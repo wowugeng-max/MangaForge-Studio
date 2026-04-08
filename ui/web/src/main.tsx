@@ -75,6 +75,7 @@ function App() {
   const [fileContent, setFileContent] = useState('')
   const [running, setRunning] = useState<string | null>(null)
   const [durations, setDurations] = useState<Record<string, number>>({})
+  const [templateImportText, setTemplateImportText] = useState('')
 
   const episodes = useMemo(() => status?.episodes ?? [], [status])
 
@@ -174,6 +175,26 @@ function App() {
     await refreshStatus()
   }
 
+  function exportTemplates() {
+    window.open(`${api}/templates/export`, '_blank')
+  }
+
+  async function importTemplates() {
+    try {
+      const parsed = JSON.parse(templateImportText) as { templates?: Template[] }
+      const res = await fetch(`${api}/templates/import`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(parsed),
+      })
+      const data = await res.json()
+      setLogs(prev => [`[template:import] ${JSON.stringify(data)}`, ...prev])
+      await refreshStatus()
+    } catch (error) {
+      setLogs(prev => [`[template:import] invalid json: ${String(error)}`, ...prev])
+    }
+  }
+
   function applyTemplate(t: Template) {
     setEpisodeId(t.episodeId)
     setTitle(t.title)
@@ -214,10 +235,19 @@ function App() {
 
       <section style={{ marginBottom: 16, padding: 12, border: '1px solid #ddd', borderRadius: 8 }}>
         <h2>Template Manager</h2>
-        <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
           <input value={templateName} onChange={e => setTemplateName(e.target.value)} placeholder="template name" />
           <button onClick={saveTemplate}>Save Current as Template</button>
+          <button onClick={exportTemplates}>Export Templates JSON</button>
+          <button onClick={importTemplates}>Import Templates JSON</button>
         </div>
+        <textarea
+          value={templateImportText}
+          onChange={e => setTemplateImportText(e.target.value)}
+          placeholder='Paste JSON like {"templates":[...]}'
+          rows={4}
+          style={{ width: '100%', marginBottom: 8 }}
+        />
         <div style={{ display: 'grid', gap: 6 }}>
           {templates.map(t => (
             <div key={t.name} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>

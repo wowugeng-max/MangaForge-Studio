@@ -266,6 +266,40 @@ app.delete('/api/manga/templates/:name', async (req, res) => {
   }
 })
 
+app.get('/api/manga/templates/export', async (_req, res) => {
+  try {
+    const templates = await listTemplates()
+    const payload = {
+      exportedAt: new Date().toISOString(),
+      templates,
+    }
+    res.setHeader('Content-Disposition', 'attachment; filename="manga-templates.json"')
+    res.setHeader('Content-Type', 'application/json; charset=utf-8')
+    return res.send(`${JSON.stringify(payload, null, 2)}\n`)
+  } catch (error) {
+    return res.status(500).json({ error: String(error) })
+  }
+})
+
+app.post('/api/manga/templates/import', async (req, res) => {
+  try {
+    const incoming = req.body as { templates?: ParamsTemplate[] }
+    if (!incoming || !Array.isArray(incoming.templates)) {
+      return res.status(400).json({ error: 'templates array is required' })
+    }
+
+    const normalized = incoming.templates.filter(t => t && typeof t.name === 'string' && t.name.trim().length > 0)
+    const deduped = new Map<string, ParamsTemplate>()
+    for (const t of normalized) deduped.set(t.name, t)
+    const merged = Array.from(deduped.values())
+
+    await saveTemplates(merged)
+    return res.json({ ok: true, imported: merged.length, templates: merged })
+  } catch (error) {
+    return res.status(500).json({ error: String(error) })
+  }
+})
+
 app.get('/api/manga/file', async (req, res) => {
   try {
     const storyRoot = getStoryRoot()
