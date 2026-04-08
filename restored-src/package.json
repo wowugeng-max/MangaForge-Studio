@@ -1,0 +1,21 @@
+{
+  "name": "mangaforge-studio-local-dev",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "smoke:manga": "bun run ./scripts/manga-smoke-test.ts",
+    "manga:init": "bun run ./scripts/manga-init.ts",
+    "manga:plot": "bun run ./scripts/manga-plot.ts",
+    "manga:storyboard": "bun run ./scripts/manga-storyboard.ts",
+    "manga:promptpack": "bun run ./scripts/manga-promptpack.ts",
+    "manga:export": "bun run ./scripts/manga-export.ts",
+    "manga:verify-exports": "bun run ./scripts/manga-verify-exports.ts",
+    "manga:release-check": "bun run ./scripts/manga-release-check.ts"
+  },
+  "dependencies": {
+    "jszip": "^3.10.1",
+    "lodash-es": "^4.17.21",
+    "yaml": "^2.8.1",
+    "zod": "^4.1.5"
+  }
+}

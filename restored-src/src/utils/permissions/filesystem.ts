@@ -5,6 +5,7 @@ import memoize from 'lodash-es/memoize.js'
 import { homedir, tmpdir } from 'os'
 import { join, normalize, posix, sep } from 'path'
 import { hasAutoMemPathOverride, isAutoMemPath } from 'src/memdir/paths.js'
+import { STORY_PROJECT_DIR } from 'src/manga/constants.js'
 import { isAgentMemoryPath } from 'src/tools/AgentTool/agentMemory.js'
 import {
   CLAUDE_FOLDER_PERMISSION_PATTERN,
@@ -1476,6 +1477,16 @@ export function generateSuggestions(
  * Check if a path is an internal path that can be edited without permission.
  * Returns a PermissionResult - either 'allow' if matched, or 'passthrough' to continue checking.
  */
+function isStoryProjectPath(absolutePath: string): boolean {
+  const storyRoot = join(getOriginalCwd(), STORY_PROJECT_DIR)
+  const normalizedStoryRoot = normalize(storyRoot)
+  const normalizedPath = normalize(absolutePath)
+  return (
+    normalizedPath === normalizedStoryRoot ||
+    normalizedPath.startsWith(normalizedStoryRoot + sep)
+  )
+}
+
 export function checkEditableInternalPath(
   absolutePath: string,
   input: { [key: string]: unknown },
@@ -1597,6 +1608,20 @@ export function checkEditableInternalPath(
       decisionReason: {
         type: 'other',
         reason: 'Preview launch config is allowed for writing',
+      },
+    }
+  }
+
+  // .story-project/** is the dedicated manga workspace for this extension.
+  // Allow writes without additional prompts so manga tools can run end-to-end
+  // while remaining scoped to the current project directory.
+  if (isStoryProjectPath(normalizedPath)) {
+    return {
+      behavior: 'allow',
+      updatedInput: input,
+      decisionReason: {
+        type: 'other',
+        reason: 'Story project files are allowed for writing',
       },
     }
   }
@@ -1736,6 +1761,18 @@ export function checkReadableInternalPath(
       decisionReason: {
         type: 'other',
         reason: 'Task files are allowed for reading',
+      },
+    }
+  }
+
+  // .story-project/** is the dedicated manga workspace for this extension.
+  if (isStoryProjectPath(normalizedPath)) {
+    return {
+      behavior: 'allow',
+      updatedInput: input,
+      decisionReason: {
+        type: 'other',
+        reason: 'Story project files are allowed for reading',
       },
     }
   }

@@ -1,4 +1,4 @@
-# claude-code-sourcemap
+# MangaForge Studio
 
 [![linux.do](https://img.shields.io/badge/linux.do-huo0-blue?logo=linux&logoColor=white)](https://linux.do)
 

@@ -1,0 +1,22 @@
+# Dependencies
+**/node_modules/
+
+# Runtime workspaces / generated artifacts
+restored-src/.smoke-workspace/
+
+# UI build artifacts
+ui/web/dist/
+ui/web/.vite/
+
+# Logs and temp files
+*.log
+*.tmp
+*.temp
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/

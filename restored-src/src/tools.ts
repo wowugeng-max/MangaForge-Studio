@@ -75,6 +75,11 @@ import { LSPTool } from './tools/LSPTool/LSPTool.js'
 import { ListMcpResourcesTool } from './tools/ListMcpResourcesTool/ListMcpResourcesTool.js'
 import { ReadMcpResourceTool } from './tools/ReadMcpResourceTool/ReadMcpResourceTool.js'
 import { ToolSearchTool } from './tools/ToolSearchTool/ToolSearchTool.js'
+import { StoryBibleTool } from './manga/tools/StoryBibleTool.js'
+import { StoryboardTool } from './manga/tools/StoryboardTool.js'
+import { ExportEpisodeTool } from './manga/tools/ExportEpisodeTool.js'
+import { PlotBeatTool } from './manga/tools/PlotBeatTool.js'
+import { PromptPackTool } from './manga/tools/PromptPackTool.js'
 import { EnterPlanModeTool } from './tools/EnterPlanModeTool/EnterPlanModeTool.js'
 import { EnterWorktreeTool } from './tools/EnterWorktreeTool/EnterWorktreeTool.js'
 import { ExitWorktreeTool } from './tools/ExitWorktreeTool/ExitWorktreeTool.js'
@@ -247,6 +252,11 @@ export function getAllBaseTools(): Tools {
     // Include ToolSearchTool when tool search might be enabled (optimistic check)
     // The actual decision to defer tools happens at request time in claude.ts
     ...(isToolSearchEnabledOptimistic() ? [ToolSearchTool] : []),
+    StoryBibleTool,
+    StoryboardTool,
+    ExportEpisodeTool,
+    PlotBeatTool,
+    PromptPackTool,
   ]
 }
 
