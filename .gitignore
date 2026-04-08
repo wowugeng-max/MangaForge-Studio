@@ -4,6 +4,9 @@
 # Runtime workspaces / generated artifacts
 restored-src/.smoke-workspace/
 
+# Large sourcemap kept locally only
+package/cli.js.map
+
 # UI build artifacts
 ui/web/dist/
 ui/web/.vite/
