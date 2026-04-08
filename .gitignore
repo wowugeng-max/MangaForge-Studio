@@ -4,8 +4,9 @@
 # Runtime workspaces / generated artifacts
 restored-src/.smoke-workspace/
 
-# Large sourcemap kept locally only
+# Large local research artifacts kept untracked
 package/cli.js.map
+claude-code-2.1.88.tgz
 
 # UI build artifacts
 ui/web/dist/

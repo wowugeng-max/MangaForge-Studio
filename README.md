@@ -21,6 +21,11 @@
 - 还原文件数：**4756 个**（含 1884 个 `.ts`/`.tsx` 源文件）
 - 还原方式：提取 `cli.js.map` 中的 `sourcesContent` 字段
 
+### 本地研究文件路径（默认不纳入 Git）
+
+- 包归档：`./claude-code-2.1.88.tgz`
+- sourcemap：`./package/cli.js.map`
+
 ## 目录结构
 
 ```
