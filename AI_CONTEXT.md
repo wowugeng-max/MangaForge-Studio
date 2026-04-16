@@ -34,3 +34,31 @@
 - PanelPilot AI
 - StoryboardOps
 - MangaFlow Engine
+
+---
+
+## 最新进度补充（2026-04-16）
+
+### 已完成
+
+- 将 ComfyForge 的前端主体源码迁入当前项目 `ui/web/src`
+- 将主入口统一到当前项目的 `main.tsx -> App.tsx -> router.tsx`
+- 路由已并入当前项目导航体系：
+  - `/` 项目大厅
+  - `/project/:id` 无限画布工作台
+  - `/assets` 全局资产大厅
+  - `/keys` Key 与模型管理
+  - `/providers` 厂商中枢
+  - `/pipeline` 图像生成管道
+  - `/rules` 系统推荐规则
+- 保留旧入口兼容：`/dashboard`、`/graph`、`/quality`
+- 统一侧边栏导航与页面语义
+- `Pipeline` 入口已切换为真实 `PipelineWorkbench`
+- `CanvasPage` 已接入 provider / key / model 选择、节点编排与基础执行链路
+- API 客户端已切换到当前后端服务前缀 `/api/comfy`
+- 解决了若干导致白屏的运行时问题（React 导入、API 返回值解包等）
+- 页面已成功渲染并进入可联调状态
+
+### 当前结论
+
+项目已从“迁移中”进入“可运行联调态”，后续重点是逐页验收交互、修复剩余差异、补齐功能细节。
