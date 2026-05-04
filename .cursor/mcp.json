@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "mempalace": {
+      "command": "python3",
+      "args": [
+        "-m",
+        "mempalace",
+        "mcp",
+        "--palace-dir",
+        "mempalace-data"
+      ],
+      "cwd": "/Users/ruiyaosong/MangaForge-Studio",
+      "disabled": false
+    }
+  }
+}

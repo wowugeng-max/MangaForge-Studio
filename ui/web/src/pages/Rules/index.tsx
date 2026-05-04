@@ -175,7 +175,7 @@ export default function RulesPage() {
 
   return (
     <div style={{ padding: 24 }}>
-      <h1>系统推荐规则</h1>
+      <h1>推荐规则管理</h1>
       <Button
         type="primary"
         icon={<PlusOutlined />}

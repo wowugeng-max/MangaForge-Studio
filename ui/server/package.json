@@ -3,11 +3,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "bun run src/index.ts"
+    "dev": "bun \"/Users/ruiyaosong/MangaForge-Studio/ui/server/src/index.ts\""
   },
   "dependencies": {
     "cors": "^2.8.5",
     "express": "^4.21.2",
-    "jszip": "^3.10.1"
+    "jszip": "^3.10.1",
+    "lodash-es": "^4.17.21",
+    "yaml": "^2.8.1",
+    "zod": "^4.1.5"
   }
 }

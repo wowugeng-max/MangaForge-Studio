@@ -1,4 +1,3 @@
-// frontend-react/src/api/providers.ts
 import apiClient from './client'
 
 export interface ProviderData {
@@ -16,8 +15,8 @@ export interface ProviderData {
 }
 
 export const providerApi = {
-  getAll: (service_type?: string) => apiClient.get<ProviderData[]>('/providers', { params: { service_type } }),
-  create: (data: Partial<ProviderData>) => apiClient.post('/providers', data),
-  update: (id: string, data: Partial<ProviderData>) => apiClient.put(`/providers/${id}`, data),
+  getAll: (service_type?: string) => apiClient.get<ProviderData[]>('/providers/', { params: { service_type } }),
+  create: (data: Partial<ProviderData>) => apiClient.post<ProviderData>('/providers/', data),
+  update: (id: string, data: Partial<ProviderData>) => apiClient.put<ProviderData>(`/providers/${id}`, data),
   delete: (id: string) => apiClient.delete(`/providers/${id}`),
 }

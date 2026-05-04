@@ -1,0 +1,17 @@
+id: lin
+name: 林岚
+role: 主角记者
+personalityTags: []
+lookAnchor:
+  silhouette: 短发风衣
+  palette:
+    - "#2B2D42"
+  keyProps:
+    - 录音笔
+speechStyle:
+  tone: 冷静
+  catchphrases:
+    - 先记下来
+  bannedPhrases:
+    - 随便啦
+relationships: []

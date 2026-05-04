@@ -1,0 +1,12 @@
+[
+  {
+    "id": 2,
+    "provider": "dsapi",
+    "key": "sk-de6fbaff696746dda075d09a5e380bf1",
+    "description": "",
+    "is_active": true,
+    "quota_total": 0,
+    "quota_used": 0,
+    "tags": []
+  }
+]

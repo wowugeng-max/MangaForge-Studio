@@ -1,9 +1,15 @@
 import React from 'react'
 import { RouterProvider } from 'react-router-dom'
+import { DndProvider } from 'react-dnd'
+import { HTML5Backend } from 'react-dnd-html5-backend'
 import router from './router'
 
 function App() {
-  return <RouterProvider router={router} />;
+  return (
+    <DndProvider backend={HTML5Backend}>
+      <RouterProvider router={router} />
+    </DndProvider>
+  )
 }
 
 export default App;

@@ -1,0 +1,128 @@
+{
+  "episodeId": "ep-002",
+  "stylePreset": "cinematic noir manga",
+  "consistencyLevel": "high",
+  "shots": [
+    {
+      "shotId": "scene-001-shot-01",
+      "positivePrompt": "cinematic noir manga, wide shot, rule of thirds, Introduce protagonist, tone, and inciting incident.",
+      "negativePrompt": "lowres, anatomy error, extra fingers, oversaturated, blurry text",
+      "characterLocks": [],
+      "cameraTags": [
+        "wide shot",
+        "rule of thirds"
+      ]
+    },
+    {
+      "shotId": "scene-001-shot-02",
+      "positivePrompt": "cinematic noir manga, medium shot, center composition, Continue scene tension beat 2.",
+      "negativePrompt": "lowres, anatomy error, extra fingers, oversaturated, blurry text",
+      "characterLocks": [],
+      "cameraTags": [
+        "medium shot",
+        "center composition"
+      ]
+    },
+    {
+      "shotId": "scene-001-shot-03",
+      "positivePrompt": "cinematic noir manga, close-up, rule of thirds, Continue scene tension beat 3.",
+      "negativePrompt": "lowres, anatomy error, extra fingers, oversaturated, blurry text",
+      "characterLocks": [],
+      "cameraTags": [
+        "close-up",
+        "rule of thirds"
+      ]
+    },
+    {
+      "shotId": "scene-001-shot-04",
+      "positivePrompt": "cinematic noir manga, wide shot, center composition, Continue scene tension beat 4.",
+      "negativePrompt": "lowres, anatomy error, extra fingers, oversaturated, blurry text",
+      "characterLocks": [],
+      "cameraTags": [
+        "wide shot",
+        "center composition"
+      ]
+    },
+    {
+      "shotId": "scene-002-shot-01",
+      "positivePrompt": "cinematic noir manga, wide shot, rule of thirds, Escalate conflict through investigation and setbacks.",
+      "negativePrompt": "lowres, anatomy error, extra fingers, oversaturated, blurry text",
+      "characterLocks": [],
+      "cameraTags": [
+        "wide shot",
+        "rule of thirds"
+      ]
+    },
+    {
+      "shotId": "scene-002-shot-02",
+      "positivePrompt": "cinematic noir manga, medium shot, center composition, Continue scene tension beat 2.",
+      "negativePrompt": "lowres, anatomy error, extra fingers, oversaturated, blurry text",
+      "characterLocks": [],
+      "cameraTags": [
+        "medium shot",
+        "center composition"
+      ]
+    },
+    {
+      "shotId": "scene-002-shot-03",
+      "positivePrompt": "cinematic noir manga, close-up, rule of thirds, Continue scene tension beat 3.",
+      "negativePrompt": "lowres, anatomy error, extra fingers, oversaturated, blurry text",
+      "characterLocks": [],
+      "cameraTags": [
+        "close-up",
+        "rule of thirds"
+      ]
+    },
+    {
+      "shotId": "scene-002-shot-04",
+      "positivePrompt": "cinematic noir manga, wide shot, center composition, Continue scene tension beat 4.",
+      "negativePrompt": "lowres, anatomy error, extra fingers, oversaturated, blurry text",
+      "characterLocks": [],
+      "cameraTags": [
+        "wide shot",
+        "center composition"
+      ]
+    },
+    {
+      "shotId": "scene-003-shot-01",
+      "positivePrompt": "cinematic noir manga, wide shot, rule of thirds, Deliver climax and hook for the next episode.",
+      "negativePrompt": "lowres, anatomy error, extra fingers, oversaturated, blurry text",
+      "characterLocks": [],
+      "cameraTags": [
+        "wide shot",
+        "rule of thirds"
+      ]
+    },
+    {
+      "shotId": "scene-003-shot-02",
+      "positivePrompt": "cinematic noir manga, medium shot, center composition, Continue scene tension beat 2.",
+      "negativePrompt": "lowres, anatomy error, extra fingers, oversaturated, blurry text",
+      "characterLocks": [],
+      "cameraTags": [
+        "medium shot",
+        "center composition"
+      ]
+    },
+    {
+      "shotId": "scene-003-shot-03",
+      "positivePrompt": "cinematic noir manga, close-up, rule of thirds, Continue scene tension beat 3.",
+      "negativePrompt": "lowres, anatomy error, extra fingers, oversaturated, blurry text",
+      "characterLocks": [],
+      "cameraTags": [
+        "close-up",
+        "rule of thirds"
+      ]
+    },
+    {
+      "shotId": "scene-003-shot-04",
+      "positivePrompt": "cinematic noir manga, wide shot, center composition, Continue scene tension beat 4.",
+      "negativePrompt": "lowres, anatomy error, extra fingers, oversaturated, blurry text",
+      "characterLocks": [],
+      "cameraTags": [
+        "wide shot",
+        "center composition"
+      ]
+    }
+  ],
+  "generatedAt": "2026-04-22T03:23:42.433Z"
+}

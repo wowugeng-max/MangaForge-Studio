@@ -7,7 +7,7 @@ export const ruleApi = {
     return apiClient.get<RecommendationRule[]>('/recommendation-rules', { params })
   },
   get: (id: number) => apiClient.get<RecommendationRule>(`/recommendation-rules/${id}`),
-  create: (data: RuleCreate) => apiClient.post('/recommendation-rules', data),
-  update: (id: number, data: RuleUpdate) => apiClient.put(`/recommendation-rules/${id}`, data),
+  create: (data: RuleCreate) => apiClient.post<RecommendationRule>('/recommendation-rules', data),
+  update: (id: number, data: RuleUpdate) => apiClient.put<RecommendationRule>(`/recommendation-rules/${id}`, data),
   delete: (id: number) => apiClient.delete(`/recommendation-rules/${id}`),
 }

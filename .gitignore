@@ -1,8 +1,21 @@
 # Dependencies
 **/node_modules/
+**/bun.lock
+**/package-lock.json
+**/yarn.lock
 
 # Runtime workspaces / generated artifacts
 restored-src/.smoke-workspace/
+
+# Local memory palace data (ChromaDB + SQLite)
+mempalace-data/
+**/.mempalace/
+
+# Environment files
+ui/server/.env
+
+# Mock workspace directories (Windows paths leaked from sourcemap)
+ui/server/I*/
 
 # Large local research artifacts kept untracked
 package/cli.js.map

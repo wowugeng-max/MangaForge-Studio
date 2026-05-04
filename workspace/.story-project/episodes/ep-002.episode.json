@@ -1,0 +1,46 @@
+{
+  "episodeId": "ep-002",
+  "title": "雨夜失踪案·上",
+  "premise": "记者林岚在旧城区调查连续失踪案，线人何烬提供关键线索后突然失联。",
+  "estimatedPanels": 12,
+  "beats": [
+    {
+      "beatId": "beat-1",
+      "title": "Act I - Setup",
+      "summary": "Introduce protagonist, tone, and inciting incident."
+    },
+    {
+      "beatId": "beat-2",
+      "title": "Act II - Confrontation",
+      "summary": "Escalate conflict through investigation and setbacks."
+    },
+    {
+      "beatId": "beat-3",
+      "title": "Act III - Resolution",
+      "summary": "Deliver climax and hook for the next episode."
+    }
+  ],
+  "scenes": [
+    {
+      "sceneId": "scene-001",
+      "location": "Opening location",
+      "summary": "Introduce protagonist, tone, and inciting incident.",
+      "mood": "tense",
+      "cast": []
+    },
+    {
+      "sceneId": "scene-002",
+      "location": "Key conflict location",
+      "summary": "Escalate conflict through investigation and setbacks.",
+      "mood": "tense",
+      "cast": []
+    },
+    {
+      "sceneId": "scene-003",
+      "location": "Key conflict location",
+      "summary": "Deliver climax and hook for the next episode.",
+      "mood": "charged",
+      "cast": []
+    }
+  ]
+}

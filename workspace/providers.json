@@ -1,0 +1,32 @@
+[
+  {
+    "id": "cliproxyapi",
+    "display_name": "CPA",
+    "service_type": "llm",
+    "api_format": "openai_compatible",
+    "auth_type": "bearer",
+    "supported_modalities": [
+      "chat"
+    ],
+    "default_base_url": "https://api.aicomic.site/v1",
+    "is_active": true,
+    "icon": "",
+    "endpoints": {},
+    "custom_headers": {}
+  },
+  {
+    "id": "dsapi",
+    "display_name": "deepseek",
+    "service_type": "llm",
+    "api_format": "openai_compatible",
+    "auth_type": "bearer",
+    "supported_modalities": [
+      "chat"
+    ],
+    "default_base_url": "https://ds2api.mailyplus.com/v1",
+    "is_active": true,
+    "icon": "",
+    "endpoints": {},
+    "custom_headers": {}
+  }
+]

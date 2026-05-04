@@ -2,6 +2,7 @@ import React from 'react'
 import { Navigate, createBrowserRouter } from 'react-router-dom'
 import Layout from './components/Layout'
 import Dashboard from './pages/Dashboard'
+import StudioHome from './pages/StudioHome'
 import AssetList from './pages/Assets'
 import AssetDetail from './pages/Assets/Detail'
 import AssetCreate from './pages/Assets/Create'
@@ -13,6 +14,9 @@ import WorkflowConfig from './pages/Assets/WorkflowConfig'
 import RulesPage from './pages/Rules'
 import CanvasPage from './pages/Canvas'
 import ProviderManager from './pages/Providers'
+import NovelStudio from './pages/NovelStudio'
+import NovelProjectWorkspace from './pages/NovelProjectWorkspace'
+import ModelManager from './pages/ModelManager'
 
 const router = createBrowserRouter([
   {
@@ -20,11 +24,13 @@ const router = createBrowserRouter([
     element: <Layout />,
     children: [
       { index: true, element: <Dashboard /> },
+      { path: 'studio', element: <StudioHome /> },
       { path: 'assets', element: <AssetList /> },
       { path: 'assets/create', element: <AssetCreate /> },
       { path: 'assets/:id', element: <AssetDetail /> },
       { path: 'video-workshop', element: <VideoWorkshop /> },
       { path: 'keys', element: <KeyManager /> },
+      { path: 'models', element: <ModelManager /> },
       { path: 'pipeline', element: <Pipeline /> },
       { path: 'assets/:id/edit', element: <AssetEdit /> },
       { path: 'assets/workflow-config', element: <WorkflowConfig /> },
@@ -33,6 +39,8 @@ const router = createBrowserRouter([
       { path: 'rules', element: <RulesPage /> },
       { path: 'canvas', element: <CanvasPage /> },
       { path: 'providers', element: <ProviderManager /> },
+      { path: 'novel', element: <NovelStudio /> },
+      { path: 'novel/workspace/:id', element: <NovelProjectWorkspace /> },
     ],
   },
   {
@@ -41,6 +49,7 @@ const router = createBrowserRouter([
   },
 
   { path: '/dashboard', element: <Navigate to="/" replace /> },
+  { path: '/home', element: <Navigate to="/studio" replace /> },
   { path: '/graph', element: <Navigate to="/pipeline" replace /> },
   { path: '/quality', element: <Navigate to="/rules" replace /> },
 ])

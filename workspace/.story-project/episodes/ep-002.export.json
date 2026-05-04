@@ -1,0 +1,160 @@
+{
+  "episodeId": "ep-002",
+  "generatedAt": "2026-04-22T03:23:42.437Z",
+  "includePrompts": true,
+  "includeDialogue": true,
+  "series": {
+    "seriesTitle": "夜雨巷",
+    "genre": "都市悬疑",
+    "tone": "冷色、克制",
+    "themes": [
+      "真相",
+      "记忆",
+      "信任"
+    ],
+    "targetAudience": "青年向",
+    "updatedAt": "2026-04-22T02:49:25.978Z"
+  },
+  "storyboard": {
+    "version": "1.0.0",
+    "episodeId": "ep-002",
+    "title": "雨夜失踪案·上",
+    "stylePreset": "cinematic noir manga",
+    "shots": [
+      {
+        "shotId": "scene-001-shot-01",
+        "sceneId": "scene-001",
+        "panelOrder": 1,
+        "camera": "wide shot",
+        "composition": "rule of thirds",
+        "action": "Introduce protagonist, tone, and inciting incident.",
+        "dialogue": [],
+        "sfx": [],
+        "emotion": "tense"
+      },
+      {
+        "shotId": "scene-001-shot-02",
+        "sceneId": "scene-001",
+        "panelOrder": 2,
+        "camera": "medium shot",
+        "composition": "center composition",
+        "action": "Continue scene tension beat 2.",
+        "dialogue": [],
+        "sfx": [],
+        "emotion": "tense"
+      },
+      {
+        "shotId": "scene-001-shot-03",
+        "sceneId": "scene-001",
+        "panelOrder": 3,
+        "camera": "close-up",
+        "composition": "rule of thirds",
+        "action": "Continue scene tension beat 3.",
+        "dialogue": [],
+        "sfx": [],
+        "emotion": "tense"
+      },
+      {
+        "shotId": "scene-001-shot-04",
+        "sceneId": "scene-001",
+        "panelOrder": 4,
+        "camera": "wide shot",
+        "composition": "center composition",
+        "action": "Continue scene tension beat 4.",
+        "dialogue": [],
+        "sfx": [],
+        "emotion": "tense"
+      },
+      {
+        "shotId": "scene-002-shot-01",
+        "sceneId": "scene-002",
+        "panelOrder": 5,
+        "camera": "wide shot",
+        "composition": "rule of thirds",
+        "action": "Escalate conflict through investigation and setbacks.",
+        "dialogue": [],
+        "sfx": [],
+        "emotion": "tense"
+      },
+      {
+        "shotId": "scene-002-shot-02",
+        "sceneId": "scene-002",
+        "panelOrder": 6,
+        "camera": "medium shot",
+        "composition": "center composition",
+        "action": "Continue scene tension beat 2.",
+        "dialogue": [],
+        "sfx": [],
+        "emotion": "tense"
+      },
+      {
+        "shotId": "scene-002-shot-03",
+        "sceneId": "scene-002",
+        "panelOrder": 7,
+        "camera": "close-up",
+        "composition": "rule of thirds",
+        "action": "Continue scene tension beat 3.",
+        "dialogue": [],
+        "sfx": [],
+        "emotion": "tense"
+      },
+      {
+        "shotId": "scene-002-shot-04",
+        "sceneId": "scene-002",
+        "panelOrder": 8,
+        "camera": "wide shot",
+        "composition": "center composition",
+        "action": "Continue scene tension beat 4.",
+        "dialogue": [],
+        "sfx": [],
+        "emotion": "tense"
+      },
+      {
+        "shotId": "scene-003-shot-01",
+        "sceneId": "scene-003",
+        "panelOrder": 9,
+        "camera": "wide shot",
+        "composition": "rule of thirds",
+        "action": "Deliver climax and hook for the next episode.",
+        "dialogue": [],
+        "sfx": [],
+        "emotion": "charged"
+      },
+      {
+        "shotId": "scene-003-shot-02",
+        "sceneId": "scene-003",
+        "panelOrder": 10,
+        "camera": "medium shot",
+        "composition": "center composition",
+        "action": "Continue scene tension beat 2.",
+        "dialogue": [],
+        "sfx": [],
+        "emotion": "charged"
+      },
+      {
+        "shotId": "scene-003-shot-03",
+        "sceneId": "scene-003",
+        "panelOrder": 11,
+        "camera": "close-up",
+        "composition": "rule of thirds",
+        "action": "Continue scene tension beat 3.",
+        "dialogue": [],
+        "sfx": [],
+        "emotion": "charged"
+      },
+      {
+        "shotId": "scene-003-shot-04",
+        "sceneId": "scene-003",
+        "panelOrder": 12,
+        "camera": "wide shot",
+        "composition": "center composition",
+        "action": "Continue scene tension beat 4.",
+        "dialogue": [],
+        "sfx": [],
+        "emotion": "charged"
+      }
+    ],
+    "createdAt": "2026-04-22T03:23:42.430Z",
+    "updatedAt": "2026-04-22T03:23:42.430Z"
+  }
+}

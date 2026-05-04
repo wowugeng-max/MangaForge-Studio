@@ -1,0 +1,522 @@
+[
+  {
+    "id": 3,
+    "api_key_id": 1,
+    "provider": "cliproxyapi",
+    "display_name": "gemini-3-pro-high",
+    "model_name": "gemini-3-pro-high",
+    "capabilities": {
+      "chat": true,
+      "vision": true,
+      "text_to_image": false,
+      "image_to_image": false,
+      "text_to_video": false,
+      "image_to_video": false
+    },
+    "health_status": "unknown",
+    "is_favorite": false,
+    "is_manual": false,
+    "context_ui_params": {},
+    "last_tested_at": "2026-04-27T06:56:29.471Z"
+  },
+  {
+    "id": 4,
+    "api_key_id": 1,
+    "provider": "cliproxyapi",
+    "display_name": "gemini-3.1-pro-low",
+    "model_name": "gemini-3.1-pro-low",
+    "capabilities": {
+      "chat": true,
+      "vision": true,
+      "text_to_image": false,
+      "image_to_image": false,
+      "text_to_video": false,
+      "image_to_video": false
+    },
+    "health_status": "unknown",
+    "is_favorite": false,
+    "is_manual": false,
+    "context_ui_params": {},
+    "last_tested_at": "2026-04-27T06:56:29.471Z"
+  },
+  {
+    "id": 5,
+    "api_key_id": 1,
+    "provider": "cliproxyapi",
+    "display_name": "gpt-5.4-mini",
+    "model_name": "gpt-5.4-mini",
+    "capabilities": {
+      "chat": true,
+      "vision": false,
+      "text_to_image": false,
+      "image_to_image": false,
+      "text_to_video": false,
+      "image_to_video": false
+    },
+    "health_status": "unknown",
+    "is_favorite": false,
+    "is_manual": false,
+    "context_ui_params": {},
+    "last_tested_at": "2026-04-27T06:56:29.471Z"
+  },
+  {
+    "id": 6,
+    "api_key_id": 1,
+    "provider": "cliproxyapi",
+    "display_name": "claude-sonnet-4-6",
+    "model_name": "claude-sonnet-4-6",
+    "capabilities": {
+      "chat": true,
+      "vision": false,
+      "text_to_image": false,
+      "image_to_image": false,
+      "text_to_video": false,
+      "image_to_video": false
+    },
+    "health_status": "unknown",
+    "is_favorite": false,
+    "is_manual": false,
+    "context_ui_params": {},
+    "last_tested_at": "2026-04-27T06:56:29.471Z"
+  },
+  {
+    "id": 7,
+    "api_key_id": 1,
+    "provider": "cliproxyapi",
+    "display_name": "gemini-3-pro-low",
+    "model_name": "gemini-3-pro-low",
+    "capabilities": {
+      "chat": true,
+      "vision": true,
+      "text_to_image": false,
+      "image_to_image": false,
+      "text_to_video": false,
+      "image_to_video": false
+    },
+    "health_status": "unknown",
+    "is_favorite": false,
+    "is_manual": false,
+    "context_ui_params": {},
+    "last_tested_at": "2026-04-27T06:56:29.471Z"
+  },
+  {
+    "id": 8,
+    "api_key_id": 1,
+    "provider": "cliproxyapi",
+    "display_name": "gpt-oss-120b-medium",
+    "model_name": "gpt-oss-120b-medium",
+    "capabilities": {
+      "chat": true,
+      "vision": false,
+      "text_to_image": false,
+      "image_to_image": false,
+      "text_to_video": false,
+      "image_to_video": false
+    },
+    "health_status": "unknown",
+    "is_favorite": false,
+    "is_manual": false,
+    "context_ui_params": {},
+    "last_tested_at": "2026-04-27T06:56:29.471Z"
+  },
+  {
+    "id": 9,
+    "api_key_id": 1,
+    "provider": "cliproxyapi",
+    "display_name": "gpt-5.2",
+    "model_name": "gpt-5.2",
+    "capabilities": {
+      "chat": true,
+      "vision": false,
+      "text_to_image": false,
+      "image_to_image": false,
+      "text_to_video": false,
+      "image_to_video": false
+    },
+    "health_status": "unknown",
+    "is_favorite": false,
+    "is_manual": false,
+    "context_ui_params": {},
+    "last_tested_at": "2026-04-27T06:56:29.471Z"
+  },
+  {
+    "id": 10,
+    "api_key_id": 1,
+    "provider": "cliproxyapi",
+    "display_name": "claude-opus-4-6-thinking",
+    "model_name": "claude-opus-4-6-thinking",
+    "capabilities": {
+      "chat": true,
+      "vision": false,
+      "text_to_image": false,
+      "image_to_image": false,
+      "text_to_video": false,
+      "image_to_video": false
+    },
+    "health_status": "unknown",
+    "is_favorite": false,
+    "is_manual": false,
+    "context_ui_params": {},
+    "last_tested_at": "2026-04-27T06:56:29.471Z"
+  },
+  {
+    "id": 11,
+    "api_key_id": 1,
+    "provider": "cliproxyapi",
+    "display_name": "gemini-3.1-flash-image",
+    "model_name": "gemini-3.1-flash-image",
+    "capabilities": {
+      "chat": false,
+      "vision": true,
+      "text_to_image": true,
+      "image_to_image": true,
+      "text_to_video": false,
+      "image_to_video": false
+    },
+    "health_status": "unknown",
+    "is_favorite": false,
+    "is_manual": false,
+    "context_ui_params": {},
+    "last_tested_at": "2026-04-27T06:56:29.471Z"
+  },
+  {
+    "id": 12,
+    "api_key_id": 1,
+    "provider": "cliproxyapi",
+    "display_name": "gemini-3.1-pro-high",
+    "model_name": "gemini-3.1-pro-high",
+    "capabilities": {
+      "chat": true,
+      "vision": true,
+      "text_to_image": false,
+      "image_to_image": false,
+      "text_to_video": false,
+      "image_to_video": false
+    },
+    "health_status": "unknown",
+    "is_favorite": false,
+    "is_manual": false,
+    "context_ui_params": {},
+    "last_tested_at": "2026-04-27T06:56:29.471Z"
+  },
+  {
+    "id": 13,
+    "api_key_id": 1,
+    "provider": "cliproxyapi",
+    "display_name": "codex-auto-review",
+    "model_name": "codex-auto-review",
+    "capabilities": {
+      "chat": true,
+      "vision": false,
+      "text_to_image": false,
+      "image_to_image": false,
+      "text_to_video": false,
+      "image_to_video": false
+    },
+    "health_status": "unknown",
+    "is_favorite": false,
+    "is_manual": false,
+    "context_ui_params": {},
+    "last_tested_at": "2026-04-27T06:56:29.471Z"
+  },
+  {
+    "id": 14,
+    "api_key_id": 1,
+    "provider": "cliproxyapi",
+    "display_name": "gpt-image-2",
+    "model_name": "gpt-image-2",
+    "capabilities": {
+      "chat": false,
+      "vision": false,
+      "text_to_image": true,
+      "image_to_image": true,
+      "text_to_video": false,
+      "image_to_video": false
+    },
+    "health_status": "unknown",
+    "is_favorite": false,
+    "is_manual": false,
+    "context_ui_params": {},
+    "last_tested_at": "2026-04-27T06:56:29.471Z"
+  },
+  {
+    "id": 15,
+    "api_key_id": 1,
+    "provider": "cliproxyapi",
+    "display_name": "gemini-3.1-flash-lite",
+    "model_name": "gemini-3.1-flash-lite",
+    "capabilities": {
+      "chat": true,
+      "vision": true,
+      "text_to_image": false,
+      "image_to_image": false,
+      "text_to_video": false,
+      "image_to_video": false
+    },
+    "health_status": "unknown",
+    "is_favorite": false,
+    "is_manual": false,
+    "context_ui_params": {},
+    "last_tested_at": "2026-04-27T06:56:29.471Z"
+  },
+  {
+    "id": 16,
+    "api_key_id": 1,
+    "provider": "cliproxyapi",
+    "display_name": "gpt-5.3-codex",
+    "model_name": "gpt-5.3-codex",
+    "capabilities": {
+      "chat": true,
+      "vision": false,
+      "text_to_image": false,
+      "image_to_image": false,
+      "text_to_video": false,
+      "image_to_video": false
+    },
+    "health_status": "unknown",
+    "is_favorite": false,
+    "is_manual": false,
+    "context_ui_params": {},
+    "last_tested_at": "2026-04-27T06:56:29.471Z"
+  },
+  {
+    "id": 17,
+    "api_key_id": 1,
+    "provider": "cliproxyapi",
+    "display_name": "gemini-3-flash",
+    "model_name": "gemini-3-flash",
+    "capabilities": {
+      "chat": true,
+      "vision": true,
+      "text_to_image": false,
+      "image_to_image": false,
+      "text_to_video": false,
+      "image_to_video": false
+    },
+    "health_status": "unknown",
+    "is_favorite": false,
+    "is_manual": false,
+    "context_ui_params": {},
+    "last_tested_at": "2026-04-27T06:56:29.471Z"
+  },
+  {
+    "id": 18,
+    "api_key_id": 1,
+    "provider": "cliproxyapi",
+    "display_name": "gpt-5.4",
+    "model_name": "gpt-5.4",
+    "capabilities": {
+      "chat": true,
+      "vision": false,
+      "text_to_image": false,
+      "image_to_image": false,
+      "text_to_video": false,
+      "image_to_video": false
+    },
+    "health_status": "unknown",
+    "is_favorite": true,
+    "is_manual": false,
+    "context_ui_params": {},
+    "last_tested_at": "2026-04-27T06:57:01.740Z"
+  },
+  {
+    "id": 19,
+    "api_key_id": 2,
+    "provider": "dsapi",
+    "display_name": "deepseek-v4-flash",
+    "model_name": "deepseek-v4-flash",
+    "capabilities": {
+      "chat": true,
+      "vision": false,
+      "text_to_image": false,
+      "image_to_image": false,
+      "text_to_video": false,
+      "image_to_video": false
+    },
+    "health_status": "unknown",
+    "is_favorite": false,
+    "is_manual": false,
+    "context_ui_params": {},
+    "last_tested_at": "2026-05-02T13:31:24.792Z"
+  },
+  {
+    "id": 20,
+    "api_key_id": 2,
+    "provider": "dsapi",
+    "display_name": "deepseek-v4-flash-nothinking",
+    "model_name": "deepseek-v4-flash-nothinking",
+    "capabilities": {
+      "chat": true,
+      "vision": false,
+      "text_to_image": false,
+      "image_to_image": false,
+      "text_to_video": false,
+      "image_to_video": false
+    },
+    "health_status": "unknown",
+    "is_favorite": false,
+    "is_manual": false,
+    "context_ui_params": {},
+    "last_tested_at": "2026-05-02T13:31:24.792Z"
+  },
+  {
+    "id": 21,
+    "api_key_id": 2,
+    "provider": "dsapi",
+    "display_name": "deepseek-v4-pro",
+    "model_name": "deepseek-v4-pro",
+    "capabilities": {
+      "chat": true,
+      "vision": false,
+      "text_to_image": false,
+      "image_to_image": false,
+      "text_to_video": false,
+      "image_to_video": false
+    },
+    "health_status": "unknown",
+    "is_favorite": false,
+    "is_manual": false,
+    "context_ui_params": {},
+    "last_tested_at": "2026-05-02T13:31:24.792Z"
+  },
+  {
+    "id": 22,
+    "api_key_id": 2,
+    "provider": "dsapi",
+    "display_name": "deepseek-v4-pro-nothinking",
+    "model_name": "deepseek-v4-pro-nothinking",
+    "capabilities": {
+      "chat": true,
+      "vision": false,
+      "text_to_image": false,
+      "image_to_image": false,
+      "text_to_video": false,
+      "image_to_video": false
+    },
+    "health_status": "unknown",
+    "is_favorite": true,
+    "is_manual": false,
+    "context_ui_params": {},
+    "last_tested_at": "2026-05-02T13:31:24.792Z"
+  },
+  {
+    "id": 23,
+    "api_key_id": 2,
+    "provider": "dsapi",
+    "display_name": "deepseek-v4-flash-search",
+    "model_name": "deepseek-v4-flash-search",
+    "capabilities": {
+      "chat": true,
+      "vision": false,
+      "text_to_image": false,
+      "image_to_image": false,
+      "text_to_video": false,
+      "image_to_video": false
+    },
+    "health_status": "unknown",
+    "is_favorite": false,
+    "is_manual": false,
+    "context_ui_params": {},
+    "last_tested_at": "2026-05-02T13:31:24.792Z"
+  },
+  {
+    "id": 24,
+    "api_key_id": 2,
+    "provider": "dsapi",
+    "display_name": "deepseek-v4-flash-search-nothinking",
+    "model_name": "deepseek-v4-flash-search-nothinking",
+    "capabilities": {
+      "chat": true,
+      "vision": false,
+      "text_to_image": false,
+      "image_to_image": false,
+      "text_to_video": false,
+      "image_to_video": false
+    },
+    "health_status": "unknown",
+    "is_favorite": false,
+    "is_manual": false,
+    "context_ui_params": {},
+    "last_tested_at": "2026-05-02T13:31:24.792Z"
+  },
+  {
+    "id": 25,
+    "api_key_id": 2,
+    "provider": "dsapi",
+    "display_name": "deepseek-v4-pro-search",
+    "model_name": "deepseek-v4-pro-search",
+    "capabilities": {
+      "chat": true,
+      "vision": false,
+      "text_to_image": false,
+      "image_to_image": false,
+      "text_to_video": false,
+      "image_to_video": false
+    },
+    "health_status": "unknown",
+    "is_favorite": false,
+    "is_manual": false,
+    "context_ui_params": {},
+    "last_tested_at": "2026-05-02T13:31:24.792Z"
+  },
+  {
+    "id": 26,
+    "api_key_id": 2,
+    "provider": "dsapi",
+    "display_name": "deepseek-v4-pro-search-nothinking",
+    "model_name": "deepseek-v4-pro-search-nothinking",
+    "capabilities": {
+      "chat": true,
+      "vision": false,
+      "text_to_image": false,
+      "image_to_image": false,
+      "text_to_video": false,
+      "image_to_video": false
+    },
+    "health_status": "unknown",
+    "is_favorite": false,
+    "is_manual": false,
+    "context_ui_params": {},
+    "last_tested_at": "2026-05-02T13:31:24.792Z"
+  },
+  {
+    "id": 27,
+    "api_key_id": 2,
+    "provider": "dsapi",
+    "display_name": "deepseek-v4-vision",
+    "model_name": "deepseek-v4-vision",
+    "capabilities": {
+      "chat": true,
+      "vision": true,
+      "text_to_image": false,
+      "image_to_image": false,
+      "text_to_video": false,
+      "image_to_video": false
+    },
+    "health_status": "unknown",
+    "is_favorite": false,
+    "is_manual": false,
+    "context_ui_params": {},
+    "last_tested_at": "2026-05-02T13:31:24.792Z"
+  },
+  {
+    "id": 28,
+    "api_key_id": 2,
+    "provider": "dsapi",
+    "display_name": "deepseek-v4-vision-nothinking",
+    "model_name": "deepseek-v4-vision-nothinking",
+    "capabilities": {
+      "chat": true,
+      "vision": true,
+      "text_to_image": false,
+      "image_to_image": false,
+      "text_to_video": false,
+      "image_to_video": false
+    },
+    "health_status": "unknown",
+    "is_favorite": false,
+    "is_manual": false,
+    "context_ui_params": {},
+    "last_tested_at": "2026-05-02T13:31:24.792Z"
+  }
+]

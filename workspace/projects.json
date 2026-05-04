@@ -1,0 +1,12 @@
+[
+  {
+    "id": 1,
+    "name": "默认创作项目",
+    "description": "用于验证 Dashboard / Pipeline 的默认项目",
+    "tags": [
+      "demo",
+      "bridge"
+    ],
+    "updated_at": "2026-04-22T02:49:05.452Z"
+  }
+]

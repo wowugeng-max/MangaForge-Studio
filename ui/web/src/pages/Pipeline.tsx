@@ -1,1 +1,1 @@
-export { PipelineWorkbench as default } from './PipelineWorkbench'
+export { default } from './PipelinePage'

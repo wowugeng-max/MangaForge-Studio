@@ -1,0 +1,13 @@
+shotId,sceneId,panelOrder,camera,composition,action,dialogue
+"scene-001-shot-01","scene-001","1","wide shot","rule of thirds","Introduce protagonist, tone, and inciting incident.",""
+"scene-001-shot-02","scene-001","2","medium shot","center composition","Continue scene tension beat 2.",""
+"scene-001-shot-03","scene-001","3","close-up","rule of thirds","Continue scene tension beat 3.",""
+"scene-001-shot-04","scene-001","4","wide shot","center composition","Continue scene tension beat 4.",""
+"scene-002-shot-01","scene-002","5","wide shot","rule of thirds","Escalate conflict through investigation and setbacks.",""
+"scene-002-shot-02","scene-002","6","medium shot","center composition","Continue scene tension beat 2.",""
+"scene-002-shot-03","scene-002","7","close-up","rule of thirds","Continue scene tension beat 3.",""
+"scene-002-shot-04","scene-002","8","wide shot","center composition","Continue scene tension beat 4.",""
+"scene-003-shot-01","scene-003","9","wide shot","rule of thirds","Deliver climax and hook for the next episode.",""
+"scene-003-shot-02","scene-003","10","medium shot","center composition","Continue scene tension beat 2.",""
+"scene-003-shot-03","scene-003","11","close-up","rule of thirds","Continue scene tension beat 3.",""
+"scene-003-shot-04","scene-003","12","wide shot","center composition","Continue scene tension beat 4.",""

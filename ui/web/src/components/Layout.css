@@ -1,0 +1,40 @@
+.studio-sider-menu .ant-menu {
+  background: transparent !important;
+}
+
+.studio-sider-menu .ant-menu-item,
+.studio-sider-menu .ant-menu-submenu-title {
+  height: 46px !important;
+  line-height: 46px !important;
+  margin: 6px 0 !important;
+  border-radius: 14px !important;
+  color: rgba(255,255,255,0.74) !important;
+}
+
+.studio-sider-menu .ant-menu-item a,
+.studio-sider-menu .ant-menu-item .anticon,
+.studio-sider-menu .ant-menu-submenu-title .anticon {
+  color: inherit !important;
+}
+
+.studio-sider-menu .ant-menu-item:hover,
+.studio-sider-menu .ant-menu-submenu-title:hover {
+  background: rgba(255,255,255,0.08) !important;
+  color: #fff !important;
+}
+
+.studio-sider-menu .ant-menu-item-selected {
+  background: linear-gradient(135deg, rgba(255,255,255,0.96), rgba(226,232,240,0.92)) !important;
+  color: #0f172a !important;
+  box-shadow: 0 10px 24px rgba(15,23,42,0.18);
+}
+
+.studio-sider-menu .ant-menu-item-selected a,
+.studio-sider-menu .ant-menu-item-selected .anticon {
+  color: #0f172a !important;
+}
+
+.studio-sider-menu .ant-menu-divider {
+  margin: 12px 0 !important;
+  border-color: rgba(255,255,255,0.08) !important;
+}
