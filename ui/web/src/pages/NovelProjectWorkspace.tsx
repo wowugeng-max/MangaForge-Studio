@@ -7,11 +7,12 @@ import {
 import {
   ArrowLeftOutlined, BarChartOutlined, DeleteOutlined, EditOutlined,
   FileTextOutlined, HistoryOutlined, PlayCircleOutlined, ReloadOutlined,
-  RocketOutlined, SafetyOutlined, SaveOutlined, CloudCheckOutlined,
-  CloudSyncOutlined, ClockCircleOutlined, UnorderedListOutlined,
+  RocketOutlined, SafetyOutlined, SaveOutlined, CheckCircleOutlined,
+  SyncOutlined, ClockCircleOutlined, UnorderedListOutlined,
 } from '@ant-design/icons'
 import { useNavigate, useParams } from 'react-router-dom'
 import apiClient from '../api/client'
+import { createSSEClient, generateClientId, type SSEMessage } from '../utils/sse'
 import { STATUS_LABELS } from '../constants/uiCopy'
 
 const { Title, Text, Paragraph } = Typography
@@ -135,13 +136,77 @@ export default function NovelProjectWorkspace() {
   const [chapterVersionDetail, setChapterVersionDetail] = useState<any | null>(null)
   const [rollingBackVersionId, setRollingBackVersionId] = useState<number | null>(null)
 
-  // ── actions ──
+  // ── 3-step writing flow ──
+  const [stepOutlineLoading, setStepOutlineLoading] = useState(false)  // ① 生成大纲+细纲
+  const [stepProseLoading, setStepProseLoading] = useState(false)      // ② 生成正文
+  const [stepRepairLoading, setStepRepairLoading] = useState(false)    // ③ 连续性修复
+  // prose batch progress
+  const [proseProgress, setProseProgress] = useState({ current: 0, total: 0 })
+  // legacy compat (for "AI 一键初始化" button in onboarding)
   const [planning, setPlanning] = useState(false)
   const [executingAgents, setExecutingAgents] = useState(false)
   const [generatingProse, setGeneratingProse] = useState(false)
   const [repairing, setRepairing] = useState(false)
-  const [auditingMarket, setAuditingMarket] = useState(false)
-  const [auditingPlatform, setAuditingPlatform] = useState(false)
+
+  // ── 3 步写作流程 ──
+  const stepGenerateOutline = async () => {
+    if (!selectedModelId) return message.warning('请先在顶部选择模型')
+    setStepOutlineLoading(true)
+    try {
+      // 执行 outline + detail-outline + continuity-check（自动包含依赖）
+      const res = await apiClient.post('/novel/agents/execute', {
+        project_id: projectId,
+        model_id: selectedModelId,
+        agents: ['outline-agent', 'detail-outline-agent', 'continuity-check-agent'],
+        prompt: '请生成世界观、角色、粗纲、细纲，并进行连续性预检。',
+        payload: {},
+      })
+      setAgentExecution(res.data || null)
+      await loadProjectModules()
+      message.success('大纲 + 细纲 + 连续性预检 完成')
+    } catch (e: any) { message.error(e.response?.data?.error || '大纲生成失败') }
+    finally { setStepOutlineLoading(false) }
+  }
+
+  const stepGenerateProse = async () => {
+    if (!selectedModelId) return message.warning('请先选择模型')
+    const unWritten = sortedChapters.filter(ch => !ch.chapter_text || ch.chapter_text.includes('【占位正文】'))
+    if (unWritten.length === 0) return message.warning('所有章节已有正文，无需生成')
+    setStepProseLoading(true)
+    let done = 0
+    try {
+      for (const ch of unWritten) {
+        setProseProgress({ current: done + 1, total: unWritten.length })
+        try {
+          await fetch(`${apiClient.defaults.baseURL}/novel/chapters/${ch.id}/generate-prose`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              project_id: projectId, model_id: selectedModelId,
+              prompt: `请生成第 ${ch.chapter_no} 章《${ch.title}》完整正文`,
+            }),
+          })
+          done++
+        } catch { done++ }
+      }
+      await loadProjectModules()
+      message.success(`正文生成完成 (${done}/${unWritten.length})`)
+    } catch (e: any) { message.error(e.message || '正文生成失败') }
+    finally { setStepProseLoading(false) }
+  }
+
+  const stepRunRepair = async () => {
+    setStepRepairLoading(true)
+    try {
+      const res = await apiClient.post('/novel/agents/repair', {
+        project_id: projectId, model_id: selectedModelId, payload: {},
+      })
+      setRepairResult(res.data || null)
+      await loadProjectModules()
+      message.success('连续性修复已完成')
+    } catch { message.error('修复失败') }
+    finally { setStepRepairLoading(false) }
+  }
 
   // ── streaming ──
   const [streamingChapterId, setStreamingChapterId] = useState<number | null>(null)
@@ -153,7 +218,7 @@ export default function NovelProjectWorkspace() {
   // ── editors / modals ──
   const [editorKind, setEditorKind] = useState<'worldbuilding' | 'character' | 'outline' | 'chapter' | null>(null)
   const [editorForm] = Form.useForm()
-  const [templateImportRef] = useState(() => useRef<HTMLInputElement>(null))
+  const templateImportRef = useRef<HTMLInputElement>(null)
 
   // ── active chapter ──
   const [activeChapterId, setActiveChapterId] = useState<number | null>(null)
@@ -304,20 +369,71 @@ export default function NovelProjectWorkspace() {
   }, [])
 
   /* ── actions ───────────────────────────────────────────────────── */
+  /** "AI 一键初始化"（空项目引导页上的按钮） — 完整跑 plan（SSE 流式进度） */
   const runPlan = async () => {
     setPlanning(true)
+    setPlanProgress(null)
     try {
-      const res = await apiClient.post('/novel/plan', {
-        project_id: projectId,
-        model_id: selectedModelId,
-        prompt: '请规划小说的基础三项：世界观、角色、大纲。请先产出这三项的核心内容与结构，不要直接进入正文。',
-        payload: { scope: 'foundation', items: ['worldbuilding', 'characters', 'outlines'] },
+      const response = await fetch(`${apiClient.defaults.baseURL}/novel/plan?stream=1`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+        body: JSON.stringify({
+          project_id: projectId,
+          model_id: selectedModelId,
+          prompt: '请规划小说的基础三项：世界观、角色、大纲。请先产出这三项的核心内容与结构，不要直接进入正文。',
+          payload: { scope: 'foundation', items: ['worldbuilding', 'characters', 'outlines'] },
+        }),
       })
-      setResults(res.data?.results || [])
+
+      if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`)
+
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let finalData: any = null
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          try {
+            const data = JSON.parse(line.slice(6))
+            if (data.type === 'progress') {
+              setPlanProgress(data)
+            } else if (data.type === 'done') {
+              finalData = data.data
+            } else if (data.type === 'error') {
+              throw new Error(data.error)
+            }
+          } catch { /* skip malformed JSON */ }
+        }
+      }
+
+      // Process remaining buffer
+      if (buffer.startsWith('data: ')) {
+        try {
+          const data = JSON.parse(buffer.slice(6))
+          if (data.type === 'done') finalData = data.data
+          else if (data.type === 'progress') setPlanProgress(data)
+          else if (data.type === 'error') throw new Error(data.error)
+        } catch { /* skip */ }
+      }
+
+      if (finalData) setResults(finalData.results || [])
       await loadProjectModules()
       message.success('规划已完成')
-    } catch { message.error('规划失败') }
-    finally { setPlanning(false) }
+    } catch (err: any) {
+      message.error(err.message || '规划失败')
+    } finally {
+      setPlanning(false)
+      setPlanProgress(null)
+    }
   }
 
   const executeAgents = async () => {
@@ -519,8 +635,8 @@ export default function NovelProjectWorkspace() {
   /* ── render: save status icon ──────────────────────────────────── */
   const SaveIndicator = () => {
     if (saveStatus === 'unsaved') return <Tooltip title="有未保存的修改"><ClockCircleOutlined style={{ color: '#faad14' }} /></Tooltip>
-    if (saveStatus === 'saving') return <Tooltip title="保存中…"><CloudSyncOutlined style={{ color: '#1677ff', animation: 'spin 1s linear infinite' }} /></Tooltip>
-    if (saveStatus === 'saved') return <Tooltip title="已保存"><CloudCheckOutlined style={{ color: '#52c41a' }} /></Tooltip>
+    if (saveStatus === 'saving') return <Tooltip title="保存中…"><SyncOutlined style={{ color: '#1677ff', animation: 'spin 1s linear infinite' }} /></Tooltip>
+    if (saveStatus === 'saved') return <Tooltip title="已保存"><CheckCircleOutlined style={{ color: '#52c41a' }} /></Tooltip>
     return null
   }
 
@@ -557,23 +673,36 @@ export default function NovelProjectWorkspace() {
 
         {/* ─── LEFT: Chapter list + Outline tree ─── */}
         <div style={{
-          width: 260, flexShrink: 0, background: '#fff',
+          width: 200, flexShrink: 0, background: '#fff',
           borderRight: '1px solid #f0f0f0', display: 'flex', flexDirection: 'column',
           overflow: 'hidden',
         }}>
-          {/* Quick actions */}
+          {/* Quick actions — 3-step flow */}
           <div style={{ padding: '8px 12px', borderBottom: '1px solid #f0f0f0' }}>
+            <Text style={{ fontSize: 11, color: '#999', display: 'block', marginBottom: 4 }}>✍️ 写作流程</Text>
             <Space direction="vertical" style={{ width: '100%' }} size={6}>
-              <Button size="small" block icon={<RocketOutlined />} loading={planning} onClick={runPlan}>
-                AI 一键初始化
-              </Button>
-              <Button size="small" block icon={<PlayCircleOutlined />} loading={executingAgents} onClick={executeAgents}>
-                执行创作链
-              </Button>
-              <Button size="small" block icon={<SafetyOutlined />} loading={repairing} onClick={runRepair}>
-                连续性修复
-              </Button>
+              <Tooltip title={selectedModelId ? '生成世界观 + 角色 + 粗纲 + 细纲 + 预检' : '请先在顶部选择模型'}>
+                <Button size="small" block icon={<RocketOutlined />} loading={stepOutlineLoading} disabled={!selectedModelId} onClick={stepGenerateOutline}>
+                  ① 生成大纲
+                </Button>
+              </Tooltip>
+              <Tooltip title={selectedModelId ? '根据细纲批量生成所有章节正文' : '请先在顶部选择模型'}>
+                <Button size="small" block icon={<PlayCircleOutlined />} loading={stepProseLoading} disabled={!selectedModelId} onClick={stepGenerateProse}>
+                  ② 生成正文
+                </Button>
+              </Tooltip>
+              <Tooltip title="检查并修复前后章矛盾">
+                <Button size="small" block icon={<SafetyOutlined />} loading={stepRepairLoading} onClick={stepRunRepair}>
+                  ③ 连续性修复
+                </Button>
+              </Tooltip>
             </Space>
+            {proseProgress.current > 0 && (
+              <div style={{ marginTop: 6 }}>
+                <Progress percent={Math.round(proseProgress.current / proseProgress.total * 100)} size="small"
+                  format={() => `${proseProgress.current}/${proseProgress.total}`} />
+              </div>
+            )}
           </div>
 
           {/* Chapter list */}
@@ -746,31 +875,30 @@ export default function NovelProjectWorkspace() {
                 </div>
               </details>
 
-              {/* Prose editor */}
-              <div style={{ flex: 1, padding: '20px 32px', overflow: 'auto' }}>
-                <div style={{
-                  maxWidth: 760, margin: '0 auto', minHeight: '100%',
-                  background: '#fff', borderRadius: 8, boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
-                  padding: '32px 40px',
-                }}>
-                  <Input.TextArea
-                    ref={proseEditorRef}
-                    value={activeChapter.chapter_text || ''}
-                    onChange={e => {
-                      const next = e.target.value
-                      setChapters(prev => prev.map(c => c.id === activeChapterId ? { ...c, chapter_text: next } : c))
-                      scheduleSave(next)
-                    }}
-                    placeholder="开始写吧……（自动保存）"
-                    autosize={{ minRows: 10, maxRows: 999 }}
-                    style={{
-                      fontSize: 16, lineHeight: 2, fontFamily: 'inherit',
-                      border: 'none', borderRadius: 0,
-                      boxShadow: 'none !important',
-                    }}
-                    className="prose-editor"
-                  />
-                </div>
+              {/* Prose editor — full-width immersive writing area */}
+              <div style={{ flex: 1, padding: 0, overflow: 'auto' }}>
+                <Input.TextArea
+                  ref={proseEditorRef}
+                  value={activeChapter.chapter_text || ''}
+                  onChange={e => {
+                    const next = e.target.value
+                    setChapters(prev => prev.map(c => c.id === activeChapterId ? { ...c, chapter_text: next } : c))
+                    scheduleSave(next)
+                  }}
+                  placeholder="开始写吧……（自动保存）"
+                  autoSize={{ minRows: 999 }}
+                  style={{
+                    width: '100%', height: '100%', boxSizing: 'border-box',
+                    fontSize: 17, lineHeight: 2, fontFamily: 'Noto Serif SC, Source Han Serif SC, Georgia, serif',
+                    border: 'none', borderRadius: 0,
+                    boxShadow: 'none !important',
+                    padding: '32px 60px',
+                    background: '#fff',
+                    resize: 'none',
+                    outline: 'none',
+                  }}
+                  className="prose-editor"
+                />
               </div>
             </>
           )}

@@ -2,6 +2,7 @@ import type { Express } from 'express'
 import { readKeys, writeKeys, type APIKeyRecord } from '../key-store'
 import { syncModelsForKey } from '../key-sync'
 import { readProviders } from '../provider-store'
+import { readModels, writeModels } from '../model-store'
 
 function redactSecret(value?: string) {
   const text = String(value || '')
@@ -73,8 +74,13 @@ export function registerKeyRoutes(app: Express, getWorkspace: () => string) {
       const activeWorkspace = getWorkspace()
       const keys = await readKeys(activeWorkspace)
       const id = Number(req.params.id)
+      // 1. 删除 Key
       await writeKeys(activeWorkspace, keys.filter(key => key.id !== id))
-      res.json({ ok: true })
+      // 2. 级联删除关联的模型
+      const models = await readModels(activeWorkspace)
+      const deletedModelCount = models.filter(m => Number(m.api_key_id) === id).length
+      await writeModels(activeWorkspace, models.filter(m => Number(m.api_key_id) !== id))
+      res.json({ ok: true, cascaded: { models_deleted: deletedModelCount } })
     } catch (error) {
       res.status(500).json({ error: String(error) })
     }

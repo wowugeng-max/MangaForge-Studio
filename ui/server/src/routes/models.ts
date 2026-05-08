@@ -1,8 +1,99 @@
 import type { Express } from 'express'
 import { readModels, writeModels, type ModelRecord } from '../model-store'
+import { readKeys } from '../key-store'
+import { readProviders } from '../provider-store'
+import { ConfiguredProviderAdapter } from '../llm/adapter'
+import type { LLMRequest, LLMMessage } from '../llm/types'
 
 function nowIso() {
   return new Date().toISOString()
+}
+
+// ── 模型健康探针 ──
+
+const OFFICIAL_TEST_IMAGE = 'https://img.alicdn.com/tfs/TB1p.bgQXXXXXbFXFXXXXXXXXXX-500-500.png'
+
+function determineProbeType(capabilities?: Record<string, boolean>): string {
+  if (!capabilities) return 'chat'
+  for (const priority of ['text_to_image', 'image_to_image', 'text_to_video', 'image_to_video', 'vision', 'chat']) {
+    if (capabilities[priority]) return priority
+  }
+  return 'chat'
+}
+
+function buildProbeRequest(probeType: string, modelName: string): LLMRequest {
+  if (probeType === 'chat') {
+    return {
+      model: modelName,
+      messages: [{ role: 'user', content: 'Return exactly: OK' }],
+      temperature: 0,
+      max_tokens: 16,
+    }
+  }
+  if (probeType === 'vision') {
+    return {
+      model: modelName,
+      messages: [{
+        role: 'user',
+        content: 'Return exactly: OK',
+      }],
+      temperature: 0,
+      max_tokens: 16,
+    }
+  }
+  // image/video types — send a minimal text-to-image request
+  return {
+    model: modelName,
+    messages: [{ role: 'user', content: 'A simple white circle on a black background.' }],
+    temperature: 0,
+    max_tokens: 16,
+  }
+}
+
+function classifyHealthError(error: unknown): { status: string; message: string } {
+  const msg = String(error || '').toLowerCase()
+  if (msg.includes('429') || msg.includes('quota') || msg.includes('rate limit')) {
+    return { status: 'quota_exhausted', message: '测试失败：额度耗尽' }
+  }
+  if (msg.includes('401') || msg.includes('403') || msg.includes('unauthorized') || msg.includes('auth')) {
+    return { status: 'unauthorized', message: '测试失败：认证失败 / 无权限' }
+  }
+  if (msg.includes('timeout') || msg.includes('econnreset') || msg.includes('network')) {
+    return { status: 'network_error', message: `测试失败：网络错误 — ${String(error).slice(0, 120)}` }
+  }
+  return { status: 'error', message: `测试失败：${String(error).slice(0, 200)}` }
+}
+
+async function runModelProbe(
+  model: ModelRecord,
+  activeWorkspace: string,
+): Promise<{ status: string; message: string }> {
+  const keys = await readKeys(activeWorkspace)
+  const providers = await readProviders(activeWorkspace)
+
+  const keyRecord = keys.find(k => k.id === model.api_key_id)
+  if (!keyRecord) return { status: 'no_key', message: '该模型未绑定有效的 API Key' }
+  if (!keyRecord.is_active) return { status: 'key_disabled', message: '绑定的 API Key 已停用' }
+
+  const providerRecord = providers.find(p => p.id === model.provider)
+  if (!providerRecord) return { status: 'no_provider', message: '未找到供应商配置' }
+
+  try {
+    const adapter = new ConfiguredProviderAdapter(
+      providerRecord,
+      keyRecord,
+      model,
+    )
+
+    const probeType = determineProbeType(model.capabilities)
+    const request = buildProbeRequest(probeType, model.model_name)
+    request.max_tokens = 16 // minimal tokens for probe
+
+    await adapter.execute(request)
+    return { status: 'healthy', message: `探针测试通过 (probe_type: ${probeType})` }
+  } catch (error) {
+    return classifyHealthError(error)
+  }
 }
 
 function normalizeModelInput(body: any, fallback?: ModelRecord): ModelRecord {
@@ -80,9 +171,23 @@ export function registerModelRoutes(app: Express, getWorkspace: () => string) {
       const id = Number(req.params.id)
       const model = models.find(item => item.id === id)
       if (!model) return res.status(404).json({ error: 'model not found' })
-      res.json({ status: 'healthy', message: '模型探针测试通过', last_tested_at: nowIso() })
+
+      const probeResult = await runModelProbe(model, activeWorkspace)
+
+      // Persist health status back to store
+      const next = models.map(m => m.id === id
+        ? { ...m, health_status: probeResult.status, last_tested_at: nowIso() }
+        : m)
+      await writeModels(activeWorkspace, next)
+
+      res.json({
+        status: probeResult.status,
+        message: probeResult.message,
+        last_tested_at: nowIso(),
+      })
     } catch (error) {
-      res.status(500).json({ error: String(error) })
+      const classified = classifyHealthError(error)
+      res.json({ status: classified.status, message: classified.message, last_tested_at: nowIso() })
     }
   })
 

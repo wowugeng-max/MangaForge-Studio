@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
-import { Button, Card, Col, Input, message, Row, Space, Tag, Typography } from 'antd'
-import { PlusOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons'
+import { Button, Card, Col, Input, Modal, Popconfirm, Row, Space, Tag, Typography, message } from 'antd'
+import { DeleteOutlined, PlusOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import apiClient from '../api/client'
 import NovelCreateWizard from '../components/NovelCreateWizard'
@@ -37,6 +37,16 @@ export default function NovelStudio() {
 
   const handleWizardCancel = () => {
     setWizardOpen(false)
+  }
+
+  const handleDeleteProject = async (projectId: number) => {
+    try {
+      await apiClient.delete(`/novel/projects/${projectId}`)
+      message.success('项目已删除')
+      await loadProjects()
+    } catch {
+      message.error('删除失败')
+    }
   }
 
   const filteredProjects = projects.filter(project => {
@@ -121,7 +131,18 @@ export default function NovelStudio() {
                     )}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 'auto' }}>
                       <Text type="secondary" style={{ fontSize: 12 }}>点击进入工作台</Text>
-                      <Button type="primary" size="small" style={{ borderRadius: 10 }} onClick={(e) => { e.stopPropagation(); navigate(`/novel/workspace/${project.id}`) }}>进入</Button>
+                      <Space>
+                        <Button type="primary" size="small" style={{ borderRadius: 10 }} onClick={(e) => { e.stopPropagation(); navigate(`/novel/workspace/${project.id}`) }}>进入</Button>
+                        <Popconfirm
+                          title="删除项目"
+                          description={`确定删除《${project.title}》吗？此操作不可撤销。`}
+                          okText="删除"
+                          okButtonProps={{ danger: true }}
+                          onConfirm={(e) => { e?.stopPropagation(); handleDeleteProject(project.id) }}
+                        >
+                          <Button danger size="small" icon={<DeleteOutlined />} style={{ borderRadius: 10 }} onClick={(e) => e.stopPropagation()}>删除</Button>
+                        </Popconfirm>
+                      </Space>
                     </div>
                   </Card>
                 </Col>

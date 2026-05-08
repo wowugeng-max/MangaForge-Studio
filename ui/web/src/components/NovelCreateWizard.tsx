@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useCallback } from 'react'
 import { Button, Checkbox, Form, Input, Modal, Result, Select, Space, Steps, message } from 'antd'
 import { ArrowLeftOutlined, ArrowRightOutlined, CheckCircleOutlined, RocketOutlined } from '@ant-design/icons'
 import apiClient from '../api/client'
@@ -68,20 +68,46 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
   const [creating, setCreating] = useState(false)
   const [createdId, setCreatedId] = useState<number | null>(null)
   const [form] = Form.useForm<NovelFormValues>()
+  // 手动管理的表单数据 — 用 state 保存，不依赖 Form 的条件渲染
+  const [data, setData] = useState({
+    title: '',
+    genre: '',
+    sub_genres: [] as string[],
+    length_target: 'medium',
+    target_audience: '',
+    style_tags: [] as string[],
+    commercial_tags: [] as string[],
+    synopsis: '',
+  })
+
+  // 每次 data 变化时同步回 Form
+  React.useEffect(() => {
+    form.setFieldsValue(data)
+  }, [data, form])
+
+  // 标题 watch — 用于按钮 disabled
+  const watchedTitle = Form.useWatch('title', form) || ''
   const formItems = ['basic', 'style', 'confirm', 'done']
 
-  const handleNext = async () => {
+  const handleNext = useCallback(async () => {
     if (current === 0) {
-      try {
-        await form.validateFields(['title', 'genre'])
-      } catch { return }
+      // 保存 Step 0 的数据
+      if (!data.title.trim()) {
+        message.warning('请输入作品标题')
+        return
+      }
+      if (!data.genre) {
+        message.warning('请选择题材')
+        return
+      }
     }
     if (current === formItems.length - 2) {
+      // Step 2 -> 创建
       await handleCreate()
       return
     }
     setCurrent(c => c + 1)
-  }
+  }, [current, data, formItems])
 
   const handlePrev = () => {
     if (current === 3) return
@@ -89,18 +115,17 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
   }
 
   const handleCreate = async () => {
-    const values = form.getFieldsValue()
     setCreating(true)
     try {
       const payload = {
-        title: values.title,
-        genre: values.genre || '',
-        sub_genres: values.sub_genres || [],
-        length_target: values.length_target || 'medium',
-        target_audience: values.target_audience || '',
-        style_tags: values.style_tags || [],
-        commercial_tags: values.commercial_tags || [],
-        synopsis: values.synopsis || '',
+        title: data.title,
+        genre: data.genre || '',
+        sub_genres: data.sub_genres || [],
+        length_target: data.length_target || 'medium',
+        target_audience: data.target_audience || '',
+        style_tags: data.style_tags || [],
+        commercial_tags: data.commercial_tags || [],
+        synopsis: data.synopsis || '',
         status: 'draft',
       }
       const res = await apiClient.post('/novel/projects', payload)
@@ -126,15 +151,22 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
     setCurrent(0)
     setCreating(false)
     setCreatedId(null)
-    form.resetFields()
+    setData({
+      title: '',
+      genre: '',
+      sub_genres: [],
+      length_target: 'medium',
+      target_audience: '',
+      style_tags: [],
+      commercial_tags: [],
+      synopsis: '',
+    })
   }
 
   const handleModalCancel = () => {
     handleReset()
     onCancel()
   }
-
-  const values = form.getFieldsValue()
 
   const steps = [
     { title: '基础信息', description: '标题与题材' },
@@ -143,13 +175,18 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
     { title: '创建完成', description: '下一步' },
   ]
 
+  // 通用 onChange — 表单字段变化时同步到 data state
+  const onFormChange = () => {
+    const v = form.getFieldsValue()
+    setData(prev => ({ ...prev, ...v }))
+  }
+
   return (
     <Modal
       open={open}
       onCancel={handleModalCancel}
       footer={null}
       width={720}
-      destroyOnHidden
       maskClosable={false}
     >
       <div style={{ textAlign: 'center', marginBottom: 24 }}>
@@ -164,103 +201,112 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
         size="small"
       />
 
-      {/* Step 0: Basic Info */}
-      {current === 0 && (
-        <Form form={form} layout="vertical">
-          <Form.Item
-            name="title"
-            label="作品标题"
-            rules={[{ required: true, message: '请输入作品标题' }]}
-          >
-            <Input
-              size="large"
-              placeholder="例如：废墟尽头的灯塔"
-              prefix="📖"
-            />
-          </Form.Item>
+      {/* 所有步骤共享同一个 Form 实例，通过 onValuesChange 同步到 data */}
+      <Form
+        form={form}
+        layout="vertical"
+        onValuesChange={onFormChange}
+      >
 
-          <Form.Item
-            name="genre"
-            label="题材"
-            rules={[{ required: true, message: '请选择题材' }]}
-          >
-            <Select
-              size="large"
-              placeholder="选择主要题材"
-              options={GENRES}
-            />
-          </Form.Item>
+        {/* Step 0: Basic Info */}
+        {current === 0 && (
+          <>
+            <Form.Item
+              name="title"
+              label="作品标题"
+              rules={[{ required: true, message: '请输入作品标题' }]}
+            >
+              <Input
+                size="large"
+                placeholder="例如：废墟尽头的灯塔"
+                prefix="📖"
+              />
+            </Form.Item>
 
-          <Form.Item name="sub_genres" label="子题材（可选，可多选）">
-            <Select
-              mode="tags"
-              placeholder="例如：穿越, 赛博朋克, 克苏鲁"
-              style={{ width: '100%' }}
-            />
-          </Form.Item>
+            <Form.Item
+              name="genre"
+              label="题材"
+              rules={[{ required: true, message: '请选择题材' }]}
+            >
+              <Select
+                size="large"
+                placeholder="选择主要题材"
+                options={GENRES}
+              />
+            </Form.Item>
 
-          <Form.Item name="synopsis" label="一句话简介（可选）">
-            <Input.TextArea
-              rows={3}
-              placeholder="用一句话描述你的小说核心卖点"
-              maxLength={200}
-              showCount
-            />
-          </Form.Item>
-        </Form>
-      )}
+            <Form.Item name="sub_genres" label="子题材（可选，可多选）">
+              <Select
+                mode="tags"
+                placeholder="例如：穿越, 赛博朋克, 克苏鲁"
+                style={{ width: '100%' }}
+              />
+            </Form.Item>
 
-      {/* Step 1: Style Settings */}
-      {current === 1 && (
-        <Form form={form} layout="vertical">
-          <Form.Item
-            name="length_target"
-            label="篇幅目标"
-            rules={[{ required: true, message: '请选择篇幅目标' }]}
-          >
-            <Select
-              size="large"
-              placeholder="选择目标篇幅"
-              options={LENGTH_TARGETS}
-              optionRender={(option) => (
-                <div>
-                  <div>{option.label}</div>
-                  <div style={{ fontSize: 12, color: '#999' }}>{option.data?.description}</div>
-                </div>
-              )}
-            />
-          </Form.Item>
+            <Form.Item name="synopsis" label="一句话简介（可选）">
+              <Input.TextArea
+                rows={3}
+                placeholder="用一句话描述你的小说核心卖点"
+                maxLength={200}
+                showCount
+              />
+            </Form.Item>
+          </>
+        )}
 
-          <Form.Item name="target_audience" label="目标读者">
-            <Select
-              placeholder="选择目标读者群体"
-              options={AUDIENCES}
-            />
-          </Form.Item>
+        {/* Step 1: Style Settings */}
+        {current === 1 && (
+          <>
+            <Form.Item
+              name="length_target"
+              label="篇幅目标"
+              rules={[{ required: true, message: '请选择篇幅目标' }]}
+            >
+              <Select
+                size="large"
+                placeholder="选择目标篇幅"
+                options={LENGTH_TARGETS}
+                optionRender={(option) => (
+                  <div>
+                    <div>{option.label}</div>
+                    <div style={{ fontSize: 12, color: '#999' }}>{option.data?.description}</div>
+                  </div>
+                )}
+              />
+            </Form.Item>
 
-          <Form.Item name="style_tags" label="风格标签（可选，可多选）">
-            <Select
-              mode="multiple"
-              placeholder="选择风格标签"
-              options={STYLE_TAGS.map(t => ({ value: t, label: t }))}
-              style={{ width: '100%' }}
-              maxCount={5}
-            />
-          </Form.Item>
+            <Form.Item name="target_audience" label="目标读者">
+              <Select
+                placeholder="选择目标读者群体"
+                options={AUDIENCES}
+              />
+            </Form.Item>
 
-          <Form.Item name="commercial_tags" label="商业标签（可选，可多选）">
-            <Select
-              mode="multiple"
-              placeholder="选择商业定位标签"
-              options={COMMERCIAL_TAGS.map(t => ({ value: t, label: t }))}
-              style={{ width: '100%' }}
-              maxCount={3}
-            />
-          </Form.Item>
-        </Form>
-      )}
+            <Form.Item name="style_tags" label="风格标签（可选，可多选）">
+              <Select
+                mode="multiple"
+                placeholder="选择风格标签"
+                options={STYLE_TAGS.map(t => ({ value: t, label: t }))}
+                style={{ width: '100%' }}
+                maxCount={5}
+              />
+            </Form.Item>
 
-      {/* Step 2: Confirm */}
+            <Form.Item name="commercial_tags" label="商业标签（可选，可多选）">
+              <Select
+                mode="multiple"
+                placeholder="选择商业定位标签"
+                options={COMMERCIAL_TAGS.map(t => ({ value: t, label: t }))}
+                style={{ width: '100%' }}
+                maxCount={3}
+              />
+            </Form.Item>
+          </>
+        )}
+
+      </Form>
+
+      {/* Step 2: Confirm — 从 data state 读取，不依赖 Form */}
       {current === 2 && (
         <div style={{ background: '#f8f9fa', borderRadius: 12, padding: 20 }}>
           <Space direction="vertical" size={12} style={{ width: '100%' }}>
@@ -269,44 +315,44 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
             <div style={{ display: 'grid', gap: 8 }}>
               <div style={{ display: 'flex' }}>
                 <span style={{ minWidth: 80, color: '#999' }}>作品标题</span>
-                <span style={{ fontWeight: 500 }}>{values.title || '-'}</span>
+                <span style={{ fontWeight: 500 }}>{data.title || '-'}</span>
               </div>
               <div style={{ display: 'flex' }}>
                 <span style={{ minWidth: 80, color: '#999' }}>题材</span>
-                <span>{values.genre || '-'}</span>
+                <span>{data.genre || '-'}</span>
               </div>
-              {values.sub_genres?.length > 0 && (
+              {data.sub_genres?.length > 0 && (
                 <div style={{ display: 'flex' }}>
                   <span style={{ minWidth: 80, color: '#999' }}>子题材</span>
-                  <span>{values.sub_genres.join(' / ')}</span>
+                  <span>{data.sub_genres.join(' / ')}</span>
                 </div>
               )}
-              {values.synopsis && (
+              {data.synopsis && (
                 <div style={{ display: 'flex' }}>
                   <span style={{ minWidth: 80, color: '#999' }}>简介</span>
-                  <span style={{ fontStyle: 'italic', color: '#666' }}>{values.synopsis}</span>
+                  <span style={{ fontStyle: 'italic', color: '#666' }}>{data.synopsis}</span>
                 </div>
               )}
               <div style={{ display: 'flex' }}>
                 <span style={{ minWidth: 80, color: '#999' }}>篇幅</span>
-                <span>{LENGTH_TARGETS.find(l => l.value === values.length_target)?.label || '中篇'}</span>
+                <span>{LENGTH_TARGETS.find(l => l.value === data.length_target)?.label || '中篇'}</span>
               </div>
-              {values.target_audience && (
+              {data.target_audience && (
                 <div style={{ display: 'flex' }}>
                   <span style={{ minWidth: 80, color: '#999' }}>读者</span>
-                  <span>{values.target_audience}</span>
+                  <span>{data.target_audience}</span>
                 </div>
               )}
-              {values.style_tags?.length > 0 && (
+              {data.style_tags?.length > 0 && (
                 <div style={{ display: 'flex' }}>
                   <span style={{ minWidth: 80, color: '#999' }}>风格</span>
-                  <span>{values.style_tags.join(' / ')}</span>
+                  <span>{data.style_tags.join(' / ')}</span>
                 </div>
               )}
-              {values.commercial_tags?.length > 0 && (
+              {data.commercial_tags?.length > 0 && (
                 <div style={{ display: 'flex' }}>
                   <span style={{ minWidth: 80, color: '#999' }}>商业</span>
-                  <span>{values.commercial_tags.join(' / ')}</span>
+                  <span>{data.commercial_tags.join(' / ')}</span>
                 </div>
               )}
             </div>
@@ -331,7 +377,7 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
           status="success"
           icon={<CheckCircleOutlined />}
           title="小说项目创建成功！"
-          subTitle={values.title ? `《${values.title}》已就绪` : '项目已就绪'}
+          subTitle={data.title ? `《${data.title}》已就绪` : '项目已就绪'}
           extra={[
             <Button
               type="primary"
@@ -366,7 +412,7 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
               icon={current === 2 ? <RocketOutlined /> : <ArrowRightOutlined />}
               onClick={handleNext}
               loading={creating}
-              disabled={current === 0 && !values.title?.trim()}
+              disabled={current === 0 && !data.title.trim()}
             >
               {current === 2 ? '创建项目' : '下一步'}
             </Button>

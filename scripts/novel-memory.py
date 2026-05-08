@@ -1,456 +1,728 @@
 #!/usr/bin/env python3
 """
-Novel Memory Helper — MemPalace MCP Client for MangaForge Studio.
+novel-memory.py — Memory Palace for novel projects.
+Stores, retrieves, verifies, and reconciles facts across chapters.
+Uses SQLite + TF-IDF vector search (no external ML deps required).
 
-Architecture:
-  ┌──────────────────┐     execFile      ┌──────────────────┐
-  │ memory-service.ts│ ────────────────► │ novel-memory.py  │
-  │    (TypeScript)  │                   │  (MCP Client)    │
-  └──────────────────┘                   └──────┬───────────┘
-                                                │ JSON-RPC
-                                                ▼ stdio
-                                         ┌──────────────────┐
-                                         │ mempalace-mcp    │
-                                         │ (MCP Server)     │
-                                         └──────────────────┘
-
-Each novel project gets its own "wing" (project_<id>) in the memory palace.
-Categories map to "rooms": worldbuilding, character, plot, foreshadowing, prose.
-
-Usage (via subprocess from TypeScript):
-  python3 scripts/novel-memory.py store --project <id> --content "<text>" [--category <cat>]
-  python3 scripts/novel-memory.py recall --project <id> --query "<text>" [--top-k <n>] [--category <cat>]
-  python3 scripts/novel-memory.py list --project <id> [--category <cat>]
-  python3 scripts/novel-memory.py init --palace-dir <dir>
+Usage:
+  python novel-memory.py init --palace-dir /path/to/data
+  python novel-memory.py store --project 1 --content "..." --category character --tags name,protagonist
+  python novel-memory.py recall --project 1 --query "主角能力" --top-k 5 --category character
+  python novel-memory.py list --project 1 --category plot
+  python novel-memory.py verify --project 1 --content "主角用了飞行能力" --category character
+  python novel-memory.py reconcile --project 1 --category character
+  python novel-memory.py dump --project 1
 """
+
 import argparse
 import json
+import math
 import os
-import select
+import re
 import sqlite3
-import subprocess
 import sys
+import time
 import uuid
-from datetime import datetime
+from collections import Counter, defaultdict
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
-PALACE_DIR = os.environ.get("MEMPALACE_DIR", os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "mempalace-data"))
+# ─── Constants ───
 
-
-def main():
-    parser = argparse.ArgumentParser(description="Novel Memory Helper")
-    sub = parser.add_subparsers(dest="command", required=True)
-
-    # init
-    init_p = sub.add_parser("init")
-    init_p.add_argument("--palace-dir", default=PALACE_DIR)
-
-    # store
-    store_p = sub.add_parser("store")
-    store_p.add_argument("--project", required=True, help="Project ID")
-    store_p.add_argument("--content", required=True, help="Memory content text")
-    store_p.add_argument("--tags", default="general", help="Comma-separated tags (informational)")
-    store_p.add_argument("--category", default="general",
-                         help="Room: worldbuilding|character|plot|foreshadowing|prose|general")
-
-    # recall
-    recall_p = sub.add_parser("recall")
-    recall_p.add_argument("--project", required=True, help="Project ID")
-    recall_p.add_argument("--query", required=True, help="Search query")
-    recall_p.add_argument("--top-k", type=int, default=5, help="Top K results")
-    recall_p.add_argument("--category", default=None, help="Filter by room")
-
-    # list
-    list_p = sub.add_parser("list")
-    list_p.add_argument("--project", required=True, help="Project ID")
-    list_p.add_argument("--tag", default=None, help="Filter by tag (informational)")
-    list_p.add_argument("--category", default=None, help="Filter by room")
-
-    # delete
-    delete_p = sub.add_parser("delete")
-    delete_p.add_argument("--project", required=True, help="Project ID")
-    delete_p.add_argument("--memory-id", required=True, help="Drawer ID to delete")
-
-    args = parser.parse_args()
-
-    # Try MCP-first; fall back to lightweight SQLite on any failure
-    try:
-        use_mempalace_mcp(args)
-    except Exception as exc:
-        # mempalace not installed, server won't start, or communication fails
-        # → degrade gracefully to local storage
-        fallback_msg = str(exc).lower()
-        if any(kw in fallback_msg for kw in ("no such file", "not found", "no mempalace", "spawn", "timeout", "mcp")):
-            try:
-                use_fallback(args)
-                return
-            except Exception:
-                pass
-        # If fallback also fails or the original error was unexpected, surface it
-        print(json.dumps({"status": "error", "error": str(exc), "mode": "none"}))
-        sys.exit(1)
+PALACE_DIR = os.environ.get("MEMPALACE_DIR", os.path.join(os.path.dirname(__file__), "..", "mempalace-data"))
+DB_NAME = "memory.db"
 
 
-# ═══════════════════════════════════════════════════════════════════════
-#  MCP Client — talks to mempalace-mcp via JSON-RPC over stdio
-# ═══════════════════════════════════════════════════════════════════════
-
-class MCPPalace:
-    """Minimal MCP client that speaks JSON-RPC to mempalace-mcp."""
-
-    _rpc_id = 0
-
-    def __init__(self, palace_dir: str):
-        self.palace_dir = palace_dir
-        self.proc: subprocess.Popen | None = None
-        self._rpc_id = 0
-
-    # ── lifecycle ────────────────────────────────────────────────────
-
-    def _start(self):
-        """Launch mempalace-mcp subprocess."""
-        self.proc = subprocess.Popen(
-            [sys.executable or "python3", "-m", "mempalace", "mcp", "--palace", self.palace_dir],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
-        )
-        # Initialize the session
-        self._request("initialize", {
-            "protocolVersion": "2024-11-05",
-            "capabilities": {},
-            "clientInfo": {"name": "mangaforge-studio", "version": "1.0.0"},
-        })
-        self._notify("notifications/initialized", {})
-        # Consume any init responses (serverCapabilities, etc.)
-        self._drain(2)
-
-    def _stop(self):
-        if self.proc:
-            try:
-                self.proc.terminate()
-                self.proc.wait(timeout=3)
-            except Exception:
-                try:
-                    self.proc.kill()
-                except Exception:
-                    pass
-            self.proc = None
-
-    def __enter__(self):
-        self._start()
-        return self
-
-    def __exit__(self, *exc):
-        self._stop()
-
-    # ── JSON-RPC primitives ─────────────────────────────────────────
-
-    def _next_id(self) -> int:
-        self._rpc_id += 1
-        return self._rpc_id
-
-    def _send(self, message: dict):
-        if not self.proc or self.proc.stdin is None:
-            raise RuntimeError("MCP server not started")
-        line = json.dumps(message) + "\n"
-        self.proc.stdin.write(line)
-        self.proc.stdin.flush()
-
-    def _read_line(self, timeout: float = 8.0) -> str | None:
-        if not self.proc or self.proc.stdout is None:
-            return None
-        ready, _, _ = select.select([self.proc.stdout], [], [], timeout)
-        if not ready:
-            return None
-        line = self.proc.stdout.readline()
-        if not line:
-            return None
-        return line.strip()
-
-    def _drain(self, max_lines: int = 5):
-        """Consume lines from stdout (for init phase / notifications)."""
-        for _ in range(max_lines):
-            line = self._read_line(timeout=0.5)
-            if not line:
-                break
-
-    def _request(self, method: str, params: dict) -> dict:
-        rid = self._next_id()
-        self._send({
-            "jsonrpc": "2.0",
-            "id": rid,
-            "method": method,
-            "params": params,
-        })
-        # Wait for matching response
-        for _ in range(20):
-            line = self._read_line(timeout=5.0)
-            if not line:
-                break
-            try:
-                resp = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if resp.get("id") == rid:
-                if "error" in resp:
-                    raise RuntimeError(f"MCP error: {resp['error']}")
-                return resp.get("result", {})
-        raise TimeoutError("MCP request timed out")
-
-    def _notify(self, method: str, params: dict):
-        self._send({
-            "jsonrpc": "2.0",
-            "method": method,
-            "params": params,
-        })
-
-    # ── tool call wrapper ───────────────────────────────────────────
-
-    def call_tool(self, name: str, arguments: dict = None) -> dict:
-        result = self._request("tools/call", {
-            "name": name,
-            "arguments": arguments or {},
-        })
-        return result
-
-    # ── high-level operations ───────────────────────────────────────
-
-    @staticmethod
-    def _wing(project_id: int) -> str:
-        return f"project_{project_id}"
-
-    def init(self) -> dict:
-        """Check or initialize the palace."""
-        try:
-            status = self.call_tool("mempalace_status")
-            return {"status": "initialized", "palace_dir": self.palace_dir, "mode": "mcp", "total_drawers": status.get("total_drawers", 0)}
-        except Exception:
-            # Palace doesn't exist yet; add_drawer will create it
-            return {"status": "initialized", "palace_dir": self.palace_dir, "mode": "mcp", "note": "will-create-on-first-write"}
-
-    def store(self, project_id: int, content: str, category: str = "general", tags: list = None) -> dict:
-        """Store content via mempalace_add_drawer."""
-        wing = self._wing(project_id)
-        result = self.call_tool("mempalace_add_drawer", {
-            "wing": wing,
-            "room": category,
-            "content": content,
-            "added_by": "mangaforge-studio",
-        })
-        return {
-            "status": "stored",
-            "memory_id": result.get("drawer_id", str(uuid.uuid4())),
-            "mode": "mcp",
-            "wing": wing,
-            "room": category,
-        }
-
-    def recall(self, project_id: int, query: str, top_k: int = 5, category: str = None) -> dict:
-        """Recall via mempalace_search."""
-        wing = self._wing(project_id)
-        args = {
-            "query": query,
-            "limit": min(top_k, 100),
-            "wing": wing,
-        }
-        if category:
-            args["room"] = category
-        result = self.call_tool("mempalace_search", args)
-        raw_results = result.get("results", [])
-        # Normalize to our MemoryRecord shape
-        records = []
-        for r in raw_results:
-            records.append({
-                "id": r.get("source_file", ""),
-                "project_id": project_id,
-                "content": r.get("text", ""),
-                "tags": [],
-                "category": r.get("room", category or "general"),
-                "timestamp": r.get("created_at", ""),
-                "similarity": r.get("similarity"),
-                "distance": r.get("distance"),
-            })
-        return {
-            "status": "ok",
-            "count": len(records),
-            "results": records,
-            "mode": "mcp",
-        }
-
-    def list_memories(self, project_id: int, category: str = None) -> dict:
-        """List via mempalace_list_drawers."""
-        wing = self._wing(project_id)
-        args = {"wing": wing, "limit": 100}
-        if category:
-            args["room"] = category
-        result = self.call_tool("mempalace_list_drawers", args)
-        raw = result.get("drawers", [])
-        records = []
-        for d in raw:
-            records.append({
-                "id": d.get("drawer_id", ""),
-                "project_id": project_id,
-                "content": d.get("content_preview", ""),
-                "tags": [],
-                "category": d.get("room", "general"),
-                "timestamp": "",
-            })
-        return {
-            "status": "ok",
-            "count": len(records),
-            "memories": records,
-            "mode": "mcp",
-        }
-
-    def delete(self, project_id: int, memory_id: str) -> dict:
-        """Delete via mempalace_delete_drawer."""
-        result = self.call_tool("mempalace_delete_drawer", {
-            "drawer_id": memory_id,
-        })
-        return {"status": "deleted" if result.get("success") else "error", "memory_id": memory_id, "mode": "mcp"}
+def get_db_path() -> str:
+    return os.path.join(PALACE_DIR, DB_NAME)
 
 
-def use_mempalace_mcp(args: argparse.Namespace):
-    """Route through mempalace-mcp (MCP protocol over stdio)."""
-    palace_dir = PALACE_DIR
-
-    if args.command == "init":
-        palace_dir = args.palace_dir or PALACE_DIR
-        # Try to connect; if mempalace isn't installed, raise so fallback kicks in
-        with MCPPalace(palace_dir) as palace:
-            result = palace.init()
-        print(json.dumps(result))
-        return
-
-    with MCPPalace(palace_dir) as palace:
-        project_id = int(args.project)
-
-        if args.command == "store":
-            tags = args.tags.split(",") if args.tags else []
-            result = palace.store(project_id, args.content, args.category or "general", tags)
-            print(json.dumps(result))
-
-        elif args.command == "recall":
-            result = palace.recall(project_id, args.query, args.top_k, args.category)
-            print(json.dumps(result))
-
-        elif args.command == "list":
-            result = palace.list_memories(project_id, args.category)
-            print(json.dumps(result))
-
-        elif args.command == "delete":
-            result = palace.delete(project_id, args.memory_id)
-            print(json.dumps(result))
-
-
-# ═══════════════════════════════════════════════════════════════════════
-#  Fallback: Lightweight local storage (SQLite + keyword matching)
-#  Used when mempalace is not installed or MCP communication fails.
-# ═══════════════════════════════════════════════════════════════════════
-
-def _get_db(palace_dir: str) -> sqlite3.Connection:
-    os.makedirs(palace_dir, exist_ok=True)
-    db_path = os.path.join(palace_dir, "memory.db")
+def get_conn() -> sqlite3.Connection:
+    db_path = get_db_path()
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS memories (
-            id TEXT PRIMARY KEY,
-            project_id TEXT NOT NULL,
-            content TEXT NOT NULL,
-            tags TEXT NOT NULL DEFAULT '',
-            category TEXT NOT NULL DEFAULT 'general',
-            timestamp TEXT NOT NULL,
-            embedding TEXT
-        )
-    """)
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_project ON memories(project_id)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_category ON memories(category)")
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA foreign_keys=ON")
     return conn
 
 
-def use_fallback(args: argparse.Namespace):
-    """Fallback storage when mempalace is not installed."""
-    palace_dir = PALACE_DIR
+# ─── TF-IDF Engine ───
 
-    if args.command == "init":
-        palace_dir = args.palace_dir or PALACE_DIR
-        conn = _get_db(palace_dir)
-        conn.commit()
-        conn.close()
-        print(json.dumps({
-            "status": "initialized",
-            "palace_dir": palace_dir,
-            "mode": "fallback_sqlite",
-        }))
-        return
+def tokenize(text: str) -> List[str]:
+    """Simple Chinese+English tokenizer: split on whitespace/punctuation, keep CJK chars."""
+    if not text:
+        return []
+    # Keep CJK characters as individual tokens, split English words
+    tokens = []
+    for ch in text:
+        if '\u4e00' <= ch <= '\u9fff' or '\u3040' <= ch <= '\u309f' or '\u30a0' <= ch <= '\u30ff':
+            tokens.append(ch)
+        elif ch.isalnum():
+            tokens.append(ch.lower())
+    # Also extract English words
+    english = re.findall(r'[a-zA-Z]+', text)
+    tokens.extend(w.lower() for w in english)
+    # Remove very short tokens
+    return [t for t in tokens if len(t) >= 1]
 
-    conn = _get_db(palace_dir)
-    project_id = str(args.project)
 
-    if args.command == "store":
-        tags = args.tags.split(",") if args.tags else [args.category or "general"]
-        memory_id = str(uuid.uuid4())
+def compute_tfidf(documents: List[List[str]]) -> tuple:
+    """Compute TF-IDF vectors for a list of documents (each doc is a list of tokens)."""
+    n_docs = len(documents)
+    if n_docs == 0:
+        return [], {}
+
+    # Document-Frequency
+    df = Counter()
+    for doc in documents:
+        for token in set(doc):
+            df[token] += 1
+
+    # Vocabulary
+    vocab = sorted(df.keys())
+    token_to_idx = {t: i for i, t in enumerate(vocab)}
+
+    # TF-IDF vectors (sparse: dict of token->score)
+    vectors = []
+    for doc in documents:
+        tf = Counter(doc)
+        vec: Dict[str, float] = {}
+        for token, count in tf.items():
+            if token in token_to_idx:
+                idf = math.log((1 + n_docs) / (1 + df[token])) + 1
+                vec[token] = count * idf
+        # L2 normalize
+        norm = math.sqrt(sum(v * v for v in vec.values())) or 1.0
+        vec = {t: v / norm for t, v in vec.items()}
+        vectors.append(vec)
+
+    return vectors, token_to_idx
+
+
+def cosine_similarity(a: Dict[str, float], b: Dict[str, float]) -> float:
+    """Cosine similarity between two sparse TF-IDF vectors."""
+    common = set(a.keys()) & set(b.keys())
+    if not common:
+        return 0.0
+    num = sum(a[t] * b[t] for t in common)
+    # Vectors are already normalized
+    return num
+
+
+# ─── Database Schema ───
+
+def init_db(conn: sqlite3.Connection):
+    """Initialize the memory palace database."""
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS memories (
+            id TEXT PRIMARY KEY,
+            project_id INTEGER NOT NULL,
+            content TEXT NOT NULL,
+            tags TEXT DEFAULT '[]',
+            category TEXT DEFAULT 'general',
+            tokens TEXT DEFAULT '[]',
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_project ON memories(project_id);
+        CREATE INDEX IF NOT EXISTS idx_category ON memories(category);
+        CREATE INDEX IF NOT EXISTS idx_project_category ON memories(project_id, category);
+        
+        CREATE TABLE IF NOT EXISTS facts (
+            id TEXT PRIMARY KEY,
+            project_id INTEGER NOT NULL,
+            entity TEXT NOT NULL,
+            attribute TEXT NOT NULL,
+            value TEXT NOT NULL,
+            source_memory_id TEXT,
+            chapter_from INTEGER,
+            chapter_to INTEGER,
+            confidence REAL DEFAULT 1.0,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (source_memory_id) REFERENCES memories(id) ON DELETE SET NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_facts_project ON facts(project_id);
+        CREATE INDEX IF NOT EXISTS idx_facts_entity ON facts(entity);
+        CREATE INDEX IF NOT EXISTS idx_facts_entity_attr ON facts(entity, attribute);
+        
+        CREATE TABLE IF NOT EXISTS continuity_log (
+            id TEXT PRIMARY KEY,
+            project_id INTEGER NOT NULL,
+            chapter_no INTEGER,
+            issue_type TEXT,
+            description TEXT,
+            severity TEXT DEFAULT 'medium',
+            status TEXT DEFAULT 'open',
+            resolution TEXT,
+            created_at TEXT DEFAULT (datetime('now')),
+            resolved_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_continuity_project ON continuity_log(project_id);
+        CREATE INDEX IF NOT EXISTS idx_continuity_status ON continuity_log(status);
+    """)
+    conn.commit()
+
+
+# ─── Memory CRUD ───
+
+def store_memory(project_id: int, content: str, category: str, tags: List[str]) -> str:
+    """Store a memory record. Returns memory ID."""
+    conn = get_conn()
+    try:
+        mid = str(uuid.uuid4())[:12]
+        tokens = tokenize(content)
         conn.execute(
-            "INSERT INTO memories (id, project_id, content, tags, category, timestamp) VALUES (?, ?, ?, ?, ?, ?)",
-            (memory_id, project_id, args.content, json.dumps(tags), args.category or "general", datetime.utcnow().isoformat()),
+            "INSERT INTO memories (id, project_id, content, tags, category, tokens, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))",
+            (mid, project_id, content, json.dumps(tags, ensure_ascii=False), category, json.dumps(tokens, ensure_ascii=False)),
         )
         conn.commit()
+        result = {"status": "ok", "memory_id": mid}
+        print(json.dumps(result, ensure_ascii=False))
+        return mid
+    finally:
         conn.close()
-        print(json.dumps({"status": "stored", "memory_id": memory_id, "mode": "fallback_sqlite"}))
+
+
+def recall_memories(project_id: int, query: str, top_k: int = 5, category: Optional[str] = None) -> List[Dict]:
+    """Recall memories by TF-IDF similarity to query."""
+    conn = get_conn()
+    try:
+        # Fetch all relevant memories
+        sql = "SELECT * FROM memories WHERE project_id = ?"
+        params: List[Any] = [project_id]
+        if category:
+            sql += " AND category = ?"
+            params.append(category)
+
+        rows = conn.execute(sql, params).fetchall()
+        if not rows:
+            print(json.dumps({"status": "ok", "count": 0, "results": []}, ensure_ascii=False))
+            return []
+
+        # Build documents for TF-IDF
+        docs = [[r["tokens"]] for r in rows] if rows[0]["tokens"] else []
+        # Parse stored token arrays
+        memories_docs: List[List[str]] = []
+        for r in rows:
+            try:
+                t = json.loads(r["tags"]) if isinstance(r.get("tags"), str) else []
+            except:
+                t = []
+            try:
+                tok = json.loads(r["tokens"]) if isinstance(r.get("tokens"), str) else tokenize(r["content"])
+            except:
+                tok = tokenize(r["content"])
+            memories_docs.append(tok)
+
+        query_tokens = tokenize(query)
+
+        # Compute TF-IDF
+        all_docs = [query_tokens] + memories_docs
+        vectors, _ = compute_tfidf(all_docs)
+        query_vec = vectors[0]
+        mem_vectors = vectors[1:]
+
+        # Score each memory
+        scored: List[tuple] = []
+        for i, row in enumerate(rows):
+            if i < len(mem_vectors):
+                sim = cosine_similarity(query_vec, mem_vectors[i])
+            else:
+                sim = 0.0
+            scored.append((sim, dict(row)))
+
+        # Sort by similarity, take top_k
+        scored.sort(key=lambda x: x[0], reverse=True)
+        results = []
+        for sim, mem in scored[:top_k]:
+            results.append({
+                "id": mem["id"],
+                "project_id": mem["project_id"],
+                "content": mem["content"],
+                "tags": json.loads(mem["tags"]) if isinstance(mem["tags"], str) else mem["tags"],
+                "category": mem["category"],
+                "timestamp": mem["created_at"],
+                "similarity": round(sim, 4),
+            })
+
+        print(json.dumps({"status": "ok", "count": len(results), "results": results}, ensure_ascii=False))
+        return results
+    finally:
+        conn.close()
+
+
+def list_memories(project_id: int, category: Optional[str] = None) -> List[Dict]:
+    """List all memories for a project."""
+    conn = get_conn()
+    try:
+        sql = "SELECT * FROM memories WHERE project_id = ? ORDER BY created_at DESC"
+        params: List[Any] = [project_id]
+        if category:
+            sql += " AND category = ?"
+            params.append(category)
+
+        rows = conn.execute(sql, params).fetchall()
+        memories = []
+        for r in rows:
+            memories.append({
+                "id": r["id"],
+                "project_id": r["project_id"],
+                "content": r["content"],
+                "tags": json.loads(r["tags"]) if isinstance(r["tags"], str) else r["tags"],
+                "category": r["category"],
+                "timestamp": r["created_at"],
+            })
+        print(json.dumps({"status": "ok", "count": len(memories), "memories": memories}, ensure_ascii=False))
+        return memories
+    finally:
+        conn.close()
+
+
+def delete_memory(project_id: int, memory_id: str) -> bool:
+    """Delete a memory."""
+    conn = get_conn()
+    try:
+        cur = conn.execute("DELETE FROM memories WHERE id = ? AND project_id = ?", (memory_id, project_id))
+        conn.commit()
+        ok = cur.rowcount > 0
+        print(json.dumps({"status": "ok" if ok else "not_found", "deleted": ok}, ensure_ascii=False))
+        return ok
+    finally:
+        conn.close()
+
+
+# ─── Facts (Entity-Attribute-Value) ───
+
+def extract_facts(content: str) -> List[Dict]:
+    """
+    Simple fact extraction from content.
+    Looks for patterns like:
+    - "X是Y" → entity=X, attribute=identity, value=Y
+    - "X有Y能力" → entity=X, attribute=ability, value=Y
+    - "X在Y位置" → entity=X, attribute=location, value=Y
+    - "X的Y是Z" → entity=X, attribute=Y, value=Z
+    """
+    facts = []
+    # Pattern: X有Y能力 / X能Y
+    for m in re.finditer(r'([\u4e00-\u9fff\w]{1,6})有([\u4e00-\u9fff\w，、]{2,30})能力', content):
+        facts.append({"entity": m.group(1), "attribute": "ability", "value": m.group(2)})
+    for m in re.finditer(r'([\u4e00-\u9fff\w]{1,6})能([\u4e00-\u9fff\w]{2,20})', content):
+        v = m.group(2)
+        if v not in ('力', '不', '够', '够不'):
+            facts.append({"entity": m.group(1), "attribute": "ability", "value": v})
+
+    # Pattern: X在Y
+    for m in re.finditer(r'([\u4e00-\u9fff\w]{1,6})在([\u4e00-\u9fff\w，、]{2,30})', content):
+        v = m.group(2).rstrip('，、。')
+        facts.append({"entity": m.group(1), "attribute": "location", "value": v})
+
+    # Pattern: X的Y
+    for m in re.finditer(r'([\u4e00-\u9fff\w]{1,6})的([\u4e00-\u9fff\w]{1,4})是([\u4e00-\u9fff\w，、]{2,30})', content):
+        facts.append({"entity": m.group(1), "attribute": m.group(2), "value": m.group(3).rstrip('，、。')})
+
+    # Pattern: X是Y
+    for m in re.finditer(r'([\u4e00-\u9fff\w]{1,6})是([\u4e00-\u9fff\w，、]{2,30})', content):
+        v = m.group(2).rstrip('，、。')
+        if v and len(v) > 1:
+            facts.append({"entity": m.group(1), "attribute": "identity", "value": v})
+
+    return facts
+
+
+def store_facts(project_id: int, content: str, source_memory_id: Optional[str] = None, chapter_no: Optional[int] = None) -> List[str]:
+    """Extract and store facts from content."""
+    conn = get_conn()
+    try:
+        facts = extract_facts(content)
+        stored_ids = []
+        for fact in facts:
+            fid = str(uuid.uuid4())[:12]
+            conn.execute(
+                "INSERT INTO facts (id, project_id, entity, attribute, value, source_memory_id, chapter_from, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))",
+                (fid, project_id, fact["entity"], fact["attribute"], fact["value"], source_memory_id, chapter_no),
+            )
+            stored_ids.append(fid)
+        conn.commit()
+        result = {
+            "status": "ok",
+            "count": len(stored_ids),
+            "facts": [{"id": fid, **fact} for fid, fact in zip(stored_ids, facts)],
+        }
+        print(json.dumps(result, ensure_ascii=False))
+        return stored_ids
+    finally:
+        conn.close()
+
+
+def query_facts(project_id: int, entity: Optional[str] = None, attribute: Optional[str] = None) -> List[Dict]:
+    """Query facts by entity and/or attribute."""
+    conn = get_conn()
+    try:
+        sql = "SELECT * FROM facts WHERE project_id = ?"
+        params: List[Any] = [project_id]
+        if entity:
+            sql += " AND entity = ?"
+            params.append(entity)
+        if attribute:
+            sql += " AND attribute = ?"
+            params.append(attribute)
+        sql += " ORDER BY created_at DESC"
+
+        rows = conn.execute(sql, params).fetchall()
+        facts = [dict(r) for r in rows]
+        print(json.dumps({"status": "ok", "count": len(facts), "facts": facts}, ensure_ascii=False))
+        return facts
+    finally:
+        conn.close()
+
+
+def list_all_facts(project_id: int) -> List[Dict]:
+    """List all facts for a project."""
+    return query_facts(project_id)
+
+
+# ─── Continuity Verification ───
+
+def verify_content(project_id: int, content: str, category: str = "general") -> Dict:
+    """
+    Verify a piece of content against existing memories and facts.
+    Returns potential continuity issues.
+    """
+    conn = get_conn()
+    try:
+        # 1. Extract facts from new content
+        new_facts = extract_facts(content)
+        new_fact_map: Dict[tuple, str] = {}
+        for f in new_facts:
+            key = (f["entity"], f["attribute"])
+            new_fact_map[key] = f["value"]
+
+        # 2. Query existing facts for same entities
+        entities = list(set(f["entity"] for f in new_facts))
+        existing_facts = []
+        for entity in entities:
+            rows = conn.execute(
+                "SELECT * FROM facts WHERE project_id = ? AND entity = ? ORDER BY created_at DESC",
+                (project_id, entity),
+            ).fetchall()
+            existing_facts.extend([dict(r) for r in rows])
+
+        # 3. Check for contradictions
+        issues = []
+        for entity, attr in new_fact_map:
+            val = new_fact_map[(entity, attr)]
+            # Find existing facts with same entity+attribute but different value
+            for ef in existing_facts:
+                if ef["entity"] == entity and ef["attribute"] == attr and ef["value"] != val:
+                    issues.append({
+                        "type": "fact_contradiction",
+                        "entity": entity,
+                        "attribute": attr,
+                        "new_value": val,
+                        "existing_value": ef["value"],
+                        "source_chapter": ef.get("chapter_from"),
+                        "severity": "high",
+                        "description": f"实体「{entity}」的{attr}冲突：旧值「{ef['value']}」vs 新值「{val}」",
+                    })
+
+        # 4. Recall similar memories for context
+        memories = []
+        rows = conn.execute(
+            "SELECT * FROM memories WHERE project_id = ? ORDER BY created_at DESC LIMIT 20",
+            (project_id,),
+        ).fetchall()
+        all_docs = [tokenize(content)]
+        mem_docs = []
+        for r in rows:
+            try:
+                tok = json.loads(r["tokens"]) if isinstance(r["tokens"], str) else tokenize(r["content"])
+            except:
+                tok = tokenize(r["content"])
+            mem_docs.append(tok)
+
+        all_docs.extend(mem_docs)
+        if all_docs:
+            vectors, _ = compute_tfidf(all_docs)
+            query_vec = vectors[0]
+            for i, row in enumerate(rows):
+                if i < len(vectors) - 1:
+                    sim = cosine_similarity(query_vec, vectors[i + 1])
+                    if sim > 0.1:
+                        memories.append({
+                            "id": row["id"],
+                            "content": row["content"][:300],
+                            "category": row["category"],
+                            "similarity": round(sim, 4),
+                        })
+
+        result = {
+            "status": "ok",
+            "issue_count": len(issues),
+            "issues": issues,
+            "related_memories": memories[:5],
+            "is_consistent": len(issues) == 0,
+        }
+        print(json.dumps(result, ensure_ascii=False))
+        return result
+    finally:
+        conn.close()
+
+
+def log_continuity_issue(project_id: int, chapter_no: Optional[int], issue_type: str, description: str, severity: str = "medium", resolution: Optional[str] = None) -> str:
+    """Log a continuity issue."""
+    conn = get_conn()
+    try:
+        lid = str(uuid.uuid4())[:12]
+        conn.execute(
+            "INSERT INTO continuity_log (id, project_id, chapter_no, issue_type, description, severity, status, resolution, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))",
+            (lid, project_id, chapter_no, issue_type, description, severity, "resolved" if resolution else "open", resolution),
+        )
+        conn.commit()
+        print(json.dumps({"status": "ok", "log_id": lid}, ensure_ascii=False))
+        return lid
+    finally:
+        conn.close()
+
+
+def list_continuity_issues(project_id: int, status: Optional[str] = None) -> List[Dict]:
+    """List continuity issues."""
+    conn = get_conn()
+    try:
+        sql = "SELECT * FROM continuity_log WHERE project_id = ?"
+        params: List[Any] = [project_id]
+        if status:
+            sql += " AND status = ?"
+            params.append(status)
+        sql += " ORDER BY created_at DESC"
+
+        rows = conn.execute(sql, params).fetchall()
+        issues = [dict(r) for r in rows]
+        print(json.dumps({"status": "ok", "count": len(issues), "issues": issues}, ensure_ascii=False))
+        return issues
+    finally:
+        conn.close()
+
+
+# ─── Reconcile: Find and flag contradictions ───
+
+def reconcile(project_id: int, category: Optional[str] = None) -> Dict:
+    """
+    Reconcile all facts for a project. Find contradictions where
+    the same entity+attribute has different values.
+    """
+    conn = get_conn()
+    try:
+        sql = "SELECT * FROM facts WHERE project_id = ?"
+        params: List[Any] = [project_id]
+        if category:
+            # Filter by source memory category
+            sql += " AND source_memory_id IN (SELECT id FROM memories WHERE category = ?)"
+            params.append(category)
+        sql += " ORDER BY entity, attribute, chapter_from"
+
+        rows = conn.execute(sql, params).fetchall()
+        facts_by_key: Dict[tuple, List[Dict]] = defaultdict(list)
+        for r in rows:
+            dr = dict(r)
+            facts_by_key[(dr["entity"], dr["attribute"])].append(dr)
+
+        contradictions = []
+        for (entity, attr), fact_list in facts_by_key.items():
+            if len(fact_list) > 1:
+                values = set(f["value"] for f in fact_list)
+                if len(values) > 1:
+                    contradictions.append({
+                        "entity": entity,
+                        "attribute": attr,
+                        "values": [{"value": f["value"], "chapter": f.get("chapter_from"), "source_id": f.get("source_memory_id")} for f in fact_list],
+                    })
+
+        result = {
+            "status": "ok",
+            "total_facts": len(rows),
+            "contradiction_count": len(contradictions),
+            "contradictions": contradictions,
+        }
+        print(json.dumps(result, ensure_ascii=False))
+        return result
+    finally:
+        conn.close()
+
+
+# ─── Dump: Export all memories and facts ───
+
+def dump_project(project_id: int) -> Dict:
+    """Dump all memories and facts for a project."""
+    conn = get_conn()
+    try:
+        memories_rows = conn.execute("SELECT * FROM memories WHERE project_id = ? ORDER BY created_at", (project_id,)).fetchall()
+        facts_rows = conn.execute("SELECT * FROM facts WHERE project_id = ? ORDER BY entity, attribute", (project_id,)).fetchall()
+        continuity_rows = conn.execute("SELECT * FROM continuity_log WHERE project_id = ? ORDER BY created_at", (project_id,)).fetchall()
+
+        memories = []
+        for r in memories_rows:
+            dr = dict(r)
+            try:
+                dr["tags"] = json.loads(dr["tags"]) if isinstance(dr["tags"], str) else dr["tags"]
+            except:
+                pass
+            memories.append(dr)
+
+        result = {
+            "status": "ok",
+            "project_id": project_id,
+            "memory_count": len(memories),
+            "fact_count": len(facts_rows),
+            "continuity_issue_count": len(continuity_rows),
+            "memories": memories,
+            "facts": [dict(r) for r in facts_rows],
+            "continuity_log": [dict(r) for r in continuity_rows],
+        }
+        print(json.dumps(result, ensure_ascii=False))
+        return result
+    finally:
+        conn.close()
+
+
+# ─── CLI ───
+
+def main():
+    global PALACE_DIR
+    parser = argparse.ArgumentParser(description="Novel Memory Palace")
+    parser.add_argument("--palace-dir", default=PALACE_DIR, help="Memory palace data directory")
+    sub = parser.add_subparsers(dest="command")
+
+    # init
+    p_init = sub.add_parser("init")
+    p_init.add_argument("--palace-dir")
+
+    # store
+    p_store = sub.add_parser("store")
+    p_store.add_argument("--project", type=int, required=True)
+    p_store.add_argument("--content", required=True)
+    p_store.add_argument("--category", default="general")
+    p_store.add_argument("--tags", default="")
+    p_store.add_argument("--chapter", type=int, default=None)
+
+    # recall
+    p_recall = sub.add_parser("recall")
+    p_recall.add_argument("--project", type=int, required=True)
+    p_recall.add_argument("--query", required=True)
+    p_recall.add_argument("--top-k", type=int, default=5)
+    p_recall.add_argument("--category", default=None)
+
+    # list
+    p_list = sub.add_parser("list")
+    p_list.add_argument("--project", type=int, required=True)
+    p_list.add_argument("--category", default=None)
+
+    # delete
+    p_delete = sub.add_parser("delete")
+    p_delete.add_argument("--project", type=int, required=True)
+    p_delete.add_argument("--memory-id", required=True)
+
+    # store-facts
+    p_sf = sub.add_parser("store-facts")
+    p_sf.add_argument("--project", type=int, required=True)
+    p_sf.add_argument("--content", required=True)
+    p_sf.add_argument("--source-id", default=None)
+    p_sf.add_argument("--chapter", type=int, default=None)
+
+    # query-facts
+    p_qf = sub.add_parser("query-facts")
+    p_qf.add_argument("--project", type=int, required=True)
+    p_qf.add_argument("--entity", default=None)
+    p_qf.add_argument("--attribute", default=None)
+
+    # list-facts
+    p_lf = sub.add_parser("list-facts")
+    p_lf.add_argument("--project", type=int, required=True)
+
+    # verify
+    p_verify = sub.add_parser("verify")
+    p_verify.add_argument("--project", type=int, required=True)
+    p_verify.add_argument("--content", required=True)
+    p_verify.add_argument("--category", default="general")
+
+    # reconcile
+    p_recon = sub.add_parser("reconcile")
+    p_recon.add_argument("--project", type=int, required=True)
+    p_recon.add_argument("--category", default=None)
+
+    # log-continuity
+    p_lc = sub.add_parser("log-continuity")
+    p_lc.add_argument("--project", type=int, required=True)
+    p_lc.add_argument("--chapter", type=int, default=None)
+    p_lc.add_argument("--issue-type", required=True)
+    p_lc.add_argument("--description", required=True)
+    p_lc.add_argument("--severity", default="medium")
+    p_lc.add_argument("--resolution", default=None)
+
+    # list-continuity
+    p_lco = sub.add_parser("list-continuity")
+    p_lco.add_argument("--project", type=int, required=True)
+    p_lco.add_argument("--status", default=None)
+
+    # dump
+    p_dump = sub.add_parser("dump")
+    p_dump.add_argument("--project", type=int, required=True)
+
+    args = parser.parse_args()
+
+    if args.palace_dir:
+        PALACE_DIR = args.palace_dir
+
+    os.makedirs(PALACE_DIR, exist_ok=True)
+
+    if args.command == "init":
+        conn = get_conn()
+        try:
+            init_db(conn)
+            print(json.dumps({"status": "ok", "palace_dir": PALACE_DIR}))
+        finally:
+            conn.close()
+
+    elif args.command == "store":
+        tags = [t.strip() for t in args.tags.split(",") if t.strip()] if args.tags else []
+        store_memory(args.project, args.content, args.category, tags)
 
     elif args.command == "recall":
-        rows = conn.execute(
-            "SELECT * FROM memories WHERE project_id = ? ORDER BY timestamp DESC LIMIT ?",
-            (project_id, args.top_k * 3),
-        ).fetchall()
-        query_words = set(args.query.lower().split())
-        scored = []
-        for row in rows:
-            content = row["content"].lower()
-            tag_words = set()
-            try:
-                tag_words = set(json.loads(row["tags"]))
-            except (json.JSONDecodeError, TypeError):
-                pass
-            score = len(query_words & set(content.split())) + len(query_words & tag_words) * 2
-            if score > 0:
-                scored.append((score, dict(row)))
-        scored.sort(key=lambda x: -x[0])
-        results = [r for _, r in scored[:args.top_k]]
-        if args.category:
-            results = [r for r in results if r["category"] == args.category]
-        conn.close()
-        print(json.dumps({
-            "status": "ok",
-            "count": len(results),
-            "results": results,
-            "mode": "fallback_sqlite",
-        }))
+        recall_memories(args.project, args.query, args.top_k, args.category)
 
     elif args.command == "list":
-        query = "SELECT * FROM memories WHERE project_id = ?"
-        params: list = [project_id]
-        if args.category:
-            query += " AND category = ?"
-            params.append(args.category)
-        query += " ORDER BY timestamp DESC"
-        rows = conn.execute(query, params).fetchall()
-        conn.close()
-        print(json.dumps({
-            "status": "ok",
-            "count": len(rows),
-            "memories": [dict(r) for r in rows],
-            "mode": "fallback_sqlite",
-        }))
+        list_memories(args.project, args.category)
 
     elif args.command == "delete":
-        conn.execute("DELETE FROM memories WHERE id = ?", (args.memory_id,))
-        conn.commit()
-        conn.close()
-        print(json.dumps({"status": "deleted", "memory_id": args.memory_id, "mode": "fallback_sqlite"}))
+        delete_memory(args.project, args.memory_id)
+
+    elif args.command == "store-facts":
+        store_facts(args.project, args.content, args.source_id, args.chapter)
+
+    elif args.command == "query-facts":
+        query_facts(args.project, args.entity, args.attribute)
+
+    elif args.command == "list-facts":
+        list_all_facts(args.project)
+
+    elif args.command == "verify":
+        verify_content(args.project, args.content, args.category)
+
+    elif args.command == "reconcile":
+        reconcile(args.project, args.category)
+
+    elif args.command == "log-continuity":
+        log_continuity_issue(args.project, args.chapter, args.issue_type, args.description, args.severity, args.resolution)
+
+    elif args.command == "list-continuity":
+        list_continuity_issues(args.project, args.status)
+
+    elif args.command == "dump":
+        dump_project(args.project)
+
+    else:
+        parser.print_help()
+        sys.exit(1)
 
 
 if __name__ == "__main__":

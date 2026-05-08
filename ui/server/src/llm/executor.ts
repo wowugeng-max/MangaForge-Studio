@@ -1,10 +1,5 @@
-import { readKeys } from '../key-store'
-import { readModels } from '../model-store'
 import type { NovelProjectRecord } from '../novel'
-import { readProviders } from '../provider-store'
 import { buildNovelAgentPlan, topologicalSortAgents } from './agents'
-import { AnthropicCompatibleAdapter, LocalCompatibleAdapter, OpenAICompatibleAdapter, type NovelLLMAdapter } from './adapter'
-import { createLLMAdapter } from './factory'
 import {
   baseNovelSystemPrompt,
   baseStructuredOutputPrompt,
@@ -21,43 +16,11 @@ import { buildNovelStrategy } from './strategy'
 import { buildNovelTools } from './tools'
 import type { LLMMessage, LLMRequest, LLMResponse } from './types'
 
+// ── Runtime model selection (reads from keys.json + providers.json + models.json) ──
+import { executeWithRuntimeModel } from './provider-runtime'
+
 // ── Memory Service ──
 import { buildMemoryInjection, initMemoryPalace, storeAgentOutput } from '../memory-service'
-
-// ── Provider / Model Resolution ──
-
-function resolveModelConfig(modelId?: number) {
-  if (modelId && modelId > 0) {
-    const providers = readProviders()
-    const keys = readKeys()
-    const models = readModels()
-    const model = models.find(m => m.id === modelId)
-    if (model) {
-      const provider = providers.find(p => p.id === model.provider_id)
-      if (provider) {
-        const apiKey = keys.find(k => k.provider_id === provider.id)
-        return { provider, apiKey, model }
-      }
-    }
-  }
-  return null
-}
-
-async function getAdapter(modelId?: number): Promise<NovelLLMAdapter> {
-  const config = resolveModelConfig(modelId)
-  if (config) {
-    return new AnthropicCompatibleAdapter()
-  }
-  // Fallback adapters
-  if (process.env.ANTHROPIC_BASE_URL) return new AnthropicCompatibleAdapter()
-  if (process.env.LLM_LOCAL_ENDPOINT) return new LocalCompatibleAdapter()
-  return new OpenAICompatibleAdapter()
-}
-
-async function getModelName(modelId?: number): Promise<string> {
-  const config = resolveModelConfig(modelId)
-  return config?.model.model_name || 'default'
-}
 
 // ── Agent Message Builder ──
 
@@ -106,13 +69,50 @@ function buildReviewPrompt(project: NovelProjectRecord, hint?: string) {
   ].filter(Boolean).join('\n')
 }
 
+function buildRepairPrompt(
+  project: NovelProjectRecord,
+  reviewIssues: Array<any>,
+  snapshot: { worldbuilding?: any; characters?: any[]; outlines?: any[]; chapters?: any[] },
+) {
+  const issuesList = reviewIssues.map((issue, i) =>
+    `${i + 1}. ${typeof issue === 'string' ? issue : JSON.stringify(issue)}`,
+  ).join('\n')
+
+  return [
+    baseNovelSystemPrompt(),
+    buildStyleGuardrails(project),
+    `作品标题：${project.title}`,
+    `当前资料：世界观 ${snapshot.worldbuilding ? '✓' : '✗'} / 角色 ${snapshot.characters?.length || 0} 个 / 章节 ${snapshot.chapters?.length || 0} 章`,
+    `发现以下问题需要修复：\n${issuesList || '无具体问题'}`,
+    '请输出 JSON 格式修复方案：{ issues_fixed[], repaired_chapters[], repaired_outlines[], repaired_characters[], repaired_worldbuilding }',
+    baseStructuredOutputPrompt(['issues_fixed', 'repaired_chapters']),
+  ].join('\n')
+}
+
+// ── LLM Execution via provider-runtime ──
+
+async function callLLM<T = any>(
+  activeWorkspace: string,
+  modelId: number | undefined,
+  messages: LLMMessage[],
+  temperature: number,
+  maxTokens: number,
+) {
+  const request: LLMRequest = {
+    model: '',
+    messages,
+    temperature,
+    max_tokens: maxTokens,
+  }
+  return executeWithRuntimeModel<T>(activeWorkspace, request, modelId) as LLMResponse<T>
+}
+
 // ── Single Agent Execution with Retry ──
 
 async function executeOneAgent<T = any>(
   agentId: string,
   project: NovelProjectRecord,
   context: Record<string, any>,
-  adapter: NovelLLMAdapter,
   strategyEntry?: any,
   activeWorkspace = '',
   modelId?: number,
@@ -122,37 +122,19 @@ async function executeOneAgent<T = any>(
     { role: 'user', content: buildAgentMessages(agentId, project, context).userContent },
   ]
 
-  const tools = buildNovelTools(project.id)
-  const request: LLMRequest = {
-    model: await getModelName(modelId),
-    messages,
-    temperature: strategyEntry?.temperature ?? 0.5,
-    max_tokens: strategyEntry?.max_tokens ?? 4096,
-    tools,
-    tool_choice: 'auto',
-    response_format: { type: 'json_schema', schema: { type: 'object' } },
-  }
-
   const maxRetries = strategyEntry?.retries ?? 2
   let lastError: string | undefined
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      const response = await adapter.execute<T>(request)
-      // Handle tool calls
-      if (response.tool_calls && response.tool_calls.length > 0) {
-        for (const toolCall of response.tool_calls) {
-          const toolResult = await executeToolCall(toolCall, project.id, activeWorkspace)
-          messages.push({
-            role: 'tool',
-            content: JSON.stringify(toolResult),
-            tool_call_id: toolCall.id,
-          })
-        }
-        // Re-execute with tool results
-        const finalResponse = await adapter.execute<T>(request)
-        return finalResponse
-      }
+      const response = await callLLM<T>(
+        activeWorkspace,
+        modelId,
+        messages,
+        strategyEntry?.temperature ?? 0.5,
+        strategyEntry?.max_tokens ?? 4096,
+      )
+      if (response.error) throw new Error(response.error)
       return response
     } catch (error) {
       lastError = String(error)
@@ -170,16 +152,7 @@ async function executeOneAgent<T = any>(
     finish_reason: 'error',
     parsed: null,
     error: lastError,
-  }
-}
-
-async function executeToolCall(toolCall: { id: string; name: string; arguments: Record<string, any> }, projectId: number, activeWorkspace: string) {
-  try {
-    const { runNovelTool } = await import('./tools')
-    return await runNovelTool(toolCall.name, toolCall.arguments, projectId, activeWorkspace)
-  } catch (error) {
-    return { error: String(error), success: false }
-  }
+  } as LLMResponse<T>
 }
 
 // ── Novel Plan Generation ──
@@ -189,70 +162,47 @@ export async function generateNovelPlan(
   prompt: string,
   activeWorkspace: string,
   modelId?: number,
+  _model?: any,
+  scope?: string[],
 ) {
-  const agentPlan = topologicalSortAgents(buildNovelAgentPlan(project))
+  const allAgents = topologicalSortAgents(buildNovelAgentPlan(project))
+  const agentPlan = scope && scope.length > 0
+    ? allAgents.filter(a => scope.includes(a.id))
+    : allAgents
   const strategy = buildNovelStrategy(project)
   const results: Array<{ step: string; success: boolean; output: any; error: string; outputSource: string }> = []
   const seed = buildNovelSeed(project, prompt)
 
   // Initialize memory palace
-  try {
-    await initMemoryPalace()
-  } catch {
-    // Non-fatal
-  }
+  try { await initMemoryPalace() } catch { /* non-fatal */ }
 
   let upstreamContext = {}
 
   for (const agent of agentPlan) {
     const strategyEntry = strategy.find(s => s.agent_id === agent.id)
-    const adapter = await getAdapter(modelId)
-
-    // Context chaining: inject upstream output
-    const context = {
-      ...seed,
-      upstreamContext,
-      project,
-    }
+    const context = { ...seed, upstreamContext, project }
 
     const response = await executeOneAgent(
-      agent.id,
-      project,
-      context,
-      adapter,
-      strategyEntry,
-      activeWorkspace,
-      modelId,
+      agent.id, project, context, strategyEntry, activeWorkspace, modelId,
     )
 
     const success = !response.error && response.parsed
     const output = response.parsed || {}
     results.push({ step: agent.id, success, output, error: response.error || '', outputSource: success ? 'llm' : 'seed' })
-
-    // Context chaining: pass current output to next agent
     upstreamContext = { ...upstreamContext, [agent.id]: output }
 
-    // Store agent output to memory palace
-    try {
-      await storeAgentOutput(project.id, agent.id, output)
-    } catch {
-      // Non-fatal
-    }
+    try { await storeAgentOutput(project.id, agent.id, output) } catch { /* non-fatal */ }
   }
 
-  const llmResult = (results || []).find(item => item.step === 'outline-agent' && item.outputSource === 'llm')?.output || {}
-  const chapterResult = (results || []).find(item => item.step === 'chapter-agent' && item.outputSource === 'llm')?.output || {}
-  const worldResult = (results || []).find(item => item.step === 'world-agent' && item.outputSource === 'llm')?.output || {}
-  const characterResult = (results || []).find(item => item.step === 'character-agent' && item.outputSource === 'llm')?.output || {}
-  const marketResult = (results || []).find(item => item.step === 'market-agent' && item.outputSource === 'llm')?.output || {}
+  const getResult = (step: string) => results.find(r => r.step === step && r.outputSource === 'llm')?.output || {}
 
   return {
     plan: {
-      market: marketResult,
-      world: worldResult,
-      characters: characterResult,
-      outline: llmResult,
-      chapters: chapterResult,
+      market: getResult('market-agent'),
+      world: getResult('world-agent'),
+      characters: getResult('character-agent'),
+      outline: getResult('outline-agent'),
+      chapters: getResult('chapter-agent'),
       seed,
     },
     results,
@@ -273,26 +223,19 @@ export async function executeNovelAgentChain(
   const results: Array<{ step: string; success: boolean; output: any; error: string; outputSource: string }> = []
   const seed = buildNovelSeed(project, prompt)
 
-  // Initialize memory palace
-  try {
-    await initMemoryPalace()
-  } catch {
-    // Non-fatal
-  }
+  try { await initMemoryPalace() } catch { /* non-fatal */ }
 
   let upstreamContext = {}
 
   for (const agent of agentPlan) {
-    // P1-1: Partial Agent Execution — skip agents not in filter
     if (agentFilter && agentFilter.length > 0 && !agentFilter.includes(agent.id)) {
       results.push({ step: agent.id, success: false, output: null, error: 'skipped_by_filter', outputSource: 'skipped' })
       continue
     }
 
     const strategyEntry = strategy.find(s => s.agent_id === agent.id)
-    const adapter = await getAdapter(modelId)
 
-    // Build memory injection for context
+    // Memory injection
     let memoryInjection = ''
     try {
       memoryInjection = await buildMemoryInjection(project.id, {
@@ -302,43 +245,24 @@ export async function executeNovelAgentChain(
         chapterTitle: seed.chapters?.[0]?.title,
         prevChapters: upstreamContext['prose-agent']?.output?.prose_chapters,
       })
-    } catch {
-      // Non-fatal
-    }
+    } catch { /* non-fatal */ }
 
-    // Context chaining: inject upstream output + memory
     const context = {
       ...seed,
-      upstreamContext: {
-        ...upstreamContext,
-        memoryInjection,
-      },
+      upstreamContext: { ...upstreamContext, memoryInjection },
       project,
     }
 
     const response = await executeOneAgent(
-      agent.id,
-      project,
-      context,
-      adapter,
-      strategyEntry,
-      activeWorkspace,
-      modelId,
+      agent.id, project, context, strategyEntry, activeWorkspace, modelId,
     )
 
     const success = !response.error && response.parsed
     const output = response.parsed || {}
     results.push({ step: agent.id, success, output, error: response.error || '', outputSource: success ? 'llm' : 'seed' })
-
-    // Context chaining: pass current output to next agent
     upstreamContext = { ...upstreamContext, [agent.id]: output }
 
-    // Store agent output to memory palace
-    try {
-      await storeAgentOutput(project.id, agent.id, output)
-    } catch {
-      // Non-fatal
-    }
+    try { await storeAgentOutput(project.id, agent.id, output) } catch { /* non-fatal */ }
   }
 
   const review = buildNovelReview(results)
@@ -353,12 +277,10 @@ function buildNovelReview(results: Array<{ step: string; success: boolean; outpu
   if (failedAgents.length > 0) {
     issues.push(...failedAgents.map(r => `${r.step}: ${r.error || '执行失败'}`))
   }
-
   const reviewResult = results.find(r => r.step === 'review-agent' && r.outputSource === 'llm')?.output
   if (reviewResult?.issues) {
     issues.push(...reviewResult.issues)
   }
-
   return {
     summary: issues.length > 0 ? `发现 ${issues.length} 个问题需要关注。` : '当前生成结构一致，尚未发现明显冲突。',
     issues,
@@ -370,18 +292,10 @@ function buildNovelReview(results: Array<{ step: string; success: boolean; outpu
 export async function executeRepairAgent(
   project: NovelProjectRecord,
   reviewIssues: Array<any>,
-  snapshot: {
-    worldbuilding?: any;
-    characters?: any[];
-    outlines?: any[];
-    chapters?: any[];
-  },
+  snapshot: { worldbuilding?: any; characters?: any[]; outlines?: any[]; chapters?: any[] },
   activeWorkspace: string,
   modelId?: number,
 ) {
-  const adapter = await getAdapter(modelId)
-  const modelName = await getModelName(modelId)
-
   const messages: LLMMessage[] = [
     { role: 'system', content: buildRepairPrompt(project, reviewIssues, snapshot) },
     {
@@ -396,86 +310,43 @@ export async function executeRepairAgent(
     },
   ]
 
-  const request: LLMRequest = {
-    model: modelName,
-    messages,
-    temperature: 0.3,
-    max_tokens: 8192,
-    tools: buildNovelTools(project.id),
-    tool_choice: 'auto',
-    response_format: { type: 'json_schema', schema: { type: 'object' } },
-  }
-
   const maxRetries = 3
   let lastError: string | undefined
-  let fallbackUsed = false
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      const response = await adapter.execute(request)
-
-      if (response.error || (!response.parsed && !response.content)) {
-        throw new Error(response.error || 'Empty response')
-      }
+      const response = await callLLM(activeWorkspace, modelId, messages, 0.3, 8192)
+      if (response.error) throw new Error(response.error)
 
       const output = response.parsed || parseJsonFromContent(response.content)
-      if (!output) {
-        throw new Error('Failed to parse JSON response')
-      }
-
-      // Validate required fields
+      if (!output) throw new Error('Failed to parse JSON response')
       if (!output.issues_fixed && !output.repaired_chapters && !output.repaired_outlines) {
         throw new Error('Response missing required repair fields')
       }
 
-      return {
-        success: true,
-        output,
-        error: undefined,
-        modelId,
-        modelName,
-        fallbackUsed: false,
-        usage: response.usage,
-      }
+      return { success: true, output, error: undefined, modelId, modelName: undefined, fallbackUsed: false, usage: response.usage }
     } catch (error) {
       lastError = String(error)
       if (attempt < maxRetries) {
-        const delay = 1000 * Math.pow(2, attempt)
-        await new Promise(resolve => setTimeout(resolve, delay))
+        await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, attempt)))
       }
     }
   }
 
-  // Fallback: build a basic repair response from the review issues
-  fallbackUsed = true
-  const fallbackOutput = buildNovelRepairFallback(
-    project,
-    reviewIssues,
-    snapshot,
-  )
-
   return {
     success: false,
-    output: fallbackOutput,
+    output: buildNovelRepairFallback(project, reviewIssues, snapshot),
     error: lastError,
     modelId,
-    modelName,
+    modelName: undefined,
     fallbackUsed: true,
   }
 }
 
 function parseJsonFromContent(content: string): any {
-  try {
-    return JSON.parse(content)
-  } catch {
+  try { return JSON.parse(content) } catch {
     const match = content.match(/```json\s*([\s\S]*?)\s*```/i)
-    if (match) {
-      try {
-        return JSON.parse(match[1])
-      } catch {
-        return null
-      }
-    }
+    if (match) { try { return JSON.parse(match[1]) } catch { return null } }
     return null
   }
 }
@@ -483,28 +354,19 @@ function parseJsonFromContent(content: string): any {
 function buildNovelRepairFallback(
   _project: NovelProjectRecord,
   reviewIssues: Array<any>,
-  original: {
-    worldbuilding?: any;
-    characters?: any[];
-    outlines?: any[];
-    chapters?: any[];
-  },
+  original: { worldbuilding?: any; characters?: any[]; outlines?: any[]; chapters?: any[] },
 ) {
-  const issuesFixed = reviewIssues.map((issue, i) => ({
-    index: i + 1,
-    issue: typeof issue === 'string' ? issue : JSON.stringify(issue),
-    fix: '已应用修复策略，内容已根据审校建议更新。',
-  }))
-
-  const repairedChapters = (original.chapters || []).map(ch => ({
-    ...ch,
-    chapter_summary: `${ch.chapter_summary || ''}（已修订）`,
-    ending_hook: `${ch.ending_hook || ''}（已修订）`,
-  }))
-
   return {
-    issues_fixed: issuesFixed,
-    repaired_chapters: repairedChapters,
+    issues_fixed: reviewIssues.map((issue, i) => ({
+      index: i + 1,
+      issue: typeof issue === 'string' ? issue : JSON.stringify(issue),
+      fix: '已应用修复策略，内容已根据审校建议更新。',
+    })),
+    repaired_chapters: (original.chapters || []).map(ch => ({
+      ...ch,
+      chapter_summary: `${ch.chapter_summary || ''}（已修订）`,
+      ending_hook: `${ch.ending_hook || ''}（已修订）`,
+    })),
     repaired_outlines: original.outlines || [],
     repaired_characters: original.characters || [],
     repaired_worldbuilding: original.worldbuilding || {},
@@ -526,12 +388,6 @@ export async function generateNovelChapterProse(
   activeWorkspace: string,
   modelId?: number,
 ) {
-  const adapter = await getAdapter(modelId)
-  const modelName = await getModelName(modelId)
-
-  // P0-3: 前置章节上下文已在 context.prevChapters 中传递
-  // P1-3: 风格护栏已在 buildAgentMessages 中注入
-  // Memory: 注入记忆宫殿
   let memoryInjection = ''
   try {
     memoryInjection = await buildMemoryInjection(project.id, {
@@ -542,88 +398,46 @@ export async function generateNovelChapterProse(
       chapterSummary: chapter.chapter_summary,
       prevChapters: context.prevChapters,
     })
-  } catch {
-    // Non-fatal
-  }
+  } catch { /* non-fatal */ }
 
-  const upstreamContext = memoryInjection
-    ? { memoryInjection }
-    : {}
-
-  const messages: LLMMessage[] = [
+  const upstreamContext = memoryInjection ? { memoryInjection } : {}
+  const proseMessages: LLMMessage[] = [
     {
       role: 'system',
       content: buildAgentMessages('prose-agent', project, {
-        ...context,
-        chapterDraft: chapter,
-        upstreamContext,
-        prevChapters: context.prevChapters,
+        ...context, chapterDraft: chapter, upstreamContext, prevChapters: context.prevChapters,
       }).systemContent,
     },
     {
       role: 'user',
       content: buildAgentMessages('prose-agent', project, {
-        ...context,
-        chapterDraft: chapter,
-        upstreamContext,
-        prevChapters: context.prevChapters,
+        ...context, chapterDraft: chapter, upstreamContext, prevChapters: context.prevChapters,
       }).userContent,
     },
   ]
-
-  const request: LLMRequest = {
-    model: modelName,
-    messages,
-    temperature: 0.75,
-    max_tokens: 8192,
-    tools: buildNovelTools(project.id),
-    tool_choice: 'auto',
-    response_format: { type: 'json_schema', schema: { type: 'object' } },
-  }
 
   const maxRetries = 3
   let lastError: string | undefined
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      const response = await adapter.execute(request)
-
-      if (response.error || (!response.parsed && !response.content)) {
-        throw new Error(response.error || 'Empty response')
-      }
+      const response = await callLLM(activeWorkspace, modelId, proseMessages, 0.75, 8192)
+      if (response.error) throw new Error(response.error)
 
       const output = response.parsed || parseJsonFromContent(response.content)
-      if (!output || !output.prose_chapters) {
-        throw new Error('Response missing prose_chapters')
-      }
+      if (!output || !output.prose_chapters) throw new Error('Response missing prose_chapters')
 
-      // Store to memory palace
-      try {
-        await storeAgentOutput(project.id, 'prose-agent', output)
-      } catch {
-        // Non-fatal
-      }
+      try { await storeAgentOutput(project.id, 'prose-agent', output) } catch { /* non-fatal */ }
 
-      return {
-        success: true,
-        output,
-        error: undefined,
-        outputSource: 'llm',
-        modelId,
-        modelName,
-        providerId: undefined,
-        usage: response.usage,
-      }
+      return { success: true, output, error: undefined, outputSource: 'llm', modelId, modelName: undefined, providerId: undefined, usage: response.usage }
     } catch (error) {
       lastError = String(error)
       if (attempt < maxRetries) {
-        const delay = 1000 * Math.pow(2, attempt)
-        await new Promise(resolve => setTimeout(resolve, delay))
+        await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, attempt)))
       }
     }
   }
 
-  // Fallback
   return {
     success: false,
     output: {
@@ -641,7 +455,7 @@ export async function generateNovelChapterProse(
   }
 }
 
-// ── Platform Fit Analysis (stub) ──
+// ── Platform Fit Analysis ──
 
 export async function buildPlatformFitAnalysis(
   project: NovelProjectRecord,
@@ -654,36 +468,20 @@ export async function buildPlatformFitAnalysis(
   activeWorkspace: string,
   modelId?: number,
 ) {
-  const adapter = await getAdapter(modelId)
-  const modelName = await getModelName(modelId)
-
-  const { buildPlatformFitPrompt } = await import('./prompts')
-  const messages: LLMMessage[] = [
-    { role: 'system', content: baseNovelSystemPrompt() + buildStyleGuardrails(project) },
-    { role: 'user', content: buildPlatformFitPrompt(project, context) },
-  ]
-
-  const request: LLMRequest = {
-    model: modelName,
-    messages,
-    temperature: 0.2,
-    max_tokens: 4096,
-    response_format: { type: 'json_schema', schema: { type: 'object' } },
-  }
-
   try {
-    const response = await adapter.execute(request)
-    const output = response.parsed || parseJsonFromContent(response.content)
-    if (output) return output
-  } catch {
-    // Fall through to fallback
-  }
+    const { buildPlatformFitPrompt } = await import('./prompts')
+    const messages: LLMMessage[] = [
+      { role: 'system', content: baseNovelSystemPrompt() + buildStyleGuardrails(project) },
+      { role: 'user', content: buildPlatformFitPrompt(project, context) },
+    ]
+    const response = await callLLM(activeWorkspace, modelId, messages, 0.2, 4096)
+    if (response.parsed) return response.parsed
+    if (response.content) return parseJsonFromContent(response.content)
+  } catch { /* fall through */ }
 
-  // Fallback: basic scoring
   const chapters = context.chapters || []
   const proseCount = chapters.filter(ch => ch.chapter_text).length
   const chapterCount = chapters.length
-  const avgLength = chapterCount > 0 ? Math.round(chapters.reduce((sum, ch) => sum + String(ch.chapter_text || '').length, 0) / chapterCount) : 0
 
   return {
     is_platform_ready: chapterCount >= 3 && proseCount >= 2,

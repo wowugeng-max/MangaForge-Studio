@@ -11,6 +11,14 @@ restored-src/.smoke-workspace/
 mempalace-data/
 **/.mempalace/
 
+# Memory palace bootstrap cache
+mempalace-bootstrap.json
+
+# Python virtual environments
+scripts/venv/
+**/venv/
+**/.venv/
+
 # Environment files
 ui/server/.env
 

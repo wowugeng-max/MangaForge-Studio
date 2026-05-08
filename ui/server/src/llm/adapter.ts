@@ -133,7 +133,15 @@ function buildOpenAIResponsesBody(request: LLMRequest) {
 
 function buildAnthropicMessagesBody(request: LLMRequest) {
   const normalized = normalizeLLMRequest(request)
-  const body: Record<string, any> = { model: normalized.model, max_tokens: normalized.max_tokens, messages: normalized.messages.map(msg => ({ role: msg.role === 'assistant' ? 'assistant' : 'user', content: msg.content })), temperature: normalized.temperature }
+  const systemMsg = normalized.messages.find(m => m.role === 'system')
+  const body: Record<string, any> = { model: normalized.model, max_tokens: normalized.max_tokens, temperature: normalized.temperature }
+  // Anthropic requires 'system' as a top-level field, NOT in messages array
+  if (systemMsg?.content) body.system = systemMsg.content
+  const nonSystemMessages = normalized.messages.filter(m => m.role !== 'system')
+  body.messages = nonSystemMessages.map(msg => ({
+    role: msg.role === 'assistant' ? 'assistant' : (msg.role === 'tool' ? 'assistant' : 'user'),
+    content: msg.content,
+  }))
   if (normalized.tools?.length) body.tools = normalized.tools.map(tool => ({ name: tool.name, description: tool.description, input_schema: tool.input_schema }))
   if (normalized.tool_choice) body.tool_choice = normalized.tool_choice
   return body
@@ -163,13 +171,18 @@ function normalizeBaseUrl(url?: string) {
 
 function resolveProviderEndpoint(provider: ProviderRecord) {
   const endpoints = provider.endpoints || {}
-  const explicit = endpoints.responses || endpoints.chat || endpoints.completions || endpoints.llm || ''
+  const explicit = endpoints.chat || endpoints.responses || endpoints.completions || endpoints.llm || ''
   const base = normalizeBaseUrl(explicit || provider.default_base_url || '')
   if (!base) return ''
-  if (/\/(chat\/completions|responses|messages|generate)$/.test(base)) return base
+  // If the URL already ends with a known completion path, use it as-is
+  if (/\/(chat\/completions|completions|responses|messages|generate|complete)$/.test(base)) return base
+  // If the URL already contains a path beyond base (e.g., /v1/complete, /api/v2/generate), treat it as the endpoint
+  const pathParts = base.replace(/^(https?:\/\/[^/]+)/, '').split('/').filter(Boolean)
+  if (pathParts.length >= 2) return base
   const hasV1 = /\/v1$/.test(base)
   if (String(provider.api_format || '').toLowerCase().includes('anthropic')) return hasV1 ? `${base}/messages` : `${base}/v1/messages`
-  return hasV1 ? `${base}/responses` : `${base}/v1/responses`
+  // Default to chat/completions (NOT responses) for OpenAI-compatible providers
+  return hasV1 ? `${base}/chat/completions` : `${base}/v1/chat/completions`
 }
 
 export class ConfiguredProviderAdapter implements NovelLLMAdapter {
@@ -184,7 +197,7 @@ export class ConfiguredProviderAdapter implements NovelLLMAdapter {
     const modelRequest = { ...request, model: this.model.model_name || request.model }
     const providerFormat = String(this.provider.api_format || '').toLowerCase()
     const isAnthropic = providerFormat.includes('anthropic')
-    const isResponses = providerFormat.includes('responses') || providerFormat.includes('openai_compatible') || providerFormat.includes('openai-compatible') || providerFormat.includes('gpt')
+    const isResponses = providerFormat.includes('responses')
     const body = isResponses ? buildOpenAIResponsesBody(modelRequest) : (isAnthropic ? buildAnthropicMessagesBody(modelRequest) : buildOpenAIChatBody(modelRequest))
     const headers = applyProviderAuth({ ...(this.provider.custom_headers || {}) }, this.provider, this.apiKey.key)
     if (isAnthropic && !headers['anthropic-version']) headers['anthropic-version'] = '2023-06-01'
@@ -197,8 +210,8 @@ abstract class BaseCompatibleAdapter implements NovelLLMAdapter {
   abstract name: string
   abstract endpointEnv: string
   protected apiKeyEnv?: string
-  protected endpointPath = 'responses'
-  protected buildRequestBody(request: LLMRequest): any { return buildOpenAIResponsesBody(request) }
+  protected endpointPath = 'chat/completions'
+  protected buildRequestBody(request: LLMRequest): any { return buildOpenAIChatBody(request) }
   protected headersExtra(): Record<string, string> { return {} }
 
   protected async executeViaEndpoint<T = any>(request: LLMRequest): Promise<LLMResponse<T>> {

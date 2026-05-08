@@ -1,6 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# ── Ensure bun is on PATH (auto-load if installed but not found) ──
+if ! command -v bun >/dev/null 2>&1; then
+  bun_bin="$HOME/.bun/bin/bun"
+  if [ -f "$bun_bin" ]; then
+    export PATH="$HOME/.bun/bin:$PATH"
+  fi
+fi
+
+# ── Ensure pyenv is on PATH (for Python 3.13 mempalace) ──
+export PYENV_ROOT="$HOME/.pyenv"
+if [ -d "$PYENV_ROOT/bin" ]; then
+  export PATH="$PYENV_ROOT/bin:$PATH"
+  eval "$(pyenv init - bash 2>/dev/null)" 2>/dev/null || true
+fi
+
 repo_root="$(cd "$(dirname "$0")" && pwd)"
 server_dir="$repo_root/ui/server"
 web_dir="$repo_root/ui/web"

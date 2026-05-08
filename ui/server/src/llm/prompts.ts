@@ -1,345 +1,512 @@
 import type { NovelProjectRecord } from '../novel'
 
-function joinTags(items?: string[]) {
-  return (items || []).filter(Boolean).join('、') || '无'
+// ── Shared Prompt Fragments ──
+
+export function baseNovelSystemPrompt(): string {
+  return `你是一个专业小说创作 AI。你正在参与一部长篇连载小说的流水线创作。
+
+核心原则：
+- 保持叙事逻辑的严格一致，不得出现时间线冲突、人物状态矛盾、设定崩塌
+- 每一章都必须是上一章节的**直接延续**，不得出现场景断层、角色凭空消失或复活
+- 保持统一的叙事风格和语言质感，不要在不同章节间切换语气
+- 伏笔必须提前规划并在合适的时机回收，不得出现"遗忘"的伏笔
+- 角色行为必须符合其已设定的性格、动机和能力范围`
 }
 
-export function baseNovelSystemPrompt() {
-  return '你是一个严格遵守结构化输出的小说创作 agent，优先保证一致性、可追踪性和可修复性。'
+export function baseStructuredOutputPrompt(fields: string[]): string {
+  return `\n请输出 JSON 格式，包含以下字段：${fields.join(', ')}。确保 JSON 可以被直接解析，不要包含任何额外文字。`
 }
 
-export function baseStructuredOutputPrompt(schema: string[]) {
-  return `请严格按照以下字段输出 JSON，不要输出无关内容：${schema.join(', ')}`
-}
+// ── Style Guardrails ──
 
-export function baseContinuityPrompt() {
-  return '请重点检查时间线、角色动机、设定一致性、伏笔回收和章节衔接。'
-}
-
-// P1-3: 风格一致性 — 根据 style_tags 生成风格护栏规则
-// 注入到 System Prompt 中，对每个 Agent 生效
 export function buildStyleGuardrails(project: NovelProjectRecord): string {
-  const tags = project.style_tags || []
-  if (tags.length === 0) return ''
-
-  // 预定义的风格映射 — 将常见标签扩展为具体的写作规则
-  const STYLE_RULES: Record<string, string[]> = {
-    '热血': ['战斗场景必须突出力量感与情绪张力', '主角在逆境中必须展现不屈意志', '胜利必须伴随代价或新冲突'],
-    '轻松': ['对话幽默风趣但不油腻', '冲突化解方式偏向巧妙而非暴力', '允许日常片段调节节奏'],
-    '暗黑': ['世界观存在灰色地带，角色动机不必完全正面', '结局不一定圆满，反转偏向残酷', '描写中可包含压抑与不安的氛围'],
-    '慢热': ['前3章以铺垫世界观和人物关系为主', '冲突逐步升级而非一开始就爆发', '伏笔回收周期可以较长'],
-    '快节奏': ['每章必须有一次事件推进或信息揭露', '减少长篇环境描写，用动作与对话推进', '悬念必须在章末出现'],
-    '细腻': ['注重人物心理描写，展现角色内心世界', '场景描写需包含感官细节', '对话中隐含潜台词，不直白'],
-    '悬疑': ['线索必须在正文中埋设，不能突兀出现', '读者信息量 < 主角信息量，制造认知差', '每个章节结尾留下未解之谜'],
-    '爽文': ['主角必须在冲突中获得明显优势或成长', '反派被打脸要有铺垫，不能纯靠运气', '爽点分布均匀，每2-3章至少一次'],
-    '虐心': ['角色之间存在不可调和的矛盾', '重要抉择需付出情感代价', '允许角色失去关键关系或信念'],
-    '群像': ['多名角色均有独立视角和成长弧线', '角色之间的互动推动剧情而非主角独断', '避免配角沦为工具人'],
-  }
-
-  const rules: string[] = []
-  for (const tag of tags) {
-    const matched = STYLE_RULES[tag]
-    if (matched) {
-      rules.push(...matched)
-    } else {
-      // 未知标签：生成通用规则
-      rules.push(`标签"${tag}"：写作时保持该风格的特征，确保语气、节奏、冲突方式与之吻合。`)
-    }
-  }
-
-  if (rules.length === 0) return ''
-
-  // 去重
-  const unique = Array.from(new Set(rules))
-  return `
-### 风格护栏（Style Guardrails）
-以下为项目风格要求，所有输出必须遵守：
-${unique.map((r, i) => `${i + 1}. ${r}`).join('\n')}
-
-在生成正文、大纲、角色对话、世界观设定时，请检查是否与上述风格要求一致。如有偏离，优先调整输出以符合风格。`
+  const parts: string[] = []
+  if (project.genre) parts.push(`题材：${project.genre}`)
+  if (project.target_audience) parts.push(`目标读者：${project.target_audience}`)
+  if (project.length_target) parts.push(`篇幅目标：${project.length_target}`)
+  if (project.style_tags && project.style_tags.length > 0) parts.push(`风格标签：${project.style_tags.join('、')}`)
+  if (project.synopsis) parts.push(`简介/核心概念：${project.synopsis}`)
+  return parts.length > 0 ? `\n\n【作品信息】\n${parts.join('\n')}` : ''
 }
 
-const GENRE_TEMPLATES: Record<string, { world_hint: string; hook: string; volume_title: string; volume_summary: string; ch1: string; ch2: string; ch1_goal: string; ch2_goal: string; ch1_conflict: string; ch2_conflict: string; ch1_hook: string; ch2_hook: string; char_archetypes: string[] }> = {
-  '科幻': {
-    world_hint: '近未来或星际时代，科技与文明碰撞', hook: '一项技术突破彻底改写了人类对现实的认知。',
-    volume_title: '第一卷：技术异变', volume_summary: '主角接触关键科技，发现其背后隐藏着颠覆性的真相。',
-    ch1: '第一章：技术觉醒', ch2: '第二章：规则验证',
-    ch1_goal: '用技术异变引爆悬念并展示世界观。', ch2_goal: '让主角验证技术并发现其隐藏的代价。',
-    ch1_conflict: '技术带来的便利与未知的危险并存。', ch2_conflict: '越深入技术核心，越接近不可控的威胁。',
-    ch1_hook: '主角发现这项技术早已存在，只是被抹去了历史记录。', ch2_hook: '主角从技术底层代码中找到了一个不属于任何人的身份标记。',
-    char_archetypes: ['技术天才 / 边缘人', '理性助手', '科技寡头 / 隐秘操盘者'],
-  },
-  '玄幻': {
-    world_hint: '修真/灵能世界，等级森严，万物有灵', hook: '一个被遗忘的力量体系在主角身上觉醒。',
-    volume_title: '第一卷：觉醒之路', volume_summary: '主角意外觉醒力量，踏入修真之路，发现世界等级制度背后的真相。',
-    ch1: '第一章：灵根初现', ch2: '第二章：入门试炼',
-    ch1_goal: '以力量觉醒引爆期待感并展示修炼体系。', ch2_goal: '让主角通过试炼，接触更广阔的世界。',
-    ch1_conflict: '天赋与出身之间的矛盾。', ch2_conflict: '实力提升带来的关注与敌意同时增加。',
-    ch1_hook: '主角的灵根类型在百年间从未出现过。', ch2_hook: '试炼中遇到的老者暗示主角的身世并非普通。',
-    char_archetypes: ['废柴逆袭 / 隐藏天命', '师门引路人', '天骄对手 / 宗门打压者'],
-  },
-  '都市': {
-    world_hint: '现代都市，现实感强，人物关系复杂', hook: '一个看似平凡的人物背后隐藏着不平凡的秘密。',
-    volume_title: '第一卷：暗流涌动', volume_summary: '主角在城市中卷入一场利益与情感的漩涡。',
-    ch1: '第一章：暗涌', ch2: '第二章：卷入',
-    ch1_goal: '用日常中的异常细节制造代入感与悬念。', ch2_goal: '让主角被迫卷入核心事件。',
-    ch1_conflict: '平凡生活与暗藏危机的反差。', ch2_conflict: '介入事件后的利益冲突与道德抉择。',
-    ch1_hook: '主角收到了一封来自已故亲友的神秘信件。', ch2_hook: '信件中提到的地点，恰好是城市中一个被封锁的秘密。',
-    char_archetypes: ['平凡人物 / 被迫成长', '利益盟友', '幕后操控者'],
-  },
-  '悬疑': {
-    world_hint: '推理与解谜，线索层层递进，真相隐藏在细节中', hook: '一桩看似普通的案件中隐藏着精心设计的骗局。',
-    volume_title: '第一卷：迷雾初现', volume_summary: '主角接手案件，发现线索指向一个更大的阴谋。',
-    ch1: '第一章：迷雾', ch2: '第二章：线索',
-    ch1_goal: '以强烈悬念开场，抛出案件核心矛盾。', ch2_goal: '让主角找到第一条关键线索，同时引入误导。',
-    ch1_conflict: '真相与表象的落差。', ch2_conflict: '线索指向两个矛盾的方向。',
-    ch1_hook: '案发现场留下了一条与五年前悬案相同的标记。', ch2_hook: '主角发现目击证人的证词中有一个不可能的细节。',
-    char_archetypes: ['侦探 / 敏锐观察者', '线索提供者 / 不可靠证人', '嫌疑人 / 幕后黑手'],
-  },
-  '奇幻': {
-    world_hint: '魔法与冒险，多元种族，史诗感', hook: '一个古老的预言在主角身上开始应验。',
-    volume_title: '第一卷：预言之始', volume_summary: '主角踏上冒险旅程，逐步发现预言背后的真相。',
-    ch1: '第一章：预言降临', ch2: '第二章：启程',
-    ch1_goal: '用预言的应验引爆史诗感。', ch2_goal: '让主角正式踏上旅程，遇到第一位伙伴。',
-    ch1_conflict: '命运与自由意志的冲突。', ch2_conflict: '旅途中的危险与未知的诱惑。',
-    ch1_hook: '预言中提到的征兆在主角面前逐一显现。', ch2_hook: '第一位伙伴的真实身份与预言中的"背叛者"吻合。',
-    char_archetypes: ['被选中的冒险者', '忠诚伙伴', '暗影中的敌对势力'],
-  },
-  '仙侠': {
-    world_hint: '仙门林立，道法自然，恩怨情仇交织', hook: '一段被封印的往事在主角身上重演。',
-    volume_title: '第一卷：仙缘初启', volume_summary: '主角因缘际会踏入仙途，发现大道之争背后的因果。',
-    ch1: '第一章：仙缘', ch2: '第二章：入门',
-    ch1_goal: '以机缘巧合引爆期待，展示仙侠世界观。', ch2_goal: '让主角拜入仙门，初识大道。',
-    ch1_conflict: '凡尘与仙道的差距。', ch2_conflict: '仙门内的派系之争与主角的清纯之道。',
-    ch1_hook: '主角获得的神秘法器中封印着一段上古记忆。', ch2_hook: '主角的法器引起了门派中某位长老的强烈反应。',
-    char_archetypes: ['凡人之姿 / 道心坚定', '仙门引路人', '宗门宿敌 / 前世因果者'],
-  },
-  '言情': {
-    world_hint: '情感驱动，人物心理细腻，关系张力十足', hook: '一次相遇让两个人的人生轨迹彻底改变。',
-    volume_title: '第一卷：初遇与纠葛', volume_summary: '主角在命运的安排下相遇，情感在纠葛中逐渐升温。',
-    ch1: '第一章：初遇', ch2: '第二章：靠近',
-    ch1_goal: '用戏剧性的相遇制造情感张力。', ch2_goal: '让两人关系产生微妙变化。',
-    ch1_conflict: '心动与理智的拉扯。', ch2_conflict: '靠近过程中的误会与试探。',
-    ch1_hook: '主角发现对方似乎认识自己，但自己毫无印象。', ch2_hook: '一次意外让主角看到了对方不为人知的一面。',
-    char_archetypes: ['深情但不善表达', '外冷内热的吸引者', '情感阻碍者'],
-  },
-}
+// ── Market Agent Prompt ──
 
-function resolveGenreKey(genre: string): string {
-  for (const key of Object.keys(GENRE_TEMPLATES)) {
-    if (genre.includes(key) || key.includes(genre)) return key
-  }
-  return '科幻'
-}
-
-function resolveStyleTags(styleTags: string[]): string {
-  return styleTags.length > 0 ? styleTags.join('、') : '叙事流畅、节奏紧凑'
-}
-
-export function buildNovelSeed(project: NovelProjectRecord, prompt: string) {
-  const genre = String(project.genre || '科幻')
-  const title = String(project.title || '未命名小说')
-  const hint = prompt || `围绕《${title}》生成完整小说`
-  const template = GENRE_TEMPLATES[resolveGenreKey(genre)]
-  const styles = resolveStyleTags(project.style_tags || [])
-
-  const world_summary = `在《${title}》中，故事发生于一个${genre}世界，核心设定围绕"${hint}"展开。世界观基调：${template.world_hint}。写作风格：${styles}。`
-  const rules = [
-    `所有${genre === '玄幻' || genre === '仙侠' ? '能力与修炼' : genre === '科幻' ? '科技设定' : '设定'}必须遵循统一规则，不得随意破坏因果。`,
-    '人物成长必须与事件推动同步，不允许无缘无故升级。',
-    '每一卷都必须有明确目标、冲突、反转与收束。',
-    `叙事风格要求：${styles}。`,
-  ]
-  const characters = [
-    { name: '主角', role_type: '主角', archetype: template.char_archetypes[0], motivation: '从困境中找出真相并改变命运', goal: '完成自我救赎', conflict: '对未知世界的恐惧与责任并存' },
-    { name: '关键伙伴', role_type: '重要配角', archetype: template.char_archetypes[1], motivation: '帮助主角活下去并揭开真相', goal: '找到线索或系统真相', conflict: '对规则与自由的冲突' },
-    { name: '主要对立者', role_type: '反派', archetype: template.char_archetypes[2], motivation: '维持表面秩序或完成更大目的', goal: '阻止主角打破规则', conflict: '其目标与主角的生存目标冲突' },
-  ]
-  const outline = {
-    outline_type: 'master', title: `${title} 总纲`,
-    summary: `${hint}。主线围绕"${template.volume_summary}"展开，风格要求：${styles}。`,
-    conflict_points: ['主角被卷入核心事件', '规则真相逐步揭露', '伙伴分裂与立场冲突', '反派的真实目的浮出水面', '最终决战与收束'],
-    turning_points: ['发现世界/事件的真正面貌', '失去关键伙伴或关键资源', '主角第一次主动反击', '反派露出更深层的身份'],
-    hook: template.hook,
-  }
-  const volumeOutlines = [{
-    outline_type: 'volume', title: template.volume_title, summary: template.volume_summary,
-    conflict_points: ['初次卷入', '伙伴加入', '规则验证', '代价显现'],
-    turning_points: ['发现更大的真相', '第一次失败代价'],
-    hook: '第一卷结尾必须让主角意识到更大的力量或操控者存在。', parent_id: null,
-  }]
-  const chapters = [
-    { chapter_no: 1, title: template.ch1, chapter_goal: template.ch1_goal, chapter_summary: `主角在${genre}世界中遭遇第一轮异常事件。`, conflict: template.ch1_conflict, ending_hook: template.ch1_hook, status: 'draft', outline_id: null },
-    { chapter_no: 2, title: template.ch2, chapter_goal: template.ch2_goal, chapter_summary: `主角尝试验证发现，接触${genre === '玄幻' || genre === '仙侠' ? '修炼' : '核心'}体系的第一条规则。`, conflict: template.ch2_conflict, ending_hook: template.ch2_hook, status: 'draft', outline_id: null },
-  ]
-  return { world_summary, rules, characters, outline, chapters, volumeOutlines }
-}
-
-export function buildMarketPrompt(project: NovelProjectRecord, context?: { hint?: string; upstreamContext?: string }) {
-  const hint = context?.hint || ''
+export function buildMarketPrompt(project: NovelProjectRecord): string {
   return [
-    baseNovelSystemPrompt(),
-    '任务：分析作品市场方向并输出写作偏好。',
+    '任务：分析当前小说的市场定位、受众偏好和章节节奏。',
     `作品标题：${project.title}`,
-    `题材：${project.genre || '未知'}`,
-    `子题材：${joinTags(project.sub_genres)}`,
-    `风格标签：${joinTags(project.style_tags)}`,
-    `商业标签：${joinTags(project.commercial_tags)}`,
-    hint ? `额外提示：${hint}` : '',
-    baseStructuredOutputPrompt(['preferred_hook', 'pace_hint', 'tone_hint', 'market_tags']),
+    project.synopsis ? `简介：${project.synopsis}` : '',
+    '输出 JSON 格式，包含以下字段：',
+    '  - genre_fit: 题材匹配度评价',
+    '  - audience_fit: 受众匹配度评价',
+    '  - hook_fit: 开篇抓力评价',
+    '  - pacing_fit: 节奏评价',
+    '  - recommendations: 建议数组',
+    baseStructuredOutputPrompt(['genre_fit', 'audience_fit', 'hook_fit', 'pacing_fit', 'recommendations']),
   ].filter(Boolean).join('\n')
 }
 
-export function buildWorldPrompt(project: NovelProjectRecord, hint?: string) {
+// ── World Agent Prompt ──
+
+export function buildWorldPrompt(project: NovelProjectRecord, task: string): string {
   return [
-    baseNovelSystemPrompt(),
-    '任务：生成世界观设定。',
+    `任务：${task}`,
     `作品标题：${project.title}`,
-    `题材：${project.genre || '未知'}`,
-    hint ? `额外提示：${hint}` : '',
-    baseStructuredOutputPrompt(['world_summary', 'rules', 'factions', 'locations', 'systems', 'timeline_anchor', 'known_unknowns']),
+    project.synopsis ? `简介：${project.synopsis}` : '',
+    '',
+    '请构建完整的世界观设定，包括：',
+    '1. 世界概述（时代背景、核心规则）',
+    '2. 力量/能力体系（规则、等级、限制）',
+    '3. 势力与阵营（关系、利益冲突）',
+    '4. 关键地点（地理、战略意义）',
+    '5. 关键物品/道具（来源、能力、去向）',
+    '6. 时间锚点（故事起点、关键时间节点）',
+    '7. 已知未知（故事中角色和读者都不知道的秘密，即伏笔）',
+    '',
+    '输出 JSON 格式：',
+    baseStructuredOutputPrompt(['world_summary', 'rules', 'factions', 'locations', 'systems', 'items', 'timeline_anchor', 'known_unknowns', 'version']),
   ].filter(Boolean).join('\n')
 }
 
-export function buildCharacterPrompt(project: NovelProjectRecord, hint?: string) {
+// ── Character Agent Prompt ──
+
+export function buildCharacterPrompt(project: NovelProjectRecord, task: string): string {
   return [
-    baseNovelSystemPrompt(),
-    '任务：生成角色卡和关系动力。',
+    `任务：${task}`,
     `作品标题：${project.title}`,
-    `题材：${project.genre || '未知'}`,
-    hint ? `额外提示：${hint}` : '',
+    project.synopsis ? `简介：${project.synopsis}` : '',
+    '',
+    '请构建角色列表，每个角色包含：',
+    '1. name: 角色名称',
+    '2. role: 角色定位（主角/配角/反派/工具人）',
+    '3. personality: 性格关键词（3-5个）',
+    '4. motivation: 核心动机（驱动角色行动的根本原因）',
+    '5. goal: 当前目标（在当前剧情中想要什么）',
+    '6. abilities: 能力列表',
+    '7. backstory: 简要背景',
+    '8. relationships: 与其他角色的关系',
+    '9. arc_hint: 角色弧光提示（这个角色会经历怎样的变化）',
+    '',
+    '输出 JSON 格式：',
     baseStructuredOutputPrompt(['characters']),
   ].filter(Boolean).join('\n')
 }
 
-export function buildOutlinePrompt(project: NovelProjectRecord, hint?: string) {
+// ── Outline Agent Prompt ──
+
+export function buildOutlinePrompt(project: NovelProjectRecord, task: string): string {
   return [
-    baseNovelSystemPrompt(),
-    '任务：生成总纲、卷纲和章纲结构。',
+    `任务：${task}`,
     `作品标题：${project.title}`,
-    `题材：${project.genre || '未知'}`,
-    hint ? `额外提示：${hint}` : '',
-    baseStructuredOutputPrompt(['master_outline', 'volume_outlines', 'chapter_outlines']),
+    project.synopsis ? `简介：${project.synopsis}` : '',
+    '',
+    '请构建完整的故事大纲，包括：',
+    '1. master_outline: 整体故事走向概述',
+    '2. volume_outlines: 分卷/分段大纲，每卷包含：',
+    '   - title: 卷标题',
+    '   - summary: 卷概述',
+    '   - hook: 卷的核心冲突/悬念',
+    '   - chapter_count: 预估章节数',
+    '3. chapter_outlines: 每章简要大纲，包含：',
+    '   - chapter_no: 章节号',
+    '   - title: 章节标题',
+    '   - summary: 本章核心事件',
+    '   - conflict: 本章主要冲突',
+    '   - ending_hook: 本章结尾悬念（用于衔接下一章）',
+    '4. foreshadowing_plan: 伏笔计划',
+    '   - plant_at: 在哪一章埋下伏笔',
+    '   - payoff_at: 在哪一章回收',
+    '   - description: 伏笔描述',
+    '',
+    '关键要求：章节之间必须有清晰的因果链条，前一章的 ending_hook 必须是下一章的起点。',
+    baseStructuredOutputPrompt(['master_outline', 'volume_outlines', 'chapter_outlines', 'foreshadowing_plan']),
   ].filter(Boolean).join('\n')
 }
 
-export function buildChapterPrompt(project: NovelProjectRecord, hint?: string) {
+// ── Detail Outline Agent Prompt（细纲分化）──
+
+export function buildDetailOutlinePrompt(
+  project: NovelProjectRecord,
+  chapterOutlines: Array<any>,
+  worldbuilding: any,
+  characters: Array<any>,
+): string {
+  const parts: string[] = []
+
+  parts.push('任务：将粗略章纲扩写为场景级别的详细细纲')
+  parts.push(`作品标题：${project.title}`)
+  parts.push(`题材：${project.genre || '未知'}`)
+  parts.push(`风格：${(project.style_tags || []).join('、') || '未指定'}`)
+
+  // 世界观约束
+  if (worldbuilding) {
+    parts.push('\n【世界观约束】')
+    if (worldbuilding.world_summary) parts.push(`概述：${worldbuilding.world_summary}`)
+    if (Array.isArray(worldbuilding.rules)) parts.push(`核心规则：${worldbuilding.rules.join('；')}`)
+    if (Array.isArray(worldbuilding.factions)) parts.push(`势力：${worldbuilding.factions.map((f: any) => f.name || f).join('、')}`)
+    if (Array.isArray(worldbuilding.items)) parts.push(`关键物品：${worldbuilding.items.map((it: any) => `${it.name}(${it.description || it.ability || '待设定'})`).join('、')}`)
+  }
+
+  // 角色列表
+  if (characters && characters.length > 0) {
+    parts.push('\n【可用角色】')
+    for (const char of characters) {
+      const name = char.name || char.character_name || '未知'
+      const role = char.role || ''
+      const personality = Array.isArray(char.personality) ? char.personality.join('，') : (char.personality || '')
+      const abilities = Array.isArray(char.abilities) ? char.abilities.join('、') : (char.abilities || '')
+      parts.push(`  ${name} [${role}] 性格：${personality} 能力：${abilities}`)
+    }
+  }
+
+  // 粗略章纲 — 这是细纲的基础
+  if (chapterOutlines && chapterOutlines.length > 0) {
+    parts.push('\n【粗略章纲（在此基础之上扩写）】')
+    for (const ch of chapterOutlines) {
+      const no = ch.chapter_no || '?'
+      const title = ch.title || '无标题'
+      const summary = ch.summary || ch.chapter_summary || ''
+      const conflict = ch.conflict || ''
+      const hook = ch.ending_hook || ''
+      parts.push(`  第${no}章「${title}」`)
+      if (summary) parts.push(`    核心事件：${summary}`)
+      if (conflict) parts.push(`    冲突：${conflict}`)
+      if (hook) parts.push(`    结尾钩子：${hook}`)
+    }
+  }
+
+  // 伏笔计划
+  if (chapterOutlines && chapterOutlines.length > 0 && chapterOutlines[0]?.foreshadowing_plan) {
+    parts.push('\n【伏笔计划】')
+    for (const fp of chapterOutlines[0].foreshadowing_plan) {
+      parts.push(`  第${fp.plant_at}章埋 → 第${fp.payoff_at}章收：${fp.description}`)
+    }
+  }
+
+  parts.push(`\n\n【输出要求】`)
+  parts.push('将每一章扩写为详细的细纲，每章包含以下字段：')
+  parts.push('  - chapter_no: 章节号（与粗纲对应）')
+  parts.push('  - title: 章节标题')
+  parts.push('  - summary: 本章核心事件概述（100字以内）')
+  parts.push('  - conflict: 本章主要冲突')
+  parts.push('  - scenes: 场景序列数组，每章至少2-4个场景。每个场景包含：')
+  parts.push('    • location: 场景地点')
+  parts.push('    • characters_present: 出场角色列表')
+  parts.push('    • action: 场景内发生的具体事件（2-3句描述）')
+  parts.push('    • emotional_tone: 情绪氛围（如：紧张、悬疑、温情、绝望）')
+  parts.push('    • dialogue_focus: 对话焦点（本章场景中什么对话最重要）')
+  parts.push('  - ending_hook: 本章结尾的悬念/转折点（下一章的入口）')
+  parts.push('  - continuity_from_prev: 如何承接上一章——具体说明从上一章的什么状态、什么地点、什么情绪延续而来')
+  parts.push('  - items_in_play: 本章涉及的关键物品（来自世界观的物品清单）')
+  parts.push('  - foreshadowing: 本章埋下的伏笔（如有）')
+  parts.push('  - timeline_note: 时间线说明（如："紧接上一章"、"三天后"、"同一晚更晚时候"）')
+
+  parts.push('\n【关键约束】')
+  parts.push('- 第一章的 continuity_from_prev 可以写"故事起点，无前章"')
+  parts.push('- 从第二章开始，continuity_from_prev 必须具体引用上一章的 ending_hook')
+  parts.push('- 每个场景的地点变化必须有过渡（不能瞬间从一个城市跳到另一个）')
+  parts.push('- 角色的出场必须有合理理由（不能无缘无故出现在某个场景）')
+  parts.push('- 物品的使用必须与世界规则一致（不能超出能力范围）')
+  parts.push('- 情绪曲线：每章应该有起伏，不能全程高潮或全程平淡')
+  parts.push('- 每章结尾的 ending_hook 要让读者"不得不看下一章"')
+
+  parts.push('\n输出格式：JSON，包含字段 detail_chapters（数组）')
+  parts.push(`⚠️ 不要返回 markdown 格式，必须是纯 JSON`)
+
+  return parts.filter(Boolean).join('\n')
+}
+
+// ── Continuity Check Agent Prompt（连续性预检）──
+
+export function buildContinuityCheckPrompt(
+  project: NovelProjectRecord,
+  detailChapters: Array<any>,
+  worldbuilding: any,
+  characters: Array<any>,
+): string {
+  const parts: string[] = []
+
+  parts.push('任务：检查细纲中的连续性是否自洽。在正文创作之前发现并标记所有问题。')
+  parts.push(`作品标题：${project.title}`)
+
+  // 细纲
+  if (detailChapters && detailChapters.length > 0) {
+    parts.push(`\n【待检查的细纲（共 ${detailChapters.length} 章）】`)
+    for (const ch of detailChapters) {
+      const no = ch.chapter_no || '?'
+      const title = ch.title || '无标题'
+      const summary = ch.summary || ch.chapter_summary || ''
+      const continuity = ch.continuity_from_prev || ''
+      const hook = ch.ending_hook || ''
+      const scenes = ch.scenes || []
+      const items = ch.items_in_play || []
+      const timeline = ch.timeline_note || ''
+      parts.push(`\n  第${no}章「${title}」`)
+      if (timeline) parts.push(`    时间线：${timeline}`)
+      if (summary) parts.push(`    核心事件：${summary}`)
+      if (continuity) parts.push(`    衔接说明：${continuity}`)
+      parts.push(`    场景数：${scenes.length}`)
+      for (const scene of scenes) {
+        const loc = typeof scene === 'string' ? scene : (scene.location || '')
+        const chars = typeof scene === 'object' && scene.characters_present ? scene.characters_present : []
+        parts.push(`      → ${loc} [${Array.isArray(chars) ? chars.join('、') : chars}]`)
+      }
+      if (items.length > 0) parts.push(`    涉及物品：${Array.isArray(items) ? items.join('、') : items}`)
+      if (hook) parts.push(`    结尾钩子：${hook}`)
+    }
+  }
+
+  // 角色
+  if (characters && characters.length > 0) {
+    parts.push('\n【角色清单】')
+    for (const char of characters) {
+      const name = char.name || char.character_name || '未知'
+      const abilities = Array.isArray(char.abilities) ? char.abilities.join('、') : ''
+      parts.push(`  ${name}: ${abilities}`)
+    }
+  }
+
+  // 物品
+  if (worldbuilding && Array.isArray(worldbuilding.items)) {
+    parts.push('\n【关键物品】')
+    for (const item of worldbuilding.items) {
+      parts.push(`  ${item.name}: ${item.description || item.ability || '待设定'}`)
+    }
+  }
+
+  parts.push('\n【检查清单】')
+  parts.push('请逐一检查以下问题：')
+  parts.push('1. 衔接连续性：从第2章开始，每章的 continuity_from_prev 是否合理衔接了上一章的 ending_hook？')
+  parts.push('2. 角色位置：角色在每章每章的位置变化是否合理？有没有凭空出现或消失？')
+  parts.push('3. 角色能力：角色在细纲中的行为是否超出了其设定能力？')
+  parts.push('4. 物品追踪：关键物品的出现、使用、丢失、找回是否有完整链路？')
+  parts.push('5. 时间线：timeline_note 是否合理？有没有矛盾的时间跳跃？')
+  parts.push('6. 伏笔：粗略章纲中的伏笔计划是否在细纲中有所体现？')
+  parts.push('7. 情绪曲线：每章的情绪起伏是否合理？有没有章节全程平淡？')
+
+  parts.push('\n输出格式：JSON，包含字段：')
+  parts.push('  - continuity_issues: 发现的问题数组，每个问题包含：chapter_no, issue_type, description, severity(high/medium/low), suggested_fix')
+  parts.push('  - continuity_fixes: 自动修复建议数组，每个建议包含：chapter_no, field, before, after')
+  parts.push('  - is_ready_for_prose: boolean，所有 high 级别问题修复后才能为 true')
+  parts.push(`⚠️ 不要返回 markdown 格式，必须是纯 JSON`)
+
+  return parts.filter(Boolean).join('\n')
+}
+
+// ── Chapter Prompt（保留，用于 backward compatibility）──
+
+export function buildChapterPrompt(project: NovelProjectRecord, task: string): string {
   return [
-    baseNovelSystemPrompt(),
-    '任务：把章纲扩写成章节草稿。',
+    `任务：${task}`,
     `作品标题：${project.title}`,
-    `题材：${project.genre || '未知'}`,
-    hint ? `额外提示：${hint}` : '',
+    project.synopsis ? `简介：${project.synopsis}` : '',
+    '',
+    '请为每一章生成详细的细纲，每章包含：',
+    '1. chapter_no: 章节号',
+    '2. title: 章节标题',
+    '3. summary: 本章核心事件概述（100字以内）',
+    '4. scenes: 场景列表',
+    '5. conflict: 本章主要冲突',
+    '6. ending_hook: 本章结尾悬念',
+    '7. continuity_from_prev: 如何承接上一章',
     baseStructuredOutputPrompt(['chapters']),
   ].filter(Boolean).join('\n')
 }
 
-export function buildProsePrompt(project: NovelProjectRecord, chapter: Record<string, any>, context: { worldbuilding?: any; characters?: any; outline?: any; prevChapters?: Array<Record<string, any>>; }) {
-  const prevChapterTexts = (context.prevChapters || [])
-    .filter((ch: Record<string, any>) => ch.chapter_text)
-    .slice(-2)
-    .map((ch: Record<string, any>) => `  ${ch.title || '第' + ch.chapter_no + '章'}：${(ch.chapter_text || '').slice(0, 500)}`)
-    .join('\n')
+// ── Prose Agent Prompt (核心修复点) ──
 
-  return [
-    baseNovelSystemPrompt(),
-    '任务：把章节草稿扩写成完整正文。',
-    `作品标题：${project.title}`,
-    `题材：${project.genre || '未知'}`,
-    `风格标签：${joinTags(project.style_tags)}`,
-    `章节标题：${chapter.title || ''}`,
-    `章节编号：${chapter.chapter_no || '?'}`,
-    `章节目标：${chapter.chapter_goal || ''}`,
-    `章节摘要：${chapter.chapter_summary || ''}`,
-    `冲突：${chapter.conflict || ''}`,
-    `结尾钩子：${chapter.ending_hook || ''}`,
-    ...(prevChapterTexts ? [`前置章节正文（用于保持叙事连贯）：\n${prevChapterTexts}`] : []),
-    `世界观：${JSON.stringify(context.worldbuilding || {})}`,
-    `角色：${JSON.stringify(context.characters || {})}`,
-    `总纲：${JSON.stringify(context.outline || {})}`,
-    '要求：输出完整正文、保持角色语气一致、包含场景推进和对话、注意与前置章节的叙事衔接，不要只写摘要。',
-    baseStructuredOutputPrompt(['prose_chapters']),
-  ].filter(Boolean).join('\n')
-}
-
-export function buildReviewPrompt(project: NovelProjectRecord, hint?: string) {
-  return [
-    baseNovelSystemPrompt(),
-    baseContinuityPrompt(),
-    '任务：审查连续性问题并输出修复建议。',
-    `作品标题：${project.title}`,
-    `题材：${project.genre || '未知'}`,
-    hint ? `额外提示：${hint}` : '',
-    baseStructuredOutputPrompt(['issues', 'repair_suggestions']),
-  ].filter(Boolean).join('\n')
-}
-
-export function buildRepairPrompt(
+export function buildProsePrompt(
   project: NovelProjectRecord,
-  reviewIssues: Array<any>,
-  originalContent: {
+  chapterDraft: Record<string, any>,
+  context: {
     worldbuilding?: any;
-    characters?: any[];
-    outlines?: any[];
-    chapters?: any[];
+    characters?: any;
+    outline?: any;
+    prevChapters?: Array<Record<string, any>>;
   },
-) {
+): string {
+  const parts: string[] = []
+
+  parts.push(`任务：创作第 ${chapterDraft.chapter_no || '?'} 章正文`)
+  parts.push(`作品标题：${project.title}`)
+  parts.push(`章节标题：${chapterDraft.title || '无标题'}`)
+
+  // 本章细纲 — 这是正文创作的蓝图
+  const chapterSummary = chapterDraft.chapter_summary || chapterDraft.summary || ''
+  const chapterConflict = chapterDraft.conflict || ''
+  const chapterEndingHook = chapterDraft.ending_hook || ''
+  const chapterScenes = chapterDraft.scenes || chapterDraft.scene_breakdown || []
+  const chapterContinuityFromPrev = chapterDraft.continuity_from_prev || ''
+  const chapterItemsInPlay = chapterDraft.items_in_play || []
+
+  if (chapterSummary) parts.push(`\n【本章细纲】\n核心事件：${chapterSummary}`)
+  if (chapterConflict) parts.push(`冲突焦点：${chapterConflict}`)
+  if (chapterEndingHook) parts.push(`结尾悬念（本章结束时必须到达的状态）：${chapterEndingHook}`)
+  if (chapterScenes.length > 0) {
+    parts.push('场景序列：')
+    for (const scene of chapterScenes) {
+      const loc = typeof scene === 'string' ? scene : (scene.location || scene.title || JSON.stringify(scene))
+      const action = typeof scene === 'object' && scene !== null ? (scene.action || scene.description || '') : ''
+      const tone = typeof scene === 'object' && scene !== null ? (scene.emotional_tone || scene.tone || '') : ''
+      parts.push(`  - ${loc}${action ? ' → ' + action : ''}${tone ? ' [' + tone + ']' : ''}`)
+    }
+  }
+  if (chapterContinuityFromPrev) parts.push(`衔接说明：${chapterContinuityFromPrev}`)
+  if (chapterItemsInPlay.length > 0) parts.push(`涉及物品：${Array.isArray(chapterItemsInPlay) ? chapterItemsInPlay.join('、') : chapterItemsInPlay}`)
+
+  // 世界观设定 — 约束创作的边界
+  if (context.worldbuilding) {
+    const wb = context.worldbuilding
+    const rules = Array.isArray(wb.rules) ? wb.rules.join('；') : (typeof wb.rules === 'string' ? wb.rules : '')
+    const factions = Array.isArray(wb.factions) ? wb.factions.map((f: any) => f.name || f).join('、') : ''
+    parts.push('\n【世界观约束】')
+    if (wb.world_summary) parts.push(`概述：${wb.world_summary}`)
+    if (rules) parts.push(`核心规则：${rules}`)
+    if (factions) parts.push(`势力：${factions}`)
+    // 物品清单
+    if (Array.isArray(wb.items)) {
+      const items = wb.items.map((it: any) => `${it.name}(${it.description || it.ability || ''})`).join('；')
+      if (items) parts.push(`关键物品：${items}`)
+    }
+  }
+
+  // 角色设定 — 每个角色的性格和状态决定了他们的行为
+  if (context.characters) {
+    const chars = Array.isArray(context.characters) ? context.characters : (context.characters.characters || [])
+    if (chars.length > 0) {
+      parts.push('\n【角色设定】')
+      for (const char of chars) {
+        const name = char.name || char.character_name || '未知'
+        const role = char.role || ''
+        const personality = Array.isArray(char.personality) ? char.personality.join('，') : (char.personality || '')
+        const motivation = char.motivation || ''
+        const goal = char.goal || ''
+        const abilities = Array.isArray(char.abilities) ? char.abilities.join('、') : (char.abilities || '')
+        parts.push(`  ${name} [${role}] 性格：${personality} 动机：${motivation} 目标：${goal} 能力：${abilities}`)
+      }
+    }
+  }
+
+  // ========== 最关键的部分：前章结尾状态 ==========
+  if (context.prevChapters && context.prevChapters.length > 0) {
+    // 取最近的一章作为直接衔接
+    const lastChapter = context.prevChapters[context.prevChapters.length - 1]
+    const lastText = lastChapter.chapter_text || ''
+
+    // 提取上一章的结尾状态（最后 800 字）
+    const endingText = lastText.length > 800 ? lastText.slice(-800) : lastText
+
+    // 尝试提取上一章的结尾悬念
+    const lastEndingHook = lastChapter.ending_hook || ''
+
+    parts.push('\n【← 上一章衔接（必须从这里延续）】')
+    parts.push(`上一章标题：第${lastChapter.chapter_no}章「${lastChapter.title || '无标题'}」`)
+
+    if (lastEndingHook) {
+      parts.push(`上一章结尾悬念：${lastEndingHook}`)
+    }
+
+    if (endingText) {
+      parts.push(`上一章结尾场景（最后片段）：\n${endingText}`)
+    }
+
+    // 如果有更早的章节，提供摘要
+    if (context.prevChapters.length > 1) {
+      parts.push('\n更早的章节摘要：')
+      for (const prev of context.prevChapters.slice(0, -1)) {
+        const prevSummary = prev.chapter_summary || prev.summary || ''
+        parts.push(`  第${prev.chapter_no}章「${prev.title}」：${prevSummary || (prev.chapter_text || '').slice(0, 200)}`)
+      }
+    }
+
+    // 关键指令：告诉 LLM 如何衔接
+    parts.push('\n⚠️ 衔接指令：')
+    parts.push('- 本章的第一句话/第一个场景必须自然地延续上一章结尾的状态')
+    parts.push('- 角色在上一章结尾的位置、情绪、手里的物品，在本章开始时必须一致')
+    parts.push('- 不得出现"场景突然切换"而没有过渡')
+    parts.push('- 如果上一章结尾有未完成的动作或对话，本章开头必须先完成它')
+  }
+
+  // 伏笔提示
+  if (chapterDraft.foreshadowing) {
+    parts.push(`\n【本章伏笔】${chapterDraft.foreshadowing}`)
+  }
+
+  // 全局写作约束
+  parts.push(`\n\n【写作约束】`)
+  parts.push(`1. 本章目标篇幅：${project.length_target === 'long' ? '4000-6000字' : project.length_target === 'short' ? '1500-2500字' : '2500-4000字'}`)
+  parts.push(`2. 叙事风格：${(project.style_tags || []).join('、') || '第一人称/第三人称混合叙事'}`)
+  parts.push(`3. 对话与描写的比例：对话驱动，描写为辅，每3段对话至少配1段环境/心理描写`)
+  parts.push(`4. 不得出现 OOC（角色性格偏离）`)
+  parts.push(`5. 不得使用"时间过得很快"、"几天后"之类的跳跃，必须有具体的过渡场景`)
+  parts.push(`6. 本章结尾必须到达细纲中指定的 ending_hook 状态：${chapterEndingHook || '自然结束'}`)
+
+  // 输出格式指令
+  parts.push(`\n\n输出格式：JSON，包含字段 prose_chapters，其中每个元素包含：chapter_no, title, chapter_text, scene_breakdown, continuity_notes`)
+  parts.push(`chapter_text 是完整的正文内容，使用纯文本格式（不要使用 markdown 标题等格式标记）`)
+  parts.push(`scene_breakdown 是场景分解数组，每个元素包含 scene_no, description, characters_present`)
+  parts.push(`continuity_notes 是连续性备注数组，说明本章如何与上一章衔接`)
+  parts.push(`⚠️ 绝对不要返回 "# 第X章：标题" 这样的 markdown 格式，chapter_text 必须直接是正文内容`)
+
+  return parts.join('\n')
+}
+
+// ── Platform Fit Agent Prompt ──
+
+export function buildPlatformFitPrompt(
+  project: NovelProjectRecord,
+  context: { plan?: any; review?: any; prose?: any; chapters?: any[] },
+): string {
+  const chapters = context.chapters || []
   return [
-    baseNovelSystemPrompt(),
-    baseContinuityPrompt(),
-    '任务：根据审校指出的具体问题，逐一修复并输出修复后的完整内容。',
-    '你必须对每个问题给出修复后的原文（不是只加后缀），修复内容必须保持原有风格与叙事连贯性。',
+    '任务：评估当前小说的平台适配度和市场潜力。',
     `作品标题：${project.title}`,
-    `题材：${project.genre || '未知'}`,
-    `风格标签：${joinTags(project.style_tags)}`,
-    `审校问题（${reviewIssues.length} 个）：`,
-    reviewIssues.map((issue, i) => `  ${i + 1}. ${typeof issue === 'string' ? issue : JSON.stringify(issue)}`).join('\n') || '  （无具体问题）',
-    `当前世界观：${JSON.stringify(originalContent.worldbuilding || {})}`,
-    `当前角色：${JSON.stringify(originalContent.characters || [])}`,
-    `当前大纲：${JSON.stringify(originalContent.outlines || [])}`,
-    `当前章节（${(originalContent.chapters || []).length} 章）：`,
-    (originalContent.chapters || []).map((ch) => `  第${ch.chapter_no || '?'}章「${ch.title || ''}」：${(ch.chapter_summary || ch.chapter_text || '').slice(0, 200)}`).join('\n'),
-    '输出要求：对每个问题输出修复后的完整内容（章节正文、大纲摘要等），不要只写"已修订"。',
-    baseStructuredOutputPrompt(['issues_fixed', 'repaired_chapters', 'repaired_outlines', 'repaired_characters', 'repaired_worldbuilding'] as const),
+    project.genre ? `题材：${project.genre}` : '',
+    `当前章节数：${chapters.length}`,
+    `已产出正文章节：${chapters.filter((c: any) => c.chapter_text).length}`,
+    '',
+    '请评估以下维度：',
+    '1. 题材在目标平台的匹配度',
+    '2. 目标受众的精准度',
+    '3. 开篇抓力（前3章的吸引力）',
+    '4. 节奏和连载友好度',
+    '5. 每章的质量检查（开头、冲突、悬念、留存）',
+    '',
+    '输出 JSON 格式：',
+    baseStructuredOutputPrompt(['is_platform_ready', 'score', 'platform_type', 'market_positioning', 'strengths', 'risks', 'blocking_issues', 'recommendations', 'launch_advice', 'chapter_checks']),
   ].filter(Boolean).join('\n')
 }
 
-export function buildMarketReviewPrompt(project: NovelProjectRecord, plan: Record<string, any>, review: Record<string, any>, prose: Record<string, any>) {
-  return [
-    baseNovelSystemPrompt(),
-    '任务：评估作品是否适合小说平台连载与上架。',
-    '请从市场适配、开篇抓力、连载续航、角色记忆点、平台风险五个维度给出判断。',
-    `作品标题：${project.title}`,
-    `题材：${project.genre || '未知'}`,
-    `子题材：${joinTags(project.sub_genres)}`,
-    `风格标签：${joinTags(project.style_tags)}`,
-    `商业标签：${joinTags(project.commercial_tags)}`,
-    `规划结果：${JSON.stringify(plan || {})}`,
-    `连续性审校：${JSON.stringify(review || {})}`,
-    `正文样本：${JSON.stringify(prose || {})}`,
-    '输出要求：is_market_ready, score(0-100), strengths, risks, platform_fit, recommendations',
-    baseStructuredOutputPrompt(['is_market_ready', 'score', 'strengths', 'risks', 'platform_fit', 'recommendations'] as const),
-  ].filter(Boolean).join('\n')
-}
+// ── Novel Seed (Fallback Content) ──
 
-export function buildPlatformFitPrompt(project: NovelProjectRecord, context: { plan?: Record<string, any>; review?: Record<string, any> | null; prose?: Record<string, any>; chapters?: Array<Record<string, any>> } = {}) {
-  const firstThreeChapters = Array.isArray(context.chapters) ? context.chapters.slice(0, 3) : []
-  return [
-    baseNovelSystemPrompt(),
-    '任务：判断作品是否适合小说平台连载与上架。',
-    '请从商业化、平台化、连载节奏、开篇抓力、冲突推进、角色记忆点、风险控制几个维度进行判断。',
-    `作品标题：${project.title}`,
-    `题材：${project.genre || '未知'}`,
-    `子题材：${joinTags(project.sub_genres)}`,
-    `风格标签：${joinTags(project.style_tags)}`,
-    `商业标签：${joinTags(project.commercial_tags)}`,
-    `长度目标：${project.length_target || '未知'}`,
-    `目标读者：${project.target_audience || '未知'}`,
-    `规划结果：${JSON.stringify(context.plan || {})}`,
-    `连续性审校：${JSON.stringify(context.review || {})}`,
-    `正文样本：${JSON.stringify(context.prose || {})}`,
-    `前3章样本：${JSON.stringify(firstThreeChapters)}`,
-    '输出要求：is_platform_ready, score, platform_type, market_positioning, strengths, risks, blocking_issues, recommendations, launch_advice, chapter_checks',
-    baseStructuredOutputPrompt(['is_platform_ready', 'score', 'platform_type', 'market_positioning', 'strengths', 'risks', 'blocking_issues', 'recommendations', 'launch_advice', 'chapter_checks'] as const),
-  ].filter(Boolean).join('\n')
+export function buildNovelSeed(project: NovelProjectRecord, prompt: string) {
+  return {
+    world_summary: '末世后的废墟城市，循环系统持续重置一切，但因果偏差让每次重置都不完全一致。',
+    rules: ['循环会在固定时间重置所有事物', '但因果偏差可能导致每次重置不完全一致', '只有少数人会保留模糊的记忆'],
+    factions: [{ name: '管理机构', role: '秩序维持者' }, { name: '幸存者联盟', role: '反抗势力' }],
+    locations: [{ name: '事件现场', type: '起点' }],
+    systems: [{ name: '循环系统', description: '重置与因果偏差机制' }],
+    timeline_anchor: '故事起点',
+    known_unknowns: ['为什么会重启', '谁在操控世界'],
+    outline: { title: '第一卷', summary: '从废墟中觉醒，寻找循环的真相', hook: '循环的秘密远不止表面', chapter_count: 10 },
+    volumeOutlines: [{ title: '第一卷：觉醒', summary: '主角从废墟中恢复意识，发现自己被困在某种循环之中。通过与其他幸存者的接触，逐渐了解循环的真相。', hook: '循环的秘密远不止表面', chapter_count: 10 }],
+    chapters: [
+      { chapter_no: 1, title: '第一章：废墟', chapter_summary: '主角从废墟中醒来，失去记忆，发现自己身处末世废墟。', conflict: '主角与未知环境的对抗', ending_hook: '废墟中发现异常的循环迹象' },
+      { chapter_no: 2, title: '第二章：线索', chapter_summary: '主角跟随线索探索废墟，遇到其他幸存者。', conflict: '幸存者之间的信任危机', ending_hook: '发现循环的关键证据' },
+      { chapter_no: 3, title: '第三章：真相的碎片', chapter_summary: '主角逐渐拼凑出循环的真相，但每接近真相就更危险。', conflict: '接近真相与生存之间的抉择', ending_hook: '主角发现自己也是循环的一部分' },
+    ],
+    characters: [
+      { name: '沈夜', role: '主角', personality: ['冷静', '谨慎', '好奇心强'], motivation: '找回记忆', goal: '找出循环的真相', abilities: ['战术素养', '快速学习'], backstory: '曾参与某个秘密项目，记忆被清除', relationships: {}, arc_hint: '从被动接受到主动反抗' },
+    ],
+    prompt,
+    chapter_outlines: [
+      { chapter_no: 1, title: '第一章：废墟', summary: '主角从废墟中醒来', conflict: '与未知环境对抗', ending_hook: '发现循环迹象' },
+      { chapter_no: 2, title: '第二章：线索', summary: '跟随线索探索', conflict: '信任危机', ending_hook: '发现关键证据' },
+      { chapter_no: 3, title: '第三章：真相的碎片', summary: '拼凑真相', conflict: '真相与生存的抉择', ending_hook: '发现自己是循环的一部分' },
+    ],
+    foreshadowing_plan: [
+      { plant_at: 1, payoff_at: 5, description: '废墟中的异常时间痕迹' },
+      { plant_at: 2, payoff_at: 8, description: '幸存者之间的记忆矛盾' },
+    ],
+  }
 }

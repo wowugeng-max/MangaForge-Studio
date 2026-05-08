@@ -1,5 +1,7 @@
 import type { Express } from 'express'
 import { readProviders, writeProviders, type ProviderRecord } from '../provider-store'
+import { readKeys, writeKeys, type APIKeyRecord } from '../key-store'
+import { readModels, writeModels } from '../model-store'
 
 function normalizeProviderInput(body: any, fallback?: ProviderRecord): ProviderRecord {
   return {
@@ -57,8 +59,17 @@ export function registerProviderRoutes(app: Express, getWorkspace: () => string)
   app.delete(['/providers/:id', '/api/providers/:id'], async (req, res) => {
     try {
       const activeWorkspace = getWorkspace()
-      const providers = await readProviders(activeWorkspace)
       const id = String(req.params.id)
+      // 检查是否有 Key 引用此 Provider
+      const keys = await readKeys(activeWorkspace)
+      const refs = keys.filter(k => k.provider === id)
+      if (refs.length > 0) {
+        return res.status(409).json({
+          error: `无法删除：该厂商下还有 ${refs.length} 个 API Key 引用（${refs.map(k => `#${k.id}`).join(', ')}）。请先删除或转移这些 Key。`,
+        })
+      }
+      // 无引用，安全删除
+      const providers = await readProviders(activeWorkspace)
       await writeProviders(activeWorkspace, providers.filter(provider => provider.id !== id))
       res.json({ ok: true })
     } catch (error) {
