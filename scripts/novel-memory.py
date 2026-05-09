@@ -600,7 +600,8 @@ def main():
     # store
     p_store = sub.add_parser("store")
     p_store.add_argument("--project", type=int, required=True)
-    p_store.add_argument("--content", required=True)
+    p_store.add_argument("--content", default=None, help="Content string (use --content-file for long text)")
+    p_store.add_argument("--content-file", default=None, help="Path to file containing content")
     p_store.add_argument("--category", default="general")
     p_store.add_argument("--tags", default="")
     p_store.add_argument("--chapter", type=int, default=None)
@@ -625,7 +626,8 @@ def main():
     # store-facts
     p_sf = sub.add_parser("store-facts")
     p_sf.add_argument("--project", type=int, required=True)
-    p_sf.add_argument("--content", required=True)
+    p_sf.add_argument("--content", default=None, help="Content string (use --content-file for long text)")
+    p_sf.add_argument("--content-file", default=None, help="Path to file containing content")
     p_sf.add_argument("--source-id", default=None)
     p_sf.add_argument("--chapter", type=int, default=None)
 
@@ -642,7 +644,8 @@ def main():
     # verify
     p_verify = sub.add_parser("verify")
     p_verify.add_argument("--project", type=int, required=True)
-    p_verify.add_argument("--content", required=True)
+    p_verify.add_argument("--content", default=None, help="Content string (use --content-file for long text)")
+    p_verify.add_argument("--content-file", default=None, help="Path to file containing content")
     p_verify.add_argument("--category", default="general")
 
     # reconcile

@@ -1,4 +1,5 @@
 import { readFile, writeFile } from 'fs/promises'
+import { readFileSync } from 'fs'
 import { join } from 'path'
 
 export type ModelRecord = {
@@ -21,7 +22,24 @@ export function getModelsPath(activeWorkspace: string) {
 
 export async function readModels(activeWorkspace: string): Promise<ModelRecord[]> {
   try {
-    return JSON.parse(await readFile(getModelsPath(activeWorkspace), 'utf8')) as ModelRecord[]
+    const data = JSON.parse(await readFile(getModelsPath(activeWorkspace), 'utf8')) as ModelRecord[]
+    // Guard: ensure we always return an array, never undefined/null
+    return Array.isArray(data) ? data : []
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Sync wrapper for readModels — ensures callers get a proper array.
+ * IMPORTANT: readModels is async; calling it without await returns a Promise,
+ * and Promise.find() will throw "readModels().find is not a function".
+ * Always use: const models = await readModels(workspace)
+ */
+export function readModelsSync(activeWorkspace: string): ModelRecord[] {
+  try {
+    const data = JSON.parse(readFileSync(getModelsPath(activeWorkspace), 'utf8')) as ModelRecord[]
+    return Array.isArray(data) ? data : []
   } catch {
     return []
   }

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Optional, List
 
 from pydantic import BaseModel, Field
 
+
+# ── Project ──────────────────────────────────────────────────────────
 
 class NovelProjectBase(BaseModel):
     title: str
@@ -41,6 +43,8 @@ class NovelProjectRead(NovelProjectBase):
         from_attributes = True
 
 
+# ── Worldbuilding ────────────────────────────────────────────────────
+
 class NovelWorldbuildingBase(BaseModel):
     project_id: int
     world_summary: str = ""
@@ -76,6 +80,8 @@ class NovelWorldbuildingRead(NovelWorldbuildingBase):
     class Config:
         from_attributes = True
 
+
+# ── Character ────────────────────────────────────────────────────────
 
 class NovelCharacterBase(BaseModel):
     project_id: int
@@ -125,6 +131,8 @@ class NovelCharacterRead(NovelCharacterBase):
         from_attributes = True
 
 
+# ── Outline ──────────────────────────────────────────────────────────
+
 class NovelOutlineBase(BaseModel):
     outline_type: str = "master"
     parent_id: Optional[int] = None
@@ -165,8 +173,11 @@ class NovelOutlineRead(NovelOutlineBase):
         from_attributes = True
 
 
+# ── Chapter ──────────────────────────────────────────────────────────
+
 class NovelChapterBase(BaseModel):
     project_id: int
+    outline_id: Optional[int] = None
     chapter_no: int
     title: str
     chapter_goal: str = ""
@@ -207,11 +218,114 @@ class NovelChapterRead(NovelChapterBase):
         from_attributes = True
 
 
+# ── Chapter Version ──────────────────────────────────────────────────
+
+class NovelChapterVersionRead(BaseModel):
+    id: int
+    chapter_id: int
+    version_no: int
+    chapter_text: str = ""
+    scene_breakdown: list[dict[str, Any]] = Field(default_factory=list)
+    continuity_notes: list[str] = Field(default_factory=list)
+    source: str = ""
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class NovelChapterVersionCreate(BaseModel):
+    chapter_id: int
+    version_no: int
+    chapter_text: str = ""
+    scene_breakdown: list[dict[str, Any]] = Field(default_factory=list)
+    continuity_notes: list[str] = Field(default_factory=list)
+    source: str = ""
+
+
+# ── Rollback ─────────────────────────────────────────────────────────
+
+class NovelRollbackRequest(BaseModel):
+    version_id: int
+
+
+# ── Generation / Agent ───────────────────────────────────────────────
+
 class NovelGenerationRequest(BaseModel):
     project_id: int
     prompt: str = ""
     payload: dict[str, Any] = Field(default_factory=dict)
 
+
+class AgentExecutionRequest(BaseModel):
+    """Agent 链执行请求 — 前端 3 步写作流程的核心接口"""
+    project_id: int
+    model_id: Optional[int] = None
+    agents: list[str] = Field(default_factory=list)
+    prompt: str = ""
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class AgentExecutionResult(BaseModel):
+    agent_id: str
+    step: int
+    success: bool
+    output: Any = None
+    error: str = ""
+    outputSource: str = "model"
+    fallbackUsed: bool = False
+
+
+class AgentExecutionResponse(BaseModel):
+    project_id: int
+    results: list[AgentExecutionResult] = Field(default_factory=list)
+
+
+class ProseGenerationRequest(BaseModel):
+    """单章正文生成请求"""
+    project_id: int
+    model_id: Optional[int] = None
+    prompt: str = ""
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class RepairRequest(BaseModel):
+    """连续性修复请求"""
+    project_id: int
+    model_id: Optional[int] = None
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class RepairResponse(BaseModel):
+    project_id: int
+    issues_found: int = 0
+    issues_fixed: int = 0
+    details: list[dict[str, Any]] = Field(default_factory=list)
+
+
+# ── Review ───────────────────────────────────────────────────────────
+
+class NovelReviewBase(BaseModel):
+    project_id: int
+    review_type: str = ""  # market_review, platform_fit, continuity_check, ...
+    summary: str = ""
+    issues: list[str] = Field(default_factory=list)
+    payload: str = ""  # JSON string for extra data
+
+
+class NovelReviewCreate(NovelReviewBase):
+    pass
+
+
+class NovelReviewRead(NovelReviewBase):
+    id: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# ── Run Record ───────────────────────────────────────────────────────
 
 class NovelRunRecordRead(BaseModel):
     id: int

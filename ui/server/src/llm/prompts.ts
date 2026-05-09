@@ -94,33 +94,72 @@ export function buildCharacterPrompt(project: NovelProjectRecord, task: string):
 
 // ── Outline Agent Prompt ──
 
-export function buildOutlinePrompt(project: NovelProjectRecord, task: string): string {
-  return [
-    `任务：${task}`,
-    `作品标题：${project.title}`,
-    project.synopsis ? `简介：${project.synopsis}` : '',
-    '',
-    '请构建完整的故事大纲，包括：',
-    '1. master_outline: 整体故事走向概述',
-    '2. volume_outlines: 分卷/分段大纲，每卷包含：',
-    '   - title: 卷标题',
-    '   - summary: 卷概述',
-    '   - hook: 卷的核心冲突/悬念',
-    '   - chapter_count: 预估章节数',
-    '3. chapter_outlines: 每章简要大纲，包含：',
-    '   - chapter_no: 章节号',
-    '   - title: 章节标题',
-    '   - summary: 本章核心事件',
-    '   - conflict: 本章主要冲突',
-    '   - ending_hook: 本章结尾悬念（用于衔接下一章）',
-    '4. foreshadowing_plan: 伏笔计划',
-    '   - plant_at: 在哪一章埋下伏笔',
-    '   - payoff_at: 在哪一章回收',
-    '   - description: 伏笔描述',
-    '',
-    '关键要求：章节之间必须有清晰的因果链条，前一章的 ending_hook 必须是下一章的起点。',
-    baseStructuredOutputPrompt(['master_outline', 'volume_outlines', 'chapter_outlines', 'foreshadowing_plan']),
-  ].filter(Boolean).join('\n')
+export interface OutlinePromptParams {
+  task?: string
+  chapterCount?: number
+  userOutline?: string          // 用户自定义大纲文本
+  continueFrom?: number          // 从第几章之后继续生成
+  existingChapters?: Array<any>  // 已有的章节数据（续写用）
+}
+
+export function buildOutlinePrompt(project: NovelProjectRecord, params: string | OutlinePromptParams): string {
+  const opts = typeof params === 'string' ? { task: params } : params
+  const parts: string[] = []
+
+  parts.push(`任务：${opts.task || '生成大纲'}`)
+  parts.push(`作品标题：${project.title}`)
+  if (project.synopsis) parts.push(`简介：${project.synopsis}`)
+  if (project.genre) parts.push(`题材：${project.genre}`)
+  if (project.style_tags?.length) parts.push(`风格：${project.style_tags.join('、')}`)
+
+  // 用户自定义大纲 — 在此基础上扩展
+  if (opts.userOutline && opts.userOutline.trim()) {
+    parts.push(`\n【用户提供的大纲（请在此基础上扩展完善）】`)
+    parts.push(opts.userOutline.trim())
+    parts.push('请保留用户大纲的核心情节和方向，将其扩展为完整的故事大纲。')
+  }
+
+  // 章节数量控制
+  if (opts.chapterCount && opts.chapterCount > 0) {
+    parts.push(`\n【章节数量要求】`)
+    parts.push(`请生成恰好 ${opts.chapterCount} 章的粗略章纲。`)
+  }
+
+  // 续写模式：从已有章节继续
+  if (opts.continueFrom && opts.continueFrom > 0) {
+    parts.push(`\n【续写模式】`)
+    parts.push(`前 ${opts.continueFrom} 章已经存在，请从第 ${opts.continueFrom + 1} 章开始继续生成。`)
+    if (opts.existingChapters && opts.existingChapters.length > 0) {
+      parts.push('已有章节摘要（续写必须基于此延续）：')
+      for (const ch of opts.existingChapters) {
+        parts.push(`  第${ch.chapter_no}章「${ch.title}」：${ch.chapter_summary || (ch.chapter_text || '').slice(0, 300)}`)
+        if (ch.ending_hook) parts.push(`    结尾钩子：${ch.ending_hook}`)
+      }
+    }
+  }
+
+  parts.push('')
+  parts.push('请构建完整的故事大纲，包括：')
+  parts.push('1. master_outline: 整体故事走向概述（对象：title, summary, hook）')
+  parts.push('2. volume_outlines: 分卷/分段大纲，每卷包含：')
+  parts.push('   - title: 卷标题')
+  parts.push('   - summary: 卷概述')
+  parts.push('   - hook: 卷的核心冲突/悬念')
+  parts.push('   - chapter_count: 预估章节数')
+  parts.push('3. chapter_outlines: 每章简要大纲，包含：')
+  parts.push('   - chapter_no: 章节号')
+  parts.push('   - title: 章节标题')
+  parts.push('   - summary: 本章核心事件')
+  parts.push('   - conflict: 本章主要冲突')
+  parts.push('   - ending_hook: 本章结尾悬念（用于衔接下一章）')
+  parts.push('4. foreshadowing_plan: 伏笔计划')
+  parts.push('   - plant_at: 在哪一章埋下伏笔')
+  parts.push('   - payoff_at: 在哪一章回收')
+  parts.push('   - description: 伏笔描述')
+  parts.push('')
+  parts.push('关键要求：章节之间必须有清晰的因果链条，前一章的 ending_hook 必须是下一章的起点。')
+  parts.push(baseStructuredOutputPrompt(['master_outline', 'volume_outlines', 'chapter_outlines', 'foreshadowing_plan']))
+  return parts.filter(Boolean).join('\n')
 }
 
 // ── Detail Outline Agent Prompt（细纲分化）──

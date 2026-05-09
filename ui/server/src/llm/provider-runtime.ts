@@ -177,9 +177,12 @@ function isRetryable(status: number, error?: string): boolean {
 /**
  * Send LLM request with retry logic.
  * Reference: Claude Code's withRetry.ts pattern:
- *   - Exponential backoff (1s, 2s, 4s, ...)
- *   - Max retries configurable
- *   - Only retry on retryable errors
+ *   - Base delay 500ms with exponential backoff + 25% jitter
+ *   - Max retries configurable (default 5 for foreground requests)
+ *   - Timeout: 600s default (Claude Code foreground), env override LLM_TIMEOUT_MS
+ *   - Only retry on retryable errors (429, 5xx, network, 524)
+ *   - AbortController per-attempt (fresh signal each retry)
+ *   - Chunked keep-alive: log progress every 30s for long requests
  */
 async function postProviderJson<T = any>(
   selection: RuntimeModelSelection,
@@ -190,29 +193,42 @@ async function postProviderJson<T = any>(
     ? toAnthropicBody(request, selection)
     : toOpenAIBody(request, selection)
   const headers = buildHeaders(selection)
-  const maxRetries = 3
-  const timeoutMs = Number(process.env.LLM_TIMEOUT_MS || 120000)
+  const maxRetries = Number(process.env.LLM_MAX_RETRIES || 5)
+  const timeoutMs = Number(process.env.LLM_TIMEOUT_MS || 600000) // 600s default, matches Claude Code foreground
   const keyMask = (selection.key.key || '').slice(0, 8) + '...'
+  const heartbeatInterval = 30_000 // log progress every 30s
 
   console.log(
-    `[provider-runtime] POST ${url} | model: ${selection.model.model_name} | format: ${selection.apiFormat} | key: ${keyMask}`,
+    `[provider-runtime] POST ${url} | model: ${selection.model.model_name} | format: ${selection.apiFormat} | key: ${keyMask} | timeout=${timeoutMs}ms | retries=${maxRetries}`,
   )
 
   let lastError: string | null = null
   let lastStatus = 0
 
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    if (attempt > 0) {
-      const delay = 1000 * Math.pow(2, attempt - 1)
-      console.log(`[provider-runtime] Attempt ${attempt}/${maxRetries}, retrying in ${delay}ms...`)
+  for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
+    if (attempt > 1) {
+      // Claude Code style: exponential backoff with jitter
+      const baseDelay = Math.min(500 * Math.pow(2, attempt - 2), 32000)
+      const jitter = Math.random() * 0.25 * baseDelay
+      const delay = baseDelay + jitter
+      console.log(`[provider-runtime] Attempt ${attempt}/${maxRetries + 1}, retrying in ${Math.round(delay)}ms...`)
       await new Promise(resolve => setTimeout(resolve, delay))
     }
 
     const controller = new AbortController()
+    const startTime = Date.now()
+    let heartbeatTimer: NodeJS.Timeout | null = null
     const timeout = setTimeout(() => {
       controller.abort()
-      console.warn(`[provider-runtime] ⏰ Request timed out after ${timeoutMs}ms`)
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(0)
+      console.warn(`[provider-runtime] ⏰ Request timed out after ${timeoutMs}ms (elapsed ${elapsed}s)`)
     }, timeoutMs)
+
+    // Heartbeat: log progress every 30s so long requests don't look dead
+    heartbeatTimer = setInterval(() => {
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(0)
+      console.log(`[provider-runtime] ♻️  Still waiting... ${elapsed}s elapsed (attempt ${attempt}/${maxRetries + 1})`)
+    }, heartbeatInterval)
 
     let response: Response
     try {
@@ -227,20 +243,23 @@ async function postProviderJson<T = any>(
       lastError = errMsg
       console.error(`[provider-runtime] Network error: ${errMsg}`)
 
+      // Claude Code: AbortError from timeout is retryable
       if (!isRetryable(0, errMsg)) {
         throw new Error(`Network error (non-retryable): ${errMsg}`)
       }
       continue
     } finally {
       clearTimeout(timeout)
+      if (heartbeatTimer) clearInterval(heartbeatTimer)
     }
 
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1)
     lastStatus = response.status
     const text = await response.text()
 
     // Log response for debugging
     console.log(
-      `[provider-runtime] Response: ${response.status} | ${selection.model.model_name} | body preview: ${text.slice(0, 300)}`,
+      `[provider-runtime] Response: ${response.status} | ${selection.model.model_name} | body preview: ${text.slice(0, 300)} | ${elapsed}s`,
     )
 
     // Check for retryable status codes
@@ -255,6 +274,11 @@ async function postProviderJson<T = any>(
       // 400 Bad Request — likely a prompt/model issue, don't retry
       if (response.status === 400) {
         throw new Error(`Bad request (400): ${text.slice(0, 500)}`)
+      }
+
+      // 404 Not Found — wrong endpoint, don't retry
+      if (response.status === 404) {
+        throw new Error(`Endpoint not found (404): ${text.slice(0, 500)}`)
       }
 
       if (!isRetryable(response.status)) {

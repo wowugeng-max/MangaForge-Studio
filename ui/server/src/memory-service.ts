@@ -142,7 +142,7 @@ function cachePythonPath(p: string): void {
   } catch { /* non-fatal */ }
 }
 
-// ─── Bootstrap ────────────────────────────────────────────────────────
+// ─── Bootstrap ────────────────────────────────────────────────
 
 let _bootstrapDone = false
 let _mempalaceAvailable = false
@@ -182,26 +182,64 @@ export async function bootstrapMempalace(): Promise<boolean> {
   return _mempalaceAvailable
 }
 
-// ─── Low-level command runner ─────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+//  Auto-init: ensure DB tables exist before any operation
+// ═══════════════════════════════════════════════════════════════
+
+let _dbInitialized = false
+
+async function ensureDbInit(): Promise<void> {
+  if (_dbInitialized) return
+  const script = join(SCRIPT_DIR, 'novel-memory.py')
+  if (!existsSync(script)) { _dbInitialized = true; return } // nothing to init
+
+  try {
+    await execFileAsync(pythonPath(), [script, 'init', '--palace-dir', PALACE_DIR_ENV], {
+      env: { ...process.env, MEMPALACE_DIR: PALACE_DIR_ENV },
+      timeout: 10000,
+      maxBuffer: 1024 * 1024,
+    })
+    _dbInitialized = true
+    console.log('[memory-service] DB auto-initialized (tables created)')
+  } catch (error) {
+    // If init fails, mark as initialized anyway so we don't keep retrying.
+    // Individual commands will handle their own errors.
+    console.warn('[memory-service] DB init failed (will retry on next command):', String(error).slice(0, 100))
+    _dbInitialized = true
+  }
+}
+
+// ─── Low-level command runner ─────────────────────────────────
 
 async function runMemoryCommand(args: string[]): Promise<any> {
   const script = join(SCRIPT_DIR, 'novel-memory.py')
+  if (!existsSync(script)) {
+    return { status: 'error', error: 'novel-memory.py not found' }
+  }
+
+  // Ensure DB tables exist before any operation
+  await ensureDbInit()
+
   try {
-    const { stdout } = await execFileAsync(pythonPath(), [script, ...args], {
+    const result = await execFileAsync(pythonPath(), [script, ...args], {
       env: { ...process.env, MEMPALACE_DIR: PALACE_DIR_ENV },
       timeout: 15000,
       maxBuffer: 1024 * 1024,
     })
-    return JSON.parse(stdout.trim())
-  } catch (error) {
-    console.error(`[memory-service] command failed: ${args.slice(0, 3).join(' ')} … → ${String(error).slice(0, 120)}`)
-    return { status: 'error', error: String(error).slice(0, 100) }
+    return JSON.parse(result.stdout.trim())
+  } catch (error: any) {
+    const stderr = error.stderr || ''
+    const stdout = error.stdout || ''
+    // Log more context for debugging
+    const detail = stderr ? stderr.slice(0, 200).replace(/\n/g, ' ') : String(error).slice(0, 120)
+    console.error(`[memory-service] command failed: ${args.slice(0, 3).join(' ')} → ${detail}${stdout ? ' | stdout: ' + stdout.slice(0, 100) : ''}`)
+    return { status: 'error', error: detail, stdout, stderr }
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 //  1. 存入 — Store (memories + facts)
-// ═══════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 
 export async function initMemoryPalace(): Promise<void> {
   try {
@@ -255,9 +293,9 @@ export async function storeFacts(
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 //  2. 提取 — Recall (memories + facts)
-// ═══════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 
 /** Recall memories by semantic similarity */
 export async function recallMemories(
@@ -337,9 +375,9 @@ export async function listAllFacts(projectId: number): Promise<FactRecord[]> {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 //  3. 核对 — Verify (content consistency check)
-// ═══════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 
 /**
  * Verify a piece of content against stored memories & facts.
@@ -376,9 +414,9 @@ export async function verifyContent(
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 //  4. 连贯性修复 — Reconcile (find & flag contradictions)
-// ═══════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 
 /**
  * Reconcile all facts for a project — find contradictions where
@@ -457,9 +495,9 @@ export async function dumpProject(projectId: number): Promise<any> {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 //  Memory Injection — 综合提取 (跨维度召回 + 事实查询 + 矛盾检测)
-// ═══════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 
 /**
  * Build a comprehensive memory injection block for the Agent prompt.
@@ -593,9 +631,91 @@ export async function buildMemoryInjection(
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+//  核对 + 存储 + 修复 — verifyAndStoreAgentOutput 闭环
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * 闭环：Agent 输出 → store(存入) → verify(核对) → reconcile(扫描矛盾)
+ *
+ * 在每个 Agent 执行后调用，发现冲突自动记录到连续性日志。
+ */
+export async function verifyAndStoreAgentOutput(
+  projectId: number,
+  agentId: string,
+  output: any,
+): Promise<{
+  storedIds: string[]
+  verificationIssues: Array<any>
+  contradictions: Array<any>
+}> {
+  const result = {
+    storedIds: [] as string[],
+    verificationIssues: [] as Array<any>,
+    contradictions: [] as Array<any>,
+  }
+
+  try {
+    // Step 1: 存入
+    result.storedIds = await storeAgentOutput(projectId, agentId, output)
+
+    // Step 2: 核对 — 仅 prose-agent 和 detail-outline-agent 需要核对正文/细纲
+    if (agentId === 'prose-agent' && Array.isArray(output.prose_chapters)) {
+      for (const pc of output.prose_chapters) {
+        if (pc.chapter_text) {
+          const verifyResult = await verifyContent(projectId, pc.chapter_text, 'prose')
+          if (!verifyResult.is_consistent && verifyResult.issues.length > 0) {
+            result.verificationIssues.push(...verifyResult.issues)
+            // 将核对问题写入连续性日志
+            for (const issue of verifyResult.issues) {
+              await logContinuityIssue(
+                projectId,
+                'verify_conflict',
+                `${issue.description || issue.entity}: ${issue.new_value} vs ${issue.existing_value}`,
+                issue.severity || 'medium',
+                typeof pc.chapter_no === 'number' ? pc.chapter_no : undefined,
+                null,
+              )
+            }
+          }
+        }
+      }
+    }
+
+    if (agentId === 'detail-outline-agent' && Array.isArray(output.detail_chapters)) {
+      const detailText = JSON.stringify(output.detail_chapters.slice(0, 3))
+      const verifyResult = await verifyContent(projectId, detailText, 'plot')
+      if (!verifyResult.is_consistent && verifyResult.issues.length > 0) {
+        result.verificationIssues.push(...verifyResult.issues)
+        for (const issue of verifyResult.issues) {
+          await logContinuityIssue(
+            projectId,
+            'verify_conflict',
+            issue.description || JSON.stringify(issue),
+            issue.severity || 'medium',
+            issue.chapter_no || undefined,
+            null,
+          )
+        }
+      }
+    }
+
+    // Step 3: 全局矛盾扫描
+    const reconcileResult = await reconcileFacts(projectId)
+    if (reconcileResult.contradiction_count > 0) {
+      result.contradictions = reconcileResult.contradictions
+    }
+
+  } catch (error) {
+    console.error(`[memory-service] verifyAndStoreAgentOutput failed for ${agentId}:`, String(error).slice(0, 200))
+  }
+
+  return result
+}
+
+// ═══════════════════════════════════════════════════════════════
 //  Agent 输出存储 — 结构化存入记忆 + 事实
-// ═══════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 
 /**
  * Auto-store key information after Agent execution.

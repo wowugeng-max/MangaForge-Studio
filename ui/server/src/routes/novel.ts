@@ -133,7 +133,13 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
     }
   }
 
-  /** P1-1: 支持部分 Agent 执行 — 传 agents 数组则只执行指定 Agent */
+  /** P1-1: 支持部分 Agent 执行 — 传 agents 数组则只执行指定 Agent
+      新增 payload 参数：
+        - chapterCount: 细纲生成章节数
+        - continueFrom: 从第几章后继续（续写）
+        - userOutline: 用户提供的大纲文本（在此基础上扩展）
+        - existingChapters: 已有章节数据（续写时自动读取，也可手动传入）
+   */
   app.post('/api/novel/agents/execute', async (req, res) => {
     try {
       const activeWorkspace = getWorkspace();
@@ -141,12 +147,30 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
       const project = await getProject(activeWorkspace, projectId);
       if (!project) return res.status(404).json({ error: 'project not found' });
       const agentFilter = Array.isArray(req.body.agents) && req.body.agents.length > 0 ? req.body.agents : undefined;
+      // 读取 payload 参数
+      const chapterCount = req.body.payload?.chapterCount || req.body.chapterCount || undefined
+      const continueFrom = req.body.payload?.continueFrom || req.body.continueFrom || undefined
+      const userOutline = req.body.payload?.userOutline || req.body.userOutline || undefined
+      // 如果是续写模式，自动读取已有章节
+      let existingChaptersData: any[] = req.body.payload?.existingChapters || req.body.existingChapters || []
+      if (continueFrom && continueFrom > 0) {
+        const allChapters = await listNovelChapters(activeWorkspace, projectId)
+        existingChaptersData = allChapters.filter(ch => ch.chapter_no <= continueFrom).map(ch => ({
+          chapter_no: ch.chapter_no,
+          title: ch.title,
+          chapter_summary: ch.chapter_summary || '',
+          ending_hook: ch.ending_hook || '',
+          chapter_text: ch.chapter_text?.slice(0, 2000) || '',
+        }))
+      }
       const execution = await executeNovelAgentChain(
         project,
         String(req.body.prompt || ''),
         activeWorkspace,
         Number(req.body.model_id || 0) || undefined,
         agentFilter,
+        { chapterCount, continueFrom, userOutline, existingChapters: existingChaptersData },
+        req.body.payload || {},
       );
       const seed = buildNovelSeed(project, String(req.body.prompt || ''));
 

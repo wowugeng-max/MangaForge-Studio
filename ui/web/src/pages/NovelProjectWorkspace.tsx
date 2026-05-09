@@ -2,13 +2,14 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Badge, Button, Card, Col, Descriptions, Divider, Drawer, Form, Input,
   InputNumber, message, Modal, Popconfirm, Progress, Row, Select, Space,
-  Tabs, Tag, Tree, Typography, Tooltip,
+  Tabs, Tag, Tree, Typography, Tooltip, Switch, Collapse,
 } from 'antd'
 import {
   ArrowLeftOutlined, BarChartOutlined, DeleteOutlined, EditOutlined,
   FileTextOutlined, HistoryOutlined, PlayCircleOutlined, ReloadOutlined,
   RocketOutlined, SafetyOutlined, SaveOutlined, CheckCircleOutlined,
   SyncOutlined, ClockCircleOutlined, UnorderedListOutlined,
+  ThunderboltOutlined, BookOutlined, InteractionOutlined,
 } from '@ant-design/icons'
 import { useNavigate, useParams } from 'react-router-dom'
 import apiClient from '../api/client'
@@ -17,7 +18,7 @@ import { STATUS_LABELS } from '../constants/uiCopy'
 
 const { Title, Text, Paragraph } = Typography
 
-/* ── helpers ─────────────────────────────────────────────────────── */
+/* ── helpers ─────────────────────────────────────────────── */
 function chapterStatusTag(chapter: any) {
   if (!chapter?.chapter_text) return <Tag color="default">未写</Tag>
   if (String(chapter.chapter_text).includes('【占位正文】'))
@@ -99,6 +100,199 @@ function wc(text?: string) {
   return text ? String(text).replace(/\s/g, '').length : 0
 }
 
+/* ── Outline Control Panel ────────────────────────────────── */
+function OutlineControlPanel({
+  open,
+  onClose,
+  onGenerate,
+  existingChapters,
+  existingOutlines,
+}: {
+  open: boolean
+  onClose: () => void
+  onGenerate: (opts: { chapterCount: number; continueMode: boolean; continueFrom: number; userOutline: string }) => void
+  existingChapters: any[]
+  existingOutlines: any[]
+}) {
+  const [chapterCount, setChapterCount] = useState(10)
+  const [continueMode, setContinueMode] = useState(false)
+  const [continueFrom, setContinueFrom] = useState(0)
+  const [userOutline, setUserOutline] = useState('')
+  const [mode, setMode] = useState<'create' | 'continue' | 'expand'>('create')
+
+  const lastChapterNo = useMemo(() => {
+    if (existingChapters.length === 0) return 0
+    return Math.max(...existingChapters.map(c => c.chapter_no))
+  }, [existingChapters])
+
+  const lastOutlineNo = useMemo(() => {
+    const chapterOutlines = existingOutlines.filter(o => o.outline_type === 'chapter')
+    if (chapterOutlines.length === 0) return 0
+    return chapterOutlines.length
+  }, [existingOutlines])
+
+  useEffect(() => {
+    if (continueMode) {
+      setContinueFrom(Math.max(lastChapterNo, lastOutlineNo))
+    }
+  }, [continueMode, lastChapterNo, lastOutlineNo])
+
+  const handleGenerate = () => {
+    if (chapterCount < 1) {
+      message.warning('至少生成 1 章')
+      return
+    }
+    onGenerate({
+      chapterCount,
+      continueMode,
+      continueFrom,
+      userOutline: userOutline.trim(),
+    })
+  }
+
+  const handleModeChange = (newMode: 'create' | 'continue' | 'expand') => {
+    setMode(newMode)
+    setContinueMode(newMode === 'continue')
+  }
+
+  return (
+    <Modal
+      title={<Space><BookOutlined /> 大纲生成设置</Space>}
+      open={open}
+      onCancel={onClose}
+      footer={null}
+      width={680}
+    >
+      <Space direction="vertical" size={20} style={{ width: '100%' }}>
+
+        {/* 模式选择 */}
+        <Card size="small" title="生成模式" styles={{ body: { padding: '12px 16px' } }}>
+          <Space size="large">
+            <div onClick={() => handleModeChange('create')} style={{ cursor: 'pointer', textAlign: 'center' }}>
+              <Tag color={mode === 'create' ? 'blue' : 'default'} style={{ padding: '4px 12px', fontSize: 14 }}>
+                ✨ 从头生成
+              </Tag>
+              <div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>生成全新的细纲</div>
+            </div>
+            <div onClick={() => handleModeChange('continue')} style={{ cursor: 'pointer', textAlign: 'center' }}>
+              <Tag color={mode === 'continue' ? 'blue' : 'default'} style={{ padding: '4px 12px', fontSize: 14 }}>
+                ➡️ 续写
+              </Tag>
+              <div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>从已有细纲继续</div>
+            </div>
+            <div onClick={() => handleModeChange('expand')} style={{ cursor: 'pointer', textAlign: 'center' }}>
+              <Tag color={mode === 'expand' ? 'blue' : 'default'} style={{ padding: '4px 12px', fontSize: 14 }}>
+                📝 扩展
+              </Tag>
+              <div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>基于你的大纲扩展</div>
+            </div>
+          </Space>
+        </Card>
+
+        {/* 细纲数量 */}
+        <Card size="small" title="细纲数量" styles={{ body: { padding: '12px 16px' } }}>
+          <Space align="center" size={12}>
+            <Text>生成</Text>
+            <InputNumber
+              min={1}
+              max={200}
+              value={chapterCount}
+              onChange={(v) => setChapterCount(v || 10)}
+              style={{ width: 120 }}
+            />
+            <Text>章细纲</Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              （每章对应一条细纲）
+            </Text>
+          </Space>
+        </Card>
+
+        {/* 续写模式 */}
+        {mode === 'continue' && (
+          <Card size="small" title="续写设置" styles={{ body: { padding: '12px 16px' } }}>
+            <Space direction="vertical" style={{ width: '100%' }} size={8}>
+              <Space align="center">
+                <Text>从第</Text>
+                <InputNumber
+                  min={0}
+                  max={999}
+                  value={continueFrom}
+                  onChange={(v) => setContinueFrom(v || 0)}
+                  style={{ width: 120 }}
+                />
+                <Text>章之后继续生成</Text>
+              </Space>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                已有 {lastChapterNo} 章正文，{lastOutlineNo} 条细纲
+                {lastChapterNo > 0 && `，最后一章为第 ${lastChapterNo} 章`}
+              </Text>
+              <div style={{ padding: '6px 12px', background: '#f0f5ff', borderRadius: 6, fontSize: 12, color: '#1677ff' }}>
+                💡 将生成第 {continueFrom + 1} ~ 第 {continueFrom + chapterCount} 章的细纲
+              </div>
+            </Space>
+          </Card>
+        )}
+
+        {/* 用户大纲扩展 */}
+        {(mode === 'expand' || mode === 'create') && (
+          <Card size="small" title={mode === 'expand' ? '用户大纲（扩展模式）' : '参考大纲（可选）'} styles={{ body: { padding: '12px 16px' } }}>
+            <Space direction="vertical" style={{ width: '100%' }} size={4}>
+              {mode === 'expand' && (
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  提供你的故事大纲，AI 将在此基础上扩展和深化。
+                </Text>
+              )}
+              {mode === 'create' && (
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  可选：提供故事灵感或粗略大纲，AI 会作为参考。
+                </Text>
+              )}
+              <Input.TextArea
+                rows={8}
+                placeholder={mode === 'expand'
+                  ? '在此输入你的故事大纲...\n\n例如：故事发生在一个赛博朋克世界，主角是一个底层黑客...\n第一幕：主角意外发现了一个惊天秘密...\n第二幕：被追杀，结识了伙伴...\n第三幕：决战，揭开真相...'
+                  : '在此输入故事灵感或粗略大纲（可选）...\n\nAI 会参考你的内容生成细纲。'
+                }
+                value={userOutline}
+                onChange={(e) => setUserOutline(e.target.value)}
+                maxLength={5000}
+                showCount
+              />
+            </Space>
+          </Card>
+        )}
+
+        {/* 信息提示 */}
+        <div style={{ padding: '12px 16px', background: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: 8 }}>
+          <Space direction="vertical" size={4} style={{ width: '100%' }}>
+            <Text style={{ fontSize: 13, color: '#52c41a' }}>📋 生成时将同步完成：</Text>
+            <div style={{ fontSize: 12, color: '#666' }}>
+              ✓ 总纲生成（如尚未存在）<br />
+              ✓ 细纲生成（{chapterCount} 章）<br />
+              ✓ 世界观同步更新<br />
+              ✓ 角色信息同步更新<br />
+              ✓ 连续性预检<br />
+              ✓ 角色知识追踪快照
+            </div>
+          </Space>
+        </div>
+
+        {/* 底部按钮 */}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <Button onClick={onClose}>取消</Button>
+          <Button
+            type="primary"
+            icon={<RocketOutlined />}
+            onClick={handleGenerate}
+          >
+            开始生成
+          </Button>
+        </div>
+      </Space>
+    </Modal>
+  )
+}
+
 /* ── main component ─────────────────────────────────────────────── */
 export default function NovelProjectWorkspace() {
   const navigate = useNavigate()
@@ -137,76 +331,17 @@ export default function NovelProjectWorkspace() {
   const [rollingBackVersionId, setRollingBackVersionId] = useState<number | null>(null)
 
   // ── 3-step writing flow ──
-  const [stepOutlineLoading, setStepOutlineLoading] = useState(false)  // ① 生成大纲+细纲
-  const [stepProseLoading, setStepProseLoading] = useState(false)      // ② 生成正文
-  const [stepRepairLoading, setStepRepairLoading] = useState(false)    // ③ 连续性修复
-  // prose batch progress
+  const [stepOutlineLoading, setStepOutlineLoading] = useState(false)
+  const [stepProseLoading, setStepProseLoading] = useState(false)
+  const [stepRepairLoading, setStepRepairLoading] = useState(false)
   const [proseProgress, setProseProgress] = useState({ current: 0, total: 0 })
-  // legacy compat (for "AI 一键初始化" button in onboarding)
   const [planning, setPlanning] = useState(false)
   const [executingAgents, setExecutingAgents] = useState(false)
   const [generatingProse, setGeneratingProse] = useState(false)
   const [repairing, setRepairing] = useState(false)
 
-  // ── 3 步写作流程 ──
-  const stepGenerateOutline = async () => {
-    if (!selectedModelId) return message.warning('请先在顶部选择模型')
-    setStepOutlineLoading(true)
-    try {
-      // 执行 outline + detail-outline + continuity-check（自动包含依赖）
-      const res = await apiClient.post('/novel/agents/execute', {
-        project_id: projectId,
-        model_id: selectedModelId,
-        agents: ['outline-agent', 'detail-outline-agent', 'continuity-check-agent'],
-        prompt: '请生成世界观、角色、粗纲、细纲，并进行连续性预检。',
-        payload: {},
-      })
-      setAgentExecution(res.data || null)
-      await loadProjectModules()
-      message.success('大纲 + 细纲 + 连续性预检 完成')
-    } catch (e: any) { message.error(e.response?.data?.error || '大纲生成失败') }
-    finally { setStepOutlineLoading(false) }
-  }
-
-  const stepGenerateProse = async () => {
-    if (!selectedModelId) return message.warning('请先选择模型')
-    const unWritten = sortedChapters.filter(ch => !ch.chapter_text || ch.chapter_text.includes('【占位正文】'))
-    if (unWritten.length === 0) return message.warning('所有章节已有正文，无需生成')
-    setStepProseLoading(true)
-    let done = 0
-    try {
-      for (const ch of unWritten) {
-        setProseProgress({ current: done + 1, total: unWritten.length })
-        try {
-          await fetch(`${apiClient.defaults.baseURL}/novel/chapters/${ch.id}/generate-prose`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              project_id: projectId, model_id: selectedModelId,
-              prompt: `请生成第 ${ch.chapter_no} 章《${ch.title}》完整正文`,
-            }),
-          })
-          done++
-        } catch { done++ }
-      }
-      await loadProjectModules()
-      message.success(`正文生成完成 (${done}/${unWritten.length})`)
-    } catch (e: any) { message.error(e.message || '正文生成失败') }
-    finally { setStepProseLoading(false) }
-  }
-
-  const stepRunRepair = async () => {
-    setStepRepairLoading(true)
-    try {
-      const res = await apiClient.post('/novel/agents/repair', {
-        project_id: projectId, model_id: selectedModelId, payload: {},
-      })
-      setRepairResult(res.data || null)
-      await loadProjectModules()
-      message.success('连续性修复已完成')
-    } catch { message.error('修复失败') }
-    finally { setStepRepairLoading(false) }
-  }
+  // ── 大纲生成控制面板 ──
+  const [outlinePanelOpen, setOutlinePanelOpen] = useState(false)
 
   // ── streaming ──
   const [streamingChapterId, setStreamingChapterId] = useState<number | null>(null)
@@ -228,7 +363,7 @@ export default function NovelProjectWorkspace() {
   const [leftDrawerOpen, setLeftDrawerOpen] = useState(false)
 
   // ── right reference panel ──
-  const [rightPanelOpen, setRightPanelOpen] = useState(true)
+  const [rightPanelOpen, setRightPanelOpen] = useState(false)
   const [rightPanelTab, setRightPanelTab] = useState('worldbuilding')
 
   // ── auto-save state ──
@@ -368,8 +503,89 @@ export default function NovelProjectWorkspace() {
     return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current) }
   }, [])
 
-  /* ── actions ───────────────────────────────────────────────────── */
-  /** "AI 一键初始化"（空项目引导页上的按钮） — 完整跑 plan（SSE 流式进度） */
+  /* ── 大纲生成 ──────────────────────────────────────────────────── */
+  const handleOutlineGenerate = async (opts: { chapterCount: number; continueMode: boolean; continueFrom: number; userOutline: string }) => {
+    if (!selectedModelId) return message.warning('请先在顶部选择模型')
+    setStepOutlineLoading(true)
+    setOutlinePanelOpen(false)
+    try {
+      const agents = ['outline-agent', 'detail-outline-agent', 'continuity-check-agent']
+      const payload: Record<string, any> = {
+        chapterCount: opts.continueMode ? undefined : opts.chapterCount,
+        continueFrom: opts.continueMode ? opts.continueFrom : undefined,
+        userOutline: opts.userOutline && opts.userOutline.trim() ? opts.userOutline.trim() : undefined,
+      }
+      const cleanPayload: Record<string, any> = {}
+      for (const [k, v] of Object.entries(payload)) {
+        if (v !== undefined) cleanPayload[k] = v
+      }
+      const res = await apiClient.post('/novel/agents/execute', {
+        project_id: projectId,
+        model_id: selectedModelId,
+        agents,
+        prompt: opts.userOutline && opts.userOutline.trim()
+          ? '请基于用户提供的大纲，扩展生成完整的故事大纲和细纲。'
+          : opts.continueMode
+            ? `请从第 ${opts.continueFrom} 章之后继续生成大纲和细纲。`
+            : '请生成世界观、角色、粗纲、细纲，并进行连续性预检。',
+        payload: cleanPayload,
+      })
+      setAgentExecution(res.data || null)
+      await loadProjectModules()
+      message.success('大纲 + 细纲 + 连续性预检 完成')
+    } catch (e: any) {
+      message.error(e.response?.data?.detail || e.response?.data?.error || '大纲生成失败')
+    } finally {
+      setStepOutlineLoading(false)
+    }
+  }
+
+  /* ── 正文生成 ──────────────────────────────────────────────────── */
+  const stepGenerateProse = async () => {
+    if (!selectedModelId) return message.warning('请先选择模型')
+    const unWritten = sortedChapters.filter(ch => !ch.chapter_text || ch.chapter_text.includes('【占位正文】'))
+    if (unWritten.length === 0) return message.warning('所有章节已有正文，无需生成')
+    setStepProseLoading(true)
+    let done = 0
+    try {
+      for (const ch of unWritten) {
+        setProseProgress({ current: done + 1, total: unWritten.length })
+        try {
+          await fetch(`${apiClient.defaults.baseURL}/novel/chapters/${ch.id}/generate-prose`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              project_id: projectId, model_id: selectedModelId,
+              prompt: `请生成第 ${ch.chapter_no} 章《${ch.title}》完整正文`,
+            }),
+          })
+          done++
+        } catch { done++ }
+      }
+      await loadProjectModules()
+      message.success(`正文生成完成 (${done}/${unWritten.length})`)
+    } catch (e: any) { message.error(e.message || '正文生成失败') }
+    finally { setStepProseLoading(false) }
+  }
+
+  const stepRunRepair = async () => {
+    if (!selectedModelId) return message.warning('请先选择模型')
+    setStepRepairLoading(true)
+    try {
+      const res = await apiClient.post('/novel/agents/repair', {
+        project_id: projectId, model_id: selectedModelId, payload: {},
+      })
+      setRepairResult(res.data || null)
+      await loadProjectModules()
+      message.success(`连续性修复完成，发现 ${res.data?.issues_found || 0} 个问题`)
+    } catch (e: any) {
+      message.error(e.response?.data?.detail || '修复失败')
+    } finally { setStepRepairLoading(false) }
+  }
+
+  /* ── Plan (AI 一键初始化) ──────────────────────────────────────── */
+  const [planProgress, setPlanProgress] = useState<any>(null)
+
   const runPlan = async () => {
     setPlanning(true)
     setPlanProgress(null)
@@ -415,7 +631,6 @@ export default function NovelProjectWorkspace() {
         }
       }
 
-      // Process remaining buffer
       if (buffer.startsWith('data: ')) {
         try {
           const data = JSON.parse(buffer.slice(6))
@@ -447,7 +662,7 @@ export default function NovelProjectWorkspace() {
       await loadProjectModules()
       message.success('生成流程已完成')
     } catch (error: any) {
-      message.error(error.response?.data?.error || '执行失败')
+      message.error(error.response?.data?.detail || error.response?.data?.error || '执行失败')
     } finally { setExecutingAgents(false) }
   }
 
@@ -533,17 +748,6 @@ export default function NovelProjectWorkspace() {
     await loadProjectModules()
   }
 
-  const runRepair = async () => {
-    setRepairing(true)
-    try {
-      const res = await apiClient.post('/novel/agents/repair', { project_id: projectId, payload: {} })
-      setRepairResult(res.data || null)
-      await loadProjectModules()
-      message.success('连续性修复已完成')
-    } catch { message.error('修复失败') }
-    finally { setRepairing(false) }
-  }
-
   /* ── editor helpers ────────────────────────────────────────────── */
   const openEditor = (kind: typeof editorKind, item?: any) => {
     if (kind === 'worldbuilding') {
@@ -626,13 +830,13 @@ export default function NovelProjectWorkspace() {
     if (streamingChapterId) streamingEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
   }, [streamingText, streamingChapterId])
 
-  /* ── sorted chapters for list ──────────────────────────────────── */
+  /* ── sorted chapters ───────────────────────────────────────────── */
   const sortedChapters = useMemo(
     () => [...chapters].sort((a, b) => a.chapter_no - b.chapter_no),
     [chapters],
   )
 
-  /* ── render: save status icon ──────────────────────────────────── */
+  /* ── save status icon ──────────────────────────────────────────── */
   const SaveIndicator = () => {
     if (saveStatus === 'unsaved') return <Tooltip title="有未保存的修改"><ClockCircleOutlined style={{ color: '#faad14' }} /></Tooltip>
     if (saveStatus === 'saving') return <Tooltip title="保存中…"><SyncOutlined style={{ color: '#1677ff', animation: 'spin 1s linear infinite' }} /></Tooltip>
@@ -673,16 +877,16 @@ export default function NovelProjectWorkspace() {
 
         {/* ─── LEFT: Chapter list + Outline tree ─── */}
         <div style={{
-          width: 200, flexShrink: 0, background: '#fff',
+          width: 240, flexShrink: 0, background: '#fff',
           borderRight: '1px solid #f0f0f0', display: 'flex', flexDirection: 'column',
           overflow: 'hidden',
         }}>
           {/* Quick actions — 3-step flow */}
-          <div style={{ padding: '8px 12px', borderBottom: '1px solid #f0f0f0' }}>
-            <Text style={{ fontSize: 11, color: '#999', display: 'block', marginBottom: 4 }}>✍️ 写作流程</Text>
-            <Space direction="vertical" style={{ width: '100%' }} size={6}>
-              <Tooltip title={selectedModelId ? '生成世界观 + 角色 + 粗纲 + 细纲 + 预检' : '请先在顶部选择模型'}>
-                <Button size="small" block icon={<RocketOutlined />} loading={stepOutlineLoading} disabled={!selectedModelId} onClick={stepGenerateOutline}>
+          <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0' }}>
+            <Text style={{ fontSize: 12, color: '#999', display: 'block', marginBottom: 8, fontWeight: 500 }}>✍️ 写作流程</Text>
+            <Space direction="vertical" style={{ width: '100%' }} size={8}>
+              <Tooltip title={selectedModelId ? '设置并生成大纲 + 细纲 + 连续性预检' : '请先在顶部选择模型'}>
+                <Button size="small" block icon={<RocketOutlined />} loading={stepOutlineLoading} disabled={!selectedModelId} onClick={() => setOutlinePanelOpen(true)}>
                   ① 生成大纲
                 </Button>
               </Tooltip>
@@ -691,14 +895,14 @@ export default function NovelProjectWorkspace() {
                   ② 生成正文
                 </Button>
               </Tooltip>
-              <Tooltip title="检查并修复前后章矛盾">
-                <Button size="small" block icon={<SafetyOutlined />} loading={stepRepairLoading} onClick={stepRunRepair}>
+              <Tooltip title={selectedModelId ? '检查并修复前后章矛盾' : '请先选择模型'}>
+                <Button size="small" block icon={<SafetyOutlined />} loading={stepRepairLoading} disabled={!selectedModelId} onClick={stepRunRepair}>
                   ③ 连续性修复
                 </Button>
               </Tooltip>
             </Space>
             {proseProgress.current > 0 && (
-              <div style={{ marginTop: 6 }}>
+              <div style={{ marginTop: 8 }}>
                 <Progress percent={Math.round(proseProgress.current / proseProgress.total * 100)} size="small"
                   format={() => `${proseProgress.current}/${proseProgress.total}`} />
               </div>
@@ -707,12 +911,12 @@ export default function NovelProjectWorkspace() {
 
           {/* Chapter list */}
           <div style={{ padding: '8px 0', flex: 1, overflow: 'auto' }}>
-            <div style={{ padding: '4px 12px 8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Text strong style={{ fontSize: 12 }}><UnorderedListOutlined /> 章节</Text>
-              <Button size="small" type="text" onClick={() => openEditor('chapter')} icon={<EditOutlined />} />
+            <div style={{ padding: '8px 16px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #f5f5f5' }}>
+              <Text strong style={{ fontSize: 13 }}><UnorderedListOutlined /> 章节</Text>
+              <Button size="small" type="text" onClick={() => openEditor('chapter')} icon={<EditOutlined />}>新增</Button>
             </div>
             {sortedChapters.length === 0 ? (
-              <div style={{ padding: '16px 12px', textAlign: 'center' }}>
+              <div style={{ padding: '20px 16px', textAlign: 'center' }}>
                 <Text type="secondary" style={{ fontSize: 12 }}>暂无章节</Text>
               </div>
             ) : (
@@ -721,7 +925,7 @@ export default function NovelProjectWorkspace() {
                   key={ch.id}
                   onClick={() => setActiveChapterId(ch.id)}
                   style={{
-                    padding: '8px 12px', cursor: 'pointer',
+                    padding: '10px 16px', cursor: 'pointer',
                     background: ch.id === activeChapterId ? '#e6f4ff' : 'transparent',
                     borderLeft: ch.id === activeChapterId ? '3px solid #1677ff' : '3px solid transparent',
                     transition: 'background .15s',
@@ -731,11 +935,11 @@ export default function NovelProjectWorkspace() {
                 >
                   <Space style={{ width: '100%' }} justify="space-between" align="start">
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
                         <Text strong style={{ fontSize: 13 }}>第{ch.chapter_no}章</Text>
                         {chapterStatusTag(ch)}
                       </div>
-                      <Text style={{ fontSize: 12, color: '#666', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block', maxWidth: 180 }}>
+                      <Text style={{ fontSize: 12, color: '#666', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block', maxWidth: 160 }}>
                         {ch.title || '无标题'}
                       </Text>
                       <Text type="secondary" style={{ fontSize: 11 }}>{wc(ch.chapter_text)} 字</Text>
@@ -751,11 +955,11 @@ export default function NovelProjectWorkspace() {
 
           {/* Outline tree */}
           <div style={{ borderTop: '1px solid #f0f0f0', maxHeight: 220, overflow: 'auto' }}>
-            <div style={{ padding: '8px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Text strong style={{ fontSize: 12 }}>大纲树</Text>
-              <Button size="small" type="text" onClick={() => openEditor('outline')} icon={<EditOutlined />} />
+            <div style={{ padding: '8px 16px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Text strong style={{ fontSize: 13 }}>大纲树</Text>
+              <Button size="small" type="text" onClick={() => openEditor('outline')} icon={<EditOutlined />}>新增</Button>
             </div>
-            <div style={{ padding: '0 12px 8px' }}>
+            <div style={{ padding: '0 16px 8px' }}>
               {chapterTreeData.length > 0 ? (
                 <Tree treeData={chapterTreeData} blockNode showLine defaultExpandAll virtual={false}
                   style={{ fontSize: 12 }} />
@@ -764,7 +968,7 @@ export default function NovelProjectWorkspace() {
           </div>
 
           {/* Stats */}
-          <div style={{ borderTop: '1px solid #f0f0f0', padding: '8px 12px' }}>
+          <div style={{ borderTop: '1px solid #f0f0f0', padding: '10px 16px' }}>
             <Space wrap size={[4, 2]}>
               <Tag color="blue" bordered={false} style={{ fontSize: 11 }}>章 {chapters.length}</Tag>
               <Tag color="green" bordered={false} style={{ fontSize: 11 }}>文 {proseChapters.length}</Tag>
@@ -875,9 +1079,12 @@ export default function NovelProjectWorkspace() {
                 </div>
               </details>
 
-              {/* Prose editor — full-width immersive writing area */}
-              <div style={{ flex: 1, padding: 0, overflow: 'auto' }}>
-                <Input.TextArea
+              {/* Prose editor */}
+              <div style={{
+                flex: 1, display: 'flex', flexDirection: 'column',
+                overflow: 'hidden', minHeight: 0, position: 'relative',
+              }}>
+                <textarea
                   ref={proseEditorRef}
                   value={activeChapter.chapter_text || ''}
                   onChange={e => {
@@ -886,18 +1093,23 @@ export default function NovelProjectWorkspace() {
                     scheduleSave(next)
                   }}
                   placeholder="开始写吧……（自动保存）"
-                  autoSize={{ minRows: 999 }}
+                  spellCheck={false}
                   style={{
-                    width: '100%', height: '100%', boxSizing: 'border-box',
-                    fontSize: 17, lineHeight: 2, fontFamily: 'Noto Serif SC, Source Han Serif SC, Georgia, serif',
-                    border: 'none', borderRadius: 0,
-                    boxShadow: 'none !important',
-                    padding: '32px 60px',
+                    position: 'absolute', inset: 0,
+                    width: '100%', height: '100%',
+                    boxSizing: 'border-box',
+                    fontSize: 18, lineHeight: 2.2,
+                    fontFamily: 'Noto Serif SC, "Source Han Serif SC", Georgia, "Times New Roman", serif',
+                    fontWeight: 400, letterSpacing: 0.02,
+                    padding: '40px 80px',
+                    border: 'none', outline: 'none',
                     background: '#fff',
                     resize: 'none',
-                    outline: 'none',
+                    color: '#1a1a1a',
+                    overflowY: 'auto',
+                    caretColor: '#1677ff',
+                    tabSize: 4,
                   }}
-                  className="prose-editor"
                 />
               </div>
             </>
@@ -920,7 +1132,7 @@ export default function NovelProjectWorkspace() {
         {/* ─── RIGHT: Reference panel ─── */}
         {rightPanelOpen && (
           <div style={{
-            width: 320, flexShrink: 0, background: '#fff',
+            width: 280, flexShrink: 0, background: '#fff',
             borderLeft: '1px solid #f0f0f0', display: 'flex', flexDirection: 'column',
             overflow: 'hidden',
           }}>
@@ -971,6 +1183,9 @@ export default function NovelProjectWorkspace() {
                             {c.motivation && <Text><Text strong>动机：</Text>{c.motivation}</Text>}
                             {c.goal && <Text><Text strong>目标：</Text>{c.goal}</Text>}
                             {c.conflict && <Text><Text strong>冲突：</Text>{c.conflict}</Text>}
+                            {c.current_state?.information_boundaries?.length > 0 && (
+                              <Text><Text strong style={{ color: '#faad14' }}>信息边界：</Text>{c.current_state.information_boundaries.length} 项限制</Text>
+                            )}
                           </Space>
                         </Card>
                       ))
@@ -1027,7 +1242,6 @@ export default function NovelProjectWorkspace() {
           </div>
         )}
 
-        {/* Right panel toggle (when closed) */}
         {!rightPanelOpen && (
           <div style={{ width: 28, flexShrink: 0, background: '#fafafa', borderLeft: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <Button type="text" shape="circle" size="small" onClick={() => setRightPanelOpen(true)}>📚</Button>
@@ -1114,13 +1328,9 @@ export default function NovelProjectWorkspace() {
               <Descriptions.Item label="来源">{versionSourceLabel(chapterVersionDetail.source)}</Descriptions.Item>
               <Descriptions.Item label="创建时间">{chapterVersionDetail.created_at}</Descriptions.Item>
             </Descriptions>
-
-            {/* Full text */}
             <Card size="small" title="正文全文">
               <Text style={{ whiteSpace: 'pre-wrap' }}>{chapterVersionDetail.chapter_text || '空版本'}</Text>
             </Card>
-
-            {/* Diff */}
             {activeChapter && (
               <Card size="small" title="与当前稿对比"
                 extra={<Button size="small" onClick={() => setShowOnlyDiff(prev => !prev)}>{showOnlyDiff ? '显示全部' : '只看差异'}</Button>}>
@@ -1145,8 +1355,6 @@ export default function NovelProjectWorkspace() {
                 </Space>
               </Card>
             )}
-
-            {/* Scenes */}
             <Card size="small" title="分场结构">
               {Array.isArray(chapterVersionDetail.scene_breakdown) && chapterVersionDetail.scene_breakdown.length > 0 ?
                 chapterVersionDetail.scene_breakdown.map((s: any, i: number) => (
@@ -1155,8 +1363,6 @@ export default function NovelProjectWorkspace() {
                   </Card>
                 )) : <Text type="secondary">暂无分场结构。</Text>}
             </Card>
-
-            {/* Continuity */}
             <Card size="small" title="连贯性备注">
               {Array.isArray(chapterVersionDetail.continuity_notes) && chapterVersionDetail.continuity_notes.length > 0 ? (
                 <ul style={{ margin: 0, paddingLeft: 18 }}>
@@ -1178,6 +1384,15 @@ export default function NovelProjectWorkspace() {
           ))}
         </Modal>
       )}
+
+      {/* ═══ Outline Control Panel ═══ */}
+      <OutlineControlPanel
+        open={outlinePanelOpen}
+        onClose={() => setOutlinePanelOpen(false)}
+        onGenerate={handleOutlineGenerate}
+        existingChapters={chapters}
+        existingOutlines={outlines}
+      />
     </div>
   )
 }

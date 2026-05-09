@@ -5,6 +5,8 @@ import {
   baseStructuredOutputPrompt,
   buildCharacterPrompt,
   buildChapterPrompt,
+  buildContinuityCheckPrompt,
+  buildDetailOutlinePrompt,
   buildMarketPrompt,
   buildNovelSeed,
   buildOutlinePrompt,
@@ -20,7 +22,7 @@ import type { LLMMessage, LLMRequest, LLMResponse } from './types'
 import { executeWithRuntimeModel } from './provider-runtime'
 
 // ── Memory Service ──
-import { buildMemoryInjection, initMemoryPalace, storeAgentOutput } from '../memory-service'
+import { buildMemoryInjection, initMemoryPalace, storeAgentOutput, verifyAndStoreAgentOutput } from '../memory-service'
 
 // ── Agent Message Builder ──
 
@@ -34,27 +36,69 @@ function buildAgentMessages(
     ? `\n\n前置 Agent 输出（作为参考上下文）：\n${JSON.stringify(context.upstreamContext, null, 2).slice(0, 4000)}`
     : ''
 
-  const systemContent = baseNovelSystemPrompt() + styleGuardrails + upstreamContext
+  // 记忆宫殿注入 — 如果上游调用了 buildMemoryInjection，这里把文本拼接到 system prompt
+  const memoryInjectionText = context?.memoryInjectionText || ''
+  const memorySection = memoryInjectionText
+    ? `\n\n⚠️ 重要：以下是从记忆宫殿中提取的项目记忆与事实，请严格确保生成内容与这些记忆保持一致：\n${memoryInjectionText}`
+    : ''
 
-  const promptMap: Record<string, string> = {
-    'market-agent': buildMarketPrompt(project),
-    'world-agent': buildWorldPrompt(project, '生成世界观'),
-    'character-agent': buildCharacterPrompt(project, '生成角色'),
-    'outline-agent': buildOutlinePrompt(project, '生成大纲'),
-    'chapter-agent': buildChapterPrompt(project, '生成章节'),
-    'prose-agent': buildProsePrompt(project, context.chapterDraft || {}, {
-      worldbuilding: context.worldbuilding,
-      characters: context.characters,
-      outline: context.outline,
-      prevChapters: context.prevChapters,
-    }),
-    'review-agent': buildReviewPrompt(project, '生成审校与修复建议'),
-  }
+  const systemContent = baseNovelSystemPrompt() + styleGuardrails + memorySection + upstreamContext
 
-  return {
-    systemContent,
-    userContent: promptMap[agentId] || promptMap['market-agent'] || '',
-  }
+  // Extract upstream results
+  const worldResult = (context?.upstreamContext as any)?.['world-agent'] || (context?.upstreamContext as any)?.worldbuilding || null
+  const charResult = (context?.upstreamContext as any)?.['character-agent'] || null
+  const outlineResult = (context?.upstreamContext as any)?.['outline-agent'] || null
+  const detailResult = (context?.upstreamContext as any)?.['detail-outline-agent'] || null
+  const worldbuildingData = context?.worldbuilding || worldResult || null
+  const charactersData = context?.characters || (charResult?.characters || [])
+  const chapterOutlines = outlineResult?.chapter_outlines || []
+
+  // New params from payload
+  const chapterCount = context?.payload?.chapterCount || context?.payload?.chapter_count || undefined
+  const continueFrom = context?.payload?.continueFrom || context?.payload?.continue_from || undefined
+  const userOutline = context?.payload?.userOutline || context?.payload?.user_outline || undefined
+  const existingChapters = context?.payload?.existingChapters || context?.payload?.existing_chapters || []
+
+  const userContent = (() => {
+    switch (agentId) {
+      case 'market-agent':
+        return buildMarketPrompt(project)
+      case 'world-agent':
+        return buildWorldPrompt(project, '生成世界观')
+      case 'character-agent':
+        return buildCharacterPrompt(project, '生成角色')
+      case 'outline-agent':
+        return buildOutlinePrompt(project, {
+          task: '生成大纲',
+          chapterCount,
+          userOutline,
+          continueFrom,
+          existingChapters,
+        })
+      case 'chapter-agent':
+        return buildChapterPrompt(project, '生成章节')
+      case 'detail-outline-agent':
+        // 细纲分化：需要粗略章纲 + 世界观 + 角色
+        return buildDetailOutlinePrompt(project, chapterOutlines, worldbuildingData, charactersData)
+      case 'continuity-check-agent':
+        // 连续性预检：需要细纲 + 世界观 + 角色
+        const detailChapters = detailResult?.detail_chapters || detailResult?.chapters || []
+        return buildContinuityCheckPrompt(project, detailChapters, worldbuildingData, charactersData)
+      case 'prose-agent':
+        return buildProsePrompt(project, context.chapterDraft || {}, {
+          worldbuilding: worldbuildingData,
+          characters: charactersData,
+          outline: outlineResult,
+          prevChapters: context.prevChapters,
+        })
+      case 'review-agent':
+        return buildReviewPrompt(project, '生成审校与修复建议')
+      default:
+        return buildMarketPrompt(project)
+    }
+  })()
+
+  return { systemContent, userContent }
 }
 
 function buildReviewPrompt(project: NovelProjectRecord, hint?: string) {
@@ -177,10 +221,35 @@ export async function generateNovelPlan(
   try { await initMemoryPalace() } catch { /* non-fatal */ }
 
   let upstreamContext = {}
+  // 累积所有核对问题与事实矛盾，注入下游 Agent
+  const _verificationIssues: Array<any> = []
+  const _contradictions: Array<any> = []
 
   for (const agent of agentPlan) {
     const strategyEntry = strategy.find(s => s.agent_id === agent.id)
-    const context = { ...seed, upstreamContext, project }
+
+    // Memory injection — generateNovelPlan 也做记忆注入
+    let memoryInjectionText = ''
+    try {
+      const memResult = await buildMemoryInjection(project.id, {
+        worldbuilding: upstreamContext['world-agent']?.output,
+        characters: upstreamContext['character-agent']?.output?.characters,
+        outline: upstreamContext['outline-agent']?.output,
+        chapterTitle: seed.chapters?.[0]?.title,
+        prevChapters: upstreamContext['prose-agent']?.output?.prose_chapters,
+        // 注入累积的核对问题与矛盾
+        verificationIssues: _verificationIssues,
+        contradictions: _contradictions,
+      })
+      memoryInjectionText = memResult?.text || ''
+    } catch { /* non-fatal */ }
+
+    const context = {
+      ...seed,
+      upstreamContext,
+      memoryInjectionText,
+      project,
+    }
 
     const response = await executeOneAgent(
       agent.id, project, context, strategyEntry, activeWorkspace, modelId,
@@ -191,7 +260,16 @@ export async function generateNovelPlan(
     results.push({ step: agent.id, success, output, error: response.error || '', outputSource: success ? 'llm' : 'seed' })
     upstreamContext = { ...upstreamContext, [agent.id]: output }
 
-    try { await storeAgentOutput(project.id, agent.id, output) } catch { /* non-fatal */ }
+    // 使用 verifyAndStoreAgentOutput 闭环：存入 → 核对 → 矛盾扫描
+    try {
+      const verifyResult = await verifyAndStoreAgentOutput(project.id, agent.id, output)
+      if (verifyResult.verificationIssues.length > 0) {
+        _verificationIssues.push(...verifyResult.verificationIssues)
+      }
+      if (verifyResult.contradictions.length > 0) {
+        _contradictions.push(...verifyResult.contradictions)
+      }
+    } catch { /* non-fatal */ }
   }
 
   const getResult = (step: string) => results.find(r => r.step === step && r.outputSource === 'llm')?.output || {}
@@ -217,6 +295,8 @@ export async function executeNovelAgentChain(
   activeWorkspace: string,
   modelId?: number,
   agentFilter?: string[],
+  payload?: Record<string, any>,   // P1-1: 新增 payload 参数，支持 chapterCount / continueFrom / userOutline 等
+  extraPayload?: Record<string, any>, // 兼容旧的额外参数
 ) {
   const agentPlan = topologicalSortAgents(buildNovelAgentPlan(project))
   const strategy = buildNovelStrategy(project)
@@ -235,22 +315,25 @@ export async function executeNovelAgentChain(
 
     const strategyEntry = strategy.find(s => s.agent_id === agent.id)
 
-    // Memory injection
-    let memoryInjection = ''
+    // Memory injection — 提取记忆宫殿注入文本（拼接到 prompt 中）
+    let memoryInjectionText = ''
     try {
-      memoryInjection = await buildMemoryInjection(project.id, {
+      const memResult = await buildMemoryInjection(project.id, {
         worldbuilding: upstreamContext['world-agent']?.output,
         characters: upstreamContext['character-agent']?.output?.characters,
         outline: upstreamContext['outline-agent']?.output,
         chapterTitle: seed.chapters?.[0]?.title,
         prevChapters: upstreamContext['prose-agent']?.output?.prose_chapters,
       })
+      memoryInjectionText = memResult?.text || ''
     } catch { /* non-fatal */ }
 
     const context = {
       ...seed,
-      upstreamContext: { ...upstreamContext, memoryInjection },
+      upstreamContext,
+      memoryInjectionText,  // 传给 buildAgentMessages 拼接到 prompt
       project,
+      payload: { ...(payload || {}), ...(extraPayload || {}) },
     }
 
     const response = await executeOneAgent(

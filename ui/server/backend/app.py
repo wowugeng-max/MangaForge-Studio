@@ -68,6 +68,10 @@ app.include_router(models.router)
 app.include_router(providers.router)
 app.include_router(bridge_router)
 
+# 📚 Novel (小说) router
+from backend.novel import router as novel_router
+app.include_router(novel_router)
+
 class PipelineStep(BaseModel):
     step: str
     provider: str
