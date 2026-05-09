@@ -148,10 +148,142 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
         Number(req.body.model_id || 0) || undefined,
         agentFilter,
       );
-      const proseOutput = execution.results.find(item => item.step === 'prose-agent')?.output?.prose_chapters || [];
+      const seed = buildNovelSeed(project, String(req.body.prompt || ''));
+
+      // ── Helper: get LLM output for a step ──
+      const getStep = (stepName: string) =>
+        execution.results.find(item => item.step === stepName && item.outputSource === 'llm')?.output || {};
+
+      const worldResult = getStep('world-agent')
+      const charResult = getStep('character-agent')
+      const outlineResult = getStep('outline-agent')
+      const detailResult = getStep('detail-outline-agent')
+      const continuityResult = getStep('continuity-check-agent')
+      const proseResult = getStep('prose-agent')
+
+      // ═══ 1. 持久化世界观 ═══
+      if (worldResult.world_summary) {
+        await createNovelWorldbuilding(activeWorkspace, {
+          project_id: projectId,
+          world_summary: worldResult.world_summary || seed.world_summary,
+          rules: Array.isArray(worldResult.rules) ? worldResult.rules : seed.rules,
+          factions: Array.isArray(worldResult.factions) ? worldResult.factions : [],
+          locations: Array.isArray(worldResult.locations) ? worldResult.locations : [],
+          systems: Array.isArray(worldResult.systems) ? worldResult.systems : [],
+          items: Array.isArray(worldResult.items) ? worldResult.items : [],
+          timeline_anchor: worldResult.timeline_anchor || '故事起点',
+          known_unknowns: Array.isArray(worldResult.known_unknowns) ? worldResult.known_unknowns : [],
+          version: 1,
+        })
+      }
+
+      // ═══ 2. 持久化角色 ═══
+      const characterItems = Array.isArray(charResult.characters) && charResult.characters.length > 0
+        ? charResult.characters : (Array.isArray(seed.characters) ? seed.characters : [])
+      for (const c of characterItems) {
+        await createNovelCharacter(activeWorkspace, { project_id: projectId, ...c })
+      }
+
+      // ═══ 3. 持久化卷纲 ═══
+      const volumeItems = Array.isArray(outlineResult.volume_outlines) && outlineResult.volume_outlines.length > 0
+        ? outlineResult.volume_outlines : []
+      for (const v of volumeItems) {
+        await createNovelOutline(activeWorkspace, {
+          project_id: projectId, outline_type: 'volume', ...v,
+        })
+      }
+
+      // ═══ 4. 持久化总纲 ═══
+      let masterOutlineData: any = {}
+      if (typeof outlineResult.master_outline === 'object' && outlineResult.master_outline) {
+        masterOutlineData = outlineResult.master_outline
+      } else if (typeof outlineResult.master_outline === 'string') {
+        masterOutlineData = { title: seed.outline?.title || '总纲', summary: outlineResult.master_outline }
+      }
+      if (masterOutlineData.summary || masterOutlineData.title) {
+        await createNovelOutline(activeWorkspace, {
+          project_id: projectId,
+          outline_type: 'master',
+          title: masterOutlineData.title || seed.outline?.title || '总纲',
+          summary: masterOutlineData.summary || seed.outline?.summary || '',
+          hook: masterOutlineData.hook || '',
+        })
+      }
+
+      // ═══ 5. 持久化章节（detail_chapters > chapter_outlines > seed）═══
+      let chapterItems: any[] = []
+      if (Array.isArray(detailResult.detail_chapters) && detailResult.detail_chapters.length > 0) {
+        chapterItems = detailResult.detail_chapters.map((dc: any) => ({
+          chapter_no: dc.chapter_no,
+          title: dc.title,
+          chapter_summary: dc.summary || dc.chapter_summary || '',
+          conflict: dc.conflict || '',
+          ending_hook: dc.ending_hook || '',
+          scene_breakdown: dc.scenes || [],
+          continuity_notes: dc.continuity_from_prev ? [dc.continuity_from_prev] : [],
+        }))
+      } else if (Array.isArray(outlineResult.chapter_outlines) && outlineResult.chapter_outlines.length > 0) {
+        chapterItems = outlineResult.chapter_outlines
+      } else if (Array.isArray(seed.chapters) && seed.chapters.length > 0) {
+        chapterItems = seed.chapters
+      }
+      for (const ch of chapterItems) {
+        await createNovelChapter(activeWorkspace, {
+          project_id: projectId,
+          chapter_no: ch.chapter_no,
+          title: ch.title || '',
+          chapter_summary: ch.chapter_summary || ch.summary || '',
+          conflict: ch.conflict || '',
+          ending_hook: ch.ending_hook || '',
+          scene_breakdown: ch.scene_breakdown || [],
+          continuity_notes: ch.continuity_notes || [],
+        })
+      }
+
+      // ═══ 6. 伏笔计划 ═══
+      if (Array.isArray(outlineResult.foreshadowing_plan) && outlineResult.foreshadowing_plan.length > 0) {
+        const masterOutlineList = await listNovelOutlines(activeWorkspace, projectId)
+        const masterOl = masterOutlineList.find((o: any) => o.outline_type === 'master')
+        for (const fp of outlineResult.foreshadowing_plan) {
+          await createNovelOutline(activeWorkspace, {
+            project_id: projectId,
+            outline_type: 'foreshadowing',
+            title: fp.description || '',
+            summary: `第${fp.plant_at}章埋 → 第${fp.payoff_at}章收`,
+            parent_id: masterOl?.id || null,
+          })
+        }
+      }
+
+      // ═══ 7. 正文同步（prose-agent）═══
+      const proseOutput = proseResult?.prose_chapters || [];
       await syncProseChaptersToStore(activeWorkspace, projectId, proseOutput);
-      await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'agent_execute', step_name: 'chain', status: 'success', output_ref: JSON.stringify(execution.results) });
-      const review = await createNovelReview(activeWorkspace, { project_id: projectId, review_type: 'continuity', status: 'ok', summary: execution.review.summary, issues: execution.review.issues });
+
+      // ═══ 8. 更新项目主记录 ═══
+      const marketResult = getStep('market-agent')
+      const genreVal = String(worldResult.genre || marketResult.genre || project.genre || '')
+      const synopsisVal = String(masterOutlineData.summary || outlineResult.synopsis || seed.outline?.summary || project.synopsis || '')
+      const audienceVal = String(marketResult.target_audience || marketResult.targetReader || project.target_audience || '')
+      await updateNovelProject(activeWorkspace, projectId, {
+        genre: genreVal,
+        synopsis: synopsisVal,
+        target_audience: audienceVal,
+        sub_genres: Array.isArray(marketResult.sub_genres) ? marketResult.sub_genres : undefined,
+        style_tags: Array.isArray(marketResult.style_tags) ? marketResult.style_tags : undefined,
+        commercial_tags: Array.isArray(marketResult.commercial_tags) ? marketResult.commercial_tags : undefined,
+        status: 'draft',
+      })
+
+      // ═══ 9. 运行记录 + 审校 ═══
+      await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'agent_execute', step_name: 'chain', status: 'success', output_ref: JSON.stringify(execution.results) })
+      const review = await createNovelReview(activeWorkspace, {
+        project_id: projectId,
+        review_type: 'continuity',
+        status: 'ok',
+        summary: continuityResult.is_ready_for_prose !== false ? '当前生成结构一致，尚未发现明显冲突。' : execution.review.summary,
+        issues: execution.review.issues || [],
+        payload: JSON.stringify(continuityResult || {}),
+      })
       res.json({ ...execution, review })
     } catch (error) {
       res.status(500).json({ error: String(error) })
