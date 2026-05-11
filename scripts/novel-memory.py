@@ -620,6 +620,36 @@ def dump_project(project_id: int) -> Dict:
         conn.close()
 
 
+# ─── Purge: Delete all data for a project ───
+
+def purge_project(project_id: int) -> Dict:
+    """Delete all memories, facts, and continuity log entries for a project."""
+    conn = get_conn()
+    try:
+        # Count before deleting
+        mem_count = conn.execute("SELECT COUNT(*) FROM memories WHERE project_id = ?", (project_id,)).fetchone()[0]
+        fact_count = conn.execute("SELECT COUNT(*) FROM facts WHERE project_id = ?", (project_id,)).fetchone()[0]
+        cont_count = conn.execute("SELECT COUNT(*) FROM continuity_log WHERE project_id = ?", (project_id,)).fetchone()[0]
+
+        # Delete in order of foreign key dependencies
+        conn.execute("DELETE FROM continuity_log WHERE project_id = ?", (project_id,))
+        conn.execute("DELETE FROM facts WHERE project_id = ?", (project_id,))
+        conn.execute("DELETE FROM memories WHERE project_id = ?", (project_id,))
+        conn.commit()
+
+        result = {
+            "status": "ok",
+            "project_id": project_id,
+            "deleted_memories": mem_count,
+            "deleted_facts": fact_count,
+            "deleted_continuity": cont_count,
+        }
+        print(json.dumps(result, ensure_ascii=False))
+        return result
+    finally:
+        conn.close()
+
+
 # ─── CLI ───
 
 def main():
@@ -706,6 +736,10 @@ def main():
     p_dump = sub.add_parser("dump")
     p_dump.add_argument("--project", type=int, required=True)
 
+    # purge-project
+    p_purge = sub.add_parser("purge-project")
+    p_purge.add_argument("--project", type=int, required=True)
+
     args = parser.parse_args()
 
     if args.palace_dir:
@@ -757,6 +791,9 @@ def main():
 
     elif args.command == "dump":
         dump_project(args.project)
+
+    elif args.command == "purge-project":
+        purge_project(args.project)
 
     else:
         parser.print_help()

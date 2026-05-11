@@ -12,6 +12,7 @@ const PROJECT_ROOT = join(__dirname, '..', '..', '..')
 const VENV_PYTHON = join(SCRIPT_DIR, 'venv', 'bin', 'python3')
 const PALACE_DIR_ENV = process.env.MEMPALACE_DIR || join(PROJECT_ROOT, 'mempalace-data')
 const LOCK_FILE = join(PROJECT_ROOT, 'mempalace-bootstrap.json')
+const PROJECT_INDEX_FILE = join(PALACE_DIR_ENV, 'project-index.json')
 
 export type MemoryCategory = 'worldbuilding' | 'character' | 'plot' | 'foreshadowing' | 'prose' | 'general'
 
@@ -80,6 +81,86 @@ export interface MemoryInjection {
   memories: MemoryRecord[]
   facts: FactRecord[]
   contradictions: Array<any>
+}
+
+export interface MemoryPalaceProjectSummary {
+  project_id: number
+  project_title: string
+  memory_count: number
+  fact_count: number
+  continuity_issue_count: number
+  last_updated_at?: string
+}
+
+type MemoryProjectIndexRecord = {
+  project_id: number
+  project_title: string
+  last_updated_at: string
+}
+
+function nowIso() {
+  return new Date().toISOString()
+}
+
+function ensurePalaceDir() {
+  if (!existsSync(PALACE_DIR_ENV)) mkdirSync(PALACE_DIR_ENV, { recursive: true })
+}
+
+function readProjectIndex(): MemoryProjectIndexRecord[] {
+  try {
+    ensurePalaceDir()
+    const indexFile = join(PALACE_DIR_ENV, 'project-index.json')
+    if (!existsSync(indexFile)) return []
+    const raw = readFileSync(indexFile, 'utf8')
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed)
+      ? parsed
+          .map((item: any) => ({
+            project_id: Number(item?.project_id || 0),
+            project_title: String(item?.project_title || ''),
+            last_updated_at: String(item?.last_updated_at || nowIso()),
+          }))
+          .filter((item: MemoryProjectIndexRecord) => item.project_id > 0 && item.project_title)
+      : []
+  } catch {
+    return []
+  }
+}
+
+function writeProjectIndex(records: MemoryProjectIndexRecord[]) {
+  ensurePalaceDir()
+  const indexFile = join(PALACE_DIR_ENV, 'project-index.json')
+  writeFileSync(indexFile, `${JSON.stringify(records, null, 2)}\n`, 'utf8')
+}
+
+function upsertProjectIndex(projectId: number, projectTitle?: string) {
+  const normalizedTitle = String(projectTitle || '').trim()
+  if (!projectId || !normalizedTitle) return
+  const records = readProjectIndex()
+  const idx = records.findIndex(item => item.project_id === projectId)
+  const next = { project_id: projectId, project_title: normalizedTitle, last_updated_at: nowIso() }
+  if (idx >= 0) records[idx] = next
+  else records.push(next)
+  writeProjectIndex(records.sort((a, b) => a.project_id - b.project_id))
+}
+
+function removeProjectIndex(projectId: number) {
+  writeProjectIndex(readProjectIndex().filter(item => item.project_id !== projectId))
+}
+
+function assertProjectIdentity(projectId: number, projectTitle?: string) {
+  const normalizedTitle = String(projectTitle || '').trim()
+  const existing = readProjectIndex().find(item => item.project_id === projectId)
+  if (!existing) return { ok: true, normalizedTitle, reason: '' }
+  if (!normalizedTitle) return { ok: false, normalizedTitle, reason: 'project title required for memory palace access' }
+  if (existing.project_title !== normalizedTitle) {
+    return {
+      ok: false,
+      normalizedTitle,
+      reason: `memory palace identity mismatch: expected "${existing.project_title}", received "${normalizedTitle}"`,
+    }
+  }
+  return { ok: true, normalizedTitle, reason: '' }
 }
 
 // ─── Python path resolution ───────────────────────────────────────────
@@ -493,6 +574,87 @@ export async function dumpProject(projectId: number): Promise<any> {
   } catch {
     return { status: 'error' }
   }
+}
+
+export async function listMemoryPalaceProjects(): Promise<MemoryPalaceProjectSummary[]> {
+  const records = readProjectIndex()
+  const summaries = await Promise.all(records.map(async (record) => {
+    const dump = await dumpProject(record.project_id)
+    return {
+      project_id: record.project_id,
+      project_title: record.project_title,
+      memory_count: Number(dump?.memory_count || 0),
+      fact_count: Number(dump?.fact_count || 0),
+      continuity_issue_count: Number(dump?.continuity_issue_count || 0),
+      last_updated_at: String(dump?.last_updated_at || record.last_updated_at || ''),
+    }
+  }))
+  return summaries.sort((a, b) => a.project_id - b.project_id)
+}
+
+export async function dumpProjectScoped(projectId: number, projectTitle?: string): Promise<any> {
+  const identity = assertProjectIdentity(projectId, projectTitle)
+  if (!identity.ok) {
+    return {
+      status: 'skipped',
+      project_id: projectId,
+      project_title: projectTitle || '',
+      reason: identity.reason,
+      memory_count: 0,
+      fact_count: 0,
+      continuity_issue_count: 0,
+      memories: [],
+      facts: [],
+      continuity_log: [],
+    }
+  }
+  if (identity.normalizedTitle) upsertProjectIndex(projectId, identity.normalizedTitle)
+  const result = await dumpProject(projectId)
+  return { ...result, project_title: identity.normalizedTitle || result?.project_title || '' }
+}
+
+export async function purgeMemoryPalaceProject(projectId: number, projectTitle?: string): Promise<{ ok: boolean; error?: string }> {
+  const identity = assertProjectIdentity(projectId, projectTitle)
+  if (projectTitle && !identity.ok) return { ok: false, error: identity.reason }
+  const result = await runMemoryCommand(['purge-project', '--project', String(projectId)])
+  if (result?.status === 'error') return { ok: false, error: String(result.error || 'purge failed') }
+  removeProjectIndex(projectId)
+  return { ok: true }
+}
+
+export async function buildMemoryInjectionForProject(
+  projectId: number,
+  projectTitle: string | undefined,
+  context: Parameters<typeof buildMemoryInjection>[1],
+): Promise<MemoryInjection> {
+  const identity = assertProjectIdentity(projectId, projectTitle)
+  if (!identity.ok) return { text: '', memories: [], facts: [], contradictions: [] }
+  if (identity.normalizedTitle) upsertProjectIndex(projectId, identity.normalizedTitle)
+  return buildMemoryInjection(projectId, context)
+}
+
+export async function verifyAndStoreAgentOutputForProject(
+  projectId: number,
+  projectTitle: string | undefined,
+  agentId: string,
+  output: any,
+) {
+  const identity = assertProjectIdentity(projectId, projectTitle)
+  if (!identity.ok) return { storedIds: [], verificationIssues: [], contradictions: [] }
+  if (identity.normalizedTitle) upsertProjectIndex(projectId, identity.normalizedTitle)
+  return verifyAndStoreAgentOutput(projectId, agentId, output)
+}
+
+export async function storeAgentOutputForProject(
+  projectId: number,
+  projectTitle: string | undefined,
+  agentId: string,
+  output: any,
+) {
+  const identity = assertProjectIdentity(projectId, projectTitle)
+  if (!identity.ok) return []
+  if (identity.normalizedTitle) upsertProjectIndex(projectId, identity.normalizedTitle)
+  return storeAgentOutput(projectId, agentId, output)
 }
 
 // ═══════════════════════════════════════════════════════════════

@@ -500,6 +500,43 @@ export default function NovelProjectWorkspace() {
   const [rightPanelOpen, setRightPanelOpen] = useState(false)
   const [rightPanelTab, setRightPanelTab] = useState('worldbuilding')
 
+  // ── memory palace ──
+  const [memoryPalaceProjects, setMemoryPalaceProjects] = useState<any[]>([])
+  const [memoryPalaceLoading, setMemoryPalaceLoading] = useState(false)
+  const [memoryPalaceDeleting, setMemoryPalaceDeleting] = useState<number | null>(null)
+
+  const loadMemoryPalaceProjects = async () => {
+    setMemoryPalaceLoading(true)
+    try {
+      const res = await apiClient.get('/novel/memory-palace/projects')
+      setMemoryPalaceProjects(Array.isArray(res.data?.projects) ? res.data.projects : [])
+    } catch { setMemoryPalaceProjects([]) }
+    finally { setMemoryPalaceLoading(false) }
+  }
+
+  const handleDeleteMemoryPalaceProject = async (memProjectId: number) => {
+    Modal.confirm({
+      title: '删除记忆宫殿项目',
+      content: '确定要删除该项目在记忆宫殿中的所有数据吗？此操作不可撤销。',
+      okText: '删除', okButtonProps: { danger: true },
+      onOk: async () => {
+        setMemoryPalaceDeleting(memProjectId)
+        try {
+          const deleteBody = selectedProject
+            ? { project_title: selectedProject.title }
+            : undefined
+          await apiClient.delete(`/novel/memory-palace/projects/${memProjectId}`, { data: deleteBody })
+          await loadMemoryPalaceProjects()
+          message.success('已删除记忆宫殿项目')
+        } catch (e: any) {
+          message.error(e?.response?.data?.error || '删除失败')
+        } finally {
+          setMemoryPalaceDeleting(null)
+        }
+      },
+    })
+  }
+
   // ── auto-save state ──
   const [saveStatus, setSaveStatus] = useState<'idle' | 'unsaved' | 'saving' | 'saved' | 'error'>('idle')
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -1410,6 +1447,83 @@ export default function NovelProjectWorkspace() {
                         <Text style={{ fontSize: 12, whiteSpace: 'pre-wrap' }}>{(v.chapter_text || '空').slice(0, 100)}</Text>
                       </Card>
                     )),
+                  },
+                  {
+                    key: 'memory-palace', label: '记忆宫殿',
+                    children: (
+                      <div style={{ padding: 8 }}>
+                        <Space direction="vertical" style={{ width: '100%' }} size={8}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <Text strong style={{ fontSize: 13 }}>🧠 记忆宫殿</Text>
+                            <Tooltip title="刷新列表">
+                              <Button size="small" type="text" icon={<ReloadOutlined />} loading={memoryPalaceLoading} onClick={loadMemoryPalaceProjects} />
+                            </Tooltip>
+                          </div>
+                          <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>
+                            管理存储在各项目中的记忆数据。
+                          </Text>
+                          {memoryPalaceLoading && memoryPalaceProjects.length === 0 ? (
+                            <div style={{ padding: 16, textAlign: 'center' }}>
+                              <SyncOutlined style={{ animation: 'spin 1s linear infinite' }} />
+                              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>加载中…</Text>
+                            </div>
+                          ) : memoryPalaceProjects.length === 0 ? (
+                            <div style={{ padding: 16, textAlign: 'center' }}>
+                              <Text type="secondary" style={{ fontSize: 12 }}>暂无记忆数据</Text>
+                            </div>
+                          ) : (
+                            memoryPalaceProjects.map((mp) => {
+                              const isCurrentProject = selectedProject && mp.project_id === selectedProject.id
+                              return (
+                                <Card
+                                  key={mp.project_id}
+                                  size="small"
+                                  style={{
+                                    borderRadius: 8,
+                                    border: isCurrentProject ? '1px solid #1677ff' : undefined,
+                                    background: isCurrentProject ? '#f0f7ff' : undefined,
+                                  }}
+                                  title={
+                                    <Space size={4}>
+                                      <Text style={{ fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 140 }}>
+                                        {mp.project_title || `项目 ${mp.project_id}`}
+                                      </Text>
+                                      {isCurrentProject && <Tag color="blue" style={{ fontSize: 10 }}>当前</Tag>}
+                                    </Space>
+                                  }
+                                  extra={
+                                    <Popconfirm
+                                      title="删除记忆"
+                                      description={`确定删除「${mp.project_title}」在记忆宫殿中的所有数据吗？`}
+                                      onConfirm={() => handleDeleteMemoryPalaceProject(mp.project_id)}
+                                      okText="删除"
+                                      okButtonProps={{ danger: true }}
+                                    >
+                                      <Button size="small" danger type="text" loading={memoryPalaceDeleting === mp.project_id}>
+                                        <DeleteOutlined />
+                                      </Button>
+                                    </Popconfirm>
+                                  }
+                                >
+                                  <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                                    <Space size={[4, 2]} wrap>
+                                      <Tag color="blue" bordered={false} style={{ fontSize: 11 }}>记忆 {mp.memory_count}</Tag>
+                                      <Tag color="green" bordered={false} style={{ fontSize: 11 }}>事实 {mp.fact_count}</Tag>
+                                      <Tag color="orange" bordered={false} style={{ fontSize: 11 }}>问题 {mp.continuity_issue_count}</Tag>
+                                    </Space>
+                                    {mp.last_updated_at && (
+                                      <Text type="secondary" style={{ fontSize: 10 }}>
+                                        更新于 {mp.last_updated_at}
+                                      </Text>
+                                    )}
+                                  </Space>
+                                </Card>
+                              )
+                            })
+                          )}
+                        </Space>
+                      </div>
+                    ),
                   },
                 ]}
               />

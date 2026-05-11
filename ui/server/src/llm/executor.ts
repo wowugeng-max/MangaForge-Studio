@@ -21,8 +21,8 @@ import type { LLMMessage, LLMRequest, LLMResponse } from './types'
 // ── Runtime model selection (reads from keys.json + providers.json + models.json) ──
 import { executeWithRuntimeModel } from './provider-runtime'
 
-// ── Memory Service ──
-import { buildMemoryInjection, initMemoryPalace, storeAgentOutput, verifyAndStoreAgentOutput } from '../memory-service'
+// ── Memory Service — 使用 ForProject 族函数，经过 project_id + project_title 双重校验 ──
+import { buildMemoryInjectionForProject, initMemoryPalace, storeAgentOutputForProject, verifyAndStoreAgentOutputForProject } from '../memory-service'
 
 // ── Agent Message Builder ──
 
@@ -228,10 +228,10 @@ export async function generateNovelPlan(
   for (const agent of agentPlan) {
     const strategyEntry = strategy.find(s => s.agent_id === agent.id)
 
-    // Memory injection — generateNovelPlan 也做记忆注入
+    // Memory injection — 使用 ForProject 族函数，经过双重标识校验
     let memoryInjectionText = ''
     try {
-      const memResult = await buildMemoryInjection(project.id, {
+      const memResult = await buildMemoryInjectionForProject(project.id, project.title, {
         worldbuilding: upstreamContext['world-agent']?.output,
         characters: upstreamContext['character-agent']?.output?.characters,
         outline: upstreamContext['outline-agent']?.output,
@@ -273,9 +273,9 @@ export async function generateNovelPlan(
     results.push({ step: agent.id, success, output, error: response.error || '', outputSource: success ? 'llm' : 'seed' })
     upstreamContext = { ...upstreamContext, [agent.id]: output }
 
-    // 使用 verifyAndStoreAgentOutput 闭环：存入 → 核对 → 矛盾扫描
+    // 使用 verifyAndStoreAgentOutputForProject 闭环：存入 → 核对 → 矛盾扫描
     try {
-      const verifyResult = await verifyAndStoreAgentOutput(project.id, agent.id, output)
+      const verifyResult = await verifyAndStoreAgentOutputForProject(project.id, project.title, agent.id, output)
       if (verifyResult.verificationIssues.length > 0) {
         _verificationIssues.push(...verifyResult.verificationIssues)
       }
@@ -328,10 +328,10 @@ export async function executeNovelAgentChain(
 
     const strategyEntry = strategy.find(s => s.agent_id === agent.id)
 
-    // Memory injection — 提取记忆宫殿注入文本（拼接到 prompt 中）
+    // Memory injection — 使用 ForProject 族函数，经过双重标识校验
     let memoryInjectionText = ''
     try {
-      const memResult = await buildMemoryInjection(project.id, {
+      const memResult = await buildMemoryInjectionForProject(project.id, project.title, {
         worldbuilding: upstreamContext['world-agent']?.output,
         characters: upstreamContext['character-agent']?.output?.characters,
         outline: upstreamContext['outline-agent']?.output,
@@ -359,7 +359,7 @@ export async function executeNovelAgentChain(
     results.push({ step: agent.id, success, output, error: response.error || '', outputSource: success ? 'llm' : 'seed' })
     upstreamContext = { ...upstreamContext, [agent.id]: output }
 
-    try { await storeAgentOutput(project.id, agent.id, output) } catch { /* non-fatal */ }
+    try { await storeAgentOutputForProject(project.id, project.title, agent.id, output) } catch { /* non-fatal */ }
   }
 
   const review = buildNovelReview(results)
@@ -532,7 +532,7 @@ export async function generateNovelChapterProse(
 ) {
   let memoryInjection = ''
   try {
-    memoryInjection = await buildMemoryInjection(project.id, {
+    const memResult = await buildMemoryInjectionForProject(project.id, project.title, {
       worldbuilding: context.worldbuilding,
       characters: context.characters,
       outline: context.outline,
@@ -540,9 +540,10 @@ export async function generateNovelChapterProse(
       chapterSummary: chapter.chapter_summary,
       prevChapters: context.prevChapters,
     })
+    memoryInjection = memResult.text || ''
   } catch { /* non-fatal */ }
 
-  const upstreamContext = memoryInjection ? { memoryInjection } : {}
+  const upstreamContext = memoryInjection ? { memoryInjectionText: memoryInjection } : {}
   const proseMessages: LLMMessage[] = [
     {
       role: 'system',
@@ -569,7 +570,7 @@ export async function generateNovelChapterProse(
       const output = response.parsed || parseJsonFromContent(response.content)
       if (!output || !output.prose_chapters) throw new Error('Response missing prose_chapters')
 
-      try { await storeAgentOutput(project.id, 'prose-agent', output) } catch { /* non-fatal */ }
+      try { await storeAgentOutputForProject(project.id, project.title, 'prose-agent', output) } catch { /* non-fatal */ }
 
       return { success: true, output, error: undefined, outputSource: 'llm', modelId, modelName: undefined, providerId: undefined, usage: response.usage }
     } catch (error) {

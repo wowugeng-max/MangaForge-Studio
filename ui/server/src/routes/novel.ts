@@ -1,5 +1,6 @@
 import type { Express } from 'express'
 import { ensureWorkspaceStructure } from '../workspace'
+import { listMemoryPalaceProjects, purgeMemoryPalaceProject } from '../memory-service'
 import {
   appendNovelRun,
   appendChapterVersion,
@@ -881,5 +882,32 @@ ${instructions ? `\n额外指令：${instructions}` : ''}
         review,
       })
     } catch (error) { res.status(500).json({ error: String(error) }) }
+  })
+
+  // ═══ Memory Palace Management API ═══
+
+  /** GET /api/novel/memory-palace/projects — 列出记忆宫殿中所有已存储记忆的项目 */
+  app.get('/api/novel/memory-palace/projects', async (_req, res) => {
+    try {
+      const projects = await listMemoryPalaceProjects()
+      res.json({ projects })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  /** DELETE /api/novel/memory-palace/projects/:id — 删除指定项目的记忆宫殿数据 */
+  app.delete('/api/novel/memory-palace/projects/:id', async (req, res) => {
+    try {
+      const projectId = Number(req.params.id)
+      const projectTitle = req.body?.project_title || req.query?.project_title
+      const result = await purgeMemoryPalaceProject(projectId, projectTitle || undefined)
+      if (!result.ok) {
+        return res.status(400).json({ ok: false, error: result.error })
+      }
+      res.json({ ok: true, project_id: projectId, message: `已成功删除项目 ${projectId} 的所有记忆数据` })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
   })
 }
