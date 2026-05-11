@@ -9,14 +9,16 @@ from .recommendation_rule import RecommendationRule
 from .model_config import ModelConfig
 from .schemas import ImageData, VideoData, PromptData
 from backend.novel.models import (
-    NovelProject,
-    NovelWorldbuilding,
-    NovelCharacter,
-    NovelOutline,
     NovelChapter,
+    NovelChapterVersion,
+    NovelCharacter,
     NovelEvent,
     NovelForeshadowing,
-    NovelTimeline,
     NovelMemorySnapshot,
+    NovelOutline,
+    NovelProject,
+    NovelReview,
     NovelRunRecord,
+    NovelTimeline,
+    NovelWorldbuilding,
 )

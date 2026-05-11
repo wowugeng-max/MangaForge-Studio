@@ -888,10 +888,11 @@ export async function storeAgentOutput(
           const severity = issue.severity || 'medium'
           const desc = typeof issue === 'string' ? issue : (issue.description || '')
           const chapterNo = issue.chapter_no
+          const issueType = typeof issue === 'string' ? 'continuity_check' : (issue.issue_type || 'continuity_check')
           if (desc) {
             await logContinuityIssue(
               projectId,
-              'continuity_check',
+              issueType,
               desc,
               severity,
               chapterNo,

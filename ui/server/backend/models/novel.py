@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy.orm import relationship
 
 from .base import Base
 
@@ -21,6 +22,8 @@ class NovelProject(Base):
     status = Column(String(32), default="draft")
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    chapters = relationship("NovelChapter", back_populates="project", cascade="all, delete-orphan")
 
 
 class NovelWorldbuilding(Base):
@@ -87,6 +90,7 @@ class NovelChapter(Base):
 
     id = Column(Integer, primary_key=True)
     project_id = Column(Integer, ForeignKey("novel_projects.id"), nullable=False, index=True)
+    outline_id = Column(Integer, ForeignKey("novel_outlines.id"), nullable=True)
     chapter_no = Column(Integer, nullable=False)
     title = Column(String(255), nullable=False)
     chapter_goal = Column(Text, default="")
@@ -100,6 +104,9 @@ class NovelChapter(Base):
     published_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    project = relationship("NovelProject", back_populates="chapters")
+    versions = relationship("NovelChapterVersion", back_populates="chapter", cascade="all, delete-orphan")
 
 
 class NovelEvent(Base):
@@ -165,6 +172,33 @@ class NovelMemorySnapshot(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class NovelChapterVersion(Base):
+    __tablename__ = "novel_chapter_versions"
+
+    id = Column(Integer, primary_key=True)
+    chapter_id = Column(Integer, ForeignKey("novel_chapters.id"), nullable=False, index=True)
+    version_no = Column(Integer, nullable=False, default=1)
+    chapter_text = Column(Text, default="")
+    scene_breakdown = Column(JSON, default=list)
+    continuity_notes = Column(JSON, default=list)
+    source = Column(String(64), default="")  # manual | agent_execute | repair | rollback | restructure_expand | restructure_contract
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    chapter = relationship("NovelChapter", back_populates="versions")
+
+
+class NovelReview(Base):
+    __tablename__ = "novel_reviews"
+
+    id = Column(Integer, primary_key=True)
+    project_id = Column(Integer, ForeignKey("novel_projects.id"), nullable=False, index=True)
+    review_type = Column(String(64), default="")  # market_review, platform_fit, continuity_check, ...
+    summary = Column(Text, default="")
+    issues = Column(JSON, default=list)
+    payload = Column(Text, default="")  # JSON string for extra data
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class NovelRunRecord(Base):
     __tablename__ = "novel_run_records"
 
@@ -173,8 +207,8 @@ class NovelRunRecord(Base):
     run_type = Column(String(64), nullable=False)
     step_name = Column(String(64), nullable=False)
     status = Column(String(32), default="pending")
-    input_ref = Column(String(255), default="")
-    output_ref = Column(String(255), default="")
+    input_ref = Column(Text, default="")
+    output_ref = Column(Text, default="")
     duration_ms = Column(Integer, default=0)
     error_message = Column(Text, default="")
     created_at = Column(DateTime, default=datetime.utcnow)

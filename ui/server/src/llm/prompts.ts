@@ -519,33 +519,30 @@ export function buildPlatformFitPrompt(
 // ── Novel Seed (Fallback Content) ──
 
 export function buildNovelSeed(project: NovelProjectRecord, prompt: string) {
+  const requestedChapterCount = (() => {
+    const m = String(prompt || '').match(/(\d{1,3})\s*章/)
+    return m ? Number(m[1]) : 10
+  })()
+
   return {
-    world_summary: '末世后的废墟城市，循环系统持续重置一切，但因果偏差让每次重置都不完全一致。',
-    rules: ['循环会在固定时间重置所有事物', '但因果偏差可能导致每次重置不完全一致', '只有少数人会保留模糊的记忆'],
-    factions: [{ name: '管理机构', role: '秩序维持者' }, { name: '幸存者联盟', role: '反抗势力' }],
-    locations: [{ name: '事件现场', type: '起点' }],
-    systems: [{ name: '循环系统', description: '重置与因果偏差机制' }],
+    world_summary: project.synopsis || `${project.title}的核心世界观待生成。`,
+    rules: [],
+    factions: [],
+    locations: [],
+    systems: [],
     timeline_anchor: '故事起点',
-    known_unknowns: ['为什么会重启', '谁在操控世界'],
-    outline: { title: '第一卷', summary: '从废墟中觉醒，寻找循环的真相', hook: '循环的秘密远不止表面', chapter_count: 10 },
-    volumeOutlines: [{ title: '第一卷：觉醒', summary: '主角从废墟中恢复意识，发现自己被困在某种循环之中。通过与其他幸存者的接触，逐渐了解循环的真相。', hook: '循环的秘密远不止表面', chapter_count: 10 }],
-    chapters: [
-      { chapter_no: 1, title: '第一章：废墟', chapter_summary: '主角从废墟中醒来，失去记忆，发现自己身处末世废墟。', conflict: '主角与未知环境的对抗', ending_hook: '废墟中发现异常的循环迹象' },
-      { chapter_no: 2, title: '第二章：线索', chapter_summary: '主角跟随线索探索废墟，遇到其他幸存者。', conflict: '幸存者之间的信任危机', ending_hook: '发现循环的关键证据' },
-      { chapter_no: 3, title: '第三章：真相的碎片', chapter_summary: '主角逐渐拼凑出循环的真相，但每接近真相就更危险。', conflict: '接近真相与生存之间的抉择', ending_hook: '主角发现自己也是循环的一部分' },
-    ],
-    characters: [
-      { name: '沈夜', role: '主角', personality: ['冷静', '谨慎', '好奇心强'], motivation: '找回记忆', goal: '找出循环的真相', abilities: ['战术素养', '快速学习'], backstory: '曾参与某个秘密项目，记忆被清除', relationships: {}, arc_hint: '从被动接受到主动反抗' },
-    ],
+    known_unknowns: [],
+    outline: {
+      title: `${project.title}·暂定总纲`,
+      summary: project.synopsis || '待根据项目设定生成完整故事总纲。',
+      hook: `${project.title}的核心悬念待生成。`,
+      chapter_count: requestedChapterCount,
+    },
+    volumeOutlines: [],
+    chapters: [],
+    characters: [],
     prompt,
-    chapter_outlines: [
-      { chapter_no: 1, title: '第一章：废墟', summary: '主角从废墟中醒来', conflict: '与未知环境对抗', ending_hook: '发现循环迹象' },
-      { chapter_no: 2, title: '第二章：线索', summary: '跟随线索探索', conflict: '信任危机', ending_hook: '发现关键证据' },
-      { chapter_no: 3, title: '第三章：真相的碎片', summary: '拼凑真相', conflict: '真相与生存的抉择', ending_hook: '发现自己是循环的一部分' },
-    ],
-    foreshadowing_plan: [
-      { plant_at: 1, payoff_at: 5, description: '废墟中的异常时间痕迹' },
-      { plant_at: 2, payoff_at: 8, description: '幸存者之间的记忆矛盾' },
-    ],
+    chapter_outlines: [],
+    foreshadowing_plan: [],
   }
 }

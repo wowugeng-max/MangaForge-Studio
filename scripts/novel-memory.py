@@ -111,23 +111,33 @@ def cosine_similarity(a: Dict[str, float], b: Dict[str, float]) -> float:
 
 # ─── Database Schema ───
 
+def _get_columns(conn: sqlite3.Connection, table: str) -> set:
+    """Return the set of column names for a given table."""
+    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    return {r["name"] for r in rows}
+
+
+def _ensure_column(conn: sqlite3.Connection, table: str, col: str, col_def: str):
+    """Add a column if it doesn't already exist."""
+    cols = _get_columns(conn, table)
+    if col not in cols:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {col_def}")
+
+
 def init_db(conn: sqlite3.Connection):
-    """Initialize the memory palace database."""
+    """Initialize the memory palace database with schema migration support."""
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS memories (
             id TEXT PRIMARY KEY,
             project_id INTEGER NOT NULL,
             content TEXT NOT NULL,
             tags TEXT DEFAULT '[]',
-            category TEXT DEFAULT 'general',
-            tokens TEXT DEFAULT '[]',
-            created_at TEXT DEFAULT (datetime('now')),
-            updated_at TEXT DEFAULT (datetime('now'))
+            category TEXT DEFAULT 'general'
         );
         CREATE INDEX IF NOT EXISTS idx_project ON memories(project_id);
         CREATE INDEX IF NOT EXISTS idx_category ON memories(category);
         CREATE INDEX IF NOT EXISTS idx_project_category ON memories(project_id, category);
-        
+
         CREATE TABLE IF NOT EXISTS facts (
             id TEXT PRIMARY KEY,
             project_id INTEGER NOT NULL,
@@ -145,7 +155,7 @@ def init_db(conn: sqlite3.Connection):
         CREATE INDEX IF NOT EXISTS idx_facts_project ON facts(project_id);
         CREATE INDEX IF NOT EXISTS idx_facts_entity ON facts(entity);
         CREATE INDEX IF NOT EXISTS idx_facts_entity_attr ON facts(entity, attribute);
-        
+
         CREATE TABLE IF NOT EXISTS continuity_log (
             id TEXT PRIMARY KEY,
             project_id INTEGER NOT NULL,
@@ -161,6 +171,30 @@ def init_db(conn: sqlite3.Connection):
         CREATE INDEX IF NOT EXISTS idx_continuity_project ON continuity_log(project_id);
         CREATE INDEX IF NOT EXISTS idx_continuity_status ON continuity_log(status);
     """)
+
+    # ── Schema migration: add columns that may be missing on older DBs ──
+    # Note: SQLite ALTER TABLE ADD COLUMN requires constant defaults,
+    # so we use empty string and backfill existing rows.
+    _ensure_column(conn, "memories", "timestamp", "TEXT DEFAULT ''")
+    _ensure_column(conn, "memories", "tokens", "TEXT DEFAULT '[]'")
+    _ensure_column(conn, "memories", "created_at", "TEXT DEFAULT ''")
+    _ensure_column(conn, "memories", "updated_at", "TEXT DEFAULT ''")
+
+    # Backfill timestamps for rows that still have empty values
+    conn.execute("""
+        UPDATE memories SET created_at = datetime('now')
+        WHERE created_at IS NULL OR created_at = ''
+    """)
+    conn.execute("""
+        UPDATE memories SET updated_at = datetime('now')
+        WHERE updated_at IS NULL OR updated_at = ''
+    """)
+    # Sync legacy timestamp column with created_at
+    conn.execute("""
+        UPDATE memories SET timestamp = COALESCE(created_at, timestamp, datetime('now'))
+        WHERE timestamp IS NULL OR timestamp = ''
+    """)
+
     conn.commit()
 
 
@@ -172,9 +206,10 @@ def store_memory(project_id: int, content: str, category: str, tags: List[str]) 
     try:
         mid = str(uuid.uuid4())[:12]
         tokens = tokenize(content)
+        now = time.strftime("%Y-%m-%d %H:%M:%S")
         conn.execute(
-            "INSERT INTO memories (id, project_id, content, tags, category, tokens, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))",
-            (mid, project_id, content, json.dumps(tags, ensure_ascii=False), category, json.dumps(tokens, ensure_ascii=False)),
+            "INSERT INTO memories (id, project_id, content, tags, category, tokens, timestamp, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (mid, project_id, content, json.dumps(tags, ensure_ascii=False), category, json.dumps(tokens, ensure_ascii=False), now, now, now),
         )
         conn.commit()
         result = {"status": "ok", "memory_id": mid}

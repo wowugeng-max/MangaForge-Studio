@@ -32,6 +32,8 @@ from .schemas import (
     ProseGenerationRequest,
     RepairRequest,
     RepairResponse,
+    ChapterRestructureRequest,
+    ChapterRestructureResponse,
 )
 from .storage import (
     create_novel_project,
@@ -61,6 +63,7 @@ from .storage import (
 from .outline_generator import OutlineGenerator
 from .prose_generator import ProseGenerator
 from .repair_service import ContinuityRepair
+from .chapter_restructure import ChapterRestructure
 
 router = APIRouter(prefix="/api/novel", tags=["novel"])
 
@@ -383,3 +386,35 @@ async def generate_prose(
                 "version": updated_chapter.version if updated_chapter else 1,
             },
         }
+
+
+# ════════════════════════════════════════════════════════════
+#  Chapter Restructure — Expand / Contract 章节重组
+# ════════════════════════════════════════════════════════════
+
+@router.post("/chapters/restructure")
+async def restructure_chapters(
+    payload: ChapterRestructureRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    章节重组：扩展（扩写）/ 收缩（合并）章节。
+
+    - mode="expand": 将 N 章扩展为 target_count 章（新增章节，保留原始章节）
+    - mode="contract": 将 N 章合并为 target_count 章（删除多余章节）
+    """
+    project = get_novel_project(db, payload.project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    restructure = ChapterRestructure(db)
+    result = restructure.restructure(
+        project_id=payload.project_id,
+        model_id=payload.model_id,
+        chapter_ids=payload.chapter_ids,
+        mode=payload.mode,
+        target_count=payload.target_count,
+        instructions=payload.instructions,
+    )
+
+    return result

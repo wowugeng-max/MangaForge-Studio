@@ -325,6 +325,46 @@ class NovelReviewRead(NovelReviewBase):
         from_attributes = True
 
 
+# ── Chapter Restructure (Expand / Contract) ──────────────────────────
+
+class ChapterRestructureRequest(BaseModel):
+    """章节重组请求 — 扩展或收缩章节"""
+    project_id: int
+    model_id: Optional[int] = None
+    chapter_ids: list[int] = Field(default_factory=list)
+    mode: str = "expand"  # "expand" | "contract"
+    target_count: int = 1  # 目标章数（扩展模式）或目标章数（收缩模式，<=选中的章数）
+    instructions: str = ""  # 用户可选的额外指令
+
+
+class ChapterRestructureProgress(BaseModel):
+    """重组进度"""
+    step: str = ""
+    current: int = 0
+    total: int = 0
+    message: str = ""
+
+
+class ChapterRestructureResult(BaseModel):
+    """重组结果中的单章"""
+    id: int
+    chapter_no: int
+    title: str
+    chapter_summary: str = ""
+    chapter_text: str = ""
+    status: str = "draft"
+
+
+class ChapterRestructureResponse(BaseModel):
+    project_id: int
+    mode: str
+    original_count: int = 0
+    target_count: int = 0
+    new_chapters: list[ChapterRestructureResult] = Field(default_factory=list)
+    deleted_chapter_ids: list[int] = Field(default_factory=list)
+    message: str = ""
+
+
 # ── Run Record ───────────────────────────────────────────────────────
 
 class NovelRunRecordRead(BaseModel):

@@ -249,14 +249,27 @@ export async function generateNovelPlan(
       upstreamContext,
       memoryInjectionText,
       project,
+      payload: extractChapterCountPayload(prompt),
     }
 
     const response = await executeOneAgent(
       agent.id, project, context, strategyEntry, activeWorkspace, modelId,
     )
 
-    const success = !response.error && response.parsed
-    const output = response.parsed || {}
+    const parsedOutput = response.parsed || parseJsonFromContent(response.content)
+    const success = !response.error && !!parsedOutput
+    let output = parsedOutput || {}
+
+    if (success && agent.id === 'outline-agent') {
+      const guard = validateOutlineThemeAlignment(project, output)
+      if (!guard.ok) {
+        output = {}
+        results.push({ step: agent.id, success: false, output, error: guard.reason, outputSource: 'seed' })
+        upstreamContext = { ...upstreamContext, [agent.id]: output }
+        continue
+      }
+    }
+
     results.push({ step: agent.id, success, output, error: response.error || '', outputSource: success ? 'llm' : 'seed' })
     upstreamContext = { ...upstreamContext, [agent.id]: output }
 
@@ -340,8 +353,9 @@ export async function executeNovelAgentChain(
       agent.id, project, context, strategyEntry, activeWorkspace, modelId,
     )
 
-    const success = !response.error && response.parsed
-    const output = response.parsed || {}
+    const parsedOutput = response.parsed || parseJsonFromContent(response.content)
+    const success = !response.error && !!parsedOutput
+    const output = parsedOutput || {}
     results.push({ step: agent.id, success, output, error: response.error || '', outputSource: success ? 'llm' : 'seed' })
     upstreamContext = { ...upstreamContext, [agent.id]: output }
 
@@ -432,6 +446,51 @@ function parseJsonFromContent(content: string): any {
     if (match) { try { return JSON.parse(match[1]) } catch { return null } }
     return null
   }
+}
+
+function extractChapterCountPayload(prompt: string): Record<string, any> {
+  const match = String(prompt || '').match(/(\d{1,3})\s*章/)
+  return match ? { chapterCount: Number(match[1]) } : {}
+}
+
+function validateOutlineThemeAlignment(project: NovelProjectRecord, output: any): { ok: boolean; reason: string } {
+  const text = JSON.stringify(output || {})
+  if (!text || text === '{}') return { ok: false, reason: 'outline-agent 返回为空' }
+
+  const projectSignals = [
+    project.title,
+    project.genre,
+    project.synopsis,
+    ...(project.sub_genres || []),
+    ...(project.style_tags || []),
+  ]
+    .map(v => String(v || '').trim().toLowerCase())
+    .filter(Boolean)
+
+  const badSignals = [
+    '废墟尽头的灯塔', '废墟城市', '循环系统', '沈夜', '新元', '灯塔',
+  ]
+
+  const matchedProjectSignals = projectSignals.filter(signal => signal && text.toLowerCase().includes(signal))
+  const matchedBadSignals = badSignals.filter(signal => text.includes(signal))
+
+  if (matchedProjectSignals.length === 0 && matchedBadSignals.length >= 2) {
+    return {
+      ok: false,
+      reason: `outline-agent 结果疑似跑题：未命中项目关键信号，且命中异常种子信号 ${matchedBadSignals.join('、')}`,
+    }
+  }
+
+  const chapterOutlines = Array.isArray(output?.chapter_outlines) ? output.chapter_outlines : []
+  const expectedCount = Number(output?.master_outline?.chapter_count || output?.chapter_count || 0)
+  if (expectedCount > 0 && chapterOutlines.length > 0 && chapterOutlines.length !== expectedCount) {
+    return {
+      ok: false,
+      reason: `outline-agent 章节数不符合要求：期望 ${expectedCount} 章，实际 ${chapterOutlines.length} 章`,
+    }
+  }
+
+  return { ok: true, reason: '' }
 }
 
 function buildNovelRepairFallback(
