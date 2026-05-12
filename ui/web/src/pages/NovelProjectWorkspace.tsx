@@ -3,7 +3,7 @@ import {
   Button, Form, message, Modal, Select, Typography, Tooltip,
 } from 'antd'
 import {
-  ArrowLeftOutlined, ReloadOutlined,
+  ArrowLeftOutlined, BookOutlined, ReloadOutlined,
 } from '@ant-design/icons'
 import { useNavigate, useParams } from 'react-router-dom'
 import apiClient from '../api/client'
@@ -15,6 +15,7 @@ import { ChapterRestructurePanel } from './novel-workspace/ChapterRestructurePan
 import { EditorModal, type EditorKind } from './novel-workspace/EditorModal'
 import { OutlineControlPanel } from './novel-workspace/OutlineControlPanel'
 import { OutlineTreeModal } from './novel-workspace/OutlineTreeModal'
+import { ReferenceConfigModal } from './novel-workspace/ReferenceConfigModal'
 import { ReferencePanel } from './novel-workspace/ReferencePanel'
 import { VersionDetailModal } from './novel-workspace/VersionDetailModal'
 import { WorkspaceCenter } from './novel-workspace/WorkspaceCenter'
@@ -77,6 +78,7 @@ export default function NovelProjectWorkspace() {
 
   // ── 大纲生成控制面板 ──
   const [outlinePanelOpen, setOutlinePanelOpen] = useState(false)
+  const [referenceConfigOpen, setReferenceConfigOpen] = useState(false)
 
   // ── 章节弹出面板 ──
   const [chapterDrawerOpen, setChapterDrawerOpen] = useState(false)
@@ -684,6 +686,11 @@ export default function NovelProjectWorkspace() {
           options={models.map(m => ({ value: m.id, label: `${m.display_name || m.model_name} · ${m.provider}` }))}
           style={{ width: 220 }} placeholder="选择模型"
         />
+        <Tooltip title="配置当前项目生成时参考的投喂作品">
+          <Button type="text" size="small" icon={<BookOutlined />} onClick={() => setReferenceConfigOpen(true)}>
+            参考作品
+          </Button>
+        </Tooltip>
         <Tooltip title="刷新">
           <Button type="text" size="small" icon={<ReloadOutlined />} loading={loading} onClick={loadProjectModules} />
         </Tooltip>
@@ -773,6 +780,14 @@ export default function NovelProjectWorkspace() {
       <AgentExecutionModal
         execution={agentExecution}
         onClose={() => setAgentExecution(null)}
+      />
+
+      <ReferenceConfigModal
+        open={referenceConfigOpen}
+        projectId={projectId}
+        config={selectedProject?.reference_config || {}}
+        onClose={() => setReferenceConfigOpen(false)}
+        onSaved={(config) => setSelectedProject((prev: any) => prev ? { ...prev, reference_config: config } : prev)}
       />
 
       <OutlineTreeModal

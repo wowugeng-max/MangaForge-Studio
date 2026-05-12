@@ -27,6 +27,12 @@ const knowledgeCategoryPresets = [
   { value: 'scene_design', label: '场景设计' },
   { value: 'conflict_design', label: '冲突设计' },
   { value: 'resource_economy', label: '资源经济' },
+  { value: 'reference_profile', label: '参考作品画像' },
+  { value: 'volume_architecture', label: '分卷结构' },
+  { value: 'chapter_beat_template', label: '章节节拍模板' },
+  { value: 'character_function_matrix', label: '角色功能矩阵' },
+  { value: 'resource_economy_model', label: '资源经济模型' },
+  { value: 'style_profile', label: '文风画像' },
 ]
 
 const fieldLabelStyle: React.CSSProperties = {
@@ -133,7 +139,7 @@ export default function NovelStudio() {
       setKnowledgeProjectOptions(Array.isArray(res.data?.projects)
         ? res.data.projects.map((item: any) => ({
             value: String(item.title || ''),
-            label: `${item.title || '未命名项目'}${item.count ? ` ${item.count}` : ''}`,
+            label: `${item.title || '未命名项目'}${item.count ? ` ${item.count}` : ''}${item.profile_count ? ` / 画像${item.profile_count}` : ''}`,
           })).filter((item: any) => item.value)
         : [])
       setKnowledgeLoadedOnce(true)
@@ -846,6 +852,13 @@ export default function NovelStudio() {
     draft: projects.filter(p => p.status === 'draft').length,
     active: projects.filter(p => p.status && p.status !== 'draft').length,
   }), [projects])
+  const getReferenceProjects = (project: any) => (
+    Array.isArray(project?.reference_config?.references)
+      ? project.reference_config.references
+          .map((item: any) => String(item?.project_title || '').trim())
+          .filter(Boolean)
+      : []
+  )
 
   return (
     <div style={{ minHeight: '100vh', padding: 24, background: 'linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%)' }}>
@@ -912,6 +925,17 @@ export default function NovelStudio() {
                       <div>目标读者：{project.target_audience || '-'}</div>
                       <div>风格标签：{Array.isArray(project.style_tags) ? project.style_tags.join(' / ') : '-'}</div>
                     </div>
+                    {getReferenceProjects(project).length > 0 && (
+                      <Space wrap size={4}>
+                        <Tag color="purple" bordered={false}>参考 {getReferenceProjects(project).length}</Tag>
+                        {getReferenceProjects(project).slice(0, 2).map(title => (
+                          <Tag key={title} bordered={false}>{title}</Tag>
+                        ))}
+                        {getReferenceProjects(project).length > 2 && (
+                          <Tag bordered={false}>+{getReferenceProjects(project).length - 2}</Tag>
+                        )}
+                      </Space>
+                    )}
                     {project.synopsis && (
                       <div style={{ fontSize: 12, color: '#94a3b8', fontStyle: 'italic' }}>
                         "{project.synopsis}"

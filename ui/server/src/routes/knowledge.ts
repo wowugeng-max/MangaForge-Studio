@@ -28,14 +28,31 @@ export function registerKnowledgeRoutes(app: Express) {
       const entries = await listKnowledge(category || undefined, projectScope)
       const all = await listKnowledge(undefined, projectScope)
       const projectRows = projectId || projectTitle ? await listKnowledge() : all
-      const projectCounts = new Map<string, number>()
+      const profileCategories = new Set([
+        'reference_profile',
+        'volume_architecture',
+        'chapter_beat_template',
+        'character_function_matrix',
+        'resource_economy_model',
+        'style_profile',
+      ])
+      const projectCounts = new Map<string, { title: string; count: number; categories: Record<string, number>; profile_count: number }>()
       for (const entry of projectRows) {
         const title = String(entry.project_title || '').trim()
         if (!title) continue
-        projectCounts.set(title, (projectCounts.get(title) || 0) + 1)
+        const current = projectCounts.get(title) || { title, count: 0, categories: {}, profile_count: 0 }
+        current.count += 1
+        const cat = String(entry.category || 'general')
+        current.categories[cat] = (current.categories[cat] || 0) + 1
+        if (profileCategories.has(cat)) current.profile_count += 1
+        projectCounts.set(title, current)
       }
-      const projects = Array.from(projectCounts.entries())
-        .map(([title, count]) => ({ title, count }))
+      const projects = Array.from(projectCounts.values())
+        .map(item => ({
+          ...item,
+          profile_complete: ['reference_profile', 'chapter_beat_template', 'character_function_matrix', 'style_profile']
+            .every(cat => (item.categories[cat] || 0) > 0),
+        }))
         .sort((a, b) => b.count - a.count || a.title.localeCompare(b.title, 'zh-CN'))
       const summary: Record<string, { label: string; count: number }> = {}
       const categories = new Set(all.map(e => e.category).filter(Boolean))
@@ -59,6 +76,12 @@ export function registerKnowledgeRoutes(app: Express) {
         scene_design: '场景设计',
         conflict_design: '冲突设计',
         resource_economy: '资源经济',
+        reference_profile: '参考作品画像',
+        volume_architecture: '分卷结构',
+        chapter_beat_template: '章节节拍模板',
+        character_function_matrix: '角色功能矩阵',
+        resource_economy_model: '资源经济模型',
+        style_profile: '文风画像',
       }
       for (const cat of categories) {
         summary[cat] = {

@@ -582,6 +582,12 @@ ${novelText.slice(0, 12000)}
 16. scene_design（场景设计）：高频场景、场景功能、场景调度、对话/动作组织
 17. conflict_design（冲突设计）：人物冲突、制度冲突、资源冲突、价值观冲突、冲突升级
 18. resource_economy（资源经济）：金钱、装备、修炼成本、价格梯度、资源获取与消耗闭环
+19. reference_profile（参考作品画像）：全书核心公式、读者承诺、差异化卖点、可迁移结构
+20. volume_architecture（分卷结构）：卷目标、卷内升级、阶段冲突、跨卷衔接
+21. chapter_beat_template（章节节拍模板）：开章钩子、场景推进、爽点/笑点/压抑释放、章末钩子
+22. character_function_matrix（角色功能矩阵）：主角、配角、对手、工具人、情绪承载者的功能位与关系张力
+23. resource_economy_model（资源经济模型）：资源来源、价格梯度、消耗闭环、贫穷/稀缺如何驱动剧情
+24. style_profile（文风画像）：叙述视角、句式密度、吐槽/幽默机制、心理描写与对白比例
 
 输出 JSON 格式，是一个数组，每个元素包含以下字段：
   - category: 优先使用上述固定类别；如果文本出现更准确的新类别，也可以返回模型自定义类别（如 "faction_design"）
@@ -617,7 +623,9 @@ ${novelText.slice(0, 12000)}
 ]
 
 ⚠️ 绝对不要返回 markdown 格式，必须是纯 JSON 数组。
-⚠️ 固定类别中凡是文本有依据的类别至少产出 1 条知识点，总共产出 10-20 条；不要为了凑类别编造文本不存在的内容。
+⚠️ 固定类别中凡是文本有依据的类别至少产出 1 条知识点，总共产出 14-28 条；不要为了凑类别编造文本不存在的内容。
+⚠️ 如果文本来自连续多章或整本书，必须至少产出 reference_profile、chapter_beat_template、character_function_matrix、style_profile；如有分卷/阶段推进证据，产出 volume_architecture；如有金钱、装备、修炼成本、资源稀缺，产出 resource_economy_model。
+⚠️ 新增 profile 类知识必须写成“可迁移蓝图”，不要只复述原剧情；同时在 content 里标明“可借鉴结构”和“避免照搬点”。
 ⚠️ tags 支持自由标签：请加入文本中真实出现或可概括出的标签，例如"人物设计"、"境界瓶颈"、"能力代价"、"章节钩子"。
 ⚠️ genre_tags/trope_tags 必须服务于后续创作检索，不要只复制 category 名称。
 ⚠️ 分析必须基于文本中的具体内容，引用原文片段作为佐证。`
@@ -638,6 +646,8 @@ export function buildKnowledgeInjectionPrompt(
     use_case?: string
     evidence?: string
     chapter_range?: string
+    source_project?: string
+    reference_weight?: number
   }>,
 ): string {
   if (!knowledgeEntries.length) return ''
@@ -672,6 +682,12 @@ export function buildKnowledgeInjectionPrompt(
     scene_design: '场景设计',
     conflict_design: '冲突设计',
     resource_economy: '资源经济',
+    reference_profile: '参考作品画像',
+    volume_architecture: '分卷结构',
+    chapter_beat_template: '章节节拍模板',
+    character_function_matrix: '角色功能矩阵',
+    resource_economy_model: '资源经济模型',
+    style_profile: '文风画像',
   }
 
   for (const [cat, entries] of Object.entries(groups)) {
@@ -679,6 +695,8 @@ export function buildKnowledgeInjectionPrompt(
     for (const entry of entries) {
       parts.push(`  💡 ${entry.title}（重要度: ${entry.weight}/5）`)
       const meta: string[] = []
+      if (entry.source_project) meta.push(`参考:${entry.source_project}`)
+      if (entry.reference_weight) meta.push(`权重:${Math.round(entry.reference_weight * 100)}%`)
       if (entry.use_case) meta.push(`用途:${entry.use_case}`)
       if (entry.genre_tags?.length) meta.push(`题材:${entry.genre_tags.join('、')}`)
       if (entry.trope_tags?.length) meta.push(`套路:${entry.trope_tags.join('、')}`)
@@ -690,7 +708,7 @@ export function buildKnowledgeInjectionPrompt(
     }
   }
 
-  parts.push('⚠️ 请注意：以上知识是参考，不是模板。请根据你的作品风格灵活运用，不要照搬。')
+  parts.push('⚠️ 请注意：以上知识是参考蓝图，不是模板。只能借鉴结构、功能和节奏，禁止照搬原作品角色名、专有名词、具体桥段顺序和原文表达。')
 
   return parts.join('\n')
 }

@@ -40,6 +40,62 @@ async function buildKnowledgeInjectionText(
   taskType: string,
 ): Promise<string> {
   try {
+    const taskAliases: Record<string, string[]> = {
+      大纲生成: ['全部', '全案', '规划', '大纲', '粗纲', '细纲', '章纲', '分卷', '剧情', '结构', '节奏', '资源经济'],
+      全案规划: ['全部', '全案', '规划', '定位', '卖点', '套路', '大纲', '世界观', '角色', '文风'],
+      世界观设定: ['全部', '世界观', '设定', '能力', '境界', '资源', '资源经济', '制度', '势力'],
+      角色设定: ['全部', '角色', '人物', '人设', '关系', '群像', '情绪', '冲突'],
+      正文创作: ['全部', '正文', '章节', '文风', '对白', '场景', '情绪', '节奏', '章末钩子'],
+    }
+    const normalizeAlias = (value: string) => String(value || '').toLowerCase().replace(/\s+/g, '')
+    const matchesTask = (useFor: string[]) => {
+      if (!useFor.length) return true
+      const aliases = (taskAliases[taskType] || [taskType]).map(normalizeAlias)
+      return useFor.map(normalizeAlias).some(item =>
+        item === 'all' ||
+        item === '全部' ||
+        aliases.some(alias => item.includes(alias) || alias.includes(item)),
+      )
+    }
+
+    const references = Array.isArray(project.reference_config?.references)
+      ? project.reference_config.references
+          .map((item: any) => ({
+            project_title: String(item?.project_title || '').trim(),
+            weight: Math.max(0.1, Math.min(1, Number(item?.weight || 0.7) || 0.7)),
+            use_for: Array.isArray(item?.use_for) ? item.use_for.map((v: any) => String(v).trim()).filter(Boolean) : [],
+            avoid: Array.isArray(item?.avoid) ? item.avoid.map((v: any) => String(v).trim()).filter(Boolean) : [],
+          }))
+          .filter((item: any) => item.project_title)
+      : []
+    const activeReferences = references.filter((ref: any) => matchesTask(ref.use_for))
+
+    const categoryByTask: Record<string, string[]> = {
+      大纲生成: ['reference_profile', 'volume_architecture', 'story_design', 'story_pacing', 'genre_positioning', 'selling_point', 'reader_hook', 'conflict_design', 'resource_economy_model', 'resource_economy', 'character_function_matrix'],
+      全案规划: ['reference_profile', 'volume_architecture', 'character_function_matrix', 'genre_positioning', 'selling_point', 'trope_design', 'worldbuilding', 'resource_economy_model', 'style_profile'],
+      世界观设定: ['reference_profile', 'worldbuilding', 'ability_design', 'realm_design', 'resource_economy_model', 'resource_economy', 'conflict_design'],
+      角色设定: ['character_function_matrix', 'character_design', 'emotion_design', 'conflict_design', 'reference_profile'],
+      正文创作: ['style_profile', 'chapter_beat_template', 'writing_style', 'technique', 'scene_design', 'emotion_design', 'reader_hook', 'story_pacing'],
+    }
+    const taskCategories = categoryByTask[taskType] || categoryByTask.全案规划
+    const referenceNotes = String(project.reference_config?.notes || '').trim()
+    const referenceGuideText = activeReferences.length > 0
+      ? [
+          '【参考作品配置】',
+          ...activeReferences.map((ref: any) => {
+            const parts = [
+              `- ${ref.project_title}`,
+              `权重 ${Math.round(ref.weight * 100)}%`,
+              ref.use_for.length ? `用途：${ref.use_for.join('、')}` : '',
+              ref.avoid.length ? `避免照搬：${ref.avoid.join('、')}` : '',
+            ].filter(Boolean)
+            return parts.join('；')
+          }),
+          referenceNotes ? `补充策略：${referenceNotes}` : '',
+          '执行要求：只迁移结构、节奏、角色功能位、资源经济与文风机制，不复制原作品角色名、专有名词、具体桥段顺序和原文表达。',
+        ].filter(Boolean).join('\n')
+      : ''
+
     // Build query from genre, style_tags, and synopsis
     const queryParts: string[] = []
     if (project.genre) queryParts.push(project.genre)
@@ -50,19 +106,63 @@ async function buildKnowledgeInjectionText(
     const query = queryParts.join(' ')
     if (!query) return ''
 
-    const entries = await queryKnowledge(query, { top_k: 8 })
-    if (!entries.length) return ''
+    const collected: Array<any> = []
+    const seen = new Set<string>()
+    const addEntries = (entries: any[], sourceProject = '', referenceWeight?: number) => {
+      for (const entry of entries) {
+        const key = `${entry.id || ''}:${entry.category}:${entry.title || entry.content?.slice(0, 40)}`
+        if (seen.has(key)) continue
+        seen.add(key)
+        collected.push({ ...entry, source_project: sourceProject || entry.project_title || '', reference_weight: referenceWeight })
+      }
+    }
 
-    return buildKnowledgeInjectionPrompt(
+    if (activeReferences.length > 0) {
+      for (const ref of activeReferences) {
+        const useFor = ref.use_for.length ? ref.use_for.join(' ') : taskType
+        const refQuery = [query, useFor, `参考作品 ${ref.project_title}`].filter(Boolean).join(' ')
+        const profileEntries = await queryKnowledge(refQuery, { top_k: 6, project_title: ref.project_title })
+        addEntries(profileEntries.filter(entry => taskCategories.includes(entry.category) || !entry.category), ref.project_title, ref.weight)
+
+        for (const category of taskCategories.slice(0, 6)) {
+          const categoryEntries = await queryKnowledge(refQuery, { top_k: 2, project_title: ref.project_title, category })
+          addEntries(categoryEntries, ref.project_title, ref.weight)
+        }
+      }
+    }
+
+    const entries = collected.length > 0
+      ? collected
+      : (activeReferences.length > 0 ? [] : await queryKnowledge(query, { top_k: 8 }))
+    if (!entries.length) {
+      return referenceGuideText
+        ? `${referenceGuideText}\n提示：当前参考作品未命中可注入知识条目，请确认该投喂项目已完成知识提炼，尤其是参考作品画像、章节节拍模板、角色功能矩阵和文风画像。`
+        : ''
+    }
+
+    const ranked = entries
+      .map(entry => ({ ...entry, rank_score: Number(entry.reference_weight || 0.5) * 10 + Number(entry.weight || 3) + Number(entry.similarity || 0) }))
+      .sort((a, b) => b.rank_score - a.rank_score)
+      .slice(0, activeReferences.length > 0 ? 18 : 8)
+
+    const knowledgeText = buildKnowledgeInjectionPrompt(
       project.genre || '',
       taskType,
-      entries.map(e => ({
+      ranked.map(e => ({
         category: e.category,
         title: e.title,
         content: e.content,
         weight: e.weight,
+        genre_tags: e.genre_tags,
+        trope_tags: e.trope_tags,
+        use_case: e.use_case,
+        evidence: e.evidence,
+        chapter_range: e.chapter_range,
+        source_project: e.source_project || e.project_title,
+        reference_weight: e.reference_weight,
       })),
     )
+    return referenceGuideText ? `${referenceGuideText}\n\n${knowledgeText}` : knowledgeText
   } catch (err) {
     console.warn('[knowledge-injection] Failed to build injection:', String(err).slice(0, 200))
     return ''
@@ -313,25 +413,38 @@ export async function executeNovelAgentChain(
       }
   const { modelId, activeWorkspace, skipMemory, continueFrom, existingChapters } = normalizedOptions
 
+  const knowledgeForTask = async (taskType: string) => {
+    try {
+      return await buildKnowledgeInjectionText(project, taskType)
+    } catch (err) {
+      console.warn(`[knowledge-injection] Failed for ${taskType}:`, String(err).slice(0, 200))
+      return ''
+    }
+  }
+
   // 1. Market Agent
+  const marketKnowledgeInjectionText = await knowledgeForTask('全案规划')
   const marketResult = await executeNovelAgent(
     'market-agent',
     project,
-    {},
+    { knowledgeInjectionText: marketKnowledgeInjectionText },
     { modelId, activeWorkspace, skipMemory },
   )
 
   // 2. World Agent
+  const worldKnowledgeInjectionText = await knowledgeForTask('世界观设定')
   const worldResult = await executeNovelAgent(
     'world-agent',
     project,
     {
       upstreamContext: { 'market-agent': marketResult.content },
+      knowledgeInjectionText: worldKnowledgeInjectionText,
     },
     { modelId, activeWorkspace, skipMemory },
   )
 
   // 3. Character Agent
+  const characterKnowledgeInjectionText = await knowledgeForTask('角色设定')
   const charResult = await executeNovelAgent(
     'character-agent',
     project,
@@ -340,6 +453,7 @@ export async function executeNovelAgentChain(
         'market-agent': marketResult.content,
         'world-agent': worldResult.content,
       },
+      knowledgeInjectionText: characterKnowledgeInjectionText,
     },
     { modelId, activeWorkspace, skipMemory },
   )
