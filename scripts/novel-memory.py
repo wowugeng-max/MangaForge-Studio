@@ -454,6 +454,9 @@ def _ensure_knowledge_table(conn: sqlite3.Connection):
             source TEXT NOT NULL DEFAULT '', source_title TEXT DEFAULT '',
             title TEXT DEFAULT '', content TEXT NOT NULL,
             tags TEXT DEFAULT '[]', weight INTEGER DEFAULT 3,
+            genre_tags TEXT DEFAULT '[]', trope_tags TEXT DEFAULT '[]',
+            use_case TEXT DEFAULT '', evidence TEXT DEFAULT '', chapter_range TEXT DEFAULT '',
+            entities TEXT DEFAULT '[]', confidence REAL DEFAULT 0,
             created_at TEXT DEFAULT (datetime('now'))
         )
     """)
@@ -464,6 +467,13 @@ def _ensure_knowledge_table(conn: sqlite3.Connection):
         ("weight", "INTEGER DEFAULT 3"),
         ("project_id", "INTEGER DEFAULT 0"),
         ("project_title", "TEXT DEFAULT ''"),
+        ("genre_tags", "TEXT DEFAULT '[]'"),
+        ("trope_tags", "TEXT DEFAULT '[]'"),
+        ("use_case", "TEXT DEFAULT ''"),
+        ("evidence", "TEXT DEFAULT ''"),
+        ("chapter_range", "TEXT DEFAULT ''"),
+        ("entities", "TEXT DEFAULT '[]'"),
+        ("confidence", "REAL DEFAULT 0"),
     ]:
         _ensure_column(conn, "knowledge", col_name, col_def)
     conn.executescript("""
@@ -472,6 +482,33 @@ def _ensure_knowledge_table(conn: sqlite3.Connection):
         CREATE INDEX IF NOT EXISTS idx_knowledge_project_title ON knowledge(project_title);
     """)
     conn.commit()
+
+
+def _parse_json_list(value: Any) -> List[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(v).strip() for v in value if str(v).strip()]
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            if isinstance(parsed, list):
+                return [str(v).strip() for v in parsed if str(v).strip()]
+        except:
+            pass
+        return [t.strip() for t in re.split(r"[,，\n]", value) if t.strip()]
+    return []
+
+
+def _normalize_knowledge_row(row: sqlite3.Row) -> Dict:
+    d = dict(row)
+    for key in ("tags", "genre_tags", "trope_tags", "entities"):
+        d[key] = _parse_json_list(d.get(key))
+    try:
+        d["confidence"] = float(d.get("confidence") or 0)
+    except:
+        d["confidence"] = 0
+    return d
 
 
 def _knowledge_project_filters(project_id: Optional[int] = None, project_title: Optional[str] = None) -> tuple[List[str], List[Any]]:
@@ -496,15 +533,31 @@ def store_knowledge(
     weight: int = 3,
     project_id: int = 0,
     project_title: str = "",
+    genre_tags: List[str] = None,
+    trope_tags: List[str] = None,
+    use_case: str = "",
+    evidence: str = "",
+    chapter_range: str = "",
+    entities: List[str] = None,
+    confidence: float = 0,
 ) -> str:
     conn = get_conn()
     try:
         _ensure_knowledge_table(conn)
         kid = str(uuid.uuid4())[:12]
         tags = tags or []
+        genre_tags = genre_tags or []
+        trope_tags = trope_tags or []
+        entities = entities or []
         conn.execute(
-            "INSERT INTO knowledge (id, category, project_id, project_title, source, source_title, title, content, tags, weight, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))",
-            (kid, category, int(project_id or 0), project_title or "", source, source_title, title, content, json.dumps(tags, ensure_ascii=False), weight),
+            "INSERT INTO knowledge (id, category, project_id, project_title, source, source_title, title, content, tags, weight, genre_tags, trope_tags, use_case, evidence, chapter_range, entities, confidence, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))",
+            (
+                kid, category, int(project_id or 0), project_title or "", source, source_title, title, content,
+                json.dumps(tags, ensure_ascii=False), weight,
+                json.dumps(genre_tags, ensure_ascii=False), json.dumps(trope_tags, ensure_ascii=False),
+                use_case or "", evidence or "", chapter_range or "",
+                json.dumps(entities, ensure_ascii=False), float(confidence or 0),
+            ),
         )
         conn.commit()
         print(json.dumps({"status": "ok", "knowledge_id": kid, "project_id": int(project_id or 0), "project_title": project_title or ""}, ensure_ascii=False))
@@ -543,11 +596,7 @@ def query_knowledge(
         scored = []
         for i, r in enumerate(rows):
             sim = cosine_similarity(vectors[0], vectors[i + 1]) if i < len(vectors) - 1 else 0.0
-            d = dict(r)
-            try:
-                d["tags"] = json.loads(d["tags"]) if isinstance(d["tags"], str) else d["tags"]
-            except:
-                d["tags"] = []
+            d = _normalize_knowledge_row(r)
             scored.append((sim, d))
         scored.sort(key=lambda x: x[0], reverse=True)
         results = [{**entry, "similarity": round(sim, 4)} for sim, entry in scored[:top_k]]
@@ -578,12 +627,7 @@ def list_knowledge(
         rows = conn.execute(sql, params).fetchall()
         entries = []
         for r in rows:
-            d = dict(r)
-            try:
-                d["tags"] = json.loads(d["tags"]) if isinstance(d["tags"], str) else d["tags"]
-            except:
-                d["tags"] = []
-            entries.append(d)
+            entries.append(_normalize_knowledge_row(r))
         print(json.dumps({"status": "ok", "count": len(entries), "entries": entries}, ensure_ascii=False))
         return {"entries": entries}
     finally:
@@ -770,6 +814,13 @@ def main():
     p.add_argument("--weight", type=int, default=3)
     p.add_argument("--project-id", type=int, default=0)
     p.add_argument("--project-title", default="")
+    p.add_argument("--genre-tags", default="[]")
+    p.add_argument("--trope-tags", default="[]")
+    p.add_argument("--use-case", default="")
+    p.add_argument("--evidence", default="")
+    p.add_argument("--chapter-range", default="")
+    p.add_argument("--entities", default="[]")
+    p.add_argument("--confidence", type=float, default=0)
 
     p = sub.add_parser("query-knowledge")
     p.add_argument("--query", required=True)
@@ -865,12 +916,28 @@ def main():
         if args.content_file:
             with open(args.content_file, "r", encoding="utf-8") as f:
                 content = f.read()
-        tags = []
-        try:
-            tags = json.loads(args.tags)
-        except:
-            tags = [t.strip() for t in args.tags.split(",") if t.strip()] if args.tags else []
-        store_knowledge(args.category, content, args.source, args.source_title, args.title, tags, args.weight, args.project_id, args.project_title)
+        tags = _parse_json_list(args.tags)
+        genre_tags = _parse_json_list(args.genre_tags)
+        trope_tags = _parse_json_list(args.trope_tags)
+        entities = _parse_json_list(args.entities)
+        store_knowledge(
+            args.category,
+            content,
+            args.source,
+            args.source_title,
+            args.title,
+            tags,
+            args.weight,
+            args.project_id,
+            args.project_title,
+            genre_tags,
+            trope_tags,
+            args.use_case,
+            args.evidence,
+            args.chapter_range,
+            entities,
+            args.confidence,
+        )
 
     elif args.command == "query-knowledge":
         query_knowledge(args.query, args.category, args.top_k, args.project_id, args.project_title)

@@ -56,6 +56,13 @@ export interface KnowledgeEntry {
   title?: string
   content: string
   tags: string[]
+  genre_tags?: string[]
+  trope_tags?: string[]
+  use_case?: string
+  evidence?: string
+  chapter_range?: string
+  entities?: string[]
+  confidence?: number
   weight: number
   created_at: string
 }
@@ -64,7 +71,7 @@ export interface KnowledgeSummary {
   [category: string]: { label: string; count: number }
 }
 
-export type KnowledgeIngestJobStatus = 'queued' | 'running' | 'completed' | 'failed'
+export type KnowledgeIngestJobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'canceled'
 export type KnowledgeIngestBatchStatus = 'pending' | 'analyzing' | 'completed' | 'failed'
 
 export interface KnowledgeIngestBatch {
@@ -87,6 +94,10 @@ export interface KnowledgeIngestJob {
   progress: number
   url: string
   model_id?: number
+  full_book?: boolean
+  auto_store?: boolean
+  project_id?: number
+  project_title?: string
   start_chapter: number
   max_chapters: number
   batch_size: number
@@ -99,6 +110,8 @@ export interface KnowledgeIngestJob {
   current_range?: string
   batches: KnowledgeIngestBatch[]
   entries: KnowledgeEntry[]
+  stored_count?: number
+  synced_count?: number
   errors: string[]
   created_at: string
   updated_at: string
@@ -106,8 +119,19 @@ export interface KnowledgeIngestJob {
 
 const ingestJobs = new Map<string, KnowledgeIngestJob>()
 const ingestJobChapters = new Map<string, any[]>()
+const ingestJobControllers = new Map<string, AbortController>()
 
 function normalizeKnowledgeEntry(raw: Partial<KnowledgeEntry>): KnowledgeEntry {
+  const normalizeList = (value: any): string[] => {
+    if (Array.isArray(value)) return value.map(item => String(item).trim()).filter(Boolean)
+    if (typeof value === 'string') {
+      const parsed = tryParseJson<any>(value, null)
+      if (Array.isArray(parsed)) return parsed.map(item => String(item).trim()).filter(Boolean)
+      return value.split(/[,，\n]/).map(item => item.trim()).filter(Boolean)
+    }
+    return []
+  }
+
   return {
     id: String(raw.id || ''),
     category: String(raw.category || 'general').trim() || 'general',
@@ -117,9 +141,14 @@ function normalizeKnowledgeEntry(raw: Partial<KnowledgeEntry>): KnowledgeEntry {
     source_title: String(raw.source_title || raw.source || '知识库导入').trim() || '知识库导入',
     title: String(raw.title || '').trim(),
     content: String(raw.content || '').trim(),
-    tags: Array.isArray(raw.tags)
-      ? raw.tags.map(tag => String(tag).trim()).filter(Boolean)
-      : [],
+    tags: normalizeList(raw.tags),
+    genre_tags: normalizeList(raw.genre_tags),
+    trope_tags: normalizeList(raw.trope_tags),
+    use_case: String(raw.use_case || '').trim(),
+    evidence: String(raw.evidence || '').trim(),
+    chapter_range: String(raw.chapter_range || '').trim(),
+    entities: normalizeList(raw.entities),
+    confidence: Math.max(0, Math.min(1, Number(raw.confidence || 0) || 0)),
     weight: Math.max(1, Math.min(5, Number(raw.weight || 3) || 3)),
     created_at: String(raw.created_at || ''),
   }
@@ -146,6 +175,12 @@ function normalizeDedupeText(value: string) {
     .replace(/[，。、“”‘’：:；;,.!?！？（）()[\]【】《》]/g, '')
 }
 
+function mergeStringLists(...lists: Array<string[] | undefined>) {
+  return Array.from(new Set(
+    lists.flatMap(list => list || []).map(item => String(item).trim()).filter(Boolean),
+  ))
+}
+
 function dedupeKnowledgeEntries(entries: KnowledgeEntry[]): KnowledgeEntry[] {
   const merged = new Map<string, KnowledgeEntry>()
 
@@ -162,16 +197,23 @@ function dedupeKnowledgeEntries(entries: KnowledgeEntry[]): KnowledgeEntry[] {
       continue
     }
 
-    const tags = Array.from(new Set([
-      ...(existing.tags || []),
-      ...(entry.tags || []),
-    ].map(tag => String(tag).trim()).filter(Boolean)))
+    const tags = mergeStringLists(existing.tags, entry.tags)
+    const genreTags = mergeStringLists(existing.genre_tags, entry.genre_tags)
+    const tropeTags = mergeStringLists(existing.trope_tags, entry.trope_tags)
+    const entities = mergeStringLists(existing.entities, entry.entities)
 
     merged.set(key, {
       ...existing,
       title: existing.title || entry.title,
       content: entry.content.length > existing.content.length ? entry.content : existing.content,
       tags,
+      genre_tags: genreTags,
+      trope_tags: tropeTags,
+      use_case: existing.use_case || entry.use_case,
+      evidence: existing.evidence || entry.evidence,
+      chapter_range: existing.chapter_range || entry.chapter_range,
+      entities,
+      confidence: Math.max(existing.confidence || 0, entry.confidence || 0),
       weight: Math.max(existing.weight || 3, entry.weight || 3),
       source: existing.source || entry.source,
       source_title: existing.source_title || entry.source_title,
@@ -229,8 +271,8 @@ function mapKnowledgeToMemoryCategory(entry: KnowledgeEntry): 'worldbuilding' | 
   if (/character|character_design|character_craft|人物|角色|人设|群像/.test(corpus)) return 'character'
   if (/foreshadow|伏笔|悬念|钩子|回收/.test(corpus)) return 'foreshadowing'
   if (/writing_style|文风|语言|叙事|视角|修辞|笔触/.test(corpus)) return 'prose'
-  if (/world|worldbuilding|ability_design|realm_design|体系|设定|世界观|能力|境界|realm|power|cultivation|faction|宗门|势力/.test(corpus)) return 'worldbuilding'
-  if (/pace|story_pacing|story_design|volume_design|节奏|故事|剧情|story|plot|结构|分卷|章纲|冲突|推进|反转/.test(corpus)) return 'plot'
+  if (/world|worldbuilding|ability_design|realm_design|resource_economy|体系|设定|世界观|能力|境界|资源|经济|价格|装备|realm|power|cultivation|faction|宗门|势力/.test(corpus)) return 'worldbuilding'
+  if (/pace|story_pacing|story_design|volume_design|genre_positioning|trope_design|selling_point|reader_hook|emotion_design|scene_design|conflict_design|节奏|题材|套路|卖点|爽点|情绪|场景|故事|剧情|story|plot|结构|分卷|章纲|冲突|推进|反转/.test(corpus)) return 'plot'
   return 'general'
 }
 
@@ -274,6 +316,13 @@ export async function storeKnowledge(input: {
   source_title?: string
   title?: string
   tags?: string[]
+  genre_tags?: string[]
+  trope_tags?: string[]
+  use_case?: string
+  evidence?: string
+  chapter_range?: string
+  entities?: string[]
+  confidence?: number
   weight?: number
   project_id?: number
   project_title?: string
@@ -285,6 +334,13 @@ export async function storeKnowledge(input: {
     source_title: input.source_title,
     title: input.title,
     tags: input.tags,
+    genre_tags: input.genre_tags,
+    trope_tags: input.trope_tags,
+    use_case: input.use_case,
+    evidence: input.evidence,
+    chapter_range: input.chapter_range,
+    entities: input.entities,
+    confidence: input.confidence,
     weight: input.weight,
     project_id: input.project_id,
     project_title: input.project_title,
@@ -296,6 +352,13 @@ export async function storeKnowledge(input: {
   if (entry.source_title) args.push('--source-title', entry.source_title)
   if (entry.title) args.push('--title', entry.title)
   if (entry.tags.length) args.push('--tags', JSON.stringify(entry.tags))
+  if (entry.genre_tags?.length) args.push('--genre-tags', JSON.stringify(entry.genre_tags))
+  if (entry.trope_tags?.length) args.push('--trope-tags', JSON.stringify(entry.trope_tags))
+  if (entry.use_case) args.push('--use-case', entry.use_case)
+  if (entry.evidence) args.push('--evidence', entry.evidence)
+  if (entry.chapter_range) args.push('--chapter-range', entry.chapter_range)
+  if (entry.entities?.length) args.push('--entities', JSON.stringify(entry.entities))
+  if (entry.confidence) args.push('--confidence', String(entry.confidence))
   if (entry.weight) args.push('--weight', String(entry.weight))
 
   const output = await execScript(args)
@@ -450,8 +513,9 @@ export async function playwrightFetchUrl(url: string): Promise<any> {
 /**
  * Fetch novel chapters serially using Playwright. Follows "next chapter" links.
  */
-export async function playwrightFetchSerial(url: string, maxChapters: number = 500, startChapter: number = 1): Promise<any> {
+export async function playwrightFetchSerial(url: string, maxChapters: number = 500, startChapter: number = 1, signal?: AbortSignal): Promise<any> {
   const py = getPythonPath()
+  const fullBook = Number(maxChapters || 0) <= 0
   try {
     const { stdout } = await execFileAsync(py, [
       PLAYWRIGHT_FETCH_PATH,
@@ -463,8 +527,9 @@ export async function playwrightFetchSerial(url: string, maxChapters: number = 5
       '--start-chapter',
       String(startChapter),
     ], {
-      timeout: 600000,
-      maxBuffer: 20 * 1024 * 1024,
+      timeout: fullBook ? 0 : 600000,
+      maxBuffer: fullBook ? 300 * 1024 * 1024 : 20 * 1024 * 1024,
+      signal,
     })
     return JSON.parse(String(stdout || '[]'))
   } catch (error: any) {
@@ -478,7 +543,11 @@ export async function playwrightFetchSerial(url: string, maxChapters: number = 5
 /**
  * Analyze text using LLM to extract writing knowledge.
  */
-export async function analyzeKnowledge(text: string, source: string, modelId?: number): Promise<KnowledgeEntry[]> {
+export async function analyzeKnowledge(text: string, source: string, modelId?: number, options?: {
+  signal?: AbortSignal
+  timeoutMs?: number
+  maxRetries?: number
+}): Promise<KnowledgeEntry[]> {
   const { buildNovelAnalysisPrompt } = await import('./llm/prompts')
   const { executeWithRuntimeModel } = await import('./llm/provider-runtime')
   const { loadActiveWorkspace } = await import('./workspace')
@@ -500,6 +569,11 @@ export async function analyzeKnowledge(text: string, source: string, modelId?: n
       response_format: 'json',
     },
     preferredModelId,
+    {
+      signal: options?.signal,
+      timeoutMs: options?.timeoutMs,
+      maxRetries: options?.maxRetries,
+    },
   )
 
   if (result.error) {
@@ -517,6 +591,13 @@ export async function analyzeKnowledge(text: string, source: string, modelId?: n
       title: row?.title,
       content: row?.content,
       tags: row?.tags,
+      genre_tags: row?.genre_tags,
+      trope_tags: row?.trope_tags,
+      use_case: row?.use_case,
+      evidence: row?.evidence,
+      chapter_range: row?.chapter_range,
+      entities: row?.entities,
+      confidence: row?.confidence,
       weight: row?.weight,
       source,
       source_title: source,
@@ -524,18 +605,143 @@ export async function analyzeKnowledge(text: string, source: string, modelId?: n
     .filter(entry => Boolean(entry.content))
 }
 
+function compactEntryForSynthesis(entry: KnowledgeEntry, index: number) {
+  return {
+    index: index + 1,
+    category: entry.category,
+    title: entry.title,
+    content: entry.content.slice(0, 650),
+    tags: entry.tags || [],
+    genre_tags: entry.genre_tags || [],
+    trope_tags: entry.trope_tags || [],
+    use_case: entry.use_case || '',
+    evidence: entry.evidence || '',
+    chapter_range: entry.chapter_range || entry.source_title || '',
+    entities: entry.entities || [],
+    weight: entry.weight || 3,
+    confidence: entry.confidence || 0,
+  }
+}
+
+async function synthesizeFullBookKnowledge(
+  job: KnowledgeIngestJob,
+  entries: KnowledgeEntry[],
+  chapters: any[],
+  signal?: AbortSignal,
+): Promise<KnowledgeEntry[]> {
+  if (!entries.length) return []
+
+  const { executeWithRuntimeModel } = await import('./llm/provider-runtime')
+  const { loadActiveWorkspace } = await import('./workspace')
+  const workspace = await loadActiveWorkspace()
+
+  const firstChapter = chapters[0]?.chapter || job.start_chapter || 1
+  const lastChapter = chapters[chapters.length - 1]?.chapter || chapters.length
+  const chapterRange = `第${firstChapter}-${lastChapter}章`
+  const chapterSamples = chapters.slice(0, 12).map(ch => ({
+    chapter: ch.chapter,
+    title: String(ch.title || '').slice(0, 80),
+  }))
+  const compactEntries = entries.slice(0, 120).map(compactEntryForSynthesis)
+
+  const prompt = `你是一位资深网文拆书策划和小说知识库架构师。现在有一部小说的分批提炼结果，请你做“全书级合并、去重、画像总结”。
+
+任务目标：
+1. 合并重复或高度相似的知识点，保留更抽象、更可复用的写作规则。
+2. 补齐全书画像：题材定位、核心卖点、套路模板、读者钩子、情绪设计、资源经济、长期冲突、能力/境界/世界观体系。
+3. 每条知识必须可用于后续创作检索，不要只做剧情摘要。
+4. 重要信息不要丢：如果多个批次都支持同一条规则，把证据和章节范围合并概括。
+
+来源：${job.url}
+章节范围：${chapterRange}
+章节样本：${JSON.stringify(chapterSamples, null, 2)}
+分批知识候选：
+${JSON.stringify(compactEntries, null, 2).slice(0, 52000)}
+
+请输出纯 JSON 数组，每个元素字段如下：
+- category: 固定类别优先，可用 character_design/story_design/story_pacing/foreshadowing/ability_design/realm_design/worldbuilding/writing_style/technique/volume_design/genre_positioning/trope_design/selling_point/reader_hook/emotion_design/scene_design/conflict_design/resource_economy
+- title: 简短标题
+- content: 200-500 字，写成可复用规则，包含具体例子
+- tags: 普通标签数组
+- genre_tags: 题材/子类型标签数组
+- trope_tags: 套路/卖点标签数组
+- use_case: 适用写作任务
+- evidence: 支撑该规则的原文/情节证据概括，不超过 120 字
+- chapter_range: 该知识主要依据的章节范围
+- entities: 涉及角色、物品、能力、势力、地点数组
+- confidence: 0-1
+- weight: 1-5
+
+数量要求：输出 18-45 条。必须覆盖 genre_positioning、selling_point、reader_hook、emotion_design、conflict_design；如果文本涉及金钱、装备、修炼成本或资源流转，必须包含 resource_economy。
+不要返回 markdown，不要解释，只返回 JSON 数组。`
+
+  const result = await executeWithRuntimeModel<any[]>(
+    workspace,
+    {
+      model: 'balanced',
+      messages: [
+        { role: 'system', content: '你只输出合法 JSON 数组，不输出 markdown。' },
+        { role: 'user', content: prompt },
+      ],
+      temperature: 0.25,
+      max_tokens: 8192,
+      response_format: 'json',
+    },
+    Number(job.model_id || 0) || undefined,
+    {
+      signal,
+    },
+  )
+
+  if (result.error) throw new Error(result.error)
+  const parsed = Array.isArray(result.parsed)
+    ? result.parsed
+    : tryParseJson<any[]>(result.content, [])
+
+  const synthesized = parsed
+    .filter(Boolean)
+    .map((row: any) => normalizeKnowledgeEntry({
+      category: row?.category,
+      title: row?.title,
+      content: row?.content,
+      tags: row?.tags,
+      genre_tags: row?.genre_tags,
+      trope_tags: row?.trope_tags,
+      use_case: row?.use_case,
+      evidence: row?.evidence,
+      chapter_range: row?.chapter_range || chapterRange,
+      entities: row?.entities,
+      confidence: row?.confidence,
+      weight: row?.weight,
+      source: `${job.url}（全书画像）`,
+      source_title: `${job.url}（全书画像）`,
+    }))
+    .filter(entry => Boolean(entry.content))
+
+  return synthesized.length ? dedupeKnowledgeEntries(synthesized) : entries
+}
+
 async function runKnowledgeIngestJob(jobId: string) {
   const job = ingestJobs.get(jobId)
   if (!job) return
+  const controller = new AbortController()
+  ingestJobControllers.set(jobId, controller)
+  const ensureNotCanceled = () => {
+    if (controller.signal.aborted || ingestJobs.get(jobId)?.status === 'canceled') {
+      throw new Error('任务已取消')
+    }
+  }
 
   try {
+    ensureNotCanceled()
     updateIngestJob(jobId, {
       status: 'running',
       phase: '抓取章节',
       progress: 5,
     })
 
-    const raw = await playwrightFetchSerial(job.url, job.max_chapters, job.start_chapter)
+    const raw = await playwrightFetchSerial(job.url, job.max_chapters, job.start_chapter, controller.signal)
+    ensureNotCanceled()
     const chapters = Array.isArray(raw)
       ? raw.filter((item: any) => item?.status === 'ok' && String(item?.text || '').trim())
       : []
@@ -561,6 +767,7 @@ async function runKnowledgeIngestJob(jobId: string) {
     const errors: string[] = []
 
     for (let index = 0; index < totalBatches; index += 1) {
+      ensureNotCanceled()
       const start = index * job.batch_size
       const batch = chapters.slice(start, start + job.batch_size)
       const firstChapter = batch[0]?.chapter || start + 1
@@ -583,7 +790,10 @@ async function runKnowledgeIngestJob(jobId: string) {
       })
 
       try {
-        const entries = await analyzeKnowledge(buildChapterBatchText(batch), source, job.model_id)
+        const entries = await analyzeKnowledge(buildChapterBatchText(batch), source, job.model_id, {
+          signal: controller.signal,
+        })
+        ensureNotCanceled()
         const currentJob = ingestJobs.get(jobId)
         const updatedBatches = (currentJob?.batches || nextBatches).map(item => (
           item.index === index
@@ -610,9 +820,38 @@ async function runKnowledgeIngestJob(jobId: string) {
     }
 
     const latestJob = ingestJobs.get(jobId)
-    const mergedEntries = latestJob ? rebuildIngestJobEntries(latestJob) : []
+    let mergedEntries = latestJob ? rebuildIngestJobEntries(latestJob) : []
     if (!mergedEntries.length) {
       throw new Error(errors[0] || 'AI 未提炼出可入库知识')
+    }
+
+    if (job.full_book) {
+      updateIngestJob(jobId, {
+        phase: '全书画像合并',
+        progress: 96,
+      })
+      try {
+        mergedEntries = await synthesizeFullBookKnowledge(job, mergedEntries, chapters, controller.signal)
+        ensureNotCanceled()
+      } catch (error) {
+        errors.push(`全书画像合并失败，已保留分批提炼结果：${String(error).slice(0, 200)}`)
+      }
+    }
+
+    let storedCount = latestJob?.stored_count || 0
+    let syncedCount = latestJob?.synced_count || 0
+    if (job.auto_store) {
+      updateIngestJob(jobId, {
+        phase: '写入知识库',
+        progress: 98,
+      })
+      const storeResult = await batchStoreKnowledge(mergedEntries, {
+        project_id: job.project_id,
+        project_title: job.project_title,
+      })
+      storedCount = storeResult.stored
+      syncedCount = storeResult.synced
+      if (storeResult.errors.length) errors.push(...storeResult.errors)
     }
 
     updateIngestJob(jobId, {
@@ -625,21 +864,38 @@ async function runKnowledgeIngestJob(jobId: string) {
       current_chapter_title: String(chapters[chapters.length - 1]?.title || ''),
       current_range: `第${chapters[0]?.chapter || 1}-${chapters[chapters.length - 1]?.chapter || chapters.length}章`,
       entries: mergedEntries,
+      stored_count: storedCount,
+      synced_count: syncedCount,
       errors,
     })
   } catch (error) {
+    if (controller.signal.aborted || String(error).includes('任务已取消') || ingestJobs.get(jobId)?.status === 'canceled') {
+      updateIngestJob(jobId, {
+        status: 'canceled',
+        phase: '已取消',
+        progress: Math.min(100, Math.max(0, ingestJobs.get(jobId)?.progress || 0)),
+        errors: [...(ingestJobs.get(jobId)?.errors || []), '任务已取消'],
+      })
+      return
+    }
     updateIngestJob(jobId, {
       status: 'failed',
       phase: '失败',
       progress: 100,
       errors: [String(error)],
     })
+  } finally {
+    ingestJobControllers.delete(jobId)
   }
 }
 
 export function startKnowledgeIngestJob(input: {
   url: string
   model_id?: number
+  full_book?: boolean
+  auto_store?: boolean
+  project_id?: number
+  project_title?: string
   start_chapter?: number
   max_chapters?: number
   batch_size?: number
@@ -648,8 +904,14 @@ export function startKnowledgeIngestJob(input: {
   if (!url) throw new Error('url 不能为空')
   const modelId = Number(input.model_id || 0) || undefined
   const startChapter = Math.max(1, Math.min(100000, Number(input.start_chapter || 1) || 1))
-  const maxChapters = Math.max(1, Math.min(500, Number(input.max_chapters || 50) || 50))
+  const fullBook = Boolean(input.full_book)
+  const requestedMaxChapters = Number(input.max_chapters)
+  const maxChapters = fullBook || requestedMaxChapters <= 0
+    ? 0
+    : Math.max(1, Math.min(5000, requestedMaxChapters || 50))
   const batchSize = Math.max(1, Math.min(50, Number(input.batch_size || 10) || 10))
+  const projectId = Number(input.project_id || 0) || undefined
+  const projectTitle = String(input.project_title || '').trim()
   const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
   const timestamp = nowIso()
   const job: KnowledgeIngestJob = {
@@ -659,6 +921,10 @@ export function startKnowledgeIngestJob(input: {
     progress: 0,
     url,
     model_id: modelId,
+    full_book: fullBook,
+    auto_store: Boolean(input.auto_store),
+    project_id: projectId,
+    project_title: projectTitle,
     start_chapter: startChapter,
     max_chapters: maxChapters,
     batch_size: batchSize,
@@ -677,6 +943,22 @@ export function startKnowledgeIngestJob(input: {
 }
 
 export function getKnowledgeIngestJob(id: string): KnowledgeIngestJob | null {
+  return ingestJobs.get(id) || null
+}
+
+export function cancelKnowledgeIngestJob(id: string): KnowledgeIngestJob | null {
+  const job = ingestJobs.get(id)
+  if (!job) return null
+  if (job.status === 'completed' || job.status === 'failed' || job.status === 'canceled') {
+    return job
+  }
+  const controller = ingestJobControllers.get(id)
+  if (controller && !controller.signal.aborted) controller.abort()
+  updateIngestJob(id, {
+    status: 'canceled',
+    phase: '已取消',
+    errors: [...(job.errors || []), '任务已取消'],
+  })
   return ingestJobs.get(id) || null
 }
 
@@ -780,6 +1062,13 @@ export async function batchStoreKnowledge(
         source_title: entry.source_title,
         title: entry.title,
         tags: entry.tags,
+        genre_tags: entry.genre_tags,
+        trope_tags: entry.trope_tags,
+        use_case: entry.use_case,
+        evidence: entry.evidence,
+        chapter_range: entry.chapter_range,
+        entities: entry.entities,
+        confidence: entry.confidence,
         weight: entry.weight,
         project_id: options?.project_id || entry.project_id,
         project_title: options?.project_title || entry.project_title,

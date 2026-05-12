@@ -36,6 +36,12 @@ export type RuntimeModelSelection = {
   apiFormat: string
 }
 
+export type RuntimeExecutionOptions = {
+  signal?: AbortSignal
+  timeoutMs?: number
+  maxRetries?: number
+}
+
 // ── URL Handling ────────────────────────────────────────────
 
 /**
@@ -187,14 +193,15 @@ function isRetryable(status: number, error?: string): boolean {
 async function postProviderJson<T = any>(
   selection: RuntimeModelSelection,
   request: LLMRequest,
+  options: RuntimeExecutionOptions = {},
 ): Promise<LLMResponse<T>> {
   const url = buildUrl(selection.baseUrl, selection.endpoint)
   const body = selection.apiFormat === 'anthropic'
     ? toAnthropicBody(request, selection)
     : toOpenAIBody(request, selection)
   const headers = buildHeaders(selection)
-  const maxRetries = Number(process.env.LLM_MAX_RETRIES || 5)
-  const timeoutMs = Number(process.env.LLM_TIMEOUT_MS || 600000) // 600s default, matches Claude Code foreground
+  const maxRetries = Number(options.maxRetries ?? process.env.LLM_MAX_RETRIES ?? 5)
+  const timeoutMs = Number(options.timeoutMs ?? process.env.LLM_TIMEOUT_MS ?? 600000) // 600s default, matches Claude Code foreground
   const keyMask = (selection.key.key || '').slice(0, 8) + '...'
   const heartbeatInterval = 30_000 // log progress every 30s
 
@@ -206,6 +213,9 @@ async function postProviderJson<T = any>(
   let lastStatus = 0
 
   for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
+    if (options.signal?.aborted) {
+      throw new Error('Request canceled')
+    }
     if (attempt > 1) {
       // Claude Code style: exponential backoff with jitter
       const baseDelay = Math.min(500 * Math.pow(2, attempt - 2), 32000)
@@ -218,6 +228,11 @@ async function postProviderJson<T = any>(
     const controller = new AbortController()
     const startTime = Date.now()
     let heartbeatTimer: NodeJS.Timeout | null = null
+    const abortFromParent = () => controller.abort()
+    if (options.signal) {
+      if (options.signal.aborted) controller.abort()
+      else options.signal.addEventListener('abort', abortFromParent, { once: true })
+    }
     const timeout = setTimeout(() => {
       controller.abort()
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(0)
@@ -239,7 +254,10 @@ async function postProviderJson<T = any>(
         signal: controller.signal,
       })
     } catch (err: any) {
-      const errMsg = String(err?.message || err)
+      if (options.signal?.aborted) {
+        throw new Error('Request canceled')
+      }
+      const errMsg = String(err?.name || err?.message || err)
       lastError = errMsg
       console.error(`[provider-runtime] Network error: ${errMsg}`)
 
@@ -251,6 +269,7 @@ async function postProviderJson<T = any>(
     } finally {
       clearTimeout(timeout)
       if (heartbeatTimer) clearInterval(heartbeatTimer)
+      if (options.signal) options.signal.removeEventListener('abort', abortFromParent)
     }
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1)
@@ -441,6 +460,7 @@ export async function executeWithRuntimeModel<T = any>(
   activeWorkspace: string,
   request: LLMRequest,
   preferredModelId?: number,
+  options: RuntimeExecutionOptions = {},
 ): Promise<LLMResponse<T> & { runtimeSelection?: RuntimeModelSelection | null }> {
   const selection = await selectRuntimeModel(activeWorkspace, preferredModelId)
   if (!selection) {
@@ -456,7 +476,7 @@ export async function executeWithRuntimeModel<T = any>(
   }
 
   try {
-    const response = await postProviderJson<T>(selection, request)
+    const response = await postProviderJson<T>(selection, request, options)
     return { ...response, runtimeSelection: selection }
   } catch (error) {
     console.error(`[provider-runtime] Request failed: ${error}`)

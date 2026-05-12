@@ -295,7 +295,10 @@ def fetch_serial(url: str, max_chapters: int = 500, start_chapter: int = 1) -> l
     pw = None
     browser = None
     start_chapter = max(1, int(start_chapter or 1))
-    max_chapters = max(1, int(max_chapters or 1))
+    max_chapters = int(max_chapters or 0)
+    unlimited = max_chapters <= 0
+    if not unlimited:
+        max_chapters = max(1, max_chapters)
 
     try:
         page, browser, pw = _launch_browser()
@@ -310,7 +313,7 @@ def fetch_serial(url: str, max_chapters: int = 500, start_chapter: int = 1) -> l
     try:
         chapter_num = 1
         collected = 0
-        while collected < max_chapters:
+        while unlimited or collected < max_chapters:
             # Deduplicate — for SPA sites, the base URL stays same, check hash too
             full_url = page.url
             if full_url in visited:
@@ -351,7 +354,7 @@ def fetch_serial(url: str, max_chapters: int = 500, start_chapter: int = 1) -> l
                     collected += 1
 
             # Find and go to next chapter
-            if collected >= max_chapters:
+            if not unlimited and collected >= max_chapters:
                 break
 
             next_url = _find_next_chapter(page)

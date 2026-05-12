@@ -13,6 +13,7 @@ import {
   playwrightFetchSerial,
   startKnowledgeIngestJob,
   getKnowledgeIngestJob,
+  cancelKnowledgeIngestJob,
   reanalyzeKnowledgeIngestBatch,
 } from '../knowledge-base'
 
@@ -50,6 +51,14 @@ export function registerKnowledgeRoutes(app: Express) {
         story_pacing: '节奏设计',
         volume_design: '分卷设计',
         character_craft: '角色塑造',
+        genre_positioning: '题材定位',
+        trope_design: '套路设计',
+        selling_point: '卖点设计',
+        reader_hook: '读者钩子',
+        emotion_design: '情绪设计',
+        scene_design: '场景设计',
+        conflict_design: '冲突设计',
+        resource_economy: '资源经济',
       }
       for (const cat of categories) {
         summary[cat] = {
@@ -66,7 +75,7 @@ export function registerKnowledgeRoutes(app: Express) {
   /** POST /api/knowledge/entries — 手动添加知识条目 */
   app.post('/api/knowledge/entries', async (req, res) => {
     try {
-      const { category, title, content, source, source_title, tags, weight, project_id, project_title } = req.body
+      const { category, title, content, source, source_title, tags, genre_tags, trope_tags, use_case, evidence, chapter_range, entities, confidence, weight, project_id, project_title } = req.body
       if (!category || !content) {
         return res.status(400).json({ error: 'category 和 content 不能为空' })
       }
@@ -77,6 +86,13 @@ export function registerKnowledgeRoutes(app: Express) {
         source_title: source_title || source || '手动添加',
         title: title || '',
         tags: Array.isArray(tags) ? tags : [],
+        genre_tags: Array.isArray(genre_tags) ? genre_tags : [],
+        trope_tags: Array.isArray(trope_tags) ? trope_tags : [],
+        use_case: use_case || '',
+        evidence: evidence || '',
+        chapter_range: chapter_range || '',
+        entities: Array.isArray(entities) ? entities : [],
+        confidence: Number(confidence || 0) || undefined,
         weight: Number(weight) || 3,
         project_id: project_id ? Number(project_id) : undefined,
         project_title: project_title || undefined,
@@ -91,6 +107,22 @@ export function registerKnowledgeRoutes(app: Express) {
   app.delete('/api/knowledge/entries/:id', async (req, res) => {
     try {
       const result = await purgeKnowledge([req.params.id])
+      res.json(result)
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  /** POST /api/knowledge/entries/purge — 批量删除知识条目 */
+  app.post('/api/knowledge/entries/purge', async (req, res) => {
+    try {
+      const ids = Array.isArray(req.body?.ids)
+        ? req.body.ids.map((id: any) => String(id || '').trim()).filter(Boolean)
+        : []
+      if (ids.length === 0) {
+        return res.status(400).json({ error: 'ids 必须是非空数组' })
+      }
+      const result = await purgeKnowledge(ids)
       res.json(result)
     } catch (error) {
       res.status(500).json({ error: String(error) })
@@ -137,15 +169,30 @@ export function registerKnowledgeRoutes(app: Express) {
 
   /** POST /api/knowledge/analyze — LLM 分析文本并提取知识（不存储，仅返回分析结果供用户预览编辑） */
   app.post('/api/knowledge/analyze', async (req, res) => {
+    const controller = new AbortController()
+    const abortIfClientClosed = () => {
+      if (!res.writableEnded) controller.abort()
+    }
+    res.on('close', abortIfClientClosed)
     try {
       const { source, text, model_id, modelId } = req.body
       if (!source || !text) {
         return res.status(400).json({ error: 'source 和 text 不能为空' })
       }
-      const entries = await analyzeKnowledge(text, source, Number(model_id || modelId || 0) || undefined)
+      const entries = await analyzeKnowledge(text, source, Number(model_id || modelId || 0) || undefined, {
+        signal: controller.signal,
+      })
       res.json({ ok: true, entries })
     } catch (error) {
+      if (controller.signal.aborted) {
+        if (!res.headersSent && !res.destroyed) {
+          return res.status(499).json({ error: 'Request canceled' })
+        }
+        return
+      }
       res.status(500).json({ error: String(error) })
+    } finally {
+      res.off('close', abortIfClientClosed)
     }
   })
 
@@ -169,7 +216,7 @@ export function registerKnowledgeRoutes(app: Express) {
   /** POST /api/knowledge/upload — 接收前端上传的纯文本（TXT / PDF 前端解析后提交） */
   app.post('/api/knowledge/upload', async (req, res) => {
     try {
-      const { text, source, category, title, tags, weight, project_id, project_title } = req.body
+      const { text, source, category, title, tags, genre_tags, trope_tags, use_case, evidence, chapter_range, entities, confidence, weight, project_id, project_title } = req.body
       if (!text) {
         return res.status(400).json({ error: 'text 不能为空' })
       }
@@ -180,6 +227,13 @@ export function registerKnowledgeRoutes(app: Express) {
         source_title: source || '文件上传',
         title: title || '',
         tags: Array.isArray(tags) ? tags : [],
+        genre_tags: Array.isArray(genre_tags) ? genre_tags : [],
+        trope_tags: Array.isArray(trope_tags) ? trope_tags : [],
+        use_case: use_case || '',
+        evidence: evidence || '',
+        chapter_range: chapter_range || '',
+        entities: Array.isArray(entities) ? entities : [],
+        confidence: Number(confidence || 0) || undefined,
         weight: Number(weight) || 3,
         project_id: project_id ? Number(project_id) : undefined,
         project_title: project_title || undefined,
@@ -237,10 +291,14 @@ export function registerKnowledgeRoutes(app: Express) {
   /** POST /api/knowledge/ingest/start — 后台任务：连载抓取 → 分批提炼 → 去重合并 */
   app.post('/api/knowledge/ingest/start', async (req, res) => {
     try {
-      const { url, model_id, modelId, start_chapter, startChapter, max_chapters, maxChapters, batch_size, batchSize } = req.body || {}
+      const { url, model_id, modelId, start_chapter, startChapter, max_chapters, maxChapters, batch_size, batchSize, full_book, fullBook, auto_store, autoStore, project_id, projectId, project_title, projectTitle } = req.body || {}
       const job = startKnowledgeIngestJob({
         url,
         model_id: Number(model_id || modelId || 0) || undefined,
+        full_book: Boolean(full_book || fullBook),
+        auto_store: Boolean(auto_store || autoStore),
+        project_id: Number(project_id || projectId || 0) || undefined,
+        project_title: String(project_title || projectTitle || '').trim() || undefined,
         start_chapter: Number(start_chapter || startChapter || 1),
         max_chapters: Number(max_chapters || maxChapters || 50),
         batch_size: Number(batch_size || batchSize || 10),
@@ -255,6 +313,17 @@ export function registerKnowledgeRoutes(app: Express) {
   app.get('/api/knowledge/ingest/:id', async (req, res) => {
     try {
       const job = getKnowledgeIngestJob(req.params.id)
+      if (!job) return res.status(404).json({ error: '任务不存在或已过期' })
+      res.json({ ok: true, job })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  /** POST /api/knowledge/ingest/:id/cancel — 取消后台提炼任务 */
+  app.post('/api/knowledge/ingest/:id/cancel', async (req, res) => {
+    try {
+      const job = cancelKnowledgeIngestJob(req.params.id)
       if (!job) return res.status(404).json({ error: '任务不存在或已过期' })
       res.json({ ok: true, job })
     } catch (error) {

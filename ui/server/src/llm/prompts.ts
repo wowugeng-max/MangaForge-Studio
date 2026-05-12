@@ -574,12 +574,27 @@ ${novelText.slice(0, 12000)}
 8. writing_style（写作风格）：语言质感、叙事视角、句式特征、修辞手法、叙述节奏
 9. technique（写作技巧）：开篇钩子、场景切换、对话设计、信息披露、视角控制
 10. volume_design（分卷设计）：卷结构规划、卷目标、跨卷衔接手法
+11. genre_positioning（题材定位）：题材/子类型、平台气质、目标读者、商业卖点、读者期待
+12. trope_design（套路设计）：流派套路、反套路、金手指模板、升级模板、日常模板
+13. selling_point（卖点设计）：核心爽点、差异化卖点、标题/简介可提炼卖点、读者记忆点
+14. reader_hook（读者钩子）：开章钩子、章末钩子、期待管理、追读驱动
+15. emotion_design（情绪设计）：爽感、笑点、压抑释放、打脸、温情、紧张感
+16. scene_design（场景设计）：高频场景、场景功能、场景调度、对话/动作组织
+17. conflict_design（冲突设计）：人物冲突、制度冲突、资源冲突、价值观冲突、冲突升级
+18. resource_economy（资源经济）：金钱、装备、修炼成本、价格梯度、资源获取与消耗闭环
 
 输出 JSON 格式，是一个数组，每个元素包含以下字段：
   - category: 优先使用上述固定类别；如果文本出现更准确的新类别，也可以返回模型自定义类别（如 "faction_design"）
   - title: 知识条目的简短标题（如"开篇三行钩子法"）
   - content: 详细的分析内容和具体示例（200-500字）
   - tags: 相关标签数组（如 ["开篇", "钩子", "悬念"]）
+  - genre_tags: 题材/子类型标签数组（如 ["都市修仙", "校园", "系统流"]）
+  - trope_tags: 套路/卖点标签数组（如 ["贫穷流", "扮猪吃虎", "资源经济"]）
+  - use_case: 这条知识适合用于什么写作任务（如 "开篇", "升级", "日常笑点", "能力设定", "章末钩子"）
+  - evidence: 支撑分析的原文短证据或情节依据（不要超过 120 字）
+  - chapter_range: 当前分析来源章节范围；如果无法判断，用空字符串
+  - entities: 涉及的角色、势力、能力、物品、地点数组
+  - confidence: 0-1 的置信度；文本证据越直接越高
   - weight: 重要程度 1-5（5 为最重要）
 
 示例输出格式：
@@ -589,6 +604,13 @@ ${novelText.slice(0, 12000)}
     "title": "开篇三行钩子法",
     "content": "该小说在开篇前三行即通过...（详细分析）",
     "tags": ["开篇", "钩子", "悬念"],
+    "genre_tags": ["都市修仙"],
+    "trope_tags": ["反差开局"],
+    "use_case": "开篇",
+    "evidence": "原文中主角一登场就遭遇...",
+    "chapter_range": "第1章",
+    "entities": ["主角"],
+    "confidence": 0.82,
     "weight": 5
   },
   ...
@@ -597,6 +619,7 @@ ${novelText.slice(0, 12000)}
 ⚠️ 绝对不要返回 markdown 格式，必须是纯 JSON 数组。
 ⚠️ 固定类别中凡是文本有依据的类别至少产出 1 条知识点，总共产出 10-20 条；不要为了凑类别编造文本不存在的内容。
 ⚠️ tags 支持自由标签：请加入文本中真实出现或可概括出的标签，例如"人物设计"、"境界瓶颈"、"能力代价"、"章节钩子"。
+⚠️ genre_tags/trope_tags 必须服务于后续创作检索，不要只复制 category 名称。
 ⚠️ 分析必须基于文本中的具体内容，引用原文片段作为佐证。`
 }
 
@@ -610,6 +633,11 @@ export function buildKnowledgeInjectionPrompt(
     title: string
     content: string
     weight: number
+    genre_tags?: string[]
+    trope_tags?: string[]
+    use_case?: string
+    evidence?: string
+    chapter_range?: string
   }>,
 ): string {
   if (!knowledgeEntries.length) return ''
@@ -636,13 +664,28 @@ export function buildKnowledgeInjectionPrompt(
     story_pacing: '节奏设计',
     volume_design: '分卷设计',
     character_craft: '角色塑造',
+    genre_positioning: '题材定位',
+    trope_design: '套路设计',
+    selling_point: '卖点设计',
+    reader_hook: '读者钩子',
+    emotion_design: '情绪设计',
+    scene_design: '场景设计',
+    conflict_design: '冲突设计',
+    resource_economy: '资源经济',
   }
 
   for (const [cat, entries] of Object.entries(groups)) {
     parts.push(`— ${categoryLabels[cat] || cat} —`)
     for (const entry of entries) {
       parts.push(`  💡 ${entry.title}（重要度: ${entry.weight}/5）`)
+      const meta: string[] = []
+      if (entry.use_case) meta.push(`用途:${entry.use_case}`)
+      if (entry.genre_tags?.length) meta.push(`题材:${entry.genre_tags.join('、')}`)
+      if (entry.trope_tags?.length) meta.push(`套路:${entry.trope_tags.join('、')}`)
+      if (entry.chapter_range) meta.push(`依据:${entry.chapter_range}`)
+      if (meta.length) parts.push(`    ${meta.join('；')}`)
       parts.push(`    ${entry.content.slice(0, 300)}`)
+      if (entry.evidence) parts.push(`    证据：${entry.evidence.slice(0, 120)}`)
       parts.push('')
     }
   }

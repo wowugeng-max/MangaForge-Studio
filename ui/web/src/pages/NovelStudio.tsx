@@ -19,6 +19,14 @@ const knowledgeCategoryPresets = [
   { value: 'writing_style', label: '写作风格' },
   { value: 'technique', label: '写作技巧' },
   { value: 'volume_design', label: '分卷设计' },
+  { value: 'genre_positioning', label: '题材定位' },
+  { value: 'trope_design', label: '套路设计' },
+  { value: 'selling_point', label: '卖点设计' },
+  { value: 'reader_hook', label: '读者钩子' },
+  { value: 'emotion_design', label: '情绪设计' },
+  { value: 'scene_design', label: '场景设计' },
+  { value: 'conflict_design', label: '冲突设计' },
+  { value: 'resource_economy', label: '资源经济' },
 ]
 
 const fieldLabelStyle: React.CSSProperties = {
@@ -58,6 +66,7 @@ export default function NovelStudio() {
 
   const [knowledgeOpen, setKnowledgeOpen] = useState(false)
   const [knowledgeLoading, setKnowledgeLoading] = useState(false)
+  const [knowledgeBulkDeleting, setKnowledgeBulkDeleting] = useState(false)
   const [knowledgeEntries, setKnowledgeEntries] = useState<any[]>([])
   const [knowledgeSummary, setKnowledgeSummary] = useState<Record<string, { label: string; count: number }>>({})
   const [knowledgeSearch, setKnowledgeSearch] = useState('')
@@ -83,6 +92,7 @@ export default function NovelStudio() {
   const [feedUrl, setFeedUrl] = useState('')
   const [feedSerialFetch, setFeedSerialFetch] = useState(false)
   const [feedStartChapter, setFeedStartChapter] = useState(1)
+  const [feedFullBook, setFeedFullBook] = useState(false)
   const [feedMaxChapters, setFeedMaxChapters] = useState(20)
   const [feedBatchSize, setFeedBatchSize] = useState(10)
   const [availableModels, setAvailableModels] = useState<any[]>([])
@@ -104,6 +114,7 @@ export default function NovelStudio() {
   const [fileReading, setFileReading] = useState(false)
   const [selectedFileName, setSelectedFileName] = useState('')
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const feedAbortControllerRef = useRef<AbortController | null>(null)
 
   const loadKnowledge = async (
     category?: string,
@@ -146,6 +157,34 @@ export default function NovelStudio() {
     }
   }
 
+  const handleDeleteVisibleKnowledge = () => {
+    const ids = filteredKnowledgeEntries.map(entry => String(entry.id || '').trim()).filter(Boolean)
+    if (ids.length === 0) {
+      message.info('当前没有可删除的知识条目')
+      return
+    }
+    Modal.confirm({
+      title: '清空当前结果',
+      content: `将删除当前筛选结果中的 ${ids.length} 条知识。该操作不可撤销。`,
+      okText: `删除 ${ids.length} 条`,
+      okButtonProps: { danger: true },
+      cancelText: '取消',
+      onOk: async () => {
+        setKnowledgeBulkDeleting(true)
+        try {
+          await apiClient.post('/knowledge/entries/purge', { ids })
+          message.success(`已删除 ${ids.length} 条知识`)
+          setKnowledgeQueryResults(prev => prev.filter(entry => !ids.includes(String(entry.id || ''))))
+          await loadKnowledge(knowledgeCategory || undefined)
+        } catch {
+          message.error('批量删除失败')
+        } finally {
+          setKnowledgeBulkDeleting(false)
+        }
+      },
+    })
+  }
+
   const handleRefreshKnowledge = async () => {
     await loadKnowledge(knowledgeCategory || undefined)
   }
@@ -175,7 +214,19 @@ export default function NovelStudio() {
   const filteredKnowledgeEntries = knowledgeEntries.filter(entry => {
     const q = knowledgeSearch.trim().toLowerCase()
     if (!q) return true
-    return [entry.title, entry.content, entry.source, entry.project_title, ...(Array.isArray(entry.tags) ? entry.tags : [])]
+    return [
+      entry.title,
+      entry.content,
+      entry.source,
+      entry.project_title,
+      entry.use_case,
+      entry.evidence,
+      entry.chapter_range,
+      ...(Array.isArray(entry.tags) ? entry.tags : []),
+      ...(Array.isArray(entry.genre_tags) ? entry.genre_tags : []),
+      ...(Array.isArray(entry.trope_tags) ? entry.trope_tags : []),
+      ...(Array.isArray(entry.entities) ? entry.entities : []),
+    ]
       .filter(Boolean)
       .some((v: any) => String(v).toLowerCase().includes(q))
   })
@@ -302,6 +353,26 @@ export default function NovelStudio() {
     <Tag key={`${tag}-${idx}`} bordered={false} color="blue">{tag}</Tag>
   )
 
+  const renderMetaTags = (entry: any) => {
+    const items: React.ReactNode[] = []
+    if (entry.use_case) items.push(<Tag key="use_case" color="gold" bordered={false}>用途 {entry.use_case}</Tag>)
+    if (entry.chapter_range) items.push(<Tag key="chapter_range" bordered={false}>{entry.chapter_range}</Tag>)
+    if (typeof entry.confidence === 'number' && entry.confidence > 0) {
+      items.push(<Tag key="confidence" bordered={false}>置信 {Math.round(entry.confidence * 100)}%</Tag>)
+    }
+    if (Array.isArray(entry.genre_tags)) {
+      entry.genre_tags.slice(0, 4).forEach((tag: string, idx: number) => {
+        items.push(<Tag key={`genre-${idx}-${tag}`} color="cyan" bordered={false}>{tag}</Tag>)
+      })
+    }
+    if (Array.isArray(entry.trope_tags)) {
+      entry.trope_tags.slice(0, 4).forEach((tag: string, idx: number) => {
+        items.push(<Tag key={`trope-${idx}-${tag}`} color="volcano" bordered={false}>{tag}</Tag>)
+      })
+    }
+    return items
+  }
+
   const truncateText = (value: string, max = 160) => {
     if (!value) return ''
     return value.length > max ? `${value.slice(0, max)}…` : value
@@ -323,6 +394,7 @@ export default function NovelStudio() {
     setFeedUrl('')
     setFeedSerialFetch(false)
     setFeedStartChapter(1)
+    setFeedFullBook(false)
     setFeedMaxChapters(20)
     setFeedBatchSize(10)
     setFeedIngestJob(null)
@@ -364,8 +436,26 @@ export default function NovelStudio() {
     updateKnowledgeRoute({ panel: 'knowledge', action: 'feed' })
   }
 
-  const handleCloseFeed = () => {
-    if (feedSubmitting || feedAnalyzeLoading || fileReading) return
+  const handleCloseFeed = async () => {
+    if (feedAnalyzeLoading && feedIngestJob?.id) {
+      try {
+        const res = await apiClient.post(`/knowledge/ingest/${feedIngestJob.id}/cancel`)
+        setFeedIngestJob(res.data?.job || { ...feedIngestJob, status: 'canceled', phase: '已取消' })
+        setFeedAnalyzeLoading(false)
+        message.success('后台提炼任务已取消')
+      } catch {
+        message.error('取消任务失败')
+        return
+      }
+    } else if ((feedAnalyzeLoading || fileReading) && feedAbortControllerRef.current) {
+      feedAbortControllerRef.current.abort()
+      feedAbortControllerRef.current = null
+      setFeedAnalyzeLoading(false)
+      setFileReading(false)
+      message.info('知识提炼已中断')
+    } else if (feedSubmitting || feedAnalyzeLoading || fileReading) {
+      return
+    }
     setFeedOpen(false)
     updateKnowledgeRoute({ panel: 'knowledge', action: null })
   }
@@ -476,9 +566,30 @@ export default function NovelStudio() {
       const job = res.data?.job
       setFeedIngestJob(job)
       if (job?.status === 'completed') return job
+      if (job?.status === 'canceled') {
+        throw new Error('任务已取消')
+      }
       if (job?.status === 'failed') {
         throw new Error(Array.isArray(job.errors) && job.errors.length ? job.errors[0] : '后台提炼任务失败')
       }
+    }
+  }
+
+  const monitorAutoIngestJob = async (jobId: string) => {
+    try {
+      const job = await waitForIngestJob(jobId)
+      const stored = Number(job?.stored_count || 0)
+      const entries = Array.isArray(job?.entries) ? job.entries.length : 0
+      if (stored > 0) {
+        message.success(`全本投喂完成，已入库 ${stored} 条知识`)
+        await loadKnowledge(knowledgeCategory || undefined, feedProjectTitle.trim() || knowledgeProjectTitle)
+      } else {
+        message.success(`全本提炼完成，得到 ${entries} 条候选知识`)
+        openAnalyzePreview(Array.isArray(job?.entries) ? job.entries : [], `${job.url || feedUrl}（全本提炼）`)
+      }
+    } catch (error: any) {
+      if (String(error?.message || '').includes('取消')) message.info('全本后台投喂已取消')
+      else message.error(error?.message || '全本后台投喂失败')
     }
   }
 
@@ -488,6 +599,8 @@ export default function NovelStudio() {
       message.warning('请输入要抓取的 URL')
       return
     }
+    const controller = new AbortController()
+    feedAbortControllerRef.current = controller
     setFeedAnalyzeLoading(true)
     try {
       let fetchedText = ''
@@ -496,8 +609,12 @@ export default function NovelStudio() {
         const startRes = await apiClient.post('/knowledge/ingest/start', {
           url,
           model_id: feedModelId,
+          full_book: feedFullBook,
+          auto_store: feedFullBook,
+          project_id: feedProjectId,
+          project_title: feedProjectTitle.trim() || undefined,
           start_chapter: feedStartChapter,
-          max_chapters: feedMaxChapters,
+          max_chapters: feedFullBook ? 0 : feedMaxChapters,
           batch_size: feedBatchSize,
         })
         const startedJob = startRes.data?.job
@@ -506,6 +623,17 @@ export default function NovelStudio() {
           return
         }
         setFeedIngestJob(startedJob)
+        if (feedFullBook) {
+          if (feedProjectTitle.trim()) {
+            setKnowledgeProjectTitle(feedProjectTitle.trim())
+            setKnowledgeProjectDraft(feedProjectTitle.trim())
+          }
+          message.success('已启动全本后台投喂，任务会自动跑到没有下一章并入库')
+          setFeedOpen(false)
+          updateKnowledgeRoute({ panel: 'knowledge', action: null })
+          void monitorAutoIngestJob(startedJob.id)
+          return
+        }
         message.success('已启动后台抓取提炼任务')
         const job = await waitForIngestJob(startedJob.id)
         const entries = Array.isArray(job?.entries) ? job.entries : []
@@ -518,7 +646,7 @@ export default function NovelStudio() {
         message.success(`已分批提炼并去重合并 ${entries.length} 条知识候选`)
         return
       } else {
-        const fetchRes = await apiClient.post('/knowledge/fetch-url', { url })
+        const fetchRes = await apiClient.post('/knowledge/fetch-url', { url }, { signal: controller.signal })
         fetchedText = String(fetchRes.data?.text || '')
       }
       if (!fetchedText.trim()) {
@@ -529,7 +657,7 @@ export default function NovelStudio() {
         source,
         text: fetchedText,
         model_id: feedModelId,
-      })
+      }, { signal: controller.signal })
       const entries = Array.isArray(analyzeRes.data?.entries) ? analyzeRes.data.entries : []
       if (!entries.length) {
         message.warning('AI 没有提炼出可入库知识')
@@ -537,9 +665,11 @@ export default function NovelStudio() {
       }
       openAnalyzePreview(entries, source)
       message.success(`已提炼 ${entries.length} 条知识候选`)
-    } catch {
-      message.error('URL 抓取或分析失败')
+    } catch (error: any) {
+      if (error?.code === 'ERR_CANCELED' || String(error?.message || '').includes('取消') || String(error?.message || '').includes('canceled')) message.info('知识提炼已中断')
+      else message.error('URL 抓取或分析失败')
     } finally {
+      if (feedAbortControllerRef.current === controller) feedAbortControllerRef.current = null
       setFeedAnalyzeLoading(false)
     }
   }
@@ -558,10 +688,13 @@ export default function NovelStudio() {
 
     setSelectedFileName(file.name)
     setFileReading(true)
+    const controller = new AbortController()
+    feedAbortControllerRef.current = controller
 
     const reader = new FileReader()
     reader.onload = async (e) => {
       try {
+        if (controller.signal.aborted) return
         const result = String(e.target?.result || '')
         const payload = isTxt
           ? {
@@ -575,7 +708,7 @@ export default function NovelStudio() {
               base64: result.split(',').pop() || '',
             }
 
-        const readRes = await apiClient.post('/knowledge/read-local-file', payload)
+        const readRes = await apiClient.post('/knowledge/read-local-file', payload, { signal: controller.signal })
         const extractedText = String(readRes.data?.text || '')
         if (!extractedText.trim()) {
           message.warning(readRes.data?.message || '未从文件中读取到可分析文本')
@@ -591,7 +724,7 @@ export default function NovelStudio() {
           source: file.name,
           text: extractedText,
           model_id: feedModelId,
-        })
+        }, { signal: controller.signal })
         const entries = Array.isArray(analyzeRes.data?.entries) ? analyzeRes.data.entries : []
         if (!entries.length) {
           message.warning('AI 没有提炼出可入库知识')
@@ -599,9 +732,11 @@ export default function NovelStudio() {
         }
         openAnalyzePreview(entries, file.name)
         message.success(`已从 ${file.name} 读取并提炼 ${entries.length} 条知识候选`)
-      } catch {
-        message.error('文件读取或分析失败')
+      } catch (error: any) {
+        if (error?.code === 'ERR_CANCELED' || String(error?.message || '').includes('canceled')) message.info('知识提炼已中断')
+        else message.error('文件读取或分析失败')
       } finally {
+        if (feedAbortControllerRef.current === controller) feedAbortControllerRef.current = null
         setFileReading(false)
         if (fileInputRef.current) fileInputRef.current.value = ''
       }
@@ -848,6 +983,16 @@ export default function NovelStudio() {
         extra={
           <Space>
             <Button size="small" icon={<EditOutlined />} onClick={handleOpenFeed}>投喂</Button>
+            <Button
+              danger
+              size="small"
+              icon={<DeleteOutlined />}
+              disabled={filteredKnowledgeEntries.length === 0}
+              loading={knowledgeBulkDeleting}
+              onClick={handleDeleteVisibleKnowledge}
+            >
+              清空当前结果
+            </Button>
             <Button size="small" icon={<ReloadOutlined />} onClick={handleRefreshKnowledge} loading={knowledgeLoading}>刷新</Button>
           </Space>
         }
@@ -870,6 +1015,32 @@ export default function NovelStudio() {
             </Row>
             <Text type="secondary" style={{ display: 'block', marginTop: 8 }}>{knowledgeCategoryLabel} · {knowledgeCountText}</Text>
           </Card>
+
+          {feedIngestJob && feedSerialFetch && (
+            <Card size="small" title="后台投喂任务" style={{ borderRadius: 8, background: '#fafcff' }}>
+              <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                <Space style={{ justifyContent: 'space-between', width: '100%' }}>
+                  <Text strong>{feedIngestJob.phase || '后台任务'}</Text>
+                  <Tag color={feedIngestJob.status === 'failed' ? 'red' : feedIngestJob.status === 'completed' ? 'green' : 'blue'} bordered={false}>
+                    {feedIngestJob.status || 'running'}
+                  </Tag>
+                </Space>
+                <Progress percent={Math.max(0, Math.min(100, Number(feedIngestJob.progress || 0)))} size="small" />
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  {feedIngestJob.full_book ? '全本模式；' : ''}
+                  从第 {feedIngestJob.start_chapter || feedStartChapter || 1} 章开始；已抓取 {feedIngestJob.fetched_chapters || 0} 章，已分析 {feedIngestJob.analyzed_batches || 0}/{feedIngestJob.total_batches || 0} 批，候选知识 {Array.isArray(feedIngestJob.entries) ? feedIngestJob.entries.length : 0} 条
+                  {feedIngestJob.stored_count ? `，已入库 ${feedIngestJob.stored_count} 条` : ''}
+                </Text>
+                {(feedIngestJob.current_range || feedIngestJob.current_chapter) && (
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    {feedIngestJob.status === 'completed' ? '已完成到' : '当前处理'}：
+                    {feedIngestJob.current_range || `第${feedIngestJob.current_chapter}章`}
+                    {feedIngestJob.current_chapter_title ? ` / ${feedIngestJob.current_chapter_title}` : ''}
+                  </Text>
+                )}
+              </Space>
+            </Card>
+          )}
 
           <Card size="small" title="筛选与检索" style={{ borderRadius: 8 }}>
             <Space direction="vertical" size={12} style={{ width: '100%' }}>
@@ -991,6 +1162,7 @@ export default function NovelStudio() {
                           <Tag color="geekblue" bordered={false}>{formatKnowledgeCategory(entry)}</Tag>
                           {formatProjectScope(entry) && <Tag color="purple" bordered={false}>{formatProjectScope(entry)}</Tag>}
                           <Tag bordered={false}>{formatSource(entry)}</Tag>
+                          {renderMetaTags(entry)}
                         </Space>
                         <Text>{truncateText(entry.content || '', 220)}</Text>
                       </Space>
@@ -1042,6 +1214,7 @@ export default function NovelStudio() {
                       <Tag color="geekblue" bordered={false}>{formatKnowledgeCategory(entry)}</Tag>
                       {formatProjectScope(entry) && <Tag color="purple" bordered={false}>{formatProjectScope(entry)}</Tag>}
                       <Tag bordered={false}>{formatSource(entry)}</Tag>
+                      {renderMetaTags(entry)}
                     </Space>
                     <Text>{truncateText(entry.content || '')}</Text>
                     {Array.isArray(entry.tags) && entry.tags.length > 0 && (
@@ -1096,8 +1269,36 @@ export default function NovelStudio() {
                     <div style={{ marginTop: 4 }}>{knowledgeDetailEntry.created_at}</div>
                   </div>
                 )}
+                {(knowledgeDetailEntry.use_case || knowledgeDetailEntry.chapter_range || knowledgeDetailEntry.confidence) && (
+                  <Space wrap>
+                    {renderMetaTags(knowledgeDetailEntry)}
+                  </Space>
+                )}
               </Space>
             </Card>
+
+            {(knowledgeDetailEntry.evidence || Array.isArray(knowledgeDetailEntry.entities) && knowledgeDetailEntry.entities.length > 0) && (
+              <Card size="small" title="证据与实体" style={{ borderRadius: 8 }}>
+                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                  {knowledgeDetailEntry.evidence && (
+                    <div>
+                      <Text type="secondary">证据</Text>
+                      <Paragraph copyable style={{ margin: '4px 0 0' }}>{knowledgeDetailEntry.evidence}</Paragraph>
+                    </div>
+                  )}
+                  {Array.isArray(knowledgeDetailEntry.entities) && knowledgeDetailEntry.entities.length > 0 && (
+                    <div>
+                      <Text type="secondary">实体</Text>
+                      <Space wrap style={{ display: 'flex', marginTop: 6 }}>
+                        {knowledgeDetailEntry.entities.map((entity: string, idx: number) => (
+                          <Tag key={`${entity}-${idx}`} bordered={false}>{entity}</Tag>
+                        ))}
+                      </Space>
+                    </div>
+                  )}
+                </Space>
+              </Card>
+            )}
 
             <div>
               <Text strong>完整内容</Text>
@@ -1134,6 +1335,21 @@ export default function NovelStudio() {
                 </Space>
               </div>
             )}
+
+            {(Array.isArray(knowledgeDetailEntry.genre_tags) && knowledgeDetailEntry.genre_tags.length > 0
+              || Array.isArray(knowledgeDetailEntry.trope_tags) && knowledgeDetailEntry.trope_tags.length > 0) && (
+              <div>
+                <Text strong>题材与套路</Text>
+                <Space wrap style={{ display: 'flex', marginTop: 8 }}>
+                  {Array.isArray(knowledgeDetailEntry.genre_tags) && knowledgeDetailEntry.genre_tags.map((tag: string, idx: number) => (
+                    <Tag key={`genre-detail-${tag}-${idx}`} color="cyan" bordered={false}>{tag}</Tag>
+                  ))}
+                  {Array.isArray(knowledgeDetailEntry.trope_tags) && knowledgeDetailEntry.trope_tags.map((tag: string, idx: number) => (
+                    <Tag key={`trope-detail-${tag}-${idx}`} color="volcano" bordered={false}>{tag}</Tag>
+                  ))}
+                </Space>
+              </div>
+            )}
           </Space>
         )}
       </Modal>
@@ -1165,9 +1381,9 @@ export default function NovelStudio() {
             ? (feedSubmitting ? '提交中...' : '加入知识库')
             : feedMode === 'file'
               ? (fileReading ? '读取中...' : '选择文件并分析')
-              : (feedAnalyzeLoading ? '分析中...' : '抓取并分析')
+              : (feedAnalyzeLoading ? '分析中...' : feedSerialFetch && feedFullBook ? '启动全本任务' : '抓取并分析')
         }
-        cancelText="取消"
+        cancelText={feedAnalyzeLoading || fileReading ? '中断任务' : '取消'}
         confirmLoading={feedMode === 'text' ? feedSubmitting : feedMode === 'url' ? feedAnalyzeLoading : fileReading}
         okButtonProps={{
           disabled:
@@ -1336,7 +1552,11 @@ export default function NovelStudio() {
                   <Col flex="auto">
                     <Checkbox
                       checked={feedSerialFetch}
-                      onChange={(e) => setFeedSerialFetch(e.target.checked)}
+                      onChange={(e) => {
+                        const checked = e.target.checked
+                        setFeedSerialFetch(checked)
+                        if (!checked) setFeedFullBook(false)
+                      }}
                     >
                       自动连载抓取：目录页先进入第一章，再追下一章
                     </Checkbox>
@@ -1346,10 +1566,10 @@ export default function NovelStudio() {
                       <Text type="secondary">上限</Text>
                       <InputNumber
                         min={1}
-                        max={500}
+                        max={5000}
                         value={feedMaxChapters}
                         onChange={(value) => setFeedMaxChapters(Number(value || 20))}
-                        disabled={!feedSerialFetch}
+                        disabled={!feedSerialFetch || feedFullBook}
                         style={{ width: 92 }}
                       />
                       <Text type="secondary">章</Text>
@@ -1358,6 +1578,17 @@ export default function NovelStudio() {
                 </Row>
                 {feedSerialFetch && (
                   <Row gutter={[10, 10]} align="middle">
+                    <Col xs={24} md={8}>
+                      <Text type="secondary">全本模式</Text>
+                    </Col>
+                    <Col xs={24} md={16}>
+                      <Checkbox
+                        checked={feedFullBook}
+                        onChange={(e) => setFeedFullBook(e.target.checked)}
+                      >
+                        一直追章到没有下一章，完成后自动入库
+                      </Checkbox>
+                    </Col>
                     <Col xs={24} md={8}>
                       <Text type="secondary">起始章节</Text>
                     </Col>
@@ -1428,8 +1659,10 @@ export default function NovelStudio() {
                   </div>
                 )}
                 <div style={{ padding: 12, borderRadius: 8, background: '#f8fafc', color: '#64748b', fontSize: 13, lineHeight: 1.7 }}>
-                  {feedSerialFetch
-                    ? '适合小说目录页。系统会后台自动进入第一章并逐章追章；如果已经投喂到第 20 章，把起始章节设为 21，就只分析后续章节。需要逐章重提时，把每批章节数设为 1。'
+                  {feedSerialFetch && feedFullBook
+                    ? '全本模式会启动后台任务，一直追到没有下一章，跑完后自动写入当前投喂项目。抓取阶段可能较久，提炼阶段会显示批次进度。'
+                    : feedSerialFetch
+                      ? '适合小说目录页。系统会后台自动进入第一章并逐章追章；如果已经投喂到第 20 章，把起始章节设为 21，就只分析后续章节。需要逐章重提时，把每批章节数设为 1。'
                     : '适合单页文章或章节页。系统会抓取当前页面正文，再让 AI 提炼为可入库知识。'}
                 </div>
               </Space>
@@ -1581,6 +1814,7 @@ export default function NovelStudio() {
                         <Text strong>{entry.title || '未命名知识'}</Text>
                         <Tag color="geekblue" bordered={false}>{entry.category || '未分类'}</Tag>
                         {typeof entry.weight === 'number' && <Tag bordered={false}>权重 {entry.weight}</Tag>}
+                        {renderMetaTags(entry)}
                       </Space>
                       <Text>{entry.content || ''}</Text>
                       {Array.isArray(entry.tags) && entry.tags.length > 0 && (
