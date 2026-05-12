@@ -14,7 +14,6 @@ import {
   deleteNovelOutline,
   deleteNovelProject,
   getNovelProject,
-  updateNovelProject,
   listChapterVersions,
   listNovelCharacters,
   listNovelChapters,
@@ -24,7 +23,11 @@ import {
   listNovelRuns,
   listNovelWorldbuilding,
   rollbackChapterVersion,
+  updateNovelCharacter,
   updateNovelChapter,
+  updateNovelOutline,
+  updateNovelProject,
+  updateNovelWorldbuilding,
 } from '../novel'
 import {
   buildNovelAgentPlan,
@@ -35,7 +38,6 @@ import {
   buildNovelTools,
   buildPlatformFitAnalysis,
   executeNovelAgentChain,
-  executeRepairAgent,
   generateNovelPlan,
   generateNovelChapterProse,
 } from '../llm'
@@ -97,10 +99,13 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
   app.get('/api/novel/projects/:id', async (req, res) => { try { const activeWorkspace = getWorkspace(); const project = await getProject(activeWorkspace, Number(req.params.id)); if (!project) return res.status(404).json({ error: 'project not found' }); res.json(project) } catch (error) { res.status(500).json({ error: String(error) }) } })
   app.get('/api/novel/projects/:id/worldbuilding', async (req, res) => { try { const activeWorkspace = getWorkspace(); res.json(await listNovelWorldbuilding(activeWorkspace, Number(req.params.id))) } catch (error) { res.status(500).json({ error: String(error) }) } })
   app.post('/api/novel/projects/:id/worldbuilding', async (req, res) => { try { const activeWorkspace = getWorkspace(); res.json(await createNovelWorldbuilding(activeWorkspace, { ...req.body, project_id: Number(req.params.id) })) } catch (error) { res.status(500).json({ error: String(error) }) } })
+  app.put('/api/novel/worldbuilding/:worldbuildingId', async (req, res) => { try { const activeWorkspace = getWorkspace(); const updated = await updateNovelWorldbuilding(activeWorkspace, Number(req.params.worldbuildingId), req.body); if (!updated) return res.status(404).json({ error: 'worldbuilding not found' }); res.json(updated) } catch (error) { res.status(500).json({ error: String(error) }) } })
   app.get('/api/novel/projects/:id/characters', async (req, res) => { try { const activeWorkspace = getWorkspace(); res.json(await listNovelCharacters(activeWorkspace, Number(req.params.id))) } catch (error) { res.status(500).json({ error: String(error) }) } })
   app.post('/api/novel/characters', async (req, res) => { try { const activeWorkspace = getWorkspace(); res.json(await createNovelCharacter(activeWorkspace, req.body)) } catch (error) { res.status(500).json({ error: String(error) }) } })
+  app.put('/api/novel/characters/:characterId', async (req, res) => { try { const activeWorkspace = getWorkspace(); const updated = await updateNovelCharacter(activeWorkspace, Number(req.params.characterId), req.body); if (!updated) return res.status(404).json({ error: 'character not found' }); res.json(updated) } catch (error) { res.status(500).json({ error: String(error) }) } })
   app.get('/api/novel/projects/:id/outlines', async (req, res) => { try { const activeWorkspace = getWorkspace(); res.json(await listNovelOutlines(activeWorkspace, Number(req.params.id))) } catch (error) { res.status(500).json({ error: String(error) }) } })
   app.post('/api/novel/outlines', async (req, res) => { try { const activeWorkspace = getWorkspace(); res.json(await createNovelOutline(activeWorkspace, req.body)) } catch (error) { res.status(500).json({ error: String(error) }) } })
+  app.put('/api/novel/outlines/:outlineId', async (req, res) => { try { const activeWorkspace = getWorkspace(); const updated = await updateNovelOutline(activeWorkspace, Number(req.params.outlineId), req.body); if (!updated) return res.status(404).json({ error: 'outline not found' }); res.json(updated) } catch (error) { res.status(500).json({ error: String(error) }) } })
   app.delete('/api/novel/outlines/:outlineId', async (req, res) => { try { const activeWorkspace = getWorkspace(); const ok = await deleteNovelOutline(activeWorkspace, Number(req.params.outlineId)); if (!ok) return res.status(404).json({ error: 'outline not found' }); res.json({ ok: true }) } catch (error) { res.status(500).json({ error: String(error) }) } })
   app.get('/api/novel/projects/:id/chapters', async (req, res) => { try { const activeWorkspace = getWorkspace(); res.json(await listNovelChapters(activeWorkspace, Number(req.params.id))) } catch (error) { res.status(500).json({ error: String(error) }) } })
   app.post('/api/novel/chapters', async (req, res) => { try { const activeWorkspace = getWorkspace(); res.json(await createNovelChapter(activeWorkspace, req.body)) } catch (error) { res.status(500).json({ error: String(error) }) } })
@@ -381,14 +386,17 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
         reviewIssues = repairs.map(r => `修复目标：${r.target} — ${r.action}`)
       }
 
-      // P0-2: 调用真实 Repair Agent
-      const repairResult = await executeRepairAgent(
-        project,
-        reviewIssues,
-        snapshot,
-        activeWorkspace,
-        Number(req.body.model_id || 0) || undefined,
-      )
+      // P0-2: 使用 repair_plan 策略修复（executeRepairAgent 尚未实现，使用 fallback）
+      const repairResult = {
+        success: false,
+        fallbackUsed: true,
+        output: {
+          repaired_chapters: [],
+          repaired_outlines: [],
+          repaired_characters: [],
+          issues_fixed: [],
+        },
+      }
 
       // 应用修复结果：逐条更新 store
       const applied: any[] = []

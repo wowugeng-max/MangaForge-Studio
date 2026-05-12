@@ -546,3 +546,108 @@ export function buildNovelSeed(project: NovelProjectRecord, prompt: string) {
     foreshadowing_plan: [],
   }
 }
+
+// ═══════════════════════════════════════════════════════════
+// ── Knowledge Base: Writing Skill Extraction Prompts ──
+// ═══════════════════════════════════════════════════════════
+
+export function buildNovelAnalysisPrompt(novelTitle: string, novelText: string): string {
+  return `你是一位资深的文学评论家和写作导师，精通网络小说和商业文学的写作技法。
+
+任务：深入分析以下小说文本，提取其写作技巧、风格特征、结构设计等可复用的写作知识。
+
+小说名称：${novelTitle}
+分析文本（节选）：
+"""
+${novelText.slice(0, 12000)}
+"""
+
+优先从以下固定维度提炼，也允许你根据文本发现新的可复用维度并返回自定义 category：
+
+1. character_design（人物设计）：人设模板、角色欲望、角色缺陷、人物关系、角色弧光、群像处理
+2. story_design（故事设计）：核心矛盾、主线推进、阶段目标、爽点结构、冲突升级、反转设计
+3. story_pacing（节奏设计）：起承转合、章节断点、高潮安排、情绪曲线、张弛节奏
+4. foreshadowing（伏笔设计）：埋线手法、回收时机、多层伏笔嵌套、悬念钩子
+5. ability_design（能力体系设计）：能力来源、成长曲线、能力限制、克制关系、体系层次
+6. realm_design（境界设计）：境界命名、晋升条件、瓶颈机制、境界差距、资源消耗
+7. worldbuilding（世界观设计）：世界规则、势力架构、地理/历史、社会秩序、制度设定
+8. writing_style（写作风格）：语言质感、叙事视角、句式特征、修辞手法、叙述节奏
+9. technique（写作技巧）：开篇钩子、场景切换、对话设计、信息披露、视角控制
+10. volume_design（分卷设计）：卷结构规划、卷目标、跨卷衔接手法
+
+输出 JSON 格式，是一个数组，每个元素包含以下字段：
+  - category: 优先使用上述固定类别；如果文本出现更准确的新类别，也可以返回模型自定义类别（如 "faction_design"）
+  - title: 知识条目的简短标题（如"开篇三行钩子法"）
+  - content: 详细的分析内容和具体示例（200-500字）
+  - tags: 相关标签数组（如 ["开篇", "钩子", "悬念"]）
+  - weight: 重要程度 1-5（5 为最重要）
+
+示例输出格式：
+[
+  {
+    "category": "technique",
+    "title": "开篇三行钩子法",
+    "content": "该小说在开篇前三行即通过...（详细分析）",
+    "tags": ["开篇", "钩子", "悬念"],
+    "weight": 5
+  },
+  ...
+]
+
+⚠️ 绝对不要返回 markdown 格式，必须是纯 JSON 数组。
+⚠️ 固定类别中凡是文本有依据的类别至少产出 1 条知识点，总共产出 10-20 条；不要为了凑类别编造文本不存在的内容。
+⚠️ tags 支持自由标签：请加入文本中真实出现或可概括出的标签，例如"人物设计"、"境界瓶颈"、"能力代价"、"章节钩子"。
+⚠️ 分析必须基于文本中的具体内容，引用原文片段作为佐证。`
+}
+
+// ── Knowledge Injection: Inject knowledge base into creation prompts ──
+
+export function buildKnowledgeInjectionPrompt(
+  projectGenre: string,
+  taskType: string,
+  knowledgeEntries: Array<{
+    category: string
+    title: string
+    content: string
+    weight: number
+  }>,
+): string {
+  if (!knowledgeEntries.length) return ''
+
+  const parts: string[] = []
+  parts.push(`\n\n📚【写作知识库参考 — 根据你的题材"${projectGenre}"和当前任务"${taskType}"，以下是从优秀作品中提炼的写作知识：】\n`)
+
+  // Group by category
+  const groups: Record<string, typeof knowledgeEntries> = {}
+  for (const entry of knowledgeEntries) {
+    if (!groups[entry.category]) groups[entry.category] = []
+    groups[entry.category].push(entry)
+  }
+
+  const categoryLabels: Record<string, string> = {
+    character_design: '人物设计',
+    story_design: '故事设计',
+    realm_design: '境界设计',
+    writing_style: '写作风格',
+    technique: '写作技巧',
+    foreshadowing: '伏笔设计',
+    worldbuilding: '世界观设计',
+    ability_design: '能力体系设计',
+    story_pacing: '节奏设计',
+    volume_design: '分卷设计',
+    character_craft: '角色塑造',
+  }
+
+  for (const [cat, entries] of Object.entries(groups)) {
+    parts.push(`— ${categoryLabels[cat] || cat} —`)
+    for (const entry of entries) {
+      parts.push(`  💡 ${entry.title}（重要度: ${entry.weight}/5）`)
+      parts.push(`    ${entry.content.slice(0, 300)}`)
+      parts.push('')
+    }
+  }
+
+  parts.push('⚠️ 请注意：以上知识是参考，不是模板。请根据你的作品风格灵活运用，不要照搬。')
+
+  return parts.join('\n')
+}

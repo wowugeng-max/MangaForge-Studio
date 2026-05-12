@@ -6,10 +6,11 @@ import {
 } from 'antd'
 import {
   ArrowLeftOutlined, BarChartOutlined, DeleteOutlined, EditOutlined,
-  FileTextOutlined, HistoryOutlined, PlayCircleOutlined, ReloadOutlined,
-  RocketOutlined, SafetyOutlined, SaveOutlined, CheckCircleOutlined,
-  SyncOutlined, ClockCircleOutlined, UnorderedListOutlined,
-  ThunderboltOutlined, BookOutlined, InteractionOutlined,
+  FileTextOutlined, HistoryOutlined, PlayCircleOutlined, PlusOutlined,
+  ReadOutlined, ReloadOutlined, RocketOutlined, SafetyOutlined, SaveOutlined,
+  CheckCircleOutlined, SyncOutlined, ClockCircleOutlined,
+  UnorderedListOutlined, ThunderboltOutlined, BookOutlined,
+  InteractionOutlined,
 } from '@ant-design/icons'
 import { useNavigate, useParams } from 'react-router-dom'
 import apiClient from '../api/client'
@@ -71,6 +72,31 @@ function buildDiffSummary(rows: Array<{ type: string; text: string }>) {
     removed: rows.filter(r => r.type === 'remove').length,
     unchanged: rows.filter(r => r.type === 'same').length,
   }
+}
+
+function displayValue(value: any): string {
+  if (value === null || value === undefined) return ''
+  if (typeof value === 'string') return value
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  if (Array.isArray(value)) {
+    return value.map(item => displayValue(item)).filter(Boolean).join(', ')
+  }
+  if (typeof value === 'object') {
+    return Object.entries(value)
+      .map(([key, val]) => {
+        const text = displayValue(val)
+        return text ? `${key}: ${text}` : ''
+      })
+      .filter(Boolean)
+      .join('; ')
+  }
+  return String(value)
+}
+
+function displayPreview(value: any, max = 30): string {
+  const text = displayValue(value)
+  if (!text) return '未命名'
+  return text.length > max ? `${text.slice(0, max)}…` : text
 }
 
 function buildTree(outlines: any[], chapters: any[]) {
@@ -329,7 +355,7 @@ function ChapterRestructurePanel({
 
   const selectedChaptersInfo = selectedChapters
     .sort((a, b) => a.chapter_no - b.chapter_no)
-    .map(c => `第${c.chapter_no}章《${c.title}》`)
+    .map(c => `第${c.chapter_no}章《${displayValue(c.title)}》`)
     .join('、')
 
   return (
@@ -486,6 +512,7 @@ export default function NovelProjectWorkspace() {
 
   // ── editors / modals ──
   const [editorKind, setEditorKind] = useState<'worldbuilding' | 'character' | 'outline' | 'chapter' | null>(null)
+  const [editorItem, setEditorItem] = useState<any | null>(null)
   const [editorForm] = Form.useForm()
   const templateImportRef = useRef<HTMLInputElement>(null)
 
@@ -499,43 +526,6 @@ export default function NovelProjectWorkspace() {
   // ── right reference panel ──
   const [rightPanelOpen, setRightPanelOpen] = useState(false)
   const [rightPanelTab, setRightPanelTab] = useState('worldbuilding')
-
-  // ── memory palace ──
-  const [memoryPalaceProjects, setMemoryPalaceProjects] = useState<any[]>([])
-  const [memoryPalaceLoading, setMemoryPalaceLoading] = useState(false)
-  const [memoryPalaceDeleting, setMemoryPalaceDeleting] = useState<number | null>(null)
-
-  const loadMemoryPalaceProjects = async () => {
-    setMemoryPalaceLoading(true)
-    try {
-      const res = await apiClient.get('/novel/memory-palace/projects')
-      setMemoryPalaceProjects(Array.isArray(res.data?.projects) ? res.data.projects : [])
-    } catch { setMemoryPalaceProjects([]) }
-    finally { setMemoryPalaceLoading(false) }
-  }
-
-  const handleDeleteMemoryPalaceProject = async (memProjectId: number) => {
-    Modal.confirm({
-      title: '删除记忆宫殿项目',
-      content: '确定要删除该项目在记忆宫殿中的所有数据吗？此操作不可撤销。',
-      okText: '删除', okButtonProps: { danger: true },
-      onOk: async () => {
-        setMemoryPalaceDeleting(memProjectId)
-        try {
-          const deleteBody = selectedProject
-            ? { project_title: selectedProject.title }
-            : undefined
-          await apiClient.delete(`/novel/memory-palace/projects/${memProjectId}`, { data: deleteBody })
-          await loadMemoryPalaceProjects()
-          message.success('已删除记忆宫殿项目')
-        } catch (e: any) {
-          message.error(e?.response?.data?.error || '删除失败')
-        } finally {
-          setMemoryPalaceDeleting(null)
-        }
-      },
-    })
-  }
 
   // ── auto-save state ──
   const [saveStatus, setSaveStatus] = useState<'idle' | 'unsaved' | 'saving' | 'saved' | 'error'>('idle')
@@ -551,7 +541,7 @@ export default function NovelProjectWorkspace() {
     title: (
       <Space size={4}>
         <Text style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {node.type === 'chapter' ? '第' : '●'} {node.title}
+          {node.type === 'chapter' ? '第' : '●'} {displayPreview(node.title, 48)}
         </Text>
         {node.type === 'chapter' && chapterStatusTag(node)}
       </Space>
@@ -561,7 +551,7 @@ export default function NovelProjectWorkspace() {
       title: (
         <Space size={4}>
           <Text style={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {child.type === 'chapter' ? '  └ 第' : '  └ ●'} {child.title}
+            {child.type === 'chapter' ? '  └ 第' : '  └ ●'} {displayPreview(child.title, 42)}
           </Text>
           {child.type === 'chapter' && chapterStatusTag(child)}
         </Space>
@@ -571,7 +561,7 @@ export default function NovelProjectWorkspace() {
         title: (
           <Space size={4}>
             <Text style={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {grand.type === 'chapter' ? '    └ 第' : '    └ ●'} {grand.title}
+              {grand.type === 'chapter' ? '    └ 第' : '    └ ●'} {displayPreview(grand.title, 36)}
             </Text>
             {grand.type === 'chapter' && chapterStatusTag(grand)}
           </Space>
@@ -757,7 +747,7 @@ export default function NovelProjectWorkspace() {
         try {
           await fetch(`${apiClient.defaults.baseURL}/novel/chapters/${ch.id}/generate-prose`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ project_id: projectId, model_id: selectedModelId, prompt: `请生成第 ${ch.chapter_no} 章《${ch.title}》完整正文` }),
+            body: JSON.stringify({ project_id: projectId, model_id: selectedModelId, prompt: `请生成第 ${ch.chapter_no} 章《${displayValue(ch.title)}》完整正文` }),
           })
           done++
         } catch { done++ }
@@ -870,7 +860,7 @@ export default function NovelProjectWorkspace() {
           headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
           body: JSON.stringify({
             project_id: projectId, model_id: selectedModelId,
-            prompt: `请生成第 ${activeChapter.chapter_no} 章《${activeChapter.title}》完整正文`,
+            prompt: `请生成第 ${activeChapter.chapter_no} 章《${displayValue(activeChapter.title)}》完整正文`,
             payload: ctx,
           }),
         },
@@ -956,23 +946,55 @@ export default function NovelProjectWorkspace() {
   }
 
   /* ── editor helpers ────────────────────────────────────────────── */
+  const formatListField = (value: any) => {
+    if (Array.isArray(value)) return value.map(item => typeof item === 'string' ? item : JSON.stringify(item)).join(', ')
+    if (value && typeof value === 'object') return JSON.stringify(value)
+    return value || ''
+  }
+
+  const parseListField = (value: any) => {
+    if (Array.isArray(value)) return value
+    const text = String(value || '').trim()
+    if (!text) return []
+    try {
+      const parsed = JSON.parse(text)
+      if (Array.isArray(parsed)) return parsed
+    } catch { /* fall back to comma split */ }
+    return text.split(/[,，\n]/).map((s: string) => s.trim()).filter(Boolean)
+  }
+
   const openEditor = (kind: typeof editorKind, item?: any) => {
+    const currentItem = item || (kind === 'worldbuilding' ? worldbuilding[0] : null)
+    setEditorItem(currentItem || null)
     if (kind === 'worldbuilding') {
-      editorForm.setFieldsValue(item || worldbuilding[0] || {
+      const data = currentItem || {
         world_summary: '', rules: [], timeline_anchor: '', known_unknowns: [], version: 1,
+      }
+      editorForm.setFieldsValue({
+        ...data,
+        rules: formatListField(data.rules),
+        timeline_anchor: formatListField(data.timeline_anchor),
+        known_unknowns: formatListField(data.known_unknowns),
       })
     } else if (kind === 'character') {
-      editorForm.setFieldsValue(item || { name: '', role_type: '', archetype: '', motivation: '', goal: '', conflict: '' })
+      const data = currentItem || { name: '', role_type: '', archetype: '', motivation: '', goal: '', conflict: '' }
+      editorForm.setFieldsValue({ ...data, role_type: data.role_type || data.role || '' })
     } else if (kind === 'outline') {
-      editorForm.setFieldsValue(item || {
+      const data = currentItem || {
         outline_type: 'master', title: '', summary: '', conflict_points: [],
         turning_points: [], hook: '', parent_id: null,
+      }
+      editorForm.setFieldsValue({
+        ...data,
+        conflict_points: formatListField(data.conflict_points),
+        turning_points: formatListField(data.turning_points),
       })
     } else if (kind === 'chapter') {
-      editorForm.setFieldsValue(item || {
+      const data = currentItem || {
         chapter_no: 1, title: '', chapter_goal: '', chapter_summary: '',
         conflict: '', ending_hook: '', outline_id: null, chapter_text: '',
-      })
+      }
+      editorForm.setFieldsValue(data)
     }
     setEditorKind(kind)
   }
@@ -980,41 +1002,51 @@ export default function NovelProjectWorkspace() {
   const submitEditor = async () => {
     const v = await editorForm.validateFields()
     try {
-      if (editorKind === 'worldbuilding')
-        await apiClient.post(`/novel/projects/${projectId}/worldbuilding`, {
+      if (editorKind === 'worldbuilding') {
+        const payload = {
           project_id: projectId,
           world_summary: v.world_summary || '',
-          rules: String(v.rules || '').split(',').map((s: string) => s.trim()).filter(Boolean),
+          rules: parseListField(v.rules),
           timeline_anchor: v.timeline_anchor || '',
-          known_unknowns: String(v.known_unknowns || '').split(',').map((s: string) => s.trim()).filter(Boolean),
-          version: Number(v.version || 1), factions: [], locations: [], systems: [],
-        })
-      else if (editorKind === 'character')
-        await apiClient.post('/novel/characters', {
+          known_unknowns: parseListField(v.known_unknowns),
+          version: Number(v.version || 1),
+        }
+        if (editorItem?.id) await apiClient.put(`/novel/worldbuilding/${editorItem.id}`, payload)
+        else await apiClient.post(`/novel/projects/${projectId}/worldbuilding`, payload)
+      } else if (editorKind === 'character') {
+        const payload = {
           project_id: projectId, name: v.name,
           role_type: v.role_type || '', archetype: v.archetype || '',
           motivation: v.motivation || '', goal: v.goal || '', conflict: v.conflict || '',
-        })
-      else if (editorKind === 'outline')
-        await apiClient.post('/novel/outlines', {
+        }
+        if (editorItem?.id) await apiClient.put(`/novel/characters/${editorItem.id}`, payload)
+        else await apiClient.post('/novel/characters', payload)
+      } else if (editorKind === 'outline') {
+        const payload = {
           project_id: projectId,
           outline_type: v.outline_type || 'master', title: v.title,
           summary: v.summary || '',
-          conflict_points: String(v.conflict_points || '').split(',').map((s: string) => s.trim()).filter(Boolean),
-          turning_points: String(v.turning_points || '').split(',').map((s: string) => s.trim()).filter(Boolean),
+          conflict_points: parseListField(v.conflict_points),
+          turning_points: parseListField(v.turning_points),
           hook: v.hook || '', parent_id: v.parent_id ?? null,
-        })
-      else if (editorKind === 'chapter')
-        await apiClient.post('/novel/chapters', {
+        }
+        if (editorItem?.id) await apiClient.put(`/novel/outlines/${editorItem.id}`, payload)
+        else await apiClient.post('/novel/outlines', payload)
+      } else if (editorKind === 'chapter') {
+        const payload = {
           project_id: projectId,
           chapter_no: Number(v.chapter_no || 1), title: v.title,
           chapter_goal: v.chapter_goal || '', chapter_summary: v.chapter_summary || '',
           conflict: v.conflict || '', ending_hook: v.ending_hook || '',
-          status: 'draft', outline_id: v.outline_id ?? null,
-          chapter_text: v.chapter_text || '', scene_breakdown: [], continuity_notes: [],
-        })
+          status: editorItem?.status || 'draft', outline_id: v.outline_id ?? null,
+          chapter_text: v.chapter_text || '',
+        }
+        if (editorItem?.id) await apiClient.put(`/novel/chapters/${editorItem.id}`, payload)
+        else await apiClient.post('/novel/chapters', { ...payload, scene_breakdown: [], continuity_notes: [] })
+      }
       message.success('已保存')
       setEditorKind(null)
+      setEditorItem(null)
       await loadProjectModules()
     } catch { message.error('保存失败') }
   }
@@ -1200,7 +1232,7 @@ export default function NovelProjectWorkspace() {
                           {chapterStatusTag(ch)}
                         </div>
                         <Text style={{ fontSize: 12, color: '#666', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block', maxWidth: 160 }}>
-                          {ch.title || '无标题'}
+                          {displayValue(ch.title) || '无标题'}
                         </Text>
                         <Text type="secondary" style={{ fontSize: 11 }}>{wc(ch.chapter_text)} 字</Text>
                       </div>
@@ -1275,7 +1307,7 @@ export default function NovelProjectWorkspace() {
                 borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', gap: 16,
               }}>
                 <Title level={5} style={{ margin: 0 }}>
-                  第{activeChapter.chapter_no}章《{activeChapter.title || '无标题'}》
+                  第{activeChapter.chapter_no}章《{displayValue(activeChapter.title) || '无标题'}》
                 </Title>
                 {chapterStatusTag(activeChapter)}
                 <div style={{ flex: 1 }} />
@@ -1310,11 +1342,11 @@ export default function NovelProjectWorkspace() {
                 </summary>
                 <div style={{ padding: '12px 24px', background: '#fff', borderBottom: '1px solid #f0f0f0' }}>
                   <Descriptions column={2} size="small" bordered>
-                    <Descriptions.Item label="章节目标">{activeChapter.chapter_goal || '-'}</Descriptions.Item>
-                    <Descriptions.Item label="章节摘要">{activeChapter.chapter_summary || '-'}</Descriptions.Item>
-                    <Descriptions.Item label="冲突">{activeChapter.conflict || '-'}</Descriptions.Item>
-                    <Descriptions.Item label="结尾钩子">{activeChapter.ending_hook || '-'}</Descriptions.Item>
-                    <Descriptions.Item label="状态">{activeChapter.status || '-'}</Descriptions.Item>
+                    <Descriptions.Item label="章节目标">{displayValue(activeChapter.chapter_goal) || '-'}</Descriptions.Item>
+                    <Descriptions.Item label="章节摘要">{displayValue(activeChapter.chapter_summary) || '-'}</Descriptions.Item>
+                    <Descriptions.Item label="冲突">{displayValue(activeChapter.conflict) || '-'}</Descriptions.Item>
+                    <Descriptions.Item label="结尾钩子">{displayValue(activeChapter.ending_hook) || '-'}</Descriptions.Item>
+                    <Descriptions.Item label="状态">{displayValue(activeChapter.status) || '-'}</Descriptions.Item>
                     <Descriptions.Item label="基础依赖">
                       {worldbuilding.length > 0 ? '✓ 世界观' : '✗ 世界观'} ·
                       {characters.length > 0 ? '✓ 角色' : '✗ 角色'} ·
@@ -1382,11 +1414,11 @@ export default function NovelProjectWorkspace() {
                       </div>
                     ) : worldbuilding.map((w, idx) => (
                       <Card key={idx} size="small" style={{ margin: 8 }}
-                        title={w.world_summary?.slice(0, 30) + (w.world_summary?.length > 30 ? '…' : '')}
+                        title={displayPreview(w.world_summary)}
                         extra={<Button size="small" type="link" onClick={() => openEditor('worldbuilding', w)}>编辑</Button>}>
-                        {w.rules?.length > 0 && <><Text strong>规则：</Text><Text style={{ display: 'block' }}>{w.rules.join(', ')}</Text></>}
-                        {w.timeline_anchor && <><Text strong style={{ marginTop: 4, display: 'block' }}>时间锚点：</Text><Text>{w.timeline_anchor}</Text></>}
-                        {w.known_unknowns?.length > 0 && <><Text strong style={{ display: 'block' }}>未知项：</Text><Text>{w.known_unknowns.join(', ')}</Text></>}
+                        {displayValue(w.rules) && <><Text strong>规则：</Text><Text style={{ display: 'block' }}>{displayValue(w.rules)}</Text></>}
+                        {displayValue(w.timeline_anchor) && <><Text strong style={{ marginTop: 4, display: 'block' }}>时间锚点：</Text><Text>{displayValue(w.timeline_anchor)}</Text></>}
+                        {displayValue(w.known_unknowns) && <><Text strong style={{ display: 'block' }}>未知项：</Text><Text>{displayValue(w.known_unknowns)}</Text></>}
                       </Card>
                     )),
                   },
@@ -1398,14 +1430,14 @@ export default function NovelProjectWorkspace() {
                         <Button size="small" type="link" onClick={() => openEditor('character')}>创建</Button>
                       </div>
                     ) : characters.map((c, idx) => (
-                      <Card key={idx} size="small" style={{ margin: 8 }} title={c.name}
+                      <Card key={idx} size="small" style={{ margin: 8 }} title={displayPreview(c.name)}
                         extra={<Button size="small" type="link" onClick={() => openEditor('character', c)}>编辑</Button>}>
                         <Space direction="vertical" size={2} style={{ width: '100%' }}>
-                          {c.role_type && <Text><Text strong>定位：</Text>{c.role_type}</Text>}
-                          {c.archetype && <Text><Text strong>原型：</Text>{c.archetype}</Text>}
-                          {c.motivation && <Text><Text strong>动机：</Text>{c.motivation}</Text>}
-                          {c.goal && <Text><Text strong>目标：</Text>{c.goal}</Text>}
-                          {c.conflict && <Text><Text strong>冲突：</Text>{c.conflict}</Text>}
+                          {displayValue(c.role_type) && <Text><Text strong>定位：</Text>{displayValue(c.role_type)}</Text>}
+                          {displayValue(c.archetype) && <Text><Text strong>原型：</Text>{displayValue(c.archetype)}</Text>}
+                          {displayValue(c.motivation) && <Text><Text strong>动机：</Text>{displayValue(c.motivation)}</Text>}
+                          {displayValue(c.goal) && <Text><Text strong>目标：</Text>{displayValue(c.goal)}</Text>}
+                          {displayValue(c.conflict) && <Text><Text strong>冲突：</Text>{displayValue(c.conflict)}</Text>}
                           {c.current_state?.information_boundaries?.length > 0 && (
                             <Text><Text strong style={{ color: '#faad14' }}>信息边界：</Text>{c.current_state.information_boundaries.length} 项限制</Text>
                           )}
@@ -1422,10 +1454,10 @@ export default function NovelProjectWorkspace() {
                       </div>
                     ) : outlines.map((o, idx) => (
                       <Card key={idx} size="small" style={{ margin: 8 }}
-                        title={<Space><Tag color="purple">{o.outline_type === 'master' ? '总纲' : o.outline_type === 'volume' ? '卷纲' : '章纲'}</Tag><Text strong>{o.title}</Text></Space>}
+                        title={<Space><Tag color="purple">{o.outline_type === 'master' ? '总纲' : o.outline_type === 'volume' ? '卷纲' : '章纲'}</Tag><Text strong>{displayPreview(o.title, 40)}</Text></Space>}
                         extra={<Button size="small" type="link" onClick={() => openEditor('outline', o)}>编辑</Button>}>
-                        {o.summary && <Paragraph ellipsis={{ rows: 3 }}>{o.summary}</Paragraph>}
-                        {o.hook && <Text type="secondary"><Text strong>钩子：</Text>{o.hook}</Text>}
+                        {displayValue(o.summary) && <Paragraph ellipsis={{ rows: 3 }}>{displayValue(o.summary)}</Paragraph>}
+                        {displayValue(o.hook) && <Text type="secondary"><Text strong>钩子：</Text>{displayValue(o.hook)}</Text>}
                       </Card>
                     )),
                   },
@@ -1448,83 +1480,6 @@ export default function NovelProjectWorkspace() {
                       </Card>
                     )),
                   },
-                  {
-                    key: 'memory-palace', label: '记忆宫殿',
-                    children: (
-                      <div style={{ padding: 8 }}>
-                        <Space direction="vertical" style={{ width: '100%' }} size={8}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <Text strong style={{ fontSize: 13 }}>🧠 记忆宫殿</Text>
-                            <Tooltip title="刷新列表">
-                              <Button size="small" type="text" icon={<ReloadOutlined />} loading={memoryPalaceLoading} onClick={loadMemoryPalaceProjects} />
-                            </Tooltip>
-                          </div>
-                          <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>
-                            管理存储在各项目中的记忆数据。
-                          </Text>
-                          {memoryPalaceLoading && memoryPalaceProjects.length === 0 ? (
-                            <div style={{ padding: 16, textAlign: 'center' }}>
-                              <SyncOutlined style={{ animation: 'spin 1s linear infinite' }} />
-                              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>加载中…</Text>
-                            </div>
-                          ) : memoryPalaceProjects.length === 0 ? (
-                            <div style={{ padding: 16, textAlign: 'center' }}>
-                              <Text type="secondary" style={{ fontSize: 12 }}>暂无记忆数据</Text>
-                            </div>
-                          ) : (
-                            memoryPalaceProjects.map((mp) => {
-                              const isCurrentProject = selectedProject && mp.project_id === selectedProject.id
-                              return (
-                                <Card
-                                  key={mp.project_id}
-                                  size="small"
-                                  style={{
-                                    borderRadius: 8,
-                                    border: isCurrentProject ? '1px solid #1677ff' : undefined,
-                                    background: isCurrentProject ? '#f0f7ff' : undefined,
-                                  }}
-                                  title={
-                                    <Space size={4}>
-                                      <Text style={{ fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 140 }}>
-                                        {mp.project_title || `项目 ${mp.project_id}`}
-                                      </Text>
-                                      {isCurrentProject && <Tag color="blue" style={{ fontSize: 10 }}>当前</Tag>}
-                                    </Space>
-                                  }
-                                  extra={
-                                    <Popconfirm
-                                      title="删除记忆"
-                                      description={`确定删除「${mp.project_title}」在记忆宫殿中的所有数据吗？`}
-                                      onConfirm={() => handleDeleteMemoryPalaceProject(mp.project_id)}
-                                      okText="删除"
-                                      okButtonProps={{ danger: true }}
-                                    >
-                                      <Button size="small" danger type="text" loading={memoryPalaceDeleting === mp.project_id}>
-                                        <DeleteOutlined />
-                                      </Button>
-                                    </Popconfirm>
-                                  }
-                                >
-                                  <Space direction="vertical" size={4} style={{ width: '100%' }}>
-                                    <Space size={[4, 2]} wrap>
-                                      <Tag color="blue" bordered={false} style={{ fontSize: 11 }}>记忆 {mp.memory_count}</Tag>
-                                      <Tag color="green" bordered={false} style={{ fontSize: 11 }}>事实 {mp.fact_count}</Tag>
-                                      <Tag color="orange" bordered={false} style={{ fontSize: 11 }}>问题 {mp.continuity_issue_count}</Tag>
-                                    </Space>
-                                    {mp.last_updated_at && (
-                                      <Text type="secondary" style={{ fontSize: 10 }}>
-                                        更新于 {mp.last_updated_at}
-                                      </Text>
-                                    )}
-                                  </Space>
-                                </Card>
-                              )
-                            })
-                          )}
-                        </Space>
-                      </div>
-                    ),
-                  },
                 ]}
               />
             </div>
@@ -1542,7 +1497,7 @@ export default function NovelProjectWorkspace() {
       <Modal
         open={editorKind !== null}
         title={{ worldbuilding: '编辑世界观', character: '角色设定', outline: '大纲设定', chapter: '章节信息' }[editorKind || 'chapter'] || '编辑'}
-        onCancel={() => setEditorKind(null)} onOk={submitEditor} okText="保存" width={720}
+        onCancel={() => { setEditorKind(null); setEditorItem(null) }} onOk={submitEditor} okText="保存" width={720}
       >
         <Form form={editorForm} layout="vertical" style={{ marginTop: 8 }}>
           {editorKind === 'worldbuilding' && (
@@ -1640,12 +1595,12 @@ export default function NovelProjectWorkspace() {
             <Card size="small" title="分场结构">
               {Array.isArray(chapterVersionDetail.scene_breakdown) && chapterVersionDetail.scene_breakdown.length > 0 ?
                 chapterVersionDetail.scene_breakdown.map((s: any, i: number) => (
-                  <Card key={i} size="small" style={{ marginBottom: 8 }} title={s.title || `场景 ${i + 1}`}><Text style={{ whiteSpace: 'pre-wrap' }}>{s.summary || JSON.stringify(s)}</Text></Card>
+                  <Card key={i} size="small" style={{ marginBottom: 8 }} title={displayValue(s.title) || `场景 ${i + 1}`}><Text style={{ whiteSpace: 'pre-wrap' }}>{displayValue(s.summary) || JSON.stringify(s)}</Text></Card>
                 )) : <Text type="secondary">暂无分场结构。</Text>}
             </Card>
             <Card size="small" title="连贯性备注">
               {Array.isArray(chapterVersionDetail.continuity_notes) && chapterVersionDetail.continuity_notes.length > 0 ? (
-                <ul style={{ margin: 0, paddingLeft: 18 }}>{chapterVersionDetail.continuity_notes.map((n: string, i: number) => <li key={i}>{n}</li>)}</ul>
+                <ul style={{ margin: 0, paddingLeft: 18 }}>{chapterVersionDetail.continuity_notes.map((n: any, i: number) => <li key={i}>{displayValue(n)}</li>)}</ul>
               ) : <Text type="secondary">暂无连贯性备注。</Text>}
             </Card>
           </Space>
@@ -1856,16 +1811,16 @@ export default function NovelProjectWorkspace() {
                             {isActive && <Tag color="blue" style={{ fontSize: 10 }}>当前编辑</Tag>}
                           </div>
                           <Text style={{ fontSize: 14, color: '#262626', display: 'block', marginBottom: 6, lineHeight: 1.5 }}>
-                            {ch.title || '无标题'}
+                            {displayValue(ch.title) || '无标题'}
                           </Text>
                           {ch.chapter_summary && (
                             <Text type="secondary" style={{ fontSize: 12, display: '-webkit-box', marginBottom: 8, lineHeight: 1.6, overflow: 'hidden', textOverflow: 'ellipsis', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical' as any }}>
-                              {ch.chapter_summary}
+                              {displayValue(ch.chapter_summary)}
                             </Text>
                           )}
                           <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
                             <Text type="secondary" style={{ fontSize: 11 }}>{wc(ch.chapter_text)} 字</Text>
-                            {ch.status && <Tag color="default" style={{ fontSize: 10, padding: '0 4px' }}>{ch.status}</Tag>}
+                          {displayValue(ch.status) && <Tag color="default" style={{ fontSize: 10, padding: '0 4px' }}>{displayValue(ch.status)}</Tag>}
                           </div>
                         </div>
 
@@ -1881,7 +1836,7 @@ export default function NovelProjectWorkspace() {
                           </Tooltip>
                           <Popconfirm
                             title="删除此章？"
-                            description={`确定删除第${ch.chapter_no}章《${ch.title}》吗？`}
+                            description={`确定删除第${ch.chapter_no}章《${displayValue(ch.title)}》吗？`}
                             onConfirm={() => { deleteChapter(ch.id) }}
                             okButtonProps={{ danger: true }}
                           >
@@ -1905,7 +1860,7 @@ export default function NovelProjectWorkspace() {
               {activeChapter ? (
                 <Space direction="vertical" size={8} style={{ width: '100%' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                    <Title level={4} style={{ margin: 0 }}>第{activeChapter.chapter_no}章《{activeChapter.title || '无标题'}》</Title>
+                    <Title level={4} style={{ margin: 0 }}>第{activeChapter.chapter_no}章《{displayValue(activeChapter.title) || '无标题'}》</Title>
                     {chapterStatusTag(activeChapter)}
                     <Tag color="blue">{wc(activeChapter.chapter_text)} 字</Tag>
                   </div>
@@ -1923,13 +1878,13 @@ export default function NovelProjectWorkspace() {
                 <Space direction="vertical" size={16} style={{ width: '100%' }}>
                   <Card size="small" title="章节信息" styles={{ body: { padding: 18 } }}>
                     <Descriptions column={2} size="small" bordered>
-                      <Descriptions.Item label="章节标题">{activeChapter.title || '-'}</Descriptions.Item>
+                      <Descriptions.Item label="章节标题">{displayValue(activeChapter.title) || '-'}</Descriptions.Item>
                       <Descriptions.Item label="章节序号">第 {activeChapter.chapter_no} 章</Descriptions.Item>
-                      <Descriptions.Item label="章节目标">{activeChapter.chapter_goal || '-'}</Descriptions.Item>
-                      <Descriptions.Item label="章节摘要">{activeChapter.chapter_summary || '-'}</Descriptions.Item>
-                      <Descriptions.Item label="冲突">{activeChapter.conflict || '-'}</Descriptions.Item>
-                      <Descriptions.Item label="结尾钩子">{activeChapter.ending_hook || '-'}</Descriptions.Item>
-                      <Descriptions.Item label="状态">{activeChapter.status || '-'}</Descriptions.Item>
+                      <Descriptions.Item label="章节目标">{displayValue(activeChapter.chapter_goal) || '-'}</Descriptions.Item>
+                      <Descriptions.Item label="章节摘要">{displayValue(activeChapter.chapter_summary) || '-'}</Descriptions.Item>
+                      <Descriptions.Item label="冲突">{displayValue(activeChapter.conflict) || '-'}</Descriptions.Item>
+                      <Descriptions.Item label="结尾钩子">{displayValue(activeChapter.ending_hook) || '-'}</Descriptions.Item>
+                      <Descriptions.Item label="状态">{displayValue(activeChapter.status) || '-'}</Descriptions.Item>
                       <Descriptions.Item label="正文长度">{wc(activeChapter.chapter_text)} 字</Descriptions.Item>
                     </Descriptions>
                   </Card>
@@ -1985,6 +1940,7 @@ export default function NovelProjectWorkspace() {
           </div>
         </div>
       </Drawer>
+
     </div>
   )
 }

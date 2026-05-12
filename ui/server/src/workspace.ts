@@ -1,8 +1,12 @@
 import { mkdir, readFile, writeFile, access } from 'fs/promises'
-import { join, resolve } from 'path'
+import { join, resolve, dirname } from 'path'
+import { fileURLToPath } from 'url'
 
 export function getServerRoot() {
-  return process.cwd()
+  // Use the actual file location instead of process.cwd(),
+  // because bun/node resolves cwd from the shell, not from the script path.
+  const __dirname = dirname(fileURLToPath(import.meta.url))
+  return resolve(__dirname, '..')
 }
 
 export function getDefaultWorkspace() {

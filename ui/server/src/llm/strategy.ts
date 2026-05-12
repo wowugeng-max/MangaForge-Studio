@@ -97,6 +97,60 @@ export function buildNovelStrategy(_project: NovelProjectRecord): NovelStrategyS
   ]
 }
 
+export async function buildPlatformFitAnalysis(
+  project: NovelProjectRecord,
+  context: { plan?: any; review?: any; prose?: any; chapters?: any[] },
+  _workspace?: string,
+  _modelId?: number,
+) {
+  const chapters = context.chapters || []
+  const proseChapters = context.prose?.prose_chapters || chapters.filter((c: any) => c.chapter_text)
+  const proseCount = proseChapters.length
+  const chapterCount = chapters.length
+
+  const score = Math.max(10, Math.min(95, Math.round(
+    50
+    + Math.min(chapterCount * 3, 20)
+    + Math.min(proseCount * 5, 20)
+    + Math.min((String(project.genre || '').length > 0 ? 5 : 0), 5)
+    + Math.min((Array.isArray(project.style_tags) && project.style_tags.length > 0 ? 5 : 0), 5)
+    + Math.min((project.synopsis ? 5 : 0), 5),
+  )))
+
+  const isReady = score >= 65
+
+  return {
+    is_platform_ready: isReady,
+    score,
+    platform_type: project.length_target || 'medium',
+    market_positioning: project.genre || '待确定',
+    strengths: [
+      chapterCount > 0 ? `已有 ${chapterCount} 章结构` : '尚未建立章节结构',
+      proseCount > 0 ? `已有 ${proseCount} 章正文` : '尚未产出正文',
+      project.genre ? `题材「${project.genre}」定位清晰` : '题材信息较少',
+    ].filter(Boolean),
+    risks: [
+      chapterCount === 0 ? '章节结构不足' : '章节节奏仍需打磨',
+      proseCount === 0 ? '正文产出不足' : '部分正文质量可能仍需增强',
+      !project.synopsis ? '缺少简介，影响平台推荐算法' : '',
+    ].filter(Boolean),
+    blocking_issues: isReady ? [] : [chapterCount === 0 ? '请先完成章节结构生成' : ''],
+    recommendations: [
+      '完善章节细纲，确保每章有清晰的冲突和钩子',
+      '持续产出正文并检查与细纲的一致性',
+      '根据平台偏好调整节奏与开篇抓力',
+    ],
+    launch_advice: isReady ? '已具备上架基础，建议持续更新保持活跃度' : '建议先完成基础结构与前三章正文',
+    chapter_checks: chapters.slice(0, 3).map((ch: any) => ({
+      chapter_no: ch.chapter_no,
+      title: ch.title,
+      has_text: !!ch.chapter_text,
+      text_length: ch.chapter_text ? String(ch.chapter_text).length : 0,
+      has_hook: !!ch.ending_hook,
+    })),
+  }
+}
+
 export function buildContinuityFixes() {
   return [
     '检查时间线与章节编号是否递增',

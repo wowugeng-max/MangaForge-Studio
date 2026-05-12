@@ -17,6 +17,7 @@ import { registerProviderRoutes } from './routes/providers'
 import { registerModelRoutes } from './routes/models'
 import { registerCanvasRoutes } from './routes/canvas'
 import { registerNovelRoutes } from './routes/novel'
+import { registerKnowledgeRoutes } from './routes/knowledge'
 import { sseManager, unregisterTask, getTask } from './ws-manager'
 
 // 加载 .env
@@ -74,6 +75,7 @@ registerProviderRoutes(app, getWorkspace)
 registerModelRoutes(app, getWorkspace)
 registerCanvasRoutes(app, getWorkspace)
 registerNovelRoutes(app, getWorkspace)
+registerKnowledgeRoutes(app)
 
 // ── SSE: Real-time task progress ──
 app.get('/api/sse/:clientId', (_req, res) => {

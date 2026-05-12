@@ -633,16 +633,100 @@ export async function buildMemoryInjectionForProject(
   return buildMemoryInjection(projectId, context)
 }
 
+function normalizeAgentOutputFromResponse(
+  agentId: string,
+  output: any,
+  response?: any,
+  context?: any,
+): any {
+  if (!Array.isArray(output) || !response || typeof response !== 'object') {
+    return output
+  }
+
+  if (response.parsed && typeof response.parsed === 'object') {
+    return response.parsed
+  }
+
+  const content = typeof response.content === 'string' ? response.content.trim() : ''
+  if (!content) return {}
+
+  try {
+    const direct = JSON.parse(content)
+    if (direct && typeof direct === 'object') return direct
+  } catch {
+    // ignore and try extracting JSON payload below
+  }
+
+  const objectMatch = content.match(/\{[\s\S]*\}/)
+  if (objectMatch) {
+    try {
+      return JSON.parse(objectMatch[0])
+    } catch {
+      // ignore
+    }
+  }
+
+  const arrayMatch = content.match(/\[[\s\S]*\]/)
+  if (arrayMatch) {
+    try {
+      return JSON.parse(arrayMatch[0])
+    } catch {
+      // ignore
+    }
+  }
+
+  if (agentId === 'prose-agent') {
+    const chapterNo = Number(
+      context?.chapter_no
+        || context?.chapterDraft?.chapter_no
+        || context?.upstreamContext?.chapter_no
+        || 0,
+    ) || 0
+
+    return {
+      prose_chapters: [
+        {
+          chapter_no: chapterNo,
+          chapter_text: content,
+        },
+      ],
+    }
+  }
+
+  return { raw_content: content }
+}
+
 export async function verifyAndStoreAgentOutputForProject(
   projectId: number,
   projectTitle: string | undefined,
   agentId: string,
   output: any,
+  response?: any,
+  context?: any,
 ) {
   const identity = assertProjectIdentity(projectId, projectTitle)
   if (!identity.ok) return { storedIds: [], verificationIssues: [], contradictions: [] }
   if (identity.normalizedTitle) upsertProjectIndex(projectId, identity.normalizedTitle)
-  return verifyAndStoreAgentOutput(projectId, agentId, output)
+
+  if (agentId.startsWith('prose-chapter-') && typeof output === 'string') {
+    const match = agentId.match(/prose-chapter-(\d+)/)
+    const chapterNo = match ? Number(match[1]) : undefined
+    const summary = output.length > 1000 ? `${output.slice(0, 800)}……${output.slice(-200)}` : output
+    const memoryId = await storeMemory(projectId, `第${chapterNo || '?'}章正文：${summary}`, 'prose', ['prose', String(chapterNo || '')], chapterNo)
+    if (memoryId) {
+      await storeFacts(projectId, output, memoryId, chapterNo)
+    }
+    const verifyResult = await verifyContent(projectId, output, 'prose')
+    const reconcileResult = await reconcileFacts(projectId)
+    return {
+      storedIds: memoryId ? [memoryId] : [],
+      verificationIssues: verifyResult.is_consistent ? [] : (verifyResult.issues || []),
+      contradictions: reconcileResult.contradictions || [],
+    }
+  }
+
+  const normalizedOutput = normalizeAgentOutputFromResponse(agentId, output, response, context)
+  return verifyAndStoreAgentOutput(projectId, agentId, normalizedOutput)
 }
 
 export async function storeAgentOutputForProject(
@@ -650,11 +734,14 @@ export async function storeAgentOutputForProject(
   projectTitle: string | undefined,
   agentId: string,
   output: any,
+  response?: any,
+  context?: any,
 ) {
   const identity = assertProjectIdentity(projectId, projectTitle)
   if (!identity.ok) return []
   if (identity.normalizedTitle) upsertProjectIndex(projectId, identity.normalizedTitle)
-  return storeAgentOutput(projectId, agentId, output)
+  const normalizedOutput = normalizeAgentOutputFromResponse(agentId, output, response, context)
+  return storeAgentOutput(projectId, agentId, normalizedOutput)
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -673,6 +760,9 @@ export async function storeAgentOutputForProject(
 export async function buildMemoryInjection(
   projectId: number,
   context: {
+    query?: string
+    categories?: MemoryCategory[]
+    topK?: number
     worldbuilding?: any
     characters?: any[]
     outline?: any
@@ -687,7 +777,42 @@ export async function buildMemoryInjection(
   const allFacts: FactRecord[] = []
   const allContradictions: Array<any> = []
 
-  // ── 1. 世界观记忆 ──
+  // ── 1. 通用语义召回（供调用方按 query/categories 直接取记忆）──
+  try {
+    const genericQuery = String(context.query || '').trim()
+    if (genericQuery) {
+      const categories = context.categories && context.categories.length
+        ? context.categories
+        : ['plot', 'worldbuilding', 'character', 'foreshadowing', 'prose', 'general'] as MemoryCategory[]
+      const topK = Math.max(1, Math.min(20, Number(context.topK || 5) || 5))
+      const labels: Record<MemoryCategory, string> = {
+        plot: '情节',
+        worldbuilding: '世界观/体系',
+        character: '角色',
+        foreshadowing: '伏笔',
+        prose: '正文/文风',
+        general: '通用',
+      }
+      const genericMemories: MemoryRecord[] = []
+      const seen = new Set<string>()
+      for (const category of categories) {
+        const memories = await recallMemories(projectId, genericQuery, topK, category)
+        for (const memory of memories) {
+          if (seen.has(memory.id)) continue
+          seen.add(memory.id)
+          genericMemories.push(memory)
+        }
+      }
+      if (genericMemories.length > 0) {
+        allMemories.push(...genericMemories)
+        parts.push('### 🧠 相关记忆\n' + genericMemories
+          .map(m => `• [${labels[m.category] || m.category}] ${m.content.slice(0, 400)}`)
+          .join('\n'))
+      }
+    }
+  } catch { /* non-fatal */ }
+
+  // ── 2. 世界观记忆 ──
   try {
     const worldQueries = [
       context.worldbuilding?.world_summary || '',
@@ -702,7 +827,7 @@ export async function buildMemoryInjection(
     }
   } catch { /* non-fatal */ }
 
-  // ── 2. 角色记忆 ──
+  // ── 3. 角色记忆 ──
   try {
     const charNames = (context.characters || []).map((c: any) => c.name).filter(Boolean)
     if (charNames.length > 0) {
@@ -724,7 +849,7 @@ export async function buildMemoryInjection(
     }
   } catch { /* non-fatal */ }
 
-  // ── 3. 情节与伏笔记忆 ──
+  // ── 4. 情节与伏笔记忆 ──
   try {
     const plotQuery = [
       context.chapterTitle,
@@ -742,7 +867,7 @@ export async function buildMemoryInjection(
     }
   } catch { /* non-fatal */ }
 
-  // ── 4. 近期正文记忆 ──
+  // ── 5. 近期正文记忆 ──
   try {
     if (context.prevChapters && context.prevChapters.length > 0) {
       const recentTexts = context.prevChapters
@@ -759,7 +884,7 @@ export async function buildMemoryInjection(
     }
   } catch { /* non-fatal */ }
 
-  // ── 5. 矛盾检测（reconcile）──
+  // ── 6. 矛盾检测（reconcile）──
   try {
     const reconcileResult = await reconcileFacts(projectId)
     if (reconcileResult.contradiction_count > 0) {
@@ -772,7 +897,7 @@ export async function buildMemoryInjection(
     }
   } catch { /* non-fatal */ }
 
-  // ── 6. 连续性日志（未解决的问题）──
+  // ── 7. 连续性日志（未解决的问题）──
   try {
     const openIssues = await listContinuityIssues(projectId, 'open')
     if (openIssues.length > 0) {
