@@ -1,0 +1,139 @@
+import React from 'react'
+import { Button, Card, Space, Tabs, Tag, Typography } from 'antd'
+import { displayPreview, displayValue, versionSourceColor, versionSourceLabel } from './utils'
+
+const { Text, Paragraph } = Typography
+
+export function ReferencePanel({
+  open,
+  activeTab,
+  worldbuilding,
+  characters,
+  outlines,
+  chapterVersions,
+  chapterVersionsLoading,
+  rollingBackVersionId,
+  onClose,
+  onOpen,
+  onTabChange,
+  onEdit,
+  onRollbackVersion,
+  onOpenVersionDetail,
+}: {
+  open: boolean
+  activeTab: string
+  worldbuilding: any[]
+  characters: any[]
+  outlines: any[]
+  chapterVersions: any[]
+  chapterVersionsLoading: boolean
+  rollingBackVersionId: number | null
+  onClose: () => void
+  onOpen: () => void
+  onTabChange: (key: string) => void
+  onEdit: (kind: 'worldbuilding' | 'character' | 'outline', item?: any) => void
+  onRollbackVersion: (versionId: number) => void
+  onOpenVersionDetail: (version: any) => void
+}) {
+  if (!open) {
+    return (
+      <div style={{ width: 28, flexShrink: 0, background: '#fafafa', borderLeft: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Button type="text" shape="circle" size="small" onClick={onOpen}>📚</Button>
+      </div>
+    )
+  }
+
+  return (
+    <div style={{
+      width: 280, flexShrink: 0, background: '#fff',
+      borderLeft: '1px solid #f0f0f0', display: 'flex', flexDirection: 'column', overflow: 'hidden',
+      minHeight: 0,
+    }}>
+      <div style={{ padding: '8px 12px', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Text strong style={{ fontSize: 12 }}>📚 参考资料</Text>
+        <Button type="text" size="small" onClick={onClose}>✕</Button>
+      </div>
+      <div style={{ flex: 1, overflow: 'auto' }}>
+        <Tabs activeKey={activeTab} onChange={onTabChange} size="small"
+          items={[
+            {
+              key: 'worldbuilding', label: '世界观',
+              children: worldbuilding.length === 0 ? (
+                <div style={{ padding: 12, textAlign: 'center' }}>
+                  <Text type="secondary" style={{ fontSize: 12 }}>暂无世界观设定</Text><br />
+                  <Button size="small" type="link" onClick={() => onEdit('worldbuilding')}>创建</Button>
+                </div>
+              ) : worldbuilding.map((w, idx) => (
+                <Card key={idx} size="small" style={{ margin: 8 }}
+                  title={displayPreview(w.world_summary)}
+                  extra={<Button size="small" type="link" onClick={() => onEdit('worldbuilding', w)}>编辑</Button>}>
+                  {displayValue(w.rules) && <><Text strong>规则：</Text><Text style={{ display: 'block' }}>{displayValue(w.rules)}</Text></>}
+                  {displayValue(w.timeline_anchor) && <><Text strong style={{ marginTop: 4, display: 'block' }}>时间锚点：</Text><Text>{displayValue(w.timeline_anchor)}</Text></>}
+                  {displayValue(w.known_unknowns) && <><Text strong style={{ display: 'block' }}>未知项：</Text><Text>{displayValue(w.known_unknowns)}</Text></>}
+                </Card>
+              )),
+            },
+            {
+              key: 'characters', label: '角色',
+              children: characters.length === 0 ? (
+                <div style={{ padding: 12, textAlign: 'center' }}>
+                  <Text type="secondary" style={{ fontSize: 12 }}>暂无角色设定</Text><br />
+                  <Button size="small" type="link" onClick={() => onEdit('character')}>创建</Button>
+                </div>
+              ) : characters.map((c, idx) => (
+                <Card key={idx} size="small" style={{ margin: 8 }} title={displayPreview(c.name)}
+                  extra={<Button size="small" type="link" onClick={() => onEdit('character', c)}>编辑</Button>}>
+                  <Space direction="vertical" size={2} style={{ width: '100%' }}>
+                    {displayValue(c.role_type) && <Text><Text strong>定位：</Text>{displayValue(c.role_type)}</Text>}
+                    {displayValue(c.archetype) && <Text><Text strong>原型：</Text>{displayValue(c.archetype)}</Text>}
+                    {displayValue(c.motivation) && <Text><Text strong>动机：</Text>{displayValue(c.motivation)}</Text>}
+                    {displayValue(c.goal) && <Text><Text strong>目标：</Text>{displayValue(c.goal)}</Text>}
+                    {displayValue(c.conflict) && <Text><Text strong>冲突：</Text>{displayValue(c.conflict)}</Text>}
+                    {c.current_state?.information_boundaries?.length > 0 && (
+                      <Text><Text strong style={{ color: '#faad14' }}>信息边界：</Text>{c.current_state.information_boundaries.length} 项限制</Text>
+                    )}
+                  </Space>
+                </Card>
+              )),
+            },
+            {
+              key: 'outline', label: '大纲',
+              children: outlines.length === 0 ? (
+                <div style={{ padding: 12, textAlign: 'center' }}>
+                  <Text type="secondary" style={{ fontSize: 12 }}>暂无大纲</Text><br />
+                  <Button size="small" type="link" onClick={() => onEdit('outline')}>创建</Button>
+                </div>
+              ) : outlines.map((o, idx) => (
+                <Card key={idx} size="small" style={{ margin: 8 }}
+                  title={<Space><Tag color="purple">{o.outline_type === 'master' ? '总纲' : o.outline_type === 'volume' ? '卷纲' : '章纲'}</Tag><Text strong>{displayPreview(o.title, 40)}</Text></Space>}
+                  extra={<Button size="small" type="link" onClick={() => onEdit('outline', o)}>编辑</Button>}>
+                  {displayValue(o.summary) && <Paragraph ellipsis={{ rows: 3 }}>{displayValue(o.summary)}</Paragraph>}
+                  {displayValue(o.hook) && <Text type="secondary"><Text strong>钩子：</Text>{displayValue(o.hook)}</Text>}
+                </Card>
+              )),
+            },
+            {
+              key: 'versions', label: '版本',
+              children: chapterVersions.length === 0 ? (
+                <div style={{ padding: 12, textAlign: 'center' }}>
+                  <Text type="secondary" style={{ fontSize: 12 }}>{chapterVersionsLoading ? '加载中…' : '暂无历史版本'}</Text>
+                </div>
+              ) : chapterVersions.slice().sort((a, b) => b.version_no - a.version_no).map(v => (
+                <Card key={v.id} size="small" style={{ margin: 8 }}
+                  title={`v${v.version_no}`}
+                  extra={<Space>
+                    <Tag color={versionSourceColor(v.source)} bordered={false}>{versionSourceLabel(v.source)}</Tag>
+                    <Button size="small" danger onClick={() => onRollbackVersion(v.id)} loading={rollingBackVersionId === v.id}>回滚</Button>
+                  </Space>}
+                  onClick={() => onOpenVersionDetail(v)}>
+                  <Text type="secondary" style={{ fontSize: 11 }}>{v.created_at}</Text><br />
+                  <Text style={{ fontSize: 12, whiteSpace: 'pre-wrap' }}>{(v.chapter_text || '空').slice(0, 100)}</Text>
+                </Card>
+              )),
+            },
+          ]}
+        />
+      </div>
+    </div>
+  )
+}
