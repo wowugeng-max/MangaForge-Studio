@@ -86,6 +86,7 @@ export default function KeyManager() {
     try {
       const res = await keyApi.test(id)
       if (res.data.valid) message.success(`测试成功，剩余额度: ${res.data.quota_remaining ?? '未知'}`)
+      else if (res.data.retryable) message.warning(res.data.error || '供应商暂时不可用，请稍后重试')
       else message.error(res.data.error || '测试失败')
       fetchKeys()
     } catch (error: any) {

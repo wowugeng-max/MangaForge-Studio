@@ -7,6 +7,7 @@ export type ProviderRecord = {
   service_type: string
   api_format: string
   auth_type: string
+  response_mode?: 'auto' | 'stream' | 'non_stream'
   supported_modalities: string[]
   default_base_url?: string
   is_active: boolean

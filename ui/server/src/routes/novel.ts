@@ -45,6 +45,40 @@ import { sseManager, registerTask, unregisterTask } from '../ws-manager'
 
 export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
   const getProject = async (workspace: string, id: number) => getNovelProject(workspace, id)
+  const parseJsonLikePayload = (value: any) => {
+    if (!value) return null
+    if (typeof value === 'object') return value
+    const raw = String(value || '').trim()
+    if (!raw) return null
+    const candidates = [
+      raw,
+      raw.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1] || '',
+      raw.match(/\{[\s\S]*\}/)?.[0] || '',
+    ].filter(Boolean)
+    for (const candidate of candidates) {
+      try {
+        return JSON.parse(candidate)
+      } catch {
+        // try next candidate
+      }
+    }
+    return null
+  }
+  const getNovelPayload = (result: any) => {
+    const rawChoicesContent = result?.raw?.choices?.[0]?.message?.content
+    const candidates = [
+      result?.output,
+      result?.parsed,
+      result?.content,
+      result?.raw?.content,
+      rawChoicesContent,
+    ]
+    for (const candidate of candidates) {
+      const payload = parseJsonLikePayload(candidate)
+      if (payload && typeof payload === 'object') return payload
+    }
+    return {}
+  }
   const deriveExecutionError = (execution: any) => {
     const failedSteps = (execution?.results || []).filter((item: any) => item && item.outputSource !== 'skipped' && !item.success)
     if (!failedSteps.length) return null
@@ -130,13 +164,15 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
         .slice(-2)
         .map(ch => ({ chapter_no: ch.chapter_no, title: ch.title, chapter_text: ch.chapter_text }))
       const result = await generateNovelChapterProse(project, chapter, { worldbuilding, characters, outline: outlines, prompt: String(req.body.prompt || ''), prevChapters }, activeWorkspace, Number(req.body.model_id || 0) || undefined)
-      // 兼容两种格式：result.output.chapter_text 或 result.output.prose_chapters[0].chapter_text
-      const proseArr = Array.isArray(result.output?.prose_chapters) ? result.output.prose_chapters : []
-      const chapterText = result.output?.chapter_text || (proseArr.length > 0 ? proseArr[0]?.chapter_text : undefined)
-      const sceneBreakdown = result.output?.scene_breakdown || (proseArr.length > 0 ? proseArr[0]?.scene_breakdown : [])
-      const continuityNotes = result.output?.continuity_notes || (proseArr.length > 0 ? proseArr[0]?.continuity_notes : [])
-      if (!result.success || !chapterText) {
-        await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'failed', input_ref: JSON.stringify(req.body), output_ref: JSON.stringify(result.parsed || null), error_message: String(result.error || result.fallbackReason || '模型未返回正文') })
+      // 兼容 result.output / result.parsed / result.content(JSON string) 等厂商返回形态
+      const resultPayload = getNovelPayload(result)
+      const proseArr = Array.isArray(resultPayload?.prose_chapters) ? resultPayload.prose_chapters : []
+      const firstProse = proseArr.length > 0 ? proseArr[0] : {}
+      const chapterText = resultPayload?.chapter_text || firstProse?.chapter_text
+      const sceneBreakdown = resultPayload?.scene_breakdown || firstProse?.scene_breakdown || []
+      const continuityNotes = resultPayload?.continuity_notes || firstProse?.continuity_notes || []
+      if ((result as any).error || !chapterText) {
+        await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'failed', input_ref: JSON.stringify(req.body), output_ref: JSON.stringify(resultPayload || null), error_message: String(result.error || result.fallbackReason || '模型未返回正文') })
         return res.status(502).json({ error: String(result.error || result.fallbackReason || '模型未返回正文'), result })
       }
       const updated = await updateNovelChapter(activeWorkspace, chapter.id, { chapter_text: chapterText, scene_breakdown: sceneBreakdown, continuity_notes: continuityNotes, status: 'draft' })
@@ -146,7 +182,7 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
       res.setHeader('Content-Type', 'text/event-stream; charset=utf-8')
       res.setHeader('Cache-Control', 'no-cache, no-transform')
       res.setHeader('Connection', 'keep-alive')
-      const fullText = String(result.output.chapter_text || '')
+      const fullText = String(chapterText || '')
       const chunkSize = Math.max(40, Math.ceil(fullText.length / 12))
       res.write(`data: ${JSON.stringify({ type: 'progress', progress: '生成完成，开始输出正文...' })}\n\n`)
       for (let i = 0; i < fullText.length; i += chunkSize) {

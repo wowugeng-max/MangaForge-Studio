@@ -42,6 +42,33 @@ export type RuntimeExecutionOptions = {
   maxRetries?: number
 }
 
+type SafeRuntimeModelSelection = Omit<RuntimeModelSelection, 'key'> & {
+  key: Omit<APIKeyRecord, 'key'> & {
+    has_key: boolean
+    key_preview: string
+  }
+}
+
+function maskSecret(value?: string) {
+  const text = String(value || '')
+  if (!text) return ''
+  if (text.length <= 8) return '***'
+  return `${text.slice(0, 4)}***${text.slice(-4)}`
+}
+
+function sanitizeRuntimeSelection(selection: RuntimeModelSelection): SafeRuntimeModelSelection {
+  const { key, ...rest } = selection
+  const { key: rawKey, ...safeKey } = key
+  return {
+    ...rest,
+    key: {
+      ...safeKey,
+      has_key: Boolean(rawKey),
+      key_preview: maskSecret(rawKey),
+    },
+  }
+}
+
 // ── URL Handling ────────────────────────────────────────────
 
 /**
@@ -110,12 +137,19 @@ function buildHeaders(selection: RuntimeModelSelection): Record<string, string> 
 // ── Request Body ────────────────────────────────────────────
 
 function toOpenAIBody(request: LLMRequest, selection: RuntimeModelSelection): Record<string, any> {
+  const responseMode = String(selection.provider.response_mode || 'auto')
+  const shouldStream = responseMode === 'stream'
+    ? true
+    : responseMode === 'non_stream'
+      ? false
+      : Boolean(request.stream)
   const body: Record<string, any> = {
     model: selection.model.model_name || request.model,
     messages: request.messages,
     temperature: request.temperature ?? 0.3,
     max_tokens: request.max_tokens ?? 4096,
   }
+  if (shouldStream) body.stream = true
   if (request.response_format && request.response_format !== 'text') {
     body.response_format = request.response_format
   }
@@ -158,6 +192,53 @@ function parseAnthropicResponse<T = any>(raw: any): LLMResponse<T> {
   return normalizeLLMResponse<T>({ ...raw, content: text })
 }
 
+async function readOpenAIStream(response: Response): Promise<any> {
+  if (!response.body) throw new Error('Streaming response has no body')
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let content = ''
+  let finishReason = ''
+  let usage: any = undefined
+  const tailChunks: any[] = []
+
+  const consumeLine = (line: string) => {
+    const trimmed = line.trim()
+    if (!trimmed.startsWith('data:')) return
+    const payload = trimmed.slice(5).trim()
+    if (!payload || payload === '[DONE]') return
+    const chunk = JSON.parse(payload)
+    const choice = chunk?.choices?.[0] || {}
+    const delta = choice?.delta || {}
+    const piece = delta?.content ?? choice?.text ?? ''
+    if (piece) content += String(piece)
+    if (choice?.finish_reason) finishReason = String(choice.finish_reason)
+    if (chunk?.usage) usage = chunk.usage
+    tailChunks.push(chunk)
+    if (tailChunks.length > 20) tailChunks.shift()
+  }
+
+  while (true) {
+    const { value, done } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split(/\r?\n/)
+    buffer = lines.pop() || ''
+    for (const line of lines) consumeLine(line)
+  }
+
+  buffer += decoder.decode()
+  for (const line of buffer.split(/\r?\n/)) consumeLine(line)
+
+  return {
+    content,
+    choices: [{ message: { role: 'assistant', content }, finish_reason: finishReason || 'stop' }],
+    usage,
+    stream_chunks_tail: tailChunks,
+  }
+}
+
 // ── Error Classification ────────────────────────────────────
 
 /**
@@ -166,6 +247,10 @@ function parseAnthropicResponse<T = any>(raw: any): LLMResponse<T> {
  * Does NOT retry on 4xx (client errors like 401, 400).
  */
 function isRetryable(status: number, error?: string): boolean {
+  // Exceptions thrown by fetch before receiving an HTTP response are network-level
+  // failures in this code path. Treat them as retryable unless the parent signal
+  // already handled cancellation.
+  if (status === 0) return true
   // 429 Too Many Requests — always retry with backoff
   if (status === 429) return true
   // 5xx server errors — retry
@@ -176,6 +261,22 @@ function isRetryable(status: number, error?: string): boolean {
   if (error === 'AbortError' || error?.includes('ECONN')) return true
   if (error?.includes('fetch failed') || error?.includes('socket')) return true
   return false
+}
+
+function describeFetchError(error: any): string {
+  const parts = [
+    error?.name,
+    error?.message,
+    error?.code,
+    error?.errno,
+    error?.cause?.name,
+    error?.cause?.message,
+    error?.cause?.code,
+    error?.cause?.errno,
+  ]
+    .map(item => String(item || '').trim())
+    .filter(Boolean)
+  return Array.from(new Set(parts)).join(' | ') || String(error || 'Unknown network error')
 }
 
 // ── HTTP Request with Retry ─────────────────────────────────
@@ -199,6 +300,7 @@ async function postProviderJson<T = any>(
   const body = selection.apiFormat === 'anthropic'
     ? toAnthropicBody(request, selection)
     : toOpenAIBody(request, selection)
+  const isStreaming = selection.apiFormat !== 'anthropic' && Boolean((body as any).stream)
   const headers = buildHeaders(selection)
   const maxRetries = Number(options.maxRetries ?? process.env.LLM_MAX_RETRIES ?? 5)
   const timeoutMs = Number(options.timeoutMs ?? process.env.LLM_TIMEOUT_MS ?? 600000) // 600s default, matches Claude Code foreground
@@ -206,7 +308,7 @@ async function postProviderJson<T = any>(
   const heartbeatInterval = 30_000 // log progress every 30s
 
   console.log(
-    `[provider-runtime] POST ${url} | model: ${selection.model.model_name} | format: ${selection.apiFormat} | key: ${keyMask} | timeout=${timeoutMs}ms | retries=${maxRetries}`,
+    `[provider-runtime] POST ${url} | model: ${selection.model.model_name} | format: ${selection.apiFormat} | responseMode=${selection.provider.response_mode || 'auto'} | stream=${isStreaming ? 'on' : 'off'} | key: ${keyMask} | timeout=${timeoutMs}ms | retries=${maxRetries}`,
   )
 
   let lastError: string | null = null
@@ -257,14 +359,12 @@ async function postProviderJson<T = any>(
       if (options.signal?.aborted) {
         throw new Error('Request canceled')
       }
-      const errMsg = String(err?.name || err?.message || err)
+      const errMsg = describeFetchError(err)
       lastError = errMsg
       console.error(`[provider-runtime] Network error: ${errMsg}`)
 
-      // Claude Code: AbortError from timeout is retryable
-      if (!isRetryable(0, errMsg)) {
-        throw new Error(`Network error (non-retryable): ${errMsg}`)
-      }
+      // Fetch threw before an HTTP response was available. Retry it like a
+      // transient network failure; parent aborts were handled above.
       continue
     } finally {
       clearTimeout(timeout)
@@ -274,15 +374,13 @@ async function postProviderJson<T = any>(
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1)
     lastStatus = response.status
-    const text = await response.text()
-
-    // Log response for debugging
-    console.log(
-      `[provider-runtime] Response: ${response.status} | ${selection.model.model_name} | body preview: ${text.slice(0, 300)} | ${elapsed}s`,
-    )
 
     // Check for retryable status codes
     if (!response.ok) {
+      const text = await response.text()
+      console.log(
+        `[provider-runtime] Response: ${response.status} | ${selection.model.model_name} | body preview: ${text.slice(0, 300)} | ${elapsed}s`,
+      )
       const errorMsg = `Provider request failed ${response.status}: ${text.slice(0, 500)}`
 
       // 401 Invalid API key — NEVER retry, fail immediately
@@ -311,10 +409,28 @@ async function postProviderJson<T = any>(
 
     // Success — parse response
     let raw: any
-    try {
-      raw = JSON.parse(text)
-    } catch {
-      raw = { content: text }
+    if (isStreaming) {
+      try {
+        console.log(`[provider-runtime] Response: ${response.status} | ${selection.model.model_name} | streaming | ${elapsed}s`)
+        raw = await readOpenAIStream(response)
+      } catch (error) {
+        lastError = describeFetchError(error)
+        console.error(`[provider-runtime] Stream read error: ${lastError}`)
+        continue
+      }
+    } else {
+      const text = await response.text()
+
+      // Log response for debugging
+      console.log(
+        `[provider-runtime] Response: ${response.status} | ${selection.model.model_name} | body preview: ${text.slice(0, 300)} | ${elapsed}s`,
+      )
+
+      try {
+        raw = JSON.parse(text)
+      } catch {
+        raw = { content: text }
+      }
     }
 
     return selection.apiFormat === 'anthropic'
@@ -477,7 +593,7 @@ export async function executeWithRuntimeModel<T = any>(
 
   try {
     const response = await postProviderJson<T>(selection, request, options)
-    return { ...response, runtimeSelection: selection }
+    return { ...response, runtimeSelection: sanitizeRuntimeSelection(selection) as any }
   } catch (error) {
     console.error(`[provider-runtime] Request failed: ${error}`)
     return {
@@ -487,7 +603,7 @@ export async function executeWithRuntimeModel<T = any>(
       tool_calls: [],
       finish_reason: 'error',
       error: String(error),
-      runtimeSelection: selection,
+      runtimeSelection: sanitizeRuntimeSelection(selection) as any,
     }
   }
 }

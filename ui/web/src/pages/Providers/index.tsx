@@ -15,6 +15,7 @@ const PRESET_PROVIDERS = [
       display_name: 'OpenAI (ChatGPT)',
       api_format: 'openai_compatible',
       auth_type: 'Bearer',
+      response_mode: 'auto',
       service_type: 'llm',
       default_base_url: 'https://api.openai.com/v1',
       supported_modalities: ['chat', 'vision', 'text_to_image', 'image_to_image'],
@@ -35,6 +36,7 @@ const PRESET_PROVIDERS = [
       display_name: 'DeepSeek 官方',
       api_format: 'openai_compatible',
       auth_type: 'Bearer',
+      response_mode: 'auto',
       service_type: 'llm',
       default_base_url: 'https://api.deepseek.com/v1',
       supported_modalities: ['chat'],
@@ -50,6 +52,7 @@ const PRESET_PROVIDERS = [
       display_name: '火山引擎 (豆包)',
       api_format: 'openai_compatible',
       auth_type: 'Bearer',
+      response_mode: 'auto',
       service_type: 'llm',
       default_base_url: 'https://ark.cn-beijing.volces.com/api/v3',
       supported_modalities: ['chat', 'vision'],
@@ -97,7 +100,7 @@ export default function ProviderManager() {
     } else {
       setEditingId(null)
       form.resetFields()
-      form.setFieldsValue({ is_active: true, api_format: 'openai_compatible', auth_type: 'Bearer', service_type: 'llm', supported_modalities: ['chat'], custom_headers_list: [], endpoints: {} })
+      form.setFieldsValue({ is_active: true, api_format: 'openai_compatible', auth_type: 'Bearer', response_mode: 'auto', service_type: 'llm', supported_modalities: ['chat'], custom_headers_list: [], endpoints: {} })
     }
     setDrawerOpen(true)
   }
@@ -132,7 +135,7 @@ export default function ProviderManager() {
 
   const columns = [
     { title: '厂商与 ID', key: 'name', render: (_: any, r: ProviderData) => <Space direction="vertical" size={0}><Text strong style={{ fontSize: 15 }}>{r.display_name}</Text><Text type="secondary" style={{ fontSize: 12, fontFamily: 'monospace' }}>{r.id}</Text></Space> },
-    { title: '通信底座', dataIndex: 'api_format', render: (t: string) => <Tag color={t === 'openai_compatible' ? 'cyan' : 'purple'} bordered={false} style={{ padding: '2px 8px' }}>{t === 'openai_compatible' ? 'STANDARD' : 'NATIVE'}</Tag> },
+    { title: '通信底座', key: 'api_format', render: (_: any, r: ProviderData) => <Space size={4} wrap><Tag color={r.api_format === 'openai_compatible' ? 'cyan' : 'purple'} bordered={false} style={{ padding: '2px 8px' }}>{r.api_format === 'openai_compatible' ? 'STANDARD' : 'NATIVE'}</Tag><Tag bordered={false}>{r.response_mode === 'stream' ? 'STREAM' : r.response_mode === 'non_stream' ? 'NON-STREAM' : 'AUTO'}</Tag></Space> },
     { title: '算力模态', dataIndex: 'supported_modalities', render: (mods: string[]) => <Space size={[0, 4]} wrap>{mods?.map(m => <Tag key={m} bordered={false}>{m.toUpperCase()}</Tag>)}</Space> },
     { title: '状态', dataIndex: 'is_active', render: (a: boolean) => <Badge status={a ? 'processing' : 'default'} text={a ? '监听中' : '已断开'} /> },
     { title: '操作', align: 'right' as const, render: (_: any, record: ProviderData) => <Space><Tooltip title="配置参数"><Button type="text" shape="circle" icon={<EditOutlined style={{ color: '#1890ff' }} />} onClick={() => onEdit(record)} /></Tooltip><Popconfirm title="确定彻底断开此厂商算力？" onConfirm={() => providerApi.delete(record.id).then(loadData)} okText="确认" cancelText="取消" okButtonProps={{ danger: true }}><Button type="text" shape="circle" danger icon={<DeleteOutlined />} /></Popconfirm></Space> },
@@ -170,6 +173,13 @@ export default function ProviderManager() {
           <Title level={5} style={{ marginBottom: 16 }}>协议与全局网关</Title>
           <Form.Item name="service_type" label="核心服务驱动类型" rules={[{ required: true, message: '必须指定算力类型' }]}><Radio.Group optionType="button" buttonStyle="solid"><Radio value="llm">🤖 AI 大语言/多模态模型</Radio><Radio value="comfyui">🚀 物理算力引擎 (ComfyUI)</Radio></Radio.Group></Form.Item>
           <Form.Item name="api_format" label="通信协议规范"><Select style={{ width: '100%' }}><Select.Option value="openai_compatible">OpenAI 标准兼容 (V1)</Select.Option><Select.Option value="gemini_native">Google Gemini 原生</Select.Option></Select></Form.Item>
+          <Form.Item name="response_mode" label="响应返回模式" extra="流式可绕开部分网关的长请求超时；非流式适合短任务或不支持 stream 的厂商。">
+            <Radio.Group optionType="button" buttonStyle="solid">
+              <Radio value="auto">自动</Radio>
+              <Radio value="stream">流式 Stream</Radio>
+              <Radio value="non_stream">非流式</Radio>
+            </Radio.Group>
+          </Form.Item>
           <Form.Item name="default_base_url" label="官方 API 网关 (Base URL)" extra="💡 提示：所有未配置高级路由的请求，默认拼接此地址。"><Input prefix={<GlobalOutlined />} placeholder="https://..." style={{ borderRadius: '6px' }} /></Form.Item>
           <Divider style={{ margin: '24px 0' }} />
           <Title level={5} style={{ marginBottom: 16 }}>模态与开关</Title>

@@ -7,7 +7,7 @@ export const keyApi = {
   create: (data: APIKeyCreate) => apiClient.post<APIKey>('/keys/', data),
   update: (id: number, data: APIKeyUpdate) => apiClient.put<APIKey>(`/keys/${id}`, data),
   delete: (id: number) => apiClient.delete(`/keys/${id}`),
-  test: (id: number) => apiClient.post<{ valid: boolean; quota_remaining?: number; message?: string }>(`/keys/${id}/test`),
+  test: (id: number) => apiClient.post<{ valid: boolean; quota_remaining?: number; message?: string; error?: string; retryable?: boolean; retry_after?: number }>(`/keys/${id}/test`),
   testAll: () => apiClient.post('/keys/test-all'),
   syncModels: (keyId: number) => apiClient.post(`/models/sync/${keyId}`),
 }

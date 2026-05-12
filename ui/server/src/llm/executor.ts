@@ -21,6 +21,7 @@ import type { LLMMessage, LLMRequest, LLMResponse } from './types'
 
 // ── Runtime model selection (reads from keys.json + providers.json + models.json) ──
 import { executeWithRuntimeModel } from './provider-runtime'
+import { loadActiveWorkspace } from '../workspace'
 
 // ── Memory Service — 使用 ForProject 族函数，经过 project_id + project_title 双重校验 ──
 import { buildMemoryInjectionForProject, initMemoryPalace, storeAgentOutputForProject, verifyAndStoreAgentOutputForProject } from '../memory-service'
@@ -137,6 +138,30 @@ function buildAgentMessages(
   return [systemMsg, userMsg]
 }
 
+function parseAgentOutput(response: LLMResponse) {
+  if (response.parsed && typeof response.parsed === 'object') return response.parsed
+  const raw = typeof response.content === 'string' ? response.content : JSON.stringify(response.content || '')
+  try {
+    const jsonMatch = raw.match(/\{[\s\S]*\}/)
+    if (jsonMatch) return JSON.parse(jsonMatch[0])
+  } catch {
+    // keep raw text when the model did not return strict JSON
+  }
+  return raw
+}
+
+function toAgentStep(step: string, response: LLMResponse) {
+  return {
+    step,
+    success: !response.error,
+    outputSource: response.error ? 'error' : 'llm',
+    output: parseAgentOutput(response),
+    content: response.content,
+    error: response.error || '',
+    usage: response.usage,
+  }
+}
+
 // ── Execute single agent ──
 
 export async function executeNovelAgent(
@@ -145,25 +170,33 @@ export async function executeNovelAgent(
   context: Record<string, any>,
   options: {
     modelId?: string
+    activeWorkspace?: string
     temperature?: number
     maxTokens?: number
     streamTaskId?: string
     skipMemory?: boolean
   } = {},
 ): Promise<LLMResponse> {
-  const { modelId, temperature = 0.7, maxTokens = 4000, streamTaskId, skipMemory } = options
+  const { modelId, activeWorkspace, temperature = 0.7, maxTokens = 4000, skipMemory } = options
 
   // Build messages
   const messages = buildAgentMessages(agentId, project, context)
+  const workspace = activeWorkspace || await loadActiveWorkspace()
+  const preferredModelId = Number(modelId || 0) || undefined
 
   // Execute LLM
-  const response = await executeWithRuntimeModel({
-    messages,
-    modelId,
-    temperature,
-    maxTokens,
-    streamTaskId,
-  })
+  const response = await executeWithRuntimeModel(
+    workspace,
+    {
+      model: 'balanced',
+      messages,
+      temperature,
+      max_tokens: maxTokens,
+      stream: true,
+      response_format: 'text',
+    },
+    preferredModelId,
+  )
 
   // ── Memory Palace: store agent output ──
   if (!skipMemory) {
@@ -177,7 +210,10 @@ export async function executeNovelAgent(
     )
   }
 
-  return response
+  return {
+    ...response,
+    output: parseAgentOutput(response),
+  }
 }
 
 // ── Generate Novel Plan (Outline Generation) ──
@@ -188,15 +224,19 @@ export async function generateNovelPlan(
     chapterCount?: number
     userOutline?: string
     modelId?: string
+    activeWorkspace?: string
     skipMemory?: boolean
-  } = {},
+  } | string = {},
+  activeWorkspaceArg?: string,
+  modelIdArg?: string | number,
 ): Promise<any> {
-  const { chapterCount, userOutline, modelId, skipMemory } = params
+  const normalizedParams = typeof params === 'object' && params !== null
+    ? params
+    : { userOutline: String(params || ''), activeWorkspace: activeWorkspaceArg, modelId: modelIdArg ? String(modelIdArg) : undefined }
+  const { chapterCount, userOutline, modelId, activeWorkspace, skipMemory } = normalizedParams
 
   // Build outline parameters
-  const outlineParams = typeof params === 'object' && params !== null
-    ? (params as any)
-    : {}
+  const outlineParams = normalizedParams as any
 
   // ── Memory Palace: recall existing memory ──
   let memoryInjectionText = ''
@@ -236,7 +276,7 @@ export async function generateNovelPlan(
         ...outlineParams,
       },
     },
-    { modelId, skipMemory: false },
+    { modelId, activeWorkspace, skipMemory: false },
   )
 
   return result
@@ -248,19 +288,37 @@ export async function executeNovelAgentChain(
   project: NovelProjectRecord,
   options: {
     modelId?: string
+    activeWorkspace?: string
     skipMemory?: boolean
     continueFrom?: number
     existingChapters?: Array<any>
-  } = {},
+  } | string = {},
+  activeWorkspaceArg?: string,
+  modelIdArg?: string | number,
+  _agentFilter?: string[],
+  chainOptions?: {
+    chapterCount?: number
+    continueFrom?: number
+    userOutline?: string
+    existingChapters?: Array<any>
+  },
 ): Promise<any> {
-  const { modelId, skipMemory, continueFrom, existingChapters } = options
+  const normalizedOptions = typeof options === 'object' && options !== null
+    ? options
+    : {
+        activeWorkspace: activeWorkspaceArg,
+        modelId: modelIdArg ? String(modelIdArg) : undefined,
+        continueFrom: chainOptions?.continueFrom,
+        existingChapters: chainOptions?.existingChapters,
+      }
+  const { modelId, activeWorkspace, skipMemory, continueFrom, existingChapters } = normalizedOptions
 
   // 1. Market Agent
   const marketResult = await executeNovelAgent(
     'market-agent',
     project,
     {},
-    { modelId, skipMemory },
+    { modelId, activeWorkspace, skipMemory },
   )
 
   // 2. World Agent
@@ -270,7 +328,7 @@ export async function executeNovelAgentChain(
     {
       upstreamContext: { 'market-agent': marketResult.content },
     },
-    { modelId, skipMemory },
+    { modelId, activeWorkspace, skipMemory },
   )
 
   // 3. Character Agent
@@ -283,7 +341,7 @@ export async function executeNovelAgentChain(
         'world-agent': worldResult.content,
       },
     },
-    { modelId, skipMemory },
+    { modelId, activeWorkspace, skipMemory },
   )
 
   // ── Memory Palace: recall for outline ──
@@ -327,7 +385,7 @@ export async function executeNovelAgentChain(
         existingChapters,
       },
     },
-    { modelId, skipMemory: false },
+    { modelId, activeWorkspace, skipMemory: false },
   )
 
   // Parse outline result
@@ -355,7 +413,7 @@ export async function executeNovelAgentChain(
       chapterOutlines: outlineContent?.chapter_outlines || [],
       task: '扩写详细细纲',
     },
-    { modelId, skipMemory },
+    { modelId, activeWorkspace, skipMemory },
   )
 
   let detailContent = null
@@ -383,10 +441,20 @@ export async function executeNovelAgentChain(
       detailChapters: detailContent?.detail_chapters || [],
       task: '连续性检查',
     },
-    { modelId, skipMemory },
+    { modelId, activeWorkspace, skipMemory },
   )
 
+  const results = [
+    toAgentStep('market-agent', marketResult),
+    toAgentStep('world-agent', worldResult),
+    toAgentStep('character-agent', charResult),
+    toAgentStep('outline-agent', outlineResult),
+    toAgentStep('detail-outline-agent', detailOutlineResult),
+    toAgentStep('continuity-check-agent', continuityResult),
+  ]
+
   return {
+    results,
     market: marketResult.content,
     world: worldResult.content,
     characters: charResult.content,
@@ -409,10 +477,15 @@ export async function generateNovelChapterProse(
   },
   options: {
     modelId?: string
+    activeWorkspace?: string
     skipMemory?: boolean
-  } = {},
+  } | string = {},
+  modelIdArg?: string | number,
 ): Promise<LLMResponse> {
-  const { modelId, skipMemory } = options
+  const normalizedOptions = typeof options === 'object' && options !== null
+    ? options
+    : { activeWorkspace: options, modelId: modelIdArg ? String(modelIdArg) : undefined }
+  const { modelId, activeWorkspace, skipMemory } = normalizedOptions
 
   // ── Memory Palace: recall chapter-specific memory ──
   let memoryInjection = ''
@@ -475,7 +548,7 @@ export async function generateNovelChapterProse(
       outline: context.outline,
       task: prosePrompt,
     },
-    { modelId, skipMemory: false, maxTokens: 8000, temperature: 0.8 },
+    { modelId, activeWorkspace, skipMemory: false, maxTokens: 8000, temperature: 0.8 },
   )
 
   // ── Memory Palace: verify and store ──

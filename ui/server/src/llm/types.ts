@@ -18,6 +18,7 @@ export interface LLMRequest {
   messages: LLMMessage[]
   temperature?: number
   max_tokens?: number
+  stream?: boolean
   tools?: Array<{ name: string; description: string; parameters: Record<string, any> }>
   tool_choice?: 'auto' | 'none'
   response_format?: LLMResponseFormat
@@ -39,6 +40,7 @@ export interface LLMResponse<T = any> {
   usage?: LLMUsage
   finish_reason?: string
   parsed?: T
+  output?: T
   error?: string
 }
 

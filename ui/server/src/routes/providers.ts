@@ -10,6 +10,9 @@ function normalizeProviderInput(body: any, fallback?: ProviderRecord): ProviderR
     service_type: String(body.service_type ?? fallback?.service_type ?? 'llm'),
     api_format: String(body.api_format ?? fallback?.api_format ?? 'openai'),
     auth_type: String(body.auth_type ?? fallback?.auth_type ?? 'bearer'),
+    response_mode: ['auto', 'stream', 'non_stream'].includes(String(body.response_mode ?? fallback?.response_mode ?? 'auto'))
+      ? String(body.response_mode ?? fallback?.response_mode ?? 'auto') as ProviderRecord['response_mode']
+      : 'auto',
     supported_modalities: Array.isArray(body.supported_modalities) ? body.supported_modalities : (fallback?.supported_modalities ?? []),
     default_base_url: String(body.default_base_url ?? fallback?.default_base_url ?? ''),
     is_active: Boolean(body.is_active ?? fallback?.is_active ?? true),

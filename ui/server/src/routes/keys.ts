@@ -2,7 +2,8 @@ import type { Express } from 'express'
 import { readKeys, writeKeys, type APIKeyRecord } from '../key-store'
 import { syncModelsForKey } from '../key-sync'
 import { readProviders } from '../provider-store'
-import { readModels, writeModels } from '../model-store'
+import { readModels, writeModels, type ModelRecord } from '../model-store'
+import { ConfiguredProviderAdapter } from '../llm/adapter'
 
 function redactSecret(value?: string) {
   const text = String(value || '')
@@ -17,6 +18,54 @@ function logDebug(scope: string, payload: Record<string, any>) {
 
 function nowIso() {
   return new Date().toISOString()
+}
+
+function tryParseJson<T = any>(value: string, fallback: T): T {
+  try { return JSON.parse(value) } catch { return fallback }
+}
+
+function extractRetryAfter(errorBody: string): number | undefined {
+  const parsed = tryParseJson<any>(errorBody, null)
+  const retryAfter = Number(parsed?.retry_after || parsed?.retryAfter || 0)
+  return retryAfter > 0 ? retryAfter : undefined
+}
+
+function classifyProviderTestFailure(status: number, body: string) {
+  const parsed = tryParseJson<any>(body, null)
+  const message = String(parsed?.detail || parsed?.message || parsed?.error?.message || parsed?.error || body || '').trim()
+  const retryAfter = extractRetryAfter(body)
+  const isCloudflare = Boolean(parsed?.cloudflare_error || /cloudflare|ray_id|origin_bad_gateway/i.test(body))
+  const retryable = Boolean(parsed?.retryable) || status === 429 || status === 524 || (status >= 500 && status < 600)
+  const summary = retryable
+    ? `供应商上游临时不可用 (${status})${isCloudflare ? '：Cloudflare/源站网关错误' : ''}${retryAfter ? `，建议 ${retryAfter}s 后重试` : '，稍后重试'}`
+    : `供应商测试失败 (${status})`
+  return {
+    valid: false,
+    status,
+    retryable,
+    retry_after: retryAfter,
+    error: message ? `${summary}。${message.slice(0, 220)}` : summary,
+  }
+}
+
+function selectProbeModel(models: ModelRecord[], keyId: number, providerId: string): ModelRecord | undefined {
+  const candidates = models.filter(model => (
+    Number(model.api_key_id || 0) === keyId
+    && String(model.provider || '') === providerId
+    && model.health_status !== 'disabled'
+  ))
+  return candidates.find(model => model.is_favorite)
+    || candidates.find(model => model.capabilities?.chat)
+    || candidates[0]
+}
+
+function buildFallbackTestUrl(rawEndpoint: string, apiFormat: string) {
+  const endpoint = rawEndpoint.replace(/\/+$/, '')
+  if (/\/(chat\/completions|responses|messages|generate)$/.test(endpoint)) return endpoint
+  if (String(apiFormat || '').toLowerCase().includes('anthropic')) {
+    return /\/v1$/.test(endpoint) ? `${endpoint}/messages` : `${endpoint}/v1/messages`
+  }
+  return /\/v1$/.test(endpoint) ? `${endpoint}/chat/completions` : `${endpoint}/v1/chat/completions`
 }
 
 function normalizeKeyInput(body: any, fallback?: APIKeyRecord): APIKeyRecord {
@@ -101,21 +150,55 @@ export function registerKeyRoutes(app: Express, getWorkspace: () => string) {
       if (provider.auth_type !== 'none' && !keyValue) return res.status(400).json({ valid: false, error: 'API key is empty' })
       const rawEndpoint = String(provider.endpoints?.chat || provider.endpoints?.completions || provider.endpoints?.llm || provider.default_base_url || '').replace(/\/$/, '')
       if (!rawEndpoint) return res.status(400).json({ valid: false, error: 'provider endpoint not configured' })
-      const testUrl = /\/(chat\/completions|responses|messages|generate)$/.test(rawEndpoint)
-        ? rawEndpoint
-        : /\/v1$/.test(rawEndpoint)
-          ? `${rawEndpoint}/responses`
-          : `${rawEndpoint}/v1/responses`
+      const models = await readModels(activeWorkspace)
+      const probeModel = selectProbeModel(models, key.id, provider.id)
+      if (probeModel) {
+        try {
+          const adapter = new ConfiguredProviderAdapter(provider, key, probeModel)
+          await adapter.execute({
+            model: probeModel.model_name,
+            messages: [{ role: 'user', content: 'Return exactly: OK' }],
+            temperature: 0,
+            max_tokens: 8,
+            response_format: 'text',
+          })
+          return res.json({
+            valid: true,
+            quota_remaining: Math.max((key.quota_total || 0) - (key.quota_used || 0), 0),
+            message: `Key test passed (${probeModel.model_name})`,
+            testedAt: nowIso(),
+            model: probeModel.model_name,
+          })
+        } catch (error: any) {
+          const errorText = String(error?.message || error)
+          const statusMatch = errorText.match(/status\s+(\d+)/i)
+          const status = Number(statusMatch?.[1] || 0)
+          if (status) {
+            const body = errorText.match(/status\s+\d+:\s*([\s\S]*)$/i)?.[1] || errorText
+            return res.json(classifyProviderTestFailure(status, body))
+          }
+          return res.json({
+            valid: false,
+            status: 0,
+            retryable: /timeout|network|fetch|socket|econn/i.test(errorText),
+            error: `供应商测试失败：${errorText.slice(0, 260)}`,
+          })
+        }
+      }
+
+      const testUrl = buildFallbackTestUrl(rawEndpoint, provider.api_format)
       const headers: Record<string, string> = { 'Content-Type': 'application/json', Accept: 'application/json', ...(provider.custom_headers || {}) }
       const authType = String(provider.auth_type || 'bearer').toLowerCase()
       if (authType === 'x-api-key' || authType === 'api-key') headers['x-api-key'] = keyValue
       else if (authType !== 'none') headers.Authorization = keyValue.toLowerCase().startsWith('bearer ') ? keyValue : `Bearer ${keyValue}`
-      const requestBody = { model: 'test', input: [{ role: 'user', content: 'ping' }], max_output_tokens: 1, temperature: 0, text: { format: { type: 'json_object' } } }
-      logDebug('key-test', { key_id: key.id, provider_id: provider.id, auth_type: authType, test_url: testUrl, request_kind: 'responses', request_body_keys: Object.keys(requestBody), headers: { ...headers, Authorization: headers.Authorization ? redactSecret(headers.Authorization) : undefined, 'x-api-key': headers['x-api-key'] ? redactSecret(headers['x-api-key']) : undefined } })
+      const requestBody = String(provider.api_format || '').toLowerCase().includes('anthropic')
+        ? { model: 'test', messages: [{ role: 'user', content: 'ping' }], max_tokens: 1, temperature: 0 }
+        : { model: 'test', messages: [{ role: 'user', content: 'ping' }], max_tokens: 1, temperature: 0 }
+      logDebug('key-test', { key_id: key.id, provider_id: provider.id, auth_type: authType, test_url: testUrl, request_kind: 'fallback-chat', request_body_keys: Object.keys(requestBody), headers: { ...headers, Authorization: headers.Authorization ? redactSecret(headers.Authorization) : undefined, 'x-api-key': headers['x-api-key'] ? redactSecret(headers['x-api-key']) : undefined } })
       const response = await fetch(testUrl, { method: 'POST', headers, body: JSON.stringify(requestBody) })
       const text = await response.text()
       logDebug('key-test-response', { key_id: key.id, provider_id: provider.id, status: response.status, ok: response.ok, response_preview: text.slice(0, 260) })
-      if (!response.ok) return res.status(502).json({ valid: false, error: `provider test failed (${response.status}): ${text}` })
+      if (!response.ok) return res.json(classifyProviderTestFailure(response.status, text))
       res.json({ valid: true, quota_remaining: Math.max((key.quota_total || 0) - (key.quota_used || 0), 0), message: 'Key test passed', testedAt: nowIso(), provider_response: text.slice(0, 200) })
     } catch (error) {
       res.status(500).json({ valid: false, error: String(error) })
