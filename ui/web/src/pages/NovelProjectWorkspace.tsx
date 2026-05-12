@@ -494,6 +494,7 @@ export default function NovelProjectWorkspace() {
 
   // ── 章节弹出面板 ──
   const [chapterDrawerOpen, setChapterDrawerOpen] = useState(false)
+  const [outlineTreeOpen, setOutlineTreeOpen] = useState(false)
 
   // ── 章节多选 + 章节重组 ──
   const [selectedChapterIds, setSelectedChapterIds] = useState<Set<number>>(new Set())
@@ -571,6 +572,16 @@ export default function NovelProjectWorkspace() {
       })),
     })),
   })), [chapterTree])
+
+  const handleOutlineTreeSelect = (keys: React.Key[]) => {
+    const key = String(keys?.[0] || '')
+    if (!key.startsWith('chapter-')) return
+    const chapterId = Number(key.replace('chapter-', ''))
+    if (chapterId) {
+      setActiveChapterId(chapterId)
+      setOutlineTreeOpen(false)
+    }
+  }
 
   const proseChapters = chapters.filter(ch => ch.chapter_text)
 
@@ -1117,11 +1128,11 @@ export default function NovelProjectWorkspace() {
 
   /* ── render ────────────────────────────────────────────────────── */
   if (loading && !selectedProject) {
-    return <div style={{ display: 'grid', placeItems: 'center', minHeight: '100vh' }}><ReloadOutlined className="anticon" style={{ fontSize: 24, animation: 'spin 1s linear infinite' }} /> 加载中…</div>
+    return <div style={{ display: 'grid', placeItems: 'center', height: '100%' }}><ReloadOutlined className="anticon" style={{ fontSize: 24, animation: 'spin 1s linear infinite' }} /> 加载中…</div>
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden', background: '#f5f5f5' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, overflow: 'hidden', background: '#fff' }}>
 
       {/* ═══ TOP BAR ═══ */}
       <div style={{
@@ -1144,13 +1155,13 @@ export default function NovelProjectWorkspace() {
       </div>
 
       {/* ═══ BODY: 3-column layout ═══ */}
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', overflow: 'hidden' }}>
 
-        {/* ─── LEFT: Chapter list + Outline tree ─── */}
+        {/* ─── LEFT: Chapter directory ─── */}
         <div style={{
           width: 240, flexShrink: 0, background: '#fff',
           borderRight: '1px solid #f0f0f0', display: 'flex', flexDirection: 'column',
-          overflow: 'hidden',
+          overflow: 'hidden', minHeight: 0,
         }}>
           {/* Quick actions — 3-step flow */}
           <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0' }}>
@@ -1180,36 +1191,40 @@ export default function NovelProjectWorkspace() {
             )}
           </div>
 
-          {/* Chapter navigator */}
-          <div style={{ padding: '8px 0', flex: 1, overflow: 'auto' }}>
+          {/* Chapter directory */}
+          <div style={{ padding: '8px 0', flex: 1, minHeight: 0, overflow: 'auto' }}>
             <div style={{ padding: '8px 16px 12px', borderBottom: '1px solid #f5f5f5' }}>
               <Space direction="vertical" size={10} style={{ width: '100%' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Text strong style={{ fontSize: 13 }}><UnorderedListOutlined /> 章节导航</Text>
-                  <Button size="small" type="primary" onClick={() => setChapterDrawerOpen(true)}>
-                    管理
-                  </Button>
+                  <Text strong style={{ fontSize: 13 }}><UnorderedListOutlined /> 章节目录</Text>
+                  <Space size={6}>
+                    <Tooltip title="弹出查看大纲树">
+                      <Button size="small" onClick={() => setOutlineTreeOpen(true)} icon={<BookOutlined />}>
+                        大纲树
+                      </Button>
+                    </Tooltip>
+                    <Button size="small" type="primary" onClick={() => setChapterDrawerOpen(true)}>
+                      管理
+                    </Button>
+                  </Space>
                 </div>
-                <div style={{ padding: '10px 12px', borderRadius: 8, background: '#f7faff', border: '1px solid #d6e4ff' }}>
-                  <Text style={{ fontSize: 12, color: '#1677ff', display: 'block', marginBottom: 6 }}>
-                    章节列表已升级为弹出式管理页
-                  </Text>
-                  <Text type="secondary" style={{ fontSize: 11, lineHeight: 1.6 }}>
-                    在弹出页面中可进行多选、批量删除、扩展/合并章节，以及查看更完整的章节摘要与预览。
-                  </Text>
-                </div>
+                <Space wrap size={[4, 2]}>
+                  <Tag color="blue" bordered={false} style={{ fontSize: 11 }}>章 {chapters.length}</Tag>
+                  <Tag color="green" bordered={false} style={{ fontSize: 11 }}>已写 {proseChapters.length}</Tag>
+                  <Tag color="orange" bordered={false} style={{ fontSize: 11 }}>未写 {chapters.length - proseChapters.length}</Tag>
+                </Space>
                 <Button block icon={<EditOutlined />} onClick={() => openEditor('chapter')}>
                   新增章节
                 </Button>
               </Space>
             </div>
 
-            {filteredChapters.length === 0 ? (
+            {sortedChapters.length === 0 ? (
               <div style={{ padding: '20px 16px', textAlign: 'center' }}>
                 <Text type="secondary" style={{ fontSize: 12 }}>暂无章节</Text>
               </div>
             ) : (
-              filteredChapters.map(ch => {
+              sortedChapters.map(ch => {
                 const isActive = ch.id === activeChapterId
                 return (
                   <div
@@ -1243,31 +1258,10 @@ export default function NovelProjectWorkspace() {
             )}
           </div>
 
-          {/* Outline tree */}
-          <div style={{ borderTop: '1px solid #f0f0f0', maxHeight: 220, overflow: 'auto' }}>
-            <div style={{ padding: '8px 16px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Text strong style={{ fontSize: 13 }}>大纲树</Text>
-              <Button size="small" type="text" onClick={() => openEditor('outline')} icon={<EditOutlined />}>新增</Button>
-            </div>
-            <div style={{ padding: '0 16px 8px' }}>
-              {chapterTreeData.length > 0 ? (
-                <Tree treeData={chapterTreeData} blockNode showLine defaultExpandAll virtual={false} style={{ fontSize: 12 }} />
-              ) : <Text type="secondary" style={{ fontSize: 12 }}>暂无大纲</Text>}
-            </div>
-          </div>
-
-          {/* Stats */}
-          <div style={{ borderTop: '1px solid #f0f0f0', padding: '10px 16px' }}>
-            <Space wrap size={[4, 2]}>
-              <Tag color="blue" bordered={false} style={{ fontSize: 11 }}>章 {chapters.length}</Tag>
-              <Tag color="green" bordered={false} style={{ fontSize: 11 }}>文 {proseChapters.length}</Tag>
-              <Tag color="cyan" bordered={false} style={{ fontSize: 11 }}>界 {worldbuilding.length}</Tag>
-            </Space>
-          </div>
         </div>
 
         {/* ─── CENTER: Editor ─── */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: '#fafbfc' }}>
+        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: '#fafbfc' }}>
 
           {/* Empty project onboarding */}
           {isEmptyProject && (
@@ -1369,9 +1363,9 @@ export default function NovelProjectWorkspace() {
                   spellCheck={false}
                   style={{
                     position: 'absolute', inset: 0, width: '100%', height: '100%',
-                    boxSizing: 'border-box', fontSize: 18, lineHeight: 2.2,
+                    boxSizing: 'border-box', fontSize: 18, lineHeight: 1.85,
                     fontFamily: 'Noto Serif SC, "Source Han Serif SC", Georgia, "Times New Roman", serif',
-                    fontWeight: 400, letterSpacing: 0.02, padding: '40px 80px',
+                    fontWeight: 400, letterSpacing: 0, padding: '40px 80px',
                     border: 'none', outline: 'none', background: '#fff',
                     resize: 'none', color: '#1a1a1a', overflowY: 'auto',
                     caretColor: '#1677ff', tabSize: 4,
@@ -1397,6 +1391,7 @@ export default function NovelProjectWorkspace() {
           <div style={{
             width: 280, flexShrink: 0, background: '#fff',
             borderLeft: '1px solid #f0f0f0', display: 'flex', flexDirection: 'column', overflow: 'hidden',
+            minHeight: 0,
           }}>
             <div style={{ padding: '8px 12px', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <Text strong style={{ fontSize: 12 }}>📚 参考资料</Text>
@@ -1617,6 +1612,38 @@ export default function NovelProjectWorkspace() {
           ))}
         </Modal>
       )}
+
+      {/* ═══ Outline Tree Modal ═══ */}
+      <Modal
+        title={<Space><BookOutlined /> 大纲树</Space>}
+        open={outlineTreeOpen}
+        onCancel={() => setOutlineTreeOpen(false)}
+        footer={
+          <Space>
+            <Button onClick={() => { setOutlineTreeOpen(false); openEditor('outline') }} icon={<EditOutlined />}>新增大纲</Button>
+            <Button type="primary" onClick={() => setOutlineTreeOpen(false)}>关闭</Button>
+          </Space>
+        }
+        width={720}
+        styles={{ body: { maxHeight: '68vh', overflow: 'auto', paddingTop: 12 } }}
+      >
+        {chapterTreeData.length > 0 ? (
+          <Tree
+            treeData={chapterTreeData}
+            blockNode
+            showLine
+            defaultExpandAll
+            virtual={false}
+            selectedKeys={activeChapterId ? [`chapter-${activeChapterId}`] : []}
+            onSelect={handleOutlineTreeSelect}
+            style={{ fontSize: 13 }}
+          />
+        ) : (
+          <div style={{ padding: '28px 0', textAlign: 'center' }}>
+            <Text type="secondary">暂无大纲。可以先生成大纲，或手动新增。</Text>
+          </div>
+        )}
+      </Modal>
 
       {/* ═══ Outline Control Panel ═══ */}
       <OutlineControlPanel
@@ -1905,7 +1932,7 @@ export default function NovelProjectWorkspace() {
                     styles={{ body: { padding: 18 } }}
                   >
                     {activeChapter.chapter_text ? (
-                      <Paragraph style={{ whiteSpace: 'pre-wrap', lineHeight: 1.9, marginBottom: 0, fontSize: 14 }}>
+                      <Paragraph style={{ whiteSpace: 'pre-wrap', lineHeight: 1.75, marginBottom: 0, fontSize: 14 }}>
                         {String(activeChapter.chapter_text).slice(0, 6000)}
                         {String(activeChapter.chapter_text).length > 6000 ? '\n\n……（预览已截断，请回到主编辑区查看全文）' : ''}
                       </Paragraph>

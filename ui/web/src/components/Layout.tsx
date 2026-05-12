@@ -37,6 +37,7 @@ export default function Layout() {
   }
 
   const selectedKey = getSelectedKey()
+  const isFullScreenWorkspace = location.pathname.startsWith('/novel/workspace')
 
   return (
     <AntLayout style={{ minHeight: '100vh', background: '#f5f7fb' }}>
@@ -102,8 +103,14 @@ export default function Layout() {
         </div>
       </Sider>
 
-      <AntLayout style={{ background: 'transparent' }}>
-        <Content style={{ margin: 0, overflow: 'auto', background: 'linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%)' }}>
+      <AntLayout style={{ background: 'transparent', minHeight: 0 }}>
+        <Content style={{
+          margin: 0,
+          height: isFullScreenWorkspace ? '100vh' : undefined,
+          minHeight: 0,
+          overflow: isFullScreenWorkspace ? 'hidden' : 'auto',
+          background: isFullScreenWorkspace ? '#fff' : 'linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%)',
+        }}>
           <Outlet />
         </Content>
       </AntLayout>
