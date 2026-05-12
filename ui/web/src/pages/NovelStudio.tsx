@@ -63,6 +63,7 @@ export default function NovelStudio() {
   const [knowledgeSearch, setKnowledgeSearch] = useState('')
   const [knowledgeCategory, setKnowledgeCategory] = useState('')
   const [knowledgeProjectTitle, setKnowledgeProjectTitle] = useState('')
+  const [knowledgeProjectDraft, setKnowledgeProjectDraft] = useState('')
   const [knowledgeProjectOptions, setKnowledgeProjectOptions] = useState<{ value: string; label: string }[]>([])
   const [knowledgeLoadedOnce, setKnowledgeLoadedOnce] = useState(false)
   const [knowledgeQuery, setKnowledgeQuery] = useState('')
@@ -378,7 +379,9 @@ export default function NovelStudio() {
   }
 
   const handleKnowledgeProjectChange = (value?: string) => {
-    setKnowledgeProjectTitle(String(value || '').trim())
+    const next = String(value || '').trim()
+    setKnowledgeProjectDraft(next)
+    setKnowledgeProjectTitle(next)
     setKnowledgeCategory('')
     setKnowledgeQueryResults([])
   }
@@ -412,7 +415,10 @@ export default function NovelStudio() {
         ...buildKnowledgePayload(),
         content: feedText.trim(),
       })
-      if (feedProjectTitle.trim()) setKnowledgeProjectTitle(feedProjectTitle.trim())
+      if (feedProjectTitle.trim()) {
+        setKnowledgeProjectTitle(feedProjectTitle.trim())
+        setKnowledgeProjectDraft(feedProjectTitle.trim())
+      }
       message.success(feedProjectTitle.trim() ? `知识已加入「${feedProjectTitle.trim()}」` : '知识已加入全局知识库')
       setFeedOpen(false)
       resetFeedForm()
@@ -628,7 +634,10 @@ export default function NovelStudio() {
         project_title: feedProjectTitle.trim() || undefined,
       })
       const synced = Number(result.data?.synced || 0)
-      if (feedProjectTitle.trim()) setKnowledgeProjectTitle(feedProjectTitle.trim())
+      if (feedProjectTitle.trim()) {
+        setKnowledgeProjectTitle(feedProjectTitle.trim())
+        setKnowledgeProjectDraft(feedProjectTitle.trim())
+      }
       if (feedProjectId && synced > 0) {
         message.success(`已批量写入 ${feedAnalyzedEntries.length} 条知识，并同步 ${synced} 条到记忆宫殿`)
       } else if (feedProjectTitle.trim()) {
@@ -864,16 +873,46 @@ export default function NovelStudio() {
 
           <Card size="small" title="筛选与检索" style={{ borderRadius: 8 }}>
             <Space direction="vertical" size={12} style={{ width: '100%' }}>
-              <Select
+              <Input.Search
+                value={knowledgeProjectDraft}
+                onChange={(e) => {
+                  const next = e.target.value
+                  setKnowledgeProjectDraft(next)
+                  if (!next.trim()) handleKnowledgeProjectChange('')
+                }}
+                onSearch={handleKnowledgeProjectChange}
+                placeholder="输入投喂项目名，例如：没钱修什么仙；留空查看全局混合视图"
+                enterButton="筛选"
                 allowClear
-                showSearch
-                value={knowledgeProjectTitle || undefined}
-                onChange={handleKnowledgeProjectChange}
-                placeholder="全部投喂项目（全局混合视图）"
-                options={knowledgeProjectOptions}
-                optionFilterProp="label"
-                style={{ width: '100%' }}
+                style={inputStyle}
               />
+              {knowledgeProjectOptions.length > 0 ? (
+                <Space wrap>
+                  <Tag
+                    color={!knowledgeProjectTitle ? 'purple' : 'default'}
+                    bordered={false}
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => handleKnowledgeProjectChange('')}
+                  >
+                    全部投喂项目
+                  </Tag>
+                  {knowledgeProjectOptions.map(option => (
+                    <Tag
+                      key={option.value}
+                      color={knowledgeProjectTitle === option.value ? 'purple' : 'default'}
+                      bordered={false}
+                      style={{ cursor: 'pointer' }}
+                      onClick={() => handleKnowledgeProjectChange(option.value)}
+                    >
+                      {option.label}
+                    </Tag>
+                  ))}
+                </Space>
+              ) : (
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  还没有带投喂项目名的知识条目；投喂时填入项目名后会出现在这里。
+                </Text>
+              )}
               <Input
                 value={knowledgeSearch}
                 onChange={(e) => setKnowledgeSearch(e.target.value)}
