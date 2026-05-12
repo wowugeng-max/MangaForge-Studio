@@ -723,6 +723,108 @@ profile 类条目必须写成“可迁移蓝图”，明确说明可借鉴结构
   return synthesized.length ? dedupeKnowledgeEntries(synthesized) : entries
 }
 
+export async function synthesizeProjectProfileKnowledge(input: {
+  project_title: string
+  missing_categories?: string[]
+  model_id?: number
+}): Promise<{ ok: boolean; entries: KnowledgeEntry[]; stored: number; missing_categories: string[] }> {
+  const projectTitle = String(input.project_title || '').trim()
+  if (!projectTitle) throw new Error('project_title 不能为空')
+
+  const allowed = new Set([
+    'reference_profile',
+    'volume_architecture',
+    'chapter_beat_template',
+    'character_function_matrix',
+    'resource_economy_model',
+    'style_profile',
+  ])
+  const existing = await listKnowledge(undefined, { project_title: projectTitle })
+  if (!existing.length) throw new Error(`未找到投喂项目「${projectTitle}」的知识条目`)
+
+  const existingCategories = new Set(existing.map(entry => entry.category).filter(Boolean))
+  const requested = (Array.isArray(input.missing_categories) ? input.missing_categories : [])
+    .map(item => String(item || '').trim())
+    .filter(item => allowed.has(item))
+  const missingCategories = requested.length
+    ? requested
+    : Array.from(allowed).filter(category => !existingCategories.has(category))
+  if (!missingCategories.length) return { ok: true, entries: [], stored: 0, missing_categories: [] }
+
+  const { executeWithRuntimeModel } = await import('./llm/provider-runtime')
+  const { loadActiveWorkspace } = await import('./workspace')
+  const workspace = await loadActiveWorkspace()
+  const compactEntries = existing.slice(0, 140).map(compactEntryForSynthesis)
+
+  const prompt = `你是一位资深网文拆书策划。现在已有投喂项目「${projectTitle}」的知识库条目，但缺少若干“参考仿写画像”分类。请只基于已有知识进行二次综合，不要编造原文没有支撑的内容。
+
+需要补齐的分类：${missingCategories.join('、')}
+
+已有知识：
+${JSON.stringify(compactEntries, null, 2).slice(0, 52000)}
+
+请输出纯 JSON 数组，每个元素字段如下：
+- category: 必须是 ${missingCategories.join(' 或 ')} 之一
+- title: 简短标题
+- content: 200-500 字，写成可迁移蓝图，明确“可借鉴结构”和“避免照搬点”
+- tags: 标签数组
+- genre_tags: 题材标签数组
+- trope_tags: 套路/卖点标签数组
+- use_case: 适用写作任务
+- evidence: 来自已有知识的证据概括，不超过 120 字
+- chapter_range: 依据范围，不确定可写“全书综合”
+- entities: 涉及角色/势力/物品/能力等实体数组
+- confidence: 0-1
+- weight: 1-5
+
+每个缺失分类至少输出 1 条，最多 2 条。禁止输出 markdown，只返回 JSON 数组。`
+
+  const result = await executeWithRuntimeModel<any[]>(
+    workspace,
+    {
+      model: 'balanced',
+      messages: [
+        { role: 'system', content: '你只输出合法 JSON 数组，不输出 markdown。' },
+        { role: 'user', content: prompt },
+      ],
+      temperature: 0.25,
+      max_tokens: 4096,
+      response_format: 'json',
+    },
+    Number(input.model_id || 0) || undefined,
+  )
+
+  if (result.error) throw new Error(result.error)
+  const parsed = Array.isArray(result.parsed)
+    ? result.parsed
+    : tryParseJson<any[]>(result.content, [])
+  const entries = dedupeKnowledgeEntries(parsed
+    .filter(Boolean)
+    .map((row: any) => normalizeKnowledgeEntry({
+      category: allowed.has(String(row?.category || '')) ? row.category : missingCategories[0],
+      title: row?.title,
+      content: row?.content,
+      tags: row?.tags,
+      genre_tags: row?.genre_tags,
+      trope_tags: row?.trope_tags,
+      use_case: row?.use_case,
+      evidence: row?.evidence,
+      chapter_range: row?.chapter_range || '全书综合',
+      entities: row?.entities,
+      confidence: row?.confidence,
+      weight: row?.weight,
+      source: `${projectTitle}（画像补提炼）`,
+      source_title: `${projectTitle}（画像补提炼）`,
+      project_title: projectTitle,
+    }))
+    .filter(entry => entry.content && missingCategories.includes(entry.category)))
+
+  const stored = entries.length
+    ? (await batchStoreKnowledge(entries, { project_title: projectTitle })).stored || entries.length
+    : 0
+  return { ok: true, entries, stored, missing_categories: missingCategories }
+}
+
 async function runKnowledgeIngestJob(jobId: string) {
   const job = ingestJobs.get(jobId)
   if (!job) return

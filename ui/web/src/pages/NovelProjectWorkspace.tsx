@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Button, Form, message, Modal, Select, Typography, Tooltip,
+  Button, Form, message, Modal, Select, Typography, Tooltip, Tag,
 } from 'antd'
 import {
   ArrowLeftOutlined, BookOutlined, ReloadOutlined,
@@ -129,6 +129,14 @@ export default function NovelProjectWorkspace() {
   const chapterTreeData = useMemo(() => buildChapterTreeData(chapterTree), [chapterTree])
 
   const proseChapters = chapters.filter(ch => ch.chapter_text)
+  const referenceSummary = useMemo(() => {
+    const refs = Array.isArray(selectedProject?.reference_config?.references)
+      ? selectedProject.reference_config.references.filter((item: any) => String(item?.project_title || '').trim())
+      : []
+    const strength = selectedProject?.reference_config?.strength || 'balanced'
+    const strengthLabel = strength === 'light' ? '轻参考' : strength === 'strong' ? '强参考' : '中参考'
+    return { count: refs.length, strengthLabel }
+  }, [selectedProject?.reference_config])
 
   // ── empty project detection ──
   const isEmptyProject = useMemo(() => (
@@ -691,6 +699,9 @@ export default function NovelProjectWorkspace() {
             参考作品
           </Button>
         </Tooltip>
+        {referenceSummary.count > 0 && (
+          <Tag color="purple" bordered={false}>{referenceSummary.strengthLabel} · {referenceSummary.count} 部参考</Tag>
+        )}
         <Tooltip title="刷新">
           <Button type="text" size="small" icon={<ReloadOutlined />} loading={loading} onClick={loadProjectModules} />
         </Tooltip>

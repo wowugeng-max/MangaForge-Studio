@@ -272,6 +272,7 @@ export default function NovelStudio() {
   const knowledgePanelFromUrl = searchParams.get('panel') === 'knowledge'
   const memoryPalacePanelFromUrl = searchParams.get('panel') === 'memory-palace'
   const knowledgeActionFromUrl = searchParams.get('action')
+  const knowledgeProjectFromUrl = searchParams.get('project_title') || ''
 
   useEffect(() => {
     if (knowledgePanelFromUrl && !knowledgeOpen) {
@@ -281,6 +282,17 @@ export default function NovelStudio() {
       setKnowledgeOpen(false)
     }
   }, [knowledgePanelFromUrl, knowledgeOpen])
+
+  useEffect(() => {
+    if (!knowledgePanelFromUrl) return
+    const next = String(knowledgeProjectFromUrl || '').trim()
+    if (next && next !== knowledgeProjectTitle) {
+      setKnowledgeProjectTitle(next)
+      setKnowledgeProjectDraft(next)
+      setFeedProjectId(undefined)
+      setFeedProjectTitle(next)
+    }
+  }, [knowledgePanelFromUrl, knowledgeProjectFromUrl])
 
   useEffect(() => {
     if (memoryPalacePanelFromUrl && !memoryPalaceOpen) {
@@ -344,13 +356,20 @@ export default function NovelStudio() {
     }
   }, [feedOpen])
 
-  const updateKnowledgeRoute = (next: { panel?: string | null; action?: string | null }) => {
+  const updateKnowledgeRoute = (next: { panel?: string | null; action?: string | null; projectTitle?: string | null }) => {
     const params = new URLSearchParams(searchParams)
     if (next.panel === null) params.delete('panel')
     else if (next.panel) params.set('panel', next.panel)
 
     if (next.action === null) params.delete('action')
     else if (next.action) params.set('action', next.action)
+
+    if (next.projectTitle === null) params.delete('project_title')
+    else if (next.projectTitle !== undefined) {
+      const title = String(next.projectTitle || '').trim()
+      if (title) params.set('project_title', title)
+      else params.delete('project_title')
+    }
 
     setSearchParams(params, { replace: true })
   }
@@ -419,7 +438,7 @@ export default function NovelStudio() {
   const handleCloseKnowledge = () => {
     setKnowledgeOpen(false)
     setFeedOpen(false)
-    updateKnowledgeRoute({ panel: null, action: null })
+    updateKnowledgeRoute({ panel: null, action: null, projectTitle: null })
   }
 
   const handleOpenMemoryPalace = () => {
@@ -480,6 +499,7 @@ export default function NovelStudio() {
     setKnowledgeProjectTitle(next)
     setKnowledgeCategory('')
     setKnowledgeQueryResults([])
+    updateKnowledgeRoute({ projectTitle: next || null })
   }
 
   const buildTags = () => {

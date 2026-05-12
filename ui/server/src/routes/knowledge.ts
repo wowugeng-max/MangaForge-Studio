@@ -15,6 +15,7 @@ import {
   getKnowledgeIngestJob,
   cancelKnowledgeIngestJob,
   reanalyzeKnowledgeIngestBatch,
+  synthesizeProjectProfileKnowledge,
 } from '../knowledge-base'
 
 export function registerKnowledgeRoutes(app: Express) {
@@ -229,6 +230,21 @@ export function registerKnowledgeRoutes(app: Express) {
       const result = await batchStoreKnowledge(entries, {
         project_id: project_id ? Number(project_id) : undefined,
         project_title: project_title || undefined,
+      })
+      res.json(result)
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  /** POST /api/knowledge/projects/profile-supplement — 从已有知识中补齐仿写画像类条目 */
+  app.post('/api/knowledge/projects/profile-supplement', async (req, res) => {
+    try {
+      const { project_title, projectTitle, missing_categories, missingCategories, model_id, modelId } = req.body || {}
+      const result = await synthesizeProjectProfileKnowledge({
+        project_title: String(project_title || projectTitle || '').trim(),
+        missing_categories: Array.isArray(missing_categories) ? missing_categories : missingCategories,
+        model_id: Number(model_id || modelId || 0) || undefined,
       })
       res.json(result)
     } catch (error) {

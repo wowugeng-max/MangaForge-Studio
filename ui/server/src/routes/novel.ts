@@ -40,6 +40,7 @@ import {
   executeNovelAgentChain,
   generateNovelPlan,
   generateNovelChapterProse,
+  previewNovelKnowledgeInjection,
 } from '../llm'
 import { sseManager, registerTask, unregisterTask } from '../ws-manager'
 
@@ -126,6 +127,56 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
     outlines: await listNovelOutlines(workspace, projectId),
     chapters: await listNovelChapters(workspace, projectId),
   })
+  const collectCopyGuardTerms = (preview: any) => {
+    const terms = new Set<string>()
+    for (const entry of Array.isArray(preview?.entries) ? preview.entries : []) {
+      for (const entity of Array.isArray(entry.entities) ? entry.entities : []) {
+        const value = String(entity || '').trim()
+        if (value.length >= 2 && value.length <= 24) terms.add(value)
+      }
+      const evidence = String(entry.evidence || '')
+      for (const match of evidence.matchAll(/[《》【】「」“”]?([\u4e00-\u9fa5A-Za-z0-9]{2,16})[《》【】「」“”]?/g)) {
+        const value = String(match[1] || '').trim()
+        if (value.length >= 3 && !/章节|结构|角色|剧情|主角|读者|情绪|世界|设定|参考|避免|借鉴|模板/.test(value)) terms.add(value)
+      }
+    }
+    return Array.from(terms).slice(0, 80)
+  }
+  const buildReferenceUsageReport = async (activeWorkspace: string, project: any, taskType: string, generatedText = '') => {
+    const preview = await previewNovelKnowledgeInjection(project, taskType)
+    const terms = collectCopyGuardTerms(preview)
+    const text = String(generatedText || '')
+    const hits = terms.filter(term => text.includes(term)).slice(0, 20)
+    const report = {
+      task_type: taskType,
+      strength: preview.strength,
+      strength_label: preview.strength_label,
+      active_references: preview.active_references,
+      injected_entries: (preview.entries || []).map((entry: any) => ({
+        id: entry.id,
+        title: entry.title,
+        category: entry.category,
+        source_project: entry.source_project,
+        reference_weight: entry.reference_weight,
+        match_reason: entry.match_reason,
+      })),
+      copy_guard: {
+        checked_terms: terms.length,
+        hits,
+        status: hits.length ? 'warn' : 'ok',
+      },
+      warnings: preview.warnings || [],
+    }
+    await createNovelReview(activeWorkspace, {
+      project_id: project.id,
+      review_type: 'reference_report',
+      status: hits.length ? 'warn' : 'ok',
+      summary: `参考报告：${preview.strength_label || '-'}，注入 ${preview.entries?.length || 0} 条${hits.length ? `，疑似照搬 ${hits.length} 项` : ''}`,
+      issues: hits.length ? hits.map(term => `正文出现参考实体/证据词：${term}`) : [],
+      payload: JSON.stringify(report),
+    })
+    return report
+  }
 
   app.get('/api/novel/projects', async (_req, res) => { try { const activeWorkspace = getWorkspace(); await ensureWorkspaceStructure(activeWorkspace); res.json(await listNovelProjects(activeWorkspace)) } catch (error) { res.status(500).json({ error: String(error) }) } })
   app.post('/api/novel/projects', async (req, res) => { try { console.log('[NovelRoute] POST /projects body:', JSON.stringify(req.body, null, 2)); const activeWorkspace = getWorkspace(); console.log('[NovelRoute] activeWorkspace:', activeWorkspace); await ensureWorkspaceStructure(activeWorkspace); const result = await createNovelProject(activeWorkspace, req.body); console.log('[NovelRoute] created project:', JSON.stringify(result, null, 2)); res.json(result) } catch (error) { console.error('[NovelRoute] POST /projects error:', error); res.status(500).json({ error: String(error) }) } })
@@ -134,6 +185,7 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
   app.put('/api/novel/projects/:id', async (req, res) => { try { const activeWorkspace = getWorkspace(); const updated = await updateNovelProject(activeWorkspace, Number(req.params.id), req.body); if (!updated) return res.status(404).json({ error: 'project not found' }); res.json(updated) } catch (error) { res.status(500).json({ error: String(error) }) } })
   app.get('/api/novel/projects/:id/reference-config', async (req, res) => { try { const activeWorkspace = getWorkspace(); const project = await getProject(activeWorkspace, Number(req.params.id)); if (!project) return res.status(404).json({ error: 'project not found' }); res.json(project.reference_config || { references: [], notes: '' }) } catch (error) { res.status(500).json({ error: String(error) }) } })
   app.put('/api/novel/projects/:id/reference-config', async (req, res) => { try { const activeWorkspace = getWorkspace(); const updated = await updateNovelProject(activeWorkspace, Number(req.params.id), { reference_config: req.body || {} } as any); if (!updated) return res.status(404).json({ error: 'project not found' }); res.json(updated.reference_config || { references: [], notes: '' }) } catch (error) { res.status(500).json({ error: String(error) }) } })
+  app.post('/api/novel/projects/:id/reference-preview', async (req, res) => { try { const activeWorkspace = getWorkspace(); const baseProject = await getProject(activeWorkspace, Number(req.params.id)); if (!baseProject) return res.status(404).json({ error: 'project not found' }); const project = { ...baseProject, reference_config: req.body?.reference_config || baseProject.reference_config || {} }; res.json(await previewNovelKnowledgeInjection(project, String(req.body?.task_type || '大纲生成'))) } catch (error) { res.status(500).json({ error: String(error) }) } })
   app.get('/api/novel/projects/:id/worldbuilding', async (req, res) => { try { const activeWorkspace = getWorkspace(); res.json(await listNovelWorldbuilding(activeWorkspace, Number(req.params.id))) } catch (error) { res.status(500).json({ error: String(error) }) } })
   app.post('/api/novel/projects/:id/worldbuilding', async (req, res) => { try { const activeWorkspace = getWorkspace(); res.json(await createNovelWorldbuilding(activeWorkspace, { ...req.body, project_id: Number(req.params.id) })) } catch (error) { res.status(500).json({ error: String(error) }) } })
   app.put('/api/novel/worldbuilding/:worldbuildingId', async (req, res) => { try { const activeWorkspace = getWorkspace(); const updated = await updateNovelWorldbuilding(activeWorkspace, Number(req.params.worldbuildingId), req.body); if (!updated) return res.status(404).json({ error: 'worldbuilding not found' }); res.json(updated) } catch (error) { res.status(500).json({ error: String(error) }) } })
@@ -179,9 +231,15 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
         return res.status(502).json({ error: String(result.error || result.fallbackReason || '模型未返回正文'), result })
       }
       const updated = await updateNovelChapter(activeWorkspace, chapter.id, { chapter_text: chapterText, scene_breakdown: sceneBreakdown, continuity_notes: continuityNotes, status: 'draft' })
-      await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'success', input_ref: JSON.stringify(req.body), output_ref: JSON.stringify({ outputSource: result.outputSource, modelId: result.modelId, modelName: result.modelName, providerId: result.providerId, usage: result.usage }) })
+      let referenceReport: any = null
+      try {
+        referenceReport = await buildReferenceUsageReport(activeWorkspace, project, '正文创作', chapterText)
+      } catch (reportError) {
+        console.warn('[reference-report] Failed:', String(reportError).slice(0, 200))
+      }
+      await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'success', input_ref: JSON.stringify(req.body), output_ref: JSON.stringify({ outputSource: result.outputSource, modelId: result.modelId, modelName: result.modelName, providerId: result.providerId, usage: result.usage, reference_report: referenceReport }) })
       const wantsStream = String(req.headers.accept || '').includes('text/event-stream') || String(req.query.stream || '') === '1'
-      if (!wantsStream) return res.json({ chapter: updated, result })
+      if (!wantsStream) return res.json({ chapter: updated, result, reference_report: referenceReport })
       res.setHeader('Content-Type', 'text/event-stream; charset=utf-8')
       res.setHeader('Cache-Control', 'no-cache, no-transform')
       res.setHeader('Connection', 'keep-alive')
@@ -193,7 +251,7 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
         res.write(`data: ${JSON.stringify({ type: 'chunk', text: chunk })}\n\n`)
         await new Promise(resolve => setTimeout(resolve, 40))
       }
-      res.write(`data: ${JSON.stringify({ type: 'done', chapter: updated, result })}\n\n`)
+      res.write(`data: ${JSON.stringify({ type: 'done', chapter: updated, result, reference_report: referenceReport })}\n\n`)
       res.end()
     } catch (error) { res.status(500).json({ error: String(error) }) }
   })

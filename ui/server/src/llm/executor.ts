@@ -30,6 +30,210 @@ import { buildMemoryInjectionForProject, initMemoryPalace, storeAgentOutputForPr
 import { queryKnowledge } from '../knowledge-base'
 
 // ── Knowledge Injection Helper ──
+type ReferenceStrength = 'light' | 'balanced' | 'strong'
+
+const referenceStrengthLabels: Record<ReferenceStrength, string> = {
+  light: '轻参考',
+  balanced: '中参考',
+  strong: '强参考',
+}
+
+const referenceStrengthInstructions: Record<ReferenceStrength, string> = {
+  light: '轻参考：只借鉴文风机制、章节节奏和局部表达组织，不迁移全书结构或核心设定公式。',
+  balanced: '中参考：可借鉴结构、节奏、角色功能位、资源经济和文风机制，但必须替换世界观、职业身份、专名和桥段表达。',
+  strong: '强参考：可参考全书公式、分卷推进、章节节拍、角色矩阵和资源经济模型，但仍必须彻底原创角色、设定名、事件顺序和正文表达。',
+}
+
+const taskAliases: Record<string, string[]> = {
+  大纲生成: ['全部', '全案', '规划', '大纲', '粗纲', '细纲', '章纲', '分卷', '剧情', '结构', '节奏', '资源经济'],
+  全案规划: ['全部', '全案', '规划', '定位', '卖点', '套路', '大纲', '世界观', '角色', '文风'],
+  世界观设定: ['全部', '世界观', '设定', '能力', '境界', '资源', '资源经济', '制度', '势力'],
+  角色设定: ['全部', '角色', '人物', '人设', '关系', '群像', '情绪', '冲突'],
+  正文创作: ['全部', '正文', '章节', '文风', '对白', '场景', '情绪', '节奏', '章末钩子'],
+}
+
+const categoryByTask: Record<string, string[]> = {
+  大纲生成: ['reference_profile', 'volume_architecture', 'story_design', 'story_pacing', 'genre_positioning', 'selling_point', 'reader_hook', 'conflict_design', 'resource_economy_model', 'resource_economy', 'character_function_matrix'],
+  全案规划: ['reference_profile', 'volume_architecture', 'character_function_matrix', 'genre_positioning', 'selling_point', 'trope_design', 'worldbuilding', 'resource_economy_model', 'style_profile'],
+  世界观设定: ['reference_profile', 'worldbuilding', 'ability_design', 'realm_design', 'resource_economy_model', 'resource_economy', 'conflict_design'],
+  角色设定: ['character_function_matrix', 'character_design', 'emotion_design', 'conflict_design', 'reference_profile'],
+  正文创作: ['style_profile', 'chapter_beat_template', 'writing_style', 'technique', 'scene_design', 'emotion_design', 'reader_hook', 'story_pacing'],
+}
+
+const normalizeAlias = (value: string) => String(value || '').toLowerCase().replace(/\s+/g, '')
+
+function getReferenceStrength(project: NovelProjectRecord): ReferenceStrength {
+  const raw = String((project.reference_config as any)?.strength || 'balanced')
+  return raw === 'light' || raw === 'strong' ? raw : 'balanced'
+}
+
+function matchesTask(taskType: string, useFor: string[]) {
+  if (!useFor.length) return true
+  const aliases = (taskAliases[taskType] || [taskType]).map(normalizeAlias)
+  return useFor.map(normalizeAlias).some(item =>
+    item === 'all' ||
+    item === '全部' ||
+    aliases.some(alias => item.includes(alias) || alias.includes(item)),
+  )
+}
+
+function getTaskCategories(taskType: string, strength: ReferenceStrength) {
+  const base = categoryByTask[taskType] || categoryByTask.全案规划
+  if (strength === 'balanced') return base
+
+  if (strength === 'light') {
+    const lightCats = new Set(['style_profile', 'chapter_beat_template', 'writing_style', 'technique', 'story_pacing', 'scene_design', 'emotion_design', 'reader_hook'])
+    const filtered = base.filter(cat => lightCats.has(cat))
+    return filtered.length ? filtered : ['style_profile', 'chapter_beat_template', 'writing_style', 'technique', 'story_pacing']
+  }
+
+  return Array.from(new Set([
+    ...base,
+    'reference_profile',
+    'volume_architecture',
+    'chapter_beat_template',
+    'character_function_matrix',
+    'resource_economy_model',
+    'style_profile',
+    'story_design',
+    'story_pacing',
+    'conflict_design',
+  ]))
+}
+
+function normalizeReferenceRows(project: NovelProjectRecord) {
+  return Array.isArray(project.reference_config?.references)
+    ? project.reference_config.references
+        .map((item: any) => ({
+          project_title: String(item?.project_title || '').trim(),
+          weight: Math.max(0.1, Math.min(1, Number(item?.weight || 0.7) || 0.7)),
+          use_for: Array.isArray(item?.use_for) ? item.use_for.map((v: any) => String(v).trim()).filter(Boolean) : [],
+          dimensions: Array.isArray(item?.dimensions) ? item.dimensions.map((v: any) => String(v).trim()).filter(Boolean) : [],
+          avoid: Array.isArray(item?.avoid) ? item.avoid.map((v: any) => String(v).trim()).filter(Boolean) : [],
+        }))
+        .filter((item: any) => item.project_title)
+    : []
+}
+
+async function buildKnowledgeInjectionContext(
+  project: NovelProjectRecord,
+  taskType: string,
+): Promise<{
+  text: string
+  entries: any[]
+  active_references: any[]
+  warnings: string[]
+  strength: ReferenceStrength
+  task_categories: string[]
+}> {
+  const warnings: string[] = []
+  const strength = getReferenceStrength(project)
+  const references = normalizeReferenceRows(project)
+  const activeReferences = references.filter((ref: any) => matchesTask(taskType, ref.use_for))
+  const taskCategories = getTaskCategories(taskType, strength)
+  const referenceNotes = String(project.reference_config?.notes || '').trim()
+  const referenceGuideText = activeReferences.length > 0
+    ? [
+        '【参考作品配置】',
+        `仿写强度：${referenceStrengthLabels[strength]}。${referenceStrengthInstructions[strength]}`,
+        ...activeReferences.map((ref: any) => {
+          const parts = [
+            `- ${ref.project_title}`,
+            `权重 ${Math.round(ref.weight * 100)}%`,
+            ref.use_for.length ? `用途：${ref.use_for.join('、')}` : '',
+            ref.dimensions.length ? `参考维度：${ref.dimensions.join('、')}` : '',
+            ref.avoid.length ? `避免照搬：${ref.avoid.join('、')}` : '',
+          ].filter(Boolean)
+          return parts.join('；')
+        }),
+        referenceNotes ? `补充策略：${referenceNotes}` : '',
+        '执行要求：只迁移结构、节奏、角色功能位、资源经济与文风机制，不复制原作品角色名、专有名词、具体桥段顺序和原文表达。',
+      ].filter(Boolean).join('\n')
+    : ''
+
+  const queryParts: string[] = []
+  if (project.genre) queryParts.push(project.genre)
+  if (project.style_tags?.length) queryParts.push(...project.style_tags)
+  if (project.synopsis) queryParts.push(project.synopsis.slice(0, 200))
+  queryParts.push(taskType)
+
+  const query = queryParts.join(' ')
+  if (!query) return { text: '', entries: [], active_references: activeReferences, warnings, strength, task_categories: taskCategories }
+
+  const collected: Array<any> = []
+  const seen = new Set<string>()
+  const addEntries = (entries: any[], sourceProject = '', referenceWeight?: number) => {
+    for (const entry of entries) {
+      const key = `${entry.id || ''}:${entry.category}:${entry.title || entry.content?.slice(0, 40)}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      collected.push({ ...entry, source_project: sourceProject || entry.project_title || '', reference_weight: referenceWeight })
+    }
+  }
+
+  if (activeReferences.length > 0) {
+    for (const ref of activeReferences) {
+      const useFor = ref.use_for.length ? ref.use_for.join(' ') : taskType
+      const dimensions = ref.dimensions.length ? ref.dimensions.join(' ') : ''
+      const refQuery = [query, useFor, dimensions, `参考作品 ${ref.project_title}`, referenceStrengthLabels[strength]].filter(Boolean).join(' ')
+      const profileEntries = await queryKnowledge(refQuery, { top_k: strength === 'strong' ? 8 : 6, project_title: ref.project_title })
+      addEntries(profileEntries.filter(entry => taskCategories.includes(entry.category) || !entry.category), ref.project_title, ref.weight)
+
+      for (const category of taskCategories.slice(0, strength === 'strong' ? 8 : 6)) {
+        const categoryEntries = await queryKnowledge(refQuery, { top_k: strength === 'light' ? 1 : 2, project_title: ref.project_title, category })
+        addEntries(categoryEntries, ref.project_title, ref.weight)
+      }
+    }
+  }
+
+  const entries = collected.length > 0
+    ? collected
+    : (activeReferences.length > 0 ? [] : await queryKnowledge(query, { top_k: 8 }))
+  if (!entries.length) {
+    if (referenceGuideText) warnings.push('当前参考作品未命中可注入知识条目，请补齐参考作品画像、章节节拍模板、角色功能矩阵和文风画像。')
+    return {
+      text: referenceGuideText ? `${referenceGuideText}\n提示：${warnings[0]}` : '',
+      entries: [],
+      active_references: activeReferences,
+      warnings,
+      strength,
+      task_categories: taskCategories,
+    }
+  }
+
+  const limitByStrength: Record<ReferenceStrength, number> = { light: 10, balanced: 18, strong: 24 }
+  const ranked = entries
+    .map(entry => ({ ...entry, rank_score: Number(entry.reference_weight || 0.5) * 10 + Number(entry.weight || 3) + Number(entry.similarity || 0) }))
+    .sort((a, b) => b.rank_score - a.rank_score)
+    .slice(0, activeReferences.length > 0 ? limitByStrength[strength] : 8)
+
+  const knowledgeText = buildKnowledgeInjectionPrompt(
+    project.genre || '',
+    taskType,
+    ranked.map(e => ({
+      category: e.category,
+      title: e.title,
+      content: e.content,
+      weight: e.weight,
+      genre_tags: e.genre_tags,
+      trope_tags: e.trope_tags,
+      use_case: e.use_case,
+      evidence: e.evidence,
+      chapter_range: e.chapter_range,
+      source_project: e.source_project || e.project_title,
+      reference_weight: e.reference_weight,
+    })),
+  )
+
+  return {
+    text: referenceGuideText ? `${referenceGuideText}\n\n${knowledgeText}` : knowledgeText,
+    entries: ranked,
+    active_references: activeReferences,
+    warnings,
+    strength,
+    task_categories: taskCategories,
+  }
+}
 
 /**
  * Query the knowledge base based on project genre + task type,
@@ -40,132 +244,44 @@ async function buildKnowledgeInjectionText(
   taskType: string,
 ): Promise<string> {
   try {
-    const taskAliases: Record<string, string[]> = {
-      大纲生成: ['全部', '全案', '规划', '大纲', '粗纲', '细纲', '章纲', '分卷', '剧情', '结构', '节奏', '资源经济'],
-      全案规划: ['全部', '全案', '规划', '定位', '卖点', '套路', '大纲', '世界观', '角色', '文风'],
-      世界观设定: ['全部', '世界观', '设定', '能力', '境界', '资源', '资源经济', '制度', '势力'],
-      角色设定: ['全部', '角色', '人物', '人设', '关系', '群像', '情绪', '冲突'],
-      正文创作: ['全部', '正文', '章节', '文风', '对白', '场景', '情绪', '节奏', '章末钩子'],
-    }
-    const normalizeAlias = (value: string) => String(value || '').toLowerCase().replace(/\s+/g, '')
-    const matchesTask = (useFor: string[]) => {
-      if (!useFor.length) return true
-      const aliases = (taskAliases[taskType] || [taskType]).map(normalizeAlias)
-      return useFor.map(normalizeAlias).some(item =>
-        item === 'all' ||
-        item === '全部' ||
-        aliases.some(alias => item.includes(alias) || alias.includes(item)),
-      )
-    }
-
-    const references = Array.isArray(project.reference_config?.references)
-      ? project.reference_config.references
-          .map((item: any) => ({
-            project_title: String(item?.project_title || '').trim(),
-            weight: Math.max(0.1, Math.min(1, Number(item?.weight || 0.7) || 0.7)),
-            use_for: Array.isArray(item?.use_for) ? item.use_for.map((v: any) => String(v).trim()).filter(Boolean) : [],
-            avoid: Array.isArray(item?.avoid) ? item.avoid.map((v: any) => String(v).trim()).filter(Boolean) : [],
-          }))
-          .filter((item: any) => item.project_title)
-      : []
-    const activeReferences = references.filter((ref: any) => matchesTask(ref.use_for))
-
-    const categoryByTask: Record<string, string[]> = {
-      大纲生成: ['reference_profile', 'volume_architecture', 'story_design', 'story_pacing', 'genre_positioning', 'selling_point', 'reader_hook', 'conflict_design', 'resource_economy_model', 'resource_economy', 'character_function_matrix'],
-      全案规划: ['reference_profile', 'volume_architecture', 'character_function_matrix', 'genre_positioning', 'selling_point', 'trope_design', 'worldbuilding', 'resource_economy_model', 'style_profile'],
-      世界观设定: ['reference_profile', 'worldbuilding', 'ability_design', 'realm_design', 'resource_economy_model', 'resource_economy', 'conflict_design'],
-      角色设定: ['character_function_matrix', 'character_design', 'emotion_design', 'conflict_design', 'reference_profile'],
-      正文创作: ['style_profile', 'chapter_beat_template', 'writing_style', 'technique', 'scene_design', 'emotion_design', 'reader_hook', 'story_pacing'],
-    }
-    const taskCategories = categoryByTask[taskType] || categoryByTask.全案规划
-    const referenceNotes = String(project.reference_config?.notes || '').trim()
-    const referenceGuideText = activeReferences.length > 0
-      ? [
-          '【参考作品配置】',
-          ...activeReferences.map((ref: any) => {
-            const parts = [
-              `- ${ref.project_title}`,
-              `权重 ${Math.round(ref.weight * 100)}%`,
-              ref.use_for.length ? `用途：${ref.use_for.join('、')}` : '',
-              ref.avoid.length ? `避免照搬：${ref.avoid.join('、')}` : '',
-            ].filter(Boolean)
-            return parts.join('；')
-          }),
-          referenceNotes ? `补充策略：${referenceNotes}` : '',
-          '执行要求：只迁移结构、节奏、角色功能位、资源经济与文风机制，不复制原作品角色名、专有名词、具体桥段顺序和原文表达。',
-        ].filter(Boolean).join('\n')
-      : ''
-
-    // Build query from genre, style_tags, and synopsis
-    const queryParts: string[] = []
-    if (project.genre) queryParts.push(project.genre)
-    if (project.style_tags?.length) queryParts.push(...project.style_tags)
-    if (project.synopsis) queryParts.push(project.synopsis.slice(0, 200))
-    queryParts.push(taskType)
-
-    const query = queryParts.join(' ')
-    if (!query) return ''
-
-    const collected: Array<any> = []
-    const seen = new Set<string>()
-    const addEntries = (entries: any[], sourceProject = '', referenceWeight?: number) => {
-      for (const entry of entries) {
-        const key = `${entry.id || ''}:${entry.category}:${entry.title || entry.content?.slice(0, 40)}`
-        if (seen.has(key)) continue
-        seen.add(key)
-        collected.push({ ...entry, source_project: sourceProject || entry.project_title || '', reference_weight: referenceWeight })
-      }
-    }
-
-    if (activeReferences.length > 0) {
-      for (const ref of activeReferences) {
-        const useFor = ref.use_for.length ? ref.use_for.join(' ') : taskType
-        const refQuery = [query, useFor, `参考作品 ${ref.project_title}`].filter(Boolean).join(' ')
-        const profileEntries = await queryKnowledge(refQuery, { top_k: 6, project_title: ref.project_title })
-        addEntries(profileEntries.filter(entry => taskCategories.includes(entry.category) || !entry.category), ref.project_title, ref.weight)
-
-        for (const category of taskCategories.slice(0, 6)) {
-          const categoryEntries = await queryKnowledge(refQuery, { top_k: 2, project_title: ref.project_title, category })
-          addEntries(categoryEntries, ref.project_title, ref.weight)
-        }
-      }
-    }
-
-    const entries = collected.length > 0
-      ? collected
-      : (activeReferences.length > 0 ? [] : await queryKnowledge(query, { top_k: 8 }))
-    if (!entries.length) {
-      return referenceGuideText
-        ? `${referenceGuideText}\n提示：当前参考作品未命中可注入知识条目，请确认该投喂项目已完成知识提炼，尤其是参考作品画像、章节节拍模板、角色功能矩阵和文风画像。`
-        : ''
-    }
-
-    const ranked = entries
-      .map(entry => ({ ...entry, rank_score: Number(entry.reference_weight || 0.5) * 10 + Number(entry.weight || 3) + Number(entry.similarity || 0) }))
-      .sort((a, b) => b.rank_score - a.rank_score)
-      .slice(0, activeReferences.length > 0 ? 18 : 8)
-
-    const knowledgeText = buildKnowledgeInjectionPrompt(
-      project.genre || '',
-      taskType,
-      ranked.map(e => ({
-        category: e.category,
-        title: e.title,
-        content: e.content,
-        weight: e.weight,
-        genre_tags: e.genre_tags,
-        trope_tags: e.trope_tags,
-        use_case: e.use_case,
-        evidence: e.evidence,
-        chapter_range: e.chapter_range,
-        source_project: e.source_project || e.project_title,
-        reference_weight: e.reference_weight,
-      })),
-    )
-    return referenceGuideText ? `${referenceGuideText}\n\n${knowledgeText}` : knowledgeText
+    return (await buildKnowledgeInjectionContext(project, taskType)).text
   } catch (err) {
     console.warn('[knowledge-injection] Failed to build injection:', String(err).slice(0, 200))
     return ''
+  }
+}
+
+export async function previewNovelKnowledgeInjection(project: NovelProjectRecord, taskType: string) {
+  const context = await buildKnowledgeInjectionContext(project, taskType || '大纲生成')
+  return {
+    task_type: taskType || '大纲生成',
+    strength: context.strength,
+    strength_label: referenceStrengthLabels[context.strength],
+    task_categories: context.task_categories,
+    active_references: context.active_references,
+    warnings: context.warnings,
+    text: context.text,
+    entries: context.entries.map(entry => ({
+      id: entry.id,
+      category: entry.category,
+      title: entry.title,
+      content: entry.content,
+      weight: entry.weight,
+      similarity: entry.similarity,
+      rank_score: entry.rank_score,
+      source_project: entry.source_project || entry.project_title,
+      reference_weight: entry.reference_weight,
+      use_case: entry.use_case,
+      chapter_range: entry.chapter_range,
+      evidence: entry.evidence,
+      entities: entry.entities,
+      match_reason: [
+        entry.source_project || entry.project_title ? `参考项目：${entry.source_project || entry.project_title}` : '',
+        entry.category ? `匹配分类：${entry.category}` : '',
+        entry.reference_weight ? `参考权重：${Math.round(Number(entry.reference_weight) * 100)}%` : '',
+        entry.rank_score ? `排序分：${Number(entry.rank_score).toFixed(2)}` : '',
+      ].filter(Boolean).join('；'),
+    })),
   }
 }
 
