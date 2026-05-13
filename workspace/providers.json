@@ -1,29 +1,63 @@
 [
   {
-    "id": "cliproxyapi",
-    "display_name": "CPA",
-    "service_type": "llm",
-    "api_format": "openai_compatible",
-    "auth_type": "bearer",
-    "supported_modalities": [
-      "chat"
-    ],
-    "default_base_url": "https://api.aicomic.site/v1",
-    "is_active": true,
-    "icon": "",
-    "endpoints": {},
-    "custom_headers": {}
-  },
-  {
     "id": "dsapi",
     "display_name": "deepseek",
     "service_type": "llm",
     "api_format": "openai_compatible",
     "auth_type": "bearer",
     "supported_modalities": [
-      "chat"
+      "chat",
+      "vision"
     ],
     "default_base_url": "https://ds2api.mailyplus.com/v1",
+    "is_active": true,
+    "icon": "",
+    "endpoints": {},
+    "custom_headers": {}
+  },
+  {
+    "id": "chatgpt2api",
+    "display_name": "chatgpt",
+    "service_type": "llm",
+    "api_format": "openai_compatible",
+    "auth_type": "bearer",
+    "supported_modalities": [
+      "chat",
+      "vision"
+    ],
+    "default_base_url": "https://gpt2api.mailyplus.com/v1/complete",
+    "is_active": true,
+    "icon": "",
+    "endpoints": {},
+    "custom_headers": {}
+  },
+  {
+    "id": "dslocaltest",
+    "display_name": "dstest",
+    "service_type": "llm",
+    "api_format": "openai_compatible",
+    "auth_type": "bearer",
+    "supported_modalities": [
+      "chat",
+      "vision"
+    ],
+    "default_base_url": "http://127.0.0.1:5001/v1",
+    "is_active": true,
+    "icon": "",
+    "endpoints": {},
+    "custom_headers": {}
+  },
+  {
+    "id": "cliproxyapi",
+    "display_name": "CPA",
+    "service_type": "llm",
+    "api_format": "openai_compatible",
+    "auth_type": "bearer",
+    "response_mode": "stream",
+    "supported_modalities": [
+      "chat"
+    ],
+    "default_base_url": "https://api.aicomic.site/v1",
     "is_active": true,
     "icon": "",
     "endpoints": {},

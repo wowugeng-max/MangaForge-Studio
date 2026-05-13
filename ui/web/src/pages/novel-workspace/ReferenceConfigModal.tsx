@@ -102,6 +102,7 @@ export function ReferenceConfigModal({
   const [previewTask, setPreviewTask] = useState('大纲生成')
   const [previewLoading, setPreviewLoading] = useState(false)
   const [preview, setPreview] = useState<any | null>(null)
+  const [apiReady, setApiReady] = useState<boolean | null>(null)
 
   useEffect(() => {
     if (!open) return
@@ -109,6 +110,13 @@ export function ReferenceConfigModal({
     setStrength(config?.strength === 'light' || config?.strength === 'strong' ? config.strength : 'balanced')
     setNotes(String(config?.notes || ''))
     setPreview(null)
+    setApiReady(null)
+    apiClient.get('/status')
+      .then(res => {
+        const features = res.data?.features || {}
+        setApiReady(Boolean(features.novel_reference_preview && features.novel_reference_profile_supplement))
+      })
+      .catch(() => setApiReady(false))
     apiClient.get('/knowledge')
       .then(res => {
         const projects = Array.isArray(res.data?.projects) ? res.data.projects : []
@@ -243,6 +251,14 @@ export function ReferenceConfigModal({
           message="指定当前项目生成时优先参考哪些投喂项目。参考用途留空或选择“全部”时会作用于所有生成阶段；否则只在匹配阶段注入。"
           description="系统只借鉴结构、节奏、功能位、资源经济和风格画像，不应照搬原角色名、专有设定、具体桥段顺序和原文表达。"
         />
+        {apiReady === false && (
+          <Alert
+            type="warning"
+            showIcon
+            message="后端能力探针未检测到参考预览/画像补提炼接口"
+            description="如果刚更新过代码，请重启 8787 后端服务后再使用参考预览和补提炼。"
+          />
+        )}
         <Card size="small" style={{ borderRadius: 8, background: '#fafcff' }}>
           <Space direction="vertical" size={8} style={{ width: '100%' }}>
             <Space align="center" style={{ width: '100%', justifyContent: 'space-between' }}>
@@ -319,16 +335,16 @@ export function ReferenceConfigModal({
                   </Space>
                   <Space direction="vertical" size={4} style={{ minWidth: 240, flex: 1 }}>
                     <Text type="secondary">生成阶段</Text>
-                <Select
-                  mode="tags"
-                  allowClear
-                  placeholder="留空 = 全部阶段"
-                  value={rows[index]?.use_for || []}
-                  options={useForOptions}
-                  maxTagCount="responsive"
-                  onChange={(value) => updateRow(index, { use_for: uniqueList(value) })}
-                  style={{ width: '100%' }}
-                />
+                    <Select
+                      mode="tags"
+                      allowClear
+                      placeholder="留空 = 全部阶段"
+                      value={rows[index]?.use_for || []}
+                      options={useForOptions}
+                      maxTagCount="responsive"
+                      onChange={(value) => updateRow(index, { use_for: uniqueList(value) })}
+                      style={{ width: '100%' }}
+                    />
                   </Space>
                   <Space direction="vertical" size={4} style={{ minWidth: 260, flex: 1 }}>
                     <Text type="secondary">参考维度</Text>
@@ -346,11 +362,11 @@ export function ReferenceConfigModal({
                 </Space>
                 <Space direction="vertical" size={4} style={{ width: '100%' }}>
                   <Text type="secondary">避免照搬</Text>
-                <Input
-                  placeholder="例如：人名, 专有设定, 原剧情顺序"
-                  value={(rows[index]?.avoid || []).join(', ')}
-                  onChange={(event) => updateRow(index, { avoid: splitList(event.target.value) })}
-                />
+                  <Input
+                    placeholder="例如：人名, 专有设定, 原剧情顺序"
+                    value={(rows[index]?.avoid || []).join(', ')}
+                    onChange={(event) => updateRow(index, { avoid: splitList(event.target.value) })}
+                  />
                 </Space>
               </Space>
             </Card>

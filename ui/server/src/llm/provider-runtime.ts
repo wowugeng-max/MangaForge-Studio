@@ -398,6 +398,13 @@ async function postProviderJson<T = any>(
         throw new Error(`Endpoint not found (404): ${text.slice(0, 500)}`)
       }
 
+      // Provider-side file upload failures are deterministic for the current
+      // payload size. Retrying the same request just burns time; callers can
+      // shrink the prompt and retry at a higher level.
+      if (/upload current user input file|upload file failed/i.test(text)) {
+        throw new Error(`Provider upload failed (${response.status}): ${text.slice(0, 500)}`)
+      }
+
       if (!isRetryable(response.status)) {
         throw new Error(errorMsg)
       }

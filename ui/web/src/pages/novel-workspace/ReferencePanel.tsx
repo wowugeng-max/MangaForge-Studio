@@ -1,8 +1,18 @@
 import React from 'react'
-import { Button, Card, Space, Tabs, Tag, Typography } from 'antd'
+import { Button, Card, Empty, Space, Tabs, Tag, Typography } from 'antd'
 import { displayPreview, displayValue, versionSourceColor, versionSourceLabel } from './utils'
 
 const { Text, Paragraph } = Typography
+
+function parseReviewPayload(review: any) {
+  if (!review?.payload) return {}
+  if (typeof review.payload === 'object') return review.payload
+  try {
+    return JSON.parse(review.payload)
+  } catch {
+    return {}
+  }
+}
 
 export function ReferencePanel({
   open,
@@ -10,6 +20,7 @@ export function ReferencePanel({
   worldbuilding,
   characters,
   outlines,
+  referenceReports,
   chapterVersions,
   chapterVersionsLoading,
   rollingBackVersionId,
@@ -25,6 +36,7 @@ export function ReferencePanel({
   worldbuilding: any[]
   characters: any[]
   outlines: any[]
+  referenceReports: any[]
   chapterVersions: any[]
   chapterVersionsLoading: boolean
   rollingBackVersionId: number | null
@@ -111,6 +123,40 @@ export function ReferencePanel({
                   {displayValue(o.hook) && <Text type="secondary"><Text strong>钩子：</Text>{displayValue(o.hook)}</Text>}
                 </Card>
               )),
+            },
+            {
+              key: 'referenceReports', label: '参考报告',
+              children: referenceReports.length === 0 ? (
+                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无参考使用报告" style={{ padding: '16px 8px' }} />
+              ) : referenceReports.slice(0, 12).map((report) => {
+                const payload = parseReviewPayload(report)
+                const entries = Array.isArray(payload.injected_entries) ? payload.injected_entries : []
+                const hits = Array.isArray(payload.copy_guard?.hits) ? payload.copy_guard.hits : []
+                return (
+                  <Card key={report.id} size="small" style={{ margin: 8, borderRadius: 8 }}
+                    title={<Space wrap><Tag color={report.status === 'warn' ? 'gold' : 'green'} bordered={false}>{report.status === 'warn' ? '需检查' : '正常'}</Tag><Text strong>{payload.task_type || '生成任务'}</Text></Space>}>
+                    <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                      <Text type="secondary" style={{ fontSize: 11 }}>{report.created_at}</Text>
+                      <Text style={{ fontSize: 12 }}>{report.summary}</Text>
+                      <Space wrap>
+                        <Tag color="purple" bordered={false}>{payload.strength_label || '参考'}</Tag>
+                        <Tag color="blue" bordered={false}>注入 {entries.length} 条</Tag>
+                        <Tag color={hits.length ? 'gold' : 'green'} bordered={false}>照搬命中 {hits.length}</Tag>
+                      </Space>
+                      {hits.length > 0 && (
+                        <Paragraph style={{ marginBottom: 0, fontSize: 12 }} ellipsis={{ rows: 2, expandable: true, symbol: '展开' }}>
+                          疑似复用词：{hits.join('、')}
+                        </Paragraph>
+                      )}
+                      {entries.length > 0 && (
+                        <Paragraph style={{ marginBottom: 0, fontSize: 12 }} ellipsis={{ rows: 3, expandable: true, symbol: '展开' }}>
+                          注入知识：{entries.map((entry: any) => `${entry.source_project || '参考'} / ${entry.category || '未分类'} / ${entry.title || entry.id}`).join('；')}
+                        </Paragraph>
+                      )}
+                    </Space>
+                  </Card>
+                )
+              }),
             },
             {
               key: 'versions', label: '版本',

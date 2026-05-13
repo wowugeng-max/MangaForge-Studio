@@ -13,7 +13,22 @@ export async function getStatusSnapshot(activeWorkspace: string) {
   const files = await readdir(join(activeWorkspace, '.story-project', 'episodes')).catch(() => [])
   const runs = await readRuns(activeWorkspace)
   const logs = await readLogs(activeWorkspace)
-  return { ok: true, workspace: activeWorkspace, projects, assets, files, runs, logs }
+  return {
+    ok: true,
+    api_version: '2026-05-12.reference-workflow-v1',
+    features: {
+      novel_reference_preview: true,
+      novel_reference_profile_supplement: true,
+      novel_reference_reports: true,
+      novel_reference_dimensions: true,
+    },
+    workspace: activeWorkspace,
+    projects,
+    assets,
+    files,
+    runs,
+    logs,
+  }
 }
 
 export async function appendRun(activeWorkspace: string, record: RunRecord) {

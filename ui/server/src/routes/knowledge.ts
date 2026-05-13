@@ -14,8 +14,13 @@ import {
   startKnowledgeIngestJob,
   getKnowledgeIngestJob,
   cancelKnowledgeIngestJob,
+  pauseKnowledgeIngestJob,
+  resumeKnowledgeIngestJob,
   reanalyzeKnowledgeIngestBatch,
   synthesizeProjectProfileKnowledge,
+  listSourceCaches,
+  getSourceCache,
+  getSourceCachedChapter,
 } from '../knowledge-base'
 
 export function registerKnowledgeRoutes(app: Express) {
@@ -299,6 +304,38 @@ export function registerKnowledgeRoutes(app: Express) {
     }
   })
 
+  /** GET /api/knowledge/source-caches — 查看正文缓存总览 */
+  app.get('/api/knowledge/source-caches', async (_req, res) => {
+    try {
+      const caches = await listSourceCaches()
+      res.json({ ok: true, caches })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  /** GET /api/knowledge/source-caches/:key — 查看某本正文缓存目录 */
+  app.get('/api/knowledge/source-caches/:key', async (req, res) => {
+    try {
+      const cache = await getSourceCache(req.params.key)
+      if (!cache) return res.status(404).json({ error: '正文缓存不存在' })
+      res.json({ ok: true, cache })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  /** GET /api/knowledge/source-caches/:key/chapters/:chapter — 读取缓存单章正文 */
+  app.get('/api/knowledge/source-caches/:key/chapters/:chapter', async (req, res) => {
+    try {
+      const chapter = await getSourceCachedChapter(req.params.key, Number(req.params.chapter || 0))
+      if (!chapter) return res.status(404).json({ error: '缓存章节不存在' })
+      res.json({ ok: true, chapter })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
   /** POST /api/knowledge/playwright-fetch — Playwright 抓取 SPA 网页 */
   app.post('/api/knowledge/playwright-fetch', async (req, res) => {
     try {
@@ -316,11 +353,17 @@ export function registerKnowledgeRoutes(app: Express) {
   /** POST /api/knowledge/playwright-serial — Playwright 连载抓取（自动追下一章） */
   app.post('/api/knowledge/playwright-serial', async (req, res) => {
     try {
-      const { url, maxChapters } = req.body
+      const { url, maxChapters, start_chapter, startChapter, fetch_concurrency, fetchConcurrency } = req.body
       if (!url) {
         return res.status(400).json({ error: 'url 不能为空' })
       }
-      const result = await playwrightFetchSerial(url, Number(maxChapters) || 500)
+      const result = await playwrightFetchSerial(
+        url,
+        Number(maxChapters) || 500,
+        Number(start_chapter || startChapter || 1),
+        undefined,
+        Number(fetch_concurrency || fetchConcurrency || 1),
+      )
       res.json(result)
     } catch (error) {
       res.status(500).json({ error: String(error) })
@@ -330,17 +373,19 @@ export function registerKnowledgeRoutes(app: Express) {
   /** POST /api/knowledge/ingest/start — 后台任务：连载抓取 → 分批提炼 → 去重合并 */
   app.post('/api/knowledge/ingest/start', async (req, res) => {
     try {
-      const { url, model_id, modelId, start_chapter, startChapter, max_chapters, maxChapters, batch_size, batchSize, full_book, fullBook, auto_store, autoStore, project_id, projectId, project_title, projectTitle } = req.body || {}
+      const { url, model_id, modelId, start_chapter, startChapter, max_chapters, maxChapters, batch_size, batchSize, fetch_concurrency, fetchConcurrency, full_book, fullBook, fetch_only, fetchOnly, auto_store, autoStore, project_id, projectId, project_title, projectTitle } = req.body || {}
       const job = startKnowledgeIngestJob({
         url,
         model_id: Number(model_id || modelId || 0) || undefined,
         full_book: Boolean(full_book || fullBook),
+        fetch_only: Boolean(fetch_only || fetchOnly),
         auto_store: Boolean(auto_store || autoStore),
         project_id: Number(project_id || projectId || 0) || undefined,
         project_title: String(project_title || projectTitle || '').trim() || undefined,
         start_chapter: Number(start_chapter || startChapter || 1),
         max_chapters: Number(max_chapters || maxChapters || 50),
         batch_size: Number(batch_size || batchSize || 10),
+        fetch_concurrency: Number(fetch_concurrency || fetchConcurrency || 1),
       })
       res.json({ ok: true, job })
     } catch (error) {
@@ -363,6 +408,29 @@ export function registerKnowledgeRoutes(app: Express) {
   app.post('/api/knowledge/ingest/:id/cancel', async (req, res) => {
     try {
       const job = cancelKnowledgeIngestJob(req.params.id)
+      if (!job) return res.status(404).json({ error: '任务不存在或已过期' })
+      res.json({ ok: true, job })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  /** POST /api/knowledge/ingest/:id/pause — 暂停后台提炼任务，保留已完成批次 */
+  app.post('/api/knowledge/ingest/:id/pause', async (req, res) => {
+    try {
+      const job = pauseKnowledgeIngestJob(req.params.id)
+      if (!job) return res.status(404).json({ error: '任务不存在或已过期' })
+      res.json({ ok: true, job })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  /** POST /api/knowledge/ingest/:id/resume — 继续后台提炼任务，从未完成批次开始 */
+  app.post('/api/knowledge/ingest/:id/resume', async (req, res) => {
+    try {
+      const { model_id, modelId } = req.body || {}
+      const job = resumeKnowledgeIngestJob(req.params.id, Number(model_id || modelId || 0) || undefined)
       if (!job) return res.status(404).json({ error: '任务不存在或已过期' })
       res.json({ ok: true, job })
     } catch (error) {

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Card, Checkbox, Col, Drawer, Input, InputNumber, Modal, Popconfirm, Progress, Radio, Row, Select, Space, Tag, Typography, message } from 'antd'
-import { BookOutlined, CloudUploadOutlined, DatabaseOutlined, DeleteOutlined, EditOutlined, EyeOutlined, FileTextOutlined, FolderOutlined, LinkOutlined, PlusOutlined, ReadOutlined, ReloadOutlined, SearchOutlined, TagsOutlined } from '@ant-design/icons'
+import { BookOutlined, CloudUploadOutlined, DatabaseOutlined, DeleteOutlined, EditOutlined, EyeOutlined, FileTextOutlined, FolderOutlined, LinkOutlined, PauseCircleOutlined, PlayCircleOutlined, PlusOutlined, ReadOutlined, ReloadOutlined, SearchOutlined, StopOutlined, TagsOutlined } from '@ant-design/icons'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import apiClient from '../api/client'
 import MemoryPalacePanel from '../components/MemoryPalacePanel'
@@ -61,6 +61,7 @@ const softPanelStyle: React.CSSProperties = {
 
 const inputStyle: React.CSSProperties = { borderRadius: 8 }
 const knowledgeExtractModelStorageKey = 'knowledge.extract.model_id'
+const knowledgeIngestJobStorageKey = 'knowledge.ingest.last_job_id'
 
 export default function NovelStudio() {
   const navigate = useNavigate()
@@ -86,6 +87,14 @@ export default function NovelStudio() {
   const [knowledgeQueryResults, setKnowledgeQueryResults] = useState<any[]>([])
   const [knowledgeDetailEntry, setKnowledgeDetailEntry] = useState<any | null>(null)
   const [memoryPalaceOpen, setMemoryPalaceOpen] = useState(false)
+  const [sourceCacheOpen, setSourceCacheOpen] = useState(false)
+  const [sourceCacheLoading, setSourceCacheLoading] = useState(false)
+  const [sourceCaches, setSourceCaches] = useState<any[]>([])
+  const [sourceCacheSearch, setSourceCacheSearch] = useState('')
+  const [selectedSourceCacheKey, setSelectedSourceCacheKey] = useState('')
+  const [sourceCacheDetail, setSourceCacheDetail] = useState<any | null>(null)
+  const [sourceCacheChapter, setSourceCacheChapter] = useState<any | null>(null)
+  const [sourceCacheChapterLoading, setSourceCacheChapterLoading] = useState(false)
 
   const [feedOpen, setFeedOpen] = useState(false)
   const [feedText, setFeedText] = useState('')
@@ -99,8 +108,10 @@ export default function NovelStudio() {
   const [feedSerialFetch, setFeedSerialFetch] = useState(false)
   const [feedStartChapter, setFeedStartChapter] = useState(1)
   const [feedFullBook, setFeedFullBook] = useState(false)
+  const [feedFetchOnly, setFeedFetchOnly] = useState(false)
   const [feedMaxChapters, setFeedMaxChapters] = useState(20)
   const [feedBatchSize, setFeedBatchSize] = useState(10)
+  const [feedFetchConcurrency, setFeedFetchConcurrency] = useState(4)
   const [availableModels, setAvailableModels] = useState<any[]>([])
   const [feedModelsLoading, setFeedModelsLoading] = useState(false)
   const [feedModelId, setFeedModelId] = useState<number | undefined>(() => {
@@ -253,6 +264,17 @@ export default function NovelStudio() {
   const knowledgeProjectLabel = knowledgeProjectTitle || '全部投喂项目'
 
   const knowledgeCountText = `共 ${filteredKnowledgeEntries.length} / ${knowledgeEntries.length} 条`
+
+  const filteredSourceCaches = useMemo(() => {
+    const q = sourceCacheSearch.trim().toLowerCase()
+    if (!q) return sourceCaches
+    return sourceCaches.filter(cache => [
+      cache.project_title,
+      cache.source_url,
+      cache.canonical_source_url,
+      cache.cache_key,
+    ].filter(Boolean).some(value => String(value).toLowerCase().includes(q)))
+  }, [sourceCaches, sourceCacheSearch])
 
   const extractionModelOptions = useMemo(() => {
     return availableModels
@@ -420,9 +442,12 @@ export default function NovelStudio() {
     setFeedSerialFetch(false)
     setFeedStartChapter(1)
     setFeedFullBook(false)
+    setFeedFetchOnly(false)
     setFeedMaxChapters(20)
     setFeedBatchSize(10)
+    setFeedFetchConcurrency(4)
     setFeedIngestJob(null)
+    if (typeof window !== 'undefined') window.localStorage.removeItem(knowledgeIngestJobStorageKey)
     setFeedMode('text')
     setFeedProjectId(undefined)
     setFeedProjectTitle('')
@@ -451,6 +476,69 @@ export default function NovelStudio() {
     updateKnowledgeRoute({ panel: null, action: null })
   }
 
+  const loadSourceCacheChapter = async (cacheKey: string, chapterNo: number) => {
+    if (!cacheKey || !chapterNo) return
+    setSourceCacheChapterLoading(true)
+    try {
+      const res = await apiClient.get(`/knowledge/source-caches/${cacheKey}/chapters/${chapterNo}`)
+      setSourceCacheChapter(res.data?.chapter || null)
+    } catch {
+      message.error('无法读取缓存章节正文')
+    } finally {
+      setSourceCacheChapterLoading(false)
+    }
+  }
+
+  const loadSourceCacheDetail = async (cacheKey: string, preferredChapter?: number) => {
+    if (!cacheKey) return
+    try {
+      const res = await apiClient.get(`/knowledge/source-caches/${cacheKey}`)
+      const cache = res.data?.cache || null
+      setSourceCacheDetail(cache)
+      setSelectedSourceCacheKey(cacheKey)
+      const chapterNo = Number(preferredChapter || cache?.chapters?.[0]?.chapter || 0)
+      if (chapterNo) {
+        await loadSourceCacheChapter(cacheKey, chapterNo)
+      } else {
+        setSourceCacheChapter(null)
+      }
+    } catch {
+      message.error('无法读取正文缓存目录')
+    }
+  }
+
+  const loadSourceCaches = async (autoSelect = false) => {
+    setSourceCacheLoading(true)
+    try {
+      const res = await apiClient.get('/knowledge/source-caches')
+      const caches = Array.isArray(res.data?.caches) ? res.data.caches : []
+      setSourceCaches(caches)
+      if (autoSelect && caches.length > 0) {
+        const current = selectedSourceCacheKey
+          ? caches.find((item: any) => item.cache_key === selectedSourceCacheKey)
+          : null
+        await loadSourceCacheDetail(current?.cache_key || caches[0].cache_key)
+      } else if (caches.length === 0) {
+        setSelectedSourceCacheKey('')
+        setSourceCacheDetail(null)
+        setSourceCacheChapter(null)
+      }
+    } catch {
+      message.error('无法加载正文缓存')
+    } finally {
+      setSourceCacheLoading(false)
+    }
+  }
+
+  const handleOpenSourceCache = () => {
+    setSourceCacheOpen(true)
+    void loadSourceCaches(true)
+  }
+
+  const handleCloseSourceCache = () => {
+    setSourceCacheOpen(false)
+  }
+
   const handleOpenFeed = () => {
     setKnowledgeOpen(true)
     if (knowledgeProjectTitle) {
@@ -464,12 +552,12 @@ export default function NovelStudio() {
   const handleCloseFeed = async () => {
     if (feedAnalyzeLoading && feedIngestJob?.id) {
       try {
-        const res = await apiClient.post(`/knowledge/ingest/${feedIngestJob.id}/cancel`)
-        setFeedIngestJob(res.data?.job || { ...feedIngestJob, status: 'canceled', phase: '已取消' })
+        const res = await apiClient.post(`/knowledge/ingest/${feedIngestJob.id}/pause`)
+        setFeedIngestJob(res.data?.job || { ...feedIngestJob, status: 'paused', phase: '已暂停' })
         setFeedAnalyzeLoading(false)
-        message.success('后台提炼任务已取消')
+        message.success('后台提炼任务已暂停，可稍后继续')
       } catch {
-        message.error('取消任务失败')
+        message.error('暂停任务失败')
         return
       }
     } else if ((feedAnalyzeLoading || fileReading) && feedAbortControllerRef.current) {
@@ -558,7 +646,113 @@ export default function NovelStudio() {
     if (status === 'completed') return 'green'
     if (status === 'failed') return 'red'
     if (status === 'analyzing') return 'blue'
+    if (status === 'pending') return 'default'
     return 'default'
+  }
+
+  const getIngestStatusColor = (status?: string) => {
+    if (status === 'completed') return 'green'
+    if (status === 'failed') return 'red'
+    if (status === 'paused') return 'gold'
+    if (status === 'canceled') return 'default'
+    return 'blue'
+  }
+
+  const getSourceCacheLabel = (cache?: any) => {
+    if (!cache) return ''
+    const cached = Number(cache.cached_chapters || 0)
+    const fetched = Number(cache.fetched_chapters || 0)
+    if (cache.status === 'hit') return `命中正文缓存 ${cached} 章`
+    if (cache.status === 'partial') return `已有缓存 ${cached} 章，新抓并缓存 ${fetched} 章`
+    if (cache.status === 'miss') return fetched > 0 ? `新抓并缓存 ${fetched} 章` : '未命中缓存'
+    return ''
+  }
+
+  const getSourceCacheColor = (status?: string) => {
+    if (status === 'hit') return 'green'
+    if (status === 'partial') return 'gold'
+    if (status === 'miss') return 'default'
+    return 'default'
+  }
+
+  const handlePauseIngestJob = async () => {
+    const jobId = feedIngestJob?.id
+    if (!jobId) return
+    try {
+      const res = await apiClient.post(`/knowledge/ingest/${jobId}/pause`)
+      setFeedIngestJob(res.data?.job)
+      setFeedAnalyzeLoading(false)
+      message.success('后台提炼任务已暂停')
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || '暂停任务失败')
+    }
+  }
+
+  const handleResumeIngestJob = async () => {
+    const jobId = feedIngestJob?.id
+    if (!jobId) return
+    try {
+      const res = await apiClient.post(`/knowledge/ingest/${jobId}/resume`, {
+        model_id: feedModelId,
+      })
+      const job = res.data?.job
+      setFeedIngestJob(job)
+      setFeedAnalyzeLoading(true)
+      message.success('已继续后台提炼任务')
+      void monitorAutoIngestJob(jobId)
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || '继续任务失败')
+    }
+  }
+
+  const handleCancelIngestJob = async () => {
+    const jobId = feedIngestJob?.id
+    if (!jobId) return
+    try {
+      const res = await apiClient.post(`/knowledge/ingest/${jobId}/cancel`)
+      setFeedIngestJob(res.data?.job)
+      setFeedAnalyzeLoading(false)
+      message.success('后台提炼任务已取消')
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || '取消任务失败')
+    }
+  }
+
+  const handleAnalyzeCachedJob = async () => {
+    const sourceJob = feedIngestJob
+    const url = String(sourceJob?.url || feedUrl || '').trim()
+    if (!url) {
+      message.warning('没有可用于提炼的缓存来源')
+      return
+    }
+    setFeedAnalyzeLoading(true)
+    try {
+      const startRes = await apiClient.post('/knowledge/ingest/start', {
+        url,
+        model_id: feedModelId || sourceJob?.model_id,
+        full_book: Boolean(sourceJob?.full_book ?? feedFullBook),
+        fetch_only: false,
+        auto_store: Boolean(sourceJob?.full_book ?? feedFullBook),
+        project_id: sourceJob?.project_id || feedProjectId,
+        project_title: String(sourceJob?.project_title || feedProjectTitle || '').trim() || undefined,
+        start_chapter: Number(sourceJob?.start_chapter || feedStartChapter || 1),
+        max_chapters: Number(sourceJob?.max_chapters ?? (feedFullBook ? 0 : feedMaxChapters)),
+        batch_size: Number(sourceJob?.batch_size || feedBatchSize || 10),
+        fetch_concurrency: Number(sourceJob?.fetch_concurrency || feedFetchConcurrency || 1),
+      })
+      const startedJob = startRes.data?.job
+      if (!startedJob?.id) {
+        message.warning('缓存提炼任务启动失败')
+        return
+      }
+      setFeedFetchOnly(false)
+      setFeedIngestJob(startedJob)
+      message.success('已从正文缓存启动提炼任务')
+      void monitorAutoIngestJob(startedJob.id)
+    } catch (error: any) {
+      setFeedAnalyzeLoading(false)
+      message.error(error?.response?.data?.error || '从缓存启动提炼失败')
+    }
   }
 
   const handleReanalyzeBatch = async (batchIndex: number) => {
@@ -591,9 +785,15 @@ export default function NovelStudio() {
       const res = await apiClient.get(`/knowledge/ingest/${jobId}`)
       const job = res.data?.job
       setFeedIngestJob(job)
+      if (sourceCacheOpen && job?.source_cache?.cache_key) {
+        void loadSourceCaches(false)
+      }
       if (job?.status === 'completed') return job
       if (job?.status === 'canceled') {
         throw new Error('任务已取消')
+      }
+      if (job?.status === 'paused') {
+        throw new Error('任务已暂停')
       }
       if (job?.status === 'failed') {
         throw new Error(Array.isArray(job.errors) && job.errors.length ? job.errors[0] : '后台提炼任务失败')
@@ -604,6 +804,11 @@ export default function NovelStudio() {
   const monitorAutoIngestJob = async (jobId: string) => {
     try {
       const job = await waitForIngestJob(jobId)
+      if (job?.fetch_only) {
+        message.success(`正文拉取完成，已缓存 ${job.fetched_chapters || 0} 章，可从缓存开始提炼`)
+        if (sourceCacheOpen) void loadSourceCaches(true)
+        return
+      }
       const stored = Number(job?.stored_count || 0)
       const entries = Array.isArray(job?.entries) ? job.entries.length : 0
       if (stored > 0) {
@@ -615,9 +820,50 @@ export default function NovelStudio() {
       }
     } catch (error: any) {
       if (String(error?.message || '').includes('取消')) message.info('全本后台投喂已取消')
+      else if (String(error?.message || '').includes('暂停')) message.info('全本后台投喂已暂停，可在投喂面板继续')
       else message.error(error?.message || '全本后台投喂失败')
+    } finally {
+      setFeedAnalyzeLoading(false)
     }
   }
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (!feedIngestJob?.id) return
+    if (feedIngestJob.status === 'completed') {
+      window.localStorage.removeItem(knowledgeIngestJobStorageKey)
+    } else {
+      window.localStorage.setItem(knowledgeIngestJobStorageKey, String(feedIngestJob.id))
+    }
+  }, [feedIngestJob?.id, feedIngestJob?.status])
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || feedIngestJob?.id) return
+    const jobId = window.localStorage.getItem(knowledgeIngestJobStorageKey)
+    if (!jobId) return
+    apiClient.get(`/knowledge/ingest/${jobId}`)
+      .then(res => {
+        const job = res.data?.job
+      if (!job?.id) return
+      setFeedIngestJob(job)
+      setFeedSerialFetch(true)
+      setFeedFullBook(Boolean(job.full_book))
+      setFeedFetchOnly(Boolean(job.fetch_only))
+      setFeedFetchConcurrency(Number(job.fetch_concurrency || 4))
+      if (job.project_title) {
+          setFeedProjectTitle(String(job.project_title))
+          setKnowledgeProjectTitle(String(job.project_title))
+          setKnowledgeProjectDraft(String(job.project_title))
+        }
+        if (['queued', 'running'].includes(job.status)) {
+          setFeedAnalyzeLoading(true)
+          void monitorAutoIngestJob(job.id)
+        }
+      })
+      .catch(() => {
+        window.localStorage.removeItem(knowledgeIngestJobStorageKey)
+      })
+  }, [])
 
   const handleAnalyzeFromUrl = async () => {
     const url = feedUrl.trim()
@@ -636,12 +882,14 @@ export default function NovelStudio() {
           url,
           model_id: feedModelId,
           full_book: feedFullBook,
-          auto_store: feedFullBook,
+          fetch_only: feedFetchOnly,
+          auto_store: feedFullBook && !feedFetchOnly,
           project_id: feedProjectId,
           project_title: feedProjectTitle.trim() || undefined,
           start_chapter: feedStartChapter,
           max_chapters: feedFullBook ? 0 : feedMaxChapters,
           batch_size: feedBatchSize,
+          fetch_concurrency: feedFetchConcurrency,
         })
         const startedJob = startRes.data?.job
         if (!startedJob?.id) {
@@ -649,6 +897,11 @@ export default function NovelStudio() {
           return
         }
         setFeedIngestJob(startedJob)
+        if (feedFetchOnly) {
+          message.success('已启动正文拉取任务，完成后可从缓存开始提炼')
+          void monitorAutoIngestJob(startedJob.id)
+          return
+        }
         if (feedFullBook) {
           if (feedProjectTitle.trim()) {
             setKnowledgeProjectTitle(feedProjectTitle.trim())
@@ -904,6 +1157,7 @@ export default function NovelStudio() {
             <Col>
               <Space>
                 <Button icon={<ReadOutlined />} onClick={handleOpenKnowledge} style={{ borderRadius: 12 }}>知识库</Button>
+                <Button icon={<FileTextOutlined />} onClick={handleOpenSourceCache} style={{ borderRadius: 12 }}>正文缓存</Button>
                 <Button icon={<DatabaseOutlined />} onClick={handleOpenMemoryPalace} style={{ borderRadius: 12 }}>记忆宫殿</Button>
                 <Button icon={<ReloadOutlined />} onClick={loadProjects} loading={loading} style={{ borderRadius: 12 }}>刷新</Button>
                 <Button type="primary" icon={<PlusOutlined />} onClick={() => setWizardOpen(true)} style={{ borderRadius: 12, boxShadow: '0 10px 24px rgba(24, 144, 255, 0.25)' }}>新建小说项目</Button>
@@ -1013,6 +1267,179 @@ export default function NovelStudio() {
         title={
           <Space direction="vertical" size={2}>
             <Space>
+              <FileTextOutlined style={{ color: '#1677ff' }} />
+              <Text strong style={{ fontSize: 18 }}>正文缓存总览</Text>
+            </Space>
+            <Text type="secondary" style={{ fontSize: 12 }}>查看已抓取原文，用来和知识提炼结果互相印证</Text>
+          </Space>
+        }
+        placement="right"
+        width={1120}
+        open={sourceCacheOpen}
+        onClose={handleCloseSourceCache}
+        destroyOnHidden={false}
+        extra={
+          <Button size="small" icon={<ReloadOutlined />} loading={sourceCacheLoading} onClick={() => loadSourceCaches(true)}>
+            刷新
+          </Button>
+        }
+      >
+        <div style={{ display: 'grid', gridTemplateColumns: '340px minmax(0, 1fr)', gap: 16, height: 'calc(100vh - 120px)' }}>
+          <div style={{ minHeight: 0, display: 'grid', gridTemplateRows: 'auto minmax(160px, 1fr) minmax(220px, 1.3fr)', gap: 12 }}>
+            <Input
+              value={sourceCacheSearch}
+              onChange={(event) => setSourceCacheSearch(event.target.value)}
+              placeholder="搜索项目名、来源、缓存键"
+              prefix={<SearchOutlined style={{ color: '#94a3b8' }} />}
+              allowClear
+            />
+
+            <Card
+              size="small"
+              title={`缓存项目 ${filteredSourceCaches.length}`}
+              style={{ borderRadius: 8, minHeight: 0, overflow: 'hidden' }}
+              bodyStyle={{ padding: 8, height: 'calc(100% - 38px)', overflowY: 'auto' }}
+            >
+              {filteredSourceCaches.length === 0 ? (
+                <div style={{ padding: 24, textAlign: 'center', color: '#94a3b8' }}>
+                  {sourceCacheLoading ? '正在加载正文缓存...' : '还没有正文缓存'}
+                </div>
+              ) : (
+                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                  {filteredSourceCaches.map(cache => {
+                    const active = cache.cache_key === selectedSourceCacheKey
+                    return (
+                      <div
+                        key={cache.cache_key}
+                        onClick={() => loadSourceCacheDetail(cache.cache_key)}
+                        style={{
+                          cursor: 'pointer',
+                          border: `1px solid ${active ? '#93c5fd' : '#e5e7eb'}`,
+                          background: active ? '#eff6ff' : '#fff',
+                          borderRadius: 8,
+                          padding: 10,
+                        }}
+                      >
+                        <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                          <Space style={{ justifyContent: 'space-between', width: '100%' }} align="start">
+                            <Text strong style={{ color: '#0f172a' }}>{cache.project_title || '未命名缓存'}</Text>
+                            <Tag color={cache.complete ? 'green' : 'gold'} bordered={false}>
+                              {cache.complete ? '完整' : '未完'}
+                            </Tag>
+                          </Space>
+                          <Text type="secondary" style={{ fontSize: 12 }}>
+                            {cache.chapter_count || 0} 章 · 第 {cache.first_chapter || '-'}-{cache.last_chapter || '-'} 章 · {Math.round(Number(cache.total_chars || 0) / 1000)}k 字
+                          </Text>
+                          <Text type="secondary" style={{ fontSize: 12 }}>
+                            {truncateText(cache.source_url || cache.canonical_source_url || cache.cache_key, 54)}
+                          </Text>
+                        </Space>
+                      </div>
+                    )
+                  })}
+                </Space>
+              )}
+            </Card>
+
+            <Card
+              size="small"
+              title={`章节目录 ${sourceCacheDetail?.chapter_count ? `(${sourceCacheDetail.chapter_count})` : ''}`}
+              style={{ borderRadius: 8, minHeight: 0, overflow: 'hidden' }}
+              bodyStyle={{ padding: 8, height: 'calc(100% - 38px)', overflowY: 'auto' }}
+            >
+              {!sourceCacheDetail ? (
+                <div style={{ padding: 24, textAlign: 'center', color: '#94a3b8' }}>选择一个缓存项目查看章节</div>
+              ) : (
+                <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                  {(sourceCacheDetail.chapters || []).map((chapter: any) => {
+                    const active = Number(sourceCacheChapter?.chapter || 0) === Number(chapter.chapter)
+                    return (
+                      <div
+                        key={chapter.chapter}
+                        onClick={() => loadSourceCacheChapter(sourceCacheDetail.cache_key, Number(chapter.chapter))}
+                        style={{
+                          cursor: 'pointer',
+                          border: `1px solid ${active ? '#bfdbfe' : '#e5e7eb'}`,
+                          background: active ? '#eff6ff' : '#fff',
+                          borderRadius: 8,
+                          padding: '8px 10px',
+                        }}
+                      >
+                        <Text strong={active} style={{ display: 'block', fontSize: 13 }}>
+                          第{chapter.chapter}章
+                        </Text>
+                        <Text type="secondary" style={{ display: 'block', fontSize: 12 }}>
+                          {truncateText(chapter.title || '', 28)}
+                        </Text>
+                      </div>
+                    )
+                  })}
+                </Space>
+              )}
+            </Card>
+          </div>
+
+          <Card
+            style={{ borderRadius: 8, minHeight: 0, overflow: 'hidden' }}
+            bodyStyle={{ height: '100%', padding: 0, display: 'flex', flexDirection: 'column' }}
+          >
+            {sourceCacheChapter ? (
+              <>
+                <div style={{ padding: '18px 22px', borderBottom: '1px solid #e5e7eb', background: '#fafcff' }}>
+                  <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                    <Space wrap style={{ justifyContent: 'space-between', width: '100%' }}>
+                      <div>
+                        <Title level={4} style={{ margin: 0 }}>{sourceCacheChapter.title || `第${sourceCacheChapter.chapter}章`}</Title>
+                        <Text type="secondary">《{sourceCacheChapter.project_title || sourceCacheDetail?.project_title || '未命名缓存'}》第 {sourceCacheChapter.chapter} 章</Text>
+                      </div>
+                      <Space wrap>
+                        <Tag bordered={false}>{Number(sourceCacheChapter.length || 0).toLocaleString()} 字</Tag>
+                        {sourceCacheDetail?.complete !== undefined && (
+                          <Tag color={sourceCacheDetail.complete ? 'green' : 'gold'} bordered={false}>
+                            {sourceCacheDetail.complete ? '完整缓存' : '未完缓存'}
+                          </Tag>
+                        )}
+                      </Space>
+                    </Space>
+                    {(sourceCacheChapter.url || sourceCacheDetail?.source_url) && (
+                      <Paragraph copyable={{ text: sourceCacheChapter.url || sourceCacheDetail?.source_url }} style={{ margin: 0, fontSize: 12 }}>
+                        <Text type="secondary">{sourceCacheChapter.url || sourceCacheDetail?.source_url}</Text>
+                      </Paragraph>
+                    )}
+                  </Space>
+                </div>
+                <div style={{ flex: 1, overflowY: 'auto', padding: '22px 34px', background: '#ffffff' }}>
+                  {sourceCacheChapterLoading ? (
+                    <Text type="secondary">正在读取正文...</Text>
+                  ) : (
+                    <div
+                      style={{
+                        maxWidth: 760,
+                        margin: '0 auto',
+                        whiteSpace: 'pre-wrap',
+                        fontSize: 16,
+                        lineHeight: 1.82,
+                        color: '#1f2937',
+                      }}
+                    >
+                      {sourceCacheChapter.text || '该章节没有正文内容'}
+                    </div>
+                  )}
+                </div>
+              </>
+            ) : (
+              <div style={{ height: '100%', display: 'grid', placeItems: 'center', color: '#94a3b8' }}>
+                {sourceCacheLoading ? '正在加载正文缓存...' : '选择左侧项目和章节查看正文'}
+              </div>
+            )}
+          </Card>
+        </div>
+      </Drawer>
+
+      <Drawer
+        title={
+          <Space direction="vertical" size={2}>
+            <Space>
               <ReadOutlined style={{ color: '#1677ff' }} />
               <Text strong style={{ fontSize: 18 }}>写作知识库</Text>
             </Space>
@@ -1065,14 +1492,45 @@ export default function NovelStudio() {
               <Space direction="vertical" size={8} style={{ width: '100%' }}>
                 <Space style={{ justifyContent: 'space-between', width: '100%' }}>
                   <Text strong>{feedIngestJob.phase || '后台任务'}</Text>
-                  <Tag color={feedIngestJob.status === 'failed' ? 'red' : feedIngestJob.status === 'completed' ? 'green' : 'blue'} bordered={false}>
-                    {feedIngestJob.status || 'running'}
-                  </Tag>
+                  <Space size={6}>
+                    <Tag color={getIngestStatusColor(feedIngestJob.status)} bordered={false}>
+                      {feedIngestJob.status || 'running'}
+                    </Tag>
+                    {getSourceCacheLabel(feedIngestJob.source_cache) && (
+                      <Tag color={getSourceCacheColor(feedIngestJob.source_cache?.status)} bordered={false}>
+                        {getSourceCacheLabel(feedIngestJob.source_cache)}
+                      </Tag>
+                    )}
+                    {feedIngestJob.fetch_only && feedIngestJob.status === 'completed' && (
+                      <Button size="small" type="primary" icon={<PlayCircleOutlined />} onClick={handleAnalyzeCachedJob}>
+                        从缓存开始提炼
+                      </Button>
+                    )}
+                    {['queued', 'running'].includes(feedIngestJob.status) && (
+                      <Button size="small" icon={<PauseCircleOutlined />} onClick={handlePauseIngestJob}>
+                        暂停
+                      </Button>
+                    )}
+                    {['paused', 'failed', 'canceled'].includes(feedIngestJob.status) && (
+                      <Button size="small" type="primary" icon={<PlayCircleOutlined />} onClick={handleResumeIngestJob}>
+                        继续
+                      </Button>
+                    )}
+                    {!['completed', 'canceled'].includes(feedIngestJob.status) && (
+                      <Popconfirm title="确定取消当前后台提炼任务？" okText="取消任务" cancelText="返回" onConfirm={handleCancelIngestJob}>
+                        <Button size="small" danger icon={<StopOutlined />}>
+                          取消
+                        </Button>
+                      </Popconfirm>
+                    )}
+                  </Space>
                 </Space>
                 <Progress percent={Math.max(0, Math.min(100, Number(feedIngestJob.progress || 0)))} size="small" />
                 <Text type="secondary" style={{ fontSize: 12 }}>
                   {feedIngestJob.full_book ? '全本模式；' : ''}
-                  从第 {feedIngestJob.start_chapter || feedStartChapter || 1} 章开始；已抓取 {feedIngestJob.fetched_chapters || 0} 章，已分析 {feedIngestJob.analyzed_batches || 0}/{feedIngestJob.total_batches || 0} 批，候选知识 {Array.isArray(feedIngestJob.entries) ? feedIngestJob.entries.length : 0} 条
+                  {feedIngestJob.fetch_only ? '仅拉取正文缓存；' : ''}
+                  从第 {feedIngestJob.start_chapter || feedStartChapter || 1} 章开始；并发 {feedIngestJob.fetch_concurrency || feedFetchConcurrency || 1}；已抓取 {feedIngestJob.fetched_chapters || 0} 章
+                  {feedIngestJob.fetch_only ? '' : `，已分析 ${feedIngestJob.analyzed_batches || 0}/${feedIngestJob.total_batches || 0} 批，候选知识 ${Array.isArray(feedIngestJob.entries) ? feedIngestJob.entries.length : 0} 条`}
                   {feedIngestJob.stored_count ? `，已入库 ${feedIngestJob.stored_count} 条` : ''}
                 </Text>
                 {(feedIngestJob.current_range || feedIngestJob.current_chapter) && (
@@ -1425,7 +1883,13 @@ export default function NovelStudio() {
             ? (feedSubmitting ? '提交中...' : '加入知识库')
             : feedMode === 'file'
               ? (fileReading ? '读取中...' : '选择文件并分析')
-              : (feedAnalyzeLoading ? '分析中...' : feedSerialFetch && feedFullBook ? '启动全本任务' : '抓取并分析')
+              : (feedAnalyzeLoading
+                  ? (feedFetchOnly ? '拉取中...' : '分析中...')
+                  : feedSerialFetch && feedFetchOnly
+                    ? '仅拉取正文'
+                    : feedSerialFetch && feedFullBook
+                      ? '启动全本任务'
+                      : '抓取并分析')
         }
         cancelText={feedAnalyzeLoading || fileReading ? '中断任务' : '取消'}
         confirmLoading={feedMode === 'text' ? feedSubmitting : feedMode === 'url' ? feedAnalyzeLoading : fileReading}
@@ -1599,7 +2063,10 @@ export default function NovelStudio() {
                       onChange={(e) => {
                         const checked = e.target.checked
                         setFeedSerialFetch(checked)
-                        if (!checked) setFeedFullBook(false)
+                        if (!checked) {
+                          setFeedFullBook(false)
+                          setFeedFetchOnly(false)
+                        }
                       }}
                     >
                       自动连载抓取：目录页先进入第一章，再追下一章
@@ -1630,7 +2097,18 @@ export default function NovelStudio() {
                         checked={feedFullBook}
                         onChange={(e) => setFeedFullBook(e.target.checked)}
                       >
-                        一直追章到没有下一章，完成后自动入库
+                        {feedFetchOnly ? '一直追章到没有下一章，只写入正文缓存' : '一直追章到没有下一章，完成后自动入库'}
+                      </Checkbox>
+                    </Col>
+                    <Col xs={24} md={8}>
+                      <Text type="secondary">两阶段投喂</Text>
+                    </Col>
+                    <Col xs={24} md={16}>
+                      <Checkbox
+                        checked={feedFetchOnly}
+                        onChange={(e) => setFeedFetchOnly(e.target.checked)}
+                      >
+                        先只拉取正文缓存，完成后再手动开始提炼
                       </Checkbox>
                     </Col>
                     <Col xs={24} md={8}>
@@ -1647,6 +2125,21 @@ export default function NovelStudio() {
                           style={{ width: 100 }}
                         />
                         <Text type="secondary">章开始</Text>
+                      </Space>
+                    </Col>
+                    <Col xs={24} md={8}>
+                      <Text type="secondary">拉取并发数</Text>
+                    </Col>
+                    <Col xs={24} md={16}>
+                      <Space size={8}>
+                        <InputNumber
+                          min={1}
+                          max={12}
+                          value={feedFetchConcurrency}
+                          onChange={(value) => setFeedFetchConcurrency(Number(value || 1))}
+                          style={{ width: 92 }}
+                        />
+                        <Text type="secondary">线程</Text>
                       </Space>
                     </Col>
                     <Col xs={24} md={8}>
@@ -1671,13 +2164,44 @@ export default function NovelStudio() {
                     <Space direction="vertical" size={6} style={{ width: '100%' }}>
                       <Space style={{ justifyContent: 'space-between', width: '100%' }}>
                         <Text strong>{feedIngestJob.phase || '后台任务'}</Text>
-                        <Tag color={feedIngestJob.status === 'failed' ? 'red' : feedIngestJob.status === 'completed' ? 'green' : 'blue'} bordered={false}>
-                          {feedIngestJob.status || 'running'}
-                        </Tag>
+                        <Space size={6}>
+                          <Tag color={getIngestStatusColor(feedIngestJob.status)} bordered={false}>
+                            {feedIngestJob.status || 'running'}
+                          </Tag>
+                          {getSourceCacheLabel(feedIngestJob.source_cache) && (
+                            <Tag color={getSourceCacheColor(feedIngestJob.source_cache?.status)} bordered={false}>
+                              {getSourceCacheLabel(feedIngestJob.source_cache)}
+                            </Tag>
+                          )}
+                          {feedIngestJob.fetch_only && feedIngestJob.status === 'completed' && (
+                            <Button size="small" type="primary" icon={<PlayCircleOutlined />} onClick={handleAnalyzeCachedJob}>
+                              从缓存开始提炼
+                            </Button>
+                          )}
+                          {['queued', 'running'].includes(feedIngestJob.status) && (
+                            <Button size="small" icon={<PauseCircleOutlined />} onClick={handlePauseIngestJob}>
+                              暂停
+                            </Button>
+                          )}
+                          {['paused', 'failed', 'canceled'].includes(feedIngestJob.status) && (
+                            <Button size="small" type="primary" icon={<PlayCircleOutlined />} onClick={handleResumeIngestJob}>
+                              继续
+                            </Button>
+                          )}
+                          {!['completed', 'canceled'].includes(feedIngestJob.status) && (
+                            <Popconfirm title="确定取消当前后台提炼任务？" okText="取消任务" cancelText="返回" onConfirm={handleCancelIngestJob}>
+                              <Button size="small" danger icon={<StopOutlined />}>
+                                取消
+                              </Button>
+                            </Popconfirm>
+                          )}
+                        </Space>
                       </Space>
                       <Progress percent={Math.max(0, Math.min(100, Number(feedIngestJob.progress || 0)))} size="small" />
                       <Text type="secondary" style={{ fontSize: 12 }}>
-                        从第 {feedIngestJob.start_chapter || feedStartChapter || 1} 章开始；已抓取 {feedIngestJob.fetched_chapters || 0} 章，已分析 {feedIngestJob.analyzed_batches || 0}/{feedIngestJob.total_batches || 0} 批，候选知识 {Array.isArray(feedIngestJob.entries) ? feedIngestJob.entries.length : 0} 条
+                        {feedIngestJob.fetch_only ? '仅拉取正文缓存；' : ''}
+                        从第 {feedIngestJob.start_chapter || feedStartChapter || 1} 章开始；并发 {feedIngestJob.fetch_concurrency || feedFetchConcurrency || 1}；已抓取 {feedIngestJob.fetched_chapters || 0} 章
+                        {feedIngestJob.fetch_only ? '' : `，已分析 ${feedIngestJob.analyzed_batches || 0}/${feedIngestJob.total_batches || 0} 批，候选知识 ${Array.isArray(feedIngestJob.entries) ? feedIngestJob.entries.length : 0} 条`}
                       </Text>
                       {(feedIngestJob.current_range || feedIngestJob.current_chapter) && (
                         <Text type="secondary" style={{ fontSize: 12 }}>
@@ -1703,8 +2227,10 @@ export default function NovelStudio() {
                   </div>
                 )}
                 <div style={{ padding: 12, borderRadius: 8, background: '#f8fafc', color: '#64748b', fontSize: 13, lineHeight: 1.7 }}>
-                  {feedSerialFetch && feedFullBook
-                    ? '全本模式会启动后台任务，一直追到没有下一章，跑完后自动写入当前投喂项目。抓取阶段可能较久，提炼阶段会显示批次进度。'
+                  {feedSerialFetch && feedFetchOnly
+                    ? '两阶段模式会先把章节正文完整拉取到本地缓存，不调用模型。目录页会优先并发拉取；解析不到目录时自动退回串行追章。'
+                    : feedSerialFetch && feedFullBook
+                    ? '全本模式会启动后台任务，一直追到没有下一章，跑完后自动写入当前投喂项目。抓取和提炼都可暂停，继续时会跳过已完成批次。'
                     : feedSerialFetch
                       ? '适合小说目录页。系统会后台自动进入第一章并逐章追章；如果已经投喂到第 20 章，把起始章节设为 21，就只分析后续章节。需要逐章重提时，把每批章节数设为 1。'
                     : '适合单页文章或章节页。系统会抓取当前页面正文，再让 AI 提炼为可入库知识。'}

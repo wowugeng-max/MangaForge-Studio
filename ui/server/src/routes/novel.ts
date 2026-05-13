@@ -160,6 +160,7 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
         reference_weight: entry.reference_weight,
         match_reason: entry.match_reason,
       })),
+      knowledge_snapshot_entry_ids: (preview.entries || []).map((entry: any) => entry.id).filter(Boolean),
       copy_guard: {
         checked_terms: terms.length,
         hits,

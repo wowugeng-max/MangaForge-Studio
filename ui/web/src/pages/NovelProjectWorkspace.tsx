@@ -137,6 +137,12 @@ export default function NovelProjectWorkspace() {
     const strengthLabel = strength === 'light' ? '轻参考' : strength === 'strong' ? '强参考' : '中参考'
     return { count: refs.length, strengthLabel }
   }, [selectedProject?.reference_config])
+  const referenceReports = useMemo(() => (
+    reviews
+      .filter((item: any) => item.review_type === 'reference_report')
+      .slice()
+      .sort((a: any, b: any) => String(b.created_at || '').localeCompare(String(a.created_at || '')))
+  ), [reviews])
 
   // ── empty project detection ──
   const isEmptyProject = useMemo(() => (
@@ -235,8 +241,54 @@ export default function NovelProjectWorkspace() {
   }, [])
 
   /* ── 大纲生成 ──────────────────────────────────────────────────── */
+  const confirmReferenceReady = async (taskType: string) => {
+    if (!referenceSummary.count) return true
+    try {
+      const res = await apiClient.post(`/novel/projects/${projectId}/reference-preview`, { task_type: taskType })
+      const preview = res.data || {}
+      const entries = Array.isArray(preview.entries) ? preview.entries : []
+      const warnings = Array.isArray(preview.warnings) ? preview.warnings : []
+      if (entries.length > 0 && warnings.length === 0) return true
+      return await new Promise<boolean>((resolve) => {
+        Modal.confirm({
+          title: '参考知识准备度不足',
+          width: 560,
+          content: (
+            <div style={{ whiteSpace: 'pre-wrap' }}>
+              {[
+                `当前任务：${taskType}`,
+                `已配置参考项目：${referenceSummary.count} 部`,
+                `本次可注入知识：${entries.length} 条`,
+                ...(warnings.length ? ['问题：', ...warnings.map((item: string) => `- ${item}`)] : ['问题：当前没有命中可注入知识。']),
+                '',
+                '继续生成不会中断，但仿写效果会明显下降。建议先打开“参考配置”做预览或补提炼。',
+              ].join('\n')}
+            </div>
+          ),
+          okText: '继续生成',
+          cancelText: '先去配置',
+          onOk: () => resolve(true),
+          onCancel: () => resolve(false),
+        })
+      })
+    } catch (error: any) {
+      const text = String(error?.response?.data || error?.response?.data?.error || error?.message || '')
+      Modal.warning({
+        title: '参考预检接口不可用',
+        content: text.includes('Cannot POST') || error?.response?.status === 404
+          ? '当前后端未加载 reference-preview 路由。请重启 8787 后端服务后再生成。'
+          : '参考预检失败，请稍后重试或检查后端服务。',
+      })
+      return false
+    }
+  }
+
   const handleOutlineGenerate = async (opts: { chapterCount: number; continueMode: boolean; continueFrom: number; userOutline: string }) => {
     if (!selectedModelId) return message.warning('请先在顶部选择模型')
+    if (!await confirmReferenceReady('大纲生成')) {
+      setReferenceConfigOpen(true)
+      return
+    }
     setStepOutlineLoading(true)
     setOutlinePanelOpen(false)
     try {
@@ -303,6 +355,10 @@ export default function NovelProjectWorkspace() {
     if (!selectedModelId) return message.warning('请先选择模型')
     const unWritten = sortedChapters.filter(ch => !ch.chapter_text || ch.chapter_text.includes('【占位正文】'))
     if (unWritten.length === 0) return message.warning('所有章节已有正文，无需生成')
+    if (!await confirmReferenceReady('正文创作')) {
+      setReferenceConfigOpen(true)
+      return
+    }
     setStepProseLoading(true)
     let done = 0
     try {
@@ -340,6 +396,10 @@ export default function NovelProjectWorkspace() {
   const [planProgress, setPlanProgress] = useState<any>(null)
 
   const runPlan = async () => {
+    if (!await confirmReferenceReady('全案规划')) {
+      setReferenceConfigOpen(true)
+      return
+    }
     setPlanning(true)
     setPlanProgress(null)
     try {
@@ -406,6 +466,10 @@ export default function NovelProjectWorkspace() {
   const generateCurrentChapterProse = async () => {
     if (!activeChapter) return message.warning('请先选择章节')
     if (!selectedModelId) return message.warning('请先选择写作模型')
+    if (!await confirmReferenceReady('正文创作')) {
+      setReferenceConfigOpen(true)
+      return
+    }
     setStreamingChapterId(activeChapter.id)
     setStreamingText('')
     setStreamingProgress('正在请求模型...')
@@ -761,6 +825,7 @@ export default function NovelProjectWorkspace() {
           worldbuilding={worldbuilding}
           characters={characters}
           outlines={outlines}
+          referenceReports={referenceReports}
           chapterVersions={chapterVersions}
           chapterVersionsLoading={chapterVersionsLoading}
           rollingBackVersionId={rollingBackVersionId}

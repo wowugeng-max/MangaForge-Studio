@@ -1,8 +1,18 @@
 [
   {
     "id": 2,
-    "provider": "dsapi",
-    "key": "sk-de6fbaff696746dda075d09a5e380bf1",
+    "provider": "dslocaltest",
+    "key": "sk-1bd0857154a549f78f88b5e48e2fa83b",
+    "description": "",
+    "is_active": true,
+    "quota_total": 0,
+    "quota_used": 0,
+    "tags": []
+  },
+  {
+    "id": 3,
+    "provider": "cliproxyapi",
+    "key": "sk-GR9LkalLljMbfR2AM",
     "description": "",
     "is_active": true,
     "quota_total": 0,

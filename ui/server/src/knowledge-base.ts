@@ -1,9 +1,11 @@
 import { execFile } from 'child_process'
-import { existsSync, unlinkSync, writeFileSync } from 'fs'
+import { createHash } from 'crypto'
+import { existsSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
 import { promisify } from 'util'
+import { Database } from 'bun:sqlite'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -44,6 +46,48 @@ function tryParseJson<T>(value: string, fallback: T): T {
   }
 }
 
+function parseJsonLike(value: any): any {
+  if (!value) return null
+  if (typeof value === 'object') return value
+  const raw = String(value || '').trim()
+  if (!raw) return null
+  const candidates = [
+    raw,
+    raw.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1] || '',
+    raw.match(/\[[\s\S]*\]/)?.[0] || '',
+    raw.match(/\{[\s\S]*\}/)?.[0] || '',
+  ].filter(Boolean)
+  for (const candidate of candidates) {
+    try {
+      return JSON.parse(candidate)
+    } catch {
+      // try next candidate
+    }
+  }
+  return null
+}
+
+function extractKnowledgeRows(result: any): any[] {
+  const candidates = [
+    result?.parsed,
+    result?.content,
+    result?.raw?.content,
+    result?.raw?.choices?.[0]?.message?.content,
+  ]
+  for (const candidate of candidates) {
+    const parsed = parseJsonLike(candidate)
+    if (Array.isArray(parsed)) return parsed
+    if (Array.isArray(parsed?.entries)) return parsed.entries
+    if (Array.isArray(parsed?.knowledge_entries)) return parsed.knowledge_entries
+    if (Array.isArray(parsed?.items)) return parsed.items
+  }
+  return []
+}
+
+function isProviderUploadFailure(error: unknown) {
+  return /upload current user input file|upload file failed|Provider upload failed/i.test(String(error))
+}
+
 // ── Knowledge Table Operations ──
 
 export interface KnowledgeEntry {
@@ -71,7 +115,7 @@ export interface KnowledgeSummary {
   [category: string]: { label: string; count: number }
 }
 
-export type KnowledgeIngestJobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'canceled'
+export type KnowledgeIngestJobStatus = 'queued' | 'running' | 'paused' | 'completed' | 'failed' | 'canceled'
 export type KnowledgeIngestBatchStatus = 'pending' | 'analyzing' | 'completed' | 'failed'
 
 export interface KnowledgeIngestBatch {
@@ -95,12 +139,14 @@ export interface KnowledgeIngestJob {
   url: string
   model_id?: number
   full_book?: boolean
+  fetch_only?: boolean
   auto_store?: boolean
   project_id?: number
   project_title?: string
   start_chapter: number
   max_chapters: number
   batch_size: number
+  fetch_concurrency?: number
   fetched_chapters: number
   analyzed_batches: number
   total_batches: number
@@ -112,6 +158,13 @@ export interface KnowledgeIngestJob {
   entries: KnowledgeEntry[]
   stored_count?: number
   synced_count?: number
+  source_cache?: {
+    status: 'miss' | 'hit' | 'partial'
+    cache_key: string
+    cached_chapters: number
+    fetched_chapters: number
+    complete?: boolean
+  }
   errors: string[]
   created_at: string
   updated_at: string
@@ -120,6 +173,473 @@ export interface KnowledgeIngestJob {
 const ingestJobs = new Map<string, KnowledgeIngestJob>()
 const ingestJobChapters = new Map<string, any[]>()
 const ingestJobControllers = new Map<string, AbortController>()
+
+type SourceCachedChapter = {
+  chapter: number
+  title: string
+  text: string
+  url: string
+  length?: number
+  content_hash: string
+  fetched_at: string
+}
+
+type SourceCacheRecord = {
+  cache_key: string
+  project_title: string
+  source_url: string
+  canonical_source_url: string
+  complete: boolean
+  chapters: SourceCachedChapter[]
+  created_at: string
+  updated_at: string
+}
+
+export type SourceCacheSummary = {
+  cache_key: string
+  project_title: string
+  source_url: string
+  canonical_source_url: string
+  complete: boolean
+  chapter_count: number
+  first_chapter: number
+  last_chapter: number
+  total_chars: number
+  updated_at: string
+  chapters: Array<{
+    chapter: number
+    title: string
+    length: number
+    url: string
+  }>
+}
+
+function canonicalSourceUrl(url: string) {
+  const raw = String(url || '').trim()
+  if (!raw) return ''
+  try {
+    const parsed = new URL(raw)
+    parsed.hash = ''
+    parsed.search = ''
+    return parsed.toString().replace(/\/$/, '')
+  } catch {
+    return raw.replace(/[?#].*$/, '').replace(/\/$/, '')
+  }
+}
+
+function sourceCacheKey(projectTitle: string, sourceUrl: string) {
+  return createHash('sha1')
+    .update(`${String(projectTitle || '').trim()}\n${canonicalSourceUrl(sourceUrl)}`)
+    .digest('hex')
+    .slice(0, 20)
+}
+
+async function activeWorkspacePath() {
+  const { loadActiveWorkspace } = await import('./workspace')
+  return loadActiveWorkspace()
+}
+
+async function legacySourceCacheRoot() {
+  const workspace = await activeWorkspacePath()
+  return join(workspace, 'source-cache')
+}
+
+function sqliteDbPathFromEnv() {
+  const raw = process.env.SQLITE_DATABASE_URL || process.env.DATABASE_URL || ''
+  if (!raw) return ''
+  if (raw.startsWith('file:')) return raw.slice(5).split('?', 1)[0]
+  return raw
+}
+
+async function openSourceCacheDb() {
+  const workspace = await activeWorkspacePath()
+  const db = new Database(sqliteDbPathFromEnv() || join(workspace, 'novel.sqlite'))
+  ensureSourceCacheSchema(db)
+  await importLegacySourceCacheJson(db)
+  return db
+}
+
+function ensureSourceCacheSchema(db: Database) {
+  db.exec(`
+PRAGMA foreign_keys = ON;
+PRAGMA journal_mode = WAL;
+CREATE TABLE IF NOT EXISTS source_books (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  cache_key TEXT NOT NULL UNIQUE,
+  project_title TEXT NOT NULL,
+  source_url TEXT NOT NULL,
+  canonical_source_url TEXT NOT NULL,
+  complete INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_source_books_project_source
+  ON source_books(project_title, canonical_source_url);
+CREATE TABLE IF NOT EXISTS source_chapters (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  book_id INTEGER NOT NULL,
+  chapter_no INTEGER NOT NULL,
+  title TEXT DEFAULT '',
+  url TEXT DEFAULT '',
+  text TEXT NOT NULL,
+  length INTEGER DEFAULT 0,
+  content_hash TEXT DEFAULT '',
+  fetched_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  fetch_status TEXT DEFAULT 'ok',
+  FOREIGN KEY(book_id) REFERENCES source_books(id) ON DELETE CASCADE,
+  UNIQUE(book_id, chapter_no)
+);
+CREATE INDEX IF NOT EXISTS idx_source_chapters_book_chapter
+  ON source_chapters(book_id, chapter_no);
+CREATE TABLE IF NOT EXISTS source_cache_meta (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+`)
+}
+
+async function importLegacySourceCacheJson(db: Database) {
+  const imported = db.query("SELECT value FROM source_cache_meta WHERE key = 'legacy_json_imported'").get() as any
+  if (String(imported?.value || '') === '1') return
+
+  try {
+    const root = await legacySourceCacheRoot()
+    if (existsSync(root)) {
+      const files = readdirSync(root).filter(file => /^[a-f0-9]{20}\.json$/i.test(file))
+      for (const file of files) {
+        try {
+          const key = file.replace(/\.json$/i, '')
+          const parsed = JSON.parse(readFileSync(join(root, file), 'utf8'))
+          const record = parseSourceCacheRecord(parsed, { cache_key: key })
+          if (record.cache_key && record.project_title) upsertSourceCacheRecord(db, record)
+        } catch {
+          // Ignore malformed legacy cache files; new writes go to SQLite only.
+        }
+      }
+    }
+  } finally {
+    db.query(`
+INSERT INTO source_cache_meta (key, value, updated_at)
+VALUES ('legacy_json_imported', '1', ?)
+ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+`).run(nowIso())
+  }
+}
+
+function parseSourceCacheRecord(parsed: any, fallback?: {
+  cache_key?: string
+  project_title?: string
+  source_url?: string
+}): SourceCacheRecord {
+  const projectTitle = String(parsed.project_title || fallback?.project_title || '').trim()
+  const sourceUrl = String(parsed.source_url || fallback?.source_url || '')
+  return {
+    cache_key: String(parsed.cache_key || fallback?.cache_key || sourceCacheKey(projectTitle, sourceUrl)),
+    project_title: projectTitle,
+    source_url: sourceUrl,
+    canonical_source_url: String(parsed.canonical_source_url || canonicalSourceUrl(sourceUrl)),
+    complete: Boolean(parsed.complete),
+    chapters: Array.isArray(parsed.chapters)
+      ? parsed.chapters
+          .map((item: any) => ({
+            chapter: Number(item.chapter || 0),
+            title: String(item.title || ''),
+            text: String(item.text || ''),
+            url: String(item.url || ''),
+            length: Number(item.length || String(item.text || '').length),
+            content_hash: String(item.content_hash || ''),
+            fetched_at: String(item.fetched_at || ''),
+          }))
+          .filter((item: SourceCachedChapter) => item.chapter > 0 && item.text)
+          .sort((a: SourceCachedChapter, b: SourceCachedChapter) => a.chapter - b.chapter)
+      : [],
+    created_at: String(parsed.created_at || nowIso()),
+    updated_at: String(parsed.updated_at || nowIso()),
+  }
+}
+
+async function readSourceCache(projectTitle: string, sourceUrl: string): Promise<SourceCacheRecord | null> {
+  const title = String(projectTitle || '').trim()
+  if (!title) return null
+  const db = await openSourceCacheDb()
+  try {
+    const canonical = canonicalSourceUrl(sourceUrl)
+    const book = db.query(`
+SELECT * FROM source_books
+WHERE project_title = ? AND canonical_source_url = ?
+LIMIT 1
+`).get(title, canonical) as any
+    return book ? sourceCacheRecordFromBook(db, book) : null
+  } catch {
+    return null
+  } finally {
+    db.close()
+  }
+}
+
+async function readSourceCacheByKey(cacheKey: string): Promise<SourceCacheRecord | null> {
+  const key = String(cacheKey || '').trim()
+  if (!/^[a-f0-9]{20}$/i.test(key)) return null
+  const db = await openSourceCacheDb()
+  try {
+    const book = db.query('SELECT * FROM source_books WHERE cache_key = ? LIMIT 1').get(key) as any
+    return book ? sourceCacheRecordFromBook(db, book) : null
+  } catch {
+    return null
+  } finally {
+    db.close()
+  }
+}
+
+function sourceCacheRecordFromBook(db: Database, book: any): SourceCacheRecord {
+  const chapters = db.query(`
+SELECT chapter_no, title, text, url, length, content_hash, fetched_at
+FROM source_chapters
+WHERE book_id = ?
+ORDER BY chapter_no ASC
+`).all(Number(book.id || 0)) as any[]
+
+  return {
+    cache_key: String(book.cache_key || ''),
+    project_title: String(book.project_title || ''),
+    source_url: String(book.source_url || ''),
+    canonical_source_url: String(book.canonical_source_url || ''),
+    complete: Boolean(Number(book.complete || 0)),
+    chapters: chapters
+      .map(row => ({
+        chapter: Number(row.chapter_no || 0),
+        title: String(row.title || ''),
+        text: String(row.text || ''),
+        url: String(row.url || ''),
+        length: Number(row.length || String(row.text || '').length),
+        content_hash: String(row.content_hash || ''),
+        fetched_at: String(row.fetched_at || ''),
+      }))
+      .filter(item => item.chapter > 0 && item.text),
+    created_at: String(book.created_at || ''),
+    updated_at: String(book.updated_at || ''),
+  }
+}
+
+function summarizeSourceCache(record: SourceCacheRecord): SourceCacheSummary {
+  const chapters = [...record.chapters].sort((a, b) => a.chapter - b.chapter)
+  return {
+    cache_key: record.cache_key,
+    project_title: record.project_title,
+    source_url: record.source_url,
+    canonical_source_url: record.canonical_source_url,
+    complete: record.complete,
+    chapter_count: chapters.length,
+    first_chapter: Number(chapters[0]?.chapter || 0),
+    last_chapter: Number(chapters[chapters.length - 1]?.chapter || 0),
+    total_chars: chapters.reduce((sum, chapter) => sum + Number(chapter.length || chapter.text.length || 0), 0),
+    updated_at: record.updated_at,
+    chapters: chapters.map(chapter => ({
+      chapter: chapter.chapter,
+      title: chapter.title || `第${chapter.chapter}章`,
+      length: Number(chapter.length || chapter.text.length || 0),
+      url: chapter.url,
+    })),
+  }
+}
+
+export async function listSourceCaches(): Promise<SourceCacheSummary[]> {
+  const db = await openSourceCacheDb()
+  try {
+    const books = db.query('SELECT * FROM source_books ORDER BY updated_at DESC').all() as any[]
+    return books.map(book => summarizeSourceCache(sourceCacheRecordFromBook(db, book)))
+  } finally {
+    db.close()
+  }
+}
+
+export async function getSourceCache(cacheKey: string): Promise<SourceCacheSummary | null> {
+  const record = await readSourceCacheByKey(cacheKey)
+  return record ? summarizeSourceCache(record) : null
+}
+
+export async function getSourceCachedChapter(cacheKey: string, chapterNo: number): Promise<any | null> {
+  const record = await readSourceCacheByKey(cacheKey)
+  if (!record) return null
+  const chapter = record.chapters.find(item => item.chapter === chapterNo)
+  if (!chapter) return null
+  return {
+    cache_key: record.cache_key,
+    project_title: record.project_title,
+    source_url: record.source_url,
+    complete: record.complete,
+    chapter: chapter.chapter,
+    title: chapter.title || `第${chapter.chapter}章`,
+    text: chapter.text,
+    length: Number(chapter.length || chapter.text.length || 0),
+    url: chapter.url,
+    content_hash: chapter.content_hash,
+    fetched_at: chapter.fetched_at,
+    updated_at: record.updated_at,
+  }
+}
+
+function normalizeCachedChapter(item: any): SourceCachedChapter | null {
+  const text = String(item?.text || '').trim()
+  const chapter = Number(item?.chapter || 0)
+  if (!chapter || !text) return null
+  return {
+    chapter,
+    title: String(item?.title || `第${chapter}章`),
+    text,
+    url: String(item?.url || ''),
+    length: Number(item?.length || text.length),
+    content_hash: String(item?.content_hash || createHash('sha1').update(text).digest('hex')),
+    fetched_at: String(item?.fetched_at || nowIso()),
+  }
+}
+
+function upsertSourceCacheRecord(db: Database, record: SourceCacheRecord) {
+  const timestamp = nowIso()
+  const createdAt = record.created_at || timestamp
+  const updatedAt = record.updated_at || timestamp
+  const transaction = db.transaction(() => {
+    db.query(`
+INSERT INTO source_books (
+  cache_key, project_title, source_url, canonical_source_url, complete, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(cache_key) DO UPDATE SET
+  project_title = excluded.project_title,
+  source_url = excluded.source_url,
+  canonical_source_url = excluded.canonical_source_url,
+  complete = CASE WHEN source_books.complete = 1 OR excluded.complete = 1 THEN 1 ELSE 0 END,
+  updated_at = excluded.updated_at
+`).run(
+      record.cache_key,
+      record.project_title,
+      record.source_url,
+      record.canonical_source_url,
+      record.complete ? 1 : 0,
+      createdAt,
+      updatedAt,
+    )
+
+    const book = db.query('SELECT id, complete FROM source_books WHERE cache_key = ? LIMIT 1').get(record.cache_key) as any
+    const bookId = Number(book?.id || 0)
+    if (!bookId) return
+
+    const insertChapter = db.query(`
+INSERT INTO source_chapters (
+  book_id, chapter_no, title, url, text, length, content_hash, fetched_at, updated_at, fetch_status
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'ok')
+ON CONFLICT(book_id, chapter_no) DO UPDATE SET
+  title = excluded.title,
+  url = excluded.url,
+  text = excluded.text,
+  length = excluded.length,
+  content_hash = excluded.content_hash,
+  fetched_at = excluded.fetched_at,
+  updated_at = excluded.updated_at,
+  fetch_status = 'ok'
+`)
+
+    for (const raw of record.chapters || []) {
+      const chapter = normalizeCachedChapter(raw)
+      if (!chapter) continue
+      insertChapter.run(
+        bookId,
+        chapter.chapter,
+        chapter.title,
+        chapter.url,
+        chapter.text,
+        Number(chapter.length || chapter.text.length || 0),
+        chapter.content_hash,
+        chapter.fetched_at || updatedAt,
+        updatedAt,
+      )
+    }
+  })
+  transaction()
+}
+
+async function writeSourceCache(
+  projectTitle: string,
+  sourceUrl: string,
+  chapters: any[],
+  complete: boolean,
+): Promise<SourceCacheRecord | null> {
+  const title = String(projectTitle || '').trim()
+  if (!title) return null
+  const db = await openSourceCacheDb()
+  try {
+    const existingBook = db.query(`
+SELECT * FROM source_books
+WHERE project_title = ? AND canonical_source_url = ?
+LIMIT 1
+`).get(title, canonicalSourceUrl(sourceUrl)) as any
+    const existing = existingBook ? sourceCacheRecordFromBook(db, existingBook) : null
+    const chapterMap = new Map<number, SourceCachedChapter>()
+    for (const item of existing?.chapters || []) chapterMap.set(item.chapter, item)
+    for (const raw of chapters) {
+      const item = normalizeCachedChapter(raw)
+      if (item) chapterMap.set(item.chapter, item)
+    }
+    const timestamp = nowIso()
+    const record: SourceCacheRecord = {
+      cache_key: sourceCacheKey(title, sourceUrl),
+      project_title: title,
+      source_url: sourceUrl,
+      canonical_source_url: canonicalSourceUrl(sourceUrl),
+      complete: Boolean(complete || existing?.complete),
+      chapters: Array.from(chapterMap.values()).sort((a, b) => a.chapter - b.chapter),
+      created_at: existing?.created_at || timestamp,
+      updated_at: timestamp,
+    }
+    upsertSourceCacheRecord(db, record)
+    const saved = db.query('SELECT * FROM source_books WHERE cache_key = ? LIMIT 1').get(record.cache_key) as any
+    return saved ? sourceCacheRecordFromBook(db, saved) : record
+  } finally {
+    db.close()
+  }
+}
+
+function contiguousCachedChapters(cache: SourceCacheRecord | null, startChapter: number, maxChapters: number) {
+  if (!cache?.chapters?.length) return []
+  const byNo = new Map(cache.chapters.map(chapter => [chapter.chapter, chapter]))
+  const result: SourceCachedChapter[] = []
+  let expected = Math.max(1, Number(startChapter || 1) || 1)
+  while (byNo.has(expected) && (maxChapters <= 0 || result.length < maxChapters)) {
+    result.push(byNo.get(expected)!)
+    expected += 1
+  }
+  return result
+}
+
+function cachedChapterToFetchItem(item: SourceCachedChapter) {
+  return {
+    status: 'ok',
+    chapter: item.chapter,
+    title: item.title,
+    text: item.text,
+    length: item.length || item.text.length,
+    url: item.url,
+    cached: true,
+  }
+}
+
+function makeChapterSeenKey(item: any, fallback: number | string) {
+  return String(item?.url || item?.chapter || fallback)
+}
+
+function scheduleKnowledgeIngestJob(jobId: string) {
+  const start = () => {
+    if (ingestJobControllers.has(jobId)) {
+      setTimeout(start, 200)
+      return
+    }
+    const job = ingestJobs.get(jobId)
+    if (!job || job.status === 'completed' || job.status === 'running') return
+    void runKnowledgeIngestJob(jobId)
+  }
+  setTimeout(start, 0)
+}
 
 function normalizeKnowledgeEntry(raw: Partial<KnowledgeEntry>): KnowledgeEntry {
   const normalizeList = (value: any): string[] => {
@@ -513,9 +1033,16 @@ export async function playwrightFetchUrl(url: string): Promise<any> {
 /**
  * Fetch novel chapters serially using Playwright. Follows "next chapter" links.
  */
-export async function playwrightFetchSerial(url: string, maxChapters: number = 500, startChapter: number = 1, signal?: AbortSignal): Promise<any> {
+export async function playwrightFetchSerial(
+  url: string,
+  maxChapters: number = 500,
+  startChapter: number = 1,
+  signal?: AbortSignal,
+  concurrency: number = 1,
+): Promise<any> {
   const py = getPythonPath()
   const fullBook = Number(maxChapters || 0) <= 0
+  const fetchConcurrency = Math.max(1, Math.min(12, Number(concurrency || 1) || 1))
   try {
     const { stdout } = await execFileAsync(py, [
       PLAYWRIGHT_FETCH_PATH,
@@ -526,6 +1053,8 @@ export async function playwrightFetchSerial(url: string, maxChapters: number = 5
       String(maxChapters),
       '--start-chapter',
       String(startChapter),
+      '--concurrency',
+      String(fetchConcurrency),
     ], {
       timeout: fullBook ? 0 : 600000,
       maxBuffer: fullBook ? 300 * 1024 * 1024 : 20 * 1024 * 1024,
@@ -538,6 +1067,196 @@ export async function playwrightFetchSerial(url: string, maxChapters: number = 5
     }
     return { status: 'error', message: String(error) }
   }
+}
+
+async function fetchIngestChapters(jobId: string, job: KnowledgeIngestJob, signal: AbortSignal): Promise<any[]> {
+  const projectTitle = String(job.project_title || '').trim()
+  const cache = projectTitle ? await readSourceCache(projectTitle, job.url) : null
+  const cacheKey = projectTitle ? sourceCacheKey(projectTitle, job.url) : ''
+  const maxNeeded = job.full_book ? 0 : Math.max(1, Number(job.max_chapters || 1) || 1)
+  const cachedItems = contiguousCachedChapters(cache, job.start_chapter, maxNeeded).map(cachedChapterToFetchItem)
+  const useCacheOnly = cachedItems.length > 0 && (
+    (job.full_book && Boolean(cache?.complete)) ||
+    (!job.full_book && cachedItems.length >= maxNeeded)
+  )
+
+  if (useCacheOnly) {
+    ingestJobChapters.set(jobId, cachedItems)
+    updateIngestJob(jobId, {
+      phase: '读取正文缓存',
+      progress: job.full_book ? 15 : 30,
+      fetched_chapters: cachedItems.length,
+      current_chapter: cachedItems[cachedItems.length - 1]?.chapter || job.start_chapter,
+      current_chapter_title: String(cachedItems[cachedItems.length - 1]?.title || ''),
+      current_range: cachedItems.length
+        ? `第${cachedItems[0]?.chapter || job.start_chapter}-${cachedItems[cachedItems.length - 1]?.chapter || job.start_chapter}章`
+        : `第${job.start_chapter}章起`,
+      source_cache: {
+        status: 'hit',
+        cache_key: cacheKey,
+        cached_chapters: cachedItems.length,
+        fetched_chapters: 0,
+        complete: Boolean(cache?.complete),
+      },
+    })
+    return cachedItems
+  }
+
+  if (!job.full_book) {
+    if (projectTitle) {
+      updateIngestJob(jobId, {
+        phase: cachedItems.length ? '补抓缺失章节' : '抓取章节',
+        source_cache: {
+          status: cachedItems.length ? 'partial' : 'miss',
+          cache_key: cacheKey,
+          cached_chapters: cachedItems.length,
+          fetched_chapters: 0,
+          complete: Boolean(cache?.complete),
+        },
+      })
+    }
+
+    const fetchStartChapter = cachedItems.length
+      ? Number(cachedItems[cachedItems.length - 1]?.chapter || job.start_chapter) + 1
+      : job.start_chapter
+    const fetchMaxChapters = Math.max(0, maxNeeded - cachedItems.length)
+    const raw = await playwrightFetchSerial(job.url, fetchMaxChapters, fetchStartChapter, signal, job.fetch_concurrency || 1)
+    const fetched = Array.isArray(raw)
+      ? raw.filter((item: any) => item?.status === 'ok' && String(item?.text || '').trim())
+      : []
+    const chapters = [...cachedItems]
+    const seen = new Set(chapters.map((item, index) => makeChapterSeenKey(item, index)))
+    for (const item of fetched) {
+      const key = makeChapterSeenKey(item, chapters.length)
+      if (seen.has(key)) continue
+      seen.add(key)
+      chapters.push(item)
+      if (chapters.length >= maxNeeded) break
+    }
+    if (projectTitle && chapters.length) {
+      await writeSourceCache(projectTitle, job.url, chapters, Boolean(cache?.complete))
+    }
+    updateIngestJob(jobId, {
+      fetched_chapters: chapters.length,
+      source_cache: projectTitle
+        ? {
+            status: cachedItems.length ? 'partial' : 'miss',
+            cache_key: cacheKey,
+            cached_chapters: cachedItems.length,
+            fetched_chapters: Math.max(0, chapters.length - cachedItems.length),
+            complete: Boolean(cache?.complete),
+          }
+        : undefined,
+    })
+    return chapters
+  }
+
+  const chapters: any[] = [...cachedItems]
+  const seen = new Set<string>(chapters.map((item, index) => makeChapterSeenKey(item, index)))
+  const chunkSize = Math.max(5, Math.min(30, Number(job.batch_size || 5) * 4))
+  let nextStart = chapters.length
+    ? Number(chapters[chapters.length - 1]?.chapter || job.start_chapter) + 1
+    : Math.max(1, Number(job.start_chapter || 1) || 1)
+  let fetchedSinceCache = 0
+  let reachedEnd = false
+
+  if (projectTitle) {
+    updateIngestJob(jobId, {
+      phase: cachedItems.length ? '读取正文缓存' : '抓取章节',
+      progress: cachedItems.length ? 12 : 5,
+      fetched_chapters: chapters.length,
+      current_chapter: chapters[chapters.length - 1]?.chapter || nextStart,
+      current_chapter_title: String(chapters[chapters.length - 1]?.title || ''),
+      current_range: chapters.length
+        ? `第${chapters[0]?.chapter || job.start_chapter}-${chapters[chapters.length - 1]?.chapter || job.start_chapter}章`
+        : `第${nextStart}章起`,
+      source_cache: {
+        status: cachedItems.length ? 'partial' : 'miss',
+        cache_key: cacheKey,
+        cached_chapters: cachedItems.length,
+        fetched_chapters: 0,
+        complete: Boolean(cache?.complete),
+      },
+    })
+  }
+
+  while (true) {
+    if (signal.aborted) throw new Error('任务已中断')
+    const currentJob = ingestJobs.get(jobId)
+    if (currentJob?.status === 'paused') throw new Error('任务已暂停')
+    if (currentJob?.status === 'canceled') throw new Error('任务已取消')
+
+    updateIngestJob(jobId, {
+      phase: `抓取章节：从第 ${nextStart} 章继续`,
+      progress: Math.min(14, 5 + Math.floor(chapters.length / Math.max(chunkSize, 1))),
+      current_chapter: nextStart,
+      current_range: `第${nextStart}章起`,
+      fetched_chapters: chapters.length,
+    })
+
+    const raw = await playwrightFetchSerial(job.url, chunkSize, nextStart, signal, job.fetch_concurrency || 1)
+    if (!Array.isArray(raw)) break
+
+    const okItems = raw.filter((item: any) => item?.status === 'ok' && String(item?.text || '').trim())
+    let added = 0
+    for (const item of okItems) {
+      const key = makeChapterSeenKey(item, nextStart + added)
+      if (seen.has(key)) continue
+      seen.add(key)
+      chapters.push(item)
+      added += 1
+    }
+    fetchedSinceCache += added
+
+    if (projectTitle && added > 0) {
+      await writeSourceCache(projectTitle, job.url, chapters, false)
+    }
+
+    ingestJobChapters.set(jobId, chapters)
+    updateIngestJob(jobId, {
+      fetched_chapters: chapters.length,
+      current_chapter: chapters[chapters.length - 1]?.chapter || nextStart,
+      current_chapter_title: String(chapters[chapters.length - 1]?.title || ''),
+      current_range: chapters.length
+        ? `第${chapters[0]?.chapter || job.start_chapter}-${chapters[chapters.length - 1]?.chapter || nextStart}章`
+        : `第${nextStart}章起`,
+      source_cache: projectTitle
+        ? {
+            status: cachedItems.length ? 'partial' : 'miss',
+            cache_key: cacheKey,
+            cached_chapters: cachedItems.length,
+            fetched_chapters: fetchedSinceCache,
+            complete: false,
+          }
+        : undefined,
+    })
+
+    const hasDone = raw.some((item: any) => item?.status === 'done')
+    if (added === 0 || okItems.length < chunkSize || hasDone) {
+      reachedEnd = true
+      break
+    }
+
+    const lastChapter = Number(okItems[okItems.length - 1]?.chapter || nextStart + added - 1)
+    nextStart = Number.isFinite(lastChapter) && lastChapter >= nextStart
+      ? lastChapter + 1
+      : nextStart + added
+  }
+
+  if (projectTitle && chapters.length) {
+    const record = await writeSourceCache(projectTitle, job.url, chapters, reachedEnd)
+    updateIngestJob(jobId, {
+      source_cache: {
+        status: cachedItems.length ? 'partial' : 'miss',
+        cache_key: cacheKey,
+        cached_chapters: cachedItems.length,
+        fetched_chapters: fetchedSinceCache,
+        complete: Boolean(record?.complete),
+      },
+    })
+  }
+
+  return chapters
 }
 
 /**
@@ -553,56 +1272,71 @@ export async function analyzeKnowledge(text: string, source: string, modelId?: n
   const { loadActiveWorkspace } = await import('./workspace')
 
   const workspace = await loadActiveWorkspace()
-  const prompt = buildNovelAnalysisPrompt(source, text.slice(0, 12000))
   const preferredModelId = Number(modelId || 0) || undefined
+  const limits = [12000, 8000, 5000, 3000]
+  let lastError: unknown = null
 
-  const result = await executeWithRuntimeModel<any[]>(
-    workspace,
-    {
-      model: 'balanced',
-      messages: [
-        { role: 'system', content: '你是一位资深的文学评论家和写作导师。' },
-        { role: 'user', content: prompt },
-      ],
-      temperature: 0.3,
-      max_tokens: 4096,
-      response_format: 'json',
-    },
-    preferredModelId,
-    {
-      signal: options?.signal,
-      timeoutMs: options?.timeoutMs,
-      maxRetries: options?.maxRetries,
-    },
-  )
+  for (const limit of limits) {
+    if (options?.signal?.aborted) throw new Error('Request canceled')
+    const prompt = buildNovelAnalysisPrompt(source, text.slice(0, limit))
+    try {
+      const result = await executeWithRuntimeModel<any[]>(
+        workspace,
+        {
+          model: 'balanced',
+          messages: [
+            { role: 'system', content: '你是一位资深的文学评论家和写作导师。你只输出合法 JSON 数组。' },
+            { role: 'user', content: prompt },
+          ],
+          temperature: 0.3,
+          max_tokens: limit <= 5000 ? 3072 : 4096,
+          response_format: 'json',
+        },
+        preferredModelId,
+        {
+          signal: options?.signal,
+          timeoutMs: options?.timeoutMs,
+          maxRetries: options?.maxRetries ?? 2,
+        },
+      )
 
-  if (result.error) {
-    throw new Error(result.error)
+      if (result.error) {
+        throw new Error(result.error)
+      }
+
+      const parsed = extractKnowledgeRows(result)
+      return parsed
+        .filter(Boolean)
+        .map((row: any) => normalizeKnowledgeEntry({
+          category: row?.category,
+          title: row?.title,
+          content: row?.content,
+          tags: row?.tags,
+          genre_tags: row?.genre_tags,
+          trope_tags: row?.trope_tags,
+          use_case: row?.use_case,
+          evidence: row?.evidence,
+          chapter_range: row?.chapter_range,
+          entities: row?.entities,
+          confidence: row?.confidence,
+          weight: row?.weight,
+          source,
+          source_title: source,
+        }))
+        .filter(entry => Boolean(entry.content))
+    } catch (error) {
+      lastError = error
+      if (isProviderUploadFailure(error)) {
+        throw new Error(`Provider upload failed：模型服务上传输入失败，请切换模型或检查当前模型代理。${String(error).slice(0, 300)}`)
+      }
+      if (limit === limits[limits.length - 1]) {
+        throw error
+      }
+      console.warn(`[knowledge-ingest] Analyze failed for ${source}; retrying with smaller prompt (${limit} -> next): ${String(error).slice(0, 160)}`)
+    }
   }
 
-  const parsed = Array.isArray(result.parsed)
-    ? result.parsed
-    : tryParseJson<any[]>(result.content, [])
-
-  return parsed
-    .filter(Boolean)
-    .map((row: any) => normalizeKnowledgeEntry({
-      category: row?.category,
-      title: row?.title,
-      content: row?.content,
-      tags: row?.tags,
-      genre_tags: row?.genre_tags,
-      trope_tags: row?.trope_tags,
-      use_case: row?.use_case,
-      evidence: row?.evidence,
-      chapter_range: row?.chapter_range,
-      entities: row?.entities,
-      confidence: row?.confidence,
-      weight: row?.weight,
-      source,
-      source_title: source,
-    }))
-    .filter(entry => Boolean(entry.content))
+  throw new Error(String(lastError || 'AI 未提炼出可入库知识'))
 }
 
 function compactEntryForSynthesis(entry: KnowledgeEntry, index: number) {
@@ -696,9 +1430,7 @@ profile 类条目必须写成“可迁移蓝图”，明确说明可借鉴结构
   )
 
   if (result.error) throw new Error(result.error)
-  const parsed = Array.isArray(result.parsed)
-    ? result.parsed
-    : tryParseJson<any[]>(result.content, [])
+  const parsed = extractKnowledgeRows(result)
 
   const synthesized = parsed
     .filter(Boolean)
@@ -795,9 +1527,7 @@ ${JSON.stringify(compactEntries, null, 2).slice(0, 52000)}
   )
 
   if (result.error) throw new Error(result.error)
-  const parsed = Array.isArray(result.parsed)
-    ? result.parsed
-    : tryParseJson<any[]>(result.content, [])
+  const parsed = extractKnowledgeRows(result)
   const entries = dedupeKnowledgeEntries(parsed
     .filter(Boolean)
     .map((row: any) => normalizeKnowledgeEntry({
@@ -826,39 +1556,73 @@ ${JSON.stringify(compactEntries, null, 2).slice(0, 52000)}
 }
 
 async function runKnowledgeIngestJob(jobId: string) {
-  const job = ingestJobs.get(jobId)
+  let job = ingestJobs.get(jobId)
   if (!job) return
   const controller = new AbortController()
   ingestJobControllers.set(jobId, controller)
-  const ensureNotCanceled = () => {
-    if (controller.signal.aborted || ingestJobs.get(jobId)?.status === 'canceled') {
+  const ensureActive = () => {
+    const status = ingestJobs.get(jobId)?.status
+    if (status === 'canceled') {
       throw new Error('任务已取消')
+    }
+    if (status === 'paused') {
+      throw new Error('任务已暂停')
+    }
+    if (controller.signal.aborted) {
+      throw new Error('任务已中断')
     }
   }
 
   try {
-    ensureNotCanceled()
+    ensureActive()
     updateIngestJob(jobId, {
       status: 'running',
       phase: '抓取章节',
       progress: 5,
     })
 
-    const raw = await playwrightFetchSerial(job.url, job.max_chapters, job.start_chapter, controller.signal)
-    ensureNotCanceled()
-    const chapters = Array.isArray(raw)
-      ? raw.filter((item: any) => item?.status === 'ok' && String(item?.text || '').trim())
-      : []
+    job = ingestJobs.get(jobId)
+    if (!job) return
+    let chapters = ingestJobChapters.get(jobId) || []
+    if (!chapters.length) {
+      chapters = await fetchIngestChapters(jobId, job, controller.signal)
+      ensureActive()
+      if (chapters.length) ingestJobChapters.set(jobId, chapters)
+    }
 
     if (!chapters.length) {
       throw new Error('未抓取到可分析章节')
     }
 
+    if (job.fetch_only) {
+      updateIngestJob(jobId, {
+        status: 'completed',
+        phase: '正文缓存已完成',
+        progress: 100,
+        fetched_chapters: chapters.length,
+        total_batches: 0,
+        analyzed_batches: 0,
+        current_chapter: chapters[chapters.length - 1]?.chapter || chapters.length,
+        current_chapter_title: String(chapters[chapters.length - 1]?.title || ''),
+        current_range: `第${chapters[0]?.chapter || 1}-${chapters[chapters.length - 1]?.chapter || chapters.length}章`,
+        entries: [],
+        errors: [],
+      })
+      return
+    }
+
     const totalBatches = Math.ceil(chapters.length / job.batch_size)
-    ingestJobChapters.set(jobId, chapters)
-    const batches = Array.from({ length: totalBatches }, (_, index) => {
+    const freshBatches = Array.from({ length: totalBatches }, (_, index) => {
       const start = index * job.batch_size
       return buildIngestBatch(job, index, chapters.slice(start, start + job.batch_size))
+    })
+    const existingBatches = ingestJobs.get(jobId)?.batches || []
+    const batches = freshBatches.map(batch => {
+      const existing = existingBatches.find(item => item.index === batch.index)
+      if (!existing) return batch
+      return existing.status === 'analyzing'
+        ? { ...existing, status: 'pending' as KnowledgeIngestBatchStatus, error: existing.error || '上次处理中断，可继续' }
+        : existing
     })
     updateIngestJob(jobId, {
       fetched_chapters: chapters.length,
@@ -866,17 +1630,21 @@ async function runKnowledgeIngestJob(jobId: string) {
       batches,
       phase: '分批提炼',
       progress: 15,
+      entries: dedupeKnowledgeEntries(batches.flatMap(item => item.entries || [])),
     })
 
-    const errors: string[] = []
+    const errors: string[] = [...(ingestJobs.get(jobId)?.errors || [])].filter(error => !String(error).includes('任务已暂停'))
 
     for (let index = 0; index < totalBatches; index += 1) {
-      ensureNotCanceled()
+      ensureActive()
+      const currentBeforeBatch = ingestJobs.get(jobId)
+      const batchState = currentBeforeBatch?.batches?.find(item => item.index === index)
+      if (batchState?.status === 'completed') continue
       const start = index * job.batch_size
       const batch = chapters.slice(start, start + job.batch_size)
       const firstChapter = batch[0]?.chapter || start + 1
       const lastChapter = batch[batch.length - 1]?.chapter || start + batch.length
-      const source = batches[index]?.source || `${job.url}（第${firstChapter}-${lastChapter}章）`
+      const source = batchState?.source || batches[index]?.source || `${job.url}（第${firstChapter}-${lastChapter}章）`
       const nextBatches = (ingestJobs.get(jobId)?.batches || batches).map(item => (
         item.index === index
           ? { ...item, status: 'analyzing' as KnowledgeIngestBatchStatus, error: '', updated_at: nowIso() }
@@ -897,7 +1665,7 @@ async function runKnowledgeIngestJob(jobId: string) {
         const entries = await analyzeKnowledge(buildChapterBatchText(batch), source, job.model_id, {
           signal: controller.signal,
         })
-        ensureNotCanceled()
+        ensureActive()
         const currentJob = ingestJobs.get(jobId)
         const updatedBatches = (currentJob?.batches || nextBatches).map(item => (
           item.index === index
@@ -905,21 +1673,51 @@ async function runKnowledgeIngestJob(jobId: string) {
             : item
         ))
         const entriesNow = dedupeKnowledgeEntries(updatedBatches.flatMap(item => item.entries || []))
+        const settledBatches = updatedBatches.filter(item => item.status === 'completed' || item.status === 'failed').length
         updateIngestJob(jobId, {
           batches: updatedBatches,
           entries: entriesNow,
+          analyzed_batches: settledBatches,
         })
       } catch (error) {
+        const status = ingestJobs.get(jobId)?.status
+        if (status === 'paused' || status === 'canceled' || String(error).includes('任务已暂停') || String(error).includes('任务已取消')) {
+          const interruptedBatches = (ingestJobs.get(jobId)?.batches || nextBatches).map(item => (
+            item.index === index && item.status === 'analyzing'
+              ? { ...item, status: 'pending' as KnowledgeIngestBatchStatus, error: status === 'paused' ? '已暂停，可继续' : item.error, updated_at: nowIso() }
+              : item
+          ))
+          updateIngestJob(jobId, {
+            status: status === 'canceled' ? 'canceled' : 'paused',
+            phase: status === 'canceled' ? '已取消' : '已暂停',
+            batches: interruptedBatches,
+            entries: dedupeKnowledgeEntries(interruptedBatches.flatMap(item => item.entries || [])),
+          })
+          return
+        }
         const errorText = `第${firstChapter}-${lastChapter}章分析失败：${String(error).slice(0, 200)}`
         errors.push(errorText)
         const currentJob = ingestJobs.get(jobId)
+        const failedBatches = (currentJob?.batches || nextBatches).map(item => (
+          item.index === index
+            ? { ...item, status: 'failed' as KnowledgeIngestBatchStatus, error: errorText, updated_at: nowIso() }
+            : item
+        ))
+        const settledBatches = failedBatches.filter(item => item.status === 'completed' || item.status === 'failed').length
         updateIngestJob(jobId, {
-          batches: (currentJob?.batches || nextBatches).map(item => (
-            item.index === index
-              ? { ...item, status: 'failed' as KnowledgeIngestBatchStatus, error: errorText, updated_at: nowIso() }
-              : item
-          )),
+          batches: failedBatches,
+          analyzed_batches: settledBatches,
         })
+        if (isProviderUploadFailure(error)) {
+          updateIngestJob(jobId, {
+            status: 'failed',
+            phase: '模型服务上传失败',
+            errors,
+            batches: failedBatches,
+            entries: dedupeKnowledgeEntries(failedBatches.flatMap(item => item.entries || [])),
+          })
+          return
+        }
       }
     }
 
@@ -936,8 +1734,9 @@ async function runKnowledgeIngestJob(jobId: string) {
       })
       try {
         mergedEntries = await synthesizeFullBookKnowledge(job, mergedEntries, chapters, controller.signal)
-        ensureNotCanceled()
+        ensureActive()
       } catch (error) {
+        if (ingestJobs.get(jobId)?.status === 'paused' || String(error).includes('任务已暂停')) throw error
         errors.push(`全书画像合并失败，已保留分批提炼结果：${String(error).slice(0, 200)}`)
       }
     }
@@ -973,6 +1772,15 @@ async function runKnowledgeIngestJob(jobId: string) {
       errors,
     })
   } catch (error) {
+    if (String(error).includes('任务已暂停') || ingestJobs.get(jobId)?.status === 'paused') {
+      updateIngestJob(jobId, {
+        status: 'paused',
+        phase: '已暂停',
+        progress: Math.min(100, Math.max(0, ingestJobs.get(jobId)?.progress || 0)),
+        entries: rebuildIngestJobEntries(ingestJobs.get(jobId)!),
+      })
+      return
+    }
     if (controller.signal.aborted || String(error).includes('任务已取消') || ingestJobs.get(jobId)?.status === 'canceled') {
       updateIngestJob(jobId, {
         status: 'canceled',
@@ -997,12 +1805,14 @@ export function startKnowledgeIngestJob(input: {
   url: string
   model_id?: number
   full_book?: boolean
+  fetch_only?: boolean
   auto_store?: boolean
   project_id?: number
   project_title?: string
   start_chapter?: number
   max_chapters?: number
   batch_size?: number
+  fetch_concurrency?: number
 }): KnowledgeIngestJob {
   const url = String(input.url || '').trim()
   if (!url) throw new Error('url 不能为空')
@@ -1014,6 +1824,7 @@ export function startKnowledgeIngestJob(input: {
     ? 0
     : Math.max(1, Math.min(5000, requestedMaxChapters || 50))
   const batchSize = Math.max(1, Math.min(50, Number(input.batch_size || 10) || 10))
+  const fetchConcurrency = Math.max(1, Math.min(12, Number(input.fetch_concurrency || 1) || 1))
   const projectId = Number(input.project_id || 0) || undefined
   const projectTitle = String(input.project_title || '').trim()
   const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
@@ -1026,12 +1837,14 @@ export function startKnowledgeIngestJob(input: {
     url,
     model_id: modelId,
     full_book: fullBook,
+    fetch_only: Boolean(input.fetch_only),
     auto_store: Boolean(input.auto_store),
     project_id: projectId,
     project_title: projectTitle,
     start_chapter: startChapter,
     max_chapters: maxChapters,
     batch_size: batchSize,
+    fetch_concurrency: fetchConcurrency,
     fetched_chapters: 0,
     analyzed_batches: 0,
     total_batches: 0,
@@ -1042,7 +1855,7 @@ export function startKnowledgeIngestJob(input: {
     updated_at: timestamp,
   }
   ingestJobs.set(id, job)
-  void runKnowledgeIngestJob(id)
+  scheduleKnowledgeIngestJob(id)
   return job
 }
 
@@ -1063,6 +1876,46 @@ export function cancelKnowledgeIngestJob(id: string): KnowledgeIngestJob | null 
     phase: '已取消',
     errors: [...(job.errors || []), '任务已取消'],
   })
+  return ingestJobs.get(id) || null
+}
+
+export function pauseKnowledgeIngestJob(id: string): KnowledgeIngestJob | null {
+  const job = ingestJobs.get(id)
+  if (!job) return null
+  if (job.status === 'completed' || job.status === 'failed' || job.status === 'canceled' || job.status === 'paused') {
+    return job
+  }
+  updateIngestJob(id, {
+    status: 'paused',
+    phase: '已暂停',
+    batches: (job.batches || []).map(item => (
+      item.status === 'analyzing'
+        ? { ...item, status: 'pending' as KnowledgeIngestBatchStatus, error: '已暂停，可继续', updated_at: nowIso() }
+        : item
+    )),
+    entries: rebuildIngestJobEntries(job),
+  })
+  const controller = ingestJobControllers.get(id)
+  if (controller && !controller.signal.aborted) controller.abort()
+  return ingestJobs.get(id) || null
+}
+
+export function resumeKnowledgeIngestJob(id: string, modelId?: number): KnowledgeIngestJob | null {
+  const job = ingestJobs.get(id)
+  if (!job) return null
+  if (job.status === 'completed') return job
+  if (job.status === 'running' || job.status === 'queued') return job
+  updateIngestJob(id, {
+    status: 'queued',
+    phase: '继续任务',
+    model_id: Number(modelId || job.model_id || 0) || job.model_id,
+    batches: (job.batches || []).map(item => (
+      item.status === 'analyzing'
+        ? { ...item, status: 'pending' as KnowledgeIngestBatchStatus, error: '上次处理中断，可继续', updated_at: nowIso() }
+      : item
+    )),
+  })
+  scheduleKnowledgeIngestJob(id)
   return ingestJobs.get(id) || null
 }
 

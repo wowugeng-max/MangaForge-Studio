@@ -11,12 +11,15 @@ Usage:
 """
 
 import argparse
+import html
 import json
 import os
 import re
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urljoin
+from urllib.request import Request, urlopen
 
 
 def _launch_browser():
@@ -243,6 +246,175 @@ def _find_first_chapter(page) -> str:
     return candidates[0][1]
 
 
+def _derive_numbered_chapter_url(chapter_url: str, target_chapter: int) -> str:
+    """Derive chapter URL by replacing a trailing numeric chapter filename."""
+    if target_chapter <= 1:
+        return chapter_url
+    match = re.search(r'(.*/)(\d+)(\.html(?:[?#].*)?)$', chapter_url)
+    if not match:
+        return ""
+    return f"{match.group(1)}{target_chapter}{match.group(3)}"
+
+
+def _find_chapter_by_number(page, target_chapter: int) -> str:
+    """Find an exact chapter URL from a catalog page by chapter number."""
+    if target_chapter <= 1:
+        return _find_first_chapter(page)
+
+    selectors = [
+        'div.listmain dd a',
+        'dd a[href*=".html"]',
+        'a[href*=".html"]',
+        'a[href*="#/book/"]',
+        'a',
+    ]
+    exact_title_re = re.compile(rf'第\s*{target_chapter}\s*[章回节]')
+    href_re = re.compile(rf'(^|/){target_chapter}\.html(?:$|[?#])')
+    candidates = []
+
+    for selector in selectors:
+        try:
+            links = page.query_selector_all(selector)
+            for link in links:
+                href = link.get_attribute("href") or ""
+                text = (link.inner_text() or "").strip()
+                if not href:
+                    continue
+                score = 0
+                if exact_title_re.search(text):
+                    score += 100
+                if href_re.search(href):
+                    score += 80
+                if score > 0:
+                    candidates.append((score, urljoin(page.url, href), text))
+        except Exception:
+            continue
+
+    if not candidates:
+        first_url = _find_first_chapter(page)
+        return _derive_numbered_chapter_url(first_url, target_chapter) if first_url else ""
+
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    return candidates[0][1]
+
+
+def _extract_catalog_chapters(page) -> list:
+    """Extract numbered chapter links from a catalog/list page."""
+    selectors = [
+        'div.listmain dd a',
+        'dd a[href*=".html"]',
+        'a[href*=".html"]',
+        'a[href*="#/book/"]',
+        'a',
+    ]
+    title_re = re.compile(r'第\s*(\d+)\s*[章回节]')
+    href_re = re.compile(r'(^|/)(\d+)\.html(?:$|[?#])')
+    chapters = {}
+
+    for selector in selectors:
+        try:
+            links = page.query_selector_all(selector)
+            for link in links:
+                href = link.get_attribute("href") or ""
+                text = (link.inner_text() or "").strip()
+                if not href:
+                    continue
+                title_match = title_re.search(text)
+                href_match = href_re.search(href)
+                chapter_no = int(title_match.group(1)) if title_match else int(href_match.group(2)) if href_match else 0
+                if chapter_no <= 0:
+                    continue
+                full_url = urljoin(page.url, href)
+                previous = chapters.get(chapter_no)
+                if not previous or len(text) > len(previous["title"]):
+                    chapters[chapter_no] = {
+                        "chapter": chapter_no,
+                        "title": text or f"第{chapter_no}章",
+                        "url": full_url,
+                    }
+        except Exception:
+            continue
+
+    return [chapters[key] for key in sorted(chapters)]
+
+
+def _html_to_text(raw_html: str) -> str:
+    text = re.sub(r'(?is)<script[^>]*>.*?</script>', '\n', raw_html)
+    text = re.sub(r'(?is)<style[^>]*>.*?</style>', '\n', text)
+    text = re.sub(r'(?i)<br\s*/?>', '\n', text)
+    text = re.sub(r'(?i)</p\s*>', '\n', text)
+    text = re.sub(r'(?i)</div\s*>', '\n', text)
+    text = re.sub(r'<[^>]+>', '', text)
+    text = html.unescape(text)
+    text = re.sub(r'\r', '', text)
+    text = re.sub(r'[ \t\xa0]+', ' ', text)
+    text = re.sub(r'\n[ \t]+', '\n', text)
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
+
+
+def _extract_static_content(raw_html: str) -> str:
+    selectors = [
+        r'<div[^>]+id=["\']content["\'][^>]*>(.*?)</div>',
+        r'<div[^>]+class=["\'][^"\']*(?:readcontent|chapter-content|booktext|content)[^"\']*["\'][^>]*>(.*?)</div>',
+        r'<article[^>]*>(.*?)</article>',
+        r'<main[^>]*>(.*?)</main>',
+        r'<body[^>]*>(.*?)</body>',
+    ]
+    for pattern in selectors:
+        match = re.search(pattern, raw_html, re.I | re.S)
+        if not match:
+            continue
+        text = _html_to_text(match.group(1))
+        if len(text) > 50:
+            return text
+    return _html_to_text(raw_html)
+
+
+def _fetch_static_chapter(chapter: dict, timeout: int = 30) -> dict:
+    """Fetch one static chapter URL without a browser. Used by parallel catalog mode."""
+    url = chapter["url"]
+    try:
+        req = Request(
+            url,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            },
+        )
+        with urlopen(req, timeout=timeout) as resp:
+            raw = resp.read()
+            content_type = resp.headers.get("content-type", "")
+            charset_match = re.search(r'charset=([\w-]+)', content_type, re.I)
+            charset = charset_match.group(1) if charset_match else "utf-8"
+            try:
+                raw_html = raw.decode(charset, errors="ignore")
+            except Exception:
+                raw_html = raw.decode("utf-8", errors="ignore")
+
+        title_match = re.search(r'<title[^>]*>(.*?)</title>', raw_html, re.I | re.S)
+        title = _html_to_text(title_match.group(1)) if title_match else chapter.get("title") or f"第{chapter['chapter']}章"
+        text = _extract_static_content(raw_html)
+        clean_text = _clean_novel_text(text, title)
+        return {
+            "status": "ok" if len(clean_text) >= 20 else "empty",
+            "chapter": chapter["chapter"],
+            "title": title,
+            "text": clean_text,
+            "length": len(clean_text),
+            "url": url,
+            **({} if len(clean_text) >= 20 else {"message": "Chapter content too short"}),
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "chapter": chapter.get("chapter"),
+            "title": chapter.get("title") or "",
+            "message": str(e),
+            "url": url,
+        }
+
+
 def _looks_like_catalog(page) -> bool:
     """Detect common novel catalog/list pages."""
     try:
@@ -288,8 +460,66 @@ def fetch_single_url(url: str) -> dict:
             pw.stop()
 
 
-def fetch_serial(url: str, max_chapters: int = 500, start_chapter: int = 1) -> list:
+def fetch_parallel_from_catalog(url: str, max_chapters: int = 500, start_chapter: int = 1, concurrency: int = 4) -> list:
+    """Fetch catalog chapter URLs in parallel. Returns [] when no usable catalog is found."""
+    start_chapter = max(1, int(start_chapter or 1))
+    max_chapters = int(max_chapters or 0)
+    unlimited = max_chapters <= 0
+    concurrency = max(1, min(12, int(concurrency or 4)))
+    pw = None
+    browser = None
+
+    try:
+        page, browser, pw = _launch_browser()
+        _navigate(page, url)
+        if not _looks_like_catalog(page):
+            return []
+        chapters = [item for item in _extract_catalog_chapters(page) if item["chapter"] >= start_chapter]
+        if not unlimited:
+            chapters = chapters[:max_chapters]
+        if not chapters:
+            return []
+    except Exception:
+        return []
+    finally:
+        if browser:
+            browser.close()
+        if pw:
+            pw.stop()
+
+    results_by_chapter = {}
+    with ThreadPoolExecutor(max_workers=concurrency) as executor:
+        futures = {executor.submit(_fetch_static_chapter, chapter): chapter for chapter in chapters}
+        for future in as_completed(futures):
+            fallback = futures[future]
+            try:
+                result = future.result()
+            except Exception as e:
+                result = {
+                    "status": "error",
+                    "chapter": fallback["chapter"],
+                    "title": fallback.get("title") or "",
+                    "message": str(e),
+                    "url": fallback["url"],
+                }
+            results_by_chapter[int(result.get("chapter") or fallback["chapter"])] = result
+
+    results = [results_by_chapter[item["chapter"]] for item in chapters if item["chapter"] in results_by_chapter]
+    ok_count = sum(1 for item in results if item.get("status") == "ok")
+    if ok_count == 0:
+        return []
+    if unlimited or len(results) < max_chapters:
+        results.append({"status": "done", "message": "Catalog chapter list exhausted"})
+    return results
+
+
+def fetch_serial(url: str, max_chapters: int = 500, start_chapter: int = 1, concurrency: int = 1) -> list:
     """Fetch chapters serially by following 'next chapter' links."""
+    if int(concurrency or 1) > 1:
+        parallel_results = fetch_parallel_from_catalog(url, max_chapters, start_chapter, concurrency)
+        if parallel_results:
+            return parallel_results
+
     results = []
     visited = set()
     pw = None
@@ -303,15 +533,17 @@ def fetch_serial(url: str, max_chapters: int = 500, start_chapter: int = 1) -> l
     try:
         page, browser, pw = _launch_browser()
         _navigate(page, url)
+        jumped_to_start = False
         if _looks_like_catalog(page):
-            start_url = _find_first_chapter(page)
+            start_url = _find_chapter_by_number(page, start_chapter) if start_chapter > 1 else _find_first_chapter(page)
             if start_url:
                 _navigate(page, start_url)
+                jumped_to_start = start_chapter > 1
     except Exception as e:
         return [{"status": "error", "message": f"Failed to open initial URL: {e}", "url": url}]
 
     try:
-        chapter_num = 1
+        chapter_num = start_chapter if jumped_to_start else 1
         collected = 0
         while unlimited or collected < max_chapters:
             # Deduplicate — for SPA sites, the base URL stays same, check hash too
@@ -392,6 +624,7 @@ def main():
     p.add_argument("--url", required=True)
     p.add_argument("--max-chapters", type=int, default=500)
     p.add_argument("--start-chapter", type=int, default=1)
+    p.add_argument("--concurrency", type=int, default=1)
 
     args = parser.parse_args()
 
@@ -400,7 +633,7 @@ def main():
         print(json.dumps(result, ensure_ascii=False))
 
     elif args.command == "fetch-serial":
-        results = fetch_serial(args.url, args.max_chapters, args.start_chapter)
+        results = fetch_serial(args.url, args.max_chapters, args.start_chapter, args.concurrency)
         print(json.dumps(results, ensure_ascii=False))
 
     else:
