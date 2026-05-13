@@ -5,6 +5,7 @@ import {
 import {
   ArrowLeftOutlined, BookOutlined, ReloadOutlined,
 } from '@ant-design/icons'
+import type { EditorView } from '@codemirror/view'
 import { useNavigate, useParams } from 'react-router-dom'
 import apiClient from '../api/client'
 import { createSSEClient, generateClientId, type SSEMessage } from '../utils/sse'
@@ -119,7 +120,7 @@ export default function NovelProjectWorkspace() {
   // ── auto-save state ──
   const [saveStatus, setSaveStatus] = useState<'idle' | 'unsaved' | 'saving' | 'saved' | 'error'>('idle')
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const proseEditorRef = useRef<HTMLTextAreaElement | null>(null)
+  const proseEditorRef = useRef<EditorView | null>(null)
 
   // ── diff toggle ──
   const [showOnlyDiff, setShowOnlyDiff] = useState(true)

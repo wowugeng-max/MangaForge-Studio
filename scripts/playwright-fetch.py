@@ -11,6 +11,7 @@ Usage:
 """
 
 import argparse
+import asyncio
 import html
 import json
 import os
@@ -82,19 +83,36 @@ def _launch_browser():
 def _navigate(page, url: str):
     """Navigate to URL with fallback strategies."""
     try:
-        page.goto(url, wait_until="networkidle", timeout=30000)
-        page.wait_for_timeout(2000)
+        page.goto(url, wait_until="domcontentloaded", timeout=20000)
+        _wait_for_readable_page(page)
         return
     except Exception:
         pass
     try:
-        page.goto(url, wait_until="domcontentloaded", timeout=30000)
-        page.wait_for_timeout(3000)
+        page.goto(url, wait_until="networkidle", timeout=20000)
+        _wait_for_readable_page(page, timeout=5000)
         return
     except Exception:
         pass
-    page.goto(url, timeout=60000)
-    page.wait_for_timeout(5000)
+    page.goto(url, timeout=30000)
+    _wait_for_readable_page(page, timeout=3000)
+
+
+def _wait_for_readable_page(page, timeout: int = 8000):
+    """Wait just long enough for dynamic novel pages to replace loading text."""
+    page.wait_for_timeout(200)
+    try:
+        page.wait_for_function(
+            """() => {
+                const text = document.body?.innerText || '';
+                if (text.length < 200) return false;
+                if (/加载中|Loading/i.test(text) && text.length < 1000) return false;
+                return true;
+            }""",
+            timeout=timeout,
+        )
+    except Exception:
+        pass
 
 
 def _extract_content_text(page) -> str:
@@ -282,9 +300,9 @@ def _find_chapter_by_number(page, target_chapter: int) -> str:
                     continue
                 score = 0
                 if exact_title_re.search(text):
-                    score += 100
-                if href_re.search(href):
                     score += 80
+                if href_re.search(href):
+                    score += 120
                 if score > 0:
                     candidates.append((score, urljoin(page.url, href), text))
         except Exception:
@@ -321,7 +339,7 @@ def _extract_catalog_chapters(page) -> list:
                     continue
                 title_match = title_re.search(text)
                 href_match = href_re.search(href)
-                chapter_no = int(title_match.group(1)) if title_match else int(href_match.group(2)) if href_match else 0
+                chapter_no = int(href_match.group(2)) if href_match else int(title_match.group(1)) if title_match else 0
                 if chapter_no <= 0:
                     continue
                 full_url = urljoin(page.url, href)
@@ -334,6 +352,57 @@ def _extract_catalog_chapters(page) -> list:
                     }
         except Exception:
             continue
+
+    return [chapters[key] for key in sorted(chapters)]
+
+
+def _fetch_static_html(url: str, timeout: int = 30) -> str:
+    req = Request(
+        url,
+        headers={
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        },
+    )
+    with urlopen(req, timeout=timeout) as resp:
+        raw = resp.read()
+        content_type = resp.headers.get("content-type", "")
+        charset_match = re.search(r'charset=([\w-]+)', content_type, re.I)
+        charset = charset_match.group(1) if charset_match else "utf-8"
+        try:
+            return raw.decode(charset, errors="ignore")
+        except Exception:
+            return raw.decode("utf-8", errors="ignore")
+
+
+def _extract_catalog_chapters_from_html(raw_html: str, base_url: str) -> list:
+    """Extract numbered chapter links from static HTML without launching a browser."""
+    title_re = re.compile(r'第\s*(\d+)\s*[章回节]')
+    href_re = re.compile(r'(^|/)(\d+)\.html(?:$|[?#])')
+    link_re = re.compile(
+        r'<a\b[^>]*href=["\']([^"\']+)["\'][^>]*>(.*?)</a>',
+        re.I | re.S,
+    )
+    chapters = {}
+
+    for href, label_html in link_re.findall(raw_html):
+        href = html.unescape(href or "").strip()
+        if not href or href.lower().startswith(("javascript:", "#")):
+            continue
+        text = _html_to_text(label_html)
+        title_match = title_re.search(text)
+        href_match = href_re.search(href)
+        chapter_no = int(href_match.group(2)) if href_match else int(title_match.group(1)) if title_match else 0
+        if chapter_no <= 0:
+            continue
+        full_url = urljoin(base_url, href)
+        previous = chapters.get(chapter_no)
+        if not previous or len(text) > len(previous["title"]):
+            chapters[chapter_no] = {
+                "chapter": chapter_no,
+                "title": text or f"第{chapter_no}章",
+                "url": full_url,
+            }
 
     return [chapters[key] for key in sorted(chapters)]
 
@@ -375,35 +444,26 @@ def _fetch_static_chapter(chapter: dict, timeout: int = 30) -> dict:
     """Fetch one static chapter URL without a browser. Used by parallel catalog mode."""
     url = chapter["url"]
     try:
-        req = Request(
-            url,
-            headers={
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            },
-        )
-        with urlopen(req, timeout=timeout) as resp:
-            raw = resp.read()
-            content_type = resp.headers.get("content-type", "")
-            charset_match = re.search(r'charset=([\w-]+)', content_type, re.I)
-            charset = charset_match.group(1) if charset_match else "utf-8"
-            try:
-                raw_html = raw.decode(charset, errors="ignore")
-            except Exception:
-                raw_html = raw.decode("utf-8", errors="ignore")
-
+        raw_html = _fetch_static_html(url, timeout)
+        fallback_title = chapter.get("title") or f"第{chapter['chapter']}章"
+        h1_match = re.search(r'<h1[^>]*>(.*?)</h1>', raw_html, re.I | re.S)
         title_match = re.search(r'<title[^>]*>(.*?)</title>', raw_html, re.I | re.S)
-        title = _html_to_text(title_match.group(1)) if title_match else chapter.get("title") or f"第{chapter['chapter']}章"
+        title = _html_to_text(h1_match.group(1)) if h1_match else _html_to_text(title_match.group(1)) if title_match else fallback_title
+        if fallback_title and (not re.search(r'第\s*\d+\s*[章回节]', title) or len(title) > 80):
+            title = fallback_title
         text = _extract_static_content(raw_html)
         clean_text = _clean_novel_text(text, title)
+        body_text = clean_text.replace(title, "", 1).strip()
+        is_loading_placeholder = bool(re.fullmatch(r'(?:加载中|Loading|请稍候|正在加载)[…。！!\s]*', body_text, re.I))
+        is_ok = len(clean_text) >= 200 and not is_loading_placeholder
         return {
-            "status": "ok" if len(clean_text) >= 20 else "empty",
+            "status": "ok" if is_ok else "empty",
             "chapter": chapter["chapter"],
             "title": title,
             "text": clean_text,
             "length": len(clean_text),
             "url": url,
-            **({} if len(clean_text) >= 20 else {"message": "Chapter content too short"}),
+            **({} if is_ok else {"message": "Chapter content too short or still loading"}),
         }
     except Exception as e:
         return {
@@ -465,16 +525,52 @@ def fetch_parallel_from_catalog(url: str, max_chapters: int = 500, start_chapter
     start_chapter = max(1, int(start_chapter or 1))
     max_chapters = int(max_chapters or 0)
     unlimited = max_chapters <= 0
-    concurrency = max(1, min(12, int(concurrency or 4)))
+    concurrency = max(1, min(24, int(concurrency or 4)))
     pw = None
     browser = None
+
+    try:
+        raw_html = _fetch_static_html(url)
+        catalog_chapters = _extract_catalog_chapters_from_html(raw_html, url)
+        if not any(item["chapter"] == start_chapter for item in catalog_chapters):
+            catalog_chapters = []
+        chapters = [item for item in catalog_chapters if item["chapter"] >= start_chapter]
+        if not unlimited:
+            chapters = chapters[:max_chapters]
+        if chapters:
+            static_results = _fetch_parallel_chapters(chapters, max_chapters, unlimited, concurrency)
+            if static_results:
+                return static_results
+            browser_results = _fetch_browser_parallel_chapters(chapters, max_chapters, unlimited, concurrency)
+            if browser_results:
+                return browser_results
+    except Exception:
+        pass
 
     try:
         page, browser, pw = _launch_browser()
         _navigate(page, url)
         if not _looks_like_catalog(page):
             return []
-        chapters = [item for item in _extract_catalog_chapters(page) if item["chapter"] >= start_chapter]
+        catalog_chapters = _extract_catalog_chapters(page)
+        if any(item["chapter"] == start_chapter for item in catalog_chapters):
+            chapters = [item for item in catalog_chapters if item["chapter"] >= start_chapter]
+        else:
+            first_url = _find_first_chapter(page)
+            start_url = _derive_numbered_chapter_url(first_url, start_chapter) if first_url else ""
+            if not start_url:
+                return []
+            derive_limit = max_chapters if not unlimited else 500
+            chapters = []
+            for chapter_no in range(start_chapter, start_chapter + derive_limit):
+                chapter_url = _derive_numbered_chapter_url(first_url, chapter_no)
+                if not chapter_url:
+                    break
+                chapters.append({
+                    "chapter": chapter_no,
+                    "title": f"第{chapter_no}章",
+                    "url": chapter_url,
+                })
         if not unlimited:
             chapters = chapters[:max_chapters]
         if not chapters:
@@ -487,6 +583,13 @@ def fetch_parallel_from_catalog(url: str, max_chapters: int = 500, start_chapter
         if pw:
             pw.stop()
 
+    static_results = _fetch_parallel_chapters(chapters, max_chapters, unlimited, concurrency)
+    if static_results:
+        return static_results
+    return _fetch_browser_parallel_chapters(chapters, max_chapters, unlimited, concurrency)
+
+
+def _fetch_parallel_chapters(chapters: list, max_chapters: int, unlimited: bool, concurrency: int) -> list:
     results_by_chapter = {}
     with ThreadPoolExecutor(max_workers=concurrency) as executor:
         futures = {executor.submit(_fetch_static_chapter, chapter): chapter for chapter in chapters}
@@ -511,6 +614,177 @@ def fetch_parallel_from_catalog(url: str, max_chapters: int = 500, start_chapter
     if unlimited or len(results) < max_chapters:
         results.append({"status": "done", "message": "Catalog chapter list exhausted"})
     return results
+
+
+async def _async_launch_browser():
+    from playwright.async_api import async_playwright
+
+    p = await async_playwright().start()
+    browser = None
+    try:
+        try:
+            browser = await p.chromium.launch(channel="chrome", headless=True)
+        except Exception:
+            pass
+        if not browser:
+            chrome_path = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+            if os.path.exists(chrome_path):
+                try:
+                    browser = await p.chromium.launch(executable_path=chrome_path, headless=True)
+                except Exception:
+                    pass
+        if not browser:
+            try:
+                browser = await p.firefox.launch(headless=True)
+            except Exception:
+                pass
+        if not browser:
+            chrome_path = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+            if os.path.exists(chrome_path):
+                try:
+                    browser = await p.chromium.launch(executable_path=chrome_path, headless=False)
+                except Exception:
+                    pass
+        if not browser:
+            raise RuntimeError("Cannot launch any browser. Install Chrome or run: playwright install chromium")
+        context = await browser.new_context(
+            viewport={"width": 1280, "height": 800},
+            user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        )
+        return p, browser, context
+    except Exception:
+        if browser:
+            await browser.close()
+        await p.stop()
+        raise
+
+
+async def _async_wait_for_readable_page(page, timeout: int = 8000):
+    await page.wait_for_timeout(200)
+    try:
+        await page.wait_for_function(
+            """() => {
+                const text = document.body?.innerText || '';
+                if (text.length < 200) return false;
+                if (/加载中|Loading/i.test(text) && text.length < 1000) return false;
+                return true;
+            }""",
+            timeout=timeout,
+        )
+    except Exception:
+        pass
+
+
+async def _async_navigate(page, url: str):
+    try:
+        await page.goto(url, wait_until="domcontentloaded", timeout=20000)
+        await _async_wait_for_readable_page(page)
+        return
+    except Exception:
+        pass
+    try:
+        await page.goto(url, wait_until="networkidle", timeout=20000)
+        await _async_wait_for_readable_page(page, timeout=5000)
+        return
+    except Exception:
+        pass
+    await page.goto(url, timeout=30000)
+    await _async_wait_for_readable_page(page, timeout=3000)
+
+
+async def _async_extract_content_text(page) -> str:
+    selectors = [
+        "div.readcontent",
+        "div#content",
+        "div.main_readbox",
+        "div.booktext",
+        "article",
+        "div.content",
+        "div#chaptercontent",
+        "div.read-container",
+        "div.chapter-content",
+        "main",
+        "body",
+    ]
+    for selector in selectors:
+        try:
+            el = await page.query_selector(selector)
+            if el:
+                text = await el.inner_text()
+                if text and len(text.strip()) > 50:
+                    return text
+        except Exception:
+            continue
+    try:
+        return await page.inner_text("body")
+    except Exception:
+        return ""
+
+
+async def _async_fetch_browser_chapter(context, chapter: dict, semaphore: asyncio.Semaphore) -> dict:
+    async with semaphore:
+        page = await context.new_page()
+        try:
+            await _async_navigate(page, chapter["url"])
+            title = await page.title()
+            fallback_title = chapter.get("title") or f"第{chapter['chapter']}章"
+            if fallback_title and (not re.search(r'第\s*\d+\s*[章回节]', title) or len(title) > 80):
+                title = fallback_title
+            raw_text = await _async_extract_content_text(page)
+            clean_text = _clean_novel_text(raw_text, title)
+            return {
+                "status": "ok" if len(clean_text) >= 200 else "empty",
+                "chapter": chapter["chapter"],
+                "title": title,
+                "text": clean_text,
+                "length": len(clean_text),
+                "url": page.url,
+                **({} if len(clean_text) >= 200 else {"message": "Chapter content too short"}),
+            }
+        except Exception as e:
+            return {
+                "status": "error",
+                "chapter": chapter.get("chapter"),
+                "title": chapter.get("title") or "",
+                "message": str(e),
+                "url": chapter.get("url") or "",
+            }
+        finally:
+            await page.close()
+
+
+def _fetch_browser_parallel_chapters(chapters: list, max_chapters: int, unlimited: bool, concurrency: int) -> list:
+    async def run():
+        p = None
+        browser = None
+        try:
+            p, browser, context = await _async_launch_browser()
+            semaphore = asyncio.Semaphore(max(1, min(24, int(concurrency or 4))))
+            tasks = [_async_fetch_browser_chapter(context, chapter, semaphore) for chapter in chapters]
+            return await asyncio.gather(*tasks)
+        finally:
+            if browser:
+                await browser.close()
+            if p:
+                await p.stop()
+
+    try:
+        results = asyncio.run(run())
+    except Exception:
+        return []
+
+    results_by_chapter = {
+        int(result.get("chapter") or 0): result
+        for result in results
+        if int(result.get("chapter") or 0) > 0
+    }
+    ordered = [results_by_chapter[item["chapter"]] for item in chapters if item["chapter"] in results_by_chapter]
+    ok_count = sum(1 for item in ordered if item.get("status") == "ok")
+    if ok_count == 0:
+        return []
+    if unlimited or len(ordered) < max_chapters:
+        ordered.append({"status": "done", "message": "Catalog chapter list exhausted"})
+    return ordered
 
 
 def fetch_serial(url: str, max_chapters: int = 500, start_chapter: int = 1, concurrency: int = 1) -> list:

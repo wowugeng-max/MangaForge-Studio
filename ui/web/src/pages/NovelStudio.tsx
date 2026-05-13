@@ -2134,7 +2134,7 @@ export default function NovelStudio() {
                       <Space size={8}>
                         <InputNumber
                           min={1}
-                          max={12}
+                          max={24}
                           value={feedFetchConcurrency}
                           onChange={(value) => setFeedFetchConcurrency(Number(value || 1))}
                           style={{ width: 92 }}

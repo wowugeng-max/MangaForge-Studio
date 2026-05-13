@@ -1042,7 +1042,7 @@ export async function playwrightFetchSerial(
 ): Promise<any> {
   const py = getPythonPath()
   const fullBook = Number(maxChapters || 0) <= 0
-  const fetchConcurrency = Math.max(1, Math.min(12, Number(concurrency || 1) || 1))
+  const fetchConcurrency = Math.max(1, Math.min(24, Number(concurrency || 1) || 1))
   try {
     const { stdout } = await execFileAsync(py, [
       PLAYWRIGHT_FETCH_PATH,
@@ -1153,7 +1153,10 @@ async function fetchIngestChapters(jobId: string, job: KnowledgeIngestJob, signa
 
   const chapters: any[] = [...cachedItems]
   const seen = new Set<string>(chapters.map((item, index) => makeChapterSeenKey(item, index)))
-  const chunkSize = Math.max(5, Math.min(30, Number(job.batch_size || 5) * 4))
+  const fetchConcurrency = Math.max(1, Math.min(24, Number(job.fetch_concurrency || 1) || 1))
+  const chunkSize = job.full_book
+    ? Math.max(80, Math.min(240, fetchConcurrency * 30))
+    : Math.max(5, Math.min(30, Number(job.batch_size || 5) * 4))
   let nextStart = chapters.length
     ? Number(chapters[chapters.length - 1]?.chapter || job.start_chapter) + 1
     : Math.max(1, Number(job.start_chapter || 1) || 1)
@@ -1194,7 +1197,7 @@ async function fetchIngestChapters(jobId: string, job: KnowledgeIngestJob, signa
       fetched_chapters: chapters.length,
     })
 
-    const raw = await playwrightFetchSerial(job.url, chunkSize, nextStart, signal, job.fetch_concurrency || 1)
+    const raw = await playwrightFetchSerial(job.url, chunkSize, nextStart, signal, fetchConcurrency)
     if (!Array.isArray(raw)) break
 
     const okItems = raw.filter((item: any) => item?.status === 'ok' && String(item?.text || '').trim())
@@ -1824,7 +1827,7 @@ export function startKnowledgeIngestJob(input: {
     ? 0
     : Math.max(1, Math.min(5000, requestedMaxChapters || 50))
   const batchSize = Math.max(1, Math.min(50, Number(input.batch_size || 10) || 10))
-  const fetchConcurrency = Math.max(1, Math.min(12, Number(input.fetch_concurrency || 1) || 1))
+  const fetchConcurrency = Math.max(1, Math.min(24, Number(input.fetch_concurrency || 1) || 1))
   const projectId = Number(input.project_id || 0) || undefined
   const projectTitle = String(input.project_title || '').trim()
   const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
