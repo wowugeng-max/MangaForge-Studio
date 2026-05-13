@@ -1866,6 +1866,11 @@ export function getKnowledgeIngestJob(id: string): KnowledgeIngestJob | null {
   return ingestJobs.get(id) || null
 }
 
+export function listKnowledgeIngestJobs(): KnowledgeIngestJob[] {
+  return Array.from(ingestJobs.values())
+    .sort((a, b) => String(b.updated_at || b.created_at || '').localeCompare(String(a.updated_at || a.created_at || '')))
+}
+
 export function cancelKnowledgeIngestJob(id: string): KnowledgeIngestJob | null {
   const job = ingestJobs.get(id)
   if (!job) return null

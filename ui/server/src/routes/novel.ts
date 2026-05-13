@@ -46,6 +46,15 @@ import { sseManager, registerTask, unregisterTask } from '../ws-manager'
 
 export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
   const getProject = async (workspace: string, id: number) => getNovelProject(workspace, id)
+  const parseOptionalBoolean = (value: any) => {
+    if (value === undefined) return undefined
+    if (typeof value === 'boolean') return value
+    if (typeof value === 'number') return value !== 0
+    const raw = String(value).trim().toLowerCase()
+    if (['true', '1', 'yes', 'on'].includes(raw)) return true
+    if (['false', '0', 'no', 'off'].includes(raw)) return false
+    return Boolean(value)
+  }
   const parseJsonLikePayload = (value: any) => {
     if (!value) return null
     if (typeof value === 'object') return value
@@ -142,11 +151,56 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
     }
     return Array.from(terms).slice(0, 80)
   }
+  const clampScore = (value: number) => Math.max(0, Math.min(100, Math.round(value)))
+  const buildReferenceQualityAssessment = (preview: any, hits: string[]) => {
+    const entries = Array.isArray(preview?.entries) ? preview.entries : []
+    const activeReferences = Array.isArray(preview?.active_references) ? preview.active_references : []
+    const warnings = Array.isArray(preview?.warnings) ? preview.warnings : []
+    const averageAvoidCoverage = activeReferences.length
+      ? activeReferences.reduce((sum: number, ref: any) => sum + Math.min(1, (Array.isArray(ref?.avoid) ? ref.avoid.length : 0) / 4), 0) / activeReferences.length * 100
+      : 0
+    const averageDimensionCoverage = activeReferences.length
+      ? activeReferences.reduce((sum: number, ref: any) => sum + Math.min(1, (Array.isArray(ref?.dimensions) ? ref.dimensions.length : 0) / 4), 0) / activeReferences.length * 100
+      : 0
+    const referenceCoverage = activeReferences.length
+      ? clampScore((entries.length / Math.max(1, activeReferences.length * 4)) * 100)
+      : (entries.length ? 60 : 0)
+    const injectionScore = clampScore(Math.min(100, (entries.length / Math.max(1, activeReferences.length * 3 || 3)) * 100) - warnings.length * 6)
+    const copySafetyScore = clampScore(100 - hits.length * 14 - warnings.length * 5)
+    const originalityScore = clampScore(copySafetyScore * 0.65 + averageAvoidCoverage * 0.25 + averageDimensionCoverage * 0.1)
+    const overallScore = clampScore(
+      referenceCoverage * 0.2 +
+      injectionScore * 0.25 +
+      copySafetyScore * 0.3 +
+      originalityScore * 0.25,
+    )
+    return {
+      overall_score: overallScore,
+      risk_level: overallScore >= 80 ? 'low' : overallScore >= 55 ? 'medium' : 'high',
+      reference_coverage_score: referenceCoverage,
+      injection_score: injectionScore,
+      copy_safety_score: copySafetyScore,
+      originality_score: originalityScore,
+      avoid_coverage_score: clampScore(averageAvoidCoverage),
+      dimension_coverage_score: clampScore(averageDimensionCoverage),
+      injected_entry_count: entries.length,
+      active_reference_count: activeReferences.length,
+      copy_hit_count: hits.length,
+      warning_count: warnings.length,
+      recommendations: [
+        referenceCoverage < 70 ? '补齐参考项目的可注入画像知识，避免生成时只拿到配置而拿不到蓝图。' : '',
+        injectionScore < 70 ? '生成前先做参考预览，确认当前任务能命中足够知识条目。' : '',
+        copySafetyScore < 75 ? '正文出现参考实体或证据词，建议替换专名、桥段顺序和原文表达。' : '',
+        originalityScore < 75 ? '增加避免照搬项，并把参考维度限定在结构、节奏、角色功能和文风机制。' : '',
+      ].filter(Boolean),
+    }
+  }
   const buildReferenceUsageReport = async (activeWorkspace: string, project: any, taskType: string, generatedText = '') => {
     const preview = await previewNovelKnowledgeInjection(project, taskType)
     const terms = collectCopyGuardTerms(preview)
     const text = String(generatedText || '')
     const hits = terms.filter(term => text.includes(term)).slice(0, 20)
+    const qualityAssessment = buildReferenceQualityAssessment(preview, hits)
     const report = {
       task_type: taskType,
       strength: preview.strength,
@@ -167,13 +221,18 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
         status: hits.length ? 'warn' : 'ok',
       },
       warnings: preview.warnings || [],
+      quality_assessment: qualityAssessment,
     }
+    const shouldWarn = hits.length > 0 || qualityAssessment.overall_score < 70
     await createNovelReview(activeWorkspace, {
       project_id: project.id,
       review_type: 'reference_report',
-      status: hits.length ? 'warn' : 'ok',
-      summary: `参考报告：${preview.strength_label || '-'}，注入 ${preview.entries?.length || 0} 条${hits.length ? `，疑似照搬 ${hits.length} 项` : ''}`,
-      issues: hits.length ? hits.map(term => `正文出现参考实体/证据词：${term}`) : [],
+      status: shouldWarn ? 'warn' : 'ok',
+      summary: `参考报告：${preview.strength_label || '-'}，注入 ${preview.entries?.length || 0} 条，质量评分 ${qualityAssessment.overall_score}${hits.length ? `，疑似照搬 ${hits.length} 项` : ''}`,
+      issues: [
+        ...hits.map(term => `正文出现参考实体/证据词：${term}`),
+        ...qualityAssessment.recommendations,
+      ],
       payload: JSON.stringify(report),
     })
     return report
@@ -202,7 +261,7 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
   app.delete('/api/novel/chapters/:chapterId', async (req, res) => { try { const activeWorkspace = getWorkspace(); const ok = await deleteNovelChapter(activeWorkspace, Number(req.params.chapterId)); if (!ok) return res.status(404).json({ error: 'chapter not found' }); res.json({ ok: true }) } catch (error) { res.status(500).json({ error: String(error) }) } })
   app.get('/api/novel/chapters/:chapterId/versions', async (req, res) => { try { const activeWorkspace = getWorkspace(); res.json(await listChapterVersions(activeWorkspace, Number(req.params.chapterId))) } catch (error) { res.status(500).json({ error: String(error) }) } })
   app.post('/api/novel/chapters/:chapterId/rollback', async (req, res) => { try { const activeWorkspace = getWorkspace(); const updated = await rollbackChapterVersion(activeWorkspace, Number(req.params.chapterId), Number(req.body.version_id)); if (!updated) return res.status(404).json({ error: 'chapter or version not found' }); res.json(updated) } catch (error) { res.status(500).json({ error: String(error) }) } })
-  app.put('/api/novel/chapters/:chapterId', async (req, res) => { try { const activeWorkspace = getWorkspace(); const updated = await updateNovelChapter(activeWorkspace, Number(req.params.chapterId), req.body); if (!updated) return res.status(404).json({ error: 'chapter not found' }); res.json(updated) } catch (error) { res.status(500).json({ error: String(error) }) } })
+  app.put('/api/novel/chapters/:chapterId', async (req, res) => { try { const activeWorkspace = getWorkspace(); const { create_version, createVersion, version_source, versionSource, force_version, forceVersion, ...patch } = req.body || {}; const updated = await updateNovelChapter(activeWorkspace, Number(req.params.chapterId), patch, { createVersion: parseOptionalBoolean(create_version ?? createVersion), versionSource: version_source || versionSource || 'manual_edit', forceVersion: parseOptionalBoolean(force_version ?? forceVersion) }); if (!updated) return res.status(404).json({ error: 'chapter not found' }); res.json(updated) } catch (error) { res.status(500).json({ error: String(error) }) } })
   app.post('/api/novel/chapters/:chapterId/generate-prose', async (req, res) => {
     try {
       const activeWorkspace = getWorkspace()
@@ -231,7 +290,7 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
         await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'failed', input_ref: JSON.stringify(req.body), output_ref: JSON.stringify(resultPayload || null), error_message: String(result.error || result.fallbackReason || '模型未返回正文') })
         return res.status(502).json({ error: String(result.error || result.fallbackReason || '模型未返回正文'), result })
       }
-      const updated = await updateNovelChapter(activeWorkspace, chapter.id, { chapter_text: chapterText, scene_breakdown: sceneBreakdown, continuity_notes: continuityNotes, status: 'draft' })
+      const updated = await updateNovelChapter(activeWorkspace, chapter.id, { chapter_text: chapterText, scene_breakdown: sceneBreakdown, continuity_notes: continuityNotes, status: 'draft' }, { versionSource: 'agent_execute' })
       let referenceReport: any = null
       try {
         referenceReport = await buildReferenceUsageReport(activeWorkspace, project, '正文创作', chapterText)
@@ -274,7 +333,7 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
           chapter_text: String(proseChapter.chapter_text || ''),
           scene_breakdown: proseChapter.scene_breakdown || [],
           continuity_notes: proseChapter.continuity_notes || [],
-        })
+        }, { versionSource: source })
       }
     }
   }
@@ -512,7 +571,7 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
               chapter_summary: String(rc.chapter_summary || matched.chapter_summary),
               conflict: String(rc.conflict || matched.conflict),
               ending_hook: String(rc.ending_hook || matched.ending_hook),
-            })
+            }, { versionSource: 'repair' })
             applied.push({ target: 'chapter', chapter_no: rc.chapter_no, action: '修复章节正文与摘要' })
           }
         }
@@ -748,7 +807,7 @@ ${instructions ? `\n额外指令：${instructions}` : ''}
 
       if (shift !== 0) {
         for (const ch of trailingChapters) {
-          await updateNovelChapter(activeWorkspace, ch.id, { chapter_no: ch.chapter_no + shift })
+          await updateNovelChapter(activeWorkspace, ch.id, { chapter_no: ch.chapter_no + shift }, { createVersion: false })
         }
       }
 

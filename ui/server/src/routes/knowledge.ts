@@ -12,6 +12,7 @@ import {
   playwrightFetchUrl,
   playwrightFetchSerial,
   startKnowledgeIngestJob,
+  listKnowledgeIngestJobs,
   getKnowledgeIngestJob,
   cancelKnowledgeIngestJob,
   pauseKnowledgeIngestJob,
@@ -24,6 +25,19 @@ import {
 } from '../knowledge-base'
 
 export function registerKnowledgeRoutes(app: Express) {
+  const summarizeIngestJob = (job: any) => ({
+    ...job,
+    entries: Array.isArray(job.entries) ? job.entries.slice(0, 20) : [],
+    entry_count: Array.isArray(job.entries) ? job.entries.length : 0,
+    batches: Array.isArray(job.batches)
+      ? job.batches.map((batch: any) => ({
+        ...batch,
+        entries: [],
+        entry_count: Array.isArray(batch.entries) ? batch.entries.length : 0,
+      }))
+      : [],
+  })
+
   /** GET /api/knowledge — 列出知识库条目（可选按 category 筛选） */
   app.get('/api/knowledge', async (req, res) => {
     try {
@@ -390,6 +404,19 @@ export function registerKnowledgeRoutes(app: Express) {
       res.json({ ok: true, job })
     } catch (error) {
       res.status(400).json({ error: String(error) })
+    }
+  })
+
+  /** GET /api/knowledge/ingest — 查询后台投喂任务列表 */
+  app.get('/api/knowledge/ingest', async (req, res) => {
+    try {
+      const projectTitle = String(req.query.project_title || req.query.projectTitle || '').trim()
+      const jobs = listKnowledgeIngestJobs()
+        .filter(job => !projectTitle || String(job.project_title || '').trim() === projectTitle)
+        .map(summarizeIngestJob)
+      res.json({ ok: true, jobs })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
     }
   })
 

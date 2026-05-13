@@ -293,8 +293,10 @@ export default function NovelStudio() {
 
   const knowledgePanelFromUrl = searchParams.get('panel') === 'knowledge'
   const memoryPalacePanelFromUrl = searchParams.get('panel') === 'memory-palace'
+  const sourceCachePanelFromUrl = searchParams.get('panel') === 'source-cache'
   const knowledgeActionFromUrl = searchParams.get('action')
   const knowledgeProjectFromUrl = searchParams.get('project_title') || ''
+  const sourceCacheProjectFromUrl = searchParams.get('project_title') || ''
 
   useEffect(() => {
     if (knowledgePanelFromUrl && !knowledgeOpen) {
@@ -324,6 +326,18 @@ export default function NovelStudio() {
       setMemoryPalaceOpen(false)
     }
   }, [memoryPalacePanelFromUrl, memoryPalaceOpen])
+
+  useEffect(() => {
+    if (sourceCachePanelFromUrl && !sourceCacheOpen) {
+      setSourceCacheOpen(true)
+      const title = String(sourceCacheProjectFromUrl || '').trim()
+      if (title) setSourceCacheSearch(title)
+      void loadSourceCaches(true, title)
+    }
+    if (!sourceCachePanelFromUrl && sourceCacheOpen) {
+      setSourceCacheOpen(false)
+    }
+  }, [sourceCachePanelFromUrl, sourceCacheOpen, sourceCacheProjectFromUrl])
 
   useEffect(() => {
     if (knowledgePanelFromUrl && knowledgeActionFromUrl === 'feed' && !feedOpen) {
@@ -507,17 +521,21 @@ export default function NovelStudio() {
     }
   }
 
-  const loadSourceCaches = async (autoSelect = false) => {
+  const loadSourceCaches = async (autoSelect = false, preferredProjectTitle = '') => {
     setSourceCacheLoading(true)
     try {
       const res = await apiClient.get('/knowledge/source-caches')
       const caches = Array.isArray(res.data?.caches) ? res.data.caches : []
       setSourceCaches(caches)
       if (autoSelect && caches.length > 0) {
+        const preferredTitle = String(preferredProjectTitle || '').trim().toLowerCase()
         const current = selectedSourceCacheKey
           ? caches.find((item: any) => item.cache_key === selectedSourceCacheKey)
           : null
-        await loadSourceCacheDetail(current?.cache_key || caches[0].cache_key)
+        const preferred = preferredTitle
+          ? caches.find((item: any) => String(item.project_title || '').trim().toLowerCase() === preferredTitle)
+          : null
+        await loadSourceCacheDetail(current?.cache_key || preferred?.cache_key || caches[0].cache_key)
       } else if (caches.length === 0) {
         setSelectedSourceCacheKey('')
         setSourceCacheDetail(null)
@@ -533,10 +551,12 @@ export default function NovelStudio() {
   const handleOpenSourceCache = () => {
     setSourceCacheOpen(true)
     void loadSourceCaches(true)
+    updateKnowledgeRoute({ panel: 'source-cache', action: null })
   }
 
   const handleCloseSourceCache = () => {
     setSourceCacheOpen(false)
+    updateKnowledgeRoute({ panel: null, action: null, projectTitle: null })
   }
 
   const handleOpenFeed = () => {

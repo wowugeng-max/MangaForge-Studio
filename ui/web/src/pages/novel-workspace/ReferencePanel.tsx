@@ -132,6 +132,10 @@ export function ReferencePanel({
                 const payload = parseReviewPayload(report)
                 const entries = Array.isArray(payload.injected_entries) ? payload.injected_entries : []
                 const hits = Array.isArray(payload.copy_guard?.hits) ? payload.copy_guard.hits : []
+                const quality = payload.quality_assessment || null
+                const qualityScore = Number(quality?.overall_score || 0)
+                const riskLabel = quality?.risk_level === 'low' ? '低风险' : quality?.risk_level === 'medium' ? '中风险' : quality?.risk_level === 'high' ? '高风险' : ''
+                const riskColor = quality?.risk_level === 'low' ? 'green' : quality?.risk_level === 'medium' ? 'gold' : quality?.risk_level === 'high' ? 'red' : 'default'
                 return (
                   <Card key={report.id} size="small" style={{ margin: 8, borderRadius: 8 }}
                     title={<Space wrap><Tag color={report.status === 'warn' ? 'gold' : 'green'} bordered={false}>{report.status === 'warn' ? '需检查' : '正常'}</Tag><Text strong>{payload.task_type || '生成任务'}</Text></Space>}>
@@ -142,10 +146,23 @@ export function ReferencePanel({
                         <Tag color="purple" bordered={false}>{payload.strength_label || '参考'}</Tag>
                         <Tag color="blue" bordered={false}>注入 {entries.length} 条</Tag>
                         <Tag color={hits.length ? 'gold' : 'green'} bordered={false}>照搬命中 {hits.length}</Tag>
+                        {quality && <Tag color={riskColor} bordered={false}>质量 {qualityScore} · {riskLabel}</Tag>}
                       </Space>
+                      {quality && (
+                        <Space wrap size={[4, 2]}>
+                          <Tag bordered={false}>注入 {quality.injection_score ?? '-'}</Tag>
+                          <Tag bordered={false}>照搬安全 {quality.copy_safety_score ?? '-'}</Tag>
+                          <Tag bordered={false}>原创性 {quality.originality_score ?? '-'}</Tag>
+                        </Space>
+                      )}
                       {hits.length > 0 && (
                         <Paragraph style={{ marginBottom: 0, fontSize: 12 }} ellipsis={{ rows: 2, expandable: true, symbol: '展开' }}>
                           疑似复用词：{hits.join('、')}
+                        </Paragraph>
+                      )}
+                      {Array.isArray(quality?.recommendations) && quality.recommendations.length > 0 && (
+                        <Paragraph style={{ marginBottom: 0, fontSize: 12 }} ellipsis={{ rows: 2, expandable: true, symbol: '展开' }}>
+                          质量建议：{quality.recommendations.join('；')}
                         </Paragraph>
                       )}
                       {entries.length > 0 && (

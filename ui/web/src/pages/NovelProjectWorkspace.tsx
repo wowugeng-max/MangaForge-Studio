@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Button, Form, message, Modal, Select, Typography, Tooltip, Tag,
+  Badge, Button, Form, message, Modal, Select, Typography, Tooltip, Tag,
 } from 'antd'
 import {
-  ArrowLeftOutlined, BookOutlined, ReloadOutlined,
+  ArrowLeftOutlined, BookOutlined, ClockCircleOutlined, ReloadOutlined,
 } from '@ant-design/icons'
 import type { EditorView } from '@codemirror/view'
 import { useNavigate, useParams } from 'react-router-dom'
@@ -17,15 +17,19 @@ import { EditorModal, type EditorKind } from './novel-workspace/EditorModal'
 import { OutlineControlPanel } from './novel-workspace/OutlineControlPanel'
 import { OutlineTreeModal } from './novel-workspace/OutlineTreeModal'
 import { ReferenceConfigModal } from './novel-workspace/ReferenceConfigModal'
+import { ReferenceEngineeringModal } from './novel-workspace/ReferenceEngineeringModal'
 import { ReferencePanel } from './novel-workspace/ReferencePanel'
+import { TaskCenterDrawer } from './novel-workspace/TaskCenterDrawer'
 import { VersionDetailModal } from './novel-workspace/VersionDetailModal'
 import { WorkspaceCenter } from './novel-workspace/WorkspaceCenter'
+import { useChapterAutosave } from './novel-workspace/useChapterAutosave'
+import { useChapterVersions } from './novel-workspace/useChapterVersions'
+import { useNovelWorkspaceData, type ChapterSortMode, type ChapterStatusFilter } from './novel-workspace/useNovelWorkspaceData'
+import { useReferenceWorkflow } from './novel-workspace/useReferenceWorkflow'
+import { useWorkspaceTasks } from './novel-workspace/useWorkspaceTasks'
 import {
-  buildChapterTreeData,
-  buildTree,
   displayValue,
   summarizeOutlineExecution,
-  wc,
 } from './novel-workspace/utils'
 
 const { Title } = Typography
@@ -36,62 +40,33 @@ export default function NovelProjectWorkspace() {
   const { id } = useParams()
   const projectId = Number(id)
 
-  // ── data ──
-  const [loading, setLoading] = useState(false)
-  const [selectedProject, setSelectedProject] = useState<any | null>(null)
-  const [worldbuilding, setWorldbuilding] = useState<any[]>([])
-  const [characters, setCharacters] = useState<any[]>([])
-  const [outlines, setOutlines] = useState<any[]>([])
-  const [chapters, setChapters] = useState<any[]>([])
-  const [runRecords, setRunRecords] = useState<any[]>([])
-  const [reviews, setReviews] = useState<any[]>([])
-  const [agentExecution, setAgentExecution] = useState<any | null>(null)
-  const [marketReview, setMarketReview] = useState<any | null>(null)
-  const [platformFit, setPlatformFit] = useState<any | null>(null)
-  const [models, setModels] = useState<any[]>([])
-  const [results, setResults] = useState<any[]>([])
-  const [continuityChecks, setContinuityChecks] = useState<any[]>([])
-  const [repairResult, setRepairResult] = useState<any | null>(null)
-
-  // ── model / platform-fit ──
-  const [selectedModelId, setSelectedModelId] = useState<number | undefined>()
-  const [platformFitChapterIds, setPlatformFitChapterIds] = useState<number[]>([])
-  const [platformFitTemplateName, setPlatformFitTemplateName] = useState('')
-  const [platformFitTemplateNote, setPlatformFitTemplateNote] = useState('')
-  const [platformFitTemplateSearch, setPlatformFitTemplateSearch] = useState('')
-  const [platformFitTemplateDefault, setPlatformFitTemplateDefault] = useState(false)
-
-  // ── chapter versions ──
-  const [chapterVersions, setChapterVersions] = useState<any[]>([])
-  const [chapterVersionsLoading, setChapterVersionsLoading] = useState(false)
-  const [chapterVersionDetail, setChapterVersionDetail] = useState<any | null>(null)
-  const [rollingBackVersionId, setRollingBackVersionId] = useState<number | null>(null)
-
   // ── 3-step writing flow ──
   const [stepOutlineLoading, setStepOutlineLoading] = useState(false)
   const [stepProseLoading, setStepProseLoading] = useState(false)
   const [stepRepairLoading, setStepRepairLoading] = useState(false)
   const [proseProgress, setProseProgress] = useState({ current: 0, total: 0 })
+  const [planProgress, setPlanProgress] = useState<any>(null)
   const [planning, setPlanning] = useState(false)
   const [executingAgents, setExecutingAgents] = useState(false)
   const [generatingProse, setGeneratingProse] = useState(false)
-  const [repairing, setRepairing] = useState(false)
 
   // ── 大纲生成控制面板 ──
   const [outlinePanelOpen, setOutlinePanelOpen] = useState(false)
   const [referenceConfigOpen, setReferenceConfigOpen] = useState(false)
+  const [referenceEngineeringOpen, setReferenceEngineeringOpen] = useState(false)
 
   // ── 章节弹出面板 ──
   const [chapterDrawerOpen, setChapterDrawerOpen] = useState(false)
   const [outlineTreeOpen, setOutlineTreeOpen] = useState(false)
+  const [taskCenterOpen, setTaskCenterOpen] = useState(false)
 
   // ── 章节多选 + 章节重组 ──
   const [selectedChapterIds, setSelectedChapterIds] = useState<Set<number>>(new Set())
   const [selectMode, setSelectMode] = useState(false)
   const [restructurePanelOpen, setRestructurePanelOpen] = useState(false)
   const [chapterSearch, setChapterSearch] = useState('')
-  const [chapterStatusFilter, setChapterStatusFilter] = useState<'all' | 'written' | 'unwritten' | 'placeholder'>('all')
-  const [chapterSortMode, setChapterSortMode] = useState<'chapter_no_asc' | 'chapter_no_desc' | 'word_count_desc' | 'title_asc'>('chapter_no_asc')
+  const [chapterStatusFilter, setChapterStatusFilter] = useState<ChapterStatusFilter>('all')
+  const [chapterSortMode, setChapterSortMode] = useState<ChapterSortMode>('chapter_no_asc')
 
   // ── streaming ──
   const [streamingChapterId, setStreamingChapterId] = useState<number | null>(null)
@@ -104,56 +79,86 @@ export default function NovelProjectWorkspace() {
   const [editorKind, setEditorKind] = useState<EditorKind | null>(null)
   const [editorItem, setEditorItem] = useState<any | null>(null)
   const [editorForm] = Form.useForm()
-  const templateImportRef = useRef<HTMLInputElement>(null)
-
-  // ── active chapter ──
-  const [activeChapterId, setActiveChapterId] = useState<number | null>(null)
-  const activeChapter = chapters.find(c => c.id === activeChapterId) || null
-
-  // ── left sidebar drawer (mobile) ──
-  const [leftDrawerOpen, setLeftDrawerOpen] = useState(false)
 
   // ── right reference panel ──
   const [rightPanelOpen, setRightPanelOpen] = useState(false)
   const [rightPanelTab, setRightPanelTab] = useState('worldbuilding')
 
-  // ── auto-save state ──
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'unsaved' | 'saving' | 'saved' | 'error'>('idle')
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const proseEditorRef = useRef<EditorView | null>(null)
+
+  const {
+    loading,
+    selectedProject,
+    setSelectedProject,
+    worldbuilding,
+    characters,
+    outlines,
+    chapters,
+    setChapters,
+    runRecords,
+    agentExecution,
+    setAgentExecution,
+    models,
+    selectedModelId,
+    setSelectedModelId,
+    activeChapterId,
+    setActiveChapterId,
+    activeChapter,
+    loadProjectModules,
+    chapterTreeData,
+    proseChapters,
+    referenceSummary,
+    referenceReports,
+    isEmptyProject,
+    sortedChapters,
+    filteredChapters,
+  } = useNovelWorkspaceData({
+    projectId,
+    chapterSearch,
+    chapterStatusFilter,
+    chapterSortMode,
+  })
+
+  // ── auto-save state ──
+  const {
+    saveStatus,
+    scheduleSave,
+    flushPendingSave,
+    selectChapter,
+  } = useChapterAutosave({
+    activeChapterId,
+    resetKey: projectId,
+    setActiveChapterId,
+    setChapters,
+  })
+
+  const {
+    activeTasks,
+    activeKnowledgeJobCount,
+    knowledgeIngestJobs,
+    knowledgeJobsLoading,
+    loadKnowledgeIngestJobs,
+    pauseKnowledgeIngestJob,
+    resumeKnowledgeIngestJob,
+    cancelKnowledgeIngestJob,
+  } = useWorkspaceTasks({
+    taskCenterOpen,
+    selectedModelId,
+    stepOutlineLoading,
+    stepProseLoading,
+    stepRepairLoading,
+    proseProgress,
+    planning,
+    planProgress,
+    executingAgents,
+    generatingProse,
+    streamingProgress,
+    streamingPercent,
+    activeChapter,
+  })
 
   // ── diff toggle ──
   const [showOnlyDiff, setShowOnlyDiff] = useState(true)
-
-  // ── chapter tree ──
-  const chapterTree = useMemo(() => buildTree(outlines, chapters), [outlines, chapters])
-  const chapterTreeData = useMemo(() => buildChapterTreeData(chapterTree), [chapterTree])
-
-  const proseChapters = chapters.filter(ch => ch.chapter_text)
-  const referenceSummary = useMemo(() => {
-    const refs = Array.isArray(selectedProject?.reference_config?.references)
-      ? selectedProject.reference_config.references.filter((item: any) => String(item?.project_title || '').trim())
-      : []
-    const strength = selectedProject?.reference_config?.strength || 'balanced'
-    const strengthLabel = strength === 'light' ? '轻参考' : strength === 'strong' ? '强参考' : '中参考'
-    return { count: refs.length, strengthLabel }
-  }, [selectedProject?.reference_config])
-  const referenceReports = useMemo(() => (
-    reviews
-      .filter((item: any) => item.review_type === 'reference_report')
-      .slice()
-      .sort((a: any, b: any) => String(b.created_at || '').localeCompare(String(a.created_at || '')))
-  ), [reviews])
-
-  // ── empty project detection ──
-  const isEmptyProject = useMemo(() => (
-    !loading &&
-    selectedProject !== null &&
-    worldbuilding.length === 0 &&
-    characters.length === 0 &&
-    outlines.length === 0 &&
-    chapters.length === 0
-  ), [loading, selectedProject, worldbuilding.length, characters.length, outlines.length, chapters.length])
 
   /* ── selected chapters (resolved to objects) ────────────────────── */
   const selectedChaptersList = useMemo(() =>
@@ -161,135 +166,29 @@ export default function NovelProjectWorkspace() {
     [chapters, selectedChapterIds],
   )
 
-  /* ── load data ─────────────────────────────────────────────────── */
-  const loadProjectModules = async () => {
-    if (!projectId) return
-    setLoading(true)
-    try {
-      const [pr, wr, cr, olr, chr, rnr, revr, mr] = await Promise.all([
-        apiClient.get(`/novel/projects/${projectId}`),
-        apiClient.get(`/novel/projects/${projectId}/worldbuilding`),
-        apiClient.get(`/novel/projects/${projectId}/characters`),
-        apiClient.get(`/novel/projects/${projectId}/outlines`),
-        apiClient.get(`/novel/projects/${projectId}/chapters`),
-        apiClient.get('/novel/runs', { params: { project_id: projectId } }),
-        apiClient.get(`/novel/projects/${projectId}/reviews`),
-        apiClient.get('/models').catch(() => ({ data: [] })),
-      ])
-      setSelectedProject(pr.data || null)
-      setWorldbuilding(Array.isArray(wr.data) ? wr.data : [])
-      setCharacters(Array.isArray(cr.data) ? cr.data : [])
-      setOutlines(Array.isArray(olr.data) ? olr.data : [])
-      setChapters(Array.isArray(chr.data) ? chr.data : [])
-      setRunRecords(Array.isArray(rnr.data) ? rnr.data : [])
-      const items = Array.isArray(revr.data) ? revr.data : []
-      setReviews(items)
-      setAgentExecution(null)
-      setContinuityChecks([])
-      const mk = items.find((i: any) => i.review_type === 'market_review') || null
-      const pf = items.find((i: any) => i.review_type === 'platform_fit') || null
-      setMarketReview(mk ? { summary: mk.summary, issues: mk.issues, ...(mk.payload ? JSON.parse(mk.payload) : {}) } : null)
-      setPlatformFit(pf ? { summary: pf.summary, issues: pf.issues, ...(pf.payload ? JSON.parse(pf.payload) : {}) } : null)
-      setModels(Array.isArray(mr.data) ? mr.data : [])
-      setSelectedModelId(prev => prev || (Array.isArray(mr.data) ? (mr.data.find((m: any) => m.is_favorite)?.id || mr.data[0]?.id) : undefined))
-      setPlatformFitChapterIds(prev => prev.length > 0 ? prev : (chr.data || []).slice(0, 3).map((c: any) => c.id))
-      const act = chr.data?.find?.((c: any) => c.chapter_text) || chr.data?.[0] || null
-      setActiveChapterId(act?.id || null)
-    } catch {
-      message.error('无法加载项目工作台')
-    } finally {
-      setLoading(false)
-    }
-  }
+  const {
+    chapterVersions,
+    chapterVersionsLoading,
+    chapterVersionDetail,
+    rollingBackVersionId,
+    setChapterVersionDetail,
+    rollbackChapterVersion,
+  } = useChapterVersions({
+    activeChapter,
+    flushPendingSave,
+    reloadProject: loadProjectModules,
+  })
 
-  useEffect(() => { loadProjectModules() }, [projectId])
-
-  const loadChapterVersions = async (chapterId: number) => {
-    setChapterVersionsLoading(true)
-    try {
-      const res = await apiClient.get(`/novel/chapters/${chapterId}/versions`)
-      setChapterVersions(Array.isArray(res.data) ? res.data : [])
-    } catch { setChapterVersions([]) }
-    finally { setChapterVersionsLoading(false) }
-  }
-
-  useEffect(() => {
-    if (activeChapter?.id) { loadChapterVersions(activeChapter.id); setChapterVersionDetail(null) }
-    else { setChapterVersions([]); setChapterVersionDetail(null) }
-  }, [activeChapter?.id])
-
-  /* ── auto-save with debounce ───────────────────────────────────── */
-  const scheduleSave = async (text: string) => {
-    if (saveStatus === 'saving') return
-    setSaveStatus('unsaved')
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-    saveTimerRef.current = setTimeout(async () => {
-      setSaveStatus('saving')
-      try {
-        await apiClient.put(`/novel/chapters/${activeChapterId}`, { chapter_text: text })
-        setChapters(prev => prev.map(c => c.id === activeChapterId ? { ...c, chapter_text: text } : c))
-        setSaveStatus('saved')
-        setTimeout(() => setSaveStatus('idle'), 2000)
-      } catch {
-        setSaveStatus('error')
-        message.error('保存失败，请检查网络')
-      }
-    }, 1500)
-  }
-
-  useEffect(() => {
-    return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current) }
-  }, [])
+  const { confirmReferenceReady } = useReferenceWorkflow({
+    projectId,
+    referenceSummary,
+    onNeedConfig: () => setReferenceConfigOpen(true),
+  })
 
   /* ── 大纲生成 ──────────────────────────────────────────────────── */
-  const confirmReferenceReady = async (taskType: string) => {
-    if (!referenceSummary.count) return true
-    try {
-      const res = await apiClient.post(`/novel/projects/${projectId}/reference-preview`, { task_type: taskType })
-      const preview = res.data || {}
-      const entries = Array.isArray(preview.entries) ? preview.entries : []
-      const warnings = Array.isArray(preview.warnings) ? preview.warnings : []
-      if (entries.length > 0 && warnings.length === 0) return true
-      return await new Promise<boolean>((resolve) => {
-        Modal.confirm({
-          title: '参考知识准备度不足',
-          width: 560,
-          content: (
-            <div style={{ whiteSpace: 'pre-wrap' }}>
-              {[
-                `当前任务：${taskType}`,
-                `已配置参考项目：${referenceSummary.count} 部`,
-                `本次可注入知识：${entries.length} 条`,
-                ...(warnings.length ? ['问题：', ...warnings.map((item: string) => `- ${item}`)] : ['问题：当前没有命中可注入知识。']),
-                '',
-                '继续生成不会中断，但仿写效果会明显下降。建议先打开“参考配置”做预览或补提炼。',
-              ].join('\n')}
-            </div>
-          ),
-          okText: '继续生成',
-          cancelText: '先去配置',
-          onOk: () => resolve(true),
-          onCancel: () => resolve(false),
-        })
-      })
-    } catch (error: any) {
-      const text = String(error?.response?.data || error?.response?.data?.error || error?.message || '')
-      Modal.warning({
-        title: '参考预检接口不可用',
-        content: text.includes('Cannot POST') || error?.response?.status === 404
-          ? '当前后端未加载 reference-preview 路由。请重启 8787 后端服务后再生成。'
-          : '参考预检失败，请稍后重试或检查后端服务。',
-      })
-      return false
-    }
-  }
-
   const handleOutlineGenerate = async (opts: { chapterCount: number; continueMode: boolean; continueFrom: number; userOutline: string }) => {
     if (!selectedModelId) return message.warning('请先在顶部选择模型')
-    if (!await confirmReferenceReady('大纲生成')) {
-      setReferenceConfigOpen(true)
-      return
-    }
+    if (!await confirmReferenceReady('大纲生成')) return
     setStepOutlineLoading(true)
     setOutlinePanelOpen(false)
     try {
@@ -354,12 +253,10 @@ export default function NovelProjectWorkspace() {
   /* ── 正文生成 ──────────────────────────────────────────────────── */
   const stepGenerateProse = async () => {
     if (!selectedModelId) return message.warning('请先选择模型')
+    if (!await flushPendingSave()) return
     const unWritten = sortedChapters.filter(ch => !ch.chapter_text || ch.chapter_text.includes('【占位正文】'))
     if (unWritten.length === 0) return message.warning('所有章节已有正文，无需生成')
-    if (!await confirmReferenceReady('正文创作')) {
-      setReferenceConfigOpen(true)
-      return
-    }
+    if (!await confirmReferenceReady('正文创作')) return
     setStepProseLoading(true)
     let done = 0
     try {
@@ -381,12 +278,12 @@ export default function NovelProjectWorkspace() {
 
   const stepRunRepair = async () => {
     if (!selectedModelId) return message.warning('请先选择模型')
+    if (!await flushPendingSave()) return
     setStepRepairLoading(true)
     try {
       const res = await apiClient.post('/novel/agents/repair', {
         project_id: projectId, model_id: selectedModelId, payload: {},
       })
-      setRepairResult(res.data || null)
       await loadProjectModules()
       message.success(`连续性修复完成，发现 ${res.data?.issues_found || 0} 个问题`)
     } catch (e: any) { message.error(e.response?.data?.detail || '修复失败') }
@@ -394,13 +291,9 @@ export default function NovelProjectWorkspace() {
   }
 
   /* ── Plan (AI 一键初始化) ──────────────────────────────────────── */
-  const [planProgress, setPlanProgress] = useState<any>(null)
-
   const runPlan = async () => {
-    if (!await confirmReferenceReady('全案规划')) {
-      setReferenceConfigOpen(true)
-      return
-    }
+    if (!await flushPendingSave()) return
+    if (!await confirmReferenceReady('全案规划')) return
     setPlanning(true)
     setPlanProgress(null)
     try {
@@ -442,7 +335,6 @@ export default function NovelProjectWorkspace() {
           else if (data.type === 'error') throw new Error(data.error)
         } catch { /* skip */ }
       }
-      if (finalData) setResults(finalData.results || [])
       await loadProjectModules()
       message.success('规划已完成')
     } catch (err: any) { message.error(err.message || '规划失败') }
@@ -450,6 +342,7 @@ export default function NovelProjectWorkspace() {
   }
 
   const executeAgents = async () => {
+    if (!await flushPendingSave()) return
     setExecutingAgents(true)
     try {
       const res = await apiClient.post('/novel/agents/execute', {
@@ -467,10 +360,8 @@ export default function NovelProjectWorkspace() {
   const generateCurrentChapterProse = async () => {
     if (!activeChapter) return message.warning('请先选择章节')
     if (!selectedModelId) return message.warning('请先选择写作模型')
-    if (!await confirmReferenceReady('正文创作')) {
-      setReferenceConfigOpen(true)
-      return
-    }
+    if (!await flushPendingSave()) return
+    if (!await confirmReferenceReady('正文创作')) return
     setStreamingChapterId(activeChapter.id)
     setStreamingText('')
     setStreamingProgress('正在请求模型...')
@@ -534,6 +425,7 @@ export default function NovelProjectWorkspace() {
       message.warning('至少选择 2 章才能进行重组')
       return
     }
+    if (!await flushPendingSave()) return
     message.loading({ content: `${mode === 'expand' ? '正在扩展' : '正在合并'}章节...`, key: 'restructure', duration: 0 })
 
     const res = await apiClient.post('/novel/chapters/restructure', {
@@ -565,6 +457,7 @@ export default function NovelProjectWorkspace() {
   }
 
   const deleteChapter = async (cid: number) => {
+    if (!await flushPendingSave()) return
     await apiClient.delete(`/novel/chapters/${cid}`)
     await loadProjectModules()
   }
@@ -629,6 +522,7 @@ export default function NovelProjectWorkspace() {
   }
 
   const submitEditor = async () => {
+    if (!await flushPendingSave()) return
     const v = await editorForm.validateFields()
     try {
       if (editorKind === 'worldbuilding') {
@@ -680,61 +574,10 @@ export default function NovelProjectWorkspace() {
     } catch { message.error('保存失败') }
   }
 
-  /* ── version rollback ──────────────────────────────────────────── */
-  const rollbackChapterVersion = async (versionId: number) => {
-    if (!activeChapter) return
-    setRollingBackVersionId(versionId)
-    try {
-      await apiClient.post(`/novel/chapters/${activeChapter.id}/rollback`, { version_id: versionId })
-      await loadProjectModules()
-      await loadChapterVersions(activeChapter.id)
-      message.success('已回滚到指定版本')
-    } catch { message.error('回滚失败') }
-    finally { setRollingBackVersionId(null) }
-  }
-
   /* ── streaming scroll ──────────────────────────────────────────── */
   useEffect(() => {
     if (streamingChapterId) streamingEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
   }, [streamingText, streamingChapterId])
-
-  /* ── sorted / filtered chapters ────────────────────────────────── */
-  const sortedChapters = useMemo(
-    () => [...chapters].sort((a, b) => a.chapter_no - b.chapter_no),
-    [chapters],
-  )
-
-  const filteredChapters = useMemo(() => {
-    const keyword = chapterSearch.trim().toLowerCase()
-    const filtered = sortedChapters.filter((ch) => {
-      const text = String(ch.chapter_text || '')
-      const isPlaceholder = text.includes('【占位正文】')
-      const isWritten = !!text && !isPlaceholder
-      const matchesKeyword = !keyword || [
-        ch.title,
-        ch.chapter_summary,
-        ch.chapter_goal,
-        ch.conflict,
-        ch.ending_hook,
-        `第${ch.chapter_no}章`,
-      ].some((value) => String(value || '').toLowerCase().includes(keyword))
-
-      const matchesStatus = chapterStatusFilter === 'all'
-        || (chapterStatusFilter === 'written' && isWritten)
-        || (chapterStatusFilter === 'unwritten' && !text)
-        || (chapterStatusFilter === 'placeholder' && isPlaceholder)
-
-      return matchesKeyword && matchesStatus
-    })
-
-    const sorted = [...filtered]
-    if (chapterSortMode === 'chapter_no_desc') sorted.sort((a, b) => b.chapter_no - a.chapter_no)
-    else if (chapterSortMode === 'word_count_desc') sorted.sort((a, b) => wc(b.chapter_text) - wc(a.chapter_text))
-    else if (chapterSortMode === 'title_asc') sorted.sort((a, b) => String(a.title || '').localeCompare(String(b.title || ''), 'zh-CN'))
-    else sorted.sort((a, b) => a.chapter_no - b.chapter_no)
-
-    return sorted
-  }, [sortedChapters, chapterSearch, chapterStatusFilter, chapterSortMode])
 
   /* ── render ────────────────────────────────────────────────────── */
   if (loading && !selectedProject) {
@@ -764,11 +607,23 @@ export default function NovelProjectWorkspace() {
             参考作品
           </Button>
         </Tooltip>
+        <Tooltip title="查看参考项目、画像完整度、正文缓存和参考报告">
+          <Button type="text" size="small" icon={<BookOutlined />} onClick={() => setReferenceEngineeringOpen(true)}>
+            参考工程
+          </Button>
+        </Tooltip>
         {referenceSummary.count > 0 && (
           <Tag color="purple" bordered={false}>{referenceSummary.strengthLabel} · {referenceSummary.count} 部参考</Tag>
         )}
+        <Tooltip title="查看运行中任务和历史运行记录">
+          <Badge count={activeTasks.length + activeKnowledgeJobCount} size="small">
+            <Button type="text" size="small" icon={<ClockCircleOutlined />} onClick={() => setTaskCenterOpen(true)}>
+              任务中心
+            </Button>
+          </Badge>
+        </Tooltip>
         <Tooltip title="刷新">
-          <Button type="text" size="small" icon={<ReloadOutlined />} loading={loading} onClick={loadProjectModules} />
+          <Button type="text" size="small" icon={<ReloadOutlined />} loading={loading} onClick={async () => { if (await flushPendingSave()) await loadProjectModules() }} />
         </Tooltip>
       </div>
 
@@ -790,7 +645,7 @@ export default function NovelProjectWorkspace() {
           onOpenOutlineTree={() => setOutlineTreeOpen(true)}
           onOpenChapterDrawer={() => setChapterDrawerOpen(true)}
           onCreateChapter={() => openEditor('chapter')}
-          onSelectChapter={setActiveChapterId}
+          onSelectChapter={(chapterId) => { void selectChapter(chapterId) }}
         />
 
         <WorkspaceCenter
@@ -815,8 +670,9 @@ export default function NovelProjectWorkspace() {
           onGenerateCurrentChapterProse={generateCurrentChapterProse}
           onEditActiveChapter={() => activeChapter && openEditor('chapter', activeChapter)}
           onChapterTextChange={(next) => {
-            setChapters(prev => prev.map(c => c.id === activeChapterId ? { ...c, chapter_text: next } : c))
-            scheduleSave(next)
+            const chapterId = activeChapterId
+            setChapters(prev => prev.map(c => c.id === chapterId ? { ...c, chapter_text: next } : c))
+            scheduleSave(chapterId, next)
           }}
         />
 
@@ -867,13 +723,39 @@ export default function NovelProjectWorkspace() {
         onSaved={(config) => setSelectedProject((prev: any) => prev ? { ...prev, reference_config: config } : prev)}
       />
 
+      <ReferenceEngineeringModal
+        open={referenceEngineeringOpen}
+        referenceConfig={selectedProject?.reference_config || {}}
+        referenceReports={referenceReports}
+        onClose={() => setReferenceEngineeringOpen(false)}
+        onOpenReferenceConfig={() => {
+          setReferenceEngineeringOpen(false)
+          setReferenceConfigOpen(true)
+        }}
+      />
+
+      <TaskCenterDrawer
+        open={taskCenterOpen}
+        activeTasks={activeTasks}
+        runRecords={runRecords}
+        knowledgeIngestJobs={knowledgeIngestJobs}
+        loading={loading}
+        knowledgeJobsLoading={knowledgeJobsLoading}
+        onClose={() => setTaskCenterOpen(false)}
+        onRefresh={async () => { if (await flushPendingSave()) await loadProjectModules() }}
+        onRefreshKnowledgeJobs={loadKnowledgeIngestJobs}
+        onPauseKnowledgeJob={(jobId) => { void pauseKnowledgeIngestJob(jobId) }}
+        onResumeKnowledgeJob={(jobId) => { void resumeKnowledgeIngestJob(jobId) }}
+        onCancelKnowledgeJob={(jobId) => { void cancelKnowledgeIngestJob(jobId) }}
+      />
+
       <OutlineTreeModal
         open={outlineTreeOpen}
         treeData={chapterTreeData}
         activeChapterId={activeChapterId}
         onClose={() => setOutlineTreeOpen(false)}
         onCreateOutline={() => { setOutlineTreeOpen(false); openEditor('outline') }}
-        onSelectChapter={(chapterId) => { setActiveChapterId(chapterId); setOutlineTreeOpen(false) }}
+        onSelectChapter={(chapterId) => { void selectChapter(chapterId).then((saved) => { if (saved) setOutlineTreeOpen(false) }) }}
       />
 
       {/* ═══ Outline Control Panel ═══ */}
@@ -919,7 +801,7 @@ export default function NovelProjectWorkspace() {
         onGenerateCurrentChapterProse={generateCurrentChapterProse}
         onOpenRestructure={() => { setSelectMode(true); setRestructurePanelOpen(true) }}
         onOpenVersionHistory={() => { setRightPanelOpen(true); setRightPanelTab('versions'); setChapterDrawerOpen(false) }}
-        onSelectChapter={setActiveChapterId}
+        onSelectChapter={(chapterId) => { void selectChapter(chapterId) }}
         onSetSelectMode={setSelectMode}
         onSetSelectedChapterIds={setSelectedChapterIds}
         onSetChapterSearch={setChapterSearch}
