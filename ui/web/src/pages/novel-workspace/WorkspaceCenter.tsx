@@ -263,15 +263,18 @@ export function WorkspaceCenter({
   streamingText,
   streamingProgress,
   streamingPercent,
+  generationPipeline,
   streamingEndRef,
   proseEditorRef,
   saveStatus,
   planning,
   generatingProse,
+  generatingSceneCards,
   onRunPlan,
   onCreateOutline,
   onCreateChapter,
   onGenerateCurrentChapterProse,
+  onGenerateSceneCards,
   onEditActiveChapter,
   onChapterTextChange,
 }: {
@@ -285,15 +288,18 @@ export function WorkspaceCenter({
   streamingText: string
   streamingProgress: string
   streamingPercent: number
+  generationPipeline?: any[]
   streamingEndRef: React.RefObject<HTMLDivElement | null>
   proseEditorRef: React.MutableRefObject<EditorView | null>
   saveStatus: SaveStatus
   planning: boolean
   generatingProse: boolean
+  generatingSceneCards: boolean
   onRunPlan: () => void
   onCreateOutline: () => void
   onCreateChapter: () => void
   onGenerateCurrentChapterProse: () => void
+  onGenerateSceneCards: () => void
   onEditActiveChapter: () => void
   onChapterTextChange: (text: string) => void
 }) {
@@ -348,6 +354,9 @@ export function WorkspaceCenter({
             <Text type="secondary" style={{ fontSize: 13 }}>{wc(activeChapter.chapter_text)} 字</Text>
             <SaveIndicator status={saveStatus} />
             <EditorDisplayControls prefs={editorDisplayPrefs} onChange={setEditorDisplayPrefs} />
+            <Tooltip title="生成或刷新场景卡">
+              <Button size="small" icon={<FileTextOutlined />} loading={generatingSceneCards} onClick={onGenerateSceneCards}>场景卡</Button>
+            </Tooltip>
             <Tooltip title="生成正文">
               <Button type="primary" size="small" icon={<PlayCircleOutlined />} loading={generatingProse} onClick={onGenerateCurrentChapterProse} />
             </Tooltip>
@@ -363,6 +372,19 @@ export function WorkspaceCenter({
                   <Text type="secondary">{Math.round(streamingPercent)}%</Text>
                 </Space>
                 <Progress percent={streamingPercent} status={streamingProgress === '生成失败' ? 'exception' : 'active'} size="small" />
+                {Array.isArray(generationPipeline) && generationPipeline.length > 0 && (
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {generationPipeline.slice(-6).map((stage: any, index: number) => (
+                      <Tag
+                        key={`${stage.key || index}-${stage.at || index}`}
+                        color={stage.status === 'success' ? 'green' : stage.status === 'warn' ? 'gold' : stage.status === 'failed' ? 'red' : 'blue'}
+                        bordered={false}
+                      >
+                        {stage.label || stage.key}
+                      </Tag>
+                    ))}
+                  </div>
+                )}
                 <Paragraph style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 13, maxHeight: 200, overflow: 'auto', margin: 0, whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
                   {streamingText}
                   <div ref={streamingEndRef} />
@@ -372,8 +394,8 @@ export function WorkspaceCenter({
           )}
 
           <details style={{ flexShrink: 0, margin: 0 }}>
-            <summary style={{ padding: '8px 24px', cursor: 'pointer', background: '#fafbfc', borderBottom: '1px solid #f0f0f0', fontSize: 13, color: '#999' }}>
-              📋 章节上下文（展开查看章节目标、摘要、冲突、钩子）
+            <summary style={{ padding: '8px 24px', cursor: 'pointer', background: '#fafbfc', borderBottom: '1px solid #f0f0f0', fontSize: 13, color: '#667085' }}>
+              章节上下文（目标、摘要、冲突、钩子、场景卡）
             </summary>
             <div style={{ padding: '12px 24px', background: '#fff', borderBottom: '1px solid #f0f0f0' }}>
               <Descriptions column={2} size="small" bordered>
@@ -381,13 +403,44 @@ export function WorkspaceCenter({
                 <Descriptions.Item label="章节摘要">{displayValue(activeChapter.chapter_summary) || '-'}</Descriptions.Item>
                 <Descriptions.Item label="冲突">{displayValue(activeChapter.conflict) || '-'}</Descriptions.Item>
                 <Descriptions.Item label="结尾钩子">{displayValue(activeChapter.ending_hook) || '-'}</Descriptions.Item>
+                <Descriptions.Item label="必须推进">
+                  {Array.isArray(activeChapter.raw_payload?.must_advance) && activeChapter.raw_payload.must_advance.length > 0
+                    ? activeChapter.raw_payload.must_advance.join('；')
+                    : '-'}
+                </Descriptions.Item>
+                <Descriptions.Item label="禁止重复">
+                  {Array.isArray(activeChapter.raw_payload?.forbidden_repeats) && activeChapter.raw_payload.forbidden_repeats.length > 0
+                    ? activeChapter.raw_payload.forbidden_repeats.join('；')
+                    : '-'}
+                </Descriptions.Item>
                 <Descriptions.Item label="状态">{displayValue(activeChapter.status) || '-'}</Descriptions.Item>
                 <Descriptions.Item label="基础依赖">
-                  {worldbuildingCount > 0 ? '✓ 世界观' : '✗ 世界观'} ·
-                  {characterCount > 0 ? '✓ 角色' : '✗ 角色'} ·
-                  {outlineCount > 0 ? '✓ 大纲' : '✗ 大纲'}
+                  {worldbuildingCount > 0 ? '有世界观' : '缺世界观'} ·
+                  {characterCount > 0 ? '有角色' : '缺角色'} ·
+                  {outlineCount > 0 ? '有大纲' : '缺大纲'}
                 </Descriptions.Item>
               </Descriptions>
+              {Array.isArray(activeChapter.scene_breakdown) && activeChapter.scene_breakdown.length > 0 && (
+                <div style={{ marginTop: 12, display: 'grid', gap: 8 }}>
+                  <Text strong style={{ fontSize: 13 }}>场景卡</Text>
+                  {activeChapter.scene_breakdown.map((scene: any, index: number) => (
+                    <div key={`${scene.scene_no || index}-${scene.title || index}`} style={{ border: '1px solid #edf0f5', borderRadius: 8, padding: '10px 12px', background: '#fbfcfe' }}>
+                      <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                        <Space wrap>
+                          <Tag color="blue" bordered={false}>场景 {scene.scene_no || index + 1}</Tag>
+                          <Text strong>{scene.title || scene.description || scene.purpose || '未命名场景'}</Text>
+                          {scene.location && <Tag bordered={false}>{scene.location}</Tag>}
+                          {scene.emotional_tone && <Tag color="purple" bordered={false}>{scene.emotional_tone}</Tag>}
+                        </Space>
+                        {(scene.purpose || scene.description) && <Text>{scene.purpose || scene.description}</Text>}
+                        {scene.conflict && <Text type="secondary">冲突：{scene.conflict}</Text>}
+                        {scene.beat && <Text type="secondary">节拍：{scene.beat}</Text>}
+                        {scene.exit_state && <Text type="secondary">出场状态：{scene.exit_state}</Text>}
+                      </Space>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </details>
 

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Badge, Button, Form, message, Modal, Select, Typography, Tooltip, Tag,
+  Alert, Badge, Button, Form, List, message, Modal, Select, Space, Typography, Tooltip, Tag,
 } from 'antd'
 import {
   ArrowLeftOutlined, BookOutlined, ClockCircleOutlined, ReloadOutlined,
@@ -32,7 +32,7 @@ import {
   summarizeOutlineExecution,
 } from './novel-workspace/utils'
 
-const { Title } = Typography
+const { Title, Text, Paragraph } = Typography
 
 /* ── main component ─────────────────────────────────────────────── */
 export default function NovelProjectWorkspace() {
@@ -45,10 +45,12 @@ export default function NovelProjectWorkspace() {
   const [stepProseLoading, setStepProseLoading] = useState(false)
   const [stepRepairLoading, setStepRepairLoading] = useState(false)
   const [proseProgress, setProseProgress] = useState({ current: 0, total: 0 })
+  const [proseBatchStatus, setProseBatchStatus] = useState<any>(null)
   const [planProgress, setPlanProgress] = useState<any>(null)
   const [planning, setPlanning] = useState(false)
   const [executingAgents, setExecutingAgents] = useState(false)
   const [generatingProse, setGeneratingProse] = useState(false)
+  const [generatingSceneCards, setGeneratingSceneCards] = useState(false)
 
   // ── 大纲生成控制面板 ──
   const [outlinePanelOpen, setOutlinePanelOpen] = useState(false)
@@ -73,7 +75,9 @@ export default function NovelProjectWorkspace() {
   const [streamingText, setStreamingText] = useState('')
   const [streamingProgress, setStreamingProgress] = useState('')
   const [streamingPercent, setStreamingPercent] = useState(0)
+  const [generationPipeline, setGenerationPipeline] = useState<any[]>([])
   const streamingEndRef = useRef<HTMLDivElement | null>(null)
+  const proseBatchCancelRef = useRef(false)
 
   // ── editors / modals ──
   const [editorKind, setEditorKind] = useState<EditorKind | null>(null)
@@ -86,6 +90,82 @@ export default function NovelProjectWorkspace() {
 
   const proseEditorRef = useRef<EditorView | null>(null)
 
+  const renderPreflightModalContent = (payload: any) => {
+    const preflight = payload?.preflight || payload?.context_package?.preflight || {}
+    const checks = Array.isArray(preflight.checks) ? preflight.checks : []
+    const blockers = Array.isArray(preflight.blockers) ? preflight.blockers : []
+    const warnings = Array.isArray(preflight.warnings) ? preflight.warnings : []
+    const safetyDecision = payload?.safety_decision
+    return (
+      <Space direction="vertical" size={12} style={{ width: '100%' }}>
+        <Alert
+          type={payload?.error_code === 'REFERENCE_SAFETY_BLOCKED' ? 'error' : 'warning'}
+          showIcon
+          message={payload?.error || '生成条件未满足'}
+          description="系统没有直接写入正文，避免整章生成失败后污染当前版本。你可以补齐材料、刷新场景卡，或选择允许缺材料继续。"
+        />
+        {blockers.length > 0 && (
+          <div>
+            <Text strong>阻塞项</Text>
+            <List
+              size="small"
+              dataSource={blockers}
+              renderItem={(item: any) => (
+                <List.Item>
+                  <Space direction="vertical" size={2}>
+                    <Text>{item.label || item.key || item}</Text>
+                    {item.fix && <Text type="secondary">{item.fix}</Text>}
+                  </Space>
+                </List.Item>
+              )}
+            />
+          </div>
+        )}
+        {checks.length > 0 && (
+          <div>
+            <Text strong>预检清单</Text>
+            <div style={{ marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {checks.map((check: any, index: number) => (
+                <Tag key={`${check.key || check.label || index}`} color={check.ok ? 'green' : check.severity === 'high' ? 'red' : 'gold'} bordered={false}>
+                  {check.ok ? '✓' : '!'} {check.label || check.key}
+                </Tag>
+              ))}
+            </div>
+          </div>
+        )}
+        {warnings.length > 0 && (
+          <Paragraph style={{ margin: 0, whiteSpace: 'pre-wrap' }}>
+            {warnings.join('\n')}
+          </Paragraph>
+        )}
+        {safetyDecision && (
+          <Alert
+            type={safetyDecision.blocked ? 'error' : 'info'}
+            showIcon
+            message={`仿写安全评分：${safetyDecision.score ?? '-'}，照搬命中：${safetyDecision.copy_hit_count ?? 0}`}
+            description={(safetyDecision.reasons || []).join('；') || '未发现阻塞项'}
+          />
+        )}
+      </Space>
+    )
+  }
+
+  const showGenerationBlockedModal = (payload: any, onContinue?: () => void) => {
+    const isSafetyBlocked = payload?.error_code === 'REFERENCE_SAFETY_BLOCKED'
+    Modal.confirm({
+      title: isSafetyBlocked ? '仿写安全阈值未通过' : '章节生成前置检查未通过',
+      width: 760,
+      icon: null,
+      content: renderPreflightModalContent(payload),
+      okText: onContinue && !isSafetyBlocked ? '允许缺材料继续' : '知道了',
+      cancelText: onContinue && !isSafetyBlocked ? '先补齐材料' : undefined,
+      okButtonProps: isSafetyBlocked ? { danger: true } : undefined,
+      onOk: () => {
+        if (onContinue && !isSafetyBlocked) onContinue()
+      },
+    })
+  }
+
   const {
     loading,
     selectedProject,
@@ -96,6 +176,7 @@ export default function NovelProjectWorkspace() {
     chapters,
     setChapters,
     runRecords,
+    reviews,
     agentExecution,
     setAgentExecution,
     models,
@@ -118,6 +199,24 @@ export default function NovelProjectWorkspace() {
     chapterStatusFilter,
     chapterSortMode,
   })
+
+  const proseQualityReports = useMemo(() => (
+    reviews
+      .filter((item: any) => item.review_type === 'prose_quality')
+      .slice()
+      .sort((a: any, b: any) => String(b.created_at || '').localeCompare(String(a.created_at || '')))
+  ), [reviews])
+
+  const cancelStepGenerateProse = () => {
+    if (!stepProseLoading) return
+    proseBatchCancelRef.current = true
+    setProseBatchStatus((prev: any) => ({
+      ...(prev || {}),
+      canceled: true,
+      lastError: '已请求停止，当前章节完成后停止后续生成',
+    }))
+    message.info('已请求停止批量生成，当前章节完成后会停止后续章节')
+  }
 
   // ── auto-save state ──
   const {
@@ -148,6 +247,7 @@ export default function NovelProjectWorkspace() {
     stepProseLoading,
     stepRepairLoading,
     proseProgress,
+    proseBatchStatus,
     planning,
     planProgress,
     executingAgents,
@@ -155,6 +255,7 @@ export default function NovelProjectWorkspace() {
     streamingProgress,
     streamingPercent,
     activeChapter,
+    onCancelProseBatch: cancelStepGenerateProse,
   })
 
   // ── diff toggle ──
@@ -258,22 +359,125 @@ export default function NovelProjectWorkspace() {
     if (unWritten.length === 0) return message.warning('所有章节已有正文，无需生成')
     if (!await confirmReferenceReady('正文创作')) return
     setStepProseLoading(true)
-    let done = 0
+    proseBatchCancelRef.current = false
+    setProseBatchStatus({ success: 0, failed: 0, currentTitle: '', lastError: '', lastQuality: '' })
+    let success = 0
+    let failed = 0
+    const errors: string[] = []
+    const batchStartedAt = Date.now()
+    const batchChapters: any[] = []
     try {
-      for (const ch of unWritten) {
-        setProseProgress({ current: done + 1, total: unWritten.length })
+      for (let index = 0; index < unWritten.length; index += 1) {
+        if (proseBatchCancelRef.current) break
+        const ch = unWritten[index]
+        const currentTitle = `第 ${ch.chapter_no} 章《${displayValue(ch.title)}》`
+        setProseProgress({ current: index + 1, total: unWritten.length })
+        setProseBatchStatus({ success, failed, currentTitle, lastError: '', lastQuality: '' })
         try {
-          await fetch(`${apiClient.defaults.baseURL}/novel/chapters/${ch.id}/generate-prose`, {
+          const resp = await fetch(`${apiClient.defaults.baseURL}/novel/chapters/${ch.id}/generate-prose`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ project_id: projectId, model_id: selectedModelId, prompt: `请生成第 ${ch.chapter_no} 章《${displayValue(ch.title)}》完整正文` }),
           })
-          done++
-        } catch { done++ }
+          const raw = await resp.text()
+          let data: any = null
+          try { data = raw ? JSON.parse(raw) : null } catch { data = null }
+          if (!resp.ok) {
+            if (data?.error_code === 'PROSE_PREFLIGHT_BLOCKED' || data?.error_code === 'REFERENCE_SAFETY_BLOCKED') {
+              showGenerationBlockedModal(data)
+            }
+            throw new Error(data?.error || data?.detail || raw || `HTTP ${resp.status}`)
+          }
+          success += 1
+          const score = data?.self_check?.review?.score
+          const revised = data?.self_check?.revised
+          batchChapters.push({
+            id: ch.id,
+            chapter_no: ch.chapter_no,
+            title: displayValue(ch.title),
+            status: 'success',
+            score,
+            revised: Boolean(revised),
+            word_count: data?.chapter?.chapter_text ? String(data.chapter.chapter_text).replace(/\s/g, '').length : undefined,
+          })
+          if (Array.isArray(data?.pipeline)) setGenerationPipeline(data.pipeline)
+          setProseBatchStatus({
+            success,
+            failed,
+            currentTitle,
+            lastError: '',
+            lastQuality: score !== undefined ? `最近质检：${score} 分${revised ? '，已修订' : ''}` : '',
+          })
+        } catch (error: any) {
+          failed += 1
+          const messageText = `${currentTitle}：${error?.message || '生成失败'}`
+          errors.push(messageText)
+          batchChapters.push({
+            id: ch.id,
+            chapter_no: ch.chapter_no,
+            title: displayValue(ch.title),
+            status: 'failed',
+            error: error?.message || '生成失败',
+          })
+          setProseBatchStatus({ success, failed, currentTitle, lastError: messageText, lastQuality: '' })
+        }
+        if (proseBatchCancelRef.current) break
+      }
+      const canceled = proseBatchCancelRef.current
+      const skipped = Math.max(0, unWritten.length - success - failed)
+      try {
+        await apiClient.post('/novel/runs', {
+          project_id: projectId,
+          run_type: 'batch_generate_prose',
+          step_name: 'summary',
+          status: canceled ? 'canceled' : failed > 0 ? 'warn' : 'success',
+          input_ref: {
+            model_id: selectedModelId,
+            chapter_ids: unWritten.map(ch => ch.id),
+            total: unWritten.length,
+          },
+          output_ref: {
+            total: unWritten.length,
+            success,
+            failed,
+            skipped,
+            canceled,
+            chapters: batchChapters,
+            errors,
+          },
+          duration_ms: Date.now() - batchStartedAt,
+          error_message: errors.slice(0, 5).join('\n'),
+        })
+      } catch {
+        // 汇总记录写入失败不影响已经生成的章节正文。
       }
       await loadProjectModules()
-      message.success(`正文生成完成 (${done}/${unWritten.length})`)
+      if (success > 0) {
+        setRightPanelOpen(true)
+        setRightPanelTab('proseQuality')
+      }
+      if (canceled) {
+        message.warning(`已停止批量生成：成功 ${success} 章，失败 ${failed} 章，未处理 ${skipped} 章`)
+      } else if (failed > 0) {
+        message.warning(`正文批量生成完成：成功 ${success} 章，失败 ${failed} 章`)
+        Modal.warning({
+          title: '部分章节生成失败',
+          width: 680,
+          content: (
+            <div style={{ whiteSpace: 'pre-wrap', maxHeight: 320, overflow: 'auto' }}>
+              {errors.slice(0, 20).join('\n')}
+              {errors.length > 20 ? `\n... 另有 ${errors.length - 20} 条失败` : ''}
+            </div>
+          ),
+        })
+      } else {
+        message.success(`正文生成完成 (${success}/${unWritten.length})`)
+      }
     } catch (e: any) { message.error(e.message || '正文生成失败') }
-    finally { setStepProseLoading(false) }
+    finally {
+      setStepProseLoading(false)
+      setProseProgress({ current: 0, total: 0 })
+      proseBatchCancelRef.current = false
+    }
   }
 
   const stepRunRepair = async () => {
@@ -357,7 +561,35 @@ export default function NovelProjectWorkspace() {
     } finally { setExecutingAgents(false) }
   }
 
-  const generateCurrentChapterProse = async () => {
+  const generateSceneCardsForActiveChapter = async (allowIncomplete = false) => {
+    if (!activeChapter) return message.warning('请先选择章节')
+    if (!selectedModelId) return message.warning('请先选择写作模型')
+    if (!await flushPendingSave()) return
+    setGeneratingSceneCards(true)
+    try {
+      const res = await apiClient.post(`/novel/chapters/${activeChapter.id}/scene-cards`, {
+        project_id: projectId,
+        model_id: selectedModelId,
+        allow_incomplete: allowIncomplete,
+      })
+      if (res.data?.chapter) {
+        setChapters(prev => prev.map(c => c.id === res.data.chapter.id ? res.data.chapter : c))
+      }
+      await loadProjectModules()
+      message.success(`场景卡已生成：${Array.isArray(res.data?.scene_cards) ? res.data.scene_cards.length : 0} 个`)
+    } catch (error: any) {
+      const payload = error?.response?.data
+      if (payload?.error_code === 'SCENE_PREFLIGHT_BLOCKED') {
+        showGenerationBlockedModal(payload, () => { void generateSceneCardsForActiveChapter(true) })
+      } else {
+        message.error(payload?.error || error?.message || '场景卡生成失败')
+      }
+    } finally {
+      setGeneratingSceneCards(false)
+    }
+  }
+
+  const generateCurrentChapterProse = async (options: { allowIncomplete?: boolean; forceSceneCards?: boolean } = {}) => {
     if (!activeChapter) return message.warning('请先选择章节')
     if (!selectedModelId) return message.warning('请先选择写作模型')
     if (!await flushPendingSave()) return
@@ -366,6 +598,7 @@ export default function NovelProjectWorkspace() {
     setStreamingText('')
     setStreamingProgress('正在请求模型...')
     setStreamingPercent(10)
+    setGenerationPipeline([])
     setGeneratingProse(true)
     try {
       const ctx = {
@@ -382,10 +615,20 @@ export default function NovelProjectWorkspace() {
             project_id: projectId, model_id: selectedModelId,
             prompt: `请生成第 ${activeChapter.chapter_no} 章《${displayValue(activeChapter.title)}》完整正文`,
             payload: ctx,
+            allow_incomplete: Boolean(options.allowIncomplete),
+            force_scene_cards: Boolean(options.forceSceneCards),
           }),
         },
       )
-      if (!resp.ok || !resp.body) throw new Error(await resp.text())
+      if (!resp.ok || !resp.body) {
+        const raw = await resp.text()
+        let payload: any = null
+        try { payload = raw ? JSON.parse(raw) : null } catch { payload = null }
+        if (payload?.error_code === 'PROSE_PREFLIGHT_BLOCKED' || payload?.error_code === 'REFERENCE_SAFETY_BLOCKED') {
+          showGenerationBlockedModal(payload, () => { void generateCurrentChapterProse({ ...options, allowIncomplete: true }) })
+        }
+        throw new Error(payload?.error || raw || `HTTP ${resp.status}`)
+      }
       const reader = resp.body.getReader()
       const dec = new TextDecoder('utf-8')
       let buf = '', done: any
@@ -398,9 +641,16 @@ export default function NovelProjectWorkspace() {
           const line = part.split('\n').find(r => r.startsWith('data: '))
           if (!line) continue
           const p = JSON.parse(line.replace(/^data: /, ''))
+          if (p.pipeline) setGenerationPipeline(Array.isArray(p.pipeline) ? p.pipeline : [])
           if (p.type === 'progress') { setStreamingProgress(p.progress || '生成中...'); setStreamingPercent(Math.min(90, p.percent || 35)) }
           else if (p.type === 'chunk') { setStreamingText(prev => `${prev}${p.text || ''}`); setStreamingPercent(prev => Math.min(95, prev + 2)) }
           else if (p.type === 'done') done = p
+          else if (p.type === 'error') {
+            if (p.error_code === 'PROSE_PREFLIGHT_BLOCKED' || p.error_code === 'REFERENCE_SAFETY_BLOCKED') {
+              showGenerationBlockedModal(p, () => { void generateCurrentChapterProse({ ...options, allowIncomplete: true }) })
+            }
+            throw new Error(p.error || '正文生成失败')
+          }
         }
       }
       const updated = done?.chapter
@@ -409,6 +659,8 @@ export default function NovelProjectWorkspace() {
       setStreamingPercent(100)
       setStreamingText(prev => prev || updated?.chapter_text || '')
       await loadProjectModules()
+      setRightPanelOpen(true)
+      setRightPanelTab('proseQuality')
       message.success(`已使用 ${done?.result?.modelName || '所选模型'} 生成正文`)
     } catch (error: any) {
       setStreamingProgress('生成失败'); setStreamingPercent(0)
@@ -516,7 +768,11 @@ export default function NovelProjectWorkspace() {
         chapter_no: 1, title: '', chapter_goal: '', chapter_summary: '',
         conflict: '', ending_hook: '', outline_id: null, chapter_text: '',
       }
-      editorForm.setFieldsValue(data)
+      editorForm.setFieldsValue({
+        ...data,
+        must_advance: formatListField(data.raw_payload?.must_advance),
+        forbidden_repeats: formatListField(data.raw_payload?.forbidden_repeats),
+      })
     }
     setEditorKind(kind)
   }
@@ -563,6 +819,11 @@ export default function NovelProjectWorkspace() {
           conflict: v.conflict || '', ending_hook: v.ending_hook || '',
           status: editorItem?.status || 'draft', outline_id: v.outline_id ?? null,
           chapter_text: v.chapter_text || '',
+          raw_payload: {
+            ...(editorItem?.raw_payload || {}),
+            must_advance: parseListField(v.must_advance),
+            forbidden_repeats: parseListField(v.forbidden_repeats),
+          },
         }
         if (editorItem?.id) await apiClient.put(`/novel/chapters/${editorItem.id}`, payload)
         else await apiClient.post('/novel/chapters', { ...payload, scene_breakdown: [], continuity_notes: [] })
@@ -641,6 +902,7 @@ export default function NovelProjectWorkspace() {
           activeChapterId={activeChapterId}
           onOpenOutlinePanel={() => setOutlinePanelOpen(true)}
           onGenerateProse={stepGenerateProse}
+          onCancelGenerateProse={cancelStepGenerateProse}
           onRunRepair={stepRunRepair}
           onOpenOutlineTree={() => setOutlineTreeOpen(true)}
           onOpenChapterDrawer={() => setChapterDrawerOpen(true)}
@@ -659,15 +921,18 @@ export default function NovelProjectWorkspace() {
           streamingText={streamingText}
           streamingProgress={streamingProgress}
           streamingPercent={streamingPercent}
+          generationPipeline={generationPipeline}
           streamingEndRef={streamingEndRef}
           proseEditorRef={proseEditorRef}
           saveStatus={saveStatus}
           planning={planning}
           generatingProse={generatingProse}
+          generatingSceneCards={generatingSceneCards}
           onRunPlan={runPlan}
           onCreateOutline={() => openEditor('outline')}
           onCreateChapter={() => openEditor('chapter')}
-          onGenerateCurrentChapterProse={generateCurrentChapterProse}
+          onGenerateCurrentChapterProse={() => generateCurrentChapterProse()}
+          onGenerateSceneCards={() => generateSceneCardsForActiveChapter()}
           onEditActiveChapter={() => activeChapter && openEditor('chapter', activeChapter)}
           onChapterTextChange={(next) => {
             const chapterId = activeChapterId
@@ -683,6 +948,8 @@ export default function NovelProjectWorkspace() {
           characters={characters}
           outlines={outlines}
           referenceReports={referenceReports}
+          proseQualityReports={proseQualityReports}
+          activeChapterId={activeChapterId}
           chapterVersions={chapterVersions}
           chapterVersionsLoading={chapterVersionsLoading}
           rollingBackVersionId={rollingBackVersionId}

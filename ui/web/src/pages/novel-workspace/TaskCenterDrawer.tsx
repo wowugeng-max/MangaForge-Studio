@@ -10,6 +10,8 @@ export type WorkspaceActiveTask = {
   phase?: string
   progress?: number
   detail?: string
+  cancelLabel?: string
+  onCancel?: () => void
 }
 
 function statusTag(status?: string) {
@@ -29,6 +31,7 @@ function runTypeLabel(type?: string) {
     plan: '全案规划',
     agent_execute: 'Agent 链',
     generate_prose: '正文生成',
+    batch_generate_prose: '批量正文生成',
     repair: '连续性修复',
     restructure: '章节重组',
     market_review: '市场审计',
@@ -45,6 +48,72 @@ function safeJsonPreview(value: any) {
   } catch {
     return raw
   }
+}
+
+function parseJsonValue(value: any) {
+  if (!value) return null
+  if (typeof value === 'object') return value
+  try {
+    return JSON.parse(String(value))
+  } catch {
+    return null
+  }
+}
+
+function BatchProseRunSummary({ run }: { run: any }) {
+  const output = parseJsonValue(run.output_ref) || {}
+  const chapters = Array.isArray(output.chapters) ? output.chapters : []
+  const failedChapters = chapters.filter((chapter: any) => chapter.status === 'failed')
+  const successChapters = chapters.filter((chapter: any) => chapter.status === 'success')
+  const avgScore = successChapters
+    .map((chapter: any) => Number(chapter.score))
+    .filter((score: number) => Number.isFinite(score))
+  const scoreText = avgScore.length > 0
+    ? Math.round(avgScore.reduce((sum: number, score: number) => sum + score, 0) / avgScore.length)
+    : null
+
+  return (
+    <Card size="small" title="批量生成摘要">
+      <Space direction="vertical" size={10} style={{ width: '100%' }}>
+        <Space wrap>
+          <Tag color="blue" bordered={false}>总计 {output.total ?? chapters.length} 章</Tag>
+          <Tag color="green" bordered={false}>成功 {output.success ?? successChapters.length} 章</Tag>
+          <Tag color={failedChapters.length > 0 ? 'red' : 'default'} bordered={false}>失败 {output.failed ?? failedChapters.length} 章</Tag>
+          {output.canceled && <Tag color="default" bordered={false}>已停止</Tag>}
+          {Number(output.skipped || 0) > 0 && <Tag bordered={false}>未处理 {output.skipped} 章</Tag>}
+          {scoreText !== null && <Tag color={scoreText >= 78 ? 'green' : 'gold'} bordered={false}>平均质检 {scoreText} 分</Tag>}
+          <Tag bordered={false}>耗时 {run.duration_ms ? `${Math.round(Number(run.duration_ms) / 1000)}s` : '-'}</Tag>
+        </Space>
+        {chapters.length > 0 && (
+          <Space wrap size={[4, 4]}>
+            {chapters.slice(0, 80).map((chapter: any) => (
+              <Tag
+                key={`${chapter.chapter_no}-${chapter.id || chapter.title}`}
+                color={chapter.status === 'success' ? (Number(chapter.score || 0) >= 78 ? 'green' : 'gold') : 'red'}
+                bordered={false}
+              >
+                第{chapter.chapter_no}章
+                {chapter.status === 'success' ? ` ${chapter.score ?? '-'}分${chapter.revised ? ' 修订' : ''}` : ' 失败'}
+              </Tag>
+            ))}
+            {chapters.length > 80 && <Tag bordered={false}>另有 {chapters.length - 80} 章</Tag>}
+          </Space>
+        )}
+        {failedChapters.length > 0 && (
+          <Card size="small" title="失败章节" styles={{ body: { padding: 8 } }}>
+            <Space direction="vertical" size={4} style={{ width: '100%' }}>
+              {failedChapters.slice(0, 12).map((chapter: any) => (
+                <Paragraph key={`${chapter.chapter_no}-${chapter.id || chapter.title}`} style={{ marginBottom: 0, fontSize: 12 }} ellipsis={{ rows: 2, expandable: true }}>
+                  第{chapter.chapter_no}章《{chapter.title || '未命名'}》：{chapter.error || '生成失败'}
+                </Paragraph>
+              ))}
+              {failedChapters.length > 12 && <Text type="secondary" style={{ fontSize: 12 }}>另有 {failedChapters.length - 12} 个失败章节，可查看下方原始输出。</Text>}
+            </Space>
+          </Card>
+        )}
+      </Space>
+    </Card>
+  )
 }
 
 function sourceCacheTag(sourceCache: any) {
@@ -117,6 +186,11 @@ export function TaskCenterDrawer({
                       {task.phase && <Text type="secondary" style={{ fontSize: 12 }}>{task.phase}</Text>}
                       {typeof task.progress === 'number' && <Progress percent={Math.max(0, Math.min(100, Math.round(task.progress)))} size="small" />}
                       {task.detail && <Paragraph style={{ marginBottom: 0, fontSize: 12 }} ellipsis={{ rows: 2, expandable: true }}>{task.detail}</Paragraph>}
+                      {task.onCancel && (
+                        <Button size="small" danger icon={<StopOutlined />} onClick={task.onCancel}>
+                          {task.cancelLabel || '停止'}
+                        </Button>
+                      )}
                     </Space>
                   </div>
                 ))}
@@ -232,6 +306,7 @@ export function TaskCenterDrawer({
                 <Text type="danger">{detailRun.error_message}</Text>
               </Card>
             )}
+            {detailRun.run_type === 'batch_generate_prose' && <BatchProseRunSummary run={detailRun} />}
             <Card size="small" title="输入">
               <Paragraph style={{ whiteSpace: 'pre-wrap', maxHeight: 220, overflow: 'auto', marginBottom: 0 }}>
                 {safeJsonPreview(detailRun.input_ref) || '无'}

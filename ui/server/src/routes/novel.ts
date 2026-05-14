@@ -37,6 +37,7 @@ import {
   buildNovelSeed,
   buildNovelTools,
   buildPlatformFitAnalysis,
+  executeNovelAgent,
   executeNovelAgentChain,
   generateNovelPlan,
   generateNovelChapterProse,
@@ -262,23 +263,561 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
   app.get('/api/novel/chapters/:chapterId/versions', async (req, res) => { try { const activeWorkspace = getWorkspace(); res.json(await listChapterVersions(activeWorkspace, Number(req.params.chapterId))) } catch (error) { res.status(500).json({ error: String(error) }) } })
   app.post('/api/novel/chapters/:chapterId/rollback', async (req, res) => { try { const activeWorkspace = getWorkspace(); const updated = await rollbackChapterVersion(activeWorkspace, Number(req.params.chapterId), Number(req.body.version_id)); if (!updated) return res.status(404).json({ error: 'chapter or version not found' }); res.json(updated) } catch (error) { res.status(500).json({ error: String(error) }) } })
   app.put('/api/novel/chapters/:chapterId', async (req, res) => { try { const activeWorkspace = getWorkspace(); const { create_version, createVersion, version_source, versionSource, force_version, forceVersion, ...patch } = req.body || {}; const updated = await updateNovelChapter(activeWorkspace, Number(req.params.chapterId), patch, { createVersion: parseOptionalBoolean(create_version ?? createVersion), versionSource: version_source || versionSource || 'manual_edit', forceVersion: parseOptionalBoolean(force_version ?? forceVersion) }); if (!updated) return res.status(404).json({ error: 'chapter not found' }); res.json(updated) } catch (error) { res.status(500).json({ error: String(error) }) } })
+
+  const compactText = (value: any, limit = 500) => String(value || '').replace(/\s+/g, ' ').trim().slice(0, limit)
+  const normalizeIssue = (issue: any) => {
+    if (typeof issue === 'string') return { severity: 'medium', type: 'general', description: issue, suggestion: '' }
+    return {
+      severity: String(issue?.severity || 'medium'),
+      type: String(issue?.type || issue?.issue_type || 'general'),
+      description: String(issue?.description || issue?.message || issue?.issue || ''),
+      suggestion: String(issue?.suggestion || issue?.suggested_fix || ''),
+    }
+  }
+  const asArray = (value: any) => Array.isArray(value) ? value : []
+  const getStyleLock = (project: any) => {
+    const raw = project?.reference_config?.style_lock || {}
+    const targetLength = raw.chapter_word_range || raw.target_length || (
+      project.length_target === 'long' ? '4000-6000字' : project.length_target === 'short' ? '1500-2500字' : '2500-4000字'
+    )
+    return {
+      narrative_person: raw.narrative_person || raw.narrative_style || ((project.style_tags || []).join('、') || '保持当前项目文风'),
+      sentence_length: raw.sentence_length || '中等句长，长短句交替',
+      dialogue_ratio: raw.dialogue_ratio || '对话驱动，描写为辅',
+      banter_density: raw.banter_density || '跟随当前项目风格',
+      payoff_density: raw.payoff_density || '每章至少一个明确爽点/信息推进',
+      description_density: raw.description_density || '关键场景给足氛围，非关键场景压缩',
+      chapter_word_range: targetLength,
+      banned_words: asArray(raw.banned_words),
+      preferred_words: asArray(raw.preferred_words),
+      ending_policy: raw.ending_policy || '结尾必须到达本章 ending_hook，并留下下一章入口',
+      banned_shortcuts: asArray(raw.banned_shortcuts).length ? asArray(raw.banned_shortcuts) : ['时间过得很快', '几天后', '一切都结束了', '突然就明白了'],
+    }
+  }
+  const getSafetyPolicy = (project: any) => {
+    const raw = project?.reference_config?.safety || {}
+    return {
+      enforce_on_generate: Boolean(raw.enforce_on_generate),
+      min_quality_score: Number(raw.min_quality_score || 60),
+      max_copy_hits: Number(raw.max_copy_hits ?? 0),
+      allowed: asArray(raw.allowed).length ? asArray(raw.allowed) : ['节奏', '结构', '爽点安排', '信息密度', '章节节拍', '情绪曲线'],
+      cautious: asArray(raw.cautious).length ? asArray(raw.cautious) : ['人物功能', '设定机制', '资源经济模型'],
+      forbidden: asArray(raw.forbidden).length ? asArray(raw.forbidden) : ['具体桥段', '专有设定', '原句', '角色名', '核心梗', '事件顺序'],
+    }
+  }
+  const getStoryState = (project: any) => project?.reference_config?.story_state || {}
+  const getVolumePlan = (outlines: any[]) => outlines
+    .filter(outline => outline.outline_type === 'volume')
+    .sort((a, b) => Number(a.id || 0) - Number(b.id || 0))
+    .map(outline => ({
+      id: outline.id,
+      title: outline.title,
+      summary: outline.summary || '',
+      phase_conflicts: outline.conflict_points || [],
+      key_turning_points: outline.turning_points || [],
+      hook: outline.hook || '',
+      target_length: outline.target_length || '',
+    }))
+  const collectRecentFacts = (reviews: any[]) => reviews
+    .filter(item => item.review_type === 'story_state')
+    .slice()
+    .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')))
+    .slice(0, 5)
+    .map(item => {
+      const payload = parseJsonLikePayload(item.payload) || {}
+      return {
+        chapter_no: payload.chapter_no,
+        state_delta: payload.state_delta || payload,
+      }
+    })
+  const buildPreflightChecks = (project: any, chapter: any, previousChapter: any, worldbuilding: any[], characters: any[], sceneCards: any[], referencePreview: any, reviews: any[]) => {
+    const charactersWithState = characters.filter(char => char.current_state && Object.keys(char.current_state || {}).length > 0)
+    const storyState = getStoryState(project)
+    const forbidden = getSafetyPolicy(project).forbidden
+    const repeatedWarnings = asArray(storyState.recent_repeated_information).slice(0, 6)
+    const checks = [
+      { key: 'chapter_blueprint', ok: Boolean(chapter.chapter_summary || chapter.chapter_goal), severity: 'high', label: '章节细纲/目标', fix: '补充章节目标或章节摘要。' },
+      { key: 'scene_cards', ok: sceneCards.length > 0, severity: 'medium', label: '场景卡', fix: '先生成或编辑本章场景卡。' },
+      { key: 'chapter_conflict', ok: Boolean(chapter.conflict), severity: 'medium', label: '本章冲突', fix: '补充本章主要冲突。' },
+      { key: 'ending_hook', ok: Boolean(chapter.ending_hook), severity: 'high', label: '章末钩子', fix: '补充本章结尾钩子。' },
+      { key: 'worldbuilding', ok: worldbuilding.length > 0, severity: 'high', label: '世界观', fix: '补充世界观或核心规则。' },
+      { key: 'characters', ok: characters.length > 0, severity: 'high', label: '角色卡', fix: '补充至少一个主要角色。' },
+      { key: 'character_state', ok: characters.length === 0 || charactersWithState.length > 0 || Boolean(storyState.character_positions), severity: 'medium', label: '角色当前状态', fix: '补充角色 current_state 或先生成故事状态。' },
+      { key: 'plot_points', ok: Boolean(chapter.chapter_goal || chapter.chapter_summary || asArray(chapter.raw_payload?.must_advance).length), severity: 'high', label: '本章必须推进剧情点', fix: '在章节目标/摘要中写清本章必须推进的剧情点。' },
+      { key: 'previous_continuity', ok: chapter.chapter_no <= 1 || Boolean(previousChapter?.chapter_text || previousChapter?.ending_hook), severity: 'high', label: '前章衔接', fix: '补齐上一章正文或结尾钩子。' },
+      { key: 'no_repeat', ok: repeatedWarnings.length === 0, severity: 'low', label: '禁止重复信息', fix: '清理 story_state.recent_repeated_information 或调整本章信息增量。' },
+      { key: 'reference_knowledge', ok: !project.reference_config?.references?.length || Boolean(referencePreview?.entries?.length), severity: 'medium', label: '参考知识注入', fix: '先做参考预览或补齐参考作品画像。' },
+      { key: 'copy_safety_policy', ok: forbidden.length > 0, severity: 'medium', label: '仿写禁止项', fix: '配置仿写安全禁止项。' },
+    ]
+    const blockers = checks.filter(item => !item.ok && item.severity === 'high')
+    const warnings = checks.filter(item => !item.ok).map(item => `${item.label}不足`)
+    return {
+      ready: blockers.length === 0,
+      strict_ready: checks.every(item => item.ok || item.severity === 'low'),
+      checks,
+      blockers,
+      warnings,
+      recent_state_entries: collectRecentFacts(reviews),
+    }
+  }
+  const buildSceneCardsPrompt = (project: any, contextPackage: any) => [
+    '任务：为当前章节生成可人工确认的场景卡。场景卡是正文生成前的蓝图，不要写完整正文。',
+    `作品标题：${project.title}`,
+    '',
+    '【结构化上下文包】',
+    JSON.stringify(contextPackage, null, 2).slice(0, 9000),
+    '',
+    '输出 JSON，字段 scene_cards(array)。每个场景卡包含：scene_no, title, location, characters_present(array), purpose, conflict, beat, emotional_tone, key_dialogue, required_information, transition_from_previous, exit_state。',
+    '要求：2-6 个场景；每个场景必须服务本章目标；最后一个场景必须到达 ending_hook；不要复制参考作品专名、桥段或原句。',
+  ].join('\n')
+  const normalizeSceneCards = (payload: any) => {
+    const cards = Array.isArray(payload?.scene_cards) ? payload.scene_cards : Array.isArray(payload?.scenes) ? payload.scenes : []
+    return cards.map((card: any, index: number) => ({
+      scene_no: Number(card?.scene_no || index + 1),
+      title: String(card?.title || `场景${index + 1}`),
+      location: String(card?.location || ''),
+      characters_present: asArray(card?.characters_present).map((item: any) => String(item)).filter(Boolean),
+      purpose: String(card?.purpose || ''),
+      conflict: String(card?.conflict || ''),
+      beat: String(card?.beat || card?.action || card?.description || ''),
+      emotional_tone: String(card?.emotional_tone || card?.tone || ''),
+      key_dialogue: String(card?.key_dialogue || card?.dialogue_focus || ''),
+      required_information: asArray(card?.required_information).map((item: any) => String(item)).filter(Boolean),
+      transition_from_previous: String(card?.transition_from_previous || ''),
+      exit_state: String(card?.exit_state || ''),
+    })).filter((card: any) => card.beat || card.purpose || card.title)
+  }
+  const generateSceneCardsForChapter = async (activeWorkspace: string, project: any, contextPackage: any, modelId?: number) => {
+    const result = await executeNovelAgent('outline-agent', project, {
+      task: buildSceneCardsPrompt(project, contextPackage),
+      upstreamContext: contextPackage,
+    }, { activeWorkspace, modelId: modelId ? String(modelId) : undefined, maxTokens: 3000, temperature: 0.45, skipMemory: true })
+    const payload = getNovelPayload(result)
+    return { result, sceneCards: normalizeSceneCards(payload) }
+  }
+  const buildParagraphProseContext = (project: any, contextPackage: any) => [
+    '任务：按场景卡生成章节正文。请先在心中按场景组织段落，再输出完整正文。',
+    `作品标题：${project.title}`,
+    '',
+    '【结构化上下文包】',
+    JSON.stringify(contextPackage, null, 2).slice(0, 12000),
+    '',
+    '【段落级写作要求】',
+    '1. 严格按 scene_cards 顺序生成，每个场景至少 3-8 个自然段。',
+    '2. 每个场景必须完成 purpose、conflict、required_information 和 exit_state。',
+    '3. 场景之间必须有过渡，不能硬切。',
+    '4. 保持 style_lock 中的人称、句长、对话比例、吐槽密度、爽点密度、描写浓度和禁用词约束。',
+    '5. 只能学习参考作品的节奏、结构、爽点安排和信息密度；不得复制具体桥段、专有设定、原句、角色名和核心梗。',
+    '',
+    '输出 JSON，包含 prose_chapters 数组。数组第一项必须包含 chapter_no, title, chapter_text, scene_breakdown, continuity_notes。chapter_text 是完整正文，不要 markdown 标题。',
+  ].join('\n')
+  const buildStoryStatePrompt = (project: any, contextPackage: any, chapterText: string) => [
+    '任务：从刚入库的章节正文中提取故事状态机增量，用于后续章节续写。只提取事实，不要推测。',
+    `作品标题：${project.title}`,
+    '',
+    '【生成上下文】',
+    JSON.stringify(contextPackage, null, 2).slice(0, 6000),
+    '',
+    '【章节正文】',
+    chapterText.slice(0, 14000),
+    '',
+    '输出 JSON，字段：',
+    'state_delta: {character_positions, character_relationships, known_secrets, item_ownership, foreshadowing_status, mainline_progress, timeline, unresolved_conflicts, recent_repeated_information}',
+    'character_updates: array，每项包含 name,current_state',
+    'next_chapter_priorities: array',
+    '只返回 JSON。',
+  ].join('\n')
+  const mergeStoryState = (prev: any, delta: any, chapter: any) => ({
+    ...(prev || {}),
+    ...(delta || {}),
+    last_updated_chapter: chapter.chapter_no,
+    last_updated_at: new Date().toISOString(),
+  })
+  const updateStoryStateMachine = async (activeWorkspace: string, project: any, chapter: any, contextPackage: any, chapterText: string, modelId?: number) => {
+    const result = await executeNovelAgent('review-agent', project, {
+      task: buildStoryStatePrompt(project, contextPackage, chapterText),
+    }, { activeWorkspace, modelId: modelId ? String(modelId) : undefined, maxTokens: 2500, temperature: 0.15, skipMemory: true })
+    const payload = getNovelPayload(result)
+    const stateDelta = payload?.state_delta || {}
+    const nextReferenceConfig = {
+      ...(project.reference_config || {}),
+      story_state: mergeStoryState(project.reference_config?.story_state || {}, stateDelta, chapter),
+    }
+    await updateNovelProject(activeWorkspace, project.id, { reference_config: nextReferenceConfig } as any)
+    const characterUpdates = Array.isArray(payload?.character_updates) ? payload.character_updates : []
+    if (characterUpdates.length > 0) {
+      const characters = await listNovelCharacters(activeWorkspace, project.id)
+      for (const update of characterUpdates) {
+        const name = String(update?.name || '').trim()
+        if (!name) continue
+        const character = characters.find(item => item.name === name)
+        if (!character) continue
+        await updateNovelCharacter(activeWorkspace, character.id, {
+          current_state: {
+            ...(character.current_state || {}),
+            ...(update.current_state || {}),
+            last_seen_chapter: chapter.chapter_no,
+          },
+        } as any)
+      }
+    }
+    await createNovelReview(activeWorkspace, {
+      project_id: project.id,
+      review_type: 'story_state',
+      status: 'ok',
+      summary: `故事状态已更新至第${chapter.chapter_no}章`,
+      issues: [],
+      payload: JSON.stringify({ chapter_id: chapter.id, chapter_no: chapter.chapter_no, ...payload }),
+    })
+    return payload
+  }
+  const getReferenceSafetyDecision = (project: any, referenceReport: any) => {
+    const safety = getSafetyPolicy(project)
+    const quality = referenceReport?.quality_assessment || {}
+    const hits = asArray(referenceReport?.copy_guard?.hits)
+    const score = Number(quality.overall_score || 0)
+    const blocked = safety.enforce_on_generate && (score < safety.min_quality_score || hits.length > safety.max_copy_hits)
+    return {
+      blocked,
+      safety,
+      score,
+      copy_hit_count: hits.length,
+      reasons: [
+        score < safety.min_quality_score ? `参考安全评分 ${score} 低于阈值 ${safety.min_quality_score}` : '',
+        hits.length > safety.max_copy_hits ? `照搬命中 ${hits.length} 超过阈值 ${safety.max_copy_hits}` : '',
+      ].filter(Boolean),
+    }
+  }
+  const buildChapterContextPackage = async (
+    activeWorkspace: string,
+    project: any,
+    chapter: any,
+    chapters: any[],
+    worldbuilding: any[],
+    characters: any[],
+    outlines: any[],
+    reviews: any[] = [],
+  ) => {
+    const sorted = [...chapters].sort((a, b) => a.chapter_no - b.chapter_no)
+    const previousChapter = sorted.filter(ch => ch.chapter_no < chapter.chapter_no).slice(-1)[0] || null
+    const previousProseChapters = sorted
+      .filter(ch => ch.chapter_no < chapter.chapter_no && ch.chapter_text)
+      .slice(-3)
+      .map(ch => ({
+        chapter_no: ch.chapter_no,
+        title: ch.title,
+        chapter_summary: ch.chapter_summary || compactText(ch.chapter_text, 240),
+        ending_hook: ch.ending_hook || '',
+        ending_excerpt: String(ch.chapter_text || '').slice(-800),
+      }))
+    let referencePreview: any = null
+    try {
+      referencePreview = await previewNovelKnowledgeInjection(project, '正文创作')
+    } catch {
+      referencePreview = null
+    }
+    const sceneCards = Array.isArray(chapter.scene_breakdown) && chapter.scene_breakdown.length
+      ? chapter.scene_breakdown
+      : (Array.isArray(chapter.scene_list) ? chapter.scene_list : [])
+    const preflight = buildPreflightChecks(project, chapter, previousChapter, worldbuilding, characters, sceneCards, referencePreview, reviews)
+    const styleLock = getStyleLock(project)
+    const safetyPolicy = getSafetyPolicy(project)
+    return {
+      project: {
+        id: project.id,
+        title: project.title,
+        genre: project.genre || '',
+        synopsis: project.synopsis || '',
+        style_tags: project.style_tags || [],
+        length_target: project.length_target || 'medium',
+        target_audience: project.target_audience || '',
+      },
+      chapter_target: {
+        id: chapter.id,
+        chapter_no: chapter.chapter_no,
+        title: chapter.title,
+        goal: chapter.chapter_goal || '',
+        summary: chapter.chapter_summary || '',
+        conflict: chapter.conflict || '',
+        ending_hook: chapter.ending_hook || '',
+        scene_cards: sceneCards,
+        continuity_notes: chapter.continuity_notes || [],
+        must_advance: asArray(chapter.raw_payload?.must_advance),
+        forbidden_repeats: asArray(chapter.raw_payload?.forbidden_repeats),
+      },
+      continuity: {
+        previous_chapter: previousChapter ? {
+          chapter_no: previousChapter.chapter_no,
+          title: previousChapter.title,
+          summary: previousChapter.chapter_summary || '',
+          ending_hook: previousChapter.ending_hook || '',
+          ending_excerpt: String(previousChapter.chapter_text || '').slice(-800),
+        } : null,
+        previous_prose_chapters: previousProseChapters,
+      },
+      story_state: {
+        global: getStoryState(project),
+        recent_state_entries: preflight.recent_state_entries,
+        worldbuilding: worldbuilding[0] || null,
+        characters: characters.map(char => ({
+          name: char.name,
+          role: char.role || char.role_type || '',
+          motivation: char.motivation || '',
+          goal: char.goal || '',
+          current_state: char.current_state || {},
+          abilities: char.abilities || [],
+        })),
+        outlines: outlines.slice(0, 20).map(outline => ({
+          id: outline.id,
+          type: outline.outline_type,
+          title: outline.title,
+          summary: outline.summary || '',
+          hook: outline.hook || '',
+        })),
+      },
+      volume_plan: getVolumePlan(outlines),
+      style_lock: styleLock,
+      safety_policy: safetyPolicy,
+      reference: referencePreview ? {
+        strength_label: referencePreview.strength_label,
+        injected_entry_count: Array.isArray(referencePreview.entries) ? referencePreview.entries.length : 0,
+        warnings: referencePreview.warnings || [],
+      } : null,
+      preflight: {
+        ready: preflight.ready,
+        strict_ready: preflight.strict_ready,
+        checks: preflight.checks,
+        blockers: preflight.blockers,
+        warnings: preflight.warnings,
+      },
+    }
+  }
+  const buildProseReviewPrompt = (project: any, contextPackage: any, chapterText: string) => [
+    '任务：对刚生成的小说章节进行章节级自检。',
+    `作品标题：${project.title}`,
+    '',
+    '请重点检查：',
+    '1. 是否完成本章目标、冲突和章末钩子。',
+    '2. 是否自然衔接上一章结尾状态。',
+    '3. 角色行为是否符合角色卡与当前状态。',
+    '4. 是否有设定冲突、时间线跳跃、物品凭空出现或消失。',
+    '5. 是否有水文、重复、空泛总结、机械说明。',
+    '6. 是否疑似照搬参考项目的专名、桥段或原句。',
+    '',
+    '【结构化上下文包】',
+    JSON.stringify(contextPackage, null, 2).slice(0, 6000),
+    '',
+    '【待审校正文】',
+    chapterText.slice(0, 16000),
+    '',
+    '输出 JSON，字段：passed(boolean), score(0-100), issues(array: severity/type/description/suggestion), revision_directives(array), needs_revision(boolean)。只返回 JSON。',
+  ].join('\n')
+  const buildProseRevisionPrompt = (project: any, contextPackage: any, chapterText: string, review: any) => [
+    '任务：根据自检结果修订本章正文，保留可用内容，修复连续性、角色、节奏和章末钩子问题。',
+    `作品标题：${project.title}`,
+    '',
+    '【结构化上下文包】',
+    JSON.stringify(contextPackage, null, 2).slice(0, 6000),
+    '',
+    '【自检结果】',
+    JSON.stringify(review, null, 2).slice(0, 4000),
+    '',
+    '【初稿正文】',
+    chapterText.slice(0, 16000),
+    '',
+    '请输出 JSON，包含 prose_chapters 数组。数组第一项必须包含 chapter_no, title, chapter_text, scene_breakdown, continuity_notes。chapter_text 是修订后的完整正文，不要 markdown 标题。',
+  ].join('\n')
+  const shouldReviseProse = (review: any) => {
+    const issues = Array.isArray(review?.issues) ? review.issues.map(normalizeIssue) : []
+    const hasHighIssue = issues.some(issue => ['high', 'critical'].includes(issue.severity.toLowerCase()))
+    return Boolean(review?.needs_revision) || Number(review?.score || 100) < 78 || hasHighIssue
+  }
+  const runProseSelfReviewAndRevision = async (activeWorkspace: string, project: any, contextPackage: any, chapterText: string, modelId?: number) => {
+    const reviewResult = await executeNovelAgent('review-agent', project, {
+      task: buildProseReviewPrompt(project, contextPackage, chapterText),
+    }, { activeWorkspace, modelId: modelId ? String(modelId) : undefined, maxTokens: 3000, temperature: 0.2, skipMemory: true })
+    const reviewPayload = getNovelPayload(reviewResult)
+    const normalizedReview = {
+      passed: reviewPayload?.passed !== false,
+      score: Number(reviewPayload?.score || 80),
+      issues: Array.isArray(reviewPayload?.issues) ? reviewPayload.issues.map(normalizeIssue) : [],
+      revision_directives: Array.isArray(reviewPayload?.revision_directives) ? reviewPayload.revision_directives.map((item: any) => String(item)) : [],
+      needs_revision: Boolean(reviewPayload?.needs_revision),
+      modelName: (reviewResult as any).modelName,
+    }
+    if (!shouldReviseProse(normalizedReview)) {
+      return { review: normalizedReview, revision: null, final_text: chapterText, revised: false }
+    }
+    const revisionResult = await executeNovelAgent('prose-agent', project, {
+      task: buildProseRevisionPrompt(project, contextPackage, chapterText, normalizedReview),
+      upstreamContext: contextPackage,
+    }, { activeWorkspace, modelId: modelId ? String(modelId) : undefined, maxTokens: 8000, temperature: 0.65, skipMemory: true })
+    const revisionPayload = getNovelPayload(revisionResult)
+    const revisedFirst = Array.isArray(revisionPayload?.prose_chapters) ? revisionPayload.prose_chapters[0] : revisionPayload
+    const revisedText = revisedFirst?.chapter_text || revisionPayload?.chapter_text || ''
+    if (!revisedText) {
+      return { review: normalizedReview, revision: { error: revisionResult.error || '修订未返回正文' }, final_text: chapterText, revised: false }
+    }
+    return {
+      review: normalizedReview,
+      revision: {
+        scene_breakdown: revisedFirst?.scene_breakdown || revisionPayload?.scene_breakdown || [],
+        continuity_notes: revisedFirst?.continuity_notes || revisionPayload?.continuity_notes || [],
+        modelName: (revisionResult as any).modelName,
+      },
+      final_text: revisedText,
+      revised: true,
+    }
+  }
+
+  app.get('/api/novel/chapters/:chapterId/preflight', async (req, res) => {
+    try {
+      const activeWorkspace = getWorkspace()
+      const chapterId = Number(req.params.chapterId)
+      const projectId = Number(req.query.project_id || 0)
+      const project = await getProject(activeWorkspace, projectId)
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const [chapters, worldbuilding, characters, outlines, reviews] = await Promise.all([
+        listNovelChapters(activeWorkspace, projectId),
+        listNovelWorldbuilding(activeWorkspace, projectId),
+        listNovelCharacters(activeWorkspace, projectId),
+        listNovelOutlines(activeWorkspace, projectId),
+        listNovelReviews(activeWorkspace, projectId),
+      ])
+      const chapter = chapters.find(item => item.id === chapterId)
+      if (!chapter) return res.status(404).json({ error: 'chapter not found' })
+      const contextPackage = await buildChapterContextPackage(activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews)
+      res.json({ ok: contextPackage.preflight.ready, context_package: contextPackage, preflight: contextPackage.preflight })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.post('/api/novel/chapters/:chapterId/scene-cards', async (req, res) => {
+    try {
+      const activeWorkspace = getWorkspace()
+      const chapterId = Number(req.params.chapterId)
+      const projectId = Number(req.body.project_id || 0)
+      const modelId = Number(req.body.model_id || 0) || undefined
+      const project = await getProject(activeWorkspace, projectId)
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const [chapters, worldbuilding, characters, outlines, reviews] = await Promise.all([
+        listNovelChapters(activeWorkspace, projectId),
+        listNovelWorldbuilding(activeWorkspace, projectId),
+        listNovelCharacters(activeWorkspace, projectId),
+        listNovelOutlines(activeWorkspace, projectId),
+        listNovelReviews(activeWorkspace, projectId),
+      ])
+      const chapter = chapters.find(item => item.id === chapterId)
+      if (!chapter) return res.status(404).json({ error: 'chapter not found' })
+      const contextPackage = await buildChapterContextPackage(activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews)
+      if (!contextPackage.preflight.ready && req.body?.allow_incomplete !== true) {
+        return res.status(412).json({ error: '场景卡生成前置检查未通过', error_code: 'SCENE_PREFLIGHT_BLOCKED', preflight: contextPackage.preflight, context_package: contextPackage })
+      }
+      const result = await generateSceneCardsForChapter(activeWorkspace, project, contextPackage, modelId)
+      if (!result.sceneCards.length) return res.status(502).json({ error: '模型未返回场景卡', result: result.result })
+      const updated = await updateNovelChapter(activeWorkspace, chapter.id, {
+        scene_breakdown: result.sceneCards,
+        scene_list: result.sceneCards,
+        raw_payload: { ...(chapter.raw_payload || {}), scene_cards_source: 'manual_pipeline' },
+      } as any, { createVersion: false })
+      await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'scene_cards', step_name: `chapter-${chapter.chapter_no}`, status: 'success', input_ref: JSON.stringify(req.body), output_ref: JSON.stringify({ scene_cards: result.sceneCards, modelName: (result.result as any).modelName }) })
+      res.json({ chapter: updated, scene_cards: result.sceneCards, result: result.result })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
   app.post('/api/novel/chapters/:chapterId/generate-prose', async (req, res) => {
     try {
       const activeWorkspace = getWorkspace()
       const chapterId = Number(req.params.chapterId)
       const projectId = Number(req.body.project_id || 0)
+      const modelId = Number(req.body.model_id || 0) || undefined
+      const wantsStream = String(req.headers.accept || '').includes('text/event-stream') || String(req.query.stream || '') === '1'
       const project = await getProject(activeWorkspace, projectId)
       if (!project) return res.status(404).json({ error: 'project not found' })
-      const chapters = await listNovelChapters(activeWorkspace, projectId)
-      const chapter = chapters.find(item => item.id === chapterId)
+      let chapters = await listNovelChapters(activeWorkspace, projectId)
+      let chapter = chapters.find(item => item.id === chapterId)
       if (!chapter) return res.status(404).json({ error: 'chapter not found' })
-      const [worldbuilding, characters, outlines] = await Promise.all([listNovelWorldbuilding(activeWorkspace, projectId), listNovelCharacters(activeWorkspace, projectId), listNovelOutlines(activeWorkspace, projectId)])
-      // P0-3: 收集前几章的正文作为前置上下文（最多取前2章有正文的章节）
+      const [worldbuilding, characters, outlines, reviews] = await Promise.all([listNovelWorldbuilding(activeWorkspace, projectId), listNovelCharacters(activeWorkspace, projectId), listNovelOutlines(activeWorkspace, projectId), listNovelReviews(activeWorkspace, projectId)])
+      const pipeline: any[] = []
+      const markStage = (key: string, label: string, status: string, detail = '', extra: any = {}) => {
+        const stage = { key, label, status, detail, at: new Date().toISOString(), ...extra }
+        pipeline.push(stage)
+        if (wantsStream && !res.writableEnded) {
+          res.write(`data: ${JSON.stringify({ type: 'progress', progress: label, pipeline, stage })}\n\n`)
+        }
+        return stage
+      }
+      if (wantsStream) {
+        res.setHeader('Content-Type', 'text/event-stream; charset=utf-8')
+        res.setHeader('Cache-Control', 'no-cache, no-transform')
+        res.setHeader('Connection', 'keep-alive')
+      }
+      markStage('context', '构建续写上下文包', 'running')
+      let contextPackage = await buildChapterContextPackage(activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews)
+      markStage(
+        'context',
+        contextPackage.preflight.ready ? '续写上下文包已就绪' : '续写上下文包存在缺口',
+        contextPackage.preflight.ready ? 'success' : 'warn',
+        contextPackage.preflight.warnings.join('；'),
+        { context_package: contextPackage },
+      )
+      if (!contextPackage.preflight.ready && req.body?.allow_incomplete !== true) {
+        const errorPayload = {
+          error: '章节生成前置检查未通过',
+          error_code: 'PROSE_PREFLIGHT_BLOCKED',
+          context_package: contextPackage,
+          preflight: contextPackage.preflight,
+          pipeline,
+        }
+        await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'failed', input_ref: JSON.stringify(req.body), output_ref: JSON.stringify(errorPayload), error_message: '章节生成前置检查未通过' })
+        if (wantsStream) {
+          res.write(`data: ${JSON.stringify({ type: 'error', ...errorPayload })}\n\n`)
+          res.end()
+          return
+        }
+        return res.status(412).json(errorPayload)
+      }
+
+      if (!contextPackage.chapter_target.scene_cards.length || req.body?.force_scene_cards === true) {
+        markStage('scene_cards', '生成章节场景卡', 'running')
+        try {
+          const sceneResult = await generateSceneCardsForChapter(activeWorkspace, project, contextPackage, modelId)
+          if (sceneResult.sceneCards.length > 0) {
+            const updatedSceneChapter = await updateNovelChapter(activeWorkspace, chapter.id, {
+              scene_breakdown: sceneResult.sceneCards,
+              scene_list: sceneResult.sceneCards,
+              raw_payload: { ...(chapter.raw_payload || {}), scene_cards_source: 'generated' },
+            } as any, { createVersion: false })
+            if (updatedSceneChapter) chapter = updatedSceneChapter
+            chapters = await listNovelChapters(activeWorkspace, projectId)
+            contextPackage = await buildChapterContextPackage(activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews)
+            markStage('scene_cards', `场景卡已生成：${sceneResult.sceneCards.length} 个`, 'success', '', { scene_cards: sceneResult.sceneCards })
+          } else {
+            markStage('scene_cards', '场景卡生成为空，继续使用章节细纲', 'warn')
+          }
+        } catch (sceneError) {
+          markStage('scene_cards', '场景卡生成失败，继续使用章节细纲', 'warn', String(sceneError).slice(0, 200))
+        }
+      }
+
+      // 收集前几章的正文作为前置上下文（最多取前3章有正文的章节）
       const prevChapters = chapters
         .filter(ch => ch.chapter_no < chapter.chapter_no && ch.chapter_text)
-        .slice(-2)
-        .map(ch => ({ chapter_no: ch.chapter_no, title: ch.title, chapter_text: ch.chapter_text }))
-      const result = await generateNovelChapterProse(project, chapter, { worldbuilding, characters, outline: outlines, prompt: String(req.body.prompt || ''), prevChapters }, activeWorkspace, Number(req.body.model_id || 0) || undefined)
+        .slice(-3)
+        .map(ch => ({ chapter_no: ch.chapter_no, title: ch.title, chapter_summary: ch.chapter_summary || '', ending_hook: ch.ending_hook || '', chapter_text: ch.chapter_text }))
+      markStage('draft', '段落级正文生成', 'running')
+      const result = await generateNovelChapterProse(project, chapter, {
+        worldbuilding,
+        characters,
+        outline: outlines,
+        prompt: String(req.body.prompt || ''),
+        prevChapters,
+        contextPackage,
+        paragraphTask: buildParagraphProseContext(project, contextPackage),
+      } as any, activeWorkspace, modelId)
       // 兼容 result.output / result.parsed / result.content(JSON string) 等厂商返回形态
       const resultPayload = getNovelPayload(result)
       const proseArr = Array.isArray(resultPayload?.prose_chapters) ? resultPayload.prose_chapters : []
@@ -288,35 +827,129 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
       const continuityNotes = resultPayload?.continuity_notes || firstProse?.continuity_notes || []
       if ((result as any).error || !chapterText) {
         await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'failed', input_ref: JSON.stringify(req.body), output_ref: JSON.stringify(resultPayload || null), error_message: String(result.error || result.fallbackReason || '模型未返回正文') })
-        return res.status(502).json({ error: String(result.error || result.fallbackReason || '模型未返回正文'), result })
+        const errorPayload = { error: String(result.error || result.fallbackReason || '模型未返回正文'), result, pipeline, context_package: contextPackage }
+        if (wantsStream) {
+          res.write(`data: ${JSON.stringify({ type: 'error', ...errorPayload })}\n\n`)
+          res.end()
+          return
+        }
+        return res.status(502).json(errorPayload)
       }
-      const updated = await updateNovelChapter(activeWorkspace, chapter.id, { chapter_text: chapterText, scene_breakdown: sceneBreakdown, continuity_notes: continuityNotes, status: 'draft' }, { versionSource: 'agent_execute' })
-      let referenceReport: any = null
+      markStage('draft', '章节初稿已生成', 'success', `${String(chapterText).length} 字`)
+      markStage('review', '执行章节自检', 'running')
+      let selfCheck: any = null
+      let finalText = String(chapterText || '')
+      let finalSceneBreakdown = sceneBreakdown
+      let finalContinuityNotes = continuityNotes
       try {
-        referenceReport = await buildReferenceUsageReport(activeWorkspace, project, '正文创作', chapterText)
+        selfCheck = await runProseSelfReviewAndRevision(activeWorkspace, project, contextPackage, finalText, modelId)
+        finalText = selfCheck.final_text || finalText
+        if (selfCheck.revised && selfCheck.revision) {
+          finalSceneBreakdown = selfCheck.revision.scene_breakdown?.length ? selfCheck.revision.scene_breakdown : finalSceneBreakdown
+          finalContinuityNotes = selfCheck.revision.continuity_notes?.length ? selfCheck.revision.continuity_notes : finalContinuityNotes
+        }
+        markStage(
+          'review',
+          selfCheck.revised ? '自检完成，已应用修订稿' : '自检完成，初稿可用',
+          selfCheck.review?.passed === false ? 'warn' : 'success',
+          `评分 ${selfCheck.review?.score ?? '-'}`,
+          { self_check: selfCheck.review, revised: selfCheck.revised },
+        )
+      } catch (reviewError) {
+        selfCheck = { error: String(reviewError), revised: false }
+        markStage('review', '自检失败，保留初稿', 'warn', String(reviewError).slice(0, 200), { self_check: selfCheck })
+      }
+
+      try {
+        const review = selfCheck?.review || {}
+        await createNovelReview(activeWorkspace, {
+          project_id: projectId,
+          review_type: 'prose_quality',
+          status: review.passed === false || Number(review.score || 100) < 78 ? 'warn' : 'ok',
+          summary: `章节自检评分 ${review.score ?? '-'}${selfCheck?.revised ? '，已生成修订稿' : ''}`,
+          issues: Array.isArray(review.issues) ? review.issues.map((issue: any) => `${issue.severity || 'medium'}｜${issue.description || issue}`) : [],
+          payload: JSON.stringify({ chapter_id: chapter.id, context_package: contextPackage, self_check: selfCheck, pipeline }),
+        })
+      } catch (reviewStoreError) {
+        console.warn('[prose-quality] Failed to store review:', String(reviewStoreError).slice(0, 200))
+      }
+      let referenceReport: any = null
+      let safetyDecision: any = null
+      try {
+        markStage('reference_report', '生成参考使用报告', 'running')
+        referenceReport = await buildReferenceUsageReport(activeWorkspace, project, '正文创作', finalText)
+        safetyDecision = getReferenceSafetyDecision(project, referenceReport)
+        markStage('reference_report', safetyDecision.blocked ? '参考安全阈值未通过' : '参考使用报告已生成', safetyDecision.blocked ? 'failed' : 'success', safetyDecision.reasons?.join('；') || '', { reference_report: referenceReport, safety_decision: safetyDecision })
       } catch (reportError) {
+        markStage('reference_report', '参考使用报告生成失败', 'warn', String(reportError).slice(0, 200))
         console.warn('[reference-report] Failed:', String(reportError).slice(0, 200))
       }
-      await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'success', input_ref: JSON.stringify(req.body), output_ref: JSON.stringify({ outputSource: result.outputSource, modelId: result.modelId, modelName: result.modelName, providerId: result.providerId, usage: result.usage, reference_report: referenceReport }) })
-      const wantsStream = String(req.headers.accept || '').includes('text/event-stream') || String(req.query.stream || '') === '1'
-      if (!wantsStream) return res.json({ chapter: updated, result, reference_report: referenceReport })
-      res.setHeader('Content-Type', 'text/event-stream; charset=utf-8')
-      res.setHeader('Cache-Control', 'no-cache, no-transform')
-      res.setHeader('Connection', 'keep-alive')
-      const fullText = String(chapterText || '')
+      if (safetyDecision?.blocked) {
+        const errorPayload = { error: '仿写安全阈值未通过，正文未入库', error_code: 'REFERENCE_SAFETY_BLOCKED', reference_report: referenceReport, safety_decision: safetyDecision, context_package: contextPackage, self_check: selfCheck, pipeline }
+        await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'failed', input_ref: JSON.stringify(req.body), output_ref: JSON.stringify(errorPayload), error_message: safetyDecision.reasons?.join('；') || '仿写安全阈值未通过' })
+        if (wantsStream) {
+          res.write(`data: ${JSON.stringify({ type: 'error', ...errorPayload })}\n\n`)
+          res.end()
+          return
+        }
+        return res.status(409).json(errorPayload)
+      }
+      markStage('store', '写入章节正文与版本', 'running')
+      const updated = await updateNovelChapter(activeWorkspace, chapter.id, { chapter_text: finalText, scene_breakdown: finalSceneBreakdown, continuity_notes: finalContinuityNotes, status: 'draft' }, { versionSource: selfCheck?.revised ? 'repair' : 'agent_execute' })
+      markStage('store', '章节已写入', 'success')
+      let storyStateUpdate: any = null
+      try {
+        markStage('story_state', '更新故事状态机', 'running')
+        storyStateUpdate = await updateStoryStateMachine(activeWorkspace, project, chapter, contextPackage, finalText, modelId)
+        markStage('story_state', '故事状态机已更新', 'success', '', { story_state_update: storyStateUpdate })
+      } catch (stateError) {
+        markStage('story_state', '故事状态机更新失败', 'warn', String(stateError).slice(0, 200))
+      }
+      const pipelineResult = { context_package: contextPackage, self_check: selfCheck, pipeline }
+      await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'success', input_ref: JSON.stringify(req.body), output_ref: JSON.stringify({ outputSource: result.outputSource, modelId: result.modelId, modelName: result.modelName, providerId: result.providerId, usage: result.usage, reference_report: referenceReport, safety_decision: safetyDecision, story_state_update: storyStateUpdate, ...pipelineResult }) })
+      if (!wantsStream) return res.json({ chapter: updated, result, reference_report: referenceReport, safety_decision: safetyDecision, story_state_update: storyStateUpdate, ...pipelineResult })
+      const fullText = String(finalText || '')
       const chunkSize = Math.max(40, Math.ceil(fullText.length / 12))
-      res.write(`data: ${JSON.stringify({ type: 'progress', progress: '生成完成，开始输出正文...' })}\n\n`)
+      res.write(`data: ${JSON.stringify({ type: 'progress', progress: '生成完成，开始输出正文...', pipeline })}\n\n`)
       for (let i = 0; i < fullText.length; i += chunkSize) {
         const chunk = fullText.slice(i, i + chunkSize)
         res.write(`data: ${JSON.stringify({ type: 'chunk', text: chunk })}\n\n`)
         await new Promise(resolve => setTimeout(resolve, 40))
       }
-      res.write(`data: ${JSON.stringify({ type: 'done', chapter: updated, result, reference_report: referenceReport })}\n\n`)
+      res.write(`data: ${JSON.stringify({ type: 'done', chapter: updated, result, reference_report: referenceReport, safety_decision: safetyDecision, story_state_update: storyStateUpdate, ...pipelineResult })}\n\n`)
       res.end()
-    } catch (error) { res.status(500).json({ error: String(error) }) }
+    } catch (error) {
+      if (res.headersSent) {
+        res.write(`data: ${JSON.stringify({ type: 'error', error: String(error) })}\n\n`)
+        res.end()
+        return
+      }
+      res.status(500).json({ error: String(error) })
+    }
   })
   app.get('/api/novel/projects/:id/reviews', async (req, res) => { try { const activeWorkspace = getWorkspace(); res.json(await listNovelReviews(activeWorkspace, Number(req.params.id))) } catch (error) { res.status(500).json({ error: String(error) }) } })
   app.get('/api/novel/runs', async (req, res) => { try { const activeWorkspace = getWorkspace(); res.json(await listNovelRuns(activeWorkspace, Number(req.query.project_id || 0))) } catch (error) { res.status(500).json({ error: String(error) }) } })
+  app.post('/api/novel/runs', async (req, res) => {
+    try {
+      const activeWorkspace = getWorkspace()
+      const projectId = Number(req.body.project_id || 0)
+      const project = await getProject(activeWorkspace, projectId)
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const record = await appendNovelRun(activeWorkspace, {
+        project_id: projectId,
+        run_type: String(req.body.run_type || 'manual'),
+        step_name: String(req.body.step_name || 'summary'),
+        status: String(req.body.status || 'success'),
+        input_ref: typeof req.body.input_ref === 'string' ? req.body.input_ref : JSON.stringify(req.body.input_ref || {}),
+        output_ref: typeof req.body.output_ref === 'string' ? req.body.output_ref : JSON.stringify(req.body.output_ref || {}),
+        duration_ms: Number(req.body.duration_ms || 0),
+        error_message: String(req.body.error_message || ''),
+      })
+      res.json(record)
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
   app.get('/api/novel/agents/plan', async (req, res) => { try { const activeWorkspace = getWorkspace(); const project = await getProject(activeWorkspace, Number(req.query.project_id || 0)); if (!project) return res.status(404).json({ error: 'project not found' }); res.json({ project_id: project.id, agents: buildNovelAgentPlan(project) }) } catch (error) { res.status(500).json({ error: String(error) }) } })
   app.get('/api/novel/agents/strategy', async (req, res) => { try { const activeWorkspace = getWorkspace(); const project = await getProject(activeWorkspace, Number(req.query.project_id || 0)); if (!project) return res.status(404).json({ error: 'project not found' }); res.json({ project_id: project.id, strategy: buildNovelStrategy(project) }) } catch (error) { res.status(500).json({ error: String(error) }) } })
   app.get('/api/novel/agents/tools', async (req, res) => { try { const activeWorkspace = getWorkspace(); const projectId = Number(req.query.project_id || 0); if (!projectId) return res.status(400).json({ error: 'project_id required' }); res.json({ project_id: projectId, tools: buildNovelTools(projectId) }) } catch (error) { res.status(500).json({ error: String(error) }) } })

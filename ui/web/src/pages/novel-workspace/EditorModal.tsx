@@ -73,6 +73,8 @@ export function EditorModal({
             <Form.Item name="chapter_goal" label="章节目标"><Input.TextArea rows={2} /></Form.Item>
             <Form.Item name="chapter_summary" label="章节摘要"><Input.TextArea rows={3} /></Form.Item>
             <Form.Item name="conflict" label="冲突"><Input.TextArea rows={2} /></Form.Item>
+            <Form.Item name="must_advance" label="本章必须推进（逗号或换行分隔）"><Input.TextArea rows={2} placeholder="例如：主角获得新线索, 反派第一次施压" /></Form.Item>
+            <Form.Item name="forbidden_repeats" label="禁止重复的信息（逗号或换行分隔）"><Input.TextArea rows={2} placeholder="例如：不要重复解释灵根等级, 不要再次介绍主角贫穷背景" /></Form.Item>
             <Form.Item name="ending_hook" label="结尾钩子"><Input.TextArea rows={2} /></Form.Item>
             <Form.Item name="chapter_text" label="正文"><Input.TextArea rows={4} /></Form.Item>
           </>

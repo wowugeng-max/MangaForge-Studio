@@ -14,6 +14,34 @@ function parseReviewPayload(review: any) {
   }
 }
 
+function statusColor(status?: string) {
+  if (status === 'success' || status === 'ok') return 'green'
+  if (status === 'warn') return 'gold'
+  if (status === 'failed' || status === 'error') return 'red'
+  if (status === 'running') return 'blue'
+  return 'default'
+}
+
+function issueLabel(issue: any) {
+  if (typeof issue === 'string') return issue
+  return issue?.description || issue?.message || issue?.type || displayValue(issue)
+}
+
+function issueSeverity(issue: any) {
+  if (typeof issue === 'string') {
+    const severity = issue.split('｜')[0]
+    return ['critical', 'high', 'medium', 'low'].includes(severity) ? severity : 'medium'
+  }
+  return String(issue?.severity || 'medium').toLowerCase()
+}
+
+function scoreColor(score: number) {
+  if (score >= 85) return 'green'
+  if (score >= 78) return 'blue'
+  if (score >= 65) return 'gold'
+  return 'red'
+}
+
 export function ReferencePanel({
   open,
   activeTab,
@@ -21,6 +49,8 @@ export function ReferencePanel({
   characters,
   outlines,
   referenceReports,
+  proseQualityReports,
+  activeChapterId,
   chapterVersions,
   chapterVersionsLoading,
   rollingBackVersionId,
@@ -37,6 +67,8 @@ export function ReferencePanel({
   characters: any[]
   outlines: any[]
   referenceReports: any[]
+  proseQualityReports: any[]
+  activeChapterId: number | null
   chapterVersions: any[]
   chapterVersionsLoading: boolean
   rollingBackVersionId: number | null
@@ -168,6 +200,86 @@ export function ReferencePanel({
                       {entries.length > 0 && (
                         <Paragraph style={{ marginBottom: 0, fontSize: 12 }} ellipsis={{ rows: 3, expandable: true, symbol: '展开' }}>
                           注入知识：{entries.map((entry: any) => `${entry.source_project || '参考'} / ${entry.category || '未分类'} / ${entry.title || entry.id}`).join('；')}
+                        </Paragraph>
+                      )}
+                    </Space>
+                  </Card>
+                )
+              }),
+            },
+            {
+              key: 'proseQuality', label: '正文质检',
+              children: proseQualityReports.length === 0 ? (
+                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无正文质检" style={{ padding: '16px 8px' }} />
+              ) : proseQualityReports.slice(0, 16).map((report) => {
+                const payload = parseReviewPayload(report)
+                const selfCheck = payload.self_check || {}
+                const review = selfCheck.review || {}
+                const score = Number(review.score ?? 0)
+                const issues = Array.isArray(review.issues) ? review.issues : (Array.isArray(report.issues) ? report.issues : [])
+                const pipeline = Array.isArray(payload.pipeline) ? payload.pipeline : []
+                const contextPackage = payload.context_package || {}
+                const chapterTarget = contextPackage.chapter_target || {}
+                const preflight = contextPackage.preflight || {}
+                const checks = Array.isArray(preflight.checks) ? preflight.checks : []
+                const warnings = Array.isArray(preflight.warnings) ? preflight.warnings : []
+                const previousChapter = contextPackage.continuity?.previous_chapter || null
+                const isCurrent = activeChapterId !== null && Number(payload.chapter_id) === Number(activeChapterId)
+                return (
+                  <Card key={report.id} size="small" style={{ margin: 8, borderRadius: 8 }}
+                    title={<Space wrap size={4}>
+                      {isCurrent && <Tag color="blue" bordered={false}>当前章</Tag>}
+                      <Tag color={report.status === 'warn' ? 'gold' : 'green'} bordered={false}>{report.status === 'warn' ? '需检查' : '通过'}</Tag>
+                      <Text strong>{chapterTarget.chapter_no ? `第${chapterTarget.chapter_no}章` : '章节'}</Text>
+                    </Space>}>
+                    <Space direction="vertical" size={7} style={{ width: '100%' }}>
+                      <Text type="secondary" style={{ fontSize: 11 }}>{report.created_at}</Text>
+                      <Space wrap size={[4, 2]}>
+                        <Tag color={scoreColor(score)} bordered={false}>评分 {score || '-'}</Tag>
+                        <Tag color={selfCheck.revised ? 'purple' : 'default'} bordered={false}>{selfCheck.revised ? '已修订' : '未修订'}</Tag>
+                        <Tag color={preflight.ready ? 'green' : 'gold'} bordered={false}>{preflight.ready ? '上下文完整' : '上下文缺口'}</Tag>
+                      </Space>
+                      {chapterTarget.title && (
+                        <Text style={{ fontSize: 12 }}><Text strong>目标章：</Text>{displayPreview(chapterTarget.title, 40)}</Text>
+                      )}
+                      {previousChapter && (
+                        <Paragraph style={{ marginBottom: 0, fontSize: 12 }} ellipsis={{ rows: 2, expandable: true, symbol: '展开' }}>
+                          前章衔接：第{previousChapter.chapter_no}章《{displayPreview(previousChapter.title, 32)}》；钩子：{displayValue(previousChapter.ending_hook) || '未记录'}
+                        </Paragraph>
+                      )}
+                      {checks.length > 0 && (
+                        <Space wrap size={[4, 2]}>
+                          {checks.map((check: any) => (
+                            <Tag key={check.key || check.label} color={check.ok ? 'green' : 'gold'} bordered={false}>{check.label}</Tag>
+                          ))}
+                        </Space>
+                      )}
+                      {warnings.length > 0 && (
+                        <Paragraph style={{ marginBottom: 0, fontSize: 12 }} ellipsis={{ rows: 2, expandable: true, symbol: '展开' }}>
+                          上下文缺口：{warnings.join('；')}
+                        </Paragraph>
+                      )}
+                      {issues.length > 0 && (
+                        <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                          {issues.slice(0, 4).map((issue: any, index: number) => (
+                            <Tag key={`${report.id}-issue-${index}`} color={statusColor(issueSeverity(issue) === 'high' || issueSeverity(issue) === 'critical' ? 'failed' : 'warn')} style={{ whiteSpace: 'normal', lineHeight: '18px' }}>
+                              {issueSeverity(issue)}｜{issueLabel(issue)}
+                            </Tag>
+                          ))}
+                        </Space>
+                      )}
+                      {pipeline.length > 0 && (
+                        <Space wrap size={[4, 2]}>
+                          {pipeline.map((stage: any, index: number) => (
+                            <Tag key={`${stage.key || stage.label}-${index}`} color={statusColor(stage.status)} bordered={false}>
+                              {stage.label || stage.key}
+                            </Tag>
+                          ))}
+                        </Space>
+                      )}
+                      {Array.isArray(review.revision_directives) && review.revision_directives.length > 0 && (
+                        <Paragraph style={{ marginBottom: 0, fontSize: 12 }} ellipsis={{ rows: 2, expandable: true, symbol: '展开' }}>
+                          修订指令：{review.revision_directives.join('；')}
                         </Paragraph>
                       )}
                     </Space>

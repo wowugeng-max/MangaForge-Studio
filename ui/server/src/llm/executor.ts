@@ -341,6 +341,10 @@ function buildAgentMessages(
           context?.worldbuilding || null,
           context?.characters || [],
         )
+      case 'prose-agent':
+        return context?.task || buildProsePrompt(project, context?.chapterDraft || {}, context || {})
+      case 'review-agent':
+        return context?.task || '请审校当前正文并输出 JSON。'
       case 'platform-fit-agent':
         return (context?.platformPrompt || context?.task || '')
       default:
@@ -755,7 +759,7 @@ export async function generateNovelChapterProse(
   }
 
   // Build prose prompt
-  const prosePrompt = buildProsePrompt(project, chapterDraft, context)
+  const prosePrompt = (context as any).paragraphTask || buildProsePrompt(project, chapterDraft, context)
 
   const upstreamContext = memoryInjection ? { memoryInjectionText: memoryInjection } : {}
   const knowledgeContext = knowledgeInjection ? { knowledgeInjectionText: knowledgeInjection } : {}

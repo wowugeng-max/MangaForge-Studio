@@ -6,6 +6,7 @@ import {
   PlayCircleOutlined,
   RocketOutlined,
   SafetyOutlined,
+  StopOutlined,
   UnorderedListOutlined,
 } from '@ant-design/icons'
 import { chapterStatusTag, displayValue, wc } from './utils'
@@ -23,6 +24,7 @@ export function ChapterDirectorySidebar({
   activeChapterId,
   onOpenOutlinePanel,
   onGenerateProse,
+  onCancelGenerateProse,
   onRunRepair,
   onOpenOutlineTree,
   onOpenChapterDrawer,
@@ -39,6 +41,7 @@ export function ChapterDirectorySidebar({
   activeChapterId: number | null
   onOpenOutlinePanel: () => void
   onGenerateProse: () => void
+  onCancelGenerateProse: () => void
   onRunRepair: () => void
   onOpenOutlineTree: () => void
   onOpenChapterDrawer: () => void
@@ -77,6 +80,18 @@ export function ChapterDirectorySidebar({
               size="small"
               format={() => `${proseProgress.current}/${proseProgress.total}`}
             />
+            {stepProseLoading && (
+              <Button
+                size="small"
+                danger
+                block
+                icon={<StopOutlined />}
+                style={{ marginTop: 6 }}
+                onClick={onCancelGenerateProse}
+              >
+                停止后续生成
+              </Button>
+            )}
           </div>
         )}
       </div>

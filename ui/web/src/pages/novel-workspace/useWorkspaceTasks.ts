@@ -10,6 +10,7 @@ export function useWorkspaceTasks({
   stepProseLoading,
   stepRepairLoading,
   proseProgress,
+  proseBatchStatus,
   planning,
   planProgress,
   executingAgents,
@@ -17,6 +18,7 @@ export function useWorkspaceTasks({
   streamingProgress,
   streamingPercent,
   activeChapter,
+  onCancelProseBatch,
 }: {
   taskCenterOpen: boolean
   selectedModelId?: number
@@ -24,6 +26,7 @@ export function useWorkspaceTasks({
   stepProseLoading: boolean
   stepRepairLoading: boolean
   proseProgress: { current: number; total: number }
+  proseBatchStatus?: any
   planning: boolean
   planProgress: any
   executingAgents: boolean
@@ -31,6 +34,7 @@ export function useWorkspaceTasks({
   streamingProgress: string
   streamingPercent: number
   activeChapter: any | null
+  onCancelProseBatch?: () => void
 }) {
   const [knowledgeIngestJobs, setKnowledgeIngestJobs] = useState<any[]>([])
   const [knowledgeJobsLoading, setKnowledgeJobsLoading] = useState(false)
@@ -88,6 +92,14 @@ export function useWorkspaceTasks({
         title: '批量生成正文',
         phase: proseProgress.total ? `第 ${proseProgress.current}/${proseProgress.total} 章` : '准备生成',
         progress: proseProgress.total ? (proseProgress.current / proseProgress.total) * 100 : undefined,
+        detail: [
+          proseBatchStatus?.currentTitle || '',
+          `成功 ${proseBatchStatus?.success || 0} 章 · 失败 ${proseBatchStatus?.failed || 0} 章`,
+          proseBatchStatus?.lastQuality || '',
+          proseBatchStatus?.lastError || '',
+        ].filter(Boolean).join('\n'),
+        cancelLabel: '停止后续',
+        onCancel: onCancelProseBatch,
       })
     }
     if (stepRepairLoading) {
@@ -119,6 +131,7 @@ export function useWorkspaceTasks({
     stepProseLoading,
     stepRepairLoading,
     proseProgress,
+    proseBatchStatus,
     planning,
     planProgress,
     executingAgents,
@@ -126,6 +139,7 @@ export function useWorkspaceTasks({
     streamingProgress,
     streamingPercent,
     activeChapter,
+    onCancelProseBatch,
   ])
 
   const activeKnowledgeJobCount = useMemo(

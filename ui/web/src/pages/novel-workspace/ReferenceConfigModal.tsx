@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { Alert, Button, Card, Empty, Input, InputNumber, Modal, Progress, Radio, Select, Space, Tag, Typography, message } from 'antd'
+import { Alert, Button, Card, Divider, Empty, Input, InputNumber, Modal, Progress, Radio, Select, Space, Switch, Tag, Typography, message } from 'antd'
 import { PlusOutlined, DeleteOutlined, EyeOutlined, ToolOutlined } from '@ant-design/icons'
 import apiClient from '../../api/client'
 
@@ -65,6 +65,30 @@ type KnowledgeProjectOption = {
   categories: Record<string, number>
 }
 
+type StyleLockConfig = {
+  narrative_person: string
+  sentence_length: string
+  dialogue_ratio: string
+  banter_density: string
+  payoff_density: string
+  description_density: string
+  chapter_word_min: number
+  chapter_word_max: number
+  banned_words: string[]
+  preferred_words: string[]
+  banned_shortcuts: string[]
+  ending_policy: string
+}
+
+type SafetyConfig = {
+  enforce_on_generate: boolean
+  min_quality_score: number
+  max_copy_hits: number
+  allowed: string[]
+  cautious: string[]
+  forbidden: string[]
+}
+
 const normalizeRows = (config: any): ReferenceRow[] => (
   Array.isArray(config?.references)
     ? config.references.map((item: any) => ({
@@ -79,6 +103,47 @@ const normalizeRows = (config: any): ReferenceRow[] => (
 
 const splitList = (value: string) => value.split(/[,，\n]/).map(item => item.trim()).filter(Boolean)
 const uniqueList = (values: string[]) => Array.from(new Set(values.map(item => String(item).trim()).filter(Boolean)))
+const defaultStyleLock: StyleLockConfig = {
+  narrative_person: '第三人称有限视角',
+  sentence_length: '中短句为主',
+  dialogue_ratio: '中',
+  banter_density: '中',
+  payoff_density: '中高',
+  description_density: '中',
+  chapter_word_min: 2500,
+  chapter_word_max: 4500,
+  banned_words: [],
+  preferred_words: [],
+  banned_shortcuts: ['机械复述设定', '用总结替代戏剧冲突', '照搬参考作品桥段'],
+  ending_policy: '章末保留明确钩子',
+}
+const defaultSafety: SafetyConfig = {
+  enforce_on_generate: false,
+  min_quality_score: 60,
+  max_copy_hits: 0,
+  allowed: ['节奏', '结构', '爽点安排', '信息密度'],
+  cautious: ['人物功能', '设定机制', '资源经济模型'],
+  forbidden: ['具体桥段', '专有设定', '原句', '角色名', '核心梗'],
+}
+const normalizeStyleLock = (config: any): StyleLockConfig => ({
+  ...defaultStyleLock,
+  ...(config?.style_lock || {}),
+  chapter_word_min: Number(config?.style_lock?.chapter_word_range?.min || config?.style_lock?.chapter_word_min || defaultStyleLock.chapter_word_min),
+  chapter_word_max: Number(config?.style_lock?.chapter_word_range?.max || config?.style_lock?.chapter_word_max || defaultStyleLock.chapter_word_max),
+  banned_words: Array.isArray(config?.style_lock?.banned_words) ? config.style_lock.banned_words : [],
+  preferred_words: Array.isArray(config?.style_lock?.preferred_words) ? config.style_lock.preferred_words : [],
+  banned_shortcuts: Array.isArray(config?.style_lock?.banned_shortcuts) ? config.style_lock.banned_shortcuts : defaultStyleLock.banned_shortcuts,
+})
+const normalizeSafety = (config: any): SafetyConfig => ({
+  ...defaultSafety,
+  ...(config?.safety || {}),
+  enforce_on_generate: Boolean(config?.safety?.enforce_on_generate),
+  min_quality_score: Number(config?.safety?.min_quality_score || defaultSafety.min_quality_score),
+  max_copy_hits: Number(config?.safety?.max_copy_hits ?? defaultSafety.max_copy_hits),
+  allowed: Array.isArray(config?.safety?.allowed) ? config.safety.allowed : defaultSafety.allowed,
+  cautious: Array.isArray(config?.safety?.cautious) ? config.safety.cautious : defaultSafety.cautious,
+  forbidden: Array.isArray(config?.safety?.forbidden) ? config.safety.forbidden : defaultSafety.forbidden,
+})
 
 export function ReferenceConfigModal({
   open,
@@ -96,6 +161,8 @@ export function ReferenceConfigModal({
   const [rows, setRows] = useState<ReferenceRow[]>([])
   const [strength, setStrength] = useState<'light' | 'balanced' | 'strong'>('balanced')
   const [notes, setNotes] = useState('')
+  const [styleLock, setStyleLock] = useState<StyleLockConfig>(defaultStyleLock)
+  const [safety, setSafety] = useState<SafetyConfig>(defaultSafety)
   const [projectOptions, setProjectOptions] = useState<KnowledgeProjectOption[]>([])
   const [saving, setSaving] = useState(false)
   const [supplementingProject, setSupplementingProject] = useState('')
@@ -109,6 +176,8 @@ export function ReferenceConfigModal({
     setRows(normalizeRows(config))
     setStrength(config?.strength === 'light' || config?.strength === 'strong' ? config.strength : 'balanced')
     setNotes(String(config?.notes || ''))
+    setStyleLock(normalizeStyleLock(config))
+    setSafety(normalizeSafety(config))
     setPreview(null)
     setApiReady(null)
     apiClient.get('/status')
@@ -166,7 +235,20 @@ export function ReferenceConfigModal({
         avoid: uniqueList(row.avoid),
       })
     }
-    return { references: Array.from(merged.values()), strength, notes }
+    return {
+      ...(config || {}),
+      references: Array.from(merged.values()),
+      strength,
+      notes,
+      style_lock: {
+        ...styleLock,
+        chapter_word_range: {
+          min: Math.max(0, Number(styleLock.chapter_word_min || 0)),
+          max: Math.max(0, Number(styleLock.chapter_word_max || 0)),
+        },
+      },
+      safety,
+    }
   }
 
   const save = async () => {
@@ -381,6 +463,90 @@ export function ReferenceConfigModal({
           onChange={(event) => setNotes(event.target.value)}
           placeholder="补充仿写策略，例如：主结构参考《没钱修什么仙》，但主角职业和世界观完全原创。"
         />
+        <Divider style={{ margin: '4px 0' }} />
+        <Card size="small" title="风格锁定" style={{ borderRadius: 8 }}>
+          <Space direction="vertical" size={10} style={{ width: '100%' }}>
+            <Space wrap align="start" style={{ width: '100%' }}>
+              <Space direction="vertical" size={4}>
+                <Text type="secondary">叙事人称</Text>
+                <Select
+                  value={styleLock.narrative_person}
+                  options={['第三人称有限视角', '第三人称全知视角', '第一人称'].map(value => ({ value, label: value }))}
+                  onChange={(value) => setStyleLock(prev => ({ ...prev, narrative_person: value }))}
+                  style={{ width: 180 }}
+                />
+              </Space>
+              <Space direction="vertical" size={4}>
+                <Text type="secondary">句长倾向</Text>
+                <Select
+                  value={styleLock.sentence_length}
+                  options={['短句为主', '中短句为主', '中等句长', '长短交错'].map(value => ({ value, label: value }))}
+                  onChange={(value) => setStyleLock(prev => ({ ...prev, sentence_length: value }))}
+                  style={{ width: 150 }}
+                />
+              </Space>
+              {[
+                ['dialogue_ratio', '对话比例', ['低', '中', '高']],
+                ['banter_density', '吐槽密度', ['低', '中', '高']],
+                ['payoff_density', '爽点密度', ['低', '中', '中高', '高']],
+                ['description_density', '描写浓度', ['低', '中', '高']],
+              ].map(([key, label, options]) => (
+                <Space key={String(key)} direction="vertical" size={4}>
+                  <Text type="secondary">{String(label)}</Text>
+                  <Select
+                    value={(styleLock as any)[key as string]}
+                    options={(options as string[]).map(value => ({ value, label: value }))}
+                    onChange={(value) => setStyleLock(prev => ({ ...prev, [key as string]: value } as StyleLockConfig))}
+                    style={{ width: 120 }}
+                  />
+                </Space>
+              ))}
+            </Space>
+            <Space wrap align="start">
+              <Space direction="vertical" size={4}>
+                <Text type="secondary">章节最少字数</Text>
+                <InputNumber min={500} max={20000} step={100} value={styleLock.chapter_word_min} onChange={(value) => setStyleLock(prev => ({ ...prev, chapter_word_min: Number(value || 0) }))} style={{ width: 150 }} />
+              </Space>
+              <Space direction="vertical" size={4}>
+                <Text type="secondary">章节最多字数</Text>
+                <InputNumber min={500} max={30000} step={100} value={styleLock.chapter_word_max} onChange={(value) => setStyleLock(prev => ({ ...prev, chapter_word_max: Number(value || 0) }))} style={{ width: 150 }} />
+              </Space>
+              <Space direction="vertical" size={4} style={{ minWidth: 360, flex: 1 }}>
+                <Text type="secondary">结尾策略</Text>
+                <Input value={styleLock.ending_policy} onChange={(event) => setStyleLock(prev => ({ ...prev, ending_policy: event.target.value }))} />
+              </Space>
+            </Space>
+            <Space direction="vertical" size={8} style={{ width: '100%' }}>
+              <Input placeholder="禁用词，逗号或换行分隔" value={styleLock.banned_words.join(', ')} onChange={(event) => setStyleLock(prev => ({ ...prev, banned_words: splitList(event.target.value) }))} />
+              <Input placeholder="常用词/偏好表达，逗号或换行分隔" value={styleLock.preferred_words.join(', ')} onChange={(event) => setStyleLock(prev => ({ ...prev, preferred_words: splitList(event.target.value) }))} />
+              <Input placeholder="禁止写法，逗号或换行分隔" value={styleLock.banned_shortcuts.join(', ')} onChange={(event) => setStyleLock(prev => ({ ...prev, banned_shortcuts: splitList(event.target.value) }))} />
+            </Space>
+          </Space>
+        </Card>
+        <Card size="small" title="仿写安全阈值" style={{ borderRadius: 8 }}>
+          <Space direction="vertical" size={10} style={{ width: '100%' }}>
+            <Space wrap align="center">
+              <Text strong>生成时强制拦截</Text>
+              <Switch checked={safety.enforce_on_generate} onChange={(checked) => setSafety(prev => ({ ...prev, enforce_on_generate: checked }))} />
+              <Text type="secondary">开启后，参考安全报告低于阈值时正文不会入库。</Text>
+            </Space>
+            <Space wrap align="start">
+              <Space direction="vertical" size={4}>
+                <Text type="secondary">最低安全评分</Text>
+                <InputNumber min={0} max={100} value={safety.min_quality_score} onChange={(value) => setSafety(prev => ({ ...prev, min_quality_score: Number(value || 0) }))} style={{ width: 140 }} />
+              </Space>
+              <Space direction="vertical" size={4}>
+                <Text type="secondary">允许照搬命中数</Text>
+                <InputNumber min={0} max={20} value={safety.max_copy_hits} onChange={(value) => setSafety(prev => ({ ...prev, max_copy_hits: Number(value || 0) }))} style={{ width: 150 }} />
+              </Space>
+            </Space>
+            <Space direction="vertical" size={8} style={{ width: '100%' }}>
+              <Input placeholder="允许学习：节奏, 结构, 爽点安排" value={safety.allowed.join(', ')} onChange={(event) => setSafety(prev => ({ ...prev, allowed: splitList(event.target.value) }))} />
+              <Input placeholder="谨慎学习：人物功能, 设定机制" value={safety.cautious.join(', ')} onChange={(event) => setSafety(prev => ({ ...prev, cautious: splitList(event.target.value) }))} />
+              <Input placeholder="禁止学习：具体桥段, 专有设定, 原句" value={safety.forbidden.join(', ')} onChange={(event) => setSafety(prev => ({ ...prev, forbidden: splitList(event.target.value) }))} />
+            </Space>
+          </Space>
+        </Card>
         <Card
           size="small"
           title="参考注入预览"
