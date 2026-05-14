@@ -54,6 +54,12 @@ async function main() {
     'novel_quality_trends',
     'novel_volume_control',
     'novel_failure_recovery',
+    'novel_worker_db_lock',
+    'novel_reference_migration_injection',
+    'novel_production_budget',
+    'novel_version_paragraph_merge',
+    'novel_volume_plan_writeback',
+    'novel_mock_dry_run_checks',
   ]
   const missingFeatures = requiredFeatures.filter(key => !features[key])
   if (missingFeatures.length) throw new Error(`Missing status features: ${missingFeatures.join(', ')}`)
@@ -82,6 +88,7 @@ async function main() {
     agent_config: false,
     run_queue: false,
     worker_status: false,
+    production_budget: false,
     reference_migration_plan: false,
     quality_trends: false,
     volume_control: false,
@@ -111,6 +118,8 @@ async function main() {
   checks.run_queue = Boolean(runQueue?.summary)
   const workerStatus = await request(`/novel/projects/${project.id}/run-queue/worker-status`)
   checks.worker_status = Boolean(workerStatus?.worker)
+  const productionBudget = await request(`/novel/projects/${project.id}/production-budget`)
+  checks.production_budget = Boolean(productionBudget?.budget && productionBudget?.decision)
   checks.quality_trends = Array.isArray(dashboard?.dashboard?.chapter_trends)
   checks.volume_control = Array.isArray(dashboard?.dashboard?.volume_controls)
 
@@ -122,10 +131,26 @@ async function main() {
       body: JSON.stringify({ project_id: project.id, dry_run: true }),
     })
     checks.reference_migration_plan = Boolean(migration?.plan || migration?.review)
+    const versions = await request(`/novel/chapters/${chapter.id}/versions`)
+    if (Array.isArray(versions) && versions[0]) {
+      const merge = await request(`/novel/chapters/${chapter.id}/version-merge`, {
+        method: 'POST',
+        body: JSON.stringify({ project_id: project.id, version_id: versions[0].id, choices: [], dry_run: true }),
+      })
+      checks.version_merge = Boolean(merge?.dry_run)
+    } else {
+      checks.version_merge = true
+    }
   } else {
     checks.diagnostics = true
     checks.reference_migration_plan = true
+    checks.version_merge = true
   }
+  const volumeSync = await request(`/novel/projects/${project.id}/volume-control/sync`, {
+    method: 'POST',
+    body: JSON.stringify({ volume_remaining_goals: [], dry_run: true }),
+  })
+  checks.volume_writeback = Boolean(volumeSync?.volume_control)
 
   const runs = await request(`/novel/runs?project_id=${project.id}`)
   checks.runs = Array.isArray(runs)

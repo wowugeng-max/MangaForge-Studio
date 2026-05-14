@@ -351,6 +351,24 @@ export default function NovelProjectWorkspace() {
     reloadProject: loadProjectModules,
   })
 
+  const mergeChapterVersion = async (version: any, choices: Array<{ index: number; source: 'current' | 'version' }>) => {
+    if (!activeChapter) return
+    if (!await flushPendingSave()) return
+    try {
+      const res = await apiClient.post(`/novel/chapters/${activeChapter.id}/version-merge`, {
+        project_id: projectId,
+        version_id: version.id,
+        choices,
+      })
+      if (res.data?.chapter) setChapters(prev => prev.map(ch => ch.id === res.data.chapter.id ? res.data.chapter : ch))
+      await loadProjectModules()
+      setChapterVersionDetail(null)
+      message.success('合并稿已生成')
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '版本合并失败')
+    }
+  }
+
   const { confirmReferenceReady } = useReferenceWorkflow({
     projectId,
     referenceSummary,
@@ -1277,74 +1295,7 @@ export default function NovelProjectWorkspace() {
   }
 
   const openProductionDesk = async () => {
-    setCommercialToolLoading('productionDesk')
-    try {
-      const [dashboardRes, queueRes] = await Promise.all([
-        apiClient.get(`/novel/projects/${projectId}/production-dashboard`),
-        apiClient.get(`/novel/projects/${projectId}/run-queue`),
-      ])
-      const dashboard = dashboardRes.data?.dashboard || {}
-      const queue = queueRes.data || {}
-      Modal.info({
-        title: '章节生产台',
-        width: 1040,
-        content: (
-          <div style={{ display: 'grid', gridTemplateColumns: '280px minmax(0, 1fr) 280px', gap: 12 }}>
-            <Card size="small" title="章节队列">
-              <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                {(dashboard.chapter_trends || []).slice(0, 40).map((chapter: any) => (
-                  <div key={chapter.chapter_id} style={{ padding: 8, border: '1px solid #f0f0f0', borderRadius: 6 }}>
-                    <Space wrap>
-                      <Tag bordered={false}>第{chapter.chapter_no}章</Tag>
-                      <Tag color={chapter.has_text ? 'green' : 'default'} bordered={false}>{chapter.has_text ? '已写' : '未写'}</Tag>
-                      {chapter.quality_score && <Tag color={chapter.quality_score >= 78 ? 'green' : 'gold'} bordered={false}>{chapter.quality_score}分</Tag>}
-                    </Space>
-                    <Paragraph style={{ margin: '4px 0 0', fontSize: 12 }} ellipsis={{ rows: 1 }}>{chapter.title}</Paragraph>
-                  </div>
-                ))}
-              </Space>
-            </Card>
-            <Card size="small" title="当前流水线">
-              <Space direction="vertical" size={10} style={{ width: '100%' }}>
-                <Space wrap>
-                  <Tag color="blue" bordered={false}>worker {queue.worker?.status || 'idle'}</Tag>
-                  <Tag bordered={false}>待执行 {queue.summary?.queued || 0}</Tag>
-                  <Tag bordered={false}>运行 {queue.summary?.running || 0}</Tag>
-                  <Tag bordered={false}>暂停 {queue.summary?.paused || 0}</Tag>
-                </Space>
-                <List
-                  size="small"
-                  dataSource={(queue.queue || []).slice(0, 12)}
-                  renderItem={(item: any) => (
-                    <List.Item>
-                      <List.Item.Meta
-                        title={<Space wrap><Tag bordered={false}>{item.step}</Tag><Tag color={item.status === 'running' ? 'blue' : item.status === 'paused' ? 'gold' : 'default'} bordered={false}>{item.status}</Tag></Space>}
-                        description={item.payload?.phase || item.created_at}
-                      />
-                    </List.Item>
-                  )}
-                />
-              </Space>
-            </Card>
-            <Card size="small" title="卷级控制">
-              <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                {(dashboard.volume_controls || []).length ? dashboard.volume_controls.map((volume: any) => (
-                  <div key={volume.id || volume.title} style={{ padding: 8, border: '1px solid #f0f0f0', borderRadius: 6 }}>
-                    <Text strong>{volume.title}</Text>
-                    <Progress percent={volume.progress || 0} size="small" />
-                    <Paragraph style={{ marginBottom: 0, fontSize: 12 }} ellipsis={{ rows: 2 }}>{volume.summary}</Paragraph>
-                  </div>
-                )) : <Text type="secondary">暂无分卷目标</Text>}
-              </Space>
-            </Card>
-          </div>
-        ),
-      })
-    } catch (error: any) {
-      message.error(error?.response?.data?.error || error?.message || '章节生产台加载失败')
-    } finally {
-      setCommercialToolLoading('')
-    }
+    navigate(`/novel/workspace/${projectId}/production`)
   }
 
   const startRunQueueWorker = async () => {
@@ -1742,6 +1693,11 @@ export default function NovelProjectWorkspace() {
             生产看板
           </Button>
         </Tooltip>
+        <Tooltip title="进入独立章节生产台，长期监控队列、预算、确认和重试">
+          <Button type="text" size="small" onClick={() => navigate(`/novel/workspace/${projectId}/production`)}>
+            生产台
+          </Button>
+        </Tooltip>
         <Tooltip title="编辑项目写作圣经、风格锁定和仿写安全策略">
           <Button type="text" size="small" onClick={openWritingBibleEditor}>
             写作圣经
@@ -1880,6 +1836,7 @@ export default function NovelProjectWorkspace() {
         showOnlyDiff={showOnlyDiff}
         onToggleDiffMode={() => setShowOnlyDiff(prev => !prev)}
         onClose={() => setChapterVersionDetail(null)}
+        onMergeVersion={mergeChapterVersion}
       />
 
       <AgentExecutionModal

@@ -16,6 +16,7 @@ import CanvasPage from './pages/Canvas'
 import ProviderManager from './pages/Providers'
 import NovelStudio from './pages/NovelStudio'
 import NovelProjectWorkspace from './pages/NovelProjectWorkspace'
+import NovelProductionDesk from './pages/NovelProductionDesk'
 import ModelManager from './pages/ModelManager'
 
 const router = createBrowserRouter([
@@ -41,6 +42,7 @@ const router = createBrowserRouter([
       { path: 'providers', element: <ProviderManager /> },
       { path: 'novel', element: <NovelStudio /> },
       { path: 'novel/workspace/:id', element: <NovelProjectWorkspace /> },
+      { path: 'novel/workspace/:id/production', element: <NovelProductionDesk /> },
     ],
   },
   {

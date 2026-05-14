@@ -405,12 +405,15 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
     const payload = getNovelPayload(result)
     return { result, sceneCards: normalizeSceneCards(payload) }
   }
-  const buildParagraphProseContext = (project: any, contextPackage: any) => [
+  const buildParagraphProseContext = (project: any, contextPackage: any, migrationPlan: any = null) => [
     '任务：按场景卡生成章节正文。请先在心中按场景组织段落，再输出完整正文。',
     `作品标题：${project.title}`,
     '',
     '【结构化上下文包】',
     JSON.stringify(contextPackage, null, 2).slice(0, 12000),
+    '',
+    '【参考迁移计划】',
+    JSON.stringify(migrationPlan || {}, null, 2).slice(0, 5000),
     '',
     '【段落级写作要求】',
     '1. 严格按 scene_cards 顺序生成，每个场景至少 3-8 个自然段。',
@@ -418,9 +421,10 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
     '3. 场景之间必须有过渡，不能硬切。',
     '4. 保持 style_lock 中的人称、句长、对话比例、吐槽密度、爽点密度、描写浓度和禁用词约束。',
     '5. 只能学习参考作品的节奏、结构、爽点安排和信息密度；不得复制具体桥段、专有设定、原句、角色名和核心梗。',
+    migrationPlan?.generation_prompt_addendum ? `6. ${migrationPlan.generation_prompt_addendum}` : '',
     '',
     '输出 JSON，包含 prose_chapters 数组。数组第一项必须包含 chapter_no, title, chapter_text, scene_breakdown, continuity_notes。chapter_text 是完整正文，不要 markdown 标题。',
-  ].join('\n')
+  ].filter(Boolean).join('\n')
   const buildStoryStatePrompt = (project: any, contextPackage: any, chapterText: string) => [
     '任务：从刚入库的章节正文中提取故事状态机增量，用于后续章节续写。只提取事实，不要推测。',
     `作品标题：${project.title}`,
@@ -584,6 +588,7 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
   const buildPipelineSteps = () => [
     { key: 'context', label: '章节目标确认/续写上下文包', status: 'pending' },
     { key: 'scene_cards', label: '场景卡生成/人工确认', status: 'pending' },
+    { key: 'migration_plan', label: '参考迁移计划', status: 'pending' },
     { key: 'draft', label: '段落级正文生成', status: 'pending' },
     { key: 'review', label: '章节级自检', status: 'pending' },
     { key: 'revise', label: '二次修订', status: 'pending' },
@@ -776,6 +781,71 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
     approval_stage: stage,
     approval_context: context,
   })
+  const getProductionBudget = (project: any) => ({
+    max_retries_per_chapter: Number(project.reference_config?.production_budget?.max_retries_per_chapter ?? 2),
+    max_daily_generated_chapters: Number(project.reference_config?.production_budget?.max_daily_generated_chapters ?? 50),
+    max_failure_rate: Number(project.reference_config?.production_budget?.max_failure_rate ?? 35),
+    max_safety_blocks_per_day: Number(project.reference_config?.production_budget?.max_safety_blocks_per_day ?? 5),
+    max_run_minutes: Number(project.reference_config?.production_budget?.max_run_minutes ?? 180),
+    pause_on_budget_exceeded: project.reference_config?.production_budget?.pause_on_budget_exceeded !== false,
+  })
+  const getProductionBudgetDecision = (project: any, runs: any[]) => {
+    const budget = getProductionBudget(project)
+    const today = new Date().toISOString().slice(0, 10)
+    const todayRuns = runs.filter(run => String(run.created_at || '').startsWith(today))
+    const generatedToday = todayRuns.filter(run => run.run_type === 'generate_prose' && run.status === 'success').length
+      + todayRuns.filter(run => run.run_type === 'chapter_group_generation' && String(run.output_ref || '').includes('"status":"success"')).length
+    const failedRuns = todayRuns.filter(run => ['failed', 'error'].includes(run.status)).length
+    const failureRate = todayRuns.length ? Math.round((failedRuns / todayRuns.length) * 100) : 0
+    const safetyBlocks = todayRuns.filter(run => String(run.error_message || '').includes('仿写安全') || String(run.output_ref || '').includes('REFERENCE_SAFETY_BLOCKED')).length
+    const reasons = [
+      generatedToday >= budget.max_daily_generated_chapters ? `今日生成章节数 ${generatedToday} 已达到上限 ${budget.max_daily_generated_chapters}` : '',
+      failureRate > budget.max_failure_rate ? `今日失败率 ${failureRate}% 超过上限 ${budget.max_failure_rate}%` : '',
+      safetyBlocks > budget.max_safety_blocks_per_day ? `今日安全阻断 ${safetyBlocks} 次超过上限 ${budget.max_safety_blocks_per_day}` : '',
+    ].filter(Boolean)
+    return {
+      budget,
+      blocked: budget.pause_on_budget_exceeded && reasons.length > 0,
+      reasons,
+      usage: { generated_today: generatedToday, failed_runs: failedRuns, failure_rate: failureRate, safety_blocks: safetyBlocks, total_runs_today: todayRuns.length },
+    }
+  }
+  const buildReferenceMigrationDryPlan = (project: any, chapter: any, preview: any, safety: any) => ({
+    allowed_learning_layers: safety.allowed,
+    cautious_layers: safety.cautious,
+    forbidden_transfer_layers: safety.forbidden,
+    chapter_specific_plan: {
+      chapter_no: chapter.chapter_no,
+      title: chapter.title,
+      learn: ['章节节奏', '结构功能', '爽点密度', '信息揭示节拍', '情绪曲线'],
+      rewrite: ['场景目标', '障碍来源', '人物选择', '事件顺序', '设定名词', '具体桥段'],
+      active_reference_count: preview.active_references?.length || 0,
+      injected_entry_count: preview.entries?.length || 0,
+    },
+    rewrite_boundaries: ['不使用参考作品角色名、专有设定、原句、核心梗。', '参考作品只能作为节奏和结构功能样本。'],
+    copy_guard_terms: collectCopyGuardTerms(preview).slice(0, 20),
+    generation_prompt_addendum: '只学习参考作品的节奏、结构功能、爽点密度和信息揭示方式；所有具体事件、设定、角色、表达、桥段和顺序必须换成当前项目自有内容。',
+  })
+  const getReferenceMigrationPlanForChapter = async (activeWorkspace: string, project: any, chapter: any) => {
+    const reviews = await listNovelReviews(activeWorkspace, project.id)
+    const latest = reviews
+      .filter(item => item.review_type === 'reference_migration_plan')
+      .map(item => parseJsonLikePayload(item.payload) || {})
+      .find(payload => Number(payload.chapter_id || 0) === Number(chapter.id))
+    if (latest?.plan) return latest.plan
+    const preview = await previewNovelKnowledgeInjection(project, '正文创作')
+    return buildReferenceMigrationDryPlan(project, chapter, preview, getSafetyPolicy(project))
+  }
+  const classifyGenerationFailure = (error: any) => {
+    const text = String(error?.message || error?.error || error || '')
+    if (text.includes('upload current user input file') || text.includes('upload file failed')) return { type: 'provider_upload_failed', actions: ['缩短上下文后重试', '切换模型重试', '把章节批量拆小'] }
+    if (text.includes('JSON') || text.includes('解析')) return { type: 'json_parse_failed', actions: ['使用 JSON 修复解析', '降低输出字段复杂度后重试'] }
+    if (text.includes('模型未返回正文') || text.includes('未返回正文')) return { type: 'empty_prose', actions: ['降低上下文字数重试', '强制重新生成场景卡', '切换正文模型'] }
+    if (text.includes('仿写安全') || text.includes('REFERENCE_SAFETY_BLOCKED')) return { type: 'reference_safety_blocked', actions: ['生成参考迁移计划', '替换高风险专名和桥段', '降低参考强度后重试'] }
+    if (text.includes('前置检查') || text.includes('PREFLIGHT')) return { type: 'preflight_blocked', actions: ['补齐章节目标/结尾钩子/角色状态', '生成场景卡', '允许缺材料继续'] }
+    if (error?.code === 'APPROVAL_REQUIRED') return { type: 'approval_required', actions: ['人工确认当前关卡', '调整审批策略', '确认后继续执行'] }
+    return { type: 'unknown', actions: ['查看原始错误', '手动重试', '切换模型重试'] }
+  }
   const getAgentPromptConfig = (project: any) => ({
     version: project.reference_config?.agent_prompt_config?.version || 1,
     prompts: project.reference_config?.agent_prompt_config?.prompts || {},
@@ -1224,6 +1294,9 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
       .filter(ch => ch.chapter_no < chapter.chapter_no && ch.chapter_text)
       .slice(-3)
       .map(ch => ({ chapter_no: ch.chapter_no, title: ch.title, chapter_summary: ch.chapter_summary || '', ending_hook: ch.ending_hook || '', chapter_text: ch.chapter_text }))
+    await onStage('migration_plan', { status: 'running' })
+    const migrationPlan = await getReferenceMigrationPlanForChapter(activeWorkspace, project, chapter).catch(error => ({ error: String(error) }))
+    await onStage('migration_plan', { status: (migrationPlan as any)?.error ? 'warn' : 'success', active_reference_count: (migrationPlan as any)?.chapter_specific_plan?.active_reference_count || 0 })
     await onStage('draft', { status: 'running' })
     const draftResult = await generateNovelChapterProse(project, chapter, {
       worldbuilding,
@@ -1232,7 +1305,8 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
       prompt: String(options.prompt || ''),
       prevChapters,
       contextPackage,
-      paragraphTask: buildParagraphProseContext(project, contextPackage),
+      migrationPlan,
+      paragraphTask: buildParagraphProseContext(project, contextPackage, migrationPlan),
     } as any, activeWorkspace, getStageModelId(project, 'draft', preferredModelId))
     const resultPayload = getNovelPayload(draftResult)
     const proseArr = Array.isArray(resultPayload?.prose_chapters) ? resultPayload.prose_chapters : []
@@ -1474,6 +1548,36 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
       const project = await getProject(activeWorkspace, Number(req.params.id))
       if (!project) return res.status(404).json({ error: 'project not found' })
       res.json({ ok: true, policy: getApprovalPolicy(project) })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.get('/api/novel/projects/:id/production-budget', async (req, res) => {
+    try {
+      const activeWorkspace = getWorkspace()
+      const project = await getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const runs = await listNovelRuns(activeWorkspace, project.id)
+      res.json({ ok: true, budget: getProductionBudget(project), decision: getProductionBudgetDecision(project, runs) })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.put('/api/novel/projects/:id/production-budget', async (req, res) => {
+    try {
+      const activeWorkspace = getWorkspace()
+      const project = await getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const budget = { ...getProductionBudget(project), ...(req.body?.budget || req.body || {}) }
+      const updated = await updateNovelProject(activeWorkspace, project.id, {
+        reference_config: {
+          ...(project.reference_config || {}),
+          production_budget: budget,
+        },
+      } as any)
+      res.json({ ok: true, budget, project: updated })
     } catch (error) {
       res.status(500).json({ error: String(error) })
     }
@@ -1791,6 +1895,46 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
     }
   })
 
+  app.post('/api/novel/projects/:id/volume-control/sync', async (req, res) => {
+    try {
+      const activeWorkspace = getWorkspace()
+      const project = await getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const reviews = await listNovelReviews(activeWorkspace, project.id)
+      const latestRolling = reviews
+        .filter(item => item.review_type === 'rolling_plan')
+        .map(item => ({ review: item, payload: parseJsonLikePayload(item.payload) || {} }))
+        .find(item => item.payload.report)
+      const report = req.body?.report || latestRolling?.payload?.report || {}
+      const volumeControl = {
+        ...(project.reference_config?.volume_control || {}),
+        volume_remaining_goals: report.volume_remaining_goals || req.body?.volume_remaining_goals || [],
+        foreshadowing_recovery_plan: report.foreshadowing_recovery_plan || req.body?.foreshadowing_recovery_plan || [],
+        character_growth_nodes: report.character_growth_nodes || req.body?.character_growth_nodes || [],
+        synced_from_review_id: latestRolling?.review?.id || null,
+        synced_at: new Date().toISOString(),
+      }
+      if (req.body?.dry_run === true) return res.json({ ok: true, dry_run: true, volume_control: volumeControl })
+      const updated = await updateNovelProject(activeWorkspace, project.id, {
+        reference_config: {
+          ...(project.reference_config || {}),
+          volume_control: volumeControl,
+        },
+      } as any)
+      await createNovelReview(activeWorkspace, {
+        project_id: project.id,
+        review_type: 'volume_control',
+        status: 'ok',
+        summary: '卷级控制已同步滚动规划',
+        issues: [],
+        payload: JSON.stringify({ volume_control: volumeControl }),
+      })
+      res.json({ ok: true, volume_control: volumeControl, project: updated })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
   app.get('/api/novel/projects/:id/model-strategy', async (req, res) => {
     try {
       const activeWorkspace = getWorkspace()
@@ -1874,6 +2018,22 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
 
   const executeChapterGroupRunRecord = async (activeWorkspace: string, project: any, run: any, options: any = {}) => {
     let payload = parseJsonLikePayload(run.output_ref) || {}
+    const lockOwner = String(options.lock_owner || `worker-${process.pid}-${Date.now()}`)
+    const lock = payload.lock || {}
+    const lockExpiresAt = lock.expires_at ? new Date(String(lock.expires_at)).getTime() : 0
+    if (lock.owner && lock.owner !== lockOwner && lockExpiresAt > Date.now()) {
+      return { run, group: payload, processed: 0, status: 'locked', locked_by: lock.owner }
+    }
+    payload = {
+      ...payload,
+      lock: {
+        owner: lockOwner,
+        acquired_at: new Date().toISOString(),
+        heartbeat_at: new Date().toISOString(),
+        expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+      },
+    }
+    await updateNovelRun(activeWorkspace, run.id, { status: 'running', output_ref: JSON.stringify(payload) })
     const chapters = Array.isArray(payload.chapters) ? payload.chapters : []
     const maxChapters = Math.max(1, Math.min(50, Number(options.max_chapters || chapters.length || 10)))
     const retryLimit = Math.max(0, Math.min(5, Number(options.retry_limit ?? payload.model_strategy?.cost_policy?.retry_limit ?? 2)))
@@ -1905,6 +2065,14 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
         break
       }
       const item = chapters[index]
+      payload = {
+        ...payload,
+        lock: {
+          ...(payload.lock || {}),
+          heartbeat_at: new Date().toISOString(),
+          expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+        },
+      }
       if (!item?.id) continue
       if (item.next_run_at && new Date(String(item.next_run_at)).getTime() > Date.now()) {
         payload = { ...payload, chapters, current_index: index, phase: `第${item.chapter_no}章等待重试窗口` }
@@ -1971,6 +2139,7 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
           approval_context: chapterError?.approval_context || null,
           error: String(chapterError?.message || chapterError),
           error_code: chapterError?.code || '',
+          recovery_plan: classifyGenerationFailure(chapterError),
           failed_at: new Date().toISOString(),
         }
         chapters[index] = resultItem
@@ -2002,7 +2171,7 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
     }
     const updated = await updateNovelRun(activeWorkspace, run.id, {
       status,
-      output_ref: JSON.stringify({ ...payload, chapters, results, phase: status === 'success' ? '章节群已完成' : payload.phase, finished_at: status === 'success' ? new Date().toISOString() : undefined }),
+      output_ref: JSON.stringify({ ...payload, chapters, results, lock: null, phase: status === 'success' ? '章节群已完成' : payload.phase, finished_at: status === 'success' ? new Date().toISOString() : undefined }),
       duration_ms: Date.now() - startedAt,
       error_message: errorMessage,
     })
@@ -2136,6 +2305,21 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
     }
   })
 
+  app.post('/api/novel/runs/:id/failure-recovery-plan', async (req, res) => {
+    try {
+      const activeWorkspace = getWorkspace()
+      const projectId = Number(req.body.project_id || req.query.project_id || 0)
+      const runs = await listNovelRuns(activeWorkspace, projectId)
+      const run = runs.find(item => item.id === Number(req.params.id))
+      if (!run) return res.status(404).json({ error: 'run not found' })
+      const payload = parseJsonLikePayload(run.output_ref) || {}
+      const plan = classifyGenerationFailure({ message: run.error_message || payload?.error || payload?.last_error?.error || JSON.stringify(payload).slice(0, 500), code: payload?.last_error?.error_code || payload?.error_code })
+      res.json({ ok: true, plan, run_id: run.id, status: run.status })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
   app.post('/api/novel/chapters/:chapterId/editor-report', async (req, res) => {
     try {
       const activeWorkspace = getWorkspace()
@@ -2261,6 +2445,45 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
     }
   })
 
+  app.post('/api/novel/chapters/:chapterId/version-merge', async (req, res) => {
+    try {
+      const activeWorkspace = getWorkspace()
+      const chapterId = Number(req.params.chapterId)
+      const projectId = Number(req.body.project_id || 0)
+      const versions = await listChapterVersions(activeWorkspace, chapterId)
+      const current = (await listNovelChapters(activeWorkspace, projectId)).find(ch => ch.id === chapterId)
+      if (!current) return res.status(404).json({ error: 'chapter not found' })
+      const version = versions.find(item => item.id === Number(req.body.version_id || 0))
+      if (!version) return res.status(404).json({ error: 'version not found' })
+      const currentParas = String(current.chapter_text || '').split(/\n+/)
+      const versionParas = String(version.chapter_text || '').split(/\n+/)
+      const choices = Array.isArray(req.body.choices) ? req.body.choices : []
+      const max = Math.max(currentParas.length, versionParas.length)
+      const merged = []
+      for (let i = 0; i < max; i += 1) {
+        const choice = choices.find((item: any) => Number(item.index) === i + 1)
+        if (choice?.source === 'version') merged.push(versionParas[i] || '')
+        else if (choice?.source === 'current') merged.push(currentParas[i] || '')
+        else if (req.body.strategy === 'prefer_version') merged.push(versionParas[i] || currentParas[i] || '')
+        else if (req.body.strategy === 'prefer_longer') merged.push(String(versionParas[i] || '').length > String(currentParas[i] || '').length ? (versionParas[i] || '') : (currentParas[i] || ''))
+        else merged.push(currentParas[i] || versionParas[i] || '')
+      }
+      const chapterText = merged.join('\n\n').trim()
+      if (req.body?.dry_run === true) return res.json({ ok: true, dry_run: true, merged_length: chapterText.length })
+      const updated = await updateNovelChapter(activeWorkspace, chapterId, {
+        chapter_text: chapterText,
+        scene_breakdown: current.scene_breakdown || [],
+        continuity_notes: [
+          ...(current.continuity_notes || []),
+          `已从版本 v${version.version_no} 段落级合并。`,
+        ],
+      }, { versionSource: 'repair' })
+      res.json({ ok: true, chapter: updated, merged_length: chapterText.length })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
   app.post('/api/novel/chapters/:chapterId/similarity-report', async (req, res) => {
     try {
       const activeWorkspace = getWorkspace()
@@ -2326,19 +2549,7 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
       const preview = await previewNovelKnowledgeInjection(project, '正文创作')
       const safety = getSafetyPolicy(project)
       if (req.body?.dry_run === true || req.query.dry_run === '1') {
-        const plan = {
-          allowed_learning_layers: safety.allowed,
-          cautious_layers: safety.cautious,
-          forbidden_transfer_layers: safety.forbidden,
-          chapter_specific_plan: {
-            chapter_no: chapter.chapter_no,
-            learn: ['章节节奏', '信息密度', '情绪曲线'],
-            rewrite: ['场景目标', '障碍来源', '人物选择', '事件顺序'],
-          },
-          rewrite_boundaries: ['不使用参考作品角色名、专有设定、原句、核心梗。'],
-          copy_guard_terms: collectCopyGuardTerms(preview).slice(0, 20),
-          generation_prompt_addendum: '只学习参考作品的节奏和结构功能，所有具体事件、设定、角色与表达必须换成当前项目自有内容。',
-        }
+        const plan = buildReferenceMigrationDryPlan(project, chapter, preview, safety)
         return res.json({ ok: true, dry_run: true, plan, preview: { strength: preview.strength, entries: preview.entries?.length || 0 } })
       }
       const prompt = [
@@ -2562,6 +2773,9 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
         .filter(ch => ch.chapter_no < chapter.chapter_no && ch.chapter_text)
         .slice(-3)
         .map(ch => ({ chapter_no: ch.chapter_no, title: ch.title, chapter_summary: ch.chapter_summary || '', ending_hook: ch.ending_hook || '', chapter_text: ch.chapter_text }))
+      markStage('migration_plan', '生成/读取参考迁移计划', 'running')
+      const migrationPlan = await getReferenceMigrationPlanForChapter(activeWorkspace, project, chapter).catch(error => ({ error: String(error) }))
+      markStage('migration_plan', (migrationPlan as any)?.error ? '参考迁移计划读取失败，继续保守生成' : '参考迁移计划已就绪', (migrationPlan as any)?.error ? 'warn' : 'success', (migrationPlan as any)?.error || '', { migration_plan: migrationPlan })
       markStage('draft', '段落级正文生成', 'running')
       const result = await generateNovelChapterProse(project, chapter, {
         worldbuilding,
@@ -2570,7 +2784,8 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
         prompt: String(req.body.prompt || ''),
         prevChapters,
         contextPackage,
-        paragraphTask: buildParagraphProseContext(project, contextPackage),
+        migrationPlan,
+        paragraphTask: buildParagraphProseContext(project, contextPackage, migrationPlan),
       } as any, activeWorkspace, getStageModelId(project, 'draft', modelId))
       // 兼容 result.output / result.parsed / result.content(JSON string) 等厂商返回形态
       const resultPayload = getNovelPayload(result)
@@ -2753,7 +2968,17 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
       void (async () => {
         try {
           while (!worker.stop_requested && worker.processed_runs < maxRuns) {
+            const latestBudgetProject = await getProject(activeWorkspace, project.id)
+            const budgetProject = latestBudgetProject || project
             const runs = await listNovelRuns(activeWorkspace, project.id)
+            const budgetDecision = getProductionBudgetDecision(budgetProject, runs)
+            worker.budget = budgetDecision
+            if (budgetDecision.blocked) {
+              worker.status = 'paused_budget'
+              worker.phase = `预算熔断：${budgetDecision.reasons.join('；')}`
+              worker.updated_at = new Date().toISOString()
+              break
+            }
             const isRunDue = (item: any) => {
               const payload = parseJsonLikePayload(item.output_ref) || {}
               const chapters = Array.isArray(payload.chapters) ? payload.chapters : []
@@ -2768,10 +2993,11 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
             worker.current_run_id = run.id
             worker.phase = `执行任务 ${run.step_name || run.id}`
             worker.updated_at = new Date().toISOString()
-            const result = await executeChapterGroupRunRecord(activeWorkspace, project, run, {
+            const result = await executeChapterGroupRunRecord(activeWorkspace, budgetProject, run, {
               ...req.body,
               max_chapters: maxChaptersPerRun,
               model_id: req.body.model_id,
+              lock_owner: `worker-${project.id}-${worker.started_at}`,
             })
             worker.processed_runs += 1
             worker.processed_chapters += Number(result.processed || 0)
