@@ -39,6 +39,15 @@ async function main() {
     'novel_reference_fusion',
     'novel_story_state_manual_edit',
     'novel_book_review',
+    'novel_background_run_queue',
+    'novel_production_metrics',
+    'novel_approval_gates',
+    'novel_quality_benchmark',
+    'novel_version_review',
+    'novel_topic_validation',
+    'novel_similarity_report',
+    'novel_rolling_planner',
+    'novel_agent_prompt_config',
   ]
   const missingFeatures = requiredFeatures.filter(key => !features[key])
   if (missingFeatures.length) throw new Error(`Missing status features: ${missingFeatures.join(', ')}`)
@@ -62,6 +71,10 @@ async function main() {
     model_strategy: false,
     reference_fusion: false,
     story_state: false,
+    production_metrics: false,
+    approval_policy: false,
+    agent_config: false,
+    run_queue: false,
     diagnostics: false,
     runs: false,
   }
@@ -78,6 +91,14 @@ async function main() {
   checks.reference_fusion = Boolean(fusion?.fusion)
   const storyState = await request(`/novel/projects/${project.id}/story-state`)
   checks.story_state = Boolean(storyState && storyState.ok)
+  const metrics = await request(`/novel/projects/${project.id}/production-metrics`)
+  checks.production_metrics = Boolean(metrics?.metrics)
+  const approvalPolicy = await request(`/novel/projects/${project.id}/approval-policy`)
+  checks.approval_policy = Boolean(approvalPolicy?.policy)
+  const agentConfig = await request(`/novel/projects/${project.id}/agent-config`)
+  checks.agent_config = Boolean(agentConfig?.config)
+  const runQueue = await request(`/novel/projects/${project.id}/run-queue`)
+  checks.run_queue = Boolean(runQueue?.summary)
 
   if (chapter) {
     const diagnostics = await request(`/novel/chapters/${chapter.id}/generation-diagnostics?project_id=${project.id}`)

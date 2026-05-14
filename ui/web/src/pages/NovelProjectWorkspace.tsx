@@ -59,7 +59,9 @@ export default function NovelProjectWorkspace() {
   const [bookReviewLoading, setBookReviewLoading] = useState(false)
   const [writingBibleOpen, setWritingBibleOpen] = useState(false)
   const [storyStateOpen, setStoryStateOpen] = useState(false)
+  const [commercialToolsOpen, setCommercialToolsOpen] = useState(false)
   const [chapterGroupExecutingId, setChapterGroupExecutingId] = useState<number | null>(null)
+  const [commercialToolLoading, setCommercialToolLoading] = useState('')
 
   // ── 大纲生成控制面板 ──
   const [outlinePanelOpen, setOutlinePanelOpen] = useState(false)
@@ -94,6 +96,8 @@ export default function NovelProjectWorkspace() {
   const [editorForm] = Form.useForm()
   const [writingBibleForm] = Form.useForm()
   const [storyStateForm] = Form.useForm()
+  const [approvalPolicyForm] = Form.useForm()
+  const [agentConfigForm] = Form.useForm()
 
   // ── right reference panel ──
   const [rightPanelOpen, setRightPanelOpen] = useState(false)
@@ -937,6 +941,146 @@ export default function NovelProjectWorkspace() {
     }
   }
 
+  const showCommercialResult = (title: string, data: any) => {
+    Modal.info({
+      title,
+      width: 900,
+      content: (
+        <Paragraph style={{ marginBottom: 0, whiteSpace: 'pre-wrap', maxHeight: 560, overflow: 'auto' }}>
+          {JSON.stringify(data, null, 2)}
+        </Paragraph>
+      ),
+    })
+  }
+
+  const runCommercialTool = async (key: string, label: string, fn: () => Promise<any>) => {
+    setCommercialToolLoading(key)
+    try {
+      const data = await fn()
+      showCommercialResult(label, data)
+      await loadProjectModules()
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || `${label}失败`)
+    } finally {
+      setCommercialToolLoading('')
+    }
+  }
+
+  const openApprovalPolicyEditor = async () => {
+    setCommercialToolLoading('approval')
+    try {
+      const res = await apiClient.get(`/novel/projects/${projectId}/approval-policy`)
+      approvalPolicyForm.setFieldsValue({ policy: JSON.stringify(res.data?.policy || {}, null, 2) })
+      Modal.confirm({
+        title: '审批关卡策略',
+        width: 760,
+        content: (
+          <Form form={approvalPolicyForm} layout="vertical">
+            <Form.Item name="policy" label="审批策略 JSON">
+              <Input.TextArea rows={14} />
+            </Form.Item>
+          </Form>
+        ),
+        okText: '保存',
+        onOk: async () => {
+          const v = await approvalPolicyForm.validateFields()
+          await apiClient.put(`/novel/projects/${projectId}/approval-policy`, { policy: JSON.parse(v.policy || '{}') })
+          await loadProjectModules()
+          message.success('审批策略已保存')
+        },
+      })
+    } catch (error: any) {
+      message.error(error?.message?.includes('JSON') ? '审批策略必须是合法 JSON' : (error?.response?.data?.error || error?.message || '审批策略加载失败'))
+    } finally {
+      setCommercialToolLoading('')
+    }
+  }
+
+  const openAgentConfigEditor = async () => {
+    setCommercialToolLoading('agentConfig')
+    try {
+      const res = await apiClient.get(`/novel/projects/${projectId}/agent-config`)
+      agentConfigForm.setFieldsValue({ config: JSON.stringify(res.data?.config || {}, null, 2) })
+      Modal.confirm({
+        title: 'Agent 提示词配置',
+        width: 860,
+        content: (
+          <Form form={agentConfigForm} layout="vertical">
+            <Form.Item name="config" label="Agent 配置 JSON">
+              <Input.TextArea rows={18} />
+            </Form.Item>
+          </Form>
+        ),
+        okText: '保存新版本',
+        onOk: async () => {
+          const v = await agentConfigForm.validateFields()
+          await apiClient.put(`/novel/projects/${projectId}/agent-config`, { config: JSON.parse(v.config || '{}') })
+          await loadProjectModules()
+          message.success('Agent 配置已保存')
+        },
+      })
+    } catch (error: any) {
+      message.error(error?.message?.includes('JSON') ? 'Agent 配置必须是合法 JSON' : (error?.response?.data?.error || error?.message || 'Agent 配置加载失败'))
+    } finally {
+      setCommercialToolLoading('')
+    }
+  }
+
+  const runSimilarityForActiveChapter = async () => {
+    if (!activeChapter) return message.warning('请先选择章节')
+    await runCommercialTool('similarity', '章节相似度检测', async () => {
+      const res = await apiClient.post(`/novel/chapters/${activeChapter.id}/similarity-report`, { project_id: projectId })
+      return res.data
+    })
+  }
+
+  const runVersionReviewForActiveChapter = async () => {
+    if (!activeChapter) return message.warning('请先选择章节')
+    await runCommercialTool('versionReview', '章节版本评审', async () => {
+      const res = await apiClient.get(`/novel/chapters/${activeChapter.id}/version-review`, { params: { project_id: projectId } })
+      return res.data
+    })
+  }
+
+  const runRollingPlan = async () => {
+    if (!selectedModelId) return message.warning('请先选择模型')
+    await runCommercialTool('rollingPlan', '未来 10 章滚动规划', async () => {
+      const res = await apiClient.post(`/novel/projects/${projectId}/rolling-plan`, { model_id: selectedModelId, from_chapter: activeChapter?.chapter_no || undefined, horizon: 10 })
+      setRightPanelOpen(true)
+      setRightPanelTab('bookReviews')
+      return res.data
+    })
+  }
+
+  const runTopicValidation = async () => {
+    if (!selectedModelId) return message.warning('请先选择模型')
+    await runCommercialTool('topic', '选题验证', async () => {
+      const res = await apiClient.post(`/novel/projects/${projectId}/topic-validation`, { model_id: selectedModelId })
+      return res.data
+    })
+  }
+
+  const runQualityBenchmark = async () => {
+    await runCommercialTool('benchmark', '项目质量基准', async () => {
+      const res = await apiClient.post(`/novel/projects/${projectId}/benchmark`, { model_id: selectedModelId })
+      return res.data
+    })
+  }
+
+  const openProductionMetrics = async () => {
+    await runCommercialTool('metrics', '生成成本与质量仪表盘', async () => {
+      const res = await apiClient.get(`/novel/projects/${projectId}/production-metrics`)
+      return res.data
+    })
+  }
+
+  const openRunQueue = async () => {
+    await runCommercialTool('queue', '后台任务队列', async () => {
+      const res = await apiClient.get(`/novel/projects/${projectId}/run-queue`)
+      return res.data
+    })
+  }
+
   const executeChapterGroupRun = async (run: any) => {
     if (!selectedModelId) return message.warning('请先选择模型')
     setChapterGroupExecutingId(run.id)
@@ -1298,6 +1442,11 @@ export default function NovelProjectWorkspace() {
             全书总检
           </Button>
         </Tooltip>
+        <Tooltip title="打开生产级自动写作工具箱">
+          <Button type="text" size="small" onClick={() => setCommercialToolsOpen(true)}>
+            商业工具
+          </Button>
+        </Tooltip>
         <Tooltip title="创建 10 章章节群生产任务">
           <Button type="text" size="small" onClick={startChapterGroupGeneration}>
             章节群
@@ -1447,6 +1596,53 @@ export default function NovelProjectWorkspace() {
           setReferenceConfigOpen(true)
         }}
       />
+
+      <Modal
+        open={commercialToolsOpen}
+        title="商业级自动写作工具箱"
+        width={920}
+        onCancel={() => setCommercialToolsOpen(false)}
+        footer={<Button type="primary" onClick={() => setCommercialToolsOpen(false)}>关闭</Button>}
+      >
+        <Space direction="vertical" size={14} style={{ width: '100%' }}>
+          <Alert
+            type="info"
+            showIcon
+            message="这些工具用于生产治理：稳定性、成本、质量、审批、相似度、滚动规划和提示词版本。"
+            description="结果会保存到运行记录或审稿记录中，适合在批量生成前后做检查。"
+          />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
+            <Card size="small" title="生产稳定性">
+              <Space direction="vertical" style={{ width: '100%' }}>
+                <Button block loading={commercialToolLoading === 'queue'} onClick={openRunQueue}>后台任务队列</Button>
+                <Button block loading={commercialToolLoading === 'metrics'} onClick={openProductionMetrics}>成本质量仪表盘</Button>
+                <Button block loading={commercialToolLoading === 'approval'} onClick={openApprovalPolicyEditor}>审批关卡策略</Button>
+              </Space>
+            </Card>
+            <Card size="small" title="质量基准">
+              <Space direction="vertical" style={{ width: '100%' }}>
+                <Button block loading={commercialToolLoading === 'benchmark'} onClick={runQualityBenchmark}>项目质量基准测试</Button>
+                <Button block loading={commercialToolLoading === 'versionReview'} onClick={runVersionReviewForActiveChapter}>当前章版本评审</Button>
+                <Button block loading={commercialToolLoading === 'similarity'} onClick={runSimilarityForActiveChapter}>当前章相似度检测</Button>
+              </Space>
+            </Card>
+            <Card size="small" title="规划与选题">
+              <Space direction="vertical" style={{ width: '100%' }}>
+                <Button block loading={commercialToolLoading === 'topic'} onClick={runTopicValidation}>原创选题验证</Button>
+                <Button block loading={commercialToolLoading === 'rollingPlan'} onClick={runRollingPlan}>未来 10 章滚动规划</Button>
+                <Button block onClick={() => { setCommercialToolsOpen(false); setReferenceEngineeringOpen(true) }}>多参考融合控制台</Button>
+              </Space>
+            </Card>
+            <Card size="small" title="Agent 配置">
+              <Space direction="vertical" style={{ width: '100%' }}>
+                <Button block loading={commercialToolLoading === 'agentConfig'} onClick={openAgentConfigEditor}>提示词与 Agent 配置</Button>
+                <Button block onClick={openWritingBibleEditor}>结构化写作圣经</Button>
+                <Button block onClick={openStoryStateEditor}>状态机人工校正</Button>
+              </Space>
+            </Card>
+          </div>
+        </Space>
+      </Modal>
 
       <Modal
         open={writingBibleOpen}

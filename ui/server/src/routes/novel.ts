@@ -649,6 +649,95 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
       ].filter(Boolean),
     }
   }
+  const buildProductionMetrics = (chapters: any[], reviews: any[], runs: any[]) => {
+    const usageItems = runs.map(run => parseJsonLikePayload(run.output_ref) || {}).map(payload => payload.usage || payload.result?.usage || payload)
+    const tokenTotal = usageItems.reduce((sum, usage) => sum + Number(usage?.total_tokens || usage?.totalTokens || usage?.tokens || 0), 0)
+    const durationTotal = runs.reduce((sum, run) => sum + Number(run.duration_ms || 0), 0)
+    const stageStats = runs.reduce((acc: Record<string, any>, run) => {
+      const key = run.run_type || 'unknown'
+      acc[key] = acc[key] || { total: 0, failed: 0, success: 0, duration_ms: 0 }
+      acc[key].total += 1
+      acc[key].failed += ['failed', 'error'].includes(run.status) ? 1 : 0
+      acc[key].success += ['success', 'ok', 'completed'].includes(run.status) ? 1 : 0
+      acc[key].duration_ms += Number(run.duration_ms || 0)
+      return acc
+    }, {})
+    const qualityScores = reviews
+      .filter(item => ['prose_quality', 'editor_report', 'book_review'].includes(item.review_type))
+      .map(item => {
+        const payload = parseJsonLikePayload(item.payload) || {}
+        return Number(payload.self_check?.review?.score || payload.report?.overall_score || 0)
+      })
+      .filter(score => score > 0)
+    const safetyBlocks = runs.filter(run => String(run.error_message || '').includes('仿写安全') || String(run.output_ref || '').includes('REFERENCE_SAFETY_BLOCKED')).length
+    const fallbackCount = runs.filter(run => run.status === 'fallback' || String(run.output_ref || '').includes('fallback')).length
+    const generatedWords = chapters.reduce((sum, chapter) => sum + String(chapter.chapter_text || '').replace(/\s/g, '').length, 0)
+    return {
+      chapter_count: chapters.length,
+      written_chapter_count: chapters.filter(chapter => chapter.chapter_text).length,
+      generated_words: generatedWords,
+      total_runs: runs.length,
+      total_tokens: tokenTotal,
+      estimated_cost_units: Math.round(tokenTotal / 1000),
+      total_duration_ms: durationTotal,
+      avg_run_duration_ms: runs.length ? Math.round(durationTotal / runs.length) : 0,
+      avg_quality_score: qualityScores.length ? Math.round(qualityScores.reduce((sum, score) => sum + score, 0) / qualityScores.length) : null,
+      failure_rate: runs.length ? Math.round((runs.filter(run => ['failed', 'error'].includes(run.status)).length / runs.length) * 100) : 0,
+      fallback_count: fallbackCount,
+      safety_block_count: safetyBlocks,
+      stage_stats: stageStats,
+      throughput: {
+        words_per_minute: durationTotal > 0 ? Math.round(generatedWords / (durationTotal / 60000)) : 0,
+        chapters_per_hour: durationTotal > 0 ? Number((chapters.filter(chapter => chapter.chapter_text).length / (durationTotal / 3600000)).toFixed(2)) : 0,
+      },
+    }
+  }
+  const getApprovalPolicy = (project: any) => ({
+    mode: project.reference_config?.approval_policy?.mode || 'balanced',
+    require_scene_card_approval: project.reference_config?.approval_policy?.require_scene_card_approval !== false,
+    require_draft_approval: Boolean(project.reference_config?.approval_policy?.require_draft_approval),
+    require_low_score_approval: project.reference_config?.approval_policy?.require_low_score_approval !== false,
+    low_score_threshold: Number(project.reference_config?.approval_policy?.low_score_threshold || 78),
+    require_safety_approval: project.reference_config?.approval_policy?.require_safety_approval !== false,
+    allow_full_auto: Boolean(project.reference_config?.approval_policy?.allow_full_auto),
+  })
+  const getAgentPromptConfig = (project: any) => ({
+    version: project.reference_config?.agent_prompt_config?.version || 1,
+    prompts: project.reference_config?.agent_prompt_config?.prompts || {},
+    project_overrides_enabled: project.reference_config?.agent_prompt_config?.project_overrides_enabled !== false,
+    updated_at: project.reference_config?.agent_prompt_config?.updated_at || '',
+  })
+  const simpleTextSimilarity = (a: string, b: string) => {
+    const grams = (text: string) => {
+      const clean = String(text || '').replace(/\s/g, '')
+      const set = new Set<string>()
+      for (let i = 0; i < clean.length - 2; i += 1) set.add(clean.slice(i, i + 3))
+      return set
+    }
+    const left = grams(a)
+    const right = grams(b)
+    if (!left.size || !right.size) return 0
+    let inter = 0
+    for (const item of left) if (right.has(item)) inter += 1
+    return clampScore((inter / Math.max(left.size, right.size)) * 100)
+  }
+  const diffTexts = (before: string, after: string) => {
+    const beforeParas = String(before || '').split(/\n+/).map(item => item.trim()).filter(Boolean)
+    const afterParas = String(after || '').split(/\n+/).map(item => item.trim()).filter(Boolean)
+    const max = Math.max(beforeParas.length, afterParas.length)
+    const changes = []
+    for (let i = 0; i < max; i += 1) {
+      if (beforeParas[i] !== afterParas[i]) changes.push({ index: i + 1, before: beforeParas[i] || '', after: afterParas[i] || '' })
+      if (changes.length >= 80) break
+    }
+    return {
+      before_length: before.length,
+      after_length: after.length,
+      paragraph_changes: changes,
+      change_count: changes.length,
+      similarity_score: simpleTextSimilarity(before, after),
+    }
+  }
   const buildOriginalIncubatorPrompt = (project: any, body: any) => [
     '任务：进行原创小说项目孵化，不依赖任何指定参考作品。请产出可直接落库的商业网文创作蓝图。',
     `项目标题：${project.title}`,
@@ -1184,6 +1273,86 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
     }
   })
 
+  app.get('/api/novel/projects/:id/production-metrics', async (req, res) => {
+    try {
+      const activeWorkspace = getWorkspace()
+      const project = await getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const [chapters, reviews, runs] = await Promise.all([
+        listNovelChapters(activeWorkspace, project.id),
+        listNovelReviews(activeWorkspace, project.id),
+        listNovelRuns(activeWorkspace, project.id),
+      ])
+      res.json({ ok: true, metrics: buildProductionMetrics(chapters, reviews, runs) })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.get('/api/novel/projects/:id/approval-policy', async (req, res) => {
+    try {
+      const activeWorkspace = getWorkspace()
+      const project = await getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      res.json({ ok: true, policy: getApprovalPolicy(project) })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.put('/api/novel/projects/:id/approval-policy', async (req, res) => {
+    try {
+      const activeWorkspace = getWorkspace()
+      const project = await getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const policy = { ...getApprovalPolicy(project), ...(req.body?.policy || req.body || {}) }
+      const updated = await updateNovelProject(activeWorkspace, project.id, {
+        reference_config: {
+          ...(project.reference_config || {}),
+          approval_policy: policy,
+        },
+      } as any)
+      res.json({ ok: true, policy, project: updated })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.get('/api/novel/projects/:id/agent-config', async (req, res) => {
+    try {
+      const activeWorkspace = getWorkspace()
+      const project = await getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      res.json({ ok: true, config: getAgentPromptConfig(project) })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.put('/api/novel/projects/:id/agent-config', async (req, res) => {
+    try {
+      const activeWorkspace = getWorkspace()
+      const project = await getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const prev = getAgentPromptConfig(project)
+      const config = {
+        ...prev,
+        ...(req.body?.config || req.body || {}),
+        version: Number(prev.version || 1) + 1,
+        updated_at: new Date().toISOString(),
+      }
+      const updated = await updateNovelProject(activeWorkspace, project.id, {
+        reference_config: {
+          ...(project.reference_config || {}),
+          agent_prompt_config: config,
+        },
+      } as any)
+      res.json({ ok: true, config, project: updated })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
   app.get('/api/novel/projects/:id/writing-assets', async (req, res) => {
     try {
       const activeWorkspace = getWorkspace()
@@ -1328,6 +1497,121 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
     }
   })
 
+  app.post('/api/novel/projects/:id/topic-validation', async (req, res) => {
+    try {
+      const activeWorkspace = getWorkspace()
+      const project = await getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const prompt = [
+        '任务：进行商业网文选题验证，只输出 JSON。',
+        `项目：${project.title}`,
+        `题材：${project.genre || ''}`,
+        `简介：${project.synopsis || ''}`,
+        `目标读者：${project.target_audience || ''}`,
+        '输出：overall_score, target_reader, market_position, selling_points, first_10_chapter_retention_risks, competition_risks, three_directions(array), recommendation。',
+      ].join('\n')
+      const modelId = getStageModelId(project, 'outline', Number(req.body.model_id || 0) || undefined)
+      const result = await executeNovelAgent('market-agent', project, { task: prompt }, { activeWorkspace, modelId: modelId ? String(modelId) : undefined, maxTokens: 5000, temperature: 0.45, skipMemory: true })
+      const report = getNovelPayload(result)
+      const saved = await createNovelReview(activeWorkspace, {
+        project_id: project.id,
+        review_type: 'topic_validation',
+        status: Number(report.overall_score || 0) >= 75 ? 'ok' : 'warn',
+        summary: `选题验证评分 ${report.overall_score ?? '-'}`,
+        issues: asArray(report.competition_risks).concat(asArray(report.first_10_chapter_retention_risks)).map((item: any) => String(item)),
+        payload: JSON.stringify({ report }),
+      })
+      res.json({ ok: true, report, review: saved, result })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.post('/api/novel/projects/:id/benchmark', async (req, res) => {
+    try {
+      const activeWorkspace = getWorkspace()
+      const project = await getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const [chapters, reviews] = await Promise.all([
+        listNovelChapters(activeWorkspace, project.id),
+        listNovelReviews(activeWorkspace, project.id),
+      ])
+      const sample = chapters.find(ch => ch.chapter_summary || ch.chapter_goal) || chapters[0] || null
+      const proseScores = reviews.filter(item => item.review_type === 'prose_quality').map(item => Number((parseJsonLikePayload(item.payload) || {}).self_check?.review?.score || 0)).filter(Boolean)
+      const report = {
+        benchmark_id: `bench-${Date.now()}`,
+        sample_chapter: sample ? { id: sample.id, chapter_no: sample.chapter_no, title: sample.title, goal: sample.chapter_goal, summary: sample.chapter_summary } : null,
+        current_strategy: project.reference_config?.model_strategy || getModelStrategy(project, Number(req.body.model_id || 0) || undefined),
+        quality_baseline: {
+          average_score: proseScores.length ? Math.round(proseScores.reduce((sum, score) => sum + score, 0) / proseScores.length) : null,
+          sample_count: proseScores.length,
+        },
+        cost_baseline: buildProductionMetrics(chapters, reviews, await listNovelRuns(activeWorkspace, project.id)),
+        recommendations: [
+          proseScores.length < 3 ? '样本不足，建议至少生成 3 章后再做模型/提示词 A/B 对比。' : '',
+          proseScores.length && Math.min(...proseScores) < 78 ? '存在低分章节，优先优化审稿修订提示词。' : '',
+          !project.reference_config?.agent_prompt_config ? '尚未配置 Agent 提示词版本，可先建立项目级提示词基线。' : '',
+        ].filter(Boolean),
+      }
+      const saved = await createNovelReview(activeWorkspace, {
+        project_id: project.id,
+        review_type: 'quality_benchmark',
+        status: 'ok',
+        summary: `质量基准：样本 ${proseScores.length}，均分 ${report.quality_baseline.average_score ?? '-'}`,
+        issues: report.recommendations,
+        payload: JSON.stringify({ report }),
+      })
+      await appendNovelRun(activeWorkspace, { project_id: project.id, run_type: 'quality_benchmark', step_name: 'baseline', status: 'success', output_ref: JSON.stringify({ report, review: saved }) })
+      res.json({ ok: true, report, review: saved })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.post('/api/novel/projects/:id/rolling-plan', async (req, res) => {
+    try {
+      const activeWorkspace = getWorkspace()
+      const project = await getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const [chapters, outlines, reviews] = await Promise.all([
+        listNovelChapters(activeWorkspace, project.id),
+        listNovelOutlines(activeWorkspace, project.id),
+        listNovelReviews(activeWorkspace, project.id),
+      ])
+      const fromChapter = Number(req.body.from_chapter || chapters.find(ch => !ch.chapter_text)?.chapter_no || 1)
+      const horizon = Math.max(3, Math.min(30, Number(req.body.horizon || 10)))
+      const targetChapters = chapters.filter(ch => ch.chapter_no >= fromChapter).slice(0, horizon)
+      const prompt = [
+        '任务：生成未来章节滚动规划，只输出 JSON。',
+        `项目：${project.title}`,
+        `从第 ${fromChapter} 章开始，规划未来 ${horizon} 章。`,
+        '需要输出：rolling_plan(array: chapter_no,title,chapter_goal,conflict,payoff,foreshadowing_to_use,ending_hook), volume_remaining_goals, foreshadowing_recovery_plan, character_growth_nodes, risk_notes。',
+        '【写作圣经/状态机】',
+        JSON.stringify({ writing_bible: project.reference_config?.writing_bible || {}, story_state: project.reference_config?.story_state || {} }, null, 2).slice(0, 6000),
+        '【分卷/大纲】',
+        JSON.stringify(outlines, null, 2).slice(0, 6000),
+        '【待规划章节】',
+        JSON.stringify(targetChapters.map(ch => ({ chapter_no: ch.chapter_no, title: ch.title, goal: ch.chapter_goal, summary: ch.chapter_summary, ending_hook: ch.ending_hook })), null, 2).slice(0, 6000),
+        '【近期审稿】',
+        JSON.stringify(reviews.slice(0, 8).map(item => ({ type: item.review_type, summary: item.summary, issues: item.issues })), null, 2).slice(0, 3000),
+      ].join('\n')
+      const modelId = getStageModelId(project, 'outline', Number(req.body.model_id || 0) || undefined)
+      const result = await executeNovelAgent('outline-agent', project, { task: prompt }, { activeWorkspace, modelId: modelId ? String(modelId) : undefined, maxTokens: 6000, temperature: getStageTemperature(project, 'outline', 0.45), skipMemory: true })
+      const report = getNovelPayload(result)
+      const saved = await createNovelReview(activeWorkspace, {
+        project_id: project.id,
+        review_type: 'rolling_plan',
+        status: 'ok',
+        summary: `滚动规划：第${fromChapter}章起 ${horizon} 章`,
+        issues: asArray(report.risk_notes).map((item: any) => String(item)),
+        payload: JSON.stringify({ report, from_chapter: fromChapter, horizon }),
+      })
+      res.json({ ok: true, report, review: saved, result })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
   app.get('/api/novel/projects/:id/model-strategy', async (req, res) => {
     try {
       const activeWorkspace = getWorkspace()
@@ -1418,15 +1702,17 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
       const count = Math.max(1, Math.min(50, Number(req.body.count || 10)))
       const selected = chapters.filter(ch => ch.chapter_no >= startNo && ch.chapter_no < startNo + count)
       const modelStrategy = project.reference_config?.model_strategy || getModelStrategy(project, Number(req.body.model_id || 0) || undefined)
+      const approvalPolicy = project.reference_config?.approval_policy || getApprovalPolicy(project)
       const output = {
         chapter_ids: selected.map(ch => ch.id),
         chapters: selected.map(ch => ({ id: ch.id, chapter_no: ch.chapter_no, title: ch.title, status: ch.chapter_text ? 'written' : 'pending' })),
         current_index: 0,
         mode: req.body.mode || 'group',
         model_strategy: modelStrategy,
+        approval_policy: approvalPolicy,
         policy: {
           stop_on_failure: req.body.stop_on_failure !== false,
-          require_scene_confirmation: req.body.require_scene_confirmation !== false,
+          require_scene_confirmation: req.body.require_scene_confirmation ?? approvalPolicy.require_scene_card_approval,
           quality_threshold: Number(req.body.quality_threshold || 78),
         },
       }
@@ -1645,6 +1931,63 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
         output_ref: JSON.stringify({ review: saved, modelName: (result as any).modelName }),
       })
       res.json({ ok: true, chapter: updated, review: saved, result })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.get('/api/novel/chapters/:chapterId/version-review', async (req, res) => {
+    try {
+      const activeWorkspace = getWorkspace()
+      const chapterId = Number(req.params.chapterId)
+      const projectId = Number(req.query.project_id || 0)
+      const versions = await listChapterVersions(activeWorkspace, chapterId)
+      const current = (await listNovelChapters(activeWorkspace, projectId)).find(ch => ch.id === chapterId)
+      const previous = versions[0] || null
+      const before = previous?.chapter_text || ''
+      const after = current?.chapter_text || ''
+      const diff = diffTexts(before, after)
+      res.json({ ok: true, chapter: current, previous_version: previous, diff, recommendation: diff.similarity_score < 55 ? '修订幅度较大，建议人工复核剧情与设定连续性。' : '修订幅度可控。' })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.post('/api/novel/chapters/:chapterId/similarity-report', async (req, res) => {
+    try {
+      const activeWorkspace = getWorkspace()
+      const chapterId = Number(req.params.chapterId)
+      const projectId = Number(req.body.project_id || req.query.project_id || 0)
+      const project = await getProject(activeWorkspace, projectId)
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const chapter = (await listNovelChapters(activeWorkspace, projectId)).find(ch => ch.id === chapterId)
+      if (!chapter) return res.status(404).json({ error: 'chapter not found' })
+      const referenceReport = await buildReferenceUsageReport(activeWorkspace, project, '相似度检测', chapter.chapter_text || '')
+      const quality = referenceReport.quality_assessment || {}
+      const structuralRisk = clampScore(100 - Number(quality.originality_score || 100))
+      const report = {
+        chapter_id: chapter.id,
+        chapter_no: chapter.chapter_no,
+        overall_risk_score: clampScore((Number(quality.copy_hit_count || 0) * 12) + structuralRisk * 0.5),
+        term_hits: referenceReport.copy_guard?.hits || [],
+        copy_safety_score: quality.copy_safety_score,
+        originality_score: quality.originality_score,
+        structural_similarity_risk: structuralRisk,
+        decision: Number(quality.copy_safety_score || 100) < 75 || structuralRisk > 45 ? 'needs_rewrite' : 'pass',
+        suggestions: [
+          ...(referenceReport.copy_guard?.hits?.length ? ['替换疑似复用专名和证据词。'] : []),
+          structuralRisk > 45 ? '调整场景目标、障碍来源、信息揭示顺序和角色选择，保留节奏功能但更换事件。' : '',
+        ].filter(Boolean),
+      }
+      const saved = await createNovelReview(activeWorkspace, {
+        project_id: project.id,
+        review_type: 'similarity_report',
+        status: report.decision === 'pass' ? 'ok' : 'warn',
+        summary: `相似度风险 ${report.overall_risk_score}`,
+        issues: report.suggestions,
+        payload: JSON.stringify({ report, reference_report: referenceReport }),
+      })
+      res.json({ ok: true, report, review: saved })
     } catch (error) {
       res.status(500).json({ error: String(error) })
     }
@@ -1958,6 +2301,44 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
   })
   app.get('/api/novel/projects/:id/reviews', async (req, res) => { try { const activeWorkspace = getWorkspace(); res.json(await listNovelReviews(activeWorkspace, Number(req.params.id))) } catch (error) { res.status(500).json({ error: String(error) }) } })
   app.get('/api/novel/runs', async (req, res) => { try { const activeWorkspace = getWorkspace(); res.json(await listNovelRuns(activeWorkspace, Number(req.query.project_id || 0))) } catch (error) { res.status(500).json({ error: String(error) }) } })
+  app.get('/api/novel/projects/:id/run-queue', async (req, res) => {
+    try {
+      const activeWorkspace = getWorkspace()
+      const projectId = Number(req.params.id)
+      const runs = await listNovelRuns(activeWorkspace, projectId)
+      const queued = runs.filter(run => ['queued', 'ready', 'paused', 'running'].includes(run.status) && ['chapter_group_generation', 'chapter_generation_pipeline', 'quality_benchmark', 'book_review'].includes(run.run_type))
+      res.json({
+        ok: true,
+        queue: queued.map(run => ({ id: run.id, type: run.run_type, step: run.step_name, status: run.status, created_at: run.created_at, payload: parseJsonLikePayload(run.output_ref) })),
+        summary: {
+          queued: queued.filter(run => run.status === 'queued' || run.status === 'ready').length,
+          running: queued.filter(run => run.status === 'running').length,
+          paused: queued.filter(run => run.status === 'paused').length,
+        },
+      })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+  app.post('/api/novel/projects/:id/run-queue/drain', async (req, res) => {
+    try {
+      const activeWorkspace = getWorkspace()
+      const projectId = Number(req.params.id)
+      const runs = await listNovelRuns(activeWorkspace, projectId)
+      const executable = runs
+        .filter(run => run.run_type === 'chapter_group_generation' && ['queued', 'ready'].includes(run.status))
+        .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))
+        .slice(0, Math.max(1, Math.min(5, Number(req.body.limit || 1))))
+      const drained = []
+      for (const run of executable) {
+        const payload = parseJsonLikePayload(run.output_ref) || {}
+        drained.push({ run_id: run.id, execute_endpoint: `/api/novel/projects/${projectId}/chapter-groups/${run.id}/execute`, current_index: payload.current_index || 0 })
+      }
+      res.json({ ok: true, drained, note: '本地版队列采用可恢复任务记录；前端或调用方按 execute_endpoint 拉起实际执行。' })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
   app.post('/api/novel/runs/:id/pause', async (req, res) => {
     try {
       const activeWorkspace = getWorkspace()

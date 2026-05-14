@@ -41,6 +41,8 @@ function runTypeLabel(type?: string) {
     original_incubation: '原创孵化',
     editor_revision: '编辑修订',
     book_review: '全书总检',
+    quality_benchmark: '质量基准',
+    rolling_plan: '滚动规划',
   }
   return map[String(type || '')] || type || '任务'
 }
