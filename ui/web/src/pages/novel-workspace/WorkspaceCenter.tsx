@@ -280,6 +280,7 @@ export function WorkspaceCenter({
   onGenerateCurrentChapterProse,
   onGenerateSceneCards,
   onOpenGenerationDiagnostics,
+  onOpenQualityCard,
   onStartChapterPipeline,
   onCreateEditorReport,
   onEditActiveChapter,
@@ -312,6 +313,7 @@ export function WorkspaceCenter({
   onGenerateCurrentChapterProse: () => void
   onGenerateSceneCards: () => void
   onOpenGenerationDiagnostics: () => void
+  onOpenQualityCard: () => void
   onStartChapterPipeline: () => void
   onCreateEditorReport: () => void
   onEditActiveChapter: () => void
@@ -377,6 +379,9 @@ export function WorkspaceCenter({
             <EditorDisplayControls prefs={editorDisplayPrefs} onChange={setEditorDisplayPrefs} />
             <Tooltip title="生成前诊断">
               <Button size="small" loading={diagnosticsLoading} onClick={onOpenGenerationDiagnostics}>诊断</Button>
+            </Tooltip>
+            <Tooltip title="查看章节质量卡">
+              <Button size="small" onClick={onOpenQualityCard}>质量卡</Button>
             </Tooltip>
             <Tooltip title="生成编辑部六维审稿报告">
               <Button size="small" loading={editorReportLoading} onClick={onCreateEditorReport}>审稿</Button>

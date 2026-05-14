@@ -48,6 +48,17 @@ function runTypeLabel(type?: string) {
   return map[String(type || '')] || type || '任务'
 }
 
+function productionModeLabel(mode?: string) {
+  const map: Record<string, string> = {
+    scene_cards_only: '只场景卡',
+    draft_only: '只初稿',
+    draft_review: '初稿+自检',
+    draft_review_revise_store: '完整流水线',
+    full_auto: '全自动',
+  }
+  return map[String(mode || '')] || mode || ''
+}
+
 function safeJsonPreview(value: any) {
   if (!value) return ''
   if (typeof value === 'object') return JSON.stringify(value, null, 2)
@@ -160,10 +171,12 @@ function ChapterGroupRunSummary({
   run,
   onApproveChapterGroup,
   onRetryChapterGroup,
+  onSkipChapterGroup,
 }: {
   run: any
   onApproveChapterGroup?: (run: any, chapter: any) => void
   onRetryChapterGroup?: (run: any, chapter: any) => void
+  onSkipChapterGroup?: (run: any, chapter: any) => void
 }) {
   const output = parseJsonValue(run.output_ref) || {}
   const chapters = Array.isArray(output.chapters) ? output.chapters : []
@@ -239,6 +252,7 @@ function ChapterGroupRunSummary({
                   <Space>
                     {chapter.status === 'needs_approval' && onApproveChapterGroup && <Button size="small" type="link" onClick={() => onApproveChapterGroup(run, chapter)}>确认</Button>}
                     {onRetryChapterGroup && <Button size="small" type="link" onClick={() => onRetryChapterGroup(run, chapter)}>重试</Button>}
+                    {onSkipChapterGroup && <Button size="small" type="link" danger onClick={() => onSkipChapterGroup(run, chapter)}>跳过</Button>}
                   </Space>
                 </Space>
               ))}
@@ -280,6 +294,7 @@ export function TaskCenterDrawer({
   onRecoverRunQueue,
   onApproveChapterGroup,
   onRetryChapterGroup,
+  onSkipChapterGroup,
 }: {
   open: boolean
   activeTasks: WorkspaceActiveTask[]
@@ -301,6 +316,7 @@ export function TaskCenterDrawer({
   onRecoverRunQueue?: () => void
   onApproveChapterGroup?: (run: any, chapter: any) => void
   onRetryChapterGroup?: (run: any, chapter: any) => void
+  onSkipChapterGroup?: (run: any, chapter: any) => void
 }) {
   const [detailRun, setDetailRun] = useState<any | null>(null)
   const [detailKnowledgeJob, setDetailKnowledgeJob] = useState<any | null>(null)
@@ -322,6 +338,7 @@ export function TaskCenterDrawer({
       error_message: task.error || '',
     })
   }
+  const getRunPayload = (run: any) => parseJsonValue(run.output_ref) || run.payload || {}
 
   return (
     <>
@@ -387,6 +404,9 @@ export function TaskCenterDrawer({
                             {statusTag(task.status)}
                             <Text strong>{task.type_label || runTypeLabel(task.run_type)}</Text>
                             <Tag bordered={false}>{task.step_name || '-'}</Tag>
+                            {productionModeLabel(task.production_mode || task.payload?.production_mode || task.payload?.policy?.production_mode) && (
+                              <Tag color="purple" bordered={false}>{productionModeLabel(task.production_mode || task.payload?.production_mode || task.payload?.policy?.production_mode)}</Tag>
+                            )}
                           </Space>
                           <Button size="small" type="link" onClick={() => openTaskDetail(task)}>详情</Button>
                         </Space>
@@ -504,6 +524,9 @@ export function TaskCenterDrawer({
                       description={(
                         <Space direction="vertical" size={2} style={{ width: '100%' }}>
                           <Text type="secondary" style={{ fontSize: 12 }}>{run.created_at || '-'}</Text>
+                          {run.run_type === 'chapter_group_generation' && productionModeLabel(getRunPayload(run).production_mode || getRunPayload(run).policy?.production_mode) && (
+                            <Text type="secondary" style={{ fontSize: 12 }}>模式：{productionModeLabel(getRunPayload(run).production_mode || getRunPayload(run).policy?.production_mode)}</Text>
+                          )}
                           {run.error_message && <Text type="danger" style={{ fontSize: 12 }}>{run.error_message}</Text>}
                         </Space>
                       )}
@@ -537,7 +560,7 @@ export function TaskCenterDrawer({
             )}
             {detailRun.run_type === 'batch_generate_prose' && <BatchProseRunSummary run={detailRun} />}
             {detailRun.run_type === 'chapter_generation_pipeline' && <ChapterPipelineRunSummary run={detailRun} />}
-            {detailRun.run_type === 'chapter_group_generation' && <ChapterGroupRunSummary run={detailRun} onApproveChapterGroup={onApproveChapterGroup} onRetryChapterGroup={onRetryChapterGroup} />}
+            {detailRun.run_type === 'chapter_group_generation' && <ChapterGroupRunSummary run={detailRun} onApproveChapterGroup={onApproveChapterGroup} onRetryChapterGroup={onRetryChapterGroup} onSkipChapterGroup={onSkipChapterGroup} />}
             <Card size="small" title="输入">
               <Paragraph style={{ whiteSpace: 'pre-wrap', maxHeight: 220, overflow: 'auto', marginBottom: 0 }}>
                 {safeJsonPreview(detailRun.input_ref) || '无'}

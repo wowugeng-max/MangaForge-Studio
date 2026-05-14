@@ -50,6 +50,103 @@ async function loadChapterBundle(ctx: EditorRoutesContext, projectId: number, ch
   return { activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews }
 }
 
+function findChapterReviewPayload(reviews: any[], chapterId: number, types: string[]) {
+  return reviews
+    .filter(item => types.includes(item.review_type))
+    .map(item => ({ review: item, payload: parseJsonLikePayload(item.payload) || {} }))
+    .filter(item => Number(item.payload.chapter_id || item.payload.report?.chapter_id || item.payload.context_package?.chapter_target?.id || 0) === chapterId)
+    .sort((a, b) => String(b.review.created_at || '').localeCompare(String(a.review.created_at || '')))[0] || null
+}
+
+function scoreStatus(score: number) {
+  if (score >= 85) return 'pass'
+  if (score >= 70) return 'watch'
+  return 'needs_rework'
+}
+
+function buildChapterQualityCard(chapter: any, contextPackage: any, reviews: any[]) {
+  const preflight = contextPackage?.preflight || {}
+  const checks = Array.isArray(preflight.checks) ? preflight.checks : []
+  const checkOk = (key: string) => checks.find((item: any) => item.key === key)?.ok === true
+  const wordCount = String(chapter.chapter_text || '').replace(/\s/g, '').length
+  const sceneCount = Array.isArray(chapter.scene_breakdown) ? chapter.scene_breakdown.length : 0
+  const qualityPayload = findChapterReviewPayload(reviews, chapter.id, ['prose_quality'])?.payload || {}
+  const editorPayload = findChapterReviewPayload(reviews, chapter.id, ['editor_report'])?.payload || {}
+  const similarityPayload = findChapterReviewPayload(reviews, chapter.id, ['similarity_report'])?.payload || {}
+  const selfReview = qualityPayload.self_check?.review || {}
+  const editorReport = editorPayload.report || {}
+  const similarityReport = similarityPayload.report || {}
+  const qualityScore = Number(selfReview.score || editorReport.overall_score || 0)
+  const dimensions = [
+    {
+      key: 'chapter_goal',
+      label: '完成本章目标',
+      score: clampScore((chapter.chapter_goal || chapter.chapter_summary ? 45 : 0) + (wordCount > 800 ? 35 : wordCount > 0 ? 20 : 0) + (chapter.ending_hook ? 20 : 0)),
+      evidence: chapter.chapter_goal || chapter.chapter_summary || '缺章节目标/摘要',
+      action: '补齐章节目标，并确认正文确实推进该目标。',
+    },
+    {
+      key: 'continuity',
+      label: '连续性',
+      score: clampScore((checkOk('previous_continuity') ? 55 : 15) + (Array.isArray(chapter.continuity_notes) && chapter.continuity_notes.length ? 25 : 10) + (contextPackage?.continuity?.previous_chapter ? 20 : 10)),
+      evidence: preflight.warnings?.join('；') || '未发现明显前置缺口',
+      action: '检查上一章结尾、当前章开场承接和状态机记录。',
+    },
+    {
+      key: 'character_consistency',
+      label: '角色一致性',
+      score: clampScore((checkOk('characters') ? 40 : 10) + (checkOk('character_state') ? 40 : 10) + (contextPackage?.story_state?.characters?.length ? 20 : 0)),
+      evidence: `角色卡 ${contextPackage?.story_state?.characters?.length || 0} 个`,
+      action: '补充主要角色 current_state 和本章行为动机。',
+    },
+    {
+      key: 'pacing',
+      label: '节奏',
+      score: clampScore((sceneCount >= 2 ? 45 : sceneCount ? 25 : 5) + (wordCount >= 1800 && wordCount <= 6000 ? 35 : wordCount > 0 ? 20 : 0) + (chapter.conflict ? 20 : 0)),
+      evidence: `${sceneCount} 个场景卡，${wordCount} 字`,
+      action: '用 2-6 个场景卡控制冲突、转折和出场状态。',
+    },
+    {
+      key: 'repetition',
+      label: '水文/重复',
+      score: clampScore(100 - Math.min(50, asArray(contextPackage?.story_state?.global?.recent_repeated_information).length * 12) - (wordCount > 8000 ? 15 : 0)),
+      evidence: asArray(contextPackage?.story_state?.global?.recent_repeated_information).slice(0, 3).join('；') || '暂无重复提示',
+      action: '删减重复解释，只保留本章新增信息。',
+    },
+    {
+      key: 'ending_hook',
+      label: '章末钩子',
+      score: clampScore((chapter.ending_hook ? 65 : 20) + (String(chapter.chapter_text || '').slice(-500).trim().length > 80 ? 35 : 10)),
+      evidence: chapter.ending_hook || '缺章末钩子',
+      action: '补一个能推动下一章点击的悬念、反转或目标变化。',
+    },
+    {
+      key: 'reference_safety',
+      label: '仿写安全',
+      score: clampScore(similarityReport.decision ? 100 - Number(similarityReport.overall_risk_score || 0) : 75),
+      evidence: similarityReport.decision ? `相似度风险 ${similarityReport.overall_risk_score}` : '暂无相似度报告',
+      action: '生成相似度检测或参考迁移计划，避免迁移具体桥段和专有设定。',
+    },
+  ]
+  const baseScore = dimensions.reduce((sum, item) => sum + item.score, 0) / Math.max(1, dimensions.length)
+  const overallScore = clampScore(qualityScore ? baseScore * 0.55 + qualityScore * 0.45 : baseScore)
+  return {
+    chapter_id: chapter.id,
+    chapter_no: chapter.chapter_no,
+    title: chapter.title,
+    word_count: wordCount,
+    overall_score: overallScore,
+    status: scoreStatus(overallScore),
+    dimensions,
+    latest_quality_score: qualityScore || null,
+    must_fix: dimensions.filter(item => item.score < 65).map(item => `${item.label}：${item.action}`),
+    next_actions: [
+      ...dimensions.filter(item => item.score < 75).sort((a, b) => a.score - b.score).slice(0, 4).map(item => item.action),
+      !qualityScore ? '建议生成一次编辑报告或正文质检，获得模型审稿样本。' : '',
+    ].filter(Boolean),
+  }
+}
+
 export function registerNovelEditorRoutes(app: Express, ctx: EditorRoutesContext) {
   app.post('/api/novel/chapters/:chapterId/editor-report', async (req, res) => {
     try {
@@ -158,6 +255,18 @@ export function registerNovelEditorRoutes(app: Express, ctx: EditorRoutesContext
       const previous = versions[0] || null
       const diff = ctx.diffTexts(previous?.chapter_text || '', current?.chapter_text || '')
       res.json({ ok: true, chapter: current, previous_version: previous, diff, recommendation: diff.similarity_score < 55 ? '修订幅度较大，建议人工复核剧情与设定连续性。' : '修订幅度可控。' })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.get('/api/novel/chapters/:chapterId/quality-card', async (req, res) => {
+    try {
+      const loaded = await loadChapterBundle(ctx, Number(req.query.project_id || 0), Number(req.params.chapterId))
+      if ('error' in loaded) return res.status(loaded.status || 500).json({ error: loaded.error })
+      const { activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews } = loaded
+      const contextPackage = await ctx.buildChapterContextPackage(activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews)
+      res.json({ ok: true, quality_card: buildChapterQualityCard(chapter, contextPackage, reviews), context_package: contextPackage })
     } catch (error) {
       res.status(500).json({ error: String(error) })
     }

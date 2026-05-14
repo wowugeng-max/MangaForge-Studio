@@ -244,11 +244,16 @@ export function createNovelRunExecutionService(ctx: {
       payload = { ...payload, chapters, current_index: index, phase: `生成第${item.chapter_no}章` }
       await updateNovelRun(activeWorkspace, run.id, { status: 'running', output_ref: JSON.stringify(payload) })
       try {
+        const productionMode = options.production_mode || payload.production_mode || payload.policy?.production_mode || 'draft_review_revise_store'
+        const approvalPolicy = productionMode === 'full_auto'
+          ? { ...(payload.approval_policy || ctx.production.getApprovalPolicy(project)), allow_full_auto: true }
+          : (payload.approval_policy || ctx.production.getApprovalPolicy(project))
         const chapterResult = await ctx.generateChapterForGroup(activeWorkspace, project.id, Number(item.id), {
           ...options,
           model_id: options.model_id || payload.model_strategy?.preferred_model_id,
+          production_mode: productionMode,
           allow_incomplete: options.allow_incomplete === true,
-          approval_policy: payload.approval_policy || ctx.production.getApprovalPolicy(project),
+          approval_policy: approvalPolicy,
           approvals: item.approvals || {},
           onStage: async (stage: string, patch: any = {}) => {
             try {
@@ -265,8 +270,11 @@ export function createNovelRunExecutionService(ctx: {
           status: 'success',
           score: chapterResult.score,
           revised: chapterResult.revised,
+          production_mode: productionMode,
           scenes: advanceSceneProduction(chapters[index]?.scenes || [], 'accepted'),
-          stages: ctx.production.updateChapterStages(chapters[index]?.stages || [], 'story_state', { status: (chapterResult.story_state_update as any)?.error ? 'failed' : 'success' }),
+          stages: (chapterResult.story_state_update as any)?.skipped
+            ? (chapters[index]?.stages || [])
+            : ctx.production.updateChapterStages(chapters[index]?.stages || [], 'story_state', { status: (chapterResult.story_state_update as any)?.error ? 'failed' : 'success' }),
           completed_at: new Date().toISOString(),
         }
         chapters[index] = resultItem

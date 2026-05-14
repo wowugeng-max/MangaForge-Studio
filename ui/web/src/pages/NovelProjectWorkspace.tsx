@@ -34,6 +34,14 @@ import {
 
 const { Title, Text, Paragraph } = Typography
 
+const productionModeOptions = [
+  { value: 'scene_cards_only', label: '只生成场景卡' },
+  { value: 'draft_only', label: '只生成正文初稿' },
+  { value: 'draft_review', label: '生成并自检' },
+  { value: 'draft_review_revise_store', label: '生成、自检、修订、入库' },
+  { value: 'full_auto', label: '全自动完整流水线' },
+]
+
 /* ── main component ─────────────────────────────────────────────── */
 export default function NovelProjectWorkspace() {
   const navigate = useNavigate()
@@ -62,6 +70,7 @@ export default function NovelProjectWorkspace() {
   const [commercialToolsOpen, setCommercialToolsOpen] = useState(false)
   const [chapterGroupExecutingId, setChapterGroupExecutingId] = useState<number | null>(null)
   const [commercialToolLoading, setCommercialToolLoading] = useState('')
+  const [productionMode, setProductionMode] = useState('draft_review_revise_store')
   const [activeChapterDiagnostics, setActiveChapterDiagnostics] = useState<any | null>(null)
   const [commercialReadiness, setCommercialReadiness] = useState<any | null>(null)
 
@@ -791,6 +800,54 @@ export default function NovelProjectWorkspace() {
     }
   }
 
+  const openChapterQualityCard = async () => {
+    if (!activeChapter) return message.warning('请先选择章节')
+    try {
+      const res = await apiClient.get(`/novel/chapters/${activeChapter.id}/quality-card`, { params: { project_id: projectId } })
+      const card = res.data?.quality_card || {}
+      Modal.info({
+        title: '章节质量卡',
+        width: 900,
+        content: (
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Card size="small">
+              <Space align="center" size={16}>
+                <Progress type="circle" size={76} percent={Number(card.overall_score || 0)} status={card.overall_score >= 80 ? 'success' : card.overall_score < 65 ? 'exception' : 'normal'} />
+                <Space direction="vertical" size={4}>
+                  <Text strong>第{card.chapter_no}章《{card.title || '未命名'}》</Text>
+                  <Text type="secondary">{card.word_count || 0} 字 · {card.status || '-'}</Text>
+                </Space>
+              </Space>
+            </Card>
+            <Card size="small" title="质量维度">
+              <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                {(card.dimensions || []).map((item: any) => (
+                  <div key={item.key} style={{ display: 'grid', gridTemplateColumns: '92px minmax(0, 1fr) 44px', gap: 8, alignItems: 'center' }}>
+                    <Text style={{ fontSize: 12 }}>{item.label}</Text>
+                    <Progress percent={Number(item.score || 0)} size="small" status={item.score >= 80 ? 'success' : item.score < 65 ? 'exception' : 'normal'} />
+                    <Text type="secondary" style={{ fontSize: 12 }}>{item.score}</Text>
+                  </div>
+                ))}
+              </Space>
+            </Card>
+            {Array.isArray(card.must_fix) && card.must_fix.length > 0 && (
+              <Card size="small" title="必须修复">
+                <List size="small" dataSource={card.must_fix} renderItem={(item: string) => <List.Item>{item}</List.Item>} />
+              </Card>
+            )}
+            {Array.isArray(card.next_actions) && card.next_actions.length > 0 && (
+              <Card size="small" title="下一步建议">
+                <List size="small" dataSource={card.next_actions} renderItem={(item: string) => <List.Item>{item}</List.Item>} />
+              </Card>
+            )}
+          </Space>
+        ),
+      })
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '章节质量卡加载失败')
+    }
+  }
+
   const openProductionDashboard = async () => {
     if (!selectedProject) return
     setDashboardLoading(true)
@@ -990,7 +1047,8 @@ export default function NovelProjectWorkspace() {
         model_id: selectedModelId,
         start_chapter: activeChapter?.chapter_no || undefined,
         count: 10,
-        require_scene_confirmation: true,
+        production_mode: productionMode,
+        require_scene_confirmation: productionMode !== 'scene_cards_only',
       })
       await loadProjectModules()
       setTaskCenterOpen(true)
@@ -1011,7 +1069,8 @@ export default function NovelProjectWorkspace() {
         scan_limit: 60,
         count: 10,
         min_score: 65,
-        require_scene_confirmation: true,
+        production_mode: productionMode,
+        require_scene_confirmation: productionMode !== 'scene_cards_only',
       })
       await loadProjectModules()
       await loadProductionTasks()
@@ -1546,6 +1605,118 @@ export default function NovelProjectWorkspace() {
     }
   }
 
+  const openContinuityAudit = async () => {
+    setCommercialToolLoading('continuityAudit')
+    try {
+      const res = await apiClient.get(`/novel/projects/${projectId}/continuity-audit`)
+      const audit = res.data?.audit || {}
+      Modal.info({
+        title: '全书连续性检查',
+        width: 920,
+        content: (
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Space wrap>
+              <Tag color={Number(audit.score || 0) >= 80 ? 'green' : 'gold'} bordered={false}>连续性 {audit.score ?? '-'}分</Tag>
+              <Tag color={(audit.high_count || 0) > 0 ? 'red' : 'default'} bordered={false}>高危 {audit.high_count || 0}</Tag>
+              <Tag color={(audit.medium_count || 0) > 0 ? 'gold' : 'default'} bordered={false}>中危 {audit.medium_count || 0}</Tag>
+              <Tag bordered={false}>总问题 {audit.issue_count || 0}</Tag>
+            </Space>
+            {Array.isArray(audit.recommendations) && audit.recommendations.length > 0 && (
+              <Card size="small" title="建议">
+                <List size="small" dataSource={audit.recommendations} renderItem={(item: string) => <List.Item>{item}</List.Item>} />
+              </Card>
+            )}
+            <Card size="small" title="问题清单">
+              <List
+                size="small"
+                dataSource={(audit.issues || []).slice(0, 80)}
+                renderItem={(issue: any) => (
+                  <List.Item
+                    actions={issue.chapter_no ? [<Button key="open" size="small" type="link" onClick={() => {
+                      const chapter = chapters.find(ch => Number(ch.chapter_no) === Number(issue.chapter_no))
+                      if (chapter) {
+                        Modal.destroyAll()
+                        void selectChapter(chapter.id)
+                      }
+                    }}>打开</Button>] : undefined}
+                  >
+                    <List.Item.Meta
+                      title={<Space><Tag color={issue.severity === 'high' ? 'red' : issue.severity === 'medium' ? 'gold' : 'default'} bordered={false}>{issue.severity}</Tag><Text>{issue.chapter_no ? `第${issue.chapter_no}章 ` : ''}{issue.message}</Text></Space>}
+                      description={issue.action}
+                    />
+                  </List.Item>
+                )}
+              />
+            </Card>
+          </Space>
+        ),
+      })
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '全书连续性检查失败')
+    } finally {
+      setCommercialToolLoading('')
+    }
+  }
+
+  const openReferenceKnowledgeDiagnosis = async () => {
+    setCommercialToolLoading('referenceDiagnosis')
+    try {
+      const [coverageRes, fusionRes, assetsRes] = await Promise.all([
+        apiClient.get(`/novel/projects/${projectId}/reference-coverage`).catch(() => ({ data: null })),
+        apiClient.get(`/novel/projects/${projectId}/reference-fusion`).catch(() => ({ data: null })),
+        apiClient.get(`/novel/projects/${projectId}/writing-assets`).catch(() => ({ data: null })),
+      ])
+      const coverage = coverageRes.data?.coverage || {}
+      const fusion = fusionRes.data?.fusion || {}
+      const references = fusionRes.data?.references || []
+      const assets = assetsRes.data?.assets || []
+      Modal.info({
+        title: '参考作品知识诊断',
+        width: 940,
+        content: (
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Space wrap>
+              <Tag color="blue" bordered={false}>参考 {references.length}</Tag>
+              <Tag bordered={false}>活跃维度 {(fusion.active_dimensions || []).length}</Tag>
+              <Tag color={(fusion.conflicts || []).length ? 'gold' : 'green'} bordered={false}>维度冲突 {(fusion.conflicts || []).length}</Tag>
+              <Tag color={(fusion.latest_copy_hits || []).length ? 'red' : 'default'} bordered={false}>照搬命中 {(fusion.latest_copy_hits || []).length}</Tag>
+            </Space>
+            {Array.isArray(coverage.references) && (
+              <Card size="small" title="知识层覆盖">
+                <List
+                  size="small"
+                  dataSource={coverage.references}
+                  renderItem={(row: any) => (
+                    <List.Item>
+                      <List.Item.Meta
+                        title={<Space><Text strong>{row.project_title}</Text><Tag color={(row.score || 0) >= 70 ? 'green' : 'gold'} bordered={false}>{row.score || 0}分</Tag><Tag bordered={false}>{row.status || '-'}</Tag></Space>}
+                        description={`缺失：${(row.missing_required || []).join('、') || '无'}；可用层：${(row.categories || []).filter((item: any) => item.count > 0).map((item: any) => item.label).join('、') || '-'}`}
+                      />
+                    </List.Item>
+                  )}
+                />
+              </Card>
+            )}
+            <Card size="small" title="资产层数量">
+              <Space wrap>
+                {assets.map((group: any) => <Tag key={group.category} color={(group.entries || []).length ? 'green' : 'default'} bordered={false}>{group.category} {(group.entries || []).length}</Tag>)}
+              </Space>
+            </Card>
+            {Array.isArray(fusion.recommendations) && fusion.recommendations.length > 0 && (
+              <Card size="small" title="诊断建议">
+                <List size="small" dataSource={fusion.recommendations} renderItem={(item: string) => <List.Item>{item}</List.Item>} />
+              </Card>
+            )}
+          </Space>
+        ),
+      })
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '参考知识诊断失败')
+    } finally {
+      setCommercialToolLoading('')
+    }
+  }
+
   const openRunQueue = async () => {
     await runCommercialTool('queue', '后台任务队列', async () => {
       const res = await apiClient.get(`/novel/projects/${projectId}/run-queue`)
@@ -1594,6 +1765,7 @@ export default function NovelProjectWorkspace() {
       await apiClient.post(`/novel/projects/${projectId}/chapter-groups/${run.id}/execute`, {
         model_id: selectedModelId,
         max_chapters: 50,
+        production_mode: productionMode,
       })
       await loadProjectModules()
       message.success('章节群执行完成或已暂停')
@@ -1624,6 +1796,19 @@ export default function NovelProjectWorkspace() {
       message.success('已加入立即重试')
     } catch (error: any) {
       message.error(error?.response?.data?.error || error?.message || '重试失败')
+    }
+  }
+
+  const skipChapterGroupStage = async (run: any, chapter: any) => {
+    try {
+      await apiClient.post(`/novel/projects/${projectId}/chapter-groups/${run.id}/skip-chapter`, {
+        chapter_id: chapter.id,
+        reason: '用户在任务中心跳过',
+      })
+      await loadProjectModules()
+      message.success(`已跳过第${chapter.chapter_no}章，可继续执行后续章节`)
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '跳过失败')
     }
   }
 
@@ -2104,6 +2289,7 @@ export default function NovelProjectWorkspace() {
           onGenerateCurrentChapterProse={() => generateCurrentChapterProse()}
           onGenerateSceneCards={() => generateSceneCardsForActiveChapter()}
           onOpenGenerationDiagnostics={openGenerationDiagnostics}
+          onOpenQualityCard={openChapterQualityCard}
           onStartChapterPipeline={startChapterPipeline}
           onCreateEditorReport={createEditorReport}
           onEditActiveChapter={() => activeChapter && openEditor('chapter', activeChapter)}
@@ -2195,6 +2381,21 @@ export default function NovelProjectWorkspace() {
             message="这些工具用于生产治理：稳定性、成本、质量、审批、相似度、滚动规划和提示词版本。"
             description="结果会保存到运行记录或审稿记录中，适合在批量生成前后做检查。"
           />
+          <Card size="small" title="批量生产模式">
+            <Space wrap align="center">
+              <Text type="secondary">章节群执行策略</Text>
+              <Select
+                size="small"
+                value={productionMode}
+                style={{ width: 220 }}
+                options={productionModeOptions}
+                onChange={setProductionMode}
+              />
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                该模式会写入章节群任务，并在任务中心按失败点继续。
+              </Text>
+            </Space>
+          </Card>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
             <Card size="small" title="生产稳定性">
               <Space direction="vertical" style={{ width: '100%' }}>
@@ -2211,6 +2412,8 @@ export default function NovelProjectWorkspace() {
             </Card>
             <Card size="small" title="质量基准">
               <Space direction="vertical" style={{ width: '100%' }}>
+                <Button block onClick={openChapterQualityCard}>当前章质量卡</Button>
+                <Button block loading={commercialToolLoading === 'continuityAudit'} onClick={openContinuityAudit}>全书连续性检查</Button>
                 <Button block loading={commercialToolLoading === 'benchmark'} onClick={runQualityBenchmark}>项目质量基准测试</Button>
                 <Button block loading={commercialToolLoading === 'versionReview'} onClick={runVersionReviewForActiveChapter}>当前章版本评审</Button>
                 <Button block loading={commercialToolLoading === 'similarity'} onClick={runSimilarityForActiveChapter}>当前章相似度检测</Button>
@@ -2221,6 +2424,7 @@ export default function NovelProjectWorkspace() {
               <Space direction="vertical" style={{ width: '100%' }}>
                 <Button block loading={commercialToolLoading === 'topic'} onClick={runTopicValidation}>原创选题验证</Button>
                 <Button block loading={commercialToolLoading === 'rollingPlan'} onClick={runRollingPlan}>未来 10 章滚动规划</Button>
+                <Button block loading={commercialToolLoading === 'referenceDiagnosis'} onClick={openReferenceKnowledgeDiagnosis}>参考知识诊断</Button>
                 <Button block onClick={() => { setCommercialToolsOpen(false); setReferenceEngineeringOpen(true) }}>多参考融合控制台</Button>
               </Space>
             </Card>
@@ -2328,6 +2532,7 @@ export default function NovelProjectWorkspace() {
         onRecoverRunQueue={() => { void recoverRunQueue() }}
         onApproveChapterGroup={approveChapterGroupStage}
         onRetryChapterGroup={retryChapterGroupStage}
+        onSkipChapterGroup={skipChapterGroupStage}
         onPauseRun={async (run) => {
           await apiClient.post(`/novel/runs/${run.id}/pause`, { project_id: projectId })
           await loadProjectModules()

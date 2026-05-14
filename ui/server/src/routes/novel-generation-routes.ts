@@ -95,12 +95,14 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
         })),
         current_index: 0,
         mode: req.body.mode || 'group',
+        production_mode: req.body.production_mode || 'draft_review_revise_store',
         model_strategy: modelStrategy,
         approval_policy: approvalPolicy,
         policy: {
           stop_on_failure: req.body.stop_on_failure !== false,
           require_scene_confirmation: req.body.require_scene_confirmation ?? approvalPolicy.require_scene_card_approval,
           quality_threshold: Number(req.body.quality_threshold || 78),
+          production_mode: req.body.production_mode || 'draft_review_revise_store',
         },
       }
       const run = await appendNovelRun(activeWorkspace, {
@@ -181,6 +183,7 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
         skipped_chapters: skipped,
         current_index: 0,
         mode: 'ready_matrix',
+        production_mode: req.body.production_mode || 'draft_review_revise_store',
         model_strategy: modelStrategy,
         approval_policy: approvalPolicy,
         policy: {
@@ -188,6 +191,7 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
           require_scene_confirmation: req.body.require_scene_confirmation ?? approvalPolicy.require_scene_card_approval,
           quality_threshold: Number(req.body.quality_threshold || 78),
           min_material_score: minScore,
+          production_mode: req.body.production_mode || 'draft_review_revise_store',
         },
       }
       const firstNo = selected[0]?.chapter_no || startNo
@@ -291,6 +295,50 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
       const updated = await updateNovelRun(activeWorkspace, run.id, {
         status: 'ready',
         output_ref: JSON.stringify({ ...payload, chapters, current_index: index, phase: `第${chapters[index].chapter_no}章已加入立即重试` }),
+        error_message: '',
+      })
+      res.json({ ok: true, run: updated, group: parseJsonLikePayload(updated?.output_ref) })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.post('/api/novel/projects/:id/chapter-groups/:runId/skip-chapter', async (req, res) => {
+    try {
+      const activeWorkspace = ctx.getWorkspace()
+      const project = await ctx.getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const runs = await listNovelRuns(activeWorkspace, project.id)
+      const run = runs.find(item => item.id === Number(req.params.runId))
+      if (!run || run.run_type !== 'chapter_group_generation') return res.status(404).json({ error: 'chapter group run not found' })
+      const payload = parseJsonLikePayload(run.output_ref) || {}
+      const chapters = Array.isArray(payload.chapters) ? payload.chapters : []
+      const chapterId = Number(req.body.chapter_id || 0)
+      const index = chapterId ? chapters.findIndex((item: any) => Number(item.id) === chapterId) : Number(payload.current_index || 0)
+      if (index < 0 || !chapters[index]) return res.status(404).json({ error: 'chapter in run not found' })
+      const item = chapters[index]
+      const stages = (Array.isArray(item.stages) && item.stages.length ? item.stages : ctx.buildChapterGroupStages())
+        .map((stage: any) => ['success', 'skipped'].includes(stage.status) ? stage : { ...stage, status: 'skipped', skipped_at: new Date().toISOString() })
+      const nextIndex = Number(payload.current_index || 0) <= index ? index + 1 : Number(payload.current_index || 0)
+      chapters[index] = {
+        ...item,
+        status: 'skipped',
+        stages,
+        skipped_reason: String(req.body.reason || '用户在任务中心跳过'),
+        skipped_at: new Date().toISOString(),
+        error: '',
+        error_code: '',
+        next_run_at: '',
+      }
+      const updated = await updateNovelRun(activeWorkspace, run.id, {
+        status: 'ready',
+        output_ref: JSON.stringify({
+          ...payload,
+          chapters,
+          current_index: nextIndex,
+          phase: `已跳过第${item.chapter_no}章，等待继续执行`,
+          last_error: payload.last_error?.id === item.id ? null : payload.last_error,
+        }),
         error_message: '',
       })
       res.json({ ok: true, run: updated, group: parseJsonLikePayload(updated?.output_ref) })

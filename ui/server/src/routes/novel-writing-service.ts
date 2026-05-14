@@ -375,7 +375,7 @@ export function createNovelWritingService(ctx: {
     return Boolean(review?.needs_revision) || Number(review?.score || 100) < 78 || hasHighIssue
   }
 
-  const runProseSelfReviewAndRevision = async (activeWorkspace: string, project: any, contextPackage: any, chapterText: string, modelId?: number) => {
+  const runProseSelfReviewAndRevision = async (activeWorkspace: string, project: any, contextPackage: any, chapterText: string, modelId?: number, options: any = {}) => {
     const reviewModelId = ctx.production.getStageModelId(project, 'review', modelId)
     const reviseModelId = ctx.production.getStageModelId(project, 'revise', modelId)
     const reviewResult = await executeNovelAgent('review-agent', project, {
@@ -390,7 +390,7 @@ export function createNovelWritingService(ctx: {
       needs_revision: Boolean(reviewPayload?.needs_revision),
       modelName: (reviewResult as any).modelName,
     }
-    if (!shouldReviseProse(normalizedReview)) {
+    if (options.revise === false || !shouldReviseProse(normalizedReview)) {
       return { review: normalizedReview, revision: null, final_text: chapterText, revised: false }
     }
     const revisionResult = await executeNovelAgent('prose-agent', project, {
@@ -422,6 +422,10 @@ export function createNovelWritingService(ctx: {
     if (!project) throw new Error('project not found')
     const approvalPolicy = options.approval_policy || ctx.production.getApprovalPolicy(project)
     const approvals = options.approvals || {}
+    const productionMode = String(options.production_mode || 'draft_review_revise_store')
+    const isSceneCardsOnly = productionMode === 'scene_cards_only'
+    const isDraftOnly = productionMode === 'draft_only'
+    const isDraftReviewOnly = productionMode === 'draft_review'
     let chapters = await listNovelChapters(activeWorkspace, projectId)
     let chapter = chapters.find(item => item.id === chapterId)
     if (!chapter) throw new Error('chapter not found')
@@ -460,6 +464,23 @@ export function createNovelWritingService(ctx: {
       await onStage('scene_cards', { status: 'needs_confirmation', count: contextPackage.chapter_target.scene_cards.length })
       throw ctx.production.buildApprovalError('scene_cards', '场景卡等待人工确认', { count: contextPackage.chapter_target.scene_cards.length })
     }
+    if (isSceneCardsOnly) {
+      await onStage('migration_plan', { status: 'skipped', reason: '生产模式：只生成场景卡' })
+      await onStage('draft', { status: 'skipped', reason: '生产模式：只生成场景卡' })
+      await onStage('review', { status: 'skipped', reason: '生产模式：只生成场景卡' })
+      await onStage('revise', { status: 'skipped', reason: '生产模式：只生成场景卡' })
+      await onStage('safety', { status: 'skipped', reason: '生产模式：只生成场景卡' })
+      await onStage('store', { status: 'skipped', reason: '场景卡已保存到章节元数据' })
+      await onStage('story_state', { status: 'skipped', reason: '未生成正文，无需更新状态机' })
+      return {
+        chapter,
+        score: null,
+        revised: false,
+        production_mode: productionMode,
+        completed_stage: 'scene_cards',
+        story_state_update: { skipped: true },
+      }
+    }
     const prevChapters = chapters
       .filter(ch => ch.chapter_no < chapter.chapter_no && ch.chapter_text)
       .slice(-3)
@@ -490,10 +511,60 @@ export function createNovelWritingService(ctx: {
     let finalText = String(chapterText || '')
     let finalSceneBreakdown = resultPayload?.scene_breakdown || firstProse?.scene_breakdown || chapter.scene_breakdown || []
     let finalContinuityNotes = resultPayload?.continuity_notes || firstProse?.continuity_notes || chapter.continuity_notes || []
+    if (isDraftOnly) {
+      await onStage('review', { status: 'skipped', reason: '生产模式：只生成正文初稿' })
+      await onStage('revise', { status: 'skipped', reason: '生产模式：只生成正文初稿' })
+      await onStage('safety', { status: 'skipped', reason: '生产模式：只生成正文初稿' })
+      await onStage('store', { status: 'running' })
+      const updatedDraft = await updateNovelChapter(activeWorkspace, chapter.id, {
+        chapter_text: finalText,
+        scene_breakdown: finalSceneBreakdown,
+        continuity_notes: finalContinuityNotes,
+        status: 'draft',
+      }, { versionSource: 'agent_execute' })
+      await onStage('store', { status: 'success', word_count: String(finalText || '').replace(/\s/g, '').length, scene_status: 'accepted' })
+      await onStage('story_state', { status: 'skipped', reason: '初稿模式不更新状态机，避免低质草稿污染长期记忆' })
+      return {
+        chapter: updatedDraft,
+        score: null,
+        revised: false,
+        production_mode: productionMode,
+        completed_stage: 'store',
+        story_state_update: { skipped: true },
+      }
+    }
     await onStage('review', { status: 'running' })
-    const selfCheck = await runProseSelfReviewAndRevision(activeWorkspace, project, contextPackage, finalText, preferredModelId)
+    const selfCheck = await runProseSelfReviewAndRevision(activeWorkspace, project, contextPackage, finalText, preferredModelId, { revise: !isDraftReviewOnly })
     await onStage('review', { status: selfCheck?.review?.passed === false ? 'warn' : 'success', score: selfCheck?.review?.score ?? null, issues: selfCheck?.review?.issues || [], scene_status: 'reviewed' })
     await onStage('revise', { status: selfCheck.revised ? 'success' : 'skipped', revised: Boolean(selfCheck.revised), scene_status: selfCheck.revised ? 'revised' : '' })
+    if (isDraftReviewOnly) {
+      await onStage('safety', { status: 'skipped', reason: '生产模式：生成并自检，不执行仿写安全门禁' })
+      await onStage('store', { status: 'running' })
+      const updatedReviewedDraft = await updateNovelChapter(activeWorkspace, chapter.id, {
+        chapter_text: finalText,
+        scene_breakdown: finalSceneBreakdown,
+        continuity_notes: finalContinuityNotes,
+        status: 'draft',
+      }, { versionSource: 'agent_execute' })
+      await onStage('store', { status: 'success', word_count: String(finalText || '').replace(/\s/g, '').length, scene_status: 'accepted' })
+      await onStage('story_state', { status: 'skipped', reason: '自检模式不更新状态机，确认后可继续完整流水线' })
+      await createNovelReview(activeWorkspace, {
+        project_id: projectId,
+        review_type: 'prose_quality',
+        status: selfCheck?.review?.passed === false || Number(selfCheck?.review?.score || 100) < 78 ? 'warn' : 'ok',
+        summary: `章节群质检评分 ${selfCheck?.review?.score ?? '-'}`,
+        issues: Array.isArray(selfCheck?.review?.issues) ? selfCheck.review.issues.map((issue: any) => `${issue.severity || 'medium'}｜${issue.description || issue}`) : [],
+        payload: JSON.stringify({ chapter_id: chapter.id, context_package: contextPackage, self_check: selfCheck, production_mode: productionMode }),
+      })
+      return {
+        chapter: updatedReviewedDraft,
+        score: selfCheck?.review?.score ?? null,
+        revised: false,
+        production_mode: productionMode,
+        completed_stage: 'store',
+        story_state_update: { skipped: true },
+      }
+    }
     const preStoreQualityDecision = getQualityGateDecision(project, { ...(selfCheck?.review || {}), revised: Boolean(selfCheck.revised) })
     if (!preStoreQualityDecision.passed && !approvals?.quality_gate?.approved) {
       await onStage('review', { status: 'needs_confirmation', score: selfCheck?.review?.score ?? null, quality_gate: preStoreQualityDecision })
@@ -546,12 +617,14 @@ export function createNovelWritingService(ctx: {
       status: selfCheck?.review?.passed === false || Number(selfCheck?.review?.score || 100) < 78 ? 'warn' : 'ok',
       summary: `章节群质检评分 ${selfCheck?.review?.score ?? '-'}`,
       issues: Array.isArray(selfCheck?.review?.issues) ? selfCheck.review.issues.map((issue: any) => `${issue.severity || 'medium'}｜${issue.description || issue}`) : [],
-      payload: JSON.stringify({ chapter_id: chapter.id, context_package: contextPackage, self_check: selfCheck, reference_report: referenceReport, safety_decision: safetyDecision, migration_audit: migrationAudit }),
+      payload: JSON.stringify({ chapter_id: chapter.id, context_package: contextPackage, self_check: selfCheck, reference_report: referenceReport, safety_decision: safetyDecision, migration_audit: migrationAudit, production_mode: productionMode }),
     })
     return {
       chapter: updated,
       score: selfCheck?.review?.score ?? null,
       revised: Boolean(selfCheck?.revised),
+      production_mode: productionMode,
+      completed_stage: 'story_state',
       reference_report: referenceReport,
       safety_decision: safetyDecision,
       migration_audit: migrationAudit,

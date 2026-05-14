@@ -93,6 +93,7 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
           progress: percent,
           current_index: payload.current_index ?? null,
           chapter_count: chapters.length,
+          production_mode: payload.production_mode || payload.policy?.production_mode || '',
           failed_count: chapters.filter((item: any) => item.status === 'failed').length,
           approval_count: chapters.filter((item: any) => item.status === 'needs_approval').length,
           can_pause: ['running', 'ready'].includes(run.status),
