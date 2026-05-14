@@ -2,7 +2,17 @@ import { readFile, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { Database } from 'bun:sqlite'
 
-export type NovelReferenceConfig = { references?: Array<{ project_title: string; weight?: number; use_for?: string[]; dimensions?: string[]; avoid?: string[] }>; strength?: 'light' | 'balanced' | 'strong'; notes?: string }
+export type NovelReferenceConfig = {
+  references?: Array<{ project_title: string; weight?: number; use_for?: string[]; dimensions?: string[]; avoid?: string[] }>
+  strength?: 'light' | 'balanced' | 'strong'
+  notes?: string
+  style_lock?: any
+  safety?: any
+  story_state?: any
+  writing_bible?: any
+  generation_pipeline?: any
+  [key: string]: any
+}
 export type NovelProjectRecord = { id: number; title: string; genre?: string; sub_genres?: string[]; synopsis?: string; length_target?: string; target_audience?: string; style_tags?: string[]; commercial_tags?: string[]; reference_config?: NovelReferenceConfig; status?: string; created_at?: string; updated_at: string }
 export type NovelWorldbuildingRecord = { id: number; project_id: number; world_summary?: string; rules?: any; factions?: any[]; locations?: any[]; systems?: any; items?: any[]; timeline_anchor?: any; known_unknowns?: any[]; version?: number; raw_payload?: any; created_at: string; updated_at: string }
 export type NovelCharacterRecord = { id: number; project_id: number; name: string; role?: string; role_type?: string; archetype?: string; personality?: any; motivation?: string; goal?: string; conflict?: string; abilities?: any[]; backstory?: string; relationships?: any; relationship_graph?: any; growth_arc?: string; arc_hint?: string; current_state?: any; secret?: string; appearance?: string; status?: string; version?: number; raw_payload?: any; created_at?: string; updated_at: string }
@@ -270,7 +280,25 @@ async function writeStore(activeWorkspace: string, store: NovelStore) {
     await writeJsonStore(activeWorkspace, normalized)
   } catch (e) { if (!committed) db.exec('ROLLBACK'); throw e } finally { db.close() }
 }
-function normalizeReferenceConfig(value: any): NovelReferenceConfig { const raw = value && typeof value === 'object' ? value : {}; const references = Array.isArray(raw.references) ? raw.references.map((item: any) => ({ project_title: String(item?.project_title || item?.projectTitle || '').trim(), weight: Math.max(0.1, Math.min(1, Number(item?.weight || 0.7) || 0.7)), use_for: toStringArray(item?.use_for || item?.useFor), dimensions: toStringArray(item?.dimensions), avoid: toStringArray(item?.avoid) })).filter((item: any) => item.project_title) : []; const strength = raw.strength === 'light' || raw.strength === 'strong' ? raw.strength : 'balanced'; return { references, strength, notes: String(raw.notes || '') } }
+function normalizeReferenceConfig(value: any): NovelReferenceConfig {
+  const raw = value && typeof value === 'object' ? value : {}
+  const references = Array.isArray(raw.references)
+    ? raw.references.map((item: any) => ({
+      project_title: String(item?.project_title || item?.projectTitle || '').trim(),
+      weight: Math.max(0.1, Math.min(1, Number(item?.weight || 0.7) || 0.7)),
+      use_for: toStringArray(item?.use_for || item?.useFor),
+      dimensions: toStringArray(item?.dimensions),
+      avoid: toStringArray(item?.avoid),
+    })).filter((item: any) => item.project_title)
+    : []
+  const strength = raw.strength === 'light' || raw.strength === 'strong' ? raw.strength : 'balanced'
+  return {
+    ...raw,
+    references,
+    strength,
+    notes: String(raw.notes || ''),
+  }
+}
 function normalizeProjectRecord(data: Partial<NovelProjectRecord>, existing?: Partial<NovelProjectRecord>): NovelProjectRecord { const ts = nowIso(); return { id: Number(existing?.id || data.id || 0), title: String(data.title ?? existing?.title ?? '未命名小说'), genre: String(data.genre ?? existing?.genre ?? ''), sub_genres: toStringArray(data.sub_genres ?? existing?.sub_genres), synopsis: String(data.synopsis ?? existing?.synopsis ?? ''), length_target: String(data.length_target ?? existing?.length_target ?? 'medium'), target_audience: String(data.target_audience ?? existing?.target_audience ?? ''), style_tags: toStringArray(data.style_tags ?? existing?.style_tags), commercial_tags: toStringArray(data.commercial_tags ?? existing?.commercial_tags), reference_config: normalizeReferenceConfig(data.reference_config ?? existing?.reference_config), status: String(data.status ?? existing?.status ?? 'draft'), created_at: String(existing?.created_at ?? data.created_at ?? ts), updated_at: String(existing?.updated_at ?? data.updated_at ?? ts) } }
 function normalizeWorldbuildingRecord(data: Partial<NovelWorldbuildingRecord>, existing?: Partial<NovelWorldbuildingRecord>): NovelWorldbuildingRecord {
   const raw = { ...(existing?.raw_payload || {}), ...(data.raw_payload || {}), ...data }
@@ -415,3 +443,4 @@ export async function listNovelReviews(activeWorkspace: string, projectId: numbe
 export async function createNovelReview(activeWorkspace: string, data: Partial<NovelReviewRecord>) { const store = await readStore(activeWorkspace); const record = normalizeReviewRecord(data, { id: store.reviews.reduce((max, item) => Math.max(max, item.id), 0) + 1 }); store.reviews.push(record); await writeStore(activeWorkspace, store); return record }
 export async function listNovelRuns(activeWorkspace: string, projectId: number) { const store = await readStore(activeWorkspace); return store.runs.filter(item => item.project_id === projectId).sort((a, b) => b.created_at.localeCompare(a.created_at)) }
 export async function appendNovelRun(activeWorkspace: string, data: Partial<NovelRunRecord>) { const store = await readStore(activeWorkspace); const record = normalizeRunRecord(data, { id: store.runs.reduce((max, item) => Math.max(max, item.id), 0) + 1 }); store.runs.push(record); await writeStore(activeWorkspace, store); return record }
+export async function updateNovelRun(activeWorkspace: string, id: number, data: Partial<NovelRunRecord>) { const store = await readStore(activeWorkspace); const idx = store.runs.findIndex(item => item.id === id); if (idx < 0) return null; store.runs[idx] = normalizeRunRecord(data, store.runs[idx]); await writeStore(activeWorkspace, store); return store.runs[idx] }

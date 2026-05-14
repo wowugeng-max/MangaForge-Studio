@@ -35,6 +35,8 @@ function runTypeLabel(type?: string) {
     repair: '连续性修复',
     restructure: '章节重组',
     market_review: '市场审计',
+    scene_cards: '场景卡',
+    chapter_generation_pipeline: '章节流水线',
   }
   return map[String(type || '')] || type || '任务'
 }
@@ -116,6 +118,37 @@ function BatchProseRunSummary({ run }: { run: any }) {
   )
 }
 
+function ChapterPipelineRunSummary({ run }: { run: any }) {
+  const output = parseJsonValue(run.output_ref) || {}
+  const steps = Array.isArray(output.steps) ? output.steps : []
+  return (
+    <Card size="small" title="章节流水线">
+      <Space direction="vertical" size={10} style={{ width: '100%' }}>
+        <Space wrap>
+          <Tag color="blue" bordered={false}>第{output.chapter_no || '-'}章</Tag>
+          <Tag bordered={false}>当前：{output.current_step || '-'}</Tag>
+          {output.can_resume_from && <Tag color="green" bordered={false}>可从 {output.can_resume_from} 继续</Tag>}
+          {output.confirmed_scene_cards === false && <Tag color="gold" bordered={false}>等待场景卡确认</Tag>}
+        </Space>
+        {steps.length > 0 && (
+          <Space wrap size={[4, 4]}>
+            {steps.map((step: any) => (
+              <Tag key={step.key} color={step.status === 'success' ? 'green' : step.status === 'failed' ? 'red' : step.status === 'needs_confirmation' ? 'gold' : step.status === 'ready' ? 'blue' : 'default'} bordered={false}>
+                {step.label || step.key} · {step.status}
+              </Tag>
+            ))}
+          </Space>
+        )}
+        {Array.isArray(output.context_package?.preflight?.warnings) && output.context_package.preflight.warnings.length > 0 && (
+          <Paragraph style={{ marginBottom: 0, fontSize: 12 }} ellipsis={{ rows: 2, expandable: true }}>
+            上下文缺口：{output.context_package.preflight.warnings.join('；')}
+          </Paragraph>
+        )}
+      </Space>
+    </Card>
+  )
+}
+
 function sourceCacheTag(sourceCache: any) {
   if (!sourceCache?.status) return null
   const cached = Number(sourceCache.cached_chapters || 0)
@@ -138,6 +171,8 @@ export function TaskCenterDrawer({
   onPauseKnowledgeJob,
   onResumeKnowledgeJob,
   onCancelKnowledgeJob,
+  onPauseRun,
+  onResumeRun,
 }: {
   open: boolean
   activeTasks: WorkspaceActiveTask[]
@@ -151,6 +186,8 @@ export function TaskCenterDrawer({
   onPauseKnowledgeJob: (jobId: string) => void
   onResumeKnowledgeJob: (jobId: string) => void
   onCancelKnowledgeJob: (jobId: string) => void
+  onPauseRun?: (run: any) => void
+  onResumeRun?: (run: any) => void
 }) {
   const [detailRun, setDetailRun] = useState<any | null>(null)
   const [detailKnowledgeJob, setDetailKnowledgeJob] = useState<any | null>(null)
@@ -262,7 +299,11 @@ export function TaskCenterDrawer({
                 dataSource={sortedRuns.slice(0, 80)}
                 renderItem={(run: any) => (
                   <List.Item
-                    actions={[<Button key="detail" type="link" size="small" onClick={() => setDetailRun(run)}>详情</Button>]}
+                    actions={[
+                      run.run_type === 'chapter_generation_pipeline' && run.status !== 'paused' && onPauseRun ? <Button key="pause" type="link" size="small" onClick={() => onPauseRun(run)}>暂停</Button> : null,
+                      run.run_type === 'chapter_generation_pipeline' && ['paused', 'failed', 'ready'].includes(run.status) && onResumeRun ? <Button key="resume" type="link" size="small" onClick={() => onResumeRun(run)}>继续</Button> : null,
+                      <Button key="detail" type="link" size="small" onClick={() => setDetailRun(run)}>详情</Button>,
+                    ].filter(Boolean)}
                   >
                     <List.Item.Meta
                       title={(
@@ -307,6 +348,7 @@ export function TaskCenterDrawer({
               </Card>
             )}
             {detailRun.run_type === 'batch_generate_prose' && <BatchProseRunSummary run={detailRun} />}
+            {detailRun.run_type === 'chapter_generation_pipeline' && <ChapterPipelineRunSummary run={detailRun} />}
             <Card size="small" title="输入">
               <Paragraph style={{ whiteSpace: 'pre-wrap', maxHeight: 220, overflow: 'auto', marginBottom: 0 }}>
                 {safeJsonPreview(detailRun.input_ref) || '无'}

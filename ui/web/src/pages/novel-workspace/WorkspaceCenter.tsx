@@ -270,11 +270,15 @@ export function WorkspaceCenter({
   planning,
   generatingProse,
   generatingSceneCards,
+  diagnosticsLoading,
+  pipelineLoading,
   onRunPlan,
   onCreateOutline,
   onCreateChapter,
   onGenerateCurrentChapterProse,
   onGenerateSceneCards,
+  onOpenGenerationDiagnostics,
+  onStartChapterPipeline,
   onEditActiveChapter,
   onChapterTextChange,
 }: {
@@ -295,11 +299,15 @@ export function WorkspaceCenter({
   planning: boolean
   generatingProse: boolean
   generatingSceneCards: boolean
+  diagnosticsLoading: boolean
+  pipelineLoading: boolean
   onRunPlan: () => void
   onCreateOutline: () => void
   onCreateChapter: () => void
   onGenerateCurrentChapterProse: () => void
   onGenerateSceneCards: () => void
+  onOpenGenerationDiagnostics: () => void
+  onStartChapterPipeline: () => void
   onEditActiveChapter: () => void
   onChapterTextChange: (text: string) => void
 }) {
@@ -354,6 +362,12 @@ export function WorkspaceCenter({
             <Text type="secondary" style={{ fontSize: 13 }}>{wc(activeChapter.chapter_text)} 字</Text>
             <SaveIndicator status={saveStatus} />
             <EditorDisplayControls prefs={editorDisplayPrefs} onChange={setEditorDisplayPrefs} />
+            <Tooltip title="生成前诊断">
+              <Button size="small" loading={diagnosticsLoading} onClick={onOpenGenerationDiagnostics}>诊断</Button>
+            </Tooltip>
+            <Tooltip title="创建可恢复流水线，并停在场景卡确认阶段">
+              <Button size="small" loading={pipelineLoading} onClick={onStartChapterPipeline}>流水线</Button>
+            </Tooltip>
             <Tooltip title="生成或刷新场景卡">
               <Button size="small" icon={<FileTextOutlined />} loading={generatingSceneCards} onClick={onGenerateSceneCards}>场景卡</Button>
             </Tooltip>

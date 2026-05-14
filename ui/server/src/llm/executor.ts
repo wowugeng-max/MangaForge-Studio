@@ -57,7 +57,7 @@ const categoryByTask: Record<string, string[]> = {
   全案规划: ['reference_profile', 'volume_architecture', 'character_function_matrix', 'genre_positioning', 'selling_point', 'trope_design', 'worldbuilding', 'resource_economy_model', 'style_profile'],
   世界观设定: ['reference_profile', 'worldbuilding', 'ability_design', 'realm_design', 'resource_economy_model', 'resource_economy', 'conflict_design'],
   角色设定: ['character_function_matrix', 'character_design', 'emotion_design', 'conflict_design', 'reference_profile'],
-  正文创作: ['style_profile', 'chapter_beat_template', 'writing_style', 'technique', 'scene_design', 'emotion_design', 'reader_hook', 'story_pacing'],
+  正文创作: ['style_profile', 'prose_syntax_profile', 'dialogue_mechanism', 'payoff_model', 'chapter_beat_template', 'writing_style', 'technique', 'scene_design', 'emotion_design', 'reader_hook', 'story_pacing'],
 }
 
 const normalizeAlias = (value: string) => String(value || '').toLowerCase().replace(/\s+/g, '')
@@ -82,9 +82,9 @@ function getTaskCategories(taskType: string, strength: ReferenceStrength) {
   if (strength === 'balanced') return base
 
   if (strength === 'light') {
-    const lightCats = new Set(['style_profile', 'chapter_beat_template', 'writing_style', 'technique', 'story_pacing', 'scene_design', 'emotion_design', 'reader_hook'])
+    const lightCats = new Set(['style_profile', 'prose_syntax_profile', 'dialogue_mechanism', 'payoff_model', 'chapter_beat_template', 'writing_style', 'technique', 'story_pacing', 'scene_design', 'emotion_design', 'reader_hook'])
     const filtered = base.filter(cat => lightCats.has(cat))
-    return filtered.length ? filtered : ['style_profile', 'chapter_beat_template', 'writing_style', 'technique', 'story_pacing']
+    return filtered.length ? filtered : ['style_profile', 'prose_syntax_profile', 'dialogue_mechanism', 'payoff_model', 'chapter_beat_template', 'writing_style', 'technique', 'story_pacing']
   }
 
   return Array.from(new Set([
@@ -95,6 +95,9 @@ function getTaskCategories(taskType: string, strength: ReferenceStrength) {
     'character_function_matrix',
     'resource_economy_model',
     'style_profile',
+    'prose_syntax_profile',
+    'dialogue_mechanism',
+    'payoff_model',
     'story_design',
     'story_pacing',
     'conflict_design',

@@ -7,9 +7,12 @@ const { Paragraph, Text } = Typography
 const defaultAvoid = ['人名', '专有设定', '原剧情顺序', '原文表达']
 const requiredProfileCategories = [
   { value: 'reference_profile', label: '参考作品画像' },
+  { value: 'volume_architecture', label: '分卷结构' },
   { value: 'chapter_beat_template', label: '章节节拍模板' },
   { value: 'character_function_matrix', label: '角色功能矩阵' },
   { value: 'style_profile', label: '文风画像' },
+  { value: 'payoff_model', label: '爽点模型' },
+  { value: 'prose_syntax_profile', label: '文风句法' },
 ]
 const useForOptions = [
   { value: '全部', label: '全部' },

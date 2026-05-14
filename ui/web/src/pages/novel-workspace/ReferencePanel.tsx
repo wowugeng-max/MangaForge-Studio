@@ -48,6 +48,7 @@ export function ReferencePanel({
   worldbuilding,
   characters,
   outlines,
+  selectedProject,
   referenceReports,
   proseQualityReports,
   activeChapterId,
@@ -66,6 +67,7 @@ export function ReferencePanel({
   worldbuilding: any[]
   characters: any[]
   outlines: any[]
+  selectedProject: any | null
   referenceReports: any[]
   proseQualityReports: any[]
   activeChapterId: number | null
@@ -86,6 +88,8 @@ export function ReferencePanel({
       </div>
     )
   }
+  const storyState = selectedProject?.reference_config?.story_state || {}
+  const writingBible = selectedProject?.reference_config?.writing_bible || null
 
   return (
     <div style={{
@@ -100,6 +104,84 @@ export function ReferencePanel({
       <div style={{ flex: 1, overflow: 'auto' }}>
         <Tabs activeKey={activeTab} onChange={onTabChange} size="small"
           items={[
+            {
+              key: 'storyMemory', label: '故事记忆',
+              children: (
+                <Space direction="vertical" size={8} style={{ width: '100%', padding: 8 }}>
+                  {!storyState || Object.keys(storyState).length === 0 ? (
+                    <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无故事状态机；生成章节入库后会自动更新。" />
+                  ) : (
+                    <>
+                      <Space wrap>
+                        {storyState.last_updated_chapter && <Tag color="blue" bordered={false}>更新至第{storyState.last_updated_chapter}章</Tag>}
+                        {storyState.last_updated_at && <Tag bordered={false}>{storyState.last_updated_at}</Tag>}
+                      </Space>
+                      {[
+                        ['character_positions', '角色位置'],
+                        ['character_relationships', '角色关系'],
+                        ['known_secrets', '已知秘密'],
+                        ['item_ownership', '道具归属'],
+                        ['foreshadowing_status', '伏笔状态'],
+                        ['mainline_progress', '主线进度'],
+                        ['timeline', '当前时间线'],
+                        ['unresolved_conflicts', '未解冲突'],
+                        ['recent_repeated_information', '近期重复信息'],
+                      ].map(([key, label]) => storyState[key] !== undefined && (
+                        <Card key={key} size="small" title={label}>
+                          <Paragraph style={{ marginBottom: 0, whiteSpace: 'pre-wrap', fontSize: 12 }} ellipsis={{ rows: 5, expandable: true, symbol: '展开' }}>
+                            {displayValue(storyState[key]) || '-'}
+                          </Paragraph>
+                        </Card>
+                      ))}
+                    </>
+                  )}
+                  {characters.some(char => char.current_state && Object.keys(char.current_state).length > 0) && (
+                    <Card size="small" title="角色当前状态">
+                      <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                        {characters.filter(char => char.current_state && Object.keys(char.current_state).length > 0).map(char => (
+                          <Paragraph key={char.id || char.name} style={{ marginBottom: 0, fontSize: 12 }} ellipsis={{ rows: 3, expandable: true, symbol: '展开' }}>
+                            <Text strong>{char.name}：</Text>{displayValue(char.current_state)}
+                          </Paragraph>
+                        ))}
+                      </Space>
+                    </Card>
+                  )}
+                </Space>
+              ),
+            },
+            {
+              key: 'writingBible', label: '写作圣经',
+              children: (
+                <Space direction="vertical" size={8} style={{ width: '100%', padding: 8 }}>
+                  {!writingBible ? (
+                    <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚未保存写作圣经；生成时会自动构建临时圣经。" />
+                  ) : (
+                    <>
+                      <Space wrap>
+                        {writingBible.updated_at && <Tag bordered={false}>{writingBible.updated_at}</Tag>}
+                        {writingBible.project?.genre && <Tag color="purple" bordered={false}>{writingBible.project.genre}</Tag>}
+                      </Space>
+                      {[
+                        ['promise', '读者承诺'],
+                        ['world_summary', '世界摘要'],
+                        ['world_rules', '世界规则'],
+                        ['mainline', '主线'],
+                        ['volume_plan', '分卷计划'],
+                        ['style_lock', '风格锁定'],
+                        ['safety_policy', '仿写安全策略'],
+                        ['forbidden', '禁止项'],
+                      ].map(([key, label]) => writingBible[key] !== undefined && (
+                        <Card key={key} size="small" title={label}>
+                          <Paragraph style={{ marginBottom: 0, whiteSpace: 'pre-wrap', fontSize: 12 }} ellipsis={{ rows: 5, expandable: true, symbol: '展开' }}>
+                            {displayValue(writingBible[key]) || '-'}
+                          </Paragraph>
+                        </Card>
+                      ))}
+                    </>
+                  )}
+                </Space>
+              ),
+            },
             {
               key: 'worldbuilding', label: '世界观',
               children: worldbuilding.length === 0 ? (

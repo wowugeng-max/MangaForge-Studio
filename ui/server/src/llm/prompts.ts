@@ -588,6 +588,9 @@ ${novelText.slice(0, 12000)}
 22. character_function_matrix（角色功能矩阵）：主角、配角、对手、工具人、情绪承载者的功能位与关系张力
 23. resource_economy_model（资源经济模型）：资源来源、价格梯度、消耗闭环、贫穷/稀缺如何驱动剧情
 24. style_profile（文风画像）：叙述视角、句式密度、吐槽/幽默机制、心理描写与对白比例
+25. payoff_model（爽点模型）：爽点触发条件、兑现节奏、压抑释放、奖励类型、追读驱动
+26. prose_syntax_profile（文风句法）：句长分布、段落密度、修辞偏好、信息句/动作句比例
+27. dialogue_mechanism（对话机制）：对话如何承载笑点、信息差、人设、冲突和节奏转场
 
 输出 JSON 格式，是一个数组，每个元素包含以下字段：
   - category: 优先使用上述固定类别；如果文本出现更准确的新类别，也可以返回模型自定义类别（如 "faction_design"）
@@ -623,8 +626,8 @@ ${novelText.slice(0, 12000)}
 ]
 
 ⚠️ 绝对不要返回 markdown 格式，必须是纯 JSON 数组。
-⚠️ 固定类别中凡是文本有依据的类别至少产出 1 条知识点，总共产出 14-28 条；不要为了凑类别编造文本不存在的内容。
-⚠️ 如果文本来自连续多章或整本书，必须至少产出 reference_profile、chapter_beat_template、character_function_matrix、style_profile；如有分卷/阶段推进证据，产出 volume_architecture；如有金钱、装备、修炼成本、资源稀缺，产出 resource_economy_model。
+⚠️ 固定类别中凡是文本有依据的类别至少产出 1 条知识点，总共产出 14-32 条；不要为了凑类别编造文本不存在的内容。
+⚠️ 如果文本来自连续多章或整本书，必须至少产出 reference_profile、chapter_beat_template、character_function_matrix、style_profile、payoff_model、prose_syntax_profile；如有分卷/阶段推进证据，产出 volume_architecture；如有金钱、装备、修炼成本、资源稀缺，产出 resource_economy_model；如对话承担笑点/信息差/冲突推进，产出 dialogue_mechanism。
 ⚠️ 新增 profile 类知识必须写成“可迁移蓝图”，不要只复述原剧情；同时在 content 里标明“可借鉴结构”和“避免照搬点”。
 ⚠️ tags 支持自由标签：请加入文本中真实出现或可概括出的标签，例如"人物设计"、"境界瓶颈"、"能力代价"、"章节钩子"。
 ⚠️ genre_tags/trope_tags 必须服务于后续创作检索，不要只复制 category 名称。

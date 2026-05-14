@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Alert, Badge, Button, Form, List, message, Modal, Select, Space, Typography, Tooltip, Tag,
+  Alert, Badge, Button, Card, Form, List, message, Modal, Progress, Select, Space, Typography, Tooltip, Tag,
 } from 'antd'
 import {
   ArrowLeftOutlined, BookOutlined, ClockCircleOutlined, ReloadOutlined,
@@ -51,6 +51,8 @@ export default function NovelProjectWorkspace() {
   const [executingAgents, setExecutingAgents] = useState(false)
   const [generatingProse, setGeneratingProse] = useState(false)
   const [generatingSceneCards, setGeneratingSceneCards] = useState(false)
+  const [diagnosticsLoading, setDiagnosticsLoading] = useState(false)
+  const [pipelineLoading, setPipelineLoading] = useState(false)
 
   // ── 大纲生成控制面板 ──
   const [outlinePanelOpen, setOutlinePanelOpen] = useState(false)
@@ -163,6 +165,48 @@ export default function NovelProjectWorkspace() {
       onOk: () => {
         if (onContinue && !isSafetyBlocked) onContinue()
       },
+    })
+  }
+
+  const showDiagnosticsModal = (diagnostics: any) => {
+    const preflight = diagnostics?.preflight || {}
+    const checks = Array.isArray(preflight.checks) ? preflight.checks : []
+    const recommendations = Array.isArray(diagnostics?.recommendations) ? diagnostics.recommendations : []
+    Modal.info({
+      title: '生成前诊断',
+      width: 820,
+      content: (
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Card size="small">
+            <Space align="center" size={16}>
+              <Progress type="circle" size={72} percent={Number(diagnostics?.readiness_score || 0)} status={preflight.ready ? 'success' : 'normal'} />
+              <Space direction="vertical" size={4}>
+                <Text strong>{preflight.ready ? '可以生成' : '存在材料缺口'}</Text>
+                <Text type="secondary">系统会根据高危缺口决定是否阻止直接生成。</Text>
+              </Space>
+            </Space>
+          </Card>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {checks.map((check: any, index: number) => (
+              <Tag key={`${check.key || index}`} color={check.ok ? 'green' : check.severity === 'high' ? 'red' : 'gold'} bordered={false}>
+                {check.ok ? '✓' : '!'} {check.label || check.key}
+              </Tag>
+            ))}
+          </div>
+          {recommendations.length > 0 && (
+            <Card size="small" title="补齐建议">
+              <List size="small" dataSource={recommendations} renderItem={(item: string) => <List.Item>{item}</List.Item>} />
+            </Card>
+          )}
+          {diagnostics?.writing_bible && (
+            <Card size="small" title="写作圣经摘要">
+              <Paragraph ellipsis={{ rows: 4, expandable: true }} style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }}>
+                {JSON.stringify(diagnostics.writing_bible, null, 2)}
+              </Paragraph>
+            </Card>
+          )}
+        </Space>
+      ),
     })
   }
 
@@ -589,6 +633,46 @@ export default function NovelProjectWorkspace() {
     }
   }
 
+  const openGenerationDiagnostics = async () => {
+    if (!activeChapter) return message.warning('请先选择章节')
+    if (!await flushPendingSave()) return
+    setDiagnosticsLoading(true)
+    try {
+      const res = await apiClient.get(`/novel/chapters/${activeChapter.id}/generation-diagnostics`, {
+        params: { project_id: projectId },
+      })
+      showDiagnosticsModal(res.data || {})
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '生成前诊断失败')
+    } finally {
+      setDiagnosticsLoading(false)
+    }
+  }
+
+  const startChapterPipeline = async () => {
+    if (!activeChapter) return message.warning('请先选择章节')
+    if (!selectedModelId) return message.warning('请先选择写作模型')
+    if (!await flushPendingSave()) return
+    setPipelineLoading(true)
+    try {
+      const res = await apiClient.post(`/novel/chapters/${activeChapter.id}/generation-pipeline/start`, {
+        project_id: projectId,
+        model_id: selectedModelId,
+        generate_scene_cards: true,
+      })
+      if (res.data?.chapter) {
+        setChapters(prev => prev.map(c => c.id === res.data.chapter.id ? res.data.chapter : c))
+      }
+      await loadProjectModules()
+      setTaskCenterOpen(true)
+      message.success('流水线已创建，已停在场景卡确认阶段')
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '流水线启动失败')
+    } finally {
+      setPipelineLoading(false)
+    }
+  }
+
   const generateCurrentChapterProse = async (options: { allowIncomplete?: boolean; forceSceneCards?: boolean } = {}) => {
     if (!activeChapter) return message.warning('请先选择章节')
     if (!selectedModelId) return message.warning('请先选择写作模型')
@@ -736,6 +820,24 @@ export default function NovelProjectWorkspace() {
     } catch { /* fall back to comma split */ }
     return text.split(/[,，\n]/).map((s: string) => s.trim()).filter(Boolean)
   }
+  const formatJsonField = (value: any) => {
+    if (value === undefined || value === null || value === '') return ''
+    try {
+      return JSON.stringify(value, null, 2)
+    } catch {
+      return String(value || '')
+    }
+  }
+  const parseJsonField = (value: any, fallback: any = []) => {
+    if (Array.isArray(value) || (value && typeof value === 'object')) return value
+    const text = String(value || '').trim()
+    if (!text) return fallback
+    try {
+      return JSON.parse(text)
+    } catch {
+      return fallback
+    }
+  }
 
   const openEditor = (kind: typeof editorKind, item?: any) => {
     const currentItem = item || (kind === 'worldbuilding' ? worldbuilding[0] : null)
@@ -772,6 +874,7 @@ export default function NovelProjectWorkspace() {
         ...data,
         must_advance: formatListField(data.raw_payload?.must_advance),
         forbidden_repeats: formatListField(data.raw_payload?.forbidden_repeats),
+        scene_breakdown: formatJsonField(data.scene_breakdown || data.scene_list || []),
       })
     }
     setEditorKind(kind)
@@ -819,6 +922,8 @@ export default function NovelProjectWorkspace() {
           conflict: v.conflict || '', ending_hook: v.ending_hook || '',
           status: editorItem?.status || 'draft', outline_id: v.outline_id ?? null,
           chapter_text: v.chapter_text || '',
+          scene_breakdown: parseJsonField(v.scene_breakdown, []),
+          scene_list: parseJsonField(v.scene_breakdown, []),
           raw_payload: {
             ...(editorItem?.raw_payload || {}),
             must_advance: parseListField(v.must_advance),
@@ -928,11 +1033,15 @@ export default function NovelProjectWorkspace() {
           planning={planning}
           generatingProse={generatingProse}
           generatingSceneCards={generatingSceneCards}
+          diagnosticsLoading={diagnosticsLoading}
+          pipelineLoading={pipelineLoading}
           onRunPlan={runPlan}
           onCreateOutline={() => openEditor('outline')}
           onCreateChapter={() => openEditor('chapter')}
           onGenerateCurrentChapterProse={() => generateCurrentChapterProse()}
           onGenerateSceneCards={() => generateSceneCardsForActiveChapter()}
+          onOpenGenerationDiagnostics={openGenerationDiagnostics}
+          onStartChapterPipeline={startChapterPipeline}
           onEditActiveChapter={() => activeChapter && openEditor('chapter', activeChapter)}
           onChapterTextChange={(next) => {
             const chapterId = activeChapterId
@@ -947,6 +1056,7 @@ export default function NovelProjectWorkspace() {
           worldbuilding={worldbuilding}
           characters={characters}
           outlines={outlines}
+          selectedProject={selectedProject}
           referenceReports={referenceReports}
           proseQualityReports={proseQualityReports}
           activeChapterId={activeChapterId}
@@ -1014,6 +1124,16 @@ export default function NovelProjectWorkspace() {
         onPauseKnowledgeJob={(jobId) => { void pauseKnowledgeIngestJob(jobId) }}
         onResumeKnowledgeJob={(jobId) => { void resumeKnowledgeIngestJob(jobId) }}
         onCancelKnowledgeJob={(jobId) => { void cancelKnowledgeIngestJob(jobId) }}
+        onPauseRun={async (run) => {
+          await apiClient.post(`/novel/runs/${run.id}/pause`, { project_id: projectId })
+          await loadProjectModules()
+          message.success('任务已暂停')
+        }}
+        onResumeRun={async (run) => {
+          const res = await apiClient.post(`/novel/runs/${run.id}/resume`, { project_id: projectId })
+          await loadProjectModules()
+          message.success(res.data?.resume_endpoint ? '任务已标记可继续，请从当前章节继续生成正文' : '任务已继续')
+        }}
       />
 
       <OutlineTreeModal

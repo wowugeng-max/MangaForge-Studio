@@ -7,9 +7,12 @@ const { Text, Paragraph } = Typography
 
 const requiredProfiles = [
   { value: 'reference_profile', label: '作品画像' },
+  { value: 'volume_architecture', label: '分卷结构' },
   { value: 'chapter_beat_template', label: '章节节拍' },
   { value: 'character_function_matrix', label: '角色矩阵' },
   { value: 'style_profile', label: '文风画像' },
+  { value: 'payoff_model', label: '爽点模型' },
+  { value: 'prose_syntax_profile', label: '文风句法' },
 ]
 
 const categoryLabels: Record<string, string> = {
@@ -25,6 +28,9 @@ const categoryLabels: Record<string, string> = {
   writing_style: '写作风格',
   worldbuilding: '世界观',
   resource_economy: '资源经济',
+  payoff_model: '爽点模型',
+  prose_syntax_profile: '文风句法',
+  dialogue_mechanism: '对话机制',
 }
 
 function normalizeReferences(config: any) {
