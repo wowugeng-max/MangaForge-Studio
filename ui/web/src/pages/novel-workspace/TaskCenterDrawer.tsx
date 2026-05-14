@@ -20,6 +20,7 @@ function statusTag(status?: string) {
   if (status === 'running') return <Tag color="blue" bordered={false}>运行中</Tag>
   if (status === 'queued') return <Tag color="cyan" bordered={false}>排队</Tag>
   if (status === 'paused') return <Tag color="gold" bordered={false}>已暂停</Tag>
+  if (status === 'needs_approval') return <Tag color="gold" bordered={false}>待确认</Tag>
   if (status === 'completed') return <Tag color="green" bordered={false}>已完成</Tag>
   if (status === 'canceled') return <Tag color="default" bordered={false}>已取消</Tag>
   if (status === 'fallback' || status === 'warn') return <Tag color="gold" bordered={false}>需检查</Tag>
@@ -155,7 +156,15 @@ function ChapterPipelineRunSummary({ run }: { run: any }) {
   )
 }
 
-function ChapterGroupRunSummary({ run }: { run: any }) {
+function ChapterGroupRunSummary({
+  run,
+  onApproveChapterGroup,
+  onRetryChapterGroup,
+}: {
+  run: any
+  onApproveChapterGroup?: (run: any, chapter: any) => void
+  onRetryChapterGroup?: (run: any, chapter: any) => void
+}) {
   const output = parseJsonValue(run.output_ref) || {}
   const chapters = Array.isArray(output.chapters) ? output.chapters : []
   const success = chapters.filter((item: any) => item.status === 'success').length
@@ -221,6 +230,21 @@ function ChapterGroupRunSummary({ run }: { run: any }) {
             第{output.last_error.chapter_no}章失败：{output.last_error.error}
           </Paragraph>
         )}
+        {chapters.some((chapter: any) => ['needs_approval', 'ready', 'failed'].includes(chapter.status)) && (
+          <Card size="small" title="可操作章节" styles={{ body: { padding: 8 } }}>
+            <Space direction="vertical" size={6} style={{ width: '100%' }}>
+              {chapters.filter((chapter: any) => ['needs_approval', 'ready', 'failed'].includes(chapter.status)).slice(0, 10).map((chapter: any) => (
+                <Space key={`action-${chapter.id || chapter.chapter_no}`} style={{ width: '100%', justifyContent: 'space-between' }}>
+                  <Text style={{ fontSize: 12 }}>第{chapter.chapter_no}章 · {chapter.error || chapter.approval_stage || chapter.status}</Text>
+                  <Space>
+                    {chapter.status === 'needs_approval' && onApproveChapterGroup && <Button size="small" type="link" onClick={() => onApproveChapterGroup(run, chapter)}>确认</Button>}
+                    {onRetryChapterGroup && <Button size="small" type="link" onClick={() => onRetryChapterGroup(run, chapter)}>重试</Button>}
+                  </Space>
+                </Space>
+              ))}
+            </Space>
+          </Card>
+        )}
       </Space>
     </Card>
   )
@@ -252,6 +276,8 @@ export function TaskCenterDrawer({
   onExecuteChapterGroup,
   onPauseRun,
   onResumeRun,
+  onApproveChapterGroup,
+  onRetryChapterGroup,
 }: {
   open: boolean
   activeTasks: WorkspaceActiveTask[]
@@ -269,6 +295,8 @@ export function TaskCenterDrawer({
   onExecuteChapterGroup?: (run: any) => void
   onPauseRun?: (run: any) => void
   onResumeRun?: (run: any) => void
+  onApproveChapterGroup?: (run: any, chapter: any) => void
+  onRetryChapterGroup?: (run: any, chapter: any) => void
 }) {
   const [detailRun, setDetailRun] = useState<any | null>(null)
   const [detailKnowledgeJob, setDetailKnowledgeJob] = useState<any | null>(null)
@@ -433,7 +461,7 @@ export function TaskCenterDrawer({
             )}
             {detailRun.run_type === 'batch_generate_prose' && <BatchProseRunSummary run={detailRun} />}
             {detailRun.run_type === 'chapter_generation_pipeline' && <ChapterPipelineRunSummary run={detailRun} />}
-            {detailRun.run_type === 'chapter_group_generation' && <ChapterGroupRunSummary run={detailRun} />}
+            {detailRun.run_type === 'chapter_group_generation' && <ChapterGroupRunSummary run={detailRun} onApproveChapterGroup={onApproveChapterGroup} onRetryChapterGroup={onRetryChapterGroup} />}
             <Card size="small" title="输入">
               <Paragraph style={{ whiteSpace: 'pre-wrap', maxHeight: 220, overflow: 'auto', marginBottom: 0 }}>
                 {safeJsonPreview(detailRun.input_ref) || '无'}

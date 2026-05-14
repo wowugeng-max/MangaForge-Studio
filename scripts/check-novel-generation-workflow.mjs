@@ -48,6 +48,12 @@ async function main() {
     'novel_similarity_report',
     'novel_rolling_planner',
     'novel_agent_prompt_config',
+    'novel_persistent_worker_queue',
+    'novel_chapter_production_desk',
+    'novel_reference_migration_plan',
+    'novel_quality_trends',
+    'novel_volume_control',
+    'novel_failure_recovery',
   ]
   const missingFeatures = requiredFeatures.filter(key => !features[key])
   if (missingFeatures.length) throw new Error(`Missing status features: ${missingFeatures.join(', ')}`)
@@ -75,6 +81,10 @@ async function main() {
     approval_policy: false,
     agent_config: false,
     run_queue: false,
+    worker_status: false,
+    reference_migration_plan: false,
+    quality_trends: false,
+    volume_control: false,
     diagnostics: false,
     runs: false,
   }
@@ -99,12 +109,22 @@ async function main() {
   checks.agent_config = Boolean(agentConfig?.config)
   const runQueue = await request(`/novel/projects/${project.id}/run-queue`)
   checks.run_queue = Boolean(runQueue?.summary)
+  const workerStatus = await request(`/novel/projects/${project.id}/run-queue/worker-status`)
+  checks.worker_status = Boolean(workerStatus?.worker)
+  checks.quality_trends = Array.isArray(dashboard?.dashboard?.chapter_trends)
+  checks.volume_control = Array.isArray(dashboard?.dashboard?.volume_controls)
 
   if (chapter) {
     const diagnostics = await request(`/novel/chapters/${chapter.id}/generation-diagnostics?project_id=${project.id}`)
     checks.diagnostics = Boolean(diagnostics?.context_package && diagnostics?.preflight)
+    const migration = await request(`/novel/chapters/${chapter.id}/reference-migration-plan`, {
+      method: 'POST',
+      body: JSON.stringify({ project_id: project.id, dry_run: true }),
+    })
+    checks.reference_migration_plan = Boolean(migration?.plan || migration?.review)
   } else {
     checks.diagnostics = true
+    checks.reference_migration_plan = true
   }
 
   const runs = await request(`/novel/runs?project_id=${project.id}`)

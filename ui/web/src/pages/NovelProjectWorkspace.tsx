@@ -1218,6 +1218,17 @@ export default function NovelProjectWorkspace() {
     })
   }
 
+  const runReferenceMigrationPlan = async () => {
+    if (!activeChapter) return message.warning('请先选择章节')
+    if (!selectedModelId) return message.warning('请先选择模型')
+    await runCommercialTool('migrationPlan', '参考迁移计划', async () => {
+      const res = await apiClient.post(`/novel/chapters/${activeChapter.id}/reference-migration-plan`, { project_id: projectId, model_id: selectedModelId })
+      setRightPanelOpen(true)
+      setRightPanelTab('bookReviews')
+      return res.data
+    })
+  }
+
   const runVersionReviewForActiveChapter = async () => {
     if (!activeChapter) return message.warning('请先选择章节')
     await runCommercialTool('versionReview', '章节版本评审', async () => {
@@ -1265,6 +1276,77 @@ export default function NovelProjectWorkspace() {
     })
   }
 
+  const openProductionDesk = async () => {
+    setCommercialToolLoading('productionDesk')
+    try {
+      const [dashboardRes, queueRes] = await Promise.all([
+        apiClient.get(`/novel/projects/${projectId}/production-dashboard`),
+        apiClient.get(`/novel/projects/${projectId}/run-queue`),
+      ])
+      const dashboard = dashboardRes.data?.dashboard || {}
+      const queue = queueRes.data || {}
+      Modal.info({
+        title: '章节生产台',
+        width: 1040,
+        content: (
+          <div style={{ display: 'grid', gridTemplateColumns: '280px minmax(0, 1fr) 280px', gap: 12 }}>
+            <Card size="small" title="章节队列">
+              <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                {(dashboard.chapter_trends || []).slice(0, 40).map((chapter: any) => (
+                  <div key={chapter.chapter_id} style={{ padding: 8, border: '1px solid #f0f0f0', borderRadius: 6 }}>
+                    <Space wrap>
+                      <Tag bordered={false}>第{chapter.chapter_no}章</Tag>
+                      <Tag color={chapter.has_text ? 'green' : 'default'} bordered={false}>{chapter.has_text ? '已写' : '未写'}</Tag>
+                      {chapter.quality_score && <Tag color={chapter.quality_score >= 78 ? 'green' : 'gold'} bordered={false}>{chapter.quality_score}分</Tag>}
+                    </Space>
+                    <Paragraph style={{ margin: '4px 0 0', fontSize: 12 }} ellipsis={{ rows: 1 }}>{chapter.title}</Paragraph>
+                  </div>
+                ))}
+              </Space>
+            </Card>
+            <Card size="small" title="当前流水线">
+              <Space direction="vertical" size={10} style={{ width: '100%' }}>
+                <Space wrap>
+                  <Tag color="blue" bordered={false}>worker {queue.worker?.status || 'idle'}</Tag>
+                  <Tag bordered={false}>待执行 {queue.summary?.queued || 0}</Tag>
+                  <Tag bordered={false}>运行 {queue.summary?.running || 0}</Tag>
+                  <Tag bordered={false}>暂停 {queue.summary?.paused || 0}</Tag>
+                </Space>
+                <List
+                  size="small"
+                  dataSource={(queue.queue || []).slice(0, 12)}
+                  renderItem={(item: any) => (
+                    <List.Item>
+                      <List.Item.Meta
+                        title={<Space wrap><Tag bordered={false}>{item.step}</Tag><Tag color={item.status === 'running' ? 'blue' : item.status === 'paused' ? 'gold' : 'default'} bordered={false}>{item.status}</Tag></Space>}
+                        description={item.payload?.phase || item.created_at}
+                      />
+                    </List.Item>
+                  )}
+                />
+              </Space>
+            </Card>
+            <Card size="small" title="卷级控制">
+              <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                {(dashboard.volume_controls || []).length ? dashboard.volume_controls.map((volume: any) => (
+                  <div key={volume.id || volume.title} style={{ padding: 8, border: '1px solid #f0f0f0', borderRadius: 6 }}>
+                    <Text strong>{volume.title}</Text>
+                    <Progress percent={volume.progress || 0} size="small" />
+                    <Paragraph style={{ marginBottom: 0, fontSize: 12 }} ellipsis={{ rows: 2 }}>{volume.summary}</Paragraph>
+                  </div>
+                )) : <Text type="secondary">暂无分卷目标</Text>}
+              </Space>
+            </Card>
+          </div>
+        ),
+      })
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '章节生产台加载失败')
+    } finally {
+      setCommercialToolLoading('')
+    }
+  }
+
   const startRunQueueWorker = async () => {
     if (!selectedModelId) return message.warning('请先选择模型')
     await runCommercialTool('queueWorker', '后台任务队列', async () => {
@@ -1300,6 +1382,29 @@ export default function NovelProjectWorkspace() {
       message.error(error?.response?.data?.error || error?.message || '章节群执行失败')
     } finally {
       setChapterGroupExecutingId(null)
+    }
+  }
+
+  const approveChapterGroupStage = async (run: any, chapter: any) => {
+    try {
+      await apiClient.post(`/novel/projects/${projectId}/chapter-groups/${run.id}/approve`, {
+        chapter_id: chapter.id,
+        stage: chapter.approval_stage || run?.output_ref?.last_error?.approval_stage || 'scene_cards',
+      })
+      await loadProjectModules()
+      message.success('已确认，任务可继续执行')
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '确认失败')
+    }
+  }
+
+  const retryChapterGroupStage = async (run: any, chapter: any) => {
+    try {
+      await apiClient.post(`/novel/projects/${projectId}/chapter-groups/${run.id}/retry-now`, { chapter_id: chapter.id })
+      await loadProjectModules()
+      message.success('已加入立即重试')
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '重试失败')
     }
   }
 
@@ -1819,6 +1924,7 @@ export default function NovelProjectWorkspace() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
             <Card size="small" title="生产稳定性">
               <Space direction="vertical" style={{ width: '100%' }}>
+                <Button block loading={commercialToolLoading === 'productionDesk'} onClick={openProductionDesk}>章节生产台</Button>
                 <Button block loading={commercialToolLoading === 'queue'} onClick={openRunQueue}>后台任务队列</Button>
                 <Button block loading={commercialToolLoading === 'queueWorker'} onClick={startRunQueueWorker}>启动后台 worker</Button>
                 <Button block loading={commercialToolLoading === 'queueStop'} onClick={stopRunQueueWorker}>停止后台 worker</Button>
@@ -1831,6 +1937,7 @@ export default function NovelProjectWorkspace() {
                 <Button block loading={commercialToolLoading === 'benchmark'} onClick={runQualityBenchmark}>项目质量基准测试</Button>
                 <Button block loading={commercialToolLoading === 'versionReview'} onClick={runVersionReviewForActiveChapter}>当前章版本评审</Button>
                 <Button block loading={commercialToolLoading === 'similarity'} onClick={runSimilarityForActiveChapter}>当前章相似度检测</Button>
+                <Button block loading={commercialToolLoading === 'migrationPlan'} onClick={runReferenceMigrationPlan}>当前章参考迁移计划</Button>
               </Space>
             </Card>
             <Card size="small" title="规划与选题">
@@ -1940,6 +2047,8 @@ export default function NovelProjectWorkspace() {
         onCancelKnowledgeJob={(jobId) => { void cancelKnowledgeIngestJob(jobId) }}
         chapterGroupExecutingId={chapterGroupExecutingId}
         onExecuteChapterGroup={executeChapterGroupRun}
+        onApproveChapterGroup={approveChapterGroupStage}
+        onRetryChapterGroup={retryChapterGroupStage}
         onPauseRun={async (run) => {
           await apiClient.post(`/novel/runs/${run.id}/pause`, { project_id: projectId })
           await loadProjectModules()
