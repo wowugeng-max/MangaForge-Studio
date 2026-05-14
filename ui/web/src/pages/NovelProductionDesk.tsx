@@ -22,23 +22,31 @@ export default function NovelProductionDesk() {
   const [dashboard, setDashboard] = useState<any>({})
   const [queue, setQueue] = useState<any>({})
   const [budget, setBudget] = useState<any>({})
+  const [qualityGate, setQualityGate] = useState<any>({})
+  const [coverage, setCoverage] = useState<any>({})
   const [runs, setRuns] = useState<any[]>([])
   const [selectedRun, setSelectedRun] = useState<any | null>(null)
   const [budgetForm] = Form.useForm()
+  const [qualityForm] = Form.useForm()
+  const [contextForm] = Form.useForm()
 
   const load = async () => {
     if (!projectId) return
     setLoading(true)
     try {
-      const [dashboardRes, queueRes, budgetRes, runsRes] = await Promise.all([
+      const [dashboardRes, queueRes, budgetRes, qualityRes, coverageRes, runsRes] = await Promise.all([
         apiClient.get(`/novel/projects/${projectId}/production-dashboard`),
         apiClient.get(`/novel/projects/${projectId}/run-queue`),
         apiClient.get(`/novel/projects/${projectId}/production-budget`),
+        apiClient.get(`/novel/projects/${projectId}/quality-gate`),
+        apiClient.get(`/novel/projects/${projectId}/reference-coverage`),
         apiClient.get('/novel/runs', { params: { project_id: projectId } }),
       ])
       setDashboard(dashboardRes.data?.dashboard || {})
       setQueue(queueRes.data || {})
       setBudget(budgetRes.data || {})
+      setQualityGate(qualityRes.data || {})
+      setCoverage(coverageRes.data?.coverage || {})
       setRuns(Array.isArray(runsRes.data) ? runsRes.data : [])
     } catch (error: any) {
       message.error(error?.response?.data?.error || error?.message || '生产台加载失败')
@@ -62,6 +70,12 @@ export default function NovelProductionDesk() {
   const stopWorker = async () => {
     await apiClient.post(`/novel/projects/${projectId}/run-queue/stop-worker`)
     message.success('worker 已请求停止')
+    await load()
+  }
+
+  const recoverWorker = async () => {
+    const res = await apiClient.post(`/novel/projects/${projectId}/run-queue/recover`)
+    message.success(`已恢复 ${res.data?.recovered_runs || 0} 个任务`)
     await load()
   }
 
@@ -108,6 +122,54 @@ export default function NovelProductionDesk() {
     })
   }
 
+  const openQualityGateEditor = () => {
+    qualityForm.setFieldsValue({ gate: JSON.stringify(qualityGate.gate || {}, null, 2) })
+    Modal.confirm({
+      title: '质量门禁',
+      width: 720,
+      content: (
+        <Form form={qualityForm} layout="vertical">
+          <Form.Item name="gate" label="门禁 JSON">
+            <Input.TextArea rows={10} />
+          </Form.Item>
+        </Form>
+      ),
+      okText: '保存',
+      onOk: async () => {
+        const values = await qualityForm.validateFields()
+        await apiClient.put(`/novel/projects/${projectId}/quality-gate`, { gate: JSON.parse(values.gate || '{}') })
+        message.success('质量门禁已保存')
+        await load()
+      },
+    })
+  }
+
+  const viewContextPackage = async (chapter: any) => {
+    const res = await apiClient.get(`/novel/chapters/${chapter.id}/context-package`, { params: { project_id: projectId } })
+    contextForm.setFieldsValue({ context: JSON.stringify(res.data?.context_package || {}, null, 2) })
+    Modal.confirm({
+      title: `第${chapter.chapter_no}章上下文包`,
+      width: 920,
+      content: (
+        <Form form={contextForm} layout="vertical">
+          <Form.Item name="context" label="生成前上下文包 JSON">
+            <Input.TextArea rows={20} style={{ fontFamily: 'Menlo, Consolas, monospace', fontSize: 12 }} />
+          </Form.Item>
+        </Form>
+      ),
+      okText: '保存覆盖',
+      cancelText: '关闭',
+      onOk: async () => {
+        const values = await contextForm.validateFields()
+        await apiClient.put(`/novel/chapters/${chapter.id}/context-package`, {
+          project_id: projectId,
+          override: JSON.parse(values.context || '{}'),
+        })
+        message.success('上下文覆盖已保存')
+      },
+    })
+  }
+
   return (
     <div style={{ height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column', background: '#fff' }}>
       <div style={{ height: 48, flexShrink: 0, borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', padding: '0 16px', gap: 12 }}>
@@ -115,7 +177,9 @@ export default function NovelProductionDesk() {
         <Title level={5} style={{ margin: 0, flex: 1 }}>{dashboard.title || '章节生产台'}</Title>
         <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={load}>刷新</Button>
         <Button size="small" onClick={openBudgetEditor}>预算</Button>
+        <Button size="small" onClick={openQualityGateEditor}>门禁</Button>
         <Button size="small" onClick={syncVolumeControl}>同步卷级规划</Button>
+        <Button size="small" onClick={recoverWorker}>恢复 worker</Button>
         <Button size="small" type="primary" onClick={startWorker}>启动 worker</Button>
         <Button size="small" danger onClick={stopWorker}>停止 worker</Button>
       </div>
@@ -141,6 +205,7 @@ export default function NovelProductionDesk() {
         <Card size="small" title="任务流水线" styles={{ body: { height: 'calc(100vh - 126px)', overflow: 'auto' } }}>
           <Space direction="vertical" size={12} style={{ width: '100%' }}>
             {budget?.decision?.blocked && <Alert type="warning" showIcon message="预算熔断" description={budget.decision.reasons?.join('；')} />}
+            {qualityGate?.gate && <Alert type="info" showIcon message={`质量门禁：${qualityGate.gate.enabled === false ? '关闭' : `${qualityGate.gate.min_score} 分入库`}`} description="低于阈值的章节不会直接入库，会停在待确认/待修订状态。" />}
             <Space wrap>
               <Tag color={statusColor(queue.worker?.status)} bordered={false}>worker：{queue.worker?.status || 'idle'}</Tag>
               <Tag bordered={false}>待执行 {queue.summary?.queued || 0}</Tag>
@@ -177,8 +242,21 @@ export default function NovelProductionDesk() {
           </Space>
         </Card>
 
-        <Card size="small" title="卷级控制" styles={{ body: { height: 'calc(100vh - 126px)', overflow: 'auto' } }}>
+        <Card size="small" title="卷级/参考覆盖" styles={{ body: { height: 'calc(100vh - 126px)', overflow: 'auto' } }}>
           <Space direction="vertical" size={10} style={{ width: '100%' }}>
+            <div style={{ padding: 8, border: '1px solid #f0f0f0', borderRadius: 6 }}>
+              <Space wrap>
+                <Text strong>参考覆盖</Text>
+                <Tag color={(coverage.overall_score || 100) >= 80 ? 'green' : (coverage.overall_score || 0) >= 50 ? 'gold' : 'red'} bordered={false}>{coverage.overall_score ?? 100}分</Tag>
+              </Space>
+              {(coverage.references || []).slice(0, 5).map((ref: any) => (
+                <div key={ref.project_title} style={{ marginTop: 6 }}>
+                  <Text style={{ fontSize: 12 }}>{ref.project_title}</Text>
+                  <Progress percent={ref.score || 0} size="small" />
+                </div>
+              ))}
+              {(coverage.recommendations || []).slice(0, 3).map((item: string) => <Paragraph key={item} style={{ margin: '4px 0 0', fontSize: 12 }} type="secondary">{item}</Paragraph>)}
+            </div>
             {(dashboard.volume_controls || []).length ? dashboard.volume_controls.map((volume: any) => (
               <div key={volume.id || volume.title} style={{ padding: 8, border: '1px solid #f0f0f0', borderRadius: 6 }}>
                 <Text strong>{volume.title}</Text>
@@ -211,10 +289,18 @@ export default function NovelProductionDesk() {
                     <Space>
                       {chapter.status === 'needs_approval' && <Button size="small" type="link" onClick={() => approveChapter(selectedRun, chapter)}>确认</Button>}
                       {['ready', 'failed', 'needs_approval'].includes(chapter.status) && <Button size="small" type="link" onClick={() => retryChapter(selectedRun, chapter)}>立即重试</Button>}
+                      <Button size="small" type="link" onClick={() => viewContextPackage(chapter)}>上下文</Button>
                     </Space>
                   </Space>
                   {chapter.error && <Paragraph type="danger" style={{ marginBottom: 0 }} ellipsis={{ rows: 2, expandable: true }}>{chapter.error}</Paragraph>}
                   {chapter.recovery_plan?.actions?.length > 0 && <Text type="secondary" style={{ fontSize: 12 }}>建议：{chapter.recovery_plan.actions.join(' / ')}</Text>}
+                  {Array.isArray(chapter.scenes) && chapter.scenes.length > 0 && (
+                    <Space wrap size={[4, 4]} style={{ marginTop: 8 }}>
+                      {chapter.scenes.map((scene: any) => (
+                        <Tag key={scene.scene_no} color={statusColor(scene.status)} bordered={false}>{scene.scene_no}. {scene.title || '场景'} · {scene.status}</Tag>
+                      ))}
+                    </Space>
+                  )}
                 </div>
               ))}
             </Space>

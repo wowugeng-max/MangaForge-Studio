@@ -60,6 +60,14 @@ async function main() {
     'novel_version_paragraph_merge',
     'novel_volume_plan_writeback',
     'novel_mock_dry_run_checks',
+    'novel_persistent_worker_recovery',
+    'novel_scene_level_production',
+    'novel_hard_quality_gate',
+    'novel_context_package_editor',
+    'novel_reference_coverage_diagnostics',
+    'novel_model_cost_strategy_stats',
+    'novel_enhanced_story_state',
+    'novel_route_module_manifest',
   ]
   const missingFeatures = requiredFeatures.filter(key => !features[key])
   if (missingFeatures.length) throw new Error(`Missing status features: ${missingFeatures.join(', ')}`)
@@ -89,6 +97,9 @@ async function main() {
     run_queue: false,
     worker_status: false,
     production_budget: false,
+    quality_gate: false,
+    reference_coverage: false,
+    modules: false,
     reference_migration_plan: false,
     quality_trends: false,
     volume_control: false,
@@ -120,12 +131,20 @@ async function main() {
   checks.worker_status = Boolean(workerStatus?.worker)
   const productionBudget = await request(`/novel/projects/${project.id}/production-budget`)
   checks.production_budget = Boolean(productionBudget?.budget && productionBudget?.decision)
+  const qualityGate = await request(`/novel/projects/${project.id}/quality-gate`)
+  checks.quality_gate = Boolean(qualityGate?.gate)
+  const referenceCoverage = await request(`/novel/projects/${project.id}/reference-coverage`)
+  checks.reference_coverage = Boolean(referenceCoverage?.coverage)
+  const modules = await request('/novel/modules')
+  checks.modules = Array.isArray(modules?.modules)
   checks.quality_trends = Array.isArray(dashboard?.dashboard?.chapter_trends)
   checks.volume_control = Array.isArray(dashboard?.dashboard?.volume_controls)
 
   if (chapter) {
     const diagnostics = await request(`/novel/chapters/${chapter.id}/generation-diagnostics?project_id=${project.id}`)
     checks.diagnostics = Boolean(diagnostics?.context_package && diagnostics?.preflight)
+    const contextPackage = await request(`/novel/chapters/${chapter.id}/context-package?project_id=${project.id}`)
+    checks.context_package_editor = Boolean(contextPackage?.context_package)
     const migration = await request(`/novel/chapters/${chapter.id}/reference-migration-plan`, {
       method: 'POST',
       body: JSON.stringify({ project_id: project.id, dry_run: true }),
@@ -145,6 +164,7 @@ async function main() {
     checks.diagnostics = true
     checks.reference_migration_plan = true
     checks.version_merge = true
+    checks.context_package_editor = true
   }
   const volumeSync = await request(`/novel/projects/${project.id}/volume-control/sync`, {
     method: 'POST',

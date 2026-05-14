@@ -46,6 +46,7 @@ import {
 } from '../llm'
 import { sseManager, registerTask, unregisterTask } from '../ws-manager'
 import { listKnowledge } from '../knowledge-base'
+import { novelRouteModules } from './novel-modules'
 
 export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
   const getProject = async (workspace: string, id: number) => getNovelProject(workspace, id)
@@ -248,6 +249,7 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
   }
 
   app.get('/api/novel/projects', async (_req, res) => { try { const activeWorkspace = getWorkspace(); await ensureWorkspaceStructure(activeWorkspace); res.json(await listNovelProjects(activeWorkspace)) } catch (error) { res.status(500).json({ error: String(error) }) } })
+  app.get('/api/novel/modules', async (_req, res) => { try { res.json({ ok: true, modules: novelRouteModules }) } catch (error) { res.status(500).json({ error: String(error) }) } })
   app.post('/api/novel/projects', async (req, res) => { try { console.log('[NovelRoute] POST /projects body:', JSON.stringify(req.body, null, 2)); const activeWorkspace = getWorkspace(); console.log('[NovelRoute] activeWorkspace:', activeWorkspace); await ensureWorkspaceStructure(activeWorkspace); const result = await createNovelProject(activeWorkspace, req.body); console.log('[NovelRoute] created project:', JSON.stringify(result, null, 2)); res.json(result) } catch (error) { console.error('[NovelRoute] POST /projects error:', error); res.status(500).json({ error: String(error) }) } })
   app.delete('/api/novel/projects/:id', async (req, res) => { try { const activeWorkspace = getWorkspace(); const ok = await deleteNovelProject(activeWorkspace, Number(req.params.id)); if (!ok) return res.status(404).json({ error: 'project not found' }); res.json({ ok: true }) } catch (error) { res.status(500).json({ error: String(error) }) } })
   app.get('/api/novel/projects/:id', async (req, res) => { try { const activeWorkspace = getWorkspace(); const project = await getProject(activeWorkspace, Number(req.params.id)); if (!project) return res.status(404).json({ error: 'project not found' }); res.json(project) } catch (error) { res.status(500).json({ error: String(error) }) } })
@@ -283,6 +285,18 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
     }
   }
   const asArray = (value: any) => Array.isArray(value) ? value : []
+  const deepMergeObjects = (base: any, override: any): any => {
+    if (!override || typeof override !== 'object' || Array.isArray(override)) return base
+    const next = { ...(base || {}) }
+    for (const [key, value] of Object.entries(override)) {
+      if (value && typeof value === 'object' && !Array.isArray(value) && base?.[key] && typeof base[key] === 'object' && !Array.isArray(base[key])) {
+        next[key] = deepMergeObjects(base[key], value)
+      } else {
+        next[key] = value
+      }
+    }
+    return next
+  }
   const getStyleLock = (project: any) => {
     const raw = project?.reference_config?.style_lock || {}
     const targetLength = raw.chapter_word_range || raw.target_length || (
@@ -314,6 +328,50 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
     }
   }
   const getStoryState = (project: any) => project?.reference_config?.story_state || {}
+  const getQualityGate = (project: any) => ({
+    enabled: project.reference_config?.quality_gate?.enabled !== false,
+    min_score: Number(project.reference_config?.quality_gate?.min_score ?? project.reference_config?.approval_policy?.low_score_threshold ?? 78),
+    max_critical_issues: Number(project.reference_config?.quality_gate?.max_critical_issues ?? 0),
+    max_high_issues: Number(project.reference_config?.quality_gate?.max_high_issues ?? 1),
+    block_on_safety: project.reference_config?.quality_gate?.block_on_safety !== false,
+    require_revision_before_store: project.reference_config?.quality_gate?.require_revision_before_store !== false,
+  })
+  const getQualityGateDecision = (project: any, review: any, safetyDecision: any = null) => {
+    const gate = getQualityGate(project)
+    const issues = Array.isArray(review?.issues) ? review.issues.map(normalizeIssue) : []
+    const criticalCount = issues.filter(issue => String(issue.severity || '').toLowerCase() === 'critical').length
+    const highCount = issues.filter(issue => String(issue.severity || '').toLowerCase() === 'high').length
+    const score = Number(review?.score || 0)
+    const reasons = [
+      score && score < gate.min_score ? `质检评分 ${score} 低于入库阈值 ${gate.min_score}` : '',
+      gate.require_revision_before_store && review?.needs_revision && !review?.revised ? '自检要求修订，但当前没有可用修订稿' : '',
+      criticalCount > gate.max_critical_issues ? `严重问题 ${criticalCount} 个超过上限 ${gate.max_critical_issues}` : '',
+      highCount > gate.max_high_issues ? `高风险问题 ${highCount} 个超过上限 ${gate.max_high_issues}` : '',
+      gate.block_on_safety && safetyDecision?.blocked ? `仿写安全未通过：${(safetyDecision.reasons || []).join('；')}` : '',
+    ].filter(Boolean)
+    return { gate, passed: !gate.enabled || reasons.length === 0, reasons, score, critical_count: criticalCount, high_count: highCount }
+  }
+  const normalizeSceneProduction = (sceneCards: any[] = [], previous: any[] = [], status = 'pending') => {
+    const byNo = new Map(previous.map((item: any) => [Number(item.scene_no || item.index || 0), item]))
+    return sceneCards.map((card: any, index: number) => {
+      const sceneNo = Number(card.scene_no || index + 1)
+      const prev = byNo.get(sceneNo) || {}
+      return {
+        ...card,
+        scene_no: sceneNo,
+        status: prev.status && prev.status !== 'pending' ? prev.status : status,
+        updated_at: new Date().toISOString(),
+        word_count: Number(prev.word_count || 0),
+        quality_notes: prev.quality_notes || [],
+      }
+    })
+  }
+  const advanceSceneProduction = (scenes: any[] = [], status: string, patch: any = {}) => scenes.map(scene => ({
+    ...scene,
+    ...patch,
+    status,
+    updated_at: new Date().toISOString(),
+  }))
   const getVolumePlan = (outlines: any[]) => outlines
     .filter(outline => outline.outline_type === 'volume')
     .sort((a, b) => Number(a.id || 0) - Number(b.id || 0))
@@ -436,7 +494,7 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
     chapterText.slice(0, 14000),
     '',
     '输出 JSON，字段：',
-    'state_delta: {character_positions, character_relationships, known_secrets, item_ownership, foreshadowing_status, mainline_progress, timeline, unresolved_conflicts, recent_repeated_information}',
+    'state_delta: {timeline, current_time, active_locations, character_positions, character_relationships, relationship_graph, known_secrets, secret_visibility, item_ownership, resource_status, foreshadowing_status, payoff_queue, mainline_progress, volume_progress, unresolved_conflicts, open_questions, recent_repeated_information, next_chapter_priorities}',
     'character_updates: array，每项包含 name,current_state',
     'next_chapter_priorities: array',
     '只返回 JSON。',
@@ -444,6 +502,18 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
   const mergeStoryState = (prev: any, delta: any, chapter: any) => ({
     ...(prev || {}),
     ...(delta || {}),
+    character_positions: { ...((prev || {}).character_positions || {}), ...((delta || {}).character_positions || {}) },
+    character_relationships: { ...((prev || {}).character_relationships || {}), ...((delta || {}).character_relationships || {}) },
+    relationship_graph: { ...((prev || {}).relationship_graph || {}), ...((delta || {}).relationship_graph || {}) },
+    known_secrets: { ...((prev || {}).known_secrets || {}), ...((delta || {}).known_secrets || {}) },
+    secret_visibility: { ...((prev || {}).secret_visibility || {}), ...((delta || {}).secret_visibility || {}) },
+    item_ownership: { ...((prev || {}).item_ownership || {}), ...((delta || {}).item_ownership || {}) },
+    resource_status: { ...((prev || {}).resource_status || {}), ...((delta || {}).resource_status || {}) },
+    foreshadowing_status: { ...((prev || {}).foreshadowing_status || {}), ...((delta || {}).foreshadowing_status || {}) },
+    payoff_queue: asArray((delta || {}).payoff_queue).length ? asArray((delta || {}).payoff_queue) : asArray((prev || {}).payoff_queue),
+    active_locations: asArray((delta || {}).active_locations).length ? asArray((delta || {}).active_locations) : asArray((prev || {}).active_locations),
+    open_questions: asArray((delta || {}).open_questions).length ? asArray((delta || {}).open_questions) : asArray((prev || {}).open_questions),
+    next_chapter_priorities: asArray((delta || {}).next_chapter_priorities).length ? asArray((delta || {}).next_chapter_priorities) : asArray((prev || {}).next_chapter_priorities),
     last_updated_chapter: chapter.chapter_no,
     last_updated_at: new Date().toISOString(),
   })
@@ -725,6 +795,24 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
       acc[key].duration_ms += Number(run.duration_ms || 0)
       return acc
     }, {})
+    const modelStats = runs.reduce((acc: Record<string, any>, run) => {
+      const payload = parseJsonLikePayload(run.output_ref) || {}
+      const candidates = [
+        payload.modelName,
+        payload.model_name,
+        payload.result?.modelName,
+        payload.self_check?.review?.modelName,
+        payload.chapters?.find?.((item: any) => item?.modelName)?.modelName,
+      ].filter(Boolean)
+      const key = String(candidates[0] || 'unknown')
+      acc[key] = acc[key] || { total: 0, success: 0, failed: 0, avg_duration_ms: 0, duration_ms: 0 }
+      acc[key].total += 1
+      acc[key].success += ['success', 'ok', 'completed'].includes(run.status) ? 1 : 0
+      acc[key].failed += ['failed', 'error'].includes(run.status) ? 1 : 0
+      acc[key].duration_ms += Number(run.duration_ms || 0)
+      acc[key].avg_duration_ms = Math.round(acc[key].duration_ms / Math.max(1, acc[key].total))
+      return acc
+    }, {})
     const qualityScores = reviews
       .filter(item => ['prose_quality', 'editor_report', 'book_review'].includes(item.review_type))
       .map(item => {
@@ -749,10 +837,63 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
       fallback_count: fallbackCount,
       safety_block_count: safetyBlocks,
       stage_stats: stageStats,
+      model_stats: modelStats,
+      model_recommendations: Object.entries(modelStats).map(([model, stats]: [string, any]) => ({
+        model,
+        success_rate: stats.total ? Math.round((stats.success / stats.total) * 100) : 0,
+        avg_duration_ms: stats.avg_duration_ms,
+        recommendation: stats.failed > stats.success ? '失败多于成功，建议降级为备用模型或缩短上下文。' : stats.avg_duration_ms > 120000 ? '平均耗时偏长，建议仅用于大纲/最终修订。' : '可继续用于当前阶段。',
+      })),
       throughput: {
         words_per_minute: durationTotal > 0 ? Math.round(generatedWords / (durationTotal / 60000)) : 0,
         chapters_per_hour: durationTotal > 0 ? Number((chapters.filter(chapter => chapter.chapter_text).length / (durationTotal / 3600000)).toFixed(2)) : 0,
       },
+    }
+  }
+  const buildReferenceCoverageReport = async (project: any) => {
+    const categories = [
+      { key: 'reference_profile', label: '作品画像', required: true },
+      { key: 'volume_architecture', label: '分卷结构', required: true },
+      { key: 'chapter_beat_template', label: '章节节奏', required: true },
+      { key: 'character_function_matrix', label: '角色功能', required: true },
+      { key: 'payoff_model', label: '爽点模板', required: true },
+      { key: 'style_profile', label: '文风样本', required: true },
+      { key: 'prose_syntax_profile', label: '句法样本', required: false },
+      { key: 'dialogue_mechanism', label: '对话机制', required: false },
+      { key: 'resource_economy_model', label: '资源经济', required: false },
+    ]
+    const references = asArray(project.reference_config?.references).filter((item: any) => String(item.project_title || '').trim())
+    const rows = await Promise.all(references.map(async (ref: any) => {
+      const title = String(ref.project_title || '').trim()
+      const categoryRows = await Promise.all(categories.map(async category => {
+        const count = (await listKnowledge(category.key, { project_title: title }).catch(() => [])).length
+        return { ...category, count, ready: count > 0 || !category.required }
+      }))
+      const requiredRows = categoryRows.filter(item => item.required)
+      const score = requiredRows.length ? Math.round((requiredRows.filter(item => item.count > 0).length / requiredRows.length) * 100) : 100
+      return {
+        project_title: title,
+        weight: Number(ref.weight || 0.7),
+        dimensions: asArray(ref.dimensions),
+        avoid: asArray(ref.avoid),
+        score,
+        status: score >= 80 ? 'ready' : score >= 50 ? 'partial' : 'insufficient',
+        categories: categoryRows,
+        missing_required: requiredRows.filter(item => item.count <= 0).map(item => item.key),
+      }
+    }))
+    const overallScore = rows.length ? Math.round(rows.reduce((sum, row) => sum + row.score, 0) / rows.length) : 100
+    return {
+      references: rows,
+      overall_score: overallScore,
+      ready: rows.every(row => row.score >= 80),
+      recommendations: [
+        !rows.length ? '当前没有配置参考作品，可走原创生产流程。' : '',
+        rows.some(row => row.missing_required.includes('reference_profile')) ? '先补齐作品画像，否则模型只能拿到零散知识。' : '',
+        rows.some(row => row.missing_required.includes('chapter_beat_template')) ? '补齐章节节奏模板，仿写才会学到节拍而不是桥段。' : '',
+        rows.some(row => row.missing_required.includes('character_function_matrix')) ? '补齐角色功能矩阵，避免照搬角色名或人设。' : '',
+        rows.some(row => row.missing_required.includes('style_profile')) ? '补齐文风样本，原创和仿写都需要稳定表达参数。' : '',
+      ].filter(Boolean),
     }
   }
   const getApprovalPolicy = (project: any) => ({
@@ -1095,7 +1236,7 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
     const styleLock = getStyleLock(project)
     const safetyPolicy = getSafetyPolicy(project)
     const writingBible = project.reference_config?.writing_bible || buildWritingBible(project, worldbuilding, characters, outlines, reviews)
-    return {
+    const basePackage = {
       project: {
         id: project.id,
         title: project.title,
@@ -1165,6 +1306,8 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
         warnings: preflight.warnings,
       },
     }
+    const override = chapter.raw_payload?.context_package_override || null
+    return override ? deepMergeObjects(basePackage, override) : basePackage
   }
   const buildProseReviewPrompt = (project: any, contextPackage: any, chapterText: string) => [
     '任务：对刚生成的小说章节进行章节级自检。',
@@ -1285,7 +1428,7 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
         contextPackage = await buildChapterContextPackage(activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews)
       }
     }
-    await onStage('scene_cards', { status: 'success', count: contextPackage.chapter_target.scene_cards.length })
+    await onStage('scene_cards', { status: 'success', count: contextPackage.chapter_target.scene_cards.length, scene_cards: contextPackage.chapter_target.scene_cards })
     if (approvalRequired(approvalPolicy, 'scene_cards', approvals, { count: contextPackage.chapter_target.scene_cards.length })) {
       await onStage('scene_cards', { status: 'needs_confirmation', count: contextPackage.chapter_target.scene_cards.length })
       throw buildApprovalError('scene_cards', '场景卡等待人工确认', { count: contextPackage.chapter_target.scene_cards.length })
@@ -1316,14 +1459,19 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
       await onStage('draft', { status: 'failed', error: String((draftResult as any).error || (draftResult as any).fallbackReason || '模型未返回正文') })
       throw new Error(String((draftResult as any).error || (draftResult as any).fallbackReason || '模型未返回正文'))
     }
-    await onStage('draft', { status: 'success', word_count: String(chapterText || '').replace(/\s/g, '').length, modelName: (draftResult as any).modelName })
+    await onStage('draft', { status: 'success', word_count: String(chapterText || '').replace(/\s/g, '').length, modelName: (draftResult as any).modelName, scene_status: 'generated' })
     let finalText = String(chapterText || '')
     let finalSceneBreakdown = resultPayload?.scene_breakdown || firstProse?.scene_breakdown || chapter.scene_breakdown || []
     let finalContinuityNotes = resultPayload?.continuity_notes || firstProse?.continuity_notes || chapter.continuity_notes || []
     await onStage('review', { status: 'running' })
     const selfCheck = await runProseSelfReviewAndRevision(activeWorkspace, project, contextPackage, finalText, preferredModelId)
-    await onStage('review', { status: selfCheck?.review?.passed === false ? 'warn' : 'success', score: selfCheck?.review?.score ?? null, issues: selfCheck?.review?.issues || [] })
-    await onStage('revise', { status: selfCheck.revised ? 'success' : 'skipped', revised: Boolean(selfCheck.revised) })
+    await onStage('review', { status: selfCheck?.review?.passed === false ? 'warn' : 'success', score: selfCheck?.review?.score ?? null, issues: selfCheck?.review?.issues || [], scene_status: 'reviewed' })
+    await onStage('revise', { status: selfCheck.revised ? 'success' : 'skipped', revised: Boolean(selfCheck.revised), scene_status: selfCheck.revised ? 'revised' : '' })
+    const preStoreQualityDecision = getQualityGateDecision(project, { ...(selfCheck?.review || {}), revised: Boolean(selfCheck.revised) })
+    if (!preStoreQualityDecision.passed && !approvals?.quality_gate?.approved) {
+      await onStage('review', { status: 'needs_confirmation', score: selfCheck?.review?.score ?? null, quality_gate: preStoreQualityDecision })
+      throw buildApprovalError('quality_gate', '章节质量门禁未通过，正文未入库', preStoreQualityDecision)
+    }
     if (approvalRequired(approvalPolicy, 'low_score', approvals, { score: selfCheck?.review?.score ?? null, issues: selfCheck?.review?.issues || [] })) {
       await onStage('review', { status: 'needs_confirmation', score: selfCheck?.review?.score ?? null, issues: selfCheck?.review?.issues || [] })
       throw buildApprovalError('low_score', '章节质检低于阈值，等待人工确认', { score: selfCheck?.review?.score ?? null, issues: selfCheck?.review?.issues || [] })
@@ -1342,8 +1490,13 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
     const safetyExplanation = explainReferenceSafety(referenceReport, safetyDecision)
     const migrationAudit = buildMigrationAudit(project, referenceReport, safetyExplanation)
     await onStage('safety', { status: safetyDecision.blocked ? 'failed' : 'success', score: safetyDecision.score, copy_hit_count: safetyDecision.copy_hit_count, risk_level: referenceReport?.quality_assessment?.risk_level })
+    const finalQualityDecision = getQualityGateDecision(project, { ...(selfCheck?.review || {}), revised: Boolean(selfCheck.revised) }, safetyDecision)
     if (safetyDecision.blocked) {
       throw Object.assign(new Error('仿写安全阈值未通过'), { code: 'REFERENCE_SAFETY_BLOCKED', referenceReport, safetyDecision, safetyExplanation, migrationAudit })
+    }
+    if (!finalQualityDecision.passed && !approvals?.quality_gate?.approved) {
+      await onStage('safety', { status: 'needs_confirmation', score: safetyDecision.score, quality_gate: finalQualityDecision })
+      throw buildApprovalError('quality_gate', '章节质量门禁未通过，正文未入库', finalQualityDecision)
     }
     if (approvalRequired(approvalPolicy, 'safety', approvals, { score: safetyDecision.score, copy_hit_count: safetyDecision.copy_hit_count, risk_level: referenceReport?.quality_assessment?.risk_level })) {
       await onStage('safety', { status: 'needs_confirmation', score: safetyDecision.score, copy_hit_count: safetyDecision.copy_hit_count, risk_level: referenceReport?.quality_assessment?.risk_level })
@@ -1356,7 +1509,7 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
       continuity_notes: finalContinuityNotes,
       status: 'draft',
     }, { versionSource: selfCheck?.revised ? 'repair' : 'agent_execute' })
-    await onStage('store', { status: 'success', word_count: String(finalText || '').replace(/\s/g, '').length })
+    await onStage('store', { status: 'success', word_count: String(finalText || '').replace(/\s/g, '').length, scene_status: 'accepted' })
     await onStage('story_state', { status: 'running' })
     const storyStateUpdate = await updateStoryStateMachine(activeWorkspace, project, chapter, contextPackage, finalText, preferredModelId).catch(error => ({ error: String(error) }))
     await onStage('story_state', { status: (storyStateUpdate as any)?.error ? 'failed' : 'success', error: (storyStateUpdate as any)?.error || '' })
@@ -1431,6 +1584,50 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
           .filter((item: any) => !item.ok)
           .map((item: any) => item.fix || `${item.label}不足`),
       })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.get('/api/novel/chapters/:chapterId/context-package', async (req, res) => {
+    try {
+      const activeWorkspace = getWorkspace()
+      const chapterId = Number(req.params.chapterId)
+      const projectId = Number(req.query.project_id || 0)
+      const project = await getProject(activeWorkspace, projectId)
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const [chapters, worldbuilding, characters, outlines, reviews] = await Promise.all([
+        listNovelChapters(activeWorkspace, projectId),
+        listNovelWorldbuilding(activeWorkspace, projectId),
+        listNovelCharacters(activeWorkspace, projectId),
+        listNovelOutlines(activeWorkspace, projectId),
+        listNovelReviews(activeWorkspace, projectId),
+      ])
+      const chapter = chapters.find(item => item.id === chapterId)
+      if (!chapter) return res.status(404).json({ error: 'chapter not found' })
+      const contextPackage = await buildChapterContextPackage(activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews)
+      res.json({ ok: true, context_package: contextPackage, override: chapter.raw_payload?.context_package_override || null })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.put('/api/novel/chapters/:chapterId/context-package', async (req, res) => {
+    try {
+      const activeWorkspace = getWorkspace()
+      const chapterId = Number(req.params.chapterId)
+      const projectId = Number(req.body.project_id || req.query.project_id || 0)
+      const chapter = (await listNovelChapters(activeWorkspace, projectId)).find(item => item.id === chapterId)
+      if (!chapter) return res.status(404).json({ error: 'chapter not found' })
+      const override = req.body?.override || req.body?.context_package_override || {}
+      const updated = await updateNovelChapter(activeWorkspace, chapterId, {
+        raw_payload: {
+          ...(chapter.raw_payload || {}),
+          context_package_override: override,
+          context_package_override_updated_at: new Date().toISOString(),
+        },
+      } as any, { createVersion: false })
+      res.json({ ok: true, chapter: updated, override })
     } catch (error) {
       res.status(500).json({ error: String(error) })
     }
@@ -1583,6 +1780,35 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
     }
   })
 
+  app.get('/api/novel/projects/:id/quality-gate', async (req, res) => {
+    try {
+      const activeWorkspace = getWorkspace()
+      const project = await getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      res.json({ ok: true, gate: getQualityGate(project) })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.put('/api/novel/projects/:id/quality-gate', async (req, res) => {
+    try {
+      const activeWorkspace = getWorkspace()
+      const project = await getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const gate = { ...getQualityGate(project), ...(req.body?.gate || req.body || {}) }
+      const updated = await updateNovelProject(activeWorkspace, project.id, {
+        reference_config: {
+          ...(project.reference_config || {}),
+          quality_gate: gate,
+        },
+      } as any)
+      res.json({ ok: true, gate, project: updated })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
   app.put('/api/novel/projects/:id/approval-policy', async (req, res) => {
     try {
       const activeWorkspace = getWorkspace()
@@ -1661,6 +1887,17 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
         entries.push({ category, entries: categoryEntries.slice(0, 20) })
       }
       res.json({ ok: true, reference_titles: referenceTitles, assets: entries })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.get('/api/novel/projects/:id/reference-coverage', async (req, res) => {
+    try {
+      const activeWorkspace = getWorkspace()
+      const project = await getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      res.json({ ok: true, coverage: await buildReferenceCoverageReport(project) })
     } catch (error) {
       res.status(500).json({ error: String(error) })
     }
@@ -2052,7 +2289,14 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
       if (!item) return
       const stages = updateChapterStages(item.stages || [], stage, patch)
       const summary = summarizeChapterStages(stages)
-      chapters[index] = { ...item, stages, current_step: summary.current_step, current_label: summary.current_label }
+      let scenes = Array.isArray(item.scenes) ? item.scenes : []
+      if (stage === 'scene_cards' && Array.isArray(patch.scene_cards)) {
+        scenes = normalizeSceneProduction(patch.scene_cards, scenes, 'planned')
+      }
+      if (patch.scene_status) {
+        scenes = advanceSceneProduction(scenes, patch.scene_status, stage === 'draft' ? { generated_at: new Date().toISOString() } : {})
+      }
+      chapters[index] = { ...item, scenes, stages, current_step: summary.current_step, current_label: summary.current_label }
       payload = { ...payload, chapters, current_index: index, phase: `第${item.chapter_no}章：${summary.current_label}` }
       await updateNovelRun(activeWorkspace, run.id, { status: 'running', output_ref: JSON.stringify(payload), duration_ms: Date.now() - startedAt })
     }
@@ -2111,6 +2355,7 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
           status: 'success',
           score: chapterResult.score,
           revised: chapterResult.revised,
+          scenes: advanceSceneProduction(chapters[index]?.scenes || [], 'accepted'),
           stages: updateChapterStages(chapters[index]?.stages || [], 'story_state', { status: (chapterResult.story_state_update as any)?.error ? 'failed' : 'success' }),
           completed_at: new Date().toISOString(),
         }
@@ -2196,6 +2441,7 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
           chapter_no: ch.chapter_no,
           title: ch.title,
           status: ch.chapter_text ? 'written' : 'pending',
+          scenes: normalizeSceneProduction(asArray(ch.scene_breakdown).length ? ch.scene_breakdown : asArray(ch.scene_list), [], ch.chapter_text ? 'accepted' : 'pending'),
           stages: buildChapterGroupStages(),
         })),
         current_index: 0,
@@ -2267,7 +2513,7 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
         next_run_at: '',
         error: '',
         error_code: '',
-        stages: updateChapterStages(item.stages || [], stage === 'low_score' ? 'review' : stage === 'draft' ? 'draft' : stage, { status: 'success', approved: true }),
+        stages: updateChapterStages(item.stages || [], stage === 'low_score' || stage === 'quality_gate' ? 'review' : stage === 'draft' ? 'draft' : stage, { status: 'success', approved: true }),
       }
       const updated = await updateNovelRun(activeWorkspace, run.id, {
         status: 'ready',
@@ -2300,6 +2546,31 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
         error_message: '',
       })
       res.json({ ok: true, run: updated, group: parseJsonLikePayload(updated?.output_ref) })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.get('/api/novel/projects/:id/chapter-groups/:runId/scenes', async (req, res) => {
+    try {
+      const activeWorkspace = getWorkspace()
+      const project = await getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const run = (await listNovelRuns(activeWorkspace, project.id)).find(item => item.id === Number(req.params.runId))
+      if (!run || run.run_type !== 'chapter_group_generation') return res.status(404).json({ error: 'chapter group run not found' })
+      const payload = parseJsonLikePayload(run.output_ref) || {}
+      const chapters = Array.isArray(payload.chapters) ? payload.chapters : []
+      res.json({
+        ok: true,
+        run_id: run.id,
+        scenes: chapters.map((chapter: any) => ({
+          chapter_id: chapter.id,
+          chapter_no: chapter.chapter_no,
+          title: chapter.title,
+          status: chapter.status,
+          scenes: Array.isArray(chapter.scenes) ? chapter.scenes : [],
+        })),
+      })
     } catch (error) {
       res.status(500).json({ error: String(error) })
     }
@@ -2911,7 +3182,8 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
       const runs = await listNovelRuns(activeWorkspace, projectId)
       const queued = runs.filter(run => ['queued', 'ready', 'paused', 'running'].includes(run.status) && ['chapter_group_generation', 'chapter_generation_pipeline', 'quality_benchmark', 'book_review'].includes(run.run_type))
       const persistentWorker = project?.reference_config?.run_queue_worker || null
-      const worker = runQueueWorkers.get(projectId) || persistentWorker || { status: 'idle' }
+      const memoryWorker = runQueueWorkers.get(projectId)
+      const worker = memoryWorker || (persistentWorker?.status === 'running' ? { ...persistentWorker, status: 'stale', phase: '后端进程已重启，可点击恢复 worker' } : persistentWorker) || { status: 'idle' }
       res.json({
         ok: true,
         worker,
@@ -2930,7 +3202,44 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
     const activeWorkspace = getWorkspace()
     const projectId = Number(req.params.id)
     const project = await getProject(activeWorkspace, projectId)
-    res.json({ ok: true, worker: runQueueWorkers.get(projectId) || project?.reference_config?.run_queue_worker || { status: 'idle' } })
+    const persistentWorker = project?.reference_config?.run_queue_worker || null
+    const worker = runQueueWorkers.get(projectId) || (persistentWorker?.status === 'running' ? { ...persistentWorker, status: 'stale', phase: '后端进程已重启，可点击恢复 worker' } : persistentWorker) || { status: 'idle' }
+    res.json({ ok: true, worker })
+  })
+  app.post('/api/novel/projects/:id/run-queue/recover', async (req, res) => {
+    try {
+      const activeWorkspace = getWorkspace()
+      const project = await getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const runs = await listNovelRuns(activeWorkspace, project.id)
+      let recoveredRuns = 0
+      for (const run of runs.filter(item => item.run_type === 'chapter_group_generation' && item.status === 'running')) {
+        const payload = parseJsonLikePayload(run.output_ref) || {}
+        await updateNovelRun(activeWorkspace, run.id, {
+          status: 'ready',
+          output_ref: JSON.stringify({ ...payload, lock: null, phase: '手动恢复：运行中任务已转回待执行', recovered_at: new Date().toISOString() }),
+        })
+        recoveredRuns += 1
+      }
+      const worker = {
+        ...(project.reference_config?.run_queue_worker || {}),
+        status: 'idle',
+        stop_requested: false,
+        phase: `已恢复 ${recoveredRuns} 个运行中任务`,
+        recovered_runs: recoveredRuns,
+        updated_at: new Date().toISOString(),
+      }
+      const updated = await updateNovelProject(activeWorkspace, project.id, {
+        reference_config: {
+          ...(project.reference_config || {}),
+          run_queue_worker: worker,
+        },
+      } as any)
+      runQueueWorkers.set(project.id, worker)
+      res.json({ ok: true, worker, project: updated, recovered_runs: recoveredRuns })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
   })
   app.post('/api/novel/projects/:id/run-queue/start-worker', async (req, res) => {
     try {
@@ -2977,6 +3286,12 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
               worker.status = 'paused_budget'
               worker.phase = `预算熔断：${budgetDecision.reasons.join('；')}`
               worker.updated_at = new Date().toISOString()
+              await updateNovelProject(activeWorkspace, project.id, {
+                reference_config: {
+                  ...(budgetProject.reference_config || {}),
+                  run_queue_worker: { ...worker },
+                },
+              } as any).catch(() => null)
               break
             }
             const isRunDue = (item: any) => {
