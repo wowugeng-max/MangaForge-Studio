@@ -272,6 +272,7 @@ export function WorkspaceCenter({
   generatingSceneCards,
   diagnosticsLoading,
   pipelineLoading,
+  editorReportLoading,
   onRunPlan,
   onCreateOutline,
   onCreateChapter,
@@ -279,6 +280,7 @@ export function WorkspaceCenter({
   onGenerateSceneCards,
   onOpenGenerationDiagnostics,
   onStartChapterPipeline,
+  onCreateEditorReport,
   onEditActiveChapter,
   onChapterTextChange,
 }: {
@@ -301,6 +303,7 @@ export function WorkspaceCenter({
   generatingSceneCards: boolean
   diagnosticsLoading: boolean
   pipelineLoading: boolean
+  editorReportLoading: boolean
   onRunPlan: () => void
   onCreateOutline: () => void
   onCreateChapter: () => void
@@ -308,6 +311,7 @@ export function WorkspaceCenter({
   onGenerateSceneCards: () => void
   onOpenGenerationDiagnostics: () => void
   onStartChapterPipeline: () => void
+  onCreateEditorReport: () => void
   onEditActiveChapter: () => void
   onChapterTextChange: (text: string) => void
 }) {
@@ -364,6 +368,9 @@ export function WorkspaceCenter({
             <EditorDisplayControls prefs={editorDisplayPrefs} onChange={setEditorDisplayPrefs} />
             <Tooltip title="生成前诊断">
               <Button size="small" loading={diagnosticsLoading} onClick={onOpenGenerationDiagnostics}>诊断</Button>
+            </Tooltip>
+            <Tooltip title="生成编辑部六维审稿报告">
+              <Button size="small" loading={editorReportLoading} onClick={onCreateEditorReport}>审稿</Button>
             </Tooltip>
             <Tooltip title="创建可恢复流水线，并停在场景卡确认阶段">
               <Button size="small" loading={pipelineLoading} onClick={onStartChapterPipeline}>流水线</Button>

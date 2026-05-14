@@ -53,6 +53,9 @@ export default function NovelProjectWorkspace() {
   const [generatingSceneCards, setGeneratingSceneCards] = useState(false)
   const [diagnosticsLoading, setDiagnosticsLoading] = useState(false)
   const [pipelineLoading, setPipelineLoading] = useState(false)
+  const [incubatingOriginal, setIncubatingOriginal] = useState(false)
+  const [dashboardLoading, setDashboardLoading] = useState(false)
+  const [editorReportLoading, setEditorReportLoading] = useState(false)
 
   // ── 大纲生成控制面板 ──
   const [outlinePanelOpen, setOutlinePanelOpen] = useState(false)
@@ -247,6 +250,13 @@ export default function NovelProjectWorkspace() {
   const proseQualityReports = useMemo(() => (
     reviews
       .filter((item: any) => item.review_type === 'prose_quality')
+      .slice()
+      .sort((a: any, b: any) => String(b.created_at || '').localeCompare(String(a.created_at || '')))
+  ), [reviews])
+
+  const editorReports = useMemo(() => (
+    reviews
+      .filter((item: any) => item.review_type === 'editor_report')
       .slice()
       .sort((a: any, b: any) => String(b.created_at || '').localeCompare(String(a.created_at || '')))
   ), [reviews])
@@ -649,6 +659,127 @@ export default function NovelProjectWorkspace() {
     }
   }
 
+  const openProductionDashboard = async () => {
+    if (!selectedProject) return
+    setDashboardLoading(true)
+    try {
+      const [dashboardRes, assetsRes, strategyRes] = await Promise.all([
+        apiClient.get(`/novel/projects/${projectId}/production-dashboard`),
+        apiClient.get(`/novel/projects/${projectId}/writing-assets`).catch(() => ({ data: null })),
+        apiClient.get(`/novel/projects/${projectId}/model-strategy`, { params: { model_id: selectedModelId } }).catch(() => ({ data: null })),
+      ])
+      const dashboard = dashboardRes.data?.dashboard || {}
+      const assets = assetsRes.data?.assets || []
+      const strategy = strategyRes.data?.strategy || {}
+      Modal.info({
+        title: '生产看板',
+        width: 900,
+        content: (
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Space wrap>
+              <Tag color="blue" bordered={false}>章节 {dashboard.chapter_total || 0}</Tag>
+              <Tag color="green" bordered={false}>已写 {dashboard.written_chapters || 0}</Tag>
+              <Tag bordered={false}>字数 {Number(dashboard.word_count || 0).toLocaleString()}</Tag>
+              <Tag color={dashboard.average_quality_score >= 78 ? 'green' : 'gold'} bordered={false}>均分 {dashboard.average_quality_score ?? '-'}</Tag>
+              {dashboard.story_state_updated_to && <Tag color="purple" bordered={false}>状态至第{dashboard.story_state_updated_to}章</Tag>}
+            </Space>
+            {Array.isArray(dashboard.recommendations) && dashboard.recommendations.length > 0 && (
+              <Card size="small" title="生产建议">
+                <List size="small" dataSource={dashboard.recommendations} renderItem={(item: string) => <List.Item>{item}</List.Item>} />
+              </Card>
+            )}
+            <Card size="small" title="写作资产库覆盖">
+              <Space wrap>
+                {assets.map((group: any) => (
+                  <Tag key={group.category} color={Array.isArray(group.entries) && group.entries.length ? 'green' : 'default'} bordered={false}>
+                    {group.category} {Array.isArray(group.entries) ? group.entries.length : 0}
+                  </Tag>
+                ))}
+              </Space>
+            </Card>
+            <Card size="small" title="模型调度策略">
+              <Paragraph style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }} ellipsis={{ rows: 8, expandable: true }}>
+                {JSON.stringify(strategy, null, 2)}
+              </Paragraph>
+            </Card>
+          </Space>
+        ),
+      })
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '生产看板加载失败')
+    } finally {
+      setDashboardLoading(false)
+    }
+  }
+
+  const runOriginalIncubator = async () => {
+    if (!selectedProject) return
+    if (!selectedModelId) return message.warning('请先选择模型')
+    Modal.confirm({
+      title: '原创项目孵化',
+      width: 640,
+      content: '系统会基于当前项目标题、题材、简介和目标读者，原创生成世界观、角色、分卷、前 30 章章纲、写作圣经和商业定位。已有相同章号的章节不会覆盖。',
+      okText: '开始孵化',
+      onOk: async () => {
+        setIncubatingOriginal(true)
+        try {
+          await apiClient.post(`/novel/projects/${projectId}/incubate-original`, {
+            model_id: selectedModelId,
+            chapter_count: 30,
+            auto_store: true,
+          })
+          await loadProjectModules()
+          setRightPanelOpen(true)
+          setRightPanelTab('writingBible')
+          message.success('原创孵化完成')
+        } catch (error: any) {
+          message.error(error?.response?.data?.error || error?.message || '原创孵化失败')
+        } finally {
+          setIncubatingOriginal(false)
+        }
+      },
+    })
+  }
+
+  const startChapterGroupGeneration = async () => {
+    if (!selectedProject) return
+    if (!selectedModelId) return message.warning('请先选择模型')
+    try {
+      await apiClient.post(`/novel/projects/${projectId}/chapter-groups/start`, {
+        model_id: selectedModelId,
+        start_chapter: activeChapter?.chapter_no || undefined,
+        count: 10,
+        require_scene_confirmation: true,
+      })
+      await loadProjectModules()
+      setTaskCenterOpen(true)
+      message.success('章节群任务已创建，可在任务中心查看并逐章推进')
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '章节群任务创建失败')
+    }
+  }
+
+  const createEditorReport = async () => {
+    if (!activeChapter) return message.warning('请先选择章节')
+    if (!selectedModelId) return message.warning('请先选择模型')
+    if (!await flushPendingSave()) return
+    setEditorReportLoading(true)
+    try {
+      await apiClient.post(`/novel/chapters/${activeChapter.id}/editor-report`, {
+        project_id: projectId,
+        model_id: selectedModelId,
+      })
+      await loadProjectModules()
+      setRightPanelOpen(true)
+      setRightPanelTab('editorReports')
+      message.success('编辑报告已生成')
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '编辑报告生成失败')
+    } finally {
+      setEditorReportLoading(false)
+    }
+  }
+
   const startChapterPipeline = async () => {
     if (!activeChapter) return message.warning('请先选择章节')
     if (!selectedModelId) return message.warning('请先选择写作模型')
@@ -973,6 +1104,21 @@ export default function NovelProjectWorkspace() {
             参考作品
           </Button>
         </Tooltip>
+        <Tooltip title="无参考作品时，原创孵化世界观、角色、分卷、章节和写作圣经">
+          <Button type="text" size="small" loading={incubatingOriginal} onClick={runOriginalIncubator}>
+            原创孵化
+          </Button>
+        </Tooltip>
+        <Tooltip title="查看长篇生产进度、资产库覆盖和模型调度策略">
+          <Button type="text" size="small" loading={dashboardLoading} onClick={openProductionDashboard}>
+            生产看板
+          </Button>
+        </Tooltip>
+        <Tooltip title="创建 10 章章节群生产任务">
+          <Button type="text" size="small" onClick={startChapterGroupGeneration}>
+            章节群
+          </Button>
+        </Tooltip>
         <Tooltip title="查看参考项目、画像完整度、正文缓存和参考报告">
           <Button type="text" size="small" icon={<BookOutlined />} onClick={() => setReferenceEngineeringOpen(true)}>
             参考工程
@@ -1035,6 +1181,7 @@ export default function NovelProjectWorkspace() {
           generatingSceneCards={generatingSceneCards}
           diagnosticsLoading={diagnosticsLoading}
           pipelineLoading={pipelineLoading}
+          editorReportLoading={editorReportLoading}
           onRunPlan={runPlan}
           onCreateOutline={() => openEditor('outline')}
           onCreateChapter={() => openEditor('chapter')}
@@ -1042,6 +1189,7 @@ export default function NovelProjectWorkspace() {
           onGenerateSceneCards={() => generateSceneCardsForActiveChapter()}
           onOpenGenerationDiagnostics={openGenerationDiagnostics}
           onStartChapterPipeline={startChapterPipeline}
+          onCreateEditorReport={createEditorReport}
           onEditActiveChapter={() => activeChapter && openEditor('chapter', activeChapter)}
           onChapterTextChange={(next) => {
             const chapterId = activeChapterId
@@ -1059,6 +1207,7 @@ export default function NovelProjectWorkspace() {
           selectedProject={selectedProject}
           referenceReports={referenceReports}
           proseQualityReports={proseQualityReports}
+          editorReports={editorReports}
           activeChapterId={activeChapterId}
           chapterVersions={chapterVersions}
           chapterVersionsLoading={chapterVersionsLoading}

@@ -37,6 +37,8 @@ function runTypeLabel(type?: string) {
     market_review: '市场审计',
     scene_cards: '场景卡',
     chapter_generation_pipeline: '章节流水线',
+    chapter_group_generation: '章节群生成',
+    original_incubation: '原创孵化',
   }
   return map[String(type || '')] || type || '任务'
 }

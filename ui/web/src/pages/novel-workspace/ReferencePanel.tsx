@@ -51,6 +51,7 @@ export function ReferencePanel({
   selectedProject,
   referenceReports,
   proseQualityReports,
+  editorReports,
   activeChapterId,
   chapterVersions,
   chapterVersionsLoading,
@@ -70,6 +71,7 @@ export function ReferencePanel({
   selectedProject: any | null
   referenceReports: any[]
   proseQualityReports: any[]
+  editorReports: any[]
   activeChapterId: number | null
   chapterVersions: any[]
   chapterVersionsLoading: boolean
@@ -247,9 +249,13 @@ export function ReferencePanel({
                 const entries = Array.isArray(payload.injected_entries) ? payload.injected_entries : []
                 const hits = Array.isArray(payload.copy_guard?.hits) ? payload.copy_guard.hits : []
                 const quality = payload.quality_assessment || null
+                const migrationAudit = payload.migration_audit || null
                 const qualityScore = Number(quality?.overall_score || 0)
                 const riskLabel = quality?.risk_level === 'low' ? '低风险' : quality?.risk_level === 'medium' ? '中风险' : quality?.risk_level === 'high' ? '高风险' : ''
                 const riskColor = quality?.risk_level === 'low' ? 'green' : quality?.risk_level === 'medium' ? 'gold' : quality?.risk_level === 'high' ? 'red' : 'default'
+                const learnedCount = migrationAudit
+                  ? ['rhythm_structure', 'style_density', 'payoff_emotion'].reduce((sum, key) => sum + (Array.isArray(migrationAudit.learned?.[key]) ? migrationAudit.learned[key].length : 0), 0)
+                  : 0
                 return (
                   <Card key={report.id} size="small" style={{ margin: 8, borderRadius: 8 }}
                     title={<Space wrap><Tag color={report.status === 'warn' ? 'gold' : 'green'} bordered={false}>{report.status === 'warn' ? '需检查' : '正常'}</Tag><Text strong>{payload.task_type || '生成任务'}</Text></Space>}>
@@ -279,9 +285,49 @@ export function ReferencePanel({
                           质量建议：{quality.recommendations.join('；')}
                         </Paragraph>
                       )}
+                      {migrationAudit && (
+                        <Paragraph style={{ marginBottom: 0, fontSize: 12 }} ellipsis={{ rows: 3, expandable: true, symbol: '展开' }}>
+                          迁移审计：学习节奏/文风/爽点资产 {learnedCount} 条；规避 {Array.isArray(migrationAudit.avoided) ? migrationAudit.avoided.length : 0} 项；建议：{Array.isArray(migrationAudit.risk?.suggestions) ? migrationAudit.risk.suggestions.join('；') : '-'}
+                        </Paragraph>
+                      )}
                       {entries.length > 0 && (
                         <Paragraph style={{ marginBottom: 0, fontSize: 12 }} ellipsis={{ rows: 3, expandable: true, symbol: '展开' }}>
                           注入知识：{entries.map((entry: any) => `${entry.source_project || '参考'} / ${entry.category || '未分类'} / ${entry.title || entry.id}`).join('；')}
+                        </Paragraph>
+                      )}
+                    </Space>
+                  </Card>
+                )
+              }),
+            },
+            {
+              key: 'editorReports', label: '编辑报告',
+              children: editorReports.length === 0 ? (
+                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无编辑报告" style={{ padding: '16px 8px' }} />
+              ) : editorReports.slice(0, 12).map((report) => {
+                const payload = parseReviewPayload(report)
+                const body = payload.report || {}
+                const dimensions = ['structure', 'continuity', 'pacing', 'style', 'originality', 'commercial']
+                return (
+                  <Card key={report.id} size="small" style={{ margin: 8, borderRadius: 8 }}
+                    title={<Space wrap><Tag color={report.status === 'ok' ? 'green' : 'gold'} bordered={false}>{body.overall_score ?? '-'}分</Tag><Text strong>编辑报告</Text></Space>}>
+                    <Space direction="vertical" size={7} style={{ width: '100%' }}>
+                      <Text type="secondary" style={{ fontSize: 11 }}>{report.created_at}</Text>
+                      <Space wrap size={[4, 2]}>
+                        {dimensions.map(key => body[key] && (
+                          <Tag key={key} color={Number(body[key]?.score || 0) >= 78 ? 'green' : 'gold'} bordered={false}>
+                            {key} {body[key]?.score ?? '-'}
+                          </Tag>
+                        ))}
+                      </Space>
+                      {Array.isArray(body.must_fix) && body.must_fix.length > 0 && (
+                        <Paragraph style={{ marginBottom: 0, fontSize: 12 }} ellipsis={{ rows: 3, expandable: true, symbol: '展开' }}>
+                          必修：{body.must_fix.join('；')}
+                        </Paragraph>
+                      )}
+                      {body.one_click_revision_prompt && (
+                        <Paragraph style={{ marginBottom: 0, fontSize: 12 }} ellipsis={{ rows: 3, expandable: true, symbol: '展开' }}>
+                          修订提示：{body.one_click_revision_prompt}
                         </Paragraph>
                       )}
                     </Space>
