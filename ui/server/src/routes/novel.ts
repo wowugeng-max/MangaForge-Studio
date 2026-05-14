@@ -591,6 +591,21 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
     { key: 'story_state', label: '记忆状态机更新', status: 'pending' },
   ]
   const updatePipelineStep = (steps: any[], key: string, patch: any) => steps.map(step => step.key === key ? { ...step, ...patch, updated_at: new Date().toISOString() } : step)
+  const buildChapterGroupStages = () => buildPipelineSteps().map(step => ({ ...step, status: 'pending' }))
+  const updateChapterStages = (stages: any[] = [], key: string, patch: any = {}) => {
+    const base = stages.length ? stages : buildChapterGroupStages()
+    return updatePipelineStep(base, key, patch)
+  }
+  const summarizeChapterStages = (stages: any[] = []) => {
+    const items = stages.length ? stages : buildChapterGroupStages()
+    const failed = items.find(step => step.status === 'failed')
+    if (failed) return { status: 'failed', current_step: failed.key, current_label: failed.label }
+    const running = items.find(step => ['running', 'ready', 'needs_confirmation'].includes(step.status))
+    if (running) return { status: 'running', current_step: running.key, current_label: running.label }
+    const success = items.filter(step => step.status === 'success').length
+    return { status: success === items.length ? 'success' : 'pending', current_step: items[success]?.key || 'done', current_label: items[success]?.label || '已完成' }
+  }
+  const runQueueWorkers = new Map<number, any>()
   const getModelStrategy = (project: any, preferredModelId?: number) => ({
     preferred_model_id: preferredModelId || null,
     stages: {
@@ -738,14 +753,74 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
       similarity_score: simpleTextSimilarity(before, after),
     }
   }
+  const extractStructureTokens = (value: any) => {
+    const text = typeof value === 'string' ? value : JSON.stringify(value || {})
+    return Array.from(new Set(String(text || '')
+      .replace(/[^\p{L}\p{N}_\u4e00-\u9fa5]+/gu, ' ')
+      .split(/\s+/)
+      .map(item => item.trim())
+      .filter(item => item.length >= 2)
+      .slice(0, 120)))
+  }
+  const overlapScore = (left: string[], right: string[]) => {
+    if (!left.length || !right.length) return 0
+    const rightSet = new Set(right)
+    const hits = left.filter(item => rightSet.has(item))
+    return clampScore((hits.length / Math.min(left.length, right.length)) * 100)
+  }
+  const buildStructuralSimilarityReport = (chapter: any, referenceReport: any) => {
+    const entries = asArray(referenceReport?.injected_entries)
+    const sceneTokens = extractStructureTokens(chapter.scene_breakdown || chapter.scene_list || [])
+    const chapterTokens = extractStructureTokens({
+      title: chapter.title,
+      goal: chapter.chapter_goal,
+      summary: chapter.chapter_summary,
+      conflict: chapter.conflict,
+      ending_hook: chapter.ending_hook,
+    })
+    const referenceTokens = extractStructureTokens(entries.map((entry: any) => ({
+      title: entry.title,
+      category: entry.category,
+      reason: entry.match_reason,
+      source: entry.source_project,
+    })))
+    const categoryCounts = entries.reduce((acc: Record<string, number>, entry: any) => {
+      const key = String(entry.category || 'unknown')
+      acc[key] = (acc[key] || 0) + 1
+      return acc
+    }, {})
+    const sceneOrderRisk = overlapScore(sceneTokens, referenceTokens)
+    const roleFunctionRisk = clampScore(overlapScore(chapterTokens, referenceTokens) * 0.7 + Number(categoryCounts.character_function_matrix || 0) * 4)
+    const payoffStructureRisk = clampScore(Number(categoryCounts.payoff_model || 0) * 8 + Number(categoryCounts.chapter_beat_template || 0) * 5)
+    const entityOverlapRisk = clampScore(Number(referenceReport?.copy_guard?.hits?.length || 0) * 18)
+    const overall = clampScore((sceneOrderRisk * 0.28) + (roleFunctionRisk * 0.24) + (payoffStructureRisk * 0.28) + (entityOverlapRisk * 0.2))
+    return {
+      overall_structural_risk: overall,
+      scene_order_risk: sceneOrderRisk,
+      role_function_risk: roleFunctionRisk,
+      payoff_structure_risk: payoffStructureRisk,
+      entity_overlap_risk: entityOverlapRisk,
+      category_counts: categoryCounts,
+      inspected_scene_token_count: sceneTokens.length,
+      risk_level: overall >= 70 ? 'high' : overall >= 45 ? 'medium' : 'low',
+      suggestions: [
+        sceneOrderRisk > 45 ? '重排场景目标和信息揭示顺序，不沿用参考作品节拍顺序。' : '',
+        roleFunctionRisk > 45 ? '替换角色功能分工和行为选择，让冲突来自本项目独有动机。' : '',
+        payoffStructureRisk > 45 ? '保留爽点密度，但更换爽点触发条件、代价和回收方式。' : '',
+        entityOverlapRisk > 0 ? '替换命中的参考专名、证据词和高辨识度表达。' : '',
+      ].filter(Boolean),
+    }
+  }
   const buildOriginalIncubatorPrompt = (project: any, body: any) => [
     '任务：进行原创小说项目孵化，不依赖任何指定参考作品。请产出可直接落库的商业网文创作蓝图。',
     `项目标题：${project.title}`,
     `题材：${body.genre || project.genre || '未指定'}`,
     `目标平台/读者：${body.target_audience || project.target_audience || '通用网文读者'}`,
     `创意/要求：${body.idea || project.synopsis || ''}`,
+    `候选方案数：${Math.max(1, Math.min(5, Number(body.variant_count || 1)))}`,
     '',
     '请输出 JSON，字段：',
+    'directions: array，当候选方案数大于 1 时输出多个方向，每项包含 direction_id,title,commercial_positioning,core_hook,differentiators,risks,first_10_chapters,score,selection_reason',
     'worldbuilding: {world_summary,rules,known_unknowns}',
     'characters: array，每项 name, role_type, archetype, motivation, goal, conflict, growth_arc, current_state',
     'outlines: array，至少包含 master 和 1-3 个 volume，每项 outline_type,title,summary,conflict_points,turning_points,hook,target_length',
@@ -755,14 +830,20 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
     '',
     '要求：主角目标清晰，金手指/能力有代价，前 10 章追读钩子密集，分卷目标明确，避免空泛设定。',
   ].join('\n')
-  const normalizeIncubatorPayload = (payload: any, chapterCount: number) => ({
-    worldbuilding: payload?.worldbuilding || {},
-    characters: Array.isArray(payload?.characters) ? payload.characters : [],
-    outlines: Array.isArray(payload?.outlines) ? payload.outlines : [],
-    chapters: (Array.isArray(payload?.chapters) ? payload.chapters : []).slice(0, chapterCount),
-    writing_bible: payload?.writing_bible || {},
-    commercial_positioning: payload?.commercial_positioning || {},
-  })
+  const normalizeIncubatorPayload = (payload: any, chapterCount: number) => {
+    const directions = Array.isArray(payload?.directions) ? payload.directions : []
+    const selectedDirection = payload?.selected_direction || directions.slice().sort((a: any, b: any) => Number(b.score || 0) - Number(a.score || 0))[0] || null
+    return {
+      directions,
+      selected_direction: selectedDirection,
+      worldbuilding: payload?.worldbuilding || selectedDirection?.worldbuilding || {},
+      characters: Array.isArray(payload?.characters) ? payload.characters : (Array.isArray(selectedDirection?.characters) ? selectedDirection.characters : []),
+      outlines: Array.isArray(payload?.outlines) ? payload.outlines : (Array.isArray(selectedDirection?.outlines) ? selectedDirection.outlines : []),
+      chapters: (Array.isArray(payload?.chapters) ? payload.chapters : (Array.isArray(selectedDirection?.chapters) ? selectedDirection.chapters : [])).slice(0, chapterCount),
+      writing_bible: payload?.writing_bible || selectedDirection?.writing_bible || {},
+      commercial_positioning: payload?.commercial_positioning || selectedDirection?.commercial_positioning || {},
+    }
+  }
   const storeOriginalIncubatorPayload = async (activeWorkspace: string, project: any, payload: any) => {
     if (payload.worldbuilding?.world_summary || payload.worldbuilding?.rules) {
       await createNovelWorldbuilding(activeWorkspace, {
@@ -1036,6 +1117,7 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
   }
   const generateChapterForGroup = async (activeWorkspace: string, projectId: number, chapterId: number, options: any = {}) => {
     const preferredModelId = Number(options.model_id || 0) || undefined
+    const onStage = typeof options.onStage === 'function' ? options.onStage : async () => {}
     const project = await getProject(activeWorkspace, projectId)
     if (!project) throw new Error('project not found')
     let chapters = await listNovelChapters(activeWorkspace, projectId)
@@ -1048,9 +1130,16 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
       listNovelReviews(activeWorkspace, projectId),
     ])
     let contextPackage = await buildChapterContextPackage(activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews)
+    await onStage('context', {
+      status: contextPackage.preflight.ready ? 'success' : 'failed',
+      score: contextPackage.preflight.ready ? 100 : 0,
+      warnings: contextPackage.preflight.warnings || [],
+      blockers: contextPackage.preflight.blockers || [],
+    })
     if (!contextPackage.preflight.ready && options.allow_incomplete !== true) {
       throw Object.assign(new Error('章节生成前置检查未通过'), { code: 'PROSE_PREFLIGHT_BLOCKED', contextPackage })
     }
+    await onStage('scene_cards', { status: 'running' })
     if (!contextPackage.chapter_target.scene_cards.length || options.force_scene_cards === true) {
       const sceneResult = await generateSceneCardsForChapter(activeWorkspace, project, contextPackage, preferredModelId)
       if (sceneResult.sceneCards.length > 0) {
@@ -1064,10 +1153,12 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
         contextPackage = await buildChapterContextPackage(activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews)
       }
     }
+    await onStage('scene_cards', { status: 'success', count: contextPackage.chapter_target.scene_cards.length })
     const prevChapters = chapters
       .filter(ch => ch.chapter_no < chapter.chapter_no && ch.chapter_text)
       .slice(-3)
       .map(ch => ({ chapter_no: ch.chapter_no, title: ch.title, chapter_summary: ch.chapter_summary || '', ending_hook: ch.ending_hook || '', chapter_text: ch.chapter_text }))
+    await onStage('draft', { status: 'running' })
     const draftResult = await generateNovelChapterProse(project, chapter, {
       worldbuilding,
       characters,
@@ -1082,12 +1173,17 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
     const firstProse = proseArr.length > 0 ? proseArr[0] : {}
     const chapterText = resultPayload?.chapter_text || firstProse?.chapter_text
     if ((draftResult as any).error || !chapterText) {
+      await onStage('draft', { status: 'failed', error: String((draftResult as any).error || (draftResult as any).fallbackReason || '模型未返回正文') })
       throw new Error(String((draftResult as any).error || (draftResult as any).fallbackReason || '模型未返回正文'))
     }
+    await onStage('draft', { status: 'success', word_count: String(chapterText || '').replace(/\s/g, '').length, modelName: (draftResult as any).modelName })
     let finalText = String(chapterText || '')
     let finalSceneBreakdown = resultPayload?.scene_breakdown || firstProse?.scene_breakdown || chapter.scene_breakdown || []
     let finalContinuityNotes = resultPayload?.continuity_notes || firstProse?.continuity_notes || chapter.continuity_notes || []
+    await onStage('review', { status: 'running' })
     const selfCheck = await runProseSelfReviewAndRevision(activeWorkspace, project, contextPackage, finalText, preferredModelId)
+    await onStage('review', { status: selfCheck?.review?.passed === false ? 'warn' : 'success', score: selfCheck?.review?.score ?? null, issues: selfCheck?.review?.issues || [] })
+    await onStage('revise', { status: selfCheck.revised ? 'success' : 'skipped', revised: Boolean(selfCheck.revised) })
     finalText = selfCheck.final_text || finalText
     if (selfCheck.revised && selfCheck.revision) {
       finalSceneBreakdown = selfCheck.revision.scene_breakdown?.length ? selfCheck.revision.scene_breakdown : finalSceneBreakdown
@@ -1097,16 +1193,21 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
     const safetyDecision = getReferenceSafetyDecision(project, referenceReport)
     const safetyExplanation = explainReferenceSafety(referenceReport, safetyDecision)
     const migrationAudit = buildMigrationAudit(project, referenceReport, safetyExplanation)
+    await onStage('safety', { status: safetyDecision.blocked ? 'failed' : 'success', score: safetyDecision.score, copy_hit_count: safetyDecision.copy_hit_count, risk_level: referenceReport?.quality_assessment?.risk_level })
     if (safetyDecision.blocked) {
       throw Object.assign(new Error('仿写安全阈值未通过'), { code: 'REFERENCE_SAFETY_BLOCKED', referenceReport, safetyDecision, safetyExplanation, migrationAudit })
     }
+    await onStage('store', { status: 'running' })
     const updated = await updateNovelChapter(activeWorkspace, chapter.id, {
       chapter_text: finalText,
       scene_breakdown: finalSceneBreakdown,
       continuity_notes: finalContinuityNotes,
       status: 'draft',
     }, { versionSource: selfCheck?.revised ? 'repair' : 'agent_execute' })
+    await onStage('store', { status: 'success', word_count: String(finalText || '').replace(/\s/g, '').length })
+    await onStage('story_state', { status: 'running' })
     const storyStateUpdate = await updateStoryStateMachine(activeWorkspace, project, chapter, contextPackage, finalText, preferredModelId).catch(error => ({ error: String(error) }))
+    await onStage('story_state', { status: (storyStateUpdate as any)?.error ? 'failed' : 'success', error: (storyStateUpdate as any)?.error || '' })
     await createNovelReview(activeWorkspace, {
       project_id: projectId,
       review_type: 'prose_quality',
@@ -1648,9 +1749,10 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
       if (!project) return res.status(404).json({ error: 'project not found' })
       const modelId = Number(req.body.model_id || 0) || undefined
       const chapterCount = Math.max(5, Math.min(80, Number(req.body.chapter_count || 30)))
+      const variantCount = Math.max(1, Math.min(5, Number(req.body.variant_count || 1)))
       const stageModelId = getStageModelId(project, 'incubation', modelId)
       const result = await executeNovelAgent('outline-agent', project, {
-        task: buildOriginalIncubatorPrompt(project, { ...req.body, chapter_count: chapterCount }),
+        task: buildOriginalIncubatorPrompt(project, { ...req.body, chapter_count: chapterCount, variant_count: variantCount }),
       }, { activeWorkspace, modelId: stageModelId ? String(stageModelId) : undefined, maxTokens: 9000, temperature: getStageTemperature(project, 'incubation', 0.65), skipMemory: true })
       const payload = normalizeIncubatorPayload(getNovelPayload(result), chapterCount)
       let updatedProject: any = null
@@ -1692,6 +1794,119 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
     }
   })
 
+  const executeChapterGroupRunRecord = async (activeWorkspace: string, project: any, run: any, options: any = {}) => {
+    let payload = parseJsonLikePayload(run.output_ref) || {}
+    const chapters = Array.isArray(payload.chapters) ? payload.chapters : []
+    const maxChapters = Math.max(1, Math.min(50, Number(options.max_chapters || chapters.length || 10)))
+    const startedAt = Date.now()
+    const results: any[] = Array.isArray(payload.results) ? payload.results : []
+    let processed = 0
+    let status = 'running'
+    let errorMessage = ''
+    await updateNovelRun(activeWorkspace, run.id, {
+      status: 'running',
+      output_ref: JSON.stringify({ ...payload, started_at: payload.started_at || new Date().toISOString(), phase: '自动执行章节群' }),
+    })
+
+    const persistStage = async (index: number, stage: string, patch: any = {}) => {
+      const item = chapters[index]
+      if (!item) return
+      const stages = updateChapterStages(item.stages || [], stage, patch)
+      const summary = summarizeChapterStages(stages)
+      chapters[index] = { ...item, stages, current_step: summary.current_step, current_label: summary.current_label }
+      payload = { ...payload, chapters, current_index: index, phase: `第${item.chapter_no}章：${summary.current_label}` }
+      await updateNovelRun(activeWorkspace, run.id, { status: 'running', output_ref: JSON.stringify(payload), duration_ms: Date.now() - startedAt })
+    }
+
+    for (let index = Number(payload.current_index || 0); index < chapters.length && processed < maxChapters; index += 1) {
+      const latestRun = (await listNovelRuns(activeWorkspace, project.id)).find(item => item.id === run.id)
+      if (latestRun?.status === 'paused') {
+        status = 'paused'
+        payload = { ...(parseJsonLikePayload(latestRun.output_ref) || payload), current_index: index, phase: '已暂停' }
+        break
+      }
+      const item = chapters[index]
+      if (!item?.id) continue
+      if (item.status === 'written' && options.regenerate !== true) {
+        chapters[index] = { ...item, status: 'skipped', skipped_reason: '已有正文' }
+        payload = { ...payload, chapters, current_index: index + 1 }
+        await updateNovelRun(activeWorkspace, run.id, { status: 'running', output_ref: JSON.stringify(payload) })
+        continue
+      }
+      chapters[index] = { ...item, status: 'running', started_at: new Date().toISOString(), stages: item.stages?.length ? item.stages : buildChapterGroupStages() }
+      payload = { ...payload, chapters, current_index: index, phase: `生成第${item.chapter_no}章` }
+      await updateNovelRun(activeWorkspace, run.id, { status: 'running', output_ref: JSON.stringify(payload) })
+      try {
+        const chapterResult = await generateChapterForGroup(activeWorkspace, project.id, Number(item.id), {
+          ...options,
+          model_id: options.model_id || payload.model_strategy?.preferred_model_id,
+          allow_incomplete: options.allow_incomplete === true,
+          onStage: async (stage: string, patch: any = {}) => {
+            try {
+              await persistStage(index, stage, patch)
+            } catch (stageError) {
+              console.warn('[novel] failed to persist chapter group stage:', stage, String(stageError).slice(0, 160))
+            }
+          },
+        })
+        const resultItem = {
+          id: item.id,
+          chapter_no: item.chapter_no,
+          title: item.title,
+          status: 'success',
+          score: chapterResult.score,
+          revised: chapterResult.revised,
+          stages: updateChapterStages(chapters[index]?.stages || [], 'story_state', { status: (chapterResult.story_state_update as any)?.error ? 'failed' : 'success' }),
+          completed_at: new Date().toISOString(),
+        }
+        chapters[index] = resultItem
+        results.push(resultItem)
+        processed += 1
+      } catch (chapterError: any) {
+        const failedStages = (() => {
+          const current = chapters[index]?.stages || buildChapterGroupStages()
+          const active = current.find((step: any) => ['running', 'ready'].includes(step.status)) || current.find((step: any) => step.status === 'pending') || current[0]
+          return active ? updateChapterStages(current, active.key, { status: 'failed', error: String(chapterError?.message || chapterError) }) : current
+        })()
+        const resultItem = {
+          id: item.id,
+          chapter_no: item.chapter_no,
+          title: item.title,
+          status: 'failed',
+          stages: failedStages,
+          error: String(chapterError?.message || chapterError),
+          error_code: chapterError?.code || '',
+          failed_at: new Date().toISOString(),
+        }
+        chapters[index] = resultItem
+        results.push(resultItem)
+        errorMessage = resultItem.error
+        if (payload.policy?.stop_on_failure !== false) {
+          status = 'paused'
+          payload = { ...payload, chapters, results, current_index: index, phase: `第${item.chapter_no}章失败，已暂停`, last_error: resultItem }
+          await updateNovelRun(activeWorkspace, run.id, { status, output_ref: JSON.stringify(payload), error_message: errorMessage })
+          break
+        }
+      }
+      payload = { ...payload, chapters, results, current_index: index + 1, phase: '自动执行章节群' }
+      await updateNovelRun(activeWorkspace, run.id, {
+        status: 'running',
+        output_ref: JSON.stringify(payload),
+        duration_ms: Date.now() - startedAt,
+      })
+    }
+    if (status === 'running') {
+      status = chapters.every((item: any) => ['success', 'skipped', 'written'].includes(item.status)) ? 'success' : 'ready'
+    }
+    const updated = await updateNovelRun(activeWorkspace, run.id, {
+      status,
+      output_ref: JSON.stringify({ ...payload, chapters, results, phase: status === 'success' ? '章节群已完成' : payload.phase, finished_at: status === 'success' ? new Date().toISOString() : undefined }),
+      duration_ms: Date.now() - startedAt,
+      error_message: errorMessage,
+    })
+    return { run: updated, group: parseJsonLikePayload(updated?.output_ref), processed, status }
+  }
+
   app.post('/api/novel/projects/:id/chapter-groups/start', async (req, res) => {
     try {
       const activeWorkspace = getWorkspace()
@@ -1705,7 +1920,13 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
       const approvalPolicy = project.reference_config?.approval_policy || getApprovalPolicy(project)
       const output = {
         chapter_ids: selected.map(ch => ch.id),
-        chapters: selected.map(ch => ({ id: ch.id, chapter_no: ch.chapter_no, title: ch.title, status: ch.chapter_text ? 'written' : 'pending' })),
+        chapters: selected.map(ch => ({
+          id: ch.id,
+          chapter_no: ch.chapter_no,
+          title: ch.title,
+          status: ch.chapter_text ? 'written' : 'pending',
+          stages: buildChapterGroupStages(),
+        })),
         current_index: 0,
         mode: req.body.mode || 'group',
         model_strategy: modelStrategy,
@@ -1738,91 +1959,8 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
       const runs = await listNovelRuns(activeWorkspace, project.id)
       const run = runs.find(item => item.id === Number(req.params.runId))
       if (!run || run.run_type !== 'chapter_group_generation') return res.status(404).json({ error: 'chapter group run not found' })
-      let payload = parseJsonLikePayload(run.output_ref) || {}
-      const chapters = Array.isArray(payload.chapters) ? payload.chapters : []
-      const maxChapters = Math.max(1, Math.min(50, Number(req.body.max_chapters || chapters.length || 10)))
-      const startedAt = Date.now()
-      const results: any[] = Array.isArray(payload.results) ? payload.results : []
-      let processed = 0
-      let status = 'running'
-      let errorMessage = ''
-      await updateNovelRun(activeWorkspace, run.id, {
-        status: 'running',
-        output_ref: JSON.stringify({ ...payload, started_at: payload.started_at || new Date().toISOString(), phase: '自动执行章节群' }),
-      })
-      for (let index = Number(payload.current_index || 0); index < chapters.length && processed < maxChapters; index += 1) {
-        const latestRun = (await listNovelRuns(activeWorkspace, project.id)).find(item => item.id === run.id)
-        if (latestRun?.status === 'paused') {
-          status = 'paused'
-          payload = { ...(parseJsonLikePayload(latestRun.output_ref) || payload), current_index: index, phase: '已暂停' }
-          break
-        }
-        const item = chapters[index]
-        if (!item?.id) continue
-        if (item.status === 'written' && req.body.regenerate !== true) {
-          chapters[index] = { ...item, status: 'skipped', skipped_reason: '已有正文' }
-          payload = { ...payload, chapters, current_index: index + 1 }
-          await updateNovelRun(activeWorkspace, run.id, { status: 'running', output_ref: JSON.stringify(payload) })
-          continue
-        }
-        chapters[index] = { ...item, status: 'running', started_at: new Date().toISOString() }
-        payload = { ...payload, chapters, current_index: index, phase: `生成第${item.chapter_no}章` }
-        await updateNovelRun(activeWorkspace, run.id, { status: 'running', output_ref: JSON.stringify(payload) })
-        try {
-          const chapterResult = await generateChapterForGroup(activeWorkspace, project.id, Number(item.id), {
-            ...req.body,
-            model_id: req.body.model_id || payload.model_strategy?.preferred_model_id,
-            allow_incomplete: req.body.allow_incomplete === true,
-          })
-          const resultItem = {
-            id: item.id,
-            chapter_no: item.chapter_no,
-            title: item.title,
-            status: 'success',
-            score: chapterResult.score,
-            revised: chapterResult.revised,
-            completed_at: new Date().toISOString(),
-          }
-          chapters[index] = resultItem
-          results.push(resultItem)
-          processed += 1
-        } catch (chapterError: any) {
-          const resultItem = {
-            id: item.id,
-            chapter_no: item.chapter_no,
-            title: item.title,
-            status: 'failed',
-            error: String(chapterError?.message || chapterError),
-            error_code: chapterError?.code || '',
-            failed_at: new Date().toISOString(),
-          }
-          chapters[index] = resultItem
-          results.push(resultItem)
-          errorMessage = resultItem.error
-          if (payload.policy?.stop_on_failure !== false) {
-            status = 'paused'
-            payload = { ...payload, chapters, results, current_index: index, phase: `第${item.chapter_no}章失败，已暂停`, last_error: resultItem }
-            await updateNovelRun(activeWorkspace, run.id, { status, output_ref: JSON.stringify(payload), error_message: errorMessage })
-            break
-          }
-        }
-        payload = { ...payload, chapters, results, current_index: index + 1, phase: '自动执行章节群' }
-        await updateNovelRun(activeWorkspace, run.id, {
-          status: 'running',
-          output_ref: JSON.stringify(payload),
-          duration_ms: Date.now() - startedAt,
-        })
-      }
-      if (status === 'running') {
-        status = chapters.every((item: any) => ['success', 'skipped', 'written'].includes(item.status)) ? 'success' : 'ready'
-      }
-      const updated = await updateNovelRun(activeWorkspace, run.id, {
-        status,
-        output_ref: JSON.stringify({ ...payload, chapters, results, phase: status === 'success' ? '章节群已完成' : payload.phase, finished_at: status === 'success' ? new Date().toISOString() : undefined }),
-        duration_ms: Date.now() - startedAt,
-        error_message: errorMessage,
-      })
-      res.json({ ok: true, run: updated, group: parseJsonLikePayload(updated?.output_ref) })
+      const result = await executeChapterGroupRunRecord(activeWorkspace, project, run, req.body || {})
+      res.json({ ok: true, ...result })
     } catch (error) {
       res.status(500).json({ error: String(error) })
     }
@@ -1965,18 +2103,23 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
       const referenceReport = await buildReferenceUsageReport(activeWorkspace, project, '相似度检测', chapter.chapter_text || '')
       const quality = referenceReport.quality_assessment || {}
       const structuralRisk = clampScore(100 - Number(quality.originality_score || 100))
+      const structuralReport = buildStructuralSimilarityReport(chapter, referenceReport)
+      const combinedStructuralRisk = clampScore((structuralRisk * 0.45) + (Number(structuralReport.overall_structural_risk || 0) * 0.55))
+      const copyHitCount = asArray(referenceReport.copy_guard?.hits).length
       const report = {
         chapter_id: chapter.id,
         chapter_no: chapter.chapter_no,
-        overall_risk_score: clampScore((Number(quality.copy_hit_count || 0) * 12) + structuralRisk * 0.5),
+        overall_risk_score: clampScore((copyHitCount * 12) + combinedStructuralRisk * 0.55),
         term_hits: referenceReport.copy_guard?.hits || [],
         copy_safety_score: quality.copy_safety_score,
         originality_score: quality.originality_score,
-        structural_similarity_risk: structuralRisk,
-        decision: Number(quality.copy_safety_score || 100) < 75 || structuralRisk > 45 ? 'needs_rewrite' : 'pass',
+        structural_similarity_risk: combinedStructuralRisk,
+        structural_report: structuralReport,
+        decision: Number(quality.copy_safety_score || 100) < 75 || combinedStructuralRisk > 45 ? 'needs_rewrite' : 'pass',
         suggestions: [
           ...(referenceReport.copy_guard?.hits?.length ? ['替换疑似复用专名和证据词。'] : []),
-          structuralRisk > 45 ? '调整场景目标、障碍来源、信息揭示顺序和角色选择，保留节奏功能但更换事件。' : '',
+          combinedStructuralRisk > 45 ? '调整场景目标、障碍来源、信息揭示顺序和角色选择，保留节奏功能但更换事件。' : '',
+          ...structuralReport.suggestions,
         ].filter(Boolean),
       }
       const saved = await createNovelReview(activeWorkspace, {
@@ -2307,8 +2450,10 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
       const projectId = Number(req.params.id)
       const runs = await listNovelRuns(activeWorkspace, projectId)
       const queued = runs.filter(run => ['queued', 'ready', 'paused', 'running'].includes(run.status) && ['chapter_group_generation', 'chapter_generation_pipeline', 'quality_benchmark', 'book_review'].includes(run.run_type))
+      const worker = runQueueWorkers.get(projectId) || { status: 'idle' }
       res.json({
         ok: true,
+        worker,
         queue: queued.map(run => ({ id: run.id, type: run.run_type, step: run.step_name, status: run.status, created_at: run.created_at, payload: parseJsonLikePayload(run.output_ref) })),
         summary: {
           queued: queued.filter(run => run.status === 'queued' || run.status === 'ready').length,
@@ -2319,6 +2464,77 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
     } catch (error) {
       res.status(500).json({ error: String(error) })
     }
+  })
+  app.get('/api/novel/projects/:id/run-queue/worker-status', async (req, res) => {
+    const projectId = Number(req.params.id)
+    res.json({ ok: true, worker: runQueueWorkers.get(projectId) || { status: 'idle' } })
+  })
+  app.post('/api/novel/projects/:id/run-queue/start-worker', async (req, res) => {
+    try {
+      const activeWorkspace = getWorkspace()
+      const project = await getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const existing = runQueueWorkers.get(project.id)
+      if (['running', 'stopping'].includes(existing?.status)) return res.json({ ok: true, worker: existing, message: '后台 worker 已在运行' })
+      const worker = {
+        status: 'running',
+        stop_requested: false,
+        started_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        processed_runs: 0,
+        processed_chapters: 0,
+        last_error: '',
+      }
+      runQueueWorkers.set(project.id, worker)
+      const maxRuns = Math.max(1, Math.min(200, Number(req.body.max_runs || 200)))
+      const maxChaptersPerRun = Math.max(1, Math.min(10, Number(req.body.max_chapters_per_run || 1)))
+      void (async () => {
+        try {
+          while (!worker.stop_requested && worker.processed_runs < maxRuns) {
+            const runs = await listNovelRuns(activeWorkspace, project.id)
+            const run = runs
+              .filter(item => item.run_type === 'chapter_group_generation' && ['queued', 'ready'].includes(item.status))
+              .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))[0]
+            if (!run) break
+            worker.current_run_id = run.id
+            worker.phase = `执行任务 ${run.step_name || run.id}`
+            worker.updated_at = new Date().toISOString()
+            const result = await executeChapterGroupRunRecord(activeWorkspace, project, run, {
+              ...req.body,
+              max_chapters: maxChaptersPerRun,
+              model_id: req.body.model_id,
+            })
+            worker.processed_runs += 1
+            worker.processed_chapters += Number(result.processed || 0)
+            worker.last_run_status = result.status
+            worker.updated_at = new Date().toISOString()
+          }
+          worker.status = worker.stop_requested ? 'stopped' : 'idle'
+          worker.phase = worker.stop_requested ? '已停止' : '队列已空'
+          worker.finished_at = new Date().toISOString()
+          worker.updated_at = worker.finished_at
+        } catch (error: any) {
+          worker.status = 'failed'
+          worker.last_error = String(error?.message || error)
+          worker.finished_at = new Date().toISOString()
+          worker.updated_at = worker.finished_at
+        } finally {
+          runQueueWorkers.set(project.id, { ...worker })
+        }
+      })()
+      res.json({ ok: true, worker, message: '后台 worker 已启动' })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+  app.post('/api/novel/projects/:id/run-queue/stop-worker', async (req, res) => {
+    const projectId = Number(req.params.id)
+    const worker = runQueueWorkers.get(projectId) || { status: 'idle' }
+    worker.stop_requested = true
+    worker.status = worker.status === 'running' ? 'stopping' : worker.status
+    worker.updated_at = new Date().toISOString()
+    runQueueWorkers.set(projectId, worker)
+    res.json({ ok: true, worker })
   })
   app.post('/api/novel/projects/:id/run-queue/drain', async (req, res) => {
     try {

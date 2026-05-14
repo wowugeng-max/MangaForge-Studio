@@ -163,6 +163,14 @@ function ChapterGroupRunSummary({ run }: { run: any }) {
   const skipped = chapters.filter((item: any) => item.status === 'skipped' || item.status === 'written').length
   const total = chapters.length
   const percent = total ? Math.round(((success + skipped) / total) * 100) : 0
+  const stageColor = (status?: string) => (
+    status === 'success' ? 'green'
+      : status === 'failed' ? 'red'
+        : status === 'running' ? 'blue'
+          : status === 'warn' ? 'gold'
+            : status === 'skipped' ? 'default'
+              : 'default'
+  )
   return (
     <Card size="small" title="章节群执行">
       <Space direction="vertical" size={10} style={{ width: '100%' }}>
@@ -186,6 +194,28 @@ function ChapterGroupRunSummary({ run }: { run: any }) {
             </Tag>
           ))}
         </Space>
+        {chapters.some((chapter: any) => Array.isArray(chapter.stages) && chapter.stages.length > 0) && (
+          <Card size="small" title="章节流水线阶段" styles={{ body: { padding: 8 } }}>
+            <Space direction="vertical" size={8} style={{ width: '100%' }}>
+              {chapters.slice(0, 12).map((chapter: any) => {
+                const stages = Array.isArray(chapter.stages) ? chapter.stages : []
+                if (!stages.length) return null
+                return (
+                  <div key={`stages-${chapter.id || chapter.chapter_no}`} style={{ borderBottom: '1px solid #f0f0f0', paddingBottom: 6 }}>
+                    <Text strong style={{ fontSize: 12 }}>第{chapter.chapter_no}章</Text>
+                    <Space wrap size={[4, 4]} style={{ marginLeft: 8 }}>
+                      {stages.map((stage: any) => (
+                        <Tag key={`${chapter.id || chapter.chapter_no}-${stage.key}`} color={stageColor(stage.status)} bordered={false}>
+                          {stage.label || stage.key}
+                        </Tag>
+                      ))}
+                    </Space>
+                  </div>
+                )
+              })}
+            </Space>
+          </Card>
+        )}
         {output.last_error && (
           <Paragraph type="danger" style={{ marginBottom: 0, fontSize: 12 }} ellipsis={{ rows: 3, expandable: true }}>
             第{output.last_error.chapter_no}章失败：{output.last_error.error}

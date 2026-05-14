@@ -743,15 +743,41 @@ export default function NovelProjectWorkspace() {
           const res = await apiClient.post(`/novel/projects/${projectId}/incubate-original`, {
             model_id: selectedModelId,
             chapter_count: 30,
+            variant_count: 3,
             auto_store: false,
           })
           const payload = res.data?.payload || {}
+          const directions = Array.isArray(payload.directions) ? payload.directions : []
+          const selectedDirection = payload.selected_direction || directions.slice().sort((a: any, b: any) => Number(b.score || 0) - Number(a.score || 0))[0] || null
+          const isSelectedDirection = (direction: any) => selectedDirection && (
+            direction === selectedDirection
+            || (direction.direction_id && direction.direction_id === selectedDirection.direction_id)
+            || (direction.title && direction.title === selectedDirection.title)
+          )
           Modal.confirm({
             title: '确认原创孵化方案',
             width: 860,
             content: (
               <Space direction="vertical" size={10} style={{ width: '100%' }}>
-                <Alert type="info" showIcon message="请先核对核心卖点、角色和前 30 章方向。确认后才会写入项目资料。" />
+                <Alert type="info" showIcon message={directions.length > 1 ? '系统已生成多个原创方向并按商业可行性竞选；确认后会入库评分最高/模型推荐方案。' : '请先核对核心卖点、角色和前 30 章方向。确认后才会写入项目资料。'} />
+                {directions.length > 0 && (
+                  <Card size="small" title="候选方向">
+                    <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                      {directions.map((direction: any, index: number) => (
+                        <div key={direction.direction_id || direction.title || index} style={{ padding: 10, border: isSelectedDirection(direction) ? '1px solid #1677ff' : '1px solid #e5e7eb', borderRadius: 8 }}>
+                          <Space wrap>
+                            <Tag color={isSelectedDirection(direction) ? 'blue' : 'default'} bordered={false}>{isSelectedDirection(direction) ? '推荐' : `方案${index + 1}`}</Tag>
+                            <Text strong>{direction.title || direction.core_hook || '未命名方向'}</Text>
+                            {direction.score !== undefined && <Tag bordered={false}>评分 {direction.score}</Tag>}
+                          </Space>
+                          <Paragraph style={{ margin: '6px 0 0' }} ellipsis={{ rows: 2, expandable: true }}>
+                            {direction.core_hook || direction.selection_reason || JSON.stringify(direction.commercial_positioning || {})}
+                          </Paragraph>
+                        </div>
+                      ))}
+                    </Space>
+                  </Card>
+                )}
                 <Card size="small" title="商业定位">
                   <Paragraph style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }} ellipsis={{ rows: 5, expandable: true }}>
                     {JSON.stringify(payload.commercial_positioning || {}, null, 2)}
@@ -859,12 +885,21 @@ export default function NovelProjectWorkspace() {
     try {
       const res = await apiClient.get(`/novel/projects/${projectId}/writing-bible`)
       const bible = res.data?.writing_bible || {}
+      const styleLock = bible.style_lock || selectedProject?.reference_config?.style_lock || {}
       writingBibleForm.setFieldsValue({
         promise: bible.promise || '',
+        narrative_person: styleLock.narrative_person || '',
+        sentence_length: styleLock.sentence_length || '',
+        dialogue_ratio: styleLock.dialogue_ratio || '',
+        payoff_density: styleLock.payoff_density || '',
+        description_density: styleLock.description_density || '',
+        chapter_word_range: styleLock.chapter_word_range || '',
+        banned_words: Array.isArray(styleLock.banned_words) ? styleLock.banned_words.join('\n') : '',
+        preferred_words: Array.isArray(styleLock.preferred_words) ? styleLock.preferred_words.join('\n') : '',
         world_rules: JSON.stringify(bible.world_rules || [], null, 2),
         mainline: JSON.stringify(bible.mainline || {}, null, 2),
         volume_plan: JSON.stringify(bible.volume_plan || [], null, 2),
-        style_lock: JSON.stringify(bible.style_lock || selectedProject?.reference_config?.style_lock || {}, null, 2),
+        style_lock: JSON.stringify(styleLock || {}, null, 2),
         safety_policy: JSON.stringify(bible.safety_policy || selectedProject?.reference_config?.safety || {}, null, 2),
         forbidden: JSON.stringify(bible.forbidden || [], null, 2),
       })
@@ -886,7 +921,17 @@ export default function NovelProjectWorkspace() {
         world_rules: parseJson(v.world_rules, []),
         mainline: parseJson(v.mainline, {}),
         volume_plan: parseJson(v.volume_plan, []),
-        style_lock: parseJson(v.style_lock, {}),
+        style_lock: {
+          ...parseJson(v.style_lock, {}),
+          narrative_person: v.narrative_person || '',
+          sentence_length: v.sentence_length || '',
+          dialogue_ratio: v.dialogue_ratio || '',
+          payoff_density: v.payoff_density || '',
+          description_density: v.description_density || '',
+          chapter_word_range: v.chapter_word_range || '',
+          banned_words: parseListField(v.banned_words),
+          preferred_words: parseListField(v.preferred_words),
+        },
         safety_policy: parseJson(v.safety_policy, {}),
         forbidden: parseJson(v.forbidden, []),
       }
@@ -903,7 +948,17 @@ export default function NovelProjectWorkspace() {
   const openStoryStateEditor = async () => {
     try {
       const res = await apiClient.get(`/novel/projects/${projectId}/story-state`)
-      storyStateForm.setFieldsValue({ story_state: JSON.stringify(res.data?.story_state || {}, null, 2) })
+      const state = res.data?.story_state || {}
+      storyStateForm.setFieldsValue({
+        character_positions: JSON.stringify(state.character_positions || {}, null, 2),
+        character_relationships: JSON.stringify(state.character_relationships || state.relationships || {}, null, 2),
+        known_secrets: JSON.stringify(state.known_secrets || {}, null, 2),
+        item_ownership: JSON.stringify(state.item_ownership || {}, null, 2),
+        foreshadowing_status: JSON.stringify(state.foreshadowing_status || {}, null, 2),
+        mainline_progress: state.mainline_progress || '',
+        timeline: JSON.stringify(state.timeline || [], null, 2),
+        story_state: JSON.stringify(state, null, 2),
+      })
       setStoryStateOpen(true)
     } catch (error: any) {
       message.error(error?.response?.data?.error || error?.message || '故事状态加载失败')
@@ -913,7 +968,20 @@ export default function NovelProjectWorkspace() {
   const saveStoryStateEditor = async () => {
     try {
       const v = await storyStateForm.validateFields()
-      const storyState = JSON.parse(v.story_state || '{}')
+      const parseJson = (value: string, fallback: any) => {
+        try { return JSON.parse(value || '') } catch { return fallback }
+      }
+      const baseState = parseJson(v.story_state || '{}', {})
+      const storyState = {
+        ...baseState,
+        character_positions: parseJson(v.character_positions, {}),
+        character_relationships: parseJson(v.character_relationships, {}),
+        known_secrets: parseJson(v.known_secrets, {}),
+        item_ownership: parseJson(v.item_ownership, {}),
+        foreshadowing_status: parseJson(v.foreshadowing_status, {}),
+        mainline_progress: v.mainline_progress || baseState.mainline_progress || '',
+        timeline: parseJson(v.timeline, []),
+      }
       const res = await apiClient.put(`/novel/projects/${projectId}/story-state`, { story_state: storyState })
       setSelectedProject((prev: any) => res.data?.project || (prev ? { ...prev, reference_config: { ...(prev.reference_config || {}), story_state: res.data?.story_state || storyState } } : prev))
       setStoryStateOpen(false)
@@ -941,15 +1009,131 @@ export default function NovelProjectWorkspace() {
     }
   }
 
+  const renderCommercialResult = (title: string, data: any) => {
+    if (title.includes('成本') || data?.metrics) {
+      const metrics = data?.metrics || data || {}
+      const stageStats = metrics.stage_stats || {}
+      return (
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Space wrap>
+            <Tag color="blue" bordered={false}>章节 {metrics.written_chapter_count || 0}/{metrics.chapter_count || 0}</Tag>
+            <Tag color="green" bordered={false}>字数 {Number(metrics.generated_words || 0).toLocaleString()}</Tag>
+            <Tag bordered={false}>运行 {metrics.total_runs || 0} 次</Tag>
+            <Tag color={Number(metrics.failure_rate || 0) > 15 ? 'red' : 'green'} bordered={false}>失败率 {metrics.failure_rate || 0}%</Tag>
+            <Tag color={Number(metrics.avg_quality_score || 0) >= 78 ? 'green' : 'gold'} bordered={false}>均分 {metrics.avg_quality_score ?? '-'}</Tag>
+          </Space>
+          <Progress percent={Math.max(0, Math.min(100, Math.round(100 - Number(metrics.failure_rate || 0))))} size="small" />
+          <Card size="small" title="阶段统计">
+            <Space wrap>
+              {Object.entries(stageStats).map(([key, stat]: any) => (
+                <Tag key={key} bordered={false} color={Number(stat.failed || 0) > 0 ? 'gold' : 'default'}>
+                  {key} · {stat.success || 0}/{stat.total || 0}
+                </Tag>
+              ))}
+            </Space>
+          </Card>
+        </Space>
+      )
+    }
+    if (title.includes('队列') || data?.queue) {
+      const worker = data?.worker || {}
+      const queue = Array.isArray(data?.queue) ? data.queue : []
+      return (
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Space wrap>
+            <Tag color={worker.status === 'running' ? 'blue' : worker.status === 'failed' ? 'red' : 'default'} bordered={false}>worker：{worker.status || 'idle'}</Tag>
+            <Tag bordered={false}>待执行 {data?.summary?.queued || 0}</Tag>
+            <Tag bordered={false}>运行中 {data?.summary?.running || 0}</Tag>
+            <Tag bordered={false}>暂停 {data?.summary?.paused || 0}</Tag>
+          </Space>
+          {worker.phase && <Alert type={worker.status === 'failed' ? 'error' : 'info'} showIcon message={worker.phase} description={worker.last_error || ''} />}
+          <List
+            size="small"
+            dataSource={queue.slice(0, 20)}
+            renderItem={(item: any) => (
+              <List.Item>
+                <List.Item.Meta
+                  title={<Space wrap><Tag bordered={false}>{item.type}</Tag><Text>{item.step}</Text><Tag color={item.status === 'running' ? 'blue' : item.status === 'paused' ? 'gold' : 'default'} bordered={false}>{item.status}</Tag></Space>}
+                  description={item.payload?.phase || item.created_at}
+                />
+              </List.Item>
+            )}
+          />
+        </Space>
+      )
+    }
+    if (title.includes('相似度') || data?.report?.structural_report) {
+      const report = data?.report || {}
+      const structural = report.structural_report || {}
+      return (
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Space wrap>
+            <Tag color={report.decision === 'pass' ? 'green' : 'red'} bordered={false}>{report.decision === 'pass' ? '通过' : '需重写'}</Tag>
+            <Tag bordered={false}>总风险 {report.overall_risk_score ?? '-'}</Tag>
+            <Tag bordered={false}>结构风险 {report.structural_similarity_risk ?? '-'}</Tag>
+            <Tag bordered={false}>文本安全 {report.copy_safety_score ?? '-'}</Tag>
+          </Space>
+          <Card size="small" title="结构风险拆解">
+            <Space wrap>
+              <Tag bordered={false}>场景顺序 {structural.scene_order_risk ?? 0}</Tag>
+              <Tag bordered={false}>角色功能 {structural.role_function_risk ?? 0}</Tag>
+              <Tag bordered={false}>爽点结构 {structural.payoff_structure_risk ?? 0}</Tag>
+              <Tag bordered={false}>实体重叠 {structural.entity_overlap_risk ?? 0}</Tag>
+            </Space>
+          </Card>
+          <List size="small" dataSource={report.suggestions || []} renderItem={(item: string) => <List.Item>{item}</List.Item>} />
+        </Space>
+      )
+    }
+    if (title.includes('版本') || data?.diff) {
+      const diff = data?.diff || {}
+      return (
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Space wrap>
+            <Tag bordered={false}>相似度 {diff.similarity_score ?? '-'}</Tag>
+            <Tag bordered={false}>改动段落 {diff.change_count ?? 0}</Tag>
+            <Tag bordered={false}>原 {diff.before_length ?? 0} 字 / 新 {diff.after_length ?? 0} 字</Tag>
+            {data?.previous_version?.id && (
+              <Button
+                size="small"
+                danger
+                onClick={async () => {
+                  await rollbackChapterVersion(data.previous_version.id)
+                  Modal.destroyAll()
+                }}
+              >
+                回滚到上一版
+              </Button>
+            )}
+          </Space>
+          {data?.recommendation && <Alert type="info" showIcon message={data.recommendation} />}
+          <List
+            size="small"
+            dataSource={(diff.paragraph_changes || []).slice(0, 30)}
+            renderItem={(item: any) => (
+              <List.Item>
+                <Card size="small" title={`第 ${item.index} 段`} style={{ width: '100%' }}>
+                  <Paragraph type="secondary" ellipsis={{ rows: 3, expandable: true }}>{item.before || '空'}</Paragraph>
+                  <Paragraph ellipsis={{ rows: 3, expandable: true }}>{item.after || '空'}</Paragraph>
+                </Card>
+              </List.Item>
+            )}
+          />
+        </Space>
+      )
+    }
+    return (
+      <Paragraph style={{ marginBottom: 0, whiteSpace: 'pre-wrap', maxHeight: 560, overflow: 'auto' }}>
+        {JSON.stringify(data, null, 2)}
+      </Paragraph>
+    )
+  }
+
   const showCommercialResult = (title: string, data: any) => {
     Modal.info({
       title,
       width: 900,
-      content: (
-        <Paragraph style={{ marginBottom: 0, whiteSpace: 'pre-wrap', maxHeight: 560, overflow: 'auto' }}>
-          {JSON.stringify(data, null, 2)}
-        </Paragraph>
-      ),
+      content: renderCommercialResult(title, data),
     })
   }
 
@@ -1076,6 +1260,27 @@ export default function NovelProjectWorkspace() {
 
   const openRunQueue = async () => {
     await runCommercialTool('queue', '后台任务队列', async () => {
+      const res = await apiClient.get(`/novel/projects/${projectId}/run-queue`)
+      return res.data
+    })
+  }
+
+  const startRunQueueWorker = async () => {
+    if (!selectedModelId) return message.warning('请先选择模型')
+    await runCommercialTool('queueWorker', '后台任务队列', async () => {
+      await apiClient.post(`/novel/projects/${projectId}/run-queue/start-worker`, {
+        model_id: selectedModelId,
+        max_chapters_per_run: 1,
+      })
+      const res = await apiClient.get(`/novel/projects/${projectId}/run-queue`)
+      setTaskCenterOpen(true)
+      return res.data
+    })
+  }
+
+  const stopRunQueueWorker = async () => {
+    await runCommercialTool('queueStop', '后台任务队列', async () => {
+      await apiClient.post(`/novel/projects/${projectId}/run-queue/stop-worker`)
       const res = await apiClient.get(`/novel/projects/${projectId}/run-queue`)
       return res.data
     })
@@ -1615,6 +1820,8 @@ export default function NovelProjectWorkspace() {
             <Card size="small" title="生产稳定性">
               <Space direction="vertical" style={{ width: '100%' }}>
                 <Button block loading={commercialToolLoading === 'queue'} onClick={openRunQueue}>后台任务队列</Button>
+                <Button block loading={commercialToolLoading === 'queueWorker'} onClick={startRunQueueWorker}>启动后台 worker</Button>
+                <Button block loading={commercialToolLoading === 'queueStop'} onClick={stopRunQueueWorker}>停止后台 worker</Button>
                 <Button block loading={commercialToolLoading === 'metrics'} onClick={openProductionMetrics}>成本质量仪表盘</Button>
                 <Button block loading={commercialToolLoading === 'approval'} onClick={openApprovalPolicyEditor}>审批关卡策略</Button>
               </Space>
@@ -1656,6 +1863,20 @@ export default function NovelProjectWorkspace() {
           <Form.Item name="promise" label="读者承诺 / 核心卖点">
             <Input.TextArea rows={3} />
           </Form.Item>
+          <Card size="small" title="风格锁定" style={{ marginBottom: 12 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
+              <Form.Item name="narrative_person" label="叙事人称" style={{ marginBottom: 0 }}><Input /></Form.Item>
+              <Form.Item name="sentence_length" label="句长倾向" style={{ marginBottom: 0 }}><Input /></Form.Item>
+              <Form.Item name="dialogue_ratio" label="对话比例" style={{ marginBottom: 0 }}><Input /></Form.Item>
+              <Form.Item name="payoff_density" label="爽点密度" style={{ marginBottom: 0 }}><Input /></Form.Item>
+              <Form.Item name="description_density" label="描写浓度" style={{ marginBottom: 0 }}><Input /></Form.Item>
+              <Form.Item name="chapter_word_range" label="章节字数范围" style={{ marginBottom: 0 }}><Input /></Form.Item>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12, marginTop: 12 }}>
+              <Form.Item name="banned_words" label="禁用词/句式" style={{ marginBottom: 0 }}><Input.TextArea rows={3} /></Form.Item>
+              <Form.Item name="preferred_words" label="常用词/风格词" style={{ marginBottom: 0 }}><Input.TextArea rows={3} /></Form.Item>
+            </div>
+          </Card>
           <Form.Item name="world_rules" label="世界规则 JSON">
             <Input.TextArea rows={4} />
           </Form.Item>
@@ -1687,8 +1908,19 @@ export default function NovelProjectWorkspace() {
       >
         <Alert type="info" showIcon style={{ marginBottom: 12 }} message="这里用于人工修正角色位置、关系、秘密、道具、伏笔、主线进度和时间线。保存后后续生成会优先读取这个状态。" />
         <Form form={storyStateForm} layout="vertical">
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
+            <Form.Item name="character_positions" label="角色位置 JSON"><Input.TextArea rows={4} /></Form.Item>
+            <Form.Item name="character_relationships" label="角色关系 JSON"><Input.TextArea rows={4} /></Form.Item>
+            <Form.Item name="known_secrets" label="已知秘密 JSON"><Input.TextArea rows={4} /></Form.Item>
+            <Form.Item name="item_ownership" label="道具归属 JSON"><Input.TextArea rows={4} /></Form.Item>
+            <Form.Item name="foreshadowing_status" label="伏笔状态 JSON"><Input.TextArea rows={4} /></Form.Item>
+            <Form.Item name="timeline" label="时间线 JSON"><Input.TextArea rows={4} /></Form.Item>
+          </div>
+          <Form.Item name="mainline_progress" label="主线进度">
+            <Input />
+          </Form.Item>
           <Form.Item name="story_state" label="故事状态 JSON" rules={[{ required: true, message: '请输入故事状态 JSON' }]}>
-            <Input.TextArea rows={18} />
+            <Input.TextArea rows={8} />
           </Form.Item>
         </Form>
       </Modal>
