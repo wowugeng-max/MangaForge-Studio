@@ -2,6 +2,7 @@ import type { Express } from 'express'
 import {
   appendNovelRun,
   createNovelReview,
+  listChapterVersions,
   listNovelCharacters,
   listNovelChapters,
   listNovelOutlines,
@@ -12,6 +13,7 @@ import {
   updateNovelRun,
 } from '../novel'
 import { generateNovelChapterProse } from '../llm'
+import { buildMaterialScore } from './novel-chapter-context-routes'
 import { asArray, getNovelPayload, normalizeSceneProduction, parseJsonLikePayload } from './novel-route-utils'
 
 type GenerationRoutesContext = {
@@ -45,6 +47,28 @@ type GenerationRoutesContext = {
   explainReferenceSafety: (referenceReport: any, safetyDecision: any) => any
   buildMigrationAudit: (project: any, referenceReport: any, safetyExplanation: any) => any
   updateStoryStateMachine: (workspace: string, project: any, chapter: any, contextPackage: any, chapterText: string, modelId?: number) => Promise<any>
+}
+
+function buildTextDiffSummary(before: string, after: string) {
+  const beforeParas = String(before || '').split(/\n+/).map(item => item.trim()).filter(Boolean)
+  const afterParas = String(after || '').split(/\n+/).map(item => item.trim()).filter(Boolean)
+  const max = Math.max(beforeParas.length, afterParas.length)
+  const paragraphChanges = []
+  for (let i = 0; i < max; i += 1) {
+    if ((beforeParas[i] || '') !== (afterParas[i] || '')) {
+      paragraphChanges.push({ index: i + 1, before: beforeParas[i] || '', after: afterParas[i] || '' })
+    }
+    if (paragraphChanges.length >= 80) break
+  }
+  const beforeChars = String(before || '').replace(/\s/g, '').length
+  const afterChars = String(after || '').replace(/\s/g, '').length
+  return {
+    before_length: beforeChars,
+    after_length: afterChars,
+    delta_length: afterChars - beforeChars,
+    change_count: paragraphChanges.length,
+    paragraph_changes: paragraphChanges,
+  }
 }
 
 export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoutesContext) {
@@ -88,6 +112,105 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
         output_ref: JSON.stringify(output),
       })
       res.json({ ok: true, run, group: output })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.post('/api/novel/projects/:id/chapter-groups/start-ready', async (req, res) => {
+    try {
+      const activeWorkspace = ctx.getWorkspace()
+      const project = await ctx.getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const [chapters, worldbuilding, characters, outlines, reviews] = await Promise.all([
+        listNovelChapters(activeWorkspace, project.id),
+        listNovelWorldbuilding(activeWorkspace, project.id),
+        listNovelCharacters(activeWorkspace, project.id),
+        listNovelOutlines(activeWorkspace, project.id),
+        listNovelReviews(activeWorkspace, project.id),
+      ])
+      const startNo = Number(req.body.start_chapter || chapters.find(ch => !ch.chapter_text)?.chapter_no || 1)
+      const scanLimit = Math.max(1, Math.min(120, Number(req.body.scan_limit || 40)))
+      const count = Math.max(1, Math.min(50, Number(req.body.count || 10)))
+      const minScore = Math.max(0, Math.min(100, Number(req.body.min_score || 65)))
+      const candidates = chapters
+        .filter(chapter => Number(chapter.chapter_no || 0) >= startNo)
+        .filter(chapter => req.body.include_written ? true : !chapter.chapter_text)
+        .sort((a, b) => Number(a.chapter_no || 0) - Number(b.chapter_no || 0))
+        .slice(0, scanLimit)
+      const ready = []
+      const skipped = []
+      for (const chapter of candidates) {
+        const contextPackage = await ctx.buildChapterContextPackage(activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews)
+        const materialScore = buildMaterialScore(contextPackage)
+        const row = {
+          id: chapter.id,
+          chapter_no: chapter.chapter_no,
+          title: chapter.title,
+          score: materialScore.score,
+          can_generate: materialScore.can_generate && Number(materialScore.score || 0) >= minScore,
+          blockers: materialScore.blockers,
+          recommendations: materialScore.recommendations,
+        }
+        if (row.can_generate && ready.length < count) ready.push({ chapter, materialScore })
+        else skipped.push(row)
+      }
+      if (ready.length === 0) {
+        return res.status(409).json({
+          error: '没有找到材料达标的待生成章节',
+          error_code: 'NO_READY_CHAPTERS',
+          min_score: minScore,
+          scanned: candidates.length,
+          skipped,
+        })
+      }
+      const selected = ready.map(item => item.chapter)
+      const modelStrategy = project.reference_config?.model_strategy || ctx.getModelStrategy(project, Number(req.body.model_id || 0) || undefined)
+      const approvalPolicy = project.reference_config?.approval_policy || ctx.getApprovalPolicy(project)
+      const output = {
+        chapter_ids: selected.map(ch => ch.id),
+        chapters: ready.map(({ chapter, materialScore }) => ({
+          id: chapter.id,
+          chapter_no: chapter.chapter_no,
+          title: chapter.title,
+          status: chapter.chapter_text ? 'written' : 'pending',
+          material_score: materialScore.score,
+          scenes: normalizeSceneProduction(asArray(chapter.scene_breakdown).length ? chapter.scene_breakdown : asArray(chapter.scene_list), [], chapter.chapter_text ? 'accepted' : 'pending'),
+          stages: ctx.buildChapterGroupStages(),
+        })),
+        skipped_chapters: skipped,
+        current_index: 0,
+        mode: 'ready_matrix',
+        model_strategy: modelStrategy,
+        approval_policy: approvalPolicy,
+        policy: {
+          stop_on_failure: req.body.stop_on_failure !== false,
+          require_scene_confirmation: req.body.require_scene_confirmation ?? approvalPolicy.require_scene_card_approval,
+          quality_threshold: Number(req.body.quality_threshold || 78),
+          min_material_score: minScore,
+        },
+      }
+      const firstNo = selected[0]?.chapter_no || startNo
+      const lastNo = selected[selected.length - 1]?.chapter_no || firstNo
+      const run = await appendNovelRun(activeWorkspace, {
+        project_id: project.id,
+        run_type: 'chapter_group_generation',
+        step_name: `ready-chapter-${firstNo}-${lastNo}`,
+        status: 'ready',
+        input_ref: JSON.stringify(req.body || {}),
+        output_ref: JSON.stringify(output),
+      })
+      res.json({
+        ok: true,
+        run,
+        group: output,
+        summary: {
+          scanned: candidates.length,
+          queued: selected.length,
+          skipped: skipped.length,
+          min_score: minScore,
+        },
+      })
     } catch (error) {
       res.status(500).json({ error: String(error) })
     }
@@ -492,7 +615,11 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
         return res.status(409).json(errorPayload)
       }
       markStage('store', '写入章节正文与版本', 'running')
+      const beforeText = String(chapter.chapter_text || '')
       const updated = await updateNovelChapter(activeWorkspace, chapter.id, { chapter_text: finalText, scene_breakdown: finalSceneBreakdown, continuity_notes: finalContinuityNotes, status: 'draft' }, { versionSource: selfCheck?.revised ? 'repair' : 'agent_execute' })
+      const versionsAfterStore = await listChapterVersions(activeWorkspace, chapter.id).catch(() => [])
+      const previousVersion = versionsAfterStore[0] || null
+      const generationDiff = buildTextDiffSummary(beforeText, finalText)
       markStage('store', '章节已写入', 'success')
       let storyStateUpdate: any = null
       try {
@@ -502,7 +629,7 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
       } catch (stateError) {
         markStage('story_state', '故事状态机更新失败', 'warn', String(stateError).slice(0, 200))
       }
-      const pipelineResult = { context_package: contextPackage, self_check: selfCheck, pipeline }
+      const pipelineResult = { context_package: contextPackage, self_check: selfCheck, pipeline, diff: generationDiff, previous_version: previousVersion }
       await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'success', input_ref: JSON.stringify(req.body), output_ref: JSON.stringify({ outputSource: (result as any).outputSource, modelId: (result as any).modelId, modelName: (result as any).modelName, providerId: (result as any).providerId, usage: (result as any).usage, reference_report: referenceReport, safety_decision: safetyDecision, safety_explanation: safetyExplanation, migration_audit: migrationAudit, story_state_update: storyStateUpdate, ...pipelineResult }) })
       if (!wantsStream) return res.json({ chapter: updated, result, reference_report: referenceReport, safety_decision: safetyDecision, safety_explanation: safetyExplanation, migration_audit: migrationAudit, story_state_update: storyStateUpdate, ...pipelineResult })
       const fullText = String(finalText || '')

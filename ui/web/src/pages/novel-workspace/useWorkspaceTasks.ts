@@ -4,6 +4,7 @@ import type { WorkspaceActiveTask } from './TaskCenterDrawer'
 import { displayValue } from './utils'
 
 export function useWorkspaceTasks({
+  projectId,
   taskCenterOpen,
   selectedModelId,
   stepOutlineLoading,
@@ -20,6 +21,7 @@ export function useWorkspaceTasks({
   activeChapter,
   onCancelProseBatch,
 }: {
+  projectId: number
   taskCenterOpen: boolean
   selectedModelId?: number
   stepOutlineLoading: boolean
@@ -38,7 +40,22 @@ export function useWorkspaceTasks({
 }) {
   const [knowledgeIngestJobs, setKnowledgeIngestJobs] = useState<any[]>([])
   const [knowledgeJobsLoading, setKnowledgeJobsLoading] = useState(false)
+  const [productionTasks, setProductionTasks] = useState<any | null>(null)
+  const [productionTasksLoading, setProductionTasksLoading] = useState(false)
   const knowledgeIngestJobsRef = useRef<any[]>([])
+
+  const loadProductionTasks = useCallback(async () => {
+    if (!projectId) return
+    setProductionTasksLoading(true)
+    try {
+      const res = await apiClient.get(`/novel/projects/${projectId}/tasks`)
+      setProductionTasks(res.data || null)
+    } catch {
+      setProductionTasks(null)
+    } finally {
+      setProductionTasksLoading(false)
+    }
+  }, [projectId])
 
   const loadKnowledgeIngestJobs = useCallback(async () => {
     setKnowledgeJobsLoading(true)
@@ -73,13 +90,15 @@ export function useWorkspaceTasks({
 
   useEffect(() => {
     if (!taskCenterOpen) return
+    void loadProductionTasks()
     void loadKnowledgeIngestJobs()
     const timer = setInterval(() => {
       const hasLiveJob = knowledgeIngestJobsRef.current.some(job => ['queued', 'running'].includes(String(job.status || '')))
       if (hasLiveJob) void loadKnowledgeIngestJobs()
+      void loadProductionTasks()
     }, 3500)
     return () => clearInterval(timer)
-  }, [taskCenterOpen, loadKnowledgeIngestJobs])
+  }, [taskCenterOpen, loadKnowledgeIngestJobs, loadProductionTasks])
 
   const activeTasks = useMemo<WorkspaceActiveTask[]>(() => {
     const tasks: WorkspaceActiveTask[] = []
@@ -150,6 +169,9 @@ export function useWorkspaceTasks({
   return {
     activeTasks,
     activeKnowledgeJobCount,
+    productionTasks,
+    productionTasksLoading,
+    loadProductionTasks,
     knowledgeIngestJobs,
     knowledgeJobsLoading,
     loadKnowledgeIngestJobs,

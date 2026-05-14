@@ -256,6 +256,7 @@ export function WorkspaceCenter({
   isEmptyProject,
   selectedProject,
   activeChapter,
+  materialScore,
   worldbuildingCount,
   characterCount,
   outlineCount,
@@ -287,6 +288,7 @@ export function WorkspaceCenter({
   isEmptyProject: boolean
   selectedProject: any | null
   activeChapter: any | null
+  materialScore?: any
   worldbuildingCount: number
   characterCount: number
   outlineCount: number
@@ -362,6 +364,13 @@ export function WorkspaceCenter({
               第{activeChapter.chapter_no}章《{displayValue(activeChapter.title) || '无标题'}》
             </Title>
             {chapterStatusTag(activeChapter)}
+            {materialScore && (
+              <Tooltip title={(materialScore.recommendations || []).slice(0, 4).join('；') || '材料完整度'}>
+                <Tag color={materialScore.can_generate ? 'green' : Number(materialScore.score || 0) >= 65 ? 'gold' : 'red'} bordered={false}>
+                  材料 {materialScore.score ?? '-'}%
+                </Tag>
+              </Tooltip>
+            )}
             <div style={{ flex: 1 }} />
             <Text type="secondary" style={{ fontSize: 13 }}>{wc(activeChapter.chapter_text)} 字</Text>
             <SaveIndicator status={saveStatus} />

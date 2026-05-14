@@ -55,6 +55,7 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
     getStoryState,
     buildProductionDashboard: dashboardService.buildProductionDashboard,
     buildProductionMetrics: dashboardService.buildProductionMetrics,
+    buildCommercialReadiness: dashboardService.buildCommercialReadiness,
     getApprovalPolicy: productionService.getApprovalPolicy,
     getProductionBudget: productionService.getProductionBudget,
     getProductionBudgetDecision: productionService.getProductionBudgetDecision,

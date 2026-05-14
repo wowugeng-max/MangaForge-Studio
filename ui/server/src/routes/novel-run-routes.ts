@@ -59,6 +59,84 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
     }
   })
 
+  app.get('/api/novel/projects/:id/tasks', async (req, res) => {
+    try {
+      const activeWorkspace = ctx.getWorkspace()
+      const projectId = Number(req.params.id)
+      const project = await ctx.getProject(activeWorkspace, projectId)
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const runs = await listNovelRuns(activeWorkspace, projectId)
+      const worker = ctx.runQueueWorkers.get(projectId)
+        || (project.reference_config?.run_queue_worker?.status === 'running'
+          ? { ...project.reference_config.run_queue_worker, status: 'stale', phase: '后端进程已重启，可点击恢复 worker' }
+          : project.reference_config?.run_queue_worker)
+        || { status: 'idle' }
+      const normalizeRun = (run: any) => {
+        const payload = parseJsonLikePayload(run.output_ref) || {}
+        const chapters = Array.isArray(payload.chapters) ? payload.chapters : []
+        const done = chapters.filter((item: any) => ['success', 'skipped', 'written'].includes(item.status)).length
+        const percent = chapters.length ? Math.round((done / chapters.length) * 100) : ['success', 'ok', 'completed'].includes(run.status) ? 100 : ['running'].includes(run.status) ? 50 : 0
+        const lastError = payload.last_error?.error || payload.error || run.error_message || ''
+        return {
+          id: run.id,
+          run_type: run.run_type,
+          type_label: run.run_type === 'chapter_group_generation' ? '章节群生成'
+            : run.run_type === 'chapter_generation_pipeline' ? '章节流水线'
+              : run.run_type === 'batch_generate_prose' ? '批量正文生成'
+                : run.run_type === 'generate_prose' ? '正文生成'
+                  : run.run_type === 'original_incubation' ? '原创孵化'
+                    : run.run_type === 'plan' ? '全案规划'
+                      : run.run_type,
+          step_name: run.step_name,
+          status: run.status,
+          phase: payload.phase || payload.current_step || run.step_name || '',
+          progress: percent,
+          current_index: payload.current_index ?? null,
+          chapter_count: chapters.length,
+          failed_count: chapters.filter((item: any) => item.status === 'failed').length,
+          approval_count: chapters.filter((item: any) => item.status === 'needs_approval').length,
+          can_pause: ['running', 'ready'].includes(run.status),
+          can_resume: ['paused', 'failed', 'ready'].includes(run.status),
+          can_execute: run.run_type === 'chapter_group_generation' && ['ready', 'paused', 'failed', 'running'].includes(run.status),
+          error: lastError,
+          recovery_plan: lastError ? (payload.last_error?.recovery_plan || null) : null,
+          created_at: run.created_at,
+          duration_ms: run.duration_ms,
+          payload,
+        }
+      }
+      const tasks = runs
+        .filter(run => [
+          'chapter_group_generation',
+          'chapter_generation_pipeline',
+          'batch_generate_prose',
+          'generate_prose',
+          'original_incubation',
+          'plan',
+          'agent_execute',
+          'repair',
+        ].includes(run.run_type))
+        .map(normalizeRun)
+      const active = tasks.filter(task => ['queued', 'ready', 'running', 'paused', 'needs_approval'].includes(task.status))
+      res.json({
+        ok: true,
+        worker,
+        tasks,
+        active,
+        summary: {
+          total: tasks.length,
+          active: active.length,
+          running: tasks.filter(task => task.status === 'running').length,
+          paused: tasks.filter(task => task.status === 'paused').length,
+          failed: tasks.filter(task => task.status === 'failed').length,
+          needs_approval: tasks.reduce((sum, task) => sum + Number(task.approval_count || 0), 0),
+        },
+      })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
   app.get('/api/novel/projects/:id/run-queue/worker-status', async (req, res) => {
     const activeWorkspace = ctx.getWorkspace()
     const projectId = Number(req.params.id)

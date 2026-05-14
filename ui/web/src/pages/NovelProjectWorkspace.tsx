@@ -62,6 +62,8 @@ export default function NovelProjectWorkspace() {
   const [commercialToolsOpen, setCommercialToolsOpen] = useState(false)
   const [chapterGroupExecutingId, setChapterGroupExecutingId] = useState<number | null>(null)
   const [commercialToolLoading, setCommercialToolLoading] = useState('')
+  const [activeChapterDiagnostics, setActiveChapterDiagnostics] = useState<any | null>(null)
+  const [commercialReadiness, setCommercialReadiness] = useState<any | null>(null)
 
   // ── 大纲生成控制面板 ──
   const [outlinePanelOpen, setOutlinePanelOpen] = useState(false)
@@ -183,6 +185,7 @@ export default function NovelProjectWorkspace() {
 
   const showDiagnosticsModal = (diagnostics: any) => {
     const preflight = diagnostics?.preflight || {}
+    const materialScore = diagnostics?.material_score || {}
     const checks = Array.isArray(preflight.checks) ? preflight.checks : []
     const recommendations = Array.isArray(diagnostics?.recommendations) ? diagnostics.recommendations : []
     Modal.info({
@@ -192,13 +195,26 @@ export default function NovelProjectWorkspace() {
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
           <Card size="small">
             <Space align="center" size={16}>
-              <Progress type="circle" size={72} percent={Number(diagnostics?.readiness_score || 0)} status={preflight.ready ? 'success' : 'normal'} />
+              <Progress type="circle" size={72} percent={Number(materialScore.score ?? diagnostics?.readiness_score ?? 0)} status={materialScore.can_generate || preflight.ready ? 'success' : 'normal'} />
               <Space direction="vertical" size={4}>
-                <Text strong>{preflight.ready ? '可以生成' : '存在材料缺口'}</Text>
+                <Text strong>{materialScore.can_generate || preflight.ready ? '可以生成' : '存在材料缺口'}</Text>
                 <Text type="secondary">系统会根据高危缺口决定是否阻止直接生成。</Text>
               </Space>
             </Space>
           </Card>
+          {Array.isArray(materialScore.categories) && materialScore.categories.length > 0 && (
+            <Card size="small" title="材料完整度">
+              <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                {materialScore.categories.map((item: any) => (
+                  <div key={item.key} style={{ display: 'grid', gridTemplateColumns: '92px minmax(0, 1fr) 42px', gap: 8, alignItems: 'center' }}>
+                    <Text style={{ fontSize: 12 }}>{item.label}</Text>
+                    <Progress percent={Number(item.score || 0)} size="small" status={item.score >= 80 ? 'success' : item.score < 60 && item.required ? 'exception' : 'normal'} />
+                    <Text type="secondary" style={{ fontSize: 12 }}>{item.score}</Text>
+                  </div>
+                ))}
+              </Space>
+            </Card>
+          )}
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             {checks.map((check: any, index: number) => (
               <Tag key={`${check.key || index}`} color={check.ok ? 'green' : check.severity === 'high' ? 'red' : 'gold'} bordered={false}>
@@ -216,6 +232,47 @@ export default function NovelProjectWorkspace() {
               <Paragraph ellipsis={{ rows: 4, expandable: true }} style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }}>
                 {JSON.stringify(diagnostics.writing_bible, null, 2)}
               </Paragraph>
+            </Card>
+          )}
+        </Space>
+      ),
+    })
+  }
+
+  const showCommercialReadinessModal = (readiness: any) => {
+    const categories = Array.isArray(readiness?.categories) ? readiness.categories : []
+    Modal.info({
+      title: '商业化就绪度',
+      width: 860,
+      content: (
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Card size="small">
+            <Space align="center" size={16}>
+              <Progress type="circle" size={76} percent={Number(readiness?.score || 0)} status={readiness?.can_batch_generate ? 'success' : 'normal'} />
+              <Space direction="vertical" size={4}>
+                <Text strong>{readiness?.can_batch_generate ? '可以进入批量生产' : '建议先补齐关键材料'}</Text>
+                <Text type="secondary">
+                  {readiness?.level || '-'} · 章节 {readiness?.summary?.chapters || 0} · 已写 {readiness?.summary?.written_chapters || 0} · 失败任务 {readiness?.summary?.failed_runs || 0}
+                </Text>
+              </Space>
+            </Space>
+          </Card>
+          {categories.length > 0 && (
+            <Card size="small" title="分项评分">
+              <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                {categories.map((item: any) => (
+                  <div key={item.key} style={{ display: 'grid', gridTemplateColumns: '96px minmax(0, 1fr) 44px', gap: 8, alignItems: 'center' }}>
+                    <Text style={{ fontSize: 12 }}>{item.label}</Text>
+                    <Progress percent={Number(item.score || 0)} size="small" status={item.score >= 80 ? 'success' : item.score < 60 && item.required ? 'exception' : 'normal'} />
+                    <Text type="secondary" style={{ fontSize: 12 }}>{item.score}</Text>
+                  </div>
+                ))}
+              </Space>
+            </Card>
+          )}
+          {Array.isArray(readiness?.next_actions) && readiness.next_actions.length > 0 && (
+            <Card size="small" title="下一步动作">
+              <List size="small" dataSource={readiness.next_actions} renderItem={(item: string) => <List.Item>{item}</List.Item>} />
             </Card>
           )}
         </Space>
@@ -305,6 +362,9 @@ export default function NovelProjectWorkspace() {
   const {
     activeTasks,
     activeKnowledgeJobCount,
+    productionTasks,
+    productionTasksLoading,
+    loadProductionTasks,
     knowledgeIngestJobs,
     knowledgeJobsLoading,
     loadKnowledgeIngestJobs,
@@ -312,6 +372,7 @@ export default function NovelProjectWorkspace() {
     resumeKnowledgeIngestJob,
     cancelKnowledgeIngestJob,
   } = useWorkspaceTasks({
+    projectId,
     taskCenterOpen,
     selectedModelId,
     stepOutlineLoading,
@@ -328,6 +389,42 @@ export default function NovelProjectWorkspace() {
     activeChapter,
     onCancelProseBatch: cancelStepGenerateProse,
   })
+
+  useEffect(() => {
+    let canceled = false
+    const loadDiagnostics = async () => {
+      if (!activeChapter?.id || !projectId) {
+        setActiveChapterDiagnostics(null)
+        return
+      }
+      try {
+        const res = await apiClient.get(`/novel/chapters/${activeChapter.id}/generation-diagnostics`, { params: { project_id: projectId } })
+        if (!canceled) setActiveChapterDiagnostics(res.data || null)
+      } catch {
+        if (!canceled) setActiveChapterDiagnostics(null)
+      }
+    }
+    void loadDiagnostics()
+    return () => { canceled = true }
+  }, [activeChapter?.id, activeChapter?.updated_at, projectId])
+
+  useEffect(() => {
+    let canceled = false
+    const loadCommercialReadiness = async () => {
+      if (!projectId || !selectedProject) {
+        setCommercialReadiness(null)
+        return
+      }
+      try {
+        const res = await apiClient.get(`/novel/projects/${projectId}/commercial-readiness`)
+        if (!canceled) setCommercialReadiness(res.data?.readiness || null)
+      } catch {
+        if (!canceled) setCommercialReadiness(null)
+      }
+    }
+    void loadCommercialReadiness()
+    return () => { canceled = true }
+  }, [projectId, selectedProject?.updated_at, chapters.length, outlines.length, characters.length, runRecords.length, reviews.length])
 
   // ── diff toggle ──
   const [showOnlyDiff, setShowOnlyDiff] = useState(true)
@@ -698,14 +795,19 @@ export default function NovelProjectWorkspace() {
     if (!selectedProject) return
     setDashboardLoading(true)
     try {
-      const [dashboardRes, assetsRes, strategyRes] = await Promise.all([
+      const [dashboardRes, assetsRes, strategyRes, readinessRes, matrixRes] = await Promise.all([
         apiClient.get(`/novel/projects/${projectId}/production-dashboard`),
         apiClient.get(`/novel/projects/${projectId}/writing-assets`).catch(() => ({ data: null })),
         apiClient.get(`/novel/projects/${projectId}/model-strategy`, { params: { model_id: selectedModelId } }).catch(() => ({ data: null })),
+        apiClient.get(`/novel/projects/${projectId}/commercial-readiness`).catch(() => ({ data: null })),
+        apiClient.get(`/novel/projects/${projectId}/chapter-material-matrix`, { params: { limit: 120, unwritten_only: 0 } }).catch(() => ({ data: null })),
       ])
       const dashboard = dashboardRes.data?.dashboard || {}
       const assets = assetsRes.data?.assets || []
       const strategy = strategyRes.data?.strategy || {}
+      const readiness = readinessRes.data?.readiness || null
+      const materialMatrix = matrixRes.data || null
+      if (readiness) setCommercialReadiness(readiness)
       Modal.info({
         title: '生产看板',
         width: 900,
@@ -716,11 +818,59 @@ export default function NovelProjectWorkspace() {
               <Tag color="green" bordered={false}>已写 {dashboard.written_chapters || 0}</Tag>
               <Tag bordered={false}>字数 {Number(dashboard.word_count || 0).toLocaleString()}</Tag>
               <Tag color={dashboard.average_quality_score >= 78 ? 'green' : 'gold'} bordered={false}>均分 {dashboard.average_quality_score ?? '-'}</Tag>
+              {readiness && <Tag color={readiness.can_batch_generate ? 'green' : 'gold'} bordered={false}>就绪 {readiness.score}%</Tag>}
               {dashboard.story_state_updated_to && <Tag color="purple" bordered={false}>状态至第{dashboard.story_state_updated_to}章</Tag>}
             </Space>
+            {readiness && (
+              <Card size="small" title="商业化就绪度">
+                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                  <Progress percent={Number(readiness.score || 0)} size="small" status={readiness.can_batch_generate ? 'success' : 'normal'} />
+                  {Array.isArray(readiness.next_actions) && readiness.next_actions.length > 0 && (
+                    <Paragraph style={{ marginBottom: 0 }} ellipsis={{ rows: 2, expandable: true }}>{readiness.next_actions.join('；')}</Paragraph>
+                  )}
+                </Space>
+              </Card>
+            )}
             {Array.isArray(dashboard.recommendations) && dashboard.recommendations.length > 0 && (
               <Card size="small" title="生产建议">
                 <List size="small" dataSource={dashboard.recommendations} renderItem={(item: string) => <List.Item>{item}</List.Item>} />
+              </Card>
+            )}
+            {materialMatrix?.summary && (
+              <Card size="small" title="章节材料矩阵">
+                <Space direction="vertical" size={10} style={{ width: '100%' }}>
+                  <Space wrap>
+                    <Tag color="blue" bordered={false}>扫描 {materialMatrix.summary.total || 0} 章</Tag>
+                    <Tag color="green" bordered={false}>可生成 {materialMatrix.summary.ready || 0}</Tag>
+                    <Tag color={(materialMatrix.summary.blocked || 0) > 0 ? 'red' : 'default'} bordered={false}>阻塞 {materialMatrix.summary.blocked || 0}</Tag>
+                    <Tag color={(materialMatrix.summary.average_score || 0) >= 75 ? 'green' : 'gold'} bordered={false}>均分 {materialMatrix.summary.average_score || 0}</Tag>
+                  </Space>
+                  <List
+                    size="small"
+                    dataSource={(materialMatrix.weakest || []).slice(0, 8)}
+                    renderItem={(row: any) => (
+                      <List.Item
+                        actions={[
+                          <Button key="open" size="small" type="link" onClick={() => {
+                            Modal.destroyAll()
+                            void selectChapter(row.chapter_id)
+                          }}>打开</Button>,
+                        ]}
+                      >
+                        <List.Item.Meta
+                          title={(
+                            <Space wrap>
+                              <Tag color={row.can_generate ? 'green' : Number(row.score || 0) >= 65 ? 'gold' : 'red'} bordered={false}>{row.score}%</Tag>
+                              <Text>第{row.chapter_no}章《{row.title || '未命名'}》</Text>
+                              {row.has_text && <Tag bordered={false}>已写</Tag>}
+                            </Space>
+                          )}
+                          description={(row.recommendations || []).slice(0, 2).join('；') || '材料可用'}
+                        />
+                      </List.Item>
+                    )}
+                  />
+                </Space>
               </Card>
             )}
             <Card size="small" title="写作资产库覆盖">
@@ -847,6 +997,55 @@ export default function NovelProjectWorkspace() {
       message.success('章节群任务已创建，可在任务中心查看并逐章推进')
     } catch (error: any) {
       message.error(error?.response?.data?.error || error?.message || '章节群任务创建失败')
+    }
+  }
+
+  const startReadyChapterGroupGeneration = async () => {
+    if (!selectedProject) return
+    if (!selectedModelId) return message.warning('请先选择模型')
+    setCommercialToolLoading('readyGroup')
+    try {
+      const res = await apiClient.post(`/novel/projects/${projectId}/chapter-groups/start-ready`, {
+        model_id: selectedModelId,
+        start_chapter: activeChapter?.chapter_no || undefined,
+        scan_limit: 60,
+        count: 10,
+        min_score: 65,
+        require_scene_confirmation: true,
+      })
+      await loadProjectModules()
+      await loadProductionTasks()
+      setTaskCenterOpen(true)
+      message.success(`已创建智能章节群：入队 ${res.data?.summary?.queued || 0} 章，跳过 ${res.data?.summary?.skipped || 0} 章`)
+    } catch (error: any) {
+      const payload = error?.response?.data
+      if (payload?.error_code === 'NO_READY_CHAPTERS') {
+        Modal.warning({
+          title: '没有可入队章节',
+          width: 760,
+          content: (
+            <Space direction="vertical" size={12} style={{ width: '100%' }}>
+              <Text>已扫描 {payload.scanned || 0} 章，但没有达到材料阈值 {payload.min_score || 65}% 的待生成章节。</Text>
+              <List
+                size="small"
+                dataSource={(payload.skipped || []).slice(0, 8)}
+                renderItem={(row: any) => (
+                  <List.Item>
+                    <List.Item.Meta
+                      title={`第${row.chapter_no}章《${row.title || '未命名'}》 · ${row.score}%`}
+                      description={(row.recommendations || []).slice(0, 2).join('；') || '材料不足'}
+                    />
+                  </List.Item>
+                )}
+              />
+            </Space>
+          ),
+        })
+      } else {
+        message.error(payload?.error || error?.message || '智能章节群创建失败')
+      }
+    } finally {
+      setCommercialToolLoading('')
     }
   }
 
@@ -1287,6 +1486,66 @@ export default function NovelProjectWorkspace() {
     })
   }
 
+  const openMaterialRepairPlan = async () => {
+    setCommercialToolLoading('materialRepair')
+    try {
+      const res = await apiClient.get(`/novel/projects/${projectId}/material-repair-plan`, {
+        params: { start_chapter: activeChapter?.chapter_no || 1, limit: 120, unwritten_only: 1 },
+      })
+      const data = res.data || {}
+      Modal.info({
+        title: '材料补齐计划',
+        width: 900,
+        content: (
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Space wrap>
+              <Tag color="blue" bordered={false}>扫描 {data.summary?.scanned || 0} 章</Tag>
+              <Tag color="green" bordered={false}>可生成 {data.summary?.ready || 0}</Tag>
+              <Tag color={(data.summary?.blocked || 0) > 0 ? 'red' : 'default'} bordered={false}>待补齐 {data.summary?.blocked || 0}</Tag>
+              <Tag bordered={false}>均分 {data.summary?.average_score || 0}</Tag>
+            </Space>
+            {Array.isArray(data.plan?.next_actions) && data.plan.next_actions.length > 0 && (
+              <Card size="small" title="推荐处理顺序">
+                <List size="small" dataSource={data.plan.next_actions} renderItem={(item: string) => <List.Item>{item}</List.Item>} />
+              </Card>
+            )}
+            <Space direction="vertical" size={10} style={{ width: '100%', maxHeight: 520, overflow: 'auto' }}>
+              {(data.plan?.buckets || []).map((bucket: any) => (
+                <Card key={bucket.key} size="small" title={<Space><Text strong>{bucket.label}</Text><Tag bordered={false}>{bucket.count} 章</Tag></Space>}>
+                  <Paragraph style={{ marginTop: 0 }}>{bucket.action}</Paragraph>
+                  <List
+                    size="small"
+                    dataSource={(bucket.chapters || []).slice(0, 10)}
+                    renderItem={(row: any) => (
+                      <List.Item
+                        actions={[
+                          <Button key="open" size="small" type="link" onClick={() => {
+                            Modal.destroyAll()
+                            void selectChapter(row.chapter_id)
+                          }}>打开</Button>,
+                        ]}
+                      >
+                        <List.Item.Meta
+                          title={`第${row.chapter_no}章《${row.title || '未命名'}》 · 总分 ${row.score}% / 分项 ${row.category_score}%`}
+                          description={row.recommendation || '补齐材料'}
+                        />
+                      </List.Item>
+                    )}
+                  />
+                </Card>
+              ))}
+              {(!data.plan?.buckets || data.plan.buckets.length === 0) && <Text type="secondary">当前扫描范围内没有明显材料缺口。</Text>}
+            </Space>
+          </Space>
+        ),
+      })
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '材料补齐计划加载失败')
+    } finally {
+      setCommercialToolLoading('')
+    }
+  }
+
   const openRunQueue = async () => {
     await runCommercialTool('queue', '后台任务队列', async () => {
       const res = await apiClient.get(`/novel/projects/${projectId}/run-queue`)
@@ -1315,6 +1574,15 @@ export default function NovelProjectWorkspace() {
     await runCommercialTool('queueStop', '后台任务队列', async () => {
       await apiClient.post(`/novel/projects/${projectId}/run-queue/stop-worker`)
       const res = await apiClient.get(`/novel/projects/${projectId}/run-queue`)
+      return res.data
+    })
+  }
+
+  const recoverRunQueue = async () => {
+    await runCommercialTool('queueRecover', '恢复后台任务队列', async () => {
+      const res = await apiClient.post(`/novel/projects/${projectId}/run-queue/recover`)
+      await loadProductionTasks()
+      setTaskCenterOpen(true)
       return res.data
     })
   }
@@ -1453,6 +1721,37 @@ export default function NovelProjectWorkspace() {
       setStreamingPercent(100)
       setStreamingText(prev => prev || updated?.chapter_text || '')
       await loadProjectModules()
+      if (done?.diff) {
+        const diff = done.diff
+        Modal.info({
+          title: '生成结果差异',
+          width: 820,
+          content: (
+            <Space direction="vertical" size={12} style={{ width: '100%' }}>
+              <Space wrap>
+                <Tag color={Number(diff.delta_length || 0) >= 0 ? 'green' : 'gold'} bordered={false}>字数变化 {diff.delta_length >= 0 ? '+' : ''}{diff.delta_length || 0}</Tag>
+                <Tag bordered={false}>原 {diff.before_length || 0} 字</Tag>
+                <Tag bordered={false}>新 {diff.after_length || 0} 字</Tag>
+                <Tag bordered={false}>改动段落 {diff.change_count || 0}</Tag>
+                {done.previous_version?.version_no && <Tag color="blue" bordered={false}>已保留 v{done.previous_version.version_no}</Tag>}
+              </Space>
+              <Card size="small" title="段落变更预览">
+                {(diff.paragraph_changes || []).length ? (
+                  <Space direction="vertical" size={8} style={{ width: '100%', maxHeight: 360, overflow: 'auto' }}>
+                    {(diff.paragraph_changes || []).slice(0, 12).map((row: any) => (
+                      <div key={row.index} style={{ borderBottom: '1px solid #f0f0f0', paddingBottom: 8 }}>
+                        <Text type="secondary" style={{ fontSize: 12 }}>第 {row.index} 段</Text>
+                        {row.before && <Paragraph style={{ margin: '4px 0', fontSize: 12, color: '#b42318' }} ellipsis={{ rows: 2, expandable: true }}>旧：{row.before}</Paragraph>}
+                        {row.after && <Paragraph style={{ margin: 0, fontSize: 12, color: '#067647' }} ellipsis={{ rows: 2, expandable: true }}>新：{row.after}</Paragraph>}
+                      </div>
+                    ))}
+                  </Space>
+                ) : <Text type="secondary">正文差异很小或原文为空。</Text>}
+              </Card>
+            </Space>
+          ),
+        })
+      }
       setRightPanelOpen(true)
       setRightPanelTab('proseQuality')
       message.success(`已使用 ${done?.result?.modelName || '所选模型'} 生成正文`)
@@ -1718,6 +2017,11 @@ export default function NovelProjectWorkspace() {
             章节群
           </Button>
         </Tooltip>
+        <Tooltip title="先检查材料完整度，只把可生成章节加入章节群队列">
+          <Button type="text" size="small" loading={commercialToolLoading === 'readyGroup'} onClick={startReadyChapterGroupGeneration}>
+            智能章节群
+          </Button>
+        </Tooltip>
         <Tooltip title="查看参考项目、画像完整度、正文缓存和参考报告">
           <Button type="text" size="small" icon={<BookOutlined />} onClick={() => setReferenceEngineeringOpen(true)}>
             参考工程
@@ -1725,6 +2029,18 @@ export default function NovelProjectWorkspace() {
         </Tooltip>
         {referenceSummary.count > 0 && (
           <Tag color="purple" bordered={false}>{referenceSummary.strengthLabel} · {referenceSummary.count} 部参考</Tag>
+        )}
+        {commercialReadiness && (
+          <Tooltip title={(commercialReadiness.next_actions || []).slice(0, 3).join('；') || '查看商业化就绪度'}>
+            <Tag
+              color={commercialReadiness.can_batch_generate ? 'green' : Number(commercialReadiness.score || 0) >= 70 ? 'gold' : 'red'}
+              bordered={false}
+              style={{ cursor: 'pointer' }}
+              onClick={() => showCommercialReadinessModal(commercialReadiness)}
+            >
+              就绪 {commercialReadiness.score ?? '-'}%
+            </Tag>
+          </Tooltip>
         )}
         <Tooltip title="查看运行中任务和历史运行记录">
           <Badge count={activeTasks.length + activeKnowledgeJobCount} size="small">
@@ -1764,6 +2080,7 @@ export default function NovelProjectWorkspace() {
           isEmptyProject={isEmptyProject}
           selectedProject={selectedProject}
           activeChapter={activeChapter}
+          materialScore={activeChapterDiagnostics?.material_score}
           worldbuildingCount={worldbuilding.length}
           characterCount={characters.length}
           outlineCount={outlines.length}
@@ -1882,9 +2199,12 @@ export default function NovelProjectWorkspace() {
             <Card size="small" title="生产稳定性">
               <Space direction="vertical" style={{ width: '100%' }}>
                 <Button block loading={commercialToolLoading === 'productionDesk'} onClick={openProductionDesk}>章节生产台</Button>
+                <Button block loading={commercialToolLoading === 'materialRepair'} onClick={openMaterialRepairPlan}>材料补齐计划</Button>
+                <Button block loading={commercialToolLoading === 'readyGroup'} onClick={startReadyChapterGroupGeneration}>智能章节群入队</Button>
                 <Button block loading={commercialToolLoading === 'queue'} onClick={openRunQueue}>后台任务队列</Button>
                 <Button block loading={commercialToolLoading === 'queueWorker'} onClick={startRunQueueWorker}>启动后台 worker</Button>
                 <Button block loading={commercialToolLoading === 'queueStop'} onClick={stopRunQueueWorker}>停止后台 worker</Button>
+                <Button block loading={commercialToolLoading === 'queueRecover'} onClick={recoverRunQueue}>恢复后台队列</Button>
                 <Button block loading={commercialToolLoading === 'metrics'} onClick={openProductionMetrics}>成本质量仪表盘</Button>
                 <Button block loading={commercialToolLoading === 'approval'} onClick={openApprovalPolicyEditor}>审批关卡策略</Button>
               </Space>
@@ -1993,17 +2313,19 @@ export default function NovelProjectWorkspace() {
         open={taskCenterOpen}
         activeTasks={activeTasks}
         runRecords={runRecords}
+        productionTasks={productionTasks}
         knowledgeIngestJobs={knowledgeIngestJobs}
-        loading={loading}
+        loading={loading || productionTasksLoading}
         knowledgeJobsLoading={knowledgeJobsLoading}
         onClose={() => setTaskCenterOpen(false)}
-        onRefresh={async () => { if (await flushPendingSave()) await loadProjectModules() }}
+        onRefresh={async () => { if (await flushPendingSave()) { await loadProjectModules(); await loadProductionTasks() } }}
         onRefreshKnowledgeJobs={loadKnowledgeIngestJobs}
         onPauseKnowledgeJob={(jobId) => { void pauseKnowledgeIngestJob(jobId) }}
         onResumeKnowledgeJob={(jobId) => { void resumeKnowledgeIngestJob(jobId) }}
         onCancelKnowledgeJob={(jobId) => { void cancelKnowledgeIngestJob(jobId) }}
         chapterGroupExecutingId={chapterGroupExecutingId}
         onExecuteChapterGroup={executeChapterGroupRun}
+        onRecoverRunQueue={() => { void recoverRunQueue() }}
         onApproveChapterGroup={approveChapterGroupStage}
         onRetryChapterGroup={retryChapterGroupStage}
         onPauseRun={async (run) => {

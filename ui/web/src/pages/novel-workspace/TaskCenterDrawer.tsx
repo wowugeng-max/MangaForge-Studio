@@ -263,6 +263,7 @@ export function TaskCenterDrawer({
   open,
   activeTasks,
   runRecords,
+  productionTasks,
   knowledgeIngestJobs,
   loading,
   knowledgeJobsLoading,
@@ -276,12 +277,14 @@ export function TaskCenterDrawer({
   onExecuteChapterGroup,
   onPauseRun,
   onResumeRun,
+  onRecoverRunQueue,
   onApproveChapterGroup,
   onRetryChapterGroup,
 }: {
   open: boolean
   activeTasks: WorkspaceActiveTask[]
   runRecords: any[]
+  productionTasks?: any | null
   knowledgeIngestJobs: any[]
   loading: boolean
   knowledgeJobsLoading: boolean
@@ -295,6 +298,7 @@ export function TaskCenterDrawer({
   onExecuteChapterGroup?: (run: any) => void
   onPauseRun?: (run: any) => void
   onResumeRun?: (run: any) => void
+  onRecoverRunQueue?: () => void
   onApproveChapterGroup?: (run: any, chapter: any) => void
   onRetryChapterGroup?: (run: any, chapter: any) => void
 }) {
@@ -306,6 +310,18 @@ export function TaskCenterDrawer({
   const sortedKnowledgeJobs = useMemo(() => (
     [...knowledgeIngestJobs].sort((a, b) => String(b.updated_at || b.created_at || '').localeCompare(String(a.updated_at || a.created_at || '')))
   ), [knowledgeIngestJobs])
+  const normalizedTasks = Array.isArray(productionTasks?.tasks) ? productionTasks.tasks : []
+  const activeNormalizedTasks = Array.isArray(productionTasks?.active) ? productionTasks.active : []
+  const taskSummary = productionTasks?.summary || {}
+  const openTaskDetail = (task: any) => {
+    const matched = runRecords.find((run: any) => run.id === task.id)
+    setDetailRun(matched || {
+      ...task,
+      input_ref: task.input_ref || '',
+      output_ref: JSON.stringify(task.payload || {}, null, 2),
+      error_message: task.error || '',
+    })
+  }
 
   return (
     <>
@@ -342,6 +358,66 @@ export function TaskCenterDrawer({
                 ))}
               </Space>
             )}
+          </Card>
+
+          <Card size="small" title="生产任务总览">
+            <Space direction="vertical" size={10} style={{ width: '100%' }}>
+              <Space wrap>
+                <Tag color="blue" bordered={false}>活动 {taskSummary.active || activeNormalizedTasks.length || 0}</Tag>
+                <Tag bordered={false}>运行 {taskSummary.running || 0}</Tag>
+                <Tag bordered={false}>暂停 {taskSummary.paused || 0}</Tag>
+                <Tag color={(taskSummary.failed || 0) > 0 ? 'red' : 'default'} bordered={false}>失败 {taskSummary.failed || 0}</Tag>
+                <Tag color={(taskSummary.needs_approval || 0) > 0 ? 'gold' : 'default'} bordered={false}>待确认 {taskSummary.needs_approval || 0}</Tag>
+                <Tag color={productionTasks?.worker?.status === 'running' ? 'green' : productionTasks?.worker?.status === 'stale' ? 'gold' : 'default'} bordered={false}>
+                  worker {productionTasks?.worker?.status || 'idle'}
+                </Tag>
+                {productionTasks?.worker?.status === 'stale' && onRecoverRunQueue && (
+                  <Button size="small" type="link" onClick={onRecoverRunQueue}>恢复队列</Button>
+                )}
+              </Space>
+              {normalizedTasks.length === 0 ? (
+                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无生产任务" />
+              ) : (
+                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                  {normalizedTasks.slice(0, 8).map((task: any) => (
+                    <div key={`${task.run_type}-${task.id}`} style={{ padding: 10, border: '1px solid #e5e7eb', borderRadius: 8 }}>
+                      <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                        <Space style={{ width: '100%', justifyContent: 'space-between' }} align="start">
+                          <Space wrap>
+                            {statusTag(task.status)}
+                            <Text strong>{task.type_label || runTypeLabel(task.run_type)}</Text>
+                            <Tag bordered={false}>{task.step_name || '-'}</Tag>
+                          </Space>
+                          <Button size="small" type="link" onClick={() => openTaskDetail(task)}>详情</Button>
+                        </Space>
+                        <Progress percent={Math.max(0, Math.min(100, Number(task.progress || 0)))} size="small" />
+                        <Text type="secondary" style={{ fontSize: 12 }}>{task.phase || task.created_at || '-'}</Text>
+                        {task.error && <Text type="danger" style={{ fontSize: 12 }}>{task.error}</Text>}
+                        {task.recovery_plan && (
+                          <Paragraph style={{ marginBottom: 0, fontSize: 12 }} ellipsis={{ rows: 2, expandable: true }}>
+                            恢复方案：{safeJsonPreview(task.recovery_plan)}
+                          </Paragraph>
+                        )}
+                        <Space wrap>
+                          {task.can_pause && onPauseRun && (
+                            <Button size="small" icon={<PauseCircleOutlined />} onClick={() => onPauseRun(task)}>暂停</Button>
+                          )}
+                          {task.can_resume && onResumeRun && (
+                            <Button size="small" type="primary" icon={<PlayCircleOutlined />} onClick={() => onResumeRun(task)}>继续</Button>
+                          )}
+                          {task.can_execute && task.run_type === 'chapter_group_generation' && onExecuteChapterGroup && (
+                            <Button size="small" loading={chapterGroupExecutingId === task.id} onClick={() => onExecuteChapterGroup(task)}>执行</Button>
+                          )}
+                          {task.error && (
+                            <Button size="small" type="link" onClick={() => openTaskDetail(task)}>查看恢复</Button>
+                          )}
+                        </Space>
+                      </Space>
+                    </div>
+                  ))}
+                </Space>
+              )}
+            </Space>
           </Card>
 
           <Card size="small" title={`全本抓取/提炼 ${sortedKnowledgeJobs.length}`}>

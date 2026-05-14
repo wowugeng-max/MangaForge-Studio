@@ -16,6 +16,7 @@ type ProjectControlRoutesContext = {
   getStoryState: (project: any) => any
   buildProductionDashboard: (project: any, chapters: any[], outlines: any[], characters: any[], reviews: any[], runs: any[]) => any
   buildProductionMetrics: (chapters: any[], reviews: any[], runs: any[]) => any
+  buildCommercialReadiness: (project: any, chapters: any[], outlines: any[], characters: any[], reviews: any[], runs: any[]) => any
   getApprovalPolicy: (project: any) => any
   getProductionBudget: (project: any) => any
   getProductionBudgetDecision: (project: any, runs: any[]) => any
@@ -119,6 +120,24 @@ export function registerNovelProjectControlRoutes(app: Express, ctx: ProjectCont
         listNovelRuns(activeWorkspace, project.id),
       ])
       res.json({ ok: true, metrics: ctx.buildProductionMetrics(chapters, reviews, runs) })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.get('/api/novel/projects/:id/commercial-readiness', async (req, res) => {
+    try {
+      const activeWorkspace = ctx.getWorkspace()
+      const project = await ctx.getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const [chapters, outlines, characters, reviews, runs] = await Promise.all([
+        listNovelChapters(activeWorkspace, project.id),
+        listNovelOutlines(activeWorkspace, project.id),
+        listNovelCharacters(activeWorkspace, project.id),
+        listNovelReviews(activeWorkspace, project.id),
+        listNovelRuns(activeWorkspace, project.id),
+      ])
+      res.json({ ok: true, readiness: ctx.buildCommercialReadiness(project, chapters, outlines, characters, reviews, runs) })
     } catch (error) {
       res.status(500).json({ error: String(error) })
     }
