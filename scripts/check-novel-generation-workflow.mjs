@@ -33,6 +33,12 @@ async function main() {
     'novel_editor_report',
     'novel_model_strategy',
     'novel_writing_assets',
+    'novel_chapter_group_autorun',
+    'novel_original_incubation_confirm',
+    'novel_editor_revision',
+    'novel_reference_fusion',
+    'novel_story_state_manual_edit',
+    'novel_book_review',
   ]
   const missingFeatures = requiredFeatures.filter(key => !features[key])
   if (missingFeatures.length) throw new Error(`Missing status features: ${missingFeatures.join(', ')}`)
@@ -54,6 +60,8 @@ async function main() {
     production_dashboard: false,
     writing_assets: false,
     model_strategy: false,
+    reference_fusion: false,
+    story_state: false,
     diagnostics: false,
     runs: false,
   }
@@ -66,6 +74,10 @@ async function main() {
   checks.writing_assets = Array.isArray(assets?.assets)
   const strategy = await request(`/novel/projects/${project.id}/model-strategy`)
   checks.model_strategy = Boolean(strategy?.strategy)
+  const fusion = await request(`/novel/projects/${project.id}/reference-fusion`)
+  checks.reference_fusion = Boolean(fusion?.fusion)
+  const storyState = await request(`/novel/projects/${project.id}/story-state`)
+  checks.story_state = Boolean(storyState && storyState.ok)
 
   if (chapter) {
     const diagnostics = await request(`/novel/chapters/${chapter.id}/generation-diagnostics?project_id=${project.id}`)

@@ -396,10 +396,11 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
     })).filter((card: any) => card.beat || card.purpose || card.title)
   }
   const generateSceneCardsForChapter = async (activeWorkspace: string, project: any, contextPackage: any, modelId?: number) => {
+    const stageModelId = getStageModelId(project, 'scene_cards', modelId)
     const result = await executeNovelAgent('outline-agent', project, {
       task: buildSceneCardsPrompt(project, contextPackage),
       upstreamContext: contextPackage,
-    }, { activeWorkspace, modelId: modelId ? String(modelId) : undefined, maxTokens: 3000, temperature: 0.45, skipMemory: true })
+    }, { activeWorkspace, modelId: stageModelId ? String(stageModelId) : undefined, maxTokens: 3000, temperature: getStageTemperature(project, 'scene_cards', 0.45), skipMemory: true })
     const payload = getNovelPayload(result)
     return { result, sceneCards: normalizeSceneCards(payload) }
   }
@@ -442,9 +443,10 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
     last_updated_at: new Date().toISOString(),
   })
   const updateStoryStateMachine = async (activeWorkspace: string, project: any, chapter: any, contextPackage: any, chapterText: string, modelId?: number) => {
+    const stageModelId = getStageModelId(project, 'review', modelId)
     const result = await executeNovelAgent('review-agent', project, {
       task: buildStoryStatePrompt(project, contextPackage, chapterText),
-    }, { activeWorkspace, modelId: modelId ? String(modelId) : undefined, maxTokens: 2500, temperature: 0.15, skipMemory: true })
+    }, { activeWorkspace, modelId: stageModelId ? String(stageModelId) : undefined, maxTokens: 2500, temperature: getStageTemperature(project, 'review', 0.15), skipMemory: true })
     const payload = getNovelPayload(result)
     const stateDelta = payload?.state_delta || {}
     const nextReferenceConfig = {
@@ -606,6 +608,14 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
       fallback_enabled: project.reference_config?.model_strategy?.fallback_enabled !== false,
     },
   })
+  const getStageModelId = (project: any, stage: string, preferredModelId?: number) => {
+    const strategy = project.reference_config?.model_strategy || getModelStrategy(project, preferredModelId)
+    return Number(strategy?.stages?.[stage]?.model_id || strategy?.preferred_model_id || preferredModelId || 0) || undefined
+  }
+  const getStageTemperature = (project: any, stage: string, fallback: number) => {
+    const value = Number(project.reference_config?.model_strategy?.stages?.[stage]?.temperature)
+    return Number.isFinite(value) && value > 0 ? value : fallback
+  }
   const buildProductionDashboard = (project: any, chapters: any[], outlines: any[], characters: any[], reviews: any[], runs: any[]) => {
     const written = chapters.filter(ch => ch.chapter_text)
     const proseQuality = reviews.filter(item => item.review_type === 'prose_quality').map(item => {
@@ -664,6 +674,77 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
     writing_bible: payload?.writing_bible || {},
     commercial_positioning: payload?.commercial_positioning || {},
   })
+  const storeOriginalIncubatorPayload = async (activeWorkspace: string, project: any, payload: any) => {
+    if (payload.worldbuilding?.world_summary || payload.worldbuilding?.rules) {
+      await createNovelWorldbuilding(activeWorkspace, {
+        project_id: project.id,
+        world_summary: payload.worldbuilding.world_summary || '',
+        rules: payload.worldbuilding.rules || [],
+        known_unknowns: payload.worldbuilding.known_unknowns || [],
+        raw_payload: payload.worldbuilding,
+      })
+    }
+    for (const character of payload.characters || []) {
+      if (!character?.name) continue
+      await createNovelCharacter(activeWorkspace, {
+        project_id: project.id,
+        name: String(character.name),
+        role_type: character.role_type || character.role || '',
+        archetype: character.archetype || '',
+        motivation: character.motivation || '',
+        goal: character.goal || '',
+        conflict: character.conflict || '',
+        growth_arc: character.growth_arc || '',
+        current_state: character.current_state || {},
+        raw_payload: character,
+      })
+    }
+    for (const outline of payload.outlines || []) {
+      if (!outline?.title) continue
+      await createNovelOutline(activeWorkspace, {
+        project_id: project.id,
+        outline_type: outline.outline_type || 'volume',
+        title: String(outline.title),
+        summary: outline.summary || '',
+        conflict_points: outline.conflict_points || [],
+        turning_points: outline.turning_points || [],
+        hook: outline.hook || '',
+        target_length: outline.target_length || '',
+        raw_payload: outline,
+      })
+    }
+    const existingChapters = await listNovelChapters(activeWorkspace, project.id)
+    for (const chapter of payload.chapters || []) {
+      const chapterNo = Number(chapter.chapter_no || 0)
+      if (!chapterNo || existingChapters.some(item => item.chapter_no === chapterNo)) continue
+      await createNovelChapter(activeWorkspace, {
+        project_id: project.id,
+        chapter_no: chapterNo,
+        title: chapter.title || `第${chapterNo}章`,
+        chapter_goal: chapter.chapter_goal || '',
+        chapter_summary: chapter.chapter_summary || '',
+        conflict: chapter.conflict || '',
+        ending_hook: chapter.ending_hook || '',
+        raw_payload: {
+          ...chapter,
+          must_advance: chapter.must_advance || [],
+          forbidden_repeats: chapter.forbidden_repeats || [],
+        },
+      })
+    }
+    return await updateNovelProject(activeWorkspace, project.id, {
+      synopsis: project.synopsis || payload.commercial_positioning?.reader_promise || '',
+      reference_config: {
+        ...(project.reference_config || {}),
+        writing_bible: {
+          ...payload.writing_bible,
+          updated_at: new Date().toISOString(),
+        },
+        commercial_positioning: payload.commercial_positioning,
+        original_incubator_last_payload: payload,
+      },
+    } as any)
+  }
   const buildMigrationAudit = (project: any, referenceReport: any, safetyExplanation: any) => ({
     project_id: project.id,
     learning_layers: safetyExplanation?.learned_layers || getSafetyPolicy(project),
@@ -826,9 +907,11 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
     return Boolean(review?.needs_revision) || Number(review?.score || 100) < 78 || hasHighIssue
   }
   const runProseSelfReviewAndRevision = async (activeWorkspace: string, project: any, contextPackage: any, chapterText: string, modelId?: number) => {
+    const reviewModelId = getStageModelId(project, 'review', modelId)
+    const reviseModelId = getStageModelId(project, 'revise', modelId)
     const reviewResult = await executeNovelAgent('review-agent', project, {
       task: buildProseReviewPrompt(project, contextPackage, chapterText),
-    }, { activeWorkspace, modelId: modelId ? String(modelId) : undefined, maxTokens: 3000, temperature: 0.2, skipMemory: true })
+    }, { activeWorkspace, modelId: reviewModelId ? String(reviewModelId) : undefined, maxTokens: 3000, temperature: getStageTemperature(project, 'review', 0.2), skipMemory: true })
     const reviewPayload = getNovelPayload(reviewResult)
     const normalizedReview = {
       passed: reviewPayload?.passed !== false,
@@ -844,7 +927,7 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
     const revisionResult = await executeNovelAgent('prose-agent', project, {
       task: buildProseRevisionPrompt(project, contextPackage, chapterText, normalizedReview),
       upstreamContext: contextPackage,
-    }, { activeWorkspace, modelId: modelId ? String(modelId) : undefined, maxTokens: 8000, temperature: 0.65, skipMemory: true })
+    }, { activeWorkspace, modelId: reviseModelId ? String(reviseModelId) : undefined, maxTokens: 8000, temperature: getStageTemperature(project, 'revise', 0.65), skipMemory: true })
     const revisionPayload = getNovelPayload(revisionResult)
     const revisedFirst = Array.isArray(revisionPayload?.prose_chapters) ? revisionPayload.prose_chapters[0] : revisionPayload
     const revisedText = revisedFirst?.chapter_text || revisionPayload?.chapter_text || ''
@@ -860,6 +943,97 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
       },
       final_text: revisedText,
       revised: true,
+    }
+  }
+  const generateChapterForGroup = async (activeWorkspace: string, projectId: number, chapterId: number, options: any = {}) => {
+    const preferredModelId = Number(options.model_id || 0) || undefined
+    const project = await getProject(activeWorkspace, projectId)
+    if (!project) throw new Error('project not found')
+    let chapters = await listNovelChapters(activeWorkspace, projectId)
+    let chapter = chapters.find(item => item.id === chapterId)
+    if (!chapter) throw new Error('chapter not found')
+    const [worldbuilding, characters, outlines, reviews] = await Promise.all([
+      listNovelWorldbuilding(activeWorkspace, projectId),
+      listNovelCharacters(activeWorkspace, projectId),
+      listNovelOutlines(activeWorkspace, projectId),
+      listNovelReviews(activeWorkspace, projectId),
+    ])
+    let contextPackage = await buildChapterContextPackage(activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews)
+    if (!contextPackage.preflight.ready && options.allow_incomplete !== true) {
+      throw Object.assign(new Error('章节生成前置检查未通过'), { code: 'PROSE_PREFLIGHT_BLOCKED', contextPackage })
+    }
+    if (!contextPackage.chapter_target.scene_cards.length || options.force_scene_cards === true) {
+      const sceneResult = await generateSceneCardsForChapter(activeWorkspace, project, contextPackage, preferredModelId)
+      if (sceneResult.sceneCards.length > 0) {
+        const updatedSceneChapter = await updateNovelChapter(activeWorkspace, chapter.id, {
+          scene_breakdown: sceneResult.sceneCards,
+          scene_list: sceneResult.sceneCards,
+          raw_payload: { ...(chapter.raw_payload || {}), scene_cards_source: 'chapter_group' },
+        } as any, { createVersion: false })
+        if (updatedSceneChapter) chapter = updatedSceneChapter
+        chapters = await listNovelChapters(activeWorkspace, projectId)
+        contextPackage = await buildChapterContextPackage(activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews)
+      }
+    }
+    const prevChapters = chapters
+      .filter(ch => ch.chapter_no < chapter.chapter_no && ch.chapter_text)
+      .slice(-3)
+      .map(ch => ({ chapter_no: ch.chapter_no, title: ch.title, chapter_summary: ch.chapter_summary || '', ending_hook: ch.ending_hook || '', chapter_text: ch.chapter_text }))
+    const draftResult = await generateNovelChapterProse(project, chapter, {
+      worldbuilding,
+      characters,
+      outline: outlines,
+      prompt: String(options.prompt || ''),
+      prevChapters,
+      contextPackage,
+      paragraphTask: buildParagraphProseContext(project, contextPackage),
+    } as any, activeWorkspace, getStageModelId(project, 'draft', preferredModelId))
+    const resultPayload = getNovelPayload(draftResult)
+    const proseArr = Array.isArray(resultPayload?.prose_chapters) ? resultPayload.prose_chapters : []
+    const firstProse = proseArr.length > 0 ? proseArr[0] : {}
+    const chapterText = resultPayload?.chapter_text || firstProse?.chapter_text
+    if ((draftResult as any).error || !chapterText) {
+      throw new Error(String((draftResult as any).error || (draftResult as any).fallbackReason || '模型未返回正文'))
+    }
+    let finalText = String(chapterText || '')
+    let finalSceneBreakdown = resultPayload?.scene_breakdown || firstProse?.scene_breakdown || chapter.scene_breakdown || []
+    let finalContinuityNotes = resultPayload?.continuity_notes || firstProse?.continuity_notes || chapter.continuity_notes || []
+    const selfCheck = await runProseSelfReviewAndRevision(activeWorkspace, project, contextPackage, finalText, preferredModelId)
+    finalText = selfCheck.final_text || finalText
+    if (selfCheck.revised && selfCheck.revision) {
+      finalSceneBreakdown = selfCheck.revision.scene_breakdown?.length ? selfCheck.revision.scene_breakdown : finalSceneBreakdown
+      finalContinuityNotes = selfCheck.revision.continuity_notes?.length ? selfCheck.revision.continuity_notes : finalContinuityNotes
+    }
+    const referenceReport = await buildReferenceUsageReport(activeWorkspace, project, '正文创作', finalText)
+    const safetyDecision = getReferenceSafetyDecision(project, referenceReport)
+    const safetyExplanation = explainReferenceSafety(referenceReport, safetyDecision)
+    const migrationAudit = buildMigrationAudit(project, referenceReport, safetyExplanation)
+    if (safetyDecision.blocked) {
+      throw Object.assign(new Error('仿写安全阈值未通过'), { code: 'REFERENCE_SAFETY_BLOCKED', referenceReport, safetyDecision, safetyExplanation, migrationAudit })
+    }
+    const updated = await updateNovelChapter(activeWorkspace, chapter.id, {
+      chapter_text: finalText,
+      scene_breakdown: finalSceneBreakdown,
+      continuity_notes: finalContinuityNotes,
+      status: 'draft',
+    }, { versionSource: selfCheck?.revised ? 'repair' : 'agent_execute' })
+    const storyStateUpdate = await updateStoryStateMachine(activeWorkspace, project, chapter, contextPackage, finalText, preferredModelId).catch(error => ({ error: String(error) }))
+    await createNovelReview(activeWorkspace, {
+      project_id: projectId,
+      review_type: 'prose_quality',
+      status: selfCheck?.review?.passed === false || Number(selfCheck?.review?.score || 100) < 78 ? 'warn' : 'ok',
+      summary: `章节群质检评分 ${selfCheck?.review?.score ?? '-'}`,
+      issues: Array.isArray(selfCheck?.review?.issues) ? selfCheck.review.issues.map((issue: any) => `${issue.severity || 'medium'}｜${issue.description || issue}`) : [],
+      payload: JSON.stringify({ chapter_id: chapter.id, context_package: contextPackage, self_check: selfCheck, reference_report: referenceReport, safety_decision: safetyDecision, migration_audit: migrationAudit }),
+    })
+    return {
+      chapter: updated,
+      score: selfCheck?.review?.score ?? null,
+      revised: Boolean(selfCheck?.revised),
+      reference_report: referenceReport,
+      safety_decision: safetyDecision,
+      migration_audit: migrationAudit,
+      story_state_update: storyStateUpdate,
     }
   }
 
@@ -952,6 +1126,46 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
     }
   })
 
+  app.get('/api/novel/projects/:id/story-state', async (req, res) => {
+    try {
+      const activeWorkspace = getWorkspace()
+      const project = await getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      res.json({ ok: true, story_state: getStoryState(project) })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.put('/api/novel/projects/:id/story-state', async (req, res) => {
+    try {
+      const activeWorkspace = getWorkspace()
+      const project = await getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const storyState = req.body?.story_state || req.body || {}
+      const updated = await updateNovelProject(activeWorkspace, project.id, {
+        reference_config: {
+          ...(project.reference_config || {}),
+          story_state: {
+            ...storyState,
+            manually_corrected_at: new Date().toISOString(),
+          },
+        },
+      } as any)
+      await createNovelReview(activeWorkspace, {
+        project_id: project.id,
+        review_type: 'story_state',
+        status: 'ok',
+        summary: '故事状态机已人工校正',
+        issues: [],
+        payload: JSON.stringify({ manual: true, story_state: updated?.reference_config?.story_state || storyState }),
+      })
+      res.json({ ok: true, story_state: updated?.reference_config?.story_state || storyState, project: updated })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
   app.get('/api/novel/projects/:id/production-dashboard', async (req, res) => {
     try {
       const activeWorkspace = getWorkspace()
@@ -1000,6 +1214,120 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
     }
   })
 
+  app.get('/api/novel/projects/:id/reference-fusion', async (req, res) => {
+    try {
+      const activeWorkspace = getWorkspace()
+      const project = await getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const references = asArray(project.reference_config?.references)
+      const reports = await listNovelReviews(activeWorkspace, project.id)
+      const latestReports = reports.filter(item => item.review_type === 'reference_report').slice(0, 8).map(item => parseJsonLikePayload(item.payload) || {})
+      const rows = await Promise.all(references.map(async (ref: any) => {
+        const title = String(ref.project_title || '').trim()
+        const categories = await Promise.all(['chapter_beat_template', 'style_profile', 'payoff_model', 'character_function_matrix', 'prose_syntax_profile', 'dialogue_mechanism'].map(async category => ({
+          category,
+          count: (await listKnowledge(category, { project_title: title }).catch(() => [])).length,
+        })))
+        return {
+          project_title: title,
+          weight: Number(ref.weight || 0.7),
+          use_for: asArray(ref.use_for),
+          dimensions: asArray(ref.dimensions),
+          avoid: asArray(ref.avoid),
+          categories,
+          learn: {
+            rhythm: categories.find(item => item.category === 'chapter_beat_template')?.count || 0,
+            style: (categories.find(item => item.category === 'style_profile')?.count || 0) + (categories.find(item => item.category === 'prose_syntax_profile')?.count || 0),
+            payoff: categories.find(item => item.category === 'payoff_model')?.count || 0,
+            character_function: categories.find(item => item.category === 'character_function_matrix')?.count || 0,
+          },
+        }
+      }))
+      const dimensionOwners: Record<string, string[]> = {}
+      for (const ref of rows) {
+        for (const dim of ref.dimensions.length ? ref.dimensions : ['未指定']) {
+          dimensionOwners[dim] = [...(dimensionOwners[dim] || []), ref.project_title]
+        }
+      }
+      const conflicts = Object.entries(dimensionOwners)
+        .filter(([, owners]) => owners.length > 1)
+        .map(([dimension, owners]) => ({ dimension, owners, suggestion: '为同一维度设置主参考，其他参考降权或只用于补充。' }))
+      const latestCopyHits = latestReports.flatMap(report => asArray(report?.copy_guard?.hits)).slice(0, 20)
+      res.json({
+        ok: true,
+        references: rows,
+        fusion: {
+          total_weight: rows.reduce((sum, row) => sum + Number(row.weight || 0), 0),
+          active_dimensions: Object.keys(dimensionOwners),
+          conflicts,
+          latest_copy_hits: latestCopyHits,
+          recommendations: [
+            conflicts.length ? '存在多个参考作品争夺同一维度，建议明确主参考和补充参考。' : '',
+            latestCopyHits.length ? '最近存在照搬命中，建议提高禁止项或降低对应参考权重。' : '',
+            rows.some(row => row.learn.rhythm === 0) ? '部分参考缺章节节拍模板，正文仿写时可能只学到设定而学不到节奏。' : '',
+          ].filter(Boolean),
+        },
+      })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.post('/api/novel/projects/:id/book-review', async (req, res) => {
+    try {
+      const activeWorkspace = getWorkspace()
+      const project = await getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const [chapters, outlines, characters, reviews] = await Promise.all([
+        listNovelChapters(activeWorkspace, project.id),
+        listNovelOutlines(activeWorkspace, project.id),
+        listNovelCharacters(activeWorkspace, project.id),
+        listNovelReviews(activeWorkspace, project.id),
+      ])
+      const chapterBriefs = chapters
+        .sort((a, b) => a.chapter_no - b.chapter_no)
+        .map(ch => ({
+          chapter_no: ch.chapter_no,
+          title: ch.title,
+          summary: ch.chapter_summary || compactText(ch.chapter_text || '', 220),
+          ending_hook: ch.ending_hook || '',
+          word_count: String(ch.chapter_text || '').replace(/\s/g, '').length,
+          has_text: Boolean(ch.chapter_text),
+        }))
+      const prompt = [
+        '任务：进行长篇小说全书/分卷级质量总检，只输出 JSON。',
+        `项目：${project.title}`,
+        '检查：主线是否停滞、角色成长是否断档、伏笔是否长期未回收、爽点密度是否下降、重复桥段/重复信息、分卷目标是否完成、是否偏离写作圣经。',
+        '输出字段：overall_score, mainline, character_arcs, foreshadowing, payoff_density, repetition, volume_goals, bible_alignment, must_fix, next_actions。',
+        '【写作圣经】',
+        JSON.stringify(project.reference_config?.writing_bible || {}, null, 2).slice(0, 5000),
+        '【大纲】',
+        JSON.stringify(outlines, null, 2).slice(0, 5000),
+        '【角色】',
+        JSON.stringify(characters.map(char => ({ name: char.name, role_type: char.role_type, goal: char.goal, current_state: char.current_state })), null, 2).slice(0, 5000),
+        '【章节摘要】',
+        JSON.stringify(chapterBriefs, null, 2).slice(0, 12000),
+        '【近期质检】',
+        JSON.stringify(reviews.slice(0, 12).map(item => ({ type: item.review_type, status: item.status, summary: item.summary, issues: item.issues })), null, 2).slice(0, 5000),
+      ].join('\n')
+      const modelId = getStageModelId(project, 'review', Number(req.body.model_id || 0) || undefined)
+      const result = await executeNovelAgent('review-agent', project, { task: prompt }, { activeWorkspace, modelId: modelId ? String(modelId) : undefined, maxTokens: 6000, temperature: getStageTemperature(project, 'review', 0.2), skipMemory: true })
+      const report = getNovelPayload(result)
+      const saved = await createNovelReview(activeWorkspace, {
+        project_id: project.id,
+        review_type: 'book_review',
+        status: Number(report.overall_score || 0) >= 78 ? 'ok' : 'warn',
+        summary: `全书总检评分 ${report.overall_score ?? '-'}`,
+        issues: asArray(report.must_fix).map((item: any) => String(item)),
+        payload: JSON.stringify({ report, chapter_count: chapters.length, written_count: chapters.filter(ch => ch.chapter_text).length }),
+      })
+      await appendNovelRun(activeWorkspace, { project_id: project.id, run_type: 'book_review', step_name: 'global', status: 'success', output_ref: JSON.stringify({ report, review: saved }) })
+      res.json({ ok: true, report, review: saved, result })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
   app.get('/api/novel/projects/:id/model-strategy', async (req, res) => {
     try {
       const activeWorkspace = getWorkspace()
@@ -1036,89 +1364,45 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
       if (!project) return res.status(404).json({ error: 'project not found' })
       const modelId = Number(req.body.model_id || 0) || undefined
       const chapterCount = Math.max(5, Math.min(80, Number(req.body.chapter_count || 30)))
+      const stageModelId = getStageModelId(project, 'incubation', modelId)
       const result = await executeNovelAgent('outline-agent', project, {
         task: buildOriginalIncubatorPrompt(project, { ...req.body, chapter_count: chapterCount }),
-      }, { activeWorkspace, modelId: modelId ? String(modelId) : undefined, maxTokens: 9000, temperature: 0.65, skipMemory: true })
+      }, { activeWorkspace, modelId: stageModelId ? String(stageModelId) : undefined, maxTokens: 9000, temperature: getStageTemperature(project, 'incubation', 0.65), skipMemory: true })
       const payload = normalizeIncubatorPayload(getNovelPayload(result), chapterCount)
+      let updatedProject: any = null
       if (req.body.auto_store !== false) {
-        if (payload.worldbuilding?.world_summary || payload.worldbuilding?.rules) {
-          await createNovelWorldbuilding(activeWorkspace, {
-            project_id: project.id,
-            world_summary: payload.worldbuilding.world_summary || '',
-            rules: payload.worldbuilding.rules || [],
-            known_unknowns: payload.worldbuilding.known_unknowns || [],
-            raw_payload: payload.worldbuilding,
-          })
-        }
-        for (const character of payload.characters) {
-          if (!character?.name) continue
-          await createNovelCharacter(activeWorkspace, {
-            project_id: project.id,
-            name: String(character.name),
-            role_type: character.role_type || character.role || '',
-            archetype: character.archetype || '',
-            motivation: character.motivation || '',
-            goal: character.goal || '',
-            conflict: character.conflict || '',
-            growth_arc: character.growth_arc || '',
-            current_state: character.current_state || {},
-            raw_payload: character,
-          })
-        }
-        for (const outline of payload.outlines) {
-          if (!outline?.title) continue
-          await createNovelOutline(activeWorkspace, {
-            project_id: project.id,
-            outline_type: outline.outline_type || 'volume',
-            title: String(outline.title),
-            summary: outline.summary || '',
-            conflict_points: outline.conflict_points || [],
-            turning_points: outline.turning_points || [],
-            hook: outline.hook || '',
-            target_length: outline.target_length || '',
-            raw_payload: outline,
-          })
-        }
-        const existingChapters = await listNovelChapters(activeWorkspace, project.id)
-        for (const chapter of payload.chapters) {
-          const chapterNo = Number(chapter.chapter_no || 0)
-          if (!chapterNo || existingChapters.some(item => item.chapter_no === chapterNo)) continue
-          await createNovelChapter(activeWorkspace, {
-            project_id: project.id,
-            chapter_no: chapterNo,
-            title: chapter.title || `第${chapterNo}章`,
-            chapter_goal: chapter.chapter_goal || '',
-            chapter_summary: chapter.chapter_summary || '',
-            conflict: chapter.conflict || '',
-            ending_hook: chapter.ending_hook || '',
-            raw_payload: {
-              ...chapter,
-              must_advance: chapter.must_advance || [],
-              forbidden_repeats: chapter.forbidden_repeats || [],
-            },
-          })
-        }
-        await updateNovelProject(activeWorkspace, project.id, {
-          synopsis: project.synopsis || payload.commercial_positioning?.reader_promise || '',
-          reference_config: {
-            ...(project.reference_config || {}),
-            writing_bible: {
-              ...payload.writing_bible,
-              updated_at: new Date().toISOString(),
-            },
-            commercial_positioning: payload.commercial_positioning,
-          },
-        } as any)
+        updatedProject = await storeOriginalIncubatorPayload(activeWorkspace, project, payload)
       }
       const run = await appendNovelRun(activeWorkspace, {
         project_id: project.id,
         run_type: 'original_incubation',
-        step_name: 'foundation',
+        step_name: req.body.auto_store === false ? 'preview' : 'foundation',
         status: 'success',
         input_ref: JSON.stringify(req.body || {}),
         output_ref: JSON.stringify({ payload, modelName: (result as any).modelName }),
       })
-      res.json({ ok: true, payload, run, result })
+      res.json({ ok: true, payload, run, project: updatedProject, result })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.post('/api/novel/projects/:id/incubate-original/commit', async (req, res) => {
+    try {
+      const activeWorkspace = getWorkspace()
+      const project = await getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const payload = normalizeIncubatorPayload(req.body?.payload || project.reference_config?.original_incubator_last_payload || {}, Number(req.body?.chapter_count || 80))
+      const updated = await storeOriginalIncubatorPayload(activeWorkspace, project, payload)
+      const run = await appendNovelRun(activeWorkspace, {
+        project_id: project.id,
+        run_type: 'original_incubation',
+        step_name: 'commit',
+        status: 'success',
+        input_ref: JSON.stringify({ confirmed: true }),
+        output_ref: JSON.stringify({ payload }),
+      })
+      res.json({ ok: true, project: updated, run })
     } catch (error) {
       res.status(500).json({ error: String(error) })
     }
@@ -1155,6 +1439,104 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
         output_ref: JSON.stringify(output),
       })
       res.json({ ok: true, run, group: output })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.post('/api/novel/projects/:id/chapter-groups/:runId/execute', async (req, res) => {
+    try {
+      const activeWorkspace = getWorkspace()
+      const project = await getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const runs = await listNovelRuns(activeWorkspace, project.id)
+      const run = runs.find(item => item.id === Number(req.params.runId))
+      if (!run || run.run_type !== 'chapter_group_generation') return res.status(404).json({ error: 'chapter group run not found' })
+      let payload = parseJsonLikePayload(run.output_ref) || {}
+      const chapters = Array.isArray(payload.chapters) ? payload.chapters : []
+      const maxChapters = Math.max(1, Math.min(50, Number(req.body.max_chapters || chapters.length || 10)))
+      const startedAt = Date.now()
+      const results: any[] = Array.isArray(payload.results) ? payload.results : []
+      let processed = 0
+      let status = 'running'
+      let errorMessage = ''
+      await updateNovelRun(activeWorkspace, run.id, {
+        status: 'running',
+        output_ref: JSON.stringify({ ...payload, started_at: payload.started_at || new Date().toISOString(), phase: '自动执行章节群' }),
+      })
+      for (let index = Number(payload.current_index || 0); index < chapters.length && processed < maxChapters; index += 1) {
+        const latestRun = (await listNovelRuns(activeWorkspace, project.id)).find(item => item.id === run.id)
+        if (latestRun?.status === 'paused') {
+          status = 'paused'
+          payload = { ...(parseJsonLikePayload(latestRun.output_ref) || payload), current_index: index, phase: '已暂停' }
+          break
+        }
+        const item = chapters[index]
+        if (!item?.id) continue
+        if (item.status === 'written' && req.body.regenerate !== true) {
+          chapters[index] = { ...item, status: 'skipped', skipped_reason: '已有正文' }
+          payload = { ...payload, chapters, current_index: index + 1 }
+          await updateNovelRun(activeWorkspace, run.id, { status: 'running', output_ref: JSON.stringify(payload) })
+          continue
+        }
+        chapters[index] = { ...item, status: 'running', started_at: new Date().toISOString() }
+        payload = { ...payload, chapters, current_index: index, phase: `生成第${item.chapter_no}章` }
+        await updateNovelRun(activeWorkspace, run.id, { status: 'running', output_ref: JSON.stringify(payload) })
+        try {
+          const chapterResult = await generateChapterForGroup(activeWorkspace, project.id, Number(item.id), {
+            ...req.body,
+            model_id: req.body.model_id || payload.model_strategy?.preferred_model_id,
+            allow_incomplete: req.body.allow_incomplete === true,
+          })
+          const resultItem = {
+            id: item.id,
+            chapter_no: item.chapter_no,
+            title: item.title,
+            status: 'success',
+            score: chapterResult.score,
+            revised: chapterResult.revised,
+            completed_at: new Date().toISOString(),
+          }
+          chapters[index] = resultItem
+          results.push(resultItem)
+          processed += 1
+        } catch (chapterError: any) {
+          const resultItem = {
+            id: item.id,
+            chapter_no: item.chapter_no,
+            title: item.title,
+            status: 'failed',
+            error: String(chapterError?.message || chapterError),
+            error_code: chapterError?.code || '',
+            failed_at: new Date().toISOString(),
+          }
+          chapters[index] = resultItem
+          results.push(resultItem)
+          errorMessage = resultItem.error
+          if (payload.policy?.stop_on_failure !== false) {
+            status = 'paused'
+            payload = { ...payload, chapters, results, current_index: index, phase: `第${item.chapter_no}章失败，已暂停`, last_error: resultItem }
+            await updateNovelRun(activeWorkspace, run.id, { status, output_ref: JSON.stringify(payload), error_message: errorMessage })
+            break
+          }
+        }
+        payload = { ...payload, chapters, results, current_index: index + 1, phase: '自动执行章节群' }
+        await updateNovelRun(activeWorkspace, run.id, {
+          status: 'running',
+          output_ref: JSON.stringify(payload),
+          duration_ms: Date.now() - startedAt,
+        })
+      }
+      if (status === 'running') {
+        status = chapters.every((item: any) => ['success', 'skipped', 'written'].includes(item.status)) ? 'success' : 'ready'
+      }
+      const updated = await updateNovelRun(activeWorkspace, run.id, {
+        status,
+        output_ref: JSON.stringify({ ...payload, chapters, results, phase: status === 'success' ? '章节群已完成' : payload.phase, finished_at: status === 'success' ? new Date().toISOString() : undefined }),
+        duration_ms: Date.now() - startedAt,
+        error_message: errorMessage,
+      })
+      res.json({ ok: true, run: updated, group: parseJsonLikePayload(updated?.output_ref) })
     } catch (error) {
       res.status(500).json({ error: String(error) })
     }
@@ -1203,6 +1585,66 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
         payload: JSON.stringify({ chapter_id: chapter.id, report, context_package: contextPackage }),
       })
       res.json({ ok: true, report, review: saved, result })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.post('/api/novel/reviews/:reviewId/apply-revision', async (req, res) => {
+    try {
+      const activeWorkspace = getWorkspace()
+      const projectId = Number(req.body.project_id || 0)
+      const project = await getProject(activeWorkspace, projectId)
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const reviews = await listNovelReviews(activeWorkspace, projectId)
+      const review = reviews.find(item => item.id === Number(req.params.reviewId))
+      if (!review) return res.status(404).json({ error: 'review not found' })
+      const payload = parseJsonLikePayload(review.payload) || {}
+      const report = payload.report || {}
+      const chapterId = Number(payload.chapter_id || req.body.chapter_id || 0)
+      const chapters = await listNovelChapters(activeWorkspace, projectId)
+      const chapter = chapters.find(item => item.id === chapterId)
+      if (!chapter) return res.status(404).json({ error: 'chapter not found' })
+      const prompt = [
+        '任务：根据商业编辑报告对当前章节进行一键修订。只输出 JSON。',
+        `项目：${project.title}`,
+        '要求：保留可用情节，修复 must_fix、维度问题和连续性问题；不得照搬参考作品；输出完整修订正文。',
+        '【编辑报告】',
+        JSON.stringify(report, null, 2).slice(0, 7000),
+        '【修订提示】',
+        String(report.one_click_revision_prompt || req.body.prompt || ''),
+        '【原章节正文】',
+        String(chapter.chapter_text || '').slice(0, 18000),
+        '输出 JSON：{chapter_text, scene_breakdown, continuity_notes, revision_summary}',
+      ].join('\n')
+      const modelId = getStageModelId(project, 'revise', Number(req.body.model_id || 0) || undefined)
+      const result = await executeNovelAgent('prose-agent', project, { task: prompt }, { activeWorkspace, modelId: modelId ? String(modelId) : undefined, maxTokens: 9000, temperature: getStageTemperature(project, 'revise', 0.62), skipMemory: true })
+      const resultPayload = getNovelPayload(result)
+      const nextText = resultPayload?.chapter_text || resultPayload?.prose_chapters?.[0]?.chapter_text || ''
+      if (!nextText) return res.status(502).json({ error: '修订未返回正文', result })
+      const updated = await updateNovelChapter(activeWorkspace, chapter.id, {
+        chapter_text: nextText,
+        scene_breakdown: resultPayload?.scene_breakdown || resultPayload?.prose_chapters?.[0]?.scene_breakdown || chapter.scene_breakdown || [],
+        continuity_notes: resultPayload?.continuity_notes || resultPayload?.prose_chapters?.[0]?.continuity_notes || chapter.continuity_notes || [],
+        status: 'draft',
+      }, { versionSource: 'repair' })
+      const saved = await createNovelReview(activeWorkspace, {
+        project_id: projectId,
+        review_type: 'editor_revision',
+        status: 'ok',
+        summary: `已根据编辑报告 ${review.id} 生成修订稿`,
+        issues: [],
+        payload: JSON.stringify({ chapter_id: chapter.id, source_review_id: review.id, revision_summary: resultPayload?.revision_summary || '' }),
+      })
+      await appendNovelRun(activeWorkspace, {
+        project_id: projectId,
+        run_type: 'editor_revision',
+        step_name: `chapter-${chapter.chapter_no}`,
+        status: 'success',
+        input_ref: JSON.stringify({ review_id: review.id }),
+        output_ref: JSON.stringify({ review: saved, modelName: (result as any).modelName }),
+      })
+      res.json({ ok: true, chapter: updated, review: saved, result })
     } catch (error) {
       res.status(500).json({ error: String(error) })
     }
@@ -1399,7 +1841,7 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
         prevChapters,
         contextPackage,
         paragraphTask: buildParagraphProseContext(project, contextPackage),
-      } as any, activeWorkspace, modelId)
+      } as any, activeWorkspace, getStageModelId(project, 'draft', modelId))
       // 兼容 result.output / result.parsed / result.content(JSON string) 等厂商返回形态
       const resultPayload = getNovelPayload(result)
       const proseArr = Array.isArray(resultPayload?.prose_chapters) ? resultPayload.prose_chapters : []
@@ -1539,6 +1981,13 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
       const run = runs.find(item => item.id === Number(req.params.id))
       if (!run) return res.status(404).json({ error: 'run not found' })
       const payload = parseJsonLikePayload(run.output_ref) || {}
+      if (run.run_type === 'chapter_group_generation') {
+        const updated = await updateNovelRun(activeWorkspace, run.id, {
+          status: 'ready',
+          output_ref: JSON.stringify({ ...payload, phase: '等待继续执行', resumed_at: new Date().toISOString() }),
+        })
+        return res.json({ ok: true, run: updated, execute_endpoint: `/api/novel/projects/${run.project_id}/chapter-groups/${run.id}/execute`, group: parseJsonLikePayload(updated?.output_ref) })
+      }
       const steps = Array.isArray(payload.steps) ? payload.steps : buildPipelineSteps()
       const currentStep = String(req.body.current_step || payload.can_resume_from || payload.current_step || 'draft')
       const updated = await updateNovelRun(activeWorkspace, run.id, {

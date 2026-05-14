@@ -39,6 +39,8 @@ function runTypeLabel(type?: string) {
     chapter_generation_pipeline: '章节流水线',
     chapter_group_generation: '章节群生成',
     original_incubation: '原创孵化',
+    editor_revision: '编辑修订',
+    book_review: '全书总检',
   }
   return map[String(type || '')] || type || '任务'
 }
@@ -151,6 +153,47 @@ function ChapterPipelineRunSummary({ run }: { run: any }) {
   )
 }
 
+function ChapterGroupRunSummary({ run }: { run: any }) {
+  const output = parseJsonValue(run.output_ref) || {}
+  const chapters = Array.isArray(output.chapters) ? output.chapters : []
+  const success = chapters.filter((item: any) => item.status === 'success').length
+  const failed = chapters.filter((item: any) => item.status === 'failed').length
+  const skipped = chapters.filter((item: any) => item.status === 'skipped' || item.status === 'written').length
+  const total = chapters.length
+  const percent = total ? Math.round(((success + skipped) / total) * 100) : 0
+  return (
+    <Card size="small" title="章节群执行">
+      <Space direction="vertical" size={10} style={{ width: '100%' }}>
+        <Space wrap>
+          <Tag color="blue" bordered={false}>进度 {success + skipped}/{total}</Tag>
+          <Tag color="green" bordered={false}>成功 {success}</Tag>
+          <Tag color={failed ? 'red' : 'default'} bordered={false}>失败 {failed}</Tag>
+          <Tag bordered={false}>跳过 {skipped}</Tag>
+          <Tag bordered={false}>当前 {output.current_index ?? 0}</Tag>
+        </Space>
+        <Progress percent={percent} size="small" />
+        {output.phase && <Text type="secondary" style={{ fontSize: 12 }}>{output.phase}</Text>}
+        <Space wrap size={[4, 4]}>
+          {chapters.slice(0, 80).map((chapter: any) => (
+            <Tag
+              key={`${chapter.id || chapter.chapter_no}-${chapter.status}`}
+              color={chapter.status === 'success' ? 'green' : chapter.status === 'failed' ? 'red' : chapter.status === 'running' ? 'blue' : chapter.status === 'skipped' ? 'default' : 'gold'}
+              bordered={false}
+            >
+              第{chapter.chapter_no}章 · {chapter.status || 'pending'}{chapter.score ? ` · ${chapter.score}分` : ''}
+            </Tag>
+          ))}
+        </Space>
+        {output.last_error && (
+          <Paragraph type="danger" style={{ marginBottom: 0, fontSize: 12 }} ellipsis={{ rows: 3, expandable: true }}>
+            第{output.last_error.chapter_no}章失败：{output.last_error.error}
+          </Paragraph>
+        )}
+      </Space>
+    </Card>
+  )
+}
+
 function sourceCacheTag(sourceCache: any) {
   if (!sourceCache?.status) return null
   const cached = Number(sourceCache.cached_chapters || 0)
@@ -173,6 +216,8 @@ export function TaskCenterDrawer({
   onPauseKnowledgeJob,
   onResumeKnowledgeJob,
   onCancelKnowledgeJob,
+  chapterGroupExecutingId,
+  onExecuteChapterGroup,
   onPauseRun,
   onResumeRun,
 }: {
@@ -188,6 +233,8 @@ export function TaskCenterDrawer({
   onPauseKnowledgeJob: (jobId: string) => void
   onResumeKnowledgeJob: (jobId: string) => void
   onCancelKnowledgeJob: (jobId: string) => void
+  chapterGroupExecutingId?: number | null
+  onExecuteChapterGroup?: (run: any) => void
   onPauseRun?: (run: any) => void
   onResumeRun?: (run: any) => void
 }) {
@@ -304,6 +351,9 @@ export function TaskCenterDrawer({
                     actions={[
                       run.run_type === 'chapter_generation_pipeline' && run.status !== 'paused' && onPauseRun ? <Button key="pause" type="link" size="small" onClick={() => onPauseRun(run)}>暂停</Button> : null,
                       run.run_type === 'chapter_generation_pipeline' && ['paused', 'failed', 'ready'].includes(run.status) && onResumeRun ? <Button key="resume" type="link" size="small" onClick={() => onResumeRun(run)}>继续</Button> : null,
+                      run.run_type === 'chapter_group_generation' && ['ready', 'paused', 'failed'].includes(run.status) && onResumeRun ? <Button key="resume-group" type="link" size="small" onClick={() => onResumeRun(run)}>继续</Button> : null,
+                      run.run_type === 'chapter_group_generation' && ['ready', 'paused', 'failed', 'running'].includes(run.status) && onExecuteChapterGroup ? <Button key="execute-group" type="link" size="small" loading={chapterGroupExecutingId === run.id} onClick={() => onExecuteChapterGroup(run)}>执行</Button> : null,
+                      run.run_type === 'chapter_group_generation' && run.status === 'running' && onPauseRun ? <Button key="pause-group" type="link" size="small" onClick={() => onPauseRun(run)}>暂停</Button> : null,
                       <Button key="detail" type="link" size="small" onClick={() => setDetailRun(run)}>详情</Button>,
                     ].filter(Boolean)}
                   >
@@ -351,6 +401,7 @@ export function TaskCenterDrawer({
             )}
             {detailRun.run_type === 'batch_generate_prose' && <BatchProseRunSummary run={detailRun} />}
             {detailRun.run_type === 'chapter_generation_pipeline' && <ChapterPipelineRunSummary run={detailRun} />}
+            {detailRun.run_type === 'chapter_group_generation' && <ChapterGroupRunSummary run={detailRun} />}
             <Card size="small" title="输入">
               <Paragraph style={{ whiteSpace: 'pre-wrap', maxHeight: 220, overflow: 'auto', marginBottom: 0 }}>
                 {safeJsonPreview(detailRun.input_ref) || '无'}

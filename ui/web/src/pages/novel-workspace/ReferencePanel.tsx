@@ -52,6 +52,7 @@ export function ReferencePanel({
   referenceReports,
   proseQualityReports,
   editorReports,
+  bookReviews,
   activeChapterId,
   chapterVersions,
   chapterVersionsLoading,
@@ -60,6 +61,8 @@ export function ReferencePanel({
   onOpen,
   onTabChange,
   onEdit,
+  onOpenStoryStateEditor,
+  onApplyEditorRevision,
   onRollbackVersion,
   onOpenVersionDetail,
 }: {
@@ -72,6 +75,7 @@ export function ReferencePanel({
   referenceReports: any[]
   proseQualityReports: any[]
   editorReports: any[]
+  bookReviews: any[]
   activeChapterId: number | null
   chapterVersions: any[]
   chapterVersionsLoading: boolean
@@ -80,6 +84,8 @@ export function ReferencePanel({
   onOpen: () => void
   onTabChange: (key: string) => void
   onEdit: (kind: 'worldbuilding' | 'character' | 'outline', item?: any) => void
+  onOpenStoryStateEditor?: () => void
+  onApplyEditorRevision?: (report: any) => void
   onRollbackVersion: (versionId: number) => void
   onOpenVersionDetail: (version: any) => void
 }) {
@@ -110,6 +116,7 @@ export function ReferencePanel({
               key: 'storyMemory', label: '故事记忆',
               children: (
                 <Space direction="vertical" size={8} style={{ width: '100%', padding: 8 }}>
+                  <Button size="small" block onClick={onOpenStoryStateEditor}>校正故事状态机</Button>
                   {!storyState || Object.keys(storyState).length === 0 ? (
                     <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无故事状态机；生成章节入库后会自动更新。" />
                   ) : (
@@ -330,6 +337,41 @@ export function ReferencePanel({
                           修订提示：{body.one_click_revision_prompt}
                         </Paragraph>
                       )}
+                      {onApplyEditorRevision && (
+                        <Button size="small" block onClick={() => onApplyEditorRevision(report)}>按报告修订</Button>
+                      )}
+                    </Space>
+                  </Card>
+                )
+              }),
+            },
+            {
+              key: 'bookReviews', label: '全书总检',
+              children: bookReviews.length === 0 ? (
+                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无全书总检" style={{ padding: '16px 8px' }} />
+              ) : bookReviews.slice(0, 8).map((review) => {
+                const payload = parseReviewPayload(review)
+                const body = payload.report || payload || {}
+                return (
+                  <Card key={review.id} size="small" style={{ margin: 8, borderRadius: 8 }}
+                    title={<Space wrap><Tag color={review.status === 'ok' ? 'green' : 'gold'} bordered={false}>{body.overall_score ?? '-'}分</Tag><Text strong>全书总检</Text></Space>}>
+                    <Space direction="vertical" size={7} style={{ width: '100%' }}>
+                      <Text type="secondary" style={{ fontSize: 11 }}>{review.created_at}</Text>
+                      {Array.isArray(body.must_fix) && body.must_fix.length > 0 && (
+                        <Paragraph style={{ marginBottom: 0, fontSize: 12 }} ellipsis={{ rows: 4, expandable: true, symbol: '展开' }}>
+                          必修：{body.must_fix.join('；')}
+                        </Paragraph>
+                      )}
+                      {Array.isArray(body.next_actions) && body.next_actions.length > 0 && (
+                        <Paragraph style={{ marginBottom: 0, fontSize: 12 }} ellipsis={{ rows: 4, expandable: true, symbol: '展开' }}>
+                          下一步：{body.next_actions.join('；')}
+                        </Paragraph>
+                      )}
+                      {['mainline', 'character_arcs', 'foreshadowing', 'payoff_density', 'repetition', 'volume_goals', 'bible_alignment'].map(key => body[key] && (
+                        <Paragraph key={key} style={{ marginBottom: 0, fontSize: 12 }} ellipsis={{ rows: 2, expandable: true, symbol: '展开' }}>
+                          <Text strong>{key}：</Text>{displayValue(body[key])}
+                        </Paragraph>
+                      ))}
                     </Space>
                   </Card>
                 )

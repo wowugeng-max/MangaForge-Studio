@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Alert, Badge, Button, Card, Form, List, message, Modal, Progress, Select, Space, Typography, Tooltip, Tag,
+  Alert, Badge, Button, Card, Form, Input, List, message, Modal, Progress, Select, Space, Typography, Tooltip, Tag,
 } from 'antd'
 import {
   ArrowLeftOutlined, BookOutlined, ClockCircleOutlined, ReloadOutlined,
@@ -56,6 +56,10 @@ export default function NovelProjectWorkspace() {
   const [incubatingOriginal, setIncubatingOriginal] = useState(false)
   const [dashboardLoading, setDashboardLoading] = useState(false)
   const [editorReportLoading, setEditorReportLoading] = useState(false)
+  const [bookReviewLoading, setBookReviewLoading] = useState(false)
+  const [writingBibleOpen, setWritingBibleOpen] = useState(false)
+  const [storyStateOpen, setStoryStateOpen] = useState(false)
+  const [chapterGroupExecutingId, setChapterGroupExecutingId] = useState<number | null>(null)
 
   // ── 大纲生成控制面板 ──
   const [outlinePanelOpen, setOutlinePanelOpen] = useState(false)
@@ -88,6 +92,8 @@ export default function NovelProjectWorkspace() {
   const [editorKind, setEditorKind] = useState<EditorKind | null>(null)
   const [editorItem, setEditorItem] = useState<any | null>(null)
   const [editorForm] = Form.useForm()
+  const [writingBibleForm] = Form.useForm()
+  const [storyStateForm] = Form.useForm()
 
   // ── right reference panel ──
   const [rightPanelOpen, setRightPanelOpen] = useState(false)
@@ -257,6 +263,13 @@ export default function NovelProjectWorkspace() {
   const editorReports = useMemo(() => (
     reviews
       .filter((item: any) => item.review_type === 'editor_report')
+      .slice()
+      .sort((a: any, b: any) => String(b.created_at || '').localeCompare(String(a.created_at || '')))
+  ), [reviews])
+
+  const bookReviews = useMemo(() => (
+    reviews
+      .filter((item: any) => item.review_type === 'book_review')
       .slice()
       .sort((a: any, b: any) => String(b.created_at || '').localeCompare(String(a.created_at || '')))
   ), [reviews])
@@ -718,20 +731,50 @@ export default function NovelProjectWorkspace() {
     Modal.confirm({
       title: '原创项目孵化',
       width: 640,
-      content: '系统会基于当前项目标题、题材、简介和目标读者，原创生成世界观、角色、分卷、前 30 章章纲、写作圣经和商业定位。已有相同章号的章节不会覆盖。',
-      okText: '开始孵化',
+      content: '系统会先生成可预览的原创方案，包括世界观、角色、分卷、前 30 章章纲、写作圣经和商业定位。确认后才入库，已有相同章号的章节不会覆盖。',
+      okText: '生成预览',
       onOk: async () => {
         setIncubatingOriginal(true)
         try {
-          await apiClient.post(`/novel/projects/${projectId}/incubate-original`, {
+          const res = await apiClient.post(`/novel/projects/${projectId}/incubate-original`, {
             model_id: selectedModelId,
             chapter_count: 30,
-            auto_store: true,
+            auto_store: false,
           })
-          await loadProjectModules()
-          setRightPanelOpen(true)
-          setRightPanelTab('writingBible')
-          message.success('原创孵化完成')
+          const payload = res.data?.payload || {}
+          Modal.confirm({
+            title: '确认原创孵化方案',
+            width: 860,
+            content: (
+              <Space direction="vertical" size={10} style={{ width: '100%' }}>
+                <Alert type="info" showIcon message="请先核对核心卖点、角色和前 30 章方向。确认后才会写入项目资料。" />
+                <Card size="small" title="商业定位">
+                  <Paragraph style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }} ellipsis={{ rows: 5, expandable: true }}>
+                    {JSON.stringify(payload.commercial_positioning || {}, null, 2)}
+                  </Paragraph>
+                </Card>
+                <Card size="small" title="主要角色">
+                  <Space wrap>
+                    {(payload.characters || []).slice(0, 12).map((char: any) => <Tag key={char.name} bordered={false}>{char.name} · {char.role_type || char.role || '-'}</Tag>)}
+                  </Space>
+                </Card>
+                <Card size="small" title="章节方向">
+                  <Paragraph style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }} ellipsis={{ rows: 6, expandable: true }}>
+                    {(payload.chapters || []).slice(0, 12).map((chapter: any) => `第${chapter.chapter_no}章 ${chapter.title}：${chapter.chapter_goal || chapter.chapter_summary || ''}`).join('\n')}
+                  </Paragraph>
+                </Card>
+              </Space>
+            ),
+            okText: '确认入库',
+            cancelText: '放弃',
+            onOk: async () => {
+              await apiClient.post(`/novel/projects/${projectId}/incubate-original/commit`, { payload, chapter_count: 30 })
+              await loadProjectModules()
+              setRightPanelOpen(true)
+              setRightPanelTab('writingBible')
+              message.success('原创孵化已入库')
+            },
+          })
         } catch (error: any) {
           message.error(error?.response?.data?.error || error?.message || '原创孵化失败')
         } finally {
@@ -777,6 +820,137 @@ export default function NovelProjectWorkspace() {
       message.error(error?.response?.data?.error || error?.message || '编辑报告生成失败')
     } finally {
       setEditorReportLoading(false)
+    }
+  }
+
+  const applyEditorRevision = async (report: any) => {
+    if (!selectedModelId) return message.warning('请先选择模型')
+    const payload = (() => {
+      try { return typeof report.payload === 'string' ? JSON.parse(report.payload) : report.payload || {} } catch { return {} }
+    })()
+    Modal.confirm({
+      title: '按编辑报告生成修订稿',
+      content: '系统会根据这份编辑报告重写当前章节，并保存为新的章节版本。',
+      okText: '生成修订稿',
+      onOk: async () => {
+        try {
+          const res = await apiClient.post(`/novel/reviews/${report.id}/apply-revision`, {
+            project_id: projectId,
+            chapter_id: payload.chapter_id || activeChapter?.id,
+            model_id: selectedModelId,
+          })
+          if (res.data?.chapter) {
+            setChapters(prev => prev.map(c => c.id === res.data.chapter.id ? res.data.chapter : c))
+          }
+          await loadProjectModules()
+          message.success('修订稿已入库')
+        } catch (error: any) {
+          message.error(error?.response?.data?.error || error?.message || '修订失败')
+        }
+      },
+    })
+  }
+
+  const openWritingBibleEditor = async () => {
+    try {
+      const res = await apiClient.get(`/novel/projects/${projectId}/writing-bible`)
+      const bible = res.data?.writing_bible || {}
+      writingBibleForm.setFieldsValue({
+        promise: bible.promise || '',
+        world_rules: JSON.stringify(bible.world_rules || [], null, 2),
+        mainline: JSON.stringify(bible.mainline || {}, null, 2),
+        volume_plan: JSON.stringify(bible.volume_plan || [], null, 2),
+        style_lock: JSON.stringify(bible.style_lock || selectedProject?.reference_config?.style_lock || {}, null, 2),
+        safety_policy: JSON.stringify(bible.safety_policy || selectedProject?.reference_config?.safety || {}, null, 2),
+        forbidden: JSON.stringify(bible.forbidden || [], null, 2),
+      })
+      setWritingBibleOpen(true)
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '写作圣经加载失败')
+    }
+  }
+
+  const saveWritingBibleEditor = async () => {
+    try {
+      const v = await writingBibleForm.validateFields()
+      const parseJson = (value: string, fallback: any) => {
+        try { return JSON.parse(value || '') } catch { return fallback }
+      }
+      const writingBible = {
+        ...(selectedProject?.reference_config?.writing_bible || {}),
+        promise: v.promise || '',
+        world_rules: parseJson(v.world_rules, []),
+        mainline: parseJson(v.mainline, {}),
+        volume_plan: parseJson(v.volume_plan, []),
+        style_lock: parseJson(v.style_lock, {}),
+        safety_policy: parseJson(v.safety_policy, {}),
+        forbidden: parseJson(v.forbidden, []),
+      }
+      const res = await apiClient.put(`/novel/projects/${projectId}/writing-bible`, { writing_bible: writingBible })
+      setSelectedProject((prev: any) => res.data?.project || (prev ? { ...prev, reference_config: { ...(prev.reference_config || {}), writing_bible: res.data?.writing_bible || writingBible } } : prev))
+      setWritingBibleOpen(false)
+      message.success('写作圣经已保存')
+    } catch (error: any) {
+      if (error?.errorFields) return
+      message.error(error?.response?.data?.error || error?.message || '写作圣经保存失败')
+    }
+  }
+
+  const openStoryStateEditor = async () => {
+    try {
+      const res = await apiClient.get(`/novel/projects/${projectId}/story-state`)
+      storyStateForm.setFieldsValue({ story_state: JSON.stringify(res.data?.story_state || {}, null, 2) })
+      setStoryStateOpen(true)
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '故事状态加载失败')
+    }
+  }
+
+  const saveStoryStateEditor = async () => {
+    try {
+      const v = await storyStateForm.validateFields()
+      const storyState = JSON.parse(v.story_state || '{}')
+      const res = await apiClient.put(`/novel/projects/${projectId}/story-state`, { story_state: storyState })
+      setSelectedProject((prev: any) => res.data?.project || (prev ? { ...prev, reference_config: { ...(prev.reference_config || {}), story_state: res.data?.story_state || storyState } } : prev))
+      setStoryStateOpen(false)
+      await loadProjectModules()
+      message.success('故事状态机已校正')
+    } catch (error: any) {
+      if (error?.errorFields) return
+      message.error(error?.message?.includes('JSON') ? '故事状态必须是合法 JSON' : (error?.response?.data?.error || error?.message || '故事状态保存失败'))
+    }
+  }
+
+  const runBookReview = async () => {
+    if (!selectedModelId) return message.warning('请先选择模型')
+    setBookReviewLoading(true)
+    try {
+      await apiClient.post(`/novel/projects/${projectId}/book-review`, { model_id: selectedModelId })
+      await loadProjectModules()
+      setRightPanelOpen(true)
+      setRightPanelTab('bookReviews')
+      message.success('全书总检已完成')
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '全书总检失败')
+    } finally {
+      setBookReviewLoading(false)
+    }
+  }
+
+  const executeChapterGroupRun = async (run: any) => {
+    if (!selectedModelId) return message.warning('请先选择模型')
+    setChapterGroupExecutingId(run.id)
+    try {
+      await apiClient.post(`/novel/projects/${projectId}/chapter-groups/${run.id}/execute`, {
+        model_id: selectedModelId,
+        max_chapters: 50,
+      })
+      await loadProjectModules()
+      message.success('章节群执行完成或已暂停')
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '章节群执行失败')
+    } finally {
+      setChapterGroupExecutingId(null)
     }
   }
 
@@ -1114,6 +1288,16 @@ export default function NovelProjectWorkspace() {
             生产看板
           </Button>
         </Tooltip>
+        <Tooltip title="编辑项目写作圣经、风格锁定和仿写安全策略">
+          <Button type="text" size="small" onClick={openWritingBibleEditor}>
+            写作圣经
+          </Button>
+        </Tooltip>
+        <Tooltip title="检查全书主线、角色、伏笔、爽点密度和分卷目标">
+          <Button type="text" size="small" loading={bookReviewLoading} onClick={runBookReview}>
+            全书总检
+          </Button>
+        </Tooltip>
         <Tooltip title="创建 10 章章节群生产任务">
           <Button type="text" size="small" onClick={startChapterGroupGeneration}>
             章节群
@@ -1208,6 +1392,7 @@ export default function NovelProjectWorkspace() {
           referenceReports={referenceReports}
           proseQualityReports={proseQualityReports}
           editorReports={editorReports}
+          bookReviews={bookReviews}
           activeChapterId={activeChapterId}
           chapterVersions={chapterVersions}
           chapterVersionsLoading={chapterVersionsLoading}
@@ -1216,6 +1401,8 @@ export default function NovelProjectWorkspace() {
           onOpen={() => setRightPanelOpen(true)}
           onTabChange={setRightPanelTab}
           onEdit={(kind, item) => openEditor(kind, item)}
+          onOpenStoryStateEditor={openStoryStateEditor}
+          onApplyEditorRevision={applyEditorRevision}
           onRollbackVersion={rollbackChapterVersion}
           onOpenVersionDetail={setChapterVersionDetail}
         />
@@ -1251,6 +1438,7 @@ export default function NovelProjectWorkspace() {
 
       <ReferenceEngineeringModal
         open={referenceEngineeringOpen}
+        projectId={projectId}
         referenceConfig={selectedProject?.reference_config || {}}
         referenceReports={referenceReports}
         onClose={() => setReferenceEngineeringOpen(false)}
@@ -1259,6 +1447,55 @@ export default function NovelProjectWorkspace() {
           setReferenceConfigOpen(true)
         }}
       />
+
+      <Modal
+        open={writingBibleOpen}
+        title="写作圣经"
+        width={860}
+        onCancel={() => setWritingBibleOpen(false)}
+        onOk={saveWritingBibleEditor}
+        okText="保存"
+      >
+        <Form form={writingBibleForm} layout="vertical">
+          <Form.Item name="promise" label="读者承诺 / 核心卖点">
+            <Input.TextArea rows={3} />
+          </Form.Item>
+          <Form.Item name="world_rules" label="世界规则 JSON">
+            <Input.TextArea rows={4} />
+          </Form.Item>
+          <Form.Item name="mainline" label="主线 JSON">
+            <Input.TextArea rows={4} />
+          </Form.Item>
+          <Form.Item name="volume_plan" label="分卷计划 JSON">
+            <Input.TextArea rows={5} />
+          </Form.Item>
+          <Form.Item name="style_lock" label="风格锁定 JSON">
+            <Input.TextArea rows={5} />
+          </Form.Item>
+          <Form.Item name="safety_policy" label="仿写安全策略 JSON">
+            <Input.TextArea rows={4} />
+          </Form.Item>
+          <Form.Item name="forbidden" label="禁止项 JSON">
+            <Input.TextArea rows={3} />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        open={storyStateOpen}
+        title="故事状态机校正"
+        width={860}
+        onCancel={() => setStoryStateOpen(false)}
+        onOk={saveStoryStateEditor}
+        okText="保存校正"
+      >
+        <Alert type="info" showIcon style={{ marginBottom: 12 }} message="这里用于人工修正角色位置、关系、秘密、道具、伏笔、主线进度和时间线。保存后后续生成会优先读取这个状态。" />
+        <Form form={storyStateForm} layout="vertical">
+          <Form.Item name="story_state" label="故事状态 JSON" rules={[{ required: true, message: '请输入故事状态 JSON' }]}>
+            <Input.TextArea rows={18} />
+          </Form.Item>
+        </Form>
+      </Modal>
 
       <TaskCenterDrawer
         open={taskCenterOpen}
@@ -1273,6 +1510,8 @@ export default function NovelProjectWorkspace() {
         onPauseKnowledgeJob={(jobId) => { void pauseKnowledgeIngestJob(jobId) }}
         onResumeKnowledgeJob={(jobId) => { void resumeKnowledgeIngestJob(jobId) }}
         onCancelKnowledgeJob={(jobId) => { void cancelKnowledgeIngestJob(jobId) }}
+        chapterGroupExecutingId={chapterGroupExecutingId}
+        onExecuteChapterGroup={executeChapterGroupRun}
         onPauseRun={async (run) => {
           await apiClient.post(`/novel/runs/${run.id}/pause`, { project_id: projectId })
           await loadProjectModules()
@@ -1281,7 +1520,7 @@ export default function NovelProjectWorkspace() {
         onResumeRun={async (run) => {
           const res = await apiClient.post(`/novel/runs/${run.id}/resume`, { project_id: projectId })
           await loadProjectModules()
-          message.success(res.data?.resume_endpoint ? '任务已标记可继续，请从当前章节继续生成正文' : '任务已继续')
+          message.success(res.data?.execute_endpoint ? '章节群已标记可继续，可点击执行' : res.data?.resume_endpoint ? '任务已标记可继续，请从当前章节继续生成正文' : '任务已继续')
         }}
       />
 

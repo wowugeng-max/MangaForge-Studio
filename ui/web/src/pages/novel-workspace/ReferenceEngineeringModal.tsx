@@ -85,12 +85,14 @@ function riskLevel(score: number) {
 
 export function ReferenceEngineeringModal({
   open,
+  projectId,
   referenceConfig,
   referenceReports,
   onClose,
   onOpenReferenceConfig,
 }: {
   open: boolean
+  projectId: number
   referenceConfig: any
   referenceReports: any[]
   onClose: () => void
@@ -101,6 +103,7 @@ export function ReferenceEngineeringModal({
   const [knowledgeProjects, setKnowledgeProjects] = useState<any[]>([])
   const [knowledgeEntries, setKnowledgeEntries] = useState<any[]>([])
   const [sourceCaches, setSourceCaches] = useState<any[]>([])
+  const [fusion, setFusion] = useState<any | null>(null)
 
   useEffect(() => {
     if (!open) return
@@ -108,15 +111,17 @@ export function ReferenceEngineeringModal({
     Promise.all([
       apiClient.get('/knowledge').catch(() => ({ data: { projects: [], entries: [] } })),
       apiClient.get('/knowledge/source-caches').catch(() => ({ data: { caches: [] } })),
+      apiClient.get(`/novel/projects/${projectId}/reference-fusion`).catch(() => ({ data: null })),
     ])
-      .then(([knowledgeRes, cacheRes]) => {
+      .then(([knowledgeRes, cacheRes, fusionRes]) => {
         setKnowledgeProjects(Array.isArray(knowledgeRes.data?.projects) ? knowledgeRes.data.projects : [])
         setKnowledgeEntries(Array.isArray(knowledgeRes.data?.entries) ? knowledgeRes.data.entries : [])
         setSourceCaches(Array.isArray(cacheRes.data?.caches) ? cacheRes.data.caches : [])
+        setFusion(fusionRes.data || null)
       })
       .catch(() => message.error('参考工程数据加载失败'))
       .finally(() => setLoading(false))
-  }, [open])
+  }, [open, projectId])
 
   const referenceTitles = references.map((item: any) => item.project_title)
   const referencedKnowledge = knowledgeEntries.filter((entry: any) => referenceTitles.includes(String(entry.project_title || '').trim()))
@@ -251,6 +256,45 @@ export function ReferenceEngineeringModal({
               />
             )}
           </Card>
+
+          {fusion?.fusion && (
+            <Card size="small" title="多参考融合控制台">
+              <Space direction="vertical" size={10} style={{ width: '100%' }}>
+                <Space wrap>
+                  <Tag color="blue" bordered={false}>总权重 {Number(fusion.fusion.total_weight || 0).toFixed(2)}</Tag>
+                  <Tag bordered={false}>维度 {fusion.fusion.active_dimensions?.length || 0}</Tag>
+                  <Tag color={fusion.fusion.conflicts?.length ? 'gold' : 'green'} bordered={false}>冲突 {fusion.fusion.conflicts?.length || 0}</Tag>
+                  <Tag color={fusion.fusion.latest_copy_hits?.length ? 'gold' : 'green'} bordered={false}>照搬命中 {fusion.fusion.latest_copy_hits?.length || 0}</Tag>
+                </Space>
+                {fusion.references?.length > 0 && (
+                  <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                    {fusion.references.map((ref: any) => (
+                      <Card key={ref.project_title} size="small" title={`${ref.project_title} · 权重 ${ref.weight}`}>
+                        <Space wrap size={[4, 4]}>
+                          <Tag bordered={false}>节奏 {ref.learn?.rhythm || 0}</Tag>
+                          <Tag bordered={false}>文风 {ref.learn?.style || 0}</Tag>
+                          <Tag bordered={false}>爽点 {ref.learn?.payoff || 0}</Tag>
+                          <Tag bordered={false}>角色功能 {ref.learn?.character_function || 0}</Tag>
+                          {(ref.dimensions || []).map((dim: string) => <Tag key={dim} color="purple" bordered={false}>{dim}</Tag>)}
+                        </Space>
+                      </Card>
+                    ))}
+                  </Space>
+                )}
+                {fusion.fusion.conflicts?.length > 0 && (
+                  <Alert
+                    type="warning"
+                    showIcon
+                    message="参考维度冲突"
+                    description={fusion.fusion.conflicts.map((item: any) => `${item.dimension}：${item.owners.join('、')}`).join('；')}
+                  />
+                )}
+                {fusion.fusion.recommendations?.length > 0 && (
+                  <Paragraph style={{ marginBottom: 0 }}>{fusion.fusion.recommendations.join(' ')}</Paragraph>
+                )}
+              </Space>
+            </Card>
+          )}
 
           {latestReport && (
             <Card size="small" title="最近参考报告">
