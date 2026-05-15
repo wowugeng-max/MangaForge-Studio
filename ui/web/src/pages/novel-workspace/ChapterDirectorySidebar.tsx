@@ -18,14 +18,29 @@ export function ChapterDirectorySidebar({
   stepOutlineLoading,
   stepProseLoading,
   stepRepairLoading,
+  incubatingOriginal,
+  bookReviewLoading,
+  commercialToolLoading,
   proseProgress,
   chapters,
   proseChapterCount,
   activeChapterId,
+  referenceCount,
   onOpenOutlinePanel,
   onGenerateProse,
   onCancelGenerateProse,
   onRunRepair,
+  onOpenReferenceConfig,
+  onOpenReferenceEngineering,
+  onRunOriginalIncubator,
+  onOpenWritingBibleEditor,
+  onOpenMaterialRepairPlan,
+  onStartReadyChapterGroupGeneration,
+  onStartChapterGroupGeneration,
+  onOpenProductionDesk,
+  onOpenTaskCenter,
+  onRunBookReview,
+  onOpenCommercialTools,
   onOpenOutlineTree,
   onOpenChapterDrawer,
   onCreateChapter,
@@ -35,14 +50,29 @@ export function ChapterDirectorySidebar({
   stepOutlineLoading: boolean
   stepProseLoading: boolean
   stepRepairLoading: boolean
+  incubatingOriginal: boolean
+  bookReviewLoading: boolean
+  commercialToolLoading: string
   proseProgress: { current: number; total: number }
   chapters: any[]
   proseChapterCount: number
   activeChapterId: number | null
+  referenceCount: number
   onOpenOutlinePanel: () => void
   onGenerateProse: () => void
   onCancelGenerateProse: () => void
   onRunRepair: () => void
+  onOpenReferenceConfig: () => void
+  onOpenReferenceEngineering: () => void
+  onRunOriginalIncubator: () => void
+  onOpenWritingBibleEditor: () => void
+  onOpenMaterialRepairPlan: () => void
+  onStartReadyChapterGroupGeneration: () => void
+  onStartChapterGroupGeneration: () => void
+  onOpenProductionDesk: () => void
+  onOpenTaskCenter: () => void
+  onRunBookReview: () => void
+  onOpenCommercialTools: () => void
   onOpenOutlineTree: () => void
   onOpenChapterDrawer: () => void
   onCreateChapter: () => void
@@ -55,23 +85,69 @@ export function ChapterDirectorySidebar({
       overflow: 'hidden', minHeight: 0,
     }}>
       <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0' }}>
-        <Text style={{ fontSize: 12, color: '#999', display: 'block', marginBottom: 8, fontWeight: 500 }}>✍️ 写作流程</Text>
-        <Space direction="vertical" style={{ width: '100%' }} size={8}>
-          <Tooltip title={selectedModelId ? '设置并生成大纲 + 细纲 + 连续性预检' : '请先在顶部选择模型'}>
-            <Button size="small" block icon={<RocketOutlined />} loading={stepOutlineLoading} disabled={!selectedModelId} onClick={onOpenOutlinePanel}>
-              ① 生成大纲
+        <Text style={{ fontSize: 12, color: '#667085', display: 'block', marginBottom: 8, fontWeight: 600 }}>生成小说步骤</Text>
+        <Space direction="vertical" style={{ width: '100%' }} size={10}>
+          <div>
+            <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 6 }}>1. 准备资料</Text>
+            <Space.Compact block>
+              <Button size="small" style={{ width: '50%' }} onClick={onOpenReferenceConfig}>参考{referenceCount ? ` ${referenceCount}` : ''}</Button>
+              <Button size="small" style={{ width: '50%' }} onClick={onOpenWritingBibleEditor}>圣经</Button>
+            </Space.Compact>
+            <Space.Compact block style={{ marginTop: 6 }}>
+              <Button size="small" style={{ width: '50%' }} loading={incubatingOriginal} onClick={onRunOriginalIncubator}>原创孵化</Button>
+              <Button size="small" style={{ width: '50%' }} onClick={onOpenReferenceEngineering}>参考工程</Button>
+            </Space.Compact>
+          </div>
+
+          <div>
+            <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 6 }}>2. 规划章节</Text>
+            <Tooltip title={selectedModelId ? '设置并生成大纲 + 细纲 + 连续性预检' : '请先在顶部选择模型'}>
+              <Button size="small" block icon={<RocketOutlined />} loading={stepOutlineLoading} disabled={!selectedModelId} onClick={onOpenOutlinePanel}>
+                生成大纲 / 细纲
+              </Button>
+            </Tooltip>
+          </div>
+
+          <div>
+            <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 6 }}>3. 补齐材料</Text>
+            <Button size="small" block loading={commercialToolLoading === 'materialRepair'} onClick={onOpenMaterialRepairPlan}>
+              材料补齐计划
             </Button>
-          </Tooltip>
-          <Tooltip title={selectedModelId ? '根据细纲批量生成所有章节正文' : '请先在顶部选择模型'}>
-            <Button size="small" block icon={<PlayCircleOutlined />} loading={stepProseLoading} disabled={!selectedModelId} onClick={onGenerateProse}>
-              ② 生成正文
-            </Button>
-          </Tooltip>
-          <Tooltip title={selectedModelId ? '检查并修复前后章矛盾' : '请先选择模型'}>
-            <Button size="small" block icon={<SafetyOutlined />} loading={stepRepairLoading} disabled={!selectedModelId} onClick={onRunRepair}>
-              ③ 连续性修复
-            </Button>
-          </Tooltip>
+          </div>
+
+          <div>
+            <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 6 }}>4. 生产正文</Text>
+            <Space.Compact block>
+              <Tooltip title={selectedModelId ? '根据细纲批量生成所有章节正文' : '请先在顶部选择模型'}>
+                <Button size="small" style={{ width: '50%' }} icon={<PlayCircleOutlined />} loading={stepProseLoading} disabled={!selectedModelId} onClick={onGenerateProse}>
+                  正文
+                </Button>
+              </Tooltip>
+              <Button size="small" style={{ width: '50%' }} loading={commercialToolLoading === 'readyGroup'} disabled={!selectedModelId} onClick={onStartReadyChapterGroupGeneration}>
+                智能群
+              </Button>
+            </Space.Compact>
+            <Space.Compact block style={{ marginTop: 6 }}>
+              <Button size="small" style={{ width: '50%' }} disabled={!selectedModelId} onClick={onStartChapterGroupGeneration}>章节群</Button>
+              <Button size="small" style={{ width: '50%' }} onClick={onOpenProductionDesk}>生产台</Button>
+            </Space.Compact>
+          </div>
+
+          <div>
+            <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 6 }}>5. 质检修订</Text>
+            <Space.Compact block>
+              <Tooltip title={selectedModelId ? '检查并修复前后章矛盾' : '请先选择模型'}>
+                <Button size="small" style={{ width: '50%' }} icon={<SafetyOutlined />} loading={stepRepairLoading} disabled={!selectedModelId} onClick={onRunRepair}>
+                  连续性
+                </Button>
+              </Tooltip>
+              <Button size="small" style={{ width: '50%' }} loading={bookReviewLoading} disabled={!selectedModelId} onClick={onRunBookReview}>全书总检</Button>
+            </Space.Compact>
+            <Space.Compact block style={{ marginTop: 6 }}>
+              <Button size="small" style={{ width: '50%' }} onClick={onOpenCommercialTools}>商业工具</Button>
+              <Button size="small" style={{ width: '50%' }} onClick={onOpenTaskCenter}>任务中心</Button>
+            </Space.Compact>
+          </div>
         </Space>
         {proseProgress.current > 0 && (
           <div style={{ marginTop: 8 }}>

@@ -25,6 +25,8 @@ export function createNovelOriginalIncubatorService() {
     'writing_bible: {promise,world_rules,mainline,volume_plan,style_lock,safety_policy,forbidden}',
     'commercial_positioning: {platform,reader_promise,selling_points,tropes,risks}',
     '',
+    '必须只输出一个合法 JSON object，不要输出 Markdown、解释、代码块或空对象。',
+    '如果无法完整生成，也必须至少输出 commercial_positioning、characters、outlines、chapters 四类内容；chapters 数量不得少于 5。',
     '要求：主角目标清晰，金手指/能力有代价，前 10 章追读钩子密集，分卷目标明确，避免空泛设定。',
   ].join('\n')
 
@@ -115,7 +117,21 @@ export function createNovelOriginalIncubatorService() {
     } as any)
   }
 
-  return { buildOriginalIncubatorPrompt, normalizeIncubatorPayload, storeOriginalIncubatorPayload }
+  const isUsableIncubatorPayload = (payload: any) => Boolean(
+    payload
+      && (
+        payload.selected_direction
+        || (Array.isArray(payload.directions) && payload.directions.length > 0)
+        || payload.worldbuilding?.world_summary
+        || (Array.isArray(payload.characters) && payload.characters.length > 0)
+        || (Array.isArray(payload.outlines) && payload.outlines.length > 0)
+        || (Array.isArray(payload.chapters) && payload.chapters.length > 0)
+        || payload.commercial_positioning?.reader_promise
+        || (Array.isArray(payload.commercial_positioning?.selling_points) && payload.commercial_positioning.selling_points.length > 0)
+      ),
+  )
+
+  return { buildOriginalIncubatorPrompt, normalizeIncubatorPayload, storeOriginalIncubatorPayload, isUsableIncubatorPayload }
 }
 
 export type NovelOriginalIncubatorService = ReturnType<typeof createNovelOriginalIncubatorService>

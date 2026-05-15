@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Alert, Badge, Button, Card, Form, Input, List, message, Modal, Progress, Select, Space, Typography, Tooltip, Tag,
+  Alert, Badge, Button, Card, Dropdown, Form, Input, List, message, Modal, Progress, Select, Space, Typography, Tooltip, Tag,
 } from 'antd'
 import {
-  ArrowLeftOutlined, BookOutlined, ClockCircleOutlined, ReloadOutlined,
+  ArrowLeftOutlined, BookOutlined, ClockCircleOutlined, DownOutlined, ReloadOutlined,
 } from '@ant-design/icons'
 import type { EditorView } from '@codemirror/view'
 import { useNavigate, useParams } from 'react-router-dom'
@@ -972,6 +972,35 @@ export default function NovelProjectWorkspace() {
             auto_store: false,
           })
           const payload = res.data?.payload || {}
+          const hasIncubatorContent = Boolean(
+            (Array.isArray(payload.directions) && payload.directions.length > 0)
+              || payload.selected_direction
+              || payload.worldbuilding?.world_summary
+              || (Array.isArray(payload.characters) && payload.characters.length > 0)
+              || (Array.isArray(payload.outlines) && payload.outlines.length > 0)
+              || (Array.isArray(payload.chapters) && payload.chapters.length > 0)
+              || payload.commercial_positioning?.reader_promise
+              || (Array.isArray(payload.commercial_positioning?.selling_points) && payload.commercial_positioning.selling_points.length > 0),
+          )
+          if (!hasIncubatorContent) {
+            Modal.error({
+              title: '原创孵化没有生成有效内容',
+              width: 720,
+              content: (
+                <Space direction="vertical" size={10} style={{ width: '100%' }}>
+                  <Text>模型返回了空方案，系统已阻止入库。请重试、切换模型，或先补充项目简介/题材/目标读者。</Text>
+                  {res.data?.raw_preview && (
+                    <Card size="small" title="模型原始返回片段">
+                      <Paragraph style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }} ellipsis={{ rows: 8, expandable: true }}>
+                        {res.data.raw_preview}
+                      </Paragraph>
+                    </Card>
+                  )}
+                </Space>
+              ),
+            })
+            return
+          }
           const directions = Array.isArray(payload.directions) ? payload.directions : []
           const selectedDirection = payload.selected_direction || directions.slice().sort((a: any, b: any) => Number(b.score || 0) - Number(a.score || 0))[0] || null
           const isSelectedDirection = (direction: any) => selectedDirection && (
@@ -1031,7 +1060,28 @@ export default function NovelProjectWorkspace() {
             },
           })
         } catch (error: any) {
-          message.error(error?.response?.data?.error || error?.message || '原创孵化失败')
+          const data = error?.response?.data || {}
+          if (data.error_code === 'ORIGINAL_INCUBATION_EMPTY') {
+            Modal.error({
+              title: '原创孵化没有生成有效内容',
+              width: 760,
+              content: (
+                <Space direction="vertical" size={10} style={{ width: '100%' }}>
+                  <Text>{data.error || '模型返回为空，请重试或切换模型。'}</Text>
+                  <Text type="secondary">建议：补充项目简介、题材、目标读者，或换一个更稳定的模型后再试。</Text>
+                  {data.raw_preview && (
+                    <Card size="small" title="模型原始返回片段">
+                      <Paragraph style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }} ellipsis={{ rows: 8, expandable: true }}>
+                        {data.raw_preview}
+                      </Paragraph>
+                    </Card>
+                  )}
+                </Space>
+              ),
+            })
+          } else {
+            message.error(data.error || error?.message || '原创孵化失败')
+          }
         } finally {
           setIncubatingOriginal(false)
         }
@@ -2144,16 +2194,44 @@ export default function NovelProjectWorkspace() {
     return <div style={{ display: 'grid', placeItems: 'center', height: '100%' }}><ReloadOutlined className="anticon" style={{ fontSize: 24, animation: 'spin 1s linear infinite' }} /> 加载中…</div>
   }
 
+  const handleWorkflowMenuClick = (key: string) => {
+    const actions: Record<string, () => void> = {
+      referenceConfig: () => setReferenceConfigOpen(true),
+      referenceEngineering: () => setReferenceEngineeringOpen(true),
+      originalIncubator: () => { void runOriginalIncubator() },
+      writingBible: () => { void openWritingBibleEditor() },
+      outlinePanel: () => setOutlinePanelOpen(true),
+      outlineTree: () => setOutlineTreeOpen(true),
+      chapterDrawer: () => setChapterDrawerOpen(true),
+      productionDashboard: () => { void openProductionDashboard() },
+      productionDesk: () => navigate(`/novel/workspace/${projectId}/production`),
+      chapterGroup: () => { void startChapterGroupGeneration() },
+      readyChapterGroup: () => { void startReadyChapterGroupGeneration() },
+      taskCenter: () => setTaskCenterOpen(true),
+      bookReview: () => { void runBookReview() },
+      continuityAudit: () => { void openContinuityAudit() },
+      commercialTools: () => setCommercialToolsOpen(true),
+      referenceDiagnosis: () => { void openReferenceKnowledgeDiagnosis() },
+      referenceMigration: () => { void runReferenceMigrationPlan() },
+    }
+    actions[key]?.()
+  }
+
+  const workflowMenu = (items: any[]) => ({
+    items,
+    onClick: ({ key }: { key: string }) => handleWorkflowMenuClick(key),
+  })
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, overflow: 'hidden', background: '#fff' }}>
 
       {/* ═══ TOP BAR ═══ */}
       <div style={{
         flexShrink: 0, height: 48, display: 'flex', alignItems: 'center',
-        padding: '0 16px', background: '#fff', borderBottom: '1px solid #f0f0f0', gap: 12,
+        padding: '0 16px', background: '#fff', borderBottom: '1px solid #f0f0f0', gap: 10,
       }}>
         <Button type="text" size="small" icon={<ArrowLeftOutlined />} onClick={() => navigate('/novel')} />
-        <Title level={5} style={{ margin: 0, flex: '1' }}>
+        <Title level={5} style={{ margin: 0, minWidth: 120, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {selectedProject?.title || '小说项目工作台'}
         </Title>
         <Select
@@ -2162,56 +2240,49 @@ export default function NovelProjectWorkspace() {
           options={models.map(m => ({ value: m.id, label: `${m.display_name || m.model_name} · ${m.provider}` }))}
           style={{ width: 220 }} placeholder="选择模型"
         />
-        <Tooltip title="配置当前项目生成时参考的投喂作品">
-          <Button type="text" size="small" icon={<BookOutlined />} onClick={() => setReferenceConfigOpen(true)}>
-            参考作品
-          </Button>
-        </Tooltip>
-        <Tooltip title="无参考作品时，原创孵化世界观、角色、分卷、章节和写作圣经">
-          <Button type="text" size="small" loading={incubatingOriginal} onClick={runOriginalIncubator}>
-            原创孵化
-          </Button>
-        </Tooltip>
-        <Tooltip title="查看长篇生产进度、资产库覆盖和模型调度策略">
-          <Button type="text" size="small" loading={dashboardLoading} onClick={openProductionDashboard}>
-            生产看板
-          </Button>
-        </Tooltip>
-        <Tooltip title="进入独立章节生产台，长期监控队列、预算、确认和重试">
-          <Button type="text" size="small" onClick={() => navigate(`/novel/workspace/${projectId}/production`)}>
-            生产台
-          </Button>
-        </Tooltip>
-        <Tooltip title="编辑项目写作圣经、风格锁定和仿写安全策略">
-          <Button type="text" size="small" onClick={openWritingBibleEditor}>
-            写作圣经
-          </Button>
-        </Tooltip>
-        <Tooltip title="检查全书主线、角色、伏笔、爽点密度和分卷目标">
-          <Button type="text" size="small" loading={bookReviewLoading} onClick={runBookReview}>
-            全书总检
-          </Button>
-        </Tooltip>
-        <Tooltip title="打开生产级自动写作工具箱">
-          <Button type="text" size="small" onClick={() => setCommercialToolsOpen(true)}>
-            商业工具
-          </Button>
-        </Tooltip>
-        <Tooltip title="创建 10 章章节群生产任务">
-          <Button type="text" size="small" onClick={startChapterGroupGeneration}>
-            章节群
-          </Button>
-        </Tooltip>
-        <Tooltip title="先检查材料完整度，只把可生成章节加入章节群队列">
-          <Button type="text" size="small" loading={commercialToolLoading === 'readyGroup'} onClick={startReadyChapterGroupGeneration}>
-            智能章节群
-          </Button>
-        </Tooltip>
-        <Tooltip title="查看参考项目、画像完整度、正文缓存和参考报告">
-          <Button type="text" size="small" icon={<BookOutlined />} onClick={() => setReferenceEngineeringOpen(true)}>
-            参考工程
-          </Button>
-        </Tooltip>
+        <Space size={4} style={{ flex: 1, minWidth: 0 }}>
+          <Dropdown
+            menu={workflowMenu([
+              { key: 'referenceConfig', label: '参考作品配置' },
+              { key: 'referenceEngineering', label: '参考工程总览' },
+              { key: 'referenceDiagnosis', label: '参考知识诊断' },
+              { key: 'originalIncubator', label: '原创孵化', disabled: incubatingOriginal },
+              { key: 'writingBible', label: '写作圣经' },
+            ])}
+          >
+            <Button size="small" type="text" icon={<BookOutlined />}>1 准备资料 <DownOutlined /></Button>
+          </Dropdown>
+          <Dropdown
+            menu={workflowMenu([
+              { key: 'outlinePanel', label: '生成/重建大纲', disabled: !selectedModelId || stepOutlineLoading },
+              { key: 'outlineTree', label: '查看大纲树' },
+              { key: 'chapterDrawer', label: '章节管理' },
+            ])}
+          >
+            <Button size="small" type="text">2 规划章节 <DownOutlined /></Button>
+          </Dropdown>
+          <Dropdown
+            menu={workflowMenu([
+              { key: 'productionDesk', label: '生产台' },
+              { key: 'productionDashboard', label: '生产看板', disabled: dashboardLoading },
+              { key: 'readyChapterGroup', label: '智能章节群', disabled: !selectedModelId || commercialToolLoading === 'readyGroup' },
+              { key: 'chapterGroup', label: '普通章节群', disabled: !selectedModelId },
+              { key: 'taskCenter', label: '任务中心' },
+            ])}
+          >
+            <Button size="small" type="text">3 批量生产 <DownOutlined /></Button>
+          </Dropdown>
+          <Dropdown
+            menu={workflowMenu([
+              { key: 'bookReview', label: '全书总检', disabled: !selectedModelId || bookReviewLoading },
+              { key: 'continuityAudit', label: '全书连续性检查' },
+              { key: 'referenceMigration', label: '当前章参考迁移计划', disabled: !activeChapter },
+              { key: 'commercialTools', label: '商业工具箱' },
+            ])}
+          >
+            <Button size="small" type="text">4 质检修订 <DownOutlined /></Button>
+          </Dropdown>
+        </Space>
         {referenceSummary.count > 0 && (
           <Tag color="purple" bordered={false}>{referenceSummary.strengthLabel} · {referenceSummary.count} 部参考</Tag>
         )}
@@ -2247,14 +2318,29 @@ export default function NovelProjectWorkspace() {
           stepOutlineLoading={stepOutlineLoading}
           stepProseLoading={stepProseLoading}
           stepRepairLoading={stepRepairLoading}
+          incubatingOriginal={incubatingOriginal}
+          bookReviewLoading={bookReviewLoading}
+          commercialToolLoading={commercialToolLoading}
           proseProgress={proseProgress}
           chapters={sortedChapters}
           proseChapterCount={proseChapters.length}
           activeChapterId={activeChapterId}
+          referenceCount={referenceSummary.count}
           onOpenOutlinePanel={() => setOutlinePanelOpen(true)}
           onGenerateProse={stepGenerateProse}
           onCancelGenerateProse={cancelStepGenerateProse}
           onRunRepair={stepRunRepair}
+          onOpenReferenceConfig={() => setReferenceConfigOpen(true)}
+          onOpenReferenceEngineering={() => setReferenceEngineeringOpen(true)}
+          onRunOriginalIncubator={() => { void runOriginalIncubator() }}
+          onOpenWritingBibleEditor={() => { void openWritingBibleEditor() }}
+          onOpenMaterialRepairPlan={() => { void openMaterialRepairPlan() }}
+          onStartReadyChapterGroupGeneration={() => { void startReadyChapterGroupGeneration() }}
+          onStartChapterGroupGeneration={() => { void startChapterGroupGeneration() }}
+          onOpenProductionDesk={() => navigate(`/novel/workspace/${projectId}/production`)}
+          onOpenTaskCenter={() => setTaskCenterOpen(true)}
+          onRunBookReview={() => { void runBookReview() }}
+          onOpenCommercialTools={() => setCommercialToolsOpen(true)}
           onOpenOutlineTree={() => setOutlineTreeOpen(true)}
           onOpenChapterDrawer={() => setChapterDrawerOpen(true)}
           onCreateChapter={() => openEditor('chapter')}

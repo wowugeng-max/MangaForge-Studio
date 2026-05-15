@@ -19,8 +19,9 @@ type PlanningRoutesContext = {
   getStageTemperature: (project: any, stage: string, fallback: number) => number
   getModelStrategy: (project: any, preferredModelId?: number) => any
   buildProductionMetrics: (chapters: any[], reviews: any[], runs: any[]) => any
-  buildOriginalIncubatorPrompt: (project: any, body: any) => string[]
+  buildOriginalIncubatorPrompt: (project: any, body: any) => string
   normalizeIncubatorPayload: (payload: any, chapterCount: number) => any
+  isUsableIncubatorPayload: (payload: any) => boolean
   storeOriginalIncubatorPayload: (workspace: string, project: any, payload: any) => Promise<any>
 }
 
@@ -271,6 +272,23 @@ export function registerNovelPlanningRoutes(app: Express, ctx: PlanningRoutesCon
         task: ctx.buildOriginalIncubatorPrompt(project, { ...req.body, chapter_count: chapterCount, variant_count: variantCount }),
       }, { activeWorkspace, modelId: stageModelId ? String(stageModelId) : undefined, maxTokens: 9000, temperature: ctx.getStageTemperature(project, 'incubation', 0.65), skipMemory: true })
       const payload = ctx.normalizeIncubatorPayload(getNovelPayload(result), chapterCount)
+      if ((result as any).error || !ctx.isUsableIncubatorPayload(payload)) {
+        await appendNovelRun(activeWorkspace, {
+          project_id: project.id,
+          run_type: 'original_incubation',
+          step_name: 'preview',
+          status: 'failed',
+          input_ref: JSON.stringify(req.body || {}),
+          output_ref: JSON.stringify({ payload, modelName: (result as any).modelName, raw_preview: String((result as any).content || (result as any).raw?.choices?.[0]?.message?.content || '').slice(0, 3000) }),
+          error_message: (result as any).error || '模型未返回有效原创孵化方案',
+        })
+        return res.status(502).json({
+          error: (result as any).error || '模型未返回有效原创孵化方案，请重试或切换模型。',
+          error_code: 'ORIGINAL_INCUBATION_EMPTY',
+          payload,
+          raw_preview: String((result as any).content || (result as any).raw?.choices?.[0]?.message?.content || '').slice(0, 3000),
+        })
+      }
       let updatedProject: any = null
       if (req.body.auto_store !== false) {
         updatedProject = await ctx.storeOriginalIncubatorPayload(activeWorkspace, project, payload)

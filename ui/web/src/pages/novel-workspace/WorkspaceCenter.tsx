@@ -359,10 +359,10 @@ export function WorkspaceCenter({
       {!isEmptyProject && activeChapter && (
         <>
           <div style={{
-            flexShrink: 0, padding: '10px 24px', background: '#fff',
-            borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', gap: 16,
+            flexShrink: 0, padding: '10px 20px', background: '#fff',
+            borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', gap: 14,
           }}>
-            <Title level={5} style={{ margin: 0 }}>
+            <Title level={5} style={{ margin: 0, minWidth: 180, maxWidth: 320 }}>
               第{activeChapter.chapter_no}章《{displayValue(activeChapter.title) || '无标题'}》
             </Title>
             {chapterStatusTag(activeChapter)}
@@ -377,25 +377,33 @@ export function WorkspaceCenter({
             <Text type="secondary" style={{ fontSize: 13 }}>{wc(activeChapter.chapter_text)} 字</Text>
             <SaveIndicator status={saveStatus} />
             <EditorDisplayControls prefs={editorDisplayPrefs} onChange={setEditorDisplayPrefs} />
-            <Tooltip title="生成前诊断">
-              <Button size="small" loading={diagnosticsLoading} onClick={onOpenGenerationDiagnostics}>诊断</Button>
-            </Tooltip>
-            <Tooltip title="查看章节质量卡">
-              <Button size="small" onClick={onOpenQualityCard}>质量卡</Button>
-            </Tooltip>
-            <Tooltip title="生成编辑部六维审稿报告">
-              <Button size="small" loading={editorReportLoading} onClick={onCreateEditorReport}>审稿</Button>
-            </Tooltip>
-            <Tooltip title="创建可恢复流水线，并停在场景卡确认阶段">
-              <Button size="small" loading={pipelineLoading} onClick={onStartChapterPipeline}>流水线</Button>
-            </Tooltip>
-            <Tooltip title="生成或刷新场景卡">
-              <Button size="small" icon={<FileTextOutlined />} loading={generatingSceneCards} onClick={onGenerateSceneCards}>场景卡</Button>
-            </Tooltip>
-            <Tooltip title="生成正文">
-              <Button type="primary" size="small" icon={<PlayCircleOutlined />} loading={generatingProse} onClick={onGenerateCurrentChapterProse} />
-            </Tooltip>
-            <Button size="small" onClick={onEditActiveChapter} icon={<EditOutlined />}>元数据</Button>
+            <Space size={10} wrap style={{ justifyContent: 'flex-end' }}>
+              <Space.Compact>
+                <Button size="small" onClick={onEditActiveChapter} icon={<EditOutlined />}>元数据</Button>
+                <Tooltip title="生成或刷新场景卡">
+                  <Button size="small" icon={<FileTextOutlined />} loading={generatingSceneCards} onClick={onGenerateSceneCards}>场景卡</Button>
+                </Tooltip>
+                <Tooltip title="生成前诊断">
+                  <Button size="small" loading={diagnosticsLoading} onClick={onOpenGenerationDiagnostics}>诊断</Button>
+                </Tooltip>
+              </Space.Compact>
+              <Space.Compact>
+                <Tooltip title="创建可恢复流水线，并停在场景卡确认阶段">
+                  <Button size="small" loading={pipelineLoading} onClick={onStartChapterPipeline}>流水线</Button>
+                </Tooltip>
+                <Tooltip title="生成正文">
+                  <Button type="primary" size="small" icon={<PlayCircleOutlined />} loading={generatingProse} onClick={onGenerateCurrentChapterProse}>生成</Button>
+                </Tooltip>
+              </Space.Compact>
+              <Space.Compact>
+                <Tooltip title="查看章节质量卡">
+                  <Button size="small" onClick={onOpenQualityCard}>质量卡</Button>
+                </Tooltip>
+                <Tooltip title="生成编辑部六维审稿报告">
+                  <Button size="small" loading={editorReportLoading} onClick={onCreateEditorReport}>审稿</Button>
+                </Tooltip>
+              </Space.Compact>
+            </Space>
           </div>
 
           {streamingChapterId === activeChapter.id && (

@@ -78,6 +78,7 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
     buildProductionMetrics: dashboardService.buildProductionMetrics,
     buildOriginalIncubatorPrompt: incubatorService.buildOriginalIncubatorPrompt,
     normalizeIncubatorPayload: incubatorService.normalizeIncubatorPayload,
+    isUsableIncubatorPayload: incubatorService.isUsableIncubatorPayload,
     storeOriginalIncubatorPayload: incubatorService.storeOriginalIncubatorPayload,
   })
 
