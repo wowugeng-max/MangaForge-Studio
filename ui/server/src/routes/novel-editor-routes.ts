@@ -147,7 +147,287 @@ function buildChapterQualityCard(chapter: any, contextPackage: any, reviews: any
   }
 }
 
+function annotationKey(input: any) {
+  return [
+    input.source || 'review',
+    input.review_id || 0,
+    input.chapter_id || 0,
+    input.chapter_no || 0,
+    String(input.kind || 'issue'),
+    String(input.title || input.message || '').slice(0, 120),
+  ].join(':')
+}
+
+function latestAnnotationStatus(reviews: any[]) {
+  const map = new Map<string, any>()
+  reviews
+    .filter(item => item.review_type === 'review_annotation_status')
+    .slice()
+    .sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')))
+    .forEach(item => {
+      const payload = parseJsonLikePayload(item.payload) || {}
+      if (payload.annotation_key) map.set(payload.annotation_key, { ...payload, review: item })
+    })
+  return map
+}
+
+function pushAnnotation(items: any[], statuses: Map<string, any>, raw: any) {
+  const key = raw.key || annotationKey(raw)
+  const state = statuses.get(key) || {}
+  items.push({
+    key,
+    status: state.status || raw.status || 'open',
+    resolved_at: state.resolved_at || null,
+    resolution_note: state.note || '',
+    severity: raw.severity || 'medium',
+    category: raw.category || 'general',
+    title: raw.title || raw.message || '审阅批注',
+    message: raw.message || raw.title || '',
+    action: raw.action || raw.suggestion || '',
+    chapter_id: raw.chapter_id || null,
+    chapter_no: raw.chapter_no || null,
+    source: raw.source || 'review',
+    source_label: raw.source_label || raw.source || '审阅',
+    review_id: raw.review_id || null,
+    created_at: raw.created_at || '',
+    payload: raw.payload || {},
+  })
+}
+
+function buildReviewAnnotations(project: any, chapters: any[], reviews: any[]) {
+  const statuses = latestAnnotationStatus(reviews)
+  const items: any[] = []
+  const chapterById = new Map(chapters.map(chapter => [Number(chapter.id), chapter]))
+  const chapterByNo = new Map(chapters.map(chapter => [Number(chapter.chapter_no), chapter]))
+  const resolveChapter = (payload: any) => {
+    const chapterId = Number(payload.chapter_id || payload.report?.chapter_id || payload.quality_card?.chapter_id || payload.context_package?.chapter_target?.id || 0)
+    const chapterNo = Number(payload.chapter_no || payload.report?.chapter_no || payload.quality_card?.chapter_no || payload.context_package?.chapter_target?.chapter_no || 0)
+    return chapterById.get(chapterId) || chapterByNo.get(chapterNo) || null
+  }
+  const pushReviewIssues = (review: any, payload: any, issueList: any[], defaults: any = {}) => {
+    const chapter = resolveChapter(payload)
+    issueList.forEach((issue: any, index: number) => {
+      const normalized = typeof issue === 'string' ? { description: issue } : issue || {}
+      pushAnnotation(items, statuses, {
+        source: defaults.source || review.review_type,
+        source_label: defaults.source_label || review.summary || review.review_type,
+        review_id: review.id,
+        chapter_id: chapter?.id || defaults.chapter_id || null,
+        chapter_no: chapter?.chapter_no || defaults.chapter_no || null,
+        kind: normalized.type || defaults.kind || `issue-${index}`,
+        severity: normalized.severity || defaults.severity || 'medium',
+        category: defaults.category || normalized.type || review.review_type,
+        title: normalized.title || normalized.description || normalized.message || String(issue),
+        message: normalized.description || normalized.message || normalized.title || String(issue),
+        action: normalized.suggestion || normalized.action || defaults.action || '',
+        created_at: review.created_at,
+        payload: { issue: normalized, review_type: review.review_type },
+      })
+    })
+  }
+
+  for (const review of reviews) {
+    const payload = parseJsonLikePayload(review.payload) || {}
+    if (review.review_type === 'prose_quality') {
+      const reviewPayload = payload.self_check?.review || payload.review || {}
+      pushReviewIssues(review, payload, asArray(reviewPayload.issues), {
+        source: 'prose_quality',
+        source_label: '正文质检',
+        category: 'quality',
+        severity: Number(reviewPayload.score || 100) < 65 ? 'high' : 'medium',
+      })
+      if (Number(reviewPayload.score || 100) < 78) {
+        const chapter = resolveChapter(payload)
+        pushAnnotation(items, statuses, {
+          source: 'prose_quality',
+          source_label: '正文质检',
+          review_id: review.id,
+          chapter_id: chapter?.id,
+          chapter_no: chapter?.chapter_no,
+          kind: 'low_quality_score',
+          severity: Number(reviewPayload.score || 0) < 65 ? 'high' : 'medium',
+          category: 'quality',
+          title: `质量分 ${reviewPayload.score || 0} 低于阈值`,
+          message: review.summary || `章节质量分 ${reviewPayload.score || 0}`,
+          action: '进入章节修订，补齐目标、冲突、节奏或章末钩子。',
+          created_at: review.created_at,
+          payload: { score: reviewPayload.score },
+        })
+      }
+    }
+    if (review.review_type === 'editor_report') {
+      const report = payload.report || {}
+      pushReviewIssues(review, payload, asArray(report.must_fix), {
+        source: 'editor_report',
+        source_label: '编辑报告',
+        category: 'editorial',
+        severity: 'high',
+        action: '按编辑报告生成修订稿或人工修改。',
+      })
+      asArray(report.optional_improvements).forEach((item: any, index: number) => {
+        const chapter = resolveChapter(payload)
+        pushAnnotation(items, statuses, {
+          source: 'editor_report',
+          source_label: '编辑报告',
+          review_id: review.id,
+          chapter_id: chapter?.id,
+          chapter_no: chapter?.chapter_no,
+          kind: `optional-${index}`,
+          severity: 'low',
+          category: 'editorial',
+          title: String(item),
+          message: String(item),
+          action: '可选优化，人工判断是否处理。',
+          created_at: review.created_at,
+        })
+      })
+    }
+    if (review.review_type === 'similarity_report') {
+      const report = payload.report || payload
+      const chapter = resolveChapter(payload)
+      const risk = Number(report.overall_risk_score || 0)
+      if (risk > 35 || report.decision === 'needs_rewrite') {
+        pushAnnotation(items, statuses, {
+          source: 'similarity_report',
+          source_label: '相似度报告',
+          review_id: review.id,
+          chapter_id: chapter?.id,
+          chapter_no: chapter?.chapter_no || report.chapter_no,
+          kind: 'similarity_risk',
+          severity: risk > 55 ? 'high' : 'medium',
+          category: 'safety',
+          title: `相似风险 ${risk}`,
+          message: `相似度检测决策：${report.decision || '需复核'}`,
+          action: asArray(report.suggestions)[0] || '运行参考迁移计划并重写高风险桥段。',
+          created_at: review.created_at,
+          payload: report,
+        })
+      }
+      pushReviewIssues(review, payload, asArray(report.suggestions), {
+        source: 'similarity_report',
+        source_label: '相似度报告',
+        category: 'safety',
+        severity: risk > 55 ? 'high' : 'medium',
+      })
+    }
+    if (review.review_type === 'release_repair_queue') {
+      const audit = payload.release_audit || {}
+      asArray(audit.blockers).concat(asArray(audit.warnings)).forEach((item: any, index: number) => {
+        pushAnnotation(items, statuses, {
+          source: 'release_repair_queue',
+          source_label: '发布审核',
+          review_id: review.id,
+          kind: `release-${item.key || index}`,
+          severity: item.status === 'blocker' ? 'high' : 'medium',
+          category: 'release',
+          title: item.label || '发布审核问题',
+          message: item.message || item.label || '',
+          action: item.action || '',
+          created_at: review.created_at,
+          payload: item,
+        })
+      })
+    }
+  }
+
+  for (const chapter of chapters) {
+    if (chapter.chapter_text && !chapter.ending_hook) {
+      pushAnnotation(items, statuses, {
+        source: 'local_scan',
+        source_label: '本地扫描',
+        chapter_id: chapter.id,
+        chapter_no: chapter.chapter_no,
+        kind: 'missing_hook',
+        severity: 'medium',
+        category: 'continuity',
+        title: '缺少章末钩子',
+        message: `第${chapter.chapter_no}章已写正文但缺少章末钩子。`,
+        action: '补齐能推动下一章点击的悬念、反转或目标变化。',
+      })
+    }
+    if (chapter.chapter_text && (!Array.isArray(chapter.continuity_notes) || chapter.continuity_notes.length === 0)) {
+      pushAnnotation(items, statuses, {
+        source: 'local_scan',
+        source_label: '本地扫描',
+        chapter_id: chapter.id,
+        chapter_no: chapter.chapter_no,
+        kind: 'missing_continuity_notes',
+        severity: 'low',
+        category: 'continuity',
+        title: '缺少连续性备注',
+        message: `第${chapter.chapter_no}章缺少角色、道具、伏笔或时间线变化记录。`,
+        action: '补齐连续性备注或运行状态机更新。',
+      })
+    }
+  }
+
+  const unique = new Map<string, any>()
+  items.forEach(item => unique.set(item.key, item))
+  const annotations = [...unique.values()].sort((a, b) => {
+    const severityWeight: Record<string, number> = { high: 0, critical: 0, medium: 1, low: 2 }
+    return (severityWeight[a.severity] ?? 3) - (severityWeight[b.severity] ?? 3)
+      || Number(a.chapter_no || 999999) - Number(b.chapter_no || 999999)
+      || String(b.created_at || '').localeCompare(String(a.created_at || ''))
+  })
+  return {
+    project_id: project.id,
+    summary: {
+      total: annotations.length,
+      open: annotations.filter(item => item.status !== 'resolved').length,
+      resolved: annotations.filter(item => item.status === 'resolved').length,
+      high: annotations.filter(item => item.status !== 'resolved' && ['high', 'critical'].includes(item.severity)).length,
+      medium: annotations.filter(item => item.status !== 'resolved' && item.severity === 'medium').length,
+      low: annotations.filter(item => item.status !== 'resolved' && item.severity === 'low').length,
+    },
+    annotations,
+    generated_at: new Date().toISOString(),
+  }
+}
+
 export function registerNovelEditorRoutes(app: Express, ctx: EditorRoutesContext) {
+  app.get('/api/novel/projects/:id/review-annotations', async (req, res) => {
+    try {
+      const activeWorkspace = ctx.getWorkspace()
+      const project = await ctx.getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const [chapters, reviews] = await Promise.all([
+        listNovelChapters(activeWorkspace, project.id),
+        listNovelReviews(activeWorkspace, project.id),
+      ])
+      const payload = buildReviewAnnotations(project, chapters, reviews)
+      res.json({ ok: true, ...payload })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.post('/api/novel/projects/:id/review-annotations/status', async (req, res) => {
+    try {
+      const activeWorkspace = ctx.getWorkspace()
+      const project = await ctx.getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const key = String(req.body?.annotation_key || req.body?.key || '').trim()
+      if (!key) return res.status(400).json({ error: 'annotation_key required' })
+      const status = String(req.body?.status || 'resolved')
+      const saved = await createNovelReview(activeWorkspace, {
+        project_id: project.id,
+        review_type: 'review_annotation_status',
+        status,
+        summary: `${status === 'resolved' ? '已处理' : '已更新'}批注：${key.slice(0, 80)}`,
+        issues: [],
+        payload: JSON.stringify({
+          annotation_key: key,
+          status,
+          note: String(req.body?.note || ''),
+          resolved_at: status === 'resolved' ? new Date().toISOString() : null,
+        }),
+      })
+      res.json({ ok: true, status: saved })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
   app.post('/api/novel/chapters/:chapterId/editor-report', async (req, res) => {
     try {
       const loaded = await loadChapterBundle(ctx, Number(req.body.project_id || 0), Number(req.params.chapterId))

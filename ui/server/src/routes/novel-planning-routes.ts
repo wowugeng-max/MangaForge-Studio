@@ -7,10 +7,11 @@ import {
   listNovelOutlines,
   listNovelReviews,
   listNovelRuns,
+  listNovelWorldbuilding,
   updateNovelProject,
 } from '../novel'
-import { executeNovelAgent } from '../llm'
-import { asArray, compactText, getNovelPayload, parseJsonLikePayload } from './novel-route-utils'
+import { executeNovelAgent, generateNovelChapterProse } from '../llm'
+import { asArray, clampScore, compactText, deepMergeObjects, getNovelPayload, parseJsonLikePayload } from './novel-route-utils'
 
 type PlanningRoutesContext = {
   getWorkspace: () => string
@@ -18,11 +19,291 @@ type PlanningRoutesContext = {
   getStageModelId: (project: any, stage: string, preferredModelId?: number) => number | undefined
   getStageTemperature: (project: any, stage: string, fallback: number) => number
   getModelStrategy: (project: any, preferredModelId?: number) => any
+  buildAgentConfigSnapshot: (project: any, preferredModelId?: number) => any
+  buildChapterContextPackage: (workspace: string, project: any, chapter: any, chapters: any[], worldbuilding: any[], characters: any[], outlines: any[], reviews: any[]) => Promise<any>
+  getReferenceMigrationPlanForChapter: (workspace: string, project: any, chapter: any) => Promise<any>
+  buildParagraphProseContext: (project: any, contextPackage: any, migrationPlan?: any) => string[]
   buildProductionMetrics: (chapters: any[], reviews: any[], runs: any[]) => any
   buildOriginalIncubatorPrompt: (project: any, body: any) => string
   normalizeIncubatorPayload: (payload: any, chapterCount: number) => any
   isUsableIncubatorPayload: (payload: any) => boolean
   storeOriginalIncubatorPayload: (workspace: string, project: any, payload: any) => Promise<any>
+}
+
+function latestChapterReviewPayload(reviews: any[], chapter: any, types: string[]) {
+  return reviews
+    .filter(review => types.includes(review.review_type))
+    .map(review => ({ review, payload: parseJsonLikePayload(review.payload) || {} }))
+    .filter(item => Number(item.payload.chapter_id || item.payload.context_package?.chapter?.id || 0) === Number(chapter.id)
+      || Number(item.payload.chapter_no || item.payload.context_package?.chapter?.chapter_no || 0) === Number(chapter.chapter_no))
+    .sort((a, b) => String(b.review.created_at || '').localeCompare(String(a.review.created_at || '')))[0] || null
+}
+
+function chapterBenchmarkMetrics(chapter: any, reviews: any[], issues: any[] = []) {
+  const quality = latestChapterReviewPayload(reviews, chapter, ['prose_quality'])?.payload || {}
+  const editor = latestChapterReviewPayload(reviews, chapter, ['editor_report'])?.payload || {}
+  const similarity = latestChapterReviewPayload(reviews, chapter, ['similarity_report'])?.payload || {}
+  const qualityScore = Number(quality.self_check?.review?.score || quality.report?.overall_score || 0) || null
+  const editorScore = Number(editor.report?.overall_score || editor.overall_score || 0) || null
+  const similarityRisk = Number(similarity.report?.overall_risk_score || similarity.overall_risk_score || 0) || null
+  const safetyScore = Number(quality.safety_decision?.score || quality.reference_report?.quality_assessment?.overall_score || similarity.reference_report?.quality_assessment?.overall_score || 0) || null
+  const chapterIssues = issues.filter(issue => Number(issue.chapter_no || 0) === Number(chapter.chapter_no || 0))
+  const issuePenalty = chapterIssues.reduce((sum, issue) => sum + (issue.severity === 'high' ? 14 : issue.severity === 'medium' ? 7 : 3), 0)
+  const missingPenalty = [
+    chapter.chapter_text ? 0 : 28,
+    chapter.chapter_goal || chapter.chapter_summary ? 0 : 10,
+    chapter.ending_hook ? 0 : 8,
+    asArray(chapter.scene_breakdown).length > 0 ? 0 : 8,
+    qualityScore ? 0 : 8,
+  ].reduce((sum, item) => sum + item, 0)
+  const base = qualityScore || (chapter.chapter_text ? 72 : 35)
+  const score = Math.max(0, Math.min(100, Math.round(base - issuePenalty - missingPenalty + (editorScore ? Math.min(8, (editorScore - 70) / 4) : 0) - (similarityRisk ? Math.min(16, similarityRisk / 4) : 0))))
+  return {
+    chapter_id: chapter.id,
+    chapter_no: chapter.chapter_no,
+    title: chapter.title || '',
+    word_count: String(chapter.chapter_text || '').replace(/\s/g, '').length,
+    score,
+    quality_score: qualityScore,
+    editor_score: editorScore,
+    similarity_risk: similarityRisk,
+    safety_score: safetyScore,
+    issue_count: chapterIssues.length,
+    high_issue_count: chapterIssues.filter(issue => issue.severity === 'high').length,
+  }
+}
+
+function buildRegressionSampleSet(project: any, chapters: any[], reviews: any[], issues: any[] = [], maxSamples = 10) {
+  const written = chapters.filter(chapter => chapter.chapter_text).sort((a, b) => Number(a.chapter_no || 0) - Number(b.chapter_no || 0))
+  const scored = written.map(chapter => ({ chapter, metrics: chapterBenchmarkMetrics(chapter, reviews, issues) }))
+  const byId = new Map<number, any>()
+  const add = (item: any, reason: string) => {
+    if (!item?.chapter?.id || byId.size >= maxSamples) return
+    byId.set(Number(item.chapter.id), {
+      chapter_id: item.chapter.id,
+      chapter_no: item.chapter.chapter_no,
+      title: item.chapter.title || '',
+      reason,
+      baseline_score: item.metrics.score,
+      baseline_word_count: item.metrics.word_count,
+    })
+  }
+  add(scored[0], '开篇样本')
+  add(scored[Math.floor(scored.length / 2)], '中段样本')
+  add(scored[scored.length - 1], '最新样本')
+  scored.slice().sort((a, b) => a.metrics.score - b.metrics.score).slice(0, 3).forEach(item => add(item, '低分回归样本'))
+  scored.slice().sort((a, b) => Number(b.metrics.similarity_risk || 0) - Number(a.metrics.similarity_risk || 0)).slice(0, 2).forEach(item => add(item, '相似风险样本'))
+  scored.slice().sort((a, b) => b.metrics.high_issue_count - a.metrics.high_issue_count).slice(0, 2).forEach(item => add(item, '连续性风险样本'))
+  return {
+    suite_id: project.reference_config?.regression_suite?.suite_id || `reg-${Date.now()}`,
+    updated_at: new Date().toISOString(),
+    samples: Array.from(byId.values()),
+    policy: {
+      min_average_score: Number(project.reference_config?.regression_suite?.policy?.min_average_score || 78),
+      max_score_drop: Number(project.reference_config?.regression_suite?.policy?.max_score_drop || 6),
+      max_similarity_risk: Number(project.reference_config?.regression_suite?.policy?.max_similarity_risk || 45),
+    },
+  }
+}
+
+function buildRegressionIssues(project: any, chapters: any[]) {
+  const state = project.reference_config?.story_state || {}
+  const sorted = chapters.slice().sort((a, b) => Number(a.chapter_no || 0) - Number(b.chapter_no || 0))
+  const issues: any[] = []
+  for (const chapter of sorted) {
+    if (chapter.chapter_text && !chapter.ending_hook) {
+      issues.push({ type: 'missing_hook', severity: 'medium', chapter_no: chapter.chapter_no, message: '章节缺章末钩子。' })
+    }
+    if (chapter.chapter_text && !asArray(chapter.continuity_notes).length) {
+      issues.push({ type: 'continuity_note_missing', severity: 'medium', chapter_no: chapter.chapter_no, message: '章节缺连续性备注。' })
+    }
+  }
+  const writtenMax = Math.max(0, ...sorted.filter(chapter => chapter.chapter_text).map(chapter => Number(chapter.chapter_no || 0)))
+  if (writtenMax && Number(state.last_updated_chapter || 0) < writtenMax) {
+    issues.push({ type: 'story_state_stale', severity: 'high', chapter_no: writtenMax, message: `状态机落后到第${state.last_updated_chapter || 0}章。` })
+  }
+  return issues
+}
+
+function runRegressionSuite(project: any, suite: any, chapters: any[], reviews: any[], runs: any[], issues: any[] = [], options: any = {}) {
+  const chapterMap = new Map(chapters.map(chapter => [Number(chapter.id), chapter]))
+  const samples = asArray(suite.samples).map((sample: any) => {
+    const chapter = chapterMap.get(Number(sample.chapter_id))
+    const metrics = chapter ? chapterBenchmarkMetrics(chapter, reviews, issues) : { chapter_id: sample.chapter_id, score: 0, missing: true }
+    return {
+      ...sample,
+      current: metrics,
+      delta_score: Number(metrics.score || 0) - Number(sample.baseline_score || 0),
+      status: !chapter ? 'missing' : Number(metrics.score || 0) < Number(suite.policy?.min_average_score || 78) ? 'warn' : 'ok',
+    }
+  })
+  const average = samples.length ? Math.round(samples.reduce((sum: number, sample: any) => sum + Number(sample.current?.score || 0), 0) / samples.length) : 0
+  const baselineAverage = samples.length ? Math.round(samples.reduce((sum: number, sample: any) => sum + Number(sample.baseline_score || 0), 0) / samples.length) : 0
+  const maxDrop = samples.reduce((drop: number, sample: any) => Math.min(drop, Number(sample.delta_score || 0)), 0)
+  const highSimilarity = samples.filter((sample: any) => Number(sample.current?.similarity_risk || 0) >= Number(suite.policy?.max_similarity_risk || 45))
+  const passed = average >= Number(suite.policy?.min_average_score || 78) && Math.abs(maxDrop) <= Number(suite.policy?.max_score_drop || 6) && highSimilarity.length === 0
+  return {
+    run_id: `reg-run-${Date.now()}`,
+    suite_id: suite.suite_id,
+    created_at: new Date().toISOString(),
+    config_snapshot: options.buildAgentConfigSnapshot?.(project, options.modelId),
+    sample_count: samples.length,
+    average_score: average,
+    baseline_average_score: baselineAverage,
+    delta_average_score: average - baselineAverage,
+    max_score_drop: maxDrop,
+    passed,
+    samples,
+    cost_baseline: options.buildProductionMetrics?.(chapters, reviews, runs),
+    recommendations: [
+      !samples.length ? '回归样本为空，先生成并固化样本集。' : '',
+      average < Number(suite.policy?.min_average_score || 78) ? '样本均分低于门禁，优先修订低分章节或调整审稿提示词。' : '',
+      Math.abs(maxDrop) > Number(suite.policy?.max_score_drop || 6) ? '存在明显分数回退，建议回滚最近提示词/模型策略改动后复测。' : '',
+      highSimilarity.length ? '存在相似风险过高样本，降低参考强度并重写高风险桥段。' : '',
+    ].filter(Boolean),
+  }
+}
+
+function suggestedAbCandidateConfig(project: any, preferredModelId?: number) {
+  const currentStrategy = project.reference_config?.model_strategy || {}
+  const currentPrompts = project.reference_config?.agent_prompt_config?.prompts || {}
+  return {
+    agent_prompt_config: {
+      ...(project.reference_config?.agent_prompt_config || {}),
+      prompts: {
+        ...currentPrompts,
+        draft_guardrails: currentPrompts.draft_guardrails || '生成正文时优先完成本章目标、避免重复解释、保留章末钩子，不照搬参考作品具体桥段。',
+        revision_guardrails: currentPrompts.revision_guardrails || '修订时优先处理连续性、角色动机、信息增量和水文重复，保持原章节核心事件不漂移。',
+      },
+    },
+    model_strategy: {
+      ...currentStrategy,
+      preferred_model_id: currentStrategy.preferred_model_id || preferredModelId || null,
+      stages: {
+        ...(currentStrategy.stages || {}),
+        draft: { ...(currentStrategy.stages?.draft || {}), model_id: currentStrategy.stages?.draft?.model_id || preferredModelId || null, temperature: 0.72 },
+        review: { ...(currentStrategy.stages?.review || {}), model_id: currentStrategy.stages?.review?.model_id || preferredModelId || null, temperature: 0.18 },
+        safety: { ...(currentStrategy.stages?.safety || {}), model_id: currentStrategy.stages?.safety?.model_id || preferredModelId || null, temperature: 0.12 },
+      },
+    },
+    quality_gate: {
+      ...(project.reference_config?.quality_gate || {}),
+      enabled: true,
+      min_score: Math.max(78, Number(project.reference_config?.quality_gate?.min_score || 78)),
+      block_on_safety: true,
+    },
+    safety: {
+      ...(project.reference_config?.safety || {}),
+      enforce_on_generate: true,
+    },
+  }
+}
+
+function buildCandidateProject(project: any, candidateConfig: any) {
+  const patch = candidateConfig?.reference_config || candidateConfig || {}
+  return {
+    ...project,
+    reference_config: deepMergeObjects(project.reference_config || {}, patch),
+  }
+}
+
+function scoreAbCandidate(currentProject: any, candidateProject: any, baseReport: any) {
+  const currentConfig = currentProject.reference_config || {}
+  const candidateConfig = candidateProject.reference_config || {}
+  const currentPrompts = currentConfig.agent_prompt_config?.prompts || {}
+  const candidatePrompts = candidateConfig.agent_prompt_config?.prompts || {}
+  const promptDelta = Object.keys(candidatePrompts).length - Object.keys(currentPrompts).length
+  const draftTemp = Number(candidateConfig.model_strategy?.stages?.draft?.temperature ?? currentConfig.model_strategy?.stages?.draft?.temperature ?? 0.75)
+  const reviewTemp = Number(candidateConfig.model_strategy?.stages?.review?.temperature ?? currentConfig.model_strategy?.stages?.review?.temperature ?? 0.2)
+  const safetyTemp = Number(candidateConfig.model_strategy?.stages?.safety?.temperature ?? currentConfig.model_strategy?.stages?.safety?.temperature ?? 0.15)
+  const gateLift = Number(candidateConfig.quality_gate?.min_score || 0) - Number(currentConfig.quality_gate?.min_score || 0)
+  const safetyEnabled = candidateConfig.safety?.enforce_on_generate === true && currentConfig.safety?.enforce_on_generate !== true
+  const qualityAdjustment = clampScore(
+    50
+    + Math.min(6, Math.max(0, promptDelta) * 2)
+    + (reviewTemp <= 0.22 ? 3 : -2)
+    + (draftTemp >= 0.62 && draftTemp <= 0.78 ? 3 : -3)
+    + (gateLift >= 0 ? 2 : -4),
+  ) - 50
+  const safetyAdjustment = (safetyEnabled ? 5 : 0) + (safetyTemp <= 0.18 ? 2 : -2)
+  const projectedAverage = clampScore(Number(baseReport.average_score || 0) + qualityAdjustment)
+  return {
+    quality_adjustment: qualityAdjustment,
+    safety_adjustment: safetyAdjustment,
+    projected_average_score: projectedAverage,
+    projected_delta_average_score: projectedAverage - Number(baseReport.average_score || 0),
+    risk_notes: [
+      promptDelta <= 0 ? '候选配置没有增加明确提示词护栏，实际效果可能有限。' : '',
+      draftTemp > 0.82 ? '正文温度偏高，可能增加风格漂移和相似风险。' : '',
+      reviewTemp > 0.3 ? '审稿温度偏高，不利于稳定复现。' : '',
+      !candidateConfig.safety?.enforce_on_generate ? '候选配置未开启生成阶段安全门禁。' : '',
+    ].filter(Boolean),
+  }
+}
+
+function buildAbExperimentReport(project: any, experiment: any, suite: any, chapters: any[], reviews: any[], runs: any[], issues: any[], options: any = {}) {
+  const candidateProject = buildCandidateProject(project, experiment.candidate_config || {})
+  const current = runRegressionSuite(project, suite, chapters, reviews, runs, issues, options)
+  const candidateBase = runRegressionSuite(candidateProject, suite, chapters, reviews, runs, issues, {
+    ...options,
+    buildAgentConfigSnapshot: options.buildAgentConfigSnapshot,
+  })
+  const projection = scoreAbCandidate(project, candidateProject, current)
+  const candidate = {
+    ...candidateBase,
+    average_score: projection.projected_average_score,
+    delta_average_score: projection.projected_delta_average_score,
+    projection,
+    projection_mode: 'offline_config_projection',
+    passed: projection.projected_average_score >= Number(suite.policy?.min_average_score || 78)
+      && projection.risk_notes.length <= 1
+      && candidateBase.passed !== false,
+  }
+  return {
+    experiment_id: experiment.id,
+    created_at: new Date().toISOString(),
+    mode: 'offline_config_projection',
+    current,
+    candidate,
+    decision: candidate.passed && candidate.average_score >= current.average_score ? 'candidate_better' : candidate.passed ? 'candidate_neutral' : 'candidate_risky',
+    recommendations: [
+      candidate.projection.risk_notes.length ? `候选配置风险：${candidate.projection.risk_notes.join('；')}` : '',
+      candidate.average_score < current.average_score ? '候选配置投影均分低于当前配置，不建议提升。' : '',
+      candidate.average_score >= current.average_score && candidate.passed ? '候选配置可进入小批量实写验证或提升为正式配置。' : '',
+    ].filter(Boolean),
+  }
+}
+
+function extractSandboxText(result: any) {
+  const payload = getNovelPayload(result)
+  const proseArr = Array.isArray(payload?.prose_chapters) ? payload.prose_chapters : []
+  const firstProse = proseArr.length > 0 ? proseArr[0] : {}
+  return {
+    payload,
+    chapter_text: String(payload?.chapter_text || firstProse?.chapter_text || ''),
+    scene_breakdown: payload?.scene_breakdown || firstProse?.scene_breakdown || [],
+    continuity_notes: payload?.continuity_notes || firstProse?.continuity_notes || [],
+  }
+}
+
+function diffSandboxText(before: string, after: string) {
+  const beforeChars = String(before || '').replace(/\s/g, '').length
+  const afterChars = String(after || '').replace(/\s/g, '').length
+  const beforeParas = String(before || '').split(/\n+/).map(item => item.trim()).filter(Boolean)
+  const afterParas = String(after || '').split(/\n+/).map(item => item.trim()).filter(Boolean)
+  let changed = 0
+  const max = Math.max(beforeParas.length, afterParas.length)
+  for (let index = 0; index < max; index += 1) {
+    if ((beforeParas[index] || '') !== (afterParas[index] || '')) changed += 1
+  }
+  return {
+    before_chars: beforeChars,
+    after_chars: afterChars,
+    delta_chars: afterChars - beforeChars,
+    before_paragraphs: beforeParas.length,
+    after_paragraphs: afterParas.length,
+    changed_paragraphs: changed,
+  }
 }
 
 export function registerNovelPlanningRoutes(app: Express, ctx: PlanningRoutesContext) {
@@ -147,6 +428,379 @@ export function registerNovelPlanningRoutes(app: Express, ctx: PlanningRoutesCon
       })
       await appendNovelRun(activeWorkspace, { project_id: project.id, run_type: 'quality_benchmark', step_name: 'baseline', status: 'success', output_ref: JSON.stringify({ report, review: saved }) })
       res.json({ ok: true, report, review: saved })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.get('/api/novel/projects/:id/regression-suite', async (req, res) => {
+    try {
+      const activeWorkspace = ctx.getWorkspace()
+      const project = await ctx.getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const [chapters, reviews] = await Promise.all([
+        listNovelChapters(activeWorkspace, project.id),
+        listNovelReviews(activeWorkspace, project.id),
+      ])
+      const issues = buildRegressionIssues(project, chapters)
+      const storedSuite = project.reference_config?.regression_suite || null
+      const suggestedSuite = buildRegressionSampleSet(project, chapters, reviews, issues, Number(req.query.max_samples || 10))
+      const runs = reviews
+        .filter(review => review.review_type === 'regression_benchmark')
+        .map(review => ({ review, payload: parseJsonLikePayload(review.payload) || {} }))
+        .sort((a, b) => String(b.review.created_at || '').localeCompare(String(a.review.created_at || '')))
+      res.json({
+        ok: true,
+        suite: storedSuite,
+        suggested_suite: suggestedSuite,
+        latest_run: runs[0]?.payload?.report || null,
+        history: runs.slice(0, 10).map(item => item.payload.report || {}),
+      })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.post('/api/novel/projects/:id/regression-suite', async (req, res) => {
+    try {
+      const activeWorkspace = ctx.getWorkspace()
+      const project = await ctx.getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const [chapters, reviews] = await Promise.all([
+        listNovelChapters(activeWorkspace, project.id),
+        listNovelReviews(activeWorkspace, project.id),
+      ])
+      const issues = buildRegressionIssues(project, chapters)
+      const autoSuite = buildRegressionSampleSet(project, chapters, reviews, issues, Number(req.body?.max_samples || 10))
+      const incoming = req.body?.suite || {}
+      const suite = {
+        ...autoSuite,
+        ...incoming,
+        suite_id: incoming.suite_id || autoSuite.suite_id,
+        updated_at: new Date().toISOString(),
+        samples: asArray(incoming.samples).length ? incoming.samples : autoSuite.samples,
+        policy: { ...(autoSuite.policy || {}), ...(incoming.policy || {}) },
+      }
+      const updated = await updateNovelProject(activeWorkspace, project.id, {
+        reference_config: { ...(project.reference_config || {}), regression_suite: suite },
+      } as any)
+      res.json({ ok: true, suite, project: updated })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.post('/api/novel/projects/:id/regression-suite/run', async (req, res) => {
+    try {
+      const activeWorkspace = ctx.getWorkspace()
+      const project = await ctx.getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const [chapters, reviews, runs] = await Promise.all([
+        listNovelChapters(activeWorkspace, project.id),
+        listNovelReviews(activeWorkspace, project.id),
+        listNovelRuns(activeWorkspace, project.id),
+      ])
+      const issues = buildRegressionIssues(project, chapters)
+      const suite = project.reference_config?.regression_suite || buildRegressionSampleSet(project, chapters, reviews, issues, Number(req.body?.max_samples || 10))
+      const report = runRegressionSuite(project, suite, chapters, reviews, runs, issues, {
+        modelId: Number(req.body?.model_id || 0) || undefined,
+        buildAgentConfigSnapshot: ctx.buildAgentConfigSnapshot,
+        buildProductionMetrics: ctx.buildProductionMetrics,
+      })
+      const saved = await createNovelReview(activeWorkspace, {
+        project_id: project.id,
+        review_type: 'regression_benchmark',
+        status: report.passed ? 'ok' : 'warn',
+        summary: `回归基准：样本 ${report.sample_count}，均分 ${report.average_score}，变化 ${report.delta_average_score >= 0 ? '+' : ''}${report.delta_average_score}`,
+        issues: report.recommendations,
+        payload: JSON.stringify({ report }),
+      })
+      await appendNovelRun(activeWorkspace, {
+        project_id: project.id,
+        run_type: 'regression_benchmark',
+        step_name: suite.suite_id || 'suite',
+        status: report.passed ? 'success' : 'warn',
+        input_ref: JSON.stringify(req.body || {}),
+        output_ref: JSON.stringify({ report, review: saved }),
+      })
+      res.json({ ok: true, report, review: saved })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.get('/api/novel/projects/:id/ab-experiments', async (req, res) => {
+    try {
+      const activeWorkspace = ctx.getWorkspace()
+      const project = await ctx.getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const experiments = asArray(project.reference_config?.ab_experiments)
+      res.json({
+        ok: true,
+        experiments,
+        suggested_candidate_config: suggestedAbCandidateConfig(project, Number(req.query.model_id || 0) || undefined),
+        current_snapshot: ctx.buildAgentConfigSnapshot(project, Number(req.query.model_id || 0) || undefined),
+      })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.post('/api/novel/projects/:id/ab-experiments', async (req, res) => {
+    try {
+      const activeWorkspace = ctx.getWorkspace()
+      const project = await ctx.getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const experiments = asArray(project.reference_config?.ab_experiments)
+      const candidateConfig = req.body?.candidate_config || suggestedAbCandidateConfig(project, Number(req.body?.model_id || 0) || undefined)
+      const candidateProject = buildCandidateProject(project, candidateConfig)
+      const experiment = {
+        id: `ab-${Date.now()}`,
+        name: String(req.body?.name || `配置实验 ${experiments.length + 1}`),
+        status: 'draft',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        current_snapshot: ctx.buildAgentConfigSnapshot(project, Number(req.body?.model_id || 0) || undefined),
+        candidate_snapshot: ctx.buildAgentConfigSnapshot(candidateProject, Number(req.body?.model_id || 0) || undefined),
+        candidate_config: candidateConfig,
+        latest_report: null,
+        history: [],
+      }
+      const updated = await updateNovelProject(activeWorkspace, project.id, {
+        reference_config: { ...(project.reference_config || {}), ab_experiments: [experiment, ...experiments].slice(0, 30) },
+      } as any)
+      res.json({ ok: true, experiment, project: updated })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.post('/api/novel/projects/:id/ab-experiments/:experimentId/run', async (req, res) => {
+    try {
+      const activeWorkspace = ctx.getWorkspace()
+      const project = await ctx.getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const experiments = asArray(project.reference_config?.ab_experiments)
+      const experiment = experiments.find((item: any) => item.id === req.params.experimentId)
+      if (!experiment) return res.status(404).json({ error: 'experiment not found' })
+      const [chapters, reviews, runs] = await Promise.all([
+        listNovelChapters(activeWorkspace, project.id),
+        listNovelReviews(activeWorkspace, project.id),
+        listNovelRuns(activeWorkspace, project.id),
+      ])
+      const issues = buildRegressionIssues(project, chapters)
+      const suite = project.reference_config?.regression_suite || buildRegressionSampleSet(project, chapters, reviews, issues, Number(req.body?.max_samples || 10))
+      const report = buildAbExperimentReport(project, experiment, suite, chapters, reviews, runs, issues, {
+        modelId: Number(req.body?.model_id || 0) || undefined,
+        buildAgentConfigSnapshot: ctx.buildAgentConfigSnapshot,
+        buildProductionMetrics: ctx.buildProductionMetrics,
+      })
+      const nextExperiment = {
+        ...experiment,
+        status: report.decision === 'candidate_better' ? 'passed' : report.decision === 'candidate_risky' ? 'risky' : 'neutral',
+        latest_report: report,
+        history: [report, ...asArray(experiment.history)].slice(0, 10),
+        updated_at: new Date().toISOString(),
+      }
+      const updatedExperiments = experiments.map((item: any) => item.id === experiment.id ? nextExperiment : item)
+      const saved = await createNovelReview(activeWorkspace, {
+        project_id: project.id,
+        review_type: 'ab_experiment',
+        status: nextExperiment.status === 'risky' ? 'warn' : 'ok',
+        summary: `A/B 实验：${experiment.name}，决策 ${report.decision}`,
+        issues: report.recommendations,
+        payload: JSON.stringify({ report, experiment_id: experiment.id }),
+      })
+      await appendNovelRun(activeWorkspace, {
+        project_id: project.id,
+        run_type: 'ab_experiment',
+        step_name: experiment.id,
+        status: nextExperiment.status === 'risky' ? 'warn' : 'success',
+        input_ref: JSON.stringify(req.body || {}),
+        output_ref: JSON.stringify({ report, review: saved }),
+      })
+      const updated = await updateNovelProject(activeWorkspace, project.id, {
+        reference_config: { ...(project.reference_config || {}), ab_experiments: updatedExperiments },
+      } as any)
+      res.json({ ok: true, experiment: nextExperiment, report, review: saved, project: updated })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.post('/api/novel/projects/:id/ab-experiments/:experimentId/promote', async (req, res) => {
+    try {
+      const activeWorkspace = ctx.getWorkspace()
+      const project = await ctx.getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const experiments = asArray(project.reference_config?.ab_experiments)
+      const experiment = experiments.find((item: any) => item.id === req.params.experimentId)
+      if (!experiment) return res.status(404).json({ error: 'experiment not found' })
+      if (experiment.status === 'risky' && req.body?.force !== true) {
+        return res.status(409).json({ error: '候选配置仍标记为风险，需传 force=true 才能提升。', experiment })
+      }
+      const nextReferenceConfig = deepMergeObjects(project.reference_config || {}, experiment.candidate_config || {})
+      const nextExperiment = {
+        ...experiment,
+        status: 'promoted',
+        promoted_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }
+      const updated = await updateNovelProject(activeWorkspace, project.id, {
+        reference_config: {
+          ...nextReferenceConfig,
+          ab_experiments: experiments.map((item: any) => item.id === experiment.id ? nextExperiment : item),
+          agent_prompt_config: {
+            ...(nextReferenceConfig.agent_prompt_config || {}),
+            version: Number(nextReferenceConfig.agent_prompt_config?.version || project.reference_config?.agent_prompt_config?.version || 1) + 1,
+            updated_at: new Date().toISOString(),
+          },
+        },
+      } as any)
+      await appendNovelRun(activeWorkspace, {
+        project_id: project.id,
+        run_type: 'ab_experiment',
+        step_name: `${experiment.id}-promote`,
+        status: 'success',
+        output_ref: JSON.stringify({ promoted_experiment: nextExperiment, snapshot: ctx.buildAgentConfigSnapshot(updated, Number(req.body?.model_id || 0) || undefined) }),
+      })
+      res.json({ ok: true, experiment: nextExperiment, project: updated })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.post('/api/novel/projects/:id/ab-experiments/:experimentId/sandbox', async (req, res) => {
+    try {
+      const activeWorkspace = ctx.getWorkspace()
+      const project = await ctx.getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const experiments = asArray(project.reference_config?.ab_experiments)
+      const experiment = experiments.find((item: any) => item.id === req.params.experimentId)
+      if (!experiment) return res.status(404).json({ error: 'experiment not found' })
+      const candidateProject = buildCandidateProject(project, experiment.candidate_config || {})
+      const preferredModelId = Number(req.body?.model_id || 0) || undefined
+      const [chapters, worldbuilding, characters, outlines, reviews, runs] = await Promise.all([
+        listNovelChapters(activeWorkspace, project.id),
+        listNovelWorldbuilding(activeWorkspace, project.id),
+        listNovelCharacters(activeWorkspace, project.id),
+        listNovelOutlines(activeWorkspace, project.id),
+        listNovelReviews(activeWorkspace, project.id),
+        listNovelRuns(activeWorkspace, project.id),
+      ])
+      const issues = buildRegressionIssues(project, chapters)
+      const suite = project.reference_config?.regression_suite || buildRegressionSampleSet(project, chapters, reviews, issues, Number(req.body?.max_samples || 10))
+      const chapterMap = new Map(chapters.map(chapter => [Number(chapter.id), chapter]))
+      const selectedSamples = asArray(suite.samples)
+        .filter((sample: any) => chapterMap.has(Number(sample.chapter_id)))
+        .slice(0, Math.max(1, Math.min(3, Number(req.body?.sample_count || 2))))
+      const drafts: any[] = []
+      for (const sample of selectedSamples) {
+        const chapter = chapterMap.get(Number(sample.chapter_id))
+        if (!chapter) continue
+        try {
+          const contextPackage = await ctx.buildChapterContextPackage(activeWorkspace, candidateProject, chapter, chapters, worldbuilding, characters, outlines, reviews)
+          const migrationPlan = await ctx.getReferenceMigrationPlanForChapter(activeWorkspace, candidateProject, chapter).catch(error => ({ error: String(error) }))
+          const prevChapters = chapters
+            .filter(item => Number(item.chapter_no || 0) < Number(chapter.chapter_no || 0) && item.chapter_text)
+            .slice(-3)
+            .map(item => ({ chapter_no: item.chapter_no, title: item.title, chapter_summary: item.chapter_summary || '', ending_hook: item.ending_hook || '', chapter_text: item.chapter_text }))
+          const stageModelId = ctx.getStageModelId(candidateProject, 'draft', preferredModelId)
+          const result = await generateNovelChapterProse(candidateProject, chapter, {
+            worldbuilding,
+            characters,
+            outline: outlines,
+            prevChapters,
+            contextPackage,
+            migrationPlan,
+            paragraphTask: ctx.buildParagraphProseContext(candidateProject, contextPackage, migrationPlan),
+            prompt: `A/B 沙盒生成：请为第 ${chapter.chapter_no} 章生成候选正文，不要覆盖原文。`,
+          } as any, { activeWorkspace, modelId: stageModelId ? String(stageModelId) : undefined, skipMemory: true })
+          const extracted = extractSandboxText(result)
+          if (!extracted.chapter_text) {
+            drafts.push({
+              chapter_id: chapter.id,
+              chapter_no: chapter.chapter_no,
+              title: chapter.title,
+              status: 'failed',
+              error: String((result as any).error || (result as any).fallbackReason || '模型未返回正文'),
+            })
+            continue
+          }
+          const diff = diffSandboxText(chapter.chapter_text || '', extracted.chapter_text)
+          drafts.push({
+            chapter_id: chapter.id,
+            chapter_no: chapter.chapter_no,
+            title: chapter.title,
+            status: 'success',
+            sample_reason: sample.reason || '',
+            modelName: (result as any).modelName || '',
+            modelId: stageModelId || null,
+            candidate_text: extracted.chapter_text,
+            candidate_preview: compactText(extracted.chapter_text, 420),
+            scene_breakdown: extracted.scene_breakdown,
+            continuity_notes: extracted.continuity_notes,
+            diff,
+            baseline_score: sample.baseline_score,
+            projected_score: clampScore(Number(sample.baseline_score || 72) + (diff.delta_chars > 0 ? 2 : 0) - (diff.after_chars < 800 ? 8 : 0)),
+          })
+        } catch (draftError: any) {
+          drafts.push({
+            chapter_id: chapter.id,
+            chapter_no: chapter.chapter_no,
+            title: chapter.title,
+            status: 'failed',
+            error: String(draftError?.message || draftError),
+          })
+        }
+      }
+      const successCount = drafts.filter(item => item.status === 'success').length
+      const report = {
+        sandbox_id: `sandbox-${Date.now()}`,
+        experiment_id: experiment.id,
+        created_at: new Date().toISOString(),
+        mode: 'candidate_draft_sandbox',
+        config_snapshot: ctx.buildAgentConfigSnapshot(candidateProject, preferredModelId),
+        sample_count: drafts.length,
+        success_count: successCount,
+        passed: drafts.length > 0 && successCount === drafts.length,
+        drafts,
+        recommendations: [
+          successCount === 0 ? '候选配置未生成有效沙盒稿，不建议提升。' : '',
+          drafts.some(item => item.status === 'success' && Number(item.diff?.after_chars || 0) < 800) ? '存在候选稿字数过短，需要检查正文提示词或模型输出限制。' : '',
+          drafts.some(item => item.status === 'failed') ? '存在沙盒生成失败样本，建议先修正候选配置再重试。' : '',
+          successCount > 0 ? '请人工对照候选稿预览和原文，确认文风、节奏、连续性后再提升配置。' : '',
+        ].filter(Boolean),
+        cost_baseline: ctx.buildProductionMetrics(chapters, reviews, runs),
+      }
+      const nextExperiment = {
+        ...experiment,
+        status: report.passed ? 'sandboxed' : 'sandbox_failed',
+        latest_sandbox: report,
+        history: [report, ...asArray(experiment.history)].slice(0, 10),
+        updated_at: new Date().toISOString(),
+      }
+      const updatedExperiments = experiments.map((item: any) => item.id === experiment.id ? nextExperiment : item)
+      const saved = await createNovelReview(activeWorkspace, {
+        project_id: project.id,
+        review_type: 'ab_sandbox_draft',
+        status: report.passed ? 'ok' : 'warn',
+        summary: `A/B 沙盒实写：${experiment.name}，成功 ${successCount}/${drafts.length}`,
+        issues: report.recommendations,
+        payload: JSON.stringify({ report, experiment_id: experiment.id }),
+      })
+      await appendNovelRun(activeWorkspace, {
+        project_id: project.id,
+        run_type: 'ab_sandbox',
+        step_name: experiment.id,
+        status: report.passed ? 'success' : 'warn',
+        input_ref: JSON.stringify(req.body || {}),
+        output_ref: JSON.stringify({ report, review: saved }),
+      })
+      const updated = await updateNovelProject(activeWorkspace, project.id, {
+        reference_config: { ...(project.reference_config || {}), ab_experiments: updatedExperiments },
+      } as any)
+      res.json({ ok: true, experiment: nextExperiment, report, review: saved, project: updated })
     } catch (error) {
       res.status(500).json({ error: String(error) })
     }

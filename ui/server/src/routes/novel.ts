@@ -19,6 +19,7 @@ import { registerNovelReferenceRoutes } from './novel-reference-routes'
 import { registerNovelRestructureRoutes } from './novel-restructure-routes'
 import { registerNovelRunRoutes } from './novel-run-routes'
 import { getQualityGate, getStoryState } from './novel-route-utils'
+import { registerNovelTruthRoutes } from './novel-truth-routes'
 import { createNovelWritingService } from './novel-writing-service'
 
 export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
@@ -48,6 +49,12 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
     buildChapterContextPackage: writingService.buildChapterContextPackage,
   })
 
+  registerNovelTruthRoutes(app, {
+    getWorkspace,
+    getProject,
+    buildChapterContextPackage: writingService.buildChapterContextPackage,
+  })
+
   registerNovelProjectControlRoutes(app, {
     getWorkspace,
     getProject,
@@ -61,6 +68,10 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
     getProductionBudgetDecision: productionService.getProductionBudgetDecision,
     getQualityGate,
     getAgentPromptConfig: productionService.getAgentPromptConfig,
+    buildAgentConfigSnapshot: productionService.buildAgentConfigSnapshot,
+    buildChapterContextPackage: writingService.buildChapterContextPackage,
+    buildReferenceUsageReport: referenceService.buildReferenceUsageReport,
+    buildStructuralSimilarityReport: referenceService.buildStructuralSimilarityReport,
   })
 
   registerNovelReferenceRoutes(app, {
@@ -75,6 +86,10 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
     getStageModelId: productionService.getStageModelId,
     getStageTemperature: productionService.getStageTemperature,
     getModelStrategy: productionService.getModelStrategy,
+    buildAgentConfigSnapshot: productionService.buildAgentConfigSnapshot,
+    buildChapterContextPackage: writingService.buildChapterContextPackage,
+    getReferenceMigrationPlanForChapter: referenceService.getReferenceMigrationPlanForChapter,
+    buildParagraphProseContext: writingService.buildParagraphProseContext,
     buildProductionMetrics: dashboardService.buildProductionMetrics,
     buildOriginalIncubatorPrompt: incubatorService.buildOriginalIncubatorPrompt,
     normalizeIncubatorPayload: incubatorService.normalizeIncubatorPayload,
@@ -87,6 +102,7 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
     getProject,
     getModelStrategy: productionService.getModelStrategy,
     getApprovalPolicy: productionService.getApprovalPolicy,
+    buildAgentConfigSnapshot: productionService.buildAgentConfigSnapshot,
     buildChapterGroupStages: productionService.buildChapterGroupStages,
     updateChapterStages: productionService.updateChapterStages,
     classifyGenerationFailure: productionService.classifyGenerationFailure,

@@ -1,5 +1,24 @@
 import { listNovelRuns, updateNovelRun } from '../novel'
-import { advanceSceneProduction, normalizeSceneProduction, parseJsonLikePayload } from './novel-route-utils'
+import { advanceSceneProduction, getQualityGate, getSafetyPolicy, getStyleLock, normalizeSceneProduction, parseJsonLikePayload } from './novel-route-utils'
+
+function stableStringify(value: any): string {
+  if (value === null || value === undefined) return 'null'
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`
+  if (typeof value === 'object') {
+    return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(',')}}`
+  }
+  return JSON.stringify(value)
+}
+
+function hashText(value: any) {
+  const text = typeof value === 'string' ? value : stableStringify(value)
+  let hash = 2166136261
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index)
+    hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24)
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0')
+}
 
 export function createNovelProductionService() {
   const buildPipelineSteps = () => [
@@ -136,7 +155,51 @@ export function createNovelProductionService() {
     prompts: project.reference_config?.agent_prompt_config?.prompts || {},
     project_overrides_enabled: project.reference_config?.agent_prompt_config?.project_overrides_enabled !== false,
     updated_at: project.reference_config?.agent_prompt_config?.updated_at || '',
+    history: Array.isArray(project.reference_config?.agent_prompt_config?.history) ? project.reference_config.agent_prompt_config.history : [],
   })
+
+  const buildAgentConfigSnapshot = (project: any, preferredModelId?: number) => {
+    const agentConfig = getAgentPromptConfig(project)
+    const modelStrategy = project.reference_config?.model_strategy || getModelStrategy(project, preferredModelId)
+    const writingBible = project.reference_config?.writing_bible || {}
+    const snapshotSource = {
+      agent_prompt_config: {
+        version: agentConfig.version,
+        prompts: agentConfig.prompts,
+        project_overrides_enabled: agentConfig.project_overrides_enabled,
+        updated_at: agentConfig.updated_at,
+      },
+      model_strategy: modelStrategy,
+      approval_policy: getApprovalPolicy(project),
+      production_budget: getProductionBudget(project),
+      quality_gate: getQualityGate(project),
+      style_lock: getStyleLock(project),
+      safety_policy: getSafetyPolicy(project),
+      writing_bible: writingBible,
+      reference_policy: {
+        strength: project.reference_config?.strength || 'balanced',
+        references_count: Array.isArray(project.reference_config?.references) ? project.reference_config.references.length : 0,
+      },
+    }
+    const fingerprint = hashText(snapshotSource)
+    return {
+      snapshot_id: `agentcfg-v${agentConfig.version}-${fingerprint}`,
+      created_at: new Date().toISOString(),
+      fingerprint,
+      agent_prompt_version: agentConfig.version,
+      agent_prompt_updated_at: agentConfig.updated_at || '',
+      prompt_keys: Object.keys(agentConfig.prompts || {}).sort(),
+      model_strategy: modelStrategy,
+      approval_policy: snapshotSource.approval_policy,
+      quality_gate: snapshotSource.quality_gate,
+      style_lock_hash: hashText(snapshotSource.style_lock),
+      safety_policy_hash: hashText(snapshotSource.safety_policy),
+      writing_bible_hash: hashText(writingBible),
+      writing_bible_updated_at: writingBible?.updated_at || '',
+      reference_policy: snapshotSource.reference_policy,
+      source_hash: fingerprint,
+    }
+  }
 
   return {
     buildPipelineSteps,
@@ -155,6 +218,7 @@ export function createNovelProductionService() {
     getProductionBudgetDecision,
     classifyGenerationFailure,
     getAgentPromptConfig,
+    buildAgentConfigSnapshot,
   }
 }
 
@@ -271,6 +335,7 @@ export function createNovelRunExecutionService(ctx: {
           score: chapterResult.score,
           revised: chapterResult.revised,
           production_mode: productionMode,
+          config_snapshot: chapterResult.config_snapshot || payload.config_snapshot || null,
           scenes: advanceSceneProduction(chapters[index]?.scenes || [], 'accepted'),
           stages: (chapterResult.story_state_update as any)?.skipped
             ? (chapters[index]?.stages || [])
@@ -300,6 +365,7 @@ export function createNovelRunExecutionService(ctx: {
           next_run_at: nextRunAt,
           approval_stage: chapterError?.approval_stage || '',
           approval_context: chapterError?.approval_context || null,
+          config_snapshot: payload.config_snapshot || ctx.production.buildAgentConfigSnapshot(project, options.model_id || payload.model_strategy?.preferred_model_id),
           error: String(chapterError?.message || chapterError),
           error_code: chapterError?.code || '',
           recovery_plan: ctx.production.classifyGenerationFailure(chapterError),

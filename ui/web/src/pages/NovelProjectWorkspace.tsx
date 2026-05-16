@@ -10,15 +10,21 @@ import { useNavigate, useParams } from 'react-router-dom'
 import apiClient from '../api/client'
 import { createSSEClient, generateClientId, type SSEMessage } from '../utils/sse'
 import { AgentExecutionModal } from './novel-workspace/AgentExecutionModal'
+import { AgentAuditDrawer } from './novel-workspace/AgentAuditDrawer'
 import { ChapterManagementDrawer } from './novel-workspace/ChapterManagementDrawer'
 import { ChapterDirectorySidebar } from './novel-workspace/ChapterDirectorySidebar'
 import { ChapterRestructurePanel } from './novel-workspace/ChapterRestructurePanel'
+import { ConsistencyGraphModal } from './novel-workspace/ConsistencyGraphModal'
+import { CreativeCardsModal } from './novel-workspace/CreativeCardsModal'
 import { EditorModal, type EditorKind } from './novel-workspace/EditorModal'
+import { ExportDeliveryModal } from './novel-workspace/ExportDeliveryModal'
 import { OutlineControlPanel } from './novel-workspace/OutlineControlPanel'
 import { OutlineTreeModal } from './novel-workspace/OutlineTreeModal'
 import { ReferenceConfigModal } from './novel-workspace/ReferenceConfigModal'
 import { ReferenceEngineeringModal } from './novel-workspace/ReferenceEngineeringModal'
 import { ReferencePanel } from './novel-workspace/ReferencePanel'
+import { QualityBenchmarkModal } from './novel-workspace/QualityBenchmarkModal'
+import { ReviewAnnotationsDrawer } from './novel-workspace/ReviewAnnotationsDrawer'
 import { TaskCenterDrawer } from './novel-workspace/TaskCenterDrawer'
 import { VersionDetailModal } from './novel-workspace/VersionDetailModal'
 import { WorkspaceCenter } from './novel-workspace/WorkspaceCenter'
@@ -69,6 +75,7 @@ export default function NovelProjectWorkspace() {
   const [storyStateOpen, setStoryStateOpen] = useState(false)
   const [commercialToolsOpen, setCommercialToolsOpen] = useState(false)
   const [chapterGroupExecutingId, setChapterGroupExecutingId] = useState<number | null>(null)
+  const [releaseRepairExecutingId, setReleaseRepairExecutingId] = useState<number | null>(null)
   const [commercialToolLoading, setCommercialToolLoading] = useState('')
   const [productionMode, setProductionMode] = useState('draft_review_revise_store')
   const [activeChapterDiagnostics, setActiveChapterDiagnostics] = useState<any | null>(null)
@@ -78,6 +85,14 @@ export default function NovelProjectWorkspace() {
   const [outlinePanelOpen, setOutlinePanelOpen] = useState(false)
   const [referenceConfigOpen, setReferenceConfigOpen] = useState(false)
   const [referenceEngineeringOpen, setReferenceEngineeringOpen] = useState(false)
+  const [creativeCardsOpen, setCreativeCardsOpen] = useState(false)
+  const [consistencyGraphOpen, setConsistencyGraphOpen] = useState(false)
+  const [qualityBenchmarkOpen, setQualityBenchmarkOpen] = useState(false)
+  const [exportDeliveryOpen, setExportDeliveryOpen] = useState(false)
+  const [reviewAnnotationsOpen, setReviewAnnotationsOpen] = useState(false)
+  const [agentAuditOpen, setAgentAuditOpen] = useState(false)
+  const [continuityAudit, setContinuityAudit] = useState<any | null>(null)
+  const [continuityAuditLoading, setContinuityAuditLoading] = useState(false)
 
   // ── 章节弹出面板 ──
   const [chapterDrawerOpen, setChapterDrawerOpen] = useState(false)
@@ -473,6 +488,11 @@ export default function NovelProjectWorkspace() {
     } catch (error: any) {
       message.error(error?.response?.data?.error || error?.message || '版本合并失败')
     }
+  }
+
+  const acceptChapterVersion = async (version: any) => {
+    await rollbackChapterVersion(version.id)
+    setChapterVersionDetail(null)
   }
 
   const { confirmReferenceReady } = useReferenceWorkflow({
@@ -1510,16 +1530,43 @@ export default function NovelProjectWorkspace() {
     setCommercialToolLoading('agentConfig')
     try {
       const res = await apiClient.get(`/novel/projects/${projectId}/agent-config`)
-      agentConfigForm.setFieldsValue({ config: JSON.stringify(res.data?.config || {}, null, 2) })
+      const config = res.data?.config || {}
+      const snapshot = res.data?.snapshot || {}
+      const history = Array.isArray(config.history) ? config.history : []
+      agentConfigForm.setFieldsValue({ config: JSON.stringify(config, null, 2) })
       Modal.confirm({
         title: 'Agent 提示词配置',
         width: 860,
         content: (
-          <Form form={agentConfigForm} layout="vertical">
-            <Form.Item name="config" label="Agent 配置 JSON">
-              <Input.TextArea rows={18} />
-            </Form.Item>
-          </Form>
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Card size="small" title="当前可复现快照">
+              <Space wrap>
+                <Tag color="blue" bordered={false}>提示词 v{snapshot.agent_prompt_version || config.version || 1}</Tag>
+                <Tag bordered={false}>快照 {snapshot.snapshot_id || '-'}</Tag>
+                <Tag bordered={false}>写作圣经 {snapshot.writing_bible_hash || '-'}</Tag>
+                <Tag bordered={false}>提示词键 {Array.isArray(snapshot.prompt_keys) ? snapshot.prompt_keys.length : 0}</Tag>
+              </Space>
+              <Paragraph style={{ margin: '8px 0 0', fontSize: 12 }} type="secondary">
+                新生成任务会把该快照写入运行记录，用于审计和复现生成环境。
+              </Paragraph>
+            </Card>
+            {history.length > 0 && (
+              <Card size="small" title="最近版本">
+                <Space wrap>
+                  {history.slice(0, 8).map((item: any) => (
+                    <Tag key={`${item.version}-${item.archived_at}`} bordered={false}>
+                      v{item.version} · {item.archived_at ? new Date(item.archived_at).toLocaleString() : item.updated_at || ''}
+                    </Tag>
+                  ))}
+                </Space>
+              </Card>
+            )}
+            <Form form={agentConfigForm} layout="vertical">
+              <Form.Item name="config" label="Agent 配置 JSON">
+                <Input.TextArea rows={16} />
+              </Form.Item>
+            </Form>
+          </Space>
         ),
         okText: '保存新版本',
         onOk: async () => {
@@ -1660,6 +1707,7 @@ export default function NovelProjectWorkspace() {
     try {
       const res = await apiClient.get(`/novel/projects/${projectId}/continuity-audit`)
       const audit = res.data?.audit || {}
+      setContinuityAudit(audit)
       Modal.info({
         title: '全书连续性检查',
         width: 920,
@@ -1705,6 +1753,19 @@ export default function NovelProjectWorkspace() {
       message.error(error?.response?.data?.error || error?.message || '全书连续性检查失败')
     } finally {
       setCommercialToolLoading('')
+    }
+  }
+
+  const refreshConsistencyAudit = async () => {
+    setContinuityAuditLoading(true)
+    try {
+      const res = await apiClient.get(`/novel/projects/${projectId}/continuity-audit`)
+      setContinuityAudit(res.data?.audit || {})
+      message.success('连续性审计已刷新')
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '连续性审计刷新失败')
+    } finally {
+      setContinuityAuditLoading(false)
     }
   }
 
@@ -1859,6 +1920,23 @@ export default function NovelProjectWorkspace() {
       message.success(`已跳过第${chapter.chapter_no}章，可继续执行后续章节`)
     } catch (error: any) {
       message.error(error?.response?.data?.error || error?.message || '跳过失败')
+    }
+  }
+
+  const executeReleaseRepairRun = async (run: any) => {
+    setReleaseRepairExecutingId(run.id)
+    try {
+      const res = await apiClient.post(`/novel/projects/${projectId}/release-repair-runs/${run.id}/execute`, {
+        max_items: 100,
+      })
+      await loadProjectModules()
+      await loadProductionTasks()
+      const audit = res.data?.release_audit
+      message.success(audit?.can_release ? '发布批量任务已完成，发布审核已通过' : '发布批量任务已完成，请刷新交付审核查看剩余问题')
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '发布批量任务执行失败')
+    } finally {
+      setReleaseRepairExecutingId(null)
     }
   }
 
@@ -2198,6 +2276,7 @@ export default function NovelProjectWorkspace() {
     const actions: Record<string, () => void> = {
       referenceConfig: () => setReferenceConfigOpen(true),
       referenceEngineering: () => setReferenceEngineeringOpen(true),
+      creativeCards: () => setCreativeCardsOpen(true),
       originalIncubator: () => { void runOriginalIncubator() },
       writingBible: () => { void openWritingBibleEditor() },
       outlinePanel: () => setOutlinePanelOpen(true),
@@ -2208,9 +2287,14 @@ export default function NovelProjectWorkspace() {
       chapterGroup: () => { void startChapterGroupGeneration() },
       readyChapterGroup: () => { void startReadyChapterGroupGeneration() },
       taskCenter: () => setTaskCenterOpen(true),
+      agentAudit: () => setAgentAuditOpen(true),
       bookReview: () => { void runBookReview() },
       continuityAudit: () => { void openContinuityAudit() },
+      consistencyGraph: () => setConsistencyGraphOpen(true),
+      qualityBenchmarkPanel: () => setQualityBenchmarkOpen(true),
+      reviewAnnotations: () => setReviewAnnotationsOpen(true),
       commercialTools: () => setCommercialToolsOpen(true),
+      exportDelivery: () => setExportDeliveryOpen(true),
       referenceDiagnosis: () => { void openReferenceKnowledgeDiagnosis() },
       referenceMigration: () => { void runReferenceMigrationPlan() },
     }
@@ -2245,6 +2329,7 @@ export default function NovelProjectWorkspace() {
             menu={workflowMenu([
               { key: 'referenceConfig', label: '参考作品配置' },
               { key: 'referenceEngineering', label: '参考工程总览' },
+              { key: 'creativeCards', label: '创作资料卡中心' },
               { key: 'referenceDiagnosis', label: '参考知识诊断' },
               { key: 'originalIncubator', label: '原创孵化', disabled: incubatingOriginal },
               { key: 'writingBible', label: '写作圣经' },
@@ -2268,6 +2353,7 @@ export default function NovelProjectWorkspace() {
               { key: 'readyChapterGroup', label: '智能章节群', disabled: !selectedModelId || commercialToolLoading === 'readyGroup' },
               { key: 'chapterGroup', label: '普通章节群', disabled: !selectedModelId },
               { key: 'taskCenter', label: '任务中心' },
+              { key: 'agentAudit', label: 'Agent 调用审计' },
             ])}
           >
             <Button size="small" type="text">3 批量生产 <DownOutlined /></Button>
@@ -2275,12 +2361,24 @@ export default function NovelProjectWorkspace() {
           <Dropdown
             menu={workflowMenu([
               { key: 'bookReview', label: '全书总检', disabled: !selectedModelId || bookReviewLoading },
+              { key: 'qualityBenchmarkPanel', label: '质量评测基准面板' },
+              { key: 'reviewAnnotations', label: '章节审阅批注' },
+              { key: 'consistencyGraph', label: '全书一致性图谱' },
               { key: 'continuityAudit', label: '全书连续性检查' },
               { key: 'referenceMigration', label: '当前章参考迁移计划', disabled: !activeChapter },
               { key: 'commercialTools', label: '商业工具箱' },
             ])}
           >
             <Button size="small" type="text">4 质检修订 <DownOutlined /></Button>
+          </Dropdown>
+          <Dropdown
+            menu={workflowMenu([
+              { key: 'exportDelivery', label: '交付导出 TXT / Markdown' },
+              { key: 'qualityBenchmarkPanel', label: '导出前质量基准' },
+              { key: 'consistencyGraph', label: '导出前一致性图谱' },
+            ])}
+          >
+            <Button size="small" type="text">5 交付导出 <DownOutlined /></Button>
           </Dropdown>
         </Space>
         {referenceSummary.count > 0 && (
@@ -2326,12 +2424,20 @@ export default function NovelProjectWorkspace() {
           proseChapterCount={proseChapters.length}
           activeChapterId={activeChapterId}
           referenceCount={referenceSummary.count}
+          outlineCount={outlines.length}
+          worldbuildingCount={worldbuilding.length}
+          characterCount={characters.length}
+          hasWritingBible={Boolean(selectedProject?.reference_config?.writing_bible)}
+          materialScore={activeChapterDiagnostics?.material_score}
+          commercialReadiness={commercialReadiness}
+          activeTaskCount={activeTasks.length + activeKnowledgeJobCount}
           onOpenOutlinePanel={() => setOutlinePanelOpen(true)}
           onGenerateProse={stepGenerateProse}
           onCancelGenerateProse={cancelStepGenerateProse}
           onRunRepair={stepRunRepair}
           onOpenReferenceConfig={() => setReferenceConfigOpen(true)}
           onOpenReferenceEngineering={() => setReferenceEngineeringOpen(true)}
+          onOpenCreativeCards={() => setCreativeCardsOpen(true)}
           onRunOriginalIncubator={() => { void runOriginalIncubator() }}
           onOpenWritingBibleEditor={() => { void openWritingBibleEditor() }}
           onOpenMaterialRepairPlan={() => { void openMaterialRepairPlan() }}
@@ -2339,8 +2445,11 @@ export default function NovelProjectWorkspace() {
           onStartChapterGroupGeneration={() => { void startChapterGroupGeneration() }}
           onOpenProductionDesk={() => navigate(`/novel/workspace/${projectId}/production`)}
           onOpenTaskCenter={() => setTaskCenterOpen(true)}
+          onOpenConsistencyGraph={() => setConsistencyGraphOpen(true)}
+          onOpenQualityBenchmark={() => setQualityBenchmarkOpen(true)}
           onRunBookReview={() => { void runBookReview() }}
           onOpenCommercialTools={() => setCommercialToolsOpen(true)}
+          onOpenExportDelivery={() => setExportDeliveryOpen(true)}
           onOpenOutlineTree={() => setOutlineTreeOpen(true)}
           onOpenChapterDrawer={() => setChapterDrawerOpen(true)}
           onCreateChapter={() => openEditor('chapter')}
@@ -2364,6 +2473,7 @@ export default function NovelProjectWorkspace() {
           proseEditorRef={proseEditorRef}
           saveStatus={saveStatus}
           planning={planning}
+          incubatingOriginal={incubatingOriginal}
           generatingProse={generatingProse}
           generatingSceneCards={generatingSceneCards}
           diagnosticsLoading={diagnosticsLoading}
@@ -2372,6 +2482,9 @@ export default function NovelProjectWorkspace() {
           onRunPlan={runPlan}
           onCreateOutline={() => openEditor('outline')}
           onCreateChapter={() => openEditor('chapter')}
+          onRunOriginalIncubator={() => { void runOriginalIncubator() }}
+          onOpenReferenceConfig={() => setReferenceConfigOpen(true)}
+          onOpenWritingBibleEditor={() => { void openWritingBibleEditor() }}
           onGenerateCurrentChapterProse={() => generateCurrentChapterProse()}
           onGenerateSceneCards={() => generateSceneCardsForActiveChapter()}
           onOpenGenerationDiagnostics={openGenerationDiagnostics}
@@ -2405,6 +2518,7 @@ export default function NovelProjectWorkspace() {
           onOpen={() => setRightPanelOpen(true)}
           onTabChange={setRightPanelTab}
           onEdit={(kind, item) => openEditor(kind, item)}
+          onOpenCreativeCards={() => setCreativeCardsOpen(true)}
           onOpenStoryStateEditor={openStoryStateEditor}
           onApplyEditorRevision={applyEditorRevision}
           onRollbackVersion={rollbackChapterVersion}
@@ -2425,7 +2539,9 @@ export default function NovelProjectWorkspace() {
         showOnlyDiff={showOnlyDiff}
         onToggleDiffMode={() => setShowOnlyDiff(prev => !prev)}
         onClose={() => setChapterVersionDetail(null)}
+        onAcceptVersion={acceptChapterVersion}
         onMergeVersion={mergeChapterVersion}
+        acceptingVersionId={rollingBackVersionId}
       />
 
       <AgentExecutionModal
@@ -2450,6 +2566,106 @@ export default function NovelProjectWorkspace() {
         onOpenReferenceConfig={() => {
           setReferenceEngineeringOpen(false)
           setReferenceConfigOpen(true)
+        }}
+      />
+
+      <CreativeCardsModal
+        open={creativeCardsOpen}
+        selectedProject={selectedProject}
+        worldbuilding={worldbuilding}
+        characters={characters}
+        outlines={outlines}
+        chapters={sortedChapters}
+        activeChapterId={activeChapterId}
+        onClose={() => setCreativeCardsOpen(false)}
+        onEdit={(kind, item) => {
+          setCreativeCardsOpen(false)
+          openEditor(kind, item)
+        }}
+        onOpenWritingBible={() => {
+          setCreativeCardsOpen(false)
+          void openWritingBibleEditor()
+        }}
+        onOpenStoryState={() => {
+          setCreativeCardsOpen(false)
+          openStoryStateEditor()
+        }}
+      />
+
+      <ConsistencyGraphModal
+        open={consistencyGraphOpen}
+        selectedProject={selectedProject}
+        chapters={sortedChapters}
+        characters={characters}
+        outlines={outlines}
+        audit={continuityAudit}
+        auditLoading={continuityAuditLoading}
+        onClose={() => setConsistencyGraphOpen(false)}
+        onRefreshAudit={refreshConsistencyAudit}
+        onOpenStoryState={() => {
+          setConsistencyGraphOpen(false)
+          openStoryStateEditor()
+        }}
+        onSelectChapter={(chapterId) => {
+          setConsistencyGraphOpen(false)
+          void selectChapter(chapterId)
+        }}
+      />
+
+      <QualityBenchmarkModal
+        open={qualityBenchmarkOpen}
+        projectId={projectId}
+        selectedModelId={selectedModelId}
+        chapters={sortedChapters}
+        reviews={reviews}
+        runRecords={runRecords}
+        continuityAudit={continuityAudit}
+        benchmarkLoading={commercialToolLoading === 'benchmark'}
+        onClose={() => setQualityBenchmarkOpen(false)}
+        onRunBenchmark={runQualityBenchmark}
+        onRefreshContinuity={refreshConsistencyAudit}
+        onSelectChapter={(chapterId) => {
+          setQualityBenchmarkOpen(false)
+          void selectChapter(chapterId)
+        }}
+      />
+
+      <ReviewAnnotationsDrawer
+        open={reviewAnnotationsOpen}
+        projectId={projectId}
+        onClose={() => setReviewAnnotationsOpen(false)}
+        onSelectChapter={(chapterId) => {
+          void selectChapter(chapterId)
+        }}
+        onApplyEditorRevision={applyEditorRevision}
+        onChanged={() => { void loadProjectModules() }}
+      />
+
+      <AgentAuditDrawer
+        open={agentAuditOpen}
+        projectId={projectId}
+        onClose={() => setAgentAuditOpen(false)}
+        onSelectChapter={(chapterId) => {
+          void selectChapter(chapterId)
+        }}
+        onOpenTaskCenter={() => setTaskCenterOpen(true)}
+      />
+
+      <ExportDeliveryModal
+        open={exportDeliveryOpen}
+        projectId={projectId}
+        onClose={() => setExportDeliveryOpen(false)}
+        onOpenQualityBenchmark={() => {
+          setExportDeliveryOpen(false)
+          setQualityBenchmarkOpen(true)
+        }}
+        onOpenConsistencyGraph={() => {
+          setExportDeliveryOpen(false)
+          setConsistencyGraphOpen(true)
+        }}
+        onOpenTaskCenter={() => {
+          setExportDeliveryOpen(false)
+          setTaskCenterOpen(true)
         }}
       />
 
@@ -2493,12 +2709,16 @@ export default function NovelProjectWorkspace() {
                 <Button block loading={commercialToolLoading === 'queueStop'} onClick={stopRunQueueWorker}>停止后台 worker</Button>
                 <Button block loading={commercialToolLoading === 'queueRecover'} onClick={recoverRunQueue}>恢复后台队列</Button>
                 <Button block loading={commercialToolLoading === 'metrics'} onClick={openProductionMetrics}>成本质量仪表盘</Button>
+                <Button block onClick={() => setAgentAuditOpen(true)}>Agent 调用审计</Button>
                 <Button block loading={commercialToolLoading === 'approval'} onClick={openApprovalPolicyEditor}>审批关卡策略</Button>
               </Space>
             </Card>
             <Card size="small" title="质量基准">
               <Space direction="vertical" style={{ width: '100%' }}>
                 <Button block onClick={openChapterQualityCard}>当前章质量卡</Button>
+                <Button block onClick={() => setQualityBenchmarkOpen(true)}>质量评测基准面板</Button>
+                <Button block onClick={() => setReviewAnnotationsOpen(true)}>章节审阅批注</Button>
+                <Button block onClick={() => setConsistencyGraphOpen(true)}>全书一致性图谱</Button>
                 <Button block loading={commercialToolLoading === 'continuityAudit'} onClick={openContinuityAudit}>全书连续性检查</Button>
                 <Button block loading={commercialToolLoading === 'benchmark'} onClick={runQualityBenchmark}>项目质量基准测试</Button>
                 <Button block loading={commercialToolLoading === 'versionReview'} onClick={runVersionReviewForActiveChapter}>当前章版本评审</Button>
@@ -2519,6 +2739,13 @@ export default function NovelProjectWorkspace() {
                 <Button block loading={commercialToolLoading === 'agentConfig'} onClick={openAgentConfigEditor}>提示词与 Agent 配置</Button>
                 <Button block onClick={openWritingBibleEditor}>结构化写作圣经</Button>
                 <Button block onClick={openStoryStateEditor}>状态机人工校正</Button>
+              </Space>
+            </Card>
+            <Card size="small" title="交付导出">
+              <Space direction="vertical" style={{ width: '100%' }}>
+                <Button block onClick={() => setExportDeliveryOpen(true)}>导出 TXT / Markdown</Button>
+                <Button block onClick={() => setQualityBenchmarkOpen(true)}>导出前质量基准</Button>
+                <Button block onClick={() => setConsistencyGraphOpen(true)}>导出前一致性图谱</Button>
               </Space>
             </Card>
           </div>
@@ -2614,7 +2841,9 @@ export default function NovelProjectWorkspace() {
         onResumeKnowledgeJob={(jobId) => { void resumeKnowledgeIngestJob(jobId) }}
         onCancelKnowledgeJob={(jobId) => { void cancelKnowledgeIngestJob(jobId) }}
         chapterGroupExecutingId={chapterGroupExecutingId}
+        releaseRepairExecutingId={releaseRepairExecutingId}
         onExecuteChapterGroup={executeChapterGroupRun}
+        onExecuteReleaseRepairRun={executeReleaseRepairRun}
         onRecoverRunQueue={() => { void recoverRunQueue() }}
         onApproveChapterGroup={approveChapterGroupStage}
         onRetryChapterGroup={retryChapterGroupStage}

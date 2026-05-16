@@ -420,6 +420,7 @@ export function createNovelWritingService(ctx: {
     const onStage = typeof options.onStage === 'function' ? options.onStage : async () => {}
     const project = await ctx.getProject(activeWorkspace, projectId)
     if (!project) throw new Error('project not found')
+    const configSnapshot = ctx.production.buildAgentConfigSnapshot(project, preferredModelId)
     const approvalPolicy = options.approval_policy || ctx.production.getApprovalPolicy(project)
     const approvals = options.approvals || {}
     const productionMode = String(options.production_mode || 'draft_review_revise_store')
@@ -479,6 +480,7 @@ export function createNovelWritingService(ctx: {
         production_mode: productionMode,
         completed_stage: 'scene_cards',
         story_state_update: { skipped: true },
+        config_snapshot: configSnapshot,
       }
     }
     const prevChapters = chapters
@@ -531,6 +533,7 @@ export function createNovelWritingService(ctx: {
         production_mode: productionMode,
         completed_stage: 'store',
         story_state_update: { skipped: true },
+        config_snapshot: configSnapshot,
       }
     }
     await onStage('review', { status: 'running' })
@@ -554,7 +557,7 @@ export function createNovelWritingService(ctx: {
         status: selfCheck?.review?.passed === false || Number(selfCheck?.review?.score || 100) < 78 ? 'warn' : 'ok',
         summary: `章节群质检评分 ${selfCheck?.review?.score ?? '-'}`,
         issues: Array.isArray(selfCheck?.review?.issues) ? selfCheck.review.issues.map((issue: any) => `${issue.severity || 'medium'}｜${issue.description || issue}`) : [],
-        payload: JSON.stringify({ chapter_id: chapter.id, context_package: contextPackage, self_check: selfCheck, production_mode: productionMode }),
+        payload: JSON.stringify({ chapter_id: chapter.id, context_package: contextPackage, self_check: selfCheck, production_mode: productionMode, config_snapshot: configSnapshot }),
       })
       return {
         chapter: updatedReviewedDraft,
@@ -563,6 +566,7 @@ export function createNovelWritingService(ctx: {
         production_mode: productionMode,
         completed_stage: 'store',
         story_state_update: { skipped: true },
+        config_snapshot: configSnapshot,
       }
     }
     const preStoreQualityDecision = getQualityGateDecision(project, { ...(selfCheck?.review || {}), revised: Boolean(selfCheck.revised) })
@@ -617,7 +621,7 @@ export function createNovelWritingService(ctx: {
       status: selfCheck?.review?.passed === false || Number(selfCheck?.review?.score || 100) < 78 ? 'warn' : 'ok',
       summary: `章节群质检评分 ${selfCheck?.review?.score ?? '-'}`,
       issues: Array.isArray(selfCheck?.review?.issues) ? selfCheck.review.issues.map((issue: any) => `${issue.severity || 'medium'}｜${issue.description || issue}`) : [],
-      payload: JSON.stringify({ chapter_id: chapter.id, context_package: contextPackage, self_check: selfCheck, reference_report: referenceReport, safety_decision: safetyDecision, migration_audit: migrationAudit, production_mode: productionMode }),
+      payload: JSON.stringify({ chapter_id: chapter.id, context_package: contextPackage, self_check: selfCheck, reference_report: referenceReport, safety_decision: safetyDecision, migration_audit: migrationAudit, production_mode: productionMode, config_snapshot: configSnapshot }),
     })
     return {
       chapter: updated,
@@ -629,6 +633,7 @@ export function createNovelWritingService(ctx: {
       safety_decision: safetyDecision,
       migration_audit: migrationAudit,
       story_state_update: storyStateUpdate,
+      config_snapshot: configSnapshot,
     }
   }
 

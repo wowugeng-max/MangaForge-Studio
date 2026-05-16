@@ -43,7 +43,13 @@ function runTypeLabel(type?: string) {
     editor_revision: '编辑修订',
     book_review: '全书总检',
     quality_benchmark: '质量基准',
+    regression_benchmark: '回归基准',
+    ab_experiment: 'A/B 实验',
+    ab_sandbox: 'A/B 沙盒实写',
     rolling_plan: '滚动规划',
+    release_repair_queue: '发布修复队列',
+    release_quality_batch: '发布质检批量任务',
+    release_similarity_batch: '发布相似度批量任务',
   }
   return map[String(type || '')] || type || '任务'
 }
@@ -161,6 +167,96 @@ function ChapterPipelineRunSummary({ run }: { run: any }) {
           <Paragraph style={{ marginBottom: 0, fontSize: 12 }} ellipsis={{ rows: 2, expandable: true }}>
             上下文缺口：{output.context_package.preflight.warnings.join('；')}
           </Paragraph>
+        )}
+      </Space>
+    </Card>
+  )
+}
+
+function ReleaseRepairRunSummary({ run }: { run: any }) {
+  const output = parseJsonValue(run.output_ref) || {}
+  const tasks = Array.isArray(output.tasks) ? output.tasks : []
+  const relatedRuns = Array.isArray(output.related_runs) ? output.related_runs : []
+  return (
+    <Card size="small" title="发布修复队列">
+      <Space direction="vertical" size={10} style={{ width: '100%' }}>
+        <Space wrap>
+          <Tag color={output.release_audit?.can_release ? 'green' : 'red'} bordered={false}>
+            发布评分 {output.release_audit?.score ?? '-'}
+          </Tag>
+          <Tag color="blue" bordered={false}>修复任务 {tasks.length}</Tag>
+          <Tag bordered={false}>子任务 {relatedRuns.length}</Tag>
+          <Tag color={(output.release_audit?.blocker_count || 0) > 0 ? 'red' : 'default'} bordered={false}>阻塞 {output.release_audit?.blocker_count || 0}</Tag>
+          <Tag color={(output.release_audit?.warning_count || 0) > 0 ? 'gold' : 'default'} bordered={false}>警告 {output.release_audit?.warning_count || 0}</Tag>
+        </Space>
+        {tasks.length > 0 && (
+          <List
+            size="small"
+            dataSource={tasks}
+            renderItem={(task: any) => (
+              <List.Item>
+                <Space direction="vertical" size={2}>
+                  <Space wrap>
+                    <Tag color={task.priority === 'high' ? 'red' : 'gold'} bordered={false}>{task.priority || 'medium'}</Tag>
+                    <Text>{task.title}</Text>
+                    <Tag bordered={false}>{task.count || 0} 项</Tag>
+                  </Space>
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    {task.action}{task.chapter_nos?.length ? ` · 章节：${task.chapter_nos.slice(0, 20).join('、')}` : ''}
+                  </Text>
+                </Space>
+              </List.Item>
+            )}
+          />
+        )}
+        {relatedRuns.length > 0 && (
+          <Space wrap>
+            {relatedRuns.map((item: any) => (
+              <Tag key={`${item.run_type}-${item.run_id}`} color="blue" bordered={false}>
+                子任务 #{item.run_id} · {runTypeLabel(item.run_type)}
+              </Tag>
+            ))}
+          </Space>
+        )}
+      </Space>
+    </Card>
+  )
+}
+
+function ReleaseBatchRunSummary({ run }: { run: any }) {
+  const output = parseJsonValue(run.output_ref) || {}
+  const results = Array.isArray(output.results) ? output.results : []
+  const failed = results.filter((item: any) => item.status === 'failed')
+  const title = run.run_type === 'release_similarity_batch' ? '发布相似度批量任务' : '发布质检批量任务'
+  return (
+    <Card size="small" title={title}>
+      <Space direction="vertical" size={10} style={{ width: '100%' }}>
+        <Space wrap>
+          {statusTag(run.status)}
+          <Tag color="blue" bordered={false}>已处理 {output.processed || results.length || 0}</Tag>
+          <Tag color="green" bordered={false}>成功 {output.success ?? results.length - failed.length}</Tag>
+          <Tag color={failed.length ? 'red' : 'default'} bordered={false}>失败 {output.failed ?? failed.length}</Tag>
+        </Space>
+        <Text type="secondary" style={{ fontSize: 12 }}>{output.phase || run.step_name || '-'}</Text>
+        {results.length > 0 && (
+          <List
+            size="small"
+            dataSource={results.slice(0, 30)}
+            renderItem={(item: any) => (
+              <List.Item>
+                <Space direction="vertical" size={2}>
+                  <Space wrap>
+                    {statusTag(item.status)}
+                    <Text>第{item.chapter_no}章</Text>
+                    {typeof item.score === 'number' && <Tag color={item.score >= 78 ? 'green' : 'gold'} bordered={false}>质量 {item.score}</Tag>}
+                    {typeof item.risk === 'number' && <Tag color={item.risk <= 35 ? 'green' : 'gold'} bordered={false}>风险 {item.risk}</Tag>}
+                    {item.review_id && <Tag bordered={false}>报告 #{item.review_id}</Tag>}
+                  </Space>
+                  {item.error && <Text type="danger" style={{ fontSize: 12 }}>{item.error}</Text>}
+                </Space>
+              </List.Item>
+            )}
+          />
         )}
       </Space>
     </Card>
@@ -288,10 +384,12 @@ export function TaskCenterDrawer({
   onResumeKnowledgeJob,
   onCancelKnowledgeJob,
   chapterGroupExecutingId,
+  releaseRepairExecutingId,
   onExecuteChapterGroup,
   onPauseRun,
   onResumeRun,
   onRecoverRunQueue,
+  onExecuteReleaseRepairRun,
   onApproveChapterGroup,
   onRetryChapterGroup,
   onSkipChapterGroup,
@@ -310,10 +408,12 @@ export function TaskCenterDrawer({
   onResumeKnowledgeJob: (jobId: string) => void
   onCancelKnowledgeJob: (jobId: string) => void
   chapterGroupExecutingId?: number | null
+  releaseRepairExecutingId?: number | null
   onExecuteChapterGroup?: (run: any) => void
   onPauseRun?: (run: any) => void
   onResumeRun?: (run: any) => void
   onRecoverRunQueue?: () => void
+  onExecuteReleaseRepairRun?: (run: any) => void
   onApproveChapterGroup?: (run: any, chapter: any) => void
   onRetryChapterGroup?: (run: any, chapter: any) => void
   onSkipChapterGroup?: (run: any, chapter: any) => void
@@ -428,6 +528,9 @@ export function TaskCenterDrawer({
                           {task.can_execute && task.run_type === 'chapter_group_generation' && onExecuteChapterGroup && (
                             <Button size="small" loading={chapterGroupExecutingId === task.id} onClick={() => onExecuteChapterGroup(task)}>执行</Button>
                           )}
+                          {['release_quality_batch', 'release_similarity_batch'].includes(task.run_type) && ['queued', 'ready', 'failed'].includes(task.status) && onExecuteReleaseRepairRun && (
+                            <Button size="small" type="primary" loading={releaseRepairExecutingId === task.id} onClick={() => onExecuteReleaseRepairRun(task)}>执行发布批量</Button>
+                          )}
                           {task.error && (
                             <Button size="small" type="link" onClick={() => openTaskDetail(task)}>查看恢复</Button>
                           )}
@@ -509,6 +612,7 @@ export function TaskCenterDrawer({
                       run.run_type === 'chapter_generation_pipeline' && ['paused', 'failed', 'ready'].includes(run.status) && onResumeRun ? <Button key="resume" type="link" size="small" onClick={() => onResumeRun(run)}>继续</Button> : null,
                       run.run_type === 'chapter_group_generation' && ['ready', 'paused', 'failed'].includes(run.status) && onResumeRun ? <Button key="resume-group" type="link" size="small" onClick={() => onResumeRun(run)}>继续</Button> : null,
                       run.run_type === 'chapter_group_generation' && ['ready', 'paused', 'failed', 'running'].includes(run.status) && onExecuteChapterGroup ? <Button key="execute-group" type="link" size="small" loading={chapterGroupExecutingId === run.id} onClick={() => onExecuteChapterGroup(run)}>执行</Button> : null,
+                      ['release_quality_batch', 'release_similarity_batch'].includes(run.run_type) && ['queued', 'ready', 'failed'].includes(run.status) && onExecuteReleaseRepairRun ? <Button key="execute-release" type="link" size="small" loading={releaseRepairExecutingId === run.id} onClick={() => onExecuteReleaseRepairRun(run)}>执行发布批量</Button> : null,
                       run.run_type === 'chapter_group_generation' && run.status === 'running' && onPauseRun ? <Button key="pause-group" type="link" size="small" onClick={() => onPauseRun(run)}>暂停</Button> : null,
                       <Button key="detail" type="link" size="small" onClick={() => setDetailRun(run)}>详情</Button>,
                     ].filter(Boolean)}
@@ -560,6 +664,8 @@ export function TaskCenterDrawer({
             )}
             {detailRun.run_type === 'batch_generate_prose' && <BatchProseRunSummary run={detailRun} />}
             {detailRun.run_type === 'chapter_generation_pipeline' && <ChapterPipelineRunSummary run={detailRun} />}
+            {detailRun.run_type === 'release_repair_queue' && <ReleaseRepairRunSummary run={detailRun} />}
+            {['release_quality_batch', 'release_similarity_batch'].includes(detailRun.run_type) && <ReleaseBatchRunSummary run={detailRun} />}
             {detailRun.run_type === 'chapter_group_generation' && <ChapterGroupRunSummary run={detailRun} onApproveChapterGroup={onApproveChapterGroup} onRetryChapterGroup={onRetryChapterGroup} onSkipChapterGroup={onSkipChapterGroup} />}
             <Card size="small" title="输入">
               <Paragraph style={{ whiteSpace: 'pre-wrap', maxHeight: 220, overflow: 'auto', marginBottom: 0 }}>

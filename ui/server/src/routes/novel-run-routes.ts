@@ -1,6 +1,7 @@
 import type { Express } from 'express'
 import {
   appendNovelRun,
+  listNovelChapters,
   listNovelReviews,
   listNovelRuns,
   updateNovelProject,
@@ -15,6 +16,254 @@ type RunRoutesContext = {
   getProductionBudgetDecision: (project: any, runs: any[]) => any
   buildPipelineSteps: () => any[]
   executeChapterGroupRunRecord: (workspace: string, project: any, run: any, options?: any) => Promise<any>
+}
+
+const AUDIT_SOURCE_LABELS: Record<string, string> = {
+  generate_prose: '正文生成',
+  chapter_generation_pipeline: '章节流水线',
+  chapter_group_generation: '章节群生成',
+  batch_generate_prose: '批量正文生成',
+  scene_cards: '场景卡生成',
+  agent_execute: 'Agent 链执行',
+  repair: '修复执行',
+  prose_quality: '章节自检',
+  editor_report: '编辑报告',
+  similarity_report: '相似度报告',
+  story_state: '故事状态机',
+  reference_migration_plan: '参考迁移计划',
+  release_repair_queue: '发布修复队列',
+  release_quality_batch: '发布质检批量任务',
+  release_similarity_batch: '发布相似度批量任务',
+}
+
+function compactAuditText(value: any, limit = 160) {
+  return String(value || '').replace(/\s+/g, ' ').trim().slice(0, limit)
+}
+
+function asAuditArray(value: any) {
+  return Array.isArray(value) ? value : []
+}
+
+function firstPresent(...values: any[]) {
+  return values.find(value => value !== undefined && value !== null && value !== '')
+}
+
+function extractModelTrace(payload: any, inputPayload: any = {}) {
+  const candidates = Array.isArray(payload) ? payload : [
+    payload,
+    payload?.result,
+    payload?.llm_result,
+    payload?.self_check?.review,
+    payload?.self_check?.revision,
+    payload?.chapters?.find?.((item: any) => item?.modelName || item?.model_name),
+    ...(Array.isArray(payload?.pipeline) ? payload.pipeline : []),
+    ...(Array.isArray(payload?.results) ? payload.results : []),
+  ]
+  const modelHit = candidates.find((item: any) => item && (item.modelName || item.model_name || item.modelId || item.model_id || item.providerId || item.provider_id)) || {}
+  const usageHit = candidates.find((item: any) => item?.usage || item?.token_usage) || {}
+  return {
+    model_name: firstPresent(modelHit.modelName, modelHit.model_name, inputPayload.model_name),
+    model_id: firstPresent(modelHit.modelId, modelHit.model_id, inputPayload.model_id),
+    provider_id: firstPresent(modelHit.providerId, modelHit.provider_id),
+    usage: usageHit.usage || usageHit.token_usage || payload?.usage || null,
+  }
+}
+
+function extractChapterRef(payload: any, inputPayload: any, record: any, chaptersById: Map<number, any>, chaptersByNo: Map<number, any>) {
+  const source = Array.isArray(payload) ? {} : (payload || {})
+  const context = source.context_package || source.contextPackage || {}
+  const chapterTarget = context.chapter_target || context.chapter || {}
+  const rawChapterNo = firstPresent(
+    source.chapter_no,
+    source.chapter?.chapter_no,
+    chapterTarget.chapter_no,
+    source.quality_card?.chapter_no,
+    inputPayload?.chapter_no,
+    String(record.step_name || '').match(/chapter-(\d+)/)?.[1],
+  )
+  const rawChapterId = firstPresent(
+    source.chapter_id,
+    source.chapter?.id,
+    source.quality_card?.chapter_id,
+    chapterTarget.chapter_id,
+    chapterTarget.id,
+    inputPayload?.chapter_id,
+  )
+  const chapterId = Number(rawChapterId || 0) || undefined
+  const chapterNo = Number(rawChapterNo || 0) || undefined
+  const byId = chapterId ? chaptersById.get(chapterId) : null
+  const byNo = !byId && chapterNo ? chaptersByNo.get(chapterNo) : null
+  const chapter = byId || byNo || null
+  return {
+    chapter_id: chapter?.id || chapterId || null,
+    chapter_no: chapter?.chapter_no || chapterNo || null,
+    chapter_title: chapter?.title || source.chapter?.title || chapterTarget.title || '',
+  }
+}
+
+function extractMaterialTrace(payload: any) {
+  const source = Array.isArray(payload) ? {} : (payload || {})
+  const context = source.context_package || source.contextPackage || null
+  const preflight = context?.preflight || source.preflight || null
+  const chapterTarget = context?.chapter_target || {}
+  const sceneCards = firstPresent(chapterTarget.scene_cards, source.scene_cards, source.confirmed_scene_cards, source.scene_breakdown)
+  const referenceEntries = firstPresent(
+    context?.reference_preview?.entries,
+    context?.reference_entries,
+    source.reference_preview?.entries,
+    source.reference_report?.entries,
+    source.reference_report?.matched_entries,
+  )
+  const blockers = asAuditArray(preflight?.blockers).map((item: any) => item.label || item.fix || item.key || item).filter(Boolean)
+  const warnings = [
+    ...asAuditArray(preflight?.warnings),
+    ...asAuditArray(source.warnings),
+    ...asAuditArray(source.pipeline).filter((item: any) => item.status === 'warn' || item.status === 'failed').map((item: any) => item.detail || item.label),
+  ].map((item: any) => compactAuditText(item, 120)).filter(Boolean)
+  return {
+    has_context_package: Boolean(context),
+    preflight_ready: preflight ? Boolean(preflight.ready) : null,
+    blocker_count: blockers.length,
+    blockers: blockers.slice(0, 8),
+    warnings: warnings.slice(0, 10),
+    scene_cards_count: Array.isArray(sceneCards) ? sceneCards.length : 0,
+    reference_entries_count: Array.isArray(referenceEntries) ? referenceEntries.length : 0,
+    character_count: Array.isArray(context?.characters) ? context.characters.length : Array.isArray(context?.character_states) ? context.character_states.length : 0,
+    has_previous_tail: Boolean(context?.previous_chapter || context?.previous_chapters || context?.continuity?.previous_tail),
+    has_writing_bible: Boolean(context?.writing_bible || context?.style_lock),
+    has_story_state: Boolean(context?.story_state || context?.state_machine || source.story_state_update),
+  }
+}
+
+function extractSafetyTrace(payload: any) {
+  const source = Array.isArray(payload) ? {} : (payload || {})
+  const report = source.reference_report || source.similarity_report || source.report?.reference_report || null
+  const decision = source.safety_decision || source.reference_safety || null
+  return {
+    has_reference_report: Boolean(report),
+    has_safety_decision: Boolean(decision),
+    blocked: Boolean(decision?.blocked),
+    score: firstPresent(decision?.score, report?.quality_assessment?.overall_score, report?.overall_score, null),
+    copy_hit_count: Number(firstPresent(decision?.copy_hit_count, report?.copy_hit_count, report?.copy_hits?.length, 0) || 0),
+    risk_level: firstPresent(report?.quality_assessment?.risk_level, report?.risk_level, decision?.risk_level, ''),
+    reasons: asAuditArray(decision?.reasons).slice(0, 5),
+  }
+}
+
+function extractConfigTrace(payload: any) {
+  const source = Array.isArray(payload) ? {} : (payload || {})
+  const snapshot = source.config_snapshot
+    || source.agent_config_snapshot
+    || source.pipeline?.find?.((item: any) => item.config_snapshot)?.config_snapshot
+    || null
+  return {
+    has_snapshot: Boolean(snapshot),
+    snapshot_id: snapshot?.snapshot_id || '',
+    fingerprint: snapshot?.fingerprint || '',
+    agent_prompt_version: snapshot?.agent_prompt_version || null,
+    prompt_keys: Array.isArray(snapshot?.prompt_keys) ? snapshot.prompt_keys : [],
+    writing_bible_hash: snapshot?.writing_bible_hash || '',
+    model_strategy_stages: snapshot?.model_strategy?.stages ? Object.keys(snapshot.model_strategy.stages) : [],
+  }
+}
+
+function summarizeAuditOutput(source: string, payload: any, record: any) {
+  if (Array.isArray(payload)) return `Agent 链执行 ${payload.length} 步`
+  if (source === 'generate_prose') {
+    const score = payload?.self_check?.review?.score
+    const revised = payload?.self_check?.revised
+    const diff = payload?.diff
+    return [`自检 ${score ?? '-'}`, revised ? '已修订' : '未修订', diff?.added_chars ? `新增 ${diff.added_chars} 字` : ''].filter(Boolean).join(' · ')
+  }
+  if (source === 'prose_quality') return compactAuditText(record.summary || `自检评分 ${payload?.self_check?.review?.score ?? '-'}`)
+  if (source === 'editor_report') return compactAuditText(record.summary || payload?.report?.summary || payload?.summary)
+  if (source === 'similarity_report') return compactAuditText(record.summary || payload?.report?.summary || payload?.summary)
+  if (source === 'story_state') return compactAuditText(record.summary || '故事状态已更新')
+  if (source.includes('release_')) return compactAuditText(record.summary || payload?.phase || payload?.summary || record.step_name)
+  return compactAuditText(record.summary || payload?.phase || payload?.current_step || record.step_name)
+}
+
+function createAuditEvent(kind: 'run' | 'review', record: any, payload: any, inputPayload: any, chaptersById: Map<number, any>, chaptersByNo: Map<number, any>) {
+  const source = kind === 'run' ? record.run_type : record.review_type
+  const chapter = extractChapterRef(payload, inputPayload, record, chaptersById, chaptersByNo)
+  const materials = extractMaterialTrace(payload)
+  const model = extractModelTrace(payload, inputPayload)
+  const safety = extractSafetyTrace(payload)
+  const config = extractConfigTrace(payload)
+  const status = record.status || (kind === 'review' ? 'ok' : '')
+  const error = record.error_message || payload?.error || payload?.last_error?.error || ''
+  return {
+    key: `${kind}-${record.id}`,
+    kind,
+    id: record.id,
+    source,
+    source_label: AUDIT_SOURCE_LABELS[source] || source,
+    title: `${AUDIT_SOURCE_LABELS[source] || source}${chapter.chapter_no ? ` · 第${chapter.chapter_no}章` : ''}`,
+    status,
+    created_at: record.created_at,
+    duration_ms: record.duration_ms || 0,
+    ...chapter,
+    model,
+    config,
+    materials,
+    safety,
+    output_summary: summarizeAuditOutput(source, payload, record),
+    warnings: [...materials.warnings, ...safety.reasons].slice(0, 12),
+    error: compactAuditText(error, 300),
+  }
+}
+
+function buildAgentAudit(project: any, runs: any[], reviews: any[], chapters: any[]) {
+  const chaptersById = new Map(chapters.map(chapter => [Number(chapter.id), chapter]))
+  const chaptersByNo = new Map(chapters.map(chapter => [Number(chapter.chapter_no), chapter]))
+  const runEvents = runs.map(run => {
+    const payload = parseJsonLikePayload(run.output_ref) || {}
+    const inputPayload = parseJsonLikePayload(run.input_ref) || {}
+    return createAuditEvent('run', run, payload, inputPayload, chaptersById, chaptersByNo)
+  })
+  const reviewEvents = reviews
+    .filter(review => review.review_type !== 'review_annotation_status')
+    .map(review => createAuditEvent('review', review, parseJsonLikePayload(review.payload) || {}, {}, chaptersById, chaptersByNo))
+  const events = [...runEvents, ...reviewEvents].sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')))
+  const generationEvents = events.filter(event => ['generate_prose', 'chapter_generation_pipeline', 'chapter_group_generation', 'prose_quality', 'editor_report'].includes(event.source))
+  const failedEvents = events.filter(event => ['failed', 'error'].includes(String(event.status || '').toLowerCase()) || event.error)
+  const contextMissing = generationEvents.filter(event => !event.materials.has_context_package)
+  const modelMissing = events.filter(event => ['generate_prose', 'scene_cards', 'agent_execute', 'repair', 'editor_report', 'prose_quality'].includes(event.source) && !event.model.model_name && !event.model.model_id)
+  const configMissing = generationEvents.filter(event => !event.config.has_snapshot)
+  const referencesConfigured = asAuditArray(project?.reference_config?.references).length > 0
+  const safetyMissing = events.filter(event => ['generate_prose', 'prose_quality', 'similarity_report'].includes(event.source) && referencesConfigured && !event.safety.has_reference_report && !event.safety.has_safety_decision)
+  const gaps = [
+    ...contextMissing.map(event => ({ type: 'missing_context', severity: 'high', event_key: event.key, title: `${event.title} 缺少续写上下文包` })),
+    ...configMissing.map(event => ({ type: 'missing_config_snapshot', severity: 'medium', event_key: event.key, title: `${event.title} 缺少 Agent 配置快照` })),
+    ...modelMissing.map(event => ({ type: 'missing_model_trace', severity: 'medium', event_key: event.key, title: `${event.title} 缺少模型记录` })),
+    ...safetyMissing.map(event => ({ type: 'missing_safety_trace', severity: 'high', event_key: event.key, title: `${event.title} 缺少仿写安全追踪` })),
+    ...failedEvents.map(event => ({ type: 'failed_event', severity: 'high', event_key: event.key, title: `${event.title} 执行失败`, message: event.error })),
+  ].slice(0, 80)
+  const recommendations = [
+    contextMissing.length ? `有 ${contextMissing.length} 条生成/审稿记录没有上下文包，建议统一从章节流水线或章节群生产入口生成。` : '',
+    configMissing.length ? `有 ${configMissing.length} 条记录没有 Agent 配置快照，后续建议用新流水线生成以便复现。` : '',
+    modelMissing.length ? `有 ${modelMissing.length} 条记录缺少模型名或模型 ID，建议后续所有 Agent 输出写入 modelName/modelId。` : '',
+    safetyMissing.length ? `参考作品已配置，但 ${safetyMissing.length} 条记录缺少安全报告，建议生成后强制执行相似度/仿写安全检查。` : '',
+    failedEvents.length ? `有 ${failedEvents.length} 条失败记录，可在任务中心按失败点重试或跳过。` : '',
+  ].filter(Boolean)
+  return {
+    project_id: project.id,
+    generated_at: new Date().toISOString(),
+    summary: {
+      total_events: events.length,
+      run_events: runEvents.length,
+      review_events: reviewEvents.length,
+      model_traced: events.filter(event => event.model.model_name || event.model.model_id).length,
+      config_traced: events.filter(event => event.config.has_snapshot).length,
+      context_traced: events.filter(event => event.materials.has_context_package).length,
+      safety_checks: events.filter(event => event.safety.has_reference_report || event.safety.has_safety_decision).length,
+      failed_events: failedEvents.length,
+      gap_count: gaps.length,
+    },
+    events,
+    gaps,
+    recommendations,
+  }
 }
 
 export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
@@ -86,6 +335,12 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
                 : run.run_type === 'generate_prose' ? '正文生成'
                   : run.run_type === 'original_incubation' ? '原创孵化'
                     : run.run_type === 'plan' ? '全案规划'
+                      : run.run_type === 'release_repair_queue' ? '发布修复队列'
+                        : run.run_type === 'release_quality_batch' ? '发布质检批量任务'
+                          : run.run_type === 'release_similarity_batch' ? '发布相似度批量任务'
+                            : run.run_type === 'regression_benchmark' ? '回归基准'
+                              : run.run_type === 'ab_experiment' ? 'A/B 实验'
+                                : run.run_type === 'ab_sandbox' ? 'A/B 沙盒实写'
                       : run.run_type,
           step_name: run.step_name,
           status: run.status,
@@ -116,6 +371,12 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
           'plan',
           'agent_execute',
           'repair',
+          'release_repair_queue',
+          'release_quality_batch',
+          'release_similarity_batch',
+          'regression_benchmark',
+          'ab_experiment',
+          'ab_sandbox',
         ].includes(run.run_type))
         .map(normalizeRun)
       const active = tasks.filter(task => ['queued', 'ready', 'running', 'paused', 'needs_approval'].includes(task.status))
@@ -133,6 +394,23 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
           needs_approval: tasks.reduce((sum, task) => sum + Number(task.approval_count || 0), 0),
         },
       })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.get('/api/novel/projects/:id/agent-audit', async (req, res) => {
+    try {
+      const activeWorkspace = ctx.getWorkspace()
+      const projectId = Number(req.params.id)
+      const project = await ctx.getProject(activeWorkspace, projectId)
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const [runs, reviews, chapters] = await Promise.all([
+        listNovelRuns(activeWorkspace, projectId),
+        listNovelReviews(activeWorkspace, projectId),
+        listNovelChapters(activeWorkspace, projectId),
+      ])
+      res.json({ ok: true, audit: buildAgentAudit(project, runs, reviews, chapters) })
     } catch (error) {
       res.status(500).json({ error: String(error) })
     }

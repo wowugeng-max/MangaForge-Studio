@@ -61,6 +61,7 @@ export function ReferencePanel({
   onOpen,
   onTabChange,
   onEdit,
+  onOpenCreativeCards,
   onOpenStoryStateEditor,
   onApplyEditorRevision,
   onRollbackVersion,
@@ -84,6 +85,7 @@ export function ReferencePanel({
   onOpen: () => void
   onTabChange: (key: string) => void
   onEdit: (kind: 'worldbuilding' | 'character' | 'outline', item?: any) => void
+  onOpenCreativeCards?: () => void
   onOpenStoryStateEditor?: () => void
   onApplyEditorRevision?: (report: any) => void
   onRollbackVersion: (versionId: number) => void
@@ -107,7 +109,10 @@ export function ReferencePanel({
     }}>
       <div style={{ padding: '8px 12px', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <Text strong style={{ fontSize: 12 }}>📚 参考资料</Text>
-        <Button type="text" size="small" onClick={onClose}>✕</Button>
+        <Space size={4}>
+          {onOpenCreativeCards && <Button type="text" size="small" onClick={onOpenCreativeCards}>卡片</Button>}
+          <Button type="text" size="small" onClick={onClose}>✕</Button>
+        </Space>
       </div>
       <div style={{ flex: 1, overflow: 'auto' }}>
         <Tabs activeKey={activeTab} onChange={onTabChange} size="small"
@@ -468,7 +473,8 @@ export function ReferencePanel({
                   title={`v${v.version_no}`}
                   extra={<Space>
                     <Tag color={versionSourceColor(v.source)} bordered={false}>{versionSourceLabel(v.source)}</Tag>
-                    <Button size="small" danger onClick={() => onRollbackVersion(v.id)} loading={rollingBackVersionId === v.id}>回滚</Button>
+                    <Button size="small" onClick={(event) => { event.stopPropagation(); onOpenVersionDetail(v) }}>对比</Button>
+                    <Button size="small" danger onClick={(event) => { event.stopPropagation(); onRollbackVersion(v.id) }} loading={rollingBackVersionId === v.id}>回滚</Button>
                   </Space>}
                   onClick={() => onOpenVersionDetail(v)}>
                   <Text type="secondary" style={{ fontSize: 11 }}>{v.created_at}</Text><br />

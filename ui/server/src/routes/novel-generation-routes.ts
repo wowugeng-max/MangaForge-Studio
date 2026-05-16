@@ -21,6 +21,7 @@ type GenerationRoutesContext = {
   getProject: (workspace: string, id: number) => Promise<any>
   getModelStrategy: (project: any, preferredModelId?: number) => any
   getApprovalPolicy: (project: any) => any
+  buildAgentConfigSnapshot: (project: any, preferredModelId?: number) => any
   buildChapterGroupStages: () => any[]
   updateChapterStages: (stages: any[], key: string, patch?: any) => any[]
   classifyGenerationFailure: (error: any) => any
@@ -83,6 +84,7 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
       const selected = chapters.filter(ch => ch.chapter_no >= startNo && ch.chapter_no < startNo + count)
       const modelStrategy = project.reference_config?.model_strategy || ctx.getModelStrategy(project, Number(req.body.model_id || 0) || undefined)
       const approvalPolicy = project.reference_config?.approval_policy || ctx.getApprovalPolicy(project)
+      const configSnapshot = ctx.buildAgentConfigSnapshot(project, Number(req.body.model_id || 0) || undefined)
       const output = {
         chapter_ids: selected.map(ch => ch.id),
         chapters: selected.map(ch => ({
@@ -98,6 +100,7 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
         production_mode: req.body.production_mode || 'draft_review_revise_store',
         model_strategy: modelStrategy,
         approval_policy: approvalPolicy,
+        config_snapshot: configSnapshot,
         policy: {
           stop_on_failure: req.body.stop_on_failure !== false,
           require_scene_confirmation: req.body.require_scene_confirmation ?? approvalPolicy.require_scene_card_approval,
@@ -395,6 +398,7 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
       const modelId = Number(req.body.model_id || 0) || undefined
       const project = await ctx.getProject(activeWorkspace, projectId)
       if (!project) return res.status(404).json({ error: 'project not found' })
+      const configSnapshot = ctx.buildAgentConfigSnapshot(project, modelId)
       const [chapters, worldbuilding, characters, outlines, reviews] = await Promise.all([
         listNovelChapters(activeWorkspace, projectId),
         listNovelWorldbuilding(activeWorkspace, projectId),
@@ -436,6 +440,7 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
         current_step: req.body?.generate_scene_cards === true ? 'scene_cards' : 'context',
         steps,
         context_package: contextPackage,
+        config_snapshot: configSnapshot,
         confirmed_scene_cards: false,
         can_resume_from: req.body?.generate_scene_cards === true ? 'draft' : 'scene_cards',
         resume_endpoint: `/api/novel/chapters/${chapter.id}/generate-prose`,
@@ -462,6 +467,7 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
       const modelId = Number(req.body.model_id || 0) || undefined
       const project = await ctx.getProject(activeWorkspace, projectId)
       if (!project) return res.status(404).json({ error: 'project not found' })
+      const configSnapshot = ctx.buildAgentConfigSnapshot(project, modelId)
       const [chapters, worldbuilding, characters, outlines, reviews] = await Promise.all([
         listNovelChapters(activeWorkspace, projectId),
         listNovelWorldbuilding(activeWorkspace, projectId),
@@ -482,7 +488,7 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
         scene_list: result.sceneCards,
         raw_payload: { ...(chapter.raw_payload || {}), scene_cards_source: 'manual_pipeline' },
       } as any, { createVersion: false })
-      await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'scene_cards', step_name: `chapter-${chapter.chapter_no}`, status: 'success', input_ref: JSON.stringify(req.body), output_ref: JSON.stringify({ scene_cards: result.sceneCards, modelName: (result.result as any).modelName }) })
+      await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'scene_cards', step_name: `chapter-${chapter.chapter_no}`, status: 'success', input_ref: JSON.stringify(req.body), output_ref: JSON.stringify({ scene_cards: result.sceneCards, modelName: (result.result as any).modelName, config_snapshot: configSnapshot }) })
       res.json({ chapter: updated, scene_cards: result.sceneCards, result: result.result })
     } catch (error) {
       res.status(500).json({ error: String(error) })
@@ -498,6 +504,7 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
       const wantsStream = String(req.headers.accept || '').includes('text/event-stream') || String(req.query.stream || '') === '1'
       const project = await ctx.getProject(activeWorkspace, projectId)
       if (!project) return res.status(404).json({ error: 'project not found' })
+      const configSnapshot = ctx.buildAgentConfigSnapshot(project, modelId)
       let chapters = await listNovelChapters(activeWorkspace, projectId)
       let chapter = chapters.find(item => item.id === chapterId)
       if (!chapter) return res.status(404).json({ error: 'chapter not found' })
@@ -530,6 +537,7 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
           error: '章节生成前置检查未通过',
           error_code: 'PROSE_PREFLIGHT_BLOCKED',
           context_package: contextPackage,
+          config_snapshot: configSnapshot,
           preflight: contextPackage.preflight,
           pipeline,
         }
@@ -589,8 +597,8 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
       const sceneBreakdown = resultPayload?.scene_breakdown || firstProse?.scene_breakdown || []
       const continuityNotes = resultPayload?.continuity_notes || firstProse?.continuity_notes || []
       if ((result as any).error || !chapterText) {
-        await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'failed', input_ref: JSON.stringify(req.body), output_ref: JSON.stringify(resultPayload || null), error_message: String((result as any).error || (result as any).fallbackReason || '模型未返回正文') })
-        const errorPayload = { error: String((result as any).error || (result as any).fallbackReason || '模型未返回正文'), result, pipeline, context_package: contextPackage }
+        await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'failed', input_ref: JSON.stringify(req.body), output_ref: JSON.stringify({ ...(resultPayload || {}), config_snapshot: configSnapshot }), error_message: String((result as any).error || (result as any).fallbackReason || '模型未返回正文') })
+        const errorPayload = { error: String((result as any).error || (result as any).fallbackReason || '模型未返回正文'), result, pipeline, context_package: contextPackage, config_snapshot: configSnapshot }
         if (wantsStream) {
           res.write(`data: ${JSON.stringify({ type: 'error', ...errorPayload })}\n\n`)
           res.end()
@@ -631,7 +639,7 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
           status: review.passed === false || Number(review.score || 100) < 78 ? 'warn' : 'ok',
           summary: `章节自检评分 ${review.score ?? '-'}${selfCheck?.revised ? '，已生成修订稿' : ''}`,
           issues: Array.isArray(review.issues) ? review.issues.map((issue: any) => `${issue.severity || 'medium'}｜${issue.description || issue}`) : [],
-          payload: JSON.stringify({ chapter_id: chapter.id, context_package: contextPackage, self_check: selfCheck, pipeline }),
+          payload: JSON.stringify({ chapter_id: chapter.id, context_package: contextPackage, self_check: selfCheck, pipeline, config_snapshot: configSnapshot }),
         })
       } catch (reviewStoreError) {
         console.warn('[prose-quality] Failed to store review:', String(reviewStoreError).slice(0, 200))
@@ -653,7 +661,7 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
       const safetyExplanation = referenceReport && safetyDecision ? ctx.explainReferenceSafety(referenceReport, safetyDecision) : null
       if (!migrationAudit && referenceReport && safetyExplanation) migrationAudit = ctx.buildMigrationAudit(project, referenceReport, safetyExplanation)
       if (safetyDecision?.blocked) {
-        const errorPayload = { error: '仿写安全阈值未通过，正文未入库', error_code: 'REFERENCE_SAFETY_BLOCKED', reference_report: referenceReport, safety_decision: safetyDecision, safety_explanation: safetyExplanation, migration_audit: migrationAudit, context_package: contextPackage, self_check: selfCheck, pipeline }
+        const errorPayload = { error: '仿写安全阈值未通过，正文未入库', error_code: 'REFERENCE_SAFETY_BLOCKED', reference_report: referenceReport, safety_decision: safetyDecision, safety_explanation: safetyExplanation, migration_audit: migrationAudit, context_package: contextPackage, self_check: selfCheck, pipeline, config_snapshot: configSnapshot }
         await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'failed', input_ref: JSON.stringify(req.body), output_ref: JSON.stringify(errorPayload), error_message: safetyDecision.reasons?.join('；') || '仿写安全阈值未通过' })
         if (wantsStream) {
           res.write(`data: ${JSON.stringify({ type: 'error', ...errorPayload })}\n\n`)
@@ -677,7 +685,7 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
       } catch (stateError) {
         markStage('story_state', '故事状态机更新失败', 'warn', String(stateError).slice(0, 200))
       }
-      const pipelineResult = { context_package: contextPackage, self_check: selfCheck, pipeline, diff: generationDiff, previous_version: previousVersion }
+      const pipelineResult = { context_package: contextPackage, self_check: selfCheck, pipeline, diff: generationDiff, previous_version: previousVersion, config_snapshot: configSnapshot }
       await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'success', input_ref: JSON.stringify(req.body), output_ref: JSON.stringify({ outputSource: (result as any).outputSource, modelId: (result as any).modelId, modelName: (result as any).modelName, providerId: (result as any).providerId, usage: (result as any).usage, reference_report: referenceReport, safety_decision: safetyDecision, safety_explanation: safetyExplanation, migration_audit: migrationAudit, story_state_update: storyStateUpdate, ...pipelineResult }) })
       if (!wantsStream) return res.json({ chapter: updated, result, reference_report: referenceReport, safety_decision: safetyDecision, safety_explanation: safetyExplanation, migration_audit: migrationAudit, story_state_update: storyStateUpdate, ...pipelineResult })
       const fullText = String(finalText || '')

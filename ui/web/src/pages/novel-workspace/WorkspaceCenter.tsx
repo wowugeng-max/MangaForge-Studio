@@ -12,13 +12,16 @@ import {
   placeholder,
 } from '@codemirror/view'
 import {
+  BookOutlined,
   CheckCircleOutlined,
   ClockCircleOutlined,
   EditOutlined,
+  ExperimentOutlined,
   FileTextOutlined,
   FontSizeOutlined,
   LineHeightOutlined,
   PlayCircleOutlined,
+  SettingOutlined,
   SyncOutlined,
 } from '@ant-design/icons'
 import { chapterStatusTag, displayValue, wc } from './utils'
@@ -269,6 +272,7 @@ export function WorkspaceCenter({
   proseEditorRef,
   saveStatus,
   planning,
+  incubatingOriginal,
   generatingProse,
   generatingSceneCards,
   diagnosticsLoading,
@@ -277,6 +281,9 @@ export function WorkspaceCenter({
   onRunPlan,
   onCreateOutline,
   onCreateChapter,
+  onRunOriginalIncubator,
+  onOpenReferenceConfig,
+  onOpenWritingBibleEditor,
   onGenerateCurrentChapterProse,
   onGenerateSceneCards,
   onOpenGenerationDiagnostics,
@@ -302,6 +309,7 @@ export function WorkspaceCenter({
   proseEditorRef: React.MutableRefObject<EditorView | null>
   saveStatus: SaveStatus
   planning: boolean
+  incubatingOriginal: boolean
   generatingProse: boolean
   generatingSceneCards: boolean
   diagnosticsLoading: boolean
@@ -310,6 +318,9 @@ export function WorkspaceCenter({
   onRunPlan: () => void
   onCreateOutline: () => void
   onCreateChapter: () => void
+  onRunOriginalIncubator: () => void
+  onOpenReferenceConfig: () => void
+  onOpenWritingBibleEditor: () => void
   onGenerateCurrentChapterProse: () => void
   onGenerateSceneCards: () => void
   onOpenGenerationDiagnostics: () => void
@@ -329,25 +340,53 @@ export function WorkspaceCenter({
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: '#fafbfc' }}>
       {isEmptyProject && (
         <div style={{ flex: 1, display: 'grid', placeItems: 'center', padding: 32 }}>
-          <div style={{ maxWidth: 640, textAlign: 'center' }}>
-            <div style={{ fontSize: 56, marginBottom: 16 }}>🚀</div>
-            <Title level={3}>欢迎开始创作《{selectedProject?.title}》</Title>
+          <div style={{ maxWidth: 860, width: '100%' }}>
+            <div style={{ textAlign: 'center', marginBottom: 24 }}>
+              <Title level={3} style={{ marginBottom: 8 }}>开始创作《{selectedProject?.title}》</Title>
+              <Text type="secondary">
+                先选择原创或参考路线，再建立写作圣经、章节规划和正文生产流水线。
+              </Text>
+            </div>
             <Text type="secondary" style={{ display: 'block', marginBottom: 32 }}>
-              你的小说项目已创建。选择以下任一路径开始：
+              推荐按以下路径起步；后续左侧生产向导会持续提示下一步。
             </Text>
             <Row gutter={24} justify="center">
               {[
-                { icon: '🤖', title: 'AI 一键初始化', desc: '自动生成世界观、角色、大纲', btn: <Button type="primary" loading={planning} onClick={onRunPlan}>开始规划</Button> },
-                { icon: '✏️', title: '手动创建', desc: '从大纲开始逐步构建', btn: <Button onClick={onCreateOutline}>创建大纲</Button> },
-                { icon: '📝', title: '直接写第一章', desc: '跳过规划直接写正文', btn: <Button onClick={onCreateChapter}>新增章节</Button> },
+                {
+                  icon: <ExperimentOutlined />,
+                  title: '原创孵化',
+                  desc: '从题材定位、读者承诺、世界观、主角和前 30 章章纲开始。',
+                  btn: <Button type="primary" loading={incubatingOriginal} onClick={onRunOriginalIncubator}>生成原创方案</Button>,
+                },
+                {
+                  icon: <BookOutlined />,
+                  title: '参考仿写',
+                  desc: '先配置参考作品，提炼节奏、结构和爽点模型，再进入安全迁移。',
+                  btn: <Button onClick={onOpenReferenceConfig}>配置参考作品</Button>,
+                },
+                {
+                  icon: <SettingOutlined />,
+                  title: '手动起步',
+                  desc: '人工创建大纲、写作圣经或第一章，适合已有完整构思的项目。',
+                  btn: (
+                    <Space>
+                      <Button loading={planning} onClick={onRunPlan}>AI 规划</Button>
+                      <Button onClick={onOpenWritingBibleEditor}>写作圣经</Button>
+                      <Button onClick={onCreateOutline}>创建大纲</Button>
+                      <Button onClick={onCreateChapter}>第一章</Button>
+                    </Space>
+                  ),
+                },
               ].map(card => (
-                <Col key={card.title} xs={22} sm={12}>
-                  <Card hoverable style={{ borderRadius: 16, height: '100%' }}
-                    bodyStyle={{ padding: 24, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
-                    <div style={{ fontSize: 36, marginBottom: 8 }}>{card.icon}</div>
-                    <Title level={5}>{card.title}</Title>
-                    <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>{card.desc}</Text>
+                <Col key={card.title} xs={24} md={8}>
+                  <Card hoverable style={{ borderRadius: 8, height: '100%' }}
+                    styles={{ body: { padding: 20, display: 'flex', flexDirection: 'column', height: '100%' } }}>
+                    <div style={{ fontSize: 28, color: '#1677ff', marginBottom: 12 }}>{card.icon}</div>
+                    <Title level={5} style={{ marginTop: 0 }}>{card.title}</Title>
+                    <Text type="secondary" style={{ display: 'block', marginBottom: 18, minHeight: 66 }}>{card.desc}</Text>
+                    <div style={{ marginTop: 'auto' }}>
                     {card.btn}
+                    </div>
                   </Card>
                 </Col>
               ))}
