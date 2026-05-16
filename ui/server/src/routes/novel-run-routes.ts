@@ -335,12 +335,18 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
                 : run.run_type === 'generate_prose' ? '正文生成'
                   : run.run_type === 'original_incubation' ? '原创孵化'
                     : run.run_type === 'plan' ? '全案规划'
-                      : run.run_type === 'release_repair_queue' ? '发布修复队列'
+                      : run.run_type === 'creative_command' ? '创作指令'
+                        : run.run_type === 'release_repair_queue' ? '发布修复队列'
                         : run.run_type === 'release_quality_batch' ? '发布质检批量任务'
                           : run.run_type === 'release_similarity_batch' ? '发布相似度批量任务'
-                            : run.run_type === 'regression_benchmark' ? '回归基准'
-                              : run.run_type === 'ab_experiment' ? 'A/B 实验'
-                                : run.run_type === 'ab_sandbox' ? 'A/B 沙盒实写'
+                              : run.run_type === 'regression_benchmark' ? '回归基准'
+                                : run.run_type === 'ab_experiment' ? 'A/B 实验'
+                                  : run.run_type === 'ab_sandbox' ? 'A/B 沙盒实写'
+                                    : run.run_type === 'ab_sandbox_apply' ? 'A/B 沙盒采纳'
+                                      : run.run_type === 'mechanical_qa' ? '机械质检'
+                                        : run.run_type === 'propagation_debt' ? '传播债务'
+                                          : run.run_type === 'project_backup' ? '项目备份'
+                                            : run.run_type === 'genre_template_apply' ? '类型模板'
                       : run.run_type,
           step_name: run.step_name,
           status: run.status,
@@ -369,6 +375,7 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
           'generate_prose',
           'original_incubation',
           'plan',
+          'creative_command',
           'agent_execute',
           'repair',
           'release_repair_queue',
@@ -377,6 +384,11 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
           'regression_benchmark',
           'ab_experiment',
           'ab_sandbox',
+          'ab_sandbox_apply',
+          'mechanical_qa',
+          'propagation_debt',
+          'project_backup',
+          'genre_template_apply',
         ].includes(run.run_type))
         .map(normalizeRun)
       const active = tasks.filter(task => ['queued', 'ready', 'running', 'paused', 'needs_approval'].includes(task.status))

@@ -74,6 +74,9 @@ export default function NovelProjectWorkspace() {
   const [writingBibleOpen, setWritingBibleOpen] = useState(false)
   const [storyStateOpen, setStoryStateOpen] = useState(false)
   const [commercialToolsOpen, setCommercialToolsOpen] = useState(false)
+  const [creativeCommandOpen, setCreativeCommandOpen] = useState(false)
+  const [creativeCommandText, setCreativeCommandText] = useState('')
+  const [creativeCommandPlan, setCreativeCommandPlan] = useState<any | null>(null)
   const [chapterGroupExecutingId, setChapterGroupExecutingId] = useState<number | null>(null)
   const [releaseRepairExecutingId, setReleaseRepairExecutingId] = useState<number | null>(null)
   const [commercialToolLoading, setCommercialToolLoading] = useState('')
@@ -1828,6 +1831,259 @@ export default function NovelProjectWorkspace() {
     }
   }
 
+  const runMechanicalQa = async () => {
+    setCommercialToolLoading('mechanicalQa')
+    try {
+      const res = await apiClient.post(`/novel/projects/${projectId}/mechanical-qa/run`)
+      const report = res.data?.report || {}
+      await loadProjectModules()
+      await loadProductionTasks()
+      Modal.info({
+        title: '机械质检规则引擎',
+        width: 920,
+        content: (
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Space wrap>
+              <Tag color={Number(report.score || 0) >= 85 ? 'green' : Number(report.score || 0) >= 70 ? 'gold' : 'red'} bordered={false}>总分 {report.score ?? '-'}</Tag>
+              <Tag color={(report.summary?.high || 0) > 0 ? 'red' : 'default'} bordered={false}>高危 {report.summary?.high || 0}</Tag>
+              <Tag color={(report.summary?.medium || 0) > 0 ? 'gold' : 'default'} bordered={false}>中危 {report.summary?.medium || 0}</Tag>
+              <Tag bordered={false}>问题 {report.summary?.issue_count || 0}</Tag>
+            </Space>
+            {Array.isArray(report.next_actions) && report.next_actions.length > 0 && (
+              <Card size="small" title="建议">
+                <List size="small" dataSource={report.next_actions} renderItem={(item: string) => <List.Item>{item}</List.Item>} />
+              </Card>
+            )}
+            <Card size="small" title="问题清单">
+              <List
+                size="small"
+                dataSource={(report.issues || []).slice(0, 80)}
+                renderItem={(issue: any) => (
+                  <List.Item
+                    actions={issue.chapter_id ? [<Button key="open" size="small" type="link" onClick={() => { Modal.destroyAll(); void selectChapter(issue.chapter_id) }}>打开</Button>] : undefined}
+                  >
+                    <List.Item.Meta
+                      title={<Space><Tag color={issue.severity === 'high' ? 'red' : issue.severity === 'medium' ? 'gold' : 'default'} bordered={false}>{issue.severity}</Tag><Text>第{issue.chapter_no}章 {issue.message}</Text></Space>}
+                      description={issue.title}
+                    />
+                  </List.Item>
+                )}
+              />
+            </Card>
+          </Space>
+        ),
+      })
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '机械质检失败')
+    } finally {
+      setCommercialToolLoading('')
+    }
+  }
+
+  const refreshPropagationDebt = async () => {
+    setCommercialToolLoading('propagationDebt')
+    try {
+      const res = await apiClient.post(`/novel/projects/${projectId}/propagation-debt/refresh`)
+      const report = res.data?.report || {}
+      setSelectedProject((prev: any) => res.data?.project || prev)
+      await loadProjectModules()
+      await loadProductionTasks()
+      Modal.info({
+        title: '传播债务队列',
+        width: 920,
+        content: (
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Space wrap>
+              <Tag color={Number(report.score || 0) >= 85 ? 'green' : Number(report.score || 0) >= 70 ? 'gold' : 'red'} bordered={false}>健康度 {report.score ?? '-'}</Tag>
+              <Tag color={(report.high_count || 0) > 0 ? 'red' : 'default'} bordered={false}>高危 {report.high_count || 0}</Tag>
+              <Tag bordered={false}>活跃债务 {report.active_count || 0}</Tag>
+              <Tag bordered={false}>已解决 {report.resolved_count || 0}</Tag>
+            </Space>
+            <Card size="small" title="待处理">
+              <List
+                size="small"
+                dataSource={(report.debts || []).slice(0, 80)}
+                locale={{ emptyText: '暂无传播债务' }}
+                renderItem={(debt: any) => (
+                  <List.Item
+                    actions={[
+                      debt.affected?.chapter_id ? <Button key="open-id" size="small" type="link" onClick={() => { Modal.destroyAll(); void selectChapter(debt.affected.chapter_id) }}>打开</Button> : null,
+                      debt.affected?.chapter_no ? <Button key="open-no" size="small" type="link" onClick={() => {
+                        const chapter = chapters.find(ch => Number(ch.chapter_no) === Number(debt.affected.chapter_no))
+                        if (chapter) { Modal.destroyAll(); void selectChapter(chapter.id) }
+                      }}>定位</Button> : null,
+                    ].filter(Boolean) as any}
+                  >
+                    <List.Item.Meta
+                      title={<Space><Tag color={debt.severity === 'high' ? 'red' : debt.severity === 'medium' ? 'gold' : 'default'} bordered={false}>{debt.severity}</Tag><Text>{debt.title}</Text></Space>}
+                      description={<Space direction="vertical" size={2}><Text type="secondary">{debt.message}</Text><Text>{debt.next_action}</Text></Space>}
+                    />
+                  </List.Item>
+                )}
+              />
+            </Card>
+          </Space>
+        ),
+      })
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '传播债务刷新失败')
+    } finally {
+      setCommercialToolLoading('')
+    }
+  }
+
+  const openModelDiagnostics = async () => {
+    setCommercialToolLoading('modelDiagnostics')
+    try {
+      const res = await apiClient.get(`/novel/projects/${projectId}/model-diagnostics`)
+      const report = res.data?.report || {}
+      Modal.info({
+        title: '模型服务诊断',
+        width: 960,
+        content: (
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Space wrap>
+              <Tag color="blue" bordered={false}>模型 {report.model_count || 0}</Tag>
+              <Tag color="green" bordered={false}>健康 {report.healthy_count || 0}</Tag>
+              <Tag color={(report.ready_count || 0) > 0 ? 'green' : 'gold'} bordered={false}>可生产 {report.ready_count || 0}</Tag>
+            </Space>
+            {Array.isArray(report.next_actions) && report.next_actions.length > 0 && (
+              <Alert type="warning" showIcon message={report.next_actions.join('；')} />
+            )}
+            <Card size="small" title="模型列表">
+              <List
+                size="small"
+                dataSource={(report.rows || []).slice(0, 20)}
+                renderItem={(row: any) => (
+                  <List.Item>
+                    <List.Item.Meta
+                      title={<Space wrap><Text strong>{row.display_name || row.model_name}</Text><Tag color={row.score >= 70 ? 'green' : row.score >= 45 ? 'gold' : 'red'} bordered={false}>{row.score}分</Tag><Tag bordered={false}>{row.health_status}</Tag><Tag bordered={false}>{row.provider}</Tag></Space>}
+                      description={<Space wrap><Tag bordered={false}>正文 {row.recommendation?.draft ? '可用' : '谨慎'}</Tag><Tag bordered={false}>审稿 {row.recommendation?.review ? '可用' : '不可用'}</Tag><Tag bordered={false}>长上下文 {row.recommendation?.long_context ? '是' : '未知'}</Tag>{row.recommendation?.risk && <Text type="warning">{row.recommendation.risk}</Text>}</Space>}
+                    />
+                  </List.Item>
+                )}
+              />
+            </Card>
+            {(report.recent_failures || []).length > 0 && (
+              <Card size="small" title="近期失败">
+                <List size="small" dataSource={report.recent_failures} renderItem={(row: any) => <List.Item><Text>{row.run_type} / {row.step_name}：{row.error}</Text></List.Item>} />
+              </Card>
+            )}
+          </Space>
+        ),
+      })
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '模型诊断失败')
+    } finally {
+      setCommercialToolLoading('')
+    }
+  }
+
+  const openGenreTemplates = async () => {
+    setCommercialToolLoading('genreTemplates')
+    try {
+      const res = await apiClient.get('/novel/genre-templates')
+      const templates = res.data?.templates || []
+      Modal.info({
+        title: '类型模板方法库',
+        width: 900,
+        content: (
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Alert type="info" showIcon message="模板会写入写作圣经，作为无参考原创或类型化仿写的基础方法。已有字段不会被空值覆盖。" />
+            <List
+              size="small"
+              dataSource={templates}
+              renderItem={(item: any) => (
+                <List.Item
+                  actions={[
+                    <Button key="apply" size="small" type="primary" onClick={async () => {
+                      try {
+                        const applyRes = await apiClient.post(`/novel/projects/${projectId}/genre-templates/${item.id}/apply`)
+                        setSelectedProject((prev: any) => applyRes.data?.project || prev)
+                        await loadProjectModules()
+                        message.success(`已应用模板：${item.name}`)
+                      } catch (error: any) {
+                        message.error(error?.response?.data?.error || error?.message || '模板应用失败')
+                      }
+                    }}>应用</Button>,
+                  ]}
+                >
+                  <List.Item.Meta
+                    title={<Space><Text strong>{item.name}</Text><Tag bordered={false}>{item.genre}</Tag></Space>}
+                    description={<Space direction="vertical" size={2}><Text>{item.promise}</Text><Text type="secondary">节拍：{(item.structure?.chapter_beat || []).join(' -> ')}</Text></Space>}
+                  />
+                </List.Item>
+              )}
+            />
+          </Space>
+        ),
+      })
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '类型模板加载失败')
+    } finally {
+      setCommercialToolLoading('')
+    }
+  }
+
+  const createBackupSnapshot = async () => {
+    setCommercialToolLoading('backup')
+    try {
+      const res = await apiClient.post(`/novel/projects/${projectId}/backup-snapshot`)
+      const manifest = res.data?.manifest || {}
+      await loadProjectModules()
+      await loadProductionTasks()
+      Modal.success({
+        title: '项目备份快照已创建',
+        content: (
+          <Space direction="vertical" size={8}>
+            <Text>快照：{manifest.snapshot_id}</Text>
+            <Text type="secondary">指纹：{manifest.text_hash}</Text>
+            <Space wrap>
+              <Tag bordered={false}>章节 {manifest.counts?.chapters || 0}</Tag>
+              <Tag bordered={false}>大纲 {manifest.counts?.outlines || 0}</Tag>
+              <Tag bordered={false}>角色 {manifest.counts?.characters || 0}</Tag>
+              <Tag bordered={false}>审稿 {manifest.counts?.reviews || 0}</Tag>
+            </Space>
+          </Space>
+        ),
+      })
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '创建备份快照失败')
+    } finally {
+      setCommercialToolLoading('')
+    }
+  }
+
+  const downloadBackupPackage = () => {
+    const baseURL = String(apiClient.defaults.baseURL || '').replace(/\/$/, '')
+    const link = document.createElement('a')
+    link.href = `${baseURL}/novel/projects/${projectId}/backup-package`
+    link.target = '_blank'
+    link.rel = 'noopener noreferrer'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+  }
+
+  const runCreativeCommand = async (execute = false) => {
+    if (!creativeCommandText.trim()) return message.warning('请输入创作指令')
+    setCommercialToolLoading('creativeCommand')
+    try {
+      const res = await apiClient.post(`/novel/projects/${projectId}/creative-command`, {
+        command: creativeCommandText,
+        execute,
+      })
+      setCreativeCommandPlan(res.data || null)
+      await loadProductionTasks()
+      if (execute) await loadProjectModules()
+      message.success(execute ? '指令已执行可安全执行的部分' : '指令已解析')
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '创作指令处理失败')
+    } finally {
+      setCommercialToolLoading('')
+    }
+  }
+
   const openRunQueue = async () => {
     await runCommercialTool('queue', '后台任务队列', async () => {
       const res = await apiClient.get(`/novel/projects/${projectId}/run-queue`)
@@ -2628,6 +2884,7 @@ export default function NovelProjectWorkspace() {
           setQualityBenchmarkOpen(false)
           void selectChapter(chapterId)
         }}
+        onChanged={() => { void loadProjectModules() }}
       />
 
       <ReviewAnnotationsDrawer
@@ -2683,6 +2940,12 @@ export default function NovelProjectWorkspace() {
             message="这些工具用于生产治理：稳定性、成本、质量、审批、相似度、滚动规划和提示词版本。"
             description="结果会保存到运行记录或审稿记录中，适合在批量生成前后做检查。"
           />
+          <Card size="small" title="自然语言创作指令台">
+            <Space direction="vertical" size={8} style={{ width: '100%' }}>
+              <Text type="secondary" style={{ fontSize: 12 }}>输入一句操作意图，系统会解析成生产步骤；低风险检查类任务可以直接执行。</Text>
+              <Button block type="primary" loading={commercialToolLoading === 'creativeCommand'} onClick={() => setCreativeCommandOpen(true)}>打开创作指令台</Button>
+            </Space>
+          </Card>
           <Card size="small" title="批量生产模式">
             <Space wrap align="center">
               <Text type="secondary">章节群执行策略</Text>
@@ -2709,6 +2972,7 @@ export default function NovelProjectWorkspace() {
                 <Button block loading={commercialToolLoading === 'queueStop'} onClick={stopRunQueueWorker}>停止后台 worker</Button>
                 <Button block loading={commercialToolLoading === 'queueRecover'} onClick={recoverRunQueue}>恢复后台队列</Button>
                 <Button block loading={commercialToolLoading === 'metrics'} onClick={openProductionMetrics}>成本质量仪表盘</Button>
+                <Button block loading={commercialToolLoading === 'modelDiagnostics'} onClick={openModelDiagnostics}>模型服务诊断</Button>
                 <Button block onClick={() => setAgentAuditOpen(true)}>Agent 调用审计</Button>
                 <Button block loading={commercialToolLoading === 'approval'} onClick={openApprovalPolicyEditor}>审批关卡策略</Button>
               </Space>
@@ -2720,6 +2984,8 @@ export default function NovelProjectWorkspace() {
                 <Button block onClick={() => setReviewAnnotationsOpen(true)}>章节审阅批注</Button>
                 <Button block onClick={() => setConsistencyGraphOpen(true)}>全书一致性图谱</Button>
                 <Button block loading={commercialToolLoading === 'continuityAudit'} onClick={openContinuityAudit}>全书连续性检查</Button>
+                <Button block loading={commercialToolLoading === 'mechanicalQa'} onClick={runMechanicalQa}>机械质检规则引擎</Button>
+                <Button block loading={commercialToolLoading === 'propagationDebt'} onClick={refreshPropagationDebt}>传播债务队列</Button>
                 <Button block loading={commercialToolLoading === 'benchmark'} onClick={runQualityBenchmark}>项目质量基准测试</Button>
                 <Button block loading={commercialToolLoading === 'versionReview'} onClick={runVersionReviewForActiveChapter}>当前章版本评审</Button>
                 <Button block loading={commercialToolLoading === 'similarity'} onClick={runSimilarityForActiveChapter}>当前章相似度检测</Button>
@@ -2732,6 +2998,7 @@ export default function NovelProjectWorkspace() {
                 <Button block loading={commercialToolLoading === 'rollingPlan'} onClick={runRollingPlan}>未来 10 章滚动规划</Button>
                 <Button block loading={commercialToolLoading === 'referenceDiagnosis'} onClick={openReferenceKnowledgeDiagnosis}>参考知识诊断</Button>
                 <Button block onClick={() => { setCommercialToolsOpen(false); setReferenceEngineeringOpen(true) }}>多参考融合控制台</Button>
+                <Button block loading={commercialToolLoading === 'genreTemplates'} onClick={openGenreTemplates}>类型模板方法库</Button>
               </Space>
             </Card>
             <Card size="small" title="Agent 配置">
@@ -2744,11 +3011,74 @@ export default function NovelProjectWorkspace() {
             <Card size="small" title="交付导出">
               <Space direction="vertical" style={{ width: '100%' }}>
                 <Button block onClick={() => setExportDeliveryOpen(true)}>导出 TXT / Markdown</Button>
+                <Button block loading={commercialToolLoading === 'backup'} onClick={createBackupSnapshot}>创建项目备份快照</Button>
+                <Button block onClick={downloadBackupPackage}>下载完整项目包 JSON</Button>
                 <Button block onClick={() => setQualityBenchmarkOpen(true)}>导出前质量基准</Button>
                 <Button block onClick={() => setConsistencyGraphOpen(true)}>导出前一致性图谱</Button>
               </Space>
             </Card>
           </div>
+        </Space>
+      </Modal>
+
+      <Modal
+        open={creativeCommandOpen}
+        title="自然语言创作指令台"
+        width={820}
+        onCancel={() => setCreativeCommandOpen(false)}
+        footer={(
+          <Space>
+            <Button onClick={() => setCreativeCommandOpen(false)}>关闭</Button>
+            <Button loading={commercialToolLoading === 'creativeCommand'} onClick={() => { void runCreativeCommand(false) }}>解析指令</Button>
+            <Button type="primary" loading={commercialToolLoading === 'creativeCommand'} onClick={() => { void runCreativeCommand(true) }}>执行安全步骤</Button>
+          </Space>
+        )}
+      >
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Alert
+            type="info"
+            showIcon
+            message="生成、发布、覆盖正文这类高风险动作只会给出操作计划，不会绕过现有确认流程。"
+          />
+          <Input.TextArea
+            rows={4}
+            value={creativeCommandText}
+            onChange={(event) => setCreativeCommandText(event.target.value)}
+            placeholder="例如：帮我检查全书有没有水文和重复，再看一下状态机是否落后；或者：我想继续写第12章，但先确认材料是否完整。"
+          />
+          {creativeCommandPlan && (
+            <Card size="small" title="解析结果">
+              <Space direction="vertical" size={10} style={{ width: '100%' }}>
+                <Space wrap>
+                  <Tag color="blue" bordered={false}>置信度 {Math.round(Number(creativeCommandPlan.plan?.confidence || 0) * 100)}%</Tag>
+                  <Tag bordered={false}>下一入口 {creativeCommandPlan.plan?.next_ui || '-'}</Tag>
+                  <Tag color={(creativeCommandPlan.executed || []).length ? 'green' : 'default'} bordered={false}>已执行 {(creativeCommandPlan.executed || []).length}</Tag>
+                </Space>
+                {(creativeCommandPlan.plan?.warnings || []).map((item: string) => <Alert key={item} type="warning" showIcon message={item} />)}
+                <List
+                  size="small"
+                  dataSource={creativeCommandPlan.plan?.actions || []}
+                  renderItem={(action: any) => (
+                    <List.Item>
+                      <List.Item.Meta
+                        title={<Space><Text strong>{action.label}</Text><Tag color={action.executable ? 'green' : 'gold'} bordered={false}>{action.executable ? '可安全执行' : '需人工确认'}</Tag><Tag bordered={false}>{action.method}</Tag></Space>}
+                        description={<Space direction="vertical" size={2}><Text type="secondary">{action.reason}</Text><Text type="secondary" style={{ fontSize: 12 }}>{action.endpoint}</Text></Space>}
+                      />
+                    </List.Item>
+                  )}
+                />
+                {(creativeCommandPlan.executed || []).length > 0 && (
+                  <Card size="small" title="执行结果">
+                    <List
+                      size="small"
+                      dataSource={creativeCommandPlan.executed}
+                      renderItem={(item: any) => <List.Item><Text>{item.key}：{item.status}{item.report?.score !== undefined ? `，评分 ${item.report.score}` : ''}</Text></List.Item>}
+                    />
+                  </Card>
+                )}
+              </Space>
+            </Card>
+          )}
         </Space>
       </Modal>
 

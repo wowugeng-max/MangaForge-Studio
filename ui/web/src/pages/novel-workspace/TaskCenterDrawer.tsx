@@ -30,6 +30,7 @@ function statusTag(status?: string) {
 function runTypeLabel(type?: string) {
   const map: Record<string, string> = {
     plan: '全案规划',
+    creative_command: '创作指令',
     agent_execute: 'Agent 链',
     generate_prose: '正文生成',
     batch_generate_prose: '批量正文生成',
@@ -43,13 +44,18 @@ function runTypeLabel(type?: string) {
     editor_revision: '编辑修订',
     book_review: '全书总检',
     quality_benchmark: '质量基准',
+    mechanical_qa: '机械质检',
+    propagation_debt: '传播债务',
     regression_benchmark: '回归基准',
     ab_experiment: 'A/B 实验',
     ab_sandbox: 'A/B 沙盒实写',
+    ab_sandbox_apply: 'A/B 沙盒采纳',
     rolling_plan: '滚动规划',
     release_repair_queue: '发布修复队列',
     release_quality_batch: '发布质检批量任务',
     release_similarity_batch: '发布相似度批量任务',
+    project_backup: '项目备份',
+    genre_template_apply: '类型模板',
   }
   return map[String(type || '')] || type || '任务'
 }

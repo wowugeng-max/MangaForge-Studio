@@ -1,5 +1,5 @@
 import React from 'react'
-import { Alert, Button, Card, Empty, Input, List, message, Modal, Progress, Space, Table, Tag, Typography } from 'antd'
+import { Alert, Button, Card, Checkbox, Empty, Input, List, message, Modal, Progress, Space, Table, Tag, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { BarChartOutlined, FileSearchOutlined, ReloadOutlined } from '@ant-design/icons'
 import apiClient from '../../api/client'
@@ -81,6 +81,13 @@ function runMatchesChapter(run: any, chapter: any) {
     || output.includes(`"id":${chapter.id}`)
 }
 
+function splitParagraphs(text?: string) {
+  return String(text || '')
+    .split(/\n+/)
+    .map(item => item.trim())
+    .filter(Boolean)
+}
+
 export function QualityBenchmarkModal({
   open,
   projectId,
@@ -94,6 +101,7 @@ export function QualityBenchmarkModal({
   onRunBenchmark,
   onRefreshContinuity,
   onSelectChapter,
+  onChanged,
 }: {
   open: boolean
   projectId: number
@@ -107,6 +115,7 @@ export function QualityBenchmarkModal({
   onRunBenchmark: () => void
   onRefreshContinuity: () => void
   onSelectChapter: (chapterId: number) => void
+  onChanged?: () => void
 }) {
   const [keyword, setKeyword] = React.useState('')
   const [regressionLoading, setRegressionLoading] = React.useState(false)
@@ -114,6 +123,8 @@ export function QualityBenchmarkModal({
   const [abLoading, setAbLoading] = React.useState(false)
   const [abData, setAbData] = React.useState<any | null>(null)
   const [candidateConfigText, setCandidateConfigText] = React.useState('')
+  const [sandboxApplyLoading, setSandboxApplyLoading] = React.useState(false)
+  const [paragraphPicker, setParagraphPicker] = React.useState<any | null>(null)
 
   const loadRegressionSuite = React.useCallback(async () => {
     if (!open || !projectId) return
@@ -242,6 +253,55 @@ export function QualityBenchmarkModal({
       setAbLoading(false)
     }
   }
+
+  const applySandboxDraft = async (experiment: any, draft: any, mode: 'full' | 'paragraphs', paragraphIndexes: number[] = []) => {
+    if (!projectId || !draft?.chapter_id) return
+    setSandboxApplyLoading(true)
+    try {
+      await apiClient.post(`/novel/projects/${projectId}/ab-experiments/${experiment.id}/sandbox/apply`, {
+        chapter_id: draft.chapter_id,
+        mode,
+        paragraph_indexes: paragraphIndexes,
+      })
+      message.success(mode === 'full' ? '沙盒稿已整章采纳' : `已采纳 ${paragraphIndexes.length} 个候选段落`)
+      setParagraphPicker(null)
+      await loadAbExperiments()
+      onChanged?.()
+      onSelectChapter(draft.chapter_id)
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '沙盒稿采纳失败')
+    } finally {
+      setSandboxApplyLoading(false)
+    }
+  }
+
+  const confirmApplyFullSandbox = (experiment: any, draft: any) => {
+    Modal.confirm({
+      title: `采纳第${draft.chapter_no}章沙盒稿？`,
+      content: '采纳后会写入当前章节正文，并自动保留原章节版本，方便回滚。',
+      okText: '整章采纳',
+      cancelText: '取消',
+      onOk: () => applySandboxDraft(experiment, draft, 'full'),
+    })
+  }
+
+  const openParagraphPicker = (experiment: any, draft: any) => {
+    const chapter = chapters.find(item => Number(item.id) === Number(draft.chapter_id))
+    const current = splitParagraphs(chapter?.chapter_text)
+    const candidate = splitParagraphs(draft.candidate_text)
+    const changedIndexes = candidate
+      .map((paragraph, index) => ({ paragraph, index }))
+      .filter(item => item.paragraph !== (current[item.index] || ''))
+      .map(item => item.index)
+    setParagraphPicker({
+      experiment,
+      draft,
+      current,
+      candidate,
+      selected: changedIndexes.length ? changedIndexes.slice(0, 80) : candidate.map((_: string, index: number) => index).slice(0, 80),
+    })
+  }
+
   const reviewBuckets = React.useMemo(() => {
     const byChapter = new Map<number, any[]>()
     const byChapterNo = new Map<number, any[]>()
@@ -412,6 +472,7 @@ export function QualityBenchmarkModal({
   ]
 
   return (
+    <>
     <Modal
       open={open}
       title={<Space><BarChartOutlined />质量评测基准面板</Space>}
@@ -596,6 +657,12 @@ export function QualityBenchmarkModal({
                                       <Tag color={draft.status === 'success' ? 'green' : 'red'} bordered={false}>{draft.status}</Tag>
                                       {draft.diff && <Tag bordered={false}>字数 {draft.diff.after_chars} / 变化 {draft.diff.delta_chars >= 0 ? '+' : ''}{draft.diff.delta_chars}</Tag>}
                                       {draft.projected_score && <Tag color={scoreColor(draft.projected_score)} bordered={false}>投影 {draft.projected_score}</Tag>}
+                                      {draft.status === 'success' && (
+                                        <>
+                                          <Button size="small" type="link" loading={sandboxApplyLoading} onClick={() => confirmApplyFullSandbox(experiment, draft)}>整章采纳</Button>
+                                          <Button size="small" type="link" loading={sandboxApplyLoading} onClick={() => openParagraphPicker(experiment, draft)}>段落采纳</Button>
+                                        </>
+                                      )}
                                     </Space>
                                     <Paragraph style={{ marginBottom: 0, marginTop: 4, fontSize: 12 }} ellipsis={{ rows: 2, expandable: true }}>
                                       {draft.candidate_preview || draft.error || '无预览'}
@@ -625,5 +692,59 @@ export function QualityBenchmarkModal({
         />
       </Space>
     </Modal>
+    <Modal
+      open={Boolean(paragraphPicker)}
+      title={paragraphPicker?.draft ? `选择采纳段落：第${paragraphPicker.draft.chapter_no}章` : '选择采纳段落'}
+      width={980}
+      onCancel={() => setParagraphPicker(null)}
+      confirmLoading={sandboxApplyLoading}
+      okText="采纳所选段落"
+      cancelText="取消"
+      onOk={() => {
+        if (!paragraphPicker) return
+        return applySandboxDraft(paragraphPicker.experiment, paragraphPicker.draft, 'paragraphs', paragraphPicker.selected || [])
+      }}
+    >
+      {paragraphPicker && (
+        <Space direction="vertical" size={10} style={{ width: '100%' }}>
+          <Alert
+            type="info"
+            showIcon
+            message="只会替换勾选的候选段落，未勾选段落保持当前正文；采纳前会自动保留章节旧版本。"
+          />
+          <Checkbox.Group
+            style={{ width: '100%' }}
+            value={paragraphPicker.selected || []}
+            onChange={(values) => setParagraphPicker((prev: any) => prev ? { ...prev, selected: values.map(Number) } : prev)}
+          >
+            <Space direction="vertical" size={8} style={{ width: '100%', maxHeight: 520, overflow: 'auto', paddingRight: 4 }}>
+              {(paragraphPicker.candidate || []).map((paragraph: string, index: number) => {
+                const current = paragraphPicker.current?.[index] || ''
+                const changed = paragraph !== current
+                return (
+                  <Card key={index} size="small" styles={{ body: { padding: 10 } }}>
+                    <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                      <Space wrap>
+                        <Checkbox value={index}>第 {index + 1} 段</Checkbox>
+                        <Tag color={changed ? 'gold' : 'default'} bordered={false}>{changed ? '有变化' : '无变化'}</Tag>
+                      </Space>
+                      {current && (
+                        <Paragraph style={{ marginBottom: 0, fontSize: 12, color: '#8c8c8c' }} ellipsis={{ rows: 2, expandable: true }}>
+                          当前：{current}
+                        </Paragraph>
+                      )}
+                      <Paragraph style={{ marginBottom: 0, fontSize: 13 }} ellipsis={{ rows: 3, expandable: true }}>
+                        候选：{paragraph}
+                      </Paragraph>
+                    </Space>
+                  </Card>
+                )
+              })}
+            </Space>
+          </Checkbox.Group>
+        </Space>
+      )}
+    </Modal>
+    </>
   )
 }

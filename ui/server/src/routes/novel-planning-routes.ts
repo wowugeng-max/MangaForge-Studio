@@ -8,6 +8,7 @@ import {
   listNovelReviews,
   listNovelRuns,
   listNovelWorldbuilding,
+  updateNovelChapter,
   updateNovelProject,
 } from '../novel'
 import { executeNovelAgent, generateNovelChapterProse } from '../llm'
@@ -304,6 +305,31 @@ function diffSandboxText(before: string, after: string) {
     after_paragraphs: afterParas.length,
     changed_paragraphs: changed,
   }
+}
+
+function splitSandboxParagraphs(text: string) {
+  return String(text || '')
+    .split(/\n+/)
+    .map(item => item.trim())
+    .filter(Boolean)
+}
+
+function mergeSandboxParagraphs(currentText: string, candidateText: string, paragraphIndexes: number[]) {
+  const current = splitSandboxParagraphs(currentText)
+  const candidate = splitSandboxParagraphs(candidateText)
+  const selected = new Set(paragraphIndexes.map(item => Number(item)).filter(item => Number.isInteger(item) && item >= 0))
+  const max = Math.max(current.length, candidate.length)
+  const merged: string[] = []
+  for (let index = 0; index < max; index += 1) {
+    if (selected.has(index) && candidate[index]) {
+      merged.push(candidate[index])
+    } else if (current[index]) {
+      merged.push(current[index])
+    } else if (candidate[index] && selected.has(index)) {
+      merged.push(candidate[index])
+    }
+  }
+  return merged.join('\n\n')
 }
 
 export function registerNovelPlanningRoutes(app: Express, ctx: PlanningRoutesContext) {
@@ -801,6 +827,88 @@ export function registerNovelPlanningRoutes(app: Express, ctx: PlanningRoutesCon
         reference_config: { ...(project.reference_config || {}), ab_experiments: updatedExperiments },
       } as any)
       res.json({ ok: true, experiment: nextExperiment, report, review: saved, project: updated })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.post('/api/novel/projects/:id/ab-experiments/:experimentId/sandbox/apply', async (req, res) => {
+    try {
+      const activeWorkspace = ctx.getWorkspace()
+      const project = await ctx.getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const experiments = asArray(project.reference_config?.ab_experiments)
+      const experiment = experiments.find((item: any) => item.id === req.params.experimentId)
+      if (!experiment) return res.status(404).json({ error: 'experiment not found' })
+      const sandbox = experiment.latest_sandbox || {}
+      const chapterId = Number(req.body?.chapter_id || 0)
+      const draft = asArray(sandbox.drafts).find((item: any) => Number(item.chapter_id || 0) === chapterId)
+      if (!draft) return res.status(404).json({ error: 'sandbox draft not found' })
+      if (draft.status !== 'success' || !draft.candidate_text) return res.status(409).json({ error: '沙盒稿不可采纳', draft })
+      const chapters = await listNovelChapters(activeWorkspace, project.id)
+      const chapter = chapters.find(item => Number(item.id) === chapterId)
+      if (!chapter) return res.status(404).json({ error: 'chapter not found' })
+
+      const mode = req.body?.mode === 'paragraphs' ? 'paragraphs' : 'full'
+      const paragraphIndexes = asArray(req.body?.paragraph_indexes).map(Number).filter(item => Number.isInteger(item) && item >= 0)
+      if (mode === 'paragraphs' && paragraphIndexes.length === 0) {
+        return res.status(400).json({ error: '段落采纳至少选择一个段落。' })
+      }
+      const nextText = mode === 'paragraphs'
+        ? mergeSandboxParagraphs(chapter.chapter_text || '', draft.candidate_text || '', paragraphIndexes)
+        : String(draft.candidate_text || '')
+      if (!nextText.trim()) return res.status(400).json({ error: '采纳后的正文为空。' })
+
+      const diff = diffSandboxText(chapter.chapter_text || '', nextText)
+      const updatedChapter = await updateNovelChapter(activeWorkspace, chapter.id, {
+        chapter_text: nextText,
+        scene_breakdown: mode === 'full' ? asArray(draft.scene_breakdown) : chapter.scene_breakdown,
+        continuity_notes: mode === 'full' ? asArray(draft.continuity_notes) : chapter.continuity_notes,
+        status: 'draft',
+      }, { versionSource: 'agent_execute' })
+      const application = {
+        applied_id: `sandbox-apply-${Date.now()}`,
+        sandbox_id: sandbox.sandbox_id || '',
+        experiment_id: experiment.id,
+        chapter_id: chapter.id,
+        chapter_no: chapter.chapter_no,
+        title: chapter.title || '',
+        mode,
+        paragraph_indexes: mode === 'paragraphs' ? paragraphIndexes : [],
+        diff,
+        applied_at: new Date().toISOString(),
+      }
+      const nextExperiment = {
+        ...experiment,
+        latest_sandbox: {
+          ...sandbox,
+          applications: [application, ...asArray(sandbox.applications)].slice(0, 20),
+        },
+        updated_at: new Date().toISOString(),
+      }
+      const saved = await createNovelReview(activeWorkspace, {
+        project_id: project.id,
+        review_type: 'ab_sandbox_apply',
+        status: 'ok',
+        summary: `采纳 A/B 沙盒稿：第${chapter.chapter_no}章，${mode === 'full' ? '整章' : `${paragraphIndexes.length} 个段落`}`,
+        issues: [],
+        payload: JSON.stringify({ application, draft_preview: compactText(draft.candidate_text || '', 800) }),
+      })
+      await appendNovelRun(activeWorkspace, {
+        project_id: project.id,
+        run_type: 'ab_sandbox_apply',
+        step_name: `${experiment.id}-chapter-${chapter.chapter_no}`,
+        status: 'success',
+        input_ref: JSON.stringify({ chapter_id: chapter.id, mode, paragraph_indexes: paragraphIndexes }),
+        output_ref: JSON.stringify({ application, review: saved, updated_chapter_id: updatedChapter?.id }),
+      })
+      const updatedProject = await updateNovelProject(activeWorkspace, project.id, {
+        reference_config: {
+          ...(project.reference_config || {}),
+          ab_experiments: experiments.map((item: any) => item.id === experiment.id ? nextExperiment : item),
+        },
+      } as any)
+      res.json({ ok: true, chapter: updatedChapter, application, experiment: nextExperiment, review: saved, project: updatedProject })
     } catch (error) {
       res.status(500).json({ error: String(error) })
     }
