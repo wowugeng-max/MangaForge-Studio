@@ -35,6 +35,9 @@ export function createNovelWritingService(ctx: {
   const buildSceneCardsPrompt = (project: any, contextPackage: any) => [
     '任务：为当前章节生成可人工确认的场景卡。场景卡是正文生成前的蓝图，不要写完整正文。',
     `作品标题：${project.title}`,
+    `目标章节：第${contextPackage?.chapter_target?.chapter_no || '?'}章《${contextPackage?.chapter_target?.title || '无标题'}》`,
+    '必须以 chapter_target.summary、chapter_target.conflict、chapter_target.ending_hook 为准重建本章场景卡。',
+    '如果上下文里已有 scene_cards 与本章目标不一致，视为旧草稿，必须忽略。',
     '',
     '【结构化上下文包】',
     JSON.stringify(contextPackage, null, 2).slice(0, 9000),
@@ -61,6 +64,27 @@ export function createNovelWritingService(ctx: {
     })).filter((card: any) => card.beat || card.purpose || card.title)
   }
 
+  const selectProseForChapter = (payload: any, chapter: any) => {
+    const targetNo = Number(chapter?.chapter_no || 0)
+    const proseArr = Array.isArray(payload?.prose_chapters) ? payload.prose_chapters : []
+    const matched = proseArr.find((item: any) => Number(item?.chapter_no || 0) === targetNo)
+    if (matched) return matched
+    if (proseArr.length === 1) {
+      const onlyNo = Number(proseArr[0]?.chapter_no || 0)
+      if (!onlyNo || onlyNo === targetNo) return proseArr[0]
+      throw new Error(`模型返回的正文章节与目标不一致：目标第${targetNo}章，返回第${onlyNo}章`)
+    }
+    if (proseArr.length > 1) {
+      const foundNos = proseArr.map((item: any) => item?.chapter_no).filter(Boolean).join('、') || '无'
+      throw new Error(`模型返回的正文章节与目标不一致：目标第${targetNo}章，返回章节号为：${foundNos}`)
+    }
+    const topLevelNo = Number(payload?.chapter_no || 0)
+    if (topLevelNo && topLevelNo !== targetNo) {
+      throw new Error(`模型返回的正文章节与目标不一致：目标第${targetNo}章，返回第${topLevelNo}章`)
+    }
+    return payload || {}
+  }
+
   const generateSceneCardsForChapter = async (activeWorkspace: string, project: any, contextPackage: any, modelId?: number) => {
     const stageModelId = ctx.production.getStageModelId(project, 'scene_cards', modelId)
     const result = await executeNovelAgent('outline-agent', project, {
@@ -71,9 +95,12 @@ export function createNovelWritingService(ctx: {
     return { result, sceneCards: normalizeSceneCards(payload) }
   }
 
-  const buildParagraphProseContext = (project: any, contextPackage: any, migrationPlan: any = null) => [
+  const buildParagraphProseContext = (project: any, contextPackage: any, migrationPlan: any = null, chapterDraft: any = null) => [
     '任务：按场景卡生成章节正文。请先在心中按场景组织段落，再输出完整正文。',
     `作品标题：${project.title}`,
+    chapterDraft?.chapter_no ? `目标章节：第${chapterDraft.chapter_no}章《${chapterDraft.title || '无标题'}》` : '',
+    chapterDraft?.chapter_no ? `只允许输出这一章的正文，不得混入其他章节内容。chapter_no 必须严格等于 ${chapterDraft.chapter_no}` : '',
+    '必须以 chapter_target.summary、chapter_target.conflict、chapter_target.ending_hook 和 scene_cards 为准；如果已有正文或旧场景分解与目标不一致，不得沿用。',
     '',
     '【结构化上下文包】',
     JSON.stringify(contextPackage, null, 2).slice(0, 12000),
@@ -88,8 +115,9 @@ export function createNovelWritingService(ctx: {
     '4. 保持 style_lock 中的人称、句长、对话比例、吐槽密度、爽点密度、描写浓度和禁用词约束。',
     '5. 只能学习参考作品的节奏、结构、爽点安排和信息密度；不得复制具体桥段、专有设定、原句、角色名和核心梗。',
     migrationPlan?.generation_prompt_addendum ? `6. ${migrationPlan.generation_prompt_addendum}` : '',
+    chapterDraft?.chapter_no ? `7. 本次只生成第${chapterDraft.chapter_no}章，不得输出其他章节或续章内容。` : '',
     '',
-    '输出 JSON，包含 prose_chapters 数组。数组第一项必须包含 chapter_no, title, chapter_text, scene_breakdown, continuity_notes。chapter_text 是完整正文，不要 markdown 标题。',
+    '输出 JSON，包含 prose_chapters 数组。数组只能有一项，且必须包含 chapter_no, title, chapter_text, scene_breakdown, continuity_notes。chapter_text 是完整正文，不要 markdown 标题。',
   ].filter(Boolean).join('\n')
 
   const buildStoryStatePrompt = (project: any, contextPackage: any, chapterText: string) => [
@@ -213,6 +241,18 @@ export function createNovelWritingService(ctx: {
     }
   }
 
+  const hasMeaningfulWritingBible = (value: any) => {
+    if (!value || typeof value !== 'object') return false
+    return Boolean(
+      String(value.promise || value.world_summary || '').trim() ||
+      (Array.isArray(value.world_rules) && value.world_rules.length > 0) ||
+      (Array.isArray(value.volume_plan) && value.volume_plan.length > 0) ||
+      (Array.isArray(value.characters) && value.characters.length > 0) ||
+      (value.mainline && Object.keys(value.mainline || {}).length > 0) ||
+      (value.style_lock && Object.values(value.style_lock || {}).some(item => Array.isArray(item) ? item.length > 0 : Boolean(String(item || '').trim())))
+    )
+  }
+
   const getStoredOrBuiltWritingBible = async (activeWorkspace: string, project: any) => {
     const [worldbuilding, characters, outlines, reviews] = await Promise.all([
       listNovelWorldbuilding(activeWorkspace, project.id),
@@ -220,7 +260,8 @@ export function createNovelWritingService(ctx: {
       listNovelOutlines(activeWorkspace, project.id),
       listNovelReviews(activeWorkspace, project.id),
     ])
-    return project.reference_config?.writing_bible || buildWritingBible(project, worldbuilding, characters, outlines, reviews)
+    const stored = project.reference_config?.writing_bible
+    return hasMeaningfulWritingBible(stored) ? stored : buildWritingBible(project, worldbuilding, characters, outlines, reviews)
   }
 
   const buildChapterContextPackage = async (
@@ -251,9 +292,9 @@ export function createNovelWritingService(ctx: {
     } catch {
       referencePreview = null
     }
-    const sceneCards = Array.isArray(chapter.scene_breakdown) && chapter.scene_breakdown.length
-      ? chapter.scene_breakdown
-      : (Array.isArray(chapter.scene_list) ? chapter.scene_list : [])
+    const sceneCards = Array.isArray(chapter.scene_list) && chapter.scene_list.length
+      ? chapter.scene_list
+      : (Array.isArray(chapter.scene_breakdown) ? chapter.scene_breakdown : [])
     const preflight = buildPreflightChecks(project, chapter, previousChapter, worldbuilding, characters, sceneCards, referencePreview, reviews)
     const styleLock = getStyleLock(project)
     const safetyPolicy = getSafetyPolicy(project)
@@ -499,20 +540,19 @@ export function createNovelWritingService(ctx: {
       prevChapters,
       contextPackage,
       migrationPlan,
-      paragraphTask: buildParagraphProseContext(project, contextPackage, migrationPlan),
+      paragraphTask: buildParagraphProseContext(project, contextPackage, migrationPlan, chapter),
     } as any, activeWorkspace, ctx.production.getStageModelId(project, 'draft', preferredModelId))
     const resultPayload = getNovelPayload(draftResult)
-    const proseArr = Array.isArray(resultPayload?.prose_chapters) ? resultPayload.prose_chapters : []
-    const firstProse = proseArr.length > 0 ? proseArr[0] : {}
-    const chapterText = resultPayload?.chapter_text || firstProse?.chapter_text
+    const targetProse = selectProseForChapter(resultPayload, chapter)
+    const chapterText = targetProse?.chapter_text || resultPayload?.chapter_text
     if ((draftResult as any).error || !chapterText) {
       await onStage('draft', { status: 'failed', error: String((draftResult as any).error || (draftResult as any).fallbackReason || '模型未返回正文') })
       throw new Error(String((draftResult as any).error || (draftResult as any).fallbackReason || '模型未返回正文'))
     }
     await onStage('draft', { status: 'success', word_count: String(chapterText || '').replace(/\s/g, '').length, modelName: (draftResult as any).modelName, scene_status: 'generated' })
     let finalText = String(chapterText || '')
-    let finalSceneBreakdown = resultPayload?.scene_breakdown || firstProse?.scene_breakdown || chapter.scene_breakdown || []
-    let finalContinuityNotes = resultPayload?.continuity_notes || firstProse?.continuity_notes || chapter.continuity_notes || []
+    let finalSceneBreakdown = targetProse?.scene_breakdown || resultPayload?.scene_breakdown || []
+    let finalContinuityNotes = targetProse?.continuity_notes || resultPayload?.continuity_notes || chapter.continuity_notes || []
     if (isDraftOnly) {
       await onStage('review', { status: 'skipped', reason: '生产模式：只生成正文初稿' })
       await onStage('revise', { status: 'skipped', reason: '生产模式：只生成正文初稿' })
@@ -520,8 +560,8 @@ export function createNovelWritingService(ctx: {
       await onStage('store', { status: 'running' })
       const updatedDraft = await updateNovelChapter(activeWorkspace, chapter.id, {
         chapter_text: finalText,
-        scene_breakdown: finalSceneBreakdown,
         continuity_notes: finalContinuityNotes,
+        raw_payload: { ...(chapter.raw_payload || {}), generated_scene_breakdown: finalSceneBreakdown },
         status: 'draft',
       }, { versionSource: 'agent_execute' })
       await onStage('store', { status: 'success', word_count: String(finalText || '').replace(/\s/g, '').length, scene_status: 'accepted' })
@@ -545,8 +585,8 @@ export function createNovelWritingService(ctx: {
       await onStage('store', { status: 'running' })
       const updatedReviewedDraft = await updateNovelChapter(activeWorkspace, chapter.id, {
         chapter_text: finalText,
-        scene_breakdown: finalSceneBreakdown,
         continuity_notes: finalContinuityNotes,
+        raw_payload: { ...(chapter.raw_payload || {}), generated_scene_breakdown: finalSceneBreakdown },
         status: 'draft',
       }, { versionSource: 'agent_execute' })
       await onStage('store', { status: 'success', word_count: String(finalText || '').replace(/\s/g, '').length, scene_status: 'accepted' })
@@ -607,8 +647,8 @@ export function createNovelWritingService(ctx: {
     await onStage('store', { status: 'running' })
     const updated = await updateNovelChapter(activeWorkspace, chapter.id, {
       chapter_text: finalText,
-      scene_breakdown: finalSceneBreakdown,
       continuity_notes: finalContinuityNotes,
+      raw_payload: { ...(chapter.raw_payload || {}), generated_scene_breakdown: finalSceneBreakdown },
       status: 'draft',
     }, { versionSource: selfCheck?.revised ? 'repair' : 'agent_execute' })
     await onStage('store', { status: 'success', word_count: String(finalText || '').replace(/\s/g, '').length, scene_status: 'accepted' })

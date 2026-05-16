@@ -479,9 +479,11 @@ export function buildProsePrompt(
   parts.push(`4. 不得出现 OOC（角色性格偏离）`)
   parts.push(`5. 不得使用"时间过得很快"、"几天后"之类的跳跃，必须有具体的过渡场景`)
   parts.push(`6. 本章结尾必须到达细纲中指定的 ending_hook 状态：${chapterEndingHook || '自然结束'}`)
+  parts.push(`7. 只允许输出第 ${chapterDraft.chapter_no || '?'} 章《${chapterDraft.title || '无标题'}》，不得输出其他章节、续章或目录`)
 
   // 输出格式指令
   parts.push(`\n\n输出格式：JSON，包含字段 prose_chapters，其中每个元素包含：chapter_no, title, chapter_text, scene_breakdown, continuity_notes`)
+  parts.push(`prose_chapters 数组只能包含一项，chapter_no 必须严格等于 ${chapterDraft.chapter_no || '?'}`)
   parts.push(`chapter_text 是完整的正文内容，使用纯文本格式（不要使用 markdown 标题等格式标记）`)
   parts.push(`scene_breakdown 是场景分解数组，每个元素包含 scene_no, description, characters_present`)
   parts.push(`continuity_notes 是连续性备注数组，说明本章如何与上一章衔接`)

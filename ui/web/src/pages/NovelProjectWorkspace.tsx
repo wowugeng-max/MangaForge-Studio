@@ -73,6 +73,7 @@ export default function NovelProjectWorkspace() {
   const [proseQualityLoading, setProseQualityLoading] = useState(false)
   const [bookReviewLoading, setBookReviewLoading] = useState(false)
   const [writingBibleOpen, setWritingBibleOpen] = useState(false)
+  const [writingBibleGenerating, setWritingBibleGenerating] = useState(false)
   const [storyStateOpen, setStoryStateOpen] = useState(false)
   const [commercialToolsOpen, setCommercialToolsOpen] = useState(false)
   const [creativeCommandOpen, setCreativeCommandOpen] = useState(false)
@@ -1261,9 +1262,12 @@ export default function NovelProjectWorkspace() {
           setRightPanelOpen(true)
           setRightPanelTab('proseQuality')
           if (res.data?.quality_refresh?.ok) {
-            message.success(`修订稿已入库，并已复检当前版本，评分 ${res.data.quality_refresh.score ?? '-'}`)
+            const syncedTo = res.data?.story_state_update?.last_synced_chapter
+            message.success(`修订稿已入库，并已复检当前版本，评分 ${res.data.quality_refresh.score ?? '-'}${syncedTo ? `；状态机已同步至第${syncedTo}章` : ''}`)
           } else if (res.data?.quality_refresh?.ok === false) {
             message.warning(`修订稿已入库，但自动复检失败：${res.data.quality_refresh.error || '未知错误'}。可在正文质检里手动复检。`)
+          } else if (res.data?.story_state_update?.last_synced_chapter) {
+            message.success(`修订稿已入库，状态机已同步至第${res.data.story_state_update.last_synced_chapter}章`)
           } else {
             message.success('修订稿已入库')
           }
@@ -1274,31 +1278,57 @@ export default function NovelProjectWorkspace() {
     })
   }
 
+  const fillWritingBibleForm = (bible: any) => {
+    const styleLock = bible.style_lock || selectedProject?.reference_config?.style_lock || {}
+    writingBibleForm.setFieldsValue({
+      promise: bible.promise || '',
+      narrative_person: styleLock.narrative_person || '',
+      sentence_length: styleLock.sentence_length || '',
+      dialogue_ratio: styleLock.dialogue_ratio || '',
+      payoff_density: styleLock.payoff_density || '',
+      description_density: styleLock.description_density || '',
+      chapter_word_range: styleLock.chapter_word_range || '',
+      banned_words: Array.isArray(styleLock.banned_words) ? styleLock.banned_words.join('\n') : '',
+      preferred_words: Array.isArray(styleLock.preferred_words) ? styleLock.preferred_words.join('\n') : '',
+      world_rules: JSON.stringify(bible.world_rules || [], null, 2),
+      mainline: JSON.stringify(bible.mainline || {}, null, 2),
+      volume_plan: JSON.stringify(bible.volume_plan || [], null, 2),
+      style_lock: JSON.stringify(styleLock || {}, null, 2),
+      safety_policy: JSON.stringify(bible.safety_policy || selectedProject?.reference_config?.safety || {}, null, 2),
+      forbidden: JSON.stringify(bible.forbidden || [], null, 2),
+    })
+  }
+
   const openWritingBibleEditor = async () => {
     try {
       const res = await apiClient.get(`/novel/projects/${projectId}/writing-bible`)
       const bible = res.data?.writing_bible || {}
-      const styleLock = bible.style_lock || selectedProject?.reference_config?.style_lock || {}
-      writingBibleForm.setFieldsValue({
-        promise: bible.promise || '',
-        narrative_person: styleLock.narrative_person || '',
-        sentence_length: styleLock.sentence_length || '',
-        dialogue_ratio: styleLock.dialogue_ratio || '',
-        payoff_density: styleLock.payoff_density || '',
-        description_density: styleLock.description_density || '',
-        chapter_word_range: styleLock.chapter_word_range || '',
-        banned_words: Array.isArray(styleLock.banned_words) ? styleLock.banned_words.join('\n') : '',
-        preferred_words: Array.isArray(styleLock.preferred_words) ? styleLock.preferred_words.join('\n') : '',
-        world_rules: JSON.stringify(bible.world_rules || [], null, 2),
-        mainline: JSON.stringify(bible.mainline || {}, null, 2),
-        volume_plan: JSON.stringify(bible.volume_plan || [], null, 2),
-        style_lock: JSON.stringify(styleLock || {}, null, 2),
-        safety_policy: JSON.stringify(bible.safety_policy || selectedProject?.reference_config?.safety || {}, null, 2),
-        forbidden: JSON.stringify(bible.forbidden || [], null, 2),
-      })
+      fillWritingBibleForm(bible)
       setWritingBibleOpen(true)
     } catch (error: any) {
       message.error(error?.response?.data?.error || error?.message || '写作圣经加载失败')
+    }
+  }
+
+  const generateWritingBibleEditor = async () => {
+    if (!selectedModelId) return message.warning('请先选择模型')
+    setWritingBibleGenerating(true)
+    try {
+      const res = await apiClient.post(`/novel/projects/${projectId}/writing-bible/generate`, {
+        model_id: selectedModelId,
+        save: true,
+      })
+      const bible = res.data?.writing_bible || {}
+      fillWritingBibleForm(bible)
+      setSelectedProject((prev: any) => res.data?.project || (prev ? { ...prev, reference_config: { ...(prev.reference_config || {}), writing_bible: bible } } : prev))
+      await loadProjectModules()
+      setRightPanelOpen(true)
+      setRightPanelTab('writingBible')
+      message.success('写作圣经已自动生成并保存，可继续人工微调')
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '写作圣经自动生成失败')
+    } finally {
+      setWritingBibleGenerating(false)
     }
   }
 
@@ -2427,12 +2457,16 @@ export default function NovelProjectWorkspace() {
     }
   }
 
-  const generateCurrentChapterProse = async (options: { allowIncomplete?: boolean; forceSceneCards?: boolean } = {}) => {
-    if (!activeChapter) return message.warning('请先选择章节')
+  const generateCurrentChapterProse = async (options: { allowIncomplete?: boolean; forceSceneCards?: boolean; targetChapterId?: number } = {}) => {
+    const targetChapter = options.targetChapterId
+      ? chapters.find(ch => ch.id === options.targetChapterId) || activeChapter
+      : activeChapter
+    if (!targetChapter) return message.warning('请先选择章节')
     if (!selectedModelId) return message.warning('请先选择写作模型')
     if (!await flushPendingSave()) return
     if (!await confirmReferenceReady('正文创作')) return
-    setStreamingChapterId(activeChapter.id)
+    const targetChapterNo = Number(targetChapter.chapter_no || 0)
+    setStreamingChapterId(targetChapter.id)
     setStreamingText('')
     setStreamingProgress('正在请求模型...')
     setStreamingPercent(10)
@@ -2442,16 +2476,16 @@ export default function NovelProjectWorkspace() {
       const ctx = {
         worldbuilding: worldbuilding[0] || null,
         characters, outlines,
-        previousChapter: chapters.filter(ch => ch.chapter_no < activeChapter.chapter_no).sort((a, b) => b.chapter_no - a.chapter_no)[0] || null,
+        previousChapter: chapters.filter(ch => ch.chapter_no < targetChapterNo).sort((a, b) => b.chapter_no - a.chapter_no)[0] || null,
       }
       const resp = await fetch(
-        `${apiClient.defaults.baseURL}/novel/chapters/${activeChapter.id}/generate-prose?stream=1`,
+        `${apiClient.defaults.baseURL}/novel/chapters/${targetChapter.id}/generate-prose?stream=1`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
           body: JSON.stringify({
             project_id: projectId, model_id: selectedModelId,
-            prompt: `请生成第 ${activeChapter.chapter_no} 章《${displayValue(activeChapter.title)}》完整正文`,
+            prompt: `请生成第 ${targetChapter.chapter_no} 章《${displayValue(targetChapter.title)}》完整正文`,
             payload: ctx,
             allow_incomplete: Boolean(options.allowIncomplete),
             force_scene_cards: Boolean(options.forceSceneCards),
@@ -2538,6 +2572,29 @@ export default function NovelProjectWorkspace() {
       setGeneratingProse(false)
       setTimeout(() => { setStreamingChapterId(null); setStreamingPercent(0) }, 1500)
     }
+  }
+
+  const repairContextAndGenerateCurrentChapter = async () => {
+    if (!activeChapter) return message.warning('请先选择章节')
+    if (!selectedModelId) return message.warning('请先选择模型')
+    if (!await flushPendingSave()) return
+    const targetChapterId = activeChapter.id
+    setGeneratingProse(true)
+    try {
+      const res = await apiClient.post(`/novel/chapters/${targetChapterId}/auto-repair-context`, {
+        project_id: projectId,
+        model_id: selectedModelId,
+      })
+      const applied = Array.isArray(res.data?.applied) ? res.data.applied : []
+      await loadProjectModules()
+      message.success(applied.length ? `已自动补齐 ${applied.length} 项上下文材料` : '上下文材料无需补齐')
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '上下文自动补齐失败')
+      setGeneratingProse(false)
+      return
+    }
+    setGeneratingProse(false)
+    await generateCurrentChapterProse({ allowIncomplete: true, forceSceneCards: true, targetChapterId })
   }
 
   /* ── 章节重组 ──────────────────────────────────────────────────── */
@@ -2659,7 +2716,7 @@ export default function NovelProjectWorkspace() {
         ...data,
         must_advance: formatListField(data.raw_payload?.must_advance),
         forbidden_repeats: formatListField(data.raw_payload?.forbidden_repeats),
-        scene_breakdown: formatJsonField(data.scene_breakdown || data.scene_list || []),
+        scene_breakdown: formatJsonField(data.scene_list || data.scene_breakdown || []),
       })
     }
     setEditorKind(kind)
@@ -2949,7 +3006,7 @@ export default function NovelProjectWorkspace() {
           onOpenReferenceConfig={() => setReferenceConfigOpen(true)}
           onOpenWritingBibleEditor={() => { void openWritingBibleEditor() }}
           onGenerateCurrentChapterProse={() => generateCurrentChapterProse()}
-          onRepairAndGenerateCurrentChapter={() => generateCurrentChapterProse({ allowIncomplete: true, forceSceneCards: true })}
+          onRepairAndGenerateCurrentChapter={repairContextAndGenerateCurrentChapter}
           onGenerateSceneCards={() => generateSceneCardsForActiveChapter()}
           onOpenGenerationDiagnostics={openGenerationDiagnostics}
           onOpenQualityCard={openChapterQualityCard}
@@ -3330,9 +3387,24 @@ export default function NovelProjectWorkspace() {
         title="写作圣经"
         width={860}
         onCancel={() => setWritingBibleOpen(false)}
-        onOk={saveWritingBibleEditor}
-        okText="保存"
+        footer={[
+          <Button key="generate" onClick={generateWritingBibleEditor} loading={writingBibleGenerating}>
+            自动生成
+          </Button>,
+          <Button key="cancel" onClick={() => setWritingBibleOpen(false)}>
+            取消
+          </Button>,
+          <Button key="save" type="primary" onClick={saveWritingBibleEditor}>
+            保存
+          </Button>,
+        ]}
       >
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message="可以从项目简介、世界观、角色、大纲、章节和参考配置自动生成写作圣经；生成后会先填入表单并保存，仍可人工微调。"
+        />
         <Form form={writingBibleForm} layout="vertical">
           <Form.Item name="promise" label="读者承诺 / 核心卖点">
             <Input.TextArea rows={3} />

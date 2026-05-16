@@ -33,6 +33,7 @@ type EditorRoutesContext = {
   buildStructuralSimilarityReport: (chapter: any, referenceReport: any) => any
   buildReferenceMigrationDryPlan: (project: any, chapter: any, preview: any, safety: any) => any
   diffTexts: (before: string, after: string) => any
+  updateStoryStateMachine: (workspace: string, project: any, chapter: any, contextPackage: any, chapterText: string, modelId?: number) => Promise<any>
 }
 
 async function loadChapterBundle(ctx: EditorRoutesContext, projectId: number, chapterId: number) {
@@ -49,6 +50,47 @@ async function loadChapterBundle(ctx: EditorRoutesContext, projectId: number, ch
   const chapter = chapters.find(item => item.id === chapterId)
   if (!chapter) return { activeWorkspace, project, status: 404, error: 'chapter not found' }
   return { activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews }
+}
+
+async function syncStoryStateFromChapter(
+  ctx: EditorRoutesContext,
+  activeWorkspace: string,
+  project: any,
+  projectId: number,
+  startChapterNo: number,
+  modelId?: number,
+) {
+  const writtenChapters = (await listNovelChapters(activeWorkspace, projectId))
+    .filter(chapter => Number(chapter.chapter_no || 0) >= startChapterNo && String(chapter.chapter_text || '').trim())
+    .sort((a, b) => Number(a.chapter_no || 0) - Number(b.chapter_no || 0))
+  const synced: any[] = []
+  const errors: any[] = []
+  let currentProject = project
+  for (const target of writtenChapters) {
+    try {
+      const [chapters, worldbuilding, characters, outlines, reviews] = await Promise.all([
+        listNovelChapters(activeWorkspace, projectId),
+        listNovelWorldbuilding(activeWorkspace, projectId),
+        listNovelCharacters(activeWorkspace, projectId),
+        listNovelOutlines(activeWorkspace, projectId),
+        listNovelReviews(activeWorkspace, projectId),
+      ])
+      currentProject = await ctx.getProject(activeWorkspace, projectId) || currentProject
+      const freshChapter = chapters.find(item => item.id === target.id) || target
+      const contextPackage = await ctx.buildChapterContextPackage(activeWorkspace, currentProject, freshChapter, chapters, worldbuilding, characters, outlines, reviews)
+      const update = await ctx.updateStoryStateMachine(activeWorkspace, currentProject, freshChapter, contextPackage, String(freshChapter.chapter_text || ''), modelId)
+      synced.push({ chapter_id: freshChapter.id, chapter_no: freshChapter.chapter_no, update })
+    } catch (error: any) {
+      errors.push({ chapter_id: target.id, chapter_no: target.chapter_no, error: String(error?.message || error) })
+      break
+    }
+  }
+  return {
+    ok: errors.length === 0,
+    synced,
+    errors,
+    last_synced_chapter: synced.length ? synced[synced.length - 1].chapter_no : null,
+  }
 }
 
 function firstPatchText(...values: any[]) {
@@ -679,8 +721,11 @@ export function registerNovelEditorRoutes(app: Express, ctx: EditorRoutesContext
       }
       const updated = await updateNovelChapter(activeWorkspace, chapter.id, {
         chapter_text: nextText,
-        scene_breakdown: resultPayload?.scene_breakdown || resultPayload?.prose_chapters?.[0]?.scene_breakdown || chapter.scene_breakdown || [],
         continuity_notes: resultPayload?.continuity_notes || resultPayload?.prose_chapters?.[0]?.continuity_notes || chapter.continuity_notes || [],
+        raw_payload: {
+          ...(chapter.raw_payload || {}),
+          generated_scene_breakdown: resultPayload?.scene_breakdown || resultPayload?.prose_chapters?.[0]?.scene_breakdown || [],
+        },
         status: 'draft',
       }, { versionSource: 'repair' })
       const saved = await createNovelReview(activeWorkspace, {
@@ -728,15 +773,26 @@ export function registerNovelEditorRoutes(app: Express, ctx: EditorRoutesContext
           })
         }
       }
+      let storyStateUpdate: any = null
+      if (req.body?.auto_story_state !== false) {
+        storyStateUpdate = await syncStoryStateFromChapter(
+          ctx,
+          activeWorkspace,
+          project,
+          projectId,
+          Number(chapter.chapter_no || 0),
+          modelId,
+        ).catch(error => ({ ok: false, error: String(error?.message || error), synced: [], errors: [] }))
+      }
       await appendNovelRun(activeWorkspace, {
         project_id: projectId,
         run_type: 'editor_revision',
         step_name: `chapter-${chapter.chapter_no}`,
         status: 'success',
         input_ref: JSON.stringify({ review_id: review.id }),
-        output_ref: JSON.stringify({ review: saved, modelName: (result as any).modelName, applied_patches: patchResult.applied.length, unapplied_patches: patchResult.unapplied.length, quality_refresh: qualityRefresh }),
+        output_ref: JSON.stringify({ review: saved, modelName: (result as any).modelName, applied_patches: patchResult.applied.length, unapplied_patches: patchResult.unapplied.length, quality_refresh: qualityRefresh, story_state_update: storyStateUpdate }),
       })
-      res.json({ ok: true, chapter: updated, review: saved, result, patch_result: patchResult, quality_refresh: qualityRefresh })
+      res.json({ ok: true, chapter: updated, review: saved, result, patch_result: patchResult, quality_refresh: qualityRefresh, story_state_update: storyStateUpdate })
     } catch (error) {
       res.status(500).json({ error: String(error) })
     }

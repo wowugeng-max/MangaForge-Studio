@@ -1,12 +1,16 @@
 import type { Express } from 'express'
 import {
+  createNovelCharacter,
   listNovelCharacters,
   listNovelChapters,
   listNovelOutlines,
   listNovelReviews,
   listNovelWorldbuilding,
   updateNovelChapter,
+  updateNovelCharacter,
 } from '../novel'
+import { executeNovelAgent } from '../llm'
+import { asArray, getNovelPayload } from './novel-route-utils'
 
 type ChapterContextRoutesContext = {
   getWorkspace: () => string
@@ -21,6 +25,35 @@ type ChapterContextRoutesContext = {
     outlines: any[],
     reviews: any[],
   ) => Promise<any>
+}
+
+function compactContextText(value: any, limit = 700) {
+  return String(value || '').replace(/\s+/g, ' ').trim().slice(0, limit)
+}
+
+function normalizeGeneratedCharacter(item: any) {
+  return {
+    name: String(item?.name || '').trim(),
+    role_type: String(item?.role_type || item?.role || ''),
+    archetype: String(item?.archetype || ''),
+    motivation: String(item?.motivation || ''),
+    goal: String(item?.goal || ''),
+    conflict: String(item?.conflict || ''),
+    growth_arc: String(item?.growth_arc || item?.arc || ''),
+    current_state: item?.current_state && typeof item.current_state === 'object' ? item.current_state : {},
+    raw_payload: item || {},
+  }
+}
+
+function fallbackForbiddenRepeats(project: any, chapter: any, contextPackage: any) {
+  const storyState = contextPackage?.story_state?.global || project?.reference_config?.story_state || {}
+  return [
+    ...asArray(storyState.recent_repeated_information),
+    ...asArray(chapter.raw_payload?.forbidden_repeats),
+  ]
+    .map((item: any) => String(item || '').trim())
+    .filter(Boolean)
+    .slice(0, 8)
 }
 
 async function loadChapterContext(ctx: ChapterContextRoutesContext, projectId: number, chapterId: number) {
@@ -199,6 +232,174 @@ export function registerNovelChapterContextRoutes(app: Express, ctx: ChapterCont
       const loaded = await loadChapterContext(ctx, Number(req.query.project_id || 0), Number(req.params.chapterId))
       if ('error' in loaded) return res.status(loaded.status || 500).json({ error: loaded.error })
       res.json({ ok: true, material_score: buildMaterialScore(loaded.contextPackage), preflight: loaded.contextPackage.preflight })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.post('/api/novel/chapters/:chapterId/auto-repair-context', async (req, res) => {
+    try {
+      const activeWorkspace = ctx.getWorkspace()
+      const projectId = Number(req.body.project_id || req.query.project_id || 0)
+      const chapterId = Number(req.params.chapterId)
+      const project = await ctx.getProject(activeWorkspace, projectId)
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const [chapters, worldbuilding, characters, outlines, reviews] = await Promise.all([
+        listNovelChapters(activeWorkspace, projectId),
+        listNovelWorldbuilding(activeWorkspace, projectId),
+        listNovelCharacters(activeWorkspace, projectId),
+        listNovelOutlines(activeWorkspace, projectId),
+        listNovelReviews(activeWorkspace, projectId),
+      ])
+      const chapter = chapters.find(item => item.id === chapterId)
+      if (!chapter) return res.status(404).json({ error: 'chapter not found' })
+      const contextPackage = await ctx.buildChapterContextPackage(activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews)
+      const checks = Array.isArray(contextPackage?.preflight?.checks) ? contextPackage.preflight.checks : []
+      const missingKeys = checks.filter((item: any) => !item.ok).map((item: any) => item.key)
+      const needsCharacters = missingKeys.includes('characters') || characters.length === 0
+      const needsCharacterState = missingKeys.includes('character_state')
+      const needsForbiddenRepeats = missingKeys.includes('no_repeat') || !asArray(chapter.raw_payload?.forbidden_repeats).length
+      if (!needsCharacters && !needsCharacterState && !needsForbiddenRepeats) {
+        return res.json({ ok: true, applied: [], skipped: true, context_package: contextPackage })
+      }
+
+      let payload: any = {}
+      const modelId = req.body?.model_id ? String(req.body.model_id) : ''
+      if (modelId) {
+        const prompt = [
+          '任务：为当前小说章节自动补齐生成前上下文材料。只输出 JSON。',
+          '只补材料，不生成正文。优先解决：角色卡不足、角色当前状态不足、禁止重复信息不足。',
+          '输出字段：',
+          '{',
+          '  "characters": [{"name","role_type","archetype","motivation","goal","conflict","growth_arc","current_state":{}}],',
+          '  "character_updates": [{"name","current_state":{}}],',
+          '  "forbidden_repeats": ["本章禁止重复解释的信息"],',
+          '  "must_advance": ["本章必须推进的剧情点"],',
+          '  "repair_summary": "补齐说明"',
+          '}',
+          '要求：角色卡只创建对当前章和后续 5 章有用的主要/关键角色；不要编造与项目核心冲突相违背的人设；禁止重复信息要具体到本章写作可执行。',
+          '【项目】',
+          JSON.stringify({
+            title: project.title,
+            genre: project.genre,
+            synopsis: project.synopsis,
+            style_tags: project.style_tags,
+          }, null, 2),
+          '【当前章】',
+          JSON.stringify({
+            chapter_no: chapter.chapter_no,
+            title: chapter.title,
+            goal: chapter.chapter_goal,
+            summary: chapter.chapter_summary,
+            conflict: chapter.conflict,
+            ending_hook: chapter.ending_hook,
+            must_advance: chapter.raw_payload?.must_advance || [],
+            forbidden_repeats: chapter.raw_payload?.forbidden_repeats || [],
+          }, null, 2),
+          '【已有角色】',
+          JSON.stringify(characters.slice(0, 20).map(char => ({
+            name: char.name,
+            role: char.role_type || char.role,
+            motivation: char.motivation,
+            goal: char.goal,
+            conflict: char.conflict,
+            current_state: char.current_state || {},
+          })), null, 2),
+          '【世界观/大纲/近期章节】',
+          JSON.stringify({
+            worldbuilding: worldbuilding.slice(0, 3),
+            outlines: outlines.slice(0, 30).map(item => ({ type: item.outline_type, title: item.title, summary: item.summary, hook: item.hook })),
+            recent_chapters: chapters
+              .filter(item => item.chapter_no <= chapter.chapter_no)
+              .slice(-5)
+              .map(item => ({ chapter_no: item.chapter_no, title: item.title, summary: item.chapter_summary, ending_hook: item.ending_hook, excerpt: compactContextText(item.chapter_text, 500) })),
+            story_state: contextPackage.story_state?.global || {},
+            preflight_warnings: contextPackage.preflight?.warnings || [],
+          }, null, 2).slice(0, 12000),
+        ].join('\n')
+        const result = await executeNovelAgent('outline-agent', project, { task: prompt }, {
+          activeWorkspace,
+          modelId,
+          maxTokens: 4000,
+          temperature: 0.35,
+          responseMode: 'non_stream',
+          skipMemory: true,
+        })
+        if ((result as any).error) return res.status(502).json({ error: (result as any).error, result })
+        payload = getNovelPayload(result)
+      } else {
+        payload = {
+          characters: [],
+          character_updates: [],
+          forbidden_repeats: fallbackForbiddenRepeats(project, chapter, contextPackage),
+          must_advance: asArray(chapter.raw_payload?.must_advance),
+          repair_summary: '未指定模型，仅执行本地可推断补齐。',
+        }
+      }
+
+      const applied: any[] = []
+      const existingByName = new Map(characters.map(char => [String(char.name || '').trim(), char]).filter(([name]) => Boolean(name)) as any)
+      if (needsCharacters) {
+        for (const raw of asArray(payload.characters).slice(0, 8)) {
+          const normalized = normalizeGeneratedCharacter(raw)
+          if (!normalized.name || existingByName.has(normalized.name)) continue
+          const created = await createNovelCharacter(activeWorkspace, {
+            project_id: projectId,
+            ...normalized,
+            status: 'active',
+          } as any)
+          existingByName.set(created.name, created)
+          applied.push({ type: 'character_created', id: created.id, name: created.name })
+        }
+      }
+      if (needsCharacterState) {
+        for (const raw of asArray(payload.character_updates).slice(0, 12)) {
+          const name = String(raw?.name || '').trim()
+          const current = existingByName.get(name)
+          if (!name || !current || !raw?.current_state || typeof raw.current_state !== 'object') continue
+          const updated = await updateNovelCharacter(activeWorkspace, current.id, {
+            current_state: {
+              ...(current.current_state || {}),
+              ...(raw.current_state || {}),
+              last_seen_chapter: chapter.chapter_no,
+            },
+          } as any)
+          if (updated) applied.push({ type: 'character_state_updated', id: updated.id, name: updated.name })
+        }
+      }
+      const nextForbiddenRepeats = [
+        ...asArray(chapter.raw_payload?.forbidden_repeats),
+        ...asArray(payload.forbidden_repeats),
+        ...fallbackForbiddenRepeats(project, chapter, contextPackage),
+      ].map((item: any) => String(item || '').trim()).filter(Boolean)
+      const nextMustAdvance = [
+        ...asArray(chapter.raw_payload?.must_advance),
+        ...asArray(payload.must_advance),
+      ].map((item: any) => String(item || '').trim()).filter(Boolean)
+      if (needsForbiddenRepeats || nextMustAdvance.length !== asArray(chapter.raw_payload?.must_advance).length) {
+        const uniqueForbidden = [...new Set(nextForbiddenRepeats)].slice(0, 12)
+        const uniqueAdvance = [...new Set(nextMustAdvance)].slice(0, 12)
+        const updated = await updateNovelChapter(activeWorkspace, chapter.id, {
+          raw_payload: {
+            ...(chapter.raw_payload || {}),
+            forbidden_repeats: uniqueForbidden,
+            must_advance: uniqueAdvance,
+            context_auto_repair_summary: payload.repair_summary || '',
+            context_auto_repaired_at: new Date().toISOString(),
+          },
+        } as any, { createVersion: false })
+        applied.push({ type: 'chapter_context_updated', chapter_id: chapter.id, forbidden_repeats: uniqueForbidden.length, must_advance: uniqueAdvance.length })
+        Object.assign(chapter, updated || chapter)
+      }
+      const refreshed = await loadChapterContext(ctx, projectId, chapter.id)
+      res.json({
+        ok: true,
+        applied,
+        payload,
+        context_package: 'error' in refreshed ? null : refreshed.contextPackage,
+        preflight: 'error' in refreshed ? null : refreshed.contextPackage.preflight,
+        material_score: 'error' in refreshed ? null : buildMaterialScore(refreshed.contextPackage),
+      })
     } catch (error) {
       res.status(500).json({ error: String(error) })
     }

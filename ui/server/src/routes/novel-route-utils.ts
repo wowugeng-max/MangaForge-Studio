@@ -171,6 +171,7 @@ export function buildPreflightChecks(project: any, chapter: any, previousChapter
   const storyState = getStoryState(project)
   const forbidden = getSafetyPolicy(project).forbidden
   const repeatedWarnings = asArray(storyState.recent_repeated_information).slice(0, 6)
+  const chapterForbiddenRepeats = asArray(chapter.raw_payload?.forbidden_repeats)
   const checks = [
     { key: 'chapter_blueprint', ok: Boolean(chapter.chapter_summary || chapter.chapter_goal), severity: 'high', label: '章节细纲/目标', fix: '补充章节目标或章节摘要。' },
     { key: 'scene_cards', ok: sceneCards.length > 0, severity: 'medium', label: '场景卡', fix: '先生成或编辑本章场景卡。' },
@@ -181,7 +182,7 @@ export function buildPreflightChecks(project: any, chapter: any, previousChapter
     { key: 'character_state', ok: characters.length === 0 || charactersWithState.length > 0 || Boolean(storyState.character_positions), severity: 'medium', label: '角色当前状态', fix: '补充角色 current_state 或先生成故事状态。' },
     { key: 'plot_points', ok: Boolean(chapter.chapter_goal || chapter.chapter_summary || asArray(chapter.raw_payload?.must_advance).length), severity: 'high', label: '本章必须推进剧情点', fix: '在章节目标/摘要中写清本章必须推进的剧情点。' },
     { key: 'previous_continuity', ok: chapter.chapter_no <= 1 || Boolean(previousChapter?.chapter_text || previousChapter?.ending_hook), severity: 'high', label: '前章衔接', fix: '补齐上一章正文或结尾钩子。' },
-    { key: 'no_repeat', ok: repeatedWarnings.length === 0, severity: 'low', label: '禁止重复信息', fix: '清理 story_state.recent_repeated_information 或调整本章信息增量。' },
+    { key: 'no_repeat', ok: repeatedWarnings.length === 0 || chapterForbiddenRepeats.length > 0, severity: 'low', label: '禁止重复信息', fix: '给本章补充 forbidden_repeats，明确哪些信息不要重复解释。' },
     { key: 'reference_knowledge', ok: !project.reference_config?.references?.length || Boolean(referencePreview?.entries?.length), severity: 'medium', label: '参考知识注入', fix: '先做参考预览或补齐参考作品画像。' },
     { key: 'copy_safety_policy', ok: forbidden.length > 0, severity: 'medium', label: '仿写禁止项', fix: '配置仿写安全禁止项。' },
   ]

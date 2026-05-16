@@ -23,7 +23,7 @@ type PlanningRoutesContext = {
   buildAgentConfigSnapshot: (project: any, preferredModelId?: number) => any
   buildChapterContextPackage: (workspace: string, project: any, chapter: any, chapters: any[], worldbuilding: any[], characters: any[], outlines: any[], reviews: any[]) => Promise<any>
   getReferenceMigrationPlanForChapter: (workspace: string, project: any, chapter: any) => Promise<any>
-  buildParagraphProseContext: (project: any, contextPackage: any, migrationPlan?: any) => string[]
+  buildParagraphProseContext: (project: any, contextPackage: any, migrationPlan?: any, chapterDraft?: any) => string[]
   buildProductionMetrics: (chapters: any[], reviews: any[], runs: any[]) => any
   buildOriginalIncubatorPrompt: (project: any, body: any) => string
   normalizeIncubatorPayload: (payload: any, chapterCount: number) => any
@@ -739,7 +739,7 @@ export function registerNovelPlanningRoutes(app: Express, ctx: PlanningRoutesCon
             prevChapters,
             contextPackage,
             migrationPlan,
-            paragraphTask: ctx.buildParagraphProseContext(candidateProject, contextPackage, migrationPlan),
+            paragraphTask: ctx.buildParagraphProseContext(candidateProject, contextPackage, migrationPlan, chapter),
             prompt: `A/B 沙盒生成：请为第 ${chapter.chapter_no} 章生成候选正文，不要覆盖原文。`,
           } as any, { activeWorkspace, modelId: stageModelId ? String(stageModelId) : undefined, skipMemory: true })
           const extracted = extractSandboxText(result)

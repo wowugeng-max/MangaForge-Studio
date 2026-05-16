@@ -138,6 +138,7 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
     buildStructuralSimilarityReport: referenceService.buildStructuralSimilarityReport,
     buildReferenceMigrationDryPlan: referenceService.buildReferenceMigrationDryPlan,
     diffTexts: referenceService.diffTexts,
+    updateStoryStateMachine: writingService.updateStoryStateMachine,
   })
 
   registerNovelRunRoutes(app, {

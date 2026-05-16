@@ -744,7 +744,7 @@ export async function generateNovelChapterProse(
           chapterDraft.goal || '',
           chapterDraft.conflict || '',
         ].filter(Boolean).join(' '),
-        categories: ['plot', 'worldbuilding', 'character', 'foreshadowing', 'prose', 'general'],
+        categories: ['worldbuilding', 'character', 'foreshadowing', 'general'],
         topK: 5,
         worldbuilding: context.worldbuilding,
         characters: Array.isArray(context.characters) ? context.characters : [],
@@ -768,7 +768,12 @@ export async function generateNovelChapterProse(
   }
 
   // Build prose prompt
-  const prosePrompt = (context as any).paragraphTask || buildProsePrompt(project, chapterDraft, context)
+  const strictTargetPrompt = [
+    `任务：只生成第 ${chapterDraft.chapter_no} 章《${chapterDraft.title || '无标题'}》的正文。`,
+    `禁止输出其他章节、续章、目录、分卷总结或额外解释。`,
+    `若输出 prose_chapters 数组，数组只能包含这一章，且 chapter_no 必须严格等于 ${chapterDraft.chapter_no}。`,
+  ].join('\n')
+  const prosePrompt = `${strictTargetPrompt}\n\n${(context as any).paragraphTask || buildProsePrompt(project, chapterDraft, context)}`
 
   const upstreamContext = memoryInjection ? { memoryInjectionText: memoryInjection } : {}
   const knowledgeContext = knowledgeInjection ? { knowledgeInjectionText: knowledgeInjection } : {}

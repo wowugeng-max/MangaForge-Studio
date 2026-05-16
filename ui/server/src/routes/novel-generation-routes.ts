@@ -40,7 +40,7 @@ type GenerationRoutesContext = {
   ) => Promise<any>
   generateSceneCardsForChapter: (workspace: string, project: any, contextPackage: any, modelId?: number) => Promise<any>
   getReferenceMigrationPlanForChapter: (workspace: string, project: any, chapter: any) => Promise<any>
-  buildParagraphProseContext: (project: any, contextPackage: any, migrationPlan?: any) => string[]
+  buildParagraphProseContext: (project: any, contextPackage: any, migrationPlan?: any, chapterDraft?: any) => string[]
   getStageModelId: (project: any, stage: string, preferredModelId?: number) => number | undefined
   runProseSelfReviewAndRevision: (workspace: string, project: any, contextPackage: any, chapterText: string, modelId?: number) => Promise<any>
   buildReferenceUsageReport: (workspace: string, project: any, taskType: string, generatedText?: string) => Promise<any>
@@ -70,6 +70,31 @@ function buildTextDiffSummary(before: string, after: string) {
     change_count: paragraphChanges.length,
     paragraph_changes: paragraphChanges,
   }
+}
+
+function selectTargetProsePayload(resultPayload: any, targetChapterNo: number) {
+  const proseArr = Array.isArray(resultPayload?.prose_chapters) ? resultPayload.prose_chapters : []
+  const topLevelChapterNo = Number(resultPayload?.chapter_no || 0)
+  if (topLevelChapterNo && topLevelChapterNo !== targetChapterNo) {
+    throw new Error(`模型返回的章节号与目标章节不一致：目标第${targetChapterNo}章，返回第${topLevelChapterNo}章`)
+  }
+  const matched = proseArr.find(item => Number(item?.chapter_no || 0) === targetChapterNo)
+  if (matched) {
+    return matched
+  }
+  if (proseArr.length === 1) {
+    const single = proseArr[0]
+    const singleChapterNo = Number(single?.chapter_no || 0)
+    if (!singleChapterNo || singleChapterNo === targetChapterNo) {
+      return single
+    }
+    throw new Error(`模型返回的章节号与目标章节不一致：目标第${targetChapterNo}章，返回第${singleChapterNo}章`)
+  }
+  if (proseArr.length > 1) {
+    const foundNos = proseArr.map(item => item?.chapter_no).filter(Boolean).join('、') || '无'
+    throw new Error(`模型返回的正文章节中没有第${targetChapterNo}章，实际章节号为：${foundNos}`)
+  }
+  return resultPayload || {}
 }
 
 export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoutesContext) {
@@ -588,14 +613,25 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
         prevChapters,
         contextPackage,
         migrationPlan,
-        paragraphTask: ctx.buildParagraphProseContext(project, contextPackage, migrationPlan),
+        paragraphTask: ctx.buildParagraphProseContext(project, contextPackage, migrationPlan, chapter),
       } as any, activeWorkspace, ctx.getStageModelId(project, 'draft', modelId))
       const resultPayload = getNovelPayload(result)
-      const proseArr = Array.isArray(resultPayload?.prose_chapters) ? resultPayload.prose_chapters : []
-      const firstProse = proseArr.length > 0 ? proseArr[0] : {}
-      const chapterText = resultPayload?.chapter_text || firstProse?.chapter_text
-      const sceneBreakdown = resultPayload?.scene_breakdown || firstProse?.scene_breakdown || []
-      const continuityNotes = resultPayload?.continuity_notes || firstProse?.continuity_notes || []
+      let targetProse: any = null
+      try {
+        targetProse = selectTargetProsePayload(resultPayload, Number(chapter.chapter_no || 0))
+      } catch (selectionError) {
+        const errorPayload = { error: String(selectionError), error_code: 'PROSE_TARGET_MISMATCH', result, pipeline, context_package: contextPackage, config_snapshot: configSnapshot }
+        await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'failed', input_ref: JSON.stringify(req.body), output_ref: JSON.stringify(errorPayload), error_message: String(selectionError) })
+        if (wantsStream) {
+          res.write(`data: ${JSON.stringify({ type: 'error', ...errorPayload })}\n\n`)
+          res.end()
+          return
+        }
+        return res.status(502).json(errorPayload)
+      }
+      const chapterText = targetProse?.chapter_text || resultPayload?.chapter_text
+      const sceneBreakdown = targetProse?.scene_breakdown || resultPayload?.scene_breakdown || []
+      const continuityNotes = targetProse?.continuity_notes || resultPayload?.continuity_notes || []
       if ((result as any).error || !chapterText) {
         await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'failed', input_ref: JSON.stringify(req.body), output_ref: JSON.stringify({ ...(resultPayload || {}), config_snapshot: configSnapshot }), error_message: String((result as any).error || (result as any).fallbackReason || '模型未返回正文') })
         const errorPayload = { error: String((result as any).error || (result as any).fallbackReason || '模型未返回正文'), result, pipeline, context_package: contextPackage, config_snapshot: configSnapshot }
@@ -672,7 +708,12 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
       }
       markStage('store', '写入章节正文与版本', 'running')
       const beforeText = String(chapter.chapter_text || '')
-      const updated = await updateNovelChapter(activeWorkspace, chapter.id, { chapter_text: finalText, scene_breakdown: finalSceneBreakdown, continuity_notes: finalContinuityNotes, status: 'draft' }, { versionSource: selfCheck?.revised ? 'repair' : 'agent_execute' })
+      const updated = await updateNovelChapter(activeWorkspace, chapter.id, {
+        chapter_text: finalText,
+        continuity_notes: finalContinuityNotes,
+        raw_payload: { ...(chapter.raw_payload || {}), generated_scene_breakdown: finalSceneBreakdown },
+        status: 'draft',
+      }, { versionSource: selfCheck?.revised ? 'repair' : 'agent_execute' })
       const versionsAfterStore = await listChapterVersions(activeWorkspace, chapter.id).catch(() => [])
       const previousVersion = versionsAfterStore[0] || null
       const generationDiff = buildTextDiffSummary(beforeText, finalText)

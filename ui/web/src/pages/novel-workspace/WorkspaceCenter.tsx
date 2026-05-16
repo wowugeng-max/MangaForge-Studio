@@ -529,10 +529,14 @@ export function WorkspaceCenter({
                   {outlineCount > 0 ? '有大纲' : '缺大纲'}
                 </Descriptions.Item>
               </Descriptions>
-              {Array.isArray(activeChapter.scene_breakdown) && activeChapter.scene_breakdown.length > 0 && (
+              {(() => {
+                const sceneCards = Array.isArray(activeChapter.scene_list) && activeChapter.scene_list.length > 0
+                  ? activeChapter.scene_list
+                  : (Array.isArray(activeChapter.scene_breakdown) ? activeChapter.scene_breakdown : [])
+                return sceneCards.length > 0 ? (
                 <div style={{ marginTop: 12, display: 'grid', gap: 8 }}>
                   <Text strong style={{ fontSize: 13 }}>场景卡</Text>
-                  {activeChapter.scene_breakdown.map((scene: any, index: number) => (
+                  {sceneCards.map((scene: any, index: number) => (
                     <div key={`${scene.scene_no || index}-${scene.title || index}`} style={{ border: '1px solid #edf0f5', borderRadius: 8, padding: '10px 12px', background: '#fbfcfe' }}>
                       <Space direction="vertical" size={4} style={{ width: '100%' }}>
                         <Space wrap>
@@ -549,7 +553,8 @@ export function WorkspaceCenter({
                     </div>
                   ))}
                 </div>
-              )}
+                ) : null
+              })()}
             </div>
           </details>
 
