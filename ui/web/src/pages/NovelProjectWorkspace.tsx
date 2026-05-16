@@ -70,6 +70,7 @@ export default function NovelProjectWorkspace() {
   const [incubatingOriginal, setIncubatingOriginal] = useState(false)
   const [dashboardLoading, setDashboardLoading] = useState(false)
   const [editorReportLoading, setEditorReportLoading] = useState(false)
+  const [proseQualityLoading, setProseQualityLoading] = useState(false)
   const [bookReviewLoading, setBookReviewLoading] = useState(false)
   const [writingBibleOpen, setWritingBibleOpen] = useState(false)
   const [storyStateOpen, setStoryStateOpen] = useState(false)
@@ -353,6 +354,13 @@ export default function NovelProjectWorkspace() {
   const editorReports = useMemo(() => (
     reviews
       .filter((item: any) => item.review_type === 'editor_report')
+      .slice()
+      .sort((a: any, b: any) => String(b.created_at || '').localeCompare(String(a.created_at || '')))
+  ), [reviews])
+
+  const editorRevisionReports = useMemo(() => (
+    reviews
+      .filter((item: any) => item.review_type === 'editor_revision')
       .slice()
       .sort((a: any, b: any) => String(b.created_at || '').localeCompare(String(a.created_at || '')))
   ), [reviews])
@@ -1204,27 +1212,61 @@ export default function NovelProjectWorkspace() {
     }
   }
 
+  const refreshActiveProseQuality = async (source = 'manual_refresh') => {
+    if (!activeChapter) return message.warning('请先选择章节')
+    if (!selectedModelId) return message.warning('请先选择模型')
+    if (!await flushPendingSave()) return
+    setProseQualityLoading(true)
+    try {
+      const res = await apiClient.post(`/novel/chapters/${activeChapter.id}/prose-quality`, {
+        project_id: projectId,
+        model_id: selectedModelId,
+        source,
+      })
+      await loadProjectModules()
+      setRightPanelOpen(true)
+      setRightPanelTab('proseQuality')
+      message.success(`当前版本复检完成，评分 ${res.data?.self_check?.score ?? '-'}`)
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '正文复检失败')
+    } finally {
+      setProseQualityLoading(false)
+    }
+  }
+
   const applyEditorRevision = async (report: any) => {
     if (!selectedModelId) return message.warning('请先选择模型')
+    const isSelfCheckRevision = report?.review_type === 'prose_quality'
     const payload = (() => {
       try { return typeof report.payload === 'string' ? JSON.parse(report.payload) : report.payload || {} } catch { return {} }
     })()
     Modal.confirm({
-      title: '按编辑报告生成修订稿',
-      content: '系统会根据这份编辑报告重写当前章节，并保存为新的章节版本。',
-      okText: '生成修订稿',
+      title: isSelfCheckRevision ? '按正文自检生成修订稿' : '按编辑报告生成修订稿',
+      content: isSelfCheckRevision
+        ? '系统会根据这份正文质检的修订指令重写当前章节，并保存为新的章节版本。'
+        : '系统会根据这份编辑报告重写当前章节，并保存为新的章节版本。',
+      okText: isSelfCheckRevision ? '按自检修订' : '生成修订稿',
       onOk: async () => {
         try {
           const res = await apiClient.post(`/novel/reviews/${report.id}/apply-revision`, {
             project_id: projectId,
             chapter_id: payload.chapter_id || activeChapter?.id,
             model_id: selectedModelId,
+            auto_quality_check: true,
           })
           if (res.data?.chapter) {
             setChapters(prev => prev.map(c => c.id === res.data.chapter.id ? res.data.chapter : c))
           }
           await loadProjectModules()
-          message.success('修订稿已入库')
+          setRightPanelOpen(true)
+          setRightPanelTab('proseQuality')
+          if (res.data?.quality_refresh?.ok) {
+            message.success(`修订稿已入库，并已复检当前版本，评分 ${res.data.quality_refresh.score ?? '-'}`)
+          } else if (res.data?.quality_refresh?.ok === false) {
+            message.warning(`修订稿已入库，但自动复检失败：${res.data.quality_refresh.error || '未知错误'}。可在正文质检里手动复检。`)
+          } else {
+            message.success('修订稿已入库')
+          }
         } catch (error: any) {
           message.error(error?.response?.data?.error || error?.message || '修订失败')
         }
@@ -2907,6 +2949,7 @@ export default function NovelProjectWorkspace() {
           onOpenReferenceConfig={() => setReferenceConfigOpen(true)}
           onOpenWritingBibleEditor={() => { void openWritingBibleEditor() }}
           onGenerateCurrentChapterProse={() => generateCurrentChapterProse()}
+          onRepairAndGenerateCurrentChapter={() => generateCurrentChapterProse({ allowIncomplete: true, forceSceneCards: true })}
           onGenerateSceneCards={() => generateSceneCardsForActiveChapter()}
           onOpenGenerationDiagnostics={openGenerationDiagnostics}
           onOpenQualityCard={openChapterQualityCard}
@@ -2930,10 +2973,14 @@ export default function NovelProjectWorkspace() {
           referenceReports={referenceReports}
           proseQualityReports={proseQualityReports}
           editorReports={editorReports}
+          editorRevisionReports={editorRevisionReports}
           bookReviews={bookReviews}
+          activeChapter={activeChapter}
           activeChapterId={activeChapterId}
+          activeChapterUpdatedAt={activeChapter?.updated_at || ''}
           chapterVersions={chapterVersions}
           chapterVersionsLoading={chapterVersionsLoading}
+          proseQualityLoading={proseQualityLoading}
           rollingBackVersionId={rollingBackVersionId}
           onClose={() => setRightPanelOpen(false)}
           onOpen={() => setRightPanelOpen(true)}
@@ -2942,6 +2989,7 @@ export default function NovelProjectWorkspace() {
           onOpenCreativeCards={() => setCreativeCardsOpen(true)}
           onOpenStoryStateEditor={openStoryStateEditor}
           onApplyEditorRevision={applyEditorRevision}
+          onRefreshProseQuality={() => refreshActiveProseQuality('manual_refresh')}
           onRollbackVersion={rollbackChapterVersion}
           onOpenVersionDetail={setChapterVersionDetail}
         />

@@ -137,12 +137,17 @@ function buildHeaders(selection: RuntimeModelSelection): Record<string, string> 
 // ── Request Body ────────────────────────────────────────────
 
 function toOpenAIBody(request: LLMRequest, selection: RuntimeModelSelection): Record<string, any> {
+  const requestMode = String(request.response_mode || 'auto')
   const responseMode = String(selection.provider.response_mode || 'auto')
-  const shouldStream = responseMode === 'stream'
+  const shouldStream = requestMode === 'stream'
     ? true
-    : responseMode === 'non_stream'
+    : requestMode === 'non_stream'
       ? false
-      : Boolean(request.stream)
+      : responseMode === 'stream'
+        ? true
+        : responseMode === 'non_stream'
+          ? false
+          : Boolean(request.stream)
   const body: Record<string, any> = {
     model: selection.model.model_name || request.model,
     messages: request.messages,

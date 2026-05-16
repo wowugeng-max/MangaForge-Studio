@@ -19,6 +19,7 @@ export interface LLMRequest {
   temperature?: number
   max_tokens?: number
   stream?: boolean
+  response_mode?: 'auto' | 'stream' | 'non_stream'
   tools?: Array<{ name: string; description: string; parameters: Record<string, any> }>
   tool_choice?: 'auto' | 'none'
   response_format?: LLMResponseFormat

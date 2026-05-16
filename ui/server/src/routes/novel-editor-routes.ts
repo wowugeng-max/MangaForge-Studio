@@ -1,4 +1,5 @@
 import type { Express } from 'express'
+import { createHash } from 'crypto'
 import {
   appendNovelRun,
   createNovelReview,
@@ -11,7 +12,7 @@ import {
   updateNovelChapter,
 } from '../novel'
 import { executeNovelAgent, previewNovelKnowledgeInjection } from '../llm'
-import { asArray, clampScore, getNovelPayload, getSafetyPolicy, parseJsonLikePayload } from './novel-route-utils'
+import { asArray, clampScore, getNovelPayload, getSafetyPolicy, normalizeIssue, parseJsonLikePayload } from './novel-route-utils'
 
 type EditorRoutesContext = {
   getWorkspace: () => string
@@ -50,6 +51,70 @@ async function loadChapterBundle(ctx: EditorRoutesContext, projectId: number, ch
   return { activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews }
 }
 
+function firstPatchText(...values: any[]) {
+  return values.map(value => String(value || '').trim()).find(Boolean) || ''
+}
+
+function textHash(value: string) {
+  return createHash('sha256').update(value || '').digest('hex').slice(0, 16)
+}
+
+function applySurgicalRevisionPatch(originalText: string, payload: any) {
+  const fullText = firstPatchText(payload?.chapter_text, payload?.prose_chapters?.[0]?.chapter_text)
+  if (fullText) {
+    return { chapterText: fullText, applied: [{ type: 'full_text', chars: fullText.length }], unapplied: [] as any[] }
+  }
+
+  let chapterText = String(originalText || '')
+  const applied: any[] = []
+  const unapplied: any[] = []
+  const replacements = asArray(payload?.replacements || payload?.replace || payload?.patches)
+  for (const item of replacements) {
+    const find = firstPatchText(item?.find, item?.old_text, item?.original, item?.target)
+    const replace = firstPatchText(item?.replace, item?.new_text, item?.replacement, item?.text)
+    if (!find || !replace) {
+      unapplied.push({ type: 'replacement', reason: 'missing_find_or_replace', item })
+      continue
+    }
+    const index = chapterText.indexOf(find)
+    if (index < 0) {
+      unapplied.push({ type: 'replacement', reason: 'anchor_not_found', find: find.slice(0, 120) })
+      continue
+    }
+    chapterText = `${chapterText.slice(0, index)}${replace}${chapterText.slice(index + find.length)}`
+    applied.push({ type: 'replacement', find: find.slice(0, 80), replace: replace.slice(0, 80) })
+  }
+
+  const insertions = asArray(payload?.insertions || payload?.insert)
+  for (const item of insertions) {
+    const text = firstPatchText(item?.text, item?.insert, item?.content)
+    const anchor = firstPatchText(item?.anchor, item?.after, item?.before, item?.near)
+    const position = String(item?.position || (item?.before ? 'before' : 'after')).toLowerCase()
+    if (!text) {
+      unapplied.push({ type: 'insertion', reason: 'missing_text', item })
+      continue
+    }
+    if (!anchor) {
+      if (position === 'start' || position === 'before') chapterText = `${text}\n\n${chapterText}`
+      else chapterText = `${chapterText}\n\n${text}`
+      applied.push({ type: 'insertion', position: anchor ? position : 'append_or_prepend', text: text.slice(0, 80) })
+      continue
+    }
+    const index = chapterText.indexOf(anchor)
+    if (index < 0) {
+      unapplied.push({ type: 'insertion', reason: 'anchor_not_found', anchor: anchor.slice(0, 120), text: text.slice(0, 120) })
+      continue
+    }
+    const offset = position === 'before' ? index : index + anchor.length
+    const prefix = position === 'before' ? '' : '\n\n'
+    const suffix = position === 'before' ? '\n\n' : ''
+    chapterText = `${chapterText.slice(0, offset)}${prefix}${text}${suffix}${chapterText.slice(offset)}`
+    applied.push({ type: 'insertion', position, anchor: anchor.slice(0, 80), text: text.slice(0, 80) })
+  }
+
+  return { chapterText, applied, unapplied }
+}
+
 function findChapterReviewPayload(reviews: any[], chapterId: number, types: string[]) {
   return reviews
     .filter(item => types.includes(item.review_type))
@@ -62,6 +127,94 @@ function scoreStatus(score: number) {
   if (score >= 85) return 'pass'
   if (score >= 70) return 'watch'
   return 'needs_rework'
+}
+
+function buildProseQualityPrompt(project: any, contextPackage: any, chapterText: string) {
+  return [
+    '任务：对当前章节正文做商用小说正文质检。只输出 JSON，不要输出正文修订稿。',
+    `作品标题：${project.title}`,
+    '检查维度：',
+    '1. 是否完成本章目标、冲突和章末钩子。',
+    '2. 是否自然衔接上一章结尾状态。',
+    '3. 角色行为是否符合角色卡与当前状态。',
+    '4. 是否有设定冲突、时间线跳跃、物品凭空出现或消失。',
+    '5. 是否有水文、重复、空泛总结、机械说明。',
+    '6. 是否疑似照搬参考项目的专名、桥段或原句。',
+    '7. 修订后新增内容是否引入新的人物、道具或规程突兀点。',
+    '',
+    '【结构化上下文包】',
+    JSON.stringify(contextPackage, null, 2).slice(0, 6000),
+    '',
+    '【待复检正文】',
+    String(chapterText || '').slice(0, 16000),
+    '',
+    '输出 JSON，字段：passed(boolean), score(0-100), issues(array: severity/type/description/suggestion), revision_directives(array), needs_revision(boolean)。只返回 JSON。',
+  ].join('\n')
+}
+
+async function createProseQualityReview(ctx: EditorRoutesContext, activeWorkspace: string, project: any, chapter: any, options: any = {}) {
+  const projectId = Number(project.id)
+  const [chapters, worldbuilding, characters, outlines, reviews] = await Promise.all([
+    listNovelChapters(activeWorkspace, projectId),
+    listNovelWorldbuilding(activeWorkspace, projectId),
+    listNovelCharacters(activeWorkspace, projectId),
+    listNovelOutlines(activeWorkspace, projectId),
+    listNovelReviews(activeWorkspace, projectId),
+  ])
+  const currentChapter = chapters.find(item => item.id === chapter.id) || chapter
+  const contextPackage = await ctx.buildChapterContextPackage(activeWorkspace, project, currentChapter, chapters, worldbuilding, characters, outlines, reviews)
+  const modelId = ctx.getStageModelId(project, 'review', Number(options.model_id || 0) || undefined)
+  const result = await executeNovelAgent('review-agent', project, {
+    task: buildProseQualityPrompt(project, contextPackage, currentChapter.chapter_text || ''),
+  }, {
+    activeWorkspace,
+    modelId: modelId ? String(modelId) : undefined,
+    maxTokens: Number(options.max_tokens || 3000),
+    temperature: ctx.getStageTemperature(project, 'review', 0.2),
+    responseMode: 'non_stream',
+    skipMemory: true,
+  })
+  if ((result as any).error) throw new Error(String((result as any).error))
+  const reviewPayload = getNovelPayload(result)
+  const normalizedReview = {
+    passed: reviewPayload?.passed !== false,
+    score: Number(reviewPayload?.score || 80),
+    issues: Array.isArray(reviewPayload?.issues) ? reviewPayload.issues.map(normalizeIssue) : [],
+    revision_directives: Array.isArray(reviewPayload?.revision_directives) ? reviewPayload.revision_directives.map((item: any) => String(item)) : [],
+    needs_revision: Boolean(reviewPayload?.needs_revision),
+    modelName: (result as any).modelName,
+  }
+  const contentHash = textHash(currentChapter.chapter_text || '')
+  const saved = await createNovelReview(activeWorkspace, {
+    project_id: projectId,
+    review_type: 'prose_quality',
+    status: normalizedReview.passed === false || Number(normalizedReview.score || 100) < 78 ? 'warn' : 'ok',
+    summary: `当前版本质检评分 ${normalizedReview.score ?? '-'}`,
+    issues: normalizedReview.issues.map((issue: any) => `${issue.severity || 'medium'}｜${issue.description || issue}`),
+    payload: JSON.stringify({
+      chapter_id: currentChapter.id,
+      chapter_updated_at: currentChapter.updated_at || '',
+      content_hash: contentHash,
+      source: options.source || 'manual_refresh',
+      source_review_id: options.source_review_id || null,
+      context_package: contextPackage,
+      self_check: {
+        review: normalizedReview,
+        revision: null,
+        final_text: currentChapter.chapter_text || '',
+        revised: false,
+      },
+    }),
+  })
+  await appendNovelRun(activeWorkspace, {
+    project_id: projectId,
+    run_type: 'prose_quality',
+    step_name: `chapter-${currentChapter.chapter_no}`,
+    status: 'success',
+    input_ref: JSON.stringify({ chapter_id: currentChapter.id, source: options.source || 'manual_refresh' }),
+    output_ref: JSON.stringify({ review_id: saved.id, score: normalizedReview.score, modelName: (result as any).modelName }),
+  })
+  return { review: normalizedReview, saved, contextPackage, result, content_hash: contentHash }
 }
 
 function buildChapterQualityCard(chapter: any, contextPackage: any, reviews: any[]) {
@@ -475,28 +628,55 @@ export function registerNovelEditorRoutes(app: Express, ctx: EditorRoutesContext
       const review = reviews.find(item => item.id === Number(req.params.reviewId))
       if (!review) return res.status(404).json({ error: 'review not found' })
       const payload = parseJsonLikePayload(review.payload) || {}
-      const report = payload.report || {}
+      const selfCheckReview = payload.self_check?.review || {}
+      const report = payload.report || (review.review_type === 'prose_quality' ? {
+        overall_score: selfCheckReview.score,
+        must_fix: asArray(selfCheckReview.issues).map((issue: any) => issue?.description || issue?.suggestion || issue).filter(Boolean),
+        optional_improvements: asArray(selfCheckReview.revision_directives),
+        one_click_revision_prompt: asArray(selfCheckReview.revision_directives).join('；'),
+        prose_quality_review: selfCheckReview,
+      } : {})
       const chapterId = Number(payload.chapter_id || req.body.chapter_id || 0)
       const chapters = await listNovelChapters(activeWorkspace, projectId)
       const chapter = chapters.find(item => item.id === chapterId)
       if (!chapter) return res.status(404).json({ error: 'chapter not found' })
       const prompt = [
-        '任务：根据商业编辑报告对当前章节进行一键修订。只输出 JSON。',
+        '任务：根据商业编辑报告对当前章节做局部修订补丁。只输出 JSON。',
         `项目：${project.title}`,
-        '要求：保留可用情节，修复 must_fix、维度问题和连续性问题；不得照搬参考作品；输出完整修订正文。',
+        '要求：保留当前章节整体结构、节奏、章末钩子和可用文气；只修复报告指出的问题；不得照搬参考作品。',
+        '为了避免长连接失败，优先输出局部补丁，不要输出完整正文。',
         '【编辑报告】',
         JSON.stringify(report, null, 2).slice(0, 7000),
         '【修订提示】',
         String(report.one_click_revision_prompt || req.body.prompt || ''),
         '【原章节正文】',
-        String(chapter.chapter_text || '').slice(0, 18000),
-        '输出 JSON：{chapter_text, scene_breakdown, continuity_notes, revision_summary}',
+        String(chapter.chapter_text || '').slice(0, 12000),
+        '输出 JSON：',
+        '{',
+        '  "revision_mode": "patch",',
+        '  "replacements": [{"find": "原文中可精确匹配的一小段", "replace": "替换后的文字"}],',
+        '  "insertions": [{"anchor": "原文中可精确匹配的一小段", "position": "before|after", "text": "要插入的文字"}],',
+        '  "continuity_notes": ["修订后的连续性说明"],',
+        '  "revision_summary": "简述修了什么"',
+        '}',
+        '只有在补丁无法表达时，才输出 chapter_text 完整修订正文。',
       ].join('\n')
       const modelId = ctx.getStageModelId(project, 'revise', Number(req.body.model_id || 0) || undefined)
-      const result = await executeNovelAgent('prose-agent', project, { task: prompt }, { activeWorkspace, modelId: modelId ? String(modelId) : undefined, maxTokens: 9000, temperature: ctx.getStageTemperature(project, 'revise', 0.62), skipMemory: true })
+      const result = await executeNovelAgent('prose-agent', project, { task: prompt }, {
+        activeWorkspace,
+        modelId: modelId ? String(modelId) : undefined,
+        maxTokens: 2600,
+        temperature: ctx.getStageTemperature(project, 'revise', 0.62),
+        responseMode: 'non_stream',
+        skipMemory: true,
+      })
+      if ((result as any).error) return res.status(502).json({ error: (result as any).error, result })
       const resultPayload = getNovelPayload(result)
-      const nextText = resultPayload?.chapter_text || resultPayload?.prose_chapters?.[0]?.chapter_text || ''
-      if (!nextText) return res.status(502).json({ error: '修订未返回正文', result })
+      const patchResult = applySurgicalRevisionPatch(String(chapter.chapter_text || ''), resultPayload)
+      const nextText = patchResult.chapterText
+      if (!nextText || (!patchResult.applied.length && !resultPayload?.chapter_text && !resultPayload?.prose_chapters?.[0]?.chapter_text)) {
+        return res.status(502).json({ error: '修订未返回可应用补丁', result, patch_result: patchResult })
+      }
       const updated = await updateNovelChapter(activeWorkspace, chapter.id, {
         chapter_text: nextText,
         scene_breakdown: resultPayload?.scene_breakdown || resultPayload?.prose_chapters?.[0]?.scene_breakdown || chapter.scene_breakdown || [],
@@ -509,17 +689,78 @@ export function registerNovelEditorRoutes(app: Express, ctx: EditorRoutesContext
         status: 'ok',
         summary: `已根据编辑报告 ${review.id} 生成修订稿`,
         issues: [],
-        payload: JSON.stringify({ chapter_id: chapter.id, source_review_id: review.id, revision_summary: resultPayload?.revision_summary || '' }),
+        payload: JSON.stringify({
+          chapter_id: chapter.id,
+          source_review_id: review.id,
+          revision_summary: resultPayload?.revision_summary || '',
+          revision_mode: resultPayload?.revision_mode || 'patch',
+          applied_patches: patchResult.applied,
+          unapplied_patches: patchResult.unapplied,
+        }),
       })
+      let qualityRefresh: any = null
+      if (req.body?.auto_quality_check !== false) {
+        try {
+          const quality = await createProseQualityReview(ctx, activeWorkspace, project, updated, {
+            model_id: req.body.model_id,
+            source: 'post_revision',
+            source_review_id: review.id,
+            max_tokens: 3000,
+          })
+          qualityRefresh = {
+            ok: true,
+            review: quality.saved,
+            score: quality.review.score,
+            status: quality.saved.status,
+          }
+        } catch (error: any) {
+          qualityRefresh = {
+            ok: false,
+            error: String(error?.message || error),
+          }
+          await appendNovelRun(activeWorkspace, {
+            project_id: projectId,
+            run_type: 'prose_quality',
+            step_name: `chapter-${chapter.chapter_no}`,
+            status: 'failed',
+            input_ref: JSON.stringify({ chapter_id: chapter.id, source: 'post_revision', source_review_id: review.id }),
+            output_ref: JSON.stringify({ error: qualityRefresh.error }),
+          })
+        }
+      }
       await appendNovelRun(activeWorkspace, {
         project_id: projectId,
         run_type: 'editor_revision',
         step_name: `chapter-${chapter.chapter_no}`,
         status: 'success',
         input_ref: JSON.stringify({ review_id: review.id }),
-        output_ref: JSON.stringify({ review: saved, modelName: (result as any).modelName }),
+        output_ref: JSON.stringify({ review: saved, modelName: (result as any).modelName, applied_patches: patchResult.applied.length, unapplied_patches: patchResult.unapplied.length, quality_refresh: qualityRefresh }),
       })
-      res.json({ ok: true, chapter: updated, review: saved, result })
+      res.json({ ok: true, chapter: updated, review: saved, result, patch_result: patchResult, quality_refresh: qualityRefresh })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.post('/api/novel/chapters/:chapterId/prose-quality', async (req, res) => {
+    try {
+      const loaded = await loadChapterBundle(ctx, Number(req.body.project_id || req.query.project_id || 0), Number(req.params.chapterId))
+      if ('error' in loaded) return res.status(loaded.status || 500).json({ error: loaded.error })
+      const { activeWorkspace, project, chapter } = loaded
+      const quality = await createProseQualityReview(ctx, activeWorkspace, project, chapter, {
+        model_id: req.body.model_id,
+        source: req.body.source || 'manual_refresh',
+        source_review_id: req.body.source_review_id || null,
+        max_tokens: 3000,
+      })
+      res.json({
+        ok: true,
+        review: quality.saved,
+        self_check: quality.review,
+        content_hash: quality.content_hash,
+        context_package: quality.contextPackage,
+        result: quality.result,
+      })
     } catch (error) {
       res.status(500).json({ error: String(error) })
     }

@@ -401,10 +401,11 @@ export async function executeNovelAgent(
     temperature?: number
     maxTokens?: number
     streamTaskId?: string
+    responseMode?: 'auto' | 'stream' | 'non_stream'
     skipMemory?: boolean
   } = {},
 ): Promise<LLMResponse> {
-  const { modelId, activeWorkspace, temperature = 0.7, maxTokens = 4000, skipMemory } = options
+  const { modelId, activeWorkspace, temperature = 0.7, maxTokens = 4000, responseMode, skipMemory } = options
 
   // Build messages
   const messages = buildAgentMessages(agentId, project, context)
@@ -419,7 +420,8 @@ export async function executeNovelAgent(
       messages,
       temperature,
       max_tokens: maxTokens,
-      stream: true,
+      stream: responseMode === 'non_stream' ? false : true,
+      response_mode: responseMode,
       response_format: 'text',
     },
     preferredModelId,

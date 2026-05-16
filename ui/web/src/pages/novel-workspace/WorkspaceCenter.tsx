@@ -285,6 +285,7 @@ export function WorkspaceCenter({
   onOpenReferenceConfig,
   onOpenWritingBibleEditor,
   onGenerateCurrentChapterProse,
+  onRepairAndGenerateCurrentChapter,
   onGenerateSceneCards,
   onOpenGenerationDiagnostics,
   onOpenQualityCard,
@@ -322,6 +323,7 @@ export function WorkspaceCenter({
   onOpenReferenceConfig: () => void
   onOpenWritingBibleEditor: () => void
   onGenerateCurrentChapterProse: () => void
+  onRepairAndGenerateCurrentChapter: () => void
   onGenerateSceneCards: () => void
   onOpenGenerationDiagnostics: () => void
   onOpenQualityCard: () => void
@@ -331,6 +333,10 @@ export function WorkspaceCenter({
   onChapterTextChange: (text: string) => void
 }) {
   const [editorDisplayPrefs, setEditorDisplayPrefs] = React.useState<EditorDisplayPrefs>(() => loadEditorDisplayPrefs())
+  const materialReady = !materialScore || Boolean(materialScore.can_generate)
+  const materialRecommendations = Array.isArray(materialScore?.recommendations)
+    ? materialScore.recommendations.filter(Boolean)
+    : []
 
   React.useEffect(() => {
     saveEditorDisplayPrefs(editorDisplayPrefs)
@@ -430,8 +436,29 @@ export function WorkspaceCenter({
                 <Tooltip title="创建可恢复流水线，并停在场景卡确认阶段">
                   <Button size="small" loading={pipelineLoading} onClick={onStartChapterPipeline}>流水线</Button>
                 </Tooltip>
-                <Tooltip title="生成正文">
-                  <Button type="primary" size="small" icon={<PlayCircleOutlined />} loading={generatingProse} onClick={onGenerateCurrentChapterProse}>生成</Button>
+                {!materialReady && (
+                  <Tooltip title={materialRecommendations.slice(0, 4).join('；') || '自动生成场景卡后继续正文生成'}>
+                    <Button
+                      type="primary"
+                      size="small"
+                      icon={<PlayCircleOutlined />}
+                      loading={generatingProse}
+                      onClick={onRepairAndGenerateCurrentChapter}
+                    >
+                      补齐并生成
+                    </Button>
+                  </Tooltip>
+                )}
+                <Tooltip title={materialReady ? '生成正文' : '材料不足时建议先使用“补齐并生成”；仍可直接生成并在弹窗中选择是否继续'}>
+                  <Button
+                    type={materialReady ? 'primary' : 'default'}
+                    size="small"
+                    icon={<PlayCircleOutlined />}
+                    loading={generatingProse}
+                    onClick={onGenerateCurrentChapterProse}
+                  >
+                    生成
+                  </Button>
                 </Tooltip>
               </Space.Compact>
               <Space.Compact>
