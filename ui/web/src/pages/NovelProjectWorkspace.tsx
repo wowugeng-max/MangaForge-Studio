@@ -2580,14 +2580,23 @@ export default function NovelProjectWorkspace() {
     if (!await flushPendingSave()) return
     const targetChapterId = activeChapter.id
     setGeneratingProse(true)
+    setStreamingChapterId(targetChapterId)
+    setStreamingText('')
+    setStreamingProgress('自动补齐上下文材料')
+    setStreamingPercent(8)
     try {
       const res = await apiClient.post(`/novel/chapters/${targetChapterId}/auto-repair-context`, {
         project_id: projectId,
         model_id: selectedModelId,
       })
       const applied = Array.isArray(res.data?.applied) ? res.data.applied : []
+      const warnings = Array.isArray(res.data?.warnings) ? res.data.warnings : []
       await loadProjectModules()
-      message.success(applied.length ? `已自动补齐 ${applied.length} 项上下文材料` : '上下文材料无需补齐')
+      if (warnings.length) {
+        message.warning(String(warnings[0] || '上下文补齐已降级处理，将继续生成正文'))
+      } else {
+        message.success(applied.length ? `已自动补齐 ${applied.length} 项上下文材料` : '上下文材料无需补齐')
+      }
     } catch (error: any) {
       message.error(error?.response?.data?.error || error?.message || '上下文自动补齐失败')
       setGeneratingProse(false)
@@ -2696,7 +2705,23 @@ export default function NovelProjectWorkspace() {
       })
     } else if (kind === 'character') {
       const data = currentItem || { name: '', role_type: '', archetype: '', motivation: '', goal: '', conflict: '' }
-      editorForm.setFieldsValue({ ...data, role_type: data.role_type || data.role || '' })
+      const state = data.current_state || {}
+      const profile = data.raw_payload?.profile || {}
+      editorForm.setFieldsValue({
+        ...data,
+        role_type: data.role_type || data.role || '',
+        age: state.age ?? profile.age ?? '',
+        gender: profile.gender || state.gender || '',
+        identity: profile.identity || state.identity || '',
+        faction: profile.faction || state.faction || '',
+        personality: formatListField(data.personality),
+        abilities: formatListField(data.abilities),
+        items: formatListField(state.items || state.inventory || data.raw_payload?.items),
+        knowledge_scope: formatListField(state.knowledge_scope || state.known_facts),
+        information_boundaries: formatListField(state.information_boundaries),
+        relationships: formatJsonField(data.relationships || []),
+        current_state: formatJsonField(state || {}),
+      })
     } else if (kind === 'outline') {
       const data = currentItem || {
         outline_type: 'master', title: '', summary: '', conflict_points: [],
@@ -2738,10 +2763,41 @@ export default function NovelProjectWorkspace() {
         if (editorItem?.id) await apiClient.put(`/novel/worldbuilding/${editorItem.id}`, payload)
         else await apiClient.post(`/novel/projects/${projectId}/worldbuilding`, payload)
       } else if (editorKind === 'character') {
+        const baseState = parseJsonField(v.current_state, {})
+        const nextCurrentState = {
+          ...(baseState && typeof baseState === 'object' && !Array.isArray(baseState) ? baseState : {}),
+          age: v.age || baseState?.age || '',
+          gender: v.gender || baseState?.gender || '',
+          identity: v.identity || baseState?.identity || '',
+          faction: v.faction || baseState?.faction || '',
+          items: parseListField(v.items),
+          knowledge_scope: parseListField(v.knowledge_scope),
+          information_boundaries: parseListField(v.information_boundaries),
+        }
         const payload = {
           project_id: projectId, name: v.name,
           role_type: v.role_type || '', archetype: v.archetype || '',
           motivation: v.motivation || '', goal: v.goal || '', conflict: v.conflict || '',
+          personality: parseListField(v.personality),
+          abilities: parseListField(v.abilities),
+          appearance: v.appearance || '',
+          backstory: v.backstory || '',
+          secret: v.secret || '',
+          growth_arc: v.growth_arc || '',
+          arc_hint: v.arc_hint || '',
+          relationships: parseJsonField(v.relationships, []),
+          current_state: nextCurrentState,
+          raw_payload: {
+            ...(editorItem?.raw_payload || {}),
+            profile: {
+              ...((editorItem?.raw_payload || {}).profile || {}),
+              age: v.age || '',
+              gender: v.gender || '',
+              identity: v.identity || '',
+              faction: v.faction || '',
+            },
+            items: parseListField(v.items),
+          },
         }
         if (editorItem?.id) await apiClient.put(`/novel/characters/${editorItem.id}`, payload)
         else await apiClient.post('/novel/characters', payload)

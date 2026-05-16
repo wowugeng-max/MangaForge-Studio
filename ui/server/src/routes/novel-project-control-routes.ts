@@ -1310,8 +1310,13 @@ export function registerNovelProjectControlRoutes(app: Express, ctx: ProjectCont
           goal: item.goal || '',
           motivation: item.motivation || '',
           conflict: item.conflict || '',
+          appearance: item.appearance || '',
+          abilities: item.abilities || [],
+          relationships: item.relationships || [],
+          secret: item.secret || '',
           growth_arc: item.growth_arc || '',
           current_state: item.current_state || {},
+          profile: item.raw_payload?.profile || {},
         })),
         outlines: outlines.slice(0, 40).map(item => ({
           type: item.outline_type,

@@ -285,12 +285,18 @@ export function ReferencePanel({
                   <Space direction="vertical" size={2} style={{ width: '100%' }}>
                     {displayValue(c.role_type) && <Text><Text strong>定位：</Text>{displayValue(c.role_type)}</Text>}
                     {displayValue(c.archetype) && <Text><Text strong>原型：</Text>{displayValue(c.archetype)}</Text>}
+                    {displayValue(c.raw_payload?.profile) && <Text><Text strong>基础档案：</Text>{displayValue(c.raw_payload.profile)}</Text>}
+                    {displayValue(c.appearance) && <Text><Text strong>外貌：</Text>{displayValue(c.appearance)}</Text>}
                     {displayValue(c.motivation) && <Text><Text strong>动机：</Text>{displayValue(c.motivation)}</Text>}
                     {displayValue(c.goal) && <Text><Text strong>目标：</Text>{displayValue(c.goal)}</Text>}
                     {displayValue(c.conflict) && <Text><Text strong>冲突：</Text>{displayValue(c.conflict)}</Text>}
+                    {displayValue(c.abilities) && <Text><Text strong>能力：</Text>{displayValue(c.abilities)}</Text>}
+                    {displayValue(c.current_state?.items) && <Text><Text strong>持有物：</Text>{displayValue(c.current_state.items)}</Text>}
+                    {displayValue(c.current_state?.knowledge_scope) && <Text><Text strong>认知范围：</Text>{displayValue(c.current_state.knowledge_scope)}</Text>}
                     {c.current_state?.information_boundaries?.length > 0 && (
                       <Text><Text strong style={{ color: '#faad14' }}>信息边界：</Text>{c.current_state.information_boundaries.length} 项限制</Text>
                     )}
+                    {displayValue(c.current_state) && <Paragraph style={{ margin: 0, fontSize: 12 }} ellipsis={{ rows: 3, expandable: true }}><Text strong>当前状态：</Text>{displayValue(c.current_state)}</Paragraph>}
                   </Space>
                 </Card>
               )),

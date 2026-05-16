@@ -1,5 +1,5 @@
 import React from 'react'
-import { Col, Form, Input, InputNumber, Modal, Row, Select } from 'antd'
+import { Card, Col, Form, Input, InputNumber, Modal, Row, Select } from 'antd'
 import type { FormInstance } from 'antd'
 
 export type EditorKind = 'worldbuilding' | 'character' | 'outline' | 'chapter'
@@ -22,7 +22,7 @@ export function EditorModal({
       onCancel={onCancel}
       onOk={onSubmit}
       okText="保存"
-      width={720}
+      width={860}
     >
       <Form form={form} layout="vertical" style={{ marginTop: 8 }}>
         {editorKind === 'worldbuilding' && (
@@ -46,8 +46,44 @@ export function EditorModal({
               <Col span={12}><Form.Item name="archetype" label="原型"><Input /></Form.Item></Col>
               <Col span={12}><Form.Item name="goal" label="目标"><Input /></Form.Item></Col>
             </Row>
+            <Card size="small" title="基础档案" style={{ marginBottom: 12 }}>
+              <Row gutter={16}>
+                <Col span={6}><Form.Item name="age" label="年龄" style={{ marginBottom: 0 }}><Input /></Form.Item></Col>
+                <Col span={6}><Form.Item name="gender" label="性别" style={{ marginBottom: 0 }}><Input /></Form.Item></Col>
+                <Col span={6}><Form.Item name="identity" label="身份" style={{ marginBottom: 0 }}><Input /></Form.Item></Col>
+                <Col span={6}><Form.Item name="faction" label="势力" style={{ marginBottom: 0 }}><Input /></Form.Item></Col>
+              </Row>
+              <Form.Item name="appearance" label="外貌/体貌固定点" style={{ marginTop: 12, marginBottom: 0 }}>
+                <Input.TextArea rows={2} placeholder="例如：断臂、衣着、标志性伤痕、气质、不可随意改变的外貌特征" />
+              </Form.Item>
+            </Card>
             <Form.Item name="motivation" label="动机"><Input.TextArea rows={2} /></Form.Item>
             <Form.Item name="conflict" label="冲突"><Input.TextArea rows={2} /></Form.Item>
+            <Row gutter={16}>
+              <Col span={12}><Form.Item name="personality" label="性格标签（逗号或换行分隔）"><Input.TextArea rows={2} /></Form.Item></Col>
+              <Col span={12}><Form.Item name="abilities" label="能力/限制（逗号或换行分隔）"><Input.TextArea rows={2} /></Form.Item></Col>
+            </Row>
+            <Row gutter={16}>
+              <Col span={12}><Form.Item name="items" label="持有物/资源（逗号或换行分隔）"><Input.TextArea rows={2} /></Form.Item></Col>
+              <Col span={12}><Form.Item name="knowledge_scope" label="认知范围/已知事实（逗号或换行分隔）"><Input.TextArea rows={2} /></Form.Item></Col>
+            </Row>
+            <Form.Item name="information_boundaries" label="信息边界/不知道的事（逗号或换行分隔）">
+              <Input.TextArea rows={2} placeholder="例如：不知道王长生真实身份；不知道天尊庙与皇室交易细节" />
+            </Form.Item>
+            <Row gutter={16}>
+              <Col span={12}><Form.Item name="backstory" label="背景"><Input.TextArea rows={3} /></Form.Item></Col>
+              <Col span={12}><Form.Item name="secret" label="秘密/隐藏信息"><Input.TextArea rows={3} /></Form.Item></Col>
+            </Row>
+            <Row gutter={16}>
+              <Col span={12}><Form.Item name="growth_arc" label="成长线"><Input.TextArea rows={2} /></Form.Item></Col>
+              <Col span={12}><Form.Item name="arc_hint" label="近期弧线提示"><Input.TextArea rows={2} /></Form.Item></Col>
+            </Row>
+            <Form.Item name="relationships" label="关系 JSON">
+              <Input.TextArea rows={3} placeholder='[{"target":"迟正","relation":"效忠","status":"试探中"}]' />
+            </Form.Item>
+            <Form.Item name="current_state" label="当前完整状态 JSON">
+              <Input.TextArea rows={5} placeholder='{"location":"黑桑县","physical_condition":"断臂濒死","emotional_state":"警惕","last_seen_chapter":1}' />
+            </Form.Item>
           </>
         )}
         {editorKind === 'outline' && (

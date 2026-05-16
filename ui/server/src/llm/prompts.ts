@@ -421,7 +421,9 @@ export function buildProsePrompt(
         const motivation = char.motivation || ''
         const goal = char.goal || ''
         const abilities = Array.isArray(char.abilities) ? char.abilities.join('、') : (char.abilities || '')
-        parts.push(`  ${name} [${role}] 性格：${personality} 动机：${motivation} 目标：${goal} 能力：${abilities}`)
+        const appearance = char.appearance || ''
+        const state = char.current_state ? JSON.stringify(char.current_state).slice(0, 500) : ''
+        parts.push(`  ${name} [${role}] 性格：${personality} 动机：${motivation} 目标：${goal} 能力：${abilities} 外貌：${appearance} 当前状态：${state}`)
       }
     }
   }

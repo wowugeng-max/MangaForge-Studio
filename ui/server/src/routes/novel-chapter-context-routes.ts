@@ -32,16 +32,41 @@ function compactContextText(value: any, limit = 700) {
 }
 
 function normalizeGeneratedCharacter(item: any) {
+  const currentState = item?.current_state && typeof item.current_state === 'object' ? item.current_state : {}
   return {
     name: String(item?.name || '').trim(),
     role_type: String(item?.role_type || item?.role || ''),
     archetype: String(item?.archetype || ''),
+    personality: asArray(item?.personality).map((value: any) => String(value || '').trim()).filter(Boolean),
     motivation: String(item?.motivation || ''),
     goal: String(item?.goal || ''),
     conflict: String(item?.conflict || ''),
+    appearance: String(item?.appearance || ''),
+    abilities: asArray(item?.abilities).map((value: any) => String(value || '').trim()).filter(Boolean),
+    backstory: String(item?.backstory || ''),
+    secret: String(item?.secret || ''),
+    relationships: asArray(item?.relationships),
     growth_arc: String(item?.growth_arc || item?.arc || ''),
-    current_state: item?.current_state && typeof item.current_state === 'object' ? item.current_state : {},
-    raw_payload: item || {},
+    current_state: {
+      ...currentState,
+      age: currentState.age ?? item?.age ?? '',
+      gender: currentState.gender ?? item?.gender ?? '',
+      identity: currentState.identity ?? item?.identity ?? '',
+      faction: currentState.faction ?? item?.faction ?? '',
+      items: asArray(currentState.items || item?.items),
+      knowledge_scope: asArray(currentState.knowledge_scope || item?.knowledge_scope),
+      information_boundaries: asArray(currentState.information_boundaries || item?.information_boundaries),
+    },
+    raw_payload: {
+      ...(item || {}),
+      profile: {
+        age: item?.age || currentState.age || '',
+        gender: item?.gender || currentState.gender || '',
+        identity: item?.identity || currentState.identity || '',
+        faction: item?.faction || currentState.faction || '',
+      },
+      items: asArray(currentState.items || item?.items),
+    },
   }
 }
 
@@ -264,19 +289,21 @@ export function registerNovelChapterContextRoutes(app: Express, ctx: ChapterCont
       }
 
       let payload: any = {}
+      let repairError = ''
       const modelId = req.body?.model_id ? String(req.body.model_id) : ''
-      if (modelId) {
+      if (modelId && (needsCharacters || needsCharacterState)) {
         const prompt = [
           '任务：为当前小说章节自动补齐生成前上下文材料。只输出 JSON。',
           '只补材料，不生成正文。优先解决：角色卡不足、角色当前状态不足、禁止重复信息不足。',
           '输出字段：',
           '{',
-          '  "characters": [{"name","role_type","archetype","motivation","goal","conflict","growth_arc","current_state":{}}],',
+          '  "characters": [{"name","role_type","archetype","age","gender","identity","faction","appearance","personality":[],"abilities":[],"items":[],"knowledge_scope":[],"information_boundaries":[],"motivation","goal","conflict","backstory","secret","relationships":[],"growth_arc","current_state":{}}],',
           '  "character_updates": [{"name","current_state":{}}],',
           '  "forbidden_repeats": ["本章禁止重复解释的信息"],',
           '  "must_advance": ["本章必须推进的剧情点"],',
           '  "repair_summary": "补齐说明"',
           '}',
+          '角色 current_state 要尽量结构化，包含 location, physical_condition, emotional_state, items, knowledge_scope, information_boundaries, ability_status, relationship_attitudes, last_seen_chapter 等可由材料确定的字段。',
           '要求：角色卡只创建对当前章和后续 5 章有用的主要/关键角色；不要编造与项目核心冲突相违背的人设；禁止重复信息要具体到本章写作可执行。',
           '【项目】',
           JSON.stringify({
@@ -300,40 +327,64 @@ export function registerNovelChapterContextRoutes(app: Express, ctx: ChapterCont
           JSON.stringify(characters.slice(0, 20).map(char => ({
             name: char.name,
             role: char.role_type || char.role,
+            archetype: char.archetype,
+            appearance: char.appearance,
+            abilities: char.abilities,
             motivation: char.motivation,
             goal: char.goal,
             conflict: char.conflict,
             current_state: char.current_state || {},
+            profile: char.raw_payload?.profile || {},
           })), null, 2),
           '【世界观/大纲/近期章节】',
           JSON.stringify({
-            worldbuilding: worldbuilding.slice(0, 3),
-            outlines: outlines.slice(0, 30).map(item => ({ type: item.outline_type, title: item.title, summary: item.summary, hook: item.hook })),
+            worldbuilding: worldbuilding.slice(0, 2).map(item => ({
+              world_summary: compactContextText(item.world_summary, 500),
+              rules: asArray(item.rules).slice(0, 8),
+              timeline_anchor: item.timeline_anchor || '',
+            })),
+            outlines: outlines.slice(0, 15).map(item => ({ type: item.outline_type, title: item.title, summary: compactContextText(item.summary, 400), hook: item.hook })),
             recent_chapters: chapters
               .filter(item => item.chapter_no <= chapter.chapter_no)
-              .slice(-5)
-              .map(item => ({ chapter_no: item.chapter_no, title: item.title, summary: item.chapter_summary, ending_hook: item.ending_hook, excerpt: compactContextText(item.chapter_text, 500) })),
+              .slice(-3)
+              .map(item => ({ chapter_no: item.chapter_no, title: item.title, summary: item.chapter_summary, ending_hook: item.ending_hook, excerpt: compactContextText(item.chapter_text, 260) })),
             story_state: contextPackage.story_state?.global || {},
             preflight_warnings: contextPackage.preflight?.warnings || [],
-          }, null, 2).slice(0, 12000),
+          }, null, 2).slice(0, 6500),
         ].join('\n')
-        const result = await executeNovelAgent('outline-agent', project, { task: prompt }, {
-          activeWorkspace,
-          modelId,
-          maxTokens: 4000,
-          temperature: 0.35,
-          responseMode: 'non_stream',
-          skipMemory: true,
-        })
-        if ((result as any).error) return res.status(502).json({ error: (result as any).error, result })
-        payload = getNovelPayload(result)
+        try {
+          const result = await executeNovelAgent('outline-agent', project, { task: prompt }, {
+            activeWorkspace,
+            modelId,
+            maxTokens: 2200,
+            temperature: 0.35,
+            responseMode: 'stream',
+            skipMemory: true,
+          })
+          if ((result as any).error) {
+            repairError = String((result as any).error || '上下文补齐模型调用失败')
+          } else {
+            payload = getNovelPayload(result)
+          }
+        } catch (error) {
+          repairError = String(error || '上下文补齐模型调用失败')
+        }
+        if (repairError) {
+          payload = {
+            characters: [],
+            character_updates: [],
+            forbidden_repeats: fallbackForbiddenRepeats(project, chapter, contextPackage),
+            must_advance: asArray(chapter.raw_payload?.must_advance),
+            repair_summary: `模型补齐失败，已降级为本地可推断补齐：${repairError.slice(0, 240)}`,
+          }
+        }
       } else {
         payload = {
           characters: [],
           character_updates: [],
           forbidden_repeats: fallbackForbiddenRepeats(project, chapter, contextPackage),
           must_advance: asArray(chapter.raw_payload?.must_advance),
-          repair_summary: '未指定模型，仅执行本地可推断补齐。',
+          repair_summary: modelId ? '当前缺口无需调用模型，仅执行本地可推断补齐。' : '未指定模型，仅执行本地可推断补齐。',
         }
       }
 
@@ -396,6 +447,7 @@ export function registerNovelChapterContextRoutes(app: Express, ctx: ChapterCont
         ok: true,
         applied,
         payload,
+        warnings: repairError ? [`上下文补齐模型调用失败，已降级处理并允许继续生成：${repairError.slice(0, 240)}`] : [],
         context_package: 'error' in refreshed ? null : refreshed.contextPackage,
         preflight: 'error' in refreshed ? null : refreshed.contextPackage.preflight,
         material_score: 'error' in refreshed ? null : buildMaterialScore(refreshed.contextPackage),
