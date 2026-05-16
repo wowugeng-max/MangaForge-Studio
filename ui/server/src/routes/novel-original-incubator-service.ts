@@ -15,6 +15,8 @@ export function createNovelOriginalIncubatorService() {
     `目标平台/读者：${body.target_audience || project.target_audience || '通用网文读者'}`,
     `创意/要求：${body.idea || project.synopsis || ''}`,
     `候选方案数：${Math.max(1, Math.min(5, Number(body.variant_count || 1)))}`,
+    project.reference_config?.project_seed ? '【已整理项目种子】' : '',
+    project.reference_config?.project_seed ? JSON.stringify(project.reference_config.project_seed, null, 2).slice(0, 9000) : '',
     '',
     '请输出 JSON，字段：',
     'directions: array，当候选方案数大于 1 时输出多个方向，每项包含 direction_id,title,commercial_positioning,core_hook,differentiators,risks,first_10_chapters,score,selection_reason',
