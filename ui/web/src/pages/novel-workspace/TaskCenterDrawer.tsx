@@ -45,7 +45,10 @@ function runTypeLabel(type?: string) {
     book_review: '全书总检',
     quality_benchmark: '质量基准',
     mechanical_qa: '机械质检',
+    mechanical_qa_llm: 'AI机械质检复核',
+    mechanical_qa_repair: '机械质检修复',
     propagation_debt: '传播债务',
+    propagation_debt_llm: 'AI传播债务方案',
     regression_benchmark: '回归基准',
     ab_experiment: 'A/B 实验',
     ab_sandbox: 'A/B 沙盒实写',
@@ -55,6 +58,7 @@ function runTypeLabel(type?: string) {
     release_quality_batch: '发布质检批量任务',
     release_similarity_batch: '发布相似度批量任务',
     project_backup: '项目备份',
+    project_backup_import: '备份导入',
     genre_template_apply: '类型模板',
   }
   return map[String(type || '')] || type || '任务'

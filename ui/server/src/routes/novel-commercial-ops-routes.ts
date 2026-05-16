@@ -2,18 +2,25 @@ import type { Express } from 'express'
 import { createHash } from 'crypto'
 import {
   appendNovelRun,
+  createNovelChapter,
+  createNovelCharacter,
+  createNovelOutline,
+  createNovelProject,
   createNovelReview,
+  createNovelWorldbuilding,
   listNovelCharacters,
   listNovelChapters,
   listNovelOutlines,
   listNovelReviews,
   listNovelRuns,
   listNovelWorldbuilding,
+  updateNovelOutline,
   updateNovelProject,
 } from '../novel'
 import { readKeys } from '../key-store'
 import { readModels } from '../model-store'
 import { readProviders } from '../provider-store'
+import { executeNovelAgent } from '../llm'
 import { asArray, compactText, parseJsonLikePayload } from './novel-route-utils'
 
 type CommercialOpsContext = {
@@ -104,6 +111,102 @@ function topRepeatedPhrases(text: string) {
     .sort((a, b) => b[1] - a[1])
     .slice(0, 8)
     .map(([phrase, count]) => ({ phrase, count }))
+}
+
+function chapterSnippet(chapter: any, limit = 900) {
+  const text = String(chapter.chapter_text || '')
+  if (!text) return ''
+  if (text.length <= limit) return text
+  const head = text.slice(0, Math.floor(limit * 0.55))
+  const tail = text.slice(-Math.floor(limit * 0.35))
+  return `${head}\n...\n${tail}`
+}
+
+function buildMechanicalQaLlmPrompt(project: any, report: any, chapters: any[]) {
+  const issueChapterNos = new Set(report.issues.slice(0, 18).map((item: any) => Number(item.chapter_no || 0)).filter(Boolean))
+  const chapterSamples = chapters
+    .filter(chapter => issueChapterNos.has(Number(chapter.chapter_no || 0)))
+    .sort((a, b) => Number(a.chapter_no || 0) - Number(b.chapter_no || 0))
+    .slice(0, 10)
+    .map(chapter => ({
+      chapter_id: chapter.id,
+      chapter_no: chapter.chapter_no,
+      title: chapter.title,
+      word_count: wc(chapter.chapter_text || ''),
+      ending_hook: chapter.ending_hook || '',
+      text_sample: chapterSnippet(chapter),
+    }))
+  return `
+你是商业网文工作台的资深编辑。现在已有一份“本地机械质检规则引擎”报告，请你做大模型复核，不要重写全文。
+
+项目：
+${JSON.stringify({ id: project.id, title: project.title, genre: project.genre, summary: project.summary, writing_bible: project.reference_config?.writing_bible || {}, style_lock: project.reference_config?.style_lock || {} }, null, 2)}
+
+本地质检报告：
+${JSON.stringify({ score: report.score, status: report.status, summary: report.summary, issues: report.issues.slice(0, 40), next_actions: report.next_actions }, null, 2)}
+
+相关章节样本：
+${JSON.stringify(chapterSamples, null, 2)}
+
+请只返回 JSON，结构如下：
+{
+  "overall_verdict": "一句话判断本地质检是否准确，以及本书最该先处理什么",
+  "score_adjustment": {"suggested_score": 0-100, "reason": "为什么"},
+  "confirmed_issues": [{"chapter_no": 1, "severity": "high|medium|low", "issue": "确认的问题", "fix": "具体修法"}],
+  "false_positives": [{"chapter_no": 1, "issue": "本地规则误判项", "reason": "为什么"}],
+  "missed_issues": [{"chapter_no": 1, "severity": "high|medium|low", "issue": "本地规则漏掉的问题", "fix": "具体修法"}],
+  "repair_order": ["按优先级排列的修复步骤"],
+  "commercial_editor_notes": ["面向连载商业质量的编辑建议"]
+}
+`.trim()
+}
+
+function buildPropagationDebtLlmPrompt(project: any, report: any, chapters: any[], characters: any[], outlines: any[], reviews: any[]) {
+  const recentChapters = chapters
+    .slice()
+    .sort((a, b) => Number(b.chapter_no || 0) - Number(a.chapter_no || 0))
+    .slice(0, 8)
+    .reverse()
+    .map(chapter => ({
+      chapter_id: chapter.id,
+      chapter_no: chapter.chapter_no,
+      title: chapter.title,
+      summary: chapter.chapter_summary || '',
+      goal: chapter.chapter_goal || '',
+      ending_hook: chapter.ending_hook || '',
+      text_sample: chapterSnippet(chapter, 700),
+    }))
+  return `
+你是长篇网文连续性主编。现在已有一份“传播债务/状态债务”本地扫描报告，请你基于项目材料生成可执行修复方案。
+
+项目：
+${JSON.stringify({ id: project.id, title: project.title, genre: project.genre, summary: project.summary, story_state: project.reference_config?.story_state || {}, writing_bible: project.reference_config?.writing_bible || {} }, null, 2)}
+
+本地传播债务报告：
+${JSON.stringify(report, null, 2)}
+
+角色状态：
+${JSON.stringify(characters.slice(0, 30).map(item => ({ id: item.id, name: item.name, role: item.role, current_state: item.current_state, status: item.status })), null, 2)}
+
+分卷/阶段/章节大纲：
+${JSON.stringify(outlines.slice(0, 60).map(item => ({ id: item.id, type: item.outline_type, title: item.title, summary: item.summary, parent_id: item.parent_id })), null, 2)}
+
+近期章节：
+${JSON.stringify(recentChapters, null, 2)}
+
+近期审稿风险：
+${JSON.stringify(reviews.slice(0, 20).map(item => ({ id: item.id, type: item.review_type, status: item.status, summary: item.summary, issues: item.issues })), null, 2)}
+
+请只返回 JSON，结构如下：
+{
+  "overall_verdict": "一句话判断长篇连续性风险",
+  "repair_plan": [{"priority": 1, "debt_id": "对应本地债务id或new", "target": "章节/角色/状态机/大纲", "action": "具体修复动作", "reason": "为什么先做", "expected_result": "修完后应该变成什么"}],
+  "state_machine_updates": {"last_updated_chapter": 0, "character_positions": {}, "open_secrets": [], "prop_status": [], "foreshadowing_status": []},
+  "chapter_level_fixes": [{"chapter_no": 1, "fix": "章节层面的补丁建议"}],
+  "do_not_generate_until": ["继续自动生成前必须补齐的材料"],
+  "editor_notes": ["商业连载角度的建议"]
+}
+`.trim()
 }
 
 function buildMechanicalQa(project: any, chapters: any[]) {
@@ -304,6 +407,85 @@ function interpretCreativeCommand(command: string, project: any) {
   }
 }
 
+function normalizeBackupPayload(body: any) {
+  const raw = body?.package || body?.backup || body
+  if (typeof raw === 'string') return JSON.parse(raw)
+  return raw || {}
+}
+
+async function importBackupAsNewProject(activeWorkspace: string, backup: any, options: any = {}) {
+  if (backup.package_type !== 'novel_project_backup' || !backup.project) {
+    throw new Error('不是有效的小说项目备份包。')
+  }
+  const sourceProject = backup.project || {}
+  const titleSuffix = options.keep_title ? '' : '（导入）'
+  const project = await createNovelProject(activeWorkspace, {
+    ...sourceProject,
+    id: undefined,
+    title: String(options.title || `${sourceProject.title || '未命名项目'}${titleSuffix}`),
+    reference_config: {
+      ...(sourceProject.reference_config || {}),
+      imported_from_backup: {
+        source_project_id: sourceProject.id,
+        source_title: sourceProject.title || '',
+        exported_at: backup.exported_at || '',
+        imported_at: new Date().toISOString(),
+      },
+    },
+  })
+  const outlineIdMap = new Map<number, number>()
+  for (const outline of asArray(backup.outlines)) {
+    const created = await createNovelOutline(activeWorkspace, { ...outline, id: undefined, project_id: project.id, parent_id: null })
+    outlineIdMap.set(Number(outline.id || 0), created.id)
+  }
+  for (const outline of asArray(backup.outlines)) {
+    const oldParentId = Number(outline.parent_id || 0)
+    const newId = outlineIdMap.get(Number(outline.id || 0))
+    const newParentId = oldParentId ? outlineIdMap.get(oldParentId) : null
+    if (newId && newParentId) {
+      await updateNovelOutline(activeWorkspace, newId, { parent_id: newParentId } as any)
+    }
+  }
+  for (const item of asArray(backup.worldbuilding)) {
+    await createNovelWorldbuilding(activeWorkspace, { ...item, id: undefined, project_id: project.id })
+  }
+  for (const character of asArray(backup.characters)) {
+    await createNovelCharacter(activeWorkspace, { ...character, id: undefined, project_id: project.id })
+  }
+  for (const chapter of asArray(backup.chapters)) {
+    await createNovelChapter(activeWorkspace, {
+      ...chapter,
+      id: undefined,
+      project_id: project.id,
+      outline_id: chapter.outline_id ? (outlineIdMap.get(Number(chapter.outline_id)) || null) : null,
+    })
+  }
+  const manifest = {
+    imported_project_id: project.id,
+    title: project.title,
+    imported_at: new Date().toISOString(),
+    counts: {
+      chapters: asArray(backup.chapters).length,
+      outlines: asArray(backup.outlines).length,
+      characters: asArray(backup.characters).length,
+      worldbuilding: asArray(backup.worldbuilding).length,
+    },
+    source: {
+      project_id: sourceProject.id,
+      title: sourceProject.title || '',
+      exported_at: backup.exported_at || '',
+    },
+  }
+  await appendNovelRun(activeWorkspace, {
+    project_id: project.id,
+    run_type: 'project_backup_import',
+    step_name: `import-${manifest.source.project_id || 'backup'}`,
+    status: 'success',
+    output_ref: JSON.stringify({ manifest }),
+  })
+  return { project, manifest }
+}
+
 export function registerNovelCommercialOpsRoutes(app: Express, ctx: CommercialOpsContext) {
   app.post('/api/novel/projects/:id/creative-command', async (req, res) => {
     try {
@@ -410,6 +592,97 @@ export function registerNovelCommercialOpsRoutes(app: Express, ctx: CommercialOp
     }
   })
 
+  app.post('/api/novel/projects/:id/mechanical-qa/repair-queue', async (req, res) => {
+    try {
+      const activeWorkspace = ctx.getWorkspace()
+      const project = await ctx.getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const chapters = await listNovelChapters(activeWorkspace, project.id)
+      const report = buildMechanicalQa(project, chapters)
+      const tasks = report.issues
+        .filter((issue: any) => ['high', 'medium'].includes(issue.severity))
+        .map((issue: any) => ({
+          task_id: `mqa-fix-${issue.chapter_id}-${issue.type}`,
+          chapter_id: issue.chapter_id,
+          chapter_no: issue.chapter_no,
+          title: issue.title,
+          issue_type: issue.type,
+          severity: issue.severity,
+          message: issue.message,
+          action: issue.type === 'missing_text'
+            ? '进入章节流水线生成正文。'
+            : issue.type === 'long_paragraph'
+              ? '拆分超长段落并检查移动端阅读节奏。'
+              : issue.type === 'banned_words'
+                ? '替换禁用词/弱表达。'
+                : '打开章节进行局部修订。',
+        }))
+      const run = await appendNovelRun(activeWorkspace, {
+        project_id: project.id,
+        run_type: 'mechanical_qa_repair',
+        step_name: `mechanical-qa-repair-${tasks.length}`,
+        status: tasks.length ? 'ready' : 'success',
+        input_ref: JSON.stringify({ source_report_id: report.report_id }),
+        output_ref: JSON.stringify({ report: { score: report.score, summary: report.summary }, tasks }),
+      })
+      const review = await createNovelReview(activeWorkspace, {
+        project_id: project.id,
+        review_type: 'mechanical_qa_repair',
+        status: tasks.length ? 'warn' : 'ok',
+        summary: `机械质检修复任务：${tasks.length} 项`,
+        issues: tasks.slice(0, 30).map((item: any) => `第${item.chapter_no}章 ${item.message}`),
+        payload: JSON.stringify({ run_id: run.id, tasks, report }),
+      })
+      res.json({ ok: true, run, review, tasks, report })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.post('/api/novel/projects/:id/mechanical-qa/llm-review', async (req, res) => {
+    try {
+      const activeWorkspace = ctx.getWorkspace()
+      const project = await ctx.getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const modelId = req.body?.model_id ? String(req.body.model_id) : undefined
+      if (!modelId) return res.status(400).json({ error: 'model_id is required' })
+      const chapters = await listNovelChapters(activeWorkspace, project.id)
+      const report = buildMechanicalQa(project, chapters)
+      const prompt = buildMechanicalQaLlmPrompt(project, report, chapters)
+      const result = await executeNovelAgent('review-agent', project, { task: prompt }, {
+        activeWorkspace,
+        modelId,
+        maxTokens: 6000,
+        temperature: 0.18,
+        skipMemory: true,
+      })
+      const aiReport = (result as any).output || parseJsonLikePayload((result as any).content) || { raw: (result as any).content || '' }
+      const review = await createNovelReview(activeWorkspace, {
+        project_id: project.id,
+        review_type: 'mechanical_qa_llm',
+        status: (result as any).error ? 'warn' : 'ok',
+        summary: `AI 复核机械质检：${aiReport.overall_verdict || report.score + ' 分'}`,
+        issues: [
+          ...asArray(aiReport.confirmed_issues).slice(0, 12).map((item: any) => `确认：第${item.chapter_no || '-'}章 ${item.issue || item.fix || ''}`),
+          ...asArray(aiReport.missed_issues).slice(0, 12).map((item: any) => `漏检：第${item.chapter_no || '-'}章 ${item.issue || item.fix || ''}`),
+        ].filter(Boolean),
+        payload: JSON.stringify({ local_report: report, ai_report: aiReport, llm_result: result }),
+      })
+      const run = await appendNovelRun(activeWorkspace, {
+        project_id: project.id,
+        run_type: 'mechanical_qa_llm',
+        step_name: 'llm-review',
+        status: (result as any).error ? 'warn' : 'success',
+        input_ref: JSON.stringify({ model_id: modelId, local_report_id: report.report_id }),
+        output_ref: JSON.stringify({ local_report: report, ai_report: aiReport, review_id: review.id, llm_result: result }),
+        error_message: (result as any).error || '',
+      })
+      res.json({ ok: true, report, ai_report: aiReport, llm_result: result, review, run })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
   app.post('/api/novel/projects/:id/propagation-debt/refresh', async (req, res) => {
     try {
       const activeWorkspace = ctx.getWorkspace()
@@ -464,6 +737,66 @@ export function registerNovelCommercialOpsRoutes(app: Express, ctx: CommercialOp
         reference_config: { ...(project.reference_config || {}), propagation_debt: { ...old, resolved } },
       } as any)
       res.json({ ok: true, project: updated, resolved })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.post('/api/novel/projects/:id/propagation-debt/llm-plan', async (req, res) => {
+    try {
+      const activeWorkspace = ctx.getWorkspace()
+      const project = await ctx.getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const modelId = req.body?.model_id ? String(req.body.model_id) : undefined
+      if (!modelId) return res.status(400).json({ error: 'model_id is required' })
+      const [chapters, characters, outlines, reviews] = await Promise.all([
+        listNovelChapters(activeWorkspace, project.id),
+        listNovelCharacters(activeWorkspace, project.id),
+        listNovelOutlines(activeWorkspace, project.id),
+        listNovelReviews(activeWorkspace, project.id),
+      ])
+      const report = buildPropagationDebt(project, chapters, characters, outlines, reviews)
+      const prompt = buildPropagationDebtLlmPrompt(project, report, chapters, characters, outlines, reviews)
+      const result = await executeNovelAgent('review-agent', project, { task: prompt }, {
+        activeWorkspace,
+        modelId,
+        maxTokens: 7000,
+        temperature: 0.2,
+        skipMemory: true,
+      })
+      const aiPlan = (result as any).output || parseJsonLikePayload((result as any).content) || { raw: (result as any).content || '' }
+      const updated = await updateNovelProject(activeWorkspace, project.id, {
+        reference_config: {
+          ...(project.reference_config || {}),
+          propagation_debt: {
+            ...(project.reference_config?.propagation_debt || {}),
+            latest_report: report,
+            latest_ai_plan: aiPlan,
+            updated_at: new Date().toISOString(),
+          },
+        },
+      } as any)
+      const review = await createNovelReview(activeWorkspace, {
+        project_id: project.id,
+        review_type: 'propagation_debt_llm',
+        status: (result as any).error ? 'warn' : (asArray(aiPlan.do_not_generate_until).length ? 'warn' : 'ok'),
+        summary: `AI 传播债务修复方案：${aiPlan.overall_verdict || report.active_count + ' 项债务'}`,
+        issues: [
+          ...asArray(aiPlan.do_not_generate_until).slice(0, 12).map((item: any) => `生成前阻塞：${item}`),
+          ...asArray(aiPlan.repair_plan).slice(0, 12).map((item: any) => `${item.target || '修复'}：${item.action || item.reason || ''}`),
+        ].filter(Boolean),
+        payload: JSON.stringify({ local_report: report, ai_plan: aiPlan, llm_result: result }),
+      })
+      const run = await appendNovelRun(activeWorkspace, {
+        project_id: project.id,
+        run_type: 'propagation_debt_llm',
+        step_name: 'llm-plan',
+        status: (result as any).error ? 'warn' : 'success',
+        input_ref: JSON.stringify({ model_id: modelId, local_report_id: report.debt_id }),
+        output_ref: JSON.stringify({ local_report: report, ai_plan: aiPlan, review_id: review.id, llm_result: result }),
+        error_message: (result as any).error || '',
+      })
+      res.json({ ok: true, report, ai_plan: aiPlan, llm_result: result, project: updated, review, run })
     } catch (error) {
       res.status(500).json({ error: String(error) })
     }
@@ -640,6 +973,17 @@ export function registerNovelCommercialOpsRoutes(app: Express, ctx: CommercialOp
       res.json({ ok: true, manifest, review })
     } catch (error) {
       res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.post('/api/novel/backup-package/import', async (req, res) => {
+    try {
+      const activeWorkspace = ctx.getWorkspace()
+      const backup = normalizeBackupPayload(req.body)
+      const result = await importBackupAsNewProject(activeWorkspace, backup, req.body?.options || {})
+      res.json({ ok: true, ...result })
+    } catch (error: any) {
+      res.status(400).json({ error: String(error?.message || error) })
     }
   })
 }

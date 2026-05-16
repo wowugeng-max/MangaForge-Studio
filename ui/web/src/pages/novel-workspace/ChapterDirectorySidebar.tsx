@@ -103,8 +103,9 @@ export function ChapterDirectorySidebar({
       borderRight: '1px solid #f0f0f0', display: 'flex', flexDirection: 'column',
       overflow: 'hidden', minHeight: 0,
     }}>
-      <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0' }}>
-        <ProductionGuidePanel
+      <div style={{ flex: 1, minHeight: 0, overflow: 'auto', paddingBottom: 24 }}>
+        <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0' }}>
+          <ProductionGuidePanel
           selectedModelId={selectedModelId}
           stepOutlineLoading={stepOutlineLoading}
           stepProseLoading={stepProseLoading}
@@ -142,10 +143,10 @@ export function ChapterDirectorySidebar({
           onRunBookReview={onRunBookReview}
           onOpenCommercialTools={onOpenCommercialTools}
           onOpenExportDelivery={onOpenExportDelivery}
-        />
-      </div>
+          />
+        </div>
 
-      <div style={{ padding: '8px 0', flex: 1, minHeight: 0, overflow: 'auto' }}>
+      <div style={{ padding: '8px 0' }}>
         <div style={{ padding: '8px 16px 12px', borderBottom: '1px solid #f5f5f5' }}>
           <Space direction="vertical" size={10} style={{ width: '100%' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -203,6 +204,7 @@ export function ChapterDirectorySidebar({
             )
           })
         )}
+        </div>
       </div>
     </div>
   )

@@ -77,6 +77,8 @@ export default function NovelProjectWorkspace() {
   const [creativeCommandOpen, setCreativeCommandOpen] = useState(false)
   const [creativeCommandText, setCreativeCommandText] = useState('')
   const [creativeCommandPlan, setCreativeCommandPlan] = useState<any | null>(null)
+  const [backupImportOpen, setBackupImportOpen] = useState(false)
+  const [backupImportText, setBackupImportText] = useState('')
   const [chapterGroupExecutingId, setChapterGroupExecutingId] = useState<number | null>(null)
   const [releaseRepairExecutingId, setReleaseRepairExecutingId] = useState<number | null>(null)
   const [commercialToolLoading, setCommercialToolLoading] = useState('')
@@ -1848,6 +1850,7 @@ export default function NovelProjectWorkspace() {
               <Tag color={(report.summary?.high || 0) > 0 ? 'red' : 'default'} bordered={false}>高危 {report.summary?.high || 0}</Tag>
               <Tag color={(report.summary?.medium || 0) > 0 ? 'gold' : 'default'} bordered={false}>中危 {report.summary?.medium || 0}</Tag>
               <Tag bordered={false}>问题 {report.summary?.issue_count || 0}</Tag>
+              <Button size="small" type="primary" onClick={() => { void createMechanicalQaRepairQueue() }}>生成修复任务</Button>
             </Space>
             {Array.isArray(report.next_actions) && report.next_actions.length > 0 && (
               <Card size="small" title="建议">
@@ -1875,6 +1878,77 @@ export default function NovelProjectWorkspace() {
       })
     } catch (error: any) {
       message.error(error?.response?.data?.error || error?.message || '机械质检失败')
+    } finally {
+      setCommercialToolLoading('')
+    }
+  }
+
+  const runMechanicalQaLlmReview = async () => {
+    if (!selectedModelId) return message.warning('请先选择模型')
+    setCommercialToolLoading('mechanicalQaLlm')
+    try {
+      const res = await apiClient.post(`/novel/projects/${projectId}/mechanical-qa/llm-review`, {
+        model_id: selectedModelId,
+      })
+      const aiReport = res.data?.ai_report || {}
+      const localReport = res.data?.report || {}
+      await loadProjectModules()
+      await loadProductionTasks()
+      Modal.info({
+        title: 'AI 复核机械质检',
+        width: 960,
+        content: (
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Alert type="info" showIcon message="这一步会调用当前选择的大模型，对本地规则质检结果进行编辑复核，不直接改正文。" />
+            <Space wrap>
+              <Tag color="blue" bordered={false}>本地分 {localReport.score ?? '-'}</Tag>
+              {aiReport.score_adjustment?.suggested_score !== undefined && <Tag color="purple" bordered={false}>AI建议分 {aiReport.score_adjustment.suggested_score}</Tag>}
+              <Tag bordered={false}>确认问题 {(aiReport.confirmed_issues || []).length || 0}</Tag>
+              <Tag bordered={false}>漏检 {(aiReport.missed_issues || []).length || 0}</Tag>
+              <Tag bordered={false}>误判 {(aiReport.false_positives || []).length || 0}</Tag>
+            </Space>
+            <Card size="small" title="总体判断">
+              <Text>{aiReport.overall_verdict || aiReport.score_adjustment?.reason || '模型已返回复核结果。'}</Text>
+            </Card>
+            {(aiReport.repair_order || []).length > 0 && (
+              <Card size="small" title="建议修复顺序">
+                <List size="small" dataSource={aiReport.repair_order} renderItem={(item: string) => <List.Item>{item}</List.Item>} />
+              </Card>
+            )}
+            <Card size="small" title="AI确认/漏检问题">
+              <List
+                size="small"
+                dataSource={[...(aiReport.confirmed_issues || []).map((item: any) => ({ ...item, bucket: '确认' })), ...(aiReport.missed_issues || []).map((item: any) => ({ ...item, bucket: '漏检' }))].slice(0, 80)}
+                locale={{ emptyText: '暂无问题' }}
+                renderItem={(item: any) => (
+                  <List.Item>
+                    <List.Item.Meta
+                      title={<Space><Tag color={item.bucket === '漏检' ? 'red' : 'blue'} bordered={false}>{item.bucket}</Tag><Tag bordered={false}>{item.severity || '-'}</Tag><Text>第{item.chapter_no || '-'}章 {item.issue}</Text></Space>}
+                      description={item.fix}
+                    />
+                  </List.Item>
+                )}
+              />
+            </Card>
+          </Space>
+        ),
+      })
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || 'AI复核机械质检失败')
+    } finally {
+      setCommercialToolLoading('')
+    }
+  }
+
+  const createMechanicalQaRepairQueue = async () => {
+    setCommercialToolLoading('mechanicalRepair')
+    try {
+      const res = await apiClient.post(`/novel/projects/${projectId}/mechanical-qa/repair-queue`)
+      await loadProductionTasks()
+      setTaskCenterOpen(true)
+      message.success(`已生成机械质检修复任务：${(res.data?.tasks || []).length} 项`)
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '生成机械质检修复任务失败')
     } finally {
       setCommercialToolLoading('')
     }
@@ -1912,6 +1986,16 @@ export default function NovelProjectWorkspace() {
                         const chapter = chapters.find(ch => Number(ch.chapter_no) === Number(debt.affected.chapter_no))
                         if (chapter) { Modal.destroyAll(); void selectChapter(chapter.id) }
                       }}>定位</Button> : null,
+                      <Button key="resolve" size="small" type="link" onClick={async () => {
+                        try {
+                          await apiClient.post(`/novel/projects/${projectId}/propagation-debt/${encodeURIComponent(debt.id)}/resolve`, { note: '用户在传播债务队列标记解决' })
+                          message.success('已标记解决')
+                          Modal.destroyAll()
+                          await refreshPropagationDebt()
+                        } catch (error: any) {
+                          message.error(error?.response?.data?.error || error?.message || '标记解决失败')
+                        }
+                      }}>标记解决</Button>,
                     ].filter(Boolean) as any}
                   >
                     <List.Item.Meta
@@ -1932,13 +2016,75 @@ export default function NovelProjectWorkspace() {
     }
   }
 
+  const runPropagationDebtLlmPlan = async () => {
+    if (!selectedModelId) return message.warning('请先选择模型')
+    setCommercialToolLoading('propagationDebtLlm')
+    try {
+      const res = await apiClient.post(`/novel/projects/${projectId}/propagation-debt/llm-plan`, {
+        model_id: selectedModelId,
+      })
+      const aiPlan = res.data?.ai_plan || {}
+      const report = res.data?.report || {}
+      setSelectedProject((prev: any) => res.data?.project || prev)
+      await loadProjectModules()
+      await loadProductionTasks()
+      Modal.info({
+        title: 'AI 传播债务修复方案',
+        width: 960,
+        content: (
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Alert type="info" showIcon message="这一步会调用当前选择的大模型，把本地传播债务扫描转成可执行修复方案，不直接覆盖状态机。" />
+            <Space wrap>
+              <Tag color="blue" bordered={false}>本地健康度 {report.score ?? '-'}</Tag>
+              <Tag color={(report.high_count || 0) > 0 ? 'red' : 'default'} bordered={false}>高危 {report.high_count || 0}</Tag>
+              <Tag bordered={false}>修复项 {(aiPlan.repair_plan || []).length || 0}</Tag>
+              <Tag color={(aiPlan.do_not_generate_until || []).length ? 'red' : 'green'} bordered={false}>生成前阻塞 {(aiPlan.do_not_generate_until || []).length || 0}</Tag>
+            </Space>
+            <Card size="small" title="总体判断">
+              <Text>{aiPlan.overall_verdict || '模型已返回修复方案。'}</Text>
+            </Card>
+            {(aiPlan.do_not_generate_until || []).length > 0 && (
+              <Card size="small" title="继续生成前必须处理">
+                <List size="small" dataSource={aiPlan.do_not_generate_until} renderItem={(item: string) => <List.Item>{item}</List.Item>} />
+              </Card>
+            )}
+            <Card size="small" title="修复计划">
+              <List
+                size="small"
+                dataSource={(aiPlan.repair_plan || []).slice(0, 80)}
+                locale={{ emptyText: '暂无修复项' }}
+                renderItem={(item: any) => (
+                  <List.Item>
+                    <List.Item.Meta
+                      title={<Space><Tag color="purple" bordered={false}>P{item.priority || '-'}</Tag><Text>{item.target || item.debt_id || '修复项'}</Text></Space>}
+                      description={<Space direction="vertical" size={2}><Text>{item.action}</Text><Text type="secondary">{item.reason || item.expected_result}</Text></Space>}
+                    />
+                  </List.Item>
+                )}
+              />
+            </Card>
+            {(aiPlan.chapter_level_fixes || []).length > 0 && (
+              <Card size="small" title="章节补丁建议">
+                <List size="small" dataSource={aiPlan.chapter_level_fixes} renderItem={(item: any) => <List.Item>第{item.chapter_no || '-'}章：{item.fix}</List.Item>} />
+              </Card>
+            )}
+          </Space>
+        ),
+      })
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || 'AI传播债务方案生成失败')
+    } finally {
+      setCommercialToolLoading('')
+    }
+  }
+
   const openModelDiagnostics = async () => {
     setCommercialToolLoading('modelDiagnostics')
     try {
       const res = await apiClient.get(`/novel/projects/${projectId}/model-diagnostics`)
       const report = res.data?.report || {}
       Modal.info({
-        title: '模型服务诊断',
+        title: '模型服务诊断（配置与历史记录）',
         width: 960,
         content: (
           <Space direction="vertical" size={12} style={{ width: '100%' }}>
@@ -1947,6 +2093,7 @@ export default function NovelProjectWorkspace() {
               <Tag color="green" bordered={false}>健康 {report.healthy_count || 0}</Tag>
               <Tag color={(report.ready_count || 0) > 0 ? 'green' : 'gold'} bordered={false}>可生产 {report.ready_count || 0}</Tag>
             </Space>
+            <Alert type="info" showIcon message="此处读取模型配置、Key 状态和近期任务失败记录，不主动调用模型探针。" />
             {Array.isArray(report.next_actions) && report.next_actions.length > 0 && (
               <Alert type="warning" showIcon message={report.next_actions.join('；')} />
             )}
@@ -2063,6 +2210,24 @@ export default function NovelProjectWorkspace() {
     document.body.appendChild(link)
     link.click()
     link.remove()
+  }
+
+  const importBackupPackage = async () => {
+    if (!backupImportText.trim()) return message.warning('请粘贴项目备份 JSON')
+    setCommercialToolLoading('backupImport')
+    try {
+      const backup = JSON.parse(backupImportText)
+      const res = await apiClient.post('/novel/backup-package/import', { package: backup })
+      const project = res.data?.project
+      message.success(`已导入项目：${project?.title || project?.id || ''}`)
+      setBackupImportOpen(false)
+      setBackupImportText('')
+      if (project?.id) navigate(`/novel/workspace/${project.id}`)
+    } catch (error: any) {
+      message.error(error?.message?.includes('JSON') ? '备份内容必须是合法 JSON' : (error?.response?.data?.error || error?.message || '导入备份失败'))
+    } finally {
+      setCommercialToolLoading('')
+    }
   }
 
   const runCreativeCommand = async (execute = false) => {
@@ -2938,12 +3103,12 @@ export default function NovelProjectWorkspace() {
             type="info"
             showIcon
             message="这些工具用于生产治理：稳定性、成本、质量、审批、相似度、滚动规划和提示词版本。"
-            description="结果会保存到运行记录或审稿记录中，适合在批量生成前后做检查。"
+            description="核心写作、审稿、规划、参考迁移会调用大模型；机械质检、传播债务、模型诊断、备份和模板默认是本地规则/配置工具，带 AI 前缀的按钮才会调用当前选择的大模型。"
           />
           <Card size="small" title="自然语言创作指令台">
             <Space direction="vertical" size={8} style={{ width: '100%' }}>
-              <Text type="secondary" style={{ fontSize: 12 }}>输入一句操作意图，系统会解析成生产步骤；低风险检查类任务可以直接执行。</Text>
-              <Button block type="primary" loading={commercialToolLoading === 'creativeCommand'} onClick={() => setCreativeCommandOpen(true)}>打开创作指令台</Button>
+              <Text type="secondary" style={{ fontSize: 12 }}>输入一句操作意图，系统会用本地指令解析器转成生产步骤；低风险检查类任务可以直接执行。</Text>
+              <Button block type="primary" loading={commercialToolLoading === 'creativeCommand'} onClick={() => setCreativeCommandOpen(true)}>打开本地创作指令台</Button>
             </Space>
           </Card>
           <Card size="small" title="批量生产模式">
@@ -2972,7 +3137,7 @@ export default function NovelProjectWorkspace() {
                 <Button block loading={commercialToolLoading === 'queueStop'} onClick={stopRunQueueWorker}>停止后台 worker</Button>
                 <Button block loading={commercialToolLoading === 'queueRecover'} onClick={recoverRunQueue}>恢复后台队列</Button>
                 <Button block loading={commercialToolLoading === 'metrics'} onClick={openProductionMetrics}>成本质量仪表盘</Button>
-                <Button block loading={commercialToolLoading === 'modelDiagnostics'} onClick={openModelDiagnostics}>模型服务诊断</Button>
+                <Button block loading={commercialToolLoading === 'modelDiagnostics'} onClick={openModelDiagnostics}>模型服务诊断（配置）</Button>
                 <Button block onClick={() => setAgentAuditOpen(true)}>Agent 调用审计</Button>
                 <Button block loading={commercialToolLoading === 'approval'} onClick={openApprovalPolicyEditor}>审批关卡策略</Button>
               </Space>
@@ -2984,8 +3149,11 @@ export default function NovelProjectWorkspace() {
                 <Button block onClick={() => setReviewAnnotationsOpen(true)}>章节审阅批注</Button>
                 <Button block onClick={() => setConsistencyGraphOpen(true)}>全书一致性图谱</Button>
                 <Button block loading={commercialToolLoading === 'continuityAudit'} onClick={openContinuityAudit}>全书连续性检查</Button>
-                <Button block loading={commercialToolLoading === 'mechanicalQa'} onClick={runMechanicalQa}>机械质检规则引擎</Button>
-                <Button block loading={commercialToolLoading === 'propagationDebt'} onClick={refreshPropagationDebt}>传播债务队列</Button>
+                <Button block loading={commercialToolLoading === 'mechanicalQa'} onClick={runMechanicalQa}>机械质检规则引擎（本地）</Button>
+                <Button block type="primary" loading={commercialToolLoading === 'mechanicalQaLlm'} onClick={runMechanicalQaLlmReview}>AI 复核机械质检</Button>
+                <Button block loading={commercialToolLoading === 'mechanicalRepair'} onClick={createMechanicalQaRepairQueue}>机械质检修复任务</Button>
+                <Button block loading={commercialToolLoading === 'propagationDebt'} onClick={refreshPropagationDebt}>传播债务队列（本地）</Button>
+                <Button block type="primary" loading={commercialToolLoading === 'propagationDebtLlm'} onClick={runPropagationDebtLlmPlan}>AI 生成传播债务修复方案</Button>
                 <Button block loading={commercialToolLoading === 'benchmark'} onClick={runQualityBenchmark}>项目质量基准测试</Button>
                 <Button block loading={commercialToolLoading === 'versionReview'} onClick={runVersionReviewForActiveChapter}>当前章版本评审</Button>
                 <Button block loading={commercialToolLoading === 'similarity'} onClick={runSimilarityForActiveChapter}>当前章相似度检测</Button>
@@ -2998,7 +3166,7 @@ export default function NovelProjectWorkspace() {
                 <Button block loading={commercialToolLoading === 'rollingPlan'} onClick={runRollingPlan}>未来 10 章滚动规划</Button>
                 <Button block loading={commercialToolLoading === 'referenceDiagnosis'} onClick={openReferenceKnowledgeDiagnosis}>参考知识诊断</Button>
                 <Button block onClick={() => { setCommercialToolsOpen(false); setReferenceEngineeringOpen(true) }}>多参考融合控制台</Button>
-                <Button block loading={commercialToolLoading === 'genreTemplates'} onClick={openGenreTemplates}>类型模板方法库</Button>
+                <Button block loading={commercialToolLoading === 'genreTemplates'} onClick={openGenreTemplates}>类型模板方法库（模板）</Button>
               </Space>
             </Card>
             <Card size="small" title="Agent 配置">
@@ -3013,6 +3181,7 @@ export default function NovelProjectWorkspace() {
                 <Button block onClick={() => setExportDeliveryOpen(true)}>导出 TXT / Markdown</Button>
                 <Button block loading={commercialToolLoading === 'backup'} onClick={createBackupSnapshot}>创建项目备份快照</Button>
                 <Button block onClick={downloadBackupPackage}>下载完整项目包 JSON</Button>
+                <Button block loading={commercialToolLoading === 'backupImport'} onClick={() => setBackupImportOpen(true)}>导入项目备份 JSON</Button>
                 <Button block onClick={() => setQualityBenchmarkOpen(true)}>导出前质量基准</Button>
                 <Button block onClick={() => setConsistencyGraphOpen(true)}>导出前一致性图谱</Button>
               </Space>
@@ -3023,7 +3192,7 @@ export default function NovelProjectWorkspace() {
 
       <Modal
         open={creativeCommandOpen}
-        title="自然语言创作指令台"
+        title="本地自然语言创作指令台"
         width={820}
         onCancel={() => setCreativeCommandOpen(false)}
         footer={(
@@ -3038,7 +3207,7 @@ export default function NovelProjectWorkspace() {
           <Alert
             type="info"
             showIcon
-            message="生成、发布、覆盖正文这类高风险动作只会给出操作计划，不会绕过现有确认流程。"
+            message="当前指令台使用本地规则解析，不调用大模型；生成、发布、覆盖正文这类高风险动作只会给出操作计划，不会绕过现有确认流程。"
           />
           <Input.TextArea
             rows={4}
@@ -3079,6 +3248,32 @@ export default function NovelProjectWorkspace() {
               </Space>
             </Card>
           )}
+        </Space>
+      </Modal>
+
+      <Modal
+        open={backupImportOpen}
+        title="导入项目备份 JSON"
+        width={760}
+        onCancel={() => setBackupImportOpen(false)}
+        confirmLoading={commercialToolLoading === 'backupImport'}
+        okText="导入为新项目"
+        cancelText="取消"
+        onOk={() => { void importBackupPackage() }}
+      >
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Alert
+            type="warning"
+            showIcon
+            message="导入会创建一个新项目，不会覆盖当前项目。"
+            description="请粘贴通过“下载完整项目包 JSON”导出的内容。导入后会自动跳转到新项目。"
+          />
+          <Input.TextArea
+            rows={12}
+            value={backupImportText}
+            onChange={(event) => setBackupImportText(event.target.value)}
+            placeholder='{"package_type":"novel_project_backup", ...}'
+          />
         </Space>
       </Modal>
 

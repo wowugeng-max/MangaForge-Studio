@@ -268,12 +268,12 @@ export function ProductionGuidePanel({
                 </Button>
               </Tooltip>
               {step.secondary && step.secondary.length > 0 && (
-                <Space.Compact block>
+                <div style={{ display: 'grid', gridTemplateColumns: step.secondary.length >= 3 ? '1fr' : `repeat(${step.secondary.length}, minmax(0, 1fr))`, gap: 6 }}>
                   {step.secondary.map(action => (
                     <Button
                       key={action.label}
                       size="small"
-                      style={{ width: `${100 / step.secondary!.length}%` }}
+                      style={{ width: '100%', minWidth: 0 }}
                       loading={action.loading}
                       disabled={action.disabled}
                       onClick={action.onClick}
@@ -281,7 +281,7 @@ export function ProductionGuidePanel({
                       {action.label}
                     </Button>
                   ))}
-                </Space.Compact>
+                </div>
               )}
             </Space>
           </div>

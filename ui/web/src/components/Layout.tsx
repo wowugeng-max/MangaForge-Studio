@@ -1,5 +1,5 @@
 import React from 'react'
-import { Layout as AntLayout, Menu, Typography, Tag } from 'antd'
+import { Button, Layout as AntLayout, Menu, Typography, Tag, Tooltip } from 'antd'
 import { Outlet, Link, useLocation } from 'react-router-dom'
 import {
   HomeOutlined,
@@ -13,13 +13,31 @@ import {
   DatabaseOutlined,
   RocketOutlined,
   CompassOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined,
 } from '@ant-design/icons'
+import './Layout.css'
 
 const { Content, Sider } = AntLayout
 const { Text } = Typography
 
 export default function Layout() {
   const location = useLocation()
+  const [sidebarCollapsed, setSidebarCollapsed] = React.useState(() => {
+    try {
+      return localStorage.getItem('mangaforge.sidebar.collapsed') === '1'
+    } catch {
+      return false
+    }
+  })
+
+  React.useEffect(() => {
+    try {
+      localStorage.setItem('mangaforge.sidebar.collapsed', sidebarCollapsed ? '1' : '0')
+    } catch {
+      // Ignore storage failures in private mode.
+    }
+  }, [sidebarCollapsed])
 
   const getSelectedKey = () => {
     const path = location.pathname
@@ -43,6 +61,10 @@ export default function Layout() {
     <AntLayout style={{ minHeight: '100vh', background: '#f5f7fb' }}>
       <Sider
         width={292}
+        collapsedWidth={76}
+        collapsed={sidebarCollapsed}
+        trigger={null}
+        className={sidebarCollapsed ? 'studio-sider studio-sider-collapsed' : 'studio-sider'}
         style={{
           background: 'linear-gradient(180deg, #111827 0%, #172036 48%, #1e293b 100%)',
           boxShadow: '10px 0 30px rgba(15, 23, 42, 0.22)',
@@ -53,29 +75,41 @@ export default function Layout() {
         <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(circle at 18% 12%, rgba(56,189,248,0.16), transparent 22%), radial-gradient(circle at 84% 22%, rgba(139,92,246,0.18), transparent 24%), radial-gradient(circle at 50% 100%, rgba(14,165,233,0.08), transparent 26%)', pointerEvents: 'none' }} />
 
         <div style={{ position: 'relative' }}>
-          <div style={{ height: 84, display: 'flex', alignItems: 'center', padding: '0 22px', gap: 12, borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ height: 84, display: 'flex', alignItems: 'center', justifyContent: sidebarCollapsed ? 'center' : 'flex-start', padding: sidebarCollapsed ? '0 10px' : '0 22px', gap: 12, borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
             <div style={{ width: 42, height: 42, borderRadius: 14, background: 'linear-gradient(135deg, #38bdf8 0%, #8b5cf6 100%)', display: 'grid', placeItems: 'center', color: '#fff', boxShadow: '0 14px 28px rgba(56, 189, 248, 0.28)' }}>
               <RocketOutlined />
             </div>
-            <div style={{ minWidth: 0 }}>
+            {!sidebarCollapsed && <div style={{ minWidth: 0 }}>
               <div style={{ color: '#fff', fontSize: 19, fontWeight: 900, letterSpacing: 0.6, lineHeight: 1.05 }}>MangaForge Studio</div>
               <Text style={{ color: 'rgba(255,255,255,0.58)', fontSize: 12 }}>Creative model workspace</Text>
-            </div>
+            </div>}
           </div>
 
-          <div style={{ padding: 16 }}>
-            <div style={{ padding: 16, borderRadius: 18, background: 'linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.04))', border: '1px solid rgba(255,255,255,0.08)', marginBottom: 16, backdropFilter: 'blur(10px)' }}>
+          <Tooltip title={sidebarCollapsed ? '展开导航栏' : '收起导航栏'} placement="right">
+            <Button
+              type="text"
+              size="small"
+              icon={sidebarCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+              onClick={() => setSidebarCollapsed(prev => !prev)}
+              className="studio-sider-toggle"
+              aria-label={sidebarCollapsed ? '展开导航栏' : '收起导航栏'}
+            />
+          </Tooltip>
+
+          <div style={{ padding: sidebarCollapsed ? '14px 10px' : 16 }}>
+            {!sidebarCollapsed && <div style={{ padding: 16, borderRadius: 18, background: 'linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.04))', border: '1px solid rgba(255,255,255,0.08)', marginBottom: 16, backdropFilter: 'blur(10px)' }}>
               <div style={{ color: '#fff', fontWeight: 800, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
                 <CompassOutlined />
                 <span>能力中台</span>
               </div>
               <Text style={{ color: 'rgba(255,255,255,0.68)', fontSize: 12, lineHeight: 1.7 }}>模型、厂商、Key、资产、工作流统一管理。</Text>
-            </div>
+            </div>}
 
             <Menu
               theme="dark"
               mode="inline"
               selectedKeys={[selectedKey]}
+              inlineCollapsed={sidebarCollapsed}
               style={{ borderRight: 0, background: 'transparent' }}
               className="studio-sider-menu"
               items={[
@@ -94,12 +128,12 @@ export default function Layout() {
             />
           </div>
 
-          <div style={{ padding: '0 22px 20px' }}>
+          {!sidebarCollapsed && <div style={{ padding: '0 22px 20px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px', borderRadius: 16, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)' }}>
               <Tag color="cyan" style={{ borderRadius: 999, padding: '2px 10px', margin: 0 }}>UI Polished</Tag>
               <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12 }}>v2</Text>
             </div>
-          </div>
+          </div>}
         </div>
       </Sider>
 

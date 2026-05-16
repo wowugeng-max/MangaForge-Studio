@@ -34,6 +34,10 @@ const AUDIT_SOURCE_LABELS: Record<string, string> = {
   release_repair_queue: '发布修复队列',
   release_quality_batch: '发布质检批量任务',
   release_similarity_batch: '发布相似度批量任务',
+  mechanical_qa: '机械质检',
+  mechanical_qa_llm: 'AI机械质检复核',
+  propagation_debt: '传播债务',
+  propagation_debt_llm: 'AI传播债务方案',
 }
 
 function compactAuditText(value: any, limit = 160) {
@@ -344,9 +348,13 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
                                   : run.run_type === 'ab_sandbox' ? 'A/B 沙盒实写'
                                     : run.run_type === 'ab_sandbox_apply' ? 'A/B 沙盒采纳'
                                       : run.run_type === 'mechanical_qa' ? '机械质检'
-                                        : run.run_type === 'propagation_debt' ? '传播债务'
-                                          : run.run_type === 'project_backup' ? '项目备份'
-                                            : run.run_type === 'genre_template_apply' ? '类型模板'
+                                        : run.run_type === 'mechanical_qa_llm' ? 'AI机械质检复核'
+                                          : run.run_type === 'propagation_debt' ? '传播债务'
+                                            : run.run_type === 'propagation_debt_llm' ? 'AI传播债务方案'
+                                              : run.run_type === 'project_backup' ? '项目备份'
+                                                : run.run_type === 'project_backup_import' ? '备份导入'
+                                                  : run.run_type === 'mechanical_qa_repair' ? '机械质检修复'
+                                                    : run.run_type === 'genre_template_apply' ? '类型模板'
                       : run.run_type,
           step_name: run.step_name,
           status: run.status,
@@ -388,7 +396,9 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
           'mechanical_qa',
           'propagation_debt',
           'project_backup',
+          'project_backup_import',
           'genre_template_apply',
+          'mechanical_qa_repair',
         ].includes(run.run_type))
         .map(normalizeRun)
       const active = tasks.filter(task => ['queued', 'ready', 'running', 'paused', 'needs_approval'].includes(task.status))
