@@ -302,10 +302,12 @@ async function runMemoryCommand(args: string[]): Promise<any> {
   await ensureDbInit()
 
   try {
+    const command = String(args[0] || '')
+    const maxBuffer = command === 'dump' ? 64 * 1024 * 1024 : 4 * 1024 * 1024
     const result = await execFileAsync(pythonPath(), [script, ...args], {
       env: { ...process.env, MEMPALACE_DIR: PALACE_DIR_ENV },
       timeout: 15000,
-      maxBuffer: 1024 * 1024,
+      maxBuffer,
     })
     return JSON.parse(result.stdout.trim())
   } catch (error: any) {
@@ -576,10 +578,19 @@ export async function dumpProject(projectId: number): Promise<any> {
   }
 }
 
+export async function summarizeProject(projectId: number): Promise<any> {
+  try {
+    const result = await runMemoryCommand(['summary', '--project', String(projectId)])
+    return result
+  } catch {
+    return { status: 'error' }
+  }
+}
+
 export async function listMemoryPalaceProjects(): Promise<MemoryPalaceProjectSummary[]> {
   const records = readProjectIndex()
   const summaries = await Promise.all(records.map(async (record) => {
-    const dump = await dumpProject(record.project_id)
+    const dump = await summarizeProject(record.project_id)
     return {
       project_id: record.project_id,
       project_title: record.project_title,

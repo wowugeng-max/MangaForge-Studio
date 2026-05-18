@@ -427,6 +427,32 @@ def dump_project(project_id: int) -> Dict:
         conn.close()
 
 
+def summarize_project(project_id: int) -> Dict:
+    conn = get_conn()
+    try:
+        memory_count = conn.execute("SELECT COUNT(*) FROM memories WHERE project_id = ?", (project_id,)).fetchone()[0]
+        fact_count = conn.execute("SELECT COUNT(*) FROM facts WHERE project_id = ?", (project_id,)).fetchone()[0]
+        continuity_issue_count = conn.execute("SELECT COUNT(*) FROM continuity_log WHERE project_id = ?", (project_id,)).fetchone()[0]
+        latest_rows = [
+            conn.execute("SELECT MAX(created_at) FROM memories WHERE project_id = ?", (project_id,)).fetchone()[0],
+            conn.execute("SELECT MAX(created_at) FROM facts WHERE project_id = ?", (project_id,)).fetchone()[0],
+            conn.execute("SELECT MAX(created_at) FROM continuity_log WHERE project_id = ?", (project_id,)).fetchone()[0],
+        ]
+        last_updated_at = max([v for v in latest_rows if v] or [""])
+        result = {
+            "status": "ok",
+            "project_id": project_id,
+            "memory_count": memory_count,
+            "fact_count": fact_count,
+            "continuity_issue_count": continuity_issue_count,
+            "last_updated_at": last_updated_at,
+        }
+        print(json.dumps(result, ensure_ascii=False))
+        return result
+    finally:
+        conn.close()
+
+
 def purge_project(project_id: int) -> Dict:
     conn = get_conn()
     try:
@@ -798,6 +824,10 @@ def main():
     p = sub.add_parser("dump")
     p.add_argument("--project", type=int, required=True)
 
+    # summary
+    p = sub.add_parser("summary")
+    p.add_argument("--project", type=int, required=True)
+
     # purge-project
     p = sub.add_parser("purge-project")
     p.add_argument("--project", type=int, required=True)
@@ -907,6 +937,9 @@ def main():
 
     elif args.command == "dump":
         dump_project(args.project)
+
+    elif args.command == "summary":
+        summarize_project(args.project)
 
     elif args.command == "purge-project":
         purge_project(args.project)
