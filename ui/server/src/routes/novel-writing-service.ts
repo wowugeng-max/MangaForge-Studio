@@ -7,6 +7,7 @@ import {
   listNovelReviews,
   listNovelSettingEntities,
   listNovelWorldbuilding,
+  replaceNovelChapterSettingUsage,
   updateNovelChapter,
   updateNovelCharacter,
   updateNovelChapterSettingUsage,
@@ -84,6 +85,46 @@ export function createNovelWritingService(ctx: {
       transition_from_previous: String(card?.transition_from_previous || ''),
       exit_state: String(card?.exit_state || ''),
     })).filter((card: any) => card.beat || card.purpose || card.title)
+  }
+
+  const buildHeuristicSettingUsage = (chapter: any, settings: any[]) => {
+    const chapterText = [
+      chapter.title,
+      chapter.chapter_goal,
+      chapter.chapter_summary,
+      chapter.conflict,
+      chapter.ending_hook,
+      JSON.stringify(chapter.raw_payload || {}),
+    ].join(' ')
+    return settings.map((setting: any) => {
+      const settingText = [
+        setting.name,
+        setting.summary,
+        JSON.stringify(setting.constraints_json || {}),
+        JSON.stringify(setting.state_json || {}),
+      ].join(' ')
+      let score = 0
+      const name = String(setting.name || '')
+      if (name && chapterText.includes(name)) score += 40
+      for (const token of settingText.split(/[\s,，。；;、/|]+/).filter(item => item.length >= 2).slice(0, 50)) {
+        if (chapterText.includes(token)) score += 2
+      }
+      if (['character', 'boss', 'rule'].includes(setting.entity_type)) score += 4
+      if (['ability', 'item', 'foreshadowing'].includes(setting.entity_type)) score += 2
+      return { setting, score }
+    })
+      .filter(item => item.score >= 6)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 12)
+      .map(({ setting, score }, index) => ({
+        entity_id: setting.id,
+        usage_type: index < 4 || score >= 30 ? 'required' : 'allowed',
+        required: index < 4 || score >= 30,
+        allowed: true,
+        forbidden: false,
+        reveal_level: setting.visibility === 'hidden' || setting.visibility === 'spoiler' ? 'hint' : 'partial',
+        expected_state_change: { reason: `生成前自动匹配：与本章目标/摘要/冲突相似度 ${score}` },
+      }))
   }
 
   const selectProseForChapter = (payload: any, chapter: any) => {
@@ -358,10 +399,19 @@ export function createNovelWritingService(ctx: {
     const styleLock = getStyleLock(project)
     const safetyPolicy = getSafetyPolicy(project)
     const writingBible = project.reference_config?.writing_bible || buildWritingBible(project, worldbuilding, characters, outlines, reviews)
-    const [settingEntities, chapterSettingUsage] = await Promise.all([
+    const [settingEntities, storedChapterSettingUsage] = await Promise.all([
       listNovelSettingEntities(activeWorkspace, project.id).catch(() => []),
       listNovelChapterSettingUsage(activeWorkspace, project.id, chapter.id).catch(() => []),
     ])
+    let chapterSettingUsage = storedChapterSettingUsage
+    let settingUsageAutoMatched = false
+    if (chapterSettingUsage.length === 0 && settingEntities.length > 0) {
+      const suggestedUsage = buildHeuristicSettingUsage(chapter, settingEntities)
+      if (suggestedUsage.length > 0) {
+        chapterSettingUsage = await replaceNovelChapterSettingUsage(activeWorkspace, project.id, chapter.id, suggestedUsage as any).catch(() => suggestedUsage as any)
+        settingUsageAutoMatched = true
+      }
+    }
     const usageEntityIds = new Set(chapterSettingUsage.map((item: any) => Number(item.entity_id || 0)).filter(Boolean))
     const relatedSettings = settingEntities.filter((item: any) => {
       const first = Number(item.first_chapter_no || 0)
@@ -397,6 +447,7 @@ export function createNovelWritingService(ctx: {
       }),
       required: chapterSettingUsage.filter((item: any) => item.required && !item.forbidden).map((usage: any) => settingById.get(Number(usage.entity_id))?.name).filter(Boolean),
       forbidden: chapterSettingUsage.filter((item: any) => item.forbidden).map((usage: any) => settingById.get(Number(usage.entity_id))?.name).filter(Boolean),
+      auto_matched: settingUsageAutoMatched,
       type_counts: settingEntities.reduce((acc: Record<string, number>, item: any) => {
         const key = item.entity_type || 'rule'
         acc[key] = (acc[key] || 0) + 1
@@ -807,6 +858,24 @@ export function createNovelWritingService(ctx: {
       issues: Array.isArray(selfCheck?.review?.issues) ? selfCheck.review.issues.map((issue: any) => `${issue.severity || 'medium'}｜${issue.description || issue}`) : [],
       payload: JSON.stringify({ chapter_id: chapter.id, context_package: contextPackage, self_check: selfCheck, reference_report: referenceReport, safety_decision: safetyDecision, migration_audit: migrationAudit, production_mode: productionMode, config_snapshot: configSnapshot }),
     })
+    const settingViolations = Array.isArray(selfCheck?.review?.setting_violations) ? selfCheck.review.setting_violations : []
+    if (contextPackage?.setting_context?.chapter_usage?.length || settingViolations.length > 0) {
+      await createNovelReview(activeWorkspace, {
+        project_id: projectId,
+        review_type: 'setting_consistency',
+        status: settingViolations.length > 0 ? 'warn' : 'ok',
+        summary: settingViolations.length > 0 ? `设定一致性发现 ${settingViolations.length} 项风险` : '设定一致性随章节质检通过',
+        issues: settingViolations.map((issue: any) => `${issue.severity || 'medium'}｜${issue.description || issue.setting_name || issue.type || '设定风险'}`),
+        payload: JSON.stringify({
+          chapter_id: chapter.id,
+          chapter_no: chapter.chapter_no,
+          source: 'prose_quality_self_check',
+          setting_context: contextPackage.setting_context,
+          setting_violations: settingViolations,
+          craft_metrics: selfCheck?.review?.craft_metrics || {},
+        }),
+      })
+    }
     return {
       chapter: updated,
       score: selfCheck?.review?.score ?? null,

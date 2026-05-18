@@ -383,11 +383,15 @@ export function ReferencePanel({
                 const hits = Array.isArray(payload.copy_guard?.hits) ? payload.copy_guard.hits : []
                 const quality = payload.quality_assessment || null
                 const migrationAudit = payload.migration_audit || null
+                const transferableModel = migrationAudit?.transferable_model || null
                 const qualityScore = Number(quality?.overall_score || 0)
                 const riskLabel = quality?.risk_level === 'low' ? '低风险' : quality?.risk_level === 'medium' ? '中风险' : quality?.risk_level === 'high' ? '高风险' : ''
                 const riskColor = quality?.risk_level === 'low' ? 'green' : quality?.risk_level === 'medium' ? 'gold' : quality?.risk_level === 'high' ? 'red' : 'default'
                 const learnedCount = migrationAudit
                   ? ['rhythm_structure', 'style_density', 'payoff_emotion'].reduce((sum, key) => sum + (Array.isArray(migrationAudit.learned?.[key]) ? migrationAudit.learned[key].length : 0), 0)
+                  : 0
+                const transferableCount = transferableModel
+                  ? Object.values(transferableModel.allowed_learning || {}).reduce((sum: number, value: any) => sum + (Array.isArray(value) ? value.length : 0), 0)
                   : 0
                 return (
                   <Card key={report.id} size="small" style={{ margin: 8, borderRadius: 8 }}
@@ -421,6 +425,11 @@ export function ReferencePanel({
                       {migrationAudit && (
                         <Paragraph style={{ marginBottom: 0, fontSize: 12 }} ellipsis={{ rows: 3, expandable: true, symbol: '展开' }}>
                           迁移审计：学习节奏/文风/爽点资产 {learnedCount} 条；规避 {Array.isArray(migrationAudit.avoided) ? migrationAudit.avoided.length : 0} 项；建议：{Array.isArray(migrationAudit.risk?.suggestions) ? migrationAudit.risk.suggestions.join('；') : '-'}
+                        </Paragraph>
+                      )}
+                      {transferableModel && (
+                        <Paragraph style={{ marginBottom: 0, fontSize: 12 }} ellipsis={{ rows: 4, expandable: true, symbol: '展开' }}>
+                          可迁移模型：抽象学习项 {transferableCount} 条；必须改写：{Array.isArray(transferableModel.rewrite_requirements) ? transferableModel.rewrite_requirements.join('；') : '-'}；禁用迁移：{Array.isArray(transferableModel.forbidden_transfer) ? transferableModel.forbidden_transfer.join('、') : '-'}
                         </Paragraph>
                       )}
                       {entries.length > 0 && (
