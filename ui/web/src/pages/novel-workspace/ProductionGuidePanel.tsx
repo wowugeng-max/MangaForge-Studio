@@ -4,10 +4,12 @@ import {
   BookOutlined,
   CheckCircleOutlined,
   ClusterOutlined,
+  DownOutlined,
   ExperimentOutlined,
   FileSearchOutlined,
   FileTextOutlined,
   PlayCircleOutlined,
+  RightOutlined,
   SafetyOutlined,
   StopOutlined,
 } from '@ant-design/icons'
@@ -126,6 +128,7 @@ export function ProductionGuidePanel({
   onOpenCommercialTools: () => void
   onOpenExportDelivery: () => void
 }) {
+  const [collapsed, setCollapsed] = React.useState(false)
   const materialNumericScore = Number(materialScore?.score ?? commercialReadiness?.score ?? 0)
   const hasCoreMaterials = hasWritingBible || referenceCount > 0 || worldbuildingCount > 0 || characterCount > 0
   const hasPlan = chapterCount > 0 && (outlineCount > 0 || chapterCount >= 3)
@@ -219,94 +222,115 @@ export function ProductionGuidePanel({
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-        <Text style={{ fontSize: 12, color: '#667085', fontWeight: 600 }}>小说生产向导</Text>
-        {commercialReadiness?.score !== undefined && (
-          <Tag
-            color={commercialReadiness.can_batch_generate ? 'green' : Number(commercialReadiness.score || 0) >= 70 ? 'gold' : 'red'}
-            bordered={false}
-            style={{ marginRight: 0 }}
-          >
-            就绪 {commercialReadiness.score}%
-          </Tag>
-        )}
+        <Button
+          type="text"
+          size="small"
+          icon={collapsed ? <RightOutlined /> : <DownOutlined />}
+          onClick={() => setCollapsed(prev => !prev)}
+          style={{ padding: 0, height: 24, fontSize: 12, color: '#667085', fontWeight: 600 }}
+        >
+          小说生产向导
+        </Button>
+        <Space size={4}>
+          {commercialReadiness?.score !== undefined && (
+            <Tag
+              color={commercialReadiness.can_batch_generate ? 'green' : Number(commercialReadiness.score || 0) >= 70 ? 'gold' : 'red'}
+              bordered={false}
+              style={{ marginRight: 0 }}
+            >
+              就绪 {commercialReadiness.score}%
+            </Tag>
+          )}
+        </Space>
       </div>
-      <Space direction="vertical" size={8} style={{ width: '100%' }}>
-        {steps.map(step => (
-          <div
-            key={step.no}
-            style={{
-              border: `1px solid ${stepBorder(step.status)}`,
-              borderRadius: 8,
-              padding: 10,
-              background: step.status === 'active' ? '#fbfdff' : '#fff',
-            }}
-          >
-            <Space direction="vertical" size={8} style={{ width: '100%' }}>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-                <Tag color={statusColor(step.status)} bordered={false} style={{ marginRight: 0, minWidth: 24, textAlign: 'center' }}>
-                  {step.status === 'done' ? <CheckCircleOutlined /> : step.no}
-                </Tag>
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                    <Text strong style={{ fontSize: 13 }}>{step.title}</Text>
-                    <Text type="secondary" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{step.statusText}</Text>
+      {collapsed ? (
+        <Space wrap size={[4, 2]}>
+          <Tag color="blue" bordered={false}>章 {chapterCount}</Tag>
+          <Tag color="green" bordered={false}>已写 {proseChapterCount}</Tag>
+          <Tag color={materialReady ? 'green' : 'gold'} bordered={false}>材料 {materialNumericScore || '-'}</Tag>
+          {activeTaskCount > 0 && <Tag color="processing" bordered={false}>任务 {activeTaskCount}</Tag>}
+        </Space>
+      ) : (
+        <>
+          <Space direction="vertical" size={8} style={{ width: '100%' }}>
+            {steps.map(step => (
+              <div
+                key={step.no}
+                style={{
+                  border: `1px solid ${stepBorder(step.status)}`,
+                  borderRadius: 8,
+                  padding: 10,
+                  background: step.status === 'active' ? '#fbfdff' : '#fff',
+                }}
+              >
+                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                    <Tag color={statusColor(step.status)} bordered={false} style={{ marginRight: 0, minWidth: 24, textAlign: 'center' }}>
+                      {step.status === 'done' ? <CheckCircleOutlined /> : step.no}
+                    </Tag>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                        <Text strong style={{ fontSize: 13 }}>{step.title}</Text>
+                        <Text type="secondary" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{step.statusText}</Text>
+                      </div>
+                      <Text type="secondary" style={{ fontSize: 11, lineHeight: 1.45 }}>{step.desc}</Text>
+                    </div>
                   </div>
-                  <Text type="secondary" style={{ fontSize: 11, lineHeight: 1.45 }}>{step.desc}</Text>
-                </div>
+                  <Tooltip title={step.primaryDisabled ? '请先完成前置步骤' : ''}>
+                    <Button
+                      size="small"
+                      block
+                      type={step.status === 'active' ? 'primary' : 'default'}
+                      icon={step.primaryIcon}
+                      loading={step.primaryLoading}
+                      disabled={step.primaryDisabled}
+                      onClick={step.onPrimary}
+                    >
+                      {step.primaryLabel}
+                    </Button>
+                  </Tooltip>
+                  {step.secondary && step.secondary.length > 0 && (
+                    <div style={{ display: 'grid', gridTemplateColumns: step.secondary.length >= 3 ? '1fr' : `repeat(${step.secondary.length}, minmax(0, 1fr))`, gap: 6 }}>
+                      {step.secondary.map(action => (
+                        <Button
+                          key={action.label}
+                          size="small"
+                          style={{ width: '100%', minWidth: 0 }}
+                          loading={action.loading}
+                          disabled={action.disabled}
+                          onClick={action.onClick}
+                        >
+                          {action.label}
+                        </Button>
+                      ))}
+                    </div>
+                  )}
+                </Space>
               </div>
-              <Tooltip title={step.primaryDisabled ? '请先完成前置步骤' : ''}>
+            ))}
+          </Space>
+          {proseProgress.current > 0 && (
+            <div style={{ marginTop: 10 }}>
+              <Progress
+                percent={proseProgress.total > 0 ? Math.round(proseProgress.current / proseProgress.total * 100) : 0}
+                size="small"
+                format={() => `${proseProgress.current}/${proseProgress.total}`}
+              />
+              {stepProseLoading && (
                 <Button
                   size="small"
+                  danger
                   block
-                  type={step.status === 'active' ? 'primary' : 'default'}
-                  icon={step.primaryIcon}
-                  loading={step.primaryLoading}
-                  disabled={step.primaryDisabled}
-                  onClick={step.onPrimary}
+                  icon={<StopOutlined />}
+                  style={{ marginTop: 6 }}
+                  onClick={onCancelGenerateProse}
                 >
-                  {step.primaryLabel}
+                  停止后续生成
                 </Button>
-              </Tooltip>
-              {step.secondary && step.secondary.length > 0 && (
-                <div style={{ display: 'grid', gridTemplateColumns: step.secondary.length >= 3 ? '1fr' : `repeat(${step.secondary.length}, minmax(0, 1fr))`, gap: 6 }}>
-                  {step.secondary.map(action => (
-                    <Button
-                      key={action.label}
-                      size="small"
-                      style={{ width: '100%', minWidth: 0 }}
-                      loading={action.loading}
-                      disabled={action.disabled}
-                      onClick={action.onClick}
-                    >
-                      {action.label}
-                    </Button>
-                  ))}
-                </div>
               )}
-            </Space>
-          </div>
-        ))}
-      </Space>
-      {proseProgress.current > 0 && (
-        <div style={{ marginTop: 10 }}>
-          <Progress
-            percent={proseProgress.total > 0 ? Math.round(proseProgress.current / proseProgress.total * 100) : 0}
-            size="small"
-            format={() => `${proseProgress.current}/${proseProgress.total}`}
-          />
-          {stepProseLoading && (
-            <Button
-              size="small"
-              danger
-              block
-              icon={<StopOutlined />}
-              style={{ marginTop: 6 }}
-              onClick={onCancelGenerateProse}
-            >
-              停止后续生成
-            </Button>
+            </div>
           )}
-        </div>
+        </>
       )}
     </div>
   )

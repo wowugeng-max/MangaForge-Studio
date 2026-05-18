@@ -183,6 +183,10 @@ function buildProseQualityPrompt(project: any, contextPackage: any, chapterText:
     '5. 是否有水文、重复、空泛总结、机械说明。',
     '6. 是否疑似照搬参考项目的专名、桥段或原句。',
     '7. 修订后新增内容是否引入新的人物、道具或规程突兀点。',
+    '8. 场景卡承诺的战斗、追逐、清剿、灾祸或强冲突是否真正写出过程，而不是只有结果。',
+    '9. action_beats 是否有起手、反应、受阻、代价、反制、结果；是否缺少空间位置、伤势、资源损耗或信息暴露。',
+    '10. 是否存在过度环境描写、连续纯氛围段落、用阴冷/压抑/雨雾等描写替代剧情推进。',
+    '11. 每 3-5 段是否有可见行动、选择、信息变化或关系变化。',
     '',
     '【结构化上下文包】',
     JSON.stringify(contextPackage, null, 2).slice(0, 6000),
@@ -190,7 +194,7 @@ function buildProseQualityPrompt(project: any, contextPackage: any, chapterText:
     '【待复检正文】',
     String(chapterText || '').slice(0, 16000),
     '',
-    '输出 JSON，字段：passed(boolean), score(0-100), issues(array: severity/type/description/suggestion), revision_directives(array), needs_revision(boolean)。只返回 JSON。',
+    '输出 JSON，字段：passed(boolean), score(0-100), craft_metrics({action_detail_score,description_overuse_score,event_density_score,combat_process_score}), focused_revision_modes(array，可取 expand_action/cut_description/tighten_pacing/add_consequence/restore_hook), issues(array: severity/type/description/suggestion), revision_directives(array), needs_revision(boolean)。只返回 JSON。',
   ].join('\n')
 }
 
@@ -213,7 +217,7 @@ async function createProseQualityReview(ctx: EditorRoutesContext, activeWorkspac
     modelId: modelId ? String(modelId) : undefined,
     maxTokens: Number(options.max_tokens || 3000),
     temperature: ctx.getStageTemperature(project, 'review', 0.2),
-    responseMode: 'non_stream',
+    responseMode: 'stream',
     skipMemory: true,
   })
   if ((result as any).error) throw new Error(String((result as any).error))
@@ -223,6 +227,8 @@ async function createProseQualityReview(ctx: EditorRoutesContext, activeWorkspac
     score: Number(reviewPayload?.score || 80),
     issues: Array.isArray(reviewPayload?.issues) ? reviewPayload.issues.map(normalizeIssue) : [],
     revision_directives: Array.isArray(reviewPayload?.revision_directives) ? reviewPayload.revision_directives.map((item: any) => String(item)) : [],
+    craft_metrics: reviewPayload?.craft_metrics || {},
+    focused_revision_modes: Array.isArray(reviewPayload?.focused_revision_modes) ? reviewPayload.focused_revision_modes.map((item: any) => String(item)) : [],
     needs_revision: Boolean(reviewPayload?.needs_revision),
     modelName: (result as any).modelName,
   }
@@ -682,15 +688,26 @@ export function registerNovelEditorRoutes(app: Express, ctx: EditorRoutesContext
       const chapters = await listNovelChapters(activeWorkspace, projectId)
       const chapter = chapters.find(item => item.id === chapterId)
       if (!chapter) return res.status(404).json({ error: 'chapter not found' })
+      const revisionMode = String(req.body.revision_mode || 'from_report')
+      const revisionModeGuide: Record<string, string> = {
+        from_report: '按报告综合修订，优先处理高严重度问题。',
+        expand_action: '重点补足战斗、追逐、清剿、灾祸或强冲突过程。必须写出动作起手、空间位置、对手反应、受伤/资源损耗/信息暴露、反制动作和结果。',
+        cut_description: '重点压缩不推动剧情的环境描写和连续氛围段落。保留影响动作空间、诡异规则、危险判断的描写。',
+        tighten_pacing: '重点提高事件密度，删掉空泛总结和重复解释。每 3-5 段必须有行动、选择、信息变化或关系变化。',
+        add_consequence: '重点补充行动后果，包括伤势、物品损耗、暴露秘密、角色关系变化、规则代价。',
+        restore_hook: '重点强化章末钩子，同时保持前文因果自然。',
+      }
       const prompt = [
         '任务：根据商业编辑报告对当前章节做局部修订补丁。只输出 JSON。',
         `项目：${project.title}`,
         '要求：保留当前章节整体结构、节奏、章末钩子和可用文气；只修复报告指出的问题；不得照搬参考作品。',
+        `本次修订模式：${revisionMode}。${revisionModeGuide[revisionMode] || revisionModeGuide.from_report}`,
+        '正文工艺硬约束：不要用环境描写替代剧情推进；涉及战斗/行动时必须补足动作链、空间变化、代价和结果；删改时不得破坏连续性。',
         '为了避免长连接失败，优先输出局部补丁，不要输出完整正文。',
         '【编辑报告】',
         JSON.stringify(report, null, 2).slice(0, 7000),
         '【修订提示】',
-        String(report.one_click_revision_prompt || req.body.prompt || ''),
+        String(req.body.prompt || report.one_click_revision_prompt || ''),
         '【原章节正文】',
         String(chapter.chapter_text || '').slice(0, 12000),
         '输出 JSON：',
@@ -709,7 +726,7 @@ export function registerNovelEditorRoutes(app: Express, ctx: EditorRoutesContext
         modelId: modelId ? String(modelId) : undefined,
         maxTokens: 2600,
         temperature: ctx.getStageTemperature(project, 'revise', 0.62),
-        responseMode: 'non_stream',
+        responseMode: 'stream',
         skipMemory: true,
       })
       if ((result as any).error) return res.status(502).json({ error: (result as any).error, result })
@@ -737,6 +754,7 @@ export function registerNovelEditorRoutes(app: Express, ctx: EditorRoutesContext
         payload: JSON.stringify({
           chapter_id: chapter.id,
           source_review_id: review.id,
+          requested_revision_mode: revisionMode,
           revision_summary: resultPayload?.revision_summary || '',
           revision_mode: resultPayload?.revision_mode || 'patch',
           applied_patches: patchResult.applied,

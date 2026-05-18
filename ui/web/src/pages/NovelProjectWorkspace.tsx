@@ -1235,46 +1235,62 @@ export default function NovelProjectWorkspace() {
     }
   }
 
-  const applyEditorRevision = async (report: any) => {
+  const applyEditorRevision = async (report: any, options: { revisionMode?: string; prompt?: string; skipConfirm?: boolean } = {}) => {
     if (!selectedModelId) return message.warning('请先选择模型')
     const isSelfCheckRevision = report?.review_type === 'prose_quality'
     const payload = (() => {
       try { return typeof report.payload === 'string' ? JSON.parse(report.payload) : report.payload || {} } catch { return {} }
     })()
+    const revisionLabels: Record<string, string> = {
+      from_report: isSelfCheckRevision ? '按正文自检生成修订稿' : '按编辑报告生成修订稿',
+      expand_action: '补动作/战斗细节',
+      cut_description: '压缩环境描写',
+      tighten_pacing: '提升事件密度',
+      add_consequence: '补行动后果',
+      restore_hook: '强化章末钩子',
+    }
+    const revisionMode = options.revisionMode || 'from_report'
+    const runRevision = async () => {
+      try {
+        const res = await apiClient.post(`/novel/reviews/${report.id}/apply-revision`, {
+          project_id: projectId,
+          chapter_id: payload.chapter_id || activeChapter?.id,
+          model_id: selectedModelId,
+          revision_mode: revisionMode,
+          prompt: options.prompt || '',
+          auto_quality_check: true,
+        })
+        if (res.data?.chapter) {
+          setChapters(prev => prev.map(c => c.id === res.data.chapter.id ? res.data.chapter : c))
+        }
+        await loadProjectModules()
+        setRightPanelOpen(true)
+        setRightPanelTab('proseQuality')
+        if (res.data?.quality_refresh?.ok) {
+          const syncedTo = res.data?.story_state_update?.last_synced_chapter
+          message.success(`${revisionLabels[revisionMode] || '修订稿'}已入库，并已复检当前版本，评分 ${res.data.quality_refresh.score ?? '-'}${syncedTo ? `；状态机已同步至第${syncedTo}章` : ''}`)
+        } else if (res.data?.quality_refresh?.ok === false) {
+          message.warning(`修订稿已入库，但自动复检失败：${res.data.quality_refresh.error || '未知错误'}。可在正文质检里手动复检。`)
+        } else if (res.data?.story_state_update?.last_synced_chapter) {
+          message.success(`修订稿已入库，状态机已同步至第${res.data.story_state_update.last_synced_chapter}章`)
+        } else {
+          message.success('修订稿已入库')
+        }
+      } catch (error: any) {
+        message.error(error?.response?.data?.error || error?.message || '修订失败')
+      }
+    }
+    if (options.skipConfirm) {
+      await runRevision()
+      return
+    }
     Modal.confirm({
-      title: isSelfCheckRevision ? '按正文自检生成修订稿' : '按编辑报告生成修订稿',
+      title: revisionLabels[revisionMode] || revisionLabels.from_report,
       content: isSelfCheckRevision
         ? '系统会根据这份正文质检的修订指令重写当前章节，并保存为新的章节版本。'
         : '系统会根据这份编辑报告重写当前章节，并保存为新的章节版本。',
       okText: isSelfCheckRevision ? '按自检修订' : '生成修订稿',
-      onOk: async () => {
-        try {
-          const res = await apiClient.post(`/novel/reviews/${report.id}/apply-revision`, {
-            project_id: projectId,
-            chapter_id: payload.chapter_id || activeChapter?.id,
-            model_id: selectedModelId,
-            auto_quality_check: true,
-          })
-          if (res.data?.chapter) {
-            setChapters(prev => prev.map(c => c.id === res.data.chapter.id ? res.data.chapter : c))
-          }
-          await loadProjectModules()
-          setRightPanelOpen(true)
-          setRightPanelTab('proseQuality')
-          if (res.data?.quality_refresh?.ok) {
-            const syncedTo = res.data?.story_state_update?.last_synced_chapter
-            message.success(`修订稿已入库，并已复检当前版本，评分 ${res.data.quality_refresh.score ?? '-'}${syncedTo ? `；状态机已同步至第${syncedTo}章` : ''}`)
-          } else if (res.data?.quality_refresh?.ok === false) {
-            message.warning(`修订稿已入库，但自动复检失败：${res.data.quality_refresh.error || '未知错误'}。可在正文质检里手动复检。`)
-          } else if (res.data?.story_state_update?.last_synced_chapter) {
-            message.success(`修订稿已入库，状态机已同步至第${res.data.story_state_update.last_synced_chapter}章`)
-          } else {
-            message.success('修订稿已入库')
-          }
-        } catch (error: any) {
-          message.error(error?.response?.data?.error || error?.message || '修订失败')
-        }
-      },
+      onOk: runRevision,
     })
   }
 

@@ -2,7 +2,9 @@ import React from 'react'
 import { Button, Space, Tag, Tooltip, Typography } from 'antd'
 import {
   BookOutlined,
+  DownOutlined,
   EditOutlined,
+  RightOutlined,
   UnorderedListOutlined,
 } from '@ant-design/icons'
 import { ProductionGuidePanel } from './ProductionGuidePanel'
@@ -97,6 +99,8 @@ export function ChapterDirectorySidebar({
   onCreateChapter: () => void
   onSelectChapter: (chapterId: number) => void
 }) {
+  const [chaptersCollapsed, setChaptersCollapsed] = React.useState(false)
+
   return (
     <div style={{
       width: 240, flexShrink: 0, background: '#fff',
@@ -150,7 +154,15 @@ export function ChapterDirectorySidebar({
         <div style={{ padding: '8px 16px 12px', borderBottom: '1px solid #f5f5f5' }}>
           <Space direction="vertical" size={10} style={{ width: '100%' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Text strong style={{ fontSize: 13 }}><UnorderedListOutlined /> 章节目录</Text>
+              <Button
+                type="text"
+                size="small"
+                icon={chaptersCollapsed ? <RightOutlined /> : <DownOutlined />}
+                onClick={() => setChaptersCollapsed(prev => !prev)}
+                style={{ padding: 0, height: 24, fontSize: 13, fontWeight: 600 }}
+              >
+                <UnorderedListOutlined /> 章节目录
+              </Button>
               <Space size={6}>
                 <Tooltip title="弹出查看大纲树">
                   <Button size="small" onClick={onOpenOutlineTree} icon={<BookOutlined />}>大纲树</Button>
@@ -163,11 +175,11 @@ export function ChapterDirectorySidebar({
               <Tag color="green" bordered={false} style={{ fontSize: 11 }}>已写 {proseChapterCount}</Tag>
               <Tag color="orange" bordered={false} style={{ fontSize: 11 }}>未写 {chapters.length - proseChapterCount}</Tag>
             </Space>
-            <Button block icon={<EditOutlined />} onClick={onCreateChapter}>新增章节</Button>
+            {!chaptersCollapsed && <Button block icon={<EditOutlined />} onClick={onCreateChapter}>新增章节</Button>}
           </Space>
         </div>
 
-        {chapters.length === 0 ? (
+        {chaptersCollapsed ? null : chapters.length === 0 ? (
           <div style={{ padding: '20px 16px', textAlign: 'center' }}>
             <Text type="secondary" style={{ fontSize: 12 }}>暂无章节</Text>
           </div>

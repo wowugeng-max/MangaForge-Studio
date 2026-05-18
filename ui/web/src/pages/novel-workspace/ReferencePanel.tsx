@@ -144,7 +144,7 @@ export function ReferencePanel({
   onEdit: (kind: 'worldbuilding' | 'character' | 'outline', item?: any) => void
   onOpenCreativeCards?: () => void
   onOpenStoryStateEditor?: () => void
-  onApplyEditorRevision?: (report: any) => void
+  onApplyEditorRevision?: (report: any, options?: { revisionMode?: string; prompt?: string; skipConfirm?: boolean }) => void
   onRefreshProseQuality?: () => void
   onRollbackVersion: (versionId: number) => void
   onOpenVersionDetail: (version: any) => void
@@ -159,6 +159,18 @@ export function ReferencePanel({
   const storyState = selectedProject?.reference_config?.story_state || {}
   const writingBible = selectedProject?.reference_config?.writing_bible || null
   const revisionUsageMap = buildRevisionUsageMap(editorRevisionReports || [])
+  const referenceNavItems = [
+    { key: 'storyMemory', label: '记忆', badge: storyState?.last_updated_chapter ? `第${storyState.last_updated_chapter}` : '' },
+    { key: 'writingBible', label: '圣经', badge: writingBible ? '有' : '' },
+    { key: 'worldbuilding', label: '世界', badge: worldbuilding.length || '' },
+    { key: 'characters', label: '角色', badge: characters.length || '' },
+    { key: 'outline', label: '大纲', badge: outlines.length || '' },
+    { key: 'referenceReports', label: '参考', badge: referenceReports.length || '' },
+    { key: 'editorReports', label: '编辑', badge: editorReports.length || '' },
+    { key: 'bookReviews', label: '总检', badge: bookReviews.length || '' },
+    { key: 'proseQuality', label: '质检', badge: proseQualityReports.length || '' },
+    { key: 'versions', label: '版本', badge: chapterVersions.length ? currentVersionNo(chapterVersions) : '' },
+  ]
 
   return (
     <div style={{
@@ -167,14 +179,48 @@ export function ReferencePanel({
       minHeight: 0,
     }}>
       <div style={{ padding: '8px 12px', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Text strong style={{ fontSize: 12 }}>📚 参考资料</Text>
+        <Space size={6}>
+          <Text strong style={{ fontSize: 12 }}>📚 参考资料</Text>
+          <Tag bordered={false} color="blue" style={{ marginRight: 0 }}>
+            {referenceNavItems.find(item => item.key === activeTab)?.label || '卡片'}
+          </Tag>
+        </Space>
         <Space size={4}>
           {onOpenCreativeCards && <Button type="text" size="small" onClick={onOpenCreativeCards}>卡片</Button>}
           <Button type="text" size="small" onClick={onClose}>✕</Button>
         </Space>
       </div>
+      <div style={{ padding: 8, borderBottom: '1px solid #f0f0f0', background: '#fafafa' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 6 }}>
+          {referenceNavItems.map(item => {
+            const active = item.key === activeTab
+            return (
+              <Button
+                key={item.key}
+                size="small"
+                type={active ? 'primary' : 'default'}
+                onClick={() => onTabChange(item.key)}
+                style={{
+                  width: '100%',
+                  minWidth: 0,
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  paddingInline: 8,
+                }}
+              >
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.label}</span>
+                {item.badge !== '' && item.badge !== 0 && (
+                  <span style={{ fontSize: 10, opacity: active ? 0.9 : 0.65, marginLeft: 4 }}>{item.badge}</span>
+                )}
+              </Button>
+            )
+          })}
+        </div>
+      </div>
       <div style={{ flex: 1, overflow: 'auto' }}>
         <Tabs activeKey={activeTab} onChange={onTabChange} size="small"
+          renderTabBar={() => <></>}
           items={[
             {
               key: 'storyMemory', label: '故事记忆',
@@ -476,6 +522,8 @@ export function ReferencePanel({
                       const selfCheck = payload.self_check || {}
                       const review = selfCheck.review || {}
                       const score = Number(review.score ?? 0)
+                      const craftMetrics = review.craft_metrics || {}
+                      const focusedModes = Array.isArray(review.focused_revision_modes) ? review.focused_revision_modes : []
                       const issues = Array.isArray(review.issues) ? review.issues : (Array.isArray(report.issues) ? report.issues : [])
                       const pipeline = Array.isArray(payload.pipeline) ? payload.pipeline : []
                       const contextPackage = payload.context_package || {}
@@ -531,6 +579,15 @@ export function ReferencePanel({
                               {payload.source === 'post_revision' && <Tag color="blue" bordered={false}>修订后复检</Tag>}
                               {payload.content_hash && <Tag bordered={false}>正文指纹 {String(payload.content_hash).slice(0, 8)}</Tag>}
                             </Space>
+                            {(Object.keys(craftMetrics).length > 0 || focusedModes.length > 0) && (
+                              <Space wrap size={[4, 2]}>
+                                {craftMetrics.action_detail_score !== undefined && <Tag bordered={false}>动作 {craftMetrics.action_detail_score}</Tag>}
+                                {craftMetrics.combat_process_score !== undefined && <Tag bordered={false}>战斗过程 {craftMetrics.combat_process_score}</Tag>}
+                                {craftMetrics.event_density_score !== undefined && <Tag bordered={false}>事件密度 {craftMetrics.event_density_score}</Tag>}
+                                {craftMetrics.description_overuse_score !== undefined && <Tag color={Number(craftMetrics.description_overuse_score) > 60 ? 'gold' : 'default'} bordered={false}>描写过量 {craftMetrics.description_overuse_score}</Tag>}
+                                {focusedModes.slice(0, 4).map((mode: string) => <Tag key={mode} color="purple" bordered={false}>{mode}</Tag>)}
+                              </Space>
+                            )}
                             {chapterTarget.title && (
                               <Text style={{ fontSize: 12 }}><Text strong>目标章：</Text>{displayPreview(chapterTarget.title, 40)}</Text>
                             )}
@@ -584,6 +641,14 @@ export function ReferencePanel({
                                 <Button size="small" block disabled={isStale || usedByRevisions.length > 0} onClick={() => onApplyEditorRevision(report)}>
                                   {usedByRevisions.length ? '已用于修订' : isStale ? '旧报告不可直接修订' : '按自检修订'}
                                 </Button>
+                              )}
+                              {onApplyEditorRevision && !isStale && usedByRevisions.length === 0 && (
+                                <Space wrap size={4}>
+                                  <Button size="small" onClick={() => onApplyEditorRevision(report, { revisionMode: 'expand_action' })}>补动作</Button>
+                                  <Button size="small" onClick={() => onApplyEditorRevision(report, { revisionMode: 'cut_description' })}>砍描写</Button>
+                                  <Button size="small" onClick={() => onApplyEditorRevision(report, { revisionMode: 'tighten_pacing' })}>提节奏</Button>
+                                  <Button size="small" onClick={() => onApplyEditorRevision(report, { revisionMode: 'add_consequence' })}>补后果</Button>
+                                </Space>
                               )}
                             </Space>
                           </Space>
