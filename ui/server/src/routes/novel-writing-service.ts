@@ -141,6 +141,7 @@ export function createNovelWritingService(ctx: {
     '8. 保持 style_lock 中的人称、句长、对话比例、吐槽密度、爽点密度、描写浓度和禁用词约束。',
     '9. 只能学习参考作品的节奏、结构、爽点安排和信息密度；不得复制具体桥段、专有设定、原句、角色名和核心梗。',
     '10. 执行 setting_context：required 设定必须在正文中落地；forbidden 设定不得泄漏；ability_beats 必须写清代价/限制；item_beats 必须符合物品归属和位置；boss_move 必须符合 Boss 行动逻辑；rule_trigger 必须写出触发条件、代价和后果；角色只能知道 knowledge_scope 允许的信息。',
+    '11. 如果参考迁移计划包含 transferable_model，只能采用其中 allowed_learning 的抽象功能；rewrite_requirements 必须执行；copy_guard_terms 和 forbidden_transfer 禁止出现在正文里。',
     migrationPlan?.generation_prompt_addendum ? `10. ${migrationPlan.generation_prompt_addendum}` : '',
     chapterDraft?.chapter_no ? `11. 本次只生成第${chapterDraft.chapter_no}章，不得输出其他章节或续章内容。` : '',
     '',

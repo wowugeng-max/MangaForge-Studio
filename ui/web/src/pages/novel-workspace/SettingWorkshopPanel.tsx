@@ -196,6 +196,25 @@ export function SettingWorkshopPanel({
     }
   }
 
+  const suggestChapterUsage = async (useModel: boolean) => {
+    if (!activeChapter?.id) return message.warning('请先选择章节')
+    setSaving(true)
+    try {
+      const res = await apiClient.post(`/novel/chapters/${activeChapter.id}/settings-usage/suggest`, {
+        project_id: projectId,
+        model_id: selectedModelId,
+        use_model: useModel,
+        apply: true,
+      })
+      message.success(`已匹配 ${res.data?.total || 0} 条本章设定调用`)
+      await load()
+    } catch {
+      message.error('本章设定自动匹配失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const runConsistencyCheck = async () => {
     if (!activeChapter?.id) return message.warning('请先选择章节')
     setSaving(true)
@@ -203,9 +222,11 @@ export function SettingWorkshopPanel({
       const res = await apiClient.post(`/novel/chapters/${activeChapter.id}/settings-consistency-check`, {
         project_id: projectId,
         model_id: selectedModelId,
+        apply_updates: true,
       })
       const report = res.data?.report || {}
-      message.success(`设定一致性评分：${report.score ?? '-'}`)
+      message.success(`设定一致性评分：${report.score ?? '-'}；回写 ${res.data?.applied_state_updates?.length || 0} 项`)
+      await load()
     } catch {
       message.error('设定一致性检查失败')
     } finally {
@@ -225,6 +246,8 @@ export function SettingWorkshopPanel({
         <Button size="small" type="primary" onClick={() => openEditor()}>新增设定</Button>
         <Button size="small" onClick={() => incubateSettings(false)} loading={saving}>从项目资料补齐</Button>
         <Button size="small" onClick={() => incubateSettings(true)} loading={saving} disabled={!selectedModelId}>模型提炼设定</Button>
+        <Button size="small" onClick={() => suggestChapterUsage(false)} loading={saving} disabled={!activeChapter?.id}>本章快速匹配</Button>
+        <Button size="small" onClick={() => suggestChapterUsage(true)} loading={saving} disabled={!activeChapter?.id || !selectedModelId}>模型匹配本章</Button>
         <Button size="small" onClick={runConsistencyCheck} loading={saving} disabled={!activeChapter?.chapter_text}>检查本章</Button>
         <Button size="small" onClick={load} loading={loading}>刷新</Button>
       </Space>

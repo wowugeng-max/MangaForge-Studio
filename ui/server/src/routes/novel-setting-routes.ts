@@ -10,6 +10,7 @@ import {
   listNovelSettingEntities,
   listNovelWorldbuilding,
   replaceNovelChapterSettingUsage,
+  updateNovelChapterSettingUsage,
   updateNovelSettingEntity,
 } from '../novel'
 import { executeNovelAgent } from '../llm'
@@ -60,6 +61,47 @@ function normalizeUsageInput(item: any) {
     expected_state_change: parseJsonField(item.expected_state_change, {}),
     actual_state_change: parseJsonField(item.actual_state_change, {}),
   }
+}
+
+function settingText(setting: any) {
+  return [
+    setting.name,
+    setting.summary,
+    JSON.stringify(setting.constraints_json || {}),
+    JSON.stringify(setting.state_json || {}),
+  ].join(' ')
+}
+
+function heuristicUsageSuggestions(chapter: any, settings: any[]) {
+  const chapterText = [
+    chapter.title,
+    chapter.chapter_goal,
+    chapter.chapter_summary,
+    chapter.conflict,
+    chapter.ending_hook,
+    JSON.stringify(chapter.raw_payload || {}),
+  ].join(' ')
+  const scored = settings.map(setting => {
+    const text = settingText(setting)
+    const name = String(setting.name || '')
+    let score = 0
+    if (name && chapterText.includes(name)) score += 40
+    for (const token of text.split(/[\s,，。；;、/|]+/).filter(item => item.length >= 2).slice(0, 50)) {
+      if (chapterText.includes(token)) score += 2
+    }
+    if (['character', 'boss', 'rule'].includes(setting.entity_type)) score += 4
+    if (['ability', 'item', 'foreshadowing'].includes(setting.entity_type)) score += 2
+    return { setting, score }
+  }).filter(item => item.score >= 6).sort((a, b) => b.score - a.score)
+  return scored.slice(0, 12).map(({ setting, score }, index) => ({
+    entity_id: setting.id,
+    usage_type: index < 4 || score >= 30 ? 'required' : 'allowed',
+    required: index < 4 || score >= 30,
+    allowed: true,
+    forbidden: false,
+    reveal_level: setting.visibility === 'hidden' || setting.visibility === 'spoiler' ? 'hint' : 'partial',
+    expected_state_change: { reason: `自动匹配：与本章目标/摘要/冲突相似度 ${score}` },
+  }))
 }
 
 function seedSettingsFromLocalData(worldbuilding: any[], characters: any[], outlines: any[], projectId: number) {
@@ -172,6 +214,41 @@ export function registerNovelSettingRoutes(app: Express, ctx: NovelSettingRoutes
     res.json({ ok: true, usage: records })
   })
 
+  app.post('/api/novel/chapters/:chapterId/settings-usage/suggest', async (req, res) => {
+    const activeWorkspace = ctx.getWorkspace()
+    const projectId = Number(req.body?.project_id || req.query.project_id || 0)
+    const chapterId = Number(req.params.chapterId)
+    const project = await ctx.getProject(activeWorkspace, projectId)
+    if (!project) return res.status(404).json({ error: 'project not found' })
+    const [chapters, settings] = await Promise.all([
+      listNovelChapters(activeWorkspace, projectId),
+      listNovelSettingEntities(activeWorkspace, projectId),
+    ])
+    const chapter = chapters.find(item => item.id === chapterId)
+    if (!chapter) return res.status(404).json({ error: 'chapter not found' })
+    let suggested = heuristicUsageSuggestions(chapter, settings)
+    const useModel = Number(req.body?.model_id || 0) > 0 && req.body?.use_model !== false
+    if (useModel && settings.length > 0) {
+      const prompt = [
+        '任务：为当前章节自动匹配设定工坊调用。只输出 JSON，不要解释。',
+        '你要决定本章哪些设定必须使用、哪些允许使用、哪些禁止揭露，并给出揭示级别和预期状态变化。',
+        'usage_type 只能是 required/allowed/forbidden；reveal_level 只能是 none/hint/partial/full。',
+        '原则：本章目标、冲突、章末钩子中明确需要的设定标 required；剧透、隐藏真相或不该提前暴露的设定标 forbidden 或 hint；无关设定不要输出。',
+        JSON.stringify({ chapter, settings: settings.slice(0, 180).map(item => ({ id: item.id, type: item.entity_type, name: item.name, summary: item.summary, visibility: item.visibility, constraints: item.constraints_json, state: item.state_json })) }, null, 2).slice(0, 18000),
+        '输出字段：usage(array)，每项包含 entity_id, usage_type, required, allowed, forbidden, reveal_level, expected_state_change。',
+      ].join('\n')
+      const result = await executeNovelAgent('outline-agent', project, { task: prompt }, { activeWorkspace, modelId: String(req.body.model_id), maxTokens: 3500, temperature: 0.2, skipMemory: true })
+      const payload = parseJsonLikePayload((result as any).output || (result as any).content || '') || {}
+      const modelUsage = (Array.isArray(payload?.usage) ? payload.usage : []).map(normalizeUsageInput).filter((item: any) => item.entity_id)
+      if (modelUsage.length > 0) suggested = modelUsage
+    }
+    const apply = req.body?.apply !== false
+    const records = apply
+      ? await replaceNovelChapterSettingUsage(activeWorkspace, projectId, chapterId, suggested as any)
+      : suggested
+    res.json({ ok: true, applied: apply, usage: records, total: records.length })
+  })
+
   app.post('/api/novel/projects/:id/settings/incubate-from-project', async (req, res) => {
     const activeWorkspace = ctx.getWorkspace()
     const projectId = Number(req.params.id)
@@ -238,14 +315,43 @@ export function registerNovelSettingRoutes(app: Express, ctx: NovelSettingRoutes
     ].join('\n')
     const result = await executeNovelAgent('review-agent', project, { task: prompt }, { activeWorkspace, modelId: req.body?.model_id ? String(req.body.model_id) : undefined, maxTokens: 3000, temperature: 0.15, skipMemory: true })
     const payload = parseJsonLikePayload((result as any).output || (result as any).content || '') || {}
+    const stateUpdates = Array.isArray(payload?.required_state_updates) ? payload.required_state_updates : []
+    const appliedStateUpdates: any[] = []
+    if (req.body?.apply_updates !== false && stateUpdates.length > 0) {
+      for (const update of stateUpdates) {
+        const entityId = Number(update?.entity_id || 0)
+        const name = String(update?.name || '').trim()
+        const entity = settings.find(item => (entityId && item.id === entityId) || (!!name && item.name === name))
+        if (!entity) continue
+        const actual = parseJsonField(update.actual_state_change || update.state_delta, {})
+        const updated = await updateNovelSettingEntity(activeWorkspace, entity.id, {
+          state_json: {
+            ...(entity.state_json || {}),
+            ...(actual || {}),
+            last_checked_chapter_id: chapterId,
+            last_checked_chapter_no: chapter.chapter_no,
+          },
+        } as any)
+        const matchedUsage = usage.find(item => item.entity_id === entity.id)
+        if (matchedUsage) {
+          await updateNovelChapterSettingUsage(activeWorkspace, matchedUsage.id, {
+            actual_state_change: {
+              ...(matchedUsage.actual_state_change || {}),
+              ...(actual || {}),
+            },
+          } as any)
+        }
+        appliedStateUpdates.push({ entity_id: entity.id, name: entity.name, actual_state_change: actual, updated: Boolean(updated) })
+      }
+    }
     await createNovelReview(activeWorkspace, {
       project_id: projectId,
       review_type: 'setting_consistency',
       status: payload?.passed === false || Number(payload?.score || 100) < 78 ? 'warn' : 'ok',
       summary: `设定一致性评分 ${payload?.score ?? '-'}`,
       issues: Array.isArray(payload?.issues) ? payload.issues.map((issue: any) => `${issue.severity || 'medium'}｜${issue.description || issue}`) : [],
-      payload: JSON.stringify({ chapter_id: chapterId, ...payload }),
+      payload: JSON.stringify({ chapter_id: chapterId, applied_state_updates: appliedStateUpdates, ...payload }),
     })
-    res.json({ ok: true, report: payload })
+    res.json({ ok: true, report: payload, applied_state_updates: appliedStateUpdates })
   })
 }

@@ -112,9 +112,49 @@ export function createNovelReferenceService() {
     }
   }
 
+  const buildTransferableReferenceModel = (preview: any, safety: any) => {
+    const entries = asArray(preview?.entries)
+    const entrySummary = entries.map((entry: any) => ({
+      id: entry.id,
+      title: entry.title,
+      category: entry.category,
+      source_project: entry.source_project,
+      match_reason: entry.match_reason,
+      reference_weight: entry.reference_weight,
+    }))
+    const pick = (patterns: RegExp[]) => entrySummary
+      .filter((entry: any) => patterns.some(pattern => pattern.test(`${entry.category || ''} ${entry.title || ''} ${entry.match_reason || ''}`)))
+      .slice(0, 10)
+    return {
+      purpose: '把参考作品转换为可学习的抽象写作模型，禁止迁移具体设定、专名、桥段和原句。',
+      allowed_learning: {
+        rhythm_structure: pick([/beat|节奏|结构|chapter|pacing|hook|章/]),
+        role_function: pick([/character|角色|function|关系|动机/]),
+        payoff_model: pick([/payoff|爽点|情绪|反转|悬念|hook/]),
+        information_density: pick([/density|信息|揭示|节拍|伏笔/]),
+        style_mechanics: pick([/style|syntax|dialogue|文风|句法|对话|叙事/]),
+      },
+      rewrite_requirements: [
+        '把参考条目的节奏功能翻译成当前项目自己的场景目标和阻碍来源。',
+        '替换人物功能承载者，不沿用参考角色名、人设关系和标志性选择。',
+        '替换所有专有名词、世界机制、核心道具、战斗招式、事件触发条件。',
+        '调整信息揭示顺序，避免与参考章节节拍同序。',
+        '保留爽点密度和情绪曲线，但重写代价、后果和章末钩子。',
+      ],
+      forbidden_transfer: asArray(safety?.forbidden).length ? safety.forbidden : getSafetyPolicy({ reference_config: { safety } }).forbidden,
+      copy_guard_terms: collectCopyGuardTerms(preview).slice(0, 30),
+      source_entry_ids: entrySummary.map((entry: any) => entry.id).filter(Boolean),
+    }
+  }
+
   const buildMigrationAudit = (project: any, referenceReport: any, safetyExplanation: any) => ({
     project_id: project.id,
     learning_layers: safetyExplanation?.learned_layers || getSafetyPolicy(project),
+    transferable_model: buildTransferableReferenceModel({
+      entries: referenceReport?.injected_entries || [],
+      active_references: referenceReport?.active_references || [],
+      warnings: referenceReport?.warnings || [],
+    }, getSafetyPolicy(project)),
     learned: {
       rhythm_structure: asArray(referenceReport?.injected_entries).filter((entry: any) => /beat|节奏|结构|chapter|style|pacing/.test(`${entry.category || ''} ${entry.title || ''}`)).slice(0, 12),
       style_density: asArray(referenceReport?.injected_entries).filter((entry: any) => /style|syntax|dialogue|文风|句法|对话/.test(`${entry.category || ''} ${entry.title || ''}`)).slice(0, 12),
@@ -181,6 +221,7 @@ export function createNovelReferenceService() {
     allowed_learning_layers: safety.allowed,
     cautious_layers: safety.cautious,
     forbidden_transfer_layers: safety.forbidden,
+    transferable_model: buildTransferableReferenceModel(preview, safety),
     chapter_specific_plan: {
       chapter_no: chapter.chapter_no,
       title: chapter.title,
