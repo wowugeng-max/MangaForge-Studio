@@ -66,6 +66,8 @@ const COMMERCIAL_TAGS = [
   'IP改编', '影视化', '短剧改编', '漫改', '有声书',
 ]
 
+type CreateMode = 'manual' | 'quick_ai' | 'deep_draft'
+
 function asStringArray(value: any): string[] {
   if (!Array.isArray(value)) return []
   return value.map(item => String(item || '').trim()).filter(Boolean)
@@ -144,9 +146,13 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
   const [creating, setCreating] = useState(false)
   const [createdId, setCreatedId] = useState<number | null>(null)
   const [seedIdea, setSeedIdea] = useState('')
+  const [createMode, setCreateMode] = useState<CreateMode>('manual')
   const [seedLoading, setSeedLoading] = useState(false)
+  const [finalizingSeed, setFinalizingSeed] = useState(false)
   const [autoCreating, setAutoCreating] = useState(false)
   const [seed, setSeed] = useState<any | null>(null)
+  const [seedDraftText, setSeedDraftText] = useState('')
+  const [seedFinalized, setSeedFinalized] = useState(false)
   const [modelsLoading, setModelsLoading] = useState(false)
   const [models, setModels] = useState<any[]>([])
   const [seedModelId, setSeedModelId] = useState<number | undefined>(() => {
@@ -196,8 +202,16 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
         message.warning('请输入作品标题')
         return
       }
-      if (!data.genre) {
+      if (createMode === 'manual' && !data.genre) {
         message.warning('请选择题材')
+        return
+      }
+      if (createMode === 'quick_ai' && !seed) {
+        message.warning('请先点击 AI 整理创意，或直接使用自动创建')
+        return
+      }
+      if (createMode === 'deep_draft' && (!seed || !seedFinalized)) {
+        message.warning('请先生成详细草稿，并由模型生成确定版本')
         return
       }
     }
@@ -207,7 +221,7 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
       return
     }
     setCurrent(c => c + 1)
-  }, [current, data, formItems])
+  }, [current, data, formItems, createMode, seed, seedFinalized])
 
   const handlePrev = () => {
     if (current === 3) return
@@ -300,9 +314,13 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
     setCreating(false)
     setCreatedId(null)
     setSeedIdea('')
+    setCreateMode('manual')
     setSeedLoading(false)
+    setFinalizingSeed(false)
     setAutoCreating(false)
     setSeed(null)
+    setSeedDraftText('')
+    setSeedFinalized(false)
     setData({
       title: '',
       genre: '',
@@ -373,6 +391,8 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
       })
       const nextSeed = normalizeProjectSeedForUi(res.data?.seed || {})
       setSeed(nextSeed)
+      setSeedDraftText(JSON.stringify(nextSeed, null, 2))
+      setSeedFinalized(createMode !== 'deep_draft')
       applySeedToForm(nextSeed)
       if (typeof window !== 'undefined') window.localStorage.setItem(projectSeedModelStorageKey, String(seedModelId))
       message.success('已整理创意草稿，可继续编辑后创建项目')
@@ -380,6 +400,38 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
       message.error(error?.response?.data?.error || error?.message || '创意草稿整理失败')
     } finally {
       setSeedLoading(false)
+    }
+  }
+
+  const finalizeProjectSeed = async () => {
+    if (!seedModelId) return message.warning('请先选择用于定稿的模型')
+    let draft: any = null
+    try {
+      draft = seedDraftText.trim() ? JSON.parse(seedDraftText) : seed
+    } catch {
+      message.error('草稿 JSON 格式不正确，请先修正')
+      return
+    }
+    if (!draft || !Object.keys(draft).length) return message.warning('请先生成或填写项目草稿')
+    setFinalizingSeed(true)
+    try {
+      const res = await apiClient.post('/novel/project-seed/finalize', {
+        idea: seedIdea,
+        title: data.title,
+        draft,
+        model_id: seedModelId,
+      })
+      const nextSeed = normalizeProjectSeedForUi(res.data?.seed || {})
+      setSeed(nextSeed)
+      setSeedDraftText(JSON.stringify(nextSeed, null, 2))
+      setSeedFinalized(true)
+      applySeedToForm(nextSeed)
+      if (typeof window !== 'undefined') window.localStorage.setItem(projectSeedModelStorageKey, String(seedModelId))
+      message.success('已生成确定版项目种子，可继续确认创建')
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '项目种子定稿失败')
+    } finally {
+      setFinalizingSeed(false)
     }
   }
 
@@ -415,60 +467,110 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
           <>
             <Card
               size="small"
-              title="碎片想法快速建项"
+              title="选择创建方式"
               style={{ marginBottom: 16, borderRadius: 12, background: '#fbfdff' }}
             >
               <Space direction="vertical" size={10} style={{ width: '100%' }}>
-                <Alert
-                  type="info"
-                  showIcon
-                  message="输入作品名即可自动建项；如果有零散设定，也可以粘贴进来，AI 会整理成项目简介、分卷、章节细纲和伏笔计划。"
-                />
-                <Input
-                  value={data.title}
-                  onChange={event => setData(prev => ({ ...prev, title: event.target.value }))}
-                  placeholder="作品名称，例如：长生天尊"
-                  size="large"
-                />
-                <Input.TextArea
-                  rows={5}
-                  value={seedIdea}
-                  onChange={event => setSeedIdea(event.target.value)}
-                  placeholder="可选：粘贴碎片想法。只填作品名时，系统会按原创项目自动扩展；粘贴设定时，会优先保留你的核心因果。"
-                  maxLength={20000}
-                  showCount
-                />
-                <Space.Compact block>
-                  <Select
-                    style={{ width: '65%' }}
-                    value={seedModelId}
-                    loading={modelsLoading}
-                    placeholder="选择整理创意的模型"
-                    options={modelOptions}
-                    onChange={setSeedModelId}
-                  />
-                  <Button
-                    type="primary"
-                    loading={seedLoading}
-                    onClick={deriveProjectSeed}
-                    style={{ width: '35%' }}
-                  >
-                    AI整理创意
-                  </Button>
-                </Space.Compact>
-                <Button
-                  block
-                  type="primary"
-                  icon={<RocketOutlined />}
-                  loading={autoCreating}
-                  disabled={seedLoading || creating}
-                  onClick={handleAutoCreate}
-                >
-                  {seed ? '用这个种子自动创建并进入工作台' : 'AI整理并自动创建项目'}
-                </Button>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
+                  {[
+                    { key: 'manual', title: '手动填写', desc: '只创建空项目，资料后续手工补齐。' },
+                    { key: 'quick_ai', title: '碎片快速生成', desc: '给作品名或一段想法，AI 整理后直接创建。' },
+                    { key: 'deep_draft', title: '深度孵化草稿', desc: 'AI 先生成角色/能力/大纲草稿，人工改完再定稿。' },
+                  ].map(item => {
+                    const active = createMode === item.key
+                    return (
+                      <button
+                        key={item.key}
+                        type="button"
+                        onClick={() => {
+                          setCreateMode(item.key as CreateMode)
+                          setSeedFinalized(item.key !== 'deep_draft' && Boolean(seed))
+                        }}
+                        style={{
+                          textAlign: 'left',
+                          padding: 12,
+                          borderRadius: 10,
+                          border: active ? '1px solid #1677ff' : '1px solid #e5e7eb',
+                          background: active ? '#eff6ff' : '#fff',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <div style={{ fontWeight: 700, marginBottom: 4 }}>{item.title}</div>
+                        <div style={{ color: '#666', fontSize: 12, lineHeight: 1.45 }}>{item.desc}</div>
+                      </button>
+                    )
+                  })}
+                </div>
+
+                {createMode === 'manual' && (
+                  <Alert type="info" showIcon message="手动创建只需要填写基础资料，不会调用模型；创建后进入工作台再逐步补世界观、角色、设定和章节。" />
+                )}
+
+                {createMode !== 'manual' && (
+                  <>
+                    <Alert
+                      type="info"
+                      showIcon
+                      message={createMode === 'quick_ai'
+                        ? '输入作品名即可自动建项；如果有零散设定，也可以粘贴进来，AI 会整理成项目简介、分卷、章节细纲和伏笔计划。'
+                        : '先让 AI 生成详细草稿，草稿会包含角色、能力、世界观、分卷、章节和伏笔。你可以直接修改 JSON，再让模型整理成确定版。'}
+                    />
+                    <Input
+                      value={data.title}
+                      onChange={event => setData(prev => ({ ...prev, title: event.target.value }))}
+                      placeholder="作品名称，例如：长生天尊"
+                      size="large"
+                    />
+                    <Input.TextArea
+                      rows={5}
+                      value={seedIdea}
+                      onChange={event => setSeedIdea(event.target.value)}
+                      placeholder="可选：粘贴碎片想法。只填作品名时，系统会按原创项目自动扩展；粘贴设定时，会优先保留你的核心因果。"
+                      maxLength={20000}
+                      showCount
+                    />
+                    <Space.Compact block>
+                      <Select
+                        style={{ width: '65%' }}
+                        value={seedModelId}
+                        loading={modelsLoading}
+                        placeholder="选择模型"
+                        options={modelOptions}
+                        onChange={setSeedModelId}
+                      />
+                      <Button
+                        type="primary"
+                        loading={seedLoading}
+                        onClick={deriveProjectSeed}
+                        style={{ width: '35%' }}
+                      >
+                        {createMode === 'deep_draft' ? '生成详细草稿' : 'AI整理创意'}
+                      </Button>
+                    </Space.Compact>
+                    {createMode === 'quick_ai' && (
+                      <Button
+                        block
+                        type="primary"
+                        icon={<RocketOutlined />}
+                        loading={autoCreating}
+                        disabled={seedLoading || creating}
+                        onClick={handleAutoCreate}
+                      >
+                        {seed ? '用这个种子自动创建并进入工作台' : 'AI整理并自动创建项目'}
+                      </Button>
+                    )}
+                  </>
+                )}
                 {seed && (
                   <Card size="small" title="已生成项目种子" style={{ borderRadius: 8 }}>
                     <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                      {createMode === 'deep_draft' && (
+                        <Alert
+                          type={seedFinalized ? 'success' : 'warning'}
+                          showIcon
+                          message={seedFinalized ? '当前是确定版项目种子' : '当前是草稿。请人工修改下方 JSON 后，点击“模型生成确定版本”。'}
+                        />
+                      )}
                       <Space wrap>
                         <Tag color="blue" bordered={false}>{seed.genre || '未定题材'}</Tag>
                         {asStringArray(seed.sub_genres).slice(0, 4).map(item => <Tag key={item} bordered={false}>{item}</Tag>)}
@@ -519,58 +621,102 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
                           待确认：{asStringArray(seed.open_questions).slice(0, 3).join('；')}
                         </Text>
                       )}
-                      <details>
-                        <summary style={{ cursor: 'pointer', color: '#1677ff' }}>查看完整项目种子 JSON</summary>
-                        <pre style={{ maxHeight: 260, overflow: 'auto', marginTop: 8, padding: 10, background: '#f8fafc', borderRadius: 8, fontSize: 12, whiteSpace: 'pre-wrap' }}>
-                          {JSON.stringify(seed, null, 2)}
-                        </pre>
-                      </details>
+                      {createMode === 'deep_draft' ? (
+                        <>
+                          <Input.TextArea
+                            rows={10}
+                            value={seedDraftText}
+                            onChange={event => {
+                              setSeedDraftText(event.target.value)
+                              setSeedFinalized(false)
+                            }}
+                            style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12 }}
+                          />
+                          <Space.Compact block>
+                            <Button
+                              style={{ width: '50%' }}
+                              onClick={() => {
+                                try {
+                                  const parsed = JSON.parse(seedDraftText || '{}')
+                                  const nextSeed = normalizeProjectSeedForUi(parsed)
+                                  setSeed(nextSeed)
+                                  applySeedToForm(nextSeed)
+                                  message.success('已采用当前草稿，仍建议模型定稿后创建')
+                                } catch {
+                                  message.error('草稿 JSON 格式不正确')
+                                }
+                              }}
+                            >
+                              采用当前草稿预览
+                            </Button>
+                            <Button
+                              type="primary"
+                              style={{ width: '50%' }}
+                              loading={finalizingSeed}
+                              onClick={finalizeProjectSeed}
+                            >
+                              模型生成确定版本
+                            </Button>
+                          </Space.Compact>
+                        </>
+                      ) : (
+                        <details>
+                          <summary style={{ cursor: 'pointer', color: '#1677ff' }}>查看完整项目种子 JSON</summary>
+                          <pre style={{ maxHeight: 260, overflow: 'auto', marginTop: 8, padding: 10, background: '#f8fafc', borderRadius: 8, fontSize: 12, whiteSpace: 'pre-wrap' }}>
+                            {JSON.stringify(seed, null, 2)}
+                          </pre>
+                        </details>
+                      )}
                     </Space>
                   </Card>
                 )}
               </Space>
             </Card>
 
-            <Form.Item
-              name="title"
-              label="作品标题"
-              rules={[{ required: true, message: '请输入作品标题' }]}
-            >
-              <Input
-                size="large"
-                placeholder="例如：废墟尽头的灯塔"
-                prefix="📖"
-              />
-            </Form.Item>
+            {(createMode === 'manual' || seed) && (
+              <>
+                <Form.Item
+                  name="title"
+                  label="作品标题"
+                  rules={[{ required: true, message: '请输入作品标题' }]}
+                >
+                  <Input
+                    size="large"
+                    placeholder="例如：废墟尽头的灯塔"
+                    prefix="📖"
+                  />
+                </Form.Item>
 
-            <Form.Item
-              name="genre"
-              label="题材"
-              rules={[{ required: true, message: '请选择题材' }]}
-            >
-              <Select
-                size="large"
-                placeholder="选择主要题材"
-                options={GENRES}
-              />
-            </Form.Item>
+                <Form.Item
+                  name="genre"
+                  label="题材"
+                  rules={[{ required: true, message: '请选择题材' }]}
+                >
+                  <Select
+                    size="large"
+                    placeholder="选择主要题材"
+                    options={GENRES}
+                  />
+                </Form.Item>
 
-            <Form.Item name="sub_genres" label="子题材（可选，可多选）">
-              <Select
-                mode="tags"
-                placeholder="例如：穿越, 赛博朋克, 克苏鲁"
-                style={{ width: '100%' }}
-              />
-            </Form.Item>
+                <Form.Item name="sub_genres" label="子题材（可选，可多选）">
+                  <Select
+                    mode="tags"
+                    placeholder="例如：穿越, 赛博朋克, 克苏鲁"
+                    style={{ width: '100%' }}
+                  />
+                </Form.Item>
 
-            <Form.Item name="synopsis" label="一句话简介（可选）">
-              <Input.TextArea
-                rows={3}
-                placeholder="用一句话描述你的小说核心卖点"
-                maxLength={500}
-                showCount
-              />
-            </Form.Item>
+                <Form.Item name="synopsis" label="一句话简介（可选）">
+                  <Input.TextArea
+                    rows={3}
+                    placeholder="用一句话描述你的小说核心卖点"
+                    maxLength={500}
+                    showCount
+                  />
+                </Form.Item>
+              </>
+            )}
           </>
         )}
 
@@ -738,7 +884,12 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
               icon={current === 2 ? <RocketOutlined /> : <ArrowRightOutlined />}
               onClick={handleNext}
               loading={creating}
-              disabled={current === 0 && !data.title.trim()}
+              disabled={current === 0 && (
+                !data.title.trim()
+                || (createMode === 'manual' && !data.genre)
+                || (createMode === 'quick_ai' && !seed)
+                || (createMode === 'deep_draft' && (!seed || !seedFinalized))
+              )}
             >
               {current === 2 ? '创建项目' : '下一步'}
             </Button>

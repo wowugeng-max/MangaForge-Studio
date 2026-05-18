@@ -146,6 +146,31 @@ function buildProjectSeedPrompt(idea: string, requestedTitle = '') {
   ].filter(Boolean).join('\n')
 }
 
+function buildFinalizeProjectSeedPrompt(draft: any, idea: string, requestedTitle = '') {
+  return [
+    '任务：把用户人工修改后的项目草稿整理成“确定版小说项目种子”。只输出 JSON object，不要 Markdown，不要解释。',
+    requestedTitle ? `用户指定作品名：${requestedTitle}` : '',
+    '',
+    '【用户原始想法】',
+    idea.slice(0, 12000),
+    '',
+    '【用户确认/修改后的草稿】',
+    JSON.stringify(draft || {}, null, 2).slice(0, 24000),
+    '',
+    '请在不推翻用户修改的前提下，补齐并规范以下字段：',
+    'title, genre, sub_genres, target_audience, length_target, style_tags, commercial_tags, synopsis, logline, core_premise, main_conflict',
+    'protagonist, antagonist, worldbuilding, plot_engine, writing_bible, characters',
+    'master_outline, volume_outlines, chapter_outlines, foreshadowing_plan, open_questions, next_steps',
+    '',
+    '要求：',
+    '1. 用户草稿中明确写出的名字、因果、限制、角色关系必须保留。',
+    '2. characters 要尽量包含年龄、身份、外貌、能力、物品、认知范围、信息边界、当前状态。',
+    '3. worldbuilding 要包含核心规则、力量体系、禁忌、地点、势力、关键物品。',
+    '4. chapter_outlines 至少 30 章；每章包含 chapter_no,title,summary,conflict,ending_hook,must_advance,forbidden_repeats。',
+    '5. 不要生成正文；不要照搬任何现有作品专有设定、角色名、桥段或原句。',
+  ].filter(Boolean).join('\n')
+}
+
 async function deriveProjectSeedWithModel(activeWorkspace: string, idea: string, modelId: string, requestedTitle = '') {
   const prompt = buildProjectSeedPrompt(idea, requestedTitle)
   const projectStub = {
@@ -168,6 +193,35 @@ async function deriveProjectSeedWithModel(activeWorkspace: string, idea: string,
     modelId,
     maxTokens: 9000,
     temperature: 0.42,
+    skipMemory: true,
+  })
+  const seed = normalizeProjectSeedPayload((result as any).output || parseJsonLikePayload((result as any).content) || {}, idea)
+  if (requestedTitle && !seed.title) seed.title = requestedTitle
+  return { seed, result }
+}
+
+async function finalizeProjectSeedWithModel(activeWorkspace: string, draft: any, idea: string, modelId: string, requestedTitle = '') {
+  const prompt = buildFinalizeProjectSeedPrompt(draft, idea, requestedTitle)
+  const projectStub = {
+    id: 0,
+    title: requestedTitle || draft?.title || '项目种子定稿',
+    genre: draft?.genre || '',
+    sub_genres: draft?.sub_genres || [],
+    synopsis: draft?.synopsis || idea.slice(0, 500),
+    length_target: draft?.length_target || 'medium',
+    target_audience: draft?.target_audience || '',
+    style_tags: draft?.style_tags || [],
+    commercial_tags: draft?.commercial_tags || [],
+    reference_config: {},
+    status: 'draft',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }
+  const result = await executeNovelAgent('outline-agent', projectStub as any, { task: prompt }, {
+    activeWorkspace,
+    modelId,
+    maxTokens: 10000,
+    temperature: 0.35,
     skipMemory: true,
   })
   const seed = normalizeProjectSeedPayload((result as any).output || parseJsonLikePayload((result as any).content) || {}, idea)
@@ -411,6 +465,29 @@ export function registerNovelCoreRoutes(app: Express, getWorkspace: () => string
       if ((result as any).error || !seed || typeof seed !== 'object' || Array.isArray(seed) || !Object.keys(seed).length) {
         return res.status(502).json({
           error: (result as any).error || '模型未返回有效项目种子',
+          raw_preview: String((result as any).content || '').slice(0, 3000),
+        })
+      }
+      res.json({ ok: true, seed, result })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.post('/api/novel/project-seed/finalize', async (req, res) => {
+    try {
+      const activeWorkspace = getWorkspace()
+      await ensureWorkspaceStructure(activeWorkspace)
+      const idea = String(req.body?.idea || '').trim()
+      const title = String(req.body?.title || '').trim()
+      const draft = parseNestedSeed(req.body?.draft || req.body?.seed || {})
+      if (!draft || !Object.keys(draft).length) return res.status(400).json({ error: 'draft is required' })
+      const modelId = req.body?.model_id ? String(req.body.model_id) : undefined
+      if (!modelId) return res.status(400).json({ error: 'model_id is required' })
+      const { seed, result } = await finalizeProjectSeedWithModel(activeWorkspace, draft, idea, modelId, title)
+      if ((result as any).error || !seed || typeof seed !== 'object' || Array.isArray(seed) || !Object.keys(seed).length) {
+        return res.status(502).json({
+          error: (result as any).error || '模型未返回有效确定版项目种子',
           raw_preview: String((result as any).content || '').slice(0, 3000),
         })
       }
