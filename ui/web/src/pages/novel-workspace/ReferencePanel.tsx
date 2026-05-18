@@ -1,5 +1,6 @@
 import React from 'react'
 import { Button, Card, Collapse, Empty, Space, Tabs, Tag, Typography } from 'antd'
+import { SettingWorkshopPanel } from './SettingWorkshopPanel'
 import { displayPreview, displayValue, versionSourceColor, versionSourceLabel } from './utils'
 
 const { Text, Paragraph } = Typography
@@ -102,6 +103,8 @@ export function ReferencePanel({
   editorReports,
   editorRevisionReports,
   bookReviews,
+  projectId,
+  selectedModelId,
   activeChapter,
   activeChapterId,
   activeChapterUpdatedAt,
@@ -131,6 +134,8 @@ export function ReferencePanel({
   editorReports: any[]
   editorRevisionReports?: any[]
   bookReviews: any[]
+  projectId: number
+  selectedModelId?: number
   activeChapter?: any | null
   activeChapterId: number | null
   activeChapterUpdatedAt?: string
@@ -162,6 +167,7 @@ export function ReferencePanel({
   const referenceNavItems = [
     { key: 'storyMemory', label: '记忆', badge: storyState?.last_updated_chapter ? `第${storyState.last_updated_chapter}` : '' },
     { key: 'writingBible', label: '圣经', badge: writingBible ? '有' : '' },
+    { key: 'settings', label: '设定', badge: '' },
     { key: 'worldbuilding', label: '世界', badge: worldbuilding.length || '' },
     { key: 'characters', label: '角色', badge: characters.length || '' },
     { key: 'outline', label: '大纲', badge: outlines.length || '' },
@@ -300,6 +306,10 @@ export function ReferencePanel({
                   )}
                 </Space>
               ),
+            },
+            {
+              key: 'settings', label: '设定工坊',
+              children: <SettingWorkshopPanel projectId={projectId} activeChapter={activeChapter} selectedModelId={selectedModelId} />,
             },
             {
               key: 'worldbuilding', label: '世界观',

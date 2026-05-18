@@ -22,8 +22,42 @@ export type NovelChapterVersionSource = 'manual_edit' | 'agent_execute' | 'repai
 export type NovelChapterVersionRecord = { id: number; chapter_id: number; project_id: number; version_no: number; chapter_text: string; scene_breakdown: any[]; continuity_notes: string[]; source: NovelChapterVersionSource; created_at: string }
 export type NovelReviewRecord = { id: number; project_id: number; review_type: string; status: string; summary: string; issues: string[]; created_at: string; payload?: string }
 export type NovelRunRecord = { id: number; project_id: number; run_type: string; step_name: string; status: string; input_ref?: string; output_ref?: string; duration_ms?: number; error_message?: string; created_at: string }
+export type NovelSettingEntityRecord = {
+  id: number
+  project_id: number
+  entity_type: string
+  name: string
+  summary?: string
+  status?: string
+  visibility?: string
+  first_chapter_no?: number | null
+  last_chapter_no?: number | null
+  related_character_ids?: number[]
+  related_chapter_ids?: number[]
+  related_entity_ids?: number[]
+  constraints_json?: any
+  state_json?: any
+  payload_json?: any
+  created_at?: string
+  updated_at: string
+}
+export type NovelChapterSettingUsageRecord = {
+  id: number
+  project_id: number
+  chapter_id: number
+  entity_id: number
+  usage_type?: string
+  required?: boolean
+  allowed?: boolean
+  forbidden?: boolean
+  reveal_level?: string
+  expected_state_change?: any
+  actual_state_change?: any
+  created_at?: string
+  updated_at: string
+}
 
-type NovelStore = { projects: NovelProjectRecord[]; worldbuilding: NovelWorldbuildingRecord[]; characters: NovelCharacterRecord[]; outlines: NovelOutlineRecord[]; chapters: NovelChapterRecord[]; chapter_versions: NovelChapterVersionRecord[]; reviews: NovelReviewRecord[]; runs: NovelRunRecord[] }
+type NovelStore = { projects: NovelProjectRecord[]; worldbuilding: NovelWorldbuildingRecord[]; characters: NovelCharacterRecord[]; outlines: NovelOutlineRecord[]; chapters: NovelChapterRecord[]; chapter_versions: NovelChapterVersionRecord[]; reviews: NovelReviewRecord[]; runs: NovelRunRecord[]; setting_entities: NovelSettingEntityRecord[]; chapter_setting_usage: NovelChapterSettingUsageRecord[] }
 
 function nowIso() { return new Date().toISOString() }
 function getNovelStorePath(activeWorkspace: string) { return join(activeWorkspace, 'novel-store.json') }
@@ -33,7 +67,7 @@ function toAnyArray(value: any, fallback: any[] = []) { return Array.isArray(val
 function toJsonable(value: any, fallback: any = null) { return value === undefined ? fallback : value }
 function jsonText(value: any, fallback: any = []) { return JSON.stringify(value === undefined ? fallback : value) }
 function textValue(value: any, fallback = '') { return value === undefined || value === null ? fallback : (typeof value === 'string' ? value : JSON.stringify(value)) }
-function normalizeStore(store: Partial<NovelStore> | null | undefined): NovelStore { return { projects: Array.isArray(store?.projects) ? store!.projects : [], worldbuilding: Array.isArray(store?.worldbuilding) ? store!.worldbuilding : [], characters: Array.isArray(store?.characters) ? store!.characters : [], outlines: Array.isArray(store?.outlines) ? store!.outlines : [], chapters: Array.isArray(store?.chapters) ? store!.chapters : [], chapter_versions: Array.isArray(store?.chapter_versions) ? store!.chapter_versions : [], reviews: Array.isArray(store?.reviews) ? store!.reviews : [], runs: Array.isArray(store?.runs) ? store!.runs : [] } }
+function normalizeStore(store: Partial<NovelStore> | null | undefined): NovelStore { return { projects: Array.isArray(store?.projects) ? store!.projects : [], worldbuilding: Array.isArray(store?.worldbuilding) ? store!.worldbuilding : [], characters: Array.isArray(store?.characters) ? store!.characters : [], outlines: Array.isArray(store?.outlines) ? store!.outlines : [], chapters: Array.isArray(store?.chapters) ? store!.chapters : [], chapter_versions: Array.isArray(store?.chapter_versions) ? store!.chapter_versions : [], reviews: Array.isArray(store?.reviews) ? store!.reviews : [], runs: Array.isArray(store?.runs) ? store!.runs : [], setting_entities: Array.isArray(store?.setting_entities) ? store!.setting_entities : [], chapter_setting_usage: Array.isArray(store?.chapter_setting_usage) ? store!.chapter_setting_usage : [] } }
 async function readJsonStore(activeWorkspace: string): Promise<NovelStore> { try { return normalizeStore(JSON.parse(await readFile(getNovelStorePath(activeWorkspace), 'utf8')) as Partial<NovelStore>) } catch { return normalizeStore(null) } }
 async function writeJsonStore(activeWorkspace: string, store: NovelStore) { await writeFile(getNovelStorePath(activeWorkspace), `${JSON.stringify(normalizeStore(store), null, 2)}\n`, 'utf8') }
 function dbPathFromEnv() { const raw = process.env.SQLITE_DATABASE_URL || process.env.DATABASE_URL || ''; if (!raw) return ''; if (raw.startsWith('file:')) return raw.slice(5).split('?', 1)[0]; return raw }
@@ -191,6 +225,44 @@ CREATE TABLE IF NOT EXISTS runs (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS setting_entities (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id INTEGER NOT NULL,
+  entity_type TEXT NOT NULL,
+  name TEXT NOT NULL,
+  summary TEXT DEFAULT '',
+  status TEXT DEFAULT 'active',
+  visibility TEXT DEFAULT 'public',
+  first_chapter_no INTEGER DEFAULT NULL,
+  last_chapter_no INTEGER DEFAULT NULL,
+  related_character_ids TEXT DEFAULT '[]',
+  related_chapter_ids TEXT DEFAULT '[]',
+  related_entity_ids TEXT DEFAULT '[]',
+  constraints_json TEXT DEFAULT '{}',
+  state_json TEXT DEFAULT '{}',
+  payload_json TEXT DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS chapter_setting_usage (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id INTEGER NOT NULL,
+  chapter_id INTEGER NOT NULL,
+  entity_id INTEGER NOT NULL,
+  usage_type TEXT DEFAULT 'allowed',
+  required INTEGER DEFAULT 0,
+  allowed INTEGER DEFAULT 1,
+  forbidden INTEGER DEFAULT 0,
+  reveal_level TEXT DEFAULT 'none',
+  expected_state_change TEXT DEFAULT '{}',
+  actual_state_change TEXT DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+  FOREIGN KEY (chapter_id) REFERENCES chapters(id) ON DELETE CASCADE,
+  FOREIGN KEY (entity_id) REFERENCES setting_entities(id) ON DELETE CASCADE
+);
 CREATE INDEX IF NOT EXISTS idx_projects_updated_at ON projects(updated_at);
 CREATE INDEX IF NOT EXISTS idx_worldbuilding_project_id ON worldbuilding(project_id);
 CREATE INDEX IF NOT EXISTS idx_characters_project_id ON characters(project_id);
@@ -202,6 +274,10 @@ CREATE INDEX IF NOT EXISTS idx_chapters_chapter_no ON chapters(chapter_no);
 CREATE INDEX IF NOT EXISTS idx_chapter_versions_chapter_id ON chapter_versions(chapter_id);
 CREATE INDEX IF NOT EXISTS idx_reviews_project_id ON reviews(project_id);
 CREATE INDEX IF NOT EXISTS idx_runs_project_id ON runs(project_id);
+CREATE INDEX IF NOT EXISTS idx_setting_entities_project_type ON setting_entities(project_id, entity_type);
+CREATE INDEX IF NOT EXISTS idx_setting_entities_project_name ON setting_entities(project_id, name);
+CREATE INDEX IF NOT EXISTS idx_chapter_setting_usage_chapter ON chapter_setting_usage(chapter_id);
+CREATE INDEX IF NOT EXISTS idx_chapter_setting_usage_entity ON chapter_setting_usage(entity_id);
 `)
   for (const [table, columns] of Object.entries({
     projects: [['synopsis', "TEXT DEFAULT ''"], ['reference_config', "TEXT DEFAULT '{}'"]],
@@ -210,6 +286,8 @@ CREATE INDEX IF NOT EXISTS idx_runs_project_id ON runs(project_id);
     outlines: [['beats', "TEXT DEFAULT '[]'"], ['target_length', "TEXT DEFAULT ''"], ['version', 'INTEGER DEFAULT 1'], ['raw_payload', "TEXT DEFAULT '{}'"], ['created_at', "TEXT DEFAULT ''"]],
     chapters: [['scene_list', "TEXT DEFAULT '[]'"], ['items_in_play', "TEXT DEFAULT '[]'"], ['foreshadowing', "TEXT DEFAULT '[]'"], ['timeline_note', "TEXT DEFAULT ''"], ['version', 'INTEGER DEFAULT 1'], ['published_at', 'TEXT DEFAULT NULL'], ['raw_payload', "TEXT DEFAULT '{}'"]],
     reviews: [['payload', "TEXT DEFAULT ''"], ['status', "TEXT DEFAULT 'ok'"]],
+    setting_entities: [['payload_json', "TEXT DEFAULT '{}'"], ['state_json', "TEXT DEFAULT '{}'"], ['constraints_json', "TEXT DEFAULT '{}'"]],
+    chapter_setting_usage: [['expected_state_change', "TEXT DEFAULT '{}'"], ['actual_state_change', "TEXT DEFAULT '{}'"]],
   } as Record<string, Array<[string, string]>>)) {
     if (!tableExists(db, table)) continue
     for (const [column, definition] of columns) addColumnIfMissing(db, table, column, definition)
@@ -226,6 +304,8 @@ function loadStoreFromOpenDb(db: Database): NovelStore {
     const chapterVersions = db.query('SELECT * FROM chapter_versions ORDER BY created_at DESC').all() as any[]
     const reviews = db.query('SELECT * FROM reviews').all() as any[]
     const runs = db.query('SELECT * FROM runs ORDER BY created_at DESC').all() as any[]
+    const settingEntities = db.query('SELECT * FROM setting_entities ORDER BY entity_type ASC, name ASC').all() as any[]
+    const chapterSettingUsage = db.query('SELECT * FROM chapter_setting_usage ORDER BY updated_at DESC').all() as any[]
     return {
       projects: projects.map(item => ({ ...item, sub_genres: parseDbArray(item.sub_genres), style_tags: parseDbArray(item.style_tags), commercial_tags: parseDbArray(item.commercial_tags), reference_config: parseDbJson(item.reference_config, {}) })),
       worldbuilding: worldbuilding.map(item => ({ ...item, rules: parseDbJson(item.rules, []), factions: parseDbArray(item.factions), locations: parseDbArray(item.locations), systems: parseDbJson(item.systems, []), items: parseDbArray(item.items), timeline_anchor: parseDbJson(item.timeline_anchor, item.timeline_anchor || ''), known_unknowns: parseDbArray(item.known_unknowns), raw_payload: parseDbJson(item.raw_payload, {}) })),
@@ -235,6 +315,8 @@ function loadStoreFromOpenDb(db: Database): NovelStore {
       chapter_versions: chapterVersions.map(item => ({ ...item, scene_breakdown: parseDbArray(item.scene_breakdown), continuity_notes: parseDbArray(item.continuity_notes) })),
       reviews: reviews.map(item => ({ ...item, issues: parseDbArray(item.issues), payload: item.payload || '' })),
       runs,
+      setting_entities: settingEntities.map(item => ({ ...item, related_character_ids: parseDbArray(item.related_character_ids).map(Number).filter(Boolean), related_chapter_ids: parseDbArray(item.related_chapter_ids).map(Number).filter(Boolean), related_entity_ids: parseDbArray(item.related_entity_ids).map(Number).filter(Boolean), constraints_json: parseDbJson(item.constraints_json, {}), state_json: parseDbJson(item.state_json, {}), payload_json: parseDbJson(item.payload_json, {}) })),
+      chapter_setting_usage: chapterSettingUsage.map(item => ({ ...item, required: Boolean(item.required), allowed: item.allowed !== 0, forbidden: Boolean(item.forbidden), expected_state_change: parseDbJson(item.expected_state_change, {}), actual_state_change: parseDbJson(item.actual_state_change, {}) })),
     }
   } catch (error) {
     if (String(error).includes('no such table')) return normalizeStore(null)
@@ -265,7 +347,7 @@ async function writeStore(activeWorkspace: string, store: NovelStore) {
   try {
     ensureSqliteSchema(db)
     db.exec('BEGIN')
-    for (const table of ['runs','reviews','chapter_versions','chapters','outlines','characters','worldbuilding','projects']) db.exec(`DELETE FROM ${table}`)
+    for (const table of ['chapter_setting_usage','setting_entities','runs','reviews','chapter_versions','chapters','outlines','characters','worldbuilding','projects']) db.exec(`DELETE FROM ${table}`)
     const insert = (sql: string, params: any[]) => db.query(sql).run(...params)
     for (const p of normalized.projects) insert('INSERT INTO projects (id,title,genre,sub_genres,synopsis,length_target,target_audience,style_tags,commercial_tags,reference_config,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)', [p.id,p.title,p.genre||'',jsonText(p.sub_genres),p.synopsis||'',p.length_target||'medium',p.target_audience||'',jsonText(p.style_tags),jsonText(p.commercial_tags),jsonText(p.reference_config, {}),p.status||'draft',p.created_at||nowIso(),p.updated_at||nowIso()])
     for (const w of normalized.worldbuilding) insert('INSERT INTO worldbuilding (id,project_id,world_summary,rules,factions,locations,systems,items,timeline_anchor,known_unknowns,version,raw_payload,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)', [w.id,w.project_id,w.world_summary||'',jsonText(w.rules),jsonText(w.factions),jsonText(w.locations),jsonText(w.systems),jsonText(w.items),textValue(w.timeline_anchor),jsonText(w.known_unknowns),w.version||1,jsonText(w.raw_payload || w, {}),w.created_at||nowIso(),w.updated_at||nowIso()])
@@ -275,6 +357,8 @@ async function writeStore(activeWorkspace: string, store: NovelStore) {
     for (const v of normalized.chapter_versions) insert('INSERT INTO chapter_versions (id,chapter_id,project_id,version_no,chapter_text,scene_breakdown,continuity_notes,source,created_at) VALUES (?,?,?,?,?,?,?,?,?)', [v.id,v.chapter_id,v.project_id,v.version_no,v.chapter_text||'',JSON.stringify(v.scene_breakdown||[]),JSON.stringify(v.continuity_notes||[]),v.source||'manual_edit',v.created_at||nowIso()])
     for (const r of normalized.reviews) insert('INSERT INTO reviews (id,project_id,review_type,status,summary,issues,payload,created_at) VALUES (?,?,?,?,?,?,?,?)', [r.id,r.project_id,r.review_type,r.status,r.summary||'',JSON.stringify(r.issues||[]),r.payload||'',r.created_at||nowIso()])
     for (const r of normalized.runs) insert('INSERT INTO runs (id,project_id,run_type,step_name,status,input_ref,output_ref,duration_ms,error_message,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)', [r.id,r.project_id,r.run_type,r.step_name,r.status,r.input_ref||'',r.output_ref||'',r.duration_ms||0,r.error_message||'',r.created_at||nowIso()])
+    for (const s of normalized.setting_entities) insert('INSERT INTO setting_entities (id,project_id,entity_type,name,summary,status,visibility,first_chapter_no,last_chapter_no,related_character_ids,related_chapter_ids,related_entity_ids,constraints_json,state_json,payload_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', [s.id,s.project_id,s.entity_type||'rule',s.name,s.summary||'',s.status||'active',s.visibility||'public',s.first_chapter_no ?? null,s.last_chapter_no ?? null,jsonText(s.related_character_ids, []),jsonText(s.related_chapter_ids, []),jsonText(s.related_entity_ids, []),jsonText(s.constraints_json, {}),jsonText(s.state_json, {}),jsonText(s.payload_json || s, {}),s.created_at||nowIso(),s.updated_at||nowIso()])
+    for (const u of normalized.chapter_setting_usage) insert('INSERT INTO chapter_setting_usage (id,project_id,chapter_id,entity_id,usage_type,required,allowed,forbidden,reveal_level,expected_state_change,actual_state_change,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)', [u.id,u.project_id,u.chapter_id,u.entity_id,u.usage_type||'allowed',u.required ? 1 : 0,u.allowed === false ? 0 : 1,u.forbidden ? 1 : 0,u.reveal_level||'none',jsonText(u.expected_state_change, {}),jsonText(u.actual_state_change, {}),u.created_at||nowIso(),u.updated_at||nowIso()])
     db.exec('COMMIT')
     committed = true
     await writeJsonStore(activeWorkspace, normalized)
@@ -399,6 +483,45 @@ function normalizeChapterRecord(data: Partial<NovelChapterRecord>, existing?: Pa
 }
 function normalizeReviewRecord(data: Partial<NovelReviewRecord>, existing?: Partial<NovelReviewRecord>): NovelReviewRecord { return { id: Number(existing?.id || data.id || 0), project_id: Number(data.project_id ?? existing?.project_id ?? 0), review_type: String(data.review_type ?? existing?.review_type ?? 'continuity'), status: String(data.status ?? existing?.status ?? 'ok'), summary: String(data.summary ?? existing?.summary ?? ''), issues: toStringArray(data.issues ?? existing?.issues), created_at: String(existing?.created_at ?? data.created_at ?? nowIso()), payload: String(data.payload ?? existing?.payload ?? '') } }
 function normalizeRunRecord(data: Partial<NovelRunRecord>, existing?: Partial<NovelRunRecord>): NovelRunRecord { return { id: Number(existing?.id || data.id || 0), project_id: Number(data.project_id ?? existing?.project_id ?? 0), run_type: String(data.run_type ?? existing?.run_type ?? 'plan'), step_name: String(data.step_name ?? existing?.step_name ?? 'step'), status: String(data.status ?? existing?.status ?? 'pending'), input_ref: String(data.input_ref ?? existing?.input_ref ?? ''), output_ref: String(data.output_ref ?? existing?.output_ref ?? ''), duration_ms: Number(data.duration_ms ?? existing?.duration_ms ?? 0), error_message: String(data.error_message ?? existing?.error_message ?? ''), created_at: String(existing?.created_at ?? data.created_at ?? nowIso()) } }
+function normalizeSettingEntityRecord(data: Partial<NovelSettingEntityRecord>, existing?: Partial<NovelSettingEntityRecord>): NovelSettingEntityRecord {
+  const raw = { ...(existing?.payload_json || {}), ...(data.payload_json || {}), ...data }
+  return {
+    id: Number(existing?.id || data.id || 0),
+    project_id: Number(data.project_id ?? existing?.project_id ?? 0),
+    entity_type: String(data.entity_type ?? existing?.entity_type ?? 'rule'),
+    name: String(data.name ?? existing?.name ?? '未命名设定'),
+    summary: String(data.summary ?? existing?.summary ?? ''),
+    status: String(data.status ?? existing?.status ?? 'active'),
+    visibility: String(data.visibility ?? existing?.visibility ?? 'public'),
+    first_chapter_no: data.first_chapter_no ?? existing?.first_chapter_no ?? null,
+    last_chapter_no: data.last_chapter_no ?? existing?.last_chapter_no ?? null,
+    related_character_ids: toAnyArray(data.related_character_ids ?? existing?.related_character_ids).map(Number).filter(Boolean),
+    related_chapter_ids: toAnyArray(data.related_chapter_ids ?? existing?.related_chapter_ids).map(Number).filter(Boolean),
+    related_entity_ids: toAnyArray(data.related_entity_ids ?? existing?.related_entity_ids).map(Number).filter(Boolean),
+    constraints_json: toJsonable(data.constraints_json ?? existing?.constraints_json, {}),
+    state_json: toJsonable(data.state_json ?? existing?.state_json, {}),
+    payload_json: raw,
+    created_at: String(existing?.created_at ?? data.created_at ?? nowIso()),
+    updated_at: String(data.updated_at ?? nowIso()),
+  }
+}
+function normalizeChapterSettingUsageRecord(data: Partial<NovelChapterSettingUsageRecord>, existing?: Partial<NovelChapterSettingUsageRecord>): NovelChapterSettingUsageRecord {
+  return {
+    id: Number(existing?.id || data.id || 0),
+    project_id: Number(data.project_id ?? existing?.project_id ?? 0),
+    chapter_id: Number(data.chapter_id ?? existing?.chapter_id ?? 0),
+    entity_id: Number(data.entity_id ?? existing?.entity_id ?? 0),
+    usage_type: String(data.usage_type ?? existing?.usage_type ?? (data.forbidden ? 'forbidden' : data.required ? 'required' : 'allowed')),
+    required: Boolean(data.required ?? existing?.required ?? false),
+    allowed: data.allowed ?? existing?.allowed ?? true,
+    forbidden: Boolean(data.forbidden ?? existing?.forbidden ?? false),
+    reveal_level: String(data.reveal_level ?? existing?.reveal_level ?? 'none'),
+    expected_state_change: toJsonable(data.expected_state_change ?? existing?.expected_state_change, {}),
+    actual_state_change: toJsonable(data.actual_state_change ?? existing?.actual_state_change, {}),
+    created_at: String(existing?.created_at ?? data.created_at ?? nowIso()),
+    updated_at: String(data.updated_at ?? nowIso()),
+  }
+}
 function dedupById<T extends { id: number | string }>(items: T[]): T[] {
   const seen = new Set<number | string>()
   return items.filter(item => {
@@ -418,6 +541,13 @@ export async function updateNovelWorldbuilding(activeWorkspace: string, id: numb
 export async function listNovelCharacters(activeWorkspace: string, projectId: number) { const store = await readStore(activeWorkspace); return dedupById(store.characters.filter(item => item.project_id === projectId)) }
 export async function createNovelCharacter(activeWorkspace: string, data: Partial<NovelCharacterRecord>) { const store = await readStore(activeWorkspace); const record = normalizeCharacterRecord(data, { id: store.characters.reduce((max, item) => Math.max(max, item.id), 0) + 1 }); store.characters.push(record); await writeStore(activeWorkspace, store); return record }
 export async function updateNovelCharacter(activeWorkspace: string, id: number, data: Partial<NovelCharacterRecord>) { const store = await readStore(activeWorkspace); const idx = store.characters.findIndex(item => item.id === id); if (idx < 0) return null; const current = store.characters[idx]; store.characters[idx] = normalizeCharacterRecord(data, current); await writeStore(activeWorkspace, store); return store.characters[idx] }
+export async function listNovelSettingEntities(activeWorkspace: string, projectId: number, entityType?: string) { const store = await readStore(activeWorkspace); return dedupById(store.setting_entities.filter(item => item.project_id === projectId && (!entityType || item.entity_type === entityType))).sort((a, b) => String(a.entity_type || '').localeCompare(String(b.entity_type || '')) || String(a.name || '').localeCompare(String(b.name || ''), 'zh-CN')) }
+export async function createNovelSettingEntity(activeWorkspace: string, data: Partial<NovelSettingEntityRecord>) { const store = await readStore(activeWorkspace); const record = normalizeSettingEntityRecord(data, { id: store.setting_entities.reduce((max, item) => Math.max(max, item.id), 0) + 1 }); store.setting_entities.push(record); await writeStore(activeWorkspace, store); return record }
+export async function updateNovelSettingEntity(activeWorkspace: string, id: number, data: Partial<NovelSettingEntityRecord>) { const store = await readStore(activeWorkspace); const idx = store.setting_entities.findIndex(item => item.id === id); if (idx < 0) return null; const current = store.setting_entities[idx]; store.setting_entities[idx] = normalizeSettingEntityRecord(data, current); await writeStore(activeWorkspace, store); return store.setting_entities[idx] }
+export async function deleteNovelSettingEntity(activeWorkspace: string, id: number) { const store = await readStore(activeWorkspace); const entity = store.setting_entities.find(item => item.id === id); if (!entity) return false; store.setting_entities = store.setting_entities.filter(item => item.id !== id); store.chapter_setting_usage = store.chapter_setting_usage.filter(item => item.entity_id !== id); await writeStore(activeWorkspace, store); return true }
+export async function listNovelChapterSettingUsage(activeWorkspace: string, projectId: number, chapterId?: number) { const store = await readStore(activeWorkspace); return dedupById(store.chapter_setting_usage.filter(item => item.project_id === projectId && (!chapterId || item.chapter_id === chapterId))) }
+export async function replaceNovelChapterSettingUsage(activeWorkspace: string, projectId: number, chapterId: number, usage: Partial<NovelChapterSettingUsageRecord>[]) { const store = await readStore(activeWorkspace); store.chapter_setting_usage = store.chapter_setting_usage.filter(item => !(item.project_id === projectId && item.chapter_id === chapterId)); let nextId = store.chapter_setting_usage.reduce((max, item) => Math.max(max, item.id), 0) + 1; const records = usage.map(item => normalizeChapterSettingUsageRecord({ ...item, project_id: projectId, chapter_id: chapterId }, { id: nextId++ })).filter(item => item.entity_id > 0); store.chapter_setting_usage.push(...records); await writeStore(activeWorkspace, store); return records }
+export async function updateNovelChapterSettingUsage(activeWorkspace: string, id: number, data: Partial<NovelChapterSettingUsageRecord>) { const store = await readStore(activeWorkspace); const idx = store.chapter_setting_usage.findIndex(item => item.id === id); if (idx < 0) return null; const current = store.chapter_setting_usage[idx]; store.chapter_setting_usage[idx] = normalizeChapterSettingUsageRecord(data, current); await writeStore(activeWorkspace, store); return store.chapter_setting_usage[idx] }
 export async function listNovelOutlines(activeWorkspace: string, projectId: number) { const store = await readStore(activeWorkspace); return dedupById(store.outlines.filter(item => item.project_id === projectId)) }
 export async function createNovelOutline(activeWorkspace: string, data: Partial<NovelOutlineRecord>) { const store = await readStore(activeWorkspace); const record = normalizeOutlineRecord(data, { id: store.outlines.reduce((max, item) => Math.max(max, item.id), 0) + 1 }); store.outlines.push(record); await writeStore(activeWorkspace, store); return record }
 export async function updateNovelOutline(activeWorkspace: string, id: number, data: Partial<NovelOutlineRecord>) { const store = await readStore(activeWorkspace); const idx = store.outlines.findIndex(item => item.id === id); if (idx < 0) return null; const current = store.outlines[idx]; store.outlines[idx] = normalizeOutlineRecord(data, current); await writeStore(activeWorkspace, store); return store.outlines[idx] }
@@ -438,7 +568,7 @@ export async function rollbackChapterVersion(activeWorkspace: string, chapterId:
 export async function updateNovelChapter(activeWorkspace: string, chapterId: number, data: Partial<NovelChapterRecord>, options: UpdateNovelChapterOptions = {}) { const store = await readStore(activeWorkspace); const idx = store.chapters.findIndex(item => item.id === chapterId); if (idx < 0) return null; const current = store.chapters[idx]; const updated = normalizeChapterRecord(data, { ...current, id: current.id, updated_at: nowIso() }); const next = { ...current, ...updated, updated_at: nowIso() }; const shouldCreateVersion = options.createVersion !== false && (options.forceVersion || versionedChapterSnapshotChanged(current, next)); if (shouldCreateVersion) store.chapter_versions.push(createChapterVersionRecord(store, { chapter_id: current.id, project_id: current.project_id, version_no: store.chapter_versions.filter(v => v.chapter_id === current.id).length + 1, chapter_text: current.chapter_text || '', scene_breakdown: current.scene_breakdown || [], continuity_notes: current.continuity_notes || [], source: options.versionSource || 'manual_edit' })); store.chapters[idx] = next; await writeStore(activeWorkspace, store); return store.chapters[idx] }
 export async function deleteNovelChapter(activeWorkspace: string, chapterId: number) { const store = await readStore(activeWorkspace); const chapter = store.chapters.find(item => item.id === chapterId); if (!chapter) return false; store.chapters = store.chapters.filter(item => item.id !== chapterId); store.chapter_versions = store.chapter_versions.filter(item => item.chapter_id !== chapterId); await writeStore(activeWorkspace, store); return true }
 export async function deleteNovelOutline(activeWorkspace: string, outlineId: number) { const store = await readStore(activeWorkspace); const outline = store.outlines.find(item => item.id === outlineId); if (!outline) return false; store.outlines = store.outlines.filter(item => item.id !== outlineId); store.chapters = store.chapters.map(chapter => chapter.outline_id === outlineId ? { ...chapter, outline_id: null } : chapter); await writeStore(activeWorkspace, store); return true }
-export async function deleteNovelProject(activeWorkspace: string, projectId: number) { const store = await readStore(activeWorkspace); const project = store.projects.find(item => item.id === projectId); if (!project) return false; store.projects = store.projects.filter(item => item.id !== projectId); store.worldbuilding = store.worldbuilding.filter(item => item.project_id !== projectId); store.characters = store.characters.filter(item => item.project_id !== projectId); store.outlines = store.outlines.filter(item => item.project_id !== projectId); store.chapters = store.chapters.filter(item => item.project_id !== projectId); store.chapter_versions = store.chapter_versions.filter(item => item.project_id !== projectId); store.reviews = store.reviews.filter(item => item.project_id !== projectId); store.runs = store.runs.filter(item => item.project_id !== projectId); await writeStore(activeWorkspace, store); return true }
+export async function deleteNovelProject(activeWorkspace: string, projectId: number) { const store = await readStore(activeWorkspace); const project = store.projects.find(item => item.id === projectId); if (!project) return false; store.projects = store.projects.filter(item => item.id !== projectId); store.worldbuilding = store.worldbuilding.filter(item => item.project_id !== projectId); store.characters = store.characters.filter(item => item.project_id !== projectId); store.outlines = store.outlines.filter(item => item.project_id !== projectId); store.chapters = store.chapters.filter(item => item.project_id !== projectId); store.chapter_versions = store.chapter_versions.filter(item => item.project_id !== projectId); store.reviews = store.reviews.filter(item => item.project_id !== projectId); store.runs = store.runs.filter(item => item.project_id !== projectId); store.setting_entities = store.setting_entities.filter(item => item.project_id !== projectId); store.chapter_setting_usage = store.chapter_setting_usage.filter(item => item.project_id !== projectId); await writeStore(activeWorkspace, store); return true }
 export async function listNovelReviews(activeWorkspace: string, projectId: number) { const store = await readStore(activeWorkspace); return store.reviews.filter(item => item.project_id === projectId) }
 export async function createNovelReview(activeWorkspace: string, data: Partial<NovelReviewRecord>) { const store = await readStore(activeWorkspace); const record = normalizeReviewRecord(data, { id: store.reviews.reduce((max, item) => Math.max(max, item.id), 0) + 1 }); store.reviews.push(record); await writeStore(activeWorkspace, store); return record }
 export async function listNovelRuns(activeWorkspace: string, projectId: number) { const store = await readStore(activeWorkspace); return store.runs.filter(item => item.project_id === projectId).sort((a, b) => b.created_at.localeCompare(a.created_at)) }

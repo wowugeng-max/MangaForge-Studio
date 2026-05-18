@@ -3099,6 +3099,8 @@ export default function NovelProjectWorkspace() {
           characters={characters}
           outlines={outlines}
           selectedProject={selectedProject}
+          projectId={projectId}
+          selectedModelId={selectedModelId}
           referenceReports={referenceReports}
           proseQualityReports={proseQualityReports}
           editorReports={editorReports}

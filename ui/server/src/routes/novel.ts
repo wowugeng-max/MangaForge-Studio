@@ -19,6 +19,7 @@ import { createNovelReferenceService } from './novel-reference-service'
 import { registerNovelReferenceRoutes } from './novel-reference-routes'
 import { registerNovelRestructureRoutes } from './novel-restructure-routes'
 import { registerNovelRunRoutes } from './novel-run-routes'
+import { registerNovelSettingRoutes } from './novel-setting-routes'
 import { getQualityGate, getStoryState } from './novel-route-utils'
 import { registerNovelTruthRoutes } from './novel-truth-routes'
 import { createNovelWritingService } from './novel-writing-service'
@@ -42,6 +43,12 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
     getProject,
     production: productionService,
     generateChapterForGroup: writingService.generateChapterForGroup,
+  })
+
+  registerNovelSettingRoutes(app, {
+    getWorkspace,
+    getProject,
+    buildChapterContextPackage: writingService.buildChapterContextPackage,
   })
 
   registerNovelChapterContextRoutes(app, {

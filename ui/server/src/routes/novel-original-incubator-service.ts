@@ -2,6 +2,7 @@ import {
   createNovelChapter,
   createNovelCharacter,
   createNovelOutline,
+  createNovelSettingEntity,
   createNovelWorldbuilding,
   listNovelChapters,
   updateNovelProject,
@@ -59,7 +60,7 @@ export function createNovelOriginalIncubatorService() {
     }
     for (const character of payload.characters || []) {
       if (!character?.name) continue
-      await createNovelCharacter(activeWorkspace, {
+      const createdCharacter = await createNovelCharacter(activeWorkspace, {
         project_id: project.id,
         name: String(character.name),
         role_type: character.role_type || character.role || '',
@@ -95,6 +96,55 @@ export function createNovelOriginalIncubatorService() {
           items: character.items || character.current_state?.items || [],
         },
       })
+      await createNovelSettingEntity(activeWorkspace, {
+        project_id: project.id,
+        entity_type: /反派|boss|敌|天尊|魔王/i.test(String(character.role_type || character.role || character.name || '')) ? 'boss' : 'character',
+        name: String(character.name),
+        summary: [character.identity, character.motivation, character.goal, character.conflict].filter(Boolean).join('；'),
+        related_character_ids: [createdCharacter.id],
+        constraints_json: {
+          knowledge_scope: character.knowledge_scope || character.current_state?.knowledge_scope || [],
+          information_boundaries: character.information_boundaries || character.current_state?.information_boundaries || [],
+          behavior_limits: character.behavior_limits || [],
+        },
+        state_json: {
+          ...(character.current_state || {}),
+          age: character.current_state?.age || character.age || '',
+          gender: character.current_state?.gender || character.gender || '',
+          identity: character.current_state?.identity || character.identity || '',
+          faction: character.current_state?.faction || character.faction || '',
+          appearance: character.appearance || '',
+          abilities: character.abilities || [],
+          items: character.items || character.current_state?.items || [],
+        },
+        payload_json: { source: 'original_incubator_character', raw: character },
+      } as any)
+      for (const ability of Array.isArray(character.abilities) ? character.abilities : []) {
+        const abilityName = typeof ability === 'string' ? ability : ability?.name
+        if (!abilityName) continue
+        await createNovelSettingEntity(activeWorkspace, {
+          project_id: project.id,
+          entity_type: 'ability',
+          name: String(abilityName),
+          summary: typeof ability === 'string' ? ability : String(ability?.summary || ability?.description || ''),
+          related_character_ids: [createdCharacter.id],
+          constraints_json: typeof ability === 'object' ? { cost: ability.cost, limit: ability.limit, condition: ability.condition } : {},
+          state_json: { owner: character.name, status: 'available' },
+          payload_json: { source: 'original_incubator_ability', raw: ability },
+        } as any)
+      }
+    }
+    for (const rule of Array.isArray(payload.worldbuilding?.rules) ? payload.worldbuilding.rules : []) {
+      const name = typeof rule === 'string' ? rule.slice(0, 32) : String(rule?.name || rule?.title || '世界规则')
+      await createNovelSettingEntity(activeWorkspace, {
+        project_id: project.id,
+        entity_type: 'rule',
+        name,
+        summary: typeof rule === 'string' ? rule : String(rule?.summary || rule?.description || ''),
+        constraints_json: typeof rule === 'object' ? rule : {},
+        state_json: {},
+        payload_json: { source: 'original_incubator_world_rule', raw: rule },
+      } as any)
     }
     for (const outline of payload.outlines || []) {
       if (!outline?.title) continue

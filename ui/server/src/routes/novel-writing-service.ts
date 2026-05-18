@@ -1,13 +1,17 @@
 import {
   createNovelReview,
+  listNovelChapterSettingUsage,
   listNovelCharacters,
   listNovelChapters,
   listNovelOutlines,
   listNovelReviews,
+  listNovelSettingEntities,
   listNovelWorldbuilding,
   updateNovelChapter,
   updateNovelCharacter,
+  updateNovelChapterSettingUsage,
   updateNovelProject,
+  updateNovelSettingEntity,
 } from '../novel'
 import { executeNovelAgent, generateNovelChapterProse, previewNovelKnowledgeInjection } from '../llm'
 import type { NovelProductionService } from './novel-production-service'
@@ -42,10 +46,11 @@ export function createNovelWritingService(ctx: {
     '【结构化上下文包】',
     JSON.stringify(contextPackage, null, 2).slice(0, 9000),
     '',
-    '输出 JSON，字段 scene_cards(array)。每个场景卡包含：scene_no, title, scene_type, location, characters_present(array), purpose, conflict, required_beats(array), action_beats(array), beat, emotional_tone, key_dialogue, dialogue_goal, required_information(array), turning_point, description_budget, transition_from_previous, exit_state。',
+    '输出 JSON，字段 scene_cards(array)。每个场景卡包含：scene_no, title, scene_type, location, characters_present(array), purpose, conflict, required_beats(array), action_beats(array), beat, emotional_tone, key_dialogue, dialogue_goal, required_information(array), used_settings(array), revealed_settings(array), forbidden_settings(array), ability_beats(array), item_beats(array), boss_move, rule_trigger, state_changes_expected(array), turning_point, description_budget, transition_from_previous, exit_state。',
     'scene_type 只能取：action/combat/chase/investigation/dialogue/reveal/emotion/transition/hook。凡是本章有战斗、追逐、灾祸、清剿、冲突升级，必须至少有一个 action/combat/chase 场景。',
     'action_beats 必须写成可见动作链：起手/试探/受阻/受伤或代价/反制/结果。非动作场景也要写 required_beats，避免只写氛围。',
     'description_budget 写 low/medium/high。默认 low；只有新地点首次登场或诡异规则首次显形时才允许 medium/high。',
+    '设定工坊约束：必须优先使用 setting_context.chapter_usage.required；allowed 可按需使用；forbidden_settings 不得揭露或误用；能力、物品、Boss、规则、境界和角色认知必须服从 setting_context.entities 的 constraints_json/state_json。',
     '要求：2-6 个场景；每个场景必须服务本章目标；最后一个场景必须到达 ending_hook；不要复制参考作品专名、桥段或原句。',
   ].join('\n')
 
@@ -66,6 +71,14 @@ export function createNovelWritingService(ctx: {
       key_dialogue: String(card?.key_dialogue || card?.dialogue_focus || ''),
       dialogue_goal: String(card?.dialogue_goal || ''),
       required_information: asArray(card?.required_information).map((item: any) => String(item)).filter(Boolean),
+      used_settings: asArray(card?.used_settings).map((item: any) => String(item)).filter(Boolean),
+      revealed_settings: asArray(card?.revealed_settings).map((item: any) => String(item)).filter(Boolean),
+      forbidden_settings: asArray(card?.forbidden_settings).map((item: any) => String(item)).filter(Boolean),
+      ability_beats: asArray(card?.ability_beats).map((item: any) => String(item)).filter(Boolean),
+      item_beats: asArray(card?.item_beats).map((item: any) => String(item)).filter(Boolean),
+      boss_move: String(card?.boss_move || ''),
+      rule_trigger: String(card?.rule_trigger || ''),
+      state_changes_expected: asArray(card?.state_changes_expected).map((item: any) => String(typeof item === 'string' ? item : JSON.stringify(item))).filter(Boolean),
       turning_point: String(card?.turning_point || ''),
       description_budget: String(card?.description_budget || card?.sensory_budget || 'low'),
       transition_from_previous: String(card?.transition_from_previous || ''),
@@ -127,6 +140,7 @@ export function createNovelWritingService(ctx: {
     '7. 场景之间必须有过渡，不能硬切。',
     '8. 保持 style_lock 中的人称、句长、对话比例、吐槽密度、爽点密度、描写浓度和禁用词约束。',
     '9. 只能学习参考作品的节奏、结构、爽点安排和信息密度；不得复制具体桥段、专有设定、原句、角色名和核心梗。',
+    '10. 执行 setting_context：required 设定必须在正文中落地；forbidden 设定不得泄漏；ability_beats 必须写清代价/限制；item_beats 必须符合物品归属和位置；boss_move 必须符合 Boss 行动逻辑；rule_trigger 必须写出触发条件、代价和后果；角色只能知道 knowledge_scope 允许的信息。',
     migrationPlan?.generation_prompt_addendum ? `10. ${migrationPlan.generation_prompt_addendum}` : '',
     chapterDraft?.chapter_no ? `11. 本次只生成第${chapterDraft.chapter_no}章，不得输出其他章节或续章内容。` : '',
     '',
@@ -147,6 +161,7 @@ export function createNovelWritingService(ctx: {
     '输出 JSON，字段：',
     'state_delta: {timeline, current_time, active_locations, character_positions, character_relationships, relationship_graph, known_secrets, secret_visibility, item_ownership, resource_status, foreshadowing_status, payoff_queue, mainline_progress, volume_progress, unresolved_conflicts, open_questions, recent_repeated_information, next_chapter_priorities}',
     'character_updates: array，每项包含 name,current_state。current_state 可包含 age, location, physical_condition, appearance_delta, outfit, items, item_changes, ability_status, resource_status, emotional_state, relationship_attitudes, knowledge_scope, newly_learned, information_boundaries, secrets_known, injuries, goals, next_intent, last_seen_chapter。',
+    'setting_updates: array，每项包含 entity_id 或 name, entity_type, state_delta, actual_state_change。用于更新设定工坊里的境界、能力、物品、Boss、规则、伏笔、地点、时间线等状态。',
     '只写正文明确出现或可由本章直接确定的状态；不知道就不要补。',
     'next_chapter_priorities: array',
     '只返回 JSON。',
@@ -198,6 +213,34 @@ export function createNovelWritingService(ctx: {
             last_seen_chapter: chapter.chapter_no,
           },
         } as any)
+      }
+    }
+    const settingUpdates = Array.isArray(payload?.setting_updates) ? payload.setting_updates : []
+    if (settingUpdates.length > 0) {
+      const settings = await listNovelSettingEntities(activeWorkspace, project.id)
+      const usages = await listNovelChapterSettingUsage(activeWorkspace, project.id, chapter.id)
+      for (const update of settingUpdates) {
+        const entityId = Number(update?.entity_id || 0)
+        const name = String(update?.name || '').trim()
+        const entity = settings.find(item => (entityId && item.id === entityId) || (!!name && item.name === name && (!update?.entity_type || item.entity_type === update.entity_type)))
+        if (!entity) continue
+        const stateDelta = update.state_delta || update.actual_state_change || {}
+        await updateNovelSettingEntity(activeWorkspace, entity.id, {
+          state_json: {
+            ...(entity.state_json || {}),
+            ...(stateDelta || {}),
+            last_seen_chapter: chapter.chapter_no,
+          },
+        } as any)
+        const usage = usages.find(item => item.entity_id === entity.id)
+        if (usage) {
+          await updateNovelChapterSettingUsage(activeWorkspace, usage.id, {
+            actual_state_change: {
+              ...(usage.actual_state_change || {}),
+              ...(update.actual_state_change || stateDelta || {}),
+            },
+          } as any)
+        }
       }
     }
     await createNovelReview(activeWorkspace, {
@@ -314,6 +357,60 @@ export function createNovelWritingService(ctx: {
     const styleLock = getStyleLock(project)
     const safetyPolicy = getSafetyPolicy(project)
     const writingBible = project.reference_config?.writing_bible || buildWritingBible(project, worldbuilding, characters, outlines, reviews)
+    const [settingEntities, chapterSettingUsage] = await Promise.all([
+      listNovelSettingEntities(activeWorkspace, project.id).catch(() => []),
+      listNovelChapterSettingUsage(activeWorkspace, project.id, chapter.id).catch(() => []),
+    ])
+    const usageEntityIds = new Set(chapterSettingUsage.map((item: any) => Number(item.entity_id || 0)).filter(Boolean))
+    const relatedSettings = settingEntities.filter((item: any) => {
+      const first = Number(item.first_chapter_no || 0)
+      const last = Number(item.last_chapter_no || 0)
+      return usageEntityIds.has(item.id)
+        || asArray(item.related_chapter_ids).map(Number).includes(Number(chapter.id))
+        || (first > 0 && Number(chapter.chapter_no) >= first && (!last || Number(chapter.chapter_no) <= last))
+    })
+    const settingById = new Map(settingEntities.map((item: any) => [Number(item.id), item]))
+    const settingContext = {
+      entities: relatedSettings.map((item: any) => ({
+        id: item.id,
+        type: item.entity_type,
+        name: item.name,
+        summary: item.summary || '',
+        status: item.status || 'active',
+        visibility: item.visibility || 'public',
+        constraints: item.constraints_json || {},
+        state: item.state_json || {},
+        first_chapter_no: item.first_chapter_no || null,
+        last_chapter_no: item.last_chapter_no || null,
+      })),
+      chapter_usage: chapterSettingUsage.map((usage: any) => {
+        const entity = settingById.get(Number(usage.entity_id || 0))
+        return {
+          ...usage,
+          entity_type: entity?.entity_type || '',
+          name: entity?.name || '',
+          summary: entity?.summary || '',
+          constraints: entity?.constraints_json || {},
+          state: entity?.state_json || {},
+        }
+      }),
+      required: chapterSettingUsage.filter((item: any) => item.required && !item.forbidden).map((usage: any) => settingById.get(Number(usage.entity_id))?.name).filter(Boolean),
+      forbidden: chapterSettingUsage.filter((item: any) => item.forbidden).map((usage: any) => settingById.get(Number(usage.entity_id))?.name).filter(Boolean),
+      type_counts: settingEntities.reduce((acc: Record<string, number>, item: any) => {
+        const key = item.entity_type || 'rule'
+        acc[key] = (acc[key] || 0) + 1
+        return acc
+      }, {}),
+    }
+    const settingChecks = [
+      { key: 'setting_workshop', ok: settingEntities.length > 0, severity: 'medium', label: '设定工坊', fix: '在右侧“设定”中从项目资料补齐角色、境界、能力、物品、Boss、规则等设定。' },
+      { key: 'chapter_setting_usage', ok: chapterSettingUsage.length > 0, severity: 'low', label: '本章设定调用', fix: '在本章设定调用中标记必用、允许或禁揭设定。' },
+    ]
+    preflight.checks.push(...settingChecks)
+    preflight.warnings.push(...settingChecks.filter(item => !item.ok).map(item => `${item.label}不足`))
+    preflight.blockers.push(...settingChecks.filter(item => !item.ok && item.severity === 'high'))
+    preflight.ready = preflight.blockers.length === 0
+    preflight.strict_ready = preflight.checks.every((item: any) => item.ok || item.severity === 'low')
     const basePackage = {
       project: {
         id: project.id,
@@ -384,6 +481,7 @@ export function createNovelWritingService(ctx: {
       },
       volume_plan: getVolumePlan(outlines),
       writing_bible: writingBible,
+      setting_context: settingContext,
       style_lock: styleLock,
       safety_policy: safetyPolicy,
       reference: referencePreview ? {
@@ -418,6 +516,7 @@ export function createNovelWritingService(ctx: {
     '8. action_beats 是否有起手、反应、受阻、代价、反制、结果；是否缺少空间位置、伤势、资源损耗或信息暴露。',
     '9. 是否存在过度环境描写、连续纯氛围段落、用阴冷/压抑/雨雾等描写替代剧情推进。',
     '10. 每 3-5 段是否有可见行动、选择、信息变化或关系变化。',
+    '11. 是否违反 setting_context：境界/战力矛盾、能力代价缺失、物品归属错误、Boss行动逻辑不一致、禁揭设定泄漏、规则触发没有代价、角色知识越界、伏笔误用、预期状态变化缺失。',
     '',
     '【结构化上下文包】',
     JSON.stringify(contextPackage, null, 2).slice(0, 6000),
@@ -425,7 +524,7 @@ export function createNovelWritingService(ctx: {
     '【待审校正文】',
     chapterText.slice(0, 16000),
     '',
-    '输出 JSON，字段：passed(boolean), score(0-100), craft_metrics({action_detail_score,description_overuse_score,event_density_score,combat_process_score}), focused_revision_modes(array，可取 expand_action/cut_description/tighten_pacing/add_consequence/restore_hook), issues(array: severity/type/description/suggestion), revision_directives(array), needs_revision(boolean)。只返回 JSON。',
+    '输出 JSON，字段：passed(boolean), score(0-100), craft_metrics({action_detail_score,description_overuse_score,event_density_score,combat_process_score,setting_consistency_score}), focused_revision_modes(array，可取 expand_action/cut_description/tighten_pacing/add_consequence/restore_hook/repair_setting_violation), setting_violations(array), issues(array: severity/type/description/suggestion), revision_directives(array), needs_revision(boolean)。只返回 JSON。',
   ].join('\n')
 
   const buildProseRevisionPrompt = (project: any, contextPackage: any, chapterText: string, review: any) => [
@@ -437,6 +536,7 @@ export function createNovelWritingService(ctx: {
     '3. tighten_pacing：提高事件密度，删掉空泛总结，让每 3-5 段都有行动、选择、信息变化或关系变化。',
     '4. add_consequence：补充行动后果，包括伤势、物品损耗、暴露秘密、角色关系变化、规则代价。',
     '5. restore_hook：保留并强化章末钩子，不要削弱下一章推动力。',
+    '6. repair_setting_violation：修复设定工坊违规，确保境界、能力代价、物品归属、Boss行动、规则触发、角色认知边界和禁揭设定全部一致。',
     '',
     '【结构化上下文包】',
     JSON.stringify(contextPackage, null, 2).slice(0, 6000),
@@ -470,6 +570,7 @@ export function createNovelWritingService(ctx: {
       revision_directives: Array.isArray(reviewPayload?.revision_directives) ? reviewPayload.revision_directives.map((item: any) => String(item)) : [],
       craft_metrics: reviewPayload?.craft_metrics || {},
       focused_revision_modes: Array.isArray(reviewPayload?.focused_revision_modes) ? reviewPayload.focused_revision_modes.map((item: any) => String(item)) : [],
+      setting_violations: Array.isArray(reviewPayload?.setting_violations) ? reviewPayload.setting_violations : [],
       needs_revision: Boolean(reviewPayload?.needs_revision),
       modelName: (reviewResult as any).modelName,
     }
