@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Card, Checkbox, Empty, Form, Input, List, message, Modal, Select, Space, Tabs, Tag, Typography } from 'antd'
+import { Alert, Button, Card, Checkbox, Empty, Form, Input, InputNumber, List, message, Modal, Select, Space, Tabs, Tag, Typography } from 'antd'
 import apiClient from '../../api/client'
 import { displayValue } from './utils'
 
@@ -18,18 +18,43 @@ const settingTypes = [
   { value: 'timeline', label: '时间线' },
 ]
 
-function parseJsonText(value: string, fallback: any) {
-  const raw = String(value || '').trim()
-  if (!raw) return fallback
-  return JSON.parse(raw)
+function splitList(value: any) {
+  if (Array.isArray(value)) return value.map(item => String(item)).map(item => item.trim()).filter(Boolean)
+  return String(value || '').split(/[\n,，]/).map(item => item.trim()).filter(Boolean)
 }
 
-function prettyJson(value: any) {
-  try {
-    return JSON.stringify(value || {}, null, 2)
-  } catch {
-    return '{}'
+function parseLooseValue(value: any) {
+  const raw = String(value ?? '').trim()
+  if (!raw) return ''
+  if (raw === 'true') return true
+  if (raw === 'false') return false
+  if (raw === 'null') return null
+  if (/^-?\d+(\.\d+)?$/.test(raw)) return Number(raw)
+  if (raw.startsWith('{') || raw.startsWith('[')) {
+    try {
+      return JSON.parse(raw)
+    } catch {
+      return raw
+    }
   }
+  return raw
+}
+
+function objectToRows(value: any) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return []
+  return Object.entries(value).map(([key, rowValue]) => ({
+    key,
+    value: rowValue && typeof rowValue === 'object' ? JSON.stringify(rowValue) : String(rowValue ?? ''),
+  }))
+}
+
+function rowsToObject(rows: any[] = []) {
+  return rows.reduce((acc: Record<string, any>, row) => {
+    const key = String(row?.key || '').trim()
+    if (!key) return acc
+    acc[key] = parseLooseValue(row?.value)
+    return acc
+  }, {})
 }
 
 function typeLabel(type: string) {
@@ -61,6 +86,8 @@ export function SettingWorkshopPanel({
   const [saving, setSaving] = useState(false)
   const [settings, setSettings] = useState<any[]>([])
   const [usage, setUsage] = useState<any[]>([])
+  const [pendingStateUpdates, setPendingStateUpdates] = useState<any[]>([])
+  const [selectedStateUpdateKeys, setSelectedStateUpdateKeys] = useState<string[]>([])
   const [activeType, setActiveType] = useState('character')
   const [editing, setEditing] = useState<any | null>(null)
   const [editorOpen, setEditorOpen] = useState(false)
@@ -100,8 +127,10 @@ export function SettingWorkshopPanel({
   const currentTypeSettings = grouped[activeType] || []
   const requiredCount = usage.filter(item => item.required && !item.forbidden).length
   const forbiddenCount = usage.filter(item => item.forbidden).length
+  const stateUpdateKey = (item: any, index: number) => `${item.entity_id || item.name || 'setting'}-${index}`
 
   const openEditor = (item?: any) => {
+    const payload = item?.payload_json || {}
     setEditing(item || null)
     form.setFieldsValue({
       entity_type: item?.entity_type || activeType,
@@ -111,9 +140,11 @@ export function SettingWorkshopPanel({
       visibility: item?.visibility || 'public',
       first_chapter_no: item?.first_chapter_no || undefined,
       last_chapter_no: item?.last_chapter_no || undefined,
-      constraints_json: prettyJson(item?.constraints_json),
-      state_json: prettyJson(item?.state_json),
-      payload_json: prettyJson(item?.payload_json),
+      aliases: splitList(payload.aliases || payload.alias || []).join('\n'),
+      constraint_rows: objectToRows(item?.constraints_json),
+      state_rows: objectToRows(item?.state_json),
+      attribute_rows: objectToRows(payload.attributes || payload.profile || {}),
+      source_note: payload.source_note || payload.source || '',
     })
     setEditorOpen(true)
   }
@@ -121,12 +152,26 @@ export function SettingWorkshopPanel({
   const submitSetting = async () => {
     try {
       const values = await form.validateFields()
+      const existingPayload = editing?.payload_json && typeof editing.payload_json === 'object' && !Array.isArray(editing.payload_json)
+        ? editing.payload_json
+        : {}
       const payload = {
         project_id: projectId,
-        ...values,
-        constraints_json: parseJsonText(values.constraints_json, {}),
-        state_json: parseJsonText(values.state_json, {}),
-        payload_json: parseJsonText(values.payload_json, {}),
+        entity_type: values.entity_type,
+        name: values.name,
+        summary: values.summary || '',
+        status: values.status || 'active',
+        visibility: values.visibility || 'public',
+        first_chapter_no: values.first_chapter_no ?? null,
+        last_chapter_no: values.last_chapter_no ?? null,
+        constraints_json: rowsToObject(values.constraint_rows),
+        state_json: rowsToObject(values.state_rows),
+        payload_json: {
+          ...existingPayload,
+          aliases: splitList(values.aliases),
+          attributes: rowsToObject(values.attribute_rows),
+          source_note: values.source_note || '',
+        },
       }
       if (editing?.id) await apiClient.put(`/novel/settings/${editing.id}`, payload)
       else await apiClient.post(`/novel/projects/${projectId}/settings`, payload)
@@ -135,7 +180,7 @@ export function SettingWorkshopPanel({
       await load()
     } catch (error: any) {
       if (error?.errorFields) return
-      message.error('设定保存失败，请检查 JSON 字段')
+      message.error('设定保存失败，请检查表单内容')
     }
   }
 
@@ -222,13 +267,39 @@ export function SettingWorkshopPanel({
       const res = await apiClient.post(`/novel/chapters/${activeChapter.id}/settings-consistency-check`, {
         project_id: projectId,
         model_id: selectedModelId,
-        apply_updates: true,
+        apply_updates: false,
       })
       const report = res.data?.report || {}
-      message.success(`设定一致性评分：${report.score ?? '-'}；回写 ${res.data?.applied_state_updates?.length || 0} 项`)
+      const pending = (Array.isArray(res.data?.pending_state_updates) ? res.data.pending_state_updates : [])
+        .map((item: any, index: number) => ({ ...item, _key: stateUpdateKey(item, index) }))
+      setPendingStateUpdates(pending)
+      setSelectedStateUpdateKeys(pending.map((item: any) => item._key))
+      message.success(`设定一致性评分：${report.score ?? '-'}；待确认 ${pending.length} 项状态变更`)
       await load()
     } catch {
       message.error('设定一致性检查失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const applySelectedStateUpdates = async () => {
+    if (!activeChapter?.id) return message.warning('请先选择章节')
+    const updates = pendingStateUpdates.filter(item => selectedStateUpdateKeys.includes(item._key))
+    if (updates.length === 0) return message.warning('请先选择要应用的状态变更')
+    setSaving(true)
+    try {
+      const res = await apiClient.post(`/novel/chapters/${activeChapter.id}/settings-state-updates/apply`, {
+        project_id: projectId,
+        updates,
+      })
+      const applied = res.data?.applied_state_updates || []
+      message.success(`已应用 ${applied.length} 项设定状态变更`)
+      setPendingStateUpdates(prev => prev.filter(item => !selectedStateUpdateKeys.includes(item._key)))
+      setSelectedStateUpdateKeys([])
+      await load()
+    } catch {
+      message.error('应用设定状态变更失败')
     } finally {
       setSaving(false)
     }
@@ -260,6 +331,51 @@ export function SettingWorkshopPanel({
         </Space>
         <Button size="small" block style={{ marginTop: 8 }} type="primary" onClick={saveUsage} loading={saving} disabled={!activeChapter?.id}>保存本章调用</Button>
       </Card>
+
+      {pendingStateUpdates.length > 0 && (
+        <Card
+          size="small"
+          title={`待确认状态变更 ${pendingStateUpdates.length}`}
+          extra={(
+            <Space size={4}>
+              <Button size="small" type="link" onClick={() => setSelectedStateUpdateKeys(pendingStateUpdates.map(item => item._key))}>全选</Button>
+              <Button size="small" type="link" onClick={() => setSelectedStateUpdateKeys([])}>清空</Button>
+            </Space>
+          )}
+        >
+          <List
+            size="small"
+            dataSource={pendingStateUpdates}
+            renderItem={(item: any) => (
+              <List.Item>
+                <Space align="start" style={{ width: '100%' }}>
+                  <Checkbox
+                    checked={selectedStateUpdateKeys.includes(item._key)}
+                    onChange={event => setSelectedStateUpdateKeys(prev => event.target.checked ? [...prev, item._key] : prev.filter(key => key !== item._key))}
+                  />
+                  <Space direction="vertical" size={2} style={{ flex: 1 }}>
+                    <Space size={4} wrap>
+                      <Text strong>{item.name}</Text>
+                      <Tag bordered={false}>{typeLabel(item.entity_type)}</Tag>
+                      <Tag color="blue" bordered={false}>第{item.chapter_no}章</Tag>
+                    </Space>
+                    <Text type="secondary" style={{ fontSize: 12 }}>当前：{displayValue(item.current_state || {}).slice(0, 120)}</Text>
+                    <Text style={{ fontSize: 12 }}>变更：{displayValue(item.actual_state_change || {}).slice(0, 160)}</Text>
+                    {item.reason && <Text type="secondary" style={{ fontSize: 12 }}>原因：{item.reason}</Text>}
+                  </Space>
+                </Space>
+              </List.Item>
+            )}
+          />
+          <Space style={{ width: '100%', justifyContent: 'space-between', marginTop: 8 }}>
+            <Text type="secondary" style={{ fontSize: 12 }}>已选择 {selectedStateUpdateKeys.length} 项</Text>
+            <Space size={6}>
+              <Button size="small" onClick={() => { setPendingStateUpdates([]); setSelectedStateUpdateKeys([]) }}>暂不处理</Button>
+              <Button size="small" type="primary" loading={saving} onClick={applySelectedStateUpdates}>应用选中变更</Button>
+            </Space>
+          </Space>
+        </Card>
+      )}
 
       <Tabs
         activeKey={activeType}
@@ -352,23 +468,80 @@ export function SettingWorkshopPanel({
           </Form.Item>
           <Space style={{ width: '100%' }} align="start">
             <Form.Item name="first_chapter_no" label="首次章节" style={{ width: 130 }}>
-              <Input type="number" />
+              <InputNumber min={1} style={{ width: '100%' }} />
             </Form.Item>
             <Form.Item name="last_chapter_no" label="末次章节" style={{ width: 130 }}>
-              <Input type="number" />
+              <InputNumber min={1} style={{ width: '100%' }} />
             </Form.Item>
             <Form.Item name="status" label="状态" style={{ width: 130 }}>
               <Select options={[{ value: 'active', label: '启用' }, { value: 'retired', label: '已退场' }, { value: 'draft', label: '草稿' }]} />
             </Form.Item>
           </Space>
-          <Form.Item name="constraints_json" label="约束 JSON">
-            <Input.TextArea rows={5} />
+          <Form.Item name="aliases" label="别名 / 提及词">
+            <Input.TextArea rows={2} placeholder={'每行一个，例如：断臂少年\n黑桑县弃子'} />
           </Form.Item>
-          <Form.Item name="state_json" label="当前状态 JSON">
-            <Input.TextArea rows={5} />
+          <Form.Item label="关键属性">
+            <Form.List name="attribute_rows">
+              {(fields, { add, remove }) => (
+                <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                  {fields.map(field => (
+                    <Space key={field.key} align="start" style={{ width: '100%' }}>
+                      <Form.Item {...field} name={[field.name, 'key']} style={{ width: 180, marginBottom: 0 }}>
+                        <Input placeholder="属性名，例如：身份" />
+                      </Form.Item>
+                      <Form.Item {...field} name={[field.name, 'value']} style={{ flex: 1, marginBottom: 0 }}>
+                        <Input placeholder="属性值，例如：黑桑县药童" />
+                      </Form.Item>
+                      <Button size="small" danger onClick={() => remove(field.name)}>删除</Button>
+                    </Space>
+                  ))}
+                  <Button size="small" onClick={() => add({ key: '', value: '' })}>添加属性</Button>
+                </Space>
+              )}
+            </Form.List>
           </Form.Item>
-          <Form.Item name="payload_json" label="扩展资料 JSON">
-            <Input.TextArea rows={4} />
+          <Form.Item label="硬性约束">
+            <Form.List name="constraint_rows">
+              {(fields, { add, remove }) => (
+                <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                  {fields.map(field => (
+                    <Space key={field.key} align="start" style={{ width: '100%' }}>
+                      <Form.Item {...field} name={[field.name, 'key']} style={{ width: 180, marginBottom: 0 }}>
+                        <Input placeholder="约束项，例如：knowledge_scope" />
+                      </Form.Item>
+                      <Form.Item {...field} name={[field.name, 'value']} style={{ flex: 1, marginBottom: 0 }}>
+                        <Input.TextArea rows={1} autoSize={{ minRows: 1, maxRows: 3 }} placeholder="约束内容；数组/对象可粘贴 JSON" />
+                      </Form.Item>
+                      <Button size="small" danger onClick={() => remove(field.name)}>删除</Button>
+                    </Space>
+                  ))}
+                  <Button size="small" onClick={() => add({ key: '', value: '' })}>添加约束</Button>
+                </Space>
+              )}
+            </Form.List>
+          </Form.Item>
+          <Form.Item label="当前状态">
+            <Form.List name="state_rows">
+              {(fields, { add, remove }) => (
+                <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                  {fields.map(field => (
+                    <Space key={field.key} align="start" style={{ width: '100%' }}>
+                      <Form.Item {...field} name={[field.name, 'key']} style={{ width: 180, marginBottom: 0 }}>
+                        <Input placeholder="状态项，例如：owner" />
+                      </Form.Item>
+                      <Form.Item {...field} name={[field.name, 'value']} style={{ flex: 1, marginBottom: 0 }}>
+                        <Input.TextArea rows={1} autoSize={{ minRows: 1, maxRows: 3 }} placeholder="状态值，例如：迟正；数组/对象可粘贴 JSON" />
+                      </Form.Item>
+                      <Button size="small" danger onClick={() => remove(field.name)}>删除</Button>
+                    </Space>
+                  ))}
+                  <Button size="small" onClick={() => add({ key: '', value: '' })}>添加状态</Button>
+                </Space>
+              )}
+            </Form.List>
+          </Form.Item>
+          <Form.Item name="source_note" label="来源备注">
+            <Input.TextArea rows={2} placeholder="例如：来自第 12 章人工补充；从角色卡同步" />
           </Form.Item>
         </Form>
       </Modal>

@@ -53,6 +53,9 @@ function loadEnvFile(path: string) {
 
 loadEnvFile('/Users/ruiyaosong/MangaForge-Studio/ui/server/.env')
 
+const port = Number(process.env.PORT || 8787)
+const host = process.env.HOST || 'localhost'
+
 const app = express()
 app.use(cors())
 app.use(express.json({ limit: '5mb' }))
@@ -134,7 +137,7 @@ app.post('/api/interrupt/:clientId', async (_req, res) => {
   })
 })
 
-app.listen(8787, async () => {
+app.listen(port, host, async () => {
   activeWorkspace = await loadActiveWorkspace()
   await ensureWorkspaceStructure(activeWorkspace)
   await saveActiveWorkspace(activeWorkspace)
@@ -151,5 +154,5 @@ app.listen(8787, async () => {
     console.warn('⚠️  Memory Palace bootstrap failed, falling back to SQLite:', String(err).slice(0, 200))
   }
 
-  console.log('Manga UI server on http://localhost:8787')
+  console.log(`Manga UI server on http://${host}:${port}`)
 })

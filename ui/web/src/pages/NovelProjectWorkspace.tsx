@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert, Badge, Button, Card, Dropdown, Form, Input, List, message, Modal, Progress, Select, Space, Typography, Tooltip, Tag,
 } from 'antd'
@@ -9,24 +9,9 @@ import type { EditorView } from '@codemirror/view'
 import { useNavigate, useParams } from 'react-router-dom'
 import apiClient from '../api/client'
 import { createSSEClient, generateClientId, type SSEMessage } from '../utils/sse'
-import { AgentExecutionModal } from './novel-workspace/AgentExecutionModal'
-import { AgentAuditDrawer } from './novel-workspace/AgentAuditDrawer'
-import { ChapterManagementDrawer } from './novel-workspace/ChapterManagementDrawer'
 import { ChapterDirectorySidebar } from './novel-workspace/ChapterDirectorySidebar'
-import { ChapterRestructurePanel } from './novel-workspace/ChapterRestructurePanel'
-import { ConsistencyGraphModal } from './novel-workspace/ConsistencyGraphModal'
-import { CreativeCardsModal } from './novel-workspace/CreativeCardsModal'
-import { EditorModal, type EditorKind } from './novel-workspace/EditorModal'
-import { ExportDeliveryModal } from './novel-workspace/ExportDeliveryModal'
-import { OutlineControlPanel } from './novel-workspace/OutlineControlPanel'
-import { OutlineTreeModal } from './novel-workspace/OutlineTreeModal'
-import { ReferenceConfigModal } from './novel-workspace/ReferenceConfigModal'
-import { ReferenceEngineeringModal } from './novel-workspace/ReferenceEngineeringModal'
+import type { EditorKind } from './novel-workspace/EditorModal'
 import { ReferencePanel } from './novel-workspace/ReferencePanel'
-import { QualityBenchmarkModal } from './novel-workspace/QualityBenchmarkModal'
-import { ReviewAnnotationsDrawer } from './novel-workspace/ReviewAnnotationsDrawer'
-import { TaskCenterDrawer } from './novel-workspace/TaskCenterDrawer'
-import { VersionDetailModal } from './novel-workspace/VersionDetailModal'
 import { WorkspaceCenter } from './novel-workspace/WorkspaceCenter'
 import { useChapterAutosave } from './novel-workspace/useChapterAutosave'
 import { useChapterVersions } from './novel-workspace/useChapterVersions'
@@ -39,6 +24,27 @@ import {
 } from './novel-workspace/utils'
 
 const { Title, Text, Paragraph } = Typography
+
+const AgentExecutionModal = lazy(() => import('./novel-workspace/AgentExecutionModal').then(module => ({ default: module.AgentExecutionModal })))
+const AgentAuditDrawer = lazy(() => import('./novel-workspace/AgentAuditDrawer').then(module => ({ default: module.AgentAuditDrawer })))
+const ChapterManagementDrawer = lazy(() => import('./novel-workspace/ChapterManagementDrawer').then(module => ({ default: module.ChapterManagementDrawer })))
+const ChapterRestructurePanel = lazy(() => import('./novel-workspace/ChapterRestructurePanel').then(module => ({ default: module.ChapterRestructurePanel })))
+const ConsistencyGraphModal = lazy(() => import('./novel-workspace/ConsistencyGraphModal').then(module => ({ default: module.ConsistencyGraphModal })))
+const CreativeCardsModal = lazy(() => import('./novel-workspace/CreativeCardsModal').then(module => ({ default: module.CreativeCardsModal })))
+const EditorModal = lazy(() => import('./novel-workspace/EditorModal').then(module => ({ default: module.EditorModal })))
+const ExportDeliveryModal = lazy(() => import('./novel-workspace/ExportDeliveryModal').then(module => ({ default: module.ExportDeliveryModal })))
+const OutlineControlPanel = lazy(() => import('./novel-workspace/OutlineControlPanel').then(module => ({ default: module.OutlineControlPanel })))
+const OutlineTreeModal = lazy(() => import('./novel-workspace/OutlineTreeModal').then(module => ({ default: module.OutlineTreeModal })))
+const ReferenceConfigModal = lazy(() => import('./novel-workspace/ReferenceConfigModal').then(module => ({ default: module.ReferenceConfigModal })))
+const ReferenceEngineeringModal = lazy(() => import('./novel-workspace/ReferenceEngineeringModal').then(module => ({ default: module.ReferenceEngineeringModal })))
+const QualityBenchmarkModal = lazy(() => import('./novel-workspace/QualityBenchmarkModal').then(module => ({ default: module.QualityBenchmarkModal })))
+const ReviewAnnotationsDrawer = lazy(() => import('./novel-workspace/ReviewAnnotationsDrawer').then(module => ({ default: module.ReviewAnnotationsDrawer })))
+const TaskCenterDrawer = lazy(() => import('./novel-workspace/TaskCenterDrawer').then(module => ({ default: module.TaskCenterDrawer })))
+const VersionDetailModal = lazy(() => import('./novel-workspace/VersionDetailModal').then(module => ({ default: module.VersionDetailModal })))
+
+function DeferredWorkspaceSurfaces({ children }: { children: React.ReactNode }) {
+  return <Suspense fallback={null}>{children}</Suspense>
+}
 
 const productionModeOptions = [
   { value: 'scene_cards_only', label: '只生成场景卡' },
@@ -3126,36 +3132,37 @@ export default function NovelProjectWorkspace() {
         />
       </div>
 
-      <EditorModal
-        editorKind={editorKind}
-        form={editorForm}
-        onCancel={() => { setEditorKind(null); setEditorItem(null) }}
-        onSubmit={submitEditor}
-      />
+      <DeferredWorkspaceSurfaces>
+        <EditorModal
+          editorKind={editorKind}
+          form={editorForm}
+          onCancel={() => { setEditorKind(null); setEditorItem(null) }}
+          onSubmit={submitEditor}
+        />
 
-      <VersionDetailModal
-        version={chapterVersionDetail}
-        activeChapter={activeChapter}
-        showOnlyDiff={showOnlyDiff}
-        onToggleDiffMode={() => setShowOnlyDiff(prev => !prev)}
-        onClose={() => setChapterVersionDetail(null)}
-        onAcceptVersion={acceptChapterVersion}
-        onMergeVersion={mergeChapterVersion}
-        acceptingVersionId={rollingBackVersionId}
-      />
+        <VersionDetailModal
+          version={chapterVersionDetail}
+          activeChapter={activeChapter}
+          showOnlyDiff={showOnlyDiff}
+          onToggleDiffMode={() => setShowOnlyDiff(prev => !prev)}
+          onClose={() => setChapterVersionDetail(null)}
+          onAcceptVersion={acceptChapterVersion}
+          onMergeVersion={mergeChapterVersion}
+          acceptingVersionId={rollingBackVersionId}
+        />
 
-      <AgentExecutionModal
-        execution={agentExecution}
-        onClose={() => setAgentExecution(null)}
-      />
+        <AgentExecutionModal
+          execution={agentExecution}
+          onClose={() => setAgentExecution(null)}
+        />
 
-      <ReferenceConfigModal
-        open={referenceConfigOpen}
-        projectId={projectId}
-        config={selectedProject?.reference_config || {}}
-        onClose={() => setReferenceConfigOpen(false)}
-        onSaved={(config) => setSelectedProject((prev: any) => prev ? { ...prev, reference_config: config } : prev)}
-      />
+        <ReferenceConfigModal
+          open={referenceConfigOpen}
+          projectId={projectId}
+          config={selectedProject?.reference_config || {}}
+          onClose={() => setReferenceConfigOpen(false)}
+          onSaved={(config) => setSelectedProject((prev: any) => prev ? { ...prev, reference_config: config } : prev)}
+        />
 
       <ReferenceEngineeringModal
         open={referenceEngineeringOpen}
@@ -3605,39 +3612,40 @@ export default function NovelProjectWorkspace() {
         onRestructure={handleRestructure}
       />
 
-      <ChapterManagementDrawer
-        open={chapterDrawerOpen}
-        onClose={() => setChapterDrawerOpen(false)}
-        chapters={chapters}
-        proseChapters={proseChapters}
-        filteredChapters={filteredChapters}
-        activeChapter={activeChapter}
-        activeChapterId={activeChapterId}
-        selectedChapterIds={selectedChapterIds}
-        selectMode={selectMode}
-        chapterSearch={chapterSearch}
-        chapterStatusFilter={chapterStatusFilter}
-        chapterSortMode={chapterSortMode}
-        generatingProse={generatingProse}
-        onCreateChapter={() => openEditor('chapter')}
-        onEditChapter={(chapter) => openEditor('chapter', chapter)}
-        onDeleteChapter={deleteChapter}
-        onBatchDelete={async (chapterIds) => {
-          for (const cid of chapterIds) await apiClient.delete(`/novel/chapters/${cid}`)
-          setSelectedChapterIds(new Set())
-          await loadProjectModules()
-          message.success('已批量删除')
-        }}
-        onGenerateCurrentChapterProse={generateCurrentChapterProse}
-        onOpenRestructure={() => { setSelectMode(true); setRestructurePanelOpen(true) }}
-        onOpenVersionHistory={() => { setRightPanelOpen(true); setRightPanelTab('versions'); setChapterDrawerOpen(false) }}
-        onSelectChapter={(chapterId) => { void selectChapter(chapterId) }}
-        onSetSelectMode={setSelectMode}
-        onSetSelectedChapterIds={setSelectedChapterIds}
-        onSetChapterSearch={setChapterSearch}
-        onSetChapterStatusFilter={setChapterStatusFilter}
-        onSetChapterSortMode={setChapterSortMode}
-      />
+        <ChapterManagementDrawer
+          open={chapterDrawerOpen}
+          onClose={() => setChapterDrawerOpen(false)}
+          chapters={chapters}
+          proseChapters={proseChapters}
+          filteredChapters={filteredChapters}
+          activeChapter={activeChapter}
+          activeChapterId={activeChapterId}
+          selectedChapterIds={selectedChapterIds}
+          selectMode={selectMode}
+          chapterSearch={chapterSearch}
+          chapterStatusFilter={chapterStatusFilter}
+          chapterSortMode={chapterSortMode}
+          generatingProse={generatingProse}
+          onCreateChapter={() => openEditor('chapter')}
+          onEditChapter={(chapter) => openEditor('chapter', chapter)}
+          onDeleteChapter={deleteChapter}
+          onBatchDelete={async (chapterIds) => {
+            for (const cid of chapterIds) await apiClient.delete(`/novel/chapters/${cid}`)
+            setSelectedChapterIds(new Set())
+            await loadProjectModules()
+            message.success('已批量删除')
+          }}
+          onGenerateCurrentChapterProse={generateCurrentChapterProse}
+          onOpenRestructure={() => { setSelectMode(true); setRestructurePanelOpen(true) }}
+          onOpenVersionHistory={() => { setRightPanelOpen(true); setRightPanelTab('versions'); setChapterDrawerOpen(false) }}
+          onSelectChapter={(chapterId) => { void selectChapter(chapterId) }}
+          onSetSelectMode={setSelectMode}
+          onSetSelectedChapterIds={setSelectedChapterIds}
+          onSetChapterSearch={setChapterSearch}
+          onSetChapterStatusFilter={setChapterStatusFilter}
+          onSetChapterSortMode={setChapterSortMode}
+        />
+      </DeferredWorkspaceSurfaces>
 
     </div>
   )

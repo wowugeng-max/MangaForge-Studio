@@ -155,6 +155,78 @@ function seedSettingsFromLocalData(worldbuilding: any[], characters: any[], outl
   return seeds
 }
 
+function buildPendingStateUpdates(stateUpdates: any[], settings: any[], usage: any[], chapter: any) {
+  return stateUpdates.map(update => {
+    const entityId = Number(update?.entity_id || 0)
+    const name = String(update?.name || '').trim()
+    const entity = settings.find(item => (entityId && item.id === entityId) || (!!name && item.name === name))
+    if (!entity) return null
+    const actual = parseJsonField(update.actual_state_change || update.state_delta, {})
+    if (!actual || typeof actual !== 'object' || Array.isArray(actual) || Object.keys(actual).length === 0) return null
+    const currentState = entity.state_json || {}
+    const usageRecord = usage.find(item => item.entity_id === entity.id)
+    return {
+      entity_id: entity.id,
+      name: entity.name,
+      entity_type: entity.entity_type,
+      summary: entity.summary || '',
+      chapter_id: chapter.id,
+      chapter_no: chapter.chapter_no,
+      usage_id: usageRecord?.id || null,
+      current_state: currentState,
+      actual_state_change: actual,
+      next_state: {
+        ...currentState,
+        ...actual,
+        last_checked_chapter_id: chapter.id,
+        last_checked_chapter_no: chapter.chapter_no,
+      },
+      reason: String(update?.reason || update?.description || update?.suggestion || ''),
+    }
+  }).filter(Boolean)
+}
+
+async function applyPendingStateUpdates(activeWorkspace: string, projectId: number, chapter: any, settings: any[], usage: any[], updates: any[]) {
+  const appliedStateUpdates: any[] = []
+  for (const update of updates) {
+    const entityId = Number(update?.entity_id || 0)
+    const name = String(update?.name || '').trim()
+    const entity = settings.find(item => (entityId && item.id === entityId) || (!!name && item.name === name))
+    if (!entity) continue
+    const actual = parseJsonField(update.actual_state_change || update.state_delta, {})
+    if (!actual || typeof actual !== 'object' || Array.isArray(actual) || Object.keys(actual).length === 0) continue
+    const updated = await updateNovelSettingEntity(activeWorkspace, entity.id, {
+      state_json: {
+        ...(entity.state_json || {}),
+        ...(actual || {}),
+        last_checked_chapter_id: chapter.id,
+        last_checked_chapter_no: chapter.chapter_no,
+      },
+    } as any)
+    const matchedUsage = usage.find(item => item.entity_id === entity.id)
+    if (matchedUsage) {
+      await updateNovelChapterSettingUsage(activeWorkspace, matchedUsage.id, {
+        actual_state_change: {
+          ...(matchedUsage.actual_state_change || {}),
+          ...(actual || {}),
+        },
+      } as any)
+    }
+    appliedStateUpdates.push({ entity_id: entity.id, name: entity.name, actual_state_change: actual, updated: Boolean(updated) })
+  }
+  if (appliedStateUpdates.length > 0) {
+    await createNovelReview(activeWorkspace, {
+      project_id: projectId,
+      review_type: 'setting_state_update_apply',
+      status: 'ok',
+      summary: `已确认设定状态变更 ${appliedStateUpdates.length} 项`,
+      issues: appliedStateUpdates.map(item => `${item.name}：${Object.keys(item.actual_state_change || {}).join('、')}`),
+      payload: JSON.stringify({ chapter_id: chapter.id, chapter_no: chapter.chapter_no, applied_state_updates: appliedStateUpdates }),
+    })
+  }
+  return appliedStateUpdates
+}
+
 export function registerNovelSettingRoutes(app: Express, ctx: NovelSettingRoutesContext) {
   app.get('/api/novel/projects/:id/settings', async (req, res) => {
     const activeWorkspace = ctx.getWorkspace()
@@ -316,42 +388,37 @@ export function registerNovelSettingRoutes(app: Express, ctx: NovelSettingRoutes
     const result = await executeNovelAgent('review-agent', project, { task: prompt }, { activeWorkspace, modelId: req.body?.model_id ? String(req.body.model_id) : undefined, maxTokens: 3000, temperature: 0.15, skipMemory: true })
     const payload = parseJsonLikePayload((result as any).output || (result as any).content || '') || {}
     const stateUpdates = Array.isArray(payload?.required_state_updates) ? payload.required_state_updates : []
-    const appliedStateUpdates: any[] = []
-    if (req.body?.apply_updates !== false && stateUpdates.length > 0) {
-      for (const update of stateUpdates) {
-        const entityId = Number(update?.entity_id || 0)
-        const name = String(update?.name || '').trim()
-        const entity = settings.find(item => (entityId && item.id === entityId) || (!!name && item.name === name))
-        if (!entity) continue
-        const actual = parseJsonField(update.actual_state_change || update.state_delta, {})
-        const updated = await updateNovelSettingEntity(activeWorkspace, entity.id, {
-          state_json: {
-            ...(entity.state_json || {}),
-            ...(actual || {}),
-            last_checked_chapter_id: chapterId,
-            last_checked_chapter_no: chapter.chapter_no,
-          },
-        } as any)
-        const matchedUsage = usage.find(item => item.entity_id === entity.id)
-        if (matchedUsage) {
-          await updateNovelChapterSettingUsage(activeWorkspace, matchedUsage.id, {
-            actual_state_change: {
-              ...(matchedUsage.actual_state_change || {}),
-              ...(actual || {}),
-            },
-          } as any)
-        }
-        appliedStateUpdates.push({ entity_id: entity.id, name: entity.name, actual_state_change: actual, updated: Boolean(updated) })
-      }
-    }
+    const pendingStateUpdates = buildPendingStateUpdates(stateUpdates, settings, usage, chapter)
+    const shouldApply = req.body?.apply_updates === true
+    const appliedStateUpdates = shouldApply
+      ? await applyPendingStateUpdates(activeWorkspace, projectId, chapter, settings, usage, pendingStateUpdates)
+      : []
     await createNovelReview(activeWorkspace, {
       project_id: projectId,
       review_type: 'setting_consistency',
       status: payload?.passed === false || Number(payload?.score || 100) < 78 ? 'warn' : 'ok',
       summary: `设定一致性评分 ${payload?.score ?? '-'}`,
       issues: Array.isArray(payload?.issues) ? payload.issues.map((issue: any) => `${issue.severity || 'medium'}｜${issue.description || issue}`) : [],
-      payload: JSON.stringify({ chapter_id: chapterId, applied_state_updates: appliedStateUpdates, ...payload }),
+      payload: JSON.stringify({ chapter_id: chapterId, pending_state_updates: pendingStateUpdates, applied_state_updates: appliedStateUpdates, auto_applied: shouldApply, ...payload }),
     })
-    res.json({ ok: true, report: payload, applied_state_updates: appliedStateUpdates })
+    res.json({ ok: true, report: payload, pending_state_updates: pendingStateUpdates, applied_state_updates: appliedStateUpdates, auto_applied: shouldApply })
+  })
+
+  app.post('/api/novel/chapters/:chapterId/settings-state-updates/apply', async (req, res) => {
+    const activeWorkspace = ctx.getWorkspace()
+    const projectId = Number(req.body?.project_id || req.query.project_id || 0)
+    const chapterId = Number(req.params.chapterId)
+    const project = await ctx.getProject(activeWorkspace, projectId)
+    if (!project) return res.status(404).json({ error: 'project not found' })
+    const [chapters, settings, usage] = await Promise.all([
+      listNovelChapters(activeWorkspace, projectId),
+      listNovelSettingEntities(activeWorkspace, projectId),
+      listNovelChapterSettingUsage(activeWorkspace, projectId, chapterId),
+    ])
+    const chapter = chapters.find(item => item.id === chapterId)
+    if (!chapter) return res.status(404).json({ error: 'chapter not found' })
+    const updates = Array.isArray(req.body?.updates) ? req.body.updates : []
+    const appliedStateUpdates = await applyPendingStateUpdates(activeWorkspace, projectId, chapter, settings, usage, updates)
+    res.json({ ok: true, applied_state_updates: appliedStateUpdates, total: appliedStateUpdates.length })
   })
 }

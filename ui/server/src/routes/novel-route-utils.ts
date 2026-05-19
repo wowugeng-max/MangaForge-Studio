@@ -32,6 +32,16 @@ export const compactText = (value: any, limit = 500) => String(value || '').repl
 export const asArray = (value: any) => Array.isArray(value) ? value : []
 export const clampScore = (value: number) => Math.max(0, Math.min(100, Math.round(value)))
 
+export function stableTextHash(value: any) {
+  const text = String(value || '')
+  let hash = 2166136261
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i)
+    hash = Math.imul(hash, 16777619)
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0')
+}
+
 export function normalizeIssue(issue: any) {
   if (typeof issue === 'string') return { severity: 'medium', type: 'general', description: issue, suggestion: '' }
   return {

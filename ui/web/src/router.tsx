@@ -1,53 +1,66 @@
-import React from 'react'
+import React, { Suspense, lazy } from 'react'
 import { Navigate, createBrowserRouter } from 'react-router-dom'
 import Layout from './components/Layout'
-import Dashboard from './pages/Dashboard'
-import StudioHome from './pages/StudioHome'
-import AssetList from './pages/Assets'
-import AssetDetail from './pages/Assets/Detail'
-import AssetCreate from './pages/Assets/Create'
-import Pipeline from './pages/Pipeline'
-import AssetEdit from './pages/Assets/Edit'
-import KeyManager from './pages/Keys'
-import VideoWorkshop from './pages/VideoWorkshop'
-import WorkflowConfig from './pages/Assets/WorkflowConfig'
-import RulesPage from './pages/Rules'
-import CanvasPage from './pages/Canvas'
-import ProviderManager from './pages/Providers'
-import NovelStudio from './pages/NovelStudio'
-import NovelProjectWorkspace from './pages/NovelProjectWorkspace'
-import NovelProductionDesk from './pages/NovelProductionDesk'
-import ModelManager from './pages/ModelManager'
+
+const Dashboard = lazy(() => import('./pages/Dashboard'))
+const StudioHome = lazy(() => import('./pages/StudioHome'))
+const AssetList = lazy(() => import('./pages/Assets'))
+const AssetDetail = lazy(() => import('./pages/Assets/Detail'))
+const AssetCreate = lazy(() => import('./pages/Assets/Create'))
+const Pipeline = lazy(() => import('./pages/Pipeline'))
+const AssetEdit = lazy(() => import('./pages/Assets/Edit'))
+const KeyManager = lazy(() => import('./pages/Keys'))
+const VideoWorkshop = lazy(() => import('./pages/VideoWorkshop'))
+const WorkflowConfig = lazy(() => import('./pages/Assets/WorkflowConfig'))
+const RulesPage = lazy(() => import('./pages/Rules'))
+const CanvasPage = lazy(() => import('./pages/Canvas'))
+const ProviderManager = lazy(() => import('./pages/Providers'))
+const NovelStudio = lazy(() => import('./pages/NovelStudio'))
+const NovelProjectWorkspace = lazy(() => import('./pages/NovelProjectWorkspace'))
+const NovelProductionDesk = lazy(() => import('./pages/NovelProductionDesk'))
+const ModelManager = lazy(() => import('./pages/ModelManager'))
+
+function PageFallback() {
+  return (
+    <div style={{ minHeight: 280, display: 'grid', placeItems: 'center', color: '#64748b', fontSize: 13 }}>
+      加载中...
+    </div>
+  )
+}
+
+function page(element: React.ReactNode) {
+  return <Suspense fallback={<PageFallback />}>{element}</Suspense>
+}
 
 const router = createBrowserRouter([
   {
     path: '/',
     element: <Layout />,
     children: [
-      { index: true, element: <Dashboard /> },
-      { path: 'studio', element: <StudioHome /> },
-      { path: 'assets', element: <AssetList /> },
-      { path: 'assets/create', element: <AssetCreate /> },
-      { path: 'assets/:id', element: <AssetDetail /> },
-      { path: 'video-workshop', element: <VideoWorkshop /> },
-      { path: 'keys', element: <KeyManager /> },
-      { path: 'models', element: <ModelManager /> },
-      { path: 'pipeline', element: <Pipeline /> },
-      { path: 'assets/:id/edit', element: <AssetEdit /> },
-      { path: 'assets/workflow-config', element: <WorkflowConfig /> },
-      { path: 'assets/workflow-config/:id?', element: <WorkflowConfig /> },
-      { path: 'assets/workflow-config/:mode?/:id?', element: <WorkflowConfig /> },
-      { path: 'rules', element: <RulesPage /> },
-      { path: 'canvas', element: <CanvasPage /> },
-      { path: 'providers', element: <ProviderManager /> },
-      { path: 'novel', element: <NovelStudio /> },
-      { path: 'novel/workspace/:id', element: <NovelProjectWorkspace /> },
-      { path: 'novel/workspace/:id/production', element: <NovelProductionDesk /> },
+      { index: true, element: page(<Dashboard />) },
+      { path: 'studio', element: page(<StudioHome />) },
+      { path: 'assets', element: page(<AssetList />) },
+      { path: 'assets/create', element: page(<AssetCreate />) },
+      { path: 'assets/:id', element: page(<AssetDetail />) },
+      { path: 'video-workshop', element: page(<VideoWorkshop />) },
+      { path: 'keys', element: page(<KeyManager />) },
+      { path: 'models', element: page(<ModelManager />) },
+      { path: 'pipeline', element: page(<Pipeline />) },
+      { path: 'assets/:id/edit', element: page(<AssetEdit />) },
+      { path: 'assets/workflow-config', element: page(<WorkflowConfig />) },
+      { path: 'assets/workflow-config/:id?', element: page(<WorkflowConfig />) },
+      { path: 'assets/workflow-config/:mode?/:id?', element: page(<WorkflowConfig />) },
+      { path: 'rules', element: page(<RulesPage />) },
+      { path: 'canvas', element: page(<CanvasPage />) },
+      { path: 'providers', element: page(<ProviderManager />) },
+      { path: 'novel', element: page(<NovelStudio />) },
+      { path: 'novel/workspace/:id', element: page(<NovelProjectWorkspace />) },
+      { path: 'novel/workspace/:id/production', element: page(<NovelProductionDesk />) },
     ],
   },
   {
     path: '/project/:id',
-    element: <CanvasPage />,
+    element: page(<CanvasPage />),
   },
 
   { path: '/dashboard', element: <Navigate to="/" replace /> },

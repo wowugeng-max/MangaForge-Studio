@@ -101,6 +101,8 @@ async function main() {
     reference_coverage: false,
     modules: false,
     reference_migration_plan: false,
+    export_preview: false,
+    release_repair_plan: false,
     quality_trends: false,
     volume_control: false,
     diagnostics: false,
@@ -137,6 +139,10 @@ async function main() {
   checks.reference_coverage = Boolean(referenceCoverage?.coverage)
   const modules = await request('/novel/modules')
   checks.modules = Array.isArray(modules?.modules)
+  const exportPreview = await request(`/novel/projects/${project.id}/export-preview`)
+  checks.export_preview = Boolean(exportPreview?.export?.stats && exportPreview?.export?.release_audit)
+  const releaseRepairPlan = await request(`/novel/projects/${project.id}/release-repair-plan`)
+  checks.release_repair_plan = Boolean(releaseRepairPlan?.release_audit && releaseRepairPlan?.repair_plan)
   checks.quality_trends = Array.isArray(dashboard?.dashboard?.chapter_trends)
   checks.volume_control = Array.isArray(dashboard?.dashboard?.volume_controls)
 
