@@ -6,6 +6,15 @@
 
 # Runtime workspaces / generated artifacts
 restored-src/.smoke-workspace/
+workspace/keys.json
+workspace/models.json
+workspace/novel-store.json
+workspace/novel.sqlite
+workspace/novel.sqlite-shm
+workspace/novel.sqlite-wal
+
+# Python caches
+**/__pycache__/
 
 # Local memory palace data (ChromaDB + SQLite)
 mempalace-data/

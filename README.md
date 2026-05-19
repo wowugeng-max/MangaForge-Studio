@@ -58,6 +58,23 @@ If you want to use the UI, you can still run the same install step above first, 
 
 From repository root:
 
+**Bun dev mode**
+
+```bash
+bun run dev
+```
+
+This starts the API backend and Vite web UI together. By default:
+
+- API: `http://localhost:8787`
+- Web: `http://localhost:5173`
+
+If the API uses another URL, start the web UI with:
+
+```bash
+VITE_API_BASE_URL=http://localhost:8787/api bun run dev:web
+```
+
 **Windows**
 
 ```powershell

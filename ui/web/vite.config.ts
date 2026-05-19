@@ -3,6 +3,17 @@ import { defineConfig } from 'vite'
 export default defineConfig({
   build: {
     rollupOptions: {
+      onwarn(warning, defaultHandler) {
+        const id = String(warning.id || '')
+        if (
+          warning.code === 'MODULE_LEVEL_DIRECTIVE' &&
+          (id.includes('node_modules/antd/es/') || id.includes('node_modules/@ant-design/icons/es/')) &&
+          String(warning.message || '').includes('"use client"')
+        ) {
+          return
+        }
+        defaultHandler(warning)
+      },
       output: {
         manualChunks(id) {
           if (!id.includes('node_modules')) return undefined
