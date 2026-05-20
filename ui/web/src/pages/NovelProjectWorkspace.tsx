@@ -1,6 +1,6 @@
 import React, { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Alert, Badge, Button, Card, Dropdown, Form, Input, List, message, Modal, Progress, Select, Space, Typography, Tooltip, Tag,
+  Alert, Badge, Button, Card, Checkbox, Dropdown, Form, Input, List, message, Modal, Progress, Select, Space, Typography, Tooltip, Tag,
 } from 'antd'
 import {
   ArrowLeftOutlined, BookOutlined, ClockCircleOutlined, DownOutlined, ReloadOutlined,
@@ -93,6 +93,10 @@ export default function NovelProjectWorkspace() {
   const [productionMode, setProductionMode] = useState('draft_review_revise_store')
   const [activeChapterDiagnostics, setActiveChapterDiagnostics] = useState<any | null>(null)
   const [commercialReadiness, setCommercialReadiness] = useState<any | null>(null)
+  const [future100Draft, setFuture100Draft] = useState<any | null>(null)
+  const [future100SelectedNos, setFuture100SelectedNos] = useState<number[]>([])
+  const [future100ApplyLoading, setFuture100ApplyLoading] = useState(false)
+  const [future100FocusOutlineIds, setFuture100FocusOutlineIds] = useState<number[]>([])
 
   // ── 大纲生成控制面板 ──
   const [outlinePanelOpen, setOutlinePanelOpen] = useState(false)
@@ -796,13 +800,12 @@ export default function NovelProjectWorkspace() {
     } finally { setExecutingAgents(false) }
   }
 
-  const generateSceneCardsForActiveChapter = async (allowIncomplete = false) => {
-    if (!activeChapter) return message.warning('请先选择章节')
+  const generateSceneCardsForChapter = async (chapterId: number, allowIncomplete = false) => {
     if (!selectedModelId) return message.warning('请先选择写作模型')
     if (!await flushPendingSave()) return
     setGeneratingSceneCards(true)
     try {
-      const res = await apiClient.post(`/novel/chapters/${activeChapter.id}/scene-cards`, {
+      const res = await apiClient.post(`/novel/chapters/${chapterId}/scene-cards`, {
         project_id: projectId,
         model_id: selectedModelId,
         allow_incomplete: allowIncomplete,
@@ -815,13 +818,18 @@ export default function NovelProjectWorkspace() {
     } catch (error: any) {
       const payload = error?.response?.data
       if (payload?.error_code === 'SCENE_PREFLIGHT_BLOCKED') {
-        showGenerationBlockedModal(payload, () => { void generateSceneCardsForActiveChapter(true) })
+        showGenerationBlockedModal(payload, () => { void generateSceneCardsForChapter(chapterId, true) })
       } else {
         message.error(payload?.error || error?.message || '场景卡生成失败')
       }
     } finally {
       setGeneratingSceneCards(false)
     }
+  }
+
+  const generateSceneCardsForActiveChapter = async (allowIncomplete = false) => {
+    if (!activeChapter) return message.warning('请先选择章节')
+    await generateSceneCardsForChapter(Number(activeChapter.id), allowIncomplete)
   }
 
   const openGenerationDiagnostics = async () => {
@@ -1198,25 +1206,265 @@ export default function NovelProjectWorkspace() {
     }
   }
 
+  const startFuture100ChapterGroupGeneration = async () => {
+    if (!selectedProject) return
+    if (!selectedModelId) return message.warning('请先选择模型')
+    setCommercialToolLoading('future100Group')
+    try {
+      const res = await apiClient.post(`/novel/projects/${projectId}/chapter-groups/start-from-skeleton`, {
+        model_id: selectedModelId,
+        start_chapter: activeChapter?.chapter_no || undefined,
+        scan_limit: 100,
+        count: 10,
+        min_score: 70,
+        create_missing: true,
+        sync_chapter_fields: true,
+        production_mode: productionMode,
+        require_scene_confirmation: productionMode !== 'scene_cards_only',
+      })
+      await loadProjectModules()
+      await loadProductionTasks()
+      setTaskCenterOpen(true)
+      message.success(`已从未来100章骨架入队：${res.data?.summary?.queued || 0} 章，创建 ${res.data?.summary?.created || 0} 章，更新 ${res.data?.summary?.updated || 0} 章`)
+    } catch (error: any) {
+      const payload = error?.response?.data
+      if (payload?.error_code === 'NO_READY_SKELETON_CHAPTERS') {
+        Modal.warning({
+          title: '没有可从骨架入队的章节',
+          width: 760,
+          content: (
+            <Space direction="vertical" size={12} style={{ width: '100%' }}>
+              <Text>已扫描 {payload.scanned || 0} 条骨架，但没有达到骨架阈值 {payload.min_score || 70}% 的待生成章节。</Text>
+              <List
+                size="small"
+                dataSource={(payload.skipped || []).slice(0, 10)}
+                renderItem={(row: any) => (
+                  <List.Item>
+                    <List.Item.Meta
+                      title={`第${row.chapter_no}章《${row.title || '未命名'}》 · 骨架分 ${row.skeleton_score || 0}`}
+                      description={(row.blockers || []).join('；') || '暂不可入队'}
+                    />
+                  </List.Item>
+                )}
+              />
+            </Space>
+          ),
+        })
+      } else {
+        message.error(payload?.error || error?.message || '从未来100章骨架入队失败')
+      }
+    } finally {
+      setCommercialToolLoading('')
+    }
+  }
+
   const createEditorReport = async () => {
     if (!activeChapter) return message.warning('请先选择章节')
+    await createEditorReportForChapter(activeChapter.id)
+  }
+
+  const createEditorReportForChapter = async (chapterId: number, options: { sourceTask?: any; autoRevision?: boolean } = {}) => {
     if (!selectedModelId) return message.warning('请先选择模型')
     if (!await flushPendingSave()) return
     setEditorReportLoading(true)
     try {
-      await apiClient.post(`/novel/chapters/${activeChapter.id}/editor-report`, {
+      const res = await apiClient.post(`/novel/chapters/${chapterId}/editor-report`, {
         project_id: projectId,
         model_id: selectedModelId,
       })
       await loadProjectModules()
       setRightPanelOpen(true)
       setRightPanelTab('editorReports')
-      message.success('编辑报告已生成')
+      if (options.autoRevision && res.data?.review) {
+        const task = options.sourceTask || {}
+        await applyEditorRevision(res.data.review, {
+          revisionMode: String(task.message || task.issue_type || '').includes('钩子') ? 'restore_hook' : 'tighten_pacing',
+          prompt: [
+            '本次修订来自任务中心的商业留存/质检修复任务。',
+            task.segment ? `分段：${task.segment}` : '',
+            task.message ? `问题：${task.message}` : '',
+            task.action ? `修复动作：${task.action}` : '',
+            Array.isArray(task.acceptance_criteria) ? `验收标准：${task.acceptance_criteria.join('；')}` : '',
+          ].filter(Boolean).join('\n'),
+        })
+      } else {
+        message.success('编辑报告已生成')
+      }
     } catch (error: any) {
       message.error(error?.response?.data?.error || error?.message || '编辑报告生成失败')
     } finally {
       setEditorReportLoading(false)
     }
+  }
+
+  const locateRepairTaskChapter = async (chapterId: number) => {
+    if (await selectChapter(chapterId)) {
+      setTaskCenterOpen(false)
+      setRightPanelOpen(true)
+      message.success('已定位到章节')
+    }
+  }
+
+  const openRepairTaskChapterEditor = async (chapterId: number) => {
+    if (!await selectChapter(chapterId)) return
+    const chapter = chapters.find(ch => Number(ch.id) === Number(chapterId))
+    if (chapter) {
+      setTaskCenterOpen(false)
+      openEditor('chapter', chapter)
+    }
+  }
+
+  const startRepairTaskRevision = async (task: any) => {
+    const chapterId = Number(task?.chapter_id || 0)
+    if (!chapterId) return message.warning('这个任务没有绑定章节')
+    if (!selectedModelId) return message.warning('请先选择模型')
+    if (!await selectChapter(chapterId)) return
+    setTaskCenterOpen(false)
+    await createEditorReportForChapter(chapterId, { sourceTask: task, autoRevision: true })
+  }
+
+  const updateRepairTaskStatus = async (run: any, taskIndex: number, status: string, note = '') => {
+    try {
+      await apiClient.post(`/novel/runs/${run.id}/tasks/${taskIndex}/status`, {
+        project_id: projectId,
+        status,
+        note,
+      })
+      await loadProjectModules()
+      await loadProductionTasks()
+      message.success(status === 'resolved' ? '任务已标记为已处理' : status === 'needs_review' ? '任务已标记为需复查' : '任务状态已更新')
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '任务状态更新失败')
+    }
+  }
+
+  const bulkUpdateRepairTaskStatus = async (items: any[], status: string) => {
+    try {
+      const grouped = new Map<number, { run: any; indices: number[] }>()
+      for (const item of items || []) {
+        const runId = Number(item?.run?.id || 0)
+        if (!runId || !Number.isInteger(Number(item?.taskIndex))) continue
+        const existing = grouped.get(runId) || { run: item.run, indices: [] }
+        existing.indices.push(Number(item.taskIndex))
+        grouped.set(runId, existing)
+      }
+      for (const group of grouped.values()) {
+        await apiClient.post(`/novel/runs/${group.run.id}/tasks/status-bulk`, {
+          project_id: projectId,
+          task_indices: group.indices,
+          status,
+          note: status === 'resolved' ? '批量复查确认通过' : '批量状态更新',
+        })
+      }
+      await loadProjectModules()
+      await loadProductionTasks()
+      message.success(status === 'resolved' ? `已确认通过 ${items.length} 个复查任务` : `已更新 ${items.length} 个任务`)
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '批量更新任务状态失败')
+    }
+  }
+
+  const generateLongformRepairAuditSummary = async (run: any) => {
+    try {
+      const res = await apiClient.post(`/novel/projects/${projectId}/longform-production-trends/repair-runs/${run.id}/audit-summary`)
+      const audit = res.data?.audit || {}
+      await loadProjectModules()
+      await loadProductionTasks()
+      Modal.info({
+        title: '长线生产修复闭环审计',
+        width: 760,
+        content: (
+          <Space direction="vertical" size={10} style={{ width: '100%' }}>
+            <Space wrap>
+              <Tag color={audit.status === 'closed' ? 'green' : 'gold'} bordered={false}>{audit.status === 'closed' ? '已闭环' : '需跟进'}</Tag>
+              <Tag bordered={false}>已确认 {audit.task_summary?.resolved || 0}/{audit.task_summary?.total || 0}</Tag>
+              <Tag bordered={false}>触达章节 {audit.task_summary?.touched_chapter_count || 0}</Tag>
+            </Space>
+            {(audit.conclusion || []).map((item: string, index: number) => <Text key={`${item}-${index}`}>{item}</Text>)}
+            <Card size="small" title="指标变化">
+              <Space wrap>
+                {Object.entries(audit.metric_deltas || {}).map(([key, value]: [string, any]) => (
+                  <Tag key={key} bordered={false}>{key} {value.before ?? '-'} {'->'} {value.after ?? '-'}{value.delta === null || value.delta === undefined ? '' : ` (${value.delta >= 0 ? '+' : ''}${value.delta})`}</Tag>
+                ))}
+              </Space>
+            </Card>
+            {(audit.remaining_risks?.unresolved_tasks || []).length > 0 && (
+              <Card size="small" title="未关闭任务">
+                <List size="small" dataSource={(audit.remaining_risks.unresolved_tasks || []).slice(0, 10)} renderItem={(item: any) => <List.Item>{item.chapter_no ? `第${item.chapter_no}章 ` : ''}{item.message || item.title}</List.Item>} />
+              </Card>
+            )}
+          </Space>
+        ),
+      })
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '生成闭环审计失败')
+    }
+  }
+
+  const executeTypedRepairTask = async (task: any, run?: any, taskIndex = -1) => {
+    const taskType = String(task?.task_type || '')
+    const chapterId = Number(task?.chapter_id || 0)
+    const markNeedsReview = async () => {
+      if (run?.id && taskIndex >= 0) {
+        await updateRepairTaskStatus(run, taskIndex, 'needs_review', '已执行类型化动作，等待复查验收')
+      }
+    }
+    if (taskType === 'repair_skeleton') {
+      const outlineId = Number(task?.outline_id || 0)
+      const outline = outlineId ? outlines.find(item => Number(item.id) === outlineId) : null
+      setTaskCenterOpen(false)
+      if (outline) {
+        openEditor('outline', outline)
+        message.success('已打开骨架大纲，请补齐目标、冲突、回报和钩子')
+      } else {
+        setOutlineTreeOpen(true)
+        if (outlineId) setFuture100FocusOutlineIds([outlineId])
+        message.warning('未找到绑定大纲，已打开大纲树')
+      }
+      await markNeedsReview()
+      return
+    }
+    if (!chapterId) return message.warning('这个任务没有绑定章节')
+    if (taskType === 'repair_materials') {
+      if (!selectedModelId) return message.warning('请先选择模型')
+      if (!await selectChapter(chapterId)) return
+      setTaskCenterOpen(false)
+      await generateSceneCardsForChapter(chapterId, true)
+      await markNeedsReview()
+      return
+    }
+    if (taskType === 'repair_quality') {
+      await startRepairTaskRevision(task)
+      await markNeedsReview()
+      return
+    }
+    if (taskType === 'repair_similarity') {
+      if (!await selectChapter(chapterId)) return
+      setTaskCenterOpen(false)
+      await runSimilarityForChapter(chapterId)
+      await markNeedsReview()
+      return
+    }
+    if (taskType === 'resolve_failure') {
+      await locateRepairTaskChapter(chapterId)
+      Modal.info({
+        title: '失败处理建议',
+        width: 720,
+        content: (
+          <Space direction="vertical" size={8} style={{ width: '100%' }}>
+            <Text>{task.message || '该章节存在生产失败记录。'}</Text>
+            <Text type="secondary">{task.action || '先处理失败原因，再重新进入章节群生产。'}</Text>
+            {Array.isArray(task.acceptance_criteria) && task.acceptance_criteria.length > 0 && (
+              <List size="small" dataSource={task.acceptance_criteria} renderItem={(item: string) => <List.Item>{item}</List.Item>} />
+            )}
+          </Space>
+        ),
+      })
+      await markNeedsReview()
+      return
+    }
+    await startRepairTaskRevision(task)
+    await markNeedsReview()
   }
 
   const refreshActiveProseQuality = async (source = 'manual_refresh') => {
@@ -1682,12 +1930,16 @@ export default function NovelProjectWorkspace() {
     }
   }
 
-  const runSimilarityForActiveChapter = async () => {
-    if (!activeChapter) return message.warning('请先选择章节')
+  const runSimilarityForChapter = async (chapterId: number) => {
     await runCommercialTool('similarity', '章节相似度检测', async () => {
-      const res = await apiClient.post(`/novel/chapters/${activeChapter.id}/similarity-report`, { project_id: projectId })
+      const res = await apiClient.post(`/novel/chapters/${chapterId}/similarity-report`, { project_id: projectId })
       return res.data
     })
+  }
+
+  const runSimilarityForActiveChapter = async () => {
+    if (!activeChapter) return message.warning('请先选择章节')
+    await runSimilarityForChapter(Number(activeChapter.id))
   }
 
   const runReferenceMigrationPlan = async () => {
@@ -1719,6 +1971,174 @@ export default function NovelProjectWorkspace() {
     })
   }
 
+  const showFuture100SkeletonModal = (title: string, data: any) => {
+    const report = data?.report || data?.audit || {}
+    const skeleton = data?.skeleton || report.rows || []
+    Modal.info({
+      title,
+      width: 980,
+      content: (
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Card size="small">
+            <Space align="center" size={16}>
+              <Progress
+                type="circle"
+                size={76}
+                percent={Number(report.score || 0)}
+                status={Number(report.score || 0) >= 80 ? 'success' : Number(report.score || 0) < 62 ? 'exception' : 'normal'}
+              />
+              <Space direction="vertical" size={4}>
+                <Text strong>{report.summary || `未来100章骨架 ${skeleton.length || 0} 条`}</Text>
+                <Text type="secondary">范围：第{report.from_chapter || '-'}章到第{report.to_chapter || '-'}章；状态：{report.status || '-'}</Text>
+                {data?.written_outlines && <Text type="secondary">已写入章节大纲 {data.written_outlines.length} 条</Text>}
+                {data?.write_summary && <Text type="secondary">写入策略：{data.write_summary.mode}；创建 {data.write_summary.created || 0}，更新 {data.write_summary.updated || 0}，跳过 {data.write_summary.skipped || 0}</Text>}
+                {Array.isArray(data?.written_outlines) && data.written_outlines.length > 0 && (
+                  <Space wrap>
+                    <Button size="small" onClick={() => {
+                      Modal.destroyAll()
+                      setFuture100FocusOutlineIds(data.written_outlines.map((item: any) => Number(item.id)).filter(Boolean))
+                      setOutlineTreeOpen(true)
+                    }}>打开大纲树检查</Button>
+                    <Button size="small" type="primary" loading={commercialToolLoading === 'future100Group'} onClick={() => {
+                      Modal.destroyAll()
+                      void startFuture100ChapterGroupGeneration()
+                    }}>从骨架入队章节群</Button>
+                  </Space>
+                )}
+              </Space>
+            </Space>
+          </Card>
+          {report.metrics && (
+            <Card size="small" title="骨架覆盖">
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
+                {[
+                  ['覆盖率', report.metrics.coverage],
+                  ['章节目标', report.metrics.goal_rate],
+                  ['冲突压力', report.metrics.conflict_rate],
+                  ['回报爽点', report.metrics.payoff_rate],
+                  ['章末钩子', report.metrics.hook_rate],
+                  ['阶段锚点', report.metrics.stage_anchor_rate],
+                ].map(([label, value]) => (
+                  <div key={label as string}>
+                    <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+                      <Text style={{ fontSize: 12 }}>{label}</Text>
+                      <Text type="secondary" style={{ fontSize: 12 }}>{Number(value || 0)}%</Text>
+                    </Space>
+                    <Progress percent={Number(value || 0)} size="small" status={Number(value || 0) >= 80 ? 'success' : Number(value || 0) < 62 ? 'exception' : 'normal'} />
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+          <Card size="small" title="风险">
+            <List
+              size="small"
+              dataSource={(report.risks || []).slice(0, 12)}
+              locale={{ emptyText: '暂无明显风险' }}
+              renderItem={(risk: any) => (
+                <List.Item>
+                  <List.Item.Meta
+                    title={<Space><Tag color={risk.severity === 'high' ? 'red' : risk.severity === 'medium' ? 'gold' : 'default'} bordered={false}>{risk.severity}</Tag><Text>{risk.issue}</Text></Space>}
+                    description={risk.action}
+                  />
+                </List.Item>
+              )}
+            />
+          </Card>
+          <Card size="small" title="章节骨架预览">
+            <List
+              size="small"
+              dataSource={skeleton.slice(0, 40)}
+              renderItem={(item: any) => (
+                <List.Item>
+                  <List.Item.Meta
+                    title={<Space wrap><Text>第{item.chapter_no}章 {item.title || '未命名'}</Text>{item.score !== undefined && <Tag color={item.score >= 80 ? 'green' : item.score < 62 ? 'red' : 'gold'} bordered={false}>{item.score}分</Tag>}{item.volume_stage && <Tag bordered={false}>{item.volume_stage}</Tag>}</Space>}
+                    description={item.chapter_goal || item.conflict || (item.flags || []).join('、') || item.ending_hook || '待补齐'}
+                  />
+                </List.Item>
+              )}
+            />
+            {skeleton.length > 40 && <Text type="secondary" style={{ fontSize: 12 }}>仅展示前40条，完整结果已写入审稿记录。</Text>}
+          </Card>
+          {(report.next_actions || []).length > 0 && (
+            <Card size="small" title="下一步">
+              <List size="small" dataSource={report.next_actions} renderItem={(item: string) => <List.Item>{item}</List.Item>} />
+            </Card>
+          )}
+        </Space>
+      ),
+    })
+  }
+
+  const runFuture100SkeletonAudit = async () => {
+    setCommercialToolLoading('future100Audit')
+    try {
+      const res = await apiClient.get(`/novel/projects/${projectId}/future-100-skeleton`, {
+        params: { from_chapter: activeChapter?.chapter_no || undefined, horizon: 100 },
+      })
+      showFuture100SkeletonModal('未来100章骨架检查', res.data)
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '未来100章骨架检查失败')
+    } finally {
+      setCommercialToolLoading('')
+    }
+  }
+
+  const generateFuture100Skeleton = async () => {
+    if (!selectedModelId) return message.warning('请先选择模型')
+    Modal.confirm({
+      title: 'AI 生成未来100章骨架',
+      width: 720,
+      content: '系统会先调用当前选择的大纲模型生成未来100章骨架草稿，并展示创建/覆盖差异。确认勾选后才会写入大纲。',
+      okText: '生成差异预览',
+      onOk: async () => {
+        setCommercialToolLoading('future100Generate')
+        try {
+          const res = await apiClient.post(`/novel/projects/${projectId}/future-100-skeleton/generate`, {
+            model_id: selectedModelId,
+            from_chapter: activeChapter?.chapter_no || undefined,
+            horizon: 100,
+            write_outline: false,
+            write_mode: 'upsert',
+          })
+          const rows = res.data?.write_preview?.rows || []
+          setFuture100Draft(res.data)
+          setFuture100SelectedNos(rows.filter((row: any) => row.action !== 'skipped').map((row: any) => Number(row.chapter_no)).filter(Boolean))
+        } catch (error: any) {
+          message.error(error?.response?.data?.error || error?.message || 'AI生成未来100章骨架失败')
+        } finally {
+          setCommercialToolLoading('')
+        }
+      },
+    })
+  }
+
+  const applyFuture100SkeletonDraft = async () => {
+    if (!future100Draft?.skeleton?.length) return message.warning('没有可写入的骨架草稿')
+    if (!future100SelectedNos.length) return message.warning('请至少选择一个章节写入')
+    setFuture100ApplyLoading(true)
+    try {
+      const res = await apiClient.post(`/novel/projects/${projectId}/future-100-skeleton/apply`, {
+        skeleton: future100Draft.skeleton,
+        from_chapter: future100Draft.audit?.from_chapter,
+        horizon: future100Draft.skeleton.length,
+        write_mode: 'upsert',
+        selected_chapter_nos: future100SelectedNos,
+      })
+      setFuture100Draft(null)
+      setFuture100SelectedNos([])
+      await loadProjectModules()
+      setFuture100FocusOutlineIds((res.data?.written_outlines || []).map((item: any) => Number(item.id)).filter(Boolean))
+      setRightPanelOpen(true)
+      setRightPanelTab('bookReviews')
+      showFuture100SkeletonModal('已应用未来100章骨架', res.data)
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '应用未来100章骨架失败')
+    } finally {
+      setFuture100ApplyLoading(false)
+    }
+  }
+
   const runTopicValidation = async () => {
     if (!selectedModelId) return message.warning('请先选择模型')
     await runCommercialTool('topic', '选题验证', async () => {
@@ -1734,11 +2154,318 @@ export default function NovelProjectWorkspace() {
     })
   }
 
+  const runFirst30RetentionDiagnosis = async () => {
+    setCommercialToolLoading('first30Retention')
+    try {
+      const res = await apiClient.post(`/novel/projects/${projectId}/first30-retention-diagnosis`)
+      const report = res.data?.report || {}
+      await loadProjectModules()
+      await loadProductionTasks()
+      setRightPanelOpen(true)
+      setRightPanelTab('bookReviews')
+      Modal.info({
+        title: '前30章留存诊断',
+        width: 960,
+        content: (
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Card size="small">
+              <Space align="center" size={16}>
+                <Progress
+                  type="circle"
+                  size={76}
+                  percent={Number(report.score || 0)}
+                  status={Number(report.score || 0) >= 80 ? 'success' : Number(report.score || 0) < 65 ? 'exception' : 'normal'}
+                />
+                <Space direction="vertical" size={4}>
+                  <Text strong>{report.summary || '已完成前30章留存诊断'}</Text>
+                  <Text type="secondary">状态：{report.status || '-'}；读者承诺：{report.positioning?.promise_ready ? '已具备' : '需补强'}</Text>
+                  {report.positioning?.reader_promise && <Text type="secondary">{report.positioning.reader_promise}</Text>}
+                  <Button size="small" type="primary" onClick={() => { void createFirst30RetentionRepairQueue() }}>
+                    生成留存修复任务
+                  </Button>
+                </Space>
+              </Space>
+            </Card>
+            <Card size="small" title="分段留存">
+              <List
+                size="small"
+                dataSource={report.segments || []}
+                renderItem={(segment: any) => (
+                  <List.Item>
+                    <List.Item.Meta
+                      title={<Space wrap><Text strong>{segment.label || segment.key}</Text><Tag color={segment.score >= 80 ? 'green' : segment.score < 65 ? 'red' : 'gold'} bordered={false}>{segment.score}分</Tag><Tag bordered={false}>覆盖 {segment.coverage}%</Tag><Tag bordered={false}>钩子 {segment.hook_rate}%</Tag><Tag bordered={false}>爽点/悬念 {segment.payoff_average}</Tag></Space>}
+                      description={`章节 ${segment.chapter_count || 0}；目标覆盖 ${segment.goal_rate || 0}%`}
+                    />
+                  </List.Item>
+                )}
+              />
+            </Card>
+            <Card size="small" title="高优先级风险">
+              <List
+                size="small"
+                dataSource={(report.risks || []).slice(0, 12)}
+                locale={{ emptyText: '暂无明显风险' }}
+                renderItem={(risk: any) => (
+                  <List.Item>
+                    <List.Item.Meta
+                      title={<Space><Tag color={risk.severity === 'high' ? 'red' : risk.severity === 'medium' ? 'gold' : 'default'} bordered={false}>{risk.severity}</Tag><Text>{risk.segment}：{risk.issue}</Text></Space>}
+                      description={risk.action}
+                    />
+                  </List.Item>
+                )}
+              />
+            </Card>
+            <Card size="small" title="章节卡片">
+              <List
+                size="small"
+                dataSource={(report.chapter_cards || []).slice(0, 30)}
+                renderItem={(row: any) => (
+                  <List.Item
+                    actions={row.chapter_id ? [<Button key="open" size="small" type="link" onClick={() => { Modal.destroyAll(); void selectChapter(row.chapter_id) }}>打开</Button>] : undefined}
+                  >
+                    <List.Item.Meta
+                      title={<Space wrap><Text>第{row.chapter_no}章 {row.title || '未命名'}</Text><Tag color={row.score >= 80 ? 'green' : row.score < 65 ? 'red' : 'gold'} bordered={false}>{row.score}分</Tag><Tag bordered={false}>{row.word_count || 0}字</Tag></Space>}
+                      description={(row.flags || []).join('、') || '基础留存信号正常'}
+                    />
+                  </List.Item>
+                )}
+              />
+            </Card>
+            {(report.next_actions || []).length > 0 && (
+              <Card size="small" title="下一步">
+                <List size="small" dataSource={report.next_actions} renderItem={(item: string) => <List.Item>{item}</List.Item>} />
+              </Card>
+            )}
+          </Space>
+        ),
+      })
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '前30章留存诊断失败')
+    } finally {
+      setCommercialToolLoading('')
+    }
+  }
+
+  const createFirst30RetentionRepairQueue = async () => {
+    setCommercialToolLoading('first30Repair')
+    try {
+      const res = await apiClient.post(`/novel/projects/${projectId}/first30-retention-diagnosis/repair-queue`)
+      await loadProjectModules()
+      await loadProductionTasks()
+      setTaskCenterOpen(true)
+      message.success(`已生成前30章留存修复任务：${(res.data?.tasks || []).length} 项`)
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '生成前30章留存修复任务失败')
+    } finally {
+      setCommercialToolLoading('')
+    }
+  }
+
+  const runLongformPressureTest = async () => {
+    setCommercialToolLoading('longformPressure')
+    try {
+      const res = await apiClient.post(`/novel/projects/${projectId}/longform-pressure-test`)
+      const report = res.data?.report || {}
+      await loadProjectModules()
+      await loadProductionTasks()
+      setRightPanelOpen(true)
+      setRightPanelTab('bookReviews')
+      Modal.info({
+        title: '300万字长线压力测试',
+        width: 960,
+        content: (
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Card size="small">
+              <Space align="center" size={16}>
+                <Progress
+                  type="circle"
+                  size={76}
+                  percent={Number(report.score || 0)}
+                  status={Number(report.score || 0) >= 80 ? 'success' : Number(report.score || 0) < 62 ? 'exception' : 'normal'}
+                />
+                <Space direction="vertical" size={4}>
+                  <Text strong>{report.summary || '已完成长线压力测试'}</Text>
+                  <Text type="secondary">目标 {Number(report.target_words || 3000000).toLocaleString()} 字；状态：{report.status || '-'}</Text>
+                  <Text type="secondary">按当前均章估算约 {report.estimated_chapters?.based_on_current_average || '-'} 章；3000字/章约 {report.estimated_chapters?.at_3000 || '-'} 章</Text>
+                </Space>
+              </Space>
+            </Card>
+            <Card size="small" title="长篇承载力">
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10 }}>
+                {[
+                  ['分卷容量', report.capacity?.volume_capacity],
+                  ['人物池', report.capacity?.character_capacity],
+                  ['世界资产', report.capacity?.world_capacity],
+                  ['冲突阶梯', report.capacity?.conflict_ladder],
+                  ['扩展引擎', report.capacity?.expansion_engine],
+                  ['回报循环', report.capacity?.payoff_loop],
+                ].map(([label, value]) => (
+                  <div key={label as string}>
+                    <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+                      <Text style={{ fontSize: 12 }}>{label}</Text>
+                      <Text type="secondary" style={{ fontSize: 12 }}>{Number(value || 0)}</Text>
+                    </Space>
+                    <Progress percent={Number(value || 0)} size="small" status={Number(value || 0) >= 75 ? 'success' : Number(value || 0) < 55 ? 'exception' : 'normal'} />
+                  </div>
+                ))}
+              </div>
+              <Space wrap style={{ marginTop: 10 }}>
+                <Tag bordered={false}>已写 {report.capacity?.written_chapters || 0} 章</Tag>
+                <Tag bordered={false}>已写 {Number(report.capacity?.written_words || 0).toLocaleString()} 字</Tag>
+                <Tag color={report.capacity?.story_state_fresh ? 'green' : 'gold'} bordered={false}>状态机{report.capacity?.story_state_fresh ? '同步' : '需同步'}</Tag>
+                <Tag color={(report.capacity?.review_debt || 0) ? 'gold' : 'green'} bordered={false}>审稿债务 {report.capacity?.review_debt || 0}</Tag>
+              </Space>
+            </Card>
+            <Card size="small" title="薄弱点">
+              <List
+                size="small"
+                dataSource={(report.weak_points || []).slice(0, 14)}
+                locale={{ emptyText: '暂无明显薄弱点' }}
+                renderItem={(item: any) => (
+                  <List.Item>
+                    <List.Item.Meta
+                      title={<Space><Tag color={item.severity === 'high' ? 'red' : item.severity === 'medium' ? 'gold' : 'default'} bordered={false}>{item.severity}</Tag><Text>{item.area}：{item.issue}</Text></Space>}
+                      description={item.action}
+                    />
+                  </List.Item>
+                )}
+              />
+            </Card>
+            <Card size="small" title="扩容路线">
+              <List
+                size="small"
+                dataSource={report.expansion_plan || []}
+                renderItem={(item: any) => (
+                  <List.Item>
+                    <List.Item.Meta title={<Text strong>{item.stage}</Text>} description={`${item.goal} ${item.output || ''}`} />
+                  </List.Item>
+                )}
+              />
+            </Card>
+            {(report.next_actions || []).length > 0 && (
+              <Card size="small" title="下一步">
+                <List size="small" dataSource={report.next_actions} renderItem={(item: string) => <List.Item>{item}</List.Item>} />
+              </Card>
+            )}
+          </Space>
+        ),
+      })
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '300万字长线压力测试失败')
+    } finally {
+      setCommercialToolLoading('')
+    }
+  }
+
   const openProductionMetrics = async () => {
     await runCommercialTool('metrics', '生成成本与质量仪表盘', async () => {
       const res = await apiClient.get(`/novel/projects/${projectId}/production-metrics`)
       return res.data
     })
+  }
+
+  const openLongformProductionTrends = async () => {
+    setCommercialToolLoading('longformTrends')
+    try {
+      const res = await apiClient.get(`/novel/projects/${projectId}/longform-production-trends`)
+      const trends = res.data?.trends || {}
+      const summary = trends.summary || {}
+      const weakRows = Array.isArray(trends.weak_rows) ? trends.weak_rows : []
+      const recommendations = Array.isArray(trends.recommendations) ? trends.recommendations : []
+      const failureReasons = Array.isArray(trends.failure_reasons) ? trends.failure_reasons : []
+      Modal.info({
+        title: '长线生产趋势报表',
+        width: 980,
+        content: (
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Space wrap>
+              <Tag color="blue" bordered={false}>跟踪 {summary.chapter_count || 0} 章</Tag>
+              <Tag color="cyan" bordered={false}>骨架 {summary.skeleton_count || 0} 章</Tag>
+              <Tag color="green" bordered={false}>已写 {summary.written_count || 0} 章</Tag>
+              <Tag color={(summary.failed_chapter_count || 0) > 0 ? 'red' : 'default'} bordered={false}>失败关注 {summary.failed_chapter_count || 0}</Tag>
+              <Button size="small" type="primary" loading={commercialToolLoading === 'longformRepair'} onClick={() => { void createLongformProductionRepairQueue() }}>生成修复任务</Button>
+            </Space>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
+              {[
+                ['骨架均分', summary.avg_skeleton_score],
+                ['材料均分', summary.avg_material_score],
+                ['质量均分', summary.avg_quality_score],
+                ['生产就绪', summary.avg_readiness],
+              ].map(([label, value]) => (
+                <Card key={label as string} size="small">
+                  <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                    <Text type="secondary">{label}</Text>
+                    <Progress
+                      percent={Number(value || 0)}
+                      size="small"
+                      status={Number(value || 0) >= 75 ? 'success' : Number(value || 0) < 55 ? 'exception' : 'normal'}
+                    />
+                  </Space>
+                </Card>
+              ))}
+            </div>
+            {recommendations.length > 0 && (
+              <Alert
+                type="warning"
+                showIcon
+                message="优先处理建议"
+                description={<Space direction="vertical" size={4}>{recommendations.map((item: string, index: number) => <Text key={`${item}-${index}`}>{item}</Text>)}</Space>}
+              />
+            )}
+            <Card size="small" title="薄弱章节">
+              <List
+                size="small"
+                dataSource={weakRows.slice(0, 20)}
+                locale={{ emptyText: '当前没有明显薄弱章节' }}
+                renderItem={(row: any) => (
+                  <List.Item
+                    actions={row.chapter_id ? [
+                      <Button key="open" size="small" type="link" onClick={() => {
+                        Modal.destroyAll()
+                        void selectChapter(row.chapter_id)
+                      }}>打开</Button>,
+                    ] : []}
+                  >
+                    <List.Item.Meta
+                      title={<Space wrap><Text>第{row.chapter_no}章《{row.title || '未命名'}》</Text><Tag bordered={false}>{row.status}</Tag><Tag bordered={false}>就绪 {row.readiness || 0}</Tag></Space>}
+                      description={
+                        <Space direction="vertical" size={4}>
+                          <Text type="secondary">骨架 {row.skeleton_score ?? '-'} / 材料 {row.material_score ?? '-'} / 质量 {row.quality_score ?? '-'} / 相似风险 {row.similarity_risk ?? '-'}</Text>
+                          {(row.failures || []).length > 0 && <Text type="danger">{(row.failures || []).join('；')}</Text>}
+                        </Space>
+                      }
+                    />
+                  </List.Item>
+                )}
+              />
+            </Card>
+            {failureReasons.length > 0 && (
+              <Card size="small" title="失败原因">
+                <List size="small" dataSource={failureReasons} renderItem={(item: string) => <List.Item>{item}</List.Item>} />
+              </Card>
+            )}
+          </Space>
+        ),
+      })
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '长线生产趋势报表加载失败')
+    } finally {
+      setCommercialToolLoading('')
+    }
+  }
+
+  const createLongformProductionRepairQueue = async () => {
+    setCommercialToolLoading('longformRepair')
+    try {
+      const res = await apiClient.post(`/novel/projects/${projectId}/longform-production-trends/repair-queue`)
+      await loadProductionTasks()
+      setTaskCenterOpen(true)
+      message.success(`已生成长线生产修复任务：${(res.data?.tasks || []).length} 项`)
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '生成长线生产修复任务失败')
+    } finally {
+      setCommercialToolLoading('')
+    }
   }
 
   const openMaterialRepairPlan = async () => {
@@ -3318,11 +4045,14 @@ export default function NovelProjectWorkspace() {
                 <Button block loading={commercialToolLoading === 'productionDesk'} onClick={openProductionDesk}>章节生产台</Button>
                 <Button block loading={commercialToolLoading === 'materialRepair'} onClick={openMaterialRepairPlan}>材料补齐计划</Button>
                 <Button block loading={commercialToolLoading === 'readyGroup'} onClick={startReadyChapterGroupGeneration}>智能章节群入队</Button>
+                <Button block loading={commercialToolLoading === 'future100Group'} onClick={startFuture100ChapterGroupGeneration}>从未来100章骨架入队</Button>
                 <Button block loading={commercialToolLoading === 'queue'} onClick={openRunQueue}>后台任务队列</Button>
                 <Button block loading={commercialToolLoading === 'queueWorker'} onClick={startRunQueueWorker}>启动后台 worker</Button>
                 <Button block loading={commercialToolLoading === 'queueStop'} onClick={stopRunQueueWorker}>停止后台 worker</Button>
                 <Button block loading={commercialToolLoading === 'queueRecover'} onClick={recoverRunQueue}>恢复后台队列</Button>
                 <Button block loading={commercialToolLoading === 'metrics'} onClick={openProductionMetrics}>成本质量仪表盘</Button>
+                <Button block loading={commercialToolLoading === 'longformTrends'} onClick={openLongformProductionTrends}>长线生产趋势报表</Button>
+                <Button block loading={commercialToolLoading === 'longformRepair'} onClick={createLongformProductionRepairQueue}>生成长线生产修复任务</Button>
                 <Button block loading={commercialToolLoading === 'modelDiagnostics'} onClick={openModelDiagnostics}>模型服务诊断（配置）</Button>
                 <Button block onClick={() => setAgentAuditOpen(true)}>Agent 调用审计</Button>
                 <Button block loading={commercialToolLoading === 'approval'} onClick={openApprovalPolicyEditor}>审批关卡策略</Button>
@@ -3335,6 +4065,8 @@ export default function NovelProjectWorkspace() {
                 <Button block onClick={() => setReviewAnnotationsOpen(true)}>章节审阅批注</Button>
                 <Button block onClick={() => setConsistencyGraphOpen(true)}>全书一致性图谱</Button>
                 <Button block loading={commercialToolLoading === 'continuityAudit'} onClick={openContinuityAudit}>全书连续性检查</Button>
+                <Button block loading={commercialToolLoading === 'first30Retention'} onClick={runFirst30RetentionDiagnosis}>前30章留存诊断</Button>
+                <Button block loading={commercialToolLoading === 'first30Repair'} onClick={createFirst30RetentionRepairQueue}>生成前30章留存修复任务</Button>
                 <Button block loading={commercialToolLoading === 'mechanicalQa'} onClick={runMechanicalQa}>机械质检规则引擎（本地）</Button>
                 <Button block type="primary" loading={commercialToolLoading === 'mechanicalQaLlm'} onClick={runMechanicalQaLlmReview}>AI 复核机械质检</Button>
                 <Button block loading={commercialToolLoading === 'mechanicalRepair'} onClick={createMechanicalQaRepairQueue}>机械质检修复任务</Button>
@@ -3349,6 +4081,9 @@ export default function NovelProjectWorkspace() {
             <Card size="small" title="规划与选题">
               <Space direction="vertical" style={{ width: '100%' }}>
                 <Button block loading={commercialToolLoading === 'topic'} onClick={runTopicValidation}>原创选题验证</Button>
+                <Button block loading={commercialToolLoading === 'longformPressure'} onClick={runLongformPressureTest}>300万字长线压力测试</Button>
+                <Button block loading={commercialToolLoading === 'future100Audit'} onClick={runFuture100SkeletonAudit}>未来100章骨架检查</Button>
+                <Button block type="primary" loading={commercialToolLoading === 'future100Generate'} onClick={generateFuture100Skeleton}>AI 生成未来100章骨架</Button>
                 <Button block loading={commercialToolLoading === 'rollingPlan'} onClick={runRollingPlan}>未来 10 章滚动规划</Button>
                 <Button block loading={commercialToolLoading === 'referenceDiagnosis'} onClick={openReferenceKnowledgeDiagnosis}>参考知识诊断</Button>
                 <Button block onClick={() => { setCommercialToolsOpen(false); setReferenceEngineeringOpen(true) }}>多参考融合控制台</Button>
@@ -3552,6 +4287,97 @@ export default function NovelProjectWorkspace() {
         </Form>
       </Modal>
 
+      <Modal
+        open={!!future100Draft}
+        title="确认未来100章骨架写入"
+        width={980}
+        onCancel={() => {
+          setFuture100Draft(null)
+          setFuture100SelectedNos([])
+        }}
+        confirmLoading={future100ApplyLoading}
+        okText={`写入选中 ${future100SelectedNos.length} 章`}
+        cancelText="暂不写入"
+        onOk={applyFuture100SkeletonDraft}
+      >
+        {future100Draft && (() => {
+          const rows = future100Draft.write_preview?.rows || []
+          const selectableNos = rows.filter((row: any) => row.action !== 'skipped').map((row: any) => Number(row.chapter_no)).filter(Boolean)
+          const selectedSet = new Set(future100SelectedNos)
+          const allChecked = selectableNos.length > 0 && selectableNos.every((chapterNo: number) => selectedSet.has(chapterNo))
+          const partialChecked = selectableNos.some((chapterNo: number) => selectedSet.has(chapterNo)) && !allChecked
+          return (
+            <Space direction="vertical" size={12} style={{ width: '100%' }}>
+              <Alert
+                type="info"
+                showIcon
+                message="生成结果尚未写入。请确认要创建或覆盖的章节骨架。"
+                description={`创建 ${future100Draft.write_preview?.created || 0}，覆盖 ${future100Draft.write_preview?.updated || 0}，跳过 ${future100Draft.write_preview?.skipped || 0}`}
+              />
+              <Space wrap>
+                <Checkbox
+                  checked={allChecked}
+                  indeterminate={partialChecked}
+                  onChange={(event) => setFuture100SelectedNos(event.target.checked ? selectableNos : [])}
+                >
+                  全选可写入章节
+                </Checkbox>
+                <Tag color="blue" bordered={false}>已选 {future100SelectedNos.length}</Tag>
+                <Tag color="green" bordered={false}>新建 {rows.filter((row: any) => row.action === 'create' && selectedSet.has(Number(row.chapter_no))).length}</Tag>
+                <Tag color="gold" bordered={false}>覆盖 {rows.filter((row: any) => row.action === 'update' && selectedSet.has(Number(row.chapter_no))).length}</Tag>
+              </Space>
+              <Card size="small" title="差异列表">
+                <List
+                  size="small"
+                  dataSource={rows.slice(0, 120)}
+                  renderItem={(row: any) => {
+                    const chapterNo = Number(row.chapter_no)
+                    const disabled = row.action === 'skipped'
+                    const checked = selectedSet.has(chapterNo)
+                    return (
+                      <List.Item>
+                        <List.Item.Meta
+                          avatar={(
+                            <Checkbox
+                              disabled={disabled}
+                              checked={checked}
+                              onChange={(event) => {
+                                setFuture100SelectedNos(prev => {
+                                  const next = new Set(prev)
+                                  if (event.target.checked) next.add(chapterNo)
+                                  else next.delete(chapterNo)
+                                  return Array.from(next).sort((a, b) => a - b)
+                                })
+                              }}
+                            />
+                          )}
+                          title={(
+                            <Space wrap>
+                              <Tag color={row.action === 'create' ? 'green' : row.action === 'update' ? 'gold' : 'default'} bordered={false}>
+                                {row.action === 'create' ? '新建' : row.action === 'update' ? '覆盖' : '跳过'}
+                              </Tag>
+                              <Text>第{row.chapter_no}章 {row.title || '未命名'}</Text>
+                              {row.existing_outline_id && <Tag bordered={false}>原大纲 #{row.existing_outline_id}</Tag>}
+                              {row.changed === false && <Tag color="default" bordered={false}>内容接近</Tag>}
+                            </Space>
+                          )}
+                          description={(
+                            <Space direction="vertical" size={2}>
+                              {row.existing_summary && <Text type="secondary">原：{row.existing_summary}</Text>}
+                              <Text>新：{row.next_summary || '待补齐'}</Text>
+                            </Space>
+                          )}
+                        />
+                      </List.Item>
+                    )
+                  }}
+                />
+              </Card>
+            </Space>
+          )
+        })()}
+      </Modal>
+
       <TaskCenterDrawer
         open={taskCenterOpen}
         activeTasks={activeTasks}
@@ -3574,6 +4400,13 @@ export default function NovelProjectWorkspace() {
         onApproveChapterGroup={approveChapterGroupStage}
         onRetryChapterGroup={retryChapterGroupStage}
         onSkipChapterGroup={skipChapterGroupStage}
+        onSelectChapter={(chapterId) => { void locateRepairTaskChapter(chapterId) }}
+        onOpenChapterEditor={(chapterId) => { void openRepairTaskChapterEditor(chapterId) }}
+        onStartRepairTaskRevision={(task) => { void startRepairTaskRevision(task) }}
+        onExecuteTypedRepairTask={(task, run, taskIndex) => { void executeTypedRepairTask(task, run, taskIndex) }}
+        onUpdateRepairTaskStatus={(task, run, status, taskIndex) => { void updateRepairTaskStatus(run, taskIndex, status, task?.message || task?.title || '') }}
+        onBulkUpdateRepairTaskStatus={(items, status) => { void bulkUpdateRepairTaskStatus(items, status) }}
+        onGenerateRepairAuditSummary={(run) => { void generateLongformRepairAuditSummary(run) }}
         onPauseRun={async (run) => {
           await apiClient.post(`/novel/runs/${run.id}/pause`, { project_id: projectId })
           await loadProjectModules()
@@ -3590,9 +4423,21 @@ export default function NovelProjectWorkspace() {
         open={outlineTreeOpen}
         treeData={chapterTreeData}
         activeChapterId={activeChapterId}
-        onClose={() => setOutlineTreeOpen(false)}
-        onCreateOutline={() => { setOutlineTreeOpen(false); openEditor('outline') }}
-        onSelectChapter={(chapterId) => { void selectChapter(chapterId).then((saved) => { if (saved) setOutlineTreeOpen(false) }) }}
+        activeOutlineIds={future100FocusOutlineIds}
+        onClose={() => {
+          setOutlineTreeOpen(false)
+          setFuture100FocusOutlineIds([])
+        }}
+        onCreateOutline={() => { setOutlineTreeOpen(false); setFuture100FocusOutlineIds([]); openEditor('outline') }}
+        onSelectOutline={(outlineId) => {
+          const outline = outlines.find(item => Number(item.id) === Number(outlineId))
+          if (outline) {
+            setOutlineTreeOpen(false)
+            setFuture100FocusOutlineIds([])
+            openEditor('outline', outline)
+          }
+        }}
+        onSelectChapter={(chapterId) => { void selectChapter(chapterId).then((saved) => { if (saved) { setOutlineTreeOpen(false); setFuture100FocusOutlineIds([]) } }) }}
       />
 
       {/* ═══ Outline Control Panel ═══ */}

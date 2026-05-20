@@ -47,6 +47,12 @@ function runTypeLabel(type?: string) {
     mechanical_qa: '机械质检',
     mechanical_qa_llm: 'AI机械质检复核',
     mechanical_qa_repair: '机械质检修复',
+    first30_retention_diagnosis: '前30章留存诊断',
+    first30_retention_repair: '前30章留存修复',
+    longform_pressure_test: '300万字压力测试',
+    longform_production_repair: '长线生产修复',
+    future_100_skeleton: '未来100章骨架',
+    future_100_skeleton_apply: '应用未来100章骨架',
     propagation_debt: '传播债务',
     propagation_debt_llm: 'AI传播债务方案',
     regression_benchmark: '回归基准',
@@ -94,6 +100,24 @@ function parseJsonValue(value: any) {
   } catch {
     return null
   }
+}
+
+function repairTaskActionLabel(task: any) {
+  const map: Record<string, string> = {
+    repair_skeleton: '补骨架',
+    repair_materials: '补材料',
+    repair_quality: '重质检',
+    repair_similarity: '降相似风险',
+    resolve_failure: '处理失败',
+  }
+  return map[String(task?.task_type || '')] || ''
+}
+
+function repairTaskStatusTag(status?: string) {
+  if (status === 'resolved') return <Tag color="green" bordered={false}>已处理</Tag>
+  if (status === 'needs_review') return <Tag color="gold" bordered={false}>需复查</Tag>
+  if (status === 'in_progress') return <Tag color="blue" bordered={false}>处理中</Tag>
+  return <Tag bordered={false}>待处理</Tag>
 }
 
 function BatchProseRunSummary({ run }: { run: any }) {
@@ -228,6 +252,127 @@ function ReleaseRepairRunSummary({ run }: { run: any }) {
             ))}
           </Space>
         )}
+      </Space>
+    </Card>
+  )
+}
+
+function RepairTaskRunSummary({
+  run,
+  onSelectChapter,
+  onOpenChapterEditor,
+  onStartRepairTaskRevision,
+  onExecuteTypedRepairTask,
+  onUpdateRepairTaskStatus,
+  onBulkUpdateRepairTaskStatus,
+  onGenerateRepairAuditSummary,
+}: {
+  run: any
+  onSelectChapter?: (chapterId: number) => void
+  onOpenChapterEditor?: (chapterId: number) => void
+  onStartRepairTaskRevision?: (task: any, run: any) => void
+  onExecuteTypedRepairTask?: (task: any, run: any, taskIndex: number) => void
+  onUpdateRepairTaskStatus?: (task: any, run: any, status: string, taskIndex: number) => void
+  onBulkUpdateRepairTaskStatus?: (items: any[], status: string) => void
+  onGenerateRepairAuditSummary?: (run: any) => void
+}) {
+  const output = parseJsonValue(run.output_ref) || {}
+  const tasks = Array.isArray(output.tasks) ? output.tasks : []
+  const audit = output.audit_summary || null
+  const high = tasks.filter((task: any) => task.severity === 'high').length
+  const medium = tasks.filter((task: any) => task.severity === 'medium').length
+  const resolved = tasks.filter((task: any) => task.task_status === 'resolved').length
+  const needsReview = tasks.filter((task: any) => task.task_status === 'needs_review').length
+  const title = run.run_type === 'first30_retention_repair'
+    ? '前30章留存修复任务'
+    : run.run_type === 'longform_production_repair'
+      ? '长线生产修复任务'
+      : '机械质检修复任务'
+  return (
+    <Card size="small" title={title}>
+      <Space direction="vertical" size={10} style={{ width: '100%' }}>
+        <Space wrap>
+          <Tag color="blue" bordered={false}>任务 {tasks.length}</Tag>
+          <Tag color={high ? 'red' : 'default'} bordered={false}>高危 {high}</Tag>
+          <Tag color={medium ? 'gold' : 'default'} bordered={false}>中危 {medium}</Tag>
+          <Tag color={resolved ? 'green' : 'default'} bordered={false}>已处理 {resolved}</Tag>
+          <Tag color={needsReview ? 'gold' : 'default'} bordered={false}>需复查 {needsReview}</Tag>
+          {output.report?.score !== undefined && <Tag bordered={false}>诊断分 {output.report.score}</Tag>}
+          {output.report?.weak_count !== undefined && <Tag bordered={false}>薄弱章节 {output.report.weak_count}</Tag>}
+          {output.report?.status && <Tag bordered={false}>{output.report.status}</Tag>}
+          {run.run_type === 'longform_production_repair' && onGenerateRepairAuditSummary && (
+            <Button size="small" type="primary" onClick={() => onGenerateRepairAuditSummary(run)}>生成审计摘要</Button>
+          )}
+        </Space>
+        {audit && (
+          <div style={{ padding: 8, border: '1px solid #e5e7eb', borderRadius: 6 }}>
+            <Space direction="vertical" size={6} style={{ width: '100%' }}>
+              <Space wrap>
+                <Tag color={audit.status === 'closed' ? 'green' : 'gold'} bordered={false}>{audit.status === 'closed' ? '已闭环' : '需跟进'}</Tag>
+                <Tag bordered={false}>已确认 {audit.task_summary?.resolved || 0}/{audit.task_summary?.total || 0}</Tag>
+                <Tag bordered={false}>触达章节 {audit.task_summary?.touched_chapter_count || 0}</Tag>
+              </Space>
+              {(audit.conclusion || []).map((item: string, index: number) => (
+                <Text key={`${item}-${index}`} type="secondary" style={{ fontSize: 12 }}>{item}</Text>
+              ))}
+              <Space wrap size={[4, 4]}>
+                {Object.entries(audit.metric_deltas || {}).map(([key, value]: [string, any]) => (
+                  <Tag key={key} bordered={false}>
+                    {key} {value.before ?? '-'} {'->'} {value.after ?? '-'}{value.delta === null || value.delta === undefined ? '' : ` (${value.delta >= 0 ? '+' : ''}${value.delta})`}
+                  </Tag>
+                ))}
+              </Space>
+            </Space>
+          </div>
+        )}
+        {Array.isArray(output.recommendations) && output.recommendations.length > 0 && (
+          <div style={{ padding: 8, border: '1px solid #e5e7eb', borderRadius: 6 }}>
+            <Space direction="vertical" size={4}>
+              <Text strong style={{ fontSize: 12 }}>处理建议</Text>
+              {output.recommendations.slice(0, 4).map((item: string, index: number) => (
+                <Text key={`${item}-${index}`} type="secondary" style={{ fontSize: 12 }}>{item}</Text>
+              ))}
+            </Space>
+          </div>
+        )}
+        {output.report?.summary && <Text type="secondary" style={{ fontSize: 12 }}>{output.report.summary}</Text>}
+        <List
+          size="small"
+          dataSource={tasks.slice(0, 40)}
+          locale={{ emptyText: '暂无修复任务' }}
+          renderItem={(task: any, taskIndex: number) => (
+            <List.Item
+              actions={[
+                repairTaskActionLabel(task) && onExecuteTypedRepairTask && task.task_status !== 'resolved' ? <Button key="typed" size="small" type="primary" onClick={() => onExecuteTypedRepairTask(task, run, taskIndex)}>{repairTaskActionLabel(task)}</Button> : null,
+                onUpdateRepairTaskStatus && task.task_status !== 'resolved' ? <Button key="resolved" size="small" type="link" onClick={() => onUpdateRepairTaskStatus(task, run, 'resolved', taskIndex)}>已处理</Button> : null,
+                onUpdateRepairTaskStatus && task.task_status !== 'needs_review' ? <Button key="review" size="small" type="link" onClick={() => onUpdateRepairTaskStatus(task, run, 'needs_review', taskIndex)}>需复查</Button> : null,
+                task.chapter_id && onSelectChapter ? <Button key="select" size="small" type="link" onClick={() => onSelectChapter(Number(task.chapter_id))}>定位</Button> : null,
+                task.chapter_id && onOpenChapterEditor ? <Button key="edit" size="small" type="link" onClick={() => onOpenChapterEditor(Number(task.chapter_id))}>手动编辑</Button> : null,
+                task.chapter_id && onStartRepairTaskRevision ? <Button key="revise" size="small" type="link" onClick={() => onStartRepairTaskRevision(task, run)}>生成修订稿</Button> : null,
+              ].filter(Boolean)}
+            >
+              <List.Item.Meta
+                title={(
+                  <Space wrap>
+                    <Tag color={task.severity === 'high' ? 'red' : task.severity === 'medium' ? 'gold' : 'default'} bordered={false}>{task.severity || 'task'}</Tag>
+                    {repairTaskStatusTag(task.task_status)}
+                    <Text>{task.chapter_no ? `第${task.chapter_no}章 ` : ''}{task.title || task.message}</Text>
+                    {task.segment && <Tag bordered={false}>{task.segment}</Tag>}
+                  </Space>
+                )}
+                description={(
+                  <Space direction="vertical" size={2}>
+                    <Text type="secondary">{task.message}</Text>
+                    <Text>{task.action}</Text>
+                    {Array.isArray(task.acceptance_criteria) && task.acceptance_criteria.length > 0 && (
+                      <Text type="secondary" style={{ fontSize: 12 }}>验收：{task.acceptance_criteria.slice(0, 2).join('；')}</Text>
+                    )}
+                  </Space>
+                )}
+              />
+            </List.Item>
+          )}
+        />
       </Space>
     </Card>
   )
@@ -403,6 +548,13 @@ export function TaskCenterDrawer({
   onApproveChapterGroup,
   onRetryChapterGroup,
   onSkipChapterGroup,
+  onSelectChapter,
+  onOpenChapterEditor,
+  onStartRepairTaskRevision,
+  onExecuteTypedRepairTask,
+  onUpdateRepairTaskStatus,
+  onBulkUpdateRepairTaskStatus,
+  onGenerateRepairAuditSummary,
 }: {
   open: boolean
   activeTasks: WorkspaceActiveTask[]
@@ -427,6 +579,13 @@ export function TaskCenterDrawer({
   onApproveChapterGroup?: (run: any, chapter: any) => void
   onRetryChapterGroup?: (run: any, chapter: any) => void
   onSkipChapterGroup?: (run: any, chapter: any) => void
+  onSelectChapter?: (chapterId: number) => void
+  onOpenChapterEditor?: (chapterId: number) => void
+  onStartRepairTaskRevision?: (task: any, run: any) => void
+  onExecuteTypedRepairTask?: (task: any, run: any, taskIndex: number) => void
+  onUpdateRepairTaskStatus?: (task: any, run: any, status: string, taskIndex: number) => void
+  onBulkUpdateRepairTaskStatus?: (items: any[], status: string) => void
+  onGenerateRepairAuditSummary?: (run: any) => void
 }) {
   const [detailRun, setDetailRun] = useState<any | null>(null)
   const [detailKnowledgeJob, setDetailKnowledgeJob] = useState<any | null>(null)
@@ -449,6 +608,14 @@ export function TaskCenterDrawer({
     })
   }
   const getRunPayload = (run: any) => parseJsonValue(run.output_ref) || run.payload || {}
+  const reviewTasks = useMemo(() => sortedRuns.flatMap((run: any) => {
+    if (!['longform_production_repair', 'first30_retention_repair', 'mechanical_qa_repair'].includes(run.run_type)) return []
+    const payload = getRunPayload(run)
+    const tasks = Array.isArray(payload.tasks) ? payload.tasks : []
+    return tasks
+      .map((task: any, taskIndex: number) => ({ run, task, taskIndex }))
+      .filter((item: any) => item.task?.task_status === 'needs_review')
+  }), [sortedRuns])
 
   return (
     <>
@@ -552,6 +719,45 @@ export function TaskCenterDrawer({
               )}
             </Space>
           </Card>
+
+          {reviewTasks.length > 0 && (
+            <Card
+              size="small"
+              title={`复查清单 ${reviewTasks.length}`}
+              extra={onBulkUpdateRepairTaskStatus ? (
+                <Popconfirm
+                  title={`确认通过 ${reviewTasks.length} 个需复查任务？`}
+                  onConfirm={() => onBulkUpdateRepairTaskStatus(reviewTasks, 'resolved')}
+                >
+                  <Button size="small" type="primary">批量确认通过</Button>
+                </Popconfirm>
+              ) : null}
+            >
+              <List
+                size="small"
+                dataSource={reviewTasks.slice(0, 30)}
+                renderItem={(item: any) => (
+                  <List.Item
+                    actions={[
+                      item.task?.chapter_id && onSelectChapter ? <Button key="select" size="small" type="link" onClick={() => onSelectChapter(Number(item.task.chapter_id))}>定位</Button> : null,
+                      onUpdateRepairTaskStatus ? <Button key="resolve" size="small" type="link" onClick={() => onUpdateRepairTaskStatus(item.task, item.run, 'resolved', item.taskIndex)}>确认通过</Button> : null,
+                    ].filter(Boolean)}
+                  >
+                    <List.Item.Meta
+                      title={(
+                        <Space wrap>
+                          <Tag color="gold" bordered={false}>需复查</Tag>
+                          <Text>{item.task?.chapter_no ? `第${item.task.chapter_no}章 ` : ''}{item.task?.title || item.task?.message || '修复任务'}</Text>
+                        </Space>
+                      )}
+                      description={<Text type="secondary" style={{ fontSize: 12 }}>{runTypeLabel(item.run?.run_type)} · {item.task?.action || item.task?.message || '-'}</Text>}
+                    />
+                  </List.Item>
+                )}
+              />
+              {reviewTasks.length > 30 && <Text type="secondary" style={{ fontSize: 12 }}>另有 {reviewTasks.length - 30} 个需复查任务，可批量确认或打开对应队列查看。</Text>}
+            </Card>
+          )}
 
           <Card size="small" title={`全本抓取/提炼 ${sortedKnowledgeJobs.length}`}>
             {sortedKnowledgeJobs.length === 0 ? (
@@ -675,6 +881,64 @@ export function TaskCenterDrawer({
             {detailRun.run_type === 'batch_generate_prose' && <BatchProseRunSummary run={detailRun} />}
             {detailRun.run_type === 'chapter_generation_pipeline' && <ChapterPipelineRunSummary run={detailRun} />}
             {detailRun.run_type === 'release_repair_queue' && <ReleaseRepairRunSummary run={detailRun} />}
+            {['mechanical_qa_repair', 'first30_retention_repair'].includes(detailRun.run_type) && (
+              <RepairTaskRunSummary
+                run={detailRun}
+                onSelectChapter={(chapterId) => {
+                  setDetailRun(null)
+                  onSelectChapter?.(chapterId)
+                }}
+                onOpenChapterEditor={(chapterId) => {
+                  setDetailRun(null)
+                  onOpenChapterEditor?.(chapterId)
+                }}
+                onStartRepairTaskRevision={(task, run) => {
+                  setDetailRun(null)
+                  onStartRepairTaskRevision?.(task, run)
+                }}
+                onExecuteTypedRepairTask={(task, run, taskIndex) => {
+                  setDetailRun(null)
+                  onExecuteTypedRepairTask?.(task, run, taskIndex)
+                }}
+                onUpdateRepairTaskStatus={(task, run, status, taskIndex) => {
+                  setDetailRun(null)
+                  onUpdateRepairTaskStatus?.(task, run, status, taskIndex)
+                }}
+                onGenerateRepairAuditSummary={(run) => {
+                  setDetailRun(null)
+                  onGenerateRepairAuditSummary?.(run)
+                }}
+              />
+            )}
+            {detailRun.run_type === 'longform_production_repair' && (
+              <RepairTaskRunSummary
+                run={detailRun}
+                onSelectChapter={(chapterId) => {
+                  setDetailRun(null)
+                  onSelectChapter?.(chapterId)
+                }}
+                onOpenChapterEditor={(chapterId) => {
+                  setDetailRun(null)
+                  onOpenChapterEditor?.(chapterId)
+                }}
+                onStartRepairTaskRevision={(task, run) => {
+                  setDetailRun(null)
+                  onStartRepairTaskRevision?.(task, run)
+                }}
+                onExecuteTypedRepairTask={(task, run, taskIndex) => {
+                  setDetailRun(null)
+                  onExecuteTypedRepairTask?.(task, run, taskIndex)
+                }}
+                onUpdateRepairTaskStatus={(task, run, status, taskIndex) => {
+                  setDetailRun(null)
+                  onUpdateRepairTaskStatus?.(task, run, status, taskIndex)
+                }}
+                onGenerateRepairAuditSummary={(run) => {
+                  setDetailRun(null)
+                  onGenerateRepairAuditSummary?.(run)
+                }}
+              />
+            )}
             {['release_quality_batch', 'release_similarity_batch'].includes(detailRun.run_type) && <ReleaseBatchRunSummary run={detailRun} />}
             {detailRun.run_type === 'chapter_group_generation' && <ChapterGroupRunSummary run={detailRun} onApproveChapterGroup={onApproveChapterGroup} onRetryChapterGroup={onRetryChapterGroup} onSkipChapterGroup={onSkipChapterGroup} />}
             <Card size="small" title="输入">

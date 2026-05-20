@@ -1,12 +1,15 @@
 import type { Express } from 'express'
 import {
+  appendNovelRun,
+  createNovelReview,
   listNovelCharacters,
   listNovelChapters,
   listNovelOutlines,
   listNovelReviews,
   listNovelRuns,
+  updateNovelRun,
 } from '../novel'
-import { parseJsonLikePayload } from './novel-route-utils'
+import { asArray, compactText, parseJsonLikePayload } from './novel-route-utils'
 
 type ProjectInsightRoutesContext = {
   getWorkspace: () => string
@@ -15,6 +18,306 @@ type ProjectInsightRoutesContext = {
   buildProductionDashboard: (project: any, chapters: any[], outlines: any[], characters: any[], reviews: any[], runs: any[]) => any
   buildProductionMetrics: (chapters: any[], reviews: any[], runs: any[]) => any
   buildCommercialReadiness: (project: any, chapters: any[], outlines: any[], characters: any[], reviews: any[], runs: any[]) => any
+}
+
+function outlineChapterNo(outline: any) {
+  const rawNo = Number(outline.raw_payload?.chapter_no || outline.raw_payload?.future100?.chapter_no || 0)
+  if (rawNo) return rawNo
+  const match = String(outline.title || '').match(/第\s*(\d+)\s*章/)
+  return match ? Number(match[1]) : 0
+}
+
+function futureSkeletonScore(outline: any) {
+  const future = outline?.raw_payload?.future100 || {}
+  return [
+    future.title || outline?.title ? 14 : 0,
+    String(future.chapter_goal || outline?.summary || '').replace(/\s/g, '').length >= 18 ? 28 : 0,
+    future.conflict || asArray(outline?.conflict_points)[0] ? 24 : 0,
+    future.payoff || asArray(outline?.turning_points)[0] ? 18 : 0,
+    future.ending_hook || outline?.hook ? 16 : 0,
+  ].reduce((sum, value) => sum + value, 0)
+}
+
+function buildLongformProductionTrends(chapters: any[], outlines: any[], reviews: any[], runs: any[]) {
+  const chapterByNo = new Map(chapters.map(chapter => [Number(chapter.chapter_no || 0), chapter]))
+  const skeletonOutlines = outlines
+    .filter(outline => String(outline.outline_type || '') === 'chapter' && (outline.raw_payload?.source === 'future_100_skeleton' || outline.raw_payload?.future100))
+    .map(outline => ({ outline, chapter_no: outlineChapterNo(outline), skeleton_score: futureSkeletonScore(outline) }))
+    .filter(item => item.chapter_no > 0)
+    .sort((a, b) => a.chapter_no - b.chapter_no)
+  const skeletonByNo = new Map(skeletonOutlines.map(item => [item.chapter_no, item]))
+
+  const reviewByChapter = new Map<number, any[]>()
+  for (const review of reviews) {
+    const payload = parseJsonLikePayload(review.payload) || {}
+    const chapterId = Number(payload.chapter_id || payload.report?.chapter_id || payload.context_package?.chapter?.id || 0)
+    if (!chapterId) continue
+    reviewByChapter.set(chapterId, [...(reviewByChapter.get(chapterId) || []), { review, payload }])
+  }
+
+  const runChapterSignals = new Map<number, any[]>()
+  const failureSignals = new Map<number, string[]>()
+  for (const run of runs) {
+    const payload = parseJsonLikePayload(run.output_ref) || {}
+    for (const row of asArray(payload.chapters)) {
+      const chapterNo = Number(row.chapter_no || 0)
+      if (!chapterNo) continue
+      runChapterSignals.set(chapterNo, [...(runChapterSignals.get(chapterNo) || []), { run, row }])
+      if (row.status === 'failed' || row.error) {
+        failureSignals.set(chapterNo, [...(failureSignals.get(chapterNo) || []), compactText(row.error || payload.last_error?.error || run.error_message || '章节任务失败', 160)])
+      }
+    }
+    const match = String(run.step_name || '').match(/chapter-(\d+)/)
+    if (['failed', 'error'].includes(run.status) && match) {
+      const chapterNo = Number(match[1])
+      failureSignals.set(chapterNo, [...(failureSignals.get(chapterNo) || []), compactText(run.error_message || payload.error || '运行失败', 160)])
+    }
+  }
+
+  const chapterNos = Array.from(new Set([
+    ...chapters.map(chapter => Number(chapter.chapter_no || 0)).filter(Boolean),
+    ...skeletonOutlines.map(item => item.chapter_no),
+  ])).sort((a, b) => a - b)
+
+  const rows = chapterNos.map(chapterNo => {
+    const chapter = chapterByNo.get(chapterNo)
+    const skeleton = skeletonByNo.get(chapterNo)
+    const chapterReviews = chapter ? reviewByChapter.get(Number(chapter.id)) || [] : []
+    const latestQuality = chapterReviews.filter(item => item.review.review_type === 'prose_quality').sort((a, b) => String(b.review.created_at || '').localeCompare(String(a.review.created_at || '')))[0]
+    const latestEditor = chapterReviews.filter(item => item.review.review_type === 'editor_report').sort((a, b) => String(b.review.created_at || '').localeCompare(String(a.review.created_at || '')))[0]
+    const latestSimilarity = chapterReviews.filter(item => item.review.review_type === 'similarity_report').sort((a, b) => String(b.review.created_at || '').localeCompare(String(a.review.created_at || '')))[0]
+    const signals = runChapterSignals.get(chapterNo) || []
+    const materialScores = signals.map(item => Number(item.row.material_score || 0)).filter(score => score > 0)
+    const skeletonScores = [
+      skeleton?.skeleton_score,
+      ...signals.map(item => Number(item.row.skeleton_score || 0)),
+    ].filter(score => Number(score) > 0)
+    const qualityScore = Number(latestQuality?.payload?.self_check?.review?.score || latestEditor?.payload?.report?.overall_score || 0) || null
+    const similarityRisk = Number(latestSimilarity?.payload?.report?.overall_risk_score || 0) || null
+    const failures = Array.from(new Set(failureSignals.get(chapterNo) || [])).slice(0, 3)
+    const readiness = Math.round((
+      (skeletonScores.length ? Math.max(...skeletonScores) : 0)
+      + (materialScores.length ? Math.max(...materialScores) : 0)
+      + (qualityScore || (chapter?.chapter_text ? 70 : 0))
+    ) / 3)
+    return {
+      chapter_no: chapterNo,
+      chapter_id: chapter?.id || null,
+      outline_id: skeleton?.outline?.id || chapter?.outline_id || null,
+      title: chapter?.title || skeleton?.outline?.title || '',
+      has_text: Boolean(chapter?.chapter_text),
+      word_count: String(chapter?.chapter_text || '').replace(/\s/g, '').length,
+      skeleton_score: skeletonScores.length ? Math.max(...skeletonScores) : null,
+      material_score: materialScores.length ? Math.max(...materialScores) : null,
+      quality_score: qualityScore,
+      similarity_risk: similarityRisk,
+      failure_count: failures.length,
+      failures,
+      readiness,
+      status: failures.length ? 'failed_attention' : qualityScore && qualityScore < 78 ? 'quality_attention' : readiness >= 75 ? 'stable' : readiness >= 55 ? 'needs_material' : 'not_ready',
+    }
+  })
+  const avg = (values: any[]) => {
+    const nums = values.map(Number).filter(value => Number.isFinite(value) && value > 0)
+    return nums.length ? Math.round(nums.reduce((sum, value) => sum + value, 0) / nums.length) : null
+  }
+  const failedRows = rows.filter(row => row.failure_count > 0)
+  const weakRows = rows.filter(row => row.status !== 'stable').slice(0, 30)
+  return {
+    created_at: new Date().toISOString(),
+    summary: {
+      chapter_count: rows.length,
+      skeleton_count: skeletonOutlines.length,
+      written_count: rows.filter(row => row.has_text).length,
+      failed_chapter_count: failedRows.length,
+      avg_skeleton_score: avg(rows.map(row => row.skeleton_score)),
+      avg_material_score: avg(rows.map(row => row.material_score)),
+      avg_quality_score: avg(rows.map(row => row.quality_score)),
+      avg_readiness: avg(rows.map(row => row.readiness)),
+    },
+    rows,
+    weak_rows: weakRows,
+    failure_reasons: Array.from(new Set(rows.flatMap(row => row.failures))).slice(0, 20),
+    recommendations: [
+      skeletonOutlines.length < 80 ? '未来100章骨架覆盖不足，先补齐骨架再批量生产。' : '',
+      rows.some(row => row.skeleton_score && row.skeleton_score < 70) ? '存在低骨架分章节，优先补目标、冲突、回报和钩子。' : '',
+      rows.some(row => row.material_score && row.material_score < 65) ? '存在材料分不足章节，先补上下文和场景卡。' : '',
+      rows.some(row => row.quality_score && row.quality_score < 78) ? '存在低质量分章节，进入质检修订链路。' : '',
+      failedRows.length ? '存在失败章节，先处理失败原因再扩大批量生产。' : '',
+    ].filter(Boolean),
+  }
+}
+
+function buildLongformProductionRepairTasks(trends: any, limit = 60) {
+  const tasks: any[] = []
+  const rows = Array.isArray(trends?.weak_rows) ? trends.weak_rows : []
+  for (const row of rows) {
+    const chapterLabel = row.chapter_no ? `第${row.chapter_no}章《${row.title || '未命名'}》` : row.title || '未命名章节'
+    if (Number(row.failure_count || 0) > 0) {
+      tasks.push({
+        task_type: 'resolve_failure',
+        issue_type: 'production_failure',
+        severity: 'high',
+        chapter_id: row.chapter_id || null,
+        outline_id: row.outline_id || null,
+        chapter_no: row.chapter_no,
+        title: `${chapterLabel} 生产失败处理`,
+        message: (row.failures || []).join('；') || '章节生产链路存在失败记录。',
+        action: '先查看失败原因，补齐上下文/模型配置/安全检查后再重试章节群。',
+        acceptance_criteria: ['失败原因已消除', '章节可重新进入章节群生产', '任务中心不再出现同类失败'],
+        metrics: { readiness: row.readiness, failures: row.failures },
+      })
+    }
+    if (!row.skeleton_score || Number(row.skeleton_score) < 70) {
+      tasks.push({
+        task_type: 'repair_skeleton',
+        issue_type: 'weak_future_skeleton',
+        severity: Number(row.skeleton_score || 0) < 55 ? 'high' : 'medium',
+        chapter_id: row.chapter_id || null,
+        outline_id: row.outline_id || null,
+        chapter_no: row.chapter_no,
+        title: `${chapterLabel} 补强骨架`,
+        message: `未来骨架分 ${row.skeleton_score ?? 0}，章节目标、冲突、回报或章末钩子不足。`,
+        action: '补齐章节目标、核心冲突、爽点回报和章末钩子，再应用到未来100章骨架。',
+        acceptance_criteria: ['章节目标清晰可执行', '冲突压力可支撑正文推进', '章末钩子能自然牵引下一章'],
+        metrics: { skeleton_score: row.skeleton_score, readiness: row.readiness },
+      })
+    }
+    if (!row.material_score || Number(row.material_score) < 65 || ['needs_material', 'not_ready'].includes(String(row.status || ''))) {
+      tasks.push({
+        task_type: 'repair_materials',
+        issue_type: 'weak_generation_materials',
+        severity: Number(row.material_score || 0) < 45 || !row.has_text ? 'high' : 'medium',
+        chapter_id: row.chapter_id || null,
+        outline_id: row.outline_id || null,
+        chapter_no: row.chapter_no,
+        title: `${chapterLabel} 补生产材料`,
+        message: `材料分 ${row.material_score ?? 0}，上下文、场景卡或参考资产不足。`,
+        action: '补齐章节上下文、场景卡、人物状态和必要参考后，再进入章节群生成。',
+        acceptance_criteria: ['上下文预检无阻塞项', '场景卡能覆盖主要动作链', '人物状态与上一章连续'],
+        metrics: { material_score: row.material_score, readiness: row.readiness },
+      })
+    }
+    if (row.quality_score && Number(row.quality_score) < 78) {
+      tasks.push({
+        task_type: 'repair_quality',
+        issue_type: 'weak_chapter_quality',
+        severity: Number(row.quality_score) < 65 ? 'high' : 'medium',
+        chapter_id: row.chapter_id || null,
+        outline_id: row.outline_id || null,
+        chapter_no: row.chapter_no,
+        title: `${chapterLabel} 重质检修订`,
+        message: `章节质量分 ${row.quality_score}，需要进入编辑报告与修订链路。`,
+        action: '生成编辑报告，按问题清单修订节奏、冲突推进和章末钩子。',
+        acceptance_criteria: ['质量分回到78以上', '核心冲突推进明确', '读者回报与章末钩子完整'],
+        metrics: { quality_score: row.quality_score, readiness: row.readiness },
+      })
+    }
+    if (row.similarity_risk && Number(row.similarity_risk) >= 45) {
+      tasks.push({
+        task_type: 'repair_similarity',
+        issue_type: 'similarity_risk',
+        severity: Number(row.similarity_risk) >= 65 ? 'high' : 'medium',
+        chapter_id: row.chapter_id || null,
+        outline_id: row.outline_id || null,
+        chapter_no: row.chapter_no,
+        title: `${chapterLabel} 降相似风险`,
+        message: `相似风险 ${row.similarity_risk}，需要替换表达路径或情节组合。`,
+        action: '重新设计场景动作链、信息揭示顺序和关键表达，避免参考痕迹。',
+        acceptance_criteria: ['相似风险降至安全阈值内', '关键桥段不再依赖参考文本表达', '原创设定与角色动机更明确'],
+        metrics: { similarity_risk: row.similarity_risk, readiness: row.readiness },
+      })
+    }
+  }
+  return tasks.slice(0, Math.max(1, Math.min(120, Number(limit || 60))))
+}
+
+function buildLongformRepairAuditSummary(run: any, trends: any) {
+  const payload = parseJsonLikePayload(run.output_ref) || {}
+  const tasks = Array.isArray(payload.tasks) ? payload.tasks : []
+  const baseline = payload.report?.summary || {}
+  const current = trends.summary || {}
+  const taskTypeLabel: Record<string, string> = {
+    repair_skeleton: '补骨架',
+    repair_materials: '补材料',
+    repair_quality: '重质检',
+    repair_similarity: '降相似风险',
+    resolve_failure: '处理失败',
+  }
+  const countBy = (items: any[], key: string) => items.reduce((acc: Record<string, number>, item: any) => {
+    const value = String(item[key] || 'open')
+    acc[value] = (acc[value] || 0) + 1
+    return acc
+  }, {})
+  const metricDelta = (key: string) => {
+    const before = baseline[key]
+    const after = current[key]
+    return {
+      before: before ?? null,
+      after: after ?? null,
+      delta: Number.isFinite(Number(before)) && Number.isFinite(Number(after)) ? Number(after) - Number(before) : null,
+    }
+  }
+  const touchedChapters = Array.from(new Set(tasks.map((task: any) => Number(task.chapter_no || 0)).filter(Boolean))).sort((a: number, b: number) => a - b)
+  const unresolved = tasks.filter((task: any) => task.task_status !== 'resolved')
+  const currentWeakByNo = new Map((trends.weak_rows || []).map((row: any) => [Number(row.chapter_no || 0), row]))
+  const remainingTouchedRisks = touchedChapters
+    .map(chapterNo => currentWeakByNo.get(chapterNo))
+    .filter(Boolean)
+    .slice(0, 30)
+  const statusCounts = countBy(tasks.map((task: any) => ({ ...task, task_status: task.task_status || 'open' })), 'task_status')
+  const typeCounts = countBy(tasks, 'task_type')
+  return {
+    created_at: new Date().toISOString(),
+    source_run_id: run.id,
+    status: tasks.length && Number(statusCounts.resolved || 0) === tasks.length ? 'closed' : unresolved.length ? 'needs_followup' : 'empty',
+    task_summary: {
+      total: tasks.length,
+      resolved: Number(statusCounts.resolved || 0),
+      needs_review: Number(statusCounts.needs_review || 0),
+      in_progress: Number(statusCounts.in_progress || 0),
+      open: Number(statusCounts.open || 0),
+      by_type: Object.fromEntries(Object.entries(typeCounts).map(([key, value]) => [taskTypeLabel[key] || key, value])),
+      touched_chapter_count: touchedChapters.length,
+      touched_chapters: touchedChapters.slice(0, 80),
+    },
+    metric_deltas: {
+      avg_skeleton_score: metricDelta('avg_skeleton_score'),
+      avg_material_score: metricDelta('avg_material_score'),
+      avg_quality_score: metricDelta('avg_quality_score'),
+      avg_readiness: metricDelta('avg_readiness'),
+      failed_chapter_count: metricDelta('failed_chapter_count'),
+      weak_row_count: {
+        before: payload.report?.weak_count ?? null,
+        after: Array.isArray(trends.weak_rows) ? trends.weak_rows.length : null,
+        delta: Number.isFinite(Number(payload.report?.weak_count)) ? (trends.weak_rows || []).length - Number(payload.report.weak_count) : null,
+      },
+    },
+    remaining_risks: {
+      unresolved_tasks: unresolved.slice(0, 30).map((task: any) => ({
+        task_type: task.task_type,
+        task_status: task.task_status || 'open',
+        chapter_no: task.chapter_no,
+        title: task.title,
+        message: task.message,
+      })),
+      weak_touched_chapters: remainingTouchedRisks.map((row: any) => ({
+        chapter_no: row.chapter_no,
+        title: row.title,
+        status: row.status,
+        readiness: row.readiness,
+        skeleton_score: row.skeleton_score,
+        material_score: row.material_score,
+        quality_score: row.quality_score,
+      })),
+      current_recommendations: trends.recommendations || [],
+    },
+    conclusion: [
+      tasks.length ? `本轮共处理 ${tasks.length} 项长线生产修复任务，已确认 ${Number(statusCounts.resolved || 0)} 项。` : '本轮没有生成修复任务。',
+      remainingTouchedRisks.length ? `仍有 ${remainingTouchedRisks.length} 个已触达章节处于薄弱状态，需要继续复查。` : '已触达章节暂无明显薄弱风险。',
+      unresolved.length ? `还有 ${unresolved.length} 项任务未关闭。` : '本轮任务已全部关闭。',
+    ],
+  }
 }
 
 export function registerNovelProjectInsightRoutes(app: Express, ctx: ProjectInsightRoutesContext) {
@@ -47,6 +350,103 @@ export function registerNovelProjectInsightRoutes(app: Express, ctx: ProjectInsi
         listNovelRuns(activeWorkspace, project.id),
       ])
       res.json({ ok: true, metrics: ctx.buildProductionMetrics(chapters, reviews, runs) })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.get('/api/novel/projects/:id/longform-production-trends', async (req, res) => {
+    try {
+      const activeWorkspace = ctx.getWorkspace()
+      const project = await ctx.getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const [chapters, outlines, reviews, runs] = await Promise.all([
+        listNovelChapters(activeWorkspace, project.id),
+        listNovelOutlines(activeWorkspace, project.id),
+        listNovelReviews(activeWorkspace, project.id),
+        listNovelRuns(activeWorkspace, project.id),
+      ])
+      res.json({ ok: true, trends: buildLongformProductionTrends(chapters, outlines, reviews, runs) })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.post('/api/novel/projects/:id/longform-production-trends/repair-queue', async (req, res) => {
+    try {
+      const activeWorkspace = ctx.getWorkspace()
+      const project = await ctx.getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const [chapters, outlines, reviews, runs] = await Promise.all([
+        listNovelChapters(activeWorkspace, project.id),
+        listNovelOutlines(activeWorkspace, project.id),
+        listNovelReviews(activeWorkspace, project.id),
+        listNovelRuns(activeWorkspace, project.id),
+      ])
+      const trends = buildLongformProductionTrends(chapters, outlines, reviews, runs)
+      const tasks = buildLongformProductionRepairTasks(trends, req.body?.limit)
+      const run = await appendNovelRun(activeWorkspace, {
+        project_id: project.id,
+        run_type: 'longform_production_repair',
+        step_name: `longform-production-repair-${tasks.length}`,
+        status: tasks.length ? 'ready' : 'success',
+        input_ref: JSON.stringify({ source: 'longform_production_trends', created_at: trends.created_at }),
+        output_ref: JSON.stringify({
+          report: {
+            created_at: trends.created_at,
+            summary: trends.summary,
+            recommendation_count: trends.recommendations.length,
+            weak_count: trends.weak_rows.length,
+          },
+          recommendations: trends.recommendations,
+          tasks,
+        }),
+      })
+      const review = await createNovelReview(activeWorkspace, {
+        project_id: project.id,
+        review_type: 'longform_production_repair',
+        status: tasks.length ? 'warn' : 'ok',
+        summary: `长线生产修复任务：${tasks.length} 项`,
+        issues: tasks.slice(0, 30).map((task: any) => task.chapter_no ? `第${task.chapter_no}章 ${task.message}` : task.message),
+        payload: JSON.stringify({ run_id: run.id, tasks, trends_summary: trends.summary }),
+      })
+      res.json({ ok: true, run, review, tasks, trends })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.post('/api/novel/projects/:id/longform-production-trends/repair-runs/:runId/audit-summary', async (req, res) => {
+    try {
+      const activeWorkspace = ctx.getWorkspace()
+      const project = await ctx.getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const [chapters, outlines, reviews, runs] = await Promise.all([
+        listNovelChapters(activeWorkspace, project.id),
+        listNovelOutlines(activeWorkspace, project.id),
+        listNovelReviews(activeWorkspace, project.id),
+        listNovelRuns(activeWorkspace, project.id),
+      ])
+      const run = runs.find(item => Number(item.id) === Number(req.params.runId) && item.run_type === 'longform_production_repair')
+      if (!run) return res.status(404).json({ error: 'repair run not found' })
+      const trends = buildLongformProductionTrends(chapters, outlines, reviews, runs)
+      const audit = buildLongformRepairAuditSummary(run, trends)
+      const payload = parseJsonLikePayload(run.output_ref) || {}
+      const updatedRun = await updateNovelRun(activeWorkspace, run.id, {
+        output_ref: JSON.stringify({ ...payload, audit_summary: audit }),
+      })
+      const review = await createNovelReview(activeWorkspace, {
+        project_id: project.id,
+        review_type: 'longform_production_repair_audit',
+        status: audit.status === 'closed' ? 'ok' : 'warn',
+        summary: `长线生产修复闭环审计：${audit.task_summary.resolved}/${audit.task_summary.total} 项已确认`,
+        issues: [
+          ...audit.remaining_risks.unresolved_tasks.slice(0, 15).map((task: any) => task.chapter_no ? `第${task.chapter_no}章 ${task.message}` : task.message),
+          ...audit.remaining_risks.weak_touched_chapters.slice(0, 15).map((row: any) => `第${row.chapter_no}章仍需关注：${row.status}`),
+        ],
+        payload: JSON.stringify({ run_id: run.id, audit }),
+      })
+      res.json({ ok: true, run: updatedRun, review, audit })
     } catch (error) {
       res.status(500).json({ error: String(error) })
     }

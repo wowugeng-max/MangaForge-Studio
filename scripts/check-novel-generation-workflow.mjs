@@ -103,6 +103,17 @@ async function main() {
     reference_migration_plan: false,
     export_preview: false,
     release_repair_plan: false,
+    first30_retention_diagnosis: false,
+    first30_retention_repair_queue: false,
+    longform_pressure_test: false,
+    future_100_skeleton: false,
+    future_100_skeleton_apply: false,
+    future_100_skeleton_group: false,
+    longform_production_trends: false,
+    longform_production_repair_queue: false,
+    longform_production_task_status: false,
+    longform_production_task_bulk_status: false,
+    longform_production_repair_audit: false,
     quality_trends: false,
     volume_control: false,
     diagnostics: false,
@@ -143,6 +154,62 @@ async function main() {
   checks.export_preview = Boolean(exportPreview?.export?.stats && exportPreview?.export?.release_audit)
   const releaseRepairPlan = await request(`/novel/projects/${project.id}/release-repair-plan`)
   checks.release_repair_plan = Boolean(releaseRepairPlan?.release_audit && releaseRepairPlan?.repair_plan)
+  const first30Retention = await request(`/novel/projects/${project.id}/first30-retention-diagnosis`, { method: 'POST' })
+  checks.first30_retention_diagnosis = Boolean(first30Retention?.report && first30Retention?.review)
+  const first30RepairQueue = await request(`/novel/projects/${project.id}/first30-retention-diagnosis/repair-queue`, { method: 'POST' })
+  checks.first30_retention_repair_queue = Boolean(first30RepairQueue?.report && first30RepairQueue?.review && Array.isArray(first30RepairQueue?.tasks))
+  const longformPressure = await request(`/novel/projects/${project.id}/longform-pressure-test`, { method: 'POST' })
+  checks.longform_pressure_test = Boolean(longformPressure?.report && longformPressure?.review)
+  const future100Skeleton = await request(`/novel/projects/${project.id}/future-100-skeleton`)
+  checks.future_100_skeleton = Boolean(future100Skeleton?.report && Array.isArray(future100Skeleton?.report?.rows))
+  const future100Apply = await request(`/novel/projects/${project.id}/future-100-skeleton/apply`, {
+    method: 'POST',
+    body: JSON.stringify({
+      from_chapter: 9001,
+      horizon: 20,
+      write_mode: 'upsert',
+      selected_chapter_nos: [],
+      skeleton: [{
+        chapter_no: 9001,
+        title: 'Smoke 骨架预览',
+        chapter_goal: '验证未来100章骨架应用端点不会在未选择章节时写入。',
+        conflict: '测试路径需要经过差异预览和跳过逻辑。',
+        payoff: '确认端点可用。',
+        ending_hook: '等待真实用户确认后再写入。',
+      }],
+    }),
+  })
+  checks.future_100_skeleton_apply = Boolean(future100Apply?.write_summary && Number(future100Apply.write_summary.skipped || 0) >= 1)
+  const future100Group = await request(`/novel/projects/${project.id}/chapter-groups/start-from-skeleton`, {
+    method: 'POST',
+    body: JSON.stringify({ start_chapter: 1, scan_limit: 5, count: 2, dry_run: true }),
+  })
+  checks.future_100_skeleton_group = Boolean(future100Group?.dry_run && Array.isArray(future100Group?.ready))
+  const longformTrends = await request(`/novel/projects/${project.id}/longform-production-trends`)
+  checks.longform_production_trends = Boolean(longformTrends?.trends?.summary && Array.isArray(longformTrends?.trends?.rows))
+  const longformRepairQueue = await request(`/novel/projects/${project.id}/longform-production-trends/repair-queue`, {
+    method: 'POST',
+    body: JSON.stringify({ limit: 20 }),
+  })
+  checks.longform_production_repair_queue = Boolean(longformRepairQueue?.run && Array.isArray(longformRepairQueue?.tasks))
+  if (longformRepairQueue?.run?.id && Array.isArray(longformRepairQueue?.tasks) && longformRepairQueue.tasks.length > 0) {
+    const taskStatus = await request(`/novel/runs/${longformRepairQueue.run.id}/tasks/0/status`, {
+      method: 'POST',
+      body: JSON.stringify({ project_id: project.id, status: 'needs_review', note: 'smoke status writeback' }),
+    })
+    checks.longform_production_task_status = Boolean(taskStatus?.task?.task_status === 'needs_review')
+    const bulkStatus = await request(`/novel/runs/${longformRepairQueue.run.id}/tasks/status-bulk`, {
+      method: 'POST',
+      body: JSON.stringify({ project_id: project.id, status: 'resolved', task_indices: [0], note: 'smoke bulk status writeback' }),
+    })
+    checks.longform_production_task_bulk_status = Boolean(Number(bulkStatus?.updated_count || 0) === 1 && bulkStatus?.task_status_summary)
+    const repairAudit = await request(`/novel/projects/${project.id}/longform-production-trends/repair-runs/${longformRepairQueue.run.id}/audit-summary`, { method: 'POST' })
+    checks.longform_production_repair_audit = Boolean(repairAudit?.audit?.task_summary && repairAudit?.run)
+  } else {
+    checks.longform_production_task_status = true
+    checks.longform_production_task_bulk_status = true
+    checks.longform_production_repair_audit = true
+  }
   checks.quality_trends = Array.isArray(dashboard?.dashboard?.chapter_trends)
   checks.volume_control = Array.isArray(dashboard?.dashboard?.volume_controls)
 

@@ -1,6 +1,7 @@
 import type { Express } from 'express'
 import {
   appendNovelRun,
+  createNovelOutline,
   createNovelReview,
   listNovelCharacters,
   listNovelChapters,
@@ -9,6 +10,7 @@ import {
   listNovelRuns,
   listNovelWorldbuilding,
   updateNovelChapter,
+  updateNovelOutline,
   updateNovelProject,
 } from '../novel'
 import { executeNovelAgent, generateNovelChapterProse } from '../llm'
@@ -330,6 +332,272 @@ function mergeSandboxParagraphs(currentText: string, candidateText: string, para
     }
   }
   return merged.join('\n\n')
+}
+
+function outlineChapterNo(outline: any) {
+  const rawNo = Number(outline.raw_payload?.chapter_no || outline.raw_payload?.future100?.chapter_no || outline.raw_payload?.skeleton?.chapter_no || 0)
+  if (rawNo) return rawNo
+  const match = String(outline.title || '').match(/第\s*(\d+)\s*章/)
+  return match ? Number(match[1]) : 0
+}
+
+function findChapterOutlineForNo(outlines: any[], chapterNo: number) {
+  return outlines
+    .filter(outline => String(outline.outline_type || '') === 'chapter' && Number(outlineChapterNo(outline)) === Number(chapterNo))
+    .sort((a, b) => {
+      const aFuture = a.raw_payload?.source === 'future_100_skeleton' ? 1 : 0
+      const bFuture = b.raw_payload?.source === 'future_100_skeleton' ? 1 : 0
+      return bFuture - aFuture || String(b.updated_at || '').localeCompare(String(a.updated_at || '')) || Number(b.id || 0) - Number(a.id || 0)
+    })[0] || null
+}
+
+function buildFuture100SkeletonAudit(project: any, chapters: any[], outlines: any[], reviews: any[], options: any = {}) {
+  const sortedChapters = chapters.slice().sort((a, b) => Number(a.chapter_no || 0) - Number(b.chapter_no || 0))
+  const firstUnwritten = sortedChapters.find(chapter => !chapter.chapter_text)?.chapter_no
+  const startChapter = Math.max(1, Number(options.from_chapter || firstUnwritten || (Math.max(0, ...sortedChapters.map(ch => Number(ch.chapter_no || 0))) + 1) || 1))
+  const horizon = Math.max(20, Math.min(120, Number(options.horizon || 100)))
+  const endChapter = startChapter + horizon - 1
+  const chapterByNo = new Map(sortedChapters.map(chapter => [Number(chapter.chapter_no || 0), chapter]))
+  const chapterOutlines = outlines.filter(item => String(item.outline_type || '') === 'chapter')
+  const volumeOutlines = outlines.filter(item => ['volume', 'arc', 'part'].includes(String(item.outline_type || '')))
+  const latestLongform = reviews
+    .filter(review => review.review_type === 'longform_pressure_test')
+    .map(review => ({ review, payload: parseJsonLikePayload(review.payload) || {} }))
+    .sort((a, b) => String(b.review.created_at || '').localeCompare(String(a.review.created_at || '')))[0]?.payload?.report || null
+  const rows = Array.from({ length: horizon }, (_, index) => {
+    const chapterNo = startChapter + index
+    const chapter = chapterByNo.get(chapterNo)
+    const outline = findChapterOutlineForNo(chapterOutlines, chapterNo)
+    const raw = outline?.raw_payload || {}
+    const text = [
+      chapter?.title,
+      chapter?.chapter_goal,
+      chapter?.chapter_summary,
+      chapter?.ending_hook,
+      outline?.title,
+      outline?.summary,
+      outline?.hook,
+      raw.conflict,
+      raw.payoff,
+      raw.ending_hook,
+      raw.chapter_goal,
+    ].filter(Boolean).join('\n')
+    const hasTitle = Boolean(chapter?.title || outline?.title)
+    const hasGoal = String(chapter?.chapter_goal || chapter?.chapter_summary || raw.chapter_goal || outline?.summary || '').replace(/\s/g, '').length >= 18
+    const hasConflict = /冲突|危机|敌|压迫|竞争|追杀|考核|阻碍|代价|选择|失败|秘密|阴谋|规则/.test(text)
+    const hasPayoff = /爽|赢|突破|奖励|收获|身份|资源|打脸|反转|真相|升级|关系/.test(text)
+    const hasHook = String(chapter?.ending_hook || raw.ending_hook || outline?.hook || '').replace(/\s/g, '').length >= 8 || /却|然而|忽然|没想到|下一刻|身后|门外|消息|秘密/.test(text.slice(-220))
+    const score = Math.max(0, Math.min(100, 20 + (hasTitle ? 12 : 0) + (hasGoal ? 22 : 0) + (hasConflict ? 22 : 0) + (hasPayoff ? 14 : 0) + (hasHook ? 10 : 0)))
+    return {
+      chapter_no: chapterNo,
+      chapter_id: chapter?.id || null,
+      outline_id: outline?.id || null,
+      title: chapter?.title || outline?.title || '',
+      has_title: hasTitle,
+      has_goal: hasGoal,
+      has_conflict: hasConflict,
+      has_payoff: hasPayoff,
+      has_hook: hasHook,
+      score,
+      flags: [
+        !hasTitle ? '缺标题' : '',
+        !hasGoal ? '缺章节目标' : '',
+        !hasConflict ? '缺冲突压力' : '',
+        !hasPayoff ? '缺回报/爽点' : '',
+        !hasHook ? '缺章末钩子' : '',
+      ].filter(Boolean),
+    }
+  })
+  const countRate = (predicate: (row: any) => boolean) => rows.length ? Math.round(rows.filter(predicate).length / rows.length * 100) : 0
+  const coverage = countRate(row => row.has_goal || row.outline_id || row.chapter_id)
+  const goalRate = countRate(row => row.has_goal)
+  const conflictRate = countRate(row => row.has_conflict)
+  const payoffRate = countRate(row => row.has_payoff)
+  const hookRate = countRate(row => row.has_hook)
+  const stageAnchors = rows.filter((row, index) => index % 20 === 0 || index % 25 === 0 || index === rows.length - 1)
+  const stageAnchorRate = stageAnchors.length ? Math.round(stageAnchors.filter(row => row.has_conflict && row.has_payoff).length / stageAnchors.length * 100) : 0
+  const risks: any[] = []
+  const addRisk = (severity: string, issue: string, action: string) => risks.push({ severity, issue, action })
+  if (coverage < 80) addRisk('high', `未来${horizon}章骨架覆盖率只有 ${coverage}%。`, '先补齐100章标题、目标、冲突、回报和章末钩子，再进入长线批量生成。')
+  if (goalRate < 80) addRisk('high', `章节目标覆盖率只有 ${goalRate}%。`, '每章必须能回答“主角这章要解决什么，以及失败代价是什么”。')
+  if (conflictRate < 70) addRisk('high', `冲突压力覆盖率只有 ${conflictRate}%。`, '补阶段反派、竞争、规则限制或资源争夺，避免流水账。')
+  if (payoffRate < 65) addRisk('medium', `回报/爽点覆盖率只有 ${payoffRate}%。`, '每3-5章安排可感知收益，每20-30章安排阶段结算。')
+  if (hookRate < 70) addRisk('medium', `章末钩子覆盖率只有 ${hookRate}%。`, '每章结尾至少保留未解问题、更大威胁或利益诱惑。')
+  if (volumeOutlines.length < 4) addRisk('medium', '分卷/阶段锚点不足。', '补未来100章所属卷/阶段，每20-30章要有一次身份、地图、敌人或目标变化。')
+  if (latestLongform && Number(latestLongform.score || 0) < 70) addRisk('medium', `最近300万字压力测试只有 ${latestLongform.score} 分。`, '先处理长线压力测试中的高危薄弱点，再生成百章骨架。')
+  const averageRowScore = rows.length ? Math.round(rows.reduce((sum, row) => sum + row.score, 0) / rows.length) : 0
+  const score = Math.max(0, Math.min(100, Math.round(
+    averageRowScore * 0.45
+    + coverage * 0.12
+    + goalRate * 0.12
+    + conflictRate * 0.12
+    + payoffRate * 0.08
+    + hookRate * 0.08
+    + stageAnchorRate * 0.03
+    - risks.reduce((sum, risk) => sum + (risk.severity === 'high' ? 4 : 2), 0),
+  )))
+  return {
+    report_id: `future100-${Date.now()}`,
+    created_at: new Date().toISOString(),
+    from_chapter: startChapter,
+    to_chapter: endChapter,
+    horizon,
+    score,
+    status: score >= 80 ? 'ready' : score >= 62 ? 'fragile' : 'blocked',
+    summary: score >= 80 ? '未来100章骨架具备长线推进基础。' : score >= 62 ? '未来100章已有雏形，但冲突/回报/钩子仍需补强。' : '未来100章骨架不足，不建议进入长线批量生成。',
+    metrics: {
+      coverage,
+      goal_rate: goalRate,
+      conflict_rate: conflictRate,
+      payoff_rate: payoffRate,
+      hook_rate: hookRate,
+      stage_anchor_rate: stageAnchorRate,
+      chapter_outline_count: chapterOutlines.length,
+      volume_outline_count: volumeOutlines.length,
+    },
+    risks,
+    weak_chapters: rows.filter(row => row.score < 72).slice(0, 30),
+    rows,
+    next_actions: [
+      coverage < 80 ? '生成或补齐未来100章骨架。' : '',
+      conflictRate < 70 ? '优先补每20章一个阶段压力源和每章即时冲突。' : '',
+      payoffRate < 65 ? '补小结算/大结算节奏，避免只有危机没有回报。' : '',
+      hookRate < 70 ? '补章末追读钩子，尤其是20、40、60、80、100章阶段节点。' : '',
+      '骨架通过后，再运行未来10章滚动规划进入日更生产。',
+    ].filter(Boolean),
+  }
+}
+
+function normalizeFuture100Skeleton(payload: any, fromChapter: number, horizon: number) {
+  const raw = asArray(payload?.skeleton || payload?.future_100_skeleton || payload?.rolling_plan || payload?.chapters)
+  return raw.slice(0, horizon).map((item: any, index: number) => {
+    const chapterNo = Number(item.chapter_no || item.no || item.index || 0) || fromChapter + index
+    return {
+      chapter_no: chapterNo,
+      title: String(item.title || `第${chapterNo}章`),
+      chapter_goal: String(item.chapter_goal || item.goal || item.summary || ''),
+      conflict: String(item.conflict || item.pressure || item.obstacle || ''),
+      payoff: String(item.payoff || item.reward || item.commercial_payoff || ''),
+      foreshadowing: asArray(item.foreshadowing || item.foreshadowing_to_use || item.clues).map(String),
+      ending_hook: String(item.ending_hook || item.hook || ''),
+      volume_stage: String(item.volume_stage || item.stage || item.arc || ''),
+      commercial_purpose: String(item.commercial_purpose || item.reader_effect || item.purpose || ''),
+      risk_notes: asArray(item.risk_notes || item.risks).map(String),
+    }
+  })
+}
+
+function future100OutlineData(project: any, item: any) {
+  return {
+    project_id: project.id,
+    outline_type: 'chapter',
+    title: `第${item.chapter_no}章 ${item.title}`,
+    summary: item.chapter_goal,
+    conflict_points: [item.conflict].filter(Boolean),
+    turning_points: [item.payoff, item.commercial_purpose].filter(Boolean),
+    hook: item.ending_hook,
+    raw_payload: {
+      source: 'future_100_skeleton',
+      chapter_no: item.chapter_no,
+      future100: item,
+      generated_at: new Date().toISOString(),
+    },
+  } as any
+}
+
+function buildFuture100WritePreview(outlines: any[], skeleton: any[], options: any = {}) {
+  const writeMode = options.write_mode === 'append' || options.overwrite_outline === false ? 'append' : 'upsert'
+  const selected = Array.isArray(options.selected_chapter_nos)
+    ? new Set(options.selected_chapter_nos.map((item: any) => Number(item)).filter(Boolean))
+    : null
+  const rows = skeleton.map(item => {
+    const selectedForWrite = !selected || selected.has(Number(item.chapter_no))
+    const existing = writeMode === 'upsert' ? findChapterOutlineForNo(outlines, item.chapter_no) : null
+    const action = !selectedForWrite ? 'skipped' : existing?.id ? 'update' : 'create'
+    return {
+      chapter_no: item.chapter_no,
+      title: item.title,
+      action,
+      selected: selectedForWrite,
+      existing_outline_id: existing?.id || null,
+      existing_title: existing?.title || '',
+      existing_summary: compactText(existing?.summary || '', 180),
+      next_summary: compactText(item.chapter_goal || item.conflict || '', 180),
+      changed: existing ? (
+        String(existing.title || '') !== `第${item.chapter_no}章 ${item.title}`
+        || String(existing.summary || '') !== String(item.chapter_goal || '')
+        || String(existing.hook || '') !== String(item.ending_hook || '')
+      ) : true,
+    }
+  })
+  return {
+    mode: writeMode,
+    created: rows.filter(row => row.action === 'create').length,
+    updated: rows.filter(row => row.action === 'update').length,
+    skipped: rows.filter(row => row.action === 'skipped').length,
+    rows,
+  }
+}
+
+async function applyFuture100SkeletonOutlines(activeWorkspace: string, project: any, outlines: any[], skeleton: any[], options: any = {}) {
+  const preview = buildFuture100WritePreview(outlines, skeleton, options)
+  const writtenOutlines: any[] = []
+  const writeSummary = { mode: preview.mode, created: 0, updated: 0, skipped: 0 }
+  for (const row of preview.rows) {
+    const item = skeleton.find(entry => Number(entry.chapter_no) === Number(row.chapter_no))
+    if (!item || row.action === 'skipped') {
+      writeSummary.skipped += 1
+      continue
+    }
+    const outlineData = future100OutlineData(project, item)
+    if (row.action === 'update' && row.existing_outline_id) {
+      const updated = await updateNovelOutline(activeWorkspace, row.existing_outline_id, outlineData)
+      if (updated) {
+        writtenOutlines.push(updated)
+        writeSummary.updated += 1
+      } else {
+        writeSummary.skipped += 1
+      }
+    } else {
+      const created = await createNovelOutline(activeWorkspace, outlineData)
+      writtenOutlines.push(created)
+      writeSummary.created += 1
+    }
+  }
+  return { writtenOutlines, writeSummary, writePreview: preview }
+}
+
+function buildFuture100Prompt(project: any, chapters: any[], outlines: any[], reviews: any[], fromChapter: number, horizon: number, audit: any) {
+  const recentChapters = chapters
+    .slice()
+    .sort((a, b) => Number(b.chapter_no || 0) - Number(a.chapter_no || 0))
+    .slice(0, 12)
+    .reverse()
+    .map(chapter => ({
+      chapter_no: chapter.chapter_no,
+      title: chapter.title,
+      goal: chapter.chapter_goal,
+      summary: chapter.chapter_summary,
+      ending_hook: chapter.ending_hook,
+      written: Boolean(chapter.chapter_text),
+    }))
+  return [
+    '任务：为商业长篇网文生成未来100章骨架，只输出 JSON。',
+    `项目：${project.title} / ${project.genre || ''}`,
+    `规划范围：第 ${fromChapter} 章到第 ${fromChapter + horizon - 1} 章，共 ${horizon} 章。`,
+    '目标：支撑300万字以上长篇连载，避免塌线；每章必须有目标、冲突、回报/爽点、章末钩子；每20-30章有阶段结算和新压力源。',
+    '输出结构：{"skeleton":[{"chapter_no":1,"title":"","chapter_goal":"","conflict":"","payoff":"","foreshadowing":[],"ending_hook":"","volume_stage":"","commercial_purpose":"","risk_notes":[]}],"volume_beats":[],"reader_retention_strategy":[],"risk_notes":[]}',
+    '【本地骨架审计】',
+    JSON.stringify({ score: audit.score, metrics: audit.metrics, risks: audit.risks, weak_chapters: audit.weak_chapters?.slice(0, 20) }, null, 2),
+    '【写作圣经/状态机】',
+    JSON.stringify({ writing_bible: project.reference_config?.writing_bible || {}, story_state: project.reference_config?.story_state || {} }, null, 2).slice(0, 7000),
+    '【已有分卷/大纲】',
+    JSON.stringify(outlines.slice(0, 120), null, 2).slice(0, 9000),
+    '【近期章节】',
+    JSON.stringify(recentChapters, null, 2),
+    '【近期审稿风险】',
+    JSON.stringify(reviews.slice(0, 12).map(item => ({ type: item.review_type, summary: item.summary, issues: item.issues })), null, 2).slice(0, 4000),
+  ].join('\n')
 }
 
 export function registerNovelPlanningRoutes(app: Express, ctx: PlanningRoutesContext) {
@@ -953,6 +1221,131 @@ export function registerNovelPlanningRoutes(app: Express, ctx: PlanningRoutesCon
         payload: JSON.stringify({ report, from_chapter: fromChapter, horizon }),
       })
       res.json({ ok: true, report, review: saved, result })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.get('/api/novel/projects/:id/future-100-skeleton', async (req, res) => {
+    try {
+      const activeWorkspace = ctx.getWorkspace()
+      const project = await ctx.getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const [chapters, outlines, reviews] = await Promise.all([
+        listNovelChapters(activeWorkspace, project.id),
+        listNovelOutlines(activeWorkspace, project.id),
+        listNovelReviews(activeWorkspace, project.id),
+      ])
+      const report = buildFuture100SkeletonAudit(project, chapters, outlines, reviews, {
+        from_chapter: Number(req.query.from_chapter || 0) || undefined,
+        horizon: Number(req.query.horizon || 100) || 100,
+      })
+      res.json({ ok: true, report })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.post('/api/novel/projects/:id/future-100-skeleton/generate', async (req, res) => {
+    try {
+      const activeWorkspace = ctx.getWorkspace()
+      const project = await ctx.getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const modelId = ctx.getStageModelId(project, 'outline', Number(req.body.model_id || 0) || undefined)
+      if (!modelId) return res.status(400).json({ error: 'model_id is required' })
+      const [chapters, outlines, reviews] = await Promise.all([
+        listNovelChapters(activeWorkspace, project.id),
+        listNovelOutlines(activeWorkspace, project.id),
+        listNovelReviews(activeWorkspace, project.id),
+      ])
+      const horizon = Math.max(20, Math.min(120, Number(req.body.horizon || 100)))
+      const audit = buildFuture100SkeletonAudit(project, chapters, outlines, reviews, {
+        from_chapter: Number(req.body.from_chapter || 0) || undefined,
+        horizon,
+      })
+      const prompt = buildFuture100Prompt(project, chapters, outlines, reviews, audit.from_chapter, horizon, audit)
+      const result = await executeNovelAgent('outline-agent', project, { task: prompt }, {
+        activeWorkspace,
+        modelId: String(modelId),
+        maxTokens: 12000,
+        temperature: ctx.getStageTemperature(project, 'outline', 0.45),
+        skipMemory: true,
+      })
+      const payload = getNovelPayload(result)
+      const skeleton = normalizeFuture100Skeleton(payload, audit.from_chapter, horizon)
+      const writtenOutlines: any[] = []
+      const writeMode = req.body?.write_mode === 'append' || req.body?.overwrite_outline === false ? 'append' : 'upsert'
+      const writeSummary = { mode: writeMode, created: 0, updated: 0, skipped: 0 }
+      let writePreview = buildFuture100WritePreview(outlines, skeleton, { write_mode: writeMode })
+      if (req.body?.write_outline === true) {
+        const applied = await applyFuture100SkeletonOutlines(activeWorkspace, project, outlines, skeleton, { write_mode: writeMode })
+        writtenOutlines.push(...applied.writtenOutlines)
+        writeSummary.created = applied.writeSummary.created
+        writeSummary.updated = applied.writeSummary.updated
+        writeSummary.skipped = applied.writeSummary.skipped
+        writePreview = applied.writePreview
+      }
+      const review = await createNovelReview(activeWorkspace, {
+        project_id: project.id,
+        review_type: 'future_100_skeleton',
+        status: skeleton.length >= Math.min(80, horizon) ? 'ok' : 'warn',
+        summary: `未来100章骨架：生成 ${skeleton.length}/${horizon} 章${req.body?.write_outline === true ? `，创建 ${writeSummary.created}，更新 ${writeSummary.updated}` : ''}`,
+        issues: asArray(payload?.risk_notes).slice(0, 30).map((item: any) => String(item)),
+        payload: JSON.stringify({ audit, skeleton, payload, written_outline_ids: writtenOutlines.map(item => item.id), write_summary: writeSummary, write_preview: writePreview }),
+      })
+      const run = await appendNovelRun(activeWorkspace, {
+        project_id: project.id,
+        run_type: 'future_100_skeleton',
+        step_name: `future-100-${audit.from_chapter}-${audit.from_chapter + horizon - 1}`,
+        status: (result as any).error ? 'warn' : 'success',
+        input_ref: JSON.stringify({ model_id: modelId, from_chapter: audit.from_chapter, horizon, write_outline: req.body?.write_outline === true, write_mode: writeMode }),
+        output_ref: JSON.stringify({ audit, skeleton, review_id: review.id, written_outline_count: writtenOutlines.length, write_summary: writeSummary, write_preview: writePreview, modelName: (result as any).modelName }),
+        error_message: (result as any).error || '',
+      })
+      res.json({ ok: true, audit, skeleton, payload, review, run, written_outlines: writtenOutlines, write_summary: writeSummary, write_preview: writePreview, result })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.post('/api/novel/projects/:id/future-100-skeleton/apply', async (req, res) => {
+    try {
+      const activeWorkspace = ctx.getWorkspace()
+      const project = await ctx.getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const skeleton = normalizeFuture100Skeleton({ skeleton: req.body?.skeleton || [] }, Number(req.body?.from_chapter || 1), Math.max(20, Math.min(120, Number(req.body?.horizon || 100))))
+      if (!skeleton.length) return res.status(400).json({ error: 'skeleton is required' })
+      const outlines = await listNovelOutlines(activeWorkspace, project.id)
+      const applied = await applyFuture100SkeletonOutlines(activeWorkspace, project, outlines, skeleton, {
+        write_mode: req.body?.write_mode || 'upsert',
+        selected_chapter_nos: req.body?.selected_chapter_nos,
+      })
+      const review = await createNovelReview(activeWorkspace, {
+        project_id: project.id,
+        review_type: 'future_100_skeleton_apply',
+        status: applied.writeSummary.created + applied.writeSummary.updated > 0 ? 'ok' : 'warn',
+        summary: `应用未来100章骨架：创建 ${applied.writeSummary.created}，更新 ${applied.writeSummary.updated}，跳过 ${applied.writeSummary.skipped}`,
+        issues: [],
+        payload: JSON.stringify({ skeleton, written_outline_ids: applied.writtenOutlines.map(item => item.id), write_summary: applied.writeSummary, write_preview: applied.writePreview }),
+      })
+      const run = await appendNovelRun(activeWorkspace, {
+        project_id: project.id,
+        run_type: 'future_100_skeleton_apply',
+        step_name: `future-100-apply-${skeleton[0]?.chapter_no || 'start'}-${skeleton[skeleton.length - 1]?.chapter_no || 'end'}`,
+        status: 'success',
+        input_ref: JSON.stringify({ write_mode: req.body?.write_mode || 'upsert', selected_chapter_nos: req.body?.selected_chapter_nos || [] }),
+        output_ref: JSON.stringify({ review_id: review.id, written_outline_count: applied.writtenOutlines.length, write_summary: applied.writeSummary, write_preview: applied.writePreview }),
+      })
+      const [chapters, nextOutlines, reviews] = await Promise.all([
+        listNovelChapters(activeWorkspace, project.id),
+        listNovelOutlines(activeWorkspace, project.id),
+        listNovelReviews(activeWorkspace, project.id),
+      ])
+      const audit = buildFuture100SkeletonAudit(project, chapters, nextOutlines, reviews, {
+        from_chapter: skeleton[0]?.chapter_no || Number(req.body?.from_chapter || 1),
+        horizon: skeleton.length,
+      })
+      res.json({ ok: true, audit, skeleton, review, run, written_outlines: applied.writtenOutlines, write_summary: applied.writeSummary, write_preview: applied.writePreview })
     } catch (error) {
       res.status(500).json({ error: String(error) })
     }

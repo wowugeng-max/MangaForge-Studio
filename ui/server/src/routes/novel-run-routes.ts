@@ -36,6 +36,7 @@ const AUDIT_SOURCE_LABELS: Record<string, string> = {
   release_similarity_batch: '发布相似度批量任务',
   mechanical_qa: '机械质检',
   mechanical_qa_llm: 'AI机械质检复核',
+  longform_production_repair: '长线生产修复',
   propagation_debt: '传播债务',
   propagation_debt_llm: 'AI传播债务方案',
 }
@@ -354,6 +355,12 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
                                               : run.run_type === 'project_backup' ? '项目备份'
                                                 : run.run_type === 'project_backup_import' ? '备份导入'
                                                   : run.run_type === 'mechanical_qa_repair' ? '机械质检修复'
+                                                    : run.run_type === 'first30_retention_diagnosis' ? '前30章留存诊断'
+                                                      : run.run_type === 'first30_retention_repair' ? '前30章留存修复'
+                                                        : run.run_type === 'longform_pressure_test' ? '300万字压力测试'
+                                                          : run.run_type === 'future_100_skeleton' ? '未来100章骨架'
+                                                            : run.run_type === 'future_100_skeleton_apply' ? '应用未来100章骨架'
+                                                              : run.run_type === 'longform_production_repair' ? '长线生产修复'
                                                     : run.run_type === 'genre_template_apply' ? '类型模板'
                       : run.run_type,
           step_name: run.step_name,
@@ -399,6 +406,12 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
           'project_backup_import',
           'genre_template_apply',
           'mechanical_qa_repair',
+          'first30_retention_diagnosis',
+          'first30_retention_repair',
+          'longform_pressure_test',
+          'future_100_skeleton',
+          'future_100_skeleton_apply',
+          'longform_production_repair',
         ].includes(run.run_type))
         .map(normalizeRun)
       const active = tasks.filter(task => ['queued', 'ready', 'running', 'paused', 'needs_approval'].includes(task.status))
@@ -664,6 +677,109 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
         }),
       })
       res.json({ ok: true, run: updated, resume_endpoint: payload.resume_endpoint || `/api/novel/chapters/${payload.chapter_id}/generate-prose`, pipeline: parseJsonLikePayload(updated?.output_ref) })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.post('/api/novel/runs/:id/tasks/:taskIndex/status', async (req, res) => {
+    try {
+      const activeWorkspace = ctx.getWorkspace()
+      const projectId = Number(req.body.project_id || req.query.project_id || 0)
+      const runs = await listNovelRuns(activeWorkspace, projectId)
+      const run = runs.find(item => item.id === Number(req.params.id))
+      if (!run) return res.status(404).json({ error: 'run not found' })
+      const payload = parseJsonLikePayload(run.output_ref) || {}
+      const tasks = Array.isArray(payload.tasks) ? payload.tasks : []
+      const taskIndex = Number(req.params.taskIndex)
+      if (!Number.isInteger(taskIndex) || taskIndex < 0 || taskIndex >= tasks.length) {
+        return res.status(404).json({ error: 'task not found' })
+      }
+      const status = String(req.body.status || 'needs_review')
+      const allowed = new Set(['open', 'in_progress', 'needs_review', 'resolved'])
+      if (!allowed.has(status)) return res.status(400).json({ error: 'invalid task status' })
+      const now = new Date().toISOString()
+      const nextTasks = tasks.map((task: any, index: number) => index === taskIndex ? {
+        ...task,
+        task_status: status,
+        status_note: String(req.body.note || ''),
+        updated_at: now,
+        started_at: status === 'in_progress' ? now : task.started_at,
+        needs_review_at: status === 'needs_review' ? now : task.needs_review_at,
+        resolved_at: status === 'resolved' ? now : task.resolved_at,
+      } : task)
+      const resolvedCount = nextTasks.filter((task: any) => task.task_status === 'resolved').length
+      const needsReviewCount = nextTasks.filter((task: any) => task.task_status === 'needs_review').length
+      const nextRunStatus = nextTasks.length > 0 && resolvedCount === nextTasks.length ? 'completed' : run.status === 'completed' ? 'ready' : run.status
+      const updated = await updateNovelRun(activeWorkspace, run.id, {
+        status: nextRunStatus,
+        output_ref: JSON.stringify({
+          ...payload,
+          tasks: nextTasks,
+          task_status_summary: {
+            total: nextTasks.length,
+            resolved: resolvedCount,
+            needs_review: needsReviewCount,
+            open: nextTasks.filter((task: any) => !task.task_status || task.task_status === 'open').length,
+            updated_at: now,
+          },
+        }),
+      })
+      res.json({ ok: true, run: updated, task: nextTasks[taskIndex], task_status_summary: parseJsonLikePayload(updated?.output_ref)?.task_status_summary })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.post('/api/novel/runs/:id/tasks/status-bulk', async (req, res) => {
+    try {
+      const activeWorkspace = ctx.getWorkspace()
+      const projectId = Number(req.body.project_id || req.query.project_id || 0)
+      const runs = await listNovelRuns(activeWorkspace, projectId)
+      const run = runs.find(item => item.id === Number(req.params.id))
+      if (!run) return res.status(404).json({ error: 'run not found' })
+      const payload = parseJsonLikePayload(run.output_ref) || {}
+      const tasks = Array.isArray(payload.tasks) ? payload.tasks : []
+      const rawIndices = Array.isArray(req.body.task_indices) ? req.body.task_indices : []
+      const taskIndices = rawIndices.length ? rawIndices.map(Number).filter((index: number) => Number.isInteger(index) && index >= 0 && index < tasks.length) : tasks.map((_: any, index: number) => index)
+      if (!taskIndices.length) return res.status(400).json({ error: 'no valid task indices' })
+      const status = String(req.body.status || 'resolved')
+      const allowed = new Set(['open', 'in_progress', 'needs_review', 'resolved'])
+      if (!allowed.has(status)) return res.status(400).json({ error: 'invalid task status' })
+      const selected = new Set(taskIndices)
+      const now = new Date().toISOString()
+      const nextTasks = tasks.map((task: any, index: number) => selected.has(index) ? {
+        ...task,
+        task_status: status,
+        status_note: String(req.body.note || ''),
+        updated_at: now,
+        started_at: status === 'in_progress' ? now : task.started_at,
+        needs_review_at: status === 'needs_review' ? now : task.needs_review_at,
+        resolved_at: status === 'resolved' ? now : task.resolved_at,
+      } : task)
+      const resolvedCount = nextTasks.filter((task: any) => task.task_status === 'resolved').length
+      const needsReviewCount = nextTasks.filter((task: any) => task.task_status === 'needs_review').length
+      const nextRunStatus = nextTasks.length > 0 && resolvedCount === nextTasks.length ? 'completed' : run.status === 'completed' ? 'ready' : run.status
+      const updated = await updateNovelRun(activeWorkspace, run.id, {
+        status: nextRunStatus,
+        output_ref: JSON.stringify({
+          ...payload,
+          tasks: nextTasks,
+          task_status_summary: {
+            total: nextTasks.length,
+            resolved: resolvedCount,
+            needs_review: needsReviewCount,
+            open: nextTasks.filter((task: any) => !task.task_status || task.task_status === 'open').length,
+            updated_at: now,
+          },
+        }),
+      })
+      res.json({
+        ok: true,
+        run: updated,
+        updated_count: taskIndices.length,
+        task_status_summary: parseJsonLikePayload(updated?.output_ref)?.task_status_summary,
+      })
     } catch (error) {
       res.status(500).json({ error: String(error) })
     }

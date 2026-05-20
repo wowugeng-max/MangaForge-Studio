@@ -351,6 +351,292 @@ function buildPropagationDebt(project: any, chapters: any[], characters: any[], 
   }
 }
 
+function includesAny(value: string, words: string[]) {
+  const text = String(value || '')
+  return words.some(word => text.includes(word))
+}
+
+function outlineText(outlines: any[]) {
+  return outlines.map(item => [item.title, item.summary, item.key_plot, item.goal, item.conflict, item.payoff].filter(Boolean).join(' ')).join('\n')
+}
+
+function buildFirst30RetentionDiagnosis(project: any, chapters: any[], outlines: any[], characters: any[], reviews: any[]) {
+  const sorted = chapters.slice().sort((a, b) => Number(a.chapter_no || 0) - Number(b.chapter_no || 0))
+  const first30 = sorted.filter(chapter => Number(chapter.chapter_no || 0) >= 1 && Number(chapter.chapter_no || 0) <= 30)
+  const bible = project.reference_config?.writing_bible || {}
+  const promiseText = [
+    project.title,
+    project.genre,
+    project.summary,
+    bible.reader_promise,
+    bible.core_selling_point,
+    bible.commercial_positioning,
+    bible.hook,
+    bible.cool_point,
+    outlineText(outlines.slice(0, 30)),
+  ].filter(Boolean).join('\n')
+  const risks: any[] = []
+  const addRisk = (severity: string, segment: string, issue: string, action: string) => {
+    risks.push({ severity, segment, issue, action })
+  }
+  const promiseReady = wc(promiseText) >= 120 && includesAny(promiseText, ['爽', '冲突', '目标', '代价', '秘密', '升级', '反转', '悬念', '压迫', '金手指'])
+  if (!promiseReady) addRisk('high', '定位', '读者承诺/商业卖点不够清晰。', '先补一句能解释主角凭什么持续变强、读者每章为什么追读的核心承诺。')
+  if (first30.length < 10) addRisk('high', '1-10', `前10章素材不足，当前只有 ${first30.length} 章。`, '至少补齐前10章标题、目标、章末钩子和正文/摘要，再判断留存。')
+  if (first30.length < 30) addRisk('medium', '11-30', `前30章样本不足，当前只有 ${first30.length} 章。`, '补齐第11-30章的阶段目标和付费前持续钩子。')
+
+  const firstChapter = first30[0]
+  if (!firstChapter?.chapter_text && !firstChapter?.chapter_summary) {
+    addRisk('high', '1-3', '第一章缺正文或摘要，无法验证开篇吸引力。', '第一章必须直接呈现压力、异常、主角选择或强情绪结果。')
+  } else {
+    const firstText = [firstChapter.title, firstChapter.chapter_goal, firstChapter.chapter_summary, firstChapter.ending_hook, chapterSnippet(firstChapter, 1000)].join('\n')
+    if (!includesAny(firstText, ['危', '死', '杀', '输', '退婚', '羞辱', '秘密', '系统', '天赋', '债', '局', '敌', '反转', '异变', '觉醒'])) {
+      addRisk('high', '1-3', '第一章缺强压力、异常事件或可传播钩子。', '重写开篇前三页，把主角困境、异常资源和即时冲突前置。')
+    }
+    if (!firstChapter.ending_hook && !includesAny(firstText.slice(-260), ['却', '然而', '忽然', '没想到', '下一刻', '秘密', '门外', '身后'])) {
+      addRisk('medium', '1-3', '第一章章末钩子偏弱。', '章末留下明确未解决问题或更大威胁，驱动读者点下一章。')
+    }
+  }
+
+  const segmentDefs = [
+    { key: '1-3', label: '开篇三章', min: 3, chapters: first30.filter(ch => Number(ch.chapter_no || 0) <= 3) },
+    { key: '4-10', label: '试读十章', min: 7, chapters: first30.filter(ch => Number(ch.chapter_no || 0) >= 4 && Number(ch.chapter_no || 0) <= 10) },
+    { key: '11-30', label: '付费前蓄势', min: 20, chapters: first30.filter(ch => Number(ch.chapter_no || 0) >= 11 && Number(ch.chapter_no || 0) <= 30) },
+  ]
+  const commercialKeywords = ['爽', '赢', '反杀', '突破', '奖励', '收获', '打脸', '震惊', '压迫', '危机', '秘密', '线索', '反转', '升级', '排名', '赌', '债', '追杀', '考核', '任务']
+  const segments = segmentDefs.map(segment => {
+    const rows = segment.chapters.map(chapter => {
+      const text = [chapter.title, chapter.chapter_goal, chapter.chapter_summary, chapter.ending_hook, chapter.chapter_text].filter(Boolean).join('\n')
+      const wordCount = wc(chapter.chapter_text || '')
+      const hasGoal = wc(chapter.chapter_goal || chapter.chapter_summary || '') >= 20
+      const hasHook = wc(chapter.ending_hook || '') >= 8 || includesAny(text.slice(-320), ['却', '然而', '忽然', '没想到', '下一刻', '身后', '门外', '消息'])
+      const payoffHits = commercialKeywords.filter(word => text.includes(word)).length
+      const repeated = topRepeatedPhrases(chapter.chapter_text || '').length
+      const missingText = !chapter.chapter_text
+      const score = Math.max(0, Math.min(100,
+        42
+        + (hasGoal ? 16 : 0)
+        + (hasHook ? 16 : 0)
+        + Math.min(18, payoffHits * 3)
+        + (wordCount >= 1800 ? 8 : wordCount >= 900 ? 4 : 0)
+        - (missingText ? 30 : 0)
+        - Math.min(12, repeated * 3),
+      ))
+      return {
+        chapter_id: chapter.id,
+        chapter_no: chapter.chapter_no,
+        title: chapter.title,
+        word_count: wordCount,
+        has_goal: hasGoal,
+        has_hook: hasHook,
+        payoff_hits: payoffHits,
+        repeated_phrase_groups: repeated,
+        score,
+        flags: [
+          missingText ? '缺正文' : '',
+          !hasGoal ? '目标不清' : '',
+          !hasHook ? '章末钩子弱' : '',
+          payoffHits < 2 ? '爽点/悬念信号少' : '',
+          repeated >= 2 ? '重复表达偏多' : '',
+        ].filter(Boolean),
+      }
+    })
+    const coverage = Math.min(100, Math.round((segment.chapters.length / segment.min) * 100))
+    const goalRate = rows.length ? Math.round(rows.filter(row => row.has_goal).length / rows.length * 100) : 0
+    const hookRate = rows.length ? Math.round(rows.filter(row => row.has_hook).length / rows.length * 100) : 0
+    const payoffAverage = rows.length ? Number((rows.reduce((sum, row) => sum + row.payoff_hits, 0) / rows.length).toFixed(1)) : 0
+    const score = Math.round((coverage * 0.25) + (goalRate * 0.2) + (hookRate * 0.25) + Math.min(100, payoffAverage * 22) * 0.3)
+    if (coverage < 80) addRisk(segment.key === '1-3' ? 'high' : 'medium', segment.key, `${segment.label}覆盖不足。`, `补齐${segment.label}的章节规划和正文样本。`)
+    if (rows.length && hookRate < 70) addRisk(segment.key === '1-3' ? 'high' : 'medium', segment.key, `${segment.label}章末追读钩子覆盖率只有 ${hookRate}%。`, '为每章补“未解决问题/更大危险/利益诱惑”之一。')
+    if (rows.length && payoffAverage < 2) addRisk('medium', segment.key, `${segment.label}每章爽点/悬念信号偏少。`, '每章至少安排一个可感知收益、风险升级、信息揭示或关系反转。')
+    return { ...segment, chapter_count: segment.chapters.length, coverage, goal_rate: goalRate, hook_rate: hookRate, payoff_average: payoffAverage, score, rows }
+  })
+  const chapterCards = segments.flatMap(segment => segment.rows).sort((a, b) => Number(a.chapter_no || 0) - Number(b.chapter_no || 0))
+  const unresolvedReviewCount = reviews.filter(review => ['warn', 'blocked', 'fail'].includes(review.status)).length
+  if (unresolvedReviewCount >= 3) addRisk('medium', '质量债务', `存在 ${unresolvedReviewCount} 条未处理审稿风险。`, '前30章留存优化前先处理高危审稿项，避免问题重复传播。')
+  if (characters.filter(character => character.status !== 'archived').length < 3) addRisk('medium', '人物牵引', '活跃角色数量偏少，关系张力可能不足。', '至少明确主角、压迫者/竞争者、盟友或利益诱惑者的前30章作用。')
+  const segmentAverage = segments.length ? Math.round(segments.reduce((sum, item) => sum + item.score, 0) / segments.length) : 0
+  const score = Math.max(0, Math.min(100, segmentAverage - risks.reduce((sum, item) => sum + (item.severity === 'high' ? 7 : item.severity === 'medium' ? 3 : 1), 0)))
+  return {
+    report_id: `first30-${Date.now()}`,
+    created_at: new Date().toISOString(),
+    score,
+    status: score >= 82 ? 'ready' : score >= 65 ? 'needs_repair' : 'blocked',
+    summary: score >= 82 ? '前30章具备较好的追读基础。' : score >= 65 ? '前30章有商业化雏形，但关键留存点需要补强。' : '前30章留存风险较高，不建议直接批量生成正文。',
+    positioning: {
+      promise_ready: promiseReady,
+      genre: project.genre || '',
+      reader_promise: compactText(bible.reader_promise || bible.core_selling_point || project.summary || '', 180),
+    },
+    segments: segments.map(({ chapters: _chapters, ...item }) => item),
+    risks,
+    chapter_cards: chapterCards.slice(0, 30),
+    next_actions: [
+      !promiseReady ? '先补齐一句清晰读者承诺：主角目标、升级资源、核心矛盾、追读奖励。' : '',
+      risks.some(item => item.segment === '1-3') ? '优先重做第1-3章：开篇压力、异常资源、章末钩子必须前置。' : '',
+      risks.some(item => item.segment === '4-10') ? '梳理第4-10章试读闭环：每章必须有目标推进和结尾未解。' : '',
+      risks.some(item => item.segment === '11-30') ? '补第11-30章阶段升级、竞争压力和付费前大钩子。' : '',
+      '把本报告的高危项处理后，再运行未来10章滚动规划。',
+    ].filter(Boolean),
+  }
+}
+
+function buildFirst30RetentionRepairTasks(report: any) {
+  const tasks: any[] = []
+  const addTask = (task: any) => {
+    if (!tasks.some(item => item.task_id === task.task_id)) tasks.push(task)
+  }
+  const risks = asArray(report?.risks)
+  for (const risk of risks.filter((item: any) => ['high', 'medium'].includes(String(item.severity || '')))) {
+    addTask({
+      task_id: `first30-risk-${String(risk.segment || 'global').replace(/\W+/g, '-')}-${textHash(`${risk.issue || ''}${risk.action || ''}`)}`,
+      task_type: 'retention_risk',
+      severity: risk.severity,
+      segment: risk.segment || '全局',
+      title: `${risk.segment || '全局'}留存风险修复`,
+      message: risk.issue || '',
+      action: risk.action || '打开前30章诊断，按风险项补齐。',
+      acceptance_criteria: [
+        '风险对应章节或分段已补齐目标、冲突、爽点/悬念和章末钩子。',
+        '重新运行前30章留存诊断后，该分段不再出现同类高危风险。',
+      ],
+    })
+  }
+  for (const row of asArray(report?.chapter_cards).filter((item: any) => Number(item.score || 0) < 72 || asArray(item.flags).length > 0)) {
+    const flags = asArray(row.flags)
+    addTask({
+      task_id: `first30-chapter-${row.chapter_id || row.chapter_no}-${textHash(flags.join('|') || String(row.score || 0))}`,
+      task_type: 'chapter_retention_patch',
+      chapter_id: row.chapter_id || null,
+      chapter_no: row.chapter_no || null,
+      title: `第${row.chapter_no || '-'}章留存补丁`,
+      issue_type: flags.join('、') || '留存分偏低',
+      severity: Number(row.score || 0) < 60 ? 'high' : 'medium',
+      message: flags.length ? flags.join('、') : `章节留存分 ${row.score}`,
+      action: [
+        flags.includes('目标不清') ? '补明确章节目标和主角选择。' : '',
+        flags.includes('章末钩子弱') ? '重做章末未解决问题、威胁升级或利益诱惑。' : '',
+        flags.includes('爽点/悬念信号少') ? '增加一个可感知收益、信息揭示、关系反转或风险升级。' : '',
+        flags.includes('缺正文') ? '进入章节流水线生成正文。' : '',
+        flags.includes('重复表达偏多') ? '局部修订重复表达，降低机器感。' : '',
+      ].filter(Boolean).join(' ') || '打开章节做局部留存修订。',
+      acceptance_criteria: [
+        '章节目标、即时冲突和章末钩子可被一句话说清。',
+        '章节至少包含一个爽点、悬念揭示、风险升级或关系反转。',
+      ],
+    })
+  }
+  return tasks
+    .sort((a, b) => (a.severity === 'high' ? -1 : 0) - (b.severity === 'high' ? -1 : 0))
+    .slice(0, 80)
+}
+
+function buildLongformPressureTest(project: any, chapters: any[], outlines: any[], characters: any[], worldbuilding: any[], reviews: any[]) {
+  const targetWords = 3000000
+  const writtenChapters = chapters.filter(chapter => chapter.chapter_text)
+  const writtenWords = writtenChapters.reduce((sum, chapter) => sum + wc(chapter.chapter_text || ''), 0)
+  const avgWords = writtenChapters.length ? Math.round(writtenWords / writtenChapters.length) : 3000
+  const estimatedChapters = {
+    at_2500: Math.ceil(targetWords / 2500),
+    at_3000: Math.ceil(targetWords / 3000),
+    at_4000: Math.ceil(targetWords / 4000),
+    based_on_current_average: Math.ceil(targetWords / Math.max(1200, avgWords)),
+  }
+  const config = project.reference_config || {}
+  const bible = config.writing_bible || {}
+  const state = config.story_state || {}
+  const volumeOutlines = outlines.filter(item => ['volume', 'arc', 'part'].includes(String(item.outline_type || '')))
+  const chapterOutlines = outlines.filter(item => String(item.outline_type || '') === 'chapter')
+  const longText = [
+    project.summary,
+    JSON.stringify(bible),
+    JSON.stringify(state),
+    outlineText(outlines),
+    characters.map(item => [item.name, item.role, item.goal, item.motivation, item.secret, item.current_state].filter(Boolean).join(' ')).join('\n'),
+    worldbuilding.map(item => [item.title, item.category, item.content, item.summary].filter(Boolean).join(' ')).join('\n'),
+  ].join('\n')
+  const weakPoints: any[] = []
+  const addWeak = (severity: string, area: string, issue: string, action: string) => weakPoints.push({ severity, area, issue, action })
+  const volumeCapacity = Math.min(100, volumeOutlines.length * 12 + chapterOutlines.length)
+  const characterCapacity = Math.min(100, characters.filter(item => item.status !== 'archived').length * 9)
+  const worldCapacity = Math.min(100, worldbuilding.length * 10)
+  const conflictSignals = ['反派', '敌', '竞争', '宗门', '家族', '公司', '组织', '联盟', '阵营', '战争', '考核', '排名', '追杀', '债', '秘密', '阴谋', '规则']
+  const expansionSignals = ['副本', '地图', '城市', '大陆', '世界', '职业', '境界', '体系', '产业', '学院', '门派', '公司', '案件', '赛季', '战场']
+  const payoffSignals = ['升级', '突破', '奖励', '资源', '身份', '关系', '打脸', '反转', '真相', '收获', '权力', '财富']
+  const conflictScore = Math.min(100, conflictSignals.filter(word => longText.includes(word)).length * 8)
+  const expansionScore = Math.min(100, expansionSignals.filter(word => longText.includes(word)).length * 9)
+  const payoffScore = Math.min(100, payoffSignals.filter(word => longText.includes(word)).length * 8)
+  const storyStateFresh = Number(state.last_updated_chapter || 0) >= Math.max(0, ...writtenChapters.map(chapter => Number(chapter.chapter_no || 0))) - 1
+  const reviewDebt = reviews.filter(review => ['warn', 'blocked', 'fail'].includes(review.status)).length
+
+  if (volumeOutlines.length < 8) addWeak('high', '分卷结构', `分卷/阶段不足，当前 ${volumeOutlines.length} 个。`, '按300万字目标至少拆出8-12个大阶段，每阶段有目标、反派压力、地图/身份变化和结算奖励。')
+  if (chapterOutlines.length < 80) addWeak('medium', '章节储备', `章节级大纲储备偏少，当前 ${chapterOutlines.length} 条。`, '先做未来100章骨架，避免日更时现想主线。')
+  if (characters.filter(item => item.status !== 'archived').length < 10) addWeak('high', '人物池', '活跃角色池不足，长篇关系张力会很快耗尽。', '补主角团、竞争者、阶段反派、资源提供者、读者情绪出口角色。')
+  if (worldbuilding.length < 8) addWeak('medium', '世界/题材资产', '世界观/组织/规则资产不足。', '补地图、组织、职业/境界、资源、禁忌、公共事件等可复用资产。')
+  if (conflictScore < 55) addWeak('high', '冲突阶梯', '反派/组织/竞争压力信号不足。', '设计从小压迫者到大组织的阶梯，确保每卷都有更高层压力。')
+  if (expansionScore < 50) addWeak('medium', '扩展机制', '地图、规则或副本扩展信号不足。', '引入可不断扩容的空间：地图、职业、案件、副本、产业或势力版图。')
+  if (payoffScore < 55) addWeak('medium', '回报循环', '升级/收益/身份跃迁信号不足。', '明确每3-5章小结算、每卷大结算，让读者看到持续收益。')
+  if (!storyStateFresh && writtenChapters.length) addWeak('high', '状态机', '故事状态机落后于已写正文。', '继续批量生成前先同步角色位置、秘密暴露、道具归属和未解冲突。')
+  if (reviewDebt >= 5) addWeak('medium', '质量债务', `未处理审稿风险较多：${reviewDebt} 条。`, '把高危审稿项转成修复任务，否则长篇问题会复利扩大。')
+
+  const capacity = {
+    written_words: writtenWords,
+    written_chapters: writtenChapters.length,
+    current_average_words_per_chapter: avgWords,
+    volume_capacity: volumeCapacity,
+    character_capacity: characterCapacity,
+    world_capacity: worldCapacity,
+    conflict_ladder: conflictScore,
+    expansion_engine: expansionScore,
+    payoff_loop: payoffScore,
+    story_state_fresh: storyStateFresh,
+    review_debt: reviewDebt,
+  }
+  const score = Math.max(0, Math.min(100, Math.round(
+    volumeCapacity * 0.2
+    + characterCapacity * 0.15
+    + worldCapacity * 0.12
+    + conflictScore * 0.18
+    + expansionScore * 0.15
+    + payoffScore * 0.12
+    + (storyStateFresh ? 8 : 0)
+    - weakPoints.reduce((sum, item) => sum + (item.severity === 'high' ? 5 : item.severity === 'medium' ? 2 : 1), 0),
+  )))
+  const volumePressure = volumeOutlines.slice(0, 20).map((item, index) => ({
+    outline_id: item.id,
+    order: index + 1,
+    title: item.title,
+    summary: compactText(item.summary || item.goal || '', 160),
+    has_goal: wc(item.summary || item.goal || '') >= 30,
+    has_conflict: includesAny([item.title, item.summary, item.conflict].filter(Boolean).join('\n'), conflictSignals),
+    has_payoff: includesAny([item.title, item.summary, item.payoff].filter(Boolean).join('\n'), payoffSignals),
+  }))
+  return {
+    report_id: `longform-${Date.now()}`,
+    created_at: new Date().toISOString(),
+    target_words: targetWords,
+    score,
+    status: score >= 80 ? 'scalable' : score >= 62 ? 'fragile' : 'blocked',
+    summary: score >= 80 ? '具备长线扩容基础，可以进入百章骨架和日更流水线。' : score >= 62 ? '存在长篇潜力，但需要先补分卷、人物和冲突阶梯。' : '当前材料不足以支撑300万字以上长篇，直接生成会高度塌线。',
+    estimated_chapters: estimatedChapters,
+    capacity,
+    weak_points: weakPoints,
+    volume_pressure: volumePressure,
+    expansion_plan: [
+      { stage: '0-30章', goal: '验证开篇承诺、主角目标、爽点回报和追读钩子。', output: '前30章留存诊断通过后再扩。' },
+      { stage: '31-100章', goal: '完成第一卷大闭环，建立核心能力边界和第一批稳定读者期待。', output: '未来100章骨架、阶段反派、卷末大结算。' },
+      { stage: '100-300章', goal: '引入更高层组织/地图/规则，让冲突从个人升级到体系。', output: '3-4个卷级目标与角色关系变化表。' },
+      { stage: '300章以后', goal: '用地图、势力、职业/境界、公共事件持续扩容。', output: '每卷新资源、新敌人、新身份、新代价。' },
+    ],
+    next_actions: [
+      weakPoints.some(item => item.area === '分卷结构') ? '先补8-12个分卷/阶段目标，每卷写清冲突、爽点、卷末结算。' : '',
+      weakPoints.some(item => item.area === '人物池') ? '补角色池和反派阶梯，确保每卷都有关系张力和竞争压力。' : '',
+      weakPoints.some(item => item.area === '世界/题材资产') ? '补可复用世界资产：地图、组织、规则、资源、禁忌。' : '',
+      !storyStateFresh ? '同步故事状态机后再继续批量生成。' : '',
+      '建立“前30章诊断 -> 未来10章滚动规划 -> 机械质检 -> 传播债务”的日更循环。',
+    ].filter(Boolean),
+  }
+}
+
 function modelUsageRecommendation(model: any) {
   const name = `${model.display_name || ''} ${model.model_name || ''}`.toLowerCase()
   const caps = model.capabilities || {}
@@ -373,6 +659,15 @@ function interpretCreativeCommand(command: string, project: any) {
   }
   if (/机械|错字|重复|水文|ai味|质检|规则/.test(text)) {
     add('mechanical_qa', '运行机械质检', `/api/novel/projects/${project.id}/mechanical-qa/run`, 'POST', true, '检查重复、超长段落、禁用词、章末钩子和基础可读性。')
+  }
+  if (/前\s*30|前三十|留存|追读|开篇|试读|付费前/.test(text)) {
+    add('first30_retention', '运行前30章留存诊断', `/api/novel/projects/${project.id}/first30-retention-diagnosis`, 'POST', true, '检查开篇三章、试读十章和付费前蓄势的追读风险。')
+  }
+  if (/(前\s*30|前三十|留存|追读|开篇|试读|付费前).*(修复|任务|队列)|(?:修复|任务|队列).*(前\s*30|前三十|留存|追读|开篇|试读|付费前)/.test(text)) {
+    add('first30_repair', '生成前30章留存修复任务', `/api/novel/projects/${project.id}/first30-retention-diagnosis/repair-queue`, 'POST', true, '把前30章留存风险转成任务中心可处理的修复队列。')
+  }
+  if (/300\s*万|三百万|长篇|长线|百万字|压力测试|塌线|扩容/.test(text)) {
+    add('longform_pressure', '运行300万字长线压力测试', `/api/novel/projects/${project.id}/longform-pressure-test`, 'POST', true, '评估分卷容量、人物池、世界资产、冲突阶梯和回报循环是否能支撑长篇。')
   }
   if (/债务|影响|改动|传播|状态机|一致性/.test(text)) {
     add('propagation_debt', '刷新传播债务', `/api/novel/projects/${project.id}/propagation-debt/refresh`, 'POST', true, '检查状态机、角色状态、分卷目标和未处理审稿风险。')
@@ -506,6 +801,67 @@ export function registerNovelCommercialOpsRoutes(app: Express, ctx: CommercialOp
               status: report.status === 'ok' ? 'ok' : 'warn',
               summary: `指令台机械质检：${report.score} 分，问题 ${report.summary.issue_count} 个`,
               issues: report.issues.slice(0, 30).map((item: any) => `第${item.chapter_no}章 ${item.message}`),
+              payload: JSON.stringify({ command: plan.command, report }),
+            })
+            executed.push({ key: action.key, status: 'success', report, review_id: review.id })
+          } else if (action.key === 'first30_retention') {
+            const [chapters, outlines, characters, reviews] = await Promise.all([
+              listNovelChapters(activeWorkspace, project.id),
+              listNovelOutlines(activeWorkspace, project.id),
+              listNovelCharacters(activeWorkspace, project.id),
+              listNovelReviews(activeWorkspace, project.id),
+            ])
+            const report = buildFirst30RetentionDiagnosis(project, chapters, outlines, characters, reviews)
+            const review = await createNovelReview(activeWorkspace, {
+              project_id: project.id,
+              review_type: 'first30_retention_diagnosis',
+              status: report.status === 'ready' ? 'ok' : 'warn',
+              summary: `指令台前30章留存诊断：${report.score} 分`,
+              issues: report.risks.slice(0, 30).map((item: any) => `${item.segment}：${item.issue}`),
+              payload: JSON.stringify({ command: plan.command, report }),
+            })
+            executed.push({ key: action.key, status: 'success', report, review_id: review.id })
+          } else if (action.key === 'first30_repair') {
+            const [chapters, outlines, characters, reviews] = await Promise.all([
+              listNovelChapters(activeWorkspace, project.id),
+              listNovelOutlines(activeWorkspace, project.id),
+              listNovelCharacters(activeWorkspace, project.id),
+              listNovelReviews(activeWorkspace, project.id),
+            ])
+            const report = buildFirst30RetentionDiagnosis(project, chapters, outlines, characters, reviews)
+            const tasks = buildFirst30RetentionRepairTasks(report)
+            const run = await appendNovelRun(activeWorkspace, {
+              project_id: project.id,
+              run_type: 'first30_retention_repair',
+              step_name: `creative-command-first30-repair-${tasks.length}`,
+              status: tasks.length ? 'ready' : 'success',
+              input_ref: JSON.stringify({ command: plan.command, source_report_id: report.report_id }),
+              output_ref: JSON.stringify({ report: { report_id: report.report_id, score: report.score, status: report.status, summary: report.summary }, tasks }),
+            })
+            const review = await createNovelReview(activeWorkspace, {
+              project_id: project.id,
+              review_type: 'first30_retention_repair',
+              status: tasks.length ? 'warn' : 'ok',
+              summary: `指令台前30章留存修复任务：${tasks.length} 项`,
+              issues: tasks.slice(0, 30).map((item: any) => item.chapter_no ? `第${item.chapter_no}章 ${item.message}` : `${item.segment || item.task_type}：${item.message}`),
+              payload: JSON.stringify({ command: plan.command, run_id: run.id, tasks, report }),
+            })
+            executed.push({ key: action.key, status: 'success', report, tasks, run_id: run.id, review_id: review.id })
+          } else if (action.key === 'longform_pressure') {
+            const [chapters, outlines, characters, worldbuilding, reviews] = await Promise.all([
+              listNovelChapters(activeWorkspace, project.id),
+              listNovelOutlines(activeWorkspace, project.id),
+              listNovelCharacters(activeWorkspace, project.id),
+              listNovelWorldbuilding(activeWorkspace, project.id),
+              listNovelReviews(activeWorkspace, project.id),
+            ])
+            const report = buildLongformPressureTest(project, chapters, outlines, characters, worldbuilding, reviews)
+            const review = await createNovelReview(activeWorkspace, {
+              project_id: project.id,
+              review_type: 'longform_pressure_test',
+              status: report.status === 'scalable' ? 'ok' : 'warn',
+              summary: `指令台300万字长线压力测试：${report.score} 分`,
+              issues: report.weak_points.slice(0, 30).map((item: any) => `${item.area}：${item.issue}`),
               payload: JSON.stringify({ command: plan.command, report }),
             })
             executed.push({ key: action.key, status: 'success', report, review_id: review.id })
@@ -678,6 +1034,111 @@ export function registerNovelCommercialOpsRoutes(app: Express, ctx: CommercialOp
         error_message: (result as any).error || '',
       })
       res.json({ ok: true, report, ai_report: aiReport, llm_result: result, review, run })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.post('/api/novel/projects/:id/first30-retention-diagnosis', async (req, res) => {
+    try {
+      const activeWorkspace = ctx.getWorkspace()
+      const project = await ctx.getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const [chapters, outlines, characters, reviews] = await Promise.all([
+        listNovelChapters(activeWorkspace, project.id),
+        listNovelOutlines(activeWorkspace, project.id),
+        listNovelCharacters(activeWorkspace, project.id),
+        listNovelReviews(activeWorkspace, project.id),
+      ])
+      const report = buildFirst30RetentionDiagnosis(project, chapters, outlines, characters, reviews)
+      const review = await createNovelReview(activeWorkspace, {
+        project_id: project.id,
+        review_type: 'first30_retention_diagnosis',
+        status: report.status === 'ready' ? 'ok' : 'warn',
+        summary: `前30章留存诊断：${report.score} 分，${report.summary}`,
+        issues: report.risks.slice(0, 30).map((item: any) => `${item.segment}：${item.issue}`),
+        payload: JSON.stringify({ report }),
+      })
+      const run = await appendNovelRun(activeWorkspace, {
+        project_id: project.id,
+        run_type: 'first30_retention_diagnosis',
+        step_name: 'first30-retention',
+        status: report.status === 'ready' ? 'success' : 'warn',
+        output_ref: JSON.stringify({ report, review_id: review.id }),
+      })
+      res.json({ ok: true, report, review, run })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.post('/api/novel/projects/:id/first30-retention-diagnosis/repair-queue', async (req, res) => {
+    try {
+      const activeWorkspace = ctx.getWorkspace()
+      const project = await ctx.getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const [chapters, outlines, characters, reviews] = await Promise.all([
+        listNovelChapters(activeWorkspace, project.id),
+        listNovelOutlines(activeWorkspace, project.id),
+        listNovelCharacters(activeWorkspace, project.id),
+        listNovelReviews(activeWorkspace, project.id),
+      ])
+      const report = buildFirst30RetentionDiagnosis(project, chapters, outlines, characters, reviews)
+      const tasks = buildFirst30RetentionRepairTasks(report)
+      const run = await appendNovelRun(activeWorkspace, {
+        project_id: project.id,
+        run_type: 'first30_retention_repair',
+        step_name: `first30-retention-repair-${tasks.length}`,
+        status: tasks.length ? 'ready' : 'success',
+        input_ref: JSON.stringify({ source_report_id: report.report_id }),
+        output_ref: JSON.stringify({
+          report: { report_id: report.report_id, score: report.score, status: report.status, summary: report.summary },
+          tasks,
+        }),
+      })
+      const review = await createNovelReview(activeWorkspace, {
+        project_id: project.id,
+        review_type: 'first30_retention_repair',
+        status: tasks.length ? 'warn' : 'ok',
+        summary: `前30章留存修复任务：${tasks.length} 项`,
+        issues: tasks.slice(0, 30).map((item: any) => item.chapter_no ? `第${item.chapter_no}章 ${item.message}` : `${item.segment || item.task_type}：${item.message}`),
+        payload: JSON.stringify({ run_id: run.id, tasks, report }),
+      })
+      res.json({ ok: true, run, review, tasks, report })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.post('/api/novel/projects/:id/longform-pressure-test', async (req, res) => {
+    try {
+      const activeWorkspace = ctx.getWorkspace()
+      const project = await ctx.getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const [chapters, outlines, characters, worldbuilding, reviews] = await Promise.all([
+        listNovelChapters(activeWorkspace, project.id),
+        listNovelOutlines(activeWorkspace, project.id),
+        listNovelCharacters(activeWorkspace, project.id),
+        listNovelWorldbuilding(activeWorkspace, project.id),
+        listNovelReviews(activeWorkspace, project.id),
+      ])
+      const report = buildLongformPressureTest(project, chapters, outlines, characters, worldbuilding, reviews)
+      const review = await createNovelReview(activeWorkspace, {
+        project_id: project.id,
+        review_type: 'longform_pressure_test',
+        status: report.status === 'scalable' ? 'ok' : 'warn',
+        summary: `300万字长线压力测试：${report.score} 分，${report.summary}`,
+        issues: report.weak_points.slice(0, 30).map((item: any) => `${item.area}：${item.issue}`),
+        payload: JSON.stringify({ report }),
+      })
+      const run = await appendNovelRun(activeWorkspace, {
+        project_id: project.id,
+        run_type: 'longform_pressure_test',
+        step_name: 'longform-pressure',
+        status: report.status === 'scalable' ? 'success' : 'warn',
+        output_ref: JSON.stringify({ report, review_id: review.id }),
+      })
+      res.json({ ok: true, report, review, run })
     } catch (error) {
       res.status(500).json({ error: String(error) })
     }
