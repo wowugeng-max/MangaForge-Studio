@@ -1201,13 +1201,12 @@ export default function NovelStudio() {
             <Input prefix={<SearchOutlined />} value={searchText} onChange={e => setSearchText(e.target.value)} placeholder="搜索项目标题、题材、状态、目标读者" allowClear />
           </Card>
 
-          {filteredProjects.length === 0 ? (
+          {projects.length > 0 && filteredProjects.length === 0 ? (
             <Card style={{ borderRadius: 18, textAlign: 'center', padding: 40 }}>
-              <div style={{ fontSize: 48, marginBottom: 16 }}>📝</div>
-              <Title level={5}>暂无小说项目</Title>
-              <Text type="secondary">点击上方「新建商业长篇」开始创作你的第一部小说。</Text>
+              <Title level={5}>未找到匹配项目</Title>
+              <Text type="secondary">调整搜索条件后重试。</Text>
             </Card>
-          ) : (
+          ) : filteredProjects.length > 0 ? (
             <Row gutter={16}>
               {filteredProjects.map(project => (
                 <Col xs={24} md={12} xl={8} key={project.id} style={{ marginBottom: 16 }}>
@@ -1269,7 +1268,7 @@ export default function NovelStudio() {
                 </Col>
               ))}
             </Row>
-          )}
+          ) : null}
         </div>
       </Card>
 
