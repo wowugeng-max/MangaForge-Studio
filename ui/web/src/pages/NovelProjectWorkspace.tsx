@@ -12,7 +12,9 @@ import { createSSEClient, generateClientId, type SSEMessage } from '../utils/sse
 import { ChapterDirectorySidebar } from './novel-workspace/ChapterDirectorySidebar'
 import type { EditorKind } from './novel-workspace/EditorModal'
 import { ReferencePanel } from './novel-workspace/ReferencePanel'
+import { StoryPlanningWorkspace, type PlanningLoadingKey } from './novel-workspace/StoryPlanningWorkspace'
 import { WorkspaceCenter } from './novel-workspace/WorkspaceCenter'
+import { buildPlanningWorkspaceModel, type PlanningActionKey } from './novel-workspace/planningWorkspaceModel'
 import { useChapterAutosave } from './novel-workspace/useChapterAutosave'
 import { useChapterVersions } from './novel-workspace/useChapterVersions'
 import { useNovelWorkspaceData, type ChapterSortMode, type ChapterStatusFilter } from './novel-workspace/useNovelWorkspaceData'
@@ -53,6 +55,8 @@ const productionModeOptions = [
   { value: 'draft_review_revise_store', label: '生成、自检、修订、入库' },
   { value: 'full_auto', label: '全自动完整流水线' },
 ]
+
+type WorkspaceArea = 'storyPlanning' | 'chapterWriting' | 'storyAssets' | 'qualityRevision' | 'productionOps'
 
 /* ── main component ─────────────────────────────────────────────── */
 export default function NovelProjectWorkspace() {
@@ -145,6 +149,7 @@ export default function NovelProjectWorkspace() {
   // ── right reference panel ──
   const [rightPanelOpen, setRightPanelOpen] = useState(false)
   const [rightPanelTab, setRightPanelTab] = useState('worldbuilding')
+  const [workspaceArea, setWorkspaceArea] = useState<WorkspaceArea>('storyPlanning')
 
   const proseEditorRef = useRef<EditorView | null>(null)
 
@@ -354,6 +359,15 @@ export default function NovelProjectWorkspace() {
     chapterStatusFilter,
     chapterSortMode,
   })
+
+  const planningWorkspaceModel = useMemo(() => buildPlanningWorkspaceModel({
+    selectedProject,
+    outlines,
+    chapters: sortedChapters,
+    activeChapter,
+    materialScore: activeChapterDiagnostics?.material_score,
+    commercialReadiness,
+  }), [selectedProject, outlines, sortedChapters, activeChapter, activeChapterDiagnostics?.material_score, commercialReadiness])
 
   const proseQualityReports = useMemo(() => (
     reviews
@@ -3597,6 +3611,29 @@ export default function NovelProjectWorkspace() {
     return <div style={{ display: 'grid', placeItems: 'center', height: '100%' }}><ReloadOutlined className="anticon" style={{ fontSize: 24, animation: 'spin 1s linear infinite' }} /> 加载中…</div>
   }
 
+  const planningLoadingKey = ((): PlanningLoadingKey | undefined => {
+    const keys: PlanningLoadingKey[] = ['rollingPlan', 'future100Audit', 'future100Generate', 'longformPressure', 'topic', 'referenceDiagnosis']
+    return keys.includes(commercialToolLoading as PlanningLoadingKey) ? commercialToolLoading as PlanningLoadingKey : undefined
+  })()
+
+  const handlePlanningAction = (key: PlanningActionKey) => {
+    const actions: Record<PlanningActionKey, () => void> = {
+      update_rolling_plan: () => { void runRollingPlan() },
+      complete_volume_plan: () => setOutlinePanelOpen(true),
+      enter_chapter_writing: () => setWorkspaceArea('chapterWriting'),
+      open_outline_tree: () => setOutlineTreeOpen(true),
+      future100_audit: () => { void runFuture100SkeletonAudit() },
+      future100_generate: () => { void generateFuture100Skeleton() },
+      longform_pressure: () => { void runLongformPressureTest() },
+      topic_validation: () => { void runTopicValidation() },
+      reference_diagnosis: () => { void openReferenceKnowledgeDiagnosis() },
+      open_story_assets: () => setWorkspaceArea('storyAssets'),
+      update_story_state: () => openStoryStateEditor(),
+      open_quality_revision: () => setWorkspaceArea('qualityRevision'),
+    }
+    actions[key]?.()
+  }
+
   const handleWorkflowMenuClick = (key: string) => {
     const actions: Record<string, () => void> = {
       referenceConfig: () => setReferenceConfigOpen(true),
@@ -3781,49 +3818,65 @@ export default function NovelProjectWorkspace() {
           onSelectChapter={(chapterId) => { void selectChapter(chapterId) }}
         />
 
-        <WorkspaceCenter
-          isEmptyProject={isEmptyProject}
-          selectedProject={selectedProject}
-          activeChapter={activeChapter}
-          materialScore={activeChapterDiagnostics?.material_score}
-          worldbuildingCount={worldbuilding.length}
-          characterCount={characters.length}
-          outlineCount={outlines.length}
-          streamingChapterId={streamingChapterId}
-          streamingText={streamingText}
-          streamingProgress={streamingProgress}
-          streamingPercent={streamingPercent}
-          generationPipeline={generationPipeline}
-          streamingEndRef={streamingEndRef}
-          proseEditorRef={proseEditorRef}
-          saveStatus={saveStatus}
-          planning={planning}
-          incubatingOriginal={incubatingOriginal}
-          generatingProse={generatingProse}
-          generatingSceneCards={generatingSceneCards}
-          diagnosticsLoading={diagnosticsLoading}
-          pipelineLoading={pipelineLoading}
-          editorReportLoading={editorReportLoading}
-          onRunPlan={runPlan}
-          onCreateOutline={() => openEditor('outline')}
-          onCreateChapter={() => openEditor('chapter')}
-          onRunOriginalIncubator={() => { void runOriginalIncubator() }}
-          onOpenReferenceConfig={() => setReferenceConfigOpen(true)}
-          onOpenWritingBibleEditor={() => { void openWritingBibleEditor() }}
-          onGenerateCurrentChapterProse={() => generateCurrentChapterProse()}
-          onRepairAndGenerateCurrentChapter={repairContextAndGenerateCurrentChapter}
-          onGenerateSceneCards={() => generateSceneCardsForActiveChapter()}
-          onOpenGenerationDiagnostics={openGenerationDiagnostics}
-          onOpenQualityCard={openChapterQualityCard}
-          onStartChapterPipeline={startChapterPipeline}
-          onCreateEditorReport={createEditorReport}
-          onEditActiveChapter={() => activeChapter && openEditor('chapter', activeChapter)}
-          onChapterTextChange={(next) => {
-            const chapterId = activeChapterId
-            setChapters(prev => prev.map(c => c.id === chapterId ? { ...c, chapter_text: next } : c))
-            scheduleSave(chapterId, next)
-          }}
-        />
+        {workspaceArea === 'chapterWriting' ? (
+          <WorkspaceCenter
+            isEmptyProject={isEmptyProject}
+            selectedProject={selectedProject}
+            activeChapter={activeChapter}
+            materialScore={activeChapterDiagnostics?.material_score}
+            worldbuildingCount={worldbuilding.length}
+            characterCount={characters.length}
+            outlineCount={outlines.length}
+            streamingChapterId={streamingChapterId}
+            streamingText={streamingText}
+            streamingProgress={streamingProgress}
+            streamingPercent={streamingPercent}
+            generationPipeline={generationPipeline}
+            streamingEndRef={streamingEndRef}
+            proseEditorRef={proseEditorRef}
+            saveStatus={saveStatus}
+            planning={planning}
+            incubatingOriginal={incubatingOriginal}
+            generatingProse={generatingProse}
+            generatingSceneCards={generatingSceneCards}
+            diagnosticsLoading={diagnosticsLoading}
+            pipelineLoading={pipelineLoading}
+            editorReportLoading={editorReportLoading}
+            onRunPlan={runPlan}
+            onCreateOutline={() => openEditor('outline')}
+            onCreateChapter={() => openEditor('chapter')}
+            onRunOriginalIncubator={() => { void runOriginalIncubator() }}
+            onOpenReferenceConfig={() => setReferenceConfigOpen(true)}
+            onOpenWritingBibleEditor={() => { void openWritingBibleEditor() }}
+            onGenerateCurrentChapterProse={() => generateCurrentChapterProse()}
+            onRepairAndGenerateCurrentChapter={repairContextAndGenerateCurrentChapter}
+            onGenerateSceneCards={() => generateSceneCardsForActiveChapter()}
+            onOpenGenerationDiagnostics={openGenerationDiagnostics}
+            onOpenQualityCard={openChapterQualityCard}
+            onStartChapterPipeline={startChapterPipeline}
+            onCreateEditorReport={createEditorReport}
+            onEditActiveChapter={() => activeChapter && openEditor('chapter', activeChapter)}
+            onChapterTextChange={(next) => {
+              const chapterId = activeChapterId
+              setChapters(prev => prev.map(c => c.id === chapterId ? { ...c, chapter_text: next } : c))
+              scheduleSave(chapterId, next)
+            }}
+          />
+        ) : (
+          <StoryPlanningWorkspace
+            model={planningWorkspaceModel}
+            selectedModelId={selectedModelId}
+            loadingKey={planningLoadingKey}
+            onAction={handlePlanningAction}
+            onSelectChapter={(chapterNo) => {
+              const chapter = sortedChapters.find(item => Number(item.chapter_no) === Number(chapterNo))
+              if (!chapter) return
+              void selectChapter(chapter.id).then((saved) => {
+                if (saved) setWorkspaceArea('chapterWriting')
+              })
+            }}
+          />
+        )}
 
         <ReferencePanel
           open={rightPanelOpen}
