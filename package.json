@@ -11,6 +11,7 @@
     "check": "bun run build:server && bun run build:web",
     "smoke:novel": "node scripts/check-novel-generation-workflow.mjs",
     "smoke:novel:local": "node scripts/run-novel-smoke-local.mjs",
+    "test:novel-server": "cd ui/server && bun test src/novel.test.ts",
     "test:novel-entry": "cd ui/web && bun test src/components/novel-entry/launchpadModel.test.ts src/pages/novel-lobby/novelLobbyModel.test.ts",
     "test:planning-workspace": "cd ui/web && bun test src/pages/novel-workspace/planningWorkspaceModel.test.ts"
   }

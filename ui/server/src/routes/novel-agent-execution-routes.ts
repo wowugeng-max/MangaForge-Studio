@@ -1,7 +1,6 @@
 import type { Express } from 'express'
 import {
   appendNovelRun,
-  createNovelChapter,
   createNovelCharacter,
   createNovelOutline,
   createNovelReview,
@@ -13,6 +12,7 @@ import {
   listNovelWorldbuilding,
   updateNovelChapter,
   updateNovelProject,
+  upsertNovelChapterByNumber,
 } from '../novel'
 import { buildNovelSeed, buildRepairPlan, executeNovelAgentChain } from '../llm'
 
@@ -147,7 +147,7 @@ export function registerNovelAgentExecutionRoutes(app: Express, ctx: AgentExecut
         chapterItems = seed.chapters
       }
       for (const ch of chapterItems) {
-        await createNovelChapter(activeWorkspace, {
+        await upsertNovelChapterByNumber(activeWorkspace, {
           project_id: projectId,
           chapter_no: ch.chapter_no,
           title: ch.title || '',

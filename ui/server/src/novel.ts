@@ -553,6 +553,13 @@ export async function createNovelOutline(activeWorkspace: string, data: Partial<
 export async function updateNovelOutline(activeWorkspace: string, id: number, data: Partial<NovelOutlineRecord>) { const store = await readStore(activeWorkspace); const idx = store.outlines.findIndex(item => item.id === id); if (idx < 0) return null; const current = store.outlines[idx]; store.outlines[idx] = normalizeOutlineRecord(data, current); await writeStore(activeWorkspace, store); return store.outlines[idx] }
 export async function listNovelChapters(activeWorkspace: string, projectId: number) { const store = await readStore(activeWorkspace); return dedupById(store.chapters.filter(item => item.project_id === projectId)).sort((a, b) => a.chapter_no - b.chapter_no) }
 export async function createNovelChapter(activeWorkspace: string, data: Partial<NovelChapterRecord>) { const store = await readStore(activeWorkspace); const record = normalizeChapterRecord(data, { id: store.chapters.reduce((max, item) => Math.max(max, item.id), 0) + 1 }); store.chapters.push(record); await writeStore(activeWorkspace, store); return record }
+export async function upsertNovelChapterByNumber(activeWorkspace: string, data: Partial<NovelChapterRecord>) {
+  const projectId = Number(data.project_id || 0)
+  const chapterNo = Number(data.chapter_no || 0)
+  const existing = (await listNovelChapters(activeWorkspace, projectId)).find(item => Number(item.chapter_no) === chapterNo)
+  if (existing) return updateNovelChapter(activeWorkspace, existing.id, data, { createVersion: false })
+  return createNovelChapter(activeWorkspace, data)
+}
 type UpdateNovelChapterOptions = { createVersion?: boolean; versionSource?: NovelChapterVersionSource; forceVersion?: boolean }
 function versionedChapterSnapshotChanged(current: NovelChapterRecord, next: NovelChapterRecord) {
   return (
