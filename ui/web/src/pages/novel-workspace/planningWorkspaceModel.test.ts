@@ -60,7 +60,9 @@ describe('buildPlanningWorkspaceModel', () => {
     expect(model.topStatus.currentChapterLabel).toBe('第7章')
     expect(model.topStatus.targetWords).toBe(3000000)
     expect(model.topStatus.writtenWords).toBeGreaterThan(0)
-    expect(model.topStatus.future10Coverage.ready).toBe(true)
+    expect(model.topStatus.future10Coverage.ready).toBe(false)
+    expect(model.topStatus.future10Coverage.expectedChapters).toBe(10)
+    expect(model.topStatus.future10Coverage.missingChapters).toContain(13)
     expect(model.mainline.readerPromise).toBe('寒门少年以阵法改写宗门秩序')
     expect(model.mainline.currentVolumeGoal).toBe('让主角从外门杂役进入内门视野')
     expect(model.mainline.currentStageConflict).toBe('执事逼主角交出阵盘')
@@ -103,5 +105,30 @@ describe('buildPlanningWorkspaceModel', () => {
     expect(model.healthIssues.map(issue => issue.key)).toContain('missing_volume_goal')
     expect(model.healthIssues.map(issue => issue.actionKey)).toContain('complete_volume_plan')
     expect(model.topStatus.longformHealth.status).toBe('needs_planning')
+  })
+
+  test('reports incomplete future coverage when fewer than 10 future chapter numbers exist', () => {
+    const partialChapters = Array.from({ length: 4 }).map((_, index) => ({
+      id: index + 1,
+      chapter_no: index + 1,
+      title: `第${index + 1}章`,
+      chapter_goal: `推进主线 ${index + 1}`,
+      conflict: '外门压迫',
+      ending_hook: '危机递进',
+      raw_payload: { mainline_progress: '外门压迫线' },
+    }))
+
+    const model = buildPlanningWorkspaceModel({
+      selectedProject: project,
+      outlines,
+      chapters: partialChapters,
+      activeChapter: partialChapters[0],
+    })
+
+    expect(model.topStatus.future10Coverage.ready).toBe(false)
+    expect(model.topStatus.future10Coverage.expectedChapters).toBe(10)
+    expect(model.topStatus.future10Coverage.plannedChapters).toBe(4)
+    expect(model.topStatus.future10Coverage.missingChapters).toEqual([5, 6, 7, 8, 9, 10])
+    expect(model.healthIssues.map(issue => issue.key)).toContain('future10_incomplete')
   })
 })

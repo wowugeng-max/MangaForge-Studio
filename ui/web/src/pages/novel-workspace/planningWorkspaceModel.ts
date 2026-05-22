@@ -162,26 +162,25 @@ function routeRiskTags(chapter: AnyRecord, activeTurns: AnyRecord[] = []) {
 function buildCoverage(chapters: AnyRecord[], startChapterNo: number, span: number): FuturePlanningCoverage {
   const expected = Array.from({ length: span }).map((_, index) => startChapterNo + index)
   const byNo = new Map(chapters.map(chapter => [Number(chapter?.chapter_no), chapter]))
-  const existing = expected.map(chapterNo => byNo.get(chapterNo)).filter(Boolean) as AnyRecord[]
-  const expectedChapters = Math.min(span, Math.max(existing.length, 0))
-  const planned = existing.filter(chapter => {
-    return text(chapter?.title) && (
-      text(chapter?.chapter_goal || chapter?.chapterTask || chapter?.task) ||
-      text(chapter?.conflict || chapter?.raw_payload?.conflict) ||
-      text(chapter?.ending_hook || chapter?.endingHook || chapter?.hook) ||
+  const isPlannedEnough = (chapter?: AnyRecord) => {
+    if (!chapter) return false
+    return Boolean(
+      text(chapter?.title) &&
+      text(chapter?.chapter_goal || chapter?.chapterTask || chapter?.task) &&
+      text(chapter?.conflict || chapter?.raw_payload?.conflict) &&
+      text(chapter?.ending_hook || chapter?.endingHook || chapter?.hook) &&
       text(chapter?.raw_payload?.mainline_progress || chapter?.mainline_progress)
     )
-  })
-  const missingChapters = existing
-    .filter(chapter => !planned.includes(chapter))
-    .map(chapter => Number(chapter?.chapter_no))
+  }
+  const plannedChapters = expected.filter(chapterNo => isPlannedEnough(byNo.get(chapterNo))).length
+  const missingChapters = expected.filter(chapterNo => !isPlannedEnough(byNo.get(chapterNo)))
 
   return {
-    ready: planned.length >= Math.min(4, expectedChapters),
-    plannedChapters: planned.length,
-    expectedChapters,
+    ready: missingChapters.length === 0,
+    plannedChapters,
+    expectedChapters: span,
     missingChapters,
-    label: `${planned.length}/${expectedChapters}`,
+    label: `${plannedChapters}/${span}`,
   }
 }
 
