@@ -61,7 +61,7 @@ describe('buildPlanningWorkspaceModel', () => {
     expect(model.topStatus.targetWords).toBe(3000000)
     expect(model.topStatus.writtenWords).toBeGreaterThan(0)
     expect(model.topStatus.future10Coverage.ready).toBe(false)
-    expect(model.topStatus.future10Coverage.expectedChapters).toBe(10)
+    expect(model.topStatus.future10Coverage.required).toBe(10)
     expect(model.topStatus.future10Coverage.missingChapters).toContain(13)
     expect(model.mainline.readerPromise).toBe('寒门少年以阵法改写宗门秩序')
     expect(model.mainline.currentVolumeGoal).toBe('让主角从外门杂役进入内门视野')
@@ -104,6 +104,8 @@ describe('buildPlanningWorkspaceModel', () => {
 
     expect(model.healthIssues.map(issue => issue.key)).toContain('missing_volume_goal')
     expect(model.healthIssues.map(issue => issue.actionKey)).toContain('complete_volume_plan')
+    expect(model.healthIssues.find(issue => issue.key === 'missing_reader_promise')?.actionKey).toBe('open_story_assets')
+    expect(model.healthIssues.find(issue => issue.key === 'future10_incomplete')?.actionKey).toBe('update_rolling_plan')
     expect(model.topStatus.longformHealth.status).toBe('needs_planning')
   })
 
@@ -126,9 +128,57 @@ describe('buildPlanningWorkspaceModel', () => {
     })
 
     expect(model.topStatus.future10Coverage.ready).toBe(false)
-    expect(model.topStatus.future10Coverage.expectedChapters).toBe(10)
-    expect(model.topStatus.future10Coverage.plannedChapters).toBe(4)
+    expect(model.topStatus.future10Coverage.required).toBe(10)
+    expect(model.topStatus.future10Coverage.planned).toBe(4)
     expect(model.topStatus.future10Coverage.missingChapters).toEqual([5, 6, 7, 8, 9, 10])
     expect(model.healthIssues.map(issue => issue.key)).toContain('future10_incomplete')
+  })
+
+  test('checks story state freshness against latest written chapter instead of active future chapter', () => {
+    const writtenAndPlannedChapters = Array.from({ length: 12 }).map((_, index) => ({
+      id: index + 1,
+      chapter_no: index + 1,
+      title: `第${index + 1}章`,
+      chapter_goal: `推进主线 ${index + 1}`,
+      conflict: '外门压迫',
+      ending_hook: '危机递进',
+      chapter_text: index < 3 ? '正文'.repeat(100) : index === 3 ? '【占位正文】' : '',
+      raw_payload: { mainline_progress: '外门压迫线' },
+    }))
+    const currentStoryProject = {
+      ...project,
+      reference_config: {
+        ...project.reference_config,
+        story_state: { ...project.reference_config.story_state, last_updated_chapter: 3 },
+      },
+    }
+
+    const model = buildPlanningWorkspaceModel({
+      selectedProject: currentStoryProject,
+      outlines,
+      chapters: writtenAndPlannedChapters,
+      activeChapter: writtenAndPlannedChapters[9],
+    })
+
+    expect(model.healthIssues.map(issue => issue.key)).not.toContain('story_state_stale')
+  })
+
+  test('does not mark a chapter as serving the volume from story state alone', () => {
+    const unplannedChapter = {
+      id: 20,
+      chapter_no: 20,
+      title: '第20章',
+      chapter_text: '',
+      raw_payload: {},
+    }
+
+    const model = buildPlanningWorkspaceModel({
+      selectedProject: project,
+      outlines,
+      chapters: [unplannedChapter],
+      activeChapter: unplannedChapter,
+    })
+
+    expect(model.mainline.currentChapterServesVolume).toBe(false)
   })
 })

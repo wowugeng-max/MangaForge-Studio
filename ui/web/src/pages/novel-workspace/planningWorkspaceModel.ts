@@ -4,8 +4,8 @@ type AnyRecord = Record<string, any>
 
 export type FuturePlanningCoverage = {
   ready: boolean
-  plannedChapters: number
-  expectedChapters: number
+  planned: number
+  required: number
   missingChapters: number[]
   label: string
 }
@@ -15,17 +15,37 @@ export type PlanningHealthStatus = {
   label: string
 }
 
+export type PlanningActionKey =
+  | 'update_rolling_plan'
+  | 'complete_volume_plan'
+  | 'enter_chapter_writing'
+  | 'open_outline_tree'
+  | 'future100_audit'
+  | 'future100_generate'
+  | 'longform_pressure'
+  | 'topic_validation'
+  | 'reference_diagnosis'
+  | 'open_story_assets'
+  | 'update_story_state'
+  | 'open_quality_revision'
+
 export type PlanningHealthIssue = {
   key: 'missing_reader_promise' | 'missing_volume_goal' | 'future10_incomplete' | 'story_state_stale' | 'material_weak'
   severity: 'critical' | 'warning'
   title: string
   detail: string
-  actionKey:
-    | 'complete_reader_promise'
-    | 'complete_volume_plan'
-    | 'complete_future10_plan'
-    | 'refresh_story_state'
-    | 'strengthen_materials'
+  actionKey: PlanningActionKey
+}
+
+export type PlanningVolumeTreeNode = {
+  id: any
+  title: string
+  level: string
+  startChapter?: number
+  endChapter?: number
+  chapterNo?: number
+  wordCount?: number
+  children: PlanningVolumeTreeNode[]
 }
 
 export type PlanningWorkspaceModel = {
@@ -59,11 +79,11 @@ export type PlanningWorkspaceModel = {
     mainlineProgress: string
     riskTags: string[]
   }>
-  volumeTree: Array<AnyRecord>
+  volumeTree: PlanningVolumeTreeNode[]
   healthIssues: PlanningHealthIssue[]
 }
 
-type BuildPlanningWorkspaceModelInput = {
+export type BuildPlanningWorkspaceModelInput = {
   selectedProject?: AnyRecord | null
   outlines?: AnyRecord[]
   chapters?: AnyRecord[]
@@ -177,15 +197,15 @@ function buildCoverage(chapters: AnyRecord[], startChapterNo: number, span: numb
 
   return {
     ready: missingChapters.length === 0,
-    plannedChapters,
-    expectedChapters: span,
+    planned: plannedChapters,
+    required: span,
     missingChapters,
     label: `${plannedChapters}/${span}`,
   }
 }
 
-function buildVolumeTree(outlines: AnyRecord[], chapters: AnyRecord[]) {
-  const byId = new Map<any, AnyRecord>()
+function buildVolumeTree(outlines: AnyRecord[], chapters: AnyRecord[]): PlanningVolumeTreeNode[] {
+  const byId = new Map<any, PlanningVolumeTreeNode>()
   outlines.forEach(outline => {
     byId.set(outline.id, {
       id: outline.id,
@@ -197,7 +217,7 @@ function buildVolumeTree(outlines: AnyRecord[], chapters: AnyRecord[]) {
     })
   })
 
-  const roots: AnyRecord[] = []
+  const roots: PlanningVolumeTreeNode[] = []
   outlines.forEach(outline => {
     const node = byId.get(outline.id)
     if (outline.parent_id && byId.has(outline.parent_id)) byId.get(outline.parent_id).children.push(node)
@@ -211,6 +231,7 @@ function buildVolumeTree(outlines: AnyRecord[], chapters: AnyRecord[]) {
       level: 'chapter',
       chapterNo: Number(chapter.chapter_no),
       wordCount: wc(chapter.chapter_text),
+      children: [],
     }
     const parent = outlines.find(outline => outline.id === chapter.outline_id) || outlines.find(outline => isStage(outline) && chapterInRange(chapterNode.chapterNo, outline))
     const parentNode = parent ? byId.get(parent.id) : null
@@ -225,7 +246,7 @@ function buildHealthIssues(args: {
   currentVolumeGoal: string
   future10Coverage: FuturePlanningCoverage
   storyState: AnyRecord
-  activeChapterNo: number
+  latestWrittenChapterNo: number
   materialScore?: AnyRecord | null
 }): PlanningHealthIssue[] {
   const issues: PlanningHealthIssue[] = []
@@ -236,7 +257,7 @@ function buildHealthIssues(args: {
       severity: 'critical',
       title: '缺读者承诺',
       detail: '项目缺少长篇核心承诺。',
-      actionKey: 'complete_reader_promise',
+      actionKey: 'open_story_assets',
     })
   }
   if (!args.currentVolumeGoal) {
@@ -254,16 +275,16 @@ function buildHealthIssues(args: {
       severity: 'critical',
       title: '未来十章规划不足',
       detail: `当前覆盖 ${args.future10Coverage.label}。`,
-      actionKey: 'complete_future10_plan',
+      actionKey: 'update_rolling_plan',
     })
   }
-  if (Number(args.storyState?.last_updated_chapter || 0) < args.activeChapterNo) {
+  if (Number(args.storyState?.last_updated_chapter || 0) < args.latestWrittenChapterNo) {
     issues.push({
       key: 'story_state_stale',
       severity: 'warning',
       title: '故事状态滞后',
       detail: '故事状态落后于当前章节。',
-      actionKey: 'refresh_story_state',
+      actionKey: 'update_story_state',
     })
   }
   if (args.materialScore && (Number(args.materialScore.score || 0) < 60 || args.materialScore.can_generate === false)) {
@@ -272,7 +293,7 @@ function buildHealthIssues(args: {
       severity: 'warning',
       title: '素材准备不足',
       detail: '素材评分或生成门槛提示需要补强。',
-      actionKey: 'strengthen_materials',
+      actionKey: 'complete_volume_plan',
     })
   }
 
@@ -283,6 +304,15 @@ function healthLabel(issues: PlanningHealthIssue[]): PlanningHealthStatus {
   if (issues.some(issue => issue.severity === 'critical')) return { status: 'needs_planning', label: '需要补规划' }
   if (issues.length > 0) return { status: 'drifting', label: '存在漂移' }
   return { status: 'healthy', label: '规划健康' }
+}
+
+function latestWrittenChapterNo(chapters: AnyRecord[]) {
+  return chapters.reduce((latest, chapter) => {
+    const chapterText = text(chapter?.chapter_text)
+    if (!chapterText || chapterText.includes('【占位正文】')) return latest
+    const chapterNo = Number(chapter?.chapter_no || 0)
+    return chapterNo > latest ? chapterNo : latest
+  }, 0)
 }
 
 export function buildPlanningWorkspaceModel(input: BuildPlanningWorkspaceModelInput): PlanningWorkspaceModel {
@@ -319,12 +349,19 @@ export function buildPlanningWorkspaceModel(input: BuildPlanningWorkspaceModelIn
   const readerPromise = firstNonEmpty(writingBible?.promise, writingBible?.reader_promise, selectedProject?.reader_promise)
   const currentVolumeGoal = firstNonEmpty(bibleVolume?.goal, currentVolume?.goal, currentVolume?.summary)
   const currentStageConflict = firstNonEmpty(bibleStage?.conflict, currentStage?.conflict, activeChapter?.conflict)
+  const activeChapterEvidence = firstNonEmpty(
+    activeChapter?.chapter_goal,
+    activeChapter?.raw_payload?.mainline_progress,
+    activeChapter?.mainline_progress,
+    activeChapter?.chapter_summary,
+    activeChapter?.summary,
+  )
   const healthIssues = buildHealthIssues({
     readerPromise,
     currentVolumeGoal,
     future10Coverage,
     storyState,
-    activeChapterNo,
+    latestWrittenChapterNo: latestWrittenChapterNo(chapters),
     materialScore: input.materialScore,
   })
 
@@ -347,11 +384,7 @@ export function buildPlanningWorkspaceModel(input: BuildPlanningWorkspaceModelIn
       payoffModel: firstNonEmpty(bibleStage?.payoff_model, activeChapter?.raw_payload?.payoff, writingBible?.payoff_model),
       previousTurn: text(previousTurn?.title, ''),
       nextTurn: text(nextTurn?.title, ''),
-      currentChapterServesVolume: Boolean(currentVolumeGoal && (
-        text(activeChapter?.chapter_goal).includes(currentVolumeGoal) ||
-        text(activeChapter?.raw_payload?.mainline_progress || activeChapter?.mainline_progress) ||
-        text(storyState?.mainline_progress)
-      )),
+      currentChapterServesVolume: Boolean(currentVolumeGoal && activeChapterEvidence),
       risks: [
         ...arrayValue(storyState?.foreshadowing_status)
           .filter(item => text(item?.status) && text(item?.status) !== 'resolved')
