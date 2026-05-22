@@ -25,6 +25,13 @@ function issueColor(severity: string) {
   return 'blue'
 }
 
+function issueIconColor(severity: string) {
+  const color = issueColor(severity)
+  if (color === 'red') return '#cf1322'
+  if (color === 'gold') return '#d48806'
+  return '#1677ff'
+}
+
 function formatWords(value: number) {
   if (value >= 10000) return `${(value / 10000).toFixed(1)}万`
   return String(value || 0)
@@ -234,7 +241,7 @@ export function StoryPlanningWorkspace({
                     >
                       <Space direction="vertical" size={6} style={{ width: '100%' }}>
                         <Space>
-                          <ExclamationCircleOutlined style={{ color: issueColor(issue.severity) === 'red' ? '#cf1322' : '#d48806' }} />
+                          <ExclamationCircleOutlined style={{ color: issueIconColor(issue.severity) }} />
                           <Text strong>{issue.title}</Text>
                         </Space>
                         <Text type="secondary" style={{ fontSize: 12 }}>{issue.detail}</Text>
