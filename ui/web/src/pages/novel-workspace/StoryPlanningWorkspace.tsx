@@ -1,5 +1,5 @@
 import React from 'react'
-import { Alert, Button, Card, Empty, Progress, Space, Tag, Tooltip, Typography } from 'antd'
+import { Alert, Button, Card, Empty, Grid, Progress, Space, Tag, Tooltip, Typography } from 'antd'
 import {
   BranchesOutlined,
   CheckCircleOutlined,
@@ -12,6 +12,17 @@ import {
 import type { PlanningActionKey, PlanningVolumeTreeNode, PlanningWorkspaceModel } from './planningWorkspaceModel'
 
 const { Text, Paragraph } = Typography
+const { useBreakpoint } = Grid
+
+export type PlanningLoadingKey = 'rollingPlan' | 'future100Audit' | 'future100Generate' | 'longformPressure' | 'topic' | 'referenceDiagnosis'
+
+export type StoryPlanningWorkspaceProps = {
+  model: PlanningWorkspaceModel
+  selectedModelId?: number
+  loadingKey?: PlanningLoadingKey
+  onAction: (key: PlanningActionKey) => void
+  onSelectChapter: (chapterNo: number) => void
+}
 
 function healthColor(status: PlanningWorkspaceModel['topStatus']['longformHealth']['status']) {
   if (status === 'healthy') return 'green'
@@ -19,13 +30,13 @@ function healthColor(status: PlanningWorkspaceModel['topStatus']['longformHealth
   return 'red'
 }
 
-function issueColor(severity: string) {
+function issueColor(severity: 'critical' | 'warning') {
   if (severity === 'critical') return 'red'
   if (severity === 'warning') return 'gold'
   return 'blue'
 }
 
-function issueIconColor(severity: string) {
+function issueIconColor(severity: 'critical' | 'warning') {
   const color = issueColor(severity)
   if (color === 'red') return '#cf1322'
   if (color === 'gold') return '#d48806'
@@ -100,13 +111,9 @@ export function StoryPlanningWorkspace({
   loadingKey,
   onAction,
   onSelectChapter,
-}: {
-  model: PlanningWorkspaceModel
-  selectedModelId?: number
-  loadingKey?: string
-  onAction: (key: PlanningActionKey) => void
-  onSelectChapter: (chapterNo: number) => void
-}) {
+}: StoryPlanningWorkspaceProps) {
+  const screens = useBreakpoint()
+  const compact = !screens.xl
   const wordPercent = model.topStatus.targetWords > 0
     ? Math.min(100, Math.round((model.topStatus.writtenWords / model.topStatus.targetWords) * 100))
     : 0
@@ -115,7 +122,7 @@ export function StoryPlanningWorkspace({
     <div style={{ flex: 1, minHeight: 0, overflow: 'auto', background: '#f6f8fb' }}>
       <div style={{ padding: '16px 20px 24px', display: 'grid', gap: 16 }}>
         <Card size="small" styles={{ body: { padding: 16 } }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 16, alignItems: 'center' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: compact ? '1fr' : 'minmax(0, 1fr) auto', gap: 16, alignItems: 'center' }}>
             <Space direction="vertical" size={8} style={{ minWidth: 0 }}>
               <Space wrap>
                 <Tag color="blue" bordered={false}>{model.topStatus.currentVolume}</Tag>
@@ -155,10 +162,10 @@ export function StoryPlanningWorkspace({
           </div>
         </Card>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 320px', gap: 16, alignItems: 'start' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: compact ? '1fr' : 'minmax(0, 1fr) 320px', gap: 16, alignItems: 'start' }}>
           <Space direction="vertical" size={16} style={{ minWidth: 0 }}>
             <Card title="主线与分卷推进" size="small">
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: compact ? '1fr' : 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
                 <Alert type="info" showIcon message="全书主线承诺" description={model.mainline.readerPromise || '未设置'} />
                 <Alert
                   type={model.mainline.currentChapterServesVolume ? 'success' : 'warning'}
@@ -195,10 +202,21 @@ export function StoryPlanningWorkspace({
               ) : (
                 <div style={{ display: 'grid', gap: 8 }}>
                   {model.futureRoute.map(row => (
-                    <div
+                    <button
                       key={`${row.chapterNo}-${row.title}`}
+                      type="button"
                       onClick={() => onSelectChapter(row.chapterNo)}
-                      style={{ border: '1px solid #edf0f5', borderRadius: 8, padding: '10px 12px', background: '#fff', cursor: 'pointer' }}
+                      style={{
+                        border: '1px solid #edf0f5',
+                        borderRadius: 8,
+                        padding: '10px 12px',
+                        background: '#fff',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        width: '100%',
+                        font: 'inherit',
+                        color: 'inherit',
+                      }}
                     >
                       <Space direction="vertical" size={6} style={{ width: '100%' }}>
                         <Space wrap>
@@ -211,7 +229,7 @@ export function StoryPlanningWorkspace({
                           主线：{row.mainlineProgress || '未标注'} · 冲突：{row.conflict || '未设置'} · 钩子：{row.endingHook || '未设置'}
                         </Text>
                       </Space>
-                    </div>
+                    </button>
                   ))}
                 </div>
               )}
