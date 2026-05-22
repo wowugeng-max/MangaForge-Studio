@@ -5,6 +5,8 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import apiClient from '../api/client'
 import MemoryPalacePanel from '../components/MemoryPalacePanel'
 import NovelCreateWizard from '../components/NovelCreateWizard'
+import NovelLobbyDashboard from './novel-lobby/NovelLobbyDashboard'
+import { buildNovelLobbyModel } from './novel-lobby/novelLobbyModel'
 
 const { Title, Text, Paragraph } = Typography
 
@@ -1145,6 +1147,8 @@ export default function NovelStudio() {
     draft: projects.filter(p => p.status === 'draft').length,
     active: projects.filter(p => p.status && p.status !== 'draft').length,
   }), [projects])
+  const lobbyModel = useMemo(() => buildNovelLobbyModel(projects), [projects])
+  const projectCardById = useMemo(() => new Map(lobbyModel.projectCards.map(card => [card.project.id, card])), [lobbyModel.projectCards])
   const getReferenceProjects = (project: any) => (
     Array.isArray(project?.reference_config?.references)
       ? project.reference_config.references
@@ -1163,8 +1167,8 @@ export default function NovelStudio() {
                 <Space align="center" size={10}>
                   <div style={{ width: 40, height: 40, borderRadius: 14, display: 'grid', placeItems: 'center', background: 'linear-gradient(135deg, #60a5fa, #7c3aed)', color: '#fff', boxShadow: '0 12px 24px rgba(99,102,241,0.24)' }}>📚</div>
                   <div>
-                    <Title level={3} style={{ margin: 0 }}>小说项目大厅</Title>
-                    <Text type="secondary">先选项目，再进入单项目工作台继续写作。</Text>
+                    <Title level={3} style={{ margin: 0 }}>小说创作大厅</Title>
+                    <Text type="secondary">优先继续写作和处理治理提醒，项目列表用于管理所有作品。</Text>
                   </div>
                 </Space>
                 <Space wrap>
@@ -1180,13 +1184,19 @@ export default function NovelStudio() {
                 <Button icon={<FileTextOutlined />} onClick={handleOpenSourceCache} style={{ borderRadius: 12 }}>正文缓存</Button>
                 <Button icon={<DatabaseOutlined />} onClick={handleOpenMemoryPalace} style={{ borderRadius: 12 }}>记忆宫殿</Button>
                 <Button icon={<ReloadOutlined />} onClick={loadProjects} loading={loading} style={{ borderRadius: 12 }}>刷新</Button>
-                <Button type="primary" icon={<PlusOutlined />} onClick={() => setWizardOpen(true)} style={{ borderRadius: 12, boxShadow: '0 10px 24px rgba(24, 144, 255, 0.25)' }}>新建小说项目</Button>
+                <Button type="primary" icon={<PlusOutlined />} onClick={() => setWizardOpen(true)} style={{ borderRadius: 12, boxShadow: '0 10px 24px rgba(24, 144, 255, 0.25)' }}>新建商业长篇</Button>
               </Space>
             </Col>
           </Row>
         </div>
 
         <div style={{ padding: 24 }}>
+          <NovelLobbyDashboard
+            projects={projects}
+            onOpenProject={(projectId) => navigate(`/novel/workspace/${projectId}`)}
+            onCreateProject={() => setWizardOpen(true)}
+          />
+
           <Card size="small" title="项目检索" style={{ borderRadius: 18, marginBottom: 16 }}>
             <Input prefix={<SearchOutlined />} value={searchText} onChange={e => setSearchText(e.target.value)} placeholder="搜索项目标题、题材、状态、目标读者" allowClear />
           </Card>
@@ -1195,7 +1205,7 @@ export default function NovelStudio() {
             <Card style={{ borderRadius: 18, textAlign: 'center', padding: 40 }}>
               <div style={{ fontSize: 48, marginBottom: 16 }}>📝</div>
               <Title level={5}>暂无小说项目</Title>
-              <Text type="secondary">点击上方「新建小说项目」开始创作你的第一部小说。</Text>
+              <Text type="secondary">点击上方「新建商业长篇」开始创作你的第一部小说。</Text>
             </Card>
           ) : (
             <Row gutter={16}>
@@ -1212,7 +1222,12 @@ export default function NovelStudio() {
                         <Title level={5} style={{ margin: 0 }}>{project.title}</Title>
                         <Tag color={project.status === 'draft' ? 'gold' : 'green'} bordered={false}>{project.status || 'draft'}</Tag>
                       </Space>
-                      <Text type="secondary">{project.genre || '未设置题材'}</Text>
+                      <Space wrap size={[4, 4]}>
+                        <Text type="secondary">{project.genre || '未设置题材'}</Text>
+                        {projectCardById.get(project.id)?.riskTags.slice(0, 3).map(tag => (
+                          <Tag key={tag} color={tag === '规划可继续' ? 'green' : 'gold'} bordered={false}>{tag}</Tag>
+                        ))}
+                      </Space>
                     </Space>
                     <div style={{ fontSize: 13, color: '#475569', lineHeight: 1.7 }}>
                       <div>篇幅目标：{project.length_target || '-'}</div>
@@ -1236,7 +1251,7 @@ export default function NovelStudio() {
                       </div>
                     )}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 'auto' }}>
-                      <Text type="secondary" style={{ fontSize: 12 }}>点击进入工作台</Text>
+                      <Text type="secondary" style={{ fontSize: 12 }}>{projectCardById.get(project.id)?.nextAction || '点击进入工作台'}</Text>
                       <Space>
                         <Button type="primary" size="small" style={{ borderRadius: 10 }} onClick={(e) => { e.stopPropagation(); navigate(`/novel/workspace/${project.id}`) }}>进入</Button>
                         <Popconfirm
