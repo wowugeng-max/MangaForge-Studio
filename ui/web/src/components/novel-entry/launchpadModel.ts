@@ -7,15 +7,26 @@ export interface First30PlanFields {
 export interface LaunchpadFields {
   reader_promise: string
   core_selling_point: string
+  protagonist_situation: string
+  protagonist_pressure: string
   opening_hook: string
   mainline_goal: string
+  long_term_conflict: string
+  growth_engine: string
+  volume_direction: string
+  expandable_assets: string
+  future100_note: string
   first_writing_task: string
   first30_plan: First30PlanFields
 }
 
+export type ReadinessKey = 'sellable' | 'first30' | 'longform'
+
 export interface ReadinessItem {
+  key: ReadinessKey
+  title: string
   ready: boolean
-  label: string
+  score: number
   missing: string[]
 }
 
@@ -24,6 +35,7 @@ export interface LaunchpadReadiness {
   first30: ReadinessItem
   longform: ReadinessItem
   risks: string[]
+  nextAction: string
 }
 
 export interface First30Summary {
@@ -51,6 +63,31 @@ function firstText(...values: any[]) {
 
 function joinList(value: any) {
   return asStringArray(value).join(' / ')
+}
+
+function summarizeNamedItems(value: any) {
+  if (!Array.isArray(value)) return ''
+  return value
+    .map(item => {
+      const record = asObject(item)
+      const title = firstText(record.title, record.name)
+      const detail = firstText(record.goal, record.direction, record.summary, record.note)
+      if (title && detail) return `${title}: ${detail}`
+      return title || detail || String(item || '').trim()
+    })
+    .filter(Boolean)
+    .join('\n')
+}
+
+function summarizeAssetItems(value: any) {
+  if (!Array.isArray(value)) return ''
+  return value
+    .map(item => {
+      const record = asObject(item)
+      return firstText(record.name, record.title, record.asset, record.hook, item)
+    })
+    .filter(Boolean)
+    .join(' / ')
 }
 
 function chapterNumber(chapter: SeedRecord, index: number) {
@@ -84,8 +121,15 @@ export function createEmptyLaunchpadFields(): LaunchpadFields {
   return {
     reader_promise: '',
     core_selling_point: '',
+    protagonist_situation: '',
+    protagonist_pressure: '',
     opening_hook: '',
     mainline_goal: '',
+    long_term_conflict: '',
+    growth_engine: '',
+    volume_direction: '',
+    expandable_assets: '',
+    future100_note: '',
     first_writing_task: '',
     first30_plan: {
       chapters_1_3: '',
@@ -133,6 +177,20 @@ export function extractLaunchpadFieldsFromSeed(seed: any): LaunchpadFields {
       joinList(root.commercial_tags),
       root.hook,
     ),
+    protagonist_situation: firstText(
+      root.protagonist_situation,
+      protagonist.situation,
+      protagonist.identity,
+      protagonist.role,
+      protagonist.background,
+    ),
+    protagonist_pressure: firstText(
+      root.protagonist_pressure,
+      protagonist.pressure,
+      protagonist.dilemma,
+      protagonist.goal,
+      root.opening_pressure,
+    ),
     opening_hook: firstText(
       root.opening_hook,
       root.hook,
@@ -145,12 +203,45 @@ export function extractLaunchpadFieldsFromSeed(seed: any): LaunchpadFields {
       root.main_conflict,
       protagonist.goal,
     ),
+    long_term_conflict: firstText(
+      root.long_term_conflict,
+      plotEngine.long_term_conflict,
+      root.main_conflict,
+      root.conflict,
+    ),
+    growth_engine: firstText(
+      root.growth_engine,
+      plotEngine.growth_engine,
+      root.power_system,
+      root.progression_engine,
+    ),
+    volume_direction: firstText(
+      root.volume_direction,
+      summarizeNamedItems(root.volume_outlines),
+    ),
+    expandable_assets: firstText(
+      root.expandable_assets,
+      summarizeAssetItems(root.foreshadowing_plan),
+      summarizeAssetItems(root.open_questions),
+      summarizeAssetItems(root.characters),
+    ),
+    future100_note: firstText(root.future100_note, root.future_100_note, root.hundred_chapter_plan),
     first_writing_task: firstText(root.first_writing_task, root.next_writing_task, '完善第1章场景卡'),
     first30_plan: {
       chapters_1_3: firstText(explicitPlan.chapters_1_3, summarizeRange(chapters, 1, 3)),
       chapters_4_10: firstText(explicitPlan.chapters_4_10, summarizeRange(chapters, 4, 10)),
       chapters_11_30: firstText(explicitPlan.chapters_11_30, summarizeRange(chapters, 11, 30)),
     },
+  }
+}
+
+function readinessItem(key: ReadinessKey, title: string, missing: string[], total: number): ReadinessItem {
+  return {
+    key,
+    title,
+    ready: missing.length === 0,
+    score: Math.max(0, total - missing.length),
+    missing,
   }
 }
 
@@ -192,35 +283,24 @@ export function evaluateLaunchpadReadiness(
     first30Missing.push('11-30章付费蓄势')
   }
 
-  const requiresLongformCapacity = lengthTarget === 'epic'
+  const requiresLongformCapacity = lengthTarget === 'long' || lengthTarget === 'epic'
   const hasLongformEngine = Boolean(
     firstText(fields.mainline_goal)
-      && firstText(plotEngine.long_term_conflict, root.long_term_conflict, root.main_conflict)
-      && firstText(plotEngine.growth_engine, root.growth_engine, root.power_system),
+      && firstText(fields.long_term_conflict, plotEngine.long_term_conflict, root.long_term_conflict, root.main_conflict)
+      && firstText(fields.growth_engine, plotEngine.growth_engine, root.growth_engine, root.power_system),
   )
 
   if (requiresLongformCapacity && !hasLongformEngine) {
-    risks.push('超长篇缺长线冲突引擎')
+    risks.push(lengthTarget === 'epic' ? '超长篇缺长线冲突引擎' : '缺长线冲突引擎')
     longformMissing.push('长线冲突引擎')
   }
 
   return {
-    sellable: {
-      ready: sellableMissing.length === 0,
-      label: '商业钩子',
-      missing: sellableMissing,
-    },
-    first30: {
-      ready: first30Missing.length === 0,
-      label: '前30章规划',
-      missing: first30Missing,
-    },
-    longform: {
-      ready: longformMissing.length === 0,
-      label: '长篇承载',
-      missing: longformMissing,
-    },
+    sellable: readinessItem('sellable', '商业钩子', sellableMissing, 3),
+    first30: readinessItem('first30', '前30章规划', first30Missing, 3),
+    longform: readinessItem('longform', '长篇承载', longformMissing, 1),
     risks,
+    nextAction: risks[0] || fields.first_writing_task,
   }
 }
 
@@ -229,8 +309,15 @@ export function buildLaunchpadSeedPatch(seed: any, fields: LaunchpadFields, risk
     ...asObject(seed),
     reader_promise: fields.reader_promise,
     core_selling_point: fields.core_selling_point,
+    protagonist_situation: fields.protagonist_situation,
+    protagonist_pressure: fields.protagonist_pressure,
     opening_hook: fields.opening_hook,
     mainline_goal: fields.mainline_goal,
+    long_term_conflict: fields.long_term_conflict,
+    growth_engine: fields.growth_engine,
+    volume_direction: fields.volume_direction,
+    expandable_assets: fields.expandable_assets,
+    future100_note: fields.future100_note,
     first_writing_task: fields.first_writing_task,
     first30_plan: { ...fields.first30_plan },
     launchpad_risks: [...risks],
