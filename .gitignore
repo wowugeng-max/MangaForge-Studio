@@ -46,6 +46,7 @@ ui/web/.vite/
 *.log
 *.tmp
 *.temp
+.superpowers/
 
 # OS files
 .DS_Store
