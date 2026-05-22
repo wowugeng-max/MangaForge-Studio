@@ -3815,7 +3815,11 @@ export default function NovelProjectWorkspace() {
           onOpenOutlineTree={() => setOutlineTreeOpen(true)}
           onOpenChapterDrawer={() => setChapterDrawerOpen(true)}
           onCreateChapter={() => openEditor('chapter')}
-          onSelectChapter={(chapterId) => { void selectChapter(chapterId) }}
+          onSelectChapter={(chapterId) => {
+            void selectChapter(chapterId).then((saved) => {
+              if (saved) setWorkspaceArea('chapterWriting')
+            })
+          }}
         />
 
         {workspaceArea === 'chapterWriting' ? (
