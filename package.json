@@ -10,6 +10,7 @@
     "build:web": "cd ui/web && bun run build",
     "check": "bun run build:server && bun run build:web",
     "smoke:novel": "node scripts/check-novel-generation-workflow.mjs",
-    "smoke:novel:local": "node scripts/run-novel-smoke-local.mjs"
+    "smoke:novel:local": "node scripts/run-novel-smoke-local.mjs",
+    "test:planning-workspace": "cd ui/web && bun test src/pages/novel-workspace/planningWorkspaceModel.test.ts"
   }
 }
