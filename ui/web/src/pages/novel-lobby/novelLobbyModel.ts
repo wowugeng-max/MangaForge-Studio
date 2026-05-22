@@ -1,3 +1,9 @@
+import {
+  evaluateLaunchpadReadiness,
+  extractLaunchpadFieldsFromSeed,
+  type LaunchpadReadiness,
+} from '../../components/novel-entry/launchpadModel'
+
 export type NovelLobbyActionKind = 'hook' | 'first30' | 'longform' | 'write' | 'planning'
 
 export interface NovelLobbyProjectCard {
@@ -49,50 +55,31 @@ function getSeed(project: AnyRecord) {
   return asObject(asObject(project.reference_config).project_seed)
 }
 
-function hasCompleteFirst30Plan(seed: AnyRecord) {
-  const plan = asObject(seed.first30_plan)
-  return hasText(plan.chapters_1_3) && hasText(plan.chapters_4_10) && hasText(plan.chapters_11_30)
+function inferReadiness(project: AnyRecord, seed: AnyRecord) {
+  const fields = extractLaunchpadFieldsFromSeed(seed)
+  return evaluateLaunchpadReadiness(fields, seed, firstText(project.length_target))
 }
 
-function needsLongformCapacity(lengthTarget: string) {
-  return lengthTarget === 'long' || lengthTarget === 'epic'
-}
-
-function hasLongformCapacity(seed: AnyRecord, lengthTarget: string) {
-  if (!needsLongformCapacity(lengthTarget)) return true
-
-  const hasRequiredLongFields = hasText(seed.mainline_goal)
-    && hasText(seed.long_term_conflict)
-    && hasText(seed.growth_engine)
-    && hasText(seed.volume_direction)
-
-  if (!hasRequiredLongFields) return false
-  if (lengthTarget !== 'epic') return true
-
-  return hasText(seed.expandable_assets)
-}
-
-function inferRiskTags(project: AnyRecord, seed: AnyRecord) {
+function inferRiskTags(readiness: LaunchpadReadiness) {
   const risks: string[] = []
-  const lengthTarget = firstText(project.length_target)
 
-  if (!hasText(seed.reader_promise)) risks.push('缺读者承诺')
-  if (!hasCompleteFirst30Plan(seed)) risks.push('缺前30章计划')
-  if (!hasLongformCapacity(seed, lengthTarget)) risks.push('缺长线承载')
+  if (!readiness.sellable.ready) risks.push('缺读者承诺')
+  if (!readiness.first30.ready) risks.push('缺前30章计划')
+  if (!readiness.longform.ready) risks.push('缺长线承载')
 
   return risks.length > 0 ? risks : ['规划可继续']
 }
 
-function inferAction(project: AnyRecord, seed: AnyRecord, riskTags: string[], chapterCount: number) {
-  if (riskTags.includes('缺读者承诺')) {
+function inferAction(seed: AnyRecord, readiness: LaunchpadReadiness, chapterCount: number) {
+  if (!readiness.sellable.ready) {
     return { actionKind: 'hook' as const, nextAction: '补商业钩子' }
   }
 
-  if (riskTags.includes('缺前30章计划')) {
+  if (!readiness.first30.ready) {
     return { actionKind: 'first30' as const, nextAction: '完善前30章启动计划' }
   }
 
-  if (riskTags.includes('缺长线承载')) {
+  if (!readiness.longform.ready) {
     return { actionKind: 'longform' as const, nextAction: '补长线承载' }
   }
 
@@ -129,8 +116,9 @@ function buildProjectCard(projectValue: any): NovelLobbyProjectCard {
   const seed = getSeed(project)
   const chapterCount = asFiniteNumber(project.chapter_count)
   const writtenWords = asFiniteNumber(project.written_words)
-  const riskTags = inferRiskTags(project, seed)
-  const action = inferAction(project, seed, riskTags, chapterCount)
+  const readiness = inferReadiness(project, seed)
+  const riskTags = inferRiskTags(readiness)
+  const action = inferAction(seed, readiness, chapterCount)
 
   return {
     project: projectValue,
@@ -182,8 +170,20 @@ function buildGovernanceCard(card: NovelLobbyProjectCard): NovelLobbyGovernanceC
   }
 }
 
+function isProjectLike(project: any) {
+  if (!project || typeof project !== 'object' || Array.isArray(project)) return false
+
+  const record = asObject(project)
+  const id = Number(record.id)
+
+  return Number.isFinite(id)
+    || hasText(record.title)
+    || record.reference_config != null
+    || record.chapter_count != null
+}
+
 export function buildNovelLobbyModel(projects: any[]): NovelLobbyModel {
-  const validProjects = Array.isArray(projects) ? projects.filter(project => project != null) : []
+  const validProjects = Array.isArray(projects) ? projects.filter(isProjectLike) : []
   const projectCards = validProjects.map(buildProjectCard)
   const featuredProject = [...projectCards].sort(compareFeaturedProject)[0] || null
 
