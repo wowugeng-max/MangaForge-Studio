@@ -41,11 +41,18 @@ async function listProjectsWithWritingAggregates(activeWorkspace: string) {
   const projects = await listNovelProjects(activeWorkspace)
   return Promise.all(projects.map(async project => {
     const chapters = await listNovelChapters(activeWorkspace, project.id)
-    const writtenWords = chapters.reduce((total, chapter) => total + String(chapter.chapter_text || '').length, 0)
+    const writtenChapters = chapters.filter(chapter => String(chapter.chapter_text || '').trim())
+    const writtenWords = writtenChapters.reduce((total, chapter) => total + String(chapter.chapter_text || '').replace(/\s/g, '').length, 0)
+    const nextUnwrittenChapter = chapters
+      .slice()
+      .sort((left, right) => Number(left.chapter_no || 0) - Number(right.chapter_no || 0))
+      .find(chapter => !String(chapter.chapter_text || '').trim())
     return {
       ...project,
       chapter_count: chapters.length,
+      written_chapter_count: writtenChapters.length,
       written_words: writtenWords,
+      next_unwritten_chapter_no: nextUnwrittenChapter ? Number(nextUnwrittenChapter.chapter_no || 0) : 0,
     }
   }))
 }

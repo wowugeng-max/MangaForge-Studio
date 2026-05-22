@@ -9,6 +9,7 @@ export type NovelLobbyActionKind = 'hook' | 'first30' | 'longform' | 'write' | '
 export interface NovelLobbyProjectCard {
   project: any
   chapterCount: number
+  writtenChapterCount: number
   writtenWords: number
   writtenWordsLabel: string
   nextAction: string
@@ -70,7 +71,7 @@ function inferRiskTags(readiness: LaunchpadReadiness) {
   return risks.length > 0 ? risks : ['规划可继续']
 }
 
-function inferAction(seed: AnyRecord, readiness: LaunchpadReadiness, chapterCount: number) {
+function inferAction(seed: AnyRecord, readiness: LaunchpadReadiness, writtenChapterCount: number, nextUnwrittenChapterNo: number) {
   if (!readiness.sellable.ready) {
     return { actionKind: 'hook' as const, nextAction: '补商业钩子' }
   }
@@ -83,8 +84,12 @@ function inferAction(seed: AnyRecord, readiness: LaunchpadReadiness, chapterCoun
     return { actionKind: 'longform' as const, nextAction: '补长线承载' }
   }
 
-  if (chapterCount > 0) {
-    return { actionKind: 'write' as const, nextAction: `继续第${chapterCount + 1}章` }
+  if (writtenChapterCount > 0) {
+    return { actionKind: 'write' as const, nextAction: `继续第${nextUnwrittenChapterNo || writtenChapterCount + 1}章` }
+  }
+
+  if (nextUnwrittenChapterNo > 0) {
+    return { actionKind: 'write' as const, nextAction: `开始第${nextUnwrittenChapterNo}章正文` }
   }
 
   return {
@@ -115,14 +120,19 @@ function buildProjectCard(projectValue: any): NovelLobbyProjectCard {
   const project = asObject(projectValue)
   const seed = getSeed(project)
   const chapterCount = asFiniteNumber(project.chapter_count)
+  const writtenChapterCount = project.written_chapter_count == null
+    ? chapterCount
+    : asFiniteNumber(project.written_chapter_count)
+  const nextUnwrittenChapterNo = asFiniteNumber(project.next_unwritten_chapter_no)
   const writtenWords = asFiniteNumber(project.written_words)
   const readiness = inferReadiness(project, seed)
   const riskTags = inferRiskTags(readiness)
-  const action = inferAction(seed, readiness, chapterCount)
+  const action = inferAction(seed, readiness, writtenChapterCount, nextUnwrittenChapterNo)
 
   return {
     project: projectValue,
     chapterCount,
+    writtenChapterCount,
     writtenWords,
     writtenWordsLabel: formatWrittenWords(writtenWords),
     nextAction: action.nextAction,
@@ -154,7 +164,7 @@ function buildGovernanceCard(card: NovelLobbyProjectCard): NovelLobbyGovernanceC
   const title = firstText(card.project?.title, '未命名作品')
   const details = [
     card.statusLabel,
-    card.chapterCount > 0 ? `${card.chapterCount}章` : '未开写',
+    card.chapterCount > 0 ? `已写 ${card.writtenChapterCount}/${card.chapterCount}章` : '未开写',
     card.writtenWordsLabel,
   ]
 

@@ -66,7 +66,7 @@ export default function NovelLobbyDashboard({ projects, onOpenProject, onCreateP
 
           <Space wrap size={[6, 6]}>
             <Tag color="blue" bordered={false}>{featured.statusLabel}</Tag>
-            <Tag bordered={false}>章节 {featured.chapterCount}</Tag>
+            <Tag bordered={false}>已写 {featured.writtenChapterCount}/{featured.chapterCount}章</Tag>
             <Tag color="cyan" bordered={false}>{featured.writtenWordsLabel}</Tag>
             <Tag color="purple" bordered={false}>{featured.project?.length_target || '未设篇幅'}</Tag>
           </Space>

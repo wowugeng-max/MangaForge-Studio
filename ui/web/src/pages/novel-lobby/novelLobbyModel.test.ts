@@ -179,4 +179,36 @@ describe('buildNovelLobbyModel', () => {
     expect(model.featuredProject?.nextAction).toBe('继续第42章')
     expect(model.featuredProject?.writtenWordsLabel).toBe('12.3万字')
   })
+
+  test('does not treat planned chapter shells as written progress', () => {
+    const projects = [{
+      id: 13,
+      title: '三十章启动台',
+      status: 'draft',
+      length_target: 'epic',
+      chapter_count: 30,
+      written_chapter_count: 0,
+      written_words: 0,
+      next_unwritten_chapter_no: 1,
+      reference_config: {
+        project_seed: {
+          reader_promise: '看寒门少年用阵法改写宗门秩序',
+          core_selling_point: '阵法升级与宗门经营',
+          opening_hook: '开局被夺阵盘后当众反击',
+          first30_plan: { chapters_1_3: '开篇', chapters_4_10: '闭环', chapters_11_30: '蓄势' },
+          mainline_goal: '建立阵道宗门',
+          long_term_conflict: '阵盟围剿',
+          growth_engine: '阵盘升级',
+          volume_direction: '外门到阵盟',
+          expandable_assets: '阵盘 / 密令',
+        },
+      },
+    }]
+
+    const model = buildNovelLobbyModel(projects)
+
+    expect(model.featuredProject?.chapterCount).toBe(30)
+    expect(model.featuredProject?.writtenChapterCount).toBe(0)
+    expect(model.featuredProject?.nextAction).toBe('开始第1章正文')
+  })
 })

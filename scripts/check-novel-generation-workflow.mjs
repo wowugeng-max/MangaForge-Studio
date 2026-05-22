@@ -122,8 +122,11 @@ async function main() {
     diagnostics: false,
     runs: false,
   }
+  const writtenChapters = chapters.filter(item => String(item?.chapter_text || '').trim())
   checks.project_list_aggregates = Number(project?.chapter_count || 0) === chapters.length
+    && Number(project?.written_chapter_count || 0) === writtenChapters.length
     && Number(project?.written_words || 0) >= 0
+    && Number(project?.next_unwritten_chapter_no || 0) >= 0
 
   const bible = await request(`/novel/projects/${project.id}/writing-bible`)
   checks.writing_bible = Boolean(bible?.writing_bible)
