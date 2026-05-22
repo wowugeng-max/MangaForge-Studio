@@ -37,6 +37,19 @@ function parseOptionalBoolean(value: any) {
   return Boolean(value)
 }
 
+async function listProjectsWithWritingAggregates(activeWorkspace: string) {
+  const projects = await listNovelProjects(activeWorkspace)
+  return Promise.all(projects.map(async project => {
+    const chapters = await listNovelChapters(activeWorkspace, project.id)
+    const writtenWords = chapters.reduce((total, chapter) => total + String(chapter.chapter_text || '').length, 0)
+    return {
+      ...project,
+      chapter_count: chapters.length,
+      written_words: writtenWords,
+    }
+  }))
+}
+
 function asSeedArray(value: any) {
   return Array.isArray(value) ? value : []
 }
@@ -430,7 +443,7 @@ export function registerNovelCoreRoutes(app: Express, getWorkspace: () => string
     try {
       const activeWorkspace = getWorkspace()
       await ensureWorkspaceStructure(activeWorkspace)
-      res.json(await listNovelProjects(activeWorkspace))
+      res.json(await listProjectsWithWritingAggregates(activeWorkspace))
     } catch (error) {
       res.status(500).json({ error: String(error) })
     }

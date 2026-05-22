@@ -84,6 +84,7 @@ async function main() {
   const checks = {
     status: true,
     projects: true,
+    project_list_aggregates: false,
     chapters: Array.isArray(chapters),
     writing_bible: false,
     production_dashboard: false,
@@ -121,6 +122,8 @@ async function main() {
     diagnostics: false,
     runs: false,
   }
+  checks.project_list_aggregates = Number(project?.chapter_count || 0) === chapters.length
+    && Number(project?.written_words || 0) >= 0
 
   const bible = await request(`/novel/projects/${project.id}/writing-bible`)
   checks.writing_bible = Boolean(bible?.writing_bible)

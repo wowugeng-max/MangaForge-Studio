@@ -186,12 +186,13 @@
 - 新增创建启动台模型，统一处理 AI 种子字段提取、前30章覆盖摘要、长线承载风险和创建 payload 扩展。
 - 将小说大厅第一屏改为继续写作与下一步治理优先，项目列表保留为管理层。
 - 新增大厅模型，基于现有项目和项目种子推断下一步动作、治理标签和项目卡状态。
+- 项目列表接口新增章节数与已写字数聚合，确保创作大厅能准确展示继续写作入口。
 
 ### 验证结果
 - `bun run test:novel-entry` 已通过
 - `bun run build:web` 已通过
 - `bun run build:server` 已通过
-- `bun run smoke:novel:local` 已通过
+- `bun run smoke:novel:local` 已通过，且已覆盖项目列表章节数/字数聚合
 - `git diff --check` 已通过
 
 ---
