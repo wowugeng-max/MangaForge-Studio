@@ -90,6 +90,17 @@ describe('launchpadModel', () => {
     expect(fields.future100_note).toBe('百章前完成阵堂夺权并引出阵盟追杀')
   })
 
+  test('normalizes object list items into useful selling point text', () => {
+    const fields = extractLaunchpadFieldsFromSeed({
+      commercial_positioning: {
+        selling_points: [{ name: '阵法升级' }, { title: '宗门打脸' }],
+      },
+    })
+
+    expect(fields.core_selling_point).toBe('阵法升级 / 宗门打脸')
+    expect(fields.core_selling_point).not.toContain('[object Object]')
+  })
+
   test('reports missing hook and longform risks for a sparse epic manual project', () => {
     const fields = {
       ...createEmptyLaunchpadFields(),
@@ -138,6 +149,53 @@ describe('launchpadModel', () => {
 
     expect(readiness.longform.ready).toBe(false)
     expect(readiness.risks).toContain('缺长线冲突引擎')
+  })
+
+  test('uses a stable next action fallback when ready fields have no first writing task', () => {
+    const fields = {
+      ...createEmptyLaunchpadFields(),
+      reader_promise: '看主角长期逆袭',
+      core_selling_point: '升级爽点',
+      opening_hook: '开局被夺传承',
+      mainline_goal: '重建宗门',
+      long_term_conflict: '旧宗门持续围剿',
+      growth_engine: '功法解锁',
+      volume_direction: '外门、内门、宗门大战',
+      first_writing_task: '',
+      first30_plan: {
+        chapters_1_3: '开篇承诺',
+        chapters_4_10: '试读闭环',
+        chapters_11_30: '付费蓄势',
+      },
+    }
+
+    const readiness = evaluateLaunchpadReadiness(fields, null, 'long')
+
+    expect(readiness.risks).toEqual([])
+    expect(readiness.nextAction).toBe('进入故事规划首页。')
+  })
+
+  test('requires volume direction and expandable assets for epic longform readiness', () => {
+    const fields = {
+      ...createEmptyLaunchpadFields(),
+      reader_promise: '看主角打穿万界宗门',
+      core_selling_point: '万界升级',
+      opening_hook: '开局宗门被灭',
+      mainline_goal: '重建万界宗门',
+      long_term_conflict: '上界联盟持续追杀',
+      growth_engine: '世界碎片解锁',
+      first30_plan: {
+        chapters_1_3: '开篇承诺',
+        chapters_4_10: '试读闭环',
+        chapters_11_30: '付费蓄势',
+      },
+    }
+
+    const readiness = evaluateLaunchpadReadiness(fields, null, 'epic')
+
+    expect(readiness.longform.ready).toBe(false)
+    expect(readiness.risks).toContain('缺分卷方向')
+    expect(readiness.risks).toContain('超长篇缺可扩展资产池')
   })
 
   test('summarizes first 30 plan from chapter outlines when seed has enough coverage', () => {

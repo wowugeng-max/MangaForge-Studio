@@ -47,6 +47,7 @@ export interface First30Summary {
 }
 
 type SeedRecord = Record<string, any>
+const readyNextActionFallback = '进入故事规划首页。'
 
 function asObject(value: any): SeedRecord {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
@@ -54,7 +55,7 @@ function asObject(value: any): SeedRecord {
 
 function asStringArray(value: any): string[] {
   if (!Array.isArray(value)) return []
-  return value.map(item => String(item || '').trim()).filter(Boolean)
+  return value.map(normalizeListItem).filter(Boolean)
 }
 
 function firstText(...values: any[]) {
@@ -65,15 +66,30 @@ function joinList(value: any) {
   return asStringArray(value).join(' / ')
 }
 
+function normalizeListItem(item: any) {
+  const record = asObject(item)
+  const normalized = firstText(
+    record.name,
+    record.title,
+    record.tag,
+    record.label,
+    record.value,
+    record.goal,
+    record.summary,
+  )
+  if (normalized) return normalized
+  return typeof item === 'object' ? '' : String(item || '').trim()
+}
+
 function summarizeNamedItems(value: any) {
   if (!Array.isArray(value)) return ''
   return value
     .map(item => {
       const record = asObject(item)
-      const title = firstText(record.title, record.name)
+      const title = firstText(record.title, record.name, record.tag, record.label, record.value)
       const detail = firstText(record.goal, record.direction, record.summary, record.note)
       if (title && detail) return `${title}: ${detail}`
-      return title || detail || String(item || '').trim()
+      return title || detail || normalizeListItem(item)
     })
     .filter(Boolean)
     .join('\n')
@@ -84,7 +100,7 @@ function summarizeAssetItems(value: any) {
   return value
     .map(item => {
       const record = asObject(item)
-      return firstText(record.name, record.title, record.asset, record.hook, item)
+      return firstText(record.name, record.title, record.tag, record.label, record.value, record.asset, record.hook, normalizeListItem(item))
     })
     .filter(Boolean)
     .join(' / ')
@@ -284,23 +300,35 @@ export function evaluateLaunchpadReadiness(
   }
 
   const requiresLongformCapacity = lengthTarget === 'long' || lengthTarget === 'epic'
-  const hasLongformEngine = Boolean(
-    firstText(fields.mainline_goal)
-      && firstText(fields.long_term_conflict, plotEngine.long_term_conflict, root.long_term_conflict, root.main_conflict)
-      && firstText(fields.growth_engine, plotEngine.growth_engine, root.growth_engine, root.power_system),
-  )
-
-  if (requiresLongformCapacity && !hasLongformEngine) {
-    risks.push(lengthTarget === 'epic' ? '超长篇缺长线冲突引擎' : '缺长线冲突引擎')
-    longformMissing.push('长线冲突引擎')
+  if (requiresLongformCapacity) {
+    if (!firstText(fields.mainline_goal)) {
+      risks.push('缺长篇主线目标')
+      longformMissing.push('长篇主线目标')
+    }
+    if (!firstText(fields.long_term_conflict, plotEngine.long_term_conflict, root.long_term_conflict, root.main_conflict)) {
+      risks.push(lengthTarget === 'epic' ? '超长篇缺长线冲突引擎' : '缺长线冲突引擎')
+      longformMissing.push('长线冲突引擎')
+    }
+    if (!firstText(fields.growth_engine, plotEngine.growth_engine, root.growth_engine, root.power_system)) {
+      risks.push('缺成长引擎')
+      longformMissing.push('成长引擎')
+    }
+    if (!firstText(fields.volume_direction, root.volume_direction)) {
+      risks.push('缺分卷方向')
+      longformMissing.push('分卷方向')
+    }
+    if (lengthTarget === 'epic' && !firstText(fields.expandable_assets, root.expandable_assets)) {
+      risks.push('超长篇缺可扩展资产池')
+      longformMissing.push('可扩展资产池')
+    }
   }
 
   return {
     sellable: readinessItem('sellable', '商业钩子', sellableMissing, 3),
     first30: readinessItem('first30', '前30章规划', first30Missing, 3),
-    longform: readinessItem('longform', '长篇承载', longformMissing, 1),
+    longform: readinessItem('longform', '长篇承载', longformMissing, lengthTarget === 'epic' ? 5 : 4),
     risks,
-    nextAction: risks[0] || fields.first_writing_task,
+    nextAction: risks[0] || firstText(fields.first_writing_task, readyNextActionFallback),
   }
 }
 
