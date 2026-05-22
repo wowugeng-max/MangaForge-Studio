@@ -26,6 +26,7 @@ import {
 } from '../novel'
 import { executeNovelAgent, previewNovelKnowledgeInjection } from '../llm'
 import { parseJsonLikePayload } from './novel-route-utils'
+import { purgeMemoryPalaceProject } from '../memory-service'
 
 function parseOptionalBoolean(value: any) {
   if (value === undefined) return undefined
@@ -555,9 +556,13 @@ export function registerNovelCoreRoutes(app: Express, getWorkspace: () => string
   app.delete('/api/novel/projects/:id', async (req, res) => {
     try {
       const activeWorkspace = getWorkspace()
-      const ok = await deleteNovelProject(activeWorkspace, Number(req.params.id))
+      const projectId = Number(req.params.id)
+      const project = await getNovelProject(activeWorkspace, projectId)
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const memoryPurge = await purgeMemoryPalaceProject(projectId)
+      const ok = await deleteNovelProject(activeWorkspace, projectId)
       if (!ok) return res.status(404).json({ error: 'project not found' })
-      res.json({ ok: true })
+      res.json({ ok: true, memory_purge: memoryPurge })
     } catch (error) {
       res.status(500).json({ error: String(error) })
     }
