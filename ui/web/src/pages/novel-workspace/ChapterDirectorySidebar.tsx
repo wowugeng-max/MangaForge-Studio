@@ -13,6 +13,7 @@ import { chapterStatusTag, displayValue, wc } from './utils'
 const { Text } = Typography
 
 export function ChapterDirectorySidebar({
+  planningMode = false,
   selectedModelId,
   stepOutlineLoading,
   stepProseLoading,
@@ -56,6 +57,7 @@ export function ChapterDirectorySidebar({
   onCreateChapter,
   onSelectChapter,
 }: {
+  planningMode?: boolean
   selectedModelId?: number
   stepOutlineLoading: boolean
   stepProseLoading: boolean
@@ -108,47 +110,58 @@ export function ChapterDirectorySidebar({
       overflow: 'hidden', minHeight: 0,
     }}>
       <div style={{ flex: 1, minHeight: 0, overflow: 'auto', paddingBottom: 24 }}>
-        <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0' }}>
-          <ProductionGuidePanel
-          selectedModelId={selectedModelId}
-          stepOutlineLoading={stepOutlineLoading}
-          stepProseLoading={stepProseLoading}
-          stepRepairLoading={stepRepairLoading}
-          incubatingOriginal={incubatingOriginal}
-          bookReviewLoading={bookReviewLoading}
-          commercialToolLoading={commercialToolLoading}
-          proseProgress={proseProgress}
-          chapterCount={chapters.length}
-          proseChapterCount={proseChapterCount}
-          referenceCount={referenceCount}
-          outlineCount={outlineCount}
-          worldbuildingCount={worldbuildingCount}
-          characterCount={characterCount}
-          hasWritingBible={hasWritingBible}
-          materialScore={materialScore}
-          commercialReadiness={commercialReadiness}
-          activeTaskCount={activeTaskCount}
-          onOpenOutlinePanel={onOpenOutlinePanel}
-          onGenerateProse={onGenerateProse}
-          onCancelGenerateProse={onCancelGenerateProse}
-          onRunRepair={onRunRepair}
-          onOpenReferenceConfig={onOpenReferenceConfig}
-          onOpenReferenceEngineering={onOpenReferenceEngineering}
-          onOpenCreativeCards={onOpenCreativeCards}
-          onRunOriginalIncubator={onRunOriginalIncubator}
-          onOpenWritingBibleEditor={onOpenWritingBibleEditor}
-          onOpenMaterialRepairPlan={onOpenMaterialRepairPlan}
-          onStartReadyChapterGroupGeneration={onStartReadyChapterGroupGeneration}
-          onStartChapterGroupGeneration={onStartChapterGroupGeneration}
-          onOpenProductionDesk={onOpenProductionDesk}
-          onOpenTaskCenter={onOpenTaskCenter}
-          onOpenConsistencyGraph={onOpenConsistencyGraph}
-          onOpenQualityBenchmark={onOpenQualityBenchmark}
-          onRunBookReview={onRunBookReview}
-          onOpenCommercialTools={onOpenCommercialTools}
-          onOpenExportDelivery={onOpenExportDelivery}
-          />
-        </div>
+        {!planningMode && (
+          <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0' }}>
+            <ProductionGuidePanel
+              selectedModelId={selectedModelId}
+              stepOutlineLoading={stepOutlineLoading}
+              stepProseLoading={stepProseLoading}
+              stepRepairLoading={stepRepairLoading}
+              incubatingOriginal={incubatingOriginal}
+              bookReviewLoading={bookReviewLoading}
+              commercialToolLoading={commercialToolLoading}
+              proseProgress={proseProgress}
+              chapterCount={chapters.length}
+              proseChapterCount={proseChapterCount}
+              referenceCount={referenceCount}
+              outlineCount={outlineCount}
+              worldbuildingCount={worldbuildingCount}
+              characterCount={characterCount}
+              hasWritingBible={hasWritingBible}
+              materialScore={materialScore}
+              commercialReadiness={commercialReadiness}
+              activeTaskCount={activeTaskCount}
+              onOpenOutlinePanel={onOpenOutlinePanel}
+              onGenerateProse={onGenerateProse}
+              onCancelGenerateProse={onCancelGenerateProse}
+              onRunRepair={onRunRepair}
+              onOpenReferenceConfig={onOpenReferenceConfig}
+              onOpenReferenceEngineering={onOpenReferenceEngineering}
+              onOpenCreativeCards={onOpenCreativeCards}
+              onRunOriginalIncubator={onRunOriginalIncubator}
+              onOpenWritingBibleEditor={onOpenWritingBibleEditor}
+              onOpenMaterialRepairPlan={onOpenMaterialRepairPlan}
+              onStartReadyChapterGroupGeneration={onStartReadyChapterGroupGeneration}
+              onStartChapterGroupGeneration={onStartChapterGroupGeneration}
+              onOpenProductionDesk={onOpenProductionDesk}
+              onOpenTaskCenter={onOpenTaskCenter}
+              onOpenConsistencyGraph={onOpenConsistencyGraph}
+              onOpenQualityBenchmark={onOpenQualityBenchmark}
+              onRunBookReview={onRunBookReview}
+              onOpenCommercialTools={onOpenCommercialTools}
+              onOpenExportDelivery={onOpenExportDelivery}
+            />
+          </div>
+        )}
+
+        {planningMode && (
+          <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0', background: '#fbfcfe' }}>
+            <Space direction="vertical" size={6} style={{ width: '100%' }}>
+              <Text strong style={{ fontSize: 13 }}>章节导航</Text>
+              <Text type="secondary" style={{ fontSize: 12 }}>规划首页负责判断方向；这里仅用于定位章节。</Text>
+            </Space>
+          </div>
+        )}
 
       <div style={{ padding: '8px 0' }}>
         <div style={{ padding: '8px 16px 12px', borderBottom: '1px solid #f5f5f5' }}>

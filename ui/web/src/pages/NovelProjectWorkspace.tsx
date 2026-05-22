@@ -3848,6 +3848,7 @@ export default function NovelProjectWorkspace() {
       <div style={{ flex: 1, minHeight: 0, display: 'flex', overflow: 'hidden' }}>
 
         <ChapterDirectorySidebar
+          planningMode={workspaceArea === 'storyPlanning'}
           selectedModelId={selectedModelId}
           stepOutlineLoading={stepOutlineLoading}
           stepProseLoading={stepProseLoading}
