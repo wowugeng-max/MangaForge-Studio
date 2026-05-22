@@ -1,7 +1,15 @@
 import React, { useState, useCallback } from 'react'
-import { Alert, Button, Card, Form, Input, Modal, Result, Select, Space, Steps, Tag, Typography, message } from 'antd'
+import { Alert, Button, Card, Form, Input, List, Modal, Result, Select, Space, Steps, Tag, Typography, message } from 'antd'
 import { ArrowLeftOutlined, ArrowRightOutlined, CheckCircleOutlined, RocketOutlined } from '@ant-design/icons'
 import apiClient from '../api/client'
+import {
+  buildLaunchpadSeedPatch,
+  createEmptyLaunchpadFields,
+  evaluateLaunchpadReadiness,
+  extractLaunchpadFieldsFromSeed,
+  summarizeFirst30Plan,
+  type LaunchpadFields,
+} from './novel-entry/launchpadModel'
 
 const { Text, Paragraph } = Typography
 const projectSeedModelStorageKey = 'novel.projectSeed.model_id'
@@ -42,8 +50,8 @@ const GENRES = [
 const LENGTH_TARGETS = [
   { value: 'short', label: '短篇（< 20万）', description: '短篇快完结，适合试水' },
   { value: 'medium', label: '中篇（20-80万）', description: '节奏紧凑，主线明确' },
-  { value: 'long', label: '长篇（80-300万）', description: '多卷多线，世界观宏大' },
-  { value: 'epic', label: '超长篇（> 300万）', description: '史诗级篇幅，适合长线连载' },
+  { value: 'long', label: '长篇连载（80-300万）', description: '多卷多线，世界观宏大' },
+  { value: 'epic', label: '超长篇连载（> 300万）', description: '史诗级篇幅，适合长线连载' },
 ]
 
 const AUDIENCES = [
@@ -153,6 +161,7 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
   const [seed, setSeed] = useState<any | null>(null)
   const [seedDraftText, setSeedDraftText] = useState('')
   const [seedFinalized, setSeedFinalized] = useState(false)
+  const [launchpad, setLaunchpad] = useState<LaunchpadFields>(() => createEmptyLaunchpadFields())
   const [modelsLoading, setModelsLoading] = useState(false)
   const [models, setModels] = useState<any[]>([])
   const [seedModelId, setSeedModelId] = useState<number | undefined>(() => {
@@ -193,7 +202,24 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
       .finally(() => setModelsLoading(false))
   }, [open, models.length, modelsLoading, seedModelId])
 
-  const formItems = ['basic', 'style', 'confirm', 'done']
+  const formItems = ['target', 'hook', 'longform', 'first30', 'confirm', 'done']
+
+  const updateLaunchpad = (patch: Partial<LaunchpadFields>) => {
+    setLaunchpad(prev => ({ ...prev, ...patch }))
+  }
+
+  const updateFirst30Plan = (patch: Partial<LaunchpadFields['first30_plan']>) => {
+    setLaunchpad(prev => ({
+      ...prev,
+      first30_plan: {
+        ...prev.first30_plan,
+        ...patch,
+      },
+    }))
+  }
+
+  const first30Summary = summarizeFirst30Plan(seed)
+  const launchpadReadiness = evaluateLaunchpadReadiness(launchpad, seed, data.length_target)
 
   const handleNext = useCallback(async () => {
     if (current === 0) {
@@ -216,7 +242,7 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
       }
     }
     if (current === formItems.length - 2) {
-      // Step 2 -> 创建
+      // Step 4 -> 创建
       await handleCreate()
       return
     }
@@ -224,37 +250,41 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
   }, [current, data, formItems, createMode, seed, seedFinalized])
 
   const handlePrev = () => {
-    if (current === 3) return
+    if (current === 5) return
     setCurrent(c => Math.max(0, c - 1))
   }
 
-  const buildCreatePayload = (projectSeed = seed) => ({
-    title: data.title,
-    genre: data.genre || '',
-    sub_genres: data.sub_genres || [],
-    length_target: data.length_target || 'medium',
-    target_audience: data.target_audience || '',
-    style_tags: data.style_tags || [],
-    commercial_tags: data.commercial_tags || [],
-    synopsis: data.synopsis || '',
-    status: 'draft',
-    reference_config: projectSeed ? {
-      project_seed: {
-        ...projectSeed,
-        raw_idea: seedIdea,
-        derived_at: new Date().toISOString(),
+  const buildCreatePayload = (projectSeed = seed) => {
+    const readiness = evaluateLaunchpadReadiness(launchpad, projectSeed, data.length_target)
+    const seedWithLaunchpad = buildLaunchpadSeedPatch(projectSeed || {}, launchpad, readiness.risks)
+    return {
+      title: data.title,
+      genre: data.genre || '',
+      sub_genres: data.sub_genres || [],
+      length_target: data.length_target || 'medium',
+      target_audience: data.target_audience || '',
+      style_tags: data.style_tags || [],
+      commercial_tags: data.commercial_tags || [],
+      synopsis: data.synopsis || launchpad.reader_promise || '',
+      status: 'draft',
+      reference_config: {
+        project_seed: {
+          ...seedWithLaunchpad,
+          raw_idea: seedIdea,
+          derived_at: new Date().toISOString(),
+        },
+        writing_bible: projectSeed?.writing_bible || {},
+        commercial_positioning: {
+          reader_promise: launchpad.reader_promise || projectSeed?.logline || projectSeed?.synopsis || '',
+          selling_points: asStringArray(projectSeed?.commercial_positioning?.selling_points).length
+            ? asStringArray(projectSeed?.commercial_positioning?.selling_points)
+            : asStringArray(projectSeed?.commercial_tags),
+          seed: Boolean(projectSeed),
+        },
       },
-      writing_bible: projectSeed.writing_bible || {},
-      commercial_positioning: {
-        reader_promise: projectSeed.logline || projectSeed.synopsis || '',
-        selling_points: asStringArray(projectSeed.commercial_positioning?.selling_points).length
-          ? asStringArray(projectSeed.commercial_positioning?.selling_points)
-          : asStringArray(projectSeed.commercial_tags),
-        seed: true,
-      },
-    } : {},
-    auto_materialize_seed: Boolean(projectSeed),
-  })
+      auto_materialize_seed: Boolean(projectSeed),
+    }
+  }
 
   const handleCreate = async () => {
     setCreating(true)
@@ -265,7 +295,7 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
         setCreatedId(projectId)
         message.success('小说项目创建成功！')
       }
-      setCurrent(3)
+      setCurrent(5)
     } catch {
       message.error('创建失败，请检查网络连接')
     } finally {
@@ -286,8 +316,11 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
     }
     setAutoCreating(true)
     try {
-      const res = seed
-        ? await apiClient.post('/novel/projects/auto-create', { title, idea, seed })
+      const patchedSeed = seed
+        ? buildLaunchpadSeedPatch(seed, launchpad, evaluateLaunchpadReadiness(launchpad, seed, data.length_target).risks)
+        : null
+      const res = patchedSeed
+        ? await apiClient.post('/novel/projects/auto-create', { title, idea, seed: patchedSeed })
         : await apiClient.post('/novel/projects/auto-create', { title, idea, model_id: seedModelId })
       const project = res.data?.project || res.data
       const projectId = project?.id
@@ -321,6 +354,7 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
     setSeed(null)
     setSeedDraftText('')
     setSeedFinalized(false)
+    setLaunchpad(createEmptyLaunchpadFields())
     setData({
       title: '',
       genre: '',
@@ -339,10 +373,12 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
   }
 
   const steps = [
-    { title: '基础信息', description: '标题与题材' },
-    { title: '风格设定', description: '篇幅与标签' },
-    { title: '确认创建', description: '预览与提交' },
-    { title: '创建完成', description: '下一步' },
+    { title: '创作目标', description: '题材与篇幅' },
+    { title: '商业钩子', description: '承诺与开篇' },
+    { title: '长线承载', description: '主线与扩展' },
+    { title: '前30章', description: '追读启动' },
+    { title: '确认创建', description: '预览与风险' },
+    { title: '创建完成', description: '进入规划' },
   ]
 
   // 通用 onChange — 表单字段变化时同步到 data state
@@ -366,6 +402,7 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
 
   const applySeedToForm = (nextSeed: any) => {
     const normalizedSeed = normalizeProjectSeedForUi(nextSeed)
+    const extractedLaunchpad = extractLaunchpadFieldsFromSeed(normalizedSeed)
     const nextData = {
       title: String(normalizedSeed.title || data.title || normalizedSeed.logline || '').trim().slice(0, 32),
       genre: pickGenre(normalizedSeed.genre || data.genre),
@@ -377,6 +414,25 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
       synopsis: String(normalizedSeed.synopsis || normalizedSeed.logline || data.synopsis || '').trim().slice(0, 500),
     }
     setData(prev => ({ ...prev, ...nextData }))
+    setLaunchpad(prev => ({
+      reader_promise: extractedLaunchpad.reader_promise || prev.reader_promise,
+      core_selling_point: extractedLaunchpad.core_selling_point || prev.core_selling_point,
+      protagonist_situation: extractedLaunchpad.protagonist_situation || prev.protagonist_situation,
+      protagonist_pressure: extractedLaunchpad.protagonist_pressure || prev.protagonist_pressure,
+      opening_hook: extractedLaunchpad.opening_hook || prev.opening_hook,
+      mainline_goal: extractedLaunchpad.mainline_goal || prev.mainline_goal,
+      long_term_conflict: extractedLaunchpad.long_term_conflict || prev.long_term_conflict,
+      growth_engine: extractedLaunchpad.growth_engine || prev.growth_engine,
+      volume_direction: extractedLaunchpad.volume_direction || prev.volume_direction,
+      expandable_assets: extractedLaunchpad.expandable_assets || prev.expandable_assets,
+      future100_note: extractedLaunchpad.future100_note || prev.future100_note,
+      first_writing_task: extractedLaunchpad.first_writing_task || prev.first_writing_task,
+      first30_plan: {
+        chapters_1_3: extractedLaunchpad.first30_plan.chapters_1_3 || prev.first30_plan.chapters_1_3,
+        chapters_4_10: extractedLaunchpad.first30_plan.chapters_4_10 || prev.first30_plan.chapters_4_10,
+        chapters_11_30: extractedLaunchpad.first30_plan.chapters_11_30 || prev.first30_plan.chapters_11_30,
+      },
+    }))
   }
 
   const deriveProjectSeed = async () => {
@@ -444,8 +500,8 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
       maskClosable={false}
     >
       <div style={{ textAlign: 'center', marginBottom: 24 }}>
-        <h2 style={{ margin: '0 0 4px 0' }}>新建小说项目</h2>
-        <p style={{ color: '#666', margin: 0 }}>分步完成你的小说项目初始化</p>
+        <h2 style={{ margin: '0 0 4px 0' }}>新书商业长篇启动台</h2>
+        <p style={{ color: '#666', margin: 0 }}>先确认卖点、前30章和长线承载，再进入故事规划</p>
       </div>
 
       <Steps
@@ -473,9 +529,9 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
               <Space direction="vertical" size={10} style={{ width: '100%' }}>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
                   {[
-                    { key: 'manual', title: '手动填写', desc: '只创建空项目，资料后续手工补齐。' },
-                    { key: 'quick_ai', title: '碎片快速生成', desc: '给作品名或一段想法，AI 整理后直接创建。' },
-                    { key: 'deep_draft', title: '深度孵化草稿', desc: 'AI 先生成角色/能力/大纲草稿，人工改完再定稿。' },
+                    { key: 'manual', title: '手动开书', desc: '先建可写项目，商业钩子和长线计划由你手动填写。' },
+                    { key: 'quick_ai', title: 'AI 快速开书', desc: '给作品名或一句想法，AI 整理卖点、前30章和长线骨架。' },
+                    { key: 'deep_draft', title: '深度孵化', desc: 'AI 先产出可编辑草稿，人工修订后再定稿创建。' },
                   ].map(item => {
                     const active = createMode === item.key
                     return (
@@ -699,6 +755,31 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
                   />
                 </Form.Item>
 
+                <Form.Item
+                  name="length_target"
+                  label="篇幅目标"
+                  rules={[{ required: true, message: '请选择篇幅目标' }]}
+                >
+                  <Select
+                    size="large"
+                    placeholder="选择目标篇幅"
+                    options={LENGTH_TARGETS}
+                    optionRender={(option) => (
+                      <div>
+                        <div>{option.label}</div>
+                        <div style={{ fontSize: 12, color: '#999' }}>{option.data?.description}</div>
+                      </div>
+                    )}
+                  />
+                </Form.Item>
+
+                <Form.Item name="target_audience" label="目标读者">
+                  <Select
+                    placeholder="选择目标读者群体"
+                    options={AUDIENCES}
+                  />
+                </Form.Item>
+
                 <Form.Item name="sub_genres" label="子题材（可选，可多选）">
                   <Select
                     mode="tags"
@@ -720,31 +801,56 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
           </>
         )}
 
-        {/* Step 1: Style Settings */}
+        {/* Step 1: Commercial Hook */}
         {current === 1 && (
           <>
-            <Form.Item
-              name="length_target"
-              label="篇幅目标"
-              rules={[{ required: true, message: '请选择篇幅目标' }]}
-            >
-              <Select
-                size="large"
-                placeholder="选择目标篇幅"
-                options={LENGTH_TARGETS}
-                optionRender={(option) => (
-                  <div>
-                    <div>{option.label}</div>
-                    <div style={{ fontSize: 12, color: '#999' }}>{option.data?.description}</div>
-                  </div>
-                )}
+            <Form.Item label="读者承诺">
+              <Input.TextArea
+                rows={2}
+                value={launchpad.reader_promise}
+                onChange={event => updateLaunchpad({ reader_promise: event.target.value })}
+                placeholder="读者追下去能持续获得什么满足感"
+                maxLength={300}
+                showCount
               />
             </Form.Item>
 
-            <Form.Item name="target_audience" label="目标读者">
-              <Select
-                placeholder="选择目标读者群体"
-                options={AUDIENCES}
+            <Form.Item label="核心卖点">
+              <Input.TextArea
+                rows={2}
+                value={launchpad.core_selling_point}
+                onChange={event => updateLaunchpad({ core_selling_point: event.target.value })}
+                placeholder="一句话说明本书最有商业辨识度的爽点"
+                maxLength={300}
+                showCount
+              />
+            </Form.Item>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
+              <Form.Item label="主角处境">
+                <Input.TextArea
+                  rows={3}
+                  value={launchpad.protagonist_situation}
+                  onChange={event => updateLaunchpad({ protagonist_situation: event.target.value })}
+                  placeholder="主角开局身份、资源、关系和位置"
+                />
+              </Form.Item>
+              <Form.Item label="主角压力">
+                <Input.TextArea
+                  rows={3}
+                  value={launchpad.protagonist_pressure}
+                  onChange={event => updateLaunchpad({ protagonist_pressure: event.target.value })}
+                  placeholder="开局必须解决的危机、倒计时或损失"
+                />
+              </Form.Item>
+            </div>
+
+            <Form.Item label="开篇钩子">
+              <Input.TextArea
+                rows={3}
+                value={launchpad.opening_hook}
+                onChange={event => updateLaunchpad({ opening_hook: event.target.value })}
+                placeholder="第1章要抛出的冲突、反差或承诺"
               />
             </Form.Item>
 
@@ -770,13 +876,164 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
           </>
         )}
 
+        {/* Step 2: Long-form Capacity */}
+        {current === 2 && (
+          <>
+            <Form.Item label="长篇主线目标">
+              <Input.TextArea
+                rows={2}
+                value={launchpad.mainline_goal}
+                onChange={event => updateLaunchpad({ mainline_goal: event.target.value })}
+                placeholder="贯穿全书的长期目标"
+              />
+            </Form.Item>
+
+            <Form.Item label="长线冲突引擎">
+              <Input.TextArea
+                rows={2}
+                value={launchpad.long_term_conflict}
+                onChange={event => updateLaunchpad({ long_term_conflict: event.target.value })}
+                placeholder="主角、反派、制度或世界规则之间的长期对抗"
+              />
+            </Form.Item>
+
+            <Form.Item label="成长引擎">
+              <Input.TextArea
+                rows={2}
+                value={launchpad.growth_engine}
+                onChange={event => updateLaunchpad({ growth_engine: event.target.value })}
+                placeholder="等级、能力、产业、关系或认知如何持续升级"
+              />
+            </Form.Item>
+
+            <Form.Item label="分卷方向">
+              <Input.TextArea
+                rows={3}
+                value={launchpad.volume_direction}
+                onChange={event => updateLaunchpad({ volume_direction: event.target.value })}
+                placeholder="每卷推进什么目标、地图或阶段性矛盾"
+              />
+            </Form.Item>
+
+            <Form.Item label="可扩展资产池">
+              <Input.TextArea
+                rows={3}
+                value={launchpad.expandable_assets}
+                onChange={event => updateLaunchpad({ expandable_assets: event.target.value })}
+                placeholder="人物、组织、地图、道具、谜题、伏笔等可长期调用的资产"
+              />
+            </Form.Item>
+
+            <Form.Item label="未来100章备注">
+              <Input.TextArea
+                rows={3}
+                value={launchpad.future100_note}
+                onChange={event => updateLaunchpad({ future100_note: event.target.value })}
+                placeholder="第31-100章的阶段方向、升级节奏或风险点"
+              />
+            </Form.Item>
+
+            {seed && (
+              <Card size="small" title="种子素材覆盖" style={{ borderRadius: 8 }}>
+                <Space wrap>
+                  <Tag color="purple" bordered={false}>分卷 {seed.volume_outlines?.length || 0}</Tag>
+                  <Tag color="geekblue" bordered={false}>章节细纲 {seed.chapter_outlines?.length || 0}</Tag>
+                  <Tag color="cyan" bordered={false}>伏笔 {seed.foreshadowing_plan?.length || 0}</Tag>
+                  <Tag color="blue" bordered={false}>人物 {seed.characters?.length || 0}</Tag>
+                </Space>
+              </Card>
+            )}
+          </>
+        )}
+
+        {/* Step 3: First 30 Chapters */}
+        {current === 3 && (
+          <>
+            <Card size="small" title="AI 种子前30章覆盖" style={{ marginBottom: 16, borderRadius: 8 }}>
+              <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                <Space wrap>
+                  <Tag color={first30Summary.hasOpening ? 'green' : 'default'} bordered={false}>1-3章 {first30Summary.hasOpening ? '已覆盖' : '待补'}</Tag>
+                  <Tag color={first30Summary.hasTrialRead ? 'green' : 'default'} bordered={false}>4-10章 {first30Summary.hasTrialRead ? '已覆盖' : '待补'}</Tag>
+                  <Tag color={first30Summary.hasPaidBuildup ? 'green' : 'default'} bordered={false}>11-30章 {first30Summary.hasPaidBuildup ? '已覆盖' : '待补'}</Tag>
+                  <Tag color="blue" bordered={false}>细纲 {first30Summary.outlineCount}</Tag>
+                </Space>
+                {first30Summary.sample.length > 0 ? (
+                  <List
+                    size="small"
+                    dataSource={first30Summary.sample}
+                    renderItem={item => <List.Item>{item}</List.Item>}
+                  />
+                ) : (
+                  <Text type="secondary">当前种子没有可识别的前30章细纲，可在下方手动填写追读启动计划。</Text>
+                )}
+              </Space>
+            </Card>
+
+            <Form.Item label="1-3章：开篇承诺">
+              <Input.TextArea
+                rows={3}
+                value={launchpad.first30_plan.chapters_1_3}
+                onChange={event => updateFirst30Plan({ chapters_1_3: event.target.value })}
+                placeholder="开局冲突、主角反差、读者第一口爽点"
+              />
+            </Form.Item>
+
+            <Form.Item label="4-10章：试读闭环">
+              <Input.TextArea
+                rows={3}
+                value={launchpad.first30_plan.chapters_4_10}
+                onChange={event => updateFirst30Plan({ chapters_4_10: event.target.value })}
+                placeholder="试读期要解决的小闭环和继续追读的悬念"
+              />
+            </Form.Item>
+
+            <Form.Item label="11-30章：付费蓄势">
+              <Input.TextArea
+                rows={4}
+                value={launchpad.first30_plan.chapters_11_30}
+                onChange={event => updateFirst30Plan({ chapters_11_30: event.target.value })}
+                placeholder="付费章节前后的升级、反转、阶段敌人和更大目标"
+              />
+            </Form.Item>
+
+            <Form.Item label="第一项写作任务">
+              <Input
+                value={launchpad.first_writing_task}
+                onChange={event => updateLaunchpad({ first_writing_task: event.target.value })}
+                placeholder="例如：完善第1章场景卡"
+              />
+            </Form.Item>
+          </>
+        )}
+
       </Form>
 
-      {/* Step 2: Confirm — 从 data state 读取，不依赖 Form */}
-      {current === 2 && (
+      {/* Step 4: Confirm — 从 data state 读取，不依赖 Form */}
+      {current === 4 && (
         <div style={{ background: '#f8f9fa', borderRadius: 12, padding: 20 }}>
           <Space direction="vertical" size={12} style={{ width: '100%' }}>
-            <h3 style={{ margin: 0, fontSize: 16 }}>📋 创建预览</h3>
+            <h3 style={{ margin: 0, fontSize: 16 }}>创建预览与风险</h3>
+
+            <Space wrap>
+              {[
+                launchpadReadiness.sellable,
+                launchpadReadiness.first30,
+                launchpadReadiness.longform,
+              ].map(item => (
+                <Tag key={item.key} color={item.ready ? 'green' : 'orange'} bordered={false}>
+                  {item.title} {item.ready ? '就绪' : `待补 ${item.missing.length}`}
+                </Tag>
+              ))}
+            </Space>
+
+            {launchpadReadiness.risks.length > 0 && (
+              <Alert
+                type="warning"
+                showIcon
+                message="创建后可继续补齐这些启动风险"
+                description={launchpadReadiness.risks.join('；')}
+              />
+            )}
 
             <div style={{ display: 'grid', gap: 8 }}>
               <div style={{ display: 'flex' }}>
@@ -829,22 +1086,46 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
               )}
             </div>
 
-            <div style={{ marginTop: 8, padding: 12, background: '#eef2ff', borderRadius: 8 }}>
-              <div style={{ fontSize: 13, color: '#6366f1' }}>
-                🚀 创建后你可以：
-              </div>
-              <ul style={{ margin: '4px 0 0 0', paddingLeft: 18, fontSize: 13, color: '#666' }}>
-                <li>进入工作台开始写作</li>
-                <li>使用 AI 一键初始化（世界观、角色、大纲）</li>
-                <li>手动编辑章节，逐步构建你的故事</li>
-              </ul>
-            </div>
+            <Card size="small" title="核心承诺" style={{ borderRadius: 8 }}>
+              <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                <Text strong>{launchpad.reader_promise || data.synopsis || '未填写读者承诺'}</Text>
+                <Text type="secondary">{launchpad.core_selling_point || '未填写核心卖点'}</Text>
+                <Text type="secondary">{launchpad.opening_hook || '未填写开篇钩子'}</Text>
+              </Space>
+            </Card>
+
+            <List
+              size="small"
+              header={<Text strong>写作准备</Text>}
+              dataSource={[
+                {
+                  title: '前30章',
+                  text: launchpad.first30_plan.chapters_1_3 || launchpad.first30_plan.chapters_4_10 || launchpad.first30_plan.chapters_11_30 || '待补前30章追读计划',
+                },
+                {
+                  title: '长线承载',
+                  text: launchpad.mainline_goal || launchpad.long_term_conflict || launchpad.growth_engine || '待补长篇主线与成长引擎',
+                },
+                {
+                  title: '下一步',
+                  text: launchpadReadiness.nextAction,
+                },
+              ]}
+              renderItem={item => (
+                <List.Item>
+                  <List.Item.Meta
+                    title={item.title}
+                    description={<span style={{ whiteSpace: 'pre-wrap' }}>{item.text}</span>}
+                  />
+                </List.Item>
+              )}
+            />
           </Space>
         </div>
       )}
 
-      {/* Step 3: Done */}
-      {current === 3 && (
+      {/* Step 5: Done */}
+      {current === 5 && (
         <Result
           status="success"
           icon={<CheckCircleOutlined />}
@@ -868,7 +1149,7 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
       )}
 
       {/* Navigation Buttons */}
-      {current < 3 && (
+      {current < 5 && (
         <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 24 }}>
           <Button
             icon={<ArrowLeftOutlined />}
@@ -881,7 +1162,7 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
             <Button onClick={handleModalCancel}>取消</Button>
             <Button
               type="primary"
-              icon={current === 2 ? <RocketOutlined /> : <ArrowRightOutlined />}
+              icon={current === 4 ? <RocketOutlined /> : <ArrowRightOutlined />}
               onClick={handleNext}
               loading={creating}
               disabled={current === 0 && (
@@ -891,7 +1172,7 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
                 || (createMode === 'deep_draft' && (!seed || !seedFinalized))
               )}
             >
-              {current === 2 ? '创建项目' : '下一步'}
+              {current === 4 ? '创建项目' : '下一步'}
             </Button>
           </Space>
         </div>
