@@ -3621,6 +3621,13 @@ export default function NovelProjectWorkspace() {
     const keys: PlanningLoadingKey[] = ['rollingPlan', 'future100Audit', 'future100Generate', 'longformPressure', 'topic', 'referenceDiagnosis']
     return keys.includes(commercialToolLoading as PlanningLoadingKey) ? commercialToolLoading as PlanningLoadingKey : undefined
   })()
+  const workspaceAreaTabs: Array<[WorkspaceArea, string]> = [
+    ['storyPlanning', '故事规划'],
+    ['chapterWriting', '章节写作'],
+    ['storyAssets', '资料设定'],
+    ['qualityRevision', '质检修订'],
+    ['productionOps', '生产运营'],
+  ]
 
   const handlePlanningAction = (key: PlanningActionKey) => {
     const actions: Record<PlanningActionKey, () => void> = {
@@ -3717,6 +3724,7 @@ export default function NovelProjectWorkspace() {
           { label: '写作圣经', onClick: () => { void openWritingBibleEditor() }, primary: true },
           { label: '故事状态机', onClick: openStoryStateEditor },
           { label: '创作资料卡中心', onClick: () => setCreativeCardsOpen(true) },
+          { label: '原创孵化', onClick: () => { void runOriginalIncubator() }, loading: incubatingOriginal, disabled: !selectedModelId || incubatingOriginal },
           { label: '参考作品配置', onClick: () => setReferenceConfigOpen(true) },
           { label: '参考工程总览', onClick: () => setReferenceEngineeringOpen(true) },
           { label: '参考知识诊断', onClick: () => { void openReferenceKnowledgeDiagnosis() }, loading: commercialToolLoading === 'referenceDiagnosis' },
@@ -3733,7 +3741,7 @@ export default function NovelProjectWorkspace() {
           { label: '质量评测基准', onClick: () => setQualityBenchmarkOpen(true) },
           { label: '全书连续性检查', onClick: () => { void openContinuityAudit() }, loading: commercialToolLoading === 'continuityAudit' },
           { label: '全书总检', onClick: () => { void runBookReview() }, loading: bookReviewLoading, disabled: !selectedModelId },
-          { label: '当前章参考迁移计划', onClick: () => { void runReferenceMigrationPlan() }, loading: commercialToolLoading === 'referenceMigration', disabled: !activeChapter },
+          { label: '当前章参考迁移计划', onClick: () => { void runReferenceMigrationPlan() }, loading: commercialToolLoading === 'migrationPlan', disabled: !activeChapter },
         ],
       },
       productionOps: {
@@ -3798,18 +3806,12 @@ export default function NovelProjectWorkspace() {
           style={{ width: 220 }} placeholder="选择模型"
         />
         <Space size={4} style={{ flex: 1, minWidth: 0 }}>
-          {[
-            ['storyPlanning', '故事规划'],
-            ['chapterWriting', '章节写作'],
-            ['storyAssets', '资料设定'],
-            ['qualityRevision', '质检修订'],
-            ['productionOps', '生产运营'],
-          ].map(([key, label]) => (
+          {workspaceAreaTabs.map(([key, label]) => (
             <Button
               key={key}
               size="small"
               type={workspaceArea === key ? 'primary' : 'text'}
-              onClick={() => setWorkspaceArea(key as WorkspaceArea)}
+              onClick={() => setWorkspaceArea(key)}
             >
               {label}
             </Button>
