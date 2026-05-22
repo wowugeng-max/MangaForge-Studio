@@ -158,7 +158,7 @@ export function ChapterDirectorySidebar({
           <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0', background: '#fbfcfe' }}>
             <Space direction="vertical" size={6} style={{ width: '100%' }}>
               <Text strong style={{ fontSize: 13 }}>章节导航</Text>
-              <Text type="secondary" style={{ fontSize: 12 }}>规划首页负责判断方向；这里仅用于定位章节。</Text>
+              <Text type="secondary" style={{ fontSize: 12 }}>规划首页负责判断方向；点击章节会进入写作区。</Text>
             </Space>
           </div>
         )}

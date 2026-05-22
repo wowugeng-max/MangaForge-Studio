@@ -181,4 +181,80 @@ describe('buildPlanningWorkspaceModel', () => {
 
     expect(model.mainline.currentChapterServesVolume).toBe(false)
   })
+
+  test('uses production outline_type records to locate current volume and stage', () => {
+    const productionOutlines = [
+      { id: 11, title: '第二卷 内门风暴', outline_type: 'volume', summary: '主角卷入内门派系斗争', start_chapter: 51, end_chapter: 100 },
+      { id: 12, title: '内门夺位', outline_type: 'arc', parent_id: 11, summary: '执法堂与丹堂冲突升级', start_chapter: 61, end_chapter: 70 },
+      { id: 13, title: '执法堂反噬', outline_type: 'turning_point', parent_id: 12, start_chapter: 66, end_chapter: 66 },
+    ]
+    const chapter = {
+      id: 66,
+      chapter_no: 66,
+      title: '第66章',
+      chapter_goal: '让主角夺回审判主动权',
+      conflict: '执法堂逼供',
+      ending_hook: '长老亲临',
+      raw_payload: { mainline_progress: '内门夺位线' },
+    }
+
+    const model = buildPlanningWorkspaceModel({
+      selectedProject: project,
+      outlines: productionOutlines,
+      chapters: [chapter],
+      activeChapter: chapter,
+    })
+
+    expect(model.topStatus.currentVolume).toBe('第二卷 内门风暴')
+    expect(model.topStatus.currentStage).toBe('内门夺位')
+    expect(model.mainline.currentVolumeGoal).toBe('主角卷入内门派系斗争')
+    expect(model.mainline.currentStageConflict).toBe('执法堂逼供')
+    expect(model.mainline.nextTurn).toBe('执法堂反噬')
+  })
+
+  test('counts applied future 100 skeleton chapter outlines as planned coverage', () => {
+    const skeletonOutlines = Array.from({ length: 100 }).map((_, index) => {
+      const chapterNo = index + 20
+      return {
+        id: 1000 + chapterNo,
+        outline_type: 'chapter',
+        title: `第${chapterNo}章 骨架`,
+        summary: `推进长线骨架 ${chapterNo}`,
+        conflict_points: ['强敌压迫'],
+        hook: '新危机出现',
+        raw_payload: {
+          source: 'future_100_skeleton',
+          chapter_no: chapterNo,
+          future100: {
+            chapter_no: chapterNo,
+            title: `骨架 ${chapterNo}`,
+            chapter_goal: `推进长线骨架 ${chapterNo}`,
+            conflict: '强敌压迫',
+            ending_hook: '新危机出现',
+            mainline_progress: '宗门暗线',
+          },
+        },
+      }
+    })
+    const active = {
+      id: 20,
+      chapter_no: 20,
+      title: '第20章',
+      chapter_goal: '进入新卷',
+      conflict: '旧敌追击',
+      ending_hook: '宗门传令',
+      raw_payload: { mainline_progress: '宗门暗线' },
+    }
+
+    const model = buildPlanningWorkspaceModel({
+      selectedProject: project,
+      outlines: skeletonOutlines,
+      chapters: [active],
+      activeChapter: active,
+    })
+
+    expect(model.topStatus.future100Coverage.ready).toBe(true)
+    expect(model.topStatus.future100Coverage.planned).toBe(100)
+    expect(model.topStatus.future100Coverage.missingChapters).toEqual([])
+  })
 })

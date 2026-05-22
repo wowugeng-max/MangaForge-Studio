@@ -114,7 +114,7 @@ function chapterInRange(chapterNo: number, item: AnyRecord) {
 }
 
 function outlineLevel(item: AnyRecord) {
-  return text(item?.outline_level || item?.level).toLowerCase()
+  return text(item?.outline_level || item?.level || item?.outline_type).toLowerCase()
 }
 
 function isVolume(item: AnyRecord) {
@@ -156,12 +156,16 @@ function titleMatches(a: any, b: any) {
 
 function resolveVolumeFromBible(writingBible: AnyRecord, currentVolume?: AnyRecord) {
   const volumes = arrayValue(writingBible?.volumes)
-  return volumes.find(volume => titleMatches(currentVolume?.title, volume?.title)) || volumes[0] || {}
+  const matched = volumes.find(volume => titleMatches(currentVolume?.title, volume?.title))
+  if (matched) return matched
+  return currentVolume?.title ? {} : volumes[0] || {}
 }
 
 function resolveStageFromBible(volume: AnyRecord, currentStage?: AnyRecord) {
   const stages = arrayValue(volume?.stages)
-  return stages.find(stage => titleMatches(currentStage?.title, stage?.title)) || stages[0] || {}
+  const matched = stages.find(stage => titleMatches(currentStage?.title, stage?.title))
+  if (matched) return matched
+  return currentStage?.title ? {} : stages[0] || {}
 }
 
 function routeRiskTags(chapter: AnyRecord, activeTurns: AnyRecord[] = []) {
@@ -179,9 +183,52 @@ function routeRiskTags(chapter: AnyRecord, activeTurns: AnyRecord[] = []) {
   return Array.from(new Set(tags))
 }
 
-function buildCoverage(chapters: AnyRecord[], startChapterNo: number, span: number): FuturePlanningCoverage {
+function outlineChapterNo(outline: AnyRecord) {
+  const rawNo = Number(outline?.raw_payload?.chapter_no || outline?.raw_payload?.future100?.chapter_no || outline?.raw_payload?.skeleton?.chapter_no || 0)
+  if (rawNo) return rawNo
+  const match = text(outline?.title).match(/第\s*(\d+)\s*章/)
+  return match ? Number(match[1]) : 0
+}
+
+function futureSkeletonPlanFromOutline(outline: AnyRecord) {
+  const future = outline?.raw_payload?.future100 || outline?.raw_payload?.skeleton || {}
+  const chapterNo = outlineChapterNo(outline)
+  if (!chapterNo) return null
+  return {
+    id: outline.id,
+    chapter_no: chapterNo,
+    title: firstNonEmpty(future?.title, outline?.title),
+    chapter_goal: firstNonEmpty(future?.chapter_goal, outline?.summary),
+    conflict: firstNonEmpty(future?.conflict, arrayValue(outline?.conflict_points)[0]),
+    ending_hook: firstNonEmpty(future?.ending_hook, outline?.hook),
+    raw_payload: {
+      ...(outline?.raw_payload || {}),
+      mainline_progress: firstNonEmpty(
+        future?.mainline_progress,
+        future?.volume_stage,
+        future?.commercial_purpose,
+        arrayValue(outline?.turning_points)[0],
+      ),
+    },
+  }
+}
+
+function planningRecords(chapters: AnyRecord[], outlines: AnyRecord[]) {
+  const futureSkeletons = outlines
+    .filter(outline => outlineLevel(outline) === 'chapter' && (outline?.raw_payload?.source === 'future_100_skeleton' || outline?.raw_payload?.future100 || outline?.raw_payload?.skeleton))
+    .map(futureSkeletonPlanFromOutline)
+    .filter(Boolean) as AnyRecord[]
+  return [...futureSkeletons, ...chapters]
+}
+
+function buildCoverage(records: AnyRecord[], startChapterNo: number, span: number): FuturePlanningCoverage {
   const expected = Array.from({ length: span }).map((_, index) => startChapterNo + index)
-  const byNo = new Map(chapters.map(chapter => [Number(chapter?.chapter_no), chapter]))
+  const byNo = new Map<number, AnyRecord[]>()
+  records.forEach(record => {
+    const chapterNo = Number(record?.chapter_no || 0)
+    if (!chapterNo) return
+    byNo.set(chapterNo, [...(byNo.get(chapterNo) || []), record])
+  })
   const isPlannedEnough = (chapter?: AnyRecord) => {
     if (!chapter) return false
     return Boolean(
@@ -192,8 +239,9 @@ function buildCoverage(chapters: AnyRecord[], startChapterNo: number, span: numb
       text(chapter?.raw_payload?.mainline_progress || chapter?.mainline_progress)
     )
   }
-  const plannedChapters = expected.filter(chapterNo => isPlannedEnough(byNo.get(chapterNo))).length
-  const missingChapters = expected.filter(chapterNo => !isPlannedEnough(byNo.get(chapterNo)))
+  const hasPlan = (chapterNo: number) => (byNo.get(chapterNo) || []).some(isPlannedEnough)
+  const plannedChapters = expected.filter(hasPlan).length
+  const missingChapters = expected.filter(chapterNo => !hasPlan(chapterNo))
 
   return {
     ready: missingChapters.length === 0,
@@ -344,8 +392,9 @@ export function buildPlanningWorkspaceModel(input: BuildPlanningWorkspaceModelIn
     riskTags: routeRiskTags(chapter, currentTurns.length ? currentTurns : turns),
   }))
 
-  const future10Coverage = buildCoverage(chapters, activeChapterNo, 10)
-  const future100Coverage = buildCoverage(chapters, activeChapterNo, 100)
+  const planRecords = planningRecords(chapters, outlines)
+  const future10Coverage = buildCoverage(planRecords, activeChapterNo, 10)
+  const future100Coverage = buildCoverage(planRecords, activeChapterNo, 100)
   const readerPromise = firstNonEmpty(writingBible?.promise, writingBible?.reader_promise, selectedProject?.reader_promise)
   const currentVolumeGoal = firstNonEmpty(bibleVolume?.goal, currentVolume?.goal, currentVolume?.summary)
   const currentStageConflict = firstNonEmpty(bibleStage?.conflict, currentStage?.conflict, activeChapter?.conflict)
