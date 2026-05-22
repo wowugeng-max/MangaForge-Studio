@@ -421,6 +421,12 @@ export default function NovelProjectWorkspace() {
     setChapters,
   })
 
+  const selectChapterForWriting = async (chapterId: number) => {
+    const saved = await selectChapter(chapterId)
+    if (saved) setWorkspaceArea('chapterWriting')
+    return saved
+  }
+
   const {
     activeTasks,
     activeKnowledgeJobCount,
@@ -972,7 +978,7 @@ export default function NovelProjectWorkspace() {
                         actions={[
                           <Button key="open" size="small" type="link" onClick={() => {
                             Modal.destroyAll()
-                            void selectChapter(row.chapter_id)
+                            void selectChapterForWriting(row.chapter_id)
                           }}>打开</Button>,
                         ]}
                       >
@@ -1312,7 +1318,7 @@ export default function NovelProjectWorkspace() {
   }
 
   const locateRepairTaskChapter = async (chapterId: number) => {
-    if (await selectChapter(chapterId)) {
+    if (await selectChapterForWriting(chapterId)) {
       setTaskCenterOpen(false)
       setRightPanelOpen(true)
       message.success('已定位到章节')
@@ -1320,7 +1326,7 @@ export default function NovelProjectWorkspace() {
   }
 
   const openRepairTaskChapterEditor = async (chapterId: number) => {
-    if (!await selectChapter(chapterId)) return
+    if (!await selectChapterForWriting(chapterId)) return
     const chapter = chapters.find(ch => Number(ch.id) === Number(chapterId))
     if (chapter) {
       setTaskCenterOpen(false)
@@ -1332,7 +1338,7 @@ export default function NovelProjectWorkspace() {
     const chapterId = Number(task?.chapter_id || 0)
     if (!chapterId) return message.warning('这个任务没有绑定章节')
     if (!selectedModelId) return message.warning('请先选择模型')
-    if (!await selectChapter(chapterId)) return
+    if (!await selectChapterForWriting(chapterId)) return
     setTaskCenterOpen(false)
     await createEditorReportForChapter(chapterId, { sourceTask: task, autoRevision: true })
   }
@@ -1441,7 +1447,7 @@ export default function NovelProjectWorkspace() {
     if (!chapterId) return message.warning('这个任务没有绑定章节')
     if (taskType === 'repair_materials') {
       if (!selectedModelId) return message.warning('请先选择模型')
-      if (!await selectChapter(chapterId)) return
+      if (!await selectChapterForWriting(chapterId)) return
       setTaskCenterOpen(false)
       await generateSceneCardsForChapter(chapterId, true)
       await markNeedsReview()
@@ -1453,7 +1459,7 @@ export default function NovelProjectWorkspace() {
       return
     }
     if (taskType === 'repair_similarity') {
-      if (!await selectChapter(chapterId)) return
+      if (!await selectChapterForWriting(chapterId)) return
       setTaskCenterOpen(false)
       await runSimilarityForChapter(chapterId)
       await markNeedsReview()
@@ -2235,7 +2241,7 @@ export default function NovelProjectWorkspace() {
                 dataSource={(report.chapter_cards || []).slice(0, 30)}
                 renderItem={(row: any) => (
                   <List.Item
-                    actions={row.chapter_id ? [<Button key="open" size="small" type="link" onClick={() => { Modal.destroyAll(); void selectChapter(row.chapter_id) }}>打开</Button>] : undefined}
+                    actions={row.chapter_id ? [<Button key="open" size="small" type="link" onClick={() => { Modal.destroyAll(); void selectChapterForWriting(row.chapter_id) }}>打开</Button>] : undefined}
                   >
                     <List.Item.Meta
                       title={<Space wrap><Text>第{row.chapter_no}章 {row.title || '未命名'}</Text><Tag color={row.score >= 80 ? 'green' : row.score < 65 ? 'red' : 'gold'} bordered={false}>{row.score}分</Tag><Tag bordered={false}>{row.word_count || 0}字</Tag></Space>}
@@ -2436,7 +2442,7 @@ export default function NovelProjectWorkspace() {
                     actions={row.chapter_id ? [
                       <Button key="open" size="small" type="link" onClick={() => {
                         Modal.destroyAll()
-                        void selectChapter(row.chapter_id)
+                        void selectChapterForWriting(row.chapter_id)
                       }}>打开</Button>,
                     ] : []}
                   >
@@ -2517,7 +2523,7 @@ export default function NovelProjectWorkspace() {
                         actions={[
                           <Button key="open" size="small" type="link" onClick={() => {
                             Modal.destroyAll()
-                            void selectChapter(row.chapter_id)
+                            void selectChapterForWriting(row.chapter_id)
                           }}>打开</Button>,
                         ]}
                       >
@@ -2574,7 +2580,7 @@ export default function NovelProjectWorkspace() {
                       const chapter = chapters.find(ch => Number(ch.chapter_no) === Number(issue.chapter_no))
                       if (chapter) {
                         Modal.destroyAll()
-                        void selectChapter(chapter.id)
+                        void selectChapterForWriting(chapter.id)
                       }
                     }}>打开</Button>] : undefined}
                   >
@@ -2698,7 +2704,7 @@ export default function NovelProjectWorkspace() {
                 dataSource={(report.issues || []).slice(0, 80)}
                 renderItem={(issue: any) => (
                   <List.Item
-                    actions={issue.chapter_id ? [<Button key="open" size="small" type="link" onClick={() => { Modal.destroyAll(); void selectChapter(issue.chapter_id) }}>打开</Button>] : undefined}
+                    actions={issue.chapter_id ? [<Button key="open" size="small" type="link" onClick={() => { Modal.destroyAll(); void selectChapterForWriting(issue.chapter_id) }}>打开</Button>] : undefined}
                   >
                     <List.Item.Meta
                       title={<Space><Tag color={issue.severity === 'high' ? 'red' : issue.severity === 'medium' ? 'gold' : 'default'} bordered={false}>{issue.severity}</Tag><Text>第{issue.chapter_no}章 {issue.message}</Text></Space>}
@@ -2816,10 +2822,10 @@ export default function NovelProjectWorkspace() {
                 renderItem={(debt: any) => (
                   <List.Item
                     actions={[
-                      debt.affected?.chapter_id ? <Button key="open-id" size="small" type="link" onClick={() => { Modal.destroyAll(); void selectChapter(debt.affected.chapter_id) }}>打开</Button> : null,
+                      debt.affected?.chapter_id ? <Button key="open-id" size="small" type="link" onClick={() => { Modal.destroyAll(); void selectChapterForWriting(debt.affected.chapter_id) }}>打开</Button> : null,
                       debt.affected?.chapter_no ? <Button key="open-no" size="small" type="link" onClick={() => {
                         const chapter = chapters.find(ch => Number(ch.chapter_no) === Number(debt.affected.chapter_no))
-                        if (chapter) { Modal.destroyAll(); void selectChapter(chapter.id) }
+                        if (chapter) { Modal.destroyAll(); void selectChapterForWriting(chapter.id) }
                       }}>定位</Button> : null,
                       <Button key="resolve" size="small" type="link" onClick={async () => {
                         try {
@@ -3815,11 +3821,7 @@ export default function NovelProjectWorkspace() {
           onOpenOutlineTree={() => setOutlineTreeOpen(true)}
           onOpenChapterDrawer={() => setChapterDrawerOpen(true)}
           onCreateChapter={() => openEditor('chapter')}
-          onSelectChapter={(chapterId) => {
-            void selectChapter(chapterId).then((saved) => {
-              if (saved) setWorkspaceArea('chapterWriting')
-            })
-          }}
+          onSelectChapter={(chapterId) => { void selectChapterForWriting(chapterId) }}
         />
 
         {workspaceArea === 'chapterWriting' ? (
@@ -3875,9 +3877,7 @@ export default function NovelProjectWorkspace() {
             onSelectChapter={(chapterNo) => {
               const chapter = sortedChapters.find(item => Number(item.chapter_no) === Number(chapterNo))
               if (!chapter) return
-              void selectChapter(chapter.id).then((saved) => {
-                if (saved) setWorkspaceArea('chapterWriting')
-              })
+              void selectChapterForWriting(chapter.id)
             }}
           />
         )}
@@ -3999,7 +3999,7 @@ export default function NovelProjectWorkspace() {
         }}
         onSelectChapter={(chapterId) => {
           setConsistencyGraphOpen(false)
-          void selectChapter(chapterId)
+          void selectChapterForWriting(chapterId)
         }}
       />
 
@@ -4017,7 +4017,7 @@ export default function NovelProjectWorkspace() {
         onRefreshContinuity={refreshConsistencyAudit}
         onSelectChapter={(chapterId) => {
           setQualityBenchmarkOpen(false)
-          void selectChapter(chapterId)
+          void selectChapterForWriting(chapterId)
         }}
         onChanged={() => { void loadProjectModules() }}
       />
@@ -4027,7 +4027,7 @@ export default function NovelProjectWorkspace() {
         projectId={projectId}
         onClose={() => setReviewAnnotationsOpen(false)}
         onSelectChapter={(chapterId) => {
-          void selectChapter(chapterId)
+          void selectChapterForWriting(chapterId)
         }}
         onApplyEditorRevision={applyEditorRevision}
         onChanged={() => { void loadProjectModules() }}
@@ -4038,7 +4038,7 @@ export default function NovelProjectWorkspace() {
         projectId={projectId}
         onClose={() => setAgentAuditOpen(false)}
         onSelectChapter={(chapterId) => {
-          void selectChapter(chapterId)
+          void selectChapterForWriting(chapterId)
         }}
         onOpenTaskCenter={() => setTaskCenterOpen(true)}
       />
@@ -4494,7 +4494,7 @@ export default function NovelProjectWorkspace() {
             openEditor('outline', outline)
           }
         }}
-        onSelectChapter={(chapterId) => { void selectChapter(chapterId).then((saved) => { if (saved) { setOutlineTreeOpen(false); setFuture100FocusOutlineIds([]) } }) }}
+        onSelectChapter={(chapterId) => { void selectChapterForWriting(chapterId).then((saved) => { if (saved) { setOutlineTreeOpen(false); setFuture100FocusOutlineIds([]) } }) }}
       />
 
       {/* ═══ Outline Control Panel ═══ */}
@@ -4540,7 +4540,7 @@ export default function NovelProjectWorkspace() {
           onGenerateCurrentChapterProse={generateCurrentChapterProse}
           onOpenRestructure={() => { setSelectMode(true); setRestructurePanelOpen(true) }}
           onOpenVersionHistory={() => { setRightPanelOpen(true); setRightPanelTab('versions'); setChapterDrawerOpen(false) }}
-          onSelectChapter={(chapterId) => { void selectChapter(chapterId) }}
+          onSelectChapter={(chapterId) => { void selectChapterForWriting(chapterId) }}
           onSetSelectMode={setSelectMode}
           onSetSelectedChapterIds={setSelectedChapterIds}
           onSetChapterSearch={setChapterSearch}
