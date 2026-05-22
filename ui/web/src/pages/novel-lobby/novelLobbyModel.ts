@@ -69,7 +69,7 @@ function hasLongformCapacity(seed: AnyRecord, lengthTarget: string) {
   if (!hasRequiredLongFields) return false
   if (lengthTarget !== 'epic') return true
 
-  return hasText(seed.expandable_assets) || hasText(seed.first_writing_task)
+  return hasText(seed.expandable_assets)
 }
 
 function inferRiskTags(project: AnyRecord, seed: AnyRecord) {

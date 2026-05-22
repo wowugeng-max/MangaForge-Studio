@@ -29,6 +29,7 @@ describe('buildNovelLobbyModel', () => {
           long_term_conflict: '阵盟围剿',
           growth_engine: '阵盘升级',
           volume_direction: '外门到阵盟',
+          expandable_assets: '阵盘 / 密令',
           first_writing_task: '检查第1章场景卡',
         },
       },
@@ -56,6 +57,35 @@ describe('buildNovelLobbyModel', () => {
     expect(model.featuredProject?.nextAction).toBe('补商业钩子')
     expect(model.projectCards[0].riskTags).toContain('缺读者承诺')
     expect(model.projectCards[0].riskTags).toContain('缺前30章计划')
+    expect(model.projectCards[0].riskTags).toContain('缺长线承载')
+  })
+
+  test('requires expandable assets for epic longform planning', () => {
+    const projects = [{
+      id: 10,
+      title: '超长篇缺资产池',
+      status: 'draft',
+      length_target: 'epic',
+      reference_config: {
+        project_seed: {
+          reader_promise: '看少年从边城打穿诸天宗门',
+          first30_plan: {
+            chapters_1_3: '边城危机',
+            chapters_4_10: '试读反杀',
+            chapters_11_30: '宗门压迫',
+          },
+          mainline_goal: '建立诸天宗门',
+          long_term_conflict: '上界联盟持续围剿',
+          growth_engine: '界石升级',
+          volume_direction: '边城到上界',
+          first_writing_task: '检查第1章场景卡',
+        },
+      },
+    }]
+
+    const model = buildNovelLobbyModel(projects)
+
+    expect(model.featuredProject?.nextAction).toBe('补长线承载')
     expect(model.projectCards[0].riskTags).toContain('缺长线承载')
   })
 
