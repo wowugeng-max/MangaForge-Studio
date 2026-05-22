@@ -1,9 +1,9 @@
 import React, { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Alert, Badge, Button, Card, Checkbox, Dropdown, Form, Input, List, message, Modal, Progress, Select, Space, Typography, Tooltip, Tag,
+  Alert, Badge, Button, Card, Checkbox, Form, Input, List, message, Modal, Progress, Select, Space, Typography, Tooltip, Tag,
 } from 'antd'
 import {
-  ArrowLeftOutlined, BookOutlined, ClockCircleOutlined, DownOutlined, ReloadOutlined,
+  ArrowLeftOutlined, ClockCircleOutlined, ReloadOutlined,
 } from '@ant-design/icons'
 import type { EditorView } from '@codemirror/view'
 import { useNavigate, useParams } from 'react-router-dom'
@@ -3640,39 +3640,144 @@ export default function NovelProjectWorkspace() {
     actions[key]?.()
   }
 
-  const handleWorkflowMenuClick = (key: string) => {
-    const actions: Record<string, () => void> = {
-      referenceConfig: () => setReferenceConfigOpen(true),
-      referenceEngineering: () => setReferenceEngineeringOpen(true),
-      creativeCards: () => setCreativeCardsOpen(true),
-      originalIncubator: () => { void runOriginalIncubator() },
-      writingBible: () => { void openWritingBibleEditor() },
-      outlinePanel: () => setOutlinePanelOpen(true),
-      outlineTree: () => setOutlineTreeOpen(true),
-      chapterDrawer: () => setChapterDrawerOpen(true),
-      productionDashboard: () => { void openProductionDashboard() },
-      productionDesk: () => navigate(`/novel/workspace/${projectId}/production`),
-      chapterGroup: () => { void startChapterGroupGeneration() },
-      readyChapterGroup: () => { void startReadyChapterGroupGeneration() },
-      taskCenter: () => setTaskCenterOpen(true),
-      agentAudit: () => setAgentAuditOpen(true),
-      bookReview: () => { void runBookReview() },
-      continuityAudit: () => { void openContinuityAudit() },
-      consistencyGraph: () => setConsistencyGraphOpen(true),
-      qualityBenchmarkPanel: () => setQualityBenchmarkOpen(true),
-      reviewAnnotations: () => setReviewAnnotationsOpen(true),
-      commercialTools: () => setCommercialToolsOpen(true),
-      exportDelivery: () => setExportDeliveryOpen(true),
-      referenceDiagnosis: () => { void openReferenceKnowledgeDiagnosis() },
-      referenceMigration: () => { void runReferenceMigrationPlan() },
+  const renderWorkspaceArea = () => {
+    if (workspaceArea === 'storyPlanning') {
+      return (
+        <StoryPlanningWorkspace
+          model={planningWorkspaceModel}
+          selectedModelId={selectedModelId}
+          loadingKey={planningLoadingKey}
+          onAction={handlePlanningAction}
+          onSelectChapter={(chapterNo) => {
+            const chapter = sortedChapters.find(item => Number(item.chapter_no) === Number(chapterNo))
+            if (!chapter) return
+            void selectChapterForWriting(chapter.id)
+          }}
+        />
+      )
     }
-    actions[key]?.()
-  }
 
-  const workflowMenu = (items: any[]) => ({
-    items,
-    onClick: ({ key }: { key: string }) => handleWorkflowMenuClick(key),
-  })
+    if (workspaceArea === 'chapterWriting') {
+      return (
+        <WorkspaceCenter
+          isEmptyProject={isEmptyProject}
+          selectedProject={selectedProject}
+          activeChapter={activeChapter}
+          materialScore={activeChapterDiagnostics?.material_score}
+          worldbuildingCount={worldbuilding.length}
+          characterCount={characters.length}
+          outlineCount={outlines.length}
+          streamingChapterId={streamingChapterId}
+          streamingText={streamingText}
+          streamingProgress={streamingProgress}
+          streamingPercent={streamingPercent}
+          generationPipeline={generationPipeline}
+          streamingEndRef={streamingEndRef}
+          proseEditorRef={proseEditorRef}
+          saveStatus={saveStatus}
+          planning={planning}
+          incubatingOriginal={incubatingOriginal}
+          generatingProse={generatingProse}
+          generatingSceneCards={generatingSceneCards}
+          diagnosticsLoading={diagnosticsLoading}
+          pipelineLoading={pipelineLoading}
+          editorReportLoading={editorReportLoading}
+          onRunPlan={runPlan}
+          onCreateOutline={() => openEditor('outline')}
+          onCreateChapter={() => openEditor('chapter')}
+          onRunOriginalIncubator={() => { void runOriginalIncubator() }}
+          onOpenReferenceConfig={() => setReferenceConfigOpen(true)}
+          onOpenWritingBibleEditor={() => { void openWritingBibleEditor() }}
+          onGenerateCurrentChapterProse={() => generateCurrentChapterProse()}
+          onRepairAndGenerateCurrentChapter={repairContextAndGenerateCurrentChapter}
+          onGenerateSceneCards={() => generateSceneCardsForActiveChapter()}
+          onOpenGenerationDiagnostics={openGenerationDiagnostics}
+          onOpenQualityCard={openChapterQualityCard}
+          onStartChapterPipeline={startChapterPipeline}
+          onCreateEditorReport={createEditorReport}
+          onEditActiveChapter={() => activeChapter && openEditor('chapter', activeChapter)}
+          onChapterTextChange={(next) => {
+            const chapterId = activeChapterId
+            setChapters(prev => prev.map(c => c.id === chapterId ? { ...c, chapter_text: next } : c))
+            scheduleSave(chapterId, next)
+          }}
+        />
+      )
+    }
+
+    const groups: Record<Exclude<WorkspaceArea, 'storyPlanning' | 'chapterWriting'>, {
+      title: string
+      desc: string
+      actions: Array<{ label: string; onClick: () => void; loading?: boolean; primary?: boolean; disabled?: boolean }>
+    }> = {
+      storyAssets: {
+        title: '资料设定',
+        desc: '维护写作圣经、故事状态、角色、世界观、创作资料卡和参考工程。',
+        actions: [
+          { label: '写作圣经', onClick: () => { void openWritingBibleEditor() }, primary: true },
+          { label: '故事状态机', onClick: openStoryStateEditor },
+          { label: '创作资料卡中心', onClick: () => setCreativeCardsOpen(true) },
+          { label: '参考作品配置', onClick: () => setReferenceConfigOpen(true) },
+          { label: '参考工程总览', onClick: () => setReferenceEngineeringOpen(true) },
+          { label: '参考知识诊断', onClick: () => { void openReferenceKnowledgeDiagnosis() }, loading: commercialToolLoading === 'referenceDiagnosis' },
+        ],
+      },
+      qualityRevision: {
+        title: '质检修订',
+        desc: '检查当前章、前后文连续性、全书一致性、审阅批注和质量基准。',
+        actions: [
+          { label: '当前章质量卡', onClick: openChapterQualityCard, primary: true, disabled: !activeChapter },
+          { label: '编辑报告', onClick: createEditorReport, loading: editorReportLoading, disabled: !activeChapter || !selectedModelId },
+          { label: '章节审阅批注', onClick: () => setReviewAnnotationsOpen(true) },
+          { label: '全书一致性图谱', onClick: () => setConsistencyGraphOpen(true) },
+          { label: '质量评测基准', onClick: () => setQualityBenchmarkOpen(true) },
+          { label: '全书连续性检查', onClick: () => { void openContinuityAudit() }, loading: commercialToolLoading === 'continuityAudit' },
+          { label: '全书总检', onClick: () => { void runBookReview() }, loading: bookReviewLoading, disabled: !selectedModelId },
+          { label: '当前章参考迁移计划', onClick: () => { void runReferenceMigrationPlan() }, loading: commercialToolLoading === 'referenceMigration', disabled: !activeChapter },
+        ],
+      },
+      productionOps: {
+        title: '生产运营',
+        desc: '管理章节群、任务队列、生产趋势、Agent 审计、模型诊断和交付导出。',
+        actions: [
+          { label: '章节生产台', onClick: openProductionDesk, primary: true, loading: commercialToolLoading === 'productionDesk' },
+          { label: '生产看板', onClick: () => { void openProductionDashboard() }, loading: dashboardLoading },
+          { label: '任务中心', onClick: () => setTaskCenterOpen(true) },
+          { label: '智能章节群入队', onClick: () => { void startReadyChapterGroupGeneration() }, loading: commercialToolLoading === 'readyGroup', disabled: !selectedModelId },
+          { label: '普通章节群入队', onClick: () => { void startChapterGroupGeneration() }, disabled: !selectedModelId },
+          { label: '后台任务队列', onClick: openRunQueue, loading: commercialToolLoading === 'queue' },
+          { label: '成本质量仪表盘', onClick: openProductionMetrics, loading: commercialToolLoading === 'metrics' },
+          { label: 'Agent 调用审计', onClick: () => setAgentAuditOpen(true) },
+          { label: '商业工具箱', onClick: () => setCommercialToolsOpen(true) },
+          { label: '交付导出', onClick: () => setExportDeliveryOpen(true) },
+        ],
+      },
+    }
+    const group = groups[workspaceArea]
+    return (
+      <div style={{ flex: 1, minHeight: 0, overflow: 'auto', background: '#f6f8fb', padding: 20 }}>
+        <Card title={group.title} extra={<Button onClick={() => setWorkspaceArea('storyPlanning')}>返回故事规划</Button>}>
+          <Space direction="vertical" size={16} style={{ width: '100%' }}>
+            <Text type="secondary">{group.desc}</Text>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+              {group.actions.map(action => (
+                <Button
+                  key={action.label}
+                  block
+                  type={action.primary ? 'primary' : 'default'}
+                  loading={action.loading}
+                  disabled={action.disabled}
+                  onClick={action.onClick}
+                >
+                  {action.label}
+                </Button>
+              ))}
+            </div>
+          </Space>
+        </Card>
+      </div>
+    )
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, overflow: 'hidden', background: '#fff' }}>
@@ -3693,61 +3798,22 @@ export default function NovelProjectWorkspace() {
           style={{ width: 220 }} placeholder="选择模型"
         />
         <Space size={4} style={{ flex: 1, minWidth: 0 }}>
-          <Dropdown
-            menu={workflowMenu([
-              { key: 'referenceConfig', label: '参考作品配置' },
-              { key: 'referenceEngineering', label: '参考工程总览' },
-              { key: 'creativeCards', label: '创作资料卡中心' },
-              { key: 'referenceDiagnosis', label: '参考知识诊断' },
-              { key: 'originalIncubator', label: '原创孵化', disabled: incubatingOriginal },
-              { key: 'writingBible', label: '写作圣经' },
-            ])}
-          >
-            <Button size="small" type="text" icon={<BookOutlined />}>1 准备资料 <DownOutlined /></Button>
-          </Dropdown>
-          <Dropdown
-            menu={workflowMenu([
-              { key: 'outlinePanel', label: '生成/重建大纲', disabled: !selectedModelId || stepOutlineLoading },
-              { key: 'outlineTree', label: '查看大纲树' },
-              { key: 'chapterDrawer', label: '章节管理' },
-            ])}
-          >
-            <Button size="small" type="text">2 规划章节 <DownOutlined /></Button>
-          </Dropdown>
-          <Dropdown
-            menu={workflowMenu([
-              { key: 'productionDesk', label: '生产台' },
-              { key: 'productionDashboard', label: '生产看板', disabled: dashboardLoading },
-              { key: 'readyChapterGroup', label: '智能章节群', disabled: !selectedModelId || commercialToolLoading === 'readyGroup' },
-              { key: 'chapterGroup', label: '普通章节群', disabled: !selectedModelId },
-              { key: 'taskCenter', label: '任务中心' },
-              { key: 'agentAudit', label: 'Agent 调用审计' },
-            ])}
-          >
-            <Button size="small" type="text">3 批量生产 <DownOutlined /></Button>
-          </Dropdown>
-          <Dropdown
-            menu={workflowMenu([
-              { key: 'bookReview', label: '全书总检', disabled: !selectedModelId || bookReviewLoading },
-              { key: 'qualityBenchmarkPanel', label: '质量评测基准面板' },
-              { key: 'reviewAnnotations', label: '章节审阅批注' },
-              { key: 'consistencyGraph', label: '全书一致性图谱' },
-              { key: 'continuityAudit', label: '全书连续性检查' },
-              { key: 'referenceMigration', label: '当前章参考迁移计划', disabled: !activeChapter },
-              { key: 'commercialTools', label: '商业工具箱' },
-            ])}
-          >
-            <Button size="small" type="text">4 质检修订 <DownOutlined /></Button>
-          </Dropdown>
-          <Dropdown
-            menu={workflowMenu([
-              { key: 'exportDelivery', label: '交付导出 TXT / Markdown' },
-              { key: 'qualityBenchmarkPanel', label: '导出前质量基准' },
-              { key: 'consistencyGraph', label: '导出前一致性图谱' },
-            ])}
-          >
-            <Button size="small" type="text">5 交付导出 <DownOutlined /></Button>
-          </Dropdown>
+          {[
+            ['storyPlanning', '故事规划'],
+            ['chapterWriting', '章节写作'],
+            ['storyAssets', '资料设定'],
+            ['qualityRevision', '质检修订'],
+            ['productionOps', '生产运营'],
+          ].map(([key, label]) => (
+            <Button
+              key={key}
+              size="small"
+              type={workspaceArea === key ? 'primary' : 'text'}
+              onClick={() => setWorkspaceArea(key as WorkspaceArea)}
+            >
+              {label}
+            </Button>
+          ))}
         </Space>
         {referenceSummary.count > 0 && (
           <Tag color="purple" bordered={false}>{referenceSummary.strengthLabel} · {referenceSummary.count} 部参考</Tag>
@@ -3824,63 +3890,7 @@ export default function NovelProjectWorkspace() {
           onSelectChapter={(chapterId) => { void selectChapterForWriting(chapterId) }}
         />
 
-        {workspaceArea === 'chapterWriting' ? (
-          <WorkspaceCenter
-            isEmptyProject={isEmptyProject}
-            selectedProject={selectedProject}
-            activeChapter={activeChapter}
-            materialScore={activeChapterDiagnostics?.material_score}
-            worldbuildingCount={worldbuilding.length}
-            characterCount={characters.length}
-            outlineCount={outlines.length}
-            streamingChapterId={streamingChapterId}
-            streamingText={streamingText}
-            streamingProgress={streamingProgress}
-            streamingPercent={streamingPercent}
-            generationPipeline={generationPipeline}
-            streamingEndRef={streamingEndRef}
-            proseEditorRef={proseEditorRef}
-            saveStatus={saveStatus}
-            planning={planning}
-            incubatingOriginal={incubatingOriginal}
-            generatingProse={generatingProse}
-            generatingSceneCards={generatingSceneCards}
-            diagnosticsLoading={diagnosticsLoading}
-            pipelineLoading={pipelineLoading}
-            editorReportLoading={editorReportLoading}
-            onRunPlan={runPlan}
-            onCreateOutline={() => openEditor('outline')}
-            onCreateChapter={() => openEditor('chapter')}
-            onRunOriginalIncubator={() => { void runOriginalIncubator() }}
-            onOpenReferenceConfig={() => setReferenceConfigOpen(true)}
-            onOpenWritingBibleEditor={() => { void openWritingBibleEditor() }}
-            onGenerateCurrentChapterProse={() => generateCurrentChapterProse()}
-            onRepairAndGenerateCurrentChapter={repairContextAndGenerateCurrentChapter}
-            onGenerateSceneCards={() => generateSceneCardsForActiveChapter()}
-            onOpenGenerationDiagnostics={openGenerationDiagnostics}
-            onOpenQualityCard={openChapterQualityCard}
-            onStartChapterPipeline={startChapterPipeline}
-            onCreateEditorReport={createEditorReport}
-            onEditActiveChapter={() => activeChapter && openEditor('chapter', activeChapter)}
-            onChapterTextChange={(next) => {
-              const chapterId = activeChapterId
-              setChapters(prev => prev.map(c => c.id === chapterId ? { ...c, chapter_text: next } : c))
-              scheduleSave(chapterId, next)
-            }}
-          />
-        ) : (
-          <StoryPlanningWorkspace
-            model={planningWorkspaceModel}
-            selectedModelId={selectedModelId}
-            loadingKey={planningLoadingKey}
-            onAction={handlePlanningAction}
-            onSelectChapter={(chapterNo) => {
-              const chapter = sortedChapters.find(item => Number(item.chapter_no) === Number(chapterNo))
-              if (!chapter) return
-              void selectChapterForWriting(chapter.id)
-            }}
-          />
-        )}
+        {renderWorkspaceArea()}
 
         <ReferencePanel
           open={rightPanelOpen}
