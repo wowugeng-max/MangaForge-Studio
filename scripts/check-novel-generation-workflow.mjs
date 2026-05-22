@@ -114,6 +114,8 @@ async function main() {
     longform_production_task_status: false,
     longform_production_task_bulk_status: false,
     longform_production_repair_audit: false,
+    longform_governance_summary: false,
+    creative_command_longform_governance: false,
     quality_trends: false,
     volume_control: false,
     diagnostics: false,
@@ -210,6 +212,13 @@ async function main() {
     checks.longform_production_task_bulk_status = true
     checks.longform_production_repair_audit = true
   }
+  const governanceSummary = await request(`/novel/projects/${project.id}/longform-governance-summary`)
+  checks.longform_governance_summary = Boolean(governanceSummary?.summary?.current_trends && governanceSummary?.summary?.risk_summary)
+  const governanceCommand = await request(`/novel/projects/${project.id}/creative-command`, {
+    method: 'POST',
+    body: JSON.stringify({ command: '长线生产现在还有哪些风险，给我闭环摘要', execute: true }),
+  })
+  checks.creative_command_longform_governance = Boolean((governanceCommand?.plan?.actions || []).some((action) => action.key === 'longform_governance_summary') && (governanceCommand?.executed || []).some((item) => item.key === 'longform_governance_summary'))
   checks.quality_trends = Array.isArray(dashboard?.dashboard?.chapter_trends)
   checks.volume_control = Array.isArray(dashboard?.dashboard?.volume_controls)
 

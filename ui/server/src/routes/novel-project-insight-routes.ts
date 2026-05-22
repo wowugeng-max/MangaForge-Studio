@@ -320,6 +320,61 @@ function buildLongformRepairAuditSummary(run: any, trends: any) {
   }
 }
 
+function buildLatestLongformGovernanceSummary(runs: any[], reviews: any[], trends: any) {
+  const repairRuns = runs
+    .filter(run => run.run_type === 'longform_production_repair')
+    .map(run => ({ run, payload: parseJsonLikePayload(run.output_ref) || {} }))
+    .sort((a, b) => String(b.run.created_at || '').localeCompare(String(a.run.created_at || '')))
+  const auditReviews = reviews
+    .filter(review => review.review_type === 'longform_production_repair_audit')
+    .map(review => ({ review, payload: parseJsonLikePayload(review.payload) || {} }))
+    .sort((a, b) => String(b.review.created_at || '').localeCompare(String(a.review.created_at || '')))
+  const latestRun = repairRuns[0] || null
+  const latestAudit = latestRun?.payload?.audit_summary || auditReviews[0]?.payload?.audit || null
+  const tasks = Array.isArray(latestRun?.payload?.tasks) ? latestRun.payload.tasks : []
+  const unresolvedTasks = tasks.filter((task: any) => task.task_status !== 'resolved')
+  const needsReviewTasks = tasks.filter((task: any) => task.task_status === 'needs_review')
+  return {
+    created_at: new Date().toISOString(),
+    latest_repair_run: latestRun ? {
+      id: latestRun.run.id,
+      status: latestRun.run.status,
+      step_name: latestRun.run.step_name,
+      created_at: latestRun.run.created_at,
+      task_count: tasks.length,
+      resolved_count: tasks.filter((task: any) => task.task_status === 'resolved').length,
+      needs_review_count: needsReviewTasks.length,
+      open_count: unresolvedTasks.length,
+    } : null,
+    latest_audit: latestAudit,
+    current_trends: {
+      summary: trends.summary,
+      weak_count: Array.isArray(trends.weak_rows) ? trends.weak_rows.length : 0,
+      weak_rows: (trends.weak_rows || []).slice(0, 12),
+      failure_reasons: trends.failure_reasons || [],
+      recommendations: trends.recommendations || [],
+    },
+    risk_summary: {
+      unresolved_task_count: unresolvedTasks.length,
+      needs_review_count: needsReviewTasks.length,
+      unresolved_tasks: unresolvedTasks.slice(0, 20).map((task: any) => ({
+        task_type: task.task_type,
+        task_status: task.task_status || 'open',
+        chapter_no: task.chapter_no,
+        title: task.title,
+        message: task.message,
+      })),
+    },
+    next_actions: [
+      !latestRun ? '还没有长线生产修复队列，先生成长线生产趋势报表和修复任务。' : '',
+      needsReviewTasks.length ? `有 ${needsReviewTasks.length} 项长线修复任务等待复查确认。` : '',
+      unresolvedTasks.length && !needsReviewTasks.length ? `有 ${unresolvedTasks.length} 项长线修复任务未关闭。` : '',
+      trends.recommendations?.[0] || '',
+      latestAudit ? '已有闭环审计摘要，可在任务中心回看本轮治理效果。' : latestRun ? '建议生成闭环审计摘要，记录本轮治理效果。' : '',
+    ].filter(Boolean),
+  }
+}
+
 export function registerNovelProjectInsightRoutes(app: Express, ctx: ProjectInsightRoutesContext) {
   app.get('/api/novel/projects/:id/production-dashboard', async (req, res) => {
     try {
@@ -367,6 +422,24 @@ export function registerNovelProjectInsightRoutes(app: Express, ctx: ProjectInsi
         listNovelRuns(activeWorkspace, project.id),
       ])
       res.json({ ok: true, trends: buildLongformProductionTrends(chapters, outlines, reviews, runs) })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.get('/api/novel/projects/:id/longform-governance-summary', async (req, res) => {
+    try {
+      const activeWorkspace = ctx.getWorkspace()
+      const project = await ctx.getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const [chapters, outlines, reviews, runs] = await Promise.all([
+        listNovelChapters(activeWorkspace, project.id),
+        listNovelOutlines(activeWorkspace, project.id),
+        listNovelReviews(activeWorkspace, project.id),
+        listNovelRuns(activeWorkspace, project.id),
+      ])
+      const trends = buildLongformProductionTrends(chapters, outlines, reviews, runs)
+      res.json({ ok: true, summary: buildLatestLongformGovernanceSummary(runs, reviews, trends) })
     } catch (error) {
       res.status(500).json({ error: String(error) })
     }

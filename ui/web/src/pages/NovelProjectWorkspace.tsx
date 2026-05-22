@@ -920,18 +920,20 @@ export default function NovelProjectWorkspace() {
     if (!selectedProject) return
     setDashboardLoading(true)
     try {
-      const [dashboardRes, assetsRes, strategyRes, readinessRes, matrixRes] = await Promise.all([
+      const [dashboardRes, assetsRes, strategyRes, readinessRes, matrixRes, governanceRes] = await Promise.all([
         apiClient.get(`/novel/projects/${projectId}/production-dashboard`),
         apiClient.get(`/novel/projects/${projectId}/writing-assets`).catch(() => ({ data: null })),
         apiClient.get(`/novel/projects/${projectId}/model-strategy`, { params: { model_id: selectedModelId } }).catch(() => ({ data: null })),
         apiClient.get(`/novel/projects/${projectId}/commercial-readiness`).catch(() => ({ data: null })),
         apiClient.get(`/novel/projects/${projectId}/chapter-material-matrix`, { params: { limit: 120, unwritten_only: 0 } }).catch(() => ({ data: null })),
+        apiClient.get(`/novel/projects/${projectId}/longform-governance-summary`).catch(() => ({ data: null })),
       ])
       const dashboard = dashboardRes.data?.dashboard || {}
       const assets = assetsRes.data?.assets || []
       const strategy = strategyRes.data?.strategy || {}
       const readiness = readinessRes.data?.readiness || null
       const materialMatrix = matrixRes.data || null
+      const governance = governanceRes.data?.summary || null
       if (readiness) setCommercialReadiness(readiness)
       Modal.info({
         title: '生产看板',
@@ -959,6 +961,22 @@ export default function NovelProjectWorkspace() {
             {Array.isArray(dashboard.recommendations) && dashboard.recommendations.length > 0 && (
               <Card size="small" title="生产建议">
                 <List size="small" dataSource={dashboard.recommendations} renderItem={(item: string) => <List.Item>{item}</List.Item>} />
+              </Card>
+            )}
+            {governance && (
+              <Card size="small" title="长线治理闭环">
+                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                  <Space wrap>
+                    <Tag color={governance.latest_audit?.status === 'closed' ? 'green' : 'gold'} bordered={false}>{governance.latest_audit ? (governance.latest_audit.status === 'closed' ? '已闭环' : '需跟进') : '未审计'}</Tag>
+                    <Tag bordered={false}>修复任务 {governance.latest_repair_run?.task_count || 0}</Tag>
+                    <Tag bordered={false}>已确认 {governance.latest_repair_run?.resolved_count || 0}</Tag>
+                    <Tag color={(governance.risk_summary?.needs_review_count || 0) ? 'gold' : 'default'} bordered={false}>需复查 {governance.risk_summary?.needs_review_count || 0}</Tag>
+                    <Tag color={(governance.current_trends?.weak_count || 0) ? 'gold' : 'green'} bordered={false}>薄弱 {governance.current_trends?.weak_count || 0}</Tag>
+                  </Space>
+                  {(governance.latest_audit?.conclusion || governance.next_actions || []).slice(0, 3).map((item: string, index: number) => (
+                    <Text key={`${item}-${index}`} type="secondary" style={{ fontSize: 12 }}>{item}</Text>
+                  ))}
+                </Space>
               </Card>
             )}
             {materialMatrix?.summary && (
@@ -1723,6 +1741,47 @@ export default function NovelProjectWorkspace() {
   }
 
   const renderCommercialResult = (title: string, data: any) => {
+    if (title.includes('长线治理') || data?.summary?.latest_audit || data?.report?.latest_audit) {
+      const summary = data?.summary || data?.report || {}
+      const audit = summary.latest_audit || null
+      const run = summary.latest_repair_run || {}
+      const risks = summary.risks || summary.risk_summary?.unresolved_tasks || []
+      return (
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Space wrap>
+            <Tag color={audit?.status === 'closed' ? 'green' : 'gold'} bordered={false}>{audit ? (audit.status === 'closed' ? '已闭环' : '需跟进') : '未审计'}</Tag>
+            <Tag bordered={false}>修复任务 {run.task_count || 0}</Tag>
+            <Tag bordered={false}>已确认 {run.resolved_count || 0}</Tag>
+            <Tag color={(summary.risk_summary?.needs_review_count || run.needs_review_count || 0) ? 'gold' : 'default'} bordered={false}>需复查 {summary.risk_summary?.needs_review_count || run.needs_review_count || 0}</Tag>
+            {summary.current_trends && <Tag color={(summary.current_trends.weak_count || 0) ? 'gold' : 'green'} bordered={false}>薄弱 {summary.current_trends.weak_count || 0}</Tag>}
+          </Space>
+          {summary.summary && <Alert type="info" showIcon message={summary.summary} />}
+          {(audit?.conclusion || summary.next_actions || []).length > 0 && (
+            <Card size="small" title={audit ? '闭环结论' : '下一步'}>
+              <List size="small" dataSource={(audit?.conclusion || summary.next_actions || []).slice(0, 8)} renderItem={(item: string) => <List.Item>{item}</List.Item>} />
+            </Card>
+          )}
+          {audit?.metric_deltas && (
+            <Card size="small" title="指标变化">
+              <Space wrap>
+                {Object.entries(audit.metric_deltas).map(([key, value]: [string, any]) => (
+                  <Tag key={key} bordered={false}>{key} {value.before ?? '-'} {'->'} {value.after ?? '-'}{value.delta === null || value.delta === undefined ? '' : ` (${value.delta >= 0 ? '+' : ''}${value.delta})`}</Tag>
+                ))}
+              </Space>
+            </Card>
+          )}
+          {risks.length > 0 && (
+            <Card size="small" title="剩余风险">
+              <List
+                size="small"
+                dataSource={risks.slice(0, 12)}
+                renderItem={(item: any) => <List.Item>{typeof item === 'string' ? item : `${item.chapter_no ? `第${item.chapter_no}章 ` : ''}${item.message || item.title || item.task_status || ''}`}</List.Item>}
+              />
+            </Card>
+          )}
+        </Space>
+      )
+    }
     if (title.includes('成本') || data?.metrics) {
       const metrics = data?.metrics || data || {}
       const stageStats = metrics.stage_stats || {}
@@ -4232,7 +4291,16 @@ export default function NovelProjectWorkspace() {
                     <List
                       size="small"
                       dataSource={creativeCommandPlan.executed}
-                      renderItem={(item: any) => <List.Item><Text>{item.key}：{item.status}{item.report?.score !== undefined ? `，评分 ${item.report.score}` : ''}</Text></List.Item>}
+                      renderItem={(item: any) => (
+                        <List.Item>
+                          <Space direction="vertical" size={2}>
+                            <Text>{item.key}：{item.status}{item.report?.score !== undefined ? `，评分 ${item.report.score}` : ''}</Text>
+                            {item.report?.summary && <Text type="secondary" style={{ fontSize: 12 }}>{item.report.summary}</Text>}
+                            {Array.isArray(item.report?.risks) && item.report.risks.length > 0 && <Text type="secondary" style={{ fontSize: 12 }}>风险：{item.report.risks.slice(0, 2).join('；')}</Text>}
+                            {Array.isArray(item.report?.next_actions) && item.report.next_actions.length > 0 && <Text type="secondary" style={{ fontSize: 12 }}>下一步：{item.report.next_actions.slice(0, 2).join('；')}</Text>}
+                          </Space>
+                        </List.Item>
+                      )}
                     />
                   </Card>
                 )}

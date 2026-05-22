@@ -666,6 +666,9 @@ function interpretCreativeCommand(command: string, project: any) {
   if (/(前\s*30|前三十|留存|追读|开篇|试读|付费前).*(修复|任务|队列)|(?:修复|任务|队列).*(前\s*30|前三十|留存|追读|开篇|试读|付费前)/.test(text)) {
     add('first30_repair', '生成前30章留存修复任务', `/api/novel/projects/${project.id}/first30-retention-diagnosis/repair-queue`, 'POST', true, '把前30章留存风险转成任务中心可处理的修复队列。')
   }
+  if (/(长线|长篇|三百万|300\s*万).*(风险|治理|闭环|摘要|复查|还有)|(?:风险|治理|闭环|摘要|复查|还有).*(长线|长篇|三百万|300\s*万)/.test(text)) {
+    add('longform_governance_summary', '查看长线治理闭环摘要', `/api/novel/projects/${project.id}/longform-governance-summary`, 'GET', true, '汇总最近一轮长线生产修复、复查状态、闭环审计和剩余风险。')
+  }
   if (/300\s*万|三百万|长篇|长线|百万字|压力测试|塌线|扩容/.test(text)) {
     add('longform_pressure', '运行300万字长线压力测试', `/api/novel/projects/${project.id}/longform-pressure-test`, 'POST', true, '评估分卷容量、人物池、世界资产、冲突阶梯和回报循环是否能支撑长篇。')
   }
@@ -706,6 +709,48 @@ function normalizeBackupPayload(body: any) {
   const raw = body?.package || body?.backup || body
   if (typeof raw === 'string') return JSON.parse(raw)
   return raw || {}
+}
+
+function buildLongformGovernanceBrief(project: any, runs: any[], reviews: any[]) {
+  const repairRuns = runs
+    .filter(run => run.run_type === 'longform_production_repair')
+    .map(run => ({ run, payload: parseJsonLikePayload(run.output_ref) || {} }))
+    .sort((a, b) => String(b.run.created_at || '').localeCompare(String(a.run.created_at || '')))
+  const auditReviews = reviews
+    .filter(review => review.review_type === 'longform_production_repair_audit')
+    .map(review => ({ review, payload: parseJsonLikePayload(review.payload) || {} }))
+    .sort((a, b) => String(b.review.created_at || '').localeCompare(String(a.review.created_at || '')))
+  const latestRun = repairRuns[0] || null
+  const latestAudit = latestRun?.payload?.audit_summary || auditReviews[0]?.payload?.audit || null
+  const tasks = asArray(latestRun?.payload?.tasks)
+  const needsReview = tasks.filter((task: any) => task.task_status === 'needs_review')
+  const unresolved = tasks.filter((task: any) => task.task_status !== 'resolved')
+  return {
+    project_id: project.id,
+    created_at: new Date().toISOString(),
+    latest_repair_run: latestRun ? {
+      id: latestRun.run.id,
+      status: latestRun.run.status,
+      created_at: latestRun.run.created_at,
+      task_count: tasks.length,
+      resolved_count: tasks.filter((task: any) => task.task_status === 'resolved').length,
+      needs_review_count: needsReview.length,
+      unresolved_count: unresolved.length,
+    } : null,
+    latest_audit: latestAudit,
+    summary: latestAudit?.conclusion?.join(' ') || (latestRun ? `最近一轮长线修复任务 ${tasks.length} 项，未关闭 ${unresolved.length} 项。` : '暂无长线生产修复闭环记录。'),
+    risks: [
+      !latestRun ? '还没有长线生产修复队列。' : '',
+      needsReview.length ? `${needsReview.length} 项任务等待复查确认。` : '',
+      unresolved.length && !needsReview.length ? `${unresolved.length} 项任务未关闭。` : '',
+      latestAudit?.remaining_risks?.current_recommendations?.[0] || '',
+    ].filter(Boolean),
+    next_actions: [
+      !latestRun ? '先打开长线生产趋势报表并生成修复任务。' : '',
+      needsReview.length ? '在任务中心复查清单里批量确认通过或逐项处理。' : '',
+      latestRun && !latestAudit ? '生成闭环审计摘要，记录本轮治理效果。' : '',
+    ].filter(Boolean),
+  }
 }
 
 async function importBackupAsNewProject(activeWorkspace: string, backup: any, options: any = {}) {
@@ -865,6 +910,13 @@ export function registerNovelCommercialOpsRoutes(app: Express, ctx: CommercialOp
               payload: JSON.stringify({ command: plan.command, report }),
             })
             executed.push({ key: action.key, status: 'success', report, review_id: review.id })
+          } else if (action.key === 'longform_governance_summary') {
+            const [runs, reviews] = await Promise.all([
+              listNovelRuns(activeWorkspace, project.id),
+              listNovelReviews(activeWorkspace, project.id),
+            ])
+            const report = buildLongformGovernanceBrief(project, runs, reviews)
+            executed.push({ key: action.key, status: 'success', report })
           } else if (action.key === 'propagation_debt') {
             const [chapters, characters, outlines, reviews] = await Promise.all([
               listNovelChapters(activeWorkspace, project.id),
