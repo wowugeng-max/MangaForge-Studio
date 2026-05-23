@@ -888,10 +888,9 @@ export default function NovelProjectWorkspace() {
     }
   }
 
-  const openChapterQualityCard = async () => {
-    if (!activeChapter) return message.warning('请先选择章节')
+  const openChapterQualityCardForChapter = async (chapterId: number) => {
     try {
-      const res = await apiClient.get(`/novel/chapters/${activeChapter.id}/quality-card`, { params: { project_id: projectId } })
+      const res = await apiClient.get(`/novel/chapters/${chapterId}/quality-card`, { params: { project_id: projectId } })
       const card = res.data?.quality_card || {}
       Modal.info({
         title: '章节质量卡',
@@ -934,6 +933,11 @@ export default function NovelProjectWorkspace() {
     } catch (error: any) {
       message.error(error?.response?.data?.error || error?.message || '章节质量卡加载失败')
     }
+  }
+
+  const openChapterQualityCard = async () => {
+    if (!activeChapter) return message.warning('请先选择章节')
+    await openChapterQualityCardForChapter(Number(activeChapter.id))
   }
 
   const openProductionDashboard = async () => {
@@ -3307,7 +3311,7 @@ export default function NovelProjectWorkspace() {
 
   const generateCurrentChapterProse = async (options: { allowIncomplete?: boolean; forceSceneCards?: boolean; targetChapterId?: number } = {}) => {
     const targetChapter = options.targetChapterId
-      ? chapters.find(ch => ch.id === options.targetChapterId) || activeChapter
+      ? chapters.find(ch => String(ch.id) === String(options.targetChapterId))
       : activeChapter
     if (!targetChapter) return message.warning('请先选择章节')
     if (!selectedModelId) return message.warning('请先选择写作模型')
@@ -3766,7 +3770,11 @@ export default function NovelProjectWorkspace() {
       case 'review_draft':
         setWorkspaceArea('chapterWriting')
         if (targetChapterId && Number(activeChapter?.id) !== targetChapterId) {
-          void selectChapterForWriting(targetChapterId)
+          void selectChapterForWriting(targetChapterId).then((saved) => {
+            if (saved) void openChapterQualityCardForChapter(targetChapterId)
+          })
+        } else if (targetChapterId) {
+          void openChapterQualityCardForChapter(targetChapterId)
         } else if (activeChapter) {
           void openChapterQualityCard()
         }
