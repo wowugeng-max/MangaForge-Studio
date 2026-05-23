@@ -62,6 +62,36 @@ const chapters = [
   },
 ]
 
+const contextPackage = {
+  chapter_target: {
+    chapter_goal: '用警钟把边军危机压到王府筵席上',
+    previous_handoff: '王府内钟声先乱',
+    core_conflict: '谢怀安要借钟声验人心，王府管事试图把警讯压成误传',
+    emotional_movement: '从压抑回府转为当众夺回主动权',
+    payoff: '读者看到失势皇子第一次反压王府新贵',
+    ending_hook: '城门守将递来带血腰牌',
+    forbidden_repeats: ['不要重复解释穿越设定'],
+  },
+  preflight: {
+    ready: true,
+    blockers: [],
+  },
+}
+
+const sceneCardChapter = {
+  ...chapters[1],
+  scene_list: [
+    {
+      scene_no: 1,
+      title: '警钟入席',
+      purpose: '把边军警讯压到王府筵席上',
+      conflict: '管事试图把警讯压成误传',
+      turn: '谢怀安当众点出腰牌血迹',
+      ending_hook: '第三声钟响后，守将闯入',
+    },
+  ],
+}
+
 describe('buildWritingCockpitModel', () => {
   test('ready project data chooses the first planned unwritten chapter as daily target', () => {
     const model = buildWritingCockpitModel({
@@ -350,5 +380,119 @@ describe('buildWritingCockpitModel', () => {
     expect(model.nextChapter?.endingHook).toBe('点将名册最后一页被人提前撕走')
     expect(model.readiness.blockers).toEqual([])
     expect(model.primaryActionKey).toBe('write_draft')
+  })
+
+  test('planning desk shows empty state without an active chapter', () => {
+    const model = buildWritingCockpitModel({
+      project,
+      outlines,
+      chapters: [],
+      materialScore: { score: 82, can_generate: true },
+    })
+
+    expect(model.chapterPlanningDesk.readiness).toBe('blocked')
+    expect(model.chapterPlanningDesk.statusLabel).toBe('缺目标章节')
+    expect(model.chapterPlanningDesk.shouldAutoExpandPlanner).toBe(true)
+    expect(model.chapterPlanningDesk.recommendedPlannerAction.key).toBe('open_outline_panel')
+  })
+
+  test('planning desk requires context package before scene planning', () => {
+    const model = buildWritingCockpitModel({
+      project,
+      outlines,
+      chapters,
+      activeChapter: chapters[1],
+      materialScore: { score: 82, can_generate: true },
+    })
+
+    expect(model.chapterPlanningDesk.readiness).toBe('needs_context')
+    expect(model.chapterPlanningDesk.contextPackageStatus).toBe('missing')
+    expect(model.chapterPlanningDesk.shouldAutoExpandPlanner).toBe(true)
+    expect(model.chapterPlanningDesk.reasons).toContain('本章还没有加载上下文包。')
+    expect(model.chapterPlanningDesk.recommendedPlannerAction.key).toBe('refresh_context_package')
+  })
+
+  test('planning desk treats failed context preflight as insufficient context', () => {
+    const model = buildWritingCockpitModel({
+      project,
+      outlines,
+      chapters,
+      activeChapter: chapters[1],
+      contextPackage: {
+        ...contextPackage,
+        preflight: {
+          ready: false,
+          blockers: ['缺少章节目标'],
+        },
+      },
+      materialScore: { score: 82, can_generate: true },
+    })
+
+    expect(model.chapterPlanningDesk.readiness).toBe('needs_context')
+    expect(model.chapterPlanningDesk.contextPackageStatus).toBe('insufficient')
+    expect(model.chapterPlanningDesk.reasons).toContain('上下文包预检未通过：缺少章节目标')
+    expect(model.chapterPlanningDesk.recommendedPlannerAction.key).toBe('open_generation_diagnostics')
+  })
+
+  test('planning desk asks for scene cards when context is ready but scene plan is missing', () => {
+    const model = buildWritingCockpitModel({
+      project,
+      outlines,
+      chapters,
+      activeChapter: chapters[1],
+      contextPackage,
+      materialScore: { score: 82, can_generate: true },
+    })
+
+    expect(model.chapterPlanningDesk.readiness).toBe('needs_scene_plan')
+    expect(model.chapterPlanningDesk.contextPackageStatus).toBe('ready')
+    expect(model.chapterPlanningDesk.scenePlanStatus).toBe('missing')
+    expect(model.chapterPlanningDesk.recommendedPlannerAction.key).toBe('build_scene_plan')
+  })
+
+  test('planning desk blocks drafting when diagnostics report blockers', () => {
+    const model = buildWritingCockpitModel({
+      project,
+      outlines,
+      chapters: [chapters[0], sceneCardChapter],
+      activeChapter: sceneCardChapter,
+      contextPackage,
+      diagnostics: {
+        preflight: {
+          ready: false,
+          blockers: ['缺少上一章承接'],
+        },
+        material_score: { score: 88, can_generate: true },
+      },
+      materialScore: { score: 88, can_generate: true },
+    })
+
+    expect(model.chapterPlanningDesk.readiness).toBe('blocked')
+    expect(model.chapterPlanningDesk.reasons).toContain('生成诊断阻塞：缺少上一章承接')
+    expect(model.chapterPlanningDesk.recommendedPlannerAction.key).toBe('open_generation_diagnostics')
+    expect(model.chapterPlanningDesk.shouldAutoExpandPlanner).toBe(true)
+  })
+
+  test('planning desk is ready when context and scene cards are usable', () => {
+    const model = buildWritingCockpitModel({
+      project,
+      outlines,
+      chapters: [chapters[0], sceneCardChapter],
+      activeChapter: sceneCardChapter,
+      contextPackage,
+      diagnostics: {
+        preflight: { ready: true, blockers: [] },
+        material_score: { score: 88, can_generate: true },
+      },
+      materialScore: { score: 88, can_generate: true },
+    })
+
+    expect(model.chapterPlanningDesk.readiness).toBe('ready')
+    expect(model.chapterPlanningDesk.statusLabel).toBe('本章可写')
+    expect(model.chapterPlanningDesk.shouldAutoExpandPlanner).toBe(false)
+    expect(model.chapterPlanningDesk.recommendedPlannerAction.key).toBe('confirm_plan_and_write_draft')
+    expect(model.chapterPlanningDesk.episodePlan.chapterObjective).toBe('用警钟把边军危机压到王府筵席上')
+    expect(model.chapterPlanningDesk.sceneCards).toHaveLength(1)
+    expect(model.chapterPlanningDesk.sceneCards[0].endingHook).toBe('第三声钟响后，守将闯入')
   })
 })
