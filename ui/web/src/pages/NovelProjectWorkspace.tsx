@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
+import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert, Badge, Button, Card, Checkbox, Form, Input, List, message, Modal, Progress, Select, Space, Typography, Tooltip, Tag,
 } from 'antd'
@@ -98,6 +98,8 @@ export default function NovelProjectWorkspace() {
   const [commercialToolLoading, setCommercialToolLoading] = useState('')
   const [productionMode, setProductionMode] = useState('draft_review_revise_store')
   const [activeChapterDiagnostics, setActiveChapterDiagnostics] = useState<any | null>(null)
+  const [activeChapterContextPackage, setActiveChapterContextPackage] = useState<any | null>(null)
+  const [contextPackageLoading, setContextPackageLoading] = useState(false)
   const [commercialReadiness, setCommercialReadiness] = useState<any | null>(null)
   const [future100Draft, setFuture100Draft] = useState<any | null>(null)
   const [future100SelectedNos, setFuture100SelectedNos] = useState<number[]>([])
@@ -465,6 +467,8 @@ export default function NovelProjectWorkspace() {
     chapters: sortedChapters,
     outlines,
     activeChapter,
+    contextPackage: activeChapterContextPackage,
+    diagnostics: activeChapterDiagnostics,
     materialScore: activeChapterDiagnostics?.material_score || null,
     commercialReadiness,
     activeRuns: activeTasks,
@@ -473,7 +477,8 @@ export default function NovelProjectWorkspace() {
     sortedChapters,
     outlines,
     activeChapter,
-    activeChapterDiagnostics?.material_score,
+    activeChapterContextPackage,
+    activeChapterDiagnostics,
     commercialReadiness,
     activeTasks,
   ])
@@ -495,6 +500,32 @@ export default function NovelProjectWorkspace() {
     void loadDiagnostics()
     return () => { canceled = true }
   }, [activeChapter?.id, activeChapter?.updated_at, projectId])
+
+  const loadActiveChapterContextPackage = useCallback(async (options: { silent?: boolean } = {}) => {
+    if (!activeChapter?.id || !projectId) {
+      setActiveChapterContextPackage(null)
+      return null
+    }
+    setContextPackageLoading(true)
+    try {
+      const res = await apiClient.get(`/novel/chapters/${activeChapter.id}/context-package`, {
+        params: { project_id: projectId },
+      })
+      setActiveChapterContextPackage(res.data || null)
+      if (!options.silent) message.success('上下文包已刷新')
+      return res.data || null
+    } catch (error: any) {
+      setActiveChapterContextPackage(null)
+      if (!options.silent) message.error(error?.response?.data?.error || error?.message || '上下文包加载失败')
+      return null
+    } finally {
+      setContextPackageLoading(false)
+    }
+  }, [activeChapter?.id, projectId])
+
+  useEffect(() => {
+    void loadActiveChapterContextPackage({ silent: true })
+  }, [loadActiveChapterContextPackage, activeChapter?.updated_at])
 
   useEffect(() => {
     let canceled = false
@@ -3744,6 +3775,22 @@ export default function NovelProjectWorkspace() {
       case 'repair_materials':
         void openMaterialRepairPlan()
         break
+      case 'refresh_context_package':
+        void loadActiveChapterContextPackage()
+        break
+      case 'open_generation_diagnostics':
+        void openGenerationDiagnostics()
+        break
+      case 'confirm_plan_and_write_draft':
+        setWorkspaceArea('chapterWriting')
+        if (targetChapterId) {
+          void selectChapterForWriting(targetChapterId).then((saved) => {
+            if (saved) void generateCurrentChapterProse({ targetChapterId })
+          })
+        } else {
+          void generateCurrentChapterProse()
+        }
+        break
       case 'build_scene_plan':
         if (targetChapterId) {
           setWorkspaceArea('chapterWriting')
@@ -4041,7 +4088,7 @@ export default function NovelProjectWorkspace() {
           <div style={{ flexShrink: 0 }}>
             <WritingCockpitPanel
               model={writingCockpitModel}
-              loading={stepProseLoading || generatingProse || generatingSceneCards || diagnosticsLoading}
+              loading={stepProseLoading || generatingProse || generatingSceneCards || diagnosticsLoading || contextPackageLoading}
               onAction={handleWritingCockpitAction}
             />
           </div>
