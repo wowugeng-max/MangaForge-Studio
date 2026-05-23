@@ -475,6 +475,30 @@ describe('buildWritingCockpitModel', () => {
     expect(model.chapterPlanningDesk.episodePlan.coreConflict).toBe('王府管事要压警讯，谢怀安要逼众人表态')
   })
 
+  test('planning desk uses backend summary as context objective fallback', () => {
+    const backendContextPackage = {
+      chapter_target: {
+        summary: '用警钟余波逼王府众人重新站队',
+        conflict: '王府管事要压警讯，谢怀安要逼众人表态',
+        ending_hook: '带血腰牌递到谢怀安掌心',
+      },
+      preflight: { ready: true, blockers: [] },
+    }
+
+    const model = buildWritingCockpitModel({
+      project,
+      outlines,
+      chapters: [chapters[0], sceneCardChapter],
+      activeChapter: sceneCardChapter,
+      contextPackage: backendContextPackage,
+      diagnostics: { preflight: { ready: true, blockers: [] }, material_score: { score: 88, can_generate: true } },
+      materialScore: { score: 88, can_generate: true },
+    })
+
+    expect(model.chapterPlanningDesk.contextPackageStatus).toBe('ready')
+    expect(model.chapterPlanningDesk.episodePlan.chapterObjective).toBe('用警钟余波逼王府众人重新站队')
+  })
+
   test('planning desk does not treat empty scene cards as ready', () => {
     const emptySceneCardChapter = {
       ...chapters[1],
