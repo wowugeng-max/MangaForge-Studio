@@ -151,4 +151,107 @@ describe('buildWritingCockpitModel', () => {
     expect(model.topStatus.primaryActionKey).toBe('open_outline_panel')
     expect(model.readiness.blockers.map(check => check.key)).toContain('chapter_missing')
   })
+
+  test('sparse chapter with valid chapter outline hydrates plan fields and allows draft writing', () => {
+    const sparseChapter = {
+      id: 103,
+      chapter_no: 3,
+      title: '夜审旧账',
+      chapter_text: '',
+    }
+    const chapterOutlines = [
+      ...outlines,
+      {
+        id: 3,
+        title: '第3章 夜审旧账',
+        outline_type: 'chapter',
+        raw_payload: {
+          future100: {
+            chapter_no: 3,
+            chapter_goal: '逼王府账房交出军饷流向',
+            conflict: '账房以太妃手令拖延，谢怀安以军法逼供',
+            ending_hook: '账册夹层露出京城密印',
+          },
+        },
+      },
+    ]
+
+    const model = buildWritingCockpitModel({
+      project,
+      outlines: chapterOutlines,
+      chapters: [chapters[0], sparseChapter],
+      materialScore: { score: 82, can_generate: true },
+    })
+
+    expect(model.nextChapter?.chapterNo).toBe(3)
+    expect(model.nextChapter?.goal).toBe('逼王府账房交出军饷流向')
+    expect(model.nextChapter?.conflict).toBe('账房以太妃手令拖延，谢怀安以军法逼供')
+    expect(model.nextChapter?.endingHook).toBe('账册夹层露出京城密印')
+    expect(model.readiness.blockers).toEqual([])
+    expect(model.primaryActionKey).toBe('write_draft')
+    expect(model.recommendedRole).toBe('draft_writer')
+  })
+
+  test('sparse chapter with invalid chapter outline blocks scene planning', () => {
+    const sparseChapter = {
+      id: 104,
+      chapter_no: 4,
+      title: '空钟回响',
+      chapter_text: '',
+    }
+    const invalidOutlines = [
+      ...outlines,
+      {
+        id: 4,
+        title: '第4章 空钟回响',
+        outline_level: 'chapter',
+        raw_payload: {
+          skeleton: {
+            chapter_no: 4,
+            chapter_goal: '让警钟余波扩散到边军',
+          },
+        },
+      },
+    ]
+
+    const model = buildWritingCockpitModel({
+      project,
+      outlines: invalidOutlines,
+      chapters: [chapters[0], sparseChapter],
+      materialScore: { score: 82, can_generate: true },
+    })
+
+    expect(model.nextChapter?.chapterNo).toBe(4)
+    expect(model.readiness.blockers.map(check => check.key)).toContain('chapter_outline_missing')
+    expect(model.primaryActionKey).toBe('build_scene_plan')
+    expect(model.recommendedRole).toBe('episode_planner')
+  })
+
+  test('stale story state recommends canon update when draft blockers are clear', () => {
+    const staleProject = {
+      ...project,
+      reference_config: {
+        ...project.reference_config,
+        story_state: {
+          ...project.reference_config.story_state,
+          last_updated_chapter: 0,
+        },
+      },
+    }
+
+    const model = buildWritingCockpitModel({
+      project: staleProject,
+      outlines,
+      chapters,
+      materialScore: { score: 82, can_generate: true },
+    })
+
+    expect(model.nextChapter?.chapterNo).toBe(2)
+    expect(model.readiness.blockers).toEqual([])
+    expect(model.readiness.warnings.map(check => check.key)).toContain('story_state_stale')
+    expect(model.primaryActionKey).toBe('update_canon')
+    expect(model.topStatus.primaryActionKey).toBe('update_canon')
+    expect(model.recommendedRole).toBe('continuity_auditor')
+    expect(model.modelTeam.recommendedRole).toBe('continuity_auditor')
+  })
 })

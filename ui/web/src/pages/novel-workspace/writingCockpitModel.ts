@@ -263,14 +263,92 @@ function chapterFromOutline(outlines: AnyRecord[], chapterNo: number) {
   }) || null
 }
 
+function firstArrayText(value: any) {
+  return arrayValue(value).map(item => text(item)).find(Boolean) || ''
+}
+
+function outlineRawPayload(outline?: AnyRecord | null) {
+  return outline?.raw_payload || {}
+}
+
+function outlinePlanPayload(outline?: AnyRecord | null) {
+  const raw = outlineRawPayload(outline)
+  return {
+    raw,
+    future100: raw?.future100 || {},
+    skeleton: raw?.skeleton || {},
+  }
+}
+
+function chapterPlanFields(chapter?: AnyRecord | null, outline?: AnyRecord | null) {
+  const chapterRaw = chapter?.raw_payload || {}
+  const { raw, future100, skeleton } = outlinePlanPayload(outline)
+  const goal = firstNonEmpty(
+    chapter?.chapter_goal,
+    chapter?.chapterTask,
+    chapter?.task,
+    chapterRaw?.chapter_goal,
+    chapterRaw?.chapterTask,
+    chapterRaw?.task,
+    outline?.chapter_goal,
+    outline?.chapterTask,
+    outline?.task,
+    raw?.chapter_goal,
+    raw?.chapterTask,
+    raw?.task,
+    future100?.chapter_goal,
+    future100?.chapterTask,
+    future100?.task,
+    skeleton?.chapter_goal,
+    skeleton?.chapterTask,
+    skeleton?.task,
+    outline?.summary,
+  )
+  const conflict = firstNonEmpty(
+    chapter?.conflict,
+    chapterRaw?.conflict,
+    outline?.conflict,
+    raw?.conflict,
+    future100?.conflict,
+    skeleton?.conflict,
+    firstArrayText(outline?.conflict_points),
+    firstArrayText(raw?.conflict_points),
+    firstArrayText(future100?.conflict_points),
+    firstArrayText(skeleton?.conflict_points),
+  )
+  const endingHook = firstNonEmpty(
+    chapter?.ending_hook,
+    chapter?.endingHook,
+    chapter?.hook,
+    chapterRaw?.ending_hook,
+    chapterRaw?.endingHook,
+    chapterRaw?.hook,
+    outline?.ending_hook,
+    outline?.endingHook,
+    outline?.hook,
+    raw?.ending_hook,
+    raw?.endingHook,
+    raw?.hook,
+    future100?.ending_hook,
+    future100?.endingHook,
+    future100?.hook,
+    skeleton?.ending_hook,
+    skeleton?.endingHook,
+    skeleton?.hook,
+  )
+
+  return { goal, conflict, endingHook }
+}
+
+function hasUsableChapterPlan(chapter?: AnyRecord | null, outline?: AnyRecord | null) {
+  const plan = chapterPlanFields(chapter, outline)
+  return Boolean(plan.goal && plan.conflict && plan.endingHook)
+}
+
 function chapterHasOutline(chapter: AnyRecord | null, outlines: AnyRecord[]) {
   if (!chapter) return false
-  if (firstNonEmpty(chapter?.chapter_goal, chapter?.chapterTask, chapter?.task)
-    && firstNonEmpty(chapter?.conflict, chapter?.raw_payload?.conflict)
-    && firstNonEmpty(chapter?.ending_hook, chapter?.endingHook, chapter?.hook)) {
-    return true
-  }
-  return Boolean(chapterFromOutline(outlines, Number(chapter?.chapter_no || 0)))
+  const matchingOutline = chapterFromOutline(outlines, Number(chapter?.chapter_no || 0))
+  return hasUsableChapterPlan(chapter, matchingOutline)
 }
 
 function materialReady(materialScore?: AnyRecord | null) {
@@ -302,21 +380,21 @@ function whyItMatters(volumeGoal: string) {
   return '当前卷目标缺失，请先明确本章为什么值得写。'
 }
 
-function toCockpitChapter(chapter: AnyRecord, context: { previousChapter?: AnyRecord | null; volumeGoal?: string } = {}): WritingCockpitChapter {
-  const goal = firstNonEmpty(chapter?.chapter_goal, chapter?.chapterTask, chapter?.task)
+function toCockpitChapter(chapter: AnyRecord, context: { previousChapter?: AnyRecord | null; volumeGoal?: string; outline?: AnyRecord | null } = {}): WritingCockpitChapter {
+  const plan = chapterPlanFields(chapter, context.outline)
   const rawPayload = chapter?.raw_payload || {}
   return {
     id: chapter?.id,
     chapterNo: Number(chapter?.chapter_no || 0),
     title: text(chapter?.title, '未命名章节'),
-    goal,
+    goal: plan.goal,
     previousEnding: previousEnding(context.previousChapter),
     whyItMatters: whyItMatters(text(context.volumeGoal)),
     mustAdvance: stringArray(rawPayload?.must_advance),
     forbiddenRepeats: stringArray(rawPayload?.forbidden_repeats),
-    chapterGoal: goal,
-    conflict: firstNonEmpty(chapter?.conflict, chapter?.raw_payload?.conflict),
-    endingHook: firstNonEmpty(chapter?.ending_hook, chapter?.endingHook, chapter?.hook),
+    chapterGoal: plan.goal,
+    conflict: plan.conflict,
+    endingHook: plan.endingHook,
     wordCount: hasProse(chapter) ? compactWordCount(chapter?.chapter_text) : 0,
     hasProse: hasProse(chapter),
     rawPayload,
@@ -402,12 +480,14 @@ export function buildWritingCockpitModel(input: BuildWritingCockpitModelInput): 
   const writingBible = resolveWritingBible(project)
   const storyState = resolveStoryState(project)
   const volume = resolveVolume(outlines, writingBible, nextChapter)
+  const nextChapterOutline = nextChapter ? chapterFromOutline(outlines, Number(nextChapter?.chapter_no || 0)) : null
+  const previousChapterOutline = previousChapter ? chapterFromOutline(outlines, Number(previousChapter?.chapter_no || 0)) : null
   const writingBibleReady = writingBibleExists(writingBible)
   const volumeGoalReady = Boolean(text(volume.goal))
   const hasChapter = Boolean(nextChapter)
   const chapterOutlineReady = hasChapter ? chapterHasOutline(nextChapter, outlines) : false
   const materialsReady = materialReady(input.materialScore || input.commercialReadiness || input.diagnostics?.material_score || null)
-  const storyStateReady = latestWrittenChapterNo === 0 || Number(storyState?.last_updated_chapter || 0) >= latestWrittenChapterNo - 1
+  const storyStateReady = latestWrittenChapterNo === 0 || Number(storyState?.last_updated_chapter || 0) >= latestWrittenChapterNo
   const memorySummaryReady = memoryReady(input.memorySummary || null)
   const nextHasProse = hasProse(nextChapter)
 
@@ -441,8 +521,8 @@ export function buildWritingCockpitModel(input: BuildWritingCockpitModelInput): 
       nextActionLabel: ACTION_LABELS[action],
       primaryActionKey: action,
     },
-    nextChapter: nextChapter ? toCockpitChapter(nextChapter, { previousChapter, volumeGoal: volume.goal }) : null,
-    previousChapter: previousChapter ? toCockpitChapter(previousChapter, { volumeGoal: volume.goal }) : null,
+    nextChapter: nextChapter ? toCockpitChapter(nextChapter, { previousChapter, volumeGoal: volume.goal, outline: nextChapterOutline }) : null,
+    previousChapter: previousChapter ? toCockpitChapter(previousChapter, { volumeGoal: volume.goal, outline: previousChapterOutline }) : null,
     primaryActionKey: action,
     recommendedRole: role,
     readiness: {
