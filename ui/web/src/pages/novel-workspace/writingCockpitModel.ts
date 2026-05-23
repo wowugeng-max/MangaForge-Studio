@@ -541,8 +541,8 @@ function contextPackageStatus(contextPackage?: AnyRecord | null): ChapterContext
   const blockers = blockerTexts(preflight?.blockers)
   if (preflight?.ready === false || blockers.length > 0) return 'insufficient'
   const hasTarget = Boolean(
-    firstNonEmpty(target?.chapter_goal, target?.chapterObjective)
-    && firstNonEmpty(target?.core_conflict, target?.coreConflict)
+    firstNonEmpty(target?.chapter_goal, target?.chapterObjective, target?.goal, target?.summary)
+    && firstNonEmpty(target?.core_conflict, target?.coreConflict, target?.conflict)
     && firstNonEmpty(target?.ending_hook, target?.endingHook),
   )
   if (preflight?.ready === true || hasTarget) return 'ready'
@@ -559,14 +559,18 @@ function chapterSceneCards(chapter?: AnyRecord | null): ChapterPlanningDeskScene
     ? chapter.scene_list
     : (Array.isArray(chapter?.scene_breakdown) ? chapter.scene_breakdown : [])
 
-  return rawCards.map((scene: AnyRecord, index: number) => ({
-    sceneNo: Number(scene?.scene_no || index + 1),
-    title: text(scene?.title || scene?.name || scene?.description || scene?.purpose, `场景 ${index + 1}`),
-    purpose: firstNonEmpty(scene?.purpose, scene?.description, scene?.goal),
-    conflict: firstNonEmpty(scene?.conflict, scene?.tension),
-    turn: firstNonEmpty(scene?.turn, scene?.reveal, scene?.beat),
-    endingHook: firstNonEmpty(scene?.ending_hook, scene?.endingHook, scene?.exit_state, scene?.hook),
-  }))
+  return rawCards.map((scene: AnyRecord, index: number) => {
+    const sceneNo = Number(scene?.scene_no)
+    const card = {
+      sceneNo: Number.isFinite(sceneNo) && sceneNo > 0 ? sceneNo : index + 1,
+      title: text(scene?.title || scene?.name || scene?.description || scene?.purpose, `场景 ${index + 1}`),
+      purpose: firstNonEmpty(scene?.purpose, scene?.description, scene?.goal),
+      conflict: firstNonEmpty(scene?.conflict, scene?.tension),
+      turn: firstNonEmpty(scene?.turn, scene?.reveal, scene?.beat),
+      endingHook: firstNonEmpty(scene?.ending_hook, scene?.endingHook, scene?.exit_state, scene?.hook),
+    }
+    return card
+  }).filter(card => Boolean(card.purpose || card.conflict || card.turn || card.endingHook))
 }
 
 function buildEpisodePlan(args: {
@@ -575,15 +579,16 @@ function buildEpisodePlan(args: {
   contextPackage?: AnyRecord | null
 }): ChapterPlanningDeskModel['episodePlan'] {
   const target = contextTarget(args.contextPackage)
+  const forbiddenRepeats = stringArray(target?.forbidden_repeats)
   return {
-    chapterObjective: firstNonEmpty(target?.chapter_goal, target?.chapterObjective, args.cockpitChapter?.chapterGoal),
+    chapterObjective: firstNonEmpty(target?.chapter_goal, target?.chapterObjective, target?.goal, target?.summary, args.cockpitChapter?.chapterGoal),
     previousHandoff: firstNonEmpty(target?.previous_handoff, target?.previousHandoff, args.cockpitChapter?.previousEnding),
-    coreConflict: firstNonEmpty(target?.core_conflict, target?.coreConflict, args.cockpitChapter?.conflict),
+    coreConflict: firstNonEmpty(target?.core_conflict, target?.coreConflict, target?.conflict, args.cockpitChapter?.conflict),
     emotionalMovement: firstNonEmpty(target?.emotional_movement, target?.emotionalMovement, target?.emotion),
     payoff: firstNonEmpty(target?.payoff, target?.reader_reward, target?.readerReward),
     endingHook: firstNonEmpty(target?.ending_hook, target?.endingHook, args.cockpitChapter?.endingHook),
-    forbiddenRepeats: stringArray(target?.forbidden_repeats).length > 0
-      ? stringArray(target?.forbidden_repeats)
+    forbiddenRepeats: forbiddenRepeats.length > 0
+      ? forbiddenRepeats
       : (args.cockpitChapter?.forbiddenRepeats || []),
   }
 }

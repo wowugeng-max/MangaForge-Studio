@@ -82,7 +82,7 @@ const sceneCardChapter = {
   ...chapters[1],
   scene_list: [
     {
-      scene_no: 1,
+      scene_no: 'not-a-number',
       title: '警钟入席',
       purpose: '把边军警讯压到王府筵席上',
       conflict: '管事试图把警讯压成误传',
@@ -450,6 +450,52 @@ describe('buildWritingCockpitModel', () => {
     expect(model.chapterPlanningDesk.recommendedPlannerAction.key).toBe('build_scene_plan')
   })
 
+  test('planning desk reads backend-style context target aliases', () => {
+    const backendContextPackage = {
+      chapter_target: {
+        goal: '把警钟危机转成谢怀安的第一次主动试探',
+        conflict: '王府管事要压警讯，谢怀安要逼众人表态',
+        ending_hook: '带血腰牌递到谢怀安掌心',
+      },
+      preflight: { ready: true, blockers: [] },
+    }
+
+    const model = buildWritingCockpitModel({
+      project,
+      outlines,
+      chapters: [chapters[0], sceneCardChapter],
+      activeChapter: sceneCardChapter,
+      contextPackage: backendContextPackage,
+      diagnostics: { preflight: { ready: true, blockers: [] }, material_score: { score: 88, can_generate: true } },
+      materialScore: { score: 88, can_generate: true },
+    })
+
+    expect(model.chapterPlanningDesk.contextPackageStatus).toBe('ready')
+    expect(model.chapterPlanningDesk.episodePlan.chapterObjective).toBe('把警钟危机转成谢怀安的第一次主动试探')
+    expect(model.chapterPlanningDesk.episodePlan.coreConflict).toBe('王府管事要压警讯，谢怀安要逼众人表态')
+  })
+
+  test('planning desk does not treat empty scene cards as ready', () => {
+    const emptySceneCardChapter = {
+      ...chapters[1],
+      scene_list: [{}],
+    }
+
+    const model = buildWritingCockpitModel({
+      project,
+      outlines,
+      chapters: [chapters[0], emptySceneCardChapter],
+      activeChapter: emptySceneCardChapter,
+      contextPackage,
+      diagnostics: { preflight: { ready: true, blockers: [] }, material_score: { score: 88, can_generate: true } },
+      materialScore: { score: 88, can_generate: true },
+    })
+
+    expect(model.chapterPlanningDesk.scenePlanStatus).toBe('missing')
+    expect(model.chapterPlanningDesk.sceneCards).toEqual([])
+    expect(model.chapterPlanningDesk.recommendedPlannerAction.key).toBe('build_scene_plan')
+  })
+
   test('planning desk blocks drafting when diagnostics report blockers', () => {
     const model = buildWritingCockpitModel({
       project,
@@ -493,6 +539,7 @@ describe('buildWritingCockpitModel', () => {
     expect(model.chapterPlanningDesk.recommendedPlannerAction.key).toBe('confirm_plan_and_write_draft')
     expect(model.chapterPlanningDesk.episodePlan.chapterObjective).toBe('用警钟把边军危机压到王府筵席上')
     expect(model.chapterPlanningDesk.sceneCards).toHaveLength(1)
+    expect(model.chapterPlanningDesk.sceneCards[0].sceneNo).toBe(1)
     expect(model.chapterPlanningDesk.sceneCards[0].endingHook).toBe('第三声钟响后，守将闯入')
   })
 })
