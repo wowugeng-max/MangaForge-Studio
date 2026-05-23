@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useEffect, useState } from 'react'
 import { Alert, Button, Card, Col, Progress, Row, Space, Tag, Typography } from 'antd'
 import {
   AuditOutlined,
@@ -54,6 +54,17 @@ function readinessStatus(model: WritingCockpitModel) {
   return 'success'
 }
 
+function plannerColor(readiness: string) {
+  if (readiness === 'ready') return 'green'
+  if (readiness === 'needs_scene_plan') return 'blue'
+  if (readiness === 'needs_context') return 'gold'
+  return 'red'
+}
+
+function compactPlanValue(value: string, fallback: string) {
+  return value && value.trim() ? value : fallback
+}
+
 function blockerAlert(model: WritingCockpitModel, loading: boolean, onAction: (key: WritingCockpitActionKey) => void) {
   const blocker = model.readiness.blockers[0]
   if (!blocker) return null
@@ -84,6 +95,112 @@ function blockerAlert(model: WritingCockpitModel, loading: boolean, onAction: (k
 
 function compactNumber(value: number) {
   return Number(value || 0).toLocaleString('zh-CN')
+}
+
+function ChapterPlanningDesk({
+  model,
+  loading,
+  onAction,
+}: {
+  model: WritingCockpitModel
+  loading: boolean
+  onAction: (key: WritingCockpitActionKey) => void
+}) {
+  const desk = model.chapterPlanningDesk
+  const [expanded, setExpanded] = useState(desk.shouldAutoExpandPlanner)
+
+  useEffect(() => {
+    setExpanded(desk.shouldAutoExpandPlanner)
+  }, [desk.shouldAutoExpandPlanner, model.nextChapter?.id])
+
+  const plan = desk.episodePlan
+
+  return (
+    <Card
+      size="small"
+      style={{ borderRadius: 8, borderColor: desk.readiness === 'ready' ? '#d9f7be' : '#ffe7ba' }}
+      styles={{ body: { padding: 12 } }}
+    >
+      <Space direction="vertical" size={10} style={{ width: '100%' }}>
+        <Row gutter={[12, 8]} align="middle">
+          <Col xs={24} lg={14}>
+            <Space wrap size={[6, 4]}>
+              <Tag color={plannerColor(desk.readiness)} bordered={false}>{desk.statusLabel}</Tag>
+              <Tag bordered={false}>上下文：{desk.contextPackageStatus === 'ready' ? '已就绪' : desk.contextPackageStatus === 'insufficient' ? '不足' : '未加载'}</Tag>
+              <Tag bordered={false}>场景卡：{desk.scenePlanStatus === 'ready' ? `${desk.sceneCards.length} 个` : '缺失'}</Tag>
+            </Space>
+            <Paragraph ellipsis={{ rows: expanded ? 3 : 1 }} style={{ margin: '6px 0 0', fontSize: 12 }}>
+              {desk.reasons.slice(0, 3).join('；')}
+            </Paragraph>
+          </Col>
+          <Col xs={24} lg={10}>
+            <Space wrap style={{ justifyContent: 'flex-end', width: '100%' }}>
+              <Button size="small" onClick={() => setExpanded(value => !value)}>
+                {expanded ? '收起编剧台' : '展开编剧台'}
+              </Button>
+              <Button
+                type={desk.readiness === 'ready' ? 'primary' : 'default'}
+                size="small"
+                loading={loading}
+                onClick={() => onAction(desk.recommendedPlannerAction.key)}
+                style={{ whiteSpace: 'normal', height: 'auto', lineHeight: 1.25 }}
+              >
+                {desk.recommendedPlannerAction.label}
+              </Button>
+            </Space>
+          </Col>
+        </Row>
+
+        {expanded && (
+          <Row gutter={[12, 10]}>
+            <Col xs={24} lg={10}>
+              <Card size="small" title="本章编剧计划" styles={{ body: { padding: 10 } }}>
+                <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                  <Text strong>{compactPlanValue(plan.chapterObjective, '待补章节目标')}</Text>
+                  <Text type="secondary">承接：{compactPlanValue(plan.previousHandoff, '待确认上一章承接')}</Text>
+                  <Text type="secondary">冲突：{compactPlanValue(plan.coreConflict, '待补核心冲突')}</Text>
+                  <Text type="secondary">情绪：{compactPlanValue(plan.emotionalMovement, '待补情绪推进')}</Text>
+                  <Text type="secondary">爽点：{compactPlanValue(plan.payoff, '待补读者回报')}</Text>
+                  <Text type="secondary">钩子：{compactPlanValue(plan.endingHook, '待补结尾钩子')}</Text>
+                  {plan.forbiddenRepeats.length > 0 && (
+                    <Space wrap size={[4, 4]}>
+                      {plan.forbiddenRepeats.slice(0, 4).map(item => (
+                        <Tag key={item} color="red" bordered={false}>{item}</Tag>
+                      ))}
+                    </Space>
+                  )}
+                </Space>
+              </Card>
+            </Col>
+            <Col xs={24} lg={14}>
+              <Card size="small" title="场景卡" styles={{ body: { padding: 10 } }}>
+                {desk.sceneCards.length > 0 ? (
+                  <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                    {desk.sceneCards.slice(0, 4).map(scene => (
+                      <div key={`${scene.sceneNo}-${scene.title}`} style={{ border: '1px solid #edf0f5', borderRadius: 6, padding: 8 }}>
+                        <Space direction="vertical" size={3} style={{ width: '100%' }}>
+                          <Space wrap size={[4, 4]}>
+                            <Tag color="blue" bordered={false}>场景 {scene.sceneNo}</Tag>
+                            <Text strong>{scene.title}</Text>
+                          </Space>
+                          <Text type="secondary">目的：{compactPlanValue(scene.purpose, '待补')}</Text>
+                          <Text type="secondary">冲突：{compactPlanValue(scene.conflict, '待补')}</Text>
+                          <Text type="secondary">转折：{compactPlanValue(scene.turn, '待补')}</Text>
+                          <Text type="secondary">钩子：{compactPlanValue(scene.endingHook, '待补')}</Text>
+                        </Space>
+                      </div>
+                    ))}
+                  </Space>
+                ) : (
+                  <Text type="secondary">还没有场景卡。先生成场景计划，再进入初稿。</Text>
+                )}
+              </Card>
+            </Col>
+          </Row>
+        )}
+      </Space>
+    </Card>
+  )
 }
 
 export function WritingCockpitPanel({
@@ -179,6 +296,8 @@ export function WritingCockpitPanel({
           </Row>
 
           {blockerAlert(model, loading, onAction)}
+
+          <ChapterPlanningDesk model={model} loading={loading} onAction={onAction} />
 
           <Row gutter={[12, 8]} align="top">
             <Col xs={24} lg={15}>
