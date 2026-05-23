@@ -18,6 +18,9 @@ export type WritingCockpitActionKey =
   | 'fix_continuity'
   | 'update_canon'
   | 'open_task_center'
+  | 'refresh_context_package'
+  | 'open_generation_diagnostics'
+  | 'confirm_plan_and_write_draft'
 
 export type WritingReadinessStatus = 'pass' | 'warning' | 'blocker'
 
@@ -60,6 +63,42 @@ export interface WritingCockpitChapter {
   rawPayload: AnyRecord
 }
 
+export type ChapterPlanningReadiness = 'ready' | 'needs_context' | 'needs_scene_plan' | 'blocked'
+export type ChapterContextPackageStatus = 'missing' | 'insufficient' | 'ready'
+export type ChapterScenePlanStatus = 'missing' | 'ready'
+
+export interface ChapterPlanningDeskSceneCard {
+  sceneNo: number
+  title: string
+  purpose: string
+  conflict: string
+  turn: string
+  endingHook: string
+}
+
+export interface ChapterPlanningDeskModel {
+  readiness: ChapterPlanningReadiness
+  statusLabel: string
+  contextPackageStatus: ChapterContextPackageStatus
+  scenePlanStatus: ChapterScenePlanStatus
+  reasons: string[]
+  recommendedPlannerAction: {
+    key: WritingCockpitActionKey
+    label: string
+  }
+  shouldAutoExpandPlanner: boolean
+  episodePlan: {
+    chapterObjective: string
+    previousHandoff: string
+    coreConflict: string
+    emotionalMovement: string
+    payoff: string
+    endingHook: string
+    forbiddenRepeats: string[]
+  }
+  sceneCards: ChapterPlanningDeskSceneCard[]
+}
+
 export interface WritingCockpitModel {
   topStatus: {
     projectTitle: string
@@ -71,6 +110,7 @@ export interface WritingCockpitModel {
   }
   nextChapter: WritingCockpitChapter | null
   previousChapter: WritingCockpitChapter | null
+  chapterPlanningDesk: ChapterPlanningDeskModel
   primaryActionKey: WritingCockpitActionKey
   recommendedRole: WritingCockpitRole
   readiness: {
@@ -106,6 +146,7 @@ export interface BuildWritingCockpitModelInput {
   materialScore?: AnyRecord | null
   commercialReadiness?: AnyRecord | null
   diagnostics?: AnyRecord | null
+  contextPackage?: AnyRecord | null
   activeRuns?: AnyRecord[] | null
   runs?: AnyRecord[] | null
   memorySummary?: AnyRecord | null
@@ -154,6 +195,9 @@ const ACTION_LABELS: Record<WritingCockpitActionKey, string> = {
   fix_continuity: '修复连续性',
   update_canon: '同步故事状态',
   open_task_center: '打开任务中心',
+  refresh_context_package: '刷新上下文包',
+  open_generation_diagnostics: '查看生成诊断',
+  confirm_plan_and_write_draft: '确认计划，进入初稿',
 }
 
 function text(value: any, fallback = '') {
@@ -474,6 +518,175 @@ function pipelineState(nextChapter: AnyRecord | null) {
   return { state: 'no_draft' as const, label: '等待生成初稿' }
 }
 
+function contextPreflight(contextPackage?: AnyRecord | null) {
+  return contextPackage?.preflight || contextPackage?.context_package?.preflight || {}
+}
+
+function contextTarget(contextPackage?: AnyRecord | null) {
+  return contextPackage?.chapter_target || contextPackage?.context_package?.chapter_target || {}
+}
+
+function blockerTexts(value: any): string[] {
+  if (!Array.isArray(value)) return []
+  return value.map(item => {
+    if (typeof item === 'string') return text(item)
+    return firstNonEmpty(item?.message, item?.reason, item?.detail, item?.label)
+  }).filter(Boolean)
+}
+
+function contextPackageStatus(contextPackage?: AnyRecord | null): ChapterContextPackageStatus {
+  if (!contextPackage) return 'missing'
+  const preflight = contextPreflight(contextPackage)
+  const target = contextTarget(contextPackage)
+  const blockers = blockerTexts(preflight?.blockers)
+  if (preflight?.ready === false || blockers.length > 0) return 'insufficient'
+  const hasTarget = Boolean(
+    firstNonEmpty(target?.chapter_goal, target?.chapterObjective)
+    && firstNonEmpty(target?.core_conflict, target?.coreConflict)
+    && firstNonEmpty(target?.ending_hook, target?.endingHook),
+  )
+  if (preflight?.ready === true || hasTarget) return 'ready'
+  return 'insufficient'
+}
+
+function diagnosticsBlockers(diagnostics?: AnyRecord | null): string[] {
+  const preflight = diagnostics?.preflight || {}
+  return blockerTexts(preflight?.blockers)
+}
+
+function chapterSceneCards(chapter?: AnyRecord | null): ChapterPlanningDeskSceneCard[] {
+  const rawCards = Array.isArray(chapter?.scene_list) && chapter.scene_list.length > 0
+    ? chapter.scene_list
+    : (Array.isArray(chapter?.scene_breakdown) ? chapter.scene_breakdown : [])
+
+  return rawCards.map((scene: AnyRecord, index: number) => ({
+    sceneNo: Number(scene?.scene_no || index + 1),
+    title: text(scene?.title || scene?.name || scene?.description || scene?.purpose, `场景 ${index + 1}`),
+    purpose: firstNonEmpty(scene?.purpose, scene?.description, scene?.goal),
+    conflict: firstNonEmpty(scene?.conflict, scene?.tension),
+    turn: firstNonEmpty(scene?.turn, scene?.reveal, scene?.beat),
+    endingHook: firstNonEmpty(scene?.ending_hook, scene?.endingHook, scene?.exit_state, scene?.hook),
+  }))
+}
+
+function buildEpisodePlan(args: {
+  nextChapter: AnyRecord | null
+  cockpitChapter: WritingCockpitChapter | null
+  contextPackage?: AnyRecord | null
+}): ChapterPlanningDeskModel['episodePlan'] {
+  const target = contextTarget(args.contextPackage)
+  return {
+    chapterObjective: firstNonEmpty(target?.chapter_goal, target?.chapterObjective, args.cockpitChapter?.chapterGoal),
+    previousHandoff: firstNonEmpty(target?.previous_handoff, target?.previousHandoff, args.cockpitChapter?.previousEnding),
+    coreConflict: firstNonEmpty(target?.core_conflict, target?.coreConflict, args.cockpitChapter?.conflict),
+    emotionalMovement: firstNonEmpty(target?.emotional_movement, target?.emotionalMovement, target?.emotion),
+    payoff: firstNonEmpty(target?.payoff, target?.reader_reward, target?.readerReward),
+    endingHook: firstNonEmpty(target?.ending_hook, target?.endingHook, args.cockpitChapter?.endingHook),
+    forbiddenRepeats: stringArray(target?.forbidden_repeats).length > 0
+      ? stringArray(target?.forbidden_repeats)
+      : (args.cockpitChapter?.forbiddenRepeats || []),
+  }
+}
+
+function buildChapterPlanningDesk(args: {
+  nextChapter: AnyRecord | null
+  cockpitChapter: WritingCockpitChapter | null
+  contextPackage?: AnyRecord | null
+  diagnostics?: AnyRecord | null
+}): ChapterPlanningDeskModel {
+  const contextStatus = contextPackageStatus(args.contextPackage)
+  const sceneCards = chapterSceneCards(args.nextChapter)
+  const scenePlanStatus: ChapterScenePlanStatus = sceneCards.length > 0 ? 'ready' : 'missing'
+  const diagnosticBlockers = diagnosticsBlockers(args.diagnostics)
+  const preflightBlockers = blockerTexts(contextPreflight(args.contextPackage)?.blockers)
+  const episodePlan = buildEpisodePlan(args)
+
+  if (!args.nextChapter) {
+    return {
+      readiness: 'blocked',
+      statusLabel: '缺目标章节',
+      contextPackageStatus: contextStatus,
+      scenePlanStatus,
+      reasons: ['需要先创建或选择章节。'],
+      recommendedPlannerAction: { key: 'open_outline_panel', label: ACTION_LABELS.open_outline_panel },
+      shouldAutoExpandPlanner: true,
+      episodePlan,
+      sceneCards,
+    }
+  }
+
+  if (diagnosticBlockers.length > 0) {
+    return {
+      readiness: 'blocked',
+      statusLabel: '诊断阻塞',
+      contextPackageStatus: contextStatus,
+      scenePlanStatus,
+      reasons: diagnosticBlockers.slice(0, 3).map(item => `生成诊断阻塞：${item}`),
+      recommendedPlannerAction: { key: 'open_generation_diagnostics', label: ACTION_LABELS.open_generation_diagnostics },
+      shouldAutoExpandPlanner: true,
+      episodePlan,
+      sceneCards,
+    }
+  }
+
+  if (contextStatus === 'missing') {
+    return {
+      readiness: 'needs_context',
+      statusLabel: '需补上下文',
+      contextPackageStatus: contextStatus,
+      scenePlanStatus,
+      reasons: ['本章还没有加载上下文包。'],
+      recommendedPlannerAction: { key: 'refresh_context_package', label: ACTION_LABELS.refresh_context_package },
+      shouldAutoExpandPlanner: true,
+      episodePlan,
+      sceneCards,
+    }
+  }
+
+  if (contextStatus === 'insufficient') {
+    const reasons = preflightBlockers.length > 0
+      ? preflightBlockers.slice(0, 3).map(item => `上下文包预检未通过：${item}`)
+      : ['上下文包预检未通过。']
+    return {
+      readiness: 'needs_context',
+      statusLabel: '上下文不足',
+      contextPackageStatus: contextStatus,
+      scenePlanStatus,
+      reasons,
+      recommendedPlannerAction: { key: 'open_generation_diagnostics', label: ACTION_LABELS.open_generation_diagnostics },
+      shouldAutoExpandPlanner: true,
+      episodePlan,
+      sceneCards,
+    }
+  }
+
+  if (scenePlanStatus === 'missing') {
+    return {
+      readiness: 'needs_scene_plan',
+      statusLabel: '需补场景计划',
+      contextPackageStatus: contextStatus,
+      scenePlanStatus,
+      reasons: ['本章还没有可用场景卡。'],
+      recommendedPlannerAction: { key: 'build_scene_plan', label: ACTION_LABELS.build_scene_plan },
+      shouldAutoExpandPlanner: true,
+      episodePlan,
+      sceneCards,
+    }
+  }
+
+  return {
+    readiness: 'ready',
+    statusLabel: '本章可写',
+    contextPackageStatus: contextStatus,
+    scenePlanStatus,
+    reasons: ['本章场景计划已就绪，可以进入初稿。'],
+    recommendedPlannerAction: { key: 'confirm_plan_and_write_draft', label: ACTION_LABELS.confirm_plan_and_write_draft },
+    shouldAutoExpandPlanner: false,
+    episodePlan,
+    sceneCards,
+  }
+}
+
 export function buildWritingCockpitModel(input: BuildWritingCockpitModelInput): WritingCockpitModel {
   const project = input.project || input.selectedProject || {}
   const outlines = arrayValue(input.outlines)
@@ -521,6 +734,14 @@ export function buildWritingCockpitModel(input: BuildWritingCockpitModelInput): 
     nextHasProse,
     storyStateReady,
   })
+  const cockpitNextChapter = nextChapter ? toCockpitChapter(nextChapter, { previousChapter, volumeGoal: volume.goal, outline: nextChapterOutline }) : null
+  const cockpitPreviousChapter = previousChapter ? toCockpitChapter(previousChapter, { volumeGoal: volume.goal, outline: previousChapterOutline }) : null
+  const chapterPlanningDesk = buildChapterPlanningDesk({
+    nextChapter,
+    cockpitChapter: cockpitNextChapter,
+    contextPackage: input.contextPackage || null,
+    diagnostics: input.diagnostics || null,
+  })
 
   return {
     topStatus: {
@@ -531,8 +752,9 @@ export function buildWritingCockpitModel(input: BuildWritingCockpitModelInput): 
       nextActionLabel: ACTION_LABELS[action],
       primaryActionKey: action,
     },
-    nextChapter: nextChapter ? toCockpitChapter(nextChapter, { previousChapter, volumeGoal: volume.goal, outline: nextChapterOutline }) : null,
-    previousChapter: previousChapter ? toCockpitChapter(previousChapter, { volumeGoal: volume.goal, outline: previousChapterOutline }) : null,
+    nextChapter: cockpitNextChapter,
+    previousChapter: cockpitPreviousChapter,
+    chapterPlanningDesk,
     primaryActionKey: action,
     recommendedRole: role,
     readiness: {
