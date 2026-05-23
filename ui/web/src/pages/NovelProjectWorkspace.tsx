@@ -3798,7 +3798,11 @@ export default function NovelProjectWorkspace() {
   const handleWritingCockpitAction = (key: WritingCockpitActionKey) => {
     const rawTargetChapterId = writingCockpitModel.nextChapter?.id
     const targetChapterId = rawTargetChapterId != null ? Number(rawTargetChapterId) : undefined
-    const targetChapterUpdatedAt = writingCockpitModel.nextChapter?.updated_at || null
+    const targetChapter = targetChapterId
+      ? sortedChapters.find(chapter => Number(chapter.id) === targetChapterId)
+        || (Number(activeChapter?.id) === targetChapterId ? activeChapter : null)
+      : activeChapter
+    const targetChapterUpdatedAt = targetChapter?.updated_at || null
 
     switch (key) {
       case 'open_writing_bible':
