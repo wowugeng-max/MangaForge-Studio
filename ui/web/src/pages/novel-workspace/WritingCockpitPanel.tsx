@@ -54,9 +54,10 @@ function readinessStatus(model: WritingCockpitModel) {
   return 'success'
 }
 
-function blockerAlert(model: WritingCockpitModel, onAction: (key: WritingCockpitActionKey) => void) {
+function blockerAlert(model: WritingCockpitModel, loading: boolean, onAction: (key: WritingCockpitActionKey) => void) {
   const blocker = model.readiness.blockers[0]
   if (!blocker) return null
+  const actionLabel = `处理：${blocker.label}`
 
   return (
     <Alert
@@ -68,6 +69,9 @@ function blockerAlert(model: WritingCockpitModel, onAction: (key: WritingCockpit
       action={
         <Button
           size="small"
+          disabled={loading}
+          title={actionLabel}
+          aria-label={actionLabel}
           onClick={() => onAction(blocker.actionKey)}
           style={{ whiteSpace: 'normal', height: 'auto', lineHeight: 1.25 }}
         >
@@ -174,7 +178,7 @@ export function WritingCockpitPanel({
             </Col>
           </Row>
 
-          {blockerAlert(model, onAction)}
+          {blockerAlert(model, loading, onAction)}
 
           <Row gutter={[12, 8]} align="top">
             <Col xs={24} lg={15}>
@@ -186,6 +190,7 @@ export function WritingCockpitPanel({
                     size="small"
                     type={role.active ? 'primary' : 'default'}
                     icon={roleIcon(role.key)}
+                    disabled={loading}
                     onClick={() => onAction(role.actionKey)}
                     title={role.description}
                     style={{ whiteSpace: 'normal', height: 'auto', lineHeight: 1.25, paddingTop: 3, paddingBottom: 3 }}
