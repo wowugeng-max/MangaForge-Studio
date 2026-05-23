@@ -65,6 +65,13 @@ function compactPlanValue(value: string, fallback: string) {
   return value && value.trim() ? value : fallback
 }
 
+const wrapTextStyle: React.CSSProperties = {
+  display: 'block',
+  minWidth: 0,
+  overflowWrap: 'anywhere',
+  wordBreak: 'break-word',
+}
+
 function blockerAlert(model: WritingCockpitModel, loading: boolean, onAction: (key: WritingCockpitActionKey) => void) {
   const blocker = model.readiness.blockers[0]
   if (!blocker) return null
@@ -116,20 +123,24 @@ function ChapterPlanningDesk({
   const plan = desk.episodePlan
 
   return (
-    <Card
-      size="small"
-      style={{ borderRadius: 8, borderColor: desk.readiness === 'ready' ? '#d9f7be' : '#ffe7ba' }}
-      styles={{ body: { padding: 12 } }}
+    <div
+      style={{
+        border: `1px solid ${desk.readiness === 'ready' ? '#d9f7be' : '#ffe7ba'}`,
+        borderRadius: 8,
+        padding: 12,
+        width: '100%',
+        minWidth: 0,
+      }}
     >
       <Space direction="vertical" size={10} style={{ width: '100%' }}>
         <Row gutter={[12, 8]} align="middle">
-          <Col xs={24} lg={14}>
+          <Col xs={24} lg={14} style={{ minWidth: 0 }}>
             <Space wrap size={[6, 4]}>
               <Tag color={plannerColor(desk.readiness)} bordered={false}>{desk.statusLabel}</Tag>
               <Tag bordered={false}>上下文：{desk.contextPackageStatus === 'ready' ? '已就绪' : desk.contextPackageStatus === 'insufficient' ? '不足' : '未加载'}</Tag>
               <Tag bordered={false}>场景卡：{desk.scenePlanStatus === 'ready' ? `${desk.sceneCards.length} 个` : '缺失'}</Tag>
             </Space>
-            <Paragraph ellipsis={{ rows: expanded ? 3 : 1 }} style={{ margin: '6px 0 0', fontSize: 12 }}>
+            <Paragraph ellipsis={{ rows: expanded ? 3 : 1 }} style={{ ...wrapTextStyle, margin: '6px 0 0', fontSize: 12 }}>
               {desk.reasons.slice(0, 3).join('；')}
             </Paragraph>
           </Col>
@@ -153,15 +164,16 @@ function ChapterPlanningDesk({
 
         {expanded && (
           <Row gutter={[12, 10]}>
-            <Col xs={24} lg={10}>
-              <Card size="small" title="本章编剧计划" styles={{ body: { padding: 10 } }}>
-                <Space direction="vertical" size={6} style={{ width: '100%' }}>
-                  <Text strong>{compactPlanValue(plan.chapterObjective, '待补章节目标')}</Text>
-                  <Text type="secondary">承接：{compactPlanValue(plan.previousHandoff, '待确认上一章承接')}</Text>
-                  <Text type="secondary">冲突：{compactPlanValue(plan.coreConflict, '待补核心冲突')}</Text>
-                  <Text type="secondary">情绪：{compactPlanValue(plan.emotionalMovement, '待补情绪推进')}</Text>
-                  <Text type="secondary">爽点：{compactPlanValue(plan.payoff, '待补读者回报')}</Text>
-                  <Text type="secondary">钩子：{compactPlanValue(plan.endingHook, '待补结尾钩子')}</Text>
+            <Col xs={24} lg={10} style={{ minWidth: 0 }}>
+              <div style={{ background: '#fafafa', borderRadius: 6, padding: 10, minWidth: 0 }}>
+                <Text strong style={{ ...wrapTextStyle, marginBottom: 6 }}>本章编剧计划</Text>
+                <Space direction="vertical" size={6} style={{ width: '100%', minWidth: 0 }}>
+                  <Text strong style={wrapTextStyle}>{compactPlanValue(plan.chapterObjective, '待补章节目标')}</Text>
+                  <Text type="secondary" style={wrapTextStyle}>承接：{compactPlanValue(plan.previousHandoff, '待确认上一章承接')}</Text>
+                  <Text type="secondary" style={wrapTextStyle}>冲突：{compactPlanValue(plan.coreConflict, '待补核心冲突')}</Text>
+                  <Text type="secondary" style={wrapTextStyle}>情绪：{compactPlanValue(plan.emotionalMovement, '待补情绪推进')}</Text>
+                  <Text type="secondary" style={wrapTextStyle}>爽点：{compactPlanValue(plan.payoff, '待补读者回报')}</Text>
+                  <Text type="secondary" style={wrapTextStyle}>钩子：{compactPlanValue(plan.endingHook, '待补结尾钩子')}</Text>
                   {plan.forbiddenRepeats.length > 0 && (
                     <Space wrap size={[4, 4]}>
                       {plan.forbiddenRepeats.slice(0, 4).map(item => (
@@ -170,36 +182,37 @@ function ChapterPlanningDesk({
                     </Space>
                   )}
                 </Space>
-              </Card>
+              </div>
             </Col>
-            <Col xs={24} lg={14}>
-              <Card size="small" title="场景卡" styles={{ body: { padding: 10 } }}>
+            <Col xs={24} lg={14} style={{ minWidth: 0 }}>
+              <div style={{ background: '#fafafa', borderRadius: 6, padding: 10, minWidth: 0 }}>
+                <Text strong style={{ ...wrapTextStyle, marginBottom: 6 }}>场景卡</Text>
                 {desk.sceneCards.length > 0 ? (
-                  <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                  <Space direction="vertical" size={8} style={{ width: '100%', minWidth: 0 }}>
                     {desk.sceneCards.slice(0, 4).map(scene => (
-                      <div key={`${scene.sceneNo}-${scene.title}`} style={{ border: '1px solid #edf0f5', borderRadius: 6, padding: 8 }}>
-                        <Space direction="vertical" size={3} style={{ width: '100%' }}>
+                      <div key={`${scene.sceneNo}-${scene.title}`} style={{ border: '1px solid #edf0f5', borderRadius: 6, padding: 8, minWidth: 0 }}>
+                        <Space direction="vertical" size={3} style={{ width: '100%', minWidth: 0 }}>
                           <Space wrap size={[4, 4]}>
                             <Tag color="blue" bordered={false}>场景 {scene.sceneNo}</Tag>
-                            <Text strong>{scene.title}</Text>
+                            <Text strong style={wrapTextStyle}>{scene.title}</Text>
                           </Space>
-                          <Text type="secondary">目的：{compactPlanValue(scene.purpose, '待补')}</Text>
-                          <Text type="secondary">冲突：{compactPlanValue(scene.conflict, '待补')}</Text>
-                          <Text type="secondary">转折：{compactPlanValue(scene.turn, '待补')}</Text>
-                          <Text type="secondary">钩子：{compactPlanValue(scene.endingHook, '待补')}</Text>
+                          <Text type="secondary" style={wrapTextStyle}>目的：{compactPlanValue(scene.purpose, '待补')}</Text>
+                          <Text type="secondary" style={wrapTextStyle}>冲突：{compactPlanValue(scene.conflict, '待补')}</Text>
+                          <Text type="secondary" style={wrapTextStyle}>转折：{compactPlanValue(scene.turn, '待补')}</Text>
+                          <Text type="secondary" style={wrapTextStyle}>钩子：{compactPlanValue(scene.endingHook, '待补')}</Text>
                         </Space>
                       </div>
                     ))}
                   </Space>
                 ) : (
-                  <Text type="secondary">还没有场景卡。先生成场景计划，再进入初稿。</Text>
+                  <Text type="secondary" style={wrapTextStyle}>还没有场景卡。先生成场景计划，再进入初稿。</Text>
                 )}
-              </Card>
+              </div>
             </Col>
           </Row>
         )}
       </Space>
-    </Card>
+    </div>
   )
 }
 
