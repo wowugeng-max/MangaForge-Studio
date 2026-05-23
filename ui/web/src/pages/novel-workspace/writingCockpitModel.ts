@@ -47,6 +47,11 @@ export interface WritingCockpitChapter {
   id: any
   chapterNo: number
   title: string
+  goal: string
+  previousEnding: string
+  whyItMatters: string
+  mustAdvance: string[]
+  forbiddenRepeats: string[]
   chapterGoal: string
   conflict: string
   endingHook: string
@@ -68,9 +73,15 @@ export interface WritingCockpitModel {
   previousChapter: WritingCockpitChapter | null
   primaryActionKey: WritingCockpitActionKey
   recommendedRole: WritingCockpitRole
+  readiness: {
+    checks: WritingReadinessCheck[]
+    blockers: WritingReadinessCheck[]
+    warnings: WritingReadinessCheck[]
+  }
   blockers: string[]
   readinessChecks: WritingReadinessCheck[]
   modelTeam: {
+    recommendedRole: WritingCockpitRole
     roles: Array<{
       key: WritingCockpitRole
       label: string
@@ -87,12 +98,15 @@ export interface WritingCockpitModel {
 }
 
 export interface BuildWritingCockpitModelInput {
+  project?: AnyRecord | null
   selectedProject?: AnyRecord | null
   outlines?: AnyRecord[] | null
   chapters?: AnyRecord[] | null
   activeChapter?: AnyRecord | null
   materialScore?: AnyRecord | null
+  commercialReadiness?: AnyRecord | null
   diagnostics?: AnyRecord | null
+  activeRuns?: AnyRecord[] | null
   runs?: AnyRecord[] | null
   memorySummary?: AnyRecord | null
 }
@@ -164,6 +178,10 @@ function compactWordCount(value: any) {
   return String(value || '').replace(/\s/g, '').length
 }
 
+function compactText(value: any) {
+  return String(value || '').replace(/\s+/g, '').trim()
+}
+
 function hasProse(chapter?: AnyRecord | null) {
   const chapterText = String(chapter?.chapter_text || '')
   const compact = chapterText.replace(/\s/g, '')
@@ -231,7 +249,7 @@ function resolveVolume(outlines: AnyRecord[], writingBible: AnyRecord, nextChapt
 
   return {
     title: firstNonEmpty(outline?.title, bibleVolume?.title, '未定卷'),
-    goal: firstNonEmpty(outline?.goal, outline?.summary, bibleVolume?.goal, bibleVolume?.summary, bibleVolume?.promise),
+    goal: firstNonEmpty(outline?.goal, bibleVolume?.goal, bibleVolume?.summary, bibleVolume?.promise, outline?.summary),
   }
 }
 
@@ -265,17 +283,43 @@ function memoryReady(memorySummary?: AnyRecord | null) {
   return Number(memorySummary.memory_count || 0) > 0 || Number(memorySummary.fact_count || 0) > 0
 }
 
-function toCockpitChapter(chapter: AnyRecord): WritingCockpitChapter {
+function stringArray(value: any): string[] {
+  if (Array.isArray(value)) return value.map(item => text(item)).filter(Boolean)
+  const single = text(value)
+  return single ? [single] : []
+}
+
+function previousEnding(previousChapter?: AnyRecord | null) {
+  const hook = firstNonEmpty(previousChapter?.ending_hook, previousChapter?.endingHook, previousChapter?.hook)
+  if (hook) return hook
+  const prose = compactText(previousChapter?.chapter_text)
+  if (prose) return prose.slice(-120)
+  return '上一章尚无可用收束，请先确认承接点。'
+}
+
+function whyItMatters(volumeGoal: string) {
+  if (volumeGoal) return `本章要服务当前卷目标：${volumeGoal}`
+  return '当前卷目标缺失，请先明确本章为什么值得写。'
+}
+
+function toCockpitChapter(chapter: AnyRecord, context: { previousChapter?: AnyRecord | null; volumeGoal?: string } = {}): WritingCockpitChapter {
+  const goal = firstNonEmpty(chapter?.chapter_goal, chapter?.chapterTask, chapter?.task)
+  const rawPayload = chapter?.raw_payload || {}
   return {
     id: chapter?.id,
     chapterNo: Number(chapter?.chapter_no || 0),
     title: text(chapter?.title, '未命名章节'),
-    chapterGoal: firstNonEmpty(chapter?.chapter_goal, chapter?.chapterTask, chapter?.task),
+    goal,
+    previousEnding: previousEnding(context.previousChapter),
+    whyItMatters: whyItMatters(text(context.volumeGoal)),
+    mustAdvance: stringArray(rawPayload?.must_advance),
+    forbiddenRepeats: stringArray(rawPayload?.forbidden_repeats),
+    chapterGoal: goal,
     conflict: firstNonEmpty(chapter?.conflict, chapter?.raw_payload?.conflict),
     endingHook: firstNonEmpty(chapter?.ending_hook, chapter?.endingHook, chapter?.hook),
     wordCount: hasProse(chapter) ? compactWordCount(chapter?.chapter_text) : 0,
     hasProse: hasProse(chapter),
-    rawPayload: chapter?.raw_payload || {},
+    rawPayload,
   }
 }
 
@@ -343,9 +387,10 @@ function pipelineState(nextChapter: AnyRecord | null) {
 }
 
 export function buildWritingCockpitModel(input: BuildWritingCockpitModelInput): WritingCockpitModel {
-  const project = input.selectedProject || {}
+  const project = input.project || input.selectedProject || {}
   const outlines = arrayValue(input.outlines)
   const chapters = arrayValue(input.chapters)
+  const activeRuns = arrayValue(input.activeRuns || input.runs)
   const nextChapter = chooseNextChapter(chapters, input.activeChapter)
   const sorted = sortChapters(chapters)
   const writtenChapters = sorted.filter(hasProse)
@@ -361,7 +406,7 @@ export function buildWritingCockpitModel(input: BuildWritingCockpitModelInput): 
   const volumeGoalReady = Boolean(text(volume.goal))
   const hasChapter = Boolean(nextChapter)
   const chapterOutlineReady = hasChapter ? chapterHasOutline(nextChapter, outlines) : false
-  const materialsReady = materialReady(input.materialScore || input.diagnostics?.material_score || null)
+  const materialsReady = materialReady(input.materialScore || input.commercialReadiness || input.diagnostics?.material_score || null)
   const storyStateReady = latestWrittenChapterNo === 0 || Number(storyState?.last_updated_chapter || 0) >= latestWrittenChapterNo - 1
   const memorySummaryReady = memoryReady(input.memorySummary || null)
   const nextHasProse = hasProse(nextChapter)
@@ -375,7 +420,9 @@ export function buildWritingCockpitModel(input: BuildWritingCockpitModelInput): 
     storyStateReady,
     memoryReady: memorySummaryReady,
   })
-  const blockers = readinessChecks.filter(check => check.status === 'blocker').map(check => check.key)
+  const readinessBlockers = readinessChecks.filter(check => check.status === 'blocker')
+  const readinessWarnings = readinessChecks.filter(check => check.status === 'warning')
+  const blockers = readinessBlockers.map(check => check.key)
   const { role, action } = resolvePrimaryAction({
     writingBibleReady,
     hasChapter,
@@ -394,17 +441,25 @@ export function buildWritingCockpitModel(input: BuildWritingCockpitModelInput): 
       nextActionLabel: ACTION_LABELS[action],
       primaryActionKey: action,
     },
-    nextChapter: nextChapter ? toCockpitChapter(nextChapter) : null,
-    previousChapter: previousChapter ? toCockpitChapter(previousChapter) : null,
+    nextChapter: nextChapter ? toCockpitChapter(nextChapter, { previousChapter, volumeGoal: volume.goal }) : null,
+    previousChapter: previousChapter ? toCockpitChapter(previousChapter, { volumeGoal: volume.goal }) : null,
     primaryActionKey: action,
     recommendedRole: role,
+    readiness: {
+      checks: readinessChecks,
+      blockers: readinessBlockers,
+      warnings: readinessWarnings,
+    },
     blockers,
     readinessChecks,
     modelTeam: {
+      recommendedRole: role,
       roles: (Object.keys(ROLE_META) as WritingCockpitRole[]).map(key => ({
         key,
         label: ROLE_META[key].label,
-        description: ROLE_META[key].description,
+        description: key === 'operations_analyst' && activeRuns.length > 0
+          ? `${ROLE_META[key].description}当前有 ${activeRuns.length} 个运行记录。`
+          : ROLE_META[key].description,
         actionKey: ROLE_META[key].actionKey,
         active: key === role,
       })),

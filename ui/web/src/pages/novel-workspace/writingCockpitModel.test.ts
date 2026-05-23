@@ -65,20 +65,26 @@ const chapters = [
 describe('buildWritingCockpitModel', () => {
   test('ready project data chooses the first planned unwritten chapter as daily target', () => {
     const model = buildWritingCockpitModel({
-      selectedProject: project,
+      project,
       outlines,
       chapters,
       materialScore: { score: 82, can_generate: true },
-      runs: [],
+      activeRuns: [],
     })
 
     expect(model.nextChapter?.chapterNo).toBe(2)
+    expect(model.nextChapter?.goal).toBe('用一口警钟把边军危机压到王府筵席上')
+    expect(model.nextChapter?.previousEnding).toBe('城外烽烟未熄，王府内钟声先乱')
+    expect(model.nextChapter?.whyItMatters).toContain('让谢怀安在镜州立住武夫根基并摸清王府人心')
     expect(model.previousChapter?.chapterNo).toBe(1)
     expect(model.primaryActionKey).toBe('write_draft')
+    expect(model.topStatus.primaryActionKey).toBe('write_draft')
     expect(model.recommendedRole).toBe('draft_writer')
+    expect(model.modelTeam.recommendedRole).toBe('draft_writer')
     expect(model.blockers).toEqual([])
-    expect(model.nextChapter?.rawPayload?.must_advance).toContain('迟正确认王府人心')
-    expect(model.nextChapter?.rawPayload?.forbidden_repeats).toContain('不要重复解释穿越设定')
+    expect(model.readiness.blockers).toEqual([])
+    expect(model.nextChapter?.mustAdvance).toContain('迟正确认王府人心')
+    expect(model.nextChapter?.forbiddenRepeats).toContain('不要重复解释穿越设定')
   })
 
   test('missing writing bible blocks draft generation', () => {
@@ -90,9 +96,11 @@ describe('buildWritingCockpitModel', () => {
       runs: [],
     })
 
-    expect(model.blockers).toContain('writing_bible_missing')
+    expect(model.readiness.blockers.map(check => check.key)).toContain('writing_bible_missing')
     expect(model.primaryActionKey).toBe('open_writing_bible')
+    expect(model.topStatus.primaryActionKey).toBe('open_writing_bible')
     expect(model.recommendedRole).toBe('chief_editor')
+    expect(model.modelTeam.recommendedRole).toBe('chief_editor')
   })
 
   test('material score not ready blocks generation', () => {
@@ -100,13 +108,15 @@ describe('buildWritingCockpitModel', () => {
       selectedProject: project,
       outlines,
       chapters,
-      materialScore: { score: 52, can_generate: false },
+      commercialReadiness: { score: 52, can_generate: false },
       runs: [],
     })
 
-    expect(model.blockers).toContain('materials_not_ready')
+    expect(model.readiness.blockers.map(check => check.key)).toContain('materials_not_ready')
     expect(model.primaryActionKey).toBe('repair_materials')
+    expect(model.topStatus.primaryActionKey).toBe('repair_materials')
     expect(model.recommendedRole).toBe('episode_planner')
+    expect(model.modelTeam.recommendedRole).toBe('episode_planner')
   })
 
   test('an active chapter that already has prose selects revision', () => {
@@ -122,7 +132,9 @@ describe('buildWritingCockpitModel', () => {
     expect(model.nextChapter?.chapterNo).toBe(1)
     expect(model.draftPipeline.state).toBe('draft_generated')
     expect(model.recommendedRole).toBe('revision_editor')
+    expect(model.modelTeam.recommendedRole).toBe('revision_editor')
     expect(model.primaryActionKey).toBe('review_draft')
+    expect(model.topStatus.primaryActionKey).toBe('review_draft')
   })
 
   test('no chapter starts with planning', () => {
@@ -136,6 +148,7 @@ describe('buildWritingCockpitModel', () => {
 
     expect(model.nextChapter).toBeNull()
     expect(model.primaryActionKey).toBe('open_outline_panel')
-    expect(model.blockers).toContain('chapter_missing')
+    expect(model.topStatus.primaryActionKey).toBe('open_outline_panel')
+    expect(model.readiness.blockers.map(check => check.key)).toContain('chapter_missing')
   })
 })
