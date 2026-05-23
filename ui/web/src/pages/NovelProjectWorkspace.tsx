@@ -13,8 +13,10 @@ import { ChapterDirectorySidebar } from './novel-workspace/ChapterDirectorySideb
 import type { EditorKind } from './novel-workspace/EditorModal'
 import { ReferencePanel } from './novel-workspace/ReferencePanel'
 import { StoryPlanningWorkspace, type PlanningLoadingKey } from './novel-workspace/StoryPlanningWorkspace'
+import { WritingCockpitPanel } from './novel-workspace/WritingCockpitPanel'
 import { WorkspaceCenter } from './novel-workspace/WorkspaceCenter'
 import { buildPlanningWorkspaceModel, type PlanningActionKey } from './novel-workspace/planningWorkspaceModel'
+import { buildWritingCockpitModel, type WritingCockpitActionKey } from './novel-workspace/writingCockpitModel'
 import { useChapterAutosave } from './novel-workspace/useChapterAutosave'
 import { useChapterVersions } from './novel-workspace/useChapterVersions'
 import { useNovelWorkspaceData, type ChapterSortMode, type ChapterStatusFilter } from './novel-workspace/useNovelWorkspaceData'
@@ -457,6 +459,24 @@ export default function NovelProjectWorkspace() {
     activeChapter,
     onCancelProseBatch: cancelStepGenerateProse,
   })
+
+  const writingCockpitModel = useMemo(() => buildWritingCockpitModel({
+    project: selectedProject,
+    chapters: sortedChapters,
+    outlines,
+    activeChapter,
+    materialScore: activeChapterDiagnostics?.material_score || null,
+    commercialReadiness,
+    activeRuns: activeTasks,
+  }), [
+    selectedProject,
+    sortedChapters,
+    outlines,
+    activeChapter,
+    activeChapterDiagnostics?.material_score,
+    commercialReadiness,
+    activeTasks,
+  ])
 
   useEffect(() => {
     let canceled = false
@@ -3706,6 +3726,27 @@ export default function NovelProjectWorkspace() {
     actions[key]?.()
   }
 
+  const handleWritingCockpitAction = (key: WritingCockpitActionKey) => {
+    const actions: Record<WritingCockpitActionKey, () => void> = {
+      open_writing_bible: () => { void openWritingBibleEditor() },
+      open_outline_panel: () => setOutlinePanelOpen(true),
+      repair_materials: () => { void openMaterialRepairPlan() },
+      build_scene_plan: () => {
+        if (activeChapter) void generateSceneCardsForActiveChapter()
+        else setOutlinePanelOpen(true)
+      },
+      write_draft: () => { void generateCurrentChapterProse() },
+      review_draft: () => {
+        if (activeChapter) void openChapterQualityCard()
+        else setWorkspaceArea('chapterWriting')
+      },
+      fix_continuity: () => { void openContinuityAudit() },
+      update_canon: () => openStoryStateEditor(),
+      open_task_center: () => setTaskCenterOpen(true),
+    }
+    actions[key]?.()
+  }
+
   const renderWorkspaceArea = () => {
     if (workspaceArea === 'storyPlanning') {
       return (
@@ -3952,7 +3993,14 @@ export default function NovelProjectWorkspace() {
           onSelectChapter={(chapterId) => { void selectChapterForWriting(chapterId) }}
         />
 
-        {renderWorkspaceArea()}
+        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <WritingCockpitPanel
+            model={writingCockpitModel}
+            loading={stepProseLoading || generatingProse || generatingSceneCards || diagnosticsLoading}
+            onAction={handleWritingCockpitAction}
+          />
+          {renderWorkspaceArea()}
+        </div>
 
         <ReferencePanel
           open={rightPanelOpen}
