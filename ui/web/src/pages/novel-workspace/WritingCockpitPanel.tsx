@@ -116,6 +116,7 @@ export function WritingCockpitPanel({
                   <Tag bordered={false}>{model.topStatus.currentVolume}</Tag>
                   <Tag color="cyan" bordered={false}>{compactNumber(model.topStatus.writtenWords)} 字</Tag>
                 </Space>
+                <Text type="secondary" style={{ display: 'block', fontSize: 12 }}>今日写作目标</Text>
                 <Text strong style={{ display: 'block' }}>{nextChapterLabel}</Text>
                 <Paragraph ellipsis={{ rows: 2 }} style={{ marginBottom: 0, fontSize: 12 }}>
                   {whyItMatters}
