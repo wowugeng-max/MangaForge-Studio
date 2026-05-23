@@ -679,6 +679,20 @@ function buildChapterPlanningDesk(args: {
     }
   }
 
+  if (args.cockpitChapter?.hasProse) {
+    return {
+      readiness: 'ready',
+      statusLabel: '本章可审',
+      contextPackageStatus: contextStatus,
+      scenePlanStatus,
+      reasons: ['本章已有正文，优先进入审阅修订。'],
+      recommendedPlannerAction: { key: 'review_draft', label: ACTION_LABELS.review_draft },
+      shouldAutoExpandPlanner: false,
+      episodePlan,
+      sceneCards,
+    }
+  }
+
   return {
     readiness: 'ready',
     statusLabel: '本章可写',

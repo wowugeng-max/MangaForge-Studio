@@ -59,6 +59,7 @@ const productionModeOptions = [
 ]
 
 type WorkspaceArea = 'storyPlanning' | 'chapterWriting' | 'storyAssets' | 'qualityRevision' | 'productionOps'
+type ChapterOwnedData = { chapterId: number; updatedAt: any; data: any }
 
 /* ── main component ─────────────────────────────────────────────── */
 export default function NovelProjectWorkspace() {
@@ -97,8 +98,9 @@ export default function NovelProjectWorkspace() {
   const [releaseRepairExecutingId, setReleaseRepairExecutingId] = useState<number | null>(null)
   const [commercialToolLoading, setCommercialToolLoading] = useState('')
   const [productionMode, setProductionMode] = useState('draft_review_revise_store')
-  const [activeChapterDiagnostics, setActiveChapterDiagnostics] = useState<any | null>(null)
-  const [activeChapterContextPackage, setActiveChapterContextPackage] = useState<{ chapterId: number; data: any } | null>(null)
+  const [activeChapterDiagnostics, setActiveChapterDiagnostics] = useState<ChapterOwnedData | null>(null)
+  const diagnosticsRequestRef = useRef(0)
+  const [activeChapterContextPackage, setActiveChapterContextPackage] = useState<ChapterOwnedData | null>(null)
   const [contextPackageLoading, setContextPackageLoading] = useState(false)
   const contextPackageRequestRef = useRef(0)
   const [commercialReadiness, setCommercialReadiness] = useState<any | null>(null)
@@ -365,14 +367,25 @@ export default function NovelProjectWorkspace() {
     chapterSortMode,
   })
 
+  const activeChapterIdNumber = Number(activeChapter?.id || 0)
+  const activeChapterUpdatedAt = activeChapter?.updated_at || null
+  const activeChapterDiagnosticsData = activeChapterDiagnostics?.chapterId === activeChapterIdNumber
+    && activeChapterDiagnostics?.updatedAt === activeChapterUpdatedAt
+    ? activeChapterDiagnostics.data
+    : null
+  const activeContextPackageData = activeChapterContextPackage?.chapterId === activeChapterIdNumber
+    && activeChapterContextPackage?.updatedAt === activeChapterUpdatedAt
+    ? activeChapterContextPackage.data
+    : null
+
   const planningWorkspaceModel = useMemo(() => buildPlanningWorkspaceModel({
     selectedProject,
     outlines,
     chapters: sortedChapters,
     activeChapter,
-    materialScore: activeChapterDiagnostics?.material_score,
+    materialScore: activeChapterDiagnosticsData?.material_score,
     commercialReadiness,
-  }), [selectedProject, outlines, sortedChapters, activeChapter, activeChapterDiagnostics?.material_score, commercialReadiness])
+  }), [selectedProject, outlines, sortedChapters, activeChapter, activeChapterDiagnosticsData?.material_score, commercialReadiness])
 
   const proseQualityReports = useMemo(() => (
     reviews
@@ -463,18 +476,14 @@ export default function NovelProjectWorkspace() {
     onCancelProseBatch: cancelStepGenerateProse,
   })
 
-  const activeContextPackageData = activeChapterContextPackage?.chapterId === Number(activeChapter?.id || 0)
-    ? activeChapterContextPackage.data
-    : null
-
   const writingCockpitModel = useMemo(() => buildWritingCockpitModel({
     project: selectedProject,
     chapters: sortedChapters,
     outlines,
     activeChapter,
     contextPackage: activeContextPackageData,
-    diagnostics: activeChapterDiagnostics,
-    materialScore: activeChapterDiagnostics?.material_score || null,
+    diagnostics: activeChapterDiagnosticsData,
+    materialScore: activeChapterDiagnosticsData?.material_score || null,
     commercialReadiness,
     activeRuns: activeTasks,
   }), [
@@ -483,31 +492,37 @@ export default function NovelProjectWorkspace() {
     outlines,
     activeChapter,
     activeContextPackageData,
-    activeChapterDiagnostics,
+    activeChapterDiagnosticsData,
     commercialReadiness,
     activeTasks,
   ])
 
   useEffect(() => {
-    let canceled = false
     const loadDiagnostics = async () => {
-      if (!activeChapter?.id || !projectId) {
+      const chapterId = Number(activeChapter?.id || 0)
+      const updatedAt = activeChapter?.updated_at || null
+      if (!chapterId || !projectId) {
+        diagnosticsRequestRef.current += 1
         setActiveChapterDiagnostics(null)
         return
       }
+      const requestId = ++diagnosticsRequestRef.current
       try {
-        const res = await apiClient.get(`/novel/chapters/${activeChapter.id}/generation-diagnostics`, { params: { project_id: projectId } })
-        if (!canceled) setActiveChapterDiagnostics(res.data || null)
+        const res = await apiClient.get(`/novel/chapters/${chapterId}/generation-diagnostics`, { params: { project_id: projectId } })
+        if (diagnosticsRequestRef.current !== requestId) return
+        setActiveChapterDiagnostics({ chapterId, updatedAt, data: res.data || null })
       } catch {
-        if (!canceled) setActiveChapterDiagnostics(null)
+        if (diagnosticsRequestRef.current === requestId) setActiveChapterDiagnostics(null)
       }
     }
     void loadDiagnostics()
-    return () => { canceled = true }
   }, [activeChapter?.id, activeChapter?.updated_at, projectId])
 
-  const loadActiveChapterContextPackage = useCallback(async (options: { silent?: boolean; chapterId?: number } = {}) => {
+  const loadActiveChapterContextPackage = useCallback(async (options: { silent?: boolean; chapterId?: number; updatedAt?: any } = {}) => {
     const chapterId = Number(options.chapterId || activeChapter?.id || 0)
+    const updatedAt = options.updatedAt !== undefined
+      ? options.updatedAt
+      : (chapterId === Number(activeChapter?.id || 0) ? activeChapter?.updated_at || null : null)
     if (!chapterId || !projectId) {
       contextPackageRequestRef.current += 1
       setActiveChapterContextPackage(null)
@@ -516,13 +531,15 @@ export default function NovelProjectWorkspace() {
     }
     const requestId = ++contextPackageRequestRef.current
     setContextPackageLoading(true)
-    setActiveChapterContextPackage(prev => prev?.chapterId === chapterId ? prev : null)
+    setActiveChapterContextPackage(prev => (
+      prev?.chapterId === chapterId && prev?.updatedAt === updatedAt ? prev : null
+    ))
     try {
       const res = await apiClient.get(`/novel/chapters/${chapterId}/context-package`, {
         params: { project_id: projectId },
       })
       if (contextPackageRequestRef.current !== requestId) return null
-      setActiveChapterContextPackage({ chapterId, data: res.data || null })
+      setActiveChapterContextPackage({ chapterId, updatedAt, data: res.data || null })
       if (!options.silent) message.success('上下文包已刷新')
       return res.data || null
     } catch (error: any) {
@@ -533,7 +550,7 @@ export default function NovelProjectWorkspace() {
     } finally {
       if (contextPackageRequestRef.current === requestId) setContextPackageLoading(false)
     }
-  }, [activeChapter?.id, projectId])
+  }, [activeChapter?.id, activeChapter?.updated_at, projectId])
 
   useEffect(() => {
     const chapterId = Number(activeChapter?.id || 0)
@@ -541,7 +558,7 @@ export default function NovelProjectWorkspace() {
       void loadActiveChapterContextPackage({ silent: true, chapterId: 0 })
       return
     }
-    void loadActiveChapterContextPackage({ silent: true, chapterId })
+    void loadActiveChapterContextPackage({ silent: true, chapterId, updatedAt: activeChapter?.updated_at || null })
   }, [activeChapter?.id, activeChapter?.updated_at, projectId, loadActiveChapterContextPackage])
 
   useEffect(() => {
@@ -3781,6 +3798,7 @@ export default function NovelProjectWorkspace() {
   const handleWritingCockpitAction = (key: WritingCockpitActionKey) => {
     const rawTargetChapterId = writingCockpitModel.nextChapter?.id
     const targetChapterId = rawTargetChapterId != null ? Number(rawTargetChapterId) : undefined
+    const targetChapterUpdatedAt = writingCockpitModel.nextChapter?.updated_at || null
 
     switch (key) {
       case 'open_writing_bible':
@@ -3793,7 +3811,7 @@ export default function NovelProjectWorkspace() {
         void openMaterialRepairPlan()
         break
       case 'refresh_context_package':
-        void loadActiveChapterContextPackage({ chapterId: targetChapterId })
+        void loadActiveChapterContextPackage({ chapterId: targetChapterId, updatedAt: targetChapterUpdatedAt })
         break
       case 'open_generation_diagnostics':
         void openGenerationDiagnostics()
@@ -3878,7 +3896,7 @@ export default function NovelProjectWorkspace() {
           isEmptyProject={isEmptyProject}
           selectedProject={selectedProject}
           activeChapter={activeChapter}
-          materialScore={activeChapterDiagnostics?.material_score}
+          materialScore={activeChapterDiagnosticsData?.material_score}
           worldbuildingCount={worldbuilding.length}
           characterCount={characters.length}
           outlineCount={outlines.length}
@@ -4073,7 +4091,7 @@ export default function NovelProjectWorkspace() {
           worldbuildingCount={worldbuilding.length}
           characterCount={characters.length}
           hasWritingBible={Boolean(selectedProject?.reference_config?.writing_bible)}
-          materialScore={activeChapterDiagnostics?.material_score}
+          materialScore={activeChapterDiagnosticsData?.material_score}
           commercialReadiness={commercialReadiness}
           activeTaskCount={activeTasks.length + activeKnowledgeJobCount}
           onOpenOutlinePanel={() => setOutlinePanelOpen(true)}

@@ -566,4 +566,27 @@ describe('buildWritingCockpitModel', () => {
     expect(model.chapterPlanningDesk.sceneCards[0].sceneNo).toBe(1)
     expect(model.chapterPlanningDesk.sceneCards[0].endingHook).toBe('第三声钟响后，守将闯入')
   })
+
+  test('planning desk routes ready prose chapter to review instead of draft generation', () => {
+    const proseSceneChapter = {
+      ...sceneCardChapter,
+      chapter_text: '谢怀安听完第三声警钟，抬手让满堂噤声。'.repeat(30),
+    }
+
+    const model = buildWritingCockpitModel({
+      project,
+      outlines,
+      chapters: [proseSceneChapter],
+      activeChapter: proseSceneChapter,
+      contextPackage,
+      diagnostics: {
+        preflight: { ready: true, blockers: [] },
+        material_score: { score: 88, can_generate: true },
+      },
+      materialScore: { score: 88, can_generate: true },
+    })
+
+    expect(model.chapterPlanningDesk.readiness).toBe('ready')
+    expect(model.chapterPlanningDesk.recommendedPlannerAction.key).toBe('review_draft')
+  })
 })
