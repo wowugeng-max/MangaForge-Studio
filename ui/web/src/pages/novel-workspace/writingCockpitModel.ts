@@ -253,13 +253,23 @@ function resolveVolume(outlines: AnyRecord[], writingBible: AnyRecord, nextChapt
   }
 }
 
-function chapterFromOutline(outlines: AnyRecord[], chapterNo: number) {
+function chapterNoFromTitle(title: any) {
+  const match = text(title).match(/第\s*(\d+)\s*章/)
+  return match ? Number(match[1]) : 0
+}
+
+function chapterFromOutline(outlines: AnyRecord[], chapterOrNo: AnyRecord | number) {
+  const chapter = typeof chapterOrNo === 'object' ? chapterOrNo : null
+  const chapterNo = Number(chapter?.chapter_no || chapterOrNo || 0)
+  const outlineId = chapter?.outline_id
   return outlines.find(outline => {
     const level = outlineLevel(outline)
     if (level !== 'chapter' && level !== '章节') return false
+    if (outlineId !== null && outlineId !== undefined && String(outline?.id) === String(outlineId)) return true
     const raw = outline?.raw_payload || {}
     const rawChapterNo = Number(outline?.chapter_no || raw?.chapter_no || raw?.future100?.chapter_no || raw?.skeleton?.chapter_no || 0)
-    return rawChapterNo === chapterNo || chapterInOutline(chapterNo, outline)
+    const titleChapterNo = chapterNoFromTitle(outline?.title)
+    return rawChapterNo === chapterNo || titleChapterNo === chapterNo || chapterInOutline(chapterNo, outline)
   }) || null
 }
 
@@ -347,7 +357,7 @@ function hasUsableChapterPlan(chapter?: AnyRecord | null, outline?: AnyRecord | 
 
 function chapterHasOutline(chapter: AnyRecord | null, outlines: AnyRecord[]) {
   if (!chapter) return false
-  const matchingOutline = chapterFromOutline(outlines, Number(chapter?.chapter_no || 0))
+  const matchingOutline = chapterFromOutline(outlines, chapter)
   return hasUsableChapterPlan(chapter, matchingOutline)
 }
 
@@ -453,8 +463,8 @@ function resolvePrimaryAction(args: {
   if (!args.hasChapter) return { role: 'chief_editor', action: 'open_outline_panel' }
   if (!args.chapterOutlineReady) return { role: 'episode_planner', action: 'build_scene_plan' }
   if (!args.materialsReady) return { role: 'episode_planner', action: 'repair_materials' }
-  if (args.nextHasProse) return { role: 'revision_editor', action: 'review_draft' }
   if (!args.storyStateReady) return { role: 'continuity_auditor', action: 'update_canon' }
+  if (args.nextHasProse) return { role: 'revision_editor', action: 'review_draft' }
   return { role: 'draft_writer', action: 'write_draft' }
 }
 
@@ -480,8 +490,8 @@ export function buildWritingCockpitModel(input: BuildWritingCockpitModelInput): 
   const writingBible = resolveWritingBible(project)
   const storyState = resolveStoryState(project)
   const volume = resolveVolume(outlines, writingBible, nextChapter)
-  const nextChapterOutline = nextChapter ? chapterFromOutline(outlines, Number(nextChapter?.chapter_no || 0)) : null
-  const previousChapterOutline = previousChapter ? chapterFromOutline(outlines, Number(previousChapter?.chapter_no || 0)) : null
+  const nextChapterOutline = nextChapter ? chapterFromOutline(outlines, nextChapter) : null
+  const previousChapterOutline = previousChapter ? chapterFromOutline(outlines, previousChapter) : null
   const writingBibleReady = writingBibleExists(writingBible)
   const volumeGoalReady = Boolean(text(volume.goal))
   const hasChapter = Boolean(nextChapter)

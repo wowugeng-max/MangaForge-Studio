@@ -254,4 +254,101 @@ describe('buildWritingCockpitModel', () => {
     expect(model.recommendedRole).toBe('continuity_auditor')
     expect(model.modelTeam.recommendedRole).toBe('continuity_auditor')
   })
+
+  test('stale story state routes active prose chapter to canon update before revision', () => {
+    const staleProject = {
+      ...project,
+      reference_config: {
+        ...project.reference_config,
+        story_state: {
+          ...project.reference_config.story_state,
+          last_updated_chapter: 0,
+        },
+      },
+    }
+
+    const model = buildWritingCockpitModel({
+      project: staleProject,
+      outlines,
+      chapters,
+      activeChapter: chapters[0],
+      materialScore: { score: 82, can_generate: true },
+    })
+
+    expect(model.nextChapter?.chapterNo).toBe(1)
+    expect(model.draftPipeline.state).toBe('draft_generated')
+    expect(model.readiness.blockers).toEqual([])
+    expect(model.readiness.warnings.map(check => check.key)).toContain('story_state_stale')
+    expect(model.primaryActionKey).toBe('update_canon')
+    expect(model.recommendedRole).toBe('continuity_auditor')
+  })
+
+  test('sparse chapter with outline_id matching a valid manual outline hydrates plan fields', () => {
+    const sparseChapter = {
+      id: 105,
+      outline_id: 805,
+      chapter_no: 5,
+      title: '密印归案',
+      chapter_text: '',
+    }
+    const manualOutlines = [
+      ...outlines,
+      {
+        id: 805,
+        title: '密印归案',
+        outline_level: 'chapter',
+        summary: '让谢怀安把账册密印和军饷案扣回王府主线',
+        conflict_points: ['太妃近侍试图销毁账册夹层'],
+        hook: '密印背面出现京中旧臣的私记',
+      },
+    ]
+
+    const model = buildWritingCockpitModel({
+      project,
+      outlines: manualOutlines,
+      chapters: [chapters[0], sparseChapter],
+      materialScore: { score: 82, can_generate: true },
+    })
+
+    expect(model.nextChapter?.chapterNo).toBe(5)
+    expect(model.nextChapter?.goal).toBe('让谢怀安把账册密印和军饷案扣回王府主线')
+    expect(model.nextChapter?.conflict).toBe('太妃近侍试图销毁账册夹层')
+    expect(model.nextChapter?.endingHook).toBe('密印背面出现京中旧臣的私记')
+    expect(model.readiness.blockers).toEqual([])
+    expect(model.primaryActionKey).toBe('write_draft')
+  })
+
+  test('sparse chapter with manual outline title chapter number hydrates plan fields', () => {
+    const sparseChapter = {
+      id: 106,
+      chapter_no: 6,
+      title: '霜夜点将',
+      chapter_text: '',
+    }
+    const manualOutlines = [
+      ...outlines,
+      {
+        id: 806,
+        title: '第6章 霜夜点将',
+        outline_type: 'chapter',
+        summary: '让谢怀安在霜夜点出第一批可信边军',
+        conflict_points: ['老校尉怀疑谢怀安断臂后已无统军之力'],
+        hook: '点将名册最后一页被人提前撕走',
+      },
+    ]
+
+    const model = buildWritingCockpitModel({
+      project,
+      outlines: manualOutlines,
+      chapters: [chapters[0], sparseChapter],
+      materialScore: { score: 82, can_generate: true },
+    })
+
+    expect(model.nextChapter?.chapterNo).toBe(6)
+    expect(model.nextChapter?.goal).toBe('让谢怀安在霜夜点出第一批可信边军')
+    expect(model.nextChapter?.conflict).toBe('老校尉怀疑谢怀安断臂后已无统军之力')
+    expect(model.nextChapter?.endingHook).toBe('点将名册最后一页被人提前撕走')
+    expect(model.readiness.blockers).toEqual([])
+    expect(model.primaryActionKey).toBe('write_draft')
+  })
 })
