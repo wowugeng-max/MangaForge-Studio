@@ -3727,24 +3727,60 @@ export default function NovelProjectWorkspace() {
   }
 
   const handleWritingCockpitAction = (key: WritingCockpitActionKey) => {
-    const actions: Record<WritingCockpitActionKey, () => void> = {
-      open_writing_bible: () => { void openWritingBibleEditor() },
-      open_outline_panel: () => setOutlinePanelOpen(true),
-      repair_materials: () => { void openMaterialRepairPlan() },
-      build_scene_plan: () => {
-        if (activeChapter) void generateSceneCardsForActiveChapter()
-        else setOutlinePanelOpen(true)
-      },
-      write_draft: () => { void generateCurrentChapterProse() },
-      review_draft: () => {
-        if (activeChapter) void openChapterQualityCard()
-        else setWorkspaceArea('chapterWriting')
-      },
-      fix_continuity: () => { void openContinuityAudit() },
-      update_canon: () => openStoryStateEditor(),
-      open_task_center: () => setTaskCenterOpen(true),
+    const rawTargetChapterId = writingCockpitModel.nextChapter?.id
+    const targetChapterId = rawTargetChapterId != null ? Number(rawTargetChapterId) : undefined
+
+    switch (key) {
+      case 'open_writing_bible':
+        void openWritingBibleEditor()
+        break
+      case 'open_outline_panel':
+        setOutlinePanelOpen(true)
+        break
+      case 'repair_materials':
+        void openMaterialRepairPlan()
+        break
+      case 'build_scene_plan':
+        if (targetChapterId) {
+          setWorkspaceArea('chapterWriting')
+          void selectChapterForWriting(targetChapterId).then((saved) => {
+            if (saved) void generateSceneCardsForChapter(targetChapterId)
+          })
+        } else if (activeChapter) {
+          setWorkspaceArea('chapterWriting')
+          void generateSceneCardsForActiveChapter()
+        } else {
+          setOutlinePanelOpen(true)
+        }
+        break
+      case 'write_draft':
+        setWorkspaceArea('chapterWriting')
+        if (targetChapterId) {
+          void selectChapterForWriting(targetChapterId).then((saved) => {
+            if (saved) void generateCurrentChapterProse({ targetChapterId })
+          })
+        } else {
+          void generateCurrentChapterProse()
+        }
+        break
+      case 'review_draft':
+        setWorkspaceArea('chapterWriting')
+        if (targetChapterId && Number(activeChapter?.id) !== targetChapterId) {
+          void selectChapterForWriting(targetChapterId)
+        } else if (activeChapter) {
+          void openChapterQualityCard()
+        }
+        break
+      case 'fix_continuity':
+        void openContinuityAudit()
+        break
+      case 'update_canon':
+        openStoryStateEditor()
+        break
+      case 'open_task_center':
+        setTaskCenterOpen(true)
+        break
     }
-    actions[key]?.()
   }
 
   const renderWorkspaceArea = () => {
@@ -3994,11 +4030,13 @@ export default function NovelProjectWorkspace() {
         />
 
         <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          <WritingCockpitPanel
-            model={writingCockpitModel}
-            loading={stepProseLoading || generatingProse || generatingSceneCards || diagnosticsLoading}
-            onAction={handleWritingCockpitAction}
-          />
+          <div style={{ flexShrink: 0 }}>
+            <WritingCockpitPanel
+              model={writingCockpitModel}
+              loading={stepProseLoading || generatingProse || generatingSceneCards || diagnosticsLoading}
+              onAction={handleWritingCockpitAction}
+            />
+          </div>
           {renderWorkspaceArea()}
         </div>
 
