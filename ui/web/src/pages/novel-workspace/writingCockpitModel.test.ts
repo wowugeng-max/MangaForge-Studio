@@ -713,6 +713,31 @@ describe('buildWritingCockpitModel', () => {
     expect(model.topStatus.primaryActionKey).toBe('refresh_current_quality')
   })
 
+  test('malformed quality self-check cannot make synced prose ready to accept', () => {
+    const model = buildWritingCockpitModel({
+      project: acceptedProject,
+      outlines,
+      chapters,
+      activeChapter: chapters[0],
+      materialScore: { score: 82, can_generate: true },
+      reviews: [
+        proseQualityReview({
+          payload: {
+            self_check: {
+              error: '模型自检失败',
+              revised: false,
+            },
+          },
+        }),
+      ],
+    })
+
+    expect(model.chapterAcceptanceDesk.acceptanceStatus).toBe('needs_quality_check')
+    expect(model.chapterAcceptanceDesk.recommendedAcceptanceAction.key).toBe('refresh_current_quality')
+    expect(model.primaryActionKey).toBe('refresh_current_quality')
+    expect(model.topStatus.primaryActionKey).toBe('refresh_current_quality')
+  })
+
   test('quality review with invalid payload is ignored even when top-level chapter id matches', () => {
     const model = buildWritingCockpitModel({
       project,

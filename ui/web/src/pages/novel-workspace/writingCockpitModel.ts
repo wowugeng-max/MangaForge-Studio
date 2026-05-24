@@ -775,6 +775,20 @@ function extractQualityScore(quality: AnyRecord) {
   return Number.isFinite(score) ? score : null
 }
 
+function hasOwnValue(record: AnyRecord, key: string) {
+  return Object.prototype.hasOwnProperty.call(record, key) && record[key] !== null && record[key] !== undefined
+}
+
+function hasUsableProseQualityReview(review?: AnyRecord | null) {
+  const quality = qualityPayload(review)
+  return extractQualityScore(quality) !== null
+    || typeof quality?.passed === 'boolean'
+    || hasOwnValue(quality, 'issues')
+    || hasOwnValue(quality, 'must_fix')
+    || hasOwnValue(quality, 'mustFix')
+    || hasOwnValue(quality, 'revision_directives')
+}
+
 function issueText(issue: any) {
   if (typeof issue === 'string') return text(issue)
   return firstNonEmpty(issue?.message, issue?.summary, issue?.detail, issue?.text, issue?.title)
@@ -851,7 +865,9 @@ function buildChapterAcceptanceDesk(args: {
   if (!args.nextChapter || !hasProse(args.nextChapter)) return buildHiddenAcceptanceDesk()
 
   const latestQualityReviewRef = latestReviewRef(args.reviews, args.nextChapter, 'prose_quality')
-  const latestQualityRef = latestQualityReviewRef && proseQualityReviewMatchesCurrentChapter(latestQualityReviewRef.review, args.nextChapter)
+  const latestQualityRef = latestQualityReviewRef
+    && proseQualityReviewMatchesCurrentChapter(latestQualityReviewRef.review, args.nextChapter)
+    && hasUsableProseQualityReview(latestQualityReviewRef.review)
     ? latestQualityReviewRef
     : null
   const latestReportRef = latestReviewRef(args.reviews, args.nextChapter, 'editor_report')
