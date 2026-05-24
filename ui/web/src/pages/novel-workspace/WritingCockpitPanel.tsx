@@ -9,7 +9,9 @@ import {
   ExclamationCircleOutlined,
   FileSearchOutlined,
   FileTextOutlined,
+  HistoryOutlined,
   PlayCircleOutlined,
+  RetweetOutlined,
   SafetyOutlined,
   TeamOutlined,
   ToolOutlined,
@@ -31,6 +33,13 @@ function roleIcon(role: WritingCockpitRole) {
 function actionIcon(key: WritingCockpitActionKey, role: WritingCockpitRole) {
   if (key === 'write_draft') return <PlayCircleOutlined />
   if (key === 'repair_materials' || key === 'fix_continuity') return <ToolOutlined />
+  if (key === 'refresh_current_quality') return <FileSearchOutlined />
+  if (key === 'create_editor_report') return <AuditOutlined />
+  if (key === 'open_editor_reports') return <AuditOutlined />
+  if (key === 'apply_editor_revision') return <RetweetOutlined />
+  if (key === 'sync_story_state') return <SafetyOutlined />
+  if (key === 'accept_chapter_and_continue') return <CheckCircleOutlined />
+  if (key === 'open_version_history') return <HistoryOutlined />
   return roleIcon(role)
 }
 
@@ -59,6 +68,19 @@ function plannerColor(readiness: string) {
   if (readiness === 'needs_scene_plan') return 'blue'
   if (readiness === 'needs_context') return 'gold'
   return 'red'
+}
+
+function acceptanceColor(status: string) {
+  if (status === 'ready_to_accept' || status === 'delivered') return 'green'
+  if (status === 'needs_state_sync') return 'cyan'
+  if (status === 'needs_recheck') return 'blue'
+  if (status === 'needs_revision') return 'red'
+  if (status === 'needs_quality_check') return 'gold'
+  return 'default'
+}
+
+function qualityScoreText(value: number | null) {
+  return value === null ? '未复检' : `${value} 分`
 }
 
 function compactPlanValue(value: string, fallback: string) {
@@ -216,6 +238,119 @@ function ChapterPlanningDesk({
   )
 }
 
+function ChapterAcceptanceDesk({
+  model,
+  loading,
+  onAction,
+}: {
+  model: WritingCockpitModel
+  loading: boolean
+  onAction: (key: WritingCockpitActionKey) => void
+}) {
+  const desk = model.chapterAcceptanceDesk
+  const [expanded, setExpanded] = useState(desk.shouldAutoExpandAcceptance)
+
+  useEffect(() => {
+    setExpanded(desk.shouldAutoExpandAcceptance)
+  }, [desk.shouldAutoExpandAcceptance, model.nextChapter?.id, desk.acceptanceStatus])
+
+  return (
+    <div
+      style={{
+        border: `1px solid ${desk.acceptanceStatus === 'ready_to_accept' ? '#d9f7be' : '#ffccc7'}`,
+        borderRadius: 8,
+        padding: 12,
+        width: '100%',
+        minWidth: 0,
+      }}
+    >
+      <Space direction="vertical" size={10} style={{ width: '100%' }}>
+        <Row gutter={[12, 8]} align="middle">
+          <Col xs={24} lg={14} style={{ minWidth: 0 }}>
+            <Space wrap size={[6, 4]}>
+              <Tag color={acceptanceColor(desk.acceptanceStatus)} bordered={false}>{desk.statusLabel}</Tag>
+              <Tag bordered={false}>质量：{qualityScoreText(desk.qualityScore)}</Tag>
+              <Tag bordered={false}>故事状态：{desk.storyStateSynced ? '已同步' : '待同步'}</Tag>
+            </Space>
+            <Paragraph ellipsis={{ rows: expanded ? 3 : 1 }} style={{ ...wrapTextStyle, margin: '6px 0 0', fontSize: 12 }}>
+              {desk.acceptanceReasons.slice(0, 3).join('；')}
+            </Paragraph>
+          </Col>
+          <Col xs={24} lg={10}>
+            <Space wrap style={{ justifyContent: 'flex-end', width: '100%' }}>
+              <Button size="small" onClick={() => setExpanded(value => !value)}>
+                {expanded ? '收起交稿台' : '展开交稿台'}
+              </Button>
+              <Button
+                type={desk.acceptanceStatus === 'ready_to_accept' ? 'primary' : 'default'}
+                size="small"
+                loading={loading}
+                icon={actionIcon(desk.recommendedAcceptanceAction.key, model.modelTeam.recommendedRole)}
+                onClick={() => onAction(desk.recommendedAcceptanceAction.key)}
+                style={{ whiteSpace: 'normal', height: 'auto', lineHeight: 1.25 }}
+              >
+                {desk.recommendedAcceptanceAction.label}
+              </Button>
+            </Space>
+          </Col>
+        </Row>
+
+        {expanded && (
+          <Row gutter={[12, 10]}>
+            <Col xs={24} lg={10} style={{ minWidth: 0 }}>
+              <div style={{ background: '#fafafa', borderRadius: 6, padding: 10, minWidth: 0 }}>
+                <Text strong style={{ ...wrapTextStyle, marginBottom: 6 }}>编辑摘要</Text>
+                <Space direction="vertical" size={6} style={{ width: '100%', minWidth: 0 }}>
+                  <Text type="secondary" style={wrapTextStyle}>质量状态：{compactPlanValue(desk.qualityStatus, '未复检')}</Text>
+                  <Text type="secondary" style={wrapTextStyle}>编辑报告：{compactPlanValue(desk.latestEditorReportSummary, '尚未生成编辑报告')}</Text>
+                  <Text type="secondary" style={wrapTextStyle}>最近修订：{compactPlanValue(desk.latestRevisionSummary, '尚未生成修订稿')}</Text>
+                </Space>
+              </div>
+            </Col>
+            <Col xs={24} lg={14} style={{ minWidth: 0 }}>
+              <div style={{ background: '#fafafa', borderRadius: 6, padding: 10, minWidth: 0 }}>
+                <Text strong style={{ ...wrapTextStyle, marginBottom: 6 }}>交稿问题</Text>
+                <Space direction="vertical" size={8} style={{ width: '100%', minWidth: 0 }}>
+                  {desk.mustFix.length > 0 ? (
+                    <Space wrap size={[4, 4]}>
+                      {desk.mustFix.slice(0, 5).map(item => (
+                        <Tag key={item} color="red" bordered={false}>{item}</Tag>
+                      ))}
+                    </Space>
+                  ) : (
+                    <Text type="secondary" style={wrapTextStyle}>没有必须修复项。</Text>
+                  )}
+                  {desk.optionalImprovements.length > 0 && (
+                    <Space wrap size={[4, 4]}>
+                      {desk.optionalImprovements.slice(0, 5).map(item => (
+                        <Tag key={item} color="blue" bordered={false}>{item}</Tag>
+                      ))}
+                    </Space>
+                  )}
+                  <Space wrap size={[6, 6]}>
+                    {desk.secondaryActions.map(action => (
+                      <Button
+                        key={action.key}
+                        size="small"
+                        disabled={loading}
+                        icon={actionIcon(action.key, model.modelTeam.recommendedRole)}
+                        onClick={() => onAction(action.key)}
+                        style={{ whiteSpace: 'normal', height: 'auto', lineHeight: 1.25, paddingTop: 3, paddingBottom: 3 }}
+                      >
+                        {action.label}
+                      </Button>
+                    ))}
+                  </Space>
+                </Space>
+              </div>
+            </Col>
+          </Row>
+        )}
+      </Space>
+    </div>
+  )
+}
+
 export function WritingCockpitPanel({
   model,
   loading = false,
@@ -310,7 +445,11 @@ export function WritingCockpitPanel({
 
           {blockerAlert(model, loading, onAction)}
 
-          <ChapterPlanningDesk model={model} loading={loading} onAction={onAction} />
+          {model.chapterAcceptanceDesk.visible ? (
+            <ChapterAcceptanceDesk model={model} loading={loading} onAction={onAction} />
+          ) : (
+            <ChapterPlanningDesk model={model} loading={loading} onAction={onAction} />
+          )}
 
           <Row gutter={[12, 8]} align="top">
             <Col xs={24} lg={15}>
