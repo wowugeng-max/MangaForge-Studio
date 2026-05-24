@@ -729,6 +729,35 @@ function qualityPayload(review?: AnyRecord | null) {
   return payload?.self_check?.review || payload?.review || payload?.quality || payload?.result || {}
 }
 
+function qualityReviewFinalText(payload: AnyRecord) {
+  const candidates = [
+    payload?.self_check?.final_text,
+    payload?.final_text,
+    payload?.chapter_text,
+  ]
+  for (const candidate of candidates) {
+    if (candidate !== null && candidate !== undefined) return String(candidate)
+  }
+  return null
+}
+
+function proseQualityReviewMatchesCurrentChapter(review: AnyRecord | null, chapter: AnyRecord | null) {
+  if (!review || !chapter) return false
+  const payload = reviewPayload(review)
+  const reviewChapterUpdatedAt = text(payload?.chapter_updated_at)
+  const currentChapterUpdatedAt = text(chapter?.updated_at)
+  if (reviewChapterUpdatedAt && currentChapterUpdatedAt && reviewChapterUpdatedAt !== currentChapterUpdatedAt) {
+    return false
+  }
+
+  const reviewedFinalText = qualityReviewFinalText(payload)
+  if (reviewedFinalText !== null && reviewedFinalText.trim() !== String(chapter?.chapter_text ?? '').trim()) {
+    return false
+  }
+
+  return true
+}
+
 function reportPayload(review?: AnyRecord | null) {
   const payload = review ? reviewPayload(review) : {}
   return payload?.report || payload?.editor_report || payload?.result || {}
@@ -821,7 +850,10 @@ function buildChapterAcceptanceDesk(args: {
 }): ChapterAcceptanceDeskModel {
   if (!args.nextChapter || !hasProse(args.nextChapter)) return buildHiddenAcceptanceDesk()
 
-  const latestQualityRef = latestReviewRef(args.reviews, args.nextChapter, 'prose_quality')
+  const latestQualityReviewRef = latestReviewRef(args.reviews, args.nextChapter, 'prose_quality')
+  const latestQualityRef = latestQualityReviewRef && proseQualityReviewMatchesCurrentChapter(latestQualityReviewRef.review, args.nextChapter)
+    ? latestQualityReviewRef
+    : null
   const latestReportRef = latestReviewRef(args.reviews, args.nextChapter, 'editor_report')
   const latestRevisionRef = latestReviewRef(args.reviews, args.nextChapter, 'editor_revision')
   const latestQuality = latestQualityRef?.review || null

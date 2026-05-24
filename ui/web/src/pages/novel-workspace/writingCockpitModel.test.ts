@@ -1000,6 +1000,74 @@ describe('buildWritingCockpitModel', () => {
     expect(model.primaryActionKey).toBe('accept_chapter_and_continue')
   })
 
+  test('passing quality for old prose needs current quality check after text changes', () => {
+    const oldText = chapters[0].chapter_text
+    const editedChapter = {
+      ...chapters[0],
+      chapter_text: `${oldText} 新增一段验收前自动保存的正文。`,
+    }
+
+    const model = buildWritingCockpitModel({
+      project: acceptedProject,
+      outlines,
+      chapters: [editedChapter, chapters[1]],
+      activeChapter: editedChapter,
+      materialScore: { score: 82, can_generate: true },
+      reviews: [
+        proseQualityReview({
+          payload: {
+            self_check: {
+              final_text: oldText,
+              review: {
+                score: 82,
+                passed: true,
+                status: 'pass',
+                issues: [],
+                must_fix: [],
+                optional_improvements: [],
+                revision_directives: [],
+                needs_revision: false,
+              },
+            },
+          },
+        }),
+      ],
+    })
+
+    expect(model.chapterAcceptanceDesk.acceptanceStatus).toBe('needs_quality_check')
+    expect(model.chapterAcceptanceDesk.latestQualityReviewId).toBeNull()
+    expect(model.chapterAcceptanceDesk.recommendedAcceptanceAction.key).toBe('refresh_current_quality')
+    expect(model.primaryActionKey).toBe('refresh_current_quality')
+    expect(model.topStatus.primaryActionKey).toBe('refresh_current_quality')
+  })
+
+  test('passing quality with mismatched chapter updated time needs current quality check', () => {
+    const updatedChapter = {
+      ...chapters[0],
+      updated_at: '2026-05-24T01:00:00.000Z',
+    }
+
+    const model = buildWritingCockpitModel({
+      project: acceptedProject,
+      outlines,
+      chapters: [updatedChapter, chapters[1]],
+      activeChapter: updatedChapter,
+      materialScore: { score: 82, can_generate: true },
+      reviews: [
+        proseQualityReview({
+          payload: {
+            chapter_updated_at: '2026-05-24T00:00:00.000Z',
+          },
+        }),
+      ],
+    })
+
+    expect(model.chapterAcceptanceDesk.acceptanceStatus).toBe('needs_quality_check')
+    expect(model.chapterAcceptanceDesk.latestQualityReviewId).toBeNull()
+    expect(model.chapterAcceptanceDesk.recommendedAcceptanceAction.key).toBe('refresh_current_quality')
+    expect(model.primaryActionKey).toBe('refresh_current_quality')
+  })
+
   test('accepted prose chapter does not route back to draft generation', () => {
     const model = buildWritingCockpitModel({
       project: acceptedProject,
