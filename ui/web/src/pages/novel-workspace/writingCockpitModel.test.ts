@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'bun:test'
-import { buildWritingCockpitModel } from './writingCockpitModel'
+import {
+  buildWritingCockpitModel,
+  resolveEditorRevisionChapterId,
+  selectTargetChapterForWriting,
+} from './writingCockpitModel'
 
 const project = {
   title: '大益武夫',
@@ -1016,5 +1020,64 @@ describe('buildWritingCockpitModel', () => {
     expect(model.chapterAcceptanceDesk.visible).toBe(true)
     expect(model.primaryActionKey).not.toBe('write_draft')
     expect(model.topStatus.primaryActionKey).toBe('accept_chapter_and_continue')
+  })
+})
+
+describe('writing cockpit target chapter actions', () => {
+  test('selects the target chapter before running a target action when active differs', async () => {
+    const selected: number[] = []
+
+    const ready = await selectTargetChapterForWriting({
+      targetChapterId: 102,
+      activeChapterId: 101,
+      selectChapterForWriting: async (chapterId) => {
+        selected.push(chapterId)
+        return true
+      },
+    })
+
+    expect(ready).toBe(true)
+    expect(selected).toEqual([102])
+  })
+
+  test('does not select again when the target chapter is already active', async () => {
+    const selected: number[] = []
+
+    const ready = await selectTargetChapterForWriting({
+      targetChapterId: 102,
+      activeChapterId: '102',
+      selectChapterForWriting: async (chapterId) => {
+        selected.push(chapterId)
+        return true
+      },
+    })
+
+    expect(ready).toBe(true)
+    expect(selected).toEqual([])
+  })
+
+  test('blocks the target action when target chapter selection fails', async () => {
+    const ready = await selectTargetChapterForWriting({
+      targetChapterId: 102,
+      activeChapterId: 101,
+      selectChapterForWriting: async () => false,
+    })
+
+    expect(ready).toBe(false)
+  })
+
+  test('resolves editor revision chapter from payload, report, target, then active chapter', () => {
+    expect(resolveEditorRevisionChapterId({
+      payload: JSON.stringify({ chapter_id: 201 }),
+      chapter_id: 202,
+    }, 203, 204)).toBe(201)
+
+    expect(resolveEditorRevisionChapterId({
+      payload: {},
+      chapter_id: 202,
+    }, 203, 204)).toBe(202)
+
+    expect(resolveEditorRevisionChapterId({ payload: {} }, 203, 204)).toBe(204)
+    expect(resolveEditorRevisionChapterId({ payload: {} }, 203)).toBe(203)
   })
 })

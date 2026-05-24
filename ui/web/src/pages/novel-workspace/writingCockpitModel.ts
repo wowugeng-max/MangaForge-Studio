@@ -640,6 +640,34 @@ function parseReviewPayload(review: AnyRecord): AnyRecord | null {
   }
 }
 
+export async function selectTargetChapterForWriting(args: {
+  targetChapterId?: number | null
+  activeChapterId?: any
+  selectChapterForWriting: (chapterId: number) => Promise<boolean>
+}) {
+  const targetChapterId = Number(args.targetChapterId || 0)
+  if (!targetChapterId) return true
+  if (Number(args.activeChapterId) === targetChapterId) return true
+  return args.selectChapterForWriting(targetChapterId)
+}
+
+export function resolveEditorRevisionChapterId(report: AnyRecord | null | undefined, activeChapterId?: any, targetChapterId?: any) {
+  const payload = parseReviewPayload(report || {}) || {}
+  const candidates = [
+    payload?.chapter_id,
+    payload?.chapterId,
+    payload?.chapter?.id,
+    report?.chapter_id,
+    report?.chapterId,
+    targetChapterId,
+    activeChapterId,
+  ]
+  for (const candidate of candidates) {
+    if (candidate !== null && candidate !== undefined && String(candidate).trim()) return candidate
+  }
+  return undefined
+}
+
 function reviewPayload(review: AnyRecord): AnyRecord {
   return parseReviewPayload(review) || {}
 }

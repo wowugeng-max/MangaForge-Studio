@@ -16,7 +16,12 @@ import { StoryPlanningWorkspace, type PlanningLoadingKey } from './novel-workspa
 import { WritingCockpitPanel } from './novel-workspace/WritingCockpitPanel'
 import { WorkspaceCenter } from './novel-workspace/WorkspaceCenter'
 import { buildPlanningWorkspaceModel, type PlanningActionKey } from './novel-workspace/planningWorkspaceModel'
-import { buildWritingCockpitModel, type WritingCockpitActionKey } from './novel-workspace/writingCockpitModel'
+import {
+  buildWritingCockpitModel,
+  resolveEditorRevisionChapterId,
+  selectTargetChapterForWriting,
+  type WritingCockpitActionKey,
+} from './novel-workspace/writingCockpitModel'
 import { useChapterAutosave } from './novel-workspace/useChapterAutosave'
 import { useChapterVersions } from './novel-workspace/useChapterVersions'
 import { useNovelWorkspaceData, type ChapterSortMode, type ChapterStatusFilter } from './novel-workspace/useNovelWorkspaceData'
@@ -486,6 +491,7 @@ export default function NovelProjectWorkspace() {
     materialScore: activeChapterDiagnosticsData?.material_score || null,
     commercialReadiness,
     activeRuns: activeTasks,
+    reviews,
   }), [
     selectedProject,
     sortedChapters,
@@ -495,7 +501,17 @@ export default function NovelProjectWorkspace() {
     activeChapterDiagnosticsData,
     commercialReadiness,
     activeTasks,
+    reviews,
   ])
+
+  const findReviewById = (reviewId: any) => (
+    reviews.find((review: any) => String(review.id) === String(reviewId)) || null
+  )
+
+  const latestCockpitEditorReport = () => {
+    const reviewId = writingCockpitModel.chapterAcceptanceDesk.latestEditorReportId
+    return reviewId ? findReviewById(reviewId) : null
+  }
 
   useEffect(() => {
     const loadDiagnostics = async () => {
@@ -1594,13 +1610,13 @@ export default function NovelProjectWorkspace() {
     await markNeedsReview()
   }
 
-  const refreshActiveProseQuality = async (source = 'manual_refresh') => {
-    if (!activeChapter) return message.warning('请先选择章节')
+  const refreshActiveProseQuality = async (source = 'manual_refresh', targetChapter: any = activeChapter) => {
+    if (!targetChapter) return message.warning('请先选择章节')
     if (!selectedModelId) return message.warning('请先选择模型')
     if (!await flushPendingSave()) return
     setProseQualityLoading(true)
     try {
-      const res = await apiClient.post(`/novel/chapters/${activeChapter.id}/prose-quality`, {
+      const res = await apiClient.post(`/novel/chapters/${targetChapter.id}/prose-quality`, {
         project_id: projectId,
         model_id: selectedModelId,
         source,
@@ -1616,12 +1632,20 @@ export default function NovelProjectWorkspace() {
     }
   }
 
-  const applyEditorRevision = async (report: any, options: { revisionMode?: string; prompt?: string; skipConfirm?: boolean } = {}) => {
+  const refreshProseQualityForChapter = async (chapterId: number, source = 'manual_refresh') => {
+    const chapter = sortedChapters.find(item => Number(item.id) === Number(chapterId))
+      || (Number(activeChapter?.id) === Number(chapterId) ? activeChapter : null)
+    if (!chapter?.id) return
+    if (Number(activeChapter?.id) !== Number(chapterId)) {
+      const saved = await selectChapterForWriting(chapterId)
+      if (!saved) return
+    }
+    await refreshActiveProseQuality(source, chapter)
+  }
+
+  const applyEditorRevision = async (report: any, options: { revisionMode?: string; prompt?: string; skipConfirm?: boolean; targetChapterId?: number; autoStoryState?: boolean } = {}) => {
     if (!selectedModelId) return message.warning('请先选择模型')
     const isSelfCheckRevision = report?.review_type === 'prose_quality'
-    const payload = (() => {
-      try { return typeof report.payload === 'string' ? JSON.parse(report.payload) : report.payload || {} } catch { return {} }
-    })()
     const revisionLabels: Record<string, string> = {
       from_report: isSelfCheckRevision ? '按正文自检生成修订稿' : '按编辑报告生成修订稿',
       expand_action: '补动作/战斗细节',
@@ -1635,11 +1659,12 @@ export default function NovelProjectWorkspace() {
       try {
         const res = await apiClient.post(`/novel/reviews/${report.id}/apply-revision`, {
           project_id: projectId,
-          chapter_id: payload.chapter_id || activeChapter?.id,
+          chapter_id: resolveEditorRevisionChapterId(report, activeChapter?.id, options.targetChapterId),
           model_id: selectedModelId,
           revision_mode: revisionMode,
           prompt: options.prompt || '',
           auto_quality_check: true,
+          auto_story_state: options.autoStoryState !== false,
         })
         if (res.data?.chapter) {
           setChapters(prev => prev.map(c => c.id === res.data.chapter.id ? res.data.chapter : c))
@@ -3795,6 +3820,22 @@ export default function NovelProjectWorkspace() {
     actions[key]?.()
   }
 
+  const acceptCockpitChapterAndContinue = async () => {
+    const currentNo = Number(writingCockpitModel.nextChapter?.chapterNo || 0)
+    const next = sortedChapters.find(chapter => Number(chapter.chapter_no || 0) > currentNo && !String(chapter.chapter_text || '').replace(/\s/g, '').trim())
+      || sortedChapters.find(chapter => Number(chapter.chapter_no || 0) > currentNo)
+      || null
+
+    if (!next?.id) {
+      message.success('本章已达到交稿条件，当前项目暂无下一章。')
+      return
+    }
+
+    setWorkspaceArea('chapterWriting')
+    const saved = await selectChapterForWriting(Number(next.id))
+    if (saved) message.success(`已进入第 ${next.chapter_no} 章。`)
+  }
+
   const handleWritingCockpitAction = (key: WritingCockpitActionKey) => {
     const rawTargetChapterId = writingCockpitModel.nextChapter?.id
     const targetChapterId = rawTargetChapterId != null ? Number(rawTargetChapterId) : undefined
@@ -3873,6 +3914,84 @@ export default function NovelProjectWorkspace() {
         break
       case 'open_task_center':
         setTaskCenterOpen(true)
+        break
+      case 'refresh_current_quality':
+        setWorkspaceArea('chapterWriting')
+        if (targetChapterId) {
+          void refreshProseQualityForChapter(targetChapterId, 'writing_cockpit')
+        } else if (activeChapter) {
+          void refreshActiveProseQuality('writing_cockpit')
+        }
+        break
+      case 'create_editor_report':
+        setWorkspaceArea('chapterWriting')
+        if (targetChapterId) {
+          void selectTargetChapterForWriting({
+            targetChapterId,
+            activeChapterId: activeChapter?.id,
+            selectChapterForWriting,
+          }).then((saved) => {
+            if (saved) void createEditorReportForChapter(targetChapterId)
+          })
+        } else {
+          void createEditorReport()
+        }
+        break
+      case 'apply_editor_revision': {
+        setWorkspaceArea('chapterWriting')
+        const report = latestCockpitEditorReport()
+        if (!report) {
+          message.warning('还没有可用于修订的编辑报告。')
+          setRightPanelOpen(true)
+          setRightPanelTab('editorReports')
+          break
+        }
+        void selectTargetChapterForWriting({
+          targetChapterId,
+          activeChapterId: activeChapter?.id,
+          selectChapterForWriting,
+        }).then((saved) => {
+          if (saved) void applyEditorRevision(report, { skipConfirm: true, targetChapterId, autoStoryState: false })
+        })
+        break
+      }
+      case 'sync_story_state':
+        void selectTargetChapterForWriting({
+          targetChapterId,
+          activeChapterId: activeChapter?.id,
+          selectChapterForWriting,
+        }).then((saved) => {
+          if (!saved) return
+          openStoryStateEditor()
+          const chapterNo = targetChapter?.chapter_no || writingCockpitModel.nextChapter?.chapterNo
+          message.info(chapterNo
+            ? `已定位到本章，请在故事状态中同步到第 ${chapterNo} 章。`
+            : '已打开故事状态，请同步当前章节。')
+        })
+        break
+      case 'accept_chapter_and_continue':
+        void acceptCockpitChapterAndContinue()
+        break
+      case 'open_editor_reports':
+        setRightPanelOpen(true)
+        setRightPanelTab('editorReports')
+        break
+      case 'open_version_history':
+        setWorkspaceArea('chapterWriting')
+        if (targetChapterId && Number(activeChapter?.id) !== targetChapterId) {
+          void selectTargetChapterForWriting({
+            targetChapterId,
+            activeChapterId: activeChapter?.id,
+            selectChapterForWriting,
+          }).then((saved) => {
+            if (!saved) return
+            setRightPanelOpen(true)
+            setRightPanelTab('versions')
+          })
+          break
+        }
+        setRightPanelOpen(true)
+        setRightPanelTab('versions')
         break
     }
   }
