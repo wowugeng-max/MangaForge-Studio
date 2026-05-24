@@ -21,6 +21,13 @@ export type WritingCockpitActionKey =
   | 'refresh_context_package'
   | 'open_generation_diagnostics'
   | 'confirm_plan_and_write_draft'
+  | 'refresh_current_quality'
+  | 'create_editor_report'
+  | 'apply_editor_revision'
+  | 'sync_story_state'
+  | 'accept_chapter_and_continue'
+  | 'open_editor_reports'
+  | 'open_version_history'
 
 export type WritingReadinessStatus = 'pass' | 'warning' | 'blocker'
 
@@ -99,6 +106,41 @@ export interface ChapterPlanningDeskModel {
   sceneCards: ChapterPlanningDeskSceneCard[]
 }
 
+export type ChapterAcceptanceStatus =
+  | 'hidden'
+  | 'needs_quality_check'
+  | 'needs_revision'
+  | 'needs_recheck'
+  | 'needs_state_sync'
+  | 'ready_to_accept'
+  | 'delivered'
+
+export interface ChapterAcceptanceDeskModel {
+  visible: boolean
+  acceptanceStatus: ChapterAcceptanceStatus
+  statusLabel: string
+  acceptanceReasons: string[]
+  qualityScore: number | null
+  qualityStatus: string
+  mustFix: string[]
+  optionalImprovements: string[]
+  latestQualityReviewId: any
+  latestEditorReportId: any
+  latestRevisionReviewId: any
+  latestEditorReportSummary: string
+  latestRevisionSummary: string
+  storyStateSynced: boolean
+  recommendedAcceptanceAction: {
+    key: WritingCockpitActionKey
+    label: string
+  }
+  secondaryActions: Array<{
+    key: WritingCockpitActionKey
+    label: string
+  }>
+  shouldAutoExpandAcceptance: boolean
+}
+
 export interface WritingCockpitModel {
   topStatus: {
     projectTitle: string
@@ -111,6 +153,7 @@ export interface WritingCockpitModel {
   nextChapter: WritingCockpitChapter | null
   previousChapter: WritingCockpitChapter | null
   chapterPlanningDesk: ChapterPlanningDeskModel
+  chapterAcceptanceDesk: ChapterAcceptanceDeskModel
   primaryActionKey: WritingCockpitActionKey
   recommendedRole: WritingCockpitRole
   readiness: {
@@ -150,6 +193,7 @@ export interface BuildWritingCockpitModelInput {
   activeRuns?: AnyRecord[] | null
   runs?: AnyRecord[] | null
   memorySummary?: AnyRecord | null
+  reviews?: AnyRecord[] | null
 }
 
 const ROLE_META: Record<WritingCockpitRole, { label: string; description: string; actionKey: WritingCockpitActionKey }> = {
@@ -198,6 +242,13 @@ const ACTION_LABELS: Record<WritingCockpitActionKey, string> = {
   refresh_context_package: '刷新上下文包',
   open_generation_diagnostics: '查看生成诊断',
   confirm_plan_and_write_draft: '确认计划，进入初稿',
+  refresh_current_quality: '复检当前版本',
+  create_editor_report: '生成编辑报告',
+  apply_editor_revision: '生成修订稿',
+  sync_story_state: '同步故事状态',
+  accept_chapter_and_continue: '验收并进入下一章',
+  open_editor_reports: '查看编辑报告',
+  open_version_history: '查看版本历史',
 }
 
 function text(value: any, fallback = '') {
@@ -573,6 +624,328 @@ function chapterSceneCards(chapter?: AnyRecord | null): ChapterPlanningDeskScene
   }).filter(card => Boolean(card.purpose || card.conflict || card.turn || card.endingHook))
 }
 
+const QUALITY_PASS_THRESHOLD = 78
+type ReviewRef = { review: AnyRecord; index: number }
+
+function parseReviewPayload(review: AnyRecord): AnyRecord | null {
+  const value = review?.payload || review?.raw_payload
+  if (!value) return null
+  if (typeof value === 'object') return value
+  if (typeof value !== 'string') return null
+  try {
+    const parsed = JSON.parse(value)
+    return parsed && typeof parsed === 'object' ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+function reviewPayload(review: AnyRecord): AnyRecord {
+  return parseReviewPayload(review) || {}
+}
+
+function reviewChapterId(review: AnyRecord) {
+  const payload = parseReviewPayload(review)
+  if (!payload) return null
+  return firstNonEmpty(
+    payload?.chapter_id,
+    payload?.chapterId,
+    payload?.chapter?.id,
+  )
+}
+
+function reviewBelongsToChapter(review: AnyRecord, chapter?: AnyRecord | null) {
+  if (!chapter) return false
+  const reviewId = text(reviewChapterId(review))
+  const chapterId = text(chapter?.id)
+  return Boolean(reviewId && chapterId && reviewId === chapterId)
+}
+
+function reviewType(review: AnyRecord) {
+  return text(review?.review_type || review?.type || review?.kind).toLowerCase()
+}
+
+function parsedTime(value: any) {
+  const normalized = text(value)
+  if (!normalized) return null
+  const timestamp = Date.parse(normalized)
+  return Number.isFinite(timestamp) ? timestamp : null
+}
+
+function createdTime(review: AnyRecord) {
+  return parsedTime(review?.created_at) ?? parsedTime(review?.updated_at)
+}
+
+function compareReviewRefs(left: ReviewRef, right: ReviewRef) {
+  const leftTime = createdTime(left.review)
+  const rightTime = createdTime(right.review)
+  if (leftTime !== null || rightTime !== null) {
+    const leftOrder = leftTime ?? Number.NEGATIVE_INFINITY
+    const rightOrder = rightTime ?? Number.NEGATIVE_INFINITY
+    if (leftOrder !== rightOrder) return leftOrder - rightOrder
+  }
+  return left.index - right.index
+}
+
+function latestReviewRef(reviews: AnyRecord[], chapter: AnyRecord | null, type: string): ReviewRef | null {
+  const matches = reviews
+    .map((review, index) => ({ review, index }))
+    .filter(item => reviewBelongsToChapter(item.review, chapter) && reviewType(item.review) === type)
+  if (!matches.length) return null
+  matches.sort((a, b) => compareReviewRefs(b, a))
+  return matches[0]
+}
+
+function qualityPayload(review?: AnyRecord | null) {
+  const payload = review ? reviewPayload(review) : {}
+  return payload?.self_check?.review || payload?.review || payload?.quality || payload?.result || {}
+}
+
+function reportPayload(review?: AnyRecord | null) {
+  const payload = review ? reviewPayload(review) : {}
+  return payload?.report || payload?.editor_report || payload?.result || {}
+}
+
+function revisionPayload(review?: AnyRecord | null) {
+  const payload = review ? reviewPayload(review) : {}
+  return payload?.revision || payload?.result || payload
+}
+
+function extractQualityScore(quality: AnyRecord) {
+  const value = quality?.score ?? quality?.overall_score ?? quality?.quality_score
+  if (value === null || value === undefined || value === '') return null
+  const score = Number(value)
+  return Number.isFinite(score) ? score : null
+}
+
+function issueText(issue: any) {
+  if (typeof issue === 'string') return text(issue)
+  return firstNonEmpty(issue?.message, issue?.summary, issue?.detail, issue?.text, issue?.title)
+}
+
+function hasHighSeverityIssue(issue: any) {
+  if (typeof issue === 'string') return false
+  const severity = text(issue?.severity || issue?.level || issue?.grade).toLowerCase()
+  return severity === 'high' || severity === 'critical' || severity === 'blocker' || severity === 'must_fix'
+}
+
+function extractMustFix(quality: AnyRecord, report: AnyRecord) {
+  const fromQuality = [
+    ...stringArray(quality?.must_fix),
+    ...stringArray(quality?.mustFix),
+    ...stringArray(quality?.revision_directives),
+  ]
+  const fromHighIssues = arrayValue(quality?.issues).filter(hasHighSeverityIssue).map(issueText).filter(Boolean)
+  const fromReport = [
+    ...stringArray(report?.must_fix),
+    ...stringArray(report?.mustFix),
+  ]
+  return Array.from(new Set([...fromQuality, ...fromHighIssues, ...fromReport])).slice(0, 5)
+}
+
+function extractOptionalImprovements(quality: AnyRecord, report: AnyRecord) {
+  const items = [
+    ...stringArray(quality?.optional_improvements),
+    ...stringArray(quality?.optionalImprovements),
+    ...stringArray(report?.optional_improvements),
+    ...stringArray(report?.optionalImprovements),
+  ]
+  return Array.from(new Set(items)).slice(0, 5)
+}
+
+function reportBelongsToCurrentQualityCycle(args: {
+  reportRef: ReviewRef | null
+  qualityRef: ReviewRef | null
+  revisionRef: ReviewRef | null
+}) {
+  if (!args.reportRef || !args.qualityRef) return false
+  return compareReviewRefs(args.reportRef, args.qualityRef) >= 0
+    && (!args.revisionRef || compareReviewRefs(args.reportRef, args.revisionRef) > 0)
+}
+
+function buildHiddenAcceptanceDesk(): ChapterAcceptanceDeskModel {
+  return {
+    visible: false,
+    acceptanceStatus: 'hidden',
+    statusLabel: '等待正文',
+    acceptanceReasons: ['本章还没有正文，先完成章节计划和初稿。'],
+    qualityScore: null,
+    qualityStatus: '',
+    mustFix: [],
+    optionalImprovements: [],
+    latestQualityReviewId: null,
+    latestEditorReportId: null,
+    latestRevisionReviewId: null,
+    latestEditorReportSummary: '',
+    latestRevisionSummary: '',
+    storyStateSynced: false,
+    recommendedAcceptanceAction: { key: 'write_draft', label: ACTION_LABELS.write_draft },
+    secondaryActions: [],
+    shouldAutoExpandAcceptance: false,
+  }
+}
+
+function buildChapterAcceptanceDesk(args: {
+  nextChapter: AnyRecord | null
+  cockpitChapter: WritingCockpitChapter | null
+  reviews: AnyRecord[]
+  storyState: AnyRecord
+}): ChapterAcceptanceDeskModel {
+  if (!args.nextChapter || !hasProse(args.nextChapter)) return buildHiddenAcceptanceDesk()
+
+  const latestQualityRef = latestReviewRef(args.reviews, args.nextChapter, 'prose_quality')
+  const latestReportRef = latestReviewRef(args.reviews, args.nextChapter, 'editor_report')
+  const latestRevisionRef = latestReviewRef(args.reviews, args.nextChapter, 'editor_revision')
+  const latestQuality = latestQualityRef?.review || null
+  const latestReport = latestReportRef?.review || null
+  const latestRevision = latestRevisionRef?.review || null
+  const quality = qualityPayload(latestQuality)
+  const report = reportPayload(latestReport)
+  const revision = revisionPayload(latestRevision)
+  const score = extractQualityScore(quality)
+  const qualityStatus = firstNonEmpty(quality?.status, latestQuality?.status)
+  const currentReport = reportBelongsToCurrentQualityCycle({
+    reportRef: latestReportRef,
+    qualityRef: latestQualityRef,
+    revisionRef: latestRevisionRef,
+  }) ? report : {}
+  const mustFix = extractMustFix(quality, currentReport)
+  const optionalImprovements = extractOptionalImprovements(quality, report)
+  const storyStateSynced = Number(args.storyState?.last_updated_chapter || 0) >= Number(args.nextChapter?.chapter_no || 0)
+  const latestEditorReportSummary = firstNonEmpty(report?.summary, latestReport?.summary)
+  const latestRevisionSummary = firstNonEmpty(revision?.revision_summary, latestRevision?.summary)
+  const revisionNeedsRecheck = Boolean(
+    latestQualityRef
+    && latestRevisionRef
+    && compareReviewRefs(latestRevisionRef, latestQualityRef) > 0,
+  )
+  const scoreNeedsRevision = score !== null && score < QUALITY_PASS_THRESHOLD
+  const qualityNeedsRevision = Boolean(
+    scoreNeedsRevision
+    || mustFix.length > 0
+    || quality?.needs_revision === true
+    || quality?.passed === false,
+  )
+  const secondaryActions: Array<{ key: WritingCockpitActionKey; label: string }> = [
+    { key: 'review_draft', label: '查看质量卡' },
+    { key: 'open_editor_reports', label: ACTION_LABELS.open_editor_reports },
+    { key: 'open_version_history', label: ACTION_LABELS.open_version_history },
+  ]
+
+  if (!latestQuality) {
+    return {
+      visible: true,
+      acceptanceStatus: 'needs_quality_check',
+      statusLabel: '需复检',
+      acceptanceReasons: ['本章已有正文，但还没有当前章节的质量复检记录。'],
+      qualityScore: null,
+      qualityStatus,
+      mustFix,
+      optionalImprovements,
+      latestQualityReviewId: null,
+      latestEditorReportId: latestReport?.id || null,
+      latestRevisionReviewId: latestRevision?.id || null,
+      latestEditorReportSummary,
+      latestRevisionSummary,
+      storyStateSynced,
+      recommendedAcceptanceAction: { key: 'refresh_current_quality', label: ACTION_LABELS.refresh_current_quality },
+      secondaryActions,
+      shouldAutoExpandAcceptance: true,
+    }
+  }
+
+  if (revisionNeedsRecheck) {
+    return {
+      visible: true,
+      acceptanceStatus: 'needs_recheck',
+      statusLabel: '修订后需复检',
+      acceptanceReasons: ['本章已有修订记录，修订时间晚于最新质量复检。'],
+      qualityScore: score,
+      qualityStatus,
+      mustFix,
+      optionalImprovements,
+      latestQualityReviewId: latestQuality?.id || null,
+      latestEditorReportId: latestReport?.id || null,
+      latestRevisionReviewId: latestRevision?.id || null,
+      latestEditorReportSummary,
+      latestRevisionSummary,
+      storyStateSynced,
+      recommendedAcceptanceAction: { key: 'refresh_current_quality', label: ACTION_LABELS.refresh_current_quality },
+      secondaryActions,
+      shouldAutoExpandAcceptance: true,
+    }
+  }
+
+  if (qualityNeedsRevision) {
+    const hasReportFix = Boolean(latestReport && extractMustFix({}, currentReport).length > 0)
+    const key: WritingCockpitActionKey = hasReportFix ? 'apply_editor_revision' : 'create_editor_report'
+    return {
+      visible: true,
+      acceptanceStatus: 'needs_revision',
+      statusLabel: '需修订',
+      acceptanceReasons: [
+        scoreNeedsRevision ? `质量分 ${score} 低于 ${QUALITY_PASS_THRESHOLD}` : '',
+        mustFix.length > 0 ? `必须修复：${mustFix.slice(0, 2).join('；')}` : '',
+      ].filter(Boolean).slice(0, 3),
+      qualityScore: score,
+      qualityStatus,
+      mustFix,
+      optionalImprovements,
+      latestQualityReviewId: latestQuality?.id || null,
+      latestEditorReportId: latestReport?.id || null,
+      latestRevisionReviewId: latestRevision?.id || null,
+      latestEditorReportSummary,
+      latestRevisionSummary,
+      storyStateSynced,
+      recommendedAcceptanceAction: { key, label: ACTION_LABELS[key] },
+      secondaryActions,
+      shouldAutoExpandAcceptance: true,
+    }
+  }
+
+  if (!storyStateSynced) {
+    return {
+      visible: true,
+      acceptanceStatus: 'needs_state_sync',
+      statusLabel: '需同步故事状态',
+      acceptanceReasons: [`故事状态还没有同步到第 ${args.nextChapter.chapter_no} 章。`],
+      qualityScore: score,
+      qualityStatus,
+      mustFix,
+      optionalImprovements,
+      latestQualityReviewId: latestQuality?.id || null,
+      latestEditorReportId: latestReport?.id || null,
+      latestRevisionReviewId: latestRevision?.id || null,
+      latestEditorReportSummary,
+      latestRevisionSummary,
+      storyStateSynced,
+      recommendedAcceptanceAction: { key: 'sync_story_state', label: ACTION_LABELS.sync_story_state },
+      secondaryActions,
+      shouldAutoExpandAcceptance: true,
+    }
+  }
+
+  return {
+    visible: true,
+    acceptanceStatus: 'ready_to_accept',
+    statusLabel: '可验收',
+    acceptanceReasons: ['质量复检通过，故事状态已同步，可以进入下一章。'],
+    qualityScore: score,
+    qualityStatus,
+    mustFix,
+    optionalImprovements,
+    latestQualityReviewId: latestQuality?.id || null,
+    latestEditorReportId: latestReport?.id || null,
+    latestRevisionReviewId: latestRevision?.id || null,
+    latestEditorReportSummary,
+    latestRevisionSummary,
+    storyStateSynced,
+    recommendedAcceptanceAction: { key: 'accept_chapter_and_continue', label: ACTION_LABELS.accept_chapter_and_continue },
+    secondaryActions,
+    shouldAutoExpandAcceptance: false,
+  }
+}
+
 function buildEpisodePlan(args: {
   nextChapter: AnyRecord | null
   cockpitChapter: WritingCockpitChapter | null
@@ -745,14 +1118,6 @@ export function buildWritingCockpitModel(input: BuildWritingCockpitModelInput): 
   const readinessBlockers = readinessChecks.filter(check => check.status === 'blocker')
   const readinessWarnings = readinessChecks.filter(check => check.status === 'warning')
   const blockers = readinessBlockers.map(check => check.key)
-  const { role, action } = resolvePrimaryAction({
-    writingBibleReady,
-    hasChapter,
-    chapterOutlineReady,
-    materialsReady,
-    nextHasProse,
-    storyStateReady,
-  })
   const cockpitNextChapter = nextChapter ? toCockpitChapter(nextChapter, { previousChapter, volumeGoal: volume.goal, outline: nextChapterOutline }) : null
   const cockpitPreviousChapter = previousChapter ? toCockpitChapter(previousChapter, { volumeGoal: volume.goal, outline: previousChapterOutline }) : null
   const chapterPlanningDesk = buildChapterPlanningDesk({
@@ -761,6 +1126,28 @@ export function buildWritingCockpitModel(input: BuildWritingCockpitModelInput): 
     contextPackage: input.contextPackage || null,
     diagnostics: input.diagnostics || null,
   })
+  const reviews = arrayValue(input.reviews)
+  const chapterAcceptanceDesk = buildChapterAcceptanceDesk({
+    nextChapter,
+    cockpitChapter: cockpitNextChapter,
+    reviews,
+    storyState,
+  })
+  const fallbackPrimary = resolvePrimaryAction({
+    writingBibleReady,
+    hasChapter,
+    chapterOutlineReady,
+    materialsReady,
+    nextHasProse,
+    storyStateReady,
+  })
+  const acceptanceAction = chapterAcceptanceDesk.visible
+    ? chapterAcceptanceDesk.recommendedAcceptanceAction.key
+    : null
+  const primary = acceptanceAction
+    ? { role: 'revision_editor' as WritingCockpitRole, action: acceptanceAction }
+    : fallbackPrimary
+  const { role, action } = primary
 
   return {
     topStatus: {
@@ -774,6 +1161,7 @@ export function buildWritingCockpitModel(input: BuildWritingCockpitModelInput): 
     nextChapter: cockpitNextChapter,
     previousChapter: cockpitPreviousChapter,
     chapterPlanningDesk,
+    chapterAcceptanceDesk,
     primaryActionKey: action,
     recommendedRole: role,
     readiness: {
