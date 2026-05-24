@@ -92,6 +92,90 @@ const sceneCardChapter = {
   ],
 }
 
+const acceptedProject = {
+  ...project,
+  reference_config: {
+    ...project.reference_config,
+    story_state: {
+      ...project.reference_config.story_state,
+      last_updated_chapter: 1,
+    },
+  },
+}
+
+function proseQualityReview(overrides: Record<string, any> = {}) {
+  const payload = {
+    chapter_id: 101,
+    self_check: {
+      review: {
+        score: 82,
+        passed: true,
+        status: 'pass',
+        issues: [],
+        must_fix: [],
+        optional_improvements: [],
+        revision_directives: [],
+        needs_revision: false,
+      },
+    },
+    ...overrides.payload,
+  }
+
+  return {
+    id: overrides.id || 201,
+    review_type: 'prose_quality',
+    status: overrides.status || 'ok',
+    summary: overrides.summary || '质量通过，节奏和钩子可交稿。',
+    created_at: overrides.created_at || '2026-05-24T00:00:00.000Z',
+    payload: JSON.stringify(payload),
+    ...overrides.record,
+  }
+}
+
+function editorReportReview(overrides: Record<string, any> = {}) {
+  const payload = {
+    chapter_id: 101,
+    report: {
+      overall_score: 68,
+      summary: '章末钩子不足，需要强化收束压力。',
+      must_fix: ['章末钩子不足'],
+      optional_improvements: ['压缩解释'],
+      one_click_revision_prompt: '强化章末钩子',
+    },
+    ...overrides.payload,
+  }
+
+  return {
+    id: overrides.id || 301,
+    review_type: 'editor_report',
+    status: overrides.status || 'ready',
+    summary: overrides.summary || '编辑报告指出章末钩子不足。',
+    created_at: overrides.created_at || '2026-05-24T00:10:00.000Z',
+    payload: JSON.stringify(payload),
+    ...overrides.record,
+  }
+}
+
+function editorRevisionReview(overrides: Record<string, any> = {}) {
+  const payload = {
+    chapter_id: 101,
+    source_review_id: 301,
+    revision_summary: '强化章末钩子，并压缩解释段落。',
+    applied_patches: [{ start: 10, end: 20, replacement: '新的章末压力段落' }],
+    ...overrides.payload,
+  }
+
+  return {
+    id: overrides.id || 401,
+    review_type: 'editor_revision',
+    status: overrides.status || 'applied',
+    summary: overrides.summary || '已应用章末钩子修订。',
+    created_at: overrides.created_at || '2026-05-24T00:20:00.000Z',
+    payload: JSON.stringify(payload),
+    ...overrides.record,
+  }
+}
+
 describe('buildWritingCockpitModel', () => {
   test('ready project data chooses the first planned unwritten chapter as daily target', () => {
     const model = buildWritingCockpitModel({
@@ -163,8 +247,10 @@ describe('buildWritingCockpitModel', () => {
     expect(model.draftPipeline.state).toBe('draft_generated')
     expect(model.recommendedRole).toBe('revision_editor')
     expect(model.modelTeam.recommendedRole).toBe('revision_editor')
-    expect(model.primaryActionKey).toBe('review_draft')
-    expect(model.topStatus.primaryActionKey).toBe('review_draft')
+    expect(model.chapterAcceptanceDesk.visible).toBe(true)
+    expect(model.chapterAcceptanceDesk.acceptanceStatus).toBe('needs_quality_check')
+    expect(model.primaryActionKey).toBe('refresh_current_quality')
+    expect(model.topStatus.primaryActionKey).toBe('refresh_current_quality')
   })
 
   test('no chapter starts with planning', () => {
@@ -285,7 +371,7 @@ describe('buildWritingCockpitModel', () => {
     expect(model.modelTeam.recommendedRole).toBe('continuity_auditor')
   })
 
-  test('stale story state routes active prose chapter to canon update before revision', () => {
+  test('stale story state on active prose chapter still requires quality check first', () => {
     const staleProject = {
       ...project,
       reference_config: {
@@ -309,8 +395,9 @@ describe('buildWritingCockpitModel', () => {
     expect(model.draftPipeline.state).toBe('draft_generated')
     expect(model.readiness.blockers).toEqual([])
     expect(model.readiness.warnings.map(check => check.key)).toContain('story_state_stale')
-    expect(model.primaryActionKey).toBe('update_canon')
-    expect(model.recommendedRole).toBe('continuity_auditor')
+    expect(model.chapterAcceptanceDesk.acceptanceStatus).toBe('needs_quality_check')
+    expect(model.primaryActionKey).toBe('refresh_current_quality')
+    expect(model.recommendedRole).toBe('revision_editor')
   })
 
   test('sparse chapter with outline_id matching a valid manual outline hydrates plan fields', () => {
@@ -588,5 +675,219 @@ describe('buildWritingCockpitModel', () => {
 
     expect(model.chapterPlanningDesk.readiness).toBe('ready')
     expect(model.chapterPlanningDesk.recommendedPlannerAction.key).toBe('review_draft')
+  })
+
+  test('acceptance desk stays hidden for a chapter without prose', () => {
+    const model = buildWritingCockpitModel({
+      project,
+      outlines,
+      chapters,
+      activeChapter: chapters[1],
+      materialScore: { score: 82, can_generate: true },
+      reviews: [],
+    })
+
+    expect(model.chapterAcceptanceDesk.visible).toBe(false)
+    expect(model.chapterAcceptanceDesk.acceptanceStatus).toBe('hidden')
+    expect(model.chapterPlanningDesk.recommendedPlannerAction.key).toBe('refresh_context_package')
+  })
+
+  test('prose chapter without a quality review needs quality check', () => {
+    const model = buildWritingCockpitModel({
+      project,
+      outlines,
+      chapters,
+      activeChapter: chapters[0],
+      materialScore: { score: 82, can_generate: true },
+      reviews: [],
+    })
+
+    expect(model.chapterAcceptanceDesk.visible).toBe(true)
+    expect(model.chapterAcceptanceDesk.acceptanceStatus).toBe('needs_quality_check')
+    expect(model.chapterAcceptanceDesk.recommendedAcceptanceAction.key).toBe('refresh_current_quality')
+    expect(model.primaryActionKey).toBe('refresh_current_quality')
+    expect(model.topStatus.primaryActionKey).toBe('refresh_current_quality')
+  })
+
+  test('low quality score requires an editor report before delivery', () => {
+    const model = buildWritingCockpitModel({
+      project,
+      outlines,
+      chapters,
+      activeChapter: chapters[0],
+      materialScore: { score: 82, can_generate: true },
+      reviews: [
+        proseQualityReview({
+          payload: {
+            self_check: {
+              review: {
+                score: 72,
+                passed: false,
+                status: 'fail',
+                issues: [{ severity: 'medium', message: '中段拖沓' }],
+                must_fix: [],
+                optional_improvements: ['压缩中段解释'],
+                revision_directives: ['压缩中段解释'],
+                needs_revision: true,
+              },
+            },
+          },
+        }),
+      ],
+    })
+
+    expect(model.chapterAcceptanceDesk.acceptanceStatus).toBe('needs_revision')
+    expect(model.chapterAcceptanceDesk.qualityScore).toBe(72)
+    expect(model.chapterAcceptanceDesk.recommendedAcceptanceAction.key).toBe('create_editor_report')
+  })
+
+  test('must-fix quality issues require revision', () => {
+    const model = buildWritingCockpitModel({
+      project,
+      outlines,
+      chapters,
+      activeChapter: chapters[0],
+      materialScore: { score: 82, can_generate: true },
+      reviews: [
+        proseQualityReview({
+          payload: {
+            self_check: {
+              review: {
+                score: 84,
+                passed: false,
+                status: 'warn',
+                issues: [{ severity: 'high', message: '主角决策动机断裂' }],
+                must_fix: ['主角决策动机断裂'],
+                optional_improvements: [],
+                revision_directives: ['补足主角决策动机'],
+                needs_revision: true,
+              },
+            },
+          },
+        }),
+      ],
+    })
+
+    expect(model.chapterAcceptanceDesk.acceptanceStatus).toBe('needs_revision')
+    expect(model.chapterAcceptanceDesk.mustFix).toContain('主角决策动机断裂')
+    expect(model.chapterAcceptanceDesk.recommendedAcceptanceAction.key).toBe('create_editor_report')
+  })
+
+  test('latest editor report with must-fix issues recommends applying revision', () => {
+    const model = buildWritingCockpitModel({
+      project,
+      outlines,
+      chapters,
+      activeChapter: chapters[0],
+      materialScore: { score: 82, can_generate: true },
+      reviews: [
+        proseQualityReview({
+          payload: {
+            self_check: {
+              review: {
+                score: 72,
+                passed: false,
+                status: 'fail',
+                issues: [],
+                must_fix: ['章末钩子不足'],
+                optional_improvements: [],
+                revision_directives: ['强化章末钩子'],
+                needs_revision: true,
+              },
+            },
+          },
+        }),
+        editorReportReview({ id: 301 }),
+      ],
+    })
+
+    expect(model.chapterAcceptanceDesk.acceptanceStatus).toBe('needs_revision')
+    expect(model.chapterAcceptanceDesk.latestEditorReportId).toBe(301)
+    expect(model.chapterAcceptanceDesk.latestEditorReportSummary).toContain('章末钩子')
+    expect(model.chapterAcceptanceDesk.recommendedAcceptanceAction.key).toBe('apply_editor_revision')
+  })
+
+  test('revision after latest quality review requires a fresh recheck', () => {
+    const model = buildWritingCockpitModel({
+      project,
+      outlines,
+      chapters,
+      activeChapter: chapters[0],
+      materialScore: { score: 82, can_generate: true },
+      reviews: [
+        proseQualityReview({ created_at: '2026-05-24T00:00:00.000Z' }),
+        editorReportReview({ created_at: '2026-05-24T00:10:00.000Z' }),
+        editorRevisionReview({ created_at: '2026-05-24T00:20:00.000Z' }),
+      ],
+    })
+
+    expect(model.chapterAcceptanceDesk.acceptanceStatus).toBe('needs_recheck')
+    expect(model.chapterAcceptanceDesk.latestRevisionSummary).toContain('强化章末钩子')
+    expect(model.chapterAcceptanceDesk.recommendedAcceptanceAction.key).toBe('refresh_current_quality')
+  })
+
+  test('passing quality with stale story state needs state sync', () => {
+    const staleProject = {
+      ...project,
+      reference_config: {
+        ...project.reference_config,
+        story_state: {
+          ...project.reference_config.story_state,
+          last_updated_chapter: 0,
+        },
+      },
+    }
+
+    const model = buildWritingCockpitModel({
+      project: staleProject,
+      outlines,
+      chapters,
+      activeChapter: chapters[0],
+      materialScore: { score: 82, can_generate: true },
+      reviews: [proseQualityReview()],
+    })
+
+    expect(model.chapterAcceptanceDesk.acceptanceStatus).toBe('needs_state_sync')
+    expect(model.chapterAcceptanceDesk.storyStateSynced).toBe(false)
+    expect(model.chapterAcceptanceDesk.recommendedAcceptanceAction.key).toBe('sync_story_state')
+    expect(model.primaryActionKey).toBe('sync_story_state')
+  })
+
+  test('passing quality with synchronized story state is ready to accept', () => {
+    const model = buildWritingCockpitModel({
+      project: acceptedProject,
+      outlines,
+      chapters,
+      activeChapter: chapters[0],
+      materialScore: { score: 82, can_generate: true },
+      reviews: [proseQualityReview()],
+    })
+
+    expect(model.chapterAcceptanceDesk.acceptanceStatus).toBe('ready_to_accept')
+    expect(model.chapterAcceptanceDesk.storyStateSynced).toBe(true)
+    expect(model.chapterAcceptanceDesk.recommendedAcceptanceAction.key).toBe('accept_chapter_and_continue')
+    expect(model.primaryActionKey).toBe('accept_chapter_and_continue')
+  })
+
+  test('accepted prose chapter does not route back to draft generation', () => {
+    const model = buildWritingCockpitModel({
+      project: acceptedProject,
+      outlines,
+      chapters,
+      activeChapter: chapters[0],
+      contextPackage,
+      diagnostics: {
+        preflight: { ready: true, blockers: [] },
+        material_score: { score: 88, can_generate: true },
+      },
+      materialScore: { score: 88, can_generate: true },
+      reviews: [proseQualityReview()],
+    })
+
+    expect(model.nextChapter?.chapterNo).toBe(1)
+    expect(model.draftPipeline.state).toBe('draft_generated')
+    expect(model.chapterAcceptanceDesk.visible).toBe(true)
+    expect(model.primaryActionKey).not.toBe('write_draft')
+    expect(model.topStatus.primaryActionKey).toBe('accept_chapter_and_continue')
   })
 })
