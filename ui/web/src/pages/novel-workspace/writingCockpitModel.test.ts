@@ -108,9 +108,10 @@ const acceptedProject = {
 }
 
 function proseQualityReview(overrides: Record<string, any> = {}) {
-  const payload = {
+  const defaultPayload = {
     chapter_id: 101,
     self_check: {
+      final_text: chapters[0].chapter_text,
       review: {
         score: 82,
         passed: true,
@@ -122,7 +123,18 @@ function proseQualityReview(overrides: Record<string, any> = {}) {
         needs_revision: false,
       },
     },
-    ...overrides.payload,
+  }
+  const payloadOverride = overrides.payload || {}
+  const selfCheckOverride = payloadOverride.self_check
+  const payload = {
+    ...defaultPayload,
+    ...payloadOverride,
+    self_check: selfCheckOverride === undefined
+      ? defaultPayload.self_check
+      : {
+          final_text: defaultPayload.self_check.final_text,
+          ...selfCheckOverride,
+        },
   }
 
   return {
@@ -726,6 +738,70 @@ describe('buildWritingCockpitModel', () => {
             self_check: {
               error: '模型自检失败',
               revised: false,
+            },
+          },
+        }),
+      ],
+    })
+
+    expect(model.chapterAcceptanceDesk.acceptanceStatus).toBe('needs_quality_check')
+    expect(model.chapterAcceptanceDesk.recommendedAcceptanceAction.key).toBe('refresh_current_quality')
+    expect(model.primaryActionKey).toBe('refresh_current_quality')
+    expect(model.topStatus.primaryActionKey).toBe('refresh_current_quality')
+  })
+
+  test('quality self-check with only empty issue arrays still needs quality check', () => {
+    const model = buildWritingCockpitModel({
+      project: acceptedProject,
+      outlines,
+      chapters,
+      activeChapter: chapters[0],
+      materialScore: { score: 82, can_generate: true },
+      reviews: [
+        proseQualityReview({
+          payload: {
+            self_check: {
+              final_text: chapters[0].chapter_text,
+              review: {
+                issues: [],
+                must_fix: [],
+                optional_improvements: [],
+                revision_directives: [],
+              },
+            },
+          },
+        }),
+      ],
+    })
+
+    expect(model.chapterAcceptanceDesk.acceptanceStatus).toBe('needs_quality_check')
+    expect(model.chapterAcceptanceDesk.recommendedAcceptanceAction.key).toBe('refresh_current_quality')
+    expect(model.primaryActionKey).toBe('refresh_current_quality')
+    expect(model.topStatus.primaryActionKey).toBe('refresh_current_quality')
+  })
+
+  test('passing quality score without current prose freshness marker still needs quality check', () => {
+    const model = buildWritingCockpitModel({
+      project: acceptedProject,
+      outlines,
+      chapters,
+      activeChapter: chapters[0],
+      materialScore: { score: 82, can_generate: true },
+      reviews: [
+        proseQualityReview({
+          payload: {
+            self_check: {
+              final_text: undefined,
+              review: {
+                score: 82,
+                passed: true,
+                status: 'pass',
+                issues: [],
+                must_fix: [],
+                optional_improvements: [],
+                revision_directives: [],
+                needs_revision: false,
+              },
             },
           },
         }),

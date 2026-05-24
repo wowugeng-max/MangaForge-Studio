@@ -746,16 +746,19 @@ function proseQualityReviewMatchesCurrentChapter(review: AnyRecord | null, chapt
   const payload = reviewPayload(review)
   const reviewChapterUpdatedAt = text(payload?.chapter_updated_at)
   const currentChapterUpdatedAt = text(chapter?.updated_at)
-  if (reviewChapterUpdatedAt && currentChapterUpdatedAt && reviewChapterUpdatedAt !== currentChapterUpdatedAt) {
-    return false
+  let hasPositiveFreshnessSignal = false
+  if (reviewChapterUpdatedAt && currentChapterUpdatedAt) {
+    if (reviewChapterUpdatedAt !== currentChapterUpdatedAt) return false
+    hasPositiveFreshnessSignal = true
   }
 
   const reviewedFinalText = qualityReviewFinalText(payload)
   if (reviewedFinalText !== null && reviewedFinalText.trim() !== String(chapter?.chapter_text ?? '').trim()) {
     return false
   }
+  if (reviewedFinalText !== null) hasPositiveFreshnessSignal = true
 
-  return true
+  return hasPositiveFreshnessSignal
 }
 
 function reportPayload(review?: AnyRecord | null) {
@@ -775,18 +778,10 @@ function extractQualityScore(quality: AnyRecord) {
   return Number.isFinite(score) ? score : null
 }
 
-function hasOwnValue(record: AnyRecord, key: string) {
-  return Object.prototype.hasOwnProperty.call(record, key) && record[key] !== null && record[key] !== undefined
-}
-
 function hasUsableProseQualityReview(review?: AnyRecord | null) {
   const quality = qualityPayload(review)
   return extractQualityScore(quality) !== null
     || typeof quality?.passed === 'boolean'
-    || hasOwnValue(quality, 'issues')
-    || hasOwnValue(quality, 'must_fix')
-    || hasOwnValue(quality, 'mustFix')
-    || hasOwnValue(quality, 'revision_directives')
 }
 
 function issueText(issue: any) {
