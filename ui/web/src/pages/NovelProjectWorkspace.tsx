@@ -3,7 +3,16 @@ import {
   Alert, Badge, Button, Card, Checkbox, Form, Input, List, message, Modal, Progress, Select, Space, Typography, Tooltip, Tag,
 } from 'antd'
 import {
-  ArrowLeftOutlined, ClockCircleOutlined, ReloadOutlined,
+  ArrowLeftOutlined,
+  BookOutlined,
+  ClockCircleOutlined,
+  DatabaseOutlined,
+  EditOutlined,
+  FullscreenExitOutlined,
+  FullscreenOutlined,
+  ReloadOutlined,
+  RocketOutlined,
+  SafetyOutlined,
 } from '@ant-design/icons'
 import type { EditorView } from '@codemirror/view'
 import { useNavigate, useParams } from 'react-router-dom'
@@ -13,8 +22,8 @@ import { ChapterDirectorySidebar } from './novel-workspace/ChapterDirectorySideb
 import type { EditorKind } from './novel-workspace/EditorModal'
 import { ReferencePanel } from './novel-workspace/ReferencePanel'
 import { StoryPlanningWorkspace, type PlanningLoadingKey } from './novel-workspace/StoryPlanningWorkspace'
-import { WritingCockpitPanel } from './novel-workspace/WritingCockpitPanel'
-import { WorkspaceCenter } from './novel-workspace/WorkspaceCenter'
+import { WritingCockpitPanel, type WritingCockpitPrimaryActionOverride } from './novel-workspace/WritingCockpitPanel'
+import { WorkspaceCenter, buildNovelWritingRecommendation } from './novel-workspace/WorkspaceCenter'
 import { buildPlanningWorkspaceModel, type PlanningActionKey } from './novel-workspace/planningWorkspaceModel'
 import {
   buildWritingCockpitModel,
@@ -30,7 +39,9 @@ import { useWorkspaceTasks } from './novel-workspace/useWorkspaceTasks'
 import {
   displayValue,
   summarizeOutlineExecution,
+  wc,
 } from './novel-workspace/utils'
+import './NovelProjectWorkspace.css'
 
 const { Title, Text, Paragraph } = Typography
 
@@ -162,6 +173,13 @@ export default function NovelProjectWorkspace() {
   const [rightPanelOpen, setRightPanelOpen] = useState(false)
   const [rightPanelTab, setRightPanelTab] = useState('worldbuilding')
   const [workspaceArea, setWorkspaceArea] = useState<WorkspaceArea>('storyPlanning')
+  const [focusWritingMode, setFocusWritingMode] = useState(false)
+
+  const isWritingFocusMode = focusWritingMode && workspaceArea === 'chapterWriting'
+
+  useEffect(() => {
+    if (workspaceArea !== 'chapterWriting') setFocusWritingMode(false)
+  }, [workspaceArea])
 
   const proseEditorRef = useRef<EditorView | null>(null)
 
@@ -3794,12 +3812,12 @@ export default function NovelProjectWorkspace() {
     const keys: PlanningLoadingKey[] = ['rollingPlan', 'future100Audit', 'future100Generate', 'longformPressure', 'topic', 'referenceDiagnosis']
     return keys.includes(commercialToolLoading as PlanningLoadingKey) ? commercialToolLoading as PlanningLoadingKey : undefined
   })()
-  const workspaceAreaTabs: Array<[WorkspaceArea, string]> = [
-    ['storyPlanning', '故事规划'],
-    ['chapterWriting', '章节写作'],
-    ['storyAssets', '资料设定'],
-    ['qualityRevision', '质检修订'],
-    ['productionOps', '生产运营'],
+  const workspaceAreaTabs: Array<{ key: WorkspaceArea; label: string; icon: React.ReactNode }> = [
+    { key: 'storyPlanning', label: '故事规划', icon: <BookOutlined /> },
+    { key: 'chapterWriting', label: '章节写作', icon: <EditOutlined /> },
+    { key: 'storyAssets', label: '资料设定', icon: <DatabaseOutlined /> },
+    { key: 'qualityRevision', label: '质检修订', icon: <SafetyOutlined /> },
+    { key: 'productionOps', label: '生产运营', icon: <RocketOutlined /> },
   ]
 
   const handlePlanningAction = (key: PlanningActionKey) => {
@@ -3996,6 +4014,71 @@ export default function NovelProjectWorkspace() {
     }
   }
 
+  const activeChapterSceneCards = (
+    activeChapter && Array.isArray(activeChapter.scene_list) && activeChapter.scene_list.length > 0
+      ? activeChapter.scene_list
+      : (activeChapter && Array.isArray(activeChapter.scene_breakdown) ? activeChapter.scene_breakdown : [])
+  )
+
+  const writingRecommendation = (() => {
+    const materialScore = activeChapterDiagnosticsData?.material_score
+    const materialReady = !materialScore || Boolean(materialScore.can_generate)
+    const materialRecommendations = Array.isArray(materialScore?.recommendations)
+      ? materialScore.recommendations.filter(Boolean)
+      : []
+
+    return buildNovelWritingRecommendation({
+      materialReady,
+      materialRecommendations,
+      sceneCardCount: activeChapterSceneCards.length,
+      activeWordCount: wc(activeChapter?.chapter_text),
+    })
+  })()
+
+  const cockpitPrimaryActionOverride: WritingCockpitPrimaryActionOverride | null = (() => {
+    if (!activeChapter || workspaceArea !== 'chapterWriting') return null
+
+    switch (writingRecommendation.key) {
+      case 'diagnostics':
+        return {
+          label: writingRecommendation.label,
+          reason: writingRecommendation.reason,
+          actionKey: 'open_generation_diagnostics',
+          onClick: () => { void openGenerationDiagnostics() },
+        }
+      case 'scene_cards':
+        return {
+          label: writingRecommendation.label,
+          reason: writingRecommendation.reason,
+          actionKey: 'build_scene_plan',
+          onClick: () => { void generateSceneCardsForActiveChapter() },
+        }
+      case 'repair_generate':
+        return {
+          label: writingRecommendation.label,
+          reason: writingRecommendation.reason,
+          actionKey: 'repair_materials',
+          onClick: repairContextAndGenerateCurrentChapter,
+        }
+      case 'generate':
+        return {
+          label: writingRecommendation.label,
+          reason: writingRecommendation.reason,
+          actionKey: 'write_draft',
+          onClick: () => { void generateCurrentChapterProse() },
+        }
+      case 'quality_card':
+        return {
+          label: writingRecommendation.label,
+          reason: writingRecommendation.reason,
+          actionKey: 'refresh_current_quality',
+          onClick: openChapterQualityCard,
+        }
+      default:
+        return null
+    }
+  })()
+
   const renderWorkspaceArea = () => {
     if (workspaceArea === 'storyPlanning') {
       return (
@@ -4052,6 +4135,7 @@ export default function NovelProjectWorkspace() {
           onStartChapterPipeline={startChapterPipeline}
           onCreateEditorReport={createEditorReport}
           onEditActiveChapter={() => activeChapter && openEditor('chapter', activeChapter)}
+          writingRecommendation={writingRecommendation}
           onChapterTextChange={(next) => {
             const chapterId = activeChapterId
             setChapters(prev => prev.map(c => c.id === chapterId ? { ...c, chapter_text: next } : c))
@@ -4137,10 +4221,13 @@ export default function NovelProjectWorkspace() {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, overflow: 'hidden', background: '#fff' }}>
+    <div
+      className={`novel-project-workspace ${isWritingFocusMode ? 'novel-workspace-focus-mode' : ''}`}
+      style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, overflow: 'hidden', background: '#fff' }}
+    >
 
       {/* ═══ TOP BAR ═══ */}
-      <div style={{
+      <div className="novel-workspace-topbar" style={{
         flexShrink: 0, height: 48, display: 'flex', alignItems: 'center',
         padding: '0 16px', background: '#fff', borderBottom: '1px solid #f0f0f0', gap: 10,
       }}>
@@ -4149,40 +4236,56 @@ export default function NovelProjectWorkspace() {
           {selectedProject?.title || '小说项目工作台'}
         </Title>
         <Select
+          className="novel-workspace-model-select"
           size="small" value={selectedModelId}
           onChange={(v) => setSelectedModelId(v)}
           options={models.map(m => ({ value: m.id, label: `${m.display_name || m.model_name} · ${m.provider}` }))}
           style={{ width: 220 }} placeholder="选择模型"
         />
-        <Space size={4} style={{ flex: 1, minWidth: 0 }}>
-          {workspaceAreaTabs.map(([key, label]) => (
+        <Space className="novel-workspace-area-tabs" size={4} style={{ flex: 1, minWidth: 0 }}>
+          {workspaceAreaTabs.map(tab => (
             <Button
-              key={key}
+              key={tab.key}
               size="small"
-              type={workspaceArea === key ? 'primary' : 'text'}
-              onClick={() => setWorkspaceArea(key)}
+              type="text"
+              icon={tab.icon}
+              className={`novel-mode-tab novel-mode-tab-${tab.key} ${workspaceArea === tab.key ? 'is-active' : ''}`}
+              onClick={() => setWorkspaceArea(tab.key)}
             >
-              {label}
+              {tab.label}
             </Button>
           ))}
         </Space>
-        {referenceSummary.count > 0 && (
-          <Tag color="purple" bordered={false}>{referenceSummary.strengthLabel} · {referenceSummary.count} 部参考</Tag>
-        )}
-        {commercialReadiness && (
-          <Tooltip title={(commercialReadiness.next_actions || []).slice(0, 3).join('；') || '查看商业化就绪度'}>
-            <Tag
-              color={commercialReadiness.can_batch_generate ? 'green' : Number(commercialReadiness.score || 0) >= 70 ? 'gold' : 'red'}
-              bordered={false}
-              style={{ cursor: 'pointer' }}
-              onClick={() => showCommercialReadinessModal(commercialReadiness)}
-            >
-              就绪 {commercialReadiness.score ?? '-'}%
-            </Tag>
-          </Tooltip>
+        <Space className="novel-workspace-topbar-meta" size={6}>
+          {referenceSummary.count > 0 && (
+            <Tag color="purple" bordered={false}>{referenceSummary.strengthLabel} · {referenceSummary.count} 部参考</Tag>
+          )}
+          {commercialReadiness && (
+            <Tooltip title={(commercialReadiness.next_actions || []).slice(0, 3).join('；') || '查看商业化就绪度'}>
+              <Tag
+                color={commercialReadiness.can_batch_generate ? 'green' : Number(commercialReadiness.score || 0) >= 70 ? 'gold' : 'red'}
+                bordered={false}
+                style={{ cursor: 'pointer' }}
+                onClick={() => showCommercialReadinessModal(commercialReadiness)}
+              >
+                就绪 {commercialReadiness.score ?? '-'}%
+              </Tag>
+            </Tooltip>
+          )}
+        </Space>
+        {workspaceArea === 'chapterWriting' && (
+          <Button
+            className="novel-workspace-focus-toggle"
+            type={isWritingFocusMode ? 'primary' : 'default'}
+            size="small"
+            icon={isWritingFocusMode ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
+            onClick={() => setFocusWritingMode(prev => !prev)}
+          >
+            {isWritingFocusMode ? '退出专注' : '专注写作'}
+          </Button>
         )}
         <Tooltip title="查看运行中任务和历史运行记录">
-          <Badge count={activeTasks.length + activeKnowledgeJobCount} size="small">
+          <Badge className="novel-workspace-task-entry" count={activeTasks.length + activeKnowledgeJobCount} size="small">
             <Button type="text" size="small" icon={<ClockCircleOutlined />} onClick={() => setTaskCenterOpen(true)}>
               任务中心
             </Button>
@@ -4194,97 +4297,103 @@ export default function NovelProjectWorkspace() {
       </div>
 
       {/* ═══ BODY: 3-column layout ═══ */}
-      <div style={{ flex: 1, minHeight: 0, display: 'flex', overflow: 'hidden' }}>
+      <div className="novel-workspace-body" style={{ flex: 1, minHeight: 0, display: 'flex', overflow: 'hidden' }}>
 
-        <ChapterDirectorySidebar
-          planningMode={workspaceArea === 'storyPlanning'}
-          selectedModelId={selectedModelId}
-          stepOutlineLoading={stepOutlineLoading}
-          stepProseLoading={stepProseLoading}
-          stepRepairLoading={stepRepairLoading}
-          incubatingOriginal={incubatingOriginal}
-          bookReviewLoading={bookReviewLoading}
-          commercialToolLoading={commercialToolLoading}
-          proseProgress={proseProgress}
-          chapters={sortedChapters}
-          proseChapterCount={proseChapters.length}
-          activeChapterId={activeChapterId}
-          referenceCount={referenceSummary.count}
-          outlineCount={outlines.length}
-          worldbuildingCount={worldbuilding.length}
-          characterCount={characters.length}
-          hasWritingBible={Boolean(selectedProject?.reference_config?.writing_bible)}
-          materialScore={activeChapterDiagnosticsData?.material_score}
-          commercialReadiness={commercialReadiness}
-          activeTaskCount={activeTasks.length + activeKnowledgeJobCount}
-          onOpenOutlinePanel={() => setOutlinePanelOpen(true)}
-          onGenerateProse={stepGenerateProse}
-          onCancelGenerateProse={cancelStepGenerateProse}
-          onRunRepair={stepRunRepair}
-          onOpenReferenceConfig={() => setReferenceConfigOpen(true)}
-          onOpenReferenceEngineering={() => setReferenceEngineeringOpen(true)}
-          onOpenCreativeCards={() => setCreativeCardsOpen(true)}
-          onRunOriginalIncubator={() => { void runOriginalIncubator() }}
-          onOpenWritingBibleEditor={() => { void openWritingBibleEditor() }}
-          onOpenMaterialRepairPlan={() => { void openMaterialRepairPlan() }}
-          onStartReadyChapterGroupGeneration={() => { void startReadyChapterGroupGeneration() }}
-          onStartChapterGroupGeneration={() => { void startChapterGroupGeneration() }}
-          onOpenProductionDesk={() => navigate(`/novel/workspace/${projectId}/production`)}
-          onOpenTaskCenter={() => setTaskCenterOpen(true)}
-          onOpenConsistencyGraph={() => setConsistencyGraphOpen(true)}
-          onOpenQualityBenchmark={() => setQualityBenchmarkOpen(true)}
-          onRunBookReview={() => { void runBookReview() }}
-          onOpenCommercialTools={() => setCommercialToolsOpen(true)}
-          onOpenExportDelivery={() => setExportDeliveryOpen(true)}
-          onOpenOutlineTree={() => setOutlineTreeOpen(true)}
-          onOpenChapterDrawer={() => setChapterDrawerOpen(true)}
-          onCreateChapter={() => openEditor('chapter')}
-          onSelectChapter={(chapterId) => { void selectChapterForWriting(chapterId) }}
-        />
+        <div className="novel-workspace-directory-shell" aria-hidden={isWritingFocusMode || undefined}>
+          <ChapterDirectorySidebar
+            planningMode={workspaceArea === 'storyPlanning'}
+            selectedModelId={selectedModelId}
+            stepOutlineLoading={stepOutlineLoading}
+            stepProseLoading={stepProseLoading}
+            stepRepairLoading={stepRepairLoading}
+            incubatingOriginal={incubatingOriginal}
+            bookReviewLoading={bookReviewLoading}
+            commercialToolLoading={commercialToolLoading}
+            proseProgress={proseProgress}
+            chapters={sortedChapters}
+            proseChapterCount={proseChapters.length}
+            activeChapterId={activeChapterId}
+            referenceCount={referenceSummary.count}
+            outlineCount={outlines.length}
+            worldbuildingCount={worldbuilding.length}
+            characterCount={characters.length}
+            hasWritingBible={Boolean(selectedProject?.reference_config?.writing_bible)}
+            materialScore={activeChapterDiagnosticsData?.material_score}
+            commercialReadiness={commercialReadiness}
+            activeTaskCount={activeTasks.length + activeKnowledgeJobCount}
+            onOpenOutlinePanel={() => setOutlinePanelOpen(true)}
+            onGenerateProse={stepGenerateProse}
+            onCancelGenerateProse={cancelStepGenerateProse}
+            onRunRepair={stepRunRepair}
+            onOpenReferenceConfig={() => setReferenceConfigOpen(true)}
+            onOpenReferenceEngineering={() => setReferenceEngineeringOpen(true)}
+            onOpenCreativeCards={() => setCreativeCardsOpen(true)}
+            onRunOriginalIncubator={() => { void runOriginalIncubator() }}
+            onOpenWritingBibleEditor={() => { void openWritingBibleEditor() }}
+            onOpenMaterialRepairPlan={() => { void openMaterialRepairPlan() }}
+            onStartReadyChapterGroupGeneration={() => { void startReadyChapterGroupGeneration() }}
+            onStartChapterGroupGeneration={() => { void startChapterGroupGeneration() }}
+            onOpenProductionDesk={() => navigate(`/novel/workspace/${projectId}/production`)}
+            onOpenTaskCenter={() => setTaskCenterOpen(true)}
+            onOpenConsistencyGraph={() => setConsistencyGraphOpen(true)}
+            onOpenQualityBenchmark={() => setQualityBenchmarkOpen(true)}
+            onRunBookReview={() => { void runBookReview() }}
+            onOpenCommercialTools={() => setCommercialToolsOpen(true)}
+            onOpenExportDelivery={() => setExportDeliveryOpen(true)}
+            onOpenOutlineTree={() => setOutlineTreeOpen(true)}
+            onOpenChapterDrawer={() => setChapterDrawerOpen(true)}
+            onCreateChapter={() => openEditor('chapter')}
+            onSelectChapter={(chapterId) => { void selectChapterForWriting(chapterId) }}
+          />
+        </div>
 
-        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          <div style={{ flexShrink: 0 }}>
+        <div className="novel-workspace-main" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <div className="novel-workspace-cockpit" style={{ flexShrink: 1, minHeight: 0 }}>
             <WritingCockpitPanel
               model={writingCockpitModel}
               loading={stepProseLoading || generatingProse || generatingSceneCards || diagnosticsLoading || contextPackageLoading}
+              forceCollapsed={isWritingFocusMode}
+              primaryActionOverride={cockpitPrimaryActionOverride}
               onAction={handleWritingCockpitAction}
             />
           </div>
           {renderWorkspaceArea()}
         </div>
 
-        <ReferencePanel
-          open={rightPanelOpen}
-          activeTab={rightPanelTab}
-          worldbuilding={worldbuilding}
-          characters={characters}
-          outlines={outlines}
-          selectedProject={selectedProject}
-          projectId={projectId}
-          selectedModelId={selectedModelId}
-          referenceReports={referenceReports}
-          proseQualityReports={proseQualityReports}
-          editorReports={editorReports}
-          editorRevisionReports={editorRevisionReports}
-          bookReviews={bookReviews}
-          activeChapter={activeChapter}
-          activeChapterId={activeChapterId}
-          activeChapterUpdatedAt={activeChapter?.updated_at || ''}
-          chapterVersions={chapterVersions}
-          chapterVersionsLoading={chapterVersionsLoading}
-          proseQualityLoading={proseQualityLoading}
-          rollingBackVersionId={rollingBackVersionId}
-          onClose={() => setRightPanelOpen(false)}
-          onOpen={() => setRightPanelOpen(true)}
-          onTabChange={setRightPanelTab}
-          onEdit={(kind, item) => openEditor(kind, item)}
-          onOpenCreativeCards={() => setCreativeCardsOpen(true)}
-          onOpenStoryStateEditor={openStoryStateEditor}
-          onApplyEditorRevision={applyEditorRevision}
-          onRefreshProseQuality={() => refreshActiveProseQuality('manual_refresh')}
-          onRollbackVersion={rollbackChapterVersion}
-          onOpenVersionDetail={setChapterVersionDetail}
-        />
+        <div className={rightPanelOpen ? 'novel-workspace-reference-shell is-open' : 'novel-workspace-reference-shell'}>
+          <ReferencePanel
+            open={rightPanelOpen}
+            activeTab={rightPanelTab}
+            worldbuilding={worldbuilding}
+            characters={characters}
+            outlines={outlines}
+            selectedProject={selectedProject}
+            projectId={projectId}
+            selectedModelId={selectedModelId}
+            referenceReports={referenceReports}
+            proseQualityReports={proseQualityReports}
+            editorReports={editorReports}
+            editorRevisionReports={editorRevisionReports}
+            bookReviews={bookReviews}
+            activeChapter={activeChapter}
+            activeChapterId={activeChapterId}
+            activeChapterUpdatedAt={activeChapter?.updated_at || ''}
+            chapterVersions={chapterVersions}
+            chapterVersionsLoading={chapterVersionsLoading}
+            proseQualityLoading={proseQualityLoading}
+            rollingBackVersionId={rollingBackVersionId}
+            onClose={() => setRightPanelOpen(false)}
+            onOpen={() => setRightPanelOpen(true)}
+            onTabChange={setRightPanelTab}
+            onEdit={(kind, item) => openEditor(kind, item)}
+            onOpenCreativeCards={() => setCreativeCardsOpen(true)}
+            onOpenStoryStateEditor={openStoryStateEditor}
+            onApplyEditorRevision={applyEditorRevision}
+            onRefreshProseQuality={() => refreshActiveProseQuality('manual_refresh')}
+            onRollbackVersion={rollbackChapterVersion}
+            onOpenVersionDetail={setChapterVersionDetail}
+          />
+        </div>
       </div>
 
       <DeferredWorkspaceSurfaces>

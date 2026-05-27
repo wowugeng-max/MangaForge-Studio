@@ -23,6 +23,11 @@ const { Text } = Typography
 
 export default function Layout() {
   const location = useLocation()
+  const [isMobileViewport, setIsMobileViewport] = React.useState(() => {
+    if (typeof window === 'undefined') return false
+    return window.matchMedia('(max-width: 768px)').matches
+  })
+  const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = React.useState(() => {
     try {
       return localStorage.getItem('mangaforge.sidebar.collapsed') === '1'
@@ -38,6 +43,23 @@ export default function Layout() {
       // Ignore storage failures in private mode.
     }
   }, [sidebarCollapsed])
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return undefined
+    const mediaQuery = window.matchMedia('(max-width: 768px)')
+    const handleChange = () => {
+      setIsMobileViewport(mediaQuery.matches)
+      if (!mediaQuery.matches) setMobileMenuOpen(false)
+    }
+
+    handleChange()
+    mediaQuery.addEventListener('change', handleChange)
+    return () => mediaQuery.removeEventListener('change', handleChange)
+  }, [])
+
+  React.useEffect(() => {
+    setMobileMenuOpen(false)
+  }, [location.pathname])
 
   const getSelectedKey = () => {
     const path = location.pathname
@@ -56,48 +78,79 @@ export default function Layout() {
 
   const selectedKey = getSelectedKey()
   const isFullScreenWorkspace = location.pathname.startsWith('/novel/workspace')
+  const effectiveSidebarCollapsed = isMobileViewport ? false : sidebarCollapsed
+  const siderClassName = [
+    'studio-sider',
+    effectiveSidebarCollapsed ? 'studio-sider-collapsed' : '',
+    isMobileViewport ? 'studio-sider-mobile' : '',
+    isMobileViewport && mobileMenuOpen ? 'studio-sider-mobile-open' : '',
+  ].filter(Boolean).join(' ')
 
   return (
-    <AntLayout style={{ minHeight: '100vh', background: '#f5f7fb' }}>
+    <AntLayout className={isMobileViewport ? 'studio-layout studio-layout-mobile' : 'studio-layout'} style={{ minHeight: '100vh', background: '#f5f7fb' }}>
+      {isMobileViewport && (
+        <>
+          <Button
+            type="primary"
+            shape="circle"
+            size="large"
+            icon={<MenuUnfoldOutlined />}
+            onClick={() => setMobileMenuOpen(true)}
+            className="studio-mobile-menu-trigger"
+            aria-label="打开导航栏"
+          />
+          {mobileMenuOpen && (
+            <button
+              type="button"
+              className="studio-mobile-menu-backdrop"
+              aria-label="关闭导航栏"
+              onClick={() => setMobileMenuOpen(false)}
+            />
+          )}
+        </>
+      )}
+
       <Sider
         width={292}
         collapsedWidth={76}
-        collapsed={sidebarCollapsed}
+        collapsed={effectiveSidebarCollapsed}
         trigger={null}
-        className={sidebarCollapsed ? 'studio-sider studio-sider-collapsed' : 'studio-sider'}
+        className={siderClassName}
         style={{
           background: 'linear-gradient(180deg, #111827 0%, #172036 48%, #1e293b 100%)',
           boxShadow: '10px 0 30px rgba(15, 23, 42, 0.22)',
-          position: 'relative',
+          position: isMobileViewport ? 'fixed' : 'relative',
           overflow: 'hidden',
         }}
       >
         <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(circle at 18% 12%, rgba(56,189,248,0.16), transparent 22%), radial-gradient(circle at 84% 22%, rgba(139,92,246,0.18), transparent 24%), radial-gradient(circle at 50% 100%, rgba(14,165,233,0.08), transparent 26%)', pointerEvents: 'none' }} />
 
         <div style={{ position: 'relative' }}>
-          <div style={{ height: 84, display: 'flex', alignItems: 'center', justifyContent: sidebarCollapsed ? 'center' : 'flex-start', padding: sidebarCollapsed ? '0 10px' : '0 22px', gap: 12, borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ height: 84, display: 'flex', alignItems: 'center', justifyContent: effectiveSidebarCollapsed ? 'center' : 'flex-start', padding: effectiveSidebarCollapsed ? '0 10px' : '0 22px', gap: 12, borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
             <div style={{ width: 42, height: 42, borderRadius: 14, background: 'linear-gradient(135deg, #38bdf8 0%, #8b5cf6 100%)', display: 'grid', placeItems: 'center', color: '#fff', boxShadow: '0 14px 28px rgba(56, 189, 248, 0.28)' }}>
               <RocketOutlined />
             </div>
-            {!sidebarCollapsed && <div style={{ minWidth: 0 }}>
+            {!effectiveSidebarCollapsed && <div style={{ minWidth: 0 }}>
               <div style={{ color: '#fff', fontSize: 19, fontWeight: 900, letterSpacing: 0.6, lineHeight: 1.05 }}>MangaForge Studio</div>
               <Text style={{ color: 'rgba(255,255,255,0.58)', fontSize: 12 }}>Creative model workspace</Text>
             </div>}
           </div>
 
-          <Tooltip title={sidebarCollapsed ? '展开导航栏' : '收起导航栏'} placement="right">
-            <Button
-              type="text"
-              size="small"
-              icon={sidebarCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
-              onClick={() => setSidebarCollapsed(prev => !prev)}
-              className="studio-sider-toggle"
-              aria-label={sidebarCollapsed ? '展开导航栏' : '收起导航栏'}
-            />
-          </Tooltip>
+          {!isMobileViewport && (
+            <Tooltip title={sidebarCollapsed ? '展开导航栏' : '收起导航栏'} placement="right">
+              <Button
+                type="text"
+                size="small"
+                icon={sidebarCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+                onClick={() => setSidebarCollapsed(prev => !prev)}
+                className="studio-sider-toggle"
+                aria-label={sidebarCollapsed ? '展开导航栏' : '收起导航栏'}
+              />
+            </Tooltip>
+          )}
 
-          <div style={{ padding: sidebarCollapsed ? '14px 10px' : 16 }}>
-            {!sidebarCollapsed && <div style={{ padding: 16, borderRadius: 18, background: 'linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.04))', border: '1px solid rgba(255,255,255,0.08)', marginBottom: 16, backdropFilter: 'blur(10px)' }}>
+          <div style={{ padding: effectiveSidebarCollapsed ? '14px 10px' : 16 }}>
+            {!effectiveSidebarCollapsed && <div style={{ padding: 16, borderRadius: 18, background: 'linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.04))', border: '1px solid rgba(255,255,255,0.08)', marginBottom: 16, backdropFilter: 'blur(10px)' }}>
               <div style={{ color: '#fff', fontWeight: 800, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
                 <CompassOutlined />
                 <span>能力中台</span>
@@ -109,7 +162,7 @@ export default function Layout() {
               theme="dark"
               mode="inline"
               selectedKeys={[selectedKey]}
-              inlineCollapsed={sidebarCollapsed}
+              inlineCollapsed={effectiveSidebarCollapsed}
               style={{ borderRight: 0, background: 'transparent' }}
               className="studio-sider-menu"
               items={[
@@ -128,7 +181,7 @@ export default function Layout() {
             />
           </div>
 
-          {!sidebarCollapsed && <div style={{ padding: '0 22px 20px' }}>
+          {!effectiveSidebarCollapsed && <div style={{ padding: '0 22px 20px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px', borderRadius: 16, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)' }}>
               <Tag color="cyan" style={{ borderRadius: 999, padding: '2px 10px', margin: 0 }}>UI Polished</Tag>
               <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12 }}>v2</Text>

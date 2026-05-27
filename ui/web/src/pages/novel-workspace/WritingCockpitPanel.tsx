@@ -5,6 +5,7 @@ import {
   BarChartOutlined,
   BookOutlined,
   CheckCircleOutlined,
+  DownOutlined,
   EditOutlined,
   ExclamationCircleOutlined,
   FileSearchOutlined,
@@ -15,11 +16,19 @@ import {
   SafetyOutlined,
   TeamOutlined,
   ToolOutlined,
+  UpOutlined,
   WarningOutlined,
 } from '@ant-design/icons'
 import type { WritingCockpitActionKey, WritingCockpitModel, WritingCockpitRole } from './writingCockpitModel'
 
 const { Paragraph, Text } = Typography
+
+export type WritingCockpitPrimaryActionOverride = {
+  label: string
+  reason: string
+  actionKey: WritingCockpitActionKey
+  onClick: () => void
+}
 
 function roleIcon(role: WritingCockpitRole) {
   if (role === 'chief_editor') return <BookOutlined />
@@ -354,13 +363,18 @@ function ChapterAcceptanceDesk({
 export function WritingCockpitPanel({
   model,
   loading = false,
+  forceCollapsed = false,
+  primaryActionOverride,
   onAction,
 }: {
   model: WritingCockpitModel
   loading?: boolean
+  forceCollapsed?: boolean
+  primaryActionOverride?: WritingCockpitPrimaryActionOverride | null
   onAction: (key: WritingCockpitActionKey) => void
 }) {
   const recommendedRole = model.modelTeam.recommendedRole
+  const [cockpitCollapsed, setCockpitCollapsed] = useState(true)
   const nextChapterLabel = model.nextChapter
     ? `第${model.nextChapter.chapterNo}章 · ${model.nextChapter.title || '未命名章节'}`
     : '等待规划下一章'
@@ -368,8 +382,72 @@ export function WritingCockpitPanel({
   const previousHook = model.nextChapter?.previousEnding || model.previousChapter?.endingHook || '暂无上一章钩子，请先确认承接点。'
   const percent = readinessPercent(model)
 
+  useEffect(() => {
+    if (forceCollapsed) setCockpitCollapsed(true)
+  }, [forceCollapsed])
+
+  const primaryAction = primaryActionOverride ?? {
+    label: model.topStatus.nextActionLabel,
+    reason: '',
+    actionKey: model.topStatus.primaryActionKey,
+    onClick: () => onAction(model.topStatus.primaryActionKey),
+  }
+
+  if (cockpitCollapsed) {
+    return (
+      <div className="writing-cockpit-panel is-collapsed" style={{ width: '100%' }}>
+        <Card
+          size="small"
+          loading={loading && model.readiness.checks.length === 0}
+          style={{ borderRadius: 8, marginBottom: 4 }}
+          styles={{ body: { padding: '6px 10px' } }}
+        >
+          <Row gutter={[10, 8]} align="middle">
+            <Col flex="auto" style={{ minWidth: 0 }}>
+              <Space wrap size={[6, 4]}>
+                <Tag color="blue" bordered={false}>{model.topStatus.currentRoleLabel}</Tag>
+                <Tag bordered={false}>{model.topStatus.currentVolume}</Tag>
+                <Tag color={model.readiness.blockers.length ? 'red' : model.readiness.warnings.length ? 'gold' : 'green'} bordered={false}>
+                  准备度 {percent}%
+                </Tag>
+                {model.readiness.blockers.slice(0, 2).map(blocker => (
+                  <Tag key={blocker.key} color="red" bordered={false}>{blocker.label}</Tag>
+                ))}
+                <Text strong style={{ maxWidth: 520, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {nextChapterLabel}
+                </Text>
+              </Space>
+            </Col>
+            <Col flex="none">
+              <Space wrap size={[6, 6]} style={{ justifyContent: 'flex-end' }}>
+                <Button
+                  type="primary"
+                  size="small"
+                  loading={loading}
+                  icon={actionIcon(primaryAction.actionKey, recommendedRole)}
+                  onClick={primaryAction.onClick}
+                >
+                  {primaryAction.label}
+                </Button>
+                {primaryActionOverride && <span className="novel-editor-recommended-badge">推荐下一步</span>}
+                {primaryActionOverride?.reason && (
+                  <Text className="writing-cockpit-next-action-reason" type="secondary" style={{ maxWidth: 260, fontSize: 12 }}>
+                    {primaryActionOverride.reason}
+                  </Text>
+                )}
+                <Button size="small" icon={<DownOutlined />} onClick={() => setCockpitCollapsed(false)}>
+                  展开写作指挥台
+                </Button>
+              </Space>
+            </Col>
+          </Row>
+        </Card>
+      </div>
+    )
+  }
+
   return (
-    <div style={{ width: '100%' }}>
+    <div className="writing-cockpit-panel is-expanded" style={{ width: '100%' }}>
       <Card
         size="small"
         loading={loading && model.readiness.checks.length === 0}
@@ -377,6 +455,20 @@ export function WritingCockpitPanel({
         styles={{ body: { padding: 12 } }}
       >
         <Space direction="vertical" size={10} style={{ width: '100%' }}>
+          <Row align="middle" gutter={[10, 8]}>
+            <Col flex="auto" style={{ minWidth: 0 }}>
+              <Space wrap size={[6, 4]}>
+                <Tag icon={<TeamOutlined />} color="purple" bordered={false}>写作指挥台</Tag>
+                <Text type="secondary" style={{ fontSize: 12 }}>规划、交稿、质检和模型团队建议</Text>
+              </Space>
+            </Col>
+            <Col flex="none">
+              <Button size="small" icon={<UpOutlined />} onClick={() => setCockpitCollapsed(true)}>
+                收起写作指挥台
+              </Button>
+            </Col>
+          </Row>
+
           <Row gutter={[12, 10]} align="middle">
             <Col xs={24} lg={8}>
               <Space direction="vertical" size={4} style={{ width: '100%' }}>

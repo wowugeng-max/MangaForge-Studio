@@ -2,6 +2,44 @@
   transition: width 0.18s ease, min-width 0.18s ease, max-width 0.18s ease;
 }
 
+.studio-layout-mobile {
+  position: relative;
+}
+
+.studio-sider-mobile {
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 1100;
+  height: 100vh;
+  max-width: min(292px, 84vw) !important;
+  min-width: min(292px, 84vw) !important;
+  width: min(292px, 84vw) !important;
+  transform: translateX(-104%);
+  transition: transform 0.2s ease;
+}
+
+.studio-sider-mobile-open {
+  transform: translateX(0);
+}
+
+.studio-mobile-menu-trigger {
+  position: fixed;
+  left: 14px;
+  bottom: 18px;
+  z-index: 1090;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.22);
+}
+
+.studio-mobile-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1095;
+  padding: 0;
+  border: 0;
+  background: rgba(15, 23, 42, 0.36);
+}
+
 .studio-sider-toggle {
   position: absolute;
   top: 96px;
@@ -87,4 +125,14 @@
 .studio-sider-collapsed .studio-sider-menu .ant-menu-title-content,
 .studio-sider-collapsed .studio-sider-menu .ant-menu-divider {
   display: none !important;
+}
+
+@media (max-width: 768px) {
+  .studio-layout > .ant-layout {
+    min-width: 0;
+  }
+
+  .studio-sider-mobile .ant-layout-sider-children {
+    overflow-y: auto;
+  }
 }

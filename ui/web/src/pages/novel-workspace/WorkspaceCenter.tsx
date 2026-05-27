@@ -1,5 +1,5 @@
 import React from 'react'
-import { Button, Card, Col, Descriptions, Popover, Progress, Row, Slider, Space, Tag, Tooltip, Typography } from 'antd'
+import { Button, Card, Col, Popover, Progress, Row, Slider, Space, Tag, Tooltip, Typography } from 'antd'
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
 import { EditorState } from '@codemirror/state'
 import {
@@ -20,19 +20,76 @@ import {
   FileTextOutlined,
   FontSizeOutlined,
   LineHeightOutlined,
+  MoreOutlined,
   PlayCircleOutlined,
   SettingOutlined,
   SyncOutlined,
 } from '@ant-design/icons'
 import { chapterStatusTag, displayValue, wc } from './utils'
+import './WorkspaceCenter.css'
 
 const { Title, Text, Paragraph } = Typography
 
 type SaveStatus = 'idle' | 'unsaved' | 'saving' | 'saved' | 'error'
 type EditorDisplayPrefs = { fontSize: number; lineHeight: number }
+export type NovelWritingRecommendedActionKey = 'diagnostics' | 'scene_cards' | 'repair_generate' | 'generate' | 'quality_card'
+export type NovelWritingRecommendation = {
+  key: NovelWritingRecommendedActionKey
+  phase: 'prep' | 'draft' | 'review'
+  label: string
+  reason: string
+}
 
 const EDITOR_DISPLAY_PREFS_KEY = 'novel.workspace.editorDisplayPrefs'
-const DEFAULT_EDITOR_DISPLAY_PREFS: EditorDisplayPrefs = { fontSize: 15, lineHeight: 24 }
+const DEFAULT_EDITOR_DISPLAY_PREFS: EditorDisplayPrefs = { fontSize: 17, lineHeight: 32 }
+const EDITOR_DISPLAY_PRESETS: Array<EditorDisplayPrefs & { key: string; label: string }> = [
+  { key: 'webNovel', label: '网文标准', fontSize: 17, lineHeight: 32 },
+  { key: 'review', label: '宽松审稿', fontSize: 18, lineHeight: 38 },
+  { key: 'sprint', label: '紧凑冲刺', fontSize: 16, lineHeight: 28 },
+]
+
+export function buildNovelWritingRecommendation({
+  materialReady,
+  materialRecommendations,
+  sceneCardCount,
+  activeWordCount,
+}: {
+  materialReady: boolean
+  materialRecommendations: string[]
+  sceneCardCount: number
+  activeWordCount: number
+}): NovelWritingRecommendation {
+  if (!materialReady) {
+    return {
+      key: 'repair_generate',
+      phase: 'draft',
+      label: '补齐并生成',
+      reason: materialRecommendations[0] || '材料不足，先补齐上下文再进入正文更稳。',
+    }
+  }
+  if (sceneCardCount === 0) {
+    return {
+      key: 'scene_cards',
+      phase: 'prep',
+      label: '场景卡',
+      reason: '当前章缺少场景节拍，先拆场景能降低正文跑偏。',
+    }
+  }
+  if (activeWordCount === 0) {
+    return {
+      key: 'generate',
+      phase: 'draft',
+      label: '生成',
+      reason: '材料和场景已具备，可以进入正文初稿。',
+    }
+  }
+  return {
+    key: 'quality_card',
+    phase: 'review',
+    label: '质量卡',
+    reason: '当前章已有正文，下一步适合检查爽点、节奏和连续性。',
+  }
+}
 
 function clampNumber(value: unknown, min: number, max: number, fallback: number) {
   const numeric = Number(value)
@@ -82,10 +139,23 @@ function EditorDisplayControls({
   }
 
   const resetPrefs = () => onChange(DEFAULT_EDITOR_DISPLAY_PREFS)
+  const applyPreset = (preset: EditorDisplayPrefs) => onChange(preset)
 
   const content = (
     <div style={{ width: 260, padding: '4px 2px 0' }}>
       <Space direction="vertical" size={14} style={{ width: '100%' }}>
+        <Space.Compact block>
+          {EDITOR_DISPLAY_PRESETS.map(preset => (
+            <Button
+              key={preset.key}
+              size="small"
+              type={prefs.fontSize === preset.fontSize && prefs.lineHeight === preset.lineHeight ? 'primary' : 'default'}
+              onClick={() => applyPreset(preset)}
+            >
+              {preset.label}
+            </Button>
+          ))}
+        </Space.Compact>
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
             <FontSizeOutlined style={{ color: '#667085' }} />
@@ -293,6 +363,7 @@ export function WorkspaceCenter({
   onCreateEditorReport,
   onEditActiveChapter,
   onChapterTextChange,
+  writingRecommendation,
 }: {
   isEmptyProject: boolean
   selectedProject: any | null
@@ -331,16 +402,80 @@ export function WorkspaceCenter({
   onCreateEditorReport: () => void
   onEditActiveChapter: () => void
   onChapterTextChange: (text: string) => void
+  writingRecommendation?: NovelWritingRecommendation
 }) {
   const [editorDisplayPrefs, setEditorDisplayPrefs] = React.useState<EditorDisplayPrefs>(() => loadEditorDisplayPrefs())
   const materialReady = !materialScore || Boolean(materialScore.can_generate)
   const materialRecommendations = Array.isArray(materialScore?.recommendations)
     ? materialScore.recommendations.filter(Boolean)
     : []
+  const requiredAdvances = Array.isArray(activeChapter?.raw_payload?.must_advance)
+    ? activeChapter.raw_payload.must_advance.filter(Boolean)
+    : []
+  const forbiddenRepeats = Array.isArray(activeChapter?.raw_payload?.forbidden_repeats)
+    ? activeChapter.raw_payload.forbidden_repeats.filter(Boolean)
+    : []
+  const sceneCards = activeChapter && Array.isArray(activeChapter.scene_list) && activeChapter.scene_list.length > 0
+    ? activeChapter.scene_list
+    : (activeChapter && Array.isArray(activeChapter.scene_breakdown) ? activeChapter.scene_breakdown : [])
+  const firstScene = sceneCards[0]
+  const dependencyText = [
+    worldbuildingCount > 0 ? '世界观已备' : '缺世界观',
+    characterCount > 0 ? '角色已备' : '缺角色',
+    outlineCount > 0 ? '大纲已备' : '缺大纲',
+  ].join(' · ')
+  const activeWordCount = wc(activeChapter?.chapter_text)
+  const recommendedAction = writingRecommendation ?? buildNovelWritingRecommendation({
+    materialReady,
+    materialRecommendations,
+    sceneCardCount: sceneCards.length,
+    activeWordCount,
+  })
+  const recommendedClass = (key: NovelWritingRecommendedActionKey) => key === recommendedAction.key ? 'novel-editor-recommended-action' : undefined
+  const recommendedBadge = (phase: typeof recommendedAction.phase) => (
+    phase === recommendedAction.phase ? <span className="novel-editor-recommended-badge">推荐下一步</span> : null
+  )
 
   React.useEffect(() => {
     saveEditorDisplayPrefs(editorDisplayPrefs)
   }, [editorDisplayPrefs])
+
+  const secondaryActionMenu = (
+    <div className="novel-editor-action-popover">
+      <div className="novel-editor-action-group">
+        <div className="novel-editor-action-group-heading">
+          <Text className="novel-editor-action-group-label">写前准备</Text>
+          {recommendedBadge('prep')}
+        </div>
+        <Button block size="small" className={recommendedClass('diagnostics')} loading={diagnosticsLoading} onClick={onOpenGenerationDiagnostics}>诊断</Button>
+        <Button block size="small" className={recommendedClass('scene_cards')} icon={<FileTextOutlined />} loading={generatingSceneCards} onClick={onGenerateSceneCards}>场景卡</Button>
+        <Button block size="small" onClick={onEditActiveChapter} icon={<EditOutlined />}>元数据</Button>
+      </div>
+      <div className="novel-editor-action-group">
+        <div className="novel-editor-action-group-heading">
+          <Text className="novel-editor-action-group-label">生成正文</Text>
+          {recommendedBadge('draft')}
+        </div>
+        <Button block size="small" loading={pipelineLoading} onClick={onStartChapterPipeline}>流水线</Button>
+        {!materialReady && (
+          <Button block type="primary" size="small" className={recommendedClass('repair_generate')} icon={<PlayCircleOutlined />} loading={generatingProse} onClick={onRepairAndGenerateCurrentChapter}>
+            补齐并生成
+          </Button>
+        )}
+        <Button block type={materialReady ? 'primary' : 'default'} size="small" className={recommendedClass('generate')} icon={<PlayCircleOutlined />} loading={generatingProse} onClick={onGenerateCurrentChapterProse}>
+          生成
+        </Button>
+      </div>
+      <div className="novel-editor-action-group">
+        <div className="novel-editor-action-group-heading">
+          <Text className="novel-editor-action-group-label">写后复检</Text>
+          {recommendedBadge('review')}
+        </div>
+        <Button block size="small" className={recommendedClass('quality_card')} onClick={onOpenQualityCard}>质量卡</Button>
+        <Button block size="small" loading={editorReportLoading} onClick={onCreateEditorReport}>审稿</Button>
+      </div>
+    </div>
+  )
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: '#fafbfc' }}>
@@ -403,11 +538,11 @@ export function WorkspaceCenter({
 
       {!isEmptyProject && activeChapter && (
         <>
-          <div style={{
+          <div className="novel-editor-toolbar" style={{
             flexShrink: 0, padding: '10px 20px', background: '#fff',
             borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', gap: 14,
           }}>
-            <Title level={5} style={{ margin: 0, minWidth: 180, maxWidth: 320 }}>
+            <Title className="novel-editor-title" level={5} style={{ margin: 0, minWidth: 180, maxWidth: 320 }}>
               第{activeChapter.chapter_no}章《{displayValue(activeChapter.title) || '无标题'}》
             </Title>
             {chapterStatusTag(activeChapter)}
@@ -422,53 +557,80 @@ export function WorkspaceCenter({
             <Text type="secondary" style={{ fontSize: 13 }}>{wc(activeChapter.chapter_text)} 字</Text>
             <SaveIndicator status={saveStatus} />
             <EditorDisplayControls prefs={editorDisplayPrefs} onChange={setEditorDisplayPrefs} />
-            <Space size={10} wrap style={{ justifyContent: 'flex-end' }}>
-              <Space.Compact>
-                <Button size="small" onClick={onEditActiveChapter} icon={<EditOutlined />}>元数据</Button>
-                <Tooltip title="生成或刷新场景卡">
-                  <Button size="small" icon={<FileTextOutlined />} loading={generatingSceneCards} onClick={onGenerateSceneCards}>场景卡</Button>
-                </Tooltip>
-                <Tooltip title="生成前诊断">
-                  <Button size="small" loading={diagnosticsLoading} onClick={onOpenGenerationDiagnostics}>诊断</Button>
-                </Tooltip>
-              </Space.Compact>
-              <Space.Compact>
-                <Tooltip title="创建可恢复流水线，并停在场景卡确认阶段">
-                  <Button size="small" loading={pipelineLoading} onClick={onStartChapterPipeline}>流水线</Button>
-                </Tooltip>
-                {!materialReady && (
-                  <Tooltip title={materialRecommendations.slice(0, 4).join('；') || '自动生成场景卡后继续正文生成'}>
-                    <Button
-                      type="primary"
-                      size="small"
-                      icon={<PlayCircleOutlined />}
-                      loading={generatingProse}
-                      onClick={onRepairAndGenerateCurrentChapter}
-                    >
-                      补齐并生成
-                    </Button>
-                  </Tooltip>
-                )}
-                <Tooltip title={materialReady ? '生成正文' : '材料不足时建议先使用“补齐并生成”；仍可直接生成并在弹窗中选择是否继续'}>
-                  <Button
-                    type={materialReady ? 'primary' : 'default'}
-                    size="small"
-                    icon={<PlayCircleOutlined />}
-                    loading={generatingProse}
-                    onClick={onGenerateCurrentChapterProse}
-                  >
-                    生成
-                  </Button>
-                </Tooltip>
-              </Space.Compact>
-              <Space.Compact>
-                <Tooltip title="查看章节质量卡">
-                  <Button size="small" onClick={onOpenQualityCard}>质量卡</Button>
-                </Tooltip>
-                <Tooltip title="生成编辑部六维审稿报告">
-                  <Button size="small" loading={editorReportLoading} onClick={onCreateEditorReport}>审稿</Button>
-                </Tooltip>
-              </Space.Compact>
+            <Text className="novel-editor-recommendation-hint">
+              推荐：{recommendedAction.label} · {recommendedAction.reason}
+            </Text>
+            <Space className="novel-editor-action-row" size={10} wrap style={{ justifyContent: 'flex-end' }}>
+              <div className="novel-editor-action-flow">
+                <div className="novel-editor-action-group">
+                  <div className="novel-editor-action-group-heading">
+                    <Text className="novel-editor-action-group-label">写前准备</Text>
+                    {recommendedBadge('prep')}
+                  </div>
+                  <Space.Compact>
+                    <Tooltip title="生成前诊断">
+                      <Button size="small" className={recommendedClass('diagnostics')} loading={diagnosticsLoading} onClick={onOpenGenerationDiagnostics}>诊断</Button>
+                    </Tooltip>
+                    <Tooltip title="生成或刷新场景卡">
+                      <Button size="small" className={recommendedClass('scene_cards')} icon={<FileTextOutlined />} loading={generatingSceneCards} onClick={onGenerateSceneCards}>场景卡</Button>
+                    </Tooltip>
+                  </Space.Compact>
+                </div>
+                <div className="novel-editor-action-group novel-editor-action-group-primary">
+                  <div className="novel-editor-action-group-heading">
+                    <Text className="novel-editor-action-group-label">生成正文</Text>
+                    {recommendedBadge('draft')}
+                  </div>
+                  <Space.Compact>
+                    <Tooltip title="创建可恢复流水线，并停在场景卡确认阶段">
+                      <Button size="small" loading={pipelineLoading} onClick={onStartChapterPipeline}>流水线</Button>
+                    </Tooltip>
+                    {!materialReady && (
+                      <Tooltip title={materialRecommendations.slice(0, 4).join('；') || '自动生成场景卡后继续正文生成'}>
+                        <Button
+                          type="primary"
+                          size="small"
+                          className={recommendedClass('repair_generate')}
+                          icon={<PlayCircleOutlined />}
+                          loading={generatingProse}
+                          onClick={onRepairAndGenerateCurrentChapter}
+                        >
+                          补齐并生成
+                        </Button>
+                      </Tooltip>
+                    )}
+                    <Tooltip title={materialReady ? '生成正文' : '材料不足时建议先使用“补齐并生成”；仍可直接生成并在弹窗中选择是否继续'}>
+                      <Button
+                        type={materialReady ? 'primary' : 'default'}
+                        size="small"
+                        className={recommendedClass('generate')}
+                        icon={<PlayCircleOutlined />}
+                        loading={generatingProse}
+                        onClick={onGenerateCurrentChapterProse}
+                      >
+                        生成
+                      </Button>
+                    </Tooltip>
+                  </Space.Compact>
+                </div>
+                <div className="novel-editor-action-group">
+                  <div className="novel-editor-action-group-heading">
+                    <Text className="novel-editor-action-group-label">写后复检</Text>
+                    {recommendedBadge('review')}
+                  </div>
+                  <Space.Compact>
+                    <Tooltip title="查看章节质量卡">
+                      <Button size="small" className={recommendedClass('quality_card')} onClick={onOpenQualityCard}>质量卡</Button>
+                    </Tooltip>
+                    <Tooltip title="生成编辑部六维审稿报告">
+                      <Button size="small" loading={editorReportLoading} onClick={onCreateEditorReport}>审稿</Button>
+                    </Tooltip>
+                  </Space.Compact>
+                </div>
+              </div>
+              <Popover content={secondaryActionMenu} trigger="click" placement="bottomRight">
+                <Button className="novel-editor-more-actions" size="small" icon={<MoreOutlined />}>更多操作</Button>
+              </Popover>
             </Space>
           </div>
 
@@ -502,59 +664,55 @@ export function WorkspaceCenter({
             </div>
           )}
 
-          <details style={{ flexShrink: 0, margin: 0 }}>
-            <summary style={{ padding: '8px 24px', cursor: 'pointer', background: '#fafbfc', borderBottom: '1px solid #f0f0f0', fontSize: 13, color: '#667085' }}>
-              章节上下文（目标、摘要、冲突、钩子、场景卡）
+          <details className="novel-context-panel" style={{ flexShrink: 0, margin: 0 }}>
+            <summary className="novel-context-strip">
+              <span className="novel-context-strip-title">章节上下文</span>
+              <span className="novel-context-pill">
+                <strong>本章任务</strong>
+                <span>{displayValue(activeChapter.chapter_goal) || displayValue(activeChapter.chapter_summary) || '待补齐'}</span>
+              </span>
+              <span className="novel-context-pill">
+                <strong>写作约束</strong>
+                <span>{displayValue(activeChapter.conflict) || displayValue(activeChapter.ending_hook) || dependencyText}</span>
+              </span>
+              <span className="novel-context-pill">
+                <strong>场景节拍</strong>
+                <span>{sceneCards.length > 0 ? `${sceneCards.length} 场 · ${displayValue(firstScene?.title || firstScene?.description || firstScene?.purpose) || '待命名'}` : '暂无场景卡'}</span>
+              </span>
             </summary>
-            <div style={{ padding: '12px 24px', background: '#fff', borderBottom: '1px solid #f0f0f0' }}>
-              <Descriptions column={2} size="small" bordered>
-                <Descriptions.Item label="章节目标">{displayValue(activeChapter.chapter_goal) || '-'}</Descriptions.Item>
-                <Descriptions.Item label="章节摘要">{displayValue(activeChapter.chapter_summary) || '-'}</Descriptions.Item>
-                <Descriptions.Item label="冲突">{displayValue(activeChapter.conflict) || '-'}</Descriptions.Item>
-                <Descriptions.Item label="结尾钩子">{displayValue(activeChapter.ending_hook) || '-'}</Descriptions.Item>
-                <Descriptions.Item label="必须推进">
-                  {Array.isArray(activeChapter.raw_payload?.must_advance) && activeChapter.raw_payload.must_advance.length > 0
-                    ? activeChapter.raw_payload.must_advance.join('；')
-                    : '-'}
-                </Descriptions.Item>
-                <Descriptions.Item label="禁止重复">
-                  {Array.isArray(activeChapter.raw_payload?.forbidden_repeats) && activeChapter.raw_payload.forbidden_repeats.length > 0
-                    ? activeChapter.raw_payload.forbidden_repeats.join('；')
-                    : '-'}
-                </Descriptions.Item>
-                <Descriptions.Item label="状态">{displayValue(activeChapter.status) || '-'}</Descriptions.Item>
-                <Descriptions.Item label="基础依赖">
-                  {worldbuildingCount > 0 ? '有世界观' : '缺世界观'} ·
-                  {characterCount > 0 ? '有角色' : '缺角色'} ·
-                  {outlineCount > 0 ? '有大纲' : '缺大纲'}
-                </Descriptions.Item>
-              </Descriptions>
-              {(() => {
-                const sceneCards = Array.isArray(activeChapter.scene_list) && activeChapter.scene_list.length > 0
-                  ? activeChapter.scene_list
-                  : (Array.isArray(activeChapter.scene_breakdown) ? activeChapter.scene_breakdown : [])
-                return sceneCards.length > 0 ? (
-                <div style={{ marginTop: 12, display: 'grid', gap: 8 }}>
-                  <Text strong style={{ fontSize: 13 }}>场景卡</Text>
-                  {sceneCards.map((scene: any, index: number) => (
-                    <div key={`${scene.scene_no || index}-${scene.title || index}`} style={{ border: '1px solid #edf0f5', borderRadius: 8, padding: '10px 12px', background: '#fbfcfe' }}>
-                      <Space direction="vertical" size={4} style={{ width: '100%' }}>
-                        <Space wrap>
-                          <Tag color="blue" bordered={false}>场景 {scene.scene_no || index + 1}</Tag>
-                          <Text strong>{scene.title || scene.description || scene.purpose || '未命名场景'}</Text>
-                          {scene.location && <Tag bordered={false}>{scene.location}</Tag>}
-                          {scene.emotional_tone && <Tag color="purple" bordered={false}>{scene.emotional_tone}</Tag>}
-                        </Space>
-                        {(scene.purpose || scene.description) && <Text>{scene.purpose || scene.description}</Text>}
-                        {scene.conflict && <Text type="secondary">冲突：{scene.conflict}</Text>}
-                        {scene.beat && <Text type="secondary">节拍：{scene.beat}</Text>}
-                        {scene.exit_state && <Text type="secondary">出场状态：{scene.exit_state}</Text>}
-                      </Space>
-                    </div>
-                  ))}
-                </div>
-                ) : null
-              })()}
+            <div className="novel-context-cards">
+              <section className="novel-context-card">
+                <Text strong>本章任务</Text>
+                <Text>{displayValue(activeChapter.chapter_goal) || '暂无章节目标'}</Text>
+                <Text type="secondary">{displayValue(activeChapter.chapter_summary) || '暂无章节摘要'}</Text>
+              </section>
+              <section className="novel-context-card">
+                <Text strong>写作约束</Text>
+                <Text>冲突：{displayValue(activeChapter.conflict) || '-'}</Text>
+                <Text>结尾钩子：{displayValue(activeChapter.ending_hook) || '-'}</Text>
+                <Text type="secondary">必须推进：{requiredAdvances.length > 0 ? requiredAdvances.join('；') : '-'}</Text>
+                <Text type="secondary">禁止重复：{forbiddenRepeats.length > 0 ? forbiddenRepeats.join('；') : '-'}</Text>
+                <Text type="secondary">{dependencyText} · 状态 {displayValue(activeChapter.status) || '-'}</Text>
+              </section>
+              <section className="novel-context-card novel-context-card-scenes">
+                <Text strong>场景节拍</Text>
+                {sceneCards.length > 0 ? sceneCards.map((scene: any, index: number) => (
+                  <div key={`${scene.scene_no || index}-${scene.title || index}`} className="novel-context-scene">
+                    <Space wrap size={[6, 4]}>
+                      <Tag color="blue" bordered={false}>场景 {scene.scene_no || index + 1}</Tag>
+                      {scene.location && <Tag bordered={false}>{scene.location}</Tag>}
+                      {scene.emotional_tone && <Tag color="purple" bordered={false}>{scene.emotional_tone}</Tag>}
+                    </Space>
+                    <Text strong>{displayValue(scene.title || scene.description || scene.purpose) || '未命名场景'}</Text>
+                    {(scene.purpose || scene.description) && <Text>{displayValue(scene.purpose || scene.description)}</Text>}
+                    {scene.conflict && <Text type="secondary">冲突：{displayValue(scene.conflict)}</Text>}
+                    {scene.beat && <Text type="secondary">节拍：{displayValue(scene.beat)}</Text>}
+                    {scene.exit_state && <Text type="secondary">出场状态：{displayValue(scene.exit_state)}</Text>}
+                  </div>
+                )) : (
+                  <Text type="secondary">暂无场景卡，生成正文前建议先补齐场景节拍。</Text>
+                )}
+              </section>
             </div>
           </details>
 

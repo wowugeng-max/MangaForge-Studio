@@ -51,6 +51,13 @@ function stepBorder(status: GuideStepStatus) {
   return '#edf0f5'
 }
 
+function stepBackground(status: GuideStepStatus) {
+  if (status === 'done') return '#f6ffed'
+  if (status === 'active') return '#f7fbff'
+  if (status === 'blocked') return '#fff7f7'
+  return '#fff'
+}
+
 export function ProductionGuidePanel({
   selectedModelId,
   stepOutlineLoading,
@@ -128,7 +135,23 @@ export function ProductionGuidePanel({
   onOpenCommercialTools: () => void
   onOpenExportDelivery: () => void
 }) {
-  const [collapsed, setCollapsed] = React.useState(false)
+  const [collapsed, setCollapsed] = React.useState(() => {
+    if (typeof window === 'undefined') return false
+    return window.matchMedia('(max-width: 768px)').matches
+  })
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return undefined
+    const mediaQuery = window.matchMedia('(max-width: 768px)')
+    const handleChange = () => {
+      if (mediaQuery.matches) setCollapsed(true)
+    }
+
+    handleChange()
+    mediaQuery.addEventListener('change', handleChange)
+    return () => mediaQuery.removeEventListener('change', handleChange)
+  }, [])
+
   const materialNumericScore = Number(materialScore?.score ?? commercialReadiness?.score ?? 0)
   const hasCoreMaterials = hasWritingBible || referenceCount > 0 || worldbuildingCount > 0 || characterCount > 0
   const hasPlan = chapterCount > 0 && (outlineCount > 0 || chapterCount >= 3)
@@ -256,11 +279,13 @@ export function ProductionGuidePanel({
             {steps.map(step => (
               <div
                 key={step.no}
+                className={`production-guide-step production-guide-step-${step.status}`}
                 style={{
                   border: `1px solid ${stepBorder(step.status)}`,
                   borderRadius: 8,
                   padding: 10,
-                  background: step.status === 'active' ? '#fbfdff' : '#fff',
+                  background: stepBackground(step.status),
+                  boxShadow: step.status === 'active' ? 'inset 3px 0 0 #1677ff' : step.status === 'blocked' ? 'inset 3px 0 0 #ff4d4f' : step.status === 'done' ? 'inset 3px 0 0 #52c41a' : 'inset 3px 0 0 #d9d9d9',
                 }}
               >
                 <Space direction="vertical" size={8} style={{ width: '100%' }}>
