@@ -26,19 +26,18 @@ import {
   SyncOutlined,
 } from '@ant-design/icons'
 import { chapterStatusTag, displayValue, wc } from './utils'
+import {
+  buildNovelWritingRecommendation,
+  buildNovelWritingResponsibility,
+  type NovelWritingRecommendedActionKey,
+  type NovelWritingRecommendation,
+} from './writingRecommendationModel'
 import './WorkspaceCenter.css'
 
 const { Title, Text, Paragraph } = Typography
 
 type SaveStatus = 'idle' | 'unsaved' | 'saving' | 'saved' | 'error'
 type EditorDisplayPrefs = { fontSize: number; lineHeight: number }
-export type NovelWritingRecommendedActionKey = 'diagnostics' | 'scene_cards' | 'repair_generate' | 'generate' | 'quality_card'
-export type NovelWritingRecommendation = {
-  key: NovelWritingRecommendedActionKey
-  phase: 'prep' | 'draft' | 'review'
-  label: string
-  reason: string
-}
 
 const EDITOR_DISPLAY_PREFS_KEY = 'novel.workspace.editorDisplayPrefs'
 const DEFAULT_EDITOR_DISPLAY_PREFS: EditorDisplayPrefs = { fontSize: 17, lineHeight: 32 }
@@ -47,49 +46,6 @@ const EDITOR_DISPLAY_PRESETS: Array<EditorDisplayPrefs & { key: string; label: s
   { key: 'review', label: '宽松审稿', fontSize: 18, lineHeight: 38 },
   { key: 'sprint', label: '紧凑冲刺', fontSize: 16, lineHeight: 28 },
 ]
-
-export function buildNovelWritingRecommendation({
-  materialReady,
-  materialRecommendations,
-  sceneCardCount,
-  activeWordCount,
-}: {
-  materialReady: boolean
-  materialRecommendations: string[]
-  sceneCardCount: number
-  activeWordCount: number
-}): NovelWritingRecommendation {
-  if (!materialReady) {
-    return {
-      key: 'repair_generate',
-      phase: 'draft',
-      label: '补齐并生成',
-      reason: materialRecommendations[0] || '材料不足，先补齐上下文再进入正文更稳。',
-    }
-  }
-  if (sceneCardCount === 0) {
-    return {
-      key: 'scene_cards',
-      phase: 'prep',
-      label: '场景卡',
-      reason: '当前章缺少场景节拍，先拆场景能降低正文跑偏。',
-    }
-  }
-  if (activeWordCount === 0) {
-    return {
-      key: 'generate',
-      phase: 'draft',
-      label: '生成',
-      reason: '材料和场景已具备，可以进入正文初稿。',
-    }
-  }
-  return {
-    key: 'quality_card',
-    phase: 'review',
-    label: '质量卡',
-    reason: '当前章已有正文，下一步适合检查爽点、节奏和连续性。',
-  }
-}
 
 function clampNumber(value: unknown, min: number, max: number, fallback: number) {
   const numeric = Number(value)
@@ -431,6 +387,7 @@ export function WorkspaceCenter({
     sceneCardCount: sceneCards.length,
     activeWordCount,
   })
+  const aiResponsibility = buildNovelWritingResponsibility(recommendedAction)
   const recommendedClass = (key: NovelWritingRecommendedActionKey) => key === recommendedAction.key ? 'novel-editor-recommended-action' : undefined
   const recommendedBadge = (phase: typeof recommendedAction.phase) => (
     phase === recommendedAction.phase ? <span className="novel-editor-recommended-badge">推荐下一步</span> : null
@@ -632,6 +589,18 @@ export function WorkspaceCenter({
                 <Button className="novel-editor-more-actions" size="small" icon={<MoreOutlined />}>更多操作</Button>
               </Popover>
             </Space>
+          </div>
+
+          <div className={`novel-ai-responsibility-strip novel-ai-responsibility-strip-${aiResponsibility.tone}`}>
+            <div className="novel-ai-responsibility-main">
+              <span className="novel-ai-responsibility-label">AI 当前职责</span>
+              <Tag className="novel-ai-responsibility-role" bordered={false}>{aiResponsibility.roleLabel}</Tag>
+              <Text className="novel-ai-responsibility-focus">{aiResponsibility.focus}</Text>
+            </div>
+            <div className="novel-ai-responsibility-next">
+              <Text type="secondary">{aiResponsibility.phaseLabel}</Text>
+              <strong>{aiResponsibility.actionLabel}</strong>
+            </div>
           </div>
 
           {streamingChapterId === activeChapter.id && (

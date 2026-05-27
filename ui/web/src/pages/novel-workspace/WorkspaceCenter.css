@@ -102,6 +102,84 @@
   display: none;
 }
 
+.novel-ai-responsibility-strip {
+  min-height: 42px;
+  flex-shrink: 0;
+  padding: 7px 20px;
+  border-bottom: 1px solid #e6ebf2;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #fbfcfe;
+}
+
+.novel-ai-responsibility-strip-planner {
+  background: #f7fbff;
+  border-bottom-color: #d8e9ff;
+}
+
+.novel-ai-responsibility-strip-writer {
+  background: #f7fcf8;
+  border-bottom-color: #d8f0df;
+}
+
+.novel-ai-responsibility-strip-reviewer {
+  background: #fffaf2;
+  border-bottom-color: #f5dfb8;
+}
+
+.novel-ai-responsibility-strip-editor {
+  background: #fbf8ff;
+  border-bottom-color: #e8dbff;
+}
+
+.novel-ai-responsibility-main {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.novel-ai-responsibility-label {
+  flex: 0 0 auto;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.novel-ai-responsibility-role {
+  flex: 0 0 auto;
+  margin-inline-end: 0;
+  font-weight: 700;
+  color: #0f172a;
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.novel-ai-responsibility-focus {
+  min-width: 0;
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.novel-ai-responsibility-next {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.novel-ai-responsibility-next strong {
+  color: #0f172a;
+  font-size: 13px;
+}
+
 .novel-context-panel {
   background: #fff;
   border-bottom: 1px solid #e6ebf2;
@@ -239,14 +317,48 @@
     display: inline-flex;
   }
 
+  .novel-ai-responsibility-strip {
+    min-height: 32px;
+    padding: 4px 10px;
+    align-items: center;
+    flex-direction: row;
+    gap: 6px;
+  }
+
+  .novel-ai-responsibility-main {
+    flex: 1;
+    width: auto;
+    flex-wrap: nowrap;
+    gap: 5px;
+  }
+
+  .novel-ai-responsibility-label {
+    font-size: 11px;
+  }
+
+  .novel-ai-responsibility-role {
+    font-size: 11px;
+    line-height: 18px;
+  }
+
+  .novel-ai-responsibility-focus {
+    display: none;
+  }
+
+  .novel-ai-responsibility-next {
+    display: none;
+  }
+
   .novel-context-strip {
-    padding: 7px 10px;
-    grid-template-columns: 1fr;
+    min-height: 34px;
+    padding: 4px 10px;
+    grid-template-columns: auto minmax(0, 1fr);
     gap: 6px;
   }
 
   .novel-context-pill {
     display: none;
+    padding: 3px 6px;
   }
 
   .novel-context-strip .novel-context-pill:nth-of-type(2) {

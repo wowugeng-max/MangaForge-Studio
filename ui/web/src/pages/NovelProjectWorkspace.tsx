@@ -23,7 +23,8 @@ import type { EditorKind } from './novel-workspace/EditorModal'
 import { ReferencePanel } from './novel-workspace/ReferencePanel'
 import { StoryPlanningWorkspace, type PlanningLoadingKey } from './novel-workspace/StoryPlanningWorkspace'
 import { WritingCockpitPanel, type WritingCockpitPrimaryActionOverride } from './novel-workspace/WritingCockpitPanel'
-import { WorkspaceCenter, buildNovelWritingRecommendation } from './novel-workspace/WorkspaceCenter'
+import { WorkspaceCenter } from './novel-workspace/WorkspaceCenter'
+import { buildNovelWritingRecommendation } from './novel-workspace/writingRecommendationModel'
 import { buildPlanningWorkspaceModel, type PlanningActionKey } from './novel-workspace/planningWorkspaceModel'
 import {
   buildWritingCockpitModel,
