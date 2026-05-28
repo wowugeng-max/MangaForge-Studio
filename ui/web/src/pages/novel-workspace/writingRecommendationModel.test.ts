@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  buildNovelDeliverySummary,
   buildNovelWritingRecommendation,
   buildNovelWritingResponsibility,
 } from './writingRecommendationModel'
@@ -64,5 +65,55 @@ describe('buildNovelWritingRecommendation', () => {
     expect(recommendation.phase).toBe('review')
     expect(responsibility.roleLabel).toBe('修订编辑')
     expect(responsibility.focus).toContain('检查已有正文')
+  })
+})
+
+describe('buildNovelDeliverySummary', () => {
+  test('hides delivery summary when the acceptance desk is not visible', () => {
+    const summary = buildNovelDeliverySummary(null)
+
+    expect(summary.visible).toBe(false)
+    expect(summary.actionKey).toBeNull()
+  })
+
+  test('summarizes revision state with editor report action', () => {
+    const summary = buildNovelDeliverySummary({
+      visible: true,
+      acceptanceStatus: 'needs_revision',
+      statusLabel: '需修订',
+      acceptanceReasons: ['质量分 72 低于 78', '必须修复：章末钩子不足'],
+      qualityScore: 72,
+      storyStateSynced: false,
+      recommendedAcceptanceAction: { key: 'create_editor_report', label: '生成编辑报告' },
+    })
+
+    expect(summary.visible).toBe(true)
+    expect(summary.tone).toBe('revision')
+    expect(summary.statusLabel).toBe('需修订')
+    expect(summary.qualityLabel).toBe('质量 72')
+    expect(summary.storyStateLabel).toBe('故事状态待同步')
+    expect(summary.reason).toContain('质量分 72')
+    expect(summary.actionKey).toBe('create_editor_report')
+    expect(summary.actionLabel).toBe('生成编辑报告')
+    expect(summary.compactActionLabel).toBe('编辑报告')
+  })
+
+  test('summarizes ready state with accept action', () => {
+    const summary = buildNovelDeliverySummary({
+      visible: true,
+      acceptanceStatus: 'ready_to_accept',
+      statusLabel: '可验收',
+      acceptanceReasons: ['质量复检通过，故事状态已同步，可以进入下一章。'],
+      qualityScore: 86,
+      storyStateSynced: true,
+      recommendedAcceptanceAction: { key: 'accept_chapter_and_continue', label: '验收并进入下一章' },
+    })
+
+    expect(summary.visible).toBe(true)
+    expect(summary.tone).toBe('ready')
+    expect(summary.qualityLabel).toBe('质量 86')
+    expect(summary.storyStateLabel).toBe('故事状态已同步')
+    expect(summary.actionKey).toBe('accept_chapter_and_continue')
+    expect(summary.compactActionLabel).toBe('验收')
   })
 })

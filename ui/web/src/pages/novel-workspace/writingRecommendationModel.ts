@@ -1,4 +1,7 @@
+import type { WritingCockpitActionKey } from './writingCockpitModel'
+
 export type NovelWritingRecommendedActionKey = 'diagnostics' | 'scene_cards' | 'repair_generate' | 'generate' | 'quality_card'
+export type NovelDeliveryActionKey = WritingCockpitActionKey
 
 export type NovelWritingRecommendation = {
   key: NovelWritingRecommendedActionKey
@@ -13,6 +16,38 @@ export type NovelWritingResponsibility = {
   actionLabel: string
   focus: string
   tone: 'editor' | 'planner' | 'writer' | 'reviewer'
+}
+
+export type NovelDeliverySummaryInput = {
+  visible: boolean
+  acceptanceStatus:
+    | 'hidden'
+    | 'needs_quality_check'
+    | 'needs_revision'
+    | 'needs_recheck'
+    | 'needs_state_sync'
+    | 'ready_to_accept'
+    | 'delivered'
+  statusLabel: string
+  acceptanceReasons: string[]
+  qualityScore: number | null
+  storyStateSynced: boolean
+  recommendedAcceptanceAction: {
+    key: NovelDeliveryActionKey
+    label: string
+  }
+}
+
+export type NovelDeliverySummary = {
+  visible: boolean
+  tone: 'check' | 'revision' | 'sync' | 'ready'
+  statusLabel: string
+  qualityLabel: string
+  storyStateLabel: string
+  reason: string
+  actionKey: NovelDeliveryActionKey | null
+  actionLabel: string
+  compactActionLabel: string
 }
 
 export function buildNovelWritingRecommendation({
@@ -100,5 +135,57 @@ export function buildNovelWritingResponsibility(recommendation: NovelWritingReco
         focus: '检查已有正文的爽点、节奏、连续性和章末钩子，给出改稿依据。',
         tone: 'reviewer',
       }
+  }
+}
+
+export function buildNovelDeliverySummary(desk?: NovelDeliverySummaryInput | null): NovelDeliverySummary {
+  if (!desk?.visible || desk.acceptanceStatus === 'hidden') {
+    return {
+      visible: false,
+      tone: 'check',
+      statusLabel: '',
+      qualityLabel: '质量待复检',
+      storyStateLabel: '故事状态待同步',
+      reason: '',
+      actionKey: null,
+      actionLabel: '',
+      compactActionLabel: '',
+    }
+  }
+
+  const tone: NovelDeliverySummary['tone'] = (() => {
+    if (desk.acceptanceStatus === 'needs_revision') return 'revision'
+    if (desk.acceptanceStatus === 'needs_state_sync') return 'sync'
+    if (desk.acceptanceStatus === 'ready_to_accept' || desk.acceptanceStatus === 'delivered') return 'ready'
+    return 'check'
+  })()
+
+  return {
+    visible: true,
+    tone,
+    statusLabel: desk.statusLabel,
+    qualityLabel: desk.qualityScore === null ? '质量待复检' : `质量 ${desk.qualityScore}`,
+    storyStateLabel: desk.storyStateSynced ? '故事状态已同步' : '故事状态待同步',
+    reason: desk.acceptanceReasons.filter(Boolean).slice(0, 2).join('；') || '本章已有正文，请按交稿流程完成复检。',
+    actionKey: desk.recommendedAcceptanceAction.key,
+    actionLabel: desk.recommendedAcceptanceAction.label,
+    compactActionLabel: compactDeliveryActionLabel(desk.recommendedAcceptanceAction.key, desk.recommendedAcceptanceAction.label),
+  }
+}
+
+function compactDeliveryActionLabel(key: NovelDeliveryActionKey, label: string) {
+  switch (key) {
+    case 'refresh_current_quality':
+      return '复检'
+    case 'create_editor_report':
+      return '编辑报告'
+    case 'apply_editor_revision':
+      return '修订'
+    case 'sync_story_state':
+      return '同步状态'
+    case 'accept_chapter_and_continue':
+      return '验收'
+    default:
+      return label
   }
 }

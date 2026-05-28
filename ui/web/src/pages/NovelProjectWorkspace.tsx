@@ -4137,6 +4137,9 @@ export default function NovelProjectWorkspace() {
           onCreateEditorReport={createEditorReport}
           onEditActiveChapter={() => activeChapter && openEditor('chapter', activeChapter)}
           writingRecommendation={writingRecommendation}
+          chapterAcceptanceDesk={writingCockpitModel.chapterAcceptanceDesk}
+          deliveryActionLoading={proseQualityLoading || editorReportLoading || generatingProse}
+          onDeliveryAction={handleWritingCockpitAction}
           onChapterTextChange={(next) => {
             const chapterId = activeChapterId
             setChapters(prev => prev.map(c => c.id === chapterId ? { ...c, chapter_text: next } : c))

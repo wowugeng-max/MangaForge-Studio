@@ -27,8 +27,11 @@ import {
 } from '@ant-design/icons'
 import { chapterStatusTag, displayValue, wc } from './utils'
 import {
+  buildNovelDeliverySummary,
   buildNovelWritingRecommendation,
   buildNovelWritingResponsibility,
+  type NovelDeliveryActionKey,
+  type NovelDeliverySummaryInput,
   type NovelWritingRecommendedActionKey,
   type NovelWritingRecommendation,
 } from './writingRecommendationModel'
@@ -320,6 +323,9 @@ export function WorkspaceCenter({
   onEditActiveChapter,
   onChapterTextChange,
   writingRecommendation,
+  chapterAcceptanceDesk,
+  deliveryActionLoading,
+  onDeliveryAction,
 }: {
   isEmptyProject: boolean
   selectedProject: any | null
@@ -359,6 +365,9 @@ export function WorkspaceCenter({
   onEditActiveChapter: () => void
   onChapterTextChange: (text: string) => void
   writingRecommendation?: NovelWritingRecommendation
+  chapterAcceptanceDesk?: NovelDeliverySummaryInput | null
+  deliveryActionLoading?: boolean
+  onDeliveryAction?: (key: NovelDeliveryActionKey) => void
 }) {
   const [editorDisplayPrefs, setEditorDisplayPrefs] = React.useState<EditorDisplayPrefs>(() => loadEditorDisplayPrefs())
   const materialReady = !materialScore || Boolean(materialScore.can_generate)
@@ -388,6 +397,7 @@ export function WorkspaceCenter({
     activeWordCount,
   })
   const aiResponsibility = buildNovelWritingResponsibility(recommendedAction)
+  const deliverySummary = buildNovelDeliverySummary(chapterAcceptanceDesk)
   const recommendedClass = (key: NovelWritingRecommendedActionKey) => key === recommendedAction.key ? 'novel-editor-recommended-action' : undefined
   const recommendedBadge = (phase: typeof recommendedAction.phase) => (
     phase === recommendedAction.phase ? <span className="novel-editor-recommended-badge">推荐下一步</span> : null
@@ -602,6 +612,30 @@ export function WorkspaceCenter({
               <strong>{aiResponsibility.actionLabel}</strong>
             </div>
           </div>
+
+          {deliverySummary.visible && (
+            <div className={`novel-delivery-status-strip novel-delivery-status-strip-${deliverySummary.tone}`}>
+              <div className="novel-delivery-status-main">
+                <span className="novel-delivery-status-label">交稿状态</span>
+                <Tag className="novel-delivery-status-tag" bordered={false}>{deliverySummary.statusLabel}</Tag>
+                <Tag bordered={false}>{deliverySummary.qualityLabel}</Tag>
+                <Tag bordered={false}>{deliverySummary.storyStateLabel}</Tag>
+                <Text className="novel-delivery-status-reason">{deliverySummary.reason}</Text>
+              </div>
+              {deliverySummary.actionKey && (
+                <Button
+                  className="novel-delivery-status-action"
+                  type={deliverySummary.tone === 'ready' ? 'primary' : 'default'}
+                  size="small"
+                  loading={deliveryActionLoading}
+                  onClick={() => onDeliveryAction?.(deliverySummary.actionKey!)}
+                >
+                  <span className="novel-delivery-status-action-full">{deliverySummary.actionLabel}</span>
+                  <span className="novel-delivery-status-action-compact">{deliverySummary.compactActionLabel}</span>
+                </Button>
+              )}
+            </div>
+          )}
 
           {streamingChapterId === activeChapter.id && (
             <div style={{ flexShrink: 0, padding: '12px 24px', background: '#f0f7ff', borderBottom: '1px solid #d6e4ff' }}>

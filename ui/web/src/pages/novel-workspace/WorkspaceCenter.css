@@ -180,6 +180,79 @@
   font-size: 13px;
 }
 
+.novel-delivery-status-strip {
+  min-height: 38px;
+  flex-shrink: 0;
+  padding: 6px 20px;
+  border-bottom: 1px solid #e6ebf2;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #fff;
+}
+
+.novel-delivery-status-strip-check {
+  background: #f7fbff;
+  border-bottom-color: #d8e9ff;
+}
+
+.novel-delivery-status-strip-revision {
+  background: #fff7f7;
+  border-bottom-color: #ffd8d8;
+}
+
+.novel-delivery-status-strip-sync {
+  background: #fffaf2;
+  border-bottom-color: #f5dfb8;
+}
+
+.novel-delivery-status-strip-ready {
+  background: #f7fcf8;
+  border-bottom-color: #d8f0df;
+}
+
+.novel-delivery-status-main {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.novel-delivery-status-label {
+  flex: 0 0 auto;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.novel-delivery-status-tag {
+  flex: 0 0 auto;
+  margin-inline-end: 0;
+  font-weight: 700;
+  color: #0f172a;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.novel-delivery-status-reason {
+  min-width: 0;
+  color: #475569;
+  font-size: 12px;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.novel-delivery-status-action {
+  flex: 0 0 auto;
+}
+
+.novel-delivery-status-action-compact {
+  display: none;
+}
+
 .novel-context-panel {
   background: #fff;
   border-bottom: 1px solid #e6ebf2;
@@ -347,6 +420,46 @@
 
   .novel-ai-responsibility-next {
     display: none;
+  }
+
+  .novel-delivery-status-strip {
+    min-height: 34px;
+    padding: 4px 10px;
+    gap: 6px;
+  }
+
+  .novel-delivery-status-main {
+    gap: 5px;
+  }
+
+  .novel-delivery-status-label {
+    font-size: 11px;
+  }
+
+  .novel-delivery-status-tag {
+    font-size: 11px;
+    line-height: 18px;
+  }
+
+  .novel-delivery-status-main .ant-tag:not(.novel-delivery-status-tag) {
+    display: none;
+  }
+
+  .novel-delivery-status-reason {
+    display: none;
+  }
+
+  .novel-delivery-status-action {
+    max-width: 96px;
+    padding-inline: 8px;
+  }
+
+  .novel-delivery-status-action-full {
+    display: none;
+  }
+
+  .novel-delivery-status-action-compact {
+    display: inline;
   }
 
   .novel-context-strip {
