@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  buildNovelDraftBriefSummary,
   buildNovelDeliverySummary,
   buildNovelWritingRecommendation,
   buildNovelWritingResponsibility,
@@ -115,5 +116,53 @@ describe('buildNovelDeliverySummary', () => {
     expect(summary.storyStateLabel).toBe('故事状态已同步')
     expect(summary.actionKey).toBe('accept_chapter_and_continue')
     expect(summary.compactActionLabel).toBe('验收')
+  })
+})
+
+describe('buildNovelDraftBriefSummary', () => {
+  test('hides draft brief when prose already exists', () => {
+    const summary = buildNovelDraftBriefSummary({
+      activeWordCount: 1200,
+      chapterGoal: '主角夺回主动权',
+      conflict: '旧臣压制主角',
+      endingHook: '带血腰牌入席',
+      sceneCardCount: 3,
+    })
+
+    expect(summary.visible).toBe(false)
+    expect(summary.actionKey).toBeNull()
+  })
+
+  test('asks for scene cards before generation when scene plan is missing', () => {
+    const summary = buildNovelDraftBriefSummary({
+      activeWordCount: 0,
+      chapterGoal: '主角夺回主动权',
+      conflict: '旧臣压制主角',
+      endingHook: '带血腰牌入席',
+      sceneCardCount: 0,
+    })
+
+    expect(summary.visible).toBe(true)
+    expect(summary.statusLabel).toBe('待补场景')
+    expect(summary.actionKey).toBe('scene_cards')
+    expect(summary.actionLabel).toBe('补场景卡')
+    expect(summary.checks).toContain('缺场景卡')
+  })
+
+  test('confirms chapter goal before generation when draft materials are ready', () => {
+    const summary = buildNovelDraftBriefSummary({
+      activeWordCount: 0,
+      chapterGoal: '主角夺回主动权',
+      conflict: '旧臣压制主角',
+      endingHook: '带血腰牌入席',
+      sceneCardCount: 4,
+    })
+
+    expect(summary.visible).toBe(true)
+    expect(summary.statusLabel).toBe('可进入初稿')
+    expect(summary.actionKey).toBe('generate')
+    expect(summary.actionLabel).toBe('确认并生成')
+    expect(summary.focus).toContain('主角夺回主动权')
+    expect(summary.checks).toContain('场景 4')
   })
 })

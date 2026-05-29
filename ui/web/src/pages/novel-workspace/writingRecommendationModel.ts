@@ -50,6 +50,86 @@ export type NovelDeliverySummary = {
   compactActionLabel: string
 }
 
+export type NovelDraftBriefActionKey = 'metadata' | 'scene_cards' | 'generate'
+
+export type NovelDraftBriefSummary = {
+  visible: boolean
+  statusLabel: string
+  focus: string
+  checks: string[]
+  actionKey: NovelDraftBriefActionKey | null
+  actionLabel: string
+}
+
+export function buildNovelDraftBriefSummary({
+  activeWordCount,
+  chapterGoal,
+  conflict,
+  endingHook,
+  sceneCardCount,
+}: {
+  activeWordCount: number
+  chapterGoal?: string | null
+  conflict?: string | null
+  endingHook?: string | null
+  sceneCardCount: number
+}): NovelDraftBriefSummary {
+  if (activeWordCount > 0) {
+    return {
+      visible: false,
+      statusLabel: '',
+      focus: '',
+      checks: [],
+      actionKey: null,
+      actionLabel: '',
+    }
+  }
+
+  const hasGoal = Boolean(chapterGoal?.trim())
+  const hasHook = Boolean(endingHook?.trim())
+  const hasScenes = sceneCardCount > 0
+  const checks = [
+    hasGoal ? '目标已定' : '缺目标',
+    conflict?.trim() ? '冲突已定' : '缺冲突',
+    hasHook ? '钩子已定' : '缺钩子',
+    hasScenes ? `场景 ${sceneCardCount}` : '缺场景卡',
+  ]
+  const focus = [
+    chapterGoal?.trim() || '本章目标待补齐',
+    conflict?.trim() ? `冲突：${conflict.trim()}` : '',
+    endingHook?.trim() ? `钩子：${endingHook.trim()}` : '',
+  ].filter(Boolean).join('；')
+
+  if (!hasGoal || !hasHook) {
+    return {
+      visible: true,
+      statusLabel: '待补目标',
+      focus,
+      checks,
+      actionKey: 'metadata',
+      actionLabel: '补章节目标',
+    }
+  }
+  if (!hasScenes) {
+    return {
+      visible: true,
+      statusLabel: '待补场景',
+      focus,
+      checks,
+      actionKey: 'scene_cards',
+      actionLabel: '补场景卡',
+    }
+  }
+  return {
+    visible: true,
+    statusLabel: '可进入初稿',
+    focus,
+    checks,
+    actionKey: 'generate',
+    actionLabel: '确认并生成',
+  }
+}
+
 export function buildNovelWritingRecommendation({
   materialReady,
   materialRecommendations,

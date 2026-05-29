@@ -27,6 +27,7 @@ import {
 } from '@ant-design/icons'
 import { chapterStatusTag, displayValue, wc } from './utils'
 import {
+  buildNovelDraftBriefSummary,
   buildNovelDeliverySummary,
   buildNovelWritingRecommendation,
   buildNovelWritingResponsibility,
@@ -398,6 +399,13 @@ export function WorkspaceCenter({
   })
   const aiResponsibility = buildNovelWritingResponsibility(recommendedAction)
   const deliverySummary = buildNovelDeliverySummary(chapterAcceptanceDesk)
+  const draftBriefSummary = buildNovelDraftBriefSummary({
+    activeWordCount,
+    chapterGoal: activeChapter?.chapter_goal || activeChapter?.chapter_summary,
+    conflict: activeChapter?.conflict,
+    endingHook: activeChapter?.ending_hook,
+    sceneCardCount: sceneCards.length,
+  })
   const recommendedClass = (key: NovelWritingRecommendedActionKey) => key === recommendedAction.key ? 'novel-editor-recommended-action' : undefined
   const recommendedBadge = (phase: typeof recommendedAction.phase) => (
     phase === recommendedAction.phase ? <span className="novel-editor-recommended-badge">推荐下一步</span> : null
@@ -632,6 +640,34 @@ export function WorkspaceCenter({
                 >
                   <span className="novel-delivery-status-action-full">{deliverySummary.actionLabel}</span>
                   <span className="novel-delivery-status-action-compact">{deliverySummary.compactActionLabel}</span>
+                </Button>
+              )}
+            </div>
+          )}
+
+          {draftBriefSummary.visible && (
+            <div className="novel-draft-brief-strip">
+              <div className="novel-draft-brief-main">
+                <span className="novel-draft-brief-label">生成前确认</span>
+                <Tag className="novel-draft-brief-status" bordered={false}>{draftBriefSummary.statusLabel}</Tag>
+                {draftBriefSummary.checks.map(check => (
+                  <Tag key={check} bordered={false}>{check}</Tag>
+                ))}
+                <Text className="novel-draft-brief-focus">{draftBriefSummary.focus}</Text>
+              </div>
+              {draftBriefSummary.actionKey && (
+                <Button
+                  className="novel-draft-brief-action"
+                  type={draftBriefSummary.actionKey === 'generate' ? 'primary' : 'default'}
+                  size="small"
+                  loading={draftBriefSummary.actionKey === 'scene_cards' ? generatingSceneCards : generatingProse}
+                  onClick={() => {
+                    if (draftBriefSummary.actionKey === 'metadata') onEditActiveChapter()
+                    if (draftBriefSummary.actionKey === 'scene_cards') onGenerateSceneCards()
+                    if (draftBriefSummary.actionKey === 'generate') onGenerateCurrentChapterProse()
+                  }}
+                >
+                  {draftBriefSummary.actionLabel}
                 </Button>
               )}
             </div>
