@@ -10,6 +10,14 @@ import {
   summarizeFirst30Plan,
   type LaunchpadFields,
 } from './novel-entry/launchpadModel'
+import {
+  buildDeepDraftReviewModel,
+  deepDraftReviewModelToSeed,
+  type DeepDraftChapter,
+  type DeepDraftCharacter,
+  type DeepDraftReviewModel,
+  type DeepDraftVolume,
+} from './novel-entry/deepDraftReviewModel'
 
 const { Text, Paragraph } = Typography
 const projectSeedModelStorageKey = 'novel.projectSeed.model_id'
@@ -159,8 +167,8 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
   const [finalizingSeed, setFinalizingSeed] = useState(false)
   const [autoCreating, setAutoCreating] = useState(false)
   const [seed, setSeed] = useState<any | null>(null)
-  const [seedDraftText, setSeedDraftText] = useState('')
   const [seedFinalized, setSeedFinalized] = useState(false)
+  const [deepDraftReview, setDeepDraftReview] = useState<DeepDraftReviewModel>(() => buildDeepDraftReviewModel({}))
   const [launchpad, setLaunchpad] = useState<LaunchpadFields>(() => createEmptyLaunchpadFields())
   const [modelsLoading, setModelsLoading] = useState(false)
   const [models, setModels] = useState<any[]>([])
@@ -215,6 +223,43 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
         ...prev.first30_plan,
         ...patch,
       },
+    }))
+  }
+
+  const updateDeepDraftReview = (patch: Partial<DeepDraftReviewModel>) => {
+    setSeedFinalized(false)
+    setDeepDraftReview(prev => ({ ...prev, ...patch }))
+  }
+
+  const updateDeepDraftCharacter = (index: number, patch: Partial<DeepDraftCharacter>) => {
+    setSeedFinalized(false)
+    setDeepDraftReview(prev => ({
+      ...prev,
+      characters: prev.characters.map((character, currentIndex) => currentIndex === index ? { ...character, ...patch } : character),
+    }))
+  }
+
+  const updateDeepDraftVolume = (index: number, patch: Partial<DeepDraftVolume>) => {
+    setSeedFinalized(false)
+    setDeepDraftReview(prev => ({
+      ...prev,
+      volumes: prev.volumes.map((volume, currentIndex) => currentIndex === index ? { ...volume, ...patch } : volume),
+    }))
+  }
+
+  const updateDeepDraftChapter = (index: number, patch: Partial<DeepDraftChapter>) => {
+    setSeedFinalized(false)
+    setDeepDraftReview(prev => ({
+      ...prev,
+      chapters: prev.chapters.map((chapter, currentIndex) => currentIndex === index ? { ...chapter, ...patch } : chapter),
+    }))
+  }
+
+  const removeDeepDraftItem = (section: 'characters' | 'volumes' | 'chapters', index: number) => {
+    setSeedFinalized(false)
+    setDeepDraftReview(prev => ({
+      ...prev,
+      [section]: prev[section].filter((_, currentIndex) => currentIndex !== index),
     }))
   }
 
@@ -352,8 +397,8 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
     setFinalizingSeed(false)
     setAutoCreating(false)
     setSeed(null)
-    setSeedDraftText('')
     setSeedFinalized(false)
+    setDeepDraftReview(buildDeepDraftReviewModel({}))
     setLaunchpad(createEmptyLaunchpadFields())
     setData({
       title: '',
@@ -403,6 +448,7 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
   const applySeedToForm = (nextSeed: any) => {
     const normalizedSeed = normalizeProjectSeedForUi(nextSeed)
     const extractedLaunchpad = extractLaunchpadFieldsFromSeed(normalizedSeed)
+    setDeepDraftReview(buildDeepDraftReviewModel(normalizedSeed))
     const nextData = {
       title: String(normalizedSeed.title || data.title || normalizedSeed.logline || '').trim().slice(0, 32),
       genre: pickGenre(normalizedSeed.genre || data.genre),
@@ -447,7 +493,6 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
       })
       const nextSeed = normalizeProjectSeedForUi(res.data?.seed || {})
       setSeed(nextSeed)
-      setSeedDraftText(JSON.stringify(nextSeed, null, 2))
       setSeedFinalized(createMode !== 'deep_draft')
       applySeedToForm(nextSeed)
       if (typeof window !== 'undefined') window.localStorage.setItem(projectSeedModelStorageKey, String(seedModelId))
@@ -461,13 +506,7 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
 
   const finalizeProjectSeed = async () => {
     if (!seedModelId) return message.warning('请先选择用于定稿的模型')
-    let draft: any = null
-    try {
-      draft = seedDraftText.trim() ? JSON.parse(seedDraftText) : seed
-    } catch {
-      message.error('草稿 JSON 格式不正确，请先修正')
-      return
-    }
+    const draft = createMode === 'deep_draft' ? deepDraftReviewModelToSeed(seed || {}, deepDraftReview) : seed
     if (!draft || !Object.keys(draft).length) return message.warning('请先生成或填写项目草稿')
     setFinalizingSeed(true)
     try {
@@ -479,7 +518,6 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
       })
       const nextSeed = normalizeProjectSeedForUi(res.data?.seed || {})
       setSeed(nextSeed)
-      setSeedDraftText(JSON.stringify(nextSeed, null, 2))
       setSeedFinalized(true)
       applySeedToForm(nextSeed)
       if (typeof window !== 'undefined') window.localStorage.setItem(projectSeedModelStorageKey, String(seedModelId))
@@ -496,8 +534,9 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
       open={open}
       onCancel={handleModalCancel}
       footer={null}
-      width={720}
+      width={900}
       maskClosable={false}
+      style={{ top: 24 }}
     >
       <div style={{ textAlign: 'center', marginBottom: 24 }}>
         <h2 style={{ margin: '0 0 4px 0' }}>新书商业长篇启动台</h2>
@@ -569,7 +608,7 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
                       showIcon
                       message={createMode === 'quick_ai'
                         ? '输入作品名即可自动建项；如果有零散设定，也可以粘贴进来，AI 会整理成项目简介、分卷、章节细纲和伏笔计划。'
-                        : '先让 AI 生成详细草稿，草稿会包含角色、能力、世界观、分卷、章节和伏笔。你可以直接修改 JSON，再让模型整理成确定版。'}
+                        : '先让 AI 生成详细草稿，再在审阅台里按创作资料修改标题、世界观、人物、分卷、章节和伏笔，最后让模型整理成确定版。'}
                     />
                     <Input
                       value={data.title}
@@ -624,7 +663,7 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
                         <Alert
                           type={seedFinalized ? 'success' : 'warning'}
                           showIcon
-                          message={seedFinalized ? '当前是确定版项目种子' : '当前是草稿。请人工修改下方 JSON 后，点击“模型生成确定版本”。'}
+                          message={seedFinalized ? '当前是确定版项目种子' : '当前是草稿。请先审阅并修改下方创作资料，再点击“模型整理为确定版”。'}
                         />
                       )}
                       <Space wrap>
@@ -679,28 +718,121 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
                       )}
                       {createMode === 'deep_draft' ? (
                         <>
-                          <Input.TextArea
-                            rows={10}
-                            value={seedDraftText}
-                            onChange={event => {
-                              setSeedDraftText(event.target.value)
-                              setSeedFinalized(false)
-                            }}
-                            style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12 }}
-                          />
+                          <Card size="small" title="创作草稿审阅台" styles={{ body: { padding: 12 } }}>
+                            <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8 }}>
+                                <Input
+                                  value={deepDraftReview.basics.title}
+                                  onChange={event => updateDeepDraftReview({ basics: { ...deepDraftReview.basics, title: event.target.value } })}
+                                  placeholder="书名"
+                                />
+                                <Input
+                                  value={deepDraftReview.basics.genre}
+                                  onChange={event => updateDeepDraftReview({ basics: { ...deepDraftReview.basics, genre: event.target.value } })}
+                                  placeholder="题材"
+                                />
+                              </div>
+                              <Input.TextArea
+                                rows={2}
+                                value={deepDraftReview.basics.pitch}
+                                onChange={event => updateDeepDraftReview({ basics: { ...deepDraftReview.basics, pitch: event.target.value } })}
+                                placeholder="一句话卖点：主角、冲突、爽点承诺"
+                              />
+                              <Input.TextArea
+                                rows={3}
+                                value={deepDraftReview.basics.synopsis}
+                                onChange={event => updateDeepDraftReview({ basics: { ...deepDraftReview.basics, synopsis: event.target.value } })}
+                                placeholder="项目简介：给后续大纲和正文使用的核心简介"
+                              />
+
+                              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 8 }}>
+                                <Input.TextArea
+                                  rows={4}
+                                  value={deepDraftReview.world.summary}
+                                  onChange={event => updateDeepDraftReview({ world: { ...deepDraftReview.world, summary: event.target.value } })}
+                                  placeholder="世界观摘要"
+                                />
+                                <Input.TextArea
+                                  rows={4}
+                                  value={deepDraftReview.world.powerSystem}
+                                  onChange={event => updateDeepDraftReview({ world: { ...deepDraftReview.world, powerSystem: event.target.value } })}
+                                  placeholder="能力 / 金手指 / 成长体系"
+                                />
+                              </div>
+
+                              <Card size="small" title="关键人物" extra={<Button size="small" onClick={() => updateDeepDraftReview({ characters: [...deepDraftReview.characters, { name: '', role: '', goal: '' }] })}>添加人物</Button>}>
+                                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                                  {deepDraftReview.characters.map((character, index) => (
+                                    <div key={`review-character-${index}`} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 8 }}>
+                                      <Input value={character.name} onChange={event => updateDeepDraftCharacter(index, { name: event.target.value })} placeholder="姓名" />
+                                      <Input value={character.role} onChange={event => updateDeepDraftCharacter(index, { role: event.target.value })} placeholder="定位" />
+                                      <Input value={character.goal} onChange={event => updateDeepDraftCharacter(index, { goal: event.target.value })} placeholder="目标 / 压力 / 关系" />
+                                      <Button onClick={() => removeDeepDraftItem('characters', index)}>移除</Button>
+                                    </div>
+                                  ))}
+                                  {deepDraftReview.characters.length === 0 && <Text type="secondary">还没有人物，可先添加主角、对手和核心同盟。</Text>}
+                                </Space>
+                              </Card>
+
+                              <Card size="small" title="分卷规划" extra={<Button size="small" onClick={() => updateDeepDraftReview({ volumes: [...deepDraftReview.volumes, { title: '', goal: '' }] })}>添加分卷</Button>}>
+                                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                                  {deepDraftReview.volumes.map((volume, index) => (
+                                    <div key={`review-volume-${index}`} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8 }}>
+                                      <Input value={volume.title} onChange={event => updateDeepDraftVolume(index, { title: event.target.value })} placeholder="卷名" />
+                                      <Input value={volume.goal} onChange={event => updateDeepDraftVolume(index, { goal: event.target.value })} placeholder="本卷阶段目标 / 地图 / 矛盾" />
+                                      <Button onClick={() => removeDeepDraftItem('volumes', index)}>移除</Button>
+                                    </div>
+                                  ))}
+                                  {deepDraftReview.volumes.length === 0 && <Text type="secondary">还没有分卷，可先写第一卷目标，再让模型扩展。</Text>}
+                                </Space>
+                              </Card>
+
+                              <Card size="small" title="前30章细纲" extra={<Button size="small" onClick={() => updateDeepDraftReview({ chapters: [...deepDraftReview.chapters, { chapterNo: deepDraftReview.chapters.length + 1, title: '', goal: '' }] })}>添加章节</Button>}>
+                                <div style={{ maxHeight: 360, overflow: 'auto', paddingRight: 4 }}>
+                                  <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                                    {deepDraftReview.chapters.slice(0, 30).map((chapter, index) => (
+                                      <div key={`review-chapter-${index}`} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(96px, 1fr))', gap: 8 }}>
+                                        <Input
+                                          type="number"
+                                          value={chapter.chapterNo}
+                                          onChange={event => updateDeepDraftChapter(index, { chapterNo: Number(event.target.value) || index + 1 })}
+                                          placeholder="章"
+                                        />
+                                        <Input value={chapter.title} onChange={event => updateDeepDraftChapter(index, { title: event.target.value })} placeholder="章节名" />
+                                        <Input value={chapter.goal} onChange={event => updateDeepDraftChapter(index, { goal: event.target.value })} placeholder="本章目标 / 爽点 / 悬念" />
+                                        <Button onClick={() => removeDeepDraftItem('chapters', index)}>移除</Button>
+                                      </div>
+                                    ))}
+                                    {deepDraftReview.chapters.length === 0 && <Text type="secondary">还没有章节细纲，可添加前3章或直接让模型定稿补齐。</Text>}
+                                  </Space>
+                                </div>
+                              </Card>
+
+                              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 8 }}>
+                                <Input.TextArea
+                                  rows={4}
+                                  value={deepDraftReview.continuity.foreshadowing}
+                                  onChange={event => updateDeepDraftReview({ continuity: { ...deepDraftReview.continuity, foreshadowing: event.target.value } })}
+                                  placeholder="伏笔与回收计划，每行一个"
+                                />
+                                <Input.TextArea
+                                  rows={4}
+                                  value={deepDraftReview.continuity.openQuestions}
+                                  onChange={event => updateDeepDraftReview({ continuity: { ...deepDraftReview.continuity, openQuestions: event.target.value } })}
+                                  placeholder="待确认问题，每行一个"
+                                />
+                              </div>
+                            </Space>
+                          </Card>
                           <Space.Compact block>
                             <Button
                               style={{ width: '50%' }}
                               onClick={() => {
-                                try {
-                                  const parsed = JSON.parse(seedDraftText || '{}')
-                                  const nextSeed = normalizeProjectSeedForUi(parsed)
-                                  setSeed(nextSeed)
-                                  applySeedToForm(nextSeed)
-                                  message.success('已采用当前草稿，仍建议模型定稿后创建')
-                                } catch {
-                                  message.error('草稿 JSON 格式不正确')
-                                }
+                                const nextSeed = normalizeProjectSeedForUi(deepDraftReviewModelToSeed(seed || {}, deepDraftReview))
+                                setSeed(nextSeed)
+                                applySeedToForm(nextSeed)
+                                setSeedFinalized(false)
+                                message.success('已采用审阅台草稿预览，仍建议模型定稿后创建')
                               }}
                             >
                               采用当前草稿预览
@@ -711,9 +843,15 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
                               loading={finalizingSeed}
                               onClick={finalizeProjectSeed}
                             >
-                              模型生成确定版本
+                              模型整理为确定版
                             </Button>
                           </Space.Compact>
+                          <details>
+                            <summary style={{ cursor: 'pointer', color: '#1677ff' }}>查看完整项目种子 JSON（高级）</summary>
+                            <pre style={{ maxHeight: 260, overflow: 'auto', marginTop: 8, padding: 10, background: '#f8fafc', borderRadius: 8, fontSize: 12, whiteSpace: 'pre-wrap' }}>
+                              {JSON.stringify(deepDraftReviewModelToSeed(seed || {}, deepDraftReview), null, 2)}
+                            </pre>
+                          </details>
                         </>
                       ) : (
                         <details>
