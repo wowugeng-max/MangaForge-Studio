@@ -16,6 +16,7 @@ import {
 import { generateNovelChapterProse } from '../llm'
 import { buildMaterialScore } from './novel-chapter-context-routes'
 import { asArray, getNovelPayload, normalizeSceneProduction, parseJsonLikePayload } from './novel-route-utils'
+import { applyChapterWordTargetToContext, proseMaxTokensForWordTarget, resolveChapterWordTarget } from './novel-writing-service'
 
 function outlineChapterNo(outline: any) {
   const rawNo = Number(outline.raw_payload?.chapter_no || outline.raw_payload?.future100?.chapter_no || 0)
@@ -621,7 +622,11 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
       ])
       const chapter = chapters.find(item => item.id === chapterId)
       if (!chapter) return res.status(404).json({ error: 'chapter not found' })
-      let contextPackage = await ctx.buildChapterContextPackage(activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews)
+      let wordTarget = resolveChapterWordTarget(project, chapter, req.body || {})
+      let contextPackage = applyChapterWordTargetToContext(
+        await ctx.buildChapterContextPackage(activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews),
+        wordTarget,
+      )
       let steps = ctx.buildPipelineSteps()
       steps = ctx.updatePipelineStep(steps, 'context', {
         status: contextPackage.preflight.ready ? 'success' : 'warn',
@@ -637,7 +642,11 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
             raw_payload: { ...(chapter.raw_payload || {}), scene_cards_source: 'pipeline_confirmation' },
           } as any, { createVersion: false }) || chapter
           const refreshedChapters = await listNovelChapters(activeWorkspace, projectId)
-          contextPackage = await ctx.buildChapterContextPackage(activeWorkspace, project, updatedChapter, refreshedChapters, worldbuilding, characters, outlines, reviews)
+          wordTarget = resolveChapterWordTarget(project, updatedChapter, req.body || {})
+          contextPackage = applyChapterWordTargetToContext(
+            await ctx.buildChapterContextPackage(activeWorkspace, project, updatedChapter, refreshedChapters, worldbuilding, characters, outlines, reviews),
+            wordTarget,
+          )
           steps = ctx.updatePipelineStep(steps, 'scene_cards', {
             status: 'needs_confirmation',
             detail: `已生成 ${sceneResult.sceneCards.length} 个场景卡，等待人工确认。`,
@@ -690,7 +699,11 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
       ])
       const chapter = chapters.find(item => item.id === chapterId)
       if (!chapter) return res.status(404).json({ error: 'chapter not found' })
-      const contextPackage = await ctx.buildChapterContextPackage(activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews)
+      const wordTarget = resolveChapterWordTarget(project, chapter, req.body || {})
+      const contextPackage = applyChapterWordTargetToContext(
+        await ctx.buildChapterContextPackage(activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews),
+        wordTarget,
+      )
       if (!contextPackage.preflight.ready && req.body?.allow_incomplete !== true) {
         return res.status(412).json({ error: '场景卡生成前置检查未通过', error_code: 'SCENE_PREFLIGHT_BLOCKED', preflight: contextPackage.preflight, context_package: contextPackage })
       }
@@ -737,7 +750,11 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
         res.setHeader('Connection', 'keep-alive')
       }
       markStage('context', '构建续写上下文包', 'running')
-      let contextPackage = await ctx.buildChapterContextPackage(activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews)
+      let wordTarget = resolveChapterWordTarget(project, chapter, req.body || {})
+      let contextPackage = applyChapterWordTargetToContext(
+        await ctx.buildChapterContextPackage(activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews),
+        wordTarget,
+      )
       markStage(
         'context',
         contextPackage.preflight.ready ? '续写上下文包已就绪' : '续写上下文包存在缺口',
@@ -775,7 +792,11 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
             } as any, { createVersion: false })
             if (updatedSceneChapter) chapter = updatedSceneChapter
             chapters = await listNovelChapters(activeWorkspace, projectId)
-            contextPackage = await ctx.buildChapterContextPackage(activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews)
+            wordTarget = resolveChapterWordTarget(project, chapter, req.body || {})
+            contextPackage = applyChapterWordTargetToContext(
+              await ctx.buildChapterContextPackage(activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews),
+              wordTarget,
+            )
             markStage('scene_cards', `场景卡已生成：${sceneResult.sceneCards.length} 个`, 'success', '', { scene_cards: sceneResult.sceneCards })
           } else {
             markStage('scene_cards', '场景卡生成为空，继续使用章节细纲', 'warn')
@@ -802,6 +823,7 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
         contextPackage,
         migrationPlan,
         paragraphTask: ctx.buildParagraphProseContext(project, contextPackage, migrationPlan, chapter),
+        maxTokens: proseMaxTokensForWordTarget(wordTarget),
       } as any, activeWorkspace, ctx.getStageModelId(project, 'draft', modelId))
       const resultPayload = getNovelPayload(result)
       let targetProse: any = null

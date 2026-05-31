@@ -77,6 +77,7 @@ const productionModeOptions = [
 
 type WorkspaceArea = 'storyPlanning' | 'chapterWriting' | 'storyAssets' | 'qualityRevision' | 'productionOps'
 type ChapterOwnedData = { chapterId: number; updatedAt: any; data: any }
+type ChapterWordTargetMode = 'standard' | 'long' | 'custom'
 
 /* ── main component ─────────────────────────────────────────────── */
 export default function NovelProjectWorkspace() {
@@ -115,6 +116,8 @@ export default function NovelProjectWorkspace() {
   const [releaseRepairExecutingId, setReleaseRepairExecutingId] = useState<number | null>(null)
   const [commercialToolLoading, setCommercialToolLoading] = useState('')
   const [productionMode, setProductionMode] = useState('draft_review_revise_store')
+  const [chapterWordTargetMode, setChapterWordTargetMode] = useState<ChapterWordTargetMode>('standard')
+  const [chapterTargetWordCount, setChapterTargetWordCount] = useState(3000)
   const [activeChapterDiagnostics, setActiveChapterDiagnostics] = useState<ChapterOwnedData | null>(null)
   const diagnosticsRequestRef = useRef(0)
   const [activeChapterContextPackage, setActiveChapterContextPackage] = useState<ChapterOwnedData | null>(null)
@@ -125,6 +128,11 @@ export default function NovelProjectWorkspace() {
   const [future100SelectedNos, setFuture100SelectedNos] = useState<number[]>([])
   const [future100ApplyLoading, setFuture100ApplyLoading] = useState(false)
   const [future100FocusOutlineIds, setFuture100FocusOutlineIds] = useState<number[]>([])
+
+  const chapterWordTargetPayload = () => ({
+    word_target_mode: chapterWordTargetMode,
+    ...(chapterWordTargetMode === 'custom' ? { target_word_count: chapterTargetWordCount } : {}),
+  })
 
   // ── 大纲生成控制面板 ──
   const [outlinePanelOpen, setOutlinePanelOpen] = useState(false)
@@ -755,7 +763,12 @@ export default function NovelProjectWorkspace() {
         try {
           const resp = await fetch(`${apiClient.defaults.baseURL}/novel/chapters/${ch.id}/generate-prose`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ project_id: projectId, model_id: selectedModelId, prompt: `请生成第 ${ch.chapter_no} 章《${displayValue(ch.title)}》完整正文` }),
+            body: JSON.stringify({
+              project_id: projectId,
+              model_id: selectedModelId,
+              ...chapterWordTargetPayload(),
+              prompt: `请生成第 ${ch.chapter_no} 章《${displayValue(ch.title)}》完整正文`,
+            }),
           })
           const raw = await resp.text()
           let data: any = null
@@ -993,7 +1006,7 @@ export default function NovelProjectWorkspace() {
       const res = await apiClient.get(`/novel/chapters/${chapterId}/quality-card`, { params: { project_id: projectId } })
       const card = res.data?.quality_card || {}
       Modal.info({
-        title: '章节质量卡',
+        title: '章节交稿质检',
         width: 900,
         content: (
           <Space direction="vertical" size={12} style={{ width: '100%' }}>
@@ -1031,7 +1044,7 @@ export default function NovelProjectWorkspace() {
         ),
       })
     } catch (error: any) {
-      message.error(error?.response?.data?.error || error?.message || '章节质量卡加载失败')
+      message.error(error?.response?.data?.error || error?.message || '章节交稿质检加载失败')
     }
   }
 
@@ -1308,6 +1321,7 @@ export default function NovelProjectWorkspace() {
         start_chapter: activeChapter?.chapter_no || undefined,
         count: 10,
         production_mode: productionMode,
+        ...chapterWordTargetPayload(),
         require_scene_confirmation: productionMode !== 'scene_cards_only',
       })
       await loadProjectModules()
@@ -1330,6 +1344,7 @@ export default function NovelProjectWorkspace() {
         count: 10,
         min_score: 65,
         production_mode: productionMode,
+        ...chapterWordTargetPayload(),
         require_scene_confirmation: productionMode !== 'scene_cards_only',
       })
       await loadProjectModules()
@@ -1382,6 +1397,7 @@ export default function NovelProjectWorkspace() {
         create_missing: true,
         sync_chapter_fields: true,
         production_mode: productionMode,
+        ...chapterWordTargetPayload(),
         require_scene_confirmation: productionMode !== 'scene_cards_only',
       })
       await loadProjectModules()
@@ -3331,6 +3347,7 @@ export default function NovelProjectWorkspace() {
         model_id: selectedModelId,
         max_chapters: 50,
         production_mode: productionMode,
+        ...chapterWordTargetPayload(),
       })
       await loadProjectModules()
       message.success('章节群执行完成或已暂停')
@@ -3403,6 +3420,7 @@ export default function NovelProjectWorkspace() {
       const res = await apiClient.post(`/novel/chapters/${activeChapter.id}/generation-pipeline/start`, {
         project_id: projectId,
         model_id: selectedModelId,
+        ...chapterWordTargetPayload(),
         generate_scene_cards: true,
       })
       if (res.data?.chapter) {
@@ -3446,6 +3464,7 @@ export default function NovelProjectWorkspace() {
           headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
           body: JSON.stringify({
             project_id: projectId, model_id: selectedModelId,
+            ...chapterWordTargetPayload(),
             prompt: `请生成第 ${targetChapter.chapter_no} 章《${displayValue(targetChapter.title)}》完整正文`,
             payload: ctx,
             allow_incomplete: Boolean(options.allowIncomplete),
@@ -4136,6 +4155,10 @@ export default function NovelProjectWorkspace() {
           onStartChapterPipeline={startChapterPipeline}
           onCreateEditorReport={createEditorReport}
           onEditActiveChapter={() => activeChapter && openEditor('chapter', activeChapter)}
+          generationWordTargetMode={chapterWordTargetMode}
+          generationTargetWordCount={chapterTargetWordCount}
+          onGenerationWordTargetModeChange={setChapterWordTargetMode}
+          onGenerationTargetWordCountChange={setChapterTargetWordCount}
           writingRecommendation={writingRecommendation}
           chapterAcceptanceDesk={writingCockpitModel.chapterAcceptanceDesk}
           deliveryActionLoading={proseQualityLoading || editorReportLoading || generatingProse}
@@ -4171,7 +4194,7 @@ export default function NovelProjectWorkspace() {
         title: '质检修订',
         desc: '检查当前章、前后文连续性、全书一致性、审阅批注和质量基准。',
         actions: [
-          { label: '当前章质量卡', onClick: openChapterQualityCard, primary: true, disabled: !activeChapter },
+          { label: '当前章交稿质检', onClick: openChapterQualityCard, primary: true, disabled: !activeChapter },
           { label: '编辑报告', onClick: createEditorReport, loading: editorReportLoading, disabled: !activeChapter || !selectedModelId },
           { label: '章节审阅批注', onClick: () => setReviewAnnotationsOpen(true) },
           { label: '全书一致性图谱', onClick: () => setConsistencyGraphOpen(true) },
@@ -4601,7 +4624,7 @@ export default function NovelProjectWorkspace() {
             </Card>
             <Card size="small" title="质量基准">
               <Space direction="vertical" style={{ width: '100%' }}>
-                <Button block onClick={openChapterQualityCard}>当前章质量卡</Button>
+                <Button block onClick={openChapterQualityCard}>当前章交稿质检</Button>
                 <Button block onClick={() => setQualityBenchmarkOpen(true)}>质量评测基准面板</Button>
                 <Button block onClick={() => setReviewAnnotationsOpen(true)}>章节审阅批注</Button>
                 <Button block onClick={() => setConsistencyGraphOpen(true)}>全书一致性图谱</Button>

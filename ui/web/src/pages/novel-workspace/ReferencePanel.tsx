@@ -1,7 +1,9 @@
 import React from 'react'
 import { Button, Card, Collapse, Empty, Space, Tabs, Tag, Typography } from 'antd'
+import { AppstoreOutlined, BookOutlined, CloseOutlined } from '@ant-design/icons'
 import { SettingWorkshopPanel } from './SettingWorkshopPanel'
 import { displayPreview, displayValue, versionSourceColor, versionSourceLabel } from './utils'
+import './ReferencePanel.css'
 
 const { Text, Paragraph } = Typography
 
@@ -156,8 +158,8 @@ export function ReferencePanel({
 }) {
   if (!open) {
     return (
-      <div style={{ width: 28, flexShrink: 0, background: '#fafafa', borderLeft: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <Button type="text" shape="circle" size="small" onClick={onOpen}>📚</Button>
+      <div className="novel-reference-collapsed">
+        <Button type="text" shape="circle" size="small" icon={<BookOutlined />} onClick={onOpen} />
       </div>
     )
   }
@@ -179,45 +181,35 @@ export function ReferencePanel({
   ]
 
   return (
-    <div style={{
-      width: 280, flexShrink: 0, background: '#fff',
-      borderLeft: '1px solid #f0f0f0', display: 'flex', flexDirection: 'column', overflow: 'hidden',
-      minHeight: 0,
-    }}>
-      <div style={{ padding: '8px 12px', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+    <div className="novel-reference-panel">
+      <div className="novel-reference-header">
         <Space size={6}>
-          <Text strong style={{ fontSize: 12 }}>📚 参考资料</Text>
+          <BookOutlined className="novel-reference-header-icon" />
+          <Text strong style={{ fontSize: 12 }}>参考资料</Text>
           <Tag bordered={false} color="blue" style={{ marginRight: 0 }}>
             {referenceNavItems.find(item => item.key === activeTab)?.label || '卡片'}
           </Tag>
         </Space>
         <Space size={4}>
-          {onOpenCreativeCards && <Button type="text" size="small" onClick={onOpenCreativeCards}>卡片</Button>}
-          <Button type="text" size="small" onClick={onClose}>✕</Button>
+          {onOpenCreativeCards && <Button className="novel-reference-header-command" type="text" size="small" icon={<AppstoreOutlined />} onClick={onOpenCreativeCards}>卡片</Button>}
+          <Button type="text" shape="circle" size="small" icon={<CloseOutlined />} onClick={onClose} />
         </Space>
       </div>
-      <div style={{ padding: 8, borderBottom: '1px solid #f0f0f0', background: '#fafafa' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 6 }}>
+      <div className="novel-reference-nav-shell">
+        <div className="novel-reference-nav-rail">
           {referenceNavItems.map(item => {
             const active = item.key === activeTab
             return (
               <Button
                 key={item.key}
                 size="small"
-                type={active ? 'primary' : 'default'}
+                type="text"
+                className={active ? 'novel-reference-nav-item is-active' : 'novel-reference-nav-item'}
                 onClick={() => onTabChange(item.key)}
-                style={{
-                  width: '100%',
-                  minWidth: 0,
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  paddingInline: 8,
-                }}
               >
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.label}</span>
+                <span className="novel-reference-nav-label">{item.label}</span>
                 {item.badge !== '' && item.badge !== 0 && (
-                  <span style={{ fontSize: 10, opacity: active ? 0.9 : 0.65, marginLeft: 4 }}>{item.badge}</span>
+                  <span className="novel-reference-nav-badge">{item.badge}</span>
                 )}
               </Button>
             )
@@ -662,11 +654,11 @@ export function ReferencePanel({
                                 </Button>
                               )}
                               {onApplyEditorRevision && !isStale && usedByRevisions.length === 0 && (
-                                <Space wrap size={4}>
-                                  <Button size="small" onClick={() => onApplyEditorRevision(report, { revisionMode: 'expand_action' })}>补动作</Button>
-                                  <Button size="small" onClick={() => onApplyEditorRevision(report, { revisionMode: 'cut_description' })}>砍描写</Button>
-                                  <Button size="small" onClick={() => onApplyEditorRevision(report, { revisionMode: 'tighten_pacing' })}>提节奏</Button>
-                                  <Button size="small" onClick={() => onApplyEditorRevision(report, { revisionMode: 'add_consequence' })}>补后果</Button>
+                                <Space className="novel-reference-revision-chip-row" wrap size={4}>
+                                  <Button className="novel-reference-revision-chip" type="text" size="small" onClick={() => onApplyEditorRevision(report, { revisionMode: 'expand_action' })}>补动作</Button>
+                                  <Button className="novel-reference-revision-chip" type="text" size="small" onClick={() => onApplyEditorRevision(report, { revisionMode: 'cut_description' })}>砍描写</Button>
+                                  <Button className="novel-reference-revision-chip" type="text" size="small" onClick={() => onApplyEditorRevision(report, { revisionMode: 'tighten_pacing' })}>提节奏</Button>
+                                  <Button className="novel-reference-revision-chip" type="text" size="small" onClick={() => onApplyEditorRevision(report, { revisionMode: 'add_consequence' })}>补后果</Button>
                                 </Space>
                               )}
                             </Space>

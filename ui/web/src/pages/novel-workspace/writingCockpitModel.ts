@@ -898,7 +898,7 @@ function buildChapterAcceptanceDesk(args: {
     || quality?.passed === false,
   )
   const secondaryActions: Array<{ key: WritingCockpitActionKey; label: string }> = [
-    { key: 'review_draft', label: '查看质量卡' },
+    { key: 'review_draft', label: '查看交稿质检' },
     { key: 'open_editor_reports', label: ACTION_LABELS.open_editor_reports },
     { key: 'open_version_history', label: ACTION_LABELS.open_version_history },
   ]

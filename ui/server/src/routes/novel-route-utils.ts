@@ -68,7 +68,7 @@ export function deepMergeObjects(base: any, override: any): any {
 export function getStyleLock(project: any) {
   const raw = project?.reference_config?.style_lock || {}
   const targetLength = raw.chapter_word_range || raw.target_length || (
-    project.length_target === 'long' ? '4000-6000字' : project.length_target === 'short' ? '1500-2500字' : '2500-4000字'
+    project.length_target === 'short' ? '1800-2500字' : '2800-3500字'
   )
   return {
     narrative_person: raw.narrative_person || raw.narrative_style || ((project.style_tags || []).join('、') || '保持当前项目文风'),

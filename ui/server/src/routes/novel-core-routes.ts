@@ -83,7 +83,45 @@ function parseNestedSeed(value: any): any {
   return {}
 }
 
-function normalizeProjectSeedPayload(payload: any, rawIdea: string) {
+function normalizeLengthTarget(value: any) {
+  const raw = String(value || '').trim()
+  return ['short', 'medium', 'long', 'epic'].includes(raw) ? raw : ''
+}
+
+function describeLengthTarget(lengthTarget: string) {
+  switch (normalizeLengthTarget(lengthTarget)) {
+    case 'short':
+      return '用户指定篇幅：short。按短篇/小体量项目孵化，聚焦单一核心冲突、少量关键人物和1个主副本/主事件；不要强行扩展为多卷长篇，chapter_outlines 可按10-20章规划。'
+    case 'medium':
+      return '用户指定篇幅：medium。按20-80万字中篇孵化，保留清晰主线、2-3个阶段目标和可完整收束的副本/事件链，chapter_outlines 至少30章。'
+    case 'long':
+      return '用户指定篇幅：long。按80-300万字长篇连载孵化，必须设计3-5个分卷、长期冲突引擎、成长体系、反派阶梯和前30章追读节奏。'
+    case 'epic':
+      return '用户指定篇幅：epic。按300万字以上超长篇连载孵化，必须设计5卷以上长线结构、可扩展人物/势力/地图资产池、长期追读钩子、100章以后方向和主线升级阶梯。'
+    default:
+      return '用户指定篇幅：medium。按20-80万字中篇孵化；如果用户想法明显更适合短篇或长篇，可在 open_questions 中提示确认。'
+  }
+}
+
+function hasObjectText(value: any, keys: string[]) {
+  const record = parseNestedSeed(value)
+  return keys.some(key => firstSeedText(record[key]))
+}
+
+export function hasUsableProjectSeed(seed: any) {
+  const root = parseNestedSeed(seed)
+  if (!root || !Object.keys(root).length) return false
+  const hasCorePitch = Boolean(firstSeedText(root.synopsis, root.logline, root.core_premise, root.main_conflict))
+  const hasWorld = hasObjectText(root.worldbuilding, ['world_summary', 'summary', 'power_system', 'rules'])
+  const hasCharacter = hasObjectText(root.protagonist, ['name', 'identity', 'goal', 'power_or_cheat'])
+    || asSeedArray(root.characters).some(character => hasObjectText(character, ['name', 'identity', 'role_type', 'goal', 'summary']))
+  const hasPlan = asSeedArray(root.volume_outlines).length > 0
+    || asSeedArray(root.chapter_outlines).length > 0
+    || asSeedArray(root.foreshadowing_plan).length > 0
+  return hasCorePitch && (hasWorld || hasCharacter || hasPlan)
+}
+
+function normalizeProjectSeedPayload(payload: any, rawIdea: string, requestedLengthTarget = '') {
   const root = parseNestedSeed(payload)
   const candidates = [
     root.project_seed,
@@ -110,7 +148,7 @@ function normalizeProjectSeedPayload(payload: any, rawIdea: string) {
     genre: firstSeedText(source.genre, source.main_genre, source.category, inferSeedGenre(rawForInference)),
     sub_genres: asSeedArray(source.sub_genres).length ? asSeedArray(source.sub_genres) : asSeedArray(source.genre_tags || source.tags),
     target_audience: firstSeedText(source.target_audience, source.audience, commercial.platform),
-    length_target: firstSeedText(source.length_target, source.length, 'medium'),
+    length_target: firstSeedText(normalizeLengthTarget(requestedLengthTarget), normalizeLengthTarget(source.length_target), normalizeLengthTarget(source.length), 'medium'),
     style_tags: asSeedArray(source.style_tags).length ? asSeedArray(source.style_tags) : asSeedArray(source.tone_tags),
     commercial_tags: asSeedArray(source.commercial_tags).length ? asSeedArray(source.commercial_tags) : asSeedArray(commercial.tropes || commercial.selling_points),
     synopsis: firstSeedText(source.synopsis, source.project_summary, source.summary, masterOutline.summary, commercial.reader_promise, source.core_premise, source.logline),
@@ -122,6 +160,9 @@ function normalizeProjectSeedPayload(payload: any, rawIdea: string) {
     worldbuilding,
     plot_engine: plotEngine,
     writing_bible: writingBible,
+    volume_outlines: asSeedArray(source.volume_outlines).length ? asSeedArray(source.volume_outlines) : asSeedArray(root.volume_outlines),
+    chapter_outlines: asSeedArray(source.chapter_outlines).length ? asSeedArray(source.chapter_outlines) : asSeedArray(root.chapter_outlines),
+    foreshadowing_plan: asSeedArray(source.foreshadowing_plan).length ? asSeedArray(source.foreshadowing_plan) : asSeedArray(root.foreshadowing_plan),
     characters: asSeedArray(source.characters).length ? asSeedArray(source.characters) : asSeedArray(root.characters),
     open_questions: asSeedArray(source.open_questions).length ? asSeedArray(source.open_questions) : asSeedArray(source.questions),
     next_steps: asSeedArray(source.next_steps).length ? asSeedArray(source.next_steps) : asSeedArray(source.suggested_next_steps),
@@ -130,20 +171,24 @@ function normalizeProjectSeedPayload(payload: any, rawIdea: string) {
   }
 }
 
-function buildProjectSeedPrompt(idea: string, requestedTitle = '') {
+export function buildProjectSeedPrompt(idea: string, requestedTitle = '', requestedLengthTarget = '') {
+  const normalizedLengthTarget = normalizeLengthTarget(requestedLengthTarget) || 'medium'
   return [
     '任务：把用户碎片化小说想法整理成可创建项目的结构化项目种子。只输出 JSON object，不要 Markdown，不要解释。',
     requestedTitle ? `用户指定作品名：${requestedTitle}` : '',
+    describeLengthTarget(normalizedLengthTarget),
     '',
     '用户原始想法：',
     idea.slice(0, 20000) || '用户只提供了作品名。请基于作品名生成一个原创、可商业连载的项目种子，不要套用现有作品。',
+    '',
+    '硬性要求：即使用户只提供作品名，也必须原创扩写完整项目种子；synopsis、logline、core_premise、main_conflict、protagonist、worldbuilding、volume_outlines、chapter_outlines 不得为空。',
     '',
     '请输出字段：',
     'title: 作品暂定名，必须短而有辨识度；如果用户指定作品名，优先使用用户指定作品名',
     'genre: 主类型，从玄幻/仙侠/悬疑/都市/历史/科幻/奇幻/武侠/言情/末世/穿越/系统/其他中选择最接近的一项',
     'sub_genres: array，子类型标签',
     'target_audience: 男频/女频/全向/轻小说/漫剧/Z世代/其他',
-    'length_target: short|medium|long|epic',
+    `length_target: 必须输出 "${normalizedLengthTarget}"`,
     'style_tags: array，文风标签',
     'commercial_tags: array，商业定位标签',
     'synopsis: 150-300字项目简介，清楚说明主角、世界、核心冲突和看点',
@@ -157,13 +202,13 @@ function buildProjectSeedPrompt(idea: string, requestedTitle = '') {
     'writing_bible: {promise, mainline, world_rules, style_lock, forbidden, safety_policy}',
     'characters: array，列出关键人物 name, role_type, motivation, goal, conflict, current_state',
     'master_outline: {title, summary, hook}',
-    'volume_outlines: array，输出 3-5 个分卷，每项 title, summary, hook, chapter_count',
-    'chapter_outlines: array，输出至少前 30 章细纲；如果故事结构已经清晰，可以输出 60 章。每项 chapter_no,title,summary,conflict,ending_hook',
+    'volume_outlines: array，按用户指定篇幅决定分卷数量；短篇可1卷，中篇2-3卷，长篇3-5卷，超长篇5卷以上。每项 title, summary, hook, chapter_count',
+    'chapter_outlines: array，按用户指定篇幅决定细纲范围；短篇可10-20章，中篇/长篇/超长篇至少前30章。每项 chapter_no,title,summary,conflict,ending_hook',
     'foreshadowing_plan: array，输出关键伏笔 plant_at,payoff_at,description',
     'open_questions: array，需要用户后续确认的问题',
     'next_steps: array，进入工作台后建议优先做什么',
     '',
-    '要求：保留用户设定中的核心因果；补齐缺失但不要推翻原意；如果名字缺失可以给暂定名；不要直接生成正文；避免照搬任何现有作品的专有设定、角色名、桥段或原句。',
+    '要求：保留用户设定中的核心因果；补齐缺失但不要推翻原意；如果名字缺失可以给暂定名；不要直接生成正文；避免照搬任何现有作品的专有设定、角色名、桥段或原句；不要返回只有标题、题材、标签的稀薄 JSON。',
   ].filter(Boolean).join('\n')
 }
 
@@ -192,15 +237,16 @@ function buildFinalizeProjectSeedPrompt(draft: any, idea: string, requestedTitle
   ].filter(Boolean).join('\n')
 }
 
-async function deriveProjectSeedWithModel(activeWorkspace: string, idea: string, modelId: string, requestedTitle = '') {
-  const prompt = buildProjectSeedPrompt(idea, requestedTitle)
+async function deriveProjectSeedWithModel(activeWorkspace: string, idea: string, modelId: string, requestedTitle = '', requestedLengthTarget = '') {
+  const lengthTarget = normalizeLengthTarget(requestedLengthTarget) || 'medium'
+  const prompt = buildProjectSeedPrompt(idea, requestedTitle, lengthTarget)
   const projectStub = {
     id: 0,
     title: requestedTitle || '创意草稿解析',
     genre: '',
     sub_genres: [],
     synopsis: idea.slice(0, 500),
-    length_target: 'medium',
+    length_target: lengthTarget,
     target_audience: '',
     style_tags: [],
     commercial_tags: [],
@@ -216,7 +262,7 @@ async function deriveProjectSeedWithModel(activeWorkspace: string, idea: string,
     temperature: 0.42,
     skipMemory: true,
   })
-  const seed = normalizeProjectSeedPayload((result as any).output || parseJsonLikePayload((result as any).content) || {}, idea)
+  const seed = normalizeProjectSeedPayload((result as any).output || parseJsonLikePayload((result as any).content) || {}, idea, lengthTarget)
   if (requestedTitle && !seed.title) seed.title = requestedTitle
   return { seed, result }
 }
@@ -245,7 +291,7 @@ async function finalizeProjectSeedWithModel(activeWorkspace: string, draft: any,
     temperature: 0.35,
     skipMemory: true,
   })
-  const seed = normalizeProjectSeedPayload((result as any).output || parseJsonLikePayload((result as any).content) || {}, idea)
+  const seed = normalizeProjectSeedPayload((result as any).output || parseJsonLikePayload((result as any).content) || {}, idea, draft?.length_target)
   if (requestedTitle && !seed.title) seed.title = requestedTitle
   return { seed, result }
 }
@@ -479,13 +525,14 @@ export function registerNovelCoreRoutes(app: Express, getWorkspace: () => string
       await ensureWorkspaceStructure(activeWorkspace)
       const idea = String(req.body?.idea || '').trim()
       const title = String(req.body?.title || '').trim()
+      const lengthTarget = normalizeLengthTarget(req.body?.length_target) || 'medium'
       if (!idea && !title) return res.status(400).json({ error: 'title or idea is required' })
       const modelId = req.body?.model_id ? String(req.body.model_id) : undefined
       if (!modelId) return res.status(400).json({ error: 'model_id is required' })
-      const { seed, result } = await deriveProjectSeedWithModel(activeWorkspace, idea, modelId, title)
-      if ((result as any).error || !seed || typeof seed !== 'object' || Array.isArray(seed) || !Object.keys(seed).length) {
+      const { seed, result } = await deriveProjectSeedWithModel(activeWorkspace, idea, modelId, title, lengthTarget)
+      if ((result as any).error || !seed || typeof seed !== 'object' || Array.isArray(seed) || !Object.keys(seed).length || !hasUsableProjectSeed(seed)) {
         return res.status(502).json({
-          error: (result as any).error || '模型未返回有效项目种子',
+          error: (result as any).error || '模型返回的项目种子过薄，请重试或换一个更适合长文本结构化输出的模型',
           raw_preview: String((result as any).content || '').slice(0, 3000),
         })
       }
@@ -506,9 +553,9 @@ export function registerNovelCoreRoutes(app: Express, getWorkspace: () => string
       const modelId = req.body?.model_id ? String(req.body.model_id) : undefined
       if (!modelId) return res.status(400).json({ error: 'model_id is required' })
       const { seed, result } = await finalizeProjectSeedWithModel(activeWorkspace, draft, idea, modelId, title)
-      if ((result as any).error || !seed || typeof seed !== 'object' || Array.isArray(seed) || !Object.keys(seed).length) {
+      if ((result as any).error || !seed || typeof seed !== 'object' || Array.isArray(seed) || !Object.keys(seed).length || !hasUsableProjectSeed(seed)) {
         return res.status(502).json({
-          error: (result as any).error || '模型未返回有效确定版项目种子',
+          error: (result as any).error || '模型返回的确定版项目种子过薄，请补充草稿后重试或换一个更适合长文本结构化输出的模型',
           raw_preview: String((result as any).content || '').slice(0, 3000),
         })
       }
@@ -524,19 +571,26 @@ export function registerNovelCoreRoutes(app: Express, getWorkspace: () => string
       await ensureWorkspaceStructure(activeWorkspace)
       const title = String(req.body?.title || '').trim()
       const idea = String(req.body?.idea || '').trim()
+      const lengthTarget = normalizeLengthTarget(req.body?.length_target) || 'medium'
       const modelId = req.body?.model_id ? String(req.body.model_id) : undefined
-      let seed = req.body?.seed ? normalizeProjectSeedPayload(req.body.seed, idea) : null
+      let seed = req.body?.seed ? normalizeProjectSeedPayload(req.body.seed, idea, lengthTarget) : null
       let result: any = null
       if (!seed || !Object.keys(seed).length || (!seed.title && !seed.synopsis && !seed.logline)) {
         if (!title && !idea) return res.status(400).json({ error: 'title or idea is required' })
         if (!modelId) return res.status(400).json({ error: 'model_id is required when seed is not provided' })
-        const derived = await deriveProjectSeedWithModel(activeWorkspace, idea, modelId, title)
+        const derived = await deriveProjectSeedWithModel(activeWorkspace, idea, modelId, title, lengthTarget)
         seed = derived.seed
         result = derived.result
       }
       if ((result as any)?.error || !seed || typeof seed !== 'object' || Array.isArray(seed) || !Object.keys(seed).length) {
         return res.status(502).json({
           error: (result as any)?.error || '模型未返回有效项目种子',
+          raw_preview: String((result as any)?.content || '').slice(0, 3000),
+        })
+      }
+      if (!hasUsableProjectSeed(seed)) {
+        return res.status(502).json({
+          error: '模型返回的项目种子过薄，请重试或换一个更适合长文本结构化输出的模型',
           raw_preview: String((result as any)?.content || '').slice(0, 3000),
         })
       }

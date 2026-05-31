@@ -1,0 +1,128 @@
+.novel-reference-collapsed {
+  width: 28px;
+  flex-shrink: 0;
+  background: #fafafa;
+  border-left: 1px solid #f0f0f0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.novel-reference-panel {
+  width: 280px;
+  flex-shrink: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-left: 1px solid #e6ebf2;
+  background: #fff;
+}
+
+.novel-reference-header {
+  min-height: 42px;
+  padding: 8px 10px 8px 12px;
+  border-bottom: 1px solid #e6ebf2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: linear-gradient(180deg, #ffffff, #fbfcfe);
+}
+
+.novel-reference-header-icon {
+  color: #475569;
+  font-size: 14px;
+}
+
+.novel-reference-header-command.ant-btn {
+  border-radius: 999px;
+  color: #2563eb;
+  font-weight: 700;
+}
+
+.novel-reference-nav-shell {
+  padding: 8px 8px 10px;
+  border-bottom: 1px solid #e6ebf2;
+  background: #f8fafc;
+}
+
+.novel-reference-nav-rail {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.novel-reference-nav-item.ant-btn {
+  width: 100%;
+  min-width: 0;
+  height: 31px;
+  padding-inline: 9px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid transparent;
+  color: #334155;
+  font-weight: 700;
+  background: transparent;
+}
+
+.novel-reference-nav-item.ant-btn:hover {
+  background: #eef5ff;
+  color: #1d4ed8;
+}
+
+.novel-reference-nav-item.is-active.ant-btn {
+  border-color: #86b7ff;
+  background: #ffffff;
+  color: #1d4ed8;
+  box-shadow: inset 3px 0 0 #2563eb, 0 1px 4px rgba(37, 99, 235, 0.08);
+}
+
+.novel-reference-nav-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.novel-reference-nav-badge {
+  flex: 0 0 auto;
+  min-width: 18px;
+  max-width: 44px;
+  margin-left: 5px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #e8f1ff;
+  color: #2563eb;
+  font-size: 10px;
+  line-height: 17px;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.novel-reference-nav-item.is-active .novel-reference-nav-badge {
+  background: #2563eb;
+  color: #fff;
+}
+
+.novel-reference-revision-chip-row {
+  display: flex;
+  gap: 5px;
+}
+
+.novel-reference-revision-chip.ant-btn {
+  height: 26px;
+  padding-inline: 9px;
+  border-radius: 999px;
+  border: 1px solid #fde2a8;
+  background: #fffaf0;
+  color: #a15c07;
+  font-weight: 750;
+}
+
+.novel-reference-revision-chip.ant-btn:hover {
+  border-color: #f59e0b;
+  background: #fff7e6;
+  color: #8a4b00;
+}

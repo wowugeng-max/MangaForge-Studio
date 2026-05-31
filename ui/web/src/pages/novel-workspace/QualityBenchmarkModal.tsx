@@ -357,7 +357,7 @@ export function QualityBenchmarkModal({
       const finalScore = Math.max(0, Math.min(100, Math.round(base - issuePenalty - missingPenalty + (editorScore ? Math.min(8, (editorScore - 70) / 4) : 0) - (similarityRisk ? Math.min(16, similarityRisk / 4) : 0))))
       const actions = [
         !chapter.chapter_text ? '生成正文' : '',
-        !qualityScore && chapter.chapter_text ? '生成质量卡/自检' : '',
+        !qualityScore && chapter.chapter_text ? '生成交稿质检/自检' : '',
         !chapter.ending_hook && chapter.chapter_text ? '补章末钩子' : '',
         !(Array.isArray(chapter.scene_breakdown) && chapter.scene_breakdown.length > 0) ? '补场景卡' : '',
         similarityRisk && similarityRisk >= 35 ? '重写高相似桥段' : '',

@@ -13,6 +13,7 @@ import {
   SafetyOutlined,
   StopOutlined,
 } from '@ant-design/icons'
+import './ProductionGuidePanel.css'
 
 const { Text } = Typography
 
@@ -42,20 +43,6 @@ function statusColor(status: GuideStepStatus) {
   if (status === 'active') return 'blue'
   if (status === 'blocked') return 'red'
   return 'default'
-}
-
-function stepBorder(status: GuideStepStatus) {
-  if (status === 'done') return '#b7eb8f'
-  if (status === 'active') return '#91caff'
-  if (status === 'blocked') return '#ffccc7'
-  return '#edf0f5'
-}
-
-function stepBackground(status: GuideStepStatus) {
-  if (status === 'done') return '#f6ffed'
-  if (status === 'active') return '#f7fbff'
-  if (status === 'blocked') return '#fff7f7'
-  return '#fff'
 }
 
 export function ProductionGuidePanel({
@@ -217,7 +204,7 @@ export function ProductionGuidePanel({
     {
       no: 5,
       title: '质检修订',
-      desc: '做连续性、质量卡、仿写安全和商业化检查。',
+      desc: '做连续性、交稿质检、仿写安全和商业化检查。',
       status: proseChapterCount > 0 ? 'active' : 'pending',
       statusText: activeTaskCount > 0 ? `${activeTaskCount} 个任务进行中` : proseChapterCount > 0 ? '可质检' : '等待正文',
       primaryLabel: '任务中心',
@@ -243,14 +230,14 @@ export function ProductionGuidePanel({
   ]
 
   return (
-    <div>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+    <div className="production-guide-panel">
+      <div className="production-guide-header">
         <Button
           type="text"
           size="small"
+          className="production-guide-title-command"
           icon={collapsed ? <RightOutlined /> : <DownOutlined />}
           onClick={() => setCollapsed(prev => !prev)}
-          style={{ padding: 0, height: 24, fontSize: 12, color: '#667085', fontWeight: 600 }}
         >
           小说生产向导
         </Button>
@@ -267,7 +254,7 @@ export function ProductionGuidePanel({
         </Space>
       </div>
       {collapsed ? (
-        <Space wrap size={[4, 2]}>
+        <Space className="production-guide-collapsed-metrics" wrap size={[4, 2]}>
           <Tag color="blue" bordered={false}>章 {chapterCount}</Tag>
           <Tag color="green" bordered={false}>已写 {proseChapterCount}</Tag>
           <Tag color={materialReady ? 'green' : 'gold'} bordered={false}>材料 {materialNumericScore || '-'}</Tag>
@@ -280,17 +267,10 @@ export function ProductionGuidePanel({
               <div
                 key={step.no}
                 className={`production-guide-step production-guide-step-${step.status}`}
-                style={{
-                  border: `1px solid ${stepBorder(step.status)}`,
-                  borderRadius: 8,
-                  padding: 10,
-                  background: stepBackground(step.status),
-                  boxShadow: step.status === 'active' ? 'inset 3px 0 0 #1677ff' : step.status === 'blocked' ? 'inset 3px 0 0 #ff4d4f' : step.status === 'done' ? 'inset 3px 0 0 #52c41a' : 'inset 3px 0 0 #d9d9d9',
-                }}
               >
                 <Space direction="vertical" size={8} style={{ width: '100%' }}>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-                    <Tag color={statusColor(step.status)} bordered={false} style={{ marginRight: 0, minWidth: 24, textAlign: 'center' }}>
+                    <Tag className="production-guide-step-status" color={statusColor(step.status)} bordered={false}>
                       {step.status === 'done' ? <CheckCircleOutlined /> : step.no}
                     </Tag>
                     <div style={{ minWidth: 0, flex: 1 }}>
@@ -304,7 +284,7 @@ export function ProductionGuidePanel({
                   <Tooltip title={step.primaryDisabled ? '请先完成前置步骤' : ''}>
                     <Button
                       size="small"
-                      block
+                      className="production-guide-primary-command"
                       type={step.status === 'active' ? 'primary' : 'default'}
                       icon={step.primaryIcon}
                       loading={step.primaryLoading}
@@ -315,12 +295,13 @@ export function ProductionGuidePanel({
                     </Button>
                   </Tooltip>
                   {step.secondary && step.secondary.length > 0 && (
-                    <div style={{ display: 'grid', gridTemplateColumns: step.secondary.length >= 3 ? '1fr' : `repeat(${step.secondary.length}, minmax(0, 1fr))`, gap: 6 }}>
+                    <div className="production-guide-secondary-row">
                       {step.secondary.map(action => (
                         <Button
                           key={action.label}
                           size="small"
-                          style={{ width: '100%', minWidth: 0 }}
+                          type="text"
+                          className="production-guide-secondary-command"
                           loading={action.loading}
                           disabled={action.disabled}
                           onClick={action.onClick}
@@ -347,7 +328,7 @@ export function ProductionGuidePanel({
                   danger
                   block
                   icon={<StopOutlined />}
-                  style={{ marginTop: 6 }}
+                  className="production-guide-stop-command"
                   onClick={onCancelGenerateProse}
                 >
                   停止后续生成

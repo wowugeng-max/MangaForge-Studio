@@ -57,6 +57,59 @@ describe('deepDraftReviewModel', () => {
     expect(model.continuity.openQuestions).toBe('阵盟为何封锁低阶阵图？')
   })
 
+  test('falls back to raw payload when normalized seed only exposes basics', () => {
+    const model = buildDeepDraftReviewModel({
+      title: '超人的规则怪谈世界',
+      genre: '都市',
+      raw_payload: {
+        logline: '一个莽夫和一个智者在规则怪谈副本里互相补位。',
+        synopsis: '双主角穿越灰域，一个负责武力战斗和搞笑，一个负责破解规则与解开迷局。',
+        worldbuilding: {
+          world_summary: '灰域会把现实地点复制成原创规则怪谈副本。',
+          power_system: '规则推演、异常身体适应、污染抗性。',
+        },
+        protagonist: {
+          name: '林野',
+          identity: '武力担当',
+          goal: '保护队友并打穿怪谈副本',
+        },
+        antagonist: {
+          name: '管理员七号',
+          identity: '副本执行者',
+          goal: '阻止玩家触及灰域源头',
+        },
+        volume_outlines: [
+          { title: '午夜员工餐厅', summary: '建立双主角搭档模式' },
+        ],
+        chapter_outlines: [
+          { chapter_no: 1, title: '午夜入职', summary: '双主角读到第一份规则' },
+        ],
+        foreshadowing_plan: [
+          { description: '灰域直播间第一次标记主角队伍', payoff_at: '第一卷末' },
+        ],
+      },
+    })
+
+    expect(model.basics.pitch).toContain('莽夫和一个智者')
+    expect(model.basics.synopsis).toContain('双主角穿越灰域')
+    expect(model.world.summary).toContain('原创规则怪谈副本')
+    expect(model.world.powerSystem).toContain('污染抗性')
+    expect(model.characters.map(character => character.name)).toEqual(['林野', '管理员七号'])
+    expect(model.volumes[0]).toEqual({ title: '午夜员工餐厅', goal: '建立双主角搭档模式' })
+    expect(model.chapters[0]).toEqual({ chapterNo: 1, title: '午夜入职', goal: '双主角读到第一份规则' })
+    expect(model.continuity.foreshadowing).toContain('灰域直播间第一次标记主角队伍')
+  })
+
+  test('does not create blank protagonist or antagonist rows from missing objects', () => {
+    const model = buildDeepDraftReviewModel({
+      title: '空白草稿',
+      protagonist: {},
+      antagonist: {},
+    })
+
+    expect(model.characters).toEqual([])
+  })
+
   test('converts edited review fields back to a seed without losing raw structures', () => {
     const seed = {
       title: '阵库长明',

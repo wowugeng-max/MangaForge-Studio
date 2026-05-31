@@ -73,10 +73,11 @@ function joinListItems(value: any, fields: string[]) {
 
 function normalizeCharacter(value: any, fallbackRole = ''): DeepDraftCharacter | null {
   const record = asObject(value)
+  const hasCharacterSignal = firstText(record.name, record.title, record.role_type, record.role, record.identity, record.goal, record.motivation, record.summary, record.pressure)
+  if (!hasCharacterSignal) return null
   const name = firstText(record.name, record.title)
   const role = firstText(record.role_type, record.role, record.identity, fallbackRole)
   const goal = firstText(record.goal, record.motivation, record.summary, record.pressure)
-  if (!name && !role && !goal) return null
   return { name, role, goal }
 }
 
@@ -114,30 +115,42 @@ function mergeIndexedRecords<T extends Record<string, any>>(
 
 export function buildDeepDraftReviewModel(seed: any): DeepDraftReviewModel {
   const root = asObject(seed)
-  const worldbuilding = asObject(root.worldbuilding)
+  const rawPayload = asObject(root.raw_payload)
+  const worldbuilding = { ...asObject(rawPayload.worldbuilding), ...asObject(root.worldbuilding) }
+  const rawProtagonist = asObject(rawPayload.protagonist)
+  const rawAntagonist = asObject(rawPayload.antagonist)
+  const rawCharacters = Array.isArray(rawPayload.characters) ? rawPayload.characters : []
+  const rawVolumes = Array.isArray(rawPayload.volume_outlines) ? rawPayload.volume_outlines : []
+  const rawChapters = Array.isArray(rawPayload.chapter_outlines) ? rawPayload.chapter_outlines : []
+  const rawForeshadowing = Array.isArray(rawPayload.foreshadowing_plan) ? rawPayload.foreshadowing_plan : []
+  const rawQuestions = Array.isArray(rawPayload.open_questions) ? rawPayload.open_questions : []
   const characters = [
-    normalizeCharacter(root.protagonist, '主角'),
-    normalizeCharacter(root.antagonist, '反派'),
-    ...(Array.isArray(root.characters) ? root.characters.map(normalizeCharacter) : []),
+    normalizeCharacter({ ...rawProtagonist, ...asObject(root.protagonist) }, '主角'),
+    normalizeCharacter({ ...rawAntagonist, ...asObject(root.antagonist) }, '反派'),
+    ...(Array.isArray(root.characters) && root.characters.length > 0 ? root.characters : rawCharacters).map(normalizeCharacter),
   ].filter(Boolean) as DeepDraftCharacter[]
+  const volumes = Array.isArray(root.volume_outlines) && root.volume_outlines.length > 0 ? root.volume_outlines : rawVolumes
+  const chapters = Array.isArray(root.chapter_outlines) && root.chapter_outlines.length > 0 ? root.chapter_outlines : rawChapters
+  const foreshadowing = Array.isArray(root.foreshadowing_plan) && root.foreshadowing_plan.length > 0 ? root.foreshadowing_plan : rawForeshadowing
+  const openQuestions = Array.isArray(root.open_questions) && root.open_questions.length > 0 ? root.open_questions : rawQuestions
 
   return {
     basics: {
-      title: firstText(root.title, root.project_title, root.book_title),
-      genre: firstText(root.genre, root.main_genre, root.category),
-      pitch: firstText(root.logline, root.hook, root.reader_promise, root.core_premise),
-      synopsis: firstText(root.synopsis, root.project_summary, root.summary, root.core_premise),
+      title: firstText(root.title, root.project_title, root.book_title, rawPayload.title, rawPayload.project_title, rawPayload.book_title),
+      genre: firstText(root.genre, root.main_genre, root.category, rawPayload.genre, rawPayload.main_genre, rawPayload.category),
+      pitch: firstText(root.logline, root.hook, root.reader_promise, root.core_premise, rawPayload.logline, rawPayload.hook, rawPayload.reader_promise, rawPayload.core_premise),
+      synopsis: firstText(root.synopsis, root.project_summary, root.summary, root.core_premise, rawPayload.synopsis, rawPayload.project_summary, rawPayload.summary, rawPayload.core_premise),
     },
     world: {
-      summary: firstText(worldbuilding.world_summary, worldbuilding.summary, root.world_summary, root.setting),
-      powerSystem: firstText(worldbuilding.power_system, root.power_system, root.progression_engine),
+      summary: firstText(worldbuilding.world_summary, worldbuilding.summary, root.world_summary, root.setting, rawPayload.world_summary, rawPayload.setting),
+      powerSystem: firstText(worldbuilding.power_system, root.power_system, root.progression_engine, rawPayload.power_system, rawPayload.progression_engine),
     },
     characters,
-    volumes: Array.isArray(root.volume_outlines) ? root.volume_outlines.map(normalizeVolume).filter(Boolean) as DeepDraftVolume[] : [],
-    chapters: Array.isArray(root.chapter_outlines) ? root.chapter_outlines.map(normalizeChapter).filter(Boolean) as DeepDraftChapter[] : [],
+    volumes: volumes.map(normalizeVolume).filter(Boolean) as DeepDraftVolume[],
+    chapters: chapters.map(normalizeChapter).filter(Boolean) as DeepDraftChapter[],
     continuity: {
-      foreshadowing: joinListItems(root.foreshadowing_plan, ['name', 'title', 'hook']),
-      openQuestions: Array.isArray(root.open_questions) ? root.open_questions.map((item: any) => firstText(item)).filter(Boolean).join('\n') : '',
+      foreshadowing: joinListItems(foreshadowing, ['name', 'title', 'hook', 'description']),
+      openQuestions: openQuestions.map((item: any) => firstText(item)).filter(Boolean).join('\n'),
     },
   }
 }

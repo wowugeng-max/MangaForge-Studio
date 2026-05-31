@@ -20,6 +20,7 @@ import {
   WarningOutlined,
 } from '@ant-design/icons'
 import type { WritingCockpitActionKey, WritingCockpitModel, WritingCockpitRole } from './writingCockpitModel'
+import './WritingCockpitPanel.css'
 
 const { Paragraph, Text } = Typography
 
@@ -155,10 +156,8 @@ function ChapterPlanningDesk({
 
   return (
     <div
+      className={`writing-cockpit-subdesk writing-cockpit-planning-desk writing-cockpit-planning-${desk.readiness}`}
       style={{
-        border: `1px solid ${desk.readiness === 'ready' ? '#d9f7be' : '#ffe7ba'}`,
-        borderRadius: 8,
-        padding: 12,
         width: '100%',
         minWidth: 0,
       }}
@@ -265,10 +264,8 @@ function ChapterAcceptanceDesk({
 
   return (
     <div
+      className={`writing-cockpit-subdesk writing-cockpit-acceptance-desk writing-cockpit-acceptance-${desk.acceptanceStatus}`}
       style={{
-        border: `1px solid ${desk.acceptanceStatus === 'ready_to_accept' ? '#d9f7be' : '#ffccc7'}`,
-        borderRadius: 8,
-        padding: 12,
         width: '100%',
         minWidth: 0,
       }}
@@ -397,14 +394,14 @@ export function WritingCockpitPanel({
     return (
       <div className="writing-cockpit-panel is-collapsed" style={{ width: '100%' }}>
         <Card
+          className="writing-cockpit-card writing-cockpit-card-collapsed"
           size="small"
           loading={loading && model.readiness.checks.length === 0}
-          style={{ borderRadius: 8, marginBottom: 4 }}
           styles={{ body: { padding: '6px 10px' } }}
         >
-          <Row gutter={[10, 8]} align="middle">
+          <Row className="writing-cockpit-collapsed-row" gutter={[10, 8]} align="middle">
             <Col flex="auto" style={{ minWidth: 0 }}>
-              <Space wrap size={[6, 4]}>
+              <Space className="writing-cockpit-collapsed-meta" wrap size={[6, 4]}>
                 <Tag color="blue" bordered={false}>{model.topStatus.currentRoleLabel}</Tag>
                 <Tag bordered={false}>{model.topStatus.currentVolume}</Tag>
                 <Tag color={model.readiness.blockers.length ? 'red' : model.readiness.warnings.length ? 'gold' : 'green'} bordered={false}>
@@ -419,7 +416,7 @@ export function WritingCockpitPanel({
               </Space>
             </Col>
             <Col flex="none">
-              <Space wrap size={[6, 6]} style={{ justifyContent: 'flex-end' }}>
+              <Space className="writing-cockpit-collapsed-actions" wrap size={[6, 6]} style={{ justifyContent: 'flex-end' }}>
                 <Button
                   type="primary"
                   size="small"
@@ -449,13 +446,13 @@ export function WritingCockpitPanel({
   return (
     <div className="writing-cockpit-panel is-expanded" style={{ width: '100%' }}>
       <Card
+        className="writing-cockpit-card writing-cockpit-card-expanded"
         size="small"
         loading={loading && model.readiness.checks.length === 0}
-        style={{ borderRadius: 8, marginBottom: 12 }}
         styles={{ body: { padding: 12 } }}
       >
         <Space direction="vertical" size={10} style={{ width: '100%' }}>
-          <Row align="middle" gutter={[10, 8]}>
+          <Row className="writing-cockpit-header" align="middle" gutter={[10, 8]}>
             <Col flex="auto" style={{ minWidth: 0 }}>
               <Space wrap size={[6, 4]}>
                 <Tag icon={<TeamOutlined />} color="purple" bordered={false}>写作指挥台</Tag>
@@ -469,9 +466,9 @@ export function WritingCockpitPanel({
             </Col>
           </Row>
 
-          <Row gutter={[12, 10]} align="middle">
+          <Row className="writing-cockpit-command-grid" gutter={[12, 10]} align="middle">
             <Col xs={24} lg={8}>
-              <Space direction="vertical" size={4} style={{ width: '100%' }}>
+              <Space className="writing-cockpit-target-block" direction="vertical" size={4} style={{ width: '100%' }}>
                 <Space wrap size={[6, 4]}>
                   <Tag color="blue" bordered={false}>{model.topStatus.currentRoleLabel}</Tag>
                   <Tag bordered={false}>{model.topStatus.currentVolume}</Tag>
@@ -486,7 +483,7 @@ export function WritingCockpitPanel({
             </Col>
 
             <Col xs={24} lg={6}>
-              <Space direction="vertical" size={4} style={{ width: '100%' }}>
+              <Space className="writing-cockpit-readiness-block" direction="vertical" size={4} style={{ width: '100%' }}>
                 <Space size={6}>
                   <Text type="secondary" style={{ fontSize: 12 }}>准备度</Text>
                   <Tag color={model.readiness.blockers.length ? 'red' : model.readiness.warnings.length ? 'gold' : 'green'} bordered={false}>
@@ -507,7 +504,7 @@ export function WritingCockpitPanel({
             </Col>
 
             <Col xs={24} lg={5}>
-              <Space direction="vertical" size={4} style={{ width: '100%' }}>
+              <Space className="writing-cockpit-pipeline-block" direction="vertical" size={4} style={{ width: '100%' }}>
                 <Text type="secondary" style={{ fontSize: 12 }}>草稿流水线</Text>
                 <Space wrap size={[6, 4]}>
                   <Tag color={model.draftPipeline.state === 'draft_generated' ? 'green' : model.draftPipeline.state === 'no_draft' ? 'blue' : 'default'} bordered={false}>

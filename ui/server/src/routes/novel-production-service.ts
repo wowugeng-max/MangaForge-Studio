@@ -316,6 +316,8 @@ export function createNovelRunExecutionService(ctx: {
           ...options,
           model_id: options.model_id || payload.model_strategy?.preferred_model_id,
           production_mode: productionMode,
+          word_target_mode: options.word_target_mode || payload.word_target_mode,
+          target_word_count: options.target_word_count || payload.target_word_count,
           allow_incomplete: options.allow_incomplete === true,
           approval_policy: approvalPolicy,
           approvals: item.approvals || {},

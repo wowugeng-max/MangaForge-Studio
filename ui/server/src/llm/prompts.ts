@@ -475,7 +475,7 @@ export function buildProsePrompt(
 
   // 全局写作约束
   parts.push(`\n\n【写作约束】`)
-  parts.push(`1. 本章目标篇幅：${project.length_target === 'long' ? '4000-6000字' : project.length_target === 'short' ? '1500-2500字' : '2500-4000字'}`)
+  parts.push(`1. 本章目标篇幅：${project.length_target === 'short' ? '1800-2500字' : '2800-3500字'}`)
   parts.push(`2. 叙事风格：${(project.style_tags || []).join('、') || '第一人称/第三人称混合叙事'}`)
   parts.push(`3. 对话与描写的比例：对话驱动，描写为辅，每3段对话至少配1段环境/心理描写`)
   parts.push(`4. 不得出现 OOC（角色性格偏离）`)

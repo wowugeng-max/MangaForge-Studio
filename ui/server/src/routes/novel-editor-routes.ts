@@ -265,7 +265,7 @@ async function createProseQualityReview(ctx: EditorRoutesContext, activeWorkspac
   return { review: normalizedReview, saved, contextPackage, result, content_hash: contentHash }
 }
 
-function buildChapterQualityCard(chapter: any, contextPackage: any, reviews: any[]) {
+export function buildChapterQualityCard(chapter: any, contextPackage: any, reviews: any[]) {
   const preflight = contextPackage?.preflight || {}
   const checks = Array.isArray(preflight.checks) ? preflight.checks : []
   const checkOk = (key: string) => checks.find((item: any) => item.key === key)?.ok === true
@@ -278,7 +278,27 @@ function buildChapterQualityCard(chapter: any, contextPackage: any, reviews: any
   const editorReport = editorPayload.report || {}
   const similarityReport = similarityPayload.report || {}
   const qualityScore = Number(selfReview.score || editorReport.overall_score || 0)
+  const wordTarget = contextPackage?.chapter_target?.word_target || null
+  const targetMin = Number(wordTarget?.min || 0)
+  const targetMax = Number(wordTarget?.max || 0)
+  const targetRangeText = String(wordTarget?.rangeText || (targetMin && targetMax ? `${targetMin}-${targetMax} 字` : ''))
+  const wordTargetScore = !wordTarget
+    ? null
+    : wordCount >= targetMin && (!targetMax || wordCount <= targetMax)
+      ? 100
+      : wordCount > 0 && wordCount < targetMin
+        ? clampScore((wordCount / Math.max(1, targetMin)) * 60)
+        : 70
   const dimensions = [
+    ...(wordTarget ? [{
+      key: 'word_target',
+      label: '字数目标',
+      score: clampScore(Number(wordTargetScore || 0)),
+      evidence: `当前 ${wordCount} 字，目标 ${targetRangeText || `${targetMin}-${targetMax} 字`}`,
+      action: wordCount < targetMin
+        ? `按目标字数扩写到 ${targetRangeText || `${targetMin}-${targetMax} 字`}，优先补动作过程、选择代价、对话交锋和章末钩子铺垫。`
+        : `压缩到 ${targetRangeText || `${targetMin}-${targetMax} 字`}，删掉重复解释和不推进剧情的描写。`,
+    }] : []),
     {
       key: 'chapter_goal',
       label: '完成本章目标',

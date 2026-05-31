@@ -3,6 +3,14 @@
   flex-wrap: wrap;
 }
 
+.novel-editor-toolbar-collapsed {
+  min-height: 42px;
+  padding-top: 6px !important;
+  padding-bottom: 6px !important;
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+
 .novel-editor-title {
   flex: 0 1 320px;
   overflow: hidden;
@@ -10,8 +18,119 @@
   white-space: nowrap;
 }
 
+.novel-editor-word-count {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
 .novel-editor-action-row {
   min-width: 0;
+}
+
+.novel-editor-desk-toggle.ant-btn {
+  height: 28px;
+  padding-inline: 10px;
+  border-radius: 999px;
+  border-color: #d8e0ea;
+  background: #fff;
+  color: #405066;
+  font-weight: 750;
+  flex-shrink: 0;
+}
+
+.novel-editor-toolbar-collapsed .novel-editor-title {
+  flex: 0 1 280px;
+  min-width: 150px !important;
+}
+
+.novel-editor-toolbar-collapsed .novel-editor-recommendation-hint {
+  display: none;
+}
+
+.novel-editor-collapsed-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: min(390px, 34vw);
+  flex: 0 1 auto;
+  padding: 3px 4px 3px 8px;
+  border: 1px solid #dfe7f1;
+  border-radius: 999px;
+  background: #fbfcfe;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.72);
+}
+
+.novel-editor-collapsed-actions {
+  min-width: 0;
+  flex: 0 0 auto;
+  flex-shrink: 0;
+}
+
+.novel-editor-collapsed-phase.ant-tag {
+  margin-right: 0;
+  border-radius: 999px;
+  color: #1d4ed8;
+  background: #e8f1ff;
+  font-weight: 800;
+}
+
+.novel-editor-collapsed-recommendation,
+.novel-editor-collapsed-action {
+  min-width: 0;
+  max-width: 176px;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.novel-editor-more-actions-inline.ant-btn {
+  height: 26px;
+  padding-inline: 9px;
+  border-radius: 999px;
+  font-weight: 750;
+  flex-shrink: 0;
+}
+
+@media (max-width: 1500px) {
+  .novel-editor-toolbar-collapsed {
+    gap: 10px !important;
+    padding-left: 16px !important;
+    padding-right: 16px !important;
+  }
+
+  .novel-editor-toolbar-collapsed .novel-editor-title {
+    flex-basis: 220px;
+    min-width: 120px !important;
+  }
+
+  .novel-editor-toolbar-collapsed .novel-editor-collapsed-recommendation {
+    display: none;
+  }
+}
+
+@media (max-width: 1280px) {
+  .novel-editor-toolbar-collapsed {
+    padding-left: 14px !important;
+    padding-right: 14px !important;
+  }
+
+  .novel-editor-toolbar-collapsed .novel-editor-title {
+    flex-basis: 150px;
+    min-width: 110px !important;
+  }
+
+  .novel-editor-toolbar-collapsed .novel-editor-collapsed-phase {
+    display: none;
+  }
+
+  .novel-editor-collapsed-summary {
+    gap: 0;
+    padding-left: 4px;
+  }
 }
 
 .novel-editor-action-flow {
@@ -21,18 +140,36 @@
   min-width: 0;
 }
 
+.novel-editor-stagebar {
+  align-items: center;
+  padding: 4px;
+  border: 1px solid #e6ebf2;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #ffffff, #f8fafc);
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.05);
+}
+
 .novel-editor-action-group {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  padding-left: 8px;
-  border-left: 1px solid #e6ebf2;
+  gap: 5px;
+  padding: 6px 8px 7px 10px;
+  border: 1px solid #e6ebf2;
+  border-left-width: 4px;
+  border-radius: 6px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.novel-editor-stage {
+  border-radius: 8px;
+  border-left-width: 0;
+  box-shadow: none;
 }
 
 .novel-editor-action-group:first-child {
-  padding-left: 0;
-  border-left: 0;
+  padding-left: 10px;
 }
 
 .novel-editor-action-group-label {
@@ -52,6 +189,111 @@
 
 .novel-editor-action-group-primary .novel-editor-action-group-label {
   color: #1677ff;
+}
+
+.novel-editor-action-group-prep {
+  border-color: #dbeafe;
+  border-left-color: #64748b;
+  background: #f8fafc;
+}
+
+.novel-editor-action-group-prep .novel-editor-action-group-label {
+  color: #475569;
+}
+
+.novel-editor-action-group-draft {
+  border-color: #bfdbfe;
+  border-left-color: #2563eb;
+  background: #eff6ff;
+}
+
+.novel-editor-action-group-draft .novel-editor-action-group-label {
+  color: #1d4ed8;
+}
+
+.novel-editor-action-group-review {
+  border-color: #fed7aa;
+  border-left-color: #f59e0b;
+  background: #fff7ed;
+}
+
+.novel-editor-action-group-review .novel-editor-action-group-label {
+  color: #b45309;
+}
+
+.novel-editor-command-cluster {
+  display: flex;
+  flex-wrap: nowrap;
+}
+
+.novel-editor-command-pill.ant-btn {
+  height: 28px;
+  padding-inline: 11px;
+  border-radius: 999px !important;
+  border-color: #d8e0ea;
+  background: rgba(255, 255, 255, 0.84);
+  color: #263244;
+  font-weight: 750;
+  box-shadow: none;
+}
+
+.novel-editor-command-pill.ant-btn-primary,
+.novel-editor-primary-command.ant-btn-primary {
+  border-color: #2563eb;
+  background: #2563eb;
+  color: #fff;
+}
+
+.novel-editor-command-pill.ant-btn:hover {
+  border-color: #7aa7ff;
+  color: #1d4ed8;
+}
+
+.novel-editor-command-pill.ant-btn-primary:hover,
+.novel-editor-primary-command.ant-btn-primary:hover {
+  border-color: #1d4ed8;
+  background: #1d4ed8;
+  color: #fff;
+}
+
+.novel-editor-icon-command.ant-btn {
+  padding-inline: 9px;
+}
+
+.novel-editor-muted-command.ant-btn {
+  color: #536176;
+  background: rgba(248, 250, 252, 0.88);
+}
+
+.novel-word-target-control {
+  display: grid;
+  grid-template-columns: auto auto 72px auto;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+}
+
+.novel-word-target-control .novel-word-preset.ant-btn {
+  height: 26px;
+  padding-inline: 9px;
+  border-radius: 999px;
+  font-weight: 750;
+}
+
+.novel-word-target-control .ant-input-number {
+  width: 72px;
+  border-color: #cbd5e1;
+}
+
+.novel-word-target-control .ant-input-number.is-custom {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
+}
+
+.novel-word-target-unit {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .novel-editor-recommended-badge {
@@ -81,15 +323,14 @@
 }
 
 .novel-editor-action-popover {
-  width: 184px;
+  width: 232px;
   display: grid;
   gap: 10px;
 }
 
 .novel-editor-action-popover .novel-editor-action-group {
-  padding-left: 0;
+  padding-left: 10px;
   padding-bottom: 10px;
-  border-left: 0;
   border-bottom: 1px solid #edf1f6;
 }
 

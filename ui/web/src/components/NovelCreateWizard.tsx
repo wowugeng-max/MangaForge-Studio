@@ -109,14 +109,15 @@ function inferGenreFromText(text: string) {
 
 function normalizeProjectSeedForUi(payload: any) {
   const root = asObject(payload)
-  const source = [root.project_seed, root.seed, root.project, root.novel_project, root.data, root.result, root]
+  const rawPayload = asObject(root.raw_payload)
+  const source = [root.project_seed, root.seed, root.project, root.novel_project, root.data, root.result, root, rawPayload]
     .map(asObject)
     .find(item => firstText(item.title, item.project_title, item.book_title, item.synopsis, item.summary, item.logline, item.core_premise) || item.worldbuilding || item.protagonist) || root
-  const masterOutline = asObject(source.master_outline || root.master_outline)
+  const masterOutline = asObject(source.master_outline || root.master_outline || rawPayload.master_outline)
   const rawText = `${JSON.stringify(root).slice(0, 5000)} ${String(root.raw_idea || '').slice(0, 5000)}`
-  const commercial = asObject(source.commercial_positioning || root.commercial_positioning)
-  const worldbuilding = asObject(source.worldbuilding || root.worldbuilding)
-  const plotEngine = asObject(source.plot_engine || root.plot_engine)
+  const commercial = asObject(source.commercial_positioning || root.commercial_positioning || rawPayload.commercial_positioning)
+  const worldbuilding = asObject(source.worldbuilding || root.worldbuilding || rawPayload.worldbuilding)
+  const plotEngine = asObject(source.plot_engine || root.plot_engine || rawPayload.plot_engine)
   return {
     ...source,
     title: firstText(source.title, source.project_title, source.book_title, source.name, source.working_title, masterOutline.title),
@@ -130,17 +131,17 @@ function normalizeProjectSeedForUi(payload: any) {
     logline: firstText(source.logline, source.hook, masterOutline.hook, commercial.reader_promise),
     core_premise: firstText(source.core_premise, source.premise, source.setting, source.summary, masterOutline.summary),
     main_conflict: firstText(source.main_conflict, source.conflict, plotEngine.long_term_goal, masterOutline.hook),
-    protagonist: asObject(source.protagonist || root.protagonist),
-    antagonist: asObject(source.antagonist || root.antagonist),
+    protagonist: asObject(source.protagonist || root.protagonist || rawPayload.protagonist),
+    antagonist: asObject(source.antagonist || root.antagonist || rawPayload.antagonist),
     worldbuilding,
     plot_engine: plotEngine,
-    writing_bible: asObject(source.writing_bible || root.writing_bible),
-    volume_outlines: Array.isArray(source.volume_outlines) ? source.volume_outlines : (Array.isArray(root.volume_outlines) ? root.volume_outlines : []),
-    chapter_outlines: Array.isArray(source.chapter_outlines) ? source.chapter_outlines : (Array.isArray(root.chapter_outlines) ? root.chapter_outlines : []),
-    foreshadowing_plan: Array.isArray(source.foreshadowing_plan) ? source.foreshadowing_plan : (Array.isArray(root.foreshadowing_plan) ? root.foreshadowing_plan : []),
-    characters: Array.isArray(source.characters) ? source.characters : (Array.isArray(root.characters) ? root.characters : []),
-    open_questions: asStringArray(source.open_questions).length ? asStringArray(source.open_questions) : asStringArray(source.questions),
-    next_steps: asStringArray(source.next_steps).length ? asStringArray(source.next_steps) : asStringArray(source.suggested_next_steps),
+    writing_bible: asObject(source.writing_bible || root.writing_bible || rawPayload.writing_bible),
+    volume_outlines: Array.isArray(source.volume_outlines) ? source.volume_outlines : (Array.isArray(root.volume_outlines) ? root.volume_outlines : (Array.isArray(rawPayload.volume_outlines) ? rawPayload.volume_outlines : [])),
+    chapter_outlines: Array.isArray(source.chapter_outlines) ? source.chapter_outlines : (Array.isArray(root.chapter_outlines) ? root.chapter_outlines : (Array.isArray(rawPayload.chapter_outlines) ? rawPayload.chapter_outlines : [])),
+    foreshadowing_plan: Array.isArray(source.foreshadowing_plan) ? source.foreshadowing_plan : (Array.isArray(root.foreshadowing_plan) ? root.foreshadowing_plan : (Array.isArray(rawPayload.foreshadowing_plan) ? rawPayload.foreshadowing_plan : [])),
+    characters: Array.isArray(source.characters) ? source.characters : (Array.isArray(root.characters) ? root.characters : (Array.isArray(rawPayload.characters) ? rawPayload.characters : [])),
+    open_questions: asStringArray(source.open_questions).length ? asStringArray(source.open_questions) : (asStringArray(source.questions).length ? asStringArray(source.questions) : asStringArray(rawPayload.open_questions || rawPayload.questions)),
+    next_steps: asStringArray(source.next_steps).length ? asStringArray(source.next_steps) : (asStringArray(source.suggested_next_steps).length ? asStringArray(source.suggested_next_steps) : asStringArray(rawPayload.next_steps || rawPayload.suggested_next_steps)),
     raw_payload: root.raw_payload || root,
   }
 }
@@ -365,8 +366,8 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
         ? buildLaunchpadSeedPatch(seed, launchpad, evaluateLaunchpadReadiness(launchpad, seed, data.length_target).risks)
         : null
       const res = patchedSeed
-        ? await apiClient.post('/novel/projects/auto-create', { title, idea, seed: patchedSeed })
-        : await apiClient.post('/novel/projects/auto-create', { title, idea, model_id: seedModelId })
+        ? await apiClient.post('/novel/projects/auto-create', { title, idea, seed: { ...patchedSeed, length_target: data.length_target }, length_target: data.length_target })
+        : await apiClient.post('/novel/projects/auto-create', { title, idea, model_id: seedModelId, length_target: data.length_target })
       const project = res.data?.project || res.data
       const projectId = project?.id
       if (!projectId) throw new Error('自动建项未返回项目 ID')
@@ -490,6 +491,7 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
         idea: seedIdea,
         title: data.title,
         model_id: seedModelId,
+        length_target: data.length_target,
       })
       const nextSeed = normalizeProjectSeedForUi(res.data?.seed || {})
       setSeed(nextSeed)
@@ -506,7 +508,7 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
 
   const finalizeProjectSeed = async () => {
     if (!seedModelId) return message.warning('请先选择用于定稿的模型')
-    const draft = createMode === 'deep_draft' ? deepDraftReviewModelToSeed(seed || {}, deepDraftReview) : seed
+    const draft = createMode === 'deep_draft' ? deepDraftReviewModelToSeed({ ...(seed || {}), length_target: data.length_target }, deepDraftReview) : seed
     if (!draft || !Object.keys(draft).length) return message.warning('请先生成或填写项目草稿')
     setFinalizingSeed(true)
     try {
@@ -615,6 +617,22 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
                       onChange={event => setData(prev => ({ ...prev, title: event.target.value }))}
                       placeholder="作品名称，例如：长生天尊"
                       size="large"
+                    />
+                    <Select
+                      size="large"
+                      value={data.length_target}
+                      placeholder="选择篇幅目标"
+                      options={LENGTH_TARGETS}
+                      optionRender={(option) => (
+                        <div>
+                          <div>{option.label}</div>
+                          <div style={{ fontSize: 12, color: '#999' }}>{option.data?.description}</div>
+                        </div>
+                      )}
+                      onChange={value => {
+                        setData(prev => ({ ...prev, length_target: value }))
+                        setSeedFinalized(false)
+                      }}
                     />
                     <Input.TextArea
                       rows={5}

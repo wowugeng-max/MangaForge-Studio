@@ -168,7 +168,7 @@ export function buildNovelWritingRecommendation({
   return {
     key: 'quality_card',
     phase: 'review',
-    label: '质量卡',
+    label: '交稿质检',
     reason: '当前章已有正文，下一步适合检查爽点、节奏和连续性。',
   }
 }

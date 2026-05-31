@@ -11,9 +11,9 @@
     "check": "bun run build:server && bun run build:web",
     "smoke:novel": "node scripts/check-novel-generation-workflow.mjs",
     "smoke:novel:local": "node scripts/run-novel-smoke-local.mjs",
-    "test:novel-server": "cd ui/server && bun test src/novel.test.ts src/routes/novel-core-routes.test.ts",
+    "test:novel-server": "cd ui/server && bun test src/novel.test.ts src/routes/novel-core-routes.test.ts src/routes/novel-writing-service.test.ts src/routes/novel-editor-routes.test.ts src/routes/novel-generation-routes.test.ts",
     "test:novel-entry": "cd ui/web && bun test src/components/novel-entry/launchpadModel.test.ts src/components/novel-entry/deepDraftReviewModel.test.ts src/pages/novel-lobby/novelLobbyModel.test.ts",
     "test:planning-workspace": "cd ui/web && bun test src/pages/novel-workspace/planningWorkspaceModel.test.ts",
-    "test:writing-cockpit": "cd ui/web && bun test src/pages/novel-workspace/writingCockpitModel.test.ts"
+    "test:writing-cockpit": "cd ui/web && bun test src/pages/novel-workspace/writingCockpitModel.test.ts src/pages/novel-workspace/workspaceUiShell.test.ts"
   }
 }

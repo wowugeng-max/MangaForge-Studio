@@ -32,6 +32,137 @@ import {
   normalizeIssue,
 } from './novel-route-utils'
 
+export type ChapterWordTarget = {
+  mode: 'standard' | 'long' | 'custom'
+  label: string
+  target: number
+  min: number
+  max: number
+  rangeText: string
+}
+
+function clampWordTarget(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return 3000
+  return Math.min(12000, Math.max(1000, Math.round(value)))
+}
+
+export function resolveChapterWordTarget(project: any, chapter: any, options: any = {}): ChapterWordTarget {
+  const raw = options.word_target || chapter?.raw_payload?.word_target || project?.reference_config?.chapter_word_target || {}
+  const requestedMode = String(options.word_target_mode || raw.mode || raw.word_target_mode || '').toLowerCase()
+  const requestedTarget = Number(options.target_word_count || raw.target || raw.target_word_count || 0)
+
+  if (requestedMode === 'long') {
+    return {
+      mode: 'long',
+      label: '长章',
+      target: 10000,
+      min: 9000,
+      max: 11000,
+      rangeText: '9000-11000 字',
+    }
+  }
+
+  if (requestedMode === 'custom' || requestedTarget > 0) {
+    const target = clampWordTarget(requestedTarget)
+    const min = Math.max(800, Math.round(target * 0.9))
+    const max = Math.round(target * 1.1)
+    return {
+      mode: 'custom',
+      label: `自定义 ${target} 字`,
+      target,
+      min,
+      max,
+      rangeText: `${min}-${max} 字`,
+    }
+  }
+
+  return {
+    mode: 'standard',
+    label: '标准章',
+    target: 3000,
+    min: 2800,
+    max: 3500,
+    rangeText: '2800-3500 字',
+  }
+}
+
+export function applyChapterWordTargetToContext(contextPackage: any, target: ChapterWordTarget) {
+  return {
+    ...(contextPackage || {}),
+    chapter_target: {
+      ...((contextPackage || {}).chapter_target || {}),
+      word_target: target,
+    },
+    style_lock: {
+      ...((contextPackage || {}).style_lock || {}),
+      chapter_word_range: target.rangeText,
+    },
+  }
+}
+
+export function proseMaxTokensForWordTarget(target: ChapterWordTarget | null | undefined) {
+  const targetWords = Number(target?.target || 3000)
+  if (targetWords >= 9000) return 18000
+  if (targetWords >= 6000) return 14000
+  return 8000
+}
+
+export function normalizeSceneCardsPayload(payload: any, contextPackage: any = {}) {
+  const directCards = Array.isArray(payload?.scene_cards) ? payload.scene_cards : Array.isArray(payload?.scenes) ? payload.scenes : []
+  const targetNo = Number(contextPackage?.chapter_target?.chapter_no || 0)
+  const outlineCards = directCards.length
+    ? []
+    : asArray(payload?.chapter_outlines)
+      .filter((outline: any) => {
+        const outlineNo = Number(outline?.chapter_no || outline?.chapter_number || outline?.no || 0)
+        return targetNo ? outlineNo === targetNo : true
+      })
+      .map((outline: any, index: number) => ({
+        scene_no: index + 1,
+        title: outline?.title || contextPackage?.chapter_target?.title || `场景${index + 1}`,
+        scene_type: outline?.scene_type || 'investigation',
+        location: outline?.location || '',
+        characters_present: asArray(outline?.characters_present || outline?.characters),
+        purpose: outline?.purpose || outline?.summary || outline?.chapter_goal || contextPackage?.chapter_target?.summary || '',
+        conflict: outline?.conflict || contextPackage?.chapter_target?.conflict || '',
+        required_beats: asArray(outline?.required_beats || outline?.beats).length
+          ? asArray(outline?.required_beats || outline?.beats)
+          : [outline?.summary, outline?.conflict, outline?.ending_hook].filter(Boolean),
+        beat: outline?.beat || outline?.summary || '',
+        turning_point: outline?.turning_point || outline?.ending_hook || '',
+        exit_state: outline?.exit_state || outline?.ending_hook || '',
+      }))
+  const cards = directCards.length ? directCards : outlineCards
+  return cards.map((card: any, index: number) => ({
+    scene_no: Number(card?.scene_no || index + 1),
+    title: String(card?.title || `场景${index + 1}`),
+    scene_type: String(card?.scene_type || card?.type || ''),
+    location: String(card?.location || ''),
+    characters_present: asArray(card?.characters_present).map((item: any) => String(item)).filter(Boolean),
+    purpose: String(card?.purpose || ''),
+    conflict: String(card?.conflict || ''),
+    required_beats: asArray(card?.required_beats || card?.beats).map((item: any) => String(item)).filter(Boolean),
+    action_beats: asArray(card?.action_beats || card?.combat_beats).map((item: any) => String(item)).filter(Boolean),
+    beat: String(card?.beat || card?.action || card?.description || ''),
+    emotional_tone: String(card?.emotional_tone || card?.tone || ''),
+    key_dialogue: String(card?.key_dialogue || card?.dialogue_focus || ''),
+    dialogue_goal: String(card?.dialogue_goal || ''),
+    required_information: asArray(card?.required_information).map((item: any) => String(item)).filter(Boolean),
+    used_settings: asArray(card?.used_settings).map((item: any) => String(item)).filter(Boolean),
+    revealed_settings: asArray(card?.revealed_settings).map((item: any) => String(item)).filter(Boolean),
+    forbidden_settings: asArray(card?.forbidden_settings).map((item: any) => String(item)).filter(Boolean),
+    ability_beats: asArray(card?.ability_beats).map((item: any) => String(item)).filter(Boolean),
+    item_beats: asArray(card?.item_beats).map((item: any) => String(item)).filter(Boolean),
+    boss_move: String(card?.boss_move || ''),
+    rule_trigger: String(card?.rule_trigger || ''),
+    state_changes_expected: asArray(card?.state_changes_expected).map((item: any) => String(typeof item === 'string' ? item : JSON.stringify(item))).filter(Boolean),
+    turning_point: String(card?.turning_point || ''),
+    description_budget: String(card?.description_budget || card?.sensory_budget || 'low'),
+    transition_from_previous: String(card?.transition_from_previous || ''),
+    exit_state: String(card?.exit_state || ''),
+  })).filter((card: any) => card.beat || card.purpose || card.title)
+}
+
 export function createNovelWritingService(ctx: {
   getProject: (workspace: string, id: number) => Promise<any>
   production: NovelProductionService
@@ -43,6 +174,8 @@ export function createNovelWritingService(ctx: {
     `目标章节：第${contextPackage?.chapter_target?.chapter_no || '?'}章《${contextPackage?.chapter_target?.title || '无标题'}》`,
     '必须以 chapter_target.summary、chapter_target.conflict、chapter_target.ending_hook 为准重建本章场景卡。',
     '如果上下文里已有 scene_cards 与本章目标不一致，视为旧草稿，必须忽略。',
+    '本次不是生成总纲、分卷或章节大纲。严禁输出 master_outline、volume_outlines、chapter_outlines、foreshadowing_plan。',
+    '只允许围绕目标章节生成 2-6 个 scene_cards；不得输出其他章节内容。',
     '',
     '【结构化上下文包】',
     JSON.stringify(contextPackage, null, 2).slice(0, 9000),
@@ -52,40 +185,8 @@ export function createNovelWritingService(ctx: {
     'action_beats 必须写成可见动作链：起手/试探/受阻/受伤或代价/反制/结果。非动作场景也要写 required_beats，避免只写氛围。',
     'description_budget 写 low/medium/high。默认 low；只有新地点首次登场或诡异规则首次显形时才允许 medium/high。',
     '设定工坊约束：必须优先使用 setting_context.chapter_usage.required；allowed 可按需使用；forbidden_settings 不得揭露或误用；能力、物品、Boss、规则、境界和角色认知必须服从 setting_context.entities 的 constraints_json/state_json。',
-    '要求：2-6 个场景；每个场景必须服务本章目标；最后一个场景必须到达 ending_hook；不要复制参考作品专名、桥段或原句。',
+    '要求：2-6 个场景；每个场景必须服务本章目标；最后一个场景必须到达 ending_hook；不要复制参考作品专名、桥段或原句；只返回 JSON object，顶层只能包含 scene_cards。',
   ].join('\n')
-
-  const normalizeSceneCards = (payload: any) => {
-    const cards = Array.isArray(payload?.scene_cards) ? payload.scene_cards : Array.isArray(payload?.scenes) ? payload.scenes : []
-    return cards.map((card: any, index: number) => ({
-      scene_no: Number(card?.scene_no || index + 1),
-      title: String(card?.title || `场景${index + 1}`),
-      scene_type: String(card?.scene_type || card?.type || ''),
-      location: String(card?.location || ''),
-      characters_present: asArray(card?.characters_present).map((item: any) => String(item)).filter(Boolean),
-      purpose: String(card?.purpose || ''),
-      conflict: String(card?.conflict || ''),
-      required_beats: asArray(card?.required_beats || card?.beats).map((item: any) => String(item)).filter(Boolean),
-      action_beats: asArray(card?.action_beats || card?.combat_beats).map((item: any) => String(item)).filter(Boolean),
-      beat: String(card?.beat || card?.action || card?.description || ''),
-      emotional_tone: String(card?.emotional_tone || card?.tone || ''),
-      key_dialogue: String(card?.key_dialogue || card?.dialogue_focus || ''),
-      dialogue_goal: String(card?.dialogue_goal || ''),
-      required_information: asArray(card?.required_information).map((item: any) => String(item)).filter(Boolean),
-      used_settings: asArray(card?.used_settings).map((item: any) => String(item)).filter(Boolean),
-      revealed_settings: asArray(card?.revealed_settings).map((item: any) => String(item)).filter(Boolean),
-      forbidden_settings: asArray(card?.forbidden_settings).map((item: any) => String(item)).filter(Boolean),
-      ability_beats: asArray(card?.ability_beats).map((item: any) => String(item)).filter(Boolean),
-      item_beats: asArray(card?.item_beats).map((item: any) => String(item)).filter(Boolean),
-      boss_move: String(card?.boss_move || ''),
-      rule_trigger: String(card?.rule_trigger || ''),
-      state_changes_expected: asArray(card?.state_changes_expected).map((item: any) => String(typeof item === 'string' ? item : JSON.stringify(item))).filter(Boolean),
-      turning_point: String(card?.turning_point || ''),
-      description_budget: String(card?.description_budget || card?.sensory_budget || 'low'),
-      transition_from_previous: String(card?.transition_from_previous || ''),
-      exit_state: String(card?.exit_state || ''),
-    })).filter((card: any) => card.beat || card.purpose || card.title)
-  }
 
   const buildHeuristicSettingUsage = (chapter: any, settings: any[]) => {
     const chapterText = [
@@ -155,7 +256,7 @@ export function createNovelWritingService(ctx: {
       upstreamContext: contextPackage,
     }, { activeWorkspace, modelId: stageModelId ? String(stageModelId) : undefined, maxTokens: 3000, temperature: ctx.production.getStageTemperature(project, 'scene_cards', 0.45), skipMemory: true })
     const payload = getNovelPayload(result)
-    return { result, sceneCards: normalizeSceneCards(payload) }
+    return { result, sceneCards: normalizeSceneCardsPayload(payload, contextPackage) }
   }
 
   const buildParagraphProseContext = (project: any, contextPackage: any, migrationPlan: any = null, chapterDraft: any = null) => [
@@ -163,6 +264,8 @@ export function createNovelWritingService(ctx: {
     `作品标题：${project.title}`,
     chapterDraft?.chapter_no ? `目标章节：第${chapterDraft.chapter_no}章《${chapterDraft.title || '无标题'}》` : '',
     chapterDraft?.chapter_no ? `只允许输出这一章的正文，不得混入其他章节内容。chapter_no 必须严格等于 ${chapterDraft.chapter_no}` : '',
+    contextPackage?.chapter_target?.word_target ? `本章目标字数：约 ${contextPackage.chapter_target.word_target.target} 字；可接受范围：${contextPackage.chapter_target.word_target.min}-${contextPackage.chapter_target.word_target.max} 字；类型：${contextPackage.chapter_target.word_target.label}。` : '',
+    contextPackage?.chapter_target?.word_target ? '字数执行要求：每个场景分配明确字数预算，正文不得只写剧情摘要；如果低于目标范围，必须扩写动作过程、选择代价、对话交锋和章末钩子铺垫，而不是堆砌环境描写。' : '',
     '必须以 chapter_target.summary、chapter_target.conflict、chapter_target.ending_hook 和 scene_cards 为准；如果已有正文或旧场景分解与目标不一致，不得沿用。',
     '',
     '【结构化上下文包】',
@@ -396,7 +499,8 @@ export function createNovelWritingService(ctx: {
       ? chapter.scene_list
       : (Array.isArray(chapter.scene_breakdown) ? chapter.scene_breakdown : [])
     const preflight = buildPreflightChecks(project, chapter, previousChapter, worldbuilding, characters, sceneCards, referencePreview, reviews)
-    const styleLock = getStyleLock(project)
+    const wordTarget = resolveChapterWordTarget(project, chapter, {})
+    const styleLock = { ...getStyleLock(project), chapter_word_range: wordTarget.rangeText }
     const safetyPolicy = getSafetyPolicy(project)
     const writingBible = project.reference_config?.writing_bible || buildWritingBible(project, worldbuilding, characters, outlines, reviews)
     const [settingEntities, storedChapterSettingUsage] = await Promise.all([
@@ -482,6 +586,7 @@ export function createNovelWritingService(ctx: {
         conflict: chapter.conflict || '',
         ending_hook: chapter.ending_hook || '',
         scene_cards: sceneCards,
+        word_target: wordTarget,
         continuity_notes: chapter.continuity_notes || [],
         must_advance: asArray(chapter.raw_payload?.must_advance),
         forbidden_repeats: asArray(chapter.raw_payload?.forbidden_repeats),
@@ -672,7 +777,11 @@ export function createNovelWritingService(ctx: {
       listNovelOutlines(activeWorkspace, projectId),
       listNovelReviews(activeWorkspace, projectId),
     ])
-    let contextPackage = await buildChapterContextPackage(activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews)
+    let wordTarget = resolveChapterWordTarget(project, chapter, options)
+    let contextPackage = applyChapterWordTargetToContext(
+      await buildChapterContextPackage(activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews),
+      wordTarget,
+    )
     await onStage('context', {
       status: contextPackage.preflight.ready ? 'success' : 'failed',
       score: contextPackage.preflight.ready ? 100 : 0,
@@ -693,7 +802,11 @@ export function createNovelWritingService(ctx: {
         } as any, { createVersion: false })
         if (updatedSceneChapter) chapter = updatedSceneChapter
         chapters = await listNovelChapters(activeWorkspace, projectId)
-        contextPackage = await buildChapterContextPackage(activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews)
+        wordTarget = resolveChapterWordTarget(project, chapter, options)
+        contextPackage = applyChapterWordTargetToContext(
+          await buildChapterContextPackage(activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews),
+          wordTarget,
+        )
       }
     }
     await onStage('scene_cards', { status: 'success', count: contextPackage.chapter_target.scene_cards.length, scene_cards: contextPackage.chapter_target.scene_cards })
@@ -736,6 +849,7 @@ export function createNovelWritingService(ctx: {
       contextPackage,
       migrationPlan,
       paragraphTask: buildParagraphProseContext(project, contextPackage, migrationPlan, chapter),
+      maxTokens: proseMaxTokensForWordTarget(wordTarget),
     } as any, activeWorkspace, ctx.production.getStageModelId(project, 'draft', preferredModelId))
     const resultPayload = getNovelPayload(draftResult)
     const targetProse = selectProseForChapter(resultPayload, chapter)

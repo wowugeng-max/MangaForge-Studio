@@ -779,6 +779,7 @@ export async function generateNovelChapterProse(
   const knowledgeContext = knowledgeInjection ? { knowledgeInjectionText: knowledgeInjection } : {}
 
   // Execute prose agent
+  const maxTokens = Number((context as any).maxTokens || 8000)
   const response = await executeNovelAgent(
     'prose-agent',
     project,
@@ -796,7 +797,7 @@ export async function generateNovelChapterProse(
       outline: context.outline,
       task: prosePrompt,
     },
-    { modelId, activeWorkspace, skipMemory: false, maxTokens: 8000, temperature: 0.8 },
+    { modelId, activeWorkspace, skipMemory: false, maxTokens, temperature: 0.8 },
   )
 
   // ── Memory Palace: verify and store ──

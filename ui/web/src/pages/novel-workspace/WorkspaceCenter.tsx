@@ -1,5 +1,5 @@
 import React from 'react'
-import { Button, Card, Col, Popover, Progress, Row, Slider, Space, Tag, Tooltip, Typography } from 'antd'
+import { Button, Card, Col, InputNumber, Popover, Progress, Row, Slider, Space, Tag, Tooltip, Typography } from 'antd'
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
 import { EditorState } from '@codemirror/state'
 import {
@@ -15,6 +15,7 @@ import {
   BookOutlined,
   CheckCircleOutlined,
   ClockCircleOutlined,
+  DownOutlined,
   EditOutlined,
   ExperimentOutlined,
   FileTextOutlined,
@@ -24,6 +25,7 @@ import {
   PlayCircleOutlined,
   SettingOutlined,
   SyncOutlined,
+  UpOutlined,
 } from '@ant-design/icons'
 import { chapterStatusTag, displayValue, wc } from './utils'
 import {
@@ -42,8 +44,10 @@ const { Title, Text, Paragraph } = Typography
 
 type SaveStatus = 'idle' | 'unsaved' | 'saving' | 'saved' | 'error'
 type EditorDisplayPrefs = { fontSize: number; lineHeight: number }
+type ChapterWordTargetMode = 'standard' | 'long' | 'custom'
 
 const EDITOR_DISPLAY_PREFS_KEY = 'novel.workspace.editorDisplayPrefs'
+const NOVEL_WRITING_DESK_COLLAPSED_KEY = 'novel.workspace.writingDeskCollapsed'
 const DEFAULT_EDITOR_DISPLAY_PREFS: EditorDisplayPrefs = { fontSize: 17, lineHeight: 32 }
 const EDITOR_DISPLAY_PRESETS: Array<EditorDisplayPrefs & { key: string; label: string }> = [
   { key: 'webNovel', label: '网文标准', fontSize: 17, lineHeight: 32 },
@@ -75,6 +79,16 @@ function loadEditorDisplayPrefs(): EditorDisplayPrefs {
 function saveEditorDisplayPrefs(prefs: EditorDisplayPrefs) {
   if (typeof window === 'undefined') return
   window.localStorage.setItem(EDITOR_DISPLAY_PREFS_KEY, JSON.stringify(prefs))
+}
+
+function loadWritingDeskCollapsed() {
+  if (typeof window === 'undefined') return false
+  return window.localStorage.getItem(NOVEL_WRITING_DESK_COLLAPSED_KEY) === 'true'
+}
+
+function saveWritingDeskCollapsed(collapsed: boolean) {
+  if (typeof window === 'undefined') return
+  window.localStorage.setItem(NOVEL_WRITING_DESK_COLLAPSED_KEY, collapsed ? 'true' : 'false')
 }
 
 function SaveIndicator({ status }: { status: SaveStatus }) {
@@ -323,6 +337,10 @@ export function WorkspaceCenter({
   onCreateEditorReport,
   onEditActiveChapter,
   onChapterTextChange,
+  generationWordTargetMode = 'standard',
+  generationTargetWordCount = 3000,
+  onGenerationWordTargetModeChange,
+  onGenerationTargetWordCountChange,
   writingRecommendation,
   chapterAcceptanceDesk,
   deliveryActionLoading,
@@ -365,12 +383,17 @@ export function WorkspaceCenter({
   onCreateEditorReport: () => void
   onEditActiveChapter: () => void
   onChapterTextChange: (text: string) => void
+  generationWordTargetMode?: ChapterWordTargetMode
+  generationTargetWordCount?: number
+  onGenerationWordTargetModeChange?: (mode: ChapterWordTargetMode) => void
+  onGenerationTargetWordCountChange?: (count: number) => void
   writingRecommendation?: NovelWritingRecommendation
   chapterAcceptanceDesk?: NovelDeliverySummaryInput | null
   deliveryActionLoading?: boolean
   onDeliveryAction?: (key: NovelDeliveryActionKey) => void
 }) {
   const [editorDisplayPrefs, setEditorDisplayPrefs] = React.useState<EditorDisplayPrefs>(() => loadEditorDisplayPrefs())
+  const [writingDeskCollapsed, setWritingDeskCollapsed] = React.useState(() => loadWritingDeskCollapsed())
   const materialReady = !materialScore || Boolean(materialScore.can_generate)
   const materialRecommendations = Array.isArray(materialScore?.recommendations)
     ? materialScore.recommendations.filter(Boolean)
@@ -407,6 +430,58 @@ export function WorkspaceCenter({
     sceneCardCount: sceneCards.length,
   })
   const recommendedClass = (key: NovelWritingRecommendedActionKey) => key === recommendedAction.key ? 'novel-editor-recommended-action' : undefined
+  const commandClass = (key?: NovelWritingRecommendedActionKey, extra = '') => [
+    'novel-editor-command-pill',
+    key ? recommendedClass(key) : '',
+    extra,
+  ].filter(Boolean).join(' ')
+  const selectWordPreset = (mode: Exclude<ChapterWordTargetMode, 'custom'>) => {
+    onGenerationWordTargetModeChange?.(mode)
+    onGenerationTargetWordCountChange?.(mode === 'long' ? 10000 : 3000)
+  }
+  const renderWordTargetControl = () => (
+    <div className="novel-word-target-control" aria-label="章节字数目标">
+      <Tooltip title="标准章节，适合日常连载更新">
+        <Button
+          size="small"
+          className="novel-word-preset"
+          type={generationWordTargetMode === 'standard' ? 'primary' : 'default'}
+          onClick={() => selectWordPreset('standard')}
+        >
+          标准章
+        </Button>
+      </Tooltip>
+      <Tooltip title="长章，适合高潮、战斗或阶段收束">
+        <Button
+          size="small"
+          className="novel-word-preset"
+          type={generationWordTargetMode === 'long' ? 'primary' : 'default'}
+          onClick={() => selectWordPreset('long')}
+        >
+          长章
+        </Button>
+      </Tooltip>
+      <Tooltip title="手动输入本次生成的目标字数">
+        <InputNumber
+          size="small"
+          min={1000}
+          max={12000}
+          step={500}
+          value={generationTargetWordCount}
+          controls={false}
+          className={generationWordTargetMode === 'custom' ? 'is-custom' : undefined}
+          formatter={(value) => `${value || 0}`}
+          parser={(value) => Number(String(value || '').replace(/[^\d]/g, ''))}
+          onChange={(value) => {
+            const next = clampNumber(value, 1000, 12000, 3000)
+            onGenerationTargetWordCountChange?.(next)
+            onGenerationWordTargetModeChange?.('custom')
+          }}
+        />
+      </Tooltip>
+      <span className="novel-word-target-unit">字</span>
+    </div>
+  )
   const recommendedBadge = (phase: typeof recommendedAction.phase) => (
     phase === recommendedAction.phase ? <span className="novel-editor-recommended-badge">推荐下一步</span> : null
   )
@@ -415,39 +490,44 @@ export function WorkspaceCenter({
     saveEditorDisplayPrefs(editorDisplayPrefs)
   }, [editorDisplayPrefs])
 
+  React.useEffect(() => {
+    saveWritingDeskCollapsed(writingDeskCollapsed)
+  }, [writingDeskCollapsed])
+
   const secondaryActionMenu = (
     <div className="novel-editor-action-popover">
-      <div className="novel-editor-action-group">
+      <div className="novel-editor-action-group novel-editor-action-group-prep">
         <div className="novel-editor-action-group-heading">
           <Text className="novel-editor-action-group-label">写前准备</Text>
           {recommendedBadge('prep')}
         </div>
-        <Button block size="small" className={recommendedClass('diagnostics')} loading={diagnosticsLoading} onClick={onOpenGenerationDiagnostics}>诊断</Button>
-        <Button block size="small" className={recommendedClass('scene_cards')} icon={<FileTextOutlined />} loading={generatingSceneCards} onClick={onGenerateSceneCards}>场景卡</Button>
-        <Button block size="small" onClick={onEditActiveChapter} icon={<EditOutlined />}>元数据</Button>
+        <Button size="small" className={commandClass('diagnostics')} loading={diagnosticsLoading} onClick={onOpenGenerationDiagnostics}>诊断</Button>
+        <Button size="small" className={commandClass('scene_cards')} icon={<FileTextOutlined />} loading={generatingSceneCards} onClick={onGenerateSceneCards}>场景卡</Button>
+        <Button size="small" className={commandClass(undefined, 'novel-editor-muted-command')} onClick={onEditActiveChapter} icon={<EditOutlined />}>元数据</Button>
       </div>
-      <div className="novel-editor-action-group">
+      <div className="novel-editor-action-group novel-editor-action-group-draft">
         <div className="novel-editor-action-group-heading">
           <Text className="novel-editor-action-group-label">生成正文</Text>
           {recommendedBadge('draft')}
         </div>
-        <Button block size="small" loading={pipelineLoading} onClick={onStartChapterPipeline}>流水线</Button>
+        <Button size="small" className={commandClass(undefined, 'novel-editor-muted-command')} loading={pipelineLoading} onClick={onStartChapterPipeline}>流水线</Button>
         {!materialReady && (
-          <Button block type="primary" size="small" className={recommendedClass('repair_generate')} icon={<PlayCircleOutlined />} loading={generatingProse} onClick={onRepairAndGenerateCurrentChapter}>
+          <Button type="primary" size="small" className={commandClass('repair_generate', 'novel-editor-primary-command')} icon={<PlayCircleOutlined />} loading={generatingProse} onClick={onRepairAndGenerateCurrentChapter}>
             补齐并生成
           </Button>
         )}
-        <Button block type={materialReady ? 'primary' : 'default'} size="small" className={recommendedClass('generate')} icon={<PlayCircleOutlined />} loading={generatingProse} onClick={onGenerateCurrentChapterProse}>
+        <Button type={materialReady ? 'primary' : 'default'} size="small" className={commandClass('generate', materialReady ? 'novel-editor-primary-command' : '')} icon={<PlayCircleOutlined />} loading={generatingProse} onClick={onGenerateCurrentChapterProse}>
           生成
         </Button>
+        {renderWordTargetControl()}
       </div>
-      <div className="novel-editor-action-group">
+      <div className="novel-editor-action-group novel-editor-action-group-review">
         <div className="novel-editor-action-group-heading">
           <Text className="novel-editor-action-group-label">写后复检</Text>
           {recommendedBadge('review')}
         </div>
-        <Button block size="small" className={recommendedClass('quality_card')} onClick={onOpenQualityCard}>质量卡</Button>
-        <Button block size="small" loading={editorReportLoading} onClick={onCreateEditorReport}>审稿</Button>
+        <Button size="small" className={commandClass('quality_card')} onClick={onOpenQualityCard}>交稿质检</Button>
+        <Button size="small" className={commandClass(undefined, 'novel-editor-muted-command')} loading={editorReportLoading} onClick={onCreateEditorReport}>编辑报告</Button>
       </div>
     </div>
   )
@@ -513,7 +593,7 @@ export function WorkspaceCenter({
 
       {!isEmptyProject && activeChapter && (
         <>
-          <div className="novel-editor-toolbar" style={{
+          <div className={`novel-editor-toolbar ${writingDeskCollapsed ? 'novel-editor-toolbar-collapsed' : ''}`} style={{
             flexShrink: 0, padding: '10px 20px', background: '#fff',
             borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', gap: 14,
           }}>
@@ -529,84 +609,109 @@ export function WorkspaceCenter({
               </Tooltip>
             )}
             <div style={{ flex: 1 }} />
-            <Text type="secondary" style={{ fontSize: 13 }}>{wc(activeChapter.chapter_text)} 字</Text>
+            <Text className="novel-editor-word-count" type="secondary" style={{ fontSize: 13 }}>{wc(activeChapter.chapter_text)} 字</Text>
             <SaveIndicator status={saveStatus} />
             <EditorDisplayControls prefs={editorDisplayPrefs} onChange={setEditorDisplayPrefs} />
+            <Tooltip title={writingDeskCollapsed ? '展开写作指挥台' : '收起写作指挥台'}>
+              <Button
+                size="small"
+                className="novel-editor-desk-toggle"
+                icon={writingDeskCollapsed ? <DownOutlined /> : <UpOutlined />}
+                onClick={() => setWritingDeskCollapsed(prev => !prev)}
+              >
+                {writingDeskCollapsed ? '展开指挥台' : '收起指挥台'}
+              </Button>
+            </Tooltip>
             <Text className="novel-editor-recommendation-hint">
               推荐：{recommendedAction.label} · {recommendedAction.reason}
             </Text>
-            <Space className="novel-editor-action-row" size={10} wrap style={{ justifyContent: 'flex-end' }}>
-              <div className="novel-editor-action-flow">
-                <div className="novel-editor-action-group">
-                  <div className="novel-editor-action-group-heading">
-                    <Text className="novel-editor-action-group-label">写前准备</Text>
-                    {recommendedBadge('prep')}
+            {writingDeskCollapsed ? (
+              <div className="novel-editor-collapsed-summary">
+                <Tag className="novel-editor-collapsed-phase" bordered={false}>{aiResponsibility.phaseLabel}</Tag>
+                <Tooltip title={`${recommendedAction.reason}；${aiResponsibility.actionLabel}`}>
+                  <Text className="novel-editor-collapsed-recommendation">推荐：{recommendedAction.label}</Text>
+                </Tooltip>
+                <Space className="novel-editor-collapsed-actions" size={6}>
+                  <Popover content={secondaryActionMenu} trigger="click" placement="bottomRight">
+                    <Button size="small" className="novel-editor-more-actions-inline" icon={<MoreOutlined />}>更多操作</Button>
+                  </Popover>
+                </Space>
+              </div>
+            ) : (
+              <Space className="novel-editor-action-row" size={10} wrap style={{ justifyContent: 'flex-end' }}>
+                <div className="novel-editor-action-flow novel-editor-stagebar">
+                  <div className="novel-editor-action-group novel-editor-stage novel-editor-stage-prep novel-editor-action-group-prep">
+                    <div className="novel-editor-action-group-heading">
+                      <Text className="novel-editor-action-group-label">写前准备</Text>
+                      {recommendedBadge('prep')}
+                    </div>
+                    <Space className="novel-editor-command-cluster" size={4}>
+                      <Tooltip title="生成前诊断">
+                        <Button size="small" className={commandClass('diagnostics', 'novel-editor-icon-command')} loading={diagnosticsLoading} onClick={onOpenGenerationDiagnostics}>诊断</Button>
+                      </Tooltip>
+                      <Tooltip title="生成或刷新场景卡">
+                        <Button size="small" className={commandClass('scene_cards', 'novel-editor-icon-command')} icon={<FileTextOutlined />} loading={generatingSceneCards} onClick={onGenerateSceneCards}>场景卡</Button>
+                      </Tooltip>
+                    </Space>
                   </div>
-                  <Space.Compact>
-                    <Tooltip title="生成前诊断">
-                      <Button size="small" className={recommendedClass('diagnostics')} loading={diagnosticsLoading} onClick={onOpenGenerationDiagnostics}>诊断</Button>
-                    </Tooltip>
-                    <Tooltip title="生成或刷新场景卡">
-                      <Button size="small" className={recommendedClass('scene_cards')} icon={<FileTextOutlined />} loading={generatingSceneCards} onClick={onGenerateSceneCards}>场景卡</Button>
-                    </Tooltip>
-                  </Space.Compact>
-                </div>
-                <div className="novel-editor-action-group novel-editor-action-group-primary">
-                  <div className="novel-editor-action-group-heading">
-                    <Text className="novel-editor-action-group-label">生成正文</Text>
-                    {recommendedBadge('draft')}
-                  </div>
-                  <Space.Compact>
-                    <Tooltip title="创建可恢复流水线，并停在场景卡确认阶段">
-                      <Button size="small" loading={pipelineLoading} onClick={onStartChapterPipeline}>流水线</Button>
-                    </Tooltip>
-                    {!materialReady && (
-                      <Tooltip title={materialRecommendations.slice(0, 4).join('；') || '自动生成场景卡后继续正文生成'}>
+                  <div className="novel-editor-action-group novel-editor-stage novel-editor-stage-draft novel-editor-action-group-primary novel-editor-action-group-draft">
+                    <div className="novel-editor-action-group-heading">
+                      <Text className="novel-editor-action-group-label">生成正文</Text>
+                      {recommendedBadge('draft')}
+                    </div>
+                    <Space className="novel-editor-command-cluster" size={4}>
+                      <Tooltip title="创建可恢复流水线，并停在场景卡确认阶段">
+                        <Button size="small" className={commandClass(undefined, 'novel-editor-muted-command')} loading={pipelineLoading} onClick={onStartChapterPipeline}>流水线</Button>
+                      </Tooltip>
+                      {!materialReady && (
+                        <Tooltip title={materialRecommendations.slice(0, 4).join('；') || '自动生成场景卡后继续正文生成'}>
+                          <Button
+                            type="primary"
+                            size="small"
+                            className={commandClass('repair_generate', 'novel-editor-primary-command')}
+                            icon={<PlayCircleOutlined />}
+                            loading={generatingProse}
+                            onClick={onRepairAndGenerateCurrentChapter}
+                          >
+                            补齐并生成
+                          </Button>
+                        </Tooltip>
+                      )}
+                      <Tooltip title={materialReady ? '生成正文' : '材料不足时建议先使用“补齐并生成”；仍可直接生成并在弹窗中选择是否继续'}>
                         <Button
-                          type="primary"
+                          type={materialReady ? 'primary' : 'default'}
                           size="small"
-                          className={recommendedClass('repair_generate')}
+                          className={commandClass('generate', materialReady ? 'novel-editor-primary-command' : '')}
                           icon={<PlayCircleOutlined />}
                           loading={generatingProse}
-                          onClick={onRepairAndGenerateCurrentChapter}
+                          onClick={onGenerateCurrentChapterProse}
                         >
-                          补齐并生成
+                          生成
                         </Button>
                       </Tooltip>
-                    )}
-                    <Tooltip title={materialReady ? '生成正文' : '材料不足时建议先使用“补齐并生成”；仍可直接生成并在弹窗中选择是否继续'}>
-                      <Button
-                        type={materialReady ? 'primary' : 'default'}
-                        size="small"
-                        className={recommendedClass('generate')}
-                        icon={<PlayCircleOutlined />}
-                        loading={generatingProse}
-                        onClick={onGenerateCurrentChapterProse}
-                      >
-                        生成
-                      </Button>
-                    </Tooltip>
-                  </Space.Compact>
-                </div>
-                <div className="novel-editor-action-group">
-                  <div className="novel-editor-action-group-heading">
-                    <Text className="novel-editor-action-group-label">写后复检</Text>
-                    {recommendedBadge('review')}
+                    </Space>
+                    {renderWordTargetControl()}
                   </div>
-                  <Space.Compact>
-                    <Tooltip title="查看章节质量卡">
-                      <Button size="small" className={recommendedClass('quality_card')} onClick={onOpenQualityCard}>质量卡</Button>
-                    </Tooltip>
-                    <Tooltip title="生成编辑部六维审稿报告">
-                      <Button size="small" loading={editorReportLoading} onClick={onCreateEditorReport}>审稿</Button>
-                    </Tooltip>
-                  </Space.Compact>
+                  <div className="novel-editor-action-group novel-editor-stage novel-editor-stage-review novel-editor-action-group-review">
+                    <div className="novel-editor-action-group-heading">
+                      <Text className="novel-editor-action-group-label">写后复检</Text>
+                      {recommendedBadge('review')}
+                    </div>
+                    <Space className="novel-editor-command-cluster" size={4}>
+                      <Tooltip title="快速验收当前版本是否达到交稿条件">
+                        <Button size="small" className={commandClass('quality_card')} onClick={onOpenQualityCard}>交稿质检</Button>
+                      </Tooltip>
+                      <Tooltip title="生成深度编辑报告，用于定位问题和指导修订">
+                        <Button size="small" className={commandClass(undefined, 'novel-editor-muted-command')} loading={editorReportLoading} onClick={onCreateEditorReport}>编辑报告</Button>
+                      </Tooltip>
+                    </Space>
+                  </div>
                 </div>
-              </div>
-              <Popover content={secondaryActionMenu} trigger="click" placement="bottomRight">
-                <Button className="novel-editor-more-actions" size="small" icon={<MoreOutlined />}>更多操作</Button>
-              </Popover>
-            </Space>
+                <Popover content={secondaryActionMenu} trigger="click" placement="bottomRight">
+                  <Button className="novel-editor-more-actions" size="small" icon={<MoreOutlined />}>更多操作</Button>
+                </Popover>
+              </Space>
+            )}
           </div>
 
           <div className={`novel-ai-responsibility-strip novel-ai-responsibility-strip-${aiResponsibility.tone}`}>
