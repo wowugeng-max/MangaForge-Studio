@@ -107,6 +107,105 @@ export function proseMaxTokensForWordTarget(target: ChapterWordTarget | null | u
   return 8000
 }
 
+export type ProseWordTargetEvaluation = {
+  actual: number
+  target: number
+  min: number
+  max: number
+  deficit: number
+  too_short: boolean
+  too_long: boolean
+  passed: boolean
+}
+
+export function countProseChars(text: string) {
+  return String(text || '').replace(/\s/g, '').length
+}
+
+export function evaluateProseWordTarget(text: string, target: ChapterWordTarget | null | undefined): ProseWordTargetEvaluation {
+  const actual = countProseChars(text)
+  const min = Number(target?.min || 0)
+  const max = Number(target?.max || 0)
+  const targetCount = Number(target?.target || 0)
+  const tooShort = min > 0 && actual < min
+  return {
+    actual,
+    target: targetCount,
+    min,
+    max,
+    deficit: tooShort ? min - actual : 0,
+    too_short: tooShort,
+    too_long: max > 0 && actual > max,
+    passed: !tooShort,
+  }
+}
+
+export function buildProseWordTargetExpansionPrompt(project: any, contextPackage: any, chapterText: string, evaluation: ProseWordTargetEvaluation, options: any = {}) {
+  const target = contextPackage?.chapter_target?.word_target || {}
+  const attempt = Number(options.attempt || 1)
+  const maxAttempts = Number(options.maxAttempts || 1)
+  const deficit = Math.max(0, Number(evaluation.deficit || 0))
+  return [
+    '任务：将本章正文扩写到商业网文标准章节长度。',
+    `作品标题：${project.title || '未命名作品'}`,
+    `目标章节：第${contextPackage?.chapter_target?.chapter_no || '?'}章《${contextPackage?.chapter_target?.title || '无标题'}》`,
+    maxAttempts > 1 ? `这是第 ${attempt} 轮补写，共最多 ${maxAttempts} 轮。` : '',
+    `当前正文约 ${evaluation.actual} 字，目标 ${evaluation.target || target.target || 3000} 字，至少 ${evaluation.min || target.min || 2800} 字，可接受上限 ${evaluation.max || target.max || 3500} 字。`,
+    deficit > 0 ? `当前仍缺至少 ${deficit} 字；本轮必须优先补足缺口，再检查章节结尾是否自然。` : '',
+    '硬性要求：不得删改已有效内容，不得把正文改成大纲、摘要或设定说明；必须保留本章主线、角色状态、章末钩子和已经成立的连续性。',
+    '扩写重点：扩写动作过程、选择代价、对话交锋、章末钩子铺垫；补足每个场景的行动链、反应链、信息变化和后果，不要靠堆砌环境描写凑字数。',
+    '如果原文有跳跃、略写或只写结果的段落，请在原位置自然补充过程；如果对话过少，请补充带冲突目标的对话；如果章末钩子过弱，请强化但不要开启下一章剧情。',
+    '',
+    '【结构化上下文包】',
+    JSON.stringify(contextPackage || {}, null, 2).slice(0, 9000),
+    '',
+    '【当前过短正文】',
+    chapterText.slice(0, 18000),
+    '',
+    '输出 JSON，包含 prose_chapters 数组。数组只能有一项，且必须包含 chapter_no, title, chapter_text, scene_breakdown, continuity_notes。chapter_text 必须返回扩写后的完整正文，不要只返回新增段落，不要 markdown 标题。',
+  ].filter(Boolean).join('\n')
+}
+
+export function extractProseExpansionPayload(result: any) {
+  const payload = getNovelPayload(result)
+  const expandedFirst = Array.isArray(payload?.prose_chapters) ? payload.prose_chapters[0] : payload
+  return {
+    text: String(expandedFirst?.chapter_text || payload?.chapter_text || ''),
+    scene_breakdown: expandedFirst?.scene_breakdown || payload?.scene_breakdown || [],
+    continuity_notes: expandedFirst?.continuity_notes || payload?.continuity_notes || [],
+    payload,
+  }
+}
+
+export function buildCommercialEditorRewritePrompt(project: any, contextPackage: any, chapterText: string, options: any = {}) {
+  const target = contextPackage?.chapter_target?.word_target || {}
+  return [
+    '任务：商业主编改稿。你不是重新写新剧情，而是在保留本章事实、人物状态和设定约束的前提下，把初稿改成更像可连载商业网文的版本。',
+    `作品标题：${project.title || '未命名作品'}`,
+    `目标章节：第${contextPackage?.chapter_target?.chapter_no || '?'}章《${contextPackage?.chapter_target?.title || '无标题'}》`,
+    target?.target ? `字数约束：目标 ${target.target} 字，可接受范围 ${target.min}-${target.max} 字。改稿后不得低于下限，不能为追求精炼而明显缩短。` : '',
+    options?.phase ? `改稿阶段：${options.phase}` : '',
+    '',
+    '【主编改稿重点】',
+    '1. 开篇钩子：前 300 字必须给出事故、异常、危险、欲望或反常信息，不要平铺醒来和解释。',
+    '2. 人物声音：主角、智者、求生者等角色说话方式要可区分；减少通用惊讶、通用冷静和旁白替角色总结。',
+    '3. 规则压力：把规则的触发条件、倒计时、违规代价和角色选择压力写成可见事件。',
+    '4. 恐怖具象化：少用“诡异、阴森、压抑”等空泛词，多写声音、光线、物体、身体反应和空间变化。',
+    '5. 爽点密度：每 800-1200 字至少有一次信息推进、能力展示、危机反制、关系变化或小回收。',
+    '6. 章末钩子：结尾必须把 ending_hook 或 scene_cards.ending_hook_seed 强化成下一章非看不可的问题。',
+    '7. 删除模板句：删掉“不是那么简单”“拉开序幕”“已然”等模板化总结，替换成具体动作和后果。',
+    '8. 不得改写主线事实，不得新增破坏后续大纲的设定；setting_context 的 forbidden/knowledge_scope 必须遵守。',
+    '',
+    '【结构化上下文包】',
+    JSON.stringify(contextPackage || {}, null, 2).slice(0, 10000),
+    '',
+    '【待改稿正文】',
+    chapterText.slice(0, 22000),
+    '',
+    '输出 JSON，包含 prose_chapters 数组。数组只能有一项，且必须包含 chapter_no, title, chapter_text, scene_breakdown, continuity_notes；同时输出 editor_report，说明 applied_changes(array)、remaining_risks(array)、word_count_estimate(number)。chapter_text 必须是改稿后的完整正文，不要 markdown 标题。',
+  ].filter(Boolean).join('\n')
+}
+
 export function normalizeSceneCardsPayload(payload: any, contextPackage: any = {}) {
   const directCards = Array.isArray(payload?.scene_cards) ? payload.scene_cards : Array.isArray(payload?.scenes) ? payload.scenes : []
   const targetNo = Number(contextPackage?.chapter_target?.chapter_no || 0)
@@ -129,6 +228,14 @@ export function normalizeSceneCardsPayload(payload: any, contextPackage: any = {
           ? asArray(outline?.required_beats || outline?.beats)
           : [outline?.summary, outline?.conflict, outline?.ending_hook].filter(Boolean),
         beat: outline?.beat || outline?.summary || '',
+        opening_hook: outline?.opening_hook || outline?.hook || '',
+        reader_payoff: outline?.reader_payoff || outline?.payoff || '',
+        fear_point: outline?.fear_point || '',
+        rule_pressure: outline?.rule_pressure || outline?.rule_trigger || '',
+        information_gap: outline?.information_gap || '',
+        reversal: outline?.reversal || outline?.turning_point || '',
+        ending_hook_seed: outline?.ending_hook_seed || outline?.ending_hook || '',
+        character_voice: outline?.character_voice || '',
         turning_point: outline?.turning_point || outline?.ending_hook || '',
         exit_state: outline?.exit_state || outline?.ending_hook || '',
       }))
@@ -144,6 +251,14 @@ export function normalizeSceneCardsPayload(payload: any, contextPackage: any = {
     required_beats: asArray(card?.required_beats || card?.beats).map((item: any) => String(item)).filter(Boolean),
     action_beats: asArray(card?.action_beats || card?.combat_beats).map((item: any) => String(item)).filter(Boolean),
     beat: String(card?.beat || card?.action || card?.description || ''),
+    opening_hook: String(card?.opening_hook || card?.hook_opening || ''),
+    reader_payoff: String(card?.reader_payoff || card?.payoff || ''),
+    fear_point: String(card?.fear_point || card?.terror_point || ''),
+    rule_pressure: String(card?.rule_pressure || card?.rule_trigger || ''),
+    information_gap: String(card?.information_gap || card?.mystery_gap || ''),
+    reversal: String(card?.reversal || card?.twist || ''),
+    ending_hook_seed: String(card?.ending_hook_seed || card?.ending_hook || ''),
+    character_voice: String(card?.character_voice || card?.voice_focus || ''),
     emotional_tone: String(card?.emotional_tone || card?.tone || ''),
     key_dialogue: String(card?.key_dialogue || card?.dialogue_focus || ''),
     dialogue_goal: String(card?.dialogue_goal || ''),
@@ -180,8 +295,11 @@ export function createNovelWritingService(ctx: {
     '【结构化上下文包】',
     JSON.stringify(contextPackage, null, 2).slice(0, 9000),
     '',
-    '输出 JSON，字段 scene_cards(array)。每个场景卡包含：scene_no, title, scene_type, location, characters_present(array), purpose, conflict, required_beats(array), action_beats(array), beat, emotional_tone, key_dialogue, dialogue_goal, required_information(array), used_settings(array), revealed_settings(array), forbidden_settings(array), ability_beats(array), item_beats(array), boss_move, rule_trigger, state_changes_expected(array), turning_point, description_budget, transition_from_previous, exit_state。',
+    '输出 JSON，字段 scene_cards(array)。每个场景卡包含：scene_no, title, scene_type, location, characters_present(array), purpose, conflict, required_beats(array), action_beats(array), beat, opening_hook, reader_payoff, fear_point, rule_pressure, information_gap, reversal, ending_hook_seed, character_voice, emotional_tone, key_dialogue, dialogue_goal, required_information(array), used_settings(array), revealed_settings(array), forbidden_settings(array), ability_beats(array), item_beats(array), boss_move, rule_trigger, state_changes_expected(array), turning_point, description_budget, transition_from_previous, exit_state。',
     'scene_type 只能取：action/combat/chase/investigation/dialogue/reveal/emotion/transition/hook。凡是本章有战斗、追逐、灾祸、清剿、冲突升级，必须至少有一个 action/combat/chase 场景。',
+    '商业读者钩子：每个场景至少落实 opening_hook/reader_payoff/fear_point/rule_pressure/information_gap/reversal/ending_hook_seed 中的一项，不允许只写剧情摘要。',
+    '前三章第一场必须有 opening_hook；最后一个场景必须有 ending_hook_seed；规则怪谈、恐怖、悬疑类章节必须把 rule_pressure 与 fear_point 写成具体可见风险。',
+    'reader_payoff 要说明这一场给读者的爽点、惊点、信息回收或关系变化；character_voice 要标出主要角色的差异化说话方式。',
     'action_beats 必须写成可见动作链：起手/试探/受阻/受伤或代价/反制/结果。非动作场景也要写 required_beats，避免只写氛围。',
     'description_budget 写 low/medium/high。默认 low；只有新地点首次登场或诡异规则首次显形时才允许 medium/high。',
     '设定工坊约束：必须优先使用 setting_context.chapter_usage.required；allowed 可按需使用；forbidden_settings 不得揭露或误用；能力、物品、Boss、规则、境界和角色认知必须服从 setting_context.entities 的 constraints_json/state_json。',
@@ -277,6 +395,7 @@ export function createNovelWritingService(ctx: {
     '【段落级写作要求】',
     '1. 严格按 scene_cards 顺序生成，每个场景至少 3-8 个自然段。',
     '2. 每个场景必须完成 purpose、conflict、required_beats、required_information、turning_point 和 exit_state；不能只写气氛、设定说明或心理总结。',
+    '2A. 每个场景必须把 opening_hook、reader_payoff、fear_point、rule_pressure、information_gap、reversal、ending_hook_seed、character_voice 中已有的商业意图落实到正文里；这些字段不是备注，必须转成动作、对话、危险、反转或章末疑问。',
     '3. 如果 scene_type 是 action/combat/chase，必须逐条落实 action_beats：写出动作起手、空间位置、对手反应、受伤/损耗/暴露信息、反制动作和结果。战斗不能一笔带过。',
     '4. 段落预算：动作/冲突场景中可见行动与直接反应不少于 60%；环境描写最多 15%；心理描写最多 20%；解释性信息最多 15%。',
     '5. 禁止连续 2 段纯环境描写；每 3-5 段必须出现一次可见行动、选择、信息变化或关系变化。',
@@ -756,6 +875,137 @@ export function createNovelWritingService(ctx: {
     }
   }
 
+  const runCommercialEditorRewrite = async (activeWorkspace: string, project: any, contextPackage: any, chapterText: string, modelId?: number, options: any = {}) => {
+    const editorModelId = ctx.production.getStageModelId(project, 'editor', modelId)
+    const editorResult = await executeNovelAgent('prose-agent', project, {
+      task: buildCommercialEditorRewritePrompt(project, contextPackage, chapterText, options),
+      upstreamContext: contextPackage,
+    }, {
+      activeWorkspace,
+      modelId: editorModelId ? String(editorModelId) : undefined,
+      maxTokens: proseMaxTokensForWordTarget(contextPackage?.chapter_target?.word_target),
+      temperature: ctx.production.getStageTemperature(project, 'editor', 0.5),
+      skipMemory: true,
+    })
+    const payload = getNovelPayload(editorResult)
+    const rewrittenFirst = Array.isArray(payload?.prose_chapters) ? payload.prose_chapters[0] : payload
+    const rewrittenText = String(rewrittenFirst?.chapter_text || payload?.chapter_text || '')
+    const originalCount = countProseChars(chapterText)
+    const rewrittenCount = countProseChars(rewrittenText)
+    if (!rewrittenText) {
+      return {
+        final_text: chapterText,
+        edited: false,
+        editor_report: { error: (editorResult as any).error || '商业主编改稿未返回正文' },
+        revision: null,
+      }
+    }
+    if (originalCount > 0 && rewrittenCount < Math.floor(originalCount * 0.85)) {
+      return {
+        final_text: chapterText,
+        edited: false,
+        editor_report: {
+          ...(payload?.editor_report || {}),
+          error: `商业主编改稿返回正文过短：${rewrittenCount}/${originalCount}`,
+        },
+        revision: null,
+      }
+    }
+    return {
+      final_text: rewrittenText,
+      edited: rewrittenText !== chapterText,
+      editor_report: {
+        ...(payload?.editor_report || {}),
+        modelName: (editorResult as any).modelName,
+        original_word_count: originalCount,
+        edited_word_count: rewrittenCount,
+      },
+      revision: {
+        scene_breakdown: rewrittenFirst?.scene_breakdown || payload?.scene_breakdown || [],
+        continuity_notes: rewrittenFirst?.continuity_notes || payload?.continuity_notes || [],
+        modelName: (editorResult as any).modelName,
+      },
+    }
+  }
+
+  const ensureProseMeetsWordTarget = async (activeWorkspace: string, project: any, contextPackage: any, chapterText: string, modelId?: number, options: any = {}) => {
+    const wordTarget = contextPackage?.chapter_target?.word_target as ChapterWordTarget | null | undefined
+    const evaluation = evaluateProseWordTarget(chapterText, wordTarget)
+    if (evaluation.passed || options.expand === false) {
+      return {
+        final_text: chapterText,
+        expanded: false,
+        evaluation,
+        final_evaluation: evaluation,
+        expansion: null,
+      }
+    }
+
+    const maxExpansionAttempts = Math.max(1, Math.min(5, Number(options.maxExpansionAttempts || options.max_expansion_attempts || 3)))
+    const reviseModelId = ctx.production.getStageModelId(project, 'revise', modelId)
+    let currentText = String(chapterText || '')
+    let currentEvaluation = evaluation
+    const attempts: any[] = []
+
+    for (let attempt = 1; attempt <= maxExpansionAttempts; attempt += 1) {
+      const expansionResult = await executeNovelAgent('prose-agent', project, {
+        task: buildProseWordTargetExpansionPrompt(project, contextPackage, currentText, currentEvaluation, { attempt, maxAttempts: maxExpansionAttempts }),
+        upstreamContext: contextPackage,
+      }, {
+        activeWorkspace,
+        modelId: reviseModelId ? String(reviseModelId) : undefined,
+        maxTokens: proseMaxTokensForWordTarget(wordTarget),
+        temperature: ctx.production.getStageTemperature(project, 'revise', 0.65),
+        skipMemory: true,
+      })
+      const extracted = extractProseExpansionPayload(expansionResult)
+      const expandedText = extracted.text
+      const finalEvaluation = evaluateProseWordTarget(expandedText, wordTarget)
+      const previousCount = countProseChars(currentText)
+      const expandedCount = countProseChars(expandedText)
+
+      attempts.push({
+        attempt,
+        previous_count: previousCount,
+        expanded_count: expandedCount,
+        evaluation: finalEvaluation,
+        modelName: (expansionResult as any).modelName,
+        returned_text: Boolean(expandedText),
+      })
+
+      if (expandedText && expandedCount > previousCount) {
+        currentText = expandedText
+        currentEvaluation = finalEvaluation
+      }
+
+      if (expandedText && expandedCount > previousCount && finalEvaluation.passed) {
+        return {
+          final_text: expandedText,
+          expanded: true,
+          evaluation,
+          final_evaluation: finalEvaluation,
+          expansion: {
+            scene_breakdown: extracted.scene_breakdown,
+            continuity_notes: extracted.continuity_notes,
+            attempts,
+            modelName: (expansionResult as any).modelName,
+          },
+        }
+      }
+    }
+
+    throw Object.assign(
+      new Error(`章节正文低于字数下限：当前 ${evaluation.actual} 字，至少 ${evaluation.min} 字，扩写后 ${currentEvaluation.actual || 0} 字`),
+      {
+        code: 'PROSE_WORD_TARGET_SHORT',
+        word_target: wordTarget,
+        evaluation,
+        final_evaluation: currentEvaluation,
+        expansion_attempts: attempts,
+      },
+    )
+  }
+
   const generateChapterForGroup = async (activeWorkspace: string, projectId: number, chapterId: number, options: any = {}) => {
     const preferredModelId = Number(options.model_id || 0) || undefined
     const onStage = typeof options.onStage === 'function' ? options.onStage : async () => {}
@@ -858,10 +1108,24 @@ export function createNovelWritingService(ctx: {
       await onStage('draft', { status: 'failed', error: String((draftResult as any).error || (draftResult as any).fallbackReason || '模型未返回正文') })
       throw new Error(String((draftResult as any).error || (draftResult as any).fallbackReason || '模型未返回正文'))
     }
-    await onStage('draft', { status: 'success', word_count: String(chapterText || '').replace(/\s/g, '').length, modelName: (draftResult as any).modelName, scene_status: 'generated' })
+    await onStage('draft', { status: 'success', word_count: countProseChars(chapterText), modelName: (draftResult as any).modelName, scene_status: 'generated' })
     let finalText = String(chapterText || '')
     let finalSceneBreakdown = targetProse?.scene_breakdown || resultPayload?.scene_breakdown || []
     let finalContinuityNotes = targetProse?.continuity_notes || resultPayload?.continuity_notes || chapter.continuity_notes || []
+    let editorRewrite: any = null
+    await onStage('word_target', { status: 'running', target: wordTarget.target, min: wordTarget.min, max: wordTarget.max, actual: countProseChars(finalText) })
+    try {
+      const wordTargetCheck = await ensureProseMeetsWordTarget(activeWorkspace, project, contextPackage, finalText, preferredModelId)
+      finalText = wordTargetCheck.final_text || finalText
+      if (wordTargetCheck.expanded && wordTargetCheck.expansion) {
+        finalSceneBreakdown = wordTargetCheck.expansion.scene_breakdown?.length ? wordTargetCheck.expansion.scene_breakdown : finalSceneBreakdown
+        finalContinuityNotes = wordTargetCheck.expansion.continuity_notes?.length ? wordTargetCheck.expansion.continuity_notes : finalContinuityNotes
+      }
+      await onStage('word_target', { status: 'success', expanded: wordTargetCheck.expanded, word_count: countProseChars(finalText), evaluation: wordTargetCheck.final_evaluation })
+    } catch (error: any) {
+      await onStage('word_target', { status: 'failed', error: String(error?.message || error), word_target: error?.word_target || wordTarget, evaluation: error?.evaluation, final_evaluation: error?.final_evaluation, expansion_attempts: error?.expansion_attempts })
+      throw error
+    }
     if (isDraftOnly) {
       await onStage('review', { status: 'skipped', reason: '生产模式：只生成正文初稿' })
       await onStage('revise', { status: 'skipped', reason: '生产模式：只生成正文初稿' })
@@ -873,7 +1137,7 @@ export function createNovelWritingService(ctx: {
         raw_payload: { ...(chapter.raw_payload || {}), generated_scene_breakdown: finalSceneBreakdown },
         status: 'draft',
       }, { versionSource: 'agent_execute' })
-      await onStage('store', { status: 'success', word_count: String(finalText || '').replace(/\s/g, '').length, scene_status: 'accepted' })
+      await onStage('store', { status: 'success', word_count: countProseChars(finalText), scene_status: 'accepted' })
       await onStage('story_state', { status: 'skipped', reason: '初稿模式不更新状态机，避免低质草稿污染长期记忆' })
       return {
         chapter: updatedDraft,
@@ -885,10 +1149,57 @@ export function createNovelWritingService(ctx: {
         config_snapshot: configSnapshot,
       }
     }
+    await onStage('editor', { status: 'running' })
+    try {
+      editorRewrite = await runCommercialEditorRewrite(activeWorkspace, project, contextPackage, finalText, preferredModelId)
+      finalText = editorRewrite.final_text || finalText
+      if (editorRewrite.edited && editorRewrite.revision) {
+        finalSceneBreakdown = editorRewrite.revision.scene_breakdown?.length ? editorRewrite.revision.scene_breakdown : finalSceneBreakdown
+        finalContinuityNotes = editorRewrite.revision.continuity_notes?.length ? editorRewrite.revision.continuity_notes : finalContinuityNotes
+      }
+      await onStage('editor', {
+        status: editorRewrite.edited ? 'success' : 'warn',
+        edited: Boolean(editorRewrite.edited),
+        word_count: countProseChars(finalText),
+        editor_report: editorRewrite.editor_report,
+      })
+    } catch (editorError) {
+      editorRewrite = { error: String(editorError), edited: false }
+      await onStage('editor', { status: 'warn', error: String(editorError).slice(0, 200), reason: '商业主编改稿失败，保留当前稿' })
+    }
+    try {
+      const postEditorWordTargetCheck = await ensureProseMeetsWordTarget(activeWorkspace, project, contextPackage, finalText, preferredModelId)
+      finalText = postEditorWordTargetCheck.final_text || finalText
+      if (postEditorWordTargetCheck.expanded && postEditorWordTargetCheck.expansion) {
+        finalSceneBreakdown = postEditorWordTargetCheck.expansion.scene_breakdown?.length ? postEditorWordTargetCheck.expansion.scene_breakdown : finalSceneBreakdown
+        finalContinuityNotes = postEditorWordTargetCheck.expansion.continuity_notes?.length ? postEditorWordTargetCheck.expansion.continuity_notes : finalContinuityNotes
+        await onStage('word_target', { status: 'success', expanded: true, word_count: countProseChars(finalText), evaluation: postEditorWordTargetCheck.final_evaluation, phase: 'post_editor' })
+      }
+    } catch (error: any) {
+      await onStage('word_target', { status: 'failed', error: String(error?.message || error), word_target: error?.word_target || wordTarget, evaluation: error?.evaluation, final_evaluation: error?.final_evaluation, expansion_attempts: error?.expansion_attempts, phase: 'post_editor' })
+      throw error
+    }
     await onStage('review', { status: 'running' })
     const selfCheck = await runProseSelfReviewAndRevision(activeWorkspace, project, contextPackage, finalText, preferredModelId, { revise: !isDraftReviewOnly })
     await onStage('review', { status: selfCheck?.review?.passed === false ? 'warn' : 'success', score: selfCheck?.review?.score ?? null, issues: selfCheck?.review?.issues || [], scene_status: 'reviewed' })
     await onStage('revise', { status: selfCheck.revised ? 'success' : 'skipped', revised: Boolean(selfCheck.revised), scene_status: selfCheck.revised ? 'revised' : '' })
+    finalText = selfCheck.final_text || finalText
+    if (selfCheck.revised && selfCheck.revision) {
+      finalSceneBreakdown = selfCheck.revision.scene_breakdown?.length ? selfCheck.revision.scene_breakdown : finalSceneBreakdown
+      finalContinuityNotes = selfCheck.revision.continuity_notes?.length ? selfCheck.revision.continuity_notes : finalContinuityNotes
+    }
+    try {
+      const postReviewWordTargetCheck = await ensureProseMeetsWordTarget(activeWorkspace, project, contextPackage, finalText, preferredModelId)
+      finalText = postReviewWordTargetCheck.final_text || finalText
+      if (postReviewWordTargetCheck.expanded && postReviewWordTargetCheck.expansion) {
+        finalSceneBreakdown = postReviewWordTargetCheck.expansion.scene_breakdown?.length ? postReviewWordTargetCheck.expansion.scene_breakdown : finalSceneBreakdown
+        finalContinuityNotes = postReviewWordTargetCheck.expansion.continuity_notes?.length ? postReviewWordTargetCheck.expansion.continuity_notes : finalContinuityNotes
+        await onStage('word_target', { status: 'success', expanded: true, word_count: countProseChars(finalText), evaluation: postReviewWordTargetCheck.final_evaluation, phase: 'post_review' })
+      }
+    } catch (error: any) {
+      await onStage('word_target', { status: 'failed', error: String(error?.message || error), word_target: error?.word_target || wordTarget, evaluation: error?.evaluation, final_evaluation: error?.final_evaluation, expansion_attempts: error?.expansion_attempts, phase: 'post_review' })
+      throw error
+    }
     if (isDraftReviewOnly) {
       await onStage('safety', { status: 'skipped', reason: '生产模式：生成并自检，不执行仿写安全门禁' })
       await onStage('store', { status: 'running' })
@@ -897,8 +1208,8 @@ export function createNovelWritingService(ctx: {
         continuity_notes: finalContinuityNotes,
         raw_payload: { ...(chapter.raw_payload || {}), generated_scene_breakdown: finalSceneBreakdown },
         status: 'draft',
-      }, { versionSource: 'agent_execute' })
-      await onStage('store', { status: 'success', word_count: String(finalText || '').replace(/\s/g, '').length, scene_status: 'accepted' })
+      }, { versionSource: editorRewrite?.edited ? 'editor_rewrite' : 'agent_execute' })
+      await onStage('store', { status: 'success', word_count: countProseChars(finalText), scene_status: 'accepted' })
       await onStage('story_state', { status: 'skipped', reason: '自检模式不更新状态机，确认后可继续完整流水线' })
       await createNovelReview(activeWorkspace, {
         project_id: projectId,
@@ -906,7 +1217,7 @@ export function createNovelWritingService(ctx: {
         status: selfCheck?.review?.passed === false || Number(selfCheck?.review?.score || 100) < 78 ? 'warn' : 'ok',
         summary: `章节群质检评分 ${selfCheck?.review?.score ?? '-'}`,
         issues: Array.isArray(selfCheck?.review?.issues) ? selfCheck.review.issues.map((issue: any) => `${issue.severity || 'medium'}｜${issue.description || issue}`) : [],
-        payload: JSON.stringify({ chapter_id: chapter.id, context_package: contextPackage, self_check: selfCheck, production_mode: productionMode, config_snapshot: configSnapshot }),
+        payload: JSON.stringify({ chapter_id: chapter.id, context_package: contextPackage, editor_rewrite: editorRewrite, self_check: selfCheck, production_mode: productionMode, config_snapshot: configSnapshot }),
       })
       return {
         chapter: updatedReviewedDraft,
@@ -931,11 +1242,6 @@ export function createNovelWritingService(ctx: {
       await onStage('draft', { status: 'needs_confirmation', score: selfCheck?.review?.score ?? null, revised: Boolean(selfCheck.revised) })
       throw ctx.production.buildApprovalError('draft', '正文入库前等待人工确认', { score: selfCheck?.review?.score ?? null, revised: Boolean(selfCheck.revised) })
     }
-    finalText = selfCheck.final_text || finalText
-    if (selfCheck.revised && selfCheck.revision) {
-      finalSceneBreakdown = selfCheck.revision.scene_breakdown?.length ? selfCheck.revision.scene_breakdown : finalSceneBreakdown
-      finalContinuityNotes = selfCheck.revision.continuity_notes?.length ? selfCheck.revision.continuity_notes : finalContinuityNotes
-    }
     const referenceReport = await ctx.reference.buildReferenceUsageReport(activeWorkspace, project, '正文创作', finalText)
     const safetyDecision = ctx.reference.getReferenceSafetyDecision(project, referenceReport)
     const safetyExplanation = ctx.reference.explainReferenceSafety(referenceReport, safetyDecision)
@@ -959,8 +1265,8 @@ export function createNovelWritingService(ctx: {
       continuity_notes: finalContinuityNotes,
       raw_payload: { ...(chapter.raw_payload || {}), generated_scene_breakdown: finalSceneBreakdown },
       status: 'draft',
-    }, { versionSource: selfCheck?.revised ? 'repair' : 'agent_execute' })
-    await onStage('store', { status: 'success', word_count: String(finalText || '').replace(/\s/g, '').length, scene_status: 'accepted' })
+    }, { versionSource: selfCheck?.revised ? 'repair' : editorRewrite?.edited ? 'editor_rewrite' : 'agent_execute' })
+    await onStage('store', { status: 'success', word_count: countProseChars(finalText), scene_status: 'accepted' })
     await onStage('story_state', { status: 'running' })
     const storyStateUpdate = await updateStoryStateMachine(activeWorkspace, project, chapter, contextPackage, finalText, preferredModelId).catch(error => ({ error: String(error) }))
     await onStage('story_state', { status: (storyStateUpdate as any)?.error ? 'failed' : 'success', error: (storyStateUpdate as any)?.error || '' })
@@ -970,7 +1276,7 @@ export function createNovelWritingService(ctx: {
       status: selfCheck?.review?.passed === false || Number(selfCheck?.review?.score || 100) < 78 ? 'warn' : 'ok',
       summary: `章节群质检评分 ${selfCheck?.review?.score ?? '-'}`,
       issues: Array.isArray(selfCheck?.review?.issues) ? selfCheck.review.issues.map((issue: any) => `${issue.severity || 'medium'}｜${issue.description || issue}`) : [],
-      payload: JSON.stringify({ chapter_id: chapter.id, context_package: contextPackage, self_check: selfCheck, reference_report: referenceReport, safety_decision: safetyDecision, migration_audit: migrationAudit, production_mode: productionMode, config_snapshot: configSnapshot }),
+      payload: JSON.stringify({ chapter_id: chapter.id, context_package: contextPackage, editor_rewrite: editorRewrite, self_check: selfCheck, reference_report: referenceReport, safety_decision: safetyDecision, migration_audit: migrationAudit, production_mode: productionMode, config_snapshot: configSnapshot }),
     })
     const settingViolations = Array.isArray(selfCheck?.review?.setting_violations) ? selfCheck.review.setting_violations : []
     if (contextPackage?.setting_context?.chapter_usage?.length || settingViolations.length > 0) {
@@ -994,6 +1300,7 @@ export function createNovelWritingService(ctx: {
       chapter: updated,
       score: selfCheck?.review?.score ?? null,
       revised: Boolean(selfCheck?.revised),
+      editor_rewrite: editorRewrite,
       production_mode: productionMode,
       completed_stage: 'story_state',
       reference_report: referenceReport,
@@ -1010,7 +1317,9 @@ export function createNovelWritingService(ctx: {
     generateSceneCardsForChapter,
     updateStoryStateMachine,
     getStoredOrBuiltWritingBible,
+    runCommercialEditorRewrite,
     runProseSelfReviewAndRevision,
+    ensureProseMeetsWordTarget,
     generateChapterForGroup,
   }
 }

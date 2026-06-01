@@ -30,4 +30,34 @@ describe('novel generate prose route source guards', () => {
     expect(routeBlock).toContain('const contextPackage = applyChapterWordTargetToContext(')
     expect(routeBlock).toContain('wordTarget,')
   })
+
+  test('enforces chapter word target before self-review and storage', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
+    const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'")
+    const reviewStart = source.indexOf("markStage('review'", routeStart)
+    const storeStart = source.indexOf("markStage('store'", routeStart)
+    const beforeReviewBlock = source.slice(routeStart, reviewStart)
+
+    expect(routeStart).toBeGreaterThanOrEqual(0)
+    expect(reviewStart).toBeGreaterThan(routeStart)
+    expect(storeStart).toBeGreaterThan(reviewStart)
+    expect(beforeReviewBlock).toContain('ctx.ensureProseMeetsWordTarget(')
+  })
+
+  test('runs commercial editor rewrite after word-target expansion and before self-review', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
+    const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'")
+    const firstWordTarget = source.indexOf('const wordTargetCheck = await ctx.ensureProseMeetsWordTarget', routeStart)
+    const editorStart = source.indexOf('ctx.runCommercialEditorRewrite(', routeStart)
+    const reviewStart = source.indexOf("markStage('review'", routeStart)
+    const contextTypeStart = source.indexOf('type GenerationRoutesContext =')
+    const contextTypeEnd = source.indexOf('function buildTextDiffSummary', contextTypeStart)
+    const contextTypeBlock = source.slice(contextTypeStart, contextTypeEnd)
+
+    expect(routeStart).toBeGreaterThanOrEqual(0)
+    expect(firstWordTarget).toBeGreaterThan(routeStart)
+    expect(editorStart).toBeGreaterThan(firstWordTarget)
+    expect(editorStart).toBeLessThan(reviewStart)
+    expect(contextTypeBlock).toContain('runCommercialEditorRewrite:')
+  })
 })

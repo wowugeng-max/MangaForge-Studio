@@ -14,7 +14,7 @@ import {
   updateNovelSettingEntity,
 } from '../novel'
 import { executeNovelAgent } from '../llm'
-import { parseJsonLikePayload } from './novel-route-utils'
+import { getNovelPayload, parseJsonLikePayload } from './novel-route-utils'
 
 type NovelSettingRoutesContext = {
   getWorkspace: () => string
@@ -22,7 +22,7 @@ type NovelSettingRoutesContext = {
   buildChapterContextPackage: (workspace: string, project: any, chapter: any, chapters: any[], worldbuilding: any[], characters: any[], outlines: any[], reviews?: any[]) => Promise<any>
 }
 
-const SETTING_TYPES = ['character', 'realm', 'ability', 'item', 'boss', 'rule', 'faction', 'location', 'foreshadowing', 'timeline']
+export const SETTING_TYPES = ['character', 'realm', 'ability', 'item', 'boss', 'rule', 'faction', 'location', 'foreshadowing', 'timeline']
 
 function parseJsonField(value: any, fallback: any) {
   if (value === undefined || value === null || value === '') return fallback
@@ -47,6 +47,152 @@ function normalizeSettingInput(body: any, projectId: number) {
     state_json: parseJsonField(body.state_json ?? body.state, {}),
     payload_json: parseJsonField(body.payload_json ?? body.payload, {}),
   }
+}
+
+function firstText(...values: any[]) {
+  for (const value of values) {
+    const text = String(value || '').trim()
+    if (text) return text
+  }
+  return ''
+}
+
+function asSettingArray(value: any) {
+  return Array.isArray(value) ? value : []
+}
+
+export function buildSettingAgentPrompt(project: any, worldbuilding: any[] = [], characters: any[] = [], outlines: any[] = [], existing: any[] = []) {
+  return [
+    '任务：你是 setting-agent，负责为商业长篇小说生成和补全“设定工坊”资产池。只输出 JSON，不要解释。',
+    `作品标题：${project.title || '未命名作品'}`,
+    `篇幅目标：${project.length_target || 'longform'}`,
+    '',
+    '必须构建可长期连载复用的设定系统，而不是只写世界观摘要。重点包括：',
+    '1. 能力体系：能力来源、能力名、拥有者、代价、限制、克制关系、升级路径。',
+    '2. 境界/等级体系：阶段名称、晋升条件、瓶颈、资源消耗、战力差距。',
+    '3. 物品体系：关键物品、归属规则、消耗/损坏、位置、禁用条件。',
+    '4. 势力体系：组织目标、资源、敌友关系、行动边界、登场阶段。',
+    '5. Boss/反派阶梯：每卷或阶段的对手、行动逻辑、压迫方式、失败代价。',
+    '6. 规则/地点/时间线/伏笔：触发条件、禁忌、揭示范围、回收章节。',
+    '',
+    '【现有项目资料】',
+    JSON.stringify({ project, worldbuilding, characters, outlines: outlines.slice(0, 120), existing_settings: existing.slice(0, 120) }, null, 2).slice(0, 20000),
+    '',
+    '输出 JSON 字段：',
+    'settings: array，每项包含 entity_type,name,summary,status,visibility,first_chapter_no,last_chapter_no,constraints_json,state_json,payload_json。',
+    '也可以额外输出 ability_system{abilities}, realm_system{realms}, item_system{items}, faction_system{factions}, boss_ladder{bosses}, rules, locations, timeline, foreshadowing；系统会归一化入库。',
+    'entity_type 只能是 character/realm/ability/item/boss/rule/faction/location/foreshadowing/timeline。',
+    '每个能力、物品、规则、Boss 必须写 constraints_json；每个已登场或可追踪对象必须写 state_json。',
+  ].join('\n')
+}
+
+function normalizeAgentSettingItem(item: any, projectId: number, fallbackType: string, source: string) {
+  const entityType = SETTING_TYPES.includes(String(item?.entity_type || item?.type || fallbackType))
+    ? String(item?.entity_type || item?.type || fallbackType)
+    : fallbackType
+  const name = firstText(item?.name, item?.title, item?.ability_name, item?.realm_name, item?.item_name, item?.faction_name, item?.boss_name)
+  if (!name) return null
+  const constraints = parseJsonField(item?.constraints_json ?? item?.constraints, {})
+  const state = parseJsonField(item?.state_json ?? item?.state, {})
+  const payload = parseJsonField(item?.payload_json ?? item?.payload, {})
+  if (entityType === 'ability') {
+    Object.assign(constraints, {
+      ...(item?.cost ? { cost: item.cost } : {}),
+      ...(item?.limit ? { limit: item.limit } : {}),
+      ...(item?.condition ? { condition: item.condition } : {}),
+      ...(item?.counter ? { counter: item.counter } : {}),
+    })
+    Object.assign(state, {
+      ...(item?.owner ? { owner: item.owner } : {}),
+      ...(item?.status ? { status: item.status } : {}),
+    })
+  }
+  if (entityType === 'realm') {
+    Object.assign(constraints, {
+      ...(item?.advancement_condition ? { advancement_condition: item.advancement_condition } : {}),
+      ...(item?.bottleneck ? { bottleneck: item.bottleneck } : {}),
+      ...(item?.resource_cost ? { resource_cost: item.resource_cost } : {}),
+    })
+  }
+  if (entityType === 'item') {
+    Object.assign(constraints, {
+      ...(item?.owner_rule ? { owner_rule: item.owner_rule } : {}),
+      ...(item?.limitation ? { limitation: item.limitation } : {}),
+      ...(item?.cost ? { cost: item.cost } : {}),
+    })
+    Object.assign(state, {
+      ...(item?.owner ? { owner: item.owner } : {}),
+      ...(item?.location ? { location: item.location } : {}),
+      ...(item?.status ? { status: item.status } : {}),
+    })
+  }
+  if (entityType === 'faction') {
+    Object.assign(constraints, {
+      ...(item?.agenda ? { agenda: item.agenda } : {}),
+      ...(item?.resources ? { resources: item.resources } : {}),
+      ...(item?.boundary ? { boundary: item.boundary } : {}),
+    })
+  }
+  if (entityType === 'boss') {
+    Object.assign(constraints, {
+      ...(item?.action_logic ? { action_logic: item.action_logic } : {}),
+      ...(item?.pressure_method ? { pressure_method: item.pressure_method } : {}),
+      ...(item?.weakness ? { weakness: item.weakness } : {}),
+    })
+  }
+  if (entityType === 'rule') {
+    Object.assign(constraints, {
+      ...(item?.trigger ? { trigger: item.trigger } : {}),
+      ...(item?.consequence ? { consequence: item.consequence } : {}),
+      ...(item?.taboo ? { taboo: item.taboo } : {}),
+    })
+  }
+  if (entityType === 'foreshadowing') {
+    Object.assign(state, {
+      ...(item?.plant_chapter ? { plant_chapter: item.plant_chapter } : {}),
+      ...(item?.payoff_chapter ? { payoff_chapter: item.payoff_chapter } : {}),
+      status: item?.status || state.status || 'planned',
+    })
+  }
+  return normalizeSettingInput({
+    project_id: projectId,
+    entity_type: entityType,
+    name,
+    summary: firstText(item?.summary, item?.description, item?.role, item?.effect, item?.content),
+    status: item?.status || 'active',
+    visibility: item?.visibility || (entityType === 'foreshadowing' ? 'hidden' : 'public'),
+    first_chapter_no: item?.first_chapter_no ?? item?.first_chapter ?? null,
+    last_chapter_no: item?.last_chapter_no ?? item?.last_chapter ?? null,
+    constraints_json: constraints,
+    state_json: state,
+    payload_json: { ...payload, source, raw: item },
+  }, projectId)
+}
+
+export function normalizeSettingAgentPayload(payload: any, projectId: number) {
+  const candidates: Array<{ item: any; type: string; source: string }> = []
+  for (const item of asSettingArray(payload?.settings || payload?.entities || payload?.setting_entities)) candidates.push({ item, type: String(item?.entity_type || item?.type || 'rule'), source: 'setting_agent_direct' })
+  for (const item of asSettingArray(payload?.ability_system?.abilities || payload?.abilities)) candidates.push({ item, type: 'ability', source: 'setting_agent_ability_system' })
+  for (const item of asSettingArray(payload?.realm_system?.realms || payload?.realms)) candidates.push({ item, type: 'realm', source: 'setting_agent_realm_system' })
+  for (const item of asSettingArray(payload?.item_system?.items || payload?.items)) candidates.push({ item, type: 'item', source: 'setting_agent_item_system' })
+  for (const item of asSettingArray(payload?.faction_system?.factions || payload?.factions)) candidates.push({ item, type: 'faction', source: 'setting_agent_faction_system' })
+  for (const item of asSettingArray(payload?.boss_ladder?.bosses || payload?.bosses)) candidates.push({ item, type: 'boss', source: 'setting_agent_boss_ladder' })
+  for (const item of asSettingArray(payload?.rules)) candidates.push({ item, type: 'rule', source: 'setting_agent_rule' })
+  for (const item of asSettingArray(payload?.locations)) candidates.push({ item, type: 'location', source: 'setting_agent_location' })
+  for (const item of asSettingArray(payload?.timeline)) candidates.push({ item, type: 'timeline', source: 'setting_agent_timeline' })
+  for (const item of asSettingArray(payload?.foreshadowing || payload?.foreshadowing_plan)) candidates.push({ item, type: 'foreshadowing', source: 'setting_agent_foreshadowing' })
+
+  const normalized: any[] = []
+  const seen = new Set<string>()
+  for (const candidate of candidates) {
+    const item = normalizeAgentSettingItem(candidate.item, projectId, candidate.type, candidate.source)
+    if (!item) continue
+    const key = `${item.entity_type}:${item.name}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    normalized.push(item)
+  }
+  return normalized
 }
 
 function normalizeUsageInput(item: any) {
@@ -337,16 +483,10 @@ export function registerNovelSettingRoutes(app: Express, ctx: NovelSettingRoutes
     const useModel = req.body?.use_model !== false && Number(req.body?.model_id || 0) > 0
     let modelSeeds: any[] = []
     if (useModel) {
-      const prompt = [
-        '任务：根据小说项目资料，提炼“设定工坊”实体。只输出 JSON，不要解释。',
-        '实体类型只能是 character/realm/ability/item/boss/rule/faction/location/foreshadowing/timeline。',
-        '每个实体包含 entity_type,name,summary,constraints_json,state_json,payload_json。',
-        '要求记录精细控制信息：能力代价/限制、物品归属、境界上限、Boss行动逻辑、角色认知边界、伏笔触发与回收、时间线约束。',
-        JSON.stringify({ project, worldbuilding, characters, outlines: outlines.slice(0, 80) }, null, 2).slice(0, 16000),
-      ].join('\n')
-      const result = await executeNovelAgent('outline-agent', project, { task: prompt }, { activeWorkspace, modelId: String(req.body.model_id), maxTokens: 5000, temperature: 0.25, skipMemory: true })
-      const payload = parseJsonLikePayload((result as any).output || (result as any).content || '') || {}
-      modelSeeds = (Array.isArray(payload?.settings) ? payload.settings : Array.isArray(payload?.entities) ? payload.entities : []).map((item: any) => normalizeSettingInput(item, projectId))
+      const result = await executeNovelAgent('setting-agent', project, {
+        task: buildSettingAgentPrompt(project, worldbuilding, characters, outlines, existing),
+      }, { activeWorkspace, modelId: String(req.body.model_id), maxTokens: 7000, temperature: 0.25, skipMemory: true })
+      modelSeeds = normalizeSettingAgentPayload(getNovelPayload(result), projectId)
     }
     const candidates = [...localSeeds, ...modelSeeds].filter(item => item.name)
     const created: any[] = []

@@ -1,6 +1,7 @@
 import React from 'react'
 import { Button, Modal, Space, Tree, Typography } from 'antd'
 import { BookOutlined, EditOutlined } from '@ant-design/icons'
+import './OutlineTreeModal.css'
 
 const { Text } = Typography
 
@@ -62,6 +63,7 @@ export function OutlineTreeModal({
           virtual={false}
           selectedKeys={selectedKeys}
           onSelect={handleSelect}
+          className="novel-outline-tree"
           style={{ fontSize: 13 }}
         />
       ) : (

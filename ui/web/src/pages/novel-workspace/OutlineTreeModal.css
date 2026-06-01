@@ -1,0 +1,43 @@
+.novel-outline-tree .ant-tree-node-content-wrapper {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.novel-outline-tree-node {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.novel-outline-tree-title {
+  max-width: 420px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 650;
+}
+
+.novel-outline-tree-chapter-no {
+  min-width: 56px;
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 800;
+  text-align: center;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  background: #eff6ff;
+}
+
+.novel-outline-tree-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #111827;
+  flex: 0 0 auto;
+}
+
+.novel-outline-tree .ant-tree-treenode-selected .novel-outline-tree-chapter-no {
+  border-color: #84cc16;
+  color: #3f6212;
+  background: #f7fee7;
+}

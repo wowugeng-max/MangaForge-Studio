@@ -16,7 +16,7 @@ import {
 import { generateNovelChapterProse } from '../llm'
 import { buildMaterialScore } from './novel-chapter-context-routes'
 import { asArray, getNovelPayload, normalizeSceneProduction, parseJsonLikePayload } from './novel-route-utils'
-import { applyChapterWordTargetToContext, proseMaxTokensForWordTarget, resolveChapterWordTarget } from './novel-writing-service'
+import { applyChapterWordTargetToContext, countProseChars, proseMaxTokensForWordTarget, resolveChapterWordTarget } from './novel-writing-service'
 
 function outlineChapterNo(outline: any) {
   const rawNo = Number(outline.raw_payload?.chapter_no || outline.raw_payload?.future100?.chapter_no || 0)
@@ -76,7 +76,9 @@ type GenerationRoutesContext = {
   getReferenceMigrationPlanForChapter: (workspace: string, project: any, chapter: any) => Promise<any>
   buildParagraphProseContext: (project: any, contextPackage: any, migrationPlan?: any, chapterDraft?: any) => string[]
   getStageModelId: (project: any, stage: string, preferredModelId?: number) => number | undefined
+  runCommercialEditorRewrite: (workspace: string, project: any, contextPackage: any, chapterText: string, modelId?: number, options?: any) => Promise<any>
   runProseSelfReviewAndRevision: (workspace: string, project: any, contextPackage: any, chapterText: string, modelId?: number) => Promise<any>
+  ensureProseMeetsWordTarget: (workspace: string, project: any, contextPackage: any, chapterText: string, modelId?: number, options?: any) => Promise<any>
   buildReferenceUsageReport: (workspace: string, project: any, taskType: string, generatedText?: string) => Promise<any>
   getReferenceSafetyDecision: (project: any, referenceReport: any) => any
   explainReferenceSafety: (referenceReport: any, safetyDecision: any) => any
@@ -852,12 +854,103 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
         }
         return res.status(502).json(errorPayload)
       }
-      markStage('draft', '章节初稿已生成', 'success', `${String(chapterText).length} 字`)
-      markStage('review', '执行章节自检', 'running')
       let selfCheck: any = null
+      let editorRewrite: any = null
       let finalText = String(chapterText || '')
       let finalSceneBreakdown = sceneBreakdown
       let finalContinuityNotes = continuityNotes
+      markStage('draft', '章节初稿已生成', 'success', `${countProseChars(finalText)} 字`)
+      markStage('word_target', '核对章节字数目标', 'running', `当前 ${countProseChars(finalText)} 字 / 目标 ${wordTarget.target} 字`)
+      try {
+        const wordTargetCheck = await ctx.ensureProseMeetsWordTarget(activeWorkspace, project, contextPackage, finalText, modelId)
+        finalText = wordTargetCheck.final_text || finalText
+        if (wordTargetCheck.expanded && wordTargetCheck.expansion) {
+          finalSceneBreakdown = wordTargetCheck.expansion.scene_breakdown?.length ? wordTargetCheck.expansion.scene_breakdown : finalSceneBreakdown
+          finalContinuityNotes = wordTargetCheck.expansion.continuity_notes?.length ? wordTargetCheck.expansion.continuity_notes : finalContinuityNotes
+        }
+        markStage(
+          'word_target',
+          wordTargetCheck.expanded ? '正文已按字数目标扩写' : '正文达到字数目标',
+          'success',
+          `当前 ${countProseChars(finalText)} 字 / 目标 ${wordTarget.target} 字`,
+          { word_target_check: wordTargetCheck },
+        )
+      } catch (wordTargetError: any) {
+        const errorPayload = {
+          error: String(wordTargetError?.message || wordTargetError || '章节正文低于字数下限'),
+          error_code: wordTargetError?.code || 'PROSE_WORD_TARGET_SHORT',
+          word_target: wordTargetError?.word_target || wordTarget,
+          word_target_check: {
+            evaluation: wordTargetError?.evaluation,
+            final_evaluation: wordTargetError?.final_evaluation,
+            expansion_attempts: wordTargetError?.expansion_attempts,
+          },
+          pipeline,
+          context_package: contextPackage,
+          config_snapshot: configSnapshot,
+        }
+        markStage('word_target', '章节正文低于字数下限', 'failed', errorPayload.error, { word_target_check: errorPayload.word_target_check })
+        await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'failed', input_ref: JSON.stringify(req.body), output_ref: JSON.stringify(errorPayload), error_message: errorPayload.error })
+        if (wantsStream) {
+          res.write(`data: ${JSON.stringify({ type: 'error', ...errorPayload })}\n\n`)
+          res.end()
+          return
+        }
+        return res.status(502).json(errorPayload)
+      }
+      markStage('editor', '商业主编改稿', 'running')
+      try {
+        editorRewrite = await ctx.runCommercialEditorRewrite(activeWorkspace, project, contextPackage, finalText, modelId)
+        finalText = editorRewrite.final_text || finalText
+        if (editorRewrite.edited && editorRewrite.revision) {
+          finalSceneBreakdown = editorRewrite.revision.scene_breakdown?.length ? editorRewrite.revision.scene_breakdown : finalSceneBreakdown
+          finalContinuityNotes = editorRewrite.revision.continuity_notes?.length ? editorRewrite.revision.continuity_notes : finalContinuityNotes
+        }
+        markStage(
+          'editor',
+          editorRewrite.edited ? '商业主编改稿已应用' : '商业主编改稿无可用修订',
+          editorRewrite.edited ? 'success' : 'warn',
+          `${countProseChars(finalText)} 字`,
+          { editor_rewrite: editorRewrite },
+        )
+      } catch (editorError) {
+        editorRewrite = { error: String(editorError), edited: false }
+        markStage('editor', '商业主编改稿失败，保留当前稿', 'warn', String(editorError).slice(0, 200), { editor_rewrite: editorRewrite })
+      }
+      try {
+        const postEditorWordTargetCheck = await ctx.ensureProseMeetsWordTarget(activeWorkspace, project, contextPackage, finalText, modelId)
+        finalText = postEditorWordTargetCheck.final_text || finalText
+        if (postEditorWordTargetCheck.expanded && postEditorWordTargetCheck.expansion) {
+          finalSceneBreakdown = postEditorWordTargetCheck.expansion.scene_breakdown?.length ? postEditorWordTargetCheck.expansion.scene_breakdown : finalSceneBreakdown
+          finalContinuityNotes = postEditorWordTargetCheck.expansion.continuity_notes?.length ? postEditorWordTargetCheck.expansion.continuity_notes : finalContinuityNotes
+          markStage('word_target', '主编改稿后正文已重新补足字数', 'success', `当前 ${countProseChars(finalText)} 字 / 目标 ${wordTarget.target} 字`, { word_target_check: postEditorWordTargetCheck, phase: 'post_editor' })
+        }
+      } catch (wordTargetError: any) {
+        const errorPayload = {
+          error: String(wordTargetError?.message || wordTargetError || '章节正文低于字数下限'),
+          error_code: wordTargetError?.code || 'PROSE_WORD_TARGET_SHORT',
+          word_target: wordTargetError?.word_target || wordTarget,
+          word_target_check: {
+            evaluation: wordTargetError?.evaluation,
+            final_evaluation: wordTargetError?.final_evaluation,
+            expansion_attempts: wordTargetError?.expansion_attempts,
+            phase: 'post_editor',
+          },
+          pipeline,
+          context_package: contextPackage,
+          editor_rewrite: editorRewrite,
+          config_snapshot: configSnapshot,
+        }
+        markStage('word_target', '主编改稿后正文低于字数下限', 'failed', errorPayload.error, { word_target_check: errorPayload.word_target_check })
+        await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'failed', input_ref: JSON.stringify(req.body), output_ref: JSON.stringify(errorPayload), error_message: errorPayload.error })
+        if (wantsStream) {
+          res.write(`data: ${JSON.stringify({ type: 'error', ...errorPayload })}\n\n`)
+          res.end()
+          return
+        }
+        return res.status(502).json(errorPayload)
+      }
+      markStage('review', '执行章节自检', 'running')
       try {
         selfCheck = await ctx.runProseSelfReviewAndRevision(activeWorkspace, project, contextPackage, finalText, modelId)
         finalText = selfCheck.final_text || finalText
@@ -876,6 +969,38 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
         selfCheck = { error: String(reviewError), revised: false }
         markStage('review', '自检失败，保留初稿', 'warn', String(reviewError).slice(0, 200), { self_check: selfCheck })
       }
+      try {
+        const postReviewWordTargetCheck = await ctx.ensureProseMeetsWordTarget(activeWorkspace, project, contextPackage, finalText, modelId)
+        finalText = postReviewWordTargetCheck.final_text || finalText
+        if (postReviewWordTargetCheck.expanded && postReviewWordTargetCheck.expansion) {
+          finalSceneBreakdown = postReviewWordTargetCheck.expansion.scene_breakdown?.length ? postReviewWordTargetCheck.expansion.scene_breakdown : finalSceneBreakdown
+          finalContinuityNotes = postReviewWordTargetCheck.expansion.continuity_notes?.length ? postReviewWordTargetCheck.expansion.continuity_notes : finalContinuityNotes
+          markStage('word_target', '自检后正文已重新补足字数', 'success', `当前 ${countProseChars(finalText)} 字 / 目标 ${wordTarget.target} 字`, { word_target_check: postReviewWordTargetCheck })
+        }
+      } catch (wordTargetError: any) {
+        const errorPayload = {
+          error: String(wordTargetError?.message || wordTargetError || '章节正文低于字数下限'),
+          error_code: wordTargetError?.code || 'PROSE_WORD_TARGET_SHORT',
+          word_target: wordTargetError?.word_target || wordTarget,
+          word_target_check: {
+            evaluation: wordTargetError?.evaluation,
+            final_evaluation: wordTargetError?.final_evaluation,
+            expansion_attempts: wordTargetError?.expansion_attempts,
+          },
+          pipeline,
+          context_package: contextPackage,
+          self_check: selfCheck,
+          config_snapshot: configSnapshot,
+        }
+        markStage('word_target', '自检后正文仍低于字数下限', 'failed', errorPayload.error, { word_target_check: errorPayload.word_target_check })
+        await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'failed', input_ref: JSON.stringify(req.body), output_ref: JSON.stringify(errorPayload), error_message: errorPayload.error })
+        if (wantsStream) {
+          res.write(`data: ${JSON.stringify({ type: 'error', ...errorPayload })}\n\n`)
+          res.end()
+          return
+        }
+        return res.status(502).json(errorPayload)
+      }
 
       try {
         const review = selfCheck?.review || {}
@@ -885,7 +1010,7 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
           status: review.passed === false || Number(review.score || 100) < 78 ? 'warn' : 'ok',
           summary: `章节自检评分 ${review.score ?? '-'}${selfCheck?.revised ? '，已生成修订稿' : ''}`,
           issues: Array.isArray(review.issues) ? review.issues.map((issue: any) => `${issue.severity || 'medium'}｜${issue.description || issue}`) : [],
-          payload: JSON.stringify({ chapter_id: chapter.id, context_package: contextPackage, self_check: selfCheck, pipeline, config_snapshot: configSnapshot }),
+          payload: JSON.stringify({ chapter_id: chapter.id, context_package: contextPackage, editor_rewrite: editorRewrite, self_check: selfCheck, pipeline, config_snapshot: configSnapshot }),
         })
       } catch (reviewStoreError) {
         console.warn('[prose-quality] Failed to store review:', String(reviewStoreError).slice(0, 200))
@@ -923,7 +1048,7 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
         continuity_notes: finalContinuityNotes,
         raw_payload: { ...(chapter.raw_payload || {}), generated_scene_breakdown: finalSceneBreakdown },
         status: 'draft',
-      }, { versionSource: selfCheck?.revised ? 'repair' : 'agent_execute' })
+      }, { versionSource: selfCheck?.revised ? 'repair' : editorRewrite?.edited ? 'editor_rewrite' : 'agent_execute' })
       const versionsAfterStore = await listChapterVersions(activeWorkspace, chapter.id).catch(() => [])
       const previousVersion = versionsAfterStore[0] || null
       const generationDiff = buildTextDiffSummary(beforeText, finalText)
@@ -936,7 +1061,7 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
       } catch (stateError) {
         markStage('story_state', '故事状态机更新失败', 'warn', String(stateError).slice(0, 200))
       }
-      const pipelineResult = { context_package: contextPackage, self_check: selfCheck, pipeline, diff: generationDiff, previous_version: previousVersion, config_snapshot: configSnapshot }
+      const pipelineResult = { context_package: contextPackage, editor_rewrite: editorRewrite, self_check: selfCheck, pipeline, diff: generationDiff, previous_version: previousVersion, config_snapshot: configSnapshot }
       await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'success', input_ref: JSON.stringify(req.body), output_ref: JSON.stringify({ outputSource: (result as any).outputSource, modelId: (result as any).modelId, modelName: (result as any).modelName, providerId: (result as any).providerId, usage: (result as any).usage, reference_report: referenceReport, safety_decision: safetyDecision, safety_explanation: safetyExplanation, migration_audit: migrationAudit, story_state_update: storyStateUpdate, ...pipelineResult }) })
       if (!wantsStream) return res.json({ chapter: updated, result, reference_report: referenceReport, safety_decision: safetyDecision, safety_explanation: safetyExplanation, migration_audit: migrationAudit, story_state_update: storyStateUpdate, ...pipelineResult })
       const fullText = String(finalText || '')

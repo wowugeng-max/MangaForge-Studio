@@ -332,6 +332,8 @@ function buildAgentMessages(
         return buildWorldPrompt(project, context?.task || '生成世界观设定')
       case 'character-agent':
         return buildCharacterPrompt(project, context?.task || '生成角色设定')
+      case 'setting-agent':
+        return context?.task || '请生成可入库的设定工坊资产，输出 settings 数组和能力、境界、物品、势力、Boss、规则、地点、伏笔、时间线体系。'
       case 'outline-agent':
         return buildOutlinePrompt(project, context?.outlineParams || context?.task || '生成大纲')
       case 'detail-outline-agent':

@@ -2,11 +2,17 @@ import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import {
+  buildCommercialEditorRewritePrompt,
+  buildProseWordTargetExpansionPrompt,
+  countProseChars,
   createNovelWritingService,
+  evaluateProseWordTarget,
+  extractProseExpansionPayload,
   normalizeSceneCardsPayload,
   proseMaxTokensForWordTarget,
   resolveChapterWordTarget,
 } from './novel-writing-service'
+import { getStyleLock } from './novel-route-utils'
 
 describe('normalizeSceneCardsPayload', () => {
   test('converts target chapter outlines into fallback scene cards', () => {
@@ -41,9 +47,109 @@ describe('normalizeSceneCardsPayload', () => {
     expect(sceneCards[0].turning_point).toContain('广播响起')
     expect(sceneCards[0].scene_type).toBe('investigation')
   })
+
+  test('preserves commercial reader-facing beats for prose generation', () => {
+    const sceneCards = normalizeSceneCardsPayload({
+      scene_cards: [
+        {
+          scene_no: 1,
+          title: '操场醒来',
+          purpose: '主角发现自己进入午夜校园。',
+          beat: '车祸醒来后确认超人力量。',
+          opening_hook: '车祸后的第一口冷风带着广播电流声。',
+          reader_payoff: '立刻展示超人身体素质，但规则空间能反制蛮力。',
+          fear_point: '空无一人的校园里，阴影会吞掉尾音。',
+          rule_pressure: '十点后不得离开宿舍，违规者会消失。',
+          information_gap: '校园为什么没有人，广播是谁发出的。',
+          reversal: '李超以为自己能冲出去，却被无形墙弹回。',
+          ending_hook_seed: '钟表停在九点五十八分。',
+          character_voice: '李超热血嘴硬，张智冷静拆规则。',
+        },
+      ],
+    })
+
+    expect(sceneCards[0].opening_hook).toContain('车祸')
+    expect(sceneCards[0].reader_payoff).toContain('超人')
+    expect(sceneCards[0].fear_point).toContain('阴影')
+    expect(sceneCards[0].rule_pressure).toContain('十点')
+    expect(sceneCards[0].information_gap).toContain('广播')
+    expect(sceneCards[0].reversal).toContain('弹回')
+    expect(sceneCards[0].ending_hook_seed).toContain('九点五十八分')
+    expect(sceneCards[0].character_voice).toContain('张智')
+  })
 })
 
 describe('chapter prose word target', () => {
+  test('counts prose characters without whitespace for chapter target evaluation', () => {
+    expect(countProseChars('李辰 醒来\n规则响起。')).toBe(9)
+  })
+
+  test('rejects a standard chapter draft below the minimum word target', () => {
+    const target = resolveChapterWordTarget({}, { chapter_no: 1 }, {})
+    const evaluation = evaluateProseWordTarget('字'.repeat(1732), target)
+
+    expect(evaluation.passed).toBe(false)
+    expect(evaluation.too_short).toBe(true)
+    expect(evaluation.actual).toBe(1732)
+    expect(evaluation.deficit).toBe(1068)
+    expect(evaluation.min).toBe(2800)
+    expect(evaluateProseWordTarget('字'.repeat(2800), target).passed).toBe(true)
+  })
+
+  test('builds an expansion prompt with explicit word target guardrails', () => {
+    const target = resolveChapterWordTarget({}, { chapter_no: 1 }, {})
+    const evaluation = evaluateProseWordTarget('字'.repeat(1732), target)
+    const prompt = buildProseWordTargetExpansionPrompt(
+      { title: '超人的规则怪谈世界' },
+      {
+        chapter_target: {
+          chapter_no: 1,
+          title: '双魂降临',
+          summary: '主角进入规则公寓。',
+          conflict: '必须理解第一条规则。',
+          ending_hook: '午夜广播响起。',
+          word_target: target,
+          scene_cards: [],
+        },
+      },
+      '字'.repeat(1732),
+      evaluation,
+    )
+
+    expect(prompt).toContain('当前正文约 1732 字')
+    expect(prompt).toContain('目标 3000 字')
+    expect(prompt).toContain('至少 2800 字')
+    expect(prompt).toContain('不得删改已有效内容')
+    expect(prompt).toContain('扩写动作过程、选择代价、对话交锋、章末钩子铺垫')
+  })
+
+  test('builds follow-up completion prompts from the remaining deficit', () => {
+    const target = resolveChapterWordTarget({}, { chapter_no: 2 }, {})
+    const evaluation = evaluateProseWordTarget('字'.repeat(2554), target)
+    const prompt = buildProseWordTargetExpansionPrompt(
+      { title: '超人的规则怪谈世界' },
+      { chapter_target: { chapter_no: 2, title: '守则初读', word_target: target, scene_cards: [] } },
+      '字'.repeat(2554),
+      evaluation,
+      { attempt: 2, maxAttempts: 3 },
+    )
+
+    expect(prompt).toContain('第 2 轮补写')
+    expect(prompt).toContain('仍缺至少 246 字')
+    expect(prompt).toContain('本轮必须优先补足缺口')
+    expect(prompt).toContain('返回扩写后的完整正文')
+  })
+
+  test('extracts expanded prose from raw fenced model content', () => {
+    const extracted = extractProseExpansionPayload({
+      content: '```json\n{"prose_chapters":[{"chapter_text":"扩写后的正文","scene_breakdown":[{"scene_no":1}],"continuity_notes":["保留钩子"]}]}\n```',
+    })
+
+    expect(extracted.text).toBe('扩写后的正文')
+    expect(extracted.scene_breakdown).toHaveLength(1)
+    expect(extracted.continuity_notes).toEqual(['保留钩子'])
+  })
+
   test('defaults normal chapters to roughly 3000 Chinese characters', () => {
     const target = resolveChapterWordTarget({ length_target: 'epic' }, { chapter_no: 1 }, {})
 
@@ -97,6 +203,70 @@ describe('chapter prose word target', () => {
     expect(target.max).toBe(5720)
     expect(target.rangeText).toBe('4680-5720 字')
   })
+
+  test('builds a commercial editor rewrite prompt with concrete improvement dimensions', () => {
+    const prompt = buildCommercialEditorRewritePrompt(
+      { title: '超人的规则怪谈世界' },
+      {
+        chapter_target: {
+          chapter_no: 1,
+          title: '双魂降临',
+          ending_hook: '午夜广播公布第一条规则。',
+          word_target: resolveChapterWordTarget({}, { chapter_no: 1 }, {}),
+          scene_cards: [
+            {
+              scene_no: 1,
+              title: '操场醒来',
+              opening_hook: '车祸后的第一口冷风。',
+              reader_payoff: '超人力量与规则压制第一次碰撞。',
+              fear_point: '尾音被黑暗吞掉。',
+              rule_pressure: '十点后不得离开宿舍。',
+              ending_hook_seed: '钟表停在九点五十八分。',
+            },
+          ],
+        },
+      },
+      '初稿正文',
+    )
+
+    expect(prompt).toContain('商业主编改稿')
+    expect(prompt).toContain('开篇钩子')
+    expect(prompt).toContain('人物声音')
+    expect(prompt).toContain('规则压力')
+    expect(prompt).toContain('恐怖具象化')
+    expect(prompt).toContain('爽点密度')
+    expect(prompt).toContain('章末钩子')
+    expect(prompt).toContain('删除模板句')
+    expect(prompt).toContain('prose_chapters')
+  })
+})
+
+describe('commercial web novel style defaults', () => {
+  test('fills writing bible style lock with current commercial web novel defaults', () => {
+    const styleLock = getStyleLock({ length_target: 'epic', style_tags: [] })
+
+    expect(styleLock.narrative_person).toContain('第三人称有限视角')
+    expect(styleLock.sentence_length).toContain('短中句')
+    expect(styleLock.dialogue_ratio).toContain('35%-45%')
+    expect(styleLock.payoff_density).toContain('800-1200字')
+    expect(styleLock.chapter_word_range).toContain('2800-3500字')
+    expect(styleLock.preferred_words).toContain('爽点回收')
+  })
+
+  test('preserves explicit project style lock over defaults', () => {
+    const styleLock = getStyleLock({
+      reference_config: {
+        style_lock: {
+          narrative_person: '第一人称主视角',
+          preferred_words: ['自定义口头禅'],
+        },
+      },
+    })
+
+    expect(styleLock.narrative_person).toBe('第一人称主视角')
+    expect(styleLock.preferred_words).toEqual(['自定义口头禅'])
+    expect(styleLock.sentence_length).toContain('短中句')
+  })
 })
 
 describe('chapter context word target source guards', () => {
@@ -114,5 +284,46 @@ describe('chapter context word target source guards', () => {
     expect(bibleBlock).not.toContain('resolveChapterWordTarget(project, chapter')
     expect(contextSetupBlock).toContain('const wordTarget = resolveChapterWordTarget(project, chapter, {})')
     expect(contextSetupBlock).toContain('const styleLock = { ...getStyleLock(project), chapter_word_range: wordTarget.rangeText }')
+  })
+
+  test('uses multiple completion attempts before failing a short chapter', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const ensureStart = source.indexOf('const ensureProseMeetsWordTarget =')
+    const groupStart = source.indexOf('const generateChapterForGroup =', ensureStart)
+    const ensureBlock = source.slice(ensureStart, groupStart)
+
+    expect(ensureStart).toBeGreaterThanOrEqual(0)
+    expect(ensureBlock).toContain('maxExpansionAttempts')
+    expect(ensureBlock).toContain('for (let attempt = 1; attempt <= maxExpansionAttempts; attempt += 1)')
+    expect(ensureBlock).toContain('attempts.push')
+  })
+
+  test('requires scene-card prompts to plan commercial reader hooks before prose generation', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const promptStart = source.indexOf('const buildSceneCardsPrompt =')
+    const promptEnd = source.indexOf('const buildHeuristicSettingUsage =', promptStart)
+    const promptBlock = source.slice(promptStart, promptEnd)
+
+    expect(promptStart).toBeGreaterThanOrEqual(0)
+    expect(promptBlock).toContain('opening_hook')
+    expect(promptBlock).toContain('reader_payoff')
+    expect(promptBlock).toContain('fear_point')
+    expect(promptBlock).toContain('rule_pressure')
+    expect(promptBlock).toContain('information_gap')
+    expect(promptBlock).toContain('reversal')
+    expect(promptBlock).toContain('ending_hook_seed')
+  })
+
+  test('runs commercial editor rewrite between word-target expansion and self-review in chapter group generation', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const groupStart = source.indexOf('const generateChapterForGroup =')
+    const draftOnlyStart = source.indexOf('if (isDraftOnly)', groupStart)
+    const reviewStart = source.indexOf('const selfCheck = await runProseSelfReviewAndRevision', groupStart)
+    const beforeReviewBlock = source.slice(draftOnlyStart, reviewStart)
+
+    expect(groupStart).toBeGreaterThanOrEqual(0)
+    expect(reviewStart).toBeGreaterThan(groupStart)
+    expect(beforeReviewBlock).toContain('runCommercialEditorRewrite(')
+    expect(beforeReviewBlock).toContain("onStage('editor'")
   })
 })

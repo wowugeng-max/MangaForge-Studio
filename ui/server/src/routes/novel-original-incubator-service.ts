@@ -7,6 +7,7 @@ import {
   listNovelChapters,
   updateNovelProject,
 } from '../novel'
+import { normalizeSettingAgentPayload } from './novel-setting-routes'
 
 export function createNovelOriginalIncubatorService() {
   const buildOriginalIncubatorPrompt = (project: any, body: any) => [
@@ -25,6 +26,7 @@ export function createNovelOriginalIncubatorService() {
     'characters: array，每项 name, role_type, archetype, age, gender, identity, faction, appearance, personality, abilities, items, knowledge_scope, information_boundaries, motivation, goal, conflict, backstory, secret, relationships, growth_arc, current_state',
     'outlines: array，至少包含 master 和 1-3 个 volume，每项 outline_type,title,summary,conflict_points,turning_points,hook,target_length',
     'chapters: array，生成前 30 章或指定 chapter_count 的章纲，每项 chapter_no,title,chapter_goal,chapter_summary,conflict,ending_hook,must_advance,forbidden_repeats',
+    'setting_entities: array，专门用于设定工坊入库；每项 entity_type,name,summary,constraints_json,state_json,payload_json。entity_type 只能是 character/realm/ability/item/boss/rule/faction/location/foreshadowing/timeline。',
     'writing_bible: {promise,world_rules,mainline,volume_plan,style_lock,safety_policy,forbidden}',
     'commercial_positioning: {platform,reader_promise,selling_points,tropes,risks}',
     '',
@@ -43,6 +45,9 @@ export function createNovelOriginalIncubatorService() {
       characters: Array.isArray(payload?.characters) ? payload.characters : (Array.isArray(selectedDirection?.characters) ? selectedDirection.characters : []),
       outlines: Array.isArray(payload?.outlines) ? payload.outlines : (Array.isArray(selectedDirection?.outlines) ? selectedDirection.outlines : []),
       chapters: (Array.isArray(payload?.chapters) ? payload.chapters : (Array.isArray(selectedDirection?.chapters) ? selectedDirection.chapters : [])).slice(0, chapterCount),
+      setting_entities: Array.isArray(payload?.setting_entities)
+        ? payload.setting_entities
+        : (Array.isArray(selectedDirection?.setting_entities) ? selectedDirection.setting_entities : []),
       writing_bible: payload?.writing_bible || selectedDirection?.writing_bible || {},
       commercial_positioning: payload?.commercial_positioning || selectedDirection?.commercial_positioning || {},
     }
@@ -144,6 +149,13 @@ export function createNovelOriginalIncubatorService() {
         constraints_json: typeof rule === 'object' ? rule : {},
         state_json: {},
         payload_json: { source: 'original_incubator_world_rule', raw: rule },
+      } as any)
+    }
+    for (const entity of normalizeSettingAgentPayload({ settings: payload.setting_entities || [] }, project.id)) {
+      await createNovelSettingEntity(activeWorkspace, {
+        ...entity,
+        project_id: project.id,
+        payload_json: { ...(entity.payload_json || {}), source: entity.payload_json?.source || 'original_incubator_setting_entity' },
       } as any)
     }
     for (const outline of payload.outlines || []) {

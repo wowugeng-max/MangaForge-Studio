@@ -26,6 +26,7 @@ import { WritingCockpitPanel, type WritingCockpitPrimaryActionOverride } from '.
 import { WorkspaceCenter } from './novel-workspace/WorkspaceCenter'
 import { buildNovelWritingRecommendation } from './novel-workspace/writingRecommendationModel'
 import { buildPlanningWorkspaceModel, type PlanningActionKey } from './novel-workspace/planningWorkspaceModel'
+import { mergeCommercialWebNovelStyleDefaults } from './novel-workspace/writingBibleDefaults'
 import {
   buildWritingCockpitModel,
   resolveEditorRevisionChapterId,
@@ -1736,7 +1737,7 @@ export default function NovelProjectWorkspace() {
   }
 
   const fillWritingBibleForm = (bible: any) => {
-    const styleLock = bible.style_lock || selectedProject?.reference_config?.style_lock || {}
+    const styleLock = mergeCommercialWebNovelStyleDefaults(bible.style_lock || selectedProject?.reference_config?.style_lock || {})
     writingBibleForm.setFieldsValue({
       promise: bible.promise || '',
       narrative_person: styleLock.narrative_person || '',
@@ -1795,6 +1796,7 @@ export default function NovelProjectWorkspace() {
       const parseJson = (value: string, fallback: any) => {
         try { return JSON.parse(value || '') } catch { return fallback }
       }
+      const parsedStyleLock = parseJson(v.style_lock, {})
       const writingBible = {
         ...(selectedProject?.reference_config?.writing_bible || {}),
         promise: v.promise || '',
@@ -1802,15 +1804,18 @@ export default function NovelProjectWorkspace() {
         mainline: parseJson(v.mainline, {}),
         volume_plan: parseJson(v.volume_plan, []),
         style_lock: {
-          ...parseJson(v.style_lock, {}),
+          ...parsedStyleLock,
           narrative_person: v.narrative_person || '',
           sentence_length: v.sentence_length || '',
           dialogue_ratio: v.dialogue_ratio || '',
           payoff_density: v.payoff_density || '',
           description_density: v.description_density || '',
           chapter_word_range: v.chapter_word_range || '',
+          banter_density: parsedStyleLock.banter_density || '',
+          ending_policy: parsedStyleLock.ending_policy || '',
           banned_words: parseListField(v.banned_words),
           preferred_words: parseListField(v.preferred_words),
+          banned_shortcuts: parsedStyleLock.banned_shortcuts || [],
         },
         safety_policy: parseJson(v.safety_policy, {}),
         forbidden: parseJson(v.forbidden, []),
@@ -4792,7 +4797,7 @@ export default function NovelProjectWorkspace() {
           type="info"
           showIcon
           style={{ marginBottom: 12 }}
-          message="可以从项目简介、世界观、角色、大纲、章节和参考配置自动生成写作圣经；生成后会先填入表单并保存，仍可人工微调。"
+          message="可以从项目简介、世界观、角色、大纲、章节和参考配置自动生成写作圣经；风格锁定会先按当前商业网文阅读习惯填入默认值，生成后仍可人工微调。"
         />
         <Form form={writingBibleForm} layout="vertical">
           <Form.Item name="promise" label="读者承诺 / 核心卖点">

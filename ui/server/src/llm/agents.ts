@@ -26,6 +26,13 @@ export function buildNovelAgentPlan(project: NovelProjectRecord): NovelAgentSpec
       output_schema: ['characters'],
       depends_on: ['world-agent'],
     },
+    {
+      id: 'setting-agent',
+      role: '设定架构师',
+      goal: '将世界观、角色和长篇结构转化为可入库的能力、境界、物品、势力、Boss、规则、地点、伏笔和时间线设定资产',
+      output_schema: ['settings', 'ability_system', 'realm_system', 'item_system', 'faction_system', 'boss_ladder', 'rules', 'locations', 'timeline', 'foreshadowing'],
+      depends_on: ['world-agent', 'character-agent'],
+    },
 
     // ═══════════════════════════════════════════════════
     //  阶段二：大纲生成（总纲 → 卷纲 → 粗略章纲 → 伏笔计划）
@@ -35,7 +42,7 @@ export function buildNovelAgentPlan(project: NovelProjectRecord): NovelAgentSpec
       role: '结构规划',
       goal: '生成总纲、卷纲、粗略章纲（每章标题+摘要+冲突+结尾钩子）、伏笔计划',
       output_schema: ['master_outline', 'volume_outlines', 'chapter_outlines', 'foreshadowing_plan'],
-      depends_on: ['world-agent', 'character-agent'],
+      depends_on: ['world-agent', 'character-agent', 'setting-agent'],
     },
 
     // ═══════════════════════════════════════════════════
@@ -143,8 +150,8 @@ export function topologicalSortAgents(plan: NovelAgentSpec[]) {
 export const AGENT_PHASES: Record<string, { label: string; agents: string[]; description: string }> = {
   setup: {
     label: '设定锚定',
-    agents: ['market-agent', 'world-agent', 'character-agent'],
-    description: '构建世界观、角色、市场分析等基础设定',
+    agents: ['market-agent', 'world-agent', 'character-agent', 'setting-agent'],
+    description: '构建世界观、角色、市场分析和结构化设定资产',
   },
   outline: {
     label: '大纲生成',

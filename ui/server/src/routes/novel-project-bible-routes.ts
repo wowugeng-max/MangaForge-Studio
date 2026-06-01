@@ -10,7 +10,13 @@ import {
   updateNovelProject,
 } from '../novel'
 import { executeNovelAgent } from '../llm'
-import { asArray, getNovelPayload, stableTextHash } from './novel-route-utils'
+import {
+  COMMERCIAL_WEB_NOVEL_STYLE_LOCK_DEFAULTS,
+  asArray,
+  getNovelPayload,
+  getStyleLock,
+  stableTextHash,
+} from './novel-route-utils'
 
 type ProjectBibleRoutesContext = {
   getWorkspace: () => string
@@ -23,8 +29,26 @@ function compactControlText(value: any, limit = 600) {
   return String(value || '').replace(/\s+/g, ' ').trim().slice(0, limit)
 }
 
+function hasStyleValue(value: any) {
+  if (Array.isArray(value)) return value.length > 0
+  return String(value || '').trim().length > 0
+}
+
+function mergeStyleLockDefaults(project: any, fallback: any, payload: any) {
+  const baseline = {
+    ...COMMERCIAL_WEB_NOVEL_STYLE_LOCK_DEFAULTS,
+    ...getStyleLock(project),
+    ...(fallback || {}),
+  }
+  const next = { ...baseline, ...(payload || {}) }
+  for (const [key, value] of Object.entries(baseline)) {
+    if (!hasStyleValue(next[key])) next[key] = Array.isArray(value) ? [...value] : value
+  }
+  return next
+}
+
 function normalizeGeneratedWritingBible(project: any, payload: any, fallback: any = {}) {
-  const styleLock = payload?.style_lock || fallback?.style_lock || {}
+  const styleLock = mergeStyleLockDefaults(project, fallback?.style_lock, payload?.style_lock)
   const safety = payload?.safety_policy || fallback?.safety_policy || project.reference_config?.safety || {}
   return {
     ...(fallback || {}),

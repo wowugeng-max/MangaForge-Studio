@@ -102,40 +102,42 @@ export function buildTree(outlines: any[], chapters: any[]) {
   return roots
 }
 
+export function chapterTreeNumber(node: any) {
+  return Number(node?.chapter_no ?? node?.chapter_number ?? node?.raw_payload?.chapter_no ?? 0)
+}
+
+export function formatChapterTreeNodeLabel(node: any) {
+  const title = displayPreview(node?.title, 48)
+  if (node?.type !== 'chapter') return title
+  const chapterNo = chapterTreeNumber(node)
+  return `${chapterNo > 0 ? `第${chapterNo}章` : '章节'} ${title}`
+}
+
+function chapterTreeNodeTitle(node: any) {
+  if (node?.type === 'chapter') {
+    const chapterNo = chapterTreeNumber(node)
+    return (
+      <Space size={6} className="novel-outline-tree-node novel-outline-tree-chapter">
+        <Text className="novel-outline-tree-chapter-no">{chapterNo > 0 ? `第${chapterNo}章` : '章节'}</Text>
+        <Text className="novel-outline-tree-title">{displayPreview(node.title, 48)}</Text>
+        {chapterStatusTag(node)}
+      </Space>
+    )
+  }
+
+  return (
+    <Space size={6} className="novel-outline-tree-node novel-outline-tree-outline">
+      <span className="novel-outline-tree-dot" />
+      <Text className="novel-outline-tree-title">{displayPreview(node.title, 48)}</Text>
+    </Space>
+  )
+}
+
 export function buildChapterTreeData(chapterTree: any[]) {
   return chapterTree.map(node => ({
-    title: (
-      <Space size={4}>
-        <Text style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {node.type === 'chapter' ? '第' : '●'} {displayPreview(node.title, 48)}
-        </Text>
-        {node.type === 'chapter' && chapterStatusTag(node)}
-      </Space>
-    ),
+    title: chapterTreeNodeTitle(node),
     key: node.key,
-    children: (node.children || []).map((child: any) => ({
-      title: (
-        <Space size={4}>
-          <Text style={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {child.type === 'chapter' ? '  └ 第' : '  └ ●'} {displayPreview(child.title, 42)}
-          </Text>
-          {child.type === 'chapter' && chapterStatusTag(child)}
-        </Space>
-      ),
-      key: child.key,
-      children: (child.children || []).map((grand: any) => ({
-        title: (
-          <Space size={4}>
-            <Text style={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {grand.type === 'chapter' ? '    └ 第' : '    └ ●'} {displayPreview(grand.title, 36)}
-            </Text>
-            {grand.type === 'chapter' && chapterStatusTag(grand)}
-          </Space>
-        ),
-        key: grand.key,
-        children: [],
-      })),
-    })),
+    children: buildChapterTreeData(node.children || []),
   }))
 }
 
