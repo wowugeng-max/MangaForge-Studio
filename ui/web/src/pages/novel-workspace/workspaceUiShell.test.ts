@@ -147,4 +147,19 @@ describe('commercial writing workspace UI shell', () => {
     expect(projectWorkspace).toContain('run_first30_retention')
     expect(projectWorkspace).toContain('create_first30_repair')
   })
+
+  test('shows storyline board as a story planning workflow', () => {
+    const planningWorkspace = source('StoryPlanningWorkspace.tsx')
+    const planningModel = source('planningWorkspaceModel.ts')
+    const projectWorkspace = readFileSync(join(import.meta.dir, '../NovelProjectWorkspace.tsx'), 'utf8')
+
+    expect(planningWorkspace).toContain('剧情线看板')
+    expect(planningWorkspace).toContain('novel-storyline-board-card')
+    expect(planningWorkspace).toContain('逾期未推')
+    expect(planningWorkspace).toContain('回收债务')
+    expect(planningWorkspace).toContain('影响留存')
+    expect(planningModel).toContain('storylineBoard')
+    expect(planningModel).toContain('settingEntities')
+    expect(projectWorkspace).toContain('projectSettings')
+  })
 })

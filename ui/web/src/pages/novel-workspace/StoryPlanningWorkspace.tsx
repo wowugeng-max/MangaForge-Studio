@@ -64,6 +64,19 @@ function retentionRiskColor(level: 'ok' | 'medium' | 'high') {
   return 'gold'
 }
 
+function storylineStatusColor(status: PlanningWorkspaceModel['storylineBoard']['status']) {
+  if (status === 'ready') return 'green'
+  if (status === 'missing') return 'gold'
+  return 'red'
+}
+
+function storylineRiskColor(tag: string) {
+  if (tag === '逾期未推') return 'red'
+  if (tag === '回收债务') return 'purple'
+  if (tag === '影响留存') return 'gold'
+  return 'blue'
+}
+
 function formatWords(value: number) {
   if (value >= 10000) return `${(value / 10000).toFixed(1)}万`
   return String(value || 0)
@@ -297,6 +310,82 @@ export function StoryPlanningWorkspace({
                   <Space wrap>
                     {model.first30Retention.nextActions.slice(0, 3).map(action => <Tag key={action} bordered={false}>{action}</Tag>)}
                   </Space>
+                )}
+              </Space>
+            </Card>
+
+            <Card
+              className="novel-storyline-board-card"
+              title="剧情线看板"
+              size="small"
+              extra={<Button size="small" type="link" onClick={() => onAction('open_story_assets')}>管理剧情线</Button>}
+            >
+              <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                <Space wrap>
+                  <Tag color={storylineStatusColor(model.storylineBoard.status)} bordered={false}>
+                    {model.storylineBoard.status === 'missing' ? '未建立' : model.storylineBoard.status === 'ready' ? '调度正常' : '需要调度'}
+                  </Tag>
+                  <Tag bordered={false}>剧情线 {model.storylineBoard.total}</Tag>
+                  {model.storylineBoard.overdueCount > 0 && <Tag color="red" bordered={false}>逾期未推 {model.storylineBoard.overdueCount}</Tag>}
+                  {model.storylineBoard.debtCount > 0 && <Tag color="purple" bordered={false}>回收债务 {model.storylineBoard.debtCount}</Tag>}
+                  {model.storylineBoard.retentionRiskCount > 0 && <Tag color="gold" bordered={false}>影响留存 {model.storylineBoard.retentionRiskCount}</Tag>}
+                </Space>
+                <Text type="secondary">{model.storylineBoard.summary}</Text>
+                {model.storylineBoard.groups.length === 0 ? (
+                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="在资料设定中补齐主线、支线、角色线、关系线、势力线和伏笔线" />
+                ) : (
+                  <div style={{ display: 'grid', gap: 10 }}>
+                    {model.storylineBoard.groups.map(group => (
+                      <div key={group.key} style={{ border: '1px solid #edf0f5', borderRadius: 8, background: '#fbfcfe', padding: 10 }}>
+                        <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                          <Space wrap>
+                            <Text strong>{group.label}</Text>
+                            <Tag bordered={false}>{group.count} 条</Tag>
+                          </Space>
+                          <div style={{ display: 'grid', gridTemplateColumns: compact ? '1fr' : 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
+                            {group.items.map(item => (
+                              <button
+                                key={`${item.entityType}-${item.id}-${item.name}`}
+                                type="button"
+                                onClick={() => onSelectChapter(item.actionChapterNo)}
+                                style={{
+                                  border: '1px solid #e8edf3',
+                                  borderRadius: 8,
+                                  padding: '10px 12px',
+                                  background: '#fff',
+                                  cursor: 'pointer',
+                                  textAlign: 'left',
+                                  width: '100%',
+                                  font: 'inherit',
+                                  color: 'inherit',
+                                }}
+                              >
+                                <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                                  <Space wrap>
+                                    <Text strong>{item.name}</Text>
+                                    <Tag color={item.priority === 'high' ? 'red' : item.priority === 'medium' ? 'gold' : 'default'} bordered={false}>
+                                      {item.priority}
+                                    </Tag>
+                                    {item.riskTags.map(tag => <Tag key={tag} color={storylineRiskColor(tag)} bordered={false}>{tag}</Tag>)}
+                                  </Space>
+                                  <Text type="secondary" style={{ fontSize: 12 }}>
+                                    最近：{item.lastAdvancedChapter ? `第${item.lastAdvancedChapter}章` : '未标注'} · 下次：{item.nextAdvanceChapter ? `第${item.nextAdvanceChapter}章` : '未标注'} · 范围：{item.startChapter ? `第${item.startChapter}` : '?'}-{item.endChapter ? `${item.endChapter}章` : '?'}
+                                  </Text>
+                                  <Text>{item.summary || item.status || '未填写简介'}</Text>
+                                  {(item.retentionImpacts.length > 0 || item.forbiddenReveal) && (
+                                    <Space wrap>
+                                      {item.retentionImpacts.slice(0, 3).map(label => <Tag key={label} color="gold" bordered={false}>留存风险 {label}</Tag>)}
+                                      {item.forbiddenReveal && <Tag color="red" bordered={false}>禁揭</Tag>}
+                                    </Space>
+                                  )}
+                                </Space>
+                              </button>
+                            ))}
+                          </div>
+                        </Space>
+                      </div>
+                    ))}
+                  </div>
                 )}
               </Space>
             </Card>

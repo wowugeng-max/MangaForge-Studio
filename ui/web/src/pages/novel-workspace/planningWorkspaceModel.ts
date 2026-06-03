@@ -50,6 +50,35 @@ export type PlanningVolumeTreeNode = {
   children: PlanningVolumeTreeNode[]
 }
 
+export type PlanningStorylineBoardItem = {
+  id: any
+  name: string
+  entityType: string
+  typeLabel: string
+  summary: string
+  priority: string
+  status: string
+  startChapter: number | null
+  endChapter: number | null
+  lastAdvancedChapter: number | null
+  nextAdvanceChapter: number | null
+  payoffStatus: string
+  expectedPayoff: string
+  relatedNames: string[]
+  advanceRule: string
+  forbiddenReveal: string
+  riskTags: string[]
+  retentionImpacts: string[]
+  actionChapterNo: number
+}
+
+export type PlanningStorylineBoardGroup = {
+  key: string
+  label: string
+  count: number
+  items: PlanningStorylineBoardItem[]
+}
+
 export type PlanningWorkspaceModel = {
   topStatus: {
     projectTitle: string
@@ -114,6 +143,15 @@ export type PlanningWorkspaceModel = {
     }>
     nextActions: string[]
   }
+  storylineBoard: {
+    status: 'missing' | 'ready' | 'needs_attention'
+    summary: string
+    total: number
+    overdueCount: number
+    debtCount: number
+    retentionRiskCount: number
+    groups: PlanningStorylineBoardGroup[]
+  }
   volumeTree: PlanningVolumeTreeNode[]
   healthIssues: PlanningHealthIssue[]
 }
@@ -126,6 +164,7 @@ export type BuildPlanningWorkspaceModelInput = {
   materialScore?: AnyRecord | null
   commercialReadiness?: AnyRecord | null
   reviews?: AnyRecord[] | null
+  settingEntities?: AnyRecord[] | null
 }
 
 function text(value: any, fallback = '') {
@@ -507,6 +546,132 @@ function buildFirst30RetentionModel(chapters: AnyRecord[], reviews: AnyRecord[])
   }
 }
 
+const STORYLINE_TYPE_LABELS: Record<string, string> = {
+  mainline: '主线',
+  subplot: '支线',
+  character_arc: '角色线',
+  relationship_arc: '关系线',
+  faction_arc: '势力线',
+  foreshadowing_arc: '伏笔线',
+}
+
+const STORYLINE_TYPE_ORDER = Object.keys(STORYLINE_TYPE_LABELS)
+
+function numberOrNull(...values: any[]) {
+  for (const value of values) {
+    const num = Number(value)
+    if (Number.isFinite(num) && num > 0) return num
+  }
+  return null
+}
+
+function listText(...values: any[]) {
+  const result: string[] = []
+  values.forEach(value => {
+    if (Array.isArray(value)) {
+      value.forEach(item => {
+        const normalized = text(item)
+        if (normalized) result.push(normalized)
+      })
+      return
+    }
+    const normalized = text(value)
+    if (normalized) result.push(normalized)
+  })
+  return Array.from(new Set(result))
+}
+
+function isStorylineType(type: string) {
+  return Boolean(STORYLINE_TYPE_LABELS[type])
+}
+
+function buildStorylineBoardModel(
+  settingEntities: AnyRecord[],
+  first30Retention: PlanningWorkspaceModel['first30Retention'],
+  activeChapterNo: number,
+): PlanningWorkspaceModel['storylineBoard'] {
+  const first30RiskCards = first30Retention.chapterCards.filter(card => card.riskLevel !== 'ok')
+  const items = settingEntities
+    .filter(entity => isStorylineType(text(entity?.entity_type)))
+    .map(entity => {
+      const entityType = text(entity?.entity_type)
+      const payload = parseJsonValue(entity?.payload_json) || {}
+      const constraints = parseJsonValue(entity?.constraints_json) || {}
+      const state = parseJsonValue(entity?.state_json) || {}
+      const startChapter = numberOrNull(entity?.first_chapter_no, payload?.start_chapter_no, payload?.start_chapter)
+      const endChapter = numberOrNull(entity?.last_chapter_no, payload?.end_chapter_no, payload?.end_chapter)
+      const lastAdvancedChapter = numberOrNull(state?.last_advanced_chapter, payload?.last_advanced_chapter)
+      const nextAdvanceChapter = numberOrNull(state?.next_advance_chapter, payload?.next_advance_chapter)
+      const payoffStatus = text(state?.payoff_status || payload?.payoff_status)
+      const retentionImpacts = first30RiskCards
+        .filter(card => {
+          const chapterNo = Number(card.chapterNo || 0)
+          if (!chapterNo) return false
+          if (startChapter && chapterNo < startChapter) return false
+          if (endChapter && chapterNo > endChapter) return false
+          return true
+        })
+        .map(card => `第${card.chapterNo}章 ${card.score}分`)
+      const riskTags: string[] = []
+      if (nextAdvanceChapter && activeChapterNo > nextAdvanceChapter) riskTags.push('逾期未推')
+      if (/debt|overdue|逾期|待回收|回收债务/.test(payoffStatus)) riskTags.push('回收债务')
+      if (retentionImpacts.length > 0) riskTags.push('影响留存')
+
+      return {
+        id: entity?.id,
+        name: text(entity?.name, '未命名剧情线'),
+        entityType,
+        typeLabel: STORYLINE_TYPE_LABELS[entityType],
+        summary: text(entity?.summary),
+        priority: text(payload?.priority || entity?.priority, 'normal'),
+        status: text(state?.current_state || entity?.status, 'active'),
+        startChapter,
+        endChapter,
+        lastAdvancedChapter,
+        nextAdvanceChapter,
+        payoffStatus,
+        expectedPayoff: text(payload?.expected_payoff || state?.expected_payoff),
+        relatedNames: listText(payload?.related_characters, payload?.related_factions, payload?.related_foreshadowing),
+        advanceRule: text(constraints?.advance_rule || payload?.advance_rule),
+        forbiddenReveal: text(constraints?.forbidden_reveal || constraints?.taboo || payload?.forbidden_reveal),
+        riskTags,
+        retentionImpacts,
+        actionChapterNo: nextAdvanceChapter || startChapter || activeChapterNo,
+      }
+    })
+    .sort((a, b) => {
+      const priorityScore = (value: string) => value === 'high' || value === '核心' ? 0 : value === 'medium' || value === '中' ? 1 : 2
+      return priorityScore(a.priority) - priorityScore(b.priority)
+        || (a.nextAdvanceChapter || 99999) - (b.nextAdvanceChapter || 99999)
+        || a.name.localeCompare(b.name, 'zh-CN')
+    })
+
+  const groups = STORYLINE_TYPE_ORDER
+    .map(key => {
+      const groupItems = items.filter(item => item.entityType === key)
+      return { key, label: STORYLINE_TYPE_LABELS[key], count: groupItems.length, items: groupItems }
+    })
+    .filter(group => group.count > 0)
+  const overdueCount = items.filter(item => item.riskTags.includes('逾期未推')).length
+  const debtCount = items.filter(item => item.riskTags.includes('回收债务')).length
+  const retentionRiskCount = items.filter(item => item.riskTags.includes('影响留存')).length
+  const status = items.length === 0 ? 'missing' : (overdueCount || debtCount || retentionRiskCount) ? 'needs_attention' : 'ready'
+
+  return {
+    status,
+    summary: items.length === 0
+      ? '尚未建立剧情线资产。'
+      : status === 'ready'
+        ? `已有 ${items.length} 条剧情线，当前没有明显调度风险。`
+        : `已有 ${items.length} 条剧情线，${overdueCount} 条逾期未推，${debtCount} 条存在回收债务，${retentionRiskCount} 条影响前30章留存。`,
+    total: items.length,
+    overdueCount,
+    debtCount,
+    retentionRiskCount,
+    groups,
+  }
+}
+
 export function buildPlanningWorkspaceModel(input: BuildPlanningWorkspaceModelInput): PlanningWorkspaceModel {
   const selectedProject = input.selectedProject || {}
   const outlines = arrayValue(input.outlines)
@@ -516,6 +681,7 @@ export function buildPlanningWorkspaceModel(input: BuildPlanningWorkspaceModelIn
   const writingBible = resolveWritingBible(selectedProject)
   const storyState = resolveStoryState(selectedProject)
   const reviews = arrayValue(input.reviews)
+  const settingEntities = arrayValue(input.settingEntities)
 
   const currentVolume = outlines.find(outline => isVolume(outline) && chapterInRange(activeChapterNo, outline)) || outlines.find(isVolume) || {}
   const currentStage = outlines.find(outline => isStage(outline) && chapterInRange(activeChapterNo, outline)) || outlines.find(isStage) || {}
@@ -558,6 +724,7 @@ export function buildPlanningWorkspaceModel(input: BuildPlanningWorkspaceModelIn
     latestWrittenChapterNo: latestWrittenChapterNo(chapters),
     materialScore: input.materialScore,
   })
+  const first30Retention = buildFirst30RetentionModel(chapters, reviews)
 
   return {
     topStatus: {
@@ -587,7 +754,8 @@ export function buildPlanningWorkspaceModel(input: BuildPlanningWorkspaceModelIn
       ],
     },
     futureRoute,
-    first30Retention: buildFirst30RetentionModel(chapters, reviews),
+    first30Retention,
+    storylineBoard: buildStorylineBoardModel(settingEntities, first30Retention, activeChapterNo),
     volumeTree: buildVolumeTree(outlines, chapters),
     healthIssues,
   }

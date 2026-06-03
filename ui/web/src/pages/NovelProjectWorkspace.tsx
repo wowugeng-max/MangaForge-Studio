@@ -129,6 +129,7 @@ export default function NovelProjectWorkspace() {
   const [future100SelectedNos, setFuture100SelectedNos] = useState<number[]>([])
   const [future100ApplyLoading, setFuture100ApplyLoading] = useState(false)
   const [future100FocusOutlineIds, setFuture100FocusOutlineIds] = useState<number[]>([])
+  const [projectSettings, setProjectSettings] = useState<any[]>([])
 
   const chapterWordTargetPayload = () => ({
     word_target_mode: chapterWordTargetMode,
@@ -411,6 +412,23 @@ export default function NovelProjectWorkspace() {
     ? activeChapterContextPackage.data
     : null
 
+  useEffect(() => {
+    if (!projectId) return
+    if (workspaceArea !== 'storyPlanning' && workspaceArea !== 'storyAssets') return
+    let canceled = false
+    apiClient.get(`/novel/projects/${projectId}/settings`)
+      .then(res => {
+        if (canceled) return
+        setProjectSettings(Array.isArray(res.data?.items) ? res.data.items : [])
+      })
+      .catch(() => {
+        if (!canceled) setProjectSettings([])
+      })
+    return () => {
+      canceled = true
+    }
+  }, [projectId, reviews.length, workspaceArea])
+
   const planningWorkspaceModel = useMemo(() => buildPlanningWorkspaceModel({
     selectedProject,
     outlines,
@@ -419,7 +437,8 @@ export default function NovelProjectWorkspace() {
     materialScore: activeChapterDiagnosticsData?.material_score,
     commercialReadiness,
     reviews,
-  }), [selectedProject, outlines, sortedChapters, activeChapter, activeChapterDiagnosticsData?.material_score, commercialReadiness, reviews])
+    settingEntities: projectSettings,
+  }), [selectedProject, outlines, sortedChapters, activeChapter, activeChapterDiagnosticsData?.material_score, commercialReadiness, reviews, projectSettings])
 
   const proseQualityReports = useMemo(() => (
     reviews

@@ -45,6 +45,61 @@ const chapters = Array.from({ length: 12 }).map((_, index) => ({
   },
 }))
 
+const storylineSettings = [
+  {
+    id: 201,
+    entity_type: 'mainline',
+    name: '外门压迫主线',
+    summary: '主角在外门压迫中建立反击能力。',
+    first_chapter_no: 1,
+    last_chapter_no: 30,
+    constraints_json: {
+      advance_rule: '每三章必须推进一次压迫升级或反击回报。',
+      forbidden_reveal: '不得提前揭露宗主真正身份。',
+    },
+    state_json: {
+      current_state: '执事已经开始针对主角。',
+      last_advanced_chapter: 4,
+      next_advance_chapter: 6,
+      payoff_status: 'pending',
+    },
+    payload_json: {
+      priority: 'high',
+      related_characters: ['李玄', '赵执事'],
+      expected_payoff: '试炼前夜完成第一次公开打脸。',
+    },
+  },
+  {
+    id: 202,
+    entity_type: 'foreshadowing_arc',
+    name: '残缺阵盘伏笔',
+    summary: '阵盘缺口指向宗门旧案。',
+    first_chapter_no: 2,
+    last_chapter_no: 18,
+    constraints_json: {
+      advance_rule: '只给线索，不解释旧案全貌。',
+      forbidden_reveal: '第18章前不得说出旧案凶手。',
+    },
+    state_json: {
+      current_state: '只露出阵盘缺口。',
+      last_advanced_chapter: 3,
+      next_advance_chapter: 9,
+      payoff_status: 'debt',
+    },
+    payload_json: {
+      priority: 'medium',
+      related_foreshadowing: ['残缺阵盘'],
+      expected_payoff: '内门试炼中回收阵盘来历。',
+    },
+  },
+  {
+    id: 203,
+    entity_type: 'item',
+    name: '玄铁阵钉',
+    summary: '普通物品设定，不进入剧情线看板。',
+  },
+]
+
 function first30Review(overrides: Record<string, any> = {}) {
   const report = {
     score: 76,
@@ -124,6 +179,36 @@ describe('buildPlanningWorkspaceModel', () => {
     expect(model.first30Retention.chapterCards[1].flags).toContain('章末钩子弱')
     expect(model.first30Retention.nextActions).toContain('优先重做第4-10章试读闭环。')
     expect(model.first30Retention.actionKey).toBe('create_first30_repair')
+  })
+
+  test('builds storyline board from setting entities and first30 risks', () => {
+    const model = buildPlanningWorkspaceModel({
+      selectedProject: project,
+      outlines,
+      chapters,
+      activeChapter: chapters[6],
+      settingEntities: storylineSettings,
+      reviews: [first30Review()],
+    })
+
+    expect(model.storylineBoard.status).toBe('needs_attention')
+    expect(model.storylineBoard.total).toBe(2)
+    expect(model.storylineBoard.overdueCount).toBe(1)
+    expect(model.storylineBoard.debtCount).toBe(1)
+    expect(model.storylineBoard.summary).toContain('1 条逾期')
+    expect(model.storylineBoard.groups.map(group => group.key)).toContain('mainline')
+    expect(model.storylineBoard.groups.map(group => group.key)).toContain('foreshadowing_arc')
+
+    const mainline = model.storylineBoard.groups.find(group => group.key === 'mainline')?.items[0]
+    expect(mainline?.name).toBe('外门压迫主线')
+    expect(mainline?.typeLabel).toBe('主线')
+    expect(mainline?.riskTags).toContain('逾期未推')
+    expect(mainline?.retentionImpacts).toContain('第7章 61分')
+    expect(mainline?.actionChapterNo).toBe(6)
+
+    const foreshadowing = model.storylineBoard.groups.find(group => group.key === 'foreshadowing_arc')?.items[0]
+    expect(foreshadowing?.riskTags).toContain('回收债务')
+    expect(foreshadowing?.forbiddenReveal).toContain('第18章前')
   })
 
   test('marks first30 retention report stale when early chapters changed later', () => {
