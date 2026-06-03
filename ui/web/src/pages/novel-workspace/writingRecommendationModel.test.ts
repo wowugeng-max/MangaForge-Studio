@@ -140,6 +140,7 @@ describe('buildNovelDraftBriefSummary', () => {
       conflict: '旧臣压制主角',
       endingHook: '带血腰牌入席',
       sceneCardCount: 0,
+      preDraftBrief: null,
     })
 
     expect(summary.visible).toBe(true)
@@ -156,13 +157,61 @@ describe('buildNovelDraftBriefSummary', () => {
       conflict: '旧臣压制主角',
       endingHook: '带血腰牌入席',
       sceneCardCount: 4,
+      preDraftBrief: {
+        chapter_goal: '主角夺回主动权',
+        reader_promise: '主角第一次正面压住旧臣',
+        core_conflict: '旧臣压制主角',
+        key_settings: ['带血腰牌'],
+        storyline_advances: ['夺权主线'],
+        storyline_plants: ['旧臣背刺伏笔线'],
+        storyline_payoffs: ['身份反转支线'],
+        storyline_forbidden: ['幕后主使真名'],
+        scene_briefs: [{ scene_no: 1, title: '入席', reader_payoff: '身份反转' }],
+        word_budget: '标准章 3000 字',
+        ending_hook: '带血腰牌入席',
+        confirmed_at: '2026-06-03T10:00:00.000Z',
+      },
     })
 
     expect(summary.visible).toBe(true)
-    expect(summary.statusLabel).toBe('可进入初稿')
+    expect(summary.statusLabel).toBe('任务书已确认')
     expect(summary.actionKey).toBe('generate')
     expect(summary.actionLabel).toBe('确认并生成')
-    expect(summary.focus).toContain('主角夺回主动权')
+    expect(summary.focus).toContain('主角第一次正面压住旧臣')
     expect(summary.checks).toContain('场景 4')
+    expect(summary.briefFields.readerPromise).toContain('旧臣')
+    expect(summary.briefFields.keySettings).toContain('带血腰牌')
+    expect(summary.briefFields.storylineAdvances).toContain('夺权主线')
+    expect(summary.briefFields.storylinePlants).toContain('旧臣背刺伏笔线')
+    expect(summary.briefFields.storylinePayoffs).toContain('身份反转支线')
+    expect(summary.briefFields.storylineForbidden).toContain('幕后主使真名')
+  })
+
+  test('shows an editable pre-draft brief when scene cards exist but the brief is not confirmed', () => {
+    const summary = buildNovelDraftBriefSummary({
+      activeWordCount: 0,
+      chapterGoal: '主角夺回主动权',
+      conflict: '旧臣压制主角',
+      endingHook: '带血腰牌入席',
+      sceneCardCount: 4,
+      preDraftBrief: {
+        chapter_goal: '主角夺回主动权',
+        reader_promise: '主角第一次正面压住旧臣',
+        core_conflict: '旧臣压制主角',
+        emotional_curve: '压抑 -> 试探 -> 反压',
+        key_settings: ['带血腰牌'],
+        forbidden_content: ['提前揭露幕后主使'],
+        scene_briefs: [{ scene_no: 1, title: '入席', reader_payoff: '身份反转' }],
+        word_budget: '标准章 3000 字',
+        ending_hook: '带血腰牌入席',
+      },
+    })
+
+    expect(summary.visible).toBe(true)
+    expect(summary.statusLabel).toBe('待确认任务书')
+    expect(summary.actionKey).toBe('confirm_brief')
+    expect(summary.actionLabel).toBe('确认任务书')
+    expect(summary.briefFields.emotionalCurve).toContain('反压')
+    expect(summary.briefFields.forbiddenContent).toContain('幕后主使')
   })
 })

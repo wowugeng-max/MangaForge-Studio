@@ -50,7 +50,24 @@ export type NovelDeliverySummary = {
   compactActionLabel: string
 }
 
-export type NovelDraftBriefActionKey = 'metadata' | 'scene_cards' | 'generate'
+export type NovelDraftBriefActionKey = 'metadata' | 'scene_cards' | 'build_brief' | 'confirm_brief' | 'generate'
+
+export type NovelPreDraftBrief = {
+  chapter_goal?: string
+  reader_promise?: string
+  core_conflict?: string
+  emotional_curve?: string
+  key_settings?: string[]
+  forbidden_content?: string[]
+  storyline_advances?: string[]
+  storyline_plants?: string[]
+  storyline_payoffs?: string[]
+  storyline_forbidden?: string[]
+  scene_briefs?: any[]
+  word_budget?: string
+  ending_hook?: string
+  confirmed_at?: string
+}
 
 export type NovelDraftBriefSummary = {
   visible: boolean
@@ -59,6 +76,21 @@ export type NovelDraftBriefSummary = {
   checks: string[]
   actionKey: NovelDraftBriefActionKey | null
   actionLabel: string
+  briefFields: {
+    chapterGoal: string
+    readerPromise: string
+    coreConflict: string
+    emotionalCurve: string
+    keySettings: string
+    forbiddenContent: string
+    storylineAdvances: string
+    storylinePlants: string
+    storylinePayoffs: string
+    storylineForbidden: string
+    sceneBudget: string
+    wordBudget: string
+    endingHook: string
+  }
 }
 
 export function buildNovelDraftBriefSummary({
@@ -67,13 +99,31 @@ export function buildNovelDraftBriefSummary({
   conflict,
   endingHook,
   sceneCardCount,
+  preDraftBrief,
 }: {
   activeWordCount: number
   chapterGoal?: string | null
   conflict?: string | null
   endingHook?: string | null
   sceneCardCount: number
+  preDraftBrief?: NovelPreDraftBrief | null
 }): NovelDraftBriefSummary {
+  const briefFields = {
+    chapterGoal: preDraftBrief?.chapter_goal?.trim() || chapterGoal?.trim() || '',
+    readerPromise: preDraftBrief?.reader_promise?.trim() || '',
+    coreConflict: preDraftBrief?.core_conflict?.trim() || conflict?.trim() || '',
+    emotionalCurve: preDraftBrief?.emotional_curve?.trim() || '',
+    keySettings: Array.isArray(preDraftBrief?.key_settings) ? preDraftBrief.key_settings.filter(Boolean).join('、') : '',
+    forbiddenContent: Array.isArray(preDraftBrief?.forbidden_content) ? preDraftBrief.forbidden_content.filter(Boolean).join('、') : '',
+    storylineAdvances: Array.isArray(preDraftBrief?.storyline_advances) ? preDraftBrief.storyline_advances.filter(Boolean).join('、') : '',
+    storylinePlants: Array.isArray(preDraftBrief?.storyline_plants) ? preDraftBrief.storyline_plants.filter(Boolean).join('、') : '',
+    storylinePayoffs: Array.isArray(preDraftBrief?.storyline_payoffs) ? preDraftBrief.storyline_payoffs.filter(Boolean).join('、') : '',
+    storylineForbidden: Array.isArray(preDraftBrief?.storyline_forbidden) ? preDraftBrief.storyline_forbidden.filter(Boolean).join('、') : '',
+    sceneBudget: Array.isArray(preDraftBrief?.scene_briefs) && preDraftBrief.scene_briefs.length > 0 ? `${preDraftBrief.scene_briefs.length} 个场景已写入任务书` : '',
+    wordBudget: preDraftBrief?.word_budget?.trim() || '',
+    endingHook: preDraftBrief?.ending_hook?.trim() || endingHook?.trim() || '',
+  }
+
   if (activeWordCount > 0) {
     return {
       visible: false,
@@ -82,6 +132,7 @@ export function buildNovelDraftBriefSummary({
       checks: [],
       actionKey: null,
       actionLabel: '',
+      briefFields,
     }
   }
 
@@ -108,6 +159,7 @@ export function buildNovelDraftBriefSummary({
       checks,
       actionKey: 'metadata',
       actionLabel: '补章节目标',
+      briefFields,
     }
   }
   if (!hasScenes) {
@@ -118,6 +170,40 @@ export function buildNovelDraftBriefSummary({
       checks,
       actionKey: 'scene_cards',
       actionLabel: '补场景卡',
+      briefFields,
+    }
+  }
+  if (!preDraftBrief) {
+    return {
+      visible: true,
+      statusLabel: '待生成任务书',
+      focus,
+      checks: [...checks, '缺任务书'],
+      actionKey: 'build_brief',
+      actionLabel: '生成任务书',
+      briefFields,
+    }
+  }
+  if (!preDraftBrief.confirmed_at) {
+    return {
+      visible: true,
+      statusLabel: '待确认任务书',
+      focus: [briefFields.readerPromise, briefFields.coreConflict, briefFields.endingHook ? `钩子：${briefFields.endingHook}` : ''].filter(Boolean).join('；') || focus,
+      checks: [...checks, '任务书待确认'],
+      actionKey: 'confirm_brief',
+      actionLabel: '确认任务书',
+      briefFields,
+    }
+  }
+  if (preDraftBrief?.confirmed_at) {
+    return {
+      visible: true,
+      statusLabel: '任务书已确认',
+      focus: [briefFields.readerPromise, briefFields.coreConflict, briefFields.endingHook ? `钩子：${briefFields.endingHook}` : ''].filter(Boolean).join('；') || focus,
+      checks: [...checks, '任务书已确认'],
+      actionKey: 'generate',
+      actionLabel: '确认并生成',
+      briefFields,
     }
   }
   return {
@@ -127,6 +213,7 @@ export function buildNovelDraftBriefSummary({
     checks,
     actionKey: 'generate',
     actionLabel: '确认并生成',
+    briefFields,
   }
 }
 

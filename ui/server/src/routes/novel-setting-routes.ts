@@ -22,7 +22,8 @@ type NovelSettingRoutesContext = {
   buildChapterContextPackage: (workspace: string, project: any, chapter: any, chapters: any[], worldbuilding: any[], characters: any[], outlines: any[], reviews?: any[]) => Promise<any>
 }
 
-export const SETTING_TYPES = ['character', 'realm', 'ability', 'item', 'boss', 'rule', 'faction', 'location', 'foreshadowing', 'timeline']
+export const STORYLINE_TYPES = ['mainline', 'subplot', 'character_arc', 'relationship_arc', 'faction_arc', 'foreshadowing_arc']
+export const SETTING_TYPES = ['character', 'realm', 'ability', 'item', 'boss', 'rule', 'faction', 'location', 'foreshadowing', 'timeline', ...STORYLINE_TYPES]
 
 function parseJsonField(value: any, fallback: any) {
   if (value === undefined || value === null || value === '') return fallback
@@ -74,6 +75,7 @@ export function buildSettingAgentPrompt(project: any, worldbuilding: any[] = [],
     '4. 势力体系：组织目标、资源、敌友关系、行动边界、登场阶段。',
     '5. Boss/反派阶梯：每卷或阶段的对手、行动逻辑、压迫方式、失败代价。',
     '6. 规则/地点/时间线/伏笔：触发条件、禁忌、揭示范围、回收章节。',
+    '7. 剧情线工坊：主线、支线、角色线、感情/关系线、势力线、伏笔线；每条线必须写推进规则、当前状态、最近推进章节、下一次应推进章节、禁揭内容和预期回报。',
     '',
     '【现有项目资料】',
     JSON.stringify({ project, worldbuilding, characters, outlines: outlines.slice(0, 120), existing_settings: existing.slice(0, 120) }, null, 2).slice(0, 20000),
@@ -81,7 +83,9 @@ export function buildSettingAgentPrompt(project: any, worldbuilding: any[] = [],
     '输出 JSON 字段：',
     'settings: array，每项包含 entity_type,name,summary,status,visibility,first_chapter_no,last_chapter_no,constraints_json,state_json,payload_json。',
     '也可以额外输出 ability_system{abilities}, realm_system{realms}, item_system{items}, faction_system{factions}, boss_ladder{bosses}, rules, locations, timeline, foreshadowing；系统会归一化入库。',
-    'entity_type 只能是 character/realm/ability/item/boss/rule/faction/location/foreshadowing/timeline。',
+    '剧情线可以输出 storylines，也可以分开输出 mainlines, subplots, character_arcs, relationship_arcs, faction_arcs, foreshadowing_arcs。',
+    '剧情线字段建议包含 name,summary,priority,start_chapter_no,end_chapter_no,related_characters,related_factions,related_foreshadowing,advance_rule,taboo,forbidden_reveal,current_state,last_advanced_chapter,next_advance_chapter,payoff_status,expected_payoff。',
+    'entity_type 只能是 character/realm/ability/item/boss/rule/faction/location/foreshadowing/timeline/mainline/subplot/character_arc/relationship_arc/faction_arc/foreshadowing_arc。',
     '每个能力、物品、规则、Boss 必须写 constraints_json；每个已登场或可追踪对象必须写 state_json。',
   ].join('\n')
 }
@@ -154,6 +158,37 @@ function normalizeAgentSettingItem(item: any, projectId: number, fallbackType: s
       status: item?.status || state.status || 'planned',
     })
   }
+  if (STORYLINE_TYPES.includes(entityType)) {
+    Object.assign(constraints, {
+      ...(item?.advance_rule ? { advance_rule: item.advance_rule } : {}),
+      ...(item?.advance_rules ? { advance_rules: item.advance_rules } : {}),
+      ...(item?.taboo ? { taboo: item.taboo } : {}),
+      ...(item?.forbidden_reveal ? { forbidden_reveal: item.forbidden_reveal } : {}),
+      ...(item?.forbidden_content ? { forbidden_content: item.forbidden_content } : {}),
+      ...(item?.conflict_escalation ? { conflict_escalation: item.conflict_escalation } : {}),
+      ...(item?.escalation ? { escalation: item.escalation } : {}),
+    })
+    Object.assign(state, {
+      ...(item?.current_state ? { current_state: item.current_state } : {}),
+      ...(item?.last_advanced_chapter ? { last_advanced_chapter: item.last_advanced_chapter } : {}),
+      ...(item?.last_advance_chapter ? { last_advanced_chapter: item.last_advance_chapter } : {}),
+      ...(item?.next_advance_chapter ? { next_advance_chapter: item.next_advance_chapter } : {}),
+      ...(item?.payoff_status ? { payoff_status: item.payoff_status } : {}),
+      status: item?.status || state.status || 'active',
+    })
+    Object.assign(payload, {
+      line_type: entityType,
+      ...(item?.priority !== undefined ? { priority: item.priority } : {}),
+      ...(item?.start_chapter_no !== undefined ? { start_chapter_no: item.start_chapter_no } : {}),
+      ...(item?.start_chapter !== undefined ? { start_chapter_no: item.start_chapter } : {}),
+      ...(item?.end_chapter_no !== undefined ? { end_chapter_no: item.end_chapter_no } : {}),
+      ...(item?.end_chapter !== undefined ? { end_chapter_no: item.end_chapter } : {}),
+      ...(item?.related_characters ? { related_characters: item.related_characters } : {}),
+      ...(item?.related_factions ? { related_factions: item.related_factions } : {}),
+      ...(item?.related_foreshadowing ? { related_foreshadowing: item.related_foreshadowing } : {}),
+      ...(item?.expected_payoff ? { expected_payoff: item.expected_payoff } : {}),
+    })
+  }
   return normalizeSettingInput({
     project_id: projectId,
     entity_type: entityType,
@@ -161,8 +196,8 @@ function normalizeAgentSettingItem(item: any, projectId: number, fallbackType: s
     summary: firstText(item?.summary, item?.description, item?.role, item?.effect, item?.content),
     status: item?.status || 'active',
     visibility: item?.visibility || (entityType === 'foreshadowing' ? 'hidden' : 'public'),
-    first_chapter_no: item?.first_chapter_no ?? item?.first_chapter ?? null,
-    last_chapter_no: item?.last_chapter_no ?? item?.last_chapter ?? null,
+    first_chapter_no: item?.first_chapter_no ?? item?.first_chapter ?? item?.start_chapter_no ?? item?.start_chapter ?? null,
+    last_chapter_no: item?.last_chapter_no ?? item?.last_chapter ?? item?.end_chapter_no ?? item?.end_chapter ?? null,
     constraints_json: constraints,
     state_json: state,
     payload_json: { ...payload, source, raw: item },
@@ -181,6 +216,13 @@ export function normalizeSettingAgentPayload(payload: any, projectId: number) {
   for (const item of asSettingArray(payload?.locations)) candidates.push({ item, type: 'location', source: 'setting_agent_location' })
   for (const item of asSettingArray(payload?.timeline)) candidates.push({ item, type: 'timeline', source: 'setting_agent_timeline' })
   for (const item of asSettingArray(payload?.foreshadowing || payload?.foreshadowing_plan)) candidates.push({ item, type: 'foreshadowing', source: 'setting_agent_foreshadowing' })
+  for (const item of asSettingArray(payload?.storylines)) candidates.push({ item, type: String(item?.entity_type || item?.type || 'mainline'), source: 'setting_agent_storyline' })
+  for (const item of asSettingArray(payload?.mainlines)) candidates.push({ item, type: 'mainline', source: 'setting_agent_mainline' })
+  for (const item of asSettingArray(payload?.subplots)) candidates.push({ item, type: 'subplot', source: 'setting_agent_subplot' })
+  for (const item of asSettingArray(payload?.character_arcs)) candidates.push({ item, type: 'character_arc', source: 'setting_agent_character_arc' })
+  for (const item of asSettingArray(payload?.relationship_arcs)) candidates.push({ item, type: 'relationship_arc', source: 'setting_agent_relationship_arc' })
+  for (const item of asSettingArray(payload?.faction_arcs)) candidates.push({ item, type: 'faction_arc', source: 'setting_agent_faction_arc' })
+  for (const item of asSettingArray(payload?.foreshadowing_arcs)) candidates.push({ item, type: 'foreshadowing_arc', source: 'setting_agent_foreshadowing_arc' })
 
   const normalized: any[] = []
   const seen = new Set<string>()
@@ -197,10 +239,11 @@ export function normalizeSettingAgentPayload(payload: any, projectId: number) {
 
 function normalizeUsageInput(item: any) {
   const usageType = String(item.usage_type || (item.forbidden ? 'forbidden' : item.required ? 'required' : 'allowed'))
+  const positiveStorylineUsage = ['advance', 'plant', 'payoff'].includes(usageType)
   return {
     entity_id: Number(item.entity_id || item.id || 0),
     usage_type: usageType,
-    required: Boolean(item.required || usageType === 'required'),
+    required: Boolean(item.required || usageType === 'required' || positiveStorylineUsage),
     allowed: item.allowed === undefined ? usageType !== 'forbidden' : Boolean(item.allowed),
     forbidden: Boolean(item.forbidden || usageType === 'forbidden'),
     reveal_level: String(item.reveal_level || 'none'),
@@ -237,12 +280,13 @@ function heuristicUsageSuggestions(chapter: any, settings: any[]) {
     }
     if (['character', 'boss', 'rule'].includes(setting.entity_type)) score += 4
     if (['ability', 'item', 'foreshadowing'].includes(setting.entity_type)) score += 2
+    if (STORYLINE_TYPES.includes(setting.entity_type)) score += 5
     return { setting, score }
   }).filter(item => item.score >= 6).sort((a, b) => b.score - a.score)
   return scored.slice(0, 12).map(({ setting, score }, index) => ({
     entity_id: setting.id,
-    usage_type: index < 4 || score >= 30 ? 'required' : 'allowed',
-    required: index < 4 || score >= 30,
+    usage_type: STORYLINE_TYPES.includes(setting.entity_type) ? 'advance' : index < 4 || score >= 30 ? 'required' : 'allowed',
+    required: STORYLINE_TYPES.includes(setting.entity_type) || index < 4 || score >= 30,
     allowed: true,
     forbidden: false,
     reveal_level: setting.visibility === 'hidden' || setting.visibility === 'spoiler' ? 'hint' : 'partial',
@@ -467,6 +511,48 @@ export function registerNovelSettingRoutes(app: Express, ctx: NovelSettingRoutes
     res.json({ ok: true, applied: apply, usage: records, total: records.length })
   })
 
+  app.post('/api/novel/chapters/:chapterId/storylines/suggest', async (req, res) => {
+    const activeWorkspace = ctx.getWorkspace()
+    const projectId = Number(req.body?.project_id || req.query.project_id || 0)
+    const chapterId = Number(req.params.chapterId)
+    const project = await ctx.getProject(activeWorkspace, projectId)
+    if (!project) return res.status(404).json({ error: 'project not found' })
+    const [chapters, settings] = await Promise.all([
+      listNovelChapters(activeWorkspace, projectId),
+      listNovelSettingEntities(activeWorkspace, projectId),
+    ])
+    const chapter = chapters.find(item => item.id === chapterId)
+    if (!chapter) return res.status(404).json({ error: 'chapter not found' })
+    const storylineSettings = settings.filter(item => STORYLINE_TYPES.includes(item.entity_type))
+    let suggested = heuristicUsageSuggestions(chapter, storylineSettings).map(item => ({
+      ...item,
+      usage_type: item.usage_type === 'required' || item.usage_type === 'allowed' ? 'advance' : item.usage_type,
+      required: item.usage_type !== 'pause',
+      allowed: item.usage_type !== 'forbidden',
+      forbidden: item.usage_type === 'forbidden',
+    }))
+    const useModel = Number(req.body?.model_id || 0) > 0 && req.body?.use_model !== false
+    if (useModel && storylineSettings.length > 0) {
+      const prompt = [
+        '任务：为当前章节匹配剧情线推进关系。只输出 JSON，不要解释。',
+        '你要决定本章哪些剧情线必推 advance、只埋线 plant、需要回收 payoff、暂时暂停 pause、禁止提前揭露 forbidden。',
+        'usage_type 只能是 advance/plant/payoff/pause/forbidden；reveal_level 只能是 none/hint/partial/full。',
+        '原则：长期主线方向不得随意改变；禁揭线不得提前泄露；每项 expected_state_change 必须写清本章预计推进结果。',
+        JSON.stringify({ chapter, storylines: storylineSettings.slice(0, 180).map(item => ({ id: item.id, type: item.entity_type, name: item.name, summary: item.summary, visibility: item.visibility, constraints: item.constraints_json, state: item.state_json, payload: item.payload_json })) }, null, 2).slice(0, 18000),
+        '输出字段：usage(array)，每项包含 entity_id, usage_type, required, allowed, forbidden, reveal_level, expected_state_change。',
+      ].join('\n')
+      const result = await executeNovelAgent('outline-agent', project, { task: prompt }, { activeWorkspace, modelId: String(req.body.model_id), maxTokens: 3500, temperature: 0.2, skipMemory: true })
+      const payload = parseJsonLikePayload((result as any).output || (result as any).content || '') || {}
+      const modelUsage = (Array.isArray(payload?.usage) ? payload.usage : []).map(normalizeUsageInput).filter((item: any) => item.entity_id)
+      if (modelUsage.length > 0) suggested = modelUsage
+    }
+    const apply = req.body?.apply !== false
+    const records = apply
+      ? await replaceNovelChapterSettingUsage(activeWorkspace, projectId, chapterId, suggested as any)
+      : suggested
+    res.json({ ok: true, applied: apply, usage: records, total: records.length })
+  })
+
   app.post('/api/novel/projects/:id/settings/incubate-from-project', async (req, res) => {
     const activeWorkspace = ctx.getWorkspace()
     const projectId = Number(req.params.id)
@@ -498,6 +584,53 @@ export function registerNovelSettingRoutes(app: Express, ctx: NovelSettingRoutes
       created.push(await createNovelSettingEntity(activeWorkspace, seed as any))
     }
     res.json({ ok: true, created, skipped_existing: existing.length, total: created.length })
+  })
+
+  app.post('/api/novel/projects/:id/storylines/incubate', async (req, res) => {
+    const activeWorkspace = ctx.getWorkspace()
+    const projectId = Number(req.params.id)
+    const project = await ctx.getProject(activeWorkspace, projectId)
+    if (!project) return res.status(404).json({ error: 'project not found' })
+    const [worldbuilding, characters, outlines, existing] = await Promise.all([
+      listNovelWorldbuilding(activeWorkspace, projectId),
+      listNovelCharacters(activeWorkspace, projectId),
+      listNovelOutlines(activeWorkspace, projectId),
+      listNovelSettingEntities(activeWorkspace, projectId),
+    ])
+    const existingKeys = new Set(existing.map(item => `${item.entity_type}:${item.name}`))
+    const useModel = req.body?.use_model !== false && Number(req.body?.model_id || 0) > 0
+    let modelSeeds: any[] = []
+    if (useModel) {
+      const result = await executeNovelAgent('setting-agent', project, {
+        task: buildSettingAgentPrompt(project, worldbuilding, characters, outlines, existing),
+      }, { activeWorkspace, modelId: String(req.body.model_id), maxTokens: 7000, temperature: 0.25, skipMemory: true })
+      modelSeeds = normalizeSettingAgentPayload(getNovelPayload(result), projectId).filter(item => STORYLINE_TYPES.includes(item.entity_type))
+    }
+    const outlineSeeds = outlines
+      .filter(item => ['master', 'volume', 'chapter'].includes(String(item.outline_type || '')))
+      .slice(0, 80)
+      .map(item => normalizeSettingInput({
+        project_id: projectId,
+        entity_type: item.outline_type === 'master' ? 'mainline' : item.outline_type === 'volume' ? 'subplot' : 'foreshadowing_arc',
+        name: String(item.title || item.hook || `剧情线${item.id || ''}`).trim(),
+        summary: [item.summary, item.hook].filter(Boolean).join('；'),
+        first_chapter_no: item.chapter_no || null,
+        constraints_json: { advance_rule: '按大纲节奏推进，不提前跳过关键冲突。', forbidden_reveal: '不得提前揭露后续卷核心真相。' },
+        state_json: { current_state: 'planned', next_advance_chapter: item.chapter_no || null },
+        payload_json: { source: 'outline_storyline_seed', outline_id: item.id, priority: item.outline_type === 'master' ? 1 : 3 },
+      }, projectId))
+      .filter(item => item.name)
+    const candidates = [...outlineSeeds, ...modelSeeds]
+    const created: any[] = []
+    const updated: any[] = []
+    const seen = new Set(existingKeys)
+    for (const seed of candidates) {
+      const key = `${seed.entity_type}:${seed.name}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      created.push(await createNovelSettingEntity(activeWorkspace, seed as any))
+    }
+    res.json({ ok: true, created, updated, skipped_existing: existing.length, total: created.length + updated.length })
   })
 
   app.post('/api/novel/chapters/:chapterId/settings-consistency-check', async (req, res) => {

@@ -32,6 +32,8 @@ import {
   normalizeIssue,
 } from './novel-route-utils'
 
+const STORYLINE_TYPES = ['mainline', 'subplot', 'character_arc', 'relationship_arc', 'faction_arc', 'foreshadowing_arc']
+
 export type ChapterWordTarget = {
   mode: 'standard' | 'long' | 'custom'
   label: string
@@ -204,6 +206,119 @@ export function buildCommercialEditorRewritePrompt(project: any, contextPackage:
     '',
     '输出 JSON，包含 prose_chapters 数组。数组只能有一项，且必须包含 chapter_no, title, chapter_text, scene_breakdown, continuity_notes；同时输出 editor_report，说明 applied_changes(array)、remaining_risks(array)、word_count_estimate(number)。chapter_text 必须是改稿后的完整正文，不要 markdown 标题。',
   ].filter(Boolean).join('\n')
+}
+
+function compactBriefText(value: any, fallback = '') {
+  return String(value || fallback || '').replace(/\s+/g, ' ').trim()
+}
+
+function sceneBriefFromCard(card: any, index: number) {
+  return {
+    scene_no: Number(card?.scene_no || index + 1),
+    title: compactBriefText(card?.title, `场景${index + 1}`),
+    purpose: compactBriefText(card?.purpose || card?.beat),
+    conflict: compactBriefText(card?.conflict),
+    reader_payoff: compactBriefText(card?.reader_payoff || card?.payoff),
+    fear_point: compactBriefText(card?.fear_point || card?.terror_point),
+    rule_pressure: compactBriefText(card?.rule_pressure || card?.rule_trigger),
+    information_gap: compactBriefText(card?.information_gap),
+    reversal: compactBriefText(card?.reversal || card?.turning_point),
+    ending_hook_seed: compactBriefText(card?.ending_hook_seed || card?.ending_hook || card?.exit_state),
+    word_budget: compactBriefText(card?.word_budget || card?.description_budget),
+  }
+}
+
+function storylineUsageName(item: any) {
+  return String(item?.name || item?.summary || item?.entity_type || '').trim()
+}
+
+function storylineUsageByType(storylineContext: any, types: string[]) {
+  return asArray(storylineContext?.chapter_usage)
+    .filter((item: any) => types.includes(String(item?.usage_type || '')))
+    .map(storylineUsageName)
+    .filter(Boolean)
+}
+
+export function buildChapterPreDraftBrief(project: any, contextPackage: any) {
+  const chapterTarget = contextPackage?.chapter_target || {}
+  const sceneCards = Array.isArray(chapterTarget.scene_cards) ? chapterTarget.scene_cards : []
+  const sceneBriefs = sceneCards.map(sceneBriefFromCard)
+  const readerPayoffs = sceneBriefs.map(item => item.reader_payoff).filter(Boolean)
+  const emotionalCurve = [
+    sceneCards[0]?.emotional_tone,
+    sceneCards.length > 1 ? sceneCards[Math.floor(sceneCards.length / 2)]?.emotional_tone : '',
+    sceneCards.length > 1 ? sceneCards[sceneCards.length - 1]?.emotional_tone : '',
+  ].filter(Boolean).join(' -> ')
+  const keySettings = [
+    ...asArray(contextPackage?.setting_context?.required),
+    ...asArray(contextPackage?.setting_context?.chapter_usage)
+      .filter((item: any) => item.required && !item.forbidden)
+      .map((item: any) => item.name),
+  ].map((item: any) => String(item || '').trim()).filter(Boolean)
+  const forbiddenContent = [
+    ...asArray(contextPackage?.setting_context?.forbidden),
+    ...asArray(chapterTarget.forbidden_repeats),
+    ...asArray(contextPackage?.safety_policy?.forbidden),
+  ].map((item: any) => String(item || '').trim()).filter(Boolean)
+  const storylineContext = contextPackage?.storyline_context || {}
+  const storylineAdvances = [
+    ...asArray(storylineContext.required),
+    ...storylineUsageByType(storylineContext, ['advance']),
+  ].map((item: any) => String(item || '').trim()).filter(Boolean)
+  const storylinePlants = storylineUsageByType(storylineContext, ['plant'])
+  const storylinePayoffs = storylineUsageByType(storylineContext, ['payoff'])
+  const storylineForbidden = [
+    ...asArray(storylineContext.forbidden),
+    ...storylineUsageByType(storylineContext, ['forbidden']),
+  ].map((item: any) => String(item || '').trim()).filter(Boolean)
+  const wordTarget = chapterTarget.word_target || {}
+
+  return {
+    chapter_no: Number(chapterTarget.chapter_no || 0) || null,
+    title: compactBriefText(chapterTarget.title, '未命名章节'),
+    chapter_goal: compactBriefText(chapterTarget.summary || chapterTarget.goal || chapterTarget.chapter_goal),
+    reader_promise: compactBriefText(readerPayoffs.join('；') || contextPackage?.writing_bible?.promise || project?.synopsis),
+    core_conflict: compactBriefText(chapterTarget.conflict || sceneCards.map((card: any) => card?.conflict).filter(Boolean).join('；')),
+    emotional_curve: compactBriefText(emotionalCurve || contextPackage?.writing_bible?.style_lock?.emotional_curve || '压迫 -> 试探 -> 转折/回报'),
+    key_settings: Array.from(new Set(keySettings)).slice(0, 12),
+    forbidden_content: Array.from(new Set(forbiddenContent)).slice(0, 12),
+    storyline_advances: Array.from(new Set(storylineAdvances)).slice(0, 12),
+    storyline_plants: Array.from(new Set(storylinePlants)).slice(0, 12),
+    storyline_payoffs: Array.from(new Set(storylinePayoffs)).slice(0, 12),
+    storyline_forbidden: Array.from(new Set(storylineForbidden)).slice(0, 12),
+    scene_briefs: sceneBriefs,
+    word_budget: wordTarget?.target
+      ? `${wordTarget.label || '章节'} ${wordTarget.target} 字，可接受 ${wordTarget.min}-${wordTarget.max} 字`
+      : compactBriefText(contextPackage?.style_lock?.chapter_word_range, '按写作圣经字数范围执行'),
+    ending_hook: compactBriefText(chapterTarget.ending_hook || sceneBriefs.map(item => item.ending_hook_seed).filter(Boolean).slice(-1)[0]),
+    generated_at: new Date().toISOString(),
+  }
+}
+
+export function mergeConfirmedPreDraftBriefIntoContext(contextPackage: any, preDraftBrief: any) {
+  if (!preDraftBrief?.confirmed_at) return contextPackage
+  return {
+    ...(contextPackage || {}),
+    pre_draft_brief: preDraftBrief,
+    chapter_target: {
+      ...((contextPackage || {}).chapter_target || {}),
+      summary: compactBriefText(preDraftBrief.chapter_goal, (contextPackage || {}).chapter_target?.summary),
+      goal: compactBriefText(preDraftBrief.chapter_goal, (contextPackage || {}).chapter_target?.goal),
+      conflict: compactBriefText(preDraftBrief.core_conflict, (contextPackage || {}).chapter_target?.conflict),
+      ending_hook: compactBriefText(preDraftBrief.ending_hook, (contextPackage || {}).chapter_target?.ending_hook),
+      reader_promise: compactBriefText(preDraftBrief.reader_promise),
+      emotional_curve: compactBriefText(preDraftBrief.emotional_curve),
+      key_settings: asArray(preDraftBrief.key_settings),
+      forbidden_content: asArray(preDraftBrief.forbidden_content),
+      storyline_advances: asArray(preDraftBrief.storyline_advances),
+      storyline_plants: asArray(preDraftBrief.storyline_plants),
+      storyline_payoffs: asArray(preDraftBrief.storyline_payoffs),
+      storyline_forbidden: asArray(preDraftBrief.storyline_forbidden),
+      scene_cards: asArray(preDraftBrief.scene_briefs).length
+        ? asArray(preDraftBrief.scene_briefs)
+        : asArray((contextPackage || {}).chapter_target?.scene_cards),
+    },
+  }
 }
 
 export function normalizeSceneCardsPayload(payload: any, contextPackage: any = {}) {
@@ -677,6 +792,51 @@ export function createNovelWritingService(ctx: {
         return acc
       }, {}),
     }
+    const storylineSettings = relatedSettings.filter((item: any) => STORYLINE_TYPES.includes(item.entity_type))
+    const storylineUsage = chapterSettingUsage
+      .map((usage: any) => {
+        const entity = settingById.get(Number(usage.entity_id || 0))
+        if (!entity || !STORYLINE_TYPES.includes(entity.entity_type)) return null
+        return {
+          ...usage,
+          entity_type: entity.entity_type || '',
+          name: entity.name || '',
+          summary: entity.summary || '',
+          constraints: entity.constraints_json || {},
+          state: entity.state_json || {},
+          payload: entity.payload_json || {},
+        }
+      })
+      .filter(Boolean)
+    const storylineContext = {
+      entities: storylineSettings.map((item: any) => ({
+        id: item.id,
+        type: item.entity_type,
+        name: item.name,
+        summary: item.summary || '',
+        status: item.status || 'active',
+        visibility: item.visibility || 'public',
+        constraints: item.constraints_json || {},
+        state: item.state_json || {},
+        payload: item.payload_json || {},
+        first_chapter_no: item.first_chapter_no || null,
+        last_chapter_no: item.last_chapter_no || null,
+      })),
+      chapter_usage: storylineUsage,
+      required: storylineUsage
+        .filter((item: any) => ['advance', 'plant', 'payoff', 'required'].includes(String(item.usage_type || '')) || (item.required && !item.forbidden))
+        .map((usage: any) => usage.name)
+        .filter(Boolean),
+      forbidden: storylineUsage
+        .filter((item: any) => item.forbidden || item.usage_type === 'forbidden')
+        .map((usage: any) => usage.name)
+        .filter(Boolean),
+      advance: storylineUsage.filter((item: any) => item.usage_type === 'advance'),
+      plant: storylineUsage.filter((item: any) => item.usage_type === 'plant'),
+      payoff: storylineUsage.filter((item: any) => item.usage_type === 'payoff'),
+      pause: storylineUsage.filter((item: any) => item.usage_type === 'pause'),
+      forbidden_usage: storylineUsage.filter((item: any) => item.usage_type === 'forbidden' || item.forbidden),
+    }
     const settingChecks = [
       { key: 'setting_workshop', ok: settingEntities.length > 0, severity: 'medium', label: '设定工坊', fix: '在右侧“设定”中从项目资料补齐角色、境界、能力、物品、Boss、规则等设定。' },
       { key: 'chapter_setting_usage', ok: chapterSettingUsage.length > 0, severity: 'low', label: '本章设定调用', fix: '在本章设定调用中标记必用、允许或禁揭设定。' },
@@ -758,6 +918,7 @@ export function createNovelWritingService(ctx: {
       volume_plan: getVolumePlan(outlines),
       writing_bible: writingBible,
       setting_context: settingContext,
+      storyline_context: storylineContext,
       style_lock: styleLock,
       safety_policy: safetyPolicy,
       reference: referencePreview ? {
@@ -773,8 +934,9 @@ export function createNovelWritingService(ctx: {
         warnings: preflight.warnings,
       },
     }
+    const confirmedPackage = mergeConfirmedPreDraftBriefIntoContext(basePackage, chapter.raw_payload?.pre_draft_brief)
     const override = chapter.raw_payload?.context_package_override || null
-    return override ? deepMergeObjects(basePackage, override) : basePackage
+    return override ? deepMergeObjects(confirmedPackage, override) : confirmedPackage
   }
 
   const buildProseReviewPrompt = (project: any, contextPackage: any, chapterText: string) => [

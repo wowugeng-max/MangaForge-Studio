@@ -4,9 +4,21 @@ import { join } from 'path'
 import {
   buildSettingAgentPrompt,
   normalizeSettingAgentPayload,
+  SETTING_TYPES,
 } from './novel-setting-routes'
 
 describe('setting agent workflow', () => {
+  test('exposes storyline setting entity types', () => {
+    expect(SETTING_TYPES).toEqual(expect.arrayContaining([
+      'mainline',
+      'subplot',
+      'character_arc',
+      'relationship_arc',
+      'faction_arc',
+      'foreshadowing_arc',
+    ]))
+  })
+
   test('asks a dedicated setting agent to build longform setting systems', () => {
     const prompt = buildSettingAgentPrompt(
       { title: '超人的规则怪谈世界', length_target: 'epic' },
@@ -21,6 +33,17 @@ describe('setting agent workflow', () => {
     expect(prompt).toContain('物品体系')
     expect(prompt).toContain('势力体系')
     expect(prompt).toContain('Boss/反派阶梯')
+    expect(prompt).toContain('剧情线工坊')
+    expect(prompt).toContain('主线')
+    expect(prompt).toContain('支线')
+    expect(prompt).toContain('角色线')
+    expect(prompt).toContain('感情/关系线')
+    expect(prompt).toContain('势力线')
+    expect(prompt).toContain('伏笔线')
+    expect(prompt).toContain('storylines')
+    expect(prompt).toContain('mainlines')
+    expect(prompt).toContain('subplots')
+    expect(prompt).toContain('character_arcs')
     expect(prompt).toContain('settings')
   })
 
@@ -54,12 +77,37 @@ describe('setting agent workflow', () => {
       rules: [{ name: '第零条规则', summary: '不可直视广播源头', consequence: '被规则标记' }],
       locations: [{ name: '死亡公寓', summary: '新人副本起点' }],
       foreshadowing: [{ name: '编织者低语', summary: '外神伏笔', payoff_chapter: 250 }],
+      storylines: [{ entity_type: 'mainline', name: '打破规则牢笼', summary: '双主角逐步破解规则世界来源', priority: 1, start_chapter_no: 1, expected_payoff: '脱离无限副本' }],
+      mainlines: [{ name: '规则之源调查', summary: '从副本异常追到外神编织者', advance_rule: '每卷必须获得一块真相拼图', forbidden_reveal: '不可提前揭露编织者真名' }],
+      subplots: [{ name: '林晓求生支线', summary: '林晓从幸存者成长为队友', next_advance_chapter: 12 }],
+      character_arcs: [{ name: '李辰蛮力到克制', summary: '从硬冲规则到学会配合张智', related_characters: ['李辰'] }],
+      relationship_arcs: [{ name: '双主角信任线', summary: '李辰和张智建立战斗默契', payoff_status: 'building' }],
+      faction_arcs: [{ name: '规则崇拜教团渗透', summary: '教团在各副本留下标记', related_factions: ['规则崇拜教团'] }],
+      foreshadowing_arcs: [{ name: '第零条规则回收线', summary: '表层规则背后的隐藏条款', payoff_chapter: 45 }],
     }, 7)
 
-    expect(entities.map(item => item.entity_type)).toEqual(expect.arrayContaining(['ability', 'realm', 'item', 'faction', 'boss', 'rule', 'location', 'foreshadowing']))
+    expect(entities.map(item => item.entity_type)).toEqual(expect.arrayContaining([
+      'ability',
+      'realm',
+      'item',
+      'faction',
+      'boss',
+      'rule',
+      'location',
+      'foreshadowing',
+      'mainline',
+      'subplot',
+      'character_arc',
+      'relationship_arc',
+      'faction_arc',
+      'foreshadowing_arc',
+    ]))
     expect(entities.every(item => item.project_id === 7)).toBe(true)
     expect(entities.find(item => item.name === '钢铁之躯')?.constraints_json).toMatchObject({ cost: '消耗日光储备', limit: '规则压制时削弱' })
     expect(entities.find(item => item.name === '规则崇拜教团')?.constraints_json).toMatchObject({ agenda: '扩大污染范围' })
+    expect(entities.find(item => item.name === '规则之源调查')?.constraints_json).toMatchObject({ advance_rule: '每卷必须获得一块真相拼图', forbidden_reveal: '不可提前揭露编织者真名' })
+    expect(entities.find(item => item.name === '林晓求生支线')?.state_json).toMatchObject({ next_advance_chapter: 12 })
+    expect(entities.find(item => item.name === '打破规则牢笼')?.payload_json).toMatchObject({ priority: 1, expected_payoff: '脱离无限副本' })
   })
 
   test('uses setting-agent in the project setting incubation route', () => {
@@ -72,5 +120,16 @@ describe('setting agent workflow', () => {
     expect(routeBlock).toContain("executeNovelAgent('setting-agent'")
     expect(routeBlock).toContain('buildSettingAgentPrompt(')
     expect(routeBlock).toContain('normalizeSettingAgentPayload(')
+  })
+
+  test('exposes storyline incubation and chapter suggestion routes', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-setting-routes.ts'), 'utf8')
+
+    expect(source).toContain("app.post('/api/novel/projects/:id/storylines/incubate'")
+    expect(source).toContain("app.post('/api/novel/chapters/:chapterId/storylines/suggest'")
+    expect(source).toContain('STORYLINE_TYPES')
+    expect(source).toContain('advance')
+    expect(source).toContain('payoff')
+    expect(source).toContain('pause')
   })
 })

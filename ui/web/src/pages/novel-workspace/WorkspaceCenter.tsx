@@ -319,6 +319,7 @@ export function WorkspaceCenter({
   incubatingOriginal,
   generatingProse,
   generatingSceneCards,
+  preDraftBriefLoading,
   diagnosticsLoading,
   pipelineLoading,
   editorReportLoading,
@@ -331,6 +332,8 @@ export function WorkspaceCenter({
   onGenerateCurrentChapterProse,
   onRepairAndGenerateCurrentChapter,
   onGenerateSceneCards,
+  onBuildPreDraftBrief,
+  onConfirmPreDraftBrief,
   onOpenGenerationDiagnostics,
   onOpenQualityCard,
   onStartChapterPipeline,
@@ -365,6 +368,7 @@ export function WorkspaceCenter({
   incubatingOriginal: boolean
   generatingProse: boolean
   generatingSceneCards: boolean
+  preDraftBriefLoading?: boolean
   diagnosticsLoading: boolean
   pipelineLoading: boolean
   editorReportLoading: boolean
@@ -377,6 +381,8 @@ export function WorkspaceCenter({
   onGenerateCurrentChapterProse: () => void
   onRepairAndGenerateCurrentChapter: () => void
   onGenerateSceneCards: () => void
+  onBuildPreDraftBrief?: () => void
+  onConfirmPreDraftBrief?: () => void
   onOpenGenerationDiagnostics: () => void
   onOpenQualityCard: () => void
   onStartChapterPipeline: () => void
@@ -428,6 +434,7 @@ export function WorkspaceCenter({
     conflict: activeChapter?.conflict,
     endingHook: activeChapter?.ending_hook,
     sceneCardCount: sceneCards.length,
+    preDraftBrief: activeChapter?.raw_payload?.pre_draft_brief || null,
   })
   const recommendedClass = (key: NovelWritingRecommendedActionKey) => key === recommendedAction.key ? 'novel-editor-recommended-action' : undefined
   const commandClass = (key?: NovelWritingRecommendedActionKey, extra = '') => [
@@ -753,22 +760,50 @@ export function WorkspaceCenter({
           {draftBriefSummary.visible && (
             <div className="novel-draft-brief-strip">
               <div className="novel-draft-brief-main">
-                <span className="novel-draft-brief-label">生成前确认</span>
-                <Tag className="novel-draft-brief-status" bordered={false}>{draftBriefSummary.statusLabel}</Tag>
-                {draftBriefSummary.checks.map(check => (
-                  <Tag key={check} bordered={false}>{check}</Tag>
-                ))}
-                <Text className="novel-draft-brief-focus">{draftBriefSummary.focus}</Text>
+                <div className="novel-draft-brief-head">
+                  <span className="novel-draft-brief-label">章节开写任务书</span>
+                  <Tag className="novel-draft-brief-status" bordered={false}>{draftBriefSummary.statusLabel}</Tag>
+                  {draftBriefSummary.checks.map(check => (
+                    <Tag key={check} bordered={false}>{check}</Tag>
+                  ))}
+                  <Text className="novel-draft-brief-focus">{draftBriefSummary.focus}</Text>
+                </div>
+                <div className="novel-draft-brief-grid">
+                  <div><span>本章目标</span><strong>{draftBriefSummary.briefFields.chapterGoal || '待补齐'}</strong></div>
+                  <div><span>读者承诺</span><strong>{draftBriefSummary.briefFields.readerPromise || '待生成任务书'}</strong></div>
+                  <div><span>核心冲突</span><strong>{draftBriefSummary.briefFields.coreConflict || '待补齐'}</strong></div>
+                  <div><span>情绪曲线</span><strong>{draftBriefSummary.briefFields.emotionalCurve || '待生成任务书'}</strong></div>
+                  <div><span>关键设定</span><strong>{draftBriefSummary.briefFields.keySettings || '无明确必用设定'}</strong></div>
+                  <div><span>禁揭/禁写</span><strong>{draftBriefSummary.briefFields.forbiddenContent || '无明确禁写项'}</strong></div>
+                  <div><span>场景预算</span><strong>{draftBriefSummary.briefFields.sceneBudget || `${sceneCards.length} 个场景`}</strong></div>
+                  <div><span>字数目标</span><strong>{draftBriefSummary.briefFields.wordBudget || `${generationTargetWordCount} 字`}</strong></div>
+                  <div><span>章末钩子</span><strong>{draftBriefSummary.briefFields.endingHook || '待补齐'}</strong></div>
+                </div>
+                <div className="novel-draft-brief-storylines">
+                  <span>剧情线推进</span>
+                  <strong>必推：{draftBriefSummary.briefFields.storylineAdvances || '无'}</strong>
+                  <strong>埋线：{draftBriefSummary.briefFields.storylinePlants || '无'}</strong>
+                  <strong>回收：{draftBriefSummary.briefFields.storylinePayoffs || '无'}</strong>
+                  <strong>禁用：{draftBriefSummary.briefFields.storylineForbidden || '无'}</strong>
+                </div>
               </div>
               {draftBriefSummary.actionKey && (
                 <Button
                   className="novel-draft-brief-action"
                   type={draftBriefSummary.actionKey === 'generate' ? 'primary' : 'default'}
                   size="small"
-                  loading={draftBriefSummary.actionKey === 'scene_cards' ? generatingSceneCards : generatingProse}
+                  loading={
+                    draftBriefSummary.actionKey === 'scene_cards'
+                      ? generatingSceneCards
+                      : ['build_brief', 'confirm_brief'].includes(draftBriefSummary.actionKey)
+                        ? Boolean(preDraftBriefLoading)
+                        : generatingProse
+                  }
                   onClick={() => {
                     if (draftBriefSummary.actionKey === 'metadata') onEditActiveChapter()
                     if (draftBriefSummary.actionKey === 'scene_cards') onGenerateSceneCards()
+                    if (draftBriefSummary.actionKey === 'build_brief') onBuildPreDraftBrief?.()
+                    if (draftBriefSummary.actionKey === 'confirm_brief') onConfirmPreDraftBrief?.()
                     if (draftBriefSummary.actionKey === 'generate') onGenerateCurrentChapterProse()
                   }}
                 >

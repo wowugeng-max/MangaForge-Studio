@@ -16,6 +16,12 @@ const settingTypes = [
   { value: 'location', label: '地点' },
   { value: 'foreshadowing', label: '伏笔' },
   { value: 'timeline', label: '时间线' },
+  { value: 'mainline', label: '主线' },
+  { value: 'subplot', label: '支线' },
+  { value: 'character_arc', label: '角色线' },
+  { value: 'relationship_arc', label: '感情线' },
+  { value: 'faction_arc', label: '势力线' },
+  { value: 'foreshadowing_arc', label: '伏笔线' },
 ]
 
 function splitList(value: any) {
@@ -204,6 +210,10 @@ export function SettingWorkshopPanel({
     if (patch.usage_type === 'required') Object.assign(next, { required: true, allowed: true, forbidden: false })
     if (patch.usage_type === 'allowed') Object.assign(next, { required: false, allowed: true, forbidden: false })
     if (patch.usage_type === 'forbidden') Object.assign(next, { required: false, allowed: false, forbidden: true })
+    if (patch.usage_type === 'advance') Object.assign(next, { required: true, allowed: true, forbidden: false })
+    if (patch.usage_type === 'plant') Object.assign(next, { required: true, allowed: true, forbidden: false, reveal_level: next.reveal_level === 'none' ? 'hint' : next.reveal_level })
+    if (patch.usage_type === 'payoff') Object.assign(next, { required: true, allowed: true, forbidden: false, reveal_level: next.reveal_level === 'none' ? 'partial' : next.reveal_level })
+    if (patch.usage_type === 'pause') Object.assign(next, { required: false, allowed: true, forbidden: false })
     setUsage(prev => {
       const rest = prev.filter(item => Number(item.entity_id) !== Number(setting.id))
       if (!next.required && next.allowed && !next.forbidden && next.reveal_level === 'none' && !Object.keys(next.expected_state_change || {}).length) return rest
@@ -241,6 +251,22 @@ export function SettingWorkshopPanel({
     }
   }
 
+  const incubateStorylines = async (useModel: boolean) => {
+    setSaving(true)
+    try {
+      const res = await apiClient.post(`/novel/projects/${projectId}/storylines/incubate`, {
+        use_model: useModel,
+        model_id: selectedModelId,
+      })
+      message.success(`已生成 ${res.data?.total || 0} 条剧情线`)
+      await load()
+    } catch {
+      message.error('剧情线孵化失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const suggestChapterUsage = async (useModel: boolean) => {
     if (!activeChapter?.id) return message.warning('请先选择章节')
     setSaving(true)
@@ -255,6 +281,25 @@ export function SettingWorkshopPanel({
       await load()
     } catch {
       message.error('本章设定自动匹配失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const suggestStorylineUsage = async (useModel: boolean) => {
+    if (!activeChapter?.id) return message.warning('请先选择章节')
+    setSaving(true)
+    try {
+      const res = await apiClient.post(`/novel/chapters/${activeChapter.id}/storylines/suggest`, {
+        project_id: projectId,
+        model_id: selectedModelId,
+        use_model: useModel,
+        apply: true,
+      })
+      message.success(`已匹配 ${res.data?.total || 0} 条本章剧情线`)
+      await load()
+    } catch {
+      message.error('本章剧情线自动匹配失败')
     } finally {
       setSaving(false)
     }
@@ -317,8 +362,12 @@ export function SettingWorkshopPanel({
         <Button size="small" type="primary" onClick={() => openEditor()}>新增设定</Button>
         <Button size="small" onClick={() => incubateSettings(false)} loading={saving}>从项目资料补齐</Button>
         <Button size="small" onClick={() => incubateSettings(true)} loading={saving} disabled={!selectedModelId}>模型提炼设定</Button>
+        <Button size="small" onClick={() => incubateStorylines(false)} loading={saving}>补齐剧情线</Button>
+        <Button size="small" onClick={() => incubateStorylines(true)} loading={saving} disabled={!selectedModelId}>模型孵化剧情线</Button>
         <Button size="small" onClick={() => suggestChapterUsage(false)} loading={saving} disabled={!activeChapter?.id}>本章快速匹配</Button>
         <Button size="small" onClick={() => suggestChapterUsage(true)} loading={saving} disabled={!activeChapter?.id || !selectedModelId}>模型匹配本章</Button>
+        <Button size="small" onClick={() => suggestStorylineUsage(false)} loading={saving} disabled={!activeChapter?.id}>匹配剧情线</Button>
+        <Button size="small" onClick={() => suggestStorylineUsage(true)} loading={saving} disabled={!activeChapter?.id || !selectedModelId}>模型匹配剧情线</Button>
         <Button size="small" onClick={runConsistencyCheck} loading={saving} disabled={!activeChapter?.chapter_text}>检查本章</Button>
         <Button size="small" onClick={load} loading={loading}>刷新</Button>
       </Space>
@@ -406,6 +455,10 @@ export function SettingWorkshopPanel({
                               { value: 'allowed', label: '允许' },
                               { value: 'required', label: '必用' },
                               { value: 'forbidden', label: '禁揭' },
+                              { value: 'advance', label: '推进' },
+                              { value: 'plant', label: '埋线' },
+                              { value: 'payoff', label: '回收' },
+                              { value: 'pause', label: '暂停' },
                             ]}
                             onChange={value => updateUsage(setting, { usage_type: value })}
                           />

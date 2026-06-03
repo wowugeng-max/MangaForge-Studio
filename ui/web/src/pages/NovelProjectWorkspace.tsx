@@ -986,6 +986,52 @@ export default function NovelProjectWorkspace() {
     await generateSceneCardsForChapter(Number(activeChapter.id), allowIncomplete)
   }
 
+  const buildPreDraftBriefForActiveChapter = async () => {
+    if (!activeChapter) return message.warning('请先选择章节')
+    if (!await flushPendingSave()) return
+    setCommercialToolLoading('preDraftBrief')
+    try {
+      const res = await apiClient.get(`/novel/chapters/${activeChapter.id}/pre-draft-brief`, {
+        params: { project_id: projectId },
+      })
+      const brief = res.data?.brief || {}
+      const saveRes = await apiClient.put(`/novel/chapters/${activeChapter.id}/pre-draft-brief`, {
+        project_id: projectId,
+        brief,
+      })
+      if (saveRes.data?.chapter) {
+        setChapters(prev => prev.map(c => c.id === saveRes.data.chapter.id ? saveRes.data.chapter : c))
+      }
+      await loadProjectModules()
+      message.success('章节开写任务书已生成')
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '任务书生成失败')
+    } finally {
+      setCommercialToolLoading('')
+    }
+  }
+
+  const confirmPreDraftBriefForActiveChapter = async () => {
+    if (!activeChapter) return message.warning('请先选择章节')
+    if (!await flushPendingSave()) return
+    setCommercialToolLoading('preDraftBriefConfirm')
+    try {
+      const res = await apiClient.post(`/novel/chapters/${activeChapter.id}/pre-draft-brief/confirm`, {
+        project_id: projectId,
+        brief: activeChapter.raw_payload?.pre_draft_brief,
+      })
+      if (res.data?.chapter) {
+        setChapters(prev => prev.map(c => c.id === res.data.chapter.id ? res.data.chapter : c))
+      }
+      await loadProjectModules()
+      message.success('章节开写任务书已确认')
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '任务书确认失败')
+    } finally {
+      setCommercialToolLoading('')
+    }
+  }
+
   const openGenerationDiagnostics = async () => {
     if (!activeChapter) return message.warning('请先选择章节')
     if (!await flushPendingSave()) return
@@ -4143,6 +4189,7 @@ export default function NovelProjectWorkspace() {
           incubatingOriginal={incubatingOriginal}
           generatingProse={generatingProse}
           generatingSceneCards={generatingSceneCards}
+          preDraftBriefLoading={commercialToolLoading === 'preDraftBrief' || commercialToolLoading === 'preDraftBriefConfirm'}
           diagnosticsLoading={diagnosticsLoading}
           pipelineLoading={pipelineLoading}
           editorReportLoading={editorReportLoading}
@@ -4155,6 +4202,8 @@ export default function NovelProjectWorkspace() {
           onGenerateCurrentChapterProse={() => generateCurrentChapterProse()}
           onRepairAndGenerateCurrentChapter={repairContextAndGenerateCurrentChapter}
           onGenerateSceneCards={() => generateSceneCardsForActiveChapter()}
+          onBuildPreDraftBrief={() => { void buildPreDraftBriefForActiveChapter() }}
+          onConfirmPreDraftBrief={() => { void confirmPreDraftBriefForActiveChapter() }}
           onOpenGenerationDiagnostics={openGenerationDiagnostics}
           onOpenQualityCard={openChapterQualityCard}
           onStartChapterPipeline={startChapterPipeline}

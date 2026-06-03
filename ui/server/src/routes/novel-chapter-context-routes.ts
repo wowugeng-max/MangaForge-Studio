@@ -11,6 +11,7 @@ import {
 } from '../novel'
 import { executeNovelAgent } from '../llm'
 import { asArray, getNovelPayload } from './novel-route-utils'
+import { buildChapterPreDraftBrief } from './novel-writing-service'
 
 type ChapterContextRoutesContext = {
   getWorkspace: () => string
@@ -571,6 +572,64 @@ export function registerNovelChapterContextRoutes(app: Express, ctx: ChapterCont
       const loaded = await loadChapterContext(ctx, Number(req.query.project_id || 0), Number(req.params.chapterId))
       if ('error' in loaded) return res.status(loaded.status || 500).json({ error: loaded.error })
       res.json({ ok: true, context_package: loaded.contextPackage, override: loaded.chapter.raw_payload?.context_package_override || null })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.get('/api/novel/chapters/:chapterId/pre-draft-brief', async (req, res) => {
+    try {
+      const loaded = await loadChapterContext(ctx, Number(req.query.project_id || 0), Number(req.params.chapterId))
+      if ('error' in loaded) return res.status(loaded.status || 500).json({ error: loaded.error })
+      const stored = loaded.chapter.raw_payload ? loaded.chapter.raw_payload.pre_draft_brief : null
+      const brief = stored || buildChapterPreDraftBrief(loaded.project, loaded.contextPackage)
+      res.json({ ok: true, brief, stored: Boolean(stored), confirmed: Boolean(brief?.confirmed_at), context_package: loaded.contextPackage })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.put('/api/novel/chapters/:chapterId/pre-draft-brief', async (req, res) => {
+    try {
+      const activeWorkspace = ctx.getWorkspace()
+      const projectId = Number(req.body.project_id || req.query.project_id || 0)
+      const chapterId = Number(req.params.chapterId)
+      const chapter = (await listNovelChapters(activeWorkspace, projectId)).find(item => item.id === chapterId)
+      if (!chapter) return res.status(404).json({ error: 'chapter not found' })
+      const brief = req.body?.brief || req.body?.pre_draft_brief || {}
+      const updated = await updateNovelChapter(activeWorkspace, chapterId, {
+        raw_payload: {
+          ...(chapter.raw_payload || {}),
+          pre_draft_brief: {
+            ...(chapter.raw_payload?.pre_draft_brief || {}),
+            ...(brief || {}),
+            updated_at: new Date().toISOString(),
+          },
+        },
+      } as any, { createVersion: false })
+      res.json({ ok: true, chapter: updated, brief: updated?.raw_payload?.pre_draft_brief || brief })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.post('/api/novel/chapters/:chapterId/pre-draft-brief/confirm', async (req, res) => {
+    try {
+      const loaded = await loadChapterContext(ctx, Number(req.body.project_id || req.query.project_id || 0), Number(req.params.chapterId))
+      if ('error' in loaded) return res.status(loaded.status || 500).json({ error: loaded.error })
+      const existing = req.body?.brief || loaded.chapter.raw_payload?.pre_draft_brief || buildChapterPreDraftBrief(loaded.project, loaded.contextPackage)
+      const brief = {
+        ...(existing || {}),
+        confirmed_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }
+      const updated = await updateNovelChapter(loaded.activeWorkspace, loaded.chapter.id, {
+        raw_payload: {
+          ...(loaded.chapter.raw_payload || {}),
+          pre_draft_brief: brief,
+        },
+      } as any, { createVersion: false })
+      res.json({ ok: true, chapter: updated, brief, confirmed: true })
     } catch (error) {
       res.status(500).json({ error: String(error) })
     }
