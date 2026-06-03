@@ -45,6 +45,39 @@ const chapters = Array.from({ length: 12 }).map((_, index) => ({
   },
 }))
 
+function first30Review(overrides: Record<string, any> = {}) {
+  const report = {
+    score: 76,
+    status: 'needs_repair',
+    summary: '前30章有商业化雏形，但关键留存点需要补强。',
+    positioning: {
+      promise_ready: true,
+      reader_promise: '寒门少年靠阵法反压宗门秩序。',
+    },
+    segments: [
+      { key: '1-3', label: '开篇三章', score: 82, coverage: 100, hook_rate: 80, payoff_average: 2.3, chapter_count: 3 },
+      { key: '4-10', label: '试读十章', score: 68, coverage: 100, hook_rate: 57, payoff_average: 1.4, chapter_count: 7 },
+      { key: '11-30', label: '付费前蓄势', score: 60, coverage: 40, hook_rate: 45, payoff_average: 1.1, chapter_count: 8 },
+    ],
+    chapter_cards: [
+      { chapter_id: 1, chapter_no: 1, title: '第一章', score: 84, word_count: 3200, flags: [] },
+      { chapter_id: 7, chapter_no: 7, title: '第七章', score: 61, word_count: 2600, flags: ['章末钩子弱', '爽点/悬念信号少'] },
+    ],
+    risks: [{ severity: 'high', segment: '4-10', issue: '章末追读钩子覆盖率偏低。', action: '补未解决问题。' }],
+    next_actions: ['优先重做第4-10章试读闭环。'],
+    ...overrides.report,
+  }
+  return {
+    id: overrides.id || 100,
+    review_type: 'first30_retention_diagnosis',
+    status: overrides.status || 'warn',
+    summary: overrides.summary || `前30章留存诊断：${report.score} 分`,
+    created_at: overrides.created_at || '2026-06-03T10:00:00.000Z',
+    payload: JSON.stringify({ report }),
+    ...overrides.record,
+  }
+}
+
 describe('buildPlanningWorkspaceModel', () => {
   test('derives strategic top status and mainline panel from existing project data', () => {
     const model = buildPlanningWorkspaceModel({
@@ -66,6 +99,50 @@ describe('buildPlanningWorkspaceModel', () => {
     expect(model.mainline.readerPromise).toBe('寒门少年以阵法改写宗门秩序')
     expect(model.mainline.currentVolumeGoal).toBe('让主角从外门杂役进入内门视野')
     expect(model.mainline.currentStageConflict).toBe('执事逼主角交出阵盘')
+    expect(model.first30Retention.status).toBe('missing')
+    expect(model.first30Retention.actionKey).toBe('run_first30_retention')
+  })
+
+  test('parses latest first30 retention diagnosis review into planning model', () => {
+    const model = buildPlanningWorkspaceModel({
+      selectedProject: project,
+      outlines,
+      chapters,
+      activeChapter: chapters[6],
+      reviews: [
+        first30Review({ id: 1, created_at: '2026-06-03T09:00:00.000Z', report: { score: 62, status: 'blocked' } }),
+        first30Review({ id: 2, created_at: '2026-06-03T10:00:00.000Z' }),
+      ],
+    })
+
+    expect(model.first30Retention.status).toBe('needs_repair')
+    expect(model.first30Retention.score).toBe(76)
+    expect(model.first30Retention.summary).toContain('商业化雏形')
+    expect(model.first30Retention.promiseReady).toBe(true)
+    expect(model.first30Retention.segments.map(item => item.key)).toEqual(['1-3', '4-10', '11-30'])
+    expect(model.first30Retention.chapterCards[1].riskLevel).toBe('high')
+    expect(model.first30Retention.chapterCards[1].flags).toContain('章末钩子弱')
+    expect(model.first30Retention.nextActions).toContain('优先重做第4-10章试读闭环。')
+    expect(model.first30Retention.actionKey).toBe('create_first30_repair')
+  })
+
+  test('marks first30 retention report stale when early chapters changed later', () => {
+    const changedChapters = chapters.map(chapter => chapter.chapter_no === 7
+      ? { ...chapter, updated_at: '2026-06-03T11:00:00.000Z' }
+      : { ...chapter, updated_at: '2026-06-03T09:30:00.000Z' })
+
+    const model = buildPlanningWorkspaceModel({
+      selectedProject: project,
+      outlines,
+      chapters: changedChapters,
+      activeChapter: changedChapters[6],
+      reviews: [first30Review({ created_at: '2026-06-03T10:00:00.000Z' })],
+    })
+
+    expect(model.first30Retention.status).toBe('stale')
+    expect(model.first30Retention.stale).toBe(true)
+    expect(model.first30Retention.actionKey).toBe('run_first30_retention')
+    expect(model.first30Retention.summary).toContain('需重新诊断')
   })
 
   test('builds a future 10-chapter route from the active chapter position', () => {

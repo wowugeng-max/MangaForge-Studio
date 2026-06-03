@@ -16,7 +16,7 @@ import type { PlanningActionKey, PlanningVolumeTreeNode, PlanningWorkspaceModel 
 const { Text, Paragraph } = Typography
 const { useBreakpoint } = Grid
 
-export type PlanningLoadingKey = 'rollingPlan' | 'future100Audit' | 'future100Generate' | 'longformPressure' | 'topic' | 'referenceDiagnosis'
+export type PlanningLoadingKey = 'rollingPlan' | 'future100Audit' | 'future100Generate' | 'longformPressure' | 'topic' | 'referenceDiagnosis' | 'first30Retention' | 'first30Repair'
 
 export type StoryPlanningWorkspaceProps = {
   model: PlanningWorkspaceModel
@@ -45,6 +45,25 @@ function issueIconColor(severity: 'critical' | 'warning') {
   return '#1677ff'
 }
 
+function retentionColor(scoreOrStatus: number | string | null | undefined) {
+  if (typeof scoreOrStatus === 'string') {
+    if (scoreOrStatus === 'ready' || scoreOrStatus === 'ok') return 'green'
+    if (scoreOrStatus === 'blocked') return 'red'
+    if (scoreOrStatus === 'missing' || scoreOrStatus === 'stale') return 'gold'
+    return 'gold'
+  }
+  const score = Number(scoreOrStatus || 0)
+  if (score >= 80) return 'green'
+  if (score < 65) return 'red'
+  return 'gold'
+}
+
+function retentionRiskColor(level: 'ok' | 'medium' | 'high') {
+  if (level === 'ok') return 'green'
+  if (level === 'high') return 'red'
+  return 'gold'
+}
+
 function formatWords(value: number) {
   if (value >= 10000) return `${(value / 10000).toFixed(1)}万`
   return String(value || 0)
@@ -64,6 +83,8 @@ function actionLabel(key: PlanningActionKey) {
     open_story_assets: '打开资料设定',
     update_story_state: '校正故事状态',
     open_quality_revision: '进入质检修订',
+    run_first30_retention: '运行前30章诊断',
+    create_first30_repair: '生成修复任务',
   }
   return labels[key]
 }
@@ -181,6 +202,105 @@ export function StoryPlanningWorkspace({
 
         <div style={{ display: 'grid', gridTemplateColumns: compact ? '1fr' : 'minmax(0, 1fr) 320px', gap: 16, alignItems: 'start' }}>
           <Space direction="vertical" size={16} style={{ minWidth: 0 }}>
+            <Card
+              className="novel-first30-retention-card"
+              title="前30章留存曲线"
+              size="small"
+              extra={(
+                <Space wrap>
+                  <Button
+                    size="small"
+                    loading={loadingKey === 'first30Retention'}
+                    onClick={() => onAction('run_first30_retention')}
+                  >
+                    运行前30章诊断
+                  </Button>
+                  {model.first30Retention.status !== 'missing' && model.first30Retention.status !== 'ready' && (
+                    <Button
+                      size="small"
+                      type="primary"
+                      loading={loadingKey === 'first30Repair'}
+                      onClick={() => onAction('create_first30_repair')}
+                    >
+                      生成修复任务
+                    </Button>
+                  )}
+                </Space>
+              )}
+            >
+              <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                <Space wrap>
+                  <Tag color={retentionColor(model.first30Retention.status)} bordered={false}>
+                    {model.first30Retention.status === 'missing' ? '未诊断' : model.first30Retention.status === 'stale' ? '需重新诊断' : model.first30Retention.status}
+                  </Tag>
+                  {model.first30Retention.score !== null && (
+                    <Tag color={retentionColor(model.first30Retention.score)} bordered={false}>留存 {model.first30Retention.score} 分</Tag>
+                  )}
+                  <Tag color={model.first30Retention.promiseReady ? 'green' : 'gold'} bordered={false}>
+                    读者承诺{model.first30Retention.promiseReady ? '已清晰' : '待补强'}
+                  </Tag>
+                </Space>
+                <Text type="secondary">{model.first30Retention.summary}</Text>
+                <div style={{ display: 'grid', gridTemplateColumns: compact ? '1fr' : 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
+                  {(model.first30Retention.segments.length ? model.first30Retention.segments : [
+                    { key: '1-3', label: '开篇三章', score: 0, coverage: 0, hookRate: 0, payoffAverage: 0, chapterCount: 0 },
+                    { key: '4-10', label: '试读十章', score: 0, coverage: 0, hookRate: 0, payoffAverage: 0, chapterCount: 0 },
+                    { key: '11-30', label: '付费前蓄势', score: 0, coverage: 0, hookRate: 0, payoffAverage: 0, chapterCount: 0 },
+                  ]).map(segment => (
+                    <div key={segment.key} style={{ border: '1px solid #edf0f5', borderRadius: 8, padding: 10, background: '#fbfcfe' }}>
+                      <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                        <Space wrap>
+                          <Text strong>{segment.label}</Text>
+                          <Tag color={retentionColor(segment.score)} bordered={false}>{segment.score || '-'}分</Tag>
+                        </Space>
+                        <Progress percent={Math.max(0, Math.min(100, Number(segment.score || 0)))} size="small" showInfo={false} strokeColor={retentionColor(segment.score) === 'green' ? '#52c41a' : retentionColor(segment.score) === 'red' ? '#ff4d4f' : '#faad14'} />
+                        <Text type="secondary" style={{ fontSize: 12 }}>
+                          覆盖 {segment.coverage}% · 钩子 {segment.hookRate}% · 爽点/悬念 {segment.payoffAverage}
+                        </Text>
+                      </Space>
+                    </div>
+                  ))}
+                </div>
+                {model.first30Retention.chapterCards.length > 0 ? (
+                  <div style={{ display: 'grid', gap: 6 }}>
+                    {model.first30Retention.chapterCards.slice(0, 30).map(row => (
+                      <button
+                        key={`${row.chapterNo}-${row.title}`}
+                        type="button"
+                        onClick={() => onSelectChapter(row.chapterNo)}
+                        style={{
+                          border: '1px solid #edf0f5',
+                          borderRadius: 8,
+                          padding: '8px 10px',
+                          background: '#fff',
+                          cursor: 'pointer',
+                          textAlign: 'left',
+                          width: '100%',
+                          font: 'inherit',
+                          color: 'inherit',
+                        }}
+                      >
+                        <Space wrap>
+                          <Tag color={retentionRiskColor(row.riskLevel)} bordered={false}>第{row.chapterNo}章</Tag>
+                          <Text strong>{row.title}</Text>
+                          <Tag color={retentionColor(row.score)} bordered={false}>{row.score}分</Tag>
+                          <Tag bordered={false}>{row.wordCount}字</Tag>
+                          {row.flags.slice(0, 3).map(flag => <Tag key={flag} color="gold" bordered={false}>{flag}</Tag>)}
+                        </Space>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="运行诊断后显示每章留存风险" />
+                )}
+                {model.first30Retention.nextActions.length > 0 && (
+                  <Space wrap>
+                    {model.first30Retention.nextActions.slice(0, 3).map(action => <Tag key={action} bordered={false}>{action}</Tag>)}
+                  </Space>
+                )}
+              </Space>
+            </Card>
+
             <Card title="主线与分卷推进" size="small">
               <div style={{ display: 'grid', gridTemplateColumns: compact ? '1fr' : 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
                 <Alert type="info" showIcon message="全书主线承诺" description={model.mainline.readerPromise || '未设置'} />

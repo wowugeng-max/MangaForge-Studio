@@ -418,7 +418,8 @@ export default function NovelProjectWorkspace() {
     activeChapter,
     materialScore: activeChapterDiagnosticsData?.material_score,
     commercialReadiness,
-  }), [selectedProject, outlines, sortedChapters, activeChapter, activeChapterDiagnosticsData?.material_score, commercialReadiness])
+    reviews,
+  }), [selectedProject, outlines, sortedChapters, activeChapter, activeChapterDiagnosticsData?.material_score, commercialReadiness, reviews])
 
   const proseQualityReports = useMemo(() => (
     reviews
@@ -3892,7 +3893,7 @@ export default function NovelProjectWorkspace() {
   }
 
   const planningLoadingKey = ((): PlanningLoadingKey | undefined => {
-    const keys: PlanningLoadingKey[] = ['rollingPlan', 'future100Audit', 'future100Generate', 'longformPressure', 'topic', 'referenceDiagnosis']
+    const keys: PlanningLoadingKey[] = ['rollingPlan', 'future100Audit', 'future100Generate', 'longformPressure', 'topic', 'referenceDiagnosis', 'first30Retention', 'first30Repair']
     return keys.includes(commercialToolLoading as PlanningLoadingKey) ? commercialToolLoading as PlanningLoadingKey : undefined
   })()
   const workspaceAreaTabs: Array<{ key: WorkspaceArea; label: string; icon: React.ReactNode }> = [
@@ -3917,6 +3918,8 @@ export default function NovelProjectWorkspace() {
       open_story_assets: () => setWorkspaceArea('storyAssets'),
       update_story_state: () => openStoryStateEditor(),
       open_quality_revision: () => setWorkspaceArea('qualityRevision'),
+      run_first30_retention: () => { void runFirst30RetentionDiagnosis() },
+      create_first30_repair: () => { void createFirst30RetentionRepairQueue() },
     }
     actions[key]?.()
   }

@@ -128,4 +128,23 @@ describe('commercial writing workspace UI shell', () => {
     expect(projectWorkspace).toContain('网感素材池')
     expect(projectWorkspace).toContain('meme_bank')
   })
+
+  test('shows first30 retention curve as a story planning workflow', () => {
+    const planningWorkspace = source('StoryPlanningWorkspace.tsx')
+    const planningModel = source('planningWorkspaceModel.ts')
+    const projectWorkspace = readFileSync(join(import.meta.dir, '../NovelProjectWorkspace.tsx'), 'utf8')
+
+    expect(planningWorkspace).toContain('前30章留存曲线')
+    expect(planningWorkspace).toContain('novel-first30-retention-card')
+    expect(planningWorkspace).toContain('运行前30章诊断')
+    expect(planningWorkspace).toContain('生成修复任务')
+    expect(planningWorkspace).toContain('开篇三章')
+    expect(planningWorkspace).toContain('试读十章')
+    expect(planningWorkspace).toContain('付费前蓄势')
+    expect(planningModel).toContain('first30Retention')
+    expect(planningModel).toContain('run_first30_retention')
+    expect(planningModel).toContain('create_first30_repair')
+    expect(projectWorkspace).toContain('run_first30_retention')
+    expect(projectWorkspace).toContain('create_first30_repair')
+  })
 })

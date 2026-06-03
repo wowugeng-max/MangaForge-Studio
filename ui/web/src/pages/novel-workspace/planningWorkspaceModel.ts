@@ -28,6 +28,8 @@ export type PlanningActionKey =
   | 'open_story_assets'
   | 'update_story_state'
   | 'open_quality_revision'
+  | 'run_first30_retention'
+  | 'create_first30_repair'
 
 export type PlanningHealthIssue = {
   key: 'missing_reader_promise' | 'missing_volume_goal' | 'future10_incomplete' | 'story_state_stale' | 'material_weak'
@@ -79,6 +81,39 @@ export type PlanningWorkspaceModel = {
     mainlineProgress: string
     riskTags: string[]
   }>
+  first30Retention: {
+    status: 'missing' | 'ready' | 'needs_repair' | 'blocked' | 'stale'
+    score: number | null
+    summary: string
+    promiseReady: boolean
+    stale: boolean
+    actionKey: PlanningActionKey
+    segments: Array<{
+      key: string
+      label: string
+      score: number
+      coverage: number
+      hookRate: number
+      payoffAverage: number
+      chapterCount: number
+    }>
+    chapterCards: Array<{
+      chapterId: any
+      chapterNo: number
+      title: string
+      score: number
+      wordCount: number
+      flags: string[]
+      riskLevel: 'ok' | 'medium' | 'high'
+    }>
+    risks: Array<{
+      severity: string
+      segment: string
+      issue: string
+      action: string
+    }>
+    nextActions: string[]
+  }
   volumeTree: PlanningVolumeTreeNode[]
   healthIssues: PlanningHealthIssue[]
 }
@@ -90,6 +125,7 @@ export type BuildPlanningWorkspaceModelInput = {
   activeChapter?: AnyRecord | null
   materialScore?: AnyRecord | null
   commercialReadiness?: AnyRecord | null
+  reviews?: AnyRecord[] | null
 }
 
 function text(value: any, fallback = '') {
@@ -363,6 +399,114 @@ function latestWrittenChapterNo(chapters: AnyRecord[]) {
   }, 0)
 }
 
+function parseJsonValue(value: any) {
+  if (!value) return null
+  if (typeof value === 'object') return value
+  try {
+    return JSON.parse(String(value))
+  } catch {
+    return null
+  }
+}
+
+function reviewTime(review: AnyRecord) {
+  const raw = text(review?.created_at || review?.updated_at)
+  if (!raw) return 0
+  const timestamp = Date.parse(raw)
+  return Number.isFinite(timestamp) ? timestamp : 0
+}
+
+function latestFirst30Review(reviews: AnyRecord[]) {
+  return reviews
+    .filter(review => text(review?.review_type) === 'first30_retention_diagnosis')
+    .sort((a, b) => reviewTime(b) - reviewTime(a))[0] || null
+}
+
+function chapterUpdatedTime(chapter: AnyRecord) {
+  const raw = text(chapter?.updated_at || chapter?.modified_at)
+  if (!raw) return 0
+  const timestamp = Date.parse(raw)
+  return Number.isFinite(timestamp) ? timestamp : 0
+}
+
+function first30ReportIsStale(review: AnyRecord, chapters: AnyRecord[]) {
+  const reportTime = reviewTime(review)
+  if (!reportTime) return false
+  return chapters
+    .filter(chapter => Number(chapter?.chapter_no || 0) >= 1 && Number(chapter?.chapter_no || 0) <= 30)
+    .some(chapter => chapterUpdatedTime(chapter) > reportTime)
+}
+
+function retentionRiskLevel(score: number, flags: string[]) {
+  if (score < 65 || flags.some(flag => /缺正文|章末钩子弱|爽点/.test(flag))) return 'high'
+  if (score < 80 || flags.length > 0) return 'medium'
+  return 'ok'
+}
+
+function buildFirst30RetentionModel(chapters: AnyRecord[], reviews: AnyRecord[]): PlanningWorkspaceModel['first30Retention'] {
+  const review = latestFirst30Review(reviews)
+  if (!review) {
+    return {
+      status: 'missing',
+      score: null,
+      summary: '尚未运行前30章留存诊断。',
+      promiseReady: false,
+      stale: false,
+      actionKey: 'run_first30_retention',
+      segments: [],
+      chapterCards: [],
+      risks: [],
+      nextActions: ['运行前30章诊断，先确认开篇三章、试读十章和付费前蓄势风险。'],
+    }
+  }
+
+  const payload = parseJsonValue(review.payload) || {}
+  const report = payload.report || payload.result?.report || payload
+  const stale = first30ReportIsStale(review, chapters)
+  const normalizedStatus = text(report?.status, 'needs_repair') as PlanningWorkspaceModel['first30Retention']['status']
+  const status = stale ? 'stale' : (['ready', 'needs_repair', 'blocked'].includes(normalizedStatus) ? normalizedStatus : 'needs_repair')
+  const segments = arrayValue(report?.segments).map(segment => ({
+    key: text(segment?.key),
+    label: text(segment?.label || segment?.key, '未命名分段'),
+    score: Number(segment?.score || 0),
+    coverage: Number(segment?.coverage || 0),
+    hookRate: Number(segment?.hook_rate || segment?.hookRate || 0),
+    payoffAverage: Number(segment?.payoff_average || segment?.payoffAverage || 0),
+    chapterCount: Number(segment?.chapter_count || segment?.chapterCount || 0),
+  }))
+  const chapterCards = arrayValue(report?.chapter_cards).map(row => {
+    const flags = arrayValue(row?.flags).map(flag => text(flag)).filter(Boolean)
+    const score = Number(row?.score || 0)
+    return {
+      chapterId: row?.chapter_id || null,
+      chapterNo: Number(row?.chapter_no || 0),
+      title: text(row?.title, '未命名章节'),
+      score,
+      wordCount: Number(row?.word_count || 0),
+      flags,
+      riskLevel: retentionRiskLevel(score, flags),
+    }
+  })
+
+  return {
+    status,
+    score: Number.isFinite(Number(report?.score)) ? Number(report.score) : null,
+    summary: stale ? `需重新诊断：前30章内容已在报告后更新。${text(report?.summary)}` : text(report?.summary, '已完成前30章留存诊断。'),
+    promiseReady: Boolean(report?.positioning?.promise_ready),
+    stale,
+    actionKey: status === 'ready' ? 'run_first30_retention' : status === 'stale' ? 'run_first30_retention' : 'create_first30_repair',
+    segments,
+    chapterCards,
+    risks: arrayValue(report?.risks).map(risk => ({
+      severity: text(risk?.severity),
+      segment: text(risk?.segment),
+      issue: text(risk?.issue),
+      action: text(risk?.action),
+    })),
+    nextActions: arrayValue(report?.next_actions).map(item => text(item)).filter(Boolean),
+  }
+}
+
 export function buildPlanningWorkspaceModel(input: BuildPlanningWorkspaceModelInput): PlanningWorkspaceModel {
   const selectedProject = input.selectedProject || {}
   const outlines = arrayValue(input.outlines)
@@ -371,6 +515,7 @@ export function buildPlanningWorkspaceModel(input: BuildPlanningWorkspaceModelIn
   const activeChapterNo = Number(activeChapter?.chapter_no || chapters[0]?.chapter_no || 1)
   const writingBible = resolveWritingBible(selectedProject)
   const storyState = resolveStoryState(selectedProject)
+  const reviews = arrayValue(input.reviews)
 
   const currentVolume = outlines.find(outline => isVolume(outline) && chapterInRange(activeChapterNo, outline)) || outlines.find(isVolume) || {}
   const currentStage = outlines.find(outline => isStage(outline) && chapterInRange(activeChapterNo, outline)) || outlines.find(isStage) || {}
@@ -442,6 +587,7 @@ export function buildPlanningWorkspaceModel(input: BuildPlanningWorkspaceModelIn
       ],
     },
     futureRoute,
+    first30Retention: buildFirst30RetentionModel(chapters, reviews),
     volumeTree: buildVolumeTree(outlines, chapters),
     healthIssues,
   }
