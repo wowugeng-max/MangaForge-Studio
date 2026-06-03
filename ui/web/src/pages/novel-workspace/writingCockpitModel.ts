@@ -133,6 +133,13 @@ export interface ChapterAcceptanceDeskModel {
     label: string
     pendingCount: number
   } | null
+  readabilityReview: {
+    score: number | null
+    scoreLabel: string
+    memeLabel: string
+    riskLabel: string
+    riskCount: number
+  } | null
   qualityScore: number | null
   qualityStatus: string
   mustFix: string[]
@@ -844,6 +851,32 @@ function buildAssetIntakeSummary(review?: AnyRecord | null): ChapterAcceptanceDe
   }
 }
 
+function readabilityPayload(review?: AnyRecord | null) {
+  const payload = review ? reviewPayload(review) : {}
+  return payload?.readability_review || payload?.result?.readability_review || payload?.result || payload
+}
+
+function buildReadabilityReviewSummary(review?: AnyRecord | null): ChapterAcceptanceDeskModel['readabilityReview'] {
+  if (!review) return null
+  const payload = readabilityPayload(review)
+  const scoreValue = payload?.readability_score ?? payload?.score
+  const score = scoreValue === null || scoreValue === undefined || scoreValue === '' ? null : Number(scoreValue)
+  const safeScore = Number.isFinite(score) ? score : null
+  const memeSense = payload?.meme_sense || {}
+  const riskCount = Array.isArray(memeSense?.immersion_risks)
+    ? memeSense.immersion_risks.length
+    : countArray(payload?.immersion_risks)
+  const intensity = firstNonEmpty(memeSense?.intensity, payload?.meme_intensity, '')
+
+  return {
+    score: safeScore,
+    scoreLabel: safeScore === null ? '可读性 -' : `可读性 ${safeScore}`,
+    memeLabel: intensity ? `网感${intensity}` : '网感未评',
+    riskLabel: riskCount > 0 ? `出戏风险 ${riskCount}` : '出戏风险 0',
+    riskCount,
+  }
+}
+
 function extractQualityScore(quality: AnyRecord) {
   const value = quality?.score ?? quality?.overall_score ?? quality?.quality_score
   if (value === null || value === undefined || value === '') return null
@@ -910,6 +943,7 @@ function buildHiddenAcceptanceDesk(): ChapterAcceptanceDeskModel {
     acceptanceReasons: ['本章还没有正文，先完成章节计划和初稿。'],
     storylineSync: null,
     assetIntake: null,
+    readabilityReview: null,
     qualityScore: null,
     qualityStatus: '',
     mustFix: [],
@@ -944,11 +978,13 @@ function buildChapterAcceptanceDesk(args: {
   const latestRevisionRef = latestReviewRef(args.reviews, args.nextChapter, 'editor_revision')
   const latestStorylineSyncRef = latestReviewRef(args.reviews, args.nextChapter, 'storyline_sync')
   const latestAssetIntakeRef = latestReviewRef(args.reviews, args.nextChapter, 'asset_intake')
+  const latestReadabilityRef = latestReviewRef(args.reviews, args.nextChapter, 'readability_review')
   const latestQuality = latestQualityRef?.review || null
   const latestReport = latestReportRef?.review || null
   const latestRevision = latestRevisionRef?.review || null
   const storylineSync = buildStorylineSyncSummary(latestStorylineSyncRef?.review || null)
   const assetIntake = buildAssetIntakeSummary(latestAssetIntakeRef?.review || null)
+  const readabilityReview = buildReadabilityReviewSummary(latestReadabilityRef?.review || null)
   const quality = qualityPayload(latestQuality)
   const report = reportPayload(latestReport)
   const revision = revisionPayload(latestRevision)
@@ -990,6 +1026,7 @@ function buildChapterAcceptanceDesk(args: {
       acceptanceReasons: ['本章已有正文，但还没有当前章节的质量复检记录。'],
       storylineSync,
       assetIntake,
+      readabilityReview,
       qualityScore: null,
       qualityStatus,
       mustFix,
@@ -1014,6 +1051,7 @@ function buildChapterAcceptanceDesk(args: {
       acceptanceReasons: ['本章已有修订记录，修订时间晚于最新质量复检。'],
       storylineSync,
       assetIntake,
+      readabilityReview,
       qualityScore: score,
       qualityStatus,
       mustFix,
@@ -1043,6 +1081,7 @@ function buildChapterAcceptanceDesk(args: {
       ].filter(Boolean).slice(0, 3),
       storylineSync,
       assetIntake,
+      readabilityReview,
       qualityScore: score,
       qualityStatus,
       mustFix,
@@ -1067,6 +1106,7 @@ function buildChapterAcceptanceDesk(args: {
       acceptanceReasons: [`故事状态还没有同步到第 ${args.nextChapter.chapter_no} 章。`],
       storylineSync,
       assetIntake,
+      readabilityReview,
       qualityScore: score,
       qualityStatus,
       mustFix,
@@ -1090,6 +1130,7 @@ function buildChapterAcceptanceDesk(args: {
     acceptanceReasons: ['质量复检通过，故事状态已同步，可以进入下一章。'],
     storylineSync,
     assetIntake,
+    readabilityReview,
     qualityScore: score,
     qualityStatus,
     mustFix,

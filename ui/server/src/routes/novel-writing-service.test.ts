@@ -4,6 +4,8 @@ import { join } from 'path'
 import {
   buildCommercialEditorRewritePrompt,
   buildChapterPreDraftBrief,
+  buildMemePolishPrompt,
+  buildReadabilityReviewPrompt,
   buildStorylineSyncReport,
   buildProseWordTargetExpansionPrompt,
   countProseChars,
@@ -12,6 +14,7 @@ import {
   extractProseExpansionPayload,
   mergeConfirmedPreDraftBriefIntoContext,
   normalizeDiscoveredAssets,
+  normalizeMemeBank,
   normalizeSceneCardsPayload,
   proseMaxTokensForWordTarget,
   resolveChapterWordTarget,
@@ -246,6 +249,40 @@ describe('chapter prose word target', () => {
 })
 
 describe('chapter pre-draft brief', () => {
+  test('adds restrained meme strategy to the pre-draft brief', () => {
+    const brief = buildChapterPreDraftBrief(
+      {
+        title: '超人的规则怪谈世界',
+        genre: '规则怪谈',
+        reference_config: {
+          meme_bank: [
+            {
+              meme_key: '社畜崩溃式吐槽',
+              function: '用上班人共鸣化解高压后的半拍吐槽',
+              tone: '轻度吐槽',
+              suitable_genres: ['规则怪谈'],
+              abstract_usage: '角色在确认危险后用短句吐槽制度感压迫，不复刻原梗。',
+            },
+          ],
+        },
+      },
+      {
+        chapter_target: {
+          chapter_no: 1,
+          title: '双魂降临',
+          summary: '李超和张智在午夜校园醒来。',
+          conflict: '必须判断规则是否可信。',
+          ending_hook: '广播响起。',
+          scene_cards: [{ title: '操场醒来', reader_payoff: '超人力量遇到规则反制。' }],
+        },
+      },
+    )
+
+    expect(brief.meme_strategy.intensity).toBe('轻度')
+    expect(brief.meme_strategy.allowed_functions).toContain('用上班人共鸣化解高压后的半拍吐槽')
+    expect(brief.meme_strategy.forbidden_usage).toContain('严肃死亡场景不玩梗')
+  })
+
   test('builds a pre-draft brief from context package and commercial scene cards', () => {
     const target = resolveChapterWordTarget({}, { chapter_no: 1 }, {})
     const brief = buildChapterPreDraftBrief(
@@ -351,6 +388,11 @@ describe('chapter pre-draft brief', () => {
         storyline_plants: ['第零条规则回收线'],
         storyline_payoffs: ['林晓求生支线'],
         storyline_forbidden: ['编织者真名'],
+        meme_strategy: {
+          intensity: '轻度',
+          allowed_functions: ['主角吐槽', '规则怪谈弹幕感'],
+          forbidden_usage: ['死亡场景不玩梗'],
+        },
         word_budget: '标准章 3000 字',
         ending_hook: '镜子里出现第四个人。',
         confirmed_at: confirmedAt,
@@ -367,6 +409,7 @@ describe('chapter pre-draft brief', () => {
     expect(context.chapter_target.storyline_plants).toContain('第零条规则回收线')
     expect(context.chapter_target.storyline_payoffs).toContain('林晓求生支线')
     expect(context.chapter_target.storyline_forbidden).toContain('编织者真名')
+    expect(context.chapter_target.meme_strategy.allowed_functions).toContain('主角吐槽')
   })
 
   test('builds storyline context in the chapter context package', () => {
@@ -376,6 +419,83 @@ describe('chapter pre-draft brief', () => {
     expect(source).toContain('STORYLINE_TYPES')
     expect(source).toContain('storylineAdvances')
     expect(source).toContain('storylineForbidden')
+  })
+})
+
+describe('readability and restrained meme workflow', () => {
+  test('normalizes meme bank into abstract usage instead of direct copied phrases', () => {
+    const memeBank = normalizeMemeBank([
+      {
+        meme_key: '班味太重',
+        direct_phrase: '这班味也太冲了',
+        function: '社畜共鸣',
+        tone: '轻度吐槽',
+        suitable_genres: ['都市', '规则怪谈'],
+        abstract_usage: '把规则压迫写成类似上班制度的荒诞感。',
+        expires_at: '2026-12-31',
+      },
+      { name: '空素材' },
+    ])
+
+    expect(memeBank).toHaveLength(1)
+    expect(memeBank[0].meme_key).toBe('班味太重')
+    expect(memeBank[0].function).toBe('社畜共鸣')
+    expect(memeBank[0].unsafe_direct_phrases).toContain('这班味也太冲了')
+    expect(memeBank[0].abstract_usage).toContain('不直接复刻原句')
+    expect(memeBank[0].suitable_genres).toContain('规则怪谈')
+    expect(memeBank[0].expires_at).toBe('2026-12-31')
+  })
+
+  test('builds readability review prompt with web novel readability dimensions', () => {
+    const prompt = buildReadabilityReviewPrompt(
+      { title: '超人的规则怪谈世界' },
+      { chapter_target: { chapter_no: 1, title: '双魂降临', scene_cards: [] } },
+      '正文',
+    )
+
+    expect(prompt).toContain('开篇 300 字')
+    expect(prompt).toContain('场景目标、阻碍、转折、回报')
+    expect(prompt).toContain('段落是否过长')
+    expect(prompt).toContain('对话比例')
+    expect(prompt).toContain('人物口吻差异')
+    expect(prompt).toContain('爽点/信息增量密度')
+    expect(prompt).toContain('readability_score')
+    expect(prompt).toContain('meme_sense')
+  })
+
+  test('builds restrained net-sense polish prompt without allowing plot changes', () => {
+    const prompt = buildMemePolishPrompt(
+      { title: '超人的规则怪谈世界' },
+      {
+        chapter_target: {
+          chapter_no: 1,
+          title: '双魂降临',
+          meme_strategy: {
+            intensity: '轻度',
+            allowed_functions: ['主角吐槽', '社畜共鸣'],
+            forbidden_usage: ['死亡场景不玩梗'],
+          },
+        },
+      },
+      '正文',
+    )
+
+    expect(prompt).toContain('克制型网感润色')
+    expect(prompt).toContain('只允许做语言层润色')
+    expect(prompt).toContain('不得修改剧情线')
+    expect(prompt).toContain('不得修改设定状态')
+    expect(prompt).toContain('used_meme_functions')
+    expect(prompt).toContain('rejected_memes')
+    expect(prompt).toContain('immersion_risks')
+  })
+
+  test('source creates readability review and stores meme bank in reference config', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+
+    expect(source).toContain("review_type: 'readability_review'")
+    expect(source).toContain('runReadabilityReview')
+    expect(source).toContain('runMemePolish')
+    expect(source).toContain('reference_config?.meme_bank')
   })
 })
 

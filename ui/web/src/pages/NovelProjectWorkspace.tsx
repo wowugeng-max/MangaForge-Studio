@@ -1800,6 +1800,7 @@ export default function NovelProjectWorkspace() {
       style_lock: JSON.stringify(styleLock || {}, null, 2),
       safety_policy: JSON.stringify(bible.safety_policy || selectedProject?.reference_config?.safety || {}, null, 2),
       forbidden: JSON.stringify(bible.forbidden || [], null, 2),
+      meme_bank: JSON.stringify(bible.meme_bank || selectedProject?.reference_config?.meme_bank || [], null, 2),
     })
   }
 
@@ -1843,6 +1844,7 @@ export default function NovelProjectWorkspace() {
         try { return JSON.parse(value || '') } catch { return fallback }
       }
       const parsedStyleLock = parseJson(v.style_lock, {})
+      const memeBank = parseJson(v.meme_bank, [])
       const writingBible = {
         ...(selectedProject?.reference_config?.writing_bible || {}),
         promise: v.promise || '',
@@ -1865,9 +1867,19 @@ export default function NovelProjectWorkspace() {
         },
         safety_policy: parseJson(v.safety_policy, {}),
         forbidden: parseJson(v.forbidden, []),
+        meme_bank: memeBank,
       }
       const res = await apiClient.put(`/novel/projects/${projectId}/writing-bible`, { writing_bible: writingBible })
-      setSelectedProject((prev: any) => res.data?.project || (prev ? { ...prev, reference_config: { ...(prev.reference_config || {}), writing_bible: res.data?.writing_bible || writingBible } } : prev))
+      const nextReferenceConfig = {
+        ...(selectedProject?.reference_config || {}),
+        ...(res.data?.project?.reference_config || {}),
+        writing_bible: res.data?.writing_bible || writingBible,
+        meme_bank: Array.isArray(memeBank) ? memeBank : [],
+      }
+      const configRes = await apiClient.put(`/novel/projects/${projectId}/reference-config`, nextReferenceConfig)
+      setSelectedProject((prev: any) => res.data?.project
+        ? { ...res.data.project, reference_config: configRes.data || nextReferenceConfig }
+        : (prev ? { ...prev, reference_config: configRes.data || nextReferenceConfig } : prev))
       setWritingBibleOpen(false)
       message.success('写作圣经已保存')
     } catch (error: any) {
@@ -4883,6 +4895,12 @@ export default function NovelProjectWorkspace() {
           </Form.Item>
           <Form.Item name="forbidden" label="禁止项 JSON">
             <Input.TextArea rows={3} />
+          </Form.Item>
+          <Form.Item name="meme_bank" label="网感素材池 JSON">
+            <Input.TextArea
+              rows={5}
+              placeholder='[{"meme_key":"社畜共鸣","function":"高压后的半拍吐槽","tone":"轻度","suitable_genres":["规则怪谈"],"abstract_usage":"只转化为角色口吻，不直接复刻原句"}]'
+            />
           </Form.Item>
         </Form>
       </Modal>

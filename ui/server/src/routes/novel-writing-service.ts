@@ -198,6 +198,7 @@ export function buildCommercialEditorRewritePrompt(project: any, contextPackage:
     '6. 章末钩子：结尾必须把 ending_hook 或 scene_cards.ending_hook_seed 强化成下一章非看不可的问题。',
     '7. 删除模板句：删掉“不是那么简单”“拉开序幕”“已然”等模板化总结，替换成具体动作和后果。',
     '8. 不得改写主线事实，不得新增破坏后续大纲的设定；setting_context 的 forbidden/knowledge_scope 必须遵守。',
+    '9. 如果 chapter_target.meme_strategy 存在，只能按其 allowed_functions 做克制型网感表达；不得直接复刻 meme_bank 中的原梗或流行语。',
     '',
     '【结构化上下文包】',
     JSON.stringify(contextPackage || {}, null, 2).slice(0, 10000),
@@ -358,6 +359,129 @@ export function normalizeDiscoveredAssets(assets: any[] = [], options: {
   return normalized
 }
 
+export function normalizeMemeBank(rawBank: any[] = []) {
+  const normalized: any[] = []
+  const seen = new Set<string>()
+  for (const raw of asArray(rawBank)) {
+    const memeKey = String(raw?.meme_key || raw?.key || raw?.name || raw?.title || '').trim()
+    const functionText = String(raw?.function || raw?.usage_function || raw?.emotion_function || raw?.purpose || '').trim()
+    const directPhrases = [
+      ...asArray(raw?.unsafe_direct_phrases),
+      ...asArray(raw?.direct_phrases),
+      raw?.direct_phrase,
+      raw?.phrase,
+    ].map((item: any) => String(item || '').trim()).filter(Boolean)
+    if (!memeKey || (!functionText && directPhrases.length === 0 && !String(raw?.abstract_usage || '').trim())) continue
+    const key = memeKey.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    const abstractUsage = String(raw?.abstract_usage || raw?.usage || '').trim()
+    normalized.push({
+      meme_key: memeKey,
+      function: functionText || '情绪共鸣/传播点',
+      tone: String(raw?.tone || raw?.voice || '轻度').trim(),
+      suitable_genres: asArray(raw?.suitable_genres || raw?.genres).map((item: any) => String(item || '').trim()).filter(Boolean),
+      unsafe_direct_phrases: Array.from(new Set(directPhrases)),
+      abstract_usage: [
+        abstractUsage || `${functionText || memeKey} 只转化为吐槽节奏、角色口吻或情绪功能。`,
+        '不直接复刻原句。',
+      ].join('').replace(/。+/g, '。'),
+      expires_at: String(raw?.expires_at || raw?.expire_at || '').trim(),
+      forbidden_scenes: asArray(raw?.forbidden_scenes || raw?.禁用场景).map((item: any) => String(item || '').trim()).filter(Boolean),
+      risk_level: String(raw?.risk_level || raw?.过期风险 || 'medium').trim(),
+    })
+  }
+  return normalized
+}
+
+function resolveMemeBank(project: any, contextPackage: any = {}) {
+  return normalizeMemeBank([
+    ...asArray(project?.reference_config?.meme_bank),
+    ...asArray(project?.reference_config?.writing_bible?.meme_bank),
+    ...asArray(contextPackage?.writing_bible?.meme_bank),
+  ])
+}
+
+function buildMemeStrategy(project: any, contextPackage: any = {}) {
+  const explicit = contextPackage?.chapter_target?.meme_strategy || contextPackage?.pre_draft_brief?.meme_strategy || null
+  if (explicit && typeof explicit === 'object') {
+    return {
+      intensity: String(explicit.intensity || '轻度'),
+      allowed_functions: asArray(explicit.allowed_functions || explicit.functions).map((item: any) => String(item || '').trim()).filter(Boolean),
+      forbidden_usage: asArray(explicit.forbidden_usage || explicit.forbidden).map((item: any) => String(item || '').trim()).filter(Boolean),
+      meme_bank: normalizeMemeBank(explicit.meme_bank || []),
+    }
+  }
+  const memeBank = resolveMemeBank(project, contextPackage)
+  const genre = String(project?.genre || contextPackage?.project?.genre || '').trim()
+  const allowedFromBank = memeBank
+    .filter((item: any) => !item.suitable_genres.length || !genre || item.suitable_genres.includes(genre))
+    .map((item: any) => item.function)
+    .filter(Boolean)
+  return {
+    intensity: memeBank.length > 0 ? '轻度' : '无',
+    allowed_functions: Array.from(new Set(allowedFromBank.length ? allowedFromBank : ['主角吐槽', '反差打脸', '评论区爽点', '社畜共鸣', '规则怪谈弹幕感'])).slice(0, 6),
+    forbidden_usage: [
+      '严肃死亡场景不玩梗',
+      '关键情绪爆点不插科打诨',
+      '不直接复刻热梗原句',
+      '不让网感表达改变剧情线、设定状态和人物状态',
+    ],
+    meme_bank: memeBank.slice(0, 12),
+  }
+}
+
+export function buildMemePolishPrompt(project: any, contextPackage: any, chapterText: string) {
+  return [
+    '任务：克制型网感润色。只允许做语言层润色，不允许重写剧情。',
+    `作品标题：${project.title || '未命名作品'}`,
+    `目标章节：第${contextPackage?.chapter_target?.chapter_no || '?'}章《${contextPackage?.chapter_target?.title || '无标题'}》`,
+    '',
+    '硬性边界：',
+    '1. 不得修改剧情线、设定状态、人物状态、章节事件、章节号和章末钩子方向。',
+    '1A. 不得修改设定状态，不得修改人物状态，不得把语言润色变成剧情重写。',
+    '2. 热梗只抽象为吐槽节奏、情绪共鸣、角色口吻、评论区传播点，不得直接复刻原句。',
+    '3. 严肃死亡、恐怖压迫、关键情绪爆点和高压反转处默认降低网感，不插科打诨。',
+    '4. 如果素材不适合本章，必须拒绝使用，并在 rejected_memes 说明。',
+    '',
+    '【本章网感策略】',
+    JSON.stringify(contextPackage?.chapter_target?.meme_strategy || buildMemeStrategy(project, contextPackage), null, 2).slice(0, 5000),
+    '',
+    '【结构化上下文包】',
+    JSON.stringify(contextPackage || {}, null, 2).slice(0, 7000),
+    '',
+    '【待润色正文】',
+    chapterText.slice(0, 22000),
+    '',
+    '输出 JSON，包含 prose_chapters 数组。数组只能有一项，包含 chapter_no,title,chapter_text,scene_breakdown,continuity_notes；同时输出 meme_polish_report: {used_meme_functions(array), rejected_memes(array), immersion_risks(array), changed_plot(boolean)}。chapter_text 必须是润色后的完整正文。',
+  ].filter(Boolean).join('\n')
+}
+
+export function buildReadabilityReviewPrompt(project: any, contextPackage: any, chapterText: string) {
+  return [
+    '任务：对最终章节做可读性/网感复检，只评估，不改稿。',
+    `作品标题：${project.title || '未命名作品'}`,
+    `目标章节：第${contextPackage?.chapter_target?.chapter_no || '?'}章《${contextPackage?.chapter_target?.title || '无标题'}》`,
+    '',
+    '请重点检查：',
+    '1. 开篇 300 字是否有钩子，是否快速给出异常、危险、欲望或反常信息。',
+    '2. 每个场景是否有场景目标、阻碍、转折、回报。',
+    '3. 段落是否过长、说明是否过密、连续环境描写是否过多。',
+    '4. 对话比例是否支撑冲突推进。',
+    '5. 人物口吻差异是否明确，主角、智者、配角不能都像旁白。',
+    '6. 爽点/信息增量密度是否足够，是否每 800-1200 字有推进或回报。',
+    '7. 网感是否克制：只使用吐槽节奏、情绪共鸣、角色口吻和传播点，不直接堆梗。',
+    '',
+    '【结构化上下文包】',
+    JSON.stringify(contextPackage || {}, null, 2).slice(0, 7000),
+    '',
+    '【最终正文】',
+    chapterText.slice(0, 18000),
+    '',
+    '输出 JSON，字段 readability_score(0-100), passed(boolean), opening_hook_score, scene_readability_score, paragraph_density_score, dialogue_voice_score, payoff_density_score, meme_sense:{intensity,used_functions(array),rejected_memes(array),immersion_risks(array)}, issues(array), suggestions(array)。只返回 JSON。',
+  ].join('\n')
+}
+
 export function buildChapterPreDraftBrief(project: any, contextPackage: any) {
   const chapterTarget = contextPackage?.chapter_target || {}
   const sceneCards = Array.isArray(chapterTarget.scene_cards) ? chapterTarget.scene_cards : []
@@ -391,6 +515,7 @@ export function buildChapterPreDraftBrief(project: any, contextPackage: any) {
     ...storylineUsageByType(storylineContext, ['forbidden']),
   ].map((item: any) => String(item || '').trim()).filter(Boolean)
   const wordTarget = chapterTarget.word_target || {}
+  const memeStrategy = buildMemeStrategy(project, contextPackage)
 
   return {
     chapter_no: Number(chapterTarget.chapter_no || 0) || null,
@@ -405,6 +530,7 @@ export function buildChapterPreDraftBrief(project: any, contextPackage: any) {
     storyline_plants: Array.from(new Set(storylinePlants)).slice(0, 12),
     storyline_payoffs: Array.from(new Set(storylinePayoffs)).slice(0, 12),
     storyline_forbidden: Array.from(new Set(storylineForbidden)).slice(0, 12),
+    meme_strategy: memeStrategy,
     scene_briefs: sceneBriefs,
     word_budget: wordTarget?.target
       ? `${wordTarget.label || '章节'} ${wordTarget.target} 字，可接受 ${wordTarget.min}-${wordTarget.max} 字`
@@ -433,6 +559,7 @@ export function mergeConfirmedPreDraftBriefIntoContext(contextPackage: any, preD
       storyline_plants: asArray(preDraftBrief.storyline_plants),
       storyline_payoffs: asArray(preDraftBrief.storyline_payoffs),
       storyline_forbidden: asArray(preDraftBrief.storyline_forbidden),
+      meme_strategy: preDraftBrief.meme_strategy || (contextPackage || {}).chapter_target?.meme_strategy || null,
       scene_cards: asArray(preDraftBrief.scene_briefs).length
         ? asArray(preDraftBrief.scene_briefs)
         : asArray((contextPackage || {}).chapter_target?.scene_cards),
@@ -638,7 +765,8 @@ export function createNovelWritingService(ctx: {
     '8. 保持 style_lock 中的人称、句长、对话比例、吐槽密度、爽点密度、描写浓度和禁用词约束。',
     '9. 只能学习参考作品的节奏、结构、爽点安排和信息密度；不得复制具体桥段、专有设定、原句、角色名和核心梗。',
     '10. 执行 setting_context：required 设定必须在正文中落地；forbidden 设定不得泄漏；ability_beats 必须写清代价/限制；item_beats 必须符合物品归属和位置；boss_move 必须符合 Boss 行动逻辑；rule_trigger 必须写出触发条件、代价和后果；角色只能知道 knowledge_scope 允许的信息。',
-    '11. 如果参考迁移计划包含 transferable_model，只能采用其中 allowed_learning 的抽象功能；rewrite_requirements 必须执行；copy_guard_terms 和 forbidden_transfer 禁止出现在正文里。',
+    '11. 执行 chapter_target.meme_strategy：网感只作为吐槽节奏、情绪共鸣、角色口吻或传播点；死亡、高压恐怖和关键情绪爆点处不得玩梗；不得直接复刻 meme_bank 的 unsafe_direct_phrases。',
+    '12. 如果参考迁移计划包含 transferable_model，只能采用其中 allowed_learning 的抽象功能；rewrite_requirements 必须执行；copy_guard_terms 和 forbidden_transfer 禁止出现在正文里。',
     migrationPlan?.generation_prompt_addendum ? `10. ${migrationPlan.generation_prompt_addendum}` : '',
     chapterDraft?.chapter_no ? `11. 本次只生成第${chapterDraft.chapter_no}章，不得输出其他章节或续章内容。` : '',
     '',
@@ -866,6 +994,7 @@ export function createNovelWritingService(ctx: {
       forbidden: safety.forbidden,
       preferred_words: styleLock.preferred_words || [],
       banned_words: styleLock.banned_words || [],
+      meme_bank: normalizeMemeBank(project.reference_config?.meme_bank || []),
       updated_at: new Date().toISOString(),
     }
   }
@@ -929,6 +1058,7 @@ export function createNovelWritingService(ctx: {
     const styleLock = { ...getStyleLock(project), chapter_word_range: wordTarget.rangeText }
     const safetyPolicy = getSafetyPolicy(project)
     const writingBible = project.reference_config?.writing_bible || buildWritingBible(project, worldbuilding, characters, outlines, reviews)
+    const memeBank = resolveMemeBank(project, { writing_bible: writingBible })
     const [settingEntities, storedChapterSettingUsage] = await Promise.all([
       listNovelSettingEntities(activeWorkspace, project.id).catch(() => []),
       listNovelChapterSettingUsage(activeWorkspace, project.id, chapter.id).catch(() => []),
@@ -1058,6 +1188,7 @@ export function createNovelWritingService(ctx: {
         ending_hook: chapter.ending_hook || '',
         scene_cards: sceneCards,
         word_target: wordTarget,
+        meme_strategy: buildMemeStrategy(project, { writing_bible: writingBible, chapter_target: chapter.raw_payload?.pre_draft_brief ? { meme_strategy: chapter.raw_payload.pre_draft_brief.meme_strategy } : {} }),
         continuity_notes: chapter.continuity_notes || [],
         must_advance: asArray(chapter.raw_payload?.must_advance),
         forbidden_repeats: asArray(chapter.raw_payload?.forbidden_repeats),
@@ -1109,6 +1240,7 @@ export function createNovelWritingService(ctx: {
       },
       volume_plan: getVolumePlan(outlines),
       writing_bible: writingBible,
+      meme_bank: memeBank,
       setting_context: settingContext,
       storyline_context: storylineContext,
       style_lock: styleLock,
@@ -1279,6 +1411,95 @@ export function createNovelWritingService(ctx: {
         continuity_notes: rewrittenFirst?.continuity_notes || payload?.continuity_notes || [],
         modelName: (editorResult as any).modelName,
       },
+    }
+  }
+
+  const runMemePolish = async (activeWorkspace: string, project: any, contextPackage: any, chapterText: string, modelId?: number) => {
+    const memeStrategy = contextPackage?.chapter_target?.meme_strategy || buildMemeStrategy(project, contextPackage)
+    if (String(memeStrategy?.intensity || '无') === '无' && !asArray(memeStrategy?.meme_bank).length) {
+      return { final_text: chapterText, polished: false, meme_polish_report: { skipped: true, reason: '未配置网感策略或素材池' }, revision: null }
+    }
+    const polishModelId = ctx.production.getStageModelId(project, 'revise', modelId)
+    const polishResult = await executeNovelAgent('prose-agent', project, {
+      task: buildMemePolishPrompt(project, contextPackage, chapterText),
+      upstreamContext: contextPackage,
+    }, {
+      activeWorkspace,
+      modelId: polishModelId ? String(polishModelId) : undefined,
+      maxTokens: proseMaxTokensForWordTarget(contextPackage?.chapter_target?.word_target),
+      temperature: ctx.production.getStageTemperature(project, 'revise', 0.45),
+      skipMemory: true,
+    })
+    const payload = getNovelPayload(polishResult)
+    const polishedFirst = Array.isArray(payload?.prose_chapters) ? payload.prose_chapters[0] : payload
+    const polishedText = String(polishedFirst?.chapter_text || payload?.chapter_text || '')
+    const originalCount = countProseChars(chapterText)
+    const polishedCount = countProseChars(polishedText)
+    if (!polishedText || payload?.meme_polish_report?.changed_plot === true) {
+      return {
+        final_text: chapterText,
+        polished: false,
+        meme_polish_report: {
+          ...(payload?.meme_polish_report || {}),
+          error: !polishedText ? '网感润色未返回正文' : '网感润色疑似改动剧情，已拒绝',
+          modelName: (polishResult as any).modelName,
+        },
+        revision: null,
+      }
+    }
+    if (originalCount > 0 && polishedCount < Math.floor(originalCount * 0.9)) {
+      return {
+        final_text: chapterText,
+        polished: false,
+        meme_polish_report: {
+          ...(payload?.meme_polish_report || {}),
+          error: `网感润色返回正文过短：${polishedCount}/${originalCount}`,
+          modelName: (polishResult as any).modelName,
+        },
+        revision: null,
+      }
+    }
+    return {
+      final_text: polishedText,
+      polished: polishedText !== chapterText,
+      meme_polish_report: {
+        ...(payload?.meme_polish_report || {}),
+        modelName: (polishResult as any).modelName,
+        original_word_count: originalCount,
+        polished_word_count: polishedCount,
+      },
+      revision: {
+        scene_breakdown: polishedFirst?.scene_breakdown || payload?.scene_breakdown || [],
+        continuity_notes: polishedFirst?.continuity_notes || payload?.continuity_notes || [],
+        modelName: (polishResult as any).modelName,
+      },
+    }
+  }
+
+  const runReadabilityReview = async (activeWorkspace: string, project: any, contextPackage: any, chapterText: string, modelId?: number) => {
+    const reviewModelId = ctx.production.getStageModelId(project, 'review', modelId)
+    const reviewResult = await executeNovelAgent('review-agent', project, {
+      task: buildReadabilityReviewPrompt(project, contextPackage, chapterText),
+    }, {
+      activeWorkspace,
+      modelId: reviewModelId ? String(reviewModelId) : undefined,
+      maxTokens: 2500,
+      temperature: ctx.production.getStageTemperature(project, 'review', 0.2),
+      skipMemory: true,
+    })
+    const payload = getNovelPayload(reviewResult)
+    return {
+      readability_score: Number(payload?.readability_score ?? payload?.score ?? 0) || 0,
+      passed: payload?.passed !== false,
+      opening_hook_score: Number(payload?.opening_hook_score ?? 0) || 0,
+      scene_readability_score: Number(payload?.scene_readability_score ?? 0) || 0,
+      paragraph_density_score: Number(payload?.paragraph_density_score ?? 0) || 0,
+      dialogue_voice_score: Number(payload?.dialogue_voice_score ?? 0) || 0,
+      payoff_density_score: Number(payload?.payoff_density_score ?? 0) || 0,
+      meme_sense: payload?.meme_sense || {},
+      issues: Array.isArray(payload?.issues) ? payload.issues.map(normalizeIssue) : [],
+      suggestions: asArray(payload?.suggestions).map((item: any) => String(item || '').trim()).filter(Boolean),
+      modelName: (reviewResult as any).modelName,
     }
   }
 
@@ -1467,6 +1688,8 @@ export function createNovelWritingService(ctx: {
     let finalSceneBreakdown = targetProse?.scene_breakdown || resultPayload?.scene_breakdown || []
     let finalContinuityNotes = targetProse?.continuity_notes || resultPayload?.continuity_notes || chapter.continuity_notes || []
     let editorRewrite: any = null
+    let memePolish: any = null
+    let readabilityReview: any = null
     await onStage('word_target', { status: 'running', target: wordTarget.target, min: wordTarget.min, max: wordTarget.max, actual: countProseChars(finalText) })
     try {
       const wordTargetCheck = await ensureProseMeetsWordTarget(activeWorkspace, project, contextPackage, finalText, preferredModelId)
@@ -1533,6 +1756,35 @@ export function createNovelWritingService(ctx: {
       await onStage('word_target', { status: 'failed', error: String(error?.message || error), word_target: error?.word_target || wordTarget, evaluation: error?.evaluation, final_evaluation: error?.final_evaluation, expansion_attempts: error?.expansion_attempts, phase: 'post_editor' })
       throw error
     }
+    await onStage('meme_polish', { status: 'running' })
+    try {
+      memePolish = await runMemePolish(activeWorkspace, project, contextPackage, finalText, preferredModelId)
+      finalText = memePolish.final_text || finalText
+      if (memePolish.polished && memePolish.revision) {
+        finalSceneBreakdown = memePolish.revision.scene_breakdown?.length ? memePolish.revision.scene_breakdown : finalSceneBreakdown
+        finalContinuityNotes = memePolish.revision.continuity_notes?.length ? memePolish.revision.continuity_notes : finalContinuityNotes
+      }
+      await onStage('meme_polish', {
+        status: memePolish.polished ? 'success' : 'skipped',
+        polished: Boolean(memePolish.polished),
+        meme_polish_report: memePolish.meme_polish_report,
+      })
+    } catch (memeError) {
+      memePolish = { error: String(memeError), polished: false }
+      await onStage('meme_polish', { status: 'warn', error: String(memeError).slice(0, 200), reason: '网感润色失败，保留当前稿' })
+    }
+    try {
+      const postMemeWordTargetCheck = await ensureProseMeetsWordTarget(activeWorkspace, project, contextPackage, finalText, preferredModelId)
+      finalText = postMemeWordTargetCheck.final_text || finalText
+      if (postMemeWordTargetCheck.expanded && postMemeWordTargetCheck.expansion) {
+        finalSceneBreakdown = postMemeWordTargetCheck.expansion.scene_breakdown?.length ? postMemeWordTargetCheck.expansion.scene_breakdown : finalSceneBreakdown
+        finalContinuityNotes = postMemeWordTargetCheck.expansion.continuity_notes?.length ? postMemeWordTargetCheck.expansion.continuity_notes : finalContinuityNotes
+        await onStage('word_target', { status: 'success', expanded: true, word_count: countProseChars(finalText), evaluation: postMemeWordTargetCheck.final_evaluation, phase: 'post_meme_polish' })
+      }
+    } catch (error: any) {
+      await onStage('word_target', { status: 'failed', error: String(error?.message || error), word_target: error?.word_target || wordTarget, evaluation: error?.evaluation, final_evaluation: error?.final_evaluation, expansion_attempts: error?.expansion_attempts, phase: 'post_meme_polish' })
+      throw error
+    }
     await onStage('review', { status: 'running' })
     const selfCheck = await runProseSelfReviewAndRevision(activeWorkspace, project, contextPackage, finalText, preferredModelId, { revise: !isDraftReviewOnly })
     await onStage('review', { status: selfCheck?.review?.passed === false ? 'warn' : 'success', score: selfCheck?.review?.score ?? null, issues: selfCheck?.review?.issues || [], scene_status: 'reviewed' })
@@ -1554,6 +1806,27 @@ export function createNovelWritingService(ctx: {
       await onStage('word_target', { status: 'failed', error: String(error?.message || error), word_target: error?.word_target || wordTarget, evaluation: error?.evaluation, final_evaluation: error?.final_evaluation, expansion_attempts: error?.expansion_attempts, phase: 'post_review' })
       throw error
     }
+    await onStage('readability_review', { status: 'running' })
+    try {
+      readabilityReview = await runReadabilityReview(activeWorkspace, project, contextPackage, finalText, preferredModelId)
+      await createNovelReview(activeWorkspace, {
+        project_id: projectId,
+        review_type: 'readability_review',
+        status: Number(readabilityReview.readability_score || 0) >= 78 ? 'ok' : 'warn',
+        summary: `可读性 ${readabilityReview.readability_score || '-'}，网感${readabilityReview?.meme_sense?.intensity || contextPackage?.chapter_target?.meme_strategy?.intensity || '无'}`,
+        issues: Array.isArray(readabilityReview?.issues) ? readabilityReview.issues.map((issue: any) => `${issue.severity || 'medium'}｜${issue.description || issue}`) : [],
+        payload: JSON.stringify({
+          chapter_id: chapter.id,
+          chapter_no: chapter.chapter_no,
+          readability_review: readabilityReview,
+          meme_polish: memePolish,
+        }),
+      })
+      await onStage('readability_review', { status: 'success', score: readabilityReview.readability_score, meme_sense: readabilityReview.meme_sense })
+    } catch (readabilityError) {
+      readabilityReview = { error: String(readabilityError) }
+      await onStage('readability_review', { status: 'warn', error: String(readabilityError).slice(0, 200), reason: '可读性复检失败，不阻塞原验收流程' })
+    }
     if (isDraftReviewOnly) {
       await onStage('safety', { status: 'skipped', reason: '生产模式：生成并自检，不执行仿写安全门禁' })
       await onStage('store', { status: 'running' })
@@ -1571,7 +1844,7 @@ export function createNovelWritingService(ctx: {
         status: selfCheck?.review?.passed === false || Number(selfCheck?.review?.score || 100) < 78 ? 'warn' : 'ok',
         summary: `章节群质检评分 ${selfCheck?.review?.score ?? '-'}`,
         issues: Array.isArray(selfCheck?.review?.issues) ? selfCheck.review.issues.map((issue: any) => `${issue.severity || 'medium'}｜${issue.description || issue}`) : [],
-        payload: JSON.stringify({ chapter_id: chapter.id, context_package: contextPackage, editor_rewrite: editorRewrite, self_check: selfCheck, production_mode: productionMode, config_snapshot: configSnapshot }),
+        payload: JSON.stringify({ chapter_id: chapter.id, context_package: contextPackage, editor_rewrite: editorRewrite, meme_polish: memePolish, readability_review: readabilityReview, self_check: selfCheck, production_mode: productionMode, config_snapshot: configSnapshot }),
       })
       return {
         chapter: updatedReviewedDraft,
@@ -1630,8 +1903,8 @@ export function createNovelWritingService(ctx: {
       status: selfCheck?.review?.passed === false || Number(selfCheck?.review?.score || 100) < 78 ? 'warn' : 'ok',
       summary: `章节群质检评分 ${selfCheck?.review?.score ?? '-'}`,
       issues: Array.isArray(selfCheck?.review?.issues) ? selfCheck.review.issues.map((issue: any) => `${issue.severity || 'medium'}｜${issue.description || issue}`) : [],
-      payload: JSON.stringify({ chapter_id: chapter.id, context_package: contextPackage, editor_rewrite: editorRewrite, self_check: selfCheck, reference_report: referenceReport, safety_decision: safetyDecision, migration_audit: migrationAudit, production_mode: productionMode, config_snapshot: configSnapshot }),
-    })
+        payload: JSON.stringify({ chapter_id: chapter.id, context_package: contextPackage, editor_rewrite: editorRewrite, meme_polish: memePolish, readability_review: readabilityReview, self_check: selfCheck, reference_report: referenceReport, safety_decision: safetyDecision, migration_audit: migrationAudit, production_mode: productionMode, config_snapshot: configSnapshot }),
+      })
     const settingViolations = Array.isArray(selfCheck?.review?.setting_violations) ? selfCheck.review.setting_violations : []
     if (contextPackage?.setting_context?.chapter_usage?.length || settingViolations.length > 0) {
       await createNovelReview(activeWorkspace, {
@@ -1660,6 +1933,8 @@ export function createNovelWritingService(ctx: {
       score: selfCheck?.review?.score ?? null,
       revised: Boolean(selfCheck?.revised),
       editor_rewrite: editorRewrite,
+      meme_polish: memePolish,
+      readability_review: readabilityReview,
       production_mode: productionMode,
       completed_stage: 'story_state',
       reference_report: referenceReport,
@@ -1677,6 +1952,8 @@ export function createNovelWritingService(ctx: {
     updateStoryStateMachine,
     getStoredOrBuiltWritingBible,
     runCommercialEditorRewrite,
+    runMemePolish,
+    runReadabilityReview,
     runProseSelfReviewAndRevision,
     ensureProseMeetsWordTarget,
     generateChapterForGroup,

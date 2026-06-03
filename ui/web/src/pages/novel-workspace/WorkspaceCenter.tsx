@@ -753,6 +753,21 @@ export function WorkspaceCenter({
                     {deliverySummary.assetIntake.label}
                   </Tag>
                 )}
+                {deliverySummary.readabilityReview && (
+                  <>
+                    <Tag className="novel-delivery-readability-tag" bordered={false}>
+                      {deliverySummary.readabilityReview.scoreLabel}
+                    </Tag>
+                    <Tag className="novel-delivery-readability-tag" bordered={false}>
+                      {deliverySummary.readabilityReview.memeLabel}
+                    </Tag>
+                    {deliverySummary.readabilityReview.riskCount > 0 && (
+                      <Tag className="novel-delivery-readability-tag novel-delivery-readability-tag-warn" bordered={false}>
+                        {deliverySummary.readabilityReview.riskLabel}
+                      </Tag>
+                    )}
+                  </>
+                )}
                 <Text className="novel-delivery-status-reason">{deliverySummary.reason}</Text>
               </div>
               {deliverySummary.actionKey && (
@@ -798,6 +813,12 @@ export function WorkspaceCenter({
                   <strong>埋线：{draftBriefSummary.briefFields.storylinePlants || '无'}</strong>
                   <strong>回收：{draftBriefSummary.briefFields.storylinePayoffs || '无'}</strong>
                   <strong>禁用：{draftBriefSummary.briefFields.storylineForbidden || '无'}</strong>
+                </div>
+                <div className="novel-draft-brief-meme">
+                  <span>本章网感策略</span>
+                  <strong>强度：{draftBriefSummary.briefFields.memeIntensity || '无'}</strong>
+                  <strong>功能：{draftBriefSummary.briefFields.memeFunctions || '无'}</strong>
+                  <strong>禁用：{draftBriefSummary.briefFields.memeForbidden || '严肃场景不玩梗'}</strong>
                 </div>
               </div>
               {draftBriefSummary.actionKey && (

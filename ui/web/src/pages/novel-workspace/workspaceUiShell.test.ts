@@ -113,4 +113,19 @@ describe('commercial writing workspace UI shell', () => {
     expect(settingPanel).toContain('/discovered-assets/apply')
     expect(settingPanel).toContain('selectedDiscoveredAssetKeys')
   })
+
+  test('shows readability and restrained meme strategy in writing workflow', () => {
+    const workspaceCenter = source('WorkspaceCenter.tsx')
+    const workspaceCss = source('WorkspaceCenter.css')
+    const projectWorkspace = readFileSync(join(import.meta.dir, '../NovelProjectWorkspace.tsx'), 'utf8')
+
+    expect(workspaceCenter).toContain('readabilityReview')
+    expect(workspaceCenter).toContain('novel-delivery-readability-tag')
+    expect(workspaceCenter).toContain('本章网感策略')
+    expect(workspaceCenter).toContain('novel-draft-brief-meme')
+    expect(workspaceCss).toContain('.novel-delivery-readability-tag')
+    expect(workspaceCss).toContain('.novel-draft-brief-meme')
+    expect(projectWorkspace).toContain('网感素材池')
+    expect(projectWorkspace).toContain('meme_bank')
+  })
 })

@@ -242,6 +242,33 @@ function assetIntakeReview(overrides: Record<string, any> = {}) {
   }
 }
 
+function readabilityReview(overrides: Record<string, any> = {}) {
+  const payload = {
+    chapter_id: 101,
+    chapter_no: 1,
+    readability_review: {
+      readability_score: 82,
+      meme_sense: {
+        intensity: '轻度',
+        used_functions: ['主角吐槽', '社畜共鸣'],
+        immersion_risks: [{ severity: 'low', description: '高压死亡前后避免插科打诨' }],
+      },
+      issues: [],
+    },
+    ...overrides.payload,
+  }
+
+  return {
+    id: overrides.id || 601,
+    review_type: 'readability_review',
+    status: overrides.status || 'ok',
+    summary: overrides.summary || '可读性 82，网感轻度，出戏风险 1。',
+    created_at: overrides.created_at || '2026-05-24T00:40:00.000Z',
+    payload: JSON.stringify(payload),
+    ...overrides.record,
+  }
+}
+
 describe('buildWritingCockpitModel', () => {
   test('ready project data chooses the first planned unwritten chapter as daily target', () => {
     const model = buildWritingCockpitModel({
@@ -919,6 +946,26 @@ describe('buildWritingCockpitModel', () => {
     expect(model.chapterAcceptanceDesk.acceptanceStatus).toBe('needs_revision')
     expect(model.chapterAcceptanceDesk.qualityScore).toBe(72)
     expect(model.chapterAcceptanceDesk.recommendedAcceptanceAction.key).toBe('create_editor_report')
+  })
+
+  test('readability review is summarized without blocking chapter acceptance', () => {
+    const model = buildWritingCockpitModel({
+      project: acceptedProject,
+      outlines,
+      chapters,
+      activeChapter: chapters[0],
+      materialScore: { score: 82, can_generate: true },
+      reviews: [
+        proseQualityReview(),
+        readabilityReview(),
+      ],
+    })
+
+    expect(model.chapterAcceptanceDesk.acceptanceStatus).toBe('ready_to_accept')
+    expect(model.chapterAcceptanceDesk.readabilityReview?.score).toBe(82)
+    expect(model.chapterAcceptanceDesk.readabilityReview?.scoreLabel).toBe('可读性 82')
+    expect(model.chapterAcceptanceDesk.readabilityReview?.memeLabel).toBe('网感轻度')
+    expect(model.chapterAcceptanceDesk.readabilityReview?.riskLabel).toBe('出戏风险 1')
   })
 
   test('zero quality score requires revision instead of being treated as missing', () => {

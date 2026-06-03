@@ -45,6 +45,13 @@ export type NovelDeliverySummaryInput = {
     label: string
     pendingCount: number
   } | null
+  readabilityReview?: {
+    score: number | null
+    scoreLabel: string
+    memeLabel: string
+    riskLabel: string
+    riskCount: number
+  } | null
   recommendedAcceptanceAction: {
     key: NovelDeliveryActionKey
     label: string
@@ -60,6 +67,7 @@ export type NovelDeliverySummary = {
   reason: string
   storylineSync: NovelDeliverySummaryInput['storylineSync']
   assetIntake: NovelDeliverySummaryInput['assetIntake']
+  readabilityReview: NovelDeliverySummaryInput['readabilityReview']
   actionKey: NovelDeliveryActionKey | null
   actionLabel: string
   compactActionLabel: string
@@ -78,6 +86,11 @@ export type NovelPreDraftBrief = {
   storyline_plants?: string[]
   storyline_payoffs?: string[]
   storyline_forbidden?: string[]
+  meme_strategy?: {
+    intensity?: string
+    allowed_functions?: string[]
+    forbidden_usage?: string[]
+  }
   scene_briefs?: any[]
   word_budget?: string
   ending_hook?: string
@@ -102,6 +115,9 @@ export type NovelDraftBriefSummary = {
     storylinePlants: string
     storylinePayoffs: string
     storylineForbidden: string
+    memeIntensity: string
+    memeFunctions: string
+    memeForbidden: string
     sceneBudget: string
     wordBudget: string
     endingHook: string
@@ -134,6 +150,9 @@ export function buildNovelDraftBriefSummary({
     storylinePlants: Array.isArray(preDraftBrief?.storyline_plants) ? preDraftBrief.storyline_plants.filter(Boolean).join('、') : '',
     storylinePayoffs: Array.isArray(preDraftBrief?.storyline_payoffs) ? preDraftBrief.storyline_payoffs.filter(Boolean).join('、') : '',
     storylineForbidden: Array.isArray(preDraftBrief?.storyline_forbidden) ? preDraftBrief.storyline_forbidden.filter(Boolean).join('、') : '',
+    memeIntensity: preDraftBrief?.meme_strategy?.intensity?.trim() || '',
+    memeFunctions: Array.isArray(preDraftBrief?.meme_strategy?.allowed_functions) ? preDraftBrief.meme_strategy.allowed_functions.filter(Boolean).join('、') : '',
+    memeForbidden: Array.isArray(preDraftBrief?.meme_strategy?.forbidden_usage) ? preDraftBrief.meme_strategy.forbidden_usage.filter(Boolean).join('、') : '',
     sceneBudget: Array.isArray(preDraftBrief?.scene_briefs) && preDraftBrief.scene_briefs.length > 0 ? `${preDraftBrief.scene_briefs.length} 个场景已写入任务书` : '',
     wordBudget: preDraftBrief?.word_budget?.trim() || '',
     endingHook: preDraftBrief?.ending_hook?.trim() || endingHook?.trim() || '',
@@ -331,6 +350,7 @@ export function buildNovelDeliverySummary(desk?: NovelDeliverySummaryInput | nul
       reason: '',
       storylineSync: null,
       assetIntake: null,
+      readabilityReview: null,
       actionKey: null,
       actionLabel: '',
       compactActionLabel: '',
@@ -353,6 +373,7 @@ export function buildNovelDeliverySummary(desk?: NovelDeliverySummaryInput | nul
     reason: desk.acceptanceReasons.filter(Boolean).slice(0, 2).join('；') || '本章已有正文，请按交稿流程完成复检。',
     storylineSync: desk.storylineSync || null,
     assetIntake: desk.assetIntake || null,
+    readabilityReview: desk.readabilityReview || null,
     actionKey: desk.recommendedAcceptanceAction.key,
     actionLabel: desk.recommendedAcceptanceAction.label,
     compactActionLabel: compactDeliveryActionLabel(desk.recommendedAcceptanceAction.key, desk.recommendedAcceptanceAction.label),
