@@ -67,6 +67,25 @@ function typeLabel(type: string) {
   return settingTypes.find(item => item.value === type)?.label || type || '设定'
 }
 
+function parseReviewPayload(review: any) {
+  if (!review?.payload) return {}
+  if (typeof review.payload === 'object') return review.payload
+  try {
+    return JSON.parse(String(review.payload || '{}'))
+  } catch {
+    return {}
+  }
+}
+
+function reviewChapterId(review: any) {
+  const payload = parseReviewPayload(review)
+  return Number(payload?.chapter_id || payload?.chapterId || payload?.chapter?.id || 0)
+}
+
+function discoveredAssetKey(item: any, index: number) {
+  return `${item.entity_type || item.type || 'asset'}:${item.name || index}:${index}`
+}
+
 function usageFromMap(usageMap: Map<number, any>, setting: any) {
   return usageMap.get(Number(setting.id)) || {
     entity_id: setting.id,
@@ -92,6 +111,8 @@ export function SettingWorkshopPanel({
   const [saving, setSaving] = useState(false)
   const [settings, setSettings] = useState<any[]>([])
   const [usage, setUsage] = useState<any[]>([])
+  const [discoveredAssets, setDiscoveredAssets] = useState<any[]>([])
+  const [selectedDiscoveredAssetKeys, setSelectedDiscoveredAssetKeys] = useState<string[]>([])
   const [pendingStateUpdates, setPendingStateUpdates] = useState<any[]>([])
   const [selectedStateUpdateKeys, setSelectedStateUpdateKeys] = useState<string[]>([])
   const [activeType, setActiveType] = useState('character')
@@ -103,14 +124,26 @@ export function SettingWorkshopPanel({
     if (!projectId) return
     setLoading(true)
     try {
-      const [settingsRes, usageRes] = await Promise.all([
+      const [settingsRes, usageRes, reviewsRes] = await Promise.all([
         apiClient.get(`/novel/projects/${projectId}/settings`),
         activeChapter?.id
           ? apiClient.get(`/novel/chapters/${activeChapter.id}/settings-usage`, { params: { project_id: projectId } })
           : Promise.resolve({ data: { usage: [] } }),
+        apiClient.get(`/novel/projects/${projectId}/reviews`),
       ])
       setSettings(Array.isArray(settingsRes.data?.items) ? settingsRes.data.items : [])
       setUsage(Array.isArray(usageRes.data?.usage) ? usageRes.data.usage : [])
+      const reviews = Array.isArray(reviewsRes.data) ? reviewsRes.data : []
+      const latestAssetReview = reviews
+        .filter((review: any) => review?.review_type === 'asset_intake' && (!activeChapter?.id || reviewChapterId(review) === Number(activeChapter.id)))
+        .sort((a: any, b: any) => Date.parse(b.created_at || '') - Date.parse(a.created_at || ''))[0]
+      const payload = parseReviewPayload(latestAssetReview)
+      const appliedNames = new Set(Array.isArray(payload?.applied_asset_names) ? payload.applied_asset_names.map((item: any) => String(item || '').trim()) : [])
+      const candidates = (Array.isArray(payload?.discovered_assets) ? payload.discovered_assets : [])
+        .filter((item: any) => item?.name && !appliedNames.has(String(item.name || '').trim()))
+        .map((item: any, index: number) => ({ ...item, _key: discoveredAssetKey(item, index) }))
+      setDiscoveredAssets(candidates)
+      setSelectedDiscoveredAssetKeys(candidates.map((item: any) => item._key))
     } catch {
       message.error('设定工坊加载失败')
     } finally {
@@ -350,6 +383,28 @@ export function SettingWorkshopPanel({
     }
   }
 
+  const applySelectedDiscoveredAssets = async () => {
+    if (!activeChapter?.id) return message.warning('请先选择章节')
+    const assets = discoveredAssets.filter(item => selectedDiscoveredAssetKeys.includes(item._key))
+    if (assets.length === 0) return message.warning('请先选择要入库的新资产')
+    setSaving(true)
+    try {
+      const res = await apiClient.post(`/novel/chapters/${activeChapter.id}/discovered-assets/apply`, {
+        project_id: projectId,
+        assets,
+      })
+      const total = Number(res.data?.created_settings?.length || 0)
+      message.success(`已确认入库 ${total} 个新资产`)
+      setDiscoveredAssets(prev => prev.filter(item => !selectedDiscoveredAssetKeys.includes(item._key)))
+      setSelectedDiscoveredAssetKeys([])
+      await load()
+    } catch {
+      message.error('新资产确认入库失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return (
     <Space direction="vertical" size={8} style={{ width: '100%', padding: 8 }}>
       <Alert
@@ -380,6 +435,51 @@ export function SettingWorkshopPanel({
         </Space>
         <Button size="small" block style={{ marginTop: 8 }} type="primary" onClick={saveUsage} loading={saving} disabled={!activeChapter?.id}>保存本章调用</Button>
       </Card>
+
+      {discoveredAssets.length > 0 && (
+        <Card
+          size="small"
+          title={`新资产候选 ${discoveredAssets.length}`}
+          extra={(
+            <Space size={4}>
+              <Button size="small" type="link" onClick={() => setSelectedDiscoveredAssetKeys(discoveredAssets.map(item => item._key))}>全选</Button>
+              <Button size="small" type="link" onClick={() => setSelectedDiscoveredAssetKeys([])}>清空</Button>
+            </Space>
+          )}
+        >
+          <List
+            size="small"
+            dataSource={discoveredAssets}
+            renderItem={(item: any) => (
+              <List.Item>
+                <Space align="start" style={{ width: '100%' }}>
+                  <Checkbox
+                    checked={selectedDiscoveredAssetKeys.includes(item._key)}
+                    onChange={event => setSelectedDiscoveredAssetKeys(prev => event.target.checked ? [...prev, item._key] : prev.filter(key => key !== item._key))}
+                  />
+                  <Space direction="vertical" size={2} style={{ flex: 1 }}>
+                    <Space size={4} wrap>
+                      <Text strong>{item.name}</Text>
+                      <Tag bordered={false}>{typeLabel(item.entity_type)}</Tag>
+                      {item.first_chapter_no && <Tag color="blue" bordered={false}>第{item.first_chapter_no}章</Tag>}
+                    </Space>
+                    <Text style={{ fontSize: 12 }}>{item.summary || '暂无摘要'}</Text>
+                    {item.evidence && <Text type="secondary" style={{ fontSize: 12 }}>证据：{displayValue(item.evidence).slice(0, 140)}</Text>}
+                    {(item.constraints_json && Object.keys(item.constraints_json).length > 0) && <Text type="secondary" style={{ fontSize: 12 }}>约束：{displayValue(item.constraints_json).slice(0, 120)}</Text>}
+                  </Space>
+                </Space>
+              </List.Item>
+            )}
+          />
+          <Space style={{ width: '100%', justifyContent: 'space-between', marginTop: 8 }}>
+            <Text type="secondary" style={{ fontSize: 12 }}>已选择 {selectedDiscoveredAssetKeys.length} 项，确认后会写入角色卡或设定工坊</Text>
+            <Space size={6}>
+              <Button size="small" onClick={() => { setDiscoveredAssets([]); setSelectedDiscoveredAssetKeys([]) }}>暂不处理</Button>
+              <Button size="small" type="primary" loading={saving} onClick={applySelectedDiscoveredAssets}>确认入库</Button>
+            </Space>
+          </Space>
+        </Card>
+      )}
 
       {pendingStateUpdates.length > 0 && (
         <Card

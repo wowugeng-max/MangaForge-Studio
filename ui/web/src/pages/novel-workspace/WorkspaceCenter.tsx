@@ -740,6 +740,19 @@ export function WorkspaceCenter({
                 <Tag className="novel-delivery-status-tag" bordered={false}>{deliverySummary.statusLabel}</Tag>
                 <Tag bordered={false}>{deliverySummary.qualityLabel}</Tag>
                 <Tag bordered={false}>{deliverySummary.storyStateLabel}</Tag>
+                {deliverySummary.storylineSync && (
+                  <Tag
+                    className={`novel-delivery-storyline-tag novel-delivery-storyline-tag-${deliverySummary.storylineSync.status}`}
+                    bordered={false}
+                  >
+                    {deliverySummary.storylineSync.label}
+                  </Tag>
+                )}
+                {deliverySummary.assetIntake && deliverySummary.assetIntake.pendingCount > 0 && (
+                  <Tag className="novel-delivery-asset-tag" bordered={false}>
+                    {deliverySummary.assetIntake.label}
+                  </Tag>
+                )}
                 <Text className="novel-delivery-status-reason">{deliverySummary.reason}</Text>
               </div>
               {deliverySummary.actionKey && (

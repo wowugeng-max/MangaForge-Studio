@@ -90,4 +90,27 @@ describe('commercial writing workspace UI shell', () => {
     expect(workspaceCenter).toContain('禁用')
     expect(workspaceCss).toContain('.novel-draft-brief-storylines')
   })
+
+  test('shows storyline sync status in the delivery strip', () => {
+    const workspaceCenter = source('WorkspaceCenter.tsx')
+    const workspaceCss = source('WorkspaceCenter.css')
+
+    expect(workspaceCenter).toContain('storylineSync')
+    expect(workspaceCenter).toContain('novel-delivery-storyline-tag')
+    expect(workspaceCss).toContain('.novel-delivery-storyline-tag')
+    expect(workspaceCss).toContain('.novel-delivery-storyline-tag-warn')
+  })
+
+  test('shows discovered asset intake in delivery strip and setting workshop', () => {
+    const workspaceCenter = source('WorkspaceCenter.tsx')
+    const workspaceCss = source('WorkspaceCenter.css')
+    const settingPanel = source('SettingWorkshopPanel.tsx')
+
+    expect(workspaceCenter).toContain('assetIntake')
+    expect(workspaceCenter).toContain('novel-delivery-asset-tag')
+    expect(workspaceCss).toContain('.novel-delivery-asset-tag')
+    expect(settingPanel).toContain('新资产候选')
+    expect(settingPanel).toContain('/discovered-assets/apply')
+    expect(settingPanel).toContain('selectedDiscoveredAssetKeys')
+  })
 })

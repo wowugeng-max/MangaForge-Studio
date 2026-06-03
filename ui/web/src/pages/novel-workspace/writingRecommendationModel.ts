@@ -32,6 +32,19 @@ export type NovelDeliverySummaryInput = {
   acceptanceReasons: string[]
   qualityScore: number | null
   storyStateSynced: boolean
+  storylineSync?: {
+    status: 'ok' | 'warn'
+    label: string
+    completedCount: number
+    missedCount: number
+    unplannedCount: number
+    forbiddenCount: number
+  } | null
+  assetIntake?: {
+    status: 'pending' | 'applied'
+    label: string
+    pendingCount: number
+  } | null
   recommendedAcceptanceAction: {
     key: NovelDeliveryActionKey
     label: string
@@ -45,6 +58,8 @@ export type NovelDeliverySummary = {
   qualityLabel: string
   storyStateLabel: string
   reason: string
+  storylineSync: NovelDeliverySummaryInput['storylineSync']
+  assetIntake: NovelDeliverySummaryInput['assetIntake']
   actionKey: NovelDeliveryActionKey | null
   actionLabel: string
   compactActionLabel: string
@@ -314,6 +329,8 @@ export function buildNovelDeliverySummary(desk?: NovelDeliverySummaryInput | nul
       qualityLabel: '质量待复检',
       storyStateLabel: '故事状态待同步',
       reason: '',
+      storylineSync: null,
+      assetIntake: null,
       actionKey: null,
       actionLabel: '',
       compactActionLabel: '',
@@ -334,6 +351,8 @@ export function buildNovelDeliverySummary(desk?: NovelDeliverySummaryInput | nul
     qualityLabel: desk.qualityScore === null ? '质量待复检' : `质量 ${desk.qualityScore}`,
     storyStateLabel: desk.storyStateSynced ? '故事状态已同步' : '故事状态待同步',
     reason: desk.acceptanceReasons.filter(Boolean).slice(0, 2).join('；') || '本章已有正文，请按交稿流程完成复检。',
+    storylineSync: desk.storylineSync || null,
+    assetIntake: desk.assetIntake || null,
     actionKey: desk.recommendedAcceptanceAction.key,
     actionLabel: desk.recommendedAcceptanceAction.label,
     compactActionLabel: compactDeliveryActionLabel(desk.recommendedAcceptanceAction.key, desk.recommendedAcceptanceAction.label),

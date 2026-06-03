@@ -120,6 +120,19 @@ export interface ChapterAcceptanceDeskModel {
   acceptanceStatus: ChapterAcceptanceStatus
   statusLabel: string
   acceptanceReasons: string[]
+  storylineSync: {
+    status: 'ok' | 'warn'
+    label: string
+    completedCount: number
+    missedCount: number
+    unplannedCount: number
+    forbiddenCount: number
+  } | null
+  assetIntake: {
+    status: 'pending' | 'applied'
+    label: string
+    pendingCount: number
+  } | null
   qualityScore: number | null
   qualityStatus: string
   mustFix: string[]
@@ -771,6 +784,66 @@ function revisionPayload(review?: AnyRecord | null) {
   return payload?.revision || payload?.result || payload
 }
 
+function storylineSyncPayload(review?: AnyRecord | null) {
+  const payload = review ? reviewPayload(review) : {}
+  return payload?.storyline_sync || payload?.result?.storyline_sync || payload?.result || payload
+}
+
+function countArray(value: any) {
+  return Array.isArray(value) ? value.length : 0
+}
+
+function buildStorylineSyncSummary(review?: AnyRecord | null): ChapterAcceptanceDeskModel['storylineSync'] {
+  if (!review) return null
+  const payload = storylineSyncPayload(review)
+  const completedCount = countArray(payload?.completed)
+  const missedCount = countArray(payload?.missed)
+  const unplannedCount = countArray(payload?.unplanned)
+  const forbiddenCount = countArray(payload?.forbidden_touched)
+  const hasRisk = missedCount > 0 || unplannedCount > 0 || forbiddenCount > 0 || payload?.status === 'warn'
+  const riskParts = [
+    missedCount > 0 ? `漏推 ${missedCount}` : '',
+    unplannedCount > 0 ? `额外推进 ${unplannedCount}` : '',
+    forbiddenCount > 0 ? `禁揭风险 ${forbiddenCount}` : '',
+  ].filter(Boolean)
+
+  return {
+    status: hasRisk ? 'warn' : 'ok',
+    label: hasRisk ? (riskParts.join(' · ') || '剧情线需复盘') : '剧情线 OK',
+    completedCount,
+    missedCount,
+    unplannedCount,
+    forbiddenCount,
+  }
+}
+
+function assetIntakePayload(review?: AnyRecord | null) {
+  const payload = review ? reviewPayload(review) : {}
+  return payload?.asset_intake || payload?.result?.asset_intake || payload?.result || payload
+}
+
+function buildAssetIntakeSummary(review?: AnyRecord | null): ChapterAcceptanceDeskModel['assetIntake'] {
+  if (!review) return null
+  const payload = assetIntakePayload(review)
+  const discoveredAssets = Array.isArray(payload?.discovered_assets) ? payload.discovered_assets : []
+  const appliedNames = new Set(
+    Array.isArray(payload?.applied_asset_names)
+      ? payload.applied_asset_names.map((item: any) => String(item || '').trim()).filter(Boolean)
+      : [],
+  )
+  const pendingCount = discoveredAssets.filter((item: any) => !appliedNames.has(String(item?.name || '').trim())).length
+  if (pendingCount <= 0) return {
+    status: 'applied',
+    label: '新资产已确认',
+    pendingCount: 0,
+  }
+  return {
+    status: 'pending',
+    label: `新资产 ${pendingCount} 待确认`,
+    pendingCount,
+  }
+}
+
 function extractQualityScore(quality: AnyRecord) {
   const value = quality?.score ?? quality?.overall_score ?? quality?.quality_score
   if (value === null || value === undefined || value === '') return null
@@ -835,6 +908,8 @@ function buildHiddenAcceptanceDesk(): ChapterAcceptanceDeskModel {
     acceptanceStatus: 'hidden',
     statusLabel: '等待正文',
     acceptanceReasons: ['本章还没有正文，先完成章节计划和初稿。'],
+    storylineSync: null,
+    assetIntake: null,
     qualityScore: null,
     qualityStatus: '',
     mustFix: [],
@@ -867,9 +942,13 @@ function buildChapterAcceptanceDesk(args: {
     : null
   const latestReportRef = latestReviewRef(args.reviews, args.nextChapter, 'editor_report')
   const latestRevisionRef = latestReviewRef(args.reviews, args.nextChapter, 'editor_revision')
+  const latestStorylineSyncRef = latestReviewRef(args.reviews, args.nextChapter, 'storyline_sync')
+  const latestAssetIntakeRef = latestReviewRef(args.reviews, args.nextChapter, 'asset_intake')
   const latestQuality = latestQualityRef?.review || null
   const latestReport = latestReportRef?.review || null
   const latestRevision = latestRevisionRef?.review || null
+  const storylineSync = buildStorylineSyncSummary(latestStorylineSyncRef?.review || null)
+  const assetIntake = buildAssetIntakeSummary(latestAssetIntakeRef?.review || null)
   const quality = qualityPayload(latestQuality)
   const report = reportPayload(latestReport)
   const revision = revisionPayload(latestRevision)
@@ -909,6 +988,8 @@ function buildChapterAcceptanceDesk(args: {
       acceptanceStatus: 'needs_quality_check',
       statusLabel: '需复检',
       acceptanceReasons: ['本章已有正文，但还没有当前章节的质量复检记录。'],
+      storylineSync,
+      assetIntake,
       qualityScore: null,
       qualityStatus,
       mustFix,
@@ -931,6 +1012,8 @@ function buildChapterAcceptanceDesk(args: {
       acceptanceStatus: 'needs_recheck',
       statusLabel: '修订后需复检',
       acceptanceReasons: ['本章已有修订记录，修订时间晚于最新质量复检。'],
+      storylineSync,
+      assetIntake,
       qualityScore: score,
       qualityStatus,
       mustFix,
@@ -958,6 +1041,8 @@ function buildChapterAcceptanceDesk(args: {
         scoreNeedsRevision ? `质量分 ${score} 低于 ${QUALITY_PASS_THRESHOLD}` : '',
         mustFix.length > 0 ? `必须修复：${mustFix.slice(0, 2).join('；')}` : '',
       ].filter(Boolean).slice(0, 3),
+      storylineSync,
+      assetIntake,
       qualityScore: score,
       qualityStatus,
       mustFix,
@@ -980,6 +1065,8 @@ function buildChapterAcceptanceDesk(args: {
       acceptanceStatus: 'needs_state_sync',
       statusLabel: '需同步故事状态',
       acceptanceReasons: [`故事状态还没有同步到第 ${args.nextChapter.chapter_no} 章。`],
+      storylineSync,
+      assetIntake,
       qualityScore: score,
       qualityStatus,
       mustFix,
@@ -1001,6 +1088,8 @@ function buildChapterAcceptanceDesk(args: {
     acceptanceStatus: 'ready_to_accept',
     statusLabel: '可验收',
     acceptanceReasons: ['质量复检通过，故事状态已同步，可以进入下一章。'],
+    storylineSync,
+    assetIntake,
     qualityScore: score,
     qualityStatus,
     mustFix,

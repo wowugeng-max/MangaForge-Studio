@@ -33,6 +33,7 @@ import {
 } from './novel-route-utils'
 
 const STORYLINE_TYPES = ['mainline', 'subplot', 'character_arc', 'relationship_arc', 'faction_arc', 'foreshadowing_arc']
+const DISCOVERED_ASSET_TYPES = ['character', 'item', 'ability', 'faction', 'location', 'foreshadowing']
 
 export type ChapterWordTarget = {
   mode: 'standard' | 'long' | 'custom'
@@ -237,6 +238,124 @@ function storylineUsageByType(storylineContext: any, types: string[]) {
     .filter((item: any) => types.includes(String(item?.usage_type || '')))
     .map(storylineUsageName)
     .filter(Boolean)
+}
+
+function storylineKeys(item: any) {
+  return [
+    Number(item?.entity_id || item?.id || 0) ? `id:${Number(item?.entity_id || item?.id || 0)}` : '',
+    String(item?.name || item?.title || '').trim() ? `name:${String(item?.name || item?.title || '').trim()}` : '',
+  ].filter(Boolean)
+}
+
+function storylineKeySet(items: any[]) {
+  const keys = new Set<string>()
+  for (const item of items) {
+    for (const key of storylineKeys(item)) keys.add(key)
+  }
+  return keys
+}
+
+function storylineMatchesKeySet(item: any, keys: Set<string>) {
+  return storylineKeys(item).some(key => keys.has(key))
+}
+
+function normalizeStorylinePlanItem(item: any, usageType = '') {
+  const name = String(item?.name || item?.title || item || '').trim()
+  if (!name && !Number(item?.entity_id || item?.id || 0)) return null
+  return {
+    entity_id: Number(item?.entity_id || item?.id || 0) || null,
+    name,
+    usage_type: String(item?.usage_type || usageType || 'advance'),
+    expected_state_change: item?.expected_state_change || {},
+  }
+}
+
+function normalizeStorylineActualItem(item: any) {
+  const name = String(item?.name || item?.title || '').trim()
+  const entityType = String(item?.entity_type || item?.type || '')
+  if (!name && !Number(item?.entity_id || item?.id || 0)) return null
+  if (!STORYLINE_TYPES.includes(entityType)) return null
+  return {
+    entity_id: Number(item?.entity_id || item?.id || 0) || null,
+    name,
+    entity_type: entityType,
+    actual_state_change: item?.actual_state_change || item?.state_delta || {},
+    summary: String(item?.summary || item?.description || ''),
+  }
+}
+
+export function buildStorylineSyncReport(contextPackage: any, storylineUpdates: any[] = []) {
+  const usagePlan = asArray(contextPackage?.storyline_context?.chapter_usage)
+    .map((item: any) => normalizeStorylinePlanItem(item))
+    .filter(Boolean)
+  const briefPlan = [
+    ...asArray(contextPackage?.chapter_target?.storyline_advances).map((name: any) => normalizeStorylinePlanItem({ name }, 'advance')),
+    ...asArray(contextPackage?.chapter_target?.storyline_plants).map((name: any) => normalizeStorylinePlanItem({ name }, 'plant')),
+    ...asArray(contextPackage?.chapter_target?.storyline_payoffs).map((name: any) => normalizeStorylinePlanItem({ name }, 'payoff')),
+    ...asArray(contextPackage?.chapter_target?.storyline_forbidden).map((name: any) => normalizeStorylinePlanItem({ name }, 'forbidden')),
+  ].filter(Boolean)
+  const planned: any[] = []
+  const plannedKeys = new Set<string>()
+  for (const item of [...usagePlan, ...briefPlan]) {
+    const keys = storylineKeys(item)
+    if (!keys.length || keys.some(key => plannedKeys.has(key))) continue
+    for (const key of keys) plannedKeys.add(key)
+    planned.push(item)
+  }
+  const actual = asArray(storylineUpdates).map(normalizeStorylineActualItem).filter(Boolean)
+  const actualKeys = storylineKeySet(actual)
+  const requiredPlan = planned.filter(item => !['pause', 'forbidden'].includes(String(item.usage_type || '')))
+  const forbiddenPlan = planned.filter(item => String(item.usage_type || '') === 'forbidden')
+  const completed = requiredPlan.filter(item => storylineMatchesKeySet(item, actualKeys))
+  const missed = requiredPlan.filter(item => !storylineMatchesKeySet(item, actualKeys))
+  const unplanned = actual.filter(item => !storylineMatchesKeySet(item, plannedKeys))
+  const forbidden_touched = forbiddenPlan.filter(item => storylineMatchesKeySet(item, actualKeys))
+  const status = missed.length || unplanned.length || forbidden_touched.length ? 'warn' : 'ok'
+  return { status, planned, actual, completed, missed, unplanned, forbidden_touched }
+}
+
+export function normalizeDiscoveredAssets(assets: any[] = [], options: {
+  existingCharacters?: any[]
+  existingSettings?: any[]
+  chapter?: any
+} = {}) {
+  const existingCharacterNames = new Set((options.existingCharacters || []).map(item => String(item?.name || '').trim()).filter(Boolean))
+  const existingSettingKeys = new Set((options.existingSettings || []).map(item => `${item?.entity_type}:${String(item?.name || '').trim()}`).filter(Boolean))
+  const seen = new Set<string>()
+  const chapterNo = Number(options.chapter?.chapter_no || 0) || null
+  const chapterId = Number(options.chapter?.id || 0) || null
+  const normalized: any[] = []
+
+  for (const asset of asArray(assets)) {
+    const entityType = String(asset?.entity_type || asset?.type || '')
+    const name = String(asset?.name || asset?.title || '').trim()
+    if (!DISCOVERED_ASSET_TYPES.includes(entityType) || !name) continue
+    if (entityType === 'character' && existingCharacterNames.has(name)) continue
+    const key = `${entityType}:${name}`
+    if (existingSettingKeys.has(key) || seen.has(key)) continue
+    seen.add(key)
+    const suggestedState = asset?.state_json || asset?.suggested_state || asset?.state || {}
+    normalized.push({
+      entity_type: entityType,
+      name,
+      summary: String(asset?.summary || asset?.description || asset?.role || asset?.effect || '').trim(),
+      evidence: String(asset?.evidence || asset?.quote || asset?.source_text || '').trim(),
+      source_excerpt: String(asset?.source_excerpt || asset?.quote || asset?.evidence || '').trim(),
+      first_chapter_no: asset?.first_chapter_no ?? chapterNo,
+      constraints_json: asset?.constraints_json || asset?.constraints || {},
+      state_json: {
+        ...(suggestedState && typeof suggestedState === 'object' && !Array.isArray(suggestedState) ? suggestedState : {}),
+        ...(chapterNo ? { first_seen_chapter: chapterNo } : {}),
+      },
+      payload_json: {
+        source: 'story_state_discovered_asset',
+        source_chapter_id: chapterId,
+        source_chapter_no: chapterNo,
+        raw: asset,
+      },
+    })
+  }
+  return normalized
 }
 
 export function buildChapterPreDraftBrief(project: any, contextPackage: any) {
@@ -541,6 +660,8 @@ export function createNovelWritingService(ctx: {
     'state_delta: {timeline, current_time, active_locations, character_positions, character_relationships, relationship_graph, known_secrets, secret_visibility, item_ownership, resource_status, foreshadowing_status, payoff_queue, mainline_progress, volume_progress, unresolved_conflicts, open_questions, recent_repeated_information, next_chapter_priorities}',
     'character_updates: array，每项包含 name,current_state。current_state 可包含 age, location, physical_condition, appearance_delta, outfit, items, item_changes, ability_status, resource_status, emotional_state, relationship_attitudes, knowledge_scope, newly_learned, information_boundaries, secrets_known, injuries, goals, next_intent, last_seen_chapter。',
     'setting_updates: array，每项包含 entity_id 或 name, entity_type, state_delta, actual_state_change。用于更新设定工坊里的境界、能力、物品、Boss、规则、伏笔、地点、时间线等状态。',
+    'storyline_updates: array，每项包含 entity_id 或 name, entity_type, actual_state_change, summary。只输出正文明确推进、埋线、回收或触碰的剧情线，entity_type 只能是 mainline/subplot/character_arc/relationship_arc/faction_arc/foreshadowing_arc。',
+    'discovered_assets: array，每项包含 entity_type,name,summary,evidence,source_excerpt,first_chapter_no,constraints_json,state_json。只收录正文中新出现且应纳入长期管理的资产，entity_type 只能是 character/item/ability/faction/location/foreshadowing。',
     '只写正文明确出现或可由本章直接确定的状态；不知道就不要补。',
     'next_chapter_priorities: array',
     '只返回 JSON。',
@@ -622,6 +743,77 @@ export function createNovelWritingService(ctx: {
         }
       }
     }
+    const storylineUpdates = Array.isArray(payload?.storyline_updates) ? payload.storyline_updates : []
+    const storylineSync = buildStorylineSyncReport(contextPackage, storylineUpdates)
+    if (storylineUpdates.length > 0) {
+      const settings = await listNovelSettingEntities(activeWorkspace, project.id)
+      const usages = await listNovelChapterSettingUsage(activeWorkspace, project.id, chapter.id)
+      for (const update of storylineUpdates) {
+        const entityId = Number(update?.entity_id || 0)
+        const name = String(update?.name || '').trim()
+        const entity = settings.find(item => STORYLINE_TYPES.includes(item.entity_type) && ((entityId && item.id === entityId) || (!!name && item.name === name)))
+        if (!entity) continue
+        const stateDelta = update.state_delta || update.actual_state_change || {}
+        if (!stateDelta || typeof stateDelta !== 'object' || Array.isArray(stateDelta)) continue
+        await updateNovelSettingEntity(activeWorkspace, entity.id, {
+          state_json: {
+            ...(entity.state_json || {}),
+            ...(stateDelta || {}),
+            last_seen_chapter: chapter.chapter_no,
+            last_checked_chapter_id: chapter.id,
+            last_checked_chapter_no: chapter.chapter_no,
+          },
+        } as any)
+        const usage = usages.find(item => item.entity_id === entity.id)
+        if (usage) {
+          await updateNovelChapterSettingUsage(activeWorkspace, usage.id, {
+            actual_state_change: {
+              ...(usage.actual_state_change || {}),
+              ...(update.actual_state_change || stateDelta || {}),
+            },
+          } as any)
+        }
+      }
+    }
+    const [assetCharacters, assetSettings] = await Promise.all([
+      listNovelCharacters(activeWorkspace, project.id),
+      listNovelSettingEntities(activeWorkspace, project.id),
+    ])
+    const discoveredAssets = normalizeDiscoveredAssets(
+      Array.isArray(payload?.discovered_assets) ? payload.discovered_assets : [],
+      { existingCharacters: assetCharacters, existingSettings: assetSettings, chapter },
+    )
+    if (discoveredAssets.length > 0) {
+      await createNovelReview(activeWorkspace, {
+        project_id: project.id,
+        review_type: 'asset_intake',
+        status: 'pending',
+        summary: `发现 ${discoveredAssets.length} 个新资产待确认`,
+        issues: discoveredAssets.map((item: any) => `${item.entity_type}：${item.name}`),
+        payload: JSON.stringify({
+          chapter_id: chapter.id,
+          chapter_no: chapter.chapter_no,
+          discovered_assets: discoveredAssets,
+          applied_asset_names: [],
+        }),
+      })
+    }
+    payload.asset_intake = { discovered_assets: discoveredAssets }
+    await createNovelReview(activeWorkspace, {
+      project_id: project.id,
+      review_type: 'storyline_sync',
+      status: storylineSync.status === 'warn' ? 'warn' : 'ok',
+      summary: storylineSync.status === 'warn'
+        ? `剧情线同步存在风险：漏推 ${storylineSync.missed.length}，额外推进 ${storylineSync.unplanned.length}，禁揭风险 ${storylineSync.forbidden_touched.length}`
+        : '剧情线同步完成，无明显计划偏差',
+      issues: [
+        ...storylineSync.missed.map((item: any) => `漏推：${item.name}`),
+        ...storylineSync.unplanned.map((item: any) => `额外推进：${item.name}`),
+        ...storylineSync.forbidden_touched.map((item: any) => `禁揭风险：${item.name}`),
+      ],
+      payload: JSON.stringify({ chapter_id: chapter.id, chapter_no: chapter.chapter_no, storyline_sync: storylineSync }),
+    })
+    payload.storyline_sync = storylineSync
     await createNovelReview(activeWorkspace, {
       project_id: project.id,
       review_type: 'story_state',
@@ -1458,6 +1650,11 @@ export function createNovelWritingService(ctx: {
         }),
       })
     }
+    const story_state_update: any = storyStateUpdate || {}
+    const storyStateUpdateWithSync = {
+      ...story_state_update,
+      storyline_sync: story_state_update.storyline_sync,
+    }
     return {
       chapter: updated,
       score: selfCheck?.review?.score ?? null,
@@ -1468,7 +1665,7 @@ export function createNovelWritingService(ctx: {
       reference_report: referenceReport,
       safety_decision: safetyDecision,
       migration_audit: migrationAudit,
-      story_state_update: storyStateUpdate,
+      story_state_update: storyStateUpdateWithSync,
       config_snapshot: configSnapshot,
     }
   }

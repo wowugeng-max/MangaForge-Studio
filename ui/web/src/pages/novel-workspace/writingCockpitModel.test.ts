@@ -192,6 +192,56 @@ function editorRevisionReview(overrides: Record<string, any> = {}) {
   }
 }
 
+function storylineSyncReview(overrides: Record<string, any> = {}) {
+  const payload = {
+    chapter_id: 101,
+    chapter_no: 1,
+    storyline_sync: {
+      status: 'warn',
+      planned: [{ name: '夺回镜州主线' }, { name: '旧臣背刺伏笔线' }],
+      actual: [{ name: '夺回镜州主线' }, { name: '额外教团渗透线' }],
+      completed: [{ name: '夺回镜州主线' }],
+      missed: [{ name: '旧臣背刺伏笔线' }],
+      unplanned: [{ name: '额外教团渗透线' }],
+      forbidden_touched: [{ name: '幕后主使真名' }],
+    },
+    ...overrides.payload,
+  }
+
+  return {
+    id: overrides.id || 401,
+    review_type: 'storyline_sync',
+    status: overrides.status || 'warn',
+    summary: overrides.summary || '剧情线同步存在 3 项风险。',
+    created_at: overrides.created_at || '2026-05-24T00:20:00.000Z',
+    payload: JSON.stringify(payload),
+    ...overrides.record,
+  }
+}
+
+function assetIntakeReview(overrides: Record<string, any> = {}) {
+  const payload = {
+    chapter_id: 101,
+    chapter_no: 1,
+    discovered_assets: [
+      { entity_type: 'character', name: '周远', summary: '新来的宿舍管理员' },
+      { entity_type: 'item', name: '黑色钥匙', summary: '能打开禁闭室' },
+    ],
+    applied_asset_names: [],
+    ...overrides.payload,
+  }
+
+  return {
+    id: overrides.id || 501,
+    review_type: 'asset_intake',
+    status: overrides.status || 'pending',
+    summary: overrides.summary || '发现 2 个新资产待确认。',
+    created_at: overrides.created_at || '2026-05-24T00:30:00.000Z',
+    payload: JSON.stringify(payload),
+    ...overrides.record,
+  }
+}
+
 describe('buildWritingCockpitModel', () => {
   test('ready project data chooses the first planned unwritten chapter as daily target', () => {
     const model = buildWritingCockpitModel({
@@ -1099,6 +1149,53 @@ describe('buildWritingCockpitModel', () => {
     expect(model.chapterAcceptanceDesk.storyStateSynced).toBe(true)
     expect(model.chapterAcceptanceDesk.recommendedAcceptanceAction.key).toBe('accept_chapter_and_continue')
     expect(model.primaryActionKey).toBe('accept_chapter_and_continue')
+  })
+
+  test('shows storyline sync warning without blocking ready acceptance', () => {
+    const model = buildWritingCockpitModel({
+      project: acceptedProject,
+      outlines,
+      chapters,
+      activeChapter: chapters[0],
+      materialScore: { score: 82, can_generate: true },
+      reviews: [proseQualityReview(), storylineSyncReview()],
+    })
+
+    expect(model.chapterAcceptanceDesk.acceptanceStatus).toBe('ready_to_accept')
+    expect(model.chapterAcceptanceDesk.recommendedAcceptanceAction.key).toBe('accept_chapter_and_continue')
+    expect(model.chapterAcceptanceDesk.storylineSync?.status).toBe('warn')
+    expect(model.chapterAcceptanceDesk.storylineSync?.label).toBe('漏推 1 · 额外推进 1 · 禁揭风险 1')
+  })
+
+  test('shows discovered asset intake without blocking ready acceptance', () => {
+    const model = buildWritingCockpitModel({
+      project: acceptedProject,
+      outlines,
+      chapters,
+      activeChapter: chapters[0],
+      materialScore: { score: 82, can_generate: true },
+      reviews: [proseQualityReview(), assetIntakeReview()],
+    })
+
+    expect(model.chapterAcceptanceDesk.acceptanceStatus).toBe('ready_to_accept')
+    expect(model.chapterAcceptanceDesk.recommendedAcceptanceAction.key).toBe('accept_chapter_and_continue')
+    expect(model.chapterAcceptanceDesk.assetIntake?.status).toBe('pending')
+    expect(model.chapterAcceptanceDesk.assetIntake?.label).toBe('新资产 2 待确认')
+  })
+
+  test('omits storyline sync summary when no storyline review exists', () => {
+    const model = buildWritingCockpitModel({
+      project: acceptedProject,
+      outlines,
+      chapters,
+      activeChapter: chapters[0],
+      materialScore: { score: 82, can_generate: true },
+      reviews: [proseQualityReview()],
+    })
+
+    expect(model.chapterAcceptanceDesk.acceptanceStatus).toBe('ready_to_accept')
+    expect(model.chapterAcceptanceDesk.storylineSync).toBeNull()
+    expect(model.chapterAcceptanceDesk.assetIntake).toBeNull()
   })
 
   test('passing quality for old prose needs current quality check after text changes', () => {

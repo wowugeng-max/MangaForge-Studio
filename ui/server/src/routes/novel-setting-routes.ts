@@ -1,5 +1,6 @@
 import type { Express } from 'express'
 import {
+  createNovelCharacter,
   createNovelReview,
   createNovelSettingEntity,
   deleteNovelSettingEntity,
@@ -24,6 +25,7 @@ type NovelSettingRoutesContext = {
 
 export const STORYLINE_TYPES = ['mainline', 'subplot', 'character_arc', 'relationship_arc', 'faction_arc', 'foreshadowing_arc']
 export const SETTING_TYPES = ['character', 'realm', 'ability', 'item', 'boss', 'rule', 'faction', 'location', 'foreshadowing', 'timeline', ...STORYLINE_TYPES]
+const DISCOVERED_ASSET_TYPES = ['character', 'item', 'ability', 'faction', 'location', 'foreshadowing']
 
 function parseJsonField(value: any, fallback: any) {
   if (value === undefined || value === null || value === '') return fallback
@@ -417,6 +419,93 @@ async function applyPendingStateUpdates(activeWorkspace: string, projectId: numb
   return appliedStateUpdates
 }
 
+function normalizeDiscoveredAssetForSetting(asset: any, projectId: number, chapter: any) {
+  const entityType = String(asset?.entity_type || asset?.type || '')
+  const name = String(asset?.name || asset?.title || '').trim()
+  if (!DISCOVERED_ASSET_TYPES.includes(entityType) || !name) return null
+  return normalizeSettingInput({
+    project_id: projectId,
+    entity_type: entityType,
+    name,
+    summary: String(asset?.summary || asset?.description || asset?.role || asset?.effect || ''),
+    status: asset?.status || 'active',
+    visibility: asset?.visibility || (entityType === 'foreshadowing' ? 'hidden' : 'public'),
+    first_chapter_no: asset?.first_chapter_no ?? chapter?.chapter_no ?? null,
+    constraints_json: parseJsonField(asset?.constraints_json ?? asset?.constraints, {}),
+    state_json: {
+      ...parseJsonField(asset?.state_json ?? asset?.state ?? asset?.suggested_state, {}),
+      ...(chapter?.chapter_no ? { first_seen_chapter: chapter.chapter_no } : {}),
+    },
+    payload_json: {
+      ...parseJsonField(asset?.payload_json ?? asset?.payload, {}),
+      source: 'discovered_asset_apply',
+      source_chapter_id: chapter?.id || null,
+      source_chapter_no: chapter?.chapter_no || null,
+      evidence: asset?.evidence || '',
+      source_excerpt: asset?.source_excerpt || asset?.evidence || '',
+      raw: asset,
+    },
+  }, projectId)
+}
+
+export async function applyDiscoveredAssetsToProject(activeWorkspace: string, projectId: number, chapter: any, assets: any[] = []) {
+  const [characters, settings] = await Promise.all([
+    listNovelCharacters(activeWorkspace, projectId),
+    listNovelSettingEntities(activeWorkspace, projectId),
+  ])
+  const characterNames = new Set(characters.map(item => String(item.name || '').trim()).filter(Boolean))
+  const settingKeys = new Set(settings.map(item => `${item.entity_type}:${String(item.name || '').trim()}`))
+  const createdCharacters: any[] = []
+  const createdSettings: any[] = []
+  const skippedExisting: any[] = []
+  const seen = new Set<string>()
+
+  for (const asset of Array.isArray(assets) ? assets : []) {
+    const seed = normalizeDiscoveredAssetForSetting(asset, projectId, chapter)
+    if (!seed) continue
+    const key = `${seed.entity_type}:${seed.name}`
+    if (seen.has(key) || settingKeys.has(key) || (seed.entity_type === 'character' && characterNames.has(seed.name))) {
+      skippedExisting.push({ entity_type: seed.entity_type, name: seed.name })
+      continue
+    }
+    seen.add(key)
+    if (seed.entity_type === 'character') {
+      const character = await createNovelCharacter(activeWorkspace, {
+        project_id: projectId,
+        name: seed.name,
+        role_type: String(asset?.role_type || asset?.role || 'supporting'),
+        role: String(asset?.role || asset?.role_type || '配角'),
+        goal: String(asset?.goal || ''),
+        motivation: String(asset?.motivation || ''),
+        conflict: String(asset?.conflict || ''),
+        appearance: String(asset?.appearance || ''),
+        current_state: seed.state_json || {},
+        raw_payload: { source: 'discovered_asset_apply', source_chapter_id: chapter?.id || null, raw: asset },
+      } as any)
+      createdCharacters.push(character)
+      const setting = await createNovelSettingEntity(activeWorkspace, {
+        ...seed,
+        related_character_ids: [character.id],
+        payload_json: { ...(seed.payload_json || {}), character_id: character.id },
+      } as any)
+      createdSettings.push(setting)
+      characterNames.add(seed.name)
+      settingKeys.add(key)
+      continue
+    }
+    const setting = await createNovelSettingEntity(activeWorkspace, seed as any)
+    createdSettings.push(setting)
+    settingKeys.add(key)
+  }
+
+  return {
+    created_characters: createdCharacters,
+    created_settings: createdSettings,
+    skipped_existing: skippedExisting,
+    total: createdCharacters.length + createdSettings.length,
+  }
+}
+
 export function registerNovelSettingRoutes(app: Express, ctx: NovelSettingRoutesContext) {
   app.get('/api/novel/projects/:id/settings', async (req, res) => {
     const activeWorkspace = ctx.getWorkspace()
@@ -693,5 +782,30 @@ export function registerNovelSettingRoutes(app: Express, ctx: NovelSettingRoutes
     const updates = Array.isArray(req.body?.updates) ? req.body.updates : []
     const appliedStateUpdates = await applyPendingStateUpdates(activeWorkspace, projectId, chapter, settings, usage, updates)
     res.json({ ok: true, applied_state_updates: appliedStateUpdates, total: appliedStateUpdates.length })
+  })
+
+  app.post('/api/novel/chapters/:chapterId/discovered-assets/apply', async (req, res) => {
+    const activeWorkspace = ctx.getWorkspace()
+    const projectId = Number(req.body?.project_id || req.query.project_id || 0)
+    const chapterId = Number(req.params.chapterId)
+    const project = await ctx.getProject(activeWorkspace, projectId)
+    if (!project) return res.status(404).json({ error: 'project not found' })
+    const chapters = await listNovelChapters(activeWorkspace, projectId)
+    const chapter = chapters.find(item => item.id === chapterId)
+    if (!chapter) return res.status(404).json({ error: 'chapter not found' })
+    const assets = Array.isArray(req.body?.assets) ? req.body.assets : []
+    const result = await applyDiscoveredAssetsToProject(activeWorkspace, projectId, chapter, assets)
+    await createNovelReview(activeWorkspace, {
+      project_id: projectId,
+      review_type: 'asset_intake_apply',
+      status: 'ok',
+      summary: `已确认新资产 ${result.created_settings.length} 项`,
+      issues: [
+        ...result.created_settings.map((item: any) => `${item.entity_type}：${item.name}`),
+        ...result.skipped_existing.map((item: any) => `已存在：${item.entity_type}：${item.name}`),
+      ],
+      payload: JSON.stringify({ chapter_id: chapterId, chapter_no: chapter.chapter_no, ...result }),
+    })
+    res.json({ ok: true, ...result })
   })
 }

@@ -4,12 +4,14 @@ import { join } from 'path'
 import {
   buildCommercialEditorRewritePrompt,
   buildChapterPreDraftBrief,
+  buildStorylineSyncReport,
   buildProseWordTargetExpansionPrompt,
   countProseChars,
   createNovelWritingService,
   evaluateProseWordTarget,
   extractProseExpansionPayload,
   mergeConfirmedPreDraftBriefIntoContext,
+  normalizeDiscoveredAssets,
   normalizeSceneCardsPayload,
   proseMaxTokensForWordTarget,
   resolveChapterWordTarget,
@@ -374,6 +376,82 @@ describe('chapter pre-draft brief', () => {
     expect(source).toContain('STORYLINE_TYPES')
     expect(source).toContain('storylineAdvances')
     expect(source).toContain('storylineForbidden')
+  })
+})
+
+describe('storyline sync backfill', () => {
+  test('builds storyline sync report from planned and actual storyline updates', () => {
+    const report = buildStorylineSyncReport(
+      {
+        storyline_context: {
+          chapter_usage: [
+            { entity_id: 1, name: '夺回镜州主线', usage_type: 'advance', expected_state_change: { target: '当众压住王府管事' } },
+            { entity_id: 2, name: '旧臣背刺伏笔线', usage_type: 'plant', expected_state_change: { clue: '旧臣避开腰牌' } },
+            { entity_id: 3, name: '幕后主使真名', usage_type: 'forbidden', expected_state_change: { forbidden: '不得揭露真名' } },
+          ],
+        },
+        chapter_target: {
+          storyline_payoffs: ['边军腰牌支线'],
+        },
+      },
+      [
+        { entity_id: 1, name: '夺回镜州主线', entity_type: 'mainline', actual_state_change: { current_state: '当众压住王府管事' } },
+        { name: '边军腰牌支线', entity_type: 'subplot', actual_state_change: { payoff_status: 'paid' } },
+        { name: '额外教团渗透线', entity_type: 'faction_arc', actual_state_change: { current_state: '教团标记出现' } },
+        { name: '幕后主使真名', entity_type: 'foreshadowing_arc', actual_state_change: { leaked: true } },
+      ],
+    )
+
+    expect(report.status).toBe('warn')
+    expect(report.planned.map((item: any) => item.name)).toEqual(expect.arrayContaining(['夺回镜州主线', '旧臣背刺伏笔线', '幕后主使真名', '边军腰牌支线']))
+    expect(report.completed.map((item: any) => item.name)).toEqual(expect.arrayContaining(['夺回镜州主线', '边军腰牌支线']))
+    expect(report.missed.map((item: any) => item.name)).toContain('旧臣背刺伏笔线')
+    expect(report.unplanned.map((item: any) => item.name)).toContain('额外教团渗透线')
+    expect(report.forbidden_touched.map((item: any) => item.name)).toContain('幕后主使真名')
+  })
+
+  test('story state prompt asks for storyline updates and sync review is created', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+
+    expect(source).toContain('storyline_updates')
+    expect(source).toContain('buildStorylineSyncReport(')
+    expect(source).toContain("review_type: 'storyline_sync'")
+    expect(source).toContain('story_state_update.storyline_sync')
+  })
+})
+
+describe('discovered asset intake', () => {
+  test('normalizes discovered assets to core types and filters existing names', () => {
+    const assets = normalizeDiscoveredAssets(
+      [
+        { entity_type: 'character', name: '林晓', summary: '已存在角色', evidence: '林晓递出背包。' },
+        { type: 'character', name: '周远', summary: '新来的宿舍管理员', evidence: '周远站在门口。', suggested_state: { location: '宿舍楼' } },
+        { entity_type: 'item', name: '黑色钥匙', summary: '能打开禁闭室', evidence: '黑色钥匙落在掌心。', constraints_json: { owner_rule: '不得离身' } },
+        { entity_type: 'realm', name: '新人试炼者', summary: '不在第一版范围' },
+        { entity_type: 'ability', name: '', summary: '缺名称' },
+      ],
+      {
+        existingCharacters: [{ name: '林晓' }],
+        existingSettings: [{ entity_type: 'item', name: '旧钥匙' }],
+        chapter: { id: 101, chapter_no: 1 },
+      },
+    )
+
+    expect(assets.map((item: any) => item.entity_type)).toEqual(['character', 'item'])
+    expect(assets.map((item: any) => item.name)).toEqual(['周远', '黑色钥匙'])
+    expect(assets[0].first_chapter_no).toBe(1)
+    expect(assets[0].state_json).toMatchObject({ location: '宿舍楼', first_seen_chapter: 1 })
+    expect(assets[1].constraints_json).toMatchObject({ owner_rule: '不得离身' })
+    expect(assets[1].payload_json.source).toBe('story_state_discovered_asset')
+  })
+
+  test('story state prompt asks for discovered assets and creates asset intake review', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+
+    expect(source).toContain('discovered_assets')
+    expect(source).toContain('normalizeDiscoveredAssets(')
+    expect(source).toContain("review_type: 'asset_intake'")
+    expect(source).toContain('asset_intake')
   })
 })
 

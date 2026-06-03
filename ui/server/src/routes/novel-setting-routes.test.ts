@@ -1,11 +1,21 @@
 import { describe, expect, test } from 'bun:test'
+import { mkdtemp } from 'fs/promises'
 import { readFileSync } from 'fs'
 import { join } from 'path'
+import { tmpdir } from 'os'
 import {
+  applyDiscoveredAssetsToProject,
   buildSettingAgentPrompt,
   normalizeSettingAgentPayload,
   SETTING_TYPES,
 } from './novel-setting-routes'
+import {
+  createNovelChapter,
+  createNovelProject,
+  createNovelSettingEntity,
+  listNovelCharacters,
+  listNovelSettingEntities,
+} from '../novel'
 
 describe('setting agent workflow', () => {
   test('exposes storyline setting entity types', () => {
@@ -131,5 +141,42 @@ describe('setting agent workflow', () => {
     expect(source).toContain('advance')
     expect(source).toContain('payoff')
     expect(source).toContain('pause')
+  })
+})
+
+describe('discovered asset intake route', () => {
+  test('applies selected discovered assets as character cards and setting entities', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-asset-intake-'))
+    const project = await createNovelProject(workspace, { title: '镜州风雷', length_target: 'epic' })
+    const chapter = await createNovelChapter(workspace, { project_id: project.id, chapter_no: 3, title: '夜入王府' })
+    await createNovelSettingEntity(workspace, {
+      project_id: project.id,
+      entity_type: 'item',
+      name: '旧钥匙',
+      summary: '已存在物品',
+    } as any)
+
+    const result = await applyDiscoveredAssetsToProject(workspace, project.id, chapter, [
+      { entity_type: 'character', name: '周远', summary: '新来的宿舍管理员', state_json: { location: '宿舍楼' } },
+      { entity_type: 'item', name: '黑色钥匙', summary: '能打开禁闭室', constraints_json: { owner_rule: '不得离身' } },
+      { entity_type: 'item', name: '旧钥匙', summary: '重复物品' },
+    ])
+
+    const characters = await listNovelCharacters(workspace, project.id)
+    const settings = await listNovelSettingEntities(workspace, project.id)
+
+    expect(result.created_characters.map((item: any) => item.name)).toContain('周远')
+    expect(result.created_settings.map((item: any) => item.name)).toEqual(expect.arrayContaining(['周远', '黑色钥匙']))
+    expect(result.skipped_existing.map((item: any) => item.name)).toContain('旧钥匙')
+    expect(characters.map(item => item.name)).toContain('周远')
+    expect(settings.find(item => item.entity_type === 'character' && item.name === '周远')?.related_character_ids).toContain(characters[0].id)
+    expect(settings.find(item => item.entity_type === 'item' && item.name === '黑色钥匙')?.constraints_json).toMatchObject({ owner_rule: '不得离身' })
+  })
+
+  test('exposes discovered assets apply endpoint', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-setting-routes.ts'), 'utf8')
+
+    expect(source).toContain("app.post('/api/novel/chapters/:chapterId/discovered-assets/apply'")
+    expect(source).toContain('applyDiscoveredAssetsToProject(')
   })
 })
