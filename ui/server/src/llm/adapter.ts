@@ -127,7 +127,7 @@ function buildOpenAIResponsesBody(request: LLMRequest) {
     body.tools = normalized.tools.map(tool => ({ type: 'function', name: tool.name, description: tool.description, parameters: tool.input_schema }))
     body.tool_choice = normalized.tool_choice
   }
-  if (normalized.response_format) body.text = { format: { type: 'json_object' } }
+  if (normalized.response_format && normalized.response_format !== 'text') body.text = { format: { type: 'json_object' } }
   return body
 }
 

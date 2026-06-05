@@ -21,13 +21,14 @@ function determineProbeType(capabilities?: Record<string, boolean>): string {
   return 'chat'
 }
 
-function buildProbeRequest(probeType: string, modelName: string): LLMRequest {
+export function buildProbeRequest(probeType: string, modelName: string): LLMRequest {
   if (probeType === 'chat') {
     return {
       model: modelName,
       messages: [{ role: 'user', content: 'Return exactly: OK' }],
       temperature: 0,
       max_tokens: 16,
+      response_format: 'text',
     }
   }
   if (probeType === 'vision') {
@@ -39,6 +40,7 @@ function buildProbeRequest(probeType: string, modelName: string): LLMRequest {
       }],
       temperature: 0,
       max_tokens: 16,
+      response_format: 'text',
     }
   }
   // image/video types — send a minimal text-to-image request
@@ -47,6 +49,7 @@ function buildProbeRequest(probeType: string, modelName: string): LLMRequest {
     messages: [{ role: 'user', content: 'A simple white circle on a black background.' }],
     temperature: 0,
     max_tokens: 16,
+    response_format: 'text',
   }
 }
 

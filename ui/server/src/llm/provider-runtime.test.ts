@@ -96,6 +96,24 @@ describe('codex responses provider runtime', () => {
     expect(body.text.format.schema).toEqual({ type: 'object' })
   })
 
+  test('omits text format for plain text Codex key probes', () => {
+    const body = buildProviderRequestBody({
+      model: 'balanced',
+      messages: [{ role: 'user', content: 'Return exactly: OK' }],
+      max_tokens: 8,
+      temperature: 0,
+      response_format: 'text',
+    }, selection())
+
+    expect(body).toMatchObject({
+      model: 'gpt-5-codex',
+      input: [{ role: 'user', content: 'Return exactly: OK' }],
+      max_output_tokens: 8,
+      temperature: 0,
+    })
+    expect(body).not.toHaveProperty('text')
+  })
+
   test('parses non-streaming Responses payloads', () => {
     const parsed = parseProviderResponsePayload({
       output_text: 'OK from responses',
