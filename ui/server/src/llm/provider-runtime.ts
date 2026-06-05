@@ -136,10 +136,10 @@ function buildHeaders(selection: RuntimeModelSelection): Record<string, string> 
 
 // ── Request Body ────────────────────────────────────────────
 
-function toOpenAIBody(request: LLMRequest, selection: RuntimeModelSelection): Record<string, any> {
+function shouldStreamRequest(request: LLMRequest, selection: RuntimeModelSelection) {
   const requestMode = String(request.response_mode || 'auto')
   const responseMode = String(selection.provider.response_mode || 'auto')
-  const shouldStream = requestMode === 'stream'
+  return requestMode === 'stream'
     ? true
     : requestMode === 'non_stream'
       ? false
@@ -148,6 +148,10 @@ function toOpenAIBody(request: LLMRequest, selection: RuntimeModelSelection): Re
         : responseMode === 'non_stream'
           ? false
           : Boolean(request.stream)
+}
+
+function toOpenAIBody(request: LLMRequest, selection: RuntimeModelSelection): Record<string, any> {
+  const shouldStream = shouldStreamRequest(request, selection)
   const body: Record<string, any> = {
     model: selection.model.model_name || request.model,
     messages: request.messages,
@@ -159,6 +163,51 @@ function toOpenAIBody(request: LLMRequest, selection: RuntimeModelSelection): Re
     body.response_format = request.response_format
   }
   if (request.tools?.length) body.tools = request.tools
+  if (request.tool_choice && request.tool_choice !== 'none') body.tool_choice = request.tool_choice
+  return body
+}
+
+function responseTextFormat(responseFormat: any) {
+  if (!responseFormat || responseFormat === 'text') return null
+  if (responseFormat?.type === 'json_schema') {
+    return {
+      format: {
+        type: 'json_schema',
+        name: 'response_schema',
+        schema: responseFormat.schema || { type: 'object' },
+        strict: false,
+      },
+    }
+  }
+  return { format: { type: 'json_object' } }
+}
+
+function toCodexResponsesBody(request: LLMRequest, selection: RuntimeModelSelection): Record<string, any> {
+  const systemMessages = request.messages.filter(message => message.role === 'system').map(message => message.content).filter(Boolean)
+  const inputMessages = request.messages
+    .filter(message => message.role !== 'system')
+    .map(message => ({
+      role: message.role === 'assistant' ? 'assistant' : 'user',
+      content: message.content,
+    }))
+  const body: Record<string, any> = {
+    model: selection.model.model_name || request.model,
+    input: inputMessages,
+    temperature: request.temperature ?? 0.3,
+    max_output_tokens: request.max_tokens ?? 4096,
+  }
+  if (systemMessages.length) body.instructions = systemMessages.join('\n\n')
+  if (shouldStreamRequest(request, selection)) body.stream = true
+  const text = responseTextFormat(request.response_format)
+  if (text) body.text = text
+  if (request.tools?.length) {
+    body.tools = request.tools.map((tool: any) => ({
+      type: 'function',
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.input_schema || tool.parameters || { type: 'object', properties: {} },
+    }))
+  }
   if (request.tool_choice && request.tool_choice !== 'none') body.tool_choice = request.tool_choice
   return body
 }
@@ -195,6 +244,32 @@ function parseAnthropicResponse<T = any>(raw: any): LLMResponse<T> {
     ? raw.content.map((item: any) => item?.text || '').join('\n')
     : String(raw?.content || '')
   return normalizeLLMResponse<T>({ ...raw, content: text })
+}
+
+function isCodexResponsesFormat(apiFormat: string) {
+  const normalized = String(apiFormat || '').toLowerCase()
+  return normalized.includes('codex') || normalized.includes('responses')
+}
+
+function parseResponsesResponse<T = any>(raw: any): LLMResponse<T> {
+  const output = Array.isArray(raw?.output) ? raw.output : Array.isArray(raw?.response?.output) ? raw.response.output : []
+  const textFromOutput = output
+    .flatMap((item: any) => Array.isArray(item?.content) ? item.content : [])
+    .map((part: any) => String(part?.text || part?.content || ''))
+    .filter(Boolean)
+    .join('\n')
+  return normalizeLLMResponse<T>({
+    ...raw,
+    content: String(raw?.output_text || raw?.response?.output_text || textFromOutput || raw?.content || ''),
+    usage: raw?.usage || raw?.response?.usage,
+    finish_reason: raw?.status || raw?.response?.status || raw?.finish_reason,
+  })
+}
+
+export function buildProviderRequestBody(request: LLMRequest, selection: RuntimeModelSelection): Record<string, any> {
+  if (selection.apiFormat === 'anthropic') return toAnthropicBody(request, selection)
+  if (isCodexResponsesFormat(selection.apiFormat)) return toCodexResponsesBody(request, selection)
+  return toOpenAIBody(request, selection)
 }
 
 async function readOpenAIStream(response: Response): Promise<any> {
@@ -242,6 +317,66 @@ async function readOpenAIStream(response: Response): Promise<any> {
     usage,
     stream_chunks_tail: tailChunks,
   }
+}
+
+async function readResponsesStream(response: Response): Promise<any> {
+  if (!response.body) throw new Error('Streaming response has no body')
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let content = ''
+  let finishReason = ''
+  let usage: any = undefined
+  const tailChunks: any[] = []
+
+  const consumeLine = (line: string) => {
+    const trimmed = line.trim()
+    if (!trimmed.startsWith('data:')) return
+    const payload = trimmed.slice(5).trim()
+    if (!payload || payload === '[DONE]') return
+    const chunk = JSON.parse(payload)
+    if (typeof chunk?.delta === 'string') content += chunk.delta
+    if (typeof chunk?.text === 'string') content += chunk.text
+    if (chunk?.response?.status) finishReason = String(chunk.response.status)
+    if (chunk?.status) finishReason = String(chunk.status)
+    if (chunk?.response?.usage) usage = chunk.response.usage
+    if (chunk?.usage) usage = chunk.usage
+    tailChunks.push(chunk)
+    if (tailChunks.length > 20) tailChunks.shift()
+  }
+
+  while (true) {
+    const { value, done } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split(/\r?\n/)
+    buffer = lines.pop() || ''
+    for (const line of lines) consumeLine(line)
+  }
+
+  buffer += decoder.decode()
+  for (const line of buffer.split(/\r?\n/)) consumeLine(line)
+
+  return {
+    content,
+    output_text: content,
+    status: finishReason || 'completed',
+    finish_reason: finishReason || 'completed',
+    usage,
+    stream_chunks_tail: tailChunks,
+  }
+}
+
+export async function readProviderStream(response: Response, selection: RuntimeModelSelection): Promise<any> {
+  if (isCodexResponsesFormat(selection.apiFormat)) return readResponsesStream(response)
+  return readOpenAIStream(response)
+}
+
+export function parseProviderResponsePayload<T = any>(raw: any, selection: RuntimeModelSelection): LLMResponse<T> {
+  if (selection.apiFormat === 'anthropic') return parseAnthropicResponse<T>(raw)
+  if (isCodexResponsesFormat(selection.apiFormat)) return parseResponsesResponse<T>(raw)
+  return normalizeLLMResponse<T>(raw)
 }
 
 // ── Error Classification ────────────────────────────────────
@@ -302,9 +437,7 @@ async function postProviderJson<T = any>(
   options: RuntimeExecutionOptions = {},
 ): Promise<LLMResponse<T>> {
   const url = buildUrl(selection.baseUrl, selection.endpoint)
-  const body = selection.apiFormat === 'anthropic'
-    ? toAnthropicBody(request, selection)
-    : toOpenAIBody(request, selection)
+  const body = buildProviderRequestBody(request, selection)
   const isStreaming = selection.apiFormat !== 'anthropic' && Boolean((body as any).stream)
   const headers = buildHeaders(selection)
   const maxRetries = Number(options.maxRetries ?? process.env.LLM_MAX_RETRIES ?? 5)
@@ -424,7 +557,7 @@ async function postProviderJson<T = any>(
     if (isStreaming) {
       try {
         console.log(`[provider-runtime] Response: ${response.status} | ${selection.model.model_name} | streaming | ${elapsed}s`)
-        raw = await readOpenAIStream(response)
+        raw = await readProviderStream(response, selection)
       } catch (error) {
         lastError = describeFetchError(error)
         console.error(`[provider-runtime] Stream read error: ${lastError}`)
@@ -445,9 +578,7 @@ async function postProviderJson<T = any>(
       }
     }
 
-    return selection.apiFormat === 'anthropic'
-      ? parseAnthropicResponse<T>(raw)
-      : normalizeLLMResponse<T>(raw)
+    return parseProviderResponsePayload<T>(raw, selection)
   }
 
   // All retries exhausted
@@ -574,9 +705,11 @@ export async function selectRuntimeModel(
 
 // ── Endpoint Resolution ─────────────────────────────────────
 
-function endpointForProvider(provider: ProviderRecord): string {
+export function endpointForProvider(provider: ProviderRecord): string {
   const endpoints = provider.endpoints || {}
+  if (isCodexResponsesFormat(provider.api_format)) return endpoints.responses || endpoints.chat || endpoints.llm || 'responses'
   if (endpoints.chat) return endpoints.chat
+  if (endpoints.responses) return endpoints.responses
   if (endpoints.completions) return endpoints.completions
   if (provider.api_format === 'anthropic') return 'messages'
   return 'chat/completions'

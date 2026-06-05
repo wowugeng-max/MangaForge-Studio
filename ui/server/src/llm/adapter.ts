@@ -171,7 +171,10 @@ function normalizeBaseUrl(url?: string) {
 
 function resolveProviderEndpoint(provider: ProviderRecord) {
   const endpoints = provider.endpoints || {}
-  const explicit = endpoints.chat || endpoints.responses || endpoints.completions || endpoints.llm || ''
+  const providerFormat = String(provider.api_format || '').toLowerCase()
+  const explicit = providerFormat.includes('responses') || providerFormat.includes('codex')
+    ? endpoints.responses || endpoints.chat || endpoints.completions || endpoints.llm || ''
+    : endpoints.chat || endpoints.responses || endpoints.completions || endpoints.llm || ''
   const base = normalizeBaseUrl(explicit || provider.default_base_url || '')
   if (!base) return ''
   // If the URL already ends with a known completion path, use it as-is
@@ -180,7 +183,8 @@ function resolveProviderEndpoint(provider: ProviderRecord) {
   const pathParts = base.replace(/^(https?:\/\/[^/]+)/, '').split('/').filter(Boolean)
   if (pathParts.length >= 2) return base
   const hasV1 = /\/v1$/.test(base)
-  if (String(provider.api_format || '').toLowerCase().includes('anthropic')) return hasV1 ? `${base}/messages` : `${base}/v1/messages`
+  if (providerFormat.includes('anthropic')) return hasV1 ? `${base}/messages` : `${base}/v1/messages`
+  if (providerFormat.includes('responses') || providerFormat.includes('codex')) return hasV1 ? `${base}/responses` : `${base}/v1/responses`
   // Default to chat/completions (NOT responses) for OpenAI-compatible providers
   return hasV1 ? `${base}/chat/completions` : `${base}/v1/chat/completions`
 }
