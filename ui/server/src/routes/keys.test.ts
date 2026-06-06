@@ -9,11 +9,11 @@ describe('provider key protocol tests', () => {
     expect(buildFallbackTestUrl('https://gateway.example.com', 'openai_responses')).toBe('https://gateway.example.com/v1/responses')
   })
 
-  test('fallback key probe sends Responses-style request body for codex providers', () => {
+  test('fallback key probe sends Codex CLI-style request body for codex providers', () => {
     const source = readFileSync(join(import.meta.dir, 'keys.ts'), 'utf8')
 
     expect(source).toContain("provider.endpoints?.responses")
-    expect(source).toContain('max_output_tokens')
-    expect(source).toContain("input: [{ role: 'user', content: 'ping' }]")
+    expect(source).toContain('buildCodexResponsesBody')
+    expect(source).not.toContain("input: [{ role: 'user', content: 'ping' }]")
   })
 })

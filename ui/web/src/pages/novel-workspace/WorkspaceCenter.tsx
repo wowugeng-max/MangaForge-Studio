@@ -339,6 +339,7 @@ export function WorkspaceCenter({
   onStartChapterPipeline,
   onCreateEditorReport,
   onEditActiveChapter,
+  onOpenStoryAssets,
   onChapterTextChange,
   generationWordTargetMode = 'standard',
   generationTargetWordCount = 3000,
@@ -388,6 +389,7 @@ export function WorkspaceCenter({
   onStartChapterPipeline: () => void
   onCreateEditorReport: () => void
   onEditActiveChapter: () => void
+  onOpenStoryAssets?: (focus?: 'discoveredAssets') => void
   onChapterTextChange: (text: string) => void
   generationWordTargetMode?: ChapterWordTargetMode
   generationTargetWordCount?: number
@@ -601,37 +603,43 @@ export function WorkspaceCenter({
       {!isEmptyProject && activeChapter && (
         <>
           <div className={`novel-editor-toolbar ${writingDeskCollapsed ? 'novel-editor-toolbar-collapsed' : ''}`} style={{
-            flexShrink: 0, padding: '10px 20px', background: '#fff',
-            borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', gap: 14,
+            flexShrink: 0,
           }}>
-            <Title className="novel-editor-title" level={5} style={{ margin: 0, minWidth: 180, maxWidth: 320 }}>
-              第{activeChapter.chapter_no}章《{displayValue(activeChapter.title) || '无标题'}》
-            </Title>
-            {chapterStatusTag(activeChapter)}
-            {materialScore && (
-              <Tooltip title={(materialScore.recommendations || []).slice(0, 4).join('；') || '材料完整度'}>
-                <Tag color={materialScore.can_generate ? 'green' : Number(materialScore.score || 0) >= 65 ? 'gold' : 'red'} bordered={false}>
-                  材料 {materialScore.score ?? '-'}%
-                </Tag>
+            <div className="novel-editor-toolbar-meta">
+              <Title className="novel-editor-title" level={5} style={{ margin: 0 }}>
+                第{activeChapter.chapter_no}章《{displayValue(activeChapter.title) || '无标题'}》
+              </Title>
+              <div className="novel-editor-status-stack">
+                {chapterStatusTag(activeChapter)}
+                {materialScore && (
+                  <Tooltip title={(materialScore.recommendations || []).slice(0, 4).join('；') || '材料完整度'}>
+                    <Tag color={materialScore.can_generate ? 'green' : Number(materialScore.score || 0) >= 65 ? 'gold' : 'red'} bordered={false}>
+                      材料 {materialScore.score ?? '-'}%
+                    </Tag>
+                  </Tooltip>
+                )}
+              </div>
+            </div>
+            <div className="novel-editor-toolbar-controls">
+              <Text className="novel-editor-word-count" type="secondary">{wc(activeChapter.chapter_text)} 字</Text>
+              <SaveIndicator status={saveStatus} />
+              <EditorDisplayControls prefs={editorDisplayPrefs} onChange={setEditorDisplayPrefs} />
+              <Tooltip title={writingDeskCollapsed ? '展开写作指挥台' : '收起写作指挥台'}>
+                <Button
+                  size="small"
+                  className="novel-editor-desk-toggle"
+                  icon={writingDeskCollapsed ? <DownOutlined /> : <UpOutlined />}
+                  onClick={() => setWritingDeskCollapsed(prev => !prev)}
+                >
+                  {writingDeskCollapsed ? '展开指挥台' : '收起指挥台'}
+                </Button>
               </Tooltip>
-            )}
-            <div style={{ flex: 1 }} />
-            <Text className="novel-editor-word-count" type="secondary" style={{ fontSize: 13 }}>{wc(activeChapter.chapter_text)} 字</Text>
-            <SaveIndicator status={saveStatus} />
-            <EditorDisplayControls prefs={editorDisplayPrefs} onChange={setEditorDisplayPrefs} />
-            <Tooltip title={writingDeskCollapsed ? '展开写作指挥台' : '收起写作指挥台'}>
-              <Button
-                size="small"
-                className="novel-editor-desk-toggle"
-                icon={writingDeskCollapsed ? <DownOutlined /> : <UpOutlined />}
-                onClick={() => setWritingDeskCollapsed(prev => !prev)}
-              >
-                {writingDeskCollapsed ? '展开指挥台' : '收起指挥台'}
-              </Button>
+            </div>
+            <Tooltip title={`${recommendedAction.label}：${recommendedAction.reason}`}>
+              <Text className="novel-editor-toolbar-recommendation">
+                推荐：{recommendedAction.label} · {recommendedAction.reason}
+              </Text>
             </Tooltip>
-            <Text className="novel-editor-recommendation-hint">
-              推荐：{recommendedAction.label} · {recommendedAction.reason}
-            </Text>
             {writingDeskCollapsed ? (
               <div className="novel-editor-collapsed-summary">
                 <Tag className="novel-editor-collapsed-phase" bordered={false}>{aiResponsibility.phaseLabel}</Tag>
@@ -645,7 +653,7 @@ export function WorkspaceCenter({
                 </Space>
               </div>
             ) : (
-              <Space className="novel-editor-action-row" size={10} wrap style={{ justifyContent: 'flex-end' }}>
+              <Space className="novel-editor-action-row novel-editor-toolbar-actions" size={10} wrap>
                 <div className="novel-editor-action-flow novel-editor-stagebar">
                   <div className="novel-editor-action-group novel-editor-stage novel-editor-stage-prep novel-editor-action-group-prep">
                     <div className="novel-editor-action-group-heading">
@@ -749,9 +757,23 @@ export function WorkspaceCenter({
                   </Tag>
                 )}
                 {deliverySummary.assetIntake && deliverySummary.assetIntake.pendingCount > 0 && (
-                  <Tag className="novel-delivery-asset-tag" bordered={false}>
-                    {deliverySummary.assetIntake.label}
-                  </Tag>
+                  <Tooltip title="打开设定资产页，确认正文中新出现的人物、物品、能力、势力、地点或伏笔">
+                    <Tag
+                      className="novel-delivery-asset-tag novel-delivery-asset-tag-clickable"
+                      bordered={false}
+                      role={onOpenStoryAssets ? 'button' : undefined}
+                      tabIndex={onOpenStoryAssets ? 0 : undefined}
+                      onClick={() => onOpenStoryAssets?.('discoveredAssets')}
+                      onKeyDown={(event) => {
+                        if (!onOpenStoryAssets) return
+                        if (event.key !== 'Enter' && event.key !== ' ') return
+                        event.preventDefault()
+                        onOpenStoryAssets('discoveredAssets')
+                      }}
+                    >
+                      {deliverySummary.assetIntake.label}
+                    </Tag>
+                  </Tooltip>
                 )}
                 {deliverySummary.readabilityReview && (
                   <>

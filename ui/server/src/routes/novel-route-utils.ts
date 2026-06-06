@@ -28,6 +28,68 @@ export function getNovelPayload(result: any) {
   return {}
 }
 
+function textFromOutputParts(parts: any[]) {
+  return parts
+    .map((part: any) => String(part?.text || part?.content || part?.value || ''))
+    .filter(Boolean)
+    .join('\n')
+}
+
+function textFromOutputItems(items: any[]) {
+  return items
+    .map((item: any) => {
+      if (typeof item?.content === 'string') return item.content
+      if (Array.isArray(item?.content)) return textFromOutputParts(item.content)
+      return String(item?.text || item?.value || '')
+    })
+    .filter(Boolean)
+    .join('\n')
+}
+
+export function extractLLMText(result: any) {
+  const candidates = [
+    result?.content,
+    result?.raw?.content,
+    result?.raw?.output_text,
+    result?.raw?.response?.output_text,
+    result?.raw?.choices?.[0]?.message?.content,
+    result?.raw?.choices?.[0]?.text,
+    Array.isArray(result?.raw?.output) ? textFromOutputItems(result.raw.output) : '',
+    Array.isArray(result?.raw?.response?.output) ? textFromOutputItems(result.raw.response.output) : '',
+  ]
+  return candidates.map(item => String(item || '').trim()).find(Boolean) || ''
+}
+
+export function extractPlainProseFallback(result: any, minChars = 800) {
+  const text = extractLLMText(result)
+    .replace(/^```(?!json\b)[a-zA-Z0-9_-]*\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim()
+  if (!text) return ''
+  if (/^```json\b/i.test(text) || /^[{\[]/.test(text)) return ''
+  const compact = text.replace(/\s/g, '')
+  if (compact.length < minChars) return ''
+  return text
+}
+
+export function buildLLMResultDiagnostics(result: any, limit = 1200) {
+  const text = extractLLMText(result)
+  const raw = result?.raw || null
+  const streamTail = Array.isArray(raw?.stream_chunks_tail) ? raw.stream_chunks_tail : []
+  return {
+    finish_reason: result?.finish_reason || raw?.finish_reason || raw?.status || '',
+    usage: result?.usage || raw?.usage || raw?.response?.usage || null,
+    content_length: String(text || '').length,
+    content_preview: compactText(text, limit),
+    raw_keys: raw && typeof raw === 'object' ? Object.keys(raw) : [],
+    stream_tail: streamTail.slice(-5).map((chunk: any) => ({
+      type: String(chunk?.type || chunk?.event || ''),
+      keys: chunk && typeof chunk === 'object' ? Object.keys(chunk) : [],
+      preview: compactText(JSON.stringify(chunk || {}), 500),
+    })),
+  }
+}
+
 export const compactText = (value: any, limit = 500) => String(value || '').replace(/\s+/g, ' ').trim().slice(0, limit)
 export const asArray = (value: any) => Array.isArray(value) ? value : []
 export const clampScore = (value: number) => Math.max(0, Math.min(100, Math.round(value)))

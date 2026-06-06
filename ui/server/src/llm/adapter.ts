@@ -1,4 +1,5 @@
 import type { LLMRequest, LLMResponse, LLMToolCall } from './types'
+import { buildCodexResponsesBody } from './codex-responses'
 import type { APIKeyRecord } from '../key-store'
 import type { ModelRecord } from '../model-store'
 import type { ProviderRecord } from '../provider-store'
@@ -201,8 +202,13 @@ export class ConfiguredProviderAdapter implements NovelLLMAdapter {
     const modelRequest = { ...request, model: this.model.model_name || request.model }
     const providerFormat = String(this.provider.api_format || '').toLowerCase()
     const isAnthropic = providerFormat.includes('anthropic')
+    const isCodex = providerFormat.includes('codex')
     const isResponses = providerFormat.includes('responses')
-    const body = isResponses ? buildOpenAIResponsesBody(modelRequest) : (isAnthropic ? buildAnthropicMessagesBody(modelRequest) : buildOpenAIChatBody(modelRequest))
+    const body = isCodex
+      ? buildCodexResponsesBody(modelRequest, this.model.model_name || request.model, false, {
+        baseUrl: this.provider.default_base_url,
+      })
+      : isResponses ? buildOpenAIResponsesBody(modelRequest) : (isAnthropic ? buildAnthropicMessagesBody(modelRequest) : buildOpenAIChatBody(modelRequest))
     const headers = applyProviderAuth({ ...(this.provider.custom_headers || {}) }, this.provider, this.apiKey.key)
     if (isAnthropic && !headers['anthropic-version']) headers['anthropic-version'] = '2023-06-01'
     const raw = await postJson(endpoint, body, undefined, headers)

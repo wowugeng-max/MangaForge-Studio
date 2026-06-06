@@ -4,6 +4,7 @@ import { syncModelsForKey } from '../key-sync'
 import { readProviders } from '../provider-store'
 import { readModels, writeModels, type ModelRecord } from '../model-store'
 import { ConfiguredProviderAdapter } from '../llm/adapter'
+import { buildCodexResponsesBody } from '../llm/codex-responses'
 
 function redactSecret(value?: string) {
   const text = String(value || '')
@@ -200,7 +201,7 @@ export function registerKeyRoutes(app: Express, getWorkspace: () => string) {
       if (authType === 'x-api-key' || authType === 'api-key') headers['x-api-key'] = keyValue
       else if (authType !== 'none') headers.Authorization = keyValue.toLowerCase().startsWith('bearer ') ? keyValue : `Bearer ${keyValue}`
       const requestBody = providerFormat.includes('responses') || providerFormat.includes('codex')
-        ? { model: 'test', input: [{ role: 'user', content: 'ping' }], max_output_tokens: 1, temperature: 0 }
+        ? buildCodexResponsesBody({ model: 'test', messages: [{ role: 'user', content: 'ping' }] }, 'test', false)
         : providerFormat.includes('anthropic')
           ? { model: 'test', messages: [{ role: 'user', content: 'ping' }], max_tokens: 1, temperature: 0 }
           : { model: 'test', messages: [{ role: 'user', content: 'ping' }], max_tokens: 1, temperature: 0 }
