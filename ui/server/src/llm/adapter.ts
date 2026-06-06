@@ -1,4 +1,5 @@
 import type { LLMRequest, LLMResponse, LLMToolCall } from './types'
+import { buildCodexResponsesBody } from './codex-responses'
 import type { APIKeyRecord } from '../key-store'
 import type { ModelRecord } from '../model-store'
 import type { ProviderRecord } from '../provider-store'
@@ -127,7 +128,7 @@ function buildOpenAIResponsesBody(request: LLMRequest) {
     body.tools = normalized.tools.map(tool => ({ type: 'function', name: tool.name, description: tool.description, parameters: tool.input_schema }))
     body.tool_choice = normalized.tool_choice
   }
-  if (normalized.response_format) body.text = { format: { type: 'json_object' } }
+  if (normalized.response_format && normalized.response_format !== 'text') body.text = { format: { type: 'json_object' } }
   return body
 }
 
@@ -171,7 +172,10 @@ function normalizeBaseUrl(url?: string) {
 
 function resolveProviderEndpoint(provider: ProviderRecord) {
   const endpoints = provider.endpoints || {}
-  const explicit = endpoints.chat || endpoints.responses || endpoints.completions || endpoints.llm || ''
+  const providerFormat = String(provider.api_format || '').toLowerCase()
+  const explicit = providerFormat.includes('responses') || providerFormat.includes('codex')
+    ? endpoints.responses || endpoints.chat || endpoints.completions || endpoints.llm || ''
+    : endpoints.chat || endpoints.responses || endpoints.completions || endpoints.llm || ''
   const base = normalizeBaseUrl(explicit || provider.default_base_url || '')
   if (!base) return ''
   // If the URL already ends with a known completion path, use it as-is
@@ -180,7 +184,8 @@ function resolveProviderEndpoint(provider: ProviderRecord) {
   const pathParts = base.replace(/^(https?:\/\/[^/]+)/, '').split('/').filter(Boolean)
   if (pathParts.length >= 2) return base
   const hasV1 = /\/v1$/.test(base)
-  if (String(provider.api_format || '').toLowerCase().includes('anthropic')) return hasV1 ? `${base}/messages` : `${base}/v1/messages`
+  if (providerFormat.includes('anthropic')) return hasV1 ? `${base}/messages` : `${base}/v1/messages`
+  if (providerFormat.includes('responses') || providerFormat.includes('codex')) return hasV1 ? `${base}/responses` : `${base}/v1/responses`
   // Default to chat/completions (NOT responses) for OpenAI-compatible providers
   return hasV1 ? `${base}/chat/completions` : `${base}/v1/chat/completions`
 }
@@ -197,8 +202,13 @@ export class ConfiguredProviderAdapter implements NovelLLMAdapter {
     const modelRequest = { ...request, model: this.model.model_name || request.model }
     const providerFormat = String(this.provider.api_format || '').toLowerCase()
     const isAnthropic = providerFormat.includes('anthropic')
+    const isCodex = providerFormat.includes('codex')
     const isResponses = providerFormat.includes('responses')
-    const body = isResponses ? buildOpenAIResponsesBody(modelRequest) : (isAnthropic ? buildAnthropicMessagesBody(modelRequest) : buildOpenAIChatBody(modelRequest))
+    const body = isCodex
+      ? buildCodexResponsesBody(modelRequest, this.model.model_name || request.model, false, {
+        baseUrl: this.provider.default_base_url,
+      })
+      : isResponses ? buildOpenAIResponsesBody(modelRequest) : (isAnthropic ? buildAnthropicMessagesBody(modelRequest) : buildOpenAIChatBody(modelRequest))
     const headers = applyProviderAuth({ ...(this.provider.custom_headers || {}) }, this.provider, this.apiKey.key)
     if (isAnthropic && !headers['anthropic-version']) headers['anthropic-version'] = '2023-06-01'
     const raw = await postJson(endpoint, body, undefined, headers)

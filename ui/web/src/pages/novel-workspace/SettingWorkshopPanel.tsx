@@ -1,9 +1,24 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Button, Card, Checkbox, Empty, Form, Input, InputNumber, List, message, Modal, Select, Space, Tabs, Tag, Typography } from 'antd'
 import apiClient from '../../api/client'
 import { displayValue } from './utils'
+import './SettingWorkshopPanel.css'
 
 const { Text, Paragraph } = Typography
+
+type SettingWorkshopActionKey =
+  | 'save_usage'
+  | 'incubate_settings'
+  | 'incubate_settings_model'
+  | 'incubate_storylines'
+  | 'incubate_storylines_model'
+  | 'suggest_usage'
+  | 'suggest_usage_model'
+  | 'suggest_storyline'
+  | 'suggest_storyline_model'
+  | 'consistency_check'
+  | 'apply_state_updates'
+  | 'apply_discovered_assets'
 
 const settingTypes = [
   { value: 'character', label: '角色' },
@@ -102,13 +117,19 @@ export function SettingWorkshopPanel({
   projectId,
   activeChapter,
   selectedModelId,
+  layout = 'compact',
+  focusDiscoveredAssetsToken = 0,
+  onAssetsApplied,
 }: {
   projectId: number
   activeChapter?: any | null
   selectedModelId?: number
+  layout?: 'compact' | 'workspace'
+  focusDiscoveredAssetsToken?: number
+  onAssetsApplied?: () => void
 }) {
   const [loading, setLoading] = useState(false)
-  const [saving, setSaving] = useState(false)
+  const [actionLoadingKey, setActionLoadingKey] = useState<SettingWorkshopActionKey | ''>('')
   const [settings, setSettings] = useState<any[]>([])
   const [usage, setUsage] = useState<any[]>([])
   const [discoveredAssets, setDiscoveredAssets] = useState<any[]>([])
@@ -119,6 +140,7 @@ export function SettingWorkshopPanel({
   const [editing, setEditing] = useState<any | null>(null)
   const [editorOpen, setEditorOpen] = useState(false)
   const [form] = Form.useForm()
+  const discoveredAssetsRef = useRef<HTMLDivElement | null>(null)
 
   const load = async () => {
     if (!projectId) return
@@ -164,6 +186,19 @@ export function SettingWorkshopPanel({
 
   const usageMap = useMemo(() => new Map(usage.map(item => [Number(item.entity_id), item])), [usage])
   const currentTypeSettings = grouped[activeType] || []
+  const isActionBusy = Boolean(actionLoadingKey)
+  const isActionLoading = (key: SettingWorkshopActionKey) => actionLoadingKey === key
+  const commandClass = (key: SettingWorkshopActionKey, modelCall = false) => [
+    'setting-workshop-command',
+    modelCall ? 'setting-workshop-model-command' : '',
+    isActionLoading(key) ? 'setting-workshop-running-command' : '',
+  ].filter(Boolean).join(' ')
+  const disabledForAction = (key: SettingWorkshopActionKey, disabled = false) => disabled || (isActionBusy && !isActionLoading(key))
+
+  useEffect(() => {
+    if (!focusDiscoveredAssetsToken || discoveredAssets.length === 0) return
+    discoveredAssetsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [focusDiscoveredAssetsToken, discoveredAssets.length])
   const requiredCount = usage.filter(item => item.required && !item.forbidden).length
   const forbiddenCount = usage.filter(item => item.forbidden).length
   const stateUpdateKey = (item: any, index: number) => `${item.entity_id || item.name || 'setting'}-${index}`
@@ -256,7 +291,7 @@ export function SettingWorkshopPanel({
 
   const saveUsage = async () => {
     if (!activeChapter?.id) return message.warning('请先选择章节')
-    setSaving(true)
+    setActionLoadingKey('save_usage')
     try {
       await apiClient.put(`/novel/chapters/${activeChapter.id}/settings-usage`, { project_id: projectId, usage })
       message.success('本章设定调用已保存')
@@ -264,12 +299,12 @@ export function SettingWorkshopPanel({
     } catch {
       message.error('保存章节设定调用失败')
     } finally {
-      setSaving(false)
+      setActionLoadingKey('')
     }
   }
 
   const incubateSettings = async (useModel: boolean) => {
-    setSaving(true)
+    setActionLoadingKey(useModel ? 'incubate_settings_model' : 'incubate_settings')
     try {
       const res = await apiClient.post(`/novel/projects/${projectId}/settings/incubate-from-project`, {
         use_model: useModel,
@@ -280,12 +315,12 @@ export function SettingWorkshopPanel({
     } catch {
       message.error('自动生成设定失败')
     } finally {
-      setSaving(false)
+      setActionLoadingKey('')
     }
   }
 
   const incubateStorylines = async (useModel: boolean) => {
-    setSaving(true)
+    setActionLoadingKey(useModel ? 'incubate_storylines_model' : 'incubate_storylines')
     try {
       const res = await apiClient.post(`/novel/projects/${projectId}/storylines/incubate`, {
         use_model: useModel,
@@ -296,13 +331,13 @@ export function SettingWorkshopPanel({
     } catch {
       message.error('剧情线孵化失败')
     } finally {
-      setSaving(false)
+      setActionLoadingKey('')
     }
   }
 
   const suggestChapterUsage = async (useModel: boolean) => {
     if (!activeChapter?.id) return message.warning('请先选择章节')
-    setSaving(true)
+    setActionLoadingKey(useModel ? 'suggest_usage_model' : 'suggest_usage')
     try {
       const res = await apiClient.post(`/novel/chapters/${activeChapter.id}/settings-usage/suggest`, {
         project_id: projectId,
@@ -315,13 +350,13 @@ export function SettingWorkshopPanel({
     } catch {
       message.error('本章设定自动匹配失败')
     } finally {
-      setSaving(false)
+      setActionLoadingKey('')
     }
   }
 
   const suggestStorylineUsage = async (useModel: boolean) => {
     if (!activeChapter?.id) return message.warning('请先选择章节')
-    setSaving(true)
+    setActionLoadingKey(useModel ? 'suggest_storyline_model' : 'suggest_storyline')
     try {
       const res = await apiClient.post(`/novel/chapters/${activeChapter.id}/storylines/suggest`, {
         project_id: projectId,
@@ -334,13 +369,13 @@ export function SettingWorkshopPanel({
     } catch {
       message.error('本章剧情线自动匹配失败')
     } finally {
-      setSaving(false)
+      setActionLoadingKey('')
     }
   }
 
   const runConsistencyCheck = async () => {
     if (!activeChapter?.id) return message.warning('请先选择章节')
-    setSaving(true)
+    setActionLoadingKey('consistency_check')
     try {
       const res = await apiClient.post(`/novel/chapters/${activeChapter.id}/settings-consistency-check`, {
         project_id: projectId,
@@ -357,7 +392,7 @@ export function SettingWorkshopPanel({
     } catch {
       message.error('设定一致性检查失败')
     } finally {
-      setSaving(false)
+      setActionLoadingKey('')
     }
   }
 
@@ -365,7 +400,7 @@ export function SettingWorkshopPanel({
     if (!activeChapter?.id) return message.warning('请先选择章节')
     const updates = pendingStateUpdates.filter(item => selectedStateUpdateKeys.includes(item._key))
     if (updates.length === 0) return message.warning('请先选择要应用的状态变更')
-    setSaving(true)
+    setActionLoadingKey('apply_state_updates')
     try {
       const res = await apiClient.post(`/novel/chapters/${activeChapter.id}/settings-state-updates/apply`, {
         project_id: projectId,
@@ -379,7 +414,7 @@ export function SettingWorkshopPanel({
     } catch {
       message.error('应用设定状态变更失败')
     } finally {
-      setSaving(false)
+      setActionLoadingKey('')
     }
   }
 
@@ -387,7 +422,7 @@ export function SettingWorkshopPanel({
     if (!activeChapter?.id) return message.warning('请先选择章节')
     const assets = discoveredAssets.filter(item => selectedDiscoveredAssetKeys.includes(item._key))
     if (assets.length === 0) return message.warning('请先选择要入库的新资产')
-    setSaving(true)
+    setActionLoadingKey('apply_discovered_assets')
     try {
       const res = await apiClient.post(`/novel/chapters/${activeChapter.id}/discovered-assets/apply`, {
         project_id: projectId,
@@ -398,15 +433,16 @@ export function SettingWorkshopPanel({
       setDiscoveredAssets(prev => prev.filter(item => !selectedDiscoveredAssetKeys.includes(item._key)))
       setSelectedDiscoveredAssetKeys([])
       await load()
+      onAssetsApplied?.()
     } catch {
       message.error('新资产确认入库失败')
     } finally {
-      setSaving(false)
+      setActionLoadingKey('')
     }
   }
 
   return (
-    <Space direction="vertical" size={8} style={{ width: '100%', padding: 8 }}>
+    <Space className={`setting-workshop-panel setting-workshop-panel-${layout}`} direction="vertical" size={layout === 'workspace' ? 14 : 8}>
       <Alert
         type="info"
         showIcon
@@ -414,17 +450,17 @@ export function SettingWorkshopPanel({
         description="把角色、境界、能力、物品、Boss、规则等精细设定结构化，再由本章调用面板决定生成时必须使用、允许使用或禁止揭露的内容。"
       />
       <Space wrap size={6}>
-        <Button size="small" type="primary" onClick={() => openEditor()}>新增设定</Button>
-        <Button size="small" onClick={() => incubateSettings(false)} loading={saving}>从项目资料补齐</Button>
-        <Button size="small" onClick={() => incubateSettings(true)} loading={saving} disabled={!selectedModelId}>模型提炼设定</Button>
-        <Button size="small" onClick={() => incubateStorylines(false)} loading={saving}>补齐剧情线</Button>
-        <Button size="small" onClick={() => incubateStorylines(true)} loading={saving} disabled={!selectedModelId}>模型孵化剧情线</Button>
-        <Button size="small" onClick={() => suggestChapterUsage(false)} loading={saving} disabled={!activeChapter?.id}>本章快速匹配</Button>
-        <Button size="small" onClick={() => suggestChapterUsage(true)} loading={saving} disabled={!activeChapter?.id || !selectedModelId}>模型匹配本章</Button>
-        <Button size="small" onClick={() => suggestStorylineUsage(false)} loading={saving} disabled={!activeChapter?.id}>匹配剧情线</Button>
-        <Button size="small" onClick={() => suggestStorylineUsage(true)} loading={saving} disabled={!activeChapter?.id || !selectedModelId}>模型匹配剧情线</Button>
-        <Button size="small" onClick={runConsistencyCheck} loading={saving} disabled={!activeChapter?.chapter_text}>检查本章</Button>
-        <Button size="small" onClick={load} loading={loading}>刷新</Button>
+        <Button size="small" type="primary" disabled={isActionBusy} onClick={() => openEditor()}>新增设定</Button>
+        <Button size="small" className={commandClass('incubate_settings')} onClick={() => incubateSettings(false)} loading={isActionLoading('incubate_settings')} disabled={disabledForAction('incubate_settings')}>从项目资料补齐</Button>
+        <Button size="small" className={commandClass('incubate_settings_model', true)} onClick={() => incubateSettings(true)} loading={isActionLoading('incubate_settings_model')} disabled={disabledForAction('incubate_settings_model', !selectedModelId)}>模型提炼设定</Button>
+        <Button size="small" className={commandClass('incubate_storylines')} onClick={() => incubateStorylines(false)} loading={isActionLoading('incubate_storylines')} disabled={disabledForAction('incubate_storylines')}>补齐剧情线</Button>
+        <Button size="small" className={commandClass('incubate_storylines_model', true)} onClick={() => incubateStorylines(true)} loading={isActionLoading('incubate_storylines_model')} disabled={disabledForAction('incubate_storylines_model', !selectedModelId)}>模型孵化剧情线</Button>
+        <Button size="small" className={commandClass('suggest_usage')} onClick={() => suggestChapterUsage(false)} loading={isActionLoading('suggest_usage')} disabled={disabledForAction('suggest_usage', !activeChapter?.id)}>本章快速匹配</Button>
+        <Button size="small" className={commandClass('suggest_usage_model', true)} onClick={() => suggestChapterUsage(true)} loading={isActionLoading('suggest_usage_model')} disabled={disabledForAction('suggest_usage_model', !activeChapter?.id || !selectedModelId)}>模型匹配本章</Button>
+        <Button size="small" className={commandClass('suggest_storyline')} onClick={() => suggestStorylineUsage(false)} loading={isActionLoading('suggest_storyline')} disabled={disabledForAction('suggest_storyline', !activeChapter?.id)}>匹配剧情线</Button>
+        <Button size="small" className={commandClass('suggest_storyline_model', true)} onClick={() => suggestStorylineUsage(true)} loading={isActionLoading('suggest_storyline_model')} disabled={disabledForAction('suggest_storyline_model', !activeChapter?.id || !selectedModelId)}>模型匹配剧情线</Button>
+        <Button size="small" className={commandClass('consistency_check', true)} onClick={runConsistencyCheck} loading={isActionLoading('consistency_check')} disabled={disabledForAction('consistency_check', !activeChapter?.chapter_text)}>检查本章</Button>
+        <Button size="small" onClick={load} loading={loading} disabled={isActionBusy}>刷新</Button>
       </Space>
 
       <Card size="small" title={activeChapter ? `本章设定调用：第${activeChapter.chapter_no}章` : '本章设定调用'}>
@@ -433,10 +469,11 @@ export function SettingWorkshopPanel({
           <Tag color="red" bordered={false}>禁揭 {forbiddenCount}</Tag>
           <Tag bordered={false}>已配置 {usage.length}</Tag>
         </Space>
-        <Button size="small" block style={{ marginTop: 8 }} type="primary" onClick={saveUsage} loading={saving} disabled={!activeChapter?.id}>保存本章调用</Button>
+        <Button size="small" block style={{ marginTop: 8 }} type="primary" onClick={saveUsage} loading={isActionLoading('save_usage')} disabled={disabledForAction('save_usage', !activeChapter?.id)}>保存本章调用</Button>
       </Card>
 
       {discoveredAssets.length > 0 && (
+        <div ref={discoveredAssetsRef} className="setting-workshop-discovered-anchor">
         <Card
           size="small"
           title={`新资产候选 ${discoveredAssets.length}`}
@@ -474,11 +511,12 @@ export function SettingWorkshopPanel({
           <Space style={{ width: '100%', justifyContent: 'space-between', marginTop: 8 }}>
             <Text type="secondary" style={{ fontSize: 12 }}>已选择 {selectedDiscoveredAssetKeys.length} 项，确认后会写入角色卡或设定工坊</Text>
             <Space size={6}>
-              <Button size="small" onClick={() => { setDiscoveredAssets([]); setSelectedDiscoveredAssetKeys([]) }}>暂不处理</Button>
-              <Button size="small" type="primary" loading={saving} onClick={applySelectedDiscoveredAssets}>确认入库</Button>
+              <Button size="small" disabled={isActionBusy} onClick={() => { setDiscoveredAssets([]); setSelectedDiscoveredAssetKeys([]) }}>暂不处理</Button>
+              <Button size="small" type="primary" loading={isActionLoading('apply_discovered_assets')} disabled={disabledForAction('apply_discovered_assets')} onClick={applySelectedDiscoveredAssets}>确认入库</Button>
             </Space>
           </Space>
         </Card>
+        </div>
       )}
 
       {pendingStateUpdates.length > 0 && (
@@ -519,8 +557,8 @@ export function SettingWorkshopPanel({
           <Space style={{ width: '100%', justifyContent: 'space-between', marginTop: 8 }}>
             <Text type="secondary" style={{ fontSize: 12 }}>已选择 {selectedStateUpdateKeys.length} 项</Text>
             <Space size={6}>
-              <Button size="small" onClick={() => { setPendingStateUpdates([]); setSelectedStateUpdateKeys([]) }}>暂不处理</Button>
-              <Button size="small" type="primary" loading={saving} onClick={applySelectedStateUpdates}>应用选中变更</Button>
+              <Button size="small" disabled={isActionBusy} onClick={() => { setPendingStateUpdates([]); setSelectedStateUpdateKeys([]) }}>暂不处理</Button>
+              <Button size="small" type="primary" loading={isActionLoading('apply_state_updates')} disabled={disabledForAction('apply_state_updates')} onClick={applySelectedStateUpdates}>应用选中变更</Button>
             </Space>
           </Space>
         </Card>

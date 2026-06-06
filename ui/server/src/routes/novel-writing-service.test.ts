@@ -19,7 +19,7 @@ import {
   proseMaxTokensForWordTarget,
   resolveChapterWordTarget,
 } from './novel-writing-service'
-import { getStyleLock } from './novel-route-utils'
+import { buildLLMResultDiagnostics, extractPlainProseFallback, getStyleLock } from './novel-route-utils'
 
 describe('normalizeSceneCardsPayload', () => {
   test('converts target chapter outlines into fallback scene cards', () => {
@@ -155,6 +155,31 @@ describe('chapter prose word target', () => {
     expect(extracted.text).toBe('扩写后的正文')
     expect(extracted.scene_breakdown).toHaveLength(1)
     expect(extracted.continuity_notes).toEqual(['保留钩子'])
+  })
+
+  test('recovers plain prose when a draft model ignores the JSON envelope', () => {
+    const prose = '刺耳的铃声炸开。李超猛地睁眼，发现宿舍门外的影子贴着地面游动。'.repeat(20)
+
+    expect(extractPlainProseFallback({ content: prose }, 120)).toBe(prose)
+    expect(extractPlainProseFallback({ content: `{"chapter_text":"${prose}"}` }, 120)).toBe('')
+  })
+
+  test('summarizes LLM result diagnostics for empty-content failures', () => {
+    const diagnostics = buildLLMResultDiagnostics({
+      content: '',
+      finish_reason: 'completed',
+      usage: { input_tokens: 10, output_tokens: 20, total_tokens: 30 },
+      raw: {
+        stream_chunks_tail: [
+          { type: 'response.completed', response: { status: 'completed', output: [{ type: 'reasoning', summary: [] }] } },
+        ],
+      },
+    })
+
+    expect(diagnostics.finish_reason).toBe('completed')
+    expect(diagnostics.usage.output_tokens).toBe(20)
+    expect(diagnostics.raw_keys).toContain('stream_chunks_tail')
+    expect(diagnostics.stream_tail.length).toBe(1)
   })
 
   test('defaults normal chapters to roughly 3000 Chinese characters', () => {

@@ -21,6 +21,7 @@ import { createSSEClient, generateClientId, type SSEMessage } from '../utils/sse
 import { ChapterDirectorySidebar } from './novel-workspace/ChapterDirectorySidebar'
 import type { EditorKind } from './novel-workspace/EditorModal'
 import { ReferencePanel } from './novel-workspace/ReferencePanel'
+import { StoryAssetsWorkspace } from './novel-workspace/StoryAssetsWorkspace'
 import { StoryPlanningWorkspace, type PlanningLoadingKey } from './novel-workspace/StoryPlanningWorkspace'
 import { WritingCockpitPanel, type WritingCockpitPrimaryActionOverride } from './novel-workspace/WritingCockpitPanel'
 import { WorkspaceCenter } from './novel-workspace/WorkspaceCenter'
@@ -185,6 +186,7 @@ export default function NovelProjectWorkspace() {
   const [rightPanelTab, setRightPanelTab] = useState('worldbuilding')
   const [workspaceArea, setWorkspaceArea] = useState<WorkspaceArea>('storyPlanning')
   const [focusWritingMode, setFocusWritingMode] = useState(false)
+  const [storyAssetsFocusDiscoveredToken, setStoryAssetsFocusDiscoveredToken] = useState(0)
 
   const isWritingFocusMode = focusWritingMode && workspaceArea === 'chapterWriting'
 
@@ -496,6 +498,13 @@ export default function NovelProjectWorkspace() {
     const saved = await selectChapter(chapterId)
     if (saved) setWorkspaceArea('chapterWriting')
     return saved
+  }
+
+  const openStoryAssetsWorkspace = (focus?: 'discoveredAssets') => {
+    setWorkspaceArea('storyAssets')
+    if (focus === 'discoveredAssets') {
+      setStoryAssetsFocusDiscoveredToken(prev => prev + 1)
+    }
   }
 
   const {
@@ -3918,7 +3927,7 @@ export default function NovelProjectWorkspace() {
   const workspaceAreaTabs: Array<{ key: WorkspaceArea; label: string; icon: React.ReactNode }> = [
     { key: 'storyPlanning', label: '故事规划', icon: <BookOutlined /> },
     { key: 'chapterWriting', label: '章节写作', icon: <EditOutlined /> },
-    { key: 'storyAssets', label: '资料设定', icon: <DatabaseOutlined /> },
+    { key: 'storyAssets', label: '设定资产', icon: <DatabaseOutlined /> },
     { key: 'qualityRevision', label: '质检修订', icon: <SafetyOutlined /> },
     { key: 'productionOps', label: '生产运营', icon: <RocketOutlined /> },
   ]
@@ -3934,7 +3943,7 @@ export default function NovelProjectWorkspace() {
       longform_pressure: () => { void runLongformPressureTest() },
       topic_validation: () => { void runTopicValidation() },
       reference_diagnosis: () => { void openReferenceKnowledgeDiagnosis() },
-      open_story_assets: () => setWorkspaceArea('storyAssets'),
+      open_story_assets: () => openStoryAssetsWorkspace(),
       update_story_state: () => openStoryStateEditor(),
       open_quality_revision: () => setWorkspaceArea('qualityRevision'),
       run_first30_retention: () => { void runFirst30RetentionDiagnosis() },
@@ -4243,6 +4252,7 @@ export default function NovelProjectWorkspace() {
           onStartChapterPipeline={startChapterPipeline}
           onCreateEditorReport={createEditorReport}
           onEditActiveChapter={() => activeChapter && openEditor('chapter', activeChapter)}
+          onOpenStoryAssets={openStoryAssetsWorkspace}
           generationWordTargetMode={chapterWordTargetMode}
           generationTargetWordCount={chapterTargetWordCount}
           onGenerationWordTargetModeChange={setChapterWordTargetMode}
@@ -4260,24 +4270,31 @@ export default function NovelProjectWorkspace() {
       )
     }
 
-    const groups: Record<Exclude<WorkspaceArea, 'storyPlanning' | 'chapterWriting'>, {
+    if (workspaceArea === 'storyAssets') {
+      return (
+        <StoryAssetsWorkspace
+          projectId={projectId}
+          activeChapter={activeChapter}
+          selectedModelId={selectedModelId}
+          worldbuildingCount={worldbuilding.length}
+          characterCount={characters.length}
+          outlineCount={outlines.length}
+          hasWritingBible={Boolean(selectedProject?.reference_config?.writing_bible)}
+          focusDiscoveredAssetsToken={storyAssetsFocusDiscoveredToken}
+          onOpenWritingBibleEditor={() => { void openWritingBibleEditor() }}
+          onOpenStoryStateEditor={openStoryStateEditor}
+          onOpenCreativeCards={() => setCreativeCardsOpen(true)}
+          onOpenReferenceEngineering={() => setReferenceEngineeringOpen(true)}
+          onAssetsApplied={() => { void loadProjectModules() }}
+        />
+      )
+    }
+
+    const groups: Record<Exclude<WorkspaceArea, 'storyPlanning' | 'chapterWriting' | 'storyAssets'>, {
       title: string
       desc: string
       actions: Array<{ label: string; onClick: () => void; loading?: boolean; primary?: boolean; disabled?: boolean }>
     }> = {
-      storyAssets: {
-        title: '资料设定',
-        desc: '维护写作圣经、故事状态、角色、世界观、创作资料卡和参考工程。',
-        actions: [
-          { label: '写作圣经', onClick: () => { void openWritingBibleEditor() }, primary: true },
-          { label: '故事状态机', onClick: openStoryStateEditor },
-          { label: '创作资料卡中心', onClick: () => setCreativeCardsOpen(true) },
-          { label: '原创孵化', onClick: () => { void runOriginalIncubator() }, loading: incubatingOriginal, disabled: !selectedModelId || incubatingOriginal },
-          { label: '参考作品配置', onClick: () => setReferenceConfigOpen(true) },
-          { label: '参考工程总览', onClick: () => setReferenceEngineeringOpen(true) },
-          { label: '参考知识诊断', onClick: () => { void openReferenceKnowledgeDiagnosis() }, loading: commercialToolLoading === 'referenceDiagnosis' },
-        ],
-      },
       qualityRevision: {
         title: '质检修订',
         desc: '检查当前章、前后文连续性、全书一致性、审阅批注和质量基准。',

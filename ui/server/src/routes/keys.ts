@@ -4,6 +4,7 @@ import { syncModelsForKey } from '../key-sync'
 import { readProviders } from '../provider-store'
 import { readModels, writeModels, type ModelRecord } from '../model-store'
 import { ConfiguredProviderAdapter } from '../llm/adapter'
+import { buildCodexResponsesBody } from '../llm/codex-responses'
 
 function redactSecret(value?: string) {
   const text = String(value || '')
@@ -59,11 +60,14 @@ function selectProbeModel(models: ModelRecord[], keyId: number, providerId: stri
     || candidates[0]
 }
 
-function buildFallbackTestUrl(rawEndpoint: string, apiFormat: string) {
+export function buildFallbackTestUrl(rawEndpoint: string, apiFormat: string) {
   const endpoint = rawEndpoint.replace(/\/+$/, '')
   if (/\/(chat\/completions|responses|messages|generate)$/.test(endpoint)) return endpoint
   if (String(apiFormat || '').toLowerCase().includes('anthropic')) {
     return /\/v1$/.test(endpoint) ? `${endpoint}/messages` : `${endpoint}/v1/messages`
+  }
+  if (String(apiFormat || '').toLowerCase().includes('responses') || String(apiFormat || '').toLowerCase().includes('codex')) {
+    return /\/v1$/.test(endpoint) ? `${endpoint}/responses` : `${endpoint}/v1/responses`
   }
   return /\/v1$/.test(endpoint) ? `${endpoint}/chat/completions` : `${endpoint}/v1/chat/completions`
 }
@@ -148,7 +152,12 @@ export function registerKeyRoutes(app: Express, getWorkspace: () => string) {
       if (!provider) return res.status(404).json({ valid: false, error: 'provider not found' })
       const keyValue = String(key.key || '').trim()
       if (provider.auth_type !== 'none' && !keyValue) return res.status(400).json({ valid: false, error: 'API key is empty' })
-      const rawEndpoint = String(provider.endpoints?.chat || provider.endpoints?.completions || provider.endpoints?.llm || provider.default_base_url || '').replace(/\/$/, '')
+      const providerFormat = String(provider.api_format || '').toLowerCase()
+      const rawEndpoint = String(
+        providerFormat.includes('responses') || providerFormat.includes('codex')
+          ? provider.endpoints?.responses || provider.endpoints?.chat || provider.endpoints?.completions || provider.endpoints?.llm || provider.default_base_url || ''
+          : provider.endpoints?.chat || provider.endpoints?.responses || provider.endpoints?.completions || provider.endpoints?.llm || provider.default_base_url || '',
+      ).replace(/\/$/, '')
       if (!rawEndpoint) return res.status(400).json({ valid: false, error: 'provider endpoint not configured' })
       const models = await readModels(activeWorkspace)
       const probeModel = selectProbeModel(models, key.id, provider.id)
@@ -191,9 +200,11 @@ export function registerKeyRoutes(app: Express, getWorkspace: () => string) {
       const authType = String(provider.auth_type || 'bearer').toLowerCase()
       if (authType === 'x-api-key' || authType === 'api-key') headers['x-api-key'] = keyValue
       else if (authType !== 'none') headers.Authorization = keyValue.toLowerCase().startsWith('bearer ') ? keyValue : `Bearer ${keyValue}`
-      const requestBody = String(provider.api_format || '').toLowerCase().includes('anthropic')
-        ? { model: 'test', messages: [{ role: 'user', content: 'ping' }], max_tokens: 1, temperature: 0 }
-        : { model: 'test', messages: [{ role: 'user', content: 'ping' }], max_tokens: 1, temperature: 0 }
+      const requestBody = providerFormat.includes('responses') || providerFormat.includes('codex')
+        ? buildCodexResponsesBody({ model: 'test', messages: [{ role: 'user', content: 'ping' }] }, 'test', false)
+        : providerFormat.includes('anthropic')
+          ? { model: 'test', messages: [{ role: 'user', content: 'ping' }], max_tokens: 1, temperature: 0 }
+          : { model: 'test', messages: [{ role: 'user', content: 'ping' }], max_tokens: 1, temperature: 0 }
       logDebug('key-test', { key_id: key.id, provider_id: provider.id, auth_type: authType, test_url: testUrl, request_kind: 'fallback-chat', request_body_keys: Object.keys(requestBody), headers: { ...headers, Authorization: headers.Authorization ? redactSecret(headers.Authorization) : undefined, 'x-api-key': headers['x-api-key'] ? redactSecret(headers['x-api-key']) : undefined } })
       const response = await fetch(testUrl, { method: 'POST', headers, body: JSON.stringify(requestBody) })
       const text = await response.text()

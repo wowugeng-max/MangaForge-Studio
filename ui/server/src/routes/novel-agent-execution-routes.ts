@@ -21,6 +21,21 @@ type AgentExecutionRoutesContext = {
   getProject: (workspace: string, id: number) => Promise<any>
 }
 
+export function summarizeAgentChainStatus(results: Array<any> = []) {
+  const failed = results.filter(item => item?.success === false || item?.outputSource === 'error' || item?.error)
+  const successCount = results.length - failed.length
+  const status = failed.length === 0 ? 'success' : successCount > 0 ? 'partial' : 'failed'
+  const error = failed
+    .map(item => `${item.step || 'agent'}：${String(item.error || '执行失败').slice(0, 160)}`)
+    .join('；')
+  return {
+    status,
+    success_count: successCount,
+    failed_count: failed.length,
+    error,
+  }
+}
+
 async function syncProseChaptersToStore(activeWorkspace: string, projectId: number, proseChapters: any[], source: 'agent_execute' | 'repair' = 'agent_execute') {
   for (const proseChapter of proseChapters || []) {
     const chapterList = await listNovelChapters(activeWorkspace, projectId)
@@ -77,6 +92,19 @@ export function registerNovelAgentExecutionRoutes(app: Express, ctx: AgentExecut
         { chapterCount, continueFrom, userOutline, existingChapters: existingChaptersData },
         req.body.payload || {},
       )
+      const chainSummary = summarizeAgentChainStatus(execution.results || [])
+      if (chainSummary.status === 'failed') {
+        await appendNovelRun(activeWorkspace, {
+          project_id: projectId,
+          run_type: 'agent_execute',
+          step_name: 'chain',
+          status: 'failed',
+          input_ref: JSON.stringify(req.body || {}),
+          output_ref: JSON.stringify(execution.results || []),
+          error_message: chainSummary.error || 'agent chain failed',
+        })
+        return res.status(502).json({ ...execution, chain_status: chainSummary, error: chainSummary.error || 'agent chain failed' })
+      }
       const seed = buildNovelSeed(project, String(req.body.prompt || ''))
       const getStep = (stepName: string) => execution.results.find(item => item.step === stepName && item.outputSource === 'llm')?.output || {}
 
@@ -186,7 +214,15 @@ export function registerNovelAgentExecutionRoutes(app: Express, ctx: AgentExecut
         status: 'draft',
       })
 
-      await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'agent_execute', step_name: 'chain', status: 'success', output_ref: JSON.stringify(execution.results) })
+      await appendNovelRun(activeWorkspace, {
+        project_id: projectId,
+        run_type: 'agent_execute',
+        step_name: 'chain',
+        status: chainSummary.status === 'partial' ? 'failed' : 'success',
+        input_ref: JSON.stringify(req.body || {}),
+        output_ref: JSON.stringify(execution.results),
+        error_message: chainSummary.error,
+      })
       const review = await createNovelReview(activeWorkspace, {
         project_id: projectId,
         review_type: 'continuity',
@@ -195,7 +231,7 @@ export function registerNovelAgentExecutionRoutes(app: Express, ctx: AgentExecut
         issues: execution.review.issues || [],
         payload: JSON.stringify(continuityResult || {}),
       })
-      res.json({ ...execution, review })
+      res.json({ ...execution, chain_status: chainSummary, review })
     } catch (error) {
       res.status(500).json({ error: String(error) })
     }

@@ -393,6 +393,27 @@ function toAgentStep(step: string, response: LLMResponse) {
 
 // ── Execute single agent ──
 
+const agentStageById: Record<string, string> = {
+  'market-agent': 'incubation',
+  'world-agent': 'incubation',
+  'character-agent': 'incubation',
+  'setting-agent': 'incubation',
+  'outline-agent': 'outline',
+  'detail-outline-agent': 'outline',
+  'continuity-check-agent': 'outline',
+  'continuity-agent': 'outline',
+  'prose-agent': 'draft',
+  'review-agent': 'review',
+}
+
+export function resolveAgentPreferredModelId(agentId: string, project: NovelProjectRecord, explicitModelId?: string | number) {
+  const explicit = Number(explicitModelId || 0) || undefined
+  if (explicit) return explicit
+  const strategy = (project.reference_config as any)?.model_strategy || {}
+  const stage = agentStageById[agentId] || ''
+  return Number(strategy?.stages?.[stage]?.model_id || strategy?.preferred_model_id || 0) || undefined
+}
+
 export async function executeNovelAgent(
   agentId: string,
   project: NovelProjectRecord,
@@ -412,7 +433,7 @@ export async function executeNovelAgent(
   // Build messages
   const messages = buildAgentMessages(agentId, project, context)
   const workspace = activeWorkspace || await loadActiveWorkspace()
-  const preferredModelId = Number(modelId || 0) || undefined
+  const preferredModelId = resolveAgentPreferredModelId(agentId, project, modelId)
 
   // Execute LLM
   const response = await executeWithRuntimeModel(

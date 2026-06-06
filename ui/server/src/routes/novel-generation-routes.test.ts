@@ -60,4 +60,38 @@ describe('novel generate prose route source guards', () => {
     expect(editorStart).toBeLessThan(reviewStart)
     expect(contextTypeBlock).toContain('runCommercialEditorRewrite:')
   })
+
+  test('stores runtime diagnostics when the prose draft model returns no chapter text', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
+    const failureStart = source.indexOf("String((result as any).error || (result as any).fallbackReason || '模型未返回正文')")
+    const nextStage = source.indexOf("let selfCheck", failureStart)
+    const failureBlock = source.slice(failureStart, nextStage)
+
+    expect(failureStart).toBeGreaterThanOrEqual(0)
+    expect(failureBlock).toContain('result_error')
+    expect(failureBlock).toContain('runtime_selection')
+    expect(failureBlock).toContain('llm_diagnostics')
+  })
+
+  test('uses plain prose fallback before failing an otherwise non-json draft response', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
+    const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'")
+    const draftStart = source.indexOf('const resultPayload = getNovelPayload(result)', routeStart)
+    const failureStart = source.indexOf("if ((result as any).error || !chapterText)", draftStart)
+    const draftBlock = source.slice(draftStart, failureStart)
+
+    expect(draftBlock).toContain('extractPlainProseFallback(result, 800)')
+    expect(draftBlock).toContain('|| plainProseFallback')
+  })
+
+  test('stores LLM diagnostics when standalone scene-card generation returns no cards', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
+    const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/scene-cards'")
+    const routeEnd = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'", routeStart)
+    const routeBlock = source.slice(routeStart, routeEnd)
+
+    expect(routeBlock).toContain('buildLLMResultDiagnostics(result.result)')
+    expect(routeBlock).toContain("run_type: 'scene_cards'")
+    expect(routeBlock).toContain("status: 'failed'")
+  })
 })

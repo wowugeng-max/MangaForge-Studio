@@ -15,7 +15,7 @@ import {
 } from '../novel'
 import { generateNovelChapterProse } from '../llm'
 import { buildMaterialScore } from './novel-chapter-context-routes'
-import { asArray, getNovelPayload, normalizeSceneProduction, parseJsonLikePayload } from './novel-route-utils'
+import { asArray, buildLLMResultDiagnostics, extractPlainProseFallback, getNovelPayload, normalizeSceneProduction, parseJsonLikePayload } from './novel-route-utils'
 import { applyChapterWordTargetToContext, countProseChars, proseMaxTokensForWordTarget, resolveChapterWordTarget } from './novel-writing-service'
 
 function outlineChapterNo(outline: any) {
@@ -710,7 +710,19 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
         return res.status(412).json({ error: '场景卡生成前置检查未通过', error_code: 'SCENE_PREFLIGHT_BLOCKED', preflight: contextPackage.preflight, context_package: contextPackage })
       }
       const result = await ctx.generateSceneCardsForChapter(activeWorkspace, project, contextPackage, modelId)
-      if (!result.sceneCards.length) return res.status(502).json({ error: '模型未返回场景卡', result: result.result })
+      if (!result.sceneCards.length) {
+        const diagnostics = buildLLMResultDiagnostics(result.result)
+        await appendNovelRun(activeWorkspace, {
+          project_id: projectId,
+          run_type: 'scene_cards',
+          step_name: `chapter-${chapter.chapter_no}`,
+          status: 'failed',
+          input_ref: JSON.stringify(req.body),
+          output_ref: JSON.stringify({ error: '模型未返回场景卡', llm_diagnostics: diagnostics, runtime_selection: (result.result as any)?.runtimeSelection || null, config_snapshot: configSnapshot }),
+          error_message: '模型未返回场景卡',
+        })
+        return res.status(502).json({ error: '模型未返回场景卡', result: result.result, llm_diagnostics: diagnostics })
+      }
       const updated = await updateNovelChapter(activeWorkspace, chapter.id, {
         scene_breakdown: result.sceneCards,
         scene_list: result.sceneCards,
@@ -841,12 +853,23 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
         }
         return res.status(502).json(errorPayload)
       }
-      const chapterText = targetProse?.chapter_text || resultPayload?.chapter_text
+      const plainProseFallback = extractPlainProseFallback(result, 800)
+      const chapterText = targetProse?.chapter_text || resultPayload?.chapter_text || plainProseFallback
       const sceneBreakdown = targetProse?.scene_breakdown || resultPayload?.scene_breakdown || []
       const continuityNotes = targetProse?.continuity_notes || resultPayload?.continuity_notes || []
       if ((result as any).error || !chapterText) {
-        await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'failed', input_ref: JSON.stringify(req.body), output_ref: JSON.stringify({ ...(resultPayload || {}), config_snapshot: configSnapshot }), error_message: String((result as any).error || (result as any).fallbackReason || '模型未返回正文') })
-        const errorPayload = { error: String((result as any).error || (result as any).fallbackReason || '模型未返回正文'), result, pipeline, context_package: contextPackage, config_snapshot: configSnapshot }
+        const resultError = String((result as any).error || (result as any).fallbackReason || '模型未返回正文')
+        const runtimeDiagnostics = {
+          result_error: resultError,
+          output_source: (result as any).outputSource || '',
+          model_id: (result as any).modelId || (result as any).runtimeSelection?.model?.id,
+          model_name: (result as any).modelName || (result as any).runtimeSelection?.model?.model_name,
+          provider_id: (result as any).providerId || (result as any).runtimeSelection?.provider?.id,
+          runtime_selection: (result as any).runtimeSelection || null,
+          llm_diagnostics: buildLLMResultDiagnostics(result),
+        }
+        await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'failed', input_ref: JSON.stringify(req.body), output_ref: JSON.stringify({ ...(resultPayload || {}), ...runtimeDiagnostics, config_snapshot: configSnapshot }), error_message: resultError })
+        const errorPayload = { error: resultError, ...runtimeDiagnostics, result, pipeline, context_package: contextPackage, config_snapshot: configSnapshot }
         if (wantsStream) {
           res.write(`data: ${JSON.stringify({ type: 'error', ...errorPayload })}\n\n`)
           res.end()

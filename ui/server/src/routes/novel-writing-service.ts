@@ -20,9 +20,11 @@ import type { NovelReferenceService } from './novel-reference-service'
 import {
   asArray,
   buildPreflightChecks,
+  buildLLMResultDiagnostics,
   collectRecentFacts,
   compactText,
   deepMergeObjects,
+  extractPlainProseFallback,
   getNovelPayload,
   getQualityGateDecision,
   getSafetyPolicy,
@@ -1678,12 +1680,17 @@ export function createNovelWritingService(ctx: {
     } as any, activeWorkspace, ctx.production.getStageModelId(project, 'draft', preferredModelId))
     const resultPayload = getNovelPayload(draftResult)
     const targetProse = selectProseForChapter(resultPayload, chapter)
-    const chapterText = targetProse?.chapter_text || resultPayload?.chapter_text
+    const plainProseFallback = extractPlainProseFallback(draftResult, 800)
+    const chapterText = targetProse?.chapter_text || resultPayload?.chapter_text || plainProseFallback
     if ((draftResult as any).error || !chapterText) {
-      await onStage('draft', { status: 'failed', error: String((draftResult as any).error || (draftResult as any).fallbackReason || '模型未返回正文') })
+      await onStage('draft', {
+        status: 'failed',
+        error: String((draftResult as any).error || (draftResult as any).fallbackReason || '模型未返回正文'),
+        llm_diagnostics: buildLLMResultDiagnostics(draftResult),
+      })
       throw new Error(String((draftResult as any).error || (draftResult as any).fallbackReason || '模型未返回正文'))
     }
-    await onStage('draft', { status: 'success', word_count: countProseChars(chapterText), modelName: (draftResult as any).modelName, scene_status: 'generated' })
+    await onStage('draft', { status: 'success', word_count: countProseChars(chapterText), modelName: (draftResult as any).modelName, scene_status: 'generated', plain_text_fallback_used: Boolean(plainProseFallback && !targetProse?.chapter_text && !resultPayload?.chapter_text) })
     let finalText = String(chapterText || '')
     let finalSceneBreakdown = targetProse?.scene_breakdown || resultPayload?.scene_breakdown || []
     let finalContinuityNotes = targetProse?.continuity_notes || resultPayload?.continuity_notes || chapter.continuity_notes || []
