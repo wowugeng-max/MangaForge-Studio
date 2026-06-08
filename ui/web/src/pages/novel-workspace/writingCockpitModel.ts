@@ -147,6 +147,13 @@ export interface ChapterAcceptanceDeskModel {
     scoreLabel: string
     riskCount: number
   } | null
+  readerPayoffSync: {
+    status: 'ok' | 'warn'
+    label: string
+    score: number | null
+    scoreLabel: string
+    debtCount: number
+  } | null
   qualityScore: number | null
   qualityStatus: string
   mustFix: string[]
@@ -909,6 +916,30 @@ function buildCoreDriftSummary(review?: AnyRecord | null): ChapterAcceptanceDesk
   }
 }
 
+function readerPayoffSyncPayload(review?: AnyRecord | null) {
+  const payload = review ? reviewPayload(review) : {}
+  return payload?.reader_payoff_sync || payload?.result?.reader_payoff_sync || payload?.result || payload
+}
+
+function buildReaderPayoffSyncSummary(review?: AnyRecord | null): ChapterAcceptanceDeskModel['readerPayoffSync'] {
+  if (!review) return null
+  const payload = readerPayoffSyncPayload(review)
+  const scoreValue = payload?.score
+  const score = scoreValue === null || scoreValue === undefined || scoreValue === '' ? null : Number(scoreValue)
+  const safeScore = Number.isFinite(score) ? score : null
+  const payloadDebtCount = Number(payload?.debt_count ?? payload?.debtCount)
+  const debtCount = Number.isFinite(payloadDebtCount) ? payloadDebtCount : countArray(payload?.missed) + countArray(payload?.debts)
+  const status: 'ok' | 'warn' = text(payload?.status || review?.status).toLowerCase() === 'ok' && debtCount === 0 ? 'ok' : 'warn'
+
+  return {
+    status,
+    label: status === 'ok' ? '回报 OK' : text(payload?.label) || `回报欠账 ${debtCount}`,
+    score: safeScore,
+    scoreLabel: safeScore === null ? '回报兑现 -' : `回报兑现 ${safeScore}`,
+    debtCount,
+  }
+}
+
 function extractQualityScore(quality: AnyRecord) {
   const value = quality?.score ?? quality?.overall_score ?? quality?.quality_score
   if (value === null || value === undefined || value === '') return null
@@ -977,6 +1008,7 @@ function buildHiddenAcceptanceDesk(): ChapterAcceptanceDeskModel {
     assetIntake: null,
     readabilityReview: null,
     coreDrift: null,
+    readerPayoffSync: null,
     qualityScore: null,
     qualityStatus: '',
     mustFix: [],
@@ -1013,6 +1045,7 @@ function buildChapterAcceptanceDesk(args: {
   const latestAssetIntakeRef = latestReviewRef(args.reviews, args.nextChapter, 'asset_intake')
   const latestReadabilityRef = latestReviewRef(args.reviews, args.nextChapter, 'readability_review')
   const latestCoreDriftRef = latestReviewRef(args.reviews, args.nextChapter, 'chapter_core_drift')
+  const latestReaderPayoffSyncRef = latestReviewRef(args.reviews, args.nextChapter, 'reader_payoff_sync')
   const latestQuality = latestQualityRef?.review || null
   const latestReport = latestReportRef?.review || null
   const latestRevision = latestRevisionRef?.review || null
@@ -1020,6 +1053,7 @@ function buildChapterAcceptanceDesk(args: {
   const assetIntake = buildAssetIntakeSummary(latestAssetIntakeRef?.review || null)
   const readabilityReview = buildReadabilityReviewSummary(latestReadabilityRef?.review || null)
   const coreDrift = buildCoreDriftSummary(latestCoreDriftRef?.review || null)
+  const readerPayoffSync = buildReaderPayoffSyncSummary(latestReaderPayoffSyncRef?.review || null)
   const quality = qualityPayload(latestQuality)
   const report = reportPayload(latestReport)
   const revision = revisionPayload(latestRevision)
@@ -1063,6 +1097,7 @@ function buildChapterAcceptanceDesk(args: {
       assetIntake,
       readabilityReview,
       coreDrift,
+      readerPayoffSync,
       qualityScore: null,
       qualityStatus,
       mustFix,
@@ -1089,6 +1124,7 @@ function buildChapterAcceptanceDesk(args: {
       assetIntake,
       readabilityReview,
       coreDrift,
+      readerPayoffSync,
       qualityScore: score,
       qualityStatus,
       mustFix,
@@ -1120,6 +1156,7 @@ function buildChapterAcceptanceDesk(args: {
       assetIntake,
       readabilityReview,
       coreDrift,
+      readerPayoffSync,
       qualityScore: score,
       qualityStatus,
       mustFix,
@@ -1146,6 +1183,7 @@ function buildChapterAcceptanceDesk(args: {
       assetIntake,
       readabilityReview,
       coreDrift,
+      readerPayoffSync,
       qualityScore: score,
       qualityStatus,
       mustFix,
@@ -1171,6 +1209,7 @@ function buildChapterAcceptanceDesk(args: {
     assetIntake,
     readabilityReview,
     coreDrift,
+    readerPayoffSync,
     qualityScore: score,
     qualityStatus,
     mustFix,

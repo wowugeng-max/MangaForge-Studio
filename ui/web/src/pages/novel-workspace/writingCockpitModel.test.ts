@@ -297,6 +297,34 @@ function coreDriftReview(overrides: Record<string, any> = {}) {
   }
 }
 
+function readerPayoffSyncReview(overrides: Record<string, any> = {}) {
+  const payload = {
+    chapter_id: 101,
+    chapter_no: 1,
+    reader_payoff_sync: {
+      status: 'warn',
+      score: 64,
+      label: '回报欠账 2',
+      debt_count: 2,
+      planned: [{ text: '主角夺回主动权' }, { text: '带血腰牌真相' }],
+      delivered: [{ text: '主角夺回主动权' }],
+      missed: [{ text: '带血腰牌真相' }, { text: '腰牌背后的边军危机' }],
+      debts: [{ text: '旧臣背刺伏笔待回收' }],
+    },
+    ...overrides.payload,
+  }
+
+  return {
+    id: overrides.id || 801,
+    review_type: 'reader_payoff_sync',
+    status: overrides.status || 'warn',
+    summary: overrides.summary || '读者回报欠账 2 项。',
+    created_at: overrides.created_at || '2026-05-24T01:00:00.000Z',
+    payload: JSON.stringify(payload),
+    ...overrides.record,
+  }
+}
+
 describe('buildWritingCockpitModel', () => {
   test('ready project data chooses the first planned unwritten chapter as daily target', () => {
     const model = buildWritingCockpitModel({
@@ -1275,6 +1303,23 @@ describe('buildWritingCockpitModel', () => {
     expect(model.chapterAcceptanceDesk.coreDrift?.scoreLabel).toBe('核心守恒 73')
   })
 
+  test('shows reader payoff debt without blocking ready acceptance', () => {
+    const model = buildWritingCockpitModel({
+      project: acceptedProject,
+      outlines,
+      chapters,
+      activeChapter: chapters[0],
+      materialScore: { score: 82, can_generate: true },
+      reviews: [proseQualityReview(), readerPayoffSyncReview()],
+    })
+
+    expect(model.chapterAcceptanceDesk.acceptanceStatus).toBe('ready_to_accept')
+    expect(model.chapterAcceptanceDesk.recommendedAcceptanceAction.key).toBe('accept_chapter_and_continue')
+    expect(model.chapterAcceptanceDesk.readerPayoffSync?.status).toBe('warn')
+    expect(model.chapterAcceptanceDesk.readerPayoffSync?.label).toBe('回报欠账 2')
+    expect(model.chapterAcceptanceDesk.readerPayoffSync?.scoreLabel).toBe('回报兑现 64')
+  })
+
   test('omits storyline sync summary when no storyline review exists', () => {
     const model = buildWritingCockpitModel({
       project: acceptedProject,
@@ -1289,6 +1334,7 @@ describe('buildWritingCockpitModel', () => {
     expect(model.chapterAcceptanceDesk.storylineSync).toBeNull()
     expect(model.chapterAcceptanceDesk.assetIntake).toBeNull()
     expect(model.chapterAcceptanceDesk.coreDrift).toBeNull()
+    expect(model.chapterAcceptanceDesk.readerPayoffSync).toBeNull()
   })
 
   test('passing quality for old prose needs current quality check after text changes', () => {

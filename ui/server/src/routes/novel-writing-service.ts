@@ -479,6 +479,128 @@ export function buildChapterCoreDriftReport(project: any, chapter: any, contextP
   }
 }
 
+function normalizePayoffItem(value: any, source = 'planned') {
+  const text = compactText(typeof value === 'string' ? value : value?.text || value?.name || value?.title || value?.summary || value?.description || '', 180)
+  if (!text) return null
+  return {
+    text,
+    source,
+  }
+}
+
+function uniquePayoffItems(items: any[]) {
+  const seen = new Set<string>()
+  const rows: any[] = []
+  for (const item of items) {
+    const normalized = normalizePayoffItem(item, item?.source || 'planned')
+    if (!normalized) continue
+    const key = normalizedMatchText(normalized.text)
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    rows.push(normalized)
+  }
+  return rows
+}
+
+const concretePayoffPattern = /回报|兑现|揭开|真相|反转|夺回|反压|打脸|破局|解决|危机|钩子|伏笔|悬念|奖励|收束|升级|救下|拿到|发现|确认|暴露/
+const genericPayoffTerms = new Set(['读者', '看到', '本章', '危机', '钩子', '真相', '支线', '回报', '兑现', '反转', '伏笔', '悬念'])
+
+function isConcreteStorylinePayoff(item: any) {
+  const text = compactText(typeof item === 'string' ? item : item?.text || item?.name || item?.title || item?.summary || item?.description || '', 180)
+  return concretePayoffPattern.test(text)
+}
+
+function salientPayoffTerms(value: any) {
+  const terms = anchorTerms(value)
+    .filter(term => term.length >= 2)
+    .filter(term => !genericPayoffTerms.has(term))
+  return new Set(terms)
+}
+
+function hasSharedPayoffAnchor(left: any, right: any) {
+  const leftTerms = salientPayoffTerms(left)
+  const rightTerms = salientPayoffTerms(right)
+  for (const term of leftTerms) {
+    if (rightTerms.has(term)) return true
+  }
+  return false
+}
+
+function isPayoffDelivered(item: any, match: any) {
+  if (match.score >= 60) return true
+  if (item?.source === 'scene_card' && match.score >= 40 && asArray(match.matched).length >= 2) return true
+  return false
+}
+
+function countPayoffDebts(missed: any[], debts: any[]) {
+  const nonSceneMisses = missed.filter(item => item.source !== 'scene_card')
+  const countedSceneMisses = missed.filter(item => {
+    if (item.source !== 'scene_card') return false
+    return !nonSceneMisses.some(other => hasSharedPayoffAnchor(item.text, other.text))
+  })
+  return nonSceneMisses.length + countedSceneMisses.length + debts.length
+}
+
+export function buildReaderPayoffSyncReport(project: any, chapter: any, contextPackage: any, chapterText: string, storyStatePayload: any = {}) {
+  const target = contextPackage?.chapter_target || {}
+  const brief = contextPackage?.pre_draft_brief || chapter?.raw_payload?.pre_draft_brief || target?.pre_draft_brief || {}
+  const sceneCards = [
+    ...asArray(target.scene_cards),
+    ...asArray(brief.scene_briefs),
+  ]
+  const planned = uniquePayoffItems([
+    normalizePayoffItem(target.payoff || target.reader_reward || target.readerReward || brief.payoff, 'chapter_payoff'),
+    ...sceneCards.map((card: any) => normalizePayoffItem(card?.reader_payoff || card?.payoff || card?.reader_reward, 'scene_card')),
+    ...asArray(target.storyline_payoffs).filter(isConcreteStorylinePayoff).map((item: any) => normalizePayoffItem(item, 'storyline_payoff')),
+    ...asArray(brief.storyline_payoffs).filter(isConcreteStorylinePayoff).map((item: any) => normalizePayoffItem(item, 'storyline_payoff')),
+  ].filter(Boolean))
+  const delivered: any[] = []
+  const missed: any[] = []
+  for (const item of planned) {
+    const match = anchorMatchScore(item.text, chapterText)
+    const row = { ...item, score: match.score, evidence: match.matched }
+    if (isPayoffDelivered(item, match)) delivered.push(row)
+    else missed.push(row)
+  }
+  const rawDebts = [
+    ...asArray(storyStatePayload?.state_delta?.payoff_queue),
+    ...asArray(storyStatePayload?.payoff_queue),
+    ...asArray(storyStatePayload?.state_delta?.open_questions)
+      .filter((item: any) => /回报|兑现|真相|伏笔|钩子|悬念|奖励|腰牌|身份/.test(String(item || ''))),
+  ]
+  const debts = uniquePayoffItems(rawDebts.map((item: any) => ({ ...(typeof item === 'object' ? item : { text: item }), source: 'payoff_queue' })))
+  const debtCount = countPayoffDebts(missed, debts)
+  const score = Math.max(0, Math.min(100, Math.round(
+    planned.length
+      ? (delivered.length / planned.length) * 82 + Math.max(0, 18 - debts.length * 6)
+      : debts.length ? 68 - debts.length * 8 : 82,
+  )))
+  const status = debtCount > 0 || score < 78 ? 'warn' : 'ok'
+
+  return {
+    report_id: `reader-payoff-sync-${chapter?.id || chapter?.chapter_no || Date.now()}`,
+    chapter_id: chapter?.id || null,
+    chapter_no: chapter?.chapter_no || null,
+    score,
+    status,
+    label: status === 'ok' ? '回报 OK' : `回报欠账 ${debtCount}`,
+    summary: status === 'ok'
+      ? '本章承诺的读者回报已在正文中基本兑现。'
+      : `本章存在 ${debtCount} 项读者回报欠账或待回收期待。`,
+    debt_count: debtCount,
+    planned,
+    delivered,
+    missed,
+    debts,
+    next_actions: status === 'ok'
+      ? ['保持场景卡 reader_payoff、章末钩子和剧情线回收的闭环。']
+      : [
+          '下一次修订优先补足 missed 中的读者回报，避免只推进设定不兑现爽点。',
+          '将 debts 中的待回收期待写入下一章任务书或剧情线调用建议。',
+        ],
+  }
+}
+
 export function normalizeDiscoveredAssets(assets: any[] = [], options: {
   existingCharacters?: any[]
   existingSettings?: any[]
@@ -1116,6 +1238,19 @@ export function createNovelWritingService(ctx: {
       payload: JSON.stringify({ chapter_id: chapter.id, chapter_no: chapter.chapter_no, core_drift: coreDrift }),
     })
     payload.core_drift = coreDrift
+    const readerPayoffSync = buildReaderPayoffSyncReport(project, chapter, contextPackage, chapterText, payload)
+    await createNovelReview(activeWorkspace, {
+      project_id: project.id,
+      review_type: 'reader_payoff_sync',
+      status: readerPayoffSync.status === 'ok' ? 'ok' : 'warn',
+      summary: `${readerPayoffSync.label}：${readerPayoffSync.summary}`,
+      issues: [
+        ...readerPayoffSync.missed.map((item: any) => `未兑现：${item.text}`),
+        ...readerPayoffSync.debts.map((item: any) => `待回收：${item.text}`),
+      ].slice(0, 20),
+      payload: JSON.stringify({ chapter_id: chapter.id, chapter_no: chapter.chapter_no, reader_payoff_sync: readerPayoffSync }),
+    })
+    payload.reader_payoff_sync = readerPayoffSync
     await createNovelReview(activeWorkspace, {
       project_id: project.id,
       review_type: 'story_state',

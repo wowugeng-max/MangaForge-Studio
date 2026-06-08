@@ -140,6 +140,29 @@ describe('buildNovelDeliverySummary', () => {
     expect(summary.coreDrift?.scoreLabel).toBe('核心守恒 73')
     expect(summary.actionKey).toBe('accept_chapter_and_continue')
   })
+
+  test('summarizes reader payoff sync without changing delivery action', () => {
+    const summary = buildNovelDeliverySummary({
+      visible: true,
+      acceptanceStatus: 'ready_to_accept',
+      statusLabel: '可验收',
+      acceptanceReasons: ['质量复检通过，故事状态已同步，可以进入下一章。'],
+      qualityScore: 86,
+      storyStateSynced: true,
+      readerPayoffSync: {
+        status: 'warn',
+        label: '回报欠账 2',
+        score: 64,
+        scoreLabel: '回报兑现 64',
+        debtCount: 2,
+      },
+      recommendedAcceptanceAction: { key: 'accept_chapter_and_continue', label: '验收并进入下一章' },
+    })
+
+    expect(summary.readerPayoffSync?.label).toBe('回报欠账 2')
+    expect(summary.readerPayoffSync?.scoreLabel).toBe('回报兑现 64')
+    expect(summary.actionKey).toBe('accept_chapter_and_continue')
+  })
 })
 
 describe('buildNovelDraftBriefSummary', () => {

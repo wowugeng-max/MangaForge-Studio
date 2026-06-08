@@ -5,6 +5,7 @@ import {
   buildCommercialEditorRewritePrompt,
   buildChapterPreDraftBrief,
   buildChapterCoreDriftReport,
+  buildReaderPayoffSyncReport,
   buildMemePolishPrompt,
   buildReadabilityReviewPrompt,
   buildStorylineSyncReport,
@@ -644,6 +645,63 @@ describe('chapter core drift report', () => {
     expect(source).toContain("review_type: 'chapter_core_drift'")
     expect(source).toContain('buildChapterCoreDriftReport(project, chapter, contextPackage, chapterText, storylineSync)')
     expect(source).toContain('payload.core_drift = coreDrift')
+  })
+})
+
+describe('reader payoff sync report', () => {
+  test('marks planned reader payoffs as delivered when the final prose contains them', () => {
+    const report = buildReaderPayoffSyncReport(
+      { title: '大益武夫' },
+      { id: 2, chapter_no: 2, title: '警钟入城' },
+      {
+        chapter_target: {
+          reader_promise: '读者看到失势皇子第一次反压王府新贵',
+          payoff: '谢怀安借警钟夺回主动权',
+          scene_cards: [
+            { scene_no: 1, reader_payoff: '警钟把边军危机压到王府筵席上' },
+            { scene_no: 2, reader_payoff: '带血腰牌带来新的危机钩子' },
+          ],
+          storyline_payoffs: ['边军腰牌支线'],
+        },
+      },
+      '警钟把边军危机压到王府筵席上，谢怀安借钟声第一次反压王府新贵，夺回主动权。末尾，带血腰牌被递入厅中。',
+      { state_delta: { payoff_queue: [] } },
+    )
+
+    expect(report.status).toBe('ok')
+    expect(report.delivered.length).toBeGreaterThanOrEqual(2)
+    expect(report.missed).toHaveLength(0)
+    expect(report.label).toBe('回报 OK')
+  })
+
+  test('warns when promised reader payoffs are missing or added to payoff debt', () => {
+    const report = buildReaderPayoffSyncReport(
+      { title: '大益武夫' },
+      { id: 3, chapter_no: 3, title: '拖欠测试' },
+      {
+        chapter_target: {
+          reader_promise: '读者看到失势皇子反压王府新贵',
+          payoff: '谢怀安拿到带血腰牌的真相',
+          scene_cards: [{ scene_no: 1, reader_payoff: '揭开腰牌背后的边军危机' }],
+        },
+      },
+      '众人在厅中闲谈许久，只说王府天气阴沉，没有腰牌真相，也没有反压。',
+      { state_delta: { payoff_queue: ['带血腰牌真相待回收'] } },
+    )
+
+    expect(report.status).toBe('warn')
+    expect(report.label).toBe('回报欠账 2')
+    expect(report.debt_count).toBe(2)
+    expect(report.missed.map((item: any) => item.text)).toContain('谢怀安拿到带血腰牌的真相')
+    expect(report.debts.map((item: any) => item.text)).toContain('带血腰牌真相待回收')
+  })
+
+  test('story state sync persists a reader_payoff_sync review', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+
+    expect(source).toContain("review_type: 'reader_payoff_sync'")
+    expect(source).toContain('buildReaderPayoffSyncReport(project, chapter, contextPackage, chapterText, payload)')
+    expect(source).toContain('payload.reader_payoff_sync = readerPayoffSync')
   })
 })
 

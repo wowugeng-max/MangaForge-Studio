@@ -122,6 +122,20 @@ describe('commercial writing workspace UI shell', () => {
     expect(service).toContain("review_type: 'chapter_core_drift'")
   })
 
+  test('shows reader payoff sync status in the delivery strip', () => {
+    const workspaceCenter = source('WorkspaceCenter.tsx')
+    const workspaceCss = source('WorkspaceCenter.css')
+    const model = source('writingCockpitModel.ts')
+    const service = readFileSync(join(import.meta.dir, '../../../../server/src/routes/novel-writing-service.ts'), 'utf8')
+
+    expect(workspaceCenter).toContain('readerPayoffSync')
+    expect(workspaceCenter).toContain('novel-delivery-payoff-tag')
+    expect(workspaceCss).toContain('.novel-delivery-payoff-tag')
+    expect(workspaceCss).toContain('.novel-delivery-payoff-tag-warn')
+    expect(model).toContain('reader_payoff_sync')
+    expect(service).toContain("review_type: 'reader_payoff_sync'")
+  })
+
   test('shows discovered asset intake in delivery strip and setting workshop', () => {
     const workspaceCenter = source('WorkspaceCenter.tsx')
     const workspaceCss = source('WorkspaceCenter.css')

@@ -630,6 +630,27 @@
   border-color: #fed7aa;
 }
 
+.novel-delivery-payoff-tag {
+  flex: 0 0 auto;
+  margin-inline-end: 0;
+  font-weight: 700;
+  color: #7c2d12;
+  background: #ffedd5;
+  border: 1px solid #fed7aa;
+}
+
+.novel-delivery-payoff-tag-ok {
+  color: #166534;
+  background: #dcfce7;
+  border-color: #bbf7d0;
+}
+
+.novel-delivery-payoff-tag-warn {
+  color: #92400e;
+  background: #fef3c7;
+  border-color: #fde68a;
+}
+
 .novel-delivery-readability-tag {
   flex: 0 0 auto;
   margin-inline-end: 0;
@@ -1026,7 +1047,7 @@
     line-height: 18px;
   }
 
-  .novel-delivery-status-main .ant-tag:not(.novel-delivery-status-tag):not(.novel-delivery-storyline-tag):not(.novel-delivery-asset-tag):not(.novel-delivery-core-drift-tag):not(.novel-delivery-readability-tag) {
+  .novel-delivery-status-main .ant-tag:not(.novel-delivery-status-tag):not(.novel-delivery-storyline-tag):not(.novel-delivery-asset-tag):not(.novel-delivery-core-drift-tag):not(.novel-delivery-payoff-tag):not(.novel-delivery-readability-tag) {
     display: none;
   }
 

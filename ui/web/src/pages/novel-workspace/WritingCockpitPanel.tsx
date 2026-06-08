@@ -278,6 +278,7 @@ function ChapterAcceptanceDesk({
               <Tag bordered={false}>质量：{qualityScoreText(desk.qualityScore)}</Tag>
               <Tag bordered={false}>故事状态：{desk.storyStateSynced ? '已同步' : '待同步'}</Tag>
               {desk.coreDrift && <Tag color={desk.coreDrift.status === 'ok' ? 'green' : 'gold'} bordered={false}>{desk.coreDrift.label}</Tag>}
+              {desk.readerPayoffSync && <Tag color={desk.readerPayoffSync.status === 'ok' ? 'green' : 'gold'} bordered={false}>{desk.readerPayoffSync.label}</Tag>}
             </Space>
             <Paragraph ellipsis={{ rows: expanded ? 3 : 1 }} style={{ ...wrapTextStyle, margin: '6px 0 0', fontSize: 12 }}>
               {desk.acceptanceReasons.slice(0, 3).join('；')}
@@ -310,6 +311,7 @@ function ChapterAcceptanceDesk({
                 <Space direction="vertical" size={6} style={{ width: '100%', minWidth: 0 }}>
                   <Text type="secondary" style={wrapTextStyle}>质量状态：{compactPlanValue(desk.qualityStatus, '未复检')}</Text>
                   <Text type="secondary" style={wrapTextStyle}>核心守恒：{desk.coreDrift ? `${desk.coreDrift.scoreLabel} · ${desk.coreDrift.label}` : '未检查'}</Text>
+                  <Text type="secondary" style={wrapTextStyle}>读者回报：{desk.readerPayoffSync ? `${desk.readerPayoffSync.scoreLabel} · ${desk.readerPayoffSync.label}` : '未检查'}</Text>
                   <Text type="secondary" style={wrapTextStyle}>编辑报告：{compactPlanValue(desk.latestEditorReportSummary, '尚未生成编辑报告')}</Text>
                   <Text type="secondary" style={wrapTextStyle}>最近修订：{compactPlanValue(desk.latestRevisionSummary, '尚未生成修订稿')}</Text>
                 </Space>

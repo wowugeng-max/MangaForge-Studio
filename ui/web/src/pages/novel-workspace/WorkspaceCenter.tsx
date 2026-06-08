@@ -790,6 +790,21 @@ export function WorkspaceCenter({
                     )}
                   </>
                 )}
+                {deliverySummary.readerPayoffSync && (
+                  <>
+                    <Tag
+                      className={`novel-delivery-payoff-tag novel-delivery-payoff-tag-${deliverySummary.readerPayoffSync.status}`}
+                      bordered={false}
+                    >
+                      {deliverySummary.readerPayoffSync.scoreLabel}
+                    </Tag>
+                    {deliverySummary.readerPayoffSync.debtCount > 0 && (
+                      <Tag className="novel-delivery-payoff-tag novel-delivery-payoff-tag-warn" bordered={false}>
+                        {deliverySummary.readerPayoffSync.label}
+                      </Tag>
+                    )}
+                  </>
+                )}
                 {deliverySummary.readabilityReview && (
                   <>
                     <Tag className="novel-delivery-readability-tag" bordered={false}>
