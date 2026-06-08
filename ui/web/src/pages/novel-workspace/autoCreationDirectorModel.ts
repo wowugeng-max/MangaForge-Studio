@@ -587,6 +587,58 @@ function readabilityRiskCount(review: AnyRecord | null) {
   return immersionRiskCount + lowScoreCount
 }
 
+function issueText(value: any) {
+  if (typeof value === 'string') return text(value)
+  return firstText(value?.description, value?.issue, value?.message, value?.suggestion, value?.title, value?.name)
+}
+
+function issueTexts(values: any[], limit = 6) {
+  return Array.from(new Set(values.map(issueText).filter(Boolean))).slice(0, limit)
+}
+
+function buildBatchPlanReview(args: {
+  batchPlanContext: AnyRecord | null
+  coreReview: AnyRecord | null
+  payoffReview: AnyRecord | null
+  storylineReview: AnyRecord | null
+}) {
+  const context = args.batchPlanContext || {}
+  const chapterPlan = context.chapter_plan || {}
+  const planned = [
+    context.batch_goal ? `本批目标：${context.batch_goal}` : '',
+    context.reader_payoff_plan ? `读者回报：${context.reader_payoff_plan}` : '',
+    context.mainline_focus ? `主线焦点：${context.mainline_focus}` : '',
+    context.forbidden_boundary ? `禁抢跑边界：${context.forbidden_boundary}` : '',
+    chapterPlan.chapter_task ? `本章职责：${chapterPlan.chapter_task}` : '',
+    chapterPlan.conflict ? `本章冲突：${chapterPlan.conflict}` : '',
+    chapterPlan.ending_hook ? `章末钩子：${chapterPlan.ending_hook}` : '',
+  ].filter(Boolean)
+
+  const corePayload = riskPayload(args.coreReview, 'chapter_core_drift')
+  const payoffPayload = riskPayload(args.payoffReview, 'reader_payoff_sync')
+  const storylinePayload = riskPayload(args.storylineReview, 'storyline_sync')
+  const coreRisks = issueTexts([...arrayValue(corePayload?.drift_risks), ...arrayValue(corePayload?.risks)])
+  const payoffMissed = issueTexts([...arrayValue(payoffPayload?.missed), ...arrayValue(payoffPayload?.debts)])
+  const storylineMissed = issueTexts(arrayValue(storylinePayload?.missed))
+  const storylineUnplanned = issueTexts(arrayValue(storylinePayload?.unplanned))
+  const forbiddenTouched = issueTexts(arrayValue(storylinePayload?.forbidden_touched))
+  const actualRisks = [
+    ...coreRisks.map(item => `核心偏移：${item}`),
+    ...payoffMissed.map(item => `回报欠账：${item}`),
+    ...storylineMissed.map(item => `剧情线漏推：${item}`),
+    ...storylineUnplanned.map(item => `额外推进：${item}`),
+    ...forbiddenTouched.map(item => `禁揭触碰：${item}`),
+  ]
+
+  return {
+    planned,
+    missed: Array.from(new Set([...payoffMissed, ...storylineMissed])),
+    actual_risks: actualRisks,
+    forbidden_touched: forbiddenTouched,
+    unplanned: storylineUnplanned,
+  }
+}
+
 function batchRepairTask(args: {
   item: AutoCreationBatchReviewItem
   issueType: string
@@ -595,6 +647,7 @@ function batchRepairTask(args: {
   action: string
   metrics: AnyRecord
   batchPlanContext?: AnyRecord | null
+  batchPlanReview?: AnyRecord | null
 }) {
   return {
     task_type: 'repair_quality',
@@ -614,6 +667,7 @@ function batchRepairTask(args: {
     source: 'auto_creation_safe_batch_risk',
     metrics: args.metrics,
     ...(args.batchPlanContext ? { batch_plan_context: args.batchPlanContext } : {}),
+    ...(args.batchPlanReview ? { batch_plan_review: args.batchPlanReview } : {}),
   }
 }
 
@@ -840,6 +894,7 @@ function buildBatchRiskRadar(args: {
       }))
     }
     if (batchPlanCount > 0) {
+      const batchPlanContext = buildBatchPlanContext(args.nextBatchBrief, item)
       repairTasks.push(batchRepairTask({
         item,
         issueType: 'batch_brief_mismatch',
@@ -847,7 +902,8 @@ function buildBatchRiskRadar(args: {
         message: `本章有 ${batchPlanCount} 项批次任务书兑现风险，可能影响本批连载计划。`,
         action: '对照下一批任务书重修本章职责、读者回报、主线焦点和禁抢跑边界，再重新复盘交稿。',
         metrics: { batch_plan_risk_count: batchPlanCount },
-        batchPlanContext: buildBatchPlanContext(args.nextBatchBrief, item),
+        batchPlanContext,
+        batchPlanReview: buildBatchPlanReview({ batchPlanContext, coreReview, payoffReview, storylineReview }),
       }))
     }
   }

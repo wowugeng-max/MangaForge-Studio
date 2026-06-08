@@ -119,6 +119,30 @@ function repairTaskIssueTag(task: any) {
   return null
 }
 
+function BatchPlanReviewPreview({ task }: { task: any }) {
+  const batchPlanReview = task.batch_plan_review || task.batchPlanReview || null
+  const planned = Array.isArray(batchPlanReview?.planned) ? batchPlanReview.planned : []
+  const actualRisks = Array.isArray(batchPlanReview?.actual_risks) ? batchPlanReview.actual_risks : []
+  if (!planned.length && !actualRisks.length) return null
+  return (
+    <div style={{ marginTop: 4, padding: 8, border: '1px solid #ede9fe', borderRadius: 6, background: '#faf5ff' }}>
+      <Space direction="vertical" size={4} style={{ width: '100%' }}>
+        <Text strong style={{ fontSize: 12 }}>计划/实际</Text>
+        {planned.length > 0 && (
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            计划：{planned.slice(0, 2).join('；')}
+          </Text>
+        )}
+        {actualRisks.length > 0 && (
+          <Text type="danger" style={{ fontSize: 12 }}>
+            实际风险：{actualRisks.slice(0, 2).join('；')}
+          </Text>
+        )}
+      </Space>
+    </div>
+  )
+}
+
 function repairTaskStatusTag(status?: string) {
   if (status === 'resolved') return <Tag color="green" bordered={false}>已处理</Tag>
   if (status === 'needs_review') return <Tag color="gold" bordered={false}>需复查</Tag>
@@ -374,6 +398,7 @@ function RepairTaskRunSummary({
                     {Array.isArray(task.acceptance_criteria) && task.acceptance_criteria.length > 0 && (
                       <Text type="secondary" style={{ fontSize: 12 }}>验收：{task.acceptance_criteria.slice(0, 2).join('；')}</Text>
                     )}
+                    <BatchPlanReviewPreview task={task} />
                   </Space>
                 )}
               />

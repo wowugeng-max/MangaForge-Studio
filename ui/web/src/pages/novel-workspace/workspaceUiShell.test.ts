@@ -250,6 +250,8 @@ describe('commercial writing workspace UI shell', () => {
     expect(taskCenter).toContain('batch_brief_mismatch')
     expect(taskCenter).toContain('批次计划')
     expect(taskCenter).toContain('按批次修订')
+    expect(taskCenter).toContain('batch_plan_review')
+    expect(taskCenter).toContain('计划/实际')
     expect(projectWorkspace).toContain('stepGenerateProse({')
     expect(projectWorkspace).toContain('limit: autoCreationDirectorModel.batchGuardrail.safeChapterCount')
     expect(projectWorkspace).toContain('longformCompass: autoCreationDirectorModel.longformCompass')
