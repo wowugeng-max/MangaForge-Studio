@@ -686,6 +686,18 @@ function batchRiskIssueKeys(item: { chapterId: any; chapterNo: number }, issueTy
   ].filter(Boolean)
 }
 
+function resolvedBatchRiskIssueTypes(issueType: string) {
+  if (issueType === 'batch_brief_mismatch') {
+    return [
+      'batch_brief_mismatch',
+      'core_drift',
+      'reader_payoff_debt',
+      'storyline_sync_risk',
+    ]
+  }
+  return [issueType]
+}
+
 function batchRiskIssueResolved(keys: Set<string> | undefined, item: AutoCreationBatchReviewItem, issueType: string) {
   if (!keys) return false
   return batchRiskIssueKeys(item, issueType).some(key => keys.has(key))
@@ -778,11 +790,13 @@ function buildResolvedBatchRiskIssueKeys(args: {
       const resolvedAfter = Number.isFinite(taskResolvedAt) ? Math.max(repairTime, taskResolvedAt) : repairTime
       const latestQuality = latestQualityReviewForChapter(args.reviews, chapter, chapterNo)
       if (!qualityReviewPassed(latestQuality) || recordTime(latestQuality || {}) <= resolvedAfter) continue
-      for (const key of batchRiskIssueKeys({
-        chapterId: chapter?.id ?? chapter?.chapter_id ?? taskChapterId,
-        chapterNo,
-      }, issueType)) {
-        resolvedKeys.add(key)
+      for (const resolvedIssueType of resolvedBatchRiskIssueTypes(issueType)) {
+        for (const key of batchRiskIssueKeys({
+          chapterId: chapter?.id ?? chapter?.chapter_id ?? taskChapterId,
+          chapterNo,
+        }, resolvedIssueType)) {
+          resolvedKeys.add(key)
+        }
       }
     }
   }
