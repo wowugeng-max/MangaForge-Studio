@@ -86,6 +86,12 @@ function batchSignalLabel(status: string) {
   return '阻塞'
 }
 
+function batchReviewColor(status: AutoCreationDirectorModel['batchReviewQueue']['status']) {
+  if (status === 'ok') return 'green'
+  if (status === 'warn') return 'gold'
+  return 'default'
+}
+
 function formatWords(value: number) {
   if (!value) return '0'
   if (value >= 10000) return `${(value / 10000).toFixed(1)}万`
@@ -287,6 +293,52 @@ export function AutoCreationDirectorWorkspace({
           </div>
         </div>
       </section>
+
+      {model.batchReviewQueue.visible && (
+        <section className={`auto-director-panel auto-director-batch-review-panel auto-director-batch-review-panel-${model.batchReviewQueue.status}`}>
+          <div className="auto-director-panel-title">
+            <CheckCircleOutlined />
+            <span>安全连写复盘</span>
+            <Tag color={batchReviewColor(model.batchReviewQueue.status)} bordered={false}>
+              成功 {model.batchReviewQueue.success}/{model.batchReviewQueue.total}
+            </Tag>
+            {model.batchReviewQueue.failed > 0 && <Tag color="red" bordered={false}>失败 {model.batchReviewQueue.failed}</Tag>}
+            {model.batchReviewQueue.safeLimit !== null && <Tag bordered={false}>安全上限 {model.batchReviewQueue.safeLimit}</Tag>}
+          </div>
+          <div className="auto-director-batch-review-layout">
+            <div className="auto-director-batch-review-summary">
+              <Text>{model.batchReviewQueue.summary}</Text>
+              <ActionButton
+                action={model.batchReviewQueue.nextAction}
+                loadingActionKey={loadingActionKey}
+                onAction={onAction}
+              />
+            </div>
+            <div className="auto-director-batch-review-list">
+              {model.batchReviewQueue.items.slice(0, 6).map(item => (
+                <button
+                  key={`${item.chapterId || item.chapterNo}-${item.title}`}
+                  type="button"
+                  className={`auto-director-batch-review-item auto-director-batch-review-item-${item.status}`}
+                  onClick={() => onSelectChapter(item.chapterNo)}
+                >
+                  <span>
+                    <strong>第 {item.chapterNo} 章 · {item.title}</strong>
+                    <Tag color={item.status === 'success' ? 'green' : 'red'} bordered={false}>
+                      {item.status === 'success' ? '已生成' : '失败'}
+                    </Tag>
+                  </span>
+                  <Text type="secondary">
+                    {item.status === 'success'
+                      ? `${item.wordCount ? `${item.wordCount} 字` : '正文已生成'}${item.score !== null ? ` · 质检 ${item.score}` : ''}${item.revised ? ' · 已修订' : ''}`
+                      : item.error || '等待查看失败原因'}
+                  </Text>
+                </button>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
 
       <div className="auto-director-grid">
         <section className="auto-director-panel auto-director-pipeline-panel">

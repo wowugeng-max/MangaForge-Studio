@@ -574,7 +574,8 @@ export default function NovelProjectWorkspace() {
     activeTasks,
     selectedModelId,
     reviews,
-  }), [planningWorkspaceModel, writingCockpitModel, activeTasks, selectedModelId, reviews])
+    runRecords,
+  }), [planningWorkspaceModel, writingCockpitModel, activeTasks, selectedModelId, reviews, runRecords])
 
   const autoDirectorBusy = Boolean(
     stepProseLoading

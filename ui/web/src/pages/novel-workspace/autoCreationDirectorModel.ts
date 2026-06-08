@@ -24,6 +24,8 @@ export type AutoCreationPipelineStatus = 'done' | 'active' | 'pending' | 'blocke
 export type AutoCreationContractStatus = 'ok' | 'warn' | 'block'
 export type AutoCreationBatchGuardrailStatus = 'ready' | 'caution' | 'blocked'
 export type AutoCreationBatchGuardrailSignalStatus = 'ok' | 'warn' | 'block'
+export type AutoCreationBatchReviewStatus = 'empty' | 'ok' | 'warn'
+export type AutoCreationBatchReviewItemStatus = 'success' | 'failed'
 
 export interface AutoCreationDirectorAction {
   area: AutoCreationDirectorArea
@@ -77,6 +79,32 @@ export interface AutoCreationBatchGuardrail {
   guardrails: AutoCreationBatchGuardrailSignal[]
 }
 
+export interface AutoCreationBatchReviewItem {
+  chapterId: any
+  chapterNo: number
+  title: string
+  status: AutoCreationBatchReviewItemStatus
+  score: number | null
+  wordCount: number | null
+  revised: boolean
+  error: string
+}
+
+export interface AutoCreationBatchReviewQueue {
+  visible: boolean
+  status: AutoCreationBatchReviewStatus
+  label: string
+  summary: string
+  total: number
+  success: number
+  failed: number
+  safeLimit: number | null
+  availableTotal: number | null
+  createdAt: string
+  nextAction: AutoCreationDirectorAction
+  items: AutoCreationBatchReviewItem[]
+}
+
 export interface AutoCreationDirectorModel {
   status: AutoCreationDirectorStatus
   statusLabel: string
@@ -110,6 +138,7 @@ export interface AutoCreationDirectorModel {
   longformRhythm: PlanningWorkspaceModel['longformRhythm']
   creationContract: AutoCreationContractItem[]
   batchGuardrail: AutoCreationBatchGuardrail
+  batchReviewQueue: AutoCreationBatchReviewQueue
   pipeline: AutoCreationPipelineStep[]
 }
 
@@ -119,6 +148,7 @@ export interface BuildAutoCreationDirectorModelInput {
   activeTasks?: AnyRecord[] | null
   selectedModelId?: any
   reviews?: AnyRecord[] | null
+  runRecords?: AnyRecord[] | null
 }
 
 const PLANNING_ACTION_LABELS: Record<PlanningActionKey, string> = {
@@ -557,6 +587,74 @@ function buildBatchGuardrail(args: {
   }
 }
 
+function buildBatchReviewQueue(runRecords: AnyRecord[]): AutoCreationBatchReviewQueue {
+  const safeBatchRuns = runRecords
+    .filter(run => text(run?.run_type) === 'batch_generate_prose')
+    .map(run => ({
+      run,
+      input: parsePayload(run?.input_ref) || {},
+      output: parsePayload(run?.output_ref) || {},
+    }))
+    .filter(entry => text(entry.input?.source) === 'auto_creation_safe_batch')
+    .sort((a, b) => recordTime(b.run) - recordTime(a.run))
+
+  const latest = safeBatchRuns[0]
+  if (!latest) {
+    return {
+      visible: false,
+      status: 'empty',
+      label: '安全连写复盘',
+      summary: '还没有安全连写批次。',
+      total: 0,
+      success: 0,
+      failed: 0,
+      safeLimit: null,
+      availableTotal: null,
+      createdAt: '',
+      nextAction: opsAction('open_task_center', '查看任务中心', '查看后台任务、失败记录和可恢复任务。'),
+      items: [],
+    }
+  }
+
+  const chapters = arrayValue(latest.output?.chapters)
+  const items = chapters.map(chapter => ({
+    chapterId: chapter?.id ?? null,
+    chapterNo: Number(chapter?.chapter_no || chapter?.chapterNo || 0),
+    title: text(chapter?.title, '未命名章节'),
+    status: text(chapter?.status) === 'failed' ? 'failed' as const : 'success' as const,
+    score: Number.isFinite(Number(chapter?.score)) ? Number(chapter?.score) : null,
+    wordCount: Number.isFinite(Number(chapter?.word_count ?? chapter?.wordCount)) ? Number(chapter?.word_count ?? chapter?.wordCount) : null,
+    revised: Boolean(chapter?.revised),
+    error: text(chapter?.error),
+  })).filter(item => item.chapterNo > 0 || item.title)
+
+  const failed = Number(latest.output?.failed ?? items.filter(item => item.status === 'failed').length)
+  const success = Number(latest.output?.success ?? items.filter(item => item.status === 'success').length)
+  const total = Number(latest.output?.total ?? items.length)
+  const safeLimit = Number(latest.input?.safety_limit || 0)
+  const availableTotal = Number(latest.input?.available_total || 0)
+  const hasFailure = failed > 0 || text(latest.run?.status) === 'warn'
+
+  return {
+    visible: true,
+    status: hasFailure ? 'warn' : 'ok',
+    label: '安全连写复盘',
+    summary: hasFailure
+      ? `本次安全连写 ${success}/${total} 章成功，先处理失败章节，再开启下一批。`
+      : `本次安全连写 ${success}/${total} 章完成，下一步逐章质检、修订和状态回填。`,
+    total,
+    success,
+    failed,
+    safeLimit: safeLimit > 0 ? safeLimit : null,
+    availableTotal: availableTotal > 0 ? availableTotal : null,
+    createdAt: text(latest.run?.created_at),
+    nextAction: hasFailure
+      ? opsAction('open_task_center', '查看失败任务', '打开任务中心，定位失败章节和可恢复步骤。')
+      : planningAction('open_quality_revision', '进入质检修订，按章节质量、核心偏移、读者回报和剧情线同步逐章验收。'),
+    items,
+  }
+}
+
 function buildPipeline(args: {
   planning: PlanningWorkspaceModel
   writing: WritingCockpitModel
@@ -692,6 +790,7 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
   const planning = input.planning
   const writing = input.writing
   const activeTasks = arrayValue(input.activeTasks)
+  const runRecords = arrayValue(input.runRecords)
   const hasModel = Boolean(input.selectedModelId)
   const chapter = targetChapter(writing)
   const blockingPlan = planningBlocker(planning)
@@ -702,6 +801,7 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
   const rhythmActionNeeded = rhythmNeedsAction(planning)
   const reviewedContract = creationContractFromReview(arrayValue(input.reviews))
   const creationContract = reviewedContract.contract || buildLongformCreationContract(planning, writing)
+  const batchReviewQueue = buildBatchReviewQueue(runRecords)
   const blockers: string[] = []
   const confirmations: string[] = []
   let status: AutoCreationDirectorStatus
@@ -819,6 +919,7 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
     longformRhythm: planning.longformRhythm,
     creationContract,
     batchGuardrail,
+    batchReviewQueue,
     pipeline,
   }
 }

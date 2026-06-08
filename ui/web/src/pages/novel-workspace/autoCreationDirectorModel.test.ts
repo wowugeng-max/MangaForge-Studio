@@ -514,6 +514,53 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(model.batchGuardrail.guardrails.find(item => item.label === '未来100章储备')?.status).toBe('warn')
   })
 
+  test('summarizes the latest safe batch generation as a review queue', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: basePlanning,
+      writing: baseWriting,
+      activeTasks: [],
+      selectedModelId: 12,
+      runRecords: [
+        {
+          id: 8,
+          run_type: 'batch_generate_prose',
+          created_at: '2026-06-01T00:00:00.000Z',
+          input_ref: JSON.stringify({ source: 'manual_batch', total: 12 }),
+          output_ref: JSON.stringify({ total: 12, success: 12, failed: 0, chapters: [] }),
+        },
+        {
+          id: 9,
+          run_type: 'batch_generate_prose',
+          created_at: '2026-06-02T00:00:00.000Z',
+          status: 'warn',
+          input_ref: JSON.stringify({ source: 'auto_creation_safe_batch', safety_limit: 3, available_total: 22 }),
+          output_ref: JSON.stringify({
+            total: 3,
+            success: 2,
+            failed: 1,
+            chapters: [
+              { id: 8, chapter_no: 8, title: '试炼前夜', status: 'success', score: 82, revised: true, word_count: 3180 },
+              { id: 9, chapter_no: 9, title: '阵盘裂纹', status: 'failed', error: '模型未返回正文' },
+              { id: 10, chapter_no: 10, title: '外门震动', status: 'success', score: 86, revised: false, word_count: 3021 },
+            ],
+            errors: ['第 9 章《阵盘裂纹》：模型未返回正文'],
+          }),
+        },
+      ],
+    })
+
+    expect(model.batchReviewQueue.visible).toBe(true)
+    expect(model.batchReviewQueue.status).toBe('warn')
+    expect(model.batchReviewQueue.label).toBe('安全连写复盘')
+    expect(model.batchReviewQueue.total).toBe(3)
+    expect(model.batchReviewQueue.success).toBe(2)
+    expect(model.batchReviewQueue.failed).toBe(1)
+    expect(model.batchReviewQueue.safeLimit).toBe(3)
+    expect(model.batchReviewQueue.nextAction.key).toBe('open_task_center')
+    expect(model.batchReviewQueue.items.map(item => item.chapterNo)).toEqual([8, 9, 10])
+    expect(model.batchReviewQueue.items.find(item => item.status === 'failed')?.error).toContain('模型未返回正文')
+  })
+
   test('keeps acceptance workflow as the only next step after prose exists', () => {
     const model = buildAutoCreationDirectorModel({
       planning: basePlanning,

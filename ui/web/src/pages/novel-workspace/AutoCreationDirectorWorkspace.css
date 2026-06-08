@@ -416,6 +416,99 @@
   background: #fef2f2;
 }
 
+.auto-director-batch-review-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.auto-director-batch-review-panel-ok {
+  border-color: #bbf7d0;
+}
+
+.auto-director-batch-review-panel-warn {
+  border-color: #fde68a;
+}
+
+.auto-director-batch-review-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.62fr) minmax(0, 1.38fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.auto-director-batch-review-summary {
+  min-width: 0;
+  border: 1px solid #edf1f7;
+  border-radius: 9px;
+  background: #fbfcfe;
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.auto-director-batch-review-summary .ant-btn {
+  justify-self: start;
+}
+
+.auto-director-batch-review-list {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.auto-director-batch-review-item {
+  min-width: 0;
+  border: 1px solid #edf1f7;
+  border-radius: 9px;
+  background: #fbfcfe;
+  padding: 9px 10px;
+  display: grid;
+  gap: 5px;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+}
+
+.auto-director-batch-review-item:hover {
+  transform: translateY(-1px);
+  border-color: #93c5fd;
+  background: #f8fbff;
+}
+
+.auto-director-batch-review-item > span {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.auto-director-batch-review-item strong {
+  min-width: 0;
+  color: #0f172a;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.auto-director-batch-review-item .ant-typography {
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.auto-director-batch-review-item-success {
+  border-color: #dcfce7;
+  background: #f0fdf4;
+}
+
+.auto-director-batch-review-item-failed {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
 .auto-director-stage-list {
   display: grid;
   gap: 8px;
@@ -503,6 +596,10 @@
   .auto-director-batch-layout {
     grid-template-columns: 1fr;
   }
+
+  .auto-director-batch-review-layout {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 768px) {
@@ -524,6 +621,10 @@
   }
 
   .auto-director-batch-guardrails {
+    grid-template-columns: 1fr;
+  }
+
+  .auto-director-batch-review-list {
     grid-template-columns: 1fr;
   }
 }
