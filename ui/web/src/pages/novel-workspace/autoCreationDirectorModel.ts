@@ -1355,6 +1355,21 @@ function normalizeRouteChapter(record: AnyRecord): AutoCreationNextBatchBriefCha
   }
 }
 
+function mergeRouteChapterPlan(
+  routeChapter: AutoCreationNextBatchBriefChapter,
+  fallback: AutoCreationNextBatchBriefChapter | null,
+): AutoCreationNextBatchBriefChapter {
+  if (!fallback) return routeChapter
+  return {
+    chapterNo: routeChapter.chapterNo || fallback.chapterNo,
+    title: routeChapter.title || fallback.title,
+    chapterTask: routeChapter.chapterTask || fallback.chapterTask,
+    conflict: routeChapter.conflict || fallback.conflict,
+    endingHook: routeChapter.endingHook || fallback.endingHook,
+    mainlineProgress: routeChapter.mainlineProgress || fallback.mainlineProgress,
+  }
+}
+
 function chapterRangeLabel(chapters: AutoCreationNextBatchBriefChapter[]) {
   if (!chapters.length) return ''
   const first = chapters[0].chapterNo
@@ -1377,16 +1392,21 @@ function buildNextBatchBrief(args: {
     .sort((a, b) => a.chapterNo - b.chapterNo)
     .slice(0, args.safeChapterCount)
   const existingNos = new Set(routeChapters.map(item => item.chapterNo))
+  const targetFallback = normalizeRouteChapter({
+    chapterNo: targetNo,
+    title: args.writing.nextChapter?.title,
+    chapterTask: args.writing.nextChapter?.chapterGoal,
+    conflict: args.writing.nextChapter?.conflict,
+    endingHook: args.writing.nextChapter?.endingHook,
+    mainlineProgress: args.planning.mainline.nextTurn,
+  })
   if (!existingNos.has(targetNo)) {
-    const fallback = normalizeRouteChapter({
-      chapterNo: targetNo,
-      title: args.writing.nextChapter?.title,
-      chapterTask: args.writing.nextChapter?.chapterGoal,
-      conflict: args.writing.nextChapter?.conflict,
-      endingHook: args.writing.nextChapter?.endingHook,
-      mainlineProgress: args.planning.mainline.nextTurn,
-    })
-    if (fallback) routeChapters.unshift(fallback)
+    if (targetFallback) routeChapters.unshift(targetFallback)
+  } else if (targetFallback) {
+    const targetIndex = routeChapters.findIndex(item => item.chapterNo === targetNo)
+    if (targetIndex >= 0) {
+      routeChapters[targetIndex] = mergeRouteChapterPlan(routeChapters[targetIndex], targetFallback)
+    }
   }
   const chapters = routeChapters.slice(0, args.safeChapterCount)
   if (!chapters.length) return emptyNextBatchBrief()
@@ -1412,6 +1432,58 @@ function buildNextBatchBrief(args: {
     ].filter(Boolean).join('；'),
     chapters,
   }
+}
+
+function chapterNoLabels(chapters: AutoCreationNextBatchBriefChapter[]) {
+  return chapters.map(item => `第${item.chapterNo}章`).join('、')
+}
+
+function buildNextBatchBriefSignal(
+  nextBatchBrief: AutoCreationNextBatchBrief,
+  expectedChapterCount: number,
+): AutoCreationBatchGuardrailSignal {
+  if (expectedChapterCount <= 0) {
+    return signal('批次任务书', 'ok', '当前没有可放行的安全连写批次。')
+  }
+  if (!nextBatchBrief.visible || nextBatchBrief.chapters.length === 0) {
+    return signal('批次任务书', 'block', '缺少下一批任务书，无法判断连续生成会推进什么。')
+  }
+
+  const missingCoverage = expectedChapterCount > 1 && nextBatchBrief.chapters.length < expectedChapterCount
+    ? [`只覆盖 ${nextBatchBrief.chapters.length}/${expectedChapterCount} 章`]
+    : []
+  const missingTask = nextBatchBrief.chapters.filter(item => !text(item.chapterTask))
+  const missingConflict = nextBatchBrief.chapters.filter(item => !text(item.conflict))
+  const missingHook = nextBatchBrief.chapters.filter(item => !text(item.endingHook))
+  const missingMainline = nextBatchBrief.chapters.filter(item => !text(item.mainlineProgress))
+  const issues = [
+    ...missingCoverage,
+    missingTask.length ? `缺逐章职责：${chapterNoLabels(missingTask)}` : '',
+    missingConflict.length ? `缺冲突落点：${chapterNoLabels(missingConflict)}` : '',
+    missingHook.length ? `缺章末钩子：${chapterNoLabels(missingHook)}` : '',
+    missingMainline.length ? `缺主线推进：${chapterNoLabels(missingMainline)}` : '',
+  ].filter(Boolean)
+
+  if (!issues.length) {
+    return signal(
+      '批次任务书',
+      'ok',
+      `下一批任务书覆盖 ${nextBatchBrief.chapterRangeLabel}，本批目标、读者回报、主线推进和章末钩子可检查。`,
+    )
+  }
+
+  const firstChapter = nextBatchBrief.chapters[0]
+  const firstChapterUsable = Boolean(
+    text(firstChapter?.chapterTask)
+    && text(firstChapter?.conflict)
+    && text(firstChapter?.endingHook)
+    && text(firstChapter?.mainlineProgress),
+  )
+  const status: AutoCreationBatchGuardrailSignalStatus = firstChapterUsable ? 'warn' : 'block'
+  const detail = status === 'warn'
+    ? `下一批任务书还不适合多章连写，${issues.slice(0, 3).join('；')}。本轮先降为单章推进。`
+    : `下一批任务书不足以开写，${issues.slice(0, 3).join('；')}。先补章节任务书或滚动规划。`
+  return signal('批次任务书', status, detail)
 }
 
 function buildBatchGuardrail(args: {
@@ -1488,15 +1560,29 @@ function buildBatchGuardrail(args: {
       currentChapterDelivered ? 'ok' : 'block',
       currentChapterDelivered ? '当前没有未处理的交稿门禁。' : text(acceptance.statusLabel, '当前章仍需质检、修订或状态同步。'),
     ),
-    signal('每章交稿回填', 'ok', '连续生产仍按单章质检、修订、故事状态同步和资产发现逐章回填。'),
   ]
+
+  const preliminaryBlocking = guardrails.find(item => item.status === 'block')
+  const preliminaryWarning = guardrails.find(item => item.status === 'warn')
+  const preliminaryStatus: AutoCreationBatchGuardrailStatus = preliminaryBlocking ? 'blocked' : preliminaryWarning ? 'caution' : 'ready'
+  const preliminarySafeChapterCount = preliminaryStatus === 'blocked'
+    ? 0
+    : preliminaryStatus === 'caution'
+      ? 1
+      : Math.max(1, Math.min(3, Number(future10.planned || 3), Number(planning.volumeBeatBudget?.plannedChapterCount || 3)))
+  const preliminaryNextBatchBrief = buildNextBatchBrief({ planning, writing, safeChapterCount: preliminarySafeChapterCount })
+  const batchBriefSignal = buildNextBatchBriefSignal(preliminaryNextBatchBrief, preliminarySafeChapterCount)
+  guardrails.push(batchBriefSignal)
+  guardrails.push(signal('每章交稿回填', 'ok', '连续生产仍按单章质检、修订、故事状态同步和资产发现逐章回填。'))
 
   const blocking = guardrails.find(item => item.status === 'block')
   const warning = guardrails.find(item => item.status === 'warn')
   const status: AutoCreationBatchGuardrailStatus = blocking ? 'blocked' : warning ? 'caution' : 'ready'
   let recommendedAction = args.mainAction
 
-  if (!blocking && warning?.label === '未来100章储备') {
+  if (blocking?.label === '批次任务书' || warning?.label === '批次任务书') {
+    recommendedAction = planningAction('update_rolling_plan', blocking?.detail || warning?.detail || '先补齐下一批任务书。')
+  } else if (!blocking && warning?.label === '未来100章储备') {
     recommendedAction = planningAction('future100_generate', '先补齐更长线的未来100章储备，再扩大连续生产批次。')
   } else if (!blocking && warning?.label === '百万字产能') {
     recommendedAction = planningAction(args.longformCapacity.recommendedActionKey, args.longformCapacity.summary)
@@ -1506,8 +1592,10 @@ function buildBatchGuardrail(args: {
     ? 0
     : status === 'caution'
       ? 1
-      : Math.max(1, Math.min(3, Number(future10.planned || 3), Number(planning.volumeBeatBudget?.plannedChapterCount || 3)))
-  const nextBatchBrief = buildNextBatchBrief({ planning, writing, safeChapterCount })
+      : preliminarySafeChapterCount
+  const nextBatchBrief = safeChapterCount === preliminarySafeChapterCount
+    ? preliminaryNextBatchBrief
+    : buildNextBatchBrief({ planning, writing, safeChapterCount })
 
   if (status === 'ready') {
     recommendedAction = opsAction(
@@ -1523,7 +1611,9 @@ function buildBatchGuardrail(args: {
     summary: status === 'ready'
       ? `建议先小批量连续生产 ${safeChapterCount} 章，每章都经过质检、回填和差异复盘后再扩大批次。`
       : status === 'caution'
-        ? '长线储备存在薄弱点，本轮建议只推进 1 章，并优先处理黄色风险。'
+        ? warning?.label === '批次任务书'
+          ? '下一批任务书还不够具体，本轮建议只推进 1 章，并先补齐后续章节职责、冲突和钩子。'
+          : '长线储备存在薄弱点，本轮建议只推进 1 章，并优先处理黄色风险。'
         : blocking?.detail || '当前存在阻塞项，暂不适合连续生产。',
     safeChapterCount,
     recommendedAction,

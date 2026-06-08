@@ -542,6 +542,7 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(model.batchGuardrail.recommendedAction.modelCall).toBe(true)
     expect(model.batchGuardrail.guardrails.map(item => item.label)).toContain('章节任务书/场景卡')
     expect(model.batchGuardrail.guardrails.map(item => item.label)).toContain('未来10章规划')
+    expect(model.batchGuardrail.guardrails.find(item => item.label === '批次任务书')?.status).toBe('ok')
     expect(model.batchGuardrail.guardrails.map(item => item.label)).toContain('每章交稿回填')
     expect(model.batchGuardrail.nextBatchBrief.visible).toBe(true)
     expect(model.batchGuardrail.nextBatchBrief.chapterRangeLabel).toBe('第8-10章')
@@ -550,6 +551,55 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(model.batchGuardrail.nextBatchBrief.chapters.map(item => item.chapterNo)).toEqual([8, 9, 10])
     expect(model.batchGuardrail.nextBatchBrief.chapters[2]?.endingHook).toBe('内门招揽提出苛刻条件')
     expect(model.pipeline.find(step => step.key === 'batch_guardrail')?.status).toBe('active')
+  })
+
+  test('downgrades safe batching when the next batch brief is too vague for multi-chapter production', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        topStatus: {
+          ...basePlanning.topStatus,
+          future100Coverage: { ready: true, planned: 100, required: 100, missingChapters: [], label: '100/100' },
+        },
+        futureRoute: [
+          { chapterNo: 8, title: '试炼前夜' },
+          { chapterNo: 9, title: '阵盘裂纹' },
+          { chapterNo: 10, title: '外门震动' },
+        ],
+      },
+      writing: {
+        ...baseWriting,
+        chapterPlanningDesk: {
+          ...baseWriting.chapterPlanningDesk,
+          readiness: 'ready',
+          statusLabel: '本章可写',
+          scenePlanStatus: 'ready',
+          sceneCards: [
+            { title: '压迫升级', goal: '执事逼主角交阵盘' },
+            { title: '反向设局', goal: '主角用阵法拿回主动权' },
+          ],
+          recommendedPlannerAction: { key: 'confirm_plan_and_write_draft', label: '确认并生成' },
+        },
+        topStatus: {
+          ...baseWriting.topStatus,
+          nextActionLabel: '确认并生成',
+          primaryActionKey: 'confirm_plan_and_write_draft',
+        },
+        primaryActionKey: 'confirm_plan_and_write_draft',
+      },
+      activeTasks: [],
+      selectedModelId: 12,
+    })
+
+    expect(model.batchGuardrail.status).toBe('caution')
+    expect(model.batchGuardrail.safeChapterCount).toBe(1)
+    expect(model.batchGuardrail.recommendedAction.key).toBe('update_rolling_plan')
+    expect(model.batchGuardrail.recommendedAction.modelCall).toBe(true)
+    expect(model.batchGuardrail.guardrails.find(item => item.label === '批次任务书')?.status).toBe('warn')
+    expect(model.batchGuardrail.guardrails.find(item => item.label === '批次任务书')?.detail).toContain('逐章职责')
+    expect(model.batchGuardrail.nextBatchBrief.chapterRangeLabel).toBe('第8章')
+    expect(model.batchGuardrail.nextBatchBrief.chapters.map(item => item.chapterNo)).toEqual([8])
+    expect(model.batchGuardrail.summary).toContain('下一批任务书')
   })
 
   test('downgrades safe batching when million-word capacity is too shallow for an epic target', () => {
