@@ -411,6 +411,28 @@ export function AutoCreationDirectorWorkspace({
             </div>
           </div>
         )}
+        {model.batchGuardrail.briefRepair.visible && (
+          <div className={`auto-director-batch-repair auto-director-batch-repair-${model.batchGuardrail.briefRepair.status}`}>
+            <div className="auto-director-batch-repair-head">
+              <span>
+                <Text strong>批次任务书补齐</Text>
+                <Text type="secondary">{model.batchGuardrail.briefRepair.summary}</Text>
+              </span>
+              <ActionButton
+                action={model.batchGuardrail.briefRepair.action}
+                loadingActionKey={loadingActionKey}
+                onAction={onAction}
+              />
+            </div>
+            <div className="auto-director-batch-repair-list">
+              {model.batchGuardrail.briefRepair.missingItems.map(item => (
+                <Tag key={item} color={model.batchGuardrail.briefRepair.status === 'block' ? 'red' : 'gold'} bordered={false}>
+                  {item}
+                </Tag>
+              ))}
+            </div>
+          </div>
+        )}
       </section>
 
       {model.batchReviewQueue.visible && (

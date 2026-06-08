@@ -99,6 +99,15 @@ export interface AutoCreationBatchGuardrailSignal {
   detail: string
 }
 
+export interface AutoCreationBatchBriefRepair {
+  visible: boolean
+  status: AutoCreationBatchGuardrailSignalStatus
+  title: string
+  summary: string
+  missingItems: string[]
+  action: AutoCreationDirectorAction
+}
+
 export interface AutoCreationNextBatchBriefChapter {
   chapterNo: number
   title: string
@@ -158,6 +167,7 @@ export interface AutoCreationBatchGuardrail {
   recommendedAction: AutoCreationDirectorAction
   guardrails: AutoCreationBatchGuardrailSignal[]
   nextBatchBrief: AutoCreationNextBatchBrief
+  briefRepair: AutoCreationBatchBriefRepair
 }
 
 export interface AutoCreationBatchReviewItem {
@@ -339,11 +349,11 @@ function firstText(...values: any[]) {
   return ''
 }
 
-function planningAction(key: PlanningActionKey, description: string): AutoCreationDirectorAction {
+function planningAction(key: PlanningActionKey, description: string, label?: string): AutoCreationDirectorAction {
   return {
     area: 'planning',
     key,
-    label: PLANNING_ACTION_LABELS[key] || key,
+    label: label || PLANNING_ACTION_LABELS[key] || key,
     description,
     modelCall: MODEL_CALL_ACTIONS.has(key),
   }
@@ -1438,6 +1448,29 @@ function chapterNoLabels(chapters: AutoCreationNextBatchBriefChapter[]) {
   return chapters.map(item => `第${item.chapterNo}章`).join('、')
 }
 
+function nextBatchBriefMissingItems(
+  nextBatchBrief: AutoCreationNextBatchBrief,
+  expectedChapterCount: number,
+) {
+  if (expectedChapterCount <= 0) return []
+  if (!nextBatchBrief.visible || nextBatchBrief.chapters.length === 0) return ['缺少下一批任务书']
+
+  const missingCoverage = expectedChapterCount > 1 && nextBatchBrief.chapters.length < expectedChapterCount
+    ? [`只覆盖 ${nextBatchBrief.chapters.length}/${expectedChapterCount} 章`]
+    : []
+  const missingTask = nextBatchBrief.chapters.filter(item => !text(item.chapterTask))
+  const missingConflict = nextBatchBrief.chapters.filter(item => !text(item.conflict))
+  const missingHook = nextBatchBrief.chapters.filter(item => !text(item.endingHook))
+  const missingMainline = nextBatchBrief.chapters.filter(item => !text(item.mainlineProgress))
+  return [
+    ...missingCoverage,
+    missingTask.length ? `缺逐章职责：${chapterNoLabels(missingTask)}` : '',
+    missingConflict.length ? `缺冲突落点：${chapterNoLabels(missingConflict)}` : '',
+    missingHook.length ? `缺章末钩子：${chapterNoLabels(missingHook)}` : '',
+    missingMainline.length ? `缺主线推进：${chapterNoLabels(missingMainline)}` : '',
+  ].filter(Boolean)
+}
+
 function buildNextBatchBriefSignal(
   nextBatchBrief: AutoCreationNextBatchBrief,
   expectedChapterCount: number,
@@ -1449,20 +1482,7 @@ function buildNextBatchBriefSignal(
     return signal('批次任务书', 'block', '缺少下一批任务书，无法判断连续生成会推进什么。')
   }
 
-  const missingCoverage = expectedChapterCount > 1 && nextBatchBrief.chapters.length < expectedChapterCount
-    ? [`只覆盖 ${nextBatchBrief.chapters.length}/${expectedChapterCount} 章`]
-    : []
-  const missingTask = nextBatchBrief.chapters.filter(item => !text(item.chapterTask))
-  const missingConflict = nextBatchBrief.chapters.filter(item => !text(item.conflict))
-  const missingHook = nextBatchBrief.chapters.filter(item => !text(item.endingHook))
-  const missingMainline = nextBatchBrief.chapters.filter(item => !text(item.mainlineProgress))
-  const issues = [
-    ...missingCoverage,
-    missingTask.length ? `缺逐章职责：${chapterNoLabels(missingTask)}` : '',
-    missingConflict.length ? `缺冲突落点：${chapterNoLabels(missingConflict)}` : '',
-    missingHook.length ? `缺章末钩子：${chapterNoLabels(missingHook)}` : '',
-    missingMainline.length ? `缺主线推进：${chapterNoLabels(missingMainline)}` : '',
-  ].filter(Boolean)
+  const issues = nextBatchBriefMissingItems(nextBatchBrief, expectedChapterCount)
 
   if (!issues.length) {
     return signal(
@@ -1484,6 +1504,36 @@ function buildNextBatchBriefSignal(
     ? `下一批任务书还不适合多章连写，${issues.slice(0, 3).join('；')}。本轮先降为单章推进。`
     : `下一批任务书不足以开写，${issues.slice(0, 3).join('；')}。先补章节任务书或滚动规划。`
   return signal('批次任务书', status, detail)
+}
+
+function emptyNextBatchBriefRepair(): AutoCreationBatchBriefRepair {
+  return {
+    visible: false,
+    status: 'ok',
+    title: '',
+    summary: '',
+    missingItems: [],
+    action: planningAction('update_rolling_plan', '批次任务书完整时无需补齐。', '补齐批次任务书'),
+  }
+}
+
+function buildNextBatchBriefRepair(
+  nextBatchBrief: AutoCreationNextBatchBrief,
+  expectedChapterCount: number,
+  batchBriefSignal: AutoCreationBatchGuardrailSignal,
+): AutoCreationBatchBriefRepair {
+  if (batchBriefSignal.status === 'ok') return emptyNextBatchBriefRepair()
+  const missingItems = nextBatchBriefMissingItems(nextBatchBrief, expectedChapterCount)
+  return {
+    visible: true,
+    status: batchBriefSignal.status,
+    title: '补齐下一批任务书',
+    summary: batchBriefSignal.status === 'block'
+      ? '下一批还没有达到开写条件，先补齐本批目标、逐章职责、冲突和钩子。'
+      : '当前章可以继续推进，但多章连写前需要补齐后续章节职责、冲突和钩子。',
+    missingItems,
+    action: planningAction('update_rolling_plan', batchBriefSignal.detail, '补齐批次任务书'),
+  }
 }
 
 function buildBatchGuardrail(args: {
@@ -1572,6 +1622,7 @@ function buildBatchGuardrail(args: {
       : Math.max(1, Math.min(3, Number(future10.planned || 3), Number(planning.volumeBeatBudget?.plannedChapterCount || 3)))
   const preliminaryNextBatchBrief = buildNextBatchBrief({ planning, writing, safeChapterCount: preliminarySafeChapterCount })
   const batchBriefSignal = buildNextBatchBriefSignal(preliminaryNextBatchBrief, preliminarySafeChapterCount)
+  const briefRepair = buildNextBatchBriefRepair(preliminaryNextBatchBrief, preliminarySafeChapterCount, batchBriefSignal)
   guardrails.push(batchBriefSignal)
   guardrails.push(signal('每章交稿回填', 'ok', '连续生产仍按单章质检、修订、故事状态同步和资产发现逐章回填。'))
 
@@ -1581,7 +1632,7 @@ function buildBatchGuardrail(args: {
   let recommendedAction = args.mainAction
 
   if (blocking?.label === '批次任务书' || warning?.label === '批次任务书') {
-    recommendedAction = planningAction('update_rolling_plan', blocking?.detail || warning?.detail || '先补齐下一批任务书。')
+    recommendedAction = briefRepair.action
   } else if (!blocking && warning?.label === '未来100章储备') {
     recommendedAction = planningAction('future100_generate', '先补齐更长线的未来100章储备，再扩大连续生产批次。')
   } else if (!blocking && warning?.label === '百万字产能') {
@@ -1619,6 +1670,7 @@ function buildBatchGuardrail(args: {
     recommendedAction,
     guardrails,
     nextBatchBrief,
+    briefRepair,
   }
 }
 

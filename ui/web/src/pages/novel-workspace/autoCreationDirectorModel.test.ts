@@ -550,6 +550,7 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(model.batchGuardrail.nextBatchBrief.readerPayoffPlan).toContain('升级+打脸')
     expect(model.batchGuardrail.nextBatchBrief.chapters.map(item => item.chapterNo)).toEqual([8, 9, 10])
     expect(model.batchGuardrail.nextBatchBrief.chapters[2]?.endingHook).toBe('内门招揽提出苛刻条件')
+    expect(model.batchGuardrail.briefRepair.visible).toBe(false)
     expect(model.pipeline.find(step => step.key === 'batch_guardrail')?.status).toBe('active')
   })
 
@@ -594,12 +595,23 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(model.batchGuardrail.status).toBe('caution')
     expect(model.batchGuardrail.safeChapterCount).toBe(1)
     expect(model.batchGuardrail.recommendedAction.key).toBe('update_rolling_plan')
+    expect(model.batchGuardrail.recommendedAction.label).toBe('补齐批次任务书')
     expect(model.batchGuardrail.recommendedAction.modelCall).toBe(true)
     expect(model.batchGuardrail.guardrails.find(item => item.label === '批次任务书')?.status).toBe('warn')
     expect(model.batchGuardrail.guardrails.find(item => item.label === '批次任务书')?.detail).toContain('逐章职责')
     expect(model.batchGuardrail.nextBatchBrief.chapterRangeLabel).toBe('第8章')
     expect(model.batchGuardrail.nextBatchBrief.chapters.map(item => item.chapterNo)).toEqual([8])
     expect(model.batchGuardrail.summary).toContain('下一批任务书')
+    expect(model.batchGuardrail.briefRepair.visible).toBe(true)
+    expect(model.batchGuardrail.briefRepair.status).toBe('warn')
+    expect(model.batchGuardrail.briefRepair.title).toBe('补齐下一批任务书')
+    expect(model.batchGuardrail.briefRepair.action.label).toBe('补齐批次任务书')
+    expect(model.batchGuardrail.briefRepair.missingItems).toEqual([
+      '缺逐章职责：第9章、第10章',
+      '缺冲突落点：第9章、第10章',
+      '缺章末钩子：第9章、第10章',
+      '缺主线推进：第9章、第10章',
+    ])
   })
 
   test('downgrades safe batching when million-word capacity is too shallow for an epic target', () => {
