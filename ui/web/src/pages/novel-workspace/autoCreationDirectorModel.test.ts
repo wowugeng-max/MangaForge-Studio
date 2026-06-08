@@ -451,6 +451,54 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(model.pipeline.find(step => step.key === 'batch_guardrail')?.status).toBe('active')
   })
 
+  test('downgrades safe batching when million-word capacity is too shallow for an epic target', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        topStatus: {
+          ...basePlanning.topStatus,
+          writtenWords: 48000,
+          targetWords: 10000000,
+          future100Coverage: { ready: true, planned: 100, required: 100, missingChapters: [], label: '100/100' },
+        },
+        storylineBoard: {
+          ...basePlanning.storylineBoard,
+          total: 3,
+          summary: '只有主线和两条支线，十万字后容易耗尽冲突。',
+        },
+        volumeBeatBudget: {
+          ...basePlanning.volumeBeatBudget,
+          plannedChapterCount: 22,
+          totalChapters: 40,
+          score: 86,
+          status: 'ready',
+        },
+      },
+      writing: {
+        ...baseWriting,
+        chapterPlanningDesk: {
+          ...baseWriting.chapterPlanningDesk,
+          readiness: 'ready',
+          statusLabel: '本章可写',
+          scenePlanStatus: 'ready',
+          sceneCards: [{ title: '试炼前夜', goal: '以试炼资格引爆外门矛盾' }],
+          recommendedPlannerAction: { key: 'confirm_plan_and_write_draft', label: '确认并生成' },
+        },
+      },
+      activeTasks: [],
+      selectedModelId: 12,
+    })
+
+    expect(model.longformCapacity.status).toBe('caution')
+    expect(model.longformCapacity.targetBandLabel).toBe('1000万字级')
+    expect(model.longformCapacity.signals.find(signal => signal.key === 'storyline_pool')?.status).toBe('warn')
+    expect(model.batchGuardrail.status).toBe('caution')
+    expect(model.batchGuardrail.safeChapterCount).toBe(1)
+    expect(model.batchGuardrail.guardrails.find(item => item.label === '百万字产能')?.status).toBe('warn')
+    expect(model.pipeline.find(step => step.key === 'longform_capacity')?.status).toBe('warning')
+    expect(model.metrics.longformCapacityScore).toBeLessThan(80)
+  })
+
   test('blocks continuous production while the current chapter still needs delivery work', () => {
     const model = buildAutoCreationDirectorModel({
       planning: basePlanning,

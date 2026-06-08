@@ -28,6 +28,7 @@ export type AutoCreationBatchGuardrailSignalStatus = 'ok' | 'warn' | 'block'
 export type AutoCreationBatchReviewStatus = 'empty' | 'ok' | 'warn' | 'risk' | 'done'
 export type AutoCreationBatchReviewItemStatus = 'success' | 'failed'
 export type AutoCreationBatchRiskStatus = 'ok' | 'warn'
+export type AutoCreationLongformCapacityStatus = 'ready' | 'caution' | 'blocked'
 
 export interface AutoCreationDirectorAction {
   area: AutoCreationDirectorArea
@@ -42,6 +43,7 @@ export interface AutoCreationPipelineStep {
   key:
     | 'longform_planning'
     | 'creation_contract'
+    | 'longform_capacity'
     | 'volume_beat_budget'
     | 'longform_rhythm'
     | 'story_assets'
@@ -70,6 +72,27 @@ export interface AutoCreationBatchGuardrailSignal {
   label: string
   status: AutoCreationBatchGuardrailSignalStatus
   detail: string
+}
+
+export interface AutoCreationLongformCapacitySignal {
+  key: 'future_reserve' | 'storyline_pool' | 'volume_runway' | 'production_stamina'
+  label: string
+  status: AutoCreationBatchGuardrailSignalStatus
+  score: number
+  detail: string
+  actionKey: PlanningActionKey
+}
+
+export interface AutoCreationLongformCapacity {
+  status: AutoCreationLongformCapacityStatus
+  score: number
+  label: string
+  summary: string
+  targetBandLabel: string
+  remainingWords: number
+  estimatedRemainingChapters: number
+  recommendedActionKey: PlanningActionKey
+  signals: AutoCreationLongformCapacitySignal[]
 }
 
 export interface AutoCreationBatchGuardrail {
@@ -158,8 +181,10 @@ export interface AutoCreationDirectorModel {
     creationDiagnosisScore: number | null
     longformRhythmScore: number | null
     volumeBeatScore: number | null
+    longformCapacityScore: number | null
   }
   longformRhythm: PlanningWorkspaceModel['longformRhythm']
+  longformCapacity: AutoCreationLongformCapacity
   creationContract: AutoCreationContractItem[]
   batchGuardrail: AutoCreationBatchGuardrail
   batchReviewQueue: AutoCreationBatchReviewQueue
@@ -872,6 +897,110 @@ function buildLongformCreationContract(planning: PlanningWorkspaceModel, writing
   ]
 }
 
+function capacityTargetBand(targetWords: number) {
+  if (targetWords >= 8000000) return '1000万字级'
+  if (targetWords >= 3000000) return '300万字级'
+  if (targetWords >= 1000000) return '百万字级'
+  return '长篇'
+}
+
+function signalStatusFromScore(score: number, warnAt = 80, blockAt = 55): AutoCreationBatchGuardrailSignalStatus {
+  if (score < blockAt) return 'block'
+  if (score < warnAt) return 'warn'
+  return 'ok'
+}
+
+function buildLongformCapacity(planning: PlanningWorkspaceModel): AutoCreationLongformCapacity {
+  const targetWords = Math.max(0, Number(planning.topStatus.targetWords || 0))
+  const writtenWords = Math.max(0, Number(planning.topStatus.writtenWords || 0))
+  const remainingWords = Math.max(0, targetWords - writtenWords)
+  const estimatedRemainingChapters = remainingWords > 0 ? Math.ceil(remainingWords / 3000) : 0
+  const targetBandLabel = capacityTargetBand(targetWords)
+  const future100 = planning.topStatus.future100Coverage
+  const future100Planned = Number(future100.planned || 0)
+  const storylineTotal = Number(planning.storylineBoard.total || 0)
+  const targetStorylineCount = targetWords >= 8000000 ? 8 : targetWords >= 3000000 ? 6 : 4
+  const plannedChapterCount = Number(planning.volumeBeatBudget?.plannedChapterCount || 0)
+  const targetVolumeRunway = targetWords >= 8000000 ? 50 : targetWords >= 3000000 ? 40 : 25
+  const rhythmScore = Number(planning.longformRhythm?.score || 0)
+  const beatScore = Number(planning.volumeBeatBudget?.score || 0)
+
+  const futureScore = future100.ready
+    ? 92
+    : future100Planned >= 60
+      ? 76
+      : future100Planned >= 30
+        ? 62
+        : 45
+  const storylineScore = storylineTotal <= 0
+    ? 45
+    : storylineTotal >= targetStorylineCount
+      ? 88
+      : Math.max(58, Math.round((storylineTotal / targetStorylineCount) * 82))
+  const volumeRunwayScore = plannedChapterCount >= targetVolumeRunway
+    ? 88
+    : plannedChapterCount >= Math.ceil(targetVolumeRunway * 0.35)
+      ? Math.max(58, Math.round((plannedChapterCount / targetVolumeRunway) * 82))
+      : 48
+  const staminaScore = Math.round(((rhythmScore || 70) + (beatScore || 70)) / 2)
+
+  const signals: AutoCreationLongformCapacitySignal[] = [
+    {
+      key: 'future_reserve',
+      label: '未来储备',
+      status: future100.ready ? 'ok' : future100Planned >= 10 ? 'warn' : 'block',
+      score: futureScore,
+      detail: future100.ready ? `未来100章覆盖 ${future100.label}。` : `未来100章只有 ${future100.label}，超长篇只能小步滚动。`,
+      actionKey: 'future100_generate',
+    },
+    {
+      key: 'storyline_pool',
+      label: '剧情线池',
+      status: signalStatusFromScore(storylineScore, 84, 50),
+      score: storylineScore,
+      detail: `当前 ${storylineTotal} 条剧情线，${targetBandLabel} 建议至少 ${targetStorylineCount} 条可轮转长线。`,
+      actionKey: 'open_story_assets',
+    },
+    {
+      key: 'volume_runway',
+      label: '当前卷跑道',
+      status: signalStatusFromScore(volumeRunwayScore, 84, 55),
+      score: volumeRunwayScore,
+      detail: `当前卷已规划 ${plannedChapterCount} 章，建议保持 ${targetVolumeRunway} 章以上的卷内冲突跑道。`,
+      actionKey: 'complete_volume_plan',
+    },
+    {
+      key: 'production_stamina',
+      label: '节奏耐力',
+      status: signalStatusFromScore(staminaScore, 80, 58),
+      score: staminaScore,
+      detail: `长篇节奏 ${rhythmScore || '-'}，爆点预算 ${beatScore || '-'}，用于判断连续生产是否会疲软。`,
+      actionKey: 'longform_pressure',
+    },
+  ]
+  const score = Math.round(signals.reduce((sum, item) => sum + item.score, 0) / Math.max(1, signals.length))
+  const status: AutoCreationLongformCapacityStatus = signals.some(item => item.status === 'block')
+    ? 'blocked'
+    : signals.some(item => item.status === 'warn') || score < 80
+      ? 'caution'
+      : 'ready'
+  const firstRisk = signals.find(item => item.status !== 'ok')
+
+  return {
+    status,
+    score,
+    label: status === 'ready' ? `产能健康 ${score}` : status === 'caution' ? `产能偏薄 ${score}` : `产能阻塞 ${score}`,
+    summary: status === 'ready'
+      ? `${targetBandLabel} 目标仍有 ${estimatedRemainingChapters} 章左右，当前储备可以进入安全连写。`
+      : `${targetBandLabel} 目标仍有 ${estimatedRemainingChapters} 章左右，${firstRisk?.label || '长线储备'}偏薄，建议先补长线资产再扩大批量。`,
+    targetBandLabel,
+    remainingWords,
+    estimatedRemainingChapters,
+    recommendedActionKey: firstRisk?.actionKey || 'longform_pressure',
+    signals,
+  }
+}
+
 function signal(label: string, status: AutoCreationBatchGuardrailSignalStatus, detail: string): AutoCreationBatchGuardrailSignal {
   return { label, status, detail }
 }
@@ -896,6 +1025,7 @@ function buildBatchGuardrail(args: {
   hasBlockingPlan: boolean
   hasModel: boolean
   mainAction: AutoCreationDirectorAction
+  longformCapacity: AutoCreationLongformCapacity
 }): AutoCreationBatchGuardrail {
   const planning = args.planning
   const writing = args.writing
@@ -909,6 +1039,11 @@ function buildBatchGuardrail(args: {
   const volumeBeatActionNeeded = volumeBeatNeedsAction(planning)
   const rhythmActionNeeded = rhythmNeedsAction(planning)
   const future100Status = future100ReserveStatus(planning)
+  const capacityStatus: AutoCreationBatchGuardrailSignalStatus = args.longformCapacity.status === 'ready'
+    ? 'ok'
+    : args.longformCapacity.status === 'blocked'
+      ? 'block'
+      : 'warn'
   const hasScenePlan = planningDesk.scenePlanStatus === 'ready' || arrayValue(planningDesk.sceneCards).length > 0
   const currentChapterDelivered = !Boolean(acceptance.visible)
   const chapterPlanIssue = text(arrayValue(planningDesk.reasons)[0], '当前章任务书或场景卡未就绪。')
@@ -943,6 +1078,11 @@ function buildBatchGuardrail(args: {
       future100.ready ? `未来100章覆盖 ${future100.label}。` : `未来100章覆盖 ${future100.label}，只适合小步推进。`,
     ),
     signal(
+      '百万字产能',
+      capacityStatus,
+      args.longformCapacity.summary,
+    ),
+    signal(
       '章节任务书/场景卡',
       chapterPlanReady ? 'ok' : 'block',
       chapterPlanReady ? '当前章任务书和场景卡已就绪。' : chapterPlanIssue,
@@ -962,6 +1102,8 @@ function buildBatchGuardrail(args: {
 
   if (!blocking && warning?.label === '未来100章储备') {
     recommendedAction = planningAction('future100_generate', '先补齐更长线的未来100章储备，再扩大连续生产批次。')
+  } else if (!blocking && warning?.label === '百万字产能') {
+    recommendedAction = planningAction(args.longformCapacity.recommendedActionKey, args.longformCapacity.summary)
   }
 
   const safeChapterCount = status === 'blocked'
@@ -1109,6 +1251,7 @@ function buildPipeline(args: {
   hasBlockingPlan: boolean
   hasModel: boolean
   creationContract: AutoCreationContractItem[]
+  longformCapacity: AutoCreationLongformCapacity
   batchGuardrail: AutoCreationBatchGuardrail
 }): AutoCreationPipelineStep[] {
   const acceptance = args.writing.chapterAcceptanceDesk
@@ -1135,6 +1278,16 @@ function buildPipeline(args: {
         .map(item => `${item.label}：${item.detail}`)
         .slice(0, 2)
         .join('；') || '核心、故事、创新和读者吸引力达标',
+    },
+    {
+      key: 'longform_capacity',
+      label: '百万字产能',
+      status: args.longformCapacity.status === 'blocked'
+        ? 'blocked'
+        : args.longformCapacity.status === 'caution'
+          ? 'warning'
+          : 'done',
+      detail: args.longformCapacity.summary,
     },
     {
       key: 'volume_beat_budget',
@@ -1248,6 +1401,7 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
   const rhythmActionNeeded = rhythmNeedsAction(planning)
   const reviewedContract = creationContractFromReview(arrayValue(input.reviews))
   const creationContract = reviewedContract.contract || buildLongformCreationContract(planning, writing)
+  const longformCapacity = buildLongformCapacity(planning)
   const batchReviewQueue = buildBatchReviewQueue({
     runRecords,
     chapters: arrayValue(input.chapters),
@@ -1354,6 +1508,7 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
     hasBlockingPlan: Boolean(blockingPlan),
     hasModel,
     mainAction,
+    longformCapacity,
   })
   const pipeline = buildPipeline({
     planning,
@@ -1362,6 +1517,7 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
     hasBlockingPlan: Boolean(blockingPlan),
     hasModel,
     creationContract,
+    longformCapacity,
     batchGuardrail,
   })
 
@@ -1388,8 +1544,10 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
       creationDiagnosisScore: reviewedContract.score,
       longformRhythmScore: planning.longformRhythm?.score ?? null,
       volumeBeatScore: planning.volumeBeatBudget?.score ?? null,
+      longformCapacityScore: longformCapacity.score,
     },
     longformRhythm: planning.longformRhythm,
+    longformCapacity,
     creationContract,
     batchGuardrail,
     batchReviewQueue,

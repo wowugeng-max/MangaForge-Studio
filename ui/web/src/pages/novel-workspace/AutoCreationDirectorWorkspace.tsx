@@ -155,6 +155,7 @@ export function AutoCreationDirectorWorkspace({
             <Tag bordered={false}>未来10章 {model.metrics.future10Label}</Tag>
             {model.metrics.first30Score !== null && <Tag bordered={false}>前30章 {model.metrics.first30Score}分</Tag>}
             {model.metrics.creationDiagnosisScore !== null && <Tag color="geekblue" bordered={false}>创作诊断 {model.metrics.creationDiagnosisScore}分</Tag>}
+            {model.metrics.longformCapacityScore !== null && <Tag color={rhythmColor(model.longformCapacity.status)} bordered={false}>产能 {model.metrics.longformCapacityScore}</Tag>}
             {model.metrics.volumeBeatScore !== null && <Tag color={rhythmColor(model.longformRhythm.status)} bordered={false}>爆点预算 {model.metrics.volumeBeatScore}</Tag>}
             {model.metrics.longformRhythmScore !== null && <Tag color={rhythmColor(model.longformRhythm.status)} bordered={false}>长篇节奏 {model.metrics.longformRhythmScore}</Tag>}
             <Tag bordered={false}>剧情线 {model.metrics.storylineCount}</Tag>
@@ -254,6 +255,40 @@ export function AutoCreationDirectorWorkspace({
               <span>
                 <strong>{signal.label}</strong>
                 <Tag color={rhythmColor(signal.status)} bordered={false}>{rhythmLabel(signal.status)}</Tag>
+              </span>
+              <em>{signal.score}</em>
+              <Text type="secondary">{signal.detail}</Text>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className={`auto-director-panel auto-director-capacity-panel auto-director-capacity-panel-${model.longformCapacity.status}`}>
+        <div className="auto-director-panel-title">
+          <FundProjectionScreenOutlined />
+          <span>百万字产能</span>
+          <Tag color={rhythmColor(model.longformCapacity.status)} bordered={false}>{model.longformCapacity.label}</Tag>
+          <Tag bordered={false}>{model.longformCapacity.targetBandLabel}</Tag>
+          <Tag bordered={false}>剩余约 {model.longformCapacity.estimatedRemainingChapters} 章</Tag>
+        </div>
+        <Text className="auto-director-capacity-summary">{model.longformCapacity.summary}</Text>
+        <div className="auto-director-capacity-grid">
+          {model.longformCapacity.signals.map(signal => (
+            <button
+              key={signal.key}
+              type="button"
+              className={`auto-director-capacity-signal auto-director-capacity-signal-${signal.status}`}
+              onClick={() => onAction({
+                area: 'planning',
+                key: signal.actionKey,
+                label: signal.label,
+                description: signal.detail,
+                modelCall: false,
+              })}
+            >
+              <span>
+                <strong>{signal.label}</strong>
+                <Tag color={signal.status === 'ok' ? 'green' : signal.status === 'warn' ? 'gold' : 'red'} bordered={false}>{batchSignalLabel(signal.status)}</Tag>
               </span>
               <em>{signal.score}</em>
               <Text type="secondary">{signal.detail}</Text>
