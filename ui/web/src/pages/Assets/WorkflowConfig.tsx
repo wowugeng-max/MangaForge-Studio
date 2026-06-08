@@ -25,6 +25,11 @@ const { Option } = Select;
 const EMPTY_OBJECT = {};
 const EMPTY_ARRAY: Suggestion[] = [];
 
+function pickWorkflowAssetMetadata(data: any) {
+  const { workflow_json, parameters, ...metadata } = data || {};
+  return metadata;
+}
+
 export default function WorkflowConfig() {
   const { mode = 'edit', id } = useParams<{ mode?: string; id?: string }>();
   const isViewMode = mode === 'view';
@@ -33,6 +38,9 @@ export default function WorkflowConfig() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const returnUrl = searchParams.get('returnUrl') || '/assets';
+  const requestedProjectId = searchParams.get('projectId');
+  const parsedProjectId = requestedProjectId ? Number(requestedProjectId) : undefined;
+  const initialProjectId = Number.isFinite(parsedProjectId) ? parsedProjectId : undefined;
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
@@ -43,8 +51,9 @@ export default function WorkflowConfig() {
   const [parameters, setParameters] = useState<Record<string, { node_id: string; field: string }>>({});
 
   const [assetName, setAssetName] = useState('');
-  const [projectId, setProjectId] = useState<number | undefined>(undefined);
+  const [projectId, setProjectId] = useState<number | undefined>(initialProjectId);
   const [projects, setProjects] = useState<any[]>([]);
+  const [originalWorkflowData, setOriginalWorkflowData] = useState<any>(null);
 
   const [loading, setLoading] = useState(false);
   const [reactFlowInstance, setReactFlowInstance] = useState<any>(null);
@@ -143,7 +152,7 @@ export default function WorkflowConfig() {
       const fetchAsset = async () => {
         try {
           const res = await apiClient.get(`/assets/${id}`);
-          const asset = res.data;
+          const asset = res.data?.asset || res.data;
           if (asset.type !== 'workflow') {
             message.error('该资产不是工作流类型');
             navigate('/assets');
@@ -151,6 +160,7 @@ export default function WorkflowConfig() {
           }
           setAssetName(asset.name);
           setProjectId(asset.project_id);
+          setOriginalWorkflowData(asset.data);
           setParameters(asset.data.parameters || {});
           await updateWorkflowData(asset.data.workflow_json);
         } catch (error) {
@@ -213,7 +223,7 @@ export default function WorkflowConfig() {
         name: assetName,
         description: '',
         tags: [],
-        data: { workflow_json: workflowJson, parameters: parameters },
+        data: { ...pickWorkflowAssetMetadata(originalWorkflowData), workflow_json: workflowJson, parameters: parameters },
         project_id: projectId || null,
       };
 
@@ -224,7 +234,8 @@ export default function WorkflowConfig() {
         message.success('🎉 工作流更新成功');
       } else {
         const res = await apiClient.post('/assets/', payload);
-        savedId = res.data.id;
+        const savedAsset = res.data?.asset || res.data;
+        savedId = savedAsset.id;
         message.success('🎉 工作流铸造成功');
       }
 
@@ -266,7 +277,7 @@ export default function WorkflowConfig() {
 
       <Row gutter={24}>
         <Col span={16}>
-          <Card bordered={false} style={{ borderRadius: 12, boxShadow: '0 1px 2px rgba(0,0,0,0.03)', height: '100%' }} bodyStyle={{ padding: 16, height: '100%', display: 'flex', flexDirection: 'column' }}>
+          <Card variant="borderless" style={{ borderRadius: 12, boxShadow: '0 1px 2px rgba(0,0,0,0.03)', height: '100%' }} styles={{ body: { padding: 16, height: '100%', display: 'flex', flexDirection: 'column' } }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
               <Space>
                 <input type="file" accept=".json,application/json" onChange={handleFileUpload} ref={fileInputRef} style={{ display: 'none' }} />
@@ -305,7 +316,7 @@ export default function WorkflowConfig() {
         </Col>
 
         <Col span={8} style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-          <Card bordered={false} style={{ borderRadius: 12, boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
+          <Card variant="borderless" style={{ borderRadius: 12, boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
             <Title level={5} style={{ marginBottom: 20 }}>基础档案</Title>
             <div style={{ marginBottom: 16 }}>
               <Text strong style={{ display: 'block', marginBottom: 8 }}>工作流名称</Text>
@@ -326,7 +337,7 @@ export default function WorkflowConfig() {
             </div>
           </Card>
 
-          <Card bordered={false} style={{ borderRadius: 12, boxShadow: '0 1px 2px rgba(0,0,0,0.03)', flex: 1, display: 'flex', flexDirection: 'column' }} bodyStyle={{ padding: 16, flex: 1, display: 'flex', flexDirection: 'column' }}>
+          <Card variant="borderless" style={{ borderRadius: 12, boxShadow: '0 1px 2px rgba(0,0,0,0.03)', flex: 1, display: 'flex', flexDirection: 'column' }} styles={{ body: { padding: 16, flex: 1, display: 'flex', flexDirection: 'column' } }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <Title level={5} style={{ margin: 0 }}>已暴露参数映射</Title>
               <Tag color="blue">{paramList.length} 个参数</Tag>

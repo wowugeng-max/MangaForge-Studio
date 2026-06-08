@@ -6,7 +6,105 @@ import { providerApi, type ProviderData } from '../../api/providers'
 const { Text, Title } = Typography
 const { TextArea } = Input
 
-const PRESET_PROVIDERS = [
+export const PRESET_PROVIDERS = [
+  {
+    label: '阿里云 (千问/万相)',
+    color: 'orange',
+    data: {
+      id: 'aliyun_dashscope',
+      display_name: '阿里百炼 (DashScope)',
+      api_format: 'openai_compatible',
+      auth_type: 'Bearer',
+      response_mode: 'auto',
+      service_type: 'llm',
+      default_base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      supported_modalities: ['chat', 'vision', 'text_to_image', 'image_to_image', 'text_to_video', 'image_to_video'],
+      is_active: true,
+      endpoints: {
+        chat: '/chat/completions',
+        vision: '/chat/completions',
+        text_to_image: {
+          url: 'https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation',
+          payload_template: {
+            model: '{{model}}',
+            input: {
+              messages: [
+                {
+                  role: 'user',
+                  content: [
+                    { text: '{{prompt}}' },
+                  ],
+                },
+              ],
+            },
+            parameters: {
+              size: '{{size}}',
+              prompt_extend: false,
+            },
+          },
+          result_extractor: 'output.choices.0.message.content.0.image',
+          model_routes: [
+            {
+              match: 'wanx',
+              url: 'https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis',
+              poll_url: 'https://dashscope.aliyuncs.com/api/v1/tasks/{{task_id}}',
+              headers: { 'X-DashScope-Async': 'enable' },
+              payload_template: {
+                model: '{{model}}',
+                input: { prompt: '{{prompt}}' },
+                parameters: {
+                  size: '{{size}}',
+                  n: '{{n}}',
+                  seed: '{{seed}}',
+                },
+              },
+              task_id_extractor: 'output.task_id',
+              status_extractor: 'output.task_status',
+              result_extractor: 'output.results.0.url',
+            },
+          ],
+        },
+        image_to_image: {
+          url: 'https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis',
+          poll_url: 'https://dashscope.aliyuncs.com/api/v1/tasks/{{task_id}}',
+          headers: { 'X-DashScope-Async': 'enable' },
+          payload_template: {
+            model: '{{model}}',
+            input: { prompt: '{{prompt}}', ref_img: '{{image_url}}' },
+            parameters: { size: '{{size}}' },
+          },
+          task_id_extractor: 'output.task_id',
+          status_extractor: 'output.task_status',
+          result_extractor: 'output.results.0.url',
+        },
+        text_to_video: {
+          url: 'https://dashscope.aliyuncs.com/api/v1/services/aigc/video-generation/video-synthesis',
+          poll_url: 'https://dashscope.aliyuncs.com/api/v1/tasks/{{task_id}}',
+          headers: { 'X-DashScope-Async': 'enable' },
+          payload_template: {
+            model: '{{model}}',
+            input: { prompt: '{{prompt}}' },
+          },
+          task_id_extractor: 'output.task_id',
+          status_extractor: 'output.task_status',
+          result_extractor: 'output.results.0.url',
+        },
+        image_to_video: {
+          url: 'https://dashscope.aliyuncs.com/api/v1/services/aigc/video-generation/video-synthesis',
+          poll_url: 'https://dashscope.aliyuncs.com/api/v1/tasks/{{task_id}}',
+          headers: { 'X-DashScope-Async': 'enable' },
+          payload_template: {
+            model: '{{model}}',
+            input: { prompt: '{{prompt}}', img_url: '{{image_url}}' },
+          },
+          task_id_extractor: 'output.task_id',
+          status_extractor: 'output.task_status',
+          result_extractor: 'output.results.0.url',
+        },
+      },
+      custom_headers: {},
+    },
+  },
   {
     label: 'OpenAI Codex / Responses',
     color: 'geekblue',
@@ -47,6 +145,23 @@ const PRESET_PROVIDERS = [
     },
   },
   {
+    label: 'Google Gemini',
+    color: 'purple',
+    data: {
+      id: 'gemini',
+      display_name: 'Google Gemini',
+      api_format: 'gemini_native',
+      auth_type: 'Bearer',
+      response_mode: 'auto',
+      service_type: 'llm',
+      default_base_url: 'https://generativelanguage.googleapis.com/v1beta',
+      supported_modalities: ['chat', 'vision'],
+      is_active: true,
+      endpoints: {},
+      custom_headers: {},
+    },
+  },
+  {
     label: 'DeepSeek 官方',
     color: 'cyan',
     data: {
@@ -79,6 +194,38 @@ const PRESET_PROVIDERS = [
     },
   },
 ]
+
+export function buildProviderSubmitPayload(values: Record<string, any>):
+  | { ok: true; payload: Record<string, any> }
+  | { ok: false; error: string } {
+  const headersObj: Record<string, string> = {}
+  ;(values.custom_headers_list || []).forEach((item: any) => {
+    if (item?.key && item?.value) headersObj[item.key] = item.value
+  })
+
+  const parsedEndpoints: Record<string, any> = {}
+  if (values.endpoints) {
+    for (const [key, val] of Object.entries(values.endpoints)) {
+      const strVal = String(val).trim()
+      if (!strVal) continue
+      if (strVal.startsWith('{')) {
+        try {
+          parsedEndpoints[key] = JSON.parse(strVal)
+        } catch {
+          return { ok: false, error: `[${key}] 路由的 JSON 格式错误，请检查大括号和引号！` }
+        }
+      } else {
+        parsedEndpoints[key] = strVal
+      }
+    }
+  }
+
+  const { custom_headers_list, ...restValues } = values
+  return {
+    ok: true,
+    payload: { ...restValues, custom_headers: headersObj, endpoints: parsedEndpoints },
+  }
+}
 
 export default function ProviderManager() {
   const [providers, setProviders] = useState<ProviderData[]>([])
@@ -126,20 +273,12 @@ export default function ProviderManager() {
   const onSave = async () => {
     try {
       const values = await form.validateFields()
-      const headersObj: Record<string, string> = {}
-      ;(values.custom_headers_list || []).forEach((item: any) => {
-        if (item?.key && item?.value) headersObj[item.key] = item.value
-      })
-      const parsedEndpoints: Record<string, any> = {}
-      if (values.endpoints) {
-        for (const [key, val] of Object.entries(values.endpoints)) {
-          const strVal = String(val).trim()
-          if (!strVal) continue
-          parsedEndpoints[key] = strVal.startsWith('{') ? JSON.parse(strVal) : strVal
-        }
+      const normalized = buildProviderSubmitPayload(values)
+      if (!normalized.ok) {
+        message.error(normalized.error)
+        return
       }
-      const payload = { ...values, custom_headers: headersObj, endpoints: parsedEndpoints }
-      delete (payload as any).custom_headers_list
+      const payload = normalized.payload
       if (editingId) await providerApi.update(editingId, payload)
       else await providerApi.create(payload)
       message.success(editingId ? '算力节点已重构' : '新厂商成功注入大动脉')
@@ -178,15 +317,15 @@ export default function ProviderManager() {
       </Row>
 
       <Row gutter={24} style={{ marginBottom: '24px' }}>
-        <Col span={6}><Card bordered={false} style={{ borderRadius: '12px' }} bodyStyle={{ padding: '16px 24px' }}><Statistic title="已就绪厂商" value={providers.length} prefix={<ApiOutlined style={{ color: '#1890ff' }} />} /></Card></Col>
-        <Col span={6}><Card bordered={false} style={{ borderRadius: '12px' }} bodyStyle={{ padding: '16px 24px' }}><Statistic title="活跃节点" value={providers.filter(p => p.is_active).length} prefix={<ThunderboltOutlined style={{ color: '#52c41a' }} />} /></Card></Col>
+        <Col span={6}><Card variant="borderless" style={{ borderRadius: '12px' }} styles={{ body: { padding: '16px 24px' } }}><Statistic title="已就绪厂商" value={providers.length} prefix={<ApiOutlined style={{ color: '#1890ff' }} />} /></Card></Col>
+        <Col span={6}><Card variant="borderless" style={{ borderRadius: '12px' }} styles={{ body: { padding: '16px 24px' } }}><Statistic title="活跃节点" value={providers.filter(p => p.is_active).length} prefix={<ThunderboltOutlined style={{ color: '#52c41a' }} />} /></Card></Col>
       </Row>
 
-      <Card bordered={false} style={{ borderRadius: '16px', boxShadow: '0 2px 16px rgba(0,0,0,0.03)' }} bodyStyle={{ padding: '0' }}>
+      <Card variant="borderless" style={{ borderRadius: '16px', boxShadow: '0 2px 16px rgba(0,0,0,0.03)' }} styles={{ body: { padding: '0' } }}>
         <Table dataSource={providers} columns={columns} rowKey="id" loading={loading} pagination={false} style={{ padding: '8px' }} />
       </Card>
 
-      <Drawer title={<Space><CodeOutlined /> {editingId ? '编辑算力节点' : '接入全新引擎'}</Space>} width={650} onClose={() => setDrawerOpen(false)} open={drawerOpen} extra={<Button type="primary" onClick={onSave} icon={<CheckCircleOutlined />}>注入配置</Button>} headerStyle={{ borderBottom: '1px solid #f0f0f0' }} bodyStyle={{ padding: '24px' }}>
+      <Drawer title={<Space><CodeOutlined /> {editingId ? '编辑算力节点' : '接入全新引擎'}</Space>} width={650} onClose={() => setDrawerOpen(false)} open={drawerOpen} extra={<Button type="primary" onClick={onSave} icon={<CheckCircleOutlined />}>注入配置</Button>} styles={{ header: { borderBottom: '1px solid #f0f0f0' }, body: { padding: '24px' } }}>
         {!editingId && <div style={{ marginBottom: 24, padding: '12px 16px', background: '#f8fafc', borderRadius: 8, border: '1px dashed #cbd5e1' }}><div style={{ fontSize: 12, color: '#64748b', marginBottom: 8 }}>💡 一键填入主流厂商官方网关与 DSL 模板：</div><Space size={[8, 8]} wrap>{PRESET_PROVIDERS.map(preset => <Tag key={preset.data.id} color={preset.color} style={{ cursor: 'pointer', padding: '4px 8px', fontSize: 12 }} onClick={() => { const presetData = { ...preset.data }; const headersList = Object.entries(presetData.custom_headers || {}).map(([key, value]) => ({ key, value })); const formattedEndpoints: Record<string, string> = {}; if (presetData.endpoints) { Object.entries(presetData.endpoints).forEach(([key, val]) => { formattedEndpoints[key] = typeof val === 'object' ? JSON.stringify(val, null, 2) : String(val); }); } form.setFieldsValue({ ...presetData, custom_headers_list: headersList, endpoints: formattedEndpoints }); message.info(`已应用 ${preset.label} 预设配置`); }}>{preset.label}</Tag>)}</Space></div>}
 
         <Form form={form} layout="vertical" requiredMark={false}>
@@ -208,6 +347,9 @@ export default function ProviderManager() {
           <Divider style={{ margin: '24px 0' }} />
           <Title level={5} style={{ marginBottom: 16 }}>模态与开关</Title>
           <Form.Item name="supported_modalities" label="支持的生成能力" rules={[{ required: true }]}><Select mode="multiple" placeholder="请选择模态" style={{ width: '100%' }}><Select.Option value="chat">CHAT (文本对话)</Select.Option><Select.Option value="vision">VISION (视觉理解)</Select.Option><Select.Option value="text_to_image">T2I (纯文生图)</Select.Option><Select.Option value="image_to_image">I2I (图生图)</Select.Option><Select.Option value="text_to_video">T2V (纯文生视频)</Select.Option><Select.Option value="image_to_video">I2V (图生视频)</Select.Option></Select></Form.Item>
+          <Form.Item name="is_active" label="当前节点状态" valuePropName="checked">
+            <Switch checkedChildren="已激活" unCheckedChildren="已休眠" />
+          </Form.Item>
           <Collapse ghost expandIconPosition="end" style={{ background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0', marginTop: 24, padding: '4px 0' }}>
             <Collapse.Panel header={<Space><SettingOutlined style={{ color: '#64748b' }} /><Text strong style={{ color: '#334155' }}>高级路由覆盖与 DSL 映射模板</Text></Space>} key="1">
               <div style={{ marginBottom: 24 }}>
@@ -220,6 +362,53 @@ export default function ProviderManager() {
                 <Form.Item name={['endpoints', 'chat']} label="对话端点 (chat)"><Input /></Form.Item>
                 <Form.Item name={['endpoints', 'responses']} label="Codex Responses 端点 (responses)"><Input placeholder="/responses" /></Form.Item>
                 <Form.Item name={['endpoints', 'vision']} label="视觉端点 (vision)"><Input /></Form.Item>
+                <Form.Item name={['endpoints', 'text_to_image']} label="文生图端点 (text_to_image)">
+                  <TextArea rows={6} placeholder={`{
+  "url": "...",
+  "payload_template": {
+    "model": "{{model}}",
+    "input": { "prompt": "{{prompt}}" }
+  },
+  "result_extractor": "data.0.url"
+}`} style={{ fontFamily: 'monospace', fontSize: 13, backgroundColor: '#fff' }} />
+                </Form.Item>
+                <Form.Item name={['endpoints', 'image_to_image']} label="图生图端点 (image_to_image)">
+                  <TextArea rows={6} placeholder={`{
+  "url": "...",
+  "headers": { "X-DashScope-Async": "enable" },
+  "payload_template": {
+    "model": "{{model}}",
+    "input": { "prompt": "{{prompt}}", "image_url": "{{image_url}}" }
+  },
+  "task_id_extractor": "output.task_id",
+  "status_extractor": "output.task_status",
+  "result_extractor": "output.results.0.url"
+}`} style={{ fontFamily: 'monospace', fontSize: 13, backgroundColor: '#fff' }} />
+                </Form.Item>
+                <Form.Item name={['endpoints', 'text_to_video']} label="文生视频端点 (text_to_video)">
+                  <TextArea rows={6} placeholder={`{
+  "url": "...",
+  "payload_template": {
+    "model": "{{model}}",
+    "input": { "prompt": "{{prompt}}" }
+  },
+  "task_id_extractor": "output.task_id",
+  "status_extractor": "output.task_status",
+  "result_extractor": "output.results.0.url"
+}`} style={{ fontFamily: 'monospace', fontSize: 13, backgroundColor: '#fff' }} />
+                </Form.Item>
+                <Form.Item name={['endpoints', 'image_to_video']} label="图生视频端点 (image_to_video)">
+                  <TextArea rows={6} placeholder={`{
+  "url": "...",
+  "payload_template": {
+    "model": "{{model}}",
+    "input": { "prompt": "{{prompt}}", "img_url": "{{image_url}}" }
+  },
+  "task_id_extractor": "output.task_id",
+  "status_extractor": "output.task_status",
+  "result_extractor": "output.results.0.url"
+}`} style={{ fontFamily: 'monospace', fontSize: 13, backgroundColor: '#fff' }} />
+                </Form.Item>
               </div>
             </Collapse.Panel>
           </Collapse>

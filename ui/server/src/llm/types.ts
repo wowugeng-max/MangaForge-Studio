@@ -1,10 +1,71 @@
 export type ModelTier = 'fast' | 'balanced' | 'creative' | 'review'
 
+export type LLMTextContentPart = {
+  type: 'text' | 'input_text' | 'output_text'
+  text?: string
+  content?: string
+}
+
+export type LLMImageContentPart = {
+  type: 'image_url' | 'input_image'
+  image_url?: string | { url?: string }
+  url?: string
+}
+
+export type LLMMessageContentPart = LLMTextContentPart | LLMImageContentPart | Record<string, any>
+export type LLMMessageContent = string | LLMMessageContentPart[]
+
 export interface LLMMessage {
   role: 'system' | 'user' | 'assistant' | 'tool'
-  content: string
+  content: LLMMessageContent
   tool_call_id?: string
   name?: string
+}
+
+export function imageUrlFromLLMContentPart(part: unknown): string {
+  if (!part || typeof part !== 'object') return ''
+  const record = part as Record<string, any>
+  const imageUrl = record.image_url
+  if (typeof imageUrl === 'string') return imageUrl
+  if (imageUrl && typeof imageUrl === 'object') return String(imageUrl.url || '')
+  return String(record.url || record.file_uri || record.fileUri || record.fileData?.fileUri || '')
+}
+
+export function textFromLLMContentPart(part: unknown): string {
+  if (typeof part === 'string') return part
+  if (!part || typeof part !== 'object') return ''
+  const record = part as Record<string, any>
+  if (typeof record.text === 'string') return record.text
+  if (typeof record.content === 'string') return record.content
+  return ''
+}
+
+export function stringifyLLMMessageContent(content: unknown): string {
+  if (typeof content === 'string') return content
+  if (Array.isArray(content)) {
+    return content
+      .map(part => textFromLLMContentPart(part) || imageUrlFromLLMContentPart(part))
+      .filter(Boolean)
+      .join('\n')
+  }
+  if (content === undefined || content === null) return ''
+  return String(content)
+}
+
+export function stringifyLLMMessageTextContent(content: unknown): string {
+  if (typeof content === 'string') return content
+  if (Array.isArray(content)) {
+    return content
+      .map(part => textFromLLMContentPart(part))
+      .filter(Boolean)
+      .join('\n')
+  }
+  if (content === undefined || content === null) return ''
+  return String(content)
+}
+
+export function hasLLMMessageContent(content: unknown): boolean {
+  return stringifyLLMMessageContent(content).trim().length > 0
 }
 
 export interface LLMToolCall {
@@ -15,6 +76,7 @@ export interface LLMToolCall {
 
 export interface LLMRequest {
   model: string
+  type?: string
   messages: LLMMessage[]
   temperature?: number
   max_tokens?: number

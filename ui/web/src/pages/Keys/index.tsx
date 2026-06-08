@@ -11,6 +11,58 @@ import { ModelParamEditor } from '../../components/admin/ModelParamEditor'
 const ENABLE_ADVANCED_PARAM_EDIT = true
 const { Title, Text } = Typography
 
+export const MANUAL_MODEL_CAPABILITY_OPTIONS = [
+  { label: '文本 (Chat)', value: 'chat' },
+  { label: '识图 (Vision)', value: 'vision' },
+  { label: '文生图 (T2I)', value: 'text_to_image' },
+  { label: '图生图 (I2I)', value: 'image_to_image' },
+  { label: '文生视频 (T2V)', value: 'text_to_video' },
+  { label: '图生视频 (I2V)', value: 'image_to_video' },
+] as const
+
+export const DEFAULT_MANUAL_MODEL_CAPABILITIES = ['text_to_video']
+export const DEFAULT_BULK_UI_PARAMS_CAPABILITY = 'text_to_image'
+
+export function buildModelCapabilityPayload(capabilities: string[] = []) {
+  const selected = new Set(capabilities)
+  return {
+    chat: selected.has('chat'),
+    vision: selected.has('vision'),
+    text_to_image: selected.has('text_to_image'),
+    image_to_image: selected.has('image_to_image'),
+    text_to_video: selected.has('text_to_video'),
+    image_to_video: selected.has('image_to_video'),
+  }
+}
+
+export function parseBulkUiParamsJson(raw: string): { ok: true; value: any[] } | { ok: false; error: string } {
+  try {
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) {
+      return { ok: false, error: 'JSON 格式错误：批量下发的参数必须是一个数组 []' }
+    }
+    return { ok: true, value: parsed }
+  } catch {
+    return { ok: false, error: 'JSON 解析失败，请检查语法' }
+  }
+}
+
+export function buildKeySubmitPayload(values: Record<string, any>) {
+  const { service_type, ...restValues } = values
+  const tags = typeof restValues.tags === 'string'
+    ? restValues.tags.split(',').map((tag: string) => tag.trim()).filter(Boolean)
+    : Array.isArray(restValues.tags)
+      ? restValues.tags.map((tag: unknown) => String(tag).trim()).filter(Boolean)
+      : []
+  return { ...restValues, tags }
+}
+
+export function formatKeySubmitError(error: any): string {
+  const detail = error?.response?.data?.detail ?? error?.response?.data?.error
+  if (!detail) return '操作失败'
+  return `提交失败: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`
+}
+
 export default function KeyManager() {
   const [keys, setKeys] = useState<APIKey[]>([])
   const [loading, setLoading] = useState(false)
@@ -38,7 +90,7 @@ export default function KeyManager() {
   const [testingModel, setTestingModel] = useState<number | null>(null)
   const [searchText, setSearchText] = useState('')
   const [bulkModalVisible, setBulkModalVisible] = useState(false)
-  const [bulkCapability, setBulkCapability] = useState('image')
+  const [bulkCapability, setBulkCapability] = useState(DEFAULT_BULK_UI_PARAMS_CAPABILITY)
   const [bulkJsonStr, setBulkJsonStr] = useState('[\n  \n]')
   const [bulkSaving, setBulkSaving] = useState(false)
 
@@ -47,6 +99,8 @@ export default function KeyManager() {
     try {
       const res = await modelApi.list({ key_id: keyId })
       setModels(res.data)
+    } catch {
+      message.error('获取模型列表失败')
     } finally { setModelsLoading(false) }
   }
 
@@ -96,12 +150,12 @@ export default function KeyManager() {
 
   const handleDelete = async (id: number) => { try { await keyApi.delete(id); message.success('删除成功'); fetchKeys() } catch { message.error('删除失败') } }
   const openModal = (key?: APIKey) => { setEditingKey(key || null); setModalVisible(true); setTimeout(() => { if (key) { const keyProviderObj = dbProviders.find(p => p.id === key.provider); form.setFieldsValue({ ...key, service_type: keyProviderObj?.service_type || 'llm', tags: key.tags?.join(', ') }) } else { form.resetFields() } }, 0) }
-  const handleModalOk = async () => { const values = await form.validateFields(); const { service_type, ...restValues } = values; const payload = { ...restValues, tags: restValues.tags ? restValues.tags.split(',').map((t: string) => t.trim()) : [] }; if (editingKey) await keyApi.update(editingKey.id, payload); else await keyApi.create(payload); setModalVisible(false); fetchKeys() }
+  const handleModalOk = async () => { try { const values = await form.validateFields(); const payload = buildKeySubmitPayload(values); if (editingKey) { await keyApi.update(editingKey.id, payload); message.success('更新成功') } else { await keyApi.create(payload); message.success('创建成功') } setModalVisible(false); fetchKeys() } catch (error: any) { message.error(formatKeySubmitError(error)) } }
   const openModelDrawer = async (keyRecord: APIKey) => { setCurrentKeyForModels(keyRecord); setDrawerVisible(true); fetchModels(keyRecord.id) }
-  const openModelModal = (model?: any) => { setEditingModel(model || null); setModelModalVisible(true); setTimeout(() => { if (model) { const caps = Object.keys(model.capabilities).filter(k => model.capabilities[k]); modelForm.setFieldsValue({ ...model, capabilities: caps }) } else { modelForm.resetFields(); modelForm.setFieldsValue({ capabilities: ['video'] }) } }, 0) }
-  const handleModelModalOk = async () => { const values = await modelForm.validateFields(); const capabilitiesObj = { chat: values.capabilities.includes('chat'), vision: values.capabilities.includes('vision'), text_to_image: values.capabilities.includes('text_to_image'), image_to_image: values.capabilities.includes('image_to_image'), text_to_video: values.capabilities.includes('text_to_video'), image_to_video: values.capabilities.includes('image_to_video') }; const payload = { ...values, provider: currentKeyForModels?.provider, api_key_id: currentKeyForModels?.id, capabilities: capabilitiesObj, is_manual: true, context_ui_params: editingModel?.context_ui_params || {} }; if (editingModel) await modelApi.update(editingModel.id, payload); else await modelApi.create(payload); setModelModalVisible(false); fetchModels(currentKeyForModels!.id) }
+  const openModelModal = (model?: any) => { setEditingModel(model || null); setModelModalVisible(true); setTimeout(() => { if (model) { const caps = Object.keys(model.capabilities).filter(k => model.capabilities[k]); modelForm.setFieldsValue({ ...model, capabilities: caps }) } else { modelForm.resetFields(); modelForm.setFieldsValue({ capabilities: DEFAULT_MANUAL_MODEL_CAPABILITIES }) } }, 0) }
+  const handleModelModalOk = async () => { const values = await modelForm.validateFields(); const payload = { ...values, provider: currentKeyForModels?.provider, api_key_id: currentKeyForModels?.id, capabilities: buildModelCapabilityPayload(values.capabilities), is_manual: true, context_ui_params: editingModel?.context_ui_params || {} }; if (editingModel) await modelApi.update(editingModel.id, payload); else await modelApi.create(payload); setModelModalVisible(false); fetchModels(currentKeyForModels!.id) }
   const handleDeleteModel = async (id: number) => { try { await modelApi.delete(id); message.success('模型已删除'); fetchModels(currentKeyForModels!.id) } catch { message.error('删除失败') } }
-  const handleBulkSave = async () => { const parsedArray = JSON.parse(bulkJsonStr); if (!Array.isArray(parsedArray)) return message.error('JSON 格式错误：批量下发的参数必须是一个数组 []'); setBulkSaving(true); try { const res = await modelApi.bulkUpdateUiParams({ api_key_id: currentKeyForModels!.id, capability: bulkCapability, ui_params_array: parsedArray }); message.success(res.data.message); setBulkModalVisible(false); fetchModels(currentKeyForModels!.id) } finally { setBulkSaving(false) } }
+  const handleBulkSave = async () => { const parsed = parseBulkUiParamsJson(bulkJsonStr); if (!parsed.ok) return message.error(parsed.error); setBulkSaving(true); try { const res = await modelApi.bulkUpdateUiParams({ api_key_id: currentKeyForModels!.id, capability: bulkCapability, ui_params_array: parsed.value }); message.success(res.data.message); setBulkModalVisible(false); fetchModels(currentKeyForModels!.id) } catch { message.error('批量更新失败') } finally { setBulkSaving(false) } }
   const handleTestModel = async (record: any) => { setTestingModel(record.id); try { const res = await modelApi.test(record.id); res.data.status === 'healthy' ? message.success(res.data.message) : message.warning(res.data.message); fetchModels(currentKeyForModels!.id) } catch (error: any) { message.error(error.response?.data?.detail || '测试失败，请检查网络'); fetchModels(currentKeyForModels!.id) } finally { setTestingModel(null) } }
 
   const columns: ColumnsType<APIKey> = [
@@ -123,7 +177,7 @@ export default function KeyManager() {
   ]
 
   return <div style={{ padding: 32 }}>
-    <Card style={{ borderRadius: 20, boxShadow: '0 16px 40px rgba(15, 23, 42, 0.08)' }} bodyStyle={{ padding: 24 }}>
+    <Card style={{ borderRadius: 20, boxShadow: '0 16px 40px rgba(15, 23, 42, 0.08)' }} styles={{ body: { padding: 24 } }}>
       <Space direction="vertical" style={{ width: '100%' }} size={20}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16 }}>
           <div><Title level={3} style={{ margin: 0 }}>Key 管理</Title><Text type="secondary">管理 API Key、测试连通性并触发模型同步</Text></div>
@@ -133,7 +187,7 @@ export default function KeyManager() {
       </Space>
     </Card>
     {/* 保持原弹窗/抽屉结构，后续可再细化样式 */}
-    <Modal title={editingKey ? '编辑 API Key' : '添加 API Key'} open={modalVisible} onOk={handleModalOk} onCancel={() => setModalVisible(false)} destroyOnClose>
+    <Modal title={editingKey ? '编辑 API Key' : '添加 API Key'} open={modalVisible} onOk={handleModalOk} onCancel={() => setModalVisible(false)} destroyOnHidden>
       <Form form={form} layout="vertical" initialValues={{ is_active: true, quota_total: 0, service_type: 'llm' }}>
         <Form.Item name="service_type" label="服务大类"><Radio.Group onChange={handleServiceTypeChange} optionType="button" buttonStyle="solid"><Radio value="llm">🤖 大模型 API</Radio><Radio value="comfyui">🚀 ComfyUI 算力</Radio></Radio.Group></Form.Item>
         <Form.Item name="provider" label="提供商" rules={[{ required: true, message: '请选择提供商' }]}><Select options={providerOptions} placeholder="请选择平台" /></Form.Item>
@@ -149,6 +203,6 @@ export default function KeyManager() {
       <Table columns={modelColumns} dataSource={models.filter(m => (m.display_name?.toLowerCase().includes(searchText.toLowerCase()) || '') || (m.model_name?.toLowerCase().includes(searchText.toLowerCase()) || ''))} rowKey="id" loading={modelsLoading} pagination={false} size="small" />
     </Drawer>
     <Modal title={`🚀 批量配置参数 (${currentKeyForModels?.provider || ''})`} open={bulkModalVisible} onOk={handleBulkSave} confirmLoading={bulkSaving} onCancel={() => setBulkModalVisible(false)} width={650}><div style={{ marginBottom: 16 }}><Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>1. 选择要批量覆盖的能力大类：</Text><Radio.Group value={bulkCapability} onChange={e => setBulkCapability(e.target.value)} buttonStyle="solid"><Radio.Button value="chat">文本</Radio.Button><Radio.Button value="vision">识图</Radio.Button><Radio.Button value="text_to_image">文生图</Radio.Button><Radio.Button value="image_to_image">图生图</Radio.Button><Radio.Button value="text_to_video">文生视频</Radio.Button><Radio.Button value="image_to_video">图生视频</Radio.Button></Radio.Group></div><div><Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>2. 粘贴该大类的 JSON 参数数组：</Text><Input.TextArea rows={15} value={bulkJsonStr} onChange={e => setBulkJsonStr(e.target.value)} style={{ fontFamily: 'monospace', backgroundColor: '#fafafa' }} /></div></Modal>
-    <Modal title={editingModel ? '编辑手动模型' : '手动添加模型'} open={modelModalVisible} onOk={handleModelModalOk} onCancel={() => setModelModalVisible(false)} destroyOnClose><Form form={modelForm} layout="vertical"><Form.Item name="display_name" label="展示名称 (Display Name)" rules={[{ required: true, message: '请输入展示名称' }]}><Input placeholder="例：Veo 3.1 视频生成" /></Form.Item><Form.Item name="model_name" label="官方模型代号 (Model Name)" rules={[{ required: true, message: '必须与官方 API 要求的代号一致' }]} extra="例如：veo-3.1-generate-001"><Input placeholder="例：veo-3.1-generate-001" disabled={!!editingModel && !editingModel.is_manual} /></Form.Item><Form.Item name="capabilities" label="支持的能力" rules={[{ required: true, message: '请至少选择一种能力' }]}><Checkbox.Group options={[{ label: '文本 (Chat)', value: 'chat' }, { label: '识图 (Vision)', value: 'vision' }, { label: '文生图 (T2I)', value: 'text_to_image' }, { label: '图生图 (I2I)', value: 'image_to_image' }, { label: '文生视频 (T2V)', value: 'text_to_video' }, { label: '图生视频 (I2V)', value: 'image_to_video' }]} /></Form.Item></Form></Modal>
+    <Modal title={editingModel ? '编辑手动模型' : '手动添加模型'} open={modelModalVisible} onOk={handleModelModalOk} onCancel={() => setModelModalVisible(false)} destroyOnHidden><Form form={modelForm} layout="vertical"><Form.Item name="display_name" label="展示名称 (Display Name)" rules={[{ required: true, message: '请输入展示名称' }]}><Input placeholder="例：Veo 3.1 视频生成" /></Form.Item><Form.Item name="model_name" label="官方模型代号 (Model Name)" rules={[{ required: true, message: '必须与官方 API 要求的代号一致' }]} extra="例如：veo-3.1-generate-001"><Input placeholder="例：veo-3.1-generate-001" disabled={!!editingModel && !editingModel.is_manual} /></Form.Item><Form.Item name="capabilities" label="支持的能力" rules={[{ required: true, message: '请至少选择一种能力' }]}><Checkbox.Group options={[...MANUAL_MODEL_CAPABILITY_OPTIONS]} /></Form.Item></Form></Modal>
   </div>
 }

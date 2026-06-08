@@ -8,6 +8,7 @@ import {
 } from '@ant-design/icons';
 import apiClient from '../../api/client';
 import { projectApi } from '../../api/projects';
+import { buildAssetMediaUrl } from '../../utils/assetMedia';
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -66,7 +67,7 @@ export default function AssetDetail() {
   const renderVisualizer = () => {
     if (!asset) return null;
     const { type, data, thumbnail } = asset;
-    const src = thumbnail || (data?.file_path ? (data.file_path.startsWith('http') || data.file_path.startsWith('data:') ? data.file_path : `/api/assets/media/${data.file_path}`) : null);
+    const src = thumbnail || (data?.file_path ? buildAssetMediaUrl(data.file_path) : null);
 
     if (type === 'image') {
       return (
@@ -100,6 +101,9 @@ export default function AssetDetail() {
   if (!asset) return null;
 
   const config = getTypeConfig(asset.type);
+  const editPath = asset.type === 'workflow'
+    ? `/assets/workflow-config/edit/${asset.id}`
+    : `/assets/${asset.id}/edit`;
 
   return (
     <div style={{ background: '#f8fafc', minHeight: '100%', padding: '24px 32px' }}>
@@ -113,7 +117,7 @@ export default function AssetDetail() {
           </Tag>
         </Space>
         <Space>
-          <Button type="primary" icon={<EditOutlined />} onClick={() => navigate(`/assets/${asset.id}/edit`)}>编辑</Button>
+          <Button type="primary" icon={<EditOutlined />} onClick={() => navigate(editPath)}>编辑</Button>
           <Popconfirm title="确定销毁此资产吗？操作不可逆。" onConfirm={handleDelete} okText="销毁" cancelText="取消">
             <Button danger icon={<DeleteOutlined />}>销毁</Button>
           </Popconfirm>
@@ -128,7 +132,7 @@ export default function AssetDetail() {
 
         {/* 右侧：元数据面板 */}
         <Col span={8}>
-          <Card bordered={false} style={{ borderRadius: 12, boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
+          <Card variant="borderless" style={{ borderRadius: 12, boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
             <Title level={5} style={{ marginBottom: 24, color: '#0f172a' }}>资产元数据</Title>
 
             <div style={{ marginBottom: 16 }}>
@@ -173,7 +177,7 @@ export default function AssetDetail() {
 
           {/* 🧬 AI 生成溯源 */}
           {asset.data?.source_model && (
-            <Card bordered={false} style={{ borderRadius: 12, boxShadow: '0 1px 2px rgba(0,0,0,0.03)', marginTop: 16 }}>
+            <Card variant="borderless" style={{ borderRadius: 12, boxShadow: '0 1px 2px rgba(0,0,0,0.03)', marginTop: 16 }}>
               <Title level={5} style={{ marginBottom: 16, color: '#1d39c4' }}>🧬 AI 生成溯源</Title>
               <div style={{ marginBottom: 12 }}>
                 <Row gutter={[16, 12]}>

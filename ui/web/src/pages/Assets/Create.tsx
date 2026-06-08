@@ -9,6 +9,7 @@ import {
 import apiClient from '../../api/client';
 import { projectApi } from '../../api/projects';
 import TagsInput from '../../components/TagsInput';
+import { buildAssetMediaUrl } from '../../utils/assetMedia';
 
 const { Option } = Select;
 const { Title, Text } = Typography;
@@ -54,6 +55,16 @@ export default function AssetCreate() {
           workflow_json: values.workflow_json ? JSON.parse(values.workflow_json) : { steps: [] },
           parameters: values.parameters ? JSON.parse(values.parameters) : {},
           source: values.source || '',
+        };
+      } else if (assetType === 'node_config') {
+        data = {
+          nodeType: values.nodeType,
+          config: values.config ? JSON.parse(values.config) : {},
+        };
+      } else if (assetType === 'node_template') {
+        data = {
+          nodes: values.nodes ? JSON.parse(values.nodes) : [],
+          edges: values.edges ? JSON.parse(values.edges) : [],
         };
       } else if (assetType === 'video') {
         if (!uploadedVideoInfo) { message.warning('请先上传视频'); return; }
@@ -120,7 +131,7 @@ export default function AssetCreate() {
                 {uploadedImageInfo ? (
                   <div style={{ padding: 8 }}>
                     <img
-                      src={`/api/assets/media/${uploadedImageInfo.file_path}`}
+                      src={buildAssetMediaUrl(uploadedImageInfo.file_path)}
                       alt="preview"
                       style={{ maxHeight: 160, maxWidth: '100%', borderRadius: 6, objectFit: 'contain' }}
                     />
@@ -191,6 +202,35 @@ export default function AssetCreate() {
             </Form.Item>
             <Form.Item name="parameters" label={<Text strong style={{ color: '#722ed1' }}>参数映射 JSON</Text>}>
               <Input.TextArea rows={6} style={codeInputStyle} placeholder='{\n  "param": "value"\n}' />
+            </Form.Item>
+          </div>
+        );
+      case 'node_config':
+        return (
+          <div style={{ background: '#f0f5ff', padding: 16, borderRadius: 8, border: '1px solid #adc6ff' }}>
+            <Form.Item name="nodeType" label={<Text strong style={{ color: '#1d39c4' }}>节点类型</Text>} rules={[{ required: true }]}>
+              <Input placeholder="例如：generate、display、comfyUIEngine" />
+            </Form.Item>
+            <Form.Item name="config" label={<Text strong style={{ color: '#1d39c4' }}>节点配置 JSON</Text>} rules={[{ required: true }]} style={{ marginBottom: 0 }}>
+              <Input.TextArea rows={10} style={codeInputStyle} placeholder={`{
+  "label": "常用生图节点",
+  "mode": "text_to_image"
+}`} />
+            </Form.Item>
+          </div>
+        );
+      case 'node_template':
+        return (
+          <div style={{ background: '#f6ffed', padding: 16, borderRadius: 8, border: '1px solid #b7eb8f' }}>
+            <Form.Item name="nodes" label={<Text strong style={{ color: '#389e0d' }}>模板节点数组 JSON</Text>} rules={[{ required: true }]}>
+              <Input.TextArea rows={8} style={codeInputStyle} placeholder={`[
+  { "type": "generate", "relativePosition": { "x": 0, "y": 0 }, "config": {} }
+]`} />
+            </Form.Item>
+            <Form.Item name="edges" label={<Text strong style={{ color: '#389e0d' }}>模板连线数组 JSON</Text>} rules={[{ required: true }]} style={{ marginBottom: 0 }}>
+              <Input.TextArea rows={6} style={codeInputStyle} placeholder={`[
+  { "sourceIndex": 0, "targetIndex": 1, "sourceHandle": "output", "targetHandle": "input" }
+]`} />
             </Form.Item>
           </div>
         );
@@ -272,7 +312,7 @@ export default function AssetCreate() {
       <Form form={form} layout="vertical" onFinish={onFinish} initialValues={{ type: 'prompt' }}>
         <Row gutter={24}>
           <Col span={16}>
-            <Card bordered={false} style={{ borderRadius: 12, boxShadow: '0 1px 2px rgba(0,0,0,0.03)', marginBottom: 24 }}>
+            <Card variant="borderless" style={{ borderRadius: 12, boxShadow: '0 1px 2px rgba(0,0,0,0.03)', marginBottom: 24 }}>
               <Title level={5} style={{ marginBottom: 20 }}>核心档案</Title>
 
               <Form.Item name="type" label={<Text strong>选择资产模态</Text>} rules={[{ required: true }]}>
@@ -288,6 +328,8 @@ export default function AssetCreate() {
                   <Radio.Button value="character" style={{ borderRadius: 6, flex: 1, textAlign: 'center' }}><AppstoreAddOutlined /> 角色</Radio.Button>
                   <Radio.Button value="video" style={{ borderRadius: 6, flex: 1, textAlign: 'center' }}><VideoCameraOutlined /> 视频</Radio.Button>
                   <Radio.Button value="workflow" style={{ borderRadius: 6, flex: 1, textAlign: 'center' }}><ApiOutlined /> 工作流</Radio.Button>
+                  <Radio.Button value="node_config" style={{ borderRadius: 6, flex: 1, textAlign: 'center' }}><AppstoreAddOutlined /> 节点配置</Radio.Button>
+                  <Radio.Button value="node_template" style={{ borderRadius: 6, flex: 1, textAlign: 'center' }}><ApiOutlined /> 节点模板</Radio.Button>
                 </Radio.Group>
               </Form.Item>
 
@@ -305,7 +347,7 @@ export default function AssetCreate() {
           </Col>
 
           <Col span={8}>
-            <Card bordered={false} style={{ borderRadius: 12, boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
+            <Card variant="borderless" style={{ borderRadius: 12, boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
               <Title level={5} style={{ marginBottom: 20 }}>元数据管理</Title>
 
               <Form.Item

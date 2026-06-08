@@ -16,9 +16,15 @@ import { registerKeyRoutes } from './routes/keys'
 import { registerProviderRoutes } from './routes/providers'
 import { registerModelRoutes } from './routes/models'
 import { registerCanvasRoutes } from './routes/canvas'
+import { registerGenerateRoutes } from './routes/generate'
+import { registerVideoLoopRoutes } from './routes/video-loop'
+import { registerDirectTaskRoutes } from './routes/direct-task'
+import { registerMangaCompatRoutes } from './routes/manga-compat'
 import { registerNovelRoutes } from './routes/novel'
 import { registerKnowledgeRoutes } from './routes/knowledge'
-import { sseManager, unregisterTask, getTask } from './ws-manager'
+import { registerRecommendationRoutes } from './routes/recommendation-rules'
+import { acceptWebSocketKey, sseManager, taskMessageManager, interruptRegisteredTask, webSocketManager, webSocketClientIdFromPath } from './ws-manager'
+import { startKeyMonitor } from './key-monitor'
 
 // 加载 .env
 // 注意：模型配置（LLM_OPENAI_ENDPOINT / LLM_LOCAL_ENDPOINT / ANTHROPIC_BASE_URL 等）
@@ -63,12 +69,14 @@ app.use(express.json({ limit: '5mb' }))
 let activeWorkspace = getDefaultWorkspace()
 const getWorkspace = () => activeWorkspace
 const setWorkspace = (value: string) => { activeWorkspace = value }
+let keyMonitor: ReturnType<typeof startKeyMonitor> | null = null
 
 registerProjectRoutes(app, getWorkspace)
 registerAssetCrudRoutes(app, getWorkspace)
 registerAssetMediaRoutes(app, getWorkspace)
 registerWorkspaceRoutes(app, getWorkspace, setWorkspace)
 registerPipelineRoutes(app, getWorkspace)
+registerMangaCompatRoutes(app, getWorkspace, setWorkspace)
 registerTemplateRoutes(app)
 registerStatusRoutes(app, getWorkspace)
 registerRunRoutes(app, getWorkspace)
@@ -77,6 +85,10 @@ registerKeyRoutes(app, getWorkspace)
 registerProviderRoutes(app, getWorkspace)
 registerModelRoutes(app, getWorkspace)
 registerCanvasRoutes(app, getWorkspace)
+registerGenerateRoutes(app, getWorkspace)
+registerVideoLoopRoutes(app, getWorkspace)
+registerDirectTaskRoutes(app, getWorkspace)
+registerRecommendationRoutes(app, getWorkspace)
 registerNovelRoutes(app, getWorkspace)
 registerKnowledgeRoutes(app)
 
@@ -89,13 +101,11 @@ app.get('/api/sse/:clientId', (_req, res) => {
   _req.on('close', () => {
     console.log(`🛑 [SSE] Client ${clientId} disconnected`)
     sseManager.disconnect(clientId)
-    unregisterTask(clientId)
   })
 
   // Handle errors
   _req.on('error', () => {
     sseManager.disconnect(clientId)
-    unregisterTask(clientId)
   })
 
   // Subscribe client
@@ -103,41 +113,17 @@ app.get('/api/sse/:clientId', (_req, res) => {
 })
 
 // ── Task Interrupt ──
-app.post('/api/interrupt/:clientId', async (_req, res) => {
+app.post(['/api/interrupt/:clientId', '/api/interrupt/:clientId/'], async (_req, res) => {
   const clientId = _req.params.clientId
   console.log(`\n🛑 [Interrupt] Received interrupt request for task: ${clientId}`)
 
-  const task = getTask(clientId)
-  if (!task) {
-    console.warn(`[Interrupt] No active task found for ${clientId}`)
-    return res.json({
-      success: false,
-      message: '未找到正在运行的任务',
-    })
-  }
-
-  // First strike: set cancel token (stops the adapter at the next checkpoint)
-  task.cancelToken.cancelled = true
-  console.log(`  👉 [Interrupt Step 1] Cancel token set for ${clientId}`)
-
-  // Second strike: notify the client
-  await sseManager.sendMessage(clientId, {
-    type: 'interrupted',
-    message: '任务已被手动强行终止',
-  })
-
-  // Cleanup
-  unregisterTask(clientId)
-
-  console.log(`✅ [Interrupt] Task ${clientId} terminated successfully\n`)
-  res.json({
-    success: true,
-    message: '已斩断底层任务并释放资源',
-    physical_interrupted: true,
-  })
+  const result = await interruptRegisteredTask(clientId, (id, message) => taskMessageManager.sendMessage(id, message))
+  if (!result.success) console.warn(`[Interrupt] No active task found for ${clientId}`)
+  else console.log(`✅ [Interrupt] Task ${clientId} terminated successfully\n`)
+  res.json(result)
 })
 
-app.listen(port, host, async () => {
+const server = app.listen(port, host, async () => {
   activeWorkspace = await loadActiveWorkspace()
   await ensureWorkspaceStructure(activeWorkspace)
   await saveActiveWorkspace(activeWorkspace)
@@ -154,5 +140,48 @@ app.listen(port, host, async () => {
     console.warn('⚠️  Memory Palace bootstrap failed, falling back to SQLite:', String(err).slice(0, 200))
   }
 
+  keyMonitor = startKeyMonitor(getWorkspace, {
+    enabled: String(process.env.KEY_MONITOR_ENABLED || 'true').toLowerCase() !== 'false',
+    intervalMs: Number(process.env.KEY_MONITOR_INTERVAL_MS || 60 * 60 * 1000),
+    onError: error => console.warn('Key monitor error:', String(error).slice(0, 240)),
+  })
+  if (keyMonitor.started) console.log('Key monitoring task started')
+
   console.log(`Manga UI server on http://${host}:${port}`)
+})
+
+server.on('close', () => {
+  keyMonitor?.stop()
+})
+
+server.on('upgrade', (req, socket) => {
+  const pathname = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`).pathname
+  if (!pathname.startsWith('/api/ws/')) {
+    socket.end('HTTP/1.1 404 Not Found\r\n\r\n')
+    return
+  }
+
+  const clientId = webSocketClientIdFromPath(pathname)
+  const key = String(req.headers['sec-websocket-key'] || '')
+  if (!clientId || !key) {
+    socket.end('HTTP/1.1 400 Bad Request\r\n\r\n')
+    return
+  }
+
+  socket.write([
+    'HTTP/1.1 101 Switching Protocols',
+    'Upgrade: websocket',
+    'Connection: Upgrade',
+    `Sec-WebSocket-Accept: ${acceptWebSocketKey(key)}`,
+    '',
+    '',
+  ].join('\r\n'))
+
+  webSocketManager.connect(clientId, socket)
+  socket.on('close', () => {
+    webSocketManager.disconnect(clientId, socket)
+  })
+  socket.on('error', () => {
+    webSocketManager.disconnect(clientId, socket)
+  })
 })

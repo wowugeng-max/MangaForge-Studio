@@ -1,4 +1,4 @@
-import type { LLMRequest, LLMResponse, LLMToolCall } from './types'
+import { imageUrlFromLLMContentPart, stringifyLLMMessageContent, stringifyLLMMessageTextContent, textFromLLMContentPart, type LLMRequest, type LLMResponse, type LLMToolCall } from './types'
 import { buildCodexResponsesBody } from './codex-responses'
 import type { APIKeyRecord } from '../key-store'
 import type { ModelRecord } from '../model-store'
@@ -64,7 +64,7 @@ export function classifyLLMError(error: unknown) {
     if (message.includes('timeout')) return 'timeout'
     if (message.includes('401') || message.includes('403') || message.includes('auth')) return 'auth'
     if (message.includes('429') || message.includes('rate limit')) return 'rate_limit'
-    if (message.includes('fetch') || message.includes('network') || message.includes('econnreset')) return 'network'
+    if (message.includes('fetch') || message.includes('network') || message.includes('econnreset') || message.includes('econnrefused') || message.includes('connectionrefused') || message.includes('connection refused') || message.includes('socket')) return 'network'
     if (message.includes('json') || message.includes('parse')) return 'parse_error'
   }
   return 'unknown'
@@ -118,6 +118,45 @@ function buildOpenAIChatBody(request: LLMRequest) {
       ? { type: 'json_object' }
       : normalized.response_format
   }
+  const passthroughBlocked = new Set([
+    'model',
+    'messages',
+    'prompt',
+    'type',
+    'mode',
+    'task_type',
+    'image_url',
+    'response_format',
+    'tools',
+    'tool_choice',
+    'metadata',
+    'stream',
+    'response_mode',
+  ])
+  for (const [key, value] of Object.entries(request as any)) {
+    if (value === undefined || value === null) continue
+    if (passthroughBlocked.has(key)) continue
+    body[key] = value
+  }
+  return body
+}
+
+function isMediaRouteType(routeType?: string) {
+  return ['image', 'video', 'text_to_image', 'image_to_image', 'text_to_video', 'image_to_video'].includes(String(routeType || ''))
+}
+
+function buildOpenAIMediaBody(request: LLMRequest) {
+  const normalized = normalizeLLMRequest(request)
+  const body: Record<string, any> = {
+    model: normalized.model,
+    prompt: (request as any).prompt || textPromptFromMessages(normalized.messages),
+  }
+  if ((request as any).image_url) body.image_url = (request as any).image_url
+  for (const [key, value] of Object.entries(request as any)) {
+    if (value === undefined || value === null) continue
+    if (['model', 'messages', 'prompt', 'type', 'mode', 'task_type', 'image_url', 'response_format', 'tools', 'tool_choice', 'metadata', 'stream', 'response_mode'].includes(key)) continue
+    body[key] = value
+  }
   return body
 }
 
@@ -137,7 +176,7 @@ function buildAnthropicMessagesBody(request: LLMRequest) {
   const systemMsg = normalized.messages.find(m => m.role === 'system')
   const body: Record<string, any> = { model: normalized.model, max_tokens: normalized.max_tokens, temperature: normalized.temperature }
   // Anthropic requires 'system' as a top-level field, NOT in messages array
-  if (systemMsg?.content) body.system = systemMsg.content
+  if (systemMsg?.content) body.system = stringifyLLMMessageContent(systemMsg.content)
   const nonSystemMessages = normalized.messages.filter(m => m.role !== 'system')
   body.messages = nonSystemMessages.map(msg => ({
     role: msg.role === 'assistant' ? 'assistant' : (msg.role === 'tool' ? 'assistant' : 'user'),
@@ -148,10 +187,61 @@ function buildAnthropicMessagesBody(request: LLMRequest) {
   return body
 }
 
+function buildGeminiGenerateContentBody(request: LLMRequest) {
+  const normalized = normalizeLLMRequest(request)
+  const systemText = normalized.messages
+    .filter(message => message.role === 'system')
+    .map(message => stringifyLLMMessageContent(message.content))
+    .filter(Boolean)
+    .join('\n')
+  const contents = normalized.messages
+    .filter(message => message.role !== 'system')
+    .map(message => ({
+      role: message.role === 'assistant' ? 'model' : 'user',
+      parts: geminiPartsFromMessageContent(message.content),
+    }))
+  const body: Record<string, any> = {
+    contents: contents.length ? contents : [{ role: 'user', parts: [{ text: promptFromMessages(normalized.messages) }] }],
+    generationConfig: {
+      temperature: normalized.temperature,
+      maxOutputTokens: normalized.max_tokens,
+    },
+  }
+  if (systemText) body.systemInstruction = { parts: [{ text: systemText }] }
+  return body
+}
+
+function normalizeGeminiGenerateContentPayload(raw: any) {
+  const candidate = Array.isArray(raw?.candidates) ? raw.candidates[0] : null
+  const parts = Array.isArray(candidate?.content?.parts) ? candidate.content.parts : []
+  const content = parts.map((part: any) => String(part?.text || '')).filter(Boolean).join('\n')
+  const usage = raw?.usageMetadata
+    ? {
+        input_tokens: raw.usageMetadata.promptTokenCount,
+        output_tokens: raw.usageMetadata.candidatesTokenCount,
+        total_tokens: raw.usageMetadata.totalTokenCount,
+      }
+    : undefined
+  return {
+    content,
+    usage,
+    finish_reason: candidate?.finishReason || raw?.finishReason,
+    raw,
+  }
+}
+
+function isGeminiNativeProvider(provider: ProviderRecord) {
+  return String(provider.api_format || '').toLowerCase() === 'gemini_native'
+}
+
 function applyProviderAuth(headers: Record<string, string>, provider: ProviderRecord, apiKey?: string) {
   const key = String(apiKey || '').trim()
   if (!key || String(provider.auth_type || 'bearer').toLowerCase() === 'none') return headers
   const authType = String(provider.auth_type || 'bearer').toLowerCase()
+  if (isGeminiNativeProvider(provider)) {
+    headers['x-goog-api-key'] = key
+    return headers
+  }
   if (authType === 'x-api-key' || authType === 'api-key') headers['x-api-key'] = key
   else headers.Authorization = key.toLowerCase().startsWith('bearer ') ? key : `Bearer ${key}`
   return headers
@@ -166,28 +256,354 @@ async function postJson(url: string, body: any, apiKey?: string, headersExtra: R
   try { return JSON.parse(text) } catch { return { content: text } }
 }
 
+async function getJson(url: string, headersExtra: Record<string, string> = {}) {
+  const response = await fetch(url, { method: 'GET', headers: headersExtra })
+  const text = await response.text()
+  if (!response.ok) throw new Error(`LLM task poll failed with status ${response.status}: ${text}`)
+  try { return JSON.parse(text) } catch { return { content: text } }
+}
+
 function normalizeBaseUrl(url?: string) {
   return String(url || '').replace(/\/$/, '')
 }
 
-function resolveProviderEndpoint(provider: ProviderRecord) {
+function isRouteObject(value: unknown): value is Record<string, any> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value))
+}
+
+function routeDslValue(routeConfig: unknown, snakeKey: string, camelKey: string = snakeKey) {
+  if (!isRouteObject(routeConfig)) return undefined
+  return routeConfig[snakeKey] ?? routeConfig[camelKey]
+}
+
+function requestRouteType(request: LLMRequest, model?: ModelRecord) {
+  const explicit = String((request as any).type || (request as any).mode || (request as any).task_type || '').trim()
+  if (explicit) return explicit
+  const capabilities = model?.capabilities || {}
+  const activeModalities = Object.entries(capabilities)
+    .filter(([key, enabled]) => enabled === true && key !== 'chat')
+    .map(([key]) => key)
+  return activeModalities.length === 1 ? activeModalities[0] : ''
+}
+
+function routeModelMatchers(route: Record<string, any>) {
+  const raw = [route.match, route.matches, route.model, route.model_name, route.modelName, route.models, route.pattern].flat()
+  return raw.map(item => String(item || '').trim()).filter(Boolean)
+}
+
+function doesModelRouteMatch(route: Record<string, any>, modelName: string) {
+  const name = String(modelName || '').trim()
+  if (!name) return false
+  const normalizedName = name.toLowerCase()
+  const matchType = String(route.match_type || route.matchType || route.matcher || 'contains').toLowerCase()
+  return routeModelMatchers(route).some(matcher => {
+    if (matcher === '*') return true
+    if (matchType === 'exact') return normalizedName === matcher.toLowerCase()
+    if (matchType === 'regex') {
+      try { return new RegExp(matcher, 'i').test(name) } catch { return false }
+    }
+    return normalizedName.includes(matcher.toLowerCase())
+  })
+}
+
+function routeConfigForModel(route: any, modelName: string) {
+  const modelRoutes = isRouteObject(route) ? route.model_routes ?? route.modelRoutes : undefined
+  if (!isRouteObject(route) || !Array.isArray(modelRoutes)) return route
+  const matched = modelRoutes.find((item: any) => isRouteObject(item) && doesModelRouteMatch(item, modelName))
+  if (!matched) return route
+  const { model_routes: _modelRoutes, modelRoutes: _modelRoutesCamel, ...baseRoute } = route
+  const {
+    match: _match,
+    matches: _matches,
+    model: _routeModel,
+    model_name: _routeModelName,
+    modelName: _routeModelNameCamel,
+    models: _models,
+    pattern: _pattern,
+    match_type: _matchType,
+    matchType: _matchTypeCamel,
+    matcher: _matcher,
+    ...overrideRoute
+  } = matched
+  const merged = { ...baseRoute, ...overrideRoute }
+  if (isRouteObject(baseRoute.headers) || isRouteObject(overrideRoute.headers)) {
+    merged.headers = { ...(baseRoute.headers || {}), ...(overrideRoute.headers || {}) }
+  }
+  return merged
+}
+
+function selectProviderRoute(provider: ProviderRecord, request?: LLMRequest, model?: ModelRecord) {
   const endpoints = provider.endpoints || {}
   const providerFormat = String(provider.api_format || '').toLowerCase()
-  const explicit = providerFormat.includes('responses') || providerFormat.includes('codex')
+  if (!providerFormat.includes('responses') && !providerFormat.includes('codex')) {
+    const routeType = request ? requestRouteType(request, model) : ''
+    if (routeType && endpoints[routeType]) return routeConfigForModel(endpoints[routeType], model?.model_name || '')
+    const broadType = routeType.includes('image') ? 'image' : routeType.includes('video') ? 'video' : ''
+    if (broadType && endpoints[broadType]) return routeConfigForModel(endpoints[broadType], model?.model_name || '')
+  }
+  return providerFormat.includes('responses') || providerFormat.includes('codex')
     ? endpoints.responses || endpoints.chat || endpoints.completions || endpoints.llm || ''
     : endpoints.chat || endpoints.responses || endpoints.completions || endpoints.llm || ''
-  const base = normalizeBaseUrl(explicit || provider.default_base_url || '')
+}
+
+function defaultEndpointPath(provider: ProviderRecord, routeType = '') {
+  const providerFormat = String(provider.api_format || '').toLowerCase()
+  if (providerFormat.includes('anthropic')) return 'messages'
+  if (providerFormat.includes('responses') || providerFormat.includes('codex')) return 'responses'
+  if (String(routeType).includes('image')) return 'images/generations'
+  if (String(routeType).includes('video')) return 'videos/generations'
+  return 'chat/completions'
+}
+
+function normalizeGeminiModelName(modelName = '') {
+  return String(modelName || '').replace(/^models\//, '').trim()
+}
+
+function resolveProviderEndpoint(provider: ProviderRecord, routeConfig = selectProviderRoute(provider), baseUrlOverride = '', routeType = '', modelName = '') {
+  const routeUrl = isRouteObject(routeConfig)
+    ? String(routeConfig.url || routeConfig.endpoint || '')
+    : String(routeConfig || '')
+  const baseUrl = normalizeBaseUrl(baseUrlOverride || provider.default_base_url || '')
+  const explicit = normalizeBaseUrl(routeUrl)
+  if (explicit) {
+    if (/^https?:\/\//i.test(explicit)) return explicit
+    if (!baseUrl) return explicit
+    return `${baseUrl}/${explicit.replace(/^\/+/, '')}`
+  }
+  const base = baseUrl || (isGeminiNativeProvider(provider) ? 'https://generativelanguage.googleapis.com/v1beta' : '')
   if (!base) return ''
+  if (isGeminiNativeProvider(provider)) {
+    if (/:generateContent$/.test(base)) return base
+    const cleanModelName = normalizeGeminiModelName(modelName || 'gemini-1.5-flash')
+    return `${base.replace(/\/+$/, '')}/models/${encodeURIComponent(cleanModelName)}:generateContent`
+  }
   // If the URL already ends with a known completion path, use it as-is
   if (/\/(chat\/completions|completions|responses|messages|generate|complete)$/.test(base)) return base
   // If the URL already contains a path beyond base (e.g., /v1/complete, /api/v2/generate), treat it as the endpoint
   const pathParts = base.replace(/^(https?:\/\/[^/]+)/, '').split('/').filter(Boolean)
   if (pathParts.length >= 2) return base
   const hasV1 = /\/v1$/.test(base)
-  if (providerFormat.includes('anthropic')) return hasV1 ? `${base}/messages` : `${base}/v1/messages`
-  if (providerFormat.includes('responses') || providerFormat.includes('codex')) return hasV1 ? `${base}/responses` : `${base}/v1/responses`
+  const path = defaultEndpointPath(provider, routeType)
+  if (hasV1) return `${base}/${path}`
   // Default to chat/completions (NOT responses) for OpenAI-compatible providers
-  return hasV1 ? `${base}/chat/completions` : `${base}/v1/chat/completions`
+  return `${base}/v1/${path}`
+}
+
+function getValueByPath(data: any, path: string) {
+  const parts = String(path || '').split('.').filter(Boolean)
+  let current = data
+  for (const part of parts) {
+    if (Array.isArray(current) && /^\d+$/.test(part)) current = current[Number(part)]
+    else if (current && typeof current === 'object' && part in current) current = current[part]
+    else return undefined
+  }
+  return current
+}
+
+function isEnvelopeObject(value: any): value is Record<string, any> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value))
+}
+
+function providerEnvelopeCandidates(raw: any) {
+  const candidates: any[] = []
+  const seen = new Set<any>()
+  const visit = (value: any, depth = 0) => {
+    if (!isEnvelopeObject(value) || seen.has(value) || depth > 8) return
+    seen.add(value)
+    candidates.push(value)
+    for (const key of ['data', 'result', 'output']) {
+      visit(value[key], depth + 1)
+    }
+  }
+  visit(raw)
+  return candidates.length ? candidates : [raw]
+}
+
+function getValueByPathFromEnvelopes(raw: any, path: string) {
+  for (const candidate of providerEnvelopeCandidates(raw)) {
+    const value = getValueByPath(candidate, path)
+    if (value !== undefined) return value
+  }
+  return undefined
+}
+
+function extractMediaContent(raw: any) {
+  for (const candidate of providerEnvelopeCandidates(raw)) {
+    const firstData = Array.isArray(candidate?.data) ? candidate.data[0] : null
+    if (firstData?.url || firstData?.b64_json) return normalizeExtractedMediaContent(String(firstData.url || firstData.b64_json))
+    const firstResult = Array.isArray(candidate?.output?.results) ? candidate.output.results[0] : Array.isArray(candidate?.results) ? candidate.results[0] : null
+    if (firstResult?.video_url || firstResult?.image_url || firstResult?.url) return normalizeExtractedMediaContent(String(firstResult.video_url || firstResult.image_url || firstResult.url))
+    if (candidate?.output?.video_url || candidate?.output?.image_url || candidate?.output?.url) return normalizeExtractedMediaContent(String(candidate.output.video_url || candidate.output.image_url || candidate.output.url))
+    if (candidate?.video_url || candidate?.image_url || candidate?.url) return normalizeExtractedMediaContent(String(candidate.video_url || candidate.image_url || candidate.url))
+    const firstVideoResult = Array.isArray(candidate?.video_result) ? candidate.video_result[0] : null
+    if (firstVideoResult?.url) return normalizeExtractedMediaContent(String(firstVideoResult.url))
+    const choiceContent = candidate?.choices?.[0]?.message?.content || candidate?.choices?.[0]?.text
+    if (choiceContent) return normalizeExtractedMediaContent(String(choiceContent))
+  }
+  return ''
+}
+
+function normalizeExtractedMediaContent(content: string) {
+  const value = String(content || '').trim()
+  if (!value) return ''
+  if (/^(https?:|data:|blob:)/i.test(value)) return value
+  const markdownMatch = value.match(/!\[.*?\]\((https?:\/\/[^\s)]+)\)/i)
+  if (markdownMatch) return markdownMatch[1]
+  const dataMatch = value.match(/(data:(?:image|video)\/[^;]+;base64,[A-Za-z0-9+/=]+)/i)
+  if (dataMatch) return dataMatch[1]
+  const urlMatch = value.match(/(https?:\/\/[^\s"'<>]+\.(?:png|jpg|jpeg|webp|gif|mp4|webm|mov)(?:\?[^\s"'<>)]*)?)/i)
+  if (urlMatch) return urlMatch[1]
+  if (value.length > 200 && /^[A-Za-z0-9+/=\s]+$/.test(value.slice(0, 120))) return `data:image/png;base64,${value.replace(/\s+/g, '')}`
+  return value
+}
+
+function asyncTaskStatus(raw: any, routeConfig: Record<string, any>) {
+  const extracted = getValueByPathFromEnvelopes(raw, String(routeDslValue(routeConfig, 'status_extractor', 'statusExtractor') || 'output.task_status'))
+  for (const candidate of providerEnvelopeCandidates(raw)) {
+    const fallback = candidate?.status || candidate?.task_status || candidate?.taskStatus || candidate?.state || candidate?.output?.task_status || candidate?.output?.taskStatus || candidate?.output?.status || candidate?.output?.state
+    if (extracted ?? fallback) return String(extracted ?? fallback).toLowerCase()
+  }
+  return ''
+}
+
+function asyncTaskId(raw: any, routeConfig: Record<string, any>) {
+  const taskPath = String(routeDslValue(routeConfig, 'task_id_extractor', 'taskIdExtractor') || '')
+  const extracted = taskPath ? getValueByPathFromEnvelopes(raw, taskPath) : undefined
+  for (const candidate of providerEnvelopeCandidates(raw)) {
+    const fallback = candidate?.task_id || candidate?.taskId || candidate?.id || candidate?.output?.task_id || candidate?.output?.taskId || candidate?.output?.id
+    const value = extracted ?? fallback
+    if (value != null) return String(value).trim()
+  }
+  return ''
+}
+
+function isPendingTaskStatus(status: string) {
+  return ['pending', 'processing', 'submitted', 'in_progress', 'queued', 'running'].includes(status)
+}
+
+function isCompletedTaskStatus(status: string) {
+  return ['succeeded', 'success', 'completed', 'finished', 'done'].includes(status)
+}
+
+function isFailedTaskStatus(status: string) {
+  const normalized = String(status || '').trim().toLowerCase().replace(/[\s-]+/g, '_')
+  return [
+    'failed',
+    'failure',
+    'fail',
+    'error',
+    'errored',
+    'cancelled',
+    'canceled',
+    'aborted',
+    'abort',
+    'rejected',
+    'reject',
+    'timeout',
+    'timed_out',
+    'expired',
+  ].includes(normalized)
+}
+
+function pollEndpointForTask(provider: ProviderRecord, endpoint: string, routeConfig: Record<string, any>, taskId: string, baseUrlOverride = '') {
+  const template = String(routeDslValue(routeConfig, 'poll_url', 'pollUrl') || '').trim()
+  const rendered = (template || `${endpoint.replace(/\/+$/, '')}/{{task_id}}`).replace(/\{\{\s*task_id\s*\}\}/g, taskId)
+  if (/^https?:\/\//i.test(rendered)) return rendered
+  const base = normalizeBaseUrl(baseUrlOverride || provider.default_base_url || '')
+  return base ? `${base}/${rendered.replace(/^\/+/, '')}` : rendered
+}
+
+async function pollConfiguredTask(provider: ProviderRecord, endpoint: string, routeConfig: unknown, raw: any, headers: Record<string, string>, baseUrlOverride = '') {
+  if (!isRouteObject(routeConfig)) return raw
+  const taskId = asyncTaskId(raw, routeConfig)
+  if (!taskId) return raw
+  const initialStatus = asyncTaskStatus(raw, routeConfig)
+  if (isCompletedTaskStatus(initialStatus) || !isPendingTaskStatus(initialStatus)) return raw
+
+  const pollUrl = pollEndpointForTask(provider, endpoint, routeConfig, taskId, baseUrlOverride)
+  const maxAttempts = Math.max(1, Number(routeDslValue(routeConfig, 'poll_max_attempts', 'pollMaxAttempts') || 60))
+  const pollIntervalMs = Math.max(0, Number(routeDslValue(routeConfig, 'poll_interval_ms', 'pollIntervalMs') ?? 10_000))
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    if (attempt > 1 && pollIntervalMs > 0) await new Promise(resolve => setTimeout(resolve, pollIntervalMs))
+    const payload = await getJson(pollUrl, headers)
+    const status = asyncTaskStatus(payload, routeConfig)
+    if (isFailedTaskStatus(status)) throw new Error(`LLM async task failed: ${JSON.stringify(payload).slice(0, 500)}`)
+    if (isCompletedTaskStatus(status) || !isPendingTaskStatus(status)) return payload
+  }
+
+  throw new Error(`LLM async task timed out: ${taskId}`)
+}
+
+function promptFromMessages(messages: LLMRequest['messages']) {
+  const lastUser = [...(messages || [])].reverse().find(message => message.role === 'user')
+  return lastUser
+    ? stringifyLLMMessageContent(lastUser.content)
+    : (messages || []).map(message => stringifyLLMMessageContent(message.content)).filter(Boolean).join('\n')
+}
+
+function textPromptFromMessages(messages: LLMRequest['messages']) {
+  const lastUser = [...(messages || [])].reverse().find(message => message.role === 'user')
+  return lastUser
+    ? stringifyLLMMessageTextContent(lastUser.content)
+    : (messages || []).map(message => stringifyLLMMessageTextContent(message.content)).filter(Boolean).join('\n')
+}
+
+function geminiPartsFromMessageContent(content: LLMRequest['messages'][number]['content']) {
+  if (!Array.isArray(content)) return [{ text: stringifyLLMMessageContent(content) }]
+  const parts = content.flatMap(part => {
+    const text = textFromLLMContentPart(part).trim()
+    if (text) return [{ text }]
+    const imageUrl = imageUrlFromLLMContentPart(part)
+    if (imageUrl) return [{ fileData: { mimeType: 'image/png', fileUri: imageUrl } }]
+    return []
+  })
+  return parts.length ? parts : [{ text: stringifyLLMMessageContent(content) }]
+}
+
+function renderTemplateValue(template: any, context: Record<string, any>): any {
+  if (Array.isArray(template)) {
+    return template
+      .map(item => renderTemplateValue(item, context))
+      .filter(item => item !== undefined && item !== null)
+  }
+  if (template && typeof template === 'object') {
+    const rendered: Record<string, any> = {}
+    for (const [key, value] of Object.entries(template)) {
+      const nextValue = renderTemplateValue(value, context)
+      if (nextValue !== undefined && nextValue !== null) rendered[key] = nextValue
+    }
+    return Object.keys(rendered).length ? rendered : undefined
+  }
+  if (typeof template === 'string') {
+    const match = template.trim().match(/^\{\{\s*([^}]+?)\s*\}\}$/)
+    if (!match) return template
+    const key = match[1].trim()
+    const value = context[key]
+    if (key === 'size' && typeof value === 'string' && value && !value.includes('*')) return value.replace(/x/g, '*')
+    return value
+  }
+  return template
+}
+
+function buildTemplateContext(request: LLMRequest) {
+  return {
+    ...(request as any),
+    model: request.model,
+    messages: request.messages,
+    prompt: (request as any).prompt || promptFromMessages(request.messages),
+    size: (request as any).size ?? '1024*1024',
+    temperature: request.temperature,
+    max_tokens: request.max_tokens,
+  }
+}
+
+function buildConfiguredRouteBody(routeConfig: unknown, request: LLMRequest, fallback: () => any) {
+  const payloadTemplate = routeDslValue(routeConfig, 'payload_template', 'payloadTemplate')
+  if (payloadTemplate) {
+    return renderTemplateValue(payloadTemplate, buildTemplateContext(request)) ?? {}
+  }
+  return fallback()
 }
 
 export class ConfiguredProviderAdapter implements NovelLLMAdapter {
@@ -197,21 +613,39 @@ export class ConfiguredProviderAdapter implements NovelLLMAdapter {
   }
 
   async execute<T = any>(request: LLMRequest): Promise<LLMResponse<T>> {
-    const endpoint = resolveProviderEndpoint(this.provider)
-    if (!endpoint) throw new Error(`provider ${this.provider.id} missing endpoint`)
+    const routeConfig = selectProviderRoute(this.provider, request, this.model)
+    const routeType = requestRouteType(request, this.model)
+    const effectiveBaseUrl = normalizeBaseUrl(this.apiKey.base_url || this.provider.default_base_url || '')
     const modelRequest = { ...request, model: this.model.model_name || request.model }
+    const endpoint = resolveProviderEndpoint(this.provider, routeConfig, effectiveBaseUrl, routeType, modelRequest.model)
+    if (!endpoint) throw new Error(`provider ${this.provider.id} missing endpoint`)
     const providerFormat = String(this.provider.api_format || '').toLowerCase()
     const isAnthropic = providerFormat.includes('anthropic')
     const isCodex = providerFormat.includes('codex')
     const isResponses = providerFormat.includes('responses')
-    const body = isCodex
+    const isGeminiNative = isGeminiNativeProvider(this.provider)
+    const body = buildConfiguredRouteBody(routeConfig, modelRequest, () => isCodex
       ? buildCodexResponsesBody(modelRequest, this.model.model_name || request.model, false, {
-        baseUrl: this.provider.default_base_url,
+        baseUrl: effectiveBaseUrl,
       })
-      : isResponses ? buildOpenAIResponsesBody(modelRequest) : (isAnthropic ? buildAnthropicMessagesBody(modelRequest) : buildOpenAIChatBody(modelRequest))
+      : isResponses ? buildOpenAIResponsesBody(modelRequest) : (isGeminiNative ? buildGeminiGenerateContentBody(modelRequest) : (isAnthropic ? buildAnthropicMessagesBody(modelRequest) : (isMediaRouteType(routeType) ? buildOpenAIMediaBody(modelRequest) : buildOpenAIChatBody(modelRequest)))))
     const headers = applyProviderAuth({ ...(this.provider.custom_headers || {}) }, this.provider, this.apiKey.key)
+    const routeHeaders = routeDslValue(routeConfig, 'headers', 'customHeaders')
+    if (routeHeaders && typeof routeHeaders === 'object') Object.assign(headers, routeHeaders)
     if (isAnthropic && !headers['anthropic-version']) headers['anthropic-version'] = '2023-06-01'
-    const raw = await postJson(endpoint, body, undefined, headers)
+    const raw = await pollConfiguredTask(this.provider, endpoint, routeConfig, await postJson(endpoint, body, undefined, headers), headers, effectiveBaseUrl)
+    if (isGeminiNative) return normalizeToolCallsFromResponse(normalizeLLMResponse<T>(normalizeGeminiGenerateContentPayload(raw)))
+    const resultExtractor = routeDslValue(routeConfig, 'result_extractor', 'resultExtractor')
+    if (resultExtractor) {
+      const extracted = getValueByPathFromEnvelopes(raw, String(resultExtractor))
+      const extractedContent = typeof extracted === 'string' ? extracted : JSON.stringify(extracted ?? '')
+      const content = isMediaRouteType(routeType) ? normalizeExtractedMediaContent(extractedContent) : extractedContent
+      return normalizeToolCallsFromResponse(normalizeLLMResponse<T>({ content, raw_response: raw }))
+    }
+    if (isMediaRouteType(routeType)) {
+      const content = extractMediaContent(raw)
+      if (content) return normalizeToolCallsFromResponse(normalizeLLMResponse<T>({ content, raw_response: raw }))
+    }
     return isResponsesPayload(raw) ? normalizeToolCallsFromResponse(normalizeLLMResponse<T>(normalizeResponsesPayload(raw))) : normalizeToolCallsFromResponse(normalizeLLMResponse<T>(raw))
   }
 }

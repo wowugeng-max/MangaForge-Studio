@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
+import { buildStudioMangaApiBase } from './studioHomeApi'
 
 type EpisodeStatus = {
   episodeId: string
@@ -50,7 +51,7 @@ type ApiResult = {
   error?: string
 }
 
-const api = 'http://localhost:8787/api/manga'
+const api = buildStudioMangaApiBase()
 
 function StepDot({ ok }: { ok: boolean }) {
   return <span style={{ color: ok ? '#16a34a' : '#dc2626', fontWeight: 700 }}>{ok ? '●' : '○'}</span>

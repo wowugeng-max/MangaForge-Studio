@@ -1,17 +1,23 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
+import ReactDOM from 'react-dom'
 import { Handle, Position, type NodeProps, useReactFlow, useUpdateNodeInternals } from 'reactflow'
-import { Button, Card, Checkbox, Collapse, Divider, Input, InputNumber, Modal, Select, Space, Spin, Switch, Tag, Typography, message, Slider } from 'antd'
-import { MessageOutlined, EyeOutlined, PictureOutlined, VideoCameraOutlined, PlayCircleOutlined, SaveOutlined, StopOutlined, SettingOutlined } from '@ant-design/icons'
+import { useParams } from 'react-router-dom'
+import { Button, Checkbox, Input, InputNumber, Select, Space, Spin, Switch, Tag, Tooltip, Typography, message, Slider } from 'antd'
+import { CloseOutlined, PlayCircleOutlined, SaveOutlined, StopOutlined, StarFilled } from '@ant-design/icons'
 import apiClient from '../../api/client'
 import { nodeRegistry } from '../../utils/nodeRegistry'
+import { createSSEClient, type SSEClient, type SSEMessage } from '../../utils/sse'
 import { useCanvasStore } from '../../stores/canvasStore'
 import { useAssetLibraryStore } from '../../stores/assetLibraryStore'
 import CameraControl, { buildCameraPromptSuffix } from '../CameraControl'
 import CameraMovement from '../CameraMovement'
+import { ASPECT_RATIOS as SHARED_ASPECT_RATIOS, getAspectRatioSize, type AspectRatioValue } from '../AspectRatioSelector'
+import { BaseNode } from './BaseNode'
+import { pickMediaResultContent } from '../../utils/mediaResult'
+import { buildAssetMediaUrl } from '../../utils/assetMedia'
 
 const { TextArea } = Input
 const { Text } = Typography
-const { Panel } = Collapse
 
 const MODES = [
   { label: 'Chat', value: 'chat' },
@@ -22,13 +28,22 @@ const MODES = [
   { label: 'I2V', value: 'image_to_video' },
 ]
 
-const ASPECT_RATIOS = [
-  { label: '1:1', value: '1:1', size: '1024*1024' },
-  { label: '3:4', value: '3:4', size: '768*1024' },
-  { label: '4:3', value: '4:3', size: '1024*768' },
-  { label: '16:9', value: '16:9', size: '1280*720' },
-  { label: '9:16', value: '9:16', size: '720*1280' },
-  { label: 'custom', value: 'custom', size: 'custom' },
+export const GENERATE_NODE_ASPECT_RATIO_OPTIONS = SHARED_ASPECT_RATIOS
+
+export const GENERATE_NODE_ROUTING_STRATEGY_OPTIONS = [
+  { label: '平衡优先', value: 'balanced' },
+  { label: '成本优先', value: 'cost' },
+  { label: '速度优先', value: 'speed' },
+  { label: '随机均衡', value: 'random' },
+]
+
+export function getGenerateNodeAspectRatioSize(value: AspectRatioValue, customWidth = 1024, customHeight = 1024) {
+  return getAspectRatioSize(value, customWidth, customHeight)
+}
+
+const PRESET_ROLES = [
+  { label: '提示词优化大师', name: '提示词优化大师', prompt: '你是顶级 Prompt Engineer。把输入转化为极致详细的英文 Prompt，并给出负面 Prompt。' },
+  { label: '金牌编剧大师', name: '金牌编剧大师', prompt: '你是好莱坞金牌编剧。扩写场景描述，不仅要无中生有，还能解读现成的文本、小说、书籍等，极具画面感。并且要能一次性生成全部的剧本。' },
 ]
 
 const DEFAULT_ROLE = { id: '_free_agent', name: '🧠 自由智能体', prompt: '你是一个万能 AI 助手，严格遵循用户指令。' }
@@ -43,28 +58,328 @@ function extractJsonArray(text: string): any[] | null {
   return null
 }
 
-function GenerateNodeImpl({ id, data }: NodeProps) {
+export function normalizeGenerateNodeImageUrl(content: string) {
+  const value = String(content || '').trim()
+  if (!value) return ''
+  if (value.startsWith('/api/assets/media/')) return value
+  if (value.startsWith('/api/files/')) return value
+  try {
+    const url = new URL(value)
+    if (url.pathname.startsWith('/api/assets/media/')) {
+      return `/api/assets/media/${url.pathname.slice('/api/assets/media/'.length)}${url.search}${url.hash}`
+    }
+    if (url.pathname.startsWith('/api/files/')) {
+      return `/api/files/${url.pathname.slice('/api/files/'.length)}${url.search}${url.hash}`
+    }
+  } catch {}
+  if (/^(https?:|data:|blob:)/i.test(value)) return value
+  return `/api/assets/media/${encodeURIComponent(value.replace(/^\/+/, ''))}`
+}
+
+export function resolveGenerateNodePreviewMediaSrc(content: string, apiBaseURL?: string) {
+  const value = String(content || '').trim()
+  if (!value) return ''
+  return buildAssetMediaUrl(value, apiBaseURL)
+}
+
+export function resolveGenerateNodeSourceContent(sourceData: any) {
+  const assetData = sourceData?.asset?.data
+  const incomingData = sourceData?.incoming_data
+  const assetIsCharacter = sourceData?.asset?.type === 'character'
+  const candidates = [
+    sourceData?.result?.content,
+    sourceData?.result?.file_path,
+    sourceData?.result?.url,
+    pickMediaResultContent(sourceData?.result),
+    assetIsCharacter ? assetData?.core_prompt : assetData?.content,
+    assetIsCharacter ? assetData?.content : assetData?.core_prompt,
+    assetData?.file_path,
+    assetData?.url,
+    pickMediaResultContent(assetData),
+    incomingData?.core_prompt,
+    incomingData?.content,
+    incomingData?.file_path,
+    incomingData?.url,
+    pickMediaResultContent(incomingData),
+    typeof incomingData === 'string' ? incomingData : '',
+  ]
+  const found = candidates.find(value => value !== undefined && value !== null && String(value).trim())
+  return found === undefined || found === null ? '' : String(found)
+}
+
+export type GenerateNodeIncomingAsset = {
+  id?: number
+  type: 'image' | 'prompt'
+  content?: string
+  file_path?: string
+  url?: string
+  source_asset_ids?: number[]
+}
+
+function normalizeGenerateNodeSourceAssetIds(value: unknown): number[] {
+  if (!Array.isArray(value)) return []
+  return value.map(item => Number(item)).filter(id => Number.isFinite(id) && id > 0)
+}
+
+export function resolveGenerateNodeSourceAssetIds(sourceData: any): number[] {
+  const ids = [
+    ...normalizeGenerateNodeSourceAssetIds(sourceData?.source_asset_ids),
+    ...normalizeGenerateNodeSourceAssetIds(sourceData?.sourceAssetIds),
+    ...normalizeGenerateNodeSourceAssetIds(sourceData?.result?.source_asset_ids),
+    ...normalizeGenerateNodeSourceAssetIds(sourceData?.result?.sourceAssetIds),
+    ...normalizeGenerateNodeSourceAssetIds(sourceData?.incoming_data?.source_asset_ids),
+    ...normalizeGenerateNodeSourceAssetIds(sourceData?.incoming_data?.sourceAssetIds),
+  ]
+  const directId = Number(sourceData?.asset?.id ?? sourceData?.asset_id ?? sourceData?.assetId ?? sourceData?.result?.asset_id ?? sourceData?.incoming_data?.asset_id ?? 0)
+  if (Number.isFinite(directId) && directId > 0) ids.unshift(directId)
+  return Array.from(new Set(ids))
+}
+
+function normalizeGenerateNodeIncomingAsset(asset: any): GenerateNodeIncomingAsset | null {
+  if (!asset || typeof asset !== 'object') return null
+  const id = Number.isFinite(Number(asset.id)) ? Number(asset.id) : undefined
+  const sourceAssetIds = Array.from(new Set([
+    ...(id ? [id] : []),
+    ...normalizeGenerateNodeSourceAssetIds(asset.source_asset_ids),
+    ...normalizeGenerateNodeSourceAssetIds(asset.sourceAssetIds),
+  ]))
+  const type = String(asset.type || '').toLowerCase()
+  if (type === 'image') {
+    const rawUrl = asset.url || asset.file_path || asset.filePath || asset.content || ''
+    const url = normalizeGenerateNodeImageUrl(String(rawUrl || ''))
+    if (!url) return null
+    return { id, type: 'image', file_path: url, url, ...(sourceAssetIds.length ? { source_asset_ids: sourceAssetIds } : {}) }
+  }
+  const content = String(asset.content || asset.text || '').trim()
+  if (!content) return null
+  return { id, type: 'prompt', content, ...(sourceAssetIds.length ? { source_asset_ids: sourceAssetIds } : {}) }
+}
+
+export function isGenerateNodeMuted(nodes: Array<{ id: string; parentNode?: string; data?: any }>, nodeId: string) {
+  const node = nodes.find(item => item.id === nodeId)
+  if (!node) return false
+  if (node.data?._muted) return true
+  if (!node.parentNode) return false
+  const parent = nodes.find(item => item.id === node.parentNode)
+  return Boolean(parent?.data?._muted)
+}
+
+export function buildGenerateNodeAssetPayload(input: {
+  resultContent: string
+  mode: string
+  prompt: string
+  selectedModel: string
+  provider: string
+  selectedRolePrompt: string
+  params: Record<string, any>
+  temperature: number
+  aspectRatio: string
+  ratioSize: string
+  projectId?: number | null
+  cameraParams?: Record<string, string>
+  sourceAssetIds?: number[] | null
+}) {
+  const contentStr = String(input.resultContent || '')
+  const looksLikeVideo = input.mode.includes('video') || /^(data:video)/i.test(contentStr) || /\.(mp4|webm|mov)(\?|$)/i.test(contentStr)
+  const looksLikeImage = !looksLikeVideo && (input.mode.includes('image') || /^(data:image)/i.test(contentStr) || /\.(png|jpg|jpeg|webp|gif)(\?|$)/i.test(contentStr))
+  const assetType: 'prompt' | 'image' | 'video' = looksLikeVideo ? 'video' : looksLikeImage ? 'image' : 'prompt'
+  const mediaFields = assetType === 'prompt' ? {} : { file_path: contentStr, url: contentStr }
+  const cameraParams = input.cameraParams || {}
+  const cameraSuffix = buildCameraPromptSuffix(cameraParams)
+  const sourceAssetIds = Array.isArray(input.sourceAssetIds)
+    ? input.sourceAssetIds.map(item => Number(item)).filter(id => Number.isFinite(id))
+    : []
+
+  return {
+    name: `${assetType === 'image' ? '🖼️' : assetType === 'video' ? '🎬' : '📝'} ${input.prompt.slice(0, 10) || input.selectedModel}...`,
+    type: assetType,
+    ...(assetType === 'prompt' ? {} : { file_path: contentStr }),
+    ...(sourceAssetIds.length ? { source_asset_ids: sourceAssetIds } : {}),
+    data: {
+      content: contentStr,
+      ...mediaFields,
+      ...(sourceAssetIds.length ? { source_asset_ids: sourceAssetIds } : {}),
+      source_provider: input.provider,
+      source_model: input.selectedModel,
+      source_mode: input.mode,
+      source_prompt: input.prompt,
+      source_system: input.selectedRolePrompt,
+      source_params: { ...input.params, temperature: input.temperature, size: input.ratioSize },
+      source_aspect_ratio: input.aspectRatio,
+      source_size: input.ratioSize,
+      source_camera_params: Object.keys(cameraParams).length > 0 ? cameraParams : null,
+      source_camera_suffix: cameraSuffix || null,
+    },
+    tags: ['AI_Generated', input.mode, input.selectedModel],
+    thumbnail: assetType === 'image' ? contentStr : undefined,
+    project_id: input.projectId || null,
+  }
+}
+
+export function normalizeGenerateNodeGenerationPacket(packet: any) {
+  const root = packet && typeof packet === 'object' ? packet : {}
+  const data = root?.data
+  const base = root?.result && typeof root.result === 'object'
+    ? root.result
+    : data?.result && typeof data.result === 'object'
+      ? data.result
+      : data && typeof data === 'object'
+        ? data
+        : root
+  const mediaContent = pickMediaResultContent(base) || pickMediaResultContent(root) || pickMediaResultContent(data?.result) || pickMediaResultContent(data)
+  const fallbackContent = mediaContent || (data ?? packet)
+  const content = base?.content ?? root?.content ?? root?.result?.content ?? data?.content ?? data?.result?.content ?? fallbackContent
+  const sourceAssetIds = Array.isArray(root?.source_asset_ids)
+    ? root.source_asset_ids
+    : Array.isArray(base?.source_asset_ids)
+      ? base.source_asset_ids
+      : []
+  if (base && typeof base === 'object' && !Array.isArray(base)) {
+    return {
+      ...base,
+      content,
+      ...(sourceAssetIds.length ? { source_asset_ids: sourceAssetIds } : {}),
+    }
+  }
+  return typeof content === 'string'
+    ? { content, ...(sourceAssetIds.length ? { source_asset_ids: sourceAssetIds } : {}) }
+    : content || packet
+}
+
+export function buildGenerateNodeResultWithFission(input: {
+  packet: any
+  fissionEnabled?: boolean
+  expectedCount?: number | null
+  onCountMismatch?: (input: { expected: number | null; actual: number }) => void
+}) {
+  let finalResult: any = normalizeGenerateNodeGenerationPacket(input.packet)
+  if (!input.fissionEnabled || typeof finalResult?.content !== 'string') return finalResult
+
+  const parsed = extractJsonArray(finalResult.content)
+  const normalizedItems = Array.isArray(parsed)
+    ? parsed
+      .map(item => {
+        if (typeof item === 'string') return item.trim()
+        if (item && typeof item === 'object') {
+          const candidate = item.prompt ?? item.text ?? item.content ?? ''
+          return typeof candidate === 'string' ? candidate.trim() : ''
+        }
+        return ''
+      })
+      .filter(Boolean)
+    : []
+  const expectedCount = input.expectedCount ?? null
+  const countMatched = expectedCount === null || normalizedItems.length === expectedCount
+  if (normalizedItems.length > 1 && countMatched) {
+    return { ...finalResult, _fission: true, items: normalizedItems }
+  }
+  if (normalizedItems.length > 1 && !countMatched) {
+    input.onCountMismatch?.({ expected: expectedCount, actual: normalizedItems.length })
+  }
+  return finalResult
+}
+
+export function buildGenerateNodeRequestPayload(input: {
+  id: string
+  prompt: string
+  selectedKey: number | string | null | undefined
+  provider: string
+  selectedModel: string
+  mode: string
+  routingStrategy: string
+  params: Record<string, any>
+  temperature: number
+  ratioSize: string
+  selectedRolePrompt: string
+  cameraSuffix?: string
+  incomingImage?: string
+  incomingAssets?: GenerateNodeIncomingAsset[]
+  externalSystemPrompt?: string
+  systemPromptOverride?: string
+}) {
+  const finalPromptText = `${input.prompt || ''}${input.cameraSuffix || ''}`
+  const activeSystemPrompt = input.externalSystemPrompt || input.systemPromptOverride || input.selectedRolePrompt
+  const normalizedIncomingAssets = (input.incomingAssets || [])
+    .map(normalizeGenerateNodeIncomingAsset)
+    .filter((asset): asset is GenerateNodeIncomingAsset => Boolean(asset))
+  if (input.incomingImage && !normalizedIncomingAssets.some(asset => asset.type === 'image' && asset.url === input.incomingImage)) {
+    normalizedIncomingAssets.unshift({ type: 'image', file_path: input.incomingImage, url: input.incomingImage })
+  }
+  const incomingImages = normalizedIncomingAssets
+    .filter(asset => asset.type === 'image' && asset.url)
+    .map(asset => String(asset.url))
+  const incomingText = normalizedIncomingAssets
+    .filter(asset => asset.type === 'prompt' && asset.content)
+    .map(asset => String(asset.content).trim())
+    .filter(Boolean)
+  const userText = [
+    finalPromptText || (incomingImages.length ? '描述这张图片' : '开始执行'),
+    incomingText.length ? `[参考素材]:\n${incomingText.join('\n')}` : '',
+  ].filter(Boolean).join('\n\n')
+  const payload: any = {
+    api_key_id: Number(input.selectedKey) || undefined,
+    provider: input.provider,
+    model: input.selectedModel,
+    type: input.mode,
+    routing_strategy: input.routingStrategy,
+    prompt: finalPromptText,
+    params: { ...input.params, temperature: input.temperature, size: input.ratioSize, client_id: input.id },
+    messages: [{ role: 'system', content: activeSystemPrompt }],
+  }
+  if (normalizedIncomingAssets.length) payload.params.incoming_assets = normalizedIncomingAssets
+  if (input.mode === 'vision' && incomingImages.length) {
+    payload.messages.push({
+      role: 'user',
+      content: [
+        { type: 'text', text: userText },
+        ...incomingImages.map(url => ({ type: 'image_url', image_url: { url } })),
+      ],
+    })
+  } else {
+    payload.messages.push({ role: 'user', content: userText })
+  }
+  if (incomingImages[0]) payload.image_url = incomingImages[0]
+  return payload
+}
+
+function GenerateNodeImpl(props: NodeProps) {
+  const { id, data } = props
+  const { id: routeProjectId } = useParams<{ id: string }>()
   const updateNodeData = useCanvasStore(s => s.updateNodeData)
   const setNodeStatus = useCanvasStore(s => s.setNodeStatus)
+  const isMuted = useCanvasStore(s => isGenerateNodeMuted(s.nodes as any, id))
   const { getEdges, getNodes } = useReactFlow()
-  useUpdateNodeInternals(id)
+  const updateNodeInternals = useUpdateNodeInternals()
 
   const assets = useAssetLibraryStore(s => s.assets)
+  const fetchAssets = useAssetLibraryStore(s => s.fetchAssets)
+  const [keys, setKeys] = useState<any[]>([])
+  const [allModels, setAllModels] = useState<any[]>([])
+  const [modelLoading, setModelLoading] = useState(false)
   const [mode, setMode] = useState(data?.mode || 'chat')
   const [prompt, setPrompt] = useState(data?.prompt || '')
   const [systemPrompt, setSystemPrompt] = useState(data?.systemPrompt || '')
-  const [model, setModel] = useState(data?.model || '')
-  const [keyId, setKeyId] = useState(data?.keyId || '')
-  const [aspectRatio, setAspectRatio] = useState(data?.aspectRatio || '16:9')
+  const [selectedKey, setSelectedKey] = useState<number | null>(Number(data?.api_key_id ?? data?.keyId) || null)
+  const [selectedModel, setSelectedModel] = useState(data?.model_name || data?.model || '')
+  const [params, setParams] = useState<Record<string, any>>(data?.params || {})
+  const [routingStrategy, setRoutingStrategy] = useState(data?.routing_strategy || data?.routingStrategy || 'balanced')
+  const [showOnlyFavorites, setShowOnlyFavorites] = useState(Boolean(data?.showOnlyFavorites ?? true))
+  const [aspectRatio, setAspectRatio] = useState<AspectRatioValue>((data?.aspectRatio ?? '16:9') as AspectRatioValue)
   const [customWidth, setCustomWidth] = useState<number>(data?.customWidth || 1920)
   const [customHeight, setCustomHeight] = useState<number>(data?.customHeight || 1080)
   const [useRoleAsset, setUseRoleAsset] = useState(Boolean(data?.useRoleAsset))
   const [roleAssetId, setRoleAssetId] = useState<number | null>(data?.roleAssetId || null)
   const [temperature, setTemperature] = useState<number>(data?.temperature ?? 0.7)
-  const [previewOpen, setPreviewOpen] = useState(false)
-  const [loading, setLoading] = useState(false)
+  const [showPreview, setShowPreview] = useState(Boolean(data?.showPreview ?? true))
+  const [configOpen, setConfigOpen] = useState(false)
+  const [panelPos, setPanelPos] = useState<{ top: number; left: number } | null>(null)
+  const [generating, setGenerating] = useState(false)
   const [progressMsg, setProgressMsg] = useState('')
   const [result, setResult] = useState<any>(data?.result || null)
+  const [mediaDims, setMediaDims] = useState('')
+  const sseClientRef = useRef<SSEClient | null>(null)
+  const prevRunSignalRef = useRef(data?._runSignal)
+  const nodeRef = useRef<HTMLDivElement>(null)
 
   // UI-only helper states for camera controls
   const [cameraOpen, setCameraOpen] = useState(false)
@@ -82,104 +397,264 @@ function GenerateNodeImpl({ id, data }: NodeProps) {
     return systemPrompt || DEFAULT_ROLE.prompt
   }, [useRoleAsset, roleAssetId, roleAssets, systemPrompt])
 
-  const selectedAspect = ASPECT_RATIOS.find(r => r.value === aspectRatio)
-  const ratioSize = aspectRatio === 'custom' ? `${customWidth}*${customHeight}` : (selectedAspect?.size || '1024*1024')
+  const ratioSize = getGenerateNodeAspectRatioSize(aspectRatio, customWidth, customHeight)
+  const selectedKeyRecord = keys.find(key => Number(key.id) === Number(selectedKey))
+  const selectedModelRecord = allModels.find(item => item.model_name === selectedModel)
+  const projectId = Number(routeProjectId || 0) || null
+  const visibleModels = allModels.filter(item => showOnlyFavorites ? item.is_favorite : true)
+  const selectableModels = visibleModels.length > 0 ? visibleModels : allModels
+
+  const modelSupportsMode = (item: any) => {
+    const capabilities = item?.capabilities || {}
+    if (capabilities[mode] === true) return true
+    return !Object.keys(capabilities).length
+  }
+
+  useEffect(() => {
+    updateNodeInternals(id)
+  }, [id, mode, updateNodeInternals])
 
   useEffect(() => {
     updateNodeData(id, {
       mode,
       prompt,
       systemPrompt,
-      model,
-      keyId,
+      model: selectedModel,
+      model_name: selectedModel,
+      api_key_id: selectedKey,
+      keyId: selectedKey,
+      params,
+      routing_strategy: routingStrategy,
+      showOnlyFavorites,
       aspectRatio,
       customWidth,
       customHeight,
       useRoleAsset,
       roleAssetId,
       temperature,
+      showPreview,
       result,
       cameraParams,
       cameraCustomOptions,
       customMovements,
     })
-  }, [id, mode, prompt, systemPrompt, model, keyId, aspectRatio, customWidth, customHeight, useRoleAsset, roleAssetId, temperature, result, cameraParams, cameraCustomOptions, customMovements, updateNodeData])
+  }, [id, mode, prompt, systemPrompt, selectedModel, selectedKey, params, routingStrategy, showOnlyFavorites, aspectRatio, customWidth, customHeight, useRoleAsset, roleAssetId, temperature, showPreview, result, cameraParams, cameraCustomOptions, customMovements, updateNodeData])
 
-  useEffect(() => { setNodeStatus(id, loading ? 'running' : result ? 'success' : 'idle') }, [id, loading, result, setNodeStatus])
+  useEffect(() => { setNodeStatus(id, generating ? 'running' : result ? 'success' : 'idle') }, [id, generating, result, setNodeStatus])
+
+  useEffect(() => {
+    apiClient.get('/keys/')
+      .then(res => {
+        const activeKeys = Array.isArray(res.data) ? res.data.filter((key: any) => key.is_active !== false) : []
+        setKeys(activeKeys)
+        setSelectedKey(current => current || (activeKeys[0]?.id ? Number(activeKeys[0].id) : null))
+      })
+      .catch(() => setKeys([]))
+  }, [])
+
+  useEffect(() => {
+    if (!selectedKey) {
+      setAllModels([])
+      return
+    }
+    setModelLoading(true)
+    apiClient.get(`/models/?key_id=${selectedKey}&mode=${mode}`)
+      .then(res => {
+        const models = Array.isArray(res.data) ? res.data.filter(modelSupportsMode) : []
+        setAllModels(models)
+        setSelectedModel(current => {
+          if (current && models.some((item: any) => item.model_name === current)) return current
+          const preferred = models.find((item: any) => item.is_favorite) || models[0]
+          return preferred?.model_name || ''
+        })
+      })
+      .catch(() => setAllModels([]))
+      .finally(() => setModelLoading(false))
+  }, [selectedKey, mode])
 
   useEffect(() => {
     const current = useCanvasStore.getState().nodes.find(n => n.id === id)?.data
     if (current?.result) setResult(current.result)
   }, [id])
 
-  const resolveProvider = () => String(keyId || '')
+  useEffect(() => { setMediaDims('') }, [result?.content])
+
+  useEffect(() => () => {
+    sseClientRef.current?.disconnect()
+    sseClientRef.current = null
+  }, [])
+
+  const updatePanelPos = () => {
+    if (!nodeRef.current) return
+    const nodeRect = nodeRef.current.closest('.react-flow__node')?.getBoundingClientRect() || nodeRef.current.getBoundingClientRect()
+    setPanelPos({ top: nodeRect.bottom + 8, left: nodeRect.left })
+  }
+
+  useEffect(() => {
+    if (!configOpen || typeof document === 'undefined') return
+    updatePanelPos()
+    const canvas = document.querySelector('.react-flow__viewport')
+    const observer = typeof MutationObserver !== 'undefined' ? new MutationObserver(updatePanelPos) : null
+    if (canvas && observer) observer.observe(canvas, { attributes: true, attributeFilter: ['transform', 'style'] })
+    window.addEventListener('resize', updatePanelPos)
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement
+      if (!target.closest('[data-config-panel]') && !target.closest('.react-flow__node')) setConfigOpen(false)
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => {
+      observer?.disconnect()
+      window.removeEventListener('resize', updatePanelPos)
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [configOpen])
+
+  const resolveProvider = () => String(selectedKeyRecord?.provider || selectedKey || '')
 
   const buildPayload = () => {
     const edges = getEdges(); const nodes = getNodes(); const incomingEdges = edges.filter(e => e.target === id)
     let finalPromptText = prompt
-    let incomingImage = ''
+    const incomingAssets: GenerateNodeIncomingAsset[] = []
     let externalSystemPrompt = ''
     incomingEdges.forEach(edge => {
       const sourceNode = nodes.find(n => n.id === edge.source)
       if (!sourceNode) return
-      const sourceContent = sourceNode.data?.result?.content || sourceNode.data?.asset?.data?.content || sourceNode.data?.asset?.data?.file_path || sourceNode.data?.incoming_data?.content
-      if (edge.targetHandle === 'text' && sourceContent) finalPromptText = finalPromptText ? `${finalPromptText}\n\n[参考素材]:\n${sourceContent}` : String(sourceContent)
-      else if (edge.targetHandle === 'image' && sourceContent && !incomingImage) incomingImage = sourceContent.startsWith('http') || sourceContent.startsWith('data:') ? sourceContent : `http://localhost:8000/${sourceContent}`
+      const sourceContent = resolveGenerateNodeSourceContent(sourceNode.data)
+      const sourceAssetIds = resolveGenerateNodeSourceAssetIds(sourceNode.data)
+      const sourceAssetId = sourceAssetIds[0]
+      if (edge.targetHandle === 'text' && sourceContent) {
+        incomingAssets.push({ id: sourceAssetId, type: 'prompt', content: String(sourceContent), source_asset_ids: sourceAssetIds })
+      } else if (edge.targetHandle === 'image' && sourceContent) {
+        const url = normalizeGenerateNodeImageUrl(String(sourceContent))
+        incomingAssets.push({ id: sourceAssetId, type: 'image', file_path: url, url, source_asset_ids: sourceAssetIds })
+      }
       else if (edge.targetHandle === 'system' && sourceContent) externalSystemPrompt = String(sourceContent)
     })
 
-    const activeSystemPrompt = externalSystemPrompt || selectedRolePrompt
     const cameraSuffix = buildCameraPromptSuffix(cameraParams)
-    const payload: any = {
-      api_key_id: Number(keyId) || undefined,
+    return buildGenerateNodeRequestPayload({
+      id,
+      prompt: finalPromptText,
+      selectedKey,
       provider: resolveProvider(),
-      model,
-      type: mode,
-      prompt: finalPromptText + cameraSuffix,
-      params: { temperature, size: ratioSize, client_id: id },
-      messages: [{ role: 'system', content: activeSystemPrompt + cameraSuffix }],
+      selectedModel,
+      mode,
+      routingStrategy,
+      params,
+      temperature,
+      ratioSize,
+      selectedRolePrompt,
+      cameraSuffix,
+      incomingAssets,
+      externalSystemPrompt,
+      systemPromptOverride: data?._systemPromptOverride,
+    })
+  }
+
+  const hasImmediateGenerationResult = (packet: any) => (
+    packet?.content != null ||
+    packet?.result?.content != null ||
+    packet?.data?.content != null ||
+    packet?.data?.result?.content != null
+  )
+
+  const finishGeneration = (packet: any) => {
+    const currentNodeData = useCanvasStore.getState().nodes.find(node => node.id === id)?.data || data
+    const expectedCountRaw = currentNodeData?._fissionExpectedCount
+    const expectedCount = Number.isFinite(Number(expectedCountRaw)) ? Number(expectedCountRaw) : null
+    const finalResult = buildGenerateNodeResultWithFission({
+      packet,
+      fissionEnabled: Boolean(currentNodeData?._fissionEnabled),
+      expectedCount,
+      onCountMismatch: ({ expected, actual }) => message.warning(`裂变数量校验失败：期望 ${expected} 条，实际 ${actual} 条，已回退普通输出`),
+    })
+
+    setResult(finalResult)
+    updateNodeData(id, { result: finalResult })
+    setNodeStatus(id, 'success')
+    setGenerating(false)
+    setProgressMsg('')
+    sseClientRef.current?.disconnect()
+    sseClientRef.current = null
+    message.success('🧠 AI 思考完成！')
+
+    if (!finalResult?._fission) {
+      getEdges().filter(e => e.source === id).forEach(edge => {
+        updateNodeData(edge.target, { incoming_data: finalResult })
+      })
     }
-    if (mode === 'vision' && incomingImage) payload.messages.push({ role: 'user', content: [{ type: 'text', text: finalPromptText || '描述这张图片' }, { type: 'image_url', image_url: { url: incomingImage } }] })
-    else payload.messages.push({ role: 'user', content: finalPromptText || '开始执行' })
-    if (incomingImage) payload.image_url = incomingImage
-    return payload
+  }
+
+  const failGeneration = (errorText: string) => {
+    message.error(`生成报错: ${errorText || '未知错误'}`)
+    setNodeStatus(id, 'error')
+    setGenerating(false)
+    setProgressMsg('')
+    sseClientRef.current?.disconnect()
+    sseClientRef.current = null
+  }
+
+  const handleSSEMessage = (msg: SSEMessage) => {
+    if (msg.type === 'status') {
+      setProgressMsg(String(msg.message || msg.progress || '云端正在生成...'))
+      return
+    }
+    if (msg.type === 'result') {
+      finishGeneration(msg.data ?? msg.result ?? msg)
+      return
+    }
+    if (msg.type === 'error') {
+      failGeneration(String(msg.message || msg.error || '后台生成失败'))
+      return
+    }
+    if (msg.type === 'interrupted') {
+      failGeneration(String(msg.message || '任务已中断'))
+    }
   }
 
   const handleRun = async () => {
-    if (!keyId || !model) return message.warning('请完整选择 Key 和 模型')
-    setLoading(true)
-    setProgressMsg('正在唤醒云端大脑...')
+    if (!selectedKey || !selectedModel) {
+      setNodeStatus(id, 'error')
+      return message.warning('请完整选择 Key 和 模型')
+    }
+    setGenerating(true)
+    setProgressMsg('正在连接实时通道...')
     setNodeStatus(id, 'running')
-    updateNodeData(id, { result: null, _finalSourcePrompt: prompt, _finalSystemPrompt: selectedRolePrompt })
+    updateNodeData(id, { result: null, _finalSourcePrompt: prompt, _finalSystemPrompt: data?._systemPromptOverride || selectedRolePrompt })
+
+    let waitingForSSE = false
     try {
+      sseClientRef.current?.disconnect()
+      const sseClient = createSSEClient(id, handleSSEMessage)
+      sseClientRef.current = sseClient
+      await sseClient.connect()
+
+      setProgressMsg('正在唤醒云端大脑...')
       const payload = buildPayload()
       const res = await apiClient.request({ url: '/generate', method: 'POST', data: payload })
-      const content = res.data?.content ?? res.data?.result?.content ?? res.data?.data?.content ?? res.data?.data ?? res.data
-      let finalResult: any = typeof content === 'string' ? { content } : content || res.data
 
-      if (typeof finalResult?.content === 'string') {
-        const parsed = extractJsonArray(finalResult.content)
-        if (parsed && parsed.length > 1) finalResult = { ...finalResult, _fission: true, items: parsed }
+      if (res.data?.client_id && !hasImmediateGenerationResult(res.data)) {
+        waitingForSSE = true
+        setProgressMsg('已进入后台生成，等待模型返回...')
+        return
       }
 
-      setResult(finalResult)
-      updateNodeData(id, { result: finalResult })
-      setNodeStatus(id, 'success')
-      message.success('🧠 AI 思考完成！')
-
-      if (!finalResult?._fission) {
-        getEdges().filter(e => e.source === id).forEach(edge => {
-          updateNodeData(edge.target, { incoming_data: finalResult })
-        })
-      }
+      finishGeneration(res.data)
     } catch (error: any) {
-      message.error(`生成报错: ${error.response?.data?.detail || '未知错误'}`)
-      setNodeStatus(id, 'error')
+      failGeneration(String(error.response?.data?.detail || error.response?.data?.error || error.message || '未知错误'))
     } finally {
-      setLoading(false)
-      setProgressMsg('')
+      if (!waitingForSSE) {
+        setGenerating(false)
+        setProgressMsg('')
+      }
     }
   }
+
+  useEffect(() => {
+    if (!data?._runSignal || data._runSignal === prevRunSignalRef.current) return
+    prevRunSignalRef.current = data._runSignal
+    void handleRun()
+  }, [data?._runSignal])
 
   const handleInterrupt = async () => {
     try { await apiClient.post(`/interrupt/${id}`); message.warning('已下发拦截指令') } catch { message.error('拦截信令发送失败') }
@@ -188,34 +663,112 @@ function GenerateNodeImpl({ id, data }: NodeProps) {
   const handleSaveToAsset = async () => {
     if (!result?.content) return
     try {
-      const contentStr = String(result.content)
-      let assetType: 'prompt' | 'image' | 'video' = 'prompt'
-      if (mode.includes('image') || contentStr.startsWith('http') || contentStr.startsWith('data:image')) assetType = 'image'
-      else if (mode.includes('video')) assetType = 'video'
-      await apiClient.post('/assets/', {
-        name: `${assetType === 'image' ? '🖼️' : assetType === 'video' ? '🎬' : '📝'} ${prompt.slice(0, 10) || model}...`,
-        type: assetType,
-        data: {
-          content: contentStr,
-          source_provider: resolveProvider(),
-          source_model: model,
-          source_mode: mode,
-          source_prompt: prompt,
-          source_system: selectedRolePrompt,
-          source_params: { temperature, size: ratioSize },
-          source_aspect_ratio: aspectRatio,
-          source_size: ratioSize,
-        },
-        tags: ['AI_Generated', mode, model],
-        thumbnail: assetType === 'image' ? contentStr : undefined,
-      })
+      await apiClient.post('/assets/', buildGenerateNodeAssetPayload({
+        resultContent: String(result.content),
+        mode,
+        prompt,
+        selectedModel,
+        provider: resolveProvider(),
+        selectedRolePrompt,
+        params,
+        temperature,
+        aspectRatio,
+        ratioSize,
+        projectId,
+        cameraParams,
+        sourceAssetIds: result?.source_asset_ids,
+      }))
       message.success('已携带溯源信息固化到资产库！')
+      if (projectId) await fetchAssets(projectId)
     } catch {
       message.error('入库失败')
     }
   }
 
-  const renderParams = () => null
+  const selectRoleAsset = (assetId: number | null) => {
+    setRoleAssetId(assetId)
+    if (assetId) {
+      setUseRoleAsset(true)
+      updateNodeData(id, { roleAssetId: assetId, useRoleAsset: true })
+      return
+    }
+    setUseRoleAsset(false)
+    updateNodeData(id, { roleAssetId: null, useRoleAsset: false })
+  }
+
+  const handleCreatePresetRole = async (preset: typeof PRESET_ROLES[0]) => {
+    const existing = roleAssets.find(asset => asset.name === preset.name)
+    if (existing) {
+      selectRoleAsset(existing.id)
+      message.info(`「${preset.name}」已存在，已自动选中`)
+      return
+    }
+
+    try {
+      const res = await apiClient.post('/assets/', {
+        type: 'prompt',
+        name: preset.name,
+        data: { content: preset.prompt },
+        tags: ['SystemRole'],
+        project_id: null,
+      })
+      const created = res.data?.asset || res.data
+      if (!created?.id) throw new Error('asset id missing')
+      selectRoleAsset(Number(created.id))
+      await fetchAssets()
+      message.success(`「${preset.name}」已创建到资产库`)
+    } catch {
+      message.error('创建预设失败')
+    }
+  }
+
+  const renderParams = () => {
+    const uiParams = selectedModelRecord?.context_ui_params?.[mode]
+    if (!Array.isArray(uiParams) || uiParams.length === 0) return null
+
+    return (
+      <div style={{ display: 'grid', gap: 10, padding: 10, border: '1px solid #e2e8f0', borderRadius: 10, background: '#f8fafc' }}>
+        {uiParams.map((param: any) => {
+          const value = params[param.name] !== undefined ? params[param.name] : param.default
+          const commit = (nextValue: any) => {
+            const nextParams = { ...params, [param.name]: nextValue }
+            setParams(nextParams)
+            updateNodeData(id, { params: nextParams })
+          }
+          return (
+            <div key={param.name}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 4 }}>
+                <Text type="secondary" style={{ fontSize: 12 }}>{param.label || param.name}</Text>
+                {param.type === 'number' && <Text type="secondary" style={{ fontSize: 12 }}>{value}</Text>}
+              </div>
+              {param.type === 'boolean' && <Switch size="small" checked={Boolean(value)} onChange={commit} />}
+              {param.type === 'select' && <Select size="small" value={value} options={param.options || []} style={{ width: '100%' }} onChange={commit} />}
+              {param.type === 'number' && Number(param.max) <= 2 && (
+                <Slider min={Number(param.min ?? 0)} max={Number(param.max ?? 2)} step={Number(param.step ?? 0.1)} value={Number(value ?? param.default ?? 0)} onChange={commit} />
+              )}
+              {param.type === 'number' && Number(param.max) > 2 && (
+                <InputNumber size="small" value={Number(value ?? param.default ?? 0)} min={param.min} max={param.max} step={param.step} style={{ width: '100%' }} onChange={commit} />
+              )}
+              {(param.type === 'string' || param.type === 'text') && (
+                <Input size="small" value={value} placeholder={param.default || param.name} onChange={event => commit(event.target.value)} />
+              )}
+            </div>
+          )
+        })}
+      </div>
+    )
+  }
+
+  const selectModel = (nextModel: string) => {
+    setSelectedModel(nextModel)
+    const modelRecord = allModels.find(item => item.model_name === nextModel)
+    const uiParams = modelRecord?.context_ui_params?.[mode]
+    if (Array.isArray(uiParams)) {
+      const defaults = Object.fromEntries(uiParams.map((param: any) => [param.name, param.default]))
+      setParams(defaults)
+      updateNodeData(id, { params: defaults })
+    }
+  }
 
   const renderDynamicHandles = () => (
     <>
@@ -225,52 +778,223 @@ function GenerateNodeImpl({ id, data }: NodeProps) {
     </>
   )
 
-  return (
-    <Card bordered={false} size="small" style={{ width: 360, borderRadius: 16, boxShadow: '0 14px 36px rgba(15,23,42,0.12)', overflow: 'hidden' }} bodyStyle={{ padding: 0 }}>
-      <div className="custom-drag-handle" style={{ padding: '10px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'linear-gradient(90deg, rgba(14,165,233,0.14), rgba(255,255,255,0))', borderBottom: '1px solid rgba(148,163,184,0.16)' }}>
-        <Text strong>AI 大脑节点</Text>
-        <Tag color="cyan">{mode.toUpperCase()}</Tag>
-      </div>
-      <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <Select value={mode} options={MODES} onChange={setMode} />
-        <Input value={keyId} onChange={e => setKeyId(e.target.value)} placeholder="Key ID" />
-        <Input value={model} onChange={e => setModel(e.target.value)} placeholder="Model name" />
-        <TextArea value={prompt} onChange={e => setPrompt(e.target.value)} rows={4} placeholder="输入提示词..." />
-        <Input value={systemPrompt} onChange={e => setSystemPrompt(e.target.value)} placeholder="System prompt" />
-        <Space wrap>
-          <Select value={aspectRatio} onChange={setAspectRatio} style={{ width: 120 }} options={ASPECT_RATIOS.map(r => ({ value: r.value, label: r.label }))} />
-          {aspectRatio === 'custom' && <><InputNumber value={customWidth} min={1} onChange={v => setCustomWidth(Number(v || 0))} /><InputNumber value={customHeight} min={1} onChange={v => setCustomHeight(Number(v || 0))} /></>}
-          <InputNumber value={temperature} min={0} max={2} step={0.1} onChange={v => setTemperature(Number(v || 0))} />
-        </Space>
-        <Checkbox checked={useRoleAsset} onChange={e => setUseRoleAsset(e.target.checked)}>Use role asset</Checkbox>
-        <Select value={roleAssetId ?? undefined} onChange={(v) => setRoleAssetId(v)} options={roleAssets.map(a => ({ value: a.id, label: a.name }))} placeholder="SystemRole 资产" allowClear />
+  const isImageVideoMode = ['text_to_image', 'image_to_image', 'text_to_video', 'image_to_video'].includes(mode)
+  const currentModeLabel = MODES.find(item => item.value === mode)?.label || mode.toUpperCase()
+  const currentModelDisplay = selectedModelRecord?.display_name || selectedModel || '未配置模型'
+  const expectedFissionCount = Number.isFinite(Number(data?._fissionExpectedCount)) ? Number(data?._fissionExpectedCount) : null
+  const parsedFissionCount = result?._fission && Array.isArray(result?.items) ? result.items.length : 0
+  const fissionCountHealthy = expectedFissionCount === null || parsedFissionCount === expectedFissionCount
+  const resultContent = result?.content
+  const previewMediaSrc = resolveGenerateNodePreviewMediaSrc(typeof resultContent === 'string' ? resultContent : '')
+  const isMediaResult = typeof resultContent === 'string' && (
+    resultContent.startsWith('http') ||
+    resultContent.startsWith('data:image') ||
+    resultContent.startsWith('data:video') ||
+    resultContent.match(/\.(png|jpg|jpeg|webp|gif|mp4|webm|mov)(\?|$)/i)
+  )
+  const isVideoResult = typeof resultContent === 'string' && (
+    resultContent.startsWith('data:video') ||
+    resultContent.match(/\.(mp4|webm|mov)(\?|$)/i)
+  )
 
-        <Collapse ghost size="small" expandIconPosition="end" style={{ background: '#f8fafc', borderRadius: 10, border: '1px solid #e2e8f0' }}>
-          <Panel header={<Space><SettingOutlined style={{ color: '#64748b' }} /><Text style={{ color: '#334155' }}>相机与运镜</Text></Space>} key="camera">
-            <Space direction="vertical" style={{ width: '100%' }} size={8}>
-              <CameraControl value={cameraParams} onChange={setCameraParams} open={cameraOpen} onOpenChange={setCameraOpen} customOptions={cameraCustomOptions} onCustomOptionsChange={setCameraCustomOptions} />
-              <CameraMovement onInsert={(text) => setPrompt(prev => prev ? `${prev}\n${text}` : text)} open={movementOpen} onOpenChange={setMovementOpen} customPresets={customMovements} onAddCustom={(preset) => setCustomMovements(prev => [...prev, preset])} onRemoveCustom={(value) => setCustomMovements(prev => prev.filter(item => item.value !== value))} />
+  const configPanel = configOpen && panelPos && typeof document !== 'undefined' ? ReactDOM.createPortal(
+    <div
+      data-config-panel
+      className="nodrag nowheel"
+      style={{
+        position: 'fixed',
+        top: panelPos.top,
+        left: panelPos.left,
+        width: 560,
+        maxWidth: 'calc(100vw - 24px)',
+        maxHeight: 'calc(100vh - 24px)',
+        overflow: 'auto',
+        background: '#fff',
+        borderRadius: 12,
+        boxShadow: '0 16px 48px rgba(15,23,42,0.18), 0 2px 10px rgba(15,23,42,0.08)',
+        border: '1px solid #e2e8f0',
+        zIndex: 9999,
+        padding: 14,
+      }}
+    >
+      <Space direction="vertical" size={10} style={{ width: '100%' }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <Select value={mode} options={MODES} style={{ flex: 1 }} onChange={nextMode => { setMode(nextMode); setSelectedModel(''); setParams({}) }} />
+          <Tooltip title="关闭配置">
+            <Button type="text" size="small" icon={<CloseOutlined />} onClick={() => setConfigOpen(false)} />
+          </Tooltip>
+        </div>
+
+        <TextArea
+          className="nodrag nowheel"
+          value={prompt}
+          onChange={event => setPrompt(event.target.value)}
+          autoSize={{ minRows: 4, maxRows: 10 }}
+          placeholder="输入指令或连线输入素材..."
+          style={{ fontSize: 13, fontFamily: 'monospace', borderRadius: 8 }}
+        />
+
+        <Space.Compact block>
+          <Select
+            value={selectedKey ?? undefined}
+            placeholder="选择 Key"
+            style={{ width: 168 }}
+            options={keys.map(key => ({ label: key.description || key.provider || `Key ${key.id}`, value: Number(key.id) }))}
+            onChange={value => { setSelectedKey(Number(value)); setSelectedModel(''); setParams({}) }}
+          />
+          <Select
+            value={selectedModel || undefined}
+            placeholder="选择模型"
+            loading={modelLoading}
+            disabled={!selectedKey}
+            style={{ flex: 1, minWidth: 0 }}
+            options={selectableModels.map(item => ({ label: `${item.is_favorite && !showOnlyFavorites ? '⭐ ' : ''}${item.display_name || item.model_name}`, value: item.model_name }))}
+            onChange={selectModel}
+          />
+          <Tooltip title={showOnlyFavorites ? '显示全量模型' : '只看收藏模型'}>
+            <Button icon={<StarFilled />} type={showOnlyFavorites ? 'primary' : 'default'} onClick={() => setShowOnlyFavorites(value => !value)} />
+          </Tooltip>
+        </Space.Compact>
+
+        <Select
+          value={routingStrategy}
+          options={GENERATE_NODE_ROUTING_STRATEGY_OPTIONS}
+          onChange={setRoutingStrategy}
+          placeholder="Key 路由策略"
+        />
+
+        <Input value={systemPrompt} onChange={event => setSystemPrompt(event.target.value)} placeholder="System prompt" />
+
+        <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
+          <Select
+            value={aspectRatio}
+            onChange={nextValue => setAspectRatio(nextValue as AspectRatioValue)}
+            options={GENERATE_NODE_ASPECT_RATIO_OPTIONS.map(r => ({ value: r.value, label: r.size ? `${r.label} · ${r.size}` : r.label }))}
+          />
+          {aspectRatio === 'custom' ? (
+            <>
+              <InputNumber value={customWidth} min={1} onChange={value => setCustomWidth(Number(value || 0))} />
+              <InputNumber value={customHeight} min={1} onChange={value => setCustomHeight(Number(value || 0))} />
+            </>
+          ) : (
+            <Input value={ratioSize} disabled />
+          )}
+          <InputNumber value={temperature} min={0} max={2} step={0.1} onChange={value => setTemperature(Number(value || 0))} />
+        </div>
+
+        {(mode === 'chat' || mode === 'vision') && (
+          <div style={{ display: 'grid', gap: 8, padding: 10, borderRadius: 10, border: '1px solid #e2e8f0', background: '#f8fafc' }}>
+            <Checkbox checked={useRoleAsset} onChange={event => setUseRoleAsset(event.target.checked)}>Use role asset</Checkbox>
+            <Select value={roleAssetId ?? undefined} onChange={value => selectRoleAsset(value ?? null)} options={roleAssets.map(asset => ({ value: asset.id, label: asset.name }))} placeholder="SystemRole 资产" allowClear />
+            <Space size={6} wrap>
+              {PRESET_ROLES.map(preset => (
+                <Tag key={preset.name} color="orange" style={{ cursor: 'pointer', margin: 0 }} onClick={() => handleCreatePresetRole(preset)}>
+                  {preset.label}
+                </Tag>
+              ))}
             </Space>
-          </Panel>
-        </Collapse>
+          </div>
+        )}
+
+        {isImageVideoMode && (
+          <div style={{ display: 'grid', gap: 8, padding: 10, borderRadius: 10, border: '1px solid #e2e8f0', background: '#f8fafc' }}>
+            <CameraControl value={cameraParams} onChange={setCameraParams} open={cameraOpen} onOpenChange={setCameraOpen} customOptions={cameraCustomOptions} onCustomOptionsChange={setCameraCustomOptions} />
+            <CameraMovement onInsert={text => setPrompt(prev => prev ? `${prev}\n${text}` : text)} open={movementOpen} onOpenChange={setMovementOpen} customPresets={customMovements} onAddCustom={preset => setCustomMovements(prev => [...prev, preset])} onRemoveCustom={value => setCustomMovements(prev => prev.filter(item => item.value !== value))} />
+          </div>
+        )}
 
         {renderParams()}
-        <Space>
-          <Button size="small" type="primary" onClick={handleRun} loading={loading} icon={<PlayCircleOutlined />}>运行</Button>
-          <Button size="small" onClick={handleInterrupt} icon={<StopOutlined />}>中断</Button>
-          <Button size="small" onClick={handleSaveToAsset} icon={<SaveOutlined />}>入库</Button>
-        </Space>
-        {loading && <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}><Spin size="small" /><Text type="secondary" style={{ fontSize: 12 }}>{progressMsg}</Text></div>}
-        {result?.content && <Button size="small" onClick={() => setPreviewOpen(true)} icon={<EyeOutlined />}>预览结果</Button>}
-        <Divider style={{ margin: '8px 0' }} />
-        <Text type="secondary" style={{ fontSize: 12 }}>节点能力已迁入完整运行链路。</Text>
-      </div>
+      </Space>
+    </div>,
+    document.body
+  ) : null
+
+  return (
+    <BaseNode {...props} onOpenConfig={() => setConfigOpen(v => !v)}>
       {renderDynamicHandles()}
-      <Handle type="source" position={Position.Right} style={{ background: '#0ea5e9' }} />
-      <Modal open={previewOpen} onCancel={() => setPreviewOpen(false)} footer={null} title="结果预览" width={720}>
-        <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0 }}>{JSON.stringify(result, null, 2)}</pre>
-      </Modal>
-    </Card>
+      <div ref={nodeRef} style={{ display: 'flex', flexDirection: 'column', gap: 8, minHeight: 0, height: '100%' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+          <Tag color="#0ea5e9" style={{ margin: 0, fontWeight: 700, fontSize: 11, fontFamily: 'monospace' }}>{currentModeLabel}</Tag>
+          <Text style={{ flex: 1, minWidth: 0, fontSize: 12, color: selectedModel ? '#1e293b' : '#94a3b8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={currentModelDisplay}>
+            {currentModelDisplay}
+          </Text>
+          {(mode === 'chat' || mode === 'vision') && (
+            <Tooltip title="裂变输出：LLM 返回 JSON 数组时自动裂变下游节点并发执行">
+              <Tag
+                className="nodrag"
+                color={data?._fissionEnabled ? '#f59e0b' : undefined}
+                style={{ margin: 0, cursor: 'pointer', fontSize: 11, userSelect: 'none' }}
+                onClick={() => updateNodeData(id, { _fissionEnabled: !data?._fissionEnabled })}
+              >
+                {data?._fissionEnabled ? '🔀 裂变' : '裂变'}
+              </Tag>
+            </Tooltip>
+          )}
+          {data?._fissionEnabled && (
+            <Tooltip title={expectedFissionCount !== null ? `裂变计数校验：期望 ${expectedFissionCount} 条，当前解析 ${parsedFissionCount} 条` : '裂变计数校验：未设置期望条数'}>
+              <Tag style={{ margin: 0, fontSize: 11, userSelect: 'none' }} color={fissionCountHealthy ? 'green' : 'red'}>
+                {expectedFissionCount !== null ? `${parsedFissionCount}/${expectedFissionCount}` : `${parsedFissionCount}/?`}
+              </Tag>
+            </Tooltip>
+          )}
+        </div>
+
+        <TextArea
+          className="nodrag nowheel"
+          value={prompt}
+          onChange={event => setPrompt(event.target.value)}
+          autoSize={{ minRows: 2, maxRows: 4 }}
+          placeholder="输入指令或连线输入素材..."
+          style={{ fontSize: 13, fontFamily: 'monospace', borderRadius: 8, flexShrink: 0 }}
+        />
+
+        <Button type="primary" danger={generating} block disabled={isMuted} icon={generating ? <StopOutlined /> : <PlayCircleOutlined />} onClick={generating ? handleInterrupt : handleRun} style={{ height: 36, fontSize: 13, fontWeight: 700, flexShrink: 0 }}>
+          {isMuted ? '已静音' : generating ? '强行中断' : '单点运行'}
+        </Button>
+
+        <div style={{ flex: showPreview ? 1 : '0 0 auto', display: 'flex', flexDirection: 'column', background: '#f8fafc', padding: 10, borderRadius: 8, border: '1px dashed #94a3b8', minHeight: showPreview ? 120 : 'auto', overflow: 'hidden' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+            <Text style={{ fontSize: 12, color: '#64748b', fontWeight: 700, fontFamily: 'monospace' }}>&gt; OUTPUT_PREVIEW</Text>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              {resultContent && (
+                <Tooltip title="携带溯源信息固化到资产库">
+                  <Button type="text" size="small" icon={<SaveOutlined />} onClick={handleSaveToAsset} style={{ fontSize: 16, color: '#0ea5e9', padding: 0, height: 'auto' }} />
+                </Tooltip>
+              )}
+              <Switch className="nodrag" size="small" checked={showPreview} onChange={value => setShowPreview(value)} />
+            </div>
+          </div>
+
+          {showPreview && (
+            <div style={{ flex: 1, position: 'relative', background: resultContent && !isMediaResult ? '#0f172a' : '#f1f5f9', borderRadius: 8, overflow: 'hidden', marginTop: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 80 }}>
+              {mediaDims && !generating && resultContent && (
+                <div style={{ position: 'absolute', top: 6, right: 6, background: 'rgba(15,23,42,0.75)', color: '#f8fafc', fontSize: 11, fontWeight: 600, padding: '2px 6px', borderRadius: 4, zIndex: 10, fontFamily: 'monospace' }}>{mediaDims}</div>
+              )}
+              {generating ? (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: 20 }}>
+                  <Spin size="default" style={{ marginBottom: 12 }} />
+                  <Text type="secondary" style={{ fontSize: 13, fontWeight: 700, color: '#10b981' }}>{progressMsg}</Text>
+                </div>
+              ) : resultContent ? (
+                isMediaResult ? (
+                  isVideoResult ? (
+                    <video src={previewMediaSrc} controls style={{ maxWidth: '100%', maxHeight: '100%', borderRadius: 8 }} onLoadedMetadata={event => setMediaDims(`${(event.target as HTMLVideoElement).videoWidth} x ${(event.target as HTMLVideoElement).videoHeight}`)} />
+                  ) : (
+                    <img src={previewMediaSrc} alt="Preview" style={{ maxWidth: '100%', maxHeight: '100%', borderRadius: 8 }} onLoad={event => setMediaDims(`${(event.target as HTMLImageElement).naturalWidth} x ${(event.target as HTMLImageElement).naturalHeight}`)} />
+                  )
+                ) : (
+                  <div className="nodrag nowheel" style={{ position: 'absolute', inset: 0, padding: 12, overflowY: 'auto', fontSize: 13, color: '#f8fafc', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{String(resultContent)}</div>
+                )
+              ) : (
+                <Text type="secondary" style={{ fontSize: 13, color: '#475569' }}>等待生成结果...</Text>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+      <Handle type="source" position={Position.Right} id="out" style={{ background: '#0ea5e9', width: 12, height: 12 }} />
+      {configPanel}
+    </BaseNode>
   )
 }
 
