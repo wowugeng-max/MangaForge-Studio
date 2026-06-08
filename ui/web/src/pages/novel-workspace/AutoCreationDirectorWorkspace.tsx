@@ -10,6 +10,7 @@ import {
   ThunderboltOutlined,
 } from '@ant-design/icons'
 import type {
+  AutoCreationContractStatus,
   AutoCreationDirectorAction,
   AutoCreationDirectorModel,
   AutoCreationPipelineStatus,
@@ -47,6 +48,18 @@ function pipelineIcon(status: AutoCreationPipelineStatus) {
   if (status === 'blocked') return <ExclamationCircleOutlined />
   if (status === 'warning') return <ExclamationCircleOutlined />
   return <ClockCircleOutlined />
+}
+
+function contractColor(status: AutoCreationContractStatus) {
+  if (status === 'ok') return 'green'
+  if (status === 'block') return 'red'
+  return 'gold'
+}
+
+function contractLabel(status: AutoCreationContractStatus) {
+  if (status === 'ok') return '达标'
+  if (status === 'block') return '阻塞'
+  return '需关注'
 }
 
 function formatWords(value: number) {
@@ -147,6 +160,41 @@ export function AutoCreationDirectorWorkspace({
           {model.mainAction.modelCall && <Text className="auto-director-model-note">会调用大模型，长文本任务保持流式/后台任务执行。</Text>}
         </div>
       </div>
+
+      <section className="auto-director-panel auto-director-contract-panel">
+        <div className="auto-director-panel-title">
+          <CheckCircleOutlined />
+          <span>长篇创作契约</span>
+          <Tag bordered={false}>核心不偏 · 故事强度 · 创新差异 · 读者吸引</Tag>
+        </div>
+        <div className="auto-director-contract-grid">
+          {model.creationContract.map(item => (
+            <button
+              key={item.key}
+              type="button"
+              className={`auto-director-contract-item auto-director-contract-${item.status}`}
+              onClick={() => onAction({
+                area: item.key === 'core' ? 'assets' : 'planning',
+                key: item.actionKey,
+                label: item.label,
+                description: item.detail,
+                modelCall: false,
+              })}
+            >
+              <span className="auto-director-contract-topline">
+                <strong>{item.label}</strong>
+                <Tag color={contractColor(item.status)} bordered={false}>{contractLabel(item.status)}</Tag>
+              </span>
+              <Text type="secondary">{item.detail}</Text>
+              {item.evidence.length > 0 && (
+                <span className="auto-director-contract-evidence">
+                  {item.evidence.slice(0, 2).map(evidence => <em key={evidence}>{evidence}</em>)}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+      </section>
 
       <div className="auto-director-grid">
         <section className="auto-director-panel auto-director-pipeline-panel">

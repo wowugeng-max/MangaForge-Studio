@@ -20,6 +20,7 @@ export type AutoCreationDirectorActionKey =
   | 'select_model'
 
 export type AutoCreationPipelineStatus = 'done' | 'active' | 'pending' | 'blocked' | 'warning'
+export type AutoCreationContractStatus = 'ok' | 'warn' | 'block'
 
 export interface AutoCreationDirectorAction {
   area: AutoCreationDirectorArea
@@ -33,6 +34,7 @@ export interface AutoCreationDirectorAction {
 export interface AutoCreationPipelineStep {
   key:
     | 'longform_planning'
+    | 'creation_contract'
     | 'story_assets'
     | 'retention_curve'
     | 'chapter_planning'
@@ -43,6 +45,15 @@ export interface AutoCreationPipelineStep {
   label: string
   status: AutoCreationPipelineStatus
   detail: string
+}
+
+export interface AutoCreationContractItem {
+  key: 'core' | 'story' | 'innovation' | 'reader_pull'
+  label: string
+  status: AutoCreationContractStatus
+  detail: string
+  evidence: string[]
+  actionKey: AutoCreationDirectorActionKey
 }
 
 export interface AutoCreationDirectorModel {
@@ -72,6 +83,7 @@ export interface AutoCreationDirectorModel {
     first30Score: number | null
     storylineCount: number
   }
+  creationContract: AutoCreationContractItem[]
   pipeline: AutoCreationPipelineStep[]
 }
 
@@ -232,12 +244,95 @@ function storylineNeedsAction(planning: PlanningWorkspaceModel) {
   return planning.storylineBoard.status === 'missing' || planning.storylineBoard.status === 'needs_attention'
 }
 
+function contractPipelineStatus(contract: AutoCreationContractItem[]): AutoCreationPipelineStatus {
+  if (contract.some(item => item.status === 'block')) return 'blocked'
+  if (contract.some(item => item.status === 'warn')) return 'warning'
+  return 'done'
+}
+
+function buildLongformCreationContract(planning: PlanningWorkspaceModel, writing: WritingCockpitModel): AutoCreationContractItem[] {
+  const mainline = planning.mainline
+  const future10Ready = planning.topStatus.future10Coverage.ready
+  const retention = planning.first30Retention
+  const readerScore = Number(retention.score || 0)
+  const sceneCardCount = Number(writing.chapterPlanningDesk.sceneCards?.length || 0)
+  const coreBlockers = [
+    !text(mainline.readerPromise) ? '缺读者承诺' : '',
+    !text(mainline.currentVolumeGoal) ? '缺当前卷目标' : '',
+    mainline.currentChapterServesVolume === false ? '当前章未服务卷目标' : '',
+  ].filter(Boolean)
+  const storyWarnings = [
+    !future10Ready ? `未来10章规划 ${planning.topStatus.future10Coverage.label}` : '',
+    planning.storylineBoard.status !== 'ready' ? '剧情线未校准' : '',
+    !text(mainline.currentStageConflict) ? '缺当前阶段冲突' : '',
+  ].filter(Boolean)
+  const innovationWarnings = [
+    !text(mainline.payoffModel) ? '缺爽点模型' : '',
+    !text(mainline.readerPromise) ? '缺差异化承诺' : '',
+    !text(mainline.currentStageConflict) ? '缺反差冲突' : '',
+  ].filter(Boolean)
+  const readerBlockers = [
+    retention.status === 'blocked' || readerScore > 0 && readerScore < 65 ? '前30章留存高危' : '',
+    retention.promiseReady === false ? '读者承诺未被诊断确认' : '',
+  ].filter(Boolean)
+  const readerWarnings = [
+    retention.status === 'missing' ? '未运行前30章诊断' : '',
+    retention.status === 'stale' ? '前30章需重新诊断' : '',
+    retention.status === 'needs_repair' ? '前30章需要修复' : '',
+    readerScore >= 65 && readerScore < 80 ? '前30章吸引力偏弱' : '',
+  ].filter(Boolean)
+
+  return [
+    {
+      key: 'core',
+      label: '核心不偏',
+      status: coreBlockers.length > 0 ? 'block' : mainline.risks.length > 0 ? 'warn' : 'ok',
+      detail: coreBlockers[0] || mainline.risks[0] || '读者承诺、卷目标和当前章服务关系明确。',
+      evidence: [mainline.readerPromise, mainline.currentVolumeGoal, mainline.nextTurn].map(item => text(item)).filter(Boolean).slice(0, 3),
+      actionKey: coreBlockers.length > 0 ? 'open_story_assets' : 'open_outline_tree',
+    },
+    {
+      key: 'story',
+      label: '故事强度',
+      status: storyWarnings.length > 0 ? 'warn' : 'ok',
+      detail: storyWarnings[0] || '未来章节、剧情线和阶段冲突能支撑连续推进。',
+      evidence: [
+        `未来10章 ${planning.topStatus.future10Coverage.label}`,
+        `剧情线 ${planning.storylineBoard.total}`,
+        sceneCardCount > 0 ? `本章场景卡 ${sceneCardCount}` : '',
+      ].filter(Boolean),
+      actionKey: storyWarnings.length > 0 ? 'update_rolling_plan' : 'enter_chapter_writing',
+    },
+    {
+      key: 'innovation',
+      label: '创新差异',
+      status: innovationWarnings.length > 0 ? 'warn' : 'ok',
+      detail: innovationWarnings[0] || '题材承诺、爽点模型和冲突反差具备可传播差异。',
+      evidence: [mainline.readerPromise, mainline.payoffModel, mainline.currentStageConflict].map(item => text(item)).filter(Boolean).slice(0, 3),
+      actionKey: innovationWarnings.length > 0 ? 'topic_validation' : 'open_story_assets',
+    },
+    {
+      key: 'reader_pull',
+      label: '读者吸引',
+      status: readerBlockers.length > 0 ? 'block' : readerWarnings.length > 0 ? 'warn' : 'ok',
+      detail: readerBlockers[0] || readerWarnings[0] || '前30章读者承诺、钩子和爽点密度处于可生产状态。',
+      evidence: [
+        retention.score !== null ? `前30章 ${retention.score}分` : '',
+        retention.promiseReady ? '承诺清晰' : '',
+        retention.summary,
+      ].map(item => text(item)).filter(Boolean).slice(0, 3),
+      actionKey: readerBlockers.length > 0 || readerWarnings.length > 0 ? retention.actionKey : 'enter_chapter_writing',
+    },
+  ]
+}
+
 function buildPipeline(args: {
   planning: PlanningWorkspaceModel
   writing: WritingCockpitModel
   activeTasks: AnyRecord[]
   hasBlockingPlan: boolean
   hasModel: boolean
+  creationContract: AutoCreationContractItem[]
 }): AutoCreationPipelineStep[] {
   const acceptance = args.writing.chapterAcceptanceDesk
   const planningDesk = args.writing.chapterPlanningDesk
@@ -253,6 +348,16 @@ function buildPipeline(args: {
       label: '长线规划',
       status: !args.hasModel ? 'blocked' : args.hasBlockingPlan ? 'blocked' : args.planning.healthIssues.length > 0 ? 'warning' : 'done',
       detail: args.planning.topStatus.longformHealth.label,
+    },
+    {
+      key: 'creation_contract',
+      label: '创作契约',
+      status: contractPipelineStatus(args.creationContract),
+      detail: args.creationContract
+        .filter(item => item.status !== 'ok')
+        .map(item => `${item.label}：${item.detail}`)
+        .slice(0, 2)
+        .join('；') || '核心、故事、创新和读者吸引力达标',
     },
     {
       key: 'story_assets',
@@ -330,6 +435,7 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
   const running = hasRunningTasks(activeTasks)
   const retentionActionNeeded = retentionNeedsAction(planning)
   const storylineActionNeeded = storylineNeedsAction(planning)
+  const creationContract = buildLongformCreationContract(planning, writing)
   const blockers: string[] = []
   const confirmations: string[] = []
   let status: AutoCreationDirectorStatus
@@ -394,6 +500,7 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
     activeTasks,
     hasBlockingPlan: Boolean(blockingPlan),
     hasModel,
+    creationContract,
   })
 
   return {
@@ -417,6 +524,7 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
       first30Score: planning.first30Retention.score,
       storylineCount: planning.storylineBoard.total,
     },
+    creationContract,
     pipeline,
   }
 }

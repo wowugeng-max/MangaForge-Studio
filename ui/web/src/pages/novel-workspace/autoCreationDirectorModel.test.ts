@@ -188,6 +188,59 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(storylineModel.confirmations).toContain('剧情线需要调度确认')
   })
 
+  test('builds a longform creation contract for core, story, innovation and reader pull', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: basePlanning,
+      writing: baseWriting,
+      activeTasks: [],
+      selectedModelId: 12,
+    })
+
+    expect(model.creationContract.map(item => item.key)).toEqual(['core', 'story', 'innovation', 'reader_pull'])
+    expect(model.creationContract.find(item => item.key === 'core')?.label).toBe('核心不偏')
+    expect(model.creationContract.find(item => item.key === 'story')?.label).toBe('故事强度')
+    expect(model.creationContract.find(item => item.key === 'innovation')?.label).toBe('创新差异')
+    expect(model.creationContract.find(item => item.key === 'reader_pull')?.label).toBe('读者吸引')
+    expect(model.creationContract.every(item => item.status === 'ok')).toBe(true)
+    expect(model.pipeline.find(step => step.key === 'creation_contract')?.status).toBe('done')
+  })
+
+  test('marks the creation contract risky when promise, conflict, or retention are weak', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        mainline: {
+          ...basePlanning.mainline,
+          readerPromise: '',
+          currentStageConflict: '',
+          payoffModel: '',
+          currentChapterServesVolume: false,
+          risks: ['当前章没有服务卷目标'],
+        },
+        first30Retention: {
+          ...basePlanning.first30Retention,
+          status: 'needs_repair',
+          score: 58,
+          promiseReady: false,
+          summary: '前30章吸引力不足。',
+          actionKey: 'create_first30_repair',
+        },
+        healthIssues: [
+          { key: 'missing_reader_promise', severity: 'critical', title: '缺读者承诺', detail: '项目缺少长篇核心承诺。', actionKey: 'open_story_assets' },
+        ],
+      },
+      writing: baseWriting,
+      activeTasks: [],
+      selectedModelId: 12,
+    })
+
+    expect(model.creationContract.find(item => item.key === 'core')?.status).toBe('block')
+    expect(model.creationContract.find(item => item.key === 'story')?.status).toBe('warn')
+    expect(model.creationContract.find(item => item.key === 'innovation')?.status).toBe('warn')
+    expect(model.creationContract.find(item => item.key === 'reader_pull')?.status).toBe('block')
+    expect(model.pipeline.find(step => step.key === 'creation_contract')?.status).toBe('blocked')
+  })
+
   test('uses chapter writing desk action when project governance is ready', () => {
     const model = buildAutoCreationDirectorModel({
       planning: basePlanning,

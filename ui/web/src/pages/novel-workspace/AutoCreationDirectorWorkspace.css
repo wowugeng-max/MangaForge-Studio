@@ -165,6 +165,86 @@
   margin-bottom: 12px;
 }
 
+.auto-director-contract-panel {
+  display: grid;
+  gap: 4px;
+}
+
+.auto-director-contract-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.auto-director-contract-item {
+  width: 100%;
+  border: 1px solid #e5eaf2;
+  background: #fbfcfe;
+  border-radius: 9px;
+  padding: 11px 12px;
+  display: grid;
+  gap: 7px;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+}
+
+.auto-director-contract-item:hover {
+  transform: translateY(-1px);
+  border-color: #93c5fd;
+  background: #f8fbff;
+}
+
+.auto-director-contract-ok {
+  border-color: #dcfce7;
+  background: #f0fdf4;
+}
+
+.auto-director-contract-warn {
+  border-color: #fde68a;
+  background: #fffbeb;
+}
+
+.auto-director-contract-block {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
+.auto-director-contract-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.auto-director-contract-topline strong {
+  min-width: 0;
+  color: #0f172a;
+}
+
+.auto-director-contract-evidence {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.auto-director-contract-evidence em {
+  max-width: 100%;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  padding: 2px 7px;
+  color: #64748b;
+  font-size: 12px;
+  font-style: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .auto-director-stage-list {
   display: grid;
   gap: 8px;
@@ -244,6 +324,10 @@
   .auto-director-grid {
     grid-template-columns: 1fr;
   }
+
+  .auto-director-contract-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 768px) {
@@ -254,5 +338,9 @@
   .auto-director-hero,
   .auto-director-panel {
     border-radius: 8px;
+  }
+
+  .auto-director-contract-grid {
+    grid-template-columns: 1fr;
   }
 }
