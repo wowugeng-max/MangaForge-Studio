@@ -858,6 +858,20 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
     summary = planning.longformRhythm.summary
     confirmations.push('长篇节奏需要校准')
     mainAction = planningAction(rhythmAction(planning), planning.longformRhythm.nextActions[0] || '先处理长篇节奏风险，再进入连续章节生产。')
+  } else if (batchReviewQueue.visible && batchReviewQueue.status === 'warn') {
+    status = 'needs_acceptance'
+    statusLabel = '批次待复盘'
+    headline = '安全连写批次需要先复盘'
+    summary = batchReviewQueue.summary
+    confirmations.push('安全连写批次需要复盘')
+    mainAction = batchReviewQueue.nextAction
+  } else if (batchReviewQueue.visible && batchReviewQueue.status === 'ok') {
+    status = 'needs_acceptance'
+    statusLabel = '批次待验收'
+    headline = '安全连写批次需要逐章验收'
+    summary = batchReviewQueue.summary
+    confirmations.push('安全连写批次需要逐章验收')
+    mainAction = batchReviewQueue.nextAction
   } else if (writing.chapterAcceptanceDesk.visible) {
     const action = writing.chapterAcceptanceDesk.recommendedAcceptanceAction
     status = 'needs_acceptance'

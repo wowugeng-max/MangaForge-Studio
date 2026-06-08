@@ -561,6 +561,70 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(model.batchReviewQueue.items.find(item => item.status === 'failed')?.error).toContain('模型未返回正文')
   })
 
+  test('prioritizes failed safe batch review before opening another batch', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: basePlanning,
+      writing: baseWriting,
+      activeTasks: [],
+      selectedModelId: 12,
+      runRecords: [
+        {
+          id: 9,
+          run_type: 'batch_generate_prose',
+          created_at: '2026-06-02T00:00:00.000Z',
+          status: 'warn',
+          input_ref: JSON.stringify({ source: 'auto_creation_safe_batch', safety_limit: 3 }),
+          output_ref: JSON.stringify({
+            total: 3,
+            success: 2,
+            failed: 1,
+            chapters: [{ chapter_no: 9, title: '阵盘裂纹', status: 'failed', error: '模型未返回正文' }],
+          }),
+        },
+      ],
+    })
+
+    expect(model.status).toBe('needs_acceptance')
+    expect(model.statusLabel).toBe('批次待复盘')
+    expect(model.mainAction.key).toBe('open_task_center')
+    expect(model.mainAction.label).toBe('查看失败任务')
+    expect(model.confirmations).toContain('安全连写批次需要复盘')
+  })
+
+  test('routes successful safe batch review into quality revision before the next batch', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: basePlanning,
+      writing: baseWriting,
+      activeTasks: [],
+      selectedModelId: 12,
+      runRecords: [
+        {
+          id: 10,
+          run_type: 'batch_generate_prose',
+          created_at: '2026-06-03T00:00:00.000Z',
+          status: 'success',
+          input_ref: JSON.stringify({ source: 'auto_creation_safe_batch', safety_limit: 3 }),
+          output_ref: JSON.stringify({
+            total: 3,
+            success: 3,
+            failed: 0,
+            chapters: [
+              { chapter_no: 8, title: '试炼前夜', status: 'success', score: 82, word_count: 3180 },
+              { chapter_no: 9, title: '阵盘裂纹', status: 'success', score: 85, word_count: 3090 },
+              { chapter_no: 10, title: '外门震动', status: 'success', score: 86, word_count: 3021 },
+            ],
+          }),
+        },
+      ],
+    })
+
+    expect(model.status).toBe('needs_acceptance')
+    expect(model.statusLabel).toBe('批次待验收')
+    expect(model.mainAction.key).toBe('open_quality_revision')
+    expect(model.mainAction.label).toBe('进入质检修订')
+    expect(model.confirmations).toContain('安全连写批次需要逐章验收')
+  })
+
   test('keeps acceptance workflow as the only next step after prose exists', () => {
     const model = buildAutoCreationDirectorModel({
       planning: basePlanning,
