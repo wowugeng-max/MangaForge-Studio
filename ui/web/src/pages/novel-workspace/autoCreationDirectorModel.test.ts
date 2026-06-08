@@ -1015,6 +1015,10 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(model.batchReviewQueue.riskRadar.batchPlanRiskCount).toBe(2)
     expect(model.batchReviewQueue.riskRadar.signals.find(signal => signal.key === 'batch_plan')?.detail).toContain('连载计划')
     expect(model.batchReviewQueue.riskRadar.repairTasks.map((task: any) => task.issue_type)).toContain('batch_brief_mismatch')
+    const batchTask = model.batchReviewQueue.riskRadar.repairTasks.find((task: any) => task.issue_type === 'batch_brief_mismatch')
+    expect(batchTask?.batch_plan_context?.batch_goal).toContain('三章内进入内门视野')
+    expect(batchTask?.batch_plan_context?.reader_payoff_plan).toContain('升级')
+    expect(batchTask?.batch_plan_context?.chapter_plan?.chapter_task).toContain('阵盘反噬回报')
     expect(model.mainAction.key).toBe('create_safe_batch_risk_repair')
   })
 

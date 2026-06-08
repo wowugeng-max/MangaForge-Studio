@@ -594,6 +594,7 @@ function batchRepairTask(args: {
   message: string
   action: string
   metrics: AnyRecord
+  batchPlanContext?: AnyRecord | null
 }) {
   return {
     task_type: 'repair_quality',
@@ -612,6 +613,7 @@ function batchRepairTask(args: {
     task_status: 'open',
     source: 'auto_creation_safe_batch_risk',
     metrics: args.metrics,
+    ...(args.batchPlanContext ? { batch_plan_context: args.batchPlanContext } : {}),
   }
 }
 
@@ -656,6 +658,31 @@ function batchBriefAppliesToItem(batchBrief: AnyRecord | null | undefined, item:
   if (!batchBriefVisible(batchBrief)) return false
   const plannedNos = batchBriefChapterNos(batchBrief)
   return plannedNos.size === 0 || plannedNos.has(Number(item.chapterNo))
+}
+
+function normalizeBatchBriefChapterPlan(value: any) {
+  if (!value) return null
+  return {
+    chapter_no: Number(value.chapter_no ?? value.chapterNo ?? 0) || null,
+    title: firstText(value.title),
+    chapter_task: firstText(value.chapter_task, value.chapterTask, value.task),
+    conflict: firstText(value.conflict),
+    ending_hook: firstText(value.ending_hook, value.endingHook),
+    mainline_progress: firstText(value.mainline_progress, value.mainlineProgress),
+  }
+}
+
+function buildBatchPlanContext(batchBrief: AnyRecord | null | undefined, item: AutoCreationBatchReviewItem) {
+  if (!batchBriefVisible(batchBrief)) return null
+  const chapterPlan = arrayValue(batchBrief?.chapters)
+    .find(plan => Number(plan?.chapter_no ?? plan?.chapterNo ?? 0) === Number(item.chapterNo))
+  return {
+    batch_goal: firstText(batchBrief?.batch_goal, batchBrief?.batchGoal),
+    reader_payoff_plan: firstText(batchBrief?.reader_payoff_plan, batchBrief?.readerPayoffPlan),
+    mainline_focus: firstText(batchBrief?.mainline_focus, batchBrief?.mainlineFocus),
+    forbidden_boundary: firstText(batchBrief?.forbidden_boundary, batchBrief?.forbiddenBoundary),
+    chapter_plan: normalizeBatchBriefChapterPlan(chapterPlan),
+  }
 }
 
 function buildResolvedBatchRiskIssueKeys(args: {
@@ -820,6 +847,7 @@ function buildBatchRiskRadar(args: {
         message: `本章有 ${batchPlanCount} 项批次任务书兑现风险，可能影响本批连载计划。`,
         action: '对照下一批任务书重修本章职责、读者回报、主线焦点和禁抢跑边界，再重新复盘交稿。',
         metrics: { batch_plan_risk_count: batchPlanCount },
+        batchPlanContext: buildBatchPlanContext(args.nextBatchBrief, item),
       }))
     }
   }

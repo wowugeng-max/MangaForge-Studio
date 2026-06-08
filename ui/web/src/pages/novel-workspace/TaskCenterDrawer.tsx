@@ -103,6 +103,7 @@ function parseJsonValue(value: any) {
 }
 
 function repairTaskActionLabel(task: any) {
+  if (String(task?.issue_type || '') === 'batch_brief_mismatch') return '按批次修订'
   const map: Record<string, string> = {
     repair_skeleton: '补骨架',
     repair_materials: '补材料',
@@ -111,6 +112,11 @@ function repairTaskActionLabel(task: any) {
     resolve_failure: '处理失败',
   }
   return map[String(task?.task_type || '')] || ''
+}
+
+function repairTaskIssueTag(task: any) {
+  if (String(task?.issue_type || '') === 'batch_brief_mismatch') return <Tag color="purple" bordered={false}>批次计划</Tag>
+  return null
 }
 
 function repairTaskStatusTag(status?: string) {
@@ -355,6 +361,7 @@ function RepairTaskRunSummary({
                 title={(
                   <Space wrap>
                     <Tag color={task.severity === 'high' ? 'red' : task.severity === 'medium' ? 'gold' : 'default'} bordered={false}>{task.severity || 'task'}</Tag>
+                    {repairTaskIssueTag(task)}
                     {repairTaskStatusTag(task.task_status)}
                     <Text>{task.chapter_no ? `第${task.chapter_no}章 ` : ''}{task.title || task.message}</Text>
                     {task.segment && <Tag bordered={false}>{task.segment}</Tag>}

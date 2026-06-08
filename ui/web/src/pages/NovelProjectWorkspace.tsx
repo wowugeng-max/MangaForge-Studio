@@ -43,6 +43,7 @@ import {
 import { useChapterAutosave } from './novel-workspace/useChapterAutosave'
 import { useChapterVersions } from './novel-workspace/useChapterVersions'
 import { useNovelWorkspaceData, type ChapterSortMode, type ChapterStatusFilter } from './novel-workspace/useNovelWorkspaceData'
+import { buildRepairTaskRevisionPrompt } from './novel-workspace/repairTaskRevisionPrompt'
 import { useReferenceWorkflow } from './novel-workspace/useReferenceWorkflow'
 import { useWorkspaceTasks } from './novel-workspace/useWorkspaceTasks'
 import {
@@ -1562,7 +1563,7 @@ export default function NovelProjectWorkspace() {
     await createEditorReportForChapter(activeChapter.id)
   }
 
-  const createEditorReportForChapter = async (chapterId: number, options: { sourceTask?: any; autoRevision?: boolean } = {}) => {
+  const createEditorReportForChapter = async (chapterId: number, options: { sourceTask?: any; sourceRun?: any; autoRevision?: boolean } = {}) => {
     if (!selectedModelId) return message.warning('请先选择模型')
     if (!await flushPendingSave()) return
     setEditorReportLoading(true)
@@ -1578,13 +1579,7 @@ export default function NovelProjectWorkspace() {
         const task = options.sourceTask || {}
         await applyEditorRevision(res.data.review, {
           revisionMode: String(task.message || task.issue_type || '').includes('钩子') ? 'restore_hook' : 'tighten_pacing',
-          prompt: [
-            '本次修订来自任务中心的商业留存/质检修复任务。',
-            task.segment ? `分段：${task.segment}` : '',
-            task.message ? `问题：${task.message}` : '',
-            task.action ? `修复动作：${task.action}` : '',
-            Array.isArray(task.acceptance_criteria) ? `验收标准：${task.acceptance_criteria.join('；')}` : '',
-          ].filter(Boolean).join('\n'),
+          prompt: buildRepairTaskRevisionPrompt(task, options.sourceRun),
         })
       } else {
         message.success('编辑报告已生成')
@@ -1613,13 +1608,13 @@ export default function NovelProjectWorkspace() {
     }
   }
 
-  const startRepairTaskRevision = async (task: any) => {
+  const startRepairTaskRevision = async (task: any, run?: any) => {
     const chapterId = Number(task?.chapter_id || 0)
     if (!chapterId) return message.warning('这个任务没有绑定章节')
     if (!selectedModelId) return message.warning('请先选择模型')
     if (!await selectChapterForWriting(chapterId)) return
     setTaskCenterOpen(false)
-    await createEditorReportForChapter(chapterId, { sourceTask: task, autoRevision: true })
+    await createEditorReportForChapter(chapterId, { sourceTask: task, sourceRun: run, autoRevision: true })
   }
 
   const updateRepairTaskStatus = async (run: any, taskIndex: number, status: string, note = '') => {
