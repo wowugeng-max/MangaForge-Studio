@@ -212,6 +212,14 @@ describe('buildNovelDraftBriefSummary', () => {
         storyline_plants: ['旧臣背刺伏笔线'],
         storyline_payoffs: ['身份反转支线'],
         storyline_forbidden: ['幕后主使真名'],
+        next_batch_brief: {
+          chapter_range_label: '第8-10章',
+          batch_goal: '三章内完成旧臣压制到公开反压。',
+          reader_payoff_plan: '身份反转、当众压制、章末追杀。',
+          mainline_focus: '夺权主线进入明面冲突。',
+          forbidden_boundary: '不得提前揭露幕后主使。',
+          current_chapter_role: '本章负责把主角第一次反压写扎实。',
+        },
         scene_briefs: [{ scene_no: 1, title: '入席', reader_payoff: '身份反转' }],
         word_budget: '标准章 3000 字',
         ending_hook: '带血腰牌入席',
@@ -231,6 +239,10 @@ describe('buildNovelDraftBriefSummary', () => {
     expect(summary.briefFields.storylinePlants).toContain('旧臣背刺伏笔线')
     expect(summary.briefFields.storylinePayoffs).toContain('身份反转支线')
     expect(summary.briefFields.storylineForbidden).toContain('幕后主使真名')
+    expect(summary.briefFields.batchRange).toBe('第8-10章')
+    expect(summary.briefFields.batchGoal).toContain('公开反压')
+    expect(summary.briefFields.batchCurrentRole).toContain('第一次反压')
+    expect(summary.briefFields.batchForbidden).toContain('幕后主使')
   })
 
   test('shows an editable pre-draft brief when scene cards exist but the brief is not confirmed', () => {

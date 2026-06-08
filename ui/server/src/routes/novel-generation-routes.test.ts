@@ -55,6 +55,17 @@ describe('novel generate prose route source guards', () => {
     expect(source).toContain('chapter_target: { ...contextPackage.chapter_target, longform_compass: req.body.longform_compass }')
   })
 
+  test('applies next batch brief override from generate-prose requests', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
+    const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'")
+    const routeEnd = source.indexOf("const prevChapters = chapters", routeStart)
+    const setupBlock = source.slice(routeStart, routeEnd)
+
+    expect(setupBlock).toContain('applyRequestNextBatchBrief(')
+    expect(source).toContain('req.body?.next_batch_brief')
+    expect(source).toContain('chapter_target: { ...contextPackage.chapter_target, next_batch_brief: req.body.next_batch_brief }')
+  })
+
   test('runs commercial editor rewrite after word-target expansion and before self-review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
     const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'")

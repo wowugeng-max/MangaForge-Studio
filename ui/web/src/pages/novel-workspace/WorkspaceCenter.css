@@ -802,6 +802,35 @@
   white-space: nowrap;
 }
 
+.novel-draft-brief-batch {
+  display: grid;
+  grid-template-columns: auto minmax(76px, 0.35fr) minmax(0, 1.1fr) minmax(0, 1.1fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 7px 8px;
+  border: 1px solid rgba(124, 58, 237, 0.18);
+  border-radius: 6px;
+  background: rgba(245, 243, 255, 0.9);
+}
+
+.novel-draft-brief-batch span {
+  color: #6d28d9;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.novel-draft-brief-batch strong {
+  min-width: 0;
+  color: #0f172a;
+  font-size: 12px;
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .novel-draft-brief-meme {
   display: grid;
   grid-template-columns: auto minmax(80px, 0.45fr) minmax(0, 1.3fr) minmax(0, 1fr);
@@ -1119,6 +1148,18 @@
 
   .novel-draft-brief-storylines strong:nth-of-type(2),
   .novel-draft-brief-storylines strong:nth-of-type(3) {
+    display: none;
+  }
+
+  .novel-draft-brief-batch {
+    grid-template-columns: auto repeat(2, minmax(0, 1fr));
+    gap: 5px;
+    margin-top: 6px;
+    padding: 6px;
+  }
+
+  .novel-draft-brief-batch strong:nth-of-type(3),
+  .novel-draft-brief-batch strong:nth-of-type(4) {
     display: none;
   }
 

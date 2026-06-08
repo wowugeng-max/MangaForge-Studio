@@ -866,6 +866,15 @@ export function WorkspaceCenter({
                   <strong>回收：{draftBriefSummary.briefFields.storylinePayoffs || '无'}</strong>
                   <strong>禁用：{draftBriefSummary.briefFields.storylineForbidden || '无'}</strong>
                 </div>
+                {(draftBriefSummary.briefFields.batchGoal || draftBriefSummary.briefFields.batchCurrentRole) && (
+                  <div className="novel-draft-brief-batch">
+                    <span>本批连载任务</span>
+                    <strong>{draftBriefSummary.briefFields.batchRange || '当前批次'}</strong>
+                    <strong>批次目标：{draftBriefSummary.briefFields.batchGoal || '保持连载推进'}</strong>
+                    <strong>本章职责：{draftBriefSummary.briefFields.batchCurrentRole || '承接本章任务书'}</strong>
+                    <strong>禁抢跑：{draftBriefSummary.briefFields.batchForbidden || '不得提前消费后续爆点'}</strong>
+                  </div>
+                )}
                 <div className="novel-draft-brief-meme">
                   <span>本章网感策略</span>
                   <strong>强度：{draftBriefSummary.briefFields.memeIntensity || '无'}</strong>

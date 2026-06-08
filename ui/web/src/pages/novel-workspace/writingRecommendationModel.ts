@@ -107,6 +107,14 @@ export type NovelPreDraftBrief = {
     allowed_functions?: string[]
     forbidden_usage?: string[]
   }
+  next_batch_brief?: {
+    chapter_range_label?: string
+    batch_goal?: string
+    reader_payoff_plan?: string
+    mainline_focus?: string
+    forbidden_boundary?: string
+    current_chapter_role?: string
+  }
   scene_briefs?: any[]
   word_budget?: string
   ending_hook?: string
@@ -134,6 +142,12 @@ export type NovelDraftBriefSummary = {
     memeIntensity: string
     memeFunctions: string
     memeForbidden: string
+    batchRange: string
+    batchGoal: string
+    batchReaderPayoff: string
+    batchMainlineFocus: string
+    batchForbidden: string
+    batchCurrentRole: string
     sceneBudget: string
     wordBudget: string
     endingHook: string
@@ -169,6 +183,12 @@ export function buildNovelDraftBriefSummary({
     memeIntensity: preDraftBrief?.meme_strategy?.intensity?.trim() || '',
     memeFunctions: Array.isArray(preDraftBrief?.meme_strategy?.allowed_functions) ? preDraftBrief.meme_strategy.allowed_functions.filter(Boolean).join('、') : '',
     memeForbidden: Array.isArray(preDraftBrief?.meme_strategy?.forbidden_usage) ? preDraftBrief.meme_strategy.forbidden_usage.filter(Boolean).join('、') : '',
+    batchRange: preDraftBrief?.next_batch_brief?.chapter_range_label?.trim() || '',
+    batchGoal: preDraftBrief?.next_batch_brief?.batch_goal?.trim() || '',
+    batchReaderPayoff: preDraftBrief?.next_batch_brief?.reader_payoff_plan?.trim() || '',
+    batchMainlineFocus: preDraftBrief?.next_batch_brief?.mainline_focus?.trim() || '',
+    batchForbidden: preDraftBrief?.next_batch_brief?.forbidden_boundary?.trim() || '',
+    batchCurrentRole: preDraftBrief?.next_batch_brief?.current_chapter_role?.trim() || '',
     sceneBudget: Array.isArray(preDraftBrief?.scene_briefs) && preDraftBrief.scene_briefs.length > 0 ? `${preDraftBrief.scene_briefs.length} 个场景已写入任务书` : '',
     wordBudget: preDraftBrief?.word_budget?.trim() || '',
     endingHook: preDraftBrief?.ending_hook?.trim() || endingHook?.trim() || '',

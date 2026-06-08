@@ -262,6 +262,43 @@ describe('chapter prose word target', () => {
     expect(prompt).toContain('副本题材可换')
   })
 
+  test('injects next batch brief into paragraph prose prompt as serial-production boundaries', () => {
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+
+    const prompt = service.buildParagraphProseContext(
+      { title: '超人的规则怪谈世界' },
+      {
+        next_batch_brief: {
+          chapter_range_label: '第8-10章',
+          batch_goal: '三章内进入内门视野。',
+          reader_payoff_plan: '升级、打脸、规则反制逐章交付。',
+          mainline_focus: '外门危机 -> 内门招揽',
+          forbidden_boundary: '第10章前不得揭露规则源头。',
+          current_chapter_role: '第8章只负责夜钟规则第一次显形。',
+        },
+        chapter_target: {
+          chapter_no: 8,
+          title: '外门夜钟',
+          summary: '验证夜钟规则。',
+          conflict: '是否相信敌人提示。',
+          ending_hook: '钟声倒数。',
+          scene_cards: [],
+        },
+      },
+      null,
+      { chapter_no: 8, title: '外门夜钟' },
+    )
+
+    expect(prompt).toContain('【本批连载任务书】')
+    expect(prompt).toContain('三章内进入内门视野')
+    expect(prompt).toContain('不得提前消费后续章节爆点')
+    expect(prompt).toContain('第8章只负责夜钟规则第一次显形')
+  })
+
   test('supports a manually edited chapter word target', () => {
     const target = resolveChapterWordTarget({}, { chapter_no: 8 }, { word_target_mode: 'custom', target_word_count: 5200 })
 
@@ -454,6 +491,37 @@ describe('chapter pre-draft brief', () => {
     expect(brief.longform_compass.axes.find((axis: any) => axis.key === 'core_conflict')?.value).toContain('蛮力')
   })
 
+  test('adds next batch serial brief to the pre-draft brief', () => {
+    const brief = buildChapterPreDraftBrief(
+      { title: '超人的规则怪谈世界' },
+      {
+        next_batch_brief: {
+          chapterRangeLabel: '第8-10章',
+          batchGoal: '三章内进入内门视野。',
+          readerPayoffPlan: '升级、打脸、规则反制逐章交付。',
+          mainlineFocus: '外门危机 -> 内门招揽',
+          forbiddenBoundary: '第10章前不得揭露规则源头。',
+          chapters: [
+            { chapterNo: 8, title: '外门夜钟', chapterTask: '证明夜钟规则有效。', conflict: '是否相信敌人提示。', endingHook: '钟声倒数。' },
+            { chapterNo: 9, title: '反制试探', chapterTask: '用超人速度验证边界。', conflict: '速度能否绕过规则。', endingHook: '内门令牌出现。' },
+          ],
+        },
+        chapter_target: {
+          chapter_no: 8,
+          title: '外门夜钟',
+          summary: '验证夜钟规则。',
+          scene_cards: [],
+        },
+      },
+    )
+
+    expect(brief.next_batch_brief.chapter_range_label).toBe('第8-10章')
+    expect(brief.next_batch_brief.batch_goal).toContain('内门视野')
+    expect(brief.next_batch_brief.reader_payoff_plan).toContain('打脸')
+    expect(brief.next_batch_brief.current_chapter_role).toContain('证明夜钟规则有效')
+    expect(brief.next_batch_brief.forbidden_boundary).toContain('规则源头')
+  })
+
   test('merges a confirmed pre-draft brief into chapter generation context', () => {
     const confirmedAt = '2026-06-03T10:00:00.000Z'
     const context = mergeConfirmedPreDraftBriefIntoContext(
@@ -487,6 +555,14 @@ describe('chapter pre-draft brief', () => {
           immutable_rules: ['超人力量不能无代价碾压规则'],
           flexible_zones: ['副本题材可换，但必须服务规则破局主线'],
         },
+        next_batch_brief: {
+          chapter_range_label: '第2-4章',
+          batch_goal: '三章内完成午夜校园第一轮规则试探。',
+          reader_payoff_plan: '每章一次规则显形或力量反制。',
+          mainline_focus: '规则初识 -> 规则漏洞',
+          forbidden_boundary: '不得提前揭露规则源头。',
+          current_chapter_role: '本章负责读懂宿舍守则。',
+        },
         word_budget: '标准章 3000 字',
         ending_hook: '镜子里出现第四个人。',
         confirmed_at: confirmedAt,
@@ -506,6 +582,8 @@ describe('chapter pre-draft brief', () => {
     expect(context.chapter_target.meme_strategy.allowed_functions).toContain('主角吐槽')
     expect(context.chapter_target.longform_compass.immutable_rules).toContain('超人力量不能无代价碾压规则')
     expect(context.longform_compass.reader_promise).toContain('规则判定')
+    expect(context.chapter_target.next_batch_brief.current_chapter_role).toContain('读懂宿舍守则')
+    expect(context.next_batch_brief.batch_goal).toContain('第一轮规则试探')
   })
 
   test('builds storyline context in the chapter context package', () => {

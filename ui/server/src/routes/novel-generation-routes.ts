@@ -59,6 +59,15 @@ function applyRequestLongformCompass(contextPackage: any, req: any) {
   }
 }
 
+function applyRequestNextBatchBrief(contextPackage: any, req: any) {
+  if (!req.body?.next_batch_brief) return contextPackage
+  return {
+    ...contextPackage,
+    next_batch_brief: req.body.next_batch_brief,
+    chapter_target: { ...contextPackage.chapter_target, next_batch_brief: req.body.next_batch_brief },
+  }
+}
+
 type GenerationRoutesContext = {
   getWorkspace: () => string
   getProject: (workspace: string, id: number) => Promise<any>
@@ -779,6 +788,7 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
         wordTarget,
       )
       contextPackage = applyRequestLongformCompass(contextPackage, req)
+      contextPackage = applyRequestNextBatchBrief(contextPackage, req)
       markStage(
         'context',
         contextPackage.preflight.ready ? '续写上下文包已就绪' : '续写上下文包存在缺口',
@@ -822,6 +832,7 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
               wordTarget,
             )
             contextPackage = applyRequestLongformCompass(contextPackage, req)
+            contextPackage = applyRequestNextBatchBrief(contextPackage, req)
             markStage('scene_cards', `场景卡已生成：${sceneResult.sceneCards.length} 个`, 'success', '', { scene_cards: sceneResult.sceneCards })
           } else {
             markStage('scene_cards', '场景卡生成为空，继续使用章节细纲', 'warn')

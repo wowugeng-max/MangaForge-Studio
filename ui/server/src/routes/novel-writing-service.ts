@@ -296,6 +296,45 @@ function latestLongformCompassFromReviews(reviews: any[]) {
   return normalizeLongformCompass(report?.compass || report?.longform_compass || null)
 }
 
+function normalizeNextBatchChapter(item: any) {
+  const chapterNo = Number(item?.chapter_no || item?.chapterNo || 0)
+  if (!chapterNo) return null
+  return {
+    chapter_no: chapterNo,
+    title: compactBriefText(item?.title, `第${chapterNo}章`),
+    chapter_task: compactBriefText(item?.chapter_task || item?.chapterTask || item?.task || item?.chapter_goal || item?.chapterGoal),
+    conflict: compactBriefText(item?.conflict),
+    ending_hook: compactBriefText(item?.ending_hook || item?.endingHook || item?.hook),
+    mainline_progress: compactBriefText(item?.mainline_progress || item?.mainlineProgress),
+  }
+}
+
+function normalizeNextBatchBrief(value: any, targetChapterNo = 0) {
+  const raw = value?.next_batch_brief || value?.nextBatchBrief || value || {}
+  const chapters = asArray(raw.chapters).map(normalizeNextBatchChapter).filter(Boolean).slice(0, 10)
+  const currentChapter = chapters.find((item: any) => Number(item.chapter_no) === Number(targetChapterNo)) || null
+  const currentChapterRole = compactBriefText(
+    raw.current_chapter_role || raw.currentChapterRole || currentChapter?.chapter_task || currentChapter?.conflict || currentChapter?.mainline_progress,
+  )
+  const normalized = {
+    chapter_range_label: compactBriefText(raw.chapter_range_label || raw.chapterRangeLabel),
+    batch_goal: compactBriefText(raw.batch_goal || raw.batchGoal),
+    reader_payoff_plan: compactBriefText(raw.reader_payoff_plan || raw.readerPayoffPlan),
+    mainline_focus: compactBriefText(raw.mainline_focus || raw.mainlineFocus),
+    forbidden_boundary: compactBriefText(raw.forbidden_boundary || raw.forbiddenBoundary),
+    current_chapter_role: currentChapterRole,
+    chapters,
+  }
+  const hasContent = normalized.chapter_range_label
+    || normalized.batch_goal
+    || normalized.reader_payoff_plan
+    || normalized.mainline_focus
+    || normalized.forbidden_boundary
+    || normalized.current_chapter_role
+    || normalized.chapters.length
+  return hasContent ? normalized : null
+}
+
 function storylineUsageName(item: any) {
   return String(item?.name || item?.summary || item?.entity_type || '').trim()
 }
@@ -867,6 +906,7 @@ export function buildChapterPreDraftBrief(project: any, contextPackage: any) {
   const wordTarget = chapterTarget.word_target || {}
   const memeStrategy = buildMemeStrategy(project, contextPackage)
   const longformCompass = normalizeLongformCompass(contextPackage?.chapter_target?.longform_compass || contextPackage?.longform_compass)
+  const nextBatchBrief = normalizeNextBatchBrief(contextPackage?.chapter_target?.next_batch_brief || contextPackage?.next_batch_brief, Number(chapterTarget.chapter_no || 0))
 
   return {
     chapter_no: Number(chapterTarget.chapter_no || 0) || null,
@@ -883,6 +923,7 @@ export function buildChapterPreDraftBrief(project: any, contextPackage: any) {
     storyline_forbidden: Array.from(new Set(storylineForbidden)).slice(0, 12),
     meme_strategy: memeStrategy,
     longform_compass: longformCompass,
+    next_batch_brief: nextBatchBrief,
     scene_briefs: sceneBriefs,
     word_budget: wordTarget?.target
       ? `${wordTarget.label || '章节'} ${wordTarget.target} 字，可接受 ${wordTarget.min}-${wordTarget.max} 字`
@@ -895,10 +936,13 @@ export function buildChapterPreDraftBrief(project: any, contextPackage: any) {
 export function mergeConfirmedPreDraftBriefIntoContext(contextPackage: any, preDraftBrief: any) {
   if (!preDraftBrief?.confirmed_at) return contextPackage
   const longformCompass = normalizeLongformCompass(preDraftBrief.longform_compass || (contextPackage || {}).chapter_target?.longform_compass || (contextPackage || {}).longform_compass)
+  const targetChapterNo = Number((contextPackage || {}).chapter_target?.chapter_no || preDraftBrief.chapter_no || 0)
+  const nextBatchBrief = normalizeNextBatchBrief(preDraftBrief.next_batch_brief || (contextPackage || {}).chapter_target?.next_batch_brief || (contextPackage || {}).next_batch_brief, targetChapterNo)
   return {
     ...(contextPackage || {}),
     pre_draft_brief: preDraftBrief,
     longform_compass: longformCompass || (contextPackage || {}).longform_compass || null,
+    next_batch_brief: nextBatchBrief || (contextPackage || {}).next_batch_brief || null,
     chapter_target: {
       ...((contextPackage || {}).chapter_target || {}),
       summary: compactBriefText(preDraftBrief.chapter_goal, (contextPackage || {}).chapter_target?.summary),
@@ -915,6 +959,7 @@ export function mergeConfirmedPreDraftBriefIntoContext(contextPackage: any, preD
       storyline_forbidden: asArray(preDraftBrief.storyline_forbidden),
       meme_strategy: preDraftBrief.meme_strategy || (contextPackage || {}).chapter_target?.meme_strategy || null,
       longform_compass: longformCompass || (contextPackage || {}).chapter_target?.longform_compass || null,
+      next_batch_brief: nextBatchBrief || (contextPackage || {}).chapter_target?.next_batch_brief || null,
       scene_cards: asArray(preDraftBrief.scene_briefs).length
         ? asArray(preDraftBrief.scene_briefs)
         : asArray((contextPackage || {}).chapter_target?.scene_cards),
@@ -1095,6 +1140,10 @@ export function createNovelWritingService(ctx: {
 
   const buildParagraphProseContext = (project: any, contextPackage: any, migrationPlan: any = null, chapterDraft: any = null) => {
     const longformCompass = normalizeLongformCompass(contextPackage?.chapter_target?.longform_compass || contextPackage?.longform_compass)
+    const nextBatchBrief = normalizeNextBatchBrief(
+      contextPackage?.chapter_target?.next_batch_brief || contextPackage?.next_batch_brief,
+      Number(chapterDraft?.chapter_no || contextPackage?.chapter_target?.chapter_no || 0),
+    )
     return [
       '任务：按场景卡生成章节正文。请先在心中按场景组织段落，再输出完整正文。',
       `作品标题：${project.title}`,
@@ -1107,6 +1156,10 @@ export function createNovelWritingService(ctx: {
       longformCompass ? '【长篇作品罗盘】' : '',
       longformCompass ? '硬性要求：不可漂移项必须遵守；可调整区只能服务本章目标、当前卷目标和读者承诺，不得把扩展写成核心改道。' : '',
       longformCompass ? JSON.stringify(longformCompass, null, 2).slice(0, 4000) : '',
+      '',
+      nextBatchBrief ? '【本批连载任务书】' : '',
+      nextBatchBrief ? '硬性要求：本章必须服务批次目标和当前章角色；不得提前消费后续章节爆点，不得跳过本章读者回报，不得抢跑批次后段的主线兑现。' : '',
+      nextBatchBrief ? JSON.stringify(nextBatchBrief, null, 2).slice(0, 4000) : '',
       '',
       '【结构化上下文包】',
       JSON.stringify(contextPackage, null, 2).slice(0, 12000),
@@ -1128,9 +1181,10 @@ export function createNovelWritingService(ctx: {
       '10. 执行 setting_context：required 设定必须在正文中落地；forbidden 设定不得泄漏；ability_beats 必须写清代价/限制；item_beats 必须符合物品归属和位置；boss_move 必须符合 Boss 行动逻辑；rule_trigger 必须写出触发条件、代价和后果；角色只能知道 knowledge_scope 允许的信息。',
       '11. 执行 chapter_target.meme_strategy：网感只作为吐槽节奏、情绪共鸣、角色口吻或传播点；死亡、高压恐怖和关键情绪爆点处不得玩梗；不得直接复刻 meme_bank 的 unsafe_direct_phrases。',
       '12. 执行长篇作品罗盘：读者承诺、核心矛盾、创新卖点、长期爽点循环和结局方向不得漂移；新增人物、物品、支线或地图必须落在可调整区内。',
-      '13. 如果参考迁移计划包含 transferable_model，只能采用其中 allowed_learning 的抽象功能；rewrite_requirements 必须执行；copy_guard_terms 和 forbidden_transfer 禁止出现在正文里。',
-      migrationPlan?.generation_prompt_addendum ? `14. ${migrationPlan.generation_prompt_addendum}` : '',
-      chapterDraft?.chapter_no ? `15. 本次只生成第${chapterDraft.chapter_no}章，不得输出其他章节或续章内容。` : '',
+      '13. 执行本批连载任务书：本章只完成 current_chapter_role 和本章读者回报；可以铺垫下一章，但不得提前解决 next_batch_brief.chapters 后续章节的冲突或钩子。',
+      '14. 如果参考迁移计划包含 transferable_model，只能采用其中 allowed_learning 的抽象功能；rewrite_requirements 必须执行；copy_guard_terms 和 forbidden_transfer 禁止出现在正文里。',
+      migrationPlan?.generation_prompt_addendum ? `15. ${migrationPlan.generation_prompt_addendum}` : '',
+      chapterDraft?.chapter_no ? `16. 本次只生成第${chapterDraft.chapter_no}章，不得输出其他章节或续章内容。` : '',
       '',
       '输出 JSON，包含 prose_chapters 数组。数组只能有一项，且必须包含 chapter_no, title, chapter_text, scene_breakdown, continuity_notes。scene_breakdown 要回填每个场景的 scene_type、required_beats/action_beats 完成情况和 description_budget 执行情况。chapter_text 是完整正文，不要 markdown 标题。',
     ].filter(Boolean).join('\n')
