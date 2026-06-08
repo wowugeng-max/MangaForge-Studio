@@ -24,7 +24,7 @@ export type AutoCreationPipelineStatus = 'done' | 'active' | 'pending' | 'blocke
 export type AutoCreationContractStatus = 'ok' | 'warn' | 'block'
 export type AutoCreationBatchGuardrailStatus = 'ready' | 'caution' | 'blocked'
 export type AutoCreationBatchGuardrailSignalStatus = 'ok' | 'warn' | 'block'
-export type AutoCreationBatchReviewStatus = 'empty' | 'ok' | 'warn'
+export type AutoCreationBatchReviewStatus = 'empty' | 'ok' | 'warn' | 'done'
 export type AutoCreationBatchReviewItemStatus = 'success' | 'failed'
 
 export interface AutoCreationDirectorAction {
@@ -87,6 +87,7 @@ export interface AutoCreationBatchReviewItem {
   score: number | null
   wordCount: number | null
   revised: boolean
+  delivered: boolean
   error: string
 }
 
@@ -98,6 +99,7 @@ export interface AutoCreationBatchReviewQueue {
   total: number
   success: number
   failed: number
+  delivered: number
   safeLimit: number | null
   availableTotal: number | null
   createdAt: string
@@ -149,6 +151,8 @@ export interface BuildAutoCreationDirectorModelInput {
   selectedModelId?: any
   reviews?: AnyRecord[] | null
   runRecords?: AnyRecord[] | null
+  chapters?: AnyRecord[] | null
+  storyState?: AnyRecord | null
 }
 
 const PLANNING_ACTION_LABELS: Record<PlanningActionKey, string> = {
@@ -336,6 +340,82 @@ function parsePayload(value: any) {
 function recordTime(record: AnyRecord) {
   const timestamp = Date.parse(text(record?.created_at || record?.updated_at))
   return Number.isFinite(timestamp) ? timestamp : 0
+}
+
+const BATCH_DELIVERY_QUALITY_THRESHOLD = 78
+
+function proseText(chapter?: AnyRecord | null) {
+  return text(chapter?.chapter_text || chapter?.chapterText)
+}
+
+function hasDeliveredProse(chapter?: AnyRecord | null) {
+  const content = proseText(chapter)
+  return Boolean(content && !content.includes('【占位正文】'))
+}
+
+function payloadChapterId(payload: AnyRecord) {
+  return payload?.chapter_id ?? payload?.chapterId ?? payload?.chapter?.id ?? payload?.chapter?.chapter_id ?? null
+}
+
+function payloadChapterNo(payload: AnyRecord) {
+  return Number(payload?.chapter_no ?? payload?.chapterNo ?? payload?.chapter?.chapter_no ?? payload?.chapter?.chapterNo ?? 0)
+}
+
+function reviewMatchesChapter(review: AnyRecord, chapter: AnyRecord, fallbackChapterNo: number) {
+  const payload = parsePayload(review?.payload) || {}
+  const reviewChapterId = review?.chapter_id ?? review?.chapterId ?? payloadChapterId(payload)
+  const reviewChapterNo = Number(review?.chapter_no ?? review?.chapterNo ?? payloadChapterNo(payload))
+  const chapterId = chapter?.id ?? chapter?.chapter_id ?? null
+  if (chapterId !== null && chapterId !== undefined && reviewChapterId !== null && reviewChapterId !== undefined) {
+    return String(reviewChapterId) === String(chapterId)
+  }
+  return reviewChapterNo > 0 && reviewChapterNo === fallbackChapterNo
+}
+
+function qualityPayload(review?: AnyRecord | null) {
+  const payload = parsePayload(review?.payload) || {}
+  return payload?.review || payload?.result?.review || payload?.result || payload
+}
+
+function latestQualityReviewForChapter(reviews: AnyRecord[], chapter: AnyRecord, chapterNo: number) {
+  return reviews
+    .filter(review => text(review?.review_type) === 'prose_quality')
+    .filter(review => reviewMatchesChapter(review, chapter, chapterNo))
+    .sort((a, b) => recordTime(b) - recordTime(a))[0] || null
+}
+
+function qualityReviewPassed(review?: AnyRecord | null) {
+  if (!review) return false
+  const quality = qualityPayload(review)
+  const passed = quality?.passed
+  const needsRevision = quality?.needs_revision ?? quality?.needsRevision
+  const scoreValue = quality?.score ?? quality?.overall_score ?? quality?.quality_score
+  const score = scoreValue === null || scoreValue === undefined || scoreValue === '' ? null : Number(scoreValue)
+  if (passed === false || needsRevision === true) return false
+  if (Number.isFinite(score)) return Number(score) >= BATCH_DELIVERY_QUALITY_THRESHOLD
+  return passed === true
+}
+
+function findChapter(chapters: AnyRecord[], item: { chapterId: any; chapterNo: number }) {
+  return chapters.find(chapter => {
+    const chapterId = chapter?.id ?? chapter?.chapter_id ?? null
+    return item.chapterId !== null && item.chapterId !== undefined && chapterId !== null && chapterId !== undefined
+      ? String(chapterId) === String(item.chapterId)
+      : Number(chapter?.chapter_no ?? chapter?.chapterNo ?? 0) === item.chapterNo
+  }) || null
+}
+
+function batchChapterDelivered(args: {
+  item: { chapterId: any; chapterNo: number; status: AutoCreationBatchReviewItemStatus }
+  chapters: AnyRecord[]
+  reviews: AnyRecord[]
+  storyState: AnyRecord
+}) {
+  if (args.item.status !== 'success') return false
+  const chapter = findChapter(args.chapters, args.item)
+  if (!chapter || !hasDeliveredProse(chapter)) return false
+  if (Number(args.storyState?.last_updated_chapter || 0) < Number(args.item.chapterNo || 0)) return false
+  return qualityReviewPassed(latestQualityReviewForChapter(args.reviews, chapter, args.item.chapterNo))
 }
 
 function latestLongformCreationReport(reviews: AnyRecord[]) {
@@ -587,7 +667,13 @@ function buildBatchGuardrail(args: {
   }
 }
 
-function buildBatchReviewQueue(runRecords: AnyRecord[]): AutoCreationBatchReviewQueue {
+function buildBatchReviewQueue(args: {
+  runRecords: AnyRecord[]
+  chapters: AnyRecord[]
+  reviews: AnyRecord[]
+  storyState: AnyRecord
+}): AutoCreationBatchReviewQueue {
+  const { runRecords, reviews, storyState } = args
   const safeBatchRuns = runRecords
     .filter(run => text(run?.run_type) === 'batch_generate_prose')
     .map(run => ({
@@ -608,6 +694,7 @@ function buildBatchReviewQueue(runRecords: AnyRecord[]): AutoCreationBatchReview
       total: 0,
       success: 0,
       failed: 0,
+      delivered: 0,
       safeLimit: null,
       availableTotal: null,
       createdAt: '',
@@ -616,17 +703,24 @@ function buildBatchReviewQueue(runRecords: AnyRecord[]): AutoCreationBatchReview
     }
   }
 
-  const chapters = arrayValue(latest.output?.chapters)
-  const items = chapters.map(chapter => ({
-    chapterId: chapter?.id ?? null,
-    chapterNo: Number(chapter?.chapter_no || chapter?.chapterNo || 0),
-    title: text(chapter?.title, '未命名章节'),
-    status: text(chapter?.status) === 'failed' ? 'failed' as const : 'success' as const,
-    score: Number.isFinite(Number(chapter?.score)) ? Number(chapter?.score) : null,
-    wordCount: Number.isFinite(Number(chapter?.word_count ?? chapter?.wordCount)) ? Number(chapter?.word_count ?? chapter?.wordCount) : null,
-    revised: Boolean(chapter?.revised),
-    error: text(chapter?.error),
-  })).filter(item => item.chapterNo > 0 || item.title)
+  const batchChapters = arrayValue(latest.output?.chapters)
+  const items = batchChapters.map(chapter => {
+    const item = {
+      chapterId: chapter?.id ?? null,
+      chapterNo: Number(chapter?.chapter_no || chapter?.chapterNo || 0),
+      title: text(chapter?.title, '未命名章节'),
+      status: text(chapter?.status) === 'failed' ? 'failed' as const : 'success' as const,
+      score: Number.isFinite(Number(chapter?.score)) ? Number(chapter?.score) : null,
+      wordCount: Number.isFinite(Number(chapter?.word_count ?? chapter?.wordCount)) ? Number(chapter?.word_count ?? chapter?.wordCount) : null,
+      revised: Boolean(chapter?.revised),
+      delivered: false,
+      error: text(chapter?.error),
+    }
+    return {
+      ...item,
+      delivered: batchChapterDelivered({ item, chapters: args.chapters, reviews, storyState }),
+    }
+  }).filter(item => item.chapterNo > 0 || item.title)
 
   const failed = Number(latest.output?.failed ?? items.filter(item => item.status === 'failed').length)
   const success = Number(latest.output?.success ?? items.filter(item => item.status === 'success').length)
@@ -634,23 +728,33 @@ function buildBatchReviewQueue(runRecords: AnyRecord[]): AutoCreationBatchReview
   const safeLimit = Number(latest.input?.safety_limit || 0)
   const availableTotal = Number(latest.input?.available_total || 0)
   const hasFailure = failed > 0 || text(latest.run?.status) === 'warn'
+  const delivered = items.filter(item => item.status === 'success' && item.delivered).length
+  const allSuccessfulChaptersDelivered = !hasFailure && items.length > 0 && items
+    .filter(item => item.status === 'success')
+    .every(item => item.delivered)
+  const status: AutoCreationBatchReviewStatus = hasFailure ? 'warn' : allSuccessfulChaptersDelivered ? 'done' : 'ok'
 
   return {
     visible: true,
-    status: hasFailure ? 'warn' : 'ok',
+    status,
     label: '安全连写复盘',
     summary: hasFailure
       ? `本次安全连写 ${success}/${total} 章成功，先处理失败章节，再开启下一批。`
-      : `本次安全连写 ${success}/${total} 章完成，下一步逐章质检、修订和状态回填。`,
+      : allSuccessfulChaptersDelivered
+        ? `本次安全连写 ${delivered}/${total} 章已完成交稿闭环，可以开启下一批安全连写。`
+        : `本次安全连写 ${success}/${total} 章完成，下一步逐章质检、修订和状态回填。`,
     total,
     success,
     failed,
+    delivered,
     safeLimit: safeLimit > 0 ? safeLimit : null,
     availableTotal: availableTotal > 0 ? availableTotal : null,
     createdAt: text(latest.run?.created_at),
     nextAction: hasFailure
       ? opsAction('open_task_center', '查看失败任务', '打开任务中心，定位失败章节和可恢复步骤。')
-      : planningAction('open_quality_revision', '进入质检修订，按章节质量、核心偏移、读者回报和剧情线同步逐章验收。'),
+      : allSuccessfulChaptersDelivered
+        ? opsAction('start_safe_batch_generation', '开始下一批安全连写', '上一批已完成交稿闭环；按当前护栏继续小批量生产。')
+        : planningAction('open_quality_revision', '进入质检修订，按章节质量、核心偏移、读者回报和剧情线同步逐章验收。'),
     items,
   }
 }
@@ -801,7 +905,12 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
   const rhythmActionNeeded = rhythmNeedsAction(planning)
   const reviewedContract = creationContractFromReview(arrayValue(input.reviews))
   const creationContract = reviewedContract.contract || buildLongformCreationContract(planning, writing)
-  const batchReviewQueue = buildBatchReviewQueue(runRecords)
+  const batchReviewQueue = buildBatchReviewQueue({
+    runRecords,
+    chapters: arrayValue(input.chapters),
+    reviews: arrayValue(input.reviews),
+    storyState: input.storyState || {},
+  })
   const blockers: string[] = []
   const confirmations: string[] = []
   let status: AutoCreationDirectorStatus

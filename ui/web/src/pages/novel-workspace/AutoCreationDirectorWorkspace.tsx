@@ -87,7 +87,7 @@ function batchSignalLabel(status: string) {
 }
 
 function batchReviewColor(status: AutoCreationDirectorModel['batchReviewQueue']['status']) {
-  if (status === 'ok') return 'green'
+  if (status === 'ok' || status === 'done') return 'green'
   if (status === 'warn') return 'gold'
   return 'default'
 }
@@ -302,6 +302,7 @@ export function AutoCreationDirectorWorkspace({
             <Tag color={batchReviewColor(model.batchReviewQueue.status)} bordered={false}>
               成功 {model.batchReviewQueue.success}/{model.batchReviewQueue.total}
             </Tag>
+            {model.batchReviewQueue.delivered > 0 && <Tag color="green" bordered={false}>交付 {model.batchReviewQueue.delivered}</Tag>}
             {model.batchReviewQueue.failed > 0 && <Tag color="red" bordered={false}>失败 {model.batchReviewQueue.failed}</Tag>}
             {model.batchReviewQueue.safeLimit !== null && <Tag bordered={false}>安全上限 {model.batchReviewQueue.safeLimit}</Tag>}
           </div>
@@ -324,8 +325,8 @@ export function AutoCreationDirectorWorkspace({
                 >
                   <span>
                     <strong>第 {item.chapterNo} 章 · {item.title}</strong>
-                    <Tag color={item.status === 'success' ? 'green' : 'red'} bordered={false}>
-                      {item.status === 'success' ? '已生成' : '失败'}
+                    <Tag color={item.status === 'success' ? item.delivered ? 'green' : 'blue' : 'red'} bordered={false}>
+                      {item.status === 'success' ? item.delivered ? '已交付' : '已生成' : '失败'}
                     </Tag>
                   </span>
                   <Text type="secondary">
