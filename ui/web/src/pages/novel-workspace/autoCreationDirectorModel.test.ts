@@ -933,6 +933,91 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(model.confirmations).toContain('安全连写批次存在质量风险')
   })
 
+  test('holds delivered safe batch when generated chapters miss the next batch brief', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        topStatus: {
+          ...basePlanning.topStatus,
+          future100Coverage: { ready: true, planned: 100, required: 100, missingChapters: [], label: '100/100' },
+        },
+      },
+      writing: {
+        ...baseWriting,
+        nextChapter: { ...baseWriting.nextChapter, id: 11, chapterNo: 11, title: '内门来人' },
+        chapterPlanningDesk: {
+          ...baseWriting.chapterPlanningDesk,
+          readiness: 'ready',
+          statusLabel: '本章可写',
+          scenePlanStatus: 'ready',
+          sceneCards: [{ title: '内门招揽', goal: '新势力提出条件' }],
+          recommendedPlannerAction: { key: 'confirm_plan_and_write_draft', label: '确认并生成' },
+        },
+        topStatus: {
+          ...baseWriting.topStatus,
+          nextActionLabel: '确认并生成',
+          primaryActionKey: 'confirm_plan_and_write_draft',
+        },
+        primaryActionKey: 'confirm_plan_and_write_draft',
+      },
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: { last_updated_chapter: 10 },
+      chapters: [
+        { id: 8, chapter_no: 8, title: '试炼前夜', chapter_text: '正文'.repeat(1600) },
+        { id: 9, chapter_no: 9, title: '阵盘裂纹', chapter_text: '正文'.repeat(1550) },
+        { id: 10, chapter_no: 10, title: '外门震动', chapter_text: '正文'.repeat(1510) },
+      ],
+      reviews: [
+        { id: 101, chapter_id: 8, review_type: 'prose_quality', created_at: '2026-06-03T01:00:00.000Z', payload: JSON.stringify({ score: 84, passed: true }) },
+        { id: 102, chapter_id: 9, review_type: 'prose_quality', created_at: '2026-06-03T01:01:00.000Z', payload: JSON.stringify({ score: 85, passed: true }) },
+        { id: 103, chapter_id: 10, review_type: 'prose_quality', created_at: '2026-06-03T01:02:00.000Z', payload: JSON.stringify({ score: 86, passed: true }) },
+        { id: 202, chapter_id: 9, review_type: 'reader_payoff_sync', created_at: '2026-06-03T01:04:00.000Z', payload: JSON.stringify({ reader_payoff_sync: { status: 'warn', debt_count: 1, missed: ['阵盘反噬回报'] } }) },
+        { id: 203, chapter_id: 10, review_type: 'storyline_sync', created_at: '2026-06-03T01:05:00.000Z', payload: JSON.stringify({ storyline_sync: { status: 'warn', missed: ['进入内门视野'] } }) },
+      ],
+      runRecords: [
+        {
+          id: 10,
+          run_type: 'batch_generate_prose',
+          created_at: '2026-06-03T00:00:00.000Z',
+          status: 'success',
+          input_ref: JSON.stringify({
+            source: 'auto_creation_safe_batch',
+            safety_limit: 3,
+            next_batch_brief: {
+              chapterRangeLabel: '第8-10章',
+              batchGoal: '三章内进入内门视野。',
+              readerPayoffPlan: '升级、打脸、规则反制逐章交付。',
+              mainlineFocus: '外门危机 -> 内门招揽',
+              forbiddenBoundary: '第10章前不得揭露规则源头。',
+              chapters: [
+                { chapterNo: 8, title: '试炼前夜', chapterTask: '试炼压迫落地。' },
+                { chapterNo: 9, title: '阵盘裂纹', chapterTask: '兑现阵盘反噬回报。' },
+                { chapterNo: 10, title: '外门震动', chapterTask: '推进到内门视野。' },
+              ],
+            },
+          }),
+          output_ref: JSON.stringify({
+            total: 3,
+            success: 3,
+            failed: 0,
+            chapters: [
+              { id: 8, chapter_no: 8, title: '试炼前夜', status: 'success', score: 84, word_count: 3180 },
+              { id: 9, chapter_no: 9, title: '阵盘裂纹', status: 'success', score: 85, word_count: 3090 },
+              { id: 10, chapter_no: 10, title: '外门震动', status: 'success', score: 86, word_count: 3021 },
+            ],
+          }),
+        },
+      ],
+    } as any)
+
+    expect(model.batchReviewQueue.status).toBe('risk')
+    expect(model.batchReviewQueue.riskRadar.batchPlanRiskCount).toBe(2)
+    expect(model.batchReviewQueue.riskRadar.signals.find(signal => signal.key === 'batch_plan')?.detail).toContain('连载计划')
+    expect(model.batchReviewQueue.riskRadar.repairTasks.map((task: any) => task.issue_type)).toContain('batch_brief_mismatch')
+    expect(model.mainAction.key).toBe('create_safe_batch_risk_repair')
+  })
+
   test('releases safe batch risk after repair tasks are resolved and chapters are rechecked', () => {
     const model = buildAutoCreationDirectorModel({
       planning: {

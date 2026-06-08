@@ -173,7 +173,7 @@ export interface AutoCreationBatchReviewItem {
 }
 
 export interface AutoCreationBatchRiskSignal {
-  key: 'quality' | 'core' | 'payoff' | 'storyline' | 'readability'
+  key: 'quality' | 'core' | 'payoff' | 'storyline' | 'readability' | 'batch_plan'
   label: string
   status: AutoCreationBatchRiskStatus
   detail: string
@@ -187,6 +187,7 @@ export interface AutoCreationBatchRiskRadar {
   payoffDebtCount: number
   storylineRiskCount: number
   readabilityRiskCount: number
+  batchPlanRiskCount: number
   signals: AutoCreationBatchRiskSignal[]
   repairTasks: AnyRecord[]
 }
@@ -634,6 +635,29 @@ function batchRiskIssueResolved(keys: Set<string> | undefined, item: AutoCreatio
   return batchRiskIssueKeys(item, issueType).some(key => keys.has(key))
 }
 
+function batchBriefChapterNos(batchBrief: AnyRecord | null | undefined) {
+  return new Set(arrayValue(batchBrief?.chapters)
+    .map(item => Number(item?.chapter_no ?? item?.chapterNo ?? 0))
+    .filter(Boolean))
+}
+
+function batchBriefVisible(batchBrief: AnyRecord | null | undefined) {
+  if (!batchBrief) return false
+  return Boolean(
+    text(batchBrief?.batch_goal || batchBrief?.batchGoal)
+    || text(batchBrief?.reader_payoff_plan || batchBrief?.readerPayoffPlan)
+    || text(batchBrief?.mainline_focus || batchBrief?.mainlineFocus)
+    || text(batchBrief?.forbidden_boundary || batchBrief?.forbiddenBoundary)
+    || arrayValue(batchBrief?.chapters).length,
+  )
+}
+
+function batchBriefAppliesToItem(batchBrief: AnyRecord | null | undefined, item: AutoCreationBatchReviewItem) {
+  if (!batchBriefVisible(batchBrief)) return false
+  const plannedNos = batchBriefChapterNos(batchBrief)
+  return plannedNos.size === 0 || plannedNos.has(Number(item.chapterNo))
+}
+
 function buildResolvedBatchRiskIssueKeys(args: {
   runRecords: AnyRecord[]
   batchCreatedAt: string
@@ -690,6 +714,7 @@ function buildBatchRiskRadar(args: {
   chapters: AnyRecord[]
   reviews: AnyRecord[]
   resolvedIssueKeys?: Set<string>
+  nextBatchBrief?: AnyRecord | null
 }): AutoCreationBatchRiskRadar {
   const successfulItems = args.items.filter(item => item.status === 'success')
   const qualityScores = successfulItems
@@ -709,6 +734,7 @@ function buildBatchRiskRadar(args: {
   let payoffDebtTotal = 0
   let storylineRiskTotal = 0
   let readabilityRiskTotal = 0
+  let batchPlanRiskTotal = 0
   const repairTasks: AnyRecord[] = []
 
   for (const item of successfulItems) {
@@ -725,12 +751,16 @@ function buildBatchRiskRadar(args: {
     const payoffCount = batchRiskIssueResolved(args.resolvedIssueKeys, item, 'reader_payoff_debt') ? 0 : payoffDebtCount(payoffReview)
     const storylineCount = batchRiskIssueResolved(args.resolvedIssueKeys, item, 'storyline_sync_risk') ? 0 : storylineRiskCount(storylineReview)
     const readabilityCount = batchRiskIssueResolved(args.resolvedIssueKeys, item, 'readability_risk') ? 0 : readabilityRiskCount(readabilityReview)
+    const batchPlanCount = batchBriefAppliesToItem(args.nextBatchBrief, item) && !batchRiskIssueResolved(args.resolvedIssueKeys, item, 'batch_brief_mismatch')
+      ? coreCount + payoffCount + storylineCount
+      : 0
     const lowQuality = qualityScore !== null && qualityScore < BATCH_DELIVERY_QUALITY_THRESHOLD
 
     coreRiskTotal += coreCount
     payoffDebtTotal += payoffCount
     storylineRiskTotal += storylineCount
     readabilityRiskTotal += readabilityCount
+    batchPlanRiskTotal += batchPlanCount
 
     if (lowQuality) {
       repairTasks.push(batchRepairTask({
@@ -782,6 +812,16 @@ function buildBatchRiskRadar(args: {
         metrics: { readability_risk_count: readabilityCount },
       }))
     }
+    if (batchPlanCount > 0) {
+      repairTasks.push(batchRepairTask({
+        item,
+        issueType: 'batch_brief_mismatch',
+        severity: batchPlanCount >= 2 ? 'high' : 'medium',
+        message: `本章有 ${batchPlanCount} 项批次任务书兑现风险，可能影响本批连载计划。`,
+        action: '对照下一批任务书重修本章职责、读者回报、主线焦点和禁抢跑边界，再重新复盘交稿。',
+        metrics: { batch_plan_risk_count: batchPlanCount },
+      }))
+    }
   }
 
   const signals: AutoCreationBatchRiskSignal[] = [
@@ -818,6 +858,14 @@ function buildBatchRiskRadar(args: {
       detail: readabilityRiskTotal > 0 ? `可读性/出戏风险 ${readabilityRiskTotal} 项` : '可读性风险可控',
     },
   ]
+  if (batchBriefVisible(args.nextBatchBrief)) {
+    signals.push({
+      key: 'batch_plan',
+      label: '连载计划',
+      status: batchPlanRiskTotal > 0 ? 'warn' : 'ok',
+      detail: batchPlanRiskTotal > 0 ? `连载计划兑现风险 ${batchPlanRiskTotal} 项` : '本批连载计划无明显漏项',
+    })
+  }
   const status: AutoCreationBatchRiskStatus = signals.some(signal => signal.status === 'warn') ? 'warn' : 'ok'
 
   return {
@@ -828,6 +876,7 @@ function buildBatchRiskRadar(args: {
     payoffDebtCount: payoffDebtTotal,
     storylineRiskCount: storylineRiskTotal,
     readabilityRiskCount: readabilityRiskTotal,
+    batchPlanRiskCount: batchPlanRiskTotal,
     signals,
     repairTasks: repairTasks.slice(0, 40),
   }
@@ -1457,7 +1506,13 @@ function buildBatchReviewQueue(args: {
     chapters: args.chapters,
     reviews,
   })
-  const riskRadar = buildBatchRiskRadar({ items, chapters: args.chapters, reviews, resolvedIssueKeys })
+  const riskRadar = buildBatchRiskRadar({
+    items,
+    chapters: args.chapters,
+    reviews,
+    resolvedIssueKeys,
+    nextBatchBrief: latest.input?.next_batch_brief || latest.input?.nextBatchBrief || null,
+  })
   const hasDeliveredBatchRisk = allSuccessfulChaptersDelivered && riskRadar.status === 'warn'
   const status: AutoCreationBatchReviewStatus = hasFailure
     ? 'warn'
