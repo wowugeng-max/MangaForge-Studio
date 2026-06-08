@@ -83,6 +83,16 @@ export interface AutoCreationLongformCapacitySignal {
   actionKey: PlanningActionKey
 }
 
+export interface AutoCreationLongformFuelItem {
+  key: AutoCreationLongformCapacitySignal['key']
+  label: string
+  status: AutoCreationBatchGuardrailSignalStatus
+  detail: string
+  actionKey: PlanningActionKey
+  actionLabel: string
+  modelCall: boolean
+}
+
 export interface AutoCreationLongformCapacity {
   status: AutoCreationLongformCapacityStatus
   score: number
@@ -93,6 +103,7 @@ export interface AutoCreationLongformCapacity {
   estimatedRemainingChapters: number
   recommendedActionKey: PlanningActionKey
   signals: AutoCreationLongformCapacitySignal[]
+  fuelQueue: AutoCreationLongformFuelItem[]
 }
 
 export interface AutoCreationBatchGuardrail {
@@ -910,6 +921,13 @@ function signalStatusFromScore(score: number, warnAt = 80, blockAt = 55): AutoCr
   return 'ok'
 }
 
+function capacityFuelLabel(key: AutoCreationLongformCapacitySignal['key']) {
+  if (key === 'future_reserve') return '补未来100章'
+  if (key === 'storyline_pool') return '补剧情线池'
+  if (key === 'volume_runway') return '延长当前卷跑道'
+  return '校准节奏耐力'
+}
+
 function buildLongformCapacity(planning: PlanningWorkspaceModel): AutoCreationLongformCapacity {
   const targetWords = Math.max(0, Number(planning.topStatus.targetWords || 0))
   const writtenWords = Math.max(0, Number(planning.topStatus.writtenWords || 0))
@@ -985,6 +1003,17 @@ function buildLongformCapacity(planning: PlanningWorkspaceModel): AutoCreationLo
       ? 'caution'
       : 'ready'
   const firstRisk = signals.find(item => item.status !== 'ok')
+  const fuelQueue = signals
+    .filter(item => item.status !== 'ok')
+    .map(item => ({
+      key: item.key,
+      label: capacityFuelLabel(item.key),
+      status: item.status,
+      detail: item.detail,
+      actionKey: item.actionKey,
+      actionLabel: PLANNING_ACTION_LABELS[item.actionKey] || item.actionKey,
+      modelCall: MODEL_CALL_ACTIONS.has(item.actionKey),
+    }))
 
   return {
     status,
@@ -998,6 +1027,7 @@ function buildLongformCapacity(planning: PlanningWorkspaceModel): AutoCreationLo
     estimatedRemainingChapters,
     recommendedActionKey: firstRisk?.actionKey || 'longform_pressure',
     signals,
+    fuelQueue,
   }
 }
 

@@ -295,6 +295,32 @@ export function AutoCreationDirectorWorkspace({
             </button>
           ))}
         </div>
+        {model.longformCapacity.fuelQueue.length > 0 && (
+          <div className="auto-director-fuel-queue">
+            <Text strong>生产燃料队列</Text>
+            <div className="auto-director-fuel-list">
+              {model.longformCapacity.fuelQueue.map(item => (
+                <div key={item.key} className={`auto-director-fuel-item auto-director-fuel-item-${item.status}`}>
+                  <span>
+                    <strong>{item.label}</strong>
+                    <Text type="secondary">{item.detail}</Text>
+                  </span>
+                  <ActionButton
+                    action={{
+                      area: 'planning',
+                      key: item.actionKey,
+                      label: item.actionLabel,
+                      description: item.detail,
+                      modelCall: item.modelCall,
+                    }}
+                    loadingActionKey={loadingActionKey}
+                    onAction={onAction}
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </section>
 
       <section className={`auto-director-panel auto-director-batch-panel auto-director-batch-panel-${model.batchGuardrail.status}`}>

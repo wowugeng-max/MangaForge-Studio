@@ -417,6 +417,55 @@
   background: #fef2f2;
 }
 
+.auto-director-fuel-queue {
+  border-top: 1px solid #e5eaf2;
+  padding-top: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.auto-director-fuel-list {
+  display: grid;
+  gap: 8px;
+}
+
+.auto-director-fuel-item {
+  min-width: 0;
+  border: 1px solid #edf1f7;
+  border-radius: 9px;
+  background: #fbfcfe;
+  padding: 9px 10px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.auto-director-fuel-item > span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.auto-director-fuel-item strong {
+  color: #0f172a;
+}
+
+.auto-director-fuel-item .ant-typography {
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.auto-director-fuel-item-warn {
+  border-color: #fde68a;
+  background: #fffbeb;
+}
+
+.auto-director-fuel-item-block {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
 .auto-director-batch-panel {
   display: grid;
   gap: 10px;
@@ -755,6 +804,10 @@
   }
 
   .auto-director-batch-review-list {
+    grid-template-columns: 1fr;
+  }
+
+  .auto-director-fuel-item {
     grid-template-columns: 1fr;
   }
 }
