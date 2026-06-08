@@ -16,7 +16,7 @@ import type { PlanningActionKey, PlanningVolumeTreeNode, PlanningWorkspaceModel 
 const { Text, Paragraph } = Typography
 const { useBreakpoint } = Grid
 
-export type PlanningLoadingKey = 'rollingPlan' | 'future100Audit' | 'future100Generate' | 'longformPressure' | 'topic' | 'referenceDiagnosis' | 'first30Retention' | 'first30Repair'
+export type PlanningLoadingKey = 'rollingPlan' | 'future100Audit' | 'future100Generate' | 'longformPressure' | 'longformCreationDiagnosis' | 'topic' | 'referenceDiagnosis' | 'first30Retention' | 'first30Repair'
 
 export type StoryPlanningWorkspaceProps = {
   model: PlanningWorkspaceModel
@@ -91,6 +91,7 @@ function actionLabel(key: PlanningActionKey) {
     future100_audit: '检查未来100章',
     future100_generate: '生成未来100章',
     longform_pressure: '运行长线压力测试',
+    longform_creation_diagnosis: '运行创作诊断',
     topic_validation: '验证原创选题',
     reference_diagnosis: '诊断参考知识',
     open_story_assets: '打开资料设定',

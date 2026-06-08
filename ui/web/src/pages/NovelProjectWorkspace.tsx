@@ -573,7 +573,8 @@ export default function NovelProjectWorkspace() {
     writing: writingCockpitModel,
     activeTasks,
     selectedModelId,
-  }), [planningWorkspaceModel, writingCockpitModel, activeTasks, selectedModelId])
+    reviews,
+  }), [planningWorkspaceModel, writingCockpitModel, activeTasks, selectedModelId, reviews])
 
   const autoDirectorBusy = Boolean(
     stepProseLoading
@@ -2610,6 +2611,80 @@ export default function NovelProjectWorkspace() {
     }
   }
 
+  const runLongformCreationDiagnosis = async () => {
+    setCommercialToolLoading('longformCreationDiagnosis')
+    try {
+      const res = await apiClient.post(`/novel/projects/${projectId}/longform-creation-diagnosis`)
+      const report = res.data?.report || {}
+      await loadProjectModules()
+      await loadProductionTasks()
+      setRightPanelOpen(true)
+      setRightPanelTab('bookReviews')
+      Modal.info({
+        title: '长篇创作诊断',
+        width: 920,
+        content: (
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Card size="small">
+              <Space align="center" size={16}>
+                <Progress
+                  type="circle"
+                  size={76}
+                  percent={Number(report.score || 0)}
+                  status={Number(report.score || 0) >= 82 ? 'success' : Number(report.score || 0) < 68 ? 'exception' : 'normal'}
+                />
+                <Space direction="vertical" size={4}>
+                  <Text strong>{report.summary || '已完成长篇创作诊断'}</Text>
+                  <Text type="secondary">质量线：{report.quality_bar || 'qidian_10k_subscription_baseline'}；状态：{report.status || '-'}</Text>
+                  <Text type="secondary">
+                    支持范围：{Number(report.support_range_words?.min || 3000000).toLocaleString()} - {Number(report.support_range_words?.max || 10000000).toLocaleString()} 字
+                  </Text>
+                </Space>
+              </Space>
+            </Card>
+            <Card size="small" title="创作契约四项">
+              <List
+                size="small"
+                dataSource={report.dimensions || []}
+                locale={{ emptyText: '暂无诊断维度' }}
+                renderItem={(item: any) => (
+                  <List.Item>
+                    <List.Item.Meta
+                      title={(
+                        <Space wrap>
+                          <Text strong>{item.label || item.key}</Text>
+                          <Tag color={item.status === 'ok' ? 'green' : item.status === 'block' ? 'red' : 'gold'} bordered={false}>{item.status || '-'}</Tag>
+                          <Tag bordered={false}>{Number(item.score || 0)}分</Tag>
+                        </Space>
+                      )}
+                      description={(
+                        <Space direction="vertical" size={2}>
+                          <Text type="secondary">{item.detail || '无说明'}</Text>
+                          {Array.isArray(item.evidence) && item.evidence.length > 0 && (
+                            <Text type="secondary" style={{ fontSize: 12 }}>证据：{item.evidence.slice(0, 3).join('；')}</Text>
+                          )}
+                        </Space>
+                      )}
+                    />
+                  </List.Item>
+                )}
+              />
+            </Card>
+            {(report.next_actions || []).length > 0 && (
+              <Card size="small" title="下一步">
+                <List size="small" dataSource={report.next_actions} renderItem={(item: string) => <List.Item>{item}</List.Item>} />
+              </Card>
+            )}
+          </Space>
+        ),
+      })
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '长篇创作诊断失败')
+    } finally {
+      setCommercialToolLoading('')
+    }
+  }
+
   const runLongformPressureTest = async () => {
     setCommercialToolLoading('longformPressure')
     try {
@@ -3950,7 +4025,7 @@ export default function NovelProjectWorkspace() {
   }
 
   const planningLoadingKey = ((): PlanningLoadingKey | undefined => {
-    const keys: PlanningLoadingKey[] = ['rollingPlan', 'future100Audit', 'future100Generate', 'longformPressure', 'topic', 'referenceDiagnosis', 'first30Retention', 'first30Repair']
+    const keys: PlanningLoadingKey[] = ['rollingPlan', 'future100Audit', 'future100Generate', 'longformPressure', 'longformCreationDiagnosis', 'topic', 'referenceDiagnosis', 'first30Retention', 'first30Repair']
     return keys.includes(commercialToolLoading as PlanningLoadingKey) ? commercialToolLoading as PlanningLoadingKey : undefined
   })()
   const workspaceAreaTabs: Array<{ key: WorkspaceArea; label: string; icon: React.ReactNode }> = [
@@ -3971,6 +4046,7 @@ export default function NovelProjectWorkspace() {
       future100_audit: () => { void runFuture100SkeletonAudit() },
       future100_generate: () => { void generateFuture100Skeleton() },
       longform_pressure: () => { void runLongformPressureTest() },
+      longform_creation_diagnosis: () => { void runLongformCreationDiagnosis() },
       topic_validation: () => { void runTopicValidation() },
       reference_diagnosis: () => { void openReferenceKnowledgeDiagnosis() },
       open_story_assets: () => openStoryAssetsWorkspace(),
@@ -4824,6 +4900,7 @@ export default function NovelProjectWorkspace() {
             <Card size="small" title="规划与选题">
               <Space direction="vertical" style={{ width: '100%' }}>
                 <Button block loading={commercialToolLoading === 'topic'} onClick={runTopicValidation}>原创选题验证</Button>
+                <Button block loading={commercialToolLoading === 'longformCreationDiagnosis'} onClick={runLongformCreationDiagnosis}>长篇创作诊断</Button>
                 <Button block loading={commercialToolLoading === 'longformPressure'} onClick={runLongformPressureTest}>300万字长线压力测试</Button>
                 <Button block loading={commercialToolLoading === 'future100Audit'} onClick={runFuture100SkeletonAudit}>未来100章骨架检查</Button>
                 <Button block type="primary" loading={commercialToolLoading === 'future100Generate'} onClick={generateFuture100Skeleton}>AI 生成未来100章骨架</Button>

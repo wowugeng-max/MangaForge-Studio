@@ -241,6 +241,54 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(model.pipeline.find(step => step.key === 'creation_contract')?.status).toBe('blocked')
   })
 
+  test('uses latest backend longform creation diagnosis review when available', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: basePlanning,
+      writing: baseWriting,
+      activeTasks: [],
+      selectedModelId: 12,
+      reviews: [
+        {
+          id: 1,
+          review_type: 'longform_creation_diagnosis',
+          created_at: '2026-06-01T00:00:00.000Z',
+          payload: JSON.stringify({
+            report: {
+              score: 71,
+              status: 'needs_repair',
+              dimensions: [
+                { key: 'core', label: '核心不偏', status: 'ok', score: 88, detail: '核心稳定', evidence: ['承诺清晰'] },
+                { key: 'story', label: '故事强度', status: 'warn', score: 72, detail: '冲突阶梯偏弱', evidence: ['未来10章 8/10'], warnings: ['未来10章缺2章'] },
+                { key: 'innovation', label: '创新差异', status: 'ok', score: 86, detail: '机制差异明确', evidence: ['阵法规则'] },
+                { key: 'reader_pull', label: '读者吸引', status: 'warn', score: 70, detail: '前30章待修复', evidence: ['前30章 70分'] },
+              ],
+            },
+          }),
+        },
+      ],
+    })
+
+    expect(model.creationContract.find(item => item.key === 'story')?.detail).toBe('冲突阶梯偏弱')
+    expect(model.creationContract.find(item => item.key === 'reader_pull')?.status).toBe('warn')
+    expect(model.pipeline.find(step => step.key === 'creation_contract')?.status).toBe('warning')
+    expect(model.metrics.creationDiagnosisScore).toBe(71)
+  })
+
+  test('offers a runnable longform creation diagnosis from the director workspace', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: basePlanning,
+      writing: baseWriting,
+      activeTasks: [],
+      selectedModelId: 12,
+    })
+
+    const action = model.secondaryActions.find(item => item.key === 'longform_creation_diagnosis')
+
+    expect(action?.area).toBe('planning')
+    expect(action?.label).toBe('运行创作诊断')
+    expect(action?.modelCall).toBe(true)
+  })
+
   test('uses chapter writing desk action when project governance is ready', () => {
     const model = buildAutoCreationDirectorModel({
       planning: basePlanning,

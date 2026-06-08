@@ -124,6 +124,7 @@ export function AutoCreationDirectorWorkspace({
             <Tag color={statusColor(model.status)} bordered={false}>{model.statusLabel}</Tag>
             <Tag bordered={false}>未来10章 {model.metrics.future10Label}</Tag>
             {model.metrics.first30Score !== null && <Tag bordered={false}>前30章 {model.metrics.first30Score}分</Tag>}
+            {model.metrics.creationDiagnosisScore !== null && <Tag color="geekblue" bordered={false}>创作诊断 {model.metrics.creationDiagnosisScore}分</Tag>}
             <Tag bordered={false}>剧情线 {model.metrics.storylineCount}</Tag>
           </Space>
           <Title level={4}>自动创作总控台</Title>

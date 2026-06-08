@@ -23,6 +23,7 @@ export type PlanningActionKey =
   | 'future100_audit'
   | 'future100_generate'
   | 'longform_pressure'
+  | 'longform_creation_diagnosis'
   | 'topic_validation'
   | 'reference_diagnosis'
   | 'open_story_assets'

@@ -13,6 +13,7 @@ import {
   listNovelOutlines,
   listNovelReviews,
   listNovelRuns,
+  listNovelSettingEntities,
   listNovelWorldbuilding,
   updateNovelOutline,
   updateNovelProject,
@@ -637,6 +638,169 @@ function buildLongformPressureTest(project: any, chapters: any[], outlines: any[
   }
 }
 
+function latestReport(reviews: any[], reviewType: string) {
+  const rows = asArray(reviews)
+    .filter(review => review?.review_type === reviewType)
+    .sort((a, b) => Date.parse(String(b.created_at || '')) - Date.parse(String(a.created_at || '')))
+  const payload = parseJsonLikePayload(rows[0]?.payload) || {}
+  return payload.report || payload.result?.report || payload
+}
+
+function dimensionStatus(score: number, block = false) {
+  if (block || score < 60) return 'block'
+  if (score < 80) return 'warn'
+  return 'ok'
+}
+
+function buildDiagnosisDimension(key: string, label: string, score: number, detail: string, evidence: string[], blockers: string[] = [], warnings: string[] = []) {
+  return {
+    key,
+    label,
+    score: Math.max(0, Math.min(100, Math.round(score))),
+    status: dimensionStatus(score, blockers.length > 0),
+    detail,
+    evidence: evidence.filter(Boolean).slice(0, 5),
+    blockers,
+    warnings,
+  }
+}
+
+function countSettingTypes(settings: any[], types: string[]) {
+  return settings.filter(item => types.includes(String(item.entity_type || item.type || ''))).length
+}
+
+export function buildLongformCreationDiagnosis(project: any, chapters: any[], outlines: any[], characters: any[], worldbuilding: any[], settingEntities: any[], reviews: any[]) {
+  const bible = project.reference_config?.writing_bible || {}
+  const storyState = project.reference_config?.story_state || {}
+  const writtenChapters = chapters.filter(chapter => String(chapter.chapter_text || '').trim())
+  const latestWrittenChapterNo = writtenChapters.reduce((max, chapter) => Math.max(max, Number(chapter.chapter_no || 0)), 0)
+  const readerPromise = compactText(bible.reader_promise || bible.core_selling_point || project.summary || '', 220)
+  const volumeOutlines = outlines.filter(item => ['volume', 'arc', 'part'].includes(String(item.outline_type || item.outline_level || '')))
+  const chapterOutlines = outlines.filter(item => String(item.outline_type || item.outline_level || '') === 'chapter')
+  const first30Report = latestReport(reviews, 'first30_retention_diagnosis')
+  const pressureReport = latestReport(reviews, 'longform_pressure_test')
+  const first30Score = Number(first30Report?.score || 0)
+  const pressureScore = Number(pressureReport?.score || 0)
+  const storylineCount = countSettingTypes(settingEntities, ['mainline', 'subplot', 'character_arc', 'relationship_arc', 'faction_arc', 'foreshadowing_arc'])
+  const systemAssetCount = countSettingTypes(settingEntities, ['ability', 'item', 'faction', 'location', 'realm', 'rule', 'foreshadowing'])
+  const activeCharacters = characters.filter(character => character.status !== 'archived')
+  const longText = [
+    project.title,
+    project.genre,
+    project.summary,
+    JSON.stringify(bible),
+    outlines.map(item => [item.title, item.summary, item.conflict, item.payoff].filter(Boolean).join(' ')).join('\n'),
+    settingEntities.map(item => [item.name, item.summary, item.entity_type].filter(Boolean).join(' ')).join('\n'),
+  ].join('\n')
+  const conflictSignals = ['压迫', '敌', '竞争', '追杀', '考核', '阴谋', '危机', '代价', '规则', '组织', '势力']
+  const innovationSignals = ['反转', '规则', '机制', '体系', '差异', '原创', '秘密', '金手指', '限制', '代价', '职业', '副本']
+  const payoffSignals = ['爽', '升级', '突破', '奖励', '收获', '打脸', '身份', '真相', '财富', '权力', '关系']
+  const conflictHits = conflictSignals.filter(word => longText.includes(word)).length
+  const innovationHits = innovationSignals.filter(word => longText.includes(word)).length
+  const payoffHits = payoffSignals.filter(word => longText.includes(word)).length
+  const storyStateFresh = Number(storyState.last_updated_chapter || 0) >= Math.max(0, latestWrittenChapterNo - 1)
+
+  const coreBlockers = [
+    wc(readerPromise) < 28 ? '缺少可执行的读者承诺/核心卖点。' : '',
+    volumeOutlines.length < 3 ? '分卷/阶段目标不足，长篇核心容易漂移。' : '',
+    storylineCount < 2 ? '主线/支线/角色线资产不足。' : '',
+  ].filter(Boolean)
+  const coreWarnings = [
+    !storyStateFresh && latestWrittenChapterNo > 0 ? '故事状态机落后于已写章节。' : '',
+  ].filter(Boolean)
+  const coreScore = 100
+    - coreBlockers.length * 22
+    - coreWarnings.length * 8
+    + Math.min(8, storylineCount)
+
+  const storyBlockers = [
+    chapterOutlines.length < 30 && chapters.length < 30 ? '章节级规划不足，无法支撑长篇连续生产。' : '',
+  ].filter(Boolean)
+  const storyWarnings = [
+    activeCharacters.length < 6 ? '活跃人物池偏薄，关系张力可能不足。' : '',
+    conflictHits < 5 ? '冲突阶梯信号不足。' : '',
+    pressureScore > 0 && pressureScore < 62 ? '长线压力测试未通过。' : '',
+  ].filter(Boolean)
+  const storyScore = Math.max(pressureScore || 0, 62)
+    + Math.min(18, chapterOutlines.length / 5)
+    + Math.min(10, activeCharacters.length)
+    + Math.min(10, conflictHits * 2)
+    - storyBlockers.length * 24
+    - storyWarnings.length * 5
+
+  const innovationBlockers = [
+    wc(readerPromise) < 28 ? '核心差异表达不足。' : '',
+  ].filter(Boolean)
+  const innovationWarnings = [
+    innovationHits < 4 ? '创新机制/反差信号偏少。' : '',
+    systemAssetCount < 2 ? '能力、物品、势力、地点等可扩展资产不足。' : '',
+  ].filter(Boolean)
+  const innovationScore = 68
+    + Math.min(18, innovationHits * 3)
+    + Math.min(12, systemAssetCount * 2)
+    - innovationBlockers.length * 25
+    - innovationWarnings.length * 6
+
+  const readerBlockers = [
+    !first30Score ? '缺少前30章留存诊断。' : '',
+    first30Score > 0 && first30Score < 65 ? '前30章留存低于基础商业线。' : '',
+    first30Report?.positioning?.promise_ready === false ? '前30章读者承诺未确认清晰。' : '',
+  ].filter(Boolean)
+  const readerWarnings = [
+    first30Score >= 65 && first30Score < 82 ? '前30章留存还未达到稳定追读线。' : '',
+    payoffHits < 5 ? '爽点/回报信号不足。' : '',
+  ].filter(Boolean)
+  const readerScore = (first30Score || 45)
+    + Math.min(10, payoffHits)
+    - readerBlockers.length * 10
+    - readerWarnings.length * 4
+
+  const dimensions = [
+    buildDiagnosisDimension('core', '核心不偏', coreScore, coreBlockers[0] || coreWarnings[0] || '读者承诺、分卷目标、剧情线和故事状态能约束长期方向。', [readerPromise, `分卷/阶段 ${volumeOutlines.length}`, `剧情线 ${storylineCount}`, storyStateFresh ? '状态机新鲜' : '状态机待同步'], coreBlockers, coreWarnings),
+    buildDiagnosisDimension('story', '故事强度', storyScore, storyBlockers[0] || storyWarnings[0] || '章节规划、冲突阶梯、人物池和长线压力能支撑连续推进。', [`章节规划 ${chapterOutlines.length || chapters.length}`, `活跃角色 ${activeCharacters.length}`, `冲突信号 ${conflictHits}`, pressureScore ? `压力测试 ${pressureScore}分` : '压力测试未运行'], storyBlockers, storyWarnings),
+    buildDiagnosisDimension('innovation', '创新差异', innovationScore, innovationBlockers[0] || innovationWarnings[0] || '题材承诺、机制反差和可扩展资产具备差异化表达。', [readerPromise, `创新信号 ${innovationHits}`, `设定资产 ${systemAssetCount}`], innovationBlockers, innovationWarnings),
+    buildDiagnosisDimension('reader_pull', '读者吸引', readerScore, readerBlockers[0] || readerWarnings[0] || '前30章留存、章末钩子和爽点回报达到连续生产前置线。', [first30Score ? `前30章 ${first30Score}分` : '前30章未诊断', first30Report?.summary || '', `回报信号 ${payoffHits}`], readerBlockers, readerWarnings),
+  ]
+  const blockers = dimensions.flatMap(item => item.blockers.map((message: string) => `${item.label}：${message}`))
+  const warnings = dimensions.flatMap(item => item.warnings.map((message: string) => `${item.label}：${message}`))
+  const score = Math.max(0, Math.min(100, Math.round(dimensions.reduce((sum, item) => sum + item.score, 0) / dimensions.length)))
+  const status = blockers.length > 0 || dimensions.some(item => item.status === 'block')
+    ? 'blocked'
+    : score >= 82 && dimensions.every(item => item.status === 'ok')
+      ? 'ready'
+      : 'needs_repair'
+  const nextActions = [
+    blockers.length > 0 ? `补齐阻塞项：${blockers[0]}` : '',
+    warnings.length > 0 ? `优先治理：${warnings[0]}` : '',
+    !first30Score ? '运行前30章留存诊断，建立开篇追读基线。' : '',
+    !pressureScore ? '运行300万字长线压力测试，确认分卷、人物池和扩展引擎。' : '',
+    status === 'ready' ? '可以进入章节任务书与连续生产，但每章仍需经过质检、状态同步和资产回填。' : '',
+  ].filter(Boolean)
+
+  return {
+    report_id: `longform-creation-${Date.now()}`,
+    created_at: new Date().toISOString(),
+    quality_bar: 'qidian_10k_subscription_baseline',
+    quality_bar_label: '起点1万均订基础线',
+    support_range_words: { min: 3000000, max: 10000000 },
+    score,
+    status,
+    summary: status === 'ready'
+      ? '长篇创作契约达到连续生产基础线。'
+      : status === 'blocked'
+        ? '长篇创作契约存在阻塞，不建议直接批量生成。'
+        : '长篇创作契约有商业化雏形，但仍需补强后再扩大自动生产。',
+    dimensions,
+    blockers,
+    warnings,
+    upstream_reports: {
+      first30_retention_score: first30Score || null,
+      longform_pressure_score: pressureScore || null,
+    },
+    next_actions: nextActions.length ? nextActions : ['保持前30章诊断、未来10章滚动规划、质检修订和故事状态同步循环。'],
+  }
+}
+
 function modelUsageRecommendation(model: any) {
   const name = `${model.display_name || ''} ${model.model_name || ''}`.toLowerCase()
   const caps = model.capabilities || {}
@@ -671,6 +835,9 @@ function interpretCreativeCommand(command: string, project: any) {
   }
   if (/300\s*万|三百万|长篇|长线|百万字|压力测试|塌线|扩容/.test(text)) {
     add('longform_pressure', '运行300万字长线压力测试', `/api/novel/projects/${project.id}/longform-pressure-test`, 'POST', true, '评估分卷容量、人物池、世界资产、冲突阶梯和回报循环是否能支撑长篇。')
+  }
+  if (/创作契约|核心不偏|故事强度|创新|读者吸引|一万均订|1\s*万均订|千万字|1000\s*万/.test(text)) {
+    add('longform_creation_diagnosis', '运行长篇创作健康诊断', `/api/novel/projects/${project.id}/longform-creation-diagnosis`, 'POST', true, '按起点1万均订基础线检查核心不偏、故事强度、创新差异和读者吸引。')
   }
   if (/债务|影响|改动|传播|状态机|一致性/.test(text)) {
     add('propagation_debt', '刷新传播债务', `/api/novel/projects/${project.id}/propagation-debt/refresh`, 'POST', true, '检查状态机、角色状态、分卷目标和未处理审稿风险。')
@@ -907,6 +1074,25 @@ export function registerNovelCommercialOpsRoutes(app: Express, ctx: CommercialOp
               status: report.status === 'scalable' ? 'ok' : 'warn',
               summary: `指令台300万字长线压力测试：${report.score} 分`,
               issues: report.weak_points.slice(0, 30).map((item: any) => `${item.area}：${item.issue}`),
+              payload: JSON.stringify({ command: plan.command, report }),
+            })
+            executed.push({ key: action.key, status: 'success', report, review_id: review.id })
+          } else if (action.key === 'longform_creation_diagnosis') {
+            const [chapters, outlines, characters, worldbuilding, settingEntities, reviews] = await Promise.all([
+              listNovelChapters(activeWorkspace, project.id),
+              listNovelOutlines(activeWorkspace, project.id),
+              listNovelCharacters(activeWorkspace, project.id),
+              listNovelWorldbuilding(activeWorkspace, project.id),
+              listNovelSettingEntities(activeWorkspace, project.id),
+              listNovelReviews(activeWorkspace, project.id),
+            ])
+            const report = buildLongformCreationDiagnosis(project, chapters, outlines, characters, worldbuilding, settingEntities, reviews)
+            const review = await createNovelReview(activeWorkspace, {
+              project_id: project.id,
+              review_type: 'longform_creation_diagnosis',
+              status: report.status === 'ready' ? 'ok' : 'warn',
+              summary: `长篇创作健康诊断：${report.score} 分，${report.summary}`,
+              issues: [...report.blockers, ...report.warnings].slice(0, 30),
               payload: JSON.stringify({ command: plan.command, report }),
             })
             executed.push({ key: action.key, status: 'success', report, review_id: review.id })
@@ -1188,6 +1374,41 @@ export function registerNovelCommercialOpsRoutes(app: Express, ctx: CommercialOp
         run_type: 'longform_pressure_test',
         step_name: 'longform-pressure',
         status: report.status === 'scalable' ? 'success' : 'warn',
+        output_ref: JSON.stringify({ report, review_id: review.id }),
+      })
+      res.json({ ok: true, report, review, run })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.post('/api/novel/projects/:id/longform-creation-diagnosis', async (req, res) => {
+    try {
+      const activeWorkspace = ctx.getWorkspace()
+      const project = await ctx.getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const [chapters, outlines, characters, worldbuilding, settingEntities, reviews] = await Promise.all([
+        listNovelChapters(activeWorkspace, project.id),
+        listNovelOutlines(activeWorkspace, project.id),
+        listNovelCharacters(activeWorkspace, project.id),
+        listNovelWorldbuilding(activeWorkspace, project.id),
+        listNovelSettingEntities(activeWorkspace, project.id),
+        listNovelReviews(activeWorkspace, project.id),
+      ])
+      const report = buildLongformCreationDiagnosis(project, chapters, outlines, characters, worldbuilding, settingEntities, reviews)
+      const review = await createNovelReview(activeWorkspace, {
+        project_id: project.id,
+        review_type: 'longform_creation_diagnosis',
+        status: report.status === 'ready' ? 'ok' : 'warn',
+        summary: `长篇创作健康诊断：${report.score} 分，${report.summary}`,
+        issues: [...report.blockers, ...report.warnings].slice(0, 30),
+        payload: JSON.stringify({ report }),
+      })
+      const run = await appendNovelRun(activeWorkspace, {
+        project_id: project.id,
+        run_type: 'longform_creation_diagnosis',
+        step_name: 'longform-creation-diagnosis',
+        status: report.status === 'ready' ? 'success' : 'warn',
         output_ref: JSON.stringify({ report, review_id: review.id }),
       })
       res.json({ ok: true, report, review, run })

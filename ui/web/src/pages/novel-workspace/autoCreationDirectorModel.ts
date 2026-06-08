@@ -82,6 +82,7 @@ export interface AutoCreationDirectorModel {
     future10Label: string
     first30Score: number | null
     storylineCount: number
+    creationDiagnosisScore: number | null
   }
   creationContract: AutoCreationContractItem[]
   pipeline: AutoCreationPipelineStep[]
@@ -92,6 +93,7 @@ export interface BuildAutoCreationDirectorModelInput {
   writing: WritingCockpitModel
   activeTasks?: AnyRecord[] | null
   selectedModelId?: any
+  reviews?: AnyRecord[] | null
 }
 
 const PLANNING_ACTION_LABELS: Record<PlanningActionKey, string> = {
@@ -102,6 +104,7 @@ const PLANNING_ACTION_LABELS: Record<PlanningActionKey, string> = {
   future100_audit: '检查未来100章',
   future100_generate: '生成未来100章',
   longform_pressure: '运行长线压力测试',
+  longform_creation_diagnosis: '运行创作诊断',
   topic_validation: '验证原创选题',
   reference_diagnosis: '诊断参考知识',
   open_story_assets: '打开设定资产',
@@ -138,6 +141,7 @@ const MODEL_CALL_ACTIONS = new Set<string>([
   'future100_audit',
   'future100_generate',
   'longform_pressure',
+  'longform_creation_diagnosis',
   'topic_validation',
   'reference_diagnosis',
   'run_first30_retention',
@@ -244,10 +248,72 @@ function storylineNeedsAction(planning: PlanningWorkspaceModel) {
   return planning.storylineBoard.status === 'missing' || planning.storylineBoard.status === 'needs_attention'
 }
 
+function parsePayload(value: any) {
+  if (!value) return null
+  if (typeof value === 'object') return value
+  try {
+    return JSON.parse(String(value))
+  } catch {
+    return null
+  }
+}
+
+function recordTime(record: AnyRecord) {
+  const timestamp = Date.parse(text(record?.created_at || record?.updated_at))
+  return Number.isFinite(timestamp) ? timestamp : 0
+}
+
+function latestLongformCreationReport(reviews: AnyRecord[]) {
+  const review = reviews
+    .filter(item => text(item?.review_type) === 'longform_creation_diagnosis')
+    .sort((a, b) => recordTime(b) - recordTime(a))[0]
+  const payload = parsePayload(review?.payload) || {}
+  return payload.report || payload.result?.report || payload
+}
+
 function contractPipelineStatus(contract: AutoCreationContractItem[]): AutoCreationPipelineStatus {
   if (contract.some(item => item.status === 'block')) return 'blocked'
   if (contract.some(item => item.status === 'warn')) return 'warning'
   return 'done'
+}
+
+function contractActionKey(key: AutoCreationContractItem['key'], status: AutoCreationContractStatus, fallback?: any): AutoCreationDirectorActionKey {
+  if (fallback) return fallback as AutoCreationDirectorActionKey
+  if (key === 'core') return 'open_story_assets'
+  if (key === 'story') return status === 'ok' ? 'enter_chapter_writing' : 'update_rolling_plan'
+  if (key === 'innovation') return status === 'ok' ? 'open_story_assets' : 'topic_validation'
+  return status === 'ok' ? 'enter_chapter_writing' : 'run_first30_retention'
+}
+
+function normalizeContractStatus(value: any): AutoCreationContractStatus {
+  const status = text(value).toLowerCase()
+  if (status === 'block' || status === 'blocked' || status === 'fail') return 'block'
+  if (status === 'warn' || status === 'warning' || status === 'needs_repair') return 'warn'
+  return 'ok'
+}
+
+function creationContractFromReview(reviews: AnyRecord[]): { score: number | null; contract: AutoCreationContractItem[] | null } {
+  const report = latestLongformCreationReport(reviews)
+  const dimensions = arrayValue(report?.dimensions)
+  if (!dimensions.length) return { score: null, contract: null }
+  const scoreValue = Number(report?.score)
+  return {
+    score: Number.isFinite(scoreValue) ? scoreValue : null,
+    contract: dimensions
+      .filter(item => ['core', 'story', 'innovation', 'reader_pull'].includes(text(item?.key)))
+      .map(item => {
+        const key = text(item?.key) as AutoCreationContractItem['key']
+        const status = normalizeContractStatus(item?.status)
+        return {
+          key,
+          label: text(item?.label, key === 'core' ? '核心不偏' : key === 'story' ? '故事强度' : key === 'innovation' ? '创新差异' : '读者吸引'),
+          status,
+          detail: text(item?.detail || arrayValue(item?.blockers)[0] || arrayValue(item?.warnings)[0], '后端诊断未给出说明。'),
+          evidence: arrayValue(item?.evidence).map(entry => text(entry)).filter(Boolean),
+          actionKey: contractActionKey(key, status, item?.actionKey || item?.action_key),
+        }
+      }),
+  }
 }
 
 function buildLongformCreationContract(planning: PlanningWorkspaceModel, writing: WritingCockpitModel): AutoCreationContractItem[] {
@@ -414,6 +480,7 @@ function buildPipeline(args: {
 
 function fallbackSecondaryActions(planning: PlanningWorkspaceModel, writing: WritingCockpitModel): AutoCreationDirectorAction[] {
   const actions: AutoCreationDirectorAction[] = [
+    planningAction('longform_creation_diagnosis', '按 300万-1000万字长篇目标检查核心不偏、故事强度、创新差异和读者吸引。'),
     planningAction('open_outline_tree', '查看章节、分卷和未来章节是否连续。'),
     planningAction('open_story_assets', '维护设定、剧情线和新资产候选。'),
     opsAction('open_task_center', '查看任务中心', '查看后台任务、失败记录和可恢复任务。'),
@@ -435,7 +502,8 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
   const running = hasRunningTasks(activeTasks)
   const retentionActionNeeded = retentionNeedsAction(planning)
   const storylineActionNeeded = storylineNeedsAction(planning)
-  const creationContract = buildLongformCreationContract(planning, writing)
+  const reviewedContract = creationContractFromReview(arrayValue(input.reviews))
+  const creationContract = reviewedContract.contract || buildLongformCreationContract(planning, writing)
   const blockers: string[] = []
   const confirmations: string[] = []
   let status: AutoCreationDirectorStatus
@@ -523,6 +591,7 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
       future10Label: planning.topStatus.future10Coverage.label,
       first30Score: planning.first30Retention.score,
       storylineCount: planning.storylineBoard.total,
+      creationDiagnosisScore: reviewedContract.score,
     },
     creationContract,
     pipeline,
