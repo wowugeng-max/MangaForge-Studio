@@ -781,6 +781,96 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(model.confirmations).toContain('安全连写批次存在质量风险')
   })
 
+  test('releases safe batch risk after repair tasks are resolved and chapters are rechecked', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        topStatus: {
+          ...basePlanning.topStatus,
+          future100Coverage: { ready: true, planned: 100, required: 100, missingChapters: [], label: '100/100' },
+        },
+      },
+      writing: {
+        ...baseWriting,
+        nextChapter: { ...baseWriting.nextChapter, id: 11, chapterNo: 11, title: '内门来人' },
+        chapterPlanningDesk: {
+          ...baseWriting.chapterPlanningDesk,
+          readiness: 'ready',
+          statusLabel: '本章可写',
+          scenePlanStatus: 'ready',
+          sceneCards: [
+            { title: '余波清算', goal: '试炼结果引发宗门震动' },
+            { title: '内门招揽', goal: '新势力提出条件' },
+          ],
+          recommendedPlannerAction: { key: 'confirm_plan_and_write_draft', label: '确认并生成' },
+        },
+        topStatus: {
+          ...baseWriting.topStatus,
+          nextActionLabel: '确认并生成',
+          primaryActionKey: 'confirm_plan_and_write_draft',
+        },
+        primaryActionKey: 'confirm_plan_and_write_draft',
+      },
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: { last_updated_chapter: 10 },
+      chapters: [
+        { id: 8, chapter_no: 8, title: '试炼前夜', chapter_text: '正文'.repeat(1600) },
+        { id: 9, chapter_no: 9, title: '阵盘裂纹', chapter_text: '正文'.repeat(1550) },
+        { id: 10, chapter_no: 10, title: '外门震动', chapter_text: '正文'.repeat(1510) },
+      ],
+      reviews: [
+        { id: 101, chapter_id: 8, review_type: 'prose_quality', created_at: '2026-06-03T01:00:00.000Z', payload: JSON.stringify({ score: 82, passed: true }) },
+        { id: 102, chapter_id: 9, review_type: 'prose_quality', created_at: '2026-06-03T01:01:00.000Z', payload: JSON.stringify({ score: 85, passed: true }) },
+        { id: 103, chapter_id: 10, review_type: 'prose_quality', created_at: '2026-06-03T01:02:00.000Z', payload: JSON.stringify({ score: 86, passed: true }) },
+        { id: 201, chapter_id: 9, review_type: 'chapter_core_drift', created_at: '2026-06-03T01:03:00.000Z', payload: JSON.stringify({ core_drift: { status: 'warn', score: 70, drift_risks: ['主线推进不足'] } }) },
+        { id: 202, chapter_id: 10, review_type: 'reader_payoff_sync', created_at: '2026-06-03T01:04:00.000Z', payload: JSON.stringify({ reader_payoff_sync: { status: 'warn', debt_count: 2, missed: ['阵盘反噬回报', '内门压力'] } }) },
+        { id: 203, chapter_id: 10, review_type: 'storyline_sync', created_at: '2026-06-03T01:05:00.000Z', payload: JSON.stringify({ storyline_sync: { status: 'warn', missed: ['内门线推进'], forbidden_touched: ['幕后主使'] } }) },
+        { id: 301, chapter_id: 9, review_type: 'prose_quality', created_at: '2026-06-03T02:10:00.000Z', payload: JSON.stringify({ score: 84, passed: true }) },
+        { id: 302, chapter_id: 10, review_type: 'prose_quality', created_at: '2026-06-03T02:11:00.000Z', payload: JSON.stringify({ score: 86, passed: true }) },
+      ],
+      runRecords: [
+        {
+          id: 10,
+          run_type: 'batch_generate_prose',
+          created_at: '2026-06-03T00:00:00.000Z',
+          status: 'success',
+          input_ref: JSON.stringify({ source: 'auto_creation_safe_batch', safety_limit: 3 }),
+          output_ref: JSON.stringify({
+            total: 3,
+            success: 3,
+            failed: 0,
+            chapters: [
+              { id: 8, chapter_no: 8, title: '试炼前夜', status: 'success', score: 82, word_count: 3180 },
+              { id: 9, chapter_no: 9, title: '阵盘裂纹', status: 'success', score: 85, word_count: 3090 },
+              { id: 10, chapter_no: 10, title: '外门震动', status: 'success', score: 86, word_count: 3021 },
+            ],
+          }),
+        },
+        {
+          id: 11,
+          run_type: 'longform_production_repair',
+          created_at: '2026-06-03T02:00:00.000Z',
+          status: 'completed',
+          input_ref: JSON.stringify({ source: 'auto_creation_safe_batch_risk', batch_created_at: '2026-06-03T00:00:00.000Z' }),
+          output_ref: JSON.stringify({
+            tasks: [
+              { task_type: 'repair_quality', issue_type: 'core_drift', task_status: 'resolved', chapter_id: 9, chapter_no: 9 },
+              { task_type: 'repair_quality', issue_type: 'reader_payoff_debt', task_status: 'resolved', chapter_id: 10, chapter_no: 10 },
+              { task_type: 'repair_quality', issue_type: 'storyline_sync_risk', task_status: 'resolved', chapter_id: 10, chapter_no: 10 },
+            ],
+          }),
+        },
+      ],
+    } as any)
+
+    expect(model.batchReviewQueue.status).toBe('done')
+    expect(model.batchReviewQueue.riskRadar.status).toBe('ok')
+    expect(model.batchReviewQueue.riskRadar.repairTasks).toHaveLength(0)
+    expect(model.status).toBe('ready')
+    expect(model.batchReviewQueue.nextAction.key).toBe('start_safe_batch_generation')
+  })
+
   test('keeps acceptance workflow as the only next step after prose exists', () => {
     const model = buildAutoCreationDirectorModel({
       planning: basePlanning,

@@ -524,10 +524,82 @@ function batchRepairTask(args: {
   }
 }
 
+function isResolvedTaskStatus(value: any) {
+  return ['resolved', 'done', 'completed', 'success', 'closed'].includes(text(value).toLowerCase())
+}
+
+function isCompletedRepairRun(run: AnyRecord) {
+  return ['completed', 'success', 'done'].includes(text(run?.status).toLowerCase())
+}
+
+function batchRiskIssueKeys(item: { chapterId: any; chapterNo: number }, issueType: string) {
+  return [
+    item.chapterId !== null && item.chapterId !== undefined ? `id:${String(item.chapterId)}:${issueType}` : '',
+    item.chapterNo > 0 ? `no:${item.chapterNo}:${issueType}` : '',
+  ].filter(Boolean)
+}
+
+function batchRiskIssueResolved(keys: Set<string> | undefined, item: AutoCreationBatchReviewItem, issueType: string) {
+  if (!keys) return false
+  return batchRiskIssueKeys(item, issueType).some(key => keys.has(key))
+}
+
+function buildResolvedBatchRiskIssueKeys(args: {
+  runRecords: AnyRecord[]
+  batchCreatedAt: string
+  chapters: AnyRecord[]
+  reviews: AnyRecord[]
+}) {
+  const resolvedKeys = new Set<string>()
+  const batchCreatedAt = text(args.batchCreatedAt)
+  const repairRuns = args.runRecords
+    .filter(run => text(run?.run_type) === 'longform_production_repair')
+    .map(run => ({
+      run,
+      input: parsePayload(run?.input_ref) || {},
+      output: parsePayload(run?.output_ref) || {},
+    }))
+    .filter(entry => text(entry.input?.source) === 'auto_creation_safe_batch_risk')
+    .filter(entry => !batchCreatedAt || text(entry.input?.batch_created_at) === batchCreatedAt)
+    .filter(entry => isCompletedRepairRun(entry.run))
+
+  for (const entry of repairRuns) {
+    const runCompletedAt = Date.parse(text(entry.run?.completed_at || entry.run?.finished_at || entry.run?.updated_at || entry.run?.created_at))
+    const repairTime = Number.isFinite(runCompletedAt) ? runCompletedAt : recordTime(entry.run)
+    const tasks = [
+      ...arrayValue(entry.output?.tasks),
+      ...arrayValue(entry.output?.repairTasks),
+    ]
+    for (const task of tasks) {
+      if (!isResolvedTaskStatus(task?.task_status ?? task?.status)) continue
+      const issueType = text(task?.issue_type ?? task?.issueType)
+      if (!issueType) continue
+      const taskChapterId = task?.chapter_id ?? task?.chapterId ?? null
+      const taskChapterNo = Number(task?.chapter_no ?? task?.chapterNo ?? 0)
+      const chapter = findChapter(args.chapters, { chapterId: taskChapterId, chapterNo: taskChapterNo })
+      if (!chapter) continue
+      const chapterNo = Number(chapter?.chapter_no ?? chapter?.chapterNo ?? taskChapterNo)
+      const taskResolvedAt = Date.parse(text(task?.resolved_at || task?.updated_at || task?.created_at))
+      const resolvedAfter = Number.isFinite(taskResolvedAt) ? Math.max(repairTime, taskResolvedAt) : repairTime
+      const latestQuality = latestQualityReviewForChapter(args.reviews, chapter, chapterNo)
+      if (!qualityReviewPassed(latestQuality) || recordTime(latestQuality || {}) <= resolvedAfter) continue
+      for (const key of batchRiskIssueKeys({
+        chapterId: chapter?.id ?? chapter?.chapter_id ?? taskChapterId,
+        chapterNo,
+      }, issueType)) {
+        resolvedKeys.add(key)
+      }
+    }
+  }
+
+  return resolvedKeys
+}
+
 function buildBatchRiskRadar(args: {
   items: AutoCreationBatchReviewItem[]
   chapters: AnyRecord[]
   reviews: AnyRecord[]
+  resolvedIssueKeys?: Set<string>
 }): AutoCreationBatchRiskRadar {
   const successfulItems = args.items.filter(item => item.status === 'success')
   const qualityScores = successfulItems
@@ -559,10 +631,10 @@ function buildBatchRiskRadar(args: {
     const qualityReview = latestQualityReviewForChapter(args.reviews, chapter, item.chapterNo)
     const quality = qualityPayload(qualityReview)
     const qualityScore = numberValue(quality?.score ?? quality?.overall_score ?? quality?.quality_score ?? item.score)
-    const coreCount = coreRiskCount(coreReview)
-    const payoffCount = payoffDebtCount(payoffReview)
-    const storylineCount = storylineRiskCount(storylineReview)
-    const readabilityCount = readabilityRiskCount(readabilityReview)
+    const coreCount = batchRiskIssueResolved(args.resolvedIssueKeys, item, 'core_drift') ? 0 : coreRiskCount(coreReview)
+    const payoffCount = batchRiskIssueResolved(args.resolvedIssueKeys, item, 'reader_payoff_debt') ? 0 : payoffDebtCount(payoffReview)
+    const storylineCount = batchRiskIssueResolved(args.resolvedIssueKeys, item, 'storyline_sync_risk') ? 0 : storylineRiskCount(storylineReview)
+    const readabilityCount = batchRiskIssueResolved(args.resolvedIssueKeys, item, 'readability_risk') ? 0 : readabilityRiskCount(readabilityReview)
     const lowQuality = qualityScore !== null && qualityScore < BATCH_DELIVERY_QUALITY_THRESHOLD
 
     coreRiskTotal += coreCount
@@ -986,7 +1058,13 @@ function buildBatchReviewQueue(args: {
   const allSuccessfulChaptersDelivered = !hasFailure && items.length > 0 && items
     .filter(item => item.status === 'success')
     .every(item => item.delivered)
-  const riskRadar = buildBatchRiskRadar({ items, chapters: args.chapters, reviews })
+  const resolvedIssueKeys = buildResolvedBatchRiskIssueKeys({
+    runRecords,
+    batchCreatedAt: text(latest.run?.created_at),
+    chapters: args.chapters,
+    reviews,
+  })
+  const riskRadar = buildBatchRiskRadar({ items, chapters: args.chapters, reviews, resolvedIssueKeys })
   const hasDeliveredBatchRisk = allSuccessfulChaptersDelivered && riskRadar.status === 'warn'
   const status: AutoCreationBatchReviewStatus = hasFailure
     ? 'warn'
