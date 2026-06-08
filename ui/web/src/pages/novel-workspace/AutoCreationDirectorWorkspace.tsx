@@ -195,6 +195,37 @@ export function AutoCreationDirectorWorkspace({
         </div>
       </div>
 
+      <section className={`auto-director-panel auto-director-compass-panel auto-director-compass-panel-${model.longformCompass.status}`}>
+        <div className="auto-director-panel-title">
+          <FundProjectionScreenOutlined />
+          <span>长篇作品罗盘</span>
+          <Tag color={model.longformCompass.status === 'ready' ? 'green' : 'gold'} bordered={false}>{model.longformCompass.label}</Tag>
+          <Tag bordered={false}>{model.longformCompass.sourceLabel}</Tag>
+        </div>
+        <Text className="auto-director-compass-summary">{model.longformCompass.summary}</Text>
+        <div className="auto-director-compass-grid">
+          {model.longformCompass.axes.map(axis => (
+            <div key={axis.key} className={`auto-director-compass-axis auto-director-compass-axis-${axis.locked ? 'locked' : 'flexible'}`}>
+              <span>
+                <strong>{axis.label}</strong>
+                {axis.locked && <Tag color="blue" bordered={false}>不可漂移</Tag>}
+              </span>
+              <Text>{axis.value}</Text>
+            </div>
+          ))}
+        </div>
+        <div className="auto-director-compass-boundaries">
+          <div>
+            <Text strong>不可漂移</Text>
+            {model.longformCompass.immutableRules.slice(0, 4).map(rule => <Text key={rule} type="secondary">{rule}</Text>)}
+          </div>
+          <div>
+            <Text strong>可调整区</Text>
+            {model.longformCompass.flexibleZones.slice(0, 4).map(zone => <Text key={zone} type="secondary">{zone}</Text>)}
+          </div>
+        </div>
+      </section>
+
       <section className="auto-director-panel auto-director-contract-panel">
         <div className="auto-director-panel-title">
           <CheckCircleOutlined />

@@ -68,6 +68,31 @@ export interface AutoCreationContractItem {
   actionKey: AutoCreationDirectorActionKey
 }
 
+export interface AutoCreationLongformCompassAxis {
+  key:
+    | 'reader_promise'
+    | 'protagonist_drive'
+    | 'core_conflict'
+    | 'world_hook'
+    | 'innovation_hook'
+    | 'payoff_loop'
+    | 'ending_direction'
+  label: string
+  value: string
+  locked: boolean
+}
+
+export interface AutoCreationLongformCompass {
+  status: 'ready' | 'needs_attention'
+  label: string
+  summary: string
+  sourceLabel: string
+  readerPromise: string
+  axes: AutoCreationLongformCompassAxis[]
+  immutableRules: string[]
+  flexibleZones: string[]
+}
+
 export interface AutoCreationBatchGuardrailSignal {
   label: string
   status: AutoCreationBatchGuardrailSignalStatus
@@ -216,6 +241,7 @@ export interface AutoCreationDirectorModel {
   }
   longformRhythm: PlanningWorkspaceModel['longformRhythm']
   longformCapacity: AutoCreationLongformCapacity
+  longformCompass: AutoCreationLongformCompass
   creationContract: AutoCreationContractItem[]
   batchGuardrail: AutoCreationBatchGuardrail
   batchReviewQueue: AutoCreationBatchReviewQueue
@@ -813,6 +839,87 @@ function latestLongformCreationReport(reviews: AnyRecord[]) {
     .sort((a, b) => recordTime(b) - recordTime(a))[0]
   const payload = parsePayload(review?.payload) || {}
   return payload.report || payload.result?.report || payload
+}
+
+const COMPASS_AXIS_LABELS: Record<AutoCreationLongformCompassAxis['key'], string> = {
+  reader_promise: '读者承诺',
+  protagonist_drive: '主角长期欲望',
+  core_conflict: '核心矛盾',
+  world_hook: '世界奇点',
+  innovation_hook: '创新卖点',
+  payoff_loop: '长期爽点循环',
+  ending_direction: '结局方向',
+}
+
+function compassAxis(
+  key: AutoCreationLongformCompassAxis['key'],
+  value: any,
+  locked = true,
+): AutoCreationLongformCompassAxis | null {
+  const normalized = text(value)
+  if (!normalized) return null
+  return {
+    key,
+    label: COMPASS_AXIS_LABELS[key],
+    value: normalized,
+    locked,
+  }
+}
+
+function compactList(values: any[], limit: number) {
+  return Array.from(new Set(values.map(item => text(item)).filter(Boolean))).slice(0, limit)
+}
+
+function buildLongformCompass(planning: PlanningWorkspaceModel, reviews: AnyRecord[]): AutoCreationLongformCompass {
+  const report = latestLongformCreationReport(reviews)
+  const reviewCompass = report?.compass || report?.longform_compass || {}
+  const mainline = planning.mainline
+  const readerPromise = firstText(reviewCompass.reader_promise, reviewCompass.readerPromise, mainline.readerPromise)
+  const coreConflict = firstText(reviewCompass.core_conflict, reviewCompass.coreConflict, mainline.currentStageConflict)
+  const innovationHook = firstText(reviewCompass.innovation_hook, reviewCompass.innovationHook, mainline.readerPromise)
+  const payoffLoop = firstText(reviewCompass.payoff_loop, reviewCompass.payoffLoop, mainline.payoffModel)
+  const endingDirection = firstText(reviewCompass.ending_direction, reviewCompass.endingDirection, mainline.currentVolumeGoal)
+  const axes = [
+    compassAxis('reader_promise', readerPromise),
+    compassAxis('protagonist_drive', firstText(reviewCompass.protagonist_drive, reviewCompass.protagonistDrive)),
+    compassAxis('core_conflict', coreConflict),
+    compassAxis('world_hook', firstText(reviewCompass.world_hook, reviewCompass.worldHook)),
+    compassAxis('innovation_hook', innovationHook),
+    compassAxis('payoff_loop', payoffLoop),
+    compassAxis('ending_direction', endingDirection),
+  ].filter((item): item is AutoCreationLongformCompassAxis => Boolean(item))
+  const immutableRules = compactList([
+    ...arrayValue(reviewCompass.immutable_rules),
+    ...arrayValue(reviewCompass.immutableRules),
+    readerPromise ? `读者承诺不可漂移：${readerPromise}` : '',
+    coreConflict ? `核心矛盾不可绕开：${coreConflict}` : '',
+    payoffLoop ? `长期爽点循环必须可感知：${payoffLoop}` : '',
+  ], 5)
+  const flexibleZones = compactList([
+    ...arrayValue(reviewCompass.flexible_zones),
+    ...arrayValue(reviewCompass.flexibleZones),
+    '副本、支线和新资产可以调整，但必须服务当前卷目标。',
+    '角色出场顺序和场景形态可调整，但不能改主角长期欲望。',
+  ], 5)
+  const missing = [
+    !readerPromise ? '读者承诺' : '',
+    !coreConflict ? '核心矛盾' : '',
+    !payoffLoop ? '长期爽点循环' : '',
+  ].filter(Boolean)
+  const status: AutoCreationLongformCompass['status'] = missing.length ? 'needs_attention' : 'ready'
+
+  return {
+    status,
+    label: status === 'ready' ? '罗盘就绪' : `缺 ${missing.join('、')}`,
+    summary: status === 'ready'
+      ? '这组长期约束会约束章节任务书、安全连写和交稿复盘，避免千万字生产时核心漂移。'
+      : '长篇自动生产前，先补齐读者承诺、核心矛盾和长期爽点循环。',
+    sourceLabel: Object.keys(reviewCompass).length ? '来自创作诊断' : '来自当前规划',
+    readerPromise,
+    axes,
+    immutableRules,
+    flexibleZones,
+  }
 }
 
 function contractPipelineStatus(contract: AutoCreationContractItem[]): AutoCreationPipelineStatus {
@@ -1545,6 +1652,7 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
   const rhythmActionNeeded = rhythmNeedsAction(planning)
   const reviewedContract = creationContractFromReview(arrayValue(input.reviews))
   const creationContract = reviewedContract.contract || buildLongformCreationContract(planning, writing)
+  const longformCompass = buildLongformCompass(planning, arrayValue(input.reviews))
   const longformCapacity = buildLongformCapacity(planning)
   const batchReviewQueue = buildBatchReviewQueue({
     runRecords,
@@ -1692,6 +1800,7 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
     },
     longformRhythm: planning.longformRhythm,
     longformCapacity,
+    longformCompass,
     creationContract,
     batchGuardrail,
     batchReviewQueue,

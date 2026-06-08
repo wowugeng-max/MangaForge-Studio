@@ -290,6 +290,72 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(model.pipeline.find(step => step.key === 'creation_contract')?.status).toBe('done')
   })
 
+  test('builds a longform compass from planning so the story core stays visible', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: basePlanning,
+      writing: baseWriting,
+      activeTasks: [],
+      selectedModelId: 12,
+    })
+
+    expect(model.longformCompass.status).toBe('ready')
+    expect(model.longformCompass.readerPromise).toBe('寒门少年以阵法反压宗门秩序')
+    expect(model.longformCompass.axes.map(item => item.key)).toEqual([
+      'reader_promise',
+      'core_conflict',
+      'innovation_hook',
+      'payoff_loop',
+      'ending_direction',
+    ])
+    expect(model.longformCompass.axes.find(item => item.key === 'core_conflict')?.value).toContain('执事逼主角交出阵盘')
+    expect(model.longformCompass.immutableRules[0]).toContain('读者承诺不可漂移')
+    expect(model.longformCompass.flexibleZones).toContain('副本、支线和新资产可以调整，但必须服务当前卷目标。')
+  })
+
+  test('prefers backend longform compass from the latest creation diagnosis review', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: basePlanning,
+      writing: baseWriting,
+      activeTasks: [],
+      selectedModelId: 12,
+      reviews: [{
+        id: 91,
+        review_type: 'longform_creation_diagnosis',
+        created_at: '2026-06-06T01:00:00.000Z',
+        payload: JSON.stringify({
+          report: {
+            score: 91,
+            status: 'ready',
+            dimensions: [
+              { key: 'core', label: '核心不偏', status: 'ok', detail: '核心稳定', evidence: ['核心证据'] },
+              { key: 'story', label: '故事强度', status: 'ok', detail: '故事稳定', evidence: ['故事证据'] },
+              { key: 'innovation', label: '创新差异', status: 'ok', detail: '创新稳定', evidence: ['创新证据'] },
+              { key: 'reader_pull', label: '读者吸引', status: 'ok', detail: '吸引稳定', evidence: ['读者证据'] },
+            ],
+            compass: {
+              reader_promise: '规则怪谈里用超人身体和智者脑力互补破局',
+              protagonist_drive: '活下去并打穿规则牢笼',
+              core_conflict: '超人蛮力与规则判定持续碰撞',
+              world_hook: '每个副本都有可钻但会反噬的规则',
+              innovation_hook: '超人力量不直接碾压，必须被规则约束后再反杀',
+              payoff_loop: '每章一次规则发现或力量反制，每卷一次副本级真相回收',
+              ending_direction: '找出规则之源并夺回制定规则的权力',
+              immutable_rules: ['超人力量不能无代价碾压规则', '双主角互补关系不能拆散'],
+              flexible_zones: ['副本题材可换', '支线角色可增减'],
+            },
+          },
+        }),
+      }],
+    })
+
+    expect(model.metrics.creationDiagnosisScore).toBe(91)
+    expect(model.longformCompass.readerPromise).toBe('规则怪谈里用超人身体和智者脑力互补破局')
+    expect(model.longformCompass.axes.find(item => item.key === 'world_hook')?.value).toContain('副本')
+    expect(model.longformCompass.axes.find(item => item.key === 'protagonist_drive')?.value).toContain('活下去')
+    expect(model.longformCompass.immutableRules).toContain('超人力量不能无代价碾压规则')
+    expect(model.longformCompass.flexibleZones).toContain('副本题材可换')
+  })
+
   test('marks the creation contract risky when promise, conflict, or retention are weak', () => {
     const model = buildAutoCreationDirectorModel({
       planning: {

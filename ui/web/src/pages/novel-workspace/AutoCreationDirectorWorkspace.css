@@ -165,6 +165,78 @@
   margin-bottom: 12px;
 }
 
+.auto-director-compass-panel {
+  display: grid;
+  gap: 10px;
+  border-color: #c7d2fe;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+}
+
+.auto-director-compass-panel-needs_attention {
+  border-color: #fde68a;
+  background: #fffdf5;
+}
+
+.auto-director-compass-summary {
+  color: #475569;
+}
+
+.auto-director-compass-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.auto-director-compass-axis {
+  min-width: 0;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.82);
+  padding: 9px 10px;
+  display: grid;
+  gap: 5px;
+}
+
+.auto-director-compass-axis span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+}
+
+.auto-director-compass-axis strong {
+  color: #0f172a;
+  font-size: 12px;
+}
+
+.auto-director-compass-axis .ant-typography {
+  color: #334155;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.auto-director-compass-boundaries {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.auto-director-compass-boundaries > div {
+  min-width: 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.78);
+  padding: 9px 10px;
+  display: grid;
+  gap: 5px;
+}
+
+.auto-director-compass-boundaries .ant-typography-secondary {
+  font-size: 12px;
+  line-height: 18px;
+}
+
 .auto-director-contract-panel {
   display: grid;
   gap: 4px;
@@ -846,6 +918,10 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .auto-director-compass-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .auto-director-batch-layout {
     grid-template-columns: 1fr;
   }
@@ -866,6 +942,11 @@
   }
 
   .auto-director-contract-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .auto-director-compass-grid,
+  .auto-director-compass-boundaries {
     grid-template-columns: 1fr;
   }
 

@@ -669,6 +669,51 @@ function countSettingTypes(settings: any[], types: string[]) {
   return settings.filter(item => types.includes(String(item.entity_type || item.type || ''))).length
 }
 
+function firstText(...values: any[]) {
+  for (const value of values) {
+    const normalized = String(value || '').trim()
+    if (normalized) return normalized
+  }
+  return ''
+}
+
+function uniqueTexts(values: any[], limit: number) {
+  return Array.from(new Set(values.map(item => String(item || '').trim()).filter(Boolean))).slice(0, limit)
+}
+
+function buildLongformCompass(project: any, bible: any, outlines: any[], settingEntities: any[], worldbuilding: any[]) {
+  const volumeOutlines = outlines.filter(item => ['volume', 'arc', 'part'].includes(String(item.outline_type || item.outline_level || '')))
+  const firstConflict = firstText(...outlines.map(item => item.conflict), ...outlines.map(item => item.summary))
+  const systemAsset = settingEntities.find(item => ['ability', 'rule', 'realm', 'item'].includes(String(item.entity_type || item.type || '')))
+  const worldAsset = worldbuilding[0] || settingEntities.find(item => ['location', 'faction'].includes(String(item.entity_type || item.type || '')))
+  const readerPromise = compactText(firstText(bible.reader_promise, bible.core_selling_point, project.summary), 180)
+  const coreConflict = compactText(firstText(bible.core_conflict, firstConflict, project.summary), 180)
+  const innovationHook = compactText(firstText(bible.innovation_hook, bible.core_selling_point, systemAsset?.summary, systemAsset?.name, project.summary), 180)
+  const payoffLoop = compactText(firstText(bible.payoff_loop, bible.payoff_density, bible.reader_promise, volumeOutlines[0]?.payoff), 180)
+  const endingDirection = compactText(firstText(bible.ending_direction, project.summary, volumeOutlines.at(-1)?.summary), 180)
+
+  return {
+    reader_promise: readerPromise,
+    protagonist_drive: compactText(firstText(bible.protagonist_drive, project.summary), 180),
+    core_conflict: coreConflict,
+    world_hook: compactText(firstText(bible.world_hook, worldAsset?.content, worldAsset?.summary, worldAsset?.name), 180),
+    innovation_hook: innovationHook,
+    payoff_loop: payoffLoop,
+    ending_direction: endingDirection,
+    immutable_rules: uniqueTexts([
+      readerPromise ? `读者承诺不可漂移：${readerPromise}` : '',
+      coreConflict ? `核心矛盾不可绕开：${coreConflict}` : '',
+      innovationHook ? `创新卖点不能被写成普通套路：${innovationHook}` : '',
+      payoffLoop ? `长期爽点循环必须持续兑现：${payoffLoop}` : '',
+    ], 6),
+    flexible_zones: uniqueTexts([
+      '地图、副本、支线人物和新资产可以扩展，但必须服务读者承诺与当前卷目标。',
+      '单章场景、打斗方式和对话网感可以调整，但不能改主角长期欲望和核心矛盾。',
+      '支线可增删，伏笔可延后，但不能无回报制造长期悬空债务。',
+    ], 6),
+  }
+}
+
 export function buildLongformCreationDiagnosis(project: any, chapters: any[], outlines: any[], characters: any[], worldbuilding: any[], settingEntities: any[], reviews: any[]) {
   const bible = project.reference_config?.writing_bible || {}
   const storyState = project.reference_config?.story_state || {}
@@ -776,6 +821,7 @@ export function buildLongformCreationDiagnosis(project: any, chapters: any[], ou
     !pressureScore ? '运行300万字长线压力测试，确认分卷、人物池和扩展引擎。' : '',
     status === 'ready' ? '可以进入章节任务书与连续生产，但每章仍需经过质检、状态同步和资产回填。' : '',
   ].filter(Boolean)
+  const compass = buildLongformCompass(project, bible, outlines, settingEntities, worldbuilding)
 
   return {
     report_id: `longform-creation-${Date.now()}`,
@@ -791,6 +837,7 @@ export function buildLongformCreationDiagnosis(project: any, chapters: any[], ou
         ? '长篇创作契约存在阻塞，不建议直接批量生成。'
         : '长篇创作契约有商业化雏形，但仍需补强后再扩大自动生产。',
     dimensions,
+    compass,
     blockers,
     warnings,
     upstream_reports: {
