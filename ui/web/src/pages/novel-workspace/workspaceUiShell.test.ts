@@ -245,6 +245,8 @@ describe('commercial writing workspace UI shell', () => {
     expect(projectWorkspace).toContain('createSafeBatchRiskRepairQueue')
     expect(projectWorkspace).toContain('create_safe_batch_risk_repair')
     expect(projectWorkspace).toContain('auto_creation_safe_batch_risk')
+    expect(projectWorkspace).toContain('batch_plan_risk_count')
+    expect(projectWorkspace).toContain('批次任务书兑现')
     expect(projectWorkspace).toContain('stepGenerateProse({')
     expect(projectWorkspace).toContain('limit: autoCreationDirectorModel.batchGuardrail.safeChapterCount')
     expect(projectWorkspace).toContain('longformCompass: autoCreationDirectorModel.longformCompass')

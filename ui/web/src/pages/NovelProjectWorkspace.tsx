@@ -2657,10 +2657,11 @@ export default function NovelProjectWorkspace() {
             payoff_debt_count: reviewQueue.riskRadar.payoffDebtCount,
             storyline_risk_count: reviewQueue.riskRadar.storylineRiskCount,
             readability_risk_count: reviewQueue.riskRadar.readabilityRiskCount,
+            batch_plan_risk_count: reviewQueue.riskRadar.batchPlanRiskCount,
             task_count: tasks.length,
           },
           recommendations: [
-            '先处理高危核心偏移、剧情线禁揭和读者回报欠账，再开启下一批安全连写。',
+            '先处理高危核心偏移、剧情线禁揭、读者回报欠账和批次任务书兑现风险，再开启下一批安全连写。',
             '每个修复任务处理后执行质量复检、故事状态同步和批次风险复盘。',
           ],
           tasks,
