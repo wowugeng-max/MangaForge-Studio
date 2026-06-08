@@ -21,6 +21,8 @@ export type AutoCreationDirectorActionKey =
 
 export type AutoCreationPipelineStatus = 'done' | 'active' | 'pending' | 'blocked' | 'warning'
 export type AutoCreationContractStatus = 'ok' | 'warn' | 'block'
+export type AutoCreationBatchGuardrailStatus = 'ready' | 'caution' | 'blocked'
+export type AutoCreationBatchGuardrailSignalStatus = 'ok' | 'warn' | 'block'
 
 export interface AutoCreationDirectorAction {
   area: AutoCreationDirectorArea
@@ -40,6 +42,7 @@ export interface AutoCreationPipelineStep {
     | 'story_assets'
     | 'retention_curve'
     | 'chapter_planning'
+    | 'batch_guardrail'
     | 'chapter_execution'
     | 'quality_gate'
     | 'canon_sync'
@@ -56,6 +59,21 @@ export interface AutoCreationContractItem {
   detail: string
   evidence: string[]
   actionKey: AutoCreationDirectorActionKey
+}
+
+export interface AutoCreationBatchGuardrailSignal {
+  label: string
+  status: AutoCreationBatchGuardrailSignalStatus
+  detail: string
+}
+
+export interface AutoCreationBatchGuardrail {
+  status: AutoCreationBatchGuardrailStatus
+  label: string
+  summary: string
+  safeChapterCount: number
+  recommendedAction: AutoCreationDirectorAction
+  guardrails: AutoCreationBatchGuardrailSignal[]
 }
 
 export interface AutoCreationDirectorModel {
@@ -90,6 +108,7 @@ export interface AutoCreationDirectorModel {
   }
   longformRhythm: PlanningWorkspaceModel['longformRhythm']
   creationContract: AutoCreationContractItem[]
+  batchGuardrail: AutoCreationBatchGuardrail
   pipeline: AutoCreationPipelineStep[]
 }
 
@@ -411,6 +430,118 @@ function buildLongformCreationContract(planning: PlanningWorkspaceModel, writing
   ]
 }
 
+function signal(label: string, status: AutoCreationBatchGuardrailSignalStatus, detail: string): AutoCreationBatchGuardrailSignal {
+  return { label, status, detail }
+}
+
+function batchPipelineStatus(status: AutoCreationBatchGuardrailStatus): AutoCreationPipelineStatus {
+  if (status === 'ready') return 'active'
+  if (status === 'caution') return 'warning'
+  return 'blocked'
+}
+
+function future100ReserveStatus(planning: PlanningWorkspaceModel): AutoCreationBatchGuardrailSignalStatus {
+  const coverage = planning.topStatus.future100Coverage
+  if (coverage.ready) return 'ok'
+  if (Number(coverage.planned || 0) >= 10) return 'warn'
+  return 'block'
+}
+
+function buildBatchGuardrail(args: {
+  planning: PlanningWorkspaceModel
+  writing: WritingCockpitModel
+  activeTasks: AnyRecord[]
+  hasBlockingPlan: boolean
+  hasModel: boolean
+  mainAction: AutoCreationDirectorAction
+}): AutoCreationBatchGuardrail {
+  const planning = args.planning
+  const writing = args.writing
+  const future10 = planning.topStatus.future10Coverage
+  const future100 = planning.topStatus.future100Coverage
+  const planningDesk = writing.chapterPlanningDesk
+  const acceptance = writing.chapterAcceptanceDesk
+  const running = hasRunningTasks(args.activeTasks)
+  const retentionActionNeeded = retentionNeedsAction(planning)
+  const storylineActionNeeded = storylineNeedsAction(planning)
+  const volumeBeatActionNeeded = volumeBeatNeedsAction(planning)
+  const rhythmActionNeeded = rhythmNeedsAction(planning)
+  const future100Status = future100ReserveStatus(planning)
+  const hasScenePlan = planningDesk.scenePlanStatus === 'ready' || arrayValue(planningDesk.sceneCards).length > 0
+  const currentChapterDelivered = !Boolean(acceptance.visible)
+  const chapterPlanIssue = text(arrayValue(planningDesk.reasons)[0], '当前章任务书或场景卡未就绪。')
+  const governanceBlocked = args.hasBlockingPlan
+    || retentionActionNeeded
+    || storylineActionNeeded
+    || volumeBeatActionNeeded
+    || rhythmActionNeeded
+  const chapterPlanReady = planningDesk.readiness === 'ready' && hasScenePlan
+
+  const guardrails = [
+    signal(
+      '模型与任务队列',
+      !args.hasModel || running ? 'block' : 'ok',
+      running
+        ? `${args.activeTasks.length} 个后台任务运行中，先等任务结束。`
+        : args.hasModel ? '已选择可用模型，且没有运行中的生产任务。' : '未选择可用模型。',
+    ),
+    signal(
+      '长线治理',
+      governanceBlocked ? 'block' : 'ok',
+      governanceBlocked ? args.mainAction.description : '创作契约、留存、剧情线、爆点预算和长篇节奏均可进入生产。',
+    ),
+    signal(
+      '未来10章规划',
+      future10.ready ? 'ok' : 'block',
+      future10.ready ? `未来10章覆盖 ${future10.label}。` : `未来10章仅覆盖 ${future10.label}，连续生产容易断线。`,
+    ),
+    signal(
+      '未来100章储备',
+      future100Status,
+      future100.ready ? `未来100章覆盖 ${future100.label}。` : `未来100章覆盖 ${future100.label}，只适合小步推进。`,
+    ),
+    signal(
+      '章节任务书/场景卡',
+      chapterPlanReady ? 'ok' : 'block',
+      chapterPlanReady ? '当前章任务书和场景卡已就绪。' : chapterPlanIssue,
+    ),
+    signal(
+      '当前章交稿',
+      currentChapterDelivered ? 'ok' : 'block',
+      currentChapterDelivered ? '当前没有未处理的交稿门禁。' : text(acceptance.statusLabel, '当前章仍需质检、修订或状态同步。'),
+    ),
+    signal('每章交稿回填', 'ok', '连续生产仍按单章质检、修订、故事状态同步和资产发现逐章回填。'),
+  ]
+
+  const blocking = guardrails.find(item => item.status === 'block')
+  const warning = guardrails.find(item => item.status === 'warn')
+  const status: AutoCreationBatchGuardrailStatus = blocking ? 'blocked' : warning ? 'caution' : 'ready'
+  let recommendedAction = args.mainAction
+
+  if (!blocking && warning?.label === '未来100章储备') {
+    recommendedAction = planningAction('future100_generate', '先补齐更长线的未来100章储备，再扩大连续生产批次。')
+  }
+
+  const safeChapterCount = status === 'blocked'
+    ? 0
+    : status === 'caution'
+      ? 1
+      : Math.max(1, Math.min(3, Number(future10.planned || 3), Number(planning.volumeBeatBudget?.plannedChapterCount || 3)))
+
+  return {
+    status,
+    label: status === 'ready' ? '可小批量连写' : status === 'caution' ? '谨慎单章推进' : '暂不适合连写',
+    summary: status === 'ready'
+      ? `建议先小批量连续生产 ${safeChapterCount} 章，每章都经过质检、回填和差异复盘后再扩大批次。`
+      : status === 'caution'
+        ? '长线储备存在薄弱点，本轮建议只推进 1 章，并优先处理黄色风险。'
+        : blocking?.detail || '当前存在阻塞项，暂不适合连续生产。',
+    safeChapterCount,
+    recommendedAction,
+    guardrails,
+  }
+}
+
 function buildPipeline(args: {
   planning: PlanningWorkspaceModel
   writing: WritingCockpitModel
@@ -418,6 +549,7 @@ function buildPipeline(args: {
   hasBlockingPlan: boolean
   hasModel: boolean
   creationContract: AutoCreationContractItem[]
+  batchGuardrail: AutoCreationBatchGuardrail
 }): AutoCreationPipelineStep[] {
   const acceptance = args.writing.chapterAcceptanceDesk
   const planningDesk = args.writing.chapterPlanningDesk
@@ -489,6 +621,12 @@ function buildPipeline(args: {
           ? 'done'
           : 'active',
       detail: planningDesk.statusLabel,
+    },
+    {
+      key: 'batch_guardrail',
+      label: '连续生产护栏',
+      status: batchPipelineStatus(args.batchGuardrail.status),
+      detail: `${args.batchGuardrail.label}，安全批次 ${args.batchGuardrail.safeChapterCount} 章`,
     },
     {
       key: 'chapter_execution',
@@ -621,6 +759,14 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
     mainAction = writingAction(plannerAction.key || writing.primaryActionKey, '按章节任务书和场景卡推进当前章。', plannerAction.label)
   }
 
+  const batchGuardrail = buildBatchGuardrail({
+    planning,
+    writing,
+    activeTasks,
+    hasBlockingPlan: Boolean(blockingPlan),
+    hasModel,
+    mainAction,
+  })
   const pipeline = buildPipeline({
     planning,
     writing,
@@ -628,6 +774,7 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
     hasBlockingPlan: Boolean(blockingPlan),
     hasModel,
     creationContract,
+    batchGuardrail,
   })
 
   return {
@@ -656,6 +803,7 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
     },
     longformRhythm: planning.longformRhythm,
     creationContract,
+    batchGuardrail,
     pipeline,
   }
 }

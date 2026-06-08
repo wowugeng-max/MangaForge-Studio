@@ -74,6 +74,18 @@ function rhythmLabel(status: string) {
   return '需治理'
 }
 
+function batchColor(status: AutoCreationDirectorModel['batchGuardrail']['status']) {
+  if (status === 'ready') return 'green'
+  if (status === 'caution') return 'gold'
+  return 'red'
+}
+
+function batchSignalLabel(status: string) {
+  if (status === 'ok') return '通过'
+  if (status === 'warn') return '谨慎'
+  return '阻塞'
+}
+
 function formatWords(value: number) {
   if (!value) return '0'
   if (value >= 10000) return `${(value / 10000).toFixed(1)}万`
@@ -241,6 +253,38 @@ export function AutoCreationDirectorWorkspace({
               <Text type="secondary">{signal.detail}</Text>
             </button>
           ))}
+        </div>
+      </section>
+
+      <section className={`auto-director-panel auto-director-batch-panel auto-director-batch-panel-${model.batchGuardrail.status}`}>
+        <div className="auto-director-panel-title">
+          <ThunderboltOutlined />
+          <span>连续生产护栏</span>
+          <Tag color={batchColor(model.batchGuardrail.status)} bordered={false}>{model.batchGuardrail.label}</Tag>
+          <Tag bordered={false}>安全批次 {model.batchGuardrail.safeChapterCount} 章</Tag>
+        </div>
+        <div className="auto-director-batch-layout">
+          <div className="auto-director-batch-summary">
+            <Text>{model.batchGuardrail.summary}</Text>
+            <ActionButton
+              action={model.batchGuardrail.recommendedAction}
+              loadingActionKey={loadingActionKey}
+              onAction={onAction}
+            />
+          </div>
+          <div className="auto-director-batch-guardrails">
+            {model.batchGuardrail.guardrails.map(item => (
+              <div key={item.label} className={`auto-director-batch-guardrail auto-director-batch-guardrail-${item.status}`}>
+                <span>
+                  <strong>{item.label}</strong>
+                  <Tag color={item.status === 'ok' ? 'green' : item.status === 'warn' ? 'gold' : 'red'} bordered={false}>
+                    {batchSignalLabel(item.status)}
+                  </Tag>
+                </span>
+                <Text type="secondary">{item.detail}</Text>
+              </div>
+            ))}
+          </div>
         </div>
       </section>
 

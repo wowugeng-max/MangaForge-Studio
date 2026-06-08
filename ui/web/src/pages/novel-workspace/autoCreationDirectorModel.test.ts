@@ -405,6 +405,112 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(model.pipeline.find(step => step.key === 'chapter_execution')?.status).toBe('active')
   })
 
+  test('builds a safe continuous production guardrail when governance and chapter plan are ready', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        topStatus: {
+          ...basePlanning.topStatus,
+          future100Coverage: { ready: true, planned: 100, required: 100, missingChapters: [], label: '100/100' },
+        },
+      },
+      writing: {
+        ...baseWriting,
+        chapterPlanningDesk: {
+          ...baseWriting.chapterPlanningDesk,
+          readiness: 'ready',
+          statusLabel: '本章可写',
+          scenePlanStatus: 'ready',
+          sceneCards: [
+            { title: '压迫升级', goal: '执事逼主角交阵盘' },
+            { title: '反向设局', goal: '主角用阵法拿回主动权' },
+          ],
+          recommendedPlannerAction: { key: 'confirm_plan_and_write_draft', label: '确认并生成' },
+        },
+        topStatus: {
+          ...baseWriting.topStatus,
+          nextActionLabel: '确认并生成',
+          primaryActionKey: 'confirm_plan_and_write_draft',
+        },
+        primaryActionKey: 'confirm_plan_and_write_draft',
+      },
+      activeTasks: [],
+      selectedModelId: 12,
+    })
+
+    expect(model.batchGuardrail.status).toBe('ready')
+    expect(model.batchGuardrail.safeChapterCount).toBe(3)
+    expect(model.batchGuardrail.summary).toContain('小批量')
+    expect(model.batchGuardrail.recommendedAction.key).toBe('confirm_plan_and_write_draft')
+    expect(model.batchGuardrail.guardrails.map(item => item.label)).toContain('章节任务书/场景卡')
+    expect(model.batchGuardrail.guardrails.map(item => item.label)).toContain('未来10章规划')
+    expect(model.batchGuardrail.guardrails.map(item => item.label)).toContain('每章交稿回填')
+    expect(model.pipeline.find(step => step.key === 'batch_guardrail')?.status).toBe('active')
+  })
+
+  test('blocks continuous production while the current chapter still needs delivery work', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: basePlanning,
+      writing: {
+        ...baseWriting,
+        nextChapter: { ...baseWriting.nextChapter, wordCount: 3200, hasProse: true },
+        chapterAcceptanceDesk: {
+          ...baseWriting.chapterAcceptanceDesk,
+          visible: true,
+          acceptanceStatus: 'needs_quality_check',
+          statusLabel: '需复检',
+          acceptanceReasons: ['本章已有正文，但还没有当前章节的质量复检记录。'],
+          recommendedAcceptanceAction: { key: 'refresh_current_quality', label: '复检当前版本' },
+        },
+        topStatus: { ...baseWriting.topStatus, nextActionLabel: '复检当前版本', primaryActionKey: 'refresh_current_quality' },
+        primaryActionKey: 'refresh_current_quality',
+      },
+      activeTasks: [],
+      selectedModelId: 12,
+    })
+
+    expect(model.batchGuardrail.status).toBe('blocked')
+    expect(model.batchGuardrail.safeChapterCount).toBe(0)
+    expect(model.batchGuardrail.recommendedAction.key).toBe('refresh_current_quality')
+    expect(model.batchGuardrail.guardrails.find(item => item.label === '当前章交稿')?.status).toBe('block')
+  })
+
+  test('downgrades continuous production when long-range chapter reserves are thin', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        topStatus: {
+          ...basePlanning.topStatus,
+          future100Coverage: { ready: false, planned: 18, required: 100, missingChapters: [], label: '18/100' },
+        },
+      },
+      writing: {
+        ...baseWriting,
+        chapterPlanningDesk: {
+          ...baseWriting.chapterPlanningDesk,
+          readiness: 'ready',
+          statusLabel: '本章可写',
+          scenePlanStatus: 'ready',
+          sceneCards: [{ title: '压迫升级', goal: '执事逼主角交阵盘' }],
+          recommendedPlannerAction: { key: 'confirm_plan_and_write_draft', label: '确认并生成' },
+        },
+        topStatus: {
+          ...baseWriting.topStatus,
+          nextActionLabel: '确认并生成',
+          primaryActionKey: 'confirm_plan_and_write_draft',
+        },
+        primaryActionKey: 'confirm_plan_and_write_draft',
+      },
+      activeTasks: [],
+      selectedModelId: 12,
+    })
+
+    expect(model.batchGuardrail.status).toBe('caution')
+    expect(model.batchGuardrail.safeChapterCount).toBe(1)
+    expect(model.batchGuardrail.recommendedAction.key).toBe('future100_generate')
+    expect(model.batchGuardrail.guardrails.find(item => item.label === '未来100章储备')?.status).toBe('warn')
+  })
+
   test('keeps acceptance workflow as the only next step after prose exists', () => {
     const model = buildAutoCreationDirectorModel({
       planning: basePlanning,

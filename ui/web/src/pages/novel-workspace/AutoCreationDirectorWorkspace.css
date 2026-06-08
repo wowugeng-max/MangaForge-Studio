@@ -325,6 +325,97 @@
   background: #fef2f2;
 }
 
+.auto-director-batch-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.auto-director-batch-panel-ready {
+  border-color: #bbf7d0;
+}
+
+.auto-director-batch-panel-caution {
+  border-color: #fde68a;
+}
+
+.auto-director-batch-panel-blocked {
+  border-color: #fecaca;
+}
+
+.auto-director-batch-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.72fr) minmax(0, 1.28fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.auto-director-batch-summary {
+  min-width: 0;
+  border: 1px solid #edf1f7;
+  border-radius: 9px;
+  background: #fbfcfe;
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.auto-director-batch-summary .ant-btn {
+  justify-self: start;
+}
+
+.auto-director-batch-guardrails {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.auto-director-batch-guardrail {
+  min-width: 0;
+  border: 1px solid #edf1f7;
+  border-radius: 9px;
+  background: #fbfcfe;
+  padding: 9px 10px;
+  display: grid;
+  gap: 5px;
+}
+
+.auto-director-batch-guardrail > span {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.auto-director-batch-guardrail strong {
+  min-width: 0;
+  color: #0f172a;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.auto-director-batch-guardrail .ant-typography {
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.auto-director-batch-guardrail-ok {
+  border-color: #dcfce7;
+  background: #f0fdf4;
+}
+
+.auto-director-batch-guardrail-warn {
+  border-color: #fde68a;
+  background: #fffbeb;
+}
+
+.auto-director-batch-guardrail-block {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
 .auto-director-stage-list {
   display: grid;
   gap: 8px;
@@ -408,6 +499,10 @@
   .auto-director-contract-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .auto-director-batch-layout {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 768px) {
@@ -425,6 +520,10 @@
   }
 
   .auto-director-rhythm-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .auto-director-batch-guardrails {
     grid-template-columns: 1fr;
   }
 }
