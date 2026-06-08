@@ -18,6 +18,7 @@ export type AutoCreationDirectorActionKey =
   | 'open_task_center'
   | 'open_story_assets'
   | 'start_safe_batch_generation'
+  | 'create_safe_batch_risk_repair'
   | 'select_model'
 
 export type AutoCreationPipelineStatus = 'done' | 'active' | 'pending' | 'blocked' | 'warning'
@@ -108,6 +109,7 @@ export interface AutoCreationBatchRiskRadar {
   storylineRiskCount: number
   readabilityRiskCount: number
   signals: AutoCreationBatchRiskSignal[]
+  repairTasks: AnyRecord[]
 }
 
 export interface AutoCreationBatchReviewQueue {
@@ -267,7 +269,7 @@ function writingAction(key: WritingCockpitActionKey, description: string, label?
 }
 
 function opsAction(
-  key: 'open_task_center' | 'select_model' | 'start_safe_batch_generation',
+  key: 'open_task_center' | 'select_model' | 'start_safe_batch_generation' | 'create_safe_batch_risk_repair',
   label: string,
   description: string,
   disabled = false,
@@ -494,6 +496,34 @@ function readabilityRiskCount(review: AnyRecord | null) {
   return immersionRiskCount + lowScoreCount
 }
 
+function batchRepairTask(args: {
+  item: AutoCreationBatchReviewItem
+  issueType: string
+  severity: 'high' | 'medium'
+  message: string
+  action: string
+  metrics: AnyRecord
+}) {
+  return {
+    task_type: 'repair_quality',
+    issue_type: args.issueType,
+    severity: args.severity,
+    chapter_id: args.item.chapterId || null,
+    chapter_no: args.item.chapterNo,
+    title: `第${args.item.chapterNo}章《${args.item.title}》批次风险修复`,
+    message: args.message,
+    action: args.action,
+    acceptance_criteria: [
+      '质量复检通过且分数不低于78',
+      '核心冲突、读者回报和章末钩子重新落地',
+      '故事状态、剧情线和回报债务复盘后无新增警告',
+    ],
+    task_status: 'open',
+    source: 'auto_creation_safe_batch_risk',
+    metrics: args.metrics,
+  }
+}
+
 function buildBatchRiskRadar(args: {
   items: AutoCreationBatchReviewItem[]
   chapters: AnyRecord[]
@@ -517,14 +547,79 @@ function buildBatchRiskRadar(args: {
   let payoffDebtTotal = 0
   let storylineRiskTotal = 0
   let readabilityRiskTotal = 0
+  const repairTasks: AnyRecord[] = []
 
   for (const item of successfulItems) {
     const chapter = findChapter(args.chapters, item)
     if (!chapter) continue
-    coreRiskTotal += coreRiskCount(latestReviewForChapter(args.reviews, chapter, item.chapterNo, 'chapter_core_drift'))
-    payoffDebtTotal += payoffDebtCount(latestReviewForChapter(args.reviews, chapter, item.chapterNo, 'reader_payoff_sync'))
-    storylineRiskTotal += storylineRiskCount(latestReviewForChapter(args.reviews, chapter, item.chapterNo, 'storyline_sync'))
-    readabilityRiskTotal += readabilityRiskCount(latestReviewForChapter(args.reviews, chapter, item.chapterNo, 'readability_review'))
+    const coreReview = latestReviewForChapter(args.reviews, chapter, item.chapterNo, 'chapter_core_drift')
+    const payoffReview = latestReviewForChapter(args.reviews, chapter, item.chapterNo, 'reader_payoff_sync')
+    const storylineReview = latestReviewForChapter(args.reviews, chapter, item.chapterNo, 'storyline_sync')
+    const readabilityReview = latestReviewForChapter(args.reviews, chapter, item.chapterNo, 'readability_review')
+    const qualityReview = latestQualityReviewForChapter(args.reviews, chapter, item.chapterNo)
+    const quality = qualityPayload(qualityReview)
+    const qualityScore = numberValue(quality?.score ?? quality?.overall_score ?? quality?.quality_score ?? item.score)
+    const coreCount = coreRiskCount(coreReview)
+    const payoffCount = payoffDebtCount(payoffReview)
+    const storylineCount = storylineRiskCount(storylineReview)
+    const readabilityCount = readabilityRiskCount(readabilityReview)
+    const lowQuality = qualityScore !== null && qualityScore < BATCH_DELIVERY_QUALITY_THRESHOLD
+
+    coreRiskTotal += coreCount
+    payoffDebtTotal += payoffCount
+    storylineRiskTotal += storylineCount
+    readabilityRiskTotal += readabilityCount
+
+    if (lowQuality) {
+      repairTasks.push(batchRepairTask({
+        item,
+        issueType: 'low_quality_score',
+        severity: qualityScore !== null && qualityScore < 65 ? 'high' : 'medium',
+        message: `批次质检分 ${qualityScore}，低于交稿阈值 78。`,
+        action: '生成编辑报告并重修本章节奏、冲突推进、爽点回报和章末钩子。',
+        metrics: { quality_score: qualityScore },
+      }))
+    }
+    if (coreCount > 0) {
+      repairTasks.push(batchRepairTask({
+        item,
+        issueType: 'core_drift',
+        severity: coreCount >= 2 ? 'high' : 'medium',
+        message: `发现 ${coreCount} 项核心偏移风险，本章可能偏离读者承诺或主线推进。`,
+        action: '对照章节任务书重修核心冲突、主线推进和章末钩子，避免长篇核心漂移。',
+        metrics: { core_risk_count: coreCount },
+      }))
+    }
+    if (payoffCount > 0) {
+      repairTasks.push(batchRepairTask({
+        item,
+        issueType: 'reader_payoff_debt',
+        severity: payoffCount >= 2 ? 'high' : 'medium',
+        message: `累计 ${payoffCount} 项读者回报欠账，承诺的爽点或信息回报未兑现。`,
+        action: '补写本章应交付的爽点、信息增量或情绪回报，并更新回报债务。',
+        metrics: { payoff_debt_count: payoffCount },
+      }))
+    }
+    if (storylineCount > 0) {
+      repairTasks.push(batchRepairTask({
+        item,
+        issueType: 'storyline_sync_risk',
+        severity: storylineCount >= 2 ? 'high' : 'medium',
+        message: `剧情线漏推/误触 ${storylineCount} 项，可能影响后续连续生产。`,
+        action: '修正本章剧情线推进、禁揭内容和伏笔回收，复查故事状态同步。',
+        metrics: { storyline_risk_count: storylineCount },
+      }))
+    }
+    if (readabilityCount > 0) {
+      repairTasks.push(batchRepairTask({
+        item,
+        issueType: 'readability_risk',
+        severity: readabilityCount >= 2 ? 'high' : 'medium',
+        message: `可读性或网感出戏风险 ${readabilityCount} 项。`,
+        action: '重修段落密度、对话节奏、吐槽强度和情绪场景的网感克制。',
+        metrics: { readability_risk_count: readabilityCount },
+      }))
+    }
   }
 
   const signals: AutoCreationBatchRiskSignal[] = [
@@ -572,6 +667,7 @@ function buildBatchRiskRadar(args: {
     storylineRiskCount: storylineRiskTotal,
     readabilityRiskCount: readabilityRiskTotal,
     signals,
+    repairTasks: repairTasks.slice(0, 40),
   }
 }
 
@@ -919,7 +1015,7 @@ function buildBatchReviewQueue(args: {
     nextAction: hasFailure
       ? opsAction('open_task_center', '查看失败任务', '打开任务中心，定位失败章节和可恢复步骤。')
       : hasDeliveredBatchRisk
-        ? planningAction('open_quality_revision', '复盘上一批的核心偏移、回报欠账、剧情线和可读性风险，处理后再开下一批。')
+        ? opsAction('create_safe_batch_risk_repair', '生成批次修复任务', '把上一批的核心偏移、回报欠账、剧情线和可读性风险写入任务中心。')
       : allSuccessfulChaptersDelivered
         ? opsAction('start_safe_batch_generation', '开始下一批安全连写', '上一批已完成交稿闭环；按当前护栏继续小批量生产。')
         : planningAction('open_quality_revision', '进入质检修订，按章节质量、核心偏移、读者回报和剧情线同步逐章验收。'),

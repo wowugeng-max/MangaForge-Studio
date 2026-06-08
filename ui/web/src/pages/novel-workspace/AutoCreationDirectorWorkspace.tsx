@@ -305,6 +305,7 @@ export function AutoCreationDirectorWorkspace({
             {model.batchReviewQueue.delivered > 0 && <Tag color="green" bordered={false}>交付 {model.batchReviewQueue.delivered}</Tag>}
             {model.batchReviewQueue.failed > 0 && <Tag color="red" bordered={false}>失败 {model.batchReviewQueue.failed}</Tag>}
             {model.batchReviewQueue.riskRadar.averageQualityScore !== null && <Tag color={model.batchReviewQueue.riskRadar.status === 'warn' ? 'gold' : 'green'} bordered={false}>均分 {model.batchReviewQueue.riskRadar.averageQualityScore}</Tag>}
+            {model.batchReviewQueue.riskRadar.repairTasks.length > 0 && <Tag color="gold" bordered={false}>修复任务 {model.batchReviewQueue.riskRadar.repairTasks.length}</Tag>}
             {model.batchReviewQueue.safeLimit !== null && <Tag bordered={false}>安全上限 {model.batchReviewQueue.safeLimit}</Tag>}
           </div>
           <div className="auto-director-batch-review-layout">

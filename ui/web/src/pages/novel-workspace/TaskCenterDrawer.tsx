@@ -286,7 +286,7 @@ function RepairTaskRunSummary({
   const title = run.run_type === 'first30_retention_repair'
     ? '前30章留存修复任务'
     : run.run_type === 'longform_production_repair'
-      ? '长线生产修复任务'
+      ? output.report?.source === 'auto_creation_safe_batch_risk' ? '安全连写风险修复任务' : '长线生产修复任务'
       : '机械质检修复任务'
   return (
     <Card size="small" title={title}>

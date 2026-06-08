@@ -769,9 +769,15 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(model.batchReviewQueue.riskRadar.coreRiskCount).toBe(1)
     expect(model.batchReviewQueue.riskRadar.payoffDebtCount).toBe(2)
     expect(model.batchReviewQueue.riskRadar.storylineRiskCount).toBe(2)
+    expect(model.batchReviewQueue.riskRadar.repairTasks.map((task: any) => task.issue_type)).toEqual([
+      'core_drift',
+      'reader_payoff_debt',
+      'storyline_sync_risk',
+    ])
     expect(model.status).toBe('needs_acceptance')
     expect(model.statusLabel).toBe('批次有风险')
-    expect(model.mainAction.key).toBe('open_quality_revision')
+    expect(model.mainAction.key).toBe('create_safe_batch_risk_repair')
+    expect(model.mainAction.modelCall).toBe(false)
     expect(model.confirmations).toContain('安全连写批次存在质量风险')
   })
 

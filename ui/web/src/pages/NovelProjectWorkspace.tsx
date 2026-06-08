@@ -2622,6 +2622,57 @@ export default function NovelProjectWorkspace() {
     }
   }
 
+  const createSafeBatchRiskRepairQueue = async () => {
+    const reviewQueue = autoCreationDirectorModel.batchReviewQueue
+    const tasks = reviewQueue.riskRadar.repairTasks || []
+    if (!tasks.length) {
+      message.info('当前安全连写批次没有可生成的风险修复任务。')
+      return
+    }
+    setAutoDirectorActionLoadingKey('create_safe_batch_risk_repair')
+    try {
+      const res = await apiClient.post('/novel/runs', {
+        project_id: projectId,
+        run_type: 'longform_production_repair',
+        step_name: `safe-batch-risk-repair-${tasks.length}`,
+        status: 'ready',
+        input_ref: {
+          source: 'auto_creation_safe_batch_risk',
+          batch_created_at: reviewQueue.createdAt,
+          total: reviewQueue.total,
+          delivered: reviewQueue.delivered,
+          risk_status: reviewQueue.riskRadar.status,
+        },
+        output_ref: {
+          report: {
+            source: 'auto_creation_safe_batch_risk',
+            summary: reviewQueue.summary,
+            status: reviewQueue.status,
+            average_quality_score: reviewQueue.riskRadar.averageQualityScore,
+            core_risk_count: reviewQueue.riskRadar.coreRiskCount,
+            payoff_debt_count: reviewQueue.riskRadar.payoffDebtCount,
+            storyline_risk_count: reviewQueue.riskRadar.storylineRiskCount,
+            readability_risk_count: reviewQueue.riskRadar.readabilityRiskCount,
+            task_count: tasks.length,
+          },
+          recommendations: [
+            '先处理高危核心偏移、剧情线禁揭和读者回报欠账，再开启下一批安全连写。',
+            '每个修复任务处理后执行质量复检、故事状态同步和批次风险复盘。',
+          ],
+          tasks,
+        },
+      })
+      await loadProjectModules()
+      await loadProductionTasks()
+      setTaskCenterOpen(true)
+      message.success(`已生成安全连写批次修复任务：${tasks.length} 项`)
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '生成安全连写批次修复任务失败')
+    } finally {
+      setAutoDirectorActionLoadingKey('')
+    }
+  }
+
   const runLongformCreationDiagnosis = async () => {
     setCommercialToolLoading('longformCreationDiagnosis')
     try {
@@ -4277,6 +4328,11 @@ export default function NovelProjectWorkspace() {
       }
       void stepGenerateProse({ limit: autoCreationDirectorModel.batchGuardrail.safeChapterCount, source: 'auto_creation_safe_batch' })
         .finally(() => setAutoDirectorActionLoadingKey(''))
+      return
+    }
+
+    if (action.key === 'create_safe_batch_risk_repair') {
+      void createSafeBatchRiskRepairQueue()
       return
     }
 
