@@ -802,7 +802,7 @@ export default function NovelProjectWorkspace() {
   }
 
   /* ── 正文生成 ──────────────────────────────────────────────────── */
-  const stepGenerateProse = async (options?: { limit?: number; source?: string }) => {
+  const stepGenerateProse = async (options?: { limit?: number; source?: string; longformCompass?: any; nextBatchBrief?: any }) => {
     if (!selectedModelId) return message.warning('请先选择模型')
     if (!await flushPendingSave()) return
     const allUnwritten = sortedChapters.filter(ch => !ch.chapter_text || ch.chapter_text.includes('【占位正文】'))
@@ -833,6 +833,8 @@ export default function NovelProjectWorkspace() {
               project_id: projectId,
               model_id: selectedModelId,
               ...chapterWordTargetPayload(),
+              longform_compass: options?.longformCompass,
+              next_batch_brief: options?.nextBatchBrief,
               prompt: `请生成第 ${ch.chapter_no} 章《${displayValue(ch.title)}》完整正文`,
             }),
           })
@@ -893,6 +895,8 @@ export default function NovelProjectWorkspace() {
             chapter_ids: unWritten.map(ch => ch.id),
             total: unWritten.length,
             source: options?.source || 'manual_batch',
+            longform_compass: options?.longformCompass,
+            next_batch_brief: options?.nextBatchBrief,
             safety_limit: safetyLimit || null,
             available_total: allUnwritten.length,
           },
@@ -4326,7 +4330,12 @@ export default function NovelProjectWorkspace() {
         setAutoDirectorActionLoadingKey('')
         return
       }
-      void stepGenerateProse({ limit: autoCreationDirectorModel.batchGuardrail.safeChapterCount, source: 'auto_creation_safe_batch' })
+      void stepGenerateProse({
+        limit: autoCreationDirectorModel.batchGuardrail.safeChapterCount,
+        source: 'auto_creation_safe_batch',
+        longformCompass: autoCreationDirectorModel.longformCompass,
+        nextBatchBrief: autoCreationDirectorModel.batchGuardrail.nextBatchBrief,
+      })
         .finally(() => setAutoDirectorActionLoadingKey(''))
       return
     }

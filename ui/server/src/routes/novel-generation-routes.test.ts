@@ -44,6 +44,17 @@ describe('novel generate prose route source guards', () => {
     expect(beforeReviewBlock).toContain('ctx.ensureProseMeetsWordTarget(')
   })
 
+  test('applies longform compass override from generate-prose requests', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
+    const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'")
+    const routeEnd = source.indexOf("const prevChapters = chapters", routeStart)
+    const setupBlock = source.slice(routeStart, routeEnd)
+
+    expect(setupBlock).toContain('applyRequestLongformCompass(')
+    expect(source).toContain('req.body?.longform_compass')
+    expect(source).toContain('chapter_target: { ...contextPackage.chapter_target, longform_compass: req.body.longform_compass }')
+  })
+
   test('runs commercial editor rewrite after word-target expansion and before self-review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
     const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'")

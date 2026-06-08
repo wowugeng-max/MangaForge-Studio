@@ -50,6 +50,15 @@ function scoreFutureSkeletonChapter(item: any) {
   return checks.reduce((sum, value) => sum + value, 0)
 }
 
+function applyRequestLongformCompass(contextPackage: any, req: any) {
+  if (!req.body?.longform_compass) return contextPackage
+  return {
+    ...contextPackage,
+    longform_compass: req.body.longform_compass,
+    chapter_target: { ...contextPackage.chapter_target, longform_compass: req.body.longform_compass },
+  }
+}
+
 type GenerationRoutesContext = {
   getWorkspace: () => string
   getProject: (workspace: string, id: number) => Promise<any>
@@ -769,6 +778,7 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
         await ctx.buildChapterContextPackage(activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews),
         wordTarget,
       )
+      contextPackage = applyRequestLongformCompass(contextPackage, req)
       markStage(
         'context',
         contextPackage.preflight.ready ? '续写上下文包已就绪' : '续写上下文包存在缺口',
@@ -811,6 +821,7 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
               await ctx.buildChapterContextPackage(activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews),
               wordTarget,
             )
+            contextPackage = applyRequestLongformCompass(contextPackage, req)
             markStage('scene_cards', `场景卡已生成：${sceneResult.sceneCards.length} 个`, 'success', '', { scene_cards: sceneResult.sceneCards })
           } else {
             markStage('scene_cards', '场景卡生成为空，继续使用章节细纲', 'warn')

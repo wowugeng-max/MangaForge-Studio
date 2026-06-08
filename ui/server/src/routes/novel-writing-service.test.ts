@@ -228,6 +228,40 @@ describe('chapter prose word target', () => {
     expect(proseMaxTokensForWordTarget(target)).toBeGreaterThan(14000)
   })
 
+  test('injects longform compass into paragraph prose prompt as hard story boundaries', () => {
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+
+    const prompt = service.buildParagraphProseContext(
+      { title: '超人的规则怪谈世界' },
+      {
+        longform_compass: {
+          reader_promise: '超人力量和规则判定持续碰撞。',
+          immutable_rules: ['超人力量不能无代价碾压规则'],
+          flexible_zones: ['副本题材可换，但必须服务规则破局主线'],
+        },
+        chapter_target: {
+          chapter_no: 2,
+          title: '第一条规则',
+          summary: '测试规则边界。',
+          conflict: '是否用蛮力冲出宿舍。',
+          ending_hook: '门外出现湿漉漉的学生。',
+          scene_cards: [],
+        },
+      },
+      null,
+      { chapter_no: 2, title: '第一条规则' },
+    )
+
+    expect(prompt).toContain('【长篇作品罗盘】')
+    expect(prompt).toContain('不可漂移')
+    expect(prompt).toContain('超人力量不能无代价碾压规则')
+    expect(prompt).toContain('副本题材可换')
+  })
+
   test('supports a manually edited chapter word target', () => {
     const target = resolveChapterWordTarget({}, { chapter_no: 8 }, { word_target_mode: 'custom', target_word_count: 5200 })
 
@@ -392,6 +426,34 @@ describe('chapter pre-draft brief', () => {
     expect(brief.storyline_forbidden).toContain('编织者真名')
   })
 
+  test('adds longform compass boundaries to the pre-draft brief', () => {
+    const brief = buildChapterPreDraftBrief(
+      { title: '超人的规则怪谈世界' },
+      {
+        longform_compass: {
+          reader_promise: '超人力量和规则判定持续碰撞。',
+          axes: [
+            { key: 'core_conflict', label: '核心矛盾', value: '蛮力不能直接碾压规则。' },
+            { key: 'payoff_loop', label: '长期爽点循环', value: '每章一次规则发现或力量反制。' },
+          ],
+          immutable_rules: ['超人力量不能无代价碾压规则', '双主角互补不能拆散'],
+          flexible_zones: ['副本题材可换，但必须服务规则破局主线'],
+        },
+        chapter_target: {
+          chapter_no: 2,
+          title: '第一条规则',
+          summary: '测试规则边界。',
+          scene_cards: [{ scene_no: 1, title: '门槛', reader_payoff: '规则边界第一次显形。' }],
+        },
+      },
+    )
+
+    expect(brief.longform_compass.reader_promise).toContain('规则判定')
+    expect(brief.longform_compass.immutable_rules).toContain('超人力量不能无代价碾压规则')
+    expect(brief.longform_compass.flexible_zones).toContain('副本题材可换，但必须服务规则破局主线')
+    expect(brief.longform_compass.axes.find((axis: any) => axis.key === 'core_conflict')?.value).toContain('蛮力')
+  })
+
   test('merges a confirmed pre-draft brief into chapter generation context', () => {
     const confirmedAt = '2026-06-03T10:00:00.000Z'
     const context = mergeConfirmedPreDraftBriefIntoContext(
@@ -420,6 +482,11 @@ describe('chapter pre-draft brief', () => {
           allowed_functions: ['主角吐槽', '规则怪谈弹幕感'],
           forbidden_usage: ['死亡场景不玩梗'],
         },
+        longform_compass: {
+          reader_promise: '超人力量和规则判定持续碰撞。',
+          immutable_rules: ['超人力量不能无代价碾压规则'],
+          flexible_zones: ['副本题材可换，但必须服务规则破局主线'],
+        },
         word_budget: '标准章 3000 字',
         ending_hook: '镜子里出现第四个人。',
         confirmed_at: confirmedAt,
@@ -437,6 +504,8 @@ describe('chapter pre-draft brief', () => {
     expect(context.chapter_target.storyline_payoffs).toContain('林晓求生支线')
     expect(context.chapter_target.storyline_forbidden).toContain('编织者真名')
     expect(context.chapter_target.meme_strategy.allowed_functions).toContain('主角吐槽')
+    expect(context.chapter_target.longform_compass.immutable_rules).toContain('超人力量不能无代价碾压规则')
+    expect(context.longform_compass.reader_promise).toContain('规则判定')
   })
 
   test('builds storyline context in the chapter context package', () => {

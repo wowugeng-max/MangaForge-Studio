@@ -32,6 +32,7 @@ import {
   getStyleLock,
   getVolumePlan,
   normalizeIssue,
+  parseJsonLikePayload,
 } from './novel-route-utils'
 
 const STORYLINE_TYPES = ['mainline', 'subplot', 'character_arc', 'relationship_arc', 'faction_arc', 'foreshadowing_arc']
@@ -230,6 +231,69 @@ function sceneBriefFromCard(card: any, index: number) {
     ending_hook_seed: compactBriefText(card?.ending_hook_seed || card?.ending_hook || card?.exit_state),
     word_budget: compactBriefText(card?.word_budget || card?.description_budget),
   }
+}
+
+const LONGFORM_COMPASS_AXIS_LABELS: Record<string, string> = {
+  reader_promise: '读者承诺',
+  protagonist_drive: '主角长期欲望',
+  core_conflict: '核心矛盾',
+  world_hook: '世界奇点',
+  innovation_hook: '创新卖点',
+  payoff_loop: '长期爽点循环',
+  ending_direction: '结局方向',
+}
+
+function normalizeLongformCompassAxis(item: any) {
+  const key = compactBriefText(item?.key)
+  const value = compactBriefText(item?.value || item?.summary || item?.detail)
+  if (!key || !value) return null
+  return {
+    key,
+    label: compactBriefText(item?.label, LONGFORM_COMPASS_AXIS_LABELS[key] || key),
+    value,
+    locked: item?.locked !== false,
+  }
+}
+
+function normalizeLongformCompass(value: any) {
+  const raw = value?.compass || value?.longform_compass || value || {}
+  const directAxes = asArray(raw.axes).map(normalizeLongformCompassAxis).filter(Boolean)
+  const fieldAxes = [
+    ['reader_promise', raw.reader_promise || raw.readerPromise],
+    ['protagonist_drive', raw.protagonist_drive || raw.protagonistDrive],
+    ['core_conflict', raw.core_conflict || raw.coreConflict],
+    ['world_hook', raw.world_hook || raw.worldHook],
+    ['innovation_hook', raw.innovation_hook || raw.innovationHook],
+    ['payoff_loop', raw.payoff_loop || raw.payoffLoop],
+    ['ending_direction', raw.ending_direction || raw.endingDirection],
+  ].map(([key, axisValue]) => normalizeLongformCompassAxis({ key, value: axisValue })).filter(Boolean)
+  const axes = directAxes.length ? directAxes : fieldAxes
+  const immutableRules = Array.from(new Set([
+    ...asArray(raw.immutable_rules),
+    ...asArray(raw.immutableRules),
+  ].map(item => compactBriefText(item)).filter(Boolean))).slice(0, 8)
+  const flexibleZones = Array.from(new Set([
+    ...asArray(raw.flexible_zones),
+    ...asArray(raw.flexibleZones),
+  ].map(item => compactBriefText(item)).filter(Boolean))).slice(0, 8)
+  const readerPromise = compactBriefText(raw.reader_promise || raw.readerPromise || axes.find((axis: any) => axis.key === 'reader_promise')?.value)
+  if (!readerPromise && !axes.length && !immutableRules.length && !flexibleZones.length) return null
+
+  return {
+    reader_promise: readerPromise,
+    axes,
+    immutable_rules: immutableRules,
+    flexible_zones: flexibleZones,
+  }
+}
+
+function latestLongformCompassFromReviews(reviews: any[]) {
+  const review = reviews
+    .filter(item => item?.review_type === 'longform_creation_diagnosis')
+    .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')))[0]
+  const payload = parseJsonLikePayload(review?.payload) || {}
+  const report = payload.report || payload.result?.report || payload
+  return normalizeLongformCompass(report?.compass || report?.longform_compass || null)
 }
 
 function storylineUsageName(item: any) {
@@ -802,6 +866,7 @@ export function buildChapterPreDraftBrief(project: any, contextPackage: any) {
   ].map((item: any) => String(item || '').trim()).filter(Boolean)
   const wordTarget = chapterTarget.word_target || {}
   const memeStrategy = buildMemeStrategy(project, contextPackage)
+  const longformCompass = normalizeLongformCompass(contextPackage?.chapter_target?.longform_compass || contextPackage?.longform_compass)
 
   return {
     chapter_no: Number(chapterTarget.chapter_no || 0) || null,
@@ -817,6 +882,7 @@ export function buildChapterPreDraftBrief(project: any, contextPackage: any) {
     storyline_payoffs: Array.from(new Set(storylinePayoffs)).slice(0, 12),
     storyline_forbidden: Array.from(new Set(storylineForbidden)).slice(0, 12),
     meme_strategy: memeStrategy,
+    longform_compass: longformCompass,
     scene_briefs: sceneBriefs,
     word_budget: wordTarget?.target
       ? `${wordTarget.label || '章节'} ${wordTarget.target} 字，可接受 ${wordTarget.min}-${wordTarget.max} 字`
@@ -828,9 +894,11 @@ export function buildChapterPreDraftBrief(project: any, contextPackage: any) {
 
 export function mergeConfirmedPreDraftBriefIntoContext(contextPackage: any, preDraftBrief: any) {
   if (!preDraftBrief?.confirmed_at) return contextPackage
+  const longformCompass = normalizeLongformCompass(preDraftBrief.longform_compass || (contextPackage || {}).chapter_target?.longform_compass || (contextPackage || {}).longform_compass)
   return {
     ...(contextPackage || {}),
     pre_draft_brief: preDraftBrief,
+    longform_compass: longformCompass || (contextPackage || {}).longform_compass || null,
     chapter_target: {
       ...((contextPackage || {}).chapter_target || {}),
       summary: compactBriefText(preDraftBrief.chapter_goal, (contextPackage || {}).chapter_target?.summary),
@@ -846,6 +914,7 @@ export function mergeConfirmedPreDraftBriefIntoContext(contextPackage: any, preD
       storyline_payoffs: asArray(preDraftBrief.storyline_payoffs),
       storyline_forbidden: asArray(preDraftBrief.storyline_forbidden),
       meme_strategy: preDraftBrief.meme_strategy || (contextPackage || {}).chapter_target?.meme_strategy || null,
+      longform_compass: longformCompass || (contextPackage || {}).chapter_target?.longform_compass || null,
       scene_cards: asArray(preDraftBrief.scene_briefs).length
         ? asArray(preDraftBrief.scene_briefs)
         : asArray((contextPackage || {}).chapter_target?.scene_cards),
@@ -1024,40 +1093,48 @@ export function createNovelWritingService(ctx: {
     return { result, sceneCards: normalizeSceneCardsPayload(payload, contextPackage) }
   }
 
-  const buildParagraphProseContext = (project: any, contextPackage: any, migrationPlan: any = null, chapterDraft: any = null) => [
-    '任务：按场景卡生成章节正文。请先在心中按场景组织段落，再输出完整正文。',
-    `作品标题：${project.title}`,
-    chapterDraft?.chapter_no ? `目标章节：第${chapterDraft.chapter_no}章《${chapterDraft.title || '无标题'}》` : '',
-    chapterDraft?.chapter_no ? `只允许输出这一章的正文，不得混入其他章节内容。chapter_no 必须严格等于 ${chapterDraft.chapter_no}` : '',
-    contextPackage?.chapter_target?.word_target ? `本章目标字数：约 ${contextPackage.chapter_target.word_target.target} 字；可接受范围：${contextPackage.chapter_target.word_target.min}-${contextPackage.chapter_target.word_target.max} 字；类型：${contextPackage.chapter_target.word_target.label}。` : '',
-    contextPackage?.chapter_target?.word_target ? '字数执行要求：每个场景分配明确字数预算，正文不得只写剧情摘要；如果低于目标范围，必须扩写动作过程、选择代价、对话交锋和章末钩子铺垫，而不是堆砌环境描写。' : '',
-    '必须以 chapter_target.summary、chapter_target.conflict、chapter_target.ending_hook 和 scene_cards 为准；如果已有正文或旧场景分解与目标不一致，不得沿用。',
-    '',
-    '【结构化上下文包】',
-    JSON.stringify(contextPackage, null, 2).slice(0, 12000),
-    '',
-    '【参考迁移计划】',
-    JSON.stringify(migrationPlan || {}, null, 2).slice(0, 5000),
-    '',
-    '【段落级写作要求】',
-    '1. 严格按 scene_cards 顺序生成，每个场景至少 3-8 个自然段。',
-    '2. 每个场景必须完成 purpose、conflict、required_beats、required_information、turning_point 和 exit_state；不能只写气氛、设定说明或心理总结。',
-    '2A. 每个场景必须把 opening_hook、reader_payoff、fear_point、rule_pressure、information_gap、reversal、ending_hook_seed、character_voice 中已有的商业意图落实到正文里；这些字段不是备注，必须转成动作、对话、危险、反转或章末疑问。',
-    '3. 如果 scene_type 是 action/combat/chase，必须逐条落实 action_beats：写出动作起手、空间位置、对手反应、受伤/损耗/暴露信息、反制动作和结果。战斗不能一笔带过。',
-    '4. 段落预算：动作/冲突场景中可见行动与直接反应不少于 60%；环境描写最多 15%；心理描写最多 20%；解释性信息最多 15%。',
-    '5. 禁止连续 2 段纯环境描写；每 3-5 段必须出现一次可见行动、选择、信息变化或关系变化。',
-    '6. description_budget=low 的场景只允许 1-2 句环境描写；medium 最多 1 个短段；high 也必须服务危险、规则或动作空间。',
-    '7. 场景之间必须有过渡，不能硬切。',
-    '8. 保持 style_lock 中的人称、句长、对话比例、吐槽密度、爽点密度、描写浓度和禁用词约束。',
-    '9. 只能学习参考作品的节奏、结构、爽点安排和信息密度；不得复制具体桥段、专有设定、原句、角色名和核心梗。',
-    '10. 执行 setting_context：required 设定必须在正文中落地；forbidden 设定不得泄漏；ability_beats 必须写清代价/限制；item_beats 必须符合物品归属和位置；boss_move 必须符合 Boss 行动逻辑；rule_trigger 必须写出触发条件、代价和后果；角色只能知道 knowledge_scope 允许的信息。',
-    '11. 执行 chapter_target.meme_strategy：网感只作为吐槽节奏、情绪共鸣、角色口吻或传播点；死亡、高压恐怖和关键情绪爆点处不得玩梗；不得直接复刻 meme_bank 的 unsafe_direct_phrases。',
-    '12. 如果参考迁移计划包含 transferable_model，只能采用其中 allowed_learning 的抽象功能；rewrite_requirements 必须执行；copy_guard_terms 和 forbidden_transfer 禁止出现在正文里。',
-    migrationPlan?.generation_prompt_addendum ? `10. ${migrationPlan.generation_prompt_addendum}` : '',
-    chapterDraft?.chapter_no ? `11. 本次只生成第${chapterDraft.chapter_no}章，不得输出其他章节或续章内容。` : '',
-    '',
-    '输出 JSON，包含 prose_chapters 数组。数组只能有一项，且必须包含 chapter_no, title, chapter_text, scene_breakdown, continuity_notes。scene_breakdown 要回填每个场景的 scene_type、required_beats/action_beats 完成情况和 description_budget 执行情况。chapter_text 是完整正文，不要 markdown 标题。',
-  ].filter(Boolean).join('\n')
+  const buildParagraphProseContext = (project: any, contextPackage: any, migrationPlan: any = null, chapterDraft: any = null) => {
+    const longformCompass = normalizeLongformCompass(contextPackage?.chapter_target?.longform_compass || contextPackage?.longform_compass)
+    return [
+      '任务：按场景卡生成章节正文。请先在心中按场景组织段落，再输出完整正文。',
+      `作品标题：${project.title}`,
+      chapterDraft?.chapter_no ? `目标章节：第${chapterDraft.chapter_no}章《${chapterDraft.title || '无标题'}》` : '',
+      chapterDraft?.chapter_no ? `只允许输出这一章的正文，不得混入其他章节内容。chapter_no 必须严格等于 ${chapterDraft.chapter_no}` : '',
+      contextPackage?.chapter_target?.word_target ? `本章目标字数：约 ${contextPackage.chapter_target.word_target.target} 字；可接受范围：${contextPackage.chapter_target.word_target.min}-${contextPackage.chapter_target.word_target.max} 字；类型：${contextPackage.chapter_target.word_target.label}。` : '',
+      contextPackage?.chapter_target?.word_target ? '字数执行要求：每个场景分配明确字数预算，正文不得只写剧情摘要；如果低于目标范围，必须扩写动作过程、选择代价、对话交锋和章末钩子铺垫，而不是堆砌环境描写。' : '',
+      '必须以 chapter_target.summary、chapter_target.conflict、chapter_target.ending_hook 和 scene_cards 为准；如果已有正文或旧场景分解与目标不一致，不得沿用。',
+      '',
+      longformCompass ? '【长篇作品罗盘】' : '',
+      longformCompass ? '硬性要求：不可漂移项必须遵守；可调整区只能服务本章目标、当前卷目标和读者承诺，不得把扩展写成核心改道。' : '',
+      longformCompass ? JSON.stringify(longformCompass, null, 2).slice(0, 4000) : '',
+      '',
+      '【结构化上下文包】',
+      JSON.stringify(contextPackage, null, 2).slice(0, 12000),
+      '',
+      '【参考迁移计划】',
+      JSON.stringify(migrationPlan || {}, null, 2).slice(0, 5000),
+      '',
+      '【段落级写作要求】',
+      '1. 严格按 scene_cards 顺序生成，每个场景至少 3-8 个自然段。',
+      '2. 每个场景必须完成 purpose、conflict、required_beats、required_information、turning_point 和 exit_state；不能只写气氛、设定说明或心理总结。',
+      '2A. 每个场景必须把 opening_hook、reader_payoff、fear_point、rule_pressure、information_gap、reversal、ending_hook_seed、character_voice 中已有的商业意图落实到正文里；这些字段不是备注，必须转成动作、对话、危险、反转或章末疑问。',
+      '3. 如果 scene_type 是 action/combat/chase，必须逐条落实 action_beats：写出动作起手、空间位置、对手反应、受伤/损耗/暴露信息、反制动作和结果。战斗不能一笔带过。',
+      '4. 段落预算：动作/冲突场景中可见行动与直接反应不少于 60%；环境描写最多 15%；心理描写最多 20%；解释性信息最多 15%。',
+      '5. 禁止连续 2 段纯环境描写；每 3-5 段必须出现一次可见行动、选择、信息变化或关系变化。',
+      '6. description_budget=low 的场景只允许 1-2 句环境描写；medium 最多 1 个短段；high 也必须服务危险、规则或动作空间。',
+      '7. 场景之间必须有过渡，不能硬切。',
+      '8. 保持 style_lock 中的人称、句长、对话比例、吐槽密度、爽点密度、描写浓度和禁用词约束。',
+      '9. 只能学习参考作品的节奏、结构、爽点安排和信息密度；不得复制具体桥段、专有设定、原句、角色名和核心梗。',
+      '10. 执行 setting_context：required 设定必须在正文中落地；forbidden 设定不得泄漏；ability_beats 必须写清代价/限制；item_beats 必须符合物品归属和位置；boss_move 必须符合 Boss 行动逻辑；rule_trigger 必须写出触发条件、代价和后果；角色只能知道 knowledge_scope 允许的信息。',
+      '11. 执行 chapter_target.meme_strategy：网感只作为吐槽节奏、情绪共鸣、角色口吻或传播点；死亡、高压恐怖和关键情绪爆点处不得玩梗；不得直接复刻 meme_bank 的 unsafe_direct_phrases。',
+      '12. 执行长篇作品罗盘：读者承诺、核心矛盾、创新卖点、长期爽点循环和结局方向不得漂移；新增人物、物品、支线或地图必须落在可调整区内。',
+      '13. 如果参考迁移计划包含 transferable_model，只能采用其中 allowed_learning 的抽象功能；rewrite_requirements 必须执行；copy_guard_terms 和 forbidden_transfer 禁止出现在正文里。',
+      migrationPlan?.generation_prompt_addendum ? `14. ${migrationPlan.generation_prompt_addendum}` : '',
+      chapterDraft?.chapter_no ? `15. 本次只生成第${chapterDraft.chapter_no}章，不得输出其他章节或续章内容。` : '',
+      '',
+      '输出 JSON，包含 prose_chapters 数组。数组只能有一项，且必须包含 chapter_no, title, chapter_text, scene_breakdown, continuity_notes。scene_breakdown 要回填每个场景的 scene_type、required_beats/action_beats 完成情况和 description_budget 执行情况。chapter_text 是完整正文，不要 markdown 标题。',
+    ].filter(Boolean).join('\n')
+  }
 
   const buildStoryStatePrompt = (project: any, contextPackage: any, chapterText: string) => [
     '任务：从刚入库的章节正文中提取故事状态机增量，用于后续章节续写。只提取事实，不要推测。',
@@ -1368,6 +1445,14 @@ export function createNovelWritingService(ctx: {
     const safetyPolicy = getSafetyPolicy(project)
     const writingBible = project.reference_config?.writing_bible || buildWritingBible(project, worldbuilding, characters, outlines, reviews)
     const memeBank = resolveMemeBank(project, { writing_bible: writingBible })
+    const fallbackCompass = normalizeLongformCompass({
+      reader_promise: writingBible.reader_promise || writingBible.promise || writingBible.core_selling_point || project.synopsis,
+      core_conflict: writingBible.core_conflict || writingBible.mainline?.core_conflict,
+      innovation_hook: writingBible.innovation_hook || writingBible.core_selling_point,
+      payoff_loop: writingBible.payoff_loop || writingBible.style_lock?.payoff_density || writingBible.payoff_density,
+      ending_direction: writingBible.ending_direction || writingBible.mainline?.ending_direction,
+    })
+    const longformCompass = latestLongformCompassFromReviews(reviews) || fallbackCompass
     const [settingEntities, storedChapterSettingUsage] = await Promise.all([
       listNovelSettingEntities(activeWorkspace, project.id).catch(() => []),
       listNovelChapterSettingUsage(activeWorkspace, project.id, chapter.id).catch(() => []),
@@ -1549,6 +1634,7 @@ export function createNovelWritingService(ctx: {
       },
       volume_plan: getVolumePlan(outlines),
       writing_bible: writingBible,
+      longform_compass: longformCompass,
       meme_bank: memeBank,
       setting_context: settingContext,
       storyline_context: storylineContext,
