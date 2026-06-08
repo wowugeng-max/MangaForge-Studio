@@ -612,6 +612,9 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(model.batchGuardrail.briefRepair.status).toBe('warn')
     expect(model.batchGuardrail.briefRepair.title).toBe('补齐下一批任务书')
     expect(model.batchGuardrail.briefRepair.action.label).toBe('补齐批次任务书')
+    expect(model.batchGuardrail.briefRepair.action.payload?.source).toBe('batch_brief_repair')
+    expect(model.batchGuardrail.briefRepair.action.payload?.missing_items).toContain('缺逐章职责：第9章、第10章')
+    expect(model.batchGuardrail.briefRepair.action.payload?.next_batch_brief?.chapterRangeLabel).toBe('第8-10章')
     expect(model.batchGuardrail.briefRepair.missingItems).toEqual([
       '缺逐章职责：第9章、第10章',
       '缺冲突落点：第9章、第10章',

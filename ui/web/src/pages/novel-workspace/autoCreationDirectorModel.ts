@@ -37,6 +37,7 @@ export interface AutoCreationDirectorAction {
   description: string
   modelCall: boolean
   disabled?: boolean
+  payload?: AnyRecord
 }
 
 export interface AutoCreationPipelineStep {
@@ -359,13 +360,14 @@ function firstText(...values: any[]) {
   return ''
 }
 
-function planningAction(key: PlanningActionKey, description: string, label?: string): AutoCreationDirectorAction {
+function planningAction(key: PlanningActionKey, description: string, label?: string, payload?: AnyRecord): AutoCreationDirectorAction {
   return {
     area: 'planning',
     key,
     label: label || PLANNING_ACTION_LABELS[key] || key,
     description,
     modelCall: MODEL_CALL_ACTIONS.has(key),
+    payload,
   }
 }
 
@@ -1542,7 +1544,12 @@ function buildNextBatchBriefRepair(
       ? '下一批还没有达到开写条件，先补齐本批目标、逐章职责、冲突和钩子。'
       : '当前章可以继续推进，但多章连写前需要补齐后续章节职责、冲突和钩子。',
     missingItems,
-    action: planningAction('update_rolling_plan', batchBriefSignal.detail, '补齐批次任务书'),
+    action: planningAction('update_rolling_plan', batchBriefSignal.detail, '补齐批次任务书', {
+      source: 'batch_brief_repair',
+      missing_items: missingItems,
+      next_batch_brief: nextBatchBrief,
+      expected_chapter_count: expectedChapterCount,
+    }),
   }
 }
 

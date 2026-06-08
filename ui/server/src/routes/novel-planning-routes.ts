@@ -1194,12 +1194,20 @@ export function registerNovelPlanningRoutes(app: Express, ctx: PlanningRoutesCon
       ])
       const fromChapter = Number(req.body.from_chapter || chapters.find(ch => !ch.chapter_text)?.chapter_no || 1)
       const horizon = Math.max(3, Math.min(30, Number(req.body.horizon || 10)))
+      const rollingPlanIntent = req.body.rolling_plan_intent || req.body.rollingPlanIntent || null
       const targetChapters = chapters.filter(ch => ch.chapter_no >= fromChapter).slice(0, horizon)
       const prompt = [
         '任务：生成未来章节滚动规划，只输出 JSON。',
         `项目：${project.title}`,
         `从第 ${fromChapter} 章开始，规划未来 ${horizon} 章。`,
         '需要输出：rolling_plan(array: chapter_no,title,chapter_goal,conflict,payoff,foreshadowing_to_use,ending_hook), volume_remaining_goals, foreshadowing_recovery_plan, character_growth_nodes, risk_notes。',
+        '【滚动规划意图】',
+        rollingPlanIntent
+          ? JSON.stringify(rollingPlanIntent, null, 2).slice(0, 4000)
+          : '常规未来10章滚动规划。',
+        rollingPlanIntent?.source === 'batch_brief_repair'
+          ? '本次是批次任务书补齐：优先修复缺逐章职责、冲突落点、主线推进或章末钩子；输出的 rolling_plan 必须让目标批次可检查、可小批量连写。'
+          : '',
         '【写作圣经/状态机】',
         JSON.stringify({ writing_bible: project.reference_config?.writing_bible || {}, story_state: project.reference_config?.story_state || {} }, null, 2).slice(0, 6000),
         '【分卷/大纲】',
@@ -1218,7 +1226,7 @@ export function registerNovelPlanningRoutes(app: Express, ctx: PlanningRoutesCon
         status: 'ok',
         summary: `滚动规划：第${fromChapter}章起 ${horizon} 章`,
         issues: asArray(report.risk_notes).map((item: any) => String(item)),
-        payload: JSON.stringify({ report, from_chapter: fromChapter, horizon }),
+        payload: JSON.stringify({ report, from_chapter: fromChapter, horizon, rolling_plan_intent: rollingPlanIntent }),
       })
       res.json({ ok: true, report, review: saved, result })
     } catch (error) {

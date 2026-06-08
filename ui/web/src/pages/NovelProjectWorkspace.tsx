@@ -2321,10 +2321,15 @@ export default function NovelProjectWorkspace() {
     })
   }
 
-  const runRollingPlan = async () => {
+  async function runRollingPlan(options?: { intent?: any }) {
     if (!selectedModelId) return message.warning('请先选择模型')
     await runCommercialTool('rollingPlan', '未来 10 章滚动规划', async () => {
-      const res = await apiClient.post(`/novel/projects/${projectId}/rolling-plan`, { model_id: selectedModelId, from_chapter: activeChapter?.chapter_no || undefined, horizon: 10 })
+      const res = await apiClient.post(`/novel/projects/${projectId}/rolling-plan`, {
+        model_id: selectedModelId,
+        from_chapter: activeChapter?.chapter_no || undefined,
+        horizon: 10,
+        rolling_plan_intent: options?.intent,
+      })
       setRightPanelOpen(true)
       setRightPanelTab('bookReviews')
       return res.data
@@ -4303,6 +4308,11 @@ export default function NovelProjectWorkspace() {
     if (action.area === 'planning' || action.area === 'assets') {
       if (action.key === 'open_story_assets') {
         openStoryAssetsWorkspace()
+        return
+      }
+      if (action.key === 'update_rolling_plan' && action.payload?.source === 'batch_brief_repair') {
+        void runRollingPlan({ intent: action.payload })
+          .finally(() => setAutoDirectorActionLoadingKey(''))
         return
       }
       handlePlanningAction(action.key as PlanningActionKey)
