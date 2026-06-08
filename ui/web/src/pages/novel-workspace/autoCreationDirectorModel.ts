@@ -17,6 +17,7 @@ export type AutoCreationDirectorActionKey =
   | WritingCockpitActionKey
   | 'open_task_center'
   | 'open_story_assets'
+  | 'start_safe_batch_generation'
   | 'select_model'
 
 export type AutoCreationPipelineStatus = 'done' | 'active' | 'pending' | 'blocked' | 'warning'
@@ -178,6 +179,7 @@ const MODEL_CALL_ACTIONS = new Set<string>([
   'apply_editor_revision',
   'repair_materials',
   'refresh_context_package',
+  'start_safe_batch_generation',
 ])
 
 function arrayValue(value: any): any[] {
@@ -210,13 +212,18 @@ function writingAction(key: WritingCockpitActionKey, description: string, label?
   }
 }
 
-function opsAction(key: 'open_task_center' | 'select_model', label: string, description: string, disabled = false): AutoCreationDirectorAction {
+function opsAction(
+  key: 'open_task_center' | 'select_model' | 'start_safe_batch_generation',
+  label: string,
+  description: string,
+  disabled = false,
+): AutoCreationDirectorAction {
   return {
     area: 'ops',
     key,
     label,
     description,
-    modelCall: false,
+    modelCall: MODEL_CALL_ACTIONS.has(key),
     disabled,
   }
 }
@@ -527,6 +534,14 @@ function buildBatchGuardrail(args: {
     : status === 'caution'
       ? 1
       : Math.max(1, Math.min(3, Number(future10.planned || 3), Number(planning.volumeBeatBudget?.plannedChapterCount || 3)))
+
+  if (status === 'ready') {
+    recommendedAction = opsAction(
+      'start_safe_batch_generation',
+      '开始安全连写',
+      `按护栏建议连续生成 ${safeChapterCount} 章；每章仍会走字数门禁、质检修订和故事状态回填。`,
+    )
+  }
 
   return {
     status,

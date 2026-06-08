@@ -799,11 +799,14 @@ export default function NovelProjectWorkspace() {
   }
 
   /* ── 正文生成 ──────────────────────────────────────────────────── */
-  const stepGenerateProse = async () => {
+  const stepGenerateProse = async (options?: { limit?: number; source?: string }) => {
     if (!selectedModelId) return message.warning('请先选择模型')
     if (!await flushPendingSave()) return
-    const unWritten = sortedChapters.filter(ch => !ch.chapter_text || ch.chapter_text.includes('【占位正文】'))
-    if (unWritten.length === 0) return message.warning('所有章节已有正文，无需生成')
+    const allUnwritten = sortedChapters.filter(ch => !ch.chapter_text || ch.chapter_text.includes('【占位正文】'))
+    const safetyLimit = Math.max(0, Number(options?.limit || 0))
+    const unWritten = safetyLimit > 0 ? allUnwritten.slice(0, safetyLimit) : allUnwritten
+    if (allUnwritten.length === 0) return message.warning('所有章节已有正文，无需生成')
+    if (unWritten.length === 0) return message.warning('当前安全批次没有可生成章节')
     if (!await confirmReferenceReady('正文创作')) return
     setStepProseLoading(true)
     proseBatchCancelRef.current = false
@@ -886,6 +889,9 @@ export default function NovelProjectWorkspace() {
             model_id: selectedModelId,
             chapter_ids: unWritten.map(ch => ch.id),
             total: unWritten.length,
+            source: options?.source || 'manual_batch',
+            safety_limit: safetyLimit || null,
+            available_total: allUnwritten.length,
           },
           output_ref: {
             total: unWritten.length,
@@ -922,7 +928,9 @@ export default function NovelProjectWorkspace() {
           ),
         })
       } else {
-        message.success(`正文生成完成 (${success}/${unWritten.length})`)
+        message.success(safetyLimit > 0
+          ? `安全连写完成 (${success}/${unWritten.length})`
+          : `正文生成完成 (${success}/${unWritten.length})`)
       }
     } catch (e: any) { message.error(e.message || '正文生成失败') }
     finally {
@@ -4254,6 +4262,18 @@ export default function NovelProjectWorkspace() {
 
     if (action.key === 'open_task_center') {
       setTaskCenterOpen(true)
+      return
+    }
+
+    if (action.key === 'start_safe_batch_generation') {
+      const guardrail = autoCreationDirectorModel.batchGuardrail
+      if (guardrail.status !== 'ready' || guardrail.safeChapterCount <= 0) {
+        message.warning('连续生产护栏尚未通过，先处理阻塞或谨慎项。')
+        setAutoDirectorActionLoadingKey('')
+        return
+      }
+      void stepGenerateProse({ limit: autoCreationDirectorModel.batchGuardrail.safeChapterCount, source: 'auto_creation_safe_batch' })
+        .finally(() => setAutoDirectorActionLoadingKey(''))
       return
     }
 
