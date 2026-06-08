@@ -9,9 +9,36 @@ import {
 import apiClient from '../../api/client';
 import { projectApi } from '../../api/projects';
 import TagsInput from '../../components/TagsInput';
+import { buildAssetMediaUrl } from '../../utils/assetMedia';
 
 const { Option } = Select;
 const { Title, Text } = Typography;
+
+function pickAssetSourceMetadata(data: any) {
+  return Object.fromEntries(
+    Object.entries(data || {}).filter(([key]) => key.startsWith('source_'))
+  );
+}
+
+function pickWorkflowAssetMetadata(data: any) {
+  const { workflow_json, parameters, ...metadata } = data || {};
+  return metadata;
+}
+
+function pickCharacterAssetMetadata(data: any) {
+  const { core_prompt_asset_id, image_asset_ids, lora_asset_id, variants, ...metadata } = data || {};
+  return metadata;
+}
+
+function pickNodeConfigAssetMetadata(data: any) {
+  const { nodeType, config, ...metadata } = data || {};
+  return metadata;
+}
+
+function pickNodeTemplateAssetMetadata(data: any) {
+  const { nodes, edges, ...metadata } = data || {};
+  return metadata;
+}
 
 export default function AssetEdit() {
   const { id } = useParams<{ id: string }>();
@@ -59,6 +86,13 @@ export default function AssetEdit() {
         initialValues.workflow_json = JSON.stringify(asset.data.workflow_json, null, 2);
         initialValues.parameters = JSON.stringify(asset.data.parameters, null, 2);
       }
+      if (asset.type === 'node_config') {
+        initialValues.config = JSON.stringify(asset.data.config || {}, null, 2);
+      }
+      if (asset.type === 'node_template') {
+        initialValues.nodes = JSON.stringify(asset.data.nodes || [], null, 2);
+        initialValues.edges = JSON.stringify(asset.data.edges || [], null, 2);
+      }
 
       form.setFieldsValue(initialValues);
       setLoading(false);
@@ -72,16 +106,22 @@ export default function AssetEdit() {
     setSaving(true);
     try {
       let data: any = {};
+      const sourceMetadata = pickAssetSourceMetadata(originalData);
+      const workflowMetadata = pickWorkflowAssetMetadata(originalData);
+      const characterMetadata = pickCharacterAssetMetadata(originalData);
+      const nodeConfigMetadata = pickNodeConfigAssetMetadata(originalData);
+      const nodeTemplateMetadata = pickNodeTemplateAssetMetadata(originalData);
       if (assetType === 'prompt') {
         data = { content: values.content, negative_prompt: values.negative || '' };
       } else if (assetType === 'image') {
         if (uploadedImageInfo) {
-          data = { file_path: uploadedImageInfo.file_path, width: uploadedImageInfo.width, height: uploadedImageInfo.height, format: uploadedImageInfo.format };
+          data = { ...sourceMetadata, file_path: uploadedImageInfo.file_path, width: uploadedImageInfo.width, height: uploadedImageInfo.height, format: uploadedImageInfo.format };
         } else {
-          data = { file_path: values.file_path, width: values.width, height: values.height, format: values.format };
+          data = { ...sourceMetadata, file_path: values.file_path, width: values.width, height: values.height, format: values.format };
         }
       } else if (assetType === 'character') {
         data = {
+          ...characterMetadata,
           core_prompt_asset_id: values.core_prompt_asset_id,
           image_asset_ids: values.image_asset_ids?.split(',').map(Number) || [],
           lora_asset_id: values.lora_asset_id,
@@ -89,14 +129,27 @@ export default function AssetEdit() {
         };
       } else if (assetType === 'workflow') {
         data = {
+          ...workflowMetadata,
           workflow_json: values.workflow_json ? JSON.parse(values.workflow_json) : {},
           parameters: values.parameters ? JSON.parse(values.parameters) : {},
         };
+      } else if (assetType === 'node_config') {
+        data = {
+          ...nodeConfigMetadata,
+          nodeType: values.nodeType,
+          config: values.config ? JSON.parse(values.config) : {},
+        };
+      } else if (assetType === 'node_template') {
+        data = {
+          ...nodeTemplateMetadata,
+          nodes: values.nodes ? JSON.parse(values.nodes) : [],
+          edges: values.edges ? JSON.parse(values.edges) : [],
+        };
       } else if (assetType === 'video') {
         if (uploadedVideoInfo) {
-          data = { file_path: uploadedVideoInfo.file_path, width: uploadedVideoInfo.width, height: uploadedVideoInfo.height, duration: uploadedVideoInfo.duration, fps: uploadedVideoInfo.fps, format: uploadedVideoInfo.format };
+          data = { ...sourceMetadata, file_path: uploadedVideoInfo.file_path, width: uploadedVideoInfo.width, height: uploadedVideoInfo.height, duration: uploadedVideoInfo.duration, fps: uploadedVideoInfo.fps, format: uploadedVideoInfo.format };
         } else {
-          data = { file_path: values.file_path, width: values.width, height: values.height, duration: values.duration, fps: values.fps, format: values.format };
+          data = { ...sourceMetadata, file_path: values.file_path, width: values.width, height: values.height, duration: values.duration, fps: values.fps, format: values.format };
         }
       }
 
@@ -166,13 +219,13 @@ export default function AssetEdit() {
               >
                 {uploadedImageInfo ? (
                   <div style={{ padding: 8 }}>
-                    <img src={`/api/assets/media/${uploadedImageInfo.file_path}`} alt="preview" style={{ maxHeight: 160, maxWidth: '100%', borderRadius: 6, objectFit: 'contain' }} />
+                    <img src={buildAssetMediaUrl(uploadedImageInfo.file_path)} alt="preview" style={{ maxHeight: 160, maxWidth: '100%', borderRadius: 6, objectFit: 'contain' }} />
                     <p style={{ marginTop: 8, color: '#52c41a', fontSize: 12 }}>✓ {uploadedImageInfo.width} × {uploadedImageInfo.height} · {uploadedImageInfo.format.toUpperCase()}</p>
                     <p style={{ color: '#8c8c8c', fontSize: 12 }}>点击或拖拽重新上传</p>
                   </div>
                 ) : originalData?.file_path ? (
                   <div style={{ padding: 8 }}>
-                    <img src={originalData.file_path.startsWith('http') || originalData.file_path.startsWith('data:') ? originalData.file_path : `/api/assets/media/${originalData.file_path}`} alt="current" style={{ maxHeight: 160, maxWidth: '100%', borderRadius: 6, objectFit: 'contain' }} />
+                    <img src={buildAssetMediaUrl(originalData.file_path)} alt="current" style={{ maxHeight: 160, maxWidth: '100%', borderRadius: 6, objectFit: 'contain' }} />
                     <p style={{ color: '#8c8c8c', fontSize: 12, marginTop: 8 }}>点击或拖拽新图片替换</p>
                   </div>
                 ) : (
@@ -237,6 +290,35 @@ export default function AssetEdit() {
             </Form.Item>
             <Form.Item name="parameters" label="动态参数暴露映射表 (JSON)" style={{ marginBottom: 0 }}>
               <Input.TextArea rows={6} style={codeInputStyle} />
+            </Form.Item>
+          </div>
+        );
+      case 'node_config':
+        return (
+          <div style={{ background: '#f0f5ff', padding: 16, borderRadius: 8, border: '1px solid #adc6ff' }}>
+            <Form.Item name="nodeType" label="节点类型" rules={[{ required: true }]}>
+              <Input placeholder="例如：generate、display、comfyUIEngine" />
+            </Form.Item>
+            <Form.Item name="config" label="节点配置 JSON" rules={[{ required: true }]} style={{ marginBottom: 0 }}>
+              <Input.TextArea rows={10} style={codeInputStyle} placeholder={`{
+  "label": "常用节点",
+  "mode": "text_to_image"
+}`} />
+            </Form.Item>
+          </div>
+        );
+      case 'node_template':
+        return (
+          <div style={{ background: '#f6ffed', padding: 16, borderRadius: 8, border: '1px solid #b7eb8f' }}>
+            <Form.Item name="nodes" label="模板节点数组 JSON" rules={[{ required: true }]}>
+              <Input.TextArea rows={8} style={codeInputStyle} placeholder={`[
+  { "type": "generate", "relativePosition": { "x": 0, "y": 0 }, "config": {} }
+]`} />
+            </Form.Item>
+            <Form.Item name="edges" label="模板连线数组 JSON" rules={[{ required: true }]} style={{ marginBottom: 0 }}>
+              <Input.TextArea rows={6} style={codeInputStyle} placeholder={`[
+  { "sourceIndex": 0, "targetIndex": 1, "sourceHandle": "output", "targetHandle": "input" }
+]`} />
             </Form.Item>
           </div>
         );
@@ -339,6 +421,8 @@ export default function AssetEdit() {
       case 'workflow': return <><ApiOutlined style={{ color: '#722ed1' }} /> 工作流</>;
       case 'video': return <><VideoCameraOutlined style={{ color: '#eb2f96' }} /> 视频</>;
       case 'character': return <><AppstoreAddOutlined style={{ color: '#fa8c16' }} /> 角色</>;
+      case 'node_config': return <><AppstoreAddOutlined style={{ color: '#1d39c4' }} /> 节点配置</>;
+      case 'node_template': return <><ApiOutlined style={{ color: '#389e0d' }} /> 节点模板</>;
       default: return null;
     }
   };
@@ -364,7 +448,7 @@ export default function AssetEdit() {
       <Form form={form} layout="vertical" onFinish={onFinish}>
         <Row gutter={24}>
           <Col span={16}>
-            <Card bordered={false} style={{ borderRadius: 12, boxShadow: '0 1px 2px rgba(0,0,0,0.03)', marginBottom: 24 }}>
+            <Card variant="borderless" style={{ borderRadius: 12, boxShadow: '0 1px 2px rgba(0,0,0,0.03)', marginBottom: 24 }}>
               <Title level={5} style={{ marginBottom: 20 }}>核心档案</Title>
               <Form.Item name="name" label={<Text strong>资产名称</Text>} rules={[{ required: true }]}>
                 <Input size="large" />
@@ -378,7 +462,7 @@ export default function AssetEdit() {
           </Col>
 
           <Col span={8}>
-            <Card bordered={false} style={{ borderRadius: 12, boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
+            <Card variant="borderless" style={{ borderRadius: 12, boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
               <Title level={5} style={{ marginBottom: 20 }}>元数据管理</Title>
               <Form.Item name="project_id" label={<Text strong>归属沙盒作用域</Text>}>
                 <Select size="large" placeholder={<span><GlobalOutlined /> 全局公共资产</span>} allowClear>

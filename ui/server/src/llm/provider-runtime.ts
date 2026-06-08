@@ -1,7 +1,18 @@
-import { readKeys, type APIKeyRecord } from '../key-store'
+import { readFile } from 'fs/promises'
+import { isAbsolute, relative, resolve } from 'path'
+import { guessAssetMimeType } from '../asset-mime'
+import { readKeys, writeKeys, type APIKeyRecord } from '../key-store'
 import { readModels, type ModelRecord } from '../model-store'
 import { readProviders, type ProviderRecord } from '../provider-store'
-import type { LLMRequest, LLMResponse } from './types'
+import {
+  imageUrlFromLLMContentPart,
+  stringifyLLMMessageContent,
+  stringifyLLMMessageTextContent,
+  textFromLLMContentPart,
+  type LLMMessageContentPart,
+  type LLMRequest,
+  type LLMResponse,
+} from './types'
 import { normalizeLLMResponse } from './adapter'
 import { buildCodexResponsesBody } from './codex-responses'
 
@@ -34,13 +45,22 @@ export type RuntimeModelSelection = {
   model: ModelRecord
   baseUrl: string
   endpoint: string
+  routeConfig?: any
+  routeType?: string
   apiFormat: string
+}
+
+export type RuntimeRoutingStrategy = 'balanced' | 'cost' | 'speed' | 'random'
+
+export type RuntimeModelSelectionOptions = {
+  routingStrategy?: RuntimeRoutingStrategy | string
 }
 
 export type RuntimeExecutionOptions = {
   signal?: AbortSignal
   timeoutMs?: number
   maxRetries?: number
+  routingStrategy?: RuntimeRoutingStrategy | string
 }
 
 type SafeRuntimeModelSelection = Omit<RuntimeModelSelection, 'key'> & {
@@ -49,6 +69,8 @@ type SafeRuntimeModelSelection = Omit<RuntimeModelSelection, 'key'> & {
     key_preview: string
   }
 }
+
+const GEMINI_NATIVE_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta'
 
 function maskSecret(value?: string) {
   const text = String(value || '')
@@ -67,6 +89,123 @@ function sanitizeRuntimeSelection(selection: RuntimeModelSelection): SafeRuntime
       has_key: Boolean(rawKey),
       key_preview: maskSecret(rawKey),
     },
+  }
+}
+
+function numberOrDefault(value: unknown, fallback: number) {
+  const number = Number(value)
+  return Number.isFinite(number) ? number : fallback
+}
+
+function keyHasUsableQuota(key: APIKeyRecord) {
+  const quotaTotal = numberOrDefault(key.quota_total, 0)
+  const hasRemaining = key.quota_remaining !== undefined && key.quota_remaining !== null
+  if (!hasRemaining) return true
+  const remaining = numberOrDefault(key.quota_remaining, 0)
+  if (quotaTotal <= 0 && remaining <= 0) return true
+  return remaining >= 1
+}
+
+function keyPriority(key: APIKeyRecord) {
+  return numberOrDefault(key.priority, 0)
+}
+
+function sortBalancedKeys(keys: APIKeyRecord[]) {
+  return [...keys].sort((a, b) => {
+    const priorityDiff = keyPriority(a) - keyPriority(b)
+    if (priorityDiff) return priorityDiff
+    const failureDiff = numberOrDefault(a.failure_count, 0) - numberOrDefault(b.failure_count, 0)
+    if (failureDiff) return failureDiff
+    return numberOrDefault(a.avg_latency, 0) - numberOrDefault(b.avg_latency, 0)
+  })
+}
+
+function normalizeRoutingStrategy(strategy?: RuntimeRoutingStrategy | string): RuntimeRoutingStrategy {
+  const value = String(strategy || 'balanced').toLowerCase()
+  if (value === 'cost' || value === 'cost_first' || value === 'cost-first') return 'cost'
+  if (value === 'speed' || value === 'speed_first' || value === 'speed-first') return 'speed'
+  if (value === 'random') return 'random'
+  return 'balanced'
+}
+
+function sortRuntimeKeys(keys: APIKeyRecord[], strategy?: RuntimeRoutingStrategy | string) {
+  const normalized = normalizeRoutingStrategy(strategy)
+  if (normalized === 'cost') {
+    return [...keys].sort((a, b) => {
+      const priceDiff = numberOrDefault(a.price_per_call, Number.MAX_SAFE_INTEGER) - numberOrDefault(b.price_per_call, Number.MAX_SAFE_INTEGER)
+      if (priceDiff) return priceDiff
+      return keyPriority(a) - keyPriority(b)
+    })
+  }
+  if (normalized === 'speed') {
+    return [...keys].sort((a, b) => {
+      const latencyDiff = numberOrDefault(a.avg_latency, Number.MAX_SAFE_INTEGER) - numberOrDefault(b.avg_latency, Number.MAX_SAFE_INTEGER)
+      if (latencyDiff) return latencyDiff
+      return keyPriority(a) - keyPriority(b)
+    })
+  }
+  if (normalized === 'random') {
+    const shuffled = [...keys]
+    for (let index = shuffled.length - 1; index > 0; index--) {
+      const swapIndex = Math.floor(Math.random() * (index + 1))
+      ;[shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]]
+    }
+    return shuffled
+  }
+  return sortBalancedKeys(keys)
+}
+
+function routeKeyForModel(model: ModelRecord, activeKeys: APIKeyRecord[], routedKeys: APIKeyRecord[]) {
+  const modelKeyId = Number(model.api_key_id || 0)
+  if (modelKeyId) {
+    const exactActiveKey = activeKeys.find(key => Number(key.id) === modelKeyId)
+    if (exactActiveKey) return routedKeys.find(key => Number(key.id) === modelKeyId)
+  }
+  return routedKeys.find(key => key.provider === model.provider)
+}
+
+function rankModelsByBalancedKey(models: ModelRecord[], activeKeys: APIKeyRecord[], routedKeys: APIKeyRecord[]) {
+  const keyRank = new Map(routedKeys.map((key, index) => [Number(key.id), index]))
+  return models
+    .map((model, index) => ({ model, index, key: routeKeyForModel(model, activeKeys, routedKeys) }))
+    .filter(item => item.key)
+    .sort((a, b) => {
+      const rankDiff = (keyRank.get(Number(a.key!.id)) ?? 9999) - (keyRank.get(Number(b.key!.id)) ?? 9999)
+      if (rankDiff) return rankDiff
+      return a.index - b.index
+    })
+    .map(item => item.model)
+}
+
+async function recordRuntimeKeyMetrics(activeWorkspace: string, keyId: number, startedAt: number, success: boolean) {
+  try {
+    const keys = await readKeys(activeWorkspace)
+    const index = keys.findIndex(key => Number(key.id) === Number(keyId))
+    if (index < 0) return
+
+    const key = { ...keys[index] }
+    const latencyMs = Math.max(0, Date.now() - startedAt)
+    key.last_used = new Date().toISOString()
+
+    if (success) {
+      key.success_count = numberOrDefault(key.success_count, 0) + 1
+      const previousLatency = numberOrDefault(key.avg_latency, 0)
+      key.avg_latency = previousLatency ? Math.round(previousLatency * 0.9 + latencyMs * 0.1) : latencyMs
+
+      const quotaTotal = numberOrDefault(key.quota_total, 0)
+      const quotaRemaining = numberOrDefault(key.quota_remaining, 0)
+      if (quotaTotal > 0 || quotaRemaining > 0) {
+        key.quota_used = numberOrDefault(key.quota_used, 0) + 1
+        key.quota_remaining = Math.max(0, quotaRemaining - 1)
+      }
+    } else {
+      key.failure_count = numberOrDefault(key.failure_count, 0) + 1
+    }
+
+    keys[index] = key
+    await writeKeys(activeWorkspace, keys)
+  } catch (error) {
+    console.warn(`[provider-runtime] Failed to record key metrics: ${error}`)
   }
 }
 
@@ -102,6 +241,15 @@ function buildUrl(baseUrl: string, endpoint: string): string {
   return `${base}/${ep}`
 }
 
+function isRouteObject(value: unknown): value is Record<string, any> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value))
+}
+
+function routeDslValue(routeConfig: unknown, snakeKey: string, camelKey: string = snakeKey) {
+  if (!isRouteObject(routeConfig)) return undefined
+  return routeConfig[snakeKey] ?? routeConfig[camelKey]
+}
+
 // ── Headers ─────────────────────────────────────────────────
 
 /**
@@ -120,7 +268,10 @@ function buildHeaders(selection: RuntimeModelSelection): Record<string, string> 
 
   // Authentication — matches Claude Code's configureApiKeyHeaders
   if (selection.key.key) {
-    if (selection.provider.auth_type === 'x-api-key') {
+    const authType = String(selection.provider.auth_type || 'bearer').toLowerCase()
+    if (isGeminiNativeFormat(selection.apiFormat)) {
+      headers['x-goog-api-key'] = selection.key.key
+    } else if (authType === 'x-api-key' || authType === 'api-key') {
       headers['x-api-key'] = selection.key.key
     } else {
       headers['Authorization'] = `Bearer ${selection.key.key}`
@@ -130,6 +281,10 @@ function buildHeaders(selection: RuntimeModelSelection): Record<string, string> 
   // Anthropic-specific headers
   if (selection.apiFormat === 'anthropic' && !headers['anthropic-version']) {
     headers['anthropic-version'] = '2023-06-01'
+  }
+  const routeHeaders = routeDslValue(selection.routeConfig, 'headers', 'customHeaders')
+  if (routeHeaders && typeof routeHeaders === 'object') {
+    Object.assign(headers, routeHeaders)
   }
 
   return headers
@@ -147,7 +302,44 @@ function shouldStreamRequest(request: LLMRequest, selection: RuntimeModelSelecti
   return Boolean(request.stream)
 }
 
+function isMediaRouteType(routeType?: string) {
+  return ['image', 'video', 'text_to_image', 'image_to_image', 'text_to_video', 'image_to_video'].includes(String(routeType || ''))
+}
+
 function toOpenAIBody(request: LLMRequest, selection: RuntimeModelSelection): Record<string, any> {
+  const routeType = requestRouteType(request, selection.model)
+  const passthroughBlocked = new Set([
+    'model',
+    'messages',
+    'prompt',
+    'type',
+    'mode',
+    'task_type',
+    'image_url',
+    'response_format',
+    'tools',
+    'tool_choice',
+    'metadata',
+    'stream',
+    'response_mode',
+    'routing_strategy',
+    'routingStrategy',
+    'incoming_assets',
+    'source_asset_ids',
+  ])
+  if (isMediaRouteType(routeType)) {
+    const body: Record<string, any> = {
+      model: selection.model.model_name || request.model,
+      prompt: (request as any).prompt || textPromptFromMessages(request.messages),
+    }
+    if ((request as any).image_url) body.image_url = (request as any).image_url
+    for (const [key, value] of Object.entries(request as any)) {
+      if (value === undefined || value === null) continue
+      if (passthroughBlocked.has(key)) continue
+      body[key] = value
+    }
+    return body
+  }
   const shouldStream = shouldStreamRequest(request, selection)
   const body: Record<string, any> = {
     model: selection.model.model_name || request.model,
@@ -161,6 +353,11 @@ function toOpenAIBody(request: LLMRequest, selection: RuntimeModelSelection): Re
   }
   if (request.tools?.length) body.tools = request.tools
   if (request.tool_choice && request.tool_choice !== 'none') body.tool_choice = request.tool_choice
+  for (const [key, value] of Object.entries(request as any)) {
+    if (value === undefined || value === null) continue
+    if (passthroughBlocked.has(key)) continue
+    body[key] = value
+  }
   return body
 }
 
@@ -195,6 +392,234 @@ function toAnthropicBody(request: LLMRequest, selection: RuntimeModelSelection):
   return body
 }
 
+function toGeminiGenerateContentBody(request: LLMRequest): Record<string, any> {
+  const systemText = (request.messages || [])
+    .filter(message => message.role === 'system')
+    .map(message => stringifyLLMMessageContent(message.content))
+    .filter(Boolean)
+    .join('\n')
+  const contents = (request.messages || [])
+    .filter(message => message.role !== 'system')
+    .map(message => ({
+      role: message.role === 'assistant' ? 'model' : 'user',
+      parts: geminiPartsFromMessageContent(message.content),
+    }))
+  const body: Record<string, any> = {
+    contents: contents.length ? contents : [{ role: 'user', parts: [{ text: promptFromMessages(request.messages) }] }],
+    generationConfig: {
+      temperature: request.temperature ?? 0.3,
+      maxOutputTokens: request.max_tokens ?? 4096,
+    },
+  }
+  if (systemText) body.systemInstruction = { parts: [{ text: systemText }] }
+  return body
+}
+
+function promptFromMessages(messages: LLMRequest['messages']) {
+  const lastUser = [...(messages || [])].reverse().find(message => message.role === 'user')
+  return lastUser
+    ? stringifyLLMMessageContent(lastUser.content)
+    : (messages || []).map(message => stringifyLLMMessageContent(message.content)).filter(Boolean).join('\n')
+}
+
+function textPromptFromMessages(messages: LLMRequest['messages']) {
+  const lastUser = [...(messages || [])].reverse().find(message => message.role === 'user')
+  return lastUser
+    ? stringifyLLMMessageTextContent(lastUser.content)
+    : (messages || []).map(message => stringifyLLMMessageTextContent(message.content)).filter(Boolean).join('\n')
+}
+
+function mimeTypeFromImageUrl(url: string) {
+  const dataMatch = String(url || '').match(/^data:([^;,]+);base64,/i)
+  if (dataMatch) return dataMatch[1]
+  if (/\.jpe?g(\?|$)/i.test(url)) return 'image/jpeg'
+  if (/\.webp(\?|$)/i.test(url)) return 'image/webp'
+  if (/\.gif(\?|$)/i.test(url)) return 'image/gif'
+  return 'image/png'
+}
+
+function geminiPartFromImageUrl(url: string) {
+  const value = String(url || '').trim()
+  const dataMatch = value.match(/^data:([^;,]+);base64,(.*)$/i)
+  if (dataMatch) return { inlineData: { mimeType: dataMatch[1], data: dataMatch[2] } }
+  return { fileData: { mimeType: mimeTypeFromImageUrl(value), fileUri: value } }
+}
+
+function geminiPartsFromMessageContent(content: LLMRequest['messages'][number]['content']) {
+  if (!Array.isArray(content)) return [{ text: stringifyLLMMessageContent(content) }]
+  const parts = content.flatMap(part => {
+    const text = textFromLLMContentPart(part).trim()
+    if (text) return [{ text }]
+    const imageUrl = imageUrlFromLLMContentPart(part)
+    if (imageUrl) return [geminiPartFromImageUrl(imageUrl)]
+    return []
+  })
+  return parts.length ? parts : [{ text: stringifyLLMMessageContent(content) }]
+}
+
+function isInsidePath(root: string, candidate: string) {
+  const relativePath = relative(resolve(root), resolve(candidate))
+  return relativePath === '' || (!!relativePath && !relativePath.startsWith('..') && !isAbsolute(relativePath))
+}
+
+function extractLocalImagePathCandidates(activeWorkspace: string, imageUrl: string) {
+  const rawUrl = String(imageUrl || '').trim()
+  if (!rawUrl || /^data:/i.test(rawUrl)) return []
+  let localValue = rawUrl
+  if (/^https?:\/\//i.test(rawUrl)) {
+    try {
+      const parsed = new URL(rawUrl)
+      const host = parsed.hostname.toLowerCase()
+      if (!['localhost', '127.0.0.1', '::1'].includes(host)) return []
+      localValue = decodeURIComponent(parsed.pathname)
+    } catch {
+      return []
+    }
+  }
+  const mediaPrefix = '/api/assets/media/'
+  const mediaIndex = localValue.indexOf(mediaPrefix)
+  if (mediaIndex >= 0) {
+    localValue = decodeURIComponent(localValue.slice(mediaIndex + mediaPrefix.length))
+  }
+  let legacyTempValue = ''
+  const filesPrefix = '/api/files/'
+  const filesIndex = localValue.indexOf(filesPrefix)
+  if (filesIndex >= 0) {
+    legacyTempValue = decodeURIComponent(localValue.slice(filesIndex + filesPrefix.length))
+    localValue = legacyTempValue
+  }
+  const trimmedLocal = localValue.replace(/^\/+/, '')
+  const candidates = [
+    localValue,
+    resolve(activeWorkspace, localValue),
+    resolve(activeWorkspace, trimmedLocal),
+    resolve(activeWorkspace, 'assets', trimmedLocal),
+    legacyTempValue ? resolve(activeWorkspace, 'data', 'temp', legacyTempValue.replace(/^\/+/, '')) : '',
+    resolve('/', trimmedLocal),
+  ]
+    .filter(Boolean)
+    .map(candidate => resolve(candidate))
+  return Array.from(new Set(candidates)).filter(candidate => isInsidePath(activeWorkspace, candidate))
+}
+
+async function localImageUrlToDataUri(activeWorkspace: string, imageUrl: string) {
+  for (const candidate of extractLocalImagePathCandidates(activeWorkspace, imageUrl)) {
+    try {
+      const mime = guessAssetMimeType(candidate)
+      if (!mime.startsWith('image/')) continue
+      const bytes = await readFile(candidate)
+      return `data:${mime};base64,${Buffer.from(bytes).toString('base64')}`
+    } catch {}
+  }
+  return imageUrl
+}
+
+async function requestWithLocalAssetDataUris(activeWorkspace: string, request: LLMRequest): Promise<LLMRequest> {
+  const imageUrl = String((request as any).image_url || '').trim()
+  let changed = false
+  const nextRequest: any = { ...(request as any) }
+  if (imageUrl) {
+    const converted = await localImageUrlToDataUri(activeWorkspace, imageUrl)
+    if (converted !== imageUrl) {
+      nextRequest.image_url = converted
+      changed = true
+    }
+  }
+  const nextMessages = await Promise.all((request.messages || []).map(async message => {
+    if (!Array.isArray(message.content)) return message
+    const nextContent = await Promise.all(message.content.map(async part => {
+      const imagePartUrl = imageUrlFromLLMContentPart(part)
+      if (!imagePartUrl) return part
+      const converted = await localImageUrlToDataUri(activeWorkspace, imagePartUrl)
+      if (converted === imagePartUrl) return part
+      changed = true
+      const record = part as LLMMessageContentPart
+      if (record && typeof record === 'object' && record.image_url && typeof record.image_url === 'object') {
+        return { ...record, image_url: { ...record.image_url, url: converted } }
+      }
+      return { ...record, image_url: { url: converted } }
+    }))
+    return { ...message, content: nextContent }
+  }))
+  if (changed) nextRequest.messages = nextMessages
+  return changed ? nextRequest : request
+}
+
+function renderTemplateValue(template: any, context: Record<string, any>): any {
+  if (Array.isArray(template)) {
+    return template
+      .map(item => renderTemplateValue(item, context))
+      .filter(item => item !== undefined && item !== null)
+  }
+  if (template && typeof template === 'object') {
+    const rendered: Record<string, any> = {}
+    for (const [key, value] of Object.entries(template)) {
+      const nextValue = renderTemplateValue(value, context)
+      if (nextValue !== undefined && nextValue !== null) rendered[key] = nextValue
+    }
+    return Object.keys(rendered).length ? rendered : undefined
+  }
+  if (typeof template === 'string') {
+    const match = template.trim().match(/^\{\{\s*([^}]+?)\s*\}\}$/)
+    if (!match) return template
+    const key = match[1].trim()
+    const value = context[key]
+    if (key === 'size' && typeof value === 'string' && value && !value.includes('*')) return value.replace(/x/g, '*')
+    return value
+  }
+  return template
+}
+
+function buildTemplateContext(request: LLMRequest, selection: RuntimeModelSelection) {
+  return {
+    ...(request as any),
+    model: selection.model.model_name || request.model,
+    messages: request.messages,
+    prompt: (request as any).prompt || promptFromMessages(request.messages),
+    size: (request as any).size ?? '1024*1024',
+    temperature: request.temperature,
+    max_tokens: request.max_tokens,
+  }
+}
+
+function getValueByPath(data: any, path: string) {
+  const parts = String(path || '').split('.').filter(Boolean)
+  let current = data
+  for (const part of parts) {
+    if (Array.isArray(current) && /^\d+$/.test(part)) current = current[Number(part)]
+    else if (current && typeof current === 'object' && part in current) current = current[part]
+    else return undefined
+  }
+  return current
+}
+
+function isEnvelopeObject(value: any): value is Record<string, any> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value))
+}
+
+function providerEnvelopeCandidates(raw: any) {
+  const candidates: any[] = []
+  const seen = new Set<any>()
+  const visit = (value: any, depth = 0) => {
+    if (!isEnvelopeObject(value) || seen.has(value) || depth > 8) return
+    seen.add(value)
+    candidates.push(value)
+    for (const key of ['data', 'result', 'output']) {
+      visit(value[key], depth + 1)
+    }
+  }
+  visit(raw)
+  return candidates.length ? candidates : [raw]
+}
+
+function getValueByPathFromEnvelopes(raw: any, path: string) {
+  for (const candidate of providerEnvelopeCandidates(raw)) {
+    const value = getValueByPath(candidate, path)
+    if (value !== undefined) return value
+  }
+  return undefined
+}
+
 // ── Response Parsing ────────────────────────────────────────
 
 function parseAnthropicResponse<T = any>(raw: any): LLMResponse<T> {
@@ -207,6 +632,10 @@ function parseAnthropicResponse<T = any>(raw: any): LLMResponse<T> {
 function isCodexResponsesFormat(apiFormat: string) {
   const normalized = String(apiFormat || '').toLowerCase()
   return normalized.includes('codex') || normalized.includes('responses')
+}
+
+function isGeminiNativeFormat(apiFormat: string) {
+  return String(apiFormat || '').toLowerCase() === 'gemini_native'
 }
 
 function parseResponsesResponse<T = any>(raw: any): LLMResponse<T> {
@@ -224,8 +653,32 @@ function parseResponsesResponse<T = any>(raw: any): LLMResponse<T> {
   })
 }
 
+function parseGeminiGenerateContentResponse<T = any>(raw: any): LLMResponse<T> {
+  const candidate = Array.isArray(raw?.candidates) ? raw.candidates[0] : null
+  const parts = Array.isArray(candidate?.content?.parts) ? candidate.content.parts : []
+  const content = parts.map((part: any) => String(part?.text || '')).filter(Boolean).join('\n')
+  const usage = raw?.usageMetadata
+    ? {
+        input_tokens: raw.usageMetadata.promptTokenCount,
+        output_tokens: raw.usageMetadata.candidatesTokenCount,
+        total_tokens: raw.usageMetadata.totalTokenCount,
+      }
+    : undefined
+  return normalizeLLMResponse<T>({
+    ...raw,
+    content,
+    usage,
+    finish_reason: candidate?.finishReason || raw?.finishReason,
+  })
+}
+
 export function buildProviderRequestBody(request: LLMRequest, selection: RuntimeModelSelection): Record<string, any> {
+  const payloadTemplate = routeDslValue(selection.routeConfig, 'payload_template', 'payloadTemplate')
+  if (payloadTemplate) {
+    return renderTemplateValue(payloadTemplate, buildTemplateContext(request, selection)) ?? {}
+  }
   if (selection.apiFormat === 'anthropic') return toAnthropicBody(request, selection)
+  if (isGeminiNativeFormat(selection.apiFormat)) return toGeminiGenerateContentBody(request)
   if (isCodexResponsesFormat(selection.apiFormat)) return toCodexResponsesBody(request, selection)
   return toOpenAIBody(request, selection)
 }
@@ -388,9 +841,51 @@ export async function readProviderStream(response: Response, selection: RuntimeM
 }
 
 export function parseProviderResponsePayload<T = any>(raw: any, selection: RuntimeModelSelection): LLMResponse<T> {
+  const resultExtractor = routeDslValue(selection.routeConfig, 'result_extractor', 'resultExtractor')
+  if (resultExtractor) {
+    const extracted = getValueByPathFromEnvelopes(raw, String(resultExtractor))
+    const extractedContent = typeof extracted === 'string' ? extracted : JSON.stringify(extracted ?? '')
+    const content = isMediaRouteType(selection.routeType) ? normalizeExtractedMediaContent(extractedContent) : extractedContent
+    return normalizeLLMResponse<T>({ ...raw, content })
+  }
+  if (isMediaRouteType(selection.routeType)) {
+    const extracted = extractMediaContent(raw)
+    if (extracted) return normalizeLLMResponse<T>({ ...raw, content: extracted })
+  }
   if (selection.apiFormat === 'anthropic') return parseAnthropicResponse<T>(raw)
+  if (isGeminiNativeFormat(selection.apiFormat)) return parseGeminiGenerateContentResponse<T>(raw)
   if (isCodexResponsesFormat(selection.apiFormat)) return parseResponsesResponse<T>(raw)
   return normalizeLLMResponse<T>(raw)
+}
+
+function extractMediaContent(raw: any) {
+  for (const candidate of providerEnvelopeCandidates(raw)) {
+    const firstData = Array.isArray(candidate?.data) ? candidate.data[0] : null
+    if (firstData?.url || firstData?.b64_json) return normalizeExtractedMediaContent(String(firstData.url || firstData.b64_json))
+    const firstResult = Array.isArray(candidate?.output?.results) ? candidate.output.results[0] : Array.isArray(candidate?.results) ? candidate.results[0] : null
+    if (firstResult?.video_url || firstResult?.image_url || firstResult?.url) return normalizeExtractedMediaContent(String(firstResult.video_url || firstResult.image_url || firstResult.url))
+    if (candidate?.output?.video_url || candidate?.output?.image_url || candidate?.output?.url) return normalizeExtractedMediaContent(String(candidate.output.video_url || candidate.output.image_url || candidate.output.url))
+    if (candidate?.video_url || candidate?.image_url || candidate?.url) return normalizeExtractedMediaContent(String(candidate.video_url || candidate.image_url || candidate.url))
+    const firstVideoResult = Array.isArray(candidate?.video_result) ? candidate.video_result[0] : null
+    if (firstVideoResult?.url) return normalizeExtractedMediaContent(String(firstVideoResult.url))
+    const choiceContent = candidate?.choices?.[0]?.message?.content || candidate?.choices?.[0]?.text
+    if (choiceContent) return normalizeExtractedMediaContent(String(choiceContent))
+  }
+  return ''
+}
+
+function normalizeExtractedMediaContent(content: string) {
+  const value = String(content || '').trim()
+  if (!value) return ''
+  if (/^(https?:|data:|blob:)/i.test(value)) return value
+  const markdownMatch = value.match(/!\[.*?\]\((https?:\/\/[^\s)]+)\)/i)
+  if (markdownMatch) return markdownMatch[1]
+  const dataMatch = value.match(/(data:(?:image|video)\/[^;]+;base64,[A-Za-z0-9+/=]+)/i)
+  if (dataMatch) return dataMatch[1]
+  const urlMatch = value.match(/(https?:\/\/[^\s"'<>]+\.(?:png|jpg|jpeg|webp|gif|mp4|webm|mov)(?:\?[^\s"'<>)]*)?)/i)
+  if (urlMatch) return urlMatch[1]
+  if (value.length > 200 && /^[A-Za-z0-9+/=\s]+$/.test(value.slice(0, 120))) return `data:image/png;base64,${value.replace(/\s+/g, '')}`
+  return value
 }
 
 export function summarizeProviderRequestBodyForLog(body: Record<string, any>) {
@@ -454,6 +949,203 @@ function describeProviderRequestContext(selection: RuntimeModelSelection, url: s
   return `POST ${url} | provider=${selection.provider.id} | model=${selection.model.model_name} | format=${selection.apiFormat}`
 }
 
+function requestRouteType(request: LLMRequest, model: ModelRecord) {
+  const explicit = String((request as any).type || (request as any).mode || (request as any).task_type || '').trim()
+  if (explicit) return explicit
+  const capabilities = model.capabilities || {}
+  const activeModalities = Object.entries(capabilities)
+    .filter(([key, enabled]) => enabled === true && key !== 'chat')
+    .map(([key]) => key)
+  return activeModalities.length === 1 ? activeModalities[0] : ''
+}
+
+function routeModelMatchers(route: Record<string, any>) {
+  const raw = [route.match, route.matches, route.model, route.model_name, route.modelName, route.models, route.pattern].flat()
+  return raw.map(item => String(item || '').trim()).filter(Boolean)
+}
+
+function doesModelRouteMatch(route: Record<string, any>, modelName: string) {
+  const name = String(modelName || '').trim()
+  if (!name) return false
+  const normalizedName = name.toLowerCase()
+  const matchType = String(route.match_type || route.matchType || route.matcher || 'contains').toLowerCase()
+  return routeModelMatchers(route).some(matcher => {
+    if (matcher === '*') return true
+    if (matchType === 'exact') return normalizedName === matcher.toLowerCase()
+    if (matchType === 'regex') {
+      try { return new RegExp(matcher, 'i').test(name) } catch { return false }
+    }
+    return normalizedName.includes(matcher.toLowerCase())
+  })
+}
+
+function routeConfigForModel(route: any, modelName: string) {
+  const modelRoutes = isRouteObject(route) ? route.model_routes ?? route.modelRoutes : undefined
+  if (!isRouteObject(route) || !Array.isArray(modelRoutes)) return route
+  const matched = modelRoutes.find((item: any) => isRouteObject(item) && doesModelRouteMatch(item, modelName))
+  if (!matched) return route
+  const { model_routes: _modelRoutes, modelRoutes: _modelRoutesCamel, ...baseRoute } = route
+  const {
+    match: _match,
+    matches: _matches,
+    model: _routeModel,
+    model_name: _routeModelName,
+    modelName: _routeModelNameCamel,
+    models: _models,
+    pattern: _pattern,
+    match_type: _matchType,
+    matchType: _matchTypeCamel,
+    matcher: _matcher,
+    ...overrideRoute
+  } = matched
+  const merged = { ...baseRoute, ...overrideRoute }
+  if (isRouteObject(baseRoute.headers) || isRouteObject(overrideRoute.headers)) {
+    merged.headers = { ...(baseRoute.headers || {}), ...(overrideRoute.headers || {}) }
+  }
+  return merged
+}
+
+function routeConfigForRequest(provider: ProviderRecord, request: LLMRequest, model: ModelRecord): any {
+  const endpoints = provider.endpoints || {}
+  if (isCodexResponsesFormat(provider.api_format)) return endpoints.responses || endpoints.chat || endpoints.llm || ''
+  const routeType = requestRouteType(request, model)
+  if (routeType && endpoints[routeType]) return routeConfigForModel(endpoints[routeType], model.model_name)
+  const broadType = routeType.includes('image') ? 'image' : routeType.includes('video') ? 'video' : ''
+  if (broadType && endpoints[broadType]) return routeConfigForModel(endpoints[broadType], model.model_name)
+  return routeConfigForProvider(provider)
+}
+
+function normalizeGeminiModelName(modelName = '') {
+  return String(modelName || '').replace(/^models\//, '').trim()
+}
+
+function endpointForRoute(provider: ProviderRecord, route: any, routeType = '', modelName = '') {
+  if (isRouteObject(route)) return String(route.url || route.endpoint || fallbackEndpointForProvider(provider, routeType, modelName))
+  if (route) return String(route)
+  return fallbackEndpointForProvider(provider, routeType, modelName)
+}
+
+function selectionForRequestRoute(selection: RuntimeModelSelection, request: LLMRequest): RuntimeModelSelection {
+  const routeType = requestRouteType(request, selection.model)
+  const routeConfig = routeConfigForRequest(selection.provider, request, selection.model)
+  return {
+    ...selection,
+    endpoint: endpointForRoute(selection.provider, routeConfig, routeType, selection.model.model_name),
+    routeConfig,
+    routeType,
+  }
+}
+
+function asyncTaskStatus(raw: any, routeConfig: Record<string, any>) {
+  const statusPath = String(routeDslValue(routeConfig, 'status_extractor', 'statusExtractor') || 'output.task_status')
+  const extracted = getValueByPathFromEnvelopes(raw, statusPath)
+  for (const candidate of providerEnvelopeCandidates(raw)) {
+    const fallback = candidate?.status || candidate?.task_status || candidate?.taskStatus || candidate?.state || candidate?.output?.task_status || candidate?.output?.taskStatus || candidate?.output?.status || candidate?.output?.state
+    if (extracted ?? fallback) return String(extracted ?? fallback).toLowerCase()
+  }
+  return ''
+}
+
+function asyncTaskId(raw: any, routeConfig: Record<string, any>) {
+  const taskPath = String(routeDslValue(routeConfig, 'task_id_extractor', 'taskIdExtractor') || '')
+  const extracted = taskPath ? getValueByPathFromEnvelopes(raw, taskPath) : undefined
+  for (const candidate of providerEnvelopeCandidates(raw)) {
+    const fallback = candidate?.task_id || candidate?.taskId || candidate?.id || candidate?.output?.task_id || candidate?.output?.taskId || candidate?.output?.id
+    const value = extracted ?? fallback
+    if (value != null) return String(value).trim()
+  }
+  return ''
+}
+
+function isPendingTaskStatus(status: string) {
+  return ['pending', 'processing', 'submitted', 'in_progress', 'queued', 'running'].includes(status)
+}
+
+function isCompletedTaskStatus(status: string) {
+  return ['succeeded', 'success', 'completed', 'finished', 'done'].includes(status)
+}
+
+function isFailedTaskStatus(status: string) {
+  const normalized = String(status || '').trim().toLowerCase().replace(/[\s-]+/g, '_')
+  return [
+    'failed',
+    'failure',
+    'fail',
+    'error',
+    'errored',
+    'cancelled',
+    'canceled',
+    'aborted',
+    'abort',
+    'rejected',
+    'reject',
+    'timeout',
+    'timed_out',
+    'expired',
+  ].includes(normalized)
+}
+
+function pollUrlForTask(selection: RuntimeModelSelection, routeConfig: Record<string, any>, taskId: string, initialUrl: string) {
+  const template = String(routeDslValue(routeConfig, 'poll_url', 'pollUrl') || '').trim()
+  const rendered = (template || `${initialUrl.replace(/\/+$/, '')}/{{task_id}}`).replace(/\{\{\s*task_id\s*\}\}/g, taskId)
+  return /^https?:\/\//i.test(rendered) ? rendered : buildUrl(selection.baseUrl, rendered)
+}
+
+async function readJsonOrText(response: Response, label: string) {
+  const text = await response.text()
+  try {
+    return text ? JSON.parse(text) : {}
+  } catch {
+    return { content: text, raw_text: text, label }
+  }
+}
+
+function waitForPollInterval(ms: number, signal?: AbortSignal) {
+  if (ms <= 0) return Promise.resolve()
+  if (signal?.aborted) return Promise.reject(new Error('Request canceled'))
+  return new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    const onAbort = () => {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', onAbort)
+      reject(new Error('Request canceled'))
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
+async function pollAsyncProviderTask(raw: any, selection: RuntimeModelSelection, headers: Record<string, string>, initialUrl: string, options: RuntimeExecutionOptions) {
+  if (!isRouteObject(selection.routeConfig)) return raw
+  const taskId = asyncTaskId(raw, selection.routeConfig)
+  if (!taskId) return raw
+  const initialStatus = asyncTaskStatus(raw, selection.routeConfig)
+  if (isCompletedTaskStatus(initialStatus) || !isPendingTaskStatus(initialStatus)) return raw
+
+  const pollUrl = pollUrlForTask(selection, selection.routeConfig, taskId, initialUrl)
+  const maxAttempts = Math.max(1, Number(routeDslValue(selection.routeConfig, 'poll_max_attempts', 'pollMaxAttempts') || 60))
+  const pollIntervalMs = Math.max(0, Number(routeDslValue(selection.routeConfig, 'poll_interval_ms', 'pollIntervalMs') ?? 10_000))
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    if (options.signal?.aborted) throw new Error('Request canceled')
+    if (attempt > 1 && pollIntervalMs > 0) await waitForPollInterval(pollIntervalMs, options.signal)
+    const response = await fetch(pollUrl, { method: 'GET', headers, signal: options.signal })
+    const pollPayload = await readJsonOrText(response, 'provider async poll')
+    if (!response.ok) {
+      throw new Error(`Async task poll failed ${response.status}: ${JSON.stringify(pollPayload).slice(0, 500)}`)
+    }
+    const status = asyncTaskStatus(pollPayload, selection.routeConfig)
+    if (isFailedTaskStatus(status)) {
+      throw new Error(`Async task failed: ${JSON.stringify(pollPayload).slice(0, 500)}`)
+    }
+    if (isCompletedTaskStatus(status) || !isPendingTaskStatus(status)) return pollPayload
+  }
+
+  throw new Error(`Async task timed out: ${taskId}`)
+}
+
 // ── HTTP Request with Retry ─────────────────────────────────
 
 /**
@@ -471,19 +1163,20 @@ async function postProviderJson<T = any>(
   request: LLMRequest,
   options: RuntimeExecutionOptions = {},
 ): Promise<LLMResponse<T>> {
-  const url = buildUrl(selection.baseUrl, selection.endpoint)
-  const body = buildProviderRequestBody(request, selection)
-  const isStreaming = selection.apiFormat !== 'anthropic' && Boolean((body as any).stream)
-  const headers = buildHeaders(selection)
+  const routedSelection = selectionForRequestRoute(selection, request)
+  const url = buildUrl(routedSelection.baseUrl, routedSelection.endpoint)
+  const body = buildProviderRequestBody(request, routedSelection)
+  const isStreaming = routedSelection.apiFormat !== 'anthropic' && Boolean((body as any).stream)
+  const headers = buildHeaders(routedSelection)
   const maxRetries = Number(options.maxRetries ?? process.env.LLM_MAX_RETRIES ?? 5)
   const timeoutMs = Number(options.timeoutMs ?? process.env.LLM_TIMEOUT_MS ?? 600000) // 600s default, matches Claude Code foreground
   const keyMask = (selection.key.key || '').slice(0, 8) + '...'
   const heartbeatInterval = 30_000 // log progress every 30s
 
   console.log(
-    `[provider-runtime] POST ${url} | model: ${selection.model.model_name} | format: ${selection.apiFormat} | responseMode=${selection.provider.response_mode || 'auto'} | stream=${isStreaming ? 'on' : 'off'} | key: ${keyMask} | timeout=${timeoutMs}ms | retries=${maxRetries}`,
+    `[provider-runtime] POST ${url} | model: ${routedSelection.model.model_name} | format: ${routedSelection.apiFormat} | responseMode=${routedSelection.provider.response_mode || 'auto'} | stream=${isStreaming ? 'on' : 'off'} | key: ${keyMask} | timeout=${timeoutMs}ms | retries=${maxRetries}`,
   )
-  if (isCodexResponsesFormat(selection.apiFormat)) {
+  if (isCodexResponsesFormat(routedSelection.apiFormat)) {
     console.log(`[provider-runtime] Codex body summary: ${JSON.stringify(summarizeProviderRequestBodyForLog(body))}`)
   }
 
@@ -555,7 +1248,7 @@ async function postProviderJson<T = any>(
     if (!response.ok) {
       const text = await response.text()
       console.log(
-        `[provider-runtime] Response: ${response.status} | ${selection.model.model_name} | body preview: ${text.slice(0, 300)} | ${elapsed}s`,
+        `[provider-runtime] Response: ${response.status} | ${routedSelection.model.model_name} | body preview: ${text.slice(0, 300)} | ${elapsed}s`,
       )
       const errorMsg = `Provider request failed ${response.status}: ${text.slice(0, 500)}`
 
@@ -594,8 +1287,8 @@ async function postProviderJson<T = any>(
     let raw: any
     if (isStreaming) {
       try {
-        console.log(`[provider-runtime] Response: ${response.status} | ${selection.model.model_name} | streaming | ${elapsed}s`)
-        raw = await readProviderStream(response, selection)
+        console.log(`[provider-runtime] Response: ${response.status} | ${routedSelection.model.model_name} | streaming | ${elapsed}s`)
+        raw = await readProviderStream(response, routedSelection)
       } catch (error) {
         lastError = describeFetchError(error)
         console.error(`[provider-runtime] Stream read error: ${lastError}`)
@@ -606,7 +1299,7 @@ async function postProviderJson<T = any>(
 
       // Log response for debugging
       console.log(
-        `[provider-runtime] Response: ${response.status} | ${selection.model.model_name} | body preview: ${text.slice(0, 300)} | ${elapsed}s`,
+        `[provider-runtime] Response: ${response.status} | ${routedSelection.model.model_name} | body preview: ${text.slice(0, 300)} | ${elapsed}s`,
       )
 
       try {
@@ -616,12 +1309,13 @@ async function postProviderJson<T = any>(
       }
     }
 
-    return parseProviderResponsePayload<T>(raw, selection)
+    const finalRaw = isStreaming ? raw : await pollAsyncProviderTask(raw, routedSelection, headers, url, options)
+    return parseProviderResponsePayload<T>(finalRaw, routedSelection)
   }
 
   // All retries exhausted
   throw new Error(
-    `All ${maxRetries} retries exhausted. ${describeProviderRequestContext(selection, url)}. Last status: ${lastStatus}. Last error: ${lastError}`,
+    `All ${maxRetries} retries exhausted. ${describeProviderRequestContext(routedSelection, url)}. Last status: ${lastStatus}. Last error: ${lastError}`,
   )
 }
 
@@ -630,6 +1324,7 @@ async function postProviderJson<T = any>(
 export async function selectRuntimeModel(
   activeWorkspace: string,
   preferredModelId?: number,
+  options: RuntimeModelSelectionOptions = {},
 ): Promise<RuntimeModelSelection | null> {
   const [providers, keys, models] = await Promise.all([
     readProviders(activeWorkspace),
@@ -637,13 +1332,16 @@ export async function selectRuntimeModel(
     readModels(activeWorkspace),
   ])
 
-  console.log(`[provider-runtime] selectRuntimeModel: workspace=${activeWorkspace}, preferredModelId=${preferredModelId}`)
+  const routingStrategy = normalizeRoutingStrategy(options.routingStrategy)
+
+  console.log(`[provider-runtime] selectRuntimeModel: workspace=${activeWorkspace}, preferredModelId=${preferredModelId}, routingStrategy=${routingStrategy}`)
   console.log(`[provider-runtime] loaded: providers=${providers.length}, keys=${keys.length}, models=${models.length}`)
 
   const activeProviders = providers.filter(
     p => p.is_active !== false && p.service_type !== 'image',
   )
   const activeKeys = keys.filter(k => k.is_active !== false && k.key)
+  const routedActiveKeys = sortRuntimeKeys(activeKeys.filter(keyHasUsableQuota), routingStrategy)
 
   // ── Model Selection ──────────────────────────────────────
   // Priority: preferredModelId (ignore health) → non-disabled favorite → non-disabled[0] → ANY model
@@ -655,6 +1353,8 @@ export async function selectRuntimeModel(
   }
 
   let model: ModelRecord | undefined
+  const routedAvailableModels = rankModelsByBalancedKey(availableModels, activeKeys, routedActiveKeys)
+  const automaticModels = routedAvailableModels.length ? routedAvailableModels : availableModels
 
   // 1. Try exact preferredModelId — ignore health_status (user explicitly selected it)
   if (preferredModelId) {
@@ -666,13 +1366,13 @@ export async function selectRuntimeModel(
 
   // 2. Favorite among available
   if (!model) {
-    model = availableModels.find(m => m.is_favorite)
+    model = automaticModels.find(m => m.is_favorite)
     if (model) console.log(`[provider-runtime] Using favorite model: id=${model.id}, name=${model.model_name}`)
   }
 
   // 3. First available
   if (!model) {
-    model = availableModels[0]
+    model = automaticModels[0]
     if (model) console.log(`[provider-runtime] Using first available model: id=${model.id}, name=${model.model_name}`)
   }
 
@@ -706,9 +1406,9 @@ export async function selectRuntimeModel(
   }
 
   // ── Key Resolution ───────────────────────────────────────
-  let key = activeKeys.find(k => k.id === model.api_key_id)
-    || activeKeys.find(k => k.provider === provider.id)
-    || activeKeys[0]
+  let key = routedActiveKeys.find(k => k.id === model.api_key_id)
+    || routedActiveKeys.find(k => k.provider === provider.id)
+    || routedActiveKeys[0]
 
   // Final fallback: use ANY key, even if inactive
   if (!key && keys.length > 0) {
@@ -721,9 +1421,9 @@ export async function selectRuntimeModel(
     return null
   }
 
-  const baseUrl = normalizeBaseUrl(provider.default_base_url)
+  const baseUrl = normalizeBaseUrl(key.base_url || provider.default_base_url || (isGeminiNativeFormat(provider.api_format) ? GEMINI_NATIVE_BASE_URL : ''))
   if (!baseUrl) {
-    console.error(`[provider-runtime] Provider "${provider.id}" has no default_base_url: ${JSON.stringify(provider)}`)
+    console.error(`[provider-runtime] Provider "${provider.id}" has no base URL on key or provider: ${JSON.stringify({ provider, key: { ...key, key: key.key ? '***' : '' } })}`)
     return null
   }
 
@@ -731,12 +1431,15 @@ export async function selectRuntimeModel(
     `[provider-runtime] ✅ Selected: model=${model.model_name} provider=${provider.id} baseUrl=${baseUrl} key=${(key.key || '').slice(0, 8)}...`,
   )
 
+  const routeConfig = routeConfigForProvider(provider)
+
   return {
     provider,
     key,
     model,
     baseUrl,
-    endpoint: endpointForProvider(provider),
+    endpoint: endpointForRoute(provider, routeConfig, '', model.model_name),
+    routeConfig,
     apiFormat: provider.api_format || 'openai',
   }
 }
@@ -744,12 +1447,22 @@ export async function selectRuntimeModel(
 // ── Endpoint Resolution ─────────────────────────────────────
 
 export function endpointForProvider(provider: ProviderRecord): string {
+  const route = routeConfigForProvider(provider)
+  return endpointForRoute(provider, route)
+}
+
+function routeConfigForProvider(provider: ProviderRecord): any {
   const endpoints = provider.endpoints || {}
-  if (isCodexResponsesFormat(provider.api_format)) return endpoints.responses || endpoints.chat || endpoints.llm || 'responses'
-  if (endpoints.chat) return endpoints.chat
-  if (endpoints.responses) return endpoints.responses
-  if (endpoints.completions) return endpoints.completions
+  if (isCodexResponsesFormat(provider.api_format)) return endpoints.responses || endpoints.chat || endpoints.llm || ''
+  return endpoints.chat || endpoints.responses || endpoints.completions || ''
+}
+
+function fallbackEndpointForProvider(provider: ProviderRecord, routeType = '', modelName = '') {
+  if (isCodexResponsesFormat(provider.api_format)) return 'responses'
   if (provider.api_format === 'anthropic') return 'messages'
+  if (isGeminiNativeFormat(provider.api_format)) return `models/${encodeURIComponent(normalizeGeminiModelName(modelName || 'gemini-1.5-flash'))}:generateContent`
+  if (String(routeType).includes('image')) return 'images/generations'
+  if (String(routeType).includes('video')) return 'videos/generations'
   return 'chat/completions'
 }
 
@@ -761,7 +1474,9 @@ export async function executeWithRuntimeModel<T = any>(
   preferredModelId?: number,
   options: RuntimeExecutionOptions = {},
 ): Promise<LLMResponse<T> & { runtimeSelection?: RuntimeModelSelection | null }> {
-  const selection = await selectRuntimeModel(activeWorkspace, preferredModelId)
+  const selection = await selectRuntimeModel(activeWorkspace, preferredModelId, {
+    routingStrategy: options.routingStrategy || (request as any).routingStrategy || (request as any).routing_strategy,
+  })
   if (!selection) {
     return {
       content: '',
@@ -774,10 +1489,14 @@ export async function executeWithRuntimeModel<T = any>(
     }
   }
 
+  const startedAt = Date.now()
   try {
-    const response = await postProviderJson<T>(selection, request, options)
+    const normalizedRequest = await requestWithLocalAssetDataUris(activeWorkspace, request)
+    const response = await postProviderJson<T>(selection, normalizedRequest, options)
+    await recordRuntimeKeyMetrics(activeWorkspace, selection.key.id, startedAt, true)
     return { ...response, runtimeSelection: sanitizeRuntimeSelection(selection) as any }
   } catch (error) {
+    await recordRuntimeKeyMetrics(activeWorkspace, selection.key.id, startedAt, false)
     console.error(`[provider-runtime] Request failed: ${error}`)
     return {
       content: '',

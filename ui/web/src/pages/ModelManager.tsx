@@ -6,6 +6,20 @@ import { keyApi } from '../api/keys'
 
 const { Title, Text } = Typography
 
+function formatJsonEditorValue(value: unknown, fallback: unknown) {
+  const normalized = value == null || value === '' ? fallback : value
+  return typeof normalized === 'string' ? normalized : JSON.stringify(normalized, null, 2)
+}
+
+export function buildModelEditorInitialValues(record?: any) {
+  const values = record || { is_manual: true, is_active: true, capabilities: { chat: true }, context_ui_params: {} }
+  return {
+    ...values,
+    capabilities: formatJsonEditorValue(values.capabilities, { chat: true }),
+    context_ui_params: formatJsonEditorValue(values.context_ui_params, {}),
+  }
+}
+
 export default function ModelManager() {
   const [models, setModels] = useState<any[]>([])
   const [keys, setKeys] = useState<any[]>([])
@@ -33,14 +47,17 @@ export default function ModelManager() {
 
   const openEditor = (record?: any) => {
     setEditing(record || null)
-    form.setFieldsValue(record || { is_manual: true, is_active: true, capabilities: { chat: true }, context_ui_params: {} })
+    form.setFieldsValue(buildModelEditorInitialValues(record))
     setOpen(true)
   }
 
   const save = async () => {
     const values = await form.validateFields()
+    const selectedKeyRecord = keys.find(k => Number(k.id) === Number(values.api_key_id))
     const payload = {
       ...values,
+      api_key_id: Number(values.api_key_id || 0) || undefined,
+      provider: selectedKeyRecord?.provider || values.provider,
       capabilities: typeof values.capabilities === 'string'
         ? JSON.parse(values.capabilities)
         : (values.capabilities || { chat: true }),
@@ -113,7 +130,7 @@ export default function ModelManager() {
     <div style={{ padding: 32, minHeight: '100%' }}>
       <Card
         style={{ borderRadius: 24, boxShadow: '0 20px 60px rgba(15, 23, 42, 0.08)', overflow: 'hidden' }}
-        bodyStyle={{ padding: 0 }}
+        styles={{ body: { padding: 0 } }}
       >
         <div style={{ padding: 28, background: 'linear-gradient(180deg, rgba(248,250,252,0.95), rgba(255,255,255,0.95))', borderBottom: '1px solid rgba(148,163,184,0.16)' }}>
           <Row justify="space-between" align="middle" gutter={24}>
@@ -140,17 +157,17 @@ export default function ModelManager() {
 
           <Row gutter={16} style={{ marginTop: 20 }}>
             <Col xs={24} sm={8}>
-              <Card bordered={false} style={{ borderRadius: 16, background: '#fff' }} bodyStyle={{ padding: 16 }}>
+              <Card variant="borderless" style={{ borderRadius: 16, background: '#fff' }} styles={{ body: { padding: 16 } }}>
                 <Statistic title="模型总数" value={models.length} prefix={<ApiOutlined style={{ color: '#1890ff' }} />} />
               </Card>
             </Col>
             <Col xs={24} sm={8}>
-              <Card bordered={false} style={{ borderRadius: 16, background: '#fff' }} bodyStyle={{ padding: 16 }}>
+              <Card variant="borderless" style={{ borderRadius: 16, background: '#fff' }} styles={{ body: { padding: 16 } }}>
                 <Statistic title="启用模型" value={models.filter(m => m.is_active).length} prefix={<ThunderboltOutlined style={{ color: '#22c55e' }} />} />
               </Card>
             </Col>
             <Col xs={24} sm={8}>
-              <Card bordered={false} style={{ borderRadius: 16, background: '#fff' }} bodyStyle={{ padding: 16 }}>
+              <Card variant="borderless" style={{ borderRadius: 16, background: '#fff' }} styles={{ body: { padding: 16 } }}>
                 <Statistic title="收藏模型" value={models.filter(m => m.is_favorite).length} prefix={<StarFilled style={{ color: '#faad14' }} />} />
               </Card>
             </Col>
@@ -158,7 +175,7 @@ export default function ModelManager() {
         </div>
 
         <div style={{ padding: 24 }}>
-          <Card bordered={false} style={{ borderRadius: 18, boxShadow: '0 10px 30px rgba(15, 23, 42, 0.04)' }} bodyStyle={{ padding: 18 }}>
+          <Card variant="borderless" style={{ borderRadius: 18, boxShadow: '0 10px 30px rgba(15, 23, 42, 0.04)' }} styles={{ body: { padding: 18 } }}>
             <Space direction="vertical" style={{ width: '100%' }} size={16}>
               <Space wrap style={{ justifyContent: 'space-between', width: '100%' }}>
                 <Space wrap>
@@ -201,7 +218,7 @@ export default function ModelManager() {
         onClose={() => setOpen(false)}
         title={editing ? '编辑模型' : '新增模型'}
         width={820}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical">
           <Row gutter={16}>
@@ -209,7 +226,7 @@ export default function ModelManager() {
             <Col span={12}><Form.Item name="model_name" label="模型代号" rules={[{ required: true }]}><Input /></Form.Item></Col>
           </Row>
           <Row gutter={16}>
-            <Col span={12}><Form.Item name="provider" label="Provider"><Select options={keys.map(k => ({ label: `${k.provider} #${k.id}`, value: k.provider }))} /></Form.Item></Col>
+            <Col span={12}><Form.Item name="api_key_id" label="API Key"><Select options={keys.map(k => ({ label: `${k.provider} #${k.id}`, value: k.id }))} /></Form.Item></Col>
             <Col span={12}><Form.Item name="is_favorite" label="收藏" valuePropName="checked"><Switch /></Form.Item></Col>
           </Row>
           <Form.Item name="capabilities" label="能力 JSON" rules={[{ required: true }]}><Input.TextArea rows={5} style={{ fontFamily: 'monospace' }} /></Form.Item>

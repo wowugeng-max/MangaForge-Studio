@@ -1,0 +1,258 @@
+.auto-director-shell {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  background: #f6f8fb;
+  padding: 18px 20px 24px;
+  display: grid;
+  gap: 16px;
+}
+
+.auto-director-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 16px;
+  align-items: stretch;
+  border: 1px solid #e5eaf2;
+  background: #fff;
+  border-radius: 10px;
+  padding: 16px;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
+}
+
+.auto-director-hero-running {
+  border-color: #bfdbfe;
+}
+
+.auto-director-hero-ready {
+  border-color: #bbf7d0;
+}
+
+.auto-director-hero-needs_governance,
+.auto-director-hero-needs_acceptance {
+  border-color: #fde68a;
+}
+
+.auto-director-hero-blocked {
+  border-color: #fecaca;
+}
+
+.auto-director-hero-copy {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+
+.auto-director-hero-copy h4 {
+  margin: 0;
+}
+
+.auto-director-headline {
+  font-size: 18px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.auto-director-summary {
+  margin: 0 !important;
+  color: #475569;
+}
+
+.auto-director-target {
+  width: 100%;
+  border: 1px solid #dbe4ef;
+  border-radius: 9px;
+  background: #f8fafc;
+  padding: 12px 14px;
+  display: grid;
+  gap: 4px;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+}
+
+.auto-director-target:hover {
+  border-color: #93c5fd;
+  background: #eff6ff;
+  transform: translateY(-1px);
+}
+
+.auto-director-target span,
+.auto-director-target em {
+  font-size: 12px;
+  color: #64748b;
+  font-style: normal;
+}
+
+.auto-director-target strong {
+  color: #0f172a;
+}
+
+.auto-director-next-card {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  border: 1px solid #dbeafe;
+  background: #f8fbff;
+  border-radius: 10px;
+  padding: 14px;
+}
+
+.auto-director-next-card p {
+  margin: 0 !important;
+  color: #475569;
+}
+
+.auto-director-next-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #1677ff;
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.auto-director-primary-action,
+.auto-director-secondary-action {
+  border-radius: 8px;
+  font-weight: 700;
+}
+
+.auto-director-primary-action {
+  min-height: 38px;
+}
+
+.auto-director-model-action {
+  border-color: #7c3aed !important;
+  box-shadow: 0 0 0 1px rgba(124, 58, 237, 0.08);
+}
+
+.auto-director-primary-action.auto-director-model-action {
+  background: #6d28d9;
+  border-color: #6d28d9 !important;
+}
+
+.auto-director-model-note {
+  font-size: 12px;
+  color: #6d28d9;
+}
+
+.auto-director-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 16px;
+  align-items: start;
+}
+
+.auto-director-panel {
+  border: 1px solid #e5eaf2;
+  background: #fff;
+  border-radius: 10px;
+  padding: 14px;
+}
+
+.auto-director-panel-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-weight: 800;
+  color: #0f172a;
+  margin-bottom: 12px;
+}
+
+.auto-director-stage-list {
+  display: grid;
+  gap: 8px;
+}
+
+.auto-director-stage {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 10px;
+  border: 1px solid #edf1f7;
+  border-radius: 9px;
+  padding: 10px 12px;
+  background: #fbfcfe;
+}
+
+.auto-director-stage-active {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+}
+
+.auto-director-stage-done {
+  border-color: #dcfce7;
+  background: #f0fdf4;
+}
+
+.auto-director-stage-warning {
+  border-color: #fde68a;
+  background: #fffbeb;
+}
+
+.auto-director-stage-blocked {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
+.auto-director-stage-icon {
+  display: grid;
+  place-items: center;
+  font-size: 17px;
+}
+
+.auto-director-stage-body {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.auto-director-side-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.auto-director-metric {
+  display: grid;
+  gap: 6px;
+}
+
+.auto-director-queue {
+  border: 1px solid #edf1f7;
+  background: #fbfcfe;
+  border-radius: 9px;
+  padding: 10px;
+}
+
+.auto-director-secondary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.auto-director-secondary-actions .ant-btn {
+  flex: 1 1 138px;
+}
+
+@media (max-width: 1080px) {
+  .auto-director-hero,
+  .auto-director-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .auto-director-shell {
+    padding: 12px;
+  }
+
+  .auto-director-hero,
+  .auto-director-panel {
+    border-radius: 8px;
+  }
+}

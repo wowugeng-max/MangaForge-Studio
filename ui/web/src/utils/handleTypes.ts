@@ -33,7 +33,7 @@ export function getHandleDataType(
 
   if (nodeType === 'loadAsset') {
     const assetType = nodeData?.asset?.type
-    if (assetType === 'prompt') return 'text'
+    if (assetType === 'prompt' || assetType === 'character') return 'text'
     if (assetType === 'image') return 'image'
     if (assetType === 'video') return 'video'
     if (assetType === 'workflow') return 'workflow'
@@ -72,7 +72,7 @@ export function getTypeColor(type: string): string {
   return TYPE_COLORS[type] || '#fa8c16'
 }
 
-const IMAGE_KEYWORDS = ['image', 'img', 'photo', 'picture', 'mask', 'ref_img']
+const IMAGE_KEYWORDS = ['image', 'img', 'photo', 'picture', 'mask', 'ref_img', 'frame_a', 'frame_b', 'first_frame', 'last_frame', 'start_frame', 'end_frame']
 const VIDEO_KEYWORDS = ['video', 'clip']
 const TEXT_KEYWORDS = ['prompt', 'text', 'caption', 'description', 'negative', 'positive']
 

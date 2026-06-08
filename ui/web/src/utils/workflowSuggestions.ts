@@ -1,4 +1,3 @@
-import React from 'react'
 import apiClient from '../api/client';
 import type {RecommendationRule} from '../types/rule';
 
@@ -9,10 +8,7 @@ export interface Suggestion {
   autoCheck?: boolean;
 }
 
-let rulesCache: Record<string, Array<{ field: string; friendlyName: string; autoCheck: boolean; priority: number; threshold: number }>> | null = null;
-
 async function fetchRules() {
-  if (rulesCache) return rulesCache;
   try {
     const res = await apiClient.get<RecommendationRule[]>('/recommendation-rules/?enabled=true');
     const rules = res.data;
@@ -31,7 +27,6 @@ async function fetchRules() {
     Object.keys(map).forEach(key => {
       map[key].sort((a, b) => a.priority - b.priority);
     });
-    rulesCache = map;
     return map;
   } catch (e) {
     console.error('获取规则失败', e);
@@ -55,6 +50,14 @@ export async function getSuggestionsForNode(nodeId: string, nodeData: any): Prom
 
   // 获取统计数据
   const stats = await fetchStatsForClass(cls);
+  return buildSuggestionsForNode(nodeData, ruleList, stats);
+}
+
+function buildSuggestionsForNode(
+  nodeData: any,
+  ruleList: Array<{ field: string; friendlyName: string; autoCheck: boolean; priority: number; threshold: number }>,
+  stats: { field: string; count: number }[]
+) {
   const statMap = new Map(stats.map(s => [s.field, s.count]));
 
   const suggestions: Suggestion[] = [];
@@ -97,8 +100,14 @@ export async function getSuggestionsForNode(nodeId: string, nodeData: any): Prom
 
 export async function getAllSuggestions(workflowJson: any): Promise<Record<string, Suggestion[]>> {
   const result: Record<string, Suggestion[]> = {};
+  const rulesByClass = await fetchRules();
+  const statsByClass = new Map<string, { field: string; count: number }[]>();
   for (const [nodeId, nodeData] of Object.entries(workflowJson) as [string, any][]) {
-    const sugs = await getSuggestionsForNode(nodeId, nodeData);
+    const cls = nodeData.class_type;
+    if (!statsByClass.has(cls)) {
+      statsByClass.set(cls, await fetchStatsForClass(cls));
+    }
+    const sugs = buildSuggestionsForNode(nodeData, rulesByClass[cls] || [], statsByClass.get(cls) || []);
     if (sugs.length) {
       result[nodeId] = sugs;
     }

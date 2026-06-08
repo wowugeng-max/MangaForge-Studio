@@ -6,6 +6,7 @@ import {
   ArrowLeftOutlined,
   BookOutlined,
   ClockCircleOutlined,
+  ControlOutlined,
   DatabaseOutlined,
   EditOutlined,
   FullscreenExitOutlined,
@@ -18,6 +19,7 @@ import type { EditorView } from '@codemirror/view'
 import { useNavigate, useParams } from 'react-router-dom'
 import apiClient from '../api/client'
 import { createSSEClient, generateClientId, type SSEMessage } from '../utils/sse'
+import { AutoCreationDirectorWorkspace } from './novel-workspace/AutoCreationDirectorWorkspace'
 import { ChapterDirectorySidebar } from './novel-workspace/ChapterDirectorySidebar'
 import type { EditorKind } from './novel-workspace/EditorModal'
 import { ReferencePanel } from './novel-workspace/ReferencePanel'
@@ -25,6 +27,10 @@ import { StoryAssetsWorkspace } from './novel-workspace/StoryAssetsWorkspace'
 import { StoryPlanningWorkspace, type PlanningLoadingKey } from './novel-workspace/StoryPlanningWorkspace'
 import { WritingCockpitPanel, type WritingCockpitPrimaryActionOverride } from './novel-workspace/WritingCockpitPanel'
 import { WorkspaceCenter } from './novel-workspace/WorkspaceCenter'
+import {
+  buildAutoCreationDirectorModel,
+  type AutoCreationDirectorAction,
+} from './novel-workspace/autoCreationDirectorModel'
 import { buildNovelWritingRecommendation } from './novel-workspace/writingRecommendationModel'
 import { buildPlanningWorkspaceModel, type PlanningActionKey } from './novel-workspace/planningWorkspaceModel'
 import { mergeCommercialWebNovelStyleDefaults } from './novel-workspace/writingBibleDefaults'
@@ -77,7 +83,7 @@ const productionModeOptions = [
   { value: 'full_auto', label: '全自动完整流水线' },
 ]
 
-type WorkspaceArea = 'storyPlanning' | 'chapterWriting' | 'storyAssets' | 'qualityRevision' | 'productionOps'
+type WorkspaceArea = 'autoCreation' | 'storyPlanning' | 'chapterWriting' | 'storyAssets' | 'qualityRevision' | 'productionOps'
 type ChapterOwnedData = { chapterId: number; updatedAt: any; data: any }
 type ChapterWordTargetMode = 'standard' | 'long' | 'custom'
 
@@ -184,9 +190,10 @@ export default function NovelProjectWorkspace() {
   // ── right reference panel ──
   const [rightPanelOpen, setRightPanelOpen] = useState(false)
   const [rightPanelTab, setRightPanelTab] = useState('worldbuilding')
-  const [workspaceArea, setWorkspaceArea] = useState<WorkspaceArea>('storyPlanning')
+  const [workspaceArea, setWorkspaceArea] = useState<WorkspaceArea>('autoCreation')
   const [focusWritingMode, setFocusWritingMode] = useState(false)
   const [storyAssetsFocusDiscoveredToken, setStoryAssetsFocusDiscoveredToken] = useState(0)
+  const [autoDirectorActionLoadingKey, setAutoDirectorActionLoadingKey] = useState('')
 
   const isWritingFocusMode = focusWritingMode && workspaceArea === 'chapterWriting'
 
@@ -416,7 +423,7 @@ export default function NovelProjectWorkspace() {
 
   useEffect(() => {
     if (!projectId) return
-    if (workspaceArea !== 'storyPlanning' && workspaceArea !== 'storyAssets') return
+    if (workspaceArea !== 'autoCreation' && workspaceArea !== 'storyPlanning' && workspaceArea !== 'storyAssets') return
     let canceled = false
     apiClient.get(`/novel/projects/${projectId}/settings`)
       .then(res => {
@@ -560,6 +567,28 @@ export default function NovelProjectWorkspace() {
     activeTasks,
     reviews,
   ])
+
+  const autoCreationDirectorModel = useMemo(() => buildAutoCreationDirectorModel({
+    planning: planningWorkspaceModel,
+    writing: writingCockpitModel,
+    activeTasks,
+    selectedModelId,
+  }), [planningWorkspaceModel, writingCockpitModel, activeTasks, selectedModelId])
+
+  const autoDirectorBusy = Boolean(
+    stepProseLoading
+    || generatingProse
+    || generatingSceneCards
+    || diagnosticsLoading
+    || contextPackageLoading
+    || editorReportLoading
+    || proseQualityLoading
+    || commercialToolLoading,
+  )
+
+  useEffect(() => {
+    if (!autoDirectorBusy) setAutoDirectorActionLoadingKey('')
+  }, [autoDirectorBusy])
 
   const findReviewById = (reviewId: any) => (
     reviews.find((review: any) => String(review.id) === String(reviewId)) || null
@@ -3925,6 +3954,7 @@ export default function NovelProjectWorkspace() {
     return keys.includes(commercialToolLoading as PlanningLoadingKey) ? commercialToolLoading as PlanningLoadingKey : undefined
   })()
   const workspaceAreaTabs: Array<{ key: WorkspaceArea; label: string; icon: React.ReactNode }> = [
+    { key: 'autoCreation', label: '自动创作', icon: <ControlOutlined /> },
     { key: 'storyPlanning', label: '故事规划', icon: <BookOutlined /> },
     { key: 'chapterWriting', label: '章节写作', icon: <EditOutlined /> },
     { key: 'storyAssets', label: '设定资产', icon: <DatabaseOutlined /> },
@@ -4128,6 +4158,35 @@ export default function NovelProjectWorkspace() {
     }
   }
 
+  const handleAutoCreationDirectorAction = (action: AutoCreationDirectorAction) => {
+    if (action.disabled) return
+    if (action.modelCall) setAutoDirectorActionLoadingKey(String(action.key))
+
+    if (action.area === 'planning' || action.area === 'assets') {
+      if (action.key === 'open_story_assets') {
+        openStoryAssetsWorkspace()
+        return
+      }
+      handlePlanningAction(action.key as PlanningActionKey)
+      return
+    }
+
+    if (action.area === 'writing' || action.area === 'quality') {
+      handleWritingCockpitAction(action.key as WritingCockpitActionKey)
+      return
+    }
+
+    if (action.key === 'open_task_center') {
+      setTaskCenterOpen(true)
+      return
+    }
+
+    if (action.key === 'select_model') {
+      message.info('请先在顶部选择一个可用模型。')
+      setAutoDirectorActionLoadingKey('')
+    }
+  }
+
   const activeChapterSceneCards = (
     activeChapter && Array.isArray(activeChapter.scene_list) && activeChapter.scene_list.length > 0
       ? activeChapter.scene_list
@@ -4194,6 +4253,21 @@ export default function NovelProjectWorkspace() {
   })()
 
   const renderWorkspaceArea = () => {
+    if (workspaceArea === 'autoCreation') {
+      return (
+        <AutoCreationDirectorWorkspace
+          model={autoCreationDirectorModel}
+          loadingActionKey={autoDirectorActionLoadingKey}
+          onAction={handleAutoCreationDirectorAction}
+          onSelectChapter={(chapterNo) => {
+            const chapter = sortedChapters.find(item => Number(item.chapter_no) === Number(chapterNo))
+            if (!chapter) return
+            void selectChapterForWriting(chapter.id)
+          }}
+        />
+      )
+    }
+
     if (workspaceArea === 'storyPlanning') {
       return (
         <StoryPlanningWorkspace
@@ -4290,7 +4364,7 @@ export default function NovelProjectWorkspace() {
       )
     }
 
-    const groups: Record<Exclude<WorkspaceArea, 'storyPlanning' | 'chapterWriting' | 'storyAssets'>, {
+    const groups: Record<Exclude<WorkspaceArea, 'autoCreation' | 'storyPlanning' | 'chapterWriting' | 'storyAssets'>, {
       title: string
       desc: string
       actions: Array<{ label: string; onClick: () => void; loading?: boolean; primary?: boolean; disabled?: boolean }>

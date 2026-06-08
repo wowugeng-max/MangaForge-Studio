@@ -5,7 +5,20 @@
  * and provides an interrupt capability.
  */
 
-const BASE = 'http://localhost:8787/api'
+const DEFAULT_API_BASE = 'http://localhost:8787/api'
+
+function getConfiguredApiBaseURL() {
+  return String(import.meta.env.VITE_API_BASE_URL || DEFAULT_API_BASE).replace(/\/+$/, '')
+}
+
+export function buildSSEUrl(clientId: string, apiBaseURL = getConfiguredApiBaseURL()) {
+  const base = String(apiBaseURL || DEFAULT_API_BASE).replace(/\/+$/, '')
+  return `${base}/sse/${encodeURIComponent(clientId)}`
+}
+
+function buildInterruptUrl(clientId: string) {
+  return `${getConfiguredApiBaseURL()}/interrupt/${encodeURIComponent(clientId)}`
+}
 
 export interface SSEMessage {
   type: string
@@ -36,7 +49,7 @@ export function createSSEClient(clientId: string, onMessage: (msg: SSEMessage) =
     async connect() {
       return new Promise<void>((resolve, reject) => {
         try {
-          eventSource = new EventSource(`${BASE}/sse/${clientId}`)
+          eventSource = new EventSource(buildSSEUrl(clientId))
 
           eventSource.onopen = () => {
             // Connection established
@@ -83,7 +96,7 @@ export function createSSEClient(clientId: string, onMessage: (msg: SSEMessage) =
 
     async interrupt(): Promise<boolean> {
       try {
-        const resp = await fetch(`${BASE}/interrupt/${clientId}`, { method: 'POST' })
+        const resp = await fetch(buildInterruptUrl(clientId), { method: 'POST' })
         if (resp.ok) {
           const data = await resp.json()
           return data.success ?? true

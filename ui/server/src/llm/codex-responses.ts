@@ -1,4 +1,4 @@
-import type { LLMRequest } from './types'
+import { imageUrlFromLLMContentPart, stringifyLLMMessageContent, textFromLLMContentPart, type LLMRequest } from './types'
 
 export type CodexResponsesBuildOptions = {
   baseUrl?: string
@@ -9,26 +9,40 @@ export function normalizeCodexModelName(modelName: string, options: CodexRespons
   return String(modelName || '').trim()
 }
 
+function toCodexContentParts(message: LLMRequest['messages'][number]) {
+  if (!Array.isArray(message.content)) {
+    const text = stringifyLLMMessageContent(message.content)
+    return [{ type: message.role === 'assistant' ? 'output_text' : 'input_text', text }]
+  }
+  const parts = message.content.flatMap(part => {
+    const text = textFromLLMContentPart(part).trim()
+    if (text) return [{ type: message.role === 'assistant' ? 'output_text' : 'input_text', text }]
+    const imageUrl = imageUrlFromLLMContentPart(part)
+    if (imageUrl) return [{ type: 'input_image', image_url: imageUrl }]
+    return []
+  })
+  return parts.length ? parts : [{ type: message.role === 'assistant' ? 'output_text' : 'input_text', text: stringifyLLMMessageContent(message.content) }]
+}
+
 function toCodexInputItem(message: LLMRequest['messages'][number]) {
-  const text = String(message.content || '')
   if (message.role === 'assistant') {
     return {
       type: 'message',
       role: 'assistant',
-      content: [{ type: 'output_text', text }],
+      content: toCodexContentParts(message),
     }
   }
   return {
     type: 'message',
     role: 'user',
-    content: [{ type: 'input_text', text }],
+    content: toCodexContentParts(message),
   }
 }
 
 export function buildCodexResponsesBody(request: LLMRequest, modelName: string, stream = false, options: CodexResponsesBuildOptions = {}): Record<string, any> {
   const systemMessages = request.messages
     .filter(message => message.role === 'system')
-    .map(message => message.content)
+    .map(message => stringifyLLMMessageContent(message.content))
     .filter(Boolean)
   const inputMessages = request.messages
     .filter(message => message.role !== 'system')

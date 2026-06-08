@@ -10,6 +10,11 @@ export type AssetRecord = {
   project_id?: number | null
   thumbnail?: string
   data?: Record<string, any>
+  version?: number
+  parent_id?: number | null
+  source_asset_ids?: number[]
+  file_path?: string
+  created_at?: string
   updated_at: string
 }
 
@@ -17,9 +22,19 @@ export function getAssetsPath(activeWorkspace: string) {
   return join(activeWorkspace, 'assets.json')
 }
 
+export function normalizeAssetRecord(asset: AssetRecord): AssetRecord {
+  const timestamp = asset.created_at || asset.updated_at || new Date().toISOString()
+  return {
+    ...asset,
+    version: Number(asset.version || 1),
+    created_at: timestamp,
+    updated_at: asset.updated_at || timestamp,
+  }
+}
+
 export async function readAssets(activeWorkspace: string): Promise<AssetRecord[]> {
   try {
-    return JSON.parse(await readFile(getAssetsPath(activeWorkspace), 'utf8')) as AssetRecord[]
+    return (JSON.parse(await readFile(getAssetsPath(activeWorkspace), 'utf8')) as AssetRecord[]).map(normalizeAssetRecord)
   } catch {
     return []
   }

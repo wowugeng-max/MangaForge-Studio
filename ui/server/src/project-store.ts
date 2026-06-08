@@ -6,6 +6,8 @@ export type ProjectRecord = {
   name: string
   description?: string
   tags?: string[]
+  canvas_data?: Record<string, any>
+  created_at?: string
   updated_at: string
 }
 
@@ -28,13 +30,16 @@ export async function writeProjects(activeWorkspace: string, projects: ProjectRe
 export async function seedProjectsIfEmpty(activeWorkspace: string): Promise<ProjectRecord[]> {
   const current = await readProjects(activeWorkspace)
   if (current.length > 0) return current
+  const ts = new Date().toISOString()
   const seed: ProjectRecord[] = [
     {
       id: 1,
       name: '默认创作项目',
       description: '用于验证 Dashboard / Pipeline 的默认项目',
       tags: ['demo', 'bridge'],
-      updated_at: new Date().toISOString(),
+      canvas_data: {},
+      created_at: ts,
+      updated_at: ts,
     },
   ]
   await writeProjects(activeWorkspace, seed)
