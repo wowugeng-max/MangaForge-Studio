@@ -52,6 +52,13 @@ export type NovelDeliverySummaryInput = {
     riskLabel: string
     riskCount: number
   } | null
+  coreDrift?: {
+    status: 'ok' | 'warn'
+    label: string
+    score: number | null
+    scoreLabel: string
+    riskCount: number
+  } | null
   recommendedAcceptanceAction: {
     key: NovelDeliveryActionKey
     label: string
@@ -68,6 +75,7 @@ export type NovelDeliverySummary = {
   storylineSync: NovelDeliverySummaryInput['storylineSync']
   assetIntake: NovelDeliverySummaryInput['assetIntake']
   readabilityReview: NovelDeliverySummaryInput['readabilityReview']
+  coreDrift: NovelDeliverySummaryInput['coreDrift']
   actionKey: NovelDeliveryActionKey | null
   actionLabel: string
   compactActionLabel: string
@@ -351,6 +359,7 @@ export function buildNovelDeliverySummary(desk?: NovelDeliverySummaryInput | nul
       storylineSync: null,
       assetIntake: null,
       readabilityReview: null,
+      coreDrift: null,
       actionKey: null,
       actionLabel: '',
       compactActionLabel: '',
@@ -374,6 +383,7 @@ export function buildNovelDeliverySummary(desk?: NovelDeliverySummaryInput | nul
     storylineSync: desk.storylineSync || null,
     assetIntake: desk.assetIntake || null,
     readabilityReview: desk.readabilityReview || null,
+    coreDrift: desk.coreDrift || null,
     actionKey: desk.recommendedAcceptanceAction.key,
     actionLabel: desk.recommendedAcceptanceAction.label,
     compactActionLabel: compactDeliveryActionLabel(desk.recommendedAcceptanceAction.key, desk.recommendedAcceptanceAction.label),

@@ -140,6 +140,13 @@ export interface ChapterAcceptanceDeskModel {
     riskLabel: string
     riskCount: number
   } | null
+  coreDrift: {
+    status: 'ok' | 'warn'
+    label: string
+    score: number | null
+    scoreLabel: string
+    riskCount: number
+  } | null
   qualityScore: number | null
   qualityStatus: string
   mustFix: string[]
@@ -877,6 +884,31 @@ function buildReadabilityReviewSummary(review?: AnyRecord | null): ChapterAccept
   }
 }
 
+function coreDriftPayload(review?: AnyRecord | null) {
+  const payload = review ? reviewPayload(review) : {}
+  return payload?.core_drift || payload?.result?.core_drift || payload?.result || payload
+}
+
+function buildCoreDriftSummary(review?: AnyRecord | null): ChapterAcceptanceDeskModel['coreDrift'] {
+  if (!review) return null
+  const payload = coreDriftPayload(review)
+  const scoreValue = payload?.score
+  const score = scoreValue === null || scoreValue === undefined || scoreValue === '' ? null : Number(scoreValue)
+  const safeScore = Number.isFinite(score) ? score : null
+  const riskCount = Array.isArray(payload?.drift_risks)
+    ? payload.drift_risks.length
+    : countArray(payload?.risks)
+  const status: 'ok' | 'warn' = text(payload?.status || review?.status).toLowerCase() === 'ok' && riskCount === 0 ? 'ok' : 'warn'
+
+  return {
+    status,
+    label: status === 'ok' ? '核心 OK' : `核心偏移 ${riskCount}`,
+    score: safeScore,
+    scoreLabel: safeScore === null ? '核心守恒 -' : `核心守恒 ${safeScore}`,
+    riskCount,
+  }
+}
+
 function extractQualityScore(quality: AnyRecord) {
   const value = quality?.score ?? quality?.overall_score ?? quality?.quality_score
   if (value === null || value === undefined || value === '') return null
@@ -944,6 +976,7 @@ function buildHiddenAcceptanceDesk(): ChapterAcceptanceDeskModel {
     storylineSync: null,
     assetIntake: null,
     readabilityReview: null,
+    coreDrift: null,
     qualityScore: null,
     qualityStatus: '',
     mustFix: [],
@@ -979,12 +1012,14 @@ function buildChapterAcceptanceDesk(args: {
   const latestStorylineSyncRef = latestReviewRef(args.reviews, args.nextChapter, 'storyline_sync')
   const latestAssetIntakeRef = latestReviewRef(args.reviews, args.nextChapter, 'asset_intake')
   const latestReadabilityRef = latestReviewRef(args.reviews, args.nextChapter, 'readability_review')
+  const latestCoreDriftRef = latestReviewRef(args.reviews, args.nextChapter, 'chapter_core_drift')
   const latestQuality = latestQualityRef?.review || null
   const latestReport = latestReportRef?.review || null
   const latestRevision = latestRevisionRef?.review || null
   const storylineSync = buildStorylineSyncSummary(latestStorylineSyncRef?.review || null)
   const assetIntake = buildAssetIntakeSummary(latestAssetIntakeRef?.review || null)
   const readabilityReview = buildReadabilityReviewSummary(latestReadabilityRef?.review || null)
+  const coreDrift = buildCoreDriftSummary(latestCoreDriftRef?.review || null)
   const quality = qualityPayload(latestQuality)
   const report = reportPayload(latestReport)
   const revision = revisionPayload(latestRevision)
@@ -1027,6 +1062,7 @@ function buildChapterAcceptanceDesk(args: {
       storylineSync,
       assetIntake,
       readabilityReview,
+      coreDrift,
       qualityScore: null,
       qualityStatus,
       mustFix,
@@ -1052,6 +1088,7 @@ function buildChapterAcceptanceDesk(args: {
       storylineSync,
       assetIntake,
       readabilityReview,
+      coreDrift,
       qualityScore: score,
       qualityStatus,
       mustFix,
@@ -1082,6 +1119,7 @@ function buildChapterAcceptanceDesk(args: {
       storylineSync,
       assetIntake,
       readabilityReview,
+      coreDrift,
       qualityScore: score,
       qualityStatus,
       mustFix,
@@ -1107,6 +1145,7 @@ function buildChapterAcceptanceDesk(args: {
       storylineSync,
       assetIntake,
       readabilityReview,
+      coreDrift,
       qualityScore: score,
       qualityStatus,
       mustFix,
@@ -1131,6 +1170,7 @@ function buildChapterAcceptanceDesk(args: {
     storylineSync,
     assetIntake,
     readabilityReview,
+    coreDrift,
     qualityScore: score,
     qualityStatus,
     mustFix,

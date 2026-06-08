@@ -108,6 +108,20 @@ describe('commercial writing workspace UI shell', () => {
     expect(workspaceCss).toContain('.novel-delivery-storyline-tag-warn')
   })
 
+  test('shows chapter core drift status in the delivery strip', () => {
+    const workspaceCenter = source('WorkspaceCenter.tsx')
+    const workspaceCss = source('WorkspaceCenter.css')
+    const model = source('writingCockpitModel.ts')
+    const service = readFileSync(join(import.meta.dir, '../../../../server/src/routes/novel-writing-service.ts'), 'utf8')
+
+    expect(workspaceCenter).toContain('coreDrift')
+    expect(workspaceCenter).toContain('novel-delivery-core-drift-tag')
+    expect(workspaceCss).toContain('.novel-delivery-core-drift-tag')
+    expect(workspaceCss).toContain('.novel-delivery-core-drift-tag-warn')
+    expect(model).toContain('chapter_core_drift')
+    expect(service).toContain("review_type: 'chapter_core_drift'")
+  })
+
   test('shows discovered asset intake in delivery strip and setting workshop', () => {
     const workspaceCenter = source('WorkspaceCenter.tsx')
     const workspaceCss = source('WorkspaceCenter.css')

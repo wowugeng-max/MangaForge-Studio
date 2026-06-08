@@ -117,6 +117,29 @@ describe('buildNovelDeliverySummary', () => {
     expect(summary.actionKey).toBe('accept_chapter_and_continue')
     expect(summary.compactActionLabel).toBe('验收')
   })
+
+  test('summarizes core drift without changing delivery action', () => {
+    const summary = buildNovelDeliverySummary({
+      visible: true,
+      acceptanceStatus: 'ready_to_accept',
+      statusLabel: '可验收',
+      acceptanceReasons: ['质量复检通过，故事状态已同步，可以进入下一章。'],
+      qualityScore: 86,
+      storyStateSynced: true,
+      coreDrift: {
+        status: 'warn',
+        label: '核心偏移 2',
+        score: 73,
+        scoreLabel: '核心守恒 73',
+        riskCount: 2,
+      },
+      recommendedAcceptanceAction: { key: 'accept_chapter_and_continue', label: '验收并进入下一章' },
+    })
+
+    expect(summary.coreDrift?.label).toBe('核心偏移 2')
+    expect(summary.coreDrift?.scoreLabel).toBe('核心守恒 73')
+    expect(summary.actionKey).toBe('accept_chapter_and_continue')
+  })
 })
 
 describe('buildNovelDraftBriefSummary', () => {

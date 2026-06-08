@@ -269,6 +269,34 @@ function readabilityReview(overrides: Record<string, any> = {}) {
   }
 }
 
+function coreDriftReview(overrides: Record<string, any> = {}) {
+  const payload = {
+    chapter_id: 101,
+    chapter_no: 1,
+    core_drift: {
+      status: 'warn',
+      score: 73,
+      drift_risks: ['核心冲突未充分落地', '章末钩子偏离任务书'],
+      checks: [
+        { key: 'reader_promise', status: 'ok', score: 88 },
+        { key: 'core_conflict', status: 'warn', score: 58 },
+        { key: 'ending_hook', status: 'warn', score: 60 },
+      ],
+    },
+    ...overrides.payload,
+  }
+
+  return {
+    id: overrides.id || 701,
+    review_type: 'chapter_core_drift',
+    status: overrides.status || 'warn',
+    summary: overrides.summary || '核心守恒 73，偏移风险 2。',
+    created_at: overrides.created_at || '2026-05-24T00:50:00.000Z',
+    payload: JSON.stringify(payload),
+    ...overrides.record,
+  }
+}
+
 describe('buildWritingCockpitModel', () => {
   test('ready project data chooses the first planned unwritten chapter as daily target', () => {
     const model = buildWritingCockpitModel({
@@ -1230,6 +1258,23 @@ describe('buildWritingCockpitModel', () => {
     expect(model.chapterAcceptanceDesk.assetIntake?.label).toBe('新资产 2 待确认')
   })
 
+  test('shows core drift warning without blocking ready acceptance', () => {
+    const model = buildWritingCockpitModel({
+      project: acceptedProject,
+      outlines,
+      chapters,
+      activeChapter: chapters[0],
+      materialScore: { score: 82, can_generate: true },
+      reviews: [proseQualityReview(), coreDriftReview()],
+    })
+
+    expect(model.chapterAcceptanceDesk.acceptanceStatus).toBe('ready_to_accept')
+    expect(model.chapterAcceptanceDesk.recommendedAcceptanceAction.key).toBe('accept_chapter_and_continue')
+    expect(model.chapterAcceptanceDesk.coreDrift?.status).toBe('warn')
+    expect(model.chapterAcceptanceDesk.coreDrift?.label).toBe('核心偏移 2')
+    expect(model.chapterAcceptanceDesk.coreDrift?.scoreLabel).toBe('核心守恒 73')
+  })
+
   test('omits storyline sync summary when no storyline review exists', () => {
     const model = buildWritingCockpitModel({
       project: acceptedProject,
@@ -1243,6 +1288,7 @@ describe('buildWritingCockpitModel', () => {
     expect(model.chapterAcceptanceDesk.acceptanceStatus).toBe('ready_to_accept')
     expect(model.chapterAcceptanceDesk.storylineSync).toBeNull()
     expect(model.chapterAcceptanceDesk.assetIntake).toBeNull()
+    expect(model.chapterAcceptanceDesk.coreDrift).toBeNull()
   })
 
   test('passing quality for old prose needs current quality check after text changes', () => {

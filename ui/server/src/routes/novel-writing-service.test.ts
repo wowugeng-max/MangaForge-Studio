@@ -4,6 +4,7 @@ import { join } from 'path'
 import {
   buildCommercialEditorRewritePrompt,
   buildChapterPreDraftBrief,
+  buildChapterCoreDriftReport,
   buildMemePolishPrompt,
   buildReadabilityReviewPrompt,
   buildStorylineSyncReport,
@@ -562,6 +563,87 @@ describe('storyline sync backfill', () => {
     expect(source).toContain('buildStorylineSyncReport(')
     expect(source).toContain("review_type: 'storyline_sync'")
     expect(source).toContain('story_state_update.storyline_sync')
+  })
+})
+
+describe('chapter core drift report', () => {
+  test('scores a chapter against reader promise, goal, conflict and ending hook', () => {
+    const report = buildChapterCoreDriftReport(
+      {
+        title: '万古长夜',
+        summary: '寒门少年以阵法反压宗门秩序',
+        reference_config: {
+          writing_bible: {
+            reader_promise: '寒门少年以阵法反压宗门秩序',
+          },
+        },
+      },
+      { id: 8, chapter_no: 8, title: '试炼前夜' },
+      {
+        chapter_target: {
+          chapter_goal: '主角拿到试炼资格',
+          reader_promise: '寒门少年以阵法反压宗门秩序',
+          core_conflict: '执事设局阻拦主角参加试炼',
+          ending_hook: '阵盘亮起第二道裂纹',
+          forbidden_content: ['提前揭示掌门身份'],
+        },
+      },
+      [
+        '执事在试炼名单前设局阻拦，逼寒门少年交出阵盘。',
+        '主角用阵法反压宗门秩序，当场拿到试炼资格。',
+        '夜色落下时，阵盘亮起第二道裂纹。',
+      ].join('\n'),
+      { missed: [], forbidden_touched: [] },
+    )
+
+    expect(report.status).toBe('ok')
+    expect(report.score).toBeGreaterThanOrEqual(80)
+    expect(report.checks.find(item => item.key === 'chapter_goal')?.status).toBe('ok')
+    expect(report.drift_risks).toHaveLength(0)
+  })
+
+  test('warns when a chapter misses the promised conflict or touches forbidden content', () => {
+    const report = buildChapterCoreDriftReport(
+      {
+        title: '万古长夜',
+        summary: '寒门少年以阵法反压宗门秩序',
+        reference_config: {
+          writing_bible: {
+            reader_promise: '寒门少年以阵法反压宗门秩序',
+          },
+        },
+      },
+      { id: 9, chapter_no: 9, title: '偏离测试' },
+      {
+        chapter_target: {
+          chapter_goal: '主角拿到试炼资格',
+          core_conflict: '执事设局阻拦主角参加试炼',
+          ending_hook: '阵盘亮起第二道裂纹',
+          forbidden_content: ['提前揭示掌门身份'],
+        },
+      },
+      '众人聊天许久，提前揭示掌门身份，却没有试炼资格、执事阻拦或阵盘裂纹。',
+      {
+        missed: [{ name: '宗门试炼主线' }],
+        forbidden_touched: [{ name: '掌门身份伏笔' }],
+      },
+    )
+
+    expect(report.status).toBe('warn')
+    expect(report.score).toBeLessThan(80)
+    expect(report.drift_risks).toEqual(expect.arrayContaining([
+      expect.stringContaining('禁写内容'),
+      expect.stringContaining('剧情线漏推'),
+    ]))
+    expect(report.checks.find(item => item.key === 'forbidden_content')?.status).toBe('warn')
+  })
+
+  test('story state sync persists a chapter_core_drift review', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+
+    expect(source).toContain("review_type: 'chapter_core_drift'")
+    expect(source).toContain('buildChapterCoreDriftReport(project, chapter, contextPackage, chapterText, storylineSync)')
+    expect(source).toContain('payload.core_drift = coreDrift')
   })
 })
 

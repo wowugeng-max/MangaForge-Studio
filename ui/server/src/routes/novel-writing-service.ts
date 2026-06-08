@@ -317,6 +317,168 @@ export function buildStorylineSyncReport(contextPackage: any, storylineUpdates: 
   return { status, planned, actual, completed, missed, unplanned, forbidden_touched }
 }
 
+function normalizedMatchText(value: any) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[\s"'“”‘’`.,，。:：;；!?！？()[\]{}<>《》【】、|/\\_-]+/g, '')
+}
+
+function firstDefined(...values: any[]) {
+  return values.find(value => value !== undefined && value !== null && String(value).trim() !== '') || ''
+}
+
+function anchorTerms(value: any) {
+  const text = normalizedMatchText(value)
+  const terms = new Set<string>()
+  const latin = String(value || '').toLowerCase().match(/[a-z0-9]{2,}/g) || []
+  latin.forEach(term => terms.add(term))
+  const cjk = text.replace(/[^\u4e00-\u9fa5]/g, '')
+  for (let i = 0; i < cjk.length - 1; i += 1) {
+    const term = cjk.slice(i, i + 2)
+    if (term.length === 2) terms.add(term)
+  }
+  return Array.from(terms).slice(0, 80)
+}
+
+function anchorMatchScore(expected: any, chapterText: string, options: { tailOnly?: boolean } = {}) {
+  const expectedText = normalizedMatchText(expected)
+  if (!expectedText) return { score: 55, matched: [] as string[], total: 0 }
+  const rawText = options.tailOnly ? chapterText.slice(-1000) : chapterText
+  const normalizedText = normalizedMatchText(rawText)
+  if (normalizedText.includes(expectedText)) return { score: 100, matched: [compactText(expected, 40)], total: 1 }
+  const terms = anchorTerms(expected)
+  if (!terms.length) return { score: 55, matched: [] as string[], total: 0 }
+  const matched = terms.filter(term => normalizedText.includes(term))
+  const ratio = matched.length / Math.max(1, Math.min(terms.length, 24))
+  return {
+    score: Math.max(0, Math.min(100, Math.round(ratio * 115))),
+    matched: matched.slice(0, 8),
+    total: terms.length,
+  }
+}
+
+function driftCheck(key: string, label: string, expected: any, chapterText: string, options: { tailOnly?: boolean } = {}) {
+  const match = anchorMatchScore(expected, chapterText, options)
+  const status = !normalizedMatchText(expected)
+    ? 'warn'
+    : match.score >= 60
+      ? 'ok'
+      : 'warn'
+  return {
+    key,
+    label,
+    status,
+    score: match.score,
+    expected: compactText(expected, 180),
+    evidence: match.matched,
+    risk: status === 'ok' ? '' : `${label}${normalizedMatchText(expected) ? '未充分落地' : '缺少守恒锚点'}`,
+  }
+}
+
+function forbiddenDriftCheck(items: any[], chapterText: string) {
+  const text = normalizedMatchText(chapterText)
+  const touched = items
+    .map(item => compactText(item, 120))
+    .filter(Boolean)
+    .filter(item => text.includes(normalizedMatchText(item)))
+  const score = Math.max(0, 100 - touched.length * 35)
+  return {
+    key: 'forbidden_content',
+    label: '禁写/禁揭',
+    status: touched.length > 0 ? 'warn' : 'ok',
+    score,
+    expected: items.map(item => compactText(item, 80)).filter(Boolean).join('；'),
+    evidence: touched,
+    risk: touched.length > 0 ? `触碰禁写内容：${touched.slice(0, 3).join('；')}` : '',
+  }
+}
+
+export function buildChapterCoreDriftReport(project: any, chapter: any, contextPackage: any, chapterText: string, storylineSync: any = null) {
+  const target = contextPackage?.chapter_target || {}
+  const brief = chapter?.raw_payload?.pre_draft_brief || target?.pre_draft_brief || {}
+  const bible = project?.reference_config?.writing_bible || {}
+  const readerPromise = firstDefined(
+    target.reader_promise,
+    target.readerPromise,
+    brief.reader_promise,
+    bible.reader_promise,
+    bible.promise,
+    bible.core_selling_point,
+    project?.summary,
+    project?.synopsis,
+  )
+  const chapterGoal = firstDefined(target.chapter_goal, target.chapterGoal, target.goal, brief.chapter_goal, chapter?.chapter_goal, chapter?.summary)
+  const coreConflict = firstDefined(target.core_conflict, target.coreConflict, target.conflict, brief.core_conflict, chapter?.conflict)
+  const endingHook = firstDefined(target.ending_hook, target.endingHook, brief.ending_hook, chapter?.ending_hook)
+  const forbiddenItems = [
+    ...asArray(target.forbidden_content),
+    ...asArray(target.forbiddenContent),
+    ...asArray(target.forbidden_repeats),
+    ...asArray(target.forbiddenRepeats),
+    ...asArray(target.storyline_forbidden),
+    ...asArray(brief.forbidden_content),
+    ...asArray(brief.storyline_forbidden),
+  ]
+  const checks = [
+    driftCheck('reader_promise', '读者承诺', readerPromise, chapterText),
+    driftCheck('chapter_goal', '本章目标', chapterGoal, chapterText),
+    driftCheck('core_conflict', '核心冲突', coreConflict, chapterText),
+    driftCheck('ending_hook', '章末钩子', endingHook, chapterText, { tailOnly: true }),
+    forbiddenDriftCheck(forbiddenItems, chapterText),
+  ]
+  const missedStorylines = asArray(storylineSync?.missed)
+  const forbiddenTouched = asArray(storylineSync?.forbidden_touched)
+  if (missedStorylines.length || forbiddenTouched.length) {
+    checks.push({
+      key: 'storyline_alignment',
+      label: '剧情线守恒',
+      status: 'warn',
+      score: Math.max(0, 100 - missedStorylines.length * 18 - forbiddenTouched.length * 28),
+      expected: '按开写任务书推进本章剧情线',
+      evidence: [
+        ...missedStorylines.map((item: any) => `漏推：${item.name || item.title || item.entity_id || '未命名剧情线'}`),
+        ...forbiddenTouched.map((item: any) => `禁揭触碰：${item.name || item.title || item.entity_id || '未命名剧情线'}`),
+      ].slice(0, 8),
+      risk: [
+        missedStorylines.length ? `剧情线漏推 ${missedStorylines.length}` : '',
+        forbiddenTouched.length ? `禁揭风险 ${forbiddenTouched.length}` : '',
+      ].filter(Boolean).join('；'),
+    })
+  }
+  const driftRisks = checks.map(check => check.risk).filter(Boolean)
+  const rawScore = checks.length
+    ? checks.reduce((sum, check) => sum + Number(check.score || 0), 0) / checks.length
+    : 75
+  const score = Math.max(0, Math.min(100, Math.round(rawScore)))
+  const status = driftRisks.length || score < 78 ? 'warn' : 'ok'
+
+  return {
+    report_id: `chapter-core-drift-${chapter?.id || chapter?.chapter_no || Date.now()}`,
+    chapter_id: chapter?.id || null,
+    chapter_no: chapter?.chapter_no || null,
+    score,
+    status,
+    label: status === 'ok' ? `核心守恒 ${score}` : `核心偏移 ${driftRisks.length}`,
+    summary: status === 'ok'
+      ? '本章目标、冲突、承诺和章末钩子与开写任务书基本一致。'
+      : `本章存在 ${driftRisks.length} 项核心偏移风险。`,
+    anchors: {
+      reader_promise: compactText(readerPromise, 180),
+      chapter_goal: compactText(chapterGoal, 180),
+      core_conflict: compactText(coreConflict, 180),
+      ending_hook: compactText(endingHook, 180),
+    },
+    checks,
+    drift_risks: driftRisks,
+    next_actions: status === 'ok'
+      ? ['保持章节任务书、场景卡、剧情线同步和交稿质检循环。']
+      : [
+          '优先回看开写任务书，确认本章目标、核心冲突和章末钩子是否需要改稿。',
+          '如果偏移来自模型自由发挥，生成编辑报告时要求只修语言和剧情落点，不改长期方向。',
+        ],
+  }
+}
+
 export function normalizeDiscoveredAssets(assets: any[] = [], options: {
   existingCharacters?: any[]
   existingSettings?: any[]
@@ -944,6 +1106,16 @@ export function createNovelWritingService(ctx: {
       payload: JSON.stringify({ chapter_id: chapter.id, chapter_no: chapter.chapter_no, storyline_sync: storylineSync }),
     })
     payload.storyline_sync = storylineSync
+    const coreDrift = buildChapterCoreDriftReport(project, chapter, contextPackage, chapterText, storylineSync)
+    await createNovelReview(activeWorkspace, {
+      project_id: project.id,
+      review_type: 'chapter_core_drift',
+      status: coreDrift.status === 'ok' ? 'ok' : 'warn',
+      summary: `${coreDrift.label}：${coreDrift.summary}`,
+      issues: coreDrift.drift_risks.slice(0, 20),
+      payload: JSON.stringify({ chapter_id: chapter.id, chapter_no: chapter.chapter_no, core_drift: coreDrift }),
+    })
+    payload.core_drift = coreDrift
     await createNovelReview(activeWorkspace, {
       project_id: project.id,
       review_type: 'story_state',

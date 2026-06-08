@@ -775,6 +775,21 @@ export function WorkspaceCenter({
                     </Tag>
                   </Tooltip>
                 )}
+                {deliverySummary.coreDrift && (
+                  <>
+                    <Tag
+                      className={`novel-delivery-core-drift-tag novel-delivery-core-drift-tag-${deliverySummary.coreDrift.status}`}
+                      bordered={false}
+                    >
+                      {deliverySummary.coreDrift.scoreLabel}
+                    </Tag>
+                    {deliverySummary.coreDrift.riskCount > 0 && (
+                      <Tag className="novel-delivery-core-drift-tag novel-delivery-core-drift-tag-warn" bordered={false}>
+                        {deliverySummary.coreDrift.label}
+                      </Tag>
+                    )}
+                  </>
+                )}
                 {deliverySummary.readabilityReview && (
                   <>
                     <Tag className="novel-delivery-readability-tag" bordered={false}>
