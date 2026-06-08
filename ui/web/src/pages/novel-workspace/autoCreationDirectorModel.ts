@@ -24,8 +24,9 @@ export type AutoCreationPipelineStatus = 'done' | 'active' | 'pending' | 'blocke
 export type AutoCreationContractStatus = 'ok' | 'warn' | 'block'
 export type AutoCreationBatchGuardrailStatus = 'ready' | 'caution' | 'blocked'
 export type AutoCreationBatchGuardrailSignalStatus = 'ok' | 'warn' | 'block'
-export type AutoCreationBatchReviewStatus = 'empty' | 'ok' | 'warn' | 'done'
+export type AutoCreationBatchReviewStatus = 'empty' | 'ok' | 'warn' | 'risk' | 'done'
 export type AutoCreationBatchReviewItemStatus = 'success' | 'failed'
+export type AutoCreationBatchRiskStatus = 'ok' | 'warn'
 
 export interface AutoCreationDirectorAction {
   area: AutoCreationDirectorArea
@@ -91,6 +92,24 @@ export interface AutoCreationBatchReviewItem {
   error: string
 }
 
+export interface AutoCreationBatchRiskSignal {
+  key: 'quality' | 'core' | 'payoff' | 'storyline' | 'readability'
+  label: string
+  status: AutoCreationBatchRiskStatus
+  detail: string
+}
+
+export interface AutoCreationBatchRiskRadar {
+  status: AutoCreationBatchRiskStatus
+  averageQualityScore: number | null
+  lowQualityCount: number
+  coreRiskCount: number
+  payoffDebtCount: number
+  storylineRiskCount: number
+  readabilityRiskCount: number
+  signals: AutoCreationBatchRiskSignal[]
+}
+
 export interface AutoCreationBatchReviewQueue {
   visible: boolean
   status: AutoCreationBatchReviewStatus
@@ -104,6 +123,7 @@ export interface AutoCreationBatchReviewQueue {
   availableTotal: number | null
   createdAt: string
   nextAction: AutoCreationDirectorAction
+  riskRadar: AutoCreationBatchRiskRadar
   items: AutoCreationBatchReviewItem[]
 }
 
@@ -384,6 +404,13 @@ function latestQualityReviewForChapter(reviews: AnyRecord[], chapter: AnyRecord,
     .sort((a, b) => recordTime(b) - recordTime(a))[0] || null
 }
 
+function latestReviewForChapter(reviews: AnyRecord[], chapter: AnyRecord, chapterNo: number, reviewType: string) {
+  return reviews
+    .filter(review => text(review?.review_type) === reviewType)
+    .filter(review => reviewMatchesChapter(review, chapter, chapterNo))
+    .sort((a, b) => recordTime(b) - recordTime(a))[0] || null
+}
+
 function qualityReviewPassed(review?: AnyRecord | null) {
   if (!review) return false
   const quality = qualityPayload(review)
@@ -416,6 +443,136 @@ function batchChapterDelivered(args: {
   if (!chapter || !hasDeliveredProse(chapter)) return false
   if (Number(args.storyState?.last_updated_chapter || 0) < Number(args.item.chapterNo || 0)) return false
   return qualityReviewPassed(latestQualityReviewForChapter(args.reviews, chapter, args.item.chapterNo))
+}
+
+function numberValue(value: any) {
+  const normalized = Number(value)
+  return Number.isFinite(normalized) ? normalized : null
+}
+
+function riskPayload(review: AnyRecord | null, key: string) {
+  const payload = parsePayload(review?.payload) || {}
+  return payload?.[key] || payload?.result?.[key] || payload?.result || payload
+}
+
+function riskCountFromStatus(payload: AnyRecord, review: AnyRecord | null) {
+  return text(payload?.status || review?.status).toLowerCase() === 'warn' ? 1 : 0
+}
+
+function coreRiskCount(review: AnyRecord | null) {
+  if (!review) return 0
+  const payload = riskPayload(review, 'core_drift')
+  const count = arrayValue(payload?.drift_risks).length + arrayValue(payload?.risks).length
+  return count > 0 ? count : riskCountFromStatus(payload, review)
+}
+
+function payoffDebtCount(review: AnyRecord | null) {
+  if (!review) return 0
+  const payload = riskPayload(review, 'reader_payoff_sync')
+  const count = numberValue(payload?.debt_count ?? payload?.debtCount)
+  if (count !== null) return count
+  const inferred = arrayValue(payload?.missed).length + arrayValue(payload?.debts).length
+  return inferred > 0 ? inferred : riskCountFromStatus(payload, review)
+}
+
+function storylineRiskCount(review: AnyRecord | null) {
+  if (!review) return 0
+  const payload = riskPayload(review, 'storyline_sync')
+  const count = arrayValue(payload?.missed).length
+    + arrayValue(payload?.unplanned).length
+    + arrayValue(payload?.forbidden_touched).length
+  return count > 0 ? count : riskCountFromStatus(payload, review)
+}
+
+function readabilityRiskCount(review: AnyRecord | null) {
+  if (!review) return 0
+  const payload = riskPayload(review, 'readability_review')
+  const memeSense = payload?.meme_sense || {}
+  const immersionRiskCount = arrayValue(memeSense?.immersion_risks).length + arrayValue(payload?.immersion_risks).length
+  const score = numberValue(payload?.readability_score ?? payload?.score)
+  const lowScoreCount = score !== null && score < BATCH_DELIVERY_QUALITY_THRESHOLD ? 1 : 0
+  return immersionRiskCount + lowScoreCount
+}
+
+function buildBatchRiskRadar(args: {
+  items: AutoCreationBatchReviewItem[]
+  chapters: AnyRecord[]
+  reviews: AnyRecord[]
+}): AutoCreationBatchRiskRadar {
+  const successfulItems = args.items.filter(item => item.status === 'success')
+  const qualityScores = successfulItems
+    .map(item => {
+      const chapter = findChapter(args.chapters, item)
+      const qualityReview = chapter ? latestQualityReviewForChapter(args.reviews, chapter, item.chapterNo) : null
+      const quality = qualityPayload(qualityReview)
+      return numberValue(quality?.score ?? quality?.overall_score ?? quality?.quality_score ?? item.score)
+    })
+    .filter((score): score is number => score !== null)
+  const averageQualityScore = qualityScores.length
+    ? Math.round(qualityScores.reduce((sum, score) => sum + score, 0) / qualityScores.length)
+    : null
+  const lowQualityCount = qualityScores.filter(score => score < BATCH_DELIVERY_QUALITY_THRESHOLD).length
+
+  let coreRiskTotal = 0
+  let payoffDebtTotal = 0
+  let storylineRiskTotal = 0
+  let readabilityRiskTotal = 0
+
+  for (const item of successfulItems) {
+    const chapter = findChapter(args.chapters, item)
+    if (!chapter) continue
+    coreRiskTotal += coreRiskCount(latestReviewForChapter(args.reviews, chapter, item.chapterNo, 'chapter_core_drift'))
+    payoffDebtTotal += payoffDebtCount(latestReviewForChapter(args.reviews, chapter, item.chapterNo, 'reader_payoff_sync'))
+    storylineRiskTotal += storylineRiskCount(latestReviewForChapter(args.reviews, chapter, item.chapterNo, 'storyline_sync'))
+    readabilityRiskTotal += readabilityRiskCount(latestReviewForChapter(args.reviews, chapter, item.chapterNo, 'readability_review'))
+  }
+
+  const signals: AutoCreationBatchRiskSignal[] = [
+    {
+      key: 'quality',
+      label: '质检均分',
+      status: lowQualityCount > 0 || averageQualityScore !== null && averageQualityScore < 82 ? 'warn' : 'ok',
+      detail: averageQualityScore === null
+        ? '暂无批次质检分'
+        : `均分 ${averageQualityScore}${lowQualityCount > 0 ? `，低分 ${lowQualityCount} 章` : ''}`,
+    },
+    {
+      key: 'core',
+      label: '核心偏移',
+      status: coreRiskTotal > 0 ? 'warn' : 'ok',
+      detail: coreRiskTotal > 0 ? `发现 ${coreRiskTotal} 项核心偏移风险` : '核心守恒正常',
+    },
+    {
+      key: 'payoff',
+      label: '回报欠账',
+      status: payoffDebtTotal > 0 ? 'warn' : 'ok',
+      detail: payoffDebtTotal > 0 ? `累计 ${payoffDebtTotal} 项读者回报欠账` : '读者回报已兑现',
+    },
+    {
+      key: 'storyline',
+      label: '剧情线',
+      status: storylineRiskTotal > 0 ? 'warn' : 'ok',
+      detail: storylineRiskTotal > 0 ? `剧情线漏推/误触 ${storylineRiskTotal} 项` : '剧情线推进正常',
+    },
+    {
+      key: 'readability',
+      label: '可读性',
+      status: readabilityRiskTotal > 0 ? 'warn' : 'ok',
+      detail: readabilityRiskTotal > 0 ? `可读性/出戏风险 ${readabilityRiskTotal} 项` : '可读性风险可控',
+    },
+  ]
+  const status: AutoCreationBatchRiskStatus = signals.some(signal => signal.status === 'warn') ? 'warn' : 'ok'
+
+  return {
+    status,
+    averageQualityScore,
+    lowQualityCount,
+    coreRiskCount: coreRiskTotal,
+    payoffDebtCount: payoffDebtTotal,
+    storylineRiskCount: storylineRiskTotal,
+    readabilityRiskCount: readabilityRiskTotal,
+    signals,
+  }
 }
 
 function latestLongformCreationReport(reviews: AnyRecord[]) {
@@ -699,6 +856,7 @@ function buildBatchReviewQueue(args: {
       availableTotal: null,
       createdAt: '',
       nextAction: opsAction('open_task_center', '查看任务中心', '查看后台任务、失败记录和可恢复任务。'),
+      riskRadar: buildBatchRiskRadar({ items: [], chapters: args.chapters, reviews }),
       items: [],
     }
   }
@@ -732,7 +890,13 @@ function buildBatchReviewQueue(args: {
   const allSuccessfulChaptersDelivered = !hasFailure && items.length > 0 && items
     .filter(item => item.status === 'success')
     .every(item => item.delivered)
-  const status: AutoCreationBatchReviewStatus = hasFailure ? 'warn' : allSuccessfulChaptersDelivered ? 'done' : 'ok'
+  const riskRadar = buildBatchRiskRadar({ items, chapters: args.chapters, reviews })
+  const hasDeliveredBatchRisk = allSuccessfulChaptersDelivered && riskRadar.status === 'warn'
+  const status: AutoCreationBatchReviewStatus = hasFailure
+    ? 'warn'
+    : hasDeliveredBatchRisk
+      ? 'risk'
+      : allSuccessfulChaptersDelivered ? 'done' : 'ok'
 
   return {
     visible: true,
@@ -740,6 +904,8 @@ function buildBatchReviewQueue(args: {
     label: '安全连写复盘',
     summary: hasFailure
       ? `本次安全连写 ${success}/${total} 章成功，先处理失败章节，再开启下一批。`
+      : hasDeliveredBatchRisk
+        ? `本次安全连写 ${delivered}/${total} 章已交付，但存在批次质量风险，先复盘修正再继续。`
       : allSuccessfulChaptersDelivered
         ? `本次安全连写 ${delivered}/${total} 章已完成交稿闭环，可以开启下一批安全连写。`
         : `本次安全连写 ${success}/${total} 章完成，下一步逐章质检、修订和状态回填。`,
@@ -752,9 +918,12 @@ function buildBatchReviewQueue(args: {
     createdAt: text(latest.run?.created_at),
     nextAction: hasFailure
       ? opsAction('open_task_center', '查看失败任务', '打开任务中心，定位失败章节和可恢复步骤。')
+      : hasDeliveredBatchRisk
+        ? planningAction('open_quality_revision', '复盘上一批的核心偏移、回报欠账、剧情线和可读性风险，处理后再开下一批。')
       : allSuccessfulChaptersDelivered
         ? opsAction('start_safe_batch_generation', '开始下一批安全连写', '上一批已完成交稿闭环；按当前护栏继续小批量生产。')
         : planningAction('open_quality_revision', '进入质检修订，按章节质量、核心偏移、读者回报和剧情线同步逐章验收。'),
+    riskRadar,
     items,
   }
 }
@@ -973,6 +1142,13 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
     headline = '安全连写批次需要先复盘'
     summary = batchReviewQueue.summary
     confirmations.push('安全连写批次需要复盘')
+    mainAction = batchReviewQueue.nextAction
+  } else if (batchReviewQueue.visible && batchReviewQueue.status === 'risk') {
+    status = 'needs_acceptance'
+    statusLabel = '批次有风险'
+    headline = '安全连写批次需要质量复盘'
+    summary = batchReviewQueue.summary
+    confirmations.push('安全连写批次存在质量风险')
     mainAction = batchReviewQueue.nextAction
   } else if (batchReviewQueue.visible && batchReviewQueue.status === 'ok') {
     status = 'needs_acceptance'

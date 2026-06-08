@@ -88,7 +88,7 @@ function batchSignalLabel(status: string) {
 
 function batchReviewColor(status: AutoCreationDirectorModel['batchReviewQueue']['status']) {
   if (status === 'ok' || status === 'done') return 'green'
-  if (status === 'warn') return 'gold'
+  if (status === 'warn' || status === 'risk') return 'gold'
   return 'default'
 }
 
@@ -304,6 +304,7 @@ export function AutoCreationDirectorWorkspace({
             </Tag>
             {model.batchReviewQueue.delivered > 0 && <Tag color="green" bordered={false}>交付 {model.batchReviewQueue.delivered}</Tag>}
             {model.batchReviewQueue.failed > 0 && <Tag color="red" bordered={false}>失败 {model.batchReviewQueue.failed}</Tag>}
+            {model.batchReviewQueue.riskRadar.averageQualityScore !== null && <Tag color={model.batchReviewQueue.riskRadar.status === 'warn' ? 'gold' : 'green'} bordered={false}>均分 {model.batchReviewQueue.riskRadar.averageQualityScore}</Tag>}
             {model.batchReviewQueue.safeLimit !== null && <Tag bordered={false}>安全上限 {model.batchReviewQueue.safeLimit}</Tag>}
           </div>
           <div className="auto-director-batch-review-layout">
@@ -314,6 +315,17 @@ export function AutoCreationDirectorWorkspace({
                 loadingActionKey={loadingActionKey}
                 onAction={onAction}
               />
+              {model.batchReviewQueue.riskRadar.signals.length > 0 && (
+                <div className="auto-director-batch-risk-radar">
+                  <Text strong>批次风险雷达</Text>
+                  {model.batchReviewQueue.riskRadar.signals.map(signal => (
+                    <span key={signal.key} className={`auto-director-batch-risk-signal auto-director-batch-risk-signal-${signal.status}`}>
+                      <Tag color={signal.status === 'warn' ? 'gold' : 'green'} bordered={false}>{signal.label}</Tag>
+                      <Text type="secondary">{signal.detail}</Text>
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
             <div className="auto-director-batch-review-list">
               {model.batchReviewQueue.items.slice(0, 6).map(item => (

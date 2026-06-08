@@ -429,6 +429,16 @@
   border-color: #fde68a;
 }
 
+.auto-director-batch-review-panel-risk {
+  border-color: #fbbf24;
+  background: #fffaf0;
+}
+
+.auto-director-batch-review-panel-done {
+  border-color: #86efac;
+  background: #f7fef9;
+}
+
 .auto-director-batch-review-layout {
   display: grid;
   grid-template-columns: minmax(220px, 0.62fr) minmax(0, 1.38fr);
@@ -448,6 +458,30 @@
 
 .auto-director-batch-review-summary .ant-btn {
   justify-self: start;
+}
+
+.auto-director-batch-risk-radar {
+  min-width: 0;
+  display: grid;
+  gap: 7px;
+  border-top: 1px solid #e5eaf2;
+  padding-top: 10px;
+}
+
+.auto-director-batch-risk-signal {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+}
+
+.auto-director-batch-risk-signal .ant-typography {
+  min-width: 0;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .auto-director-batch-review-list {
