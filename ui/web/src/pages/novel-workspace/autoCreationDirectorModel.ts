@@ -108,6 +108,15 @@ export interface AutoCreationBatchBriefRepair {
   action: AutoCreationDirectorAction
 }
 
+export interface AutoCreationBatchBriefRecovery {
+  visible: boolean
+  title: string
+  summary: string
+  restoredChapterCount: number
+  evidence: string[]
+  action: AutoCreationDirectorAction
+}
+
 export interface AutoCreationNextBatchBriefChapter {
   chapterNo: number
   title: string
@@ -168,6 +177,7 @@ export interface AutoCreationBatchGuardrail {
   guardrails: AutoCreationBatchGuardrailSignal[]
   nextBatchBrief: AutoCreationNextBatchBrief
   briefRepair: AutoCreationBatchBriefRepair
+  briefRecovery: AutoCreationBatchBriefRecovery
 }
 
 export interface AutoCreationBatchReviewItem {
@@ -1536,6 +1546,43 @@ function buildNextBatchBriefRepair(
   }
 }
 
+function emptyNextBatchBriefRecovery(): AutoCreationBatchBriefRecovery {
+  return {
+    visible: false,
+    title: '',
+    summary: '',
+    restoredChapterCount: 0,
+    evidence: [],
+    action: opsAction('start_safe_batch_generation', '开始安全连写', '当前批次尚未恢复到多章连写。', true),
+  }
+}
+
+function buildNextBatchBriefRecovery(args: {
+  status: AutoCreationBatchGuardrailStatus
+  safeChapterCount: number
+  nextBatchBrief: AutoCreationNextBatchBrief
+  batchBriefSignal: AutoCreationBatchGuardrailSignal
+  recommendedAction: AutoCreationDirectorAction
+}): AutoCreationBatchBriefRecovery {
+  if (args.status !== 'ready' || args.safeChapterCount < 2 || args.batchBriefSignal.status !== 'ok') {
+    return emptyNextBatchBriefRecovery()
+  }
+  return {
+    visible: true,
+    title: '已恢复多章安全连写',
+    summary: `${args.nextBatchBrief.chapterRangeLabel || `未来 ${args.safeChapterCount} 章`} 的批次目标、读者回报、主线推进和章末钩子已具备，可按护栏进入小批量生产。`,
+    restoredChapterCount: args.safeChapterCount,
+    evidence: [
+      '批次任务书完整',
+      `安全批次 ${args.safeChapterCount} 章`,
+      args.nextBatchBrief.chapterRangeLabel,
+      args.nextBatchBrief.readerPayoffPlan ? '读者回报已明确' : '',
+      args.nextBatchBrief.mainlineFocus ? '主线焦点已明确' : '',
+    ].filter(Boolean),
+    action: args.recommendedAction,
+  }
+}
+
 function buildBatchGuardrail(args: {
   planning: PlanningWorkspaceModel
   writing: WritingCockpitModel
@@ -1655,6 +1702,13 @@ function buildBatchGuardrail(args: {
       `按护栏建议连续生成 ${safeChapterCount} 章；每章仍会走字数门禁、质检修订和故事状态回填。`,
     )
   }
+  const briefRecovery = buildNextBatchBriefRecovery({
+    status,
+    safeChapterCount,
+    nextBatchBrief,
+    batchBriefSignal,
+    recommendedAction,
+  })
 
   return {
     status,
@@ -1671,6 +1725,7 @@ function buildBatchGuardrail(args: {
     guardrails,
     nextBatchBrief,
     briefRepair,
+    briefRecovery,
   }
 }
 

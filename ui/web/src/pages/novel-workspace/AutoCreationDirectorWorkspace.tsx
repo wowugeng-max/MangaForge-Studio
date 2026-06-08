@@ -433,6 +433,26 @@ export function AutoCreationDirectorWorkspace({
             </div>
           </div>
         )}
+        {model.batchGuardrail.briefRecovery.visible && (
+          <div className="auto-director-batch-recovery">
+            <div className="auto-director-batch-recovery-head">
+              <span>
+                <Text strong>批次安全已恢复</Text>
+                <Text type="secondary">{model.batchGuardrail.briefRecovery.summary}</Text>
+              </span>
+              <ActionButton
+                action={model.batchGuardrail.briefRecovery.action}
+                loadingActionKey={loadingActionKey}
+                onAction={onAction}
+              />
+            </div>
+            <div className="auto-director-batch-recovery-list">
+              {model.batchGuardrail.briefRecovery.evidence.map(item => (
+                <Tag key={item} color="green" bordered={false}>{item}</Tag>
+              ))}
+            </div>
+          </div>
+        )}
       </section>
 
       {model.batchReviewQueue.visible && (

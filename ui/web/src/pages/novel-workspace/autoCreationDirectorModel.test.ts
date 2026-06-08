@@ -551,6 +551,12 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(model.batchGuardrail.nextBatchBrief.chapters.map(item => item.chapterNo)).toEqual([8, 9, 10])
     expect(model.batchGuardrail.nextBatchBrief.chapters[2]?.endingHook).toBe('内门招揽提出苛刻条件')
     expect(model.batchGuardrail.briefRepair.visible).toBe(false)
+    expect(model.batchGuardrail.briefRecovery.visible).toBe(true)
+    expect(model.batchGuardrail.briefRecovery.title).toBe('已恢复多章安全连写')
+    expect(model.batchGuardrail.briefRecovery.restoredChapterCount).toBe(3)
+    expect(model.batchGuardrail.briefRecovery.summary).toContain('第8-10章')
+    expect(model.batchGuardrail.briefRecovery.evidence).toContain('批次任务书完整')
+    expect(model.batchGuardrail.briefRecovery.action.key).toBe('start_safe_batch_generation')
     expect(model.pipeline.find(step => step.key === 'batch_guardrail')?.status).toBe('active')
   })
 
@@ -612,6 +618,7 @@ describe('buildAutoCreationDirectorModel', () => {
       '缺章末钩子：第9章、第10章',
       '缺主线推进：第9章、第10章',
     ])
+    expect(model.batchGuardrail.briefRecovery.visible).toBe(false)
   })
 
   test('downgrades safe batching when million-word capacity is too shallow for an epic target', () => {

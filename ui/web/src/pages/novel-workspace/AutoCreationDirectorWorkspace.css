@@ -746,6 +746,40 @@
   gap: 6px;
 }
 
+.auto-director-batch-recovery {
+  border: 1px solid #bbf7d0;
+  border-radius: 9px;
+  background: #f0fdf4;
+  padding: 11px 12px;
+  display: grid;
+  gap: 9px;
+}
+
+.auto-director-batch-recovery-head {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.auto-director-batch-recovery-head > span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.auto-director-batch-recovery-head .ant-typography-secondary {
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.auto-director-batch-recovery-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .auto-director-batch-review-panel {
   display: grid;
   gap: 10px;
@@ -1010,6 +1044,10 @@
   }
 
   .auto-director-batch-repair-head {
+    grid-template-columns: 1fr;
+  }
+
+  .auto-director-batch-recovery-head {
     grid-template-columns: 1fr;
   }
 
