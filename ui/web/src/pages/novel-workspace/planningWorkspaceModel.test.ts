@@ -133,6 +133,46 @@ function first30Review(overrides: Record<string, any> = {}) {
   }
 }
 
+function coreDriftReview(overrides: Record<string, any> = {}) {
+  const report = {
+    status: 'warn',
+    score: 66,
+    label: '核心偏移 1',
+    drift_risks: ['核心冲突未充分落地'],
+    ...overrides.report,
+  }
+  return {
+    id: overrides.id || 301,
+    review_type: 'chapter_core_drift',
+    status: overrides.status || 'warn',
+    summary: overrides.summary || report.label,
+    created_at: overrides.created_at || '2026-06-04T10:00:00.000Z',
+    payload: JSON.stringify({ chapter_id: 7, chapter_no: 7, core_drift: report }),
+    ...overrides.record,
+  }
+}
+
+function readerPayoffReview(overrides: Record<string, any> = {}) {
+  const report = {
+    status: 'warn',
+    score: 62,
+    label: '回报欠账 2',
+    debt_count: 2,
+    missed: [{ text: '阵盘裂纹的回报' }],
+    debts: [{ text: '试炼资格伏笔待回收' }],
+    ...overrides.report,
+  }
+  return {
+    id: overrides.id || 302,
+    review_type: 'reader_payoff_sync',
+    status: overrides.status || 'warn',
+    summary: overrides.summary || report.label,
+    created_at: overrides.created_at || '2026-06-04T10:05:00.000Z',
+    payload: JSON.stringify({ chapter_id: 7, chapter_no: 7, reader_payoff_sync: report }),
+    ...overrides.record,
+  }
+}
+
 describe('buildPlanningWorkspaceModel', () => {
   test('derives strategic top status and mainline panel from existing project data', () => {
     const model = buildPlanningWorkspaceModel({
@@ -209,6 +249,26 @@ describe('buildPlanningWorkspaceModel', () => {
     const foreshadowing = model.storylineBoard.groups.find(group => group.key === 'foreshadowing_arc')?.items[0]
     expect(foreshadowing?.riskTags).toContain('回收债务')
     expect(foreshadowing?.forbiddenReveal).toContain('第18章前')
+  })
+
+  test('summarizes longform rhythm risks from core drift, payoff debt and storyline debt', () => {
+    const model = buildPlanningWorkspaceModel({
+      selectedProject: project,
+      outlines,
+      chapters,
+      activeChapter: chapters[6],
+      settingEntities: storylineSettings,
+      reviews: [first30Review(), coreDriftReview(), readerPayoffReview()],
+    })
+
+    expect(model.longformRhythm.status).toBe('needs_attention')
+    expect(model.longformRhythm.score).toBeLessThan(80)
+    expect(model.longformRhythm.currentBandLabel).toContain('10万字')
+    expect(model.longformRhythm.signals.map(item => item.key)).toEqual(['core', 'volume', 'payoff', 'fatigue'])
+    expect(model.longformRhythm.signals.find(item => item.key === 'core')?.detail).toContain('核心偏移')
+    expect(model.longformRhythm.signals.find(item => item.key === 'payoff')?.detail).toContain('回报欠账 2')
+    expect(model.longformRhythm.signals.find(item => item.key === 'fatigue')?.detail).toContain('剧情线债务')
+    expect(model.longformRhythm.nextActions).toContain('先处理核心偏移、回报欠账和剧情线债务，再连续生成下一批章节。')
   })
 
   test('marks first30 retention report stale when early chapters changed later', () => {

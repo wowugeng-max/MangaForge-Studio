@@ -62,6 +62,18 @@ function contractLabel(status: AutoCreationContractStatus) {
   return '需关注'
 }
 
+function rhythmColor(status: string) {
+  if (status === 'ready' || status === 'ok') return 'green'
+  if (status === 'blocked' || status === 'block') return 'red'
+  return 'gold'
+}
+
+function rhythmLabel(status: string) {
+  if (status === 'ready' || status === 'ok') return '稳定'
+  if (status === 'blocked' || status === 'block') return '阻塞'
+  return '需治理'
+}
+
 function formatWords(value: number) {
   if (!value) return '0'
   if (value >= 10000) return `${(value / 10000).toFixed(1)}万`
@@ -125,6 +137,7 @@ export function AutoCreationDirectorWorkspace({
             <Tag bordered={false}>未来10章 {model.metrics.future10Label}</Tag>
             {model.metrics.first30Score !== null && <Tag bordered={false}>前30章 {model.metrics.first30Score}分</Tag>}
             {model.metrics.creationDiagnosisScore !== null && <Tag color="geekblue" bordered={false}>创作诊断 {model.metrics.creationDiagnosisScore}分</Tag>}
+            {model.metrics.longformRhythmScore !== null && <Tag color={rhythmColor(model.longformRhythm.status)} bordered={false}>长篇节奏 {model.metrics.longformRhythmScore}</Tag>}
             <Tag bordered={false}>剧情线 {model.metrics.storylineCount}</Tag>
           </Space>
           <Title level={4}>自动创作总控台</Title>
@@ -192,6 +205,39 @@ export function AutoCreationDirectorWorkspace({
                   {item.evidence.slice(0, 2).map(evidence => <em key={evidence}>{evidence}</em>)}
                 </span>
               )}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="auto-director-panel auto-director-rhythm-panel">
+        <div className="auto-director-panel-title">
+          <FundProjectionScreenOutlined />
+          <span>长篇节奏总控</span>
+          <Tag color={rhythmColor(model.longformRhythm.status)} bordered={false}>{model.longformRhythm.label}</Tag>
+          <Tag bordered={false}>{model.longformRhythm.currentBandLabel}</Tag>
+        </div>
+        <Text className="auto-director-rhythm-summary">{model.longformRhythm.summary}</Text>
+        <div className="auto-director-rhythm-grid">
+          {model.longformRhythm.signals.map(signal => (
+            <button
+              key={signal.key}
+              type="button"
+              className={`auto-director-rhythm-signal auto-director-rhythm-signal-${signal.status}`}
+              onClick={() => onAction({
+                area: 'planning',
+                key: signal.actionKey,
+                label: signal.label,
+                description: signal.detail,
+                modelCall: false,
+              })}
+            >
+              <span>
+                <strong>{signal.label}</strong>
+                <Tag color={rhythmColor(signal.status)} bordered={false}>{rhythmLabel(signal.status)}</Tag>
+              </span>
+              <em>{signal.score}</em>
+              <Text type="secondary">{signal.detail}</Text>
             </button>
           ))}
         </div>

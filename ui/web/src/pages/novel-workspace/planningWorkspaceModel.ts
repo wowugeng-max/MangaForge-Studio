@@ -40,6 +40,15 @@ export type PlanningHealthIssue = {
   actionKey: PlanningActionKey
 }
 
+export type PlanningRhythmSignal = {
+  key: 'core' | 'volume' | 'payoff' | 'fatigue'
+  label: string
+  status: 'ok' | 'warn' | 'block'
+  score: number
+  detail: string
+  actionKey: PlanningActionKey
+}
+
 export type PlanningVolumeTreeNode = {
   id: any
   title: string
@@ -152,6 +161,15 @@ export type PlanningWorkspaceModel = {
     debtCount: number
     retentionRiskCount: number
     groups: PlanningStorylineBoardGroup[]
+  }
+  longformRhythm: {
+    status: 'ready' | 'needs_attention' | 'blocked'
+    score: number
+    label: string
+    summary: string
+    currentBandLabel: string
+    signals: PlanningRhythmSignal[]
+    nextActions: string[]
   }
   volumeTree: PlanningVolumeTreeNode[]
   healthIssues: PlanningHealthIssue[]
@@ -673,6 +691,125 @@ function buildStorylineBoardModel(
   }
 }
 
+function latestReviewPayload(reviews: AnyRecord[], reviewType: string, payloadKey: string) {
+  const review = reviews
+    .filter(item => text(item?.review_type) === reviewType)
+    .sort((a, b) => reviewTime(b) - reviewTime(a))[0]
+  const payload = parseJsonValue(review?.payload) || {}
+  return payload[payloadKey] || payload.result?.[payloadKey] || payload.result || payload
+}
+
+function boundedScore(value: any, fallback: number) {
+  const score = Number(value)
+  if (!Number.isFinite(score)) return fallback
+  return Math.max(0, Math.min(100, Math.round(score)))
+}
+
+function rhythmStatusFromSignals(signals: PlanningRhythmSignal[]): PlanningWorkspaceModel['longformRhythm']['status'] {
+  if (signals.some(signal => signal.status === 'block')) return 'blocked'
+  if (signals.some(signal => signal.status === 'warn')) return 'needs_attention'
+  return 'ready'
+}
+
+function buildLongformRhythmModel(args: {
+  reviews: AnyRecord[]
+  writtenWords: number
+  currentVolumeGoal: string
+  future100Coverage: FuturePlanningCoverage
+  healthIssues: PlanningHealthIssue[]
+  first30Retention: PlanningWorkspaceModel['first30Retention']
+  storylineBoard: PlanningWorkspaceModel['storylineBoard']
+}): PlanningWorkspaceModel['longformRhythm'] {
+  const coreDrift = latestReviewPayload(args.reviews, 'chapter_core_drift', 'core_drift')
+  const payoffSync = latestReviewPayload(args.reviews, 'reader_payoff_sync', 'reader_payoff_sync')
+  const coreRiskCount = arrayValue(coreDrift?.drift_risks).length
+  const coreStatus: PlanningRhythmSignal['status'] = args.healthIssues.some(issue => issue.key === 'missing_reader_promise')
+    ? 'block'
+    : text(coreDrift?.status).toLowerCase() === 'warn' || coreRiskCount > 0
+      ? 'warn'
+      : 'ok'
+  const future100Ratio = args.future100Coverage.required > 0
+    ? args.future100Coverage.planned / args.future100Coverage.required
+    : 1
+  const volumeStatus: PlanningRhythmSignal['status'] = !args.currentVolumeGoal
+    ? 'block'
+    : future100Ratio < 0.3
+      ? 'warn'
+      : 'ok'
+  const payoffDebt = Number(payoffSync?.debt_count ?? payoffSync?.debtCount ?? arrayValue(payoffSync?.missed).length + arrayValue(payoffSync?.debts).length)
+  const payoffStatus: PlanningRhythmSignal['status'] = payoffDebt > 0 || text(payoffSync?.status).toLowerCase() === 'warn' ? 'warn' : 'ok'
+  const fatigueRisk = args.first30Retention.status !== 'ready'
+    || args.storylineBoard.overdueCount > 0
+    || args.storylineBoard.debtCount > 0
+    || args.storylineBoard.retentionRiskCount > 0
+  const fatigueStatus: PlanningRhythmSignal['status'] = fatigueRisk ? 'warn' : 'ok'
+  const bandIndex = Math.max(1, Math.floor(Math.max(0, args.writtenWords) / 100000) + 1)
+
+  const signals: PlanningRhythmSignal[] = [
+    {
+      key: 'core',
+      label: '核心守恒',
+      status: coreStatus,
+      score: coreStatus === 'block' ? 45 : boundedScore(coreDrift?.score, coreStatus === 'warn' ? 68 : 88),
+      detail: coreStatus === 'block'
+        ? '长篇核心承诺缺失，不能进入连续生产。'
+        : coreStatus === 'warn'
+          ? text(coreDrift?.label || coreDrift?.summary, `核心偏移 ${coreRiskCount || 1}`)
+          : '核心承诺、卷目标和章节服务关系稳定。',
+      actionKey: coreStatus === 'ok' ? 'open_outline_tree' : 'open_story_assets',
+    },
+    {
+      key: 'volume',
+      label: '卷级推进',
+      status: volumeStatus,
+      score: volumeStatus === 'block' ? 45 : volumeStatus === 'warn' ? Math.max(55, Math.round(future100Ratio * 100)) : 86,
+      detail: volumeStatus === 'block'
+        ? '当前章节没有明确卷目标。'
+        : volumeStatus === 'warn'
+          ? `未来100章规划 ${args.future100Coverage.label}，不适合长时间自动连写。`
+          : `当前卷目标明确，未来100章规划 ${args.future100Coverage.label}。`,
+      actionKey: volumeStatus === 'ok' ? 'open_outline_tree' : 'update_rolling_plan',
+    },
+    {
+      key: 'payoff',
+      label: '回报兑现',
+      status: payoffStatus,
+      score: boundedScore(payoffSync?.score, payoffStatus === 'warn' ? 64 : 86),
+      detail: payoffStatus === 'warn'
+        ? text(payoffSync?.label, `回报欠账 ${payoffDebt}`)
+        : '章节承诺、场景回报和待回收期待处于可控状态。',
+      actionKey: payoffStatus === 'ok' ? 'enter_chapter_writing' : 'open_quality_revision',
+    },
+    {
+      key: 'fatigue',
+      label: '疲劳风险',
+      status: fatigueStatus,
+      score: fatigueStatus === 'warn' ? Math.max(50, Math.min(78, Number(args.first30Retention.score || 72))) : 86,
+      detail: fatigueStatus === 'warn'
+        ? `剧情线债务 ${args.storylineBoard.debtCount}，逾期 ${args.storylineBoard.overdueCount}，前30章状态 ${args.first30Retention.status}。`
+        : '留存曲线、剧情线推进和回收压力没有明显疲劳信号。',
+      actionKey: fatigueStatus === 'warn' ? 'run_first30_retention' : 'enter_chapter_writing',
+    },
+  ]
+  const status = rhythmStatusFromSignals(signals)
+  const score = Math.max(0, Math.min(100, Math.round(signals.reduce((sum, signal) => sum + signal.score, 0) / Math.max(1, signals.length))))
+  const riskySignals = signals.filter(signal => signal.status !== 'ok')
+
+  return {
+    status,
+    score,
+    label: status === 'ready' ? `节奏健康 ${score}` : status === 'blocked' ? `节奏阻塞 ${score}` : `节奏风险 ${score}`,
+    summary: status === 'ready'
+      ? '长篇节奏稳定，可以继续推进当前章。'
+      : `长篇节奏存在 ${riskySignals.length} 项风险：${riskySignals.map(signal => signal.label).join('、')}。`,
+    currentBandLabel: `第${bandIndex}个10万字`,
+    signals,
+    nextActions: status === 'ready'
+      ? ['保持卷目标、回报兑现和剧情线回收的节奏闭环。']
+      : ['先处理核心偏移、回报欠账和剧情线债务，再连续生成下一批章节。'],
+  }
+}
+
 export function buildPlanningWorkspaceModel(input: BuildPlanningWorkspaceModelInput): PlanningWorkspaceModel {
   const selectedProject = input.selectedProject || {}
   const outlines = arrayValue(input.outlines)
@@ -726,6 +863,17 @@ export function buildPlanningWorkspaceModel(input: BuildPlanningWorkspaceModelIn
     materialScore: input.materialScore,
   })
   const first30Retention = buildFirst30RetentionModel(chapters, reviews)
+  const storylineBoard = buildStorylineBoardModel(settingEntities, first30Retention, activeChapterNo)
+  const writtenWords = chapters.reduce((sum, chapter) => sum + wc(chapter?.chapter_text), 0)
+  const longformRhythm = buildLongformRhythmModel({
+    reviews,
+    writtenWords,
+    currentVolumeGoal,
+    future100Coverage,
+    healthIssues,
+    first30Retention,
+    storylineBoard,
+  })
 
   return {
     topStatus: {
@@ -733,7 +881,7 @@ export function buildPlanningWorkspaceModel(input: BuildPlanningWorkspaceModelIn
       currentVolume: text(currentVolume?.title || bibleVolume?.title, '未定位当前卷'),
       currentStage: text(currentStage?.title || bibleStage?.title, '未定位当前阶段'),
       currentChapterLabel: activeChapterNo ? `第${activeChapterNo}章` : '未选择章节',
-      writtenWords: chapters.reduce((sum, chapter) => sum + wc(chapter?.chapter_text), 0),
+      writtenWords,
       targetWords: Number(selectedProject?.target_words || selectedProject?.targetWords || 0),
       future10Coverage,
       future100Coverage,
@@ -756,7 +904,8 @@ export function buildPlanningWorkspaceModel(input: BuildPlanningWorkspaceModelIn
     },
     futureRoute,
     first30Retention,
-    storylineBoard: buildStorylineBoardModel(settingEntities, first30Retention, activeChapterNo),
+    storylineBoard,
+    longformRhythm,
     volumeTree: buildVolumeTree(outlines, chapters),
     healthIssues,
   }

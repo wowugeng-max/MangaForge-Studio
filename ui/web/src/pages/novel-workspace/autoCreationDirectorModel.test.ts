@@ -45,6 +45,20 @@ const basePlanning = {
     retentionRiskCount: 0,
     groups: [],
   },
+  longformRhythm: {
+    status: 'ready',
+    score: 86,
+    label: '节奏健康 86',
+    summary: '长篇节奏稳定，可以继续推进当前章。',
+    currentBandLabel: '第1个10万字',
+    signals: [
+      { key: 'core', label: '核心守恒', status: 'ok', score: 90, detail: '核心稳定', actionKey: 'open_outline_tree' },
+      { key: 'volume', label: '卷级推进', status: 'ok', score: 84, detail: '当前卷推进正常', actionKey: 'update_rolling_plan' },
+      { key: 'payoff', label: '回报兑现', status: 'ok', score: 86, detail: '回报债务可控', actionKey: 'open_quality_revision' },
+      { key: 'fatigue', label: '疲劳风险', status: 'ok', score: 84, detail: '留存和剧情线风险可控', actionKey: 'run_first30_retention' },
+    ],
+    nextActions: [],
+  },
   volumeTree: [],
   healthIssues: [],
 } as any
@@ -186,6 +200,35 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(storylineModel.mainAction.area).toBe('planning')
     expect(storylineModel.mainAction.key).toBe('open_story_assets')
     expect(storylineModel.confirmations).toContain('剧情线需要调度确认')
+  })
+
+  test('surfaces longform rhythm governance before chapter generation', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        longformRhythm: {
+          ...basePlanning.longformRhythm,
+          status: 'needs_attention',
+          score: 67,
+          label: '节奏风险 67',
+          summary: '核心偏移和回报欠账正在累积。',
+          signals: basePlanning.longformRhythm.signals.map((signal: any) => signal.key === 'payoff'
+            ? { ...signal, status: 'warn', score: 58, detail: '回报欠账 2', actionKey: 'open_quality_revision' }
+            : signal),
+          nextActions: ['先处理核心偏移、回报欠账和剧情线债务，再连续生成下一批章节。'],
+        },
+      },
+      writing: baseWriting,
+      activeTasks: [],
+      selectedModelId: 12,
+    })
+
+    expect(model.status).toBe('needs_governance')
+    expect(model.mainAction.area).toBe('planning')
+    expect(model.mainAction.key).toBe('open_quality_revision')
+    expect(model.metrics.longformRhythmScore).toBe(67)
+    expect(model.pipeline.find(step => step.key === 'longform_rhythm')?.status).toBe('warning')
+    expect(model.confirmations).toContain('长篇节奏需要校准')
   })
 
   test('builds a longform creation contract for core, story, innovation and reader pull', () => {

@@ -35,6 +35,7 @@ export interface AutoCreationPipelineStep {
   key:
     | 'longform_planning'
     | 'creation_contract'
+    | 'longform_rhythm'
     | 'story_assets'
     | 'retention_curve'
     | 'chapter_planning'
@@ -83,7 +84,9 @@ export interface AutoCreationDirectorModel {
     first30Score: number | null
     storylineCount: number
     creationDiagnosisScore: number | null
+    longformRhythmScore: number | null
   }
+  longformRhythm: PlanningWorkspaceModel['longformRhythm']
   creationContract: AutoCreationContractItem[]
   pipeline: AutoCreationPipelineStep[]
 }
@@ -248,6 +251,16 @@ function storylineNeedsAction(planning: PlanningWorkspaceModel) {
   return planning.storylineBoard.status === 'missing' || planning.storylineBoard.status === 'needs_attention'
 }
 
+function rhythmNeedsAction(planning: PlanningWorkspaceModel) {
+  return Boolean(planning.longformRhythm && planning.longformRhythm.status !== 'ready')
+}
+
+function rhythmAction(planning: PlanningWorkspaceModel): PlanningActionKey {
+  const signal = planning.longformRhythm?.signals?.find(item => item.status === 'block')
+    || planning.longformRhythm?.signals?.find(item => item.status === 'warn')
+  return (signal?.actionKey || 'longform_pressure') as PlanningActionKey
+}
+
 function parsePayload(value: any) {
   if (!value) return null
   if (typeof value === 'object') return value
@@ -406,6 +419,7 @@ function buildPipeline(args: {
   const hasProse = Boolean(chapter?.hasProse)
   const retentionAction = retentionNeedsAction(args.planning)
   const storylineAction = storylineNeedsAction(args.planning)
+  const rhythmActionNeeded = rhythmNeedsAction(args.planning)
   const running = hasRunningTasks(args.activeTasks)
 
   return [
@@ -424,6 +438,18 @@ function buildPipeline(args: {
         .map(item => `${item.label}：${item.detail}`)
         .slice(0, 2)
         .join('；') || '核心、故事、创新和读者吸引力达标',
+    },
+    {
+      key: 'longform_rhythm',
+      label: '长篇节奏',
+      status: !args.planning.longformRhythm
+        ? 'pending'
+        : args.planning.longformRhythm.status === 'blocked'
+          ? 'blocked'
+          : args.planning.longformRhythm.status === 'needs_attention'
+            ? 'warning'
+            : 'done',
+      detail: args.planning.longformRhythm?.summary || '等待长篇节奏总控计算',
     },
     {
       key: 'story_assets',
@@ -502,6 +528,7 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
   const running = hasRunningTasks(activeTasks)
   const retentionActionNeeded = retentionNeedsAction(planning)
   const storylineActionNeeded = storylineNeedsAction(planning)
+  const rhythmActionNeeded = rhythmNeedsAction(planning)
   const reviewedContract = creationContractFromReview(arrayValue(input.reviews))
   const creationContract = reviewedContract.contract || buildLongformCreationContract(planning, writing)
   const blockers: string[] = []
@@ -546,6 +573,13 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
     summary = planning.storylineBoard.summary
     confirmations.push('剧情线需要调度确认')
     mainAction = planningAction('open_story_assets', '进入设定资产页，补齐或确认主线、支线、角色线、关系线、势力线和伏笔线。')
+  } else if (rhythmActionNeeded) {
+    status = 'needs_governance'
+    statusLabel = '节奏待治理'
+    headline = '先校准长篇节奏再连续生成'
+    summary = planning.longformRhythm.summary
+    confirmations.push('长篇节奏需要校准')
+    mainAction = planningAction(rhythmAction(planning), planning.longformRhythm.nextActions[0] || '先处理长篇节奏风险，再进入连续章节生产。')
   } else if (writing.chapterAcceptanceDesk.visible) {
     const action = writing.chapterAcceptanceDesk.recommendedAcceptanceAction
     status = 'needs_acceptance'
@@ -592,7 +626,9 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
       first30Score: planning.first30Retention.score,
       storylineCount: planning.storylineBoard.total,
       creationDiagnosisScore: reviewedContract.score,
+      longformRhythmScore: planning.longformRhythm?.score ?? null,
     },
+    longformRhythm: planning.longformRhythm,
     creationContract,
     pipeline,
   }

@@ -245,6 +245,86 @@
   white-space: nowrap;
 }
 
+.auto-director-rhythm-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.auto-director-rhythm-summary {
+  color: #475569;
+}
+
+.auto-director-rhythm-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.auto-director-rhythm-signal {
+  min-width: 0;
+  border: 1px solid #e5eaf2;
+  border-radius: 9px;
+  background: #fbfcfe;
+  padding: 10px 11px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 8px;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+}
+
+.auto-director-rhythm-signal:hover {
+  transform: translateY(-1px);
+  border-color: #93c5fd;
+  background: #f8fbff;
+}
+
+.auto-director-rhythm-signal > span {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.auto-director-rhythm-signal strong {
+  min-width: 0;
+  color: #0f172a;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.auto-director-rhythm-signal em {
+  justify-self: end;
+  color: #334155;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.auto-director-rhythm-signal .ant-typography {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.auto-director-rhythm-signal-ok {
+  border-color: #dcfce7;
+  background: #f0fdf4;
+}
+
+.auto-director-rhythm-signal-warn {
+  border-color: #fde68a;
+  background: #fffbeb;
+}
+
+.auto-director-rhythm-signal-block {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
 .auto-director-stage-list {
   display: grid;
   gap: 8px;
@@ -341,6 +421,10 @@
   }
 
   .auto-director-contract-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .auto-director-rhythm-grid {
     grid-template-columns: 1fr;
   }
 }
