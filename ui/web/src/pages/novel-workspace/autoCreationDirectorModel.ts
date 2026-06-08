@@ -74,6 +74,25 @@ export interface AutoCreationBatchGuardrailSignal {
   detail: string
 }
 
+export interface AutoCreationNextBatchBriefChapter {
+  chapterNo: number
+  title: string
+  chapterTask: string
+  conflict: string
+  endingHook: string
+  mainlineProgress: string
+}
+
+export interface AutoCreationNextBatchBrief {
+  visible: boolean
+  chapterRangeLabel: string
+  batchGoal: string
+  readerPayoffPlan: string
+  mainlineFocus: string
+  forbiddenBoundary: string
+  chapters: AutoCreationNextBatchBriefChapter[]
+}
+
 export interface AutoCreationLongformCapacitySignal {
   key: 'future_reserve' | 'storyline_pool' | 'volume_runway' | 'production_stamina'
   label: string
@@ -113,6 +132,7 @@ export interface AutoCreationBatchGuardrail {
   safeChapterCount: number
   recommendedAction: AutoCreationDirectorAction
   guardrails: AutoCreationBatchGuardrailSignal[]
+  nextBatchBrief: AutoCreationNextBatchBrief
 }
 
 export interface AutoCreationBatchReviewItem {
@@ -282,6 +302,14 @@ function text(value: any, fallback = '') {
   if (value === null || value === undefined) return fallback
   const normalized = String(value).trim()
   return normalized || fallback
+}
+
+function firstText(...values: any[]) {
+  for (const value of values) {
+    const normalized = text(value)
+    if (normalized) return normalized
+  }
+  return ''
 }
 
 function planningAction(key: PlanningActionKey, description: string): AutoCreationDirectorAction {
@@ -1048,6 +1076,90 @@ function future100ReserveStatus(planning: PlanningWorkspaceModel): AutoCreationB
   return 'block'
 }
 
+function emptyNextBatchBrief(): AutoCreationNextBatchBrief {
+  return {
+    visible: false,
+    chapterRangeLabel: '',
+    batchGoal: '',
+    readerPayoffPlan: '',
+    mainlineFocus: '',
+    forbiddenBoundary: '',
+    chapters: [],
+  }
+}
+
+function normalizeRouteChapter(record: AnyRecord): AutoCreationNextBatchBriefChapter | null {
+  const chapterNo = Number(record?.chapterNo ?? record?.chapter_no ?? 0)
+  if (!chapterNo) return null
+  return {
+    chapterNo,
+    title: firstText(record?.title, `第${chapterNo}章`),
+    chapterTask: firstText(record?.chapterTask, record?.chapter_task, record?.task, record?.chapterGoal, record?.chapter_goal),
+    conflict: firstText(record?.conflict, record?.raw_payload?.conflict),
+    endingHook: firstText(record?.endingHook, record?.ending_hook, record?.hook),
+    mainlineProgress: firstText(record?.mainlineProgress, record?.mainline_progress, record?.raw_payload?.mainline_progress),
+  }
+}
+
+function chapterRangeLabel(chapters: AutoCreationNextBatchBriefChapter[]) {
+  if (!chapters.length) return ''
+  const first = chapters[0].chapterNo
+  const last = chapters[chapters.length - 1].chapterNo
+  return first === last ? `第${first}章` : `第${first}-${last}章`
+}
+
+function buildNextBatchBrief(args: {
+  planning: PlanningWorkspaceModel
+  writing: WritingCockpitModel
+  safeChapterCount: number
+}): AutoCreationNextBatchBrief {
+  if (args.safeChapterCount <= 0) return emptyNextBatchBrief()
+  const targetNo = Number(args.writing.nextChapter?.chapterNo || 0)
+  if (!targetNo) return emptyNextBatchBrief()
+  const routeChapters = arrayValue(args.planning.futureRoute)
+    .map(normalizeRouteChapter)
+    .filter((item): item is AutoCreationNextBatchBriefChapter => Boolean(item))
+    .filter(item => item.chapterNo >= targetNo)
+    .sort((a, b) => a.chapterNo - b.chapterNo)
+    .slice(0, args.safeChapterCount)
+  const existingNos = new Set(routeChapters.map(item => item.chapterNo))
+  if (!existingNos.has(targetNo)) {
+    const fallback = normalizeRouteChapter({
+      chapterNo: targetNo,
+      title: args.writing.nextChapter?.title,
+      chapterTask: args.writing.nextChapter?.chapterGoal,
+      conflict: args.writing.nextChapter?.conflict,
+      endingHook: args.writing.nextChapter?.endingHook,
+      mainlineProgress: args.planning.mainline.nextTurn,
+    })
+    if (fallback) routeChapters.unshift(fallback)
+  }
+  const chapters = routeChapters.slice(0, args.safeChapterCount)
+  if (!chapters.length) return emptyNextBatchBrief()
+  const mainlineProgress = chapters.map(item => item.mainlineProgress).filter(Boolean)
+  const conflicts = chapters.map(item => item.conflict).filter(Boolean)
+
+  return {
+    visible: true,
+    chapterRangeLabel: chapterRangeLabel(chapters),
+    batchGoal: [
+      args.planning.mainline.currentVolumeGoal ? `卷目标：${args.planning.mainline.currentVolumeGoal}` : '',
+      chapters[chapters.length - 1]?.mainlineProgress ? `本批推进到：${chapters[chapters.length - 1].mainlineProgress}` : '',
+    ].filter(Boolean).join('；') || '保持当前卷目标连续推进。',
+    readerPayoffPlan: [
+      args.planning.mainline.payoffModel ? `爽点模型：${args.planning.mainline.payoffModel}` : '',
+      chapters.map(item => item.endingHook).filter(Boolean).slice(0, 3).join(' / '),
+    ].filter(Boolean).join('；') || '每章保留明确读者回报和章末钩子。',
+    mainlineFocus: mainlineProgress.join(' -> ') || args.planning.mainline.currentStageConflict || '保持主线推进不偏移。',
+    forbiddenBoundary: [
+      '不得跳过单章质检、修订和故事状态回填。',
+      args.planning.mainline.risks[0] ? `避开风险：${args.planning.mainline.risks[0]}` : '',
+      conflicts.length ? `冲突必须逐章落地：${conflicts.slice(0, 3).join(' / ')}` : '',
+    ].filter(Boolean).join('；'),
+    chapters,
+  }
+}
+
 function buildBatchGuardrail(args: {
   planning: PlanningWorkspaceModel
   writing: WritingCockpitModel
@@ -1141,6 +1253,7 @@ function buildBatchGuardrail(args: {
     : status === 'caution'
       ? 1
       : Math.max(1, Math.min(3, Number(future10.planned || 3), Number(planning.volumeBeatBudget?.plannedChapterCount || 3)))
+  const nextBatchBrief = buildNextBatchBrief({ planning, writing, safeChapterCount })
 
   if (status === 'ready') {
     recommendedAction = opsAction(
@@ -1161,6 +1274,7 @@ function buildBatchGuardrail(args: {
     safeChapterCount,
     recommendedAction,
     guardrails,
+    nextBatchBrief,
   }
 }
 

@@ -353,6 +353,33 @@ export function AutoCreationDirectorWorkspace({
             ))}
           </div>
         </div>
+        {model.batchGuardrail.nextBatchBrief.visible && (
+          <div className="auto-director-batch-brief">
+            <div className="auto-director-batch-brief-head">
+              <Text strong>下一批任务书</Text>
+              <Tag bordered={false}>{model.batchGuardrail.nextBatchBrief.chapterRangeLabel}</Tag>
+            </div>
+            <div className="auto-director-batch-brief-grid">
+              <div><span>批次目标</span><strong>{model.batchGuardrail.nextBatchBrief.batchGoal}</strong></div>
+              <div><span>读者回报</span><strong>{model.batchGuardrail.nextBatchBrief.readerPayoffPlan}</strong></div>
+              <div><span>主线焦点</span><strong>{model.batchGuardrail.nextBatchBrief.mainlineFocus}</strong></div>
+              <div><span>禁写边界</span><strong>{model.batchGuardrail.nextBatchBrief.forbiddenBoundary}</strong></div>
+            </div>
+            <div className="auto-director-batch-brief-chapters">
+              {model.batchGuardrail.nextBatchBrief.chapters.map(chapter => (
+                <button
+                  key={chapter.chapterNo}
+                  type="button"
+                  className="auto-director-batch-brief-chapter"
+                  onClick={() => onSelectChapter(chapter.chapterNo)}
+                >
+                  <span>第 {chapter.chapterNo} 章 · {chapter.title}</span>
+                  <Text type="secondary">{chapter.chapterTask || chapter.conflict || '待补章节任务'} · 钩子：{chapter.endingHook || '待补'}</Text>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </section>
 
       {model.batchReviewQueue.visible && (

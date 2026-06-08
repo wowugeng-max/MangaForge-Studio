@@ -413,6 +413,35 @@ describe('buildAutoCreationDirectorModel', () => {
           ...basePlanning.topStatus,
           future100Coverage: { ready: true, planned: 100, required: 100, missingChapters: [], label: '100/100' },
         },
+        futureRoute: [
+          {
+            chapterNo: 8,
+            title: '试炼前夜',
+            chapterTask: '主角拿到试炼资格',
+            conflict: '执事设局阻拦',
+            endingHook: '阵盘亮起第二道裂纹',
+            mainlineProgress: '进入外门试炼核心局',
+            riskTags: [],
+          },
+          {
+            chapterNo: 9,
+            title: '阵盘裂纹',
+            chapterTask: '阵盘异常暴露主角潜力',
+            conflict: '同门围堵试探底牌',
+            endingHook: '内门执事点名关注',
+            mainlineProgress: '让宗门高层第一次注意主角',
+            riskTags: [],
+          },
+          {
+            chapterNo: 10,
+            title: '外门震动',
+            chapterTask: '试炼结果引发宗门震动',
+            conflict: '旧秩序压制新晋黑马',
+            endingHook: '内门招揽提出苛刻条件',
+            mainlineProgress: '打开内门势力线',
+            riskTags: [],
+          },
+        ],
       },
       writing: {
         ...baseWriting,
@@ -448,6 +477,12 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(model.batchGuardrail.guardrails.map(item => item.label)).toContain('章节任务书/场景卡')
     expect(model.batchGuardrail.guardrails.map(item => item.label)).toContain('未来10章规划')
     expect(model.batchGuardrail.guardrails.map(item => item.label)).toContain('每章交稿回填')
+    expect(model.batchGuardrail.nextBatchBrief.visible).toBe(true)
+    expect(model.batchGuardrail.nextBatchBrief.chapterRangeLabel).toBe('第8-10章')
+    expect(model.batchGuardrail.nextBatchBrief.batchGoal).toContain('进入内门视野')
+    expect(model.batchGuardrail.nextBatchBrief.readerPayoffPlan).toContain('升级+打脸')
+    expect(model.batchGuardrail.nextBatchBrief.chapters.map(item => item.chapterNo)).toEqual([8, 9, 10])
+    expect(model.batchGuardrail.nextBatchBrief.chapters[2]?.endingHook).toBe('内门招揽提出苛刻条件')
     expect(model.pipeline.find(step => step.key === 'batch_guardrail')?.status).toBe('active')
   })
 
