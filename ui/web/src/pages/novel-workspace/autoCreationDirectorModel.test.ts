@@ -59,6 +59,22 @@ const basePlanning = {
     ],
     nextActions: [],
   },
+  volumeBeatBudget: {
+    status: 'ready',
+    score: 86,
+    label: '爆点预算 86',
+    summary: '当前卷高潮与爽点预算稳定。',
+    currentVolumeTitle: '第一卷 宗门试炼',
+    chapterRange: '第1-50章',
+    totalChapters: 50,
+    plannedChapterCount: 50,
+    climaxTarget: 4,
+    climaxCount: 4,
+    payoffTarget: 12,
+    payoffCount: 18,
+    beats: [],
+    nextActions: [],
+  },
   volumeTree: [],
   healthIssues: [],
 } as any
@@ -229,6 +245,32 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(model.metrics.longformRhythmScore).toBe(67)
     expect(model.pipeline.find(step => step.key === 'longform_rhythm')?.status).toBe('warning')
     expect(model.confirmations).toContain('长篇节奏需要校准')
+  })
+
+  test('surfaces volume climax budget governance before chapter generation', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        volumeBeatBudget: {
+          ...basePlanning.volumeBeatBudget,
+          status: 'needs_attention',
+          score: 61,
+          label: '爆点预算不足 61',
+          summary: '当前卷只有 1 个转折点，缺少中段爆点和卷末爆点。',
+          climaxCount: 1,
+          nextActions: ['补齐当前卷的小高潮、中高潮和卷末爆点，再进入批量连写。'],
+        },
+      },
+      writing: baseWriting,
+      activeTasks: [],
+      selectedModelId: 12,
+    })
+
+    expect(model.status).toBe('needs_governance')
+    expect(model.mainAction.key).toBe('complete_volume_plan')
+    expect(model.metrics.volumeBeatScore).toBe(61)
+    expect(model.pipeline.find(step => step.key === 'volume_beat_budget')?.status).toBe('warning')
+    expect(model.confirmations).toContain('卷级高潮预算需要补齐')
   })
 
   test('builds a longform creation contract for core, story, innovation and reader pull', () => {

@@ -35,6 +35,7 @@ export interface AutoCreationPipelineStep {
   key:
     | 'longform_planning'
     | 'creation_contract'
+    | 'volume_beat_budget'
     | 'longform_rhythm'
     | 'story_assets'
     | 'retention_curve'
@@ -85,6 +86,7 @@ export interface AutoCreationDirectorModel {
     storylineCount: number
     creationDiagnosisScore: number | null
     longformRhythmScore: number | null
+    volumeBeatScore: number | null
   }
   longformRhythm: PlanningWorkspaceModel['longformRhythm']
   creationContract: AutoCreationContractItem[]
@@ -255,6 +257,10 @@ function rhythmNeedsAction(planning: PlanningWorkspaceModel) {
   return Boolean(planning.longformRhythm && planning.longformRhythm.status !== 'ready')
 }
 
+function volumeBeatNeedsAction(planning: PlanningWorkspaceModel) {
+  return Boolean(planning.volumeBeatBudget && planning.volumeBeatBudget.status !== 'ready')
+}
+
 function rhythmAction(planning: PlanningWorkspaceModel): PlanningActionKey {
   const signal = planning.longformRhythm?.signals?.find(item => item.status === 'block')
     || planning.longformRhythm?.signals?.find(item => item.status === 'warn')
@@ -419,7 +425,6 @@ function buildPipeline(args: {
   const hasProse = Boolean(chapter?.hasProse)
   const retentionAction = retentionNeedsAction(args.planning)
   const storylineAction = storylineNeedsAction(args.planning)
-  const rhythmActionNeeded = rhythmNeedsAction(args.planning)
   const running = hasRunningTasks(args.activeTasks)
 
   return [
@@ -438,6 +443,18 @@ function buildPipeline(args: {
         .map(item => `${item.label}：${item.detail}`)
         .slice(0, 2)
         .join('；') || '核心、故事、创新和读者吸引力达标',
+    },
+    {
+      key: 'volume_beat_budget',
+      label: '卷级爆点预算',
+      status: !args.planning.volumeBeatBudget
+        ? 'pending'
+        : args.planning.volumeBeatBudget.status === 'blocked'
+          ? 'blocked'
+          : args.planning.volumeBeatBudget.status === 'needs_attention'
+            ? 'warning'
+            : 'done',
+      detail: args.planning.volumeBeatBudget?.summary || '等待卷级高潮和爽点预算计算',
     },
     {
       key: 'longform_rhythm',
@@ -528,6 +545,7 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
   const running = hasRunningTasks(activeTasks)
   const retentionActionNeeded = retentionNeedsAction(planning)
   const storylineActionNeeded = storylineNeedsAction(planning)
+  const volumeBeatActionNeeded = volumeBeatNeedsAction(planning)
   const rhythmActionNeeded = rhythmNeedsAction(planning)
   const reviewedContract = creationContractFromReview(arrayValue(input.reviews))
   const creationContract = reviewedContract.contract || buildLongformCreationContract(planning, writing)
@@ -573,6 +591,13 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
     summary = planning.storylineBoard.summary
     confirmations.push('剧情线需要调度确认')
     mainAction = planningAction('open_story_assets', '进入设定资产页，补齐或确认主线、支线、角色线、关系线、势力线和伏笔线。')
+  } else if (volumeBeatActionNeeded) {
+    status = 'needs_governance'
+    statusLabel = '爆点预算待补'
+    headline = '先补齐当前卷高潮和爽点预算'
+    summary = planning.volumeBeatBudget.summary
+    confirmations.push('卷级高潮预算需要补齐')
+    mainAction = planningAction('complete_volume_plan', planning.volumeBeatBudget.nextActions[0] || '补齐当前卷的小高潮、中高潮和卷末爆点。')
   } else if (rhythmActionNeeded) {
     status = 'needs_governance'
     statusLabel = '节奏待治理'
@@ -627,6 +652,7 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
       storylineCount: planning.storylineBoard.total,
       creationDiagnosisScore: reviewedContract.score,
       longformRhythmScore: planning.longformRhythm?.score ?? null,
+      volumeBeatScore: planning.volumeBeatBudget?.score ?? null,
     },
     longformRhythm: planning.longformRhythm,
     creationContract,

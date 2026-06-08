@@ -208,6 +208,21 @@ describe('commercial writing workspace UI shell', () => {
     expect(projectWorkspace).toContain('projectSettings')
   })
 
+  test('shows volume climax budget as a story planning workflow', () => {
+    const planningWorkspace = source('StoryPlanningWorkspace.tsx')
+    const planningModel = source('planningWorkspaceModel.ts')
+    const directorModel = source('autoCreationDirectorModel.ts')
+
+    expect(planningWorkspace).toContain('卷级高潮预算')
+    expect(planningWorkspace).toContain('novel-volume-beat-budget-card')
+    expect(planningWorkspace).toContain('小高潮')
+    expect(planningWorkspace).toContain('中高潮')
+    expect(planningWorkspace).toContain('卷末爆点')
+    expect(planningModel).toContain('volumeBeatBudget')
+    expect(directorModel).toContain('volume_beat_budget')
+    expect(directorModel).toContain('volumeBeatScore')
+  })
+
   test('shows auto creation director as the longform control workspace', () => {
     const directorWorkspace = source('AutoCreationDirectorWorkspace.tsx')
     const directorCss = source('AutoCreationDirectorWorkspace.css')

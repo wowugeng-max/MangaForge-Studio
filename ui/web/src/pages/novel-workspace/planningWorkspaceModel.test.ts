@@ -271,6 +271,24 @@ describe('buildPlanningWorkspaceModel', () => {
     expect(model.longformRhythm.nextActions).toContain('先处理核心偏移、回报欠账和剧情线债务，再连续生成下一批章节。')
   })
 
+  test('builds current volume climax and payoff budget from outlines and chapter plans', () => {
+    const model = buildPlanningWorkspaceModel({
+      selectedProject: project,
+      outlines,
+      chapters,
+      activeChapter: chapters[6],
+    })
+
+    expect(model.volumeBeatBudget.currentVolumeTitle).toBe('第一卷 宗门试炼')
+    expect(model.volumeBeatBudget.status).toBe('needs_attention')
+    expect(model.volumeBeatBudget.totalChapters).toBe(50)
+    expect(model.volumeBeatBudget.climaxTarget).toBe(4)
+    expect(model.volumeBeatBudget.climaxCount).toBe(1)
+    expect(model.volumeBeatBudget.payoffCount).toBeGreaterThanOrEqual(10)
+    expect(model.volumeBeatBudget.beats.map(item => item.label)).toContain('试炼前夜转折')
+    expect(model.volumeBeatBudget.nextActions).toContain('补齐当前卷的小高潮、中高潮和卷末爆点，再进入批量连写。')
+  })
+
   test('marks first30 retention report stale when early chapters changed later', () => {
     const changedChapters = chapters.map(chapter => chapter.chapter_no === 7
       ? { ...chapter, updated_at: '2026-06-03T11:00:00.000Z' }

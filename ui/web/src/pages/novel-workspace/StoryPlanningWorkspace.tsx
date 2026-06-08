@@ -77,6 +77,12 @@ function storylineRiskColor(tag: string) {
   return 'blue'
 }
 
+function volumeBeatColor(status: PlanningWorkspaceModel['volumeBeatBudget']['status'] | string) {
+  if (status === 'ready' || status === 'planned') return 'green'
+  if (status === 'blocked') return 'red'
+  return 'gold'
+}
+
 function formatWords(value: number) {
   if (value >= 10000) return `${(value / 10000).toFixed(1)}万`
   return String(value || 0)
@@ -310,6 +316,79 @@ export function StoryPlanningWorkspace({
                 {model.first30Retention.nextActions.length > 0 && (
                   <Space wrap>
                     {model.first30Retention.nextActions.slice(0, 3).map(action => <Tag key={action} bordered={false}>{action}</Tag>)}
+                  </Space>
+                )}
+              </Space>
+            </Card>
+
+            <Card
+              className="novel-volume-beat-budget-card"
+              title="卷级高潮预算"
+              size="small"
+              extra={<Button size="small" type="link" onClick={() => onAction('complete_volume_plan')}>补齐当前卷规划</Button>}
+            >
+              <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                <Space wrap>
+                  <Tag color={volumeBeatColor(model.volumeBeatBudget.status)} bordered={false}>
+                    {model.volumeBeatBudget.label}
+                  </Tag>
+                  <Tag bordered={false}>{model.volumeBeatBudget.currentVolumeTitle}</Tag>
+                  <Tag bordered={false}>{model.volumeBeatBudget.chapterRange}</Tag>
+                  <Tag color={model.volumeBeatBudget.climaxCount >= model.volumeBeatBudget.climaxTarget ? 'green' : 'gold'} bordered={false}>
+                    高潮 {model.volumeBeatBudget.climaxCount}/{model.volumeBeatBudget.climaxTarget}
+                  </Tag>
+                  <Tag color={model.volumeBeatBudget.payoffCount >= model.volumeBeatBudget.payoffTarget ? 'green' : 'gold'} bordered={false}>
+                    爽点 {model.volumeBeatBudget.payoffCount}/{model.volumeBeatBudget.payoffTarget}
+                  </Tag>
+                </Space>
+                <Text type="secondary">{model.volumeBeatBudget.summary}</Text>
+                <div style={{ display: 'grid', gridTemplateColumns: compact ? '1fr' : 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
+                  {[
+                    { label: '小高潮', description: '前段建立期待，给第一次明确反压或规则突破。' },
+                    { label: '中高潮', description: '中段升级冲突，兑现阶段性爽点并抛出更大危机。' },
+                    { label: '卷末爆点', description: '卷尾完成大回报、身份/势力变化或新地图钩子。' },
+                  ].map(item => (
+                    <div key={item.label} style={{ border: '1px solid #edf0f5', borderRadius: 8, padding: 10, background: '#fbfcfe' }}>
+                      <Space direction="vertical" size={6}>
+                        <Text strong>{item.label}</Text>
+                        <Text type="secondary" style={{ fontSize: 12 }}>{item.description}</Text>
+                      </Space>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: compact ? '1fr' : 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
+                  {model.volumeBeatBudget.beats.map(beat => (
+                    <button
+                      key={beat.key}
+                      type="button"
+                      disabled={!beat.chapterNo}
+                      onClick={() => beat.chapterNo && onSelectChapter(beat.chapterNo)}
+                      style={{
+                        border: '1px solid #edf0f5',
+                        borderRadius: 8,
+                        padding: '10px 12px',
+                        background: beat.status === 'missing' ? '#fffbeb' : '#fff',
+                        cursor: beat.chapterNo ? 'pointer' : 'default',
+                        textAlign: 'left',
+                        width: '100%',
+                        font: 'inherit',
+                        color: 'inherit',
+                      }}
+                    >
+                      <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                        <Space wrap>
+                          <Tag color={volumeBeatColor(beat.status)} bordered={false}>{beat.type}</Tag>
+                          {beat.chapterNo && <Tag bordered={false}>第{beat.chapterNo}章</Tag>}
+                          <Text strong>{beat.label}</Text>
+                        </Space>
+                        <Text type="secondary" style={{ fontSize: 12 }}>{beat.detail}</Text>
+                      </Space>
+                    </button>
+                  ))}
+                </div>
+                {model.volumeBeatBudget.nextActions.length > 0 && (
+                  <Space wrap>
+                    {model.volumeBeatBudget.nextActions.map(action => <Tag key={action} bordered={false}>{action}</Tag>)}
                   </Space>
                 )}
               </Space>

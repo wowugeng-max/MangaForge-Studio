@@ -49,6 +49,15 @@ export type PlanningRhythmSignal = {
   actionKey: PlanningActionKey
 }
 
+export type PlanningVolumeBeat = {
+  key: string
+  label: string
+  chapterNo: number | null
+  type: '小高潮' | '中高潮' | '卷末爆点' | '待补'
+  status: 'planned' | 'missing'
+  detail: string
+}
+
 export type PlanningVolumeTreeNode = {
   id: any
   title: string
@@ -171,6 +180,22 @@ export type PlanningWorkspaceModel = {
     signals: PlanningRhythmSignal[]
     nextActions: string[]
   }
+  volumeBeatBudget: {
+    status: 'ready' | 'needs_attention' | 'blocked'
+    score: number
+    label: string
+    summary: string
+    currentVolumeTitle: string
+    chapterRange: string
+    totalChapters: number
+    plannedChapterCount: number
+    climaxTarget: number
+    climaxCount: number
+    payoffTarget: number
+    payoffCount: number
+    beats: PlanningVolumeBeat[]
+    nextActions: string[]
+  }
   volumeTree: PlanningVolumeTreeNode[]
   healthIssues: PlanningHealthIssue[]
 }
@@ -224,6 +249,12 @@ function isStage(item: AnyRecord) {
 function isTurn(item: AnyRecord) {
   const level = outlineLevel(item)
   return level === 'turning_point' || level === 'turn' || level === 'plot_turn' || level === '转折'
+}
+
+function isClimaxOutline(item: AnyRecord) {
+  const level = outlineLevel(item)
+  const title = text(item?.title)
+  return isTurn(item) || /climax|高潮|爆点|反转|转折/.test(level) || /高潮|爆点|反转|转折/.test(title)
 }
 
 function firstNonEmpty(...values: any[]) {
@@ -691,6 +722,132 @@ function buildStorylineBoardModel(
   }
 }
 
+function volumeBeatType(chapterNo: number, start: number, end: number): PlanningVolumeBeat['type'] {
+  if (!chapterNo || !start || !end || end <= start) return '小高潮'
+  const ratio = (chapterNo - start) / Math.max(1, end - start)
+  if (ratio >= 0.82) return '卷末爆点'
+  if (ratio >= 0.42) return '中高潮'
+  return '小高潮'
+}
+
+function hasChapterPayoff(chapter: AnyRecord) {
+  return Boolean(firstNonEmpty(
+    chapter?.raw_payload?.payoff,
+    chapter?.raw_payload?.reader_payoff,
+    chapter?.raw_payload?.reader_reward,
+    chapter?.payoff,
+    chapter?.reader_payoff,
+    chapter?.ending_hook,
+  ))
+}
+
+function isChapterPlannedForBudget(chapter: AnyRecord) {
+  return Boolean(
+    text(chapter?.title) &&
+    text(chapter?.chapter_goal || chapter?.chapterTask || chapter?.task) &&
+    text(chapter?.conflict || chapter?.raw_payload?.conflict) &&
+    text(chapter?.ending_hook || chapter?.endingHook || chapter?.hook)
+  )
+}
+
+function buildVolumeBeatBudgetModel(args: {
+  currentVolume: AnyRecord
+  outlines: AnyRecord[]
+  chapters: AnyRecord[]
+  activeChapterNo: number
+}): PlanningWorkspaceModel['volumeBeatBudget'] {
+  const start = Number(args.currentVolume?.start_chapter || args.currentVolume?.chapter_no || 0)
+  const explicitEnd = Number(args.currentVolume?.end_chapter || 0)
+  const fallbackEnd = args.chapters.reduce((max, chapter) => Math.max(max, Number(chapter?.chapter_no || 0)), start)
+  const end = explicitEnd || (start ? Math.max(start + 49, fallbackEnd) : fallbackEnd)
+  const currentVolumeTitle = text(args.currentVolume?.title, '未定位当前卷')
+  if (!start || !end) {
+    return {
+      status: 'blocked',
+      score: 45,
+      label: '爆点预算缺失',
+      summary: '当前章节无法定位到明确分卷，不能计算卷级高潮和爽点预算。',
+      currentVolumeTitle,
+      chapterRange: '章节范围未定',
+      totalChapters: 0,
+      plannedChapterCount: 0,
+      climaxTarget: 0,
+      climaxCount: 0,
+      payoffTarget: 0,
+      payoffCount: 0,
+      beats: [],
+      nextActions: ['先补齐当前卷范围、卷目标和关键转折点。'],
+    }
+  }
+
+  const totalChapters = Math.max(1, end - start + 1)
+  const volumeChapters = args.chapters.filter(chapter => {
+    const chapterNo = Number(chapter?.chapter_no || 0)
+    return chapterNo >= start && chapterNo <= end
+  })
+  const plannedChapterCount = volumeChapters.filter(isChapterPlannedForBudget).length
+  const payoffCount = volumeChapters.filter(hasChapterPayoff).length
+  const climaxOutlines = args.outlines
+    .filter(outline => isClimaxOutline(outline) && chapterRange(outline).start >= start && chapterRange(outline).start <= end)
+    .sort((a, b) => chapterRange(a).start - chapterRange(b).start)
+  const beats: PlanningVolumeBeat[] = climaxOutlines.map(outline => {
+    const chapterNo = chapterRange(outline).start || null
+    return {
+      key: `outline-${outline.id || outline.title}`,
+      label: text(outline?.title, '未命名爆点'),
+      chapterNo,
+      type: volumeBeatType(Number(chapterNo || 0), start, end),
+      status: 'planned',
+      detail: text(outline?.summary || outline?.goal || outline?.hook, '已规划关键转折/高潮节点。'),
+    }
+  })
+  const climaxTarget = Math.max(3, Math.ceil(totalChapters / 15))
+  const payoffTarget = Math.max(climaxTarget * 2, Math.ceil(Math.max(plannedChapterCount, Math.min(totalChapters, 30)) / 3))
+  const missingCount = Math.max(0, climaxTarget - beats.length)
+  const missingTypes: PlanningVolumeBeat['type'][] = ['小高潮', '中高潮', '卷末爆点']
+  for (let index = 0; index < missingCount; index += 1) {
+    const type = missingTypes[Math.min(index, missingTypes.length - 1)]
+    beats.push({
+      key: `missing-${index}-${type}`,
+      label: `${type}待补`,
+      chapterNo: null,
+      type: '待补',
+      status: 'missing',
+      detail: `当前卷还缺少${type}节点。`,
+    })
+  }
+  const climaxScore = Math.min(1, climaxOutlines.length / Math.max(1, climaxTarget)) * 60
+  const payoffScore = Math.min(1, payoffCount / Math.max(1, payoffTarget)) * 30
+  const planScore = plannedChapterCount > 0 ? 10 : 0
+  const score = Math.max(0, Math.min(100, Math.round(climaxScore + payoffScore + planScore)))
+  const status: PlanningWorkspaceModel['volumeBeatBudget']['status'] = plannedChapterCount === 0
+    ? 'blocked'
+    : score >= 80 && climaxOutlines.length >= climaxTarget && payoffCount >= payoffTarget
+      ? 'ready'
+      : 'needs_attention'
+
+  return {
+    status,
+    score,
+    label: status === 'ready' ? `爆点预算 ${score}` : status === 'blocked' ? `爆点预算阻塞 ${score}` : `爆点预算不足 ${score}`,
+    summary: status === 'ready'
+      ? `当前卷已规划 ${climaxOutlines.length}/${climaxTarget} 个高潮节点，爽点回报 ${payoffCount}/${payoffTarget}。`
+      : `当前卷已规划 ${climaxOutlines.length}/${climaxTarget} 个高潮节点，爽点回报 ${payoffCount}/${payoffTarget}，需要补强卷级节奏。`,
+    currentVolumeTitle,
+    chapterRange: `第${start}-${end}章`,
+    totalChapters,
+    plannedChapterCount,
+    climaxTarget,
+    climaxCount: climaxOutlines.length,
+    payoffTarget,
+    payoffCount,
+    beats,
+    nextActions: status === 'ready'
+      ? ['按当前卷爆点预算推进章节任务书和场景卡。']
+      : ['补齐当前卷的小高潮、中高潮和卷末爆点，再进入批量连写。'],
+  }
+}
+
 function latestReviewPayload(reviews: AnyRecord[], reviewType: string, payloadKey: string) {
   const review = reviews
     .filter(item => text(item?.review_type) === reviewType)
@@ -719,6 +876,7 @@ function buildLongformRhythmModel(args: {
   healthIssues: PlanningHealthIssue[]
   first30Retention: PlanningWorkspaceModel['first30Retention']
   storylineBoard: PlanningWorkspaceModel['storylineBoard']
+  volumeBeatBudget: PlanningWorkspaceModel['volumeBeatBudget']
 }): PlanningWorkspaceModel['longformRhythm'] {
   const coreDrift = latestReviewPayload(args.reviews, 'chapter_core_drift', 'core_drift')
   const payoffSync = latestReviewPayload(args.reviews, 'reader_payoff_sync', 'reader_payoff_sync')
@@ -731,9 +889,9 @@ function buildLongformRhythmModel(args: {
   const future100Ratio = args.future100Coverage.required > 0
     ? args.future100Coverage.planned / args.future100Coverage.required
     : 1
-  const volumeStatus: PlanningRhythmSignal['status'] = !args.currentVolumeGoal
+  const volumeStatus: PlanningRhythmSignal['status'] = !args.currentVolumeGoal || args.volumeBeatBudget.status === 'blocked'
     ? 'block'
-    : future100Ratio < 0.3
+    : future100Ratio < 0.3 || args.volumeBeatBudget.status === 'needs_attention'
       ? 'warn'
       : 'ok'
   const payoffDebt = Number(payoffSync?.debt_count ?? payoffSync?.debtCount ?? arrayValue(payoffSync?.missed).length + arrayValue(payoffSync?.debts).length)
@@ -762,9 +920,11 @@ function buildLongformRhythmModel(args: {
       key: 'volume',
       label: '卷级推进',
       status: volumeStatus,
-      score: volumeStatus === 'block' ? 45 : volumeStatus === 'warn' ? Math.max(55, Math.round(future100Ratio * 100)) : 86,
+      score: volumeStatus === 'block' ? 45 : volumeStatus === 'warn' ? Math.min(args.volumeBeatBudget.score, Math.max(55, Math.round(future100Ratio * 100))) : 86,
       detail: volumeStatus === 'block'
         ? '当前章节没有明确卷目标。'
+        : args.volumeBeatBudget.status === 'needs_attention'
+          ? args.volumeBeatBudget.summary
         : volumeStatus === 'warn'
           ? `未来100章规划 ${args.future100Coverage.label}，不适合长时间自动连写。`
           : `当前卷目标明确，未来100章规划 ${args.future100Coverage.label}。`,
@@ -865,6 +1025,12 @@ export function buildPlanningWorkspaceModel(input: BuildPlanningWorkspaceModelIn
   const first30Retention = buildFirst30RetentionModel(chapters, reviews)
   const storylineBoard = buildStorylineBoardModel(settingEntities, first30Retention, activeChapterNo)
   const writtenWords = chapters.reduce((sum, chapter) => sum + wc(chapter?.chapter_text), 0)
+  const volumeBeatBudget = buildVolumeBeatBudgetModel({
+    currentVolume,
+    outlines,
+    chapters,
+    activeChapterNo,
+  })
   const longformRhythm = buildLongformRhythmModel({
     reviews,
     writtenWords,
@@ -873,6 +1039,7 @@ export function buildPlanningWorkspaceModel(input: BuildPlanningWorkspaceModelIn
     healthIssues,
     first30Retention,
     storylineBoard,
+    volumeBeatBudget,
   })
 
   return {
@@ -906,6 +1073,7 @@ export function buildPlanningWorkspaceModel(input: BuildPlanningWorkspaceModelIn
     first30Retention,
     storylineBoard,
     longformRhythm,
+    volumeBeatBudget,
     volumeTree: buildVolumeTree(outlines, chapters),
     healthIssues,
   }
