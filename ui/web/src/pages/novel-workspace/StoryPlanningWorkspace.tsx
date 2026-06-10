@@ -101,6 +101,18 @@ function battleDeskColor(status: PlanningWorkspaceModel['longformBattleDesk']['s
   return 'gold'
 }
 
+function serialReleaseColor(
+  status:
+    | PlanningWorkspaceModel['serialReleaseDesk']['status']
+    | PlanningWorkspaceModel['serialReleaseDesk']['pipeline'][number]['status']
+    | PlanningWorkspaceModel['serialReleaseDesk']['releaseWindow'][number]['status'],
+) {
+  if (status === 'ready' || status === 'ok' || status === 'publishable' || status === 'published') return 'green'
+  if (status === 'blocked' || status === 'block' || status === 'needs_revision') return 'red'
+  if (status === 'drafting') return 'blue'
+  return 'gold'
+}
+
 function spineGuardColor(status: PlanningWorkspaceModel['longformSpineGuard']['status'] | 'ok' | 'missing') {
   if (status === 'ready' || status === 'ok') return 'green'
   if (status === 'blocked' || status === 'missing') return 'red'
@@ -391,6 +403,132 @@ export function StoryPlanningWorkspace({
                 </button>
               ))}
             </div>
+          </Space>
+        </Card>
+
+        <Card
+          className="novel-serial-release-desk-card"
+          title="连载发布节奏台"
+          size="small"
+          extra={(
+            <Button
+              size="small"
+              type={model.serialReleaseDesk.status === 'ready' ? 'default' : 'primary'}
+              onClick={() => onAction(model.serialReleaseDesk.primaryAction.key)}
+            >
+              {model.serialReleaseDesk.primaryAction.label}
+            </Button>
+          )}
+        >
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Space wrap>
+              <Tag color={serialReleaseColor(model.serialReleaseDesk.status)} bordered={false}>
+                {model.serialReleaseDesk.label}
+              </Tag>
+              <Tag bordered={false}>日更 {model.serialReleaseDesk.dailyTargetChapters} 章</Tag>
+              <Tag color={model.serialReleaseDesk.bufferDays >= model.serialReleaseDesk.minBufferDays ? 'green' : 'gold'} bordered={false}>
+                存稿 {model.serialReleaseDesk.bufferDays} 天
+              </Tag>
+              <Tag bordered={false}>存稿安全线 {model.serialReleaseDesk.minBufferDays} 天</Tag>
+              <Tag bordered={false}>已发布到第 {model.serialReleaseDesk.lastPublishedChapter} 章</Tag>
+            </Space>
+            <Text type="secondary">{model.serialReleaseDesk.summary}</Text>
+            <Alert
+              type={model.serialReleaseDesk.status === 'ready' ? 'success' : model.serialReleaseDesk.status === 'blocked' ? 'error' : 'warning'}
+              showIcon
+              message={`发布节奏下一步：${model.serialReleaseDesk.primaryAction.label}`}
+              description={model.serialReleaseDesk.primaryAction.reason}
+            />
+            <div style={{ display: 'grid', gridTemplateColumns: compact ? '1fr' : 'repeat(4, minmax(0, 1fr))', gap: 8 }}>
+              {[
+                { label: '发布窗口', value: `${model.serialReleaseDesk.releaseWindow[0]?.chapterNo || '?'}-${model.serialReleaseDesk.releaseWindow.at(-1)?.chapterNo || '?'}`, color: serialReleaseColor(model.serialReleaseDesk.status) },
+                { label: '可发布存稿', value: `${model.serialReleaseDesk.publishableChapters} 章`, color: model.serialReleaseDesk.publishableChapters > 0 ? 'green' : 'gold' },
+                { label: '当前存稿', value: `${model.serialReleaseDesk.bufferDays} 天`, color: model.serialReleaseDesk.bufferDays >= model.serialReleaseDesk.minBufferDays ? 'green' : 'gold' },
+                { label: '风险章节', value: `${model.serialReleaseDesk.riskChapters.length} 章`, color: model.serialReleaseDesk.riskChapters.length ? 'red' : 'green' },
+              ].map(item => (
+                <div key={item.label} style={{ border: '1px solid #edf0f5', borderRadius: 8, padding: '10px 12px', background: '#fbfcfe' }}>
+                  <Space direction="vertical" size={6}>
+                    <Text type="secondary" style={{ fontSize: 12 }}>{item.label}</Text>
+                    <Tag color={item.color} bordered={false}>{item.value}</Tag>
+                  </Space>
+                </div>
+              ))}
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: compact ? '1fr' : 'repeat(5, minmax(0, 1fr))', gap: 8 }}>
+              {model.serialReleaseDesk.pipeline.map(step => (
+                <button
+                  key={step.key}
+                  type="button"
+                  onClick={() => onAction(step.actionKey)}
+                  style={{
+                    border: '1px solid #edf0f5',
+                    borderRadius: 8,
+                    padding: '10px 12px',
+                    background: step.status === 'ok' ? '#fff' : step.status === 'block' ? '#fff1f0' : '#fffbeb',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    width: '100%',
+                    font: 'inherit',
+                    color: 'inherit',
+                  }}
+                >
+                  <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                    <Space wrap>
+                      <Tag color={serialReleaseColor(step.status)} bordered={false}>{step.label}</Tag>
+                      <Tag bordered={false}>{step.count}</Tag>
+                    </Space>
+                    <Text type="secondary" style={{ fontSize: 12 }}>{step.detail}</Text>
+                  </Space>
+                </button>
+              ))}
+            </div>
+            <div style={{ border: '1px solid #edf0f5', borderRadius: 8, padding: 10, background: '#fff' }}>
+              <Text strong style={{ display: 'block', marginBottom: 8 }}>发布窗口</Text>
+              <div style={{ display: 'grid', gap: 6 }}>
+                {model.serialReleaseDesk.releaseWindow.map(chapter => (
+                  <button
+                    key={`${chapter.chapterNo}-${chapter.title}`}
+                    type="button"
+                    onClick={() => onSelectChapter(chapter.chapterNo)}
+                    style={{
+                      border: '1px solid #edf0f5',
+                      borderRadius: 8,
+                      padding: '8px 10px',
+                      background: chapter.status === 'needs_revision' ? '#fff1f0' : '#fbfcfe',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      width: '100%',
+                      font: 'inherit',
+                      color: 'inherit',
+                    }}
+                  >
+                    <Space wrap>
+                      <Tag color={serialReleaseColor(chapter.status)} bordered={false}>第{chapter.chapterNo}章</Tag>
+                      <Text strong>{chapter.title}</Text>
+                      <Tag bordered={false}>{chapter.wordCount} 字</Tag>
+                      <Tag color={serialReleaseColor(chapter.status)} bordered={false}>
+                        {chapter.status === 'publishable' ? '可发布' : chapter.status === 'needs_revision' ? '待修订' : chapter.status === 'drafting' ? '待生成正文' : chapter.status === 'published' ? '已发布' : '待补计划'}
+                      </Tag>
+                      {chapter.riskTags.map(tag => <Tag key={tag} color="red" bordered={false}>{tag}</Tag>)}
+                    </Space>
+                  </button>
+                ))}
+              </div>
+            </div>
+            {model.serialReleaseDesk.riskChapters.length > 0 && (
+              <Space wrap>
+                {model.serialReleaseDesk.riskChapters.slice(0, 6).map(chapter => (
+                  <Tag key={chapter.chapterNo} color="red" bordered={false}>
+                    第{chapter.chapterNo}章 {chapter.riskTags.join('、')}
+                  </Tag>
+                ))}
+              </Space>
+            )}
+            {model.serialReleaseDesk.nextActions.length > 0 && (
+              <Space wrap>
+                {model.serialReleaseDesk.nextActions.map(action => <Tag key={action} color="gold" bordered={false}>{action}</Tag>)}
+              </Space>
+            )}
           </Space>
         </Card>
 

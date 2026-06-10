@@ -973,6 +973,158 @@ describe('buildPlanningWorkspaceModel', () => {
     expect(model.governanceHub.checkpoints.find(item => item.key === 'asset_intake')?.detail).toContain('2 个新资产')
   })
 
+  test('builds a serial release desk from daily update target and publishable backlog', () => {
+    const serialProject = {
+      ...project,
+      reference_config: {
+        ...project.reference_config,
+        serialization_policy: {
+          daily_chapters: 2,
+          min_buffer_days: 7,
+          last_published_chapter: 4,
+        },
+      },
+    }
+    const releaseChapters = Array.from({ length: 28 }).map((_, index) => {
+      const chapterNo = index + 1
+      return {
+        id: chapterNo,
+        chapter_no: chapterNo,
+        title: `第${chapterNo}章`,
+        chapter_goal: `推进连载节奏 ${chapterNo}`,
+        conflict: chapterNo % 2 === 0 ? '外门压迫升级' : '阵法反制',
+        ending_hook: `第${chapterNo}章末钩子`,
+        chapter_text: chapterNo <= 18 ? '正文'.repeat(1500) : '',
+        raw_payload: {
+          mainline_progress: '外门压迫线',
+          payoff: chapterNo % 2 === 0 ? '打脸回报' : '阵法升级',
+        },
+      }
+    })
+
+    const model = buildPlanningWorkspaceModel({
+      selectedProject: serialProject,
+      outlines,
+      chapters: releaseChapters,
+      activeChapter: releaseChapters[17],
+    })
+
+    expect(model.serialReleaseDesk.status).toBe('ready')
+    expect(model.serialReleaseDesk.dailyTargetChapters).toBe(2)
+    expect(model.serialReleaseDesk.minBufferDays).toBe(7)
+    expect(model.serialReleaseDesk.publishableChapters).toBe(14)
+    expect(model.serialReleaseDesk.bufferDays).toBe(7)
+    expect(model.serialReleaseDesk.primaryAction.key).toBe('enter_chapter_writing')
+    expect(model.serialReleaseDesk.pipeline.map(item => item.key)).toEqual(['published', 'publishable', 'needs_revision', 'drafting', 'planned'])
+    expect(model.serialReleaseDesk.releaseWindow[0]).toMatchObject({ chapterNo: 5, status: 'publishable' })
+  })
+
+  test('blocks serial release desk when the next release window has delivery risks', () => {
+    const riskyChapters = Array.from({ length: 14 }).map((_, index) => {
+      const chapterNo = index + 1
+      return {
+        id: chapterNo,
+        chapter_no: chapterNo,
+        title: `第${chapterNo}章`,
+        chapter_goal: `推进连载节奏 ${chapterNo}`,
+        conflict: '外门压迫',
+        ending_hook: `第${chapterNo}章末钩子`,
+        chapter_text: chapterNo <= 10 ? '正文'.repeat(1400) : '',
+        raw_payload: {
+          mainline_progress: '外门压迫线',
+          payoff: '打脸回报',
+        },
+      }
+    })
+    const riskyProject = {
+      ...project,
+      reference_config: {
+        ...project.reference_config,
+        serialization_policy: {
+          daily_chapters: 2,
+          min_buffer_days: 7,
+          last_published_chapter: 6,
+        },
+      },
+    }
+
+    const model = buildPlanningWorkspaceModel({
+      selectedProject: riskyProject,
+      outlines,
+      chapters: riskyChapters,
+      activeChapter: riskyChapters[9],
+      reviews: [
+        coreDriftReview({
+          record: {
+            payload: JSON.stringify({
+              chapter_id: 7,
+              chapter_no: 7,
+              core_drift: { status: 'warn', score: 61, label: '核心偏移 1', drift_risks: ['本章没有服务外门压迫主线'] },
+            }),
+          },
+        }),
+        readerRetentionReview({
+          record: {
+            payload: JSON.stringify({
+              chapter_id: 8,
+              chapter_no: 8,
+              reader_retention_sync: { status: 'warn', score: 63, label: '追读漏项 1', missed_count: 1, missed: [{ text: '章末钩子弱' }] },
+            }),
+          },
+        }),
+      ],
+    })
+
+    expect(model.serialReleaseDesk.status).toBe('blocked')
+    expect(model.serialReleaseDesk.riskChapters.map(item => item.chapterNo)).toEqual([7, 8])
+    expect(model.serialReleaseDesk.primaryAction.key).toBe('open_quality_revision')
+    expect(model.serialReleaseDesk.releaseWindow.slice(0, 2).map(item => item.status)).toEqual(['needs_revision', 'needs_revision'])
+    expect(model.serialReleaseDesk.summary).toContain('发布窗口')
+  })
+
+  test('asks for more drafting when serial release buffer is below the configured minimum', () => {
+    const thinChapters = Array.from({ length: 14 }).map((_, index) => {
+      const chapterNo = index + 1
+      return {
+        id: chapterNo,
+        chapter_no: chapterNo,
+        title: `第${chapterNo}章`,
+        chapter_goal: `推进连载节奏 ${chapterNo}`,
+        conflict: '外门压迫',
+        ending_hook: `第${chapterNo}章末钩子`,
+        chapter_text: chapterNo <= 9 ? '正文'.repeat(1300) : '',
+        raw_payload: {
+          mainline_progress: '外门压迫线',
+          payoff: '阵法升级',
+        },
+      }
+    })
+    const thinProject = {
+      ...project,
+      reference_config: {
+        ...project.reference_config,
+        serialization_policy: {
+          daily_chapters: 2,
+          min_buffer_days: 7,
+          last_published_chapter: 6,
+        },
+      },
+    }
+
+    const model = buildPlanningWorkspaceModel({
+      selectedProject: thinProject,
+      outlines,
+      chapters: thinChapters,
+      activeChapter: thinChapters[8],
+    })
+
+    expect(model.serialReleaseDesk.status).toBe('needs_buffer')
+    expect(model.serialReleaseDesk.publishableChapters).toBe(3)
+    expect(model.serialReleaseDesk.bufferDays).toBe(1)
+    expect(model.serialReleaseDesk.primaryAction.key).toBe('enter_chapter_writing')
+    expect(model.serialReleaseDesk.nextActions[0]).toContain('补存稿')
+  })
+
   test('routes serial governance to task center when delivery repair tasks already exist', () => {
     const model = buildPlanningWorkspaceModel({
       selectedProject: project,

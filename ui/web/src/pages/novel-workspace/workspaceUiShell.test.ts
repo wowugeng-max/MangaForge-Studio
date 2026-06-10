@@ -844,6 +844,25 @@ describe('commercial writing workspace UI shell', () => {
     expect(planningModel).toContain('buildLongformBattleDeskModel')
   })
 
+  test('shows serial release desk in the story planning workflow', () => {
+    const planningWorkspace = source('StoryPlanningWorkspace.tsx')
+    const planningModel = source('planningWorkspaceModel.ts')
+
+    expect(planningWorkspace).toContain('连载发布节奏台')
+    expect(planningWorkspace).toContain('novel-serial-release-desk-card')
+    expect(planningWorkspace).toContain('model.serialReleaseDesk.primaryAction')
+    expect(planningWorkspace).toContain('model.serialReleaseDesk.releaseWindow')
+    expect(planningWorkspace).toContain('发布窗口')
+    expect(planningWorkspace).toContain('存稿安全线')
+    expect(planningWorkspace).toContain('可发布存稿')
+    expect(planningWorkspace).toContain('待修订')
+    expect(planningWorkspace).toContain('待生成正文')
+    expect(planningWorkspace).toContain('待补计划')
+    expect(planningModel).toContain('serialReleaseDesk')
+    expect(planningModel).toContain('serialization_policy')
+    expect(planningModel).toContain('buildSerialReleaseDeskModel')
+  })
+
   test('shows a longform spine guard in the story planning workflow', () => {
     const planningWorkspace = source('StoryPlanningWorkspace.tsx')
     const planningModel = source('planningWorkspaceModel.ts')
