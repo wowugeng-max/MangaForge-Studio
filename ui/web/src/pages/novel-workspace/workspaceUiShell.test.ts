@@ -844,6 +844,27 @@ describe('commercial writing workspace UI shell', () => {
     expect(planningModel).toContain('buildLongformBattleDeskModel')
   })
 
+  test('shows an AI longform creation pipeline as the top story planning navigator', () => {
+    const planningWorkspace = source('StoryPlanningWorkspace.tsx')
+    const planningModel = source('planningWorkspaceModel.ts')
+
+    expect(planningWorkspace).toContain('AI长篇创作流水线')
+    expect(planningWorkspace).toContain('novel-creation-pipeline-card')
+    expect(planningWorkspace).toContain('model.creationPipeline.stages')
+    expect(planningWorkspace).toContain('model.creationPipeline.primaryAction')
+    expect(planningWorkspace).toContain('全书核心')
+    expect(planningWorkspace).toContain('长线规划')
+    expect(planningWorkspace).toContain('设定资产')
+    expect(planningWorkspace).toContain('章节开写')
+    expect(planningWorkspace).toContain('交稿验收')
+    expect(planningWorkspace).toContain('连载发布')
+    expect(planningWorkspace).toContain('当前建议')
+    expect(planningModel).toContain('creationPipeline')
+    expect(planningModel).toContain('buildCreationPipelineModel')
+    expect(planningModel).toContain('book_core')
+    expect(planningModel).toContain('serial_release')
+  })
+
   test('shows serial release desk in the story planning workflow', () => {
     const planningWorkspace = source('StoryPlanningWorkspace.tsx')
     const planningModel = source('planningWorkspaceModel.ts')

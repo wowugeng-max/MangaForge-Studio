@@ -199,6 +199,16 @@ export type PlanningLongformMemoryCapsule = {
   actionKey: PlanningActionKey
 }
 
+export type PlanningCreationPipelineStage = {
+  key: 'book_core' | 'longform_plan' | 'story_assets' | 'chapter_launch' | 'delivery_acceptance' | 'serial_release'
+  label: string
+  status: 'ok' | 'warn' | 'block'
+  active: boolean
+  score: number
+  detail: string
+  actionKey: PlanningActionKey
+}
+
 export type PlanningSerialReleaseDesk = {
   status: 'ready' | 'needs_buffer' | 'blocked' | 'needs_planning'
   score: number
@@ -258,6 +268,17 @@ export type PlanningWorkspaceModel = {
     nextTurn: string
     currentChapterServesVolume: boolean
     risks: string[]
+  }
+  creationPipeline: {
+    currentStageKey: PlanningCreationPipelineStage['key']
+    summary: string
+    riskCount: number
+    primaryAction: {
+      key: PlanningActionKey
+      label: string
+      reason: string
+    }
+    stages: PlanningCreationPipelineStage[]
   }
   longformSpineGuard: {
     status: 'ready' | 'needs_attention' | 'blocked'
@@ -3578,6 +3599,127 @@ function buildLongformBattleDeskModel(args: {
   }
 }
 
+function pipelineStatusFromPlanning(status: string): PlanningCreationPipelineStage['status'] {
+  if (['blocked', 'missing', 'block'].includes(status)) return 'block'
+  if (['needs_attention', 'needs_action', 'needs_repair', 'needs_buffer', 'needs_planning', 'stale', 'warn', 'drifting'].includes(status)) return 'warn'
+  return 'ok'
+}
+
+function buildCreationPipelineModel(args: {
+  longformSpineGuard: PlanningWorkspaceModel['longformSpineGuard']
+  millionWordMilestones: PlanningWorkspaceModel['millionWordMilestones']
+  future10Coverage: FuturePlanningCoverage
+  future100Coverage: FuturePlanningCoverage
+  storylineBoard: PlanningWorkspaceModel['storylineBoard']
+  characterArcBoard: PlanningWorkspaceModel['characterArcBoard']
+  activeChapter: AnyRecord
+  currentVolumeGoal: string
+  governanceHub: PlanningWorkspaceModel['governanceHub']
+  serialReleaseDesk: PlanningWorkspaceModel['serialReleaseDesk']
+}): PlanningWorkspaceModel['creationPipeline'] {
+  const activeChapterPlanned = Boolean(
+    text(args.activeChapter?.chapter_goal || args.activeChapter?.chapterTask || args.activeChapter?.task) &&
+    text(args.activeChapter?.conflict || args.activeChapter?.raw_payload?.conflict) &&
+    text(args.activeChapter?.ending_hook || args.activeChapter?.endingHook || args.activeChapter?.hook) &&
+    args.currentVolumeGoal
+  )
+  const longformPlanBlocked = args.millionWordMilestones.status === 'blocked'
+  const longformPlanWarn = !args.future10Coverage.ready
+    || !args.future100Coverage.ready
+    || args.millionWordMilestones.status !== 'ready'
+  const longformPlanAction: PlanningActionKey = args.millionWordMilestones.status !== 'ready'
+    ? args.millionWordMilestones.actionKey
+    : !args.future10Coverage.ready
+      ? 'update_rolling_plan'
+      : !args.future100Coverage.ready
+        ? 'future100_generate'
+        : 'complete_volume_plan'
+  const assetBlocked = args.storylineBoard.status === 'missing' || args.characterArcBoard.status === 'missing'
+  const assetWarn = args.storylineBoard.status !== 'ready' || args.characterArcBoard.status !== 'ready'
+  const chapterLaunchStatus: PlanningCreationPipelineStage['status'] = activeChapterPlanned ? 'ok' : 'warn'
+  const stages: PlanningCreationPipelineStage[] = [
+    {
+      key: 'book_core',
+      label: '全书核心',
+      status: pipelineStatusFromPlanning(args.longformSpineGuard.status),
+      active: false,
+      score: args.longformSpineGuard.score,
+      detail: args.longformSpineGuard.summary,
+      actionKey: args.longformSpineGuard.actionKey,
+    },
+    {
+      key: 'longform_plan',
+      label: '长线规划',
+      status: longformPlanBlocked ? 'block' : longformPlanWarn ? 'warn' : 'ok',
+      active: false,
+      score: Math.min(
+        args.millionWordMilestones.score,
+        Math.round(((args.future10Coverage.planned / Math.max(1, args.future10Coverage.required)) * 100 + (args.future100Coverage.planned / Math.max(1, args.future100Coverage.required)) * 100) / 2),
+      ),
+      detail: longformPlanWarn
+        ? `未来10章 ${args.future10Coverage.label}，未来100章 ${args.future100Coverage.label}，里程碑：${args.millionWordMilestones.label}。`
+        : '未来章节、百万字里程碑和当前卷规划可支撑继续开写。',
+      actionKey: longformPlanAction,
+    },
+    {
+      key: 'story_assets',
+      label: '设定资产',
+      status: assetBlocked ? 'block' : assetWarn ? 'warn' : 'ok',
+      active: false,
+      score: assetBlocked ? 50 : assetWarn ? 72 : 88,
+      detail: assetWarn
+        ? `${args.storylineBoard.summary} ${args.characterArcBoard.summary}`
+        : '剧情线、角色线和关系线已进入可调度状态。',
+      actionKey: assetWarn ? 'open_story_assets' : 'enter_chapter_writing',
+    },
+    {
+      key: 'chapter_launch',
+      label: '章节开写',
+      status: chapterLaunchStatus,
+      active: false,
+      score: activeChapterPlanned ? 88 : 66,
+      detail: activeChapterPlanned
+        ? '当前章已有目标、冲突、章末钩子和卷目标承接，可进入开写任务书。'
+        : '当前章缺少目标、冲突、章末钩子或卷目标承接，建议先补章节计划。',
+      actionKey: activeChapterPlanned ? 'enter_chapter_writing' : 'update_rolling_plan',
+    },
+    {
+      key: 'delivery_acceptance',
+      label: '交稿验收',
+      status: pipelineStatusFromPlanning(args.governanceHub.status),
+      active: false,
+      score: args.governanceHub.status === 'ready' ? 88 : args.governanceHub.status === 'blocked' ? 55 : 72,
+      detail: args.governanceHub.summary,
+      actionKey: args.governanceHub.primaryAction.key,
+    },
+    {
+      key: 'serial_release',
+      label: '连载发布',
+      status: pipelineStatusFromPlanning(args.serialReleaseDesk.status),
+      active: false,
+      score: args.serialReleaseDesk.score,
+      detail: args.serialReleaseDesk.summary,
+      actionKey: args.serialReleaseDesk.primaryAction.key,
+    },
+  ]
+  const current = stages.find(stage => stage.status !== 'ok') || stages.find(stage => stage.key === 'chapter_launch') || stages[0]
+  const normalizedStages = stages.map(stage => ({ ...stage, active: stage.key === current.key }))
+  const riskCount = normalizedStages.filter(stage => stage.status !== 'ok').length
+  return {
+    currentStageKey: current.key,
+    summary: riskCount > 0
+      ? `当前建议先处理「${current.label}」：${current.detail}`
+      : '全书核心、长线规划、设定资产、章节开写、交稿验收和连载发布均处于可推进状态。',
+    riskCount,
+    primaryAction: {
+      key: current.actionKey,
+      label: planningActionLabel(current.actionKey),
+      reason: current.detail,
+    },
+    stages: normalizedStages,
+  }
+}
+
 export function buildPlanningWorkspaceModel(input: BuildPlanningWorkspaceModelInput): PlanningWorkspaceModel {
   const selectedProject = input.selectedProject || {}
   const outlines = arrayValue(input.outlines)
@@ -3726,6 +3868,18 @@ export function buildPlanningWorkspaceModel(input: BuildPlanningWorkspaceModelIn
     future100Coverage,
     productionTasks,
   })
+  const creationPipeline = buildCreationPipelineModel({
+    longformSpineGuard,
+    millionWordMilestones,
+    future10Coverage,
+    future100Coverage,
+    storylineBoard,
+    characterArcBoard,
+    activeChapter,
+    currentVolumeGoal,
+    governanceHub,
+    serialReleaseDesk,
+  })
 
   return {
     topStatus: {
@@ -3754,6 +3908,7 @@ export function buildPlanningWorkspaceModel(input: BuildPlanningWorkspaceModelIn
         ...healthIssues.map(issue => issue.title),
       ],
     },
+    creationPipeline,
     longformSpineGuard,
     millionWordMilestones,
     longformMemoryCapsule,

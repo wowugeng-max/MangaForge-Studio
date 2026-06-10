@@ -508,6 +508,64 @@ function assetIntakeReview(overrides: Record<string, any> = {}) {
 }
 
 describe('buildPlanningWorkspaceModel', () => {
+  test('builds a natural six-stage AI creation pipeline with the next best action', () => {
+    const model = buildPlanningWorkspaceModel({
+      selectedProject: project,
+      outlines,
+      chapters,
+      activeChapter: chapters[6],
+      settingEntities: [...storylineSettings, ...characterArcSettings],
+      reviews: [first30Review()],
+    })
+
+    expect(model.creationPipeline.stages.map(stage => stage.key)).toEqual([
+      'book_core',
+      'longform_plan',
+      'story_assets',
+      'chapter_launch',
+      'delivery_acceptance',
+      'serial_release',
+    ])
+    expect(model.creationPipeline.stages.map(stage => stage.label)).toEqual([
+      '全书核心',
+      '长线规划',
+      '设定资产',
+      '章节开写',
+      '交稿验收',
+      '连载发布',
+    ])
+    expect(model.creationPipeline.stages.find(stage => stage.key === 'book_core')?.status).toBe('ok')
+    expect(model.creationPipeline.currentStageKey).toBe('longform_plan')
+    expect(model.creationPipeline.primaryAction.key).toBe('update_rolling_plan')
+    expect(model.creationPipeline.primaryAction.label).toBe('更新滚动规划')
+    expect(model.creationPipeline.summary).toContain('长线规划')
+    expect(model.creationPipeline.riskCount).toBeGreaterThan(0)
+  })
+
+  test('blocks the AI creation pipeline at book core when the longform spine is missing', () => {
+    const model = buildPlanningWorkspaceModel({
+      selectedProject: {
+        ...project,
+        reference_config: {
+          ...project.reference_config,
+          writing_bible: {},
+        },
+      },
+      outlines,
+      chapters,
+      activeChapter: chapters[6],
+    })
+
+    expect(model.creationPipeline.currentStageKey).toBe('book_core')
+    expect(model.creationPipeline.primaryAction.key).toBe('open_story_assets')
+    expect(model.creationPipeline.stages[0]).toMatchObject({
+      key: 'book_core',
+      label: '全书核心',
+      status: 'block',
+      active: true,
+    })
+  })
+
   test('derives strategic top status and mainline panel from existing project data', () => {
     const model = buildPlanningWorkspaceModel({
       selectedProject: project,
