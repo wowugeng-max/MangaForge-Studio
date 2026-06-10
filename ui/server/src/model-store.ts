@@ -7,6 +7,7 @@ export type ModelRecord = {
   id: number
   api_key_id?: number
   provider: string
+  api_format?: string
   display_name: string
   model_name: string
   capabilities?: Record<string, boolean>
@@ -44,6 +45,7 @@ function normalizeModelRecord(raw: Partial<ModelRecord> & Record<string, any>): 
       ? undefined
       : Number(raw.api_key_id ?? raw.apiKeyId ?? raw.key_id ?? raw.keyId),
     provider: String(raw.provider ?? ''),
+    api_format: raw.api_format === undefined && raw.apiFormat === undefined ? undefined : String(raw.api_format ?? raw.apiFormat ?? ''),
     display_name: String(raw.display_name ?? raw.displayName ?? modelName),
     model_name: modelName,
     capabilities: {

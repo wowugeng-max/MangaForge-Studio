@@ -278,8 +278,8 @@ function buildHeaders(selection: RuntimeModelSelection): Record<string, string> 
     }
   }
 
-  // Anthropic-specific headers
-  if (selection.apiFormat === 'anthropic' && !headers['anthropic-version']) {
+  // Claude Code / Anthropic Messages-specific headers
+  if (isClaudeCodeFormat(selection.apiFormat) && !headers['anthropic-version']) {
     headers['anthropic-version'] = '2023-06-01'
   }
   const routeHeaders = routeDslValue(selection.routeConfig, 'headers', 'customHeaders')
@@ -389,6 +389,7 @@ function toAnthropicBody(request: LLMRequest, selection: RuntimeModelSelection):
       input_schema: tool.input_schema,
     }))
   }
+  if (shouldStreamRequest(request, selection)) body.stream = true
   return body
 }
 
@@ -634,6 +635,11 @@ function isCodexResponsesFormat(apiFormat: string) {
   return normalized.includes('codex') || normalized.includes('responses')
 }
 
+function isClaudeCodeFormat(apiFormat: string) {
+  const normalized = String(apiFormat || '').toLowerCase()
+  return normalized === 'claude_code' || normalized.includes('anthropic')
+}
+
 function isGeminiNativeFormat(apiFormat: string) {
   return String(apiFormat || '').toLowerCase() === 'gemini_native'
 }
@@ -677,10 +683,67 @@ export function buildProviderRequestBody(request: LLMRequest, selection: Runtime
   if (payloadTemplate) {
     return renderTemplateValue(payloadTemplate, buildTemplateContext(request, selection)) ?? {}
   }
-  if (selection.apiFormat === 'anthropic') return toAnthropicBody(request, selection)
+  if (isClaudeCodeFormat(selection.apiFormat)) return toAnthropicBody(request, selection)
   if (isGeminiNativeFormat(selection.apiFormat)) return toGeminiGenerateContentBody(request)
   if (isCodexResponsesFormat(selection.apiFormat)) return toCodexResponsesBody(request, selection)
   return toOpenAIBody(request, selection)
+}
+
+async function readClaudeCodeStream(response: Response): Promise<any> {
+  if (!response.body) throw new Error('Streaming response has no body')
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let rawText = ''
+  let content = ''
+  let finishReason = ''
+  let usage: any = undefined
+  const tailChunks: any[] = []
+
+  const consumeLine = (line: string) => {
+    const trimmed = line.trim()
+    if (!trimmed.startsWith('data:')) return
+    const payload = trimmed.slice(5).trim()
+    if (!payload || payload === '[DONE]') return
+    const chunk = JSON.parse(payload)
+    const deltaText = chunk?.delta?.text || chunk?.content_block?.text || chunk?.text || ''
+    if (deltaText) content += String(deltaText)
+    if (chunk?.delta?.stop_reason) finishReason = String(chunk.delta.stop_reason)
+    if (chunk?.stop_reason) finishReason = String(chunk.stop_reason)
+    if (chunk?.usage) usage = chunk.usage
+    tailChunks.push(chunk)
+    if (tailChunks.length > 20) tailChunks.shift()
+  }
+
+  while (true) {
+    const { value, done } = await reader.read()
+    if (done) break
+    const chunkText = decoder.decode(value, { stream: true })
+    rawText += chunkText
+    buffer += chunkText
+    const lines = buffer.split(/\r?\n/)
+    buffer = lines.pop() || ''
+    for (const line of lines) consumeLine(line)
+  }
+
+  const finalText = decoder.decode()
+  rawText += finalText
+  buffer += finalText
+  for (const line of buffer.split(/\r?\n/)) consumeLine(line)
+
+  if (!content && rawText.trim()) {
+    try {
+      return JSON.parse(rawText)
+    } catch {}
+  }
+
+  return {
+    content: [{ type: 'text', text: content }],
+    stop_reason: finishReason || 'end_turn',
+    usage,
+    stream_chunks_tail: tailChunks,
+  }
 }
 
 async function readOpenAIStream(response: Response): Promise<any> {
@@ -836,6 +899,7 @@ async function readResponsesStream(response: Response): Promise<any> {
 }
 
 export async function readProviderStream(response: Response, selection: RuntimeModelSelection): Promise<any> {
+  if (isClaudeCodeFormat(selection.apiFormat)) return readClaudeCodeStream(response)
   if (isCodexResponsesFormat(selection.apiFormat)) return readResponsesStream(response)
   return readOpenAIStream(response)
 }
@@ -852,7 +916,7 @@ export function parseProviderResponsePayload<T = any>(raw: any, selection: Runti
     const extracted = extractMediaContent(raw)
     if (extracted) return normalizeLLMResponse<T>({ ...raw, content: extracted })
   }
-  if (selection.apiFormat === 'anthropic') return parseAnthropicResponse<T>(raw)
+  if (isClaudeCodeFormat(selection.apiFormat)) return parseAnthropicResponse<T>(raw)
   if (isGeminiNativeFormat(selection.apiFormat)) return parseGeminiGenerateContentResponse<T>(raw)
   if (isCodexResponsesFormat(selection.apiFormat)) return parseResponsesResponse<T>(raw)
   return normalizeLLMResponse<T>(raw)
@@ -1007,7 +1071,9 @@ function routeConfigForModel(route: any, modelName: string) {
 
 function routeConfigForRequest(provider: ProviderRecord, request: LLMRequest, model: ModelRecord): any {
   const endpoints = provider.endpoints || {}
-  if (isCodexResponsesFormat(provider.api_format)) return endpoints.responses || endpoints.chat || endpoints.llm || ''
+  const apiFormat = effectiveApiFormat(provider, model)
+  if (isClaudeCodeFormat(apiFormat)) return endpoints.messages || endpoints.chat || endpoints.llm || ''
+  if (isCodexResponsesFormat(apiFormat)) return endpoints.responses || endpoints.chat || endpoints.llm || ''
   const routeType = requestRouteType(request, model)
   if (routeType && endpoints[routeType]) return routeConfigForModel(endpoints[routeType], model.model_name)
   const broadType = routeType.includes('image') ? 'image' : routeType.includes('video') ? 'video' : ''
@@ -1019,10 +1085,10 @@ function normalizeGeminiModelName(modelName = '') {
   return String(modelName || '').replace(/^models\//, '').trim()
 }
 
-function endpointForRoute(provider: ProviderRecord, route: any, routeType = '', modelName = '') {
-  if (isRouteObject(route)) return String(route.url || route.endpoint || fallbackEndpointForProvider(provider, routeType, modelName))
+function endpointForRoute(provider: ProviderRecord, route: any, routeType = '', modelName = '', apiFormat = provider.api_format) {
+  if (isRouteObject(route)) return String(route.url || route.endpoint || fallbackEndpointForProvider(provider, routeType, modelName, apiFormat))
   if (route) return String(route)
-  return fallbackEndpointForProvider(provider, routeType, modelName)
+  return fallbackEndpointForProvider(provider, routeType, modelName, apiFormat)
 }
 
 function selectionForRequestRoute(selection: RuntimeModelSelection, request: LLMRequest): RuntimeModelSelection {
@@ -1030,7 +1096,7 @@ function selectionForRequestRoute(selection: RuntimeModelSelection, request: LLM
   const routeConfig = routeConfigForRequest(selection.provider, request, selection.model)
   return {
     ...selection,
-    endpoint: endpointForRoute(selection.provider, routeConfig, routeType, selection.model.model_name),
+    endpoint: endpointForRoute(selection.provider, routeConfig, routeType, selection.model.model_name, selection.apiFormat),
     routeConfig,
     routeType,
   }
@@ -1166,7 +1232,7 @@ async function postProviderJson<T = any>(
   const routedSelection = selectionForRequestRoute(selection, request)
   const url = buildUrl(routedSelection.baseUrl, routedSelection.endpoint)
   const body = buildProviderRequestBody(request, routedSelection)
-  const isStreaming = routedSelection.apiFormat !== 'anthropic' && Boolean((body as any).stream)
+  const isStreaming = Boolean((body as any).stream)
   const headers = buildHeaders(routedSelection)
   const maxRetries = Number(options.maxRetries ?? process.env.LLM_MAX_RETRIES ?? 5)
   const timeoutMs = Number(options.timeoutMs ?? process.env.LLM_TIMEOUT_MS ?? 600000) // 600s default, matches Claude Code foreground
@@ -1421,7 +1487,8 @@ export async function selectRuntimeModel(
     return null
   }
 
-  const baseUrl = normalizeBaseUrl(key.base_url || provider.default_base_url || (isGeminiNativeFormat(provider.api_format) ? GEMINI_NATIVE_BASE_URL : ''))
+  const apiFormat = effectiveApiFormat(provider, model)
+  const baseUrl = normalizeBaseUrl(key.base_url || provider.default_base_url || (isGeminiNativeFormat(apiFormat) ? GEMINI_NATIVE_BASE_URL : ''))
   if (!baseUrl) {
     console.error(`[provider-runtime] Provider "${provider.id}" has no base URL on key or provider: ${JSON.stringify({ provider, key: { ...key, key: key.key ? '***' : '' } })}`)
     return null
@@ -1431,16 +1498,16 @@ export async function selectRuntimeModel(
     `[provider-runtime] ✅ Selected: model=${model.model_name} provider=${provider.id} baseUrl=${baseUrl} key=${(key.key || '').slice(0, 8)}...`,
   )
 
-  const routeConfig = routeConfigForProvider(provider)
+  const routeConfig = routeConfigForProvider(provider, apiFormat)
 
   return {
     provider,
     key,
     model,
     baseUrl,
-    endpoint: endpointForRoute(provider, routeConfig, '', model.model_name),
+    endpoint: endpointForRoute(provider, routeConfig, '', model.model_name, apiFormat),
     routeConfig,
-    apiFormat: provider.api_format || 'openai',
+    apiFormat,
   }
 }
 
@@ -1451,16 +1518,21 @@ export function endpointForProvider(provider: ProviderRecord): string {
   return endpointForRoute(provider, route)
 }
 
-function routeConfigForProvider(provider: ProviderRecord): any {
+function effectiveApiFormat(provider: ProviderRecord, model?: ModelRecord): string {
+  return String(model?.api_format || provider.api_format || 'openai_compatible')
+}
+
+function routeConfigForProvider(provider: ProviderRecord, apiFormat = provider.api_format): any {
   const endpoints = provider.endpoints || {}
-  if (isCodexResponsesFormat(provider.api_format)) return endpoints.responses || endpoints.chat || endpoints.llm || ''
+  if (isClaudeCodeFormat(apiFormat)) return endpoints.messages || endpoints.chat || endpoints.llm || ''
+  if (isCodexResponsesFormat(apiFormat)) return endpoints.responses || endpoints.chat || endpoints.llm || ''
   return endpoints.chat || endpoints.responses || endpoints.completions || ''
 }
 
-function fallbackEndpointForProvider(provider: ProviderRecord, routeType = '', modelName = '') {
-  if (isCodexResponsesFormat(provider.api_format)) return 'responses'
-  if (provider.api_format === 'anthropic') return 'messages'
-  if (isGeminiNativeFormat(provider.api_format)) return `models/${encodeURIComponent(normalizeGeminiModelName(modelName || 'gemini-1.5-flash'))}:generateContent`
+function fallbackEndpointForProvider(provider: ProviderRecord, routeType = '', modelName = '', apiFormat = provider.api_format) {
+  if (isClaudeCodeFormat(apiFormat)) return 'messages'
+  if (isCodexResponsesFormat(apiFormat)) return 'responses'
+  if (isGeminiNativeFormat(apiFormat)) return `models/${encodeURIComponent(normalizeGeminiModelName(modelName || 'gemini-1.5-flash'))}:generateContent`
   if (String(routeType).includes('image')) return 'images/generations'
   if (String(routeType).includes('video')) return 'videos/generations'
   return 'chat/completions'

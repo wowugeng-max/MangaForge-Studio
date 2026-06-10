@@ -57,6 +57,7 @@ export default function ModelManager() {
     const payload = {
       ...values,
       api_key_id: Number(values.api_key_id || 0) || undefined,
+      api_format: values.api_format || undefined,
       provider: selectedKeyRecord?.provider || values.provider,
       capabilities: typeof values.capabilities === 'string'
         ? JSON.parse(values.capabilities)
@@ -109,6 +110,7 @@ export default function ModelManager() {
     { title: '名称', dataIndex: 'display_name', key: 'display_name', width: 220 },
     { title: '模型代号', dataIndex: 'model_name', key: 'model_name', width: 220 },
     { title: 'Provider', dataIndex: 'provider', key: 'provider', width: 160, render: (v: string) => <Tag color="blue" bordered={false}>{v || '-'}</Tag> },
+    { title: '协议', dataIndex: 'api_format', key: 'api_format', width: 150, render: (v: string) => v ? <Tag color={v === 'claude_code' ? 'purple' : v === 'codex_responses' ? 'geekblue' : 'cyan'} bordered={false}>{v}</Tag> : <Tag bordered={false}>跟随厂商</Tag> },
     {
       title: '能力', dataIndex: 'capabilities', key: 'capabilities',
       render: (v: any) => <Space size={[0, 4]} wrap>{Object.entries(v || {}).filter(([, on]) => on).map(([k]) => <Tag key={k} color="geekblue" bordered={false}>{k}</Tag>)}</Space>
@@ -229,6 +231,19 @@ export default function ModelManager() {
             <Col span={12}><Form.Item name="api_key_id" label="API Key"><Select options={keys.map(k => ({ label: `${k.provider} #${k.id}`, value: k.id }))} /></Form.Item></Col>
             <Col span={12}><Form.Item name="is_favorite" label="收藏" valuePropName="checked"><Switch /></Form.Item></Col>
           </Row>
+          <Form.Item name="api_format" label="通信协议覆盖">
+            <Select
+              allowClear
+              placeholder="跟随厂商默认协议"
+              options={[
+                { label: '跟随厂商默认协议', value: '' },
+                { label: 'OpenAI 标准兼容 (V1)', value: 'openai_compatible' },
+                { label: 'Codex / OpenAI Responses', value: 'codex_responses' },
+                { label: 'Claude Code / Anthropic Messages', value: 'claude_code' },
+                { label: 'Google Gemini 原生', value: 'gemini_native' },
+              ]}
+            />
+          </Form.Item>
           <Form.Item name="capabilities" label="能力 JSON" rules={[{ required: true }]}><Input.TextArea rows={5} style={{ fontFamily: 'monospace' }} /></Form.Item>
           <Form.Item name="context_ui_params" label="UI 参数 JSON"><Input.TextArea rows={6} style={{ fontFamily: 'monospace' }} /></Form.Item>
           <Divider />

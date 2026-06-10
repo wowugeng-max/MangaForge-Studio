@@ -13,6 +13,15 @@ describe('ModelManager key binding', () => {
     expect(source).toContain('provider: selectedKeyRecord?.provider')
   })
 
+  test('exposes model-level protocol override in the editor', () => {
+    const source = readFileSync(join(import.meta.dir, 'ModelManager.tsx'), 'utf8')
+
+    expect(source).toContain('name="api_format"')
+    expect(source).toContain('跟随厂商默认协议')
+    expect(source).toContain('Claude Code / Anthropic Messages')
+    expect(source).toContain('api_format: values.api_format || undefined')
+  })
+
   test('serializes JSON editor defaults instead of rendering object values', () => {
     expect(buildModelEditorInitialValues()).toMatchObject({
       is_manual: true,

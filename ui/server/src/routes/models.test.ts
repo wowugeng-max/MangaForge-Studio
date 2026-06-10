@@ -886,6 +886,40 @@ describe('model health probes', () => {
     expect(await readFile(join(workspace, 'models.json'), 'utf8')).toBe(initial)
   })
 
+  test('preserves model-level protocol override when listing and updating models', async () => {
+    const workspace = await tempWorkspace()
+    await writeFile(join(workspace, 'models.json'), JSON.stringify([
+      {
+        id: 1,
+        api_key_id: 10,
+        provider: 'mixed',
+        display_name: 'Claude Opus',
+        model_name: 'claude-opus-4-8',
+        api_format: 'claude_code',
+        capabilities: { chat: true },
+      },
+    ]))
+    const { registerModelRoutes } = await import('./models')
+    const { app, handlers } = createRouteHarness()
+    registerModelRoutes(app as any, () => workspace)
+
+    const listed = await call(handlers.get('GET /api/models'))
+    expect(listed.body[0].api_format).toBe('claude_code')
+
+    const updated = await call(handlers.get('PUT /api/models/:id'), {
+      params: { id: '1' },
+      body: {
+        display_name: 'Claude Opus Updated',
+        model_name: 'claude-opus-4-8',
+        api_format: 'openai_compatible',
+        capabilities: { chat: true },
+      },
+    })
+
+    expect(updated.statusCode).toBe(200)
+    expect(updated.body.model.api_format).toBe('openai_compatible')
+  })
+
   test('does not rewrite model storage when toggling favorite on a missing model', async () => {
     const workspace = await tempWorkspace()
     const initial = '[{"id":1,"api_key_id":10,"provider":"p","display_name":"Keep","model_name":"keep","capabilities":{"chat":true},"health_status":"healthy","is_favorite":false}]'

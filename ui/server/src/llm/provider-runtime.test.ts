@@ -64,6 +64,235 @@ afterEach(() => {
 })
 
 describe('codex responses provider runtime', () => {
+  test('routes claude_code providers to the Claude messages endpoint', () => {
+    expect(endpointForProvider({
+      id: 'claude-code',
+      display_name: 'Claude Code Gateway',
+      service_type: 'llm',
+      api_format: 'claude_code',
+      auth_type: 'bearer',
+      supported_modalities: ['chat'],
+      default_base_url: 'https://gateway.example/v1',
+      is_active: true,
+      endpoints: {},
+      custom_headers: {},
+    })).toBe('messages')
+  })
+
+  test('builds Claude Code messages request bodies with top-level system and streaming', () => {
+    const body = buildProviderRequestBody({
+      model: 'claude-opus-4-8',
+      messages: [
+        { role: 'system', content: 'You are careful.' },
+        { role: 'user', content: 'Return OK.' },
+      ],
+      temperature: 0.2,
+      max_tokens: 128,
+      response_format: 'text',
+      stream: true,
+    }, selection({
+      provider: {
+        id: 'claude-code',
+        display_name: 'Claude Code Gateway',
+        service_type: 'llm',
+        api_format: 'claude_code',
+        auth_type: 'bearer',
+        response_mode: 'stream',
+        supported_modalities: ['chat'],
+        default_base_url: 'https://gateway.example/v1',
+        is_active: true,
+        endpoints: {},
+        custom_headers: {},
+      },
+      model: {
+        id: 9,
+        api_key_id: 1,
+        provider: 'claude-code',
+        display_name: 'Claude Opus',
+        model_name: 'claude-opus-4-8',
+        capabilities: { chat: true },
+        health_status: 'healthy',
+        is_favorite: false,
+        is_manual: false,
+        context_ui_params: {},
+      },
+      apiFormat: 'claude_code',
+      endpoint: 'messages',
+    }))
+
+    expect(body).toEqual({
+      model: 'claude-opus-4-8',
+      messages: [{ role: 'user', content: 'Return OK.' }],
+      temperature: 0.2,
+      max_tokens: 128,
+      system: 'You are careful.',
+      stream: true,
+    })
+  })
+
+  test('uses model api_format override before provider default during runtime execution', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-runtime-claude-override-'))
+    try {
+      await writeFile(join(workspace, 'providers.json'), JSON.stringify([
+        {
+          id: 'mixed-gateway',
+          display_name: 'Mixed Gateway',
+          service_type: 'llm',
+          api_format: 'openai_compatible',
+          auth_type: 'bearer',
+          response_mode: 'stream',
+          supported_modalities: ['chat'],
+          default_base_url: 'https://gateway.example/v1',
+          is_active: true,
+          endpoints: {},
+          custom_headers: {},
+        },
+      ]))
+      await writeFile(join(workspace, 'keys.json'), JSON.stringify([
+        { id: 1, provider: 'mixed-gateway', key: 'secret-key', is_active: true },
+      ]))
+      await writeFile(join(workspace, 'models.json'), JSON.stringify([
+        {
+          id: 1,
+          api_key_id: 1,
+          provider: 'mixed-gateway',
+          display_name: 'Claude Opus',
+          model_name: 'claude-opus-4-8',
+          api_format: 'claude_code',
+          capabilities: { chat: true },
+          health_status: 'healthy',
+        },
+      ]))
+
+      let capturedUrl = ''
+      let capturedHeaders: Record<string, string> = {}
+      let capturedBody: any = null
+      globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+        capturedUrl = String(url)
+        capturedHeaders = Object.fromEntries(new Headers(init?.headers || {}).entries())
+        capturedBody = JSON.parse(String(init?.body || '{}'))
+        return new Response(JSON.stringify({
+          content: [{ type: 'text', text: 'Claude override OK' }],
+          stop_reason: 'end_turn',
+        }), { status: 200 })
+      }) as typeof fetch
+
+      const result = await executeWithRuntimeModel(workspace, {
+        model: 'balanced',
+        messages: [
+          { role: 'system', content: 'Use Claude messages.' },
+          { role: 'user', content: 'Say OK.' },
+        ],
+        temperature: 0.1,
+        max_tokens: 64,
+        response_format: 'text',
+      }, 1, { maxRetries: 0 })
+
+      expect(capturedUrl).toBe('https://gateway.example/v1/messages')
+      expect(capturedHeaders['anthropic-version']).toBe('2023-06-01')
+      expect(capturedBody).toMatchObject({
+        model: 'claude-opus-4-8',
+        system: 'Use Claude messages.',
+        messages: [{ role: 'user', content: 'Say OK.' }],
+        max_tokens: 64,
+      })
+      expect(capturedBody.response_format).toBeUndefined()
+      expect(result.content).toBe('Claude override OK')
+      expect(result.runtimeSelection?.apiFormat).toBe('claude_code')
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('uses model api_format override for Gemini native default routing and auth', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-runtime-gemini-override-'))
+    try {
+      await writeFile(join(workspace, 'providers.json'), JSON.stringify([
+        {
+          id: 'mixed-gateway',
+          display_name: 'Mixed Gateway',
+          service_type: 'llm',
+          api_format: 'openai_compatible',
+          auth_type: 'bearer',
+          response_mode: 'auto',
+          supported_modalities: ['chat', 'vision'],
+          is_active: true,
+          endpoints: {},
+          custom_headers: {},
+        },
+      ]))
+      await writeFile(join(workspace, 'keys.json'), JSON.stringify([
+        { id: 7, provider: 'mixed-gateway', key: 'gemini-key', is_active: true },
+      ]))
+      await writeFile(join(workspace, 'models.json'), JSON.stringify([
+        {
+          id: 7,
+          api_key_id: 7,
+          provider: 'mixed-gateway',
+          display_name: 'Gemini Override',
+          model_name: 'gemini-1.5-pro',
+          api_format: 'gemini_native',
+          capabilities: { chat: true, vision: true },
+          health_status: 'healthy',
+        },
+      ]))
+
+      let capturedUrl = ''
+      let capturedHeaders: Record<string, string> = {}
+      let capturedBody: any = null
+      globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+        capturedUrl = String(url)
+        capturedHeaders = Object.fromEntries(new Headers(init?.headers || {}).entries())
+        capturedBody = JSON.parse(String(init?.body || '{}'))
+        return new Response(JSON.stringify({
+          candidates: [{
+            content: { parts: [{ text: 'Gemini override OK' }] },
+            finishReason: 'STOP',
+          }],
+        }), { status: 200 })
+      }) as typeof fetch
+
+      const result = await executeWithRuntimeModel(workspace, {
+        model: 'balanced',
+        messages: [{ role: 'user', content: 'Say OK.' }],
+        response_format: 'text',
+      }, 7, { maxRetries: 0 })
+
+      expect(capturedUrl).toBe('https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent')
+      expect(capturedHeaders['x-goog-api-key']).toBe('gemini-key')
+      expect(capturedHeaders.authorization).toBeUndefined()
+      expect(capturedBody).toMatchObject({
+        contents: [{ role: 'user', parts: [{ text: 'Say OK.' }] }],
+      })
+      expect(result.content).toBe('Gemini override OK')
+      expect(result.runtimeSelection?.apiFormat).toBe('gemini_native')
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('parses Claude Code streaming message deltas', async () => {
+    const stream = new ReadableStream({
+      start(controller) {
+        const encoder = new TextEncoder()
+        controller.enqueue(encoder.encode('event: content_block_delta\n'))
+        controller.enqueue(encoder.encode('data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"你"}}\n\n'))
+        controller.enqueue(encoder.encode('event: content_block_delta\n'))
+        controller.enqueue(encoder.encode('data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"好"}}\n\n'))
+        controller.enqueue(encoder.encode('event: message_delta\n'))
+        controller.enqueue(encoder.encode('data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}\n\n'))
+        controller.close()
+      },
+    })
+
+    const raw = await readProviderStream(new Response(stream), selection({ apiFormat: 'claude_code' }))
+    const parsed = parseProviderResponsePayload(raw, selection({ apiFormat: 'claude_code' }))
+
+    expect(parsed.content).toBe('你好')
+    expect(parsed.finish_reason).toBe('end_turn')
+    expect(parsed.usage?.output_tokens).toBe(2)
+  })
+
   test('routes codex_responses providers to the responses endpoint', () => {
     expect(endpointForProvider({
       id: 'codex-proxy',

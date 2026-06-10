@@ -237,6 +237,81 @@ describe('ConfiguredProviderAdapter config-driven routes', () => {
     expect(result.finish_reason).toBe('STOP')
   })
 
+  test('uses model api_format override for Gemini native endpoint and auth', async () => {
+    let capturedUrl = ''
+    let capturedHeaders: Record<string, string> = {}
+    let capturedBody: any = null
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      capturedUrl = String(url)
+      capturedHeaders = Object.fromEntries(new Headers(init?.headers || {}).entries())
+      capturedBody = JSON.parse(String(init?.body || '{}'))
+      return new Response(JSON.stringify({
+        candidates: [{
+          content: {
+            parts: [
+              { text: 'Gemini model override OK' },
+            ],
+          },
+          finishReason: 'STOP',
+        }],
+      }), { status: 200 })
+    }) as typeof fetch
+
+    const adapter = new ConfiguredProviderAdapter(
+      {
+        id: 'mixed-gateway',
+        display_name: 'Mixed Gateway',
+        service_type: 'llm',
+        api_format: 'openai_compatible',
+        auth_type: 'bearer',
+        response_mode: 'auto',
+        supported_modalities: ['chat', 'vision'],
+        is_active: true,
+        endpoints: {},
+        custom_headers: {},
+      },
+      {
+        id: 1,
+        provider: 'mixed-gateway',
+        key: 'gemini-key',
+        description: '',
+        is_active: true,
+        quota_total: 0,
+        quota_used: 0,
+        tags: [],
+      },
+      {
+        id: 1,
+        api_key_id: 1,
+        provider: 'mixed-gateway',
+        api_format: 'gemini_native',
+        display_name: 'Gemini Override',
+        model_name: 'gemini-1.5-pro',
+        capabilities: { chat: true, vision: true },
+        health_status: 'unknown',
+        is_favorite: false,
+        is_manual: false,
+        context_ui_params: {},
+      },
+    )
+
+    const result = await adapter.execute({
+      model: 'balanced',
+      messages: [{ role: 'user', content: 'Return exactly OK.' }],
+      temperature: 0.2,
+      max_tokens: 32,
+      response_format: 'text',
+    })
+
+    expect(capturedUrl).toBe('https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent')
+    expect(capturedHeaders['x-goog-api-key']).toBe('gemini-key')
+    expect(capturedHeaders.authorization).toBeUndefined()
+    expect(capturedBody.contents).toEqual([
+      { role: 'user', parts: [{ text: 'Return exactly OK.' }] },
+    ])
+    expect(result.content).toBe('Gemini model override OK')
+  })
+
   test('supports endpoint object payload templates, route headers, and result extractors', async () => {
     let capturedUrl = ''
     let capturedHeaders: Record<string, string> = {}

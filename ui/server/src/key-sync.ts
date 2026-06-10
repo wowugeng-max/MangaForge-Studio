@@ -123,6 +123,12 @@ function defaultContextUiParams(capabilities?: ModelRecord['capabilities']) {
   return Object.keys(params).length > 0 ? params : { chat: defaultTextParams() }
 }
 
+function inferModelApiFormat(modelName: string) {
+  const name = String(modelName || '').toLowerCase()
+  if (/^claude(?:-|_|$)|anthropic/.test(name)) return 'claude_code'
+  return undefined
+}
+
 function findModelListCandidate(raw: any, depth = 0): any[] {
   if (Array.isArray(raw)) return raw
   if (!raw || typeof raw !== 'object' || depth > 8) return []
@@ -146,9 +152,10 @@ function extractModels(raw: any, provider?: ProviderRecord) {
         model_name: id,
         display_name: String(item?.display_name || item?.displayName || item?.label || id).replace(/^models\//, ''),
         capabilities: normalizeCapabilities(item?.capabilities, id),
+        api_format: String(item?.api_format || item?.apiFormat || inferModelApiFormat(id) || '') || undefined,
       }
     })
-    .filter(Boolean) as Array<Pick<ModelRecord, 'model_name' | 'display_name' | 'capabilities'>>
+    .filter(Boolean) as Array<Pick<ModelRecord, 'model_name' | 'display_name' | 'capabilities' | 'api_format'>>
 }
 
 function applyAuthHeaders(headers: Record<string, string>, provider: ProviderRecord, apiKey?: string) {
@@ -176,7 +183,7 @@ async function fetchProviderModels(provider: ProviderRecord, apiKey?: string, ba
   try { return extractModels(JSON.parse(text), provider) } catch { throw new Error(`模型列表响应不是有效 JSON: ${text.slice(0, 180)}`) }
 }
 
-function mergeSyncedModels(models: ModelRecord[], keyId: number, providerId: string, synced: Array<Pick<ModelRecord, 'model_name' | 'display_name' | 'capabilities'>>) {
+function mergeSyncedModels(models: ModelRecord[], keyId: number, providerId: string, synced: Array<Pick<ModelRecord, 'model_name' | 'display_name' | 'capabilities' | 'api_format'>>) {
   let nextId = models.reduce((max, item) => Math.max(max, item.id), 0) + 1
   let created = 0
   let updated = 0
@@ -197,6 +204,7 @@ function mergeSyncedModels(models: ModelRecord[], keyId: number, providerId: str
         ...existing,
         is_active: true,
         display_name: existing.display_name || item.display_name || item.model_name,
+        api_format: item.api_format || existing.api_format,
         capabilities: mergedCapabilities,
         health_status: existing.health_status || 'unknown',
         is_manual: existing.is_manual ?? false,
@@ -214,6 +222,7 @@ function mergeSyncedModels(models: ModelRecord[], keyId: number, providerId: str
         provider: providerId,
         display_name: item.display_name || item.model_name,
         model_name: item.model_name,
+        api_format: item.api_format,
         capabilities,
         health_status: 'unknown',
         is_active: true,

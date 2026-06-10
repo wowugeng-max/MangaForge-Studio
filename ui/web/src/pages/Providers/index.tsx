@@ -124,6 +124,24 @@ export const PRESET_PROVIDERS = [
     },
   },
   {
+    label: 'Claude Code / Anthropic',
+    color: 'purple',
+    data: {
+      id: 'claude-code',
+      display_name: 'Claude Code / Anthropic',
+      api_format: 'claude_code',
+      auth_type: 'Bearer',
+      response_mode: 'stream',
+      service_type: 'llm',
+      default_base_url: 'https://api.anthropic.com/v1',
+      supported_modalities: ['chat', 'vision'],
+      is_active: true,
+      endpoints: {
+        messages: '/messages',
+      },
+    },
+  },
+  {
     label: 'OpenAI 官方',
     color: 'green',
     data: {
@@ -293,6 +311,7 @@ export default function ProviderManager() {
   const protocolTag = (apiFormat: string) => {
     if (apiFormat === 'openai_compatible') return { color: 'cyan', label: 'STANDARD' }
     if (apiFormat === 'codex_responses') return { color: 'geekblue', label: 'CODEX' }
+    if (apiFormat === 'claude_code') return { color: 'purple', label: 'CLAUDE' }
     return { color: 'purple', label: 'NATIVE' }
   }
 
@@ -335,7 +354,7 @@ export default function ProviderManager() {
           <Divider style={{ margin: '24px 0' }} />
           <Title level={5} style={{ marginBottom: 16 }}>协议与全局网关</Title>
           <Form.Item name="service_type" label="核心服务驱动类型" rules={[{ required: true, message: '必须指定算力类型' }]}><Radio.Group optionType="button" buttonStyle="solid"><Radio value="llm">🤖 AI 大语言/多模态模型</Radio><Radio value="comfyui">🚀 物理算力引擎 (ComfyUI)</Radio></Radio.Group></Form.Item>
-          <Form.Item name="api_format" label="通信协议规范"><Select style={{ width: '100%' }}><Select.Option value="openai_compatible">OpenAI 标准兼容 (V1)</Select.Option><Select.Option value="codex_responses">Codex / OpenAI Responses</Select.Option><Select.Option value="gemini_native">Google Gemini 原生</Select.Option></Select></Form.Item>
+          <Form.Item name="api_format" label="通信协议规范"><Select style={{ width: '100%' }}><Select.Option value="openai_compatible">OpenAI 标准兼容 (V1)</Select.Option><Select.Option value="codex_responses">Codex / OpenAI Responses</Select.Option><Select.Option value="claude_code">Claude Code / Anthropic Messages</Select.Option><Select.Option value="gemini_native">Google Gemini 原生</Select.Option></Select></Form.Item>
           <Form.Item name="response_mode" label="响应返回模式" extra="流式可绕开部分网关的长请求超时；非流式适合短任务或不支持 stream 的厂商。">
             <Radio.Group optionType="button" buttonStyle="solid">
               <Radio value="auto">自动</Radio>
@@ -361,6 +380,7 @@ export default function ProviderManager() {
                 <Divider />
                 <Form.Item name={['endpoints', 'chat']} label="对话端点 (chat)"><Input /></Form.Item>
                 <Form.Item name={['endpoints', 'responses']} label="Codex Responses 端点 (responses)"><Input placeholder="/responses" /></Form.Item>
+                <Form.Item name={['endpoints', 'messages']} label="Claude Messages 端点 (messages)"><Input placeholder="/messages" /></Form.Item>
                 <Form.Item name={['endpoints', 'vision']} label="视觉端点 (vision)"><Input /></Form.Item>
                 <Form.Item name={['endpoints', 'text_to_image']} label="文生图端点 (text_to_image)">
                   <TextArea rows={6} placeholder={`{

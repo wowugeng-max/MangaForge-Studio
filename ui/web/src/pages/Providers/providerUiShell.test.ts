@@ -12,6 +12,15 @@ describe('provider matrix protocol UI', () => {
     expect(source).toContain("responses: '/responses'")
   })
 
+  test('offers Claude Code protocol in provider configuration', () => {
+    const source = readFileSync(join(import.meta.dir, 'index.tsx'), 'utf8')
+
+    expect(source).toContain("value=\"claude_code\"")
+    expect(source).toContain('Claude Code / Anthropic Messages')
+    expect(source).toContain('CLAUDE')
+    expect(source).toContain("messages: '/messages'")
+  })
+
   test('exposes upstream multimodal DSL route editors', () => {
     const source = readFileSync(join(import.meta.dir, 'index.tsx'), 'utf8')
 

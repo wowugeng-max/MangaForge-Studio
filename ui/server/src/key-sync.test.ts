@@ -99,6 +99,23 @@ describe('model sync capability inference', () => {
     ])
   })
 
+  test('infers Claude Code protocol overrides from synced Claude model ids', async () => {
+    const workspace = await tempWorkspace()
+
+    const result = await syncModelsForKey(workspace, 1, {
+      data: [
+        { id: 'claude-opus-4-8' },
+        { id: 'claude-sonnet-4-6' },
+        { id: 'gpt-5.5' },
+      ],
+    })
+
+    const byName = Object.fromEntries(result.models.map(model => [model.model_name, model]))
+    expect(byName['claude-opus-4-8'].api_format).toBe('claude_code')
+    expect(byName['claude-sonnet-4-6'].api_format).toBe('claude_code')
+    expect(byName['gpt-5.5'].api_format).toBeUndefined()
+  })
+
   test('normalizes legacy upstream image and video capability keys into six task capabilities', async () => {
     const workspace = await tempWorkspace()
 

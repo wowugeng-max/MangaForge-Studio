@@ -230,15 +230,28 @@ function normalizeGeminiGenerateContentPayload(raw: any) {
   }
 }
 
-function isGeminiNativeProvider(provider: ProviderRecord) {
-  return String(provider.api_format || '').toLowerCase() === 'gemini_native'
+function isGeminiNativeFormat(apiFormat: string) {
+  return String(apiFormat || '').toLowerCase() === 'gemini_native'
 }
 
-function applyProviderAuth(headers: Record<string, string>, provider: ProviderRecord, apiKey?: string) {
+function isGeminiNativeProvider(provider: ProviderRecord) {
+  return isGeminiNativeFormat(provider.api_format || '')
+}
+
+function effectiveApiFormat(provider: ProviderRecord, model?: ModelRecord) {
+  return String(model?.api_format || provider.api_format || 'openai_compatible').toLowerCase()
+}
+
+function isClaudeCodeFormat(apiFormat: string) {
+  const normalized = String(apiFormat || '').toLowerCase()
+  return normalized === 'claude_code' || normalized.includes('anthropic')
+}
+
+function applyProviderAuth(headers: Record<string, string>, provider: ProviderRecord, apiKey?: string, apiFormat = provider.api_format) {
   const key = String(apiKey || '').trim()
   if (!key || String(provider.auth_type || 'bearer').toLowerCase() === 'none') return headers
   const authType = String(provider.auth_type || 'bearer').toLowerCase()
-  if (isGeminiNativeProvider(provider)) {
+  if (isGeminiNativeFormat(apiFormat)) {
     headers['x-goog-api-key'] = key
     return headers
   }
@@ -334,7 +347,8 @@ function routeConfigForModel(route: any, modelName: string) {
 
 function selectProviderRoute(provider: ProviderRecord, request?: LLMRequest, model?: ModelRecord) {
   const endpoints = provider.endpoints || {}
-  const providerFormat = String(provider.api_format || '').toLowerCase()
+  const providerFormat = effectiveApiFormat(provider, model)
+  if (isClaudeCodeFormat(providerFormat)) return endpoints.messages || endpoints.chat || endpoints.completions || endpoints.llm || ''
   if (!providerFormat.includes('responses') && !providerFormat.includes('codex')) {
     const routeType = request ? requestRouteType(request, model) : ''
     if (routeType && endpoints[routeType]) return routeConfigForModel(endpoints[routeType], model?.model_name || '')
@@ -346,9 +360,9 @@ function selectProviderRoute(provider: ProviderRecord, request?: LLMRequest, mod
     : endpoints.chat || endpoints.responses || endpoints.completions || endpoints.llm || ''
 }
 
-function defaultEndpointPath(provider: ProviderRecord, routeType = '') {
-  const providerFormat = String(provider.api_format || '').toLowerCase()
-  if (providerFormat.includes('anthropic')) return 'messages'
+function defaultEndpointPath(provider: ProviderRecord, routeType = '', apiFormat = provider.api_format) {
+  const providerFormat = String(apiFormat || '').toLowerCase()
+  if (isClaudeCodeFormat(providerFormat)) return 'messages'
   if (providerFormat.includes('responses') || providerFormat.includes('codex')) return 'responses'
   if (String(routeType).includes('image')) return 'images/generations'
   if (String(routeType).includes('video')) return 'videos/generations'
@@ -359,7 +373,7 @@ function normalizeGeminiModelName(modelName = '') {
   return String(modelName || '').replace(/^models\//, '').trim()
 }
 
-function resolveProviderEndpoint(provider: ProviderRecord, routeConfig = selectProviderRoute(provider), baseUrlOverride = '', routeType = '', modelName = '') {
+function resolveProviderEndpoint(provider: ProviderRecord, routeConfig = selectProviderRoute(provider), baseUrlOverride = '', routeType = '', modelName = '', apiFormat = provider.api_format) {
   const routeUrl = isRouteObject(routeConfig)
     ? String(routeConfig.url || routeConfig.endpoint || '')
     : String(routeConfig || '')
@@ -370,9 +384,9 @@ function resolveProviderEndpoint(provider: ProviderRecord, routeConfig = selectP
     if (!baseUrl) return explicit
     return `${baseUrl}/${explicit.replace(/^\/+/, '')}`
   }
-  const base = baseUrl || (isGeminiNativeProvider(provider) ? 'https://generativelanguage.googleapis.com/v1beta' : '')
+  const base = baseUrl || (isGeminiNativeFormat(apiFormat) ? 'https://generativelanguage.googleapis.com/v1beta' : '')
   if (!base) return ''
-  if (isGeminiNativeProvider(provider)) {
+  if (isGeminiNativeFormat(apiFormat)) {
     if (/:generateContent$/.test(base)) return base
     const cleanModelName = normalizeGeminiModelName(modelName || 'gemini-1.5-flash')
     return `${base.replace(/\/+$/, '')}/models/${encodeURIComponent(cleanModelName)}:generateContent`
@@ -383,7 +397,7 @@ function resolveProviderEndpoint(provider: ProviderRecord, routeConfig = selectP
   const pathParts = base.replace(/^(https?:\/\/[^/]+)/, '').split('/').filter(Boolean)
   if (pathParts.length >= 2) return base
   const hasV1 = /\/v1$/.test(base)
-  const path = defaultEndpointPath(provider, routeType)
+  const path = defaultEndpointPath(provider, routeType, apiFormat)
   if (hasV1) return `${base}/${path}`
   // Default to chat/completions (NOT responses) for OpenAI-compatible providers
   return `${base}/v1/${path}`
@@ -617,19 +631,19 @@ export class ConfiguredProviderAdapter implements NovelLLMAdapter {
     const routeType = requestRouteType(request, this.model)
     const effectiveBaseUrl = normalizeBaseUrl(this.apiKey.base_url || this.provider.default_base_url || '')
     const modelRequest = { ...request, model: this.model.model_name || request.model }
-    const endpoint = resolveProviderEndpoint(this.provider, routeConfig, effectiveBaseUrl, routeType, modelRequest.model)
+    const providerFormat = effectiveApiFormat(this.provider, this.model)
+    const endpoint = resolveProviderEndpoint(this.provider, routeConfig, effectiveBaseUrl, routeType, modelRequest.model, providerFormat)
     if (!endpoint) throw new Error(`provider ${this.provider.id} missing endpoint`)
-    const providerFormat = String(this.provider.api_format || '').toLowerCase()
-    const isAnthropic = providerFormat.includes('anthropic')
+    const isAnthropic = isClaudeCodeFormat(providerFormat)
     const isCodex = providerFormat.includes('codex')
     const isResponses = providerFormat.includes('responses')
-    const isGeminiNative = isGeminiNativeProvider(this.provider)
+    const isGeminiNative = isGeminiNativeFormat(providerFormat)
     const body = buildConfiguredRouteBody(routeConfig, modelRequest, () => isCodex
       ? buildCodexResponsesBody(modelRequest, this.model.model_name || request.model, false, {
         baseUrl: effectiveBaseUrl,
       })
       : isResponses ? buildOpenAIResponsesBody(modelRequest) : (isGeminiNative ? buildGeminiGenerateContentBody(modelRequest) : (isAnthropic ? buildAnthropicMessagesBody(modelRequest) : (isMediaRouteType(routeType) ? buildOpenAIMediaBody(modelRequest) : buildOpenAIChatBody(modelRequest)))))
-    const headers = applyProviderAuth({ ...(this.provider.custom_headers || {}) }, this.provider, this.apiKey.key)
+    const headers = applyProviderAuth({ ...(this.provider.custom_headers || {}) }, this.provider, this.apiKey.key, providerFormat)
     const routeHeaders = routeDslValue(routeConfig, 'headers', 'customHeaders')
     if (routeHeaders && typeof routeHeaders === 'object') Object.assign(headers, routeHeaders)
     if (isAnthropic && !headers['anthropic-version']) headers['anthropic-version'] = '2023-06-01'

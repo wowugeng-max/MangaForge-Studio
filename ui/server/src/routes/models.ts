@@ -128,6 +128,9 @@ function normalizeModelInput(body: any, fallback?: ModelRecord): ModelRecord {
     id: Number(body.id ?? fallback?.id ?? 0),
     api_key_id: body.api_key_id ?? body.apiKeyId ?? body.key_id ?? body.keyId ?? fallback?.api_key_id,
     provider: String(body.provider ?? fallback?.provider ?? ''),
+    api_format: body.api_format === undefined && body.apiFormat === undefined
+      ? fallback?.api_format
+      : String(body.api_format ?? body.apiFormat ?? ''),
     display_name: String(body.display_name ?? body.displayName ?? fallback?.display_name ?? ''),
     model_name: String(body.model_name ?? body.modelName ?? fallback?.model_name ?? ''),
     capabilities: body.capabilities && typeof body.capabilities === 'object' ? body.capabilities : (fallback?.capabilities ?? {}),

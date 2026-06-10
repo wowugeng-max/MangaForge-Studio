@@ -88,7 +88,7 @@ export function buildFallbackTestUrl(rawEndpoint: string, apiFormat: string) {
     return /\/v1beta$/i.test(endpoint) ? `${endpoint}/models/test:generateContent` : `${endpoint}/v1beta/models/test:generateContent`
   }
   if (/\/(chat\/completions|responses|messages|generate|models)$/.test(endpoint)) return endpoint
-  if (providerFormat.includes('anthropic')) {
+  if (providerFormat === 'claude_code' || providerFormat.includes('anthropic')) {
     return /\/v1$/.test(endpoint) ? `${endpoint}/messages` : `${endpoint}/v1/messages`
   }
   if (providerFormat.includes('responses') || providerFormat.includes('codex')) {
@@ -151,7 +151,7 @@ function buildProbeRequestBody(apiFormat: string) {
   if (providerFormat.includes('responses') || providerFormat.includes('codex')) {
     return buildCodexResponsesBody({ model: 'test', messages: [{ role: 'user', content: 'ping' }] }, 'test', false)
   }
-  if (providerFormat.includes('anthropic')) return { model: 'test', messages: [{ role: 'user', content: 'ping' }], max_tokens: 1, temperature: 0 }
+  if (providerFormat === 'claude_code' || providerFormat.includes('anthropic')) return { model: 'test', messages: [{ role: 'user', content: 'ping' }], max_tokens: 1, temperature: 0 }
   return { model: 'test', messages: [{ role: 'user', content: 'ping' }], max_tokens: 1, temperature: 0 }
 }
 
@@ -171,6 +171,10 @@ function buildKeyProbeHeaders(provider: any, keyValue: string) {
   if (String(provider.api_format || '').toLowerCase() === 'gemini_native') headers['x-goog-api-key'] = keyValue
   else if (authType === 'x-api-key' || authType === 'api-key') headers['x-api-key'] = keyValue
   else if (authType !== 'none') headers.Authorization = keyValue.toLowerCase().startsWith('bearer ') ? keyValue : `Bearer ${keyValue}`
+  const providerFormat = String(provider.api_format || '').toLowerCase()
+  if ((providerFormat === 'claude_code' || providerFormat.includes('anthropic')) && !headers['anthropic-version']) {
+    headers['anthropic-version'] = '2023-06-01'
+  }
   return headers
 }
 
@@ -198,7 +202,9 @@ async function fetchDashScopeQuota(provider: any, keyValue: string) {
 function resolveKeyProbeEndpoint(provider: any, key: APIKeyRecord) {
   const providerFormat = String(provider.api_format || '').toLowerCase()
   const rawRoute = (
-    providerFormat.includes('responses') || providerFormat.includes('codex')
+    providerFormat === 'claude_code' || providerFormat.includes('anthropic')
+      ? provider.endpoints?.messages || provider.endpoints?.chat || provider.endpoints?.completions || provider.endpoints?.llm || key.base_url || provider.default_base_url || ''
+      : providerFormat.includes('responses') || providerFormat.includes('codex')
       ? provider.endpoints?.responses || provider.endpoints?.chat || provider.endpoints?.completions || provider.endpoints?.llm || key.base_url || provider.default_base_url || ''
       : provider.endpoints?.chat || provider.endpoints?.responses || provider.endpoints?.completions || provider.endpoints?.llm || key.base_url || provider.default_base_url || '',
   )
