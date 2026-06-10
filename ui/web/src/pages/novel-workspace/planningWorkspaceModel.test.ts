@@ -654,6 +654,75 @@ describe('buildPlanningWorkspaceModel', () => {
     expect(model.longformSpineGuard.actionKey).toBe('longform_creation_diagnosis')
   })
 
+  test('builds a core contract radar from the spine guard and current chapter obligations', () => {
+    const active = {
+      ...chapters[8],
+      chapter_no: 9,
+      chapter_goal: '让李玄用残阵反制执事压迫',
+      conflict: '赵执事逼迫交出阵盘',
+      ending_hook: '内门长老注意到残阵异常',
+      raw_payload: {
+        mainline_progress: '外门压迫升级，主角开始主动反击',
+        payoff: '残阵反制、公开打脸、旧案线索',
+        innovation_execution: '用残阵缺口制造反制机会',
+      },
+    }
+
+    const model = buildPlanningWorkspaceModel({
+      selectedProject: project,
+      outlines,
+      chapters: [...chapters.slice(0, 8), active],
+      activeChapter: active,
+    })
+
+    expect(model.coreContractRadar.status).toBe('ready')
+    expect(model.coreContractRadar.primaryAction.key).toBe('enter_chapter_writing')
+    expect(model.coreContractRadar.checks.map(item => item.key)).toEqual([
+      'reader_promise',
+      'protagonist_drive',
+      'core_conflict',
+      'chapter_service',
+      'reader_payoff',
+      'innovation_hook',
+    ])
+    expect(model.coreContractRadar.checks.find(item => item.key === 'chapter_service')?.detail).toContain('让李玄')
+    expect(model.coreContractRadar.mustServe).toEqual(expect.arrayContaining([
+      expect.stringContaining('寒门少年'),
+      expect.stringContaining('底层阵修'),
+    ]))
+    expect(model.coreContractRadar.noDrift).toEqual(expect.arrayContaining([
+      expect.stringContaining('核心卖点不可漂移'),
+    ]))
+  })
+
+  test('routes the core contract radar to quality revision when recent delivery drift exists', () => {
+    const driftReview = {
+      review_type: 'chapter_core_drift',
+      created_at: '2026-06-09T00:00:00.000Z',
+      payload_json: {
+        core_drift: {
+          status: 'warn',
+          score: 58,
+          label: '核心偏移 2',
+          drift_risks: ['本章没有服务外门压迫主线', '创新机制只在旁白里声明'],
+        },
+      },
+    }
+
+    const model = buildPlanningWorkspaceModel({
+      selectedProject: project,
+      outlines,
+      chapters,
+      activeChapter: chapters[8],
+      reviews: [driftReview],
+    })
+
+    expect(model.coreContractRadar.status).toBe('needs_action')
+    expect(model.coreContractRadar.primaryAction.key).toBe('open_quality_revision')
+    expect(model.coreContractRadar.riskTags).toEqual(expect.arrayContaining(['核心偏移', '读者回报待补']))
+    expect(model.coreContractRadar.checks.find(item => item.key === 'chapter_service')?.status).toBe('warn')
+  })
+
   test('marks longform spine guard blocked when core axes are missing', () => {
     const model = buildPlanningWorkspaceModel({
       selectedProject: {

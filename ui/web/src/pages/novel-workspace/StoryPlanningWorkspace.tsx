@@ -101,6 +101,12 @@ function battleDeskColor(status: PlanningWorkspaceModel['longformBattleDesk']['s
   return 'gold'
 }
 
+function coreContractRadarColor(status: PlanningWorkspaceModel['coreContractRadar']['status'] | 'ok' | 'warn' | 'block') {
+  if (status === 'ready' || status === 'ok') return 'green'
+  if (status === 'blocked' || status === 'block') return 'red'
+  return 'gold'
+}
+
 function serialReleaseColor(
   status:
     | PlanningWorkspaceModel['serialReleaseDesk']['status']
@@ -479,6 +485,91 @@ export function StoryPlanningWorkspace({
                   </Space>
                 </button>
               ))}
+            </div>
+          </Space>
+        </Card>
+
+        <Card
+          className="novel-core-contract-radar-card"
+          title="核心契约雷达"
+          size="small"
+          extra={(
+            <Button
+              size="small"
+              type={model.coreContractRadar.status === 'ready' ? 'default' : 'primary'}
+              onClick={() => onAction(model.coreContractRadar.primaryAction.key)}
+            >
+              {model.coreContractRadar.primaryAction.label}
+            </Button>
+          )}
+        >
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Space wrap>
+              <Tag color={coreContractRadarColor(model.coreContractRadar.status)} bordered={false}>
+                {model.coreContractRadar.label}
+              </Tag>
+              <Tag bordered={false}>百万字核心守门</Tag>
+              {model.coreContractRadar.riskTags.map(tag => (
+                <Tag key={tag} color={tag.includes('偏移') || tag.includes('缺') ? 'red' : 'gold'} bordered={false}>{tag}</Tag>
+              ))}
+            </Space>
+            <Alert
+              type={model.coreContractRadar.status === 'ready' ? 'success' : model.coreContractRadar.status === 'blocked' ? 'error' : 'warning'}
+              showIcon
+              message={`契约下一步：${model.coreContractRadar.primaryAction.label}`}
+              description={model.coreContractRadar.summary}
+            />
+            <div style={{ display: 'grid', gridTemplateColumns: compact ? '1fr' : 'repeat(6, minmax(0, 1fr))', gap: 8 }}>
+              {model.coreContractRadar.checks.map(check => (
+                <button
+                  key={check.key}
+                  type="button"
+                  onClick={() => onAction(check.status === 'ok' ? 'enter_chapter_writing' : model.coreContractRadar.primaryAction.key)}
+                  style={{
+                    border: '1px solid #edf0f5',
+                    borderRadius: 8,
+                    padding: '10px 12px',
+                    background: check.status === 'ok' ? '#fff' : check.status === 'block' ? '#fff1f0' : '#fffbeb',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    width: '100%',
+                    font: 'inherit',
+                    color: 'inherit',
+                  }}
+                >
+                  <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                    <Space wrap>
+                      <Tag color={coreContractRadarColor(check.status)} bordered={false}>{check.label}</Tag>
+                      <Tag bordered={false}>{check.score}</Tag>
+                    </Space>
+                    <Progress
+                      percent={Math.max(0, Math.min(100, check.score))}
+                      size="small"
+                      showInfo={false}
+                      strokeColor={coreContractRadarColor(check.status) === 'green' ? '#52c41a' : coreContractRadarColor(check.status) === 'red' ? '#ff4d4f' : '#faad14'}
+                    />
+                    <Text type="secondary" style={{ fontSize: 12 }}>{check.detail}</Text>
+                  </Space>
+                </button>
+              ))}
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: compact ? '1fr' : 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
+              <div style={{ border: '1px solid #edf0f5', borderRadius: 8, padding: '10px 12px', background: '#fbfcfe' }}>
+                <Text strong style={{ display: 'block', marginBottom: 6 }}>必须服务</Text>
+                <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                  {(model.coreContractRadar.mustServe.length ? model.coreContractRadar.mustServe : ['补齐核心卖点、主角驱动、核心矛盾和本章任务。']).slice(0, 5).map(item => (
+                    <Text key={item} type="secondary" style={{ fontSize: 12 }}>{item}</Text>
+                  ))}
+                </Space>
+              </div>
+              <div style={{ border: '1px solid #edf0f5', borderRadius: 8, padding: '10px 12px', background: '#fbfcfe' }}>
+                <Text strong style={{ display: 'block', marginBottom: 6 }}>不可偏移</Text>
+                <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                  {(model.coreContractRadar.noDrift.length ? model.coreContractRadar.noDrift : ['不能改写既定核心承诺，不能把创新机制写成普通套路。']).slice(0, 5).map(item => (
+                    <Text key={item} type="secondary" style={{ fontSize: 12 }}>{item}</Text>
+                  ))}
+                </Space>
+              </div>
             </div>
           </Space>
         </Card>

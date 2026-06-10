@@ -922,6 +922,13 @@ describe('commercial writing workspace UI shell', () => {
     const planningWorkspace = source('StoryPlanningWorkspace.tsx')
     const planningModel = source('planningWorkspaceModel.ts')
 
+    expect(planningWorkspace).toContain('核心契约雷达')
+    expect(planningWorkspace).toContain('novel-core-contract-radar-card')
+    expect(planningWorkspace).toContain('model.coreContractRadar.checks')
+    expect(planningWorkspace).toContain('必须服务')
+    expect(planningWorkspace).toContain('不可偏移')
+    expect(planningModel).toContain('coreContractRadar')
+    expect(planningModel).toContain('buildCoreContractRadarModel')
     expect(planningWorkspace).toContain('全书主轴护栏')
     expect(planningWorkspace).toContain('novel-longform-spine-guard-card')
     expect(planningWorkspace).toContain('model.longformSpineGuard.axes')

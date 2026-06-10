@@ -167,6 +167,15 @@ export type PlanningLongformSpineAxis = {
   status: 'ok' | 'missing'
 }
 
+export type PlanningCoreContractRadarCheck = {
+  key: 'reader_promise' | 'protagonist_drive' | 'core_conflict' | 'chapter_service' | 'reader_payoff' | 'innovation_hook'
+  label: string
+  status: 'ok' | 'warn' | 'block'
+  score: number
+  detail: string
+  evidence: string[]
+}
+
 export type PlanningMillionWordMilestone = {
   key: string
   label: string
@@ -292,6 +301,21 @@ export type PlanningWorkspaceModel = {
     immutableRules: string[]
     flexibleZones: string[]
     missingAxes: string[]
+  }
+  coreContractRadar: {
+    status: 'ready' | 'needs_action' | 'blocked'
+    score: number
+    label: string
+    summary: string
+    primaryAction: {
+      key: PlanningActionKey
+      label: string
+      reason: string
+    }
+    checks: PlanningCoreContractRadarCheck[]
+    mustServe: string[]
+    noDrift: string[]
+    riskTags: string[]
   }
   millionWordMilestones: {
     status: 'ready' | 'needs_attention' | 'blocked'
@@ -1061,7 +1085,7 @@ function isStorylineType(type: string) {
 
 function storylineSyncReport(review: AnyRecord) {
   if (text(review?.review_type) !== 'storyline_sync') return null
-  const payload = parseJsonValue(review?.payload) || {}
+  const payload = parseJsonValue(review?.payload) || parseJsonValue(review?.payload_json) || {}
   const report = payload.storyline_sync || payload.result?.storyline_sync || payload.result || payload
   if (!report || typeof report !== 'object') return null
   return {
@@ -1509,7 +1533,7 @@ function latestReviewPayload(reviews: AnyRecord[], reviewType: string, payloadKe
   const review = reviews
     .filter(item => text(item?.review_type) === reviewType)
     .sort((a, b) => reviewTime(b) - reviewTime(a))[0]
-  const payload = parseJsonValue(review?.payload) || {}
+  const payload = parseJsonValue(review?.payload) || parseJsonValue(review?.payload_json) || {}
   return payload[payloadKey] || payload.result?.[payloadKey] || payload.result || payload
 }
 
@@ -1613,6 +1637,151 @@ function buildLongformSpineGuardModel(writingBible: AnyRecord, reviews: AnyRecor
     immutableRules,
     flexibleZones,
     missingAxes,
+  }
+}
+
+function spineAxisValue(spine: PlanningWorkspaceModel['longformSpineGuard'], key: PlanningLongformSpineAxis['key']) {
+  return spine.axes.find(axis => axis.key === key)?.value || ''
+}
+
+function coreContractCheck(
+  key: PlanningCoreContractRadarCheck['key'],
+  label: string,
+  value: string,
+  missingDetail: string,
+  options: { warn?: boolean; warnDetail?: string; evidence?: string[] } = {},
+): PlanningCoreContractRadarCheck {
+  const evidence = compactList(options.evidence || [value], 4)
+  const status: PlanningCoreContractRadarCheck['status'] = !value
+    ? 'block'
+    : options.warn
+      ? 'warn'
+      : 'ok'
+  return {
+    key,
+    label,
+    status,
+    score: status === 'ok' ? 90 : status === 'warn' ? 66 : 38,
+    detail: !value ? missingDetail : options.warn ? (options.warnDetail || value) : value,
+    evidence,
+  }
+}
+
+function buildCoreContractRadarModel(args: {
+  longformSpineGuard: PlanningWorkspaceModel['longformSpineGuard']
+  activeChapter?: AnyRecord | null
+  currentVolumeGoal: string
+  reviews: AnyRecord[]
+}): PlanningWorkspaceModel['coreContractRadar'] {
+  const { longformSpineGuard, activeChapter } = args
+  const coreDrift = latestReviewPayloadAny(args.reviews, 'chapter_core_drift', 'core_drift')
+  const driftRisks = compactList([
+    ...arrayValue(coreDrift?.drift_risks),
+    ...arrayValue(coreDrift?.risks),
+    ...arrayValue(coreDrift?.forbidden_touched),
+  ], 6)
+  const hasDeliveryDrift = driftRisks.length > 0 || ['warn', 'warning', 'risk', 'blocked', 'block'].includes(text(coreDrift?.status).toLowerCase())
+
+  const chapterGoal = firstNonEmpty(activeChapter?.chapter_goal, activeChapter?.chapterGoal, activeChapter?.goal, activeChapter?.summary, activeChapter?.chapter_summary)
+  const chapterConflict = firstNonEmpty(activeChapter?.conflict, activeChapter?.raw_payload?.conflict, activeChapter?.raw_payload?.core_conflict)
+  const chapterMainline = firstNonEmpty(activeChapter?.raw_payload?.mainline_progress, activeChapter?.mainline_progress, activeChapter?.raw_payload?.storyline_advance)
+  const chapterPayoff = firstNonEmpty(activeChapter?.raw_payload?.payoff, activeChapter?.raw_payload?.reader_payoff, activeChapter?.ending_hook, activeChapter?.hook)
+  const chapterInnovation = firstNonEmpty(activeChapter?.raw_payload?.innovation_execution, activeChapter?.raw_payload?.innovation_angle, activeChapter?.raw_payload?.signature_scene, activeChapter?.raw_payload?.ip_scene)
+  const chapterService = compactList([chapterGoal, chapterConflict, chapterMainline], 3).join('；')
+
+  const checks: PlanningCoreContractRadarCheck[] = [
+    coreContractCheck('reader_promise', '核心卖点', spineAxisValue(longformSpineGuard, 'reader_promise'), '缺核心卖点，无法判断章节是否吸引目标读者。'),
+    coreContractCheck('protagonist_drive', '主角驱动', spineAxisValue(longformSpineGuard, 'protagonist_drive'), '缺主角驱动，超长篇容易变成事件推着人走。'),
+    coreContractCheck('core_conflict', '核心矛盾', spineAxisValue(longformSpineGuard, 'core_conflict'), '缺核心矛盾，章节冲突容易散成单元小事。'),
+    coreContractCheck(
+      'chapter_service',
+      '本章服务',
+      chapterService,
+      '当前章缺目标、冲突或主线推进，先补开写任务再生成正文。',
+      {
+        warn: hasDeliveryDrift,
+        warnDetail: driftRisks[0] || '最近交稿存在核心偏移，先修订后再放大生产。',
+        evidence: [chapterGoal, chapterConflict, chapterMainline, ...driftRisks],
+      },
+    ),
+    coreContractCheck(
+      'reader_payoff',
+      '读者回报',
+      chapterPayoff,
+      '当前章缺可见回报或章末追读问题。',
+      {
+        warn: hasDeliveryDrift,
+        warnDetail: '核心偏移会削弱读者回报，先把回报写成可见事件。',
+        evidence: [chapterPayoff, activeChapter?.ending_hook, ...driftRisks],
+      },
+    ),
+    coreContractCheck(
+      'innovation_hook',
+      '创新执行',
+      spineAxisValue(longformSpineGuard, 'innovation_hook'),
+      '缺创新钩子，章节容易退回同题材套路。',
+      {
+        warn: Boolean(spineAxisValue(longformSpineGuard, 'innovation_hook')) && !chapterInnovation,
+        warnDetail: chapterInnovation || '本章还没写清创新机制、反差场面或可传播执行点。',
+        evidence: [spineAxisValue(longformSpineGuard, 'innovation_hook'), chapterInnovation],
+      },
+    ),
+  ]
+
+  const blockCount = checks.filter(item => item.status === 'block').length
+  const warnCount = checks.filter(item => item.status === 'warn').length
+  const status: PlanningWorkspaceModel['coreContractRadar']['status'] = longformSpineGuard.status === 'blocked' || blockCount > 0
+    ? 'blocked'
+    : warnCount > 0
+      ? 'needs_action'
+      : 'ready'
+  const score = Math.max(0, Math.min(100, Math.round(checks.reduce((sum, item) => sum + item.score, 0) / Math.max(1, checks.length))))
+  const primaryKey: PlanningActionKey = longformSpineGuard.status === 'blocked' || checks.slice(0, 3).some(item => item.status === 'block')
+    ? 'open_story_assets'
+    : hasDeliveryDrift
+      ? 'open_quality_revision'
+      : checks.some(item => item.status !== 'ok')
+        ? 'update_rolling_plan'
+        : 'enter_chapter_writing'
+  const riskTags = compactList([
+    ...longformSpineGuard.missingAxes.map(axis => `缺${axis}`),
+    hasDeliveryDrift ? '核心偏移' : '',
+    checks.find(item => item.key === 'chapter_service' && item.status !== 'ok') ? '本章服务不足' : '',
+    checks.find(item => item.key === 'reader_payoff' && item.status !== 'ok') ? '读者回报待补' : '',
+    checks.find(item => item.key === 'innovation_hook' && item.status !== 'ok') ? '创新执行待补' : '',
+  ], 8)
+  const mustServe = compactList([
+    spineAxisValue(longformSpineGuard, 'reader_promise') ? `服务核心卖点：${spineAxisValue(longformSpineGuard, 'reader_promise')}` : '',
+    spineAxisValue(longformSpineGuard, 'protagonist_drive') ? `推动主角驱动：${spineAxisValue(longformSpineGuard, 'protagonist_drive')}` : '',
+    spineAxisValue(longformSpineGuard, 'core_conflict') ? `压住核心矛盾：${spineAxisValue(longformSpineGuard, 'core_conflict')}` : '',
+    args.currentVolumeGoal ? `承接当前卷目标：${args.currentVolumeGoal}` : '',
+    chapterGoal ? `当前章任务：${chapterGoal}` : '',
+  ], 6)
+
+  return {
+    status,
+    score,
+    label: status === 'ready' ? `契约稳定 ${score}` : status === 'blocked' ? `契约阻塞 ${score}` : `契约待修 ${score}`,
+    summary: status === 'ready'
+      ? '全书核心与当前章目标、冲突、回报、创新执行已经对齐，可以进入章节写作。'
+      : hasDeliveryDrift
+        ? `最近交稿存在核心偏移：${driftRisks[0] || text(coreDrift?.label, '需回质检修订')}。先修复再继续连写。`
+        : `核心契约还有 ${blockCount + warnCount} 项需要补齐：${riskTags.join('、') || '补齐章节任务书'}`,
+    primaryAction: {
+      key: primaryKey,
+      label: planningActionLabel(primaryKey),
+      reason: primaryKey === 'open_quality_revision'
+        ? '先处理最近交稿的核心偏移，避免后续章节沿着错误方向扩写。'
+        : primaryKey === 'open_story_assets'
+          ? '先补齐全书核心卖点、主角驱动和核心矛盾。'
+          : primaryKey === 'update_rolling_plan'
+            ? '先补齐本章目标、回报或创新执行，再生成正文。'
+            : '核心契约通过，进入当前章写作。',
+    },
+    checks,
+    mustServe,
+    noDrift: longformSpineGuard.immutableRules,
+    riskTags,
   }
 }
 
@@ -3804,6 +3973,12 @@ export function buildPlanningWorkspaceModel(input: BuildPlanningWorkspaceModelIn
   const currentVolumeGoal = firstNonEmpty(bibleVolume?.goal, currentVolume?.goal, currentVolume?.summary)
   const currentStageConflict = firstNonEmpty(bibleStage?.conflict, currentStage?.conflict, activeChapter?.conflict)
   const longformSpineGuard = buildLongformSpineGuardModel(writingBible, reviews)
+  const coreContractRadar = buildCoreContractRadarModel({
+    longformSpineGuard,
+    activeChapter,
+    currentVolumeGoal,
+    reviews,
+  })
   const activeChapterEvidence = firstNonEmpty(
     activeChapter?.chapter_goal,
     activeChapter?.raw_payload?.mainline_progress,
@@ -3950,6 +4125,7 @@ export function buildPlanningWorkspaceModel(input: BuildPlanningWorkspaceModelIn
     },
     creationPipeline,
     longformSpineGuard,
+    coreContractRadar,
     millionWordMilestones,
     longformMemoryCapsule,
     futureRoute,
