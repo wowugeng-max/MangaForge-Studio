@@ -89,6 +89,24 @@ export interface AutoCreationSerialWorkflowStage {
   action: AutoCreationDirectorAction
 }
 
+export interface AutoCreationDirectorCreationPipelineStage {
+  key: PlanningWorkspaceModel['creationPipeline']['stages'][number]['key'] | string
+  label: string
+  status: AutoCreationPipelineStatus
+  active: boolean
+  score: number
+  detail: string
+  action: AutoCreationDirectorAction
+}
+
+export interface AutoCreationDirectorCreationPipeline {
+  currentStageKey: string
+  summary: string
+  riskCount: number
+  primaryAction: AutoCreationDirectorAction
+  stages: AutoCreationDirectorCreationPipelineStage[]
+}
+
 export interface AutoCreationSerialWorkflow {
   currentKey: AutoCreationSerialStageKey
   currentLabel: string
@@ -535,6 +553,7 @@ export interface AutoCreationDirectorModel {
   deliveryRiskGate: AutoCreationDeliveryRiskGate
   batchGuardrail: AutoCreationBatchGuardrail
   batchReviewQueue: AutoCreationBatchReviewQueue
+  creationPipeline: AutoCreationDirectorCreationPipeline
   serialWorkflow: AutoCreationSerialWorkflow
   pipeline: AutoCreationPipelineStep[]
 }
@@ -4959,6 +4978,64 @@ function compactStatus(
   return status === 'blocked' ? 'blocked' : status === 'warning' ? 'warning' : 'pending'
 }
 
+function planningPipelineStatusToDirector(status: string, active: boolean): AutoCreationPipelineStatus {
+  if (status === 'block' || status === 'blocked') return 'blocked'
+  if (status === 'warn' || status === 'warning') return 'warning'
+  if (status === 'ok' || status === 'ready') return 'done'
+  if (active) return 'active'
+  return 'pending'
+}
+
+function buildCreationPipeline(args: {
+  planning: PlanningWorkspaceModel
+  mainAction: AutoCreationDirectorAction
+  serialWorkflow?: AutoCreationSerialWorkflow
+}): AutoCreationDirectorCreationPipeline {
+  const source = (args.planning as any).creationPipeline
+  const sourceStages = arrayValue(source?.stages)
+  if (sourceStages.length > 0) {
+    const stages = sourceStages.map((stage: AnyRecord) => {
+      const actionKey = text(stage?.actionKey || stage?.action_key, 'enter_story_planning') as PlanningActionKey
+      const detail = text(stage?.detail, '等待规划页补充阶段说明。')
+      return {
+        key: text(stage?.key, actionKey),
+        label: text(stage?.label, actionKey),
+        status: planningPipelineStatusToDirector(text(stage?.status), Boolean(stage?.active)),
+        active: Boolean(stage?.active),
+        score: Math.max(0, Math.min(100, Number(stage?.score || 0))),
+        detail,
+        action: planningAction(actionKey, detail, PLANNING_ACTION_LABELS[actionKey] || text(stage?.label, actionKey)),
+      }
+    })
+    const primaryKey = text(source?.primaryAction?.key || source?.primary_action?.key, stages.find(stage => stage.active)?.action.key || 'enter_story_planning') as PlanningActionKey
+    const primaryReason = text(source?.primaryAction?.reason || source?.primary_action?.reason, source?.summary || '按故事规划页的当前建议推进。')
+    return {
+      currentStageKey: text(source?.currentStageKey || source?.current_stage_key, stages.find(stage => stage.active)?.key || stages[0]?.key || 'chapter_launch'),
+      summary: text(source?.summary, '故事规划页暂未生成流水线摘要。'),
+      riskCount: Number(source?.riskCount || source?.risk_count || stages.filter(stage => ['blocked', 'warning'].includes(stage.status)).length),
+      primaryAction: planningAction(primaryKey, primaryReason, text(source?.primaryAction?.label || source?.primary_action?.label, PLANNING_ACTION_LABELS[primaryKey] || primaryKey)),
+      stages,
+    }
+  }
+
+  const fallbackStages = arrayValue(args.serialWorkflow?.stages).map((stage: AnyRecord) => ({
+    key: text(stage?.key, 'chapter_launch'),
+    label: text(stage?.label, '章节开写'),
+    status: text(stage?.status, 'pending') as AutoCreationPipelineStatus,
+    active: text(stage?.key) === text(args.serialWorkflow?.currentKey),
+    score: stage?.status === 'done' ? 88 : stage?.status === 'active' ? 76 : stage?.status === 'blocked' ? 45 : 64,
+    detail: text(stage?.detail, '等待流水线阶段判断。'),
+    action: stage?.action || args.mainAction,
+  }))
+  return {
+    currentStageKey: text(args.serialWorkflow?.currentKey, fallbackStages.find(stage => stage.active)?.key || 'chapter_launch'),
+    summary: text(args.serialWorkflow?.summary, '按当前总控台判断推进下一步。'),
+    riskCount: fallbackStages.filter(stage => ['blocked', 'warning'].includes(stage.status)).length,
+    primaryAction: args.mainAction,
+    stages: fallbackStages,
+  }
+}
+
 function buildSerialWorkflow(args: {
   hasModel: boolean
   mainAction: AutoCreationDirectorAction
@@ -5404,6 +5481,11 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
     batchGuardrail,
     deliveryRiskGate,
   })
+  const creationPipeline = buildCreationPipeline({
+    planning,
+    mainAction,
+    serialWorkflow,
+  })
 
   return {
     status,
@@ -5445,6 +5527,7 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
     deliveryRiskGate,
     batchGuardrail,
     batchReviewQueue,
+    creationPipeline,
     serialWorkflow,
     pipeline,
   }

@@ -1432,6 +1432,35 @@ describe('buildPlanningWorkspaceModel', () => {
     expect(model.first30Retention.summary).toContain('需重新诊断')
   })
 
+  test('asks to rerun first30 retention diagnosis after repair tasks finish', () => {
+    const unchangedChapters = chapters.map(chapter => ({ ...chapter, updated_at: '2026-06-03T09:30:00.000Z' }))
+
+    const model = buildPlanningWorkspaceModel({
+      selectedProject: project,
+      outlines,
+      chapters: unchangedChapters,
+      activeChapter: unchangedChapters[6],
+      reviews: [first30Review({ created_at: '2026-06-03T10:00:00.000Z' })],
+      productionTasks: {
+        recent: [
+          {
+            id: 701,
+            run_type: 'first30_retention_repair',
+            status: 'success',
+            created_at: '2026-06-03T10:30:00.000Z',
+            updated_at: '2026-06-03T10:45:00.000Z',
+          },
+        ],
+      },
+    })
+
+    expect(model.first30Retention.status).toBe('stale')
+    expect(model.first30Retention.stale).toBe(true)
+    expect(model.first30Retention.actionKey).toBe('run_first30_retention')
+    expect(model.first30Retention.summary).toContain('留存修复任务已完成')
+    expect(model.first30Retention.nextActions[0]).toContain('重新运行前30章诊断')
+  })
+
   test('builds a future 10-chapter route from the active chapter position', () => {
     const model = buildPlanningWorkspaceModel({
       selectedProject: project,

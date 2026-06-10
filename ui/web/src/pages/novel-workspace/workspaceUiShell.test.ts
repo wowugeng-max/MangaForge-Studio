@@ -130,6 +130,40 @@ describe('commercial writing workspace UI shell', () => {
     expect(css).toContain('.auto-director-serial-stage-done')
   })
 
+  test('shows the shared six-stage AI creation pipeline inside the auto creation director', () => {
+    const component = source('AutoCreationDirectorWorkspace.tsx')
+    const css = source('AutoCreationDirectorWorkspace.css')
+    const model = source('autoCreationDirectorModel.ts')
+
+    expect(model).toContain('creationPipeline')
+    expect(model).toContain('buildCreationPipeline')
+    expect(component).toContain('AI长篇创作流水线')
+    expect(component).toContain('model.creationPipeline.summary')
+    expect(component).toContain('model.creationPipeline.primaryAction')
+    expect(component).toContain('model.creationPipeline.stages.map')
+    expect(component).toContain('auto-director-creation-pipeline')
+    expect(component).toContain('auto-director-creation-stage')
+    expect(component).toContain('全书核心')
+    expect(component).toContain('长线规划')
+    expect(component).toContain('设定资产')
+    expect(component).toContain('章节开写')
+    expect(component).toContain('交稿验收')
+    expect(component).toContain('连载发布')
+    expect(css).toContain('.auto-director-creation-pipeline')
+    expect(css).toContain('.auto-director-creation-stage')
+    expect(css).toContain('.auto-director-creation-stage.is-active')
+  })
+
+  test('keeps longform governance rails inside the auto creation detail drawer', () => {
+    const component = source('AutoCreationDirectorWorkspace.tsx')
+
+    const drawerIndex = component.indexOf('auto-director-detail-drawer')
+    expect(drawerIndex).toBeGreaterThan(0)
+    expect(component.indexOf('auto-director-creation-pipeline')).toBeGreaterThan(drawerIndex)
+    expect(component.indexOf('auto-director-battle-desk')).toBeGreaterThan(drawerIndex)
+    expect(component.indexOf('auto-director-serial-rail')).toBeGreaterThan(drawerIndex)
+  })
+
   test('guards longform canon and memory runway before safe batching', () => {
     const model = source('autoCreationDirectorModel.ts')
 

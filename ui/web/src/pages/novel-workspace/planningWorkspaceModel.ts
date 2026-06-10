@@ -910,13 +910,46 @@ function first30ReportIsStale(review: AnyRecord, chapters: AnyRecord[]) {
     .some(chapter => chapterUpdatedTime(chapter) > reportTime)
 }
 
+function productionTaskRuns(productionTasks?: AnyRecord | null) {
+  if (!productionTasks) return []
+  return [
+    ...arrayValue(productionTasks.tasks),
+    ...arrayValue(productionTasks.active),
+    ...arrayValue(productionTasks.recent),
+    ...arrayValue(productionTasks.completed),
+    ...arrayValue(productionTasks.history),
+  ]
+}
+
+function runCompletedTime(run: AnyRecord) {
+  const raw = text(run?.completed_at || run?.finished_at || run?.updated_at || run?.created_at)
+  if (!raw) return 0
+  const timestamp = Date.parse(raw)
+  return Number.isFinite(timestamp) ? timestamp : 0
+}
+
+function runIsCompleted(run: AnyRecord) {
+  return ['success', 'completed', 'done', 'resolved'].includes(text(run?.status).toLowerCase())
+}
+
+function latestFirst30RepairAfterReport(review: AnyRecord, productionTasks?: AnyRecord | null) {
+  const reportTime = reviewTime(review)
+  if (!reportTime) return null
+  return productionTaskRuns(productionTasks)
+    .filter(run => text(run?.run_type || run?.type) === 'first30_retention_repair')
+    .filter(runIsCompleted)
+    .map(run => ({ run, completedAt: runCompletedTime(run) }))
+    .filter(item => item.completedAt > reportTime)
+    .sort((a, b) => b.completedAt - a.completedAt)[0]?.run || null
+}
+
 function retentionRiskLevel(score: number, flags: string[]) {
   if (score < 65 || flags.some(flag => /缺正文|章末钩子弱|爽点/.test(flag))) return 'high'
   if (score < 80 || flags.length > 0) return 'medium'
   return 'ok'
 }
 
-function buildFirst30RetentionModel(chapters: AnyRecord[], reviews: AnyRecord[]): PlanningWorkspaceModel['first30Retention'] {
+function buildFirst30RetentionModel(chapters: AnyRecord[], reviews: AnyRecord[], productionTasks?: AnyRecord | null): PlanningWorkspaceModel['first30Retention'] {
   const review = latestFirst30Review(reviews)
   if (!review) {
     return {
@@ -935,7 +968,9 @@ function buildFirst30RetentionModel(chapters: AnyRecord[], reviews: AnyRecord[])
 
   const payload = parseJsonValue(review.payload) || {}
   const report = payload.report || payload.result?.report || payload
-  const stale = first30ReportIsStale(review, chapters)
+  const staleByChapterUpdate = first30ReportIsStale(review, chapters)
+  const completedRepair = latestFirst30RepairAfterReport(review, productionTasks)
+  const stale = staleByChapterUpdate || Boolean(completedRepair)
   const normalizedStatus = text(report?.status, 'needs_repair') as PlanningWorkspaceModel['first30Retention']['status']
   const status = stale ? 'stale' : (['ready', 'needs_repair', 'blocked'].includes(normalizedStatus) ? normalizedStatus : 'needs_repair')
   const segments = arrayValue(report?.segments).map(segment => ({
@@ -964,7 +999,9 @@ function buildFirst30RetentionModel(chapters: AnyRecord[], reviews: AnyRecord[])
   return {
     status,
     score: Number.isFinite(Number(report?.score)) ? Number(report.score) : null,
-    summary: stale ? `需重新诊断：前30章内容已在报告后更新。${text(report?.summary)}` : text(report?.summary, '已完成前30章留存诊断。'),
+    summary: stale
+      ? `${completedRepair ? '需重新诊断：留存修复任务已完成，需复查修复后追读曲线。' : '需重新诊断：前30章内容已在报告后更新。'}${text(report?.summary)}`
+      : text(report?.summary, '已完成前30章留存诊断。'),
     promiseReady: Boolean(report?.positioning?.promise_ready),
     stale,
     actionKey: status === 'ready' ? 'run_first30_retention' : status === 'stale' ? 'run_first30_retention' : 'create_first30_repair',
@@ -976,7 +1013,10 @@ function buildFirst30RetentionModel(chapters: AnyRecord[], reviews: AnyRecord[])
       issue: text(risk?.issue),
       action: text(risk?.action),
     })),
-    nextActions: arrayValue(report?.next_actions).map(item => text(item)).filter(Boolean),
+    nextActions: [
+      ...(completedRepair ? ['重新运行前30章诊断，确认修复后的目标、钩子、爽点和试读闭环已经收敛。'] : []),
+      ...arrayValue(report?.next_actions).map(item => text(item)).filter(Boolean),
+    ],
   }
 }
 
@@ -3780,7 +3820,7 @@ export function buildPlanningWorkspaceModel(input: BuildPlanningWorkspaceModelIn
     latestWrittenChapterNo: currentLatestWrittenChapterNo,
     materialScore: input.materialScore,
   })
-  const first30Retention = buildFirst30RetentionModel(chapters, reviews)
+  const first30Retention = buildFirst30RetentionModel(chapters, reviews, productionTasks)
   const readerTrustLedger = buildReaderTrustLedgerModel(reviews)
   const readerTrialRoom = buildReaderTrialRoomModel(reviews)
   const innovationRadar = buildInnovationRadarModel(reviews)

@@ -312,6 +312,78 @@ describe('ConfiguredProviderAdapter config-driven routes', () => {
     expect(result.content).toBe('Gemini model override OK')
   })
 
+  test('enables Anthropic 1M context for Claude Code model probes', async () => {
+    let capturedUrl = ''
+    let capturedHeaders: Record<string, string> = {}
+    let capturedBody: any = null
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      capturedUrl = String(url)
+      capturedHeaders = Object.fromEntries(new Headers(init?.headers || {}).entries())
+      capturedBody = JSON.parse(String(init?.body || '{}'))
+      return new Response(JSON.stringify({
+        content: [{ type: 'text', text: 'Claude probe OK' }],
+        stop_reason: 'end_turn',
+      }), { status: 200 })
+    }) as typeof fetch
+
+    const adapter = new ConfiguredProviderAdapter(
+      {
+        id: 'mixed-gateway',
+        display_name: 'Mixed Gateway',
+        service_type: 'llm',
+        api_format: 'openai_compatible',
+        auth_type: 'bearer',
+        response_mode: 'auto',
+        supported_modalities: ['chat'],
+        default_base_url: 'https://gateway.example/v1',
+        is_active: true,
+        endpoints: {},
+        custom_headers: {},
+      },
+      {
+        id: 1,
+        provider: 'mixed-gateway',
+        key: 'claude-key',
+        description: '',
+        is_active: true,
+        quota_total: 0,
+        quota_used: 0,
+        tags: [],
+      },
+      {
+        id: 1,
+        api_key_id: 1,
+        provider: 'mixed-gateway',
+        api_format: 'claude_code',
+        display_name: 'Claude Opus',
+        model_name: 'claude-opus-4-8[1M]',
+        capabilities: { chat: true },
+        health_status: 'unknown',
+        is_favorite: false,
+        is_manual: false,
+        context_ui_params: {
+          context_window: 1_000_000,
+          max_context: 1_000_000,
+          context_window_preset: '1m',
+        },
+      },
+    )
+
+    await adapter.execute({
+      model: 'balanced',
+      messages: [{ role: 'user', content: 'Return exactly OK.' }],
+      temperature: 0.2,
+      max_tokens: 32,
+      response_format: 'text',
+    })
+
+    expect(capturedUrl).toBe('https://gateway.example/v1/messages')
+    expect(capturedHeaders['anthropic-version']).toBe('2023-06-01')
+    expect(capturedHeaders['anthropic-beta']).toContain('claude-code-20250219')
+    expect(capturedHeaders['anthropic-beta']).toContain('context-1m')
+    expect(capturedBody.model).toBe('claude-opus-4-8')
+  })
+
   test('supports endpoint object payload templates, route headers, and result extractors', async () => {
     let capturedUrl = ''
     let capturedHeaders: Record<string, string> = {}

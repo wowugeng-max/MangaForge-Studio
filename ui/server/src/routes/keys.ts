@@ -3,6 +3,7 @@ import { readKeys, writeKeys, type APIKeyRecord } from '../key-store'
 import { readProviders } from '../provider-store'
 import { readModels, writeModels, type ModelRecord } from '../model-store'
 import { ConfiguredProviderAdapter } from '../llm/adapter'
+import { applyClaudeCodeHeaders } from '../llm/anthropic-context'
 import { buildCodexResponsesBody } from '../llm/codex-responses'
 import { coerceBoolean } from '../boolean-utils'
 
@@ -172,9 +173,7 @@ function buildKeyProbeHeaders(provider: any, keyValue: string) {
   else if (authType === 'x-api-key' || authType === 'api-key') headers['x-api-key'] = keyValue
   else if (authType !== 'none') headers.Authorization = keyValue.toLowerCase().startsWith('bearer ') ? keyValue : `Bearer ${keyValue}`
   const providerFormat = String(provider.api_format || '').toLowerCase()
-  if ((providerFormat === 'claude_code' || providerFormat.includes('anthropic')) && !headers['anthropic-version']) {
-    headers['anthropic-version'] = '2023-06-01'
-  }
+  if (providerFormat === 'claude_code' || providerFormat.includes('anthropic')) applyClaudeCodeHeaders(headers)
   return headers
 }
 

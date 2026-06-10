@@ -798,6 +798,55 @@ describe('provider key protocol tests', () => {
     }
   })
 
+  test('fallback key probe sends Claude Code compatible headers for Anthropic messages providers', async () => {
+    const { probeKeyFallback } = await import('./keys')
+    const provider = {
+      id: 'claude-code',
+      display_name: 'Claude Code Gateway',
+      service_type: 'llm',
+      api_format: 'claude_code',
+      auth_type: 'bearer',
+      supported_modalities: ['chat'],
+      default_base_url: 'https://anthropic-gateway.example/v1',
+      is_active: true,
+    }
+    const key = { id: 1, provider: 'claude-code', key: 'claude-key', is_active: true }
+
+    const previousFetch = globalThis.fetch
+    let capturedUrl = ''
+    let capturedHeaders: Record<string, string> = {}
+    let capturedBody: any = null
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      capturedUrl = String(url)
+      capturedHeaders = init?.headers as Record<string, string>
+      capturedBody = JSON.parse(String(init?.body || '{}'))
+      return new Response(JSON.stringify({
+        content: [{ type: 'text', text: 'OK' }],
+      }), { status: 200 })
+    }) as any
+
+    try {
+      const result = await probeKeyFallback(provider, key)
+
+      expect(result.valid).toBe(true)
+      expect(capturedUrl).toBe('https://anthropic-gateway.example/v1/messages')
+      expect(capturedHeaders.Authorization).toBe('Bearer claude-key')
+      expect(capturedHeaders['anthropic-version']).toBe('2023-06-01')
+      expect(capturedHeaders['anthropic-beta']).toContain('claude-code-20250219')
+      expect(capturedHeaders['anthropic-dangerous-direct-browser-access']).toBe('true')
+      expect(capturedHeaders['x-app']).toBe('cli')
+      expect(capturedHeaders['accept-encoding']).toBe('identity')
+      expect(capturedHeaders['x-stainless-lang']).toBe('js')
+      expect(capturedBody).toMatchObject({
+        model: 'test',
+        messages: [{ role: 'user', content: 'ping' }],
+        max_tokens: 1,
+      })
+    } finally {
+      globalThis.fetch = previousFetch
+    }
+  })
+
   test('fallback key probe reports network errors without throwing the whole batch', async () => {
     const { probeKeyFallback } = await import('./keys')
     const provider = {

@@ -1,5 +1,6 @@
 import { imageUrlFromLLMContentPart, stringifyLLMMessageContent, stringifyLLMMessageTextContent, textFromLLMContentPart, type LLMRequest, type LLMResponse, type LLMToolCall } from './types'
 import { buildCodexResponsesBody } from './codex-responses'
+import { applyClaudeCodeHeaders, stripAnthropicLocal1mMarker } from './anthropic-context'
 import type { APIKeyRecord } from '../key-store'
 import type { ModelRecord } from '../model-store'
 import type { ProviderRecord } from '../provider-store'
@@ -174,7 +175,7 @@ function buildOpenAIResponsesBody(request: LLMRequest) {
 function buildAnthropicMessagesBody(request: LLMRequest) {
   const normalized = normalizeLLMRequest(request)
   const systemMsg = normalized.messages.find(m => m.role === 'system')
-  const body: Record<string, any> = { model: normalized.model, max_tokens: normalized.max_tokens, temperature: normalized.temperature }
+  const body: Record<string, any> = { model: stripAnthropicLocal1mMarker(normalized.model), max_tokens: normalized.max_tokens, temperature: normalized.temperature }
   // Anthropic requires 'system' as a top-level field, NOT in messages array
   if (systemMsg?.content) body.system = stringifyLLMMessageContent(systemMsg.content)
   const nonSystemMessages = normalized.messages.filter(m => m.role !== 'system')
@@ -646,7 +647,7 @@ export class ConfiguredProviderAdapter implements NovelLLMAdapter {
     const headers = applyProviderAuth({ ...(this.provider.custom_headers || {}) }, this.provider, this.apiKey.key, providerFormat)
     const routeHeaders = routeDslValue(routeConfig, 'headers', 'customHeaders')
     if (routeHeaders && typeof routeHeaders === 'object') Object.assign(headers, routeHeaders)
-    if (isAnthropic && !headers['anthropic-version']) headers['anthropic-version'] = '2023-06-01'
+    if (isAnthropic) applyClaudeCodeHeaders(headers, this.model)
     const raw = await pollConfiguredTask(this.provider, endpoint, routeConfig, await postJson(endpoint, body, undefined, headers), headers, effectiveBaseUrl)
     if (isGeminiNative) return normalizeToolCallsFromResponse(normalizeLLMResponse<T>(normalizeGeminiGenerateContentPayload(raw)))
     const resultExtractor = routeDslValue(routeConfig, 'result_extractor', 'resultExtractor')

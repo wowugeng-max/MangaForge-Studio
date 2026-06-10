@@ -15,6 +15,7 @@ import {
 } from './types'
 import { normalizeLLMResponse } from './adapter'
 import { buildCodexResponsesBody } from './codex-responses'
+import { applyClaudeCodeHeaders, stripAnthropicLocal1mMarker } from './anthropic-context'
 
 // ════════════════════════════════════════════════════════════
 // provider-runtime.ts — Reference: Claude Code API client
@@ -278,14 +279,11 @@ function buildHeaders(selection: RuntimeModelSelection): Record<string, string> 
     }
   }
 
-  // Claude Code / Anthropic Messages-specific headers
-  if (isClaudeCodeFormat(selection.apiFormat) && !headers['anthropic-version']) {
-    headers['anthropic-version'] = '2023-06-01'
-  }
   const routeHeaders = routeDslValue(selection.routeConfig, 'headers', 'customHeaders')
   if (routeHeaders && typeof routeHeaders === 'object') {
     Object.assign(headers, routeHeaders)
   }
+  if (isClaudeCodeFormat(selection.apiFormat)) applyClaudeCodeHeaders(headers, selection.model)
 
   return headers
 }
@@ -376,7 +374,7 @@ function toAnthropicBody(request: LLMRequest, selection: RuntimeModelSelection):
       content: m.content,
     }))
   const body: Record<string, any> = {
-    model: selection.model.model_name || request.model,
+    model: stripAnthropicLocal1mMarker(selection.model.model_name || request.model),
     messages,
     temperature: request.temperature ?? 0.3,
     max_tokens: request.max_tokens ?? 4096,

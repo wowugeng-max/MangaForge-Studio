@@ -109,7 +109,7 @@ describe('codex responses provider runtime', () => {
         api_key_id: 1,
         provider: 'claude-code',
         display_name: 'Claude Opus',
-        model_name: 'claude-opus-4-8',
+        model_name: 'claude-opus-4-8[1M]',
         capabilities: { chat: true },
         health_status: 'healthy',
         is_favorite: false,
@@ -161,6 +161,11 @@ describe('codex responses provider runtime', () => {
           api_format: 'claude_code',
           capabilities: { chat: true },
           health_status: 'healthy',
+          context_ui_params: {
+            context_window: 1_000_000,
+            max_context: 1_000_000,
+            context_window_preset: '1m',
+          },
         },
       ]))
 
@@ -190,6 +195,8 @@ describe('codex responses provider runtime', () => {
 
       expect(capturedUrl).toBe('https://gateway.example/v1/messages')
       expect(capturedHeaders['anthropic-version']).toBe('2023-06-01')
+      expect(capturedHeaders['anthropic-beta']).toContain('claude-code-20250219')
+      expect(capturedHeaders['anthropic-beta']).toContain('context-1m')
       expect(capturedBody).toMatchObject({
         model: 'claude-opus-4-8',
         system: 'Use Claude messages.',

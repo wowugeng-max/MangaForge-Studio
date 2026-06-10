@@ -150,6 +150,8 @@ function scriptRoomStatusLabel(status: AutoCreationDirectorModel['rollingScriptR
   return '待校准'
 }
 
+const CREATION_PIPELINE_STAGE_HINTS = ['全书核心', '长线规划', '设定资产', '章节开写', '交稿验收', '连载发布']
+
 function formatWords(value: number) {
   if (!value) return '0'
   if (value >= 10000) return `${(value / 10000).toFixed(1)}万`
@@ -314,6 +316,63 @@ export function AutoCreationDirectorWorkspace({
         </div>
       </section>
 
+      <details className="auto-director-detail-drawer">
+        <summary className="auto-director-detail-summary">
+          <span>展开详细依据</span>
+          <Text type="secondary">查看长篇链路、作战台、生产轨道、航线守门、连续生产护栏和复盘证据。</Text>
+        </summary>
+
+      <section className="auto-director-panel auto-director-creation-pipeline">
+        <div className="auto-director-panel-title">
+          <FundProjectionScreenOutlined />
+          <span>AI长篇创作流水线</span>
+          <Tag color={model.creationPipeline.riskCount > 0 ? 'gold' : 'green'} bordered={false}>
+            {model.creationPipeline.riskCount > 0 ? `风险 ${model.creationPipeline.riskCount}` : '链路可推进'}
+          </Tag>
+          <Tag color="blue" bordered={false}>唯一下一步</Tag>
+        </div>
+        <div className="auto-director-creation-pipeline-body">
+          <div className="auto-director-creation-pipeline-copy">
+            <Text strong>{model.creationPipeline.summary}</Text>
+            <div className="auto-director-creation-pipeline-hints">
+              {CREATION_PIPELINE_STAGE_HINTS.map(label => <Tag key={label} bordered={false}>{label}</Tag>)}
+            </div>
+            <ActionButton
+              primary={model.creationPipeline.riskCount > 0}
+              action={model.creationPipeline.primaryAction}
+              loadingActionKey={loadingActionKey}
+              onAction={onAction}
+            />
+          </div>
+          <div className="auto-director-creation-stages">
+            {model.creationPipeline.stages.map((stage, index) => (
+              <button
+                key={stage.key}
+                type="button"
+                className={[
+                  'auto-director-creation-stage',
+                  `auto-director-creation-stage-${stage.status}`,
+                  stage.active ? 'is-active' : '',
+                ].filter(Boolean).join(' ')}
+                onClick={() => onStageAction(stage.action)}
+              >
+                <span className="auto-director-creation-stage-head">
+                  <span className="auto-director-creation-stage-index" style={{ color: pipelineColor(stage.status) }}>
+                    {pipelineIcon(stage.status)}
+                    <em>{index + 1}</em>
+                  </span>
+                  <Text strong>{stage.label}</Text>
+                  {stage.active && <Tag color="blue" bordered={false}>当前</Tag>}
+                </span>
+                <Progress percent={Math.max(0, Math.min(100, stage.score))} size="small" showInfo={false} />
+                <Text type="secondary">{stage.detail}</Text>
+                <Text className="auto-director-creation-action-label">{stage.action.label}</Text>
+              </button>
+            ))}
+          </div>
+        </div>
+      </section>
+
       <section className={`auto-director-panel auto-director-battle-desk auto-director-battle-desk-${model.longformBattleDesk.status}`}>
         <div className="auto-director-panel-title">
           <FundProjectionScreenOutlined />
@@ -396,12 +455,6 @@ export function AutoCreationDirectorWorkspace({
           </div>
         </div>
       </section>
-
-      <details className="auto-director-detail-drawer">
-        <summary className="auto-director-detail-summary">
-          <span>展开详细依据</span>
-          <Text type="secondary">查看生产许可、日更作战、航线守门、连续生产护栏和复盘证据。</Text>
-        </summary>
 
       <section className={`auto-director-panel auto-director-license-panel auto-director-license-panel-${model.productionLicense.status}`}>
         <div className="auto-director-panel-title">

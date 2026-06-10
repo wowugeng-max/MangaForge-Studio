@@ -199,6 +199,53 @@ const baseWriting = {
 } as any
 
 describe('buildAutoCreationDirectorModel', () => {
+  test('reuses the story planning creation pipeline as the director source of truth', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        creationPipeline: {
+          currentStageKey: 'longform_plan',
+          summary: '当前建议先处理「长线规划」：未来10章 10/10，未来100章 100/100，里程碑缺少百万字锚点。',
+          riskCount: 1,
+          primaryAction: {
+            key: 'future100_generate',
+            label: '生成未来100章',
+            reason: '里程碑缺少百万字锚点。',
+          },
+          stages: [
+            { key: 'book_core', label: '全书核心', status: 'ok', active: false, score: 90, detail: '核心稳定', actionKey: 'open_outline_tree' },
+            { key: 'longform_plan', label: '长线规划', status: 'warn', active: true, score: 72, detail: '里程碑缺少百万字锚点。', actionKey: 'future100_generate' },
+            { key: 'story_assets', label: '设定资产', status: 'ok', active: false, score: 88, detail: '资产可调度', actionKey: 'open_story_assets' },
+            { key: 'chapter_launch', label: '章节开写', status: 'ok', active: false, score: 88, detail: '本章可写', actionKey: 'enter_chapter_writing' },
+            { key: 'delivery_acceptance', label: '交稿验收', status: 'ok', active: false, score: 86, detail: '交稿风险可控', actionKey: 'open_quality_revision' },
+            { key: 'serial_release', label: '连载发布', status: 'ok', active: false, score: 86, detail: '发布缓冲稳定', actionKey: 'enter_chapter_writing' },
+          ],
+        },
+      },
+      writing: baseWriting,
+      activeTasks: [],
+      selectedModelId: 12,
+    })
+
+    expect(model.creationPipeline.currentStageKey).toBe('longform_plan')
+    expect(model.creationPipeline.summary).toContain('长线规划')
+    expect(model.creationPipeline.primaryAction.key).toBe('future100_generate')
+    expect(model.creationPipeline.primaryAction.modelCall).toBe(true)
+    expect(model.creationPipeline.stages.map(stage => stage.label)).toEqual([
+      '全书核心',
+      '长线规划',
+      '设定资产',
+      '章节开写',
+      '交稿验收',
+      '连载发布',
+    ])
+    expect(model.creationPipeline.stages.find(stage => stage.key === 'longform_plan')).toMatchObject({
+      status: 'warning',
+      active: true,
+      action: { key: 'future100_generate', area: 'planning' },
+    })
+  })
+
   test('prioritizes running background work and routes the user to the task center', () => {
     const model = buildAutoCreationDirectorModel({
       planning: basePlanning,
