@@ -5,6 +5,21 @@ import apiClient from '../../api/client'
 
 const { Text, Paragraph } = Typography
 
+const DELIVERY_RISK_ANNOTATION_SOURCES = new Set([
+  'chapter_core_drift',
+  'reader_expectation_sync',
+  'reader_retention_sync',
+  'chapter_attraction_review',
+  'story_drive_sync',
+  'character_arc_sync',
+  'style_sample_sync',
+  'reader_payoff_sync',
+  'runway_sync',
+  'innovation_sync',
+  'storyline_sync',
+  'readability_review',
+])
+
 function severityColor(severity?: string) {
   if (severity === 'high' || severity === 'critical') return 'red'
   if (severity === 'medium') return 'gold'
@@ -19,8 +34,26 @@ function categoryLabel(category?: string) {
     safety: '仿写安全',
     release: '发布',
     continuity: '连续性',
+    delivery_core: '核心',
+    reader_expectation: '期待',
+    reader_retention: '追读',
+    chapter_attraction: '吸引力',
+    story_drive: '故事力',
+    character_arc: '人物弧光',
+    style_sample: '风格',
+    reader_payoff: '回报',
+    innovation: '创新',
+    storyline: '剧情线',
+    readability: '可读性',
   }
   return map[String(category || '')] || category || '通用'
+}
+
+function revisionActionLabel(item: any) {
+  if (item.source === 'editor_report') return '按报告修订'
+  if (item.source === 'prose_quality') return '按自检修订'
+  if (DELIVERY_RISK_ANNOTATION_SOURCES.has(String(item.source || ''))) return '按风险修订'
+  return ''
 }
 
 export function ReviewAnnotationsDrawer({
@@ -35,7 +68,7 @@ export function ReviewAnnotationsDrawer({
   projectId: number
   onClose: () => void
   onSelectChapter: (chapterId: number) => void
-  onApplyEditorRevision?: (review: any) => void
+  onApplyEditorRevision?: (review: any, options?: { targetChapterId?: number }) => void
   onChanged?: () => void
 }) {
   const [loading, setLoading] = React.useState(false)
@@ -43,6 +76,7 @@ export function ReviewAnnotationsDrawer({
   const [payload, setPayload] = React.useState<any | null>(null)
   const [statusFilter, setStatusFilter] = React.useState('open')
   const [severityFilter, setSeverityFilter] = React.useState('all')
+  const [categoryFilter, setCategoryFilter] = React.useState('all')
   const [keyword, setKeyword] = React.useState('')
 
   const loadAnnotations = React.useCallback(async () => {
@@ -68,6 +102,7 @@ export function ReviewAnnotationsDrawer({
     if (statusFilter === 'open' && item.status === 'resolved') return false
     if (statusFilter === 'resolved' && item.status !== 'resolved') return false
     if (severityFilter !== 'all' && item.severity !== severityFilter) return false
+    if (categoryFilter !== 'all' && item.category !== categoryFilter) return false
     const text = [item.title, item.message, item.action, item.source_label, item.chapter_no].join('\n').toLowerCase()
     return !keyword.trim() || text.includes(keyword.trim().toLowerCase())
   })
@@ -97,9 +132,13 @@ export function ReviewAnnotationsDrawer({
 
   const applyRevision = (item: any) => {
     if (!item.review_id || !onApplyEditorRevision) return
+    if (item.chapter_id) onSelectChapter(Number(item.chapter_id))
     onApplyEditorRevision({
       id: item.review_id,
+      review_type: item.source,
       payload: JSON.stringify({ chapter_id: item.chapter_id }),
+    }, {
+      targetChapterId: Number(item.chapter_id),
     })
   }
 
@@ -128,7 +167,7 @@ export function ReviewAnnotationsDrawer({
                 <Tag color="green" bordered={false}>已处理 {summary.resolved || 0}</Tag>
               </Space>
               <Text type="secondary" style={{ fontSize: 12 }}>
-                批注来自正文质检、编辑报告、相似度报告、发布审核和本地连续性扫描。
+                批注来自正文质检、编辑报告、交稿风险、相似度报告、发布审核和本地连续性扫描。
               </Text>
             </Space>
           </Space>
@@ -157,6 +196,31 @@ export function ReviewAnnotationsDrawer({
                 { value: 'high', label: '高危' },
                 { value: 'medium', label: '中危' },
                 { value: 'low', label: '低危' },
+              ]}
+            />
+            <Select
+              size="small"
+              value={categoryFilter}
+              onChange={setCategoryFilter}
+              style={{ width: 128 }}
+              options={[
+                { value: 'all', label: '全部类别' },
+                { value: 'delivery_core', label: '核心' },
+                { value: 'reader_expectation', label: '期待' },
+                { value: 'reader_retention', label: '追读' },
+                { value: 'chapter_attraction', label: '吸引力' },
+                { value: 'story_drive', label: '故事力' },
+                { value: 'character_arc', label: '人物弧光' },
+                { value: 'style_sample', label: '风格' },
+                { value: 'reader_payoff', label: '回报' },
+                { value: 'innovation', label: '创新' },
+                { value: 'storyline', label: '剧情线' },
+                { value: 'readability', label: '可读性' },
+                { value: 'quality', label: '质量' },
+                { value: 'editorial', label: '编辑' },
+                { value: 'continuity', label: '连续性' },
+                { value: 'safety', label: '仿写安全' },
+                { value: 'release', label: '发布' },
               ]}
             />
             <Input.Search
@@ -202,8 +266,8 @@ export function ReviewAnnotationsDrawer({
                     )}
                     <Space wrap>
                       {item.chapter_id && <Button size="small" icon={<FileSearchOutlined />} onClick={() => openChapter(item)}>打开章节</Button>}
-                      {item.source === 'editor_report' && item.review_id && onApplyEditorRevision && (
-                        <Button size="small" type="primary" onClick={() => applyRevision(item)}>按报告修订</Button>
+                      {revisionActionLabel(item) && item.review_id && onApplyEditorRevision && (
+                        <Button size="small" type="primary" onClick={() => applyRevision(item)}>{revisionActionLabel(item)}</Button>
                       )}
                       {item.status !== 'resolved' && (
                         <Button

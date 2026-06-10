@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'fs'
 import { join } from 'path'
-import { buildLongformCreationDiagnosis } from './novel-commercial-ops-routes'
+import { buildLongformCreationDiagnosis, buildReaderTrialRepairTasks, buildReaderTrialReview } from './novel-commercial-ops-routes'
 
 const project = {
   id: 1,
@@ -128,5 +128,89 @@ describe('longform creation diagnosis', () => {
     expect(source).toContain("review_type: 'longform_creation_diagnosis'")
     expect(source).toContain("run_type: 'longform_creation_diagnosis'")
     expect(source).toContain('buildLongformCreationDiagnosis')
+  })
+
+  test('builds a reader trial review against Qidian 10k subscription reader pull', () => {
+    const report = buildReaderTrialReview(project, healthyChapters, healthyOutlines, [
+      ...healthyReviews,
+      {
+        id: 3,
+        project_id: 1,
+        review_type: 'reader_expectation_sync',
+        status: 'warn',
+        summary: '期待欠账 1',
+        payload: JSON.stringify({
+          reader_expectation_sync: {
+            status: 'warn',
+            score: 72,
+            missed: [{ text: '阵法真相必须有可见推进。' }],
+            keep_alive: [{ text: '祖阵到底是谁留下的。' }],
+          },
+        }),
+      },
+      {
+        id: 4,
+        project_id: 1,
+        review_type: 'innovation_sync',
+        status: 'warn',
+        summary: '创新缺口 1',
+        payload: JSON.stringify({
+          innovation_sync: {
+            status: 'warn',
+            score: 75,
+            missed: [{ text: '阵法机制没有写成可视化反差。' }],
+          },
+        }),
+      },
+    ])
+
+    expect(report.quality_bar).toBe('qidian_10k_reader_trial_baseline')
+    expect(report.personas.map((item: any) => item.key)).toEqual(['payoff_reader', 'plot_reader', 'setting_reader', 'trial_reader'])
+    expect(report.personas.find((item: any) => item.key === 'trial_reader')?.focus).toContain('前三章')
+    expect(report.segments.map((item: any) => item.key)).toEqual(['1-3', '1-10', 'recent10'])
+    expect(report.drop_points.join('')).toContain('期待欠账')
+    expect(report.repair_actions.length).toBeGreaterThan(0)
+    expect(report.status).toBe('needs_repair')
+  })
+
+  test('commercial ops route persists reader_trial_review reviews', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-commercial-ops-routes.ts'), 'utf8')
+
+    expect(source).toContain('/api/novel/projects/:id/reader-trial-review')
+    expect(source).toContain("review_type: 'reader_trial_review'")
+    expect(source).toContain("run_type: 'reader_trial_review'")
+    expect(source).toContain('buildReaderTrialReview')
+  })
+
+  test('turns reader trial drop points into longform repair tasks', () => {
+    const report = {
+      report_id: 'reader-trial-test',
+      score: 68,
+      status: 'needs_repair',
+      summary: '读者试读存在弃读点。',
+      drop_points: ['第7章章末钩子弱，试读用户可能弃读。', '创新缺口：阵法机制没有写成可视化反差。'],
+      repair_actions: ['重做第7章章末未解决问题。', '把创新卖点写成动作、机制代价、反差场面或 IP 化画面。'],
+      personas: [{ key: 'trial_reader', label: '平台试读用户', verdict: '第七章钩子弱。' }],
+      segments: [{ key: '1-10', label: '试读十章', score: 68, verdict: '第4-10章需要补强。' }],
+    }
+
+    const tasks = buildReaderTrialRepairTasks(report)
+
+    expect(tasks.length).toBe(2)
+    expect(tasks[0].source).toBe('reader_trial_review')
+    expect(tasks[0].issue_type).toBe('reader_trial_drop_point')
+    expect(tasks[0].chapter_no).toBe(7)
+    expect(tasks[0].title).toContain('读者试读弃读点修复')
+    expect(tasks[0].action).toContain('章末')
+    expect(tasks[0].reader_trial_review.drop_points[0]).toContain('第7章')
+  })
+
+  test('commercial ops route persists reader trial repair queue as longform production repair', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-commercial-ops-routes.ts'), 'utf8')
+
+    expect(source).toContain('/api/novel/projects/:id/reader-trial-review/repair-queue')
+    expect(source).toContain('buildReaderTrialRepairTasks')
+    expect(source).toContain("source: 'reader_trial_review'")
+    expect(source).toContain("run_type: 'longform_production_repair'")
   })
 })

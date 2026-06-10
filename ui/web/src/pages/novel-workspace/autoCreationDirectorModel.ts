@@ -19,6 +19,8 @@ export type AutoCreationDirectorActionKey =
   | 'open_story_assets'
   | 'start_safe_batch_generation'
   | 'create_safe_batch_risk_repair'
+  | 'create_delivery_risk_repair'
+  | 'create_script_room_repair'
   | 'select_model'
 
 export type AutoCreationPipelineStatus = 'done' | 'active' | 'pending' | 'blocked' | 'warning'
@@ -28,7 +30,17 @@ export type AutoCreationBatchGuardrailSignalStatus = 'ok' | 'warn' | 'block'
 export type AutoCreationBatchReviewStatus = 'empty' | 'ok' | 'warn' | 'risk' | 'done'
 export type AutoCreationBatchReviewItemStatus = 'success' | 'failed'
 export type AutoCreationBatchRiskStatus = 'ok' | 'warn'
+export type AutoCreationBatchCompletionStatus = 'empty' | 'in_progress' | 'needs_repair' | 'ready_next'
+export type AutoCreationBatchCompletionMetricStatus = 'ok' | 'warn' | 'block'
+export type AutoCreationBatchHandoffStatus = 'empty' | 'failed' | 'deliver_chapters' | 'repair_risks' | 'continue_batch' | 'prepare_next'
+export type AutoCreationChapterLaunchGateStatus = 'ready' | 'warn' | 'blocked'
 export type AutoCreationLongformCapacityStatus = 'ready' | 'caution' | 'blocked'
+export type AutoCreationDeliveryRiskGateStatus = 'ok' | 'warn' | 'block'
+export type AutoCreationDailyBattleStepKey = 'clear_risks' | 'fuel_materials' | 'chapter_work' | 'batch_release'
+export type AutoCreationRollingScriptRoomStatus = 'ready' | 'needs_attention' | 'blocked'
+export type AutoCreationRollingScriptLayerKey = 'current_chapter' | 'next_10' | 'future_100' | 'current_volume' | 'book_compass'
+export type AutoCreationMillionWordRunwayStatus = 'ready' | 'single_chapter' | 'blocked'
+export type AutoCreationProductionLicenseStatus = 'blocked' | 'single_chapter' | 'batch_allowed'
 
 export interface AutoCreationDirectorAction {
   area: AutoCreationDirectorArea
@@ -44,20 +56,44 @@ export interface AutoCreationPipelineStep {
   key:
     | 'longform_planning'
     | 'creation_contract'
+    | 'rolling_script_room'
     | 'longform_capacity'
     | 'volume_beat_budget'
     | 'longform_rhythm'
     | 'story_assets'
     | 'retention_curve'
     | 'chapter_planning'
-    | 'batch_guardrail'
     | 'chapter_execution'
     | 'quality_gate'
     | 'canon_sync'
+    | 'chapter_handoff'
+    | 'batch_guardrail'
     | 'async_tasks'
   label: string
   status: AutoCreationPipelineStatus
   detail: string
+}
+
+export type AutoCreationSerialStageKey =
+  | 'book_core'
+  | 'longform_plan'
+  | 'chapter_launch'
+  | 'delivery_acceptance'
+  | 'serial_governance'
+
+export interface AutoCreationSerialWorkflowStage {
+  key: AutoCreationSerialStageKey
+  label: string
+  status: AutoCreationPipelineStatus
+  detail: string
+  action: AutoCreationDirectorAction
+}
+
+export interface AutoCreationSerialWorkflow {
+  currentKey: AutoCreationSerialStageKey
+  currentLabel: string
+  summary: string
+  stages: AutoCreationSerialWorkflowStage[]
 }
 
 export interface AutoCreationContractItem {
@@ -98,6 +134,32 @@ export interface AutoCreationBatchGuardrailSignal {
   label: string
   status: AutoCreationBatchGuardrailSignalStatus
   detail: string
+}
+
+export interface AutoCreationBatchReleaseChapter {
+  chapterNo: number
+  title: string
+  status: 'allowed' | 'blocked'
+  reason: string
+}
+
+export interface AutoCreationBatchReleaseWindow {
+  summary: string
+  allowedChapters: AutoCreationBatchReleaseChapter[]
+  blockedChapters: AutoCreationBatchReleaseChapter[]
+}
+
+export interface AutoCreationBatchPreflight {
+  visible: boolean
+  status: AutoCreationBatchGuardrailStatus
+  title: string
+  summary: string
+  allowedChapterNos: number[]
+  blockedChapterNos: number[]
+  modelPipeline: string[]
+  warnings: string[]
+  longformMemoryAnchor?: AnyRecord | null
+  inputSnapshot: AnyRecord
 }
 
 export interface AutoCreationBatchBriefRepair {
@@ -169,6 +231,21 @@ export interface AutoCreationLongformCapacity {
   fuelQueue: AutoCreationLongformFuelItem[]
 }
 
+export interface AutoCreationChapterLaunchSignal {
+  key: 'reader_promise' | 'chapter_goal' | 'core_conflict' | 'mainline_service' | 'reader_payoff' | 'ending_hook'
+  label: string
+  status: AutoCreationBatchGuardrailSignalStatus
+  detail: string
+}
+
+export interface AutoCreationChapterLaunchGate {
+  status: AutoCreationChapterLaunchGateStatus
+  label: string
+  summary: string
+  signals: AutoCreationChapterLaunchSignal[]
+  action: AutoCreationDirectorAction
+}
+
 export interface AutoCreationBatchGuardrail {
   status: AutoCreationBatchGuardrailStatus
   label: string
@@ -176,9 +253,20 @@ export interface AutoCreationBatchGuardrail {
   safeChapterCount: number
   recommendedAction: AutoCreationDirectorAction
   guardrails: AutoCreationBatchGuardrailSignal[]
+  releaseWindow: AutoCreationBatchReleaseWindow
+  preflight: AutoCreationBatchPreflight
   nextBatchBrief: AutoCreationNextBatchBrief
   briefRepair: AutoCreationBatchBriefRepair
   briefRecovery: AutoCreationBatchBriefRecovery
+}
+
+interface AutoCreationCanonRunway {
+  status: AutoCreationBatchGuardrailSignalStatus
+  label: string
+  detail: string
+  action: AutoCreationDirectorAction
+  staleState: boolean
+  memoryUnavailable: boolean
 }
 
 export interface AutoCreationBatchReviewItem {
@@ -194,7 +282,7 @@ export interface AutoCreationBatchReviewItem {
 }
 
 export interface AutoCreationBatchRiskSignal {
-  key: 'quality' | 'core' | 'payoff' | 'storyline' | 'readability' | 'batch_plan'
+  key: 'quality' | 'core' | 'runway' | 'payoff' | 'reader_pull' | 'storyline' | 'story_drive' | 'character_arc' | 'innovation' | 'signature_scene' | 'readability' | 'serial_rhythm' | 'asset_growth' | 'volume_segment' | 'batch_plan'
   label: string
   status: AutoCreationBatchRiskStatus
   detail: string
@@ -205,12 +293,49 @@ export interface AutoCreationBatchRiskRadar {
   averageQualityScore: number | null
   lowQualityCount: number
   coreRiskCount: number
+  runwayRiskCount: number
   payoffDebtCount: number
+  readerPullRiskCount: number
   storylineRiskCount: number
+  innovationRiskCount: number
+  signatureSceneRiskCount: number
   readabilityRiskCount: number
+  serialRhythmRiskCount: number
+  assetGrowthRiskCount: number
+  volumeSegmentRiskCount: number
   batchPlanRiskCount: number
   signals: AutoCreationBatchRiskSignal[]
   repairTasks: AnyRecord[]
+}
+
+export interface AutoCreationBatchCompletionMetric {
+  key: 'generation' | 'delivery' | 'quality' | 'plan'
+  label: string
+  value: number
+  target: number
+  status: AutoCreationBatchCompletionMetricStatus
+  detail: string
+}
+
+export interface AutoCreationBatchCompletionDashboard {
+  visible: boolean
+  status: AutoCreationBatchCompletionStatus
+  score: number
+  label: string
+  summary: string
+  nextAction: AutoCreationDirectorAction
+  metrics: AutoCreationBatchCompletionMetric[]
+}
+
+export interface AutoCreationBatchHandoff {
+  visible: boolean
+  status: AutoCreationBatchHandoffStatus
+  label: string
+  summary: string
+  action: AutoCreationDirectorAction
+  targetChapterNos: number[]
+  riskLabels: string[]
+  evidence: string[]
 }
 
 export interface AutoCreationBatchReviewQueue {
@@ -227,7 +352,141 @@ export interface AutoCreationBatchReviewQueue {
   createdAt: string
   nextAction: AutoCreationDirectorAction
   riskRadar: AutoCreationBatchRiskRadar
+  completionDashboard: AutoCreationBatchCompletionDashboard
+  handoff: AutoCreationBatchHandoff
   items: AutoCreationBatchReviewItem[]
+}
+
+export interface AutoCreationDeliveryRiskGateCategory {
+  key: 'delivery_core' | 'reader_retention' | 'reader_payoff' | 'innovation' | 'signature_scene' | 'storyline' | 'story_unit' | 'story_drive' | 'character_arc' | 'style_sample' | 'readability'
+  label: string
+  count: number
+  highCount: number
+}
+
+export interface AutoCreationDeliveryRiskGate {
+  status: AutoCreationDeliveryRiskGateStatus
+  label: string
+  summary: string
+  totalOpen: number
+  highOpen: number
+  categories: AutoCreationDeliveryRiskGateCategory[]
+  topRisks: string[]
+}
+
+export interface AutoCreationWritingQueueFocus {
+  visible: boolean
+  status: 'empty' | 'needs_plan' | 'ready_to_draft' | 'draft_generated'
+  label: string
+  summary: string
+  currentChapterNo: number | null
+  readyCount: number
+  blockedCount: number
+  draftedCount: number
+  action: AutoCreationDirectorAction
+  badges: string[]
+}
+
+export interface AutoCreationDailyBattleStep {
+  key: AutoCreationDailyBattleStepKey
+  label: string
+  status: AutoCreationPipelineStatus
+  detail: string
+  action: AutoCreationDirectorAction
+  badges: string[]
+  gateChecks: string[]
+}
+
+export interface AutoCreationDailyBattlePlan {
+  label: string
+  summary: string
+  currentStepKey: AutoCreationDailyBattleStepKey
+  steps: AutoCreationDailyBattleStep[]
+}
+
+export interface AutoCreationProductionLicense {
+  status: AutoCreationProductionLicenseStatus
+  label: string
+  modeLabel: string
+  summary: string
+  safeChapterCount: number
+  reasons: string[]
+  badges: string[]
+  nextAction: AutoCreationDirectorAction
+}
+
+export interface AutoCreationTodayCommandFlowItem {
+  key: AutoCreationDailyBattleStepKey
+  label: string
+  status: AutoCreationPipelineStatus
+}
+
+export interface AutoCreationTodayQualityGate {
+  key: 'core' | 'story_drive' | 'reader_pull' | 'innovation' | 'serial_safety'
+  label: string
+  status: AutoCreationBatchGuardrailSignalStatus
+  detail: string
+}
+
+export interface AutoCreationTodayCommandDeck {
+  label: string
+  status: AutoCreationProductionLicenseStatus
+  modeLabel: string
+  currentStepLabel: string
+  summary: string
+  reasons: string[]
+  action: AutoCreationDirectorAction
+  actionLabel: string
+  qualityGates: AutoCreationTodayQualityGate[]
+  flow: AutoCreationTodayCommandFlowItem[]
+}
+
+export interface AutoCreationMillionWordRunwayGate {
+  key: 'core_compass' | 'chapter_four_questions' | 'reader_fuel' | 'innovation' | 'canon_memory' | 'batch_entry'
+  label: string
+  status: AutoCreationBatchGuardrailSignalStatus
+  detail: string
+}
+
+export interface AutoCreationMillionWordRunwayQuestion {
+  key: 'why_now' | 'page_turn' | 'mainline_move' | 'freshness'
+  label: string
+  answer: string
+  status: AutoCreationBatchGuardrailSignalStatus
+}
+
+export interface AutoCreationMillionWordRunway {
+  status: AutoCreationMillionWordRunwayStatus
+  label: string
+  summary: string
+  bandLabel: string
+  safeModeLabel: string
+  gates: AutoCreationMillionWordRunwayGate[]
+  fourQuestions: AutoCreationMillionWordRunwayQuestion[]
+  redLines: string[]
+  readerFuel: string[]
+  recommendedAction: AutoCreationDirectorAction
+}
+
+export interface AutoCreationRollingScriptLayer {
+  key: AutoCreationRollingScriptLayerKey
+  label: string
+  status: AutoCreationRollingScriptRoomStatus
+  detail: string
+  evidence: string[]
+  action: AutoCreationDirectorAction
+}
+
+export interface AutoCreationRollingScriptRoom {
+  status: AutoCreationRollingScriptRoomStatus
+  label: string
+  summary: string
+  focusRangeLabel: string
+  layers: AutoCreationRollingScriptLayer[]
+  nextChapters: AutoCreationNextBatchBriefChapter[]
+  nextAction: AutoCreationDirectorAction
+  repairTasks: AnyRecord[]
+  repairAction: AutoCreationDirectorAction
 }
 
 export interface AutoCreationDirectorModel {
@@ -262,11 +521,21 @@ export interface AutoCreationDirectorModel {
     longformCapacityScore: number | null
   }
   longformRhythm: PlanningWorkspaceModel['longformRhythm']
+  longformBattleDesk: PlanningWorkspaceModel['longformBattleDesk']
   longformCapacity: AutoCreationLongformCapacity
   longformCompass: AutoCreationLongformCompass
   creationContract: AutoCreationContractItem[]
+  chapterLaunchGate: AutoCreationChapterLaunchGate
+  dailyBattlePlan: AutoCreationDailyBattlePlan
+  productionLicense: AutoCreationProductionLicense
+  todayCommandDeck: AutoCreationTodayCommandDeck
+  millionWordRunway: AutoCreationMillionWordRunway
+  writingQueueFocus: AutoCreationWritingQueueFocus
+  rollingScriptRoom: AutoCreationRollingScriptRoom
+  deliveryRiskGate: AutoCreationDeliveryRiskGate
   batchGuardrail: AutoCreationBatchGuardrail
   batchReviewQueue: AutoCreationBatchReviewQueue
+  serialWorkflow: AutoCreationSerialWorkflow
   pipeline: AutoCreationPipelineStep[]
 }
 
@@ -284,6 +553,7 @@ export interface BuildAutoCreationDirectorModelInput {
 const PLANNING_ACTION_LABELS: Record<PlanningActionKey, string> = {
   update_rolling_plan: '更新滚动规划',
   complete_volume_plan: '补齐当前卷规划',
+  enter_story_planning: '进入故事规划',
   enter_chapter_writing: '进入当前章写作',
   open_outline_tree: '查看完整大纲',
   future100_audit: '检查未来100章',
@@ -297,6 +567,10 @@ const PLANNING_ACTION_LABELS: Record<PlanningActionKey, string> = {
   open_quality_revision: '进入质检修订',
   run_first30_retention: '运行前30章诊断',
   create_first30_repair: '生成修复任务',
+  run_reader_trial_review: '运行读者试读复盘',
+  create_reader_trial_repair: '生成试读修复任务',
+  create_delivery_risk_repair: '生成风险修复任务',
+  open_task_center: '打开任务中心',
 }
 
 const WRITING_ACTION_LABELS: Record<WritingCockpitActionKey, string> = {
@@ -382,7 +656,7 @@ function writingAction(key: WritingCockpitActionKey, description: string, label?
 }
 
 function opsAction(
-  key: 'open_task_center' | 'select_model' | 'start_safe_batch_generation' | 'create_safe_batch_risk_repair',
+  key: 'open_task_center' | 'select_model' | 'start_safe_batch_generation' | 'create_safe_batch_risk_repair' | 'create_delivery_risk_repair' | 'create_script_room_repair',
   label: string,
   description: string,
   disabled = false,
@@ -394,6 +668,51 @@ function opsAction(
     description,
     modelCall: MODEL_CALL_ACTIONS.has(key),
     disabled,
+  }
+}
+
+function writingReadinessIssue(writing: WritingCockpitModel, key: string) {
+  return [
+    ...arrayValue(writing.readiness?.warnings),
+    ...arrayValue(writing.readiness?.blockers),
+    ...arrayValue(writing.readinessChecks),
+    ...arrayValue(writing.readiness?.checks),
+  ].find(check => text(check?.key) === key && text(check?.status) !== 'pass')
+}
+
+function buildCanonRunway(writing: WritingCockpitModel): AutoCreationCanonRunway {
+  const staleState = writingReadinessIssue(writing, 'story_state_stale')
+  const memoryUnavailable = writingReadinessIssue(writing, 'memory_unavailable')
+  if (staleState) {
+    return {
+      status: 'block',
+      label: '长线记忆',
+      detail: [
+        `${text(staleState.label, '故事状态可能滞后')}：${text(staleState.detail, '建议同步最近已写章节的状态机。')}`,
+        memoryUnavailable ? `${text(memoryUnavailable.label, '记忆摘要不可用')}：${text(memoryUnavailable.detail, '缺少可引用的记忆事实。')}` : '',
+      ].filter(Boolean).join('；'),
+      action: writingAction('update_canon', '先同步故事状态，确保正史、剧情线和长期设定与已写章节对齐。', '同步故事状态'),
+      staleState: true,
+      memoryUnavailable: Boolean(memoryUnavailable),
+    }
+  }
+  if (memoryUnavailable) {
+    return {
+      status: 'warn',
+      label: '长线记忆',
+      detail: `${text(memoryUnavailable.label, '记忆摘要不可用')}：${text(memoryUnavailable.detail, '缺少可引用的记忆事实。')} 本轮只建议单章推进，并先修复连续性材料。`,
+      action: writingAction('fix_continuity', '补齐长期记忆摘要和连续性事实后，再扩大安全连写批次。', '修复连续性'),
+      staleState: false,
+      memoryUnavailable: true,
+    }
+  }
+  return {
+    status: 'ok',
+    label: '长线记忆',
+    detail: '故事状态与长期记忆均可支撑连续生产。',
+    action: writingAction('fix_continuity', '长线记忆状态正常，无需修复。', '修复连续性'),
+    staleState: false,
+    memoryUnavailable: false,
   }
 }
 
@@ -446,6 +765,10 @@ function retentionNeedsAction(planning: PlanningWorkspaceModel) {
 
 function storylineNeedsAction(planning: PlanningWorkspaceModel) {
   return planning.storylineBoard.status === 'missing' || planning.storylineBoard.status === 'needs_attention'
+}
+
+function characterArcNeedsAction(planning: PlanningWorkspaceModel) {
+  return Boolean(planning.characterArcBoard && planning.characterArcBoard.status === 'needs_attention')
 }
 
 function rhythmNeedsAction(planning: PlanningWorkspaceModel) {
@@ -570,6 +893,10 @@ function riskPayload(review: AnyRecord | null, key: string) {
   return payload?.[key] || payload?.result?.[key] || payload?.result || payload
 }
 
+function reviewPayload(review: AnyRecord | null) {
+  return parsePayload(review?.payload) || {}
+}
+
 function riskCountFromStatus(payload: AnyRecord, review: AnyRecord | null) {
   return text(payload?.status || review?.status).toLowerCase() === 'warn' ? 1 : 0
 }
@@ -581,10 +908,30 @@ function coreRiskCount(review: AnyRecord | null) {
   return count > 0 ? count : riskCountFromStatus(payload, review)
 }
 
+function runwayRiskCount(review: AnyRecord | null) {
+  if (!review) return 0
+  const payload = riskPayload(review, 'runway_sync')
+  const count = numberValue(payload?.risk_count ?? payload?.riskCount)
+  if (count !== null) return count
+  const inferred = arrayValue(payload?.four_question_missed).length
+    + arrayValue(payload?.reader_fuel_missed).length
+    + arrayValue(payload?.redline_touched).length
+  return inferred > 0 ? inferred : riskCountFromStatus(payload, review)
+}
+
 function payoffDebtCount(review: AnyRecord | null) {
   if (!review) return 0
   const payload = riskPayload(review, 'reader_payoff_sync')
   const count = numberValue(payload?.debt_count ?? payload?.debtCount)
+  if (count !== null) return count
+  const inferred = arrayValue(payload?.missed).length + arrayValue(payload?.debts).length
+  return inferred > 0 ? inferred : riskCountFromStatus(payload, review)
+}
+
+function expectationRiskCount(review: AnyRecord | null) {
+  if (!review) return 0
+  const payload = riskPayload(review, 'reader_expectation_sync')
+  const count = numberValue(payload?.missed_count ?? payload?.missedCount)
   if (count !== null) return count
   const inferred = arrayValue(payload?.missed).length + arrayValue(payload?.debts).length
   return inferred > 0 ? inferred : riskCountFromStatus(payload, review)
@@ -599,6 +946,44 @@ function storylineRiskCount(review: AnyRecord | null) {
   return count > 0 ? count : riskCountFromStatus(payload, review)
 }
 
+function storyUnitRiskCount(review: AnyRecord | null) {
+  if (!review) return 0
+  const payload = riskPayload(review, 'story_unit_sync')
+  const counted = numberValue(payload?.missed_count ?? payload?.missedCount)
+    || numberValue(payload?.rushed_count ?? payload?.rushedCount)
+    || numberValue(payload?.forbidden_count ?? payload?.forbiddenCount)
+  if (counted !== null) {
+    const missed = numberValue(payload?.missed_count ?? payload?.missedCount) ?? arrayValue(payload?.missed).length
+    const rushed = numberValue(payload?.rushed_count ?? payload?.rushedCount) ?? (arrayValue(payload?.rushed_ahead).length + arrayValue(payload?.rushedAhead).length)
+    const forbidden = numberValue(payload?.forbidden_count ?? payload?.forbiddenCount) ?? (arrayValue(payload?.forbidden_touched).length + arrayValue(payload?.forbiddenTouched).length)
+    return missed + rushed + forbidden
+  }
+  const count = arrayValue(payload?.missed).length
+    + arrayValue(payload?.rushed_ahead).length
+    + arrayValue(payload?.rushedAhead).length
+    + arrayValue(payload?.forbidden_touched).length
+    + arrayValue(payload?.forbiddenTouched).length
+  return count > 0 ? count : riskCountFromStatus(payload, review)
+}
+
+function storyDriveRiskCount(review: AnyRecord | null) {
+  if (!review) return 0
+  const payload = riskPayload(review, 'story_drive_sync')
+  const count = numberValue(payload?.missed_count ?? payload?.missedCount)
+  if (count !== null) return count
+  const inferred = arrayValue(payload?.missed).length
+  return inferred > 0 ? inferred : riskCountFromStatus(payload, review)
+}
+
+function characterArcRiskCount(review: AnyRecord | null) {
+  if (!review) return 0
+  const payload = riskPayload(review, 'character_arc_sync')
+  const count = numberValue(payload?.missed_count ?? payload?.missedCount)
+  if (count !== null) return count
+  const inferred = arrayValue(payload?.missed).length
+  return inferred > 0 ? inferred : riskCountFromStatus(payload, review)
+}
+
 function readabilityRiskCount(review: AnyRecord | null) {
   if (!review) return 0
   const payload = riskPayload(review, 'readability_review')
@@ -607,6 +992,392 @@ function readabilityRiskCount(review: AnyRecord | null) {
   const score = numberValue(payload?.readability_score ?? payload?.score)
   const lowScoreCount = score !== null && score < BATCH_DELIVERY_QUALITY_THRESHOLD ? 1 : 0
   return immersionRiskCount + lowScoreCount
+}
+
+function styleSampleRiskCount(review: AnyRecord | null) {
+  if (!review) return 0
+  const payload = riskPayload(review, 'style_sample_sync')
+  const missed = numberValue(payload?.missed_count ?? payload?.missedCount) ?? arrayValue(payload?.missed).length
+  const copied = numberValue(payload?.copy_risk_count ?? payload?.copyRiskCount) ?? (arrayValue(payload?.copied_phrases).length + arrayValue(payload?.copiedPhrases).length)
+  const total = missed + copied
+  return total > 0 ? total : riskCountFromStatus(payload, review)
+}
+
+function retentionRiskCount(review: AnyRecord | null) {
+  if (!review) return 0
+  const payload = riskPayload(review, 'reader_retention_sync')
+  const count = numberValue(payload?.missed_count ?? payload?.missedCount)
+  if (count !== null) return count
+  const inferred = arrayValue(payload?.missed).length
+  return inferred > 0 ? inferred : riskCountFromStatus(payload, review)
+}
+
+function innovationRiskCount(review: AnyRecord | null) {
+  if (!review) return 0
+  const payload = riskPayload(review, 'innovation_sync')
+  const count = numberValue(payload?.missed_count ?? payload?.missedCount)
+  if (count !== null) return count
+  const inferred = arrayValue(payload?.missed).length
+  return inferred > 0 ? inferred : riskCountFromStatus(payload, review)
+}
+
+function signatureSceneRiskCount(review: AnyRecord | null) {
+  if (!review) return 0
+  const payload = riskPayload(review, 'signature_scene_sync')
+  const count = numberValue(payload?.missed_count ?? payload?.missedCount)
+  if (count !== null) return count
+  const inferred = arrayValue(payload?.missed).length
+  return inferred > 0 ? inferred : riskCountFromStatus(payload, review)
+}
+
+function payloadReviewChapterId(review: AnyRecord, payload: AnyRecord) {
+  return review?.chapter_id
+    ?? review?.chapterId
+    ?? payload?.chapter_id
+    ?? payload?.chapterId
+    ?? payload?.report?.chapter_id
+    ?? payload?.report?.chapterId
+    ?? payload?.context_package?.chapter_target?.id
+    ?? null
+}
+
+function payloadReviewChapterNo(review: AnyRecord, payload: AnyRecord) {
+  return Number(
+    review?.chapter_no
+    ?? review?.chapterNo
+    ?? payload?.chapter_no
+    ?? payload?.chapterNo
+    ?? payload?.report?.chapter_no
+    ?? payload?.report?.chapterNo
+    ?? payload?.context_package?.chapter_target?.chapter_no
+    ?? payload?.context_package?.chapter_target?.chapterNo
+    ?? 0,
+  )
+}
+
+function deliveryRiskAnnotationKey(input: {
+  source: string
+  reviewId: any
+  chapterId: any
+  chapterNo: any
+  kind: string
+  title: string
+}) {
+  return [
+    input.source || 'review',
+    input.reviewId || 0,
+    input.chapterId || 0,
+    input.chapterNo || 0,
+    String(input.kind || 'issue'),
+    String(input.title || '').slice(0, 120),
+  ].join(':')
+}
+
+function resolvedAnnotationKeys(reviews: AnyRecord[]) {
+  const map = new Map<string, AnyRecord>()
+  reviews
+    .filter(review => text(review?.review_type) === 'review_annotation_status')
+    .slice()
+    .sort((a, b) => recordTime(a) - recordTime(b))
+    .forEach(review => {
+      const payload = reviewPayload(review)
+      const key = text(payload?.annotation_key || payload?.key)
+      if (key) map.set(key, payload)
+    })
+  return new Set([...map.entries()]
+    .filter(([, payload]) => text(payload?.status).toLowerCase() === 'resolved')
+    .map(([key]) => key))
+}
+
+function clearedDeliveryRiskChapterKeys(reviews: AnyRecord[]) {
+  const cleared = new Map<string, number>()
+  reviews
+    .filter(review => text(review?.review_type) === 'delivery_risk_convergence')
+    .forEach(review => {
+      const payload = reviewPayload(review)
+      const convergence = payload?.delivery_risk_convergence || payload?.result?.delivery_risk_convergence || payload?.result || payload
+      const afterCount = Number(convergence?.after_count ?? convergence?.afterCount ?? convergence?.after?.total_count ?? 0)
+      if (!(text(convergence?.status) === 'cleared' || afterCount === 0)) return
+      const chapterId = payloadReviewChapterId(review, { ...payload, chapter_id: payload?.chapter_id || convergence?.chapter_id })
+      const chapterNo = payloadReviewChapterNo(review, { ...payload, chapter_no: payload?.chapter_no || convergence?.chapter_no })
+      const time = recordTime(review)
+      if (chapterId !== null && chapterId !== undefined) cleared.set(`id:${chapterId}`, Math.max(cleared.get(`id:${chapterId}`) || 0, time))
+      if (chapterNo > 0) cleared.set(`no:${chapterNo}`, Math.max(cleared.get(`no:${chapterNo}`) || 0, time))
+    })
+  return cleared
+}
+
+const DELIVERY_RISK_CONFIG: Record<string, {
+  category: AutoCreationDeliveryRiskGateCategory['key']
+  label: string
+  kind: string
+  payloadKey: string
+  issueType: string
+  count: (review: AnyRecord) => number
+  title: (risk: AnyRecord, count: number) => string
+  message: (risk: AnyRecord) => string
+  high: (risk: AnyRecord, count: number) => boolean
+}> = {
+  chapter_core_drift: {
+    category: 'delivery_core',
+    label: '核心',
+    kind: 'core_drift',
+    payloadKey: 'core_drift',
+    issueType: 'core_drift',
+    count: coreRiskCount,
+    title: (risk, count) => text(risk?.label, `核心偏移 ${count}`),
+    message: risk => issueTexts([...arrayValue(risk?.drift_risks), ...arrayValue(risk?.risks)], 2).join('；') || '核心偏移风险',
+    high: () => true,
+  },
+  reader_retention_sync: {
+    category: 'reader_retention',
+    label: '追读',
+    kind: 'reader_retention_missed',
+    payloadKey: 'reader_retention_sync',
+    issueType: 'reader_retention_missed',
+    count: retentionRiskCount,
+    title: (risk, count) => text(risk?.label, `漏追读 ${count}`),
+    message: risk => issueTexts(arrayValue(risk?.missed), 2).join('；') || '追读承诺未兑现',
+    high: (_risk, count) => count >= 2,
+  },
+  reader_payoff_sync: {
+    category: 'reader_payoff',
+    label: '回报',
+    kind: 'reader_payoff_debt',
+    payloadKey: 'reader_payoff_sync',
+    issueType: 'reader_payoff_debt',
+    count: payoffDebtCount,
+    title: (risk, count) => text(risk?.label, `回报欠账 ${count}`),
+    message: risk => issueTexts([...arrayValue(risk?.missed), ...arrayValue(risk?.debts)], 2).join('；') || '读者回报欠账',
+    high: (_risk, count) => count >= 2,
+  },
+  innovation_sync: {
+    category: 'innovation',
+    label: '创新',
+    kind: 'innovation_missed',
+    payloadKey: 'innovation_sync',
+    issueType: 'innovation_missed',
+    count: innovationRiskCount,
+    title: (risk, count) => text(risk?.label, `创新缺口 ${count}`),
+    message: risk => issueTexts(arrayValue(risk?.missed), 2).join('；') || '创新执行未落地',
+    high: (_risk, count) => count >= 2,
+  },
+  signature_scene_sync: {
+    category: 'signature_scene',
+    label: '强场面',
+    kind: 'signature_scene_missed',
+    payloadKey: 'signature_scene_sync',
+    issueType: 'signature_scene_missed',
+    count: signatureSceneRiskCount,
+    title: (risk, count) => text(risk?.label, `强场面漏写 ${count}`),
+    message: risk => issueTexts(arrayValue(risk?.missed), 2).join('；') || '开写任务书指定的标志性强场面没有充分兑现',
+    high: () => true,
+  },
+  storyline_sync: {
+    category: 'storyline',
+    label: '剧情线',
+    kind: 'storyline_sync_risk',
+    payloadKey: 'storyline_sync',
+    issueType: 'storyline_sync_risk',
+    count: storylineRiskCount,
+    title: (risk, count) => text(risk?.label, `剧情线风险 ${count}`),
+    message: risk => issueTexts([
+      ...arrayValue(risk?.missed),
+      ...arrayValue(risk?.unplanned),
+      ...arrayValue(risk?.forbidden_touched),
+    ], 2).join('；') || '剧情线同步风险',
+    high: risk => arrayValue(risk?.forbidden_touched).length > 0,
+  },
+  story_unit_sync: {
+    category: 'story_unit',
+    label: '剧情单元',
+    kind: 'story_unit_sync_risk',
+    payloadKey: 'story_unit_sync',
+    issueType: 'story_unit_sync_risk',
+    count: storyUnitRiskCount,
+    title: (risk, count) => text(risk?.label, `剧情单元风险 ${count}`),
+    message: risk => issueTexts([
+      ...arrayValue(risk?.missed),
+      ...arrayValue(risk?.rushed_ahead),
+      ...arrayValue(risk?.rushedAhead),
+      ...arrayValue(risk?.forbidden_touched),
+      ...arrayValue(risk?.forbiddenTouched),
+    ], 2).join('；') || '剧情单元兑现风险',
+    high: risk => arrayValue(risk?.rushed_ahead).length > 0
+      || arrayValue(risk?.rushedAhead).length > 0
+      || arrayValue(risk?.forbidden_touched).length > 0
+      || arrayValue(risk?.forbiddenTouched).length > 0,
+  },
+  story_drive_sync: {
+    category: 'story_drive',
+    label: '故事力',
+    kind: 'story_drive_gap',
+    payloadKey: 'story_drive_sync',
+    issueType: 'story_drive_gap',
+    count: storyDriveRiskCount,
+    title: (risk, count) => text(risk?.label, `故事力缺口 ${count}`),
+    message: risk => issueTexts(arrayValue(risk?.missed), 2).join('；') || '主角主动选择、明确阻碍、选择代价、状态变化或下一步因果没有落地',
+    high: (_risk, count) => count >= 3,
+  },
+  character_arc_sync: {
+    category: 'character_arc',
+    label: '人物弧光',
+    kind: 'character_arc_gap',
+    payloadKey: 'character_arc_sync',
+    issueType: 'character_arc_gap',
+    count: characterArcRiskCount,
+    title: (risk, count) => text(risk?.label, `人物弧光缺口 ${count}`),
+    message: risk => issueTexts(arrayValue(risk?.missed), 2).join('；') || '角色欲望、缺陷受压、关系变化、成长节点或口吻锚点没有落地',
+    high: (_risk, count) => count >= 3,
+  },
+  readability_review: {
+    category: 'readability',
+    label: '可读性',
+    kind: 'readability_or_meme_risk',
+    payloadKey: 'readability_review',
+    issueType: 'readability_risk',
+    count: readabilityRiskCount,
+    title: (risk, count) => text(risk?.label, `可读性/网感风险 ${count}`),
+    message: risk => issueTexts([
+      ...arrayValue(risk?.meme_sense?.immersion_risks),
+      ...arrayValue(risk?.immersion_risks),
+      ...arrayValue(risk?.issues),
+    ], 2).join('；') || `可读性评分 ${risk?.readability_score || risk?.score || '-'}`,
+    high: risk => Number(risk?.readability_score ?? risk?.score ?? 100) < 65,
+  },
+  style_sample_sync: {
+    category: 'style_sample',
+    label: '风格',
+    kind: 'style_sample_gap',
+    payloadKey: 'style_sample_sync',
+    issueType: 'style_sample_gap',
+    count: styleSampleRiskCount,
+    title: (risk, count) => text(risk?.label, `风格缺口 ${count}`),
+    message: risk => issueTexts([
+      ...arrayValue(risk?.missed),
+      ...arrayValue(risk?.copied_phrases),
+      ...arrayValue(risk?.copiedPhrases),
+    ], 2).join('；') || `风格评分 ${risk?.score || '-'}`,
+    high: risk => (numberValue(risk?.copy_risk_count ?? risk?.copyRiskCount) ?? arrayValue(risk?.copied_phrases).length + arrayValue(risk?.copiedPhrases).length) > 0,
+  },
+}
+
+function buildResolvedDeliveryRiskIssueKeys(args: {
+  runRecords: AnyRecord[]
+  chapters: AnyRecord[]
+  reviews: AnyRecord[]
+}) {
+  const resolvedKeys = new Set<string>()
+  const repairRuns = args.runRecords
+    .filter(run => text(run?.run_type) === 'longform_production_repair')
+    .map(run => ({
+      run,
+      output: parsePayload(run?.output_ref) || {},
+    }))
+    .filter(entry => isCompletedRepairRun(entry.run))
+
+  for (const entry of repairRuns) {
+    const repairTime = recordTime(entry.run)
+    const tasks = [
+      ...arrayValue(entry.output?.tasks),
+      ...arrayValue(entry.output?.repairTasks),
+    ]
+    for (const task of tasks) {
+      if (!isResolvedTaskStatus(task?.task_status ?? task?.status)) continue
+      const issueType = text(task?.issue_type ?? task?.issueType)
+      if (!issueType) continue
+      const taskChapterId = task?.chapter_id ?? task?.chapterId ?? null
+      const taskChapterNo = Number(task?.chapter_no ?? task?.chapterNo ?? 0)
+      const chapter = findChapter(args.chapters, { chapterId: taskChapterId, chapterNo: taskChapterNo })
+      if (!chapter) continue
+      const chapterNo = Number(chapter?.chapter_no ?? chapter?.chapterNo ?? taskChapterNo)
+      const taskResolvedAt = Date.parse(text(task?.resolved_at || task?.updated_at || task?.created_at))
+      const resolvedAfter = Number.isFinite(taskResolvedAt) ? Math.max(repairTime, taskResolvedAt) : repairTime
+      const latestQuality = latestQualityReviewForChapter(args.reviews, chapter, chapterNo)
+      if (!qualityReviewPassed(latestQuality) || recordTime(latestQuality || {}) <= resolvedAfter) continue
+      for (const resolvedIssueType of resolvedBatchRiskIssueTypes(issueType)) {
+        for (const key of batchRiskIssueKeys({
+          chapterId: chapter?.id ?? chapter?.chapter_id ?? taskChapterId,
+          chapterNo,
+        }, resolvedIssueType)) {
+          resolvedKeys.add(key)
+        }
+      }
+    }
+  }
+
+  return resolvedKeys
+}
+
+function buildDeliveryRiskGate(args: {
+  reviews: AnyRecord[]
+  runRecords: AnyRecord[]
+  chapters: AnyRecord[]
+}): AutoCreationDeliveryRiskGate {
+  const reviews = args.reviews
+  const resolvedKeys = resolvedAnnotationKeys(reviews)
+  const clearedChapters = clearedDeliveryRiskChapterKeys(reviews)
+  const repairedIssueKeys = buildResolvedDeliveryRiskIssueKeys(args)
+  const categoryMap = new Map<AutoCreationDeliveryRiskGateCategory['key'], AutoCreationDeliveryRiskGateCategory>()
+  const topRisks: string[] = []
+
+  for (const review of reviews) {
+    const reviewType = text(review?.review_type)
+    const config = DELIVERY_RISK_CONFIG[reviewType]
+    if (!config) continue
+    const payload = reviewPayload(review)
+    const risk = riskPayload(review, config.payloadKey)
+    const count = Math.max(0, Number(config.count(review) || 0))
+    if (count <= 0 && text(risk?.status) !== 'warn') continue
+    const normalizedCount = Math.max(1, count)
+    const chapterId = payloadReviewChapterId(review, payload)
+    const chapterNo = payloadReviewChapterNo(review, payload)
+    if (batchRiskIssueResolved(repairedIssueKeys, { chapterId, chapterNo, status: 'success' }, config.issueType)) continue
+    const clearedAt = Math.max(
+      chapterId !== null && chapterId !== undefined ? clearedChapters.get(`id:${chapterId}`) || 0 : 0,
+      chapterNo > 0 ? clearedChapters.get(`no:${chapterNo}`) || 0 : 0,
+    )
+    if (clearedAt > recordTime(review)) continue
+    const title = config.title(risk, normalizedCount)
+    const annotationKey = deliveryRiskAnnotationKey({
+      source: reviewType,
+      reviewId: review?.id,
+      chapterId,
+      chapterNo,
+      kind: config.kind,
+      title,
+    })
+    if (resolvedKeys.has(annotationKey)) continue
+
+    const high = config.high(risk, normalizedCount)
+    const current = categoryMap.get(config.category) || {
+      key: config.category,
+      label: config.label,
+      count: 0,
+      highCount: 0,
+    }
+    current.count += normalizedCount
+    if (high) current.highCount += normalizedCount
+    categoryMap.set(config.category, current)
+    topRisks.push(`${config.label}${chapterNo > 0 ? `第${chapterNo}章` : ''}：${config.message(risk)}`)
+  }
+
+  const categories = [...categoryMap.values()]
+  const totalOpen = categories.reduce((sum, item) => sum + item.count, 0)
+  const highOpen = categories.reduce((sum, item) => sum + item.highCount, 0)
+  const status: AutoCreationDeliveryRiskGateStatus = highOpen > 0 ? 'block' : totalOpen > 0 ? 'warn' : 'ok'
+
+  return {
+    status,
+    label: status === 'ok' ? '交稿风险已清' : status === 'block' ? `高风险 ${highOpen}` : `未清风险 ${totalOpen}`,
+    summary: status === 'ok'
+      ? '批注池没有未处理的交稿风险，可以按现有护栏推进。'
+      : `批注池还有 ${totalOpen} 项交稿风险未清，其中高风险 ${highOpen} 项；先修正核心、追读、回报、创新、强场面、剧情线、剧情单元或可读性问题，再扩大连写批次。`,
+    totalOpen,
+    highOpen,
+    categories,
+    topRisks: topRisks.slice(0, 4),
+  }
 }
 
 function issueText(value: any) {
@@ -661,18 +1432,294 @@ function buildBatchPlanReview(args: {
   }
 }
 
+function rhythmFingerprint(value: any) {
+  return text(value)
+    .replace(/[，。！？、；：,.!?;:\s"'“”‘’《》（）()【】\[\]{}]/g, '')
+    .slice(0, 80)
+}
+
+function batchPlanChapterForItem(batchBrief: AnyRecord | null | undefined, item: AutoCreationBatchReviewItem) {
+  return arrayValue(batchBrief?.chapters)
+    .find(plan => Number(plan?.chapter_no ?? plan?.chapterNo ?? 0) === Number(item.chapterNo)) || null
+}
+
+function repeatedRhythmDimension(args: {
+  label: string
+  values: string[]
+  threshold: number
+}) {
+  const buckets = new Map<string, { value: string; count: number }>()
+  for (const value of args.values) {
+    const fingerprint = rhythmFingerprint(value)
+    if (!fingerprint || fingerprint.length < 4) continue
+    const existing = buckets.get(fingerprint)
+    buckets.set(fingerprint, { value: existing?.value || value, count: (existing?.count || 0) + 1 })
+  }
+  const repeated = Array.from(buckets.values())
+    .filter(item => item.count >= args.threshold)
+    .sort((a, b) => b.count - a.count)[0]
+  if (!repeated) return null
+  return {
+    label: args.label,
+    value: repeated.value,
+    count: repeated.count,
+    risk: `${args.label}连续 ${repeated.count} 章重复：${repeated.value}`,
+  }
+}
+
+function buildSerialRhythmReview(args: {
+  items: AutoCreationBatchReviewItem[]
+  chapters: AnyRecord[]
+  nextBatchBrief?: AnyRecord | null
+}) {
+  const successfulItems = args.items.filter(item => item.status === 'success')
+  if (successfulItems.length < 3) {
+    return {
+      status: 'ok' as const,
+      score: 88,
+      risk_count: 0,
+      risks: [],
+      evidence: [],
+      dimensions: [],
+    }
+  }
+  const rows = successfulItems.map(item => {
+    const chapter = findChapter(args.chapters, item) || {}
+    const raw = parsePayload(chapter.raw_payload || chapter.rawPayload) || chapter.raw_payload || chapter.rawPayload || {}
+    const plan = batchPlanChapterForItem(args.nextBatchBrief, item) || {}
+    return {
+      chapter_no: item.chapterNo,
+      title: item.title,
+      conflict: firstText(chapter.conflict, raw.conflict, raw.core_conflict, plan.conflict),
+      payoff: firstText(raw.payoff, raw.reader_payoff, raw.readerPayoff, plan.payoff, plan.reader_payoff, plan.readerPayoff, plan.chapter_payoff, plan.chapterPayoff),
+      ending_hook: firstText(chapter.ending_hook, chapter.endingHook, chapter.hook, raw.ending_hook, raw.endingHook, raw.hook, plan.ending_hook, plan.endingHook),
+      prose_seed: text(chapter.chapter_text).slice(0, 160),
+    }
+  })
+  const threshold = Math.min(successfulItems.length, 3)
+  const dimensions = [
+    repeatedRhythmDimension({ label: '冲突来源', values: rows.map(row => row.conflict), threshold }),
+    repeatedRhythmDimension({ label: '读者回报', values: rows.map(row => row.payoff), threshold }),
+    repeatedRhythmDimension({ label: '章末钩子', values: rows.map(row => row.ending_hook), threshold }),
+  ].filter(Boolean) as Array<{ label: string; value: string; count: number; risk: string }>
+
+  const riskCount = dimensions.length
+  return {
+    status: riskCount > 0 ? 'warn' as const : 'ok' as const,
+    score: Math.max(45, 90 - riskCount * 14),
+    risk_count: riskCount,
+    risks: dimensions.map(item => item.risk),
+    evidence: rows.map(row => `第${row.chapter_no}章：${[row.conflict, row.payoff, row.ending_hook].filter(Boolean).join(' / ')}`).slice(0, 6),
+    dimensions,
+  }
+}
+
+function assetIntakePayload(review: AnyRecord | null) {
+  const payload = reviewPayload(review)
+  return payload?.asset_intake || payload?.result?.asset_intake || payload?.result || payload
+}
+
+function assetApplyExistsAfter(args: {
+  reviews: AnyRecord[]
+  chapter: AnyRecord
+  chapterNo: number
+  intakeReview: AnyRecord | null
+}) {
+  const intakeTime = recordTime(args.intakeReview || {})
+  return args.reviews.some(review => {
+    if (text(review?.review_type) !== 'asset_intake_apply') return false
+    if (recordTime(review) < intakeTime) return false
+    const payload = reviewPayload(review)
+    const reviewChapterId = payload?.chapter_id ?? review?.chapter_id ?? null
+    const reviewChapterNo = Number(payload?.chapter_no ?? review?.chapter_no ?? 0)
+    const chapterId = args.chapter?.id ?? args.chapter?.chapter_id ?? null
+    return chapterId !== null && reviewChapterId !== null
+      ? String(chapterId) === String(reviewChapterId)
+      : reviewChapterNo === args.chapterNo
+  })
+}
+
+function buildAssetGrowthReview(args: {
+  items: AutoCreationBatchReviewItem[]
+  chapters: AnyRecord[]
+  reviews: AnyRecord[]
+}) {
+  const successfulItems = args.items.filter(item => item.status === 'success')
+  const pendingAssets: AnyRecord[] = []
+  for (const item of successfulItems) {
+    const chapter = findChapter(args.chapters, item)
+    if (!chapter) continue
+    const intakeReview = latestReviewForChapter(args.reviews, chapter, item.chapterNo, 'asset_intake')
+    if (!intakeReview || assetApplyExistsAfter({ reviews: args.reviews, chapter, chapterNo: item.chapterNo, intakeReview })) continue
+    const payload = assetIntakePayload(intakeReview)
+    const appliedNames = new Set(arrayValue(payload?.applied_asset_names).map(name => text(name)).filter(Boolean))
+    for (const asset of arrayValue(payload?.discovered_assets)) {
+      const name = text(asset?.name)
+      if (!name || appliedNames.has(name)) continue
+      pendingAssets.push({
+        chapter_no: item.chapterNo,
+        chapter_id: item.chapterId,
+        entity_type: text(asset?.entity_type || asset?.type, 'unknown'),
+        name,
+        summary: text(asset?.summary),
+      })
+    }
+  }
+  const budget = Math.max(3, successfulItems.length * 2)
+  const overBudget = Math.max(0, pendingAssets.length - budget)
+  const typeCounts = pendingAssets.reduce((acc: Record<string, number>, asset) => {
+    const type = text(asset.entity_type, 'unknown')
+    acc[type] = (acc[type] || 0) + 1
+    return acc
+  }, {})
+  return {
+    status: overBudget > 0 ? 'warn' as const : 'ok' as const,
+    budget,
+    pending_count: pendingAssets.length,
+    over_budget_count: overBudget,
+    pending_assets: pendingAssets,
+    type_counts: typeCounts,
+    summary: overBudget > 0
+      ? `本批发现 ${pendingAssets.length} 个新资产，超过预算 ${budget} 个。`
+      : `本批新资产 ${pendingAssets.length}/${budget}，仍在预算内。`,
+  }
+}
+
+function syncMissedItems(review: AnyRecord | null, payloadKey: string) {
+  const payload = riskPayload(review, payloadKey)
+  return [
+    ...arrayValue(payload?.missed),
+    ...arrayValue(payload?.debts),
+  ].map(item => {
+    if (typeof item === 'string') {
+      return { label: text(item), text: text(item) }
+    }
+    return {
+      label: firstText(item?.label, item?.title, item?.name, item?.key, item?.type, item?.text),
+      text: firstText(item?.text, item?.description, item?.reason, item?.expected_state_change, item?.expectedStateChange, item?.label, item?.title, item?.name),
+    }
+  }).filter(item => item.label || item.text)
+}
+
+function buildReaderPullReview(args: {
+  item: AutoCreationBatchReviewItem
+  expectationReview: AnyRecord | null
+  retentionReview: AnyRecord | null
+}) {
+  const expectationPayload = riskPayload(args.expectationReview, 'reader_expectation_sync')
+  const retentionPayload = riskPayload(args.retentionReview, 'reader_retention_sync')
+  const expectationCount = expectationRiskCount(args.expectationReview)
+  const retentionCount = retentionRiskCount(args.retentionReview)
+  const missed = [
+    ...syncMissedItems(args.expectationReview, 'reader_expectation_sync'),
+    ...syncMissedItems(args.retentionReview, 'reader_retention_sync'),
+  ]
+  return {
+    status: expectationCount + retentionCount > 0 ? 'warn' as const : 'ok' as const,
+    chapter_no: args.item.chapterNo,
+    chapter_id: args.item.chapterId || null,
+    title: args.item.title,
+    expectation_count: expectationCount,
+    retention_count: retentionCount,
+    missed_count: expectationCount + retentionCount,
+    missed,
+    expectation_label: firstText(expectationPayload?.label, expectationCount > 0 ? `期待欠账 ${expectationCount}` : ''),
+    retention_label: firstText(retentionPayload?.label, retentionCount > 0 ? `追读漏项 ${retentionCount}` : ''),
+  }
+}
+
+function buildInnovationExecutionReview(args: {
+  item: AutoCreationBatchReviewItem
+  review: AnyRecord | null
+}) {
+  const payload = riskPayload(args.review, 'innovation_sync')
+  const count = innovationRiskCount(args.review)
+  return {
+    status: count > 0 ? 'warn' as const : 'ok' as const,
+    chapter_no: args.item.chapterNo,
+    chapter_id: args.item.chapterId || null,
+    title: args.item.title,
+    missed_count: count,
+    missed: syncMissedItems(args.review, 'innovation_sync'),
+    label: firstText(payload?.label, count > 0 ? `创新缺口 ${count}` : ''),
+    score: numberValue(payload?.score),
+  }
+}
+
+function volumeSegmentMissedItems(review: AnyRecord | null) {
+  return syncMissedItems(review, 'volume_beat_sync')
+}
+
+function volumeSegmentRiskCount(review: AnyRecord | null) {
+  if (!review) return 0
+  const payload = riskPayload(review, 'volume_beat_sync')
+  const explicit = numberValue(payload?.missed_count ?? payload?.missedCount)
+  if (explicit !== null) return explicit
+  const missed = volumeSegmentMissedItems(review).length
+  return missed > 0 ? missed : riskCountFromStatus(payload, review)
+}
+
+function buildVolumeSegmentReview(args: {
+  planning?: PlanningWorkspaceModel | null
+  item: AutoCreationBatchReviewItem
+  chapter?: AnyRecord | null
+  review: AnyRecord | null
+}) {
+  const planning = args.planning
+  const payload = riskPayload(args.review, 'volume_beat_sync')
+  const gate = planning?.volumeSegmentGate || null
+  const gateSignals = arrayValue(gate?.signals).filter(signal => text(signal?.status) !== 'ok')
+  const raw = parsePayload(args.chapter?.raw_payload || args.chapter?.rawPayload) || args.chapter?.raw_payload || args.chapter?.rawPayload || {}
+  const planned = [
+    firstText(planning?.topStatus?.currentVolume) ? `当前卷：${firstText(planning?.topStatus?.currentVolume)}` : '',
+    firstText(planning?.topStatus?.currentStage) ? `当前阶段：${firstText(planning?.topStatus?.currentStage)}` : '',
+    firstText(planning?.mainline?.currentVolumeGoal) ? `当前卷目标：${firstText(planning?.mainline?.currentVolumeGoal)}` : '',
+    firstText(planning?.mainline?.currentStageConflict) ? `阶段冲突：${firstText(planning?.mainline?.currentStageConflict)}` : '',
+    ...gateSignals.map(signal => `${firstText(signal?.label, signal?.key)}：${firstText(signal?.detail)}`).filter(Boolean),
+  ].filter(Boolean)
+  const actual = [
+    firstText(raw?.mainline_progress, raw?.mainlineProgress, args.chapter?.mainline_progress, args.chapter?.volume_stage)
+      ? `本章主线进度：${firstText(raw?.mainline_progress, raw?.mainlineProgress, args.chapter?.mainline_progress, args.chapter?.volume_stage)}`
+      : '',
+    firstText(args.chapter?.conflict, raw?.conflict) ? `本章冲突：${firstText(args.chapter?.conflict, raw?.conflict)}` : '',
+    firstText(raw?.payoff, raw?.reader_payoff, raw?.readerPayoff) ? `本章回报：${firstText(raw?.payoff, raw?.reader_payoff, raw?.readerPayoff)}` : '',
+  ].filter(Boolean)
+  const missed = volumeSegmentMissedItems(args.review)
+  const missedCount = volumeSegmentRiskCount(args.review)
+  return {
+    status: missedCount > 0 ? 'warn' as const : 'ok' as const,
+    chapter_no: args.item.chapterNo,
+    chapter_id: args.item.chapterId || null,
+    title: args.item.title,
+    missed_count: missedCount,
+    planned,
+    actual,
+    missed,
+    gate_summary: firstText(gate?.summary),
+    review_label: firstText(payload?.label, missedCount > 0 ? `卷级阶段漏兑现 ${missedCount}` : '卷级阶段正常'),
+  }
+}
+
 function batchRepairTask(args: {
   item: AutoCreationBatchReviewItem
   issueType: string
+  taskType?: string
   severity: 'high' | 'medium'
   message: string
   action: string
   metrics: AnyRecord
   batchPlanContext?: AnyRecord | null
   batchPlanReview?: AnyRecord | null
+  serialRhythmReview?: AnyRecord | null
+  assetGrowthReview?: AnyRecord | null
+  volumeSegmentReview?: AnyRecord | null
+  readerPullReview?: AnyRecord | null
+  innovationReview?: AnyRecord | null
+  actionArea?: string
+  actionKey?: string
 }) {
   return {
-    task_type: 'repair_quality',
+    task_type: args.taskType || 'repair_quality',
     issue_type: args.issueType,
     severity: args.severity,
     chapter_id: args.item.chapterId || null,
@@ -688,8 +1735,15 @@ function batchRepairTask(args: {
     task_status: 'open',
     source: 'auto_creation_safe_batch_risk',
     metrics: args.metrics,
+    ...(args.actionArea ? { action_area: args.actionArea } : {}),
+    ...(args.actionKey ? { action_key: args.actionKey } : {}),
     ...(args.batchPlanContext ? { batch_plan_context: args.batchPlanContext } : {}),
     ...(args.batchPlanReview ? { batch_plan_review: args.batchPlanReview } : {}),
+    ...(args.serialRhythmReview ? { serial_rhythm_review: args.serialRhythmReview } : {}),
+    ...(args.assetGrowthReview ? { asset_growth_review: args.assetGrowthReview } : {}),
+    ...(args.volumeSegmentReview ? { volume_segment_review: args.volumeSegmentReview } : {}),
+    ...(args.readerPullReview ? { reader_pull_review: args.readerPullReview } : {}),
+    ...(args.innovationReview ? { innovation_review: args.innovationReview } : {}),
   }
 }
 
@@ -720,7 +1774,7 @@ function resolvedBatchRiskIssueTypes(issueType: string) {
   return [issueType]
 }
 
-function batchRiskIssueResolved(keys: Set<string> | undefined, item: AutoCreationBatchReviewItem, issueType: string) {
+function batchRiskIssueResolved(keys: Set<string> | undefined, item: { chapterId: any; chapterNo: number }, issueType: string) {
   if (!keys) return false
   return batchRiskIssueKeys(item, issueType).some(key => keys.has(key))
 }
@@ -830,6 +1884,7 @@ function buildBatchRiskRadar(args: {
   items: AutoCreationBatchReviewItem[]
   chapters: AnyRecord[]
   reviews: AnyRecord[]
+  planning?: PlanningWorkspaceModel | null
   resolvedIssueKeys?: Set<string>
   nextBatchBrief?: AnyRecord | null
 }): AutoCreationBatchRiskRadar {
@@ -848,9 +1903,30 @@ function buildBatchRiskRadar(args: {
   const lowQualityCount = qualityScores.filter(score => score < BATCH_DELIVERY_QUALITY_THRESHOLD).length
 
   let coreRiskTotal = 0
+  let runwayRiskTotal = 0
   let payoffDebtTotal = 0
+  let readerPullRiskTotal = 0
   let storylineRiskTotal = 0
+  let storyDriveRiskTotal = 0
+  let characterArcRiskTotal = 0
+  let innovationRiskTotal = 0
+  let signatureSceneRiskTotal = 0
   let readabilityRiskTotal = 0
+  let volumeSegmentRiskTotal = 0
+  const serialRhythmReview = buildSerialRhythmReview({
+    items: successfulItems,
+    chapters: args.chapters,
+    nextBatchBrief: args.nextBatchBrief,
+  })
+  const serialRhythmResolved = successfulItems.length > 0 && batchRiskIssueResolved(args.resolvedIssueKeys, successfulItems[0], 'serial_rhythm_fatigue')
+  const serialRhythmRiskTotal = serialRhythmResolved ? 0 : Number(serialRhythmReview.risk_count || 0)
+  const assetGrowthReview = buildAssetGrowthReview({
+    items: successfulItems,
+    chapters: args.chapters,
+    reviews: args.reviews,
+  })
+  const assetGrowthResolved = successfulItems.length > 0 && batchRiskIssueResolved(args.resolvedIssueKeys, successfulItems[0], 'asset_growth_over_budget')
+  const assetGrowthRiskTotal = assetGrowthResolved ? 0 : Number(assetGrowthReview.over_budget_count || 0)
   let batchPlanRiskTotal = 0
   const repairTasks: AnyRecord[] = []
 
@@ -858,25 +1934,49 @@ function buildBatchRiskRadar(args: {
     const chapter = findChapter(args.chapters, item)
     if (!chapter) continue
     const coreReview = latestReviewForChapter(args.reviews, chapter, item.chapterNo, 'chapter_core_drift')
+    const runwayReview = latestReviewForChapter(args.reviews, chapter, item.chapterNo, 'runway_sync')
     const payoffReview = latestReviewForChapter(args.reviews, chapter, item.chapterNo, 'reader_payoff_sync')
+    const expectationReview = latestReviewForChapter(args.reviews, chapter, item.chapterNo, 'reader_expectation_sync')
+    const retentionReview = latestReviewForChapter(args.reviews, chapter, item.chapterNo, 'reader_retention_sync')
     const storylineReview = latestReviewForChapter(args.reviews, chapter, item.chapterNo, 'storyline_sync')
+    const storyDriveReview = latestReviewForChapter(args.reviews, chapter, item.chapterNo, 'story_drive_sync')
+    const characterArcReview = latestReviewForChapter(args.reviews, chapter, item.chapterNo, 'character_arc_sync')
+    const innovationReviewRef = latestReviewForChapter(args.reviews, chapter, item.chapterNo, 'innovation_sync')
+    const signatureSceneReview = latestReviewForChapter(args.reviews, chapter, item.chapterNo, 'signature_scene_sync')
     const readabilityReview = latestReviewForChapter(args.reviews, chapter, item.chapterNo, 'readability_review')
+    const volumeSegmentReviewRef = latestReviewForChapter(args.reviews, chapter, item.chapterNo, 'volume_beat_sync')
     const qualityReview = latestQualityReviewForChapter(args.reviews, chapter, item.chapterNo)
     const quality = qualityPayload(qualityReview)
     const qualityScore = numberValue(quality?.score ?? quality?.overall_score ?? quality?.quality_score ?? item.score)
     const coreCount = batchRiskIssueResolved(args.resolvedIssueKeys, item, 'core_drift') ? 0 : coreRiskCount(coreReview)
+    const runwayCount = batchRiskIssueResolved(args.resolvedIssueKeys, item, 'runway_sync_risk') ? 0 : runwayRiskCount(runwayReview)
     const payoffCount = batchRiskIssueResolved(args.resolvedIssueKeys, item, 'reader_payoff_debt') ? 0 : payoffDebtCount(payoffReview)
+    const readerPullCount = batchRiskIssueResolved(args.resolvedIssueKeys, item, 'reader_pull_missed')
+      ? 0
+      : expectationRiskCount(expectationReview) + retentionRiskCount(retentionReview)
     const storylineCount = batchRiskIssueResolved(args.resolvedIssueKeys, item, 'storyline_sync_risk') ? 0 : storylineRiskCount(storylineReview)
+    const storyDriveCount = batchRiskIssueResolved(args.resolvedIssueKeys, item, 'story_drive_gap') ? 0 : storyDriveRiskCount(storyDriveReview)
+    const characterArcCount = batchRiskIssueResolved(args.resolvedIssueKeys, item, 'character_arc_gap') ? 0 : characterArcRiskCount(characterArcReview)
+    const innovationCount = batchRiskIssueResolved(args.resolvedIssueKeys, item, 'innovation_execution_missed') ? 0 : innovationRiskCount(innovationReviewRef)
+    const signatureSceneCount = batchRiskIssueResolved(args.resolvedIssueKeys, item, 'signature_scene_missed') ? 0 : signatureSceneRiskCount(signatureSceneReview)
     const readabilityCount = batchRiskIssueResolved(args.resolvedIssueKeys, item, 'readability_risk') ? 0 : readabilityRiskCount(readabilityReview)
+    const volumeSegmentCount = batchRiskIssueResolved(args.resolvedIssueKeys, item, 'volume_segment_missed') ? 0 : volumeSegmentRiskCount(volumeSegmentReviewRef)
     const batchPlanCount = batchBriefAppliesToItem(args.nextBatchBrief, item) && !batchRiskIssueResolved(args.resolvedIssueKeys, item, 'batch_brief_mismatch')
       ? coreCount + payoffCount + storylineCount
       : 0
     const lowQuality = qualityScore !== null && qualityScore < BATCH_DELIVERY_QUALITY_THRESHOLD
 
     coreRiskTotal += coreCount
+    runwayRiskTotal += runwayCount
     payoffDebtTotal += payoffCount
+    readerPullRiskTotal += readerPullCount
     storylineRiskTotal += storylineCount
+    storyDriveRiskTotal += storyDriveCount
+    characterArcRiskTotal += characterArcCount
+    innovationRiskTotal += innovationCount
+    signatureSceneRiskTotal += signatureSceneCount
     readabilityRiskTotal += readabilityCount
+    volumeSegmentRiskTotal += volumeSegmentCount
     batchPlanRiskTotal += batchPlanCount
 
     if (lowQuality) {
@@ -899,6 +1999,16 @@ function buildBatchRiskRadar(args: {
         metrics: { core_risk_count: coreCount },
       }))
     }
+    if (runwayCount > 0) {
+      repairTasks.push(batchRepairTask({
+        item,
+        issueType: 'runway_sync_risk',
+        severity: runwayCount >= 2 ? 'high' : 'medium',
+        message: `百万字航线风险 ${runwayCount} 项，本章可能没有兑现四问、读者燃料或红线约束。`,
+        action: '对照百万字航线重修本章四问、读者燃料和红线约束，确认当前章服务长期主线、追读承诺和创新差异。',
+        metrics: { runway_risk_count: runwayCount },
+      }))
+    }
     if (payoffCount > 0) {
       repairTasks.push(batchRepairTask({
         item,
@@ -907,6 +2017,22 @@ function buildBatchRiskRadar(args: {
         message: `累计 ${payoffCount} 项读者回报欠账，承诺的爽点或信息回报未兑现。`,
         action: '补写本章应交付的爽点、信息增量或情绪回报，并更新回报债务。',
         metrics: { payoff_debt_count: payoffCount },
+      }))
+    }
+    if (readerPullCount > 0) {
+      const readerPullReview = buildReaderPullReview({
+        item,
+        expectationReview,
+        retentionReview,
+      })
+      repairTasks.push(batchRepairTask({
+        item,
+        issueType: 'reader_pull_missed',
+        severity: readerPullCount >= 2 ? 'high' : 'medium',
+        message: `读者期待或追读漏兑现 ${readerPullCount} 项，连续阅读动力不足。`,
+        action: '补齐本章承诺的期待兑现、追读问题和下一章动力；让读者清楚知道本章爽点已交付、下一章为什么必须继续看。',
+        metrics: { reader_pull_risk_count: readerPullCount },
+        readerPullReview,
       }))
     }
     if (storylineCount > 0) {
@@ -919,6 +2045,51 @@ function buildBatchRiskRadar(args: {
         metrics: { storyline_risk_count: storylineCount },
       }))
     }
+    if (storyDriveCount > 0) {
+      repairTasks.push(batchRepairTask({
+        item,
+        issueType: 'story_drive_gap',
+        severity: storyDriveCount >= 3 ? 'high' : 'medium',
+        message: `故事驱动力缺口 ${storyDriveCount} 项，本章可能只有事件推进，缺少主角主动选择和代价反馈。`,
+        action: '补出主角主动选择、明确阻碍、选择代价、局面变化和下一步因果，避免章节只有事件没有人物决策。',
+        metrics: { story_drive_risk_count: storyDriveCount },
+      }))
+    }
+    if (characterArcCount > 0) {
+      repairTasks.push(batchRepairTask({
+        item,
+        issueType: 'character_arc_gap',
+        severity: characterArcCount >= 3 ? 'high' : 'medium',
+        message: `人物弧光缺口 ${characterArcCount} 项，本章可能只有事件推进但人物欲望、缺陷或关系没有变化。`,
+        action: '补出角色欲望、缺陷受压、关系变化、成长节点和口吻锚点。',
+        metrics: { character_arc_risk_count: characterArcCount },
+      }))
+    }
+    if (innovationCount > 0) {
+      const innovationReview = buildInnovationExecutionReview({
+        item,
+        review: innovationReviewRef,
+      })
+      repairTasks.push(batchRepairTask({
+        item,
+        issueType: 'innovation_execution_missed',
+        severity: innovationCount >= 2 ? 'high' : 'medium',
+        message: `创新/IP化执行漏兑现 ${innovationCount} 项，本章新鲜感或传播场面不足。`,
+        action: '补齐本书差异化机制、反差体验和可视化传播场面；让创新点落成读者能复述的事件，而不是只停留在设定说明。',
+        metrics: { innovation_risk_count: innovationCount },
+        innovationReview,
+      }))
+    }
+    if (signatureSceneCount > 0) {
+      repairTasks.push(batchRepairTask({
+        item,
+        issueType: 'signature_scene_missed',
+        severity: 'high',
+        message: `强场面漏写 ${signatureSceneCount} 项，本章开写任务书要求的记忆点没有落成可视化场面。`,
+        action: '补回开写任务书指定的标志性场面，把它写成可视化动作、空间冲突、规则代价、公开反转或读者可讨论的选择。',
+        metrics: { signature_scene_risk_count: signatureSceneCount },
+      }))
+    }
     if (readabilityCount > 0) {
       repairTasks.push(batchRepairTask({
         item,
@@ -927,6 +2098,23 @@ function buildBatchRiskRadar(args: {
         message: `可读性或网感出戏风险 ${readabilityCount} 项。`,
         action: '重修段落密度、对话节奏、吐槽强度和情绪场景的网感克制。',
         metrics: { readability_risk_count: readabilityCount },
+      }))
+    }
+    if (volumeSegmentCount > 0) {
+      const volumeSegmentReview = buildVolumeSegmentReview({
+        planning: args.planning,
+        item,
+        chapter,
+        review: volumeSegmentReviewRef,
+      })
+      repairTasks.push(batchRepairTask({
+        item,
+        issueType: 'volume_segment_missed',
+        severity: volumeSegmentCount >= 2 ? 'high' : 'medium',
+        message: `卷级阶段验收漏兑现 ${volumeSegmentCount} 项，本章可能没有结算当前卷目标或阶段身份变化。`,
+        action: '对照当前卷目标、阶段冲突和卷级爆点预算重修本章；把漏掉的身份变化、阶段结算、关键入场或阶段回报写成可见结果。',
+        metrics: { volume_segment_risk_count: volumeSegmentCount },
+        volumeSegmentReview,
       }))
     }
     if (batchPlanCount > 0) {
@@ -942,6 +2130,37 @@ function buildBatchRiskRadar(args: {
         batchPlanReview: buildBatchPlanReview({ batchPlanContext, coreReview, payoffReview, storylineReview }),
       }))
     }
+  }
+  if (serialRhythmRiskTotal > 0 && successfulItems.length > 0) {
+    const firstItem = successfulItems[0]
+    repairTasks.push(batchRepairTask({
+      item: firstItem,
+      issueType: 'serial_rhythm_fatigue',
+      severity: serialRhythmRiskTotal >= 2 ? 'high' : 'medium',
+      message: `本批存在 ${serialRhythmRiskTotal} 项连载节奏同质化，连续阅读容易疲劳。`,
+      action: '按批次重修节奏：轮换冲突来源、读者回报、章末追读问题和可视化场面，再复查整批连载读感。',
+      metrics: { serial_rhythm_risk_count: serialRhythmRiskTotal, score: serialRhythmReview.score },
+      serialRhythmReview,
+    }))
+  }
+  if (assetGrowthRiskTotal > 0 && successfulItems.length > 0) {
+    const firstItem = successfulItems[0]
+    repairTasks.push(batchRepairTask({
+      item: firstItem,
+      issueType: 'asset_growth_over_budget',
+      taskType: 'repair_assets',
+      severity: assetGrowthReview.pending_count >= assetGrowthReview.budget + 4 ? 'high' : 'medium',
+      message: `本批发现 ${assetGrowthReview.pending_count} 个新资产，超过预算 ${assetGrowthReview.budget}，存在设定膨胀风险。`,
+      action: '进入设定工坊，把本批新资产逐项确认入库、合并或删除；只保留服务当前卷目标和读者承诺的资产。',
+      metrics: {
+        asset_growth_risk_count: assetGrowthRiskTotal,
+        pending_asset_count: assetGrowthReview.pending_count,
+        asset_budget: assetGrowthReview.budget,
+      },
+      assetGrowthReview,
+      actionArea: 'assets',
+      actionKey: 'open_story_assets',
+    }))
   }
 
   const signals: AutoCreationBatchRiskSignal[] = [
@@ -960,10 +2179,22 @@ function buildBatchRiskRadar(args: {
       detail: coreRiskTotal > 0 ? `发现 ${coreRiskTotal} 项核心偏移风险` : '核心守恒正常',
     },
     {
+      key: 'runway',
+      label: '航线风险',
+      status: runwayRiskTotal > 0 ? 'warn' : 'ok',
+      detail: runwayRiskTotal > 0 ? `航线风险 ${runwayRiskTotal} 项，四问、读者燃料或红线约束未闭环` : '百万字航线兑现正常',
+    },
+    {
       key: 'payoff',
       label: '回报欠账',
       status: payoffDebtTotal > 0 ? 'warn' : 'ok',
       detail: payoffDebtTotal > 0 ? `累计 ${payoffDebtTotal} 项读者回报欠账` : '读者回报已兑现',
+    },
+    {
+      key: 'reader_pull',
+      label: '读者拉力',
+      status: readerPullRiskTotal > 0 ? 'warn' : 'ok',
+      detail: readerPullRiskTotal > 0 ? `读者拉力漏项 ${readerPullRiskTotal} 项，期待兑现或追读钩子不足` : '期待兑现和追读动力正常',
     },
     {
       key: 'storyline',
@@ -972,10 +2203,58 @@ function buildBatchRiskRadar(args: {
       detail: storylineRiskTotal > 0 ? `剧情线漏推/误触 ${storylineRiskTotal} 项` : '剧情线推进正常',
     },
     {
+      key: 'story_drive',
+      label: '故事力',
+      status: storyDriveRiskTotal > 0 ? 'warn' : 'ok',
+      detail: storyDriveRiskTotal > 0 ? `故事驱动力缺口 ${storyDriveRiskTotal} 项，主角选择、代价或状态变化不足` : '主角选择链和因果推进正常',
+    },
+    {
+      key: 'character_arc',
+      label: '人物弧光',
+      status: characterArcRiskTotal > 0 ? 'warn' : 'ok',
+      detail: characterArcRiskTotal > 0 ? `人物弧光缺口 ${characterArcRiskTotal} 项，欲望、缺陷、关系或成长节点不足` : '人物成长和关系变化正常',
+    },
+    {
+      key: 'innovation',
+      label: '创新/IP',
+      status: innovationRiskTotal > 0 ? 'warn' : 'ok',
+      detail: innovationRiskTotal > 0 ? `创新/IP化执行缺口 ${innovationRiskTotal} 项` : '创新点和可传播场面执行正常',
+    },
+    {
+      key: 'signature_scene',
+      label: '强场面',
+      status: signatureSceneRiskTotal > 0 ? 'warn' : 'ok',
+      detail: signatureSceneRiskTotal > 0 ? `强场面漏写 ${signatureSceneRiskTotal} 项，章节记忆点或短剧化场面不足` : '标志性场面兑现正常',
+    },
+    {
       key: 'readability',
       label: '可读性',
       status: readabilityRiskTotal > 0 ? 'warn' : 'ok',
       detail: readabilityRiskTotal > 0 ? `可读性/出戏风险 ${readabilityRiskTotal} 项` : '可读性风险可控',
+    },
+    {
+      key: 'serial_rhythm',
+      label: '连载节奏',
+      status: serialRhythmRiskTotal > 0 ? 'warn' : 'ok',
+      detail: serialRhythmRiskTotal > 0
+        ? `连载节奏同质化 ${serialRhythmRiskTotal} 项：${serialRhythmReview.dimensions.map((item: any) => item.label).join('、')}`
+        : '冲突来源、读者回报和章末钩子轮换正常',
+    },
+    {
+      key: 'asset_growth',
+      label: '新资产',
+      status: assetGrowthRiskTotal > 0 ? 'warn' : 'ok',
+      detail: assetGrowthRiskTotal > 0
+        ? `新资产待确认 ${assetGrowthReview.pending_count} 个，超过本批预算 ${assetGrowthReview.budget} 个`
+        : assetGrowthReview.summary,
+    },
+    {
+      key: 'volume_segment',
+      label: '卷段验收',
+      status: volumeSegmentRiskTotal > 0 ? 'warn' : 'ok',
+      detail: volumeSegmentRiskTotal > 0
+        ? `阶段验收漏兑现 ${volumeSegmentRiskTotal} 项，当前批次不能直接放行下一批`
+        : '当前卷/阶段目标未发现漏结算风险',
     },
   ]
   if (batchBriefVisible(args.nextBatchBrief)) {
@@ -993,12 +2272,234 @@ function buildBatchRiskRadar(args: {
     averageQualityScore,
     lowQualityCount,
     coreRiskCount: coreRiskTotal,
+    runwayRiskCount: runwayRiskTotal,
     payoffDebtCount: payoffDebtTotal,
+    readerPullRiskCount: readerPullRiskTotal,
     storylineRiskCount: storylineRiskTotal,
+    innovationRiskCount: innovationRiskTotal,
+    signatureSceneRiskCount: signatureSceneRiskTotal,
     readabilityRiskCount: readabilityRiskTotal,
+    serialRhythmRiskCount: serialRhythmRiskTotal,
+    assetGrowthRiskCount: assetGrowthRiskTotal,
+    volumeSegmentRiskCount: volumeSegmentRiskTotal,
     batchPlanRiskCount: batchPlanRiskTotal,
     signals,
     repairTasks: repairTasks.slice(0, 40),
+  }
+}
+
+function clampScore(value: number) {
+  if (!Number.isFinite(value)) return 0
+  return Math.max(0, Math.min(100, Math.round(value)))
+}
+
+function buildBatchCompletionDashboard(args: {
+  status: AutoCreationBatchReviewStatus
+  total: number
+  success: number
+  failed: number
+  delivered: number
+  riskRadar: AutoCreationBatchRiskRadar
+  nextAction: AutoCreationDirectorAction
+}): AutoCreationBatchCompletionDashboard {
+  if (args.status === 'empty') {
+    return {
+      visible: false,
+      status: 'empty',
+      score: 0,
+      label: '暂无批次',
+      summary: '还没有安全连写批次。',
+      nextAction: args.nextAction,
+      metrics: [],
+    }
+  }
+
+  const total = Math.max(0, Number(args.total || 0))
+  const success = Math.max(0, Number(args.success || 0))
+  const failed = Math.max(0, Number(args.failed || 0))
+  const delivered = Math.max(0, Number(args.delivered || 0))
+  const generationScore = total > 0 ? clampScore((success / total) * 100) : 0
+  const deliveryScore = success > 0 ? clampScore((delivered / success) * 100) : 0
+  const qualityScore = args.riskRadar.averageQualityScore !== null
+    ? clampScore(args.riskRadar.averageQualityScore)
+    : success > 0 ? 72 : 0
+  const planPenalty = failed * 25
+    + args.riskRadar.repairTasks.length * 20
+    + args.riskRadar.coreRiskCount * 10
+    + args.riskRadar.runwayRiskCount * 9
+    + args.riskRadar.payoffDebtCount * 5
+    + args.riskRadar.readerPullRiskCount * 8
+    + args.riskRadar.storylineRiskCount * 5
+    + args.riskRadar.innovationRiskCount * 8
+    + args.riskRadar.signatureSceneRiskCount * 10
+    + args.riskRadar.readabilityRiskCount * 5
+    + args.riskRadar.serialRhythmRiskCount * 8
+    + args.riskRadar.assetGrowthRiskCount * 6
+    + args.riskRadar.volumeSegmentRiskCount * 10
+    + args.riskRadar.batchPlanRiskCount * 10
+  const planScore = clampScore(100 - planPenalty)
+  const score = clampScore(generationScore * 0.3 + deliveryScore * 0.25 + qualityScore * 0.25 + planScore * 0.2)
+  const completionStatus: AutoCreationBatchCompletionStatus = args.status === 'warn' || args.status === 'risk'
+    ? 'needs_repair'
+    : args.status === 'done'
+      ? 'ready_next'
+      : 'in_progress'
+
+  const metrics: AutoCreationBatchCompletionMetric[] = [
+    {
+      key: 'generation',
+      label: '生成完成',
+      value: success,
+      target: total,
+      status: failed > 0 ? 'block' : total > 0 && success >= total ? 'ok' : 'warn',
+      detail: failed > 0 ? `${failed} 章失败，先去任务中心处理。` : total > 0 ? `${success}/${total} 章已生成。` : '暂无批次章节。',
+    },
+    {
+      key: 'delivery',
+      label: '交稿完成',
+      value: delivered,
+      target: success,
+      status: success > 0 && delivered >= success ? 'ok' : failed > 0 ? 'warn' : 'warn',
+      detail: success > 0 ? `${delivered}/${success} 章完成质检、修订和状态回填。` : '还没有成功生成的章节可交稿。',
+    },
+    {
+      key: 'quality',
+      label: '质检健康',
+      value: qualityScore,
+      target: 100,
+      status: args.riskRadar.status === 'warn' || args.riskRadar.lowQualityCount > 0 ? 'warn' : qualityScore >= 82 ? 'ok' : 'warn',
+      detail: args.riskRadar.averageQualityScore === null
+        ? '暂无批次质检均分。'
+        : `批次均分 ${args.riskRadar.averageQualityScore}${args.riskRadar.lowQualityCount > 0 ? `，低分 ${args.riskRadar.lowQualityCount} 章` : ''}。`,
+    },
+    {
+      key: 'plan',
+      label: '计划兑现',
+      value: planScore,
+      target: 100,
+      status: failed > 0 ? 'block' : args.riskRadar.repairTasks.length > 0 || args.riskRadar.batchPlanRiskCount > 0 ? 'warn' : 'ok',
+      detail: args.riskRadar.repairTasks.length > 0
+        ? `待处理 ${args.riskRadar.repairTasks.length} 个批次风险。`
+        : '本批读者回报、剧情线和连载计划未发现阻塞风险。',
+    },
+  ]
+
+  return {
+    visible: true,
+    status: completionStatus,
+    score,
+    label: completionStatus === 'ready_next' ? '可开下一批' : completionStatus === 'needs_repair' ? '待修复' : '交稿中',
+    summary: completionStatus === 'ready_next'
+      ? '本批生成、交稿和复盘已闭环，可以按护栏开启下一批。'
+      : completionStatus === 'needs_repair'
+        ? failed > 0
+          ? '批次生成存在失败章节，先处理失败和风险再继续。'
+          : '批次已交付但存在质量或计划风险，先修复再开启下一批。'
+        : '本批已生成，继续逐章质检、修订和故事状态回填。',
+    nextAction: args.nextAction,
+    metrics,
+  }
+}
+
+function batchRiskLabels(riskRadar: AutoCreationBatchRiskRadar) {
+  return [
+    riskRadar.lowQualityCount > 0 ? '质检低分' : '',
+    riskRadar.coreRiskCount > 0 ? '核心偏移' : '',
+    riskRadar.runwayRiskCount > 0 ? '航线风险' : '',
+    riskRadar.payoffDebtCount > 0 ? '回报欠账' : '',
+    riskRadar.readerPullRiskCount > 0 ? '读者拉力' : '',
+    riskRadar.storylineRiskCount > 0 ? '剧情线' : '',
+    riskRadar.innovationRiskCount > 0 ? '创新/IP' : '',
+    riskRadar.signatureSceneRiskCount > 0 ? '强场面' : '',
+    riskRadar.readabilityRiskCount > 0 ? '可读性' : '',
+    riskRadar.serialRhythmRiskCount > 0 ? '连载节奏' : '',
+    riskRadar.assetGrowthRiskCount > 0 ? '新资产' : '',
+    riskRadar.volumeSegmentRiskCount > 0 ? '卷级阶段' : '',
+    riskRadar.batchPlanRiskCount > 0 ? '批次计划' : '',
+  ].filter(Boolean)
+}
+
+function buildBatchHandoff(args: {
+  status: AutoCreationBatchReviewStatus
+  total: number
+  success: number
+  failed: number
+  delivered: number
+  items: AutoCreationBatchReviewItem[]
+  riskRadar: AutoCreationBatchRiskRadar
+  nextAction: AutoCreationDirectorAction
+}): AutoCreationBatchHandoff {
+  if (args.status === 'empty') {
+    return {
+      visible: false,
+      status: 'empty',
+      label: '暂无批次',
+      summary: '还没有安全连写批次。',
+      action: args.nextAction,
+      targetChapterNos: [],
+      riskLabels: [],
+      evidence: [],
+    }
+  }
+
+  const failedChapters = args.items.filter(item => item.status === 'failed').map(item => item.chapterNo).filter(Boolean)
+  const pendingDeliveryChapters = args.items
+    .filter(item => item.status === 'success' && !item.delivered)
+    .map(item => item.chapterNo)
+    .filter(Boolean)
+  const riskChapters = Array.from(new Set(args.riskRadar.repairTasks
+    .map((task: any) => Number(task?.chapter_no ?? task?.chapterNo ?? 0))
+    .filter(Boolean)))
+  const riskLabels = batchRiskLabels(args.riskRadar)
+
+  if (args.status === 'warn') {
+    return {
+      visible: true,
+      status: 'failed',
+      label: '先处理失败章节',
+      summary: `本批 ${args.success}/${args.total} 章生成成功，失败章节需要先去任务中心处理，避免跳过断点继续写后文。`,
+      action: args.nextAction,
+      targetChapterNos: failedChapters,
+      riskLabels: [],
+      evidence: failedChapters.map(no => `第${no}章生成失败`),
+    }
+  }
+
+  if (args.status === 'risk') {
+    return {
+      visible: true,
+      status: 'repair_risks',
+      label: '修复批次风险',
+      summary: `本批 ${args.delivered}/${args.total} 章已交稿，但仍有${riskLabels.length ? ` ${riskLabels.join('、')}` : '质量或计划'}风险；先修复再放行下一批。`,
+      action: args.nextAction,
+      targetChapterNos: riskChapters,
+      riskLabels,
+      evidence: args.riskRadar.signals.filter(signal => signal.status === 'warn').map(signal => signal.detail).slice(0, 4),
+    }
+  }
+
+  if (args.status === 'done') {
+    return {
+      visible: true,
+      status: 'continue_batch',
+      label: '放行下一批',
+      summary: `本批 ${args.delivered}/${args.total} 章已完成生成、质检、修订和故事状态回填，可以回到连续生产护栏开启下一批。`,
+      action: args.nextAction,
+      targetChapterNos: [],
+      riskLabels: [],
+      evidence: ['生成完成', '交稿完成', '质检健康', '计划兑现'],
+    }
+  }
+
+  return {
+    visible: true,
+    status: 'deliver_chapters',
+    label: '逐章交稿',
+    summary: `本批 ${args.success}/${args.total} 章已生成，先把待交稿章节逐章完成质检、修订、故事状态和剧情线回填。`,
+    action: args.nextAction,
+    targetChapterNos: pendingDeliveryChapters,
+    riskLabels: [],
+    evidence: pendingDeliveryChapters.map(no => `第${no}章待交稿`),
   }
 }
 
@@ -1088,6 +2589,463 @@ function buildLongformCompass(planning: PlanningWorkspaceModel, reviews: AnyReco
     axes,
     immutableRules,
     flexibleZones,
+  }
+}
+
+function launchSignal(
+  key: AutoCreationChapterLaunchSignal['key'],
+  label: string,
+  status: AutoCreationBatchGuardrailSignalStatus,
+  detail: string,
+): AutoCreationChapterLaunchSignal {
+  return { key, label, status, detail }
+}
+
+function launchGateStatus(signals: AutoCreationChapterLaunchSignal[]): AutoCreationChapterLaunchGateStatus {
+  if (signals.some(item => item.status === 'block')) return 'blocked'
+  if (signals.some(item => item.status === 'warn')) return 'warn'
+  return 'ready'
+}
+
+function buildChapterLaunchGate(
+  planning: PlanningWorkspaceModel,
+  writing: WritingCockpitModel,
+  longformCompass: AutoCreationLongformCompass,
+): AutoCreationChapterLaunchGate {
+  const chapter = (writing.nextChapter || {}) as AnyRecord
+  const raw = (chapter.rawPayload || chapter.raw_payload || {}) as AnyRecord
+  const chapterNo = Number(chapter.chapterNo || chapter.chapter_no || 0)
+  const readerPromise = firstText(longformCompass.readerPromise, planning.mainline.readerPromise)
+  const chapterGoal = firstText(chapter.chapterGoal, chapter.chapter_goal, raw.chapterGoal, raw.chapter_goal, raw.goal)
+  const conflict = firstText(chapter.conflict, raw.conflict, raw.coreConflict, raw.core_conflict)
+  const mainlineProgress = firstText(raw.mainlineProgress, raw.mainline_progress, raw.mustAdvance, raw.must_advance, planning.mainline.nextTurn, planning.mainline.currentVolumeGoal)
+  const readerPayoff = firstText(raw.readerPayoff, raw.reader_payoff, raw.payoff, raw.payoffModel, planning.mainline.payoffModel)
+  const endingHook = firstText(chapter.endingHook, chapter.ending_hook, raw.endingHook, raw.ending_hook, raw.hook)
+  const servesVolume = planning.mainline.currentChapterServesVolume !== false
+  const proseReady = Boolean(chapter.hasProse)
+
+  const signals = proseReady
+    ? [
+      launchSignal('reader_promise', '读者承诺', 'ok', readerPromise ? `已按「${readerPromise}」进入交稿闭环。` : '正文已生成，后续通过核心偏移复盘校正。'),
+      launchSignal('chapter_goal', '本章目标', 'ok', '正文已生成，下一步看交稿质检和故事状态回填。'),
+      launchSignal('core_conflict', '核心冲突', 'ok', '正文已生成，冲突落地由质检复盘判断。'),
+      launchSignal('mainline_service', '主线服务', 'ok', '正文已生成，主线服务由交稿复盘校正。'),
+      launchSignal('reader_payoff', '读者回报', 'ok', '正文已生成，读者回报由交稿复盘校正。'),
+      launchSignal('ending_hook', '章末钩子', 'ok', '正文已生成，章末钩子由追读复盘校正。'),
+    ]
+    : [
+      launchSignal('reader_promise', '读者承诺', readerPromise ? 'ok' : 'block', readerPromise ? `本章必须服务：${readerPromise}` : '缺少全书读者承诺，无法判断本章写出来后读者等什么。'),
+      launchSignal('chapter_goal', '本章目标', chapterGoal ? 'ok' : 'block', chapterGoal ? `目标：${chapterGoal}` : `第${chapterNo || '-'}章缺本章目标，容易写成流水账。`),
+      launchSignal('core_conflict', '核心冲突', conflict ? 'ok' : 'block', conflict ? `冲突：${conflict}` : '缺核心冲突，正文会缺压迫、选择和转折。'),
+      launchSignal(
+        'mainline_service',
+        '主线服务',
+        servesVolume && mainlineProgress ? 'ok' : servesVolume ? 'warn' : 'block',
+        servesVolume
+          ? mainlineProgress ? `推进：${mainlineProgress}` : '本章服务卷目标，但缺明确主线推进描述。'
+          : '当前章被标记为未服务卷目标，不能直接进入初稿。',
+      ),
+      launchSignal('reader_payoff', '读者回报', readerPayoff ? 'ok' : 'warn', readerPayoff ? `回报模型：${readerPayoff}` : '缺本章读者回报模型，建议补出爽点、信息增量或情绪回报。'),
+      launchSignal('ending_hook', '章末钩子', endingHook ? 'ok' : 'block', endingHook ? `钩子：${endingHook}` : '缺章末钩子，追读问题不清楚。'),
+    ]
+  const status = proseReady ? 'ready' : launchGateStatus(signals)
+  const actionPayload = {
+    source: 'chapter_launch_gate_repair',
+    chapter_no: chapterNo || null,
+    blocked_signals: signals.filter(item => item.status === 'block').map(item => item.key),
+    warning_signals: signals.filter(item => item.status === 'warn').map(item => item.key),
+  }
+  const missingReaderPromise = signals.some(item => item.key === 'reader_promise' && item.status === 'block')
+  const action = missingReaderPromise
+    ? planningAction('open_story_assets', '先补齐全书读者承诺、核心矛盾和长期爽点循环，再生成当前章。')
+    : planningAction('update_rolling_plan', '补齐当前章目标、核心冲突、主线推进、读者回报和章末钩子后再开写。', '补齐开写门禁', actionPayload)
+
+  return {
+    status,
+    label: status === 'ready' ? '本章可以开写' : status === 'warn' ? '本章开写需校准' : '本章开写门禁未通过',
+    summary: status === 'ready'
+      ? proseReady ? '当前章已有正文，继续交稿质检、修订和状态回填。' : '当前章已对齐读者承诺、章节目标、核心冲突、主线服务、读者回报和章末钩子。'
+      : status === 'warn'
+        ? '当前章基本可推进，但读者回报或主线推进还不够明确，建议先补齐再扩大连续生产。'
+        : '当前章未守住开写前提，直接生成正文容易导致主线漂移、冲突疲软或追读断线。',
+    signals,
+    action,
+  }
+}
+
+function rollingLayerStatusToPipeline(status: AutoCreationRollingScriptRoomStatus): AutoCreationPipelineStatus {
+  if (status === 'ready') return 'done'
+  if (status === 'blocked') return 'blocked'
+  return 'warning'
+}
+
+function currentChapterDirectorAction(writing: WritingCockpitModel): AutoCreationDirectorAction {
+  const handoff = (writing as any).chapterHandoffDesk || null
+  if (handoff?.visible) {
+    return writingAction(
+      (handoff.actionKey || writing.primaryActionKey || 'accept_chapter_and_continue') as WritingCockpitActionKey,
+      chapterHandoffDetail(handoff),
+      text(handoff.actionLabel, '处理章节交接'),
+    )
+  }
+  if (writing.chapterAcceptanceDesk?.visible) {
+    const action = writing.chapterAcceptanceDesk.recommendedAcceptanceAction || {}
+    return writingAction(
+      (action.key || writing.primaryActionKey || 'refresh_current_quality') as WritingCockpitActionKey,
+      '处理当前章交稿闭环，先完成质检、修订、状态同步或验收。',
+      action.label,
+    )
+  }
+  const plannerAction = writing.chapterPlanningDesk?.recommendedPlannerAction || {}
+  return writingAction(
+    (plannerAction.key || writing.primaryActionKey || 'build_scene_plan') as WritingCockpitActionKey,
+    '推进当前章任务书、场景卡或正文生成。',
+    plannerAction.label,
+  )
+}
+
+function chapterHandoffDetail(handoff: AnyRecord) {
+  const route = Number(handoff?.fromChapterNo || 0) && Number(handoff?.toChapterNo || 0)
+    ? `第${Number(handoff.fromChapterNo)}章到第${Number(handoff.toChapterNo)}章`
+    : '当前章节'
+  const previousEnding = text(handoff?.previousEnding)
+  const carryOver = arrayValue(handoff?.expectationCarryOver).map(item => text(item)).filter(Boolean).join('；')
+  const opening = arrayValue(handoff?.nextOpeningObligations).map(item => text(item)).filter(Boolean).join('；')
+  return [
+    `${route}交接待确认`,
+    previousEnding ? `上一章钩子：${previousEnding}` : '',
+    carryOver ? `期待承接：${carryOver}` : '',
+    opening ? `下一章开场：${opening}` : '',
+  ].filter(Boolean).join('；')
+}
+
+function writingQueueBadges(queue: AnyRecord) {
+  return [
+    Number(queue?.readyCount || 0) > 0 ? `可写 ${Number(queue.readyCount || 0)}` : '',
+    Number(queue?.blockedCount || 0) > 0 ? `待补 ${Number(queue.blockedCount || 0)}` : '',
+    Number(queue?.draftedCount || 0) > 0 ? `待质检 ${Number(queue.draftedCount || 0)}` : '',
+  ].filter(Boolean)
+}
+
+function buildWritingQueueFocus(writing: WritingCockpitModel): AutoCreationWritingQueueFocus {
+  const fallbackAction = currentChapterDirectorAction(writing)
+  const queue = (writing as any).writingQueue || {}
+  const items = arrayValue(queue?.items)
+  const readyCount = Number(queue?.readyCount || 0)
+  const blockedCount = Number(queue?.blockedCount || 0)
+  const draftedCount = Number(queue?.draftedCount || 0)
+  if (!queue?.visible || !items.length) {
+    return {
+      visible: false,
+      status: 'empty',
+      label: '写作队列未启用',
+      summary: '当前总控台按章节工作台推荐动作推进。',
+      currentChapterNo: null,
+      readyCount,
+      blockedCount,
+      draftedCount,
+      action: fallbackAction,
+      badges: [],
+    }
+  }
+
+  const currentChapterNo = Number(queue.currentChapterNo || items[0]?.chapterNo || 0) || null
+  const item = items.find(entry => Number(entry?.chapterNo || 0) === Number(currentChapterNo || 0)) || items[0]
+  const status = text(item?.status, 'ready_to_draft') as AutoCreationWritingQueueFocus['status']
+  const chapterNo = Number(item?.chapterNo || currentChapterNo || 0)
+  const title = text(item?.title, '未命名章节')
+  const badges = writingQueueBadges(queue)
+
+  if (status === 'needs_plan') {
+    const missingLabels = arrayValue(item?.missingPlanLabels).map(label => text(label)).filter(Boolean)
+    const batchRepair = queue?.planRepair?.visible
+    const action = batchRepair
+      ? planningAction(
+        'update_rolling_plan',
+        `补齐写作队列中 ${Number(queue.planRepair.chapterCount || blockedCount || 1)} 章的计划缺口，再进入正文生产。`,
+        text(queue.planRepair.label, '补齐队列计划'),
+        queue.planRepair.intent || null,
+      )
+      : planningAction(
+        'update_rolling_plan',
+        `补齐第${chapterNo || '-'}章计划缺口，明确目标、冲突、钩子和场景职责后再开写。`,
+        text(item?.actionLabel, '补齐本章计划'),
+        item?.repairIntent || null,
+      )
+    return {
+      visible: true,
+      status,
+      label: '本章计划缺口',
+      summary: `第${chapterNo || '-'}章《${title}》存在计划缺口：${missingLabels.join('、') || text(item?.actionHint, '缺目标、冲突或章末钩子')}。先补计划，避免正文生成时主线和读者回报跑偏。`,
+      currentChapterNo,
+      readyCount,
+      blockedCount,
+      draftedCount,
+      action,
+      badges,
+    }
+  }
+
+  if (status === 'draft_generated') {
+    return {
+      visible: true,
+      status,
+      label: '本章待质检',
+      summary: `第${chapterNo || '-'}章《${title}》已有正文，下一步应进入质检、修订、故事状态回填和验收。`,
+      currentChapterNo,
+      readyCount,
+      blockedCount,
+      draftedCount,
+      action: fallbackAction,
+      badges,
+    }
+  }
+
+  return {
+    visible: true,
+    status: 'ready_to_draft',
+    label: '本章开写就绪',
+    summary: `第${chapterNo || '-'}章《${title}》的章节计划已就绪，可以按任务书、场景卡和字数门禁生成初稿。`,
+    currentChapterNo,
+    readyCount,
+    blockedCount,
+    draftedCount,
+    action: fallbackAction,
+    badges,
+  }
+}
+
+function writingQueueRelease(writing: WritingCockpitModel, expectedChapterCount: number) {
+  const queue = (writing as any).writingQueue || {}
+  const items = arrayValue(queue?.items)
+  const targetCount = Math.max(0, Number(expectedChapterCount || 0))
+  const focus = buildWritingQueueFocus(writing)
+  const emptyRelease = {
+    allowedChapters: [] as AutoCreationBatchReleaseChapter[],
+    blockedChapters: [] as AutoCreationBatchReleaseChapter[],
+  }
+
+  if (!queue?.visible || !items.length || targetCount <= 0) {
+    return {
+      signal: signal('写作队列放行', 'ok' as const, '当前按章节工作台状态放行。'),
+      safeChapterCount: targetCount,
+      action: focus.action,
+      ...emptyRelease,
+    }
+  }
+
+  const currentChapterNo = Number(queue.currentChapterNo || items[0]?.chapterNo || 0)
+  const ordered = items
+    .filter(item => Number(item?.chapterNo || 0) >= currentChapterNo)
+    .sort((a, b) => Number(a?.chapterNo || 0) - Number(b?.chapterNo || 0))
+  let consecutiveReady = 0
+  for (const item of ordered) {
+    if (text(item?.status) !== 'ready_to_draft') break
+    consecutiveReady += 1
+  }
+  const allowedChapters = ordered.slice(0, Math.min(consecutiveReady, targetCount)).map(item => ({
+    chapterNo: Number(item?.chapterNo || 0),
+    title: text(item?.title, '未命名章节'),
+    status: 'allowed' as const,
+    reason: '队列状态可开写',
+  }))
+  const nextBlocked = ordered[consecutiveReady]
+  const blockedChapters = nextBlocked ? [{
+    chapterNo: Number(nextBlocked?.chapterNo || 0),
+    title: text(nextBlocked?.title, '未命名章节'),
+    status: 'blocked' as const,
+    reason: text(nextBlocked?.statusLabel, text(nextBlocked?.actionHint, '未进入可写状态')),
+  }] : []
+
+  if (consecutiveReady >= targetCount) {
+    return {
+      signal: signal('写作队列放行', 'ok' as const, `写作队列连续可写 ${consecutiveReady} 章，可覆盖本轮安全批次。`),
+      safeChapterCount: targetCount,
+      action: focus.action,
+      allowedChapters,
+      blockedChapters: [],
+    }
+  }
+
+  if (consecutiveReady > 0) {
+    const detail = `写作队列连续可写 ${consecutiveReady} 章；第${Number(nextBlocked?.chapterNo || 0)}章仍是「${text(nextBlocked?.statusLabel, '未就绪')}」，本轮降为单章推进，先补齐后续计划或交稿。`
+    const action = queue?.planRepair?.visible
+      ? planningAction('update_rolling_plan', detail, text(queue.planRepair.label, '补齐队列计划'), queue.planRepair.intent || null)
+      : focus.action
+    return {
+      signal: signal('写作队列放行', 'warn' as const, detail),
+      safeChapterCount: consecutiveReady,
+      action,
+      allowedChapters,
+      blockedChapters,
+    }
+  }
+
+  return {
+    signal: signal('写作队列放行', 'block' as const, focus.summary || '当前写作队列没有连续可写章节，先补计划或处理交稿。'),
+    safeChapterCount: 0,
+    action: focus.action,
+    allowedChapters: [],
+    blockedChapters,
+  }
+}
+
+function releaseChapterLabel(chapter: AutoCreationBatchReleaseChapter) {
+  return `第${chapter.chapterNo}章《${chapter.title}》`
+}
+
+function buildBatchReleaseWindow(
+  nextBatchBrief: AutoCreationNextBatchBrief,
+  queueRelease: {
+    allowedChapters: AutoCreationBatchReleaseChapter[]
+    blockedChapters: AutoCreationBatchReleaseChapter[]
+  },
+): AutoCreationBatchReleaseWindow {
+  const allowedChapters = queueRelease.allowedChapters.length
+    ? queueRelease.allowedChapters
+    : nextBatchBrief.chapters.map(chapter => ({
+      chapterNo: chapter.chapterNo,
+      title: chapter.title,
+      status: 'allowed' as const,
+      reason: '护栏放行',
+    }))
+  const blockedChapters = queueRelease.blockedChapters
+  const allowedLabel = allowedChapters.length
+    ? `本批放行 ${allowedChapters.map(releaseChapterLabel).join('、')}`
+    : '本批没有放行章节'
+  const blockedLabel = blockedChapters.length
+    ? `；${blockedChapters.map(chapter => `${releaseChapterLabel(chapter)}因${chapter.reason}被拦截`).join('、')}`
+    : ''
+  return {
+    summary: `${allowedLabel}${blockedLabel}。`,
+    allowedChapters,
+    blockedChapters,
+  }
+}
+
+function buildRollingScriptRoom(
+  planning: PlanningWorkspaceModel,
+  writing: WritingCockpitModel,
+  longformCompass: AutoCreationLongformCompass,
+): AutoCreationRollingScriptRoom {
+  const chapter = targetChapter(writing)
+  const nextBatchBrief = buildNextBatchBrief({ planning, writing, safeChapterCount: 10 })
+  const nextChapters = nextBatchBrief.chapters
+  const currentAction = currentChapterDirectorAction(writing)
+  const chapterReady = Boolean(chapter) && (
+    Boolean(chapter?.hasProse)
+    || writing.chapterPlanningDesk?.readiness === 'ready'
+    || writing.chapterPlanningDesk?.scenePlanStatus === 'ready'
+    || arrayValue((writing.chapterPlanningDesk as any)?.sceneCards).length > 0
+  )
+  const future10 = planning.topStatus.future10Coverage
+  const future100 = planning.topStatus.future100Coverage
+  const volumeBeat = planning.volumeBeatBudget
+  const layers: AutoCreationRollingScriptLayer[] = [
+    {
+      key: 'current_chapter',
+      label: '当前章',
+      status: !chapter ? 'blocked' : chapterReady ? 'ready' : 'needs_attention',
+      detail: chapter
+        ? `第${chapter.chapterNo}章《${chapter.title || '未命名'}》：${chapter.hasProse ? '已有正文，进入交稿闭环。' : writing.chapterPlanningDesk?.statusLabel || '等待章节任务书。'}`
+        : '还没有可写章节。',
+      evidence: [
+        chapter?.chapterGoal ? `目标：${chapter.chapterGoal}` : '',
+        chapter?.conflict ? `冲突：${chapter.conflict}` : '',
+        chapter?.endingHook ? `钩子：${chapter.endingHook}` : '',
+      ].filter(Boolean),
+      action: currentAction,
+    },
+    {
+      key: 'next_10',
+      label: '未来10章',
+      status: future10.ready ? 'ready' : Number(future10.planned || 0) >= 5 ? 'needs_attention' : 'blocked',
+      detail: `未来10章 ${future10.label}，${future10.ready ? '短周期排期可支撑当前章。' : '需要补齐短周期章节职责、冲突和钩子。'}`,
+      evidence: nextChapters.slice(0, 3).map(item => `第${item.chapterNo}章：${item.chapterTask || item.conflict || item.title}`),
+      action: planningAction('update_rolling_plan', '补齐未来10章滚动规划，明确每章职责、冲突、回报和章末钩子。'),
+    },
+    {
+      key: 'future_100',
+      label: '未来100章',
+      status: future100.ready ? 'ready' : Number(future100.planned || 0) >= 30 ? 'needs_attention' : 'blocked',
+      detail: `未来100章 ${future100.label}，${future100.ready ? '中长期骨架足够约束批量生产。' : '中长期骨架不足，安全连写容易跑偏。'}`,
+      evidence: future100.missingChapters.slice(0, 3).map(no => `缺第${no}章`),
+      action: planningAction(future100.ready ? 'future100_audit' : 'future100_generate', future100.ready ? '检查未来100章骨架是否仍匹配当前剧情。' : '生成或补齐未来100章骨架。'),
+    },
+    {
+      key: 'current_volume',
+      label: '当前卷',
+      status: volumeBeat.status === 'ready' ? 'ready' : volumeBeat.status === 'blocked' ? 'blocked' : 'needs_attention',
+      detail: `${volumeBeat.label || `爆点预算 ${volumeBeat.score}`}，${volumeBeat.summary || '等待当前卷高潮与爽点预算。'}`,
+      evidence: [
+        volumeBeat.currentVolumeTitle,
+        volumeBeat.chapterRange,
+        `爆点 ${volumeBeat.climaxCount}/${volumeBeat.climaxTarget}`,
+        `回报 ${volumeBeat.payoffCount}/${volumeBeat.payoffTarget}`,
+      ].filter(Boolean),
+      action: planningAction('complete_volume_plan', volumeBeat.nextActions[0] || '补齐当前卷目标、小高潮、中高潮、卷末爆点和读者回报。'),
+    },
+    {
+      key: 'book_compass',
+      label: '全书罗盘',
+      status: longformCompass.status === 'ready' ? 'ready' : 'needs_attention',
+      detail: longformCompass.readerPromise ? `全书罗盘：${longformCompass.readerPromise}` : longformCompass.summary,
+      evidence: longformCompass.immutableRules.slice(0, 3),
+      action: planningAction(longformCompass.status === 'ready' ? 'longform_creation_diagnosis' : 'open_story_assets', longformCompass.status === 'ready' ? '重新运行创作诊断，确认核心、故事强度、创新和读者吸引仍然达标。' : '补齐读者承诺、核心矛盾和长期爽点循环。'),
+    },
+  ]
+  const status: AutoCreationRollingScriptRoomStatus = layers.some(layer => layer.status === 'blocked')
+    ? 'blocked'
+    : layers.some(layer => layer.status === 'needs_attention')
+      ? 'needs_attention'
+      : 'ready'
+  const firstActionLayer = layers.find(layer => layer.status !== 'ready')
+  const repairTasks = layers
+    .filter(layer => layer.key !== 'current_chapter' && layer.status !== 'ready')
+    .map(layer => ({
+      task_type: 'repair_script_room',
+      issue_type: 'script_room_layer_gap',
+      severity: layer.status === 'blocked' ? 'high' : 'medium',
+      title: `${layer.label}剧本室修复`,
+      message: layer.detail,
+      action: layer.action.description || `修复${layer.label}规划缺口。`,
+      acceptance_criteria: [
+        '剧本室对应层级恢复绿色或人工确认可继续生产',
+        '修复后重新查看自动创作总控台，确认当前章、未来10章、未来100章、当前卷和全书罗盘不再互相冲突',
+      ],
+      task_status: 'open',
+      source: 'rolling_script_room',
+      layer_key: layer.key,
+      layer_label: layer.label,
+      action_area: layer.action.area,
+      action_key: layer.action.key,
+      evidence: layer.evidence,
+      payload: {
+        layer,
+        focus_range: nextBatchBrief.chapterRangeLabel,
+        next_chapters: nextChapters.slice(0, 6),
+      },
+    }))
+  const repairAction = opsAction(
+    'create_script_room_repair',
+    '生成剧本室修复任务',
+    repairTasks.length
+      ? `把 ${repairTasks.length} 个百章剧本室黄/红层级写入任务中心。`
+      : '当前百章剧本室没有需要任务化的缺口。',
+    repairTasks.length === 0,
+  )
+  return {
+    status,
+    label: status === 'ready' ? '百章剧本就绪' : status === 'blocked' ? '百章剧本阻塞' : '百章剧本待校准',
+    summary: status === 'ready'
+      ? '当前章、未来10章、未来100章、当前卷和全书罗盘已对齐，可进入本章生产或小批量安全连写。'
+      : '先校准红/黄层级，再进入正文生成；避免单章看似顺畅但几十章后主线、爆点或读者承诺松动。',
+    focusRangeLabel: nextBatchBrief.chapterRangeLabel || (chapter ? `第${chapter.chapterNo}章` : '未确定'),
+    layers,
+    nextChapters,
+    nextAction: firstActionLayer?.action || currentAction,
+    repairTasks,
+    repairAction,
   }
 }
 
@@ -1590,6 +3548,110 @@ function buildNextBatchBriefRecovery(args: {
   }
 }
 
+function buildLongformMemoryAnchor(storyState: AnyRecord) {
+  const state = storyState || {}
+  const global = state.global || state
+  const characterStates = arrayValue(state.characters)
+    .map((item: any) => {
+      const name = firstText(item?.name, item?.character_name, item?.title)
+      if (!name) return ''
+      const status = firstText(item?.status, item?.state, item?.current_state, item?.arc_state)
+      const location = firstText(item?.location, item?.current_location)
+      return [name, status, location ? `@${location}` : ''].filter(Boolean).join('：').replace('：@', '@')
+    })
+    .filter(Boolean)
+    .slice(0, 8)
+  const openQuestions = [
+    ...arrayValue(global?.open_questions),
+    ...arrayValue(state?.open_questions),
+  ].map((item: any) => firstText(item?.text, item?.summary, item?.description, item)).filter(Boolean)
+  const payoffDebts = [
+    ...arrayValue(global?.payoff_queue),
+    ...arrayValue(global?.payoff_debts),
+    ...arrayValue(state?.payoff_queue),
+    ...arrayValue(state?.payoff_debts),
+  ].map((item: any) => firstText(item?.text, item?.summary, item?.description, item)).filter(Boolean)
+  const anchor = {
+    last_updated_chapter: Number(state.last_updated_chapter || global.last_updated_chapter || 0) || null,
+    core_promise: firstText(global.core_promise, global.reader_promise, global.promise, state.core_promise, state.reader_promise),
+    current_volume_goal: firstText(global.current_volume_goal, global.volume_goal, state.current_volume_goal, state.volume_goal),
+    current_mainline: firstText(global.current_mainline, global.mainline, state.current_mainline, state.mainline),
+    character_states: characterStates,
+    open_questions: Array.from(new Set(openQuestions)).slice(0, 8),
+    payoff_debts: Array.from(new Set(payoffDebts)).slice(0, 8),
+  }
+  const hasAnchor = Boolean(
+    anchor.last_updated_chapter
+    || anchor.core_promise
+    || anchor.current_volume_goal
+    || anchor.current_mainline
+    || anchor.character_states.length
+    || anchor.open_questions.length
+    || anchor.payoff_debts.length,
+  )
+  return hasAnchor ? anchor : null
+}
+
+const SAFE_BATCH_MODEL_PIPELINE = [
+  '章节任务书',
+  '正文初稿',
+  '字数门禁',
+  '商业主编改稿',
+  '自检修订',
+  '故事状态/剧情线回填',
+]
+
+function buildBatchPreflight(args: {
+  status: AutoCreationBatchGuardrailStatus
+  safeChapterCount: number
+  releaseWindow: AutoCreationBatchReleaseWindow
+  nextBatchBrief: AutoCreationNextBatchBrief
+  guardrails: AutoCreationBatchGuardrailSignal[]
+  storyState?: AnyRecord | null
+}): AutoCreationBatchPreflight {
+  const allowedChapterNos = args.releaseWindow.allowedChapters.map(chapter => Number(chapter.chapterNo || 0)).filter(Boolean)
+  const blockedChapterNos = args.releaseWindow.blockedChapters.map(chapter => Number(chapter.chapterNo || 0)).filter(Boolean)
+  const guardrailWarnings = args.guardrails
+    .filter(item => item.status !== 'ok')
+    .map(item => `${item.label}：${item.detail}`)
+  const blockedWarnings = args.releaseWindow.blockedChapters
+    .map(chapter => `第${chapter.chapterNo}章《${chapter.title}》被拦截：${chapter.reason}`)
+  const warnings = Array.from(new Set([...guardrailWarnings, ...blockedWarnings])).slice(0, 8)
+  const visible = args.nextBatchBrief.visible || allowedChapterNos.length > 0 || blockedChapterNos.length > 0
+  const summary = args.status === 'ready'
+    ? `本批将按护栏放行 ${allowedChapterNos.length} 章：${args.nextBatchBrief.chapterRangeLabel || allowedChapterNos.map(no => `第${no}章`).join('、')}。`
+    : args.status === 'caution'
+      ? `本批只放行 ${allowedChapterNos.length || args.safeChapterCount} 章，后续章节需要先处理黄色风险。`
+      : '当前护栏未通过，不会启动安全连写。'
+  const longformMemoryAnchor = buildLongformMemoryAnchor(args.storyState || {})
+
+  return {
+    visible,
+    status: args.status,
+    title: '安全连写预执行确认',
+    summary,
+    allowedChapterNos,
+    blockedChapterNos,
+    modelPipeline: SAFE_BATCH_MODEL_PIPELINE,
+    warnings,
+    longformMemoryAnchor,
+    inputSnapshot: {
+      source: 'auto_creation_safe_batch_preflight',
+      guardrail_status: args.status,
+      safe_chapter_count: args.safeChapterCount,
+      allowed_chapter_nos: allowedChapterNos,
+      blocked_chapter_nos: blockedChapterNos,
+      chapter_range_label: args.nextBatchBrief.chapterRangeLabel,
+      release_window: args.releaseWindow,
+      next_batch_brief: args.nextBatchBrief,
+      guardrails: args.guardrails,
+      model_pipeline: SAFE_BATCH_MODEL_PIPELINE,
+      warnings,
+      ...(longformMemoryAnchor ? { longform_memory_anchor: longformMemoryAnchor } : {}),
+    },
+  }
+}
+
 function buildBatchGuardrail(args: {
   planning: PlanningWorkspaceModel
   writing: WritingCockpitModel
@@ -1598,6 +3660,9 @@ function buildBatchGuardrail(args: {
   hasModel: boolean
   mainAction: AutoCreationDirectorAction
   longformCapacity: AutoCreationLongformCapacity
+  deliveryRiskGate: AutoCreationDeliveryRiskGate
+  chapterLaunchGate: AutoCreationChapterLaunchGate
+  storyState?: AnyRecord | null
 }): AutoCreationBatchGuardrail {
   const planning = args.planning
   const writing = args.writing
@@ -1605,26 +3670,89 @@ function buildBatchGuardrail(args: {
   const future100 = planning.topStatus.future100Coverage
   const planningDesk = writing.chapterPlanningDesk
   const acceptance = writing.chapterAcceptanceDesk
+  const chapterHandoff = (writing as any).chapterHandoffDesk || null
+  const chapterHandoffVisible = Boolean(chapterHandoff?.visible)
   const running = hasRunningTasks(args.activeTasks)
   const retentionActionNeeded = retentionNeedsAction(planning)
   const storylineActionNeeded = storylineNeedsAction(planning)
+  const characterArcActionNeeded = characterArcNeedsAction(planning)
   const volumeBeatActionNeeded = volumeBeatNeedsAction(planning)
   const rhythmActionNeeded = rhythmNeedsAction(planning)
+  const canonRunway = buildCanonRunway(writing)
   const future100Status = future100ReserveStatus(planning)
   const capacityStatus: AutoCreationBatchGuardrailSignalStatus = args.longformCapacity.status === 'ready'
     ? 'ok'
     : args.longformCapacity.status === 'blocked'
       ? 'block'
       : 'warn'
+  const fatigue = planning.recentFatigueRadar
+  const fatigueWarnings = arrayValue(fatigue?.signals).filter(item => text(item?.status) === 'warn')
+  const fatigueStatus: AutoCreationBatchGuardrailSignalStatus = fatigue?.status === 'needs_attention' || fatigueWarnings.length > 0
+    ? 'warn'
+    : 'ok'
+  const fatigueWarningDetail = [
+    ...fatigueWarnings.map(item => text(item?.detail)).filter(Boolean),
+    text(fatigue?.summary),
+  ].filter(Boolean).join('；')
+  const fatigueDetail = fatigueStatus === 'warn'
+    ? firstText(
+        fatigueWarningDetail,
+        arrayValue(fatigue?.nextActions)[0],
+        `${fatigueWarnings.length || 1} 类近10章同质化风险，需要先换冲突来源、回报形态、章末问题或可视化场面。`,
+      )
+    : firstText(fatigue?.summary, '近10章冲突来源、回报形态、章末钩子和可视化场面没有明显同质化。')
+  const storyPressureLadder = planning.storyPressureLadder
+  const storyPressureWarnings = arrayValue(storyPressureLadder?.signals).filter(item => text(item?.status) === 'warn')
+  const storyPressureBlocks = arrayValue(storyPressureLadder?.signals).filter(item => text(item?.status) === 'block')
+  const storyPressureStatus: AutoCreationBatchGuardrailSignalStatus = storyPressureLadder?.status === 'blocked' || storyPressureBlocks.length > 0
+    ? 'block'
+    : storyPressureLadder?.status === 'needs_attention' || storyPressureWarnings.length > 0
+      ? 'warn'
+      : 'ok'
+  const storyPressureDetail = storyPressureStatus !== 'ok'
+    ? firstText(
+        storyPressureLadder?.summary,
+        arrayValue(storyPressureLadder?.nextActions)[0],
+        `${storyPressureWarnings.length || storyPressureBlocks.length || 1} 项故事压力风险，需要补明确压力源、冲突升级、赌注升级或反转逼迫。`,
+      )
+    : firstText(storyPressureLadder?.summary, '未来章节有明确压力源、冲突升级、赌注升级和反转逼迫。')
+  const storyUnitWorkshop = planning.storyUnitWorkshop
+  const storyUnitSignals = arrayValue(storyUnitWorkshop?.currentUnit?.signals)
+  const storyUnitWarnings = storyUnitSignals.filter(item => text(item?.status) === 'warn')
+  const storyUnitBlocks = storyUnitSignals.filter(item => text(item?.status) === 'block')
+  const storyUnitStatus: AutoCreationBatchGuardrailSignalStatus = storyUnitWorkshop?.status === 'blocked' || storyUnitBlocks.length > 0
+    ? 'block'
+    : storyUnitWorkshop?.status === 'needs_attention' || storyUnitWarnings.length > 0
+      ? 'warn'
+      : 'ok'
+  const storyUnitDetail = storyUnitStatus !== 'ok'
+    ? firstText(
+        storyUnitWorkshop?.summary,
+        storyUnitWorkshop?.currentUnit?.summary,
+        arrayValue(storyUnitWorkshop?.nextActions)[0],
+        `${storyUnitWarnings.length || storyUnitBlocks.length || 1} 项剧情单元缺口，需要补入口钩子、压力升级、小高潮回报、伏笔/剧情线或出单元钩子。`,
+      )
+    : firstText(storyUnitWorkshop?.summary, '当前剧情单元入口、压力升级、小高潮回报、伏笔/剧情线和出单元钩子完整。')
+  const deliveryRiskStatus: AutoCreationBatchGuardrailSignalStatus = args.deliveryRiskGate.status === 'ok'
+    ? 'ok'
+    : args.deliveryRiskGate.status === 'block'
+      ? 'block'
+      : 'warn'
   const hasScenePlan = planningDesk.scenePlanStatus === 'ready' || arrayValue(planningDesk.sceneCards).length > 0
-  const currentChapterDelivered = !Boolean(acceptance.visible)
+  const currentChapterDelivered = !Boolean(acceptance.visible) && !chapterHandoffVisible
   const chapterPlanIssue = text(arrayValue(planningDesk.reasons)[0], '当前章任务书或场景卡未就绪。')
   const governanceBlocked = args.hasBlockingPlan
     || retentionActionNeeded
     || storylineActionNeeded
+    || characterArcActionNeeded
     || volumeBeatActionNeeded
     || rhythmActionNeeded
   const chapterPlanReady = planningDesk.readiness === 'ready' && hasScenePlan
+  const launchGateSignalStatus: AutoCreationBatchGuardrailSignalStatus = args.chapterLaunchGate.status === 'blocked'
+    ? 'block'
+    : args.chapterLaunchGate.status === 'warn'
+      ? 'warn'
+      : 'ok'
 
   const guardrails = [
     signal(
@@ -1638,6 +3766,21 @@ function buildBatchGuardrail(args: {
       '长线治理',
       governanceBlocked ? 'block' : 'ok',
       governanceBlocked ? args.mainAction.description : '创作契约、留存、剧情线、爆点预算和长篇节奏均可进入生产。',
+    ),
+    signal(
+      canonRunway.label,
+      canonRunway.status,
+      canonRunway.detail,
+    ),
+    signal(
+      '本章开写门禁',
+      launchGateSignalStatus,
+      args.chapterLaunchGate.summary,
+    ),
+    signal(
+      '未清交稿风险',
+      deliveryRiskStatus,
+      args.deliveryRiskGate.summary,
     ),
     signal(
       '未来10章规划',
@@ -1655,15 +3798,36 @@ function buildBatchGuardrail(args: {
       args.longformCapacity.summary,
     ),
     signal(
+      '故事压力阶梯',
+      storyPressureStatus,
+      storyPressureDetail,
+    ),
+    signal(
+      '剧情单元',
+      storyUnitStatus,
+      storyUnitDetail,
+    ),
+    signal(
+      '近10章疲劳',
+      fatigueStatus,
+      fatigueDetail,
+    ),
+    signal(
       '章节任务书/场景卡',
       chapterPlanReady ? 'ok' : 'block',
       chapterPlanReady ? '当前章任务书和场景卡已就绪。' : chapterPlanIssue,
     ),
-    signal(
-      '当前章交稿',
-      currentChapterDelivered ? 'ok' : 'block',
-      currentChapterDelivered ? '当前没有未处理的交稿门禁。' : text(acceptance.statusLabel, '当前章仍需质检、修订或状态同步。'),
-    ),
+    chapterHandoffVisible
+      ? signal(
+        '章节交接',
+        'block',
+        chapterHandoffDetail(chapterHandoff),
+      )
+      : signal(
+        '当前章交稿',
+        currentChapterDelivered ? 'ok' : 'block',
+        currentChapterDelivered ? '当前没有未处理的交稿门禁。' : text(acceptance.statusLabel, '当前章仍需质检、修订或状态同步。'),
+      ),
   ]
 
   const preliminaryBlocking = guardrails.find(item => item.status === 'block')
@@ -1674,9 +3838,14 @@ function buildBatchGuardrail(args: {
     : preliminaryStatus === 'caution'
       ? 1
       : Math.max(1, Math.min(3, Number(future10.planned || 3), Number(planning.volumeBeatBudget?.plannedChapterCount || 3)))
-  const preliminaryNextBatchBrief = buildNextBatchBrief({ planning, writing, safeChapterCount: preliminarySafeChapterCount })
-  const batchBriefSignal = buildNextBatchBriefSignal(preliminaryNextBatchBrief, preliminarySafeChapterCount)
-  const briefRepair = buildNextBatchBriefRepair(preliminaryNextBatchBrief, preliminarySafeChapterCount, batchBriefSignal)
+  const queueRelease = writingQueueRelease(writing, preliminarySafeChapterCount)
+  const queueLimitedPreliminarySafeChapterCount = queueRelease.signal.status === 'block'
+    ? 0
+    : Math.min(preliminarySafeChapterCount, queueRelease.safeChapterCount)
+  const preliminaryNextBatchBrief = buildNextBatchBrief({ planning, writing, safeChapterCount: queueLimitedPreliminarySafeChapterCount })
+  const batchBriefSignal = buildNextBatchBriefSignal(preliminaryNextBatchBrief, queueLimitedPreliminarySafeChapterCount)
+  const briefRepair = buildNextBatchBriefRepair(preliminaryNextBatchBrief, queueLimitedPreliminarySafeChapterCount, batchBriefSignal)
+  guardrails.push(queueRelease.signal)
   guardrails.push(batchBriefSignal)
   guardrails.push(signal('每章交稿回填', 'ok', '连续生产仍按单章质检、修订、故事状态同步和资产发现逐章回填。'))
 
@@ -1685,22 +3854,60 @@ function buildBatchGuardrail(args: {
   const status: AutoCreationBatchGuardrailStatus = blocking ? 'blocked' : warning ? 'caution' : 'ready'
   let recommendedAction = args.mainAction
 
-  if (blocking?.label === '批次任务书' || warning?.label === '批次任务书') {
+  if (blocking?.label === '长线记忆' || warning?.label === '长线记忆') {
+    recommendedAction = canonRunway.action
+  } else if (blocking?.label === '剧情单元' || warning?.label === '剧情单元') {
+    recommendedAction = planningAction('update_rolling_plan', storyUnitDetail, '更新滚动规划', {
+      source: 'story_unit_repair',
+      story_unit_workshop: storyUnitWorkshop,
+    })
+  } else if (blocking?.label === '批次任务书' || warning?.label === '批次任务书') {
     recommendedAction = briefRepair.action
+  } else if (blocking?.label === '本章开写门禁' || warning?.label === '本章开写门禁') {
+    recommendedAction = args.chapterLaunchGate.action
+  } else if (blocking?.label === '写作队列放行' || warning?.label === '写作队列放行') {
+    recommendedAction = queueRelease.action
+  } else if (blocking?.label === '章节交接' || warning?.label === '章节交接') {
+    recommendedAction = writingAction(
+      (chapterHandoff?.actionKey || acceptance?.recommendedAcceptanceAction?.key || writing.primaryActionKey || 'accept_chapter_and_continue') as WritingCockpitActionKey,
+      chapterHandoffDetail(chapterHandoff),
+      text(chapterHandoff?.actionLabel, acceptance?.recommendedAcceptanceAction?.label || '处理章节交接'),
+    )
+  } else if (blocking?.label === '未清交稿风险' || warning?.label === '未清交稿风险') {
+    recommendedAction = opsAction('create_delivery_risk_repair', '生成风险修复任务', args.deliveryRiskGate.summary)
+  } else if (blocking?.label === '故事压力阶梯' || warning?.label === '故事压力阶梯') {
+    recommendedAction = planningAction('update_rolling_plan', storyPressureDetail, '更新滚动规划', {
+      source: 'story_pressure_repair',
+      story_pressure_ladder: storyPressureLadder,
+    })
   } else if (!blocking && warning?.label === '未来100章储备') {
     recommendedAction = planningAction('future100_generate', '先补齐更长线的未来100章储备，再扩大连续生产批次。')
   } else if (!blocking && warning?.label === '百万字产能') {
     recommendedAction = planningAction(args.longformCapacity.recommendedActionKey, args.longformCapacity.summary)
+  } else if (!blocking && warning?.label === '近10章疲劳') {
+    recommendedAction = planningAction('update_rolling_plan', fatigueDetail, '更新滚动规划', {
+      source: 'recent_fatigue_repair',
+      recent_fatigue_radar: fatigue,
+    })
   }
 
   const safeChapterCount = status === 'blocked'
     ? 0
     : status === 'caution'
-      ? 1
-      : preliminarySafeChapterCount
-  const nextBatchBrief = safeChapterCount === preliminarySafeChapterCount
+      ? Math.max(1, Math.min(1, queueLimitedPreliminarySafeChapterCount || 1))
+      : queueLimitedPreliminarySafeChapterCount
+  const nextBatchBrief = safeChapterCount === queueLimitedPreliminarySafeChapterCount
     ? preliminaryNextBatchBrief
     : buildNextBatchBrief({ planning, writing, safeChapterCount })
+  const releaseWindow = buildBatchReleaseWindow(nextBatchBrief, queueRelease)
+  const preflight = buildBatchPreflight({
+    status,
+    safeChapterCount,
+    releaseWindow,
+    nextBatchBrief,
+    guardrails,
+    storyState: args.storyState || {},
+  })
 
   if (status === 'ready') {
     recommendedAction = opsAction(
@@ -1725,14 +3932,174 @@ function buildBatchGuardrail(args: {
       : status === 'caution'
         ? warning?.label === '批次任务书'
           ? '下一批任务书还不够具体，本轮建议只推进 1 章，并先补齐后续章节职责、冲突和钩子。'
+          : warning?.label === '写作队列放行'
+            ? '写作队列后续章节还没有连续进入可写状态，本轮只推进当前可写章节，并先补齐后续计划或交稿。'
+          : warning?.label === '近10章疲劳'
+            ? `近10章疲劳雷达提示：${fatigueDetail} 本轮建议只推进 1 章，并先更新滚动规划更换压迫来源、回报形态、章末问题或可视化场面。`
+            : warning?.label === '故事压力阶梯'
+              ? '故事压力阶梯提示压力不足，本轮建议只推进 1 章，并先更新滚动规划补明确压力源、升级赌注和反转逼迫。'
+              : warning?.label === '剧情单元'
+                ? '剧情单元工坊提示当前事件包不完整，本轮建议只推进 1 章，并先更新滚动规划补入口钩子、小高潮、伏笔/剧情线和出单元钩子。'
           : '长线储备存在薄弱点，本轮建议只推进 1 章，并优先处理黄色风险。'
         : blocking?.detail || '当前存在阻塞项，暂不适合连续生产。',
     safeChapterCount,
     recommendedAction,
     guardrails,
+    releaseWindow,
+    preflight,
     nextBatchBrief,
     briefRepair,
     briefRecovery,
+  }
+}
+
+function runwayGate(
+  key: AutoCreationMillionWordRunwayGate['key'],
+  label: string,
+  status: AutoCreationBatchGuardrailSignalStatus,
+  detail: string,
+): AutoCreationMillionWordRunwayGate {
+  return { key, label, status, detail }
+}
+
+function runwayQuestion(
+  key: AutoCreationMillionWordRunwayQuestion['key'],
+  label: string,
+  answer: string,
+  fallback: string,
+  required = true,
+): AutoCreationMillionWordRunwayQuestion {
+  const normalized = text(answer)
+  return {
+    key,
+    label,
+    answer: normalized || fallback,
+    status: normalized ? 'ok' : required ? 'block' : 'warn',
+  }
+}
+
+function contractStatusToSignal(status: AutoCreationContractStatus | undefined): AutoCreationBatchGuardrailSignalStatus {
+  if (status === 'block') return 'block'
+  if (status === 'warn') return 'warn'
+  return 'ok'
+}
+
+function batchStatusToSignal(status: AutoCreationBatchGuardrailStatus): AutoCreationBatchGuardrailSignalStatus {
+  if (status === 'blocked') return 'block'
+  if (status === 'caution') return 'warn'
+  return 'ok'
+}
+
+function buildMillionWordRunway(args: {
+  planning: PlanningWorkspaceModel
+  writing: WritingCockpitModel
+  longformCompass: AutoCreationLongformCompass
+  creationContract: AutoCreationContractItem[]
+  chapterLaunchGate: AutoCreationChapterLaunchGate
+  canonRunway: AutoCreationCanonRunway
+  batchGuardrail: AutoCreationBatchGuardrail
+}): AutoCreationMillionWordRunway {
+  const { planning, writing, longformCompass, chapterLaunchGate, canonRunway, batchGuardrail } = args
+  const chapter = (writing.nextChapter || {}) as AnyRecord
+  const raw = (chapter.rawPayload || chapter.raw_payload || {}) as AnyRecord
+  const innovationContract = args.creationContract.find(item => item.key === 'innovation')
+  const chapterGoal = firstText(chapter.chapterGoal, chapter.chapter_goal, raw.chapterGoal, raw.chapter_goal, raw.goal)
+  const endingHook = firstText(chapter.endingHook, chapter.ending_hook, raw.endingHook, raw.ending_hook, raw.hook)
+  const mainlineMove = firstText(raw.mainlineProgress, raw.mainline_progress, planning.mainline.nextTurn, planning.mainline.currentVolumeGoal)
+  const freshness = firstText(
+    longformCompass.axes.find(item => item.key === 'innovation_hook')?.value,
+    innovationContract?.detail,
+    planning.mainline.readerPromise,
+  )
+  const fourQuestions: AutoCreationMillionWordRunwayQuestion[] = [
+    runwayQuestion('why_now', '这章为什么必须写', chapterGoal, '缺少本章明确目标，容易写成过渡章。'),
+    runwayQuestion('page_turn', '读者为什么翻页', endingHook, '缺少章末追读钩子。'),
+    runwayQuestion('mainline_move', '主线推进了什么', mainlineMove, '缺少主线推进落点。'),
+    runwayQuestion('freshness', '这一章的新意在哪', freshness, '缺少差异化执行点，容易滑回同题材套路。', false),
+  ]
+  const questionBlocking = fourQuestions.some(item => item.status === 'block')
+  const questionWarning = fourQuestions.some(item => item.status === 'warn')
+  const readerFuel = compactList([
+    firstText(raw.readerPayoff, raw.reader_payoff, raw.payoff, raw.payoffModel),
+    planning.mainline.payoffModel ? `长期爽点：${planning.mainline.payoffModel}` : '',
+    endingHook ? `章末钩子：${endingHook}` : '',
+    planning.first30Retention?.summary ? `留存状态：${planning.first30Retention.summary}` : '',
+  ], 5)
+  const launchReaderSignals = chapterLaunchGate.signals.filter(item => ['reader_payoff', 'ending_hook'].includes(item.key))
+  const readerFuelStatus: AutoCreationBatchGuardrailSignalStatus = launchReaderSignals.some(item => item.status === 'block')
+    ? 'block'
+    : launchReaderSignals.some(item => item.status === 'warn') || readerFuel.length < 2
+      ? 'warn'
+      : 'ok'
+  const batchSignal = batchStatusToSignal(batchGuardrail.status)
+  const gates: AutoCreationMillionWordRunwayGate[] = [
+    runwayGate(
+      'core_compass',
+      '核心罗盘',
+      longformCompass.status === 'ready' ? 'ok' : 'block',
+      longformCompass.summary,
+    ),
+    runwayGate(
+      'chapter_four_questions',
+      '本章四问',
+      questionBlocking ? 'block' : questionWarning ? 'warn' : 'ok',
+      fourQuestions.map(item => `${item.label}：${item.answer}`).join('；'),
+    ),
+    runwayGate(
+      'reader_fuel',
+      '追读燃料',
+      readerFuelStatus,
+      readerFuel.length ? readerFuel.join('；') : '缺少本章读者回报和章末钩子。',
+    ),
+    runwayGate(
+      'innovation',
+      '创新差异',
+      contractStatusToSignal(innovationContract?.status),
+      innovationContract?.detail || '按创作契约检查创新角度、差异护栏和可视化场面。',
+    ),
+    runwayGate(
+      'canon_memory',
+      '长线记忆',
+      canonRunway.status,
+      canonRunway.detail,
+    ),
+    runwayGate(
+      'batch_entry',
+      '连写准入',
+      batchSignal,
+      batchGuardrail.summary,
+    ),
+  ]
+  const blocking = gates.find(item => item.status === 'block')
+  const warning = gates.find(item => item.status === 'warn')
+  const status: AutoCreationMillionWordRunwayStatus = blocking ? 'blocked' : warning ? 'single_chapter' : 'ready'
+  const recommendedAction = canonRunway.status !== 'ok'
+    ? canonRunway.action
+    : chapterLaunchGate.status !== 'ready'
+      ? chapterLaunchGate.action
+      : batchGuardrail.status !== 'ready'
+        ? batchGuardrail.recommendedAction
+        : batchGuardrail.recommendedAction
+  const redLines = compactList([
+    ...longformCompass.immutableRules,
+    ...arrayValue(planning.mainline.risks).map(item => `当前风险：${text(item)}`),
+  ], 6)
+
+  return {
+    status,
+    label: status === 'ready' ? '航线可连续' : status === 'single_chapter' ? '航线仅单章' : '航线阻塞',
+    summary: status === 'ready'
+      ? `当前处于${planning.longformRhythm.currentBandLabel || '长篇跑道'}，核心、追读、创新、记忆和连写准入均可支撑小批量生产。`
+      : status === 'single_chapter'
+        ? `当前处于${planning.longformRhythm.currentBandLabel || '长篇跑道'}，${warning?.label || '长篇材料'}仍需关注，本轮只建议单章推进。`
+        : `${blocking?.label || '长篇航线'}未通过：${blocking?.detail || '先处理阻塞项，再进入自动创作。'}`,
+    bandLabel: planning.longformRhythm.currentBandLabel || '长篇跑道',
+    safeModeLabel: status === 'ready' ? `小批量连写 ${batchGuardrail.safeChapterCount} 章` : status === 'single_chapter' ? '仅单章推进' : '禁止连写',
+    gates,
+    fourQuestions,
+    redLines,
+    readerFuel,
+    recommendedAction,
   }
 }
 
@@ -1740,6 +4107,7 @@ function buildBatchReviewQueue(args: {
   runRecords: AnyRecord[]
   chapters: AnyRecord[]
   reviews: AnyRecord[]
+  planning?: PlanningWorkspaceModel | null
   storyState: AnyRecord
 }): AutoCreationBatchReviewQueue {
   const { runRecords, reviews, storyState } = args
@@ -1755,6 +4123,8 @@ function buildBatchReviewQueue(args: {
 
   const latest = safeBatchRuns[0]
   if (!latest) {
+    const nextAction = opsAction('open_task_center', '查看任务中心', '查看后台任务、失败记录和可恢复任务。')
+    const riskRadar = buildBatchRiskRadar({ items: [], chapters: args.chapters, reviews, planning: args.planning })
     return {
       visible: false,
       status: 'empty',
@@ -1767,8 +4137,27 @@ function buildBatchReviewQueue(args: {
       safeLimit: null,
       availableTotal: null,
       createdAt: '',
-      nextAction: opsAction('open_task_center', '查看任务中心', '查看后台任务、失败记录和可恢复任务。'),
-      riskRadar: buildBatchRiskRadar({ items: [], chapters: args.chapters, reviews }),
+      nextAction,
+      riskRadar,
+      completionDashboard: buildBatchCompletionDashboard({
+        status: 'empty',
+        total: 0,
+        success: 0,
+        failed: 0,
+        delivered: 0,
+        riskRadar,
+        nextAction,
+      }),
+      handoff: buildBatchHandoff({
+        status: 'empty',
+        total: 0,
+        success: 0,
+        failed: 0,
+        delivered: 0,
+        items: [],
+        riskRadar,
+        nextAction,
+      }),
       items: [],
     }
   }
@@ -1812,6 +4201,7 @@ function buildBatchReviewQueue(args: {
     items,
     chapters: args.chapters,
     reviews,
+    planning: args.planning,
     resolvedIssueKeys,
     nextBatchBrief: latest.input?.next_batch_brief || latest.input?.nextBatchBrief || null,
   })
@@ -1821,18 +4211,45 @@ function buildBatchReviewQueue(args: {
     : hasDeliveredBatchRisk
       ? 'risk'
       : allSuccessfulChaptersDelivered ? 'done' : 'ok'
+  const summary = hasFailure
+    ? `本次安全连写 ${success}/${total} 章成功，先处理失败章节，再开启下一批。`
+    : hasDeliveredBatchRisk
+      ? `本次安全连写 ${delivered}/${total} 章已交付，但存在批次质量风险，先复盘修正再继续。`
+    : allSuccessfulChaptersDelivered
+      ? `本次安全连写 ${delivered}/${total} 章已完成交稿闭环，可以开启下一批安全连写。`
+      : `本次安全连写 ${success}/${total} 章完成，下一步逐章质检、修订和状态回填。`
+  const nextAction = hasFailure
+    ? opsAction('open_task_center', '查看失败任务', '打开任务中心，定位失败章节和可恢复步骤。')
+    : hasDeliveredBatchRisk
+      ? opsAction('create_safe_batch_risk_repair', '生成批次修复任务', '把上一批的核心偏移、回报欠账、剧情线和可读性风险写入任务中心。')
+    : allSuccessfulChaptersDelivered
+      ? opsAction('start_safe_batch_generation', '开始下一批安全连写', '上一批已完成交稿闭环；按当前护栏继续小批量生产。')
+      : planningAction('open_quality_revision', '进入质检修订，按章节质量、核心偏移、读者回报和剧情线同步逐章验收。')
+  const completionDashboard = buildBatchCompletionDashboard({
+    status,
+    total,
+    success,
+    failed,
+    delivered,
+    riskRadar,
+    nextAction,
+  })
+  const handoff = buildBatchHandoff({
+    status,
+    total,
+    success,
+    failed,
+    delivered,
+    items,
+    riskRadar,
+    nextAction,
+  })
 
   return {
     visible: true,
     status,
     label: '安全连写复盘',
-    summary: hasFailure
-      ? `本次安全连写 ${success}/${total} 章成功，先处理失败章节，再开启下一批。`
-      : hasDeliveredBatchRisk
-        ? `本次安全连写 ${delivered}/${total} 章已交付，但存在批次质量风险，先复盘修正再继续。`
-      : allSuccessfulChaptersDelivered
-        ? `本次安全连写 ${delivered}/${total} 章已完成交稿闭环，可以开启下一批安全连写。`
-        : `本次安全连写 ${success}/${total} 章完成，下一步逐章质检、修订和状态回填。`,
+    summary,
     total,
     success,
     failed,
@@ -1840,16 +4257,524 @@ function buildBatchReviewQueue(args: {
     safeLimit: safeLimit > 0 ? safeLimit : null,
     availableTotal: availableTotal > 0 ? availableTotal : null,
     createdAt: text(latest.run?.created_at),
-    nextAction: hasFailure
-      ? opsAction('open_task_center', '查看失败任务', '打开任务中心，定位失败章节和可恢复步骤。')
-      : hasDeliveredBatchRisk
-        ? opsAction('create_safe_batch_risk_repair', '生成批次修复任务', '把上一批的核心偏移、回报欠账、剧情线和可读性风险写入任务中心。')
-      : allSuccessfulChaptersDelivered
-        ? opsAction('start_safe_batch_generation', '开始下一批安全连写', '上一批已完成交稿闭环；按当前护栏继续小批量生产。')
-        : planningAction('open_quality_revision', '进入质检修订，按章节质量、核心偏移、读者回报和剧情线同步逐章验收。'),
+    nextAction,
     riskRadar,
+    completionDashboard,
+    handoff,
     items,
   }
+}
+
+function batchGuardrailRiskLabels(guardrail: AutoCreationBatchGuardrail) {
+  return guardrail.guardrails
+    .filter(item => item.status !== 'ok')
+    .map(item => item.label)
+    .filter(Boolean)
+}
+
+function batchGuardrailEvidence(guardrail: AutoCreationBatchGuardrail) {
+  return guardrail.guardrails
+    .filter(item => item.status !== 'ok')
+    .map(item => item.detail)
+    .filter(Boolean)
+    .slice(0, 4)
+}
+
+function actionTargetChapterNos(action: AutoCreationDirectorAction) {
+  const payload = action.payload || {}
+  return [
+    ...arrayValue(payload?.chapter_nos),
+    ...arrayValue(payload?.chapterNos),
+    payload?.chapter_no,
+    payload?.chapterNo,
+  ].map(no => Number(no || 0)).filter(Boolean)
+}
+
+function reconcileBatchHandoffWithGuardrail(
+  queue: AutoCreationBatchReviewQueue,
+  guardrail: AutoCreationBatchGuardrail,
+): AutoCreationBatchReviewQueue {
+  if (!queue.visible || queue.status !== 'done' || guardrail.status === 'ready') return queue
+
+  const targetChapterNos = Array.from(new Set([
+    ...guardrail.releaseWindow.blockedChapters.map(chapter => Number(chapter.chapterNo || 0)),
+    ...guardrail.preflight.blockedChapterNos,
+    ...guardrail.nextBatchBrief.chapters.slice(0, 1).map(chapter => Number(chapter.chapterNo || 0)),
+    ...actionTargetChapterNos(guardrail.recommendedAction),
+  ].filter(Boolean)))
+  const label = guardrail.recommendedAction.key === 'update_rolling_plan' ? '补下一批计划' : '处理下一批护栏'
+  const riskLabels = batchGuardrailRiskLabels(guardrail)
+  const evidence = batchGuardrailEvidence(guardrail)
+
+  return {
+    ...queue,
+    handoff: {
+      ...queue.handoff,
+      visible: true,
+      status: 'prepare_next',
+      label,
+      summary: `上一批 ${queue.delivered}/${queue.total} 章已完成交稿闭环，但下一批尚未通过安全连写护栏；先处理${riskLabels.length ? `「${riskLabels[0]}」` : '下一批计划'}再继续连写。`,
+      action: guardrail.recommendedAction,
+      targetChapterNos,
+      riskLabels,
+      evidence,
+    },
+  }
+}
+
+function hasBatchReviewRisk(queue: AutoCreationBatchReviewQueue) {
+  return queue.visible && (queue.status === 'warn' || queue.status === 'risk')
+}
+
+function isFuelGovernanceAction(action: AutoCreationDirectorAction) {
+  if (action.area === 'writing' && [
+    'update_canon',
+    'fix_continuity',
+  ].includes(String(action.key))) return true
+  return action.area === 'planning' && [
+    'run_first30_retention',
+    'create_first30_repair',
+    'open_story_assets',
+    'complete_volume_plan',
+    'longform_pressure',
+    'open_quality_revision',
+    'update_rolling_plan',
+    'future100_generate',
+    'topic_validation',
+    'reference_diagnosis',
+  ].includes(String(action.key))
+}
+
+function buildFuelAction(args: {
+  mainAction: AutoCreationDirectorAction
+  longformCapacity: AutoCreationLongformCapacity
+}) {
+  if (isFuelGovernanceAction(args.mainAction)) return args.mainAction
+  const fuel = args.longformCapacity.fuelQueue[0]
+  if (fuel) {
+    return {
+      area: 'planning' as const,
+      key: fuel.actionKey,
+      label: fuel.actionLabel,
+      description: fuel.detail,
+      modelCall: fuel.modelCall,
+    }
+  }
+  return planningAction('longform_creation_diagnosis', '检查读者承诺、长线冲突、创新差异和留存牵引，作为今天继续生产前的总诊断。')
+}
+
+function buildChapterWorkAction(writing: WritingCockpitModel, writingQueueFocus?: AutoCreationWritingQueueFocus) {
+  if (writingQueueFocus?.visible) return writingQueueFocus.action
+  const acceptance = writing.chapterAcceptanceDesk
+  if (acceptance.visible) {
+    const action = acceptance.recommendedAcceptanceAction
+    return writingAction(action.key, '先把当前章走完质检、修订、状态回填和验收闭环。', action.label)
+  }
+  const plannerAction = writing.chapterPlanningDesk.recommendedPlannerAction
+  return writingAction(
+    plannerAction.key || writing.primaryActionKey,
+    '按章节任务书、场景卡和字数门禁推进当前章。',
+    plannerAction.label,
+  )
+}
+
+function buildDailyBattlePlan(args: {
+  planning: PlanningWorkspaceModel
+  writing: WritingCockpitModel
+  mainAction: AutoCreationDirectorAction
+  deliveryRiskGate: AutoCreationDeliveryRiskGate
+  batchGuardrail: AutoCreationBatchGuardrail
+  batchReviewQueue: AutoCreationBatchReviewQueue
+  longformCapacity: AutoCreationLongformCapacity
+  writingQueueFocus: AutoCreationWritingQueueFocus
+  hasBlockingPlan: boolean
+  hasModel: boolean
+  activeTasks: AnyRecord[]
+}): AutoCreationDailyBattlePlan {
+  const riskActive = args.deliveryRiskGate.status !== 'ok' || hasBatchReviewRisk(args.batchReviewQueue)
+  const canonBlocked = args.batchGuardrail.guardrails.find(item => item.label === '长线记忆')?.status === 'block'
+  const fuelActive = !riskActive && (
+    args.hasBlockingPlan
+    || retentionNeedsAction(args.planning)
+    || storylineNeedsAction(args.planning)
+    || characterArcNeedsAction(args.planning)
+    || volumeBeatNeedsAction(args.planning)
+    || rhythmNeedsAction(args.planning)
+    || args.longformCapacity.status === 'blocked'
+    || canonBlocked
+  )
+  const chapter = args.writing.nextChapter
+  const acceptance = args.writing.chapterAcceptanceDesk
+  const chapterHandoff = (args.writing as any).chapterHandoffDesk || null
+  const chapterHandoffVisible = Boolean(chapterHandoff?.visible)
+  const chapterDone = Boolean(chapter?.hasProse) && !acceptance.visible && !chapterHandoffVisible
+  const chapterBlocked = !chapter || args.writing.chapterPlanningDesk.readiness === 'blocked'
+  const chapterActive = !riskActive && !fuelActive && !chapterDone
+  const queueFocus = args.writingQueueFocus.visible ? args.writingQueueFocus : null
+
+  const clearRiskAction = args.deliveryRiskGate.status !== 'ok'
+    ? opsAction('create_delivery_risk_repair', '生成风险修复任务', args.deliveryRiskGate.summary)
+    : hasBatchReviewRisk(args.batchReviewQueue)
+      ? args.batchReviewQueue.nextAction
+      : opsAction('open_task_center', '查看任务中心', '查看后台任务、失败记录和可恢复任务。')
+  const fuelAction = buildFuelAction({
+    mainAction: args.mainAction,
+    longformCapacity: args.longformCapacity,
+  })
+  const chapterAction = buildChapterWorkAction(args.writing, args.writingQueueFocus)
+  const batchAction = args.batchGuardrail.recommendedAction
+  const batchStatus: AutoCreationPipelineStatus = riskActive
+    ? 'blocked'
+    : canonBlocked
+      ? 'blocked'
+    : fuelActive || chapterActive
+      ? 'pending'
+      : args.batchGuardrail.status === 'ready'
+        ? 'active'
+        : args.batchGuardrail.status === 'caution'
+          ? 'warning'
+          : 'blocked'
+
+  const steps: AutoCreationDailyBattleStep[] = [
+    {
+      key: 'clear_risks',
+      label: '清交稿风险',
+      status: riskActive ? 'active' : 'done',
+      detail: riskActive
+        ? args.deliveryRiskGate.status !== 'ok' ? args.deliveryRiskGate.summary : args.batchReviewQueue.summary
+        : '交稿风险、批次失败和质量复盘没有阻塞今天生产。',
+      action: clearRiskAction,
+      badges: [
+        args.deliveryRiskGate.totalOpen > 0 ? `未清 ${args.deliveryRiskGate.totalOpen}` : '',
+        args.deliveryRiskGate.highOpen > 0 ? `高危 ${args.deliveryRiskGate.highOpen}` : '',
+        hasBatchReviewRisk(args.batchReviewQueue) ? args.batchReviewQueue.label : '',
+      ].filter(Boolean),
+      gateChecks: [
+        '交稿风险清零或已生成修复任务',
+        '上一批失败、核心偏移、追读欠账、剧情线风险不继续滚入新章',
+      ],
+    },
+    {
+      key: 'fuel_materials',
+      label: '补长线材料',
+      status: riskActive ? 'pending' : fuelActive ? 'active' : 'done',
+      detail: fuelActive
+        ? args.mainAction.description
+        : '前30章留存、剧情线、人物成长、卷级爆点和长篇节奏可支撑今天单章推进。',
+      action: fuelAction,
+      badges: [
+        args.planning.first30Retention.score !== null ? `前30章 ${args.planning.first30Retention.score}` : '',
+        `剧情线 ${args.planning.storylineBoard.total}`,
+        args.longformCapacity.status !== 'ready' ? args.longformCapacity.label : '',
+      ].filter(Boolean),
+      gateChecks: [
+        '未来10章规划、剧情线、爆点预算和长篇节奏可支撑当前章',
+        '人物成长、关系推进和弧光兑现没有明显断档',
+        '读者承诺、主线方向、创新卖点和追读燃料仍清晰',
+      ],
+    },
+    {
+      key: 'chapter_work',
+      label: '写/修当前章',
+      status: riskActive || fuelActive
+        ? 'pending'
+        : chapterDone
+          ? 'done'
+          : chapterBlocked ? 'blocked' : 'active',
+      detail: queueFocus
+        ? `${queueFocus.label}：${queueFocus.summary}`
+        : chapterHandoffVisible
+          ? `${text(chapterHandoff?.label, '章节交接')}：${chapterHandoffDetail(chapterHandoff)}`
+        : chapterDone
+        ? '当前章已完成交稿闭环，可以准备下一批生产。'
+        : acceptance.visible
+          ? (acceptance.acceptanceReasons[0] || acceptance.statusLabel)
+          : args.writing.chapterPlanningDesk.reasons[0] || args.writing.topStatus.nextActionLabel,
+      action: chapterAction,
+      badges: queueFocus?.badges.length ? queueFocus.badges : [
+        chapterHandoffVisible ? `第${Number(chapterHandoff?.fromChapterNo || 0) || '-'}章→第${Number(chapterHandoff?.toChapterNo || 0) || '-' }章` : '',
+        chapterHandoffVisible ? text(chapterHandoff?.label) : '',
+        chapter ? `第${Number(chapter.chapterNo || 0)}章` : '',
+        chapter?.hasProse ? `${Number(chapter.wordCount || 0)}字` : args.writing.chapterPlanningDesk.statusLabel,
+      ].filter(Boolean),
+      gateChecks: [
+        '当前章完成任务书、正文、质检、修订、故事状态同步和验收闭环',
+        '正文满足字数门禁、核心不偏、读者期待和章末追读要求',
+      ],
+    },
+    {
+      key: 'batch_release',
+      label: '放行下一批',
+      status: batchStatus,
+      detail: args.batchGuardrail.summary,
+      action: batchAction,
+      badges: [
+        `安全 ${args.batchGuardrail.safeChapterCount}章`,
+        args.batchGuardrail.nextBatchBrief.visible ? args.batchGuardrail.nextBatchBrief.chapterRangeLabel : '',
+      ].filter(Boolean),
+      gateChecks: [
+        '下一批只放行安全连写护栏允许的连续章节',
+        '批次任务书、长线记忆、近10章疲劳和交稿回填均已通过',
+      ],
+    },
+  ]
+
+  const currentStep = steps.find(step => step.status === 'active')
+    || steps.find(step => step.status === 'blocked')
+    || steps.find(step => step.status === 'warning')
+    || steps[steps.length - 1]
+  const currentStepKey = currentStep.key
+  const summary = currentStepKey === 'clear_risks'
+    ? '今天先清未交稿风险，再进入章节生产；避免问题章节带着核心偏移、追读欠账或禁揭风险滚入后文。'
+    : currentStepKey === 'fuel_materials'
+      ? '今天先补长线材料，再写当前章；保证 300万到1000万字生产时主线、留存和爆点不断粮。'
+      : currentStepKey === 'chapter_work'
+        ? '今天先推进当前章，把任务书、正文、质检、修订和状态回填做成一个闭环。'
+        : '当前章闭环已完成，可以按护栏放行下一批小规模安全连写。'
+
+  return {
+    label: '连载日更作战',
+    summary,
+    currentStepKey,
+    steps,
+  }
+}
+
+function buildProductionLicense(args: {
+  hasModel: boolean
+  mainAction: AutoCreationDirectorAction
+  dailyBattlePlan: AutoCreationDailyBattlePlan
+  deliveryRiskGate: AutoCreationDeliveryRiskGate
+  batchReviewQueue: AutoCreationBatchReviewQueue
+  batchGuardrail: AutoCreationBatchGuardrail
+  chapterLaunchGate: AutoCreationChapterLaunchGate
+  millionWordRunway: AutoCreationMillionWordRunway
+}): AutoCreationProductionLicense {
+  const currentStep = args.dailyBattlePlan.steps.find(step => step.key === args.dailyBattlePlan.currentStepKey)
+    || args.dailyBattlePlan.steps[0]
+  const hasOpenDeliveryRisk = args.deliveryRiskGate.status !== 'ok'
+  const hasOpenBatchRisk = hasBatchReviewRisk(args.batchReviewQueue)
+  const hardBlocked = !args.hasModel
+    || hasOpenDeliveryRisk
+    || hasOpenBatchRisk
+    || args.chapterLaunchGate.status === 'blocked'
+    || args.millionWordRunway.status === 'blocked'
+    || currentStep.status === 'blocked'
+  const reasons = [
+    !args.hasModel ? '未选择可用模型' : '',
+    hasOpenDeliveryRisk ? args.deliveryRiskGate.summary : '',
+    hasOpenBatchRisk ? args.batchReviewQueue.summary : '',
+    args.chapterLaunchGate.status === 'blocked' ? args.chapterLaunchGate.summary : '',
+    args.millionWordRunway.status === 'blocked' ? args.millionWordRunway.summary : '',
+    currentStep.status === 'blocked' ? currentStep.detail : '',
+  ].filter(Boolean).slice(0, 4)
+
+  if (hardBlocked) {
+    return {
+      status: 'blocked',
+      label: '生产许可',
+      modeLabel: '禁止生产',
+      summary: reasons[0] || '当前存在未处理门禁，先完成总控台唯一下一步，再继续生成正文或安全连写。',
+      safeChapterCount: 0,
+      reasons,
+      badges: ['禁止连写', currentStep.label],
+      nextAction: currentStep.action || args.mainAction,
+    }
+  }
+
+  if (args.batchGuardrail.status === 'ready' && args.batchGuardrail.recommendedAction.key === 'start_safe_batch_generation') {
+    return {
+      status: 'batch_allowed',
+      label: '生产许可',
+      modeLabel: '小批量连写',
+      summary: `当前长线材料、交稿风险和下一批任务书已通过检查，可按安全连写放行 ${args.batchGuardrail.safeChapterCount} 章。`,
+      safeChapterCount: args.batchGuardrail.safeChapterCount,
+      reasons: ['长线材料可用', '交稿风险已清', '下一批任务书可执行'],
+      badges: [`安全 ${args.batchGuardrail.safeChapterCount}章`, args.batchGuardrail.nextBatchBrief.chapterRangeLabel].filter(Boolean),
+      nextAction: args.batchGuardrail.recommendedAction,
+    }
+  }
+
+  if (currentStep.key === 'chapter_work' && currentStep.status === 'active') {
+    return {
+      status: 'single_chapter',
+      label: '生产许可',
+      modeLabel: '单章生产',
+      summary: '先推进当前章，把任务书、正文、质检、修订和状态回填做成闭环；暂不放行下一批自动连写。',
+      safeChapterCount: 1,
+      reasons: [currentStep.detail],
+      badges: ['单章闭环', currentStep.label],
+      nextAction: currentStep.action,
+    }
+  }
+
+  if (args.batchGuardrail.status === 'caution') {
+    return {
+      status: 'single_chapter',
+      label: '生产许可',
+      modeLabel: '单章生产',
+      summary: '下一批护栏仍有谨慎项，只允许单章小步推进，避免批量生成时放大主线偏移或节奏疲劳。',
+      safeChapterCount: Math.max(1, Math.min(1, args.batchGuardrail.safeChapterCount || 1)),
+      reasons: args.batchGuardrail.guardrails.filter(item => item.status !== 'ok').map(item => item.detail).slice(0, 4),
+      badges: ['禁止批量', '单章校验'],
+      nextAction: args.batchGuardrail.recommendedAction,
+    }
+  }
+
+  return {
+    status: 'blocked',
+    label: '生产许可',
+    modeLabel: '禁止生产',
+    summary: currentStep.detail || '先完成当前总控步骤，再继续生产。',
+    safeChapterCount: 0,
+    reasons: [currentStep.detail].filter(Boolean),
+    badges: ['等待门禁', currentStep.label],
+    nextAction: currentStep.action || args.mainAction,
+  }
+}
+
+function buildTodayCommandDeck(args: {
+  dailyBattlePlan: AutoCreationDailyBattlePlan
+  productionLicense: AutoCreationProductionLicense
+  creationContract: AutoCreationContractItem[]
+  chapterLaunchGate: AutoCreationChapterLaunchGate
+  deliveryRiskGate: AutoCreationDeliveryRiskGate
+  batchGuardrail: AutoCreationBatchGuardrail
+  millionWordRunway: AutoCreationMillionWordRunway
+}): AutoCreationTodayCommandDeck {
+  const currentStep = args.dailyBattlePlan.steps.find(step => step.key === args.dailyBattlePlan.currentStepKey)
+    || args.dailyBattlePlan.steps[0]
+  const reasons = [
+    args.productionLicense.summary,
+    ...args.productionLicense.reasons,
+    currentStep?.detail || '',
+  ]
+
+  return {
+    label: '今日指挥条',
+    status: args.productionLicense.status,
+    modeLabel: args.productionLicense.modeLabel,
+    currentStepLabel: currentStep?.label || '等待下一步',
+    summary: args.productionLicense.summary,
+    reasons: Array.from(new Set(reasons.filter(Boolean))).slice(0, 3),
+    action: args.productionLicense.nextAction,
+    actionLabel: args.productionLicense.nextAction.label,
+    qualityGates: buildTodayQualityGates(args),
+    flow: args.dailyBattlePlan.steps.map(step => ({
+      key: step.key,
+      label: step.label,
+      status: step.status,
+    })),
+  }
+}
+
+function contractGateStatus(value: string): AutoCreationBatchGuardrailSignalStatus {
+  if (value === 'block' || value === 'blocked') return 'block'
+  if (value === 'warn' || value === 'warning' || value === 'needs_attention') return 'warn'
+  return 'ok'
+}
+
+function chapterLaunchQualityStatus(value: string): AutoCreationBatchGuardrailSignalStatus {
+  if (value === 'blocked') return 'block'
+  if (value === 'warn') return 'warn'
+  return 'ok'
+}
+
+function batchGateStatus(value: string): AutoCreationBatchGuardrailSignalStatus {
+  if (value === 'blocked') return 'block'
+  if (value === 'caution') return 'warn'
+  return 'ok'
+}
+
+function runwayGateStatus(value: string): AutoCreationBatchGuardrailSignalStatus {
+  if (value === 'blocked') return 'block'
+  return 'ok'
+}
+
+function mergeGateStatus(...values: AutoCreationBatchGuardrailSignalStatus[]): AutoCreationBatchGuardrailSignalStatus {
+  if (values.includes('block')) return 'block'
+  if (values.includes('warn')) return 'warn'
+  return 'ok'
+}
+
+function categoryRiskStatus(
+  deliveryRiskGate: AutoCreationDeliveryRiskGate,
+  categories: AutoCreationDeliveryRiskGateCategory['key'][],
+): AutoCreationBatchGuardrailSignalStatus {
+  const matched = deliveryRiskGate.categories.filter(item => categories.includes(item.key))
+  if (matched.some(item => item.highCount > 0)) return 'block'
+  if (matched.some(item => item.count > 0)) return 'warn'
+  return 'ok'
+}
+
+function contractItem(items: AutoCreationContractItem[], key: AutoCreationContractItem['key']) {
+  return items.find(item => item.key === key) || null
+}
+
+function contractDetail(item: AutoCreationContractItem | null, fallback: string) {
+  return firstText(item?.detail, item?.evidence?.[0], fallback)
+}
+
+function buildTodayQualityGates(args: {
+  productionLicense: AutoCreationProductionLicense
+  creationContract: AutoCreationContractItem[]
+  chapterLaunchGate: AutoCreationChapterLaunchGate
+  deliveryRiskGate: AutoCreationDeliveryRiskGate
+  batchGuardrail: AutoCreationBatchGuardrail
+  millionWordRunway: AutoCreationMillionWordRunway
+}): AutoCreationTodayQualityGate[] {
+  const core = contractItem(args.creationContract, 'core')
+  const story = contractItem(args.creationContract, 'story')
+  const readerPull = contractItem(args.creationContract, 'reader_pull')
+  const innovation = contractItem(args.creationContract, 'innovation')
+  const readerRisk = categoryRiskStatus(args.deliveryRiskGate, ['reader_retention', 'reader_payoff'])
+  const innovationRisk = categoryRiskStatus(args.deliveryRiskGate, ['innovation', 'signature_scene'])
+  const serialRisk = mergeGateStatus(
+    args.deliveryRiskGate.status === 'block' ? 'block' : args.deliveryRiskGate.status === 'warn' ? 'warn' : 'ok',
+    args.productionLicense.status === 'single_chapter' ? 'ok' : batchGateStatus(args.batchGuardrail.status),
+    runwayGateStatus(args.millionWordRunway.status),
+  )
+
+  return [
+    {
+      key: 'core',
+      label: '核心不偏',
+      status: contractGateStatus(String(core?.status || 'ok')),
+      detail: contractDetail(core, '作品核心、读者承诺和长期矛盾清晰可守。'),
+    },
+    {
+      key: 'story_drive',
+      label: '故事推进',
+      status: mergeGateStatus(contractGateStatus(String(story?.status || 'ok')), chapterLaunchQualityStatus(args.chapterLaunchGate.status)),
+      detail: args.chapterLaunchGate.status === 'ready'
+        ? contractDetail(story, '本章目标、冲突和章末钩子能推动主线。')
+        : args.chapterLaunchGate.summary,
+    },
+    {
+      key: 'reader_pull',
+      label: '读者拉力',
+      status: mergeGateStatus(contractGateStatus(String(readerPull?.status || 'ok')), readerRisk),
+      detail: readerRisk === 'ok'
+        ? contractDetail(readerPull, '开篇钩子、追读问题和回报循环可支撑继续阅读。')
+        : args.deliveryRiskGate.summary,
+    },
+    {
+      key: 'innovation',
+      label: '创新差异',
+      status: mergeGateStatus(contractGateStatus(String(innovation?.status || 'ok')), innovationRisk),
+      detail: innovationRisk === 'ok'
+        ? contractDetail(innovation, '差异化机制、场面或人物选择不会退回普通套路章。')
+        : args.deliveryRiskGate.summary,
+    },
+    {
+      key: 'serial_safety',
+      label: '连载安全',
+      status: serialRisk,
+      detail: serialRisk === 'ok'
+        ? '交稿风险已清，剧情线、剧情单元、百万字航线和连续生产护栏可控。'
+        : firstText(args.deliveryRiskGate.summary, args.batchGuardrail.summary, args.millionWordRunway.summary),
+    },
+  ]
 }
 
 function buildPipeline(args: {
@@ -1860,6 +4785,7 @@ function buildPipeline(args: {
   hasModel: boolean
   creationContract: AutoCreationContractItem[]
   longformCapacity: AutoCreationLongformCapacity
+  rollingScriptRoom: AutoCreationRollingScriptRoom
   batchGuardrail: AutoCreationBatchGuardrail
 }): AutoCreationPipelineStep[] {
   const acceptance = args.writing.chapterAcceptanceDesk
@@ -1868,7 +4794,27 @@ function buildPipeline(args: {
   const hasProse = Boolean(chapter?.hasProse)
   const retentionAction = retentionNeedsAction(args.planning)
   const storylineAction = storylineNeedsAction(args.planning)
+  const characterArcAction = characterArcNeedsAction(args.planning)
   const running = hasRunningTasks(args.activeTasks)
+  const chapterHandoff = (args.writing as any).chapterHandoffDesk || null
+  const chapterHandoffVisible = Boolean(chapterHandoff?.visible)
+  const qualityDone = Boolean(acceptance.visible && (
+    acceptance.acceptanceStatus === 'ready_to_accept'
+    || acceptance.acceptanceStatus === 'delivered'
+  ))
+  const canonDone = Boolean(acceptance.visible && acceptance.storyStateSynced)
+  const handoffStatus: AutoCreationPipelineStatus = chapterHandoffVisible
+    ? 'active'
+    : hasProse && (!acceptance.visible || (qualityDone && canonDone))
+      ? 'done'
+      : 'pending'
+  const handoffDetail = chapterHandoffVisible
+    ? chapterHandoffDetail(chapterHandoff)
+    : hasProse
+      ? handoffStatus === 'done'
+        ? '章节交接已完成或暂无下一章交接。'
+        : '等待质检、修订和故事状态回填完成后生成交接单。'
+      : '等待正文交稿后生成交接单。'
 
   return [
     {
@@ -1886,6 +4832,12 @@ function buildPipeline(args: {
         .map(item => `${item.label}：${item.detail}`)
         .slice(0, 2)
         .join('；') || '核心、故事、创新和读者吸引力达标',
+    },
+    {
+      key: 'rolling_script_room',
+      label: '百章剧本室',
+      status: rollingLayerStatusToPipeline(args.rollingScriptRoom.status),
+      detail: `${args.rollingScriptRoom.focusRangeLabel}：${args.rollingScriptRoom.summary}`,
     },
     {
       key: 'longform_capacity',
@@ -1924,8 +4876,11 @@ function buildPipeline(args: {
     {
       key: 'story_assets',
       label: '设定/剧情线',
-      status: storylineAction ? 'warning' : 'done',
-      detail: args.planning.storylineBoard.summary,
+      status: storylineAction || characterArcAction ? 'warning' : 'done',
+      detail: [
+        args.planning.storylineBoard.summary,
+        characterArcAction ? args.planning.characterArcBoard.summary : '',
+      ].filter(Boolean).join('；'),
     },
     {
       key: 'retention_curve',
@@ -1944,15 +4899,9 @@ function buildPipeline(args: {
       detail: planningDesk.statusLabel,
     },
     {
-      key: 'batch_guardrail',
-      label: '连续生产护栏',
-      status: batchPipelineStatus(args.batchGuardrail.status),
-      detail: `${args.batchGuardrail.label}，安全批次 ${args.batchGuardrail.safeChapterCount} 章`,
-    },
-    {
       key: 'chapter_execution',
       label: '正文生产',
-      status: hasProse ? 'done' : planningDesk.readiness === 'ready' && !retentionAction && !storylineAction && !args.hasBlockingPlan ? 'active' : 'pending',
+      status: hasProse ? 'done' : planningDesk.readiness === 'ready' && !retentionAction && !storylineAction && !characterArcAction && !args.hasBlockingPlan ? 'active' : 'pending',
       detail: hasProse ? `${chapter?.wordCount || 0} 字` : args.writing.topStatus.nextActionLabel,
     },
     {
@@ -1972,12 +4921,143 @@ function buildPipeline(args: {
       detail: acceptance.visible ? (acceptance.storyStateSynced ? '故事状态已同步' : '等待交稿同步') : '等待正文',
     },
     {
+      key: 'chapter_handoff',
+      label: '章节交接',
+      status: handoffStatus,
+      detail: handoffDetail,
+    },
+    {
+      key: 'batch_guardrail',
+      label: '连续生产护栏',
+      status: batchPipelineStatus(args.batchGuardrail.status),
+      detail: `${args.batchGuardrail.label}，安全批次 ${args.batchGuardrail.safeChapterCount} 章`,
+    },
+    {
       key: 'async_tasks',
       label: '任务队列',
       status: running ? 'active' : 'done',
       detail: running ? `${args.activeTasks.length} 个任务运行中` : '无排队任务',
     },
   ]
+}
+
+function highestPipelineStatus(steps: AutoCreationPipelineStep[]): AutoCreationPipelineStatus {
+  if (steps.some(step => step.status === 'blocked')) return 'blocked'
+  if (steps.some(step => step.status === 'active')) return 'active'
+  if (steps.some(step => step.status === 'warning')) return 'warning'
+  if (steps.every(step => step.status === 'done')) return 'done'
+  return 'pending'
+}
+
+function compactStatus(
+  status: AutoCreationPipelineStatus,
+  current: boolean,
+  alreadyPassed: boolean,
+): AutoCreationPipelineStatus {
+  if (current) return status === 'done' ? 'active' : status
+  if (alreadyPassed) return status === 'blocked' ? 'blocked' : 'done'
+  return status === 'blocked' ? 'blocked' : status === 'warning' ? 'warning' : 'pending'
+}
+
+function buildSerialWorkflow(args: {
+  hasModel: boolean
+  mainAction: AutoCreationDirectorAction
+  status: AutoCreationDirectorStatus
+  writing: WritingCockpitModel
+  creationContract: AutoCreationContractItem[]
+  pipeline: AutoCreationPipelineStep[]
+  productionLicense: AutoCreationProductionLicense
+  batchGuardrail: AutoCreationBatchGuardrail
+  deliveryRiskGate: AutoCreationDeliveryRiskGate
+}): AutoCreationSerialWorkflow {
+  const byKey = new Map(args.pipeline.map(step => [step.key, step]))
+  const acceptance = args.writing.chapterAcceptanceDesk
+  const chapter = args.writing.nextChapter
+  const hasProse = Boolean(chapter?.hasProse || acceptance?.visible)
+  const contractStatus = contractPipelineStatus(args.creationContract)
+  const longformStatus = highestPipelineStatus([
+    byKey.get('longform_planning'),
+    byKey.get('rolling_script_room'),
+    byKey.get('longform_capacity'),
+    byKey.get('volume_beat_budget'),
+    byKey.get('longform_rhythm'),
+    byKey.get('story_assets'),
+    byKey.get('retention_curve'),
+  ].filter(Boolean) as AutoCreationPipelineStep[])
+  const chapterStatus = highestPipelineStatus([
+    byKey.get('chapter_planning'),
+    byKey.get('chapter_execution'),
+  ].filter(Boolean) as AutoCreationPipelineStep[])
+  const deliveryStatus = highestPipelineStatus([
+    byKey.get('quality_gate'),
+    byKey.get('canon_sync'),
+    byKey.get('chapter_handoff'),
+  ].filter(Boolean) as AutoCreationPipelineStep[])
+  const governanceStatus = highestPipelineStatus([
+    byKey.get('batch_guardrail'),
+    byKey.get('async_tasks'),
+  ].filter(Boolean) as AutoCreationPipelineStep[])
+
+  let currentKey: AutoCreationSerialStageKey = 'chapter_launch'
+  if (!args.hasModel || contractStatus === 'blocked' || contractStatus === 'warning') {
+    currentKey = 'book_core'
+  } else if (args.mainAction.area === 'planning' || args.status === 'needs_governance' && !acceptance?.visible && args.deliveryRiskGate.status === 'ok') {
+    currentKey = 'longform_plan'
+  } else if (acceptance?.visible) {
+    currentKey = 'delivery_acceptance'
+  } else if (args.deliveryRiskGate.status !== 'ok' || args.productionLicense.status === 'batch_allowed' || args.batchGuardrail.status !== 'blocked' && hasProse) {
+    currentKey = 'serial_governance'
+  }
+
+  const order: AutoCreationSerialStageKey[] = ['book_core', 'longform_plan', 'chapter_launch', 'delivery_acceptance', 'serial_governance']
+  const currentIndex = order.indexOf(currentKey)
+  const stageStatus = (key: AutoCreationSerialStageKey, raw: AutoCreationPipelineStatus) => compactStatus(raw, key === currentKey, order.indexOf(key) < currentIndex)
+  const deliveryAction = acceptance?.visible ? args.writing.chapterAcceptanceDesk?.recommendedAcceptanceAction : null
+  const stages: AutoCreationSerialWorkflowStage[] = [
+    {
+      key: 'book_core',
+      label: '立项定核',
+      status: stageStatus('book_core', !args.hasModel ? 'blocked' : contractStatus),
+      detail: args.hasModel ? '核心承诺、类型卖点、创新差异和读者拉力已纳入创作契约。' : '先选择可用模型，才能启动自动创作流水线。',
+      action: planningAction('longform_creation_diagnosis', '检查核心不偏、故事强度、创新差异和读者吸引，必要时刷新创作契约。'),
+    },
+    {
+      key: 'longform_plan',
+      label: '长线规划',
+      status: stageStatus('longform_plan', longformStatus),
+      detail: byKey.get('longform_planning')?.detail || '维护未来章节、剧情线、卷级爆点、留存和百万字产能。',
+      action: planningAction('enter_story_planning', '进入故事规划主工作区，集中查看未来100章、剧情线、前30章留存、卷级爆点和读者期待债务。'),
+    },
+    {
+      key: 'chapter_launch',
+      label: '单章开写',
+      status: stageStatus('chapter_launch', hasProse ? 'done' : chapterStatus),
+      detail: hasProse ? '正文已生成，进入交稿闭环。' : args.writing.chapterPlanningDesk.statusLabel,
+      action: planningAction('enter_chapter_writing', '进入章节写作区，处理上下文包、场景卡、开写任务书和正文生成。'),
+    },
+    {
+      key: 'delivery_acceptance',
+      label: '交稿质检',
+      status: stageStatus('delivery_acceptance', acceptance?.visible ? deliveryStatus : 'pending'),
+      detail: acceptance?.visible ? acceptance.statusLabel : '等待正文生成后执行质检、修订、状态回填和章节交接。',
+      action: writingAction((deliveryAction?.key || 'review_draft') as WritingCockpitActionKey, '进入当前章交稿闭环，执行质检、修订、故事状态同步和验收。', deliveryAction?.label || '进入交稿质检'),
+    },
+    {
+      key: 'serial_governance',
+      label: '连载治理',
+      status: stageStatus('serial_governance', governanceStatus),
+      detail: args.productionLicense.summary || args.batchGuardrail.summary || '清理交稿风险，确认下一批任务书和安全连写许可。',
+      action: opsAction('open_task_center', '查看生产运营', '查看后台任务、修复队列和安全连写复盘。'),
+    },
+  ]
+  const currentLabel = stages.find(stage => stage.key === currentKey)?.label || '单章开写'
+
+  return {
+    currentKey,
+    currentLabel,
+    summary: `当前处于「${currentLabel}」，下一步：${args.mainAction.label}。`,
+    stages,
+  }
 }
 
 function fallbackSecondaryActions(planning: PlanningWorkspaceModel, writing: WritingCockpitModel): AutoCreationDirectorAction[] {
@@ -1994,31 +5074,131 @@ function fallbackSecondaryActions(planning: PlanningWorkspaceModel, writing: Wri
   return actions.slice(0, 4)
 }
 
+function buildDirectorBattleDesk(planning: PlanningWorkspaceModel): PlanningWorkspaceModel['longformBattleDesk'] {
+  if ((planning as any).longformBattleDesk?.lanes?.length) return (planning as any).longformBattleDesk
+  const rhythm = planning.longformRhythm || {
+    status: 'needs_attention',
+    score: 68,
+    label: '节奏待治理',
+    summary: '长篇节奏材料不足。',
+    currentBandLabel: '长篇跑道',
+    signals: [],
+    nextActions: [],
+  }
+  const first30Status = planning.first30Retention?.status === 'ready' ? 'ok' : 'warn'
+  const storylineStatus = planning.storylineBoard?.status === 'ready' ? 'ok' : planning.storylineBoard?.status === 'missing' ? 'block' : 'warn'
+  const volumeStatus = planning.volumeBeatBudget?.status === 'ready' ? 'ok' : planning.volumeBeatBudget?.status === 'blocked' ? 'block' : 'warn'
+  const fuelStatus = planning.topStatus?.future10Coverage?.ready && planning.topStatus?.future100Coverage?.ready ? 'ok' : 'warn'
+  const lanes: PlanningWorkspaceModel['longformBattleDesk']['lanes'] = [
+    {
+      key: 'story_core',
+      label: '核心守恒',
+      status: rhythm.status === 'blocked' ? 'block' : rhythm.status === 'needs_attention' ? 'warn' : 'ok',
+      score: Number(rhythm.score || 68),
+      detail: rhythm.summary || '长篇核心与节奏待确认。',
+      actionKey: rhythm.status === 'ready' ? 'enter_chapter_writing' : 'open_quality_revision',
+    },
+    {
+      key: 'reader_pull',
+      label: '读者拉力',
+      status: first30Status,
+      score: Number(planning.first30Retention?.score || 70),
+      detail: planning.first30Retention?.summary || '前30章留存待确认。',
+      actionKey: planning.first30Retention?.actionKey || 'run_first30_retention',
+    },
+    {
+      key: 'storyline',
+      label: '剧情线调度',
+      status: storylineStatus,
+      score: storylineStatus === 'ok' ? 86 : storylineStatus === 'block' ? 55 : 70,
+      detail: planning.storylineBoard?.summary || '剧情线待补齐。',
+      actionKey: storylineStatus === 'ok' ? 'enter_chapter_writing' : 'open_story_assets',
+    },
+    {
+      key: 'volume_beat',
+      label: '卷级爆点',
+      status: volumeStatus,
+      score: Number(planning.volumeBeatBudget?.score || 70),
+      detail: planning.volumeBeatBudget?.summary || '卷级爆点预算待确认。',
+      actionKey: volumeStatus === 'ok' ? 'enter_chapter_writing' : 'complete_volume_plan',
+    },
+    {
+      key: 'innovation_ip',
+      label: '创新/IP场面',
+      status: planning.innovationRadar?.status === 'ready' ? 'ok' : 'warn',
+      score: Number(planning.innovationRadar?.score || 70),
+      detail: planning.innovationRadar?.summary || '创新/IP场面待复盘。',
+      actionKey: planning.innovationRadar?.actionKey || 'open_quality_revision',
+    },
+    {
+      key: 'production_fuel',
+      label: '生产燃料',
+      status: fuelStatus,
+      score: fuelStatus === 'ok' ? 86 : 68,
+      detail: `未来10章 ${planning.topStatus?.future10Coverage?.label || '-'}，未来100章 ${planning.topStatus?.future100Coverage?.label || '-'}。`,
+      actionKey: fuelStatus === 'ok' ? 'enter_chapter_writing' : 'update_rolling_plan',
+    },
+  ]
+  const status: PlanningWorkspaceModel['longformBattleDesk']['status'] = lanes.some(lane => lane.status === 'block')
+    ? 'blocked'
+    : lanes.some(lane => lane.status === 'warn')
+      ? 'needs_action'
+      : 'ready'
+  const primaryLane = lanes.find(lane => lane.status !== 'ok') || lanes[0]
+  const score = Math.round(lanes.reduce((sum, lane) => sum + lane.score, 0) / Math.max(1, lanes.length))
+  return {
+    status,
+    score,
+    label: status === 'ready' ? `长篇作战 ${score}` : status === 'blocked' ? `长篇作战阻塞 ${score}` : `长篇作战待治理 ${score}`,
+    summary: status === 'ready' ? '长篇作战台可支撑继续写作。' : `先处理 ${primaryLane.label}：${primaryLane.detail}`,
+    primaryAction: {
+      key: primaryLane.actionKey,
+      label: PLANNING_ACTION_LABELS[primaryLane.actionKey],
+      reason: primaryLane.detail,
+    },
+    lanes,
+    riskChips: lanes.filter(lane => lane.status !== 'ok').map(lane => lane.label).slice(0, 6),
+  }
+}
+
 export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorModelInput): AutoCreationDirectorModel {
   const planning = input.planning
   const writing = input.writing
   const activeTasks = arrayValue(input.activeTasks)
   const runRecords = arrayValue(input.runRecords)
+  const reviews = arrayValue(input.reviews)
   const hasModel = Boolean(input.selectedModelId)
   const chapter = targetChapter(writing)
   const blockingPlan = planningBlocker(planning)
   const running = hasRunningTasks(activeTasks)
   const retentionActionNeeded = retentionNeedsAction(planning)
   const storylineActionNeeded = storylineNeedsAction(planning)
+  const characterArcActionNeeded = characterArcNeedsAction(planning)
   const volumeBeatActionNeeded = volumeBeatNeedsAction(planning)
   const rhythmActionNeeded = rhythmNeedsAction(planning)
-  const reviewedContract = creationContractFromReview(arrayValue(input.reviews))
+  const reviewedContract = creationContractFromReview(reviews)
   const creationContract = reviewedContract.contract || buildLongformCreationContract(planning, writing)
-  const longformCompass = buildLongformCompass(planning, arrayValue(input.reviews))
+  const longformCompass = buildLongformCompass(planning, reviews)
+  const longformBattleDesk = buildDirectorBattleDesk(planning)
+  const chapterLaunchGate = buildChapterLaunchGate(planning, writing, longformCompass)
   const longformCapacity = buildLongformCapacity(planning)
-  const batchReviewQueue = buildBatchReviewQueue({
+  const canonRunway = buildCanonRunway(writing)
+  const deliveryRiskGate = buildDeliveryRiskGate({
+    reviews,
     runRecords,
     chapters: arrayValue(input.chapters),
-    reviews: arrayValue(input.reviews),
+  })
+  let batchReviewQueue = buildBatchReviewQueue({
+    runRecords,
+    chapters: arrayValue(input.chapters),
+    reviews,
+    planning,
     storyState: input.storyState || {},
   })
   const blockers: string[] = []
   const confirmations: string[] = []
+  const writingQueueFocus = buildWritingQueueFocus(writing)
+  const rollingScriptRoom = buildRollingScriptRoom(planning, writing, longformCompass)
   let status: AutoCreationDirectorStatus
   let statusLabel: string
   let headline: string
@@ -2059,6 +5239,13 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
     summary = planning.storylineBoard.summary
     confirmations.push('剧情线需要调度确认')
     mainAction = planningAction('open_story_assets', '进入设定资产页，补齐或确认主线、支线、角色线、关系线、势力线和伏笔线。')
+  } else if (characterArcActionNeeded) {
+    status = 'needs_governance'
+    statusLabel = '人物成长待治理'
+    headline = '先校准人物成长和关系张力'
+    summary = planning.characterArcBoard.summary
+    confirmations.push('人物成长需要治理确认')
+    mainAction = planningAction(planning.characterArcBoard.actionKey, '先处理人物成长看板中的成长断档、关系待推进或人物弧光缺口。')
   } else if (volumeBeatActionNeeded) {
     status = 'needs_governance'
     statusLabel = '爆点预算待补'
@@ -2073,6 +5260,13 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
     summary = planning.longformRhythm.summary
     confirmations.push('长篇节奏需要校准')
     mainAction = planningAction(rhythmAction(planning), planning.longformRhythm.nextActions[0] || '先处理长篇节奏风险，再进入连续章节生产。')
+  } else if (canonRunway.staleState) {
+    status = 'needs_governance'
+    statusLabel = '长线记忆待同步'
+    headline = '先同步故事状态再连续生产'
+    summary = canonRunway.detail
+    confirmations.push('故事状态需要同步')
+    mainAction = canonRunway.action
   } else if (batchReviewQueue.visible && batchReviewQueue.status === 'warn') {
     status = 'needs_acceptance'
     statusLabel = '批次待复盘'
@@ -2094,6 +5288,13 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
     summary = batchReviewQueue.summary
     confirmations.push('安全连写批次需要逐章验收')
     mainAction = batchReviewQueue.nextAction
+  } else if (deliveryRiskGate.status === 'block') {
+    status = 'needs_governance'
+    statusLabel = '交稿风险待处理'
+    headline = '先清理高风险交稿批注'
+    summary = deliveryRiskGate.summary
+    confirmations.push('未清交稿风险会阻止安全连写')
+    mainAction = opsAction('create_delivery_risk_repair', '生成风险修复任务', deliveryRiskGate.summary)
   } else if (writing.chapterAcceptanceDesk.visible) {
     const action = writing.chapterAcceptanceDesk.recommendedAcceptanceAction
     status = 'needs_acceptance'
@@ -2101,13 +5302,22 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
     headline = chapter ? `第 ${chapter.chapterNo} 章进入交稿闭环` : '当前章进入交稿闭环'
     summary = writing.chapterAcceptanceDesk.acceptanceReasons[0] || '按质检、修订、状态同步和验收顺序处理当前章。'
     mainAction = writingAction(action.key, '处理当前章交稿门禁，不跳过质检和状态回填。', action.label)
+  } else if (chapterLaunchGate.status === 'blocked') {
+    status = 'needs_governance'
+    statusLabel = '开写门禁'
+    headline = '先校准本章再生成正文'
+    summary = chapterLaunchGate.summary
+    confirmations.push('本章开写门禁未通过')
+    mainAction = chapterLaunchGate.action
   } else {
     const plannerAction = writing.chapterPlanningDesk.recommendedPlannerAction
     status = 'ready'
-    statusLabel = writing.chapterPlanningDesk.statusLabel
+    statusLabel = writingQueueFocus.visible ? writingQueueFocus.label : writing.chapterPlanningDesk.statusLabel
     headline = chapter ? `第 ${chapter.chapterNo} 章可以推进` : '可以推进下一章'
-    summary = writing.chapterPlanningDesk.reasons[0] || writing.topStatus.nextActionLabel
-    mainAction = writingAction(plannerAction.key || writing.primaryActionKey, '按章节任务书和场景卡推进当前章。', plannerAction.label)
+    summary = writingQueueFocus.visible ? writingQueueFocus.summary : writing.chapterPlanningDesk.reasons[0] || writing.topStatus.nextActionLabel
+    mainAction = writingQueueFocus.visible
+      ? writingQueueFocus.action
+      : writingAction(plannerAction.key || writing.primaryActionKey, '按章节任务书和场景卡推进当前章。', plannerAction.label)
   }
 
   const batchGuardrail = buildBatchGuardrail({
@@ -2118,6 +5328,59 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
     hasModel,
     mainAction,
     longformCapacity,
+    deliveryRiskGate,
+    chapterLaunchGate,
+    storyState: input.storyState || {},
+  })
+  batchReviewQueue = reconcileBatchHandoffWithGuardrail(batchReviewQueue, batchGuardrail)
+  if (batchReviewQueue.handoff.status === 'prepare_next' && status === 'ready') {
+    status = 'needs_governance'
+    statusLabel = '下一批待准备'
+    headline = '补齐下一批计划再连写'
+    summary = batchReviewQueue.handoff.summary
+    confirmations.push('下一批安全连写护栏未放行')
+    mainAction = batchReviewQueue.handoff.action
+  }
+  const millionWordRunway = buildMillionWordRunway({
+    planning,
+    writing,
+    longformCompass,
+    creationContract,
+    chapterLaunchGate,
+    canonRunway,
+    batchGuardrail,
+  })
+  const dailyBattlePlan = buildDailyBattlePlan({
+    planning,
+    writing,
+    mainAction,
+    deliveryRiskGate,
+    batchGuardrail,
+    batchReviewQueue,
+    longformCapacity,
+    writingQueueFocus,
+    hasBlockingPlan: Boolean(blockingPlan),
+    hasModel,
+    activeTasks,
+  })
+  const productionLicense = buildProductionLicense({
+    hasModel,
+    mainAction,
+    dailyBattlePlan,
+    deliveryRiskGate,
+    batchReviewQueue,
+    batchGuardrail,
+    chapterLaunchGate,
+    millionWordRunway,
+  })
+  const todayCommandDeck = buildTodayCommandDeck({
+    dailyBattlePlan,
+    productionLicense,
+    creationContract,
+    chapterLaunchGate,
+    deliveryRiskGate,
+    batchGuardrail,
+    millionWordRunway,
   })
   const pipeline = buildPipeline({
     planning,
@@ -2127,7 +5390,19 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
     hasModel,
     creationContract,
     longformCapacity,
+    rollingScriptRoom,
     batchGuardrail,
+  })
+  const serialWorkflow = buildSerialWorkflow({
+    hasModel,
+    mainAction,
+    status,
+    writing,
+    creationContract,
+    pipeline,
+    productionLicense,
+    batchGuardrail,
+    deliveryRiskGate,
   })
 
   return {
@@ -2156,11 +5431,21 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
       longformCapacityScore: longformCapacity.score,
     },
     longformRhythm: planning.longformRhythm,
+    longformBattleDesk,
     longformCapacity,
     longformCompass,
     creationContract,
+    chapterLaunchGate,
+    dailyBattlePlan,
+    productionLicense,
+    todayCommandDeck,
+    millionWordRunway,
+    writingQueueFocus,
+    rollingScriptRoom,
+    deliveryRiskGate,
     batchGuardrail,
     batchReviewQueue,
+    serialWorkflow,
     pipeline,
   }
 }

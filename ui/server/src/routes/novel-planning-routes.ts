@@ -12,6 +12,7 @@ import {
   updateNovelChapter,
   updateNovelOutline,
   updateNovelProject,
+  upsertNovelChapterByNumber,
 } from '../novel'
 import { executeNovelAgent, generateNovelChapterProse } from '../llm'
 import { asArray, clampScore, compactText, deepMergeObjects, getNovelPayload, parseJsonLikePayload } from './novel-route-utils'
@@ -487,6 +488,28 @@ function normalizeFuture100Skeleton(payload: any, fromChapter: number, horizon: 
   })
 }
 
+function normalizeRollingPlanPayload(payload: any, fromChapter: number, horizon: number) {
+  const raw = asArray(payload?.rolling_plan || payload?.rollingPlan || payload?.chapters || payload?.plan)
+  return raw.slice(0, horizon).map((item: any, index: number) => {
+    const chapterNo = Number(item.chapter_no || item.no || item.index || 0) || fromChapter + index
+    return {
+      chapter_no: chapterNo,
+      title: String(item.title || `第${chapterNo}章`),
+      chapter_goal: String(item.chapter_goal || item.goal || item.chapterTask || item.task || item.summary || ''),
+      conflict: String(item.conflict || item.pressure || item.obstacle || ''),
+      payoff: String(item.payoff || item.reward || item.commercial_payoff || ''),
+      foreshadowing_to_use: asArray(item.foreshadowing_to_use || item.foreshadowing || item.clues).map(String),
+      ending_hook: String(item.ending_hook || item.hook || ''),
+      signature_scene: String(item.signature_scene || item.ip_scene || item.visual_scene || item.memorable_scene || ''),
+      scene_repair_target: String(item.scene_repair_target || item.scene_gap_repair || item.repair_target || ''),
+      reader_payoff: String(item.reader_payoff || item.reader_reward || item.commercial_payoff || item.payoff || ''),
+      storyline_service: String(item.storyline_service || item.mainline_service || item.storyline_advance || item.mainline_progress || ''),
+      mainline_progress: String(item.mainline_progress || item.volume_stage || item.commercial_purpose || item.storyline_advance || ''),
+      risk_notes: asArray(item.risk_notes || item.risks).map(String),
+    }
+  })
+}
+
 function future100OutlineData(project: any, item: any) {
   return {
     project_id: project.id,
@@ -500,6 +523,46 @@ function future100OutlineData(project: any, item: any) {
       source: 'future_100_skeleton',
       chapter_no: item.chapter_no,
       future100: item,
+      generated_at: new Date().toISOString(),
+    },
+  } as any
+}
+
+function rollingPlanOutlineData(project: any, item: any, rollingPlanIntent: any) {
+  return {
+    project_id: project.id,
+    outline_type: 'chapter',
+    title: `第${item.chapter_no}章 ${item.title}`,
+    summary: [item.chapter_goal, item.signature_scene ? `标志性场面：${item.signature_scene}` : ''].filter(Boolean).join('\n'),
+    conflict_points: [item.conflict, item.scene_repair_target].filter(Boolean),
+    turning_points: [item.payoff, item.reader_payoff, item.mainline_progress, item.storyline_service, item.signature_scene].filter(Boolean),
+    hook: item.ending_hook,
+    raw_payload: {
+      source: 'rolling_plan',
+      chapter_no: item.chapter_no,
+      rollingPlan: item,
+      rolling_plan_intent: rollingPlanIntent || null,
+      generated_at: new Date().toISOString(),
+    },
+  } as any
+}
+
+function rollingPlanChapterData(project: any, item: any, outline: any, rollingPlanIntent: any) {
+  return {
+    project_id: project.id,
+    outline_id: outline?.id || null,
+    chapter_no: Number(item.chapter_no || 0),
+    title: String(item.title || `第${item.chapter_no}章`),
+    chapter_goal: String(item.chapter_goal || ''),
+    chapter_summary: [item.chapter_goal, item.signature_scene ? `标志性场面：${item.signature_scene}` : '', item.scene_repair_target ? `场面补位：${item.scene_repair_target}` : ''].filter(Boolean).join('\n') || String(item.payoff || item.conflict || ''),
+    conflict: String(item.conflict || ''),
+    ending_hook: String(item.ending_hook || ''),
+    status: 'planned',
+    raw_payload: {
+      source: 'rolling_plan',
+      chapter_no: Number(item.chapter_no || 0),
+      rollingPlan: item,
+      rolling_plan_intent: rollingPlanIntent || null,
       generated_at: new Date().toISOString(),
     },
   } as any
@@ -565,6 +628,56 @@ async function applyFuture100SkeletonOutlines(activeWorkspace: string, project: 
     }
   }
   return { writtenOutlines, writeSummary, writePreview: preview }
+}
+
+async function applyRollingPlanOutlines(activeWorkspace: string, project: any, outlines: any[], rollingPlan: any[], rollingPlanIntent: any) {
+  const writtenOutlines: any[] = []
+  const writtenChapters: any[] = []
+  const writeSummary = { created: 0, updated: 0, skipped: 0 }
+  const chapterWriteSummary = { created: 0, updated: 0, skipped: 0 }
+  const existingChaptersByNo = new Map((await listNovelChapters(activeWorkspace, project.id))
+    .map(chapter => [Number(chapter.chapter_no || 0), chapter]))
+  for (const item of rollingPlan) {
+    const outlineData = rollingPlanOutlineData(project, item, rollingPlanIntent)
+    const existing = findChapterOutlineForNo(outlines, item.chapter_no)
+    let writtenOutline: any = null
+    if (existing?.id) {
+      const updated = await updateNovelOutline(activeWorkspace, existing.id, outlineData)
+      if (updated) {
+        writtenOutline = updated
+        writtenOutlines.push(updated)
+        writeSummary.updated += 1
+      } else {
+        writeSummary.skipped += 1
+      }
+    } else {
+      const created = await createNovelOutline(activeWorkspace, outlineData)
+      writtenOutline = created
+      writtenOutlines.push(created)
+      writeSummary.created += 1
+    }
+    if (!writtenOutline) {
+      chapterWriteSummary.skipped += 1
+      continue
+    }
+    const chapterNo = Number(item.chapter_no || 0)
+    const existingChapter = existingChaptersByNo.get(chapterNo)
+    const writtenChapter = await upsertNovelChapterByNumber(activeWorkspace, rollingPlanChapterData(project, item, writtenOutline, rollingPlanIntent))
+    if (writtenChapter) {
+      writtenChapters.push(writtenChapter)
+      existingChaptersByNo.set(chapterNo, writtenChapter)
+      if (existingChapter?.id) chapterWriteSummary.updated += 1
+      else chapterWriteSummary.created += 1
+    } else {
+      chapterWriteSummary.skipped += 1
+    }
+  }
+  return { writtenOutlines, writtenChapters, writeSummary, chapterWriteSummary }
+}
+
+export const __testExports = {
+  applyRollingPlanOutlines,
+  rollingPlanChapterData,
 }
 
 function buildFuture100Prompt(project: any, chapters: any[], outlines: any[], reviews: any[], fromChapter: number, horizon: number, audit: any) {
@@ -1200,13 +1313,22 @@ export function registerNovelPlanningRoutes(app: Express, ctx: PlanningRoutesCon
         '任务：生成未来章节滚动规划，只输出 JSON。',
         `项目：${project.title}`,
         `从第 ${fromChapter} 章开始，规划未来 ${horizon} 章。`,
-        '需要输出：rolling_plan(array: chapter_no,title,chapter_goal,conflict,payoff,foreshadowing_to_use,ending_hook), volume_remaining_goals, foreshadowing_recovery_plan, character_growth_nodes, risk_notes。',
+        '需要输出：rolling_plan(array: chapter_no,title,chapter_goal,conflict,payoff,reader_payoff,foreshadowing_to_use,ending_hook,signature_scene,scene_repair_target,storyline_service), volume_remaining_goals, foreshadowing_recovery_plan, character_growth_nodes, risk_notes。',
         '【滚动规划意图】',
         rollingPlanIntent
           ? JSON.stringify(rollingPlanIntent, null, 2).slice(0, 4000)
           : '常规未来10章滚动规划。',
         rollingPlanIntent?.source === 'batch_brief_repair'
           ? '本次是批次任务书补齐：优先修复缺逐章职责、冲突落点、主线推进或章末钩子；输出的 rolling_plan 必须让目标批次可检查、可小批量连写。'
+          : '',
+        rollingPlanIntent?.source === 'recent_fatigue_repair'
+          ? [
+              '本次是近10章疲劳修复：优先根据 recent_fatigue_radar 中的 warn 信号做未来章节差异化规划。',
+              '具体要求：更换冲突来源；更换回报/爽点形态；更换章末追读问题；更换标志性场面；每章必须在 chapter_goal/conflict/payoff/ending_hook 中体现差异化职责。',
+              '如果 warn 信号包含 IP场面覆盖 或 场面新鲜度不足，必须生成“标志性场面补位”：至少指定 1-3 个补位章节；每个补位章节在 signature_scene 写明本章要补的标志性场面，在 scene_repair_target 写明修复哪个覆盖缺口，在 storyline_service 写明服务的主线推进或爽点回报。',
+              '标志性场面必须是可被读者记住、可短剧/漫剧化的空间冲突、反转动作、规则压迫或视觉化爽点；不能只写“增加场面新鲜度”这类抽象说明。',
+              '边界：不得改变主线方向、长期设定和已确认剧情线；只能调整后续章节的表达节奏、压迫来源、回报形态和场面安排。',
+            ].join('\n')
           : '',
         '【写作圣经/状态机】',
         JSON.stringify({ writing_bible: project.reference_config?.writing_bible || {}, story_state: project.reference_config?.story_state || {} }, null, 2).slice(0, 6000),
@@ -1220,15 +1342,45 @@ export function registerNovelPlanningRoutes(app: Express, ctx: PlanningRoutesCon
       const modelId = ctx.getStageModelId(project, 'outline', Number(req.body.model_id || 0) || undefined)
       const result = await executeNovelAgent('outline-agent', project, { task: prompt }, { activeWorkspace, modelId: modelId ? String(modelId) : undefined, maxTokens: 6000, temperature: ctx.getStageTemperature(project, 'outline', 0.45), skipMemory: true })
       const report = getNovelPayload(result)
+      const rollingPlan = normalizeRollingPlanPayload(report, fromChapter, horizon)
+      const shouldWriteOutlines = req.body?.write_rolling_outlines !== false
+      const applied = shouldWriteOutlines
+        ? await applyRollingPlanOutlines(activeWorkspace, project, outlines, rollingPlan, rollingPlanIntent)
+        : {
+            writtenOutlines: [],
+            writtenChapters: [],
+            writeSummary: { created: 0, updated: 0, skipped: rollingPlan.length },
+            chapterWriteSummary: { created: 0, updated: 0, skipped: rollingPlan.length },
+          }
       const saved = await createNovelReview(activeWorkspace, {
         project_id: project.id,
         review_type: 'rolling_plan',
         status: 'ok',
-        summary: `滚动规划：第${fromChapter}章起 ${horizon} 章`,
+        summary: `滚动规划：第${fromChapter}章起 ${horizon} 章${shouldWriteOutlines ? `，大纲创建 ${applied.writeSummary.created}，章节占位创建 ${applied.chapterWriteSummary.created}` : ''}`,
         issues: asArray(report.risk_notes).map((item: any) => String(item)),
-        payload: JSON.stringify({ report, from_chapter: fromChapter, horizon, rolling_plan_intent: rollingPlanIntent }),
+        payload: JSON.stringify({
+          report,
+          rolling_plan: rollingPlan,
+          from_chapter: fromChapter,
+          horizon,
+          rolling_plan_intent: rollingPlanIntent,
+          written_outline_ids: applied.writtenOutlines.map((item: any) => item.id),
+          written_chapter_ids: applied.writtenChapters.map((item: any) => item.id),
+          write_summary: applied.writeSummary,
+          chapter_write_summary: applied.chapterWriteSummary,
+        }),
       })
-      res.json({ ok: true, report, review: saved, result })
+      res.json({
+        ok: true,
+        report,
+        rolling_plan: rollingPlan,
+        review: saved,
+        written_outlines: applied.writtenOutlines,
+        written_chapters: applied.writtenChapters,
+        write_summary: applied.writeSummary,
+        chapter_write_summary: applied.chapterWriteSummary,
+        result,
+      })
     } catch (error) {
       res.status(500).json({ error: String(error) })
     }

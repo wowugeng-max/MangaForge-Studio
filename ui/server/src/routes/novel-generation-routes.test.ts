@@ -55,6 +55,17 @@ describe('novel generate prose route source guards', () => {
     expect(source).toContain('chapter_target: { ...contextPackage.chapter_target, longform_compass: req.body.longform_compass }')
   })
 
+  test('applies longform battle context override from generate-prose requests', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
+    const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'")
+    const routeEnd = source.indexOf("const prevChapters = chapters", routeStart)
+    const setupBlock = source.slice(routeStart, routeEnd)
+
+    expect(setupBlock).toContain('applyRequestLongformBattleContext(')
+    expect(source).toContain('req.body?.longform_battle_context')
+    expect(source).toContain('chapter_target: { ...contextPackage.chapter_target, longform_battle_context: req.body.longform_battle_context }')
+  })
+
   test('applies next batch brief override from generate-prose requests', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
     const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'")
@@ -64,6 +75,39 @@ describe('novel generate prose route source guards', () => {
     expect(setupBlock).toContain('applyRequestNextBatchBrief(')
     expect(source).toContain('req.body?.next_batch_brief')
     expect(source).toContain('chapter_target: { ...contextPackage.chapter_target, next_batch_brief: req.body.next_batch_brief }')
+  })
+
+  test('applies chapter launch gate override from generate-prose requests', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
+    const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'")
+    const routeEnd = source.indexOf("const prevChapters = chapters", routeStart)
+    const setupBlock = source.slice(routeStart, routeEnd)
+
+    expect(setupBlock).toContain('applyRequestChapterLaunchGate(')
+    expect(source).toContain('req.body?.chapter_launch_gate')
+    expect(source).toContain('chapter_target: { ...contextPackage.chapter_target, chapter_launch_gate: req.body.chapter_launch_gate }')
+  })
+
+  test('applies safe batch preflight override from generate-prose requests', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
+    const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'")
+    const routeEnd = source.indexOf("const prevChapters = chapters", routeStart)
+    const setupBlock = source.slice(routeStart, routeEnd)
+
+    expect(setupBlock).toContain('applyRequestBatchPreflight(')
+    expect(source).toContain('req.body?.batch_preflight')
+    expect(source).toContain('chapter_target: { ...contextPackage.chapter_target, batch_preflight: req.body.batch_preflight }')
+  })
+
+  test('applies million word runway override from generate-prose requests', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
+    const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'")
+    const routeEnd = source.indexOf("const prevChapters = chapters", routeStart)
+    const setupBlock = source.slice(routeStart, routeEnd)
+
+    expect(setupBlock).toContain('applyRequestMillionWordRunway(')
+    expect(source).toContain('req.body?.million_word_runway')
+    expect(source).toContain('chapter_target: { ...contextPackage.chapter_target, million_word_runway: req.body.million_word_runway }')
   })
 
   test('runs commercial editor rewrite after word-target expansion and before self-review', () => {

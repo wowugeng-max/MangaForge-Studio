@@ -23,6 +23,7 @@ export type AutoCreationDirectorWorkspaceProps = {
   model: AutoCreationDirectorModel
   loadingActionKey?: string
   onAction: (action: AutoCreationDirectorAction) => void
+  onStageAction?: (action: AutoCreationDirectorAction) => void
   onSelectChapter: (chapterNo: number) => void
 }
 
@@ -92,6 +93,63 @@ function batchReviewColor(status: AutoCreationDirectorModel['batchReviewQueue'][
   return 'default'
 }
 
+function batchCompletionColor(status: AutoCreationDirectorModel['batchReviewQueue']['completionDashboard']['status']) {
+  if (status === 'ready_next') return 'green'
+  if (status === 'needs_repair') return 'gold'
+  if (status === 'in_progress') return 'blue'
+  return 'default'
+}
+
+function batchCompletionMetricColor(status: AutoCreationDirectorModel['batchReviewQueue']['completionDashboard']['metrics'][number]['status']) {
+  if (status === 'ok') return 'green'
+  if (status === 'block') return 'red'
+  return 'gold'
+}
+
+function productionLicenseColor(status: AutoCreationDirectorModel['productionLicense']['status']) {
+  if (status === 'batch_allowed') return 'green'
+  if (status === 'single_chapter') return 'blue'
+  return 'red'
+}
+
+function qualityGateColor(status: string) {
+  if (status === 'ok') return 'green'
+  if (status === 'block') return 'red'
+  return 'gold'
+}
+
+function battleDeskColor(status: string) {
+  if (status === 'ready' || status === 'ok') return 'green'
+  if (status === 'blocked' || status === 'block') return 'red'
+  return 'gold'
+}
+
+function battleLaneLabel(key: AutoCreationDirectorModel['longformBattleDesk']['lanes'][number]['key']) {
+  const labels = {
+    story_core: '核心守恒',
+    reader_pull: '读者拉力',
+    storyline: '剧情线调度',
+    volume_beat: '卷级爆点',
+    innovation_ip: '创新/IP场面',
+    production_fuel: '生产燃料',
+  }
+  return labels[key]
+}
+
+function dailyStepStatusLabel(status: AutoCreationPipelineStatus) {
+  if (status === 'done') return '完成'
+  if (status === 'active') return '当前'
+  if (status === 'blocked') return '阻塞'
+  if (status === 'warning') return '待治理'
+  return '等待'
+}
+
+function scriptRoomStatusLabel(status: AutoCreationDirectorModel['rollingScriptRoom']['status']) {
+  if (status === 'ready') return '已对齐'
+  if (status === 'blocked') return '阻塞'
+  return '待校准'
+}
+
 function formatWords(value: number) {
   if (!value) return '0'
   if (value >= 10000) return `${(value / 10000).toFixed(1)}万`
@@ -139,12 +197,19 @@ export function AutoCreationDirectorWorkspace({
   model,
   loadingActionKey,
   onAction,
+  onStageAction = onAction,
   onSelectChapter,
 }: AutoCreationDirectorWorkspaceProps) {
   const targetPercent = model.metrics.targetWords > 0
     ? Math.min(100, Math.round((model.metrics.writtenWords / model.metrics.targetWords) * 100))
     : 0
   const activeStep = model.pipeline.find(step => step.status === 'active')
+  const todayCommandDeck = model.todayCommandDeck
+  const batchPreflight = model.batchGuardrail.preflight
+  const longformMemoryAnchor = batchPreflight.longformMemoryAnchor || null
+  const longformCharacterStates = Array.isArray(longformMemoryAnchor?.character_states) ? longformMemoryAnchor.character_states : []
+  const longformOpenQuestions = Array.isArray(longformMemoryAnchor?.open_questions) ? longformMemoryAnchor.open_questions : []
+  const longformPayoffDebts = Array.isArray(longformMemoryAnchor?.payoff_debts) ? longformMemoryAnchor.payoff_debts : []
 
   return (
     <div className="auto-director-shell">
@@ -159,6 +224,11 @@ export function AutoCreationDirectorWorkspace({
             {model.metrics.volumeBeatScore !== null && <Tag color={rhythmColor(model.longformRhythm.status)} bordered={false}>爆点预算 {model.metrics.volumeBeatScore}</Tag>}
             {model.metrics.longformRhythmScore !== null && <Tag color={rhythmColor(model.longformRhythm.status)} bordered={false}>长篇节奏 {model.metrics.longformRhythmScore}</Tag>}
             <Tag bordered={false}>剧情线 {model.metrics.storylineCount}</Tag>
+            {model.deliveryRiskGate.totalOpen > 0 && (
+              <Tag color={model.deliveryRiskGate.status === 'block' ? 'red' : 'gold'} bordered={false}>
+                未清风险 {model.deliveryRiskGate.totalOpen}
+              </Tag>
+            )}
           </Space>
           <Title level={4}>自动创作总控台</Title>
           <Text className="auto-director-headline">{model.headline}</Text>
@@ -178,22 +248,447 @@ export function AutoCreationDirectorWorkspace({
           )}
         </div>
 
-        <div className="auto-director-next-card">
-          <div className="auto-director-next-eyebrow">
+        <div className="auto-director-judgement-card">
+          <div className="auto-director-judgement-eyebrow">
             <FireOutlined />
-            <span>唯一下一步</span>
+            <span>当前判断</span>
           </div>
           <Text strong>{model.mainAction.label}</Text>
           <Paragraph>{model.mainAction.description}</Paragraph>
-          <ActionButton
-            primary
-            action={model.mainAction}
-            loadingActionKey={loadingActionKey}
-            onAction={onAction}
-          />
           {model.mainAction.modelCall && <Text className="auto-director-model-note">会调用大模型，长文本任务保持流式/后台任务执行。</Text>}
         </div>
       </div>
+
+      <section className={`auto-director-panel auto-director-command-deck auto-director-command-deck-${todayCommandDeck.status}`}>
+        <div className="auto-director-panel-title">
+          <FireOutlined />
+          <span>今日指挥条</span>
+          <Tag color={productionLicenseColor(todayCommandDeck.status)} bordered={false}>
+            {todayCommandDeck.modeLabel}
+          </Tag>
+          <Tag bordered={false}>当前：{todayCommandDeck.currentStepLabel}</Tag>
+          <Tag color="blue" bordered={false}>唯一下一步</Tag>
+        </div>
+        <div className="auto-director-command-body">
+          <div className="auto-director-command-copy">
+            <Text strong>{todayCommandDeck.summary}</Text>
+            {todayCommandDeck.reasons.length > 0 && (
+              <div className="auto-director-command-reasons">
+                {todayCommandDeck.reasons.slice(0, 3).map(reason => <Text key={reason} type="secondary">{reason}</Text>)}
+              </div>
+            )}
+          </div>
+          <div className="auto-director-command-quality-gates" aria-label="万订护栏">
+            <Text className="auto-director-command-quality-title">万订护栏</Text>
+            {todayCommandDeck.qualityGates.map(gate => (
+              <Tooltip key={gate.key} title={gate.detail}>
+                <span className={`auto-director-command-quality-gate auto-director-command-quality-gate-${gate.status}`}>
+                  <Tag color={qualityGateColor(gate.status)} bordered={false}>
+                    {gate.status === 'ok' ? '稳' : gate.status === 'block' ? '阻' : '警'}
+                  </Tag>
+                  <Text>{gate.label}</Text>
+                </span>
+              </Tooltip>
+            ))}
+          </div>
+          <div className="auto-director-command-flow">
+            {todayCommandDeck.flow.map((step, index) => (
+              <div
+                key={step.key}
+                className={[
+                  'auto-director-command-flow-step',
+                  `auto-director-command-flow-step-${step.status}`,
+                ].join(' ')}
+              >
+                <span>{index + 1}</span>
+                <Text>{step.label}</Text>
+              </div>
+            ))}
+          </div>
+          <ActionButton
+            primary
+            action={todayCommandDeck.action}
+            loadingActionKey={loadingActionKey}
+            onAction={onAction}
+          />
+        </div>
+      </section>
+
+      <section className={`auto-director-panel auto-director-battle-desk auto-director-battle-desk-${model.longformBattleDesk.status}`}>
+        <div className="auto-director-panel-title">
+          <FundProjectionScreenOutlined />
+          <span>长篇作战台</span>
+          <Tag color={battleDeskColor(model.longformBattleDesk.status)} bordered={false}>{model.longformBattleDesk.label}</Tag>
+          {model.longformBattleDesk.riskChips.slice(0, 4).map(chip => (
+            <Tag key={chip} color="gold" bordered={false}>{chip}</Tag>
+          ))}
+        </div>
+        <div className="auto-director-battle-body">
+          <div className="auto-director-battle-copy">
+            <Text strong>{model.longformBattleDesk.summary}</Text>
+            <Text type="secondary">同故事规划页共用六条生产线，避免总控台和规划页给出两套判断。</Text>
+          </div>
+          <div className="auto-director-battle-lanes">
+            {model.longformBattleDesk.lanes.map(lane => (
+              <button
+                key={lane.key}
+                type="button"
+                className={`auto-director-battle-lane auto-director-battle-lane-${lane.status}`}
+                onClick={() => onAction({
+                  area: 'planning',
+                  key: lane.actionKey,
+                  label: lane.label,
+                  description: lane.detail,
+                  modelCall: false,
+                })}
+              >
+                <span>
+                  <Tag color={battleDeskColor(lane.status)} bordered={false}>
+                    {lane.status === 'ok' ? '稳' : lane.status === 'block' ? '阻' : '警'}
+                  </Tag>
+                  <Text strong>{lane.label || battleLaneLabel(lane.key)}</Text>
+                </span>
+                <Progress percent={Math.max(0, Math.min(100, lane.score))} size="small" showInfo={false} />
+                <Text type="secondary">{lane.detail}</Text>
+              </button>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="auto-director-panel auto-director-serial-rail">
+        <div className="auto-director-panel-title">
+          <FundProjectionScreenOutlined />
+          <span>连载生产轨道</span>
+          <Tag color="blue" bordered={false}>当前：{model.serialWorkflow.currentLabel}</Tag>
+        </div>
+        <div className="auto-director-serial-body">
+          <Text className="auto-director-serial-summary">{model.serialWorkflow.summary}</Text>
+          <div className="auto-director-serial-stages">
+            {model.serialWorkflow.stages.map((stage, index) => (
+              <button
+                key={stage.key}
+                type="button"
+                className={[
+                  'auto-director-serial-stage',
+                  'auto-director-serial-stage-button',
+                  `auto-director-serial-stage-${stage.status}`,
+                ].join(' ')}
+                onClick={() => onStageAction(stage.action)}
+              >
+                <div className="auto-director-serial-stage-head">
+                  <span className="auto-director-serial-index" style={{ color: pipelineColor(stage.status) }}>
+                    {pipelineIcon(stage.status)}
+                    <em>{index + 1}</em>
+                  </span>
+                  <Text strong>{stage.label}</Text>
+                  <Tag
+                    color={stage.status === 'done' ? 'green' : stage.status === 'active' ? 'blue' : stage.status === 'blocked' ? 'red' : stage.status === 'warning' ? 'gold' : 'default'}
+                    bordered={false}
+                  >
+                    {dailyStepStatusLabel(stage.status)}
+                  </Tag>
+                </div>
+                <Text type="secondary">{stage.detail}</Text>
+                <Text className="auto-director-serial-action-label">{stage.action.label}</Text>
+              </button>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <details className="auto-director-detail-drawer">
+        <summary className="auto-director-detail-summary">
+          <span>展开详细依据</span>
+          <Text type="secondary">查看生产许可、日更作战、航线守门、连续生产护栏和复盘证据。</Text>
+        </summary>
+
+      <section className={`auto-director-panel auto-director-license-panel auto-director-license-panel-${model.productionLicense.status}`}>
+        <div className="auto-director-panel-title">
+          <CheckCircleOutlined />
+          <span>生产许可</span>
+          <Tag color={productionLicenseColor(model.productionLicense.status)} bordered={false}>
+            {model.productionLicense.modeLabel}
+          </Tag>
+          {model.productionLicense.safeChapterCount > 0 && (
+            <Tag bordered={false}>放行 {model.productionLicense.safeChapterCount} 章</Tag>
+          )}
+        </div>
+        <div className="auto-director-license-detail">
+          <div className="auto-director-license-copy">
+            <Text className="auto-director-license-mode">{model.productionLicense.summary}</Text>
+            {model.productionLicense.reasons.length > 0 && (
+              <div className="auto-director-license-reasons">
+                {model.productionLicense.reasons.slice(0, 4).map(reason => <Text key={reason} type="secondary">{reason}</Text>)}
+              </div>
+            )}
+            {model.productionLicense.badges.length > 0 && (
+              <div className="auto-director-license-badges">
+                {model.productionLicense.badges.map(badge => <Tag key={badge} bordered={false}>{badge}</Tag>)}
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+
+      <section className="auto-director-panel auto-director-daily-panel">
+        <div className="auto-director-panel-title">
+          <FireOutlined />
+          <span>连载日更作战</span>
+          <Tag color="blue" bordered={false}>
+            当前：{model.dailyBattlePlan.steps.find(step => step.key === model.dailyBattlePlan.currentStepKey)?.label}
+          </Tag>
+        </div>
+        <Text className="auto-director-daily-summary">{model.dailyBattlePlan.summary}</Text>
+        <Text className="auto-director-daily-order" type="secondary">
+          顺序：清交稿风险 {'->'} 补长线材料 {'->'} 写/修当前章 {'->'} 放行下一批
+        </Text>
+        <div className="auto-director-daily-steps">
+          {model.dailyBattlePlan.steps.map((step, index) => (
+            <div
+              key={step.key}
+              className={[
+                'auto-director-daily-step',
+                `auto-director-daily-step-${step.status}`,
+                step.key === model.dailyBattlePlan.currentStepKey ? 'auto-director-daily-step-current' : '',
+              ].filter(Boolean).join(' ')}
+            >
+              <div className="auto-director-daily-step-index" style={{ color: pipelineColor(step.status) }}>
+                {pipelineIcon(step.status)}
+                <span>{index + 1}</span>
+              </div>
+              <div className="auto-director-daily-step-body">
+                <Space wrap size={6}>
+                  <Text strong>{step.label}</Text>
+                  <Tag color={step.status === 'done' ? 'green' : step.status === 'active' ? 'blue' : step.status === 'blocked' ? 'red' : step.status === 'warning' ? 'gold' : 'default'} bordered={false}>
+                    {dailyStepStatusLabel(step.status)}
+                  </Tag>
+                </Space>
+                <Text type="secondary">{step.detail}</Text>
+                {step.badges.length > 0 && (
+                  <div className="auto-director-daily-badges">
+                    {step.badges.slice(0, 3).map(badge => <Tag key={badge} bordered={false}>{badge}</Tag>)}
+                  </div>
+                )}
+                {step.gateChecks.length > 0 && (
+                  <div className="auto-director-daily-gates">
+                    <span>完成口径</span>
+                    {step.gateChecks.slice(0, 2).map(check => <Text key={check} type="secondary">{check}</Text>)}
+                  </div>
+                )}
+                {step.status !== 'done' && (
+                  <ActionButton
+                    action={step.action}
+                    loadingActionKey={loadingActionKey}
+                    onAction={onAction}
+                  />
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className={`auto-director-panel auto-director-runway-panel auto-director-runway-panel-${model.millionWordRunway.status}`}>
+        <div className="auto-director-panel-title">
+          <FundProjectionScreenOutlined />
+          <span>百万字航线守门</span>
+          <Tag color={rhythmColor(model.millionWordRunway.status)} bordered={false}>{model.millionWordRunway.label}</Tag>
+          <Tag bordered={false}>{model.millionWordRunway.bandLabel}</Tag>
+          <Tag color={model.millionWordRunway.status === 'ready' ? 'green' : model.millionWordRunway.status === 'blocked' ? 'red' : 'gold'} bordered={false}>
+            {model.millionWordRunway.safeModeLabel}
+          </Tag>
+        </div>
+        <Text className="auto-director-runway-summary">{model.millionWordRunway.summary}</Text>
+        <div className="auto-director-runway-layout">
+          <div className="auto-director-runway-gates">
+            {model.millionWordRunway.gates.map(gate => (
+              <button
+                key={gate.key}
+                type="button"
+                className={`auto-director-runway-gate auto-director-runway-gate-${gate.status}`}
+                onClick={() => onAction(model.millionWordRunway.recommendedAction)}
+              >
+                <span>
+                  <strong>{gate.label}</strong>
+                  <Tag color={gate.status === 'ok' ? 'green' : gate.status === 'block' ? 'red' : 'gold'} bordered={false}>
+                    {batchSignalLabel(gate.status)}
+                  </Tag>
+                </span>
+                <Text type="secondary">{gate.detail}</Text>
+              </button>
+            ))}
+          </div>
+          <div className="auto-director-runway-brief">
+            <div>
+              <Text strong>本章四问</Text>
+              <div className="auto-director-runway-questions">
+                {model.millionWordRunway.fourQuestions.map(question => (
+                  <div key={question.key} className={`auto-director-runway-question auto-director-runway-question-${question.status}`}>
+                    <span>{question.label}</span>
+                    <Text>{question.answer}</Text>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="auto-director-runway-lists">
+              <div>
+                <Text strong>不可偏移红线</Text>
+                {model.millionWordRunway.redLines.slice(0, 4).map(item => <Text key={item} type="secondary">{item}</Text>)}
+              </div>
+              <div>
+                <Text strong>追读燃料</Text>
+                {model.millionWordRunway.readerFuel.slice(0, 4).map(item => <Text key={item} type="secondary">{item}</Text>)}
+              </div>
+            </div>
+            <ActionButton
+              action={model.millionWordRunway.recommendedAction}
+              loadingActionKey={loadingActionKey}
+              onAction={onAction}
+            />
+          </div>
+        </div>
+      </section>
+
+      {model.writingQueueFocus.visible && (
+        <section className={`auto-director-panel auto-director-writing-queue-focus auto-director-writing-queue-focus-${model.writingQueueFocus.status}`}>
+          <div className="auto-director-panel-title">
+            <ThunderboltOutlined />
+            <span>写作队列</span>
+            <Tag color={model.writingQueueFocus.status === 'needs_plan' ? 'gold' : model.writingQueueFocus.status === 'draft_generated' ? 'blue' : 'green'} bordered={false}>
+              {model.writingQueueFocus.label}
+            </Tag>
+            {model.writingQueueFocus.currentChapterNo && (
+              <Tag bordered={false}>第 {model.writingQueueFocus.currentChapterNo} 章</Tag>
+            )}
+          </div>
+          <div className="auto-director-writing-queue-focus-body">
+            <div className="auto-director-writing-queue-focus-copy">
+              <Text>{model.writingQueueFocus.summary}</Text>
+              {model.writingQueueFocus.badges.length > 0 && (
+                <div className="auto-director-writing-queue-focus-badges">
+                  {model.writingQueueFocus.badges.map(badge => <Tag key={badge} bordered={false}>{badge}</Tag>)}
+                </div>
+              )}
+            </div>
+            <div className="auto-director-writing-queue-focus-actions">
+              {model.writingQueueFocus.currentChapterNo && (
+                <Button onClick={() => onSelectChapter(model.writingQueueFocus.currentChapterNo || 0)}>
+                  定位章节
+                </Button>
+              )}
+              <ActionButton
+                action={model.writingQueueFocus.action}
+                loadingActionKey={loadingActionKey}
+                onAction={onAction}
+              />
+            </div>
+          </div>
+        </section>
+      )}
+
+      <section className={`auto-director-panel auto-director-launch-gate-panel auto-director-launch-gate-panel-${model.chapterLaunchGate.status}`}>
+        <div className="auto-director-panel-title">
+          <CheckCircleOutlined />
+          <span>本章开写门禁</span>
+          <Tag color={rhythmColor(model.chapterLaunchGate.status)} bordered={false}>{model.chapterLaunchGate.label}</Tag>
+        </div>
+        <Text className="auto-director-launch-gate-summary">{model.chapterLaunchGate.summary}</Text>
+        <div className="auto-director-launch-gate-signals">
+          {model.chapterLaunchGate.signals.map(signal => (
+            <div key={signal.key} className={`auto-director-launch-gate-signal auto-director-launch-gate-signal-${signal.status}`}>
+              <span>
+                <Text strong>{signal.label}</Text>
+                <Tag color={signal.status === 'ok' ? 'green' : signal.status === 'block' ? 'red' : 'gold'} bordered={false}>
+                  {batchSignalLabel(signal.status)}
+                </Tag>
+              </span>
+              <Text type="secondary">{signal.detail}</Text>
+            </div>
+          ))}
+        </div>
+        {model.chapterLaunchGate.status !== 'ready' && (
+          <ActionButton
+            action={model.chapterLaunchGate.action}
+            loadingActionKey={loadingActionKey}
+            onAction={onAction}
+          />
+        )}
+      </section>
+
+      <section className={`auto-director-panel auto-director-script-room-panel auto-director-script-room-panel-${model.rollingScriptRoom.status}`}>
+        <div className="auto-director-panel-title">
+          <FundProjectionScreenOutlined />
+          <span>百章滚动剧本室</span>
+          <Tag color={rhythmColor(model.rollingScriptRoom.status)} bordered={false}>{model.rollingScriptRoom.label}</Tag>
+          <Tag bordered={false}>{model.rollingScriptRoom.focusRangeLabel}</Tag>
+          {model.rollingScriptRoom.repairTasks.length > 0 && (
+            <Tag color="gold" bordered={false}>待修复 {model.rollingScriptRoom.repairTasks.length}</Tag>
+          )}
+        </div>
+        <Text className="auto-director-script-room-summary">{model.rollingScriptRoom.summary}</Text>
+        <Text className="auto-director-script-room-axis" type="secondary">
+          五层：当前章 / 未来10章 / 未来100章 / 当前卷 / 全书罗盘
+        </Text>
+        <div className="auto-director-script-room-layout">
+          <div className="auto-director-script-room-layers">
+            {model.rollingScriptRoom.layers.map(layer => (
+              <button
+                key={layer.key}
+                type="button"
+                className={`auto-director-script-room-layer auto-director-script-room-layer-${layer.status}`}
+                onClick={() => onAction(layer.action)}
+              >
+                <span>
+                  <strong>{layer.label}</strong>
+                  <Tag color={rhythmColor(layer.status)} bordered={false}>{scriptRoomStatusLabel(layer.status)}</Tag>
+                </span>
+                <Text type="secondary">{layer.detail}</Text>
+                {layer.evidence.length > 0 && (
+                  <em>{layer.evidence.slice(0, 2).join('；')}</em>
+                )}
+              </button>
+            ))}
+          </div>
+          <div className="auto-director-script-room-route">
+            <div className="auto-director-script-room-route-head">
+              <Text strong>短期排期</Text>
+              <ActionButton
+                action={model.rollingScriptRoom.nextAction}
+                loadingActionKey={loadingActionKey}
+                onAction={onAction}
+              />
+              {model.rollingScriptRoom.repairTasks.length > 0 && (
+                <div className="auto-director-script-room-repair-entry">
+                  <Text type="secondary">生成剧本室修复任务</Text>
+                  <ActionButton
+                    action={model.rollingScriptRoom.repairAction}
+                    loadingActionKey={loadingActionKey}
+                    onAction={onAction}
+                  />
+                </div>
+              )}
+            </div>
+            {model.rollingScriptRoom.nextChapters.length > 0 ? (
+              <div className="auto-director-script-room-chapters">
+                {model.rollingScriptRoom.nextChapters.slice(0, 6).map(chapter => (
+                  <button
+                    key={chapter.chapterNo}
+                    type="button"
+                    className="auto-director-script-room-chapter"
+                    onClick={() => onSelectChapter(chapter.chapterNo)}
+                  >
+                    <span>第{chapter.chapterNo}章 · {chapter.title}</span>
+                    <Text type="secondary">{chapter.chapterTask || chapter.conflict || '待补章节职责'}</Text>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <Alert type="warning" showIcon message="短期排期不足" description="先补齐未来10章滚动规划，再放行连续生成。" />
+            )}
+          </div>
+        </div>
+      </section>
 
       <section className={`auto-director-panel auto-director-compass-panel auto-director-compass-panel-${model.longformCompass.status}`}>
         <div className="auto-director-panel-title">
@@ -260,6 +755,52 @@ export function AutoCreationDirectorWorkspace({
           ))}
         </div>
       </section>
+
+      {model.deliveryRiskGate.totalOpen > 0 && (
+        <section className={`auto-director-panel auto-director-risk-fuse auto-director-risk-fuse-${model.deliveryRiskGate.status}`}>
+          <div className="auto-director-panel-title">
+            <ExclamationCircleOutlined />
+            <span>交稿风险熔断</span>
+            <Tag color={model.deliveryRiskGate.status === 'block' ? 'red' : 'gold'} bordered={false}>
+              {model.deliveryRiskGate.label}
+            </Tag>
+            {model.deliveryRiskGate.highOpen > 0 && <Tag color="red" bordered={false}>高风险 {model.deliveryRiskGate.highOpen}</Tag>}
+          </div>
+          <div className="auto-director-risk-fuse-layout">
+            <div className="auto-director-risk-fuse-summary">
+              <Text>{model.deliveryRiskGate.summary}</Text>
+              <ActionButton
+                action={{
+                  area: 'ops',
+                  key: 'create_delivery_risk_repair',
+                  label: '生成风险修复任务',
+                  description: model.deliveryRiskGate.summary,
+                  modelCall: false,
+                }}
+                loadingActionKey={loadingActionKey}
+                onAction={onAction}
+              />
+            </div>
+            <div className="auto-director-risk-fuse-body">
+              <div className="auto-director-risk-fuse-categories">
+                {model.deliveryRiskGate.categories.map(category => (
+                  <span key={category.key} className="auto-director-risk-fuse-category">
+                    <strong>{category.label}</strong>
+                    <Tag color={category.highCount > 0 ? 'red' : 'gold'} bordered={false}>
+                      {category.count}
+                    </Tag>
+                  </span>
+                ))}
+              </div>
+              {model.deliveryRiskGate.topRisks.length > 0 && (
+                <div className="auto-director-risk-fuse-list">
+                  {model.deliveryRiskGate.topRisks.map(risk => <Text key={risk} type="secondary">{risk}</Text>)}
+                </div>
+              )}
+            </div>
+          </div>
+        </section>
+      )}
 
       <section className="auto-director-panel auto-director-rhythm-panel">
         <div className="auto-director-panel-title">
@@ -360,6 +901,87 @@ export function AutoCreationDirectorWorkspace({
           <span>连续生产护栏</span>
           <Tag color={batchColor(model.batchGuardrail.status)} bordered={false}>{model.batchGuardrail.label}</Tag>
           <Tag bordered={false}>安全批次 {model.batchGuardrail.safeChapterCount} 章</Tag>
+        </div>
+        <Text type="secondary" className="auto-director-batch-axis">
+          检查：长线治理 / 故事压力 / 剧情单元 / 近10章疲劳 / 批次任务书 / 每章交稿回填
+        </Text>
+        {batchPreflight.visible && (
+          <div className={`auto-director-batch-preflight auto-director-batch-preflight-${batchPreflight.status}`}>
+            <div className="auto-director-batch-preflight-head">
+              <Text strong>安全连写预执行确认</Text>
+              <Tag color={batchColor(batchPreflight.status)} bordered={false}>
+                {batchPreflight.status === 'ready' ? '可执行' : batchPreflight.status === 'caution' ? '谨慎' : '阻塞'}
+              </Tag>
+              <Tag bordered={false}>放行 {batchPreflight.allowedChapterNos.length} 章</Tag>
+              {batchPreflight.blockedChapterNos.length > 0 && (
+                <Tag color="gold" bordered={false}>拦截 {batchPreflight.blockedChapterNos.length} 章</Tag>
+              )}
+            </div>
+            <Text type="secondary">{batchPreflight.summary}</Text>
+            <div className="auto-director-batch-preflight-flow">
+              {batchPreflight.modelPipeline.map(step => (
+                <Tag key={step} bordered={false}>{step}</Tag>
+              ))}
+            </div>
+            {longformMemoryAnchor && (
+              <div className="auto-director-batch-memory-anchor">
+                <div className="auto-director-batch-memory-anchor-head">
+                  <Text strong>正史锚点</Text>
+                  {longformMemoryAnchor.last_updated_chapter && (
+                    <Tag color="blue" bordered={false}>第{longformMemoryAnchor.last_updated_chapter}章同步</Tag>
+                  )}
+                  <Tag bordered={false}>角色 {longformCharacterStates.length}</Tag>
+                  <Tag bordered={false}>悬念 {longformOpenQuestions.length}</Tag>
+                  <Tag bordered={false}>回报债 {longformPayoffDebts.length}</Tag>
+                </div>
+                {longformMemoryAnchor.core_promise && (
+                  <Text className="auto-director-batch-memory-promise">{longformMemoryAnchor.core_promise}</Text>
+                )}
+                <div className="auto-director-batch-memory-chips">
+                  {longformMemoryAnchor.current_volume_goal && <Tag bordered={false}>卷目标：{longformMemoryAnchor.current_volume_goal}</Tag>}
+                  {longformOpenQuestions.slice(0, 2).map((item: any) => <Tag key={`question-${item}`} bordered={false}>悬念：{item}</Tag>)}
+                  {longformPayoffDebts.slice(0, 2).map((item: any) => <Tag key={`payoff-${item}`} bordered={false}>待兑现：{item}</Tag>)}
+                </div>
+              </div>
+            )}
+            {batchPreflight.warnings.length > 0 && (
+              <div className="auto-director-batch-preflight-warnings">
+                {batchPreflight.warnings.slice(0, 4).map(warning => (
+                  <Text key={warning} type="secondary">{warning}</Text>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+        <div className="auto-director-batch-release-window">
+          <div className="auto-director-batch-release-head">
+            <Text strong>本批放行范围</Text>
+            <Text type="secondary">{model.batchGuardrail.releaseWindow.summary}</Text>
+          </div>
+          <div className="auto-director-batch-release-list">
+            {model.batchGuardrail.releaseWindow.allowedChapters.map(chapter => (
+              <button
+                key={`allowed-${chapter.chapterNo}`}
+                type="button"
+                className="auto-director-batch-release-chapter auto-director-batch-release-chapter-allowed"
+                onClick={() => onSelectChapter(chapter.chapterNo)}
+              >
+                <span>第 {chapter.chapterNo} 章 · {chapter.title}</span>
+                <Tag color="green" bordered={false}>{chapter.reason}</Tag>
+              </button>
+            ))}
+            {model.batchGuardrail.releaseWindow.blockedChapters.map(chapter => (
+              <button
+                key={`blocked-${chapter.chapterNo}`}
+                type="button"
+                className="auto-director-batch-release-chapter auto-director-batch-release-chapter-blocked"
+                onClick={() => onSelectChapter(chapter.chapterNo)}
+              >
+                <span>第 {chapter.chapterNo} 章 · {chapter.title}</span>
+                <Tag color="gold" bordered={false}>{chapter.reason}</Tag>
+              </button>
+            ))}
+          </div>
         </div>
         <div className="auto-director-batch-layout">
           <div className="auto-director-batch-summary">
@@ -471,12 +1093,83 @@ export function AutoCreationDirectorWorkspace({
           </div>
           <div className="auto-director-batch-review-layout">
             <div className="auto-director-batch-review-summary">
+              {model.batchReviewQueue.completionDashboard.visible && (
+                <div className={`auto-director-batch-completion-dashboard auto-director-batch-completion-dashboard-${model.batchReviewQueue.completionDashboard.status}`}>
+                  <div className="auto-director-batch-completion-head">
+                    <Text strong>批次完成度</Text>
+                    <Tag color={batchCompletionColor(model.batchReviewQueue.completionDashboard.status)} bordered={false}>
+                      {model.batchReviewQueue.completionDashboard.label}
+                    </Tag>
+                    <Tag bordered={false}>{model.batchReviewQueue.completionDashboard.score}分</Tag>
+                  </div>
+                  <Text type="secondary">{model.batchReviewQueue.completionDashboard.summary}</Text>
+                  <Progress
+                    percent={model.batchReviewQueue.completionDashboard.score}
+                    size="small"
+                    showInfo={false}
+                    status={model.batchReviewQueue.completionDashboard.status === 'needs_repair' ? 'exception' : 'normal'}
+                  />
+                  <div className="auto-director-batch-completion-metrics">
+                    {model.batchReviewQueue.completionDashboard.metrics.map(metric => (
+                      <div key={metric.key} className={`auto-director-batch-completion-metric auto-director-batch-completion-metric-${metric.status}`}>
+                        <span>
+                          <strong>{metric.label}</strong>
+                          <Tag color={batchCompletionMetricColor(metric.status)} bordered={false}>
+                            {metric.value}/{metric.target}
+                          </Tag>
+                        </span>
+                        <Text type="secondary">{metric.detail}</Text>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {model.batchReviewQueue.handoff.visible && (
+                <div className={`auto-director-batch-handoff auto-director-batch-handoff-${model.batchReviewQueue.handoff.status}`}>
+                  <div className="auto-director-batch-handoff-head">
+                    <Text strong>批次交接</Text>
+                    <Tag
+                      color={model.batchReviewQueue.handoff.status === 'continue_batch'
+                        ? 'green'
+                        : model.batchReviewQueue.handoff.status === 'failed'
+                          ? 'red'
+                          : 'gold'}
+                      bordered={false}
+                    >
+                      {model.batchReviewQueue.handoff.label}
+                    </Tag>
+                    {model.batchReviewQueue.handoff.targetChapterNos.length > 0 && (
+                      <Tag bordered={false}>
+                        章节 {model.batchReviewQueue.handoff.targetChapterNos.map(no => `第${no}章`).join('、')}
+                      </Tag>
+                    )}
+                  </div>
+                  <Text type="secondary">{model.batchReviewQueue.handoff.summary}</Text>
+                  {(model.batchReviewQueue.handoff.riskLabels.length > 0 || model.batchReviewQueue.handoff.evidence.length > 0) && (
+                    <div className="auto-director-batch-handoff-tags">
+                      {model.batchReviewQueue.handoff.riskLabels.map(label => (
+                        <Tag key={`risk-${label}`} color="gold" bordered={false}>{label}</Tag>
+                      ))}
+                      {model.batchReviewQueue.handoff.evidence.slice(0, 4).map(item => (
+                        <Tag key={`evidence-${item}`} bordered={false}>{item}</Tag>
+                      ))}
+                    </div>
+                  )}
+                  <ActionButton
+                    action={model.batchReviewQueue.handoff.action}
+                    loadingActionKey={loadingActionKey}
+                    onAction={onAction}
+                  />
+                </div>
+              )}
               <Text>{model.batchReviewQueue.summary}</Text>
-              <ActionButton
-                action={model.batchReviewQueue.nextAction}
-                loadingActionKey={loadingActionKey}
-                onAction={onAction}
-              />
+              {!model.batchReviewQueue.handoff.visible && (
+                <ActionButton
+                  action={model.batchReviewQueue.nextAction}
+                  loadingActionKey={loadingActionKey}
+                  onAction={onAction}
+                />
+              )}
               {model.batchReviewQueue.riskRadar.signals.length > 0 && (
                 <div className="auto-director-batch-risk-radar">
                   <Text strong>批次风险雷达</Text>
@@ -585,6 +1278,7 @@ export function AutoCreationDirectorWorkspace({
           </div>
         </aside>
       </div>
+      </details>
     </div>
   )
 }

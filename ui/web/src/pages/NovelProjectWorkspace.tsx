@@ -43,7 +43,7 @@ import {
 import { useChapterAutosave } from './novel-workspace/useChapterAutosave'
 import { useChapterVersions } from './novel-workspace/useChapterVersions'
 import { useNovelWorkspaceData, type ChapterSortMode, type ChapterStatusFilter } from './novel-workspace/useNovelWorkspaceData'
-import { buildRepairTaskRevisionPrompt } from './novel-workspace/repairTaskRevisionPrompt'
+import { buildDeliveryRiskRevisionClosurePlan, buildRepairTaskRevisionPrompt } from './novel-workspace/repairTaskRevisionPrompt'
 import { useReferenceWorkflow } from './novel-workspace/useReferenceWorkflow'
 import { useWorkspaceTasks } from './novel-workspace/useWorkspaceTasks'
 import {
@@ -138,6 +138,7 @@ export default function NovelProjectWorkspace() {
   const [future100ApplyLoading, setFuture100ApplyLoading] = useState(false)
   const [future100FocusOutlineIds, setFuture100FocusOutlineIds] = useState<number[]>([])
   const [projectSettings, setProjectSettings] = useState<any[]>([])
+  const [memoryPalaceProjects, setMemoryPalaceProjects] = useState<any[] | null>(null)
 
   const chapterWordTargetPayload = () => ({
     word_target_mode: chapterWordTargetMode,
@@ -421,6 +422,17 @@ export default function NovelProjectWorkspace() {
     && activeChapterContextPackage?.updatedAt === activeChapterUpdatedAt
     ? activeChapterContextPackage.data
     : null
+  const activeMemorySummary = useMemo(() => {
+    if (!projectId) return null
+    if (!Array.isArray(memoryPalaceProjects)) return null
+    return memoryPalaceProjects.find((item: any) => Number(item?.project_id || 0) === projectId) || {
+      project_id: projectId,
+      memory_count: 0,
+      fact_count: 0,
+      continuity_issue_count: 0,
+      missing: true,
+    }
+  }, [memoryPalaceProjects, projectId])
 
   useEffect(() => {
     if (!projectId) return
@@ -439,16 +451,21 @@ export default function NovelProjectWorkspace() {
     }
   }, [projectId, reviews.length, workspaceArea])
 
-  const planningWorkspaceModel = useMemo(() => buildPlanningWorkspaceModel({
-    selectedProject,
-    outlines,
-    chapters: sortedChapters,
-    activeChapter,
-    materialScore: activeChapterDiagnosticsData?.material_score,
-    commercialReadiness,
-    reviews,
-    settingEntities: projectSettings,
-  }), [selectedProject, outlines, sortedChapters, activeChapter, activeChapterDiagnosticsData?.material_score, commercialReadiness, reviews, projectSettings])
+  useEffect(() => {
+    if (!projectId) return
+    let canceled = false
+    apiClient.get('/novel/memory-palace/projects')
+      .then(res => {
+        if (canceled) return
+        setMemoryPalaceProjects(Array.isArray(res.data?.projects) ? res.data.projects : [])
+      })
+      .catch(() => {
+        if (!canceled) setMemoryPalaceProjects([])
+      })
+    return () => {
+      canceled = true
+    }
+  }, [projectId, runRecords.length, reviews.length, sortedChapters.length])
 
   const proseQualityReports = useMemo(() => (
     reviews
@@ -508,6 +525,37 @@ export default function NovelProjectWorkspace() {
     return saved
   }
 
+  const repairWritingQueuePlan = async (item: any) => {
+    const chapterId = Number(item?.id || 0)
+    if (!chapterId) return message.warning('这个队列项没有绑定章节')
+    if (!await selectChapterForWriting(chapterId)) return
+    await runRollingPlan({
+      intent: {
+        ...(item?.repairIntent || {}),
+        source: 'writing_queue_plan_repair',
+        chapter_id: chapterId,
+        chapter_no: Number(item?.chapterNo || 0),
+        title: item?.title || '',
+        source_label: item?.sourceLabel || '',
+        missing_fields: Array.isArray(item?.missingPlanFields) ? item.missingPlanFields : [],
+        missing_labels: Array.isArray(item?.missingPlanLabels) ? item.missingPlanLabels : [],
+        instruction: '只补齐当前章节的目标、核心冲突、章末钩子和必要场景职责，不改长期主线、不提前消费后续爆点。',
+      },
+    })
+  }
+
+  const repairWritingQueuePlanBatch = async (queue: any) => {
+    const intent = queue?.planRepair?.intent
+    if (!intent) return message.warning('当前队列没有可补齐的计划缺口')
+    await runRollingPlan({
+      intent: {
+        ...intent,
+        source: 'writing_queue_batch_plan_repair',
+        instruction: '批量补齐写作队列里缺少的章节目标、核心冲突、章末钩子和必要场景职责；保持章节顺序、长期主线、剧情线和禁揭边界不变，不提前消费后续爆点。',
+      },
+    })
+  }
+
   const openStoryAssetsWorkspace = (focus?: 'discoveredAssets') => {
     setWorkspaceArea('storyAssets')
     if (focus === 'discoveredAssets') {
@@ -546,6 +594,23 @@ export default function NovelProjectWorkspace() {
     onCancelProseBatch: cancelStepGenerateProse,
   })
 
+  useEffect(() => {
+    if (!projectId || workspaceArea !== 'storyPlanning') return
+    void loadProductionTasks()
+  }, [projectId, workspaceArea, loadProductionTasks])
+
+  const planningWorkspaceModel = useMemo(() => buildPlanningWorkspaceModel({
+    selectedProject,
+    outlines,
+    chapters: sortedChapters,
+    activeChapter,
+    materialScore: activeChapterDiagnosticsData?.material_score,
+    commercialReadiness,
+    reviews,
+    settingEntities: projectSettings,
+    productionTasks,
+  }), [selectedProject, outlines, sortedChapters, activeChapter, activeChapterDiagnosticsData?.material_score, commercialReadiness, reviews, projectSettings, productionTasks])
+
   const writingCockpitModel = useMemo(() => buildWritingCockpitModel({
     project: selectedProject,
     chapters: sortedChapters,
@@ -557,6 +622,7 @@ export default function NovelProjectWorkspace() {
     commercialReadiness,
     activeRuns: activeTasks,
     reviews,
+    memorySummary: activeMemorySummary,
   }), [
     selectedProject,
     sortedChapters,
@@ -567,6 +633,7 @@ export default function NovelProjectWorkspace() {
     commercialReadiness,
     activeTasks,
     reviews,
+    activeMemorySummary,
   ])
 
   const autoCreationDirectorModel = useMemo(() => buildAutoCreationDirectorModel({
@@ -579,6 +646,18 @@ export default function NovelProjectWorkspace() {
     chapters: sortedChapters,
     storyState: selectedProject?.reference_config?.story_state || {},
   }), [planningWorkspaceModel, writingCockpitModel, activeTasks, selectedModelId, reviews, runRecords, sortedChapters, selectedProject?.reference_config?.story_state])
+
+  const recentFatigueRollingPlanIntent = useMemo(() => {
+    const fatigue = planningWorkspaceModel.recentFatigueRadar
+    const fatigueWarnings = Array.isArray(fatigue?.signals)
+      ? fatigue.signals.filter((signal: any) => String(signal?.status || '') === 'warn')
+      : []
+    if (fatigue?.status !== 'needs_attention' && fatigueWarnings.length === 0) return null
+    return {
+      source: 'recent_fatigue_repair',
+      recent_fatigue_radar: fatigue,
+    }
+  }, [planningWorkspaceModel.recentFatigueRadar])
 
   const autoDirectorBusy = Boolean(
     stepProseLoading
@@ -803,13 +882,18 @@ export default function NovelProjectWorkspace() {
   }
 
   /* ── 正文生成 ──────────────────────────────────────────────────── */
-  const stepGenerateProse = async (options?: { limit?: number; source?: string; longformCompass?: any; nextBatchBrief?: any }) => {
+  const stepGenerateProse = async (options?: { limit?: number; source?: string; longformCompass?: any; longformBattleContext?: any; chapterLaunchGate?: any; nextBatchBrief?: any; batchPreflight?: any; millionWordRunway?: any; allowedChapterNos?: number[] }) => {
     if (!selectedModelId) return message.warning('请先选择模型')
     if (!await flushPendingSave()) return
-    const allUnwritten = sortedChapters.filter(ch => !ch.chapter_text || ch.chapter_text.includes('【占位正文】'))
+    const allowedChapterNoSet = new Set((options?.allowedChapterNos || []).map(chapterNo => Number(chapterNo)).filter(Boolean))
+    const allUnwrittenChapters = sortedChapters.filter(ch => !ch.chapter_text || ch.chapter_text.includes('【占位正文】'))
+    const allUnwritten = allowedChapterNoSet.size > 0
+      ? allUnwrittenChapters.filter(ch => allowedChapterNoSet.has(Number(ch.chapter_no || 0)))
+      : allUnwrittenChapters
     const safetyLimit = Math.max(0, Number(options?.limit || 0))
     const unWritten = safetyLimit > 0 ? allUnwritten.slice(0, safetyLimit) : allUnwritten
-    if (allUnwritten.length === 0) return message.warning('所有章节已有正文，无需生成')
+    if (allUnwrittenChapters.length === 0) return message.warning('所有章节已有正文，无需生成')
+    if (allUnwritten.length === 0) return message.warning('当前护栏放行的章节没有可生成正文')
     if (unWritten.length === 0) return message.warning('当前安全批次没有可生成章节')
     if (!await confirmReferenceReady('正文创作')) return
     setStepProseLoading(true)
@@ -835,7 +919,11 @@ export default function NovelProjectWorkspace() {
               model_id: selectedModelId,
               ...chapterWordTargetPayload(),
               longform_compass: options?.longformCompass,
+              longform_battle_context: options?.longformBattleContext,
+              chapter_launch_gate: options?.chapterLaunchGate,
               next_batch_brief: options?.nextBatchBrief,
+              batch_preflight: options?.batchPreflight,
+              million_word_runway: options?.millionWordRunway,
               prompt: `请生成第 ${ch.chapter_no} 章《${displayValue(ch.title)}》完整正文`,
             }),
           })
@@ -897,7 +985,12 @@ export default function NovelProjectWorkspace() {
             total: unWritten.length,
             source: options?.source || 'manual_batch',
             longform_compass: options?.longformCompass,
+            longform_battle_context: options?.longformBattleContext,
+            chapter_launch_gate: options?.chapterLaunchGate,
             next_batch_brief: options?.nextBatchBrief,
+            batch_preflight: options?.batchPreflight,
+            million_word_runway: options?.millionWordRunway,
+            allowed_chapter_nos: Array.from(allowedChapterNoSet),
             safety_limit: safetyLimit || null,
             available_total: allUnwritten.length,
           },
@@ -1563,7 +1656,7 @@ export default function NovelProjectWorkspace() {
     await createEditorReportForChapter(activeChapter.id)
   }
 
-  const createEditorReportForChapter = async (chapterId: number, options: { sourceTask?: any; sourceRun?: any; autoRevision?: boolean } = {}) => {
+  const createEditorReportForChapter = async (chapterId: number, options: { sourceTask?: any; sourceRun?: any; sourceTaskIndex?: number; autoRevision?: boolean } = {}) => {
     if (!selectedModelId) return message.warning('请先选择模型')
     if (!await flushPendingSave()) return
     setEditorReportLoading(true)
@@ -1580,6 +1673,9 @@ export default function NovelProjectWorkspace() {
         await applyEditorRevision(res.data.review, {
           revisionMode: String(task.message || task.issue_type || '').includes('钩子') ? 'restore_hook' : 'tighten_pacing',
           prompt: buildRepairTaskRevisionPrompt(task, options.sourceRun),
+          sourceTask: task,
+          sourceRun: options.sourceRun,
+          sourceTaskIndex: options.sourceTaskIndex,
         })
       } else {
         message.success('编辑报告已生成')
@@ -1608,13 +1704,13 @@ export default function NovelProjectWorkspace() {
     }
   }
 
-  const startRepairTaskRevision = async (task: any, run?: any) => {
+  const startRepairTaskRevision = async (task: any, run?: any, taskIndex = -1) => {
     const chapterId = Number(task?.chapter_id || 0)
     if (!chapterId) return message.warning('这个任务没有绑定章节')
     if (!selectedModelId) return message.warning('请先选择模型')
     if (!await selectChapterForWriting(chapterId)) return
     setTaskCenterOpen(false)
-    await createEditorReportForChapter(chapterId, { sourceTask: task, sourceRun: run, autoRevision: true })
+    await createEditorReportForChapter(chapterId, { sourceTask: task, sourceRun: run, sourceTaskIndex: taskIndex, autoRevision: true })
   }
 
   const updateRepairTaskStatus = async (run: any, taskIndex: number, status: string, note = '') => {
@@ -1718,6 +1814,28 @@ export default function NovelProjectWorkspace() {
       await markNeedsReview()
       return
     }
+    if (taskType === 'repair_script_room' || String(task?.source || '') === 'rolling_script_room' || String(task?.issue_type || '') === 'script_room_layer_gap') {
+      setTaskCenterOpen(false)
+      const actionArea = String(task?.action_area || '')
+      const actionKey = String(task?.action_key || '')
+      if (actionArea === 'assets' || actionKey === 'open_story_assets') {
+        openStoryAssetsWorkspace()
+      } else if (actionArea === 'planning' && actionKey) {
+        handlePlanningAction(actionKey as PlanningActionKey)
+      } else if ((actionArea === 'writing' || actionArea === 'quality') && actionKey) {
+        handleWritingCockpitAction(actionKey as WritingCockpitActionKey)
+      } else {
+        setTaskCenterOpen(true)
+      }
+      await markNeedsReview()
+      return
+    }
+    if (taskType === 'repair_assets') {
+      setTaskCenterOpen(false)
+      openStoryAssetsWorkspace('discoveredAssets')
+      await markNeedsReview()
+      return
+    }
     if (!chapterId) return message.warning('这个任务没有绑定章节')
     if (taskType === 'repair_materials') {
       if (!selectedModelId) return message.warning('请先选择模型')
@@ -1728,8 +1846,7 @@ export default function NovelProjectWorkspace() {
       return
     }
     if (taskType === 'repair_quality') {
-      await startRepairTaskRevision(task)
-      await markNeedsReview()
+      await startRepairTaskRevision(task, run, taskIndex)
       return
     }
     if (taskType === 'repair_similarity') {
@@ -1757,8 +1874,7 @@ export default function NovelProjectWorkspace() {
       await markNeedsReview()
       return
     }
-    await startRepairTaskRevision(task)
-    await markNeedsReview()
+    await startRepairTaskRevision(task, run, taskIndex)
   }
 
   const refreshActiveProseQuality = async (source = 'manual_refresh', targetChapter: any = activeChapter) => {
@@ -1794,11 +1910,88 @@ export default function NovelProjectWorkspace() {
     await refreshActiveProseQuality(source, chapter)
   }
 
-  const applyEditorRevision = async (report: any, options: { revisionMode?: string; prompt?: string; skipConfirm?: boolean; targetChapterId?: number; autoStoryState?: boolean } = {}) => {
+  const closeRepairTaskAfterRevision = async (task: any, run: any, taskIndex: number, revisionResult: any) => {
+    if (!run?.id || taskIndex < 0) return null
+    const plan = buildDeliveryRiskRevisionClosurePlan(task, revisionResult || {})
+    await apiClient.post(`/novel/runs/${run.id}/tasks/${taskIndex}/status`, {
+      project_id: projectId,
+      status: plan.taskStatus,
+      note: plan.note,
+    })
+    if (plan.annotationStatus && plan.annotationKey) {
+      await apiClient.post(`/novel/projects/${projectId}/review-annotations/status`, {
+        annotation_key: plan.annotationKey,
+        status: plan.annotationStatus,
+        note: plan.note,
+      })
+    }
+    await loadProjectModules()
+    await loadProductionTasks()
+    return plan
+  }
+
+  const recheckRepairTaskConvergence = async (task: any, run: any, taskIndex: number) => {
+    const chapterId = Number(task?.chapter_id || 0)
+    if (!chapterId) return message.warning('这个复查任务没有绑定章节')
+    if (!selectedModelId) return message.warning('请先选择模型')
+    if (!await selectChapterForWriting(chapterId)) return
+    if (!await flushPendingSave()) return
+    setTaskCenterOpen(false)
+    setProseQualityLoading(true)
+    try {
+      const qualityRes = await apiClient.post(`/novel/chapters/${chapterId}/prose-quality`, {
+        project_id: projectId,
+        model_id: selectedModelId,
+        source: 'repair_task_recheck',
+        source_review_id: task?.review_id || null,
+      })
+      const storyRes = await apiClient.post(`/novel/chapters/${chapterId}/story-state-sync`, {
+        project_id: projectId,
+        model_id: selectedModelId,
+        source: 'repair_task_recheck',
+        source_review_id: qualityRes.data?.review?.id || task?.review_id || null,
+      })
+      const closurePlan = await closeRepairTaskAfterRevision(task, run, taskIndex, {
+        quality_refresh: {
+          ok: true,
+          score: qualityRes.data?.self_check?.score,
+          status: qualityRes.data?.review?.status,
+        },
+        story_state_update: storyRes.data?.story_state_update,
+        delivery_risk_convergence: storyRes.data?.delivery_risk_convergence,
+      })
+      setRightPanelOpen(true)
+      setRightPanelTab('proseQuality')
+      if (closurePlan?.taskStatus === 'resolved') {
+        message.success(`复检收敛完成，评分 ${qualityRes.data?.self_check?.score ?? '-'}，风险已清零，任务已关闭`)
+      } else {
+        message.warning(`复检收敛完成，评分 ${qualityRes.data?.self_check?.score ?? '-'}，仍需复查`)
+      }
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '复检收敛失败')
+    } finally {
+      setProseQualityLoading(false)
+    }
+  }
+
+  const applyEditorRevision = async (report: any, options: { revisionMode?: string; prompt?: string; skipConfirm?: boolean; targetChapterId?: number; autoStoryState?: boolean; sourceTask?: any; sourceRun?: any; sourceTaskIndex?: number } = {}) => {
     if (!selectedModelId) return message.warning('请先选择模型')
     const isSelfCheckRevision = report?.review_type === 'prose_quality'
+    const isDeliveryRiskRevision = [
+      'chapter_core_drift',
+      'reader_expectation_sync',
+      'reader_retention_sync',
+      'chapter_attraction_review',
+      'story_drive_sync',
+      'character_arc_sync',
+      'style_sample_sync',
+      'reader_payoff_sync',
+      'innovation_sync',
+      'storyline_sync',
+      'readability_review',
+    ].includes(String(report?.review_type || ''))
     const revisionLabels: Record<string, string> = {
-      from_report: isSelfCheckRevision ? '按正文自检生成修订稿' : '按编辑报告生成修订稿',
+      from_report: isSelfCheckRevision ? '按正文自检生成修订稿' : isDeliveryRiskRevision ? '按交稿风险生成修订稿' : '按编辑报告生成修订稿',
       expand_action: '补动作/战斗细节',
       cut_description: '压缩环境描写',
       tighten_pacing: '提升事件密度',
@@ -1821,20 +2014,31 @@ export default function NovelProjectWorkspace() {
           setChapters(prev => prev.map(c => c.id === res.data.chapter.id ? res.data.chapter : c))
         }
         await loadProjectModules()
+        let closurePlan: any = null
+        if (options.sourceTask && options.sourceRun && typeof options.sourceTaskIndex === 'number') {
+          closurePlan = await closeRepairTaskAfterRevision(options.sourceTask, options.sourceRun, options.sourceTaskIndex, res.data)
+        }
         setRightPanelOpen(true)
         setRightPanelTab('proseQuality')
+        const closureSuffix = closurePlan
+          ? closurePlan.taskStatus === 'resolved'
+            ? '；风险任务已自动关闭'
+            : '；风险任务已转入需复查'
+          : ''
         if (res.data?.quality_refresh?.ok) {
           const syncedTo = res.data?.story_state_update?.last_synced_chapter
-          message.success(`${revisionLabels[revisionMode] || '修订稿'}已入库，并已复检当前版本，评分 ${res.data.quality_refresh.score ?? '-'}${syncedTo ? `；状态机已同步至第${syncedTo}章` : ''}`)
+          message.success(`${revisionLabels[revisionMode] || '修订稿'}已入库，并已复检当前版本，评分 ${res.data.quality_refresh.score ?? '-'}${syncedTo ? `；状态机已同步至第${syncedTo}章` : ''}${closureSuffix}`)
         } else if (res.data?.quality_refresh?.ok === false) {
-          message.warning(`修订稿已入库，但自动复检失败：${res.data.quality_refresh.error || '未知错误'}。可在正文质检里手动复检。`)
+          message.warning(`修订稿已入库，但自动复检失败：${res.data.quality_refresh.error || '未知错误'}。可在正文质检里手动复检。${closureSuffix}`)
         } else if (res.data?.story_state_update?.last_synced_chapter) {
-          message.success(`修订稿已入库，状态机已同步至第${res.data.story_state_update.last_synced_chapter}章`)
+          message.success(`修订稿已入库，状态机已同步至第${res.data.story_state_update.last_synced_chapter}章${closureSuffix}`)
         } else {
-          message.success('修订稿已入库')
+          message.success(`修订稿已入库${closureSuffix}`)
         }
+        return res.data
       } catch (error: any) {
         message.error(error?.response?.data?.error || error?.message || '修订失败')
+        return null
       }
     }
     if (options.skipConfirm) {
@@ -1845,8 +2049,10 @@ export default function NovelProjectWorkspace() {
       title: revisionLabels[revisionMode] || revisionLabels.from_report,
       content: isSelfCheckRevision
         ? '系统会根据这份正文质检的修订指令重写当前章节，并保存为新的章节版本。'
+        : isDeliveryRiskRevision
+          ? '系统会根据这条交稿风险和当前章节的完整风险清单生成修订补丁，并保存为新的章节版本。'
         : '系统会根据这份编辑报告重写当前章节，并保存为新的章节版本。',
-      okText: isSelfCheckRevision ? '按自检修订' : '生成修订稿',
+      okText: isSelfCheckRevision ? '按自检修订' : isDeliveryRiskRevision ? '按风险修订' : '生成修订稿',
       onOk: runRevision,
     })
   }
@@ -1870,6 +2076,8 @@ export default function NovelProjectWorkspace() {
       safety_policy: JSON.stringify(bible.safety_policy || selectedProject?.reference_config?.safety || {}, null, 2),
       forbidden: JSON.stringify(bible.forbidden || [], null, 2),
       meme_bank: JSON.stringify(bible.meme_bank || selectedProject?.reference_config?.meme_bank || [], null, 2),
+      style_sample_bank: JSON.stringify(bible.style_sample_bank || selectedProject?.reference_config?.style_sample_bank || [], null, 2),
+      chapter_benchmark_sample_bank: JSON.stringify(bible.chapter_benchmark_sample_bank || selectedProject?.reference_config?.chapter_benchmark_sample_bank || [], null, 2),
     })
   }
 
@@ -1914,6 +2122,8 @@ export default function NovelProjectWorkspace() {
       }
       const parsedStyleLock = parseJson(v.style_lock, {})
       const memeBank = parseJson(v.meme_bank, [])
+      const styleSampleBank = parseJson(v.style_sample_bank, [])
+      const chapterBenchmarkSampleBank = parseJson(v.chapter_benchmark_sample_bank, [])
       const writingBible = {
         ...(selectedProject?.reference_config?.writing_bible || {}),
         promise: v.promise || '',
@@ -1937,6 +2147,8 @@ export default function NovelProjectWorkspace() {
         safety_policy: parseJson(v.safety_policy, {}),
         forbidden: parseJson(v.forbidden, []),
         meme_bank: memeBank,
+        style_sample_bank: styleSampleBank,
+        chapter_benchmark_sample_bank: chapterBenchmarkSampleBank,
       }
       const res = await apiClient.put(`/novel/projects/${projectId}/writing-bible`, { writing_bible: writingBible })
       const nextReferenceConfig = {
@@ -1944,6 +2156,8 @@ export default function NovelProjectWorkspace() {
         ...(res.data?.project?.reference_config || {}),
         writing_bible: res.data?.writing_bible || writingBible,
         meme_bank: Array.isArray(memeBank) ? memeBank : [],
+        style_sample_bank: Array.isArray(styleSampleBank) ? styleSampleBank : [],
+        chapter_benchmark_sample_bank: Array.isArray(chapterBenchmarkSampleBank) ? chapterBenchmarkSampleBank : [],
       }
       const configRes = await apiClient.put(`/novel/projects/${projectId}/reference-config`, nextReferenceConfig)
       setSelectedProject((prev: any) => res.data?.project
@@ -2626,6 +2840,88 @@ export default function NovelProjectWorkspace() {
     }
   }
 
+  const runReaderTrialReview = async () => {
+    setCommercialToolLoading('readerTrial')
+    try {
+      const res = await apiClient.post(`/novel/projects/${projectId}/reader-trial-review`)
+      const report = res.data?.report || {}
+      await loadProjectModules()
+      await loadProductionTasks()
+      setRightPanelOpen(true)
+      setRightPanelTab('bookReviews')
+      Modal.info({
+        title: '读者试读复盘',
+        width: 920,
+        content: (
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Card size="small">
+              <Space align="center" size={16}>
+                <Progress
+                  type="circle"
+                  size={76}
+                  percent={Number(report.score || 0)}
+                  status={Number(report.score || 0) >= 82 ? 'success' : Number(report.score || 0) < 65 ? 'exception' : 'normal'}
+                />
+                <Space direction="vertical" size={4}>
+                  <Text strong>{report.summary || '已完成读者试读复盘'}</Text>
+                  <Text type="secondary">{report.quality_bar_label || '起点1万均订试读基准'} · {report.status || '-'}</Text>
+                  {(report.drop_points || []).length > 0 && <Tag color="red" bordered={false}>弃读点 {(report.drop_points || []).length}</Tag>}
+                </Space>
+              </Space>
+            </Card>
+            <Card size="small" title="模拟读者">
+              <List
+                size="small"
+                dataSource={report.personas || []}
+                locale={{ emptyText: '暂无模拟读者结论' }}
+                renderItem={(persona: any) => (
+                  <List.Item>
+                    <List.Item.Meta
+                      title={<Space wrap><Text strong>{persona.label}</Text><Tag color={persona.risk_level === 'high' ? 'red' : persona.risk_level === 'low' ? 'green' : 'gold'} bordered={false}>{persona.score || '-'}分</Tag></Space>}
+                      description={`${persona.focus || ''} ${persona.verdict || ''}`}
+                    />
+                  </List.Item>
+                )}
+              />
+            </Card>
+            <Card size="small" title="弃读点与修复动作">
+              <List
+                size="small"
+                dataSource={(report.drop_points || []).slice(0, 10)}
+                locale={{ emptyText: '暂无明显弃读点' }}
+                renderItem={(item: string) => <List.Item>{item}</List.Item>}
+              />
+              {(report.repair_actions || []).length > 0 && (
+                <Space wrap style={{ marginTop: 8 }}>
+                  {(report.repair_actions || []).slice(0, 5).map((item: string) => <Tag key={item} color="gold" bordered={false}>{item}</Tag>)}
+                </Space>
+              )}
+            </Card>
+          </Space>
+        ),
+      })
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '读者试读复盘失败')
+    } finally {
+      setCommercialToolLoading('')
+    }
+  }
+
+  const createReaderTrialRepairQueue = async () => {
+    setCommercialToolLoading('readerTrialRepair')
+    try {
+      const res = await apiClient.post(`/novel/projects/${projectId}/reader-trial-review/repair-queue`)
+      await loadProjectModules()
+      await loadProductionTasks()
+      setTaskCenterOpen(true)
+      message.success(`已生成读者试读修复任务：${(res.data?.tasks || []).length} 项`)
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '生成读者试读修复任务失败')
+    } finally {
+      setCommercialToolLoading('')
+    }
+  }
+
   const createSafeBatchRiskRepairQueue = async () => {
     const reviewQueue = autoCreationDirectorModel.batchReviewQueue
     const tasks = reviewQueue.riskRadar.repairTasks || []
@@ -2655,13 +2951,18 @@ export default function NovelProjectWorkspace() {
             average_quality_score: reviewQueue.riskRadar.averageQualityScore,
             core_risk_count: reviewQueue.riskRadar.coreRiskCount,
             payoff_debt_count: reviewQueue.riskRadar.payoffDebtCount,
+            reader_pull_risk_count: reviewQueue.riskRadar.readerPullRiskCount,
             storyline_risk_count: reviewQueue.riskRadar.storylineRiskCount,
+            innovation_risk_count: reviewQueue.riskRadar.innovationRiskCount,
             readability_risk_count: reviewQueue.riskRadar.readabilityRiskCount,
+            serial_rhythm_risk_count: reviewQueue.riskRadar.serialRhythmRiskCount,
+            asset_growth_risk_count: reviewQueue.riskRadar.assetGrowthRiskCount,
+            volume_segment_risk_count: reviewQueue.riskRadar.volumeSegmentRiskCount,
             batch_plan_risk_count: reviewQueue.riskRadar.batchPlanRiskCount,
             task_count: tasks.length,
           },
           recommendations: [
-            '先处理高危核心偏移、剧情线禁揭、读者回报欠账和批次任务书兑现风险，再开启下一批安全连写。',
+            '先处理高危核心偏移、剧情线禁揭、读者回报欠账、读者拉力不足、创新/IP化缺口、卷级阶段漏结算、连载节奏疲劳、新资产膨胀和批次任务书兑现风险，再开启下一批安全连写。',
             '每个修复任务处理后执行质量复检、故事状态同步和批次风险复盘。',
           ],
           tasks,
@@ -2673,6 +2974,75 @@ export default function NovelProjectWorkspace() {
       message.success(`已生成安全连写批次修复任务：${tasks.length} 项`)
     } catch (error: any) {
       message.error(error?.response?.data?.error || error?.message || '生成安全连写批次修复任务失败')
+    } finally {
+      setAutoDirectorActionLoadingKey('')
+    }
+  }
+
+  const createScriptRoomRepairQueue = async () => {
+    const scriptRoom = autoCreationDirectorModel.rollingScriptRoom
+    const tasks = scriptRoom.repairTasks || []
+    if (!tasks.length) {
+      message.info('当前百章滚动剧本室没有可生成的修复任务。')
+      return
+    }
+    setAutoDirectorActionLoadingKey('create_script_room_repair')
+    try {
+      await apiClient.post('/novel/runs', {
+        project_id: projectId,
+        run_type: 'longform_production_repair',
+        step_name: `rolling-script-room-repair-${tasks.length}`,
+        status: 'ready',
+        input_ref: {
+          source: 'rolling_script_room',
+          focus_range: scriptRoom.focusRangeLabel,
+          status: scriptRoom.status,
+          layer_count: scriptRoom.layers.length,
+        },
+        output_ref: {
+          report: {
+            source: 'rolling_script_room',
+            summary: scriptRoom.summary,
+            status: scriptRoom.status,
+            focus_range: scriptRoom.focusRangeLabel,
+            task_count: tasks.length,
+            layer_status: scriptRoom.layers.map(layer => ({
+              key: layer.key,
+              label: layer.label,
+              status: layer.status,
+              detail: layer.detail,
+            })),
+          },
+          recommendations: [
+            '先处理百章剧本室的红/黄层级，再进入正文生成或安全连写。',
+            '修复后回到自动创作总控台，确认当前章、未来10章、未来100章、当前卷和全书罗盘重新对齐。',
+          ],
+          tasks,
+        },
+      })
+      await loadProjectModules()
+      await loadProductionTasks()
+      setTaskCenterOpen(true)
+      message.success(`已生成百章剧本室修复任务：${tasks.length} 项`)
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '生成百章剧本室修复任务失败')
+    } finally {
+      setAutoDirectorActionLoadingKey('')
+    }
+  }
+
+  const createDeliveryRiskRepairQueue = async () => {
+    setAutoDirectorActionLoadingKey('create_delivery_risk_repair')
+    try {
+      const res = await apiClient.post(`/novel/projects/${projectId}/review-annotations/repair-queue`)
+      const tasks = res.data?.tasks || []
+      await loadProjectModules()
+      await loadProductionTasks()
+      setTaskCenterOpen(true)
+      const skipped = Number(res.data?.skipped_existing || 0)
+      message.success(`已生成交稿风险修复任务：${tasks.length} 项${skipped ? `，跳过已有 ${skipped} 项` : ''}`)
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '生成交稿风险修复任务失败')
     } finally {
       setAutoDirectorActionLoadingKey('')
     }
@@ -3068,6 +3438,50 @@ export default function NovelProjectWorkspace() {
       })
     } catch (error: any) {
       message.error(error?.response?.data?.error || error?.message || '全书连续性检查失败')
+    } finally {
+      setCommercialToolLoading('')
+    }
+  }
+
+  const syncStoryStateForChapter = async (chapterId?: number) => {
+    const targetId = Number(chapterId || 0)
+    const targetChapter = targetId
+      ? sortedChapters.find(chapter => Number(chapter.id) === targetId)
+      : activeChapter
+    if (!targetChapter?.id) {
+      openStoryStateEditor()
+      return message.warning('当前没有可同步的目标章节，已打开人工故事状态校正。')
+    }
+    if (!selectedModelId) return message.warning('请先选择模型，再同步故事状态。')
+    if (!String(targetChapter.chapter_text || '').replace(/\s/g, '').trim()) {
+      openStoryStateEditor()
+      return message.warning('当前章节还没有正文，已打开人工故事状态校正。')
+    }
+    if (!await selectTargetChapterForWriting({
+      targetChapterId: Number(targetChapter.id),
+      activeChapterId: activeChapter?.id,
+      selectChapterForWriting,
+    })) return
+    if (!await flushPendingSave()) return
+
+    setCommercialToolLoading('storyStateSync')
+    try {
+      const res = await apiClient.post(`/novel/chapters/${targetChapter.id}/story-state-sync`, {
+        project_id: projectId,
+        model_id: selectedModelId,
+        source: 'writing_cockpit_state_sync',
+      })
+      await loadProjectModules()
+      await loadProductionTasks()
+      const update = res.data?.story_state_update || {}
+      if (update?.ok === false || update?.error) {
+        message.error(update?.error || '故事状态同步失败，请打开人工校正检查。')
+        return
+      }
+      const syncedTo = update?.last_synced_chapter || update?.last_updated_chapter || targetChapter.chapter_no
+      message.success(syncedTo ? `故事状态已同步至第 ${syncedTo} 章。` : '故事状态已同步。')
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '故事状态同步失败')
     } finally {
       setCommercialToolLoading('')
     }
@@ -3708,6 +4122,12 @@ export default function NovelProjectWorkspace() {
     if (!await flushPendingSave()) return
     if (!await confirmReferenceReady('正文创作')) return
     const targetChapterNo = Number(targetChapter.chapter_no || 0)
+    const currentChapterLaunchGate = (
+      Number(autoCreationDirectorModel.targetChapter?.id || 0) === Number(targetChapter.id || 0)
+      || Number(autoCreationDirectorModel.targetChapter?.chapterNo || 0) === targetChapterNo
+    )
+      ? autoCreationDirectorModel.chapterLaunchGate
+      : null
     setStreamingChapterId(targetChapter.id)
     setStreamingText('')
     setStreamingProgress('正在请求模型...')
@@ -3728,6 +4148,10 @@ export default function NovelProjectWorkspace() {
           body: JSON.stringify({
             project_id: projectId, model_id: selectedModelId,
             ...chapterWordTargetPayload(),
+            longform_compass: autoCreationDirectorModel.longformCompass,
+            longform_battle_context: autoCreationDirectorModel.longformBattleDesk,
+            chapter_launch_gate: currentChapterLaunchGate,
+            million_word_runway: autoCreationDirectorModel.millionWordRunway,
             prompt: `请生成第 ${targetChapter.chapter_no} 章《${displayValue(targetChapter.title)}》完整正文`,
             payload: ctx,
             allow_incomplete: Boolean(options.allowIncomplete),
@@ -4092,7 +4516,7 @@ export default function NovelProjectWorkspace() {
   }
 
   const planningLoadingKey = ((): PlanningLoadingKey | undefined => {
-    const keys: PlanningLoadingKey[] = ['rollingPlan', 'future100Audit', 'future100Generate', 'longformPressure', 'longformCreationDiagnosis', 'topic', 'referenceDiagnosis', 'first30Retention', 'first30Repair']
+    const keys: PlanningLoadingKey[] = ['rollingPlan', 'future100Audit', 'future100Generate', 'longformPressure', 'longformCreationDiagnosis', 'topic', 'referenceDiagnosis', 'first30Retention', 'first30Repair', 'readerTrial', 'readerTrialRepair']
     return keys.includes(commercialToolLoading as PlanningLoadingKey) ? commercialToolLoading as PlanningLoadingKey : undefined
   })()
   const workspaceAreaTabs: Array<{ key: WorkspaceArea; label: string; icon: React.ReactNode }> = [
@@ -4104,10 +4528,12 @@ export default function NovelProjectWorkspace() {
     { key: 'productionOps', label: '生产运营', icon: <RocketOutlined /> },
   ]
 
-  const handlePlanningAction = (key: PlanningActionKey) => {
-    const actions: Record<PlanningActionKey, () => void> = {
-      update_rolling_plan: () => { void runRollingPlan() },
+  const handlePlanningAction = (key: PlanningActionKey, options?: { intent?: any }) => {
+    const rollingPlanIntent = options?.intent || (key === 'update_rolling_plan' ? recentFatigueRollingPlanIntent : null)
+    const actions: Record<PlanningActionKey, () => void | Promise<void>> = {
+      update_rolling_plan: () => runRollingPlan({ intent: rollingPlanIntent || undefined }),
       complete_volume_plan: () => setOutlinePanelOpen(true),
+      enter_story_planning: () => setWorkspaceArea('storyPlanning'),
       enter_chapter_writing: () => setWorkspaceArea('chapterWriting'),
       open_outline_tree: () => setOutlineTreeOpen(true),
       future100_audit: () => { void runFuture100SkeletonAudit() },
@@ -4121,8 +4547,12 @@ export default function NovelProjectWorkspace() {
       open_quality_revision: () => setWorkspaceArea('qualityRevision'),
       run_first30_retention: () => { void runFirst30RetentionDiagnosis() },
       create_first30_repair: () => { void createFirst30RetentionRepairQueue() },
+      run_reader_trial_review: () => { void runReaderTrialReview() },
+      create_reader_trial_repair: () => { void createReaderTrialRepairQueue() },
+      create_delivery_risk_repair: () => { void createDeliveryRiskRepairQueue() },
+      open_task_center: () => setTaskCenterOpen(true),
     }
-    actions[key]?.()
+    return actions[key]?.()
   }
 
   const acceptCockpitChapterAndContinue = async () => {
@@ -4261,18 +4691,7 @@ export default function NovelProjectWorkspace() {
         break
       }
       case 'sync_story_state':
-        void selectTargetChapterForWriting({
-          targetChapterId,
-          activeChapterId: activeChapter?.id,
-          selectChapterForWriting,
-        }).then((saved) => {
-          if (!saved) return
-          openStoryStateEditor()
-          const chapterNo = targetChapter?.chapter_no || writingCockpitModel.nextChapter?.chapterNo
-          message.info(chapterNo
-            ? `已定位到本章，请在故事状态中同步到第 ${chapterNo} 章。`
-            : '已打开故事状态，请同步当前章节。')
-        })
+        void syncStoryStateForChapter(targetChapterId)
         break
       case 'accept_chapter_and_continue':
         void acceptCockpitChapterAndContinue()
@@ -4310,8 +4729,8 @@ export default function NovelProjectWorkspace() {
         openStoryAssetsWorkspace()
         return
       }
-      if (action.key === 'update_rolling_plan' && action.payload?.source === 'batch_brief_repair') {
-        void runRollingPlan({ intent: action.payload })
+      if (action.key === 'update_rolling_plan' && (action.payload?.source === 'batch_brief_repair' || action.payload?.source === 'recent_fatigue_repair')) {
+        void Promise.resolve(handlePlanningAction(action.key as PlanningActionKey, { intent: action.payload }))
           .finally(() => setAutoDirectorActionLoadingKey(''))
         return
       }
@@ -4338,9 +4757,14 @@ export default function NovelProjectWorkspace() {
       }
       void stepGenerateProse({
         limit: autoCreationDirectorModel.batchGuardrail.safeChapterCount,
+        allowedChapterNos: autoCreationDirectorModel.batchGuardrail.nextBatchBrief.chapters.map(chapter => chapter.chapterNo),
         source: 'auto_creation_safe_batch',
         longformCompass: autoCreationDirectorModel.longformCompass,
+        longformBattleContext: autoCreationDirectorModel.longformBattleDesk,
+        chapterLaunchGate: autoCreationDirectorModel.chapterLaunchGate,
         nextBatchBrief: autoCreationDirectorModel.batchGuardrail.nextBatchBrief,
+        batchPreflight: autoCreationDirectorModel.batchGuardrail.preflight.inputSnapshot,
+        millionWordRunway: autoCreationDirectorModel.millionWordRunway,
       })
         .finally(() => setAutoDirectorActionLoadingKey(''))
       return
@@ -4348,6 +4772,16 @@ export default function NovelProjectWorkspace() {
 
     if (action.key === 'create_safe_batch_risk_repair') {
       void createSafeBatchRiskRepairQueue()
+      return
+    }
+
+    if (action.key === 'create_script_room_repair') {
+      void createScriptRoomRepairQueue()
+      return
+    }
+
+    if (action.key === 'create_delivery_risk_repair') {
+      void createDeliveryRiskRepairQueue()
       return
     }
 
@@ -4429,6 +4863,7 @@ export default function NovelProjectWorkspace() {
           model={autoCreationDirectorModel}
           loadingActionKey={autoDirectorActionLoadingKey}
           onAction={handleAutoCreationDirectorAction}
+          onStageAction={handleAutoCreationDirectorAction}
           onSelectChapter={(chapterNo) => {
             const chapter = sortedChapters.find(item => Number(item.chapter_no) === Number(chapterNo))
             if (!chapter) return
@@ -4502,7 +4937,12 @@ export default function NovelProjectWorkspace() {
           onGenerationWordTargetModeChange={setChapterWordTargetMode}
           onGenerationTargetWordCountChange={setChapterTargetWordCount}
           writingRecommendation={writingRecommendation}
+          writingQueue={writingCockpitModel.writingQueue}
+          onSelectWritingQueueChapter={(chapterId) => { void selectChapterForWriting(chapterId) }}
+          onRepairWritingQueuePlan={repairWritingQueuePlan}
+          onRepairWritingQueuePlanBatch={repairWritingQueuePlanBatch}
           chapterAcceptanceDesk={writingCockpitModel.chapterAcceptanceDesk}
+          chapterHandoffDesk={writingCockpitModel.chapterHandoffDesk}
           deliveryActionLoading={proseQualityLoading || editorReportLoading || generatingProse}
           onDeliveryAction={handleWritingCockpitAction}
           onChapterTextChange={(next) => {
@@ -4727,7 +5167,7 @@ export default function NovelProjectWorkspace() {
           <div className="novel-workspace-cockpit" style={{ flexShrink: 1, minHeight: 0 }}>
             <WritingCockpitPanel
               model={writingCockpitModel}
-              loading={stepProseLoading || generatingProse || generatingSceneCards || diagnosticsLoading || contextPackageLoading}
+              loading={stepProseLoading || generatingProse || generatingSceneCards || diagnosticsLoading || contextPackageLoading || commercialToolLoading === 'storyStateSync'}
               forceCollapsed={isWritingFocusMode}
               primaryActionOverride={cockpitPrimaryActionOverride}
               onAction={handleWritingCockpitAction}
@@ -5186,6 +5626,18 @@ export default function NovelProjectWorkspace() {
               placeholder='[{"meme_key":"社畜共鸣","function":"高压后的半拍吐槽","tone":"轻度","suitable_genres":["规则怪谈"],"abstract_usage":"只转化为角色口吻，不直接复刻原句"}]'
             />
           </Form.Item>
+          <Form.Item name="style_sample_bank" label="风格样章库 JSON">
+            <Input.TextArea
+              rows={5}
+              placeholder='[{"sample_key":"规则危机反打","scene_function":"规则压力下的动作反制","narrative_rhythm":"先压迫，再拆规则，再小反打","sentence_pattern":"短中句为主，解释压短","dialogue_ratio":"35%-45%","abstract_usage":"只学习节奏、句式密度、对白比例和情绪转折","unsafe_direct_phrases":["原句不能照搬"]}]'
+            />
+          </Form.Item>
+          <Form.Item name="chapter_benchmark_sample_bank" label="章节质量基准样例库 JSON">
+            <Input.TextArea
+              rows={5}
+              placeholder='[{"sample_key":"规则怪谈第一夜","genre":"规则怪谈","opening_hook":"开篇300字出现死亡规则和反常边界","conflict_pattern":"主角冲动试探规则，智者低成本验证边界","payoff_pattern":"规则反制蛮力，同时给出可学习生路","ending_hook_pattern":"章末出现救或不救的选择","scene_budget_pattern":"边界验证/队友分歧/外部威胁敲门","do_not_copy":["不得复制样例桥段、角色名、设定和原句"]}]'
+            />
+          </Form.Item>
         </Form>
       </Modal>
 
@@ -5331,8 +5783,9 @@ export default function NovelProjectWorkspace() {
         onSkipChapterGroup={skipChapterGroupStage}
         onSelectChapter={(chapterId) => { void locateRepairTaskChapter(chapterId) }}
         onOpenChapterEditor={(chapterId) => { void openRepairTaskChapterEditor(chapterId) }}
-        onStartRepairTaskRevision={(task) => { void startRepairTaskRevision(task) }}
+        onStartRepairTaskRevision={(task, run, taskIndex) => { void startRepairTaskRevision(task, run, taskIndex) }}
         onExecuteTypedRepairTask={(task, run, taskIndex) => { void executeTypedRepairTask(task, run, taskIndex) }}
+        onRecheckRepairTask={(task, run, taskIndex) => { void recheckRepairTaskConvergence(task, run, taskIndex) }}
         onUpdateRepairTaskStatus={(task, run, status, taskIndex) => { void updateRepairTaskStatus(run, taskIndex, status, task?.message || task?.title || '') }}
         onBulkUpdateRepairTaskStatus={(items, status) => { void bulkUpdateRepairTaskStatus(items, status) }}
         onGenerateRepairAuditSummary={(run) => { void generateLongformRepairAuditSummary(run) }}

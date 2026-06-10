@@ -40,10 +40,40 @@ export type NovelDeliverySummaryInput = {
     unplannedCount: number
     forbiddenCount: number
   } | null
+  storyUnitSync?: {
+    status: 'ok' | 'warn'
+    label: string
+    score: number | null
+    scoreLabel: string
+    missedCount: number
+    rushedCount: number
+    forbiddenCount: number
+    riskCount: number
+  } | null
   assetIntake?: {
     status: 'pending' | 'applied'
     label: string
     pendingCount: number
+  } | null
+  ipSceneIntake?: {
+    status: 'ready'
+    label: string
+    candidateCount: number
+    candidates: Array<{
+      title: string
+      summary: string
+      visualHook: string
+      adaptationValue: string
+      spreadPoint: string
+    }>
+  } | null
+  signatureSceneSync?: {
+    status: 'ok' | 'warn'
+    label: string
+    score: number | null
+    scoreLabel: string
+    missedCount: number
+    plannedCount: number
   } | null
   readabilityReview?: {
     score: number | null
@@ -59,12 +89,104 @@ export type NovelDeliverySummaryInput = {
     scoreLabel: string
     riskCount: number
   } | null
+  runwaySync?: {
+    status: 'ok' | 'warn'
+    label: string
+    score: number | null
+    scoreLabel: string
+    riskCount: number
+  } | null
   readerPayoffSync?: {
     status: 'ok' | 'warn'
     label: string
     score: number | null
     scoreLabel: string
     debtCount: number
+  } | null
+  readerExpectationSync?: {
+    status: 'ok' | 'warn'
+    label: string
+    score: number | null
+    scoreLabel: string
+    missedCount: number
+  } | null
+  readerRetentionSync?: {
+    status: 'ok' | 'warn'
+    label: string
+    score: number | null
+    scoreLabel: string
+    missedCount: number
+  } | null
+  chapterAttraction?: {
+    status: 'ok' | 'warn'
+    label: string
+    score: number | null
+    scoreLabel: string
+    weakCount: number
+    priorityLabel: string
+  } | null
+  storyDriveSync?: {
+    status: 'ok' | 'warn'
+    label: string
+    score: number | null
+    scoreLabel: string
+    missedCount: number
+    priorityLabel: string
+  } | null
+  characterArcSync?: {
+    status: 'ok' | 'warn'
+    label: string
+    score: number | null
+    scoreLabel: string
+    missedCount: number
+    priorityLabel: string
+  } | null
+  chapterBenchmarkSync?: {
+    status: 'ok' | 'warn'
+    label: string
+    score: number | null
+    scoreLabel: string
+    missedCount: number
+  } | null
+  styleSampleSync?: {
+    status: 'ok' | 'warn'
+    label: string
+    score: number | null
+    scoreLabel: string
+    missedCount: number
+    copyRiskCount: number
+  } | null
+  first30RetentionRecheck?: {
+    status: 'stale'
+    label: string
+    reason: string
+  } | null
+  innovationSync?: {
+    status: 'ok' | 'warn'
+    label: string
+    score: number | null
+    scoreLabel: string
+    missedCount: number
+  } | null
+  volumeBeatSync?: {
+    status: 'ok' | 'warn'
+    label: string
+    score: number | null
+    scoreLabel: string
+    missedCount: number
+  } | null
+  deliveryRiskQueue?: {
+    totalCount: number
+    label: string
+    priorityLabel: string
+    items: string[]
+  } | null
+  deliveryRiskConvergence?: {
+    status: 'cleared' | 'improved' | 'unchanged' | 'worse'
+    label: string
+    residualCount: number
+    resolvedCount: number
+    nextAction: string
   } | null
   recommendedAcceptanceAction: {
     key: NovelDeliveryActionKey
@@ -80,10 +202,26 @@ export type NovelDeliverySummary = {
   storyStateLabel: string
   reason: string
   storylineSync: NovelDeliverySummaryInput['storylineSync']
+  storyUnitSync: NovelDeliverySummaryInput['storyUnitSync']
   assetIntake: NovelDeliverySummaryInput['assetIntake']
+  ipSceneIntake: NovelDeliverySummaryInput['ipSceneIntake']
+  signatureSceneSync: NovelDeliverySummaryInput['signatureSceneSync']
   readabilityReview: NovelDeliverySummaryInput['readabilityReview']
   coreDrift: NovelDeliverySummaryInput['coreDrift']
+  runwaySync: NovelDeliverySummaryInput['runwaySync']
   readerPayoffSync: NovelDeliverySummaryInput['readerPayoffSync']
+  readerExpectationSync: NovelDeliverySummaryInput['readerExpectationSync']
+  readerRetentionSync: NovelDeliverySummaryInput['readerRetentionSync']
+  chapterAttraction: NovelDeliverySummaryInput['chapterAttraction']
+  storyDriveSync: NovelDeliverySummaryInput['storyDriveSync']
+  characterArcSync: NovelDeliverySummaryInput['characterArcSync']
+  chapterBenchmarkSync: NovelDeliverySummaryInput['chapterBenchmarkSync']
+  styleSampleSync: NovelDeliverySummaryInput['styleSampleSync']
+  first30RetentionRecheck: NovelDeliverySummaryInput['first30RetentionRecheck']
+  innovationSync: NovelDeliverySummaryInput['innovationSync']
+  volumeBeatSync: NovelDeliverySummaryInput['volumeBeatSync']
+  deliveryRiskQueue: NovelDeliverySummaryInput['deliveryRiskQueue']
+  deliveryRiskConvergence: NovelDeliverySummaryInput['deliveryRiskConvergence']
   actionKey: NovelDeliveryActionKey | null
   actionLabel: string
   compactActionLabel: string
@@ -96,16 +234,131 @@ export type NovelPreDraftBrief = {
   reader_promise?: string
   core_conflict?: string
   emotional_curve?: string
+  previous_handoff?: string
+  previousHandoff?: string
   key_settings?: string[]
   forbidden_content?: string[]
   storyline_advances?: string[]
   storyline_plants?: string[]
   storyline_payoffs?: string[]
   storyline_forbidden?: string[]
+  character_arc_brief?: {
+    desire?: string
+    flaw_pressure?: string
+    relationship_shift?: string
+    growth_beat?: string
+    voice_anchor?: string
+    forbidden_reveal?: string
+    arcs?: Array<{
+      name?: string
+      type_label?: string
+      related_characters?: string[]
+      current_state?: string
+      growth_beat?: string
+      relationship_shift?: string
+      forbidden_reveal?: string
+    }>
+  }
+  reader_retention_brief?: {
+    opening_hook?: string
+    payoff_promise?: string
+    information_gap?: string
+    emotional_reward?: string
+    short_drama_scene?: string
+    ending_question?: string
+    forbidden_cliches?: string[]
+  }
+  reader_expectation_ledger?: {
+    chapter_promise?: string
+    carry_over?: Array<{ key?: string; label?: string; type?: string; text?: string }>
+    must_deliver?: Array<{ key?: string; label?: string; type?: string; text?: string }>
+    keep_alive?: Array<{ key?: string; label?: string; type?: string; text?: string }>
+    must_not_break?: string[]
+  }
+  reader_expectation_debt?: {
+    must_carry?: Array<{ from_chapter_no?: number | null; age_chapters?: number | null; overdue?: boolean; key?: string; label?: string; type?: string; text?: string }>
+    keep_alive?: Array<{ from_chapter_no?: number | null; age_chapters?: number | null; overdue?: boolean; key?: string; label?: string; type?: string; text?: string }>
+    overdue?: Array<{ from_chapter_no?: number | null; age_chapters?: number | null; overdue?: boolean; key?: string; label?: string; type?: string; text?: string }>
+    overdue_count?: number
+    source_chapters?: number[]
+    summary?: string
+  }
+  innovation_brief?: {
+    chapter_angle?: string
+    execution_points?: string[]
+    differentiation_guardrails?: string[]
+    ip_adaptation_hooks?: string[]
+  }
+  signature_scene_brief?: {
+    signature_scene?: string
+    scene_repair_target?: string
+    reader_payoff?: string
+    storyline_service?: string
+  }
+  longform_battle_context?: {
+    status?: string
+    score?: number | null
+    summary?: string
+    risk_chips?: string[]
+    primary_action?: {
+      key?: string
+      label?: string
+      reason?: string
+    } | null
+    lanes?: Array<{
+      key?: string
+      label?: string
+      status?: string
+      score?: number | null
+      detail?: string
+      required_action?: string
+    }>
+    risk_lanes?: Array<{
+      key?: string
+      label?: string
+      status?: string
+      score?: number | null
+      detail?: string
+      required_action?: string
+    }>
+  }
+  longform_memory_capsule?: {
+    last_updated_chapter?: number | null
+    core_promise?: string
+    current_volume_goal?: string
+    mainline_progress?: string
+    character_states?: string[]
+    open_questions?: string[]
+    payoff_debts?: string[]
+    canon_facts?: string[]
+    red_lines?: string[]
+  }
   meme_strategy?: {
     intensity?: string
     allowed_functions?: string[]
     forbidden_usage?: string[]
+  }
+  style_sample_strategy?: {
+    enabled?: boolean
+    samples?: Array<{
+      sample_key?: string
+      scene_function?: string
+      narrative_rhythm?: string
+      sentence_pattern?: string
+      dialogue_ratio?: string
+      abstract_usage?: string
+      unsafe_direct_phrases?: string[]
+    }>
+    apply_to?: string[]
+    do_not_copy?: string[]
+  }
+  first30_retention_brief?: {
+    segment_label?: string
+    chapter_score?: number | null
+    flags?: string[]
+    required_actions?: string[]
+    repair_focus?: string
+    risk_level?: string
   }
   next_batch_brief?: {
     chapter_range_label?: string
@@ -114,6 +367,18 @@ export type NovelPreDraftBrief = {
     mainline_focus?: string
     forbidden_boundary?: string
     current_chapter_role?: string
+  }
+  story_unit_context?: {
+    title?: string
+    chapter_range_label?: string
+    current_chapter_role?: string
+    unit_goal?: string
+    entry_hook?: string
+    pressure_escalation?: string[]
+    mini_climax_payoff?: string
+    setup_and_storyline?: string[]
+    exit_hook?: string
+    forbidden_advance?: string[]
   }
   scene_briefs?: any[]
   word_budget?: string
@@ -139,9 +404,66 @@ export type NovelDraftBriefSummary = {
     storylinePlants: string
     storylinePayoffs: string
     storylineForbidden: string
+    retentionOpeningHook: string
+    retentionPayoffPromise: string
+    retentionInformationGap: string
+    retentionEmotionalReward: string
+    retentionShortDramaScene: string
+    retentionEndingQuestion: string
+    retentionForbiddenCliches: string
+    expectationCarryOver: string
+    expectationDebtMustCarry: string
+    expectationDebtKeepAlive: string
+    handoffPreviousEnding: string
+    handoffOpeningObligation: string
+    handoffMustCarry: string
+    handoffKeepAlive: string
+    expectationMustDeliver: string
+    expectationKeepAlive: string
+    expectationMustNotBreak: string
+    innovationAngle: string
+    innovationExecution: string
+    innovationGuardrails: string
+    innovationIpHooks: string
+    signatureScene: string
+    signatureSceneTarget: string
+    signatureScenePayoff: string
+    signatureSceneStoryline: string
+    longformBattleStatus: string
+    longformBattleSummary: string
+    longformBattleRisks: string
+    longformBattlePrimaryAction: string
+    longformBattleLaneRequirements: string
+    longformMemoryStatus: string
+    longformMemoryCorePromise: string
+    longformMemoryMainline: string
+    longformMemoryCharacters: string
+    longformMemoryQuestions: string
+    longformMemoryPayoffDebts: string
+    longformMemoryCanonFacts: string
+    longformMemoryRedLines: string
     memeIntensity: string
     memeFunctions: string
     memeForbidden: string
+    styleSampleKeys: string
+    styleSampleUsage: string
+    styleSampleForbidden: string
+    chapterBenchmarkKeys: string
+    chapterBenchmarkUsage: string
+    chapterBenchmarkForbidden: string
+    first30RetentionSegment: string
+    first30RetentionFlags: string
+    first30RetentionActions: string
+    first30RetentionFocus: string
+    storyUnitRange: string
+    storyUnitRole: string
+    storyUnitGoal: string
+    storyUnitEntryHook: string
+    storyUnitPressure: string
+    storyUnitSetup: string
+    storyUnitPayoff: string
+    storyUnitExitHook: string
+    storyUnitForbidden: string
     batchRange: string
     batchGoal: string
     batchReaderPayoff: string
@@ -169,6 +491,16 @@ export function buildNovelDraftBriefSummary({
   sceneCardCount: number
   preDraftBrief?: NovelPreDraftBrief | null
 }): NovelDraftBriefSummary {
+  const expectationListText = (items?: Array<{ text?: string; label?: string }>) => Array.isArray(items)
+    ? items.map(item => item?.text || item?.label).filter(Boolean).join('、')
+    : ''
+  const longformBattleLaneText = (items?: NovelPreDraftBrief['longform_battle_context']['risk_lanes']) => Array.isArray(items)
+    ? items.map(item => [
+      item?.label || item?.key,
+      item?.detail,
+      item?.required_action ? `动作：${item.required_action}` : '',
+    ].filter(Boolean).join(' - ')).filter(Boolean).join('、')
+    : ''
   const briefFields = {
     chapterGoal: preDraftBrief?.chapter_goal?.trim() || chapterGoal?.trim() || '',
     readerPromise: preDraftBrief?.reader_promise?.trim() || '',
@@ -180,9 +512,103 @@ export function buildNovelDraftBriefSummary({
     storylinePlants: Array.isArray(preDraftBrief?.storyline_plants) ? preDraftBrief.storyline_plants.filter(Boolean).join('、') : '',
     storylinePayoffs: Array.isArray(preDraftBrief?.storyline_payoffs) ? preDraftBrief.storyline_payoffs.filter(Boolean).join('、') : '',
     storylineForbidden: Array.isArray(preDraftBrief?.storyline_forbidden) ? preDraftBrief.storyline_forbidden.filter(Boolean).join('、') : '',
+    characterArcNames: Array.isArray(preDraftBrief?.character_arc_brief?.arcs) ? preDraftBrief.character_arc_brief.arcs.map(arc => arc?.name).filter(Boolean).join('、') : '',
+    characterArcDesire: preDraftBrief?.character_arc_brief?.desire?.trim() || '',
+    characterArcFlawPressure: preDraftBrief?.character_arc_brief?.flaw_pressure?.trim() || '',
+    characterArcGrowthBeat: preDraftBrief?.character_arc_brief?.growth_beat?.trim() || '',
+    characterArcRelationshipShift: preDraftBrief?.character_arc_brief?.relationship_shift?.trim() || '',
+    characterArcVoiceAnchor: preDraftBrief?.character_arc_brief?.voice_anchor?.trim() || '',
+    characterArcForbiddenReveal: preDraftBrief?.character_arc_brief?.forbidden_reveal?.trim() || '',
+    retentionOpeningHook: preDraftBrief?.reader_retention_brief?.opening_hook?.trim() || '',
+    retentionPayoffPromise: preDraftBrief?.reader_retention_brief?.payoff_promise?.trim() || '',
+    retentionInformationGap: preDraftBrief?.reader_retention_brief?.information_gap?.trim() || '',
+    retentionEmotionalReward: preDraftBrief?.reader_retention_brief?.emotional_reward?.trim() || '',
+    retentionShortDramaScene: preDraftBrief?.reader_retention_brief?.short_drama_scene?.trim() || '',
+    retentionEndingQuestion: preDraftBrief?.reader_retention_brief?.ending_question?.trim() || '',
+    retentionForbiddenCliches: Array.isArray(preDraftBrief?.reader_retention_brief?.forbidden_cliches) ? preDraftBrief.reader_retention_brief.forbidden_cliches.filter(Boolean).join('、') : '',
+    expectationCarryOver: expectationListText(preDraftBrief?.reader_expectation_ledger?.carry_over),
+    expectationDebtMustCarry: expectationListText(preDraftBrief?.reader_expectation_debt?.must_carry),
+    expectationDebtKeepAlive: expectationListText(preDraftBrief?.reader_expectation_debt?.keep_alive),
+    expectationDebtOverdue: expectationListText(preDraftBrief?.reader_expectation_debt?.overdue),
+    expectationDebtSummary: preDraftBrief?.reader_expectation_debt?.summary?.trim() || '',
+    handoffPreviousEnding: preDraftBrief?.previous_handoff?.trim() || preDraftBrief?.previousHandoff?.trim() || '',
+    handoffOpeningObligation: preDraftBrief?.reader_retention_brief?.opening_hook?.trim() || '',
+    handoffMustCarry: expectationListText(preDraftBrief?.reader_expectation_debt?.must_carry) || expectationListText(preDraftBrief?.reader_expectation_ledger?.carry_over),
+    handoffKeepAlive: expectationListText(preDraftBrief?.reader_expectation_debt?.keep_alive),
+    expectationMustDeliver: expectationListText(preDraftBrief?.reader_expectation_ledger?.must_deliver),
+    expectationKeepAlive: expectationListText(preDraftBrief?.reader_expectation_ledger?.keep_alive),
+    expectationMustNotBreak: Array.isArray(preDraftBrief?.reader_expectation_ledger?.must_not_break) ? preDraftBrief.reader_expectation_ledger.must_not_break.filter(Boolean).join('、') : '',
+    innovationAngle: preDraftBrief?.innovation_brief?.chapter_angle?.trim() || '',
+    innovationExecution: Array.isArray(preDraftBrief?.innovation_brief?.execution_points) ? preDraftBrief.innovation_brief.execution_points.filter(Boolean).join('、') : '',
+    innovationGuardrails: Array.isArray(preDraftBrief?.innovation_brief?.differentiation_guardrails) ? preDraftBrief.innovation_brief.differentiation_guardrails.filter(Boolean).join('、') : '',
+    innovationIpHooks: Array.isArray(preDraftBrief?.innovation_brief?.ip_adaptation_hooks) ? preDraftBrief.innovation_brief.ip_adaptation_hooks.filter(Boolean).join('、') : '',
+    signatureScene: preDraftBrief?.signature_scene_brief?.signature_scene?.trim() || '',
+    signatureSceneTarget: preDraftBrief?.signature_scene_brief?.scene_repair_target?.trim() || '',
+    signatureScenePayoff: preDraftBrief?.signature_scene_brief?.reader_payoff?.trim() || '',
+    signatureSceneStoryline: preDraftBrief?.signature_scene_brief?.storyline_service?.trim() || '',
+    longformBattleStatus: preDraftBrief?.longform_battle_context?.status?.trim() || '',
+    longformBattleSummary: preDraftBrief?.longform_battle_context?.summary?.trim() || '',
+    longformBattleRisks: Array.isArray(preDraftBrief?.longform_battle_context?.risk_chips) ? preDraftBrief.longform_battle_context.risk_chips.filter(Boolean).join('、') : '',
+    longformBattlePrimaryAction: [
+      preDraftBrief?.longform_battle_context?.primary_action?.label?.trim(),
+      preDraftBrief?.longform_battle_context?.primary_action?.reason?.trim(),
+    ].filter(Boolean).join('：'),
+    longformBattleLaneRequirements: longformBattleLaneText(
+      Array.isArray(preDraftBrief?.longform_battle_context?.risk_lanes) && preDraftBrief.longform_battle_context.risk_lanes.length > 0
+        ? preDraftBrief.longform_battle_context.risk_lanes
+        : preDraftBrief?.longform_battle_context?.lanes,
+    ),
+    longformMemoryStatus: preDraftBrief?.longform_memory_capsule?.last_updated_chapter ? `第${preDraftBrief.longform_memory_capsule.last_updated_chapter}章同步` : '',
+    longformMemoryCorePromise: preDraftBrief?.longform_memory_capsule?.core_promise?.trim() || '',
+    longformMemoryMainline: [
+      preDraftBrief?.longform_memory_capsule?.current_volume_goal?.trim(),
+      preDraftBrief?.longform_memory_capsule?.mainline_progress?.trim(),
+    ].filter(Boolean).join('；'),
+    longformMemoryCharacters: Array.isArray(preDraftBrief?.longform_memory_capsule?.character_states) ? preDraftBrief.longform_memory_capsule.character_states.filter(Boolean).join('、') : '',
+    longformMemoryQuestions: Array.isArray(preDraftBrief?.longform_memory_capsule?.open_questions) ? preDraftBrief.longform_memory_capsule.open_questions.filter(Boolean).join('、') : '',
+    longformMemoryPayoffDebts: Array.isArray(preDraftBrief?.longform_memory_capsule?.payoff_debts) ? preDraftBrief.longform_memory_capsule.payoff_debts.filter(Boolean).join('、') : '',
+    longformMemoryCanonFacts: Array.isArray(preDraftBrief?.longform_memory_capsule?.canon_facts) ? preDraftBrief.longform_memory_capsule.canon_facts.filter(Boolean).join('、') : '',
+    longformMemoryRedLines: Array.isArray(preDraftBrief?.longform_memory_capsule?.red_lines) ? preDraftBrief.longform_memory_capsule.red_lines.filter(Boolean).join('、') : '',
     memeIntensity: preDraftBrief?.meme_strategy?.intensity?.trim() || '',
     memeFunctions: Array.isArray(preDraftBrief?.meme_strategy?.allowed_functions) ? preDraftBrief.meme_strategy.allowed_functions.filter(Boolean).join('、') : '',
     memeForbidden: Array.isArray(preDraftBrief?.meme_strategy?.forbidden_usage) ? preDraftBrief.meme_strategy.forbidden_usage.filter(Boolean).join('、') : '',
+    styleSampleKeys: Array.isArray(preDraftBrief?.style_sample_strategy?.samples)
+      ? preDraftBrief.style_sample_strategy.samples.map(sample => sample?.sample_key).filter(Boolean).join('、')
+      : '',
+    styleSampleUsage: Array.isArray(preDraftBrief?.style_sample_strategy?.samples)
+      ? preDraftBrief.style_sample_strategy.samples.map(sample => sample?.abstract_usage || sample?.scene_function || sample?.narrative_rhythm).filter(Boolean).join('、')
+      : '',
+    styleSampleForbidden: Array.isArray(preDraftBrief?.style_sample_strategy?.do_not_copy)
+      ? preDraftBrief.style_sample_strategy.do_not_copy.filter(Boolean).join('、')
+      : '',
+    chapterBenchmarkKeys: Array.isArray(preDraftBrief?.chapter_benchmark_strategy?.samples)
+      ? preDraftBrief.chapter_benchmark_strategy.samples.map(sample => sample?.sample_key).filter(Boolean).join('、')
+      : '',
+    chapterBenchmarkUsage: Array.isArray(preDraftBrief?.chapter_benchmark_strategy?.samples)
+      ? preDraftBrief.chapter_benchmark_strategy.samples.map(sample => sample?.abstract_usage || sample?.conflict_pattern || sample?.payoff_pattern || sample?.ending_hook_pattern).filter(Boolean).join('、')
+      : '',
+    chapterBenchmarkForbidden: Array.isArray(preDraftBrief?.chapter_benchmark_strategy?.do_not_copy)
+      ? preDraftBrief.chapter_benchmark_strategy.do_not_copy.filter(Boolean).join('、')
+      : '',
+    first30RetentionSegment: [
+      preDraftBrief?.first30_retention_brief?.segment_label?.trim(),
+      Number.isFinite(Number(preDraftBrief?.first30_retention_brief?.chapter_score)) ? `${Number(preDraftBrief?.first30_retention_brief?.chapter_score)}分` : '',
+    ].filter(Boolean).join(' · '),
+    first30RetentionFlags: Array.isArray(preDraftBrief?.first30_retention_brief?.flags) ? preDraftBrief.first30_retention_brief.flags.filter(Boolean).join('、') : '',
+    first30RetentionActions: Array.isArray(preDraftBrief?.first30_retention_brief?.required_actions) ? preDraftBrief.first30_retention_brief.required_actions.filter(Boolean).join('、') : '',
+    first30RetentionFocus: preDraftBrief?.first30_retention_brief?.repair_focus?.trim() || '',
+    storyUnitRange: [
+      preDraftBrief?.story_unit_context?.chapter_range_label?.trim(),
+      preDraftBrief?.story_unit_context?.title?.trim(),
+    ].filter(Boolean).join(' · '),
+    storyUnitRole: preDraftBrief?.story_unit_context?.current_chapter_role?.trim() || '',
+    storyUnitGoal: preDraftBrief?.story_unit_context?.unit_goal?.trim() || '',
+    storyUnitEntryHook: preDraftBrief?.story_unit_context?.entry_hook?.trim() || '',
+    storyUnitPressure: Array.isArray(preDraftBrief?.story_unit_context?.pressure_escalation) ? preDraftBrief.story_unit_context.pressure_escalation.filter(Boolean).join('、') : '',
+    storyUnitSetup: Array.isArray(preDraftBrief?.story_unit_context?.setup_and_storyline) ? preDraftBrief.story_unit_context.setup_and_storyline.filter(Boolean).join('、') : '',
+    storyUnitPayoff: preDraftBrief?.story_unit_context?.mini_climax_payoff?.trim() || '',
+    storyUnitExitHook: preDraftBrief?.story_unit_context?.exit_hook?.trim() || '',
+    storyUnitForbidden: Array.isArray(preDraftBrief?.story_unit_context?.forbidden_advance) ? preDraftBrief.story_unit_context.forbidden_advance.filter(Boolean).join('、') : '',
     batchRange: preDraftBrief?.next_batch_brief?.chapter_range_label?.trim() || '',
     batchGoal: preDraftBrief?.next_batch_brief?.batch_goal?.trim() || '',
     batchReaderPayoff: preDraftBrief?.next_batch_brief?.reader_payoff_plan?.trim() || '',
@@ -385,10 +811,26 @@ export function buildNovelDeliverySummary(desk?: NovelDeliverySummaryInput | nul
       storyStateLabel: '故事状态待同步',
       reason: '',
       storylineSync: null,
+      storyUnitSync: null,
       assetIntake: null,
+      ipSceneIntake: null,
+      signatureSceneSync: null,
       readabilityReview: null,
       coreDrift: null,
+      runwaySync: null,
       readerPayoffSync: null,
+      readerExpectationSync: null,
+      readerRetentionSync: null,
+      chapterAttraction: null,
+      storyDriveSync: null,
+      characterArcSync: null,
+      chapterBenchmarkSync: null,
+      styleSampleSync: null,
+      first30RetentionRecheck: null,
+      innovationSync: null,
+      volumeBeatSync: null,
+      deliveryRiskQueue: null,
+      deliveryRiskConvergence: null,
       actionKey: null,
       actionLabel: '',
       compactActionLabel: '',
@@ -410,10 +852,26 @@ export function buildNovelDeliverySummary(desk?: NovelDeliverySummaryInput | nul
     storyStateLabel: desk.storyStateSynced ? '故事状态已同步' : '故事状态待同步',
     reason: desk.acceptanceReasons.filter(Boolean).slice(0, 2).join('；') || '本章已有正文，请按交稿流程完成复检。',
     storylineSync: desk.storylineSync || null,
+    storyUnitSync: desk.storyUnitSync || null,
     assetIntake: desk.assetIntake || null,
+    ipSceneIntake: desk.ipSceneIntake || null,
+    signatureSceneSync: desk.signatureSceneSync || null,
     readabilityReview: desk.readabilityReview || null,
     coreDrift: desk.coreDrift || null,
+    runwaySync: desk.runwaySync || null,
     readerPayoffSync: desk.readerPayoffSync || null,
+    readerExpectationSync: desk.readerExpectationSync || null,
+    readerRetentionSync: desk.readerRetentionSync || null,
+    chapterAttraction: desk.chapterAttraction || null,
+    storyDriveSync: desk.storyDriveSync || null,
+    characterArcSync: desk.characterArcSync || null,
+    chapterBenchmarkSync: desk.chapterBenchmarkSync || null,
+    styleSampleSync: desk.styleSampleSync || null,
+    first30RetentionRecheck: desk.first30RetentionRecheck || null,
+    innovationSync: desk.innovationSync || null,
+    volumeBeatSync: desk.volumeBeatSync || null,
+    deliveryRiskQueue: desk.deliveryRiskQueue || null,
+    deliveryRiskConvergence: desk.deliveryRiskConvergence || null,
     actionKey: desk.recommendedAcceptanceAction.key,
     actionLabel: desk.recommendedAcceptanceAction.label,
     compactActionLabel: compactDeliveryActionLabel(desk.recommendedAcceptanceAction.key, desk.recommendedAcceptanceAction.label),

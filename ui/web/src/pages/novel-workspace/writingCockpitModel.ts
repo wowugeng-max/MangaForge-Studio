@@ -70,6 +70,43 @@ export interface WritingCockpitChapter {
   rawPayload: AnyRecord
 }
 
+export type WritingQueueItemStatus = 'ready_to_draft' | 'needs_plan' | 'draft_generated'
+
+export interface WritingQueueItem {
+  id: any
+  chapterNo: number
+  title: string
+  sourceLabel: string
+  status: WritingQueueItemStatus
+  statusLabel: string
+  actionLabel: string
+  actionHint: string
+  missingPlanFields: string[]
+  missingPlanLabels: string[]
+  repairIntent: AnyRecord | null
+  goal: string
+  conflict: string
+  endingHook: string
+  wordCount: number
+}
+
+export interface WritingQueueModel {
+  visible: boolean
+  currentChapterNo: number | null
+  readyCount: number
+  blockedCount: number
+  draftedCount: number
+  planRepair: {
+    visible: boolean
+    label: string
+    chapterCount: number
+    missingCount: number
+    chapterNos: number[]
+    intent: AnyRecord | null
+  }
+  items: WritingQueueItem[]
+}
+
 export type ChapterPlanningReadiness = 'ready' | 'needs_context' | 'needs_scene_plan' | 'blocked'
 export type ChapterContextPackageStatus = 'missing' | 'insufficient' | 'ready'
 export type ChapterScenePlanStatus = 'missing' | 'ready'
@@ -128,19 +165,68 @@ export interface ChapterAcceptanceDeskModel {
     unplannedCount: number
     forbiddenCount: number
   } | null
+  storyUnitSync: {
+    status: 'ok' | 'warn'
+    label: string
+    score: number | null
+    scoreLabel: string
+    missedCount: number
+    rushedCount: number
+    forbiddenCount: number
+    riskCount: number
+  } | null
   assetIntake: {
     status: 'pending' | 'applied'
     label: string
     pendingCount: number
   } | null
+  ipSceneIntake: {
+    status: 'ready'
+    label: string
+    candidateCount: number
+    candidates: Array<{
+      title: string
+      summary: string
+      visualHook: string
+      adaptationValue: string
+      spreadPoint: string
+    }>
+  } | null
+  signatureSceneSync: {
+    status: 'ok' | 'warn'
+    label: string
+    score: number | null
+    scoreLabel: string
+    missedCount: number
+    plannedCount: number
+  } | null
   readabilityReview: {
     score: number | null
     scoreLabel: string
+    openingHookScore: number | null
+    openingHookLabel: string
+    openingHookRisk: boolean
+    endingHookScore: number | null
+    endingHookLabel: string
+    endingHookRisk: boolean
+    sceneReadabilityScore: number | null
+    sceneReadabilityLabel: string
+    sceneReadabilityRisk: boolean
+    payoffDensityScore: number | null
+    payoffDensityLabel: string
+    payoffDensityRisk: boolean
     memeLabel: string
     riskLabel: string
     riskCount: number
   } | null
   coreDrift: {
+    status: 'ok' | 'warn'
+    label: string
+    score: number | null
+    scoreLabel: string
+    riskCount: number
+  } | null
+  runwaySync: {
     status: 'ok' | 'warn'
     label: string
     score: number | null
@@ -153,6 +239,92 @@ export interface ChapterAcceptanceDeskModel {
     score: number | null
     scoreLabel: string
     debtCount: number
+  } | null
+  readerExpectationSync: {
+    status: 'ok' | 'warn'
+    label: string
+    score: number | null
+    scoreLabel: string
+    missedCount: number
+    openingHandoffMissedCount: number
+  } | null
+  readerRetentionSync: {
+    status: 'ok' | 'warn'
+    label: string
+    score: number | null
+    scoreLabel: string
+    missedCount: number
+  } | null
+  chapterAttraction: {
+    status: 'ok' | 'warn'
+    label: string
+    score: number | null
+    scoreLabel: string
+    weakCount: number
+    priorityLabel: string
+  } | null
+  storyDriveSync: {
+    status: 'ok' | 'warn'
+    label: string
+    score: number | null
+    scoreLabel: string
+    missedCount: number
+    priorityLabel: string
+  } | null
+  characterArcSync: {
+    status: 'ok' | 'warn'
+    label: string
+    score: number | null
+    scoreLabel: string
+    missedCount: number
+    priorityLabel: string
+  } | null
+  chapterBenchmarkSync: {
+    status: 'ok' | 'warn'
+    label: string
+    score: number | null
+    scoreLabel: string
+    missedCount: number
+  } | null
+  styleSampleSync: {
+    status: 'ok' | 'warn'
+    label: string
+    score: number | null
+    scoreLabel: string
+    missedCount: number
+    copyRiskCount: number
+  } | null
+  first30RetentionRecheck: {
+    status: 'stale'
+    label: string
+    reason: string
+  } | null
+  innovationSync: {
+    status: 'ok' | 'warn'
+    label: string
+    score: number | null
+    scoreLabel: string
+    missedCount: number
+  } | null
+  volumeBeatSync: {
+    status: 'ok' | 'warn'
+    label: string
+    score: number | null
+    scoreLabel: string
+    missedCount: number
+  } | null
+  deliveryRiskQueue: {
+    totalCount: number
+    label: string
+    priorityLabel: string
+    items: string[]
+  } | null
+  deliveryRiskConvergence: {
+    status: 'cleared' | 'improved' | 'unchanged' | 'worse'
+    label: string
+    residualCount: number
+    resolvedCount: number
+    nextAction: string
   } | null
   qualityScore: number | null
   qualityStatus: string
@@ -175,6 +347,23 @@ export interface ChapterAcceptanceDeskModel {
   shouldAutoExpandAcceptance: boolean
 }
 
+export type ChapterHandoffStatus = 'hidden' | 'needs_delivery' | 'ready'
+
+export interface ChapterHandoffDeskModel {
+  visible: boolean
+  status: ChapterHandoffStatus
+  label: string
+  fromChapterNo: number | null
+  toChapterNo: number | null
+  previousEnding: string
+  nextOpeningObligations: string[]
+  expectationCarryOver: string[]
+  storyStateSynced: boolean
+  storylineStatusLabel: string
+  actionKey: WritingCockpitActionKey
+  actionLabel: string
+}
+
 export interface WritingCockpitModel {
   topStatus: {
     projectTitle: string
@@ -188,6 +377,7 @@ export interface WritingCockpitModel {
   previousChapter: WritingCockpitChapter | null
   chapterPlanningDesk: ChapterPlanningDeskModel
   chapterAcceptanceDesk: ChapterAcceptanceDeskModel
+  chapterHandoffDesk: ChapterHandoffDeskModel
   primaryActionKey: WritingCockpitActionKey
   recommendedRole: WritingCockpitRole
   readiness: {
@@ -211,6 +401,7 @@ export interface WritingCockpitModel {
     state: 'no_chapter' | 'no_draft' | 'draft_generated'
     label: string
   }
+  writingQueue: WritingQueueModel
   canonUpdatePreview: string[]
 }
 
@@ -396,7 +587,7 @@ function chapterFromOutline(outlines: AnyRecord[], chapterOrNo: AnyRecord | numb
     if (level !== 'chapter' && level !== '章节') return false
     if (outlineId !== null && outlineId !== undefined && String(outline?.id) === String(outlineId)) return true
     const raw = outline?.raw_payload || {}
-    const rawChapterNo = Number(outline?.chapter_no || raw?.chapter_no || raw?.future100?.chapter_no || raw?.skeleton?.chapter_no || 0)
+    const rawChapterNo = Number(outline?.chapter_no || raw?.chapter_no || raw?.future100?.chapter_no || raw?.skeleton?.chapter_no || raw?.rollingPlan?.chapter_no || 0)
     const titleChapterNo = chapterNoFromTitle(outline?.title)
     return rawChapterNo === chapterNo || titleChapterNo === chapterNo || chapterInOutline(chapterNo, outline)
   }) || null
@@ -416,12 +607,14 @@ function outlinePlanPayload(outline?: AnyRecord | null) {
     raw,
     future100: raw?.future100 || {},
     skeleton: raw?.skeleton || {},
+    rollingPlan: raw?.rollingPlan || {},
   }
 }
 
 function chapterPlanFields(chapter?: AnyRecord | null, outline?: AnyRecord | null) {
   const chapterRaw = chapter?.raw_payload || {}
-  const { raw, future100, skeleton } = outlinePlanPayload(outline)
+  const chapterRollingPlan = chapterRaw?.rollingPlan || {}
+  const { raw, future100, skeleton, rollingPlan } = outlinePlanPayload(outline)
   const goal = firstNonEmpty(
     chapter?.chapter_goal,
     chapter?.chapterTask,
@@ -429,12 +622,18 @@ function chapterPlanFields(chapter?: AnyRecord | null, outline?: AnyRecord | nul
     chapterRaw?.chapter_goal,
     chapterRaw?.chapterTask,
     chapterRaw?.task,
+    chapterRollingPlan?.chapter_goal,
+    chapterRollingPlan?.chapterTask,
+    chapterRollingPlan?.task,
     outline?.chapter_goal,
     outline?.chapterTask,
     outline?.task,
     raw?.chapter_goal,
     raw?.chapterTask,
     raw?.task,
+    rollingPlan?.chapter_goal,
+    rollingPlan?.chapterTask,
+    rollingPlan?.task,
     future100?.chapter_goal,
     future100?.chapterTask,
     future100?.task,
@@ -446,12 +645,16 @@ function chapterPlanFields(chapter?: AnyRecord | null, outline?: AnyRecord | nul
   const conflict = firstNonEmpty(
     chapter?.conflict,
     chapterRaw?.conflict,
+    chapterRollingPlan?.conflict,
     outline?.conflict,
     raw?.conflict,
+    rollingPlan?.conflict,
     future100?.conflict,
     skeleton?.conflict,
+    firstArrayText(chapterRollingPlan?.conflict_points),
     firstArrayText(outline?.conflict_points),
     firstArrayText(raw?.conflict_points),
+    firstArrayText(rollingPlan?.conflict_points),
     firstArrayText(future100?.conflict_points),
     firstArrayText(skeleton?.conflict_points),
   )
@@ -462,12 +665,18 @@ function chapterPlanFields(chapter?: AnyRecord | null, outline?: AnyRecord | nul
     chapterRaw?.ending_hook,
     chapterRaw?.endingHook,
     chapterRaw?.hook,
+    chapterRollingPlan?.ending_hook,
+    chapterRollingPlan?.endingHook,
+    chapterRollingPlan?.hook,
     outline?.ending_hook,
     outline?.endingHook,
     outline?.hook,
     raw?.ending_hook,
     raw?.endingHook,
     raw?.hook,
+    rollingPlan?.ending_hook,
+    rollingPlan?.endingHook,
+    rollingPlan?.hook,
     future100?.ending_hook,
     future100?.endingHook,
     future100?.hook,
@@ -601,6 +810,127 @@ function pipelineState(nextChapter: AnyRecord | null) {
   if (!nextChapter) return { state: 'no_chapter' as const, label: '等待章节' }
   if (hasProse(nextChapter)) return { state: 'draft_generated' as const, label: '已有初稿' }
   return { state: 'no_draft' as const, label: '等待生成初稿' }
+}
+
+function chapterPlanSourceLabel(chapter: AnyRecord, outline?: AnyRecord | null) {
+  const chapterRaw = chapter?.raw_payload || {}
+  const outlineRaw = outline?.raw_payload || {}
+  if (chapterRaw?.source === 'rolling_plan' || outlineRaw?.source === 'rolling_plan' || chapterRaw?.rollingPlan || outlineRaw?.rollingPlan) return '滚动规划'
+  if (outlineRaw?.source === 'future100' || outlineRaw?.future100 || outlineRaw?.skeleton) return '百章骨架'
+  if (outline?.id || chapter?.outline_id) return '章节大纲'
+  return '手动章节'
+}
+
+function missingPlanItems(plan: { goal: string; conflict: string; endingHook: string }) {
+  const items = [
+    { field: 'chapter_goal', label: '章节目标', missing: !plan.goal },
+    { field: 'conflict', label: '核心冲突', missing: !plan.conflict },
+    { field: 'ending_hook', label: '章末钩子', missing: !plan.endingHook },
+  ].filter(item => item.missing)
+  return {
+    fields: items.map(item => item.field),
+    labels: items.map(item => item.label),
+  }
+}
+
+function writingQueueAction(status: WritingQueueItemStatus, missingLabels: string[] = []) {
+  if (status === 'draft_generated') {
+    return { actionLabel: '质检', actionHint: '进入交稿质检、编辑报告和故事状态同步。' }
+  }
+  if (status === 'needs_plan') {
+    return { actionLabel: '补计划', actionHint: `先补${missingLabels.length > 0 ? missingLabels.join('、') : '章节目标、核心冲突、章末钩子'}。` }
+  }
+  return { actionLabel: '开写', actionHint: '进入本章任务书、场景卡和正文生成。' }
+}
+
+function buildWritingQueue(chapters: AnyRecord[], outlines: AnyRecord[], nextChapter: AnyRecord | null): WritingQueueModel {
+  if (!nextChapter) {
+    return {
+      visible: false,
+      currentChapterNo: null,
+      readyCount: 0,
+      blockedCount: 0,
+      draftedCount: 0,
+      planRepair: {
+        visible: false,
+        label: '补齐队列计划',
+        chapterCount: 0,
+        missingCount: 0,
+        chapterNos: [],
+        intent: null,
+      },
+      items: [],
+    }
+  }
+  const currentChapterNo = Number(nextChapter?.chapter_no || 0)
+  const items = sortChapters(chapters)
+    .filter(chapter => Number(chapter?.chapter_no || 0) >= currentChapterNo)
+    .slice(0, 5)
+    .map(chapter => {
+      const outline = chapterFromOutline(outlines, chapter)
+      const plan = chapterPlanFields(chapter, outline)
+      const drafted = hasProse(chapter)
+      const planReady = Boolean(plan.goal && plan.conflict && plan.endingHook)
+      const status: WritingQueueItemStatus = drafted ? 'draft_generated' : planReady ? 'ready_to_draft' : 'needs_plan'
+      const missing = missingPlanItems(plan)
+      const action = writingQueueAction(status, missing.labels)
+      return {
+        id: chapter?.id,
+        chapterNo: Number(chapter?.chapter_no || 0),
+        title: text(chapter?.title, '未命名章节'),
+        sourceLabel: chapterPlanSourceLabel(chapter, outline),
+        status,
+        statusLabel: status === 'draft_generated' ? '待质检' : status === 'ready_to_draft' ? '可开写' : '缺计划',
+        actionLabel: action.actionLabel,
+        actionHint: action.actionHint,
+        missingPlanFields: status === 'needs_plan' ? missing.fields : [],
+        missingPlanLabels: status === 'needs_plan' ? missing.labels : [],
+        repairIntent: status === 'needs_plan'
+          ? {
+              source: 'writing_queue_plan_repair',
+              chapter_id: chapter?.id,
+              chapter_no: Number(chapter?.chapter_no || 0),
+              missing_fields: missing.fields,
+              missing_labels: missing.labels,
+            }
+          : null,
+        goal: plan.goal,
+        conflict: plan.conflict,
+        endingHook: plan.endingHook,
+        wordCount: drafted ? compactWordCount(chapter?.chapter_text) : 0,
+      }
+    })
+  const blockedItems = items.filter(item => item.status === 'needs_plan')
+  const planRepair = {
+    visible: blockedItems.length > 1,
+    label: '补齐队列计划',
+    chapterCount: blockedItems.length,
+    missingCount: blockedItems.reduce((sum, item) => sum + item.missingPlanFields.length, 0),
+    chapterNos: blockedItems.map(item => item.chapterNo),
+    intent: blockedItems.length > 0
+      ? {
+          source: 'writing_queue_batch_plan_repair',
+          chapter_nos: blockedItems.map(item => item.chapterNo),
+          chapters: blockedItems.map(item => ({
+            chapter_id: item.id,
+            chapter_no: item.chapterNo,
+            title: item.title,
+            source_label: item.sourceLabel,
+            missing_fields: item.missingPlanFields,
+            missing_labels: item.missingPlanLabels,
+          })),
+        }
+      : null,
+  }
+  return {
+    visible: items.length > 0,
+    currentChapterNo,
+    readyCount: items.filter(item => item.status === 'ready_to_draft').length,
+    blockedCount: blockedItems.length,
+    draftedCount: items.filter(item => item.status === 'draft_generated').length,
+    planRepair,
+    items,
+  }
 }
 
 function contextPreflight(contextPackage?: AnyRecord | null) {
@@ -838,6 +1168,42 @@ function buildStorylineSyncSummary(review?: AnyRecord | null): ChapterAcceptance
   }
 }
 
+function storyUnitSyncPayload(review?: AnyRecord | null) {
+  const payload = review ? reviewPayload(review) : {}
+  return payload?.story_unit_sync || payload?.result?.story_unit_sync || payload?.result || payload
+}
+
+function buildStoryUnitSyncSummary(review?: AnyRecord | null): ChapterAcceptanceDeskModel['storyUnitSync'] {
+  if (!review) return null
+  const payload = storyUnitSyncPayload(review)
+  const missedCount = Number(payload?.missed_count ?? countArray(payload?.missed))
+  const rushedCount = Number(payload?.rushed_count ?? countArray(payload?.rushed_ahead))
+  const forbiddenCount = Number(payload?.forbidden_count ?? countArray(payload?.forbidden_touched))
+  const safeMissedCount = Number.isFinite(missedCount) ? missedCount : 0
+  const safeRushedCount = Number.isFinite(rushedCount) ? rushedCount : 0
+  const safeForbiddenCount = Number.isFinite(forbiddenCount) ? forbiddenCount : 0
+  const riskCount = safeMissedCount + safeRushedCount + safeForbiddenCount
+  const scoreValue = Number(payload?.score)
+  const score = Number.isFinite(scoreValue) ? scoreValue : null
+  const hasRisk = riskCount > 0 || payload?.status === 'warn' || review?.status === 'warn'
+  const riskParts = [
+    safeMissedCount > 0 ? `单元漏写 ${safeMissedCount}` : '',
+    safeRushedCount > 0 ? `单元抢跑 ${safeRushedCount}` : '',
+    safeForbiddenCount > 0 ? `禁抢跑 ${safeForbiddenCount}` : '',
+  ].filter(Boolean)
+
+  return {
+    status: hasRisk ? 'warn' : 'ok',
+    label: hasRisk ? (riskParts.join(' · ') || text(payload?.label) || '剧情单元需复盘') : '剧情单元 OK',
+    score,
+    scoreLabel: score === null ? '单元兑现 -' : `单元兑现 ${score}`,
+    missedCount: safeMissedCount,
+    rushedCount: safeRushedCount,
+    forbiddenCount: safeForbiddenCount,
+    riskCount,
+  }
+}
+
 function assetIntakePayload(review?: AnyRecord | null) {
   const payload = review ? reviewPayload(review) : {}
   return payload?.asset_intake || payload?.result?.asset_intake || payload?.result || payload
@@ -865,6 +1231,59 @@ function buildAssetIntakeSummary(review?: AnyRecord | null): ChapterAcceptanceDe
   }
 }
 
+function ipSceneIntakePayload(review?: AnyRecord | null) {
+  const payload = review ? reviewPayload(review) : {}
+  return payload?.ip_scene_intake || payload?.result?.ip_scene_intake || payload?.result || payload
+}
+
+function buildIpSceneIntakeSummary(review?: AnyRecord | null): ChapterAcceptanceDeskModel['ipSceneIntake'] {
+  if (!review) return null
+  const payload = ipSceneIntakePayload(review)
+  const candidates = Array.isArray(payload?.ip_scene_candidates) ? payload.ip_scene_candidates : []
+  const candidateCount = candidates.length
+  if (candidateCount <= 0) return null
+  return {
+    status: 'ready',
+    label: `IP场面 ${candidateCount}`,
+    candidateCount,
+    candidates: candidates.slice(0, 5).map((item: AnyRecord) => ({
+      title: text(item?.title || item?.name, '未命名强场面'),
+      summary: text(item?.summary || item?.description),
+      visualHook: text(item?.visual_hook || item?.visualHook || item?.visual),
+      adaptationValue: text(item?.adaptation_value || item?.adaptationValue || item?.ip_value),
+      spreadPoint: text(item?.spread_point || item?.spreadPoint || item?.comment_point),
+    })),
+  }
+}
+
+function signatureSceneSyncPayload(review?: AnyRecord | null) {
+  const payload = review ? reviewPayload(review) : {}
+  return payload?.signature_scene_sync || payload?.result?.signature_scene_sync || payload?.result || payload
+}
+
+function buildSignatureSceneSyncSummary(review?: AnyRecord | null): ChapterAcceptanceDeskModel['signatureSceneSync'] {
+  if (!review) return null
+  const payload = signatureSceneSyncPayload(review)
+  const plannedCountValue = Number(payload?.planned_count ?? payload?.plannedCount)
+  const plannedCount = Number.isFinite(plannedCountValue) ? plannedCountValue : countArray(payload?.planned)
+  if (plannedCount <= 0) return null
+  const scoreValue = payload?.score
+  const score = scoreValue === null || scoreValue === undefined || scoreValue === '' ? null : Number(scoreValue)
+  const safeScore = Number.isFinite(score) ? score : null
+  const missedCountValue = Number(payload?.missed_count ?? payload?.missedCount)
+  const missedCount = Number.isFinite(missedCountValue) ? missedCountValue : countArray(payload?.missed)
+  const status: 'ok' | 'warn' = text(payload?.status || review?.status).toLowerCase() === 'ok' && missedCount === 0 ? 'ok' : 'warn'
+
+  return {
+    status,
+    label: status === 'ok' ? '强场面 OK' : text(payload?.label) || `强场面漏写 ${missedCount}`,
+    score: safeScore,
+    scoreLabel: safeScore === null ? '强场面兑现 -' : `强场面兑现 ${safeScore}`,
+    missedCount,
+    plannedCount,
+  }
+}
+
 function readabilityPayload(review?: AnyRecord | null) {
   const payload = review ? reviewPayload(review) : {}
   return payload?.readability_review || payload?.result?.readability_review || payload?.result || payload
@@ -876,17 +1295,58 @@ function buildReadabilityReviewSummary(review?: AnyRecord | null): ChapterAccept
   const scoreValue = payload?.readability_score ?? payload?.score
   const score = scoreValue === null || scoreValue === undefined || scoreValue === '' ? null : Number(scoreValue)
   const safeScore = Number.isFinite(score) ? score : null
+  const openingScoreValue = payload?.opening_hook_score ?? payload?.openingHookScore
+  const openingScore = openingScoreValue === null || openingScoreValue === undefined || openingScoreValue === '' ? null : Number(openingScoreValue)
+  const safeOpeningScore = Number.isFinite(openingScore) ? openingScore : null
+  const openingHookRisk = safeOpeningScore !== null && safeOpeningScore > 0 && safeOpeningScore < 70
+  const endingScoreValue = payload?.ending_hook_score ?? payload?.endingHookScore
+  const endingScore = endingScoreValue === null || endingScoreValue === undefined || endingScoreValue === '' ? null : Number(endingScoreValue)
+  const safeEndingScore = Number.isFinite(endingScore) ? endingScore : null
+  const endingHookRisk = safeEndingScore !== null && safeEndingScore > 0 && safeEndingScore < 70
+  const sceneScoreValue = payload?.scene_readability_score ?? payload?.sceneReadabilityScore
+  const sceneScore = sceneScoreValue === null || sceneScoreValue === undefined || sceneScoreValue === '' ? null : Number(sceneScoreValue)
+  const safeSceneScore = Number.isFinite(sceneScore) ? sceneScore : null
+  const sceneReadabilityRisk = safeSceneScore !== null && safeSceneScore > 0 && safeSceneScore < 70
+  const payoffScoreValue = payload?.payoff_density_score ?? payload?.payoffDensityScore
+  const payoffScore = payoffScoreValue === null || payoffScoreValue === undefined || payoffScoreValue === '' ? null : Number(payoffScoreValue)
+  const safePayoffScore = Number.isFinite(payoffScore) ? payoffScore : null
+  const payoffDensityRisk = safePayoffScore !== null && safePayoffScore > 0 && safePayoffScore < 70
   const memeSense = payload?.meme_sense || {}
-  const riskCount = Array.isArray(memeSense?.immersion_risks)
+  const immersionRiskCount = Array.isArray(memeSense?.immersion_risks)
     ? memeSense.immersion_risks.length
     : countArray(payload?.immersion_risks)
+  const riskCount = immersionRiskCount
+    + (openingHookRisk ? 1 : 0)
+    + (endingHookRisk ? 1 : 0)
+    + (sceneReadabilityRisk ? 1 : 0)
+    + (payoffDensityRisk ? 1 : 0)
   const intensity = firstNonEmpty(memeSense?.intensity, payload?.meme_intensity, '')
 
   return {
     score: safeScore,
     scoreLabel: safeScore === null ? '可读性 -' : `可读性 ${safeScore}`,
+    openingHookScore: safeOpeningScore,
+    openingHookLabel: safeOpeningScore === null ? '开篇吸引力 -' : `开篇吸引力 ${safeOpeningScore}`,
+    openingHookRisk,
+    endingHookScore: safeEndingScore,
+    endingHookLabel: safeEndingScore === null ? '章末翻页 -' : `章末翻页 ${safeEndingScore}`,
+    endingHookRisk,
+    sceneReadabilityScore: safeSceneScore,
+    sceneReadabilityLabel: safeSceneScore === null ? '场景推进 -' : `场景推进 ${safeSceneScore}`,
+    sceneReadabilityRisk,
+    payoffDensityScore: safePayoffScore,
+    payoffDensityLabel: safePayoffScore === null ? '爽点密度 -' : `爽点密度 ${safePayoffScore}`,
+    payoffDensityRisk,
     memeLabel: intensity ? `网感${intensity}` : '网感未评',
-    riskLabel: riskCount > 0 ? `出戏风险 ${riskCount}` : '出戏风险 0',
+    riskLabel: openingHookRisk
+      ? `开篇吸引力弱 ${safeOpeningScore}`
+      : endingHookRisk
+        ? `章末翻页弱 ${safeEndingScore}`
+        : sceneReadabilityRisk
+          ? `场景推进弱 ${safeSceneScore}`
+          : payoffDensityRisk
+            ? `爽点密度弱 ${safePayoffScore}`
+        : immersionRiskCount > 0 ? `出戏风险 ${immersionRiskCount}` : '出戏风险 0',
     riskCount,
   }
 }
@@ -916,6 +1376,32 @@ function buildCoreDriftSummary(review?: AnyRecord | null): ChapterAcceptanceDesk
   }
 }
 
+function runwaySyncPayload(review?: AnyRecord | null) {
+  const payload = review ? reviewPayload(review) : {}
+  return payload?.runway_sync || payload?.result?.runway_sync || payload?.result || payload
+}
+
+function buildRunwaySyncSummary(review?: AnyRecord | null): ChapterAcceptanceDeskModel['runwaySync'] {
+  if (!review) return null
+  const payload = runwaySyncPayload(review)
+  const scoreValue = payload?.score
+  const score = scoreValue === null || scoreValue === undefined || scoreValue === '' ? null : Number(scoreValue)
+  const safeScore = Number.isFinite(score) ? score : null
+  const payloadRiskCount = Number(payload?.risk_count ?? payload?.riskCount)
+  const riskCount = Number.isFinite(payloadRiskCount)
+    ? payloadRiskCount
+    : countArray(payload?.four_question_missed) + countArray(payload?.reader_fuel_missed) + countArray(payload?.redline_touched)
+  const status: 'ok' | 'warn' = text(payload?.status || review?.status).toLowerCase() === 'ok' && riskCount === 0 ? 'ok' : 'warn'
+
+  return {
+    status,
+    label: status === 'ok' ? '航线 OK' : text(payload?.label) || `航线风险 ${riskCount}`,
+    score: safeScore,
+    scoreLabel: safeScore === null ? '航线兑现 -' : `航线兑现 ${safeScore}`,
+    riskCount,
+  }
+}
+
 function readerPayoffSyncPayload(review?: AnyRecord | null) {
   const payload = review ? reviewPayload(review) : {}
   return payload?.reader_payoff_sync || payload?.result?.reader_payoff_sync || payload?.result || payload
@@ -937,6 +1423,406 @@ function buildReaderPayoffSyncSummary(review?: AnyRecord | null): ChapterAccepta
     score: safeScore,
     scoreLabel: safeScore === null ? '回报兑现 -' : `回报兑现 ${safeScore}`,
     debtCount,
+  }
+}
+
+function readerExpectationSyncPayload(review?: AnyRecord | null) {
+  const payload = review ? reviewPayload(review) : {}
+  return payload?.reader_expectation_sync || payload?.result?.reader_expectation_sync || payload?.result || payload
+}
+
+function isOpeningHandoffMiss(value: any) {
+  const searchable = [
+    value?.key,
+    value?.type,
+    value?.label,
+    value?.name,
+    value?.category,
+    value?.match_scope,
+    value?.scope,
+  ].map(item => text(item).toLowerCase()).join(' ')
+  return searchable.includes('opening_handoff')
+    || searchable.includes('previous_handoff')
+    || searchable.includes('上一章承接')
+    || (searchable.includes('handoff') && searchable.includes('opening'))
+}
+
+function buildReaderExpectationSyncSummary(review?: AnyRecord | null): ChapterAcceptanceDeskModel['readerExpectationSync'] {
+  if (!review) return null
+  const payload = readerExpectationSyncPayload(review)
+  const scoreValue = payload?.score
+  const score = scoreValue === null || scoreValue === undefined || scoreValue === '' ? null : Number(scoreValue)
+  const safeScore = Number.isFinite(score) ? score : null
+  const payloadMissedCount = Number(payload?.missed_count ?? payload?.missedCount)
+  const missedCount = Number.isFinite(payloadMissedCount) ? payloadMissedCount : countArray(payload?.missed)
+  const openingHandoffMissedCount = arrayValue(payload?.missed).filter(isOpeningHandoffMiss).length
+  const status: 'ok' | 'warn' = text(payload?.status || review?.status).toLowerCase() === 'ok' && missedCount === 0 ? 'ok' : 'warn'
+
+  return {
+    status,
+    label: status === 'ok'
+      ? '期待 OK'
+      : openingHandoffMissedCount > 0
+        ? `开篇承接漏写 ${openingHandoffMissedCount}`
+        : text(payload?.label) || `期待欠账 ${missedCount}`,
+    score: safeScore,
+    scoreLabel: safeScore === null ? '期待兑现 -' : `期待兑现 ${safeScore}`,
+    missedCount,
+    openingHandoffMissedCount,
+  }
+}
+
+function readerRetentionSyncPayload(review?: AnyRecord | null) {
+  const payload = review ? reviewPayload(review) : {}
+  return payload?.reader_retention_sync || payload?.result?.reader_retention_sync || payload?.result || payload
+}
+
+function buildReaderRetentionSyncSummary(review?: AnyRecord | null): ChapterAcceptanceDeskModel['readerRetentionSync'] {
+  if (!review) return null
+  const payload = readerRetentionSyncPayload(review)
+  const scoreValue = payload?.score
+  const score = scoreValue === null || scoreValue === undefined || scoreValue === '' ? null : Number(scoreValue)
+  const safeScore = Number.isFinite(score) ? score : null
+  const payloadMissedCount = Number(payload?.missed_count ?? payload?.missedCount)
+  const missedCount = Number.isFinite(payloadMissedCount) ? payloadMissedCount : countArray(payload?.missed)
+  const status: 'ok' | 'warn' = text(payload?.status || review?.status).toLowerCase() === 'ok' && missedCount === 0 ? 'ok' : 'warn'
+
+  return {
+    status,
+    label: status === 'ok' ? '追读 OK' : text(payload?.label) || `漏追读 ${missedCount}`,
+    score: safeScore,
+    scoreLabel: safeScore === null ? '追读兑现 -' : `追读兑现 ${safeScore}`,
+    missedCount,
+  }
+}
+
+function chapterAttractionPayload(review?: AnyRecord | null) {
+  const payload = review ? reviewPayload(review) : {}
+  return payload?.chapter_attraction_review || payload?.result?.chapter_attraction_review || payload?.result || payload
+}
+
+function buildChapterAttractionSummary(review?: AnyRecord | null): ChapterAcceptanceDeskModel['chapterAttraction'] {
+  if (!review) return null
+  const payload = chapterAttractionPayload(review)
+  const scoreValue = payload?.score
+  const score = scoreValue === null || scoreValue === undefined || scoreValue === '' ? null : Number(scoreValue)
+  const safeScore = Number.isFinite(score) ? score : null
+  const payloadWeakCount = Number(payload?.weak_count ?? payload?.weakCount)
+  const weakCount = Number.isFinite(payloadWeakCount)
+    ? payloadWeakCount
+    : countArray(payload?.weak_dimensions || payload?.weakDimensions || payload?.dimensions)
+  const status: 'ok' | 'warn' = text(payload?.status || review?.status).toLowerCase() === 'ok' && weakCount === 0 ? 'ok' : 'warn'
+
+  return {
+    status,
+    label: status === 'ok' ? '吸引力 OK' : text(payload?.label) || `吸引力缺口 ${weakCount}`,
+    score: safeScore,
+    scoreLabel: safeScore === null ? '吸引力 -' : `吸引力 ${safeScore}`,
+    weakCount,
+    priorityLabel: text(payload?.priority_repair || payload?.priorityRepair, status === 'ok' ? '吸引力稳定' : '优先修吸引力'),
+  }
+}
+
+function storyDriveSyncPayload(review?: AnyRecord | null) {
+  const payload = review ? reviewPayload(review) : {}
+  return payload?.story_drive_sync || payload?.result?.story_drive_sync || payload?.result || payload
+}
+
+function buildStoryDriveSyncSummary(review?: AnyRecord | null): ChapterAcceptanceDeskModel['storyDriveSync'] {
+  if (!review) return null
+  const payload = storyDriveSyncPayload(review)
+  const scoreValue = payload?.score
+  const score = scoreValue === null || scoreValue === undefined || scoreValue === '' ? null : Number(scoreValue)
+  const safeScore = Number.isFinite(score) ? score : null
+  const payloadMissedCount = Number(payload?.missed_count ?? payload?.missedCount)
+  const missedCount = Number.isFinite(payloadMissedCount) ? payloadMissedCount : countArray(payload?.missed)
+  const status: 'ok' | 'warn' = text(payload?.status || review?.status).toLowerCase() === 'ok' && missedCount === 0 ? 'ok' : 'warn'
+
+  return {
+    status,
+    label: status === 'ok' ? '故事力 OK' : text(payload?.label) || `故事力缺口 ${missedCount}`,
+    score: safeScore,
+    scoreLabel: safeScore === null ? '故事力 -' : `故事力 ${safeScore}`,
+    missedCount,
+    priorityLabel: text(payload?.priority_repair || payload?.priorityRepair, status === 'ok' ? '故事力稳定' : '优先补故事力'),
+  }
+}
+
+function characterArcSyncPayload(review?: AnyRecord | null) {
+  const payload = review ? reviewPayload(review) : {}
+  return payload?.character_arc_sync || payload?.result?.character_arc_sync || payload?.result || payload
+}
+
+function buildCharacterArcSyncSummary(review?: AnyRecord | null): ChapterAcceptanceDeskModel['characterArcSync'] {
+  if (!review) return null
+  const payload = characterArcSyncPayload(review)
+  const scoreValue = payload?.score
+  const score = scoreValue === null || scoreValue === undefined || scoreValue === '' ? null : Number(scoreValue)
+  const safeScore = Number.isFinite(score) ? score : null
+  const payloadMissedCount = Number(payload?.missed_count ?? payload?.missedCount)
+  const missedCount = Number.isFinite(payloadMissedCount) ? payloadMissedCount : countArray(payload?.missed)
+  const status: 'ok' | 'warn' = text(payload?.status || review?.status).toLowerCase() === 'ok' && missedCount === 0 ? 'ok' : 'warn'
+
+  return {
+    status,
+    label: status === 'ok' ? '人物弧光 OK' : text(payload?.label) || `人物弧光缺口 ${missedCount}`,
+    score: safeScore,
+    scoreLabel: safeScore === null ? '人物弧光 -' : `人物弧光 ${safeScore}`,
+    missedCount,
+    priorityLabel: text(payload?.priority_repair || payload?.priorityRepair, status === 'ok' ? '人物弧光稳定' : '优先补人物弧光'),
+  }
+}
+
+function chapterBenchmarkSyncPayload(review?: AnyRecord | null) {
+  const payload = review ? reviewPayload(review) : {}
+  return payload?.chapter_benchmark_sync || payload?.result?.chapter_benchmark_sync || payload?.result || payload
+}
+
+function buildChapterBenchmarkSyncSummary(review?: AnyRecord | null): ChapterAcceptanceDeskModel['chapterBenchmarkSync'] {
+  if (!review) return null
+  const payload = chapterBenchmarkSyncPayload(review)
+  const scoreValue = payload?.score
+  const score = scoreValue === null || scoreValue === undefined || scoreValue === '' ? null : Number(scoreValue)
+  const safeScore = Number.isFinite(score) ? score : null
+  const payloadMissedCount = Number(payload?.missed_count ?? payload?.missedCount)
+  const missedCount = Number.isFinite(payloadMissedCount) ? payloadMissedCount : countArray(payload?.missed)
+  const status: 'ok' | 'warn' = text(payload?.status || review?.status).toLowerCase() === 'ok' && missedCount === 0 ? 'ok' : 'warn'
+
+  return {
+    status,
+    label: status === 'ok' ? '基准 OK' : text(payload?.label) || `基准缺口 ${missedCount}`,
+    score: safeScore,
+    scoreLabel: safeScore === null ? '质量基准 -' : `质量基准 ${safeScore}`,
+    missedCount,
+  }
+}
+
+function styleSampleSyncPayload(review?: AnyRecord | null) {
+  const payload = review ? reviewPayload(review) : {}
+  return payload?.style_sample_sync || payload?.result?.style_sample_sync || payload?.result || payload
+}
+
+function buildStyleSampleSyncSummary(review?: AnyRecord | null): ChapterAcceptanceDeskModel['styleSampleSync'] {
+  if (!review) return null
+  const payload = styleSampleSyncPayload(review)
+  const scoreValue = payload?.score
+  const score = scoreValue === null || scoreValue === undefined || scoreValue === '' ? null : Number(scoreValue)
+  const safeScore = Number.isFinite(score) ? score : null
+  const payloadMissedCount = Number(payload?.missed_count ?? payload?.missedCount)
+  const missedCount = Number.isFinite(payloadMissedCount) ? payloadMissedCount : countArray(payload?.missed)
+  const payloadCopyRiskCount = Number(payload?.copy_risk_count ?? payload?.copyRiskCount)
+  const copyRiskCount = Number.isFinite(payloadCopyRiskCount) ? payloadCopyRiskCount : countArray(payload?.copied_phrases || payload?.copiedPhrases)
+  const status: 'ok' | 'warn' = text(payload?.status || review?.status).toLowerCase() === 'ok' && missedCount === 0 && copyRiskCount === 0 ? 'ok' : 'warn'
+
+  return {
+    status,
+    label: status === 'ok' ? '风格 OK' : text(payload?.label) || `风格缺口 ${missedCount + copyRiskCount}`,
+    score: safeScore,
+    scoreLabel: safeScore === null ? '风格 -' : `风格 ${safeScore}`,
+    missedCount,
+    copyRiskCount,
+  }
+}
+
+function latestFirst30RetentionReview(reviews: AnyRecord[]) {
+  const matches = reviews.filter(review => reviewType(review) === 'first30_retention_diagnosis')
+  if (!matches.length) return null
+  return matches.sort((a, b) => (createdTime(b) ?? 0) - (createdTime(a) ?? 0))[0]
+}
+
+function buildFirst30RetentionRecheckSummary(chapter: AnyRecord | null, reviews: AnyRecord[]): ChapterAcceptanceDeskModel['first30RetentionRecheck'] {
+  const chapterNo = Number(chapter?.chapter_no || 0)
+  if (chapterNo < 1 || chapterNo > 30) return null
+  const review = latestFirst30RetentionReview(reviews)
+  if (!review) return null
+  const reportTime = createdTime(review)
+  const chapterTime = parsedTime(chapter?.updated_at || chapter?.modified_at)
+  if (!reportTime || !chapterTime || chapterTime <= reportTime) return null
+  return {
+    status: 'stale',
+    label: '留存需复诊',
+    reason: `第${chapterNo}章已在前30章诊断后更新，建议重跑留存曲线。`,
+  }
+}
+
+function innovationSyncPayload(review?: AnyRecord | null) {
+  const payload = review ? reviewPayload(review) : {}
+  return payload?.innovation_sync || payload?.result?.innovation_sync || payload?.result || payload
+}
+
+function buildInnovationSyncSummary(review?: AnyRecord | null): ChapterAcceptanceDeskModel['innovationSync'] {
+  if (!review) return null
+  const payload = innovationSyncPayload(review)
+  const scoreValue = payload?.score
+  const score = scoreValue === null || scoreValue === undefined || scoreValue === '' ? null : Number(scoreValue)
+  const safeScore = Number.isFinite(score) ? score : null
+  const payloadMissedCount = Number(payload?.missed_count ?? payload?.missedCount)
+  const missedCount = Number.isFinite(payloadMissedCount) ? payloadMissedCount : countArray(payload?.missed)
+  const status: 'ok' | 'warn' = text(payload?.status || review?.status).toLowerCase() === 'ok' && missedCount === 0 ? 'ok' : 'warn'
+
+  return {
+    status,
+    label: status === 'ok' ? '创新 OK' : text(payload?.label) || `创新缺口 ${missedCount}`,
+    score: safeScore,
+    scoreLabel: safeScore === null ? '创新兑现 -' : `创新兑现 ${safeScore}`,
+    missedCount,
+  }
+}
+
+function volumeBeatSyncPayload(review?: AnyRecord | null) {
+  const payload = review ? reviewPayload(review) : {}
+  return payload?.volume_beat_sync || payload?.result?.volume_beat_sync || payload?.result || payload
+}
+
+function buildVolumeBeatSyncSummary(review?: AnyRecord | null): ChapterAcceptanceDeskModel['volumeBeatSync'] {
+  if (!review) return null
+  const payload = volumeBeatSyncPayload(review)
+  const scoreValue = payload?.score
+  const score = scoreValue === null || scoreValue === undefined || scoreValue === '' ? null : Number(scoreValue)
+  const safeScore = Number.isFinite(score) ? score : null
+  const payloadMissedCount = Number(payload?.missed_count ?? payload?.missedCount)
+  const missedCount = Number.isFinite(payloadMissedCount) ? payloadMissedCount : countArray(payload?.missed)
+  const status: 'ok' | 'warn' = text(payload?.status || review?.status).toLowerCase() === 'ok' && missedCount === 0 ? 'ok' : 'warn'
+
+  return {
+    status,
+    label: status === 'ok' ? '爆点 OK' : text(payload?.label) || `爆点漏兑现 ${missedCount}`,
+    score: safeScore,
+    scoreLabel: safeScore === null ? '爆点兑现 -' : `爆点兑现 ${safeScore}`,
+    missedCount,
+  }
+}
+
+function buildDeliveryRiskQueue(args: {
+  mustFix: string[]
+  storylineSync: ChapterAcceptanceDeskModel['storylineSync']
+  storyUnitSync: ChapterAcceptanceDeskModel['storyUnitSync']
+  signatureSceneSync: ChapterAcceptanceDeskModel['signatureSceneSync']
+  readabilityReview: ChapterAcceptanceDeskModel['readabilityReview']
+  coreDrift: ChapterAcceptanceDeskModel['coreDrift']
+  runwaySync: ChapterAcceptanceDeskModel['runwaySync']
+  readerPayoffSync: ChapterAcceptanceDeskModel['readerPayoffSync']
+  readerExpectationSync: ChapterAcceptanceDeskModel['readerExpectationSync']
+  readerRetentionSync: ChapterAcceptanceDeskModel['readerRetentionSync']
+  chapterAttraction: ChapterAcceptanceDeskModel['chapterAttraction']
+  storyDriveSync: ChapterAcceptanceDeskModel['storyDriveSync']
+  characterArcSync: ChapterAcceptanceDeskModel['characterArcSync']
+  chapterBenchmarkSync: ChapterAcceptanceDeskModel['chapterBenchmarkSync']
+  styleSampleSync: ChapterAcceptanceDeskModel['styleSampleSync']
+  innovationSync: ChapterAcceptanceDeskModel['innovationSync']
+  volumeBeatSync: ChapterAcceptanceDeskModel['volumeBeatSync']
+}): ChapterAcceptanceDeskModel['deliveryRiskQueue'] {
+  const risks: Array<{ count: number; item: string; priorityLabel: string }> = []
+  if (args.coreDrift && args.coreDrift.riskCount > 0) {
+    risks.push({ count: args.coreDrift.riskCount, item: `守核心：${args.coreDrift.label}`, priorityLabel: '优先补核心' })
+  }
+  if (args.runwaySync && args.runwaySync.riskCount > 0) {
+    risks.push({ count: args.runwaySync.riskCount, item: `补航线：${args.runwaySync.label}`, priorityLabel: '优先补航线' })
+  }
+  if (args.storyUnitSync && args.storyUnitSync.riskCount > 0) {
+    risks.push({ count: args.storyUnitSync.riskCount, item: `校剧情单元：${args.storyUnitSync.label}`, priorityLabel: '优先校单元' })
+  }
+  if (args.signatureSceneSync && args.signatureSceneSync.missedCount > 0) {
+    risks.push({ count: args.signatureSceneSync.missedCount, item: `补强场面：${args.signatureSceneSync.label}`, priorityLabel: '优先补强场面' })
+  }
+  if (args.mustFix.length > 0) {
+    risks.push({ count: args.mustFix.length, item: `修质量：${args.mustFix.slice(0, 2).join('；')}`, priorityLabel: '优先修质量' })
+  }
+  if (args.readerExpectationSync && args.readerExpectationSync.missedCount > 0) {
+    risks.push(args.readerExpectationSync.openingHandoffMissedCount > 0
+      ? { count: args.readerExpectationSync.missedCount, item: `修开篇承接：${args.readerExpectationSync.label}`, priorityLabel: '优先修开篇' }
+      : { count: args.readerExpectationSync.missedCount, item: `补期待：${args.readerExpectationSync.label}`, priorityLabel: '优先补期待' })
+  } else if (args.readerRetentionSync && args.readerRetentionSync.missedCount > 0) {
+    risks.push({ count: args.readerRetentionSync.missedCount, item: `补追读：${args.readerRetentionSync.label}`, priorityLabel: '优先补追读' })
+  }
+  if (args.chapterAttraction && args.chapterAttraction.weakCount > 0) {
+    risks.push({ count: args.chapterAttraction.weakCount, item: `修吸引力：${args.chapterAttraction.label}`, priorityLabel: args.chapterAttraction.priorityLabel || '优先修吸引力' })
+  }
+  if (args.storyDriveSync && args.storyDriveSync.missedCount > 0) {
+    risks.push({
+      count: args.storyDriveSync.missedCount,
+      item: `补故事力：${args.storyDriveSync.label}`,
+      priorityLabel: args.storyDriveSync.priorityLabel || '优先补故事力',
+    })
+  }
+  if (args.characterArcSync && args.characterArcSync.missedCount > 0) {
+    risks.push({
+      count: args.characterArcSync.missedCount,
+      item: `补人物弧光：${args.characterArcSync.label}`,
+      priorityLabel: args.characterArcSync.priorityLabel || '优先补人物弧光',
+    })
+  }
+  if (args.chapterBenchmarkSync && args.chapterBenchmarkSync.missedCount > 0) {
+    risks.push({ count: args.chapterBenchmarkSync.missedCount, item: `补基准：${args.chapterBenchmarkSync.label}`, priorityLabel: '优先补基准' })
+  }
+  if (args.styleSampleSync && (args.styleSampleSync.missedCount > 0 || args.styleSampleSync.copyRiskCount > 0)) {
+    risks.push({
+      count: args.styleSampleSync.missedCount + args.styleSampleSync.copyRiskCount,
+      item: `校风格：${args.styleSampleSync.label}`,
+      priorityLabel: '优先校风格',
+    })
+  }
+  if (args.innovationSync && args.innovationSync.missedCount > 0) {
+    risks.push({ count: args.innovationSync.missedCount, item: `补创新：${args.innovationSync.label}`, priorityLabel: '优先补创新' })
+  }
+  if (args.volumeBeatSync && args.volumeBeatSync.missedCount > 0) {
+    risks.push({ count: args.volumeBeatSync.missedCount, item: `补爆点：${args.volumeBeatSync.label}`, priorityLabel: '优先补爆点' })
+  }
+  if (!args.readerExpectationSync && args.readerPayoffSync && args.readerPayoffSync.debtCount > 0) {
+    risks.push({ count: args.readerPayoffSync.debtCount, item: `补回报：${args.readerPayoffSync.label}`, priorityLabel: '优先补回报' })
+  }
+  if (args.storylineSync) {
+    const storylineRiskCount = args.storylineSync.missedCount + args.storylineSync.unplannedCount + args.storylineSync.forbiddenCount
+    if (storylineRiskCount > 0) {
+      risks.push({ count: storylineRiskCount, item: `校剧情线：${args.storylineSync.label}`, priorityLabel: '优先校剧情线' })
+    }
+  }
+  if (args.readabilityReview && args.readabilityReview.riskCount > 0) {
+    risks.push(args.readabilityReview.openingHookRisk
+      ? { count: args.readabilityReview.riskCount, item: `修开篇吸引力：${args.readabilityReview.riskLabel}`, priorityLabel: '优先修开篇' }
+      : args.readabilityReview.endingHookRisk
+        ? { count: args.readabilityReview.riskCount, item: `修章末翻页：${args.readabilityReview.riskLabel}`, priorityLabel: '优先修章末' }
+        : args.readabilityReview.sceneReadabilityRisk
+          ? { count: args.readabilityReview.riskCount, item: `修场景推进：${args.readabilityReview.riskLabel}`, priorityLabel: '优先修场景' }
+          : args.readabilityReview.payoffDensityRisk
+            ? { count: args.readabilityReview.riskCount, item: `补爽点密度：${args.readabilityReview.riskLabel}`, priorityLabel: '优先补爽点' }
+      : { count: args.readabilityReview.riskCount, item: `调可读性：${args.readabilityReview.riskLabel}`, priorityLabel: '优先调可读性' })
+  }
+
+  const totalCount = risks.reduce((sum, risk) => sum + risk.count, 0)
+  if (totalCount <= 0) return null
+
+  return {
+    totalCount,
+    label: `待修复 ${totalCount}`,
+    priorityLabel: risks[0]?.priorityLabel || '优先复盘本章',
+    items: risks.map(risk => risk.item),
+  }
+}
+
+function deliveryRiskConvergencePayload(review?: AnyRecord | null) {
+  const payload = review ? reviewPayload(review) : {}
+  return payload?.delivery_risk_convergence || payload?.result?.delivery_risk_convergence || payload?.result || payload
+}
+
+function buildDeliveryRiskConvergenceSummary(review?: AnyRecord | null): ChapterAcceptanceDeskModel['deliveryRiskConvergence'] {
+  if (!review) return null
+  const payload = deliveryRiskConvergencePayload(review)
+  const statusText = text(payload?.status || review?.status).toLowerCase()
+  const status: 'cleared' | 'improved' | 'unchanged' | 'worse' =
+    statusText === 'cleared' || statusText === 'improved' || statusText === 'worse' ? statusText : 'unchanged'
+  const residualCountValue = Number(payload?.residual_count ?? payload?.residualCount ?? payload?.after_count)
+  const resolvedCountValue = Number(payload?.resolved_count ?? payload?.resolvedCount)
+  const residualCount = Number.isFinite(residualCountValue) ? residualCountValue : 0
+  const resolvedCount = Number.isFinite(resolvedCountValue) ? resolvedCountValue : 0
+  const nextActions = Array.isArray(payload?.next_actions) ? payload.next_actions.map((item: any) => text(item)).filter(Boolean) : []
+
+  return {
+    status,
+    label: text(payload?.label) || (status === 'cleared' ? '风险已清零' : status === 'improved' ? `风险收敛 ${resolvedCount}` : status === 'worse' ? '新增风险' : `仍有残留 ${residualCount}`),
+    residualCount,
+    resolvedCount,
+    nextAction: nextActions[0] || '',
   }
 }
 
@@ -1005,10 +1891,26 @@ function buildHiddenAcceptanceDesk(): ChapterAcceptanceDeskModel {
     statusLabel: '等待正文',
     acceptanceReasons: ['本章还没有正文，先完成章节计划和初稿。'],
     storylineSync: null,
+    storyUnitSync: null,
     assetIntake: null,
+    ipSceneIntake: null,
+    signatureSceneSync: null,
     readabilityReview: null,
     coreDrift: null,
+    runwaySync: null,
     readerPayoffSync: null,
+    readerExpectationSync: null,
+    readerRetentionSync: null,
+    chapterAttraction: null,
+    storyDriveSync: null,
+    characterArcSync: null,
+    chapterBenchmarkSync: null,
+    styleSampleSync: null,
+    first30RetentionRecheck: null,
+    innovationSync: null,
+    volumeBeatSync: null,
+    deliveryRiskQueue: null,
+    deliveryRiskConvergence: null,
     qualityScore: null,
     qualityStatus: '',
     mustFix: [],
@@ -1042,18 +1944,47 @@ function buildChapterAcceptanceDesk(args: {
   const latestReportRef = latestReviewRef(args.reviews, args.nextChapter, 'editor_report')
   const latestRevisionRef = latestReviewRef(args.reviews, args.nextChapter, 'editor_revision')
   const latestStorylineSyncRef = latestReviewRef(args.reviews, args.nextChapter, 'storyline_sync')
+  const latestStoryUnitSyncRef = latestReviewRef(args.reviews, args.nextChapter, 'story_unit_sync')
   const latestAssetIntakeRef = latestReviewRef(args.reviews, args.nextChapter, 'asset_intake')
+  const latestIpSceneIntakeRef = latestReviewRef(args.reviews, args.nextChapter, 'ip_scene_intake')
+  const latestSignatureSceneSyncRef = latestReviewRef(args.reviews, args.nextChapter, 'signature_scene_sync')
   const latestReadabilityRef = latestReviewRef(args.reviews, args.nextChapter, 'readability_review')
   const latestCoreDriftRef = latestReviewRef(args.reviews, args.nextChapter, 'chapter_core_drift')
+  const latestRunwaySyncRef = latestReviewRef(args.reviews, args.nextChapter, 'runway_sync')
   const latestReaderPayoffSyncRef = latestReviewRef(args.reviews, args.nextChapter, 'reader_payoff_sync')
+  const latestReaderExpectationSyncRef = latestReviewRef(args.reviews, args.nextChapter, 'reader_expectation_sync')
+  const latestReaderRetentionSyncRef = latestReviewRef(args.reviews, args.nextChapter, 'reader_retention_sync')
+  const latestChapterAttractionRef = latestReviewRef(args.reviews, args.nextChapter, 'chapter_attraction_review')
+  const latestStoryDriveSyncRef = latestReviewRef(args.reviews, args.nextChapter, 'story_drive_sync')
+  const latestCharacterArcSyncRef = latestReviewRef(args.reviews, args.nextChapter, 'character_arc_sync')
+  const latestChapterBenchmarkSyncRef = latestReviewRef(args.reviews, args.nextChapter, 'chapter_benchmark_sync')
+  const latestStyleSampleSyncRef = latestReviewRef(args.reviews, args.nextChapter, 'style_sample_sync')
+  const latestInnovationSyncRef = latestReviewRef(args.reviews, args.nextChapter, 'innovation_sync')
+  const latestVolumeBeatSyncRef = latestReviewRef(args.reviews, args.nextChapter, 'volume_beat_sync')
+  const latestDeliveryRiskConvergenceRef = latestReviewRef(args.reviews, args.nextChapter, 'delivery_risk_convergence')
   const latestQuality = latestQualityRef?.review || null
   const latestReport = latestReportRef?.review || null
   const latestRevision = latestRevisionRef?.review || null
   const storylineSync = buildStorylineSyncSummary(latestStorylineSyncRef?.review || null)
+  const storyUnitSync = buildStoryUnitSyncSummary(latestStoryUnitSyncRef?.review || null)
   const assetIntake = buildAssetIntakeSummary(latestAssetIntakeRef?.review || null)
+  const ipSceneIntake = buildIpSceneIntakeSummary(latestIpSceneIntakeRef?.review || null)
+  const signatureSceneSync = buildSignatureSceneSyncSummary(latestSignatureSceneSyncRef?.review || null)
   const readabilityReview = buildReadabilityReviewSummary(latestReadabilityRef?.review || null)
   const coreDrift = buildCoreDriftSummary(latestCoreDriftRef?.review || null)
+  const runwaySync = buildRunwaySyncSummary(latestRunwaySyncRef?.review || null)
   const readerPayoffSync = buildReaderPayoffSyncSummary(latestReaderPayoffSyncRef?.review || null)
+  const readerExpectationSync = buildReaderExpectationSyncSummary(latestReaderExpectationSyncRef?.review || null)
+  const readerRetentionSync = buildReaderRetentionSyncSummary(latestReaderRetentionSyncRef?.review || null)
+  const chapterAttraction = buildChapterAttractionSummary(latestChapterAttractionRef?.review || null)
+  const storyDriveSync = buildStoryDriveSyncSummary(latestStoryDriveSyncRef?.review || null)
+  const characterArcSync = buildCharacterArcSyncSummary(latestCharacterArcSyncRef?.review || null)
+  const chapterBenchmarkSync = buildChapterBenchmarkSyncSummary(latestChapterBenchmarkSyncRef?.review || null)
+  const styleSampleSync = buildStyleSampleSyncSummary(latestStyleSampleSyncRef?.review || null)
+  const first30RetentionRecheck = buildFirst30RetentionRecheckSummary(args.nextChapter, args.reviews)
+  const innovationSync = buildInnovationSyncSummary(latestInnovationSyncRef?.review || null)
+  const volumeBeatSync = buildVolumeBeatSyncSummary(latestVolumeBeatSyncRef?.review || null)
+  const deliveryRiskConvergence = buildDeliveryRiskConvergenceSummary(latestDeliveryRiskConvergenceRef?.review || null)
   const quality = qualityPayload(latestQuality)
   const report = reportPayload(latestReport)
   const revision = revisionPayload(latestRevision)
@@ -1066,6 +1997,25 @@ function buildChapterAcceptanceDesk(args: {
   }) ? report : {}
   const mustFix = extractMustFix(quality, currentReport)
   const optionalImprovements = extractOptionalImprovements(quality, report)
+  const deliveryRiskQueue = buildDeliveryRiskQueue({
+    mustFix,
+    storylineSync,
+    storyUnitSync,
+    signatureSceneSync,
+    readabilityReview,
+    coreDrift,
+    runwaySync,
+    readerPayoffSync,
+    readerExpectationSync,
+    readerRetentionSync,
+    chapterAttraction,
+    storyDriveSync,
+    characterArcSync,
+    chapterBenchmarkSync,
+    styleSampleSync,
+    innovationSync,
+    volumeBeatSync,
+  })
   const storyStateSynced = Number(args.storyState?.last_updated_chapter || 0) >= Number(args.nextChapter?.chapter_no || 0)
   const latestEditorReportSummary = firstNonEmpty(report?.summary, latestReport?.summary)
   const latestRevisionSummary = firstNonEmpty(revision?.revision_summary, latestRevision?.summary)
@@ -1094,10 +2044,26 @@ function buildChapterAcceptanceDesk(args: {
       statusLabel: '需复检',
       acceptanceReasons: ['本章已有正文，但还没有当前章节的质量复检记录。'],
       storylineSync,
+      storyUnitSync,
       assetIntake,
+      ipSceneIntake,
+      signatureSceneSync,
       readabilityReview,
       coreDrift,
+      runwaySync,
       readerPayoffSync,
+      readerExpectationSync,
+      readerRetentionSync,
+      chapterAttraction,
+      storyDriveSync,
+      characterArcSync,
+      chapterBenchmarkSync,
+      styleSampleSync,
+      first30RetentionRecheck,
+      innovationSync,
+      volumeBeatSync,
+      deliveryRiskQueue,
+      deliveryRiskConvergence,
       qualityScore: null,
       qualityStatus,
       mustFix,
@@ -1121,10 +2087,26 @@ function buildChapterAcceptanceDesk(args: {
       statusLabel: '修订后需复检',
       acceptanceReasons: ['本章已有修订记录，修订时间晚于最新质量复检。'],
       storylineSync,
+      storyUnitSync,
       assetIntake,
+      ipSceneIntake,
+      signatureSceneSync,
       readabilityReview,
       coreDrift,
+      runwaySync,
       readerPayoffSync,
+      readerExpectationSync,
+      readerRetentionSync,
+      chapterAttraction,
+      storyDriveSync,
+      characterArcSync,
+      chapterBenchmarkSync,
+      styleSampleSync,
+      first30RetentionRecheck,
+      innovationSync,
+      volumeBeatSync,
+      deliveryRiskQueue,
+      deliveryRiskConvergence,
       qualityScore: score,
       qualityStatus,
       mustFix,
@@ -1153,10 +2135,26 @@ function buildChapterAcceptanceDesk(args: {
         mustFix.length > 0 ? `必须修复：${mustFix.slice(0, 2).join('；')}` : '',
       ].filter(Boolean).slice(0, 3),
       storylineSync,
+      storyUnitSync,
       assetIntake,
+      ipSceneIntake,
+      signatureSceneSync,
       readabilityReview,
       coreDrift,
+      runwaySync,
       readerPayoffSync,
+      readerExpectationSync,
+      readerRetentionSync,
+      chapterAttraction,
+      storyDriveSync,
+      characterArcSync,
+      chapterBenchmarkSync,
+      styleSampleSync,
+      first30RetentionRecheck,
+      innovationSync,
+      volumeBeatSync,
+      deliveryRiskQueue,
+      deliveryRiskConvergence,
       qualityScore: score,
       qualityStatus,
       mustFix,
@@ -1180,10 +2178,26 @@ function buildChapterAcceptanceDesk(args: {
       statusLabel: '需同步故事状态',
       acceptanceReasons: [`故事状态还没有同步到第 ${args.nextChapter.chapter_no} 章。`],
       storylineSync,
+      storyUnitSync,
       assetIntake,
+      ipSceneIntake,
+      signatureSceneSync,
       readabilityReview,
       coreDrift,
+      runwaySync,
       readerPayoffSync,
+      readerExpectationSync,
+      readerRetentionSync,
+      chapterAttraction,
+      storyDriveSync,
+      characterArcSync,
+      chapterBenchmarkSync,
+      styleSampleSync,
+      first30RetentionRecheck,
+      innovationSync,
+      volumeBeatSync,
+      deliveryRiskQueue,
+      deliveryRiskConvergence,
       qualityScore: score,
       qualityStatus,
       mustFix,
@@ -1206,10 +2220,26 @@ function buildChapterAcceptanceDesk(args: {
     statusLabel: '可验收',
     acceptanceReasons: ['质量复检通过，故事状态已同步，可以进入下一章。'],
     storylineSync,
+    storyUnitSync,
     assetIntake,
+    ipSceneIntake,
+    signatureSceneSync,
     readabilityReview,
     coreDrift,
+    runwaySync,
     readerPayoffSync,
+    readerExpectationSync,
+    readerRetentionSync,
+    chapterAttraction,
+    storyDriveSync,
+    characterArcSync,
+    chapterBenchmarkSync,
+    styleSampleSync,
+    first30RetentionRecheck,
+    innovationSync,
+    volumeBeatSync,
+    deliveryRiskQueue,
+    deliveryRiskConvergence,
     qualityScore: score,
     qualityStatus,
     mustFix,
@@ -1223,6 +2253,62 @@ function buildChapterAcceptanceDesk(args: {
     recommendedAcceptanceAction: { key: 'accept_chapter_and_continue', label: ACTION_LABELS.accept_chapter_and_continue },
     secondaryActions,
     shouldAutoExpandAcceptance: false,
+  }
+}
+
+function buildHiddenHandoffDesk(): ChapterHandoffDeskModel {
+  return {
+    visible: false,
+    status: 'hidden',
+    label: '等待交接',
+    fromChapterNo: null,
+    toChapterNo: null,
+    previousEnding: '',
+    nextOpeningObligations: [],
+    expectationCarryOver: [],
+    storyStateSynced: false,
+    storylineStatusLabel: '',
+    actionKey: 'write_draft',
+    actionLabel: ACTION_LABELS.write_draft,
+  }
+}
+
+function handoffItemText(item: any) {
+  if (typeof item === 'string') return text(item)
+  return firstNonEmpty(item?.text, item?.label, item?.name, item?.summary, item?.detail, item?.title)
+}
+
+function handoffTextItems(value: any): string[] {
+  return Array.from(new Set(arrayValue(value).map(handoffItemText).filter(Boolean))).slice(0, 4)
+}
+
+function buildChapterHandoffDesk(args: {
+  fromChapter: AnyRecord | null
+  toChapter: AnyRecord | null
+  acceptanceDesk: ChapterAcceptanceDeskModel
+  reviews: AnyRecord[]
+}): ChapterHandoffDeskModel {
+  if (!args.fromChapter || !hasProse(args.fromChapter) || !args.toChapter) return buildHiddenHandoffDesk()
+
+  const readerExpectationRef = latestReviewRef(args.reviews, args.fromChapter, 'reader_expectation_sync')
+  const expectationPayload = readerExpectationSyncPayload(readerExpectationRef?.review || null)
+  const expectationCarryOver = handoffTextItems(expectationPayload?.missed)
+  const nextOpeningObligations = handoffTextItems(expectationPayload?.keep_alive)
+  const ready = args.acceptanceDesk.acceptanceStatus === 'ready_to_accept' || args.acceptanceDesk.acceptanceStatus === 'delivered'
+
+  return {
+    visible: true,
+    status: ready ? 'ready' : 'needs_delivery',
+    label: ready ? '可接下一章' : '先完成交稿',
+    fromChapterNo: Number(args.fromChapter?.chapter_no || 0) || null,
+    toChapterNo: Number(args.toChapter?.chapter_no || 0) || null,
+    previousEnding: previousEnding(args.fromChapter),
+    nextOpeningObligations,
+    expectationCarryOver,
+    storyStateSynced: args.acceptanceDesk.storyStateSynced,
+    storylineStatusLabel: args.acceptanceDesk.storylineSync?.label || '',
+    actionKey: ready ? 'accept_chapter_and_continue' : args.acceptanceDesk.recommendedAcceptanceAction.key,
+    actionLabel: ready ? '进入下一章开写' : '先完成交稿',
   }
 }
 
@@ -1368,6 +2454,9 @@ export function buildWritingCockpitModel(input: BuildWritingCockpitModelInput): 
   const sorted = sortChapters(chapters)
   const writtenChapters = sorted.filter(hasProse)
   const latestWrittenChapterNo = Math.max(0, ...writtenChapters.map(chapter => Number(chapter?.chapter_no || 0)))
+  const chapterAfterNext = nextChapter
+    ? sorted.find(chapter => Number(chapter?.chapter_no || 0) > Number(nextChapter?.chapter_no || 0)) || null
+    : null
   const previousChapter = nextChapter
     ? [...writtenChapters].reverse().find(chapter => Number(chapter?.chapter_no || 0) < Number(nextChapter?.chapter_no || 0)) || null
     : writtenChapters[writtenChapters.length - 1] || null
@@ -1413,6 +2502,12 @@ export function buildWritingCockpitModel(input: BuildWritingCockpitModelInput): 
     reviews,
     storyState,
   })
+  const chapterHandoffDesk = buildChapterHandoffDesk({
+    fromChapter: nextChapter,
+    toChapter: chapterAfterNext,
+    acceptanceDesk: chapterAcceptanceDesk,
+    reviews,
+  })
   const fallbackPrimary = resolvePrimaryAction({
     writingBibleReady,
     hasChapter,
@@ -1442,6 +2537,7 @@ export function buildWritingCockpitModel(input: BuildWritingCockpitModelInput): 
     previousChapter: cockpitPreviousChapter,
     chapterPlanningDesk,
     chapterAcceptanceDesk,
+    chapterHandoffDesk,
     primaryActionKey: action,
     recommendedRole: role,
     readiness: {
@@ -1464,6 +2560,7 @@ export function buildWritingCockpitModel(input: BuildWritingCockpitModelInput): 
       })),
     },
     draftPipeline: pipelineState(nextChapter),
+    writingQueue: buildWritingQueue(chapters, outlines, nextChapter),
     canonUpdatePreview: [
       '同步最近已写章节的关键事实',
       '检查人物立场与伏笔状态',

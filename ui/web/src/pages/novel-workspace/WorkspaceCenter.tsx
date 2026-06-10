@@ -38,6 +38,7 @@ import {
   type NovelWritingRecommendedActionKey,
   type NovelWritingRecommendation,
 } from './writingRecommendationModel'
+import type { ChapterHandoffDeskModel, WritingQueueItem, WritingQueueModel } from './writingCockpitModel'
 import './WorkspaceCenter.css'
 
 const { Title, Text, Paragraph } = Typography
@@ -346,7 +347,12 @@ export function WorkspaceCenter({
   onGenerationWordTargetModeChange,
   onGenerationTargetWordCountChange,
   writingRecommendation,
+  writingQueue,
+  onSelectWritingQueueChapter,
+  onRepairWritingQueuePlan,
+  onRepairWritingQueuePlanBatch,
   chapterAcceptanceDesk,
+  chapterHandoffDesk,
   deliveryActionLoading,
   onDeliveryAction,
 }: {
@@ -396,7 +402,12 @@ export function WorkspaceCenter({
   onGenerationWordTargetModeChange?: (mode: ChapterWordTargetMode) => void
   onGenerationTargetWordCountChange?: (count: number) => void
   writingRecommendation?: NovelWritingRecommendation
+  writingQueue?: WritingQueueModel | null
+  onSelectWritingQueueChapter?: (chapterId: number) => void
+  onRepairWritingQueuePlan?: (item: WritingQueueItem) => void
+  onRepairWritingQueuePlanBatch?: (queue: WritingQueueModel) => void
   chapterAcceptanceDesk?: NovelDeliverySummaryInput | null
+  chapterHandoffDesk?: ChapterHandoffDeskModel | null
   deliveryActionLoading?: boolean
   onDeliveryAction?: (key: NovelDeliveryActionKey) => void
 }) {
@@ -430,6 +441,18 @@ export function WorkspaceCenter({
   })
   const aiResponsibility = buildNovelWritingResponsibility(recommendedAction)
   const deliverySummary = buildNovelDeliverySummary(chapterAcceptanceDesk)
+  const ipSceneIntakeTooltip = deliverySummary.ipSceneIntake?.candidates?.length ? (
+    <div className="novel-delivery-ip-scene-tooltip">
+      {deliverySummary.ipSceneIntake.candidates.slice(0, 3).map((candidate, index) => (
+        <div key={`${candidate.title}-${index}`} className="novel-delivery-ip-scene-tooltip-item">
+          <strong>{candidate.title}</strong>
+          {candidate.visualHook && <span>视觉钩子：{candidate.visualHook}</span>}
+          {candidate.adaptationValue && <span>改编价值：{candidate.adaptationValue}</span>}
+          {candidate.spreadPoint && <span>传播点：{candidate.spreadPoint}</span>}
+        </div>
+      ))}
+    </div>
+  ) : '本章已沉淀可传播、可视化或适合短剧/漫剧改编的强场面候选'
   const draftBriefSummary = buildNovelDraftBriefSummary({
     activeWordCount,
     chapterGoal: activeChapter?.chapter_goal || activeChapter?.chapter_summary,
@@ -494,6 +517,68 @@ export function WorkspaceCenter({
   const recommendedBadge = (phase: typeof recommendedAction.phase) => (
     phase === recommendedAction.phase ? <span className="novel-editor-recommended-badge">推荐下一步</span> : null
   )
+  const selectWritingQueueChapter = (chapterId: any) => {
+    const id = Number(chapterId || 0)
+    if (!id) return
+    onSelectWritingQueueChapter?.(id)
+  }
+  const currentQueueItem = writingQueue?.items.find(item => Number(item.chapterNo) === Number(writingQueue.currentChapterNo)) || null
+  const runDraftBriefAction = () => {
+    if (draftBriefSummary.actionKey === 'metadata') onEditActiveChapter()
+    if (draftBriefSummary.actionKey === 'scene_cards') onGenerateSceneCards()
+    if (draftBriefSummary.actionKey === 'build_brief') onBuildPreDraftBrief?.()
+    if (draftBriefSummary.actionKey === 'confirm_brief') onConfirmPreDraftBrief?.()
+    if (draftBriefSummary.actionKey === 'generate') onGenerateCurrentChapterProse()
+  }
+  const runQueueDeliveryAction = () => {
+    if (deliverySummary.actionKey) {
+      onDeliveryAction?.(deliverySummary.actionKey)
+      return
+    }
+    onOpenQualityCard()
+  }
+  const queueFocus = currentQueueItem
+    ? currentQueueItem.status === 'needs_plan'
+      ? {
+          tone: 'plan',
+          title: '本章计划缺口',
+          detail: `需要先补齐 ${currentQueueItem.missingPlanLabels.length > 0 ? currentQueueItem.missingPlanLabels.join('、') : '章节目标、核心冲突、章末钩子'}，再进入任务书、场景卡和正文生成。`,
+          actionLabel: '补齐本章计划',
+          disabled: false,
+          loading: false,
+          run: () => onRepairWritingQueuePlan?.(currentQueueItem),
+          tags: currentQueueItem.missingPlanLabels,
+        }
+      : currentQueueItem.status === 'ready_to_draft'
+        ? {
+            tone: 'draft',
+            title: '本章开写就绪',
+            detail: draftBriefSummary.actionLabel
+              ? `章节计划已具备，下一步处理 ${draftBriefSummary.actionLabel}，再进入正文生成。`
+              : '章节计划已具备，检查任务书、场景卡和字数目标后进入正文生成。',
+            actionLabel: '处理本章开写',
+            disabled: !draftBriefSummary.actionKey,
+            loading: draftBriefSummary.actionKey === 'scene_cards'
+              ? generatingSceneCards
+              : ['build_brief', 'confirm_brief'].includes(String(draftBriefSummary.actionKey || ''))
+                ? Boolean(preDraftBriefLoading)
+                : generatingProse,
+            run: runDraftBriefAction,
+            tags: [draftBriefSummary.statusLabel].filter(Boolean),
+          }
+        : {
+            tone: 'delivery',
+            title: '本章待质检',
+            detail: deliverySummary.visible
+              ? `${deliverySummary.statusLabel}：${deliverySummary.reason || '按交稿状态完成质检、修订、状态同步和验收。'}`
+              : '正文已生成，下一步进入交稿质检、编辑报告和故事状态同步。',
+            actionLabel: '处理交稿质检',
+            disabled: false,
+            loading: Boolean(deliveryActionLoading),
+            run: runQueueDeliveryAction,
+            tags: deliverySummary.visible ? [deliverySummary.qualityLabel, deliverySummary.storyStateLabel].filter(Boolean) : ['待质检'],
+          }
+    : null
 
   React.useEffect(() => {
     saveEditorDisplayPrefs(editorDisplayPrefs)
@@ -741,6 +826,91 @@ export function WorkspaceCenter({
             </div>
           </div>
 
+          {writingQueue?.visible && (
+            <div className="novel-writing-queue-strip" aria-label="写作队列，滚动规划章节会自动进入">
+              <div className="novel-writing-queue-head">
+                <span className="novel-writing-queue-label">写作队列</span>
+                <Tag bordered={false}>可写 {writingQueue.readyCount}</Tag>
+                {writingQueue.blockedCount > 0 && <Tag color="gold" bordered={false}>待补 {writingQueue.blockedCount}</Tag>}
+                {writingQueue.draftedCount > 0 && <Tag color="blue" bordered={false}>待质检 {writingQueue.draftedCount}</Tag>}
+                {writingQueue.planRepair?.visible && (
+                  <Tooltip title={`补齐 ${writingQueue.planRepair.chapterCount} 章计划缺口，共 ${writingQueue.planRepair.missingCount} 项`}>
+                    <Button
+                      size="small"
+                      className="novel-writing-queue-batch-action"
+                      icon={<ExperimentOutlined />}
+                      onClick={() => onRepairWritingQueuePlanBatch?.(writingQueue)}
+                    >
+                      补齐队列计划
+                    </Button>
+                  </Tooltip>
+                )}
+              </div>
+              <div className="novel-writing-queue-list">
+                {writingQueue.items.map(item => (
+                  <Tooltip
+                    key={`${item.id || item.chapterNo}-${item.status}`}
+                    title={[
+                      item.goal ? `目标：${item.goal}` : '目标待补齐',
+                      item.conflict ? `冲突：${item.conflict}` : '冲突待补齐',
+                      item.endingHook ? `钩子：${item.endingHook}` : '章末钩子待补齐',
+                      item.actionHint || '',
+                    ].join('；')}
+                  >
+                    <div
+                      className={[
+                        'novel-writing-queue-item',
+                        `novel-writing-queue-item-${item.status}`,
+                        Number(item.chapterNo) === Number(writingQueue.currentChapterNo) ? 'is-active' : '',
+                      ].filter(Boolean).join(' ')}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => selectWritingQueueChapter(item.id)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault()
+                          selectWritingQueueChapter(item.id)
+                        }
+                      }}
+                    >
+                      <span className="novel-writing-queue-no">第{item.chapterNo}章</span>
+                      <strong>{displayValue(item.title) || '未命名章节'}</strong>
+                      <span className="novel-writing-queue-source">{item.sourceLabel || '手动章节'}</span>
+                      <span className="novel-writing-queue-status">{item.statusLabel}</span>
+                      <span className="novel-writing-queue-action">{item.actionLabel}</span>
+                    </div>
+                  </Tooltip>
+                ))}
+              </div>
+              {queueFocus && currentQueueItem && (
+                <div className={`novel-writing-queue-focus novel-writing-queue-focus-${queueFocus.tone}`}>
+                  <div className="novel-writing-queue-focus-main">
+                    <span>{queueFocus.title}</span>
+                    <strong>第{currentQueueItem.chapterNo}章 · {currentQueueItem.title || '未命名章节'}</strong>
+                    <Text type="secondary">
+                      {queueFocus.detail}
+                    </Text>
+                  </div>
+                  <Space wrap size={6}>
+                    {queueFocus.tags.map(label => (
+                      <Tag key={label} color={queueFocus.tone === 'delivery' ? 'blue' : queueFocus.tone === 'draft' ? 'green' : 'gold'} bordered={false}>{label}</Tag>
+                    ))}
+                    <Button
+                      size="small"
+                      type="primary"
+                      className="novel-writing-queue-focus-action"
+                      loading={queueFocus.loading}
+                      disabled={queueFocus.disabled}
+                      onClick={queueFocus.run}
+                    >
+                      {queueFocus.actionLabel}
+                    </Button>
+                  </Space>
+                </div>
+              )}
+            </div>
+          )}
+
           {deliverySummary.visible && (
             <div className={`novel-delivery-status-strip novel-delivery-status-strip-${deliverySummary.tone}`}>
               <div className="novel-delivery-status-main">
@@ -748,6 +918,26 @@ export function WorkspaceCenter({
                 <Tag className="novel-delivery-status-tag" bordered={false}>{deliverySummary.statusLabel}</Tag>
                 <Tag bordered={false}>{deliverySummary.qualityLabel}</Tag>
                 <Tag bordered={false}>{deliverySummary.storyStateLabel}</Tag>
+                {deliverySummary.deliveryRiskQueue && (
+                  <Tooltip title={deliverySummary.deliveryRiskQueue.items.join('；')}>
+                    <Tag
+                      className="novel-delivery-risk-tag novel-delivery-risk-tag-warn"
+                      bordered={false}
+                    >
+                      {deliverySummary.deliveryRiskQueue.label} · {deliverySummary.deliveryRiskQueue.priorityLabel}
+                    </Tag>
+                  </Tooltip>
+                )}
+                {deliverySummary.deliveryRiskConvergence && (
+                  <Tooltip title={deliverySummary.deliveryRiskConvergence.nextAction || deliverySummary.deliveryRiskConvergence.label}>
+                    <Tag
+                      className={`novel-delivery-convergence-tag novel-delivery-convergence-tag-${deliverySummary.deliveryRiskConvergence.status}`}
+                      bordered={false}
+                    >
+                      {deliverySummary.deliveryRiskConvergence.label}
+                    </Tag>
+                  </Tooltip>
+                )}
                 {deliverySummary.storylineSync && (
                   <Tag
                     className={`novel-delivery-storyline-tag novel-delivery-storyline-tag-${deliverySummary.storylineSync.status}`}
@@ -755,6 +945,21 @@ export function WorkspaceCenter({
                   >
                     {deliverySummary.storylineSync.label}
                   </Tag>
+                )}
+                {deliverySummary.storyUnitSync && (
+                  <>
+                    <Tag
+                      className={`novel-delivery-story-unit-tag novel-delivery-story-unit-tag-${deliverySummary.storyUnitSync.status}`}
+                      bordered={false}
+                    >
+                      {deliverySummary.storyUnitSync.scoreLabel}
+                    </Tag>
+                    {deliverySummary.storyUnitSync.riskCount > 0 && (
+                      <Tag className="novel-delivery-story-unit-tag novel-delivery-story-unit-tag-warn" bordered={false}>
+                        {deliverySummary.storyUnitSync.label}
+                      </Tag>
+                    )}
+                  </>
                 )}
                 {deliverySummary.assetIntake && deliverySummary.assetIntake.pendingCount > 0 && (
                   <Tooltip title="打开设定资产页，确认正文中新出现的人物、物品、能力、势力、地点或伏笔">
@@ -775,6 +980,28 @@ export function WorkspaceCenter({
                     </Tag>
                   </Tooltip>
                 )}
+                {deliverySummary.ipSceneIntake && (
+                  <Tooltip title={ipSceneIntakeTooltip}>
+                    <Tag className="novel-delivery-ip-scene-tag" bordered={false}>
+                      {deliverySummary.ipSceneIntake.label}
+                    </Tag>
+                  </Tooltip>
+                )}
+                {deliverySummary.signatureSceneSync && (
+                  <>
+                    <Tag
+                      className={`novel-delivery-signature-scene-tag novel-delivery-signature-scene-tag-${deliverySummary.signatureSceneSync.status}`}
+                      bordered={false}
+                    >
+                      {deliverySummary.signatureSceneSync.scoreLabel}
+                    </Tag>
+                    {deliverySummary.signatureSceneSync.missedCount > 0 && (
+                      <Tag className="novel-delivery-signature-scene-tag novel-delivery-signature-scene-tag-warn" bordered={false}>
+                        {deliverySummary.signatureSceneSync.label}
+                      </Tag>
+                    )}
+                  </>
+                )}
                 {deliverySummary.coreDrift && (
                   <>
                     <Tag
@@ -790,7 +1017,37 @@ export function WorkspaceCenter({
                     )}
                   </>
                 )}
-                {deliverySummary.readerPayoffSync && (
+                {deliverySummary.runwaySync && (
+                  <>
+                    <Tag
+                      className={`novel-delivery-runway-tag novel-delivery-runway-tag-${deliverySummary.runwaySync.status}`}
+                      bordered={false}
+                    >
+                      {deliverySummary.runwaySync.scoreLabel}
+                    </Tag>
+                    {deliverySummary.runwaySync.riskCount > 0 && (
+                      <Tag className="novel-delivery-runway-tag novel-delivery-runway-tag-warn" bordered={false}>
+                        {deliverySummary.runwaySync.label}
+                      </Tag>
+                    )}
+                  </>
+                )}
+                {deliverySummary.readerExpectationSync && (
+                  <>
+                    <Tag
+                      className={`novel-delivery-expectation-tag novel-delivery-expectation-tag-${deliverySummary.readerExpectationSync.status}`}
+                      bordered={false}
+                    >
+                      {deliverySummary.readerExpectationSync.scoreLabel}
+                    </Tag>
+                    {deliverySummary.readerExpectationSync.missedCount > 0 && (
+                      <Tag className="novel-delivery-expectation-tag novel-delivery-expectation-tag-warn" bordered={false}>
+                        {deliverySummary.readerExpectationSync.label}
+                      </Tag>
+                    )}
+                  </>
+                )}
+                {!deliverySummary.readerExpectationSync && deliverySummary.readerPayoffSync && (
                   <>
                     <Tag
                       className={`novel-delivery-payoff-tag novel-delivery-payoff-tag-${deliverySummary.readerPayoffSync.status}`}
@@ -801,6 +1058,133 @@ export function WorkspaceCenter({
                     {deliverySummary.readerPayoffSync.debtCount > 0 && (
                       <Tag className="novel-delivery-payoff-tag novel-delivery-payoff-tag-warn" bordered={false}>
                         {deliverySummary.readerPayoffSync.label}
+                      </Tag>
+                    )}
+                  </>
+                )}
+                {!deliverySummary.readerExpectationSync && deliverySummary.readerRetentionSync && (
+                  <>
+                    <Tag
+                      className={`novel-delivery-retention-tag novel-delivery-retention-tag-${deliverySummary.readerRetentionSync.status}`}
+                      bordered={false}
+                    >
+                      {deliverySummary.readerRetentionSync.scoreLabel}
+                    </Tag>
+                    {deliverySummary.readerRetentionSync.missedCount > 0 && (
+                      <Tag className="novel-delivery-retention-tag novel-delivery-retention-tag-warn" bordered={false}>
+                        {deliverySummary.readerRetentionSync.label}
+                      </Tag>
+                    )}
+                  </>
+                )}
+                {deliverySummary.chapterAttraction && (
+                  <>
+                    <Tag
+                      className={`novel-delivery-attraction-tag novel-delivery-attraction-tag-${deliverySummary.chapterAttraction.status}`}
+                      bordered={false}
+                    >
+                      {deliverySummary.chapterAttraction.scoreLabel}
+                    </Tag>
+                    {deliverySummary.chapterAttraction.weakCount > 0 && (
+                      <Tag className="novel-delivery-attraction-tag novel-delivery-attraction-tag-warn" bordered={false}>
+                        {deliverySummary.chapterAttraction.priorityLabel || deliverySummary.chapterAttraction.label}
+                      </Tag>
+                    )}
+                  </>
+                )}
+                {deliverySummary.storyDriveSync && (
+                  <>
+                    <Tag
+                      className={`novel-delivery-story-drive-tag novel-delivery-story-drive-tag-${deliverySummary.storyDriveSync.status}`}
+                      bordered={false}
+                    >
+                      {deliverySummary.storyDriveSync.scoreLabel}
+                    </Tag>
+                    {deliverySummary.storyDriveSync.missedCount > 0 && (
+                      <Tag className="novel-delivery-story-drive-tag novel-delivery-story-drive-tag-warn" bordered={false}>
+                        {deliverySummary.storyDriveSync.priorityLabel || deliverySummary.storyDriveSync.label}
+                      </Tag>
+                    )}
+                  </>
+                )}
+                {deliverySummary.characterArcSync && (
+                  <>
+                    <Tag
+                      className={`novel-delivery-character-arc-tag novel-delivery-character-arc-tag-${deliverySummary.characterArcSync.status}`}
+                      bordered={false}
+                    >
+                      {deliverySummary.characterArcSync.scoreLabel}
+                    </Tag>
+                    {deliverySummary.characterArcSync.missedCount > 0 && (
+                      <Tag className="novel-delivery-character-arc-tag novel-delivery-character-arc-tag-warn" bordered={false}>
+                        {deliverySummary.characterArcSync.priorityLabel || deliverySummary.characterArcSync.label}
+                      </Tag>
+                    )}
+                  </>
+                )}
+                {deliverySummary.chapterBenchmarkSync && (
+                  <>
+                    <Tag
+                      className={`novel-delivery-benchmark-tag novel-delivery-benchmark-tag-${deliverySummary.chapterBenchmarkSync.status}`}
+                      bordered={false}
+                    >
+                      {deliverySummary.chapterBenchmarkSync.scoreLabel}
+                    </Tag>
+                    {deliverySummary.chapterBenchmarkSync.missedCount > 0 && (
+                      <Tag className="novel-delivery-benchmark-tag novel-delivery-benchmark-tag-warn" bordered={false}>
+                        {deliverySummary.chapterBenchmarkSync.label}
+                      </Tag>
+                    )}
+                  </>
+                )}
+                {deliverySummary.styleSampleSync && (
+                  <>
+                    <Tag
+                      className={`novel-delivery-style-sample-tag novel-delivery-style-sample-tag-${deliverySummary.styleSampleSync.status}`}
+                      bordered={false}
+                    >
+                      {deliverySummary.styleSampleSync.scoreLabel}
+                    </Tag>
+                    {(deliverySummary.styleSampleSync.missedCount > 0 || deliverySummary.styleSampleSync.copyRiskCount > 0) && (
+                      <Tag className="novel-delivery-style-sample-tag novel-delivery-style-sample-tag-warn" bordered={false}>
+                        {deliverySummary.styleSampleSync.copyRiskCount > 0 ? `照搬风险 ${deliverySummary.styleSampleSync.copyRiskCount}` : deliverySummary.styleSampleSync.label}
+                      </Tag>
+                    )}
+                  </>
+                )}
+                {deliverySummary.first30RetentionRecheck && (
+                  <Tooltip title={deliverySummary.first30RetentionRecheck.reason}>
+                    <Tag className="novel-delivery-first30-tag" bordered={false}>
+                      {deliverySummary.first30RetentionRecheck.label}
+                    </Tag>
+                  </Tooltip>
+                )}
+                {deliverySummary.innovationSync && (
+                  <>
+                    <Tag
+                      className={`novel-delivery-innovation-tag novel-delivery-innovation-tag-${deliverySummary.innovationSync.status}`}
+                      bordered={false}
+                    >
+                      {deliverySummary.innovationSync.scoreLabel}
+                    </Tag>
+                    {deliverySummary.innovationSync.missedCount > 0 && (
+                      <Tag className="novel-delivery-innovation-tag novel-delivery-innovation-tag-warn" bordered={false}>
+                        {deliverySummary.innovationSync.label}
+                      </Tag>
+                    )}
+                  </>
+                )}
+                {deliverySummary.volumeBeatSync && (
+                  <>
+                    <Tag
+                      className={`novel-delivery-volume-beat-tag novel-delivery-volume-beat-tag-${deliverySummary.volumeBeatSync.status}`}
+                      bordered={false}
+                    >
+                      {deliverySummary.volumeBeatSync.scoreLabel}
+                    </Tag>
+                    {deliverySummary.volumeBeatSync.missedCount > 0 && (
+                      <Tag className="novel-delivery-volume-beat-tag novel-delivery-volume-beat-tag-warn" bordered={false}>
+                        {deliverySummary.volumeBeatSync.label}
                       </Tag>
                     )}
                   </>
@@ -837,6 +1221,53 @@ export function WorkspaceCenter({
             </div>
           )}
 
+          {chapterHandoffDesk?.visible && (
+            <div className={`novel-chapter-handoff-strip novel-chapter-handoff-strip-${chapterHandoffDesk.status}`}>
+              <div className="novel-chapter-handoff-main">
+                <div className="novel-chapter-handoff-head">
+                  <span className="novel-chapter-handoff-label">章节交接单</span>
+                  <Tag className="novel-chapter-handoff-status" bordered={false}>{chapterHandoffDesk.label}</Tag>
+                  <Text className="novel-chapter-handoff-route">
+                    第{chapterHandoffDesk.fromChapterNo || '-'}章 → 第{chapterHandoffDesk.toChapterNo || '-'}章
+                  </Text>
+                  {chapterHandoffDesk.storylineStatusLabel && (
+                    <Tag bordered={false}>{chapterHandoffDesk.storylineStatusLabel}</Tag>
+                  )}
+                  <Tag bordered={false}>{chapterHandoffDesk.storyStateSynced ? '状态已同步' : '状态待同步'}</Tag>
+                </div>
+                <div className="novel-chapter-handoff-grid">
+                  <Tooltip title={chapterHandoffDesk.previousEnding || '无明确章末钩子'}>
+                    <div>
+                      <span>上一章钩子</span>
+                      <strong>{chapterHandoffDesk.previousEnding || '无明确章末钩子'}</strong>
+                    </div>
+                  </Tooltip>
+                  <Tooltip title={chapterHandoffDesk.expectationCarryOver.join('；') || '无期待欠账'}>
+                    <div>
+                      <span>期待承接</span>
+                      <strong>{chapterHandoffDesk.expectationCarryOver.join('；') || '无期待欠账'}</strong>
+                    </div>
+                  </Tooltip>
+                  <Tooltip title={chapterHandoffDesk.nextOpeningObligations.join('；') || '承接上一章最后一幕'}>
+                    <div>
+                      <span>下一章开场</span>
+                      <strong>{chapterHandoffDesk.nextOpeningObligations.join('；') || '承接上一章最后一幕'}</strong>
+                    </div>
+                  </Tooltip>
+                </div>
+              </div>
+              <Button
+                className="novel-chapter-handoff-action"
+                type={chapterHandoffDesk.status === 'ready' ? 'primary' : 'default'}
+                size="small"
+                loading={deliveryActionLoading && chapterHandoffDesk.status !== 'ready'}
+                onClick={() => onDeliveryAction?.(chapterHandoffDesk.actionKey)}
+              >
+                {chapterHandoffDesk.actionLabel}
+              </Button>
+            </div>
+          )}
+
           {draftBriefSummary.visible && (
             <div className="novel-draft-brief-strip">
               <div className="novel-draft-brief-main">
@@ -859,6 +1290,90 @@ export function WorkspaceCenter({
                   <div><span>字数目标</span><strong>{draftBriefSummary.briefFields.wordBudget || `${generationTargetWordCount} 字`}</strong></div>
                   <div><span>章末钩子</span><strong>{draftBriefSummary.briefFields.endingHook || '待补齐'}</strong></div>
                 </div>
+                <div className="novel-draft-brief-retention">
+                  <span>追读雷达</span>
+                  <strong>开篇钩子：{draftBriefSummary.briefFields.retentionOpeningHook || '前300字要有抓手'}</strong>
+                  <strong>爽点承诺：{draftBriefSummary.briefFields.retentionPayoffPromise || draftBriefSummary.briefFields.readerPromise || '明确本章回报'}</strong>
+                  <strong>信息缺口：{draftBriefSummary.briefFields.retentionInformationGap || '保留待解问题'}</strong>
+                  <strong>短剧场面：{draftBriefSummary.briefFields.retentionShortDramaScene || '需要可视化冲突场面'}</strong>
+                  <strong>章末追读：{draftBriefSummary.briefFields.retentionEndingQuestion || draftBriefSummary.briefFields.endingHook || '压到最后一幕'}</strong>
+                </div>
+                {(draftBriefSummary.briefFields.longformBattleSummary || draftBriefSummary.briefFields.longformBattleRisks || draftBriefSummary.briefFields.longformBattleLaneRequirements) && (
+                  <div className="novel-draft-brief-battle">
+                    <span>长篇作战承接</span>
+                    <strong>状态：{draftBriefSummary.briefFields.longformBattleStatus || '待承接'}</strong>
+                    <strong>风险线：{draftBriefSummary.briefFields.longformBattleRisks || draftBriefSummary.briefFields.longformBattleSummary || '无明确风险'}</strong>
+                    <strong>今日优先：{draftBriefSummary.briefFields.longformBattlePrimaryAction || '按风险线补正文动作'}</strong>
+                    <strong>写作动作：{draftBriefSummary.briefFields.longformBattleLaneRequirements || '保持核心、追读和剧情线不偏移'}</strong>
+                  </div>
+                )}
+                {(draftBriefSummary.briefFields.longformMemoryCorePromise || draftBriefSummary.briefFields.longformMemoryCharacters || draftBriefSummary.briefFields.longformMemoryQuestions || draftBriefSummary.briefFields.longformMemoryPayoffDebts) && (
+                  <div className="novel-draft-brief-memory-capsule">
+                    <span>长篇记忆胶囊</span>
+                    <strong>同步：{draftBriefSummary.briefFields.longformMemoryStatus || '待同步'}</strong>
+                    <strong>核心承诺：{draftBriefSummary.briefFields.longformMemoryCorePromise || '按写作圣经执行'}</strong>
+                    <strong>主线进度：{draftBriefSummary.briefFields.longformMemoryMainline || '按当前章任务推进'}</strong>
+                    <strong>角色状态：{draftBriefSummary.briefFields.longformMemoryCharacters || '无明确状态'}</strong>
+                    <strong>开放悬念：{draftBriefSummary.briefFields.longformMemoryQuestions || '无'}</strong>
+                    <strong>待兑现：{draftBriefSummary.briefFields.longformMemoryPayoffDebts || '无'}</strong>
+                    <strong>正史事实：{draftBriefSummary.briefFields.longformMemoryCanonFacts || '无'}</strong>
+                    <strong>红线：{draftBriefSummary.briefFields.longformMemoryRedLines || '不得偏离核心承诺'}</strong>
+                  </div>
+                )}
+                {(draftBriefSummary.briefFields.handoffPreviousEnding || draftBriefSummary.briefFields.handoffOpeningObligation || draftBriefSummary.briefFields.handoffMustCarry || draftBriefSummary.briefFields.handoffKeepAlive) && (
+                  <div className="novel-draft-brief-handoff">
+                    <span>上一章承接</span>
+                    <strong>最后一幕：{draftBriefSummary.briefFields.handoffPreviousEnding || '承接上一章章末钩子'}</strong>
+                    <strong>开篇义务：{draftBriefSummary.briefFields.handoffOpeningObligation || '开篇接住上一章悬念'}</strong>
+                    <strong>必须推进：{draftBriefSummary.briefFields.handoffMustCarry || '无跨章欠账'}</strong>
+                    <strong>继续悬念：{draftBriefSummary.briefFields.handoffKeepAlive || '无跨章悬念'}</strong>
+                  </div>
+                )}
+                {(draftBriefSummary.briefFields.expectationMustDeliver || draftBriefSummary.briefFields.expectationKeepAlive) && (
+                  <div className="novel-draft-brief-expectations">
+                    <span>读者期待账本</span>
+                    <strong>必须兑现：{draftBriefSummary.briefFields.expectationMustDeliver || '承接本章读者承诺'}</strong>
+                    <strong>保持悬念：{draftBriefSummary.briefFields.expectationKeepAlive || '无明确长期悬念'}</strong>
+                    <strong>禁止破坏：{draftBriefSummary.briefFields.expectationMustNotBreak || '不得只铺设定不兑现期待'}</strong>
+                  </div>
+                )}
+                {(draftBriefSummary.briefFields.expectationDebtMustCarry || draftBriefSummary.briefFields.expectationDebtKeepAlive || draftBriefSummary.briefFields.expectationDebtOverdue || draftBriefSummary.briefFields.expectationCarryOver) && (
+                  <div className="novel-draft-brief-expectation-debt">
+                    <span>期待债务承接</span>
+                    {draftBriefSummary.briefFields.expectationDebtOverdue && (
+                      <strong>逾期优先：{draftBriefSummary.briefFields.expectationDebtOverdue}</strong>
+                    )}
+                    <strong>待兑现：{draftBriefSummary.briefFields.expectationDebtMustCarry || draftBriefSummary.briefFields.expectationCarryOver || '无跨章欠账'}</strong>
+                    <strong>继续悬念：{draftBriefSummary.briefFields.expectationDebtKeepAlive || '无跨章悬念'}</strong>
+                    {draftBriefSummary.briefFields.expectationDebtSummary && (
+                      <strong>债务概览：{draftBriefSummary.briefFields.expectationDebtSummary}</strong>
+                    )}
+                  </div>
+                )}
+                {(draftBriefSummary.briefFields.first30RetentionSegment || draftBriefSummary.briefFields.first30RetentionFlags) && (
+                  <div className="novel-draft-brief-first30">
+                    <span>前30章留存修复</span>
+                    <strong>{draftBriefSummary.briefFields.first30RetentionSegment || '当前章'}</strong>
+                    <strong>风险：{draftBriefSummary.briefFields.first30RetentionFlags || draftBriefSummary.briefFields.first30RetentionFocus || '无明确风险'}</strong>
+                    <strong>动作：{draftBriefSummary.briefFields.first30RetentionActions || '按追读雷达补强'}</strong>
+                  </div>
+                )}
+                <div className="novel-draft-brief-innovation">
+                  <span>创新执行</span>
+                  <strong>创新角度：{draftBriefSummary.briefFields.innovationAngle || '承接长篇作品罗盘'}</strong>
+                  <strong>执行点：{draftBriefSummary.briefFields.innovationExecution || '用本章动作/规则/反差落地'}</strong>
+                  <strong>差异护栏：{draftBriefSummary.briefFields.innovationGuardrails || '不得写成普通套路章'}</strong>
+                  <strong>IP化场面：{draftBriefSummary.briefFields.innovationIpHooks || draftBriefSummary.briefFields.retentionShortDramaScene || '保留可视化场面'}</strong>
+                </div>
+                {(draftBriefSummary.briefFields.signatureScene || draftBriefSummary.briefFields.signatureSceneTarget) && (
+                  <div className="novel-draft-brief-signature-scene">
+                    <span>强场面补位</span>
+                    <strong>标志性场面：{draftBriefSummary.briefFields.signatureScene || '本章必须补一个可记忆画面'}</strong>
+                    <strong>补位目标：{draftBriefSummary.briefFields.signatureSceneTarget || '修复强场面覆盖缺口'}</strong>
+                    <strong>爽点回报：{draftBriefSummary.briefFields.signatureScenePayoff || '落成可见读者回报'}</strong>
+                    <strong>服务主线：{draftBriefSummary.briefFields.signatureSceneStoryline || '服务当前主线推进'}</strong>
+                  </div>
+                )}
                 <div className="novel-draft-brief-storylines">
                   <span>剧情线推进</span>
                   <strong>必推：{draftBriefSummary.briefFields.storylineAdvances || '无'}</strong>
@@ -866,6 +1381,29 @@ export function WorkspaceCenter({
                   <strong>回收：{draftBriefSummary.briefFields.storylinePayoffs || '无'}</strong>
                   <strong>禁用：{draftBriefSummary.briefFields.storylineForbidden || '无'}</strong>
                 </div>
+                {(draftBriefSummary.briefFields.characterArcDesire || draftBriefSummary.briefFields.characterArcGrowthBeat || draftBriefSummary.briefFields.characterArcRelationshipShift) && (
+                  <div className="novel-draft-brief-character-arc">
+                    <span>人物成长承接</span>
+                    <strong>人物线：{draftBriefSummary.briefFields.characterArcNames || '本章角色/关系线'}</strong>
+                    <strong>角色欲望：{draftBriefSummary.briefFields.characterArcDesire || '用欲望驱动行动'}</strong>
+                    <strong>缺陷受压：{draftBriefSummary.briefFields.characterArcFlawPressure || '让旧习惯被冲突逼出反应'}</strong>
+                    <strong>成长节点：{draftBriefSummary.briefFields.characterArcGrowthBeat || '写成选择或行动变化'}</strong>
+                    <strong>关系变化：{draftBriefSummary.briefFields.characterArcRelationshipShift || '写成对话、试探、站队或亏欠'}</strong>
+                    <strong>口吻锚点：{draftBriefSummary.briefFields.characterArcVoiceAnchor || '保持角色说话和行动方式差异'}</strong>
+                    <strong>禁揭：{draftBriefSummary.briefFields.characterArcForbiddenReveal || '不得提前写穿后续关系/成长结果'}</strong>
+                  </div>
+                )}
+                {(draftBriefSummary.briefFields.storyUnitRange || draftBriefSummary.briefFields.storyUnitRole || draftBriefSummary.briefFields.storyUnitGoal) && (
+                  <div className="novel-draft-brief-story-unit">
+                    <span>剧情单元任务</span>
+                    <strong>{draftBriefSummary.briefFields.storyUnitRange || '当前剧情单元'}</strong>
+                    <strong>当前职责：{draftBriefSummary.briefFields.storyUnitRole || '承接本章任务书'}</strong>
+                    <strong>单元目标：{draftBriefSummary.briefFields.storyUnitGoal || '推进当前事件包'}</strong>
+                    <strong>小高潮：{draftBriefSummary.briefFields.storyUnitPayoff || '后续章节兑现，不在本章抢跑'}</strong>
+                    <strong>出单元钩子：{draftBriefSummary.briefFields.storyUnitExitHook || '保留追读问题'}</strong>
+                    <strong>禁抢跑：{draftBriefSummary.briefFields.storyUnitForbidden || '不得提前消费后段爆点'}</strong>
+                  </div>
+                )}
                 {(draftBriefSummary.briefFields.batchGoal || draftBriefSummary.briefFields.batchCurrentRole) && (
                   <div className="novel-draft-brief-batch">
                     <span>本批连载任务</span>
@@ -881,6 +1419,22 @@ export function WorkspaceCenter({
                   <strong>功能：{draftBriefSummary.briefFields.memeFunctions || '无'}</strong>
                   <strong>禁用：{draftBriefSummary.briefFields.memeForbidden || '严肃场景不玩梗'}</strong>
                 </div>
+                {(draftBriefSummary.briefFields.styleSampleKeys || draftBriefSummary.briefFields.styleSampleUsage) && (
+                  <div className="novel-draft-brief-style-samples">
+                    <span>本章风格样章</span>
+                    <strong>样章：{draftBriefSummary.briefFields.styleSampleKeys || '未指定'}</strong>
+                    <strong>学习：{draftBriefSummary.briefFields.styleSampleUsage || '只学习节奏与句式'}</strong>
+                    <strong>禁抄：{draftBriefSummary.briefFields.styleSampleForbidden || '原句不能照搬'}</strong>
+                  </div>
+                )}
+                {(draftBriefSummary.briefFields.chapterBenchmarkKeys || draftBriefSummary.briefFields.chapterBenchmarkUsage) && (
+                  <div className="novel-draft-brief-benchmark-samples">
+                    <span>本章质量基准</span>
+                    <strong>样例：{draftBriefSummary.briefFields.chapterBenchmarkKeys || '未指定'}</strong>
+                    <strong>学习：{draftBriefSummary.briefFields.chapterBenchmarkUsage || '只学习章节结构与追读节拍'}</strong>
+                    <strong>禁抄：{draftBriefSummary.briefFields.chapterBenchmarkForbidden || '不得复制桥段、角色名、设定和原句'}</strong>
+                  </div>
+                )}
               </div>
               {draftBriefSummary.actionKey && (
                 <Button
@@ -894,13 +1448,7 @@ export function WorkspaceCenter({
                         ? Boolean(preDraftBriefLoading)
                         : generatingProse
                   }
-                  onClick={() => {
-                    if (draftBriefSummary.actionKey === 'metadata') onEditActiveChapter()
-                    if (draftBriefSummary.actionKey === 'scene_cards') onGenerateSceneCards()
-                    if (draftBriefSummary.actionKey === 'build_brief') onBuildPreDraftBrief?.()
-                    if (draftBriefSummary.actionKey === 'confirm_brief') onConfirmPreDraftBrief?.()
-                    if (draftBriefSummary.actionKey === 'generate') onGenerateCurrentChapterProse()
-                  }}
+                  onClick={runDraftBriefAction}
                 >
                   {draftBriefSummary.actionLabel}
                 </Button>

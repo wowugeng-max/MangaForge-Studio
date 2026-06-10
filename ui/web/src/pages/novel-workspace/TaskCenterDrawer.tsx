@@ -104,9 +104,16 @@ function parseJsonValue(value: any) {
 
 function repairTaskActionLabel(task: any) {
   if (String(task?.issue_type || '') === 'batch_brief_mismatch') return '按批次修订'
+  if (String(task?.source || '') === 'reader_trial_review' || String(task?.issue_type || '') === 'reader_trial_drop_point') return '补试读'
+  if (String(task?.issue_type || '') === 'volume_segment_missed') return '补阶段结算'
+  if (String(task?.issue_type || '') === 'reader_pull_missed') return '补追读'
+  if (String(task?.issue_type || '') === 'innovation_execution_missed') return '补创新'
+  if (String(task?.source || '') === 'rolling_script_room' || String(task?.issue_type || '') === 'script_room_layer_gap') return '按剧本室修复'
+  if (String(task?.source || '') === 'review_annotation_risk') return '按风险修订'
   const map: Record<string, string> = {
     repair_skeleton: '补骨架',
     repair_materials: '补材料',
+    repair_assets: '确认资产',
     repair_quality: '重质检',
     repair_similarity: '降相似风险',
     resolve_failure: '处理失败',
@@ -114,9 +121,59 @@ function repairTaskActionLabel(task: any) {
   return map[String(task?.task_type || '')] || ''
 }
 
+function deliveryRiskIssueMeta(task: any) {
+  if (String(task?.source || '') !== 'review_annotation_risk') return null
+  const issueType = String(task?.issue_type || '')
+  const category = String(task?.annotation_category || '')
+  const key = `${issueType} ${category}`
+  if (key.includes('core_drift') || key.includes('delivery_core')) return { label: '核心偏移', color: 'red' }
+  if (key.includes('retention')) return { label: '追读', color: 'orange' }
+  if (key.includes('payoff')) return { label: '回报欠账', color: 'magenta' }
+  if (key.includes('volume_beat')) return { label: '爆点', color: 'gold' }
+  if (key.includes('innovation')) return { label: '创新', color: 'geekblue' }
+  if (key.includes('signature_scene') || key.includes('强场面')) return { label: '强场面', color: 'volcano' }
+  if (key.includes('storyline')) return { label: '剧情线', color: 'purple' }
+  if (key.includes('story_drive') || key.includes('故事力')) return { label: '故事力', color: 'blue' }
+  if (key.includes('character_arc') || key.includes('人物弧光')) return { label: '人物弧光', color: 'pink' }
+  if (key.includes('style_sample') || key.includes('风格')) return { label: '风格', color: 'purple' }
+  if (key.includes('readability') || key.includes('meme')) return { label: '可读性', color: 'cyan' }
+  return { label: '交稿风险', color: 'volcano' }
+}
+
 function repairTaskIssueTag(task: any) {
   if (String(task?.issue_type || '') === 'batch_brief_mismatch') return <Tag color="purple" bordered={false}>批次计划</Tag>
+  if (String(task?.source || '') === 'reader_trial_review' || String(task?.issue_type || '') === 'reader_trial_drop_point') return <Tag color="red" bordered={false}>读者试读</Tag>
+  if (String(task?.issue_type || '') === 'volume_segment_missed') return <Tag color="gold" bordered={false}>卷级阶段</Tag>
+  if (String(task?.issue_type || '') === 'reader_pull_missed') return <Tag color="magenta" bordered={false}>读者拉力</Tag>
+  if (String(task?.issue_type || '') === 'innovation_execution_missed') return <Tag color="geekblue" bordered={false}>创新/IP</Tag>
+  if (String(task?.source || '') === 'rolling_script_room' || String(task?.issue_type || '') === 'script_room_layer_gap') return <Tag color="blue" bordered={false}>剧本室</Tag>
+  const meta = deliveryRiskIssueMeta(task)
+  if (meta) return <Tag color={meta.color} bordered={false}>{meta.label}</Tag>
   return null
+}
+
+function compactEvidenceText(value: any) {
+  if (!value) return ''
+  if (typeof value !== 'object') return String(value)
+  return String(value.name || value.label || value.title || value.text || value.description || value.reason || value.message || '').trim()
+}
+
+function deliveryRiskEvidenceLines(task: any) {
+  if (String(task?.source || '') !== 'review_annotation_risk') return []
+  const payload = task.payload && typeof task.payload === 'object' ? task.payload : {}
+  const rows = [
+    ['漏推', payload.missed],
+    ['额外推进', payload.unplanned],
+    ['禁揭', payload.forbidden_touched || payload.forbiddenTouched],
+    ['核心', payload.drift_risks || payload.risks],
+    ['出戏', payload.meme_sense?.immersion_risks || payload.immersion_risks || payload.issues],
+  ]
+  return rows
+    .flatMap(([label, value]: any[]) => Array.isArray(value)
+      ? value.slice(0, 2).map(item => `${label}：${compactEvidenceText(item)}`)
+      : [])
+    .filter(Boolean)
+    .slice(0, 4)
 }
 
 function BatchPlanReviewPreview({ task }: { task: any }) {
@@ -138,6 +195,21 @@ function BatchPlanReviewPreview({ task }: { task: any }) {
             实际风险：{actualRisks.slice(0, 2).join('；')}
           </Text>
         )}
+      </Space>
+    </div>
+  )
+}
+
+function DeliveryRiskReviewPreview({ task }: { task: any }) {
+  const evidence = deliveryRiskEvidenceLines(task)
+  if (!evidence.length) return null
+  return (
+    <div style={{ marginTop: 4, padding: 8, border: '1px solid #fee2e2', borderRadius: 6, background: '#fff7ed' }}>
+      <Space direction="vertical" size={4} style={{ width: '100%' }}>
+        <Text strong style={{ fontSize: 12 }}>风险证据</Text>
+        {evidence.map(item => (
+          <Text key={item} type="secondary" style={{ fontSize: 12 }}>{item}</Text>
+        ))}
       </Space>
     </div>
   )
@@ -300,8 +372,9 @@ function RepairTaskRunSummary({
   run: any
   onSelectChapter?: (chapterId: number) => void
   onOpenChapterEditor?: (chapterId: number) => void
-  onStartRepairTaskRevision?: (task: any, run: any) => void
+  onStartRepairTaskRevision?: (task: any, run: any, taskIndex: number) => void
   onExecuteTypedRepairTask?: (task: any, run: any, taskIndex: number) => void
+  onRecheckRepairTask?: (task: any, run: any, taskIndex: number) => void
   onUpdateRepairTaskStatus?: (task: any, run: any, status: string, taskIndex: number) => void
   onBulkUpdateRepairTaskStatus?: (items: any[], status: string) => void
   onGenerateRepairAuditSummary?: (run: any) => void
@@ -316,7 +389,15 @@ function RepairTaskRunSummary({
   const title = run.run_type === 'first30_retention_repair'
     ? '前30章留存修复任务'
     : run.run_type === 'longform_production_repair'
-      ? output.report?.source === 'auto_creation_safe_batch_risk' ? '安全连写风险修复任务' : '长线生产修复任务'
+      ? output.report?.source === 'auto_creation_safe_batch_risk'
+        ? '安全连写风险修复任务'
+        : output.report?.source === 'review_annotation_risk'
+          ? '交稿风险修复任务'
+          : output.report?.source === 'rolling_script_room'
+            ? '百章剧本室修复任务'
+            : output.report?.source === 'reader_trial_review'
+              ? '读者试读修复任务'
+              : '长线生产修复任务'
       : '机械质检修复任务'
   return (
     <Card size="small" title={title}>
@@ -378,7 +459,7 @@ function RepairTaskRunSummary({
                 onUpdateRepairTaskStatus && task.task_status !== 'needs_review' ? <Button key="review" size="small" type="link" onClick={() => onUpdateRepairTaskStatus(task, run, 'needs_review', taskIndex)}>需复查</Button> : null,
                 task.chapter_id && onSelectChapter ? <Button key="select" size="small" type="link" onClick={() => onSelectChapter(Number(task.chapter_id))}>定位</Button> : null,
                 task.chapter_id && onOpenChapterEditor ? <Button key="edit" size="small" type="link" onClick={() => onOpenChapterEditor(Number(task.chapter_id))}>手动编辑</Button> : null,
-                task.chapter_id && onStartRepairTaskRevision ? <Button key="revise" size="small" type="link" onClick={() => onStartRepairTaskRevision(task, run)}>生成修订稿</Button> : null,
+                task.chapter_id && onStartRepairTaskRevision ? <Button key="revise" size="small" type="link" onClick={() => onStartRepairTaskRevision(task, run, taskIndex)}>生成修订稿</Button> : null,
               ].filter(Boolean)}
             >
               <List.Item.Meta
@@ -399,6 +480,7 @@ function RepairTaskRunSummary({
                       <Text type="secondary" style={{ fontSize: 12 }}>验收：{task.acceptance_criteria.slice(0, 2).join('；')}</Text>
                     )}
                     <BatchPlanReviewPreview task={task} />
+                    <DeliveryRiskReviewPreview task={task} />
                   </Space>
                 )}
               />
@@ -584,6 +666,7 @@ export function TaskCenterDrawer({
   onOpenChapterEditor,
   onStartRepairTaskRevision,
   onExecuteTypedRepairTask,
+  onRecheckRepairTask,
   onUpdateRepairTaskStatus,
   onBulkUpdateRepairTaskStatus,
   onGenerateRepairAuditSummary,
@@ -613,8 +696,9 @@ export function TaskCenterDrawer({
   onSkipChapterGroup?: (run: any, chapter: any) => void
   onSelectChapter?: (chapterId: number) => void
   onOpenChapterEditor?: (chapterId: number) => void
-  onStartRepairTaskRevision?: (task: any, run: any) => void
+  onStartRepairTaskRevision?: (task: any, run: any, taskIndex: number) => void
   onExecuteTypedRepairTask?: (task: any, run: any, taskIndex: number) => void
+  onRecheckRepairTask?: (task: any, run: any, taskIndex: number) => void
   onUpdateRepairTaskStatus?: (task: any, run: any, status: string, taskIndex: number) => void
   onBulkUpdateRepairTaskStatus?: (items: any[], status: string) => void
   onGenerateRepairAuditSummary?: (run: any) => void
@@ -772,6 +856,7 @@ export function TaskCenterDrawer({
                   <List.Item
                     actions={[
                       item.task?.chapter_id && onSelectChapter ? <Button key="select" size="small" type="link" onClick={() => onSelectChapter(Number(item.task.chapter_id))}>定位</Button> : null,
+                      item.task?.chapter_id && onRecheckRepairTask ? <Button key="recheck" size="small" type="link" onClick={() => onRecheckRepairTask(item.task, item.run, item.taskIndex)}>复检收敛</Button> : null,
                       onUpdateRepairTaskStatus ? <Button key="resolve" size="small" type="link" onClick={() => onUpdateRepairTaskStatus(item.task, item.run, 'resolved', item.taskIndex)}>确认通过</Button> : null,
                     ].filter(Boolean)}
                   >
@@ -924,9 +1009,9 @@ export function TaskCenterDrawer({
                   setDetailRun(null)
                   onOpenChapterEditor?.(chapterId)
                 }}
-                onStartRepairTaskRevision={(task, run) => {
+                onStartRepairTaskRevision={(task, run, taskIndex) => {
                   setDetailRun(null)
-                  onStartRepairTaskRevision?.(task, run)
+                  onStartRepairTaskRevision?.(task, run, taskIndex)
                 }}
                 onExecuteTypedRepairTask={(task, run, taskIndex) => {
                   setDetailRun(null)
@@ -953,9 +1038,9 @@ export function TaskCenterDrawer({
                   setDetailRun(null)
                   onOpenChapterEditor?.(chapterId)
                 }}
-                onStartRepairTaskRevision={(task, run) => {
+                onStartRepairTaskRevision={(task, run, taskIndex) => {
                   setDetailRun(null)
-                  onStartRepairTaskRevision?.(task, run)
+                  onStartRepairTaskRevision?.(task, run, taskIndex)
                 }}
                 onExecuteTypedRepairTask={(task, run, taskIndex) => {
                   setDetailRun(null)

@@ -7,6 +7,46 @@ const project = {
   reference_config: {
     writing_bible: {
       promise: '寒门少年以阵法改写宗门秩序',
+      protagonist_drive: '李玄要拿回试炼资格，证明残阵不是废物',
+      core_conflict: '底层阵修对抗宗门旧秩序的资源封锁',
+      world_hook: '残阵缺口牵出宗门旧案和阵道真相',
+      innovation_hook: '用残缺阵法反制完整规则，每次破局都有代价',
+      payoff_loop: '压迫升级、残阵反制、公开打脸、旧案线索回收',
+      ending_direction: '李玄重写宗门阵道秩序',
+      immutable_rules: ['主角不能脱离阵法成长线', '宗门秩序压迫不能突然消失'],
+      flexible_zones: ['支线人物可增减，但必须服务阵法秩序主线'],
+      longform_milestones: [
+        {
+          label: '30万字外门翻身',
+          target_words: 300000,
+          target_chapter: 100,
+          theme: '外门压迫线阶段兑现',
+          protagonist_state: '李玄从藏拙杂役变成被内门注意的阵修',
+          world_expansion: '外门、试炼、执事体系完整展开',
+          conflict_escalation: '执事压迫升级为内门派系关注',
+          reader_payoff: '第一次公开打脸并拿到内门资格',
+        },
+        {
+          label: '100万字宗门旧案',
+          target_words: 1000000,
+          target_chapter: 330,
+          theme: '宗门旧案进入核心主线',
+          protagonist_state: '李玄从被动求生转为主动查案',
+          world_expansion: '内门、执法堂、旧案势力展开',
+          conflict_escalation: '个人压迫升级为宗门秩序清算',
+          reader_payoff: '残阵来历第一次大回收',
+        },
+        {
+          label: '300万字阵道改制',
+          target_words: 3000000,
+          target_chapter: 1000,
+          theme: '重写宗门阵道秩序',
+          protagonist_state: '李玄成为能制定新阵道规则的人',
+          world_expansion: '宗门之外的阵道世界打开',
+          conflict_escalation: '宗门旧秩序背后的上层势力登场',
+          reader_payoff: '完成全书第一阶段终局兑现',
+        },
+      ],
       volumes: [
         {
           title: '宗门试炼',
@@ -100,6 +140,59 @@ const storylineSettings = [
   },
 ]
 
+const characterArcSettings = [
+  {
+    id: 301,
+    entity_type: 'character_arc',
+    name: '李玄藏拙到公开争取',
+    summary: '李玄从害怕暴露阵盘裂纹，转向主动承认缺陷并争取试炼资格。',
+    first_chapter_no: 1,
+    last_chapter_no: 30,
+    constraints_json: {
+      advance_rule: '每个试炼节点都要给李玄一次选择压力。',
+      taboo: '不得让主角只靠旁白成长。',
+    },
+    state_json: {
+      current_state: '仍在藏拙，但已经被执事逼到边缘。',
+      last_advanced_chapter: 4,
+      next_advance_chapter: 6,
+      payoff_status: 'building',
+    },
+    payload_json: {
+      priority: 'high',
+      related_characters: ['李玄'],
+      desire: '保住试炼资格并证明阵图属于自己',
+      flaw_pressure: '害怕暴露阵盘裂纹，只想继续藏拙',
+      growth_target: '第一次主动承认残阵缺陷，把藏拙改成公开争取',
+      voice_anchor: '克制、冷静，但遇到阵法归属寸步不让',
+    },
+  },
+  {
+    id: 302,
+    entity_type: 'relationship_arc',
+    name: '李玄与林青禾互信线',
+    summary: '林青禾从旁观者转为愿意替李玄作证。',
+    first_chapter_no: 3,
+    last_chapter_no: 24,
+    constraints_json: {
+      advance_rule: '关系推进必须来自共同承担风险，不得靠解释性旁白。',
+      forbidden_reveal: '不得提前写成完全信任。',
+    },
+    state_json: {
+      current_state: '林青禾仍在观察李玄。',
+      last_advanced_chapter: 3,
+      next_advance_chapter: 7,
+      payoff_status: 'building',
+    },
+    payload_json: {
+      priority: 'medium',
+      related_characters: ['李玄', '林青禾'],
+      relationship_shift: '林青禾从旁观转为愿意替他作证',
+      expected_payoff: '试炼前夜第一次公开站队',
+    },
+  },
+]
+
 function first30Review(overrides: Record<string, any> = {}) {
   const report = {
     score: 76,
@@ -173,6 +266,247 @@ function readerPayoffReview(overrides: Record<string, any> = {}) {
   }
 }
 
+function storylineSyncReview(overrides: Record<string, any> = {}) {
+  const report = {
+    status: 'warn',
+    planned: [
+      { entity_id: 201, name: '外门压迫主线', entity_type: 'mainline', usage_type: 'advance', expected_state_change: { summary: '第7章应让执事压迫升级。' } },
+      { entity_id: 202, name: '残缺阵盘伏笔', entity_type: 'foreshadowing_arc', usage_type: 'plant', expected_state_change: { summary: '第7章只露一枚残缺阵纹。' } },
+    ],
+    actual: [
+      { entity_id: 202, name: '残缺阵盘伏笔', entity_type: 'foreshadowing_arc', actual_state_change: { summary: '正文写出阵盘缺口发热，指向宗门旧案。' } },
+    ],
+    completed: [
+      { entity_id: 202, name: '残缺阵盘伏笔', entity_type: 'foreshadowing_arc', actual_state_change: { summary: '正文写出阵盘缺口发热。' } },
+    ],
+    missed: [
+      { entity_id: 201, name: '外门压迫主线', entity_type: 'mainline', usage_type: 'advance', expected_state_change: { summary: '没有写出执事压迫升级。' } },
+    ],
+    unplanned: [],
+    forbidden_touched: [],
+    ...overrides.report,
+  }
+  return {
+    id: overrides.id || 303,
+    review_type: 'storyline_sync',
+    status: overrides.status || 'warn',
+    summary: overrides.summary || '剧情线复盘：漏推 1',
+    created_at: overrides.created_at || '2026-06-04T10:08:00.000Z',
+    payload: JSON.stringify({ chapter_id: 7, chapter_no: 7, storyline_sync: report }),
+    ...overrides.record,
+  }
+}
+
+function characterArcSyncReview(overrides: Record<string, any> = {}) {
+  const report = {
+    status: 'warn',
+    score: 58,
+    label: '人物弧光缺口 3',
+    missed_count: 3,
+    priority_repair: '优先补成长节点',
+    character_name: '李玄',
+    missed: [
+      { key: 'desire', label: '角色欲望', text: '李玄想保住试炼资格并证明阵图属于自己' },
+      { key: 'flaw_pressure', label: '缺陷受压', text: '害怕暴露阵盘裂纹，只想继续藏拙' },
+      { key: 'growth_beat', label: '成长节点', text: '第一次主动承认残阵缺陷' },
+    ],
+    ...overrides.report,
+  }
+  return {
+    id: overrides.id || 304,
+    review_type: 'character_arc_sync',
+    status: overrides.status || 'warn',
+    summary: overrides.summary || report.label,
+    created_at: overrides.created_at || '2026-06-04T10:10:00.000Z',
+    payload: JSON.stringify({ chapter_id: 7, chapter_no: 7, character_arc_sync: report }),
+    ...overrides.record,
+  }
+}
+
+function readerExpectationReview(overrides: Record<string, any> = {}) {
+  const report = {
+    status: 'warn',
+    score: 58,
+    label: '期待欠账 2',
+    planned_count: 4,
+    delivered_count: 2,
+    missed_count: 2,
+    missed: [
+      { text: '李玄必须当场反压赵执事的羞辱。' },
+      { text: '章末要留下试炼资格被动手脚的问题。' },
+    ],
+    keep_alive: [
+      { text: '残缺阵盘为何会响应宗门旧案。' },
+    ],
+    next_actions: ['下一次修订优先补足 missed 中的读者期待。'],
+    ...overrides.report,
+  }
+  return {
+    id: overrides.id || 306,
+    review_type: 'reader_expectation_sync',
+    status: overrides.status || 'warn',
+    summary: overrides.summary || report.label,
+    created_at: overrides.created_at || '2026-06-04T10:18:00.000Z',
+    payload: JSON.stringify({ chapter_id: 7, chapter_no: 7, reader_expectation_sync: report }),
+    ...overrides.record,
+  }
+}
+
+function readerRetentionReview(overrides: Record<string, any> = {}) {
+  const report = {
+    status: 'warn',
+    score: 64,
+    label: '追读漏项 1',
+    missed_count: 1,
+    missed: [
+      { label: '章末追读问题', text: '试炼资格被动手脚的问题没有压到章末。' },
+    ],
+    ...overrides.report,
+  }
+  return {
+    id: overrides.id || 307,
+    review_type: 'reader_retention_sync',
+    status: overrides.status || 'warn',
+    summary: overrides.summary || report.label,
+    created_at: overrides.created_at || '2026-06-04T10:20:00.000Z',
+    payload: JSON.stringify({ chapter_id: 7, chapter_no: 7, reader_retention_sync: report }),
+    ...overrides.record,
+  }
+}
+
+function innovationReview(overrides: Record<string, any> = {}) {
+  const report = {
+    status: 'warn',
+    score: 57,
+    label: '创新缺口 3',
+    planned_count: 5,
+    delivered_count: 2,
+    missed_count: 3,
+    planned: [
+      { key: 'chapter_angle', label: '创新角度', text: '规则边界反噬' },
+      { key: 'execution_point_1', label: '执行点', text: '用饼干碎屑验证门槛清除规则' },
+      { key: 'differentiation_guardrail_1', label: '差异护栏', text: '不得写成普通开挂碾压' },
+      { key: 'ip_adaptation_hook_1', label: 'IP化场面', text: '玻璃门内外对峙' },
+    ],
+    missed: [
+      { key: 'chapter_angle', label: '创新角度', text: '规则边界反噬' },
+      { key: 'differentiation_guardrail_1', label: '差异护栏', text: '不得写成普通开挂碾压' },
+      { key: 'ip_adaptation_hook_1', label: 'IP化场面', text: '玻璃门内外对峙' },
+    ],
+    next_actions: ['把创新角度转成可见选择、机制反差、规则代价或 IP 化场面。'],
+    ...overrides.report,
+  }
+  return {
+    id: overrides.id || 308,
+    review_type: 'innovation_sync',
+    status: overrides.status || 'warn',
+    summary: overrides.summary || report.label,
+    created_at: overrides.created_at || '2026-06-04T10:22:00.000Z',
+    payload: JSON.stringify({ chapter_id: 7, chapter_no: 7, innovation_sync: report }),
+    ...overrides.record,
+  }
+}
+
+function ipSceneIntakeReview(overrides: Record<string, any> = {}) {
+  const chapterNo = overrides.chapter_no || overrides.chapterNo || 2
+  const candidates = overrides.candidates || [
+    {
+      title: '玻璃门内外对峙',
+      visual_hook: '黑暗贴着玻璃爬动，门槛白线像判定边界。',
+      adaptation_value: '适合短剧第一集结尾。',
+      spread_point: '救不救门外学生的评论区争议。',
+    },
+  ]
+  return {
+    id: overrides.id || 309,
+    review_type: 'ip_scene_intake',
+    status: overrides.status || 'ok',
+    summary: overrides.summary || `沉淀 ${candidates.length} 个 IP 场面候选。`,
+    created_at: overrides.created_at || '2026-06-04T10:24:00.000Z',
+    payload: JSON.stringify({
+      chapter_id: chapterNo,
+      chapter_no: chapterNo,
+      ip_scene_candidates: candidates,
+      ...overrides.payload,
+    }),
+    ...overrides.record,
+  }
+}
+
+function readabilityReview(overrides: Record<string, any> = {}) {
+  const report = {
+    readability_score: 72,
+    meme_sense: {
+      intensity: '轻度',
+      immersion_risks: ['死亡高压场景插入吐槽，削弱恐怖感。'],
+    },
+    issues: [{ severity: 'medium', description: '连续说明偏密。' }],
+    ...overrides.report,
+  }
+  return {
+    id: overrides.id || 304,
+    review_type: 'readability_review',
+    status: overrides.status || 'warn',
+    summary: overrides.summary || '可读性 72，出戏风险 1',
+    created_at: overrides.created_at || '2026-06-04T10:12:00.000Z',
+    payload: JSON.stringify({ chapter_id: 7, chapter_no: 7, readability_review: report }),
+    ...overrides.record,
+  }
+}
+
+function readerTrialReview(overrides: Record<string, any> = {}) {
+  const report = {
+    status: 'needs_repair',
+    score: 74,
+    summary: '试读读者仍会追，但第4-10章存在弃读点。',
+    quality_bar: 'qidian_10k_reader_trial_baseline',
+    personas: [
+      { key: 'payoff_reader', label: '爽点读者', verdict: '阵法反击有爽点，但回报密度不稳。', risk_level: 'medium' },
+      { key: 'plot_reader', label: '剧情党', verdict: '主线压力清晰。', risk_level: 'low' },
+      { key: 'setting_reader', label: '设定党', verdict: '阵法机制可看，但解释偏少。', risk_level: 'medium' },
+      { key: 'trial_reader', label: '平台试读用户', verdict: '前三章能点下一章，第七章钩子弱。', risk_level: 'high' },
+    ],
+    segments: [
+      { key: '1-3', label: '开篇三章', score: 82, verdict: '开篇可读。' },
+      { key: '1-10', label: '试读十章', score: 68, verdict: '第4-10章需要补强。' },
+      { key: 'recent10', label: '最近十章', score: 73, verdict: '近期节奏略疲劳。' },
+    ],
+    drop_points: ['第7章章末钩子弱，试读用户可能弃读。'],
+    pull_points: ['寒门阵法反压强权的承诺清晰。'],
+    repair_actions: ['重做第7章章末未解决问题。'],
+    ...overrides.report,
+  }
+  return {
+    id: overrides.id || 309,
+    review_type: 'reader_trial_review',
+    status: overrides.status || 'warn',
+    summary: overrides.summary || `读者试读复盘：${report.score} 分`,
+    created_at: overrides.created_at || '2026-06-04T10:24:00.000Z',
+    payload: JSON.stringify({ report }),
+    ...overrides.record,
+  }
+}
+
+function assetIntakeReview(overrides: Record<string, any> = {}) {
+  const report = {
+    discovered_assets: [
+      { type: 'character', name: '灰袍监考', summary: '试炼场临时出现的监考者。' },
+      { type: 'item', name: '裂纹玉牌', summary: '触发旧案伏笔的道具。' },
+    ],
+    applied_asset_names: [],
+    ...overrides.report,
+  }
+  return {
+    id: overrides.id || 305,
+    review_type: 'asset_intake',
+    status: overrides.status || 'warn',
+    summary: overrides.summary || '发现 2 个新资产待确认。',
+    created_at: overrides.created_at || '2026-06-04T10:15:00.000Z',
+    payload: JSON.stringify({ chapter_id: 7, chapter_no: 7, asset_intake: report }),
+    ...overrides.record,
+  }
+}
+
 describe('buildPlanningWorkspaceModel', () => {
   test('derives strategic top status and mainline panel from existing project data', () => {
     const model = buildPlanningWorkspaceModel({
@@ -196,6 +530,196 @@ describe('buildPlanningWorkspaceModel', () => {
     expect(model.mainline.currentStageConflict).toBe('执事逼主角交出阵盘')
     expect(model.first30Retention.status).toBe('missing')
     expect(model.first30Retention.actionKey).toBe('run_first30_retention')
+  })
+
+  test('builds a longform spine guard from writing bible and latest creation diagnosis compass', () => {
+    const model = buildPlanningWorkspaceModel({
+      selectedProject: {
+        ...project,
+        reference_config: {
+          ...project.reference_config,
+          writing_bible: {
+            ...project.reference_config.writing_bible,
+            protagonist_drive: '李玄要证明残阵不是废物，也证明自己不是外门弃子',
+            core_conflict: '底层阵修对抗宗门旧秩序的资源封锁',
+            world_hook: '阵法缺口会暴露宗门旧案',
+            innovation_hook: '每次阵法破局都必须付出可见代价',
+            payoff_loop: '压迫升级、阵法反制、公开打脸、旧案线索',
+            ending_direction: '李玄重写宗门阵道秩序',
+            immutable_rules: ['主角不能脱离阵法成长线', '宗门秩序压迫不能突然消失'],
+            flexible_zones: ['支线人物可增减，但必须服务阵法秩序主线'],
+          },
+        },
+      },
+      outlines,
+      chapters,
+      activeChapter: chapters[6],
+      reviews: [
+        {
+          id: 91,
+          review_type: 'longform_creation_diagnosis',
+          created_at: '2026-06-05T10:00:00.000Z',
+          payload: JSON.stringify({
+            report: {
+              compass: {
+                reader_promise: '寒门阵修靠残阵反压宗门秩序',
+                protagonist_drive: '夺回试炼资格并查清残阵来历',
+                core_conflict: '残阵规则与宗门等级压迫持续碰撞',
+                world_hook: '每块残阵都对应一段被掩埋的宗门旧史',
+                innovation_hook: '破阵不是开挂，而是用缺陷换机会',
+                payoff_loop: '发现缺陷、反用规则、争夺资格、回收旧史',
+                ending_direction: '主角建立新的阵道规则',
+                immutable_rules: ['残阵缺陷必须持续带来代价', '宗门压迫线不能中途变成普通升级流'],
+                flexible_zones: ['副本地点可以换，但必须显影阵道旧史'],
+              },
+            },
+          }),
+        },
+      ],
+    })
+
+    expect(model.longformSpineGuard.status).toBe('ready')
+    expect(model.longformSpineGuard.sourceLabel).toBe('来自长篇创作诊断')
+    expect(model.longformSpineGuard.readerPromise).toBe('寒门阵修靠残阵反压宗门秩序')
+    expect(model.longformSpineGuard.axes.map(item => item.key)).toEqual([
+      'reader_promise',
+      'protagonist_drive',
+      'core_conflict',
+      'world_hook',
+      'innovation_hook',
+      'payoff_loop',
+      'ending_direction',
+    ])
+    expect(model.longformSpineGuard.axes.find(item => item.key === 'innovation_hook')?.value).toContain('用缺陷换机会')
+    expect(model.longformSpineGuard.immutableRules).toContain('残阵缺陷必须持续带来代价')
+    expect(model.longformSpineGuard.flexibleZones).toContain('副本地点可以换，但必须显影阵道旧史')
+    expect(model.longformSpineGuard.actionKey).toBe('longform_creation_diagnosis')
+  })
+
+  test('marks longform spine guard blocked when core axes are missing', () => {
+    const model = buildPlanningWorkspaceModel({
+      selectedProject: {
+        ...project,
+        reference_config: {
+          ...project.reference_config,
+          writing_bible: {},
+        },
+      },
+      outlines,
+      chapters,
+      activeChapter: chapters[6],
+    })
+
+    expect(model.longformSpineGuard.status).toBe('blocked')
+    expect(model.longformSpineGuard.missingAxes).toContain('核心卖点')
+    expect(model.longformSpineGuard.missingAxes).toContain('核心矛盾')
+    expect(model.longformSpineGuard.actionKey).toBe('open_story_assets')
+  })
+
+  test('uses longform spine gaps to block the story core lane before automatic writing', () => {
+    const model = buildPlanningWorkspaceModel({
+      selectedProject: {
+        ...project,
+        reference_config: {
+          ...project.reference_config,
+          writing_bible: {
+            promise: '寒门少年以阵法反压宗门秩序',
+            protagonist_drive: '争夺试炼资格',
+            payoff_loop: '阵法反制与公开打脸',
+          },
+        },
+      },
+      outlines,
+      chapters,
+      activeChapter: chapters[6],
+    })
+
+    const coreLane = model.longformBattleDesk.lanes.find(item => item.key === 'story_core')
+    expect(model.longformSpineGuard.status).toBe('blocked')
+    expect(coreLane?.status).toBe('block')
+    expect(coreLane?.detail).toContain('全书主轴缺')
+    expect(model.longformBattleDesk.primaryAction.key).toBe('open_story_assets')
+  })
+
+  test('builds a million-word milestone map from the writing bible', () => {
+    const model = buildPlanningWorkspaceModel({
+      selectedProject: project,
+      outlines,
+      chapters,
+      activeChapter: chapters[6],
+    })
+
+    expect(model.millionWordMilestones.status).toBe('ready')
+    expect(model.millionWordMilestones.sourceLabel).toBe('来自写作圣经')
+    expect(model.millionWordMilestones.total).toBe(3)
+    expect(model.millionWordMilestones.currentMilestone?.label).toBe('30万字外门翻身')
+    expect(model.millionWordMilestones.nextMilestone?.targetWords).toBe(300000)
+    expect(model.millionWordMilestones.milestones.map(item => item.key)).toEqual([
+      'milestone-300000',
+      'milestone-1000000',
+      'milestone-3000000',
+    ])
+    expect(model.millionWordMilestones.milestones[0].theme).toContain('外门压迫线')
+    expect(model.millionWordMilestones.milestones[0].riskTags).toEqual([])
+  })
+
+  test('builds a longform memory capsule from story state for canon recall', () => {
+    const model = buildPlanningWorkspaceModel({
+      selectedProject: {
+        ...project,
+        reference_config: {
+          ...project.reference_config,
+          story_state: {
+            ...project.reference_config.story_state,
+            character_states: [
+              '李玄：仍在藏拙，但已经被执事逼到试炼边缘',
+              { name: '林青禾', state: '仍在观察李玄，尚未公开站队', chapter_no: 5 },
+            ],
+            open_questions: ['残阵缺口为什么会回应旧案禁制'],
+            payoff_debts: ['试炼资格被夺后的公开打脸回报'],
+            canon_facts: ['残阵缺口不能被普通阵图修复'],
+          },
+        },
+      },
+      outlines,
+      chapters,
+      activeChapter: chapters[6],
+    })
+
+    expect(model.longformMemoryCapsule.status).toBe('ready')
+    expect(model.longformMemoryCapsule.lastUpdatedChapter).toBe(7)
+    expect(model.longformMemoryCapsule.corePromise).toContain('寒门少年')
+    expect(model.longformMemoryCapsule.mainlineProgress).toContain('试炼前夜')
+    expect(model.longformMemoryCapsule.characterStates.join('｜')).toContain('李玄')
+    expect(model.longformMemoryCapsule.characterStates.join('｜')).toContain('林青禾')
+    expect(model.longformMemoryCapsule.openQuestions).toContain('残阵缺口为什么会回应旧案禁制')
+    expect(model.longformMemoryCapsule.payoffDebts).toContain('试炼资格被夺后的公开打脸回报')
+    expect(model.longformMemoryCapsule.canonFacts).toContain('残阵缺口不能被普通阵图修复')
+    expect(model.longformMemoryCapsule.redLines).toContain('主角不能脱离阵法成长线')
+  })
+
+  test('blocks production fuel when an epic target lacks million-word milestones', () => {
+    const model = buildPlanningWorkspaceModel({
+      selectedProject: {
+        ...project,
+        reference_config: {
+          ...project.reference_config,
+          writing_bible: {
+            ...project.reference_config.writing_bible,
+            longform_milestones: [],
+          },
+        },
+      },
+      outlines,
+      chapters,
+      activeChapter: chapters[6],
+    })
+
+    const fuelLane = model.longformBattleDesk.lanes.find(item => item.key === 'production_fuel')
+    expect(model.millionWordMilestones.status).toBe('blocked')
+    expect(model.millionWordMilestones.summary).toContain('缺少百万字里程碑')
+    expect(fuelLane?.status).toBe('block')
+    expect(fuelLane?.detail).toContain('百万字里程碑')
   })
 
   test('parses latest first30 retention diagnosis review into planning model', () => {
@@ -251,6 +775,62 @@ describe('buildPlanningWorkspaceModel', () => {
     expect(foreshadowing?.forbiddenReveal).toContain('第18章前')
   })
 
+  test('adds storyline sync evidence to board items for plan versus actual review', () => {
+    const model = buildPlanningWorkspaceModel({
+      selectedProject: project,
+      outlines,
+      chapters,
+      activeChapter: chapters[6],
+      settingEntities: storylineSettings,
+      reviews: [first30Review(), storylineSyncReview()],
+    })
+
+    const mainline = model.storylineBoard.groups.find(group => group.key === 'mainline')?.items[0]
+    expect(mainline?.planEvidence[0].summary).toContain('执事压迫升级')
+    expect(mainline?.syncRisks).toContain('第7章漏推')
+    expect(mainline?.latestSyncChapter).toBe(7)
+
+    const foreshadowing = model.storylineBoard.groups.find(group => group.key === 'foreshadowing_arc')?.items[0]
+    expect(foreshadowing?.actualEvidence[0].summary).toContain('阵盘缺口发热')
+    expect(foreshadowing?.planEvidence[0].usageType).toBe('plant')
+    expect(foreshadowing?.latestSyncChapter).toBe(7)
+  })
+
+  test('builds character growth board from character arcs, relationship arcs and arc sync risks', () => {
+    const model = buildPlanningWorkspaceModel({
+      selectedProject: project,
+      outlines,
+      chapters,
+      activeChapter: chapters[6],
+      settingEntities: [...storylineSettings, ...characterArcSettings],
+      reviews: [characterArcSyncReview()],
+    })
+
+    expect(model.characterArcBoard.status).toBe('needs_attention')
+    expect(model.characterArcBoard.total).toBe(2)
+    expect(model.characterArcBoard.growthGapCount).toBe(3)
+    expect(model.characterArcBoard.overdueCount).toBe(1)
+    expect(model.characterArcBoard.relationshipRiskCount).toBe(1)
+    expect(model.characterArcBoard.summary).toContain('人物弧光缺口 3')
+    expect(model.characterArcBoard.actionKey).toBe('open_quality_revision')
+
+    const protagonistArc = model.characterArcBoard.arcs.find(item => item.name === '李玄藏拙到公开争取')
+    expect(protagonistArc?.typeLabel).toBe('角色线')
+    expect(protagonistArc?.riskTags).toContain('成长断档')
+    expect(protagonistArc?.riskTags).toContain('弧光缺口')
+    expect(protagonistArc?.desire).toContain('试炼资格')
+    expect(protagonistArc?.flawPressure).toContain('藏拙')
+    expect(protagonistArc?.growthTarget).toContain('公开争取')
+    expect(protagonistArc?.latestEvidence[0]).toContain('成长节点')
+    expect(protagonistArc?.actionChapterNo).toBe(6)
+
+    const relationshipArc = model.characterArcBoard.arcs.find(item => item.name === '李玄与林青禾互信线')
+    expect(relationshipArc?.typeLabel).toBe('关系线')
+    expect(relationshipArc?.riskTags).toContain('关系待推进')
+    expect(relationshipArc?.relationshipShift).toContain('替他作证')
+    expect(relationshipArc?.forbiddenReveal).toContain('完全信任')
+  })
+
   test('summarizes longform rhythm risks from core drift, payoff debt and storyline debt', () => {
     const model = buildPlanningWorkspaceModel({
       selectedProject: project,
@@ -271,6 +851,199 @@ describe('buildPlanningWorkspaceModel', () => {
     expect(model.longformRhythm.nextActions).toContain('先处理核心偏移、回报欠账和剧情线债务，再连续生成下一批章节。')
   })
 
+  test('builds a longform battle desk for daily serial decisions', () => {
+    const model = buildPlanningWorkspaceModel({
+      selectedProject: project,
+      outlines,
+      chapters,
+      activeChapter: chapters[6],
+      settingEntities: storylineSettings,
+      reviews: [first30Review(), coreDriftReview(), readerPayoffReview(), storylineSyncReview(), innovationReview()],
+    })
+
+    expect(model.longformBattleDesk.status).toBe('needs_action')
+    expect(model.longformBattleDesk.label).toContain('长篇作战')
+    expect(model.longformBattleDesk.primaryAction.key).toBe('open_quality_revision')
+    expect(model.longformBattleDesk.primaryAction.label).toBe('进入质检修订')
+    expect(model.longformBattleDesk.lanes.map(item => item.key)).toEqual([
+      'story_core',
+      'reader_pull',
+      'storyline',
+      'volume_beat',
+      'innovation_ip',
+      'production_fuel',
+    ])
+    expect(model.longformBattleDesk.lanes.find(item => item.key === 'story_core')?.detail).toContain('核心偏移')
+    expect(model.longformBattleDesk.lanes.find(item => item.key === 'reader_pull')?.detail).toContain('前30章')
+    expect(model.longformBattleDesk.lanes.find(item => item.key === 'storyline')?.detail).toContain('漏推')
+    expect(model.longformBattleDesk.lanes.find(item => item.key === 'innovation_ip')?.detail).toContain('创新缺口')
+    expect(model.longformBattleDesk.riskChips).toEqual(expect.arrayContaining(['核心偏移', '前30章留存', '剧情线漏推', '创新缺口']))
+  })
+
+  test('builds a reader trust ledger from expectation, payoff and retention reviews', () => {
+    const model = buildPlanningWorkspaceModel({
+      selectedProject: project,
+      outlines,
+      chapters,
+      activeChapter: chapters[6],
+      reviews: [readerExpectationReview(), readerPayoffReview(), readerRetentionReview()],
+    })
+
+    expect(model.readerTrustLedger.status).toBe('needs_attention')
+    expect(model.readerTrustLedger.score).toBe(58)
+    expect(model.readerTrustLedger.summary).toContain('期待欠账 2')
+    expect(model.readerTrustLedger.expectationDebtCount).toBe(2)
+    expect(model.readerTrustLedger.payoffDebtCount).toBe(2)
+    expect(model.readerTrustLedger.retentionMissedCount).toBe(1)
+    expect(model.readerTrustLedger.keepAliveCount).toBe(1)
+    expect(model.readerTrustLedger.actionKey).toBe('open_quality_revision')
+    expect(model.readerTrustLedger.signals.map(item => item.key)).toEqual(['expectation', 'payoff', 'retention', 'keep_alive'])
+    expect(model.readerTrustLedger.signals.find(item => item.key === 'keep_alive')?.detail).toContain('残缺阵盘')
+  })
+
+  test('builds an innovation radar from latest innovation sync review', () => {
+    const model = buildPlanningWorkspaceModel({
+      selectedProject: project,
+      outlines,
+      chapters,
+      activeChapter: chapters[6],
+      reviews: [innovationReview()],
+    })
+
+    expect(model.innovationRadar.status).toBe('needs_attention')
+    expect(model.innovationRadar.score).toBe(57)
+    expect(model.innovationRadar.summary).toContain('创新缺口 3')
+    expect(model.innovationRadar.missedCount).toBe(3)
+    expect(model.innovationRadar.actionKey).toBe('open_quality_revision')
+    expect(model.innovationRadar.signals.map(item => item.key)).toEqual(['chapter_angle', 'execution', 'differentiation', 'ip_adaptation'])
+    expect(model.innovationRadar.signals.find(item => item.key === 'chapter_angle')?.detail).toContain('规则边界反噬')
+    expect(model.innovationRadar.signals.find(item => item.key === 'ip_adaptation')?.detail).toContain('玻璃门')
+  })
+
+  test('builds a reader trial room from latest reader trial review', () => {
+    const model = buildPlanningWorkspaceModel({
+      selectedProject: project,
+      outlines,
+      chapters,
+      activeChapter: chapters[6],
+      reviews: [readerTrialReview()],
+    })
+
+    expect(model.readerTrialRoom.status).toBe('needs_repair')
+    expect(model.readerTrialRoom.score).toBe(74)
+    expect(model.readerTrialRoom.summary).toContain('试读读者')
+    expect(model.readerTrialRoom.qualityBar).toBe('起点1万均订试读基准')
+    expect(model.readerTrialRoom.actionKey).toBe('create_reader_trial_repair')
+    expect(model.readerTrialRoom.personas.map(item => item.key)).toEqual(['payoff_reader', 'plot_reader', 'setting_reader', 'trial_reader'])
+    expect(model.readerTrialRoom.dropPoints[0]).toContain('第7章')
+    expect(model.readerTrialRoom.repairActions[0]).toContain('章末')
+    expect(model.governanceHub.checkpoints.map(item => item.key)).toContain('reader_trial')
+  })
+
+  test('builds a serial governance hub from delivery, storyline, retention, readability and asset risks', () => {
+    const model = buildPlanningWorkspaceModel({
+      selectedProject: project,
+      outlines,
+      chapters,
+      activeChapter: chapters[6],
+      settingEntities: storylineSettings,
+      reviews: [
+        first30Review(),
+        coreDriftReview(),
+        readerPayoffReview(),
+        storylineSyncReview(),
+        readabilityReview(),
+        assetIntakeReview(),
+      ],
+    })
+
+    expect(model.governanceHub.status).toBe('needs_action')
+    expect(model.governanceHub.primaryAction.key).toBe('create_delivery_risk_repair')
+    expect(model.governanceHub.primaryAction.label).toBe('生成风险修复任务')
+    expect(model.governanceHub.summary).toContain('交稿风险')
+    expect(model.governanceHub.checkpoints.map(item => item.key)).toEqual([
+      'delivery_risk',
+      'first30_retention',
+      'reader_trial',
+      'storyline',
+      'asset_intake',
+      'longform_material',
+    ])
+    expect(model.governanceHub.checkpoints.find(item => item.key === 'delivery_risk')?.count).toBeGreaterThanOrEqual(4)
+    expect(model.governanceHub.checkpoints.find(item => item.key === 'asset_intake')?.detail).toContain('2 个新资产')
+  })
+
+  test('routes serial governance to task center when delivery repair tasks already exist', () => {
+    const model = buildPlanningWorkspaceModel({
+      selectedProject: project,
+      outlines,
+      chapters,
+      activeChapter: chapters[6],
+      settingEntities: storylineSettings,
+      reviews: [
+        first30Review(),
+        coreDriftReview(),
+        storylineSyncReview(),
+        readabilityReview(),
+      ],
+      productionTasks: {
+        tasks: [
+          {
+            id: 901,
+            run_type: 'longform_production_repair',
+            status: 'success',
+            payload: {
+              source: 'review_annotation_risk',
+              tasks: [
+                { source: 'review_annotation_risk', task_status: 'pending', title: '补核心偏移' },
+                { source: 'review_annotation_risk', task_status: 'needs_review', title: '复查剧情线修复' },
+                { source: 'review_annotation_risk', task_status: 'resolved', title: '已解决风险' },
+              ],
+            },
+          },
+        ],
+      },
+    })
+
+    expect(model.governanceHub.primaryAction.key).toBe('open_task_center')
+    expect(model.governanceHub.primaryAction.label).toBe('打开任务中心')
+    expect(model.governanceHub.primaryAction.reason).toContain('2 个交稿风险修复任务')
+    expect(model.governanceHub.checkpoints.find(item => item.key === 'delivery_risk')?.detail).toContain('已有 2 个')
+  })
+
+  test('routes serial governance to task center while production tasks are active', () => {
+    const model = buildPlanningWorkspaceModel({
+      selectedProject: project,
+      outlines,
+      chapters,
+      activeChapter: chapters[6],
+      settingEntities: storylineSettings,
+      reviews: [first30Review()],
+      productionTasks: {
+        active: [
+          {
+            id: 700,
+            run_type: 'generate_prose',
+            type_label: '正文生成',
+            step_name: 'chapter-8',
+            status: 'running',
+          },
+        ],
+        summary: {
+          active: 1,
+          running: 1,
+          paused: 0,
+          needs_approval: 0,
+        },
+      },
+    })
+
+    expect(model.governanceHub.primaryAction.key).toBe('open_task_center')
+    expect(model.governanceHub.primaryAction.label).toBe('打开任务中心')
+    expect(model.governanceHub.primaryAction.reason).toContain('1 个后台任务')
+    expect(model.governanceHub.summary).toContain('后台任务')
+  })
+
   test('builds current volume climax and payoff budget from outlines and chapter plans', () => {
     const model = buildPlanningWorkspaceModel({
       selectedProject: project,
@@ -287,6 +1060,147 @@ describe('buildPlanningWorkspaceModel', () => {
     expect(model.volumeBeatBudget.payoffCount).toBeGreaterThanOrEqual(10)
     expect(model.volumeBeatBudget.beats.map(item => item.label)).toContain('试炼前夜转折')
     expect(model.volumeBeatBudget.nextActions).toContain('补齐当前卷的小高潮、中高潮和卷末爆点，再进入批量连写。')
+  })
+
+  test('builds a volume segment acceptance gate from delivery, payoff and innovation evidence', () => {
+    const model = buildPlanningWorkspaceModel({
+      selectedProject: project,
+      outlines,
+      chapters,
+      activeChapter: chapters[6],
+      reviews: [
+        readerExpectationReview(),
+        readerPayoffReview(),
+        readerRetentionReview(),
+        innovationReview(),
+        coreDriftReview(),
+        storylineSyncReview(),
+      ],
+    })
+
+    expect(model.volumeSegmentGate.status).toBe('needs_attention')
+    expect(model.volumeSegmentGate.currentSegmentLabel).toBe('第1-50章')
+    expect(model.volumeSegmentGate.actionKey).toBe('complete_volume_plan')
+    expect(model.volumeSegmentGate.score).toBeLessThan(80)
+    expect(model.volumeSegmentGate.signals.map(signal => signal.key)).toEqual([
+      'volume_goal',
+      'climax_payoff',
+      'reader_trust',
+      'innovation_ip',
+      'risk_closure',
+    ])
+    expect(model.volumeSegmentGate.signals.find(signal => signal.key === 'climax_payoff')?.status).toBe('warn')
+    expect(model.volumeSegmentGate.signals.find(signal => signal.key === 'reader_trust')?.detail).toContain('期待欠账')
+    expect(model.volumeSegmentGate.signals.find(signal => signal.key === 'innovation_ip')?.detail).toContain('玻璃门')
+    expect(model.volumeSegmentGate.nextActions).toContain('先补齐当前卷爆点、爽点回报和 IP 化场面，再扩大连续生产。')
+  })
+
+  test('builds a recent 10 chapter fatigue radar from repeated conflicts, payoffs and hooks', () => {
+    const model = buildPlanningWorkspaceModel({
+      selectedProject: project,
+      outlines,
+      chapters,
+      activeChapter: chapters[6],
+      reviews: [innovationReview()],
+    })
+
+    expect(model.recentFatigueRadar.status).toBe('needs_attention')
+    expect(model.recentFatigueRadar.chapterRangeLabel).toBe('第1-10章')
+    expect(model.recentFatigueRadar.score).toBeLessThan(80)
+    expect(model.recentFatigueRadar.actionKey).toBe('update_rolling_plan')
+    expect(model.recentFatigueRadar.signals.map(signal => signal.key)).toEqual([
+      'conflict_variety',
+      'payoff_variety',
+      'hook_variety',
+      'scene_freshness',
+    ])
+    expect(model.recentFatigueRadar.signals.find(signal => signal.key === 'conflict_variety')?.detail).toContain('执事压迫')
+    expect(model.recentFatigueRadar.signals.find(signal => signal.key === 'hook_variety')?.detail).toContain('试炼将至')
+    expect(model.recentFatigueRadar.signals.find(signal => signal.key === 'scene_freshness')?.status).toBe('warn')
+    expect(model.recentFatigueRadar.nextActions).toContain('下一批章节要更换压迫来源、回报形态、章末问题或可视化场面，避免十章连续同质化。')
+  })
+
+  test('warns when recent chapters have an IP scene intake gap', () => {
+    const model = buildPlanningWorkspaceModel({
+      selectedProject: project,
+      outlines,
+      chapters,
+      activeChapter: chapters[6],
+      reviews: [ipSceneIntakeReview({ chapterNo: 2 })],
+    })
+
+    const sceneSignal = model.recentFatigueRadar.signals.find(signal => signal.key === 'scene_freshness')
+    expect(sceneSignal?.status).toBe('warn')
+    expect(sceneSignal?.count).toBe(9)
+    expect(sceneSignal?.detail).toContain('IP场面覆盖 1/10')
+    expect(sceneSignal?.detail).toContain('玻璃门内外对峙')
+    expect(sceneSignal?.actionKey).toBe('update_rolling_plan')
+  })
+
+  test('builds a story pressure ladder from future chapter conflicts and stakes', () => {
+    const model = buildPlanningWorkspaceModel({
+      selectedProject: project,
+      outlines,
+      chapters,
+      activeChapter: chapters[6],
+    })
+
+    expect(model.storyPressureLadder.status).toBe('needs_attention')
+    expect(model.storyPressureLadder.chapterRangeLabel).toBe('第7-12章')
+    expect(model.storyPressureLadder.actionKey).toBe('update_rolling_plan')
+    expect(model.storyPressureLadder.signals.map(signal => signal.key)).toEqual([
+      'pressure_source',
+      'conflict_escalation',
+      'stakes_growth',
+      'reversal_pressure',
+    ])
+    expect(model.storyPressureLadder.signals.find(signal => signal.key === 'pressure_source')?.detail).toContain('执事压迫')
+    expect(model.storyPressureLadder.signals.find(signal => signal.key === 'stakes_growth')?.status).toBe('warn')
+    expect(model.storyPressureLadder.pressureSources[0].label).toContain('执事压迫')
+    expect(model.storyPressureLadder.nextActions).toContain('下一批章节要明确压力源、升级赌注和反转逼迫，保证故事持续往前拱。')
+  })
+
+  test('builds a story unit workshop from the next serial event package', () => {
+    const plannedChapters = chapters.map(chapter => {
+      if (chapter.chapter_no < 7 || chapter.chapter_no > 12) return chapter
+      return {
+        ...chapter,
+        chapter_goal: `推进试炼前夜事件包 ${chapter.chapter_no}`,
+        conflict: chapter.chapter_no <= 9 ? '执事压迫升级' : '试炼场公开反转',
+        ending_hook: chapter.chapter_no === 12 ? '内门长老亲自点名' : '试炼倒计时逼近',
+        raw_payload: {
+          ...chapter.raw_payload,
+          pressure_source: chapter.chapter_no <= 9 ? '执事设局' : '试炼规则反噬',
+          reader_payoff: chapter.chapter_no === 10 ? '公开打脸执事' : chapter.raw_payload.payoff,
+          mainline_progress: chapter.chapter_no === 12 ? '主角进入内门视野' : '试炼前夜压迫升级',
+          foreshadowing_task: chapter.chapter_no === 9 ? '阵盘第二道裂纹埋线' : '',
+          storyline_task: chapter.chapter_no === 11 ? '外门压迫主线阶段兑现' : '',
+          unit_role: chapter.chapter_no === 7 ? '入口钩子' : chapter.chapter_no === 10 ? '小高潮回报' : chapter.chapter_no === 12 ? '出单元钩子' : '',
+        },
+      }
+    })
+
+    const model = buildPlanningWorkspaceModel({
+      selectedProject: project,
+      outlines,
+      chapters: plannedChapters,
+      activeChapter: plannedChapters[6],
+    })
+
+    expect(model.storyUnitWorkshop.status).toBe('ready')
+    expect(model.storyUnitWorkshop.currentUnit.chapterRangeLabel).toBe('第7-12章')
+    expect(model.storyUnitWorkshop.currentUnit.title).toContain('试炼前夜')
+    expect(model.storyUnitWorkshop.currentUnit.signals.map(signal => signal.key)).toEqual([
+      'entry_hook',
+      'pressure_escalation',
+      'mini_climax_payoff',
+      'setup_and_storyline',
+      'exit_hook',
+    ])
+    expect(model.storyUnitWorkshop.currentUnit.signals.find(signal => signal.key === 'mini_climax_payoff')?.status).toBe('ok')
+    expect(model.storyUnitWorkshop.currentUnit.signals.find(signal => signal.key === 'setup_and_storyline')?.detail).toContain('阵盘第二道裂纹')
+    expect(model.storyUnitWorkshop.units[0]?.chapters.map(chapter => chapter.chapterNo)).toEqual([7, 8, 9, 10, 11, 12])
+    expect(model.storyUnitWorkshop.nextActions).toContain('当前剧情单元入口、压力升级、小高潮、伏笔/剧情线和出单元钩子完整，可以按单元推进。')
   })
 
   test('marks first30 retention report stale when early chapters changed later', () => {
@@ -496,5 +1410,52 @@ describe('buildPlanningWorkspaceModel', () => {
     expect(model.topStatus.future100Coverage.ready).toBe(true)
     expect(model.topStatus.future100Coverage.planned).toBe(100)
     expect(model.topStatus.future100Coverage.missingChapters).toEqual([])
+  })
+
+  test('counts applied rolling plan chapter outlines as future 10 planning coverage', () => {
+    const rollingOutlines = Array.from({ length: 10 }).map((_, index) => {
+      const chapterNo = index + 30
+      return {
+        id: 2000 + chapterNo,
+        outline_type: 'chapter',
+        title: `第${chapterNo}章 滚动规划`,
+        summary: `更换压迫来源 ${chapterNo}`,
+        conflict_points: ['新势力登场'],
+        hook: '新的追读问题出现',
+        raw_payload: {
+          source: 'rolling_plan',
+          chapter_no: chapterNo,
+          rollingPlan: {
+            chapter_no: chapterNo,
+            title: `滚动规划 ${chapterNo}`,
+            chapter_goal: `更换压迫来源 ${chapterNo}`,
+            conflict: '新势力登场',
+            ending_hook: '新的追读问题出现',
+            mainline_progress: '滚动推进宗门暗线',
+          },
+        },
+      }
+    })
+    const active = {
+      id: 30,
+      chapter_no: 30,
+      title: '第30章',
+      chapter_text: '',
+      raw_payload: {},
+    }
+
+    const model = buildPlanningWorkspaceModel({
+      selectedProject: project,
+      outlines: rollingOutlines,
+      chapters: [active],
+      activeChapter: active,
+    })
+
+    expect(model.topStatus.future10Coverage.ready).toBe(true)
+    expect(model.topStatus.future10Coverage.planned).toBe(10)
+    expect(model.topStatus.future10Coverage.missingChapters).toEqual([])
+    expect(model.futureRoute[0].chapterTask).toBe('更换压迫来源 30')
+    expect(model.futureRoute[0].conflict).toBe('新势力登场')
+    expect(model.futureRoute[0].endingHook).toBe('新的追读问题出现')
   })
 })

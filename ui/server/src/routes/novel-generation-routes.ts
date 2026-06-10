@@ -59,12 +59,48 @@ function applyRequestLongformCompass(contextPackage: any, req: any) {
   }
 }
 
+function applyRequestLongformBattleContext(contextPackage: any, req: any) {
+  if (!req.body?.longform_battle_context) return contextPackage
+  return {
+    ...contextPackage,
+    longform_battle_context: req.body.longform_battle_context,
+    chapter_target: { ...contextPackage.chapter_target, longform_battle_context: req.body.longform_battle_context },
+  }
+}
+
 function applyRequestNextBatchBrief(contextPackage: any, req: any) {
   if (!req.body?.next_batch_brief) return contextPackage
   return {
     ...contextPackage,
     next_batch_brief: req.body.next_batch_brief,
     chapter_target: { ...contextPackage.chapter_target, next_batch_brief: req.body.next_batch_brief },
+  }
+}
+
+function applyRequestChapterLaunchGate(contextPackage: any, req: any) {
+  if (!req.body?.chapter_launch_gate) return contextPackage
+  return {
+    ...contextPackage,
+    chapter_launch_gate: req.body.chapter_launch_gate,
+    chapter_target: { ...contextPackage.chapter_target, chapter_launch_gate: req.body.chapter_launch_gate },
+  }
+}
+
+function applyRequestBatchPreflight(contextPackage: any, req: any) {
+  if (!req.body?.batch_preflight) return contextPackage
+  return {
+    ...contextPackage,
+    batch_preflight: req.body.batch_preflight,
+    chapter_target: { ...contextPackage.chapter_target, batch_preflight: req.body.batch_preflight },
+  }
+}
+
+function applyRequestMillionWordRunway(contextPackage: any, req: any) {
+  if (!req.body?.million_word_runway) return contextPackage
+  return {
+    ...contextPackage,
+    million_word_runway: req.body.million_word_runway,
+    chapter_target: { ...contextPackage.chapter_target, million_word_runway: req.body.million_word_runway },
   }
 }
 
@@ -788,7 +824,11 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
         wordTarget,
       )
       contextPackage = applyRequestLongformCompass(contextPackage, req)
+      contextPackage = applyRequestLongformBattleContext(contextPackage, req)
       contextPackage = applyRequestNextBatchBrief(contextPackage, req)
+      contextPackage = applyRequestChapterLaunchGate(contextPackage, req)
+      contextPackage = applyRequestBatchPreflight(contextPackage, req)
+      contextPackage = applyRequestMillionWordRunway(contextPackage, req)
       markStage(
         'context',
         contextPackage.preflight.ready ? '续写上下文包已就绪' : '续写上下文包存在缺口',
@@ -832,7 +872,11 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
               wordTarget,
             )
             contextPackage = applyRequestLongformCompass(contextPackage, req)
+            contextPackage = applyRequestLongformBattleContext(contextPackage, req)
             contextPackage = applyRequestNextBatchBrief(contextPackage, req)
+            contextPackage = applyRequestChapterLaunchGate(contextPackage, req)
+            contextPackage = applyRequestBatchPreflight(contextPackage, req)
+            contextPackage = applyRequestMillionWordRunway(contextPackage, req)
             markStage('scene_cards', `场景卡已生成：${sceneResult.sceneCards.length} 个`, 'success', '', { scene_cards: sceneResult.sceneCards })
           } else {
             markStage('scene_cards', '场景卡生成为空，继续使用章节细纲', 'warn')

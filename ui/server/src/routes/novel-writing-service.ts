@@ -217,12 +217,34 @@ function compactBriefText(value: any, fallback = '') {
   return String(value || fallback || '').replace(/\s+/g, ' ').trim()
 }
 
+function buildPreviousChapterHandoff(contextPackage: any) {
+  const target = contextPackage?.chapter_target || {}
+  const explicit = compactBriefText(
+    target.previous_handoff || target.previousHandoff || contextPackage?.previous_handoff || contextPackage?.pre_draft_brief?.previous_handoff,
+  )
+  if (explicit) return explicit
+
+  const previous = contextPackage?.continuity?.previous_chapter || null
+  if (!previous) return ''
+  const label = previous.chapter_no
+    ? `第${previous.chapter_no}章${previous.title ? `《${previous.title}》` : ''}`
+    : '上一章'
+  const endingHook = compactBriefText(previous.ending_hook)
+  const endingExcerpt = compactBriefText(previous.ending_excerpt)
+  const parts = [
+    endingHook ? `章末钩子：${endingHook}` : '',
+    endingExcerpt ? `最后一幕：${compactText(endingExcerpt, 180)}` : '',
+  ].filter(Boolean)
+  return parts.length ? `${label} ${parts.join('；')}` : ''
+}
+
 function sceneBriefFromCard(card: any, index: number) {
   return {
     scene_no: Number(card?.scene_no || index + 1),
     title: compactBriefText(card?.title, `场景${index + 1}`),
     purpose: compactBriefText(card?.purpose || card?.beat),
     conflict: compactBriefText(card?.conflict),
+    opening_hook: compactBriefText(card?.opening_hook || card?.hook_opening),
     reader_payoff: compactBriefText(card?.reader_payoff || card?.payoff),
     fear_point: compactBriefText(card?.fear_point || card?.terror_point),
     rule_pressure: compactBriefText(card?.rule_pressure || card?.rule_trigger),
@@ -230,6 +252,354 @@ function sceneBriefFromCard(card: any, index: number) {
     reversal: compactBriefText(card?.reversal || card?.turning_point),
     ending_hook_seed: compactBriefText(card?.ending_hook_seed || card?.ending_hook || card?.exit_state),
     word_budget: compactBriefText(card?.word_budget || card?.description_budget),
+  }
+}
+
+function buildReaderRetentionBrief(project: any, contextPackage: any, sceneBriefs: any[]) {
+  const chapterTarget = contextPackage?.chapter_target || {}
+  const writingBible = contextPackage?.writing_bible || project?.reference_config?.writing_bible || {}
+  const firstScene = sceneBriefs[0] || {}
+  const lastScene = sceneBriefs[sceneBriefs.length - 1] || {}
+  const readerPayoffs = sceneBriefs.map((item: any) => item.reader_payoff).filter(Boolean)
+  const informationGaps = sceneBriefs.map((item: any) => item.information_gap).filter(Boolean)
+  const reversals = sceneBriefs.map((item: any) => item.reversal).filter(Boolean)
+  const retentionStrategy = firstDefined(
+    writingBible?.commercial_positioning?.retention_strategy,
+    writingBible?.retention_strategy,
+    project?.reference_config?.writing_bible?.commercial_positioning?.retention_strategy,
+  )
+  return {
+    opening_hook: compactBriefText(firstDefined(
+      chapterTarget.opening_hook,
+      firstScene.opening_hook,
+      firstScene.purpose,
+      chapterTarget.summary,
+    )),
+    payoff_promise: compactBriefText(firstDefined(
+      readerPayoffs.join('；'),
+      chapterTarget.reader_payoff,
+      chapterTarget.payoff,
+      writingBible?.style_lock?.payoff_density,
+      retentionStrategy,
+    )),
+    information_gap: compactBriefText(firstDefined(
+      informationGaps.join('；'),
+      chapterTarget.information_gap,
+      chapterTarget.conflict,
+    )),
+    emotional_reward: compactBriefText(firstDefined(
+      writingBible?.promise,
+      writingBible?.reader_promise,
+      project?.reference_config?.writing_bible?.promise,
+      project?.synopsis,
+      readerPayoffs.join('；'),
+    )),
+    short_drama_scene: compactBriefText([
+      firstScene.title,
+      firstDefined(firstScene.conflict, firstScene.reversal, firstScene.reader_payoff, reversals[0], chapterTarget.conflict),
+    ].filter(Boolean).join('：')),
+    ending_question: compactBriefText(firstDefined(
+      chapterTarget.ending_hook,
+      lastScene.ending_hook_seed,
+      lastScene.reversal,
+    )),
+    forbidden_cliches: Array.from(new Set([
+      '只写环境氛围不推进目标',
+      '用长篇背景解释替代现场危机',
+      '章末用模板总结代替追读问题',
+      '爽点只停留在旁白承诺不落成动作',
+      ...asArray(chapterTarget.forbidden_cliches),
+    ].map((item: any) => String(item || '').trim()).filter(Boolean))).slice(0, 8),
+  }
+}
+
+function normalizeExpectationItem(value: any, fallback: { key: string; label: string; type: string }) {
+  const text = compactBriefText(typeof value === 'string' ? value : value?.text || value?.summary || value?.description || value?.name || value?.title)
+  if (!text) return null
+  return {
+    key: compactBriefText(typeof value === 'object' ? value?.key : '', fallback.key),
+    label: compactBriefText(typeof value === 'object' ? value?.label : '', fallback.label),
+    type: compactBriefText(typeof value === 'object' ? value?.type : '', fallback.type),
+    text,
+  }
+}
+
+function uniqueExpectationItems(items: any[]) {
+  const seen = new Set<string>()
+  const rows: any[] = []
+  for (const item of items) {
+    if (!item?.text) continue
+    const key = `${item.type || 'expectation'}:${normalizedMatchText(item.text)}`
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    rows.push(item)
+  }
+  return rows
+}
+
+function normalizeDebtExpectationItem(value: any, fallback: { key: string; label: string; type: string }, extra: any = {}) {
+  const normalized = normalizeExpectationItem(value, fallback)
+  if (!normalized) return null
+  const raw = typeof value === 'object' && value ? value : {}
+  return {
+    ...extra,
+    age_chapters: Number(raw.age_chapters ?? raw.ageChapters ?? extra.age_chapters ?? 0) || null,
+    overdue: Boolean(raw.overdue ?? extra.overdue ?? false),
+    urgency: compactBriefText(raw.urgency || extra.urgency),
+    ...normalized,
+  }
+}
+
+const EXPECTATION_MUST_CARRY_OVERDUE_AFTER_CHAPTERS = 2
+const EXPECTATION_KEEP_ALIVE_OVERDUE_AFTER_CHAPTERS = 4
+
+function applyReaderExpectationDebtAging(context: any, currentChapterNo: number) {
+  const chapterNo = Number(currentChapterNo || 0)
+  const decorate = (item: any, kind: 'must_carry' | 'keep_alive') => {
+    const fromChapterNo = Number(item?.from_chapter_no || item?.fromChapterNo || 0) || null
+    const explicitAge = Number(item?.age_chapters ?? item?.ageChapters ?? 0) || null
+    const age = chapterNo && fromChapterNo ? Math.max(0, chapterNo - fromChapterNo) : explicitAge
+    const overdueAfter = kind === 'keep_alive'
+      ? EXPECTATION_KEEP_ALIVE_OVERDUE_AFTER_CHAPTERS
+      : EXPECTATION_MUST_CARRY_OVERDUE_AFTER_CHAPTERS
+    const overdue = Boolean(item?.overdue) || (age !== null && age >= overdueAfter)
+    return {
+      ...item,
+      from_chapter_no: fromChapterNo,
+      age_chapters: age,
+      overdue,
+      urgency: overdue ? 'overdue' : age !== null && age > 0 ? 'due' : compactBriefText(item?.urgency),
+    }
+  }
+  const mustCarry = uniqueExpectationItems(asArray(context?.must_carry).map((item: any) => decorate(item, 'must_carry')))
+  const keepAlive = uniqueExpectationItems(asArray(context?.keep_alive).map((item: any) => decorate(item, 'keep_alive')))
+  const overdue = uniqueExpectationItems([
+    ...asArray(context?.overdue),
+    ...mustCarry.filter((item: any) => item.overdue),
+    ...keepAlive.filter((item: any) => item.overdue),
+  ]).slice(0, 12)
+  const sourceChapters = Array.from(new Set([
+    ...mustCarry.map((item: any) => Number(item.from_chapter_no || 0)).filter(Boolean),
+    ...keepAlive.map((item: any) => Number(item.from_chapter_no || 0)).filter(Boolean),
+  ])).sort((a, b) => a - b)
+  const summary = [
+    mustCarry.length ? `待兑现 ${mustCarry.length} 项` : '',
+    keepAlive.length ? `继续悬念 ${keepAlive.length} 项` : '',
+    overdue.length ? `逾期 ${overdue.length} 项` : '',
+  ].filter(Boolean).join('，')
+  return {
+    ...(context || {}),
+    must_carry: mustCarry.slice(0, 12),
+    keep_alive: keepAlive.slice(0, 12),
+    overdue,
+    overdue_count: overdue.length,
+    source_chapters: sourceChapters.slice(-8),
+    summary: compactBriefText(summary || context?.summary || ''),
+  }
+}
+
+function normalizeReaderExpectationDebtContext(value: any) {
+  const raw = value || {}
+  const mustCarry = uniqueExpectationItems(asArray(raw.must_carry || raw.mustCarry || raw.carry_over || raw.carryOver)
+    .map((item: any, index: number) => normalizeDebtExpectationItem(item, { key: `carry_over_${index + 1}`, label: '期待债务', type: 'carry_over' }, {
+      from_chapter_no: Number(item?.from_chapter_no || item?.fromChapterNo || 0) || null,
+      source_review_id: item?.source_review_id || item?.sourceReviewId || null,
+    }))
+    .filter(Boolean))
+  const keepAlive = uniqueExpectationItems(asArray(raw.keep_alive || raw.keepAlive)
+    .map((item: any, index: number) => normalizeDebtExpectationItem(item, { key: `debt_keep_alive_${index + 1}`, label: '继续悬念', type: 'question' }, {
+      from_chapter_no: Number(item?.from_chapter_no || item?.fromChapterNo || 0) || null,
+      source_review_id: item?.source_review_id || item?.sourceReviewId || null,
+    }))
+    .filter(Boolean))
+  const overdue = uniqueExpectationItems(asArray(raw.overdue || raw.overdue_items || raw.overdueItems)
+    .map((item: any, index: number) => normalizeDebtExpectationItem(item, { key: `overdue_${index + 1}`, label: '逾期待补', type: 'overdue' }, {
+      from_chapter_no: Number(item?.from_chapter_no || item?.fromChapterNo || 0) || null,
+      source_review_id: item?.source_review_id || item?.sourceReviewId || null,
+      overdue: true,
+      urgency: 'overdue',
+    }))
+    .filter(Boolean))
+  const sourceChapters = Array.from(new Set([
+    ...mustCarry.map((item: any) => Number(item.from_chapter_no || 0)).filter(Boolean),
+    ...keepAlive.map((item: any) => Number(item.from_chapter_no || 0)).filter(Boolean),
+    ...overdue.map((item: any) => Number(item.from_chapter_no || 0)).filter(Boolean),
+  ])).sort((a, b) => a - b)
+  return {
+    must_carry: mustCarry.slice(0, 12),
+    keep_alive: keepAlive.slice(0, 12),
+    overdue: overdue.slice(0, 12),
+    overdue_count: Number(raw.overdue_count ?? raw.overdueCount ?? overdue.length) || overdue.length,
+    source_chapters: sourceChapters.slice(-8),
+    summary: compactBriefText(raw.summary || [
+      mustCarry.length ? `待兑现 ${mustCarry.length} 项` : '',
+      keepAlive.length ? `继续悬念 ${keepAlive.length} 项` : '',
+      overdue.length ? `逾期 ${overdue.length} 项` : '',
+    ].filter(Boolean).join('，')),
+  }
+}
+
+export function buildReaderExpectationDebtContext(chapter: any, chapters: any[] = [], reviews: any[] = []) {
+  const chapterNo = Number(chapter?.chapter_no || 0)
+  const chapterId = Number(chapter?.id || 0)
+  if (!chapterNo && !chapterId) return normalizeReaderExpectationDebtContext(null)
+  const previousChapters = asArray(chapters)
+    .filter((item: any) => Number(item?.chapter_no || 0) > 0 && Number(item.chapter_no) < chapterNo)
+    .sort((a: any, b: any) => Number(a.chapter_no || 0) - Number(b.chapter_no || 0))
+    .slice(-6)
+  const previousChapterNos = new Set(previousChapters.map((item: any) => Number(item.chapter_no || 0)).filter(Boolean))
+  const previousChapterIds = new Set(previousChapters.map((item: any) => Number(item.id || 0)).filter(Boolean))
+  const latestByChapter = new Map<string, any>()
+  for (const review of asArray(reviews)) {
+    if (String(review?.review_type || '') !== 'reader_expectation_sync') continue
+    const payload = parseJsonLikePayload(review?.payload) || {}
+    const reviewChapterNo = Number(payload?.chapter_no || payload?.reader_expectation_sync?.chapter_no || review?.chapter_no || 0)
+    const reviewChapterId = Number(payload?.chapter_id || payload?.reader_expectation_sync?.chapter_id || review?.chapter_id || 0)
+    const isPrevious = previousChapterNos.has(reviewChapterNo) || previousChapterIds.has(reviewChapterId)
+    if (!isPrevious) continue
+    const key = reviewChapterId ? `id:${reviewChapterId}` : `no:${reviewChapterNo}`
+    const existing = latestByChapter.get(key)
+    if (!existing || reviewTimestamp(review) >= reviewTimestamp(existing.review)) {
+      latestByChapter.set(key, { review, payload, chapter_no: reviewChapterNo || previousChapters.find((item: any) => Number(item.id || 0) === reviewChapterId)?.chapter_no || null })
+    }
+  }
+  const mustCarry: any[] = []
+  const keepAlive: any[] = []
+  for (const item of Array.from(latestByChapter.values()).sort((a: any, b: any) => Number(a.chapter_no || 0) - Number(b.chapter_no || 0))) {
+    const sync = item.payload?.reader_expectation_sync || item.payload?.result?.reader_expectation_sync || item.payload?.result || item.payload || {}
+    const fromChapterNo = Number(sync?.chapter_no || item.chapter_no || 0) || null
+    for (const missed of asArray(sync?.missed)) {
+      const normalized = normalizeDebtExpectationItem(missed, { key: 'missed_expectation', label: '待补期待', type: 'carry_over' }, {
+        from_chapter_no: fromChapterNo,
+        source_review_id: item.review?.id || null,
+      })
+      if (normalized) mustCarry.push(normalized)
+    }
+    for (const alive of asArray(sync?.keep_alive)) {
+      const normalized = normalizeDebtExpectationItem(alive, { key: 'keep_alive', label: '继续悬念', type: 'question' }, {
+        from_chapter_no: fromChapterNo,
+        source_review_id: item.review?.id || null,
+      })
+      if (normalized) keepAlive.push(normalized)
+    }
+  }
+  return applyReaderExpectationDebtAging(normalizeReaderExpectationDebtContext({ must_carry: mustCarry, keep_alive: keepAlive }), chapterNo)
+}
+
+function buildReaderExpectationLedger(project: any, contextPackage: any, sceneBriefs: any[], readerRetentionBrief: any) {
+  const chapterTarget = contextPackage?.chapter_target || {}
+  const readerExpectationDebtContext = applyReaderExpectationDebtAging(
+    normalizeReaderExpectationDebtContext(chapterTarget.reader_expectation_debt_context || contextPackage?.reader_expectation_debt_context),
+    Number(chapterTarget.chapter_no || contextPackage?.chapter_no || 0),
+  )
+  const projectStoryState = project?.reference_config?.story_state || {}
+  const contextStoryState = contextPackage?.story_state || {}
+  const storyState = {
+    ...projectStoryState,
+    ...contextStoryState,
+    open_questions: [
+      ...asArray(projectStoryState?.open_questions),
+      ...asArray(contextStoryState?.open_questions),
+    ],
+    payoff_queue: [
+      ...asArray(projectStoryState?.payoff_queue),
+      ...asArray(contextStoryState?.payoff_queue),
+    ],
+  }
+  const carryOver = uniqueExpectationItems(readerExpectationDebtContext.must_carry)
+  const previousHandoff = buildPreviousChapterHandoff(contextPackage)
+  const mustDeliver = uniqueExpectationItems([
+    ...carryOver,
+    normalizeExpectationItem(previousHandoff, { key: 'opening_handoff', label: '上一章承接', type: 'opening_handoff' }),
+    normalizeExpectationItem(readerRetentionBrief?.opening_hook, { key: 'opening_hook', label: '开篇钩子', type: 'hook' }),
+    normalizeExpectationItem(readerRetentionBrief?.payoff_promise || chapterTarget.reader_promise || chapterTarget.payoff, { key: 'payoff_promise', label: '爽点承诺', type: 'payoff' }),
+    normalizeExpectationItem(readerRetentionBrief?.emotional_reward, { key: 'emotional_reward', label: '情绪回报', type: 'emotion' }),
+    ...sceneBriefs.map((scene: any, index: number) => normalizeExpectationItem(scene?.reader_payoff, { key: `scene_payoff_${index + 1}`, label: `场景${index + 1}回报`, type: 'scene_payoff' })),
+    normalizeExpectationItem(readerRetentionBrief?.ending_question || chapterTarget.ending_hook, { key: 'ending_hook', label: '章末追读', type: 'hook' }),
+  ].filter(Boolean))
+  const keepAlive = uniqueExpectationItems([
+    ...readerExpectationDebtContext.keep_alive,
+    normalizeExpectationItem(readerRetentionBrief?.information_gap, { key: 'information_gap', label: '信息缺口', type: 'question' }),
+    ...asArray(storyState?.open_questions).map((item: any, index: number) => normalizeExpectationItem(item, { key: `open_question_${index + 1}`, label: '保留悬念', type: 'question' })),
+    ...asArray(storyState?.payoff_queue).map((item: any, index: number) => normalizeExpectationItem(item, { key: `payoff_queue_${index + 1}`, label: '待回收期待', type: 'payoff_debt' })),
+  ].filter(Boolean))
+
+  return {
+    chapter_promise: compactBriefText(chapterTarget.reader_promise || readerRetentionBrief?.payoff_promise || contextPackage?.writing_bible?.promise || project?.synopsis),
+    carry_over: carryOver.slice(0, 12),
+    must_deliver: mustDeliver.slice(0, 12),
+    keep_alive: keepAlive.slice(0, 12),
+    must_not_break: [
+      '已承诺的爽点、悬念和情绪回报不能整章只铺设定不兑现',
+      '可以保留 keep_alive 中的长期疑问，但必须在正文中维持其存在感，不得遗忘或矛盾改写',
+      '章末追读必须落到最后一幕的未解问题、升级威胁或新信息上',
+    ],
+  }
+}
+
+function buildChapterInnovationBrief(project: any, contextPackage: any, sceneBriefs: any[], longformCompass: any) {
+  const compactPoint = (item: any) => compactBriefText(item).replace(/[。.!！?？]+$/g, '')
+  const chapterTarget = contextPackage?.chapter_target || {}
+  const writingBible = contextPackage?.writing_bible || project?.reference_config?.writing_bible || {}
+  const commercial = writingBible?.commercial_positioning || project?.reference_config?.writing_bible?.commercial_positioning || {}
+  const innovationAxis = asArray(longformCompass?.axes).find((axis: any) => String(axis?.key || '') === 'innovation_hook')
+  const worldAxis = asArray(longformCompass?.axes).find((axis: any) => String(axis?.key || '') === 'world_hook')
+  const executionPoints = [
+    ...sceneBriefs.map((item: any) => item.reader_payoff),
+    ...sceneBriefs.map((item: any) => item.rule_pressure),
+    ...sceneBriefs.map((item: any) => item.reversal),
+    chapterTarget.signature_scene_brief?.signature_scene,
+    chapterTarget.signature_scene_brief?.reader_payoff,
+    chapterTarget.reader_payoff,
+  ].map(compactPoint).filter(Boolean)
+  const ipHooks = [
+    ...sceneBriefs.map((item: any) => item.title),
+    ...sceneBriefs.map((item: any) => item.short_drama_scene),
+    ...sceneBriefs.map((item: any) => item.conflict),
+    chapterTarget.signature_scene_brief?.signature_scene,
+    chapterTarget.short_drama_scene,
+  ].map(compactPoint).filter(Boolean)
+  const chapterAngle = compactBriefText(firstDefined(
+    chapterTarget.innovation_angle,
+    chapterTarget.innovation_hook,
+    innovationAxis?.value,
+    writingBible?.innovation_hook,
+    commercial?.innovation_hook,
+    asArray(commercial?.selling_points)[0],
+    worldAxis?.value,
+  ))
+  const guardrails = Array.from(new Set([
+    '不得写成普通开挂碾压',
+    '不得把创新卖点降级成通用套路桥段',
+    '新增人物、道具、支线必须服务本章创新角度和长期读者承诺',
+    ...asArray(chapterTarget.innovation_guardrails),
+    ...asArray(chapterTarget.differentiation_guardrails),
+  ].map((item: any) => compactBriefText(item)).filter(Boolean))).slice(0, 8)
+
+  const hasContent = chapterAngle || executionPoints.length || guardrails.length || ipHooks.length
+  if (!hasContent) return null
+  return {
+    chapter_angle: chapterAngle,
+    execution_points: Array.from(new Set(executionPoints)).slice(0, 8),
+    differentiation_guardrails: guardrails,
+    ip_adaptation_hooks: Array.from(new Set(ipHooks)).slice(0, 8),
+  }
+}
+
+function normalizeSignatureSceneBrief(value: any) {
+  const source = value?.signature_scene_brief || value?.rollingPlan || value?.rolling_plan || value || {}
+  const signatureScene = compactBriefText(source.signature_scene || source.ip_scene || source.visual_scene || source.memorable_scene)
+  const sceneRepairTarget = compactBriefText(source.scene_repair_target || source.scene_gap_repair || source.repair_target)
+  const readerPayoff = compactBriefText(source.reader_payoff || source.reader_reward || source.commercial_payoff || source.payoff)
+  const storylineService = compactBriefText(source.storyline_service || source.mainline_service || source.storyline_advance || source.mainline_progress)
+  const hasContent = signatureScene || sceneRepairTarget || readerPayoff || storylineService
+  if (!hasContent) return null
+  return {
+    signature_scene: signatureScene,
+    scene_repair_target: sceneRepairTarget,
+    reader_payoff: readerPayoff,
+    storyline_service: storylineService,
+    source: compactBriefText(source.source, 'rolling_plan'),
   }
 }
 
@@ -287,6 +657,182 @@ function normalizeLongformCompass(value: any) {
   }
 }
 
+function normalizeMemoryTextItem(value: any) {
+  if (typeof value === 'string') return compactBriefText(value)
+  if (!value || typeof value !== 'object') return ''
+  const name = compactBriefText(value.name || value.title || value.key)
+  const state = compactBriefText(value.state || value.current_state || value.summary || value.description || value.text)
+  const chapterNo = Number(value.chapter_no || value.chapterNo || value.last_updated_chapter || 0)
+  const chapterLabel = chapterNo ? `@第${chapterNo}章` : ''
+  return compactBriefText([name, state].filter(Boolean).join('：') + chapterLabel)
+}
+
+function normalizeLongformMemoryCapsule(value: any) {
+  const raw = value?.longform_memory_capsule || value?.longformMemoryCapsule || value?.longform_memory_anchor || value?.longformMemoryAnchor || value || {}
+  const characterStates = Array.from(new Set([
+    ...asArray(raw.character_states),
+    ...asArray(raw.characterStates),
+    ...asArray(raw.characters),
+  ].map(normalizeMemoryTextItem).filter(Boolean))).slice(0, 10)
+  const openQuestions = Array.from(new Set([
+    ...asArray(raw.open_questions),
+    ...asArray(raw.openQuestions),
+    ...asArray(raw.unresolved_questions),
+    ...asArray(raw.unresolvedQuestions),
+  ].map(normalizeMemoryTextItem).filter(Boolean))).slice(0, 10)
+  const payoffDebts = Array.from(new Set([
+    ...asArray(raw.payoff_debts),
+    ...asArray(raw.payoffDebts),
+    ...asArray(raw.debts),
+    ...asArray(raw.reader_debts),
+  ].map(normalizeMemoryTextItem).filter(Boolean))).slice(0, 10)
+  const canonFacts = Array.from(new Set([
+    ...asArray(raw.canon_facts),
+    ...asArray(raw.canonFacts),
+    ...asArray(raw.facts),
+  ].map(normalizeMemoryTextItem).filter(Boolean))).slice(0, 10)
+  const redLines = Array.from(new Set([
+    ...asArray(raw.red_lines),
+    ...asArray(raw.redLines),
+    ...asArray(raw.immutable_rules),
+    ...asArray(raw.immutableRules),
+  ].map(normalizeMemoryTextItem).filter(Boolean))).slice(0, 10)
+  const capsule = {
+    last_updated_chapter: Number(raw.last_updated_chapter || raw.lastUpdatedChapter || 0) || null,
+    core_promise: compactBriefText(raw.core_promise || raw.corePromise || raw.reader_promise || raw.readerPromise),
+    current_volume_goal: compactBriefText(raw.current_volume_goal || raw.currentVolumeGoal || raw.volume_goal || raw.volumeGoal),
+    mainline_progress: compactBriefText(raw.mainline_progress || raw.mainlineProgress || raw.current_mainline || raw.currentMainline),
+    character_states: characterStates,
+    open_questions: openQuestions,
+    payoff_debts: payoffDebts,
+    canon_facts: canonFacts,
+    red_lines: redLines,
+  }
+  const hasCapsule = Boolean(
+    capsule.last_updated_chapter
+    || capsule.core_promise
+    || capsule.current_volume_goal
+    || capsule.mainline_progress
+    || capsule.character_states.length
+    || capsule.open_questions.length
+    || capsule.payoff_debts.length
+    || capsule.canon_facts.length
+    || capsule.red_lines.length
+  )
+  return hasCapsule ? capsule : null
+}
+
+function buildLongformMemoryCapsule(project: any, writingBible: any) {
+  const storyState = project?.reference_config?.story_state || project?.story_state || {}
+  const global = storyState?.global || storyState || {}
+  return normalizeLongformMemoryCapsule({
+    last_updated_chapter: storyState.last_updated_chapter || global.last_updated_chapter,
+    core_promise: writingBible?.reader_promise || writingBible?.promise || writingBible?.core_selling_point || global.reader_promise || global.core_promise || project?.synopsis,
+    current_volume_goal: global.current_volume_goal || global.volume_goal || storyState.current_volume_goal || storyState.volume_goal,
+    mainline_progress: global.mainline_progress || global.current_mainline || global.mainline || storyState.mainline_progress || storyState.current_mainline || storyState.mainline,
+    character_states: [
+      ...asArray(storyState.character_states),
+      ...asArray(global.character_states),
+      ...asArray(storyState.characters),
+      ...asArray(global.characters),
+    ],
+    open_questions: [
+      ...asArray(storyState.open_questions),
+      ...asArray(global.open_questions),
+      ...asArray(storyState.unresolved_questions),
+      ...asArray(global.unresolved_questions),
+    ],
+    payoff_debts: [
+      ...asArray(storyState.payoff_debts),
+      ...asArray(global.payoff_debts),
+      ...asArray(storyState.payoff_queue),
+      ...asArray(global.payoff_queue),
+    ],
+    canon_facts: [
+      ...asArray(storyState.canon_facts),
+      ...asArray(global.canon_facts),
+      ...asArray(storyState.facts),
+      ...asArray(global.facts),
+    ],
+    red_lines: [
+      ...asArray(writingBible?.immutable_rules),
+      ...asArray(writingBible?.immutableRules),
+      ...asArray(global.red_lines),
+      ...asArray(storyState.red_lines),
+    ],
+  })
+}
+
+const LONGFORM_BATTLE_LANE_LABELS: Record<string, string> = {
+  story_core: '核心守恒',
+  reader_pull: '读者拉力',
+  storyline: '剧情线调度',
+  volume_beat: '卷级爆点',
+  innovation_ip: '创新/IP场面',
+  production_fuel: '生产燃料',
+}
+
+function isLongformBattleLaneRisk(status: string, score: number | null) {
+  const normalized = status.toLowerCase()
+  if (['block', 'blocked', 'warn', 'warning', 'needs_action', 'risk'].includes(normalized)) return true
+  if (Number.isFinite(Number(score)) && Number(score) < 78) return true
+  return false
+}
+
+function normalizeLongformBattleLane(item: any) {
+  const key = compactBriefText(item?.key || item?.lane_key || item?.laneKey)
+  const label = compactBriefText(item?.label || item?.title, LONGFORM_BATTLE_LANE_LABELS[key] || key)
+  const detail = compactBriefText(item?.detail || item?.summary || item?.reason || item?.risk)
+  const requiredAction = compactBriefText(
+    item?.required_action || item?.requiredAction || item?.action || item?.action_label || item?.actionLabel,
+  )
+  const score = Number.isFinite(Number(item?.score)) ? Number(item.score) : null
+  const status = compactBriefText(item?.status, score !== null && score < 78 ? 'warn' : 'ok')
+  if (!key && !label && !detail && !requiredAction) return null
+  return {
+    key: key || label,
+    label: label || key,
+    status,
+    score,
+    detail,
+    required_action: requiredAction,
+  }
+}
+
+function normalizeLongformBattleContext(value: any) {
+  const raw = value?.longform_battle_context || value?.longformBattleContext || value?.longform_battle_desk || value?.longformBattleDesk || value || {}
+  const lanes = asArray(raw.lanes).map(normalizeLongformBattleLane).filter(Boolean).slice(0, 8)
+  const explicitRiskLanes = asArray(raw.risk_lanes || raw.riskLanes)
+    .map(normalizeLongformBattleLane)
+    .filter(Boolean)
+  const riskLanes = (explicitRiskLanes.length ? explicitRiskLanes : lanes.filter((lane: any) => isLongformBattleLaneRisk(lane.status, lane.score))).slice(0, 6)
+  const primaryActionRaw = raw.primary_action || raw.primaryAction || {}
+  const primaryAction = {
+    key: compactBriefText(primaryActionRaw.key),
+    label: compactBriefText(primaryActionRaw.label || primaryActionRaw.title || raw.primary_action_label || raw.primaryActionLabel),
+    reason: compactBriefText(primaryActionRaw.reason || primaryActionRaw.detail || raw.primary_action_reason || raw.primaryActionReason),
+  }
+  const riskChips = Array.from(new Set([
+    ...asArray(raw.risk_chips),
+    ...asArray(raw.riskChips),
+    ...riskLanes.map((lane: any) => lane.label || lane.detail),
+  ].map(item => compactBriefText(item)).filter(Boolean))).slice(0, 8)
+  const summary = compactBriefText(raw.summary || raw.detail || raw.reason || (riskLanes.length ? `本章需处理：${riskLanes.map((lane: any) => lane.label).join('、')}` : ''))
+  const status = compactBriefText(raw.status, riskLanes.some((lane: any) => String(lane.status).toLowerCase().includes('block')) ? 'blocked' : riskLanes.length ? 'needs_action' : 'ready')
+  const score = Number.isFinite(Number(raw.score)) ? Number(raw.score) : null
+  if (!summary && !lanes.length && !riskLanes.length && !riskChips.length) return null
+
+  return {
+    status,
+    score,
+    summary,
+    risk_chips: riskChips,
+    primary_action: primaryAction.label || primaryAction.reason || primaryAction.key ? primaryAction : null,
+    lanes,
+    risk_lanes: riskLanes,
+  }
+}
+
 function latestLongformCompassFromReviews(reviews: any[]) {
   const review = reviews
     .filter(item => item?.review_type === 'longform_creation_diagnosis')
@@ -335,6 +881,204 @@ function normalizeNextBatchBrief(value: any, targetChapterNo = 0) {
   return hasContent ? normalized : null
 }
 
+function normalizeStoryUnitContext(value: any, targetChapterNo = 0) {
+  const raw = value?.story_unit_context || value?.storyUnitContext || value || {}
+  const textList = (...values: any[]) => Array.from(new Set(values
+    .flatMap(item => Array.isArray(item) ? item : [item])
+    .map(item => compactBriefText(item))
+    .filter(Boolean)))
+  const currentChapter = asArray(raw.chapters)
+    .find((item: any) => Number(item?.chapter_no || item?.chapterNo || 0) === Number(targetChapterNo)) || null
+  const normalized = {
+    title: compactBriefText(raw.title || raw.unit_title || raw.unitTitle || raw.story_unit_title || raw.storyUnitTitle),
+    chapter_range_label: compactBriefText(raw.chapter_range_label || raw.chapterRangeLabel || raw.range_label || raw.rangeLabel),
+    current_chapter_role: compactBriefText(raw.current_chapter_role || raw.currentChapterRole || raw.chapter_role || raw.chapterRole || currentChapter?.role || currentChapter?.chapter_role),
+    unit_goal: compactBriefText(raw.unit_goal || raw.unitGoal || raw.goal || raw.summary),
+    entry_hook: compactBriefText(raw.entry_hook || raw.entryHook || raw.opening_hook || raw.openingHook),
+    pressure_escalation: textList(raw.pressure_escalation, raw.pressureEscalation, raw.escalation, raw.escalations),
+    mini_climax_payoff: compactBriefText(raw.mini_climax_payoff || raw.miniClimaxPayoff || raw.payoff || raw.climax || raw.mini_climax),
+    setup_and_storyline: textList(raw.setup_and_storyline, raw.setupAndStoryline, raw.foreshadowing, raw.storyline, raw.storylines),
+    exit_hook: compactBriefText(raw.exit_hook || raw.exitHook || raw.ending_hook || raw.endingHook),
+    forbidden_advance: textList(raw.forbidden_advance, raw.forbiddenAdvance, raw.forbidden, raw.do_not_advance, raw.doNotAdvance),
+  }
+  const hasContent = Object.values(normalized).some(value => Array.isArray(value) ? value.length > 0 : Boolean(value))
+  return hasContent ? normalized : null
+}
+
+function storyUnitRoleForChapter(chapter: any, position: number, total: number) {
+  const payload = chapter?.raw_payload || {}
+  const explicit = compactBriefText(
+    payload.story_unit_role || payload.storyUnitRole || payload.unit_role || payload.unitRole || payload.episode_role || payload.episodeRole,
+  )
+  if (explicit) return explicit
+  const haystack = compactBriefText([
+    chapter?.title,
+    chapter?.chapter_summary,
+    chapter?.conflict,
+    chapter?.ending_hook,
+  ].filter(Boolean).join(' '))
+  if (/高潮|回报|兑现|反杀|打脸|收束/.test(haystack)) return '小高潮/回报'
+  if (position === 0) return '入口钩子'
+  if (position === total - 1 && total > 1) return '出单元钩子'
+  return '压力升级/推进'
+}
+
+function buildStoryUnitContext(chapter: any, chapters: any[] = [], outlines: any[] = []) {
+  const targetNo = Number(chapter?.chapter_no || 0)
+  const explicit = normalizeStoryUnitContext(
+    chapter?.raw_payload?.pre_draft_brief?.story_unit_context
+      || chapter?.raw_payload?.story_unit_context
+      || chapter?.raw_payload?.storyUnitContext,
+    targetNo,
+  )
+  if (explicit) return explicit
+  if (!targetNo) return null
+
+  const raw = chapter?.raw_payload || {}
+  const startNo = Number(raw.story_unit_start_chapter || raw.storyUnitStartChapter || raw.unit_start_chapter || raw.unitStartChapter || targetNo) || targetNo
+  const endNo = Number(raw.story_unit_end_chapter || raw.storyUnitEndChapter || raw.unit_end_chapter || raw.unitEndChapter || startNo + 5) || startNo + 5
+  const sorted = asArray(chapters)
+    .filter((item: any) => Number(item?.chapter_no || 0) >= startNo && Number(item?.chapter_no || 0) <= endNo)
+    .sort((a: any, b: any) => Number(a.chapter_no || 0) - Number(b.chapter_no || 0))
+  const unitChapters = sorted.length ? sorted : [chapter]
+  const currentIndex = Math.max(0, unitChapters.findIndex((item: any) => Number(item?.chapter_no || 0) === targetNo))
+  const first = unitChapters[0] || chapter
+  const last = unitChapters[unitChapters.length - 1] || chapter
+  const outlineHint = asArray(outlines)
+    .find((item: any) => /单元|事件|阶段|篇|卷/.test(compactBriefText(item?.outline_type || item?.title || item?.summary))) || null
+  const title = compactBriefText(
+    raw.story_unit_title || raw.storyUnitTitle || raw.unit_title || raw.unitTitle || outlineHint?.title,
+    `第${startNo}-${Number(last?.chapter_no || endNo)}章剧情单元`,
+  )
+  const pressureEscalation = unitChapters
+    .slice(Math.max(0, currentIndex), Math.min(unitChapters.length, currentIndex + 4))
+    .map((item: any) => compactBriefText(item?.conflict || item?.chapter_summary || item?.ending_hook || item?.title))
+    .filter(Boolean)
+  const climaxChapter = unitChapters.find((item: any) => /高潮|回报|兑现|反杀|打脸|收束/.test(compactBriefText([
+    item?.title,
+    item?.chapter_summary,
+    item?.conflict,
+    item?.ending_hook,
+  ].filter(Boolean).join(' ')))) || unitChapters[Math.min(unitChapters.length - 1, Math.max(0, Math.floor(unitChapters.length * 0.65)))]
+  const setupAndStoryline = Array.from(new Set([
+    ...asArray(raw.foreshadowing_task),
+    ...asArray(raw.foreshadowingTask),
+    ...asArray(raw.storyline_task),
+    ...asArray(raw.storylineTask),
+    compactBriefText(chapter?.conflict),
+  ].map(item => compactBriefText(item)).filter(Boolean))).slice(0, 6)
+
+  return normalizeStoryUnitContext({
+    title,
+    chapter_range_label: `第${startNo}-${Number(last?.chapter_no || endNo)}章`,
+    current_chapter_role: storyUnitRoleForChapter(chapter, currentIndex, unitChapters.length),
+    unit_goal: compactBriefText(raw.story_unit_goal || raw.storyUnitGoal || outlineHint?.summary || `完成${title}的入口、升级、回报和出单元钩子。`),
+    entry_hook: compactBriefText(first?.chapter_summary || first?.ending_hook || first?.title),
+    pressure_escalation: pressureEscalation,
+    mini_climax_payoff: compactBriefText(climaxChapter?.ending_hook || climaxChapter?.chapter_summary || climaxChapter?.conflict || climaxChapter?.title),
+    setup_and_storyline: setupAndStoryline,
+    exit_hook: compactBriefText(last?.ending_hook || last?.chapter_summary || last?.title),
+    forbidden_advance: [
+      ...asArray(raw.forbidden_repeats),
+      ...asArray(raw.forbidden_advance),
+      ...asArray(raw.forbiddenAdvance),
+    ],
+  }, targetNo)
+}
+
+function first30SegmentKeyForChapter(chapterNo: number) {
+  if (chapterNo >= 1 && chapterNo <= 3) return '1-3'
+  if (chapterNo >= 4 && chapterNo <= 10) return '4-10'
+  if (chapterNo >= 11 && chapterNo <= 30) return '11-30'
+  return ''
+}
+
+function reviewTimestamp(review: any) {
+  const raw = String(review?.created_at || review?.updated_at || '')
+  const timestamp = Date.parse(raw)
+  return Number.isFinite(timestamp) ? timestamp : 0
+}
+
+function first30RetentionRiskLevel(score: number, flags: string[]) {
+  if (score > 0 && score < 65) return 'high'
+  if (flags.some(flag => /缺正文|章末钩子弱|爽点|悬念/.test(flag))) return 'high'
+  if (score > 0 && score < 80) return 'medium'
+  if (flags.length > 0) return 'medium'
+  return 'ok'
+}
+
+function first30FlagAction(flag: string) {
+  if (/目标不清/.test(flag)) return '补明确章节目标和主角选择。'
+  if (/章末钩子弱/.test(flag)) return '重做章末未解决问题、威胁升级或利益诱惑。'
+  if (/爽点|悬念/.test(flag)) return '增加一个可感知收益、信息揭示、关系反转或风险升级。'
+  if (/缺正文/.test(flag)) return '先完成正文初稿，再重新运行前30章留存诊断。'
+  if (/重复/.test(flag)) return '减少重复表达，用新的选择、阻碍或信息增量替换水文。'
+  return ''
+}
+
+export function buildFirst30RetentionContext(chapterTarget: any, reviews: any[] = []) {
+  const chapterNo = Number(chapterTarget?.chapter_no || 0)
+  if (chapterNo < 1 || chapterNo > 30) return null
+  const review = asArray(reviews)
+    .filter((item: any) => String(item?.review_type || '') === 'first30_retention_diagnosis')
+    .sort((a: any, b: any) => reviewTimestamp(b) - reviewTimestamp(a))[0]
+  if (!review) return null
+  const payload = parseJsonLikePayload(review.payload) || {}
+  const report = payload.report || payload.result?.report || payload
+  if (!report || typeof report !== 'object') return null
+  const segmentKey = first30SegmentKeyForChapter(chapterNo)
+  const chapterId = Number(chapterTarget?.id || 0)
+  const chapterCard = asArray(report.chapter_cards).find((row: any) => {
+    const rowNo = Number(row?.chapter_no || 0)
+    const rowId = Number(row?.chapter_id || 0)
+    return rowNo === chapterNo || (chapterId > 0 && rowId === chapterId)
+  }) || null
+  const segment = asArray(report.segments).find((item: any) => String(item?.key || '') === segmentKey) || null
+  const flags = asArray(chapterCard?.flags).map((item: any) => compactBriefText(item)).filter(Boolean)
+  const segmentRisks = asArray(report.risks)
+    .filter((risk: any) => {
+      const riskSegment = String(risk?.segment || '')
+      return riskSegment === segmentKey || (!riskSegment && String(risk?.severity || '') === 'high')
+    })
+    .map((risk: any) => ({
+      severity: compactBriefText(risk?.severity),
+      issue: compactBriefText(risk?.issue),
+      action: compactBriefText(risk?.action),
+    }))
+    .filter((risk: any) => risk.issue || risk.action)
+  const score = Number(chapterCard?.score || 0)
+  const riskLevel = first30RetentionRiskLevel(score, flags)
+  const requiredActions = Array.from(new Set([
+    ...segmentRisks.map((risk: any) => risk.action),
+    ...flags.map(first30FlagAction),
+  ].map((item: any) => compactBriefText(item)).filter(Boolean))).slice(0, 8)
+  if (!chapterCard && !segmentRisks.length) return null
+  if (riskLevel === 'ok' && !segmentRisks.length) return null
+  return {
+    report_score: Number(report.score || 0) || null,
+    report_status: compactBriefText(report.status),
+    report_summary: compactBriefText(report.summary),
+    report_created_at: compactBriefText(review.created_at || report.created_at),
+    promise_ready: Boolean(report.positioning?.promise_ready),
+    reader_promise: compactBriefText(report.positioning?.reader_promise),
+    chapter_no: chapterNo,
+    chapter_score: score || null,
+    chapter_title: compactBriefText(chapterCard?.title || chapterTarget?.title),
+    segment_key: segmentKey,
+    segment_label: compactBriefText(segment?.label || segmentKey),
+    segment_score: Number(segment?.score || 0) || null,
+    flags,
+    risks: segmentRisks,
+    risk_level: segmentRisks.some((risk: any) => risk.severity === 'high') ? 'high' : riskLevel,
+    repair_focus: compactBriefText([
+      chapterCard ? `第${chapterNo}章留存分 ${score || '-'}` : '',
+      flags.length ? `风险：${flags.join('、')}` : '',
+      segmentRisks[0]?.issue || '',
+    ].filter(Boolean).join('；')),
+    required_actions: requiredActions,
+  }
+}
+
 function storylineUsageName(item: any) {
   return String(item?.name || item?.summary || item?.entity_type || '').trim()
 }
@@ -344,6 +1088,153 @@ function storylineUsageByType(storylineContext: any, types: string[]) {
     .filter((item: any) => types.includes(String(item?.usage_type || '')))
     .map(storylineUsageName)
     .filter(Boolean)
+}
+
+function settingJsonObject(value: any) {
+  const parsed = parseJsonLikePayload(value)
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
+}
+
+function characterArcText(...values: any[]) {
+  for (const value of values) {
+    const text = compactText(value, 260)
+    if (text) return text
+  }
+  return ''
+}
+
+function characterArcListText(...values: any[]) {
+  return Array.from(new Set(values.flatMap(value => asArray(value).map((item: any) => compactText(item, 80)).filter(Boolean))))
+}
+
+function characterArcJoinedText(...values: any[]) {
+  return Array.from(new Set(values.map(value => compactText(value, 220)).filter(Boolean))).join('；')
+}
+
+function characterArcUsageKey(item: any) {
+  const id = Number(item?.entity_id || item?.id || 0)
+  const name = compactBriefText(item?.name || item?.title)
+  return id ? `id:${id}` : name ? `name:${name}` : ''
+}
+
+function characterArcEntityKeys(entity: any) {
+  const id = Number(entity?.id || entity?.entity_id || 0)
+  const name = compactBriefText(entity?.name || entity?.title)
+  return [id ? `id:${id}` : '', name ? `name:${name}` : ''].filter(Boolean)
+}
+
+function characterArcTypeLabel(type: string) {
+  return type === 'relationship_arc' ? '关系线' : '角色线'
+}
+
+function buildCharacterArcBriefFromContext(contextPackage: any) {
+  const target = contextPackage?.chapter_target || {}
+  const explicit = target.character_arc_brief
+    || target.characterArcBrief
+    || contextPackage?.pre_draft_brief?.character_arc_brief
+    || contextPackage?.pre_draft_brief?.characterArcBrief
+    || contextPackage?.character_arc_context
+    || contextPackage?.characterArcContext
+  if (explicit && typeof explicit === 'object' && Object.keys(explicit).length > 0) return explicit
+
+  const chapterNo = Number(target.chapter_no || 0)
+  const chapterText = [
+    target.title,
+    target.summary,
+    target.goal,
+    target.chapter_goal,
+    target.conflict,
+    target.ending_hook,
+  ].map(item => compactBriefText(item)).filter(Boolean).join(' ')
+  const entities = [
+    ...asArray(contextPackage?.setting_context?.entities),
+    ...asArray(contextPackage?.storyline_context?.entities),
+  ]
+  const usages = [
+    ...asArray(contextPackage?.setting_context?.chapter_usage),
+    ...asArray(contextPackage?.storyline_context?.chapter_usage),
+  ].filter((item: any) => ['advance', 'plant', 'payoff', 'required'].includes(String(item?.usage_type || 'advance')))
+  const usageMap = new Map<string, any>()
+  for (const usage of usages) {
+    const key = characterArcUsageKey(usage)
+    if (key && !usageMap.has(key)) usageMap.set(key, usage)
+  }
+
+  const arcs = entities
+    .filter((entity: any) => ['character_arc', 'relationship_arc'].includes(String(entity?.entity_type || entity?.type || '')))
+    .map((entity: any) => {
+      const entityType = String(entity?.entity_type || entity?.type || 'character_arc')
+      const payload = settingJsonObject(entity?.payload_json || entity?.payload || {})
+      const constraints = settingJsonObject(entity?.constraints_json || entity?.constraints || {})
+      const state = settingJsonObject(entity?.state_json || entity?.state || {})
+      const keys = characterArcEntityKeys(entity)
+      const usage = keys.map(key => usageMap.get(key)).find(Boolean)
+        || usages.find((item: any) => compactBriefText(item?.name) && compactBriefText(entity?.name).includes(compactBriefText(item?.name)))
+        || null
+      const expected = settingJsonObject(usage?.expected_state_change || usage?.expectedStateChange || {})
+      const relatedCharacters = characterArcListText(payload?.related_characters, payload?.characters, payload?.related_names, payload?.relatedNames)
+      const nextAdvanceChapter = Number(state?.next_advance_chapter || payload?.next_advance_chapter || 0)
+      const due = Boolean(chapterNo && nextAdvanceChapter && nextAdvanceChapter <= chapterNo)
+      const mentioned = Boolean(chapterText && [
+        compactBriefText(entity?.name),
+        ...relatedCharacters,
+      ].some(token => token && chapterText.includes(token)))
+      if (!usage && !due && !mentioned) return null
+      const growthBeat = characterArcJoinedText(
+        expected?.growth_beat,
+        expected?.growthBeat,
+        expected?.character_growth,
+        expected?.characterGrowth,
+        expected?.next,
+        payload?.growth_beat,
+        payload?.growthBeat,
+        payload?.growth_target,
+        payload?.growthTarget,
+        payload?.expected_payoff,
+      )
+      const relationshipShift = characterArcJoinedText(
+        expected?.relationship_shift,
+        expected?.relationshipShift,
+        expected?.relationship_change,
+        expected?.relationshipChange,
+        expected?.next,
+        payload?.relationship_shift,
+        payload?.relationshipShift,
+        state?.relationship_shift,
+      )
+      return {
+        entity_id: Number(entity?.id || entity?.entity_id || 0) || null,
+        entity_type: entityType,
+        type_label: characterArcTypeLabel(entityType),
+        name: compactBriefText(entity?.name || entity?.title, entityType === 'relationship_arc' ? '未命名关系线' : '未命名角色线'),
+        summary: compactBriefText(entity?.summary || payload?.summary),
+        usage_type: compactBriefText(usage?.usage_type || (due ? 'advance' : 'required')),
+        related_characters: relatedCharacters,
+        current_state: characterArcText(state?.current_state, entity?.status),
+        desire: characterArcText(payload?.desire, payload?.character_desire, state?.desire, expected?.desire),
+        flaw_pressure: characterArcText(payload?.flaw_pressure, payload?.flawPressure, payload?.inner_conflict, state?.flaw_pressure, expected?.flaw_pressure),
+        growth_beat: growthBeat,
+        relationship_shift: relationshipShift,
+        voice_anchor: characterArcText(payload?.voice_anchor, payload?.voiceAnchor, state?.voice_anchor),
+        forbidden_reveal: characterArcText(constraints?.forbidden_reveal, constraints?.taboo, payload?.forbidden_reveal),
+        expected_state_change: expected,
+        next_advance_chapter: nextAdvanceChapter || null,
+      }
+    })
+    .filter(Boolean)
+    .slice(0, 8)
+
+  if (!arcs.length) return null
+  const listFromArcs = (key: string) => Array.from(new Set(arcs.map((arc: any) => compactBriefText(arc?.[key])).filter(Boolean))).slice(0, 6)
+  return {
+    desire: listFromArcs('desire').join('；'),
+    flaw_pressure: listFromArcs('flaw_pressure').join('；'),
+    relationship_shift: listFromArcs('relationship_shift').join('；'),
+    growth_beat: listFromArcs('growth_beat').join('；'),
+    voice_anchor: listFromArcs('voice_anchor').join('；'),
+    forbidden_reveal: listFromArcs('forbidden_reveal').join('；'),
+    arcs,
+  }
 }
 
 function storylineKeys(item: any) {
@@ -704,6 +1595,1377 @@ export function buildReaderPayoffSyncReport(project: any, chapter: any, contextP
   }
 }
 
+function readerExpectationLedgerFromContext(project: any, chapter: any, contextPackage: any) {
+  const target = contextPackage?.chapter_target || {}
+  const brief = contextPackage?.pre_draft_brief || chapter?.raw_payload?.pre_draft_brief || target?.pre_draft_brief || {}
+  const explicit = target.reader_expectation_ledger || brief.reader_expectation_ledger
+  const debtContext = applyReaderExpectationDebtAging(
+    normalizeReaderExpectationDebtContext(target.reader_expectation_debt_context || brief.reader_expectation_debt || contextPackage?.reader_expectation_debt_context),
+    Number(target.chapter_no || brief.chapter_no || chapter?.chapter_no || 0),
+  )
+  if (explicit) {
+    const carryOver = uniqueExpectationItems([
+      ...asArray(explicit.carry_over).map((item: any, index: number) => normalizeExpectationItem(item, { key: `carry_over_${index + 1}`, label: '期待债务', type: 'carry_over' })),
+      ...debtContext.must_carry,
+    ].filter(Boolean))
+    return {
+      chapter_promise: compactBriefText(explicit.chapter_promise || target.reader_promise || brief.reader_promise),
+      carry_over: carryOver,
+      must_deliver: uniqueExpectationItems([
+        ...carryOver,
+        ...asArray(explicit.must_deliver).map((item: any, index: number) => normalizeExpectationItem(item, { key: `expectation_${index + 1}`, label: '读者期待', type: 'expectation' })),
+      ].filter(Boolean)),
+      keep_alive: uniqueExpectationItems([
+        ...debtContext.keep_alive,
+        ...asArray(explicit.keep_alive).map((item: any, index: number) => normalizeExpectationItem(item, { key: `keep_alive_${index + 1}`, label: '保留悬念', type: 'question' })),
+      ].filter(Boolean)),
+      must_not_break: asArray(explicit.must_not_break).map((item: any) => compactBriefText(item)).filter(Boolean),
+    }
+  }
+  const sceneCards = [
+    ...asArray(target.scene_cards),
+    ...asArray(brief.scene_briefs),
+  ]
+  const sceneBriefs = sceneCards.map(sceneBriefFromCard)
+  const retentionBrief = target.reader_retention_brief || brief.reader_retention_brief || buildReaderRetentionBrief(project, contextPackage, sceneBriefs)
+  return buildReaderExpectationLedger(project, contextPackage, sceneBriefs, retentionBrief)
+}
+
+function expectationBeatMatch(item: any, chapterText: string) {
+  const key = String(item?.key || '')
+  const type = String(item?.type || '')
+  const scope = key.includes('opening') || key.includes('handoff') || type.includes('handoff')
+    ? 'opening'
+    : key.includes('ending') || /章末|追读/.test(String(item?.label || '')) || type === 'hook'
+      ? 'tail'
+      : 'full'
+  const scopedText = scope === 'opening'
+    ? chapterText.slice(0, 900)
+    : scope === 'tail'
+      ? chapterText.slice(-1200)
+      : chapterText
+  const match = anchorMatchScore(item?.text, scopedText)
+  const threshold = scope === 'tail' ? 48 : 44
+  return {
+    ...item,
+    match_scope: scope,
+    score: match.score,
+    evidence: match.matched,
+    delivered: match.score >= threshold,
+  }
+}
+
+export function buildReaderExpectationSyncReport(project: any, chapter: any, contextPackage: any, chapterText: string) {
+  const ledger = readerExpectationLedgerFromContext(project, chapter, contextPackage)
+  const planned = asArray(ledger.must_deliver)
+  const checked = planned.map(item => expectationBeatMatch(item, chapterText))
+  const delivered = checked.filter(item => item.delivered)
+  const missed = checked.filter(item => !item.delivered)
+  const keepAlive = asArray(ledger.keep_alive)
+  const missedCount = missed.length
+  const score = Math.max(0, Math.min(100, Math.round(
+    planned.length ? (delivered.length / planned.length) * 100 : 82,
+  )))
+  const status = missedCount > 0 || score < 78 ? 'warn' : 'ok'
+
+  return {
+    report_id: `reader-expectation-sync-${chapter?.id || chapter?.chapter_no || Date.now()}`,
+    chapter_id: chapter?.id || null,
+    chapter_no: chapter?.chapter_no || null,
+    score,
+    status,
+    label: status === 'ok' ? '期待 OK' : `期待欠账 ${missedCount}`,
+    summary: status === 'ok'
+      ? '本章读者期待账本中的必兑现项已基本落地。'
+      : `本章读者期待账本有 ${missedCount} 项未充分兑现。`,
+    planned_count: planned.length,
+    delivered_count: delivered.length,
+    missed_count: missedCount,
+    chapter_promise: ledger.chapter_promise || '',
+    planned,
+    delivered,
+    missed,
+    keep_alive: keepAlive,
+    must_not_break: asArray(ledger.must_not_break),
+    next_actions: status === 'ok'
+      ? ['保持读者期待账本：承诺、兑现、保留悬念和章末追读要逐章闭环。']
+      : [
+          '下一次修订优先补足 missed 中的读者期待；不要只补设定说明，要写成可见行动、冲突结果或章末未解问题。',
+          'keep_alive 中的长期悬念可以不回收，但下一章任务书必须继续承接，避免读者期待断线。',
+        ],
+  }
+}
+
+function chapterBenchmarkStrategyFromContext(project: any, contextPackage: any, chapter: any = {}) {
+  const target = contextPackage?.chapter_target || {}
+  const brief = contextPackage?.pre_draft_brief || chapter?.raw_payload?.pre_draft_brief || target?.pre_draft_brief || {}
+  return buildChapterBenchmarkStrategy(project, {
+    ...(contextPackage || {}),
+    chapter_target: {
+      ...target,
+      chapter_benchmark_strategy: target.chapter_benchmark_strategy || brief.chapter_benchmark_strategy,
+    },
+    pre_draft_brief: {
+      ...brief,
+      chapter_benchmark_strategy: brief.chapter_benchmark_strategy || target.chapter_benchmark_strategy,
+    },
+  })
+}
+
+function normalizeChapterBenchmarkBeat(key: string, label: string, value: any, sample: any, matchScope: 'opening' | 'tail' | 'full' = 'full') {
+  const text = compactText(value, 180)
+  if (!text) return null
+  return {
+    key,
+    label,
+    text,
+    sample_key: sample?.sample_key || '',
+    match_scope: matchScope,
+  }
+}
+
+function uniqueChapterBenchmarkBeats(items: any[]) {
+  const seen = new Set<string>()
+  const rows: any[] = []
+  for (const item of items.filter(Boolean)) {
+    const key = `${item.key}:${normalizedMatchText(item.text)}`
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    rows.push(item)
+  }
+  return rows
+}
+
+function chapterBenchmarkBeatMatch(beat: any, chapterText: string) {
+  const scopedText = beat.match_scope === 'opening'
+    ? chapterText.slice(0, 1000)
+    : beat.match_scope === 'tail'
+      ? chapterText.slice(-1400)
+      : chapterText
+  const match = anchorMatchScore(beat.text, scopedText, { tailOnly: beat.match_scope === 'tail' })
+  const threshold = beat.match_scope === 'opening'
+    ? 24
+    : beat.match_scope === 'tail'
+      ? 28
+      : beat.key === 'scene_budget_pattern'
+        ? 18
+        : 26
+  return {
+    ...beat,
+    score: match.score,
+    evidence: match.matched,
+    delivered: match.score >= threshold,
+  }
+}
+
+export function buildChapterBenchmarkSyncReport(project: any, chapter: any, contextPackage: any, chapterText: string) {
+  const strategy = chapterBenchmarkStrategyFromContext(project, contextPackage, chapter)
+  const samples = asArray(strategy?.samples)
+  const planned = uniqueChapterBenchmarkBeats(samples.flatMap((sample: any) => [
+    normalizeChapterBenchmarkBeat('opening_hook', '开篇钩子', sample.opening_hook, sample, 'opening'),
+    normalizeChapterBenchmarkBeat('conflict_pattern', '冲突推进', sample.conflict_pattern, sample),
+    normalizeChapterBenchmarkBeat('payoff_pattern', '爽点兑现', sample.payoff_pattern, sample),
+    normalizeChapterBenchmarkBeat('ending_hook_pattern', '章末追读', sample.ending_hook_pattern, sample, 'tail'),
+    normalizeChapterBenchmarkBeat('scene_budget_pattern', '场景节拍', sample.scene_budget_pattern, sample),
+    String(sample.dialogue_pattern || '').includes('对白必须推动冲突')
+      ? null
+      : normalizeChapterBenchmarkBeat('dialogue_pattern', '对白推进', sample.dialogue_pattern, sample),
+    normalizeChapterBenchmarkBeat('visual_pattern', '场面可视化', sample.visual_pattern, sample),
+  ]))
+  const checked = planned.map(item => chapterBenchmarkBeatMatch(item, chapterText))
+  const delivered = checked.filter(item => item.delivered)
+  const missed = checked.filter(item => !item.delivered)
+  const missedCount = missed.length
+  const score = Math.max(0, Math.min(100, Math.round(
+    planned.length ? (delivered.length / planned.length) * 100 : 82,
+  )))
+  const status = missedCount > 0 || score < 78 ? 'warn' : 'ok'
+
+  return {
+    report_id: `chapter-benchmark-sync-${chapter?.id || chapter?.chapter_no || Date.now()}`,
+    chapter_id: chapter?.id || null,
+    chapter_no: chapter?.chapter_no || null,
+    score,
+    status,
+    label: planned.length === 0 ? '基准未配置' : status === 'ok' ? '基准 OK' : `基准缺口 ${missedCount}`,
+    summary: planned.length === 0
+      ? '本章没有配置章节质量基准样例。'
+      : status === 'ok'
+        ? '正文已基本兑现质量基准样例中的开篇、冲突、爽点、节拍、场面和章末追读结构。'
+        : `正文有 ${missedCount} 项质量基准结构未充分落地。`,
+    missed_count: missedCount,
+    planned,
+    delivered,
+    missed,
+    next_actions: status === 'ok'
+      ? ['保持质量基准样例：只学习结构、节拍、爽点兑现和章末追读，不复制桥段。']
+      : [
+          '下一次修订优先补足质量基准样例 missed 项，把缺口写成可见冲突、行动结果、信息增量或章末问题。',
+          '如果正文只复述设定或顺滑过场，按质量基准样例重排开篇钩子、冲突推进、爽点兑现和章末追读。',
+        ],
+  }
+}
+
+function styleSampleStrategyFromContext(project: any, contextPackage: any, chapter: any = {}) {
+  const target = contextPackage?.chapter_target || {}
+  const brief = contextPackage?.pre_draft_brief || chapter?.raw_payload?.pre_draft_brief || target?.pre_draft_brief || {}
+  return buildStyleSampleStrategy(project, {
+    ...(contextPackage || {}),
+    chapter_target: {
+      ...target,
+      style_sample_strategy: target.style_sample_strategy || brief.style_sample_strategy,
+    },
+    pre_draft_brief: {
+      ...brief,
+      style_sample_strategy: brief.style_sample_strategy || target.style_sample_strategy,
+    },
+  })
+}
+
+function styleSampleBeat(key: string, label: string, value: any, sample: any) {
+  const text = compactText(value, 180)
+  return text ? { key, label, text, sample_key: sample?.sample_key || '' } : null
+}
+
+function quotedDialogueRatio(chapterText: string) {
+  const text = String(chapterText || '')
+  if (!text.trim()) return 0
+  const quoted = Array.from(text.matchAll(/[“"「『]([^”"」』]{1,300})[”"」』]/g))
+    .reduce((sum, match) => sum + String(match[1] || '').length, 0)
+  const proseChars = Math.max(1, countProseChars(text))
+  return quoted / proseChars
+}
+
+function dialogueRatioTarget(text: string) {
+  const match = String(text || '').match(/(\d{1,2})\s*%\s*[-~至到]\s*(\d{1,2})\s*%/)
+  if (!match) return null
+  const low = Number(match[1]) / 100
+  const high = Number(match[2]) / 100
+  if (!Number.isFinite(low) || !Number.isFinite(high)) return null
+  return { low: Math.min(low, high), high: Math.max(low, high) }
+}
+
+function styleSampleBeatMatch(beat: any, chapterText: string) {
+  if (beat.key === 'sentence_pattern') {
+    const sentenceCount = Math.max(1, (String(chapterText || '').match(/[。！？!?]/g) || []).length)
+    const avgSentenceChars = countProseChars(chapterText) / sentenceCount
+    const wantsShortMiddle = /短中句|短句|解释压短|短中/.test(String(beat.text || ''))
+    const delivered = wantsShortMiddle ? avgSentenceChars <= 45 : avgSentenceChars <= 70
+    return {
+      ...beat,
+      score: delivered ? 86 : Math.max(30, Math.round(86 - Math.max(0, avgSentenceChars - 45))),
+      evidence: `平均句长 ${Math.round(avgSentenceChars)} 字`,
+      delivered,
+    }
+  }
+
+  if (beat.key === 'dialogue_ratio') {
+    const ratio = quotedDialogueRatio(chapterText)
+    const target = dialogueRatioTarget(beat.text)
+    const delivered = target
+      ? ratio >= Math.max(0, target.low - 0.12) && ratio <= Math.min(1, target.high + 0.18)
+      : ratio >= 0.12
+    return {
+      ...beat,
+      score: delivered ? 84 : Math.round(Math.max(20, Math.min(72, ratio * 220))),
+      evidence: `对白占比约 ${Math.round(ratio * 100)}%`,
+      delivered,
+    }
+  }
+
+  const match = anchorMatchScore(beat.text, chapterText)
+  const threshold = beat.key === 'voice_rules' || beat.key === 'scene_function' ? 12 : 22
+  return {
+    ...beat,
+    score: match.score,
+    evidence: match.matched,
+    delivered: match.score >= threshold,
+  }
+}
+
+export function buildStyleSampleSyncReport(project: any, chapter: any, contextPackage: any, chapterText: string) {
+  const strategy = styleSampleStrategyFromContext(project, contextPackage, chapter)
+  const samples = asArray(strategy?.samples)
+  const planned = uniqueChapterBenchmarkBeats(samples.flatMap((sample: any) => [
+    styleSampleBeat('scene_function', '场景功能', sample.scene_function, sample),
+    styleSampleBeat('narrative_rhythm', '叙述节奏', sample.narrative_rhythm, sample),
+    styleSampleBeat('sentence_pattern', '句式密度', sample.sentence_pattern, sample),
+    styleSampleBeat('dialogue_ratio', '对白比例', sample.dialogue_ratio, sample),
+    ...asArray(sample.voice_rules).map((rule: any) => styleSampleBeat('voice_rules', '角色口吻', rule, sample)),
+  ]))
+  const checked = planned.map(item => styleSampleBeatMatch(item, chapterText))
+  const delivered = checked.filter(item => item.delivered)
+  const missed = checked.filter(item => !item.delivered)
+  const copiedPhrases = Array.from(new Set([
+    ...asArray(strategy?.do_not_copy),
+    ...samples.flatMap((sample: any) => asArray(sample.unsafe_direct_phrases)),
+  ].map((item: any) => String(item || '').trim()).filter(item => item.length >= 6 && String(chapterText || '').includes(item))))
+  const missedCount = missed.length
+  const copyRiskCount = copiedPhrases.length
+  const score = Math.max(0, Math.min(100, Math.round(
+    planned.length ? (delivered.length / planned.length) * 100 - copyRiskCount * 12 : 82,
+  )))
+  const status = missedCount > 0 || copyRiskCount > 0 || score < 78 ? 'warn' : 'ok'
+
+  return {
+    report_id: `style-sample-sync-${chapter?.id || chapter?.chapter_no || Date.now()}`,
+    chapter_id: chapter?.id || null,
+    chapter_no: chapter?.chapter_no || null,
+    score,
+    status,
+    label: planned.length === 0 ? '风格未配置' : status === 'ok' ? '风格 OK' : `风格缺口 ${missedCount + copyRiskCount}`,
+    summary: planned.length === 0
+      ? '本章没有配置风格样章策略。'
+      : status === 'ok'
+        ? '正文已基本执行风格样章中的节奏、句式、对白和角色口吻策略，且没有照搬原句。'
+        : `正文有 ${missedCount} 项风格策略未充分落地，照搬风险 ${copyRiskCount} 项。`,
+    missed_count: missedCount,
+    copy_risk_count: copyRiskCount,
+    planned,
+    delivered,
+    missed,
+    copied_phrases: copiedPhrases,
+    next_actions: status === 'ok'
+      ? ['保持风格样章约束：学习节奏、句式密度、对白比例和情绪转折，不复制桥段和原句。']
+      : [
+          '下一次修订按风格样章补足 missed 项，把节奏、句式、对白比例和角色口吻改成正文可感知的表达。',
+          '不得照搬样章原句；copied_phrases 中的表达必须替换成作者当前章节自己的说法。',
+        ],
+  }
+}
+
+function retentionBriefFromContext(contextPackage: any, chapter: any = {}) {
+  const target = contextPackage?.chapter_target || {}
+  const brief = contextPackage?.pre_draft_brief || chapter?.raw_payload?.pre_draft_brief || target?.pre_draft_brief || {}
+  return target.reader_retention_brief || brief.reader_retention_brief || {}
+}
+
+function normalizeRetentionBeat(key: string, label: string, value: any, matchScope: 'opening' | 'tail' | 'full' = 'full') {
+  const text = compactText(value, 180)
+  return text ? { key, label, text, match_scope: matchScope } : null
+}
+
+function retentionBeatMatch(beat: any, chapterText: string) {
+  const scopedText = beat.match_scope === 'opening'
+    ? chapterText.slice(0, 900)
+    : beat.match_scope === 'tail'
+      ? chapterText.slice(-1200)
+      : chapterText
+  const match = anchorMatchScore(beat.text, scopedText)
+  const threshold = beat.match_scope === 'tail' ? 48 : 44
+  return {
+    ...beat,
+    score: match.score,
+    evidence: match.matched,
+    delivered: match.score >= threshold,
+  }
+}
+
+export function buildReaderRetentionSyncReport(project: any, chapter: any, contextPackage: any, chapterText: string) {
+  const retentionBrief = retentionBriefFromContext(contextPackage, chapter)
+  const planned = [
+    normalizeRetentionBeat('opening_hook', '开篇钩子', retentionBrief.opening_hook, 'opening'),
+    normalizeRetentionBeat('payoff_promise', '爽点承诺', retentionBrief.payoff_promise),
+    normalizeRetentionBeat('information_gap', '信息缺口', retentionBrief.information_gap),
+    normalizeRetentionBeat('emotional_reward', '情绪回报', retentionBrief.emotional_reward),
+    normalizeRetentionBeat('short_drama_scene', '短剧场面', retentionBrief.short_drama_scene),
+    normalizeRetentionBeat('ending_question', '章末追读', retentionBrief.ending_question, 'tail'),
+  ].filter(Boolean)
+  const checked = planned.map(item => retentionBeatMatch(item, chapterText))
+  const delivered = checked.filter(item => item.delivered)
+  const missed = checked.filter(item => !item.delivered)
+  const missedCount = missed.length
+  const score = Math.max(0, Math.min(100, Math.round(
+    planned.length ? (delivered.length / planned.length) * 100 : 82,
+  )))
+  const status = missedCount > 0 || score < 78 ? 'warn' : 'ok'
+
+  return {
+    report_id: `reader-retention-sync-${chapter?.id || chapter?.chapter_no || Date.now()}`,
+    chapter_id: chapter?.id || null,
+    chapter_no: chapter?.chapter_no || null,
+    score,
+    status,
+    label: status === 'ok' ? '追读 OK' : `漏追读 ${missedCount}`,
+    summary: status === 'ok'
+      ? '追读雷达的开篇钩子、爽点承诺、信息缺口和章末追读已基本兑现。'
+      : `追读雷达有 ${missedCount} 项未在正文中充分兑现。`,
+    missed_count: missedCount,
+    planned,
+    delivered,
+    missed,
+    next_actions: status === 'ok'
+      ? ['保持开写任务书的追读雷达和写后复盘闭环。']
+      : [
+          '下一次修订优先补足追读雷达 missed 项，尤其是前 300 字钩子和最后一幕追读问题。',
+          '如果正文只是解释设定或铺氛围，改为现场危机、可视化冲突和明确读者回报。',
+        ],
+  }
+}
+
+function normalizeAttractionDimension(key: string, label: string, expected: any, chapterText: string, options: { tailOnly?: boolean; openingOnly?: boolean; threshold?: number } = {}) {
+  const expectedText = compactText(expected, 240)
+  const scopeText = options.openingOnly ? chapterText.slice(0, 900) : chapterText
+  const match = anchorMatchScore(expectedText, scopeText, { tailOnly: options.tailOnly })
+  const threshold = Number(options.threshold || 50)
+  const status = !expectedText || match.score >= threshold ? 'ok' : 'warn'
+  return {
+    key,
+    label,
+    status,
+    score: expectedText ? match.score : 82,
+    expected: expectedText,
+    evidence: match.matched,
+    issue: status === 'ok' ? '' : `${label}未充分兑现：${expectedText}`,
+    repair_instruction: status === 'ok' ? '' : attractionRepairInstruction(key),
+  }
+}
+
+function attractionRepairInstruction(key: string) {
+  if (key === 'opening_hook') return '重写或补写前300字，先给异常、危险、欲望或反常信息。'
+  if (key === 'scene_drive') return '补齐场景目标、阻碍、转折、回报，把说明改成现场行动链。'
+  if (key === 'payoff_density') return '补出可见反制结果、信息增量、能力展示或情绪回报。'
+  if (key === 'page_turn') return '重做最后300字，留下下一章非看不可的危险、选择、反转或未解答案。'
+  if (key === 'spread_scene') return '补成可视化传播场面，让读者能复述画面、机制反差或公开反转。'
+  return '把缺口写成可见冲突、行动结果、信息增量或章末问题。'
+}
+
+function sceneDriveExpectation(contextPackage: any) {
+  const target = contextPackage?.chapter_target || {}
+  const sceneCards = asArray(target.scene_cards || contextPackage?.scene_cards)
+  const card = sceneCards.find((item: any) => compactText(item?.goal || item?.purpose || item?.conflict || item?.turning_point || item?.reader_payoff, 80)) || {}
+  return [
+    card?.goal || card?.purpose,
+    card?.conflict,
+    card?.turning_point || card?.turn || card?.reversal,
+    card?.reader_payoff,
+  ].filter(Boolean).join('；')
+}
+
+function chapterAttractionPriority(dimensions: any[]) {
+  const weak = dimensions.filter(item => item.status === 'warn')
+  if (weak.some(item => item.key === 'page_turn')) return '优先修章末翻页'
+  if (weak.some(item => item.key === 'opening_hook')) return '优先修开篇钩子'
+  if (weak.some(item => item.key === 'payoff_density')) return '优先补爽点密度'
+  if (weak.some(item => item.key === 'scene_drive')) return '优先修场景推进'
+  if (weak.some(item => item.key === 'spread_scene')) return '优先补传播场面'
+  return ''
+}
+
+function storyDriveSceneCards(contextPackage: any, chapter: any = {}) {
+  const target = contextPackage?.chapter_target || {}
+  const brief = contextPackage?.pre_draft_brief || chapter?.raw_payload?.pre_draft_brief || target?.pre_draft_brief || {}
+  return [
+    ...asArray(target.scene_cards),
+    ...asArray(contextPackage?.scene_cards),
+    ...asArray(brief.scene_briefs),
+    ...asArray(brief.scene_cards),
+  ]
+}
+
+function firstCompactText(...values: any[]) {
+  for (const value of values) {
+    const text = compactText(value, 220)
+    if (text) return text
+  }
+  return ''
+}
+
+function firstSceneCardText(sceneCards: any[], keys: string[]) {
+  for (const card of sceneCards) {
+    for (const key of keys) {
+      const text = compactText(card?.[key], 220)
+      if (text) return text
+    }
+  }
+  return ''
+}
+
+function storyDriveRepairInstruction(key: string) {
+  if (key === 'protagonist_choice') return '补出主角在压力下做出的主动选择，必须写成现场行动或对话交锋。'
+  if (key === 'choice_cost') return '补出选择带来的即时代价、暴露风险、资源消耗或关系变化。'
+  if (key === 'state_change') return '补出本章结束时主角处境、信息、关系或目标状态的明确变化。'
+  if (key === 'obstacle') return '补出外部阻碍和冲突压力，让主角不是顺滑完成事件。'
+  if (key === 'causal_next_step') return '补出下一步因果，把章末问题、危险或新目标接到下一章。'
+  if (key === 'chapter_goal') return '补出本章目标的可见达成、失败或阶段性结果。'
+  return '把缺口写成主角选择、冲突阻碍、代价反馈、状态变化和下一步因果。'
+}
+
+function normalizeStoryDriveDimension(key: string, label: string, expected: any, chapterText: string, threshold = 44) {
+  const text = compactText(expected, 240)
+  if (!text) return null
+  const match = anchorMatchScore(text, chapterText)
+  const delivered = match.score >= threshold
+  return {
+    key,
+    label,
+    text,
+    expected: text,
+    score: match.score,
+    evidence: match.matched,
+    delivered,
+    status: delivered ? 'ok' : 'warn',
+    issue: delivered ? '' : `${label}未充分兑现：${text}`,
+    repair_instruction: delivered ? '' : storyDriveRepairInstruction(key),
+  }
+}
+
+function storyDrivePriority(missed: any[]) {
+  if (missed.some(item => item.key === 'protagonist_choice')) return '优先补主角选择'
+  if (missed.some(item => item.key === 'choice_cost')) return '优先补选择代价'
+  if (missed.some(item => item.key === 'state_change')) return '优先补状态变化'
+  if (missed.some(item => item.key === 'obstacle')) return '优先补明确阻碍'
+  if (missed.some(item => item.key === 'causal_next_step')) return '优先补下一步因果'
+  if (missed.some(item => item.key === 'chapter_goal')) return '优先补本章目标'
+  return ''
+}
+
+export function buildStoryDriveSyncReport(project: any, chapter: any, contextPackage: any, chapterText: string) {
+  const target = contextPackage?.chapter_target || {}
+  const brief = contextPackage?.pre_draft_brief || chapter?.raw_payload?.pre_draft_brief || target?.pre_draft_brief || {}
+  const sceneCards = storyDriveSceneCards(contextPackage, chapter)
+  const dimensions = [
+    normalizeStoryDriveDimension(
+      'chapter_goal',
+      '本章目标',
+      firstCompactText(
+        target.chapter_goal,
+        target.goal,
+        target.objective,
+        brief.chapter_goal,
+        brief.chapter_objective,
+        firstSceneCardText(sceneCards, ['goal', 'purpose', 'reader_payoff', 'payoff']),
+      ),
+      chapterText,
+      42,
+    ),
+    normalizeStoryDriveDimension(
+      'obstacle',
+      '明确阻碍',
+      firstCompactText(
+        target.core_conflict,
+        target.conflict,
+        brief.core_conflict,
+        brief.conflict,
+        firstSceneCardText(sceneCards, ['conflict', 'obstacle', 'pressure']),
+      ),
+      chapterText,
+      40,
+    ),
+    normalizeStoryDriveDimension(
+      'protagonist_choice',
+      '主角选择',
+      firstCompactText(
+        target.protagonist_choice,
+        target.active_choice,
+        target.main_character_choice,
+        brief.protagonist_choice,
+        firstSceneCardText(sceneCards, ['protagonist_choice', 'active_choice', 'turning_point', 'turn', 'reversal']),
+      ),
+      chapterText,
+      42,
+    ),
+    normalizeStoryDriveDimension(
+      'choice_cost',
+      '选择代价',
+      firstCompactText(
+        target.choice_cost,
+        target.cost,
+        target.consequence,
+        target.stakes,
+        brief.choice_cost,
+        brief.cost,
+        firstSceneCardText(sceneCards, ['choice_cost', 'cost', 'consequence', 'stakes', 'risk']),
+      ),
+      chapterText,
+      42,
+    ),
+    normalizeStoryDriveDimension(
+      'state_change',
+      '状态变化',
+      firstCompactText(
+        target.state_change,
+        target.exit_state,
+        target.chapter_state_change,
+        brief.state_change,
+        firstSceneCardText(sceneCards, ['exit_state', 'state_change', 'result', 'scene_result']),
+      ),
+      chapterText,
+      42,
+    ),
+    normalizeStoryDriveDimension(
+      'causal_next_step',
+      '下一步因果',
+      firstCompactText(
+        target.causal_next_step,
+        target.next_step,
+        target.ending_hook,
+        brief.causal_next_step,
+        brief.ending_hook,
+        firstSceneCardText(sceneCards, ['causal_next_step', 'next_step', 'ending_hook', 'exit_hook']),
+      ),
+      chapterText,
+      42,
+    ),
+  ].filter(Boolean)
+
+  const delivered = dimensions.filter((item: any) => item.delivered)
+  const missed = dimensions.filter((item: any) => !item.delivered)
+  const score = Math.max(0, Math.min(100, Math.round(
+    dimensions.length ? dimensions.reduce((sum: number, item: any) => sum + Number(item.score || 0), 0) / dimensions.length : 82,
+  )))
+  const status = missed.length > 0 || score < 78 ? 'warn' : 'ok'
+  const priorityRepair = storyDrivePriority(missed)
+
+  return {
+    report_id: `story-drive-sync-${chapter?.id || chapter?.chapter_no || Date.now()}`,
+    chapter_id: chapter?.id || null,
+    chapter_no: chapter?.chapter_no || null,
+    score,
+    status,
+    label: dimensions.length === 0 ? '故事力未配置' : status === 'ok' ? '故事力 OK' : `故事力缺口 ${missed.length}`,
+    summary: dimensions.length === 0
+      ? '本章没有明确的故事驱动力任务书，建议补充主角选择、阻碍、代价和状态变化。'
+      : status === 'ok'
+        ? '本章目标、阻碍、主角选择、选择代价、状态变化和下一步因果已形成可追踪行动链。'
+        : `本章有 ${missed.length} 项故事驱动力缺口，${priorityRepair || '优先补主角主动选择和代价反馈'}。`,
+    missed_count: missed.length,
+    priority_repair: priorityRepair,
+    dimensions,
+    planned: dimensions,
+    delivered,
+    missed,
+    next_actions: status === 'ok'
+      ? ['保持本章主角主动选择、外部阻碍、选择代价、状态变化和下一步因果的连续执行。']
+      : [
+          '下一次修订必须补出主角主动选择、明确阻碍、选择代价、局面变化和下一步因果。',
+          '不能只用旁白解释剧情推进；缺口必须写成现场行动、对话交锋、代价反馈或状态变化。',
+          '如果本章原本只是过场，至少让主角做一个不可逆的小选择，并让下一章承接其后果。',
+        ],
+  }
+}
+
+function characterArcBriefFromContext(contextPackage: any, chapter: any = {}) {
+  const target = contextPackage?.chapter_target || {}
+  const brief = contextPackage?.pre_draft_brief || chapter?.raw_payload?.pre_draft_brief || target?.pre_draft_brief || {}
+  return target.character_arc_brief
+    || target.characterArcBrief
+    || brief.character_arc_brief
+    || brief.characterArcBrief
+    || contextPackage?.character_arc_context
+    || contextPackage?.characterArcContext
+    || {}
+}
+
+function characterArcRepairInstruction(key: string) {
+  if (key === 'growth_beat') return '补出角色在本章发生的可见成长节点，必须体现认知、选择、关系或行动方式变化。'
+  if (key === 'desire') return '补出角色本章想要什么，让欲望推动行动，而不是只被事件推着走。'
+  if (key === 'flaw_pressure') return '补出角色缺陷、恐惧或旧习惯被冲突压迫的瞬间。'
+  if (key === 'relationship_shift') return '补出人物关系的可见变化，例如信任、敌意、亏欠、试探或结盟。'
+  if (key === 'voice_anchor') return '补出角色稳定口吻和行动风格，避免所有人物说话像同一个旁白。'
+  return '把人物弧光缺口写成角色欲望、缺陷受压、关系变化、成长节点或口吻锚点。'
+}
+
+function normalizeCharacterArcDimension(key: string, label: string, expected: any, chapterText: string, threshold = 42) {
+  const text = compactText(expected, 240)
+  if (!text) return null
+  const match = anchorMatchScore(text, chapterText)
+  const delivered = match.score >= threshold
+  return {
+    key,
+    label,
+    text,
+    expected: text,
+    score: match.score,
+    evidence: match.matched,
+    delivered,
+    status: delivered ? 'ok' : 'warn',
+    issue: delivered ? '' : `${label}未充分兑现：${text}`,
+    repair_instruction: delivered ? '' : characterArcRepairInstruction(key),
+  }
+}
+
+function characterArcPriority(missed: any[]) {
+  if (missed.some(item => item.key === 'growth_beat')) return '优先补成长节点'
+  if (missed.some(item => item.key === 'desire')) return '优先补角色欲望'
+  if (missed.some(item => item.key === 'flaw_pressure')) return '优先补缺陷受压'
+  if (missed.some(item => item.key === 'relationship_shift')) return '优先补关系变化'
+  if (missed.some(item => item.key === 'voice_anchor')) return '优先补人物口吻'
+  return ''
+}
+
+export function buildCharacterArcSyncReport(project: any, chapter: any, contextPackage: any, chapterText: string) {
+  const arc = characterArcBriefFromContext(contextPackage, chapter)
+  const sceneCards = storyDriveSceneCards(contextPackage, chapter)
+  const dimensions = [
+    normalizeCharacterArcDimension(
+      'desire',
+      '角色欲望',
+      firstCompactText(
+        arc.desire,
+        arc.character_desire,
+        arc.characterDesire,
+        arc.goal,
+        firstSceneCardText(sceneCards, ['character_goal', 'characterGoal', 'desire', 'goal']),
+      ),
+      chapterText,
+      40,
+    ),
+    normalizeCharacterArcDimension(
+      'flaw_pressure',
+      '缺陷受压',
+      firstCompactText(
+        arc.flaw_pressure,
+        arc.flawPressure,
+        arc.inner_conflict,
+        arc.innerConflict,
+        arc.fear,
+        firstSceneCardText(sceneCards, ['flaw_pressure', 'flawPressure', 'inner_conflict', 'fear', 'pressure']),
+      ),
+      chapterText,
+      40,
+    ),
+    normalizeCharacterArcDimension(
+      'relationship_shift',
+      '关系变化',
+      firstCompactText(
+        arc.relationship_shift,
+        arc.relationshipShift,
+        arc.relationship_change,
+        arc.relationshipChange,
+        firstSceneCardText(sceneCards, ['relationship_shift', 'relationshipShift', 'relationship_change', 'relationshipChange']),
+      ),
+      chapterText,
+      40,
+    ),
+    normalizeCharacterArcDimension(
+      'growth_beat',
+      '成长节点',
+      firstCompactText(
+        arc.growth_beat,
+        arc.growthBeat,
+        arc.character_growth,
+        arc.characterGrowth,
+        arc.arc_step,
+        arc.arcStep,
+        firstSceneCardText(sceneCards, ['growth_beat', 'growthBeat', 'character_growth', 'arc_step', 'exit_state']),
+      ),
+      chapterText,
+      40,
+    ),
+    normalizeCharacterArcDimension(
+      'voice_anchor',
+      '口吻锚点',
+      firstCompactText(
+        arc.voice_anchor,
+        arc.voiceAnchor,
+        arc.voice_rule,
+        arc.voiceRule,
+        arc.dialogue_style,
+        firstSceneCardText(sceneCards, ['voice_anchor', 'voiceAnchor', 'voice_rule', 'dialogue_style']),
+      ),
+      chapterText,
+      36,
+    ),
+  ].filter(Boolean)
+
+  const delivered = dimensions.filter((item: any) => item.delivered)
+  const missed = dimensions.filter((item: any) => !item.delivered)
+  const score = Math.max(0, Math.min(100, Math.round(
+    dimensions.length ? dimensions.reduce((sum: number, item: any) => sum + Number(item.score || 0), 0) / dimensions.length : 82,
+  )))
+  const status = missed.length > 0 || score < 78 ? 'warn' : 'ok'
+  const priorityRepair = characterArcPriority(missed)
+
+  return {
+    report_id: `character-arc-sync-${chapter?.id || chapter?.chapter_no || Date.now()}`,
+    chapter_id: chapter?.id || null,
+    chapter_no: chapter?.chapter_no || null,
+    score,
+    status,
+    label: dimensions.length === 0 ? '人物弧光未配置' : status === 'ok' ? '人物弧光 OK' : `人物弧光缺口 ${missed.length}`,
+    summary: dimensions.length === 0
+      ? '本章没有明确的人物弧光任务，建议在开写任务书中补角色欲望、缺陷受压、关系变化和成长节点。'
+      : status === 'ok'
+        ? '本章角色欲望、缺陷受压、关系变化、成长节点和口吻锚点已基本落地。'
+        : `本章有 ${missed.length} 项人物弧光缺口，${priorityRepair || '优先补人物成长节点'}。`,
+    missed_count: missed.length,
+    priority_repair: priorityRepair,
+    dimensions,
+    planned: dimensions,
+    delivered,
+    missed,
+    next_actions: status === 'ok'
+      ? ['保持角色欲望、缺陷受压、关系变化、成长节点和口吻锚点的连续执行。']
+      : [
+          '下一次修订必须补出人物成长：角色欲望、缺陷受压、关系变化、成长节点和口吻锚点至少落地主要缺口。',
+          '不能只补心理旁白；新增内容必须写成角色行动、选择、对话反应、关系反馈或可见状态变化。',
+          '人物成长不能改长期方向；只推进本章应承担的阶段性变化。',
+        ],
+  }
+}
+
+export function buildChapterAttractionReviewReport(project: any, chapter: any, contextPackage: any, chapterText: string) {
+  const target = contextPackage?.chapter_target || {}
+  const retentionBrief = retentionBriefFromContext(contextPackage, chapter)
+  const dimensions = [
+    normalizeAttractionDimension('opening_hook', '开篇钩子', retentionBrief.opening_hook || target.opening_hook || target.summary, chapterText, { openingOnly: true, threshold: 44 }),
+    normalizeAttractionDimension('scene_drive', '场景推进', sceneDriveExpectation(contextPackage) || target.conflict || target.core_conflict, chapterText, { threshold: 40 }),
+    normalizeAttractionDimension('payoff_density', '爽点密度', retentionBrief.payoff_promise || target.reader_payoff || target.payoff, chapterText, { threshold: 42 }),
+    normalizeAttractionDimension('page_turn', '章末翻页', retentionBrief.ending_question || target.ending_hook, chapterText, { tailOnly: true, threshold: 42 }),
+    normalizeAttractionDimension('spread_scene', '传播场面', retentionBrief.short_drama_scene || target.signature_scene_brief?.signature_scene || target.ip_scene_hook, chapterText, { threshold: 42 }),
+  ]
+  const weak = dimensions.filter(item => item.status === 'warn')
+  const score = Math.max(0, Math.min(100, Math.round(dimensions.reduce((sum, item) => sum + Number(item.score || 0), 0) / Math.max(1, dimensions.length))))
+  const status = weak.length > 0 || score < 78 ? 'warn' : 'ok'
+  const priorityRepair = chapterAttractionPriority(dimensions)
+  return {
+    report_id: `chapter-attraction-${chapter?.id || chapter?.chapter_no || Date.now()}`,
+    chapter_id: chapter?.id || null,
+    chapter_no: chapter?.chapter_no || null,
+    score,
+    status,
+    label: status === 'ok' ? '吸引力 OK' : `吸引力缺口 ${weak.length}`,
+    summary: status === 'ok'
+      ? '本章开篇钩子、场景推进、爽点密度、章末翻页和传播场面已形成连续读者拉力。'
+      : `本章有 ${weak.length} 项吸引力执行缺口，${priorityRepair || '优先处理读者翻页动力'}。`,
+    weak_count: weak.length,
+    priority_repair: priorityRepair,
+    dimensions,
+    weak_dimensions: weak,
+    next_actions: status === 'ok'
+      ? ['保持当前章的读者拉力执行结构，并在下一章继续承接章末问题。']
+      : [
+          '前300字必须尽快给出异常、危险、欲望或反常信息。',
+          '每个场景补齐目标、阻碍、转折、回报，避免纯解释或纯氛围过场。',
+          '最后300字必须留下下一章非看不可的危险、选择、反转或未解答案。',
+          '补出可视化传播场面和短周期爽点，让读者能复述本章最有记忆点的一幕。',
+        ],
+  }
+}
+
+function innovationBriefFromContext(contextPackage: any, chapter: any = {}) {
+  const target = contextPackage?.chapter_target || {}
+  const brief = contextPackage?.pre_draft_brief || chapter?.raw_payload?.pre_draft_brief || target?.pre_draft_brief || {}
+  return target.innovation_brief || brief.innovation_brief || {}
+}
+
+function normalizeInnovationBeat(key: string, label: string, value: any) {
+  const text = compactText(value, 180)
+  return text ? { key, label, text } : null
+}
+
+function innovationBeatMatch(beat: any, chapterText: string) {
+  const match = anchorMatchScore(beat.text, chapterText)
+  const key = String(beat.key || '')
+  const threshold = key === 'chapter_angle'
+    ? 22
+    : key.startsWith('differentiation_guardrail')
+      ? 38
+      : 44
+  const delivered = match.score >= threshold || (key === 'chapter_angle' && match.score >= 20 && asArray(match.matched).length >= 2)
+  return {
+    ...beat,
+    score: match.score,
+    evidence: match.matched,
+    delivered,
+  }
+}
+
+export function buildInnovationSyncReport(project: any, chapter: any, contextPackage: any, chapterText: string) {
+  const innovationBrief = innovationBriefFromContext(contextPackage, chapter)
+  const planned = [
+    normalizeInnovationBeat('chapter_angle', '创新角度', innovationBrief.chapter_angle),
+    ...asArray(innovationBrief.execution_points).map((item: any, index: number) => normalizeInnovationBeat(`execution_point_${index + 1}`, '执行点', item)),
+    ...asArray(innovationBrief.differentiation_guardrails).map((item: any, index: number) => normalizeInnovationBeat(`differentiation_guardrail_${index + 1}`, '差异护栏', item)),
+    ...asArray(innovationBrief.ip_adaptation_hooks).map((item: any, index: number) => normalizeInnovationBeat(`ip_adaptation_hook_${index + 1}`, 'IP化场面', item)),
+  ].filter(Boolean)
+  const checked = planned.map(item => innovationBeatMatch(item, chapterText))
+  const delivered = checked.filter(item => item.delivered)
+  const missed = checked.filter(item => !item.delivered)
+  const missedCount = missed.length
+  const score = Math.max(0, Math.min(100, Math.round(
+    planned.length ? (delivered.length / planned.length) * 100 : 82,
+  )))
+  const status = missedCount > 0 || score < 78 ? 'warn' : 'ok'
+
+  return {
+    report_id: `innovation-sync-${chapter?.id || chapter?.chapter_no || Date.now()}`,
+    chapter_id: chapter?.id || null,
+    chapter_no: chapter?.chapter_no || null,
+    score,
+    status,
+    label: status === 'ok' ? '创新 OK' : `创新缺口 ${missedCount}`,
+    summary: status === 'ok'
+      ? '本章创新角度、执行点、差异护栏和可视化场面已基本落地。'
+      : `创新执行有 ${missedCount} 项未在正文中充分兑现。`,
+    missed_count: missedCount,
+    planned,
+    delivered,
+    missed,
+    next_actions: status === 'ok'
+      ? ['保持开写任务书的创新执行和写后复盘闭环。']
+      : [
+          '下一次修订优先补足创新执行 missed 项，避免把本章写成普通套路章。',
+          '把创新角度转成可见选择、机制反差、规则代价或 IP 化场面，不要只靠旁白解释卖点。',
+      ],
+  }
+}
+
+function signatureSceneBriefFromContext(contextPackage: any, chapter: any = {}) {
+  return normalizeSignatureSceneBrief(
+    contextPackage?.chapter_target?.signature_scene_brief
+      || contextPackage?.signature_scene_brief
+      || contextPackage?.pre_draft_brief?.signature_scene_brief
+      || chapter?.raw_payload?.pre_draft_brief?.signature_scene_brief
+      || chapter?.raw_payload?.signature_scene_brief,
+  )
+}
+
+function normalizeSignatureSceneSyncBeat(key: string, label: string, text: any, threshold = 58) {
+  const normalizedText = compactText(text, 180)
+  return normalizedText ? { key, label, text: normalizedText, threshold } : null
+}
+
+function signatureSceneSyncBeatMatch(beat: any, chapterText: string) {
+  const match = anchorMatchScore(beat.text, chapterText)
+  const delivered = match.score >= Number(beat.threshold || 58)
+  return {
+    ...beat,
+    score: match.score,
+    evidence: match.matched,
+    delivered,
+  }
+}
+
+export function buildSignatureSceneSyncReport(project: any, chapter: any, contextPackage: any, chapterText: string) {
+  const signatureSceneBrief = signatureSceneBriefFromContext(contextPackage, chapter)
+  const planned = [
+    normalizeSignatureSceneSyncBeat('signature_scene', '标志性场面', signatureSceneBrief?.signature_scene, 58),
+    normalizeSignatureSceneSyncBeat('scene_repair_target', '补位目标', signatureSceneBrief?.scene_repair_target, 50),
+    normalizeSignatureSceneSyncBeat('reader_payoff', '读者回报', signatureSceneBrief?.reader_payoff, 42),
+    normalizeSignatureSceneSyncBeat('storyline_service', '剧情线服务', signatureSceneBrief?.storyline_service, 50),
+  ].filter(Boolean)
+
+  if (!planned.length) {
+    return {
+      report_id: `signature-scene-sync-${chapter?.id || chapter?.chapter_no || Date.now()}`,
+      chapter_id: chapter?.id || null,
+      chapter_no: chapter?.chapter_no || null,
+      score: null,
+      status: 'ok',
+      label: '强场面未计划',
+      summary: '本章没有明确标志性强场面补位任务，不做兑现复盘。',
+      planned_count: 0,
+      missed_count: 0,
+      planned: [],
+      delivered: [],
+      missed: [],
+      next_actions: ['后续如近10章强场面覆盖不足，先在滚动规划和开写任务书中补标志性场面。'],
+    }
+  }
+
+  const rawChecked = planned.map(item => signatureSceneSyncBeatMatch(item, chapterText))
+  const signatureDelivered = rawChecked.some(item => item.key === 'signature_scene' && item.delivered)
+  const checked = rawChecked.map(item => {
+    if (item.key !== 'scene_repair_target' || item.delivered || !signatureDelivered) return item
+    return {
+      ...item,
+      score: Math.max(Number(item.score || 0), 80),
+      evidence: ['标志性场面已落地'],
+      delivered: true,
+    }
+  })
+  const delivered = checked.filter(item => item.delivered)
+  const missed = checked.filter(item => !item.delivered)
+  const missedCount = missed.length
+  const score = Math.max(0, Math.min(100, Math.round((delivered.length / planned.length) * 100)))
+  const signatureSceneMissed = missed.some(item => item.key === 'signature_scene')
+  const status = signatureSceneMissed || missedCount > 0 || score < 78 ? 'warn' : 'ok'
+
+  return {
+    report_id: `signature-scene-sync-${chapter?.id || chapter?.chapter_no || Date.now()}`,
+    chapter_id: chapter?.id || null,
+    chapter_no: chapter?.chapter_no || null,
+    score,
+    status,
+    label: status === 'ok' ? '强场面 OK' : `强场面漏写 ${missedCount}`,
+    summary: status === 'ok'
+      ? '本章开写任务书里的标志性场面、补位目标、读者回报和剧情线服务已基本落地。'
+      : `标志性强场面补位有 ${missedCount} 项未在正文中充分兑现。`,
+    planned_count: planned.length,
+    missed_count: missedCount,
+    planned,
+    delivered,
+    missed,
+    next_actions: status === 'ok'
+      ? ['保持强场面补位从滚动规划到正文交稿的兑现闭环。']
+      : [
+          '下一次修订优先补回开写任务书指定的标志性场面，把它写成可视化动作、空间冲突、规则代价或公开反转。',
+          '不要只补气氛描写；必须让 scene_repair_target、reader_payoff 和 storyline_service 在正文事件中可见。',
+      ],
+  }
+}
+
+function storyUnitContextFromContext(contextPackage: any, chapter: any = {}) {
+  return normalizeStoryUnitContext(
+    contextPackage?.chapter_target?.story_unit_context
+      || contextPackage?.story_unit_context
+      || contextPackage?.pre_draft_brief?.story_unit_context
+      || chapter?.raw_payload?.pre_draft_brief?.story_unit_context
+      || chapter?.raw_payload?.story_unit_context,
+    Number(chapter?.chapter_no || contextPackage?.chapter_target?.chapter_no || 0),
+  )
+}
+
+function normalizeStoryUnitSyncBeat(key: string, label: string, text: any, source = 'story_unit', threshold = 58) {
+  const normalizedText = compactText(text, 180)
+  return normalizedText ? { key, label, text: normalizedText, source, threshold } : null
+}
+
+function storyUnitSyncBeatMatch(beat: any, chapterText: string) {
+  const match = anchorMatchScore(beat.text, chapterText)
+  const delivered = match.score >= Number(beat.threshold || 58)
+  return {
+    ...beat,
+    score: match.score,
+    evidence: match.matched,
+    delivered,
+  }
+}
+
+function storyUnitForbiddenTouched(beat: any, chapterText: string) {
+  const match = anchorMatchScore(String(beat.text || '').replace(/^不得|禁止|不可/, ''), chapterText)
+  const touched = match.score >= 42
+  return {
+    ...beat,
+    score: match.score,
+    evidence: match.matched,
+    touched,
+  }
+}
+
+export function buildStoryUnitSyncReport(project: any, chapter: any, contextPackage: any, chapterText: string) {
+  const storyUnit = storyUnitContextFromContext(contextPackage, chapter)
+  if (!storyUnit) {
+    return {
+      report_id: `story-unit-sync-${chapter?.id || chapter?.chapter_no || Date.now()}`,
+      chapter_id: chapter?.id || null,
+      chapter_no: chapter?.chapter_no || null,
+      score: null,
+      status: 'ok',
+      label: '剧情单元未计划',
+      summary: '本章没有明确剧情单元任务，不做单元职责复盘。',
+      missed_count: 0,
+      rushed_count: 0,
+      forbidden_count: 0,
+      story_unit: null,
+      planned: [],
+      delivered: [],
+      missed: [],
+      rushed_ahead: [],
+      forbidden_touched: [],
+      next_actions: [],
+    }
+  }
+
+  const role = compactBriefText(storyUnit.current_chapter_role)
+  const roleText = normalizedMatchText(role)
+  const roleRequired = [
+    /入口|开场|进场/.test(role)
+      ? normalizeStoryUnitSyncBeat('entry_hook', '入口钩子', storyUnit.entry_hook || role, 'story_unit', 50)
+      : null,
+    /高潮|回报|兑现|打脸|结算/.test(role)
+      ? normalizeStoryUnitSyncBeat('mini_climax_payoff', '小高潮/回报', storyUnit.mini_climax_payoff || role, 'story_unit', 58)
+      : null,
+    /出单元|出场|收束|转入|承接下一|下一段/.test(role)
+      ? normalizeStoryUnitSyncBeat('exit_hook', '出单元钩子', storyUnit.exit_hook || role, 'story_unit', 58)
+      : null,
+    /压力|升级|推进|冲突/.test(role)
+      ? normalizeStoryUnitSyncBeat('pressure_escalation', '压力升级', asArray(storyUnit.pressure_escalation)[0] || role, 'story_unit', 50)
+      : null,
+  ].filter(Boolean)
+  const fallbackRequired = roleRequired.length
+    ? []
+    : [
+        normalizeStoryUnitSyncBeat('current_chapter_role', '当前职责', role || storyUnit.unit_goal, 'story_unit', 46),
+      ].filter(Boolean)
+  const setupOptional = asArray(storyUnit.setup_and_storyline)
+    .slice(0, 3)
+    .map((item: any, index: number) => normalizeStoryUnitSyncBeat(`setup_and_storyline_${index + 1}`, '伏笔/剧情线', item, 'story_unit_setup', 48))
+    .filter(Boolean)
+  const required = [...roleRequired, ...fallbackRequired]
+  const planned = [...required, ...setupOptional]
+  const checkedRequired = required.map(item => storyUnitSyncBeatMatch(item, chapterText))
+  const checkedOptional = setupOptional.map(item => storyUnitSyncBeatMatch(item, chapterText))
+  const delivered = [...checkedRequired, ...checkedOptional].filter(item => item.delivered)
+  const missed = checkedRequired.filter(item => !item.delivered)
+  const rushCandidates = [
+    !/高潮|回报|兑现|打脸|结算/.test(role)
+      ? normalizeStoryUnitSyncBeat('mini_climax_payoff', '后段小高潮', storyUnit.mini_climax_payoff, 'story_unit_rush', 58)
+      : null,
+    !/出单元|收束|转入/.test(role)
+      ? normalizeStoryUnitSyncBeat('exit_hook', '出单元钩子', storyUnit.exit_hook, 'story_unit_rush', 58)
+      : null,
+  ].filter(Boolean)
+  const rushedAhead = rushCandidates
+    .map(item => storyUnitSyncBeatMatch(item, chapterText))
+    .filter(item => item.delivered)
+  const forbiddenTouched = asArray(storyUnit.forbidden_advance)
+    .slice(0, 6)
+    .map((item: any, index: number) => normalizeStoryUnitSyncBeat(`forbidden_advance_${index + 1}`, '禁抢跑', item, 'story_unit_forbidden', 42))
+    .filter(Boolean)
+    .map(item => storyUnitForbiddenTouched(item, chapterText))
+    .filter(item => item.touched)
+
+  const missedCount = missed.length
+  const rushedCount = rushedAhead.length
+  const forbiddenCount = forbiddenTouched.length
+  const status = missedCount || rushedCount || forbiddenCount ? 'warn' : 'ok'
+  const score = Math.max(0, Math.min(100, Math.round(100 - missedCount * 24 - rushedCount * 22 - forbiddenCount * 28)))
+  const riskParts = [
+    missedCount ? `单元漏写 ${missedCount}` : '',
+    rushedCount ? `单元抢跑 ${rushedCount}` : '',
+    forbiddenCount ? `禁抢跑 ${forbiddenCount}` : '',
+  ].filter(Boolean)
+
+  return {
+    report_id: `story-unit-sync-${chapter?.id || chapter?.chapter_no || Date.now()}`,
+    chapter_id: chapter?.id || null,
+    chapter_no: chapter?.chapter_no || null,
+    score,
+    status,
+    label: status === 'ok' ? '剧情单元 OK' : riskParts.join(' · '),
+    summary: status === 'ok'
+      ? '本章已完成当前剧情单元职责，且未明显提前消费后段小高潮或出单元钩子。'
+      : `本章剧情单元职责存在 ${missedCount + rushedCount + forbiddenCount} 项风险。`,
+    missed_count: missedCount,
+    rushed_count: rushedCount,
+    forbidden_count: forbiddenCount,
+    story_unit: {
+      title: storyUnit.title,
+      chapter_range_label: storyUnit.chapter_range_label,
+      current_chapter_role: storyUnit.current_chapter_role,
+      unit_goal: storyUnit.unit_goal,
+    },
+    role_key: roleText,
+    planned,
+    delivered,
+    missed,
+    rushed_ahead: rushedAhead,
+    forbidden_touched: forbiddenTouched,
+    next_actions: status === 'ok'
+      ? ['保持剧情单元任务书、正文生成和交稿复盘闭环。']
+      : [
+          '下一次修订优先补足当前剧情单元职责 missed 项，尤其是入口钩子、压力升级或本章回报。',
+          '把 rushed_ahead 和 forbidden_touched 中的后段内容改成暗示、误导或延迟兑现，不要在本章提前解决。',
+      ],
+  }
+}
+
+const volumeBeatPattern = /小高潮|中高潮|卷末|高潮|爆点|转折|反转|大回报|强冲突|阶段收束|收束|破局|打脸|揭底|真相|压轴/
+
+function volumeBeatBriefFromContext(contextPackage: any, chapter: any = {}) {
+  const target = contextPackage?.chapter_target || {}
+  const brief = contextPackage?.pre_draft_brief || chapter?.raw_payload?.pre_draft_brief || target?.pre_draft_brief || {}
+  return {
+    explicit: target.volume_beat_brief || brief.volume_beat_brief || {},
+    nextBatch: target.next_batch_brief || brief.next_batch_brief || contextPackage?.next_batch_brief || {},
+    sceneCards: [
+      ...asArray(target.scene_cards),
+      ...asArray(brief.scene_briefs),
+    ],
+  }
+}
+
+function normalizeVolumeBeat(key: string, label: string, value: any, source = 'volume_beat') {
+  const text = compactText(value, 180)
+  return text ? { key, label, text, source } : null
+}
+
+function uniqueVolumeBeats(items: any[]) {
+  const seen = new Set<string>()
+  const rows: any[] = []
+  for (const item of items.filter(Boolean)) {
+    const key = normalizedMatchText(item.text)
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    rows.push(item)
+  }
+  return rows
+}
+
+function volumeBeatMatch(beat: any, chapterText: string) {
+  const match = anchorMatchScore(beat.text, chapterText)
+  const threshold = beat.key === 'current_chapter_role' ? 44 : 70
+  return {
+    ...beat,
+    score: match.score,
+    evidence: match.matched,
+    delivered: match.score >= threshold,
+  }
+}
+
+export function buildVolumeBeatSyncReport(project: any, chapter: any, contextPackage: any, chapterText: string) {
+  const beatContext = volumeBeatBriefFromContext(contextPackage, chapter)
+  const currentRole = firstDefined(
+    beatContext.explicit.current_chapter_role,
+    beatContext.explicit.chapter_role,
+    beatContext.nextBatch.current_chapter_role,
+    beatContext.nextBatch.currentChapterRole,
+  )
+  const explicitBeats = [
+    normalizeVolumeBeat('volume_goal', '卷级目标', beatContext.explicit.volume_goal || beatContext.explicit.goal),
+    normalizeVolumeBeat('climax_promise', '高潮承诺', beatContext.explicit.climax_promise || beatContext.explicit.climax),
+    ...asArray(beatContext.explicit.required_beats).map((item: any, index: number) => normalizeVolumeBeat(`required_beat_${index + 1}`, '爆点动作', item)),
+  ].filter(Boolean)
+  const hasExplicitVolumeBeat = explicitBeats.length > 0 || volumeBeatPattern.test(currentRole)
+  const sceneBeats = beatContext.sceneCards.flatMap((card: any, index: number) => {
+    const candidates = [
+      normalizeVolumeBeat(`turning_point_${index + 1}`, '转折点', card?.turning_point || card?.turn || card?.reversal, 'scene_card'),
+      normalizeVolumeBeat(`reader_payoff_${index + 1}`, '读者回报', card?.reader_payoff || card?.payoff || card?.reader_reward, 'scene_card'),
+      normalizeVolumeBeat(`ending_hook_${index + 1}`, '钩子推进', card?.ending_hook_seed || card?.ending_hook, 'scene_card'),
+    ].filter(Boolean)
+    return hasExplicitVolumeBeat ? candidates : candidates.filter(item => volumeBeatPattern.test(item.text))
+  })
+  const planned = uniqueVolumeBeats([
+    volumeBeatPattern.test(currentRole) ? normalizeVolumeBeat('current_chapter_role', '本章爆点职责', currentRole) : null,
+    ...explicitBeats,
+    ...sceneBeats,
+  ])
+  const checked = planned.map(item => volumeBeatMatch(item, chapterText))
+  const delivered = checked.filter(item => item.delivered)
+  const missed = checked.filter(item => !item.delivered)
+  const missedCount = missed.length
+  const score = Math.max(0, Math.min(100, Math.round(
+    planned.length ? (delivered.length / planned.length) * 100 : 82,
+  )))
+  const status = missedCount > 0 || score < 78 ? 'warn' : 'ok'
+
+  return {
+    report_id: `volume-beat-sync-${chapter?.id || chapter?.chapter_no || Date.now()}`,
+    chapter_id: chapter?.id || null,
+    chapter_no: chapter?.chapter_no || null,
+    score,
+    status,
+    label: planned.length === 0 ? '爆点未计划' : status === 'ok' ? '爆点 OK' : `爆点漏兑现 ${missedCount}`,
+    summary: planned.length === 0
+      ? '本章没有明确卷级高潮或爆点承诺。'
+      : status === 'ok'
+        ? '本章卷级爆点、转折和读者回报已基本兑现。'
+        : `本章有 ${missedCount} 项卷级爆点或小高潮承诺未在正文中充分兑现。`,
+    missed_count: missedCount,
+    planned,
+    delivered,
+    missed,
+    next_actions: status === 'ok'
+      ? ['保持卷级爆点预算、章节任务书和正文兑现闭环。']
+      : [
+          '下一次修订优先补足卷级爆点 missed 项，把小高潮/中高潮/卷末爆点写成可见行动、反转和回报。',
+          '如果正文只铺信息没有兑现转折，优先补现场冲突、选择代价、反制结果和章末升级。',
+        ],
+  }
+}
+
+function runwayFromContext(contextPackage: any) {
+  return contextPackage?.chapter_target?.million_word_runway || contextPackage?.million_word_runway || {}
+}
+
+function normalizeRunwayQuestion(item: any, index: number) {
+  const text = compactText(item?.answer || item?.text || item?.summary || item?.value || '', 180)
+  if (!text) return null
+  return {
+    key: String(item?.key || `question_${index + 1}`),
+    label: compactText(item?.label || item?.title || `本章四问 ${index + 1}`, 60),
+    text,
+  }
+}
+
+function normalizeRunwayFuel(item: any, index: number) {
+  const text = compactText(typeof item === 'string' ? item : item?.text || item?.name || item?.title || item?.summary || item?.description || '', 180)
+  return text ? { key: `reader_fuel_${index + 1}`, text } : null
+}
+
+function runwayBeatMatch(beat: any, chapterText: string) {
+  const match = anchorMatchScore(beat.text, chapterText)
+  return {
+    ...beat,
+    score: match.score,
+    evidence: match.matched,
+    delivered: match.score >= 44,
+  }
+}
+
+function runwayRedlineTouched(redLines: any[], chapterText: string) {
+  const normalizedChapterText = normalizedMatchText(chapterText)
+  return redLines
+    .map((item: any) => ({ text: compactText(typeof item === 'string' ? item : item?.text || item?.name || item?.title || item?.summary || item?.description || '', 180) }))
+    .filter((item: any) => item.text && normalizedChapterText.includes(normalizedMatchText(item.text)))
+}
+
+export function buildRunwaySyncReport(project: any, chapter: any, contextPackage: any, chapterText: string) {
+  const runway = runwayFromContext(contextPackage)
+  const fourQuestions = [
+    ...asArray(runway?.fourQuestions),
+    ...asArray(runway?.four_questions),
+  ]
+    .map(normalizeRunwayQuestion)
+    .filter(Boolean)
+  const readerFuel = [
+    ...asArray(runway?.readerFuel),
+    ...asArray(runway?.reader_fuel),
+  ]
+    .map(normalizeRunwayFuel)
+    .filter(Boolean)
+  const redLines = [
+    ...asArray(runway?.redLines),
+    ...asArray(runway?.red_lines),
+  ]
+
+  const questionChecks = fourQuestions.map(item => runwayBeatMatch(item, chapterText))
+  const fuelChecks = readerFuel.map(item => runwayBeatMatch(item, chapterText))
+  const fourQuestionDelivered = questionChecks.filter(item => item.delivered)
+  const fourQuestionMissed = questionChecks.filter(item => !item.delivered)
+  const readerFuelDelivered = fuelChecks.filter(item => item.delivered)
+  const readerFuelMissed = fuelChecks.filter(item => !item.delivered)
+  const redlineTouched = runwayRedlineTouched(redLines, chapterText)
+  const riskCount = fourQuestionMissed.length + readerFuelMissed.length + redlineTouched.length
+  const plannedCount = fourQuestions.length + readerFuel.length
+  const deliveredCount = fourQuestionDelivered.length + readerFuelDelivered.length
+  const score = Math.max(0, Math.min(100, Math.round(
+    plannedCount
+      ? (deliveredCount / plannedCount) * 100 - redlineTouched.length * 22
+      : redlineTouched.length ? 62 - redlineTouched.length * 12 : 82,
+  )))
+  const status = riskCount > 0 || score < 78 ? 'warn' : 'ok'
+
+  return {
+    report_id: `runway-sync-${chapter?.id || chapter?.chapter_no || Date.now()}`,
+    chapter_id: chapter?.id || null,
+    chapter_no: chapter?.chapter_no || null,
+    score,
+    status,
+    label: status === 'ok' ? '航线 OK' : `航线风险 ${riskCount}`,
+    summary: status === 'ok'
+      ? '本章已基本兑现百万字航线的本章四问、读者燃料和红线约束。'
+      : `百万字航线存在 ${riskCount} 项兑现风险。`,
+    risk_count: riskCount,
+    four_questions: questionChecks,
+    four_question_delivered: fourQuestionDelivered,
+    four_question_missed: fourQuestionMissed,
+    reader_fuel: fuelChecks,
+    reader_fuel_delivered: readerFuelDelivered,
+    reader_fuel_missed: readerFuelMissed,
+    redline_touched: redlineTouched,
+    next_actions: status === 'ok'
+      ? ['保持百万字航线：本章四问、读者燃料、禁用红线要继续进入开写任务书和交稿复盘。']
+      : [
+          '下一次修订优先补足 four_question_missed 和 reader_fuel_missed，避免章节只完成事件但不服务长期追读。',
+          '如果 redline_touched 有内容，必须改掉提前揭露、越级回收或破坏长期核心的段落。',
+        ],
+  }
+}
+
 export function normalizeDiscoveredAssets(assets: any[] = [], options: {
   existingCharacters?: any[]
   existingSettings?: any[]
@@ -748,6 +3010,43 @@ export function normalizeDiscoveredAssets(assets: any[] = [], options: {
   return normalized
 }
 
+export function normalizeIpSceneCandidates(candidates: any[] = [], chapter: any = {}) {
+  const normalized: any[] = []
+  const seen = new Set<string>()
+  const chapterNo = Number(chapter?.chapter_no || 0) || null
+  const chapterId = Number(chapter?.id || 0) || null
+
+  for (const candidate of asArray(candidates)) {
+    const title = String(candidate?.title || candidate?.name || '').trim()
+    const summary = String(candidate?.summary || candidate?.description || '').trim()
+    if (!title || !summary) continue
+    const key = title.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+
+    normalized.push({
+      title,
+      summary,
+      visual_hook: String(candidate?.visual_hook || candidate?.visual || candidate?.image_hook || '').trim(),
+      adaptation_value: String(candidate?.adaptation_value || candidate?.ip_value || candidate?.short_drama_value || '').trim(),
+      spread_point: String(candidate?.spread_point || candidate?.comment_point || candidate?.discussion_point || '').trim(),
+      evidence: String(candidate?.evidence || candidate?.quote || '').trim(),
+      source_excerpt: String(candidate?.source_excerpt || candidate?.excerpt || candidate?.evidence || '').trim(),
+      tags: asArray(candidate?.tags).map((item: any) => String(item || '').trim()).filter(Boolean).slice(0, 8),
+      chapter_id: chapterId,
+      chapter_no: chapterNo,
+      payload_json: {
+        source: 'story_state_ip_scene_intake',
+        source_chapter_id: chapterId,
+        source_chapter_no: chapterNo,
+        raw: candidate,
+      },
+    })
+  }
+
+  return normalized
+}
+
 export function normalizeMemeBank(rawBank: any[] = []) {
   const normalized: any[] = []
   const seen = new Set<string>()
@@ -783,11 +3082,133 @@ export function normalizeMemeBank(rawBank: any[] = []) {
   return normalized
 }
 
+export function normalizeStyleSampleBank(rawBank: any[] = []) {
+  const normalized: any[] = []
+  const seen = new Set<string>()
+  for (const raw of asArray(rawBank)) {
+    const sampleKey = String(raw?.sample_key || raw?.key || raw?.name || raw?.title || '').trim()
+    if (!sampleKey) continue
+    const key = sampleKey.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+
+    const sceneFunction = String(raw?.scene_function || raw?.function || raw?.usage_function || raw?.purpose || '').trim()
+    const narrativeRhythm = String(raw?.narrative_rhythm || raw?.rhythm || raw?.pacing || '').trim()
+    const sentencePattern = String(raw?.sentence_pattern || raw?.sentence_density || raw?.sentence_length || '').trim()
+    const dialogueRatio = String(raw?.dialogue_ratio || raw?.dialogue_density || '').trim()
+    const voiceRules = asArray(raw?.voice_rules || raw?.character_voice || raw?.voice)
+      .map((item: any) => String(item || '').trim())
+      .filter(Boolean)
+    const abstractUsage = String(raw?.abstract_usage || raw?.usage || '').trim()
+    const unsafeDirectPhrases = [
+      ...asArray(raw?.unsafe_direct_phrases),
+      ...asArray(raw?.forbidden_copy),
+      ...asArray(raw?.direct_phrases),
+      raw?.direct_phrase,
+      raw?.forbidden_phrase,
+    ].map((item: any) => String(item || '').trim()).filter(Boolean)
+
+    normalized.push({
+      sample_key: sampleKey,
+      scene_function: sceneFunction || '叙述节奏样本',
+      narrative_rhythm: narrativeRhythm || '按本章场景压力调整节奏',
+      sentence_pattern: sentencePattern || '短中句结合，解释压短',
+      dialogue_ratio: dialogueRatio || '按冲突需要控制对白比例',
+      voice_rules: voiceRules,
+      abstract_usage: [
+        abstractUsage || sceneFunction || narrativeRhythm || `${sampleKey} 的表达方法`,
+        '；只学习节奏、句式密度、对白比例和情绪转折，不学习具体桥段、设定和原句。',
+      ].join('').replace(/；+/g, '；'),
+      unsafe_direct_phrases: Array.from(new Set(unsafeDirectPhrases)),
+      suitable_genres: asArray(raw?.suitable_genres || raw?.genres).map((item: any) => String(item || '').trim()).filter(Boolean),
+      forbidden_scenes: asArray(raw?.forbidden_scenes || raw?.禁用场景).map((item: any) => String(item || '').trim()).filter(Boolean),
+    })
+  }
+  return normalized
+}
+
+export function normalizeChapterBenchmarkSampleBank(rawBank: any[] = []) {
+  const normalized: any[] = []
+  const seen = new Set<string>()
+  for (const raw of asArray(rawBank)) {
+    const sampleKey = String(raw?.sample_key || raw?.key || raw?.name || raw?.title || '').trim()
+    if (!sampleKey) continue
+    const key = sampleKey.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+
+    const openingHook = String(raw?.opening_hook || raw?.openingHook || raw?.hook || '').trim()
+    const conflictPattern = String(raw?.conflict_pattern || raw?.conflictPattern || raw?.conflict || '').trim()
+    const payoffPattern = String(raw?.payoff_pattern || raw?.payoffPattern || raw?.payoff || '').trim()
+    const endingHookPattern = String(raw?.ending_hook_pattern || raw?.endingHookPattern || raw?.ending_hook || '').trim()
+    const sceneBudgetPattern = String(raw?.scene_budget_pattern || raw?.sceneBudgetPattern || raw?.scene_budget || raw?.structure || '').trim()
+    const dialoguePattern = String(raw?.dialogue_pattern || raw?.dialoguePattern || raw?.dialogue || '').trim()
+    const visualPattern = String(raw?.visual_pattern || raw?.visualPattern || raw?.visual_scene || '').trim()
+    const abstractUsage = String(raw?.abstract_usage || raw?.usage || '').trim()
+    const doNotCopy = [
+      ...asArray(raw?.do_not_copy),
+      ...asArray(raw?.forbidden_copy),
+      ...asArray(raw?.unsafe_direct_phrases),
+      raw?.source_excerpt,
+      raw?.sample_text,
+      raw?.direct_phrase,
+    ].map((item: any) => String(item || '').trim()).filter(Boolean)
+
+    normalized.push({
+      sample_key: sampleKey,
+      genre: String(raw?.genre || raw?.type || '').trim(),
+      quality_axes: Array.from(new Set([
+        ...asArray(raw?.quality_axes || raw?.axes),
+        openingHook ? '开篇钩子' : '',
+        conflictPattern ? '冲突推进' : '',
+        payoffPattern ? '爽点兑现' : '',
+        endingHookPattern ? '章末追读' : '',
+        sceneBudgetPattern ? '场景节拍' : '',
+        dialoguePattern ? '对白节奏' : '',
+        visualPattern ? '场面可视化' : '',
+      ].map((item: any) => String(item || '').trim()).filter(Boolean))),
+      opening_hook: openingHook || '开篇 300 字内给出异常、危险、欲望或反常信息',
+      conflict_pattern: conflictPattern || '每个场景都有目标、阻碍、转折和可见代价',
+      payoff_pattern: payoffPattern || '把爽点写成行动结果、信息增量或情绪回报',
+      ending_hook_pattern: endingHookPattern || '章末保留一个读者必须继续看的未解问题',
+      scene_budget_pattern: sceneBudgetPattern || '按开局钩子、冲突升级、回报反转、章末钩子分配篇幅',
+      dialogue_pattern: dialoguePattern || '对白必须推动冲突、试探信息或暴露关系变化',
+      visual_pattern: visualPattern || '关键场面要有空间、动作、道具或规则反馈，便于短剧/漫剧转化',
+      abstract_usage: [
+        abstractUsage || '对照样例的章节结构、冲突节拍、爽点密度和章末追读设计。',
+        '只学习章节结构、信息密度、冲突节拍、爽点兑现和章末钩子，不学习具体桥段、设定和原句。',
+      ].join('').replace(/。+/g, '。'),
+      do_not_copy: Array.from(new Set([
+        ...doNotCopy,
+        '不得复制样例桥段、角色名、专有设定和原句',
+        '不得把样例剧情替换成本章剧情',
+      ])),
+    })
+  }
+  return normalized
+}
+
 function resolveMemeBank(project: any, contextPackage: any = {}) {
   return normalizeMemeBank([
     ...asArray(project?.reference_config?.meme_bank),
     ...asArray(project?.reference_config?.writing_bible?.meme_bank),
     ...asArray(contextPackage?.writing_bible?.meme_bank),
+  ])
+}
+
+function resolveStyleSampleBank(project: any, contextPackage: any = {}) {
+  return normalizeStyleSampleBank([
+    ...asArray(project?.reference_config?.style_sample_bank),
+    ...asArray(project?.reference_config?.writing_bible?.style_sample_bank),
+    ...asArray(contextPackage?.writing_bible?.style_sample_bank),
+  ])
+}
+
+function resolveChapterBenchmarkSampleBank(project: any, contextPackage: any = {}) {
+  return normalizeChapterBenchmarkSampleBank([
+    ...asArray(project?.reference_config?.chapter_benchmark_sample_bank),
+    ...asArray(project?.reference_config?.writing_bible?.chapter_benchmark_sample_bank),
+    ...asArray(contextPackage?.writing_bible?.chapter_benchmark_sample_bank),
   ])
 }
 
@@ -817,6 +3238,71 @@ function buildMemeStrategy(project: any, contextPackage: any = {}) {
       '不让网感表达改变剧情线、设定状态和人物状态',
     ],
     meme_bank: memeBank.slice(0, 12),
+  }
+}
+
+function buildStyleSampleStrategy(project: any, contextPackage: any = {}) {
+  const explicit = contextPackage?.chapter_target?.style_sample_strategy || contextPackage?.pre_draft_brief?.style_sample_strategy || null
+  if (explicit && typeof explicit === 'object') {
+    const samples = normalizeStyleSampleBank(explicit.samples || explicit.style_sample_bank || [])
+    return {
+      enabled: Boolean(explicit.enabled ?? samples.length > 0),
+      samples,
+      apply_to: asArray(explicit.apply_to || explicit.applyTo).map((item: any) => String(item || '').trim()).filter(Boolean),
+      do_not_copy: Array.from(new Set([
+        ...asArray(explicit.do_not_copy || explicit.copy_guard || explicit.forbidden_copy),
+        ...samples.flatMap((sample: any) => asArray(sample.unsafe_direct_phrases)),
+        '只学习叙述节奏、句式密度、对白比例和情绪转折',
+        '原句不能照搬',
+      ].map((item: any) => String(item || '').trim()).filter(Boolean))),
+    }
+  }
+
+  const samples = resolveStyleSampleBank(project, contextPackage).slice(0, 8)
+  return {
+    enabled: samples.length > 0,
+    samples,
+    apply_to: samples.length > 0 ? ['开篇钩子', '高压冲突', '对白推进', '章末钩子'] : [],
+    do_not_copy: Array.from(new Set([
+      ...samples.flatMap((sample: any) => asArray(sample.unsafe_direct_phrases)),
+      '只学习叙述节奏、句式密度、对白比例和情绪转折',
+      '原句不能照搬',
+      '不得复制样章桥段、专有设定、角色名和核心梗',
+    ].filter(Boolean))),
+  }
+}
+
+function buildChapterBenchmarkStrategy(project: any, contextPackage: any = {}) {
+  const explicit = contextPackage?.chapter_target?.chapter_benchmark_strategy || contextPackage?.pre_draft_brief?.chapter_benchmark_strategy || null
+  if (explicit && typeof explicit === 'object') {
+    const samples = normalizeChapterBenchmarkSampleBank(explicit.samples || explicit.chapter_benchmark_sample_bank || [])
+    return {
+      enabled: Boolean(explicit.enabled ?? samples.length > 0),
+      samples,
+      apply_to: asArray(explicit.apply_to || explicit.applyTo).map((item: any) => String(item || '').trim()).filter(Boolean),
+      do_not_copy: Array.from(new Set([
+        ...asArray(explicit.do_not_copy || explicit.copy_guard || explicit.forbidden_copy),
+        ...samples.flatMap((sample: any) => asArray(sample.do_not_copy)),
+        '只学习章节结构、信息密度、冲突节拍、爽点兑现和章末钩子',
+        '不得复制样例桥段、角色名、专有设定和原句',
+      ].map((item: any) => String(item || '').trim()).filter(Boolean))),
+    }
+  }
+
+  const genre = String(project?.genre || contextPackage?.project?.genre || '').trim()
+  const samples = resolveChapterBenchmarkSampleBank(project, contextPackage)
+    .filter((sample: any) => !sample.genre || !genre || sample.genre === genre)
+    .slice(0, 6)
+  return {
+    enabled: samples.length > 0,
+    samples,
+    apply_to: samples.length > 0 ? ['开篇300字', '场景目标/阻碍/转折/回报', '爽点兑现', '章末追读钩子'] : [],
+    do_not_copy: Array.from(new Set([
+      ...samples.flatMap((sample: any) => asArray(sample.do_not_copy)),
+      '只学习章节结构、信息密度、冲突节拍、爽点兑现和章末钩子',
+      '不得复制样例桥段、角色名、专有设定和原句',
+      '不得把样例剧情替换成本章剧情',
+    ].filter(Boolean))),
   }
 }
 
@@ -859,7 +3345,8 @@ export function buildReadabilityReviewPrompt(project: any, contextPackage: any, 
     '4. 对话比例是否支撑冲突推进。',
     '5. 人物口吻差异是否明确，主角、智者、配角不能都像旁白。',
     '6. 爽点/信息增量密度是否足够，是否每 800-1200 字有推进或回报。',
-    '7. 网感是否克制：只使用吐槽节奏、情绪共鸣、角色口吻和传播点，不直接堆梗。',
+    '7. 章末翻页是否有力：最后 300 字是否形成下一章非看不可的危险、选择、反转、未解答案或利益诱惑。',
+    '8. 网感是否克制：只使用吐槽节奏、情绪共鸣、角色口吻和传播点，不直接堆梗。',
     '',
     '【结构化上下文包】',
     JSON.stringify(contextPackage || {}, null, 2).slice(0, 7000),
@@ -867,7 +3354,7 @@ export function buildReadabilityReviewPrompt(project: any, contextPackage: any, 
     '【最终正文】',
     chapterText.slice(0, 18000),
     '',
-    '输出 JSON，字段 readability_score(0-100), passed(boolean), opening_hook_score, scene_readability_score, paragraph_density_score, dialogue_voice_score, payoff_density_score, meme_sense:{intensity,used_functions(array),rejected_memes(array),immersion_risks(array)}, issues(array), suggestions(array)。只返回 JSON。',
+    '输出 JSON，字段 readability_score(0-100), passed(boolean), opening_hook_score, ending_hook_score, scene_readability_score, paragraph_density_score, dialogue_voice_score, payoff_density_score, meme_sense:{intensity,used_functions(array),rejected_memes(array),immersion_risks(array)}, issues(array), suggestions(array)。只返回 JSON。',
   ].join('\n')
 }
 
@@ -903,14 +3390,55 @@ export function buildChapterPreDraftBrief(project: any, contextPackage: any) {
     ...asArray(storylineContext.forbidden),
     ...storylineUsageByType(storylineContext, ['forbidden']),
   ].map((item: any) => String(item || '').trim()).filter(Boolean)
+  const characterArcBrief = buildCharacterArcBriefFromContext(contextPackage)
   const wordTarget = chapterTarget.word_target || {}
   const memeStrategy = buildMemeStrategy(project, contextPackage)
+  const styleSampleStrategy = buildStyleSampleStrategy(project, contextPackage)
+  const chapterBenchmarkStrategy = buildChapterBenchmarkStrategy(project, contextPackage)
+  const first30RetentionBrief = contextPackage?.chapter_target?.first30_retention_brief || contextPackage?.first30_retention_context || null
   const longformCompass = normalizeLongformCompass(contextPackage?.chapter_target?.longform_compass || contextPackage?.longform_compass)
+  const longformBattleContext = normalizeLongformBattleContext(
+    contextPackage?.chapter_target?.longform_battle_context
+    || contextPackage?.chapter_target?.longform_battle_desk
+    || contextPackage?.longform_battle_context
+    || contextPackage?.longform_battle_desk
+    || contextPackage?.longformBattleDesk,
+  )
+  const longformMemoryCapsule = normalizeLongformMemoryCapsule(
+    contextPackage?.chapter_target?.longform_memory_capsule
+    || contextPackage?.chapter_target?.longformMemoryCapsule
+    || contextPackage?.longform_memory_capsule
+    || contextPackage?.longformMemoryCapsule,
+  )
   const nextBatchBrief = normalizeNextBatchBrief(contextPackage?.chapter_target?.next_batch_brief || contextPackage?.next_batch_brief, Number(chapterTarget.chapter_no || 0))
+  const storyUnitContext = normalizeStoryUnitContext(contextPackage?.chapter_target?.story_unit_context || contextPackage?.story_unit_context, Number(chapterTarget.chapter_no || 0))
+  const readerRetentionBrief = buildReaderRetentionBrief(project, contextPackage, sceneBriefs)
+  const readerExpectationDebtContext = applyReaderExpectationDebtAging(
+    normalizeReaderExpectationDebtContext(chapterTarget.reader_expectation_debt_context || contextPackage?.reader_expectation_debt_context),
+    Number(chapterTarget.chapter_no || 0),
+  )
+  const readerExpectationLedger = buildReaderExpectationLedger(project, {
+    ...contextPackage,
+    reader_expectation_debt_context: readerExpectationDebtContext,
+    chapter_target: {
+      ...(contextPackage?.chapter_target || {}),
+      reader_expectation_debt_context: readerExpectationDebtContext,
+    },
+  }, sceneBriefs, readerRetentionBrief)
+  const signatureSceneBrief = normalizeSignatureSceneBrief(chapterTarget.signature_scene_brief || chapterTarget.rollingPlan || chapterTarget.rolling_plan)
+  const innovationBrief = buildChapterInnovationBrief(project, {
+    ...contextPackage,
+    chapter_target: {
+      ...chapterTarget,
+      signature_scene_brief: signatureSceneBrief,
+    },
+  }, sceneBriefs, longformCompass)
+  const previousHandoff = buildPreviousChapterHandoff(contextPackage)
 
   return {
     chapter_no: Number(chapterTarget.chapter_no || 0) || null,
     title: compactBriefText(chapterTarget.title, '未命名章节'),
+    previous_handoff: previousHandoff,
     chapter_goal: compactBriefText(chapterTarget.summary || chapterTarget.goal || chapterTarget.chapter_goal),
     reader_promise: compactBriefText(readerPayoffs.join('；') || contextPackage?.writing_bible?.promise || project?.synopsis),
     core_conflict: compactBriefText(chapterTarget.conflict || sceneCards.map((card: any) => card?.conflict).filter(Boolean).join('；')),
@@ -921,9 +3449,21 @@ export function buildChapterPreDraftBrief(project: any, contextPackage: any) {
     storyline_plants: Array.from(new Set(storylinePlants)).slice(0, 12),
     storyline_payoffs: Array.from(new Set(storylinePayoffs)).slice(0, 12),
     storyline_forbidden: Array.from(new Set(storylineForbidden)).slice(0, 12),
+    character_arc_brief: characterArcBrief,
+    reader_retention_brief: readerRetentionBrief,
+    reader_expectation_debt: readerExpectationDebtContext,
+    reader_expectation_ledger: readerExpectationLedger,
+    innovation_brief: innovationBrief,
+    signature_scene_brief: signatureSceneBrief,
     meme_strategy: memeStrategy,
+    style_sample_strategy: styleSampleStrategy,
+    chapter_benchmark_strategy: chapterBenchmarkStrategy,
+    first30_retention_brief: first30RetentionBrief,
     longform_compass: longformCompass,
+    longform_battle_context: longformBattleContext,
+    longform_memory_capsule: longformMemoryCapsule,
     next_batch_brief: nextBatchBrief,
+    story_unit_context: storyUnitContext,
     scene_briefs: sceneBriefs,
     word_budget: wordTarget?.target
       ? `${wordTarget.label || '章节'} ${wordTarget.target} 字，可接受 ${wordTarget.min}-${wordTarget.max} 字`
@@ -936,19 +3476,52 @@ export function buildChapterPreDraftBrief(project: any, contextPackage: any) {
 export function mergeConfirmedPreDraftBriefIntoContext(contextPackage: any, preDraftBrief: any) {
   if (!preDraftBrief?.confirmed_at) return contextPackage
   const longformCompass = normalizeLongformCompass(preDraftBrief.longform_compass || (contextPackage || {}).chapter_target?.longform_compass || (contextPackage || {}).longform_compass)
+  const longformBattleContext = normalizeLongformBattleContext(
+    preDraftBrief.longform_battle_context
+    || (contextPackage || {}).chapter_target?.longform_battle_context
+    || (contextPackage || {}).chapter_target?.longform_battle_desk
+    || (contextPackage || {}).longform_battle_context
+    || (contextPackage || {}).longform_battle_desk
+    || (contextPackage || {}).longformBattleDesk,
+  )
+  const longformMemoryCapsule = normalizeLongformMemoryCapsule(
+    preDraftBrief.longform_memory_capsule
+    || preDraftBrief.longformMemoryCapsule
+    || (contextPackage || {}).chapter_target?.longform_memory_capsule
+    || (contextPackage || {}).chapter_target?.longformMemoryCapsule
+    || (contextPackage || {}).longform_memory_capsule
+    || (contextPackage || {}).longformMemoryCapsule,
+  )
   const targetChapterNo = Number((contextPackage || {}).chapter_target?.chapter_no || preDraftBrief.chapter_no || 0)
   const nextBatchBrief = normalizeNextBatchBrief(preDraftBrief.next_batch_brief || (contextPackage || {}).chapter_target?.next_batch_brief || (contextPackage || {}).next_batch_brief, targetChapterNo)
+  const storyUnitContext = normalizeStoryUnitContext(preDraftBrief.story_unit_context || (contextPackage || {}).chapter_target?.story_unit_context || (contextPackage || {}).story_unit_context, targetChapterNo)
+  const readerExpectationDebtContext = applyReaderExpectationDebtAging(
+    normalizeReaderExpectationDebtContext(preDraftBrief.reader_expectation_debt || (contextPackage || {}).chapter_target?.reader_expectation_debt_context || (contextPackage || {}).reader_expectation_debt_context),
+    Number((contextPackage || {}).chapter_target?.chapter_no || preDraftBrief.chapter_no || 0),
+  )
+  const signatureSceneBrief = normalizeSignatureSceneBrief(preDraftBrief.signature_scene_brief || (contextPackage || {}).chapter_target?.signature_scene_brief || (contextPackage || {}).chapter_target?.rollingPlan || (contextPackage || {}).chapter_target?.rolling_plan)
+  const characterArcBrief = preDraftBrief.character_arc_brief
+    || preDraftBrief.characterArcBrief
+    || (contextPackage || {}).chapter_target?.character_arc_brief
+    || (contextPackage || {}).character_arc_context
+    || null
   return {
     ...(contextPackage || {}),
     pre_draft_brief: preDraftBrief,
     longform_compass: longformCompass || (contextPackage || {}).longform_compass || null,
+    longform_battle_context: longformBattleContext || (contextPackage || {}).longform_battle_context || null,
+    longform_memory_capsule: longformMemoryCapsule || (contextPackage || {}).longform_memory_capsule || null,
     next_batch_brief: nextBatchBrief || (contextPackage || {}).next_batch_brief || null,
+    story_unit_context: storyUnitContext || (contextPackage || {}).story_unit_context || null,
+    reader_expectation_debt_context: readerExpectationDebtContext,
+    character_arc_context: characterArcBrief || (contextPackage || {}).character_arc_context || null,
     chapter_target: {
       ...((contextPackage || {}).chapter_target || {}),
       summary: compactBriefText(preDraftBrief.chapter_goal, (contextPackage || {}).chapter_target?.summary),
       goal: compactBriefText(preDraftBrief.chapter_goal, (contextPackage || {}).chapter_target?.goal),
       conflict: compactBriefText(preDraftBrief.core_conflict, (contextPackage || {}).chapter_target?.conflict),
       ending_hook: compactBriefText(preDraftBrief.ending_hook, (contextPackage || {}).chapter_target?.ending_hook),
+      previous_handoff: compactBriefText(preDraftBrief.previous_handoff, (contextPackage || {}).chapter_target?.previous_handoff),
       reader_promise: compactBriefText(preDraftBrief.reader_promise),
       emotional_curve: compactBriefText(preDraftBrief.emotional_curve),
       key_settings: asArray(preDraftBrief.key_settings),
@@ -957,9 +3530,21 @@ export function mergeConfirmedPreDraftBriefIntoContext(contextPackage: any, preD
       storyline_plants: asArray(preDraftBrief.storyline_plants),
       storyline_payoffs: asArray(preDraftBrief.storyline_payoffs),
       storyline_forbidden: asArray(preDraftBrief.storyline_forbidden),
+      character_arc_brief: characterArcBrief,
+      reader_retention_brief: preDraftBrief.reader_retention_brief || (contextPackage || {}).chapter_target?.reader_retention_brief || null,
+      reader_expectation_debt_context: readerExpectationDebtContext,
+      reader_expectation_ledger: preDraftBrief.reader_expectation_ledger || (contextPackage || {}).chapter_target?.reader_expectation_ledger || null,
+      innovation_brief: preDraftBrief.innovation_brief || (contextPackage || {}).chapter_target?.innovation_brief || null,
+      signature_scene_brief: signatureSceneBrief,
       meme_strategy: preDraftBrief.meme_strategy || (contextPackage || {}).chapter_target?.meme_strategy || null,
+      style_sample_strategy: preDraftBrief.style_sample_strategy || (contextPackage || {}).chapter_target?.style_sample_strategy || null,
+      chapter_benchmark_strategy: preDraftBrief.chapter_benchmark_strategy || (contextPackage || {}).chapter_target?.chapter_benchmark_strategy || null,
+      first30_retention_brief: preDraftBrief.first30_retention_brief || (contextPackage || {}).chapter_target?.first30_retention_brief || (contextPackage || {}).first30_retention_context || null,
       longform_compass: longformCompass || (contextPackage || {}).chapter_target?.longform_compass || null,
+      longform_battle_context: longformBattleContext || (contextPackage || {}).chapter_target?.longform_battle_context || null,
+      longform_memory_capsule: longformMemoryCapsule || (contextPackage || {}).chapter_target?.longform_memory_capsule || null,
       next_batch_brief: nextBatchBrief || (contextPackage || {}).chapter_target?.next_batch_brief || null,
+      story_unit_context: storyUnitContext || (contextPackage || {}).chapter_target?.story_unit_context || null,
       scene_cards: asArray(preDraftBrief.scene_briefs).length
         ? asArray(preDraftBrief.scene_briefs)
         : asArray((contextPackage || {}).chapter_target?.scene_cards),
@@ -1140,10 +3725,50 @@ export function createNovelWritingService(ctx: {
 
   const buildParagraphProseContext = (project: any, contextPackage: any, migrationPlan: any = null, chapterDraft: any = null) => {
     const longformCompass = normalizeLongformCompass(contextPackage?.chapter_target?.longform_compass || contextPackage?.longform_compass)
+    const longformBattleContext = normalizeLongformBattleContext(
+      contextPackage?.chapter_target?.longform_battle_context
+      || contextPackage?.chapter_target?.longform_battle_desk
+      || contextPackage?.longform_battle_context
+      || contextPackage?.longform_battle_desk
+      || contextPackage?.longformBattleDesk,
+    )
+    const chapterLaunchGate = contextPackage?.chapter_target?.chapter_launch_gate || contextPackage?.chapter_launch_gate || null
     const nextBatchBrief = normalizeNextBatchBrief(
       contextPackage?.chapter_target?.next_batch_brief || contextPackage?.next_batch_brief,
       Number(chapterDraft?.chapter_no || contextPackage?.chapter_target?.chapter_no || 0),
     )
+    const batchPreflight = contextPackage?.chapter_target?.batch_preflight || contextPackage?.batch_preflight || null
+    const longformMemoryAnchor = batchPreflight?.longform_memory_anchor
+      || batchPreflight?.longformMemoryAnchor
+      || contextPackage?.chapter_target?.longform_memory_anchor
+      || contextPackage?.longform_memory_anchor
+      || null
+    const longformMemoryCapsule = normalizeLongformMemoryCapsule(
+      contextPackage?.chapter_target?.longform_memory_capsule
+      || contextPackage?.chapter_target?.longformMemoryCapsule
+      || contextPackage?.longform_memory_capsule
+      || contextPackage?.longformMemoryCapsule,
+    )
+    const millionWordRunway = contextPackage?.chapter_target?.million_word_runway || contextPackage?.million_word_runway || null
+    const styleSampleStrategy = contextPackage?.chapter_target?.style_sample_strategy || buildStyleSampleStrategy(project, contextPackage)
+    const chapterBenchmarkStrategy = contextPackage?.chapter_target?.chapter_benchmark_strategy || buildChapterBenchmarkStrategy(project, contextPackage)
+    const first30RetentionBrief = contextPackage?.chapter_target?.first30_retention_brief || contextPackage?.first30_retention_context || null
+    const readerExpectationDebtContext = applyReaderExpectationDebtAging(
+      normalizeReaderExpectationDebtContext(contextPackage?.chapter_target?.reader_expectation_debt_context || contextPackage?.reader_expectation_debt_context),
+      Number(chapterDraft?.chapter_no || contextPackage?.chapter_target?.chapter_no || 0),
+    )
+    const previousHandoff = buildPreviousChapterHandoff(contextPackage)
+    const storyUnitContext = normalizeStoryUnitContext(
+      contextPackage?.chapter_target?.story_unit_context || contextPackage?.story_unit_context,
+      Number(chapterDraft?.chapter_no || contextPackage?.chapter_target?.chapter_no || 0),
+    )
+    const signatureSceneBrief = normalizeSignatureSceneBrief(
+      contextPackage?.chapter_target?.signature_scene_brief
+      || contextPackage?.signature_scene_brief
+      || contextPackage?.chapter_target?.rollingPlan
+      || contextPackage?.chapter_target?.rolling_plan,
+    )
+    const characterArcBrief = characterArcBriefFromContext(contextPackage, chapterDraft)
     return [
       '任务：按场景卡生成章节正文。请先在心中按场景组织段落，再输出完整正文。',
       `作品标题：${project.title}`,
@@ -1153,13 +3778,69 @@ export function createNovelWritingService(ctx: {
       contextPackage?.chapter_target?.word_target ? '字数执行要求：每个场景分配明确字数预算，正文不得只写剧情摘要；如果低于目标范围，必须扩写动作过程、选择代价、对话交锋和章末钩子铺垫，而不是堆砌环境描写。' : '',
       '必须以 chapter_target.summary、chapter_target.conflict、chapter_target.ending_hook 和 scene_cards 为准；如果已有正文或旧场景分解与目标不一致，不得沿用。',
       '',
+      previousHandoff ? '【上一章承接】' : '',
+      previousHandoff ? '硬性要求：前 300 字必须接住上一章最后一幕，写出角色对上一章钩子、危机、欠账或未解问题的直接反应；不得重新从泛环境描写、空泛醒来或无关解释开场。' : '',
+      previousHandoff ? previousHandoff : '',
+      '',
       longformCompass ? '【长篇作品罗盘】' : '',
       longformCompass ? '硬性要求：不可漂移项必须遵守；可调整区只能服务本章目标、当前卷目标和读者承诺，不得把扩展写成核心改道。' : '',
       longformCompass ? JSON.stringify(longformCompass, null, 2).slice(0, 4000) : '',
       '',
+      longformBattleContext ? '【长篇作战承接】' : '',
+      longformBattleContext ? '硬性要求：执行 chapter_target.longform_battle_context；risk_lanes 是本章必须修复或承接的长篇生产风险，必须写成可见事件、冲突推进、读者回报、剧情线动作或章末钩子，不得只在旁白里声明已经解决。' : '',
+      longformBattleContext ? JSON.stringify(longformBattleContext, null, 2).slice(0, 4000) : '',
+      '',
+      chapterLaunchGate ? '【本章开写门禁】' : '',
+      chapterLaunchGate ? '硬性要求：本章必须逐条落实读者承诺、章节目标、核心冲突、主线服务、读者回报和章末钩子；不得把门禁中的 warn/block 项绕过去写。' : '',
+      chapterLaunchGate ? JSON.stringify(chapterLaunchGate, null, 2).slice(0, 4000) : '',
+      '',
       nextBatchBrief ? '【本批连载任务书】' : '',
       nextBatchBrief ? '硬性要求：本章必须服务批次目标和当前章角色；不得提前消费后续章节爆点，不得跳过本章读者回报，不得抢跑批次后段的主线兑现。' : '',
       nextBatchBrief ? JSON.stringify(nextBatchBrief, null, 2).slice(0, 4000) : '',
+      '',
+      longformMemoryAnchor ? '【长篇正史锚点】' : '',
+      longformMemoryAnchor ? '硬性要求：这是本批连续生产的压缩正史。角色状态、开放悬念、回报债务和核心承诺不得被改写、遗忘或绕开；新增情节必须从这些锚点自然推进。' : '',
+      longformMemoryAnchor ? JSON.stringify(longformMemoryAnchor, null, 2).slice(0, 3000) : '',
+      '',
+      longformMemoryCapsule ? '【长篇记忆胶囊】' : '',
+      longformMemoryCapsule ? '硬性要求：执行 chapter_target.longform_memory_capsule；这是本章必须召回的压缩正史。核心承诺、主线进度、角色状态、开放悬念、回报债务、正史事实和红线不得被遗忘、矛盾改写或跳过。' : '',
+      longformMemoryCapsule ? JSON.stringify(longformMemoryCapsule, null, 2).slice(0, 4000) : '',
+      '',
+      storyUnitContext ? '【剧情单元任务】' : '',
+      storyUnitContext ? '硬性要求：执行 chapter_target.story_unit_context；本章只完成 current_chapter_role，并服务 unit_goal。可以铺垫 pressure_escalation 和 setup_and_storyline，但不得提前消费 mini_climax_payoff、exit_hook 或 forbidden_advance 中的后段爆点。' : '',
+      storyUnitContext ? JSON.stringify(storyUnitContext, null, 2).slice(0, 4000) : '',
+      '',
+      signatureSceneBrief ? '【本章标志性场面补位】' : '',
+      signatureSceneBrief ? '硬性要求：必须把 signature_scene 写成正文核心场面；scene_repair_target 是本章要修复的强场面缺口；reader_payoff 和 storyline_service 必须落成可见爽点、冲突结果或主线推进。不能只在旁白里声明“场面很震撼”。' : '',
+      signatureSceneBrief ? JSON.stringify(signatureSceneBrief, null, 2).slice(0, 3000) : '',
+      '',
+      characterArcBrief && Object.keys(characterArcBrief).length ? '【人物成长承接】' : '',
+      characterArcBrief && Object.keys(characterArcBrief).length ? '硬性要求：执行 chapter_target.character_arc_brief；本章必须把角色欲望、缺陷受压、关系变化、成长节点和口吻锚点写成可见选择、行动后果、对话反馈或关系反应。不得只在旁白里说人物成长，不得提前揭露 forbidden_reveal。' : '',
+      characterArcBrief && Object.keys(characterArcBrief).length ? JSON.stringify(characterArcBrief, null, 2).slice(0, 4000) : '',
+      '',
+      batchPreflight ? '【安全连写预执行门禁】' : '',
+      batchPreflight ? '硬性要求：本章必须服从安全连写预执行门禁；若存在近10章疲劳、批次任务书缺口、被拦截章节或 caution/warn 风险，本章必须主动换冲突来源、回报形态、章末问题或可视化场面，不能沿用上一批同质化写法。' : '',
+      batchPreflight ? JSON.stringify(batchPreflight, null, 2).slice(0, 4000) : '',
+      '',
+      millionWordRunway ? '【百万字航线守门】' : '',
+      millionWordRunway ? '硬性要求：本章必须回答航线中的本章四问，遵守不可偏移红线，兑现追读燃料；如果 safeModeLabel 为仅单章或禁止连写，不得抢跑后续章节内容。' : '',
+      millionWordRunway ? JSON.stringify(millionWordRunway, null, 2).slice(0, 5000) : '',
+      '',
+      first30RetentionBrief ? '【本章前30章留存修复】' : '',
+      first30RetentionBrief ? '硬性要求：本章必须修复前30章诊断指出的目标、章末钩子、爽点/悬念和试读闭环风险；修复要落成可见行动、信息增量、回报或章末未解问题。' : '',
+      first30RetentionBrief ? JSON.stringify(first30RetentionBrief, null, 2).slice(0, 4000) : '',
+      '',
+      readerExpectationDebtContext.must_carry.length || readerExpectationDebtContext.keep_alive.length ? '【期待债务承接】' : '',
+      readerExpectationDebtContext.must_carry.length || readerExpectationDebtContext.keep_alive.length ? '硬性要求：上一章或最近章节欠下的期待必须在本章可见推进；overdue/逾期待补项必须优先处理成动作、信息增量、冲突结果或章末升级。可延迟完全兑现，但不得遗忘、换线或矛盾改写。' : '',
+      readerExpectationDebtContext.must_carry.length || readerExpectationDebtContext.keep_alive.length ? JSON.stringify(readerExpectationDebtContext, null, 2).slice(0, 3000) : '',
+      '',
+      styleSampleStrategy?.enabled ? '【本章风格样章策略】' : '',
+      styleSampleStrategy?.enabled ? '硬性要求：只学习叙述节奏、句式密度、对白比例和情绪转折；原句不能照搬，不得复制样章桥段、专有设定、角色名和核心梗。' : '',
+      styleSampleStrategy?.enabled ? JSON.stringify(styleSampleStrategy, null, 2).slice(0, 5000) : '',
+      '',
+      chapterBenchmarkStrategy?.enabled ? '【本章质量基准样例】' : '',
+      chapterBenchmarkStrategy?.enabled ? '硬性要求：只学习章节结构、信息密度、冲突节拍、爽点兑现和章末钩子；不得复制样例桥段、角色名、专有设定和原句，不得把样例剧情替换成本章剧情。' : '',
+      chapterBenchmarkStrategy?.enabled ? JSON.stringify(chapterBenchmarkStrategy, null, 2).slice(0, 5000) : '',
       '',
       '【结构化上下文包】',
       JSON.stringify(contextPackage, null, 2).slice(0, 12000),
@@ -1171,6 +3852,14 @@ export function createNovelWritingService(ctx: {
       '1. 严格按 scene_cards 顺序生成，每个场景至少 3-8 个自然段。',
       '2. 每个场景必须完成 purpose、conflict、required_beats、required_information、turning_point 和 exit_state；不能只写气氛、设定说明或心理总结。',
       '2A. 每个场景必须把 opening_hook、reader_payoff、fear_point、rule_pressure、information_gap、reversal、ending_hook_seed、character_voice 中已有的商业意图落实到正文里；这些字段不是备注，必须转成动作、对话、危险、反转或章末疑问。',
+      '2A+. 如果存在 chapter_target.previous_handoff 或 continuity.previous_chapter，开篇前 300 字必须承接上一章最后一幕或章末钩子，先处理连续危机、角色反应和期待欠账，再展开新的场景信息。',
+      '2B. 执行 chapter_target.reader_retention_brief：开篇钩子必须在前 300 字落地；爽点承诺、信息缺口、情绪回报和短剧化场面必须转成可见行动；章末追读问题必须压到最后一幕。',
+      '2B+. 执行 chapter_target.reader_expectation_ledger：must_deliver 是本章必须还给读者的期待账，必须写成可见事件、冲突结果、情绪回报或章末钩子；keep_alive 可以保留但不能遗忘或矛盾改写。',
+      '2B++. 执行 reader_expectation_debt_context：must_carry 来自上一章或最近章节的期待欠账，本章必须给可见推进；keep_alive 是继续悬念，必须保持存在感，不得被正文遗忘、反向改写或突然换线。',
+      '2C. 执行 chapter_target.innovation_brief：本章必须有可见的创新执行点；把 chapter_angle 写成选择、规则、机制、反差或场面，不得写成普通套路章；ip_adaptation_hooks 要尽量落成可视化场面。',
+      '2C+. 执行 chapter_target.signature_scene_brief：如果存在 signature_scene，必须把它写成本章最可被读者记住、可短剧/漫剧化的空间冲突、反转动作、规则压迫或视觉化爽点；scene_repair_target、reader_payoff、storyline_service 都必须在正文中可见。',
+      '2C++. 执行 chapter_target.character_arc_brief：人物成长必须落成角色欲望驱动、缺陷受压、关系变化、成长节点或口吻锚点；如果有 forbidden_reveal，不得提前写穿，只能通过误解、遮挡、试探或代价保持边界。',
+      '2D. 执行 chapter_target.first30_retention_brief：如果当前章在前30章诊断中有风险，必须补强 flags 和 required_actions 指向的留存问题，尤其是章末钩子弱、爽点/悬念信号少、目标不清和缺正文。',
       '3. 如果 scene_type 是 action/combat/chase，必须逐条落实 action_beats：写出动作起手、空间位置、对手反应、受伤/损耗/暴露信息、反制动作和结果。战斗不能一笔带过。',
       '4. 段落预算：动作/冲突场景中可见行动与直接反应不少于 60%；环境描写最多 15%；心理描写最多 20%；解释性信息最多 15%。',
       '5. 禁止连续 2 段纯环境描写；每 3-5 段必须出现一次可见行动、选择、信息变化或关系变化。',
@@ -1180,11 +3869,20 @@ export function createNovelWritingService(ctx: {
       '9. 只能学习参考作品的节奏、结构、爽点安排和信息密度；不得复制具体桥段、专有设定、原句、角色名和核心梗。',
       '10. 执行 setting_context：required 设定必须在正文中落地；forbidden 设定不得泄漏；ability_beats 必须写清代价/限制；item_beats 必须符合物品归属和位置；boss_move 必须符合 Boss 行动逻辑；rule_trigger 必须写出触发条件、代价和后果；角色只能知道 knowledge_scope 允许的信息。',
       '11. 执行 chapter_target.meme_strategy：网感只作为吐槽节奏、情绪共鸣、角色口吻或传播点；死亡、高压恐怖和关键情绪爆点处不得玩梗；不得直接复刻 meme_bank 的 unsafe_direct_phrases。',
-      '12. 执行长篇作品罗盘：读者承诺、核心矛盾、创新卖点、长期爽点循环和结局方向不得漂移；新增人物、物品、支线或地图必须落在可调整区内。',
-      '13. 执行本批连载任务书：本章只完成 current_chapter_role 和本章读者回报；可以铺垫下一章，但不得提前解决 next_batch_brief.chapters 后续章节的冲突或钩子。',
-      '14. 如果参考迁移计划包含 transferable_model，只能采用其中 allowed_learning 的抽象功能；rewrite_requirements 必须执行；copy_guard_terms 和 forbidden_transfer 禁止出现在正文里。',
-      migrationPlan?.generation_prompt_addendum ? `15. ${migrationPlan.generation_prompt_addendum}` : '',
-      chapterDraft?.chapter_no ? `16. 本次只生成第${chapterDraft.chapter_no}章，不得输出其他章节或续章内容。` : '',
+      '12. 执行 chapter_target.style_sample_strategy：只学习叙述节奏、句式密度、对白比例和情绪转折；do_not_copy 与 unsafe_direct_phrases 中的原句不能照搬。',
+      '12A. 执行 chapter_target.chapter_benchmark_strategy：只学习开篇钩子、场景节拍、冲突升级、爽点兑现、对白推进、场面可视化和章末追读结构；不得复制样例桥段、角色名、专有设定和原句。',
+      '13. 执行长篇作品罗盘：读者承诺、核心矛盾、创新卖点、长期爽点循环和结局方向不得漂移；新增人物、物品、支线或地图必须落在可调整区内。',
+      '13A. 执行 chapter_target.chapter_launch_gate：读者承诺、本章目标、核心冲突、主线服务、读者回报、章末钩子必须在正文中可见落地；如果门禁信号为 warn/block，不得忽略，必须优先补成可见事件、选择、冲突结果或章末问题。',
+      '13B. 执行 chapter_target.longform_battle_context：核心守恒、读者拉力、剧情线调度、卷级爆点、创新/IP场面和生产燃料中的风险项必须在本章有可见承接；blocked/warn 风险优先于普通铺垫，不能写成空泛解释。',
+      '14. 执行本批连载任务书：本章只完成 current_chapter_role 和本章读者回报；可以铺垫下一章，但不得提前解决 next_batch_brief.chapters 后续章节的冲突或钩子。',
+      '14A. 执行 chapter_target.batch_preflight：如果安全连写预执行门禁提示近10章疲劳或批次风险，本章必须在冲突来源、回报形态、章末问题、可视化场面中至少改造一项；被 blocked_chapter_nos 拦截的后续章节内容不得提前写进本章。',
+      '14A+. 执行 batch_preflight.longform_memory_anchor：批量续写时必须遵守压缩正史锚点，不能改变角色状态、遗忘开放悬念、跳过回报债务或偏离核心承诺。',
+      '14A++. 执行 chapter_target.longform_memory_capsule：单章开写也必须召回压缩正史，角色状态、开放悬念、回报债务、正史事实和 red_lines 不得遗忘、矛盾改写或跳过。',
+      '14B. 执行 chapter_target.million_word_runway：正文必须可见回答本章四问，守住 redLines，不丢 readerFuel；如果航线为 single_chapter 或 blocked，只写当前章可兑现内容，不得预支后续章节主线回收。',
+      '14C. 执行 chapter_target.story_unit_context：正文必须完成当前剧情单元的 current_chapter_role；只推进本章职责需要的 pressure_escalation、setup_and_storyline 和 reader payoff，不得提前写完 mini_climax_payoff、exit_hook 或 forbidden_advance 标注的后续兑现。',
+      '15. 如果参考迁移计划包含 transferable_model，只能采用其中 allowed_learning 的抽象功能；rewrite_requirements 必须执行；copy_guard_terms 和 forbidden_transfer 禁止出现在正文里。',
+      migrationPlan?.generation_prompt_addendum ? `16. ${migrationPlan.generation_prompt_addendum}` : '',
+      chapterDraft?.chapter_no ? `17. 本次只生成第${chapterDraft.chapter_no}章，不得输出其他章节或续章内容。` : '',
       '',
       '输出 JSON，包含 prose_chapters 数组。数组只能有一项，且必须包含 chapter_no, title, chapter_text, scene_breakdown, continuity_notes。scene_breakdown 要回填每个场景的 scene_type、required_beats/action_beats 完成情况和 description_budget 执行情况。chapter_text 是完整正文，不要 markdown 标题。',
     ].filter(Boolean).join('\n')
@@ -1207,6 +3905,7 @@ export function createNovelWritingService(ctx: {
     'setting_updates: array，每项包含 entity_id 或 name, entity_type, state_delta, actual_state_change。用于更新设定工坊里的境界、能力、物品、Boss、规则、伏笔、地点、时间线等状态。',
     'storyline_updates: array，每项包含 entity_id 或 name, entity_type, actual_state_change, summary。只输出正文明确推进、埋线、回收或触碰的剧情线，entity_type 只能是 mainline/subplot/character_arc/relationship_arc/faction_arc/foreshadowing_arc。',
     'discovered_assets: array，每项包含 entity_type,name,summary,evidence,source_excerpt,first_chapter_no,constraints_json,state_json。只收录正文中新出现且应纳入长期管理的资产，entity_type 只能是 character/item/ability/faction/location/foreshadowing。',
+    'ip_scene_candidates: array，每项包含 title,summary,visual_hook,adaptation_value,spread_point,evidence,source_excerpt,tags。只收录正文已经写出来、可视化强、适合短剧/漫剧/IP改编或评论区传播的标志性场面；普通过场、纯解释和没有画面冲突的片段不要收录。',
     '只写正文明确出现或可由本章直接确定的状态；不知道就不要补。',
     'next_chapter_priorities: array',
     '只返回 JSON。',
@@ -1344,6 +4043,37 @@ export function createNovelWritingService(ctx: {
       })
     }
     payload.asset_intake = { discovered_assets: discoveredAssets }
+    const ipSceneCandidates = normalizeIpSceneCandidates(
+      Array.isArray(payload?.ip_scene_candidates) ? payload.ip_scene_candidates : [],
+      chapter,
+    )
+    if (ipSceneCandidates.length > 0) {
+      await createNovelReview(activeWorkspace, {
+        project_id: project.id,
+        review_type: 'ip_scene_intake',
+        status: 'ok',
+        summary: `沉淀 ${ipSceneCandidates.length} 个 IP 场面候选`,
+        issues: ipSceneCandidates.map((item: any) => item.title),
+        payload: JSON.stringify({
+          chapter_id: chapter.id,
+          chapter_no: chapter.chapter_no,
+          ip_scene_candidates: ipSceneCandidates,
+        }),
+      })
+    }
+    payload.ip_scene_intake = { ip_scene_candidates: ipSceneCandidates }
+    const signatureSceneSync = buildSignatureSceneSyncReport(project, chapter, contextPackage, chapterText)
+    if (Number(signatureSceneSync.planned_count || 0) > 0) {
+      await createNovelReview(activeWorkspace, {
+        project_id: project.id,
+        review_type: 'signature_scene_sync',
+        status: signatureSceneSync.status === 'ok' ? 'ok' : 'warn',
+        summary: `${signatureSceneSync.label}：${signatureSceneSync.summary}`,
+        issues: signatureSceneSync.missed.map((item: any) => `未兑现：${item.label}｜${item.text}`).slice(0, 20),
+        payload: JSON.stringify({ chapter_id: chapter.id, chapter_no: chapter.chapter_no, signature_scene_sync: signatureSceneSync }),
+      })
+    }
+    payload.signature_scene_sync = signatureSceneSync
     await createNovelReview(activeWorkspace, {
       project_id: project.id,
       review_type: 'storyline_sync',
@@ -1359,6 +4089,20 @@ export function createNovelWritingService(ctx: {
       payload: JSON.stringify({ chapter_id: chapter.id, chapter_no: chapter.chapter_no, storyline_sync: storylineSync }),
     })
     payload.storyline_sync = storylineSync
+    const storyUnitSync = buildStoryUnitSyncReport(project, chapter, contextPackage, chapterText)
+    await createNovelReview(activeWorkspace, {
+      project_id: project.id,
+      review_type: 'story_unit_sync',
+      status: storyUnitSync.status === 'ok' ? 'ok' : 'warn',
+      summary: `${storyUnitSync.label}：${storyUnitSync.summary}`,
+      issues: [
+        ...storyUnitSync.missed.map((item: any) => `单元漏写：${item.label}｜${item.text}`),
+        ...storyUnitSync.rushed_ahead.map((item: any) => `单元抢跑：${item.label}｜${item.text}`),
+        ...storyUnitSync.forbidden_touched.map((item: any) => `禁抢跑：${item.label}｜${item.text}`),
+      ].slice(0, 20),
+      payload: JSON.stringify({ chapter_id: chapter.id, chapter_no: chapter.chapter_no, story_unit_sync: storyUnitSync }),
+    })
+    payload.story_unit_sync = storyUnitSync
     const coreDrift = buildChapterCoreDriftReport(project, chapter, contextPackage, chapterText, storylineSync)
     await createNovelReview(activeWorkspace, {
       project_id: project.id,
@@ -1382,6 +4126,113 @@ export function createNovelWritingService(ctx: {
       payload: JSON.stringify({ chapter_id: chapter.id, chapter_no: chapter.chapter_no, reader_payoff_sync: readerPayoffSync }),
     })
     payload.reader_payoff_sync = readerPayoffSync
+    const readerExpectationSync = buildReaderExpectationSyncReport(project, chapter, contextPackage, chapterText)
+    await createNovelReview(activeWorkspace, {
+      project_id: project.id,
+      review_type: 'reader_expectation_sync',
+      status: readerExpectationSync.status === 'ok' ? 'ok' : 'warn',
+      summary: `${readerExpectationSync.label}：${readerExpectationSync.summary}`,
+      issues: readerExpectationSync.missed.map((item: any) => `未兑现：${item.label}｜${item.text}`).slice(0, 20),
+      payload: JSON.stringify({ chapter_id: chapter.id, chapter_no: chapter.chapter_no, reader_expectation_sync: readerExpectationSync }),
+    })
+    payload.reader_expectation_sync = readerExpectationSync
+    const readerRetentionSync = buildReaderRetentionSyncReport(project, chapter, contextPackage, chapterText)
+    await createNovelReview(activeWorkspace, {
+      project_id: project.id,
+      review_type: 'reader_retention_sync',
+      status: readerRetentionSync.status === 'ok' ? 'ok' : 'warn',
+      summary: `${readerRetentionSync.label}：${readerRetentionSync.summary}`,
+      issues: readerRetentionSync.missed.map((item: any) => `未兑现：${item.label}｜${item.text}`).slice(0, 20),
+      payload: JSON.stringify({ chapter_id: chapter.id, chapter_no: chapter.chapter_no, reader_retention_sync: readerRetentionSync }),
+    })
+    payload.reader_retention_sync = readerRetentionSync
+    const chapterAttractionReview = buildChapterAttractionReviewReport(project, chapter, contextPackage, chapterText)
+    await createNovelReview(activeWorkspace, {
+      project_id: project.id,
+      review_type: 'chapter_attraction_review',
+      status: chapterAttractionReview.status === 'ok' ? 'ok' : 'warn',
+      summary: `${chapterAttractionReview.label}：${chapterAttractionReview.summary}`,
+      issues: chapterAttractionReview.weak_dimensions.map((item: any) => `${item.label}｜${item.issue}`).slice(0, 20),
+      payload: JSON.stringify({ chapter_id: chapter.id, chapter_no: chapter.chapter_no, chapter_attraction_review: chapterAttractionReview }),
+    })
+    payload.chapter_attraction_review = chapterAttractionReview
+    const storyDriveSync = buildStoryDriveSyncReport(project, chapter, contextPackage, chapterText)
+    await createNovelReview(activeWorkspace, {
+      project_id: project.id,
+      review_type: 'story_drive_sync',
+      status: storyDriveSync.status === 'ok' ? 'ok' : 'warn',
+      summary: `${storyDriveSync.label}：${storyDriveSync.summary}`,
+      issues: storyDriveSync.missed.map((item: any) => `故事力缺口：${item.label}｜${item.text || item.expected}`).slice(0, 20),
+      payload: JSON.stringify({ chapter_id: chapter.id, chapter_no: chapter.chapter_no, story_drive_sync: storyDriveSync }),
+    })
+    payload.story_drive_sync = storyDriveSync
+    const characterArcSync = buildCharacterArcSyncReport(project, chapter, contextPackage, chapterText)
+    await createNovelReview(activeWorkspace, {
+      project_id: project.id,
+      review_type: 'character_arc_sync',
+      status: characterArcSync.status === 'ok' ? 'ok' : 'warn',
+      summary: `${characterArcSync.label}：${characterArcSync.summary}`,
+      issues: characterArcSync.missed.map((item: any) => `人物弧光缺口：${item.label}｜${item.text || item.expected}`).slice(0, 20),
+      payload: JSON.stringify({ chapter_id: chapter.id, chapter_no: chapter.chapter_no, character_arc_sync: characterArcSync }),
+    })
+    payload.character_arc_sync = characterArcSync
+    const chapterBenchmarkSync = buildChapterBenchmarkSyncReport(project, chapter, contextPackage, chapterText)
+    await createNovelReview(activeWorkspace, {
+      project_id: project.id,
+      review_type: 'chapter_benchmark_sync',
+      status: chapterBenchmarkSync.status === 'ok' ? 'ok' : 'warn',
+      summary: `${chapterBenchmarkSync.label}：${chapterBenchmarkSync.summary}`,
+      issues: chapterBenchmarkSync.missed.map((item: any) => `未达标：${item.label}｜${item.text}`).slice(0, 20),
+      payload: JSON.stringify({ chapter_id: chapter.id, chapter_no: chapter.chapter_no, chapter_benchmark_sync: chapterBenchmarkSync }),
+    })
+    payload.chapter_benchmark_sync = chapterBenchmarkSync
+    const styleSampleSync = buildStyleSampleSyncReport(project, chapter, contextPackage, chapterText)
+    await createNovelReview(activeWorkspace, {
+      project_id: project.id,
+      review_type: 'style_sample_sync',
+      status: styleSampleSync.status === 'ok' ? 'ok' : 'warn',
+      summary: `${styleSampleSync.label}：${styleSampleSync.summary}`,
+      issues: [
+        ...styleSampleSync.missed.map((item: any) => `风格缺口：${item.label}｜${item.text}`),
+        ...styleSampleSync.copied_phrases.map((item: any) => `照搬风险：${item}`),
+      ].slice(0, 20),
+      payload: JSON.stringify({ chapter_id: chapter.id, chapter_no: chapter.chapter_no, style_sample_sync: styleSampleSync }),
+    })
+    payload.style_sample_sync = styleSampleSync
+    const innovationSync = buildInnovationSyncReport(project, chapter, contextPackage, chapterText)
+    await createNovelReview(activeWorkspace, {
+      project_id: project.id,
+      review_type: 'innovation_sync',
+      status: innovationSync.status === 'ok' ? 'ok' : 'warn',
+      summary: `${innovationSync.label}：${innovationSync.summary}`,
+      issues: innovationSync.missed.map((item: any) => `未兑现：${item.label}｜${item.text}`).slice(0, 20),
+      payload: JSON.stringify({ chapter_id: chapter.id, chapter_no: chapter.chapter_no, innovation_sync: innovationSync }),
+    })
+    payload.innovation_sync = innovationSync
+    const volumeBeatSync = buildVolumeBeatSyncReport(project, chapter, contextPackage, chapterText)
+    await createNovelReview(activeWorkspace, {
+      project_id: project.id,
+      review_type: 'volume_beat_sync',
+      status: volumeBeatSync.status === 'ok' ? 'ok' : 'warn',
+      summary: `${volumeBeatSync.label}：${volumeBeatSync.summary}`,
+      issues: volumeBeatSync.missed.map((item: any) => `未兑现：${item.label}｜${item.text}`).slice(0, 20),
+      payload: JSON.stringify({ chapter_id: chapter.id, chapter_no: chapter.chapter_no, volume_beat_sync: volumeBeatSync }),
+    })
+    payload.volume_beat_sync = volumeBeatSync
+    const runwaySync = buildRunwaySyncReport(project, chapter, contextPackage, chapterText)
+    await createNovelReview(activeWorkspace, {
+      project_id: project.id,
+      review_type: 'runway_sync',
+      status: runwaySync.status === 'ok' ? 'ok' : 'warn',
+      summary: `${runwaySync.label}：${runwaySync.summary}`,
+      issues: [
+        ...runwaySync.four_question_missed.map((item: any) => `四问未兑现：${item.label}｜${item.text}`),
+        ...runwaySync.reader_fuel_missed.map((item: any) => `读者燃料未兑现：${item.text}`),
+        ...runwaySync.redline_touched.map((item: any) => `触碰红线：${item.text}`),
+      ].slice(0, 20),
+      payload: JSON.stringify({ chapter_id: chapter.id, chapter_no: chapter.chapter_no, runway_sync: runwaySync }),
+    })
+    payload.runway_sync = runwaySync
     await createNovelReview(activeWorkspace, {
       project_id: project.id,
       review_type: 'story_state',
@@ -1499,6 +4350,21 @@ export function createNovelWritingService(ctx: {
     const safetyPolicy = getSafetyPolicy(project)
     const writingBible = project.reference_config?.writing_bible || buildWritingBible(project, worldbuilding, characters, outlines, reviews)
     const memeBank = resolveMemeBank(project, { writing_bible: writingBible })
+    const styleSampleBank = resolveStyleSampleBank(project, { writing_bible: writingBible })
+    const first30RetentionContext = buildFirst30RetentionContext(chapter, reviews)
+    const readerExpectationDebtContext = buildReaderExpectationDebtContext(chapter, sorted, reviews)
+    const storyUnitContext = buildStoryUnitContext(chapter, sorted, outlines)
+    const previousHandoff = buildPreviousChapterHandoff({
+      chapter_target: chapter.raw_payload?.pre_draft_brief || {},
+      continuity: {
+        previous_chapter: previousChapter ? {
+          chapter_no: previousChapter.chapter_no,
+          title: previousChapter.title,
+          ending_hook: previousChapter.ending_hook || '',
+          ending_excerpt: String(previousChapter.chapter_text || '').slice(-800),
+        } : null,
+      },
+    })
     const fallbackCompass = normalizeLongformCompass({
       reader_promise: writingBible.reader_promise || writingBible.promise || writingBible.core_selling_point || project.synopsis,
       core_conflict: writingBible.core_conflict || writingBible.mainline?.core_conflict,
@@ -1507,6 +4373,7 @@ export function createNovelWritingService(ctx: {
       ending_direction: writingBible.ending_direction || writingBible.mainline?.ending_direction,
     })
     const longformCompass = latestLongformCompassFromReviews(reviews) || fallbackCompass
+    const longformMemoryCapsule = buildLongformMemoryCapsule(project, writingBible)
     const [settingEntities, storedChapterSettingUsage] = await Promise.all([
       listNovelSettingEntities(activeWorkspace, project.id).catch(() => []),
       listNovelChapterSettingUsage(activeWorkspace, project.id, chapter.id).catch(() => []),
@@ -1616,6 +4483,8 @@ export function createNovelWritingService(ctx: {
     preflight.blockers.push(...settingChecks.filter(item => !item.ok && item.severity === 'high'))
     preflight.ready = preflight.blockers.length === 0
     preflight.strict_ready = preflight.checks.every((item: any) => item.ok || item.severity === 'low')
+    const chapterRollingPlan = chapter.raw_payload?.rollingPlan || chapter.raw_payload?.rolling_plan || null
+    const signatureSceneBrief = normalizeSignatureSceneBrief(chapter.raw_payload?.signature_scene_brief || chapterRollingPlan)
     const basePackage = {
       project: {
         id: project.id,
@@ -1634,9 +4503,17 @@ export function createNovelWritingService(ctx: {
         summary: chapter.chapter_summary || '',
         conflict: chapter.conflict || '',
         ending_hook: chapter.ending_hook || '',
+        previous_handoff: previousHandoff,
+        rollingPlan: chapterRollingPlan || undefined,
+        signature_scene_brief: signatureSceneBrief,
         scene_cards: sceneCards,
         word_target: wordTarget,
         meme_strategy: buildMemeStrategy(project, { writing_bible: writingBible, chapter_target: chapter.raw_payload?.pre_draft_brief ? { meme_strategy: chapter.raw_payload.pre_draft_brief.meme_strategy } : {} }),
+        style_sample_strategy: buildStyleSampleStrategy(project, { writing_bible: writingBible, chapter_target: chapter.raw_payload?.pre_draft_brief ? { style_sample_strategy: chapter.raw_payload.pre_draft_brief.style_sample_strategy } : {} }),
+        chapter_benchmark_strategy: buildChapterBenchmarkStrategy(project, { writing_bible: writingBible, chapter_target: chapter.raw_payload?.pre_draft_brief ? { chapter_benchmark_strategy: chapter.raw_payload.pre_draft_brief.chapter_benchmark_strategy } : {} }),
+        first30_retention_brief: chapter.raw_payload?.pre_draft_brief?.first30_retention_brief || first30RetentionContext,
+        story_unit_context: chapter.raw_payload?.pre_draft_brief?.story_unit_context || storyUnitContext,
+        reader_expectation_debt_context: chapter.raw_payload?.pre_draft_brief?.reader_expectation_debt || readerExpectationDebtContext,
         continuity_notes: chapter.continuity_notes || [],
         must_advance: asArray(chapter.raw_payload?.must_advance),
         forbidden_repeats: asArray(chapter.raw_payload?.forbidden_repeats),
@@ -1689,7 +4566,12 @@ export function createNovelWritingService(ctx: {
       volume_plan: getVolumePlan(outlines),
       writing_bible: writingBible,
       longform_compass: longformCompass,
+      longform_memory_capsule: longformMemoryCapsule,
       meme_bank: memeBank,
+      style_sample_bank: styleSampleBank,
+      first30_retention_context: first30RetentionContext,
+      reader_expectation_debt_context: readerExpectationDebtContext,
+      story_unit_context: storyUnitContext,
       setting_context: settingContext,
       storyline_context: storylineContext,
       style_lock: styleLock,
@@ -1941,6 +4823,7 @@ export function createNovelWritingService(ctx: {
       readability_score: Number(payload?.readability_score ?? payload?.score ?? 0) || 0,
       passed: payload?.passed !== false,
       opening_hook_score: Number(payload?.opening_hook_score ?? 0) || 0,
+      ending_hook_score: Number(payload?.ending_hook_score ?? 0) || 0,
       scene_readability_score: Number(payload?.scene_readability_score ?? 0) || 0,
       paragraph_density_score: Number(payload?.paragraph_density_score ?? 0) || 0,
       dialogue_voice_score: Number(payload?.dialogue_voice_score ?? 0) || 0,
@@ -2381,6 +5264,10 @@ export function createNovelWritingService(ctx: {
     const storyStateUpdateWithSync = {
       ...story_state_update,
       storyline_sync: story_state_update.storyline_sync,
+      story_unit_sync: story_state_update.story_unit_sync,
+      signature_scene_sync: story_state_update.signature_scene_sync,
+      chapter_benchmark_sync: story_state_update.chapter_benchmark_sync,
+      volume_beat_sync: story_state_update.volume_beat_sync,
     }
     return {
       chapter: updated,

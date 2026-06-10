@@ -531,6 +531,219 @@ function buildFirst30RetentionRepairTasks(report: any) {
     .slice(0, 80)
 }
 
+function latestReportByKey(reviews: any[], reviewType: string, payloadKey: string) {
+  const rows = asArray(reviews)
+    .filter(review => review?.review_type === reviewType)
+    .sort((a, b) => Date.parse(String(b.created_at || '')) - Date.parse(String(a.created_at || '')))
+  const payload = parseJsonLikePayload(rows[0]?.payload) || {}
+  return payload[payloadKey] || payload.report || payload.result?.[payloadKey] || payload.result?.report || payload.result || payload
+}
+
+function segmentTrialScore(chapters: any[], chapterNos: number[]) {
+  const selected = chapters.filter(chapter => chapterNos.includes(Number(chapter.chapter_no || 0)))
+  if (!selected.length) return { score: 0, chapter_count: 0, hook_rate: 0, payoff_average: 0, weak_chapters: [] as any[] }
+  const payoffWords = ['爽', '赢', '反杀', '突破', '奖励', '收获', '打脸', '震惊', '压迫', '危机', '秘密', '线索', '反转', '升级', '资格', '排名', '真相']
+  const rows = selected.map(chapter => {
+    const body = [chapter.title, chapter.chapter_goal, chapter.chapter_summary, chapter.ending_hook, chapter.chapter_text].filter(Boolean).join('\n')
+    const wordCount = wc(chapter.chapter_text || '')
+    const hasHook = wc(chapter.ending_hook || '') >= 8 || includesAny(body.slice(-360), ['却', '然而', '忽然', '没想到', '下一刻', '身后', '门外', '消息'])
+    const payoffHits = payoffWords.filter(word => body.includes(word)).length
+    const score = Math.max(0, Math.min(100, 42 + (hasHook ? 18 : 0) + Math.min(24, payoffHits * 3) + (wordCount >= 1800 ? 16 : wordCount >= 900 ? 8 : 0) - (!chapter.chapter_text ? 28 : 0)))
+    return {
+      chapter_no: chapter.chapter_no,
+      title: chapter.title,
+      score,
+      has_hook: hasHook,
+      payoff_hits: payoffHits,
+      word_count: wordCount,
+    }
+  })
+  const hookRate = Math.round(rows.filter(row => row.has_hook).length / rows.length * 100)
+  const payoffAverage = Number((rows.reduce((sum, row) => sum + row.payoff_hits, 0) / rows.length).toFixed(1))
+  return {
+    score: Math.round(rows.reduce((sum, row) => sum + row.score, 0) / rows.length),
+    chapter_count: rows.length,
+    hook_rate: hookRate,
+    payoff_average: payoffAverage,
+    weak_chapters: rows.filter(row => row.score < 72).slice(0, 6),
+  }
+}
+
+function personaRiskLevel(score: number) {
+  if (score >= 82) return 'low'
+  if (score >= 68) return 'medium'
+  return 'high'
+}
+
+export function buildReaderTrialReview(project: any, chapters: any[], outlines: any[], reviews: any[]) {
+  const sorted = chapters.slice().sort((a, b) => Number(a.chapter_no || 0) - Number(b.chapter_no || 0))
+  const written = sorted.filter(chapter => String(chapter.chapter_text || '').trim())
+  const recentWritten = written.slice(-10)
+  const first30 = latestReport(reviews, 'first30_retention_diagnosis')
+  const expectation = latestReportByKey(reviews, 'reader_expectation_sync', 'reader_expectation_sync')
+  const payoff = latestReportByKey(reviews, 'reader_payoff_sync', 'reader_payoff_sync')
+  const innovation = latestReportByKey(reviews, 'innovation_sync', 'innovation_sync')
+  const readability = latestReportByKey(reviews, 'readability_review', 'readability_review')
+  const first3Local = segmentTrialScore(sorted, [1, 2, 3])
+  const first10Local = segmentTrialScore(sorted, Array.from({ length: 10 }).map((_, index) => index + 1))
+  const recentLocal = segmentTrialScore(recentWritten, recentWritten.map(chapter => Number(chapter.chapter_no || 0)))
+  const first30Score = Number(first30?.score || 0)
+  const first3Score = Number(asArray(first30?.segments).find((item: any) => String(item.key) === '1-3')?.score || first3Local.score || first30Score || 0)
+  const first10Score = Number(asArray(first30?.segments).find((item: any) => String(item.key) === '4-10')?.score || first10Local.score || first30Score || 0)
+  const expectationMissed = asArray(expectation?.missed)
+  const payoffDebts = [...asArray(payoff?.missed), ...asArray(payoff?.debts)]
+  const innovationMissed = asArray(innovation?.missed)
+  const immersionRisks = asArray(readability?.meme_sense?.immersion_risks || readability?.immersion_risks)
+  const expectationScore = Number(expectation?.score || (expectationMissed.length ? 70 : 84))
+  const payoffScore = Number(payoff?.score || (payoffDebts.length ? 70 : 84))
+  const innovationScore = Number(innovation?.score || (innovationMissed.length ? 72 : 84))
+  const readabilityScore = Number(readability?.readability_score || readability?.score || (immersionRisks.length ? 72 : 84))
+  const trialScore = first30Score || Math.round((first3Score + first10Score + recentLocal.score) / 3)
+  const rawScore = (trialScore * 0.34)
+    + (Math.min(expectationScore, payoffScore) * 0.24)
+    + (innovationScore * 0.18)
+    + (readabilityScore * 0.12)
+    + (Math.max(first3Score, recentLocal.score || first3Score) * 0.12)
+  const debtPenalty = Math.min(16, expectationMissed.length * 4 + payoffDebts.length * 3 + innovationMissed.length * 3 + immersionRisks.length * 3)
+  const score = Math.max(0, Math.min(100, Math.round(rawScore - debtPenalty)))
+  const status = score >= 82 && !expectationMissed.length && !payoffDebts.length && !innovationMissed.length && !immersionRisks.length
+    ? 'ready'
+    : score < 65 || first3Score < 65
+      ? 'blocked'
+      : 'needs_repair'
+  const promise = compactText(project.reference_config?.writing_bible?.reader_promise || project.reference_config?.writing_bible?.core_selling_point || project.summary || '', 180)
+  const dropPoints = [
+    first3Score < 72 ? `前三章试读压力不足：${first3Score} 分。` : '',
+    first10Score < 72 ? `第4-10章试读闭环偏弱：${first10Score} 分。` : '',
+    ...expectationMissed.slice(0, 3).map((item: any) => `期待欠账：${item.text || item.summary || item.label || item}`),
+    ...payoffDebts.slice(0, 3).map((item: any) => `回报欠账：${item.text || item.summary || item.label || item}`),
+    ...innovationMissed.slice(0, 3).map((item: any) => `创新缺口：${item.text || item.summary || item.label || item}`),
+    ...immersionRisks.slice(0, 2).map((item: any) => `出戏风险：${item.description || item.text || item}`),
+  ].filter(Boolean)
+  const repairActions = [
+    first3Score < 72 ? '重做前三章开篇压力、异常资源和章末未解问题。' : '',
+    first10Score < 72 ? '补强第4-10章每章目标推进、爽点回报和章末钩子。' : '',
+    expectationMissed.length ? '把期待欠账写入下一章任务书，形成可见推进或明确延期理由。' : '',
+    payoffDebts.length ? '把回报欠账补成可见收益、信息揭示、身份变化或关系反转。' : '',
+    innovationMissed.length ? '把创新卖点写成动作、机制代价、反差场面或 IP 化画面。' : '',
+    immersionRisks.length ? '降低严肃/恐怖/爆点场景中的玩梗强度，修段落密度和口吻。' : '',
+  ].filter(Boolean)
+  const pullPoints = [
+    promise ? `读者承诺：${promise}` : '',
+    first30Score >= 80 ? `前30章留存基线 ${first30Score} 分。` : '',
+    first3Score >= 80 ? `前三章试读钩子 ${first3Score} 分。` : '',
+    asArray(expectation?.keep_alive).length ? `保留悬念：${asArray(expectation?.keep_alive).slice(0, 2).map((item: any) => item.text || item.summary || item.label || item).join('；')}` : '',
+  ].filter(Boolean)
+
+  return {
+    report_id: `reader-trial-${Date.now()}`,
+    created_at: new Date().toISOString(),
+    quality_bar: 'qidian_10k_reader_trial_baseline',
+    quality_bar_label: '起点1万均订试读基准',
+    score,
+    status,
+    summary: status === 'ready'
+      ? '读者试读吸引力达到稳定追读基础。'
+      : status === 'blocked'
+        ? '读者试读存在高危弃读点，不建议继续批量生成。'
+        : '读者试读有追读基础，但仍存在需要修复的弃读点。',
+    personas: [
+      {
+        key: 'payoff_reader',
+        label: '爽点读者',
+        focus: '每章是否有可感知收益、反杀、打脸、升级或信息回报。',
+        score: Math.round((payoffScore + trialScore) / 2),
+        risk_level: personaRiskLevel(Math.round((payoffScore + trialScore) / 2)),
+        verdict: payoffDebts.length ? `爽点/回报欠账 ${payoffDebts.length} 项。` : '爽点回报暂时可支撑追读。',
+      },
+      {
+        key: 'plot_reader',
+        label: '剧情党',
+        focus: '主线压力、目标推进和章末未解问题是否连续。',
+        score: Math.round((expectationScore + first10Score) / 2),
+        risk_level: personaRiskLevel(Math.round((expectationScore + first10Score) / 2)),
+        verdict: expectationMissed.length ? `读者期待漏兑现 ${expectationMissed.length} 项。` : '剧情期待兑现暂时可控。',
+      },
+      {
+        key: 'setting_reader',
+        label: '设定党',
+        focus: '能力体系、规则代价、世界资产和创新机制是否新鲜且不乱。',
+        score: innovationScore,
+        risk_level: personaRiskLevel(innovationScore),
+        verdict: innovationMissed.length ? `创新/设定执行缺口 ${innovationMissed.length} 项。` : '创新设定有可继续展开的基础。',
+      },
+      {
+        key: 'trial_reader',
+        label: '平台试读用户',
+        focus: '前三章能否抓住人，前十章是否让读者愿意继续追。',
+        score: Math.round((first3Score + first10Score) / 2),
+        risk_level: personaRiskLevel(Math.round((first3Score + first10Score) / 2)),
+        verdict: first10Score < 72 ? '试读十章存在弃读风险，需要补目标、爽点和章末钩子。' : '试读段落具备继续点击下一章的基础。',
+      },
+    ],
+    segments: [
+      { key: '1-3', label: '开篇三章', ...first3Local, score: first3Score, verdict: first3Score >= 80 ? '开篇钩子较稳。' : '开篇压力、异常资源或章末钩子需要补强。' },
+      { key: '1-10', label: '试读十章', ...first10Local, score: first10Score, verdict: first10Score >= 80 ? '试读闭环较稳。' : '第4-10章需要补目标推进、回报和未解问题。' },
+      { key: 'recent10', label: '最近十章', ...recentLocal, score: recentLocal.score || trialScore, verdict: recentLocal.score >= 80 ? '近期追读节奏较稳。' : '近期存在疲劳或回报密度风险。' },
+    ],
+    drop_points: dropPoints.length ? dropPoints : ['暂无明显弃读点，但仍建议保持每章目标、回报和章末钩子。'],
+    pull_points: pullPoints.length ? pullPoints : ['需要先补齐读者承诺、前三章试读和爽点回报证据。'],
+    repair_actions: repairActions.length ? repairActions : ['保持章节任务书、场景卡、质检、故事状态同步和试读复盘闭环。'],
+    source_reports: {
+      first30_retention_score: first30Score || null,
+      expectation_score: expectationScore || null,
+      payoff_score: payoffScore || null,
+      innovation_score: innovationScore || null,
+      readability_score: readabilityScore || null,
+    },
+  }
+}
+
+function parseChapterNoFromText(value: any) {
+  const raw = String(value || '')
+  const match = raw.match(/第\s*(\d+)\s*章/i) || raw.match(/chapter\s*(\d+)/i)
+  return match ? Number(match[1]) : null
+}
+
+export function buildReaderTrialRepairTasks(report: any) {
+  const dropPoints = asArray(report?.drop_points || report?.dropPoints).map(item => String(item || '').trim()).filter(Boolean)
+  const repairActions = asArray(report?.repair_actions || report?.repairActions).map(item => String(item || '').trim()).filter(Boolean)
+  const personas = asArray(report?.personas)
+  const segments = asArray(report?.segments)
+  const tasks = dropPoints.map((dropPoint, index) => {
+    const chapterNo = parseChapterNoFromText(dropPoint)
+    const action = repairActions[index] || repairActions.find(item => chapterNo && item.includes(`第${chapterNo}章`)) || repairActions[0] || '按读者试读复盘修复弃读点，补足目标推进、爽点回报、章末钩子或创新执行。'
+    const severity = /前三章|第1章|第2章|第3章|高危|弃读/.test(dropPoint) ? 'high' : 'medium'
+    return {
+      task_id: `reader-trial-${chapterNo || 'global'}-${textHash(`${dropPoint}${action}`)}`,
+      task_type: 'repair_quality',
+      source: 'reader_trial_review',
+      issue_type: 'reader_trial_drop_point',
+      severity,
+      chapter_no: chapterNo,
+      title: chapterNo ? `第${chapterNo}章读者试读弃读点修复` : '读者试读弃读点修复',
+      message: dropPoint,
+      action,
+      task_status: 'open',
+      reader_trial_review: {
+        report_id: report?.report_id || '',
+        score: report?.score ?? null,
+        status: report?.status || '',
+        summary: report?.summary || '',
+        drop_points: [dropPoint],
+        repair_actions: action ? [action] : [],
+        personas: personas.slice(0, 4),
+        segments: segments.slice(0, 3),
+      },
+      acceptance_criteria: [
+        '弃读点已在对应章节修订为可见的目标推进、爽点回报、章末未解问题或创新场面。',
+        '重新运行读者试读复盘后，同类弃读点不再出现，或风险等级明显降低。',
+      ],
+    }
+  })
+  return tasks.slice(0, 60)
+}
+
 function buildLongformPressureTest(project: any, chapters: any[], outlines: any[], characters: any[], worldbuilding: any[], reviews: any[]) {
   const targetWords = 3000000
   const writtenChapters = chapters.filter(chapter => chapter.chapter_text)
@@ -1387,6 +1600,82 @@ export function registerNovelCommercialOpsRoutes(app: Express, ctx: CommercialOp
         status: tasks.length ? 'warn' : 'ok',
         summary: `前30章留存修复任务：${tasks.length} 项`,
         issues: tasks.slice(0, 30).map((item: any) => item.chapter_no ? `第${item.chapter_no}章 ${item.message}` : `${item.segment || item.task_type}：${item.message}`),
+        payload: JSON.stringify({ run_id: run.id, tasks, report }),
+      })
+      res.json({ ok: true, run, review, tasks, report })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.post('/api/novel/projects/:id/reader-trial-review', async (req, res) => {
+    try {
+      const activeWorkspace = ctx.getWorkspace()
+      const project = await ctx.getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const [chapters, outlines, reviews] = await Promise.all([
+        listNovelChapters(activeWorkspace, project.id),
+        listNovelOutlines(activeWorkspace, project.id),
+        listNovelReviews(activeWorkspace, project.id),
+      ])
+      const report = buildReaderTrialReview(project, chapters, outlines, reviews)
+      const review = await createNovelReview(activeWorkspace, {
+        project_id: project.id,
+        review_type: 'reader_trial_review',
+        status: report.status === 'ready' ? 'ok' : report.status === 'blocked' ? 'blocked' : 'warn',
+        summary: `读者试读复盘：${report.score} 分，${report.summary}`,
+        issues: report.drop_points.slice(0, 30),
+        payload: JSON.stringify({ report }),
+      })
+      const run = await appendNovelRun(activeWorkspace, {
+        project_id: project.id,
+        run_type: 'reader_trial_review',
+        step_name: 'reader-trial-review',
+        status: report.status === 'ready' ? 'success' : report.status === 'blocked' ? 'failed' : 'warn',
+        output_ref: JSON.stringify({ report, review_id: review.id }),
+      })
+      res.json({ ok: true, report, review, run })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.post('/api/novel/projects/:id/reader-trial-review/repair-queue', async (req, res) => {
+    try {
+      const activeWorkspace = ctx.getWorkspace()
+      const project = await ctx.getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const [chapters, outlines, reviews] = await Promise.all([
+        listNovelChapters(activeWorkspace, project.id),
+        listNovelOutlines(activeWorkspace, project.id),
+        listNovelReviews(activeWorkspace, project.id),
+      ])
+      const report = buildReaderTrialReview(project, chapters, outlines, reviews)
+      const tasks = buildReaderTrialRepairTasks(report)
+      const run = await appendNovelRun(activeWorkspace, {
+        project_id: project.id,
+        run_type: 'longform_production_repair',
+        step_name: `reader-trial-repair-${tasks.length}`,
+        status: tasks.length ? 'ready' : 'success',
+        input_ref: JSON.stringify({ source: 'reader_trial_review', source_report_id: report.report_id }),
+        output_ref: JSON.stringify({
+          report: {
+            source: 'reader_trial_review',
+            report_id: report.report_id,
+            score: report.score,
+            status: report.status,
+            summary: report.summary,
+          },
+          tasks,
+          recommendations: report.repair_actions || [],
+        }),
+      })
+      const review = await createNovelReview(activeWorkspace, {
+        project_id: project.id,
+        review_type: 'reader_trial_repair',
+        status: tasks.length ? 'warn' : 'ok',
+        summary: `读者试读修复任务：${tasks.length} 项`,
+        issues: tasks.slice(0, 30).map((item: any) => item.chapter_no ? `第${item.chapter_no}章 ${item.message}` : item.message),
         payload: JSON.stringify({ run_id: run.id, tasks, report }),
       })
       res.json({ ok: true, run, review, tasks, report })
