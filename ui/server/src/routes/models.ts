@@ -303,9 +303,12 @@ export function registerModelRoutes(app: Express, getWorkspace: () => string) {
         : req.body?.contextUiParams && typeof req.body.contextUiParams === 'object'
           ? req.body.contextUiParams
           : {}
+      const hasApiFormat = req.body && (Object.prototype.hasOwnProperty.call(req.body, 'api_format') || Object.prototype.hasOwnProperty.call(req.body, 'apiFormat'))
+      const apiFormat = hasApiFormat ? String(req.body.api_format ?? req.body.apiFormat ?? '') : model.api_format
       const next = models.map(item => item.id === id
         ? {
             ...item,
+            api_format: apiFormat,
             context_ui_params: contextUiParams,
           }
         : item)

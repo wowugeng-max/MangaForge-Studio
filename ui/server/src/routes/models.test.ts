@@ -663,6 +663,48 @@ describe('model health probes', () => {
     expect(stored[1].context_ui_params).toEqual({ chat: [{ name: 'kept' }] })
   })
 
+  test('single model runtime params endpoint can persist protocol override', async () => {
+    const workspace = await tempWorkspace()
+    await writeFile(join(workspace, 'models.json'), JSON.stringify([
+      {
+        id: 1,
+        api_key_id: 10,
+        provider: 'p',
+        display_name: 'Claude',
+        model_name: 'claude-sonnet',
+        api_format: '',
+        capabilities: { chat: true },
+        health_status: 'healthy',
+        context_ui_params: { chat: [{ name: 'old' }] },
+      },
+    ]))
+    const { registerModelRoutes } = await import('./models')
+    const { app, handlers } = createRouteHarness()
+    registerModelRoutes(app as any, () => workspace)
+
+    const response = await call(handlers.get('PUT /api/models/:id/ui-params'), {
+      params: { id: '1' },
+      body: {
+        api_format: 'claude_code',
+        context_ui_params: {
+          context_window: 1_000_000,
+          max_context: 1_000_000,
+          chat: [{ name: 'context_window', default: 1_000_000 }],
+        },
+      },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.body).toEqual({ status: 'success' })
+
+    const stored = JSON.parse(await readFile(join(workspace, 'models.json'), 'utf8'))
+    expect(stored[0].api_format).toBe('claude_code')
+    expect(stored[0].context_ui_params).toMatchObject({
+      context_window: 1_000_000,
+      max_context: 1_000_000,
+    })
+  })
+
   test('accepts camelCase contextUiParams for single model ui params', async () => {
     const workspace = await tempWorkspace()
     await writeFile(join(workspace, 'models.json'), JSON.stringify([

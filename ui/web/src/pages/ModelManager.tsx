@@ -3,6 +3,8 @@ import { Button, Card, Drawer, Empty, Form, Input, message, Popconfirm, Select, 
 import { DeleteOutlined, EditOutlined, PlusOutlined, ReloadOutlined, StarFilled, StarOutlined, CheckCircleOutlined, DatabaseOutlined, ApiOutlined, ThunderboltOutlined, FilterOutlined } from '@ant-design/icons'
 import { modelApi } from '../api/models'
 import { keyApi } from '../api/keys'
+import { ModelRuntimeConfigForm } from '../components/admin/ModelRuntimeConfigForm'
+import { buildModelRuntimeInitialValues, buildModelRuntimeSavePayload } from '../components/admin/modelRuntimeConfig'
 
 const { Title, Text } = Typography
 
@@ -16,7 +18,7 @@ export function buildModelEditorInitialValues(record?: any) {
   return {
     ...values,
     capabilities: formatJsonEditorValue(values.capabilities, { chat: true }),
-    context_ui_params: formatJsonEditorValue(values.context_ui_params, {}),
+    ...buildModelRuntimeInitialValues(values),
   }
 }
 
@@ -54,17 +56,24 @@ export default function ModelManager() {
   const save = async () => {
     const values = await form.validateFields()
     const selectedKeyRecord = keys.find(k => Number(k.id) === Number(values.api_key_id))
+    const capabilities = typeof values.capabilities === 'string'
+      ? JSON.parse(values.capabilities)
+      : (values.capabilities || { chat: true })
+    const runtimePayload = buildModelRuntimeSavePayload(values, {
+      api_format: editing?.api_format,
+      context_ui_params: editing?.context_ui_params,
+      capabilities,
+    })
     const payload = {
-      ...values,
+      display_name: values.display_name,
+      model_name: values.model_name,
       api_key_id: Number(values.api_key_id || 0) || undefined,
-      api_format: values.api_format || undefined,
       provider: selectedKeyRecord?.provider || values.provider,
-      capabilities: typeof values.capabilities === 'string'
-        ? JSON.parse(values.capabilities)
-        : (values.capabilities || { chat: true }),
-      context_ui_params: typeof values.context_ui_params === 'string'
-        ? JSON.parse(values.context_ui_params || '{}')
-        : (values.context_ui_params || {}),
+      capabilities,
+      is_favorite: values.is_favorite,
+      is_manual: values.is_manual,
+      is_active: values.is_active,
+      ...runtimePayload,
     }
     if (editing) await modelApi.update(editing.id, payload)
     else await modelApi.create(payload)
@@ -231,21 +240,8 @@ export default function ModelManager() {
             <Col span={12}><Form.Item name="api_key_id" label="API Key"><Select options={keys.map(k => ({ label: `${k.provider} #${k.id}`, value: k.id }))} /></Form.Item></Col>
             <Col span={12}><Form.Item name="is_favorite" label="收藏" valuePropName="checked"><Switch /></Form.Item></Col>
           </Row>
-          <Form.Item name="api_format" label="通信协议覆盖">
-            <Select
-              allowClear
-              placeholder="跟随厂商默认协议"
-              options={[
-                { label: '跟随厂商默认协议', value: '' },
-                { label: 'OpenAI 标准兼容 (V1)', value: 'openai_compatible' },
-                { label: 'Codex / OpenAI Responses', value: 'codex_responses' },
-                { label: 'Claude Code / Anthropic Messages', value: 'claude_code' },
-                { label: 'Google Gemini 原生', value: 'gemini_native' },
-              ]}
-            />
-          </Form.Item>
           <Form.Item name="capabilities" label="能力 JSON" rules={[{ required: true }]}><Input.TextArea rows={5} style={{ fontFamily: 'monospace' }} /></Form.Item>
-          <Form.Item name="context_ui_params" label="UI 参数 JSON"><Input.TextArea rows={6} style={{ fontFamily: 'monospace' }} /></Form.Item>
+          <ModelRuntimeConfigForm form={form} />
           <Divider />
           <Space wrap>
             <Form.Item name="is_manual" label="手动模型" valuePropName="checked"><Switch /></Form.Item>

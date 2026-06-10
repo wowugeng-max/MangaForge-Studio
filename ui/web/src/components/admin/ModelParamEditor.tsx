@@ -1,44 +1,50 @@
 import React, { useState } from 'react'
-import { Modal, Input, message, Button, Typography } from 'antd'
+import { Modal, message, Button, Typography, Form } from 'antd'
 import { EditOutlined } from '@ant-design/icons'
 import apiClient from '../../api/client'
+import { ModelRuntimeConfigForm } from './ModelRuntimeConfigForm'
+import { buildModelRuntimeInitialValues, buildModelRuntimeSavePayload } from './modelRuntimeConfig'
 
-const { TextArea } = Input
 const { Text } = Typography
 
 interface Props {
   modelId: number
   modelName: string
   initialParams: any
+  initialApiFormat?: string
+  capabilities?: Record<string, boolean>
   onSuccess?: () => void
 }
 
-export const ModelParamEditor: React.FC<Props> = ({ modelId, modelName, initialParams, onSuccess }) => {
+export const ModelParamEditor: React.FC<Props> = ({ modelId, modelName, initialParams, initialApiFormat, capabilities, onSuccess }) => {
   const [visible, setVisible] = useState(false)
-  const [jsonStr, setJsonStr] = useState('')
   const [saving, setSaving] = useState(false)
+  const [form] = Form.useForm()
 
   const handleOpen = () => {
-    setJsonStr(JSON.stringify(initialParams || {}, null, 2))
+    form.setFieldsValue(buildModelRuntimeInitialValues({
+      api_format: initialApiFormat,
+      context_ui_params: initialParams || {},
+      capabilities,
+    }))
     setVisible(true)
   }
 
   const handleSave = async () => {
     try {
-      const parsedJson = JSON.parse(jsonStr)
-      setSaving(true)
-      await apiClient.put(`/models/${modelId}/ui-params`, {
-        context_ui_params: parsedJson,
+      const values = await form.validateFields()
+      const payload = buildModelRuntimeSavePayload(values, {
+        api_format: initialApiFormat,
+        context_ui_params: initialParams || {},
+        capabilities,
       })
+      setSaving(true)
+      await apiClient.put(`/models/${modelId}/ui-params`, payload)
       message.success(`${modelName} 参数配置已热更新！`)
       setVisible(false)
       onSuccess?.()
     } catch (e: any) {
-      if (e instanceof SyntaxError) {
-        message.error('JSON 格式错误，请检查标点和引号！')
-      } else {
-        message.error('保存失败: ' + e.message)
-      }
+      message.error('保存失败: ' + (e?.message || '未知错误'))
     } finally {
       setSaving(false)
     }
@@ -47,7 +53,7 @@ export const ModelParamEditor: React.FC<Props> = ({ modelId, modelName, initialP
   return (
     <>
       <Button type="link" size="small" icon={<EditOutlined />} onClick={handleOpen}>
-        配置参数 (JSON)
+        配置参数
       </Button>
 
       <Modal
@@ -56,19 +62,16 @@ export const ModelParamEditor: React.FC<Props> = ({ modelId, modelName, initialP
         onOk={handleSave}
         confirmLoading={saving}
         onCancel={() => setVisible(false)}
-        width={600}
+        width={620}
       >
         <div style={{ marginBottom: 8 }}>
           <Text type="secondary" style={{ fontSize: 12 }}>
-            在这里修改该模型在节点中暴露的动态表单。保存后，所有画布节点立即生效，无需重启代码。
+            配置模型通信协议、上下文窗口和常用运行参数。保存后，画布节点和小说工作台会读取最新配置。
           </Text>
         </div>
-        <TextArea
-          rows={15}
-          value={jsonStr}
-          onChange={(e) => setJsonStr(e.target.value)}
-          style={{ fontFamily: 'monospace', backgroundColor: '#fafafa' }}
-        />
+        <Form form={form} layout="vertical">
+          <ModelRuntimeConfigForm form={form} compact />
+        </Form>
       </Modal>
     </>
   )

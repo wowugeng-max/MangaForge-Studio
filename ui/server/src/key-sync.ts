@@ -92,8 +92,20 @@ function normalizeCapabilities(raw: any, modelName = '') {
 
 function defaultTextParams() {
   return [
+    {
+      name: 'context_window',
+      label: '上下文窗口',
+      type: 'select',
+      options: [
+        { label: '1M', value: 1_000_000 },
+        { label: '256K', value: 256_000 },
+        { label: '128K', value: 128_000 },
+        { label: '32K', value: 32_000 },
+      ],
+      default: 1_000_000,
+    },
     { name: 'temperature', label: '随机性 (Temp)', type: 'number', default: 0.7, min: 0, max: 2, step: 0.1 },
-    { name: 'max_tokens', label: '输出长度限制', type: 'number', default: 2048, min: 1, max: 8192, step: 1 },
+    { name: 'max_tokens', label: '输出长度限制', type: 'number', default: 8192, min: 1, max: 262144, step: 1 },
   ]
 }
 
@@ -113,14 +125,23 @@ function defaultVideoParams() {
 
 function defaultContextUiParams(capabilities?: ModelRecord['capabilities']) {
   const caps = normalizeCapabilities(capabilities || { chat: true })
-  const params: Record<string, unknown[]> = {}
+  const params: Record<string, unknown> = {
+    context_window: 1_000_000,
+    max_context: 1_000_000,
+    context_window_preset: '1m',
+    max_tokens: 8192,
+    temperature: 0.7,
+  }
   if (caps.chat) params.chat = defaultTextParams()
   if (caps.vision) params.vision = defaultTextParams()
   if (caps.text_to_image) params.text_to_image = defaultImageParams()
   if (caps.image_to_image) params.image_to_image = defaultImageParams()
   if (caps.text_to_video) params.text_to_video = defaultVideoParams()
   if (caps.image_to_video) params.image_to_video = defaultVideoParams()
-  return Object.keys(params).length > 0 ? params : { chat: defaultTextParams() }
+  if (!caps.chat && !caps.vision && !caps.text_to_image && !caps.image_to_image && !caps.text_to_video && !caps.image_to_video) {
+    params.chat = defaultTextParams()
+  }
+  return params
 }
 
 function inferModelApiFormat(modelName: string) {

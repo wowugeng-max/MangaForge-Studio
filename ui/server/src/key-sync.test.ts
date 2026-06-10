@@ -86,12 +86,17 @@ describe('model sync capability inference', () => {
       image_to_video: false,
     })
     expect(byName['deepseek-chat'].context_ui_params).toMatchObject({
-      chat: [
-        { name: 'temperature', type: 'number', min: 0, max: 2, step: 0.1, default: 0.7 },
-        { name: 'max_tokens', type: 'number', min: 1, max: 8192, step: 1, default: 2048 },
-      ],
+      context_window: 1_000_000,
+      max_context: 1_000_000,
+      context_window_preset: '1m',
+      max_tokens: 8192,
+      temperature: 0.7,
     })
-    expect(byName['deepseek-chat'].context_ui_params.temperature).toBeUndefined()
+    expect(byName['deepseek-chat'].context_ui_params.chat).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'context_window', type: 'select', default: 1_000_000 }),
+      expect.objectContaining({ name: 'temperature', type: 'number', min: 0, max: 2, step: 0.1, default: 0.7 }),
+      expect.objectContaining({ name: 'max_tokens', type: 'number', min: 1, max: 262144, step: 1, default: 8192 }),
+    ]))
     expect(byName['qwen-vl-plus'].context_ui_params.vision).toBeArray()
     expect(byName['sdxl-pro'].context_ui_params.text_to_image).toEqual([
       { name: 'size', label: '图像尺寸', type: 'select', options: ['1024*1024', '768*1024', '1024*768'], default: '1024*1024' },
