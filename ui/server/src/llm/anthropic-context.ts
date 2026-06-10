@@ -100,3 +100,20 @@ export function applyClaudeCodeHeaders(headers: Record<string, string>, model?: 
   }
   return headers
 }
+
+export function appendAnthropicBetaBodyValue(body: Record<string, any>, value: string) {
+  const current = Array.isArray(body.anthropic_beta) ? body.anthropic_beta : []
+  const values = current
+    .map((item: any) => String(item || '').trim())
+    .filter(Boolean)
+  if (!values.some(item => item.toLowerCase() === value.toLowerCase())) values.push(value)
+  body.anthropic_beta = values
+  return body
+}
+
+export function applyClaudeCodeBodyMetadata(body: Record<string, any>, model?: ModelWithContextParams) {
+  if (modelRequestsAnthropic1mContext(model)) {
+    appendAnthropicBetaBodyValue(body, ANTHROPIC_1M_CONTEXT_BETA)
+  }
+  return body
+}

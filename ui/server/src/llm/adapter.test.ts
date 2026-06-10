@@ -382,6 +382,69 @@ describe('ConfiguredProviderAdapter config-driven routes', () => {
     expect(capturedHeaders['anthropic-beta']).toContain('claude-code-20250219')
     expect(capturedHeaders['anthropic-beta']).toContain('context-1m')
     expect(capturedBody.model).toBe('claude-opus-4-8')
+    expect(capturedBody.anthropic_beta).toContain('context-1m-2025-08-07')
+    expect(capturedBody.tool_choice).toBeUndefined()
+  })
+
+  test('parses Anthropic content blocks as response text in configured adapter', async () => {
+    globalThis.fetch = (async () => new Response(JSON.stringify({
+      content: [
+        { type: 'text', text: 'Claude ' },
+        { type: 'text', text: 'OK' },
+      ],
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 3, output_tokens: 2 },
+    }), { status: 200 })) as typeof fetch
+
+    const adapter = new ConfiguredProviderAdapter(
+      {
+        id: 'claude-gateway',
+        display_name: 'Claude Gateway',
+        service_type: 'llm',
+        api_format: 'claude_code',
+        auth_type: 'bearer',
+        response_mode: 'auto',
+        supported_modalities: ['chat'],
+        default_base_url: 'https://gateway.example/v1',
+        is_active: true,
+        endpoints: {},
+        custom_headers: {},
+      },
+      {
+        id: 1,
+        provider: 'claude-gateway',
+        key: 'claude-key',
+        description: '',
+        is_active: true,
+        quota_total: 0,
+        quota_used: 0,
+        tags: [],
+      },
+      {
+        id: 1,
+        api_key_id: 1,
+        provider: 'claude-gateway',
+        api_format: 'claude_code',
+        display_name: 'Claude Opus',
+        model_name: 'claude-opus-4-8',
+        capabilities: { chat: true },
+        health_status: 'unknown',
+        is_favorite: false,
+        is_manual: false,
+        context_ui_params: {},
+      },
+    )
+
+    const result = await adapter.execute({
+      model: 'balanced',
+      messages: [{ role: 'user', content: 'Return exactly OK.' }],
+      temperature: 0,
+      max_tokens: 16,
+      response_format: 'text',
+    })
+
+    expect(result.content).toBe('Claude \nOK')
+    expect(result.finish_reason).toBe('end_turn')
   })
 
   test('supports endpoint object payload templates, route headers, and result extractors', async () => {

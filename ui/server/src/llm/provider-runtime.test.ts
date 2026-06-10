@@ -127,6 +127,7 @@ describe('codex responses provider runtime', () => {
       max_tokens: 128,
       system: 'You are careful.',
       stream: true,
+      anthropic_beta: ['context-1m-2025-08-07'],
     })
   })
 
@@ -202,8 +203,10 @@ describe('codex responses provider runtime', () => {
         system: 'Use Claude messages.',
         messages: [{ role: 'user', content: 'Say OK.' }],
         max_tokens: 64,
+        anthropic_beta: expect.arrayContaining(['context-1m-2025-08-07']),
       })
       expect(capturedBody.response_format).toBeUndefined()
+      expect(capturedBody.tool_choice).toBeUndefined()
       expect(result.content).toBe('Claude override OK')
       expect(result.runtimeSelection?.apiFormat).toBe('claude_code')
     } finally {

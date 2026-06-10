@@ -15,7 +15,7 @@ import {
 } from './types'
 import { normalizeLLMResponse } from './adapter'
 import { buildCodexResponsesBody } from './codex-responses'
-import { applyClaudeCodeHeaders, stripAnthropicLocal1mMarker } from './anthropic-context'
+import { applyClaudeCodeBodyMetadata, applyClaudeCodeHeaders, stripAnthropicLocal1mMarker } from './anthropic-context'
 
 // ════════════════════════════════════════════════════════════
 // provider-runtime.ts — Reference: Claude Code API client
@@ -388,6 +388,7 @@ function toAnthropicBody(request: LLMRequest, selection: RuntimeModelSelection):
     }))
   }
   if (shouldStreamRequest(request, selection)) body.stream = true
+  if (selection.apiFormat === 'claude_code') applyClaudeCodeBodyMetadata(body, selection.model)
   return body
 }
 

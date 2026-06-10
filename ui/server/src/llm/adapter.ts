@@ -1,6 +1,6 @@
 import { imageUrlFromLLMContentPart, stringifyLLMMessageContent, stringifyLLMMessageTextContent, textFromLLMContentPart, type LLMRequest, type LLMResponse, type LLMToolCall } from './types'
 import { buildCodexResponsesBody } from './codex-responses'
-import { applyClaudeCodeHeaders, stripAnthropicLocal1mMarker } from './anthropic-context'
+import { applyClaudeCodeBodyMetadata, applyClaudeCodeHeaders, stripAnthropicLocal1mMarker } from './anthropic-context'
 import type { APIKeyRecord } from '../key-store'
 import type { ModelRecord } from '../model-store'
 import type { ProviderRecord } from '../provider-store'
@@ -44,10 +44,10 @@ export function parseStructuredContent<T = any>(content: string, parsed?: T) {
 }
 
 export function normalizeLLMResponse<T = any>(raw: any) {
-  const content = String(raw?.content || raw?.message?.content || raw?.choices?.[0]?.message?.content || raw?.choices?.[0]?.text || '')
+  const content = String(contentTextFromProviderValue(raw?.content || raw?.message?.content || raw?.choices?.[0]?.message?.content || raw?.choices?.[0]?.text) || '')
   const rawToolCalls = raw?.tool_calls || raw?.message?.tool_calls || raw?.choices?.[0]?.message?.tool_calls || []
   const choice = raw?.choices?.[0]?.message || raw?.choices?.[0]
-  const contentText = String(raw?.content || raw?.message?.content || choice?.content || choice?.text || '')
+  const contentText = String(contentTextFromProviderValue(raw?.content || raw?.message?.content || choice?.content || choice?.text) || '')
   const parsed = parseStructuredContent<T>(contentText, raw?.parsed || choice?.parsed)
   return {
     content: contentText,
@@ -57,6 +57,24 @@ export function normalizeLLMResponse<T = any>(raw: any) {
     raw,
     parsed,
   }
+}
+
+function contentTextFromProviderValue(value: any): string {
+  if (Array.isArray(value)) {
+    return value
+      .map(item => {
+        if (typeof item === 'string') return item
+        if (item && typeof item === 'object') {
+          if (typeof item.text === 'string') return item.text
+          if (typeof item.content === 'string') return item.content
+        }
+        return ''
+      })
+      .filter(Boolean)
+      .join('\n')
+  }
+  if (value === undefined || value === null) return ''
+  return String(value)
 }
 
 export function classifyLLMError(error: unknown) {
@@ -183,8 +201,10 @@ function buildAnthropicMessagesBody(request: LLMRequest) {
     role: msg.role === 'assistant' ? 'assistant' : (msg.role === 'tool' ? 'assistant' : 'user'),
     content: msg.content,
   }))
-  if (normalized.tools?.length) body.tools = normalized.tools.map(tool => ({ name: tool.name, description: tool.description, input_schema: tool.input_schema }))
-  if (normalized.tool_choice) body.tool_choice = normalized.tool_choice
+  if (normalized.tools?.length) {
+    body.tools = normalized.tools.map((tool: any) => ({ name: tool.name, description: tool.description, input_schema: tool.input_schema || tool.parameters || {} }))
+    if (normalized.tool_choice === 'auto') body.tool_choice = { type: 'auto' }
+  }
   return body
 }
 
@@ -647,7 +667,10 @@ export class ConfiguredProviderAdapter implements NovelLLMAdapter {
     const headers = applyProviderAuth({ ...(this.provider.custom_headers || {}) }, this.provider, this.apiKey.key, providerFormat)
     const routeHeaders = routeDslValue(routeConfig, 'headers', 'customHeaders')
     if (routeHeaders && typeof routeHeaders === 'object') Object.assign(headers, routeHeaders)
-    if (isAnthropic) applyClaudeCodeHeaders(headers, this.model)
+    if (isAnthropic) {
+      applyClaudeCodeHeaders(headers, this.model)
+      if (providerFormat === 'claude_code') applyClaudeCodeBodyMetadata(body, this.model)
+    }
     const raw = await pollConfiguredTask(this.provider, endpoint, routeConfig, await postJson(endpoint, body, undefined, headers), headers, effectiveBaseUrl)
     if (isGeminiNative) return normalizeToolCallsFromResponse(normalizeLLMResponse<T>(normalizeGeminiGenerateContentPayload(raw)))
     const resultExtractor = routeDslValue(routeConfig, 'result_extractor', 'resultExtractor')
