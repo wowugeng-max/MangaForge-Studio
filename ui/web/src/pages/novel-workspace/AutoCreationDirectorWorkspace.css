@@ -461,6 +461,199 @@
   font-size: 12px;
 }
 
+.auto-director-serial-cockpit {
+  display: grid;
+  gap: 12px;
+  border-color: #bfdbfe;
+  background: #f8fbff;
+}
+
+.auto-director-cockpit-command {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.84);
+  padding: 12px;
+}
+
+.auto-director-cockpit-command-copy {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.auto-director-cockpit-section-title {
+  color: #334155;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.auto-director-cockpit-guardrails {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.auto-director-cockpit-guardrails > .auto-director-cockpit-section-title {
+  grid-column: 1 / -1;
+}
+
+.auto-director-cockpit-guardrail,
+.auto-director-cockpit-chain-step,
+.auto-director-cockpit-risk {
+  min-width: 0;
+  width: 100%;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease, box-shadow 160ms ease, opacity 160ms ease;
+}
+
+.auto-director-cockpit-guardrail {
+  padding: 9px 10px;
+  display: grid;
+  gap: 6px;
+}
+
+.auto-director-cockpit-guardrail:hover,
+.auto-director-cockpit-chain-step:hover,
+.auto-director-cockpit-risk:hover {
+  border-color: #93c5fd;
+  background: #eff6ff;
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.07);
+}
+
+.auto-director-cockpit-guardrail:focus-visible,
+.auto-director-cockpit-chain-step:focus-visible,
+.auto-director-cockpit-risk:focus-visible {
+  outline: 2px solid #1677ff;
+  outline-offset: 2px;
+}
+
+.auto-director-cockpit-guardrail:disabled,
+.auto-director-cockpit-chain-step:disabled,
+.auto-director-cockpit-risk:disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
+  transform: none;
+  box-shadow: none;
+}
+
+.auto-director-cockpit-guardrail-warn,
+.auto-director-cockpit-chain-step-warn,
+.auto-director-cockpit-risk-warn {
+  border-color: #fde68a;
+  background: #fffdf5;
+}
+
+.auto-director-cockpit-guardrail-block,
+.auto-director-cockpit-chain-step-block,
+.auto-director-cockpit-risk-block {
+  border-color: #fecaca;
+  background: #fff7f7;
+}
+
+.auto-director-cockpit-guardrail-ok,
+.auto-director-cockpit-chain-step-done {
+  border-color: #bbf7d0;
+  background: #f7fff9;
+}
+
+.auto-director-cockpit-chain-step-current {
+  border-color: #93c5fd;
+  background: #eff6ff;
+  box-shadow: 0 0 0 1px rgba(22, 119, 255, 0.08);
+}
+
+.auto-director-cockpit-guardrail span,
+.auto-director-cockpit-risk span {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.auto-director-cockpit-guardrail .ant-tag,
+.auto-director-cockpit-chain-step .ant-tag,
+.auto-director-cockpit-risk .ant-tag {
+  flex-shrink: 0;
+  margin: 0;
+}
+
+.auto-director-cockpit-guardrail .ant-typography-secondary,
+.auto-director-cockpit-chain-step .ant-typography-secondary,
+.auto-director-cockpit-risk .ant-typography-secondary,
+.auto-director-cockpit-license .ant-typography-secondary {
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.auto-director-cockpit-lower {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(280px, 0.85fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.auto-director-cockpit-chain,
+.auto-director-cockpit-side,
+.auto-director-cockpit-license,
+.auto-director-cockpit-risks {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.auto-director-cockpit-chain-step {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 9px 10px;
+}
+
+.auto-director-cockpit-chain-index {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #eef2ff;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.auto-director-cockpit-chain-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.auto-director-cockpit-license,
+.auto-director-cockpit-risks {
+  border: 1px solid #dbe4ef;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.78);
+  padding: 10px;
+}
+
+.auto-director-cockpit-risk {
+  padding: 8px 9px;
+  display: grid;
+  gap: 5px;
+}
+
 .auto-director-command-quality-gate-ok {
   border-color: #bbf7d0;
   background: #f0fdf4;
@@ -2614,6 +2807,14 @@
     grid-template-columns: 1fr;
   }
 
+  .auto-director-cockpit-guardrails {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .auto-director-cockpit-lower {
+    grid-template-columns: 1fr;
+  }
+
   .auto-director-creation-pipeline-body {
     grid-template-columns: 1fr;
   }
@@ -2689,6 +2890,23 @@
 
   .auto-director-command-quality-gates {
     grid-template-columns: 1fr;
+  }
+
+  .auto-director-cockpit-command {
+    grid-template-columns: 1fr;
+  }
+
+  .auto-director-cockpit-guardrails {
+    grid-template-columns: 1fr;
+  }
+
+  .auto-director-cockpit-chain-step {
+    grid-template-columns: 24px minmax(0, 1fr);
+  }
+
+  .auto-director-cockpit-chain-step .ant-tag {
+    grid-column: 2;
+    justify-self: start;
   }
 
   .auto-director-battle-lanes {

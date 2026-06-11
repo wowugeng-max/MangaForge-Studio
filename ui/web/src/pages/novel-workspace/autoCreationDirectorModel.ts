@@ -521,6 +521,45 @@ export interface AutoCreationTodayCommandDeck {
   flow: AutoCreationTodayCommandFlowItem[]
 }
 
+export type AutoCreationSerialCockpitStatus = 'ok' | 'warn' | 'block'
+export type AutoCreationChapterChainStatus = 'done' | 'current' | 'pending' | 'warn' | 'block'
+
+export interface AutoCreationSerialGuardrail {
+  key: 'core_stability' | 'story_drive' | 'reader_pull' | 'innovation_ip' | 'serial_safety'
+  label: string
+  status: AutoCreationSerialCockpitStatus
+  detail: string
+  count: number
+  action: AutoCreationDirectorAction
+}
+
+export interface AutoCreationChapterChainStep {
+  key: 'handoff' | 'brief' | 'draft' | 'quality' | 'state_sync' | 'delivery'
+  label: string
+  status: AutoCreationChapterChainStatus
+  detail: string
+  action: AutoCreationDirectorAction
+}
+
+export interface AutoCreationRiskQueueItem {
+  key: 'delivery_risks' | 'storylines' | 'reader_expectation' | 'first30_retention' | 'asset_intake' | 'batch_risks'
+  label: string
+  count: number
+  status: AutoCreationSerialCockpitStatus
+  detail: string
+  action: AutoCreationDirectorAction
+}
+
+export interface AutoCreationSerialCockpit {
+  title: string
+  summary: string
+  command: AutoCreationTodayCommandDeck
+  guardrails: AutoCreationSerialGuardrail[]
+  chapterChain: AutoCreationChapterChainStep[]
+  batchLicense: AutoCreationProductionLicense
+  riskQueue: AutoCreationRiskQueueItem[]
+}
+
 export interface AutoCreationMillionWordRunwayGate {
   key: 'core_compass' | 'chapter_four_questions' | 'reader_fuel' | 'innovation' | 'canon_memory' | 'batch_entry'
   label: string
@@ -609,6 +648,7 @@ export interface AutoCreationDirectorModel {
   dailyBattlePlan: AutoCreationDailyBattlePlan
   productionLicense: AutoCreationProductionLicense
   todayCommandDeck: AutoCreationTodayCommandDeck
+  serialCockpit: AutoCreationSerialCockpit
   millionWordRunway: AutoCreationMillionWordRunway
   writingQueueFocus: AutoCreationWritingQueueFocus
   rollingScriptRoom: AutoCreationRollingScriptRoom
@@ -6626,6 +6666,309 @@ function buildDirectorBattleDesk(planning: PlanningWorkspaceModel): PlanningWork
   }
 }
 
+function mergeCockpitStatus(...statuses: AutoCreationSerialCockpitStatus[]): AutoCreationSerialCockpitStatus {
+  if (statuses.includes('block')) return 'block'
+  if (statuses.includes('warn')) return 'warn'
+  return 'ok'
+}
+
+function signalToCockpitStatus(status: any): AutoCreationSerialCockpitStatus {
+  const normalized = text(status)
+  if (normalized === 'block' || normalized === 'blocked') return 'block'
+  if (['warn', 'warning', 'needs_action', 'needs_attention', 'stale', 'risk', 'caution'].includes(normalized)) return 'warn'
+  return 'ok'
+}
+
+function cockpitStatusFromCount(count: number, highCount = 0): AutoCreationSerialCockpitStatus {
+  if (highCount > 0) return 'block'
+  if (count > 0) return 'warn'
+  return 'ok'
+}
+
+function buildSerialGuardrails(args: {
+  creationContract: AutoCreationContractItem[]
+  chapterLaunchGate: AutoCreationChapterLaunchGate
+  deliveryRiskGate: AutoCreationDeliveryRiskGate
+  longformCompass: AutoCreationLongformCompass
+  millionWordRunway: AutoCreationMillionWordRunway
+  writing: WritingCockpitModel
+  planning: PlanningWorkspaceModel
+  batchGuardrail: AutoCreationBatchGuardrail
+  productionLicense: AutoCreationProductionLicense
+}): AutoCreationSerialGuardrail[] {
+  const acceptance = args.writing.chapterAcceptanceDesk
+  const contractCore = args.creationContract.find(item => item.key === 'core')
+  const contractStory = args.creationContract.find(item => item.key === 'story')
+  const contractInnovation = args.creationContract.find(item => item.key === 'innovation')
+  const contractReader = args.creationContract.find(item => item.key === 'reader_pull')
+  const delivery = args.deliveryRiskGate
+  const deliveryCategory = (key: AutoCreationDeliveryRiskGateCategory['key']) => delivery.categories.find(item => item.key === key)
+  const storylineCount = Number(acceptance.storylineSync?.missedCount || 0) + Number(acceptance.storylineSync?.forbiddenCount || 0)
+  const expectationDebtCount = Number(acceptance.readerExpectationSync?.missedCount || 0)
+    + Number(acceptance.readerExpectationSync?.openingHandoffMissedCount || 0)
+  const attractionWeakCount = Number(acceptance.chapterAttraction?.weakCount || 0)
+  const innovationMissed = Number(acceptance.innovationSync?.missedCount || 0)
+    + Number(acceptance.signatureSceneSync?.missedCount || 0)
+    + Number(acceptance.volumeBeatSync?.missedCount || 0)
+  const serialRiskCount = storylineCount
+    + Number(acceptance.assetIntake?.pendingCount || 0)
+    + Number(deliveryCategory('storyline')?.count || 0)
+    + Number(deliveryCategory('story_unit')?.count || 0)
+  const coreMissing = !text(args.planning.mainline?.readerPromise) || !text(args.planning.mainline?.currentVolumeGoal)
+
+  return [
+    {
+      key: 'core_stability',
+      label: '核心不偏移',
+      status: mergeCockpitStatus(
+        coreMissing ? 'block' : 'ok',
+        signalToCockpitStatus(contractCore?.status),
+        signalToCockpitStatus(args.longformCompass.status),
+        cockpitStatusFromCount(Number(deliveryCategory('delivery_core')?.count || 0), Number(deliveryCategory('delivery_core')?.highCount || 0)),
+        signalToCockpitStatus(args.millionWordRunway.gates.find(gate => gate.key === 'core_compass')?.status),
+      ),
+      detail: coreMissing
+        ? '核心卖点或当前卷目标缺失，不能扩大自动连写。'
+        : contractCore?.detail || args.longformCompass.summary || '核心承诺、主角驱动和长期方向保持可追踪。',
+      count: Number(deliveryCategory('delivery_core')?.count || 0),
+      action: planningAction('open_outline_tree', '查看全书核心契约、主轴护栏和长期方向。'),
+    },
+    {
+      key: 'story_drive',
+      label: '故事驱动力',
+      status: mergeCockpitStatus(
+        signalToCockpitStatus(contractStory?.status),
+        signalToCockpitStatus(args.chapterLaunchGate.status),
+        signalToCockpitStatus(acceptance.storyDriveSync?.status),
+        cockpitStatusFromCount(Number(deliveryCategory('story_drive')?.count || 0), Number(deliveryCategory('story_drive')?.highCount || 0)),
+      ),
+      detail: acceptance.storyDriveSync?.priorityLabel || args.chapterLaunchGate.summary || contractStory?.detail || '本章目标、阻碍、代价和状态变化保持明确。',
+      count: Number(acceptance.storyDriveSync?.missedCount || 0) + Number(deliveryCategory('story_drive')?.count || 0),
+      action: args.chapterLaunchGate.action,
+    },
+    {
+      key: 'reader_pull',
+      label: '读者追读',
+      status: mergeCockpitStatus(
+        signalToCockpitStatus(contractReader?.status),
+        signalToCockpitStatus(acceptance.readerExpectationSync?.status),
+        signalToCockpitStatus(acceptance.readerRetentionSync?.status),
+        signalToCockpitStatus(acceptance.chapterAttraction?.status),
+        signalToCockpitStatus(args.planning.first30Retention?.status),
+        cockpitStatusFromCount(Number(deliveryCategory('reader_expectation')?.count || 0) + Number(deliveryCategory('reader_retention')?.count || 0)),
+      ),
+      detail: acceptance.readerExpectationSync?.label
+        || acceptance.chapterAttraction?.priorityLabel
+        || args.planning.first30Retention?.summary
+        || '章节承诺、爽点回报和章末翻页理由保持可见。',
+      count: expectationDebtCount + attractionWeakCount + Number(deliveryCategory('reader_expectation')?.count || 0) + Number(deliveryCategory('reader_retention')?.count || 0),
+      action: acceptance.readerExpectationSync?.status === 'warn'
+        ? writingAction('apply_editor_revision', '按读者期待欠账修订当前章。', '按期待修订')
+        : planningAction('run_first30_retention', '运行或刷新前30章留存诊断。'),
+    },
+    {
+      key: 'innovation_ip',
+      label: '创新/IP场面',
+      status: mergeCockpitStatus(
+        signalToCockpitStatus(contractInnovation?.status),
+        signalToCockpitStatus(acceptance.innovationSync?.status),
+        signalToCockpitStatus(acceptance.signatureSceneSync?.status),
+        signalToCockpitStatus(acceptance.volumeBeatSync?.status),
+        cockpitStatusFromCount(Number(deliveryCategory('innovation')?.count || 0) + Number(deliveryCategory('signature_scene')?.count || 0)),
+      ),
+      detail: acceptance.signatureSceneSync?.label || acceptance.innovationSync?.label || contractInnovation?.detail || '差异化设定、可传播场面和卷级爆点保持可执行。',
+      count: innovationMissed + Number(deliveryCategory('innovation')?.count || 0) + Number(deliveryCategory('signature_scene')?.count || 0),
+      action: planningAction('complete_volume_plan', '补齐创新执行、强场面和卷级爆点预算。'),
+    },
+    {
+      key: 'serial_safety',
+      label: '连载安全',
+      status: mergeCockpitStatus(
+        signalToCockpitStatus(acceptance.storylineSync?.status),
+        cockpitStatusFromCount(serialRiskCount, Number(acceptance.storylineSync?.forbiddenCount || 0) + Number(args.deliveryRiskGate.highOpen || 0)),
+      ),
+      detail: args.productionLicense.summary || args.batchGuardrail.summary || '正史同步、剧情线、资产入库和批量连写护栏保持可控。',
+      count: serialRiskCount,
+      action: args.productionLicense.nextAction,
+    },
+  ]
+}
+
+function buildChapterChain(writing: WritingCockpitModel): AutoCreationChapterChainStep[] {
+  const chapter = writing.nextChapter
+  const planningDesk = writing.chapterPlanningDesk
+  const acceptance = writing.chapterAcceptanceDesk
+  const handoff = writing.chapterHandoffDesk || {
+    visible: false,
+    status: 'hidden',
+    label: '等待章节交接',
+    actionKey: 'accept_chapter_and_continue',
+    actionLabel: '查看交接',
+  }
+  const hasChapter = Boolean(chapter)
+  const hasProse = Boolean(chapter?.hasProse || Number(chapter?.wordCount || 0) > 0)
+  const hasBrief = planningDesk.readiness === 'ready' || planningDesk.scenePlanStatus === 'ready' || arrayValue(planningDesk.sceneCards).length > 0
+  const qualityDone = acceptance.qualityScore !== null || Boolean(acceptance.latestQualityReviewId)
+  const needsRevision = ['needs_revision', 'needs_recheck'].includes(acceptance.acceptanceStatus)
+  const synced = acceptance.storyStateSynced
+  const delivered = acceptance.acceptanceStatus === 'delivered'
+  const actionForMissingChapter = writingAction('open_outline_panel', '先补齐章节大纲，创建可写章节。', '打开大纲面板')
+  const handoffAction = writingAction(handoff.actionKey || 'accept_chapter_and_continue', handoff.label || '查看章节交接', handoff.actionLabel || '查看交接')
+
+  return [
+    {
+      key: 'handoff',
+      label: '交接',
+      status: !hasChapter ? 'block' : handoff.visible && handoff.status === 'needs_delivery' ? 'warn' : 'done',
+      detail: !hasChapter ? '还没有可写章节。' : handoff.visible ? handoff.label : '上一章钩子、期待欠账和故事状态已接入。',
+      action: !hasChapter ? actionForMissingChapter : handoffAction,
+    },
+    {
+      key: 'brief',
+      label: '任务书',
+      status: !hasChapter ? 'pending' : hasBrief ? 'done' : 'current',
+      detail: hasBrief ? planningDesk.statusLabel || '章节任务书和场景卡可用。' : planningDesk.reasons[0] || '先补章节开写任务书或场景卡。',
+      action: writingAction(planningDesk.recommendedPlannerAction.key || 'build_scene_plan', '补齐章节任务书、场景卡和本章生成约束。', planningDesk.recommendedPlannerAction.label || '补章节计划'),
+    },
+    {
+      key: 'draft',
+      label: '初稿',
+      status: !hasChapter || !hasBrief ? 'pending' : hasProse ? 'done' : 'current',
+      detail: hasProse ? `当前正文约 ${chapter?.wordCount || 0} 字。` : '生成正文前必须确认任务书和场景预算。',
+      action: writingAction('confirm_plan_and_write_draft', '确认任务书并生成本章初稿。', '确认并生成'),
+    },
+    {
+      key: 'quality',
+      label: '质检',
+      status: !hasProse ? 'pending' : needsRevision ? 'warn' : qualityDone ? 'done' : 'current',
+      detail: !hasProse ? '初稿生成后进入质检。' : needsRevision ? acceptance.statusLabel : qualityDone ? '质量复检已有结果。' : '运行质量复检和编辑报告。',
+      action: writingAction(needsRevision ? 'apply_editor_revision' : 'refresh_current_quality', needsRevision ? '按风险清单生成修订稿。' : '复检当前正文质量。', needsRevision ? '生成修订稿' : '复检当前版本'),
+    },
+    {
+      key: 'state_sync',
+      label: '状态同步',
+      status: !hasProse || !qualityDone ? 'pending' : synced ? 'done' : 'current',
+      detail: synced ? '故事状态已同步到当前章。' : '交稿前需要同步正史、剧情线和新资产候选。',
+      action: writingAction('sync_story_state', '同步故事状态、剧情线和资产候选。', '同步故事状态'),
+    },
+    {
+      key: 'delivery',
+      label: '交稿',
+      status: delivered ? 'done' : acceptance.acceptanceStatus === 'ready_to_accept' ? 'current' : acceptance.visible ? 'warn' : 'pending',
+      detail: delivered ? '本章已交稿。' : acceptance.visible ? acceptance.statusLabel : '完成质检、修订和状态同步后验收。',
+      action: writingAction('accept_chapter_and_continue', '验收当前章并进入下一章。', '验收并进入下一章'),
+    },
+  ]
+}
+
+function buildSerialRiskQueue(args: {
+  planning: PlanningWorkspaceModel
+  writing: WritingCockpitModel
+  deliveryRiskGate: AutoCreationDeliveryRiskGate
+  batchReviewQueue: AutoCreationBatchReviewQueue
+}): AutoCreationRiskQueueItem[] {
+  const acceptance = args.writing.chapterAcceptanceDesk
+  const risks: AutoCreationRiskQueueItem[] = []
+  if (args.deliveryRiskGate.totalOpen > 0 || acceptance.deliveryRiskQueue?.totalCount) {
+    const count = Number(acceptance.deliveryRiskQueue?.totalCount || args.deliveryRiskGate.totalOpen || 0)
+    risks.push({
+      key: 'delivery_risks',
+      label: acceptance.deliveryRiskQueue?.label || `待修复 ${count}`,
+      count,
+      status: args.deliveryRiskGate.highOpen > 0 ? 'block' : 'warn',
+      detail: acceptance.deliveryRiskQueue?.priorityLabel || args.deliveryRiskGate.summary,
+      action: opsAction('create_delivery_risk_repair', '生成风险修复任务', args.deliveryRiskGate.summary || '把交稿风险转成可执行修复任务。'),
+    })
+  }
+  const storylineCount = Number(args.planning.storylineBoard?.overdueCount || 0)
+    + Number(args.planning.storylineBoard?.debtCount || 0)
+    + Number(acceptance.storylineSync?.missedCount || 0)
+    + Number(acceptance.storylineSync?.forbiddenCount || 0)
+  if (storylineCount > 0) {
+    risks.push({
+      key: 'storylines',
+      label: `剧情线 ${storylineCount}`,
+      count: storylineCount,
+      status: Number(acceptance.storylineSync?.forbiddenCount || 0) > 0 ? 'block' : 'warn',
+      detail: args.planning.storylineBoard?.summary || acceptance.storylineSync?.label || '剧情线推进和禁揭边界需要确认。',
+      action: planningAction('open_story_assets', '打开资料设定页，校准剧情线资产和本章调用关系。'),
+    })
+  }
+  const expectationCount = Number(acceptance.readerExpectationSync?.missedCount || 0)
+    + Number(acceptance.readerExpectationSync?.openingHandoffMissedCount || 0)
+  if (expectationCount > 0) {
+    risks.push({
+      key: 'reader_expectation',
+      label: `期待欠账 ${expectationCount}`,
+      count: expectationCount,
+      status: 'warn',
+      detail: acceptance.readerExpectationSync?.label || '读者期待承诺没有在正文中充分兑现。',
+      action: writingAction('apply_editor_revision', '按读者期待欠账修订当前章。', '按期待修订'),
+    })
+  }
+  if (args.planning.first30Retention?.status === 'stale' || acceptance.first30RetentionRecheck) {
+    risks.push({
+      key: 'first30_retention',
+      label: '留存需复诊',
+      count: 1,
+      status: 'warn',
+      detail: acceptance.first30RetentionRecheck?.reason || args.planning.first30Retention?.summary || '前30章章节更新后需要重新诊断留存。',
+      action: planningAction('run_first30_retention', '重新运行前30章留存诊断。'),
+    })
+  }
+  if (acceptance.assetIntake?.pendingCount) {
+    risks.push({
+      key: 'asset_intake',
+      label: acceptance.assetIntake.label,
+      count: acceptance.assetIntake.pendingCount,
+      status: 'warn',
+      detail: '正文中新人物、物品、能力、势力、地点或伏笔需要作者确认入库。',
+      action: planningAction('open_story_assets', '进入资料设定页确认新资产候选。'),
+    })
+  }
+  if (args.batchReviewQueue.visible && ['warn', 'risk'].includes(args.batchReviewQueue.status)) {
+    const count = Math.max(1, arrayValue(args.batchReviewQueue.riskRadar?.signals).filter(item => item.status === 'warn').length)
+    risks.push({
+      key: 'batch_risks',
+      label: `批次风险 ${count}`,
+      count,
+      status: args.batchReviewQueue.status === 'risk' ? 'block' : 'warn',
+      detail: args.batchReviewQueue.summary,
+      action: args.batchReviewQueue.nextAction,
+    })
+  }
+  return risks
+}
+
+function buildSerialCockpit(args: {
+  planning: PlanningWorkspaceModel
+  writing: WritingCockpitModel
+  todayCommandDeck: AutoCreationTodayCommandDeck
+  creationContract: AutoCreationContractItem[]
+  chapterLaunchGate: AutoCreationChapterLaunchGate
+  deliveryRiskGate: AutoCreationDeliveryRiskGate
+  longformCompass: AutoCreationLongformCompass
+  millionWordRunway: AutoCreationMillionWordRunway
+  batchGuardrail: AutoCreationBatchGuardrail
+  productionLicense: AutoCreationProductionLicense
+  batchReviewQueue: AutoCreationBatchReviewQueue
+}): AutoCreationSerialCockpit {
+  const riskQueue = buildSerialRiskQueue(args)
+  const guardrails = buildSerialGuardrails(args)
+  const primaryRisk = riskQueue[0]
+  return {
+    title: '长篇连载驾驶舱',
+    summary: primaryRisk
+      ? `当前优先处理：${primaryRisk.label}。${primaryRisk.detail}`
+      : args.todayCommandDeck.summary,
+    command: args.todayCommandDeck,
+    guardrails,
+    chapterChain: buildChapterChain(args.writing),
+    batchLicense: args.productionLicense,
+    riskQueue,
+  }
+}
+
 export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorModelInput): AutoCreationDirectorModel {
   const planning = input.planning
   const writing = input.writing
@@ -6847,6 +7190,19 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
     batchGuardrail,
     millionWordRunway,
   })
+  const serialCockpit = buildSerialCockpit({
+    planning,
+    writing,
+    todayCommandDeck,
+    creationContract,
+    chapterLaunchGate,
+    deliveryRiskGate,
+    longformCompass,
+    millionWordRunway,
+    batchGuardrail,
+    productionLicense,
+    batchReviewQueue,
+  })
   const pipeline = buildPipeline({
     planning,
     writing,
@@ -6909,6 +7265,7 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
     dailyBattlePlan,
     productionLicense,
     todayCommandDeck,
+    serialCockpit,
     millionWordRunway,
     writingQueueFocus,
     rollingScriptRoom,

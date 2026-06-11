@@ -112,10 +112,26 @@ function productionLicenseColor(status: AutoCreationDirectorModel['productionLic
   return 'red'
 }
 
-function qualityGateColor(status: string) {
-  if (status === 'ok') return 'green'
+function cockpitStatusColor(status: string) {
+  if (status === 'ok' || status === 'done') return 'green'
   if (status === 'block') return 'red'
-  return 'gold'
+  if (status === 'current') return 'blue'
+  if (status === 'warn') return 'gold'
+  return 'default'
+}
+
+function cockpitStatusLabel(status: string) {
+  if (status === 'ok') return '稳'
+  if (status === 'block') return '阻'
+  return '警'
+}
+
+function cockpitChainLabel(status: string) {
+  if (status === 'done') return '完成'
+  if (status === 'current') return '当前'
+  if (status === 'block') return '阻塞'
+  if (status === 'warn') return '待修'
+  return '等待'
 }
 
 function battleDeskColor(status: string) {
@@ -206,7 +222,7 @@ export function AutoCreationDirectorWorkspace({
     ? Math.min(100, Math.round((model.metrics.writtenWords / model.metrics.targetWords) * 100))
     : 0
   const activeStep = model.pipeline.find(step => step.status === 'active')
-  const todayCommandDeck = model.todayCommandDeck
+  const serialCockpit = model.serialCockpit
   const batchPreflight = model.batchGuardrail.preflight
   const longformMemoryAnchor = batchPreflight.longformMemoryAnchor || null
   const longformCharacterStates = Array.isArray(longformMemoryAnchor?.character_states) ? longformMemoryAnchor.character_states : []
@@ -264,76 +280,116 @@ export function AutoCreationDirectorWorkspace({
         </div>
       </div>
 
-      <section className={`auto-director-panel auto-director-command-deck auto-director-command-deck-${todayCommandDeck.status}`}>
+      <section className={`auto-director-panel auto-director-serial-cockpit auto-director-command-deck-${serialCockpit.command.status}`}>
         <div className="auto-director-panel-title">
           <FireOutlined />
-          <span>今日指挥条</span>
-          <Tag color={productionLicenseColor(todayCommandDeck.status)} bordered={false}>
-            {todayCommandDeck.modeLabel}
+          <span>{serialCockpit.title || '长篇连载驾驶舱'}</span>
+          <Tag color={productionLicenseColor(serialCockpit.command.status)} bordered={false}>
+            {serialCockpit.command.modeLabel}
           </Tag>
-          <Tag bordered={false}>当前：{todayCommandDeck.currentStepLabel}</Tag>
-          <Tag color="blue" bordered={false}>唯一下一步</Tag>
+          <Tag color="blue" bordered={false}>今日唯一动作</Tag>
         </div>
-        <div className="auto-director-command-body">
-          <div className="auto-director-command-copy">
-            <Text strong>{todayCommandDeck.summary}</Text>
-            {todayCommandDeck.reasons.length > 0 && (
+
+        <div className="auto-director-cockpit-command">
+          <div className="auto-director-cockpit-command-copy">
+            <Text strong>{serialCockpit.summary}</Text>
+            <Text type="secondary">当前：{serialCockpit.command.currentStepLabel}</Text>
+            {serialCockpit.command.reasons.length > 0 && (
               <div className="auto-director-command-reasons">
-                {todayCommandDeck.reasons.slice(0, 3).map(reason => <Text key={reason} type="secondary">{reason}</Text>)}
+                {serialCockpit.command.reasons.slice(0, 3).map(reason => <Text key={reason} type="secondary">{reason}</Text>)}
               </div>
             )}
-            <div className="auto-director-release-rationale">
-              <div className="auto-director-release-rationale-head">
-                <Text strong>连写放行说明</Text>
-                <Tag color={productionLicenseColor(todayCommandDeck.status)} bordered={false}>
-                  {todayCommandDeck.releaseRationale.mode}
-                </Tag>
-                <Tag bordered={false}>放行 {todayCommandDeck.releaseRationale.allowedCount} 章</Tag>
-              </div>
-              <Text type="secondary">{todayCommandDeck.releaseRationale.primaryReason}</Text>
-              <div className="auto-director-release-rationale-tags">
-                {todayCommandDeck.releaseRationale.checks.slice(0, 3).map(check => (
-                  <Tag key={`check-${check}`} color="green" bordered={false}>{check}</Tag>
-                ))}
-                {todayCommandDeck.releaseRationale.limits.slice(0, 2).map(limit => (
-                  <Tag key={`limit-${limit}`} bordered={false}>{limit}</Tag>
-                ))}
-              </div>
-            </div>
-          </div>
-          <div className="auto-director-command-quality-gates" aria-label="万订护栏">
-            <Text className="auto-director-command-quality-title">万订护栏</Text>
-            {todayCommandDeck.qualityGates.map(gate => (
-              <Tooltip key={gate.key} title={gate.detail}>
-                <span className={`auto-director-command-quality-gate auto-director-command-quality-gate-${gate.status}`}>
-                  <Tag color={qualityGateColor(gate.status)} bordered={false}>
-                    {gate.status === 'ok' ? '稳' : gate.status === 'block' ? '阻' : '警'}
-                  </Tag>
-                  <Text>{gate.label}</Text>
-                </span>
-              </Tooltip>
-            ))}
-          </div>
-          <div className="auto-director-command-flow">
-            {todayCommandDeck.flow.map((step, index) => (
-              <div
-                key={step.key}
-                className={[
-                  'auto-director-command-flow-step',
-                  `auto-director-command-flow-step-${step.status}`,
-                ].join(' ')}
-              >
-                <span>{index + 1}</span>
-                <Text>{step.label}</Text>
-              </div>
-            ))}
           </div>
           <ActionButton
             primary
-            action={todayCommandDeck.action}
+            action={serialCockpit.command.action}
             loadingActionKey={loadingActionKey}
             onAction={onAction}
           />
+        </div>
+
+        <div className="auto-director-cockpit-guardrails" aria-label="万订五项护栏">
+          <Text className="auto-director-cockpit-section-title">万订五项护栏</Text>
+          {serialCockpit.guardrails.map(item => (
+            <button
+              key={item.key}
+              type="button"
+              className={`auto-director-cockpit-guardrail auto-director-cockpit-guardrail-${item.status}`}
+              disabled={Boolean(loadingActionKey)}
+              onClick={() => onAction(item.action)}
+            >
+              <span>
+                <Tag color={cockpitStatusColor(item.status)} bordered={false}>
+                  {cockpitStatusLabel(item.status)}
+                </Tag>
+                <Text strong>{item.label}</Text>
+                {item.count > 0 && <Tag bordered={false}>{item.count}</Tag>}
+              </span>
+              <Text type="secondary">{item.detail}</Text>
+            </button>
+          ))}
+        </div>
+
+        <div className="auto-director-cockpit-lower">
+          <div className="auto-director-cockpit-chain" aria-label="当前章生产链">
+            <Text className="auto-director-cockpit-section-title">当前章生产链</Text>
+            {serialCockpit.chapterChain.map((step, index) => (
+              <button
+                key={step.key}
+                type="button"
+                className={`auto-director-cockpit-chain-step auto-director-cockpit-chain-step-${step.status}`}
+                disabled={Boolean(loadingActionKey)}
+                onClick={() => onAction(step.action)}
+              >
+                <span className="auto-director-cockpit-chain-index">{index + 1}</span>
+                <span className="auto-director-cockpit-chain-copy">
+                  <Text strong>{step.label}</Text>
+                  <Text type="secondary">{step.detail}</Text>
+                </span>
+                <Tag color={cockpitStatusColor(step.status)} bordered={false}>
+                  {cockpitChainLabel(step.status)}
+                </Tag>
+              </button>
+            ))}
+          </div>
+
+          <div className="auto-director-cockpit-side">
+            <div className="auto-director-cockpit-license">
+              <Text className="auto-director-cockpit-section-title">连写许可</Text>
+              <Space wrap size={[6, 6]}>
+                <Tag color={productionLicenseColor(serialCockpit.batchLicense.status)} bordered={false}>
+                  {serialCockpit.batchLicense.modeLabel}
+                </Tag>
+                {serialCockpit.batchLicense.safeChapterCount > 0 && (
+                  <Tag bordered={false}>放行 {serialCockpit.batchLicense.safeChapterCount} 章</Tag>
+                )}
+              </Space>
+              <Text type="secondary">{serialCockpit.batchLicense.summary}</Text>
+            </div>
+
+            <div className="auto-director-cockpit-risks">
+              <Text className="auto-director-cockpit-section-title">待处理风险</Text>
+              {serialCockpit.riskQueue.length > 0 ? (
+                serialCockpit.riskQueue.slice(0, 6).map(item => (
+                  <button
+                    key={item.key}
+                    type="button"
+                    className={`auto-director-cockpit-risk auto-director-cockpit-risk-${item.status}`}
+                    disabled={Boolean(loadingActionKey)}
+                    onClick={() => onAction(item.action)}
+                  >
+                    <span>
+                      <Tag color={cockpitStatusColor(item.status)} bordered={false}>{item.label}</Tag>
+                      {item.count > 0 && <Tag bordered={false}>{item.count}</Tag>}
+                    </span>
+                    <Text type="secondary">{item.detail}</Text>
+                  </button>
+                ))
+              ) : (
+                <Text type="secondary">当前没有阻塞连载推进的聚合风险。</Text>
+              )}
+            </div>
+          </div>
         </div>
       </section>
 

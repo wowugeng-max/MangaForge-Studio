@@ -817,6 +817,165 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(model.todayCommandDeck.flow.find(item => item.key === 'chapter_work')?.status).toBe('active')
   })
 
+  test('builds a longform serial cockpit from existing director signals', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        topStatus: {
+          ...basePlanning.topStatus,
+          future100Coverage: { ready: true, planned: 100, required: 100, missingChapters: [], label: '100/100' },
+        },
+      },
+      writing: {
+        ...baseWriting,
+        chapterPlanningDesk: {
+          ...baseWriting.chapterPlanningDesk,
+          readiness: 'ready',
+          statusLabel: '本章可写',
+          scenePlanStatus: 'ready',
+          sceneCards: [{ title: '资格争夺', goal: '主角拿到试炼资格' }],
+          reasons: [],
+          recommendedPlannerAction: { key: 'confirm_plan_and_write_draft', label: '确认计划，进入初稿' },
+        },
+        topStatus: {
+          ...baseWriting.topStatus,
+          nextActionLabel: '确认计划，进入初稿',
+          primaryActionKey: 'confirm_plan_and_write_draft',
+        },
+        primaryActionKey: 'confirm_plan_and_write_draft',
+      },
+      activeTasks: [],
+      selectedModelId: 12,
+    })
+
+    expect(model.serialCockpit.title).toBe('长篇连载驾驶舱')
+    expect(model.serialCockpit.command.action.key).toBe('confirm_plan_and_write_draft')
+    expect(model.serialCockpit.guardrails.map(item => item.key)).toEqual([
+      'core_stability',
+      'story_drive',
+      'reader_pull',
+      'innovation_ip',
+      'serial_safety',
+    ])
+    expect(model.serialCockpit.guardrails.every(item => item.status === 'ok')).toBe(true)
+    expect(model.serialCockpit.chapterChain.map(item => item.key)).toEqual([
+      'handoff',
+      'brief',
+      'draft',
+      'quality',
+      'state_sync',
+      'delivery',
+    ])
+    expect(model.serialCockpit.chapterChain.find(item => item.key === 'brief')?.status).toBe('done')
+    expect(model.serialCockpit.chapterChain.find(item => item.key === 'draft')?.status).toBe('current')
+    expect(model.serialCockpit.batchLicense.status).toBe('single_chapter')
+    expect(model.serialCockpit.riskQueue.length).toBe(0)
+  })
+
+  test('serial cockpit summarizes open risks into a compact queue', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        first30Retention: {
+          ...basePlanning.first30Retention,
+          status: 'stale',
+          stale: true,
+          score: 70,
+          summary: '前30章报告已过期。',
+        },
+        storylineBoard: {
+          ...basePlanning.storylineBoard,
+          status: 'needs_attention',
+          overdueCount: 1,
+          debtCount: 1,
+          summary: '主线第8章应推进但未推进。',
+        },
+      },
+      writing: {
+        ...baseWriting,
+        chapterAcceptanceDesk: {
+          ...baseWriting.chapterAcceptanceDesk,
+          visible: true,
+          acceptanceStatus: 'needs_revision',
+          statusLabel: '待修订',
+          deliveryRiskQueue: {
+            totalCount: 3,
+            label: '待修复 3',
+            priorityLabel: '优先补追读',
+            items: ['开篇未承接上一章钩子', '主角选择不清', '章末钩子弱'],
+          },
+          assetIntake: {
+            status: 'pending',
+            label: '新资产 2 待确认',
+            pendingCount: 2,
+          },
+          readerExpectationSync: {
+            status: 'warn',
+            label: '期待欠账 1',
+            score: 72,
+            scoreLabel: '72',
+            missedCount: 1,
+            openingHandoffMissedCount: 0,
+          },
+          recommendedAcceptanceAction: { key: 'apply_editor_revision', label: '生成修订稿' },
+        },
+      },
+      activeTasks: [],
+      reviews: [
+        {
+          review_type: 'delivery_risk_annotations',
+          summary: '待修复 3',
+          payload_json: { open_count: 3 },
+          created_at: '2026-06-11T01:00:00.000Z',
+        },
+      ],
+      selectedModelId: 12,
+    })
+
+    expect(model.serialCockpit.riskQueue.map(item => item.key)).toEqual(expect.arrayContaining([
+      'delivery_risks',
+      'storylines',
+      'reader_expectation',
+      'first30_retention',
+      'asset_intake',
+    ]))
+    expect(model.serialCockpit.riskQueue.find(item => item.key === 'delivery_risks')?.label).toBe('待修复 3')
+    expect(model.serialCockpit.riskQueue.find(item => item.key === 'asset_intake')?.count).toBe(2)
+    expect(model.serialCockpit.guardrails.find(item => item.key === 'reader_pull')?.status).toBe('warn')
+    expect(model.serialCockpit.guardrails.find(item => item.key === 'serial_safety')?.status).toBe('warn')
+  })
+
+  test('serial cockpit degrades gracefully when chapter material is missing', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        mainline: {
+          ...basePlanning.mainline,
+          readerPromise: '',
+          currentVolumeGoal: '',
+        },
+      },
+      writing: {
+        ...baseWriting,
+        nextChapter: null,
+        chapterPlanningDesk: {
+          ...baseWriting.chapterPlanningDesk,
+          readiness: 'blocked',
+          statusLabel: '缺少章节',
+          reasons: ['还没有可写章节。'],
+          recommendedPlannerAction: { key: 'open_outline_panel', label: '打开大纲面板' },
+        },
+      },
+      activeTasks: [],
+      selectedModelId: 12,
+    })
+
+    expect(model.serialCockpit.chapterChain.find(item => item.key === 'handoff')?.status).toBe('block')
+    expect(model.serialCockpit.chapterChain.find(item => item.key === 'handoff')?.detail).toContain('还没有可写章节')
+    expect(model.serialCockpit.guardrails.find(item => item.key === 'core_stability')?.status).toBe('block')
+    expect(model.serialCockpit.command.action.key).toBe('open_outline_panel')
+  })
+
   test('today command deck explains why safe batch generation is allowed', () => {
     const model = buildAutoCreationDirectorModel({
       planning: {
