@@ -8,6 +8,7 @@ import {
   buildChapterAttractionReviewReport,
   buildStoryDriveSyncReport,
   buildCharacterArcSyncReport,
+  buildDeliveryRiskCarryOverContext,
   buildReaderExpectationDebtContext,
   buildInnovationSyncReport,
   buildSignatureSceneSyncReport,
@@ -296,6 +297,10 @@ describe('chapter prose word target', () => {
           mainline_focus: '外门危机 -> 内门招揽',
           forbidden_boundary: '第10章前不得揭露规则源头。',
           current_chapter_role: '第8章只负责夜钟规则第一次显形。',
+          start_checklist: [
+            { key: 'core_promise', label: '核心承诺', status: 'ok', detail: '主角必须以规则反制兑现逆袭承诺。' },
+            { key: 'reader_payoff', label: '读者回报', status: 'ok', detail: '升级、打脸、规则反制逐章交付。' },
+          ],
         },
         chapter_target: {
           chapter_no: 8,
@@ -311,6 +316,8 @@ describe('chapter prose word target', () => {
     )
 
     expect(prompt).toContain('【本批连载任务书】')
+    expect(prompt).toContain('批次开工清单')
+    expect(prompt).toContain('核心承诺')
     expect(prompt).toContain('三章内进入内门视野')
     expect(prompt).toContain('不得提前消费后续章节爆点')
     expect(prompt).toContain('第8章只负责夜钟规则第一次显形')
@@ -435,6 +442,93 @@ describe('chapter prose word target', () => {
     expect(prompt).toContain('近10章冲突来源、回报形态和章末问题同质化')
     expect(prompt).toContain('更换压迫来源、回报形态、章末问题或可视化场面')
     expect(prompt).toContain('执行 chapter_target.batch_preflight')
+  })
+
+  test('injects safe batch delivery-risk obligations into paragraph prose prompt', () => {
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+
+    const prompt = service.buildParagraphProseContext(
+      { title: '超人的规则怪谈世界' },
+      {
+        batch_preflight: {
+          source: 'auto_creation_safe_batch_preflight',
+          delivery_risk_carry_over: {
+            source: 'chapter_delivery_risk_carry_over',
+            source_chapter_no: 7,
+            apply_to_chapter_no: 8,
+            label: '待修复 3',
+            priority_label: '优先修章末翻页',
+            items: ['修吸引力：吸引力缺口 2', '补创新：创新缺口 1'],
+            required_actions: ['前300字接住门外学生压迫', '中段补规则反制创新', '章末重做翻页问题'],
+            opening_actions: ['开篇先补异常压迫'],
+            middle_actions: ['中段补规则反制创新'],
+            ending_actions: ['章末重做翻页问题'],
+          },
+        },
+        chapter_target: {
+          chapter_no: 8,
+          title: '外门夜钟',
+          summary: '验证夜钟规则。',
+          conflict: '是否相信敌人提示。',
+          ending_hook: '钟声倒数。',
+          scene_cards: [],
+        },
+      },
+      null,
+      { chapter_no: 8, title: '外门夜钟' },
+    )
+
+    expect(prompt).toContain('【安全连写交稿风险承接】')
+    expect(prompt).toContain('执行 batch_preflight.delivery_risk_carry_over')
+    expect(prompt).toContain('前300字接住门外学生压迫')
+    expect(prompt).toContain('章末重做翻页问题')
+  })
+
+  test('injects safe batch chapter handoff contract into paragraph prose prompt', () => {
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+
+    const prompt = service.buildParagraphProseContext(
+      { title: '超人的规则怪谈世界' },
+      {
+        batch_preflight: {
+          source: 'auto_creation_safe_batch_preflight',
+          chapter_handoff_contract: {
+            source: 'safe_batch_chapter_handoff_contract',
+            from_chapter_no: 7,
+            apply_to_chapter_no: 8,
+            previous_handoff: '第7章最后一幕：阵盘亮起第二道裂纹，执事当场逼主角交出阵盘。',
+            opening_obligations: ['阵盘第二道裂纹必须在开篇造成可见压力'],
+            must_deliver: ['主角必须用阵法反制执事试探'],
+            keep_alive: ['是谁在背后改试炼规则'],
+            overdue: ['内门长老为何提前关注主角'],
+          },
+        },
+        chapter_target: {
+          chapter_no: 8,
+          title: '外门夜钟',
+          summary: '验证夜钟规则。',
+          conflict: '是否相信敌人提示。',
+          ending_hook: '钟声倒数。',
+          scene_cards: [],
+        },
+      },
+      null,
+      { chapter_no: 8, title: '外门夜钟' },
+    )
+
+    expect(prompt).toContain('【安全连写章节交接契约】')
+    expect(prompt).toContain('执行 batch_preflight.chapter_handoff_contract')
+    expect(prompt).toContain('阵盘第二道裂纹必须在开篇造成可见压力')
+    expect(prompt).toContain('主角必须用阵法反制执事试探')
+    expect(prompt).toContain('是谁在背后改试炼规则')
   })
 
   test('injects longform memory anchor from safe batch preflight into paragraph prose prompt', () => {
@@ -599,6 +693,44 @@ describe('chapter prose word target', () => {
     expect(prompt).toContain('超人力量和规则判定持续碰撞')
     expect(prompt).toContain('是否用蛮力冲出宿舍')
     expect(prompt).toContain('执行 chapter_target.chapter_launch_gate')
+  })
+
+  test('injects core contract radar into paragraph prose prompt as hard guardrails', () => {
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+
+    const prompt = service.buildParagraphProseContext(
+      { title: '超人的规则怪谈世界' },
+      {
+        chapter_target: {
+          chapter_no: 2,
+          title: '第一条规则',
+          summary: '测试规则边界。',
+          conflict: '是否用蛮力冲出宿舍。',
+          ending_hook: '门外出现湿漉漉的学生。',
+          scene_cards: [],
+          core_contract_radar: {
+            summary: '本章必须把超人力量撞上规则判定写成可见事件。',
+            must_serve: ['超人力量和规则判定持续碰撞', '蛮力破局与规则判定的对抗'],
+            no_drift: ['不能把规则怪谈写成纯打怪'],
+            repair_focus: ['补足规则判定反制蛮力'],
+            checks: [{ key: 'reader_promise', label: '读者承诺', status: 'warn', reason: '碰撞不够可见' }],
+          },
+        },
+      },
+      null,
+      { chapter_no: 2, title: '第一条规则' },
+    )
+
+    expect(prompt).toContain('【核心契约】')
+    expect(prompt).toContain('必须服务')
+    expect(prompt).toContain('不得漂移')
+    expect(prompt).toContain('超人力量和规则判定持续碰撞')
+    expect(prompt).toContain('不能把规则怪谈写成纯打怪')
+    expect(prompt).toContain('执行 chapter_target.core_contract_radar')
   })
 
   test('injects longform battle context into paragraph prose prompt as chapter obligations', () => {
@@ -1220,6 +1352,94 @@ describe('chapter pre-draft brief', () => {
     expect(brief.reader_expectation_ledger.keep_alive.map((item: any) => item.text).join('｜')).toContain('广播是谁发出的')
   })
 
+  test('carries previous chapter delivery risks into the next pre-draft brief and prose prompt', () => {
+    const deliveryRiskCarryOver = buildDeliveryRiskCarryOverContext(
+      { id: 3, chapter_no: 3, title: '门外学生' },
+      [
+        { id: 2, chapter_no: 2, title: '第一条规则' },
+        { id: 3, chapter_no: 3, title: '门外学生' },
+      ],
+      [
+        {
+          id: 201,
+          chapter_id: 2,
+          review_type: 'chapter_attraction_review',
+          created_at: '2026-06-09T08:00:00.000Z',
+          payload: JSON.stringify({
+            chapter_id: 2,
+            chapter_no: 2,
+            chapter_attraction_review: {
+              status: 'warn',
+              label: '吸引力缺口 2',
+              weak_count: 2,
+              priority_repair: '优先修章末翻页',
+              weak_dimensions: [
+                { label: '开篇钩子', issue: '开篇没有直接接住门外学生。' },
+                { label: '章末翻页', issue: '结尾没有留下门外学生身份问题。' },
+              ],
+            },
+          }),
+        },
+        {
+          id: 202,
+          chapter_id: 2,
+          review_type: 'innovation_sync',
+          created_at: '2026-06-09T08:02:00.000Z',
+          payload: JSON.stringify({
+            chapter_id: 2,
+            chapter_no: 2,
+            innovation_sync: {
+              status: 'warn',
+              label: '创新缺口 1',
+              missed_count: 1,
+              missed: [{ label: '规则反差', issue: '超人力量没有和宿舍规则形成新鲜反差。' }],
+            },
+          }),
+        },
+      ],
+    )
+    const project = { title: '超人的规则怪谈世界', reference_config: {} }
+    const contextPackage = {
+      delivery_risk_carry_over: deliveryRiskCarryOver,
+      chapter_target: {
+        chapter_no: 3,
+        title: '门外学生',
+        summary: '判断门外学生是否是规则诱饵。',
+        conflict: '救人还是守规。',
+        ending_hook: '玻璃门上的水迹拼出一个名字。',
+        scene_cards: [
+          { scene_no: 1, title: '门前对峙', reader_payoff: '识破门外学生的第一层规则诱饵。' },
+        ],
+      },
+    }
+    const brief = buildChapterPreDraftBrief(project, contextPackage)
+    const context = mergeConfirmedPreDraftBriefIntoContext(contextPackage, {
+      ...brief,
+      confirmed_at: '2026-06-10T08:00:00.000Z',
+    })
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+    const prompt = service.buildParagraphProseContext(
+      project,
+      context,
+      null,
+      { chapter_no: 3, title: '门外学生' },
+    )
+
+    expect(deliveryRiskCarryOver?.label).toBe('待修复 3')
+    expect(deliveryRiskCarryOver?.priority_label).toBe('优先修章末翻页')
+    expect(brief.delivery_risk_carry_over.items.join('｜')).toContain('修吸引力：吸引力缺口 2')
+    expect(brief.delivery_risk_carry_over.items.join('｜')).toContain('补创新：创新缺口 1')
+    expect(context.chapter_target.delivery_risk_carry_over.priority_label).toBe('优先修章末翻页')
+    expect(prompt).toContain('【上一章交稿风险承接】')
+    expect(prompt).toContain('执行 chapter_target.delivery_risk_carry_over')
+    expect(prompt).toContain('修吸引力：吸引力缺口 2')
+    expect(prompt).toContain('补创新：创新缺口 1')
+  })
+
   test('marks aged reader expectation debt as overdue in context, brief, and prose prompt', () => {
     const debtContext = buildReaderExpectationDebtContext(
       { id: 6, chapter_no: 6, title: '旧债压场' },
@@ -1457,6 +1677,49 @@ describe('chapter pre-draft brief', () => {
     expect(brief.longform_compass.axes.find((axis: any) => axis.key === 'core_conflict')?.value).toContain('蛮力')
   })
 
+  test('adds core contract radar to the pre-draft brief', () => {
+    const brief = buildChapterPreDraftBrief(
+      {
+        title: '超人的规则怪谈世界',
+        reference_config: {
+          writing_bible: {
+            promise: '超人力量和规则判定持续碰撞。',
+          },
+        },
+      },
+      {
+        longform_compass: {
+          reader_promise: '超人力量和规则判定持续碰撞。',
+          core_conflict: '蛮力破局与规则判定的对抗。',
+          innovation_hook: '超人能力被规则空间反制。',
+          immutable_rules: ['不能把规则怪谈写成纯打怪', '双主角互补不能拆散'],
+        },
+        chapter_target: {
+          chapter_no: 2,
+          title: '第一条规则',
+          summary: '验证十点门槛的规则边界。',
+          conflict: '李超想硬闯，张智要求低成本验证。',
+          chapter_launch_gate: {
+            reader_promise: { status: 'warn', reason: '超人力量与规则判定碰撞不够可见' },
+            mainline_service: { status: 'block', reason: '本章必须推进午夜校园规则调查' },
+          },
+          scene_cards: [
+            { scene_no: 1, title: '十点门槛', reader_payoff: '超人力量第一次被规则边界反制。' },
+          ],
+        },
+      },
+    )
+
+    expect(brief.core_contract_radar.summary).toContain('超人力量')
+    expect(brief.core_contract_radar.must_serve).toContain('超人力量和规则判定持续碰撞。')
+    expect(brief.core_contract_radar.must_serve).toContain('蛮力破局与规则判定的对抗。')
+    expect(brief.core_contract_radar.must_serve).toContain('超人能力被规则空间反制。')
+    expect(brief.core_contract_radar.must_serve).toContain('超人力量第一次被规则边界反制。')
+    expect(brief.core_contract_radar.no_drift).toContain('不能把规则怪谈写成纯打怪')
+    expect(brief.core_contract_radar.repair_focus.join('｜')).toContain('本章必须推进午夜校园规则调查')
+    expect(brief.core_contract_radar.checks.map((check: any) => check.label)).toContain('主线服务')
+  })
+
   test('adds longform battle desk risks to the pre-draft brief', () => {
     const brief = buildChapterPreDraftBrief(
       { title: '超人的规则怪谈世界' },
@@ -1596,6 +1859,10 @@ describe('chapter pre-draft brief', () => {
           readerPayoffPlan: '升级、打脸、规则反制逐章交付。',
           mainlineFocus: '外门危机 -> 内门招揽',
           forbiddenBoundary: '第10章前不得揭露规则源头。',
+          startChecklist: [
+            { key: 'core_promise', label: '核心承诺', status: 'ok', detail: '主角必须以规则反制兑现逆袭承诺。' },
+            { key: 'forbidden_boundary', label: '禁写边界', status: 'ok', detail: '第10章前不得揭露规则源头。' },
+          ],
           chapters: [
             { chapterNo: 8, title: '外门夜钟', chapterTask: '证明夜钟规则有效。', conflict: '是否相信敌人提示。', endingHook: '钟声倒数。' },
             { chapterNo: 9, title: '反制试探', chapterTask: '用超人速度验证边界。', conflict: '速度能否绕过规则。', endingHook: '内门令牌出现。' },
@@ -1615,6 +1882,8 @@ describe('chapter pre-draft brief', () => {
     expect(brief.next_batch_brief.reader_payoff_plan).toContain('打脸')
     expect(brief.next_batch_brief.current_chapter_role).toContain('证明夜钟规则有效')
     expect(brief.next_batch_brief.forbidden_boundary).toContain('规则源头')
+    expect(brief.next_batch_brief.start_checklist.map((item: any) => item.key)).toEqual(['core_promise', 'forbidden_boundary'])
+    expect(brief.next_batch_brief.start_checklist[0].detail).toContain('规则反制')
   })
 
   test('adds longform memory capsule to the pre-draft brief', () => {
@@ -1816,6 +2085,35 @@ describe('chapter pre-draft brief', () => {
     expect(context.story_unit_context.title).toContain('午夜校园')
     expect(context.chapter_target.longform_memory_capsule.character_states[0]).toContain('李超')
     expect(context.longform_memory_capsule.open_questions).toContain('广播是谁发出的')
+  })
+
+  test('merges confirmed core contract radar into chapter generation context', () => {
+    const context = mergeConfirmedPreDraftBriefIntoContext(
+      {
+        chapter_target: {
+          chapter_no: 2,
+          title: '第一条规则',
+          summary: '旧目标',
+          scene_cards: [],
+        },
+      },
+      {
+        chapter_no: 2,
+        chapter_goal: '验证十点门槛。',
+        core_contract_radar: {
+          summary: '本章必须把超人力量撞上规则判定写成可见事件。',
+          must_serve: ['超人力量和规则判定持续碰撞', '蛮力破局与规则判定的对抗'],
+          no_drift: ['不能把规则怪谈写成纯打怪'],
+          repair_focus: ['补足规则判定反制蛮力'],
+          checks: [{ key: 'reader_promise', label: '读者承诺', status: 'warn', reason: '碰撞不够可见' }],
+        },
+        confirmed_at: '2026-06-09T10:00:00.000Z',
+      },
+    )
+
+    expect(context.pre_draft_brief.core_contract_radar.must_serve).toContain('超人力量和规则判定持续碰撞')
+    expect(context.chapter_target.core_contract_radar.no_drift).toContain('不能把规则怪谈写成纯打怪')
+    expect(context.core_contract_radar.repair_focus).toContain('补足规则判定反制蛮力')
   })
 
   test('builds storyline context in the chapter context package', () => {
@@ -2174,6 +2472,435 @@ describe('readability and restrained meme workflow', () => {
     expect(prompt).toContain('本章前30章留存修复')
     expect(prompt).toContain('章末钩子弱')
     expect(prompt).toContain('补未解决问题')
+  })
+
+  test('adds reader drop risk brief to the pre-draft brief and prose prompt', () => {
+    const project = { title: '寒门阵师', reference_config: {} }
+    const contextPackage = {
+      reader_trial_context: {
+        status: 'needs_repair',
+        score: 66,
+        quality_bar: '起点1万均订试读基准',
+        drop_points: ['第7章中段解释阵法过密，试读用户可能弃读。', '章末钩子只交代结果，没有未解问题。'],
+        pull_points: ['主角用残阵反压执事时有追读爽点。'],
+        repair_actions: ['开篇 300 字先给阵图被夺的现场压力。', '中段减少设定解释，用动作验证阵法规则。', '章末留下第二层阵纹的代价问题。'],
+      },
+      chapter_target: {
+        id: 7,
+        chapter_no: 7,
+        title: '夜闯阵堂',
+        summary: '主角夜闯阵堂，试图找回被夺走的阵图。',
+        conflict: '守堂执事阻拦，主角必须证明阵图归属。',
+        ending_hook: '阵图背面露出第二层阵纹。',
+        scene_cards: [
+          { title: '阵堂对峙', reader_payoff: '主角用残阵反压守堂执事', conflict: '阵图归属争夺', ending_hook_seed: '第二层阵纹显形' },
+        ],
+      },
+    }
+    const brief = buildChapterPreDraftBrief(project, contextPackage)
+    const context = mergeConfirmedPreDraftBriefIntoContext(contextPackage, {
+      ...brief,
+      confirmed_at: '2026-06-10T08:00:00.000Z',
+    })
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+    const prompt = service.buildParagraphProseContext(
+      project,
+      context,
+      null,
+      { chapter_no: 7, title: '夜闯阵堂' },
+    )
+
+    expect(brief.reader_drop_risk_brief.status).toBe('needs_repair')
+    expect(brief.reader_drop_risk_brief.quality_bar).toContain('起点1万均订')
+    expect(brief.reader_drop_risk_brief.drop_points[0]).toContain('中段解释阵法过密')
+    expect(brief.reader_drop_risk_brief.opening_guardrail).toContain('开篇 300 字')
+    expect(brief.reader_drop_risk_brief.middle_guardrail).toContain('中段减少设定解释')
+    expect(brief.reader_drop_risk_brief.ending_guardrail).toContain('章末留下第二层阵纹')
+    expect(context.chapter_target.reader_drop_risk_brief.drop_points[0]).toContain('试读用户可能弃读')
+    expect(prompt).toContain('【读者弃读预警】')
+    expect(prompt).toContain('开篇 300 字')
+    expect(prompt).toContain('中段减少设定解释')
+    expect(prompt).toContain('章末留下第二层阵纹')
+    expect(prompt).toContain('执行 chapter_target.reader_drop_risk_brief')
+  })
+
+  test('adds story pressure ladder to the pre-draft brief and prose prompt', () => {
+    const project = { title: '寒门阵师', reference_config: {} }
+    const contextPackage = {
+      story_pressure_ladder: {
+        status: 'needs_attention',
+        score: 64,
+        chapterRangeLabel: '第7-12章',
+        pressureSources: [
+          { label: '执事压迫', count: 4, chapters: [7, 8, 9, 10], riskLevel: 'warn' },
+        ],
+        signals: [
+          { key: 'pressure_source', label: '压力源', status: 'warn', detail: '未来章节压力源过于集中。' },
+          { key: 'conflict_escalation', label: '冲突升级', status: 'ok', detail: '未来章节能看到压力加码。' },
+          { key: 'stakes_growth', label: '赌注升级', status: 'warn', detail: '未来章节缺少可感知赌注。' },
+          { key: 'reversal_pressure', label: '反转逼迫', status: 'warn', detail: '未来章节缺少两难选择。' },
+        ],
+        nextActions: ['下一批章节要明确压力源、升级赌注和反转逼迫。'],
+      },
+      chapter_target: {
+        id: 7,
+        chapter_no: 7,
+        title: '夜闯阵堂',
+        summary: '主角夜闯阵堂，试图找回被夺走的阵图。',
+        conflict: '守堂执事阻拦，主角必须证明阵图归属。',
+        ending_hook: '阵图背面露出第二层阵纹。',
+        scene_cards: [
+          { title: '阵堂对峙', reader_payoff: '主角用残阵反压守堂执事', conflict: '阵图归属争夺', ending_hook_seed: '第二层阵纹显形' },
+        ],
+      },
+    }
+    const brief = buildChapterPreDraftBrief(project, contextPackage)
+    const context = mergeConfirmedPreDraftBriefIntoContext(contextPackage, {
+      ...brief,
+      confirmed_at: '2026-06-10T08:00:00.000Z',
+    })
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+    const prompt = service.buildParagraphProseContext(
+      project,
+      context,
+      null,
+      { chapter_no: 7, title: '夜闯阵堂' },
+    )
+
+    expect(brief.story_pressure_brief.status).toBe('needs_attention')
+    expect(brief.story_pressure_brief.pressure_sources[0]).toContain('执事压迫')
+    expect(brief.story_pressure_brief.weak_signals.map((item: any) => item.key)).toContain('stakes_growth')
+    expect(brief.story_pressure_brief.stakes_growth_guardrail).toContain('可感知赌注')
+    expect(brief.story_pressure_brief.reversal_pressure_guardrail).toContain('两难选择')
+    expect(context.chapter_target.story_pressure_brief.required_actions[0]).toContain('升级赌注')
+    expect(prompt).toContain('【故事压力阶梯】')
+    expect(prompt).toContain('执行 chapter_target.story_pressure_brief')
+    expect(prompt).toContain('执事压迫')
+    expect(prompt).toContain('赌注升级')
+    expect(prompt).toContain('反转逼迫')
+  })
+
+  test('adds protagonist agency story drive to the pre-draft brief and prose prompt', () => {
+    const project = { title: '寒门阵师', reference_config: {} }
+    const contextPackage = {
+      chapter_target: {
+        id: 12,
+        chapter_no: 12,
+        title: '试炼资格',
+        chapter_goal: '主角拿到试炼资格',
+        core_conflict: '执事设局阻拦主角参加试炼',
+        protagonist_choice: '主角当众选择用残阵反证阵图归属',
+        choice_cost: '暴露阵盘裂纹，招来内门势力注意',
+        state_change: '主角从被动挨压转为主动入局',
+        ending_hook: '内门长老盯上阵盘裂纹。',
+        scene_cards: [
+          {
+            title: '阵堂对峙',
+            conflict: '执事设局阻拦主角参加试炼',
+            turning_point: '主角当众选择用残阵反证阵图归属',
+            reader_payoff: '主角拿到试炼资格',
+            exit_state: '主角从被动挨压转为主动入局',
+          },
+        ],
+      },
+    }
+    const brief = buildChapterPreDraftBrief(project, contextPackage)
+    const context = mergeConfirmedPreDraftBriefIntoContext(contextPackage, {
+      ...brief,
+      confirmed_at: '2026-06-10T08:00:00.000Z',
+    })
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+    const prompt = service.buildParagraphProseContext(
+      project,
+      context,
+      null,
+      { chapter_no: 12, title: '试炼资格' },
+    )
+
+    expect(brief.story_drive_brief.protagonist_choice).toContain('当众选择')
+    expect(brief.story_drive_brief.choice_cost).toContain('暴露阵盘裂纹')
+    expect(brief.story_drive_brief.state_change).toContain('主动入局')
+    expect(brief.story_drive_brief.obstacle).toContain('执事设局')
+    expect(brief.story_drive_brief.causal_next_step).toContain('内门长老')
+    expect(context.chapter_target.story_drive_brief.required_actions[0]).toContain('主角主动选择')
+    expect(prompt).toContain('【主角能动性】')
+    expect(prompt).toContain('执行 chapter_target.story_drive_brief')
+    expect(prompt).toContain('主角选择')
+    expect(prompt).toContain('选择代价')
+    expect(prompt).toContain('状态变化')
+  })
+
+  test('adds serial rhythm payoff density to the pre-draft brief and prose prompt', () => {
+    const project = { title: '寒门阵师', synopsis: '废柴阵师靠残阵翻盘。', reference_config: {} }
+    const contextPackage = {
+      chapter_target: {
+        id: 15,
+        chapter_no: 15,
+        title: '阵堂打脸',
+        summary: '主角在阵堂公开拆穿执事偷换阵图。',
+        conflict: '执事拖延审查，主角必须当场逼出破绽。',
+        ending_hook: '破阵声中，内门长老认出残阵来源。',
+        word_target: { label: '标准章', target: 3200, min: 2800, max: 3500 },
+        scene_cards: [
+          {
+            scene_no: 1,
+            title: '堂前拦路',
+            opening_hook: '执事把假阵图拍在主角脸前。',
+            conflict: '执事当众污蔑主角偷阵。',
+            reader_payoff: '主角用一句反问逼执事露怯。',
+            reversal: '假阵图上的裂纹反而证明执事动过手脚。',
+            ending_hook_seed: '众弟子开始怀疑执事。',
+            word_budget: '1000 字',
+          },
+          {
+            scene_no: 2,
+            title: '残阵反证',
+            conflict: '主角必须在阵纹崩毁前复原真图。',
+            reader_payoff: '残阵亮起，执事的伪证当场反噬。',
+            reversal: '内门长老发现残阵源自禁库。',
+            ending_hook_seed: '长老问主角从哪里学来这道阵。',
+            word_budget: '1800 字',
+          },
+        ],
+      },
+    }
+    const brief = buildChapterPreDraftBrief(project, contextPackage)
+    const context = mergeConfirmedPreDraftBriefIntoContext(contextPackage, {
+      ...brief,
+      confirmed_at: '2026-06-10T09:00:00.000Z',
+    })
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+    const prompt = service.buildParagraphProseContext(
+      project,
+      context,
+      null,
+      { chapter_no: 15, title: '阵堂打脸' },
+    )
+
+    expect(brief.serial_rhythm_brief.opening_hook_deadline).toContain('前 300 字')
+    expect(brief.serial_rhythm_brief.payoff_interval).toContain('800-1200')
+    expect(brief.serial_rhythm_brief.scene_payoff_budget).toHaveLength(2)
+    expect(brief.serial_rhythm_brief.scene_payoff_budget[0].required_payoff).toContain('逼执事露怯')
+    expect(brief.serial_rhythm_brief.scene_payoff_budget[1].turn).toContain('禁库')
+    expect(brief.serial_rhythm_brief.anti_drag_rules.join('；')).toContain('连续')
+    expect(context.chapter_target.serial_rhythm_brief.scene_payoff_budget[1].title).toBe('残阵反证')
+    expect(prompt).toContain('【连载节奏与回报密度】')
+    expect(prompt).toContain('执行 chapter_target.serial_rhythm_brief')
+    expect(prompt).toContain('每 800-1200 字')
+    expect(prompt).toContain('残阵反证')
+    expect(prompt).toContain('伪证当场反噬')
+  })
+
+  test('adds page-turn hook execution brief to the pre-draft brief and prose prompt', () => {
+    const project = { title: '寒门阵师', reference_config: {} }
+    const contextPackage = {
+      chapter_target: {
+        id: 16,
+        chapter_no: 16,
+        title: '禁库旧阵',
+        summary: '主角用残阵反证执事伪造证据。',
+        conflict: '执事试图把禁库旧阵嫁祸给主角。',
+        ending_hook: '内门长老盯着亮起的残阵，问主角从哪里学来禁库旧阵。',
+        story_drive_brief: {
+          causal_next_step: '下一章必须追问禁库旧阵来源，并逼主角解释师承。',
+        },
+        scene_cards: [
+          {
+            scene_no: 2,
+            title: '残阵亮名',
+            reader_payoff: '执事伪证被残阵反噬。',
+            reversal: '内门长老认出残阵源自禁库。',
+            ending_hook_seed: '长老当众问出禁库旧阵来源。',
+          },
+        ],
+      },
+    }
+    const brief = buildChapterPreDraftBrief(project, contextPackage)
+    const context = mergeConfirmedPreDraftBriefIntoContext(contextPackage, {
+      ...brief,
+      confirmed_at: '2026-06-10T10:00:00.000Z',
+    })
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+    const prompt = service.buildParagraphProseContext(
+      project,
+      context,
+      null,
+      { chapter_no: 16, title: '禁库旧阵' },
+    )
+
+    expect(brief.page_turn_hook_brief.core_question).toContain('禁库旧阵')
+    expect(brief.page_turn_hook_brief.visible_trigger).toContain('内门长老认出')
+    expect(brief.page_turn_hook_brief.next_chapter_pull).toContain('追问禁库旧阵来源')
+    expect(brief.page_turn_hook_brief.forbidden_resolution.join('；')).toContain('不得在本章解释完整答案')
+    expect(context.chapter_target.page_turn_hook_brief.final_image).toContain('长老当众问出')
+    expect(prompt).toContain('【章末翻页钩子】')
+    expect(prompt).toContain('执行 chapter_target.page_turn_hook_brief')
+    expect(prompt).toContain('最后 300 字')
+    expect(prompt).toContain('内门长老认出残阵源自禁库')
+    expect(prompt).toContain('不得在本章解释完整答案')
+  })
+
+  test('adds volume climax budget brief to the pre-draft brief and prose prompt', () => {
+    const project = { title: '寒门阵师', reference_config: {} }
+    const contextPackage = {
+      volume_beat_budget: {
+        status: 'needs_attention',
+        score: 62,
+        current_volume_title: '第一卷 阵堂起势',
+        chapter_range: '第1-60章',
+        summary: '当前卷缺中高潮和卷末爆点，本章承担第一次小高潮回报。',
+        beats: [
+          {
+            chapter_no: 18,
+            type: '小高潮',
+            label: '阵堂公开打脸',
+            detail: '主角公开反证执事偷换阵图。',
+          },
+          {
+            chapter_no: 45,
+            type: '卷末爆点',
+            label: '禁库真相',
+            detail: '禁库旧阵牵出主角师承真相。',
+          },
+        ],
+        next_actions: ['本章只兑现阵堂公开打脸，不提前揭穿禁库真相。'],
+      },
+      chapter_target: {
+        id: 18,
+        chapter_no: 18,
+        title: '阵堂公开打脸',
+        summary: '主角在阵堂公开反证执事偷换阵图。',
+        conflict: '执事逼主角认罪，主角必须反证阵图来源。',
+        ending_hook: '禁库旧阵的第二层纹路亮起。',
+        volume_beat_brief: {
+          current_chapter_role: '完成第一卷第一次小高潮：阵堂公开打脸。',
+          volume_goal: '让主角在阵堂立住起势资格。',
+          climax_promise: '公开反证执事偷换阵图，给读者阶段性打脸回报。',
+          required_beats: ['执事当众失势', '主角得到试炼资格'],
+          forbidden_payoff: ['不得提前揭穿禁库真相', '不得提前解决卷末师承身份'],
+        },
+        scene_cards: [
+          {
+            title: '阵堂对证',
+            conflict: '执事逼主角认罪。',
+            reader_payoff: '主角公开反证执事偷换阵图。',
+            reversal: '执事伪证被残阵反噬。',
+            ending_hook_seed: '禁库旧阵第二层纹路亮起。',
+          },
+        ],
+      },
+    }
+    const brief = buildChapterPreDraftBrief(project, contextPackage)
+    const context = mergeConfirmedPreDraftBriefIntoContext(contextPackage, {
+      ...brief,
+      confirmed_at: '2026-06-10T11:00:00.000Z',
+    })
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+    const prompt = service.buildParagraphProseContext(
+      project,
+      context,
+      null,
+      { chapter_no: 18, title: '阵堂公开打脸' },
+    )
+
+    expect(brief.volume_climax_brief.current_chapter_role).toContain('第一次小高潮')
+    expect(brief.volume_climax_brief.volume_goal).toContain('起势资格')
+    expect(brief.volume_climax_brief.climax_promise).toContain('阶段性打脸回报')
+    expect(brief.volume_climax_brief.required_beats).toContain('执事当众失势')
+    expect(brief.volume_climax_brief.forbidden_payoff).toContain('不得提前揭穿禁库真相')
+    expect(brief.volume_climax_brief.nearby_beats[0].label).toContain('阵堂公开打脸')
+    expect(context.chapter_target.volume_climax_brief.forbidden_payoff[1]).toContain('师承身份')
+    expect(prompt).toContain('【卷级高潮预算】')
+    expect(prompt).toContain('执行 chapter_target.volume_climax_brief')
+    expect(prompt).toContain('第一次小高潮')
+    expect(prompt).toContain('不得提前揭穿禁库真相')
+  })
+
+  test('adds recent fatigue avoidance brief to the pre-draft brief and prose prompt', () => {
+    const project = { title: '寒门阵师', reference_config: {} }
+    const contextPackage = {
+      recent_fatigue_radar: {
+        status: 'needs_attention',
+        score: 61,
+        chapter_range_label: '第9-18章',
+        summary: '近10章存在 3 类同质化风险：冲突变化、回报变化、钩子变化。',
+        signals: [
+          { key: 'conflict_variety', label: '冲突变化', status: 'warn', detail: '近10章「执事压迫」出现 7 次，冲突来源变化不足。' },
+          { key: 'payoff_variety', label: '回报变化', status: 'warn', detail: '近10章「公开打脸」出现 6 次，回报形态变化不足。' },
+          { key: 'hook_variety', label: '钩子变化', status: 'warn', detail: '近10章「试炼将至」出现 6 次，章末问题变化不足。' },
+          { key: 'scene_freshness', label: '场面新鲜度', status: 'warn', detail: '近10章缺少稳定的标志性场面记录。' },
+        ],
+        next_actions: ['下一章要更换压迫来源、回报形态、章末问题或可视化场面，避免十章连续同质化。'],
+      },
+      chapter_target: {
+        id: 19,
+        chapter_no: 19,
+        title: '旧阵异响',
+        summary: '主角发现旧阵异响来自藏书阁而非阵堂。',
+        conflict: '旧执事余党仍想用阵堂规矩压人，主角转向藏书阁追查。',
+        ending_hook: '藏书阁地砖下传出第二道阵鸣。',
+        scene_cards: [
+          {
+            title: '藏书阁转场',
+            conflict: '旧执事余党继续用阵堂规矩压人。',
+            reader_payoff: '主角不再重复公开打脸，而是用旧阵异响反向设局。',
+            ending_hook_seed: '藏书阁地砖下传出第二道阵鸣。',
+          },
+        ],
+      },
+    }
+    const brief = buildChapterPreDraftBrief(project, contextPackage)
+    const context = mergeConfirmedPreDraftBriefIntoContext(contextPackage, {
+      ...brief,
+      confirmed_at: '2026-06-10T12:00:00.000Z',
+    })
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+    const prompt = service.buildParagraphProseContext(
+      project,
+      context,
+      null,
+      { chapter_no: 19, title: '旧阵异响' },
+    )
+
+    expect(brief.recent_fatigue_brief.chapter_range_label).toContain('第9-18章')
+    expect(brief.recent_fatigue_brief.fatigue_risks.join('；')).toContain('执事压迫')
+    expect(brief.recent_fatigue_brief.conflict_variation).toContain('更换压迫来源')
+    expect(brief.recent_fatigue_brief.payoff_variation).toContain('更换回报形态')
+    expect(brief.recent_fatigue_brief.hook_variation).toContain('更换章末问题')
+    expect(brief.recent_fatigue_brief.scene_freshness).toContain('可视化场面')
+    expect(context.chapter_target.recent_fatigue_brief.next_actions[0]).toContain('十章连续同质化')
+    expect(prompt).toContain('【近10章疲劳规避】')
+    expect(prompt).toContain('执行 chapter_target.recent_fatigue_brief')
+    expect(prompt).toContain('执事压迫')
+    expect(prompt).toContain('更换压迫来源')
   })
 
   test('normalizes meme bank into abstract usage instead of direct copied phrases', () => {

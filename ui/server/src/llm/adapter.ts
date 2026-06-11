@@ -1,6 +1,12 @@
 import { imageUrlFromLLMContentPart, stringifyLLMMessageContent, stringifyLLMMessageTextContent, textFromLLMContentPart, type LLMRequest, type LLMResponse, type LLMToolCall } from './types'
 import { buildCodexResponsesBody } from './codex-responses'
-import { applyClaudeCodeBodyMetadata, applyClaudeCodeHeaders, stripAnthropicLocal1mMarker } from './anthropic-context'
+import {
+  applyClaudeCodeAuthHeaders,
+  anthropicModelNameForRequest,
+  anyRouterOfficialMessagesEndpoint,
+  applyClaudeCodeBodyMetadata,
+  applyClaudeCodeHeaders,
+} from './anthropic-context'
 import type { APIKeyRecord } from '../key-store'
 import type { ModelRecord } from '../model-store'
 import type { ProviderRecord } from '../provider-store'
@@ -190,10 +196,14 @@ function buildOpenAIResponsesBody(request: LLMRequest) {
   return body
 }
 
-function buildAnthropicMessagesBody(request: LLMRequest) {
+function buildAnthropicMessagesBody(request: LLMRequest, model?: ModelRecord, provider?: ProviderRecord, baseUrl = '') {
   const normalized = normalizeLLMRequest(request)
   const systemMsg = normalized.messages.find(m => m.role === 'system')
-  const body: Record<string, any> = { model: stripAnthropicLocal1mMarker(normalized.model), max_tokens: normalized.max_tokens, temperature: normalized.temperature }
+  const body: Record<string, any> = {
+    model: anthropicModelNameForRequest(normalized.model, model, { provider, baseUrl }),
+    max_tokens: normalized.max_tokens,
+    temperature: normalized.temperature,
+  }
   // Anthropic requires 'system' as a top-level field, NOT in messages array
   if (systemMsg?.content) body.system = stringifyLLMMessageContent(systemMsg.content)
   const nonSystemMessages = normalized.messages.filter(m => m.role !== 'system')
@@ -268,10 +278,16 @@ function isClaudeCodeFormat(apiFormat: string) {
   return normalized === 'claude_code' || normalized.includes('anthropic')
 }
 
-function applyProviderAuth(headers: Record<string, string>, provider: ProviderRecord, apiKey?: string, apiFormat = provider.api_format) {
+function applyProviderAuth(headers: Record<string, string>, provider: ProviderRecord, apiKey?: string, apiFormat = provider.api_format, baseUrl = '') {
   const key = String(apiKey || '').trim()
   if (!key || String(provider.auth_type || 'bearer').toLowerCase() === 'none') return headers
   const authType = String(provider.auth_type || 'bearer').toLowerCase()
+  if (isClaudeCodeFormat(apiFormat)) {
+    return applyClaudeCodeAuthHeaders(headers, key, authType, undefined, {
+      provider,
+      baseUrl,
+    })
+  }
   if (isGeminiNativeFormat(apiFormat)) {
     headers['x-goog-api-key'] = key
     return headers
@@ -400,6 +416,10 @@ function resolveProviderEndpoint(provider: ProviderRecord, routeConfig = selectP
     : String(routeConfig || '')
   const baseUrl = normalizeBaseUrl(baseUrlOverride || provider.default_base_url || '')
   const explicit = normalizeBaseUrl(routeUrl)
+  if (isClaudeCodeFormat(apiFormat)) {
+    const anyRouterMessagesEndpoint = anyRouterOfficialMessagesEndpoint(baseUrl, provider.default_base_url, explicit)
+    if (anyRouterMessagesEndpoint) return anyRouterMessagesEndpoint
+  }
   if (explicit) {
     if (/^https?:\/\//i.test(explicit)) return explicit
     if (!baseUrl) return explicit
@@ -663,13 +683,22 @@ export class ConfiguredProviderAdapter implements NovelLLMAdapter {
       ? buildCodexResponsesBody(modelRequest, this.model.model_name || request.model, false, {
         baseUrl: effectiveBaseUrl,
       })
-      : isResponses ? buildOpenAIResponsesBody(modelRequest) : (isGeminiNative ? buildGeminiGenerateContentBody(modelRequest) : (isAnthropic ? buildAnthropicMessagesBody(modelRequest) : (isMediaRouteType(routeType) ? buildOpenAIMediaBody(modelRequest) : buildOpenAIChatBody(modelRequest)))))
-    const headers = applyProviderAuth({ ...(this.provider.custom_headers || {}) }, this.provider, this.apiKey.key, providerFormat)
+      : isResponses ? buildOpenAIResponsesBody(modelRequest) : (isGeminiNative ? buildGeminiGenerateContentBody(modelRequest) : (isAnthropic ? buildAnthropicMessagesBody(modelRequest, this.model, this.provider, effectiveBaseUrl) : (isMediaRouteType(routeType) ? buildOpenAIMediaBody(modelRequest) : buildOpenAIChatBody(modelRequest)))))
+    const headers = applyProviderAuth({ ...(this.provider.custom_headers || {}) }, this.provider, this.apiKey.key, providerFormat, effectiveBaseUrl)
     const routeHeaders = routeDslValue(routeConfig, 'headers', 'customHeaders')
     if (routeHeaders && typeof routeHeaders === 'object') Object.assign(headers, routeHeaders)
     if (isAnthropic) {
-      applyClaudeCodeHeaders(headers, this.model)
-      if (providerFormat === 'claude_code') applyClaudeCodeBodyMetadata(body, this.model)
+      applyClaudeCodeHeaders(headers, this.model, { provider: this.provider, baseUrl: effectiveBaseUrl })
+      if (providerFormat === 'claude_code') {
+        applyClaudeCodeBodyMetadata(body, this.model, {
+          provider: this.provider,
+          baseUrl: effectiveBaseUrl,
+        })
+      }
+      applyClaudeCodeAuthHeaders(headers, this.apiKey.key, this.provider.auth_type, this.model, {
+        provider: this.provider,
+        baseUrl: effectiveBaseUrl,
+      })
     }
     const raw = await pollConfiguredTask(this.provider, endpoint, routeConfig, await postJson(endpoint, body, undefined, headers), headers, effectiveBaseUrl)
     if (isGeminiNative) return normalizeToolCallsFromResponse(normalizeLLMResponse<T>(normalizeGeminiGenerateContentPayload(raw)))

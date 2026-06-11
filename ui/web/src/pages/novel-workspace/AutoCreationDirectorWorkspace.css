@@ -210,6 +210,29 @@
   line-height: 18px;
 }
 
+.auto-director-release-rationale {
+  margin-top: 4px;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.78);
+  padding: 8px;
+  display: grid;
+  gap: 5px;
+}
+
+.auto-director-release-rationale-head,
+.auto-director-release-rationale-tags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.auto-director-release-rationale .ant-typography-secondary {
+  font-size: 12px;
+  line-height: 18px;
+}
+
 .auto-director-command-quality-gates {
   min-width: 0;
   display: grid;
@@ -1498,6 +1521,46 @@
   line-height: 18px;
 }
 
+.auto-director-risk-cleared {
+  display: grid;
+  gap: 10px;
+  border-color: #bbf7d0;
+  background: #f6fff9;
+}
+
+.auto-director-risk-cleared-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+}
+
+.auto-director-risk-cleared-item {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  border: 1px solid rgba(34, 197, 94, 0.22);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.76);
+  padding: 9px 10px;
+}
+
+.auto-director-risk-cleared-item span {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.auto-director-risk-cleared-item strong {
+  color: #14532d;
+  font-size: 13px;
+}
+
+.auto-director-risk-cleared-item .ant-typography {
+  font-size: 12px;
+  line-height: 18px;
+}
+
 .auto-director-rhythm-panel {
   display: grid;
   gap: 10px;
@@ -2007,6 +2070,81 @@
   color: #0f172a;
   font-size: 12px;
   line-height: 18px;
+}
+
+.auto-director-batch-start-checklist {
+  border-top: 1px solid rgba(191, 219, 254, 0.76);
+  padding-top: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.auto-director-batch-start-checklist-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.auto-director-batch-start-checklist-head .ant-typography {
+  font-size: 12px;
+}
+
+.auto-director-batch-start-checklist-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.auto-director-batch-start-check {
+  min-width: 0;
+  border: 1px solid rgba(203, 213, 225, 0.8);
+  border-radius: 8px;
+  background: #fff;
+  padding: 8px 9px;
+  display: grid;
+  gap: 5px;
+}
+
+.auto-director-batch-start-check > span {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.auto-director-batch-start-check strong {
+  min-width: 0;
+  color: #0f172a;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.auto-director-batch-start-check .ant-typography {
+  font-size: 12px;
+  line-height: 18px;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.auto-director-batch-start-check-ok {
+  border-color: rgba(187, 247, 208, 0.95);
+  background: #f0fdf4;
+}
+
+.auto-director-batch-start-check-warn {
+  border-color: rgba(253, 230, 138, 0.95);
+  background: #fffbeb;
+}
+
+.auto-director-batch-start-check-block {
+  border-color: rgba(254, 202, 202, 0.95);
+  background: #fef2f2;
 }
 
 .auto-director-batch-brief-chapters {
@@ -2590,6 +2728,7 @@
   }
 
   .auto-director-batch-brief-grid,
+  .auto-director-batch-start-checklist-grid,
   .auto-director-batch-brief-chapters {
     grid-template-columns: 1fr;
   }

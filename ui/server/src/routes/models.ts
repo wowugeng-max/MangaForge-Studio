@@ -6,6 +6,8 @@ import { ConfiguredProviderAdapter } from '../llm/adapter'
 import type { LLMRequest, LLMMessage } from '../llm/types'
 import { syncModelsForKey } from '../key-sync'
 import { coerceBoolean } from '../boolean-utils'
+import { anthropicModelNameForRequest } from '../llm/anthropic-context'
+import type { ProviderRecord } from '../provider-store'
 
 function nowIso() {
   return new Date().toISOString()
@@ -22,7 +24,7 @@ const OFFICIAL_TEST_IMAGE = 'https://img.alicdn.com/tfs/TB1p.bgQXXXXXbFXFXXXXXXX
 
 export function determineProbeType(capabilities?: Record<string, boolean>): string {
   if (!capabilities) return 'chat'
-  for (const priority of ['text_to_image', 'image_to_image', 'text_to_video', 'image_to_video', 'vision', 'chat']) {
+  for (const priority of ['chat', 'vision', 'text_to_image', 'image_to_image', 'text_to_video', 'image_to_video']) {
     if (capabilities[priority]) return priority
   }
   if (capabilities.image) return 'text_to_image'
@@ -77,12 +79,61 @@ export function buildProbeRequest(probeType: string, modelName: string): LLMRequ
   }
 }
 
-function classifyHealthError(error: unknown): { status: string; message: string } {
+function isClaudeCodeModel(model?: ModelRecord, provider?: ProviderRecord) {
+  const fingerprint = [
+    model?.api_format,
+    provider?.api_format,
+    model?.model_name,
+    model?.display_name,
+  ].map(value => String(value || '').toLowerCase()).join(' ')
+  return fingerprint.includes('claude_code')
+    || fingerprint.includes('anthropic')
+    || /\bclaude(?:-|_|$)/.test(fingerprint)
+}
+
+function isAnyRouterProvider(provider?: ProviderRecord) {
+  if (!provider) return false
+  const fingerprint = [
+    provider.id,
+    provider.display_name,
+    provider.default_base_url,
+  ].map(value => String(value || '').toLowerCase()).join(' ')
+  return /\banyrouter\b|anyrouter\.(?:top|dev)/.test(fingerprint)
+    || String(provider.id || '').toLowerCase() === 'any'
+}
+
+function extractUpstreamErrorSummary(error: unknown) {
+  const raw = String(error || '')
+  const jsonMatch = raw.match(/\{[\s\S]*\}/)
+  if (jsonMatch) {
+    try {
+      const parsed = JSON.parse(jsonMatch[0])
+      const upstream = parsed?.error?.message || parsed?.message || parsed?.error || ''
+      if (upstream) return String(upstream).slice(0, 240)
+    } catch {
+      // Fall through to raw message below.
+    }
+  }
+  return raw.slice(0, 240)
+}
+
+function classifyHealthError(
+  error: unknown,
+  context: { model?: ModelRecord; provider?: ProviderRecord; sentModelName?: string } = {},
+): { status: string; message: string } {
   const msg = String(error || '').toLowerCase()
   if (msg.includes('429') || msg.includes('quota') || msg.includes('rate limit')) {
     return { status: 'quota_exhausted', message: '测试失败：额度耗尽' }
   }
   if (msg.includes('401') || msg.includes('403') || msg.includes('unauthorized') || msg.includes('auth')) {
+    if (isAnyRouterProvider(context.provider) && isClaudeCodeModel(context.model, context.provider)) {
+      const sentModel = context.sentModelName || context.model?.model_name || ''
+      const upstream = extractUpstreamErrorSummary(error)
+      return {
+        status: 'unauthorized',
+        message: `测试失败：AnyRouter Claude/Anthropic 模型无权限。请求已按 Claude Messages 格式发送，实际模型 ID: ${sentModel}。请在 AnyRouter 控制台确认该 LLM Key 对 Anthropic/Claude 上游（BYOK/OpenRouter/Anthropic）有权限且额度可用。上游返回：${upstream}`,
+      }
+    }
     return { status: 'unauthorized', message: '测试失败：认证失败 / 无权限' }
   }
   if (msg.includes('timeout') || msg.includes('econnreset') || msg.includes('econnrefused') || msg.includes('connectionrefused') || msg.includes('connection refused') || msg.includes('socket') || msg.includes('fetch') || msg.includes('network')) {
@@ -104,6 +155,10 @@ async function runModelProbe(
 
   const providerRecord = providers.find(p => p.id === model.provider)
   if (!providerRecord) return { status: 'no_provider', message: '未找到供应商配置' }
+  const effectiveBaseUrl = keyRecord.base_url || providerRecord.default_base_url || ''
+  const sentModelName = isClaudeCodeModel(model, providerRecord)
+    ? anthropicModelNameForRequest(model.model_name, model, { provider: providerRecord, baseUrl: effectiveBaseUrl })
+    : model.model_name
 
   try {
     const adapter = new ConfiguredProviderAdapter(
@@ -119,7 +174,7 @@ async function runModelProbe(
     await adapter.execute(request)
     return { status: 'healthy', message: `探针测试通过 (probe_type: ${probeType})` }
   } catch (error) {
-    return classifyHealthError(error)
+    return classifyHealthError(error, { model, provider: providerRecord, sentModelName })
   }
 }
 
@@ -144,6 +199,7 @@ function normalizeModelInput(body: any, fallback?: ModelRecord): ModelRecord {
         ? body.contextUiParams
         : (fallback?.context_ui_params ?? {}),
     last_tested_at: String(body.last_tested_at ?? body.lastTestedAt ?? fallback?.last_tested_at ?? ''),
+    last_error: String(body.last_error ?? body.lastError ?? fallback?.last_error ?? ''),
   }
 }
 
@@ -246,15 +302,18 @@ export function registerModelRoutes(app: Express, getWorkspace: () => string) {
       const probeResult = await runModelProbe(model, activeWorkspace)
 
       // Persist health status back to store
+      const testedAt = nowIso()
+      const lastError = probeResult.status === 'healthy' ? '' : probeResult.message
       const next = models.map(m => m.id === id
-        ? { ...m, health_status: probeResult.status, last_tested_at: nowIso() }
+        ? { ...m, health_status: probeResult.status, last_tested_at: testedAt, last_error: lastError }
         : m)
       await writeModels(activeWorkspace, next)
 
       res.json({
         status: probeResult.status,
         message: probeResult.message,
-        last_tested_at: nowIso(),
+        last_tested_at: testedAt,
+        last_error: lastError,
       })
     } catch (error) {
       const classified = classifyHealthError(error)

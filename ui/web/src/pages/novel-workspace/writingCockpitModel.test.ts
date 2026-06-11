@@ -887,6 +887,28 @@ describe('buildWritingCockpitModel', () => {
     expect(model.chapterHandoffDesk.actionLabel).toBe('进入下一章开写')
   })
 
+  test('chapter handoff carries unresolved delivery risks into the next chapter warning', () => {
+    const model = buildWritingCockpitModel({
+      selectedProject: acceptedProject,
+      outlines,
+      chapters,
+      activeChapter: chapters[0],
+      materialScore: { score: 82, can_generate: true },
+      reviews: [
+        proseQualityReview(),
+        chapterAttractionReview(),
+        innovationSyncReview(),
+      ],
+    })
+
+    expect(model.chapterHandoffDesk.visible).toBe(true)
+    expect(model.chapterHandoffDesk.status).toBe('ready')
+    expect(model.chapterHandoffDesk.deliveryRiskCarryOver?.label).toBe('待修复 5')
+    expect(model.chapterHandoffDesk.deliveryRiskCarryOver?.priorityLabel).toBe('优先修章末翻页')
+    expect(model.chapterHandoffDesk.deliveryRiskCarryOver?.items).toContain('修吸引力：吸引力缺口 3')
+    expect(model.chapterHandoffDesk.deliveryRiskCarryOver?.items).toContain('补创新：创新缺口 2')
+  })
+
   test('handoff asks to finish delivery before moving to the next chapter', () => {
     const model = buildWritingCockpitModel({
       selectedProject: acceptedProject,
@@ -1300,6 +1322,73 @@ describe('buildWritingCockpitModel', () => {
         goal: '把警钟危机转成谢怀安的第一次主动试探',
         conflict: '王府管事要压警讯，谢怀安要逼众人表态',
         ending_hook: '带血腰牌递到谢怀安掌心',
+        core_contract_radar: {
+          summary: '本章必须服务失势皇子夺回镜州主动权。',
+          must_serve: ['失势皇子以武道和权谋守住镜州', '边军危机压入王府权斗'],
+          no_drift: ['不能把主线写成纯宅斗'],
+          repair_focus: ['补足谢怀安主动选择和代价'],
+        },
+        reader_drop_risk_brief: {
+          status: 'needs_repair',
+          drop_points: ['第2章中段解释王府派系过密，试读用户可能弃读。'],
+          opening_guardrail: '开篇 300 字先接住警钟压席。',
+          middle_guardrail: '中段用当众验腰牌推进，不堆派系解释。',
+          ending_guardrail: '章末留下带血腰牌背后的旧臣身份问题。',
+        },
+        story_pressure_brief: {
+          status: 'needs_attention',
+          pressure_sources: ['王府管事压席', '边军警钟逼近'],
+          conflict_escalation_guardrail: '中段必须让压席变成公开站队。',
+          stakes_growth_guardrail: '赌注要落到谢怀安是否失去王府号令权。',
+          reversal_pressure_guardrail: '章末用带血腰牌反转局势。',
+          required_actions: ['把压力源、赌注升级和反转逼迫写成可见行动。'],
+        },
+        story_drive_brief: {
+          protagonist_choice: '谢怀安当众选择撕开王府管事的遮掩。',
+          choice_cost: '暴露自己仍能调动旧部，招来王府内线反扑。',
+          state_change: '谢怀安从被动受宴转为公开夺回审判主动权。',
+          obstacle: '王府管事压下警讯并逼众人表态。',
+          causal_next_step: '带血腰牌把旧臣身份问题推到下一章。',
+        },
+        serial_rhythm_brief: {
+          status: 'ready',
+          opening_hook_deadline: '前 300 字必须接住警钟压席。',
+          payoff_interval: '每 800-1200 字至少给一次信息增量或局势反转。',
+          middle_guardrail: '中段不能堆王府派系解释，要用验腰牌逼站队。',
+          ending_hook_guardrail: '最后一幕压到带血腰牌背后的旧臣身份。',
+          scene_payoff_budget: [
+            {
+              scene_no: 1,
+              title: '警钟压席',
+              word_budget: '900 字',
+              required_payoff: '众人第一次看见谢怀安还能控场。',
+              turn: '太妃沉默等于放任管事试探。',
+            },
+          ],
+          anti_drag_rules: ['连续两段必须出现行动、信息或关系变化。'],
+        },
+        page_turn_hook_brief: {
+          hook_type: '身份反转',
+          core_question: '带血腰牌背后的旧臣到底站哪边。',
+          visible_trigger: '守将把带血腰牌递到谢怀安掌心。',
+          withheld_answer: '旧臣身份和真实站队不能在本章解释完。',
+          next_chapter_pull: '下一章逼谢怀安审问守将并判断旧臣是否可信。',
+          final_image: '谢怀安掌心压着带血腰牌，钟声在府门外停住。',
+          forbidden_resolution: ['不得在本章解释完整答案。'],
+        },
+        volume_climax_brief: {
+          status: 'needs_attention',
+          current_volume_title: '第一卷 镜州风雷',
+          chapter_range: '第1-60章',
+          current_chapter_role: '完成卷中小高潮：谢怀安第一次公开夺回王府审判主动权。',
+          volume_goal: '让谢怀安在镜州立住武夫根基并摸清王府人心。',
+          climax_promise: '用带血腰牌和公开站队给读者阶段性回报。',
+          required_beats: ['王府管事当众失势', '旧部第一次表态'],
+          forbidden_payoff: ['不得提前解决京城幕后黑手', '不得提前消费卷末军权爆点'],
+          nearby_beats: [
+            { chapter_no: 2, type: '小高潮', label: '王府审判夺权', detail: '谢怀安用警钟和腰牌逼王府站队。' },
+          ],
+        },
       },
       preflight: { ready: true, blockers: [] },
     }
@@ -1317,6 +1406,73 @@ describe('buildWritingCockpitModel', () => {
     expect(model.chapterPlanningDesk.contextPackageStatus).toBe('ready')
     expect(model.chapterPlanningDesk.episodePlan.chapterObjective).toBe('把警钟危机转成谢怀安的第一次主动试探')
     expect(model.chapterPlanningDesk.episodePlan.coreConflict).toBe('王府管事要压警讯，谢怀安要逼众人表态')
+    expect(model.chapterPlanningDesk.episodePlan.coreContract.summary).toContain('夺回镜州主动权')
+    expect(model.chapterPlanningDesk.episodePlan.coreContract.mustServe).toContain('失势皇子以武道和权谋守住镜州')
+    expect(model.chapterPlanningDesk.episodePlan.coreContract.noDrift).toContain('不能把主线写成纯宅斗')
+    expect(model.chapterPlanningDesk.episodePlan.coreContract.repairFocus).toContain('补足谢怀安主动选择和代价')
+    expect(model.chapterPlanningDesk.episodePlan.readerDropRisk.dropPoints[0]).toContain('试读用户可能弃读')
+    expect(model.chapterPlanningDesk.episodePlan.readerDropRisk.openingGuardrail).toContain('开篇 300 字')
+    expect(model.chapterPlanningDesk.episodePlan.readerDropRisk.middleGuardrail).toContain('不堆派系解释')
+    expect(model.chapterPlanningDesk.episodePlan.readerDropRisk.endingGuardrail).toContain('旧臣身份问题')
+    expect(model.chapterPlanningDesk.episodePlan.storyPressure.pressureSources).toContain('王府管事压席')
+    expect(model.chapterPlanningDesk.episodePlan.storyPressure.conflictEscalationGuardrail).toContain('公开站队')
+    expect(model.chapterPlanningDesk.episodePlan.storyPressure.stakesGrowthGuardrail).toContain('王府号令权')
+    expect(model.chapterPlanningDesk.episodePlan.storyPressure.reversalPressureGuardrail).toContain('带血腰牌')
+    expect(model.chapterPlanningDesk.episodePlan.storyDrive.protagonistChoice).toContain('当众选择')
+    expect(model.chapterPlanningDesk.episodePlan.storyDrive.choiceCost).toContain('旧部')
+    expect(model.chapterPlanningDesk.episodePlan.storyDrive.stateChange).toContain('主动权')
+    expect(model.chapterPlanningDesk.episodePlan.storyDrive.causalNextStep).toContain('旧臣身份')
+    expect(model.chapterPlanningDesk.episodePlan.serialRhythm.openingHookDeadline).toContain('前 300 字')
+    expect(model.chapterPlanningDesk.episodePlan.serialRhythm.payoffInterval).toContain('800-1200')
+    expect(model.chapterPlanningDesk.episodePlan.serialRhythm.middleGuardrail).toContain('验腰牌')
+    expect(model.chapterPlanningDesk.episodePlan.serialRhythm.endingHookGuardrail).toContain('旧臣身份')
+    expect(model.chapterPlanningDesk.episodePlan.serialRhythm.scenePayoffBudget[0].requiredPayoff).toContain('控场')
+    expect(model.chapterPlanningDesk.episodePlan.serialRhythm.antiDragRules[0]).toContain('连续两段')
+    expect(model.chapterPlanningDesk.episodePlan.pageTurnHook.coreQuestion).toContain('旧臣')
+    expect(model.chapterPlanningDesk.episodePlan.pageTurnHook.visibleTrigger).toContain('带血腰牌')
+    expect(model.chapterPlanningDesk.episodePlan.pageTurnHook.nextChapterPull).toContain('审问守将')
+    expect(model.chapterPlanningDesk.episodePlan.pageTurnHook.forbiddenResolution[0]).toContain('不得在本章解释')
+    expect(model.chapterPlanningDesk.episodePlan.volumeClimax.currentChapterRole).toContain('公开夺回')
+    expect(model.chapterPlanningDesk.episodePlan.volumeClimax.volumeGoal).toContain('镜州')
+    expect(model.chapterPlanningDesk.episodePlan.volumeClimax.climaxPromise).toContain('阶段性回报')
+    expect(model.chapterPlanningDesk.episodePlan.volumeClimax.forbiddenPayoff[0]).toContain('京城幕后黑手')
+    expect(model.chapterPlanningDesk.episodePlan.volumeClimax.nearbyBeats[0].label).toContain('王府审判夺权')
+  })
+
+  test('planning desk turns delivery risk carry-over into next chapter writing actions', () => {
+    const backendContextPackage = {
+      chapter_target: {
+        goal: '把上一章缺失的吸引力和创新补进规则边界试探',
+        conflict: '李超想硬闯，张智要用规则反制黑影',
+        ending_hook: '门外校服男生说出李超车祸前最后一句话',
+        delivery_risk_carry_over: {
+          label: '待修复 5',
+          priority_label: '优先修章末翻页',
+          items: ['修吸引力：吸引力缺口 3', '补创新：创新缺口 2'],
+          required_actions: ['前 300 字先兑现门外黑影压迫', '中段用规则边界反制黑影', '章末必须留下身份反转问题'],
+        },
+      },
+      preflight: { ready: true, blockers: [] },
+    }
+
+    const model = buildWritingCockpitModel({
+      project,
+      outlines,
+      chapters: [chapters[0], sceneCardChapter],
+      activeChapter: sceneCardChapter,
+      contextPackage: backendContextPackage,
+      diagnostics: { preflight: { ready: true, blockers: [] }, material_score: { score: 88, can_generate: true } },
+      materialScore: { score: 88, can_generate: true },
+    })
+
+    expect(model.chapterPlanningDesk.episodePlan.deliveryRiskCarryOver.label).toBe('待修复 5')
+    expect(model.chapterPlanningDesk.episodePlan.deliveryRiskCarryOver.priorityLabel).toBe('优先修章末翻页')
+    expect(model.chapterPlanningDesk.episodePlan.deliveryRiskCarryOver.items).toContain('修吸引力：吸引力缺口 3')
+    expect(model.chapterPlanningDesk.episodePlan.deliveryRiskCarryOver.items).toContain('补创新：创新缺口 2')
+    expect(model.chapterPlanningDesk.episodePlan.deliveryRiskCarryOver.requiredActions).toContain('前 300 字先兑现门外黑影压迫')
+    expect(model.chapterPlanningDesk.episodePlan.deliveryRiskCarryOver.openingActions).toContain('前 300 字先兑现门外黑影压迫')
+    expect(model.chapterPlanningDesk.episodePlan.deliveryRiskCarryOver.middleActions).toContain('中段用规则边界反制黑影')
+    expect(model.chapterPlanningDesk.episodePlan.deliveryRiskCarryOver.endingActions).toContain('章末必须留下身份反转问题')
   })
 
   test('planning desk uses backend summary as context objective fallback', () => {

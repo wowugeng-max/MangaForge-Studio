@@ -2257,39 +2257,7 @@ function buildInnovationRadarModel(reviews: AnyRecord[]): PlanningWorkspaceModel
 }
 
 function latestDeliveryRiskCounts(reviews: AnyRecord[]) {
-  const coreDrift = latestReviewPayloadAny(reviews, 'chapter_core_drift', 'core_drift')
-  const readerPayoff = latestReviewPayloadAny(reviews, 'reader_payoff_sync', 'reader_payoff_sync')
-  const readerExpectation = latestReviewPayloadAny(reviews, 'reader_expectation_sync', 'reader_expectation_sync')
-  const readerRetention = latestReviewPayloadAny(reviews, 'reader_retention_sync', 'reader_retention_sync')
-  const innovation = latestReviewPayloadAny(reviews, 'innovation_sync', 'innovation_sync')
-  const volumeBeat = latestReviewPayloadAny(reviews, 'volume_beat_sync', 'volume_beat_sync')
-  const storylineSync = latestReviewPayloadAny(reviews, 'storyline_sync', 'storyline_sync')
-  const readability = latestReviewPayloadAny(reviews, 'readability_review', 'readability_review')
-  const coreRiskCount = listLength(coreDrift?.drift_risks) + listLength(coreDrift?.risks)
-  const payoffDebtCount = numericCount(readerPayoff?.debt_count, readerPayoff?.debtCount, listLength(readerPayoff?.missed) + listLength(readerPayoff?.debts))
-  const expectationMissedCount = numericCount(readerExpectation?.missed_count, readerExpectation?.missedCount, listLength(readerExpectation?.missed))
-  const retentionMissedCount = numericCount(readerRetention?.missed_count, readerRetention?.missedCount, listLength(readerRetention?.missed))
-  const innovationMissedCount = numericCount(innovation?.missed_count, innovation?.missedCount, listLength(innovation?.missed))
-  const volumeBeatMissedCount = numericCount(volumeBeat?.missed_count, volumeBeat?.missedCount, listLength(volumeBeat?.missed))
-  const storylineRiskCount = listLength(storylineSync?.missed) + listLength(storylineSync?.unplanned) + listLength(storylineSync?.forbidden_touched)
-  const readabilityRiskCount = listLength(readability?.meme_sense?.immersion_risks) + listLength(readability?.immersion_risks)
-  return {
-    coreRiskCount,
-    payoffDebtCount,
-    expectationMissedCount,
-    retentionMissedCount,
-    innovationMissedCount,
-    volumeBeatMissedCount,
-    storylineRiskCount,
-    readabilityRiskCount,
-    total: coreRiskCount
-      + payoffDebtCount
-      + Math.max(expectationMissedCount, retentionMissedCount)
-      + innovationMissedCount
-      + volumeBeatMissedCount
-      + storylineRiskCount
-      + readabilityRiskCount,
-  }
+  return aggregateDeliveryRiskCounts(reviews)
 }
 
 function buildVolumeSegmentGateModel(args: {
@@ -3089,6 +3057,193 @@ function numericCount(...values: any[]) {
   return 0
 }
 
+function weakDimensionCount(report: AnyRecord) {
+  const weakDimensions = [
+    ...arrayValue(report?.weak_dimensions),
+    ...arrayValue(report?.weakDimensions),
+    ...arrayValue(report?.dimensions).filter(item => text(item?.status) === 'warn'),
+  ]
+  return weakDimensions.length
+}
+
+function copiedPhraseCount(report: AnyRecord) {
+  return listLength(report?.copied_phrases) + listLength(report?.copiedPhrases)
+}
+
+const DELIVERY_RISK_REVIEW_DEFS: Array<{
+  type: string
+  payloadKey: string
+  label: string
+  count: (report: AnyRecord, review?: AnyRecord | null) => number
+}> = [
+  {
+    type: 'chapter_core_drift',
+    payloadKey: 'core_drift',
+    label: '核心',
+    count: report => listLength(report?.drift_risks) + listLength(report?.risks),
+  },
+  {
+    type: 'reader_payoff_sync',
+    payloadKey: 'reader_payoff_sync',
+    label: '回报',
+    count: report => numericCount(report?.debt_count, report?.debtCount, listLength(report?.missed) + listLength(report?.debts)),
+  },
+  {
+    type: 'reader_expectation_sync',
+    payloadKey: 'reader_expectation_sync',
+    label: '期待',
+    count: report => numericCount(report?.missed_count, report?.missedCount, listLength(report?.missed)),
+  },
+  {
+    type: 'reader_retention_sync',
+    payloadKey: 'reader_retention_sync',
+    label: '追读',
+    count: report => numericCount(report?.missed_count, report?.missedCount, listLength(report?.missed)),
+  },
+  {
+    type: 'innovation_sync',
+    payloadKey: 'innovation_sync',
+    label: '创新',
+    count: report => numericCount(report?.missed_count, report?.missedCount, listLength(report?.missed)),
+  },
+  {
+    type: 'volume_beat_sync',
+    payloadKey: 'volume_beat_sync',
+    label: '爆点',
+    count: report => numericCount(report?.missed_count, report?.missedCount, listLength(report?.missed)),
+  },
+  {
+    type: 'storyline_sync',
+    payloadKey: 'storyline_sync',
+    label: '剧情线',
+    count: report => listLength(report?.missed) + listLength(report?.unplanned) + listLength(report?.forbidden_touched),
+  },
+  {
+    type: 'story_unit_sync',
+    payloadKey: 'story_unit_sync',
+    label: '剧情单元',
+    count: report => numericCount(
+      report?.missed_count,
+      report?.missedCount,
+      report?.risk_count,
+      report?.riskCount,
+      listLength(report?.missed) + listLength(report?.risks) + listLength(report?.rushed_ahead) + listLength(report?.rushedAhead) + listLength(report?.forbidden_touched) + listLength(report?.forbiddenTouched),
+    ),
+  },
+  {
+    type: 'story_drive_sync',
+    payloadKey: 'story_drive_sync',
+    label: '故事力',
+    count: report => numericCount(report?.missed_count, report?.missedCount, report?.weak_count, report?.weakCount, listLength(report?.missed)),
+  },
+  {
+    type: 'character_arc_sync',
+    payloadKey: 'character_arc_sync',
+    label: '人物弧光',
+    count: report => numericCount(report?.missed_count, report?.missedCount, report?.weak_count, report?.weakCount, listLength(report?.missed)),
+  },
+  {
+    type: 'signature_scene_sync',
+    payloadKey: 'signature_scene_sync',
+    label: '强场面',
+    count: report => numericCount(report?.missed_count, report?.missedCount, listLength(report?.missed)),
+  },
+  {
+    type: 'chapter_attraction_review',
+    payloadKey: 'chapter_attraction_review',
+    label: '吸引力',
+    count: report => numericCount(report?.weak_count, report?.weakCount, report?.risk_count, report?.riskCount, weakDimensionCount(report)),
+  },
+  {
+    type: 'chapter_benchmark_sync',
+    payloadKey: 'chapter_benchmark_sync',
+    label: '标杆章',
+    count: report => numericCount(report?.missed_count, report?.missedCount, listLength(report?.missed)),
+  },
+  {
+    type: 'style_sample_sync',
+    payloadKey: 'style_sample_sync',
+    label: '风格',
+    count: report => numericCount(report?.missed_count, report?.missedCount, listLength(report?.missed) + copiedPhraseCount(report)),
+  },
+  {
+    type: 'readability_review',
+    payloadKey: 'readability_review',
+    label: '可读性',
+    count: report => listLength(report?.meme_sense?.immersion_risks) + listLength(report?.immersion_risks),
+  },
+  {
+    type: 'runway_sync',
+    payloadKey: 'runway_sync',
+    label: '航线',
+    count: report => numericCount(
+      report?.risk_count,
+      report?.riskCount,
+      listLength(report?.four_question_missed) + listLength(report?.reader_fuel_missed) + listLength(report?.redline_touched),
+    ),
+  },
+]
+
+function latestDeliveryRiskReports(reviews: AnyRecord[]) {
+  const latest = new Map<string, { def: typeof DELIVERY_RISK_REVIEW_DEFS[number]; review: AnyRecord; report: AnyRecord }>()
+  reviews.forEach(review => {
+    const def = DELIVERY_RISK_REVIEW_DEFS.find(item => item.type === text(review?.review_type))
+    if (!def) return
+    const payload = parseJsonValue(review?.payload) || parseJsonValue(review?.payload_json) || {}
+    const report = payload?.[def.payloadKey] || payload?.result?.[def.payloadKey] || payload?.result || payload
+    const chapterNo = reviewChapterNo(review, payload)
+    const key = `${chapterNo || 'global'}:${def.type}`
+    const current = latest.get(key)
+    if (!current || reviewTime(review) >= reviewTime(current.review)) {
+      latest.set(key, { def, review, report })
+    }
+  })
+  return Array.from(latest.values())
+}
+
+function aggregateDeliveryRiskCounts(reviews: AnyRecord[]) {
+  const totals: Record<string, number> = {}
+  for (const def of DELIVERY_RISK_REVIEW_DEFS) {
+    totals[def.type] = 0
+  }
+  latestDeliveryRiskReports(reviews).forEach(({ def, report, review }) => {
+    totals[def.type] += Math.max(0, def.count(report, review))
+  })
+  const expectationMissedCount = totals.reader_expectation_sync || 0
+  const retentionMissedCount = totals.reader_retention_sync || 0
+  const total = (totals.chapter_core_drift || 0)
+    + (totals.reader_payoff_sync || 0)
+    + Math.max(expectationMissedCount, retentionMissedCount)
+    + (totals.innovation_sync || 0)
+    + (totals.volume_beat_sync || 0)
+    + (totals.storyline_sync || 0)
+    + (totals.story_unit_sync || 0)
+    + (totals.story_drive_sync || 0)
+    + (totals.character_arc_sync || 0)
+    + (totals.signature_scene_sync || 0)
+    + (totals.chapter_attraction_review || 0)
+    + (totals.chapter_benchmark_sync || 0)
+    + (totals.style_sample_sync || 0)
+    + (totals.readability_review || 0)
+    + (totals.runway_sync || 0)
+  const labels = DELIVERY_RISK_REVIEW_DEFS
+    .filter(def => (totals[def.type] || 0) > 0)
+    .map(def => def.label)
+  return {
+    totals,
+    labels,
+    total,
+    coreRiskCount: totals.chapter_core_drift || 0,
+    payoffDebtCount: totals.reader_payoff_sync || 0,
+    expectationMissedCount,
+    retentionMissedCount,
+    innovationMissedCount: totals.innovation_sync || 0,
+    volumeBeatMissedCount: totals.volume_beat_sync || 0,
+    storylineRiskCount: totals.storyline_sync || 0,
+    readabilityRiskCount: totals.readability_review || 0,
+  }
+}
+
 function planningActionLabel(key: PlanningActionKey) {
   const labels: Record<PlanningActionKey, string> = {
     update_rolling_plan: '更新滚动规划',
@@ -3138,31 +3293,10 @@ function buildGovernanceHubModel(args: {
   future100Coverage: FuturePlanningCoverage
   productionTasks?: AnyRecord | null
 }): PlanningWorkspaceModel['governanceHub'] {
-  const coreDrift = latestReviewPayloadAny(args.reviews, 'chapter_core_drift', 'core_drift')
-  const readerPayoff = latestReviewPayloadAny(args.reviews, 'reader_payoff_sync', 'reader_payoff_sync')
-  const readerExpectation = latestReviewPayloadAny(args.reviews, 'reader_expectation_sync', 'reader_expectation_sync')
-  const readerRetention = latestReviewPayloadAny(args.reviews, 'reader_retention_sync', 'reader_retention_sync')
-  const innovation = latestReviewPayloadAny(args.reviews, 'innovation_sync', 'innovation_sync')
-  const volumeBeat = latestReviewPayloadAny(args.reviews, 'volume_beat_sync', 'volume_beat_sync')
-  const storylineSync = latestReviewPayloadAny(args.reviews, 'storyline_sync', 'storyline_sync')
-  const readability = latestReviewPayloadAny(args.reviews, 'readability_review', 'readability_review')
   const assetIntake = latestReviewPayloadAny(args.reviews, 'asset_intake', 'asset_intake')
-
-  const coreRiskCount = listLength(coreDrift?.drift_risks) + listLength(coreDrift?.risks)
-  const payoffDebtCount = numericCount(readerPayoff?.debt_count, readerPayoff?.debtCount, listLength(readerPayoff?.missed) + listLength(readerPayoff?.debts))
-  const expectationMissedCount = numericCount(readerExpectation?.missed_count, readerExpectation?.missedCount, listLength(readerExpectation?.missed))
-  const retentionMissedCount = numericCount(readerRetention?.missed_count, readerRetention?.missedCount, listLength(readerRetention?.missed))
-  const innovationMissedCount = numericCount(innovation?.missed_count, innovation?.missedCount, listLength(innovation?.missed))
-  const volumeBeatMissedCount = numericCount(volumeBeat?.missed_count, volumeBeat?.missedCount, listLength(volumeBeat?.missed))
-  const storylineRiskCount = listLength(storylineSync?.missed) + listLength(storylineSync?.unplanned) + listLength(storylineSync?.forbidden_touched)
-  const readabilityRiskCount = listLength(readability?.meme_sense?.immersion_risks) + listLength(readability?.immersion_risks)
-  const qualityRiskCount = coreRiskCount
-    + payoffDebtCount
-    + Math.max(expectationMissedCount, retentionMissedCount)
-    + innovationMissedCount
-    + volumeBeatMissedCount
-    + storylineRiskCount
-    + readabilityRiskCount
+  const deliveryRiskCounts = aggregateDeliveryRiskCounts(args.reviews)
+  const qualityRiskCount = deliveryRiskCounts.total
+  const qualityRiskLabels = deliveryRiskCounts.labels
   const existingDeliveryRiskTaskCount = openDeliveryRiskRepairTaskCount(args.productionTasks)
   const activeTasks = activeProductionTaskSummary(args.productionTasks)
 
@@ -3188,7 +3322,7 @@ function buildGovernanceHubModel(args: {
       detail: existingDeliveryRiskTaskCount > 0
         ? `已有 ${existingDeliveryRiskTaskCount} 个交稿风险修复任务待处理，先进入任务中心逐项修订和复检。`
         : qualityRiskCount > 0
-        ? `还有 ${qualityRiskCount} 项核心、回报、追读、创新、爆点、剧情线或可读性风险待修。`
+        ? `还有 ${qualityRiskCount} 项${qualityRiskLabels.join('、') || '交稿'}风险待修。`
         : '最近交稿风险可控。',
       actionKey: existingDeliveryRiskTaskCount > 0 ? 'open_task_center' : qualityRiskCount > 0 ? 'create_delivery_risk_repair' : 'enter_chapter_writing',
     },
@@ -3212,7 +3346,7 @@ function buildGovernanceHubModel(args: {
       key: 'storyline',
       label: '剧情线',
       status: args.storylineBoard.status === 'ready' ? 'ok' : args.storylineBoard.status === 'missing' ? 'block' : 'warn',
-      count: args.storylineBoard.overdueCount + args.storylineBoard.debtCount + args.storylineBoard.retentionRiskCount + storylineRiskCount,
+      count: args.storylineBoard.overdueCount + args.storylineBoard.debtCount + args.storylineBoard.retentionRiskCount + deliveryRiskCounts.storylineRiskCount,
       detail: args.storylineBoard.summary,
       actionKey: args.storylineBoard.status === 'ready' ? 'enter_chapter_writing' : 'open_story_assets',
     },
@@ -3331,7 +3465,14 @@ const SERIAL_DELIVERY_REVIEW_DEFS: Array<{ type: string; payloadKey: string; tag
   { type: 'reader_payoff_sync', payloadKey: 'reader_payoff_sync', tag: '回报欠账' },
   { type: 'reader_expectation_sync', payloadKey: 'reader_expectation_sync', tag: '期待欠账' },
   { type: 'storyline_sync', payloadKey: 'storyline_sync', tag: '剧情线风险' },
+  { type: 'story_unit_sync', payloadKey: 'story_unit_sync', tag: '剧情单元风险' },
+  { type: 'story_drive_sync', payloadKey: 'story_drive_sync', tag: '故事力风险' },
+  { type: 'character_arc_sync', payloadKey: 'character_arc_sync', tag: '人物弧光风险' },
   { type: 'innovation_sync', payloadKey: 'innovation_sync', tag: '创新缺口' },
+  { type: 'signature_scene_sync', payloadKey: 'signature_scene_sync', tag: '强场面风险' },
+  { type: 'chapter_attraction_review', payloadKey: 'chapter_attraction_review', tag: '吸引力风险' },
+  { type: 'chapter_benchmark_sync', payloadKey: 'chapter_benchmark_sync', tag: '标杆章风险' },
+  { type: 'style_sample_sync', payloadKey: 'style_sample_sync', tag: '风格风险' },
   { type: 'readability_review', payloadKey: 'readability_review', tag: '可读性风险' },
   { type: 'volume_beat_sync', payloadKey: 'volume_beat_sync', tag: '爆点风险' },
   { type: 'runway_sync', payloadKey: 'runway_sync', tag: '航线风险' },
@@ -3367,11 +3508,21 @@ function serialReviewHasRisk(review: AnyRecord, report: AnyRecord) {
 
 function buildSerialDeliveryRiskMap(reviews: AnyRecord[]) {
   const risksByChapter = new Map<number, string[]>()
+  const latestByChapterAndType = new Map<string, { review: AnyRecord; payload: AnyRecord; report: AnyRecord; def: typeof SERIAL_DELIVERY_REVIEW_DEFS[number] }>()
   reviews.forEach(review => {
     const def = SERIAL_DELIVERY_REVIEW_DEFS.find(item => item.type === text(review?.review_type))
     if (!def) return
     const payload = parseJsonValue(review?.payload) || {}
     const report = payload?.[def.payloadKey] || payload?.result?.[def.payloadKey] || payload?.result || payload
+    const chapterNo = reviewChapterNo(review, payload)
+    if (!chapterNo) return
+    const key = `${chapterNo}:${def.type}`
+    const current = latestByChapterAndType.get(key)
+    if (!current || reviewTime(review) >= reviewTime(current.review)) {
+      latestByChapterAndType.set(key, { review, payload, report, def })
+    }
+  })
+  latestByChapterAndType.forEach(({ review, report, def, payload }) => {
     if (!serialReviewHasRisk(review, report)) return
     const chapterNo = reviewChapterNo(review, payload)
     if (!chapterNo) return
@@ -3571,7 +3722,8 @@ function buildLongformRhythmModel(args: {
 }): PlanningWorkspaceModel['longformRhythm'] {
   const coreDrift = latestReviewPayload(args.reviews, 'chapter_core_drift', 'core_drift')
   const payoffSync = latestReviewPayload(args.reviews, 'reader_payoff_sync', 'reader_payoff_sync')
-  const coreRiskCount = arrayValue(coreDrift?.drift_risks).length
+  const deliveryRiskCounts = aggregateDeliveryRiskCounts(args.reviews)
+  const coreRiskCount = deliveryRiskCounts.coreRiskCount
   const coreStatus: PlanningRhythmSignal['status'] = args.healthIssues.some(issue => issue.key === 'missing_reader_promise')
     ? 'block'
     : text(coreDrift?.status).toLowerCase() === 'warn' || coreRiskCount > 0
@@ -3585,7 +3737,7 @@ function buildLongformRhythmModel(args: {
     : future100Ratio < 0.3 || args.volumeBeatBudget.status === 'needs_attention'
       ? 'warn'
       : 'ok'
-  const payoffDebt = Number(payoffSync?.debt_count ?? payoffSync?.debtCount ?? arrayValue(payoffSync?.missed).length + arrayValue(payoffSync?.debts).length)
+  const payoffDebt = deliveryRiskCounts.payoffDebtCount
   const payoffStatus: PlanningRhythmSignal['status'] = payoffDebt > 0 || text(payoffSync?.status).toLowerCase() === 'warn' ? 'warn' : 'ok'
   const fatigueRisk = args.first30Retention.status !== 'ready'
     || args.storylineBoard.overdueCount > 0
@@ -3599,11 +3751,11 @@ function buildLongformRhythmModel(args: {
       key: 'core',
       label: '核心守恒',
       status: coreStatus,
-      score: coreStatus === 'block' ? 45 : boundedScore(coreDrift?.score, coreStatus === 'warn' ? 68 : 88),
+      score: coreStatus === 'block' ? 45 : coreStatus === 'warn' ? Math.min(68, boundedScore(coreDrift?.score, 68)) : boundedScore(coreDrift?.score, 88),
       detail: coreStatus === 'block'
         ? '长篇核心承诺缺失，不能进入连续生产。'
         : coreStatus === 'warn'
-          ? text(coreDrift?.label || coreDrift?.summary, `核心偏移 ${coreRiskCount || 1}`)
+          ? `核心偏移 ${coreRiskCount || 1}`
           : '核心承诺、卷目标和章节服务关系稳定。',
       actionKey: coreStatus === 'ok' ? 'open_outline_tree' : 'open_story_assets',
     },
@@ -3679,10 +3831,11 @@ function buildLongformBattleDeskModel(args: {
   const coreSignal = args.longformRhythm.signals.find(signal => signal.key === 'core')
   const coreDrift = latestReviewPayloadAny(args.reviews, 'chapter_core_drift', 'core_drift')
   const storylineSync = latestReviewPayloadAny(args.reviews, 'storyline_sync', 'storyline_sync')
-  const coreRiskCount = listLength(coreDrift?.drift_risks) + listLength(coreDrift?.risks)
+  const deliveryRiskCounts = aggregateDeliveryRiskCounts(args.reviews)
+  const coreRiskCount = deliveryRiskCounts.coreRiskCount
   const spineBlocked = args.longformSpineGuard.status === 'blocked'
   const spineNeedsAttention = args.longformSpineGuard.status !== 'ready'
-  const storylineMissedCount = listLength(storylineSync?.missed)
+  const storylineMissedCount = Math.max(listLength(storylineSync?.missed), deliveryRiskCounts.storylineRiskCount)
   const storylineForbiddenCount = listLength(storylineSync?.forbidden_touched)
   const readerPullStatus: PlanningBattleDeskLane['status'] = args.first30Retention.status === 'blocked'
     ? 'block'
@@ -3708,7 +3861,7 @@ function buildLongformBattleDeskModel(args: {
       detail: spineNeedsAttention
         ? `全书主轴缺 ${args.longformSpineGuard.missingAxes.join('、') || '可选护栏'}，不能放大自动连写。`
         : coreRiskCount > 0
-          ? text(coreDrift?.label || coreDrift?.summary, `核心偏移 ${coreRiskCount}`)
+          ? `核心偏移 ${coreRiskCount}`
           : coreSignal?.detail || '核心承诺稳定。',
       actionKey: spineNeedsAttention ? args.longformSpineGuard.actionKey : coreRiskCount > 0 ? 'open_quality_revision' : coreSignal?.actionKey || 'open_story_assets',
     },

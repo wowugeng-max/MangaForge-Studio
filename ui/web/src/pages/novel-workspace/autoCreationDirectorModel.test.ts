@@ -817,6 +817,112 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(model.todayCommandDeck.flow.find(item => item.key === 'chapter_work')?.status).toBe('active')
   })
 
+  test('today command deck explains why safe batch generation is allowed', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        topStatus: {
+          ...basePlanning.topStatus,
+          future100Coverage: { ready: true, planned: 100, required: 100, missingChapters: [], label: '100/100' },
+        },
+        futureRoute: [
+          { chapterNo: 8, title: '试炼前夜', chapterTask: '主角拿到试炼资格', conflict: '执事设局阻拦', endingHook: '阵盘亮起第二道裂纹', mainlineProgress: '进入外门试炼核心局', riskTags: [] },
+          { chapterNo: 9, title: '阵盘裂纹', chapterTask: '阵盘异常暴露主角潜力', conflict: '同门围堵试探底牌', endingHook: '内门执事点名关注', mainlineProgress: '让宗门高层第一次注意主角', riskTags: [] },
+          { chapterNo: 10, title: '外门震动', chapterTask: '试炼结果引发宗门震动', conflict: '旧秩序压制新晋黑马', endingHook: '内门招揽提出苛刻条件', mainlineProgress: '打开内门势力线', riskTags: [] },
+        ],
+      },
+      writing: {
+        ...baseWriting,
+        chapterPlanningDesk: {
+          ...baseWriting.chapterPlanningDesk,
+          readiness: 'ready',
+          statusLabel: '本章可写',
+          scenePlanStatus: 'ready',
+          sceneCards: [
+            { title: '压迫升级', goal: '执事逼主角交阵盘' },
+            { title: '反向设局', goal: '主角用阵法拿回主动权' },
+          ],
+          recommendedPlannerAction: { key: 'confirm_plan_and_write_draft', label: '确认并生成' },
+        },
+        topStatus: {
+          ...baseWriting.topStatus,
+          nextActionLabel: '确认并生成',
+          primaryActionKey: 'confirm_plan_and_write_draft',
+        },
+        primaryActionKey: 'confirm_plan_and_write_draft',
+      },
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: {
+        last_updated_chapter: 7,
+        global: {
+          core_promise: '李超用超人蛮力碰撞规则怪谈，张智负责拆解规则。',
+          current_volume_goal: '午夜校园中活过第一轮规则。',
+          open_questions: ['广播是谁发出的', '湿漉漉学生为什么敲门'],
+          payoff_queue: ['规则边界反制蛮力'],
+        },
+        characters: [
+          { name: '李超', status: '力量觉醒但不懂规则', location: '宿舍楼大厅' },
+          { name: '张智', status: '负责推理规则', location: '宿舍楼大厅' },
+        ],
+      },
+    } as any)
+
+    expect(model.productionLicense.status).toBe('batch_allowed')
+    expect(model.todayCommandDeck.releaseRationale.mode).toBe('小批量连写')
+    expect(model.todayCommandDeck.releaseRationale.allowedCount).toBe(3)
+    expect(model.todayCommandDeck.releaseRationale.primaryReason).toContain('可按安全连写放行 3 章')
+    expect(model.todayCommandDeck.releaseRationale.checks).toEqual(expect.arrayContaining(['长线材料可用', '交稿风险已清', '下一批任务书可执行']))
+    expect(model.todayCommandDeck.releaseRationale.limits).toContain('只放行护栏确认的连续章节')
+  })
+
+  test('today command deck explains why production is downgraded to one chapter', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        topStatus: {
+          ...basePlanning.topStatus,
+          future100Coverage: { ready: true, planned: 100, required: 100, missingChapters: [], label: '100/100' },
+        },
+        futureRoute: [
+          { chapterNo: 8, title: '试炼前夜', chapterTask: '主角拿到试炼资格', conflict: '执事设局阻拦', endingHook: '阵盘亮起第二道裂纹', mainlineProgress: '进入外门试炼核心局', riskTags: [] },
+          { chapterNo: 9, title: '阵盘裂纹', chapterTask: '', conflict: '', endingHook: '内门执事点名关注', mainlineProgress: '', riskTags: ['缺逐章职责'] },
+        ],
+      },
+      writing: {
+        ...baseWriting,
+        chapterPlanningDesk: {
+          ...baseWriting.chapterPlanningDesk,
+          readiness: 'ready',
+          statusLabel: '本章可写',
+          scenePlanStatus: 'ready',
+          sceneCards: [
+            { title: '压迫升级', goal: '执事逼主角交阵盘' },
+            { title: '反向设局', goal: '主角用阵法拿回主动权' },
+          ],
+          recommendedPlannerAction: { key: 'confirm_plan_and_write_draft', label: '确认并生成' },
+        },
+        topStatus: {
+          ...baseWriting.topStatus,
+          nextActionLabel: '确认并生成',
+          primaryActionKey: 'confirm_plan_and_write_draft',
+        },
+        primaryActionKey: 'confirm_plan_and_write_draft',
+      },
+      activeTasks: [],
+      selectedModelId: 12,
+    } as any)
+
+    expect(model.productionLicense.status).toBe('single_chapter')
+    expect(model.todayCommandDeck.releaseRationale.mode).toBe('单章生产')
+    expect(model.todayCommandDeck.releaseRationale.allowedCount).toBe(1)
+    expect(model.todayCommandDeck.releaseRationale.limits).toEqual(expect.arrayContaining([
+      '暂不放行批量自动连写',
+      '当前章交稿闭环完成后再评估下一批',
+    ]))
+    expect(model.todayCommandDeck.releaseRationale.primaryReason).toContain('先推进当前章')
+  })
+
   test('builds a million word runway that explains the current writing course before safe batching', () => {
     const model = buildAutoCreationDirectorModel({
       planning: {
@@ -1294,6 +1400,17 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(model.batchGuardrail.nextBatchBrief.readerPayoffPlan).toContain('升级+打脸')
     expect(model.batchGuardrail.nextBatchBrief.chapters.map(item => item.chapterNo)).toEqual([8, 9, 10])
     expect(model.batchGuardrail.nextBatchBrief.chapters[2]?.endingHook).toBe('内门招揽提出苛刻条件')
+    expect(model.batchGuardrail.nextBatchBrief.startChecklist.map(item => item.key)).toEqual([
+      'core_promise',
+      'story_drive',
+      'reader_payoff',
+      'innovation',
+      'forbidden_boundary',
+    ])
+    expect(model.batchGuardrail.nextBatchBrief.startChecklist.every(item => item.status === 'ok')).toBe(true)
+    expect(model.batchGuardrail.nextBatchBrief.startChecklist.find(item => item.key === 'core_promise')?.detail).toContain('寒门少年以阵法反压宗门秩序')
+    expect(model.batchGuardrail.nextBatchBrief.startChecklist.find(item => item.key === 'reader_payoff')?.detail).toContain('升级+打脸')
+    expect(model.batchGuardrail.nextBatchBrief.startChecklist.find(item => item.key === 'forbidden_boundary')?.detail).toContain('不得跳过单章质检')
     expect(model.batchGuardrail.preflight.visible).toBe(true)
     expect(model.batchGuardrail.preflight.status).toBe('ready')
     expect(model.batchGuardrail.preflight.title).toBe('安全连写预执行确认')
@@ -1335,6 +1452,204 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(model.productionLicense.summary).toContain('安全连写')
     expect(model.productionLicense.safeChapterCount).toBe(3)
     expect(model.productionLicense.nextAction.key).toBe('start_safe_batch_generation')
+  })
+
+  test('injects staged delivery-risk obligations into safe batch preflight and action payload', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        topStatus: {
+          ...basePlanning.topStatus,
+          future100Coverage: { ready: true, planned: 100, required: 100, missingChapters: [], label: '100/100' },
+        },
+        futureRoute: [
+          {
+            chapterNo: 8,
+            title: '试炼前夜',
+            chapterTask: '主角拿到试炼资格',
+            conflict: '执事设局阻拦',
+            endingHook: '阵盘亮起第二道裂纹',
+            mainlineProgress: '进入外门试炼核心局',
+          },
+          {
+            chapterNo: 9,
+            title: '阵盘裂纹',
+            chapterTask: '阵盘异常暴露主角潜力',
+            conflict: '同门围堵试探底牌',
+            endingHook: '内门执事点名关注',
+            mainlineProgress: '让宗门高层第一次注意主角',
+          },
+          {
+            chapterNo: 10,
+            title: '外门震动',
+            chapterTask: '试炼结果引发宗门震动',
+            conflict: '旧秩序压制新晋黑马',
+            endingHook: '内门招揽提出苛刻条件',
+            mainlineProgress: '打开内门势力线',
+          },
+        ],
+      },
+      writing: {
+        ...baseWriting,
+        chapterPlanningDesk: {
+          ...baseWriting.chapterPlanningDesk,
+          readiness: 'ready',
+          statusLabel: '本章可写',
+          scenePlanStatus: 'ready',
+          sceneCards: [
+            { title: '压迫升级', goal: '执事逼主角交阵盘' },
+            { title: '反向设局', goal: '主角用阵法拿回主动权' },
+          ],
+          episodePlan: {
+            deliveryRiskCarryOver: {
+              sourceChapterNo: 7,
+              totalCount: 3,
+              label: '待修复 3',
+              priorityLabel: '优先修章末翻页',
+              items: ['修吸引力：吸引力缺口 2', '补创新：创新缺口 1'],
+              requiredActions: ['前300字接住门外学生压迫', '中段补规则反制创新', '章末重做翻页问题'],
+              openingActions: ['开篇先补异常压迫'],
+              middleActions: ['中段补规则反制创新'],
+              endingActions: ['章末重做翻页问题'],
+            },
+          },
+          recommendedPlannerAction: { key: 'confirm_plan_and_write_draft', label: '确认并生成' },
+        },
+        topStatus: {
+          ...baseWriting.topStatus,
+          nextActionLabel: '确认并生成',
+          primaryActionKey: 'confirm_plan_and_write_draft',
+        },
+        primaryActionKey: 'confirm_plan_and_write_draft',
+      },
+      activeTasks: [],
+      selectedModelId: 12,
+    })
+
+    expect(model.batchGuardrail.status).toBe('ready')
+    expect(model.batchGuardrail.preflight.inputSnapshot.delivery_risk_carry_over).toMatchObject({
+      source: 'chapter_delivery_risk_carry_over',
+      source_chapter_no: 7,
+      apply_to_chapter_no: 8,
+      label: '待修复 3',
+      priority_label: '优先修章末翻页',
+      items: ['修吸引力：吸引力缺口 2', '补创新：创新缺口 1'],
+      required_actions: ['前300字接住门外学生压迫', '中段补规则反制创新', '章末重做翻页问题'],
+      opening_actions: ['开篇先补异常压迫', '前300字接住门外学生压迫'],
+      middle_actions: ['中段补规则反制创新'],
+      ending_actions: ['章末重做翻页问题', '优先修章末翻页'],
+    })
+    expect(model.batchGuardrail.recommendedAction.payload?.batch_preflight?.delivery_risk_carry_over?.opening_actions).toContain('开篇先补异常压迫')
+    expect(model.batchGuardrail.recommendedAction.payload?.next_batch_brief?.chapterRangeLabel).toBe('第8-10章')
+    expect(model.productionLicense.nextAction.payload?.batch_preflight?.delivery_risk_carry_over?.ending_actions).toContain('章末重做翻页问题')
+  })
+
+  test('injects chapter handoff contract into safe batch preflight and action payload', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        topStatus: {
+          ...basePlanning.topStatus,
+          future100Coverage: { ready: true, planned: 100, required: 100, missingChapters: [], label: '100/100' },
+        },
+        futureRoute: [
+          {
+            chapterNo: 8,
+            title: '试炼前夜',
+            chapterTask: '主角拿到试炼资格',
+            conflict: '执事设局阻拦',
+            endingHook: '阵盘亮起第二道裂纹',
+            mainlineProgress: '进入外门试炼核心局',
+          },
+          {
+            chapterNo: 9,
+            title: '阵盘裂纹',
+            chapterTask: '阵盘异常暴露主角潜力',
+            conflict: '同门围堵试探底牌',
+            endingHook: '内门执事点名关注',
+            mainlineProgress: '让宗门高层第一次注意主角',
+          },
+          {
+            chapterNo: 10,
+            title: '外门震动',
+            chapterTask: '试炼结果引发宗门震动',
+            conflict: '旧秩序压制新晋黑马',
+            endingHook: '内门招揽提出苛刻条件',
+            mainlineProgress: '打开内门势力线',
+          },
+        ],
+      },
+      writing: {
+        ...baseWriting,
+        nextChapter: {
+          ...baseWriting.nextChapter,
+          rawPayload: {
+            pre_draft_brief: {
+              previous_handoff: '第7章《执事加码》最后一幕：阵盘亮起第二道裂纹，执事当场改口要主角交出阵盘。',
+              reader_expectation_debt: {
+                must_carry: [
+                  { key: 'crack_pressure', text: '阵盘第二道裂纹必须在开篇造成可见压力' },
+                ],
+                keep_alive: [
+                  { key: 'who_changed_rule', text: '是谁在背后改试炼规则' },
+                ],
+                overdue: [
+                  { key: 'elder_hint', text: '内门长老为何提前关注主角' },
+                ],
+              },
+              reader_expectation_ledger: {
+                must_deliver: [
+                  { key: 'fight_back', text: '主角必须用阵法反制执事试探' },
+                ],
+              },
+            },
+          },
+        },
+        chapterPlanningDesk: {
+          ...baseWriting.chapterPlanningDesk,
+          readiness: 'ready',
+          statusLabel: '本章可写',
+          scenePlanStatus: 'ready',
+          sceneCards: [
+            { title: '裂纹压迫', goal: '阵盘裂纹引发执事逼迫' },
+            { title: '反向设局', goal: '主角用阵法拿回主动权' },
+          ],
+          episodePlan: {
+            previousHandoff: '第7章《执事加码》最后一幕：阵盘亮起第二道裂纹，执事当场改口要主角交出阵盘。',
+          },
+          recommendedPlannerAction: { key: 'confirm_plan_and_write_draft', label: '确认并生成' },
+        },
+        topStatus: {
+          ...baseWriting.topStatus,
+          nextActionLabel: '确认并生成',
+          primaryActionKey: 'confirm_plan_and_write_draft',
+        },
+        primaryActionKey: 'confirm_plan_and_write_draft',
+      },
+      activeTasks: [],
+      selectedModelId: 12,
+    })
+
+    expect(model.batchGuardrail.status).toBe('ready')
+    const preflightContract = JSON.parse(JSON.stringify(model.batchGuardrail.preflight.inputSnapshot.chapter_handoff_contract || {}))
+    const actionContract = JSON.parse(JSON.stringify(model.batchGuardrail.recommendedAction.payload?.batch_preflight?.chapter_handoff_contract || {}))
+    const licenseContract = JSON.parse(JSON.stringify(model.productionLicense.nextAction.payload?.batch_preflight?.chapter_handoff_contract || {}))
+    expect(preflightContract).toMatchObject({
+      source: 'safe_batch_chapter_handoff_contract',
+      from_chapter_no: 7,
+      apply_to_chapter_no: 8,
+      previous_handoff: expect.stringContaining('阵盘亮起第二道裂纹'),
+      opening_obligations: expect.arrayContaining(['阵盘第二道裂纹必须在开篇造成可见压力']),
+      keep_alive: expect.arrayContaining(['是谁在背后改试炼规则']),
+      overdue: expect.arrayContaining(['内门长老为何提前关注主角']),
+      must_deliver: expect.arrayContaining(['主角必须用阵法反制执事试探']),
+    })
+    expect(actionContract).toMatchObject({
+      previous_handoff: expect.stringContaining('执事当场改口'),
+    })
+    expect(licenseContract).toMatchObject({
+      opening_obligations: expect.arrayContaining(['阵盘第二道裂纹必须在开篇造成可见压力']),
+    })
   })
 
   test('limits safe batching to consecutive ready writing queue chapters', () => {
@@ -1437,6 +1752,138 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(model.batchGuardrail.nextBatchBrief.chapterRangeLabel).toBe('第8章')
     expect(model.batchGuardrail.recommendedAction.key).toBe('update_rolling_plan')
     expect(model.batchGuardrail.recommendedAction.payload?.source).toBe('writing_queue_batch_plan_repair')
+  })
+
+  test('downgrades safe batching when serial release inventory is below the buffer line', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        serialReleaseDesk: {
+          status: 'needs_buffer',
+          score: 60,
+          label: '存稿不足',
+          summary: '当前可发布 1 章，约 0 天，低于 3 天安全线。',
+          dailyTargetChapters: 2,
+          minBufferDays: 3,
+          lastPublishedChapter: 7,
+          publishableChapters: 1,
+          bufferDays: 0,
+          primaryAction: {
+            key: 'enter_chapter_writing',
+            label: '补存稿',
+            reason: '当前可发布 1 章，约 0 天，低于最低 3 天存稿。',
+          },
+          pipeline: [],
+          releaseWindow: [
+            { chapterNo: 8, title: '试炼前夜', wordCount: 3100, status: 'publishable', riskTags: [] },
+            { chapterNo: 9, title: '阵盘裂纹', wordCount: 0, status: 'drafting', riskTags: [] },
+          ],
+          riskChapters: [],
+          nextActions: ['至少再完成 5 章，恢复 3 天安全垫。'],
+        },
+        futureRoute: [
+          { chapterNo: 8, title: '试炼前夜', chapterTask: '主角拿到试炼资格', conflict: '执事设局阻拦', endingHook: '阵盘亮起第二道裂纹', mainlineProgress: '主角从被动挨压转为主动入局' },
+          { chapterNo: 9, title: '阵盘裂纹', chapterTask: '阵盘异常暴露主角潜力', conflict: '同门围堵试探底牌', endingHook: '内门执事点名关注', mainlineProgress: '宗门高层第一次注意主角' },
+          { chapterNo: 10, title: '外门震动', chapterTask: '试炼结果引发宗门震动', conflict: '旧秩序压制新晋黑马', endingHook: '内门招揽提出苛刻条件', mainlineProgress: '打开内门势力线' },
+        ],
+      },
+      writing: {
+        ...baseWriting,
+        chapterPlanningDesk: {
+          ...baseWriting.chapterPlanningDesk,
+          readiness: 'ready',
+          statusLabel: '本章可写',
+          scenePlanStatus: 'ready',
+          sceneCards: [{ title: '资格争夺', goal: '主角拿到试炼资格' }],
+          reasons: [],
+          recommendedPlannerAction: { key: 'confirm_plan_and_write_draft', label: '确认并生成' },
+        },
+        topStatus: {
+          ...baseWriting.topStatus,
+          nextActionLabel: '确认并生成',
+          primaryActionKey: 'confirm_plan_and_write_draft',
+        },
+        primaryActionKey: 'confirm_plan_and_write_draft',
+      },
+      activeTasks: [],
+      selectedModelId: 12,
+    })
+
+    expect(model.batchGuardrail.status).toBe('caution')
+    expect(model.batchGuardrail.safeChapterCount).toBe(1)
+    expect(model.batchGuardrail.guardrails.find(item => item.label === '连载库存')?.status).toBe('warn')
+    expect(model.batchGuardrail.guardrails.find(item => item.label === '连载库存')?.detail).toContain('低于 3 天安全线')
+    expect(model.productionLicense.status).toBe('single_chapter')
+    expect(model.productionLicense.modeLabel).toBe('单章生产')
+    expect(model.todayCommandDeck.qualityGates.find(item => item.key === 'serial_safety')?.status).toBe('warn')
+    expect(model.todayCommandDeck.qualityGates.find(item => item.key === 'serial_safety')?.detail).toContain('低于 3 天安全线')
+  })
+
+  test('blocks safe batching when the serial release window contains chapters needing revision', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        serialReleaseDesk: {
+          status: 'blocked',
+          score: 48,
+          label: '发布阻塞',
+          summary: '发布窗口有 1 章存在风险，暂不建议直接发布。',
+          dailyTargetChapters: 2,
+          minBufferDays: 3,
+          lastPublishedChapter: 7,
+          publishableChapters: 2,
+          bufferDays: 1,
+          primaryAction: {
+            key: 'open_quality_revision',
+            label: '修复发布窗口',
+            reason: '发布窗口内第 8 章存在质检风险，先修订再发。',
+          },
+          pipeline: [],
+          releaseWindow: [
+            { chapterNo: 8, title: '试炼前夜', wordCount: 3100, status: 'needs_revision', riskTags: ['读者拉力不足'] },
+            { chapterNo: 9, title: '阵盘裂纹', wordCount: 3200, status: 'publishable', riskTags: [] },
+          ],
+          riskChapters: [
+            { chapterNo: 8, title: '试炼前夜', riskTags: ['读者拉力不足'] },
+          ],
+          nextActions: ['先处理发布窗口内的质检风险，再恢复发稿节奏。'],
+        },
+        futureRoute: [
+          { chapterNo: 8, title: '试炼前夜', chapterTask: '主角拿到试炼资格', conflict: '执事设局阻拦', endingHook: '阵盘亮起第二道裂纹', mainlineProgress: '主角从被动挨压转为主动入局' },
+          { chapterNo: 9, title: '阵盘裂纹', chapterTask: '阵盘异常暴露主角潜力', conflict: '同门围堵试探底牌', endingHook: '内门执事点名关注', mainlineProgress: '宗门高层第一次注意主角' },
+          { chapterNo: 10, title: '外门震动', chapterTask: '试炼结果引发宗门震动', conflict: '旧秩序压制新晋黑马', endingHook: '内门招揽提出苛刻条件', mainlineProgress: '打开内门势力线' },
+        ],
+      },
+      writing: {
+        ...baseWriting,
+        chapterPlanningDesk: {
+          ...baseWriting.chapterPlanningDesk,
+          readiness: 'ready',
+          statusLabel: '本章可写',
+          scenePlanStatus: 'ready',
+          sceneCards: [{ title: '资格争夺', goal: '主角拿到试炼资格' }],
+          reasons: [],
+          recommendedPlannerAction: { key: 'confirm_plan_and_write_draft', label: '确认并生成' },
+        },
+        topStatus: {
+          ...baseWriting.topStatus,
+          nextActionLabel: '确认并生成',
+          primaryActionKey: 'confirm_plan_and_write_draft',
+        },
+        primaryActionKey: 'confirm_plan_and_write_draft',
+      },
+      activeTasks: [],
+      selectedModelId: 12,
+    })
+
+    expect(model.batchGuardrail.status).toBe('blocked')
+    expect(model.batchGuardrail.safeChapterCount).toBe(0)
+    expect(model.batchGuardrail.guardrails.find(item => item.label === '连载库存')?.status).toBe('block')
+    expect(model.batchGuardrail.guardrails.find(item => item.label === '连载库存')?.detail).toContain('发布窗口有 1 章存在风险')
+    expect(model.batchGuardrail.recommendedAction.key).toBe('open_quality_revision')
+    expect(model.productionLicense.status).toBe('blocked')
+    expect(model.productionLicense.nextAction.key).toBe('open_quality_revision')
+    expect(model.dailyBattlePlan.steps.find(step => step.key === 'batch_release')?.status).toBe('blocked')
   })
 
   test('downgrades safe batching when the next batch brief is too vague for multi-chapter production', () => {
@@ -2014,6 +2461,15 @@ describe('buildAutoCreationDirectorModel', () => {
           previousEnding: '阵盘亮起第二道裂纹',
           expectationCarryOver: ['执事背后的供奉是谁'],
           nextOpeningObligations: ['试炼前夜必须先回应裂纹异变'],
+          deliveryRiskCarryOver: {
+            totalCount: 3,
+            label: '待修复 3',
+            priorityLabel: '优先修章末翻页',
+            items: ['修吸引力：吸引力缺口 2', '补创新：创新缺口 1'],
+            openingActions: ['开篇先补异常压迫'],
+            middleActions: ['中段补规则反制创新'],
+            endingActions: ['章末重做翻页问题'],
+          },
           storyStateSynced: true,
           storylineStatusLabel: '剧情线 OK',
           actionKey: 'accept_chapter_and_continue',
@@ -2033,6 +2489,11 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(handoffSignal?.status).toBe('block')
     expect(handoffSignal?.detail).toContain('第8章到第9章')
     expect(handoffSignal?.detail).toContain('阵盘亮起第二道裂纹')
+    expect(handoffSignal?.detail).toContain('交稿风险：待修复 3')
+    expect(handoffSignal?.detail).toContain('优先修章末翻页')
+    expect(handoffSignal?.detail).toContain('开篇修复：开篇先补异常压迫')
+    expect(handoffSignal?.detail).toContain('中段推进：中段补规则反制创新')
+    expect(handoffSignal?.detail).toContain('章末追读：章末重做翻页问题')
     expect(model.dailyBattlePlan.steps.find(step => step.key === 'chapter_work')?.detail).toContain('可接下一章')
     expect(model.productionLicense.status).toBe('blocked')
     expect(model.productionLicense.nextAction.key).toBe('accept_chapter_and_continue')
@@ -2062,6 +2523,15 @@ describe('buildAutoCreationDirectorModel', () => {
           previousEnding: '阵盘亮起第二道裂纹',
           expectationCarryOver: ['执事背后的供奉是谁'],
           nextOpeningObligations: ['试炼前夜必须先回应裂纹异变'],
+          deliveryRiskCarryOver: {
+            totalCount: 3,
+            label: '待修复 3',
+            priorityLabel: '优先修章末翻页',
+            items: ['修吸引力：吸引力缺口 2', '补创新：创新缺口 1'],
+            openingActions: ['开篇先补异常压迫'],
+            middleActions: ['中段补规则反制创新'],
+            endingActions: ['章末重做翻页问题'],
+          },
           storyStateSynced: true,
           storylineStatusLabel: '剧情线 OK',
           actionKey: 'accept_chapter_and_continue',
@@ -2081,6 +2551,11 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(handoffStep?.detail).toContain('第8章到第9章')
     expect(handoffStep?.detail).toContain('阵盘亮起第二道裂纹')
     expect(handoffStep?.detail).toContain('试炼前夜必须先回应裂纹异变')
+    expect(handoffStep?.detail).toContain('交稿风险：待修复 3')
+    expect(handoffStep?.detail).toContain('补创新：创新缺口 1')
+    expect(handoffStep?.detail).toContain('开篇修复：开篇先补异常压迫')
+    expect(handoffStep?.detail).toContain('中段推进：中段补规则反制创新')
+    expect(handoffStep?.detail).toContain('章末追读：章末重做翻页问题')
     expect(model.pipeline.map(step => step.key)).toEqual([
       'longform_planning',
       'creation_contract',
@@ -2753,6 +3228,780 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(model.batchGuardrail.recommendedAction.key).toBe('start_safe_batch_generation')
   })
 
+  test('delivery risk gate explains convergence-cleared risks without repair tasks', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        topStatus: {
+          ...basePlanning.topStatus,
+          future100Coverage: { ready: true, planned: 100, required: 100, missingChapters: [], label: '100/100' },
+        },
+        futureRoute: [
+          {
+            chapterNo: 8,
+            title: '试炼前夜',
+            chapterTask: '主角拿到试炼资格',
+            conflict: '执事设局阻拦',
+            endingHook: '阵盘亮起第二道裂纹',
+            mainlineProgress: '进入外门试炼核心局',
+            riskTags: [],
+          },
+          {
+            chapterNo: 9,
+            title: '阵盘裂纹',
+            chapterTask: '阵盘异常暴露主角潜力',
+            conflict: '同门围堵试探底牌',
+            endingHook: '内门执事点名关注',
+            mainlineProgress: '让宗门高层第一次注意主角',
+            riskTags: [],
+          },
+          {
+            chapterNo: 10,
+            title: '外门震动',
+            chapterTask: '试炼结果引发宗门震动',
+            conflict: '旧秩序压制新晋黑马',
+            endingHook: '内门招揽提出苛刻条件',
+            mainlineProgress: '打开内门势力线',
+            riskTags: [],
+          },
+        ],
+      },
+      writing: {
+        ...baseWriting,
+        chapterPlanningDesk: {
+          ...baseWriting.chapterPlanningDesk,
+          readiness: 'ready',
+          statusLabel: '本章可写',
+          scenePlanStatus: 'ready',
+          sceneCards: [
+            { title: '压迫升级', goal: '执事逼主角交阵盘' },
+            { title: '反向设局', goal: '主角用阵法拿回主动权' },
+          ],
+          recommendedPlannerAction: { key: 'confirm_plan_and_write_draft', label: '确认并生成' },
+        },
+        topStatus: {
+          ...baseWriting.topStatus,
+          nextActionLabel: '确认并生成',
+          primaryActionKey: 'confirm_plan_and_write_draft',
+        },
+        primaryActionKey: 'confirm_plan_and_write_draft',
+      },
+      activeTasks: [],
+      selectedModelId: 12,
+      reviews: [
+        {
+          id: 201,
+          chapter_id: 7,
+          review_type: 'chapter_core_drift',
+          created_at: '2026-06-04T01:00:00.000Z',
+          payload: JSON.stringify({
+            chapter_id: 7,
+            chapter_no: 7,
+            core_drift: { status: 'warn', drift_risks: ['主角长期欲望被支线盖住'] },
+          }),
+        },
+        {
+          id: 302,
+          chapter_id: 7,
+          review_type: 'delivery_risk_convergence',
+          created_at: '2026-06-04T01:12:00.000Z',
+          payload: JSON.stringify({
+            chapter_id: 7,
+            chapter_no: 7,
+            delivery_risk_convergence: {
+              status: 'cleared',
+              label: '风险已清零',
+              before_count: 1,
+              after_count: 0,
+              after: { total_count: 0, items: [] },
+            },
+          }),
+        },
+      ],
+    } as any)
+
+    expect(model.deliveryRiskGate.status).toBe('ok')
+    expect(model.deliveryRiskGate.totalOpen).toBe(0)
+    expect(model.deliveryRiskGate.recentlyResolved).toEqual([
+      expect.objectContaining({
+        label: '复检收敛已清',
+        count: 1,
+        chapterNos: [7],
+        issueTypes: ['delivery_risk_convergence'],
+      }),
+    ])
+    expect(model.deliveryRiskGate.recentlyResolved[0]?.detail).toContain('第7章')
+    expect(model.deliveryRiskGate.recentlyResolved[0]?.detail).toContain('风险已清零')
+    expect(model.deliveryRiskGate.recentlyResolved[0]?.detail).toContain('风险清零')
+    expect(model.batchGuardrail.status).toBe('ready')
+  })
+
+  test('delivery risk gate uses the latest review for the same chapter and risk type', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        topStatus: {
+          ...basePlanning.topStatus,
+          future100Coverage: { ready: true, planned: 100, required: 100, missingChapters: [], label: '100/100' },
+        },
+        futureRoute: [
+          {
+            chapterNo: 8,
+            title: '试炼前夜',
+            chapterTask: '主角拿到试炼资格',
+            conflict: '执事设局阻拦',
+            endingHook: '阵盘亮起第二道裂纹',
+            mainlineProgress: '进入外门试炼核心局',
+            riskTags: [],
+          },
+          {
+            chapterNo: 9,
+            title: '阵盘裂纹',
+            chapterTask: '阵盘异常暴露主角潜力',
+            conflict: '同门围堵试探底牌',
+            endingHook: '内门执事点名关注',
+            mainlineProgress: '让宗门高层第一次注意主角',
+            riskTags: [],
+          },
+          {
+            chapterNo: 10,
+            title: '外门震动',
+            chapterTask: '试炼结果引发宗门震动',
+            conflict: '旧秩序压制新晋黑马',
+            endingHook: '内门招揽提出苛刻条件',
+            mainlineProgress: '打开内门势力线',
+            riskTags: [],
+          },
+        ],
+      },
+      writing: {
+        ...baseWriting,
+        chapterPlanningDesk: {
+          ...baseWriting.chapterPlanningDesk,
+          readiness: 'ready',
+          statusLabel: '本章可写',
+          scenePlanStatus: 'ready',
+          sceneCards: [
+            { title: '压迫升级', goal: '执事逼主角交阵盘' },
+            { title: '反向设局', goal: '主角用阵法拿回主动权' },
+          ],
+          recommendedPlannerAction: { key: 'confirm_plan_and_write_draft', label: '确认并生成' },
+        },
+        topStatus: {
+          ...baseWriting.topStatus,
+          nextActionLabel: '确认并生成',
+          primaryActionKey: 'confirm_plan_and_write_draft',
+        },
+        primaryActionKey: 'confirm_plan_and_write_draft',
+      },
+      activeTasks: [],
+      selectedModelId: 12,
+      reviews: [
+        {
+          id: 401,
+          chapter_id: 7,
+          review_type: 'chapter_core_drift',
+          created_at: '2026-06-04T01:00:00.000Z',
+          payload: JSON.stringify({
+            chapter_id: 7,
+            chapter_no: 7,
+            core_drift: { status: 'warn', drift_risks: ['主角长期欲望被支线盖住'] },
+          }),
+        },
+        {
+          id: 402,
+          chapter_id: 7,
+          review_type: 'chapter_core_drift',
+          created_at: '2026-06-04T01:20:00.000Z',
+          payload: JSON.stringify({
+            chapter_id: 7,
+            chapter_no: 7,
+            core_drift: { status: 'ok', drift_risks: [], risks: [], summary: '核心已回正' },
+          }),
+        },
+      ],
+    } as any)
+
+    expect(model.deliveryRiskGate.status).toBe('ok')
+    expect(model.deliveryRiskGate.totalOpen).toBe(0)
+    expect(model.batchGuardrail.status).toBe('ready')
+    expect(model.batchGuardrail.recommendedAction.key).toBe('start_safe_batch_generation')
+  })
+
+  test('delivery risk gate blocks safe batching for runway and volume beat risks', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        topStatus: {
+          ...basePlanning.topStatus,
+          future100Coverage: { ready: true, planned: 100, required: 100, missingChapters: [], label: '100/100' },
+        },
+        futureRoute: [
+          {
+            chapterNo: 8,
+            title: '试炼前夜',
+            chapterTask: '主角拿到试炼资格',
+            conflict: '执事设局阻拦',
+            endingHook: '阵盘亮起第二道裂纹',
+            mainlineProgress: '进入外门试炼核心局',
+            riskTags: [],
+          },
+          {
+            chapterNo: 9,
+            title: '阵盘裂纹',
+            chapterTask: '阵盘异常暴露主角潜力',
+            conflict: '同门围堵试探底牌',
+            endingHook: '内门执事点名关注',
+            mainlineProgress: '让宗门高层第一次注意主角',
+            riskTags: [],
+          },
+          {
+            chapterNo: 10,
+            title: '外门震动',
+            chapterTask: '试炼结果引发宗门震动',
+            conflict: '旧秩序压制新晋黑马',
+            endingHook: '内门招揽提出苛刻条件',
+            mainlineProgress: '打开内门势力线',
+            riskTags: [],
+          },
+        ],
+      },
+      writing: {
+        ...baseWriting,
+        chapterPlanningDesk: {
+          ...baseWriting.chapterPlanningDesk,
+          readiness: 'ready',
+          statusLabel: '本章可写',
+          scenePlanStatus: 'ready',
+          sceneCards: [
+            { title: '压迫升级', goal: '执事逼主角交阵盘' },
+            { title: '反向设局', goal: '主角用阵法拿回主动权' },
+          ],
+          recommendedPlannerAction: { key: 'confirm_plan_and_write_draft', label: '确认并生成' },
+        },
+        topStatus: {
+          ...baseWriting.topStatus,
+          nextActionLabel: '确认并生成',
+          primaryActionKey: 'confirm_plan_and_write_draft',
+        },
+        primaryActionKey: 'confirm_plan_and_write_draft',
+      },
+      activeTasks: [],
+      selectedModelId: 12,
+      reviews: [
+        {
+          id: 501,
+          chapter_id: 7,
+          review_type: 'runway_sync',
+          created_at: '2026-06-04T01:00:00.000Z',
+          payload: JSON.stringify({
+            chapter_id: 7,
+            chapter_no: 7,
+            runway_sync: {
+              status: 'warn',
+              risk_count: 2,
+              label: '航线风险 2',
+              four_question_missed: ['本章没有回答主角下一步方向'],
+              redline_touched: ['临时支线压过阵法秩序主线'],
+            },
+          }),
+        },
+        {
+          id: 502,
+          chapter_id: 7,
+          review_type: 'volume_beat_sync',
+          created_at: '2026-06-04T01:01:00.000Z',
+          payload: JSON.stringify({
+            chapter_id: 7,
+            chapter_no: 7,
+            volume_beat_sync: {
+              status: 'warn',
+              missed_count: 1,
+              missed: ['卷级小高潮没有形成可见回报'],
+            },
+          }),
+        },
+      ],
+    } as any)
+
+    expect(model.deliveryRiskGate.status).toBe('block')
+    expect(model.deliveryRiskGate.categories.map(item => item.label)).toEqual(expect.arrayContaining(['航线', '爆点']))
+    expect(model.deliveryRiskGate.topRisks).toContain('航线第7章：本章没有回答主角下一步方向；临时支线压过阵法秩序主线')
+    expect(model.batchGuardrail.status).toBe('blocked')
+    expect(model.batchGuardrail.recommendedAction.key).toBe('create_delivery_risk_repair')
+  })
+
+  test('delivery risk gate releases volume beat risk when annotation repair uses beat alias', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        topStatus: {
+          ...basePlanning.topStatus,
+          future100Coverage: { ready: true, planned: 100, required: 100, missingChapters: [], label: '100/100' },
+        },
+        futureRoute: [
+          {
+            chapterNo: 8,
+            title: '试炼前夜',
+            chapterTask: '主角拿到试炼资格',
+            conflict: '执事设局阻拦',
+            endingHook: '阵盘亮起第二道裂纹',
+            mainlineProgress: '进入外门试炼核心局',
+            riskTags: [],
+          },
+          {
+            chapterNo: 9,
+            title: '阵盘裂纹',
+            chapterTask: '阵盘异常暴露主角潜力',
+            conflict: '同门围堵试探底牌',
+            endingHook: '内门执事点名关注',
+            mainlineProgress: '让宗门高层第一次注意主角',
+            riskTags: [],
+          },
+          {
+            chapterNo: 10,
+            title: '外门震动',
+            chapterTask: '试炼结果引发宗门震动',
+            conflict: '旧秩序压制新晋黑马',
+            endingHook: '内门招揽提出苛刻条件',
+            mainlineProgress: '打开内门势力线',
+            riskTags: [],
+          },
+        ],
+      },
+      writing: {
+        ...baseWriting,
+        chapterPlanningDesk: {
+          ...baseWriting.chapterPlanningDesk,
+          readiness: 'ready',
+          statusLabel: '本章可写',
+          scenePlanStatus: 'ready',
+          sceneCards: [
+            { title: '压迫升级', goal: '执事逼主角交阵盘' },
+            { title: '反向设局', goal: '主角用阵法拿回主动权' },
+          ],
+          recommendedPlannerAction: { key: 'confirm_plan_and_write_draft', label: '确认并生成' },
+        },
+        topStatus: {
+          ...baseWriting.topStatus,
+          nextActionLabel: '确认并生成',
+          primaryActionKey: 'confirm_plan_and_write_draft',
+        },
+        primaryActionKey: 'confirm_plan_and_write_draft',
+      },
+      activeTasks: [],
+      selectedModelId: 12,
+      chapters: [
+        { id: 7, chapter_no: 7, title: '旧规反噬', chapter_text: '正文'.repeat(1500) },
+      ],
+      reviews: [
+        {
+          id: 502,
+          chapter_id: 7,
+          review_type: 'volume_beat_sync',
+          created_at: '2026-06-04T01:01:00.000Z',
+          payload: JSON.stringify({
+            chapter_id: 7,
+            chapter_no: 7,
+            volume_beat_sync: {
+              status: 'warn',
+              missed_count: 1,
+              missed: ['卷级小高潮没有形成可见回报'],
+            },
+          }),
+        },
+        {
+          id: 602,
+          chapter_id: 7,
+          review_type: 'prose_quality',
+          created_at: '2026-06-04T02:10:00.000Z',
+          payload: JSON.stringify({ score: 84, passed: true }),
+        },
+      ],
+      runRecords: [
+        {
+          id: 701,
+          run_type: 'longform_production_repair',
+          created_at: '2026-06-04T02:00:00.000Z',
+          status: 'completed',
+          output_ref: JSON.stringify({
+            tasks: [
+              {
+                source: 'review_annotation_risk',
+                task_type: 'repair_quality',
+                issue_type: 'volume_beat_missed',
+                task_status: 'resolved',
+                chapter_id: 7,
+                chapter_no: 7,
+              },
+            ],
+          }),
+        },
+      ],
+    } as any)
+
+    expect(model.deliveryRiskGate.status).toBe('ok')
+    expect(model.deliveryRiskGate.totalOpen).toBe(0)
+    expect(model.batchGuardrail.status).toBe('ready')
+    expect(model.batchGuardrail.recommendedAction.key).toBe('start_safe_batch_generation')
+  })
+
+  test('delivery risk gate explains why repaired risks no longer block safe batching', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        topStatus: {
+          ...basePlanning.topStatus,
+          future100Coverage: { ready: true, planned: 100, required: 100, missingChapters: [], label: '100/100' },
+        },
+        futureRoute: [
+          {
+            chapterNo: 8,
+            title: '试炼前夜',
+            chapterTask: '主角拿到试炼资格',
+            conflict: '执事设局阻拦',
+            endingHook: '阵盘亮起第二道裂纹',
+            mainlineProgress: '进入外门试炼核心局',
+            riskTags: [],
+          },
+          {
+            chapterNo: 9,
+            title: '阵盘裂纹',
+            chapterTask: '阵盘异常暴露主角潜力',
+            conflict: '同门围堵试探底牌',
+            endingHook: '内门执事点名关注',
+            mainlineProgress: '让宗门高层第一次注意主角',
+            riskTags: [],
+          },
+          {
+            chapterNo: 10,
+            title: '外门震动',
+            chapterTask: '试炼结果引发宗门震动',
+            conflict: '旧秩序压制新晋黑马',
+            endingHook: '内门招揽提出苛刻条件',
+            mainlineProgress: '打开内门势力线',
+            riskTags: [],
+          },
+        ],
+      },
+      writing: {
+        ...baseWriting,
+        chapterPlanningDesk: {
+          ...baseWriting.chapterPlanningDesk,
+          readiness: 'ready',
+          statusLabel: '本章可写',
+          scenePlanStatus: 'ready',
+          sceneCards: [
+            { title: '压迫升级', goal: '执事逼主角交阵盘' },
+            { title: '反向设局', goal: '主角用阵法拿回主动权' },
+          ],
+          recommendedPlannerAction: { key: 'confirm_plan_and_write_draft', label: '确认并生成' },
+        },
+        topStatus: {
+          ...baseWriting.topStatus,
+          nextActionLabel: '确认并生成',
+          primaryActionKey: 'confirm_plan_and_write_draft',
+        },
+        primaryActionKey: 'confirm_plan_and_write_draft',
+      },
+      activeTasks: [],
+      selectedModelId: 12,
+      chapters: [
+        { id: 7, chapter_no: 7, title: '旧规反噬', chapter_text: '正文'.repeat(1500) },
+      ],
+      reviews: [
+        {
+          id: 502,
+          chapter_id: 7,
+          review_type: 'volume_beat_sync',
+          created_at: '2026-06-04T01:01:00.000Z',
+          payload: JSON.stringify({
+            chapter_id: 7,
+            chapter_no: 7,
+            volume_beat_sync: {
+              status: 'warn',
+              missed_count: 1,
+              missed: ['卷级小高潮没有形成可见回报'],
+            },
+          }),
+        },
+        {
+          id: 602,
+          chapter_id: 7,
+          review_type: 'prose_quality',
+          created_at: '2026-06-04T02:10:00.000Z',
+          payload: JSON.stringify({ score: 84, passed: true }),
+        },
+      ],
+      runRecords: [
+        {
+          id: 701,
+          run_type: 'longform_production_repair',
+          created_at: '2026-06-04T02:00:00.000Z',
+          status: 'completed',
+          output_ref: JSON.stringify({
+            tasks: [
+              {
+                source: 'review_annotation_risk',
+                task_type: 'repair_quality',
+                issue_type: 'volume_beat_missed',
+                task_status: 'resolved',
+                chapter_id: 7,
+                chapter_no: 7,
+              },
+            ],
+          }),
+        },
+      ],
+    } as any)
+
+    expect(model.deliveryRiskGate.status).toBe('ok')
+    expect((model.deliveryRiskGate as any).recentlyResolved).toEqual([
+      expect.objectContaining({
+        label: '任务修复已清',
+        count: 1,
+        chapterNos: [7],
+        issueTypes: ['volume_beat_missed'],
+      }),
+    ])
+    expect((model.deliveryRiskGate as any).recentlyResolved[0].detail).toContain('第7章')
+    expect((model.deliveryRiskGate as any).recentlyResolved[0].detail).toContain('爆点')
+    expect((model.deliveryRiskGate as any).recentlyResolved[0].detail).toContain('复检通过')
+  })
+
+  test('delivery risk gate blocks safe batching for unresolved reader expectation debt', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        topStatus: {
+          ...basePlanning.topStatus,
+          future100Coverage: { ready: true, planned: 100, required: 100, missingChapters: [], label: '100/100' },
+        },
+        futureRoute: [
+          {
+            chapterNo: 8,
+            title: '试炼前夜',
+            chapterTask: '主角拿到试炼资格',
+            conflict: '执事设局阻拦',
+            endingHook: '阵盘亮起第二道裂纹',
+            mainlineProgress: '进入外门试炼核心局',
+            riskTags: [],
+          },
+          {
+            chapterNo: 9,
+            title: '阵盘裂纹',
+            chapterTask: '阵盘异常暴露主角潜力',
+            conflict: '同门围堵试探底牌',
+            endingHook: '内门执事点名关注',
+            mainlineProgress: '让宗门高层第一次注意主角',
+            riskTags: [],
+          },
+          {
+            chapterNo: 10,
+            title: '外门震动',
+            chapterTask: '试炼结果引发宗门震动',
+            conflict: '旧秩序压制新晋黑马',
+            endingHook: '内门招揽提出苛刻条件',
+            mainlineProgress: '打开内门势力线',
+            riskTags: [],
+          },
+        ],
+      },
+      writing: {
+        ...baseWriting,
+        chapterPlanningDesk: {
+          ...baseWriting.chapterPlanningDesk,
+          readiness: 'ready',
+          statusLabel: '本章可写',
+          scenePlanStatus: 'ready',
+          sceneCards: [
+            { title: '压迫升级', goal: '执事逼主角交阵盘' },
+            { title: '反向设局', goal: '主角用阵法拿回主动权' },
+          ],
+          recommendedPlannerAction: { key: 'confirm_plan_and_write_draft', label: '确认并生成' },
+        },
+        topStatus: {
+          ...baseWriting.topStatus,
+          nextActionLabel: '确认并生成',
+          primaryActionKey: 'confirm_plan_and_write_draft',
+        },
+        primaryActionKey: 'confirm_plan_and_write_draft',
+      },
+      activeTasks: [],
+      selectedModelId: 12,
+      reviews: [
+        {
+          id: 601,
+          chapter_id: 7,
+          review_type: 'reader_expectation_sync',
+          created_at: '2026-06-04T01:00:00.000Z',
+          payload: JSON.stringify({
+            chapter_id: 7,
+            chapter_no: 7,
+            reader_expectation_sync: {
+              status: 'warn',
+              missed_count: 2,
+              label: '期待欠账 2',
+              missed: ['没有回应阵盘第二道裂纹', '没有承接执事背后供奉悬念'],
+            },
+          }),
+        },
+      ],
+    } as any)
+
+    expect(model.deliveryRiskGate.status).toBe('block')
+    expect(model.deliveryRiskGate.categories.map(item => item.label)).toContain('期待')
+    expect(model.deliveryRiskGate.topRisks).toContain('期待第7章：没有回应阵盘第二道裂纹；没有承接执事背后供奉悬念')
+    expect(model.batchGuardrail.status).toBe('blocked')
+    expect(model.batchGuardrail.recommendedAction.key).toBe('create_delivery_risk_repair')
+  })
+
+  test('delivery risk gate releases opening handoff and readability subtype repairs after recheck', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        topStatus: {
+          ...basePlanning.topStatus,
+          future100Coverage: { ready: true, planned: 100, required: 100, missingChapters: [], label: '100/100' },
+        },
+        futureRoute: [
+          {
+            chapterNo: 9,
+            title: '阵盘裂纹',
+            chapterTask: '阵盘异常暴露主角潜力',
+            conflict: '同门围堵试探底牌',
+            endingHook: '内门执事点名关注',
+            mainlineProgress: '让宗门高层第一次注意主角',
+            riskTags: [],
+          },
+          {
+            chapterNo: 10,
+            title: '外门震动',
+            chapterTask: '试炼结果引发宗门震动',
+            conflict: '旧秩序压制新晋黑马',
+            endingHook: '内门招揽提出苛刻条件',
+            mainlineProgress: '打开内门势力线',
+            riskTags: [],
+          },
+          {
+            chapterNo: 11,
+            title: '内门来人',
+            chapterTask: '内门势力抛出招揽条件',
+            conflict: '招揽背后附带夺阵盘的暗线',
+            endingHook: '内门令牌落在桌上',
+            mainlineProgress: '主角进入内门视野',
+            riskTags: [],
+          },
+        ],
+      },
+      writing: {
+        ...baseWriting,
+        chapterPlanningDesk: {
+          ...baseWriting.chapterPlanningDesk,
+          readiness: 'ready',
+          statusLabel: '本章可写',
+          scenePlanStatus: 'ready',
+          sceneCards: [
+            { title: '承接裂纹', goal: '开篇接住上一章阵盘裂纹危机' },
+            { title: '内门施压', goal: '把招揽条件变成现场压迫' },
+          ],
+          recommendedPlannerAction: { key: 'confirm_plan_and_write_draft', label: '确认并生成' },
+        },
+        topStatus: {
+          ...baseWriting.topStatus,
+          nextActionLabel: '确认并生成',
+          primaryActionKey: 'confirm_plan_and_write_draft',
+        },
+        primaryActionKey: 'confirm_plan_and_write_draft',
+      },
+      activeTasks: [],
+      selectedModelId: 12,
+      chapters: [
+        { id: 8, chapter_no: 8, title: '试炼前夜', chapter_text: '正文'.repeat(1500) },
+      ],
+      reviews: [
+        {
+          id: 801,
+          chapter_id: 8,
+          review_type: 'reader_expectation_sync',
+          created_at: '2026-06-04T01:00:00.000Z',
+          payload: JSON.stringify({
+            chapter_id: 8,
+            chapter_no: 8,
+            reader_expectation_sync: {
+              status: 'warn',
+              missed_count: 1,
+              missed: [
+                {
+                  key: 'opening_handoff',
+                  label: '上一章承接',
+                  match_scope: 'opening',
+                  text: '阵盘第二道裂纹必须在开篇造成可见压力。',
+                },
+              ],
+            },
+          }),
+        },
+        {
+          id: 802,
+          chapter_id: 8,
+          review_type: 'readability_review',
+          created_at: '2026-06-04T01:01:00.000Z',
+          payload: JSON.stringify({
+            chapter_id: 8,
+            chapter_no: 8,
+            readability_review: {
+              status: 'warn',
+              readability_score: 84,
+              opening_hook_score: 52,
+              meme_sense: { intensity: '轻度', immersion_risks: [] },
+            },
+          }),
+        },
+        {
+          id: 803,
+          chapter_id: 8,
+          review_type: 'prose_quality',
+          created_at: '2026-06-04T02:10:00.000Z',
+          payload: JSON.stringify({ score: 85, passed: true }),
+        },
+      ],
+      runRecords: [
+        {
+          id: 901,
+          run_type: 'longform_production_repair',
+          created_at: '2026-06-04T02:00:00.000Z',
+          status: 'completed',
+          output_ref: JSON.stringify({
+            tasks: [
+              {
+                source: 'review_annotation_risk',
+                task_type: 'repair_quality',
+                issue_type: 'opening_handoff_debt',
+                task_status: 'resolved',
+                chapter_id: 8,
+                chapter_no: 8,
+              },
+              {
+                source: 'review_annotation_risk',
+                task_type: 'repair_quality',
+                issue_type: 'opening_pull_risk',
+                task_status: 'resolved',
+                chapter_id: 8,
+                chapter_no: 8,
+              },
+            ],
+          }),
+        },
+      ],
+    } as any)
+
+    expect(model.deliveryRiskGate.status).toBe('ok')
+    expect(model.deliveryRiskGate.totalOpen).toBe(0)
+    expect(model.batchGuardrail.status).toBe('ready')
+    expect(model.batchGuardrail.recommendedAction.key).toBe('start_safe_batch_generation')
+  })
+
   test('holds delivered safe batch when quality radar finds core, payoff, or storyline risks', () => {
     const deliveredBatchInput = {
       planning: {
@@ -2853,6 +4102,108 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(model.batchReviewQueue.completionDashboard.metrics.find(metric => metric.key === 'plan')?.status).toBe('warn')
   })
 
+  test('holds delivered safe batch when chapter handoff contract is missed in the opening', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        topStatus: {
+          ...basePlanning.topStatus,
+          future100Coverage: { ready: true, planned: 100, required: 100, missingChapters: [], label: '100/100' },
+        },
+      },
+      writing: {
+        ...baseWriting,
+        nextChapter: { ...baseWriting.nextChapter, id: 11, chapterNo: 11, title: '内门来人' },
+        chapterPlanningDesk: {
+          ...baseWriting.chapterPlanningDesk,
+          readiness: 'ready',
+          statusLabel: '本章可写',
+          scenePlanStatus: 'ready',
+          sceneCards: [{ title: '内门招揽', goal: '新势力提出条件' }],
+          recommendedPlannerAction: { key: 'confirm_plan_and_write_draft', label: '确认并生成' },
+        },
+        topStatus: {
+          ...baseWriting.topStatus,
+          nextActionLabel: '确认并生成',
+          primaryActionKey: 'confirm_plan_and_write_draft',
+        },
+        primaryActionKey: 'confirm_plan_and_write_draft',
+      },
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: { last_updated_chapter: 10 },
+      chapters: [
+        { id: 8, chapter_no: 8, title: '试炼前夜', chapter_text: '正文'.repeat(1600) },
+        { id: 9, chapter_no: 9, title: '阵盘裂纹', chapter_text: '正文'.repeat(1550) },
+        { id: 10, chapter_no: 10, title: '外门震动', chapter_text: '正文'.repeat(1510) },
+      ],
+      reviews: [
+        { id: 101, chapter_id: 8, review_type: 'prose_quality', created_at: '2026-06-03T01:00:00.000Z', payload: JSON.stringify({ score: 84, passed: true }) },
+        { id: 102, chapter_id: 9, review_type: 'prose_quality', created_at: '2026-06-03T01:01:00.000Z', payload: JSON.stringify({ score: 85, passed: true }) },
+        { id: 103, chapter_id: 10, review_type: 'prose_quality', created_at: '2026-06-03T01:02:00.000Z', payload: JSON.stringify({ score: 86, passed: true }) },
+        {
+          id: 301,
+          chapter_id: 10,
+          review_type: 'reader_expectation_sync',
+          created_at: '2026-06-03T01:03:00.000Z',
+          payload: JSON.stringify({
+            reader_expectation_sync: {
+              status: 'warn',
+              missed_count: 1,
+              missed: [
+                {
+                  key: 'opening_handoff',
+                  label: '上一章承接',
+                  match_scope: 'opening',
+                  text: '阵盘第二道裂纹必须在开篇造成可见压力。',
+                },
+              ],
+              keep_alive: ['是谁在背后改试炼规则'],
+            },
+          }),
+        },
+      ],
+      runRecords: [
+        {
+          id: 10,
+          run_type: 'batch_generate_prose',
+          created_at: '2026-06-03T00:00:00.000Z',
+          status: 'success',
+          input_ref: JSON.stringify({
+            source: 'auto_creation_safe_batch',
+            safety_limit: 3,
+            chapter_handoff_contract: {
+              previous_chapter_no: 9,
+              current_chapter_no: 10,
+              opening_must_land: '阵盘第二道裂纹必须在开篇造成可见压力。',
+              keep_alive: ['是谁在背后改试炼规则'],
+            },
+          }),
+          output_ref: JSON.stringify({
+            total: 3,
+            success: 3,
+            failed: 0,
+            chapters: [
+              { id: 8, chapter_no: 8, title: '试炼前夜', status: 'success', score: 84, word_count: 3180 },
+              { id: 9, chapter_no: 9, title: '阵盘裂纹', status: 'success', score: 85, word_count: 3090 },
+              { id: 10, chapter_no: 10, title: '外门震动', status: 'success', score: 86, word_count: 3021 },
+            ],
+          }),
+        },
+      ],
+    } as any)
+
+    expect(model.batchReviewQueue.status).toBe('risk')
+    expect(model.batchReviewQueue.riskRadar.status).toBe('warn')
+    expect((model.batchReviewQueue.riskRadar as any).handoffRiskCount).toBe(1)
+    expect(model.batchReviewQueue.riskRadar.signals.find(signal => signal.key === 'handoff')?.label).toBe('章节交接')
+    expect(model.batchReviewQueue.riskRadar.signals.find(signal => signal.key === 'handoff')?.detail).toContain('上一章承接')
+    expect(model.batchReviewQueue.riskRadar.repairTasks.map((task: any) => task.issue_type)).toContain('chapter_handoff_missed')
+    const handoffTask = model.batchReviewQueue.riskRadar.repairTasks.find((task: any) => task.issue_type === 'chapter_handoff_missed')
+    expect(handoffTask?.chapter_handoff_review?.missed.map((item: any) => item.label)).toContain('上一章承接')
+    expect(model.batchReviewQueue.handoff.riskLabels).toContain('章节交接')
+  })
+
   test('holds delivered safe batch when generated chapters miss the next batch brief', () => {
     const model = buildAutoCreationDirectorModel({
       planning: {
@@ -2947,6 +4298,121 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(chapter10Task?.batch_plan_review?.missed).toContain('进入内门视野')
     expect(chapter10Task?.batch_plan_review?.actual_risks.join('；')).toContain('剧情线漏推：进入内门视野')
     expect(model.mainAction.key).toBe('create_safe_batch_risk_repair')
+  })
+
+  test('scores delivered safe batch against the batch start checklist', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        topStatus: {
+          ...basePlanning.topStatus,
+          future100Coverage: { ready: true, planned: 100, required: 100, missingChapters: [], label: '100/100' },
+        },
+      },
+      writing: {
+        ...baseWriting,
+        nextChapter: { ...baseWriting.nextChapter, id: 11, chapterNo: 11, title: '内门来人' },
+        chapterPlanningDesk: {
+          ...baseWriting.chapterPlanningDesk,
+          readiness: 'ready',
+          statusLabel: '本章可写',
+          scenePlanStatus: 'ready',
+          sceneCards: [{ title: '内门招揽', goal: '新势力提出条件' }],
+          recommendedPlannerAction: { key: 'confirm_plan_and_write_draft', label: '确认并生成' },
+        },
+        topStatus: {
+          ...baseWriting.topStatus,
+          nextActionLabel: '确认并生成',
+          primaryActionKey: 'confirm_plan_and_write_draft',
+        },
+        primaryActionKey: 'confirm_plan_and_write_draft',
+      },
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: { last_updated_chapter: 10 },
+      chapters: [
+        { id: 8, chapter_no: 8, title: '试炼前夜', chapter_text: '正文'.repeat(1600) },
+        { id: 9, chapter_no: 9, title: '阵盘裂纹', chapter_text: '正文'.repeat(1550) },
+        { id: 10, chapter_no: 10, title: '外门震动', chapter_text: '正文'.repeat(1510) },
+      ],
+      reviews: [
+        { id: 101, chapter_id: 8, review_type: 'prose_quality', created_at: '2026-06-03T01:00:00.000Z', payload: JSON.stringify({ score: 84, passed: true }) },
+        { id: 102, chapter_id: 9, review_type: 'prose_quality', created_at: '2026-06-03T01:01:00.000Z', payload: JSON.stringify({ score: 86, passed: true }) },
+        { id: 103, chapter_id: 10, review_type: 'prose_quality', created_at: '2026-06-03T01:02:00.000Z', payload: JSON.stringify({ score: 85, passed: true }) },
+        { id: 201, chapter_id: 8, review_type: 'chapter_core_drift', created_at: '2026-06-03T01:03:00.000Z', payload: JSON.stringify({ chapter_core_drift: { status: 'warn', drift_risks: ['寒门逆袭承诺没有被试炼结果兑现'] } }) },
+        { id: 202, chapter_id: 9, review_type: 'story_drive_sync', created_at: '2026-06-03T01:04:00.000Z', payload: JSON.stringify({ story_drive_sync: { status: 'warn', missed_count: 1, missed: ['主角没有主动选择代价'] } }) },
+        { id: 203, chapter_id: 9, review_type: 'reader_payoff_sync', created_at: '2026-06-03T01:05:00.000Z', payload: JSON.stringify({ reader_payoff_sync: { status: 'warn', debt_count: 1, missed: ['升级+打脸回报不足'] } }) },
+        { id: 204, chapter_id: 10, review_type: 'innovation_sync', created_at: '2026-06-03T01:06:00.000Z', payload: JSON.stringify({ innovation_sync: { status: 'warn', missed_count: 1, missed: ['阵法反压宗门秩序的记忆点不够'] } }) },
+        { id: 205, chapter_id: 10, review_type: 'storyline_sync', created_at: '2026-06-03T01:07:00.000Z', payload: JSON.stringify({ storyline_sync: { status: 'warn', forbidden_touched: ['第10章前提前揭露规则源头'] } }) },
+      ],
+      runRecords: [
+        {
+          id: 10,
+          run_type: 'batch_generate_prose',
+          created_at: '2026-06-03T00:00:00.000Z',
+          status: 'success',
+          input_ref: JSON.stringify({
+            source: 'auto_creation_safe_batch',
+            safety_limit: 3,
+            next_batch_brief: {
+              chapterRangeLabel: '第8-10章',
+              batchGoal: '三章内进入内门视野。',
+              readerPayoffPlan: '升级、打脸、规则反制逐章交付。',
+              mainlineFocus: '外门危机 -> 内门招揽',
+              forbiddenBoundary: '第10章前不得揭露规则源头。',
+              startChecklist: [
+                { key: 'core_promise', label: '核心承诺', status: 'ok', detail: '寒门少年以阵法反压宗门秩序。' },
+                { key: 'story_drive', label: '故事驱动力', status: 'ok', detail: '主角必须主动承担试炼代价。' },
+                { key: 'reader_payoff', label: '读者回报', status: 'ok', detail: '升级+打脸回报必须逐章可见。' },
+                { key: 'innovation', label: '创新/IP记忆点', status: 'ok', detail: '阵法反压宗门秩序要形成可复述场面。' },
+                { key: 'forbidden_boundary', label: '禁写边界', status: 'ok', detail: '第10章前不得揭露规则源头。' },
+              ],
+              chapters: [
+                { chapterNo: 8, title: '试炼前夜', chapterTask: '试炼压迫落地。' },
+                { chapterNo: 9, title: '阵盘裂纹', chapterTask: '兑现阵盘反噬回报。' },
+                { chapterNo: 10, title: '外门震动', chapterTask: '推进到内门视野。' },
+              ],
+            },
+          }),
+          output_ref: JSON.stringify({
+            total: 3,
+            success: 3,
+            failed: 0,
+            chapters: [
+              { id: 8, chapter_no: 8, title: '试炼前夜', status: 'success', score: 84, word_count: 3180 },
+              { id: 9, chapter_no: 9, title: '阵盘裂纹', status: 'success', score: 86, word_count: 3090 },
+              { id: 10, chapter_no: 10, title: '外门震动', status: 'success', score: 85, word_count: 3021 },
+            ],
+          }),
+        },
+      ],
+    } as any)
+
+    expect(model.batchReviewQueue.status).toBe('risk')
+    expect(model.batchReviewQueue.riskRadar.checklistExecution.visible).toBe(true)
+    expect(model.batchReviewQueue.riskRadar.checklistExecution.status).toBe('warn')
+    expect(model.batchReviewQueue.riskRadar.checklistExecution.score).toBeLessThan(70)
+    expect(model.batchReviewQueue.riskRadar.checklistExecution.items.map(item => item.key)).toEqual([
+      'core_promise',
+      'story_drive',
+      'reader_payoff',
+      'innovation',
+      'forbidden_boundary',
+    ])
+    expect(model.batchReviewQueue.riskRadar.checklistExecution.items.every(item => item.status === 'warn')).toBe(true)
+    expect(model.batchReviewQueue.riskRadar.signals.find(signal => signal.key === 'batch_checklist')?.detail).toContain('开工清单')
+    expect(model.batchReviewQueue.riskRadar.batchChecklistRiskCount).toBe(5)
+    expect(model.batchReviewQueue.riskRadar.repairTasks.map((task: any) => task.issue_type)).toContain('batch_checklist_mismatch')
+    const checklistTask = model.batchReviewQueue.riskRadar.repairTasks.find((task: any) => task.issue_type === 'batch_checklist_mismatch')
+    expect(checklistTask?.batch_checklist_execution?.missed.map((item: any) => item.label)).toEqual([
+      '核心承诺',
+      '故事驱动力',
+      '读者回报',
+      '创新/IP记忆点',
+      '禁写边界',
+    ])
+    expect(model.batchReviewQueue.handoff.riskLabels).toContain('开工清单')
+    expect(model.batchReviewQueue.completionDashboard.metrics.find(metric => metric.key === 'checklist')?.status).toBe('warn')
   })
 
   test('holds delivered safe batch when serial rhythm repeats across the generated batch', () => {
@@ -3232,6 +4698,657 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(model.mainAction.key).toBe('create_safe_batch_risk_repair')
   })
 
+  test('holds delivered safe batch when story drive and character arcs are missed', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        topStatus: {
+          ...basePlanning.topStatus,
+          future100Coverage: { ready: true, planned: 100, required: 100, missingChapters: [], label: '100/100' },
+        },
+      },
+      writing: {
+        ...baseWriting,
+        nextChapter: { ...baseWriting.nextChapter, id: 18, chapterNo: 18, title: '内门来人' },
+        chapterPlanningDesk: {
+          ...baseWriting.chapterPlanningDesk,
+          readiness: 'ready',
+          statusLabel: '本章可写',
+          scenePlanStatus: 'ready',
+          sceneCards: [{ title: '内门招揽', goal: '新势力提出条件' }],
+          recommendedPlannerAction: { key: 'confirm_plan_and_write_draft', label: '确认并生成' },
+        },
+        topStatus: {
+          ...baseWriting.topStatus,
+          nextActionLabel: '确认并生成',
+          primaryActionKey: 'confirm_plan_and_write_draft',
+        },
+        primaryActionKey: 'confirm_plan_and_write_draft',
+      },
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: { last_updated_chapter: 17 },
+      chapters: [
+        { id: 15, chapter_no: 15, title: '内门影子', chapter_text: '内门影子'.repeat(500) },
+        { id: 16, chapter_no: 16, title: '执事逼问', chapter_text: '执事逼问'.repeat(500) },
+        { id: 17, chapter_no: 17, title: '阵纹余波', chapter_text: '阵纹余波'.repeat(500) },
+      ],
+      reviews: [
+        { id: 101, chapter_id: 15, review_type: 'prose_quality', created_at: '2026-06-03T01:00:00.000Z', payload: JSON.stringify({ score: 84, passed: true }) },
+        { id: 102, chapter_id: 16, review_type: 'prose_quality', created_at: '2026-06-03T01:01:00.000Z', payload: JSON.stringify({ score: 85, passed: true }) },
+        { id: 103, chapter_id: 17, review_type: 'prose_quality', created_at: '2026-06-03T01:02:00.000Z', payload: JSON.stringify({ score: 86, passed: true }) },
+        {
+          id: 401,
+          chapter_id: 16,
+          review_type: 'story_drive_sync',
+          created_at: '2026-06-03T01:03:00.000Z',
+          payload: JSON.stringify({
+            story_drive_sync: {
+              status: 'warn',
+              label: '故事力缺口 2',
+              score: 61,
+              missed_count: 2,
+              missed: [
+                { label: '主角主动选择', text: '本章冲突由执事推动，主角没有主动做选择。' },
+                { label: '选择代价', text: '主角反制没有付出资源、关系或危险代价。' },
+              ],
+            },
+          }),
+        },
+        {
+          id: 402,
+          chapter_id: 17,
+          review_type: 'character_arc_sync',
+          created_at: '2026-06-03T01:04:00.000Z',
+          payload: JSON.stringify({
+            character_arc_sync: {
+              status: 'warn',
+              label: '人物弧光缺口 2',
+              score: 58,
+              missed_count: 2,
+              missed: [
+                { label: '缺陷受压', text: '主角怕暴露阵盘的缺陷没有被逼到选择边缘。' },
+                { label: '关系变化', text: '林晓与主角的信任关系没有因本章事件改变。' },
+              ],
+            },
+          }),
+        },
+      ],
+      runRecords: [
+        {
+          id: 10,
+          run_type: 'batch_generate_prose',
+          created_at: '2026-06-03T00:00:00.000Z',
+          status: 'success',
+          input_ref: JSON.stringify({ source: 'auto_creation_safe_batch', safety_limit: 3 }),
+          output_ref: JSON.stringify({
+            total: 3,
+            success: 3,
+            failed: 0,
+            chapters: [
+              { id: 15, chapter_no: 15, title: '内门影子', status: 'success', score: 84, word_count: 3180 },
+              { id: 16, chapter_no: 16, title: '执事逼问', status: 'success', score: 85, word_count: 3090 },
+              { id: 17, chapter_no: 17, title: '阵纹余波', status: 'success', score: 86, word_count: 3021 },
+            ],
+          }),
+        },
+      ],
+    } as any)
+
+    expect(model.batchReviewQueue.status).toBe('risk')
+    expect((model.batchReviewQueue.riskRadar as any).storyDriveRiskCount).toBe(2)
+    expect((model.batchReviewQueue.riskRadar as any).characterArcRiskCount).toBe(2)
+    expect(model.batchReviewQueue.riskRadar.signals.find(signal => signal.key === 'story_drive')?.detail).toContain('故事驱动力缺口')
+    expect(model.batchReviewQueue.riskRadar.signals.find(signal => signal.key === 'character_arc')?.detail).toContain('人物弧光缺口')
+    expect(model.batchReviewQueue.riskRadar.repairTasks.map((task: any) => task.issue_type)).toEqual(expect.arrayContaining([
+      'story_drive_gap',
+      'character_arc_gap',
+    ]))
+    const storyTask = model.batchReviewQueue.riskRadar.repairTasks.find((task: any) => task.issue_type === 'story_drive_gap')
+    const characterTask = model.batchReviewQueue.riskRadar.repairTasks.find((task: any) => task.issue_type === 'character_arc_gap')
+    expect(storyTask?.story_drive_sync?.missed.map((item: any) => item.label)).toContain('主角主动选择')
+    expect(characterTask?.character_arc_sync?.missed.map((item: any) => item.label)).toContain('关系变化')
+    expect(model.batchReviewQueue.handoff.riskLabels).toEqual(expect.arrayContaining(['故事力', '人物弧光']))
+    expect(model.batchReviewQueue.completionDashboard.score).toBeLessThan(90)
+  })
+
+  test('holds delivered safe batch when style sample execution drifts or copies source phrases', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        topStatus: {
+          ...basePlanning.topStatus,
+          future100Coverage: { ready: true, planned: 100, required: 100, missingChapters: [], label: '100/100' },
+        },
+      },
+      writing: {
+        ...baseWriting,
+        nextChapter: { ...baseWriting.nextChapter, id: 18, chapterNo: 18, title: '内门来人' },
+        chapterPlanningDesk: {
+          ...baseWriting.chapterPlanningDesk,
+          readiness: 'ready',
+          statusLabel: '本章可写',
+          scenePlanStatus: 'ready',
+          sceneCards: [{ title: '内门招揽', goal: '新势力提出条件' }],
+          recommendedPlannerAction: { key: 'confirm_plan_and_write_draft', label: '确认并生成' },
+        },
+        topStatus: {
+          ...baseWriting.topStatus,
+          nextActionLabel: '确认并生成',
+          primaryActionKey: 'confirm_plan_and_write_draft',
+        },
+        primaryActionKey: 'confirm_plan_and_write_draft',
+      },
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: { last_updated_chapter: 17 },
+      chapters: [
+        { id: 15, chapter_no: 15, title: '内门影子', chapter_text: '内门影子'.repeat(500) },
+        { id: 16, chapter_no: 16, title: '执事逼问', chapter_text: '执事逼问'.repeat(500) },
+        { id: 17, chapter_no: 17, title: '阵纹余波', chapter_text: '阵纹余波'.repeat(500) },
+      ],
+      reviews: [
+        { id: 101, chapter_id: 15, review_type: 'prose_quality', created_at: '2026-06-03T01:00:00.000Z', payload: JSON.stringify({ score: 84, passed: true }) },
+        { id: 102, chapter_id: 16, review_type: 'prose_quality', created_at: '2026-06-03T01:01:00.000Z', payload: JSON.stringify({ score: 85, passed: true }) },
+        { id: 103, chapter_id: 17, review_type: 'prose_quality', created_at: '2026-06-03T01:02:00.000Z', payload: JSON.stringify({ score: 86, passed: true }) },
+        {
+          id: 501,
+          chapter_id: 16,
+          review_type: 'style_sample_sync',
+          created_at: '2026-06-03T01:03:00.000Z',
+          payload: JSON.stringify({
+            style_sample_sync: {
+              status: 'warn',
+              label: '风格缺口 3',
+              score: 61,
+              missed_count: 2,
+              copy_risk_count: 1,
+              missed: [
+                { label: '对白比例', text: '本章大段旁白解释过多，缺少角色互怼推进。' },
+                { label: '叙述节奏', text: '没有学到样章的短段落压迫和反转节奏。' },
+              ],
+              copied_phrases: ['天塌下来有高个子顶着'],
+            },
+          }),
+        },
+      ],
+      runRecords: [
+        {
+          id: 10,
+          run_type: 'batch_generate_prose',
+          created_at: '2026-06-03T00:00:00.000Z',
+          status: 'success',
+          input_ref: JSON.stringify({ source: 'auto_creation_safe_batch', safety_limit: 3 }),
+          output_ref: JSON.stringify({
+            total: 3,
+            success: 3,
+            failed: 0,
+            chapters: [
+              { id: 15, chapter_no: 15, title: '内门影子', status: 'success', score: 84, word_count: 3180 },
+              { id: 16, chapter_no: 16, title: '执事逼问', status: 'success', score: 85, word_count: 3090 },
+              { id: 17, chapter_no: 17, title: '阵纹余波', status: 'success', score: 86, word_count: 3021 },
+            ],
+          }),
+        },
+      ],
+    } as any)
+
+    expect(model.batchReviewQueue.status).toBe('risk')
+    expect((model.batchReviewQueue.riskRadar as any).styleSampleRiskCount).toBe(3)
+    expect(model.batchReviewQueue.riskRadar.signals.find(signal => signal.key === 'style_sample')?.detail).toContain('风格')
+    expect(model.batchReviewQueue.riskRadar.repairTasks.map((task: any) => task.issue_type)).toContain('style_sample_gap')
+    const styleTask = model.batchReviewQueue.riskRadar.repairTasks.find((task: any) => task.issue_type === 'style_sample_gap')
+    expect(styleTask?.style_sample_sync?.missed.map((item: any) => item.label)).toContain('对白比例')
+    expect(styleTask?.style_sample_sync?.copied_phrases).toContain('天塌下来有高个子顶着')
+    expect(model.batchReviewQueue.handoff.riskLabels).toContain('风格')
+    expect(model.batchReviewQueue.completionDashboard.score).toBeLessThan(90)
+  })
+
+  test('holds delivered safe batch when chapter benchmark execution misses baseline beats', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        topStatus: {
+          ...basePlanning.topStatus,
+          future100Coverage: { ready: true, planned: 100, required: 100, missingChapters: [], label: '100/100' },
+        },
+      },
+      writing: {
+        ...baseWriting,
+        nextChapter: { ...baseWriting.nextChapter, id: 18, chapterNo: 18, title: '内门来人' },
+        chapterPlanningDesk: {
+          ...baseWriting.chapterPlanningDesk,
+          readiness: 'ready',
+          statusLabel: '本章可写',
+          scenePlanStatus: 'ready',
+          sceneCards: [{ title: '内门招揽', goal: '新势力提出条件' }],
+          recommendedPlannerAction: { key: 'confirm_plan_and_write_draft', label: '确认并生成' },
+        },
+        topStatus: {
+          ...baseWriting.topStatus,
+          nextActionLabel: '确认并生成',
+          primaryActionKey: 'confirm_plan_and_write_draft',
+        },
+        primaryActionKey: 'confirm_plan_and_write_draft',
+      },
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: { last_updated_chapter: 17 },
+      chapters: [
+        { id: 15, chapter_no: 15, title: '内门影子', chapter_text: '内门影子'.repeat(500) },
+        { id: 16, chapter_no: 16, title: '执事逼问', chapter_text: '执事逼问'.repeat(500) },
+        { id: 17, chapter_no: 17, title: '阵纹余波', chapter_text: '阵纹余波'.repeat(500) },
+      ],
+      reviews: [
+        { id: 101, chapter_id: 15, review_type: 'prose_quality', created_at: '2026-06-03T01:00:00.000Z', payload: JSON.stringify({ score: 84, passed: true }) },
+        { id: 102, chapter_id: 16, review_type: 'prose_quality', created_at: '2026-06-03T01:01:00.000Z', payload: JSON.stringify({ score: 85, passed: true }) },
+        { id: 103, chapter_id: 17, review_type: 'prose_quality', created_at: '2026-06-03T01:02:00.000Z', payload: JSON.stringify({ score: 86, passed: true }) },
+        {
+          id: 502,
+          chapter_id: 16,
+          review_type: 'chapter_benchmark_sync',
+          created_at: '2026-06-03T01:03:00.000Z',
+          payload: JSON.stringify({
+            chapter_benchmark_sync: {
+              status: 'warn',
+              label: '基准缺口 3',
+              score: 57,
+              missed_count: 3,
+              missed: [
+                { key: 'opening_hook', label: '开篇钩子', text: '前300字没有把上一章压力转成现场危险。' },
+                { key: 'payoff_pattern', label: '爽点兑现', text: '主角反制没有形成可见回报。' },
+                { key: 'ending_hook_pattern', label: '章末追读', text: '章末缺少下一章非看不可的问题。' },
+              ],
+            },
+          }),
+        },
+      ],
+      runRecords: [
+        {
+          id: 10,
+          run_type: 'batch_generate_prose',
+          created_at: '2026-06-03T00:00:00.000Z',
+          status: 'success',
+          input_ref: JSON.stringify({ source: 'auto_creation_safe_batch', safety_limit: 3 }),
+          output_ref: JSON.stringify({
+            total: 3,
+            success: 3,
+            failed: 0,
+            chapters: [
+              { id: 15, chapter_no: 15, title: '内门影子', status: 'success', score: 84, word_count: 3180 },
+              { id: 16, chapter_no: 16, title: '执事逼问', status: 'success', score: 85, word_count: 3090 },
+              { id: 17, chapter_no: 17, title: '阵纹余波', status: 'success', score: 86, word_count: 3021 },
+            ],
+          }),
+        },
+      ],
+    } as any)
+
+    expect(model.batchReviewQueue.status).toBe('risk')
+    expect((model.batchReviewQueue.riskRadar as any).chapterBenchmarkRiskCount).toBe(3)
+    expect(model.batchReviewQueue.riskRadar.signals.find(signal => signal.key === 'chapter_benchmark')?.detail).toContain('标杆章')
+    expect(model.batchReviewQueue.riskRadar.repairTasks.map((task: any) => task.issue_type)).toContain('chapter_benchmark_gap')
+    const benchmarkTask = model.batchReviewQueue.riskRadar.repairTasks.find((task: any) => task.issue_type === 'chapter_benchmark_gap')
+    expect(benchmarkTask?.chapter_benchmark_sync?.missed.map((item: any) => item.label)).toContain('开篇钩子')
+    expect(model.batchReviewQueue.handoff.riskLabels).toContain('标杆章')
+    expect(model.batchReviewQueue.completionDashboard.score).toBeLessThan(90)
+  })
+
+  test('holds delivered safe batch when chapter attraction execution is weak', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        topStatus: {
+          ...basePlanning.topStatus,
+          future100Coverage: { ready: true, planned: 100, required: 100, missingChapters: [], label: '100/100' },
+        },
+      },
+      writing: {
+        ...baseWriting,
+        nextChapter: { ...baseWriting.nextChapter, id: 18, chapterNo: 18, title: '内门来人' },
+        chapterPlanningDesk: {
+          ...baseWriting.chapterPlanningDesk,
+          readiness: 'ready',
+          statusLabel: '本章可写',
+          scenePlanStatus: 'ready',
+          sceneCards: [{ title: '内门招揽', goal: '新势力提出条件' }],
+          recommendedPlannerAction: { key: 'confirm_plan_and_write_draft', label: '确认并生成' },
+        },
+        topStatus: {
+          ...baseWriting.topStatus,
+          nextActionLabel: '确认并生成',
+          primaryActionKey: 'confirm_plan_and_write_draft',
+        },
+        primaryActionKey: 'confirm_plan_and_write_draft',
+      },
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: { last_updated_chapter: 17 },
+      chapters: [
+        { id: 15, chapter_no: 15, title: '内门影子', chapter_text: '内门影子'.repeat(500) },
+        { id: 16, chapter_no: 16, title: '执事逼问', chapter_text: '执事逼问'.repeat(500) },
+        { id: 17, chapter_no: 17, title: '阵纹余波', chapter_text: '阵纹余波'.repeat(500) },
+      ],
+      reviews: [
+        { id: 101, chapter_id: 15, review_type: 'prose_quality', created_at: '2026-06-03T01:00:00.000Z', payload: JSON.stringify({ score: 84, passed: true }) },
+        { id: 102, chapter_id: 16, review_type: 'prose_quality', created_at: '2026-06-03T01:01:00.000Z', payload: JSON.stringify({ score: 85, passed: true }) },
+        { id: 103, chapter_id: 17, review_type: 'prose_quality', created_at: '2026-06-03T01:02:00.000Z', payload: JSON.stringify({ score: 86, passed: true }) },
+        {
+          id: 503,
+          chapter_id: 16,
+          review_type: 'chapter_attraction_review',
+          created_at: '2026-06-03T01:03:00.000Z',
+          payload: JSON.stringify({
+            chapter_attraction_review: {
+              status: 'warn',
+              label: '吸引力缺口 3',
+              score: 62,
+              weak_count: 3,
+              priority_repair: '优先修章末翻页',
+              weak_dimensions: [
+                { key: 'scene_drive', label: '场景推进', status: 'warn', score: 57, issue: '中段缺少目标、阻碍、转折和回报。' },
+                { key: 'payoff_density', label: '爽点密度', status: 'warn', score: 58, issue: '主角反制没有写成可见结果。' },
+                { key: 'page_turn', label: '章末翻页', status: 'warn', score: 42, issue: '结尾没有留下下一章必须看的问题。' },
+              ],
+            },
+          }),
+        },
+      ],
+      runRecords: [
+        {
+          id: 10,
+          run_type: 'batch_generate_prose',
+          created_at: '2026-06-03T00:00:00.000Z',
+          status: 'success',
+          input_ref: JSON.stringify({ source: 'auto_creation_safe_batch', safety_limit: 3 }),
+          output_ref: JSON.stringify({
+            total: 3,
+            success: 3,
+            failed: 0,
+            chapters: [
+              { id: 15, chapter_no: 15, title: '内门影子', status: 'success', score: 84, word_count: 3180 },
+              { id: 16, chapter_no: 16, title: '执事逼问', status: 'success', score: 85, word_count: 3090 },
+              { id: 17, chapter_no: 17, title: '阵纹余波', status: 'success', score: 86, word_count: 3021 },
+            ],
+          }),
+        },
+      ],
+    } as any)
+
+    expect(model.batchReviewQueue.status).toBe('risk')
+    expect((model.batchReviewQueue.riskRadar as any).chapterAttractionRiskCount).toBe(3)
+    expect(model.batchReviewQueue.riskRadar.signals.find(signal => signal.key === 'chapter_attraction')?.detail).toContain('吸引力')
+    expect(model.batchReviewQueue.riskRadar.repairTasks.map((task: any) => task.issue_type)).toContain('chapter_attraction_gap')
+    const attractionTask = model.batchReviewQueue.riskRadar.repairTasks.find((task: any) => task.issue_type === 'chapter_attraction_gap')
+    expect(attractionTask?.chapter_attraction_review?.weak_dimensions.map((item: any) => item.label)).toContain('章末翻页')
+    expect(attractionTask?.chapter_attraction_review?.priority_repair).toBe('优先修章末翻页')
+    expect(model.batchReviewQueue.handoff.riskLabels).toContain('吸引力')
+    expect(model.batchReviewQueue.completionDashboard.score).toBeLessThan(90)
+  })
+
+  test('holds delivered safe batch when reader trial review finds drop points in the batch', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        topStatus: {
+          ...basePlanning.topStatus,
+          future100Coverage: { ready: true, planned: 100, required: 100, missingChapters: [], label: '100/100' },
+        },
+      },
+      writing: {
+        ...baseWriting,
+        nextChapter: { ...baseWriting.nextChapter, id: 11, chapterNo: 11, title: '内门来人' },
+        chapterPlanningDesk: {
+          ...baseWriting.chapterPlanningDesk,
+          readiness: 'ready',
+          statusLabel: '本章可写',
+          scenePlanStatus: 'ready',
+          sceneCards: [{ title: '内门招揽', goal: '新势力提出条件' }],
+          recommendedPlannerAction: { key: 'confirm_plan_and_write_draft', label: '确认并生成' },
+        },
+        topStatus: {
+          ...baseWriting.topStatus,
+          nextActionLabel: '确认并生成',
+          primaryActionKey: 'confirm_plan_and_write_draft',
+        },
+        primaryActionKey: 'confirm_plan_and_write_draft',
+      },
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: { last_updated_chapter: 10 },
+      chapters: [
+        { id: 8, chapter_no: 8, title: '试炼前夜', chapter_text: '试炼前夜'.repeat(500) },
+        { id: 9, chapter_no: 9, title: '阵盘裂纹', chapter_text: '阵盘裂纹'.repeat(500) },
+        { id: 10, chapter_no: 10, title: '外门震动', chapter_text: '外门震动'.repeat(500) },
+      ],
+      reviews: [
+        { id: 101, chapter_id: 8, review_type: 'prose_quality', created_at: '2026-06-03T01:00:00.000Z', payload: JSON.stringify({ score: 84, passed: true }) },
+        { id: 102, chapter_id: 9, review_type: 'prose_quality', created_at: '2026-06-03T01:01:00.000Z', payload: JSON.stringify({ score: 85, passed: true }) },
+        { id: 103, chapter_id: 10, review_type: 'prose_quality', created_at: '2026-06-03T01:02:00.000Z', payload: JSON.stringify({ score: 86, passed: true }) },
+        {
+          id: 601,
+          review_type: 'reader_trial_review',
+          created_at: '2026-06-03T01:03:00.000Z',
+          payload: JSON.stringify({
+            report: {
+              status: 'needs_repair',
+              score: 63,
+              summary: '试读十章存在明显弃读点。',
+              quality_bar: 'qidian_10k_reader_trial_baseline',
+              drop_points: [
+                '第8章中段解释宗门派系过密，试读用户可能弃读。',
+                '第10章章末钩子弱，没有形成付费前继续阅读动力。',
+              ],
+              repair_actions: [
+                '第8章删减派系解释，改成执事现场逼问。',
+                '第10章重做章末未解决问题。',
+              ],
+              segments: [
+                { key: 'trial_10', label: '试读十章', score: 63, verdict: '第8-10章掉速。' },
+              ],
+            },
+          }),
+        },
+      ],
+      runRecords: [
+        {
+          id: 10,
+          run_type: 'batch_generate_prose',
+          created_at: '2026-06-03T00:00:00.000Z',
+          status: 'success',
+          input_ref: JSON.stringify({ source: 'auto_creation_safe_batch', safety_limit: 3 }),
+          output_ref: JSON.stringify({
+            total: 3,
+            success: 3,
+            failed: 0,
+            chapters: [
+              { id: 8, chapter_no: 8, title: '试炼前夜', status: 'success', score: 84, word_count: 3180 },
+              { id: 9, chapter_no: 9, title: '阵盘裂纹', status: 'success', score: 85, word_count: 3090 },
+              { id: 10, chapter_no: 10, title: '外门震动', status: 'success', score: 86, word_count: 3021 },
+            ],
+          }),
+        },
+      ],
+    } as any)
+
+    expect(model.batchReviewQueue.status).toBe('risk')
+    expect((model.batchReviewQueue.riskRadar as any).readerTrialRiskCount).toBe(2)
+    expect(model.batchReviewQueue.riskRadar.signals.find(signal => signal.key === 'reader_trial')?.detail).toContain('试读弃读点')
+    expect(model.batchReviewQueue.riskRadar.repairTasks.map((task: any) => task.issue_type)).toContain('reader_trial_drop_point')
+    const trialTask = model.batchReviewQueue.riskRadar.repairTasks.find((task: any) => task.issue_type === 'reader_trial_drop_point')
+    expect(trialTask?.reader_trial_review?.drop_points).toContain('第8章中段解释宗门派系过密，试读用户可能弃读。')
+    expect(trialTask?.reader_trial_review?.repair_actions).toContain('第10章重做章末未解决问题。')
+    expect(model.batchReviewQueue.handoff.riskLabels).toContain('试读')
+    expect(model.batchReviewQueue.completionDashboard.score).toBeLessThan(90)
+  })
+
+  test('holds delivered safe batch when first30 retention diagnosis is stale for opening chapters', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        first30Retention: {
+          ...basePlanning.first30Retention,
+          status: 'stale',
+          score: 76,
+          summary: '需重新诊断：前30章内容已在报告后更新。旧报告显示第4-10章试读闭环偏弱。',
+          stale: true,
+          actionKey: 'run_first30_retention',
+          risks: [{ severity: 'high', segment: '4-10', issue: '试读闭环偏弱', action: '重新运行前30章诊断' }],
+          nextActions: ['重新运行前30章诊断，确认第8-10章修复后的追读曲线。'],
+        },
+        topStatus: {
+          ...basePlanning.topStatus,
+          future100Coverage: { ready: true, planned: 100, required: 100, missingChapters: [], label: '100/100' },
+        },
+      },
+      writing: {
+        ...baseWriting,
+        nextChapter: { ...baseWriting.nextChapter, id: 11, chapterNo: 11, title: '内门来人' },
+        chapterPlanningDesk: {
+          ...baseWriting.chapterPlanningDesk,
+          readiness: 'ready',
+          statusLabel: '本章可写',
+          scenePlanStatus: 'ready',
+          sceneCards: [{ title: '内门招揽', goal: '新势力提出条件' }],
+          recommendedPlannerAction: { key: 'confirm_plan_and_write_draft', label: '确认并生成' },
+        },
+        topStatus: {
+          ...baseWriting.topStatus,
+          nextActionLabel: '确认并生成',
+          primaryActionKey: 'confirm_plan_and_write_draft',
+        },
+        primaryActionKey: 'confirm_plan_and_write_draft',
+      },
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: { last_updated_chapter: 10 },
+      chapters: [
+        { id: 8, chapter_no: 8, title: '试炼前夜', updated_at: '2026-06-03T02:00:00.000Z', chapter_text: '试炼前夜'.repeat(500) },
+        { id: 9, chapter_no: 9, title: '阵盘裂纹', updated_at: '2026-06-03T02:01:00.000Z', chapter_text: '阵盘裂纹'.repeat(500) },
+        { id: 10, chapter_no: 10, title: '外门震动', updated_at: '2026-06-03T02:02:00.000Z', chapter_text: '外门震动'.repeat(500) },
+      ],
+      reviews: [
+        { id: 101, chapter_id: 8, review_type: 'prose_quality', created_at: '2026-06-03T03:00:00.000Z', payload: JSON.stringify({ score: 84, passed: true }) },
+        { id: 102, chapter_id: 9, review_type: 'prose_quality', created_at: '2026-06-03T03:01:00.000Z', payload: JSON.stringify({ score: 85, passed: true }) },
+        { id: 103, chapter_id: 10, review_type: 'prose_quality', created_at: '2026-06-03T03:02:00.000Z', payload: JSON.stringify({ score: 86, passed: true }) },
+      ],
+      runRecords: [
+        {
+          id: 10,
+          run_type: 'batch_generate_prose',
+          created_at: '2026-06-03T00:00:00.000Z',
+          status: 'success',
+          input_ref: JSON.stringify({ source: 'auto_creation_safe_batch', safety_limit: 3 }),
+          output_ref: JSON.stringify({
+            total: 3,
+            success: 3,
+            failed: 0,
+            chapters: [
+              { id: 8, chapter_no: 8, title: '试炼前夜', status: 'success', score: 84, word_count: 3180 },
+              { id: 9, chapter_no: 9, title: '阵盘裂纹', status: 'success', score: 85, word_count: 3090 },
+              { id: 10, chapter_no: 10, title: '外门震动', status: 'success', score: 86, word_count: 3021 },
+            ],
+          }),
+        },
+      ],
+    } as any)
+
+    expect(model.batchReviewQueue.status).toBe('risk')
+    expect((model.batchReviewQueue.riskRadar as any).first30RetentionRiskCount).toBe(1)
+    expect(model.batchReviewQueue.riskRadar.signals.find(signal => signal.key === 'first30_retention')?.detail).toContain('需重新诊断')
+    expect(model.batchReviewQueue.riskRadar.repairTasks.map((task: any) => task.issue_type)).toContain('first30_retention_recheck')
+    const retentionTask = model.batchReviewQueue.riskRadar.repairTasks.find((task: any) => task.issue_type === 'first30_retention_recheck')
+    expect(retentionTask?.action_key).toBe('run_first30_retention')
+    expect(retentionTask?.first30_retention?.summary).toContain('前30章内容已在报告后更新')
+    expect(model.batchReviewQueue.handoff.riskLabels).toContain('前30章')
+    expect(model.batchReviewQueue.completionDashboard.score).toBeLessThan(90)
+  })
+
+  test('ignores old reader trial drop points when the safe batch is outside the trial window', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        topStatus: {
+          ...basePlanning.topStatus,
+          currentChapterLabel: '第43章',
+          future100Coverage: { ready: true, planned: 100, required: 100, missingChapters: [], label: '100/100' },
+        },
+      },
+      writing: {
+        ...baseWriting,
+        nextChapter: { ...baseWriting.nextChapter, id: 43, chapterNo: 43, title: '内门复盘' },
+        chapterPlanningDesk: {
+          ...baseWriting.chapterPlanningDesk,
+          readiness: 'ready',
+          statusLabel: '本章可写',
+          scenePlanStatus: 'ready',
+          sceneCards: [{ title: '内门复盘', goal: '结算阶段回报' }],
+          recommendedPlannerAction: { key: 'confirm_plan_and_write_draft', label: '确认并生成' },
+        },
+        topStatus: {
+          ...baseWriting.topStatus,
+          nextActionLabel: '确认并生成',
+          primaryActionKey: 'confirm_plan_and_write_draft',
+        },
+        primaryActionKey: 'confirm_plan_and_write_draft',
+      },
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: { last_updated_chapter: 42 },
+      chapters: [
+        { id: 40, chapter_no: 40, title: '内门暗潮', chapter_text: '内门暗潮'.repeat(500) },
+        { id: 41, chapter_no: 41, title: '长老下注', chapter_text: '长老下注'.repeat(500) },
+        { id: 42, chapter_no: 42, title: '榜单改写', chapter_text: '榜单改写'.repeat(500) },
+      ],
+      reviews: [
+        { id: 101, chapter_id: 40, review_type: 'prose_quality', created_at: '2026-06-03T01:00:00.000Z', payload: JSON.stringify({ score: 84, passed: true }) },
+        { id: 102, chapter_id: 41, review_type: 'prose_quality', created_at: '2026-06-03T01:01:00.000Z', payload: JSON.stringify({ score: 85, passed: true }) },
+        { id: 103, chapter_id: 42, review_type: 'prose_quality', created_at: '2026-06-03T01:02:00.000Z', payload: JSON.stringify({ score: 86, passed: true }) },
+        {
+          id: 601,
+          review_type: 'reader_trial_review',
+          created_at: '2026-06-03T01:03:00.000Z',
+          payload: JSON.stringify({
+            report: {
+              status: 'needs_repair',
+              score: 63,
+              summary: '试读十章存在明显弃读点。',
+              drop_points: [
+                '第8章中段解释宗门派系过密，试读用户可能弃读。',
+                '第10章章末钩子弱，没有形成付费前继续阅读动力。',
+              ],
+              repair_actions: ['第8章删减派系解释。', '第10章重做章末未解决问题。'],
+            },
+          }),
+        },
+      ],
+      runRecords: [
+        {
+          id: 10,
+          run_type: 'batch_generate_prose',
+          created_at: '2026-06-03T00:00:00.000Z',
+          status: 'success',
+          input_ref: JSON.stringify({ source: 'auto_creation_safe_batch', safety_limit: 3 }),
+          output_ref: JSON.stringify({
+            total: 3,
+            success: 3,
+            failed: 0,
+            chapters: [
+              { id: 40, chapter_no: 40, title: '内门暗潮', status: 'success', score: 84, word_count: 3180 },
+              { id: 41, chapter_no: 41, title: '长老下注', status: 'success', score: 85, word_count: 3090 },
+              { id: 42, chapter_no: 42, title: '榜单改写', status: 'success', score: 86, word_count: 3021 },
+            ],
+          }),
+        },
+      ],
+    } as any)
+
+    expect(model.batchReviewQueue.status).toBe('done')
+    expect((model.batchReviewQueue.riskRadar as any).readerTrialRiskCount).toBe(0)
+    expect(model.batchReviewQueue.riskRadar.signals.find(signal => signal.key === 'reader_trial')?.status).toBe('ok')
+    expect(model.batchReviewQueue.riskRadar.repairTasks.map((task: any) => task.issue_type)).not.toContain('reader_trial_drop_point')
+  })
+
   test('holds delivered safe batch when reader pull and innovation execution are missed', () => {
     const model = buildAutoCreationDirectorModel({
       planning: {
@@ -3451,6 +5568,109 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(model.batchReviewQueue.completionDashboard.score).toBeGreaterThanOrEqual(90)
     expect(model.batchReviewQueue.completionDashboard.nextAction.key).toBe('start_safe_batch_generation')
     expect(model.batchReviewQueue.completionDashboard.metrics.every(metric => metric.status === 'ok')).toBe(true)
+  })
+
+  test('releases chapter handoff batch risk after the handoff repair is resolved and rechecked', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        topStatus: {
+          ...basePlanning.topStatus,
+          future100Coverage: { ready: true, planned: 100, required: 100, missingChapters: [], label: '100/100' },
+        },
+      },
+      writing: {
+        ...baseWriting,
+        nextChapter: { ...baseWriting.nextChapter, id: 11, chapterNo: 11, title: '内门来人' },
+        chapterPlanningDesk: {
+          ...baseWriting.chapterPlanningDesk,
+          readiness: 'ready',
+          statusLabel: '本章可写',
+          scenePlanStatus: 'ready',
+          sceneCards: [{ title: '内门招揽', goal: '新势力提出条件' }],
+          recommendedPlannerAction: { key: 'confirm_plan_and_write_draft', label: '确认并生成' },
+        },
+        topStatus: {
+          ...baseWriting.topStatus,
+          nextActionLabel: '确认并生成',
+          primaryActionKey: 'confirm_plan_and_write_draft',
+        },
+        primaryActionKey: 'confirm_plan_and_write_draft',
+      },
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: { last_updated_chapter: 10 },
+      chapters: [
+        { id: 8, chapter_no: 8, title: '试炼前夜', chapter_text: '正文'.repeat(1600) },
+        { id: 9, chapter_no: 9, title: '阵盘裂纹', chapter_text: '正文'.repeat(1550) },
+        { id: 10, chapter_no: 10, title: '外门震动', chapter_text: '正文'.repeat(1510) },
+      ],
+      reviews: [
+        { id: 101, chapter_id: 8, review_type: 'prose_quality', created_at: '2026-06-03T01:00:00.000Z', payload: JSON.stringify({ score: 84, passed: true }) },
+        { id: 102, chapter_id: 9, review_type: 'prose_quality', created_at: '2026-06-03T01:01:00.000Z', payload: JSON.stringify({ score: 85, passed: true }) },
+        { id: 103, chapter_id: 10, review_type: 'prose_quality', created_at: '2026-06-03T01:02:00.000Z', payload: JSON.stringify({ score: 86, passed: true }) },
+        {
+          id: 301,
+          chapter_id: 10,
+          review_type: 'reader_expectation_sync',
+          created_at: '2026-06-03T01:03:00.000Z',
+          payload: JSON.stringify({
+            reader_expectation_sync: {
+              status: 'warn',
+              missed_count: 1,
+              missed: [
+                {
+                  key: 'opening_handoff',
+                  label: '上一章承接',
+                  match_scope: 'opening',
+                  text: '阵盘第二道裂纹必须在开篇造成可见压力。',
+                },
+              ],
+            },
+          }),
+        },
+        { id: 401, chapter_id: 10, review_type: 'prose_quality', created_at: '2026-06-03T02:10:00.000Z', payload: JSON.stringify({ score: 88, passed: true }) },
+      ],
+      runRecords: [
+        {
+          id: 10,
+          run_type: 'batch_generate_prose',
+          created_at: '2026-06-03T00:00:00.000Z',
+          status: 'success',
+          input_ref: JSON.stringify({ source: 'auto_creation_safe_batch', safety_limit: 3 }),
+          output_ref: JSON.stringify({
+            total: 3,
+            success: 3,
+            failed: 0,
+            chapters: [
+              { id: 8, chapter_no: 8, title: '试炼前夜', status: 'success', score: 84, word_count: 3180 },
+              { id: 9, chapter_no: 9, title: '阵盘裂纹', status: 'success', score: 85, word_count: 3090 },
+              { id: 10, chapter_no: 10, title: '外门震动', status: 'success', score: 86, word_count: 3021 },
+            ],
+          }),
+        },
+        {
+          id: 11,
+          run_type: 'longform_production_repair',
+          created_at: '2026-06-03T02:00:00.000Z',
+          status: 'completed',
+          input_ref: JSON.stringify({ source: 'auto_creation_safe_batch_risk', batch_created_at: '2026-06-03T00:00:00.000Z' }),
+          output_ref: JSON.stringify({
+            tasks: [
+              { task_type: 'repair_quality', issue_type: 'chapter_handoff_missed', task_status: 'resolved', chapter_id: 10, chapter_no: 10 },
+            ],
+          }),
+        },
+      ],
+    } as any)
+
+    expect(model.batchReviewQueue.status).toBe('done')
+    expect(model.batchReviewQueue.riskRadar.status).toBe('ok')
+    expect((model.batchReviewQueue.riskRadar as any).handoffRiskCount).toBe(0)
+    expect((model.batchReviewQueue.riskRadar as any).readerPullRiskCount).toBe(0)
+    expect(model.batchReviewQueue.riskRadar.repairTasks).toHaveLength(0)
+    expect(model.batchReviewQueue.handoff.status).not.toBe('repair_risks')
+    expect(model.batchReviewQueue.nextAction.key).not.toBe('create_safe_batch_risk_repair')
   })
 
   test('releases underlying batch risks after composite batch brief repairs are resolved and rechecked', () => {

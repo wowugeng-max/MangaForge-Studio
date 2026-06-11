@@ -386,6 +386,217 @@ describe('ConfiguredProviderAdapter config-driven routes', () => {
     expect(capturedBody.tool_choice).toBeUndefined()
   })
 
+  test('sends AnyRouter Claude Code 1M models through the configured top gateway', async () => {
+    let capturedUrl = ''
+    let capturedHeaders: Record<string, string> = {}
+    let capturedBody: any = null
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      capturedUrl = String(url)
+      capturedHeaders = Object.fromEntries(new Headers(init?.headers || {}).entries())
+      capturedBody = JSON.parse(String(init?.body || '{}'))
+      return new Response(JSON.stringify({
+        content: [{ type: 'text', text: 'OK' }],
+        stop_reason: 'end_turn',
+      }), { status: 200 })
+    }) as typeof fetch
+
+    const adapter = new ConfiguredProviderAdapter(
+      {
+        id: 'any',
+        display_name: 'AnyRouter',
+        service_type: 'llm',
+        api_format: 'claude_code',
+        auth_type: 'bearer',
+        response_mode: 'auto',
+        supported_modalities: ['chat'],
+        default_base_url: 'https://anyrouter.top',
+        is_active: true,
+        endpoints: {},
+        custom_headers: {},
+      },
+      {
+        id: 1,
+        provider: 'any',
+        key: 'claude-key',
+        description: '',
+        is_active: true,
+        quota_total: 0,
+        quota_used: 0,
+        tags: [],
+      },
+      {
+        id: 1,
+        api_key_id: 1,
+        provider: 'any',
+        api_format: 'claude_code',
+        display_name: 'Claude Opus 1M',
+        model_name: 'claude-opus-4-8[1m]',
+        capabilities: { chat: true },
+        health_status: 'unknown',
+        is_favorite: false,
+        is_manual: false,
+        context_ui_params: {
+          context_window: 1_000_000,
+          max_context: 1_000_000,
+          context_window_preset: '1m',
+        },
+      },
+    )
+
+    await adapter.execute({
+      model: 'balanced',
+      messages: [{ role: 'user', content: 'Return exactly OK.' }],
+      temperature: 0.2,
+      max_tokens: 32,
+      response_format: 'text',
+    })
+
+    expect(capturedUrl).toBe('https://anyrouter.top/v1/messages')
+    expect(capturedHeaders.authorization).toBe('Bearer claude-key')
+    expect(capturedHeaders['x-api-key']).toBeUndefined()
+    expect(capturedHeaders['anthropic-beta']).toContain('claude-code-20250219')
+    expect(capturedHeaders['anthropic-beta']).toContain('context-1m')
+    expect(capturedHeaders['anthropic-beta']).not.toContain('interleaved-thinking')
+    expect(capturedHeaders['x-app']).toBeUndefined()
+    expect(capturedHeaders['anthropic-dangerous-direct-browser-access']).toBeUndefined()
+    expect(capturedHeaders['x-stainless-lang']).toBeUndefined()
+    expect(capturedBody.model).toBe('claude-opus-4-8[1m]')
+    expect(capturedBody.anthropic_beta).toBeUndefined()
+  })
+
+  test('keeps official AnyRouter dev API Claude model ids in anthropic catalog format', async () => {
+    let capturedUrl = ''
+    let capturedBody: any = null
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      capturedUrl = String(url)
+      capturedBody = JSON.parse(String(init?.body || '{}'))
+      return new Response(JSON.stringify({
+        content: [{ type: 'text', text: 'OK' }],
+        stop_reason: 'end_turn',
+      }), { status: 200 })
+    }) as typeof fetch
+
+    const adapter = new ConfiguredProviderAdapter(
+      {
+        id: 'any',
+        display_name: 'AnyRouter',
+        service_type: 'llm',
+        api_format: 'claude_code',
+        auth_type: 'bearer',
+        response_mode: 'auto',
+        supported_modalities: ['chat'],
+        default_base_url: 'https://anyrouter.dev/api',
+        is_active: true,
+        endpoints: {},
+        custom_headers: {},
+      },
+      {
+        id: 1,
+        provider: 'any',
+        key: 'claude-key',
+        description: '',
+        is_active: true,
+        quota_total: 0,
+        quota_used: 0,
+        tags: [],
+      },
+      {
+        id: 1,
+        api_key_id: 1,
+        provider: 'any',
+        api_format: 'claude_code',
+        display_name: 'Claude Opus 1M',
+        model_name: 'claude-opus-4-8[1m]',
+        capabilities: { chat: true },
+        health_status: 'unknown',
+        is_favorite: false,
+        is_manual: false,
+        context_ui_params: {
+          context_window: 1_000_000,
+          max_context: 1_000_000,
+          context_window_preset: '1m',
+        },
+      },
+    )
+
+    await adapter.execute({
+      model: 'balanced',
+      messages: [{ role: 'user', content: 'Return exactly OK.' }],
+      temperature: 0.2,
+      max_tokens: 32,
+      response_format: 'text',
+    })
+
+    expect(capturedUrl).toBe('https://anyrouter.dev/api/v1/messages')
+    expect(capturedBody.model).toBe('anthropic/claude-opus-4.8')
+  })
+
+  test('keeps AnyRouter Claude Authorization after custom route headers are merged', async () => {
+    let capturedHeaders: Record<string, string> = {}
+    globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+      capturedHeaders = Object.fromEntries(new Headers(init?.headers || {}).entries())
+      return new Response(JSON.stringify({
+        content: [{ type: 'text', text: 'OK' }],
+        stop_reason: 'end_turn',
+      }), { status: 200 })
+    }) as typeof fetch
+
+    const adapter = new ConfiguredProviderAdapter(
+      {
+        id: 'any',
+        display_name: 'AnyRouter',
+        service_type: 'llm',
+        api_format: 'claude_code',
+        auth_type: 'bearer',
+        response_mode: 'auto',
+        supported_modalities: ['chat'],
+        default_base_url: 'https://anyrouter.top',
+        is_active: true,
+        endpoints: {
+          messages: {
+            url: '/v1/messages',
+            headers: { Authorization: '', 'x-api-key': '' },
+          },
+        } as any,
+        custom_headers: { Authorization: '' },
+      },
+      {
+        id: 1,
+        provider: 'any',
+        key: 'claude-key',
+        description: '',
+        is_active: true,
+        quota_total: 0,
+        quota_used: 0,
+        tags: [],
+      },
+      {
+        id: 1,
+        api_key_id: 1,
+        provider: 'any',
+        api_format: 'claude_code',
+        display_name: 'Claude Opus 1M',
+        model_name: 'claude-opus-4-8[1m]',
+        capabilities: { chat: true },
+        health_status: 'unknown',
+        is_favorite: false,
+        is_manual: false,
+        context_ui_params: {},
+      },
+    )
+
+    await adapter.execute({
+      model: 'balanced',
+      messages: [{ role: 'user', content: 'Return exactly OK.' }],
+      temperature: 0.2,
+      max_tokens: 32,
+      response_format: 'text',
+    })
+
+    expect(capturedHeaders.authorization).toBe('Bearer claude-key')
+    expect(capturedHeaders['x-api-key']).toBeUndefined()
+  })
+
   test('parses Anthropic content blocks as response text in configured adapter', async () => {
     globalThis.fetch = (async () => new Response(JSON.stringify({
       content: [

@@ -1254,6 +1254,14 @@ export function WorkspaceCenter({
                       <strong>{chapterHandoffDesk.nextOpeningObligations.join('；') || '承接上一章最后一幕'}</strong>
                     </div>
                   </Tooltip>
+                  {chapterHandoffDesk.deliveryRiskCarryOver && (
+                    <Tooltip title={chapterHandoffDesk.deliveryRiskCarryOver.items.join('；') || '无交稿风险'}>
+                      <div className="novel-chapter-handoff-risk">
+                        <span>交稿风险</span>
+                        <strong>{chapterHandoffDesk.deliveryRiskCarryOver.label} · {chapterHandoffDesk.deliveryRiskCarryOver.priorityLabel}</strong>
+                      </div>
+                    </Tooltip>
+                  )}
                 </div>
               </div>
               <Button
@@ -1298,6 +1306,34 @@ export function WorkspaceCenter({
                   <strong>短剧场面：{draftBriefSummary.briefFields.retentionShortDramaScene || '需要可视化冲突场面'}</strong>
                   <strong>章末追读：{draftBriefSummary.briefFields.retentionEndingQuestion || draftBriefSummary.briefFields.endingHook || '压到最后一幕'}</strong>
                 </div>
+                {(draftBriefSummary.briefFields.readerDropRiskStatus || draftBriefSummary.briefFields.readerDropRisks || draftBriefSummary.briefFields.readerDropOpening) && (
+                  <div className="novel-draft-brief-reader-drop">
+                    <span>弃读预警</span>
+                    <strong>{draftBriefSummary.briefFields.readerDropRiskStatus || '起点1万均订试读基准'}</strong>
+                    <strong>风险：{draftBriefSummary.briefFields.readerDropRisks || '无明确弃读点'}</strong>
+                    <strong>开篇防弃读：{draftBriefSummary.briefFields.readerDropOpening || draftBriefSummary.briefFields.retentionOpeningHook || '前300字先给现场压力'}</strong>
+                    <strong>中段防掉速：{draftBriefSummary.briefFields.readerDropMiddle || '减少设定解释，用行动推进'}</strong>
+                    <strong>章末防流失：{draftBriefSummary.briefFields.readerDropEnding || draftBriefSummary.briefFields.retentionEndingQuestion || '留下下一章必须看的问题'}</strong>
+                  </div>
+                )}
+                {(draftBriefSummary.briefFields.storyDriveChoice || draftBriefSummary.briefFields.storyPressureSources || draftBriefSummary.briefFields.serialRhythmPayoffInterval || draftBriefSummary.briefFields.pageTurnQuestion) && (
+                  <div className="novel-draft-brief-story-pull">
+                    <span>强故事节奏</span>
+                    <strong>压力源：{draftBriefSummary.briefFields.storyPressureSources || draftBriefSummary.briefFields.storyDriveObstacle || '本章必须有外部阻碍'}</strong>
+                    <strong>主角选择：{draftBriefSummary.briefFields.storyDriveChoice || '必须写成主动选择'}</strong>
+                    <strong>选择代价：{draftBriefSummary.briefFields.storyDriveCost || draftBriefSummary.briefFields.storyPressureStakes || '选择必须有代价'}</strong>
+                    <strong>回报密度：{draftBriefSummary.briefFields.serialRhythmPayoffInterval || '每800-1200字给一次回报'}</strong>
+                    <strong>场景回报：{draftBriefSummary.briefFields.serialRhythmScenePayoffs || '每个场景有目标、转折和回报'}</strong>
+                    <strong>章末翻页：{draftBriefSummary.briefFields.pageTurnQuestion || draftBriefSummary.briefFields.pageTurnPull || draftBriefSummary.briefFields.retentionEndingQuestion || '最后300字压追读问题'}</strong>
+                    {(draftBriefSummary.briefFields.storyDriveChange || draftBriefSummary.briefFields.pageTurnTrigger || draftBriefSummary.briefFields.pageTurnForbidden) && (
+                      <strong>边界：{[
+                        draftBriefSummary.briefFields.storyDriveChange ? `状态变化：${draftBriefSummary.briefFields.storyDriveChange}` : '',
+                        draftBriefSummary.briefFields.pageTurnTrigger ? `触发：${draftBriefSummary.briefFields.pageTurnTrigger}` : '',
+                        draftBriefSummary.briefFields.pageTurnForbidden ? `禁提前解答：${draftBriefSummary.briefFields.pageTurnForbidden}` : '',
+                      ].filter(Boolean).join('；')}</strong>
+                    )}
+                  </div>
+                )}
                 {(draftBriefSummary.briefFields.longformBattleSummary || draftBriefSummary.briefFields.longformBattleRisks || draftBriefSummary.briefFields.longformBattleLaneRequirements) && (
                   <div className="novel-draft-brief-battle">
                     <span>长篇作战承接</span>
@@ -1329,6 +1365,15 @@ export function WorkspaceCenter({
                     <strong>继续悬念：{draftBriefSummary.briefFields.handoffKeepAlive || '无跨章悬念'}</strong>
                   </div>
                 )}
+                {(draftBriefSummary.briefFields.deliveryRiskLabel || draftBriefSummary.briefFields.deliveryRiskItems || draftBriefSummary.briefFields.deliveryRiskActions) && (
+                  <div className="novel-draft-brief-delivery-risk">
+                    <span>交稿风险承接</span>
+                    <strong>{draftBriefSummary.briefFields.deliveryRiskLabel || '上一章待复盘'}</strong>
+                    <strong>优先：{draftBriefSummary.briefFields.deliveryRiskPriority || '先处理最高风险'}</strong>
+                    <strong>风险：{draftBriefSummary.briefFields.deliveryRiskItems || '无明确残留风险'}</strong>
+                    <strong>动作：{draftBriefSummary.briefFields.deliveryRiskActions || '写成开篇承接、场景推进或章末钩子'}</strong>
+                  </div>
+                )}
                 {(draftBriefSummary.briefFields.expectationMustDeliver || draftBriefSummary.briefFields.expectationKeepAlive) && (
                   <div className="novel-draft-brief-expectations">
                     <span>读者期待账本</span>
@@ -1356,6 +1401,20 @@ export function WorkspaceCenter({
                     <strong>{draftBriefSummary.briefFields.first30RetentionSegment || '当前章'}</strong>
                     <strong>风险：{draftBriefSummary.briefFields.first30RetentionFlags || draftBriefSummary.briefFields.first30RetentionFocus || '无明确风险'}</strong>
                     <strong>动作：{draftBriefSummary.briefFields.first30RetentionActions || '按追读雷达补强'}</strong>
+                  </div>
+                )}
+                {(draftBriefSummary.briefFields.recentFatigueRange || draftBriefSummary.briefFields.recentFatigueRisks || draftBriefSummary.briefFields.recentFatigueConflict) && (
+                  <div className="novel-draft-brief-recent-fatigue">
+                    <span>近10章疲劳规避</span>
+                    <strong>{draftBriefSummary.briefFields.recentFatigueRange || '近10章'}</strong>
+                    <strong>风险：{draftBriefSummary.briefFields.recentFatigueRisks || '无明确疲劳风险'}</strong>
+                    <strong>冲突换源：{draftBriefSummary.briefFields.recentFatigueConflict || '更换压迫来源'}</strong>
+                    <strong>回报换形：{draftBriefSummary.briefFields.recentFatiguePayoff || '更换回报形态'}</strong>
+                    <strong>钩子换题：{draftBriefSummary.briefFields.recentFatigueHook || '更换章末问题'}</strong>
+                    <strong>场面新鲜：{draftBriefSummary.briefFields.recentFatigueScene || '补新可视化场面'}</strong>
+                    {draftBriefSummary.briefFields.recentFatigueActions && (
+                      <strong>动作：{draftBriefSummary.briefFields.recentFatigueActions}</strong>
+                    )}
                   </div>
                 )}
                 <div className="novel-draft-brief-innovation">
@@ -1402,6 +1461,23 @@ export function WorkspaceCenter({
                     <strong>小高潮：{draftBriefSummary.briefFields.storyUnitPayoff || '后续章节兑现，不在本章抢跑'}</strong>
                     <strong>出单元钩子：{draftBriefSummary.briefFields.storyUnitExitHook || '保留追读问题'}</strong>
                     <strong>禁抢跑：{draftBriefSummary.briefFields.storyUnitForbidden || '不得提前消费后段爆点'}</strong>
+                  </div>
+                )}
+                {(draftBriefSummary.briefFields.volumeClimaxRange || draftBriefSummary.briefFields.volumeClimaxRole || draftBriefSummary.briefFields.volumeClimaxGoal) && (
+                  <div className="novel-draft-brief-volume-climax">
+                    <span>卷级爆点预算</span>
+                    <strong>{draftBriefSummary.briefFields.volumeClimaxRange || '当前卷爆点'}</strong>
+                    <strong>本章爆点职责：{draftBriefSummary.briefFields.volumeClimaxRole || '承接当前卷节奏'}</strong>
+                    <strong>卷目标：{draftBriefSummary.briefFields.volumeClimaxGoal || '服务当前卷主线推进'}</strong>
+                    <strong>高潮承诺：{draftBriefSummary.briefFields.volumeClimaxPromise || '本章必须给阶段性回报'}</strong>
+                    <strong>必须兑现：{draftBriefSummary.briefFields.volumeClimaxRequiredBeats || '按场景卡兑现本章爆点'}</strong>
+                    <strong>禁提前消费：{draftBriefSummary.briefFields.volumeClimaxForbidden || '不得提前揭穿卷末爆点'}</strong>
+                    {draftBriefSummary.briefFields.volumeClimaxNearbyBeats && (
+                      <strong>邻近爆点：{draftBriefSummary.briefFields.volumeClimaxNearbyBeats}</strong>
+                    )}
+                    {draftBriefSummary.briefFields.volumeClimaxNextActions && (
+                      <strong>动作：{draftBriefSummary.briefFields.volumeClimaxNextActions}</strong>
+                    )}
                   </div>
                 )}
                 {(draftBriefSummary.briefFields.batchGoal || draftBriefSummary.briefFields.batchCurrentRole) && (

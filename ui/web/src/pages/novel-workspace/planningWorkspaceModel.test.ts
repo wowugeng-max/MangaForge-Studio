@@ -612,6 +612,7 @@ describe('buildPlanningWorkspaceModel', () => {
       outlines,
       chapters,
       activeChapter: chapters[6],
+      settingEntities: storylineSettings,
       reviews: [
         {
           id: 91,
@@ -978,6 +979,72 @@ describe('buildPlanningWorkspaceModel', () => {
     expect(model.longformRhythm.nextActions).toContain('先处理核心偏移、回报欠账和剧情线债务，再连续生成下一批章节。')
   })
 
+  test('longform rhythm and battle desk keep unresolved chapter drift when another chapter is healthy', () => {
+    const model = buildPlanningWorkspaceModel({
+      selectedProject: project,
+      outlines,
+      chapters,
+      activeChapter: chapters[6],
+      settingEntities: storylineSettings,
+      reviews: [
+        first30Review({
+          status: 'ok',
+          report: {
+            status: 'ready',
+            score: 86,
+            summary: '前30章留存达标。',
+            segments: [],
+            chapter_cards: [],
+            risks: [],
+            next_actions: [],
+          },
+        }),
+        coreDriftReview({
+          id: 3051,
+          created_at: '2026-06-04T11:00:00.000Z',
+          record: {
+            payload: JSON.stringify({
+              chapter_id: 5,
+              chapter_no: 5,
+              core_drift: {
+                status: 'warn',
+                score: 64,
+                label: '核心偏移 1',
+                drift_risks: ['第5章临时支线压过阵法秩序主线'],
+              },
+            }),
+          },
+        }),
+        coreDriftReview({
+          id: 3052,
+          status: 'ok',
+          created_at: '2026-06-04T11:20:00.000Z',
+          record: {
+            payload: JSON.stringify({
+              chapter_id: 6,
+              chapter_no: 6,
+              core_drift: {
+                status: 'ok',
+                score: 90,
+                label: '核心稳定',
+                drift_risks: [],
+                risks: [],
+              },
+            }),
+          },
+        }),
+      ],
+    })
+
+    const coreSignal = model.longformRhythm.signals.find(item => item.key === 'core')
+    const coreLane = model.longformBattleDesk.lanes.find(item => item.key === 'story_core')
+
+    expect(coreSignal?.status).toBe('warn')
+    expect(coreSignal?.detail).toContain('核心偏移')
+    expect(coreLane?.status).toBe('warn')
+    expect(coreLane?.detail).toContain('核心偏移')
+  })
+
   test('builds a longform battle desk for daily serial decisions', () => {
     const model = buildPlanningWorkspaceModel({
       selectedProject: project,
@@ -1100,6 +1167,189 @@ describe('buildPlanningWorkspaceModel', () => {
     expect(model.governanceHub.checkpoints.find(item => item.key === 'asset_intake')?.detail).toContain('2 个新资产')
   })
 
+  test('routes governance hub to delivery repair for attraction and benchmark risks', () => {
+    const model = buildPlanningWorkspaceModel({
+      selectedProject: project,
+      outlines,
+      chapters,
+      activeChapter: chapters[6],
+      reviews: [
+        first30Review({
+          status: 'ok',
+          report: {
+            status: 'ready',
+            score: 86,
+            summary: '前30章留存达标。',
+            segments: [],
+            chapter_cards: [],
+            risks: [],
+            next_actions: [],
+          },
+        }),
+        {
+          id: 9101,
+          chapter_id: 7,
+          review_type: 'chapter_attraction_review',
+          created_at: '2026-06-04T11:00:00.000Z',
+          payload: JSON.stringify({
+            chapter_id: 7,
+            chapter_no: 7,
+            chapter_attraction_review: {
+              status: 'warn',
+              score: 62,
+              weak_count: 2,
+              weak_dimensions: [
+                { label: '开篇钩子', status: 'warn', issue: '第一屏没有现场危险' },
+                { label: '章末翻页', status: 'warn', issue: '结尾没有下一章必须看的问题' },
+              ],
+            },
+          }),
+        },
+        {
+          id: 9102,
+          chapter_id: 7,
+          review_type: 'chapter_benchmark_sync',
+          created_at: '2026-06-04T11:01:00.000Z',
+          payload: JSON.stringify({
+            chapter_id: 7,
+            chapter_no: 7,
+            chapter_benchmark_sync: {
+              status: 'warn',
+              score: 58,
+              missed_count: 2,
+              missed: [
+                { label: '爽点兑现', text: '主角反制没有形成可见回报' },
+                { label: '场景节拍', text: '中段目标、阻碍、转折不清' },
+              ],
+            },
+          }),
+        },
+      ],
+    })
+
+    const deliveryCheckpoint = model.governanceHub.checkpoints.find(item => item.key === 'delivery_risk')
+
+    expect(model.governanceHub.primaryAction.key).toBe('create_delivery_risk_repair')
+    expect(deliveryCheckpoint?.status).toBe('warn')
+    expect(deliveryCheckpoint?.count).toBeGreaterThanOrEqual(4)
+    expect(deliveryCheckpoint?.detail).toContain('吸引力')
+    expect(deliveryCheckpoint?.detail).toContain('标杆章')
+  })
+
+  test('governance hub keeps unresolved chapter risks when a later chapter review is healthy', () => {
+    const model = buildPlanningWorkspaceModel({
+      selectedProject: project,
+      outlines,
+      chapters,
+      activeChapter: chapters[6],
+      reviews: [
+        first30Review({
+          status: 'ok',
+          report: {
+            status: 'ready',
+            score: 86,
+            summary: '前30章留存达标。',
+            segments: [],
+            chapter_cards: [],
+            risks: [],
+            next_actions: [],
+          },
+        }),
+        {
+          id: 9121,
+          chapter_id: 5,
+          review_type: 'chapter_attraction_review',
+          created_at: '2026-06-04T11:00:00.000Z',
+          payload: JSON.stringify({
+            chapter_id: 5,
+            chapter_no: 5,
+            chapter_attraction_review: {
+              status: 'warn',
+              score: 61,
+              weak_count: 2,
+              weak_dimensions: [
+                { label: '开篇钩子', status: 'warn', issue: '开篇没有即时问题' },
+                { label: '章末翻页', status: 'warn', issue: '结尾缺少下一章驱动力' },
+              ],
+            },
+          }),
+        },
+        {
+          id: 9122,
+          chapter_id: 6,
+          review_type: 'chapter_attraction_review',
+          created_at: '2026-06-04T11:20:00.000Z',
+          payload: JSON.stringify({
+            chapter_id: 6,
+            chapter_no: 6,
+            chapter_attraction_review: {
+              status: 'ok',
+              score: 88,
+              weak_count: 0,
+              weak_dimensions: [],
+              summary: '第6章吸引力达标。',
+            },
+          }),
+        },
+      ],
+    })
+
+    const deliveryCheckpoint = model.governanceHub.checkpoints.find(item => item.key === 'delivery_risk')
+
+    expect(model.governanceHub.primaryAction.key).toBe('create_delivery_risk_repair')
+    expect(deliveryCheckpoint?.status).toBe('warn')
+    expect(deliveryCheckpoint?.count).toBeGreaterThanOrEqual(2)
+    expect(deliveryCheckpoint?.detail).toContain('吸引力')
+  })
+
+  test('governance hub treats style copy risk as delivery risk even when style beats are present', () => {
+    const model = buildPlanningWorkspaceModel({
+      selectedProject: project,
+      outlines,
+      chapters,
+      activeChapter: chapters[6],
+      reviews: [
+        first30Review({
+          status: 'ok',
+          report: {
+            status: 'ready',
+            score: 86,
+            summary: '前30章留存达标。',
+            segments: [],
+            chapter_cards: [],
+            risks: [],
+            next_actions: [],
+          },
+        }),
+        {
+          id: 9131,
+          chapter_id: 7,
+          review_type: 'style_sample_sync',
+          created_at: '2026-06-04T11:00:00.000Z',
+          payload: JSON.stringify({
+            chapter_id: 7,
+            chapter_no: 7,
+            style_sample_sync: {
+              status: 'warn',
+              score: 72,
+              missed_count: 0,
+              missed: [],
+              copy_risk_count: 1,
+              copied_phrases: ['天塌下来有高个子顶着'],
+            },
+          }),
+        },
+      ],
+    })
+
+    const deliveryCheckpoint = model.governanceHub.checkpoints.find(item => item.key === 'delivery_risk')
+
+    expect(model.governanceHub.primaryAction.key).toBe('create_delivery_risk_repair')
+    expect(deliveryCheckpoint?.status).toBe('warn')
+    expect(deliveryCheckpoint?.count).toBeGreaterThanOrEqual(1)
+    expect(deliveryCheckpoint?.detail).toContain('风格')
+  })
+
   test('builds a serial release desk from daily update target and publishable backlog', () => {
     const serialProject = {
       ...project,
@@ -1207,6 +1457,168 @@ describe('buildPlanningWorkspaceModel', () => {
     expect(model.serialReleaseDesk.primaryAction.key).toBe('open_quality_revision')
     expect(model.serialReleaseDesk.releaseWindow.slice(0, 2).map(item => item.status)).toEqual(['needs_revision', 'needs_revision'])
     expect(model.serialReleaseDesk.summary).toContain('发布窗口')
+  })
+
+  test('blocks serial release desk when attraction or benchmark reviews warn before publishing', () => {
+    const riskyChapters = Array.from({ length: 14 }).map((_, index) => {
+      const chapterNo = index + 1
+      return {
+        id: chapterNo,
+        chapter_no: chapterNo,
+        title: `第${chapterNo}章`,
+        chapter_goal: `推进连载节奏 ${chapterNo}`,
+        conflict: '外门压迫',
+        ending_hook: `第${chapterNo}章末钩子`,
+        chapter_text: chapterNo <= 10 ? '正文'.repeat(1400) : '',
+        raw_payload: {
+          mainline_progress: '外门压迫线',
+          payoff: '打脸回报',
+        },
+      }
+    })
+    const riskyProject = {
+      ...project,
+      reference_config: {
+        ...project.reference_config,
+        serialization_policy: {
+          daily_chapters: 2,
+          min_buffer_days: 7,
+          last_published_chapter: 6,
+        },
+      },
+    }
+
+    const model = buildPlanningWorkspaceModel({
+      selectedProject: riskyProject,
+      outlines,
+      chapters: riskyChapters,
+      activeChapter: riskyChapters[9],
+      reviews: [
+        {
+          id: 9001,
+          chapter_id: 7,
+          review_type: 'chapter_attraction_review',
+          created_at: '2026-06-04T11:00:00.000Z',
+          payload: JSON.stringify({
+            chapter_id: 7,
+            chapter_no: 7,
+            chapter_attraction_review: {
+              status: 'warn',
+              score: 62,
+              weak_count: 2,
+              weak_dimensions: [
+                { label: '开篇钩子', status: 'warn', issue: '第一屏没有现场危险' },
+                { label: '章末翻页', status: 'warn', issue: '结尾没有下一章必须看的问题' },
+              ],
+            },
+          }),
+        },
+        {
+          id: 9002,
+          chapter_id: 8,
+          review_type: 'chapter_benchmark_sync',
+          created_at: '2026-06-04T11:01:00.000Z',
+          payload: JSON.stringify({
+            chapter_id: 8,
+            chapter_no: 8,
+            chapter_benchmark_sync: {
+              status: 'warn',
+              score: 58,
+              missed_count: 2,
+              missed: [
+                { label: '爽点兑现', text: '主角反制没有形成可见回报' },
+                { label: '场景节拍', text: '中段目标、阻碍、转折不清' },
+              ],
+            },
+          }),
+        },
+      ],
+    })
+
+    expect(model.serialReleaseDesk.status).toBe('blocked')
+    expect(model.serialReleaseDesk.riskChapters.map(item => item.chapterNo)).toEqual([7, 8])
+    expect(model.serialReleaseDesk.releaseWindow.slice(0, 2).map(item => item.status)).toEqual(['needs_revision', 'needs_revision'])
+    expect(model.serialReleaseDesk.riskChapters[0].riskTags).toContain('吸引力风险')
+    expect(model.serialReleaseDesk.riskChapters[1].riskTags).toContain('标杆章风险')
+  })
+
+  test('serial release desk uses the latest chapter review so fixed risks do not block publishing', () => {
+    const riskyChapters = Array.from({ length: 14 }).map((_, index) => {
+      const chapterNo = index + 1
+      return {
+        id: chapterNo,
+        chapter_no: chapterNo,
+        title: `第${chapterNo}章`,
+        chapter_goal: `推进连载节奏 ${chapterNo}`,
+        conflict: '外门压迫',
+        ending_hook: `第${chapterNo}章末钩子`,
+        chapter_text: chapterNo <= 10 ? '正文'.repeat(1400) : '',
+        raw_payload: {
+          mainline_progress: '外门压迫线',
+          payoff: '打脸回报',
+        },
+      }
+    })
+    const riskyProject = {
+      ...project,
+      reference_config: {
+        ...project.reference_config,
+        serialization_policy: {
+          daily_chapters: 2,
+          min_buffer_days: 2,
+          last_published_chapter: 6,
+        },
+      },
+    }
+
+    const model = buildPlanningWorkspaceModel({
+      selectedProject: riskyProject,
+      outlines,
+      chapters: riskyChapters,
+      activeChapter: riskyChapters[9],
+      reviews: [
+        {
+          id: 9201,
+          chapter_id: 7,
+          review_type: 'chapter_attraction_review',
+          created_at: '2026-06-04T11:00:00.000Z',
+          payload: JSON.stringify({
+            chapter_id: 7,
+            chapter_no: 7,
+            chapter_attraction_review: {
+              status: 'warn',
+              score: 62,
+              weak_count: 2,
+              weak_dimensions: [
+                { label: '开篇钩子', status: 'warn', issue: '第一屏没有现场危险' },
+                { label: '章末翻页', status: 'warn', issue: '结尾没有下一章必须看的问题' },
+              ],
+            },
+          }),
+        },
+        {
+          id: 9202,
+          chapter_id: 7,
+          review_type: 'chapter_attraction_review',
+          created_at: '2026-06-04T11:10:00.000Z',
+          payload: JSON.stringify({
+            chapter_id: 7,
+            chapter_no: 7,
+            chapter_attraction_review: {
+              status: 'ok',
+              score: 86,
+              weak_count: 0,
+              weak_dimensions: [],
+              summary: '开篇钩子、场景推进和章末翻页已修复。',
+            },
+          }),
+        },
+      ],
+    })
+
+    expect(model.serialReleaseDesk.releaseWindow[0]).toMatchObject({ chapterNo: 7, status: 'publishable' })
+    expect(model.serialReleaseDesk.riskChapters.map(item => item.chapterNo)).not.toContain(7)
+    expect(model.serialReleaseDesk.riskChapters.flatMap(item => item.riskTags)).not.toContain('吸引力风险')
   })
 
   test('asks for more drafting when serial release buffer is below the configured minimum', () => {

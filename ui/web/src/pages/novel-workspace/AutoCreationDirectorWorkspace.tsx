@@ -231,6 +231,9 @@ export function AutoCreationDirectorWorkspace({
                 未清风险 {model.deliveryRiskGate.totalOpen}
               </Tag>
             )}
+            {model.deliveryRiskGate.totalOpen === 0 && model.deliveryRiskGate.recentlyResolved.length > 0 && (
+              <Tag color="green" bordered={false}>已清风险 {model.deliveryRiskGate.recentlyResolved.reduce((sum, item) => sum + item.count, 0)}</Tag>
+            )}
           </Space>
           <Title level={4}>自动创作总控台</Title>
           <Text className="auto-director-headline">{model.headline}</Text>
@@ -279,6 +282,24 @@ export function AutoCreationDirectorWorkspace({
                 {todayCommandDeck.reasons.slice(0, 3).map(reason => <Text key={reason} type="secondary">{reason}</Text>)}
               </div>
             )}
+            <div className="auto-director-release-rationale">
+              <div className="auto-director-release-rationale-head">
+                <Text strong>连写放行说明</Text>
+                <Tag color={productionLicenseColor(todayCommandDeck.status)} bordered={false}>
+                  {todayCommandDeck.releaseRationale.mode}
+                </Tag>
+                <Tag bordered={false}>放行 {todayCommandDeck.releaseRationale.allowedCount} 章</Tag>
+              </div>
+              <Text type="secondary">{todayCommandDeck.releaseRationale.primaryReason}</Text>
+              <div className="auto-director-release-rationale-tags">
+                {todayCommandDeck.releaseRationale.checks.slice(0, 3).map(check => (
+                  <Tag key={`check-${check}`} color="green" bordered={false}>{check}</Tag>
+                ))}
+                {todayCommandDeck.releaseRationale.limits.slice(0, 2).map(limit => (
+                  <Tag key={`limit-${limit}`} bordered={false}>{limit}</Tag>
+                ))}
+              </div>
+            </div>
           </div>
           <div className="auto-director-command-quality-gates" aria-label="万订护栏">
             <Text className="auto-director-command-quality-title">万订护栏</Text>
@@ -855,6 +876,29 @@ export function AutoCreationDirectorWorkspace({
         </section>
       )}
 
+      {model.deliveryRiskGate.totalOpen === 0 && model.deliveryRiskGate.recentlyResolved.length > 0 && (
+        <section className="auto-director-panel auto-director-risk-cleared">
+          <div className="auto-director-panel-title">
+            <CheckCircleOutlined />
+            <span>交稿风险已清</span>
+            <Tag color="green" bordered={false}>
+              已确认 {model.deliveryRiskGate.recentlyResolved.reduce((sum, item) => sum + item.count, 0)}
+            </Tag>
+          </div>
+          <div className="auto-director-risk-cleared-list">
+            {model.deliveryRiskGate.recentlyResolved.map(item => (
+              <div key={`${item.label}-${item.chapterNos.join('-')}-${item.issueTypes.join('-')}`} className="auto-director-risk-cleared-item">
+                <span>
+                  <strong>{item.label}</strong>
+                  <Tag color="green" bordered={false}>{item.count}</Tag>
+                </span>
+                <Text type="secondary">{item.detail}</Text>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       <section className="auto-director-panel auto-director-rhythm-panel">
         <div className="auto-director-panel-title">
           <FundProjectionScreenOutlined />
@@ -1071,6 +1115,30 @@ export function AutoCreationDirectorWorkspace({
               <div><span>主线焦点</span><strong>{model.batchGuardrail.nextBatchBrief.mainlineFocus}</strong></div>
               <div><span>禁写边界</span><strong>{model.batchGuardrail.nextBatchBrief.forbiddenBoundary}</strong></div>
             </div>
+            {model.batchGuardrail.nextBatchBrief.startChecklist.length > 0 && (
+              <div className="auto-director-batch-start-checklist">
+                <div className="auto-director-batch-start-checklist-head">
+                  <Text strong>批次开工清单</Text>
+                  <Text type="secondary">安全连写前确认核心、强故事、回报和边界。</Text>
+                </div>
+                <div className="auto-director-batch-start-checklist-grid">
+                  {model.batchGuardrail.nextBatchBrief.startChecklist.map(item => (
+                    <div
+                      key={item.key}
+                      className={`auto-director-batch-start-check auto-director-batch-start-check-${item.status}`}
+                    >
+                      <span>
+                        <strong>{item.label}</strong>
+                        <Tag color={item.status === 'ok' ? 'green' : item.status === 'warn' ? 'gold' : 'red'} bordered={false}>
+                          {batchSignalLabel(item.status)}
+                        </Tag>
+                      </span>
+                      <Text type="secondary">{item.detail}</Text>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="auto-director-batch-brief-chapters">
               {model.batchGuardrail.nextBatchBrief.chapters.map(chapter => (
                 <button

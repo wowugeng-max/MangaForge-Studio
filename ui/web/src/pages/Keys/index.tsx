@@ -63,6 +63,28 @@ export function formatKeySubmitError(error: any): string {
   return `提交失败: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`
 }
 
+export const MODEL_HEALTH_STATUS_MAP: Record<string, { color: string; text: string }> = {
+  healthy: { color: 'success', text: '可用' },
+  quota_exhausted: { color: 'error', text: '额度耗尽' },
+  unauthorized: { color: 'warning', text: '无权限' },
+  network_error: { color: 'error', text: '网络错误' },
+  key_disabled: { color: 'default', text: 'Key停用' },
+  no_key: { color: 'default', text: '缺Key' },
+  no_provider: { color: 'default', text: '缺厂商' },
+  disabled: { color: 'default', text: '停用' },
+  error: { color: 'default', text: '异常' },
+  unknown: { color: 'default', text: '未知' },
+}
+
+export function modelHealthTooltipTitle(record: any) {
+  const parts = [
+    record?.last_tested_at ? `最后测试: ${new Date(record.last_tested_at).toLocaleString()}` : '尚未测试',
+  ]
+  const lastError = String(record?.last_error || record?.lastError || '').trim()
+  if (lastError) parts.push(`最近错误: ${lastError}`)
+  return parts.join('\n')
+}
+
 export default function KeyManager() {
   const [keys, setKeys] = useState<APIKey[]>([])
   const [loading, setLoading] = useState(false)
@@ -171,7 +193,7 @@ export default function KeyManager() {
     { title: '展示名称', dataIndex: 'display_name', key: 'display_name' },
     { title: '模型代号 (Name)', dataIndex: 'model_name', key: 'model_name' },
     { title: '能力标签', key: 'capabilities', render: (_: any, record: any) => <Space size={[0, 4]} wrap>{record.capabilities?.chat && <Tag color="cyan">文本</Tag>}{record.capabilities?.vision && <Tag color="blue">识图</Tag>}{record.capabilities?.text_to_image && <Tag color="purple">文生图</Tag>}{record.capabilities?.image_to_image && <Tag color="magenta">图生图</Tag>}{record.capabilities?.text_to_video && <Tag color="volcano">文生视频</Tag>}{record.capabilities?.image_to_video && <Tag color="red">图生视频</Tag>}</Space> },
-    { title: '健康状态', key: 'health_status', render: (_: any, record: any) => { const statusMap: Record<string, { color: string, text: string }> = { healthy: { color: 'success', text: '可用' }, quota_exhausted: { color: 'error', text: '额度耗尽' }, unauthorized: { color: 'warning', text: '无权限' }, error: { color: 'default', text: '异常' }, unknown: { color: 'default', text: '未知' } }; const s = statusMap[record.health_status] || statusMap.unknown; return <Tooltip title={record.last_tested_at ? `最后测试: ${new Date(record.last_tested_at).toLocaleString()}` : '尚未测试'}><Tag color={s.color}>{s.text}</Tag></Tooltip> } },
+    { title: '健康状态', key: 'health_status', render: (_: any, record: any) => { const s = MODEL_HEALTH_STATUS_MAP[record.health_status] || MODEL_HEALTH_STATUS_MAP.unknown; return <Tooltip title={modelHealthTooltipTitle(record)}><Tag color={s.color}>{s.text}</Tag></Tooltip> } },
     { title: '来源', key: 'source', render: (_: any, record: any) => record.is_manual ? <Tag color="orange">手动</Tag> : <Tag color="green">同步</Tag> },
     { title: '操作', key: 'action', render: (_: any, record: any) => <Space size="middle"><a onClick={() => handleTestModel(record)}>{testingModel === record.id ? <Spin size="small" /> : '单点测试'}</a>{ENABLE_ADVANCED_PARAM_EDIT && <ModelParamEditor modelId={record.id} modelName={record.model_name} initialParams={record.context_ui_params} initialApiFormat={record.api_format} capabilities={record.capabilities} onSuccess={() => fetchModels(currentKeyForModels!.id)} />}<a onClick={() => openModelModal(record)}>编辑标签</a>{record.is_manual && <Popconfirm title="确定删除这个模型吗？" onConfirm={() => handleDeleteModel(record.id)}><a style={{ color: 'red' }}>删除</a></Popconfirm>}</Space> },
   ]

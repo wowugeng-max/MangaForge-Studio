@@ -121,6 +121,42 @@ describe('model sync capability inference', () => {
     expect(byName['gpt-5.5'].api_format).toBeUndefined()
   })
 
+  test('normalizes AnyRouter Claude model ids to official anthropic catalog ids', async () => {
+    const workspace = await tempWorkspace()
+    await writeFile(join(workspace, 'keys.json'), JSON.stringify([
+      { id: 2, provider: 'any', key: 'sk-ar-test', is_active: true },
+    ]))
+    await writeFile(join(workspace, 'providers.json'), JSON.stringify([
+      {
+        id: 'any',
+        display_name: 'AnyRouter',
+        service_type: 'llm',
+        api_format: 'codex_responses',
+        auth_type: 'bearer',
+        supported_modalities: ['chat'],
+        default_base_url: 'https://anyrouter.top/v1',
+        is_active: true,
+      },
+    ]))
+    await writeFile(join(workspace, 'models.json'), JSON.stringify([]))
+
+    const result = await syncModelsForKey(workspace, 2, {
+      data: [
+        { id: 'claude-opus-4-8' },
+        { id: 'anthropic/claude-sonnet-4.6' },
+        { id: 'gpt-5.5' },
+      ],
+    })
+
+    const byName = Object.fromEntries(result.models.map(model => [model.model_name, model]))
+    expect(Object.keys(byName)).toContain('anthropic/claude-opus-4.8')
+    expect(Object.keys(byName)).toContain('anthropic/claude-sonnet-4.6')
+    expect(Object.keys(byName)).toContain('gpt-5.5')
+    expect(byName['anthropic/claude-opus-4.8'].api_format).toBe('claude_code')
+    expect(byName['anthropic/claude-sonnet-4.6'].api_format).toBe('claude_code')
+    expect(byName['gpt-5.5'].api_format).toBeUndefined()
+  })
+
   test('normalizes legacy upstream image and video capability keys into six task capabilities', async () => {
     const workspace = await tempWorkspace()
 

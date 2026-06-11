@@ -214,6 +214,213 @@ describe('codex responses provider runtime', () => {
     }
   })
 
+  test('uses AnyRouter Claude Code compatible request shape for 1M models', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-runtime-anyrouter-claude-'))
+    try {
+      await writeFile(join(workspace, 'providers.json'), JSON.stringify([
+        {
+          id: 'any',
+          display_name: 'AnyRouter',
+          service_type: 'llm',
+          api_format: 'claude_code',
+          auth_type: 'bearer',
+          response_mode: 'auto',
+          supported_modalities: ['chat'],
+          default_base_url: 'https://anyrouter.top',
+          is_active: true,
+          endpoints: {},
+          custom_headers: {},
+        },
+      ]))
+      await writeFile(join(workspace, 'keys.json'), JSON.stringify([
+        { id: 1, provider: 'any', key: 'secret-key', is_active: true },
+      ]))
+      await writeFile(join(workspace, 'models.json'), JSON.stringify([
+        {
+          id: 1,
+          api_key_id: 1,
+          provider: 'any',
+          display_name: 'Claude Opus 1M',
+          model_name: 'claude-opus-4-8[1m]',
+          api_format: 'claude_code',
+          capabilities: { chat: true },
+          health_status: 'healthy',
+          context_ui_params: {
+            context_window: 1_000_000,
+            max_context: 1_000_000,
+            context_window_preset: '1m',
+          },
+        },
+      ]))
+
+      let capturedUrl = ''
+      let capturedHeaders: Record<string, string> = {}
+      let capturedBody: any = null
+      globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+        capturedUrl = String(url)
+        capturedHeaders = Object.fromEntries(new Headers(init?.headers || {}).entries())
+        capturedBody = JSON.parse(String(init?.body || '{}'))
+        return new Response(JSON.stringify({
+          content: [{ type: 'text', text: 'AnyRouter Claude OK' }],
+          stop_reason: 'end_turn',
+        }), { status: 200 })
+      }) as typeof fetch
+
+      const result = await executeWithRuntimeModel(workspace, {
+        model: 'balanced',
+        messages: [{ role: 'user', content: 'Say OK.' }],
+        temperature: 0.1,
+        max_tokens: 64,
+        response_format: 'text',
+      }, 1, { maxRetries: 0 })
+
+      expect(capturedUrl).toBe('https://anyrouter.top/v1/messages')
+      expect(capturedHeaders.authorization).toBe('Bearer secret-key')
+      expect(capturedHeaders['x-api-key']).toBeUndefined()
+      expect(capturedHeaders['anthropic-beta']).toContain('claude-code-20250219')
+      expect(capturedHeaders['anthropic-beta']).toContain('context-1m')
+      expect(capturedHeaders['anthropic-beta']).not.toContain('interleaved-thinking')
+      expect(capturedHeaders['x-app']).toBeUndefined()
+      expect(capturedHeaders['anthropic-dangerous-direct-browser-access']).toBeUndefined()
+      expect(capturedHeaders['x-stainless-lang']).toBeUndefined()
+      expect(capturedBody).toMatchObject({
+        model: 'claude-opus-4-8[1m]',
+        messages: [{ role: 'user', content: 'Say OK.' }],
+        max_tokens: 64,
+      })
+      expect(capturedBody.anthropic_beta).toBeUndefined()
+      expect(result.content).toBe('AnyRouter Claude OK')
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('maps synced AnyRouter Claude catalog ids back to Claude Code local role ids for top gateway', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-runtime-anyrouter-claude-synced-'))
+    try {
+      await writeFile(join(workspace, 'providers.json'), JSON.stringify([
+        {
+          id: 'any',
+          display_name: 'AnyRouter',
+          service_type: 'llm',
+          api_format: 'claude_code',
+          auth_type: 'bearer',
+          response_mode: 'auto',
+          supported_modalities: ['chat'],
+          default_base_url: 'https://anyrouter.top',
+          is_active: true,
+          endpoints: {},
+          custom_headers: {},
+        },
+      ]))
+      await writeFile(join(workspace, 'keys.json'), JSON.stringify([
+        { id: 1, provider: 'any', key: 'secret-key', is_active: true },
+      ]))
+      await writeFile(join(workspace, 'models.json'), JSON.stringify([
+        {
+          id: 1,
+          api_key_id: 1,
+          provider: 'any',
+          display_name: 'Claude Opus 1M',
+          model_name: 'anthropic/claude-opus-4.8',
+          api_format: 'claude_code',
+          capabilities: { chat: true },
+          health_status: 'healthy',
+          context_ui_params: {
+            context_window: 1_000_000,
+            max_context: 1_000_000,
+            context_window_preset: '1m',
+          },
+        },
+      ]))
+
+      let capturedBody: any = null
+      globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+        capturedBody = JSON.parse(String(init?.body || '{}'))
+        return new Response(JSON.stringify({
+          content: [{ type: 'text', text: 'AnyRouter Claude OK' }],
+          stop_reason: 'end_turn',
+        }), { status: 200 })
+      }) as typeof fetch
+
+      await executeWithRuntimeModel(workspace, {
+        model: 'balanced',
+        messages: [{ role: 'user', content: 'Say OK.' }],
+        temperature: 0.1,
+        max_tokens: 64,
+        response_format: 'text',
+      }, 1, { maxRetries: 0 })
+
+      expect(capturedBody.model).toBe('claude-opus-4-8[1m]')
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('can preserve AnyRouter Claude Code 1M suffix when explicitly requested', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-runtime-anyrouter-claude-preserve-suffix-'))
+    try {
+      await writeFile(join(workspace, 'providers.json'), JSON.stringify([
+        {
+          id: 'any',
+          display_name: 'AnyRouter',
+          service_type: 'llm',
+          api_format: 'claude_code',
+          auth_type: 'bearer',
+          response_mode: 'auto',
+          supported_modalities: ['chat'],
+          default_base_url: 'https://anyrouter.top',
+          is_active: true,
+          endpoints: {},
+          custom_headers: {},
+        },
+      ]))
+      await writeFile(join(workspace, 'keys.json'), JSON.stringify([
+        { id: 1, provider: 'any', key: 'secret-key', is_active: true },
+      ]))
+      await writeFile(join(workspace, 'models.json'), JSON.stringify([
+        {
+          id: 1,
+          api_key_id: 1,
+          provider: 'any',
+          display_name: 'Claude Opus 1M',
+          model_name: 'claude-opus-4-8[1m]',
+          api_format: 'claude_code',
+          capabilities: { chat: true },
+          health_status: 'healthy',
+          context_ui_params: {
+            context_window: 1_000_000,
+            max_context: 1_000_000,
+            context_window_preset: '1m',
+            claude_code_model_suffix_mode: 'preserve',
+          },
+        },
+      ]))
+
+      let capturedBody: any = null
+      globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+        capturedBody = JSON.parse(String(init?.body || '{}'))
+        return new Response(JSON.stringify({
+          content: [{ type: 'text', text: 'AnyRouter Claude OK' }],
+          stop_reason: 'end_turn',
+        }), { status: 200 })
+      }) as typeof fetch
+
+      await executeWithRuntimeModel(workspace, {
+        model: 'balanced',
+        messages: [{ role: 'user', content: 'Say OK.' }],
+        temperature: 0.1,
+        max_tokens: 64,
+        response_format: 'text',
+      }, 1, { maxRetries: 0 })
+
+      expect(capturedBody.model).toBe('claude-opus-4-8[1m]')
+      expect(capturedBody.anthropic_beta).toBeUndefined()
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
   test('uses model api_format override for Gemini native default routing and auth', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-runtime-gemini-override-'))
     try {

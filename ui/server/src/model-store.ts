@@ -17,6 +17,7 @@ export type ModelRecord = {
   is_manual?: boolean
   context_ui_params?: Record<string, unknown>
   last_tested_at?: string
+  last_error?: string
 }
 
 const DEFAULT_MODEL_CAPABILITIES = {
@@ -58,6 +59,7 @@ function normalizeModelRecord(raw: Partial<ModelRecord> & Record<string, any>): 
     is_manual: coerceBoolean(raw.is_manual ?? raw.isManual, false),
     context_ui_params: objectOrEmpty(raw.context_ui_params ?? raw.contextUiParams),
     last_tested_at: String(raw.last_tested_at ?? raw.lastTestedAt ?? ''),
+    last_error: String(raw.last_error ?? raw.lastError ?? ''),
   }
 }
 

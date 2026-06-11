@@ -1,6 +1,7 @@
 import { readKeys } from './key-store'
 import { readModels, writeModels, type ModelRecord } from './model-store'
 import { readProviders, type ProviderRecord } from './provider-store'
+import { normalizeAnyRouterAnthropicModelName } from './llm/anthropic-context'
 
 function nowIso() {
   return new Date().toISOString()
@@ -27,6 +28,18 @@ function isDashScopeProvider(provider: ProviderRecord) {
 function isGeminiProvider(provider: ProviderRecord) {
   return String(provider.api_format || '').toLowerCase() === 'gemini_native'
     || /gemini|google/i.test(`${provider.id} ${provider.display_name}`)
+}
+
+function isAnyRouterProvider(provider?: ProviderRecord) {
+  if (!provider) return false
+  const fingerprint = [
+    provider.id,
+    provider.display_name,
+    provider.default_base_url,
+    (provider as any).defaultBaseUrl,
+  ].map(value => String(value || '').toLowerCase()).join(' ')
+  return /\banyrouter\b|anyrouter\.(?:top|dev)/.test(fingerprint)
+    || String(provider.id || '').toLowerCase() === 'any'
 }
 
 function resolveModelsEndpoint(provider: ProviderRecord, baseUrlOverride = '') {
@@ -150,6 +163,14 @@ function inferModelApiFormat(modelName: string) {
   return undefined
 }
 
+function normalizeSyncedModelName(id: string, provider?: ProviderRecord) {
+  const apiFormat = inferModelApiFormat(id)
+  if (apiFormat === 'claude_code' && isAnyRouterProvider(provider)) {
+    return normalizeAnyRouterAnthropicModelName(id)
+  }
+  return id
+}
+
 function findModelListCandidate(raw: any, depth = 0): any[] {
   if (Array.isArray(raw)) return raw
   if (!raw || typeof raw !== 'object' || depth > 8) return []
@@ -166,7 +187,7 @@ function extractModels(raw: any, provider?: ProviderRecord) {
   return candidates
     .map((item: any) => {
       const rawId = String(item?.id || item?.name || item?.model || item?.model_name || '').trim()
-      const id = rawId.replace(/^models\//, '')
+      const id = normalizeSyncedModelName(rawId.replace(/^models\//, ''), provider)
       if (!id) return null
       if (isGemini && !/gemini/i.test(id)) return null
       return {
@@ -269,7 +290,7 @@ export async function syncModelsForKey(activeWorkspace: string, keyId: number, p
   if (!provider) throw new Error(`provider ${apiKey.provider} not found`)
 
   const models = await readModels(activeWorkspace)
-  const manualModels = extractModels(payload)
+  const manualModels = extractModels(payload, provider)
   const syncedModels = manualModels.length > 0 ? manualModels : await fetchProviderModels(provider, apiKey.key, apiKey.base_url)
   const { models: next, created, updated } = mergeSyncedModels(models, keyId, provider.id, syncedModels)
   await writeModels(activeWorkspace, next)

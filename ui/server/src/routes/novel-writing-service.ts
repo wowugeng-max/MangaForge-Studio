@@ -220,7 +220,15 @@ function compactBriefText(value: any, fallback = '') {
 function buildPreviousChapterHandoff(contextPackage: any) {
   const target = contextPackage?.chapter_target || {}
   const explicit = compactBriefText(
-    target.previous_handoff || target.previousHandoff || contextPackage?.previous_handoff || contextPackage?.pre_draft_brief?.previous_handoff,
+    target.previous_handoff
+      || target.previousHandoff
+      || target.chapter_handoff_contract?.previous_handoff
+      || target.chapterHandoffContract?.previous_handoff
+      || contextPackage?.previous_handoff
+      || contextPackage?.chapter_handoff_contract?.previous_handoff
+      || contextPackage?.batch_preflight?.chapter_handoff_contract?.previous_handoff
+      || contextPackage?.batch_preflight?.chapterHandoffContract?.previous_handoff
+      || contextPackage?.pre_draft_brief?.previous_handoff,
   )
   if (explicit) return explicit
 
@@ -236,6 +244,53 @@ function buildPreviousChapterHandoff(contextPackage: any) {
     endingExcerpt ? `最后一幕：${compactText(endingExcerpt, 180)}` : '',
   ].filter(Boolean)
   return parts.length ? `${label} ${parts.join('；')}` : ''
+}
+
+function handoffContractItemText(item: any) {
+  if (typeof item === 'string') return compactBriefText(item)
+  return compactBriefText(item?.text || item?.label || item?.name || item?.summary || item?.detail || item?.title || item?.issue)
+}
+
+function handoffContractTextItems(value: any, limit = 12) {
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const item of asArray(value)) {
+    const normalized = handoffContractItemText(item)
+    if (!normalized || seen.has(normalized)) continue
+    seen.add(normalized)
+    result.push(normalized)
+    if (result.length >= limit) break
+  }
+  return result
+}
+
+function normalizeBatchChapterHandoffContract(value: any) {
+  const raw = value?.chapter_handoff_contract || value?.chapterHandoffContract || value || {}
+  const previousHandoff = compactBriefText(raw.previous_handoff || raw.previousHandoff)
+  const openingObligations = handoffContractTextItems(raw.opening_obligations || raw.openingObligations)
+  const expectationCarryOver = handoffContractTextItems(raw.expectation_carry_over || raw.expectationCarryOver)
+  const mustDeliver = handoffContractTextItems(raw.must_deliver || raw.mustDeliver)
+  const keepAlive = handoffContractTextItems(raw.keep_alive || raw.keepAlive)
+  const overdue = handoffContractTextItems(raw.overdue || raw.overdue_items || raw.overdueItems)
+  const hasContract = previousHandoff
+    || openingObligations.length
+    || expectationCarryOver.length
+    || mustDeliver.length
+    || keepAlive.length
+    || overdue.length
+  if (!hasContract) return null
+  return {
+    source: compactBriefText(raw.source, 'safe_batch_chapter_handoff_contract'),
+    from_chapter_no: Number(raw.from_chapter_no || raw.fromChapterNo || 0) || null,
+    apply_to_chapter_no: Number(raw.apply_to_chapter_no || raw.applyToChapterNo || 0) || null,
+    previous_handoff: previousHandoff,
+    opening_obligations: openingObligations,
+    expectation_carry_over: expectationCarryOver,
+    must_deliver: mustDeliver,
+    keep_alive: keepAlive,
+    overdue,
+    policy: compactBriefText(raw.policy, '安全连写第一章必须先接住上一章最后一幕和读者期待债务。'),
+  }
 }
 
 function sceneBriefFromCard(card: any, index: number) {
@@ -310,6 +365,574 @@ function buildReaderRetentionBrief(project: any, contextPackage: any, sceneBrief
       '爽点只停留在旁白承诺不落成动作',
       ...asArray(chapterTarget.forbidden_cliches),
     ].map((item: any) => String(item || '').trim()).filter(Boolean))).slice(0, 8),
+  }
+}
+
+function firstMatchingBrief(items: any[], pattern: RegExp) {
+  return uniqueBriefStrings(items, 20).find(item => pattern.test(item)) || ''
+}
+
+function normalizeReaderDropRiskBrief(value: any, readerRetentionBrief: any = null, first30RetentionBrief: any = null) {
+  const raw = value?.reader_drop_risk_brief || value?.readerDropRiskBrief || value || {}
+  const dropPoints = uniqueBriefStrings(raw.drop_points || raw.dropPoints || raw.risks || [], 10)
+  const pullPoints = uniqueBriefStrings(raw.pull_points || raw.pullPoints || raw.reader_pull || raw.readerPull || [], 8)
+  const repairActions = uniqueBriefStrings(raw.repair_actions || raw.repairActions || raw.required_actions || raw.requiredActions || [], 10)
+  const first30Flags = uniqueBriefStrings(first30RetentionBrief?.flags || [], 6)
+  const first30Actions = uniqueBriefStrings(first30RetentionBrief?.required_actions || first30RetentionBrief?.requiredActions || [], 6)
+  const openingGuardrail = compactBriefText(
+    raw.opening_guardrail
+    || raw.openingGuardrail
+    || firstMatchingBrief([...repairActions, ...dropPoints, ...first30Actions, ...first30Flags], /开篇|开场|前\s*300|前三章|第1章|第一章|起手/)
+    || (readerRetentionBrief?.opening_hook ? `开篇 300 字必须落地：${readerRetentionBrief.opening_hook}` : ''),
+  )
+  const middleGuardrail = compactBriefText(
+    raw.middle_guardrail
+    || raw.middleGuardrail
+    || firstMatchingBrief([...repairActions, ...dropPoints, ...first30Actions, ...first30Flags], /中段|解释|设定|节奏|场景|试读十章|第4-10|掉速|水/)
+    || repairActions.find((item: string) => item !== openingGuardrail && !/章末|钩子|结尾|翻页/.test(item))
+    || '',
+  )
+  const endingGuardrail = compactBriefText(
+    raw.ending_guardrail
+    || raw.endingGuardrail
+    || firstMatchingBrief([...repairActions, ...dropPoints, ...first30Actions, ...first30Flags], /章末|钩子|结尾|翻页|未解|下一章|最后/)
+    || (readerRetentionBrief?.ending_question ? `章末必须压出追读问题：${readerRetentionBrief.ending_question}` : ''),
+  )
+  const status = compactBriefText(raw.status, dropPoints.length || repairActions.length || first30Flags.length ? 'needs_repair' : 'ready')
+  const qualityBar = compactBriefText(raw.quality_bar || raw.qualityBar || raw.quality_bar_label || raw.qualityBarLabel, '起点1万均订试读基准')
+  const score = Number.isFinite(Number(raw.score)) ? Number(raw.score) : null
+  if (!dropPoints.length && !pullPoints.length && !repairActions.length && !openingGuardrail && !middleGuardrail && !endingGuardrail) return null
+  return {
+    status,
+    score,
+    quality_bar: qualityBar,
+    drop_points: dropPoints,
+    pull_points: pullPoints,
+    repair_actions: repairActions,
+    opening_guardrail: openingGuardrail,
+    middle_guardrail: middleGuardrail,
+    ending_guardrail: endingGuardrail,
+  }
+}
+
+function normalizeStoryPressureSignal(value: any) {
+  const key = compactBriefText(value?.key || value?.field || value?.type)
+  const label = compactBriefText(value?.label || value?.title || key)
+  const status = compactBriefText(value?.status || value?.state, 'ok').toLowerCase()
+  const detail = compactBriefText(value?.detail || value?.reason || value?.summary || value?.text)
+  if (!key && !label && !detail) return null
+  return {
+    key: key || label,
+    label: label || key || '故事压力',
+    status,
+    detail,
+  }
+}
+
+function normalizeStoryPressureBrief(value: any) {
+  const raw = value?.story_pressure_brief
+    || value?.storyPressureBrief
+    || value?.story_pressure_ladder
+    || value?.storyPressureLadder
+    || value
+    || {}
+  const signals = asArray(raw.signals || raw.pressure_signals || raw.pressureSignals)
+    .map((item: any) => normalizeStoryPressureSignal(item))
+    .filter(Boolean)
+    .slice(0, 8)
+  const weakSignals = signals
+    .filter((signal: any) => !['ok', 'ready', 'pass', 'passed'].includes(String(signal.status || '').toLowerCase()))
+    .slice(0, 6)
+  const pressureSourceRows = asArray(raw.pressure_sources || raw.pressureSources || raw.sources)
+  const pressureSources = uniqueBriefStrings(
+    pressureSourceRows.map((item: any) => typeof item === 'string' ? item : item?.label || item?.name || item?.summary || item?.detail),
+    8,
+  )
+  const requiredActions = uniqueBriefStrings(raw.required_actions || raw.requiredActions || raw.next_actions || raw.nextActions || [], 8)
+  const signalDetail = (key: string) => compactBriefText(signals.find((signal: any) => signal.key === key)?.detail)
+  const conflictEscalationGuardrail = compactBriefText(
+    raw.conflict_escalation_guardrail
+    || raw.conflictEscalationGuardrail
+    || signalDetail('conflict_escalation'),
+  )
+  const stakesGrowthGuardrail = compactBriefText(
+    raw.stakes_growth_guardrail
+    || raw.stakesGrowthGuardrail
+    || signalDetail('stakes_growth'),
+  )
+  const reversalPressureGuardrail = compactBriefText(
+    raw.reversal_pressure_guardrail
+    || raw.reversalPressureGuardrail
+    || signalDetail('reversal_pressure'),
+  )
+  const pressureSourceGuardrail = compactBriefText(
+    raw.pressure_source_guardrail
+    || raw.pressureSourceGuardrail
+    || signalDetail('pressure_source'),
+  )
+  const status = compactBriefText(raw.status, weakSignals.length ? 'needs_attention' : (signals.length || pressureSources.length ? 'ready' : ''))
+  const score = Number.isFinite(Number(raw.score)) ? Number(raw.score) : null
+  const rangeLabel = compactBriefText(raw.chapter_range_label || raw.chapterRangeLabel || raw.range_label || raw.rangeLabel)
+  if (!status && !pressureSources.length && !signals.length && !requiredActions.length && !conflictEscalationGuardrail && !stakesGrowthGuardrail && !reversalPressureGuardrail && !pressureSourceGuardrail) return null
+  return {
+    status,
+    score,
+    range_label: rangeLabel,
+    pressure_sources: pressureSources,
+    weak_signals: weakSignals,
+    required_actions: requiredActions,
+    pressure_source_guardrail: pressureSourceGuardrail,
+    conflict_escalation_guardrail: conflictEscalationGuardrail,
+    stakes_growth_guardrail: stakesGrowthGuardrail,
+    reversal_pressure_guardrail: reversalPressureGuardrail,
+  }
+}
+
+function normalizeStoryDriveBrief(value: any, sceneCards: any[] = []) {
+  const raw = value?.story_drive_brief || value?.storyDriveBrief || value || {}
+  const target = value?.chapter_target || value?.chapterTarget || value || {}
+  const protagonistChoice = firstCompactText(
+    raw.protagonist_choice,
+    raw.protagonistChoice,
+    raw.active_choice,
+    raw.activeChoice,
+    target.protagonist_choice,
+    target.protagonistChoice,
+    target.active_choice,
+    target.activeChoice,
+    target.main_character_choice,
+    firstSceneCardText(sceneCards, ['protagonist_choice', 'active_choice', 'turning_point', 'turn', 'reversal']),
+  )
+  const choiceCost = firstCompactText(
+    raw.choice_cost,
+    raw.choiceCost,
+    raw.cost,
+    raw.consequence,
+    raw.stakes,
+    target.choice_cost,
+    target.choiceCost,
+    target.cost,
+    target.consequence,
+    target.stakes,
+    firstSceneCardText(sceneCards, ['choice_cost', 'cost', 'consequence', 'stakes', 'risk']),
+  )
+  const stateChange = firstCompactText(
+    raw.state_change,
+    raw.stateChange,
+    raw.exit_state,
+    raw.exitState,
+    target.state_change,
+    target.stateChange,
+    target.exit_state,
+    target.exitState,
+    target.chapter_state_change,
+    firstSceneCardText(sceneCards, ['exit_state', 'state_change', 'result', 'scene_result']),
+  )
+  const obstacle = firstCompactText(
+    raw.obstacle,
+    raw.conflict,
+    raw.core_conflict,
+    raw.coreConflict,
+    target.core_conflict,
+    target.coreConflict,
+    target.conflict,
+    firstSceneCardText(sceneCards, ['conflict', 'obstacle', 'pressure']),
+  )
+  const causalNextStep = firstCompactText(
+    raw.causal_next_step,
+    raw.causalNextStep,
+    raw.next_step,
+    raw.nextStep,
+    raw.ending_hook,
+    raw.endingHook,
+    target.causal_next_step,
+    target.causalNextStep,
+    target.next_step,
+    target.nextStep,
+    target.ending_hook,
+    target.endingHook,
+    firstSceneCardText(sceneCards, ['causal_next_step', 'next_step', 'ending_hook', 'exit_hook']),
+  )
+  const requiredActions = uniqueBriefStrings(
+    raw.required_actions
+    || raw.requiredActions
+    || [
+      '把主角主动选择、明确阻碍、选择代价、状态变化和下一步因果写成可见事件。',
+    ],
+    6,
+  )
+  if (!protagonistChoice && !choiceCost && !stateChange && !obstacle && !causalNextStep) return null
+  return {
+    protagonist_choice: protagonistChoice,
+    choice_cost: choiceCost,
+    state_change: stateChange,
+    obstacle,
+    causal_next_step: causalNextStep,
+    required_actions: requiredActions,
+  }
+}
+
+function normalizeSerialRhythmBudgetItem(value: any, index: number) {
+  const raw = typeof value === 'object' && value ? value : { required_payoff: value }
+  const title = compactBriefText(raw.title || raw.name || raw.scene_title || raw.sceneTitle, `场景${index + 1}`)
+  const requiredPayoff = firstCompactText(
+    raw.required_payoff,
+    raw.requiredPayoff,
+    raw.reader_payoff,
+    raw.readerPayoff,
+    raw.payoff,
+  )
+  const turn = firstCompactText(raw.turn, raw.reversal, raw.turning_point, raw.turningPoint, raw.information_gap, raw.informationGap)
+  const endingHookSeed = firstCompactText(raw.ending_hook_seed, raw.endingHookSeed, raw.ending_hook, raw.endingHook, raw.exit_state, raw.exitState)
+  const wordBudget = compactBriefText(raw.word_budget || raw.wordBudget || raw.budget)
+  if (!title && !requiredPayoff && !turn && !endingHookSeed && !wordBudget) return null
+  return {
+    scene_no: Number(raw.scene_no || raw.sceneNo || index + 1),
+    title,
+    word_budget: wordBudget,
+    required_payoff: requiredPayoff,
+    turn,
+    ending_hook_seed: endingHookSeed,
+  }
+}
+
+function normalizeSerialRhythmBrief(value: any, sceneBriefs: any[] = [], readerRetentionBrief: any = null, wordTarget: any = null) {
+  const raw = value?.serial_rhythm_brief || value?.serialRhythmBrief || value || {}
+  const explicitBudget = asArray(raw.scene_payoff_budget || raw.scenePayoffBudget || raw.scene_budgets || raw.sceneBudgets)
+    .map((item: any, index: number) => normalizeSerialRhythmBudgetItem(item, index))
+    .filter(Boolean)
+  const scenePayoffBudget = (explicitBudget.length ? explicitBudget : sceneBriefs.map(normalizeSerialRhythmBudgetItem).filter(Boolean)).slice(0, 8)
+  const targetWords = Number(wordTarget?.target || raw.word_target || raw.wordTarget || 0)
+  const defaultInterval = targetWords >= 9000 ? '每 1200-1800 字至少交付一次可见回报。' : '每 800-1200 字至少交付一次可见回报。'
+  const openingHookDeadline = firstCompactText(
+    raw.opening_hook_deadline,
+    raw.openingHookDeadline,
+    raw.opening_guardrail,
+    raw.openingGuardrail,
+    readerRetentionBrief?.opening_hook ? `前 300 字必须落地：${readerRetentionBrief.opening_hook}` : '',
+  )
+  const payoffInterval = firstCompactText(
+    raw.payoff_interval,
+    raw.payoffInterval,
+    raw.payoff_density,
+    raw.payoffDensity,
+    `${defaultInterval}回报可以是信息增量、冲突转折、爽点兑现、能力展示、关系变化或小回收。`,
+  )
+  const middleGuardrail = firstCompactText(
+    raw.middle_guardrail,
+    raw.middleGuardrail,
+    raw.pacing_guardrail,
+    raw.pacingGuardrail,
+    readerRetentionBrief?.payoff_promise ? `中段必须围绕读者承诺推进：${readerRetentionBrief.payoff_promise}` : '',
+    scenePayoffBudget.length ? `每个场景至少兑现一个回报，不能只写路过、解释或等待。` : '',
+  )
+  const endingHookGuardrail = firstCompactText(
+    raw.ending_hook_guardrail,
+    raw.endingHookGuardrail,
+    raw.ending_guardrail,
+    raw.endingGuardrail,
+    readerRetentionBrief?.ending_question ? `最后一幕必须压出追读问题：${readerRetentionBrief.ending_question}` : '',
+  )
+  const antiDragRules = uniqueBriefStrings(
+    raw.anti_drag_rules
+    || raw.antiDragRules
+    || raw.no_drag_rules
+    || raw.noDragRules
+    || [
+      '禁止连续两段纯环境描写或设定解释；每 3-5 段必须出现行动、选择、信息变化或关系变化。',
+      '不能用心理总结替代冲突推进；每个场景必须有目标、阻碍、转折和回报。',
+      '字数不足时优先扩写行动链、对话交锋、选择代价和章末铺垫，不靠水环境。',
+    ],
+    8,
+  )
+  if (!openingHookDeadline && !payoffInterval && !middleGuardrail && !endingHookGuardrail && !scenePayoffBudget.length && !antiDragRules.length) return null
+  return {
+    status: compactBriefText(raw.status, 'ready'),
+    opening_hook_deadline: openingHookDeadline,
+    payoff_interval: payoffInterval,
+    middle_guardrail: middleGuardrail,
+    ending_hook_guardrail: endingHookGuardrail,
+    scene_payoff_budget: scenePayoffBudget,
+    anti_drag_rules: antiDragRules,
+  }
+}
+
+function normalizePageTurnHookBrief(value: any, target: any = {}, sceneBriefs: any[] = [], readerRetentionBrief: any = null, storyDriveBrief: any = null) {
+  const raw = value?.page_turn_hook_brief || value?.pageTurnHookBrief || value || {}
+  const lastScene = sceneBriefs[sceneBriefs.length - 1] || {}
+  const coreQuestion = firstCompactText(
+    raw.core_question,
+    raw.coreQuestion,
+    raw.question,
+    readerRetentionBrief?.ending_question,
+    target.ending_hook,
+    lastScene.ending_hook_seed,
+  )
+  const visibleTrigger = firstCompactText(
+    raw.visible_trigger,
+    raw.visibleTrigger,
+    raw.trigger,
+    lastScene.reversal,
+    lastScene.ending_hook_seed,
+    target.ending_hook,
+  )
+  const nextChapterPull = firstCompactText(
+    raw.next_chapter_pull,
+    raw.nextChapterPull,
+    raw.next_pull,
+    raw.nextPull,
+    storyDriveBrief?.causal_next_step,
+    target.causal_next_step,
+    target.causalNextStep,
+    target.next_step,
+    target.nextStep,
+    coreQuestion,
+  )
+  const finalImage = firstCompactText(
+    raw.final_image,
+    raw.finalImage,
+    raw.last_image,
+    raw.lastImage,
+    lastScene.ending_hook_seed,
+    lastScene.reversal,
+    target.ending_hook,
+  )
+  const withheldAnswer = firstCompactText(
+    raw.withheld_answer,
+    raw.withheldAnswer,
+    raw.withheld,
+    raw.forbidden_answer,
+    raw.forbiddenAnswer,
+    coreQuestion ? `本章只抛出「${coreQuestion}」，不得在本章解释完整答案。` : '',
+  )
+  const forbiddenResolution = uniqueBriefStrings([
+    raw.forbidden_resolution,
+    raw.forbiddenResolution,
+    raw.forbidden,
+    withheldAnswer,
+    coreQuestion ? `不得在本章解释完整答案：${coreQuestion}` : '',
+  ], 8)
+  const requiredActions = uniqueBriefStrings(
+    raw.required_actions
+    || raw.requiredActions
+    || [
+      visibleTrigger ? `最后 300 字必须把「${visibleTrigger}」写成角色现场看见、听见、拿到或被迫面对的触发。` : '最后 300 字必须出现可见触发，不得只用旁白宣布悬念。',
+      coreQuestion ? `结尾必须让读者带着「${coreQuestion}」翻页。` : '结尾必须留下下一章非看不可的问题。',
+      nextChapterPull ? `只收束本章行动，把「${nextChapterPull}」留给下一章推进。` : '只收束本章行动，不提前解决下一章冲突。',
+    ],
+    8,
+  )
+  const hookType = compactBriefText(raw.hook_type || raw.hookType || raw.type, '问题反转')
+  if (!coreQuestion && !visibleTrigger && !nextChapterPull && !finalImage && !forbiddenResolution.length) return null
+  return {
+    status: compactBriefText(raw.status, 'ready'),
+    hook_type: hookType,
+    core_question: coreQuestion,
+    visible_trigger: visibleTrigger,
+    withheld_answer: withheldAnswer,
+    next_chapter_pull: nextChapterPull,
+    final_image: finalImage,
+    forbidden_resolution: forbiddenResolution,
+    required_actions: requiredActions,
+  }
+}
+
+function normalizeVolumeClimaxBeat(value: any, index: number) {
+  const raw = typeof value === 'object' && value ? value : { label: value }
+  const label = firstCompactText(raw.label, raw.title, raw.name, raw.summary, raw.detail, `爆点${index + 1}`)
+  const detail = firstCompactText(raw.detail, raw.description, raw.summary, raw.promise, raw.payoff)
+  const type = firstCompactText(raw.type, raw.beat_type, raw.beatType, raw.kind)
+  if (!label && !detail && !type) return null
+  return {
+    chapter_no: Number(raw.chapter_no || raw.chapterNo || raw.chapter || 0) || null,
+    type,
+    label,
+    detail,
+  }
+}
+
+function sortNearbyVolumeBeats(beats: any[], chapterNo: number) {
+  return beats
+    .map((beat, index) => ({ beat, index }))
+    .sort((left, right) => {
+      const leftNo = Number(left.beat.chapter_no || 0)
+      const rightNo = Number(right.beat.chapter_no || 0)
+      if (chapterNo && leftNo === chapterNo && rightNo !== chapterNo) return -1
+      if (chapterNo && rightNo === chapterNo && leftNo !== chapterNo) return 1
+      if (chapterNo && leftNo && rightNo) return Math.abs(leftNo - chapterNo) - Math.abs(rightNo - chapterNo)
+      return left.index - right.index
+    })
+    .map(item => item.beat)
+}
+
+function normalizeVolumeClimaxBrief(value: any, target: any = {}, volumeBeatBudget: any = {}) {
+  const explicit = value?.volume_climax_brief
+    || value?.volumeClimaxBrief
+    || value?.volume_beat_brief
+    || value?.volumeBeatBrief
+    || target?.volume_climax_brief
+    || target?.volumeClimaxBrief
+    || target?.volume_beat_brief
+    || target?.volumeBeatBrief
+    || {}
+  const budget = value?.volume_beat_budget
+    || value?.volumeBeatBudget
+    || volumeBeatBudget?.volume_beat_budget
+    || volumeBeatBudget?.volumeBeatBudget
+    || volumeBeatBudget
+    || {}
+  const chapterNo = Number(target?.chapter_no || target?.chapterNo || explicit?.chapter_no || explicit?.chapterNo || 0)
+  const explicitBeats = asArray(explicit?.nearby_beats || explicit?.nearbyBeats)
+    .map((item: any, index: number) => normalizeVolumeClimaxBeat(item, index))
+    .filter(Boolean)
+  const budgetBeats = asArray(budget?.beats || budget?.volume_beats || budget?.volumeBeats || budget?.climax_beats || budget?.climaxBeats)
+    .map((item: any, index: number) => normalizeVolumeClimaxBeat(item, index))
+    .filter(Boolean)
+  const nearbyBeats = (explicitBeats.length ? explicitBeats : sortNearbyVolumeBeats(budgetBeats, chapterNo)).slice(0, 6)
+  const currentBeat = nearbyBeats.find((beat: any) => chapterNo && Number(beat.chapter_no || 0) === chapterNo) || nearbyBeats[0] || null
+  const requiredBeats = uniqueBriefStrings(
+    explicit?.required_beats
+    || explicit?.requiredBeats
+    || explicit?.beats_required
+    || explicit?.beatsRequired
+    || [],
+    8,
+  )
+  const forbiddenPayoff = uniqueBriefStrings(
+    explicit?.forbidden_payoff
+    || explicit?.forbiddenPayoff
+    || explicit?.forbidden_payoffs
+    || explicit?.forbiddenPayoffs
+    || explicit?.forbidden_resolution
+    || explicit?.forbiddenResolution
+    || [],
+    8,
+  )
+  const nextActions = uniqueBriefStrings(
+    explicit?.next_actions
+    || explicit?.nextActions
+    || budget?.next_actions
+    || budget?.nextActions
+    || [],
+    8,
+  )
+  const currentChapterRole = firstCompactText(
+    explicit?.current_chapter_role,
+    explicit?.currentChapterRole,
+    explicit?.chapter_role,
+    explicit?.chapterRole,
+    explicit?.role,
+    currentBeat ? `${currentBeat.type ? `${currentBeat.type}：` : ''}${currentBeat.label}${currentBeat.detail ? `，${currentBeat.detail}` : ''}` : '',
+    budget?.summary,
+  )
+  const volumeGoal = firstCompactText(
+    explicit?.volume_goal,
+    explicit?.volumeGoal,
+    budget?.volume_goal,
+    budget?.volumeGoal,
+    budget?.goal,
+    budget?.summary,
+  )
+  const climaxPromise = firstCompactText(
+    explicit?.climax_promise,
+    explicit?.climaxPromise,
+    explicit?.reader_payoff,
+    explicit?.readerPayoff,
+    explicit?.payoff,
+    currentBeat?.detail,
+  )
+  if (!currentChapterRole && !volumeGoal && !climaxPromise && !requiredBeats.length && !forbiddenPayoff.length && !nearbyBeats.length && !nextActions.length) return null
+  return {
+    status: compactBriefText(explicit?.status || budget?.status, 'ready'),
+    current_volume_title: firstCompactText(explicit?.current_volume_title, explicit?.currentVolumeTitle, budget?.current_volume_title, budget?.currentVolumeTitle, budget?.volume_title, budget?.volumeTitle),
+    chapter_range: firstCompactText(explicit?.chapter_range, explicit?.chapterRange, budget?.chapter_range, budget?.chapterRange),
+    current_chapter_role: currentChapterRole,
+    volume_goal: volumeGoal,
+    climax_promise: climaxPromise,
+    required_beats: requiredBeats,
+    forbidden_payoff: forbiddenPayoff,
+    nearby_beats: nearbyBeats,
+    next_actions: nextActions,
+  }
+}
+
+function normalizeRecentFatigueSignal(value: any) {
+  const key = compactBriefText(value?.key || value?.field || value?.type)
+  const label = compactBriefText(value?.label || value?.title || key)
+  const status = compactBriefText(value?.status || value?.state, 'ok').toLowerCase()
+  const detail = compactBriefText(value?.detail || value?.reason || value?.summary || value?.text)
+  if (!key && !label && !detail) return null
+  return {
+    key: key || label,
+    label: label || key || '疲劳风险',
+    status,
+    detail,
+  }
+}
+
+function normalizeRecentFatigueBrief(value: any) {
+  const raw = value?.recent_fatigue_brief
+    || value?.recentFatigueBrief
+    || value?.recent_fatigue_radar
+    || value?.recentFatigueRadar
+    || value
+    || {}
+  const signals = asArray(raw.signals || raw.fatigue_signals || raw.fatigueSignals)
+    .map((item: any) => normalizeRecentFatigueSignal(item))
+    .filter(Boolean)
+    .slice(0, 8)
+  const warnSignals = signals.filter((signal: any) => !['ok', 'ready', 'pass', 'passed'].includes(String(signal.status || '').toLowerCase()))
+  const nextActions = uniqueBriefStrings(raw.next_actions || raw.nextActions || raw.required_actions || raw.requiredActions || [], 8)
+  const fatigueRisks = uniqueBriefStrings([
+    raw.summary,
+    raw.risk_summary,
+    raw.riskSummary,
+    ...warnSignals.map((signal: any) => signal.detail || signal.label),
+    raw.fatigue_risks,
+    raw.fatigueRisks,
+  ], 10)
+  const actionAndRisks = [...nextActions, ...fatigueRisks]
+  const conflictVariationSource = firstMatchingBrief(actionAndRisks, /冲突|压迫|对手|来源|阻碍/)
+  const payoffVariationSource = firstMatchingBrief(actionAndRisks, /回报|爽点|打脸|兑现|奖励/)
+  const hookVariationSource = firstMatchingBrief(actionAndRisks, /章末|钩子|问题|悬念|翻页/)
+  const sceneFreshnessSource = firstMatchingBrief(actionAndRisks, /场面|可视化|标志性|IP|画面/)
+  const conflictVariation = compactBriefText(
+    raw.conflict_variation
+    || raw.conflictVariation
+    || (conflictVariationSource ? `更换压迫来源：${conflictVariationSource}` : '')
+    || '本章必须更换压迫来源或对手施压方式，不能继续复刻最近章节的同类冲突。',
+  )
+  const payoffVariation = compactBriefText(
+    raw.payoff_variation
+    || raw.payoffVariation
+    || (payoffVariationSource ? `更换回报形态：${payoffVariationSource}` : '')
+    || '本章必须更换回报形态，不能只重复上一轮打脸、震惊或解释。',
+  )
+  const hookVariation = compactBriefText(
+    raw.hook_variation
+    || raw.hookVariation
+    || (hookVariationSource ? `更换章末问题：${hookVariationSource}` : '')
+    || '本章章末问题必须换角度，不得重复最近章节已经用过的追读问题。',
+  )
+  const sceneFreshness = compactBriefText(
+    raw.scene_freshness
+    || raw.sceneFreshness
+    || (sceneFreshnessSource ? `补新可视化场面：${sceneFreshnessSource}` : '')
+    || '本章至少补一个新的可视化场面或空间动作，避免连续章节只有同类对话交锋。',
+  )
+  if (!signals.length && !fatigueRisks.length && !nextActions.length && !conflictVariation && !payoffVariation && !hookVariation && !sceneFreshness) return null
+  return {
+    status: compactBriefText(raw.status, warnSignals.length ? 'needs_attention' : 'ready'),
+    score: Number.isFinite(Number(raw.score)) ? Number(raw.score) : null,
+    chapter_range_label: compactBriefText(raw.chapter_range_label || raw.chapterRangeLabel || raw.range_label || raw.rangeLabel),
+    summary: compactBriefText(raw.summary),
+    fatigue_risks: fatigueRisks,
+    conflict_variation: conflictVariation,
+    payoff_variation: payoffVariation,
+    hook_variation: hookVariation,
+    scene_freshness: sceneFreshness,
+    next_actions: nextActions,
+    signals,
   }
 }
 
@@ -486,6 +1109,190 @@ export function buildReaderExpectationDebtContext(chapter: any, chapters: any[] 
   return applyReaderExpectationDebtAging(normalizeReaderExpectationDebtContext({ must_carry: mustCarry, keep_alive: keepAlive }), chapterNo)
 }
 
+function reviewPayloadForType(review: any, reviewType: string) {
+  const payload = parseJsonLikePayload(review?.payload) || {}
+  return payload?.[reviewType] || payload?.result?.[reviewType] || payload?.result || payload || {}
+}
+
+function reviewBelongsToChapter(review: any, payload: any, chapter: any) {
+  const chapterNo = Number(chapter?.chapter_no || 0)
+  const chapterId = Number(chapter?.id || 0)
+  const payloadChapterNo = Number(payload?.chapter_no || review?.chapter_no || 0)
+  const payloadChapterId = Number(payload?.chapter_id || review?.chapter_id || 0)
+  return (chapterNo > 0 && payloadChapterNo === chapterNo) || (chapterId > 0 && payloadChapterId === chapterId)
+}
+
+function deliveryRiskCountFromPayload(payload: any, keys: string[] = []) {
+  for (const key of keys) {
+    const value = Number(payload?.[key])
+    if (Number.isFinite(value) && value > 0) return value
+  }
+  const candidateArrays = [
+    payload?.missed,
+    payload?.weak_dimensions,
+    payload?.weakDimensions,
+    payload?.drift_risks,
+    payload?.driftRisks,
+    payload?.risks,
+    payload?.risk_items,
+    payload?.riskItems,
+  ]
+  for (const candidate of candidateArrays) {
+    const length = asArray(candidate).length
+    if (length > 0) return length
+  }
+  return 0
+}
+
+function deliveryRiskItemText(value: any) {
+  if (typeof value === 'string') return compactBriefText(value)
+  return compactBriefText(value?.issue || value?.text || value?.label || value?.summary || value?.detail || value?.name || value?.title)
+}
+
+function deliveryRiskEvidence(payload: any) {
+  return [
+    ...asArray(payload?.missed),
+    ...asArray(payload?.weak_dimensions || payload?.weakDimensions),
+    ...asArray(payload?.drift_risks || payload?.driftRisks),
+    ...asArray(payload?.risks),
+  ].map(deliveryRiskItemText).filter(Boolean).slice(0, 6)
+}
+
+function makeDeliveryRiskItem(prefix: string, payload: any, count: number) {
+  const label = compactBriefText(payload?.label || payload?.summary, `${prefix} ${count}`)
+  return `${prefix}：${label}`
+}
+
+export function normalizeDeliveryRiskCarryOverContext(value: any) {
+  if (!value || typeof value !== 'object') return null
+  const items = asArray(value.items || value.risk_items || value.riskItems || value.risks)
+    .map(deliveryRiskItemText)
+    .filter(Boolean)
+  const requiredActions = asArray(value.required_actions || value.requiredActions || value.next_actions || value.nextActions)
+    .map(deliveryRiskItemText)
+    .filter(Boolean)
+  const openingActions = asArray(value.opening_actions || value.openingActions)
+    .map(deliveryRiskItemText)
+    .filter(Boolean)
+  const middleActions = asArray(value.middle_actions || value.middleActions)
+    .map(deliveryRiskItemText)
+    .filter(Boolean)
+  const endingActions = asArray(value.ending_actions || value.endingActions)
+    .map(deliveryRiskItemText)
+    .filter(Boolean)
+  const totalCount = Number(value.total_count ?? value.totalCount ?? value.count ?? items.length)
+  const stagedCount = openingActions.length + middleActions.length + endingActions.length
+  const safeTotal = Number.isFinite(totalCount) && totalCount > 0 ? totalCount : Math.max(items.length, requiredActions.length, stagedCount)
+  if (safeTotal <= 0 && items.length === 0 && requiredActions.length === 0 && stagedCount === 0) return null
+  const sourceChapterNo = Number(value.source_chapter_no ?? value.sourceChapterNo ?? 0) || null
+  return {
+    source_chapter_no: sourceChapterNo,
+    apply_to_chapter_no: Number(value.apply_to_chapter_no ?? value.applyToChapterNo ?? 0) || null,
+    total_count: safeTotal,
+    label: compactBriefText(value.label, `待修复 ${safeTotal}`),
+    priority_label: compactBriefText(value.priority_label || value.priorityLabel, '优先复盘上一章'),
+    items: items.slice(0, 12),
+    required_actions: requiredActions.slice(0, 12),
+    opening_actions: openingActions.slice(0, 12),
+    middle_actions: middleActions.slice(0, 12),
+    ending_actions: endingActions.slice(0, 12),
+    evidence: asArray(value.evidence).map(deliveryRiskItemText).filter(Boolean).slice(0, 12),
+    source_review_ids: asArray(value.source_review_ids || value.sourceReviewIds).filter(Boolean).slice(0, 12),
+  }
+}
+
+export function buildDeliveryRiskCarryOverContext(chapter: any, chapters: any[] = [], reviews: any[] = []) {
+  const chapterNo = Number(chapter?.chapter_no || 0)
+  if (!chapterNo) return null
+  const previousChapter = asArray(chapters)
+    .filter((item: any) => Number(item?.chapter_no || 0) > 0 && Number(item.chapter_no) < chapterNo)
+    .sort((a: any, b: any) => Number(a.chapter_no || 0) - Number(b.chapter_no || 0))
+    .slice(-1)[0]
+  if (!previousChapter) return null
+
+  const rules = [
+    { type: 'chapter_core_drift', prefix: '守核心', priority: '优先补核心', countKeys: ['risk_count', 'riskCount'] },
+    { type: 'runway_sync', prefix: '补航线', priority: '优先补航线', countKeys: ['risk_count', 'riskCount'] },
+    { type: 'story_unit_sync', prefix: '校剧情单元', priority: '优先校单元', countKeys: ['risk_count', 'riskCount'] },
+    { type: 'signature_scene_sync', prefix: '补强场面', priority: '优先补强场面', countKeys: ['missed_count', 'missedCount'] },
+    { type: 'reader_expectation_sync', prefix: '补期待', priority: '优先补期待', countKeys: ['missed_count', 'missedCount'] },
+    { type: 'reader_retention_sync', prefix: '补追读', priority: '优先补追读', countKeys: ['missed_count', 'missedCount'] },
+    { type: 'chapter_attraction_review', prefix: '修吸引力', priority: '', countKeys: ['weak_count', 'weakCount'] },
+    { type: 'story_drive_sync', prefix: '补故事力', priority: '', countKeys: ['missed_count', 'missedCount'] },
+    { type: 'character_arc_sync', prefix: '补人物弧光', priority: '', countKeys: ['missed_count', 'missedCount'] },
+    { type: 'chapter_benchmark_sync', prefix: '补基准', priority: '优先补基准', countKeys: ['missed_count', 'missedCount'] },
+    { type: 'style_sample_sync', prefix: '校风格', priority: '优先校风格', countKeys: ['missed_count', 'missedCount', 'copy_risk_count', 'copyRiskCount'] },
+    { type: 'innovation_sync', prefix: '补创新', priority: '优先补创新', countKeys: ['missed_count', 'missedCount'] },
+    { type: 'volume_beat_sync', prefix: '补爆点', priority: '优先补爆点', countKeys: ['missed_count', 'missedCount'] },
+    { type: 'readability_review', prefix: '调可读性', priority: '优先调可读性', countKeys: ['risk_count', 'riskCount'] },
+  ]
+  const latestByType = new Map<string, any>()
+  for (const review of asArray(reviews)) {
+    const type = String(review?.review_type || '')
+    if (!rules.some(rule => rule.type === type) && type !== 'storyline_sync') continue
+    const payload = reviewPayloadForType(review, type)
+    if (!reviewBelongsToChapter(review, payload, previousChapter)) continue
+    const existing = latestByType.get(type)
+    if (!existing || reviewTimestamp(review) >= reviewTimestamp(existing.review)) {
+      latestByType.set(type, { review, payload })
+    }
+  }
+
+  const riskRows: Array<{ count: number; item: string; priorityLabel: string; evidence: string[]; sourceReviewId: any }> = []
+  for (const rule of rules) {
+    const entry = latestByType.get(rule.type)
+    if (!entry) continue
+    const payload = entry.payload || {}
+    const count = deliveryRiskCountFromPayload(payload, rule.countKeys)
+    if (count <= 0 || String(payload?.status || '').toLowerCase() === 'ok') continue
+    const priorityLabel = compactBriefText(
+      payload?.priority_repair || payload?.priorityRepair || payload?.priority_label || payload?.priorityLabel,
+      rule.type === 'reader_expectation_sync' && Number(payload?.opening_handoff_missed_count || payload?.openingHandoffMissedCount || 0) > 0
+        ? '优先修开篇'
+        : rule.priority || '优先复盘上一章',
+    )
+    riskRows.push({
+      count,
+      item: makeDeliveryRiskItem(rule.prefix, payload, count),
+      priorityLabel,
+      evidence: deliveryRiskEvidence(payload),
+      sourceReviewId: entry.review?.id || null,
+    })
+  }
+  const storylineEntry = latestByType.get('storyline_sync')
+  if (storylineEntry) {
+    const payload = storylineEntry.payload || {}
+    const count = Number(payload?.missed_count || payload?.missedCount || asArray(payload?.missed).length)
+      + Number(payload?.unplanned_count || payload?.unplannedCount || asArray(payload?.unplanned).length)
+      + Number(payload?.forbidden_count || payload?.forbiddenCount || asArray(payload?.forbidden_touched || payload?.forbiddenTouched).length)
+    if (count > 0 && String(payload?.status || '').toLowerCase() !== 'ok') {
+      riskRows.push({
+        count,
+        item: makeDeliveryRiskItem('校剧情线', payload, count),
+        priorityLabel: '优先校剧情线',
+        evidence: deliveryRiskEvidence(payload),
+        sourceReviewId: storylineEntry.review?.id || null,
+      })
+    }
+  }
+
+  const totalCount = riskRows.reduce((sum, row) => sum + row.count, 0)
+  if (totalCount <= 0) return null
+  return normalizeDeliveryRiskCarryOverContext({
+    source_chapter_no: Number(previousChapter.chapter_no || 0) || null,
+    total_count: totalCount,
+    label: `待修复 ${totalCount}`,
+    priority_label: riskRows[0]?.priorityLabel || '优先复盘上一章',
+    items: riskRows.map(row => row.item),
+    required_actions: [
+      `第${previousChapter.chapter_no}章交稿风险必须在本章开篇、场景推进或章末钩子中得到可见承接。`,
+      ...riskRows.flatMap(row => row.evidence.map(item => `修复：${item}`)),
+    ],
+    evidence: riskRows.flatMap(row => row.evidence),
+    source_review_ids: riskRows.map(row => row.sourceReviewId).filter(Boolean),
+  })
+}
+
 function buildReaderExpectationLedger(project: any, contextPackage: any, sceneBriefs: any[], readerRetentionBrief: any) {
   const chapterTarget = contextPackage?.chapter_target || {}
   const readerExpectationDebtContext = applyReaderExpectationDebtAging(
@@ -655,6 +1462,141 @@ function normalizeLongformCompass(value: any) {
     immutable_rules: immutableRules,
     flexible_zones: flexibleZones,
   }
+}
+
+const CORE_CONTRACT_CHECK_LABELS: Record<string, string> = {
+  reader_promise: '读者承诺',
+  chapter_goal: '本章目标',
+  chapter_objective: '本章目标',
+  core_conflict: '核心冲突',
+  mainline_service: '主线服务',
+  reader_payoff: '读者回报',
+  ending_hook: '章末钩子',
+  innovation_hook: '创新卖点',
+  forbidden_content: '不可偏移',
+}
+
+function uniqueBriefStrings(values: any[], limit = 12) {
+  return Array.from(new Set(values
+    .flatMap(value => Array.isArray(value) ? value : [value])
+    .map(value => compactBriefText(value))
+    .filter(Boolean))).slice(0, limit)
+}
+
+function normalizeCoreContractCheck(item: any, fallbackKey = '') {
+  const key = compactBriefText(item?.key || item?.field || fallbackKey)
+  const label = compactBriefText(item?.label || item?.title, CORE_CONTRACT_CHECK_LABELS[key] || key || '核心契约')
+  const status = compactBriefText(item?.status || item?.state, 'ok').toLowerCase()
+  const reason = compactBriefText(item?.reason || item?.detail || item?.message || item?.summary || item?.text)
+  if (!key && !label && !reason) return null
+  return {
+    key: key || label,
+    label: label || key,
+    status,
+    reason,
+  }
+}
+
+function normalizeChapterLaunchGateChecks(gate: any) {
+  if (!gate || typeof gate !== 'object') return []
+  const signalChecks = asArray(gate.signals)
+    .map((item: any) => normalizeCoreContractCheck(item))
+    .filter(Boolean)
+  const objectChecks = Object.entries(gate)
+    .filter(([key, value]) => {
+      if (['signals', 'summary'].includes(key)) return false
+      return value && typeof value === 'object' && !Array.isArray(value)
+    })
+    .map(([key, value]: [string, any]) => normalizeCoreContractCheck({ key, ...value }, key))
+    .filter(Boolean)
+  const checks = signalChecks.length ? signalChecks : objectChecks
+  if (checks.length) return checks
+  const status = compactBriefText(gate.status)
+  const summary = compactBriefText(gate.summary || gate.reason || gate.detail)
+  return status || summary ? [normalizeCoreContractCheck({ key: 'chapter_launch_gate', label: '开写门禁', status, reason: summary })].filter(Boolean) : []
+}
+
+function normalizeCoreContractRadar(value: any) {
+  const raw = value?.core_contract_radar || value?.coreContractRadar || value || {}
+  const mustServe = uniqueBriefStrings(raw.must_serve || raw.mustServe || raw.required || raw.mustServePoints || [], 12)
+  const noDrift = uniqueBriefStrings(raw.no_drift || raw.noDrift || raw.red_lines || raw.redLines || raw.immutable_rules || raw.immutableRules || [], 12)
+  const repairFocus = uniqueBriefStrings(raw.repair_focus || raw.repairFocus || raw.required_actions || raw.requiredActions || [], 10)
+  const checks = asArray(raw.checks).map((item: any) => normalizeCoreContractCheck(item)).filter(Boolean).slice(0, 8)
+  const summary = compactBriefText(raw.summary || raw.detail || raw.reason || (
+    mustServe.length ? `本章必须服务：${mustServe.slice(0, 3).join('；')}` : ''
+  ))
+  if (!summary && !mustServe.length && !noDrift.length && !repairFocus.length && !checks.length) return null
+  return {
+    summary,
+    must_serve: mustServe,
+    no_drift: noDrift,
+    repair_focus: repairFocus,
+    checks,
+  }
+}
+
+function buildCoreContractRadar(project: any, contextPackage: any, sceneBriefs: any[], longformCompass: any, longformBattleContext: any = null) {
+  const existing = normalizeCoreContractRadar(contextPackage?.chapter_target?.core_contract_radar || contextPackage?.core_contract_radar)
+  if (existing) return existing
+  const target = contextPackage?.chapter_target || {}
+  const bible = contextPackage?.writing_bible || project?.reference_config?.writing_bible || {}
+  const axes = asArray(longformCompass?.axes)
+  const axisValue = (key: string) => axes.find((axis: any) => axis?.key === key)?.value
+  const gateChecks = normalizeChapterLaunchGateChecks(target.chapter_launch_gate || contextPackage?.chapter_launch_gate)
+  const drift = contextPackage?.chapter_core_drift || contextPackage?.core_drift || target.core_drift || {}
+  const driftRisks = uniqueBriefStrings([drift.drift_risks, drift.risks, drift.issues], 8)
+  const riskLaneActions = uniqueBriefStrings(asArray(longformBattleContext?.risk_lanes).map((lane: any) => lane?.required_action || lane?.detail), 6)
+  const gateRepair = uniqueBriefStrings(
+    gateChecks
+      .filter((check: any) => ['warn', 'warning', 'block', 'blocked', 'risk', 'needs_action'].includes(String(check.status).toLowerCase()))
+      .map((check: any) => check.reason || check.label),
+    8,
+  )
+  const mustServe = uniqueBriefStrings([
+    longformCompass?.reader_promise,
+    axisValue('reader_promise'),
+    axisValue('core_conflict'),
+    axisValue('innovation_hook'),
+    axisValue('payoff_loop'),
+    bible.reader_promise,
+    bible.promise,
+    target.summary || target.goal || target.chapter_goal,
+    target.conflict || target.core_conflict,
+    sceneBriefs.map(item => item.reader_payoff),
+  ], 12)
+  const noDrift = uniqueBriefStrings([
+    longformCompass?.immutable_rules,
+    bible.immutable_rules,
+    bible.red_lines,
+    target.forbidden_content,
+    target.forbidden_repeats,
+  ], 12)
+  const repairFocus = uniqueBriefStrings([
+    gateRepair,
+    driftRisks,
+    riskLaneActions,
+  ], 10)
+  const checks = gateChecks.length
+    ? gateChecks
+    : [
+        mustServe.length ? normalizeCoreContractCheck({ key: 'reader_promise', label: '读者承诺', status: 'ok', reason: mustServe[0] }) : null,
+        target.summary ? normalizeCoreContractCheck({ key: 'chapter_goal', label: '本章目标', status: 'ok', reason: target.summary }) : null,
+        target.conflict ? normalizeCoreContractCheck({ key: 'core_conflict', label: '核心冲突', status: 'ok', reason: target.conflict }) : null,
+      ].filter(Boolean)
+  const summary = compactBriefText(
+    repairFocus.length
+      ? `本章必须修正：${repairFocus.slice(0, 2).join('；')}`
+      : mustServe.length
+        ? `本章必须服务：${mustServe.slice(0, 3).join('；')}`
+        : '',
+  )
+  return normalizeCoreContractRadar({
+    summary,
+    must_serve: mustServe,
+    no_drift: noDrift,
+    repair_focus: repairFocus,
+    checks,
+  })
 }
 
 function normalizeMemoryTextItem(value: any) {
@@ -855,9 +1797,28 @@ function normalizeNextBatchChapter(item: any) {
   }
 }
 
+function normalizeNextBatchChecklistItem(item: any) {
+  const key = compactBriefText(item?.key)
+  const label = compactBriefText(item?.label || item?.name || key)
+  const statusRaw = compactBriefText(item?.status)
+  const status = ['ok', 'warn', 'block'].includes(statusRaw) ? statusRaw : statusRaw === 'blocked' ? 'block' : statusRaw || 'warn'
+  const detail = compactBriefText(item?.detail || item?.summary || item?.description)
+  if (!key && !label && !detail) return null
+  return {
+    key,
+    label,
+    status,
+    detail,
+  }
+}
+
 function normalizeNextBatchBrief(value: any, targetChapterNo = 0) {
   const raw = value?.next_batch_brief || value?.nextBatchBrief || value || {}
   const chapters = asArray(raw.chapters).map(normalizeNextBatchChapter).filter(Boolean).slice(0, 10)
+  const startChecklist = asArray(raw.start_checklist || raw.startChecklist || raw.start_checklist_items || raw.startChecklistItems)
+    .map(normalizeNextBatchChecklistItem)
+    .filter(Boolean)
+    .slice(0, 8)
   const currentChapter = chapters.find((item: any) => Number(item.chapter_no) === Number(targetChapterNo)) || null
   const currentChapterRole = compactBriefText(
     raw.current_chapter_role || raw.currentChapterRole || currentChapter?.chapter_task || currentChapter?.conflict || currentChapter?.mainline_progress,
@@ -869,6 +1830,7 @@ function normalizeNextBatchBrief(value: any, targetChapterNo = 0) {
     mainline_focus: compactBriefText(raw.mainline_focus || raw.mainlineFocus),
     forbidden_boundary: compactBriefText(raw.forbidden_boundary || raw.forbiddenBoundary),
     current_chapter_role: currentChapterRole,
+    start_checklist: startChecklist,
     chapters,
   }
   const hasContent = normalized.chapter_range_label
@@ -877,6 +1839,7 @@ function normalizeNextBatchBrief(value: any, targetChapterNo = 0) {
     || normalized.mainline_focus
     || normalized.forbidden_boundary
     || normalized.current_chapter_role
+    || normalized.start_checklist.length
     || normalized.chapters.length
   return hasContent ? normalized : null
 }
@@ -3413,6 +4376,77 @@ export function buildChapterPreDraftBrief(project: any, contextPackage: any) {
   const nextBatchBrief = normalizeNextBatchBrief(contextPackage?.chapter_target?.next_batch_brief || contextPackage?.next_batch_brief, Number(chapterTarget.chapter_no || 0))
   const storyUnitContext = normalizeStoryUnitContext(contextPackage?.chapter_target?.story_unit_context || contextPackage?.story_unit_context, Number(chapterTarget.chapter_no || 0))
   const readerRetentionBrief = buildReaderRetentionBrief(project, contextPackage, sceneBriefs)
+  const readerDropRiskBrief = normalizeReaderDropRiskBrief(
+    contextPackage?.chapter_target?.reader_drop_risk_brief
+    || contextPackage?.reader_drop_risk_brief
+    || contextPackage?.reader_trial_context
+    || contextPackage?.readerTrialContext,
+    readerRetentionBrief,
+    first30RetentionBrief,
+  )
+  const storyPressureBrief = normalizeStoryPressureBrief(
+    contextPackage?.chapter_target?.story_pressure_brief
+    || contextPackage?.chapter_target?.storyPressureBrief
+    || contextPackage?.story_pressure_brief
+    || contextPackage?.storyPressureBrief
+    || contextPackage?.story_pressure_ladder
+    || contextPackage?.storyPressureLadder,
+  )
+  const storyDriveBrief = normalizeStoryDriveBrief(
+    contextPackage?.chapter_target?.story_drive_brief
+    || contextPackage?.chapter_target?.storyDriveBrief
+    || contextPackage,
+    sceneCards,
+  )
+  const serialRhythmBrief = normalizeSerialRhythmBrief(
+    contextPackage?.chapter_target?.serial_rhythm_brief
+    || contextPackage?.chapter_target?.serialRhythmBrief
+    || contextPackage?.serial_rhythm_brief
+    || contextPackage?.serialRhythmBrief,
+    sceneBriefs,
+    readerRetentionBrief,
+    wordTarget,
+  )
+  const pageTurnHookBrief = normalizePageTurnHookBrief(
+    contextPackage?.chapter_target?.page_turn_hook_brief
+    || contextPackage?.chapter_target?.pageTurnHookBrief
+    || contextPackage?.page_turn_hook_brief
+    || contextPackage?.pageTurnHookBrief,
+    chapterTarget,
+    sceneBriefs,
+    readerRetentionBrief,
+    storyDriveBrief,
+  )
+  const volumeClimaxBrief = normalizeVolumeClimaxBrief(
+    contextPackage?.chapter_target?.volume_climax_brief
+    || contextPackage?.chapter_target?.volumeClimaxBrief
+    || contextPackage?.chapter_target?.volume_beat_brief
+    || contextPackage?.chapter_target?.volumeBeatBrief
+    || contextPackage?.volume_climax_brief
+    || contextPackage?.volumeClimaxBrief
+    || contextPackage?.volume_beat_brief
+    || contextPackage?.volumeBeatBrief
+    || contextPackage?.volume_beat_budget
+    || contextPackage?.volumeBeatBudget,
+    chapterTarget,
+    contextPackage?.volume_beat_budget || contextPackage?.volumeBeatBudget,
+  )
+  const recentFatigueBrief = normalizeRecentFatigueBrief(
+    contextPackage?.chapter_target?.recent_fatigue_brief
+    || contextPackage?.chapter_target?.recentFatigueBrief
+    || contextPackage?.chapter_target?.recent_fatigue_radar
+    || contextPackage?.chapter_target?.recentFatigueRadar
+    || contextPackage?.recent_fatigue_brief
+    || contextPackage?.recentFatigueBrief
+    || contextPackage?.recent_fatigue_radar
+    || contextPackage?.recentFatigueRadar,
+  )
+  const deliveryRiskCarryOver = normalizeDeliveryRiskCarryOverContext(
+    contextPackage?.chapter_target?.delivery_risk_carry_over
+    || contextPackage?.chapter_target?.deliveryRiskCarryOver
+    || contextPackage?.delivery_risk_carry_over
+    || contextPackage?.deliveryRiskCarryOver,
+  )
   const readerExpectationDebtContext = applyReaderExpectationDebtAging(
     normalizeReaderExpectationDebtContext(chapterTarget.reader_expectation_debt_context || contextPackage?.reader_expectation_debt_context),
     Number(chapterTarget.chapter_no || 0),
@@ -3433,6 +4467,7 @@ export function buildChapterPreDraftBrief(project: any, contextPackage: any) {
       signature_scene_brief: signatureSceneBrief,
     },
   }, sceneBriefs, longformCompass)
+  const coreContractRadar = buildCoreContractRadar(project, contextPackage, sceneBriefs, longformCompass, longformBattleContext)
   const previousHandoff = buildPreviousChapterHandoff(contextPackage)
 
   return {
@@ -3451,6 +4486,14 @@ export function buildChapterPreDraftBrief(project: any, contextPackage: any) {
     storyline_forbidden: Array.from(new Set(storylineForbidden)).slice(0, 12),
     character_arc_brief: characterArcBrief,
     reader_retention_brief: readerRetentionBrief,
+    reader_drop_risk_brief: readerDropRiskBrief,
+    story_pressure_brief: storyPressureBrief,
+    story_drive_brief: storyDriveBrief,
+    serial_rhythm_brief: serialRhythmBrief,
+    page_turn_hook_brief: pageTurnHookBrief,
+    volume_climax_brief: volumeClimaxBrief,
+    recent_fatigue_brief: recentFatigueBrief,
+    delivery_risk_carry_over: deliveryRiskCarryOver,
     reader_expectation_debt: readerExpectationDebtContext,
     reader_expectation_ledger: readerExpectationLedger,
     innovation_brief: innovationBrief,
@@ -3459,6 +4502,7 @@ export function buildChapterPreDraftBrief(project: any, contextPackage: any) {
     style_sample_strategy: styleSampleStrategy,
     chapter_benchmark_strategy: chapterBenchmarkStrategy,
     first30_retention_brief: first30RetentionBrief,
+    core_contract_radar: coreContractRadar,
     longform_compass: longformCompass,
     longform_battle_context: longformBattleContext,
     longform_memory_capsule: longformMemoryCapsule,
@@ -3476,6 +4520,11 @@ export function buildChapterPreDraftBrief(project: any, contextPackage: any) {
 export function mergeConfirmedPreDraftBriefIntoContext(contextPackage: any, preDraftBrief: any) {
   if (!preDraftBrief?.confirmed_at) return contextPackage
   const longformCompass = normalizeLongformCompass(preDraftBrief.longform_compass || (contextPackage || {}).chapter_target?.longform_compass || (contextPackage || {}).longform_compass)
+  const coreContractRadar = normalizeCoreContractRadar(
+    preDraftBrief.core_contract_radar
+    || (contextPackage || {}).chapter_target?.core_contract_radar
+    || (contextPackage || {}).core_contract_radar,
+  )
   const longformBattleContext = normalizeLongformBattleContext(
     preDraftBrief.longform_battle_context
     || (contextPackage || {}).chapter_target?.longform_battle_context
@@ -3495,6 +4544,102 @@ export function mergeConfirmedPreDraftBriefIntoContext(contextPackage: any, preD
   const targetChapterNo = Number((contextPackage || {}).chapter_target?.chapter_no || preDraftBrief.chapter_no || 0)
   const nextBatchBrief = normalizeNextBatchBrief(preDraftBrief.next_batch_brief || (contextPackage || {}).chapter_target?.next_batch_brief || (contextPackage || {}).next_batch_brief, targetChapterNo)
   const storyUnitContext = normalizeStoryUnitContext(preDraftBrief.story_unit_context || (contextPackage || {}).chapter_target?.story_unit_context || (contextPackage || {}).story_unit_context, targetChapterNo)
+  const readerDropRiskBrief = normalizeReaderDropRiskBrief(
+    preDraftBrief.reader_drop_risk_brief
+    || preDraftBrief.readerDropRiskBrief
+    || (contextPackage || {}).chapter_target?.reader_drop_risk_brief
+    || (contextPackage || {}).reader_drop_risk_brief
+    || (contextPackage || {}).reader_trial_context
+    || (contextPackage || {}).readerTrialContext,
+    preDraftBrief.reader_retention_brief || (contextPackage || {}).chapter_target?.reader_retention_brief || null,
+    preDraftBrief.first30_retention_brief || (contextPackage || {}).chapter_target?.first30_retention_brief || (contextPackage || {}).first30_retention_context || null,
+  )
+  const storyPressureBrief = normalizeStoryPressureBrief(
+    preDraftBrief.story_pressure_brief
+    || preDraftBrief.storyPressureBrief
+    || (contextPackage || {}).chapter_target?.story_pressure_brief
+    || (contextPackage || {}).chapter_target?.storyPressureBrief
+    || (contextPackage || {}).story_pressure_brief
+    || (contextPackage || {}).storyPressureBrief
+    || (contextPackage || {}).story_pressure_ladder
+    || (contextPackage || {}).storyPressureLadder,
+  )
+  const storyDriveBrief = normalizeStoryDriveBrief(
+    preDraftBrief.story_drive_brief
+    || preDraftBrief.storyDriveBrief
+    || (contextPackage || {}).chapter_target?.story_drive_brief
+    || (contextPackage || {}).chapter_target?.storyDriveBrief
+    || (contextPackage || {}),
+    asArray(preDraftBrief.scene_briefs).length
+      ? asArray(preDraftBrief.scene_briefs)
+      : asArray((contextPackage || {}).chapter_target?.scene_cards),
+  )
+  const sceneBriefs = asArray(preDraftBrief.scene_briefs).length
+    ? asArray(preDraftBrief.scene_briefs)
+    : asArray((contextPackage || {}).chapter_target?.scene_cards).map(sceneBriefFromCard)
+  const serialRhythmBrief = normalizeSerialRhythmBrief(
+    preDraftBrief.serial_rhythm_brief
+    || preDraftBrief.serialRhythmBrief
+    || (contextPackage || {}).chapter_target?.serial_rhythm_brief
+    || (contextPackage || {}).chapter_target?.serialRhythmBrief
+    || (contextPackage || {}).serial_rhythm_brief
+    || (contextPackage || {}).serialRhythmBrief,
+    sceneBriefs,
+    preDraftBrief.reader_retention_brief || (contextPackage || {}).chapter_target?.reader_retention_brief || null,
+    (contextPackage || {}).chapter_target?.word_target,
+  )
+  const pageTurnHookBrief = normalizePageTurnHookBrief(
+    preDraftBrief.page_turn_hook_brief
+    || preDraftBrief.pageTurnHookBrief
+    || (contextPackage || {}).chapter_target?.page_turn_hook_brief
+    || (contextPackage || {}).chapter_target?.pageTurnHookBrief
+    || (contextPackage || {}).page_turn_hook_brief
+    || (contextPackage || {}).pageTurnHookBrief,
+    (contextPackage || {}).chapter_target || {},
+    sceneBriefs,
+    preDraftBrief.reader_retention_brief || (contextPackage || {}).chapter_target?.reader_retention_brief || null,
+    storyDriveBrief,
+  )
+  const volumeClimaxBrief = normalizeVolumeClimaxBrief(
+    preDraftBrief.volume_climax_brief
+    || preDraftBrief.volumeClimaxBrief
+    || preDraftBrief.volume_beat_brief
+    || preDraftBrief.volumeBeatBrief
+    || (contextPackage || {}).chapter_target?.volume_climax_brief
+    || (contextPackage || {}).chapter_target?.volumeClimaxBrief
+    || (contextPackage || {}).chapter_target?.volume_beat_brief
+    || (contextPackage || {}).chapter_target?.volumeBeatBrief
+    || (contextPackage || {}).volume_climax_brief
+    || (contextPackage || {}).volumeClimaxBrief
+    || (contextPackage || {}).volume_beat_brief
+    || (contextPackage || {}).volumeBeatBrief
+    || (contextPackage || {}).volume_beat_budget
+    || (contextPackage || {}).volumeBeatBudget,
+    (contextPackage || {}).chapter_target || {},
+    (contextPackage || {}).volume_beat_budget || (contextPackage || {}).volumeBeatBudget,
+  )
+  const recentFatigueBrief = normalizeRecentFatigueBrief(
+    preDraftBrief.recent_fatigue_brief
+    || preDraftBrief.recentFatigueBrief
+    || preDraftBrief.recent_fatigue_radar
+    || preDraftBrief.recentFatigueRadar
+    || (contextPackage || {}).chapter_target?.recent_fatigue_brief
+    || (contextPackage || {}).chapter_target?.recentFatigueBrief
+    || (contextPackage || {}).chapter_target?.recent_fatigue_radar
+    || (contextPackage || {}).chapter_target?.recentFatigueRadar
+    || (contextPackage || {}).recent_fatigue_brief
+    || (contextPackage || {}).recentFatigueBrief
+    || (contextPackage || {}).recent_fatigue_radar
+    || (contextPackage || {}).recentFatigueRadar,
+  )
+  const deliveryRiskCarryOver = normalizeDeliveryRiskCarryOverContext(
+    preDraftBrief.delivery_risk_carry_over
+    || preDraftBrief.deliveryRiskCarryOver
+    || (contextPackage || {}).chapter_target?.delivery_risk_carry_over
+    || (contextPackage || {}).chapter_target?.deliveryRiskCarryOver
+    || (contextPackage || {}).delivery_risk_carry_over
+    || (contextPackage || {}).deliveryRiskCarryOver,
+  )
   const readerExpectationDebtContext = applyReaderExpectationDebtAging(
     normalizeReaderExpectationDebtContext(preDraftBrief.reader_expectation_debt || (contextPackage || {}).chapter_target?.reader_expectation_debt_context || (contextPackage || {}).reader_expectation_debt_context),
     Number((contextPackage || {}).chapter_target?.chapter_no || preDraftBrief.chapter_no || 0),
@@ -3508,11 +4653,20 @@ export function mergeConfirmedPreDraftBriefIntoContext(contextPackage: any, preD
   return {
     ...(contextPackage || {}),
     pre_draft_brief: preDraftBrief,
+    core_contract_radar: coreContractRadar || (contextPackage || {}).core_contract_radar || null,
     longform_compass: longformCompass || (contextPackage || {}).longform_compass || null,
     longform_battle_context: longformBattleContext || (contextPackage || {}).longform_battle_context || null,
     longform_memory_capsule: longformMemoryCapsule || (contextPackage || {}).longform_memory_capsule || null,
     next_batch_brief: nextBatchBrief || (contextPackage || {}).next_batch_brief || null,
     story_unit_context: storyUnitContext || (contextPackage || {}).story_unit_context || null,
+    reader_drop_risk_brief: readerDropRiskBrief || (contextPackage || {}).reader_drop_risk_brief || null,
+    story_pressure_brief: storyPressureBrief || (contextPackage || {}).story_pressure_brief || null,
+    story_drive_brief: storyDriveBrief || (contextPackage || {}).story_drive_brief || null,
+    serial_rhythm_brief: serialRhythmBrief || (contextPackage || {}).serial_rhythm_brief || null,
+    page_turn_hook_brief: pageTurnHookBrief || (contextPackage || {}).page_turn_hook_brief || null,
+    volume_climax_brief: volumeClimaxBrief || (contextPackage || {}).volume_climax_brief || null,
+    recent_fatigue_brief: recentFatigueBrief || (contextPackage || {}).recent_fatigue_brief || null,
+    delivery_risk_carry_over: deliveryRiskCarryOver || (contextPackage || {}).delivery_risk_carry_over || null,
     reader_expectation_debt_context: readerExpectationDebtContext,
     character_arc_context: characterArcBrief || (contextPackage || {}).character_arc_context || null,
     chapter_target: {
@@ -3532,6 +4686,14 @@ export function mergeConfirmedPreDraftBriefIntoContext(contextPackage: any, preD
       storyline_forbidden: asArray(preDraftBrief.storyline_forbidden),
       character_arc_brief: characterArcBrief,
       reader_retention_brief: preDraftBrief.reader_retention_brief || (contextPackage || {}).chapter_target?.reader_retention_brief || null,
+      reader_drop_risk_brief: readerDropRiskBrief || (contextPackage || {}).chapter_target?.reader_drop_risk_brief || null,
+      story_pressure_brief: storyPressureBrief || (contextPackage || {}).chapter_target?.story_pressure_brief || null,
+      story_drive_brief: storyDriveBrief || (contextPackage || {}).chapter_target?.story_drive_brief || null,
+      serial_rhythm_brief: serialRhythmBrief || (contextPackage || {}).chapter_target?.serial_rhythm_brief || null,
+      page_turn_hook_brief: pageTurnHookBrief || (contextPackage || {}).chapter_target?.page_turn_hook_brief || null,
+      volume_climax_brief: volumeClimaxBrief || (contextPackage || {}).chapter_target?.volume_climax_brief || null,
+      recent_fatigue_brief: recentFatigueBrief || (contextPackage || {}).chapter_target?.recent_fatigue_brief || null,
+      delivery_risk_carry_over: deliveryRiskCarryOver || (contextPackage || {}).chapter_target?.delivery_risk_carry_over || null,
       reader_expectation_debt_context: readerExpectationDebtContext,
       reader_expectation_ledger: preDraftBrief.reader_expectation_ledger || (contextPackage || {}).chapter_target?.reader_expectation_ledger || null,
       innovation_brief: preDraftBrief.innovation_brief || (contextPackage || {}).chapter_target?.innovation_brief || null,
@@ -3540,6 +4702,7 @@ export function mergeConfirmedPreDraftBriefIntoContext(contextPackage: any, preD
       style_sample_strategy: preDraftBrief.style_sample_strategy || (contextPackage || {}).chapter_target?.style_sample_strategy || null,
       chapter_benchmark_strategy: preDraftBrief.chapter_benchmark_strategy || (contextPackage || {}).chapter_target?.chapter_benchmark_strategy || null,
       first30_retention_brief: preDraftBrief.first30_retention_brief || (contextPackage || {}).chapter_target?.first30_retention_brief || (contextPackage || {}).first30_retention_context || null,
+      core_contract_radar: coreContractRadar || (contextPackage || {}).chapter_target?.core_contract_radar || null,
       longform_compass: longformCompass || (contextPackage || {}).chapter_target?.longform_compass || null,
       longform_battle_context: longformBattleContext || (contextPackage || {}).chapter_target?.longform_battle_context || null,
       longform_memory_capsule: longformMemoryCapsule || (contextPackage || {}).chapter_target?.longform_memory_capsule || null,
@@ -3724,6 +4887,7 @@ export function createNovelWritingService(ctx: {
   }
 
   const buildParagraphProseContext = (project: any, contextPackage: any, migrationPlan: any = null, chapterDraft: any = null) => {
+    const chapterTarget = contextPackage?.chapter_target || {}
     const longformCompass = normalizeLongformCompass(contextPackage?.chapter_target?.longform_compass || contextPackage?.longform_compass)
     const longformBattleContext = normalizeLongformBattleContext(
       contextPackage?.chapter_target?.longform_battle_context
@@ -3733,11 +4897,21 @@ export function createNovelWritingService(ctx: {
       || contextPackage?.longformBattleDesk,
     )
     const chapterLaunchGate = contextPackage?.chapter_target?.chapter_launch_gate || contextPackage?.chapter_launch_gate || null
+    const sceneBriefs = asArray(chapterTarget.scene_cards).map(sceneBriefFromCard)
+    const coreContractRadar = buildCoreContractRadar(project, contextPackage, sceneBriefs, longformCompass, longformBattleContext)
     const nextBatchBrief = normalizeNextBatchBrief(
       contextPackage?.chapter_target?.next_batch_brief || contextPackage?.next_batch_brief,
       Number(chapterDraft?.chapter_no || contextPackage?.chapter_target?.chapter_no || 0),
     )
     const batchPreflight = contextPackage?.chapter_target?.batch_preflight || contextPackage?.batch_preflight || null
+    const batchDeliveryRiskCarryOver = normalizeDeliveryRiskCarryOverContext(
+      batchPreflight?.delivery_risk_carry_over
+      || batchPreflight?.deliveryRiskCarryOver,
+    )
+    const batchChapterHandoffContract = normalizeBatchChapterHandoffContract(
+      batchPreflight?.chapter_handoff_contract
+      || batchPreflight?.chapterHandoffContract,
+    )
     const longformMemoryAnchor = batchPreflight?.longform_memory_anchor
       || batchPreflight?.longformMemoryAnchor
       || contextPackage?.chapter_target?.longform_memory_anchor
@@ -3753,6 +4927,77 @@ export function createNovelWritingService(ctx: {
     const styleSampleStrategy = contextPackage?.chapter_target?.style_sample_strategy || buildStyleSampleStrategy(project, contextPackage)
     const chapterBenchmarkStrategy = contextPackage?.chapter_target?.chapter_benchmark_strategy || buildChapterBenchmarkStrategy(project, contextPackage)
     const first30RetentionBrief = contextPackage?.chapter_target?.first30_retention_brief || contextPackage?.first30_retention_context || null
+    const readerDropRiskBrief = normalizeReaderDropRiskBrief(
+      contextPackage?.chapter_target?.reader_drop_risk_brief
+      || contextPackage?.reader_drop_risk_brief
+      || contextPackage?.reader_trial_context
+      || contextPackage?.readerTrialContext,
+      contextPackage?.chapter_target?.reader_retention_brief,
+      first30RetentionBrief,
+    )
+    const storyPressureBrief = normalizeStoryPressureBrief(
+      contextPackage?.chapter_target?.story_pressure_brief
+      || contextPackage?.chapter_target?.storyPressureBrief
+      || contextPackage?.story_pressure_brief
+      || contextPackage?.storyPressureBrief
+      || contextPackage?.story_pressure_ladder
+      || contextPackage?.storyPressureLadder,
+    )
+    const storyDriveBrief = normalizeStoryDriveBrief(
+      contextPackage?.chapter_target?.story_drive_brief
+      || contextPackage?.chapter_target?.storyDriveBrief
+      || contextPackage,
+      asArray(contextPackage?.chapter_target?.scene_cards),
+    )
+    const serialRhythmBrief = normalizeSerialRhythmBrief(
+      contextPackage?.chapter_target?.serial_rhythm_brief
+      || contextPackage?.chapter_target?.serialRhythmBrief
+      || contextPackage?.serial_rhythm_brief
+      || contextPackage?.serialRhythmBrief,
+      sceneBriefs,
+      contextPackage?.chapter_target?.reader_retention_brief,
+      contextPackage?.chapter_target?.word_target,
+    )
+    const pageTurnHookBrief = normalizePageTurnHookBrief(
+      contextPackage?.chapter_target?.page_turn_hook_brief
+      || contextPackage?.chapter_target?.pageTurnHookBrief
+      || contextPackage?.page_turn_hook_brief
+      || contextPackage?.pageTurnHookBrief,
+      contextPackage?.chapter_target || {},
+      sceneBriefs,
+      contextPackage?.chapter_target?.reader_retention_brief,
+      storyDriveBrief,
+    )
+    const volumeClimaxBrief = normalizeVolumeClimaxBrief(
+      contextPackage?.chapter_target?.volume_climax_brief
+      || contextPackage?.chapter_target?.volumeClimaxBrief
+      || contextPackage?.chapter_target?.volume_beat_brief
+      || contextPackage?.chapter_target?.volumeBeatBrief
+      || contextPackage?.volume_climax_brief
+      || contextPackage?.volumeClimaxBrief
+      || contextPackage?.volume_beat_brief
+      || contextPackage?.volumeBeatBrief
+      || contextPackage?.volume_beat_budget
+      || contextPackage?.volumeBeatBudget,
+      contextPackage?.chapter_target || {},
+      contextPackage?.volume_beat_budget || contextPackage?.volumeBeatBudget,
+    )
+    const recentFatigueBrief = normalizeRecentFatigueBrief(
+      contextPackage?.chapter_target?.recent_fatigue_brief
+      || contextPackage?.chapter_target?.recentFatigueBrief
+      || contextPackage?.chapter_target?.recent_fatigue_radar
+      || contextPackage?.chapter_target?.recentFatigueRadar
+      || contextPackage?.recent_fatigue_brief
+      || contextPackage?.recentFatigueBrief
+      || contextPackage?.recent_fatigue_radar
+      || contextPackage?.recentFatigueRadar,
+    )
+    const deliveryRiskCarryOver = normalizeDeliveryRiskCarryOverContext(
+      contextPackage?.chapter_target?.delivery_risk_carry_over
+      || contextPackage?.chapter_target?.deliveryRiskCarryOver
+      || contextPackage?.delivery_risk_carry_over
+      || contextPackage?.deliveryRiskCarryOver,
+    )
     const readerExpectationDebtContext = applyReaderExpectationDebtAging(
       normalizeReaderExpectationDebtContext(contextPackage?.chapter_target?.reader_expectation_debt_context || contextPackage?.reader_expectation_debt_context),
       Number(chapterDraft?.chapter_no || contextPackage?.chapter_target?.chapter_no || 0),
@@ -3782,6 +5027,15 @@ export function createNovelWritingService(ctx: {
       previousHandoff ? '硬性要求：前 300 字必须接住上一章最后一幕，写出角色对上一章钩子、危机、欠账或未解问题的直接反应；不得重新从泛环境描写、空泛醒来或无关解释开场。' : '',
       previousHandoff ? previousHandoff : '',
       '',
+      deliveryRiskCarryOver ? '【上一章交稿风险承接】' : '',
+      deliveryRiskCarryOver ? '硬性要求：执行 chapter_target.delivery_risk_carry_over；这些是上一章交稿后仍未完全解决的软风险，本章必须把它们转成开篇承接、场景推进、读者回报、创新落点或章末钩子，不得只在旁白中声明已经处理。' : '',
+      deliveryRiskCarryOver?.source_chapter_no ? `风险来源：第${deliveryRiskCarryOver.source_chapter_no}章` : '',
+      deliveryRiskCarryOver?.label ? `风险总览：${deliveryRiskCarryOver.label}` : '',
+      deliveryRiskCarryOver?.priority_label ? `优先级：${deliveryRiskCarryOver.priority_label}` : '',
+      deliveryRiskCarryOver?.items?.length ? `风险项：${deliveryRiskCarryOver.items.join('；')}` : '',
+      deliveryRiskCarryOver?.required_actions?.length ? `承接动作：${deliveryRiskCarryOver.required_actions.join('；')}` : '',
+      deliveryRiskCarryOver ? JSON.stringify(deliveryRiskCarryOver, null, 2).slice(0, 3000) : '',
+      '',
       longformCompass ? '【长篇作品罗盘】' : '',
       longformCompass ? '硬性要求：不可漂移项必须遵守；可调整区只能服务本章目标、当前卷目标和读者承诺，不得把扩展写成核心改道。' : '',
       longformCompass ? JSON.stringify(longformCompass, null, 2).slice(0, 4000) : '',
@@ -3794,8 +5048,16 @@ export function createNovelWritingService(ctx: {
       chapterLaunchGate ? '硬性要求：本章必须逐条落实读者承诺、章节目标、核心冲突、主线服务、读者回报和章末钩子；不得把门禁中的 warn/block 项绕过去写。' : '',
       chapterLaunchGate ? JSON.stringify(chapterLaunchGate, null, 2).slice(0, 4000) : '',
       '',
+      coreContractRadar ? '【核心契约】' : '',
+      coreContractRadar ? '硬性要求：执行 chapter_target.core_contract_radar；must_serve 是本章必须服务的全书承诺、核心冲突、创新卖点和读者回报；no_drift 是不得漂移的红线；repair_focus 必须写成可见事件、选择、代价、规则判定、主线推进或章末问题。' : '',
+      coreContractRadar ? `必须服务：${coreContractRadar.must_serve.join('；') || '按长篇罗盘与本章任务书执行'}` : '',
+      coreContractRadar ? `不得漂移：${coreContractRadar.no_drift.join('；') || '不得改写全书核心承诺、主角驱动和长期方向'}` : '',
+      coreContractRadar?.repair_focus?.length ? `优先修正：${coreContractRadar.repair_focus.join('；')}` : '',
+      coreContractRadar ? JSON.stringify(coreContractRadar, null, 2).slice(0, 4000) : '',
+      '',
       nextBatchBrief ? '【本批连载任务书】' : '',
       nextBatchBrief ? '硬性要求：本章必须服务批次目标和当前章角色；不得提前消费后续章节爆点，不得跳过本章读者回报，不得抢跑批次后段的主线兑现。' : '',
+      nextBatchBrief?.start_checklist?.length ? `批次开工清单：${nextBatchBrief.start_checklist.map((item: any) => `${item.label || item.key}：${item.detail || item.status}`).join('；')}` : '',
       nextBatchBrief ? JSON.stringify(nextBatchBrief, null, 2).slice(0, 4000) : '',
       '',
       longformMemoryAnchor ? '【长篇正史锚点】' : '',
@@ -3810,6 +5072,72 @@ export function createNovelWritingService(ctx: {
       storyUnitContext ? '硬性要求：执行 chapter_target.story_unit_context；本章只完成 current_chapter_role，并服务 unit_goal。可以铺垫 pressure_escalation 和 setup_and_storyline，但不得提前消费 mini_climax_payoff、exit_hook 或 forbidden_advance 中的后段爆点。' : '',
       storyUnitContext ? JSON.stringify(storyUnitContext, null, 2).slice(0, 4000) : '',
       '',
+      storyPressureBrief ? '【故事压力阶梯】' : '',
+      storyPressureBrief ? '硬性要求：执行 chapter_target.story_pressure_brief；本章必须把压力源、冲突升级、赌注升级和反转逼迫写成可见事件。不得只平铺过场、复述设定或让主角无代价通关。' : '',
+      storyPressureBrief?.pressure_sources?.length ? `压力源：${storyPressureBrief.pressure_sources.join('；')}` : '',
+      storyPressureBrief?.conflict_escalation_guardrail ? `冲突升级：${storyPressureBrief.conflict_escalation_guardrail}` : '',
+      storyPressureBrief?.stakes_growth_guardrail ? `赌注升级：${storyPressureBrief.stakes_growth_guardrail}` : '',
+      storyPressureBrief?.reversal_pressure_guardrail ? `反转逼迫：${storyPressureBrief.reversal_pressure_guardrail}` : '',
+      storyPressureBrief?.required_actions?.length ? `执行动作：${storyPressureBrief.required_actions.join('；')}` : '',
+      storyPressureBrief ? JSON.stringify(storyPressureBrief, null, 2).slice(0, 4000) : '',
+      '',
+      storyDriveBrief ? '【主角能动性】' : '',
+      storyDriveBrief ? '硬性要求：执行 chapter_target.story_drive_brief；本章必须让主角在压力下做出主动选择，并写清阻碍、选择代价、状态变化和下一步因果。不得让主角只听解释、等别人推动或无代价通关。' : '',
+      storyDriveBrief?.obstacle ? `明确阻碍：${storyDriveBrief.obstacle}` : '',
+      storyDriveBrief?.protagonist_choice ? `主角选择：${storyDriveBrief.protagonist_choice}` : '',
+      storyDriveBrief?.choice_cost ? `选择代价：${storyDriveBrief.choice_cost}` : '',
+      storyDriveBrief?.state_change ? `状态变化：${storyDriveBrief.state_change}` : '',
+      storyDriveBrief?.causal_next_step ? `下一步因果：${storyDriveBrief.causal_next_step}` : '',
+      storyDriveBrief?.required_actions?.length ? `执行动作：${storyDriveBrief.required_actions.join('；')}` : '',
+      storyDriveBrief ? JSON.stringify(storyDriveBrief, null, 2).slice(0, 4000) : '',
+      '',
+      serialRhythmBrief ? '【连载节奏与回报密度】' : '',
+      serialRhythmBrief ? '硬性要求：执行 chapter_target.serial_rhythm_brief；开篇钩子、中段回报密度、场景回报预算和章末追读必须写成正文中的可见行动、信息变化、反转、爽点或未解问题。不得用长解释、纯环境、心理总结或无效对话拖字数。' : '',
+      serialRhythmBrief?.opening_hook_deadline ? `开篇钩子：${serialRhythmBrief.opening_hook_deadline}` : '',
+      serialRhythmBrief?.payoff_interval ? `回报密度：${serialRhythmBrief.payoff_interval}` : '',
+      serialRhythmBrief?.middle_guardrail ? `中段节奏：${serialRhythmBrief.middle_guardrail}` : '',
+      serialRhythmBrief?.ending_hook_guardrail ? `章末追读：${serialRhythmBrief.ending_hook_guardrail}` : '',
+      serialRhythmBrief?.scene_payoff_budget?.length ? `场景回报预算：${serialRhythmBrief.scene_payoff_budget.map((item: any) => `${item.scene_no || ''}.${item.title || '场景'}：${item.required_payoff || item.turn || item.ending_hook_seed || '必须有可见回报'}`).join('；')}` : '',
+      serialRhythmBrief?.anti_drag_rules?.length ? `防水规则：${serialRhythmBrief.anti_drag_rules.join('；')}` : '',
+      serialRhythmBrief ? JSON.stringify(serialRhythmBrief, null, 2).slice(0, 4000) : '',
+      '',
+      pageTurnHookBrief ? '【章末翻页钩子】' : '',
+      pageTurnHookBrief ? '硬性要求：执行 chapter_target.page_turn_hook_brief；最后 300 字必须形成清晰翻页冲动。可见触发要落成角色现场看见、听见、拿到、失去、被迫选择或被反转击中；读者问题必须留到下一章推动；禁提前解答项不得在本章解释完。' : '',
+      pageTurnHookBrief?.hook_type ? `钩子类型：${pageTurnHookBrief.hook_type}` : '',
+      pageTurnHookBrief?.core_question ? `读者问题：${pageTurnHookBrief.core_question}` : '',
+      pageTurnHookBrief?.visible_trigger ? `可见触发：${pageTurnHookBrief.visible_trigger}` : '',
+      pageTurnHookBrief?.final_image ? `最后画面：${pageTurnHookBrief.final_image}` : '',
+      pageTurnHookBrief?.next_chapter_pull ? `下一章拉力：${pageTurnHookBrief.next_chapter_pull}` : '',
+      pageTurnHookBrief?.forbidden_resolution?.length ? `禁提前解答：${pageTurnHookBrief.forbidden_resolution.join('；')}` : '',
+      pageTurnHookBrief?.required_actions?.length ? `执行动作：${pageTurnHookBrief.required_actions.join('；')}` : '',
+      pageTurnHookBrief ? JSON.stringify(pageTurnHookBrief, null, 2).slice(0, 4000) : '',
+      '',
+      volumeClimaxBrief ? '【卷级高潮预算】' : '',
+      volumeClimaxBrief ? '硬性要求：执行 chapter_target.volume_climax_brief；本章只兑现 current_chapter_role、required_beats 和 climax_promise，不得提前消费 forbidden_payoff 标注的卷末爆点、身份答案、终局反转或后续大回报。' : '',
+      volumeClimaxBrief?.current_volume_title ? `当前卷：${volumeClimaxBrief.current_volume_title}` : '',
+      volumeClimaxBrief?.chapter_range ? `卷区间：${volumeClimaxBrief.chapter_range}` : '',
+      volumeClimaxBrief?.current_chapter_role ? `本章职责：${volumeClimaxBrief.current_chapter_role}` : '',
+      volumeClimaxBrief?.volume_goal ? `卷目标：${volumeClimaxBrief.volume_goal}` : '',
+      volumeClimaxBrief?.climax_promise ? `高潮承诺：${volumeClimaxBrief.climax_promise}` : '',
+      volumeClimaxBrief?.required_beats?.length ? `必须兑现：${volumeClimaxBrief.required_beats.join('；')}` : '',
+      volumeClimaxBrief?.forbidden_payoff?.length ? `禁提前消费：${volumeClimaxBrief.forbidden_payoff.join('；')}` : '',
+      volumeClimaxBrief?.nearby_beats?.length ? `邻近爆点：${volumeClimaxBrief.nearby_beats.map((item: any) => `${item.chapter_no ? `第${item.chapter_no}章` : ''}${item.type ? `${item.type}` : ''}${item.label ? `《${item.label}》` : ''}${item.detail ? `：${item.detail}` : ''}`).join('；')}` : '',
+      volumeClimaxBrief?.next_actions?.length ? `执行动作：${volumeClimaxBrief.next_actions.join('；')}` : '',
+      volumeClimaxBrief ? JSON.stringify(volumeClimaxBrief, null, 2).slice(0, 4000) : '',
+      '',
+      recentFatigueBrief ? '【近10章疲劳规避】' : '',
+      recentFatigueBrief ? '硬性要求：执行 chapter_target.recent_fatigue_brief；本章必须主动更换最近十章已经重复的冲突来源、回报形态、章末问题或可视化场面。不得为了稳妥继续复刻同一种压迫、同一种打脸、同一种悬念。' : '',
+      recentFatigueBrief?.chapter_range_label ? `观察区间：${recentFatigueBrief.chapter_range_label}` : '',
+      Number.isFinite(Number(recentFatigueBrief?.score)) ? `疲劳分：${recentFatigueBrief.score}` : '',
+      recentFatigueBrief?.summary ? `疲劳概览：${recentFatigueBrief.summary}` : '',
+      recentFatigueBrief?.fatigue_risks?.length ? `疲劳风险：${recentFatigueBrief.fatigue_risks.join('；')}` : '',
+      recentFatigueBrief?.conflict_variation ? `冲突换源：${recentFatigueBrief.conflict_variation}` : '',
+      recentFatigueBrief?.payoff_variation ? `回报换形：${recentFatigueBrief.payoff_variation}` : '',
+      recentFatigueBrief?.hook_variation ? `钩子换题：${recentFatigueBrief.hook_variation}` : '',
+      recentFatigueBrief?.scene_freshness ? `场面新鲜度：${recentFatigueBrief.scene_freshness}` : '',
+      recentFatigueBrief?.next_actions?.length ? `执行动作：${recentFatigueBrief.next_actions.join('；')}` : '',
+      recentFatigueBrief ? JSON.stringify(recentFatigueBrief, null, 2).slice(0, 4000) : '',
+      '',
       signatureSceneBrief ? '【本章标志性场面补位】' : '',
       signatureSceneBrief ? '硬性要求：必须把 signature_scene 写成正文核心场面；scene_repair_target 是本章要修复的强场面缺口；reader_payoff 和 storyline_service 必须落成可见爽点、冲突结果或主线推进。不能只在旁白里声明“场面很震撼”。' : '',
       signatureSceneBrief ? JSON.stringify(signatureSceneBrief, null, 2).slice(0, 3000) : '',
@@ -3822,6 +5150,30 @@ export function createNovelWritingService(ctx: {
       batchPreflight ? '硬性要求：本章必须服从安全连写预执行门禁；若存在近10章疲劳、批次任务书缺口、被拦截章节或 caution/warn 风险，本章必须主动换冲突来源、回报形态、章末问题或可视化场面，不能沿用上一批同质化写法。' : '',
       batchPreflight ? JSON.stringify(batchPreflight, null, 2).slice(0, 4000) : '',
       '',
+      batchChapterHandoffContract ? '【安全连写章节交接契约】' : '',
+      batchChapterHandoffContract ? '硬性要求：执行 batch_preflight.chapter_handoff_contract；这是安全连写启动时从上一章交接单和读者期待账提炼出的连续性契约。开篇前 300 字必须承接 previous_handoff 和 opening_obligations；must_deliver 必须写成可见回报；keep_alive 必须保持存在感；overdue 必须优先推进，不能被新剧情覆盖。' : '',
+      batchChapterHandoffContract?.from_chapter_no ? `交接来源：第${batchChapterHandoffContract.from_chapter_no}章` : '',
+      batchChapterHandoffContract?.apply_to_chapter_no ? `优先落点：第${batchChapterHandoffContract.apply_to_chapter_no}章` : '',
+      batchChapterHandoffContract?.previous_handoff ? `上一章最后一幕：${batchChapterHandoffContract.previous_handoff}` : '',
+      batchChapterHandoffContract?.opening_obligations?.length ? `开篇义务：${batchChapterHandoffContract.opening_obligations.join('；')}` : '',
+      batchChapterHandoffContract?.expectation_carry_over?.length ? `期待承接：${batchChapterHandoffContract.expectation_carry_over.join('；')}` : '',
+      batchChapterHandoffContract?.must_deliver?.length ? `必须兑现：${batchChapterHandoffContract.must_deliver.join('；')}` : '',
+      batchChapterHandoffContract?.keep_alive?.length ? `继续悬念：${batchChapterHandoffContract.keep_alive.join('；')}` : '',
+      batchChapterHandoffContract?.overdue?.length ? `逾期优先：${batchChapterHandoffContract.overdue.join('；')}` : '',
+      batchChapterHandoffContract ? JSON.stringify(batchChapterHandoffContract, null, 2).slice(0, 3000) : '',
+      '',
+      batchDeliveryRiskCarryOver ? '【安全连写交稿风险承接】' : '',
+      batchDeliveryRiskCarryOver ? '硬性要求：执行 batch_preflight.delivery_risk_carry_over；这是安全连写启动时从上一章交稿状态带来的风险债务，本章必须把它们写成开篇承接、中段推进和章末追读动作，不能只在旁白中宣布已修复。' : '',
+      batchDeliveryRiskCarryOver?.source_chapter_no ? `风险来源：第${batchDeliveryRiskCarryOver.source_chapter_no}章` : '',
+      batchDeliveryRiskCarryOver?.apply_to_chapter_no ? `优先落点：第${batchDeliveryRiskCarryOver.apply_to_chapter_no}章` : '',
+      batchDeliveryRiskCarryOver?.priority_label ? `优先级：${batchDeliveryRiskCarryOver.priority_label}` : '',
+      batchDeliveryRiskCarryOver?.items?.length ? `风险项：${batchDeliveryRiskCarryOver.items.join('；')}` : '',
+      batchDeliveryRiskCarryOver?.required_actions?.length ? `修复动作：${batchDeliveryRiskCarryOver.required_actions.join('；')}` : '',
+      batchDeliveryRiskCarryOver?.opening_actions?.length ? `开篇动作：${batchDeliveryRiskCarryOver.opening_actions.join('；')}` : '',
+      batchDeliveryRiskCarryOver?.middle_actions?.length ? `中段动作：${batchDeliveryRiskCarryOver.middle_actions.join('；')}` : '',
+      batchDeliveryRiskCarryOver?.ending_actions?.length ? `章末动作：${batchDeliveryRiskCarryOver.ending_actions.join('；')}` : '',
+      batchDeliveryRiskCarryOver ? JSON.stringify(batchDeliveryRiskCarryOver, null, 2).slice(0, 3000) : '',
+      '',
       millionWordRunway ? '【百万字航线守门】' : '',
       millionWordRunway ? '硬性要求：本章必须回答航线中的本章四问，遵守不可偏移红线，兑现追读燃料；如果 safeModeLabel 为仅单章或禁止连写，不得抢跑后续章节内容。' : '',
       millionWordRunway ? JSON.stringify(millionWordRunway, null, 2).slice(0, 5000) : '',
@@ -3829,6 +5181,13 @@ export function createNovelWritingService(ctx: {
       first30RetentionBrief ? '【本章前30章留存修复】' : '',
       first30RetentionBrief ? '硬性要求：本章必须修复前30章诊断指出的目标、章末钩子、爽点/悬念和试读闭环风险；修复要落成可见行动、信息增量、回报或章末未解问题。' : '',
       first30RetentionBrief ? JSON.stringify(first30RetentionBrief, null, 2).slice(0, 4000) : '',
+      '',
+      readerDropRiskBrief ? '【读者弃读预警】' : '',
+      readerDropRiskBrief ? '硬性要求：执行 chapter_target.reader_drop_risk_brief；drop_points 是试读读者可能离开的原因，必须分别在开篇 300 字、中段场景推进和章末翻页处补抓手。不得用设定说明、模板热血或空泛总结糊过去。' : '',
+      readerDropRiskBrief?.opening_guardrail ? `开篇防弃读：${readerDropRiskBrief.opening_guardrail}` : '',
+      readerDropRiskBrief?.middle_guardrail ? `中段防掉速：${readerDropRiskBrief.middle_guardrail}` : '',
+      readerDropRiskBrief?.ending_guardrail ? `章末防流失：${readerDropRiskBrief.ending_guardrail}` : '',
+      readerDropRiskBrief ? JSON.stringify(readerDropRiskBrief, null, 2).slice(0, 4000) : '',
       '',
       readerExpectationDebtContext.must_carry.length || readerExpectationDebtContext.keep_alive.length ? '【期待债务承接】' : '',
       readerExpectationDebtContext.must_carry.length || readerExpectationDebtContext.keep_alive.length ? '硬性要求：上一章或最近章节欠下的期待必须在本章可见推进；overdue/逾期待补项必须优先处理成动作、信息增量、冲突结果或章末升级。可延迟完全兑现，但不得遗忘、换线或矛盾改写。' : '',
@@ -3853,6 +5212,7 @@ export function createNovelWritingService(ctx: {
       '2. 每个场景必须完成 purpose、conflict、required_beats、required_information、turning_point 和 exit_state；不能只写气氛、设定说明或心理总结。',
       '2A. 每个场景必须把 opening_hook、reader_payoff、fear_point、rule_pressure、information_gap、reversal、ending_hook_seed、character_voice 中已有的商业意图落实到正文里；这些字段不是备注，必须转成动作、对话、危险、反转或章末疑问。',
       '2A+. 如果存在 chapter_target.previous_handoff 或 continuity.previous_chapter，开篇前 300 字必须承接上一章最后一幕或章末钩子，先处理连续危机、角色反应和期待欠账，再展开新的场景信息。',
+      '2A++. 执行 chapter_target.delivery_risk_carry_over：上一章交稿后残留的吸引力、追读、创新、故事力、剧情线、强场面或可读性风险，必须在本章变成可见修复动作；尤其优先级指向开篇或章末时，必须在前 300 字或最后 300 字落地。',
       '2B. 执行 chapter_target.reader_retention_brief：开篇钩子必须在前 300 字落地；爽点承诺、信息缺口、情绪回报和短剧化场面必须转成可见行动；章末追读问题必须压到最后一幕。',
       '2B+. 执行 chapter_target.reader_expectation_ledger：must_deliver 是本章必须还给读者的期待账，必须写成可见事件、冲突结果、情绪回报或章末钩子；keep_alive 可以保留但不能遗忘或矛盾改写。',
       '2B++. 执行 reader_expectation_debt_context：must_carry 来自上一章或最近章节的期待欠账，本章必须给可见推进；keep_alive 是继续悬念，必须保持存在感，不得被正文遗忘、反向改写或突然换线。',
@@ -3860,6 +5220,13 @@ export function createNovelWritingService(ctx: {
       '2C+. 执行 chapter_target.signature_scene_brief：如果存在 signature_scene，必须把它写成本章最可被读者记住、可短剧/漫剧化的空间冲突、反转动作、规则压迫或视觉化爽点；scene_repair_target、reader_payoff、storyline_service 都必须在正文中可见。',
       '2C++. 执行 chapter_target.character_arc_brief：人物成长必须落成角色欲望驱动、缺陷受压、关系变化、成长节点或口吻锚点；如果有 forbidden_reveal，不得提前写穿，只能通过误解、遮挡、试探或代价保持边界。',
       '2D. 执行 chapter_target.first30_retention_brief：如果当前章在前30章诊断中有风险，必须补强 flags 和 required_actions 指向的留存问题，尤其是章末钩子弱、爽点/悬念信号少、目标不清和缺正文。',
+      '2D+. 执行 chapter_target.reader_drop_risk_brief：正文必须针对弃读点设计开篇抓手、中段反转/行动推进和章末翻页问题；任何 drop_points 中指出的风险都必须用可见事件、对话冲突、信息增量或读者回报修复。',
+      '2D++. 执行 chapter_target.story_pressure_brief：本章必须补足压力源、冲突升级、赌注升级和反转逼迫；至少一个场景要让主角付出代价、被迫选择、暴露风险、遭遇反制或得到新的未解问题。',
+      '2D+++. 执行 chapter_target.story_drive_brief：必须写出主角主动选择、选择代价、状态变化和下一步因果；主角不能只是旁观、听解释或被事件推着走。',
+      '2D++++. 执行 chapter_target.serial_rhythm_brief：前 300 字必须有开篇钩子；每 800-1200 字至少给一次信息增量、冲突转折、爽点兑现、能力展示、关系变化或小回收；每个场景必须兑现 scene_payoff_budget；章末必须压出追读问题。',
+      '2D+++++. 执行 chapter_target.page_turn_hook_brief：最后 300 字必须有可见触发、读者问题和下一章拉力；禁提前解答项不得在本章说明完；结尾不能用“拉开序幕”等模板总结替代现场钩子。',
+      '2D++++++. 执行 chapter_target.volume_climax_brief：本章只兑现 current_chapter_role、required_beats 和 climax_promise；不得提前消费 forbidden_payoff 中的卷末爆点、身份答案、终局反转或后续大回报。',
+      '2D+++++++. 执行 chapter_target.recent_fatigue_brief：如果近10章存在疲劳风险，本章必须至少更换一项冲突来源、回报形态、章末问题或可视化场面；禁止继续复制最近章节的同类压迫、同类打脸和同类钩子。',
       '3. 如果 scene_type 是 action/combat/chase，必须逐条落实 action_beats：写出动作起手、空间位置、对手反应、受伤/损耗/暴露信息、反制动作和结果。战斗不能一笔带过。',
       '4. 段落预算：动作/冲突场景中可见行动与直接反应不少于 60%；环境描写最多 15%；心理描写最多 20%；解释性信息最多 15%。',
       '5. 禁止连续 2 段纯环境描写；每 3-5 段必须出现一次可见行动、选择、信息变化或关系变化。',
@@ -3873,11 +5240,14 @@ export function createNovelWritingService(ctx: {
       '12A. 执行 chapter_target.chapter_benchmark_strategy：只学习开篇钩子、场景节拍、冲突升级、爽点兑现、对白推进、场面可视化和章末追读结构；不得复制样例桥段、角色名、专有设定和原句。',
       '13. 执行长篇作品罗盘：读者承诺、核心矛盾、创新卖点、长期爽点循环和结局方向不得漂移；新增人物、物品、支线或地图必须落在可调整区内。',
       '13A. 执行 chapter_target.chapter_launch_gate：读者承诺、本章目标、核心冲突、主线服务、读者回报、章末钩子必须在正文中可见落地；如果门禁信号为 warn/block，不得忽略，必须优先补成可见事件、选择、冲突结果或章末问题。',
+      '13A+. 执行 chapter_target.core_contract_radar：必须服务 must_serve 中的全书核心承诺、核心矛盾、创新卖点和读者回报；不得漂移 no_drift 中的红线；repair_focus 不能只靠解释，要落成正文中的冲突结果、规则判定、角色选择或章末钩子。',
       '13B. 执行 chapter_target.longform_battle_context：核心守恒、读者拉力、剧情线调度、卷级爆点、创新/IP场面和生产燃料中的风险项必须在本章有可见承接；blocked/warn 风险优先于普通铺垫，不能写成空泛解释。',
       '14. 执行本批连载任务书：本章只完成 current_chapter_role 和本章读者回报；可以铺垫下一章，但不得提前解决 next_batch_brief.chapters 后续章节的冲突或钩子。',
       '14A. 执行 chapter_target.batch_preflight：如果安全连写预执行门禁提示近10章疲劳或批次风险，本章必须在冲突来源、回报形态、章末问题、可视化场面中至少改造一项；被 blocked_chapter_nos 拦截的后续章节内容不得提前写进本章。',
       '14A+. 执行 batch_preflight.longform_memory_anchor：批量续写时必须遵守压缩正史锚点，不能改变角色状态、遗忘开放悬念、跳过回报债务或偏离核心承诺。',
-      '14A++. 执行 chapter_target.longform_memory_capsule：单章开写也必须召回压缩正史，角色状态、开放悬念、回报债务、正史事实和 red_lines 不得遗忘、矛盾改写或跳过。',
+      '14A++. 执行 batch_preflight.delivery_risk_carry_over：安全连写第一章必须优先承接上一章残留风险；opening_actions 在前 300 字落地，middle_actions 在中段转成事件推进，ending_actions 在最后 300 字形成追读钩子。',
+      '14A+++. 执行 batch_preflight.chapter_handoff_contract：安全连写第一章必须承接上一章最后一幕、开篇义务和读者期待债；must_deliver 写成可见回报，keep_alive 保持存在感，overdue 优先推进。',
+      '14A++++. 执行 chapter_target.longform_memory_capsule：单章开写也必须召回压缩正史，角色状态、开放悬念、回报债务、正史事实和 red_lines 不得遗忘、矛盾改写或跳过。',
       '14B. 执行 chapter_target.million_word_runway：正文必须可见回答本章四问，守住 redLines，不丢 readerFuel；如果航线为 single_chapter 或 blocked，只写当前章可兑现内容，不得预支后续章节主线回收。',
       '14C. 执行 chapter_target.story_unit_context：正文必须完成当前剧情单元的 current_chapter_role；只推进本章职责需要的 pressure_escalation、setup_and_storyline 和 reader payoff，不得提前写完 mini_climax_payoff、exit_hook 或 forbidden_advance 标注的后续兑现。',
       '15. 如果参考迁移计划包含 transferable_model，只能采用其中 allowed_learning 的抽象功能；rewrite_requirements 必须执行；copy_guard_terms 和 forbidden_transfer 禁止出现在正文里。',
@@ -4353,6 +5723,7 @@ export function createNovelWritingService(ctx: {
     const styleSampleBank = resolveStyleSampleBank(project, { writing_bible: writingBible })
     const first30RetentionContext = buildFirst30RetentionContext(chapter, reviews)
     const readerExpectationDebtContext = buildReaderExpectationDebtContext(chapter, sorted, reviews)
+    const deliveryRiskCarryOverContext = buildDeliveryRiskCarryOverContext(chapter, sorted, reviews)
     const storyUnitContext = buildStoryUnitContext(chapter, sorted, outlines)
     const previousHandoff = buildPreviousChapterHandoff({
       chapter_target: chapter.raw_payload?.pre_draft_brief || {},
@@ -4514,6 +5885,7 @@ export function createNovelWritingService(ctx: {
         first30_retention_brief: chapter.raw_payload?.pre_draft_brief?.first30_retention_brief || first30RetentionContext,
         story_unit_context: chapter.raw_payload?.pre_draft_brief?.story_unit_context || storyUnitContext,
         reader_expectation_debt_context: chapter.raw_payload?.pre_draft_brief?.reader_expectation_debt || readerExpectationDebtContext,
+        delivery_risk_carry_over: chapter.raw_payload?.pre_draft_brief?.delivery_risk_carry_over || deliveryRiskCarryOverContext,
         continuity_notes: chapter.continuity_notes || [],
         must_advance: asArray(chapter.raw_payload?.must_advance),
         forbidden_repeats: asArray(chapter.raw_payload?.forbidden_repeats),
@@ -4571,6 +5943,7 @@ export function createNovelWritingService(ctx: {
       style_sample_bank: styleSampleBank,
       first30_retention_context: first30RetentionContext,
       reader_expectation_debt_context: readerExpectationDebtContext,
+      delivery_risk_carry_over: deliveryRiskCarryOverContext,
       story_unit_context: storyUnitContext,
       setting_context: settingContext,
       storyline_context: storylineContext,

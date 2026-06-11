@@ -500,6 +500,13 @@ describe('buildNovelDraftBriefSummary', () => {
         reader_promise: '主角第一次正面压住旧臣',
         core_conflict: '旧臣压制主角',
         previous_handoff: '上一章结尾：门外追杀信号响起，主角必须立刻处理。',
+        delivery_risk_carry_over: {
+          total_count: 3,
+          label: '待修复 3',
+          priority_label: '优先修章末',
+          items: ['修章末翻页：上一章没有把追杀信号压成翻页问题。', '补创新：制度漏洞反压不够新鲜。'],
+          required_actions: ['本章前 300 字直接接追杀信号。', '章末必须留下新的未解问题。'],
+        },
         key_settings: ['带血腰牌'],
         storyline_advances: ['夺权主线'],
         storyline_plants: ['旧臣背刺伏笔线'],
@@ -634,6 +641,9 @@ describe('buildNovelDraftBriefSummary', () => {
     expect(summary.briefFields.handoffOpeningObligation).toContain('开篇直接写旧臣当众压主角')
     expect(summary.briefFields.handoffMustCarry).toContain('门外追杀信号')
     expect(summary.briefFields.handoffKeepAlive).toContain('旧臣背后')
+    expect(summary.briefFields.deliveryRiskLabel).toContain('待修复')
+    expect(summary.briefFields.deliveryRiskItems).toContain('修章末翻页')
+    expect(summary.briefFields.deliveryRiskPriority).toContain('优先修章末')
     expect(summary.briefFields.keySettings).toContain('带血腰牌')
     expect(summary.briefFields.storylineAdvances).toContain('夺权主线')
     expect(summary.briefFields.storylinePlants).toContain('旧臣背刺伏笔线')
@@ -715,5 +725,149 @@ describe('buildNovelDraftBriefSummary', () => {
     expect(summary.briefFields.forbiddenContent).toContain('幕后主使')
     expect(summary.briefFields.innovationAngle).toContain('公开规则反杀')
     expect(summary.briefFields.innovationExecution).toContain('腰牌资格')
+  })
+
+  test('surfaces volume climax budget in the pre-draft brief summary', () => {
+    const summary = buildNovelDraftBriefSummary({
+      activeWordCount: 0,
+      chapterGoal: '阵堂公开反证',
+      conflict: '执事逼主角认罪',
+      endingHook: '禁库旧阵第二层纹路亮起',
+      sceneCardCount: 3,
+      preDraftBrief: {
+        chapter_goal: '阵堂公开反证',
+        reader_promise: '主角第一次公开打脸执事',
+        core_conflict: '执事逼主角认罪',
+        volume_climax_brief: {
+          current_volume_title: '第一卷 阵堂起势',
+          chapter_range: '第1-60章',
+          current_chapter_role: '完成第一卷第一次小高潮：阵堂公开打脸。',
+          volume_goal: '让主角在阵堂立住起势资格。',
+          climax_promise: '公开反证执事偷换阵图，给读者阶段性打脸回报。',
+          required_beats: ['执事当众失势', '主角得到试炼资格'],
+          forbidden_payoff: ['不得提前揭穿禁库真相', '不得提前解决卷末师承身份'],
+          nearby_beats: [
+            { chapter_no: 18, type: '小高潮', label: '阵堂公开打脸', detail: '主角公开反证执事偷换阵图。' },
+          ],
+        },
+      },
+    })
+
+    expect(summary.briefFields.volumeClimaxRange).toContain('第一卷')
+    expect(summary.briefFields.volumeClimaxRange).toContain('第1-60章')
+    expect(summary.briefFields.volumeClimaxRole).toContain('第一次小高潮')
+    expect(summary.briefFields.volumeClimaxGoal).toContain('起势资格')
+    expect(summary.briefFields.volumeClimaxPromise).toContain('阶段性打脸回报')
+    expect(summary.briefFields.volumeClimaxRequiredBeats).toContain('执事当众失势')
+    expect(summary.briefFields.volumeClimaxForbidden).toContain('禁库真相')
+    expect(summary.briefFields.volumeClimaxNearbyBeats).toContain('阵堂公开打脸')
+  })
+
+  test('surfaces recent fatigue avoidance in the pre-draft brief summary', () => {
+    const summary = buildNovelDraftBriefSummary({
+      activeWordCount: 0,
+      chapterGoal: '旧阵异响',
+      conflict: '旧执事余党仍想用阵堂规矩压人',
+      endingHook: '藏书阁地砖下传出第二道阵鸣',
+      sceneCardCount: 3,
+      preDraftBrief: {
+        chapter_goal: '旧阵异响',
+        reader_promise: '主角换一种方式反制旧执事余党',
+        core_conflict: '旧执事余党仍想用阵堂规矩压人',
+        recent_fatigue_brief: {
+          chapter_range_label: '第9-18章',
+          score: 61,
+          fatigue_risks: ['近10章「执事压迫」出现 7 次', '近10章「公开打脸」出现 6 次'],
+          conflict_variation: '更换压迫来源：转向藏书阁规矩与旧阵异响。',
+          payoff_variation: '更换回报形态：不再公开打脸，改为反向设局。',
+          hook_variation: '更换章末问题：从试炼将至改成地砖阵鸣。',
+          scene_freshness: '补新可视化场面：藏书阁地砖下阵纹亮起。',
+          next_actions: ['本章至少换一项冲突来源、回报形态或章末问题。'],
+        },
+      },
+    })
+
+    expect(summary.briefFields.recentFatigueRange).toContain('第9-18章')
+    expect(summary.briefFields.recentFatigueRange).toContain('61分')
+    expect(summary.briefFields.recentFatigueRisks).toContain('执事压迫')
+    expect(summary.briefFields.recentFatigueConflict).toContain('更换压迫来源')
+    expect(summary.briefFields.recentFatiguePayoff).toContain('更换回报形态')
+    expect(summary.briefFields.recentFatigueHook).toContain('更换章末问题')
+    expect(summary.briefFields.recentFatigueScene).toContain('可视化场面')
+    expect(summary.briefFields.recentFatigueActions).toContain('至少换一项')
+  })
+
+  test('surfaces reader drop and strong story execution briefs in the pre-draft brief summary', () => {
+    const summary = buildNovelDraftBriefSummary({
+      activeWordCount: 0,
+      chapterGoal: '主角公开夺回阵图',
+      conflict: '守堂执事拖延审查',
+      endingHook: '内门长老认出禁库旧阵',
+      sceneCardCount: 2,
+      preDraftBrief: {
+        reader_drop_risk_brief: {
+          status: 'needs_repair',
+          score: 66,
+          quality_bar: '起点1万均订试读基准',
+          drop_points: ['中段解释阵法过密，试读用户可能弃读。'],
+          opening_guardrail: '开篇 300 字先给阵图被夺的现场压力。',
+          middle_guardrail: '中段减少设定解释，用动作验证阵法规则。',
+          ending_guardrail: '章末留下第二层阵纹的代价问题。',
+        },
+        story_pressure_brief: {
+          status: 'needs_attention',
+          range_label: '第7-12章',
+          pressure_sources: ['执事压迫', '内门长老审视'],
+          stakes_growth_guardrail: '赌注要落到主角是否失去试炼资格。',
+          reversal_pressure_guardrail: '章末用禁库旧阵反转局势。',
+        },
+        story_drive_brief: {
+          protagonist_choice: '主角当众选择用残阵反证阵图归属。',
+          choice_cost: '暴露阵盘裂纹，招来内门势力注意。',
+          state_change: '主角从被动挨压转为主动入局。',
+          causal_next_step: '下一章必须追问禁库旧阵来源。',
+        },
+        serial_rhythm_brief: {
+          opening_hook_deadline: '前 300 字必须接住执事夺图。',
+          payoff_interval: '每 800-1200 字至少给一次信息增量或局势反转。',
+          middle_guardrail: '中段不能堆阵法解释，要用验阵逼站队。',
+          ending_hook_guardrail: '最后一幕压到禁库旧阵来源。',
+          scene_payoff_budget: [
+            { scene_no: 1, title: '堂前拦路', required_payoff: '逼执事露怯', turn: '假阵图反证执事动手脚' },
+            { scene_no: 2, title: '残阵反证', required_payoff: '伪证当场反噬', turn: '内门长老发现残阵源自禁库' },
+          ],
+        },
+        page_turn_hook_brief: {
+          hook_type: '身份反转',
+          core_question: '禁库旧阵到底是谁传给主角。',
+          visible_trigger: '内门长老认出残阵源自禁库。',
+          next_chapter_pull: '下一章逼主角解释师承。',
+          forbidden_resolution: ['不得在本章解释完整答案。'],
+        },
+        confirmed_at: '2026-06-10T11:00:00.000Z',
+      },
+    })
+
+    expect(summary.briefFields.readerDropRiskStatus).toContain('needs_repair')
+    expect(summary.briefFields.readerDropRiskStatus).toContain('66分')
+    expect(summary.briefFields.readerDropRisks).toContain('中段解释阵法过密')
+    expect(summary.briefFields.readerDropOpening).toContain('开篇 300 字')
+    expect(summary.briefFields.readerDropMiddle).toContain('中段减少设定解释')
+    expect(summary.briefFields.readerDropEnding).toContain('第二层阵纹')
+    expect(summary.briefFields.storyPressureSources).toContain('执事压迫')
+    expect(summary.briefFields.storyPressureStakes).toContain('试炼资格')
+    expect(summary.briefFields.storyPressureReversal).toContain('禁库旧阵')
+    expect(summary.briefFields.storyDriveChoice).toContain('当众选择')
+    expect(summary.briefFields.storyDriveCost).toContain('暴露阵盘裂纹')
+    expect(summary.briefFields.storyDriveChange).toContain('主动入局')
+    expect(summary.briefFields.storyDriveNextStep).toContain('禁库旧阵来源')
+    expect(summary.briefFields.serialRhythmOpening).toContain('前 300 字')
+    expect(summary.briefFields.serialRhythmPayoffInterval).toContain('800-1200')
+    expect(summary.briefFields.serialRhythmScenePayoffs).toContain('堂前拦路')
+    expect(summary.briefFields.serialRhythmScenePayoffs).toContain('残阵反证')
+    expect(summary.briefFields.pageTurnQuestion).toContain('禁库旧阵')
+    expect(summary.briefFields.pageTurnTrigger).toContain('内门长老认出')
+    expect(summary.briefFields.pageTurnPull).toContain('解释师承')
+    expect(summary.briefFields.pageTurnForbidden).toContain('不得在本章解释完整答案')
   })
 })

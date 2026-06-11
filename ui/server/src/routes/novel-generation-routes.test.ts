@@ -96,7 +96,11 @@ describe('novel generate prose route source guards', () => {
 
     expect(setupBlock).toContain('applyRequestBatchPreflight(')
     expect(source).toContain('req.body?.batch_preflight')
-    expect(source).toContain('chapter_target: { ...contextPackage.chapter_target, batch_preflight: req.body.batch_preflight }')
+    expect(source).toContain('const deliveryRiskCarryOver = req.body.batch_preflight?.delivery_risk_carry_over')
+    expect(source).toContain('const chapterHandoffContract = req.body.batch_preflight?.chapter_handoff_contract')
+    expect(source).toContain('batch_preflight: req.body.batch_preflight')
+    expect(source).toContain('delivery_risk_carry_over: deliveryRiskCarryOver')
+    expect(source).toContain('chapter_handoff_contract: chapterHandoffContract')
   })
 
   test('applies million word runway override from generate-prose requests', () => {

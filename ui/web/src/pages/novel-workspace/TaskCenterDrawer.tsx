@@ -140,6 +140,100 @@ function deliveryRiskIssueMeta(task: any) {
   return { label: '交稿风险', color: 'volcano' }
 }
 
+export type RepairClosureHighlight = {
+  key: string
+  label: string
+  color: string
+  count: number
+  chapterNos: number[]
+  issueTypes: string[]
+  detail: string
+}
+
+function isResolvedRepairTaskStatus(status: any) {
+  return ['resolved', 'closed', 'done', 'completed'].includes(String(status || ''))
+}
+
+function repairClosureIssueMeta(task: any) {
+  const issueType = String(task?.issue_type || '')
+  const category = String(task?.annotation_category || '')
+  const source = String(task?.source || '')
+  const key = `${issueType} ${category} ${source}`
+  if (key.includes('core_drift') || key.includes('delivery_core')) return { key: 'core', label: '核心偏移', color: 'red' }
+  if (
+    key.includes('retention')
+    || key.includes('reader_pull')
+    || key.includes('reader_expectation')
+    || key.includes('opening_handoff')
+  ) return { key: 'reader_pull', label: '追读', color: 'magenta' }
+  if (key.includes('payoff')) return { key: 'payoff', label: '回报欠账', color: 'magenta' }
+  if (key.includes('volume_beat') || key.includes('volume_segment')) return { key: 'volume_beat', label: '爆点', color: 'gold' }
+  if (key.includes('innovation')) return { key: 'innovation', label: '创新', color: 'geekblue' }
+  if (key.includes('signature_scene')) return { key: 'signature_scene', label: '强场面', color: 'volcano' }
+  if (key.includes('storyline')) return { key: 'storyline', label: '剧情线', color: 'purple' }
+  if (key.includes('story_drive')) return { key: 'story_drive', label: '故事力', color: 'blue' }
+  if (key.includes('character_arc')) return { key: 'character_arc', label: '人物弧光', color: 'pink' }
+  if (key.includes('style_sample')) return { key: 'style_sample', label: '风格', color: 'purple' }
+  if (key.includes('readability') || key.includes('meme') || key.includes('opening_pull') || key.includes('ending_page_turn') || key.includes('scene_progression') || key.includes('payoff_density')) {
+    return { key: 'readability', label: '可读性', color: 'cyan' }
+  }
+  const deliveryMeta = deliveryRiskIssueMeta(task)
+  if (deliveryMeta) return { key: issueType || 'delivery_risk', ...deliveryMeta }
+  return null
+}
+
+function compactChapterNos(chapterNos: number[]) {
+  if (!chapterNos.length) return '相关章节'
+  return `第${chapterNos.slice(0, 6).join('、')}章${chapterNos.length > 6 ? `等${chapterNos.length}章` : ''}`
+}
+
+export function buildRepairClosureHighlights(tasks: any[], audit?: any | null): RepairClosureHighlight[] {
+  const groups = new Map<string, {
+    label: string
+    color: string
+    chapterNos: Set<number>
+    issueTypes: Set<string>
+    count: number
+  }>()
+
+  for (const task of Array.isArray(tasks) ? tasks : []) {
+    if (!isResolvedRepairTaskStatus(task?.task_status ?? task?.status)) continue
+    const meta = repairClosureIssueMeta(task)
+    if (!meta) continue
+    const group = groups.get(meta.key) || {
+      label: meta.label,
+      color: meta.color,
+      chapterNos: new Set<number>(),
+      issueTypes: new Set<string>(),
+      count: 0,
+    }
+    const chapterNo = Number(task?.chapter_no || task?.chapterNo || 0)
+    if (Number.isFinite(chapterNo) && chapterNo > 0) group.chapterNos.add(chapterNo)
+    const issueType = String(task?.issue_type || task?.annotation_category || meta.key || '')
+    if (issueType) group.issueTypes.add(issueType)
+    group.count += 1
+    groups.set(meta.key, group)
+  }
+
+  const auditClosed = String(audit?.status || '') === 'closed'
+  return Array.from(groups.entries())
+    .map(([key, group]) => {
+      const chapterNos = Array.from(group.chapterNos).sort((a, b) => a - b)
+      const issueTypes = Array.from(group.issueTypes)
+      return {
+        key,
+        label: `${group.label}风险已清`,
+        color: group.color,
+        count: group.count,
+        chapterNos,
+        issueTypes,
+        detail: `${compactChapterNos(chapterNos)} ${group.label}风险已处理，${auditClosed ? '修复审计已闭环' : '可等待或继续执行复检收敛'}。`,
+      }
+    })
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+    .slice(0, 6)
+}
+
 function repairTaskIssueTag(task: any) {
   if (String(task?.issue_type || '') === 'batch_brief_mismatch') return <Tag color="purple" bordered={false}>批次计划</Tag>
   if (String(task?.source || '') === 'reader_trial_review' || String(task?.issue_type || '') === 'reader_trial_drop_point') return <Tag color="red" bordered={false}>读者试读</Tag>
@@ -386,6 +480,7 @@ function RepairTaskRunSummary({
   const medium = tasks.filter((task: any) => task.severity === 'medium').length
   const resolved = tasks.filter((task: any) => task.task_status === 'resolved').length
   const needsReview = tasks.filter((task: any) => task.task_status === 'needs_review').length
+  const closureHighlights = buildRepairClosureHighlights(tasks, audit)
   const title = run.run_type === 'first30_retention_repair'
     ? '前30章留存修复任务'
     : run.run_type === 'longform_production_repair'
@@ -433,6 +528,26 @@ function RepairTaskRunSummary({
                   </Tag>
                 ))}
               </Space>
+            </Space>
+          </div>
+        )}
+        {closureHighlights.length > 0 && (
+          <div style={{ padding: 8, border: '1px solid #bbf7d0', borderRadius: 6, background: '#f0fdf4' }}>
+            <Space direction="vertical" size={6} style={{ width: '100%' }}>
+              <Space wrap>
+                <Text strong style={{ fontSize: 12 }}>风险闭环记录</Text>
+                <Tag color="green" bordered={false}>已清 {closureHighlights.reduce((sum, item) => sum + item.count, 0)}</Tag>
+              </Space>
+              {closureHighlights.map(item => (
+                <Space key={item.key} direction="vertical" size={2} style={{ width: '100%' }}>
+                  <Space wrap size={[4, 4]}>
+                    <Tag color={item.color} bordered={false}>{item.label}</Tag>
+                    <Tag color="green" bordered={false}>{item.count}</Tag>
+                    {item.chapterNos.length > 0 && <Tag bordered={false}>第{item.chapterNos.slice(0, 6).join('、')}章</Tag>}
+                  </Space>
+                  <Text type="secondary" style={{ fontSize: 12 }}>{item.detail}</Text>
+                </Space>
+              ))}
             </Space>
           </div>
         )}

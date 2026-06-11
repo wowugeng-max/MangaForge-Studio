@@ -1263,7 +1263,7 @@
 
 .novel-chapter-handoff-grid {
   display: grid;
-  grid-template-columns: 1.1fr 1fr 1fr;
+  grid-template-columns: 1.05fr 1fr 1fr 1fr;
   gap: 8px;
 }
 
@@ -1292,6 +1292,16 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.novel-chapter-handoff-risk {
+  border-color: rgba(217, 119, 6, 0.22) !important;
+  background: rgba(255, 251, 235, 0.88) !important;
+}
+
+.novel-chapter-handoff-risk span,
+.novel-chapter-handoff-risk strong {
+  color: #92400e;
 }
 
 .novel-chapter-handoff-action {
@@ -1504,6 +1514,64 @@
   white-space: nowrap;
 }
 
+.novel-draft-brief-reader-drop {
+  display: grid;
+  grid-template-columns: auto minmax(92px, 0.42fr) minmax(0, 1.25fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 7px 8px;
+  border: 1px solid rgba(220, 38, 38, 0.2);
+  border-radius: 6px;
+  background: rgba(254, 242, 242, 0.92);
+}
+
+.novel-draft-brief-reader-drop span {
+  color: #b91c1c;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.novel-draft-brief-reader-drop strong {
+  min-width: 0;
+  color: #0f172a;
+  font-size: 12px;
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.novel-draft-brief-story-pull {
+  display: grid;
+  grid-template-columns: auto minmax(0, 0.95fr) minmax(0, 1fr) minmax(0, 0.9fr) minmax(0, 0.9fr) minmax(0, 1.05fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 7px 8px;
+  border: 1px solid rgba(37, 99, 235, 0.2);
+  border-radius: 6px;
+  background: rgba(239, 246, 255, 0.92);
+}
+
+.novel-draft-brief-story-pull span {
+  color: #1d4ed8;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.novel-draft-brief-story-pull strong {
+  min-width: 0;
+  color: #0f172a;
+  font-size: 12px;
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .novel-draft-brief-battle {
   display: grid;
   grid-template-columns: auto minmax(76px, 0.35fr) minmax(0, 0.8fr) minmax(0, 0.9fr) minmax(0, 1.45fr);
@@ -1620,6 +1688,35 @@
   white-space: nowrap;
 }
 
+.novel-draft-brief-delivery-risk {
+  display: grid;
+  grid-template-columns: auto minmax(82px, 0.38fr) minmax(86px, 0.42fr) minmax(0, 1.35fr) minmax(0, 1.15fr);
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 7px 8px;
+  border: 1px solid rgba(217, 119, 6, 0.2);
+  border-radius: 6px;
+  background: rgba(255, 251, 235, 0.92);
+}
+
+.novel-draft-brief-delivery-risk span {
+  color: #92400e;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.novel-draft-brief-delivery-risk strong {
+  min-width: 0;
+  color: #0f172a;
+  font-size: 12px;
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .novel-draft-brief-first30 {
   display: grid;
   grid-template-columns: auto minmax(90px, 0.4fr) minmax(0, 1.25fr) minmax(0, 1fr);
@@ -1640,6 +1737,35 @@
 }
 
 .novel-draft-brief-first30 strong {
+  min-width: 0;
+  color: #0f172a;
+  font-size: 12px;
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.novel-draft-brief-recent-fatigue {
+  display: grid;
+  grid-template-columns: auto minmax(84px, 0.34fr) minmax(0, 1.1fr) minmax(0, 0.95fr) minmax(0, 0.95fr) minmax(0, 0.95fr) minmax(0, 0.95fr);
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 7px 8px;
+  border: 1px solid rgba(225, 29, 72, 0.18);
+  border-radius: 6px;
+  background: rgba(255, 241, 242, 0.9);
+}
+
+.novel-draft-brief-recent-fatigue span {
+  color: #be123c;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.novel-draft-brief-recent-fatigue strong {
   min-width: 0;
   color: #0f172a;
   font-size: 12px;
@@ -1727,6 +1853,35 @@
 }
 
 .novel-draft-brief-batch strong {
+  min-width: 0;
+  color: #0f172a;
+  font-size: 12px;
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.novel-draft-brief-volume-climax {
+  display: grid;
+  grid-template-columns: auto minmax(88px, 0.4fr) minmax(0, 1.15fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 7px 8px;
+  border: 1px solid rgba(147, 51, 234, 0.2);
+  border-radius: 6px;
+  background: rgba(250, 245, 255, 0.92);
+}
+
+.novel-draft-brief-volume-climax span {
+  color: #7e22ce;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.novel-draft-brief-volume-climax strong {
   min-width: 0;
   color: #0f172a;
   font-size: 12px;
@@ -2147,6 +2302,33 @@
     display: none;
   }
 
+  .novel-draft-brief-reader-drop {
+    grid-template-columns: auto repeat(2, minmax(0, 1fr));
+    gap: 5px;
+    margin-top: 6px;
+    padding: 6px;
+  }
+
+  .novel-draft-brief-reader-drop strong:nth-of-type(3),
+  .novel-draft-brief-reader-drop strong:nth-of-type(4),
+  .novel-draft-brief-reader-drop strong:nth-of-type(5) {
+    display: none;
+  }
+
+  .novel-draft-brief-story-pull {
+    grid-template-columns: auto repeat(2, minmax(0, 1fr));
+    gap: 5px;
+    margin-top: 6px;
+    padding: 6px;
+  }
+
+  .novel-draft-brief-story-pull strong:nth-of-type(1),
+  .novel-draft-brief-story-pull strong:nth-of-type(3),
+  .novel-draft-brief-story-pull strong:nth-of-type(5),
+  .novel-draft-brief-story-pull strong:nth-of-type(7) {
+    display: none;
+  }
+
   .novel-draft-brief-battle {
     grid-template-columns: auto repeat(2, minmax(0, 1fr));
     gap: 5px;
@@ -2193,6 +2375,18 @@
     display: none;
   }
 
+  .novel-draft-brief-delivery-risk {
+    grid-template-columns: auto repeat(2, minmax(0, 1fr));
+    gap: 5px;
+    margin-top: 6px;
+    padding: 6px;
+  }
+
+  .novel-draft-brief-delivery-risk strong:nth-of-type(3),
+  .novel-draft-brief-delivery-risk strong:nth-of-type(4) {
+    display: none;
+  }
+
   .novel-draft-brief-first30 {
     grid-template-columns: auto repeat(2, minmax(0, 1fr));
     gap: 5px;
@@ -2201,6 +2395,20 @@
   }
 
   .novel-draft-brief-first30 strong:nth-of-type(3) {
+    display: none;
+  }
+
+  .novel-draft-brief-recent-fatigue {
+    grid-template-columns: auto repeat(2, minmax(0, 1fr));
+    gap: 5px;
+    margin-top: 6px;
+    padding: 6px;
+  }
+
+  .novel-draft-brief-recent-fatigue strong:nth-of-type(4),
+  .novel-draft-brief-recent-fatigue strong:nth-of-type(5),
+  .novel-draft-brief-recent-fatigue strong:nth-of-type(6),
+  .novel-draft-brief-recent-fatigue strong:nth-of-type(7) {
     display: none;
   }
 
@@ -2264,6 +2472,20 @@
   .novel-draft-brief-story-unit strong:nth-of-type(4),
   .novel-draft-brief-story-unit strong:nth-of-type(5),
   .novel-draft-brief-story-unit strong:nth-of-type(6) {
+    display: none;
+  }
+
+  .novel-draft-brief-volume-climax {
+    grid-template-columns: auto repeat(2, minmax(0, 1fr));
+    gap: 5px;
+    margin-top: 6px;
+    padding: 6px;
+  }
+
+  .novel-draft-brief-volume-climax strong:nth-of-type(4),
+  .novel-draft-brief-volume-climax strong:nth-of-type(5),
+  .novel-draft-brief-volume-climax strong:nth-of-type(7),
+  .novel-draft-brief-volume-climax strong:nth-of-type(8) {
     display: none;
   }
 

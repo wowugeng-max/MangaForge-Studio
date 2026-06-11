@@ -15,7 +15,13 @@ import {
 } from './types'
 import { normalizeLLMResponse } from './adapter'
 import { buildCodexResponsesBody } from './codex-responses'
-import { applyClaudeCodeBodyMetadata, applyClaudeCodeHeaders, stripAnthropicLocal1mMarker } from './anthropic-context'
+import {
+  applyClaudeCodeAuthHeaders,
+  anthropicModelNameForRequest,
+  anyRouterOfficialMessagesEndpoint,
+  applyClaudeCodeBodyMetadata,
+  applyClaudeCodeHeaders,
+} from './anthropic-context'
 
 // ════════════════════════════════════════════════════════════
 // provider-runtime.ts — Reference: Claude Code API client
@@ -229,13 +235,25 @@ function normalizeBaseUrl(url?: string): string {
  *
  * Claude Code: SDK builds URL from baseURL + endpoint automatically.
  */
-function buildUrl(baseUrl: string, endpoint: string): string {
+function buildUrl(baseUrl: string, endpoint: string, apiFormat = ''): string {
+  if (isClaudeCodeFormat(apiFormat)) {
+    const anyRouterMessagesEndpoint = anyRouterOfficialMessagesEndpoint(baseUrl, endpoint)
+    if (anyRouterMessagesEndpoint) return anyRouterMessagesEndpoint
+  }
   if (/^https?:\/\//i.test(endpoint)) return endpoint
   const base = normalizeBaseUrl(baseUrl)
   const ep = String(endpoint || '').replace(/^\/+/, '')
 
   // Check if base already ends with a version segment like /v1
   if (/\/v\d+$/i.test(base)) return `${base}/${ep}`
+
+  // Claude Code/OpenAI Responses SDK-style base URLs may be configured as a
+  // bare origin. In that case the API version segment is still required.
+  const pathParts = base.replace(/^(https?:\/\/[^/]+)/i, '').split('/').filter(Boolean)
+  const isBareOrigin = pathParts.length === 0
+  if (isBareOrigin && /^v\d+\//i.test(ep)) return `${base}/${ep}`
+  if (isBareOrigin && isClaudeCodeFormat(apiFormat) && ep === 'messages') return `${base}/v1/${ep}`
+  if (isBareOrigin && isCodexResponsesFormat(apiFormat) && ep === 'responses') return `${base}/v1/${ep}`
 
   // Check if base already ends with a full endpoint path (e.g. /v1/complete)
   // In this case, just append the sub-path
@@ -270,7 +288,12 @@ function buildHeaders(selection: RuntimeModelSelection): Record<string, string> 
   // Authentication — matches Claude Code's configureApiKeyHeaders
   if (selection.key.key) {
     const authType = String(selection.provider.auth_type || 'bearer').toLowerCase()
-    if (isGeminiNativeFormat(selection.apiFormat)) {
+    if (isClaudeCodeFormat(selection.apiFormat)) {
+      applyClaudeCodeAuthHeaders(headers, selection.key.key, authType, selection.model, {
+        provider: selection.provider,
+        baseUrl: selection.baseUrl,
+      })
+    } else if (isGeminiNativeFormat(selection.apiFormat)) {
       headers['x-goog-api-key'] = selection.key.key
     } else if (authType === 'x-api-key' || authType === 'api-key') {
       headers['x-api-key'] = selection.key.key
@@ -283,7 +306,16 @@ function buildHeaders(selection: RuntimeModelSelection): Record<string, string> 
   if (routeHeaders && typeof routeHeaders === 'object') {
     Object.assign(headers, routeHeaders)
   }
-  if (isClaudeCodeFormat(selection.apiFormat)) applyClaudeCodeHeaders(headers, selection.model)
+  if (isClaudeCodeFormat(selection.apiFormat)) {
+    applyClaudeCodeHeaders(headers, selection.model, {
+      provider: selection.provider,
+      baseUrl: selection.baseUrl,
+    })
+    applyClaudeCodeAuthHeaders(headers, selection.key.key, selection.provider.auth_type, selection.model, {
+      provider: selection.provider,
+      baseUrl: selection.baseUrl,
+    })
+  }
 
   return headers
 }
@@ -374,7 +406,10 @@ function toAnthropicBody(request: LLMRequest, selection: RuntimeModelSelection):
       content: m.content,
     }))
   const body: Record<string, any> = {
-    model: stripAnthropicLocal1mMarker(selection.model.model_name || request.model),
+    model: anthropicModelNameForRequest(selection.model.model_name || request.model, selection.model, {
+      provider: selection.provider,
+      baseUrl: selection.baseUrl,
+    }),
     messages,
     temperature: request.temperature ?? 0.3,
     max_tokens: request.max_tokens ?? 4096,
@@ -388,7 +423,12 @@ function toAnthropicBody(request: LLMRequest, selection: RuntimeModelSelection):
     }))
   }
   if (shouldStreamRequest(request, selection)) body.stream = true
-  if (selection.apiFormat === 'claude_code') applyClaudeCodeBodyMetadata(body, selection.model)
+  if (isClaudeCodeFormat(selection.apiFormat)) {
+    applyClaudeCodeBodyMetadata(body, selection.model, {
+      provider: selection.provider,
+      baseUrl: selection.baseUrl,
+    })
+  }
   return body
 }
 
@@ -1229,7 +1269,7 @@ async function postProviderJson<T = any>(
   options: RuntimeExecutionOptions = {},
 ): Promise<LLMResponse<T>> {
   const routedSelection = selectionForRequestRoute(selection, request)
-  const url = buildUrl(routedSelection.baseUrl, routedSelection.endpoint)
+  const url = buildUrl(routedSelection.baseUrl, routedSelection.endpoint, routedSelection.apiFormat)
   const body = buildProviderRequestBody(request, routedSelection)
   const isStreaming = Boolean((body as any).stream)
   const headers = buildHeaders(routedSelection)
@@ -1237,9 +1277,10 @@ async function postProviderJson<T = any>(
   const timeoutMs = Number(options.timeoutMs ?? process.env.LLM_TIMEOUT_MS ?? 600000) // 600s default, matches Claude Code foreground
   const keyMask = (selection.key.key || '').slice(0, 8) + '...'
   const heartbeatInterval = 30_000 // log progress every 30s
+  const requestModelName = String((body as any).model || routedSelection.model.model_name || request.model || '')
 
   console.log(
-    `[provider-runtime] POST ${url} | model: ${routedSelection.model.model_name} | format: ${routedSelection.apiFormat} | responseMode=${routedSelection.provider.response_mode || 'auto'} | stream=${isStreaming ? 'on' : 'off'} | key: ${keyMask} | timeout=${timeoutMs}ms | retries=${maxRetries}`,
+    `[provider-runtime] POST ${url} | model: ${requestModelName} | format: ${routedSelection.apiFormat} | responseMode=${routedSelection.provider.response_mode || 'auto'} | stream=${isStreaming ? 'on' : 'off'} | key: ${keyMask} | timeout=${timeoutMs}ms | retries=${maxRetries}`,
   )
   if (isCodexResponsesFormat(routedSelection.apiFormat)) {
     console.log(`[provider-runtime] Codex body summary: ${JSON.stringify(summarizeProviderRequestBodyForLog(body))}`)

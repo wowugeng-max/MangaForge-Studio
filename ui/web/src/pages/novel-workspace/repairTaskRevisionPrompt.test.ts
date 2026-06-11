@@ -270,6 +270,33 @@ describe('buildRepairTaskRevisionPrompt', () => {
     expect(prompt).toContain('必须重写为作者口吻的节奏、句式、对白比例和情绪转折，不得照搬样章原句')
   })
 
+  test('injects chapter benchmark evidence for benchmark repair tasks', () => {
+    const prompt = buildRepairTaskRevisionPrompt({
+      issue_type: 'chapter_benchmark_gap',
+      message: '本章标杆章执行缺口 3 项。',
+      action: '按章节标杆重修本章结构。',
+      chapter_benchmark_sync: {
+        score: 57,
+        label: '基准缺口 3',
+        missed: [
+          { label: '开篇钩子', text: '前300字没有把上一章压力转成现场危险' },
+          { label: '爽点兑现', text: '主角反制没有形成可见回报' },
+          { label: '章末追读', text: '章末缺少下一章非看不可的问题' },
+        ],
+        next_actions: ['优先补足开篇、爽点和章末追读。'],
+      },
+    })
+
+    expect(prompt).toContain('【章节标杆修复】')
+    expect(prompt).toContain('标杆评分：57')
+    expect(prompt).toContain('基准缺口 3')
+    expect(prompt).toContain('开篇钩子：前300字没有把上一章压力转成现场危险')
+    expect(prompt).toContain('爽点兑现：主角反制没有形成可见回报')
+    expect(prompt).toContain('章末追读：章末缺少下一章非看不可的问题')
+    expect(prompt).toContain('优先补足开篇、爽点和章末追读。')
+    expect(prompt).toContain('必须补成可见的开篇钩子、冲突推进、爽点兑现、场景节拍和章末追读')
+  })
+
   test('injects reader trial drop point evidence for trial repair tasks', () => {
     const prompt = buildRepairTaskRevisionPrompt({
       source: 'reader_trial_review',
@@ -298,6 +325,37 @@ describe('buildRepairTaskRevisionPrompt', () => {
     expect(prompt).toContain('修复动作：重做第7章章末未解决问题。')
     expect(prompt).toContain('只修当前章节')
     expect(prompt).toContain('章末钩子')
+  })
+
+  test('injects first30 retention recheck evidence for opening batch repairs', () => {
+    const prompt = buildRepairTaskRevisionPrompt({
+      issue_type: 'first30_retention_recheck',
+      task_type: 'review_planning',
+      message: '前30章留存状态需要处理：需重新诊断。',
+      action: '重新运行前30章留存诊断，确认本批修改后的开篇三章、试读十章和付费前蓄势。',
+      action_key: 'run_first30_retention',
+      first30_retention: {
+        status: 'stale',
+        score: 76,
+        stale: true,
+        summary: '需重新诊断：前30章内容已在报告后更新。旧报告显示第4-10章试读闭环偏弱。',
+        risks: [
+          { severity: 'high', segment: '4-10', issue: '试读闭环偏弱', action: '重新运行前30章诊断' },
+        ],
+        next_actions: ['重新运行前30章诊断，确认第8-10章修复后的追读曲线。'],
+        risky_chapters: [
+          { chapter_no: 8, title: '试炼前夜', score: 61, flags: ['章末钩子弱'], risk_level: 'high' },
+        ],
+      },
+    })
+
+    expect(prompt).toContain('【前30章留存复诊】')
+    expect(prompt).toContain('留存状态：stale')
+    expect(prompt).toContain('留存评分：76')
+    expect(prompt).toContain('需重新诊断：前30章内容已在报告后更新')
+    expect(prompt).toContain('风险：4-10：试读闭环偏弱 -> 重新运行前30章诊断')
+    expect(prompt).toContain('高危章节：第8章《试炼前夜》 61分：章末钩子弱')
+    expect(prompt).toContain('必须重新校准开篇三章、试读十章和付费前蓄势')
   })
 
   test('injects delivery risk evidence and category-specific repair rules for annotation tasks', () => {
@@ -501,6 +559,33 @@ describe('buildRepairTaskRevisionPrompt', () => {
     expect(prompt).toContain('上一章最后一幕：湿漉漉学生敲响玻璃门')
     expect(prompt).toContain('开篇先写角色对上一章钩子、危机、欠账或未解问题的直接反应')
     expect(prompt).toContain('不得从泛环境描写、空泛醒来或无关解释重新开场')
+  })
+
+  test('uses a targeted opening rewrite for safe-batch chapter handoff repair tasks', () => {
+    const prompt = buildRepairTaskRevisionPrompt({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'chapter_handoff_missed',
+      severity: 'medium',
+      message: '章节交接漏接 1 项，开篇没有接住上一章悬念。',
+      action: '重修本章开篇300字和第一场景。',
+      chapter_handoff_review: {
+        status: 'warn',
+        missed_count: 1,
+        missed: [
+          {
+            key: 'opening_handoff',
+            label: '上一章承接',
+            text: '阵盘第二道裂纹必须在开篇造成可见压力。',
+            match_scope: 'opening',
+          },
+        ],
+      },
+    })
+
+    expect(prompt).toContain('【开篇承接修复】')
+    expect(prompt).toContain('重写或补写本章前 300-500 字')
+    expect(prompt).toContain('阵盘第二道裂纹必须在开篇造成可见压力')
+    expect(prompt).toContain('不得把上一章钩子拖到中后段才提一句')
   })
 
   test('uses a targeted opening pull rewrite when opening hook score is weak', () => {

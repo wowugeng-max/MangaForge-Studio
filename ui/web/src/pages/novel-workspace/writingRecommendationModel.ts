@@ -268,6 +268,69 @@ export type NovelPreDraftBrief = {
     ending_question?: string
     forbidden_cliches?: string[]
   }
+  reader_drop_risk_brief?: {
+    status?: string
+    score?: number | null
+    quality_bar?: string
+    drop_points?: string[]
+    pull_points?: string[]
+    repair_actions?: string[]
+    opening_guardrail?: string
+    middle_guardrail?: string
+    ending_guardrail?: string
+  }
+  story_pressure_brief?: {
+    status?: string
+    score?: number | null
+    range_label?: string
+    pressure_sources?: string[]
+    weak_signals?: Array<{
+      key?: string
+      label?: string
+      status?: string
+      detail?: string
+    }>
+    required_actions?: string[]
+    pressure_source_guardrail?: string
+    conflict_escalation_guardrail?: string
+    stakes_growth_guardrail?: string
+    reversal_pressure_guardrail?: string
+  }
+  story_drive_brief?: {
+    protagonist_choice?: string
+    choice_cost?: string
+    state_change?: string
+    obstacle?: string
+    causal_next_step?: string
+    required_actions?: string[]
+  }
+  serial_rhythm_brief?: {
+    status?: string
+    opening_hook_deadline?: string
+    payoff_interval?: string
+    middle_guardrail?: string
+    ending_hook_guardrail?: string
+    scene_payoff_budget?: Array<{
+      scene_no?: number | null
+      title?: string
+      word_budget?: string
+      required_payoff?: string
+      turn?: string
+      ending_hook_seed?: string
+    }>
+    anti_drag_rules?: string[]
+  }
+  page_turn_hook_brief?: {
+    status?: string
+    hook_type?: string
+    core_question?: string
+    visible_trigger?: string
+    withheld_answer?: string
+    next_chapter_pull?: string
+    final_image?: string
+    forbidden_resolution?: string[]
+    required_actions?: string[]
+  }
   reader_expectation_ledger?: {
     chapter_promise?: string
     carry_over?: Array<{ key?: string; label?: string; type?: string; text?: string }>
@@ -360,6 +423,26 @@ export type NovelPreDraftBrief = {
     repair_focus?: string
     risk_level?: string
   }
+  recent_fatigue_brief?: {
+    status?: string
+    score?: number | null
+    chapter_range_label?: string
+    summary?: string
+    fatigue_risks?: string[]
+    conflict_variation?: string
+    payoff_variation?: string
+    hook_variation?: string
+    scene_freshness?: string
+    next_actions?: string[]
+  }
+  delivery_risk_carry_over?: {
+    source_chapter_no?: number | null
+    total_count?: number
+    label?: string
+    priority_label?: string
+    items?: string[]
+    required_actions?: string[]
+  }
   next_batch_brief?: {
     chapter_range_label?: string
     batch_goal?: string
@@ -379,6 +462,23 @@ export type NovelPreDraftBrief = {
     setup_and_storyline?: string[]
     exit_hook?: string
     forbidden_advance?: string[]
+  }
+  volume_climax_brief?: {
+    status?: string
+    current_volume_title?: string
+    chapter_range?: string
+    current_chapter_role?: string
+    volume_goal?: string
+    climax_promise?: string
+    required_beats?: string[]
+    forbidden_payoff?: string[]
+    nearby_beats?: Array<{
+      chapter_no?: number | null
+      type?: string
+      label?: string
+      detail?: string
+    }>
+    next_actions?: string[]
   }
   scene_briefs?: any[]
   word_budget?: string
@@ -411,6 +511,31 @@ export type NovelDraftBriefSummary = {
     retentionShortDramaScene: string
     retentionEndingQuestion: string
     retentionForbiddenCliches: string
+    readerDropRiskStatus: string
+    readerDropRisks: string
+    readerDropOpening: string
+    readerDropMiddle: string
+    readerDropEnding: string
+    storyPressureSources: string
+    storyPressureConflict: string
+    storyPressureStakes: string
+    storyPressureReversal: string
+    storyPressureActions: string
+    storyDriveChoice: string
+    storyDriveCost: string
+    storyDriveChange: string
+    storyDriveObstacle: string
+    storyDriveNextStep: string
+    serialRhythmOpening: string
+    serialRhythmPayoffInterval: string
+    serialRhythmMiddle: string
+    serialRhythmEnding: string
+    serialRhythmScenePayoffs: string
+    serialRhythmAntiDrag: string
+    pageTurnQuestion: string
+    pageTurnTrigger: string
+    pageTurnPull: string
+    pageTurnForbidden: string
     expectationCarryOver: string
     expectationDebtMustCarry: string
     expectationDebtKeepAlive: string
@@ -418,6 +543,10 @@ export type NovelDraftBriefSummary = {
     handoffOpeningObligation: string
     handoffMustCarry: string
     handoffKeepAlive: string
+    deliveryRiskLabel: string
+    deliveryRiskItems: string
+    deliveryRiskPriority: string
+    deliveryRiskActions: string
     expectationMustDeliver: string
     expectationKeepAlive: string
     expectationMustNotBreak: string
@@ -455,6 +584,13 @@ export type NovelDraftBriefSummary = {
     first30RetentionFlags: string
     first30RetentionActions: string
     first30RetentionFocus: string
+    recentFatigueRange: string
+    recentFatigueRisks: string
+    recentFatigueConflict: string
+    recentFatiguePayoff: string
+    recentFatigueHook: string
+    recentFatigueScene: string
+    recentFatigueActions: string
     storyUnitRange: string
     storyUnitRole: string
     storyUnitGoal: string
@@ -464,6 +600,14 @@ export type NovelDraftBriefSummary = {
     storyUnitPayoff: string
     storyUnitExitHook: string
     storyUnitForbidden: string
+    volumeClimaxRange: string
+    volumeClimaxRole: string
+    volumeClimaxGoal: string
+    volumeClimaxPromise: string
+    volumeClimaxRequiredBeats: string
+    volumeClimaxForbidden: string
+    volumeClimaxNearbyBeats: string
+    volumeClimaxNextActions: string
     batchRange: string
     batchGoal: string
     batchReaderPayoff: string
@@ -501,6 +645,24 @@ export function buildNovelDraftBriefSummary({
       item?.required_action ? `动作：${item.required_action}` : '',
     ].filter(Boolean).join(' - ')).filter(Boolean).join('、')
     : ''
+  const volumeClimaxBeatText = (items?: NovelPreDraftBrief['volume_climax_brief']['nearby_beats']) => Array.isArray(items)
+    ? items.map(item => [
+      item?.chapter_no ? `第${item.chapter_no}章` : '',
+      item?.type,
+      item?.label,
+      item?.detail,
+    ].filter(Boolean).join(' ')).filter(Boolean).join('、')
+    : ''
+  const serialRhythmScenePayoffText = (items?: NovelPreDraftBrief['serial_rhythm_brief']['scene_payoff_budget']) => Array.isArray(items)
+    ? items.map(item => [
+      item?.scene_no ? `场景${item.scene_no}` : '',
+      item?.title,
+      item?.word_budget,
+      item?.required_payoff ? `回报：${item.required_payoff}` : '',
+      item?.turn ? `转折：${item.turn}` : '',
+      item?.ending_hook_seed ? `钩子：${item.ending_hook_seed}` : '',
+    ].filter(Boolean).join(' ')).filter(Boolean).join('、')
+    : ''
   const briefFields = {
     chapterGoal: preDraftBrief?.chapter_goal?.trim() || chapterGoal?.trim() || '',
     readerPromise: preDraftBrief?.reader_promise?.trim() || '',
@@ -526,6 +688,35 @@ export function buildNovelDraftBriefSummary({
     retentionShortDramaScene: preDraftBrief?.reader_retention_brief?.short_drama_scene?.trim() || '',
     retentionEndingQuestion: preDraftBrief?.reader_retention_brief?.ending_question?.trim() || '',
     retentionForbiddenCliches: Array.isArray(preDraftBrief?.reader_retention_brief?.forbidden_cliches) ? preDraftBrief.reader_retention_brief.forbidden_cliches.filter(Boolean).join('、') : '',
+    readerDropRiskStatus: [
+      preDraftBrief?.reader_drop_risk_brief?.status?.trim(),
+      Number.isFinite(Number(preDraftBrief?.reader_drop_risk_brief?.score)) ? `${Number(preDraftBrief?.reader_drop_risk_brief?.score)}分` : '',
+      preDraftBrief?.reader_drop_risk_brief?.quality_bar?.trim(),
+    ].filter(Boolean).join(' · '),
+    readerDropRisks: Array.isArray(preDraftBrief?.reader_drop_risk_brief?.drop_points) ? preDraftBrief.reader_drop_risk_brief.drop_points.filter(Boolean).join('、') : '',
+    readerDropOpening: preDraftBrief?.reader_drop_risk_brief?.opening_guardrail?.trim() || '',
+    readerDropMiddle: preDraftBrief?.reader_drop_risk_brief?.middle_guardrail?.trim() || '',
+    readerDropEnding: preDraftBrief?.reader_drop_risk_brief?.ending_guardrail?.trim() || '',
+    storyPressureSources: Array.isArray(preDraftBrief?.story_pressure_brief?.pressure_sources) ? preDraftBrief.story_pressure_brief.pressure_sources.filter(Boolean).join('、') : '',
+    storyPressureConflict: preDraftBrief?.story_pressure_brief?.conflict_escalation_guardrail?.trim() || '',
+    storyPressureStakes: preDraftBrief?.story_pressure_brief?.stakes_growth_guardrail?.trim() || '',
+    storyPressureReversal: preDraftBrief?.story_pressure_brief?.reversal_pressure_guardrail?.trim() || '',
+    storyPressureActions: Array.isArray(preDraftBrief?.story_pressure_brief?.required_actions) ? preDraftBrief.story_pressure_brief.required_actions.filter(Boolean).join('、') : '',
+    storyDriveChoice: preDraftBrief?.story_drive_brief?.protagonist_choice?.trim() || '',
+    storyDriveCost: preDraftBrief?.story_drive_brief?.choice_cost?.trim() || '',
+    storyDriveChange: preDraftBrief?.story_drive_brief?.state_change?.trim() || '',
+    storyDriveObstacle: preDraftBrief?.story_drive_brief?.obstacle?.trim() || '',
+    storyDriveNextStep: preDraftBrief?.story_drive_brief?.causal_next_step?.trim() || '',
+    serialRhythmOpening: preDraftBrief?.serial_rhythm_brief?.opening_hook_deadline?.trim() || '',
+    serialRhythmPayoffInterval: preDraftBrief?.serial_rhythm_brief?.payoff_interval?.trim() || '',
+    serialRhythmMiddle: preDraftBrief?.serial_rhythm_brief?.middle_guardrail?.trim() || '',
+    serialRhythmEnding: preDraftBrief?.serial_rhythm_brief?.ending_hook_guardrail?.trim() || '',
+    serialRhythmScenePayoffs: serialRhythmScenePayoffText(preDraftBrief?.serial_rhythm_brief?.scene_payoff_budget),
+    serialRhythmAntiDrag: Array.isArray(preDraftBrief?.serial_rhythm_brief?.anti_drag_rules) ? preDraftBrief.serial_rhythm_brief.anti_drag_rules.filter(Boolean).join('、') : '',
+    pageTurnQuestion: preDraftBrief?.page_turn_hook_brief?.core_question?.trim() || '',
+    pageTurnTrigger: preDraftBrief?.page_turn_hook_brief?.visible_trigger?.trim() || '',
+    pageTurnPull: preDraftBrief?.page_turn_hook_brief?.next_chapter_pull?.trim() || '',
+    pageTurnForbidden: Array.isArray(preDraftBrief?.page_turn_hook_brief?.forbidden_resolution) ? preDraftBrief.page_turn_hook_brief.forbidden_resolution.filter(Boolean).join('、') : '',
     expectationCarryOver: expectationListText(preDraftBrief?.reader_expectation_ledger?.carry_over),
     expectationDebtMustCarry: expectationListText(preDraftBrief?.reader_expectation_debt?.must_carry),
     expectationDebtKeepAlive: expectationListText(preDraftBrief?.reader_expectation_debt?.keep_alive),
@@ -535,6 +726,13 @@ export function buildNovelDraftBriefSummary({
     handoffOpeningObligation: preDraftBrief?.reader_retention_brief?.opening_hook?.trim() || '',
     handoffMustCarry: expectationListText(preDraftBrief?.reader_expectation_debt?.must_carry) || expectationListText(preDraftBrief?.reader_expectation_ledger?.carry_over),
     handoffKeepAlive: expectationListText(preDraftBrief?.reader_expectation_debt?.keep_alive),
+    deliveryRiskLabel: [
+      preDraftBrief?.delivery_risk_carry_over?.label?.trim(),
+      preDraftBrief?.delivery_risk_carry_over?.source_chapter_no ? `第${preDraftBrief.delivery_risk_carry_over.source_chapter_no}章` : '',
+    ].filter(Boolean).join(' · '),
+    deliveryRiskItems: Array.isArray(preDraftBrief?.delivery_risk_carry_over?.items) ? preDraftBrief.delivery_risk_carry_over.items.filter(Boolean).join('、') : '',
+    deliveryRiskPriority: preDraftBrief?.delivery_risk_carry_over?.priority_label?.trim() || '',
+    deliveryRiskActions: Array.isArray(preDraftBrief?.delivery_risk_carry_over?.required_actions) ? preDraftBrief.delivery_risk_carry_over.required_actions.filter(Boolean).join('、') : '',
     expectationMustDeliver: expectationListText(preDraftBrief?.reader_expectation_ledger?.must_deliver),
     expectationKeepAlive: expectationListText(preDraftBrief?.reader_expectation_ledger?.keep_alive),
     expectationMustNotBreak: Array.isArray(preDraftBrief?.reader_expectation_ledger?.must_not_break) ? preDraftBrief.reader_expectation_ledger.must_not_break.filter(Boolean).join('、') : '',
@@ -597,6 +795,16 @@ export function buildNovelDraftBriefSummary({
     first30RetentionFlags: Array.isArray(preDraftBrief?.first30_retention_brief?.flags) ? preDraftBrief.first30_retention_brief.flags.filter(Boolean).join('、') : '',
     first30RetentionActions: Array.isArray(preDraftBrief?.first30_retention_brief?.required_actions) ? preDraftBrief.first30_retention_brief.required_actions.filter(Boolean).join('、') : '',
     first30RetentionFocus: preDraftBrief?.first30_retention_brief?.repair_focus?.trim() || '',
+    recentFatigueRange: [
+      preDraftBrief?.recent_fatigue_brief?.chapter_range_label?.trim(),
+      Number.isFinite(Number(preDraftBrief?.recent_fatigue_brief?.score)) ? `${Number(preDraftBrief?.recent_fatigue_brief?.score)}分` : '',
+    ].filter(Boolean).join(' · '),
+    recentFatigueRisks: Array.isArray(preDraftBrief?.recent_fatigue_brief?.fatigue_risks) ? preDraftBrief.recent_fatigue_brief.fatigue_risks.filter(Boolean).join('、') : '',
+    recentFatigueConflict: preDraftBrief?.recent_fatigue_brief?.conflict_variation?.trim() || '',
+    recentFatiguePayoff: preDraftBrief?.recent_fatigue_brief?.payoff_variation?.trim() || '',
+    recentFatigueHook: preDraftBrief?.recent_fatigue_brief?.hook_variation?.trim() || '',
+    recentFatigueScene: preDraftBrief?.recent_fatigue_brief?.scene_freshness?.trim() || '',
+    recentFatigueActions: Array.isArray(preDraftBrief?.recent_fatigue_brief?.next_actions) ? preDraftBrief.recent_fatigue_brief.next_actions.filter(Boolean).join('、') : '',
     storyUnitRange: [
       preDraftBrief?.story_unit_context?.chapter_range_label?.trim(),
       preDraftBrief?.story_unit_context?.title?.trim(),
@@ -609,6 +817,17 @@ export function buildNovelDraftBriefSummary({
     storyUnitPayoff: preDraftBrief?.story_unit_context?.mini_climax_payoff?.trim() || '',
     storyUnitExitHook: preDraftBrief?.story_unit_context?.exit_hook?.trim() || '',
     storyUnitForbidden: Array.isArray(preDraftBrief?.story_unit_context?.forbidden_advance) ? preDraftBrief.story_unit_context.forbidden_advance.filter(Boolean).join('、') : '',
+    volumeClimaxRange: [
+      preDraftBrief?.volume_climax_brief?.current_volume_title?.trim(),
+      preDraftBrief?.volume_climax_brief?.chapter_range?.trim(),
+    ].filter(Boolean).join(' · '),
+    volumeClimaxRole: preDraftBrief?.volume_climax_brief?.current_chapter_role?.trim() || '',
+    volumeClimaxGoal: preDraftBrief?.volume_climax_brief?.volume_goal?.trim() || '',
+    volumeClimaxPromise: preDraftBrief?.volume_climax_brief?.climax_promise?.trim() || '',
+    volumeClimaxRequiredBeats: Array.isArray(preDraftBrief?.volume_climax_brief?.required_beats) ? preDraftBrief.volume_climax_brief.required_beats.filter(Boolean).join('、') : '',
+    volumeClimaxForbidden: Array.isArray(preDraftBrief?.volume_climax_brief?.forbidden_payoff) ? preDraftBrief.volume_climax_brief.forbidden_payoff.filter(Boolean).join('、') : '',
+    volumeClimaxNearbyBeats: volumeClimaxBeatText(preDraftBrief?.volume_climax_brief?.nearby_beats),
+    volumeClimaxNextActions: Array.isArray(preDraftBrief?.volume_climax_brief?.next_actions) ? preDraftBrief.volume_climax_brief.next_actions.filter(Boolean).join('、') : '',
     batchRange: preDraftBrief?.next_batch_brief?.chapter_range_label?.trim() || '',
     batchGoal: preDraftBrief?.next_batch_brief?.batch_goal?.trim() || '',
     batchReaderPayoff: preDraftBrief?.next_batch_brief?.reader_payoff_plan?.trim() || '',

@@ -83,6 +83,11 @@ describe('model health probes', () => {
     expect(determineProbeType({ video: true } as any)).toBe('text_to_video')
   })
 
+  test('prioritizes chat probes for multimodal LLMs so text health is not blocked by vision routes', () => {
+    expect(determineProbeType({ chat: true, vision: true } as any)).toBe('chat')
+    expect(determineProbeType({ chat: true, vision: true, text_to_image: true } as any)).toBe('chat')
+  })
+
   test('includes the upstream official image in vision probes', () => {
     const request = buildProbeRequest('vision', 'vision-model') as any
 
@@ -154,6 +159,80 @@ describe('model health probes', () => {
       const stored = JSON.parse(await readFile(join(workspace, 'models.json'), 'utf8'))
       expect(stored[0].health_status).toBe('network_error')
       expect(stored[0].last_tested_at).toBeTruthy()
+    } finally {
+      globalThis.fetch = previousFetch
+    }
+  })
+
+  test('diagnoses AnyRouter Claude 403 as provider-side Claude permission and persists the last error', async () => {
+    const workspace = await tempWorkspace()
+    await writeFile(join(workspace, 'providers.json'), JSON.stringify([
+      {
+        id: 'any',
+        display_name: 'AnyRouter',
+        service_type: 'llm',
+        api_format: 'codex_responses',
+        auth_type: 'bearer',
+        supported_modalities: ['chat'],
+        default_base_url: 'https://anyrouter.top/v1',
+        is_active: true,
+      },
+    ]))
+    await writeFile(join(workspace, 'keys.json'), JSON.stringify([
+      { id: 10, provider: 'any', key: 'sk-ar-test', is_active: true },
+    ]))
+    await writeFile(join(workspace, 'models.json'), JSON.stringify([
+      {
+        id: 1,
+        api_key_id: 10,
+        provider: 'any',
+        display_name: 'Claude Opus',
+        model_name: 'claude-opus-4-8[1m]',
+        api_format: 'claude_code',
+        capabilities: { chat: true },
+        health_status: 'unknown',
+      },
+    ]))
+
+    const previousFetch = globalThis.fetch
+    let capturedUrl = ''
+    let capturedHeaders: Record<string, string> = {}
+    let capturedBody: any = null
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      capturedUrl = String(url)
+      capturedHeaders = Object.fromEntries(new Headers(init?.headers || {}).entries())
+      capturedBody = JSON.parse(String(init?.body || '{}'))
+      return new Response(JSON.stringify({
+        error: {
+          code: 'provider_unauthorized',
+          message: 'No permission to access anthropic_byok model',
+        },
+      }), { status: 403 })
+    }) as any
+
+    try {
+      const { registerModelRoutes } = await import('./models')
+      const { app, handlers } = createRouteHarness()
+      registerModelRoutes(app as any, () => workspace)
+
+      const response = await call(handlers.get('POST /api/models/:id/test'), { params: { id: '1' } })
+
+      expect(capturedUrl).toBe('https://anyrouter.top/v1/messages')
+      expect(capturedHeaders.authorization).toBe('Bearer sk-ar-test')
+      expect(capturedHeaders['x-api-key']).toBeUndefined()
+      expect(capturedBody.model).toBe('claude-opus-4-8[1m]')
+      expect(response.statusCode).toBe(200)
+      expect(response.body.status).toBe('unauthorized')
+      expect(response.body.message).toContain('AnyRouter')
+      expect(response.body.message).toContain('Claude/Anthropic')
+      expect(response.body.message).toContain('Claude Messages 格式')
+      expect(response.body.message).toContain('claude-opus-4-8')
+      expect(response.body.message).toContain('BYOK')
+
+      const stored = JSON.parse(await readFile(join(workspace, 'models.json'), 'utf8'))
+      expect(stored[0].health_status).toBe('unauthorized')
+      expect(stored[0].last_error).toContain('AnyRouter')
+      expect(stored[0].last_error).toContain('No permission')
     } finally {
       globalThis.fetch = previousFetch
     }

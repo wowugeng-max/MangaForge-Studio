@@ -88,10 +88,21 @@ function applyRequestChapterLaunchGate(contextPackage: any, req: any) {
 
 function applyRequestBatchPreflight(contextPackage: any, req: any) {
   if (!req.body?.batch_preflight) return contextPackage
+  const deliveryRiskCarryOver = req.body.batch_preflight?.delivery_risk_carry_over || req.body.batch_preflight?.deliveryRiskCarryOver || null
+  const chapterHandoffContract = req.body.batch_preflight?.chapter_handoff_contract || req.body.batch_preflight?.chapterHandoffContract || null
   return {
     ...contextPackage,
     batch_preflight: req.body.batch_preflight,
-    chapter_target: { ...contextPackage.chapter_target, batch_preflight: req.body.batch_preflight },
+    ...(deliveryRiskCarryOver ? { delivery_risk_carry_over: deliveryRiskCarryOver } : {}),
+    ...(chapterHandoffContract ? { chapter_handoff_contract: chapterHandoffContract } : {}),
+    ...(chapterHandoffContract?.previous_handoff ? { previous_handoff: chapterHandoffContract.previous_handoff } : {}),
+    chapter_target: {
+      ...contextPackage.chapter_target,
+      batch_preflight: req.body.batch_preflight,
+      ...(deliveryRiskCarryOver ? { delivery_risk_carry_over: deliveryRiskCarryOver } : {}),
+      ...(chapterHandoffContract ? { chapter_handoff_contract: chapterHandoffContract } : {}),
+      ...(chapterHandoffContract?.previous_handoff ? { previous_handoff: chapterHandoffContract.previous_handoff } : {}),
+    },
   }
 }
 

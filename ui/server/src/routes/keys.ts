@@ -3,7 +3,7 @@ import { readKeys, writeKeys, type APIKeyRecord } from '../key-store'
 import { readProviders } from '../provider-store'
 import { readModels, writeModels, type ModelRecord } from '../model-store'
 import { ConfiguredProviderAdapter } from '../llm/adapter'
-import { applyClaudeCodeHeaders } from '../llm/anthropic-context'
+import { anyRouterOfficialMessagesEndpoint, applyClaudeCodeAuthHeaders, applyClaudeCodeHeaders } from '../llm/anthropic-context'
 import { buildCodexResponsesBody } from '../llm/codex-responses'
 import { coerceBoolean } from '../boolean-utils'
 
@@ -88,10 +88,13 @@ export function buildFallbackTestUrl(rawEndpoint: string, apiFormat: string) {
     if (/\/models\/[^/]+:generateContent$/i.test(endpoint)) return endpoint
     return /\/v1beta$/i.test(endpoint) ? `${endpoint}/models/test:generateContent` : `${endpoint}/v1beta/models/test:generateContent`
   }
-  if (/\/(chat\/completions|responses|messages|generate|models)$/.test(endpoint)) return endpoint
   if (providerFormat === 'claude_code' || providerFormat.includes('anthropic')) {
+    const anyRouterMessagesEndpoint = anyRouterOfficialMessagesEndpoint(endpoint)
+    if (anyRouterMessagesEndpoint) return anyRouterMessagesEndpoint
+    if (/\/(chat\/completions|responses|messages|generate|models)$/.test(endpoint)) return endpoint
     return /\/v1$/.test(endpoint) ? `${endpoint}/messages` : `${endpoint}/v1/messages`
   }
+  if (/\/(chat\/completions|responses|messages|generate|models)$/.test(endpoint)) return endpoint
   if (providerFormat.includes('responses') || providerFormat.includes('codex')) {
     return /\/v1$/.test(endpoint) ? `${endpoint}/responses` : `${endpoint}/v1/responses`
   }
@@ -166,14 +169,23 @@ function routeUrl(routeConfig: unknown) {
   return ''
 }
 
-function buildKeyProbeHeaders(provider: any, keyValue: string) {
+function buildKeyProbeHeaders(provider: any, key: APIKeyRecord, keyValue: string) {
   const headers: Record<string, string> = { 'Content-Type': 'application/json', Accept: 'application/json', ...(provider.custom_headers || {}) }
   const authType = String(provider.auth_type || 'bearer').toLowerCase()
   if (String(provider.api_format || '').toLowerCase() === 'gemini_native') headers['x-goog-api-key'] = keyValue
   else if (authType === 'x-api-key' || authType === 'api-key') headers['x-api-key'] = keyValue
   else if (authType !== 'none') headers.Authorization = keyValue.toLowerCase().startsWith('bearer ') ? keyValue : `Bearer ${keyValue}`
   const providerFormat = String(provider.api_format || '').toLowerCase()
-  if (providerFormat === 'claude_code' || providerFormat.includes('anthropic')) applyClaudeCodeHeaders(headers)
+  if (providerFormat === 'claude_code' || providerFormat.includes('anthropic')) {
+    applyClaudeCodeHeaders(headers, undefined, {
+      provider,
+      baseUrl: String(key.base_url || provider.default_base_url || provider.base_url || provider.baseUrl || ''),
+    })
+    applyClaudeCodeAuthHeaders(headers, keyValue, provider.auth_type, undefined, {
+      provider,
+      baseUrl: String(key.base_url || provider.default_base_url || provider.base_url || provider.baseUrl || ''),
+    })
+  }
   return headers
 }
 
@@ -217,7 +229,7 @@ function resolveKeyProbeEndpoint(provider: any, key: APIKeyRecord) {
 function buildKeyProbeRequest(provider: any, key: APIKeyRecord, keyValue: string) {
   const testUrl = resolveKeyProbeEndpoint(provider, key)
   if (!testUrl) return null
-  const headers = buildKeyProbeHeaders(provider, keyValue)
+  const headers = buildKeyProbeHeaders(provider, key, keyValue)
   const apiFormat = String(provider.api_format || '').toLowerCase()
   if (apiFormat === 'openai_compatible' && /\/models(?:[?#].*)?$/i.test(testUrl)) {
     return {

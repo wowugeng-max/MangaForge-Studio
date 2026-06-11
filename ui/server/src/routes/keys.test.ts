@@ -77,6 +77,12 @@ describe('provider key protocol tests', () => {
     expect(buildFallbackTestUrl('https://generativelanguage.googleapis.com/v1beta', 'gemini_native')).toBe('https://generativelanguage.googleapis.com/v1beta/models/test:generateContent')
   })
 
+  test('keeps AnyRouter top Claude probes on the configured Claude Code gateway URL', () => {
+    expect(buildFallbackTestUrl('https://anyrouter.top', 'claude_code')).toBe('https://anyrouter.top/v1/messages')
+    expect(buildFallbackTestUrl('https://anyrouter.top/v1', 'claude_code')).toBe('https://anyrouter.top/v1/messages')
+    expect(buildFallbackTestUrl('https://anyrouter.dev/api', 'claude_code')).toBe('https://anyrouter.dev/api/v1/messages')
+  })
+
   test('fallback key probe sends Codex CLI-style request body for codex providers', () => {
     const source = readFileSync(join(import.meta.dir, 'keys.ts'), 'utf8')
 
@@ -842,6 +848,48 @@ describe('provider key protocol tests', () => {
         messages: [{ role: 'user', content: 'ping' }],
         max_tokens: 1,
       })
+    } finally {
+      globalThis.fetch = previousFetch
+    }
+  })
+
+  test('fallback key probe disables Claude Code experimental betas for AnyRouter', async () => {
+    const { probeKeyFallback } = await import('./keys')
+    const provider = {
+      id: 'any',
+      display_name: 'AnyRouter',
+      service_type: 'llm',
+      api_format: 'claude_code',
+      auth_type: 'bearer',
+      supported_modalities: ['chat'],
+      default_base_url: 'https://anyrouter.top',
+      is_active: true,
+    }
+    const key = { id: 1, provider: 'any', key: 'claude-key', is_active: true }
+
+    const previousFetch = globalThis.fetch
+    let capturedUrl = ''
+    let capturedHeaders: Record<string, string> = {}
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      capturedUrl = String(url)
+      capturedHeaders = init?.headers as Record<string, string>
+      return new Response(JSON.stringify({
+        content: [{ type: 'text', text: 'OK' }],
+      }), { status: 200 })
+    }) as any
+
+    try {
+      const result = await probeKeyFallback(provider, key)
+
+      expect(result.valid).toBe(true)
+      expect(capturedUrl).toBe('https://anyrouter.top/v1/messages')
+      expect(capturedHeaders.Authorization).toBe('Bearer claude-key')
+      expect(capturedHeaders['x-api-key']).toBeUndefined()
+      expect(capturedHeaders['anthropic-beta']).toContain('claude-code-20250219')
+      expect(capturedHeaders['anthropic-beta']).not.toContain('interleaved-thinking')
+      expect(capturedHeaders['x-app']).toBeUndefined()
+      expect(capturedHeaders['anthropic-dangerous-direct-browser-access']).toBeUndefined()
+      expect(capturedHeaders['x-stainless-lang']).toBeUndefined()
     } finally {
       globalThis.fetch = previousFetch
     }

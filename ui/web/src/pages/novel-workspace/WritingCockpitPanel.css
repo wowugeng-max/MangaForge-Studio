@@ -108,6 +108,126 @@
   box-shadow: inset 4px 0 0 rgba(217, 119, 6, 0.64);
 }
 
+.writing-cockpit-core-contract {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.writing-cockpit-core-contract .ant-tag {
+  max-width: 100%;
+  white-space: normal;
+  line-height: 1.35;
+}
+
+.writing-cockpit-delivery-risk {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  margin-top: 2px;
+  border: 1px solid #fecaca;
+  border-left: 4px solid var(--cockpit-red);
+  border-radius: 8px;
+  background: #fffafa;
+}
+
+.writing-cockpit-delivery-risk .ant-tag {
+  max-width: 100%;
+  white-space: normal;
+  line-height: 1.35;
+}
+
+.writing-cockpit-reader-drop-risk {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+  margin-top: 2px;
+  border-top: 1px solid #f3e2d8;
+}
+
+.writing-cockpit-reader-drop-risk .ant-tag {
+  max-width: 100%;
+  white-space: normal;
+  line-height: 1.35;
+}
+
+.writing-cockpit-story-pressure {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+  margin-top: 2px;
+  border-top: 1px solid #d8edf1;
+}
+
+.writing-cockpit-story-pressure .ant-tag {
+  max-width: 100%;
+  white-space: normal;
+  line-height: 1.35;
+}
+
+.writing-cockpit-story-drive {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+  margin-top: 2px;
+  border-top: 1px solid #dde4f7;
+}
+
+.writing-cockpit-story-drive .ant-tag {
+  max-width: 100%;
+  white-space: normal;
+  line-height: 1.35;
+}
+
+.writing-cockpit-serial-rhythm {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+  margin-top: 2px;
+  border-top: 1px solid #dcecc8;
+}
+
+.writing-cockpit-serial-rhythm .ant-tag {
+  max-width: 100%;
+  white-space: normal;
+  line-height: 1.35;
+}
+
+.writing-cockpit-page-turn-hook {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+  margin-top: 2px;
+  border-top: 1px solid #efd5e6;
+}
+
+.writing-cockpit-page-turn-hook .ant-tag {
+  max-width: 100%;
+  white-space: normal;
+  line-height: 1.35;
+}
+
+.writing-cockpit-volume-climax {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+  margin-top: 2px;
+  border-top: 1px solid #e6ddf5;
+}
+
+.writing-cockpit-volume-climax .ant-tag {
+  max-width: 100%;
+  white-space: normal;
+  line-height: 1.35;
+}
+
 .writing-cockpit-collapsed-row {
   min-height: 38px;
 }

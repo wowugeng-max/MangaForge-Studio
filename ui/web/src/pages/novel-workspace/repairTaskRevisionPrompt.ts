@@ -104,6 +104,13 @@ function deliveryRiskStrategy(issueType: string, category = '') {
       '新增弧光必须服务本章事件和长期人物线，不能临时改人物底层动机。',
     ]
   }
+  if (normalized.includes('chapter_benchmark') || normalized.includes('benchmark') || normalized.includes('标杆章') || normalized.includes('质量基准')) {
+    return [
+      '按章节标杆重修开篇钩子、冲突推进、爽点兑现、场景节拍和章末追读。',
+      '只学习标杆章的抽象结构和读者回报节奏，把缺口写成本章自己的现场行动、对话交锋和结果变化。',
+      '不得复制标杆样例的桥段、角色名、专有设定、原句和核心梗。',
+    ]
+  }
   if (normalized.includes('style_sample') || normalized.includes('style') || normalized.includes('风格')) {
     return [
       '按风格样章重修叙述节奏、句式密度、对白比例和角色口吻。',
@@ -226,12 +233,26 @@ function metricNumber(value: any) {
 }
 
 function normalizeDeliveryRiskContext(task: AnyRecord) {
+  const normalizedKind = `${firstText(task.issue_type)} ${firstText(task.annotation_category)}`.toLowerCase()
+  const chapterHandoffReview = objectValue(task.chapter_handoff_review || task.chapterHandoffReview)
+  const isBatchHandoffRisk = normalizedKind.includes('chapter_handoff')
+    || arrayValue(chapterHandoffReview.missed).length > 0
   const isDeliveryRisk = task.source === 'review_annotation_risk'
     || Boolean(task.annotation_key)
     || Boolean(task.annotation_source)
+    || isBatchHandoffRisk
   if (!isDeliveryRisk) return null
-  const payload = objectValue(task.payload)
-  const normalizedKind = `${firstText(task.issue_type)} ${firstText(task.annotation_category)}`.toLowerCase()
+  const taskPayload = objectValue(task.payload)
+  const payload = isBatchHandoffRisk
+    ? {
+      ...chapterHandoffReview,
+      ...taskPayload,
+      missed: [
+        ...arrayValue(chapterHandoffReview.missed),
+        ...arrayValue(taskPayload.missed),
+      ],
+    }
+    : taskPayload
   const isStoryUnit = normalizedKind.includes('story_unit')
   const openingHookScore = metricNumber(payload.opening_hook_score ?? payload.openingHookScore)
   const openingPullRisk = normalizedKind.includes('opening_pull')
@@ -388,8 +409,10 @@ export function buildRepairTaskRevisionPrompt(task: AnyRecord, run?: AnyRecord |
   const chapterAttractionReview = task.chapter_attraction_review || task.chapterAttractionReview || null
   const storyDriveSync = task.story_drive_sync || task.storyDriveSync || null
   const characterArcSync = task.character_arc_sync || task.characterArcSync || null
+  const chapterBenchmarkSync = task.chapter_benchmark_sync || task.chapterBenchmarkSync || null
   const styleSampleSync = task.style_sample_sync || task.styleSampleSync || null
   const readerTrialReview = task.reader_trial_review || task.readerTrialReview || null
+  const first30Retention = task.first30_retention || task.first30Retention || null
   const lines = [
     '本次修订来自任务中心的商业留存/质检修复任务。',
     task.segment ? `分段：${task.segment}` : '',
@@ -508,6 +531,23 @@ export function buildRepairTaskRevisionPrompt(task: AnyRecord, run?: AnyRecord |
       '不能只补心理旁白；新增内容必须落到选择、对话、行动后果或关系反馈上。',
     )
   }
+  if (chapterBenchmarkSync) {
+    const missed = arrayValue(chapterBenchmarkSync.missed)
+      .map(summarizeEvidenceItem)
+      .filter(Boolean)
+    const nextActions = arrayValue(chapterBenchmarkSync.next_actions || chapterBenchmarkSync.nextActions)
+      .map(item => String(item || '').trim())
+      .filter(Boolean)
+    lines.push(
+      '【章节标杆修复】',
+      chapterBenchmarkSync.score !== undefined && chapterBenchmarkSync.score !== null ? `标杆评分：${chapterBenchmarkSync.score}` : '',
+      firstText(chapterBenchmarkSync.label) ? `标杆结论：${firstText(chapterBenchmarkSync.label)}` : '',
+      missed.length > 0 ? `缺口维度：${missed.join('；')}` : '',
+      nextActions.length > 0 ? `建议动作：${nextActions.join('；')}` : '',
+      '修订要求：必须补成可见的开篇钩子、冲突推进、爽点兑现、场景节拍和章末追读。',
+      '只学习标杆章的抽象方法，不得复制桥段、专有设定、角色名、原句或核心梗；新增内容必须服务本章目标和长期主线。',
+    )
+  }
   if (styleSampleSync) {
     const missed = arrayValue(styleSampleSync.missed)
       .map(summarizeEvidenceItem)
@@ -561,6 +601,45 @@ export function buildRepairTaskRevisionPrompt(task: AnyRecord, run?: AnyRecord |
       ...repairActions.map(item => `修复动作：${item}`),
       '修订要求：只修当前章节，把弃读点改成可见的目标推进、爽点回报、情绪反转、信息增量、创新场面或章末钩子。',
       '不得改长期主线方向，不得新增未确认设定，不得把试读问题转嫁到后续章节。',
+    )
+  }
+  if (first30Retention || task.issue_type === 'first30_retention_recheck') {
+    const retention = objectValue(first30Retention)
+    const risks = arrayValue(retention.risks)
+      .map(item => {
+        const value = objectValue(item)
+        const segment = firstText(value.segment, value.key, value.label, '前30章')
+        const issue = firstText(value.issue, value.message, value.text, value.description)
+        const action = firstText(value.action, value.repair_action, value.repairAction)
+        if (issue && action) return `${segment}：${issue} -> ${action}`
+        if (issue) return `${segment}：${issue}`
+        return summarizeEvidenceItem(value)
+      })
+      .filter(Boolean)
+    const riskyChapters = arrayValue(retention.risky_chapters || retention.riskyChapters)
+      .map(item => {
+        const value = objectValue(item)
+        const chapterNo = Number(value.chapter_no ?? value.chapterNo ?? 0)
+        const title = firstText(value.title, '未命名章节')
+        const score = value.score === undefined || value.score === null ? '' : ` ${value.score}分`
+        const flags = arrayValue(value.flags).map(flag => text(flag)).filter(Boolean)
+        const prefix = chapterNo > 0 ? `第${chapterNo}章《${title}》` : title
+        return `${prefix}${score}${flags.length > 0 ? `：${flags.join('、')}` : ''}`
+      })
+      .filter(Boolean)
+    const nextActions = arrayValue(retention.next_actions || retention.nextActions)
+      .map(item => text(item))
+      .filter(Boolean)
+    lines.push(
+      '【前30章留存复诊】',
+      firstText(retention.status) ? `留存状态：${firstText(retention.status)}` : '',
+      retention.score !== undefined && retention.score !== null ? `留存评分：${retention.score}` : '',
+      firstText(retention.summary) ? `留存结论：${firstText(retention.summary)}` : '',
+      ...risks.map(item => `风险：${item}`),
+      ...riskyChapters.map(item => `高危章节：${item}`),
+      ...nextActions.map(item => `建议动作：${item}`),
+      '修订要求：必须重新校准开篇三章、试读十章和付费前蓄势；把过期诊断后的正文变化重新纳入判断。',
+      '如果动作是重新诊断，不要臆造已经修复；如果动作是生成修复任务，优先处理开篇钩子、试读闭环、爽点兑现和章末翻页。',
     )
   }
   if (deliveryRisk) {

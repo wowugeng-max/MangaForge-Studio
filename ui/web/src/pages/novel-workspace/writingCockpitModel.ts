@@ -139,6 +139,88 @@ export interface ChapterPlanningDeskModel {
     payoff: string
     endingHook: string
     forbiddenRepeats: string[]
+    coreContract: {
+      summary: string
+      mustServe: string[]
+      noDrift: string[]
+      repairFocus: string[]
+    }
+    readerDropRisk: {
+      status: string
+      dropPoints: string[]
+      openingGuardrail: string
+      middleGuardrail: string
+      endingGuardrail: string
+    }
+    storyPressure: {
+      status: string
+      pressureSources: string[]
+      conflictEscalationGuardrail: string
+      stakesGrowthGuardrail: string
+      reversalPressureGuardrail: string
+      requiredActions: string[]
+    }
+    storyDrive: {
+      protagonistChoice: string
+      choiceCost: string
+      stateChange: string
+      obstacle: string
+      causalNextStep: string
+      requiredActions: string[]
+    }
+    serialRhythm: {
+      status: string
+      openingHookDeadline: string
+      payoffInterval: string
+      middleGuardrail: string
+      endingHookGuardrail: string
+      scenePayoffBudget: Array<{
+        sceneNo: number
+        title: string
+        wordBudget: string
+        requiredPayoff: string
+        turn: string
+        endingHookSeed: string
+      }>
+      antiDragRules: string[]
+    }
+    pageTurnHook: {
+      status: string
+      hookType: string
+      coreQuestion: string
+      visibleTrigger: string
+      withheldAnswer: string
+      nextChapterPull: string
+      finalImage: string
+      forbiddenResolution: string[]
+      requiredActions: string[]
+    }
+    volumeClimax: {
+      status: string
+      currentVolumeTitle: string
+      chapterRange: string
+      currentChapterRole: string
+      volumeGoal: string
+      climaxPromise: string
+      requiredBeats: string[]
+      forbiddenPayoff: string[]
+      nearbyBeats: Array<{
+        chapterNo: number | null
+        type: string
+        label: string
+        detail: string
+      }>
+      nextActions: string[]
+    }
+    deliveryRiskCarryOver: {
+      label: string
+      priorityLabel: string
+      items: string[]
+      requiredActions: string[]
+      openingActions: string[]
+      middleActions: string[]
+      endingActions: string[]
+    }
   }
   sceneCards: ChapterPlanningDeskSceneCard[]
 }
@@ -358,6 +440,12 @@ export interface ChapterHandoffDeskModel {
   previousEnding: string
   nextOpeningObligations: string[]
   expectationCarryOver: string[]
+  deliveryRiskCarryOver: {
+    totalCount: number
+    label: string
+    priorityLabel: string
+    items: string[]
+  } | null
   storyStateSynced: boolean
   storylineStatusLabel: string
   actionKey: WritingCockpitActionKey
@@ -713,6 +801,281 @@ function stringArray(value: any): string[] {
   if (Array.isArray(value)) return value.map(item => text(item)).filter(Boolean)
   const single = text(value)
   return single ? [single] : []
+}
+
+function labelStringArray(value: any): string[] {
+  if (!Array.isArray(value)) return stringArray(value)
+  return value.map(item => {
+    if (!item || typeof item !== 'object') return text(item)
+    return firstNonEmpty(item.label, item.name, item.summary, item.detail)
+  }).filter(Boolean)
+}
+
+function normalizeCoreContractPlan(contextPackage?: AnyRecord | null, target: AnyRecord = {}) {
+  const raw = target?.core_contract_radar
+    || target?.coreContractRadar
+    || contextPackage?.core_contract_radar
+    || contextPackage?.coreContractRadar
+    || contextPackage?.pre_draft_brief?.core_contract_radar
+    || contextPackage?.context_package?.core_contract_radar
+    || {}
+  return {
+    summary: firstNonEmpty(raw?.summary, raw?.detail, raw?.reason),
+    mustServe: stringArray(raw?.must_serve || raw?.mustServe || raw?.required),
+    noDrift: stringArray(raw?.no_drift || raw?.noDrift || raw?.red_lines || raw?.redLines),
+    repairFocus: stringArray(raw?.repair_focus || raw?.repairFocus || raw?.required_actions || raw?.requiredActions),
+  }
+}
+
+function normalizeReaderDropRiskPlan(contextPackage?: AnyRecord | null, target: AnyRecord = {}) {
+  const raw = target?.reader_drop_risk_brief
+    || target?.readerDropRiskBrief
+    || contextPackage?.reader_drop_risk_brief
+    || contextPackage?.readerDropRiskBrief
+    || contextPackage?.reader_trial_context
+    || contextPackage?.readerTrialContext
+    || contextPackage?.pre_draft_brief?.reader_drop_risk_brief
+    || {}
+  return {
+    status: firstNonEmpty(raw?.status, raw?.drop_points?.length || raw?.dropPoints?.length ? 'needs_repair' : ''),
+    dropPoints: stringArray(raw?.drop_points || raw?.dropPoints || raw?.risks),
+    openingGuardrail: firstNonEmpty(raw?.opening_guardrail, raw?.openingGuardrail),
+    middleGuardrail: firstNonEmpty(raw?.middle_guardrail, raw?.middleGuardrail),
+    endingGuardrail: firstNonEmpty(raw?.ending_guardrail, raw?.endingGuardrail),
+  }
+}
+
+function normalizeStoryPressurePlan(contextPackage?: AnyRecord | null, target: AnyRecord = {}) {
+  const raw = target?.story_pressure_brief
+    || target?.storyPressureBrief
+    || contextPackage?.story_pressure_brief
+    || contextPackage?.storyPressureBrief
+    || contextPackage?.story_pressure_ladder
+    || contextPackage?.storyPressureLadder
+    || contextPackage?.pre_draft_brief?.story_pressure_brief
+    || {}
+  const pressureSources = labelStringArray(raw?.pressure_sources || raw?.pressureSources || raw?.sources)
+  return {
+    status: firstNonEmpty(raw?.status, pressureSources.length ? 'ready' : ''),
+    pressureSources,
+    conflictEscalationGuardrail: firstNonEmpty(raw?.conflict_escalation_guardrail, raw?.conflictEscalationGuardrail),
+    stakesGrowthGuardrail: firstNonEmpty(raw?.stakes_growth_guardrail, raw?.stakesGrowthGuardrail),
+    reversalPressureGuardrail: firstNonEmpty(raw?.reversal_pressure_guardrail, raw?.reversalPressureGuardrail),
+    requiredActions: stringArray(raw?.required_actions || raw?.requiredActions || raw?.next_actions || raw?.nextActions),
+  }
+}
+
+function normalizeStoryDrivePlan(contextPackage?: AnyRecord | null, target: AnyRecord = {}) {
+  const raw = target?.story_drive_brief
+    || target?.storyDriveBrief
+    || contextPackage?.story_drive_brief
+    || contextPackage?.storyDriveBrief
+    || contextPackage?.pre_draft_brief?.story_drive_brief
+    || target
+    || {}
+  return {
+    protagonistChoice: firstNonEmpty(raw?.protagonist_choice, raw?.protagonistChoice, raw?.active_choice, raw?.activeChoice, target?.protagonist_choice, target?.active_choice),
+    choiceCost: firstNonEmpty(raw?.choice_cost, raw?.choiceCost, raw?.cost, raw?.consequence, raw?.stakes, target?.choice_cost, target?.cost, target?.consequence, target?.stakes),
+    stateChange: firstNonEmpty(raw?.state_change, raw?.stateChange, raw?.exit_state, raw?.exitState, target?.state_change, target?.exit_state),
+    obstacle: firstNonEmpty(raw?.obstacle, raw?.conflict, raw?.core_conflict, raw?.coreConflict, target?.core_conflict, target?.conflict),
+    causalNextStep: firstNonEmpty(raw?.causal_next_step, raw?.causalNextStep, raw?.next_step, raw?.nextStep, raw?.ending_hook, raw?.endingHook, target?.ending_hook),
+    requiredActions: stringArray(raw?.required_actions || raw?.requiredActions || raw?.next_actions || raw?.nextActions),
+  }
+}
+
+function normalizeSerialRhythmBudget(value: any, index: number) {
+  if (!value || typeof value !== 'object') return null
+  return {
+    sceneNo: Number(value?.scene_no || value?.sceneNo || index + 1),
+    title: firstNonEmpty(value?.title, value?.name, `场景${index + 1}`),
+    wordBudget: firstNonEmpty(value?.word_budget, value?.wordBudget, value?.budget),
+    requiredPayoff: firstNonEmpty(value?.required_payoff, value?.requiredPayoff, value?.reader_payoff, value?.readerPayoff, value?.payoff),
+    turn: firstNonEmpty(value?.turn, value?.reversal, value?.turning_point, value?.turningPoint, value?.information_gap, value?.informationGap),
+    endingHookSeed: firstNonEmpty(value?.ending_hook_seed, value?.endingHookSeed, value?.ending_hook, value?.endingHook, value?.exit_state, value?.exitState),
+  }
+}
+
+function normalizeSerialRhythmPlan(contextPackage?: AnyRecord | null, target: AnyRecord = {}) {
+  const raw = target?.serial_rhythm_brief
+    || target?.serialRhythmBrief
+    || contextPackage?.serial_rhythm_brief
+    || contextPackage?.serialRhythmBrief
+    || contextPackage?.pre_draft_brief?.serial_rhythm_brief
+    || {}
+  return {
+    status: firstNonEmpty(raw?.status),
+    openingHookDeadline: firstNonEmpty(raw?.opening_hook_deadline, raw?.openingHookDeadline, raw?.opening_guardrail, raw?.openingGuardrail),
+    payoffInterval: firstNonEmpty(raw?.payoff_interval, raw?.payoffInterval, raw?.payoff_density, raw?.payoffDensity),
+    middleGuardrail: firstNonEmpty(raw?.middle_guardrail, raw?.middleGuardrail, raw?.pacing_guardrail, raw?.pacingGuardrail),
+    endingHookGuardrail: firstNonEmpty(raw?.ending_hook_guardrail, raw?.endingHookGuardrail, raw?.ending_guardrail, raw?.endingGuardrail),
+    scenePayoffBudget: (Array.isArray(raw?.scene_payoff_budget) ? raw.scene_payoff_budget : Array.isArray(raw?.scenePayoffBudget) ? raw.scenePayoffBudget : [])
+      .map((item: any, index: number) => normalizeSerialRhythmBudget(item, index))
+      .filter(Boolean),
+    antiDragRules: stringArray(raw?.anti_drag_rules || raw?.antiDragRules || raw?.no_drag_rules || raw?.noDragRules),
+  }
+}
+
+function normalizePageTurnHookPlan(contextPackage?: AnyRecord | null, target: AnyRecord = {}) {
+  const raw = target?.page_turn_hook_brief
+    || target?.pageTurnHookBrief
+    || contextPackage?.page_turn_hook_brief
+    || contextPackage?.pageTurnHookBrief
+    || contextPackage?.pre_draft_brief?.page_turn_hook_brief
+    || {}
+  return {
+    status: firstNonEmpty(raw?.status),
+    hookType: firstNonEmpty(raw?.hook_type, raw?.hookType, raw?.type),
+    coreQuestion: firstNonEmpty(raw?.core_question, raw?.coreQuestion, raw?.question),
+    visibleTrigger: firstNonEmpty(raw?.visible_trigger, raw?.visibleTrigger, raw?.trigger),
+    withheldAnswer: firstNonEmpty(raw?.withheld_answer, raw?.withheldAnswer, raw?.withheld, raw?.forbidden_answer, raw?.forbiddenAnswer),
+    nextChapterPull: firstNonEmpty(raw?.next_chapter_pull, raw?.nextChapterPull, raw?.next_pull, raw?.nextPull),
+    finalImage: firstNonEmpty(raw?.final_image, raw?.finalImage, raw?.last_image, raw?.lastImage),
+    forbiddenResolution: stringArray(raw?.forbidden_resolution || raw?.forbiddenResolution || raw?.forbidden),
+    requiredActions: stringArray(raw?.required_actions || raw?.requiredActions),
+  }
+}
+
+function normalizeVolumeClimaxBeat(value: any, index: number) {
+  if (!value || typeof value !== 'object') {
+    const label = firstNonEmpty(value, `爆点${index + 1}`)
+    return label ? { chapterNo: null, type: '', label, detail: '' } : null
+  }
+  const label = firstNonEmpty(value?.label, value?.title, value?.name, value?.summary, value?.detail, `爆点${index + 1}`)
+  const detail = firstNonEmpty(value?.detail, value?.description, value?.summary, value?.promise, value?.payoff)
+  const type = firstNonEmpty(value?.type, value?.beat_type, value?.beatType, value?.kind)
+  if (!label && !detail && !type) return null
+  return {
+    chapterNo: Number(value?.chapter_no || value?.chapterNo || value?.chapter || 0) || null,
+    type,
+    label,
+    detail,
+  }
+}
+
+function sortNearbyVolumeClimaxBeats(beats: Array<NonNullable<ReturnType<typeof normalizeVolumeClimaxBeat>>>, chapterNo: number) {
+  return beats
+    .map((beat, index) => ({ beat, index }))
+    .sort((left, right) => {
+      const leftNo = Number(left.beat.chapterNo || 0)
+      const rightNo = Number(right.beat.chapterNo || 0)
+      if (chapterNo && leftNo === chapterNo && rightNo !== chapterNo) return -1
+      if (chapterNo && rightNo === chapterNo && leftNo !== chapterNo) return 1
+      if (chapterNo && leftNo && rightNo) return Math.abs(leftNo - chapterNo) - Math.abs(rightNo - chapterNo)
+      return left.index - right.index
+    })
+    .map(item => item.beat)
+}
+
+function normalizeVolumeClimaxPlan(contextPackage?: AnyRecord | null, target: AnyRecord = {}) {
+  const raw = target?.volume_climax_brief
+    || target?.volumeClimaxBrief
+    || target?.volume_beat_brief
+    || target?.volumeBeatBrief
+    || contextPackage?.volume_climax_brief
+    || contextPackage?.volumeClimaxBrief
+    || contextPackage?.volume_beat_brief
+    || contextPackage?.volumeBeatBrief
+    || contextPackage?.pre_draft_brief?.volume_climax_brief
+    || {}
+  const budget = contextPackage?.volume_beat_budget
+    || contextPackage?.volumeBeatBudget
+    || raw?.volume_beat_budget
+    || raw?.volumeBeatBudget
+    || {}
+  const chapterNo = Number(target?.chapter_no || target?.chapterNo || raw?.chapter_no || raw?.chapterNo || 0)
+  const explicitBeats = (Array.isArray(raw?.nearby_beats) ? raw.nearby_beats : Array.isArray(raw?.nearbyBeats) ? raw.nearbyBeats : [])
+    .map((item: any, index: number) => normalizeVolumeClimaxBeat(item, index))
+    .filter(Boolean)
+  const budgetBeats = (Array.isArray(budget?.beats) ? budget.beats : Array.isArray(budget?.volume_beats) ? budget.volume_beats : Array.isArray(budget?.volumeBeats) ? budget.volumeBeats : [])
+    .map((item: any, index: number) => normalizeVolumeClimaxBeat(item, index))
+    .filter(Boolean)
+  const nearbyBeats = (explicitBeats.length ? explicitBeats : sortNearbyVolumeClimaxBeats(budgetBeats, chapterNo)).slice(0, 6)
+  const currentBeat = nearbyBeats.find(beat => chapterNo && Number(beat?.chapterNo || 0) === chapterNo) || nearbyBeats[0] || null
+  return {
+    status: firstNonEmpty(raw?.status, budget?.status),
+    currentVolumeTitle: firstNonEmpty(raw?.current_volume_title, raw?.currentVolumeTitle, budget?.current_volume_title, budget?.currentVolumeTitle, budget?.volume_title, budget?.volumeTitle),
+    chapterRange: firstNonEmpty(raw?.chapter_range, raw?.chapterRange, budget?.chapter_range, budget?.chapterRange),
+    currentChapterRole: firstNonEmpty(
+      raw?.current_chapter_role,
+      raw?.currentChapterRole,
+      raw?.chapter_role,
+      raw?.chapterRole,
+      raw?.role,
+      currentBeat ? `${currentBeat.type ? `${currentBeat.type}：` : ''}${currentBeat.label}${currentBeat.detail ? `，${currentBeat.detail}` : ''}` : '',
+      budget?.summary,
+    ),
+    volumeGoal: firstNonEmpty(raw?.volume_goal, raw?.volumeGoal, budget?.volume_goal, budget?.volumeGoal, budget?.goal, budget?.summary),
+    climaxPromise: firstNonEmpty(raw?.climax_promise, raw?.climaxPromise, raw?.reader_payoff, raw?.readerPayoff, raw?.payoff, currentBeat?.detail),
+    requiredBeats: stringArray(raw?.required_beats || raw?.requiredBeats || raw?.beats_required || raw?.beatsRequired),
+    forbiddenPayoff: stringArray(raw?.forbidden_payoff || raw?.forbiddenPayoff || raw?.forbidden_payoffs || raw?.forbiddenPayoffs || raw?.forbidden_resolution || raw?.forbiddenResolution),
+    nearbyBeats,
+    nextActions: stringArray(raw?.next_actions || raw?.nextActions || budget?.next_actions || budget?.nextActions),
+  }
+}
+
+function normalizeDeliveryRiskCarryOverPlan(contextPackage?: AnyRecord | null, target: AnyRecord = {}) {
+  const raw = target?.delivery_risk_carry_over
+    || target?.deliveryRiskCarryOver
+    || contextPackage?.delivery_risk_carry_over
+    || contextPackage?.deliveryRiskCarryOver
+    || contextPackage?.pre_draft_brief?.delivery_risk_carry_over
+    || contextPackage?.pre_draft_brief?.deliveryRiskCarryOver
+    || contextPackage?.preDraftBrief?.delivery_risk_carry_over
+    || contextPackage?.preDraftBrief?.deliveryRiskCarryOver
+    || contextPackage?.context_package?.delivery_risk_carry_over
+    || contextPackage?.context_package?.deliveryRiskCarryOver
+    || {}
+  const totalCount = Number(raw?.total_count ?? raw?.totalCount ?? raw?.count)
+  const items = stringArray(raw?.items || raw?.risk_items || raw?.riskItems || raw?.risks)
+  const requiredActions = stringArray(raw?.required_actions || raw?.requiredActions || raw?.next_actions || raw?.nextActions || raw?.actions)
+  const stagedActions = categorizeDeliveryRiskActions(requiredActions)
+  return {
+    label: firstNonEmpty(raw?.label, Number.isFinite(totalCount) && totalCount > 0 ? `待修复 ${totalCount}` : ''),
+    priorityLabel: firstNonEmpty(raw?.priority_label, raw?.priorityLabel, raw?.priority, raw?.focus),
+    items,
+    requiredActions,
+    openingActions: stagedActions.openingActions,
+    middleActions: stagedActions.middleActions,
+    endingActions: stagedActions.endingActions,
+  }
+}
+
+function uniqueStrings(values: string[]) {
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const value of values) {
+    const normalized = text(value)
+    if (!normalized || seen.has(normalized)) continue
+    seen.add(normalized)
+    result.push(normalized)
+  }
+  return result
+}
+
+function categorizeDeliveryRiskActions(actions: string[]) {
+  const openingActions: string[] = []
+  const middleActions: string[] = []
+  const endingActions: string[] = []
+
+  for (const action of actions) {
+    const normalized = text(action)
+    if (!normalized) continue
+    if (/前\s*300|开篇|开头|开场|承接|入口|第一场/.test(normalized)) {
+      openingActions.push(normalized)
+      continue
+    }
+    if (/章末|结尾|最后|追读|翻页|尾声|钩子/.test(normalized)) {
+      endingActions.push(normalized)
+      continue
+    }
+    middleActions.push(normalized)
+  }
+
+  return {
+    openingActions: uniqueStrings(openingActions),
+    middleActions: uniqueStrings(middleActions),
+    endingActions: uniqueStrings(endingActions),
+  }
 }
 
 function previousEnding(previousChapter?: AnyRecord | null) {
@@ -2266,6 +2629,7 @@ function buildHiddenHandoffDesk(): ChapterHandoffDeskModel {
     previousEnding: '',
     nextOpeningObligations: [],
     expectationCarryOver: [],
+    deliveryRiskCarryOver: null,
     storyStateSynced: false,
     storylineStatusLabel: '',
     actionKey: 'write_draft',
@@ -2305,6 +2669,7 @@ function buildChapterHandoffDesk(args: {
     previousEnding: previousEnding(args.fromChapter),
     nextOpeningObligations,
     expectationCarryOver,
+    deliveryRiskCarryOver: args.acceptanceDesk.deliveryRiskQueue || null,
     storyStateSynced: args.acceptanceDesk.storyStateSynced,
     storylineStatusLabel: args.acceptanceDesk.storylineSync?.label || '',
     actionKey: ready ? 'accept_chapter_and_continue' : args.acceptanceDesk.recommendedAcceptanceAction.key,
@@ -2319,6 +2684,14 @@ function buildEpisodePlan(args: {
 }): ChapterPlanningDeskModel['episodePlan'] {
   const target = contextTarget(args.contextPackage)
   const forbiddenRepeats = stringArray(target?.forbidden_repeats)
+  const coreContract = normalizeCoreContractPlan(args.contextPackage, target)
+  const readerDropRisk = normalizeReaderDropRiskPlan(args.contextPackage, target)
+  const storyPressure = normalizeStoryPressurePlan(args.contextPackage, target)
+  const storyDrive = normalizeStoryDrivePlan(args.contextPackage, target)
+  const serialRhythm = normalizeSerialRhythmPlan(args.contextPackage, target)
+  const pageTurnHook = normalizePageTurnHookPlan(args.contextPackage, target)
+  const volumeClimax = normalizeVolumeClimaxPlan(args.contextPackage, target)
+  const deliveryRiskCarryOver = normalizeDeliveryRiskCarryOverPlan(args.contextPackage, target)
   return {
     chapterObjective: firstNonEmpty(target?.chapter_goal, target?.chapterObjective, target?.goal, target?.summary, args.cockpitChapter?.chapterGoal),
     previousHandoff: firstNonEmpty(target?.previous_handoff, target?.previousHandoff, args.cockpitChapter?.previousEnding),
@@ -2329,6 +2702,14 @@ function buildEpisodePlan(args: {
     forbiddenRepeats: forbiddenRepeats.length > 0
       ? forbiddenRepeats
       : (args.cockpitChapter?.forbiddenRepeats || []),
+    coreContract,
+    readerDropRisk,
+    storyPressure,
+    storyDrive,
+    serialRhythm,
+    pageTurnHook,
+    volumeClimax,
+    deliveryRiskCarryOver,
   }
 }
 

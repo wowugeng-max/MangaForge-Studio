@@ -6,6 +6,8 @@ import {
   DEFAULT_MANUAL_MODEL_CAPABILITIES,
   formatKeySubmitError,
   MANUAL_MODEL_CAPABILITY_OPTIONS,
+  MODEL_HEALTH_STATUS_MAP,
+  modelHealthTooltipTitle,
   parseBulkUiParamsJson,
 } from './index'
 
@@ -72,5 +74,18 @@ describe('Key manager migration behavior', () => {
 
     expect(optionValues).toContain(DEFAULT_BULK_UI_PARAMS_CAPABILITY)
     expect(DEFAULT_BULK_UI_PARAMS_CAPABILITY).toBe('text_to_image')
+  })
+
+  test('maps model health statuses and exposes the persisted last error in tooltip text', () => {
+    expect(MODEL_HEALTH_STATUS_MAP.network_error.text).toBe('网络错误')
+    expect(MODEL_HEALTH_STATUS_MAP.key_disabled.text).toBe('Key停用')
+
+    const tooltip = modelHealthTooltipTitle({
+      last_tested_at: '2026-06-10T01:02:03.000Z',
+      last_error: '测试失败：AnyRouter Claude/Anthropic 模型无权限',
+    })
+
+    expect(tooltip).toContain('最后测试')
+    expect(tooltip).toContain('AnyRouter Claude/Anthropic')
   })
 })
