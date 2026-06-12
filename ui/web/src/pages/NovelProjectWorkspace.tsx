@@ -20,7 +20,6 @@ import type { EditorView } from '@codemirror/view'
 import { useNavigate, useParams } from 'react-router-dom'
 import apiClient from '../api/client'
 import { createSSEClient, generateClientId, type SSEMessage } from '../utils/sse'
-import { AutoCreationDirectorWorkspace } from './novel-workspace/AutoCreationDirectorWorkspace'
 import { ChapterDirectorySidebar } from './novel-workspace/ChapterDirectorySidebar'
 import { CreativeAssistantPanel } from './novel-workspace/CreativeAssistantPanel'
 import type { EditorKind } from './novel-workspace/EditorModal'
@@ -69,6 +68,7 @@ const { Title, Text, Paragraph } = Typography
 
 const AgentExecutionModal = lazy(() => import('./novel-workspace/AgentExecutionModal').then(module => ({ default: module.AgentExecutionModal })))
 const AgentAuditDrawer = lazy(() => import('./novel-workspace/AgentAuditDrawer').then(module => ({ default: module.AgentAuditDrawer })))
+const AutoCreationDirectorWorkspace = lazy(() => import('./novel-workspace/AutoCreationDirectorWorkspace').then(module => ({ default: module.AutoCreationDirectorWorkspace })))
 const ChapterManagementDrawer = lazy(() => import('./novel-workspace/ChapterManagementDrawer').then(module => ({ default: module.ChapterManagementDrawer })))
 const ChapterRestructurePanel = lazy(() => import('./novel-workspace/ChapterRestructurePanel').then(module => ({ default: module.ChapterRestructurePanel })))
 const ConsistencyGraphModal = lazy(() => import('./novel-workspace/ConsistencyGraphModal').then(module => ({ default: module.ConsistencyGraphModal })))
@@ -5740,7 +5740,9 @@ export default function NovelProjectWorkspace() {
               onAction={handleWritingCockpitAction}
             />
           </div>
-          {renderWorkspaceArea()}
+          <Suspense fallback={null}>
+            {renderWorkspaceArea()}
+          </Suspense>
         </div>
 
         <div className={rightPanelOpen ? 'novel-workspace-reference-shell is-open' : 'novel-workspace-reference-shell'}>
