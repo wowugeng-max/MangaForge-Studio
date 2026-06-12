@@ -29,11 +29,15 @@ import { WritingCockpitPanel, type WritingCockpitPrimaryActionOverride } from '.
 import { WorkspaceCenter } from './novel-workspace/WorkspaceCenter'
 import {
   buildAutoCreationDirectorModel,
+  buildStyleSampleTaskBookRecheckPlan,
   type AutoCreationDirectorAction,
 } from './novel-workspace/autoCreationDirectorModel'
 import { buildNovelWritingRecommendation } from './novel-workspace/writingRecommendationModel'
 import { buildPlanningWorkspaceModel, type PlanningActionKey } from './novel-workspace/planningWorkspaceModel'
-import { mergeCommercialWebNovelStyleDefaults } from './novel-workspace/writingBibleDefaults'
+import {
+  mergeCommercialWebNovelStyleDefaults,
+  mergeCommercialWebNovelStyleSampleDefaults,
+} from './novel-workspace/writingBibleDefaults'
 import {
   buildWritingCockpitModel,
   resolveEditorRevisionChapterId,
@@ -114,6 +118,10 @@ export default function NovelProjectWorkspace() {
   const [bookReviewLoading, setBookReviewLoading] = useState(false)
   const [writingBibleOpen, setWritingBibleOpen] = useState(false)
   const [writingBibleGenerating, setWritingBibleGenerating] = useState(false)
+  const [styleSampleCandidateLoading, setStyleSampleCandidateLoading] = useState(false)
+  const [styleSampleEffectivenessLoading, setStyleSampleEffectivenessLoading] = useState(false)
+  const [styleSamplePatchLoadingKey, setStyleSamplePatchLoadingKey] = useState('')
+  const [styleSampleEffectiveness, setStyleSampleEffectiveness] = useState<any | null>(null)
   const [storyStateOpen, setStoryStateOpen] = useState(false)
   const [commercialToolsOpen, setCommercialToolsOpen] = useState(false)
   const [creativeCommandOpen, setCreativeCommandOpen] = useState(false)
@@ -144,6 +152,12 @@ export default function NovelProjectWorkspace() {
     word_target_mode: chapterWordTargetMode,
     ...(chapterWordTargetMode === 'custom' ? { target_word_count: chapterTargetWordCount } : {}),
   })
+
+  const styleSampleEffectivenessItems = useMemo(() => (
+    Array.isArray(styleSampleEffectiveness?.samples)
+      ? styleSampleEffectiveness.samples.slice(0, 4)
+      : []
+  ), [styleSampleEffectiveness])
 
   // ── 大纲生成控制面板 ──
   const [outlinePanelOpen, setOutlinePanelOpen] = useState(false)
@@ -645,7 +659,21 @@ export default function NovelProjectWorkspace() {
     runRecords,
     chapters: sortedChapters,
     storyState: selectedProject?.reference_config?.story_state || {},
-  }), [planningWorkspaceModel, writingCockpitModel, activeTasks, selectedModelId, reviews, runRecords, sortedChapters, selectedProject?.reference_config?.story_state])
+    styleSampleEffectiveness,
+  }), [planningWorkspaceModel, writingCockpitModel, activeTasks, selectedModelId, reviews, runRecords, sortedChapters, selectedProject?.reference_config?.story_state, styleSampleEffectiveness])
+
+  useEffect(() => {
+    if (!projectId) return
+    let cancelled = false
+    apiClient.get(`/novel/projects/${projectId}/writing-bible/style-sample-effectiveness`)
+      .then(res => {
+        if (!cancelled) {
+          setStyleSampleEffectiveness(res.data?.style_sample_effectiveness || res.data?.report || null)
+        }
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [projectId, selectedProject?.updated_at, reviews.length, sortedChapters.length])
 
   const recentFatigueRollingPlanIntent = useMemo(() => {
     const fatigue = planningWorkspaceModel.recentFatigueRadar
@@ -1198,6 +1226,44 @@ export default function NovelProjectWorkspace() {
     } finally {
       setCommercialToolLoading('')
     }
+  }
+
+  const applyStyleSampleActionForChapter = async (targetChapter: any, action: 'lock' | 'replace' | 'disable', successMessage = '') => {
+    if (!targetChapter?.id) {
+      message.warning('请先选择章节')
+      return false
+    }
+    if (Number(activeChapter?.id || 0) === Number(targetChapter.id)) {
+      if (!await flushPendingSave()) return false
+    } else if (!await selectChapterForWriting(Number(targetChapter.id))) {
+      return false
+    }
+    const loadingKey = action === 'lock' ? 'styleSampleLock' : action === 'replace' ? 'styleSampleReplace' : 'styleSampleDisable'
+    setCommercialToolLoading(loadingKey)
+    try {
+      const res = await apiClient.post(`/novel/chapters/${targetChapter.id}/pre-draft-brief/style-samples`, {
+        project_id: projectId,
+        action,
+      })
+      if (res.data?.chapter) {
+        setChapters(prev => prev.map(c => c.id === res.data.chapter.id ? res.data.chapter : c))
+      }
+      await loadProjectModules()
+      if (successMessage) message.success(successMessage)
+      else if (action === 'lock') message.success('本章风格样章已锁定')
+      else if (action === 'replace') message.success('已换一组风格样章，请重新确认任务书')
+      else if (action === 'disable') message.success('本章已不用风格样章，请重新确认任务书')
+      return true
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '风格样章操作失败')
+      return false
+    } finally {
+      setCommercialToolLoading('')
+    }
+  }
+
+  const applyStyleSampleActionForActiveChapter = async (action: 'lock' | 'replace' | 'disable') => {
+    return applyStyleSampleActionForChapter(activeChapter, action)
   }
 
   const openGenerationDiagnostics = async () => {
@@ -1754,6 +1820,49 @@ export default function NovelProjectWorkspace() {
     }
   }
 
+  const recheckStyleSampleTaskBookReviewTasks = async (items: any[]) => {
+    const preflight = autoCreationDirectorModel.batchGuardrail.preflight.inputSnapshot?.style_sample_batch_preflight
+    const plan = buildStyleSampleTaskBookRecheckPlan({
+      items,
+      styleSampleBatchPreflight: preflight,
+    })
+    if (plan.status === 'needs_preflight') {
+      message.warning(plan.summary)
+      return
+    }
+    if (!plan.resolvedItems.length) {
+      message.warning(plan.summary)
+      return
+    }
+    try {
+      const grouped = new Map<number, { run: any; indices: number[] }>()
+      for (const item of plan.resolvedItems) {
+        const runId = Number(item?.run?.id || 0)
+        if (!runId || !Number.isInteger(Number(item?.taskIndex))) continue
+        const existing = grouped.get(runId) || { run: item.run, indices: [] }
+        existing.indices.push(Number(item.taskIndex))
+        grouped.set(runId, existing)
+      }
+      for (const group of grouped.values()) {
+        await apiClient.post(`/novel/runs/${group.run.id}/tasks/status-bulk`, {
+          project_id: projectId,
+          task_indices: group.indices,
+          status: 'resolved',
+          note: '样章任务书复检通过：下一批任务书已避开风险样章',
+        })
+      }
+      await loadProjectModules()
+      await loadProductionTasks()
+      if (plan.blockedItems.length > 0) {
+        message.warning(plan.summary)
+      } else {
+        message.success(plan.summary)
+      }
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '样章任务书复检失败')
+    }
+  }
+
   const generateLongformRepairAuditSummary = async (run: any) => {
     try {
       const res = await apiClient.post(`/novel/projects/${projectId}/longform-production-trends/repair-runs/${run.id}/audit-summary`)
@@ -1791,6 +1900,23 @@ export default function NovelProjectWorkspace() {
     }
   }
 
+  const executeStyleSampleTaskBookRebuild = async (task: any, run?: any, taskIndex = -1) => {
+    const chapterId = Number(task?.chapter_id || 0)
+    const chapterNo = Number(task?.chapter_no || task?.chapterNo || 0)
+    const targetChapter = (chapterId ? sortedChapters.find(item => Number(item.id) === chapterId) : null)
+      || (chapterNo ? sortedChapters.find(item => Number(item.chapter_no || 0) === chapterNo) : null)
+      || null
+    if (!targetChapter?.id) {
+      message.warning('这个样章任务没有匹配章节')
+      return
+    }
+    setTaskCenterOpen(false)
+    const changed = await applyStyleSampleActionForChapter(targetChapter, 'replace', '已换样章并重审任务书，请重新确认任务书')
+    if (changed && run?.id && taskIndex >= 0) {
+      await updateRepairTaskStatus(run, taskIndex, 'needs_review', '已换样章并清除任务书确认状态，等待作者重审任务书')
+    }
+  }
+
   const executeTypedRepairTask = async (task: any, run?: any, taskIndex = -1) => {
     const taskType = String(task?.task_type || '')
     const chapterId = Number(task?.chapter_id || 0)
@@ -1798,6 +1924,10 @@ export default function NovelProjectWorkspace() {
       if (run?.id && taskIndex >= 0) {
         await updateRepairTaskStatus(run, taskIndex, 'needs_review', '已执行类型化动作，等待复查验收')
       }
+    }
+    if (String(task?.issue_type || '') === 'style_sample_task_book_rebuild') {
+      await executeStyleSampleTaskBookRebuild(task, run, taskIndex)
+      return
     }
     if (taskType === 'repair_skeleton') {
       const outlineId = Number(task?.outline_id || 0)
@@ -1832,7 +1962,8 @@ export default function NovelProjectWorkspace() {
     }
     if (taskType === 'repair_assets') {
       setTaskCenterOpen(false)
-      openStoryAssetsWorkspace('discoveredAssets')
+      if (String(task?.source || '') === 'storyline_diff_decision') openStoryAssetsWorkspace()
+      else openStoryAssetsWorkspace('discoveredAssets')
       await markNeedsReview()
       return
     }
@@ -1939,19 +2070,24 @@ export default function NovelProjectWorkspace() {
     setTaskCenterOpen(false)
     setProseQualityLoading(true)
     try {
+      const storylineDecisionRecheckMeta = { source: 'storyline_decision_recheck', storyline_decision_closure: true }
+      const recheckMeta = String(task?.source || '') === 'storyline_diff_decision'
+        ? storylineDecisionRecheckMeta
+        : { source: 'repair_task_recheck', storyline_decision_closure: false }
       const qualityRes = await apiClient.post(`/novel/chapters/${chapterId}/prose-quality`, {
         project_id: projectId,
         model_id: selectedModelId,
-        source: 'repair_task_recheck',
+        source: recheckMeta.source,
         source_review_id: task?.review_id || null,
       })
       const storyRes = await apiClient.post(`/novel/chapters/${chapterId}/story-state-sync`, {
         project_id: projectId,
         model_id: selectedModelId,
-        source: 'repair_task_recheck',
+        source: recheckMeta.source,
         source_review_id: qualityRes.data?.review?.id || task?.review_id || null,
       })
       const closurePlan = await closeRepairTaskAfterRevision(task, run, taskIndex, {
+        storyline_decision_closure: recheckMeta.storyline_decision_closure,
         quality_refresh: {
           ok: true,
           score: qualityRes.data?.self_check?.score,
@@ -2059,6 +2195,7 @@ export default function NovelProjectWorkspace() {
 
   const fillWritingBibleForm = (bible: any) => {
     const styleLock = mergeCommercialWebNovelStyleDefaults(bible.style_lock || selectedProject?.reference_config?.style_lock || {})
+    const styleSampleBank = mergeCommercialWebNovelStyleSampleDefaults(bible.style_sample_bank || selectedProject?.reference_config?.style_sample_bank || [])
     writingBibleForm.setFieldsValue({
       promise: bible.promise || '',
       narrative_person: styleLock.narrative_person || '',
@@ -2076,19 +2213,278 @@ export default function NovelProjectWorkspace() {
       safety_policy: JSON.stringify(bible.safety_policy || selectedProject?.reference_config?.safety || {}, null, 2),
       forbidden: JSON.stringify(bible.forbidden || [], null, 2),
       meme_bank: JSON.stringify(bible.meme_bank || selectedProject?.reference_config?.meme_bank || [], null, 2),
-      style_sample_bank: JSON.stringify(bible.style_sample_bank || selectedProject?.reference_config?.style_sample_bank || [], null, 2),
+      style_sample_bank: JSON.stringify(styleSampleBank, null, 2),
       chapter_benchmark_sample_bank: JSON.stringify(bible.chapter_benchmark_sample_bank || selectedProject?.reference_config?.chapter_benchmark_sample_bank || [], null, 2),
     })
   }
 
-  const openWritingBibleEditor = async () => {
+  const fillDefaultStyleSampleBank = () => {
+    writingBibleForm.setFieldsValue({
+      style_sample_bank: JSON.stringify(mergeCommercialWebNovelStyleSampleDefaults([]), null, 2),
+    })
+    message.success('已填入默认风格样本库')
+  }
+
+  const extractStyleSampleCandidates = async () => {
+    setStyleSampleCandidateLoading(true)
     try {
-      const res = await apiClient.get(`/novel/projects/${projectId}/writing-bible`)
+      const res = await apiClient.post(`/novel/projects/${projectId}/writing-bible/style-sample-candidates`, {
+        min_score: 86,
+        limit: 6,
+      })
+      const candidates = Array.isArray(res.data?.candidates) ? res.data.candidates : []
+      if (!candidates.length) {
+        message.warning('暂未找到可提炼的高分章节')
+        return
+      }
+      writingBibleForm.setFieldsValue({
+        style_sample_bank: JSON.stringify(candidates, null, 2),
+      })
+      message.success(`已提炼 ${candidates.length} 条风格样本候选，请审阅后保存`)
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '风格样本候选提炼失败')
+    } finally {
+      setStyleSampleCandidateLoading(false)
+    }
+  }
+
+  const openWritingBibleEditor = async () => {
+    setStyleSampleEffectivenessLoading(true)
+    setStyleSampleEffectiveness(null)
+    try {
+      const [res, effectivenessRes] = await Promise.all([
+        apiClient.get(`/novel/projects/${projectId}/writing-bible`),
+        apiClient.get(`/novel/projects/${projectId}/writing-bible/style-sample-effectiveness`).catch(() => null),
+      ])
       const bible = res.data?.writing_bible || {}
       fillWritingBibleForm(bible)
+      setStyleSampleEffectiveness(effectivenessRes?.data?.style_sample_effectiveness || effectivenessRes?.data?.report || null)
       setWritingBibleOpen(true)
     } catch (error: any) {
       message.error(error?.response?.data?.error || error?.message || '写作圣经加载失败')
+    } finally {
+      setStyleSampleEffectivenessLoading(false)
+    }
+  }
+
+  const previewStyleSampleAdjustmentPatch = async (item: any) => {
+    const sampleKey = String(item?.sample_key || '').trim()
+    if (!sampleKey) return message.warning('缺少样章键')
+    setStyleSamplePatchLoadingKey(sampleKey)
+    try {
+      const previewRes = await apiClient.post(`/novel/projects/${projectId}/writing-bible/style-sample-adjustment`, {
+        sample_key: sampleKey,
+        dry_run: true,
+      })
+      const patch = previewRes.data?.style_sample_patch || item?.adjustment_patch || {}
+      const patchText = patch.patch_json || JSON.stringify(patch, null, 2)
+      Modal.confirm({
+        title: '样章补丁预览',
+        width: 760,
+        okText: '应用补丁',
+        cancelText: '暂不应用',
+        content: (
+          <Space direction="vertical" size={8} style={{ width: '100%' }}>
+            <Alert
+              type="info"
+              showIcon
+              message={`将调整样章：${sampleKey}`}
+              description="补丁只会写回风格样章库，不会改正文；请确认 JSON 变更符合作者口吻和禁抄边界。"
+            />
+            <Input.TextArea value={patchText} rows={12} readOnly />
+          </Space>
+        ),
+        onOk: async () => {
+          try {
+            const applyRes = await apiClient.post(`/novel/projects/${projectId}/writing-bible/style-sample-adjustment`, {
+              sample_key: sampleKey,
+              dry_run: false,
+            })
+            const nextBible = applyRes.data?.writing_bible || applyRes.data?.project?.reference_config?.writing_bible
+            const nextBank = nextBible?.style_sample_bank || applyRes.data?.project?.reference_config?.style_sample_bank
+            if (Array.isArray(nextBank)) {
+              writingBibleForm.setFieldsValue({
+                style_sample_bank: JSON.stringify(nextBank, null, 2),
+              })
+            }
+            if (applyRes.data?.project) {
+              setSelectedProject((prev: any) => prev ? { ...prev, ...applyRes.data.project } : applyRes.data.project)
+            }
+            const effectivenessRes = await apiClient.get(`/novel/projects/${projectId}/writing-bible/style-sample-effectiveness`).catch(() => null)
+            setStyleSampleEffectiveness(effectivenessRes?.data?.style_sample_effectiveness || effectivenessRes?.data?.report || styleSampleEffectiveness)
+            message.success('样章补丁已应用，请检查 JSON 后保存写作圣经')
+          } catch (error: any) {
+            message.error(error?.response?.data?.error || error?.message || '样章补丁应用失败')
+            throw error
+          }
+        },
+      })
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '样章补丁预览失败')
+    } finally {
+      setStyleSamplePatchLoadingKey('')
+    }
+  }
+
+  const previewStyleSampleAdjustmentBatch = async () => {
+    const riskyCount = Number(styleSampleEffectiveness?.risky_sample_count || 0)
+    if (riskyCount <= 0) return message.info('当前没有需复盘样章')
+    setStyleSamplePatchLoadingKey('batch')
+    try {
+      const previewRes = await apiClient.post(`/novel/projects/${projectId}/writing-bible/style-sample-adjustments`, {
+        dry_run: true,
+      })
+      const batch = previewRes.data?.style_sample_patch_batch || {}
+      const patchText = batch.patch_json || JSON.stringify(batch, null, 2)
+      Modal.confirm({
+        title: '样章批量补丁预览',
+        width: 820,
+        okText: '应用全部补丁',
+        cancelText: '暂不应用',
+        content: (
+          <Space direction="vertical" size={8} style={{ width: '100%' }}>
+            <Alert
+              type="info"
+              showIcon
+              message={`将批量调整 ${batch.total_patch_count || riskyCount} 条需复盘样章`}
+              description="批量补丁只处理需复盘样章，跳过表现稳定样章；确认后写回风格样章库，不会改正文。"
+            />
+            <Input.TextArea value={patchText} rows={14} readOnly />
+          </Space>
+        ),
+        onOk: async () => {
+          try {
+            const applyRes = await apiClient.post(`/novel/projects/${projectId}/writing-bible/style-sample-adjustments`, {
+              dry_run: false,
+            })
+            const nextBible = applyRes.data?.writing_bible || applyRes.data?.project?.reference_config?.writing_bible
+            const nextBank = nextBible?.style_sample_bank || applyRes.data?.project?.reference_config?.style_sample_bank
+            if (Array.isArray(nextBank)) {
+              writingBibleForm.setFieldsValue({
+                style_sample_bank: JSON.stringify(nextBank, null, 2),
+              })
+            }
+            if (applyRes.data?.project) {
+              setSelectedProject((prev: any) => prev ? { ...prev, ...applyRes.data.project } : applyRes.data.project)
+            }
+            const effectivenessRes = await apiClient.get(`/novel/projects/${projectId}/writing-bible/style-sample-effectiveness`).catch(() => null)
+            setStyleSampleEffectiveness(effectivenessRes?.data?.style_sample_effectiveness || effectivenessRes?.data?.report || styleSampleEffectiveness)
+            message.success('样章批量补丁已应用，请检查 JSON 后保存写作圣经')
+          } catch (error: any) {
+            message.error(error?.response?.data?.error || error?.message || '样章批量补丁应用失败')
+            throw error
+          }
+        },
+      })
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '样章批量补丁预览失败')
+    } finally {
+      setStyleSamplePatchLoadingKey('')
+    }
+  }
+
+  const undoStyleSampleAdjustmentPatch = async () => {
+    setStyleSamplePatchLoadingKey('undo')
+    try {
+      const undoRes = await apiClient.post(`/novel/projects/${projectId}/writing-bible/style-sample-adjustments/undo`)
+      if (!undoRes.data?.changed) {
+        message.info('暂无可撤销的样章补丁')
+        return
+      }
+      const nextBible = undoRes.data?.writing_bible || undoRes.data?.project?.reference_config?.writing_bible
+      const nextBank = nextBible?.style_sample_bank || undoRes.data?.project?.reference_config?.style_sample_bank
+      if (Array.isArray(nextBank)) {
+        writingBibleForm.setFieldsValue({
+          style_sample_bank: JSON.stringify(nextBank, null, 2),
+        })
+      }
+      if (undoRes.data?.project) {
+        setSelectedProject((prev: any) => prev ? { ...prev, ...undoRes.data.project } : undoRes.data.project)
+      }
+      const effectivenessRes = await apiClient.get(`/novel/projects/${projectId}/writing-bible/style-sample-effectiveness`).catch(() => null)
+      setStyleSampleEffectiveness(effectivenessRes?.data?.style_sample_effectiveness || effectivenessRes?.data?.report || styleSampleEffectiveness)
+      message.success('样章补丁已撤销')
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '样章补丁撤销失败')
+    } finally {
+      setStyleSamplePatchLoadingKey('')
+    }
+  }
+
+  const repairStyleSamplePatchReviewSelection = async (review: any = {}) => {
+    const repairAction = review?.recommended_repair_action || review?.recommendedRepairAction || {}
+    if (repairAction?.action !== 'replace') return
+    if (!activeChapter) {
+      message.warning('请先选择要重审任务书的章节')
+      return
+    }
+    await applyStyleSampleActionForActiveChapter('replace')
+    setWritingBibleOpen(false)
+    setWorkspaceArea('chapterWriting')
+    setRightPanelOpen(false)
+  }
+
+  const reviewStyleSampleAdjustmentPatch = async () => {
+    setStyleSamplePatchLoadingKey('review')
+    try {
+      const contextPackage = activeContextPackageData?.context_package || activeContextPackageData || null
+      const nextStyleSampleStrategy = activeChapter?.raw_payload?.pre_draft_brief?.style_sample_strategy
+        || contextPackage?.pre_draft_brief?.style_sample_strategy
+        || contextPackage?.chapter_target?.style_sample_strategy
+        || null
+      const reviewRes = await apiClient.post(`/novel/projects/${projectId}/writing-bible/style-sample-adjustments/post-apply-review`, {
+        chapter_id: activeChapter?.id || null,
+        chapter_no: activeChapter?.chapter_no || null,
+        context_package: contextPackage,
+        next_style_sample_strategy: nextStyleSampleStrategy,
+      })
+      const review = reviewRes.data?.style_sample_patch_review || {}
+      setStyleSampleEffectiveness(reviewRes.data?.style_sample_effectiveness || reviewRes.data?.report || styleSampleEffectiveness)
+      const status = review.status || 'empty'
+      const repairAction = review.recommended_repair_action || review.recommendedRepairAction || null
+      const repairActionLabel = '换样章并重审任务书'
+      const reviewOkText = repairAction?.action === 'replace'
+        ? (repairAction.label || repairActionLabel)
+        : '知道了'
+      const messageText = status === 'warn'
+        ? '当前任务书仍选中了复盘风险样章'
+        : status === 'ok'
+          ? '样章补丁复检通过'
+          : status === 'watch'
+            ? '样章补丁进入观察'
+            : '暂无可复检的样章补丁'
+      Modal.info({
+        title: '样章补丁复检',
+        width: 760,
+        content: (
+          <Space direction="vertical" size={8} style={{ width: '100%' }}>
+            <Alert
+              type={status === 'warn' ? 'warning' : status === 'ok' ? 'success' : 'info'}
+              showIcon
+              message={messageText}
+              description={(Array.isArray(review.next_actions) ? review.next_actions : []).join('；') || '请先应用样章补丁，再复检任务书是否还会选择风险样章。'}
+            />
+            <Space size={6} wrap>
+              <Tag bordered={false}>补丁样章 {(review.patched_sample_keys || []).length || 0}</Tag>
+              <Tag color={(review.still_risky_sample_keys || []).length ? 'orange' : 'green'} bordered={false}>仍需观察 {(review.still_risky_sample_keys || []).length || 0}</Tag>
+              <Tag color={review.next_task_selects_repatched_risky_sample ? 'red' : 'green'} bordered={false}>
+                任务书选中风险 {review.next_task_selects_repatched_risky_sample ? '是' : '否'}
+              </Tag>
+            </Space>
+            <Input.TextArea value={JSON.stringify(review, null, 2)} rows={10} readOnly />
+          </Space>
+        ),
+        okText: reviewOkText,
+        onOk: async () => {
+          if (repairAction?.action === 'replace') {
+            await repairStyleSamplePatchReviewSelection(review)
+          }
+        },
+      })
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '样章补丁复检失败')
+    } finally {
+      setStyleSamplePatchLoadingKey('')
     }
   }
 
@@ -2122,7 +2518,7 @@ export default function NovelProjectWorkspace() {
       }
       const parsedStyleLock = parseJson(v.style_lock, {})
       const memeBank = parseJson(v.meme_bank, [])
-      const styleSampleBank = parseJson(v.style_sample_bank, [])
+      const styleSampleBank = mergeCommercialWebNovelStyleSampleDefaults(parseJson(v.style_sample_bank, []))
       const chapterBenchmarkSampleBank = parseJson(v.chapter_benchmark_sample_bank, [])
       const writingBible = {
         ...(selectedProject?.reference_config?.writing_bible || {}),
@@ -2919,6 +3315,57 @@ export default function NovelProjectWorkspace() {
       message.error(error?.response?.data?.error || error?.message || '生成读者试读修复任务失败')
     } finally {
       setCommercialToolLoading('')
+    }
+  }
+
+  const createStyleSampleBatchRepairQueue = async () => {
+    const preflight = autoCreationDirectorModel.batchGuardrail.preflight.inputSnapshot?.style_sample_batch_preflight
+      || autoCreationDirectorModel.batchGuardrail.recommendedAction.payload
+      || {}
+    const tasks = preflight.repair_tasks || preflight.repairTasks || []
+    if (!tasks.length) {
+      message.info('当前下一批任务书没有需要批量重审的风险样章。')
+      return
+    }
+    setAutoDirectorActionLoadingKey('create_style_sample_batch_repair')
+    try {
+      await apiClient.post('/novel/runs', {
+        project_id: projectId,
+        run_type: 'longform_production_repair',
+        step_name: `style-sample-batch-taskbook-repair-${tasks.length}`,
+        status: 'ready',
+        input_ref: {
+          source: 'style_sample_batch_preflight',
+          status: preflight.status,
+          risk_count: preflight.risk_count,
+          risky_sample_keys: preflight.risky_sample_keys || [],
+          affected_chapter_nos: preflight.affected_chapter_nos || [],
+          chapter_range_label: autoCreationDirectorModel.batchGuardrail.preflight.inputSnapshot?.chapter_range_label,
+        },
+        output_ref: {
+          report: {
+            source: 'style_sample_batch_preflight',
+            summary: preflight.summary,
+            status: preflight.status,
+            task_count: tasks.length,
+            risky_sample_keys: preflight.risky_sample_keys || [],
+            affected_chapter_nos: preflight.affected_chapter_nos || [],
+          },
+          recommendations: [
+            '先对命中风险样章的章节执行换样章并重审任务书，再恢复多章安全连写。',
+            '重审后回到自动创作总控台，确认风格样章预检恢复绿色，再开始下一批。',
+          ],
+          tasks,
+        },
+      })
+      await loadProjectModules()
+      await loadProductionTasks()
+      setTaskCenterOpen(true)
+      message.success(`已生成样章任务书修复任务：${tasks.length} 项`)
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '生成样章任务书修复任务失败')
+    } finally {
+      setAutoDirectorActionLoadingKey('')
     }
   }
 
@@ -4528,6 +4975,46 @@ export default function NovelProjectWorkspace() {
     { key: 'productionOps', label: '生产运营', icon: <RocketOutlined /> },
   ]
 
+  const recordStorylineDiffDecision = async (intent: any) => {
+    if (!intent?.decisionKey) return message.warning('缺少剧情线差异决策键')
+    try {
+      await apiClient.post(`/novel/projects/${projectId}/storyline-diff-decisions`, {
+        decision_key: intent.decisionKey,
+        decision: intent.recommendedDecision,
+        chapter_no: intent.chapterNo,
+        entity_id: intent.entityId,
+        entity_name: intent.entityName,
+        entity_type: intent.entityType,
+        risk_type: intent.riskType,
+        risk_label: intent.riskLabel,
+        summary: intent.summary,
+        evidence: intent.evidence,
+      })
+      await loadProjectModules()
+      message.success(`已记录剧情线决策：${intent.recommendedActionLabel || '已处理'}`)
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '剧情线决策记录失败')
+    }
+  }
+
+  const createStorylineDecisionTasks = async () => {
+    setAutoDirectorActionLoadingKey('create_storyline_decision_tasks')
+    try {
+      const res = await apiClient.post(`/novel/projects/${projectId}/storyline-diff-decisions/repair-queue`)
+      const tasks = res.data?.tasks || []
+      await loadProjectModules()
+      await loadProductionTasks()
+      setTaskCenterOpen(true)
+      const skipped = Number(res.data?.skipped_existing || 0)
+      const ignored = Number(res.data?.skipped_ignored || 0)
+      message.success(`已生成剧情线决策任务：${tasks.length} 项${skipped ? `，跳过已有 ${skipped} 项` : ''}${ignored ? `，忽略误判 ${ignored} 项` : ''}`)
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '生成剧情线决策任务失败')
+    } finally {
+      setAutoDirectorActionLoadingKey('')
+    }
+  }
+
   const handlePlanningAction = (key: PlanningActionKey, options?: { intent?: any }) => {
     const rollingPlanIntent = options?.intent || (key === 'update_rolling_plan' ? recentFatigueRollingPlanIntent : null)
     const actions: Record<PlanningActionKey, () => void | Promise<void>> = {
@@ -4550,6 +5037,8 @@ export default function NovelProjectWorkspace() {
       run_reader_trial_review: () => { void runReaderTrialReview() },
       create_reader_trial_repair: () => { void createReaderTrialRepairQueue() },
       create_delivery_risk_repair: () => { void createDeliveryRiskRepairQueue() },
+      record_storyline_diff_decision: () => { void recordStorylineDiffDecision(options?.intent) },
+      create_storyline_decision_tasks: () => { void createStorylineDecisionTasks() },
       open_task_center: () => setTaskCenterOpen(true),
     }
     return actions[key]?.()
@@ -4775,6 +5264,11 @@ export default function NovelProjectWorkspace() {
       return
     }
 
+    if (action.key === 'create_style_sample_batch_repair') {
+      void createStyleSampleBatchRepairQueue()
+      return
+    }
+
     if (action.key === 'create_script_room_repair') {
       void createScriptRoomRepairQueue()
       return
@@ -4912,6 +5406,7 @@ export default function NovelProjectWorkspace() {
           generatingProse={generatingProse}
           generatingSceneCards={generatingSceneCards}
           preDraftBriefLoading={commercialToolLoading === 'preDraftBrief' || commercialToolLoading === 'preDraftBriefConfirm'}
+          styleSampleActionLoading={['styleSampleLock', 'styleSampleReplace', 'styleSampleDisable'].includes(commercialToolLoading)}
           diagnosticsLoading={diagnosticsLoading}
           pipelineLoading={pipelineLoading}
           editorReportLoading={editorReportLoading}
@@ -4926,6 +5421,9 @@ export default function NovelProjectWorkspace() {
           onGenerateSceneCards={() => generateSceneCardsForActiveChapter()}
           onBuildPreDraftBrief={() => { void buildPreDraftBriefForActiveChapter() }}
           onConfirmPreDraftBrief={() => { void confirmPreDraftBriefForActiveChapter() }}
+          onLockStyleSamples={() => { void applyStyleSampleActionForActiveChapter('lock') }}
+          onReplaceStyleSamples={() => { void applyStyleSampleActionForActiveChapter('replace') }}
+          onDisableStyleSamples={() => { void applyStyleSampleActionForActiveChapter('disable') }}
           onOpenGenerationDiagnostics={openGenerationDiagnostics}
           onOpenQualityCard={openChapterQualityCard}
           onStartChapterPipeline={startChapterPipeline}
@@ -5626,12 +6124,106 @@ export default function NovelProjectWorkspace() {
               placeholder='[{"meme_key":"社畜共鸣","function":"高压后的半拍吐槽","tone":"轻度","suitable_genres":["规则怪谈"],"abstract_usage":"只转化为角色口吻，不直接复刻原句"}]'
             />
           </Form.Item>
-          <Form.Item name="style_sample_bank" label="风格样章库 JSON">
-            <Input.TextArea
-              rows={5}
-              placeholder='[{"sample_key":"规则危机反打","scene_function":"规则压力下的动作反制","narrative_rhythm":"先压迫，再拆规则，再小反打","sentence_pattern":"短中句为主，解释压短","dialogue_ratio":"35%-45%","abstract_usage":"只学习节奏、句式密度、对白比例和情绪转折","unsafe_direct_phrases":["原句不能照搬"]}]'
+          <Card
+            size="small"
+            title="风格样章库"
+            style={{ marginBottom: 12 }}
+            extra={(
+              <Space size={8} wrap>
+                <Button size="small" onClick={fillDefaultStyleSampleBank}>填入默认风格样本库</Button>
+                <Button size="small" loading={styleSampleCandidateLoading} onClick={extractStyleSampleCandidates}>从高分章节提炼样本候选</Button>
+              </Space>
+            )}
+          >
+            <Alert
+              type="warning"
+              showIcon
+              style={{ marginBottom: 8 }}
+              message="只学习抽象策略，不复制样章原句"
+              description="样本库只描述场景功能、适用/不适用场景、叙述节奏、句式密度、对白比例和角色口吻；unsafe_direct_phrases 会作为禁抄短语进入生成和复盘。"
             />
-          </Form.Item>
+            <div style={{ marginBottom: 10, padding: '8px 10px', background: '#f7f9fc', border: '1px solid #e5eaf3', borderRadius: 6 }}>
+              <Space size={6} wrap style={{ marginBottom: styleSampleEffectivenessItems.length ? 6 : 0 }}>
+                <Text strong style={{ fontSize: 13 }}>样章效果回收</Text>
+                {styleSampleEffectivenessLoading ? (
+                  <Tag bordered={false}>加载中</Tag>
+                ) : styleSampleEffectiveness ? (
+                  <>
+                    <Tag bordered={false}>已用 {styleSampleEffectiveness.used_sample_count || 0}/{styleSampleEffectiveness.total_samples || 0}</Tag>
+                    <Tag color={styleSampleEffectiveness.risky_sample_count > 0 ? 'orange' : 'green'} bordered={false}>需复盘 {styleSampleEffectiveness.risky_sample_count || 0}</Tag>
+                    {styleSampleEffectiveness.risky_sample_count > 0 && (
+                      <Button
+                        size="small"
+                        type="link"
+                        loading={styleSamplePatchLoadingKey === 'batch'}
+                        onClick={() => { void previewStyleSampleAdjustmentBatch() }}
+                      >
+                        批量预览补丁
+                      </Button>
+                    )}
+                    <Button
+                      size="small"
+                      type="link"
+                      loading={styleSamplePatchLoadingKey === 'undo'}
+                      onClick={() => { void undoStyleSampleAdjustmentPatch() }}
+                    >
+                      撤销上次补丁
+                    </Button>
+                    <Button
+                      size="small"
+                      type="link"
+                      loading={styleSamplePatchLoadingKey === 'review'}
+                      onClick={() => { void reviewStyleSampleAdjustmentPatch() }}
+                    >
+                      应用后复检
+                    </Button>
+                  </>
+                ) : (
+                  <Tag bordered={false}>暂无回收数据</Tag>
+                )}
+              </Space>
+              {styleSampleEffectivenessItems.length > 0 && (
+                <Space size={6} wrap>
+                  {styleSampleEffectivenessItems.map((item: any) => {
+                    const riskLabel = item.risk_label || '表现稳定'
+                    const adjustment = item.adjustment_suggestion || {}
+                    const adjustmentLabel = adjustment.label || (riskLabel === '需复盘' ? '补禁抄短语' : '保留策略')
+                    const adjustmentText = `调整建议：${adjustmentLabel}${adjustment.detail ? `｜${adjustment.detail}` : ''}`
+                    const chapterTitle = Array.isArray(item.chapter_refs) && item.chapter_refs.length
+                      ? `关联章节：${item.chapter_refs.map((ref: any) => `第${ref.chapter_no || '?'}章`).join('、')}`
+                      : '还没有关联章节'
+                    const title = `${chapterTitle}；${adjustmentText}`
+                    return (
+                      <Space key={item.sample_key} size={4} wrap={false}>
+                        <Tooltip title={title}>
+                          <Tag color={riskLabel === '需复盘' ? 'orange' : riskLabel === '表现稳定' ? 'green' : 'default'} bordered={false}>
+                            {item.sample_key} · 使用 {item.usage_count || 0} · 命中率 {item.hit_rate || 0}% · 风格 {item.average_style_score || '-'} · {riskLabel}
+                            {riskLabel === '需复盘' ? ` · 调整建议 ${adjustmentLabel}` : ''}
+                          </Tag>
+                        </Tooltip>
+                        {riskLabel === '需复盘' && (
+                          <Button
+                            size="small"
+                            type="link"
+                            loading={styleSamplePatchLoadingKey === item.sample_key}
+                            onClick={() => { void previewStyleSampleAdjustmentPatch(item) }}
+                          >
+                            预览补丁
+                          </Button>
+                        )}
+                      </Space>
+                    )
+                  })}
+                </Space>
+              )}
+            </div>
+            <Form.Item name="style_sample_bank" label="风格样章库 JSON" style={{ marginBottom: 0 }}>
+              <Input.TextArea
+                rows={5}
+                placeholder='[{"sample_key":"规则危机反打","scene_function":"规则压力下的动作反制","applicable_scenes":["高压反打","规则压迫"],"avoid_scenes":["纯背景说明","低压日常过场"],"narrative_rhythm":"先压迫，再拆规则，再小反打","sentence_pattern":"短中句为主，解释压短","dialogue_ratio":"35%-45%","abstract_usage":"只学习节奏、句式密度、对白比例和情绪转折","unsafe_direct_phrases":["原句不能照搬"]}]'
+              />
+            </Form.Item>
+          </Card>
           <Form.Item name="chapter_benchmark_sample_bank" label="章节质量基准样例库 JSON">
             <Input.TextArea
               rows={5}
@@ -5788,6 +6380,7 @@ export default function NovelProjectWorkspace() {
         onRecheckRepairTask={(task, run, taskIndex) => { void recheckRepairTaskConvergence(task, run, taskIndex) }}
         onUpdateRepairTaskStatus={(task, run, status, taskIndex) => { void updateRepairTaskStatus(run, taskIndex, status, task?.message || task?.title || '') }}
         onBulkUpdateRepairTaskStatus={(items, status) => { void bulkUpdateRepairTaskStatus(items, status) }}
+        onRecheckStyleSampleTaskBooks={(items) => { void recheckStyleSampleTaskBookReviewTasks(items) }}
         onGenerateRepairAuditSummary={(run) => { void generateLongformRepairAuditSummary(run) }}
         onPauseRun={async (run) => {
           await apiClient.post(`/novel/runs/${run.id}/pause`, { project_id: projectId })

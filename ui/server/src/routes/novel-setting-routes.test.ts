@@ -173,6 +173,44 @@ describe('discovered asset intake route', () => {
     expect(settings.find(item => item.entity_type === 'item' && item.name === '黑色钥匙')?.constraints_json).toMatchObject({ owner_rule: '不得离身' })
   })
 
+  test('disposes discovered assets by rename, merge, or one-off cameo without polluting canon', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-asset-disposition-'))
+    const project = await createNovelProject(workspace, { title: '镜州风雷', length_target: 'epic' })
+    const chapter = await createNovelChapter(workspace, { project_id: project.id, chapter_no: 9, title: '旧城雨夜' })
+    const existing = await createNovelSettingEntity(workspace, {
+      project_id: project.id,
+      entity_type: 'faction',
+      name: '镜州王府',
+      summary: '旧城最大势力。',
+      payload_json: { source: 'manual_seed' },
+    } as any)
+
+    const result = await applyDiscoveredAssetsToProject(workspace, project.id, chapter, [
+      { entity_type: 'item', name: '黑伞', disposition: 'rename', target_name: '无骨黑伞', summary: '能遮住照妖镜视线', evidence: '黑伞一合，镜光断了。' },
+      { entity_type: 'faction', name: '王府暗卫', disposition: 'merge', merge_target_id: existing.id, evidence: '暗卫只听王府令牌。', summary: '王府暗线力量' },
+      { entity_type: 'location', name: '雨棚小巷', disposition: 'cameo', evidence: '追逐只经过一次。', summary: '一次性追逐地点' },
+    ])
+
+    const settings = await listNovelSettingEntities(workspace, project.id)
+    const merged = settings.find(item => item.id === existing.id)
+
+    expect(result.created_settings.map((item: any) => item.name)).toContain('无骨黑伞')
+    expect(result.created_settings.map((item: any) => item.name)).not.toContain('黑伞')
+    expect(result.merged_assets).toEqual([
+      expect.objectContaining({ source_name: '王府暗卫', target_id: existing.id, target_name: '镜州王府' }),
+    ])
+    expect(result.cameo_assets).toEqual([
+      expect.objectContaining({ name: '雨棚小巷', entity_type: 'location' }),
+    ])
+    expect(settings.map(item => item.name)).not.toContain('王府暗卫')
+    expect(settings.map(item => item.name)).not.toContain('雨棚小巷')
+    expect(merged?.payload_json?.merged_discovered_assets?.[0]).toMatchObject({
+      name: '王府暗卫',
+      source_chapter_no: 9,
+      evidence: '暗卫只听王府令牌。',
+    })
+  })
+
   test('exposes discovered assets apply endpoint', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-setting-routes.ts'), 'utf8')
 

@@ -14,6 +14,7 @@ import {
   buildSignatureSceneSyncReport,
   buildChapterBenchmarkSyncReport,
   buildStyleSampleSyncReport,
+  buildStyleSampleEffectivenessForSelection,
   buildFirst30RetentionContext,
   buildReaderExpectationSyncReport,
   buildReaderPayoffSyncReport,
@@ -24,6 +25,7 @@ import {
   buildMemePolishPrompt,
   buildReadabilityReviewPrompt,
   buildStorylineSyncReport,
+  applyStyleSampleStrategyAuthorAction,
   buildProseWordTargetExpansionPrompt,
   countProseChars,
   createNovelWritingService,
@@ -2137,6 +2139,8 @@ describe('readability and restrained meme workflow', () => {
         sentence_pattern: '短中句为主',
         dialogue_ratio: '40%',
         forbidden_copy: ['这破学校连晚自习都外包给影子了'],
+        applicable_scenes: ['高压反打', '规则压迫'],
+        avoid_scenes: ['纯背景说明', '严肃死亡收束'],
       },
     ])
 
@@ -2145,6 +2149,8 @@ describe('readability and restrained meme workflow', () => {
     expect(samples[0].abstract_usage).toContain('高压后半拍吐槽')
     expect(samples[0].abstract_usage).toContain('只学习节奏')
     expect(samples[0].unsafe_direct_phrases).toContain('这破学校连晚自习都外包给影子了')
+    expect(samples[0].applicable_scenes).toEqual(['高压反打', '规则压迫'])
+    expect(samples[0].avoid_scenes).toEqual(['纯背景说明', '严肃死亡收束'])
     expect(samples[0].sample_text).toBeUndefined()
   })
 
@@ -2154,6 +2160,28 @@ describe('readability and restrained meme workflow', () => {
       reference_config: {
         style_sample_bank: [
           {
+            sample_key: '世界观铺垫说明',
+            scene_function: '低压过场中的背景信息铺垫',
+            narrative_rhythm: '慢速说明，补齐规则源流',
+            sentence_pattern: '中长句解释',
+            dialogue_ratio: '10%-20%',
+            abstract_usage: '只学习解释顺序',
+            unsafe_direct_phrases: ['原句不能照搬'],
+            applicable_scenes: ['纯背景说明', '低压日常过场'],
+            avoid_scenes: ['规则压迫', '高压反打'],
+          },
+          {
+            sample_key: '重大情感告别',
+            scene_function: '角色离别和情绪余韵',
+            narrative_rhythm: '先静场，再情绪递进，最后留余韵',
+            sentence_pattern: '中句为主，动作放慢',
+            dialogue_ratio: '20%-35%',
+            abstract_usage: '只学习情绪递进',
+            unsafe_direct_phrases: ['原句不能照搬'],
+            applicable_scenes: ['重大情感告别', '情感余韵'],
+            avoid_scenes: ['规则压迫', '高压反打'],
+          },
+          {
             sample_key: '规则危机反打',
             scene_function: '规则压力下的动作反制',
             narrative_rhythm: '先压迫，再拆规则，再小反打',
@@ -2161,6 +2189,30 @@ describe('readability and restrained meme workflow', () => {
             dialogue_ratio: '35%-45%',
             abstract_usage: '动作链和规则判定交替推进',
             unsafe_direct_phrases: ['原句不能照搬'],
+            applicable_scenes: ['规则压迫', '高压反打'],
+            avoid_scenes: ['纯背景说明'],
+          },
+          {
+            sample_key: '章末追读钩子',
+            scene_function: '章节最后 300-600 字制造继续阅读理由',
+            narrative_rhythm: '先兑现小回报，再抛出新问题或危险',
+            sentence_pattern: '短句收束',
+            dialogue_ratio: '15%-35%',
+            abstract_usage: '只学习回报后加钩子的结构',
+            unsafe_direct_phrases: ['原句不能照搬'],
+            applicable_scenes: ['章末追读钩子', '新问题抛出'],
+            avoid_scenes: ['正文中段解释'],
+          },
+          {
+            sample_key: '对白交锋推进',
+            scene_function: '双方试探和信息差拉扯',
+            narrative_rhythm: '对白短促推进，每两到三轮产生信息增量',
+            sentence_pattern: '对白句短，动作句压缩',
+            dialogue_ratio: '35%-55%',
+            abstract_usage: '只学习对白功能和回合节奏',
+            unsafe_direct_phrases: ['原句不能照搬'],
+            applicable_scenes: ['对白交锋', '信息差试探'],
+            avoid_scenes: ['纯动作无信息差'],
           },
         ],
       },
@@ -2170,8 +2222,8 @@ describe('readability and restrained meme workflow', () => {
       chapter_target: {
         chapter_no: 2,
         title: '第一条规则',
-        summary: '主角验证宿舍规则边界。',
-        conflict: '李超想冲出去，张智阻止。',
+        summary: '主角验证宿舍规则边界，并在门口用对白试探同伴的信息差。',
+        conflict: '李超想冲出去，张智阻止，双方围绕规则代价短促交锋。',
         ending_hook: '门外出现湿漉漉的学生。',
         scene_cards: [
           { title: '门槛边界', reader_payoff: '规则压制超人蛮力', conflict: '是否出门', ending_hook_seed: '门外有人敲门' },
@@ -2198,11 +2250,305 @@ describe('readability and restrained meme workflow', () => {
     )
 
     expect(brief.style_sample_strategy.enabled).toBe(true)
-    expect(brief.style_sample_strategy.samples[0].sample_key).toBe('规则危机反打')
+    expect(brief.style_sample_strategy.samples).toHaveLength(3)
+    expect(brief.style_sample_strategy.samples.map((sample: any) => sample.sample_key)).toEqual([
+      '规则危机反打',
+      '章末追读钩子',
+      '对白交锋推进',
+    ])
+    expect(brief.style_sample_strategy.samples[0].applicable_scenes).toEqual(['规则压迫', '高压反打'])
+    expect(brief.style_sample_strategy.samples[0].avoid_scenes).toEqual(['纯背景说明'])
+    expect(brief.style_sample_strategy.samples[0].selection_reason).toContain('命中规则压迫')
+    expect(brief.style_sample_strategy.samples[0].selection_reason).toContain('避开纯背景说明')
+    expect(brief.style_sample_strategy.samples[1].selection_reason).toContain('命中章末追读钩子')
+    expect(JSON.stringify(brief.style_sample_strategy.samples)).not.toContain('世界观铺垫说明')
+    expect(JSON.stringify(brief.style_sample_strategy.samples)).not.toContain('重大情感告别')
     expect(brief.style_sample_strategy.do_not_copy).toContain('原句不能照搬')
     expect(prompt).toContain('本章风格样章策略')
+    expect(prompt).toContain('selection_reason')
+    expect(prompt).toContain('命中规则压迫')
+    expect(prompt).toContain('按 applicable_scenes / avoid_scenes 选择样章策略')
     expect(prompt).toContain('只学习叙述节奏、句式密度、对白比例和情绪转折')
     expect(prompt).toContain('原句不能照搬')
+  })
+
+  test('does not fall back to style samples that only match avoided scenes', () => {
+    const project = {
+      title: '超人的规则怪谈世界',
+      reference_config: {
+        style_sample_bank: [
+          {
+            sample_key: '规则危机反打',
+            scene_function: '规则压力下的动作反制',
+            narrative_rhythm: '先压迫，再拆规则，再小反打',
+            sentence_pattern: '短中句为主，解释压短',
+            dialogue_ratio: '35%-45%',
+            abstract_usage: '动作链和规则判定交替推进',
+            unsafe_direct_phrases: ['原句不能照搬'],
+            applicable_scenes: ['规则压迫', '高压反打'],
+            avoid_scenes: ['纯背景说明', '低压日常过场'],
+          },
+        ],
+      },
+    }
+    const contextPackage = {
+      writing_bible: {},
+      chapter_target: {
+        chapter_no: 3,
+        title: '旧校史',
+        summary: '本章解释学校规则源流和过往背景，暂不进入危机反打。',
+        conflict: '低压过场，用设定铺垫下一次规则压迫。',
+        scene_cards: [
+          { title: '校史馆', purpose: '补充背景说明', conflict: '暂无正面战斗' },
+        ],
+      },
+    }
+
+    const brief = buildChapterPreDraftBrief(project, contextPackage)
+
+    expect(brief.style_sample_strategy.enabled).toBe(false)
+    expect(brief.style_sample_strategy.samples).toEqual([])
+  })
+
+  test('uses style sample effectiveness to prefer stable matched samples', () => {
+    const project = {
+      title: '超人的规则怪谈世界',
+      reference_config: {
+        style_sample_bank: [
+          {
+            sample_key: '旧高压反打样章',
+            scene_function: '规则压力下的动作反制',
+            narrative_rhythm: '先压迫，再拆规则，再小反打',
+            sentence_pattern: '短中句为主，解释压短',
+            dialogue_ratio: '35%-45%',
+            abstract_usage: '动作链和规则判定交替推进',
+            unsafe_direct_phrases: ['原句不能照搬'],
+            applicable_scenes: ['规则压迫', '高压反打'],
+            avoid_scenes: ['纯背景说明'],
+          },
+          {
+            sample_key: '稳定规则反打样章',
+            scene_function: '规则压力下的动作反制',
+            narrative_rhythm: '先压迫，再拆规则，再小反打',
+            sentence_pattern: '短中句为主，解释压短',
+            dialogue_ratio: '35%-45%',
+            abstract_usage: '动作链和规则判定交替推进',
+            unsafe_direct_phrases: ['原句不能照搬'],
+            applicable_scenes: ['规则压迫', '高压反打'],
+            avoid_scenes: ['纯背景说明'],
+          },
+        ],
+      },
+    }
+    const contextPackage = {
+      writing_bible: {},
+      style_sample_effectiveness: {
+        samples: [
+          {
+            sample_key: '旧高压反打样章',
+            usage_count: 5,
+            hit_rate: 40,
+            missed_count: 6,
+            copy_risk_count: 1,
+            average_style_score: 61,
+            risk_label: '需复盘',
+          },
+          {
+            sample_key: '稳定规则反打样章',
+            usage_count: 6,
+            hit_rate: 100,
+            missed_count: 0,
+            copy_risk_count: 0,
+            average_style_score: 91,
+            risk_label: '表现稳定',
+          },
+        ],
+      },
+      chapter_target: {
+        chapter_no: 6,
+        title: '门禁反打',
+        summary: '主角在宿舍门禁规则压迫下拆解限制并反制巡逻者。',
+        conflict: '门禁规则压迫，主角必须反打破局。',
+        ending_hook: '巡逻者身后露出第二道门禁符。',
+        scene_cards: [
+          { title: '门禁压迫', conflict: '规则逼迫主角停手', reader_payoff: '拆规则后反打', ending_hook_seed: '第二道门禁符出现' },
+        ],
+      },
+    }
+
+    const brief = buildChapterPreDraftBrief(project, contextPackage)
+
+    expect(brief.style_sample_strategy.samples[0].sample_key).toBe('稳定规则反打样章')
+    expect(brief.style_sample_strategy.samples[0].selection_reason).toContain('历史命中率100%')
+    expect(brief.style_sample_strategy.samples[0].selection_reason).toContain('表现稳定')
+    expect(brief.style_sample_strategy.samples.map((sample: any) => sample.sample_key)).not.toContain('旧高压反打样章')
+  })
+
+  test('builds style sample effectiveness for chapter selection from historical reviews', () => {
+    const styleSampleBank = [
+      { sample_key: '旧高压反打样章', applicable_scenes: ['规则压迫'], avoid_scenes: ['纯背景说明'] },
+      { sample_key: '稳定规则反打样章', applicable_scenes: ['规则压迫'], avoid_scenes: ['纯背景说明'] },
+    ]
+    const chapters = [
+      {
+        id: 21,
+        chapter_no: 21,
+        title: '旧样章失手',
+        raw_payload: {
+          pre_draft_brief: {
+            style_sample_strategy: {
+              samples: [{ sample_key: '旧高压反打样章' }],
+            },
+          },
+        },
+      },
+      {
+        id: 22,
+        chapter_no: 22,
+        title: '稳定样章命中',
+        raw_payload: {
+          pre_draft_brief: {
+            style_sample_strategy: {
+              samples: [{ sample_key: '稳定规则反打样章' }],
+            },
+          },
+        },
+      },
+    ]
+    const reviews = [
+      {
+        chapter_id: 21,
+        review_type: 'prose_quality',
+        created_at: '2026-06-01T00:00:00.000Z',
+        payload: JSON.stringify({ self_check: { review: { score: 72 } } }),
+      },
+      {
+        chapter_id: 22,
+        review_type: 'prose_quality',
+        created_at: '2026-06-02T00:00:00.000Z',
+        payload: JSON.stringify({ self_check: { review: { score: 91 } } }),
+      },
+      {
+        chapter_id: 21,
+        review_type: 'style_sample_sync',
+        created_at: '2026-06-01T00:01:00.000Z',
+        payload: JSON.stringify({
+          style_sample_sync: {
+            score: 58,
+            planned: [{ sample_key: '旧高压反打样章', label: '叙述节奏' }],
+            delivered: [],
+            missed: [{ sample_key: '旧高压反打样章', label: '叙述节奏' }],
+            copied_phrases: ['原句不能照搬'],
+          },
+        }),
+      },
+      {
+        chapter_id: 22,
+        review_type: 'style_sample_sync',
+        created_at: '2026-06-02T00:01:00.000Z',
+        payload: JSON.stringify({
+          style_sample_sync: {
+            score: 94,
+            planned: [{ sample_key: '稳定规则反打样章', label: '叙述节奏' }],
+            delivered: [{ sample_key: '稳定规则反打样章', label: '叙述节奏' }],
+            missed: [],
+            copied_phrases: [],
+          },
+        }),
+      },
+    ]
+
+    const report = buildStyleSampleEffectivenessForSelection(styleSampleBank, chapters, reviews)
+
+    expect(report.samples.find((item: any) => item.sample_key === '旧高压反打样章')).toMatchObject({
+      usage_count: 1,
+      hit_rate: 0,
+      missed_count: 1,
+      copy_risk_count: 1,
+      average_style_score: 58,
+      average_quality_score: 72,
+      risk_label: '需复盘',
+    })
+    expect(report.samples.find((item: any) => item.sample_key === '稳定规则反打样章')).toMatchObject({
+      usage_count: 1,
+      hit_rate: 100,
+      missed_count: 0,
+      copy_risk_count: 0,
+      average_style_score: 94,
+      average_quality_score: 91,
+      risk_label: '表现稳定',
+    })
+  })
+
+  test('lets the author lock or replace chapter style sample strategy before drafting', () => {
+    const project = {
+      title: '超人的规则怪谈世界',
+      reference_config: {
+        style_sample_bank: [
+          {
+            sample_key: '规则危机反打',
+            scene_function: '规则压力下的动作反制',
+            narrative_rhythm: '先压迫，再拆规则，再小反打',
+            abstract_usage: '动作链和规则判定交替推进',
+            applicable_scenes: ['规则压迫', '高压反打'],
+            avoid_scenes: ['纯背景说明'],
+          },
+          {
+            sample_key: '章末追读钩子',
+            scene_function: '章节最后制造继续阅读理由',
+            narrative_rhythm: '先兑现小回报，再抛出新问题或危险',
+            abstract_usage: '只学习回报后加钩子的结构',
+            applicable_scenes: ['章末追读钩子', '新问题抛出'],
+          },
+          {
+            sample_key: '对白交锋推进',
+            scene_function: '双方试探和信息差拉扯',
+            narrative_rhythm: '对白短促推进，每两到三轮产生信息增量',
+            abstract_usage: '只学习对白功能和回合节奏',
+            applicable_scenes: ['对白交锋', '信息差试探'],
+          },
+        ],
+      },
+    }
+    const contextPackage = {
+      chapter_target: {
+        title: '第一条规则',
+        summary: '主角验证规则边界，并用对白试探同伴的信息差。',
+        conflict: '双方围绕规则代价短促交锋。',
+        ending_hook: '门外出现湿漉漉的学生。',
+      },
+    }
+    const currentStrategy = {
+      enabled: true,
+      samples: [{ sample_key: '规则危机反打', selection_reason: '命中规则压迫；避开纯背景说明。' }],
+      do_not_copy: ['原句不能照搬'],
+    }
+
+    const locked = applyStyleSampleStrategyAuthorAction(project, contextPackage, currentStrategy, {
+      action: 'lock',
+      now: '2026-06-12T08:00:00.000Z',
+    })
+    const replaced = applyStyleSampleStrategyAuthorAction(project, contextPackage, currentStrategy, {
+      action: 'replace',
+      now: '2026-06-12T08:01:00.000Z',
+    })
+    const disabled = applyStyleSampleStrategyAuthorAction(project, contextPackage, currentStrategy, {
+      action: 'disable',
+      now: '2026-06-12T08:02:00.000Z',
+    })
+
+    expect(locked.locked).toBe(true)
+    expect(locked.selection_mode).toBe('author_locked')
+    expect(locked.author_locked_at).toBe('2026-06-12T08:00:00.000Z')
+    expect(locked.samples.map((sample: any) => sample.sample_key)).toEqual(['规则危机反打'])
+    expect(replaced.locked).toBe(false)
+    expect(replaced.selection_mode).toBe('author_replaced')
+    expect(replaced.samples.map((sample: any) => sample.sample_key)).not.toContain('规则危机反打')
+    expect(replaced.samples.length).toBeGreaterThan(0)
+    expect(disabled.enabled).toBe(false)
+    expect(disabled.locked).toBe(true)
+    expect(disabled.selection_mode).toBe('disabled_by_author')
+    expect(disabled.samples).toEqual([])
   })
 
   test('adds chapter benchmark sample strategy to the pre-draft brief and prose prompt', () => {
@@ -3745,6 +4091,8 @@ describe('chapter context word target source guards', () => {
     expect(source).toContain("app.get('/api/novel/chapters/:chapterId/pre-draft-brief'")
     expect(source).toContain("app.put('/api/novel/chapters/:chapterId/pre-draft-brief'")
     expect(source).toContain("app.post('/api/novel/chapters/:chapterId/pre-draft-brief/confirm'")
+    expect(source).toContain("app.post('/api/novel/chapters/:chapterId/pre-draft-brief/style-samples'")
+    expect(source).toContain('applyStyleSampleStrategyAuthorAction')
     expect(source).toContain('raw_payload.pre_draft_brief')
   })
 })

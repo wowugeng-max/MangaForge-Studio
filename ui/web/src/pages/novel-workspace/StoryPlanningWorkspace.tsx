@@ -83,6 +83,12 @@ function storylineRiskColor(tag: string) {
   return 'blue'
 }
 
+function storylineDiffColor(riskType: PlanningWorkspaceModel['storylineBoard']['groups'][number]['items'][number]['diffEvidence'][number]['riskType']) {
+  if (riskType === 'missed') return 'red'
+  if (riskType === 'forbidden_touched') return 'volcano'
+  return 'gold'
+}
+
 function volumeBeatColor(status: PlanningWorkspaceModel['volumeBeatBudget']['status'] | string) {
   if (status === 'ready' || status === 'planned') return 'green'
   if (status === 'blocked') return 'red'
@@ -223,6 +229,8 @@ function actionLabel(key: PlanningActionKey) {
     run_reader_trial_review: '运行读者试读复盘',
     create_reader_trial_repair: '生成试读修复任务',
     create_delivery_risk_repair: '生成风险修复任务',
+    record_storyline_diff_decision: '记录差异决策',
+    create_storyline_decision_tasks: '生成决策任务',
     open_task_center: '打开任务中心',
   }
   return labels[key]
@@ -275,6 +283,55 @@ function renderStorylineEvidenceRows(rows: Array<{ chapterNo: number | null; usa
         <Text key={`${row.chapterNo || 'unknown'}-${row.usageType}-${index}`} style={{ fontSize: 12 }}>
           {row.chapterNo ? `第${row.chapterNo}章` : '未标注章节'} · {row.usageType} · {row.summary}
         </Text>
+      ))}
+    </Space>
+  )
+}
+
+function renderStorylineDiffRows(
+  rows: PlanningWorkspaceModel['storylineBoard']['groups'][number]['items'][number]['diffEvidence'],
+  onAction: StoryPlanningWorkspaceProps['onAction'],
+) {
+  if (!rows.length) return <Text type="secondary" style={{ fontSize: 12 }}>暂无差异决策</Text>
+  return (
+    <Space direction="vertical" size={6} style={{ width: '100%' }}>
+      {rows.map((row, index) => (
+        <div
+          key={`${row.chapterNo || 'unknown'}-${row.riskType}-${row.summary}-${index}`}
+          style={{
+            display: 'grid',
+            gap: 4,
+            border: '1px solid #fed7aa',
+            borderRadius: 6,
+            padding: 8,
+            background: '#fff',
+          }}
+        >
+          <Space wrap>
+            <Tag color={storylineDiffColor(row.riskType)} bordered={false}>{row.riskLabel}</Tag>
+            <Tag bordered={false}>{row.chapterNo ? `第${row.chapterNo}章` : '未标注章节'}</Tag>
+            <Tag color="blue" bordered={false}>{row.recommendedActionLabel}</Tag>
+            <Button
+              size="small"
+              type="link"
+              style={{ paddingInline: 0 }}
+              onClick={() => onAction('record_storyline_diff_decision', {
+                intent: {
+                  ...row,
+                  decisionKey: row.decisionKey,
+                  recommendedDecision: row.recommendedDecision,
+                },
+              })}
+            >
+              记录决策
+            </Button>
+          </Space>
+          <Text style={{ fontSize: 12 }}>{row.summary}</Text>
+          {row.evidence && row.evidence !== row.summary && (
+            <Text type="secondary" style={{ fontSize: 12 }}>证据：{row.evidence}</Text>
+          )}
+          <Text type="secondary" style={{ fontSize: 12 }}>{row.recommendedActionDetail}</Text>
+        </div>
       ))}
     </Space>
   )
@@ -1714,7 +1771,12 @@ export function StoryPlanningWorkspace({
               className="novel-storyline-board-card"
               title="剧情线看板"
               size="small"
-              extra={<Button size="small" type="link" onClick={() => onAction('open_story_assets')}>管理剧情线</Button>}
+              extra={(
+                <Space>
+                  <Button size="small" type="link" onClick={() => onAction('create_storyline_decision_tasks')}>生成决策任务</Button>
+                  <Button size="small" type="link" onClick={() => onAction('open_story_assets')}>管理剧情线</Button>
+                </Space>
+              )}
             >
               <Space direction="vertical" size={12} style={{ width: '100%' }}>
                 <Space wrap>
@@ -1778,7 +1840,7 @@ export function StoryPlanningWorkspace({
                                       跳到第{item.actionChapterNo}章
                                     </Button>
                                   </Space>
-                                  {(item.planEvidence.length > 0 || item.actualEvidence.length > 0 || item.syncRisks.length > 0) && (
+                                  {(item.planEvidence.length > 0 || item.actualEvidence.length > 0 || item.diffEvidence.length > 0 || item.syncRisks.length > 0) && (
                                     <details className="novel-storyline-evidence" style={{ marginTop: 4 }}>
                                       <summary style={{ cursor: 'pointer', color: '#475569', fontSize: 12, fontWeight: 650 }}>剧情线证据</summary>
                                       <div style={{ display: 'grid', gap: 8, marginTop: 8 }}>
@@ -1795,6 +1857,13 @@ export function StoryPlanningWorkspace({
                                           {item.syncRisks.length
                                             ? <Space wrap>{item.syncRisks.map(risk => <Tag key={risk} color={risk.includes('禁揭') ? 'red' : 'gold'} bordered={false}>{risk}</Tag>)}</Space>
                                             : <Text type="secondary" style={{ fontSize: 12 }}>暂无差异风险</Text>}
+                                        </div>
+                                        <div style={{ border: '1px solid #fed7aa', borderRadius: 6, padding: 8, background: '#fffbeb' }}>
+                                          <Text strong style={{ display: 'block', marginBottom: 4, fontSize: 12 }}>差异决策</Text>
+                                          <Text type="secondary" style={{ display: 'block', marginBottom: 6, fontSize: 12 }}>
+                                            动作口径：漏推回修正文，额外推进接受为新计划，禁揭风险先核对后标记误判或回修。
+                                          </Text>
+                                          {renderStorylineDiffRows(item.diffEvidence, onAction)}
                                         </div>
                                       </div>
                                     </details>

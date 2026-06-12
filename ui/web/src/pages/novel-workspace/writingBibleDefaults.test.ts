@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 import {
   COMMERCIAL_WEB_NOVEL_STYLE_LOCK_DEFAULTS,
+  COMMERCIAL_WEB_NOVEL_STYLE_SAMPLE_BANK_DEFAULTS,
   mergeCommercialWebNovelStyleDefaults,
+  mergeCommercialWebNovelStyleSampleDefaults,
 } from './writingBibleDefaults'
 
 describe('writing bible default style lock', () => {
@@ -28,5 +30,25 @@ describe('writing bible default style lock', () => {
     expect(styleLock.narrative_person).toBe('第一人称主视角')
     expect(styleLock.preferred_words).toEqual(['自定义口头禅'])
     expect(styleLock.payoff_density).toBe(COMMERCIAL_WEB_NOVEL_STYLE_LOCK_DEFAULTS.payoff_density)
+  })
+
+  test('provides abstract style sample defaults without source prose copying', () => {
+    const samples = mergeCommercialWebNovelStyleSampleDefaults([])
+
+    expect(samples.length).toBeGreaterThanOrEqual(3)
+    expect(samples.map(sample => sample.sample_key)).toEqual(
+      expect.arrayContaining(COMMERCIAL_WEB_NOVEL_STYLE_SAMPLE_BANK_DEFAULTS.map(sample => sample.sample_key)),
+    )
+    expect(samples[0].abstract_usage).toContain('只学习')
+    expect(samples[0].unsafe_direct_phrases).toContain('原句不能照搬')
+    expect(samples.every(sample => Array.isArray(sample.applicable_scenes) && sample.applicable_scenes.length > 0)).toBe(true)
+    expect(samples.every(sample => Array.isArray(sample.avoid_scenes))).toBe(true)
+    expect(samples.every(sample => sample.sample_text === undefined)).toBe(true)
+  })
+
+  test('preserves custom style samples and fills only an empty sample bank', () => {
+    const custom = [{ sample_key: '作者自定义对白', scene_function: '双主角斗嘴推进信息差' }]
+
+    expect(mergeCommercialWebNovelStyleSampleDefaults(custom)).toEqual(custom)
   })
 })

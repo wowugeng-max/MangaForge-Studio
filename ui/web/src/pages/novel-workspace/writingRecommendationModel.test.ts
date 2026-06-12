@@ -609,6 +609,19 @@ describe('buildNovelDraftBriefSummary', () => {
           exit_hook: '第12章追杀信号指向幕后主使。',
           forbidden_advance: ['不得提前揭露幕后主使真名'],
         },
+        style_sample_strategy: {
+          enabled: true,
+          locked: true,
+          selection_mode: 'author_locked',
+          samples: [
+            {
+              sample_key: '权谋反压语感',
+              abstract_usage: '只学习制度压迫下的短句反压和对白节奏。',
+              selection_reason: '命中高压反打、对白交锋；避开纯背景说明。',
+            },
+          ],
+          do_not_copy: ['不得复制样章原句'],
+        },
         chapter_benchmark_strategy: {
           enabled: true,
           samples: [
@@ -688,6 +701,10 @@ describe('buildNovelDraftBriefSummary', () => {
     expect(summary.briefFields.storyUnitPayoff).toContain('公开反压')
     expect(summary.briefFields.storyUnitExitHook).toContain('幕后主使')
     expect(summary.briefFields.storyUnitForbidden).toContain('不得提前揭露幕后主使真名')
+    expect(summary.briefFields.styleSampleKeys).toContain('权谋反压语感')
+    expect(summary.briefFields.styleSampleReasons).toContain('命中高压反打')
+    expect(summary.briefFields.styleSampleReasons).toContain('避开纯背景说明')
+    expect(summary.briefFields.styleSampleControlState).toContain('作者已锁定')
     expect(summary.briefFields.chapterBenchmarkKeys).toContain('权谋反压基准')
     expect(summary.briefFields.chapterBenchmarkUsage).toContain('冲突节拍')
     expect(summary.briefFields.chapterBenchmarkForbidden).toContain('不得复制样例桥段')

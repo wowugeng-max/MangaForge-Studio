@@ -35,6 +35,8 @@ export type PlanningActionKey =
   | 'run_reader_trial_review'
   | 'create_reader_trial_repair'
   | 'create_delivery_risk_repair'
+  | 'record_storyline_diff_decision'
+  | 'create_storyline_decision_tasks'
   | 'open_task_center'
 
 export type PlanningHealthIssue = {
@@ -102,6 +104,21 @@ export type PlanningStorylineBoardItem = {
     chapterNo: number | null
     usageType: string
     summary: string
+  }>
+  diffEvidence: Array<{
+    decisionKey: string
+    chapterNo: number | null
+    entityId: any
+    entityName: string
+    entityType: string
+    riskType: 'missed' | 'unplanned' | 'forbidden_touched'
+    riskLabel: string
+    usageType: string
+    summary: string
+    evidence: string
+    recommendedDecision: 'revise_prose' | 'accept_as_plan' | 'false_positive'
+    recommendedActionLabel: '回修正文' | '接受为新计划' | '标记误判'
+    recommendedActionDetail: string
   }>
   syncRisks: string[]
   latestSyncChapter: number | null
@@ -1135,9 +1152,76 @@ function uniqueEvidence<T extends { chapterNo: number | null; usageType: string;
   return rows
 }
 
+function storylineDiffDecision(
+  riskType: PlanningStorylineBoardItem['diffEvidence'][number]['riskType'],
+): Pick<PlanningStorylineBoardItem['diffEvidence'][number], 'riskLabel' | 'recommendedDecision' | 'recommendedActionLabel' | 'recommendedActionDetail'> {
+  if (riskType === 'missed') {
+    return {
+      riskLabel: '漏推',
+      recommendedDecision: 'revise_prose',
+      recommendedActionLabel: '回修正文',
+      recommendedActionDetail: '任务书要求推进但正文没有兑现，优先回到当前章修订，把计划内推进写成现场行动或结果变化。',
+    }
+  }
+  if (riskType === 'unplanned') {
+    return {
+      riskLabel: '额外推进',
+      recommendedDecision: 'accept_as_plan',
+      recommendedActionLabel: '接受为新计划',
+      recommendedActionDetail: '正文推进了计划外剧情线；如果它更强且不破坏核心，应回到资料设定或大纲把它纳入后续计划。',
+    }
+  }
+  return {
+    riskLabel: '禁揭风险',
+    recommendedDecision: 'false_positive',
+    recommendedActionLabel: '标记误判',
+    recommendedActionDetail: '正文疑似触碰禁揭边界；先核对证据，若确为误判可人工忽略，否则应回修为遮挡、误导或延迟兑现。',
+  }
+}
+
+function storylineDiffEvidenceRows(
+  entity: AnyRecord,
+  chapterNo: number | null,
+  riskType: PlanningStorylineBoardItem['diffEvidence'][number]['riskType'],
+  items: AnyRecord[],
+): PlanningStorylineBoardItem['diffEvidence'] {
+  const decision = storylineDiffDecision(riskType)
+  const entityId = entity?.id ?? null
+  const entityName = text(entity?.name)
+  const entityType = text(entity?.entity_type)
+  const entityKey = text(entityId || entityName || entityType || 'unknown')
+  return items.map(item => {
+    const summary = evidenceSummary(item, decision.riskLabel)
+    return {
+      decisionKey: `storyline_diff:${chapterNo || 'unknown'}:${entityKey}:${riskType}:${summary}`.slice(0, 260),
+      chapterNo,
+      entityId,
+      entityName,
+      entityType,
+      riskType,
+      riskLabel: decision.riskLabel,
+      usageType: text(item?.usage_type || item?.usageType || item?.change_type || item?.changeType, riskType),
+      summary,
+      evidence: firstNonEmpty(
+        item?.evidence,
+        item?.quote,
+        item?.text,
+        item?.reason,
+        item?.issue,
+        item?.description,
+        summary,
+      ),
+      recommendedDecision: decision.recommendedDecision,
+      recommendedActionLabel: decision.recommendedActionLabel,
+      recommendedActionDetail: decision.recommendedActionDetail,
+    }
+  }).filter(item => Boolean(item.summary))
+}
+
 function buildStorylineSyncEvidence(entity: AnyRecord, reviews: AnyRecord[]) {
   const planEvidence: PlanningStorylineBoardItem['planEvidence'] = []
   const actualEvidence: PlanningStorylineBoardItem['actualEvidence'] = []
+  const diffEvidence: PlanningStorylineBoardItem['diffEvidence'] = []
   const syncRisks: string[] = []
   const touchedChapters: number[] = []
 
@@ -1174,6 +1258,11 @@ function buildStorylineSyncEvidence(entity: AnyRecord, reviews: AnyRecord[]) {
       if (missed.length > 0) syncRisks.push(`${chapterLabel}漏推`)
       if (unplanned.length > 0) syncRisks.push(`${chapterLabel}额外推进`)
       if (forbiddenTouched.length > 0) syncRisks.push(`${chapterLabel}禁揭风险`)
+      diffEvidence.push(
+        ...storylineDiffEvidenceRows(entity, chapterNo, 'missed', missed),
+        ...storylineDiffEvidenceRows(entity, chapterNo, 'unplanned', unplanned),
+        ...storylineDiffEvidenceRows(entity, chapterNo, 'forbidden_touched', forbiddenTouched),
+      )
       if (planned.length || actual.length || missed.length || unplanned.length || forbiddenTouched.length) {
         if (chapterNo) touchedChapters.push(chapterNo)
       }
@@ -1182,6 +1271,7 @@ function buildStorylineSyncEvidence(entity: AnyRecord, reviews: AnyRecord[]) {
   return {
     planEvidence: uniqueEvidence(planEvidence).slice(-6),
     actualEvidence: uniqueEvidence(actualEvidence).slice(-6),
+    diffEvidence: uniqueEvidence(diffEvidence).slice(-9),
     syncRisks: Array.from(new Set(syncRisks)).slice(-6),
     latestSyncChapter: touchedChapters.length ? Math.max(...touchedChapters) : null,
   }
@@ -1244,6 +1334,7 @@ function buildStorylineBoardModel(
         retentionImpacts,
         planEvidence: syncEvidence.planEvidence,
         actualEvidence: syncEvidence.actualEvidence,
+        diffEvidence: syncEvidence.diffEvidence,
         syncRisks: syncEvidence.syncRisks,
         latestSyncChapter: syncEvidence.latestSyncChapter,
         actionChapterNo: nextAdvanceChapter || startChapter || activeChapterNo,
@@ -3265,6 +3356,8 @@ function planningActionLabel(key: PlanningActionKey) {
     run_reader_trial_review: '运行读者试读复盘',
     create_reader_trial_repair: '生成试读修复任务',
     create_delivery_risk_repair: '生成风险修复任务',
+    record_storyline_diff_decision: '记录剧情线决策',
+    create_storyline_decision_tasks: '生成剧情线决策任务',
     open_task_center: '打开任务中心',
   }
   return labels[key]
@@ -3397,6 +3490,8 @@ function buildGovernanceHubModel(args: {
     run_reader_trial_review: '运行读者试读复盘',
     create_reader_trial_repair: '生成试读修复任务',
     create_delivery_risk_repair: '生成风险修复任务',
+    record_storyline_diff_decision: '记录剧情线决策',
+    create_storyline_decision_tasks: '生成剧情线决策任务',
     open_task_center: '打开任务中心',
   }
   const activeTaskReason = activeTasks.active > 0

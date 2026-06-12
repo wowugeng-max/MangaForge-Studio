@@ -403,6 +403,9 @@ export type NovelPreDraftBrief = {
   }
   style_sample_strategy?: {
     enabled?: boolean
+    locked?: boolean
+    selection_mode?: string
+    selection_note?: string
     samples?: Array<{
       sample_key?: string
       scene_function?: string
@@ -410,6 +413,7 @@ export type NovelPreDraftBrief = {
       sentence_pattern?: string
       dialogue_ratio?: string
       abstract_usage?: string
+      selection_reason?: string
       unsafe_direct_phrases?: string[]
     }>
     apply_to?: string[]
@@ -576,6 +580,8 @@ export type NovelDraftBriefSummary = {
     memeForbidden: string
     styleSampleKeys: string
     styleSampleUsage: string
+    styleSampleReasons: string
+    styleSampleControlState: string
     styleSampleForbidden: string
     chapterBenchmarkKeys: string
     chapterBenchmarkUsage: string
@@ -663,6 +669,15 @@ export function buildNovelDraftBriefSummary({
       item?.ending_hook_seed ? `钩子：${item.ending_hook_seed}` : '',
     ].filter(Boolean).join(' ')).filter(Boolean).join('、')
     : ''
+  const styleSampleControlState = (() => {
+    const strategy = preDraftBrief?.style_sample_strategy
+    const sampleCount = Array.isArray(strategy?.samples) ? strategy.samples.length : 0
+    if (strategy?.selection_mode === 'disabled_by_author' || strategy?.enabled === false) return '本章不用样章'
+    if (strategy?.locked) return '作者已锁定'
+    if (strategy?.selection_mode === 'author_replaced') return '已替换待确认'
+    if (sampleCount > 0) return '系统推荐待确认'
+    return ''
+  })()
   const briefFields = {
     chapterGoal: preDraftBrief?.chapter_goal?.trim() || chapterGoal?.trim() || '',
     readerPromise: preDraftBrief?.reader_promise?.trim() || '',
@@ -776,6 +791,10 @@ export function buildNovelDraftBriefSummary({
     styleSampleUsage: Array.isArray(preDraftBrief?.style_sample_strategy?.samples)
       ? preDraftBrief.style_sample_strategy.samples.map(sample => sample?.abstract_usage || sample?.scene_function || sample?.narrative_rhythm).filter(Boolean).join('、')
       : '',
+    styleSampleReasons: Array.isArray(preDraftBrief?.style_sample_strategy?.samples)
+      ? preDraftBrief.style_sample_strategy.samples.map(sample => sample?.selection_reason).filter(Boolean).join('、')
+      : '',
+    styleSampleControlState,
     styleSampleForbidden: Array.isArray(preDraftBrief?.style_sample_strategy?.do_not_copy)
       ? preDraftBrief.style_sample_strategy.do_not_copy.filter(Boolean).join('、')
       : '',

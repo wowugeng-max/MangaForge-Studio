@@ -910,18 +910,37 @@ describe('buildPlanningWorkspaceModel', () => {
       chapters,
       activeChapter: chapters[6],
       settingEntities: storylineSettings,
-      reviews: [first30Review(), storylineSyncReview()],
+      reviews: [first30Review(), storylineSyncReview({
+        report: {
+          unplanned: [
+            { entity_id: 202, name: '残缺阵盘伏笔', entity_type: 'foreshadowing_arc', usage_type: 'advance', actual_state_change: { summary: '正文提前让阵盘指向宗门旧案。' } },
+          ],
+          forbidden_touched: [
+            { entity_id: 202, name: '残缺阵盘伏笔', entity_type: 'foreshadowing_arc', usage_type: 'reveal', actual_state_change: { summary: '疑似提前揭开旧案真相。' } },
+          ],
+        },
+      })],
     })
 
     const mainline = model.storylineBoard.groups.find(group => group.key === 'mainline')?.items[0]
     expect(mainline?.planEvidence[0].summary).toContain('执事压迫升级')
     expect(mainline?.syncRisks).toContain('第7章漏推')
     expect(mainline?.latestSyncChapter).toBe(7)
+    expect(mainline?.diffEvidence.map(item => item.riskType)).toContain('missed')
+    expect(mainline?.diffEvidence.find(item => item.riskType === 'missed')?.recommendedActionLabel).toBe('回修正文')
+    expect(mainline?.diffEvidence.find(item => item.riskType === 'missed')?.recommendedDecision).toBe('revise_prose')
+    expect(mainline?.diffEvidence.find(item => item.riskType === 'missed')?.decisionKey).toContain('storyline_diff:7:201:missed')
 
     const foreshadowing = model.storylineBoard.groups.find(group => group.key === 'foreshadowing_arc')?.items[0]
     expect(foreshadowing?.actualEvidence[0].summary).toContain('阵盘缺口发热')
     expect(foreshadowing?.planEvidence[0].usageType).toBe('plant')
     expect(foreshadowing?.latestSyncChapter).toBe(7)
+    expect(foreshadowing?.diffEvidence.map(item => item.riskType)).toEqual(expect.arrayContaining(['unplanned', 'forbidden_touched']))
+    expect(foreshadowing?.diffEvidence.find(item => item.riskType === 'unplanned')?.recommendedActionLabel).toBe('接受为新计划')
+    expect(foreshadowing?.diffEvidence.find(item => item.riskType === 'unplanned')?.recommendedDecision).toBe('accept_as_plan')
+    expect(foreshadowing?.diffEvidence.find(item => item.riskType === 'unplanned')?.entityName).toBe('残缺阵盘伏笔')
+    expect(foreshadowing?.diffEvidence.find(item => item.riskType === 'forbidden_touched')?.recommendedActionLabel).toBe('标记误判')
+    expect(foreshadowing?.diffEvidence.find(item => item.riskType === 'forbidden_touched')?.recommendedDecision).toBe('false_positive')
   })
 
   test('builds character growth board from character arcs, relationship arcs and arc sync risks', () => {

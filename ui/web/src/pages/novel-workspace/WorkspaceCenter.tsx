@@ -24,6 +24,7 @@ import {
   MoreOutlined,
   PlayCircleOutlined,
   SettingOutlined,
+  StopOutlined,
   SyncOutlined,
   UpOutlined,
 } from '@ant-design/icons'
@@ -321,6 +322,7 @@ export function WorkspaceCenter({
   generatingProse,
   generatingSceneCards,
   preDraftBriefLoading,
+  styleSampleActionLoading,
   diagnosticsLoading,
   pipelineLoading,
   editorReportLoading,
@@ -335,6 +337,9 @@ export function WorkspaceCenter({
   onGenerateSceneCards,
   onBuildPreDraftBrief,
   onConfirmPreDraftBrief,
+  onLockStyleSamples,
+  onReplaceStyleSamples,
+  onDisableStyleSamples,
   onOpenGenerationDiagnostics,
   onOpenQualityCard,
   onStartChapterPipeline,
@@ -376,6 +381,7 @@ export function WorkspaceCenter({
   generatingProse: boolean
   generatingSceneCards: boolean
   preDraftBriefLoading?: boolean
+  styleSampleActionLoading?: boolean
   diagnosticsLoading: boolean
   pipelineLoading: boolean
   editorReportLoading: boolean
@@ -390,6 +396,9 @@ export function WorkspaceCenter({
   onGenerateSceneCards: () => void
   onBuildPreDraftBrief?: () => void
   onConfirmPreDraftBrief?: () => void
+  onLockStyleSamples?: () => void
+  onReplaceStyleSamples?: () => void
+  onDisableStyleSamples?: () => void
   onOpenGenerationDiagnostics: () => void
   onOpenQualityCard: () => void
   onStartChapterPipeline: () => void
@@ -461,6 +470,7 @@ export function WorkspaceCenter({
     sceneCardCount: sceneCards.length,
     preDraftBrief: activeChapter?.raw_payload?.pre_draft_brief || null,
   })
+  const styleSampleActionDisabled = !activeChapter || Boolean(styleSampleActionLoading || preDraftBriefLoading || generatingProse)
   const recommendedClass = (key: NovelWritingRecommendedActionKey) => key === recommendedAction.key ? 'novel-editor-recommended-action' : undefined
   const commandClass = (key?: NovelWritingRecommendedActionKey, extra = '') => [
     'novel-editor-command-pill',
@@ -1495,12 +1505,31 @@ export function WorkspaceCenter({
                   <strong>功能：{draftBriefSummary.briefFields.memeFunctions || '无'}</strong>
                   <strong>禁用：{draftBriefSummary.briefFields.memeForbidden || '严肃场景不玩梗'}</strong>
                 </div>
-                {(draftBriefSummary.briefFields.styleSampleKeys || draftBriefSummary.briefFields.styleSampleUsage) && (
+                {(draftBriefSummary.briefFields.styleSampleKeys || draftBriefSummary.briefFields.styleSampleUsage || draftBriefSummary.briefFields.styleSampleControlState) && (
                   <div className="novel-draft-brief-style-samples">
                     <span>本章风格样章</span>
+                    <strong>状态：{draftBriefSummary.briefFields.styleSampleControlState || '系统推荐待确认'}</strong>
                     <strong>样章：{draftBriefSummary.briefFields.styleSampleKeys || '未指定'}</strong>
                     <strong>学习：{draftBriefSummary.briefFields.styleSampleUsage || '只学习节奏与句式'}</strong>
+                    <strong>命中：{draftBriefSummary.briefFields.styleSampleReasons || '按本章目标与场景卡匹配'}</strong>
                     <strong>禁抄：{draftBriefSummary.briefFields.styleSampleForbidden || '原句不能照搬'}</strong>
+                    <div className="novel-draft-brief-style-actions">
+                      <Tooltip title="确认本章使用当前风格样章策略">
+                        <Button size="small" icon={<CheckCircleOutlined />} loading={styleSampleActionLoading} disabled={styleSampleActionDisabled || !onLockStyleSamples} onClick={onLockStyleSamples}>
+                          锁定样章
+                        </Button>
+                      </Tooltip>
+                      <Tooltip title="替换为另一组更适合本章的风格样章策略">
+                        <Button size="small" icon={<SyncOutlined />} loading={styleSampleActionLoading} disabled={styleSampleActionDisabled || !onReplaceStyleSamples} onClick={onReplaceStyleSamples}>
+                          换一组
+                        </Button>
+                      </Tooltip>
+                      <Tooltip title="本章不使用风格样章，只按任务书和写作圣经生成">
+                        <Button size="small" icon={<StopOutlined />} loading={styleSampleActionLoading} disabled={styleSampleActionDisabled || !onDisableStyleSamples} onClick={onDisableStyleSamples}>
+                          不用样章
+                        </Button>
+                      </Tooltip>
+                    </div>
                   </div>
                 )}
                 {(draftBriefSummary.briefFields.chapterBenchmarkKeys || draftBriefSummary.briefFields.chapterBenchmarkUsage) && (

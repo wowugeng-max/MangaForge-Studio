@@ -11,7 +11,7 @@ import {
 } from '../novel'
 import { executeNovelAgent } from '../llm'
 import { asArray, getNovelPayload } from './novel-route-utils'
-import { buildChapterPreDraftBrief } from './novel-writing-service'
+import { applyStyleSampleStrategyAuthorAction, buildChapterPreDraftBrief } from './novel-writing-service'
 
 type ChapterContextRoutesContext = {
   getWorkspace: () => string
@@ -630,6 +630,41 @@ export function registerNovelChapterContextRoutes(app: Express, ctx: ChapterCont
         },
       } as any, { createVersion: false })
       res.json({ ok: true, chapter: updated, brief, confirmed: true })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.post('/api/novel/chapters/:chapterId/pre-draft-brief/style-samples', async (req, res) => {
+    try {
+      const loaded = await loadChapterContext(ctx, Number(req.body.project_id || req.query.project_id || 0), Number(req.params.chapterId))
+      if ('error' in loaded) return res.status(loaded.status || 500).json({ error: loaded.error })
+      const action = String(req.body?.action || 'lock').trim() || 'lock'
+      const existing = loaded.chapter.raw_payload?.pre_draft_brief || buildChapterPreDraftBrief(loaded.project, loaded.contextPackage)
+      const styleSampleStrategy = applyStyleSampleStrategyAuthorAction(
+        loaded.project,
+        loaded.contextPackage,
+        existing?.style_sample_strategy || {},
+        {
+          action,
+          sample_keys: req.body?.sample_keys || req.body?.sampleKeys || [],
+        },
+      )
+      const brief = {
+        ...(existing || {}),
+        style_sample_strategy: styleSampleStrategy,
+        updated_at: new Date().toISOString(),
+      }
+      if (action !== 'lock') {
+        delete (brief as any).confirmed_at
+      }
+      const updated = await updateNovelChapter(loaded.activeWorkspace, loaded.chapter.id, {
+        raw_payload: {
+          ...(loaded.chapter.raw_payload || {}),
+          pre_draft_brief: brief,
+        },
+      } as any, { createVersion: false })
+      res.json({ ok: true, chapter: updated, brief, style_sample_strategy: styleSampleStrategy })
     } catch (error) {
       res.status(500).json({ error: String(error) })
     }

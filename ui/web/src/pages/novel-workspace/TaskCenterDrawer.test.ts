@@ -62,6 +62,29 @@ describe('buildRepairClosureHighlights', () => {
     expect(highlights[0]?.detail).toContain('第9、10章')
   })
 
+  test('groups resolved recovery evidence repairs as closure evidence', () => {
+    const highlights = buildRepairClosureHighlights([
+      {
+        source: 'auto_creation_safe_batch_risk',
+        issue_type: 'recovery_evidence_mismatch',
+        task_status: 'resolved',
+        chapter_no: 41,
+      },
+    ], { status: 'closed' })
+
+    expect(highlights).toEqual([
+      expect.objectContaining({
+        key: 'recovery_evidence',
+        label: '恢复依据风险已清',
+        count: 1,
+        chapterNos: [41],
+        issueTypes: ['recovery_evidence_mismatch'],
+      }),
+    ])
+    expect(highlights[0]?.detail).toContain('恢复依据风险已处理')
+    expect(highlights[0]?.detail).toContain('修复审计已闭环')
+  })
+
   test('ignores open repair tasks and non-risk maintenance tasks', () => {
     const highlights = buildRepairClosureHighlights([
       { issue_type: 'reader_pull_missed', task_status: 'needs_review', chapter_no: 9 },

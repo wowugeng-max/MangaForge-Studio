@@ -104,11 +104,15 @@ function parseJsonValue(value: any) {
 
 function repairTaskActionLabel(task: any) {
   if (String(task?.issue_type || '') === 'batch_brief_mismatch') return '按批次修订'
+  if (String(task?.issue_type || '') === 'recovery_evidence_mismatch') return '按批次修订'
+  if (String(task?.issue_type || '') === 'style_sample_task_book_rebuild') return '重审样章'
   if (String(task?.source || '') === 'reader_trial_review' || String(task?.issue_type || '') === 'reader_trial_drop_point') return '补试读'
   if (String(task?.issue_type || '') === 'volume_segment_missed') return '补阶段结算'
   if (String(task?.issue_type || '') === 'reader_pull_missed') return '补追读'
   if (String(task?.issue_type || '') === 'innovation_execution_missed') return '补创新'
   if (String(task?.source || '') === 'rolling_script_room' || String(task?.issue_type || '') === 'script_room_layer_gap') return '按剧本室修复'
+  if (String(task?.source || '') === 'storyline_diff_decision' && String(task?.issue_type || '') === 'storyline_diff_accept_as_plan') return '同步计划'
+  if (String(task?.source || '') === 'storyline_diff_decision') return '按决策修订'
   if (String(task?.source || '') === 'review_annotation_risk') return '按风险修订'
   const map: Record<string, string> = {
     repair_skeleton: '补骨架',
@@ -174,6 +178,7 @@ function repairClosureIssueMeta(task: any) {
   if (key.includes('story_drive')) return { key: 'story_drive', label: '故事力', color: 'blue' }
   if (key.includes('character_arc')) return { key: 'character_arc', label: '人物弧光', color: 'pink' }
   if (key.includes('style_sample')) return { key: 'style_sample', label: '风格', color: 'purple' }
+  if (key.includes('recovery_evidence')) return { key: 'recovery_evidence', label: '恢复依据', color: 'purple' }
   if (key.includes('readability') || key.includes('meme') || key.includes('opening_pull') || key.includes('ending_page_turn') || key.includes('scene_progression') || key.includes('payoff_density')) {
     return { key: 'readability', label: '可读性', color: 'cyan' }
   }
@@ -236,11 +241,14 @@ export function buildRepairClosureHighlights(tasks: any[], audit?: any | null): 
 
 function repairTaskIssueTag(task: any) {
   if (String(task?.issue_type || '') === 'batch_brief_mismatch') return <Tag color="purple" bordered={false}>批次计划</Tag>
+  if (String(task?.issue_type || '') === 'recovery_evidence_mismatch') return <Tag color="purple" bordered={false}>恢复依据</Tag>
+  if (String(task?.issue_type || '') === 'style_sample_task_book_rebuild') return <Tag color="purple" bordered={false}>样章任务书</Tag>
   if (String(task?.source || '') === 'reader_trial_review' || String(task?.issue_type || '') === 'reader_trial_drop_point') return <Tag color="red" bordered={false}>读者试读</Tag>
   if (String(task?.issue_type || '') === 'volume_segment_missed') return <Tag color="gold" bordered={false}>卷级阶段</Tag>
   if (String(task?.issue_type || '') === 'reader_pull_missed') return <Tag color="magenta" bordered={false}>读者拉力</Tag>
   if (String(task?.issue_type || '') === 'innovation_execution_missed') return <Tag color="geekblue" bordered={false}>创新/IP</Tag>
   if (String(task?.source || '') === 'rolling_script_room' || String(task?.issue_type || '') === 'script_room_layer_gap') return <Tag color="blue" bordered={false}>剧本室</Tag>
+  if (String(task?.source || '') === 'storyline_diff_decision') return <Tag color="purple" bordered={false}>剧情线决策</Tag>
   const meta = deliveryRiskIssueMeta(task)
   if (meta) return <Tag color={meta.color} bordered={false}>{meta.label}</Tag>
   return null
@@ -294,6 +302,44 @@ function BatchPlanReviewPreview({ task }: { task: any }) {
   )
 }
 
+function RecoveryEvidenceReviewPreview({ task }: { task: any }) {
+  const recoveryEvidenceReview = task.recovery_evidence_review || task.recoveryEvidenceReview || null
+  const failedItems = Array.isArray(recoveryEvidenceReview?.failed_items) ? recoveryEvidenceReview.failed_items : []
+  const failedEvidence = Array.isArray(recoveryEvidenceReview?.failed_evidence) ? recoveryEvidenceReview.failed_evidence : []
+  const rows = (failedItems.length > 0
+    ? failedItems.map((item: any) => ({
+      evidence: compactEvidenceText(item?.evidence || item),
+      riskLabels: Array.isArray(item?.risk_labels) ? item.risk_labels : Array.isArray(item?.riskLabels) ? item.riskLabels : [],
+    }))
+    : failedEvidence.map((item: any) => ({
+      evidence: compactEvidenceText(item),
+      riskLabels: [],
+    })))
+    .filter((item: any) => item.evidence)
+  const summary = String(recoveryEvidenceReview?.summary || '').trim()
+  if (!rows.length && !summary) return null
+  return (
+    <div style={{ marginTop: 4, padding: 8, border: '1px solid #f5d0fe', borderRadius: 6, background: '#fdf4ff' }}>
+      <Space direction="vertical" size={4} style={{ width: '100%' }}>
+        <Text strong style={{ fontSize: 12 }}>恢复依据复盘</Text>
+        {summary && (
+          <Text type="danger" style={{ fontSize: 12 }}>
+            复盘结论：{summary}
+          </Text>
+        )}
+        {rows.slice(0, 4).map((item: any, index: number) => (
+          <Space key={`${item.evidence}-${index}`} direction="vertical" size={2} style={{ width: '100%' }}>
+            <Text type="secondary" style={{ fontSize: 12 }}>失效依据：{item.evidence}</Text>
+            {item.riskLabels.length > 0 && (
+              <Text type="secondary" style={{ fontSize: 12 }}>对应风险：{item.riskLabels.slice(0, 3).join('；')}</Text>
+            )}
+          </Space>
+        ))}
+      </Space>
+    </div>
+  )
+}
+
 function DeliveryRiskReviewPreview({ task }: { task: any }) {
   const evidence = deliveryRiskEvidenceLines(task)
   if (!evidence.length) return null
@@ -317,7 +363,13 @@ function repairTaskStatusTag(status?: string) {
 }
 
 function BatchProseRunSummary({ run }: { run: any }) {
+  const input = parseJsonValue(run.input_ref) || {}
   const output = parseJsonValue(run.output_ref) || {}
+  const batchPreflight = input.batch_preflight || input.batchPreflight || null
+  const recoveryEvidence = [
+    ...(Array.isArray(batchPreflight?.recovery_evidence) ? batchPreflight.recovery_evidence : []),
+    ...(Array.isArray(batchPreflight?.recoveryEvidence) ? batchPreflight.recoveryEvidence : []),
+  ].map((item: any) => String(item || '').trim()).filter(Boolean)
   const chapters = Array.isArray(output.chapters) ? output.chapters : []
   const failedChapters = chapters.filter((chapter: any) => chapter.status === 'failed')
   const successChapters = chapters.filter((chapter: any) => chapter.status === 'success')
@@ -340,6 +392,18 @@ function BatchProseRunSummary({ run }: { run: any }) {
           {scoreText !== null && <Tag color={scoreText >= 78 ? 'green' : 'gold'} bordered={false}>平均质检 {scoreText} 分</Tag>}
           <Tag bordered={false}>耗时 {run.duration_ms ? `${Math.round(Number(run.duration_ms) / 1000)}s` : '-'}</Tag>
         </Space>
+        {recoveryEvidence.length > 0 && (
+          <div style={{ padding: 8, border: '1px solid #bbf7d0', borderRadius: 6, background: '#f0fdf4' }}>
+            <Space direction="vertical" size={6} style={{ width: '100%' }}>
+              <Text strong style={{ fontSize: 12 }}>恢复放行依据</Text>
+              <Space wrap size={[4, 4]}>
+                {Array.from(new Set(recoveryEvidence)).slice(0, 8).map(item => (
+                  <Tag key={item} color="green" bordered={false}>{item}</Tag>
+                ))}
+              </Space>
+            </Space>
+          </div>
+        )}
         {chapters.length > 0 && (
           <Space wrap size={[4, 4]}>
             {chapters.slice(0, 80).map((chapter: any) => (
@@ -461,6 +525,7 @@ function RepairTaskRunSummary({
   onExecuteTypedRepairTask,
   onUpdateRepairTaskStatus,
   onBulkUpdateRepairTaskStatus,
+  onRecheckStyleSampleTaskBooks,
   onGenerateRepairAuditSummary,
 }: {
   run: any
@@ -471,6 +536,7 @@ function RepairTaskRunSummary({
   onRecheckRepairTask?: (task: any, run: any, taskIndex: number) => void
   onUpdateRepairTaskStatus?: (task: any, run: any, status: string, taskIndex: number) => void
   onBulkUpdateRepairTaskStatus?: (items: any[], status: string) => void
+  onRecheckStyleSampleTaskBooks?: (items: any[]) => void
   onGenerateRepairAuditSummary?: (run: any) => void
 }) {
   const output = parseJsonValue(run.output_ref) || {}
@@ -595,6 +661,7 @@ function RepairTaskRunSummary({
                       <Text type="secondary" style={{ fontSize: 12 }}>验收：{task.acceptance_criteria.slice(0, 2).join('；')}</Text>
                     )}
                     <BatchPlanReviewPreview task={task} />
+                    <RecoveryEvidenceReviewPreview task={task} />
                     <DeliveryRiskReviewPreview task={task} />
                   </Space>
                 )}
@@ -847,6 +914,7 @@ export function TaskCenterDrawer({
       .map((task: any, taskIndex: number) => ({ run, task, taskIndex }))
       .filter((item: any) => item.task?.task_status === 'needs_review')
   }), [sortedRuns])
+  const styleSampleReviewTasks = reviewTasks.filter((item: any) => String(item.task?.issue_type || '') === 'style_sample_task_book_rebuild')
 
   return (
     <>
@@ -955,14 +1023,23 @@ export function TaskCenterDrawer({
             <Card
               size="small"
               title={`复查清单 ${reviewTasks.length}`}
-              extra={onBulkUpdateRepairTaskStatus ? (
-                <Popconfirm
-                  title={`确认通过 ${reviewTasks.length} 个需复查任务？`}
-                  onConfirm={() => onBulkUpdateRepairTaskStatus(reviewTasks, 'resolved')}
-                >
-                  <Button size="small" type="primary">批量确认通过</Button>
-                </Popconfirm>
-              ) : null}
+              extra={(
+                <Space>
+                  {styleSampleReviewTasks.length > 0 && onRecheckStyleSampleTaskBooks && (
+                    <Button size="small" onClick={() => onRecheckStyleSampleTaskBooks(styleSampleReviewTasks)}>
+                      复检样章任务书
+                    </Button>
+                  )}
+                  {onBulkUpdateRepairTaskStatus ? (
+                    <Popconfirm
+                      title={`确认通过 ${reviewTasks.length} 个需复查任务？`}
+                      onConfirm={() => onBulkUpdateRepairTaskStatus(reviewTasks, 'resolved')}
+                    >
+                      <Button size="small" type="primary">批量确认通过</Button>
+                    </Popconfirm>
+                  ) : null}
+                </Space>
+              )}
             >
               <List
                 size="small"

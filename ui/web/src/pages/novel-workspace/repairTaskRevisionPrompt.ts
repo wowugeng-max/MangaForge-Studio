@@ -321,6 +321,95 @@ function normalizeDeliveryRiskContext(task: AnyRecord) {
 }
 
 export function buildDeliveryRiskRevisionClosurePlan(task: AnyRecord, revisionResult: AnyRecord = {}) {
+  const isStorylineDecision = task?.source === 'storyline_diff_decision' || Boolean(task?.decision_key)
+  if (isStorylineDecision) {
+    const quality = objectValue(revisionResult.quality_refresh)
+    const storyStateUpdate = objectValue(revisionResult.story_state_update)
+    const storylineSync = objectValue(storyStateUpdate.storyline_sync || revisionResult.storyline_sync)
+    const missedCount = arrayValue(storylineSync.missed).length
+    const unplannedCount = arrayValue(storylineSync.unplanned).length
+    const forbiddenCount = arrayValue(storylineSync.forbidden_touched || storylineSync.forbiddenTouched).length
+    const diffCount = missedCount + unplannedCount + forbiddenCount
+    const qualityOk = quality.ok !== false
+    const status = firstText(storylineSync.status)
+    const cleared = qualityOk && (status === 'ok' || diffCount === 0)
+    const decisionKey = firstText(task.decision_key)
+    const diffSummary = [
+      missedCount ? `漏推 ${missedCount}` : '',
+      unplannedCount ? `额外推进 ${unplannedCount}` : '',
+      forbiddenCount ? `禁揭 ${forbiddenCount}` : '',
+    ].filter(Boolean).join('，')
+    if (cleared) {
+      return {
+        taskStatus: 'resolved',
+        annotationStatus: '',
+        annotationKey: '',
+        note: `剧情线决策复检通过${decisionKey ? `：${decisionKey}` : ''}。`,
+      }
+    }
+    if (!qualityOk) {
+      return {
+        taskStatus: 'needs_review',
+        annotationStatus: '',
+        annotationKey: '',
+        note: `剧情线决策已执行，但自动复检未通过：${firstText(quality.error, '需要人工复查')}。`,
+      }
+    }
+    return {
+      taskStatus: 'needs_review',
+      annotationStatus: '',
+      annotationKey: '',
+      note: `剧情线仍有差异：${diffSummary || firstText(storylineSync.label, status, '需要人工复查')}。`,
+    }
+  }
+
+  const isRecoveryEvidenceMismatch = firstText(task?.issue_type, task?.issueType) === 'recovery_evidence_mismatch'
+  if (isRecoveryEvidenceMismatch) {
+    const quality = objectValue(revisionResult.quality_refresh)
+    const recoveryReview = objectValue(revisionResult.recovery_evidence_review || revisionResult.recoveryEvidenceReview)
+    const convergence = objectValue(revisionResult.delivery_risk_convergence)
+    const qualityOk = quality.ok === true
+    const scoreText = quality.score === undefined || quality.score === null ? '' : `，评分 ${quality.score}`
+    const hasRecoveryReview = Object.keys(recoveryReview).length > 0
+    const hasFailedEvidenceField = Array.isArray(recoveryReview.failed_evidence) || Array.isArray(recoveryReview.failedEvidence)
+    const failedEvidence = arrayValue(recoveryReview.failed_evidence || recoveryReview.failedEvidence)
+      .map(item => summarizeEvidenceItem(item))
+      .filter(Boolean)
+    const reviewStatus = firstText(recoveryReview.status)
+    const convergenceStatus = firstText(convergence.status)
+    const hasConvergence = Object.keys(convergence).length > 0
+    const hasResidualField = convergence.residual_count !== undefined || convergence.residualCount !== undefined
+    const residualCount = Math.max(0, Number(convergence.residual_count ?? convergence.residualCount ?? 0) || 0)
+    const clearedByRecoveryReview = hasRecoveryReview && (reviewStatus === 'ok' || (hasFailedEvidenceField && failedEvidence.length === 0))
+    const clearedByConvergence = !hasRecoveryReview && hasConvergence && (convergenceStatus === 'cleared' || (hasResidualField && residualCount === 0))
+    const cleared = qualityOk && (clearedByRecoveryReview || clearedByConvergence)
+    if (cleared) {
+      return {
+        taskStatus: 'resolved',
+        annotationStatus: '',
+        annotationKey: '',
+        note: `恢复依据复检通过${scoreText}，failed_evidence 已清空。`,
+      }
+    }
+    if (!qualityOk) {
+      return {
+        taskStatus: 'needs_review',
+        annotationStatus: '',
+        annotationKey: '',
+        note: `恢复依据已回修，但自动复检未通过：${firstText(quality.error, '需要人工复查')}。`,
+      }
+    }
+    const evidenceSummary = failedEvidence.length > 0
+      ? failedEvidence.slice(0, 3).join('；')
+      : firstText(recoveryReview.summary, convergence.label, convergence.summary, reviewStatus, convergenceStatus, '需要人工复查')
+    return {
+      taskStatus: 'needs_review',
+      annotationStatus: '',
+      annotationKey: '',
+      note: `恢复依据仍有失效项：${evidenceSummary}${residualCount ? `，残留 ${residualCount} 项` : ''}。`,
+    }
+  }
+
   const isDeliveryRisk = task?.source === 'review_annotation_risk' || Boolean(task?.annotation_key)
   if (!isDeliveryRisk) {
     return {
@@ -398,9 +487,42 @@ function normalizeBatchPlanContext(task: AnyRecord, run?: AnyRecord | null) {
   }
 }
 
+function normalizeRecoveryEvidenceReview(task: AnyRecord) {
+  const review = objectValue(task.recovery_evidence_review || task.recoveryEvidenceReview)
+  const failedItems = arrayValue(review.failed_items || review.failedItems)
+    .map(item => {
+      const value = objectValue(item)
+      return {
+        evidence: firstText(value.evidence, value.text, value.label, value.summary, summarizeEvidenceItem(item)),
+        riskLabels: arrayValue(value.risk_labels || value.riskLabels)
+          .map(label => text(label))
+          .filter(Boolean),
+      }
+    })
+    .filter(item => item.evidence)
+  const failedEvidence = arrayValue(review.failed_evidence || review.failedEvidence)
+    .map(item => summarizeEvidenceItem(item))
+    .filter(Boolean)
+  const rows = failedItems.length > 0
+    ? failedItems
+    : failedEvidence.map(item => ({ evidence: item, riskLabels: [] }))
+  const allEvidence = arrayValue(review.evidence)
+    .map(item => summarizeEvidenceItem(item))
+    .filter(Boolean)
+  const summary = firstText(review.summary, task.issue_type === 'recovery_evidence_mismatch' ? task.message : '')
+  if (!rows.length && !summary && !allEvidence.length && task.issue_type !== 'recovery_evidence_mismatch') return null
+  return {
+    status: firstText(review.status),
+    summary,
+    rows,
+    allEvidence,
+  }
+}
+
 export function buildRepairTaskRevisionPrompt(task: AnyRecord, run?: AnyRecord | null) {
   const batchPlan = normalizeBatchPlanContext(task, run)
   const chapterPlan = batchPlan?.chapter_plan
+  const recoveryEvidenceReview = normalizeRecoveryEvidenceReview(task)
   const deliveryRisk = normalizeDeliveryRiskContext(task)
   const serialRhythmReview = task.serial_rhythm_review || task.serialRhythmReview || null
   const volumeSegmentReview = task.volume_segment_review || task.volumeSegmentReview || null
@@ -433,6 +555,19 @@ export function buildRepairTaskRevisionPrompt(task: AnyRecord, run?: AnyRecord |
       chapterPlan?.mainline_progress ? `本章主线进度：${chapterPlan.mainline_progress}` : '',
       chapterPlan?.ending_hook ? `章末钩子：${chapterPlan.ending_hook}` : '',
       '修订要求：只补齐本章漏兑现内容，不新增长期方向，不提前揭示禁抢跑边界。',
+    )
+  }
+  if (recoveryEvidenceReview) {
+    lines.push(
+      '【恢复依据失效回修】',
+      recoveryEvidenceReview.summary ? `复盘结论：${recoveryEvidenceReview.summary}` : '',
+      ...recoveryEvidenceReview.rows.flatMap(item => [
+        item.evidence ? `失效依据：${item.evidence}` : '',
+        item.riskLabels.length > 0 ? `对应风险：${item.riskLabels.join('；')}` : '',
+      ]),
+      recoveryEvidenceReview.allEvidence.length > 0 ? `全部恢复依据：${recoveryEvidenceReview.allEvidence.slice(0, 6).join('；')}` : '',
+      '修订要求：逐项把失效依据改成正文可见的兑现结果，优先补样章执行、读者回报、主线/剧情线和批次任务书承诺。',
+      '修订后必须重新运行批次交稿复盘，确认 recovery_evidence_review.status 为 ok、failed_evidence 为空，再关闭任务。',
     )
   }
   if (serialRhythmReview) {

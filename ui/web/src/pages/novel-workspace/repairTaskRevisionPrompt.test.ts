@@ -46,6 +46,40 @@ describe('buildRepairTaskRevisionPrompt', () => {
     expect(prompt).toContain('补齐阵盘反噬回报；不能提前揭露规则源头')
   })
 
+  test('injects failed recovery evidence into batch repair prompts', () => {
+    const prompt = buildRepairTaskRevisionPrompt({
+      issue_type: 'recovery_evidence_mismatch',
+      segment: '第41-43章',
+      message: '恢复放行依据 2 项未兑现，上一轮闭环可能没有真正落到正文。',
+      action: '按失效依据回修本批：逐项核对样章执行、读者回报、主线/剧情线和批次任务书，修完后重新运行交稿复盘。',
+      acceptance_criteria: [
+        '第42章对白交锋补回样章节奏',
+        '恢复依据复检为 ok 且 failed_evidence 为空',
+      ],
+      recovery_evidence_review: {
+        status: 'warn',
+        summary: '恢复放行依据 2 项未被本批交稿兑现：样章任务书复检通过 1 项；第42章样章已重审',
+        failed_evidence: [
+          '样章任务书复检通过 1 项',
+          '第42章样章已重审',
+        ],
+        failed_items: [
+          { evidence: '样章任务书复检通过 1 项', risk_labels: ['风格样章缺口 2 项'] },
+          { evidence: '第42章样章已重审', risk_labels: ['风格样章缺口 2 项'] },
+        ],
+      },
+    })
+
+    expect(prompt).toContain('【恢复依据失效回修】')
+    expect(prompt).toContain('复盘结论：恢复放行依据 2 项未被本批交稿兑现')
+    expect(prompt).toContain('失效依据：样章任务书复检通过 1 项')
+    expect(prompt).toContain('对应风险：风格样章缺口 2 项')
+    expect(prompt).toContain('失效依据：第42章样章已重审')
+    expect(prompt).toContain('第42章对白交锋补回样章节奏；恢复依据复检为 ok 且 failed_evidence 为空')
+    expect(prompt).toContain('修订要求：逐项把失效依据改成正文可见的兑现结果')
+    expect(prompt).toContain('修订后必须重新运行批次交稿复盘')
+  })
+
   test('falls back to run input next batch brief when task lacks embedded context', () => {
     const prompt = buildRepairTaskRevisionPrompt(
       {
@@ -736,5 +770,94 @@ describe('buildRepairTaskRevisionPrompt', () => {
     expect(failedQuality.taskStatus).toBe('needs_review')
     expect(failedQuality.annotationStatus).toBe('')
     expect(failedQuality.note).toContain('自动复检未通过')
+  })
+
+  test('closes recovery evidence mismatch tasks after recovery evidence recheck clears', () => {
+    const cleared = buildDeliveryRiskRevisionClosurePlan(
+      {
+        source: 'auto_creation_safe_batch_risk',
+        issue_type: 'recovery_evidence_mismatch',
+      },
+      {
+        quality_refresh: { ok: true, score: 84 },
+        recovery_evidence_review: {
+          status: 'ok',
+          failed_evidence: [],
+          summary: '恢复放行依据已被本批交稿复盘接住。',
+        },
+      },
+    )
+
+    expect(cleared.taskStatus).toBe('resolved')
+    expect(cleared.note).toContain('恢复依据复检通过')
+    expect(cleared.note).toContain('failed_evidence 已清空')
+
+    const residual = buildDeliveryRiskRevisionClosurePlan(
+      {
+        source: 'auto_creation_safe_batch_risk',
+        issue_type: 'recovery_evidence_mismatch',
+      },
+      {
+        quality_refresh: { ok: true, score: 81 },
+        recovery_evidence_review: {
+          status: 'warn',
+          failed_evidence: ['第42章样章已重审'],
+          summary: '恢复放行依据 1 项未被本批交稿兑现。',
+        },
+      },
+    )
+
+    expect(residual.taskStatus).toBe('needs_review')
+    expect(residual.note).toContain('恢复依据仍有失效项')
+    expect(residual.note).toContain('第42章样章已重审')
+  })
+
+  test('closes storyline decision tasks only after storyline sync recheck clears', () => {
+    const cleared = buildDeliveryRiskRevisionClosurePlan(
+      {
+        source: 'storyline_diff_decision',
+        decision_key: 'storyline_diff:7:201:missed:执事压迫升级没有兑现。',
+        decision: 'revise_prose',
+      },
+      {
+        quality_refresh: { ok: true, score: 83 },
+        story_state_update: {
+          storyline_sync: {
+            status: 'ok',
+            missed: [],
+            unplanned: [],
+            forbidden_touched: [],
+          },
+        },
+      },
+    )
+
+    expect(cleared.taskStatus).toBe('resolved')
+    expect(cleared.annotationStatus).toBe('')
+    expect(cleared.note).toContain('剧情线决策复检通过')
+    expect(cleared.note).toContain('storyline_diff:7:201:missed')
+
+    const residual = buildDeliveryRiskRevisionClosurePlan(
+      {
+        source: 'storyline_diff_decision',
+        decision_key: 'storyline_diff:7:202:unplanned:正文提前让阵盘指向宗门旧案。',
+        decision: 'accept_as_plan',
+      },
+      {
+        quality_refresh: { ok: true, score: 86 },
+        story_state_update: {
+          storyline_sync: {
+            status: 'warn',
+            unplanned: [{ name: '残缺阵盘伏笔', reason: '计划仍未承接' }],
+            missed: [],
+            forbidden_touched: [],
+          },
+        },
+      },
+    )
+
+    expect(residual.taskStatus).toBe('needs_review')
+    expect(residual.note).toContain('剧情线仍有差异')
+    expect(residual.note).toContain('额外推进 1')
   })
 })

@@ -421,7 +421,7 @@ async function applyPendingStateUpdates(activeWorkspace: string, projectId: numb
 
 function normalizeDiscoveredAssetForSetting(asset: any, projectId: number, chapter: any) {
   const entityType = String(asset?.entity_type || asset?.type || '')
-  const name = String(asset?.name || asset?.title || '').trim()
+  const name = String(asset?.target_name || asset?.targetName || asset?.rename_to || asset?.renameTo || asset?.name || asset?.title || '').trim()
   if (!DISCOVERED_ASSET_TYPES.includes(entityType) || !name) return null
   return normalizeSettingInput({
     project_id: projectId,
@@ -443,9 +443,37 @@ function normalizeDiscoveredAssetForSetting(asset: any, projectId: number, chapt
       source_chapter_no: chapter?.chapter_no || null,
       evidence: asset?.evidence || '',
       source_excerpt: asset?.source_excerpt || asset?.evidence || '',
+      original_name: asset?.name || asset?.title || name,
       raw: asset,
     },
   }, projectId)
+}
+
+function discoveredAssetDisposition(asset: any) {
+  const value = String(asset?.disposition || asset?.disposition_action || asset?.action || 'confirm').trim()
+  if (['rename', 'merge', 'cameo', 'ignore', 'confirm'].includes(value)) return value
+  if (['one_off', 'one-time', 'one_time', 'temporary'].includes(value)) return 'cameo'
+  return 'confirm'
+}
+
+function findMergeTarget(settings: any[], asset: any) {
+  const targetId = Number(asset?.merge_target_id || asset?.mergeTargetId || asset?.target_id || asset?.targetId || 0)
+  if (targetId) return settings.find(item => Number(item.id) === targetId) || null
+  const targetName = firstText(asset?.target_name, asset?.targetName, asset?.merge_target_name, asset?.mergeTargetName)
+  const targetType = String(asset?.target_entity_type || asset?.targetEntityType || asset?.entity_type || asset?.type || '')
+  if (!targetName) return null
+  return settings.find(item => String(item.name || '').trim() === targetName && (!targetType || item.entity_type === targetType)) || null
+}
+
+function mergedAssetEvidence(asset: any, chapter: any) {
+  return {
+    entity_type: String(asset?.entity_type || asset?.type || ''),
+    name: String(asset?.name || asset?.title || '').trim(),
+    summary: String(asset?.summary || asset?.description || asset?.role || asset?.effect || ''),
+    evidence: asset?.evidence || asset?.source_excerpt || '',
+    source_chapter_id: chapter?.id || null,
+    source_chapter_no: chapter?.chapter_no || null,
+  }
 }
 
 export async function applyDiscoveredAssetsToProject(activeWorkspace: string, projectId: number, chapter: any, assets: any[] = []) {
@@ -458,9 +486,51 @@ export async function applyDiscoveredAssetsToProject(activeWorkspace: string, pr
   const createdCharacters: any[] = []
   const createdSettings: any[] = []
   const skippedExisting: any[] = []
+  const mergedAssets: any[] = []
+  const cameoAssets: any[] = []
   const seen = new Set<string>()
 
   for (const asset of Array.isArray(assets) ? assets : []) {
+    const disposition = discoveredAssetDisposition(asset)
+    if (disposition === 'cameo' || disposition === 'ignore') {
+      const cameo = mergedAssetEvidence(asset, chapter)
+      if (cameo.name) cameoAssets.push(cameo)
+      continue
+    }
+    if (disposition === 'merge') {
+      const target = findMergeTarget(settings, asset)
+      const source = mergedAssetEvidence(asset, chapter)
+      if (!target || !source.name) {
+        skippedExisting.push({ entity_type: source.entity_type || String(asset?.entity_type || asset?.type || 'unknown'), name: source.name || String(asset?.name || asset?.title || ''), reason: 'merge_target_missing' })
+        continue
+      }
+      const payload = target.payload_json && typeof target.payload_json === 'object' && !Array.isArray(target.payload_json)
+        ? target.payload_json
+        : {}
+      const mergedEvidence = Array.isArray(payload.merged_discovered_assets) ? payload.merged_discovered_assets : []
+      const updated = await updateNovelSettingEntity(activeWorkspace, target.id, {
+        ...target,
+        payload_json: {
+          ...payload,
+          merged_discovered_assets: [
+            ...mergedEvidence,
+            source,
+          ],
+        },
+      } as any)
+      if (updated) {
+        const index = settings.findIndex(item => Number(item.id) === Number(updated.id))
+        if (index >= 0) settings[index] = updated
+      }
+      mergedAssets.push({
+        ...source,
+        source_name: source.name,
+        target_id: target.id,
+        target_name: target.name,
+        target_entity_type: target.entity_type,
+      })
+      continue
+    }
     const seed = normalizeDiscoveredAssetForSetting(asset, projectId, chapter)
     if (!seed) continue
     const key = `${seed.entity_type}:${seed.name}`
@@ -502,6 +572,8 @@ export async function applyDiscoveredAssetsToProject(activeWorkspace: string, pr
     created_characters: createdCharacters,
     created_settings: createdSettings,
     skipped_existing: skippedExisting,
+    merged_assets: mergedAssets,
+    cameo_assets: cameoAssets,
     total: createdCharacters.length + createdSettings.length,
   }
 }
@@ -799,9 +871,11 @@ export function registerNovelSettingRoutes(app: Express, ctx: NovelSettingRoutes
       project_id: projectId,
       review_type: 'asset_intake_apply',
       status: 'ok',
-      summary: `已确认新资产 ${result.created_settings.length} 项`,
+      summary: `已确认新资产 ${result.created_settings.length} 项，合并 ${result.merged_assets.length} 项，过场 ${result.cameo_assets.length} 项`,
       issues: [
         ...result.created_settings.map((item: any) => `${item.entity_type}：${item.name}`),
+        ...result.merged_assets.map((item: any) => `合并：${item.source_name} → ${item.target_name}`),
+        ...result.cameo_assets.map((item: any) => `过场：${item.entity_type}：${item.name}`),
         ...result.skipped_existing.map((item: any) => `已存在：${item.entity_type}：${item.name}`),
       ],
       payload: JSON.stringify({ chapter_id: chapterId, chapter_no: chapter.chapter_no, ...result }),

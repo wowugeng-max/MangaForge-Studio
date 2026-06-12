@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { buildAutoCreationDirectorModel } from './autoCreationDirectorModel'
+import { buildAutoCreationDirectorModel, buildStyleSampleTaskBookRecheckPlan } from './autoCreationDirectorModel'
 
 const basePlanning = {
   topStatus: {
@@ -1012,6 +1012,35 @@ describe('buildAutoCreationDirectorModel', () => {
       },
       activeTasks: [],
       selectedModelId: 12,
+      runRecords: [
+        {
+          id: 901,
+          run_type: 'longform_production_repair',
+          status: 'ready',
+          input_ref: {
+            source: 'style_sample_batch_preflight',
+          },
+          output_ref: {
+            report: {
+              source: 'style_sample_batch_preflight',
+            },
+            tasks: [
+              {
+                issue_type: 'style_sample_task_book_rebuild',
+                task_status: 'resolved',
+                chapter_no: 9,
+                sample_key: '旧高压反打样章',
+              },
+              {
+                issue_type: 'style_sample_task_book_rebuild',
+                task_status: 'resolved',
+                chapter_no: 10,
+                sample_key: '旧对白交锋样章',
+              },
+            ],
+          },
+        },
+      ],
       storyState: {
         last_updated_chapter: 7,
         global: {
@@ -1033,6 +1062,13 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(model.todayCommandDeck.releaseRationale.primaryReason).toContain('可按安全连写放行 3 章')
     expect(model.todayCommandDeck.releaseRationale.checks).toEqual(expect.arrayContaining(['长线材料可用', '交稿风险已清', '下一批任务书可执行']))
     expect(model.todayCommandDeck.releaseRationale.limits).toContain('只放行护栏确认的连续章节')
+    expect(model.batchGuardrail.briefRecovery.evidence).toContain('样章任务书复检通过 2 项')
+    expect(model.batchGuardrail.briefRecovery.evidence).toContain('第9、10章样章已重审')
+    expect(model.batchGuardrail.recommendedAction.payload?.batch_preflight?.recovery_evidence).toEqual(expect.arrayContaining([
+      '批次任务书完整',
+      '样章任务书复检通过 2 项',
+      '第9、10章样章已重审',
+    ]))
   })
 
   test('today command deck explains why production is downgraded to one chapter', () => {
@@ -1589,6 +1625,15 @@ describe('buildAutoCreationDirectorModel', () => {
       allowed_chapter_nos: [8, 9, 10],
       blocked_chapter_nos: [],
       chapter_range_label: '第8-10章',
+      storyline_decision_closure: {
+        status: 'ok',
+        label: '剧情线决策已闭环',
+        open_count: 0,
+      },
+    })
+    expect(model.batchGuardrail.recommendedAction.payload?.batch_preflight?.storyline_decision_closure).toMatchObject({
+      status: 'ok',
+      label: '剧情线决策已闭环',
     })
     expect(model.batchGuardrail.preflight.inputSnapshot.longform_memory_anchor).toMatchObject({
       last_updated_chapter: 7,
@@ -1611,6 +1656,280 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(model.productionLicense.summary).toContain('安全连写')
     expect(model.productionLicense.safeChapterCount).toBe(3)
     expect(model.productionLicense.nextAction.key).toBe('start_safe_batch_generation')
+  })
+
+  test('downgrades safe batching when the next batch still selects risky style samples', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        topStatus: {
+          ...basePlanning.topStatus,
+          future100Coverage: { ready: true, planned: 100, required: 100, missingChapters: [], label: '100/100' },
+        },
+        futureRoute: [
+          {
+            chapterNo: 8,
+            title: '试炼前夜',
+            chapterTask: '主角拿到试炼资格',
+            conflict: '执事设局阻拦',
+            endingHook: '阵盘亮起第二道裂纹',
+            mainlineProgress: '进入外门试炼核心局',
+          },
+          {
+            chapterNo: 9,
+            title: '阵盘裂纹',
+            chapterTask: '阵盘异常暴露主角潜力',
+            conflict: '同门围堵试探底牌',
+            endingHook: '内门执事点名关注',
+            mainlineProgress: '让宗门高层第一次注意主角',
+            style_sample_strategy: {
+              samples: [
+                { sample_key: '旧高压反打样章', selection_reason: '历史低命中但仍被任务书选中。' },
+              ],
+            },
+          },
+          {
+            chapterNo: 10,
+            title: '外门震动',
+            chapterTask: '试炼结果引发宗门震动',
+            conflict: '旧秩序压制新晋黑马',
+            endingHook: '内门招揽提出苛刻条件',
+            mainlineProgress: '打开内门势力线',
+            style_sample_strategy: {
+              samples: [
+                { sample_key: '稳定规则反打样章', selection_reason: '表现稳定。' },
+              ],
+            },
+          },
+        ],
+      },
+      writing: {
+        ...baseWriting,
+        chapterPlanningDesk: {
+          ...baseWriting.chapterPlanningDesk,
+          readiness: 'ready',
+          statusLabel: '本章可写',
+          scenePlanStatus: 'ready',
+          sceneCards: [
+            { title: '压迫升级', goal: '执事逼主角交阵盘' },
+            { title: '反向设局', goal: '主角用阵法拿回主动权' },
+          ],
+          recommendedPlannerAction: { key: 'confirm_plan_and_write_draft', label: '确认并生成' },
+        },
+        topStatus: {
+          ...baseWriting.topStatus,
+          nextActionLabel: '确认并生成',
+          primaryActionKey: 'confirm_plan_and_write_draft',
+        },
+        primaryActionKey: 'confirm_plan_and_write_draft',
+      },
+      activeTasks: [],
+      selectedModelId: 12,
+      styleSampleEffectiveness: {
+        samples: [
+          {
+            sample_key: '旧高压反打样章',
+            usage_count: 5,
+            hit_rate: 40,
+            missed_count: 6,
+            copy_risk_count: 1,
+            risk_label: '需复盘',
+          },
+          {
+            sample_key: '稳定规则反打样章',
+            usage_count: 6,
+            hit_rate: 100,
+            missed_count: 0,
+            copy_risk_count: 0,
+            risk_label: '表现稳定',
+          },
+        ],
+      },
+    } as any)
+
+    const styleSignal = model.batchGuardrail.guardrails.find(item => item.label === '风格样章预检')
+    expect(model.batchGuardrail.status).toBe('caution')
+    expect(model.batchGuardrail.safeChapterCount).toBe(1)
+    expect(styleSignal?.status).toBe('warn')
+    expect(styleSignal?.detail).toContain('旧高压反打样章')
+    expect(styleSignal?.detail).toContain('第9章')
+    expect(model.batchGuardrail.recommendedAction.key).toBe('create_style_sample_batch_repair')
+    expect(model.batchGuardrail.recommendedAction.label).toBe('生成样章任务书修复')
+    expect(model.batchGuardrail.preflight.status).toBe('caution')
+    expect(model.batchGuardrail.preflight.allowedChapterNos).toEqual([8])
+    expect(model.batchGuardrail.preflight.warnings.join('；')).toContain('风格样章预检')
+    expect(model.batchGuardrail.preflight.inputSnapshot.style_sample_batch_preflight).toMatchObject({
+      status: 'warn',
+      risky_sample_keys: ['旧高压反打样章'],
+      affected_chapter_nos: [9],
+      recommended_repair_action: {
+        action: 'replace',
+        label: '换样章并重审任务书',
+        requires_task_book_reconfirm: true,
+      },
+    })
+    expect(model.batchGuardrail.recommendedAction.payload?.repair_tasks?.[0]).toMatchObject({
+      issue_type: 'style_sample_task_book_rebuild',
+      chapter_no: 9,
+      sample_key: '旧高压反打样章',
+      action: '换样章并重审任务书',
+    })
+  })
+
+  test('closes style sample task-book repairs only after the next batch avoids risky samples', () => {
+    const repairItems = [
+      {
+        run: { id: 91 },
+        taskIndex: 0,
+        task: {
+          issue_type: 'style_sample_task_book_rebuild',
+          task_status: 'needs_review',
+          chapter_no: 9,
+          sample_key: '旧高压反打样章',
+        },
+      },
+      {
+        run: { id: 91 },
+        taskIndex: 1,
+        task: {
+          issue_type: 'style_sample_task_book_rebuild',
+          task_status: 'needs_review',
+          chapter_no: 10,
+          sample_key: '旧对白交锋样章',
+        },
+      },
+    ]
+
+    const partialPlan = buildStyleSampleTaskBookRecheckPlan({
+      items: repairItems,
+      styleSampleBatchPreflight: {
+        status: 'warn',
+        risk_count: 1,
+        selected_samples: [
+          { chapter_no: 9, sample_key: '旧高压反打样章' },
+        ],
+        affected_chapter_nos: [9],
+      },
+    })
+
+    expect(partialPlan.status).toBe('partial')
+    expect(partialPlan.resolvedItems.map((item: any) => item.taskIndex)).toEqual([1])
+    expect(partialPlan.blockedItems.map((item: any) => item.taskIndex)).toEqual([0])
+    expect(partialPlan.summary).toContain('通过 1')
+    expect(partialPlan.summary).toContain('仍需重审 1')
+
+    const cleanPlan = buildStyleSampleTaskBookRecheckPlan({
+      items: repairItems,
+      styleSampleBatchPreflight: {
+        status: 'ok',
+        risk_count: 0,
+        selected_samples: [],
+        affected_chapter_nos: [],
+      },
+    })
+
+    expect(cleanPlan.status).toBe('all_clear')
+    expect(cleanPlan.resolvedItems.map((item: any) => item.taskIndex)).toEqual([0, 1])
+    expect(cleanPlan.blockedItems).toHaveLength(0)
+    expect(cleanPlan.summary).toContain('通过 2')
+  })
+
+  test('blocks safe batching while storyline decision tasks are still open', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        topStatus: {
+          ...basePlanning.topStatus,
+          future100Coverage: { ready: true, planned: 100, required: 100, missingChapters: [], label: '100/100' },
+        },
+        futureRoute: [
+          {
+            chapterNo: 8,
+            title: '试炼前夜',
+            chapterTask: '主角拿到试炼资格',
+            conflict: '执事设局阻拦',
+            endingHook: '阵盘亮起第二道裂纹',
+            mainlineProgress: '进入外门试炼核心局',
+            riskTags: [],
+          },
+          {
+            chapterNo: 9,
+            title: '阵盘裂纹',
+            chapterTask: '阵盘异常暴露主角潜力',
+            conflict: '同门围堵试探底牌',
+            endingHook: '内门执事点名关注',
+            mainlineProgress: '让宗门高层第一次注意主角',
+            riskTags: [],
+          },
+          {
+            chapterNo: 10,
+            title: '外门震动',
+            chapterTask: '试炼结果引发宗门震动',
+            conflict: '旧秩序压制新晋黑马',
+            endingHook: '内门招揽提出苛刻条件',
+            mainlineProgress: '打开内门势力线',
+            riskTags: [],
+          },
+        ],
+      },
+      writing: {
+        ...baseWriting,
+        chapterPlanningDesk: {
+          ...baseWriting.chapterPlanningDesk,
+          readiness: 'ready',
+          statusLabel: '本章可写',
+          scenePlanStatus: 'ready',
+          sceneCards: [
+            { title: '压迫升级', goal: '执事逼主角交阵盘' },
+            { title: '反向设局', goal: '主角用阵法拿回主动权' },
+          ],
+          recommendedPlannerAction: { key: 'confirm_plan_and_write_draft', label: '确认并生成' },
+        },
+        topStatus: {
+          ...baseWriting.topStatus,
+          nextActionLabel: '确认并生成',
+          primaryActionKey: 'confirm_plan_and_write_draft',
+        },
+        primaryActionKey: 'confirm_plan_and_write_draft',
+      },
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: {
+        last_updated_chapter: 7,
+        global: {
+          core_promise: '李超用超人蛮力碰撞规则怪谈，张智负责拆解规则。',
+          current_volume_goal: '午夜校园中活过第一轮规则。',
+        },
+      },
+      runRecords: [
+        {
+          id: 730,
+          run_type: 'longform_production_repair',
+          created_at: '2026-06-04T02:00:00.000Z',
+          status: 'ready',
+          output_ref: JSON.stringify({
+            source: 'storyline_diff_decision',
+            tasks: [
+              {
+                source: 'storyline_diff_decision',
+                task_type: 'repair_quality',
+                issue_type: 'storyline_diff_revise_prose',
+                task_status: 'needs_review',
+                chapter_no: 8,
+                title: '第8章剧情线漏推需要回修正文',
+              },
+            ],
+          }),
+        },
+      ],
+    } as any)
+
+    expect(model.batchGuardrail.status).toBe('ready')
+    expect(model.productionLicense.status).toBe('blocked')
+    expect(model.productionLicense.summary).toContain('剧情线决策')
+    expect(model.productionLicense.nextAction.key).toBe('open_task_center')
+    expect(model.todayCommandDeck.releaseRationale.limits).toContain('剧情线决策未闭环')
+    expect(model.todayCommandDeck.qualityGates.find(item => item.key === 'serial_safety')?.detail).toContain('剧情线决策')
   })
 
   test('injects staged delivery-risk obligations into safe batch preflight and action payload', () => {
@@ -4744,7 +5063,7 @@ describe('buildAutoCreationDirectorModel', () => {
     const assetTask = model.batchReviewQueue.riskRadar.repairTasks.find((task: any) => task.issue_type === 'asset_growth_over_budget')
     expect(assetTask?.task_type).toBe('repair_assets')
     expect(assetTask?.asset_growth_review?.pending_assets.map((asset: any) => asset.name)).toContain('裂纹阵盘')
-    expect(assetTask?.action).toContain('确认入库、合并或删除')
+    expect(assetTask?.action).toContain('确认入库、改名、合并已有或标记一次性过场')
     expect(model.batchReviewQueue.handoff.riskLabels).toContain('新资产')
   })
 
@@ -5061,6 +5380,220 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(styleTask?.style_sample_sync?.copied_phrases).toContain('天塌下来有高个子顶着')
     expect(model.batchReviewQueue.handoff.riskLabels).toContain('风格')
     expect(model.batchReviewQueue.completionDashboard.score).toBeLessThan(90)
+  })
+
+  test('turns failed recovery evidence into a batch repair task', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        topStatus: {
+          ...basePlanning.topStatus,
+          future100Coverage: { ready: true, planned: 100, required: 100, missingChapters: [], label: '100/100' },
+        },
+      },
+      writing: {
+        ...baseWriting,
+        nextChapter: { ...baseWriting.nextChapter, id: 44, chapterNo: 44, title: '证据复盘后续' },
+        chapterPlanningDesk: {
+          ...baseWriting.chapterPlanningDesk,
+          readiness: 'ready',
+          statusLabel: '本章可写',
+          scenePlanStatus: 'ready',
+          sceneCards: [{ title: '证据复盘', goal: '确认上一批恢复依据是否兑现' }],
+          recommendedPlannerAction: { key: 'confirm_plan_and_write_draft', label: '确认并生成' },
+        },
+        topStatus: {
+          ...baseWriting.topStatus,
+          nextActionLabel: '确认并生成',
+          primaryActionKey: 'confirm_plan_and_write_draft',
+        },
+        primaryActionKey: 'confirm_plan_and_write_draft',
+      },
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: { last_updated_chapter: 43 },
+      chapters: [
+        { id: 41, chapter_no: 41, title: '证据复盘一', chapter_text: '证据复盘一'.repeat(500) },
+        { id: 42, chapter_no: 42, title: '证据复盘二', chapter_text: '证据复盘二'.repeat(500) },
+        { id: 43, chapter_no: 43, title: '证据复盘三', chapter_text: '证据复盘三'.repeat(500) },
+      ],
+      reviews: [
+        { id: 4101, chapter_id: 41, review_type: 'prose_quality', created_at: '2026-06-03T01:00:00.000Z', payload: JSON.stringify({ score: 84, passed: true }) },
+        { id: 4102, chapter_id: 42, review_type: 'prose_quality', created_at: '2026-06-03T01:01:00.000Z', payload: JSON.stringify({ score: 85, passed: true }) },
+        { id: 4103, chapter_id: 43, review_type: 'prose_quality', created_at: '2026-06-03T01:02:00.000Z', payload: JSON.stringify({ score: 86, passed: true }) },
+        {
+          id: 4104,
+          chapter_id: 42,
+          review_type: 'style_sample_sync',
+          created_at: '2026-06-03T01:03:00.000Z',
+          payload: JSON.stringify({
+            style_sample_sync: {
+              status: 'warn',
+              label: '风格缺口 2',
+              missed_count: 2,
+              missed: [
+                { label: '对白比例', text: '样章重审后仍没有把对白交锋写成推进。' },
+                { label: '叙述节奏', text: '样章重审后仍缺短段落压迫节奏。' },
+              ],
+              copied_phrases: [],
+            },
+          }),
+        },
+      ],
+      runRecords: [
+        {
+          id: 410,
+          run_type: 'batch_generate_prose',
+          created_at: '2026-06-03T00:00:00.000Z',
+          status: 'success',
+          input_ref: JSON.stringify({
+            source: 'auto_creation_safe_batch',
+            safety_limit: 3,
+            batch_preflight: {
+              recovery_evidence: [
+                '样章任务书复检通过 1 项',
+                '第42章样章已重审',
+              ],
+            },
+          }),
+          output_ref: JSON.stringify({
+            total: 3,
+            success: 3,
+            failed: 0,
+            chapters: [
+              { id: 41, chapter_no: 41, title: '证据复盘一', status: 'success', score: 84, word_count: 3180 },
+              { id: 42, chapter_no: 42, title: '证据复盘二', status: 'success', score: 85, word_count: 3090 },
+              { id: 43, chapter_no: 43, title: '证据复盘三', status: 'success', score: 86, word_count: 3021 },
+            ],
+          }),
+        },
+      ],
+    } as any)
+
+    expect(model.batchReviewQueue.status).toBe('risk')
+    expect(model.batchReviewQueue.riskRadar.signals.find(signal => signal.key === 'recovery_evidence')?.detail).toContain('样章任务书复检通过 1 项')
+    expect(model.batchReviewQueue.riskRadar.repairTasks.map((task: any) => task.issue_type)).toContain('recovery_evidence_mismatch')
+    const recoveryTask = model.batchReviewQueue.riskRadar.repairTasks.find((task: any) => task.issue_type === 'recovery_evidence_mismatch')
+    expect(recoveryTask?.recovery_evidence_review?.failed_evidence).toContain('样章任务书复检通过 1 项')
+    expect(recoveryTask?.recovery_evidence_review?.failed_evidence).toContain('第42章样章已重审')
+    expect(model.batchReviewQueue.handoff.riskLabels).toContain('恢复依据')
+  })
+
+  test('shows recovery evidence closure in completion dashboard after repair recheck resolves it', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        topStatus: {
+          ...basePlanning.topStatus,
+          future100Coverage: { ready: true, planned: 100, required: 100, missingChapters: [], label: '100/100' },
+        },
+      },
+      writing: {
+        ...baseWriting,
+        nextChapter: { ...baseWriting.nextChapter, id: 44, chapterNo: 44, title: '证据复盘后续' },
+        chapterPlanningDesk: {
+          ...baseWriting.chapterPlanningDesk,
+          readiness: 'ready',
+          statusLabel: '本章可写',
+          scenePlanStatus: 'ready',
+          sceneCards: [{ title: '证据复盘', goal: '确认上一批恢复依据是否兑现' }],
+          recommendedPlannerAction: { key: 'confirm_plan_and_write_draft', label: '确认并生成' },
+        },
+        topStatus: {
+          ...baseWriting.topStatus,
+          nextActionLabel: '确认并生成',
+          primaryActionKey: 'confirm_plan_and_write_draft',
+        },
+        primaryActionKey: 'confirm_plan_and_write_draft',
+      },
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: { last_updated_chapter: 43 },
+      chapters: [
+        { id: 41, chapter_no: 41, title: '证据复盘一', chapter_text: '证据复盘一'.repeat(500) },
+        { id: 42, chapter_no: 42, title: '证据复盘二', chapter_text: '证据复盘二'.repeat(500) },
+        { id: 43, chapter_no: 43, title: '证据复盘三', chapter_text: '证据复盘三'.repeat(500) },
+      ],
+      reviews: [
+        { id: 4101, chapter_id: 41, review_type: 'prose_quality', created_at: '2026-06-03T01:00:00.000Z', payload: JSON.stringify({ score: 84, passed: true }) },
+        { id: 4102, chapter_id: 42, review_type: 'prose_quality', created_at: '2026-06-03T01:01:00.000Z', payload: JSON.stringify({ score: 85, passed: true }) },
+        { id: 4103, chapter_id: 43, review_type: 'prose_quality', created_at: '2026-06-03T01:02:00.000Z', payload: JSON.stringify({ score: 86, passed: true }) },
+        {
+          id: 4104,
+          chapter_id: 42,
+          review_type: 'style_sample_sync',
+          created_at: '2026-06-03T01:03:00.000Z',
+          payload: JSON.stringify({
+            style_sample_sync: {
+              status: 'warn',
+              label: '风格缺口 2',
+              missed_count: 2,
+              missed: [
+                { label: '对白比例', text: '样章重审后仍没有把对白交锋写成推进。' },
+                { label: '叙述节奏', text: '样章重审后仍缺短段落压迫节奏。' },
+              ],
+              copied_phrases: [],
+            },
+          }),
+        },
+        { id: 4105, chapter_id: 41, review_type: 'prose_quality', created_at: '2026-06-03T02:10:00.000Z', payload: JSON.stringify({ score: 85, passed: true }) },
+        { id: 4106, chapter_id: 42, review_type: 'prose_quality', created_at: '2026-06-03T02:11:00.000Z', payload: JSON.stringify({ score: 86, passed: true }) },
+      ],
+      runRecords: [
+        {
+          id: 410,
+          run_type: 'batch_generate_prose',
+          created_at: '2026-06-03T00:00:00.000Z',
+          status: 'success',
+          input_ref: JSON.stringify({
+            source: 'auto_creation_safe_batch',
+            safety_limit: 3,
+            batch_preflight: {
+              recovery_evidence: [
+                '样章任务书复检通过 1 项',
+                '第42章样章已重审',
+              ],
+            },
+          }),
+          output_ref: JSON.stringify({
+            total: 3,
+            success: 3,
+            failed: 0,
+            chapters: [
+              { id: 41, chapter_no: 41, title: '证据复盘一', status: 'success', score: 84, word_count: 3180 },
+              { id: 42, chapter_no: 42, title: '证据复盘二', status: 'success', score: 85, word_count: 3090 },
+              { id: 43, chapter_no: 43, title: '证据复盘三', status: 'success', score: 86, word_count: 3021 },
+            ],
+          }),
+        },
+        {
+          id: 411,
+          run_type: 'longform_production_repair',
+          created_at: '2026-06-03T02:00:00.000Z',
+          status: 'completed',
+          input_ref: JSON.stringify({ source: 'auto_creation_safe_batch_risk', batch_created_at: '2026-06-03T00:00:00.000Z' }),
+          output_ref: JSON.stringify({
+            tasks: [
+              { task_type: 'repair_quality', issue_type: 'recovery_evidence_mismatch', task_status: 'resolved', chapter_id: 41, chapter_no: 41 },
+              { task_type: 'repair_quality', issue_type: 'style_sample_gap', task_status: 'resolved', chapter_id: 42, chapter_no: 42 },
+            ],
+          }),
+        },
+      ],
+    } as any)
+
+    const recoverySignal = model.batchReviewQueue.riskRadar.signals.find(signal => signal.key === 'recovery_evidence')
+    const recoveryMetric = model.batchReviewQueue.completionDashboard.metrics.find(metric => metric.key === 'recovery_evidence' as any)
+
+    expect(model.batchReviewQueue.status).toBe('done')
+    expect(model.batchReviewQueue.riskRadar.repairTasks.map((task: any) => task.issue_type)).not.toContain('recovery_evidence_mismatch')
+    expect(recoverySignal?.status).toBe('ok')
+    expect(recoverySignal?.detail).toContain('恢复放行依据失效风险已修复并通过复检')
+    expect(recoveryMetric?.label).toBe('恢复依据')
+    expect(recoveryMetric?.status).toBe('ok')
+    expect(recoveryMetric?.detail).toContain('恢复依据已闭环')
+    expect(model.batchReviewQueue.completionDashboard.summary).toContain('恢复依据已闭环')
+    expect(model.batchReviewQueue.handoff.evidence).toContain('恢复依据已闭环')
   })
 
   test('holds delivered safe batch when chapter benchmark execution misses baseline beats', () => {
@@ -5689,7 +6222,22 @@ describe('buildAutoCreationDirectorModel', () => {
           run_type: 'batch_generate_prose',
           created_at: '2026-06-03T00:00:00.000Z',
           status: 'success',
-          input_ref: JSON.stringify({ source: 'auto_creation_safe_batch', safety_limit: 3 }),
+          input_ref: JSON.stringify({
+            source: 'auto_creation_safe_batch',
+            safety_limit: 3,
+            batch_preflight: {
+              recovery_evidence: [
+                '批次任务书完整',
+                '样章任务书复检通过 2 项',
+                '第9、10章样章已重审',
+              ],
+              storyline_decision_closure: {
+                status: 'ok',
+                label: '剧情线决策已闭环',
+                open_count: 0,
+              },
+            },
+          }),
           output_ref: JSON.stringify({
             total: 3,
             success: 3,
@@ -5727,6 +6275,9 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(model.batchReviewQueue.completionDashboard.score).toBeGreaterThanOrEqual(90)
     expect(model.batchReviewQueue.completionDashboard.nextAction.key).toBe('start_safe_batch_generation')
     expect(model.batchReviewQueue.completionDashboard.metrics.every(metric => metric.status === 'ok')).toBe(true)
+    expect(model.batchReviewQueue.handoff.evidence).toContain('剧情线决策已闭环')
+    expect(model.batchReviewQueue.handoff.evidence).toContain('样章任务书复检通过 2 项')
+    expect(model.batchReviewQueue.handoff.evidence).toContain('第9、10章样章已重审')
   })
 
   test('releases chapter handoff batch risk after the handoff repair is resolved and rechecked', () => {

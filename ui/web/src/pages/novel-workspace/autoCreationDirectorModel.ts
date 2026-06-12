@@ -19,6 +19,7 @@ export type AutoCreationDirectorActionKey =
   | 'open_story_assets'
   | 'start_safe_batch_generation'
   | 'create_safe_batch_risk_repair'
+  | 'create_style_sample_batch_repair'
   | 'create_delivery_risk_repair'
   | 'create_script_room_repair'
   | 'select_model'
@@ -206,6 +207,8 @@ export interface AutoCreationNextBatchBriefChapter {
   conflict: string
   endingHook: string
   mainlineProgress: string
+  styleSampleStrategy?: AnyRecord | null
+  styleSampleKeys?: string[]
 }
 
 export type AutoCreationNextBatchBriefStartChecklistKey =
@@ -316,7 +319,7 @@ export interface AutoCreationBatchReviewItem {
 }
 
 export interface AutoCreationBatchRiskSignal {
-  key: 'quality' | 'core' | 'runway' | 'payoff' | 'reader_pull' | 'reader_trial' | 'first30_retention' | 'handoff' | 'storyline' | 'story_drive' | 'character_arc' | 'innovation' | 'signature_scene' | 'chapter_attraction' | 'chapter_benchmark' | 'style_sample' | 'readability' | 'serial_rhythm' | 'asset_growth' | 'volume_segment' | 'batch_plan' | 'batch_checklist'
+  key: 'quality' | 'core' | 'runway' | 'payoff' | 'reader_pull' | 'reader_trial' | 'first30_retention' | 'handoff' | 'storyline' | 'story_drive' | 'character_arc' | 'innovation' | 'signature_scene' | 'chapter_attraction' | 'chapter_benchmark' | 'style_sample' | 'readability' | 'serial_rhythm' | 'asset_growth' | 'volume_segment' | 'batch_plan' | 'batch_checklist' | 'recovery_evidence'
   label: string
   status: AutoCreationBatchRiskStatus
   detail: string
@@ -365,13 +368,14 @@ export interface AutoCreationBatchRiskRadar {
   volumeSegmentRiskCount: number
   batchPlanRiskCount: number
   batchChecklistRiskCount: number
+  recoveryEvidenceRiskCount: number
   checklistExecution: AutoCreationBatchChecklistExecution
   signals: AutoCreationBatchRiskSignal[]
   repairTasks: AnyRecord[]
 }
 
 export interface AutoCreationBatchCompletionMetric {
-  key: 'generation' | 'delivery' | 'quality' | 'plan' | 'checklist'
+  key: 'generation' | 'delivery' | 'quality' | 'plan' | 'recovery_evidence' | 'checklist'
   label: string
   value: number
   target: number
@@ -443,6 +447,14 @@ export interface AutoCreationDeliveryRiskGate {
   categories: AutoCreationDeliveryRiskGateCategory[]
   topRisks: string[]
   recentlyResolved: AutoCreationDeliveryRiskResolution[]
+}
+
+export interface AutoCreationStorylineDecisionGate {
+  status: 'ok' | 'block'
+  label: string
+  summary: string
+  openCount: number
+  taskTitles: string[]
 }
 
 export interface AutoCreationWritingQueueFocus {
@@ -542,7 +554,7 @@ export interface AutoCreationChapterChainStep {
 }
 
 export interface AutoCreationRiskQueueItem {
-  key: 'delivery_risks' | 'storylines' | 'reader_expectation' | 'first30_retention' | 'asset_intake' | 'batch_risks'
+  key: 'delivery_risks' | 'storyline_decisions' | 'storylines' | 'reader_expectation' | 'first30_retention' | 'asset_intake' | 'batch_risks'
   label: string
   count: number
   status: AutoCreationSerialCockpitStatus
@@ -649,6 +661,7 @@ export interface AutoCreationDirectorModel {
   productionLicense: AutoCreationProductionLicense
   todayCommandDeck: AutoCreationTodayCommandDeck
   serialCockpit: AutoCreationSerialCockpit
+  storylineDecisionGate: AutoCreationStorylineDecisionGate
   millionWordRunway: AutoCreationMillionWordRunway
   writingQueueFocus: AutoCreationWritingQueueFocus
   rollingScriptRoom: AutoCreationRollingScriptRoom
@@ -669,6 +682,7 @@ export interface BuildAutoCreationDirectorModelInput {
   runRecords?: AnyRecord[] | null
   chapters?: AnyRecord[] | null
   storyState?: AnyRecord | null
+  styleSampleEffectiveness?: AnyRecord | null
 }
 
 const PLANNING_ACTION_LABELS: Record<PlanningActionKey, string> = {
@@ -691,6 +705,8 @@ const PLANNING_ACTION_LABELS: Record<PlanningActionKey, string> = {
   run_reader_trial_review: '运行读者试读复盘',
   create_reader_trial_repair: '生成试读修复任务',
   create_delivery_risk_repair: '生成风险修复任务',
+  record_storyline_diff_decision: '记录剧情线决策',
+  create_storyline_decision_tasks: '生成剧情线决策任务',
   open_task_center: '打开任务中心',
 }
 
@@ -783,7 +799,7 @@ function writingAction(key: WritingCockpitActionKey, description: string, label?
 }
 
 function opsAction(
-  key: 'open_task_center' | 'select_model' | 'start_safe_batch_generation' | 'create_safe_batch_risk_repair' | 'create_delivery_risk_repair' | 'create_script_room_repair',
+  key: 'open_task_center' | 'select_model' | 'start_safe_batch_generation' | 'create_safe_batch_risk_repair' | 'create_style_sample_batch_repair' | 'create_delivery_risk_repair' | 'create_script_room_repair',
   label: string,
   description: string,
   disabled = false,
@@ -1814,6 +1830,56 @@ function buildDeliveryRiskGate(args: {
   }
 }
 
+function taskTitle(task: AnyRecord) {
+  return firstText(task?.title, task?.message, task?.summary, task?.issue, task?.description, task?.issue_type, task?.issueType)
+}
+
+function isStorylineDecisionTask(task: AnyRecord, output: AnyRecord) {
+  const source = text(task?.source || output?.source)
+  const issueType = text(task?.issue_type || task?.issueType)
+  return source === 'storyline_diff_decision'
+    || issueType.startsWith('storyline_diff_')
+    || Boolean(task?.decision_key || task?.decisionKey)
+}
+
+function buildStorylineDecisionGate(runRecords: AnyRecord[]): AutoCreationStorylineDecisionGate {
+  const openTasks: AnyRecord[] = []
+  for (const run of runRecords.filter(item => text(item?.run_type) === 'longform_production_repair')) {
+    const output = parsePayload(run?.output_ref) || {}
+    const tasks = [
+      ...arrayValue(output?.tasks),
+      ...arrayValue(output?.repairTasks),
+    ]
+    for (const task of tasks) {
+      if (!isStorylineDecisionTask(task, output)) continue
+      const status = text(task?.task_status ?? task?.status)
+      if (isResolvedTaskStatus(status)) continue
+      if (['ignored', 'false_positive'].includes(status)) continue
+      openTasks.push(task)
+    }
+  }
+
+  const openCount = openTasks.length
+  const taskTitles = issueTexts(openTasks.map(task => taskTitle(task)), 3)
+  if (openCount <= 0) {
+    return {
+      status: 'ok',
+      label: '剧情线决策已闭环',
+      summary: '剧情线差异决策任务已处理并通过复检，不阻止安全连写。',
+      openCount: 0,
+      taskTitles: [],
+    }
+  }
+
+  return {
+    status: 'block',
+    label: `剧情线决策 ${openCount}`,
+    summary: `还有 ${openCount} 个剧情线决策任务未闭环；先在任务中心完成回修或计划同步，并通过剧情线同步复检后，再放行安全连写。`,
+    openCount,
+    taskTitles,
+  }
+}
+
 function issueText(value: any) {
   if (typeof value === 'string') return text(value)
   return firstText(value?.description, value?.issue, value?.message, value?.suggestion, value?.title, value?.name)
@@ -2300,6 +2366,7 @@ function batchRepairTask(args: {
   chapterBenchmarkSync?: AnyRecord | null
   styleSampleSync?: AnyRecord | null
   batchChecklistExecution?: AnyRecord | null
+  recoveryEvidenceReview?: AnyRecord | null
   actionArea?: string
   actionKey?: string
 }) {
@@ -2338,6 +2405,7 @@ function batchRepairTask(args: {
     ...(args.chapterBenchmarkSync ? { chapter_benchmark_sync: args.chapterBenchmarkSync } : {}),
     ...(args.styleSampleSync ? { style_sample_sync: args.styleSampleSync } : {}),
     ...(args.batchChecklistExecution ? { batch_checklist_execution: args.batchChecklistExecution } : {}),
+    ...(args.recoveryEvidenceReview ? { recovery_evidence_review: args.recoveryEvidenceReview } : {}),
   }
 }
 
@@ -2397,6 +2465,65 @@ function resolvedBatchRiskIssueTypes(issueType: string) {
 function batchRiskIssueResolved(keys: Set<string> | undefined, item: { chapterId: any; chapterNo: number }, issueType: string) {
   if (!keys) return false
   return batchRiskIssueKeys(item, issueType).some(key => keys.has(key))
+}
+
+function recoveryEvidenceRiskMatches(evidence: string, counts: {
+  payoffDebtTotal: number
+  readerPullRiskTotal: number
+  storylineRiskTotal: number
+  styleSampleRiskTotal: number
+  batchPlanRiskTotal: number
+  batchChecklistRiskTotal: number
+}) {
+  const riskLabels: string[] = []
+  const normalized = evidence.toLowerCase()
+  if (normalized.includes('样章') || normalized.includes('风格')) {
+    if (counts.styleSampleRiskTotal > 0) riskLabels.push(`风格样章缺口 ${counts.styleSampleRiskTotal} 项`)
+  }
+  if (normalized.includes('读者回报') || normalized.includes('回报') || normalized.includes('追读') || normalized.includes('读者拉力')) {
+    const count = counts.payoffDebtTotal + counts.readerPullRiskTotal
+    if (count > 0) riskLabels.push(`读者回报/拉力风险 ${count} 项`)
+  }
+  if (normalized.includes('主线') || normalized.includes('剧情线')) {
+    const count = counts.storylineRiskTotal + counts.batchPlanRiskTotal
+    if (count > 0) riskLabels.push(`主线/剧情线风险 ${count} 项`)
+  }
+  if (normalized.includes('批次任务书') || normalized.includes('开工清单') || normalized.includes('安全批次')) {
+    const count = counts.batchPlanRiskTotal + counts.batchChecklistRiskTotal
+    if (count > 0) riskLabels.push(`批次计划/开工清单风险 ${count} 项`)
+  }
+  return riskLabels
+}
+
+function buildRecoveryEvidenceReview(args: {
+  preflight?: AnyRecord | null
+  counts: {
+    payoffDebtTotal: number
+    readerPullRiskTotal: number
+    storylineRiskTotal: number
+    styleSampleRiskTotal: number
+    batchPlanRiskTotal: number
+    batchChecklistRiskTotal: number
+  }
+}) {
+  const evidence = batchReleaseEvidenceFromPreflight(args.preflight)
+  const failedItems = evidence
+    .map(item => ({
+      evidence: item,
+      risk_labels: recoveryEvidenceRiskMatches(item, args.counts),
+    }))
+    .filter(item => item.risk_labels.length > 0)
+
+  return {
+    visible: evidence.length > 0,
+    status: failedItems.length > 0 ? 'warn' as const : 'ok' as const,
+    evidence,
+    failed_evidence: failedItems.map(item => item.evidence),
+    failed_items: failedItems,
+    summary: failedItems.length > 0
+      ? `恢复放行依据 ${failedItems.length} 项未被本批交稿兑现：${failedItems.map(item => item.evidence).slice(0, 3).join('；')}`
+      : evidence.length > 0 ? '恢复放行依据已被本批交稿复盘接住。' : '本批没有恢复放行依据。',
+  }
 }
 
 function batchBriefChapterNos(batchBrief: AnyRecord | null | undefined) {
@@ -2670,6 +2797,7 @@ function buildBatchRiskRadar(args: {
   planning?: PlanningWorkspaceModel | null
   resolvedIssueKeys?: Set<string>
   nextBatchBrief?: AnyRecord | null
+  batchPreflight?: AnyRecord | null
 }): AutoCreationBatchRiskRadar {
   const successfulItems = args.items.filter(item => item.status === 'success')
   const qualityScores = successfulItems
@@ -3060,6 +3188,39 @@ function buildBatchRiskRadar(args: {
       batchChecklistExecution,
     }))
   }
+  const recoveryEvidenceReview = buildRecoveryEvidenceReview({
+    preflight: args.batchPreflight,
+    counts: {
+      payoffDebtTotal,
+      readerPullRiskTotal,
+      storylineRiskTotal,
+      styleSampleRiskTotal,
+      batchPlanRiskTotal,
+      batchChecklistRiskTotal,
+    },
+  })
+  const recoveryEvidenceResolved = successfulItems.length > 0 && batchRiskIssueResolved(args.resolvedIssueKeys, successfulItems[0], 'recovery_evidence_mismatch')
+  const effectiveRecoveryEvidenceReview = recoveryEvidenceResolved && recoveryEvidenceReview.visible
+    ? {
+      ...recoveryEvidenceReview,
+      status: 'ok' as const,
+      failed_evidence: [],
+      failed_items: [],
+      summary: '恢复放行依据失效风险已修复并通过复检。',
+    }
+    : recoveryEvidenceReview
+  const recoveryEvidenceRiskTotal = effectiveRecoveryEvidenceReview.failed_evidence.length
+  if (recoveryEvidenceRiskTotal > 0 && successfulItems.length > 0) {
+    repairTasks.push(batchRepairTask({
+      item: successfulItems[0],
+      issueType: 'recovery_evidence_mismatch',
+      severity: recoveryEvidenceRiskTotal >= 2 ? 'high' : 'medium',
+      message: `恢复放行依据 ${recoveryEvidenceRiskTotal} 项未兑现，上一轮闭环可能没有真正落到正文。`,
+      action: '按失效依据回修本批：逐项核对样章执行、读者回报、主线/剧情线和批次任务书，修完后重新运行交稿复盘。',
+      metrics: { recovery_evidence_risk_count: recoveryEvidenceRiskTotal },
+      recoveryEvidenceReview: effectiveRecoveryEvidenceReview,
+    }))
+  }
   if (serialRhythmRiskTotal > 0 && successfulItems.length > 0) {
     const firstItem = successfulItems[0]
     repairTasks.push(batchRepairTask({
@@ -3080,7 +3241,7 @@ function buildBatchRiskRadar(args: {
       taskType: 'repair_assets',
       severity: assetGrowthReview.pending_count >= assetGrowthReview.budget + 4 ? 'high' : 'medium',
       message: `本批发现 ${assetGrowthReview.pending_count} 个新资产，超过预算 ${assetGrowthReview.budget}，存在设定膨胀风险。`,
-      action: '进入设定工坊，把本批新资产逐项确认入库、合并或删除；只保留服务当前卷目标和读者承诺的资产。',
+      action: '进入设定工坊，把本批新资产逐项确认入库、改名、合并已有或标记一次性过场；只保留服务当前卷目标和读者承诺的资产。',
       metrics: {
         asset_growth_risk_count: assetGrowthRiskTotal,
         pending_asset_count: assetGrowthReview.pending_count,
@@ -3277,6 +3438,14 @@ function buildBatchRiskRadar(args: {
         : `批次开工清单兑现分 ${effectiveBatchChecklistExecution.score}`,
     })
   }
+  if (effectiveRecoveryEvidenceReview.visible) {
+    signals.push({
+      key: 'recovery_evidence',
+      label: '恢复依据',
+      status: recoveryEvidenceRiskTotal > 0 ? 'warn' : 'ok',
+      detail: effectiveRecoveryEvidenceReview.summary,
+    })
+  }
   const status: AutoCreationBatchRiskStatus = signals.some(signal => signal.status === 'warn') ? 'warn' : 'ok'
 
   return {
@@ -3304,6 +3473,7 @@ function buildBatchRiskRadar(args: {
     volumeSegmentRiskCount: volumeSegmentRiskTotal,
     batchPlanRiskCount: batchPlanRiskTotal,
     batchChecklistRiskCount: batchChecklistRiskTotal,
+    recoveryEvidenceRiskCount: recoveryEvidenceRiskTotal,
     checklistExecution: effectiveBatchChecklistExecution,
     signals,
     repairTasks: repairTasks.slice(0, 40),
@@ -3368,8 +3538,11 @@ function buildBatchCompletionDashboard(args: {
     + args.riskRadar.volumeSegmentRiskCount * 10
     + args.riskRadar.batchPlanRiskCount * 10
     + args.riskRadar.batchChecklistRiskCount * 8
+    + args.riskRadar.recoveryEvidenceRiskCount * 10
   const planScore = clampScore(100 - planPenalty)
   const checklistScore = args.riskRadar.checklistExecution.visible ? args.riskRadar.checklistExecution.score : 100
+  const recoveryEvidenceSignal = args.riskRadar.signals.find(signal => signal.key === 'recovery_evidence')
+  const recoveryEvidenceClosed = Boolean(recoveryEvidenceSignal && recoveryEvidenceSignal.status === 'ok')
   const score = args.riskRadar.checklistExecution.visible
     ? clampScore(generationScore * 0.28 + deliveryScore * 0.23 + qualityScore * 0.24 + planScore * 0.17 + checklistScore * 0.08)
     : clampScore(generationScore * 0.3 + deliveryScore * 0.25 + qualityScore * 0.25 + planScore * 0.2)
@@ -3416,6 +3589,16 @@ function buildBatchCompletionDashboard(args: {
         ? `待处理 ${args.riskRadar.repairTasks.length} 个批次风险。`
         : '本批读者回报、剧情线和连载计划未发现阻塞风险。',
     },
+    ...(recoveryEvidenceSignal ? [{
+      key: 'recovery_evidence',
+      label: '恢复依据',
+      value: recoveryEvidenceClosed ? 100 : 100 - args.riskRadar.recoveryEvidenceRiskCount,
+      target: 100,
+      status: args.riskRadar.recoveryEvidenceRiskCount > 0 ? 'warn' : 'ok',
+      detail: args.riskRadar.recoveryEvidenceRiskCount > 0
+        ? recoveryEvidenceSignal.detail
+        : `恢复依据已闭环：${recoveryEvidenceSignal.detail}`,
+    } as AutoCreationBatchCompletionMetric] : []),
     ...(args.riskRadar.checklistExecution.visible ? [{
       key: 'checklist',
       label: '开工清单',
@@ -3434,7 +3617,7 @@ function buildBatchCompletionDashboard(args: {
     score,
     label: completionStatus === 'ready_next' ? '可开下一批' : completionStatus === 'needs_repair' ? '待修复' : '交稿中',
     summary: completionStatus === 'ready_next'
-      ? '本批生成、交稿和复盘已闭环，可以按护栏开启下一批。'
+      ? `本批生成、交稿和复盘已闭环${recoveryEvidenceClosed ? '，恢复依据已闭环' : ''}，可以按护栏开启下一批。`
       : completionStatus === 'needs_repair'
         ? failed > 0
           ? '批次生成存在失败章节，先处理失败和风险再继续。'
@@ -3469,6 +3652,7 @@ function batchRiskLabels(riskRadar: AutoCreationBatchRiskRadar) {
     riskRadar.volumeSegmentRiskCount > 0 ? '卷级阶段' : '',
     riskRadar.batchPlanRiskCount > 0 ? '批次计划' : '',
     riskRadar.batchChecklistRiskCount > 0 ? '开工清单' : '',
+    riskRadar.recoveryEvidenceRiskCount > 0 ? '恢复依据' : '',
   ].filter(Boolean)
 }
 
@@ -3481,6 +3665,7 @@ function buildBatchHandoff(args: {
   items: AutoCreationBatchReviewItem[]
   riskRadar: AutoCreationBatchRiskRadar
   nextAction: AutoCreationDirectorAction
+  releaseEvidence?: string[]
 }): AutoCreationBatchHandoff {
   if (args.status === 'empty') {
     return {
@@ -3504,6 +3689,12 @@ function buildBatchHandoff(args: {
     .map((task: any) => Number(task?.chapter_no ?? task?.chapterNo ?? 0))
     .filter(Boolean)))
   const riskLabels = batchRiskLabels(args.riskRadar)
+  const recoveryEvidenceSignal = args.riskRadar.signals.find(signal => signal.key === 'recovery_evidence')
+  const closedRecoveryEvidence = recoveryEvidenceSignal?.status === 'ok' ? '恢复依据已闭环' : ''
+  const releaseEvidence = Array.from(new Set([
+    ...arrayValue(args.releaseEvidence).map(item => text(item)).filter(Boolean),
+    closedRecoveryEvidence,
+  ].filter(Boolean)))
 
   if (args.status === 'warn') {
     return {
@@ -3540,7 +3731,7 @@ function buildBatchHandoff(args: {
       action: args.nextAction,
       targetChapterNos: [],
       riskLabels: [],
-      evidence: ['生成完成', '交稿完成', '质检健康', '计划兑现'],
+      evidence: ['生成完成', '交稿完成', '质检健康', '计划兑现', ...releaseEvidence],
     }
   }
 
@@ -3554,6 +3745,19 @@ function buildBatchHandoff(args: {
     riskLabels: [],
     evidence: pendingDeliveryChapters.map(no => `第${no}章待交稿`),
   }
+}
+
+function batchReleaseEvidenceFromPreflight(preflight: AnyRecord | null | undefined) {
+  const closure = preflight?.storyline_decision_closure || preflight?.storylineDecisionClosure || null
+  const recoveryEvidence = [
+    ...arrayValue(preflight?.recovery_evidence),
+    ...arrayValue(preflight?.recoveryEvidence),
+  ].map(item => text(item)).filter(Boolean)
+  const evidence = [
+    text(closure?.status) === 'ok' ? text(closure?.label, '剧情线决策已闭环') : '',
+    ...recoveryEvidence,
+  ]
+  return Array.from(new Set(evidence.filter(Boolean)))
 }
 
 function latestLongformCreationReport(reviews: AnyRecord[]) {
@@ -4574,9 +4778,31 @@ function emptyNextBatchBrief(): AutoCreationNextBatchBrief {
   }
 }
 
+function styleSampleStrategyFromRecord(record: AnyRecord | null | undefined) {
+  return record?.styleSampleStrategy
+    || record?.style_sample_strategy
+    || record?.rawPayload?.preDraftBrief?.styleSampleStrategy
+    || record?.rawPayload?.pre_draft_brief?.style_sample_strategy
+    || record?.raw_payload?.preDraftBrief?.styleSampleStrategy
+    || record?.raw_payload?.pre_draft_brief?.style_sample_strategy
+    || record?.raw_payload?.context_package?.pre_draft_brief?.style_sample_strategy
+    || record?.raw_payload?.context_package?.chapter_target?.style_sample_strategy
+    || null
+}
+
+function styleSampleKeysFromStrategy(strategy: AnyRecord | null | undefined) {
+  return Array.from(new Set(
+    arrayValue(strategy?.samples)
+      .map((sample: any) => text(sample?.sample_key, text(sample?.sampleKey, text(sample?.key))))
+      .filter(Boolean),
+  ))
+}
+
 function normalizeRouteChapter(record: AnyRecord): AutoCreationNextBatchBriefChapter | null {
   const chapterNo = Number(record?.chapterNo ?? record?.chapter_no ?? 0)
   if (!chapterNo) return null
+  const styleSampleStrategy = styleSampleStrategyFromRecord(record)
+  const styleSampleKeys = styleSampleKeysFromStrategy(styleSampleStrategy)
   return {
     chapterNo,
     title: firstText(record?.title, `第${chapterNo}章`),
@@ -4584,6 +4810,7 @@ function normalizeRouteChapter(record: AnyRecord): AutoCreationNextBatchBriefCha
     conflict: firstText(record?.conflict, record?.raw_payload?.conflict),
     endingHook: firstText(record?.endingHook, record?.ending_hook, record?.hook),
     mainlineProgress: firstText(record?.mainlineProgress, record?.mainline_progress, record?.raw_payload?.mainline_progress),
+    ...(styleSampleKeys.length ? { styleSampleStrategy, styleSampleKeys } : {}),
   }
 }
 
@@ -4599,6 +4826,8 @@ function mergeRouteChapterPlan(
     conflict: routeChapter.conflict || fallback.conflict,
     endingHook: routeChapter.endingHook || fallback.endingHook,
     mainlineProgress: routeChapter.mainlineProgress || fallback.mainlineProgress,
+    styleSampleStrategy: routeChapter.styleSampleStrategy || fallback.styleSampleStrategy || null,
+    styleSampleKeys: routeChapter.styleSampleKeys?.length ? routeChapter.styleSampleKeys : fallback.styleSampleKeys || [],
   }
 }
 
@@ -4684,10 +4913,14 @@ function buildNextBatchBrief(args: {
   planning: PlanningWorkspaceModel
   writing: WritingCockpitModel
   safeChapterCount: number
+  chapters?: AnyRecord[] | null
 }): AutoCreationNextBatchBrief {
   if (args.safeChapterCount <= 0) return emptyNextBatchBrief()
   const targetNo = Number(args.writing.nextChapter?.chapterNo || 0)
   if (!targetNo) return emptyNextBatchBrief()
+  const chaptersByNo = new Map(arrayValue(args.chapters)
+    .map((chapter: AnyRecord) => [Number(chapter?.chapterNo ?? chapter?.chapter_no ?? 0), chapter])
+    .filter(([chapterNo]) => Boolean(chapterNo)))
   const routeChapters = arrayValue(args.planning.futureRoute)
     .map(normalizeRouteChapter)
     .filter((item): item is AutoCreationNextBatchBriefChapter => Boolean(item))
@@ -4702,6 +4935,7 @@ function buildNextBatchBrief(args: {
     conflict: args.writing.nextChapter?.conflict,
     endingHook: args.writing.nextChapter?.endingHook,
     mainlineProgress: args.planning.mainline.nextTurn,
+    styleSampleStrategy: styleSampleStrategyFromRecord(args.writing.nextChapter as AnyRecord),
   })
   if (!existingNos.has(targetNo)) {
     if (targetFallback) routeChapters.unshift(targetFallback)
@@ -4711,7 +4945,14 @@ function buildNextBatchBrief(args: {
       routeChapters[targetIndex] = mergeRouteChapterPlan(routeChapters[targetIndex], targetFallback)
     }
   }
-  const chapters = routeChapters.slice(0, args.safeChapterCount)
+  const chapters = routeChapters.slice(0, args.safeChapterCount).map(chapter => {
+    const sourceChapter = chaptersByNo.get(chapter.chapterNo)
+    const styleSampleStrategy = chapter.styleSampleStrategy || styleSampleStrategyFromRecord(sourceChapter)
+    const styleSampleKeys = chapter.styleSampleKeys?.length ? chapter.styleSampleKeys : styleSampleKeysFromStrategy(styleSampleStrategy)
+    return styleSampleKeys.length
+      ? { ...chapter, styleSampleStrategy, styleSampleKeys }
+      : chapter
+  })
   if (!chapters.length) return emptyNextBatchBrief()
   const mainlineProgress = chapters.map(item => item.mainlineProgress).filter(Boolean)
   const conflicts = chapters.map(item => item.conflict).filter(Boolean)
@@ -4845,6 +5086,202 @@ function buildNextBatchBriefRepair(
   }
 }
 
+function styleSampleEffectivenessRows(effectiveness: AnyRecord | null | undefined) {
+  if (!effectiveness) return []
+  if (Array.isArray(effectiveness?.samples)) return effectiveness.samples
+  if (Array.isArray(effectiveness?.items)) return effectiveness.items
+  return arrayValue(effectiveness)
+}
+
+function styleSampleEffectivenessRisky(row: AnyRecord) {
+  const riskLabel = text(row?.risk_label, text(row?.riskLabel))
+  const usageCount = numberValue(row?.usage_count ?? row?.usageCount) ?? 0
+  const hitRate = numberValue(row?.hit_rate ?? row?.hitRate) ?? 100
+  const missedCount = numberValue(row?.missed_count ?? row?.missedCount) ?? 0
+  const copyRiskCount = numberValue(row?.copy_risk_count ?? row?.copyRiskCount) ?? 0
+  return /需复盘|风险|低命中|照搬/.test(riskLabel)
+    || missedCount > 0
+    || copyRiskCount > 0
+    || (usageCount > 0 && hitRate < 80)
+}
+
+function styleSampleEffectivenessRiskReason(row: AnyRecord) {
+  const riskLabel = text(row?.risk_label, text(row?.riskLabel))
+  const hitRate = numberValue(row?.hit_rate ?? row?.hitRate)
+  const missedCount = numberValue(row?.missed_count ?? row?.missedCount)
+  const copyRiskCount = numberValue(row?.copy_risk_count ?? row?.copyRiskCount)
+  return [
+    riskLabel,
+    hitRate !== null ? `命中率 ${hitRate}%` : '',
+    missedCount ? `缺口 ${missedCount}` : '',
+    copyRiskCount ? `照搬风险 ${copyRiskCount}` : '',
+  ].filter(Boolean).join('，') || '样章效果回收提示需复盘'
+}
+
+function buildStyleSampleBatchPreflight(
+  nextBatchBrief: AutoCreationNextBatchBrief,
+  effectiveness: AnyRecord | null | undefined,
+) {
+  const riskyRows = styleSampleEffectivenessRows(effectiveness)
+    .filter(styleSampleEffectivenessRisky)
+  const riskyByKey = new Map(riskyRows
+    .map((row: AnyRecord) => [text(row?.sample_key, text(row?.sampleKey)), row])
+    .filter(([key]) => Boolean(key)))
+  const selections = nextBatchBrief.chapters.flatMap(chapter => {
+    const keys = chapter.styleSampleKeys?.length
+      ? chapter.styleSampleKeys
+      : styleSampleKeysFromStrategy(chapter.styleSampleStrategy)
+    return keys
+      .filter(key => riskyByKey.has(key))
+      .map(key => ({
+        chapter_no: chapter.chapterNo,
+        chapter_title: chapter.title,
+        sample_key: key,
+        reason: styleSampleEffectivenessRiskReason(riskyByKey.get(key) || {}),
+        effectiveness: riskyByKey.get(key) || {},
+      }))
+  })
+  const riskySampleKeys = Array.from(new Set(selections.map(item => item.sample_key))).filter(Boolean)
+  const affectedChapterNos = Array.from(new Set(selections.map(item => Number(item.chapter_no || 0)).filter(Boolean))).sort((a, b) => a - b)
+  const recommendedRepairAction = {
+    action: 'replace',
+    label: '换样章并重审任务书',
+    requires_task_book_reconfirm: true,
+  }
+  const repairTasks = selections.map(item => ({
+    task_type: 'repair_task_book',
+    issue_type: 'style_sample_task_book_rebuild',
+    severity: Number(item.effectiveness?.copy_risk_count || item.effectiveness?.copyRiskCount || 0) > 0 ? 'high' : 'medium',
+    title: `第${item.chapter_no}章换样章并重审任务书`,
+    message: `第${item.chapter_no}章《${item.chapter_title || '未命名'}》任务书仍选择风险样章「${item.sample_key}」：${item.reason}。`,
+    action: recommendedRepairAction.label,
+    acceptance_criteria: [
+      '任务书已换用表现稳定或更匹配本章场景的风格样章',
+      '换样章后任务书确认状态已清除，并由作者重新确认',
+      '重新生成正文前不再选择低命中或照搬风险样章',
+    ],
+    task_status: 'open',
+    source: 'style_sample_batch_preflight',
+    chapter_no: item.chapter_no,
+    sample_key: item.sample_key,
+    sample_effectiveness: item.effectiveness,
+    recommended_repair_action: recommendedRepairAction,
+  }))
+  const status = selections.length ? 'warn' : 'ok'
+  return {
+    visible: nextBatchBrief.visible || riskyRows.length > 0,
+    status,
+    risk_count: selections.length,
+    summary: selections.length
+      ? `下一批任务书${affectedChapterNos.map(chapterNo => `第${chapterNo}章`).join('、')}仍选择需复盘样章：${riskySampleKeys.join('、')}。先换样章并重审任务书，再扩大安全连写。`
+      : riskyRows.length
+        ? '下一批任务书没有继续选择需复盘样章。'
+        : '样章效果回收没有待复盘风险，下一批可按任务书样章策略继续。',
+    risky_sample_keys: riskySampleKeys,
+    affected_chapter_nos: affectedChapterNos,
+    selected_samples: selections,
+    recommended_repair_action: recommendedRepairAction,
+    repair_tasks: repairTasks,
+  }
+}
+
+export function buildStyleSampleTaskBookRecheckPlan(args: {
+  items: AnyRecord[]
+  styleSampleBatchPreflight?: AnyRecord | null
+}) {
+  const styleItems = arrayValue(args.items)
+    .filter(item => {
+      const task = item?.task || item
+      return text(task?.issue_type) === 'style_sample_task_book_rebuild'
+        && text(task?.task_status) === 'needs_review'
+    })
+  const preflight = args.styleSampleBatchPreflight || null
+  if (!preflight) {
+    return {
+      status: 'needs_preflight',
+      resolvedItems: [],
+      blockedItems: styleItems,
+      summary: '请先刷新自动创作总控台，取得最新风格样章预检后再批量关闭样章任务书。',
+      riskyChapterNos: [],
+    }
+  }
+
+  const selectedSamples = arrayValue(preflight.selected_samples || preflight.selectedSamples)
+  const affectedChapterNos = Array.from(new Set([
+    ...arrayValue(preflight.affected_chapter_nos || preflight.affectedChapterNos)
+      .map(item => Number(item))
+      .filter(chapterNo => Number.isFinite(chapterNo) && chapterNo > 0),
+    ...selectedSamples
+      .map(item => Number(item?.chapter_no || item?.chapterNo || 0))
+      .filter(chapterNo => Number.isFinite(chapterNo) && chapterNo > 0),
+  ])).sort((a, b) => a - b)
+  const riskActive = text(preflight.status) === 'warn'
+    || Number(preflight.risk_count || preflight.riskCount || 0) > 0
+    || selectedSamples.length > 0
+
+  if (!riskActive || affectedChapterNos.length === 0) {
+    return {
+      status: styleItems.length ? 'all_clear' : 'empty',
+      resolvedItems: styleItems,
+      blockedItems: [],
+      summary: `样章任务书复检通过 ${styleItems.length} 项，下一批任务书已避开风险样章。`,
+      riskyChapterNos: [],
+    }
+  }
+
+  const riskyChapterSet = new Set(affectedChapterNos)
+  const resolvedItems = styleItems.filter(item => {
+    const task = item?.task || item
+    const chapterNo = Number(task?.chapter_no || task?.chapterNo || 0)
+    return Number.isFinite(chapterNo) && chapterNo > 0 && !riskyChapterSet.has(chapterNo)
+  })
+  const blockedItems = styleItems.filter(item => !resolvedItems.includes(item))
+  return {
+    status: resolvedItems.length > 0 ? 'partial' : 'blocked',
+    resolvedItems,
+    blockedItems,
+    summary: `样章任务书复检通过 ${resolvedItems.length} 项，仍需重审 ${blockedItems.length} 项。`,
+    riskyChapterNos: affectedChapterNos,
+  }
+}
+
+function compactChapterNoEvidence(chapterNos: number[]) {
+  if (!chapterNos.length) return ''
+  const visibleNos = chapterNos.slice(0, 6).join('、')
+  return `第${visibleNos}${chapterNos.length > 6 ? `等${chapterNos.length}章` : '章'}`
+}
+
+function buildStyleSampleTaskBookRecoveryEvidence(runRecords: AnyRecord[]) {
+  const resolvedTasks = runRecords.flatMap(run => {
+    if (text(run?.run_type) !== 'longform_production_repair') return []
+    const input = parsePayload(run?.input_ref) || {}
+    const output = parsePayload(run?.output_ref) || {}
+    const source = firstText(input?.source, output?.report?.source)
+    if (source !== 'style_sample_batch_preflight') return []
+    return [
+      ...arrayValue(output?.tasks),
+      ...arrayValue(output?.repairTasks),
+    ].filter(task => text(task?.issue_type ?? task?.issueType) === 'style_sample_task_book_rebuild'
+      && isResolvedTaskStatus(task?.task_status ?? task?.status))
+  })
+  if (!resolvedTasks.length) return []
+  const chapterNos = Array.from(new Set(resolvedTasks
+    .map(task => Number(task?.chapter_no ?? task?.chapterNo ?? 0))
+    .filter(chapterNo => Number.isFinite(chapterNo) && chapterNo > 0)))
+    .sort((a, b) => a - b)
+  return [
+    `样章任务书复检通过 ${resolvedTasks.length} 项`,
+    chapterNos.length ? `${compactChapterNoEvidence(chapterNos)}样章已重审` : '',
+  ].filter(Boolean)
+}
+
+function buildStyleSampleBatchPreflightSignal(preflight: AnyRecord): AutoCreationBatchGuardrailSignal {
+  if (preflight.status === 'warn') {
+    return signal('风格样章预检', 'warn', preflight.summary)
+  }
+  return signal('风格样章预检', 'ok', preflight.summary || '下一批任务书没有选择风险样章。')
+}
+
 function emptyNextBatchBriefRecovery(): AutoCreationBatchBriefRecovery {
   return {
     visible: false,
@@ -4856,12 +5293,33 @@ function emptyNextBatchBriefRecovery(): AutoCreationBatchBriefRecovery {
   }
 }
 
+function buildNextBatchBriefRecoveryEvidence(args: {
+  status: AutoCreationBatchGuardrailStatus
+  safeChapterCount: number
+  nextBatchBrief: AutoCreationNextBatchBrief
+  batchBriefSignal: AutoCreationBatchGuardrailSignal
+  evidence?: string[]
+}) {
+  if (args.status !== 'ready' || args.safeChapterCount < 2 || args.batchBriefSignal.status !== 'ok') {
+    return []
+  }
+  return [
+    '批次任务书完整',
+    `安全批次 ${args.safeChapterCount} 章`,
+    args.nextBatchBrief.chapterRangeLabel,
+    args.nextBatchBrief.readerPayoffPlan ? '读者回报已明确' : '',
+    args.nextBatchBrief.mainlineFocus ? '主线焦点已明确' : '',
+    ...arrayValue(args.evidence),
+  ].filter(Boolean)
+}
+
 function buildNextBatchBriefRecovery(args: {
   status: AutoCreationBatchGuardrailStatus
   safeChapterCount: number
   nextBatchBrief: AutoCreationNextBatchBrief
   batchBriefSignal: AutoCreationBatchGuardrailSignal
   recommendedAction: AutoCreationDirectorAction
+  evidence?: string[]
 }): AutoCreationBatchBriefRecovery {
   if (args.status !== 'ready' || args.safeChapterCount < 2 || args.batchBriefSignal.status !== 'ok') {
     return emptyNextBatchBriefRecovery()
@@ -4871,13 +5329,7 @@ function buildNextBatchBriefRecovery(args: {
     title: '已恢复多章安全连写',
     summary: `${args.nextBatchBrief.chapterRangeLabel || `未来 ${args.safeChapterCount} 章`} 的批次目标、读者回报、主线推进和章末钩子已具备，可按护栏进入小批量生产。`,
     restoredChapterCount: args.safeChapterCount,
-    evidence: [
-      '批次任务书完整',
-      `安全批次 ${args.safeChapterCount} 章`,
-      args.nextBatchBrief.chapterRangeLabel,
-      args.nextBatchBrief.readerPayoffPlan ? '读者回报已明确' : '',
-      args.nextBatchBrief.mainlineFocus ? '主线焦点已明确' : '',
-    ].filter(Boolean),
+    evidence: buildNextBatchBriefRecoveryEvidence(args),
     action: args.recommendedAction,
   }
 }
@@ -4944,6 +5396,9 @@ function buildBatchPreflight(args: {
   storyState?: AnyRecord | null
   deliveryRiskCarryOver?: AnyRecord | null
   chapterHandoffContract?: AnyRecord | null
+  storylineDecisionGate: AutoCreationStorylineDecisionGate
+  styleSampleBatchPreflight?: AnyRecord | null
+  recoveryEvidence?: string[]
 }): AutoCreationBatchPreflight {
   const allowedChapterNos = args.releaseWindow.allowedChapters.map(chapter => Number(chapter.chapterNo || 0)).filter(Boolean)
   const blockedChapterNos = args.releaseWindow.blockedChapters.map(chapter => Number(chapter.chapterNo || 0)).filter(Boolean)
@@ -4960,6 +5415,13 @@ function buildBatchPreflight(args: {
       ? `本批只放行 ${allowedChapterNos.length || args.safeChapterCount} 章，后续章节需要先处理黄色风险。`
       : '当前护栏未通过，不会启动安全连写。'
   const longformMemoryAnchor = buildLongformMemoryAnchor(args.storyState || {})
+  const storylineDecisionClosure = {
+    status: args.storylineDecisionGate.status === 'ok' ? 'ok' : 'blocked',
+    label: args.storylineDecisionGate.label,
+    open_count: args.storylineDecisionGate.openCount,
+    summary: args.storylineDecisionGate.summary,
+    tasks: args.storylineDecisionGate.taskTitles,
+  }
 
   return {
     visible,
@@ -4984,6 +5446,9 @@ function buildBatchPreflight(args: {
       guardrails: args.guardrails,
       model_pipeline: SAFE_BATCH_MODEL_PIPELINE,
       warnings,
+      ...(arrayValue(args.recoveryEvidence).length ? { recovery_evidence: arrayValue(args.recoveryEvidence) } : {}),
+      storyline_decision_closure: storylineDecisionClosure,
+      ...(args.styleSampleBatchPreflight?.visible ? { style_sample_batch_preflight: args.styleSampleBatchPreflight } : {}),
       ...(args.deliveryRiskCarryOver ? { delivery_risk_carry_over: args.deliveryRiskCarryOver } : {}),
       ...(args.chapterHandoffContract ? { chapter_handoff_contract: args.chapterHandoffContract } : {}),
       ...(longformMemoryAnchor ? { longform_memory_anchor: longformMemoryAnchor } : {}),
@@ -5000,8 +5465,12 @@ function buildBatchGuardrail(args: {
   mainAction: AutoCreationDirectorAction
   longformCapacity: AutoCreationLongformCapacity
   deliveryRiskGate: AutoCreationDeliveryRiskGate
+  storylineDecisionGate: AutoCreationStorylineDecisionGate
   chapterLaunchGate: AutoCreationChapterLaunchGate
   storyState?: AnyRecord | null
+  chapters?: AnyRecord[] | null
+  styleSampleEffectiveness?: AnyRecord | null
+  runRecords?: AnyRecord[] | null
 }): AutoCreationBatchGuardrail {
   const planning = args.planning
   const writing = args.writing
@@ -5187,11 +5656,20 @@ function buildBatchGuardrail(args: {
   const queueLimitedPreliminarySafeChapterCount = queueRelease.signal.status === 'block'
     ? 0
     : Math.min(preliminarySafeChapterCount, queueRelease.safeChapterCount)
-  const preliminaryNextBatchBrief = buildNextBatchBrief({ planning, writing, safeChapterCount: queueLimitedPreliminarySafeChapterCount })
+  const preliminaryNextBatchBrief = buildNextBatchBrief({
+    planning,
+    writing,
+    safeChapterCount: queueLimitedPreliminarySafeChapterCount,
+    chapters: args.chapters,
+  })
   const batchBriefSignal = buildNextBatchBriefSignal(preliminaryNextBatchBrief, queueLimitedPreliminarySafeChapterCount)
   const briefRepair = buildNextBatchBriefRepair(preliminaryNextBatchBrief, queueLimitedPreliminarySafeChapterCount, batchBriefSignal)
+  const styleSampleBatchPreflight = buildStyleSampleBatchPreflight(preliminaryNextBatchBrief, args.styleSampleEffectiveness)
+  const styleSampleBatchSignal = buildStyleSampleBatchPreflightSignal(styleSampleBatchPreflight)
+  const styleSampleRecoveryEvidence = buildStyleSampleTaskBookRecoveryEvidence(arrayValue(args.runRecords))
   guardrails.push(queueRelease.signal)
   guardrails.push(batchBriefSignal)
+  guardrails.push(styleSampleBatchSignal)
   guardrails.push(signal('每章交稿回填', 'ok', '连续生产仍按单章质检、修订、故事状态同步和资产发现逐章回填。'))
 
   const blocking = guardrails.find(item => item.status === 'block')
@@ -5208,6 +5686,14 @@ function buildBatchGuardrail(args: {
     })
   } else if (blocking?.label === '批次任务书' || warning?.label === '批次任务书') {
     recommendedAction = briefRepair.action
+  } else if (blocking?.label === '风格样章预检' || warning?.label === '风格样章预检') {
+    recommendedAction = opsAction(
+      'create_style_sample_batch_repair',
+      '生成样章任务书修复',
+      styleSampleBatchSignal.detail,
+      false,
+      styleSampleBatchPreflight,
+    )
   } else if (blocking?.label === '连载库存' || warning?.label === '连载库存') {
     recommendedAction = serialReleaseInventory.action
   } else if (blocking?.label === '本章开写门禁' || warning?.label === '本章开写门禁') {
@@ -5245,7 +5731,7 @@ function buildBatchGuardrail(args: {
       : queueLimitedPreliminarySafeChapterCount
   const nextBatchBrief = safeChapterCount === queueLimitedPreliminarySafeChapterCount
     ? preliminaryNextBatchBrief
-    : buildNextBatchBrief({ planning, writing, safeChapterCount })
+    : buildNextBatchBrief({ planning, writing, safeChapterCount, chapters: args.chapters })
   const releaseWindow = buildBatchReleaseWindow(nextBatchBrief, queueRelease)
   const deliveryRiskCarryOver = normalizeSafeBatchDeliveryRiskCarryOver(
     planningDesk?.episodePlan?.deliveryRiskCarryOver
@@ -5259,6 +5745,13 @@ function buildBatchGuardrail(args: {
     writing,
     Number(nextBatchBrief.chapters[0]?.chapterNo || 0) || null,
   )
+  const recoveryEvidence = buildNextBatchBriefRecoveryEvidence({
+    status,
+    safeChapterCount,
+    nextBatchBrief,
+    batchBriefSignal,
+    evidence: styleSampleRecoveryEvidence,
+  })
   const preflight = buildBatchPreflight({
     status,
     safeChapterCount,
@@ -5268,6 +5761,9 @@ function buildBatchGuardrail(args: {
     storyState: args.storyState || {},
     deliveryRiskCarryOver,
     chapterHandoffContract,
+    storylineDecisionGate: args.storylineDecisionGate,
+    styleSampleBatchPreflight,
+    recoveryEvidence,
   })
 
   if (status === 'ready') {
@@ -5291,6 +5787,7 @@ function buildBatchGuardrail(args: {
     nextBatchBrief,
     batchBriefSignal,
     recommendedAction,
+    evidence: styleSampleRecoveryEvidence,
   })
 
   return {
@@ -5557,6 +6054,7 @@ function buildBatchReviewQueue(args: {
   const total = Number(latest.output?.total ?? items.length)
   const safeLimit = Number(latest.input?.safety_limit || 0)
   const availableTotal = Number(latest.input?.available_total || 0)
+  const batchPreflight = latest.input?.batch_preflight || latest.input?.batchPreflight || null
   const hasFailure = failed > 0 || text(latest.run?.status) === 'warn'
   const delivered = items.filter(item => item.status === 'success' && item.delivered).length
   const allSuccessfulChaptersDelivered = !hasFailure && items.length > 0 && items
@@ -5575,6 +6073,7 @@ function buildBatchReviewQueue(args: {
     planning: args.planning,
     resolvedIssueKeys,
     nextBatchBrief: latest.input?.next_batch_brief || latest.input?.nextBatchBrief || null,
+    batchPreflight,
   })
   const hasDeliveredBatchRisk = allSuccessfulChaptersDelivered && riskRadar.status === 'warn'
   const status: AutoCreationBatchReviewStatus = hasFailure
@@ -5614,6 +6113,7 @@ function buildBatchReviewQueue(args: {
     items,
     riskRadar,
     nextAction,
+    releaseEvidence: batchReleaseEvidenceFromPreflight(batchPreflight),
   })
 
   return {
@@ -5675,7 +6175,10 @@ function reconcileBatchHandoffWithGuardrail(
   ].filter(Boolean)))
   const label = guardrail.recommendedAction.key === 'update_rolling_plan' ? '补下一批计划' : '处理下一批护栏'
   const riskLabels = batchGuardrailRiskLabels(guardrail)
-  const evidence = batchGuardrailEvidence(guardrail)
+  const evidence = Array.from(new Set([
+    ...arrayValue(queue.handoff.evidence).map(item => text(item)).filter(Boolean),
+    ...batchGuardrailEvidence(guardrail),
+  ]))
 
   return {
     ...queue,
@@ -5917,6 +6420,7 @@ function buildProductionLicense(args: {
   mainAction: AutoCreationDirectorAction
   dailyBattlePlan: AutoCreationDailyBattlePlan
   deliveryRiskGate: AutoCreationDeliveryRiskGate
+  storylineDecisionGate: AutoCreationStorylineDecisionGate
   batchReviewQueue: AutoCreationBatchReviewQueue
   batchGuardrail: AutoCreationBatchGuardrail
   chapterLaunchGate: AutoCreationChapterLaunchGate
@@ -5925,11 +6429,13 @@ function buildProductionLicense(args: {
   const currentStep = args.dailyBattlePlan.steps.find(step => step.key === args.dailyBattlePlan.currentStepKey)
     || args.dailyBattlePlan.steps[0]
   const hasOpenDeliveryRisk = args.deliveryRiskGate.status !== 'ok'
+  const hasOpenStorylineDecision = args.storylineDecisionGate.status !== 'ok'
   const hasOpenBatchRisk = hasBatchReviewRisk(args.batchReviewQueue)
   const serialReleaseIssue = serialReleaseInventoryIssue(args.batchGuardrail)
   const serialReleaseBlocked = serialReleaseIssue?.status === 'block'
   const hardBlocked = !args.hasModel
     || hasOpenDeliveryRisk
+    || hasOpenStorylineDecision
     || hasOpenBatchRisk
     || serialReleaseBlocked
     || args.chapterLaunchGate.status === 'blocked'
@@ -5938,6 +6444,7 @@ function buildProductionLicense(args: {
   const reasons = [
     !args.hasModel ? '未选择可用模型' : '',
     hasOpenDeliveryRisk ? args.deliveryRiskGate.summary : '',
+    hasOpenStorylineDecision ? args.storylineDecisionGate.summary : '',
     hasOpenBatchRisk ? args.batchReviewQueue.summary : '',
     serialReleaseBlocked ? serialReleaseIssue?.detail : '',
     args.chapterLaunchGate.status === 'blocked' ? args.chapterLaunchGate.summary : '',
@@ -5953,8 +6460,10 @@ function buildProductionLicense(args: {
       summary: reasons[0] || '当前存在未处理门禁，先完成总控台唯一下一步，再继续生成正文或安全连写。',
       safeChapterCount: 0,
       reasons,
-      badges: ['禁止连写', serialReleaseBlocked ? '发布窗口阻塞' : currentStep.label],
-      nextAction: serialReleaseBlocked ? args.batchGuardrail.recommendedAction : currentStep.action || args.mainAction,
+      badges: ['禁止连写', hasOpenStorylineDecision ? args.storylineDecisionGate.label : serialReleaseBlocked ? '发布窗口阻塞' : currentStep.label],
+      nextAction: hasOpenStorylineDecision
+        ? opsAction('open_task_center', '打开任务中心', args.storylineDecisionGate.summary)
+        : serialReleaseBlocked ? args.batchGuardrail.recommendedAction : currentStep.action || args.mainAction,
     }
   }
 
@@ -5965,7 +6474,7 @@ function buildProductionLicense(args: {
       modeLabel: '小批量连写',
       summary: `当前长线材料、交稿风险和下一批任务书已通过检查，可按安全连写放行 ${args.batchGuardrail.safeChapterCount} 章。`,
       safeChapterCount: args.batchGuardrail.safeChapterCount,
-      reasons: ['长线材料可用', '交稿风险已清', '下一批任务书可执行'],
+      reasons: ['长线材料可用', '交稿风险已清', '剧情线决策已闭环', '下一批任务书可执行'],
       badges: [`安全 ${args.batchGuardrail.safeChapterCount}章`, args.batchGuardrail.nextBatchBrief.chapterRangeLabel].filter(Boolean),
       nextAction: args.batchGuardrail.recommendedAction,
     }
@@ -6015,6 +6524,7 @@ function buildTodayCommandDeck(args: {
   creationContract: AutoCreationContractItem[]
   chapterLaunchGate: AutoCreationChapterLaunchGate
   deliveryRiskGate: AutoCreationDeliveryRiskGate
+  storylineDecisionGate: AutoCreationStorylineDecisionGate
   batchGuardrail: AutoCreationBatchGuardrail
   millionWordRunway: AutoCreationMillionWordRunway
 }): AutoCreationTodayCommandDeck {
@@ -6050,6 +6560,7 @@ function buildReleaseRationale(args: {
   dailyBattlePlan: AutoCreationDailyBattlePlan
   batchGuardrail: AutoCreationBatchGuardrail
   deliveryRiskGate: AutoCreationDeliveryRiskGate
+  storylineDecisionGate: AutoCreationStorylineDecisionGate
   millionWordRunway: AutoCreationMillionWordRunway
 }): AutoCreationReleaseRationale {
   const currentStep = args.dailyBattlePlan.steps.find(step => step.key === args.dailyBattlePlan.currentStepKey)
@@ -6098,13 +6609,15 @@ function buildReleaseRationale(args: {
     checks: Array.from(new Set([
       ...args.productionLicense.reasons,
       args.deliveryRiskGate.status !== 'ok' ? args.deliveryRiskGate.summary : '',
+      args.storylineDecisionGate.status !== 'ok' ? args.storylineDecisionGate.summary : '',
       args.millionWordRunway.status === 'blocked' ? args.millionWordRunway.summary : '',
       currentStep?.detail || '',
     ].filter(Boolean))).slice(0, 5),
     limits: [
       '禁止批量自动连写',
+      args.storylineDecisionGate.status !== 'ok' ? '剧情线决策未闭环' : '',
       '先完成总控台唯一下一步',
-    ],
+    ].filter(Boolean),
   }
 }
 
@@ -6160,6 +6673,7 @@ function buildTodayQualityGates(args: {
   creationContract: AutoCreationContractItem[]
   chapterLaunchGate: AutoCreationChapterLaunchGate
   deliveryRiskGate: AutoCreationDeliveryRiskGate
+  storylineDecisionGate: AutoCreationStorylineDecisionGate
   batchGuardrail: AutoCreationBatchGuardrail
   millionWordRunway: AutoCreationMillionWordRunway
 }): AutoCreationTodayQualityGate[] {
@@ -6172,6 +6686,7 @@ function buildTodayQualityGates(args: {
   const serialReleaseIssue = serialReleaseInventoryIssue(args.batchGuardrail)
   const serialRisk = mergeGateStatus(
     args.deliveryRiskGate.status === 'block' ? 'block' : args.deliveryRiskGate.status === 'warn' ? 'warn' : 'ok',
+    args.storylineDecisionGate.status,
     serialReleaseIssue?.status || 'ok',
     args.productionLicense.status === 'single_chapter' ? 'ok' : batchGateStatus(args.batchGuardrail.status),
     runwayGateStatus(args.millionWordRunway.status),
@@ -6215,6 +6730,7 @@ function buildTodayQualityGates(args: {
       detail: serialRisk === 'ok'
         ? '交稿风险已清，剧情线、剧情单元、百万字航线和连续生产护栏可控。'
         : firstText(
+          args.storylineDecisionGate.status !== 'ok' ? args.storylineDecisionGate.summary : '',
           args.deliveryRiskGate.status !== 'ok' ? args.deliveryRiskGate.summary : '',
           serialReleaseIssue?.detail,
           args.batchGuardrail.summary,
@@ -6865,6 +7381,7 @@ function buildSerialRiskQueue(args: {
   planning: PlanningWorkspaceModel
   writing: WritingCockpitModel
   deliveryRiskGate: AutoCreationDeliveryRiskGate
+  storylineDecisionGate: AutoCreationStorylineDecisionGate
   batchReviewQueue: AutoCreationBatchReviewQueue
 }): AutoCreationRiskQueueItem[] {
   const acceptance = args.writing.chapterAcceptanceDesk
@@ -6878,6 +7395,16 @@ function buildSerialRiskQueue(args: {
       status: args.deliveryRiskGate.highOpen > 0 ? 'block' : 'warn',
       detail: acceptance.deliveryRiskQueue?.priorityLabel || args.deliveryRiskGate.summary,
       action: opsAction('create_delivery_risk_repair', '生成风险修复任务', args.deliveryRiskGate.summary || '把交稿风险转成可执行修复任务。'),
+    })
+  }
+  if (args.storylineDecisionGate.openCount > 0) {
+    risks.push({
+      key: 'storyline_decisions',
+      label: args.storylineDecisionGate.label,
+      count: args.storylineDecisionGate.openCount,
+      status: 'block',
+      detail: args.storylineDecisionGate.summary,
+      action: opsAction('open_task_center', '打开任务中心', args.storylineDecisionGate.summary),
     })
   }
   const storylineCount = Number(args.planning.storylineBoard?.overdueCount || 0)
@@ -6922,8 +7449,8 @@ function buildSerialRiskQueue(args: {
       label: acceptance.assetIntake.label,
       count: acceptance.assetIntake.pendingCount,
       status: 'warn',
-      detail: '正文中新人物、物品、能力、势力、地点或伏笔需要作者确认入库。',
-      action: planningAction('open_story_assets', '进入资料设定页确认新资产候选。'),
+      detail: '正文中新人物、物品、能力、势力、地点或伏笔需要作者处置后才进入长期资产。',
+      action: planningAction('open_story_assets', '进入资料设定页处置新资产候选。'),
     })
   }
   if (args.batchReviewQueue.visible && ['warn', 'risk'].includes(args.batchReviewQueue.status)) {
@@ -6947,6 +7474,7 @@ function buildSerialCockpit(args: {
   creationContract: AutoCreationContractItem[]
   chapterLaunchGate: AutoCreationChapterLaunchGate
   deliveryRiskGate: AutoCreationDeliveryRiskGate
+  storylineDecisionGate: AutoCreationStorylineDecisionGate
   longformCompass: AutoCreationLongformCompass
   millionWordRunway: AutoCreationMillionWordRunway
   batchGuardrail: AutoCreationBatchGuardrail
@@ -6996,6 +7524,7 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
     runRecords,
     chapters: arrayValue(input.chapters),
   })
+  const storylineDecisionGate = buildStorylineDecisionGate(runRecords)
   let batchReviewQueue = buildBatchReviewQueue({
     runRecords,
     chapters: arrayValue(input.chapters),
@@ -7137,8 +7666,12 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
     mainAction,
     longformCapacity,
     deliveryRiskGate,
+    storylineDecisionGate,
     chapterLaunchGate,
     storyState: input.storyState || {},
+    chapters: arrayValue(input.chapters),
+    styleSampleEffectiveness: input.styleSampleEffectiveness || null,
+    runRecords,
   })
   batchReviewQueue = reconcileBatchHandoffWithGuardrail(batchReviewQueue, batchGuardrail)
   if (batchReviewQueue.handoff.status === 'prepare_next' && status === 'ready') {
@@ -7176,6 +7709,7 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
     mainAction,
     dailyBattlePlan,
     deliveryRiskGate,
+    storylineDecisionGate,
     batchReviewQueue,
     batchGuardrail,
     chapterLaunchGate,
@@ -7187,6 +7721,7 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
     creationContract,
     chapterLaunchGate,
     deliveryRiskGate,
+    storylineDecisionGate,
     batchGuardrail,
     millionWordRunway,
   })
@@ -7197,6 +7732,7 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
     creationContract,
     chapterLaunchGate,
     deliveryRiskGate,
+    storylineDecisionGate,
     longformCompass,
     millionWordRunway,
     batchGuardrail,
@@ -7266,6 +7802,7 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
     productionLicense,
     todayCommandDeck,
     serialCockpit,
+    storylineDecisionGate,
     millionWordRunway,
     writingQueueFocus,
     rollingScriptRoom,

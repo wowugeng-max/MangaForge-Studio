@@ -102,6 +102,62 @@ function textHash(value: string) {
   return createHash('sha256').update(value || '').digest('hex').slice(0, 16)
 }
 
+const STORYLINE_DIFF_DECISION_LABELS = {
+  revise_prose: '回修正文',
+  accept_as_plan: '接受为新计划',
+  false_positive: '标记误判',
+} as const
+
+type StorylineDiffDecision = keyof typeof STORYLINE_DIFF_DECISION_LABELS
+
+function compactAuditText(value: any, limit = 500) {
+  return String(value || '').replace(/\s+/g, ' ').trim().slice(0, limit)
+}
+
+export function buildStorylineDiffDecisionReviewPayload(input: any, now = new Date()) {
+  const decision = String(input?.decision || input?.recommendedDecision || '').trim() as StorylineDiffDecision
+  if (!decision || !STORYLINE_DIFF_DECISION_LABELS[decision]) {
+    throw new Error('unsupported storyline diff decision')
+  }
+  const decisionKey = compactAuditText(input?.decision_key || input?.decisionKey, 260)
+  if (!decisionKey) throw new Error('decision_key required')
+  const summary = compactAuditText(input?.summary, 500)
+  if (!summary) throw new Error('summary required')
+  const chapterNo = Number(input?.chapter_no ?? input?.chapterNo ?? 0) || null
+  const chapterId = Number(input?.chapter_id ?? input?.chapterId ?? 0) || null
+  const entityId = Number(input?.entity_id ?? input?.entityId ?? 0) || null
+  const entityName = compactAuditText(input?.entity_name || input?.entityName || '未命名剧情线', 120)
+  const riskLabel = compactAuditText(input?.risk_label || input?.riskLabel || input?.risk_type || input?.riskType, 80)
+  const decisionLabel = STORYLINE_DIFF_DECISION_LABELS[decision]
+  const issues = decision === 'revise_prose'
+    ? [`${chapterNo ? `第${chapterNo}章 ` : ''}${summary}`]
+    : []
+
+  return {
+    review_type: 'storyline_diff_decision',
+    status: decision === 'revise_prose' ? 'warn' : 'ok',
+    summary: `剧情线差异决策：${decisionLabel} · ${entityName}${chapterNo ? ` · 第${chapterNo}章` : ''}`,
+    issues,
+    payload: JSON.stringify({
+      source: 'storyline_diff_decision',
+      decision_key: decisionKey,
+      decision,
+      decision_label: decisionLabel,
+      chapter_no: chapterNo,
+      chapter_id: chapterId,
+      entity_id: entityId,
+      entity_name: entityName,
+      entity_type: compactAuditText(input?.entity_type || input?.entityType, 80),
+      risk_type: compactAuditText(input?.risk_type || input?.riskType, 80),
+      risk_label: riskLabel,
+      summary,
+      evidence: compactAuditText(input?.evidence, 800),
+      note: compactAuditText(input?.note, 500),
+      decided_at: now.toISOString(),
+    }),
+  }
+}
+
 function applySurgicalRevisionPatch(originalText: string, payload: any) {
   const fullText = firstPatchText(payload?.chapter_text, payload?.prose_chapters?.[0]?.chapter_text)
   if (fullText) {
@@ -1482,6 +1538,22 @@ function existingReviewAnnotationRepairKeys(runs: any[]) {
   return keys
 }
 
+function existingStorylineDiffDecisionTaskKeys(runs: any[]) {
+  const keys = new Set<string>()
+  for (const run of runs || []) {
+    if (run?.run_type !== 'longform_production_repair') continue
+    const payload = parseJsonLikePayload(run.output_ref) || {}
+    const tasks = Array.isArray(payload.tasks) ? payload.tasks : []
+    for (const task of tasks) {
+      if (task?.source !== 'storyline_diff_decision') continue
+      if (isResolvedTaskStatus(task?.task_status || task?.status)) continue
+      const key = String(task.decision_key || '').trim()
+      if (key) keys.add(key)
+    }
+  }
+  return keys
+}
+
 function annotationTaskTitle(annotation: any) {
   const chapterNo = Number(annotation.chapter_no || 0)
   const prefix = chapterNo > 0 ? `第${chapterNo}章` : '章节'
@@ -1540,6 +1612,82 @@ export function buildReviewAnnotationRepairTasks(annotations: any[], runs: any[]
     total_candidates: tasks.length,
     skipped_existing: skippedExisting,
     skipped_resolved: skippedResolved,
+  }
+}
+
+export function buildStorylineDiffDecisionRepairTasks(reviews: any[], runs: any[] = [], options: any = {}) {
+  const existingKeys = existingStorylineDiffDecisionTaskKeys(runs)
+  const tasks: any[] = []
+  let skippedExisting = 0
+  let skippedIgnored = 0
+  const limit = Math.max(1, Math.min(120, Number(options.limit || 60)))
+
+  for (const review of reviews || []) {
+    if (review?.review_type !== 'storyline_diff_decision') continue
+    const payload = parseJsonLikePayload(review.payload) || {}
+    const decision = String(payload.decision || '').trim()
+    const decisionKey = String(payload.decision_key || '').trim()
+    if (!decisionKey) continue
+    if (decision === 'false_positive') {
+      skippedIgnored += 1
+      continue
+    }
+    if (!['revise_prose', 'accept_as_plan'].includes(decision)) continue
+    if (existingKeys.has(decisionKey)) {
+      skippedExisting += 1
+      continue
+    }
+    const chapterNo = Number(payload.chapter_no || 0) || null
+    const entityName = compactAuditText(payload.entity_name || '未命名剧情线', 120)
+    const summary = compactAuditText(payload.summary || review.summary || '剧情线差异需要处理。', 500)
+    const isPlanSync = decision === 'accept_as_plan'
+    tasks.push({
+      task_type: isPlanSync ? 'repair_assets' : 'repair_quality',
+      issue_type: isPlanSync ? 'storyline_diff_accept_as_plan' : 'storyline_diff_revise_prose',
+      severity: isPlanSync ? 'medium' : 'high',
+      chapter_id: Number(payload.chapter_id || 0) || null,
+      chapter_no: chapterNo,
+      title: `${chapterNo ? `第${chapterNo}章` : '章节'}《${entityName}》${isPlanSync ? '同步计划' : '回修正文'}`,
+      message: summary,
+      action: isPlanSync
+        ? `接受为新计划：打开资料设定，把“${entityName}”的额外推进写入剧情线计划，并调整后续章节承接。`
+        : `回修正文：按已记录决策修订第${chapterNo || '-'}章，把“${entityName}”的计划推进写成可见行动、状态变化或结果回收。`,
+      acceptance_criteria: isPlanSync
+        ? [
+          '资料设定或大纲已纳入这次额外推进，并明确后续承接章节',
+          '重新运行剧情线同步复盘，确认该推进不再作为计划外风险出现',
+          '确认新计划不破坏全书核心承诺、禁揭边界和当前卷爆点节奏',
+        ]
+        : [
+          '修订后重新运行章节质量复检，质量分不低于78',
+          '修订后重新运行剧情线同步复盘，确认漏推或禁揭风险清零',
+          '重新同步故事状态，确认主线、伏笔和禁揭边界没有新增偏移',
+        ],
+      task_status: 'open',
+      source: 'storyline_diff_decision',
+      decision_key: decisionKey,
+      decision,
+      decision_label: payload.decision_label || (isPlanSync ? '接受为新计划' : '回修正文'),
+      entity_id: Number(payload.entity_id || 0) || null,
+      entity_name: entityName,
+      entity_type: compactAuditText(payload.entity_type, 80),
+      risk_type: compactAuditText(payload.risk_type, 80),
+      risk_label: compactAuditText(payload.risk_label, 80),
+      review_id: review.id || null,
+      created_from_decision_at: review.created_at || payload.decided_at || '',
+      payload,
+    })
+  }
+
+  tasks.sort((a, b) => (a.decision === 'revise_prose' ? 0 : 1) - (b.decision === 'revise_prose' ? 0 : 1)
+    || Number(a.chapter_no || 999999) - Number(b.chapter_no || 999999)
+    || String(b.created_from_decision_at || '').localeCompare(String(a.created_from_decision_at || '')))
+
+  return {
+    tasks: tasks.slice(0, limit),
+    total_candidates: tasks.length + skippedExisting,
+    skipped_existing: skippedExisting,
+    skipped_ignored: skippedIgnored,
   }
 }
 
@@ -1639,6 +1787,81 @@ export function registerNovelEditorRoutes(app: Express, ctx: EditorRoutesContext
         }),
       })
       res.json({ ok: true, status: saved })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.post('/api/novel/projects/:id/storyline-diff-decisions', async (req, res) => {
+    try {
+      const activeWorkspace = ctx.getWorkspace()
+      const project = await ctx.getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      let reviewPayload: ReturnType<typeof buildStorylineDiffDecisionReviewPayload>
+      try {
+        reviewPayload = buildStorylineDiffDecisionReviewPayload(req.body || {})
+      } catch (error: any) {
+        return res.status(400).json({ error: String(error?.message || error) })
+      }
+      const saved = await createNovelReview(activeWorkspace, {
+        project_id: project.id,
+        ...reviewPayload,
+      })
+      res.json({ ok: true, decision: saved })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.post('/api/novel/projects/:id/storyline-diff-decisions/repair-queue', async (req, res) => {
+    try {
+      const activeWorkspace = ctx.getWorkspace()
+      const project = await ctx.getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const [reviews, runs] = await Promise.all([
+        listNovelReviews(activeWorkspace, project.id),
+        listNovelRuns(activeWorkspace, project.id),
+      ])
+      const taskPayload = buildStorylineDiffDecisionRepairTasks(reviews, runs, { limit: req.body?.limit })
+      const tasks = taskPayload.tasks
+      const run = await appendNovelRun(activeWorkspace, {
+        project_id: project.id,
+        run_type: 'longform_production_repair',
+        step_name: `storyline-diff-decision-${tasks.length}`,
+        status: tasks.length ? 'ready' : 'success',
+        input_ref: JSON.stringify({
+          source: 'storyline_diff_decision',
+          total_candidates: taskPayload.total_candidates,
+          skipped_existing: taskPayload.skipped_existing,
+          skipped_ignored: taskPayload.skipped_ignored,
+        }),
+        output_ref: JSON.stringify({
+          report: {
+            source: 'storyline_diff_decision',
+            summary: tasks.length
+              ? `从剧情线差异决策生成 ${tasks.length} 项修复或计划同步任务。`
+              : '当前没有新的剧情线差异决策任务需要生成。',
+            status: tasks.length ? 'needs_repair' : 'clean',
+            task_count: tasks.length,
+            skipped_existing: taskPayload.skipped_existing,
+            skipped_ignored: taskPayload.skipped_ignored,
+          },
+          recommendations: [
+            '先处理回修正文任务，确认计划内剧情线在正文中兑现，再处理计划同步候选。',
+            '接受为新计划前必须确认不破坏全书核心承诺、当前卷爆点和禁揭边界。',
+          ],
+          tasks,
+        }),
+      })
+      const review = await createNovelReview(activeWorkspace, {
+        project_id: project.id,
+        review_type: 'longform_production_repair',
+        status: tasks.length ? 'warn' : 'ok',
+        summary: `剧情线决策任务：${tasks.length} 项`,
+        issues: tasks.slice(0, 30).map((task: any) => task.chapter_no ? `第${task.chapter_no}章 ${task.message}` : task.message),
+        payload: JSON.stringify({ run_id: run.id, source: 'storyline_diff_decision', tasks, skipped_existing: taskPayload.skipped_existing, skipped_ignored: taskPayload.skipped_ignored }),
+      })
+      res.json({ ok: true, run, review, ...taskPayload })
     } catch (error) {
       res.status(500).json({ error: String(error) })
     }

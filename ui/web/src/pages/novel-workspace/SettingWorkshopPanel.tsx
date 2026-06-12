@@ -134,6 +134,7 @@ export function SettingWorkshopPanel({
   const [usage, setUsage] = useState<any[]>([])
   const [discoveredAssets, setDiscoveredAssets] = useState<any[]>([])
   const [selectedDiscoveredAssetKeys, setSelectedDiscoveredAssetKeys] = useState<string[]>([])
+  const [assetDispositionDrafts, setAssetDispositionDrafts] = useState<Record<string, any>>({})
   const [pendingStateUpdates, setPendingStateUpdates] = useState<any[]>([])
   const [selectedStateUpdateKeys, setSelectedStateUpdateKeys] = useState<string[]>([])
   const [activeType, setActiveType] = useState('character')
@@ -161,11 +162,22 @@ export function SettingWorkshopPanel({
         .sort((a: any, b: any) => Date.parse(b.created_at || '') - Date.parse(a.created_at || ''))[0]
       const payload = parseReviewPayload(latestAssetReview)
       const appliedNames = new Set(Array.isArray(payload?.applied_asset_names) ? payload.applied_asset_names.map((item: any) => String(item || '').trim()) : [])
+      for (const review of reviews.filter((item: any) => item?.review_type === 'asset_intake_apply' && (!activeChapter?.id || reviewChapterId(item) === Number(activeChapter.id)))) {
+        const appliedPayload = parseReviewPayload(review)
+        for (const item of Array.isArray(appliedPayload?.created_settings) ? appliedPayload.created_settings : []) appliedNames.add(String(item?.payload_json?.original_name || item?.name || '').trim())
+        for (const item of Array.isArray(appliedPayload?.merged_assets) ? appliedPayload.merged_assets : []) appliedNames.add(String(item?.source_name || item?.name || '').trim())
+        for (const item of Array.isArray(appliedPayload?.cameo_assets) ? appliedPayload.cameo_assets : []) appliedNames.add(String(item?.name || '').trim())
+        for (const item of Array.isArray(appliedPayload?.skipped_existing) ? appliedPayload.skipped_existing : []) appliedNames.add(String(item?.name || '').trim())
+      }
       const candidates = (Array.isArray(payload?.discovered_assets) ? payload.discovered_assets : [])
         .filter((item: any) => item?.name && !appliedNames.has(String(item.name || '').trim()))
         .map((item: any, index: number) => ({ ...item, _key: discoveredAssetKey(item, index) }))
       setDiscoveredAssets(candidates)
       setSelectedDiscoveredAssetKeys(candidates.map((item: any) => item._key))
+      setAssetDispositionDrafts(prev => candidates.reduce((acc: Record<string, any>, item: any) => {
+        acc[item._key] = prev[item._key] || { disposition: 'confirm', target_name: item.name, merge_target_id: undefined }
+        return acc
+      }, {}))
     } catch {
       message.error('设定工坊加载失败')
     } finally {
@@ -202,6 +214,20 @@ export function SettingWorkshopPanel({
   const requiredCount = usage.filter(item => item.required && !item.forbidden).length
   const forbiddenCount = usage.filter(item => item.forbidden).length
   const stateUpdateKey = (item: any, index: number) => `${item.entity_id || item.name || 'setting'}-${index}`
+  const mergeTargetOptions = useMemo(() => settings.map(item => ({
+    value: Number(item.id),
+    label: `${typeLabel(item.entity_type)}｜${item.name}`,
+  })), [settings])
+
+  const updateAssetDispositionDraft = (key: string, patch: any) => {
+    setAssetDispositionDrafts(prev => ({
+      ...prev,
+      [key]: {
+        ...(prev[key] || {}),
+        ...patch,
+      },
+    }))
+  }
 
   const openEditor = (item?: any) => {
     const payload = item?.payload_json || {}
@@ -420,7 +446,18 @@ export function SettingWorkshopPanel({
 
   const applySelectedDiscoveredAssets = async () => {
     if (!activeChapter?.id) return message.warning('请先选择章节')
-    const assets = discoveredAssets.filter(item => selectedDiscoveredAssetKeys.includes(item._key))
+    const assets = discoveredAssets
+      .filter(item => selectedDiscoveredAssetKeys.includes(item._key))
+      .map(item => {
+        const draft = assetDispositionDrafts[item._key] || { disposition: 'confirm' }
+        const mergeTarget = settings.find(setting => Number(setting.id) === Number(draft.merge_target_id))
+        return {
+          ...item,
+          disposition: draft.disposition || 'confirm',
+          target_name: draft.disposition === 'rename' ? draft.target_name : mergeTarget?.name,
+          merge_target_id: draft.disposition === 'merge' ? draft.merge_target_id : undefined,
+        }
+      })
     if (assets.length === 0) return message.warning('请先选择要入库的新资产')
     setActionLoadingKey('apply_discovered_assets')
     try {
@@ -429,13 +466,16 @@ export function SettingWorkshopPanel({
         assets,
       })
       const total = Number(res.data?.created_settings?.length || 0)
-      message.success(`已确认入库 ${total} 个新资产`)
+      const merged = Number(res.data?.merged_assets?.length || 0)
+      const cameo = Number(res.data?.cameo_assets?.length || 0)
+      message.success(`已入库 ${total} 个，合并 ${merged} 个，标记过场 ${cameo} 个`)
       setDiscoveredAssets(prev => prev.filter(item => !selectedDiscoveredAssetKeys.includes(item._key)))
       setSelectedDiscoveredAssetKeys([])
+      setAssetDispositionDrafts(prev => Object.fromEntries(Object.entries(prev).filter(([key]) => !selectedDiscoveredAssetKeys.includes(key))))
       await load()
       onAssetsApplied?.()
     } catch {
-      message.error('新资产确认入库失败')
+      message.error('新资产候选处置失败')
     } finally {
       setActionLoadingKey('')
     }
@@ -503,16 +543,51 @@ export function SettingWorkshopPanel({
                     <Text style={{ fontSize: 12 }}>{item.summary || '暂无摘要'}</Text>
                     {item.evidence && <Text type="secondary" style={{ fontSize: 12 }}>证据：{displayValue(item.evidence).slice(0, 140)}</Text>}
                     {(item.constraints_json && Object.keys(item.constraints_json).length > 0) && <Text type="secondary" style={{ fontSize: 12 }}>约束：{displayValue(item.constraints_json).slice(0, 120)}</Text>}
+                    <Space size={6} wrap>
+                      <Select
+                        size="small"
+                        value={assetDispositionDrafts[item._key]?.disposition || 'confirm'}
+                        style={{ width: 116 }}
+                        options={[
+                          { value: 'confirm', label: '确认入库' },
+                          { value: 'rename', label: '改名入库' },
+                          { value: 'merge', label: '合并已有' },
+                          { value: 'cameo', label: '一次性过场' },
+                        ]}
+                        onChange={value => updateAssetDispositionDraft(item._key, { disposition: value, target_name: value === 'rename' ? (assetDispositionDrafts[item._key]?.target_name || item.name) : undefined })}
+                      />
+                      {(assetDispositionDrafts[item._key]?.disposition === 'rename') && (
+                        <Input
+                          size="small"
+                          value={assetDispositionDrafts[item._key]?.target_name || item.name}
+                          style={{ width: 180 }}
+                          placeholder="入库名称"
+                          onChange={event => updateAssetDispositionDraft(item._key, { disposition: 'rename', target_name: event.target.value })}
+                        />
+                      )}
+                      {(assetDispositionDrafts[item._key]?.disposition === 'merge') && (
+                        <Select
+                          size="small"
+                          showSearch
+                          value={assetDispositionDrafts[item._key]?.merge_target_id}
+                          style={{ width: 220 }}
+                          placeholder="选择已有资产"
+                          options={mergeTargetOptions}
+                          optionFilterProp="label"
+                          onChange={value => updateAssetDispositionDraft(item._key, { disposition: 'merge', merge_target_id: value })}
+                        />
+                      )}
+                    </Space>
                   </Space>
                 </Space>
               </List.Item>
             )}
           />
           <Space style={{ width: '100%', justifyContent: 'space-between', marginTop: 8 }}>
-            <Text type="secondary" style={{ fontSize: 12 }}>已选择 {selectedDiscoveredAssetKeys.length} 项，确认后会写入角色卡或设定工坊</Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>已选择 {selectedDiscoveredAssetKeys.length} 项，长期资产入库；误判同源合并；临时地点和过场元素只留审计。</Text>
             <Space size={6}>
-              <Button size="small" disabled={isActionBusy} onClick={() => { setDiscoveredAssets([]); setSelectedDiscoveredAssetKeys([]) }}>暂不处理</Button>
-              <Button size="small" type="primary" loading={isActionLoading('apply_discovered_assets')} disabled={disabledForAction('apply_discovered_assets')} onClick={applySelectedDiscoveredAssets}>确认入库</Button>
+              <Button size="small" disabled={isActionBusy} onClick={() => { setDiscoveredAssets([]); setSelectedDiscoveredAssetKeys([]); setAssetDispositionDrafts({}) }}>暂不处理</Button>
+              <Button size="small" type="primary" loading={isActionLoading('apply_discovered_assets')} disabled={disabledForAction('apply_discovered_assets')} onClick={applySelectedDiscoveredAssets}>执行处置</Button>
             </Space>
           </Space>
         </Card>

@@ -4062,6 +4062,14 @@ export function normalizeStyleSampleBank(rawBank: any[] = []) {
     const voiceRules = asArray(raw?.voice_rules || raw?.character_voice || raw?.voice)
       .map((item: any) => String(item || '').trim())
       .filter(Boolean)
+    const applicableScenes = Array.from(new Set(asArray(
+      raw?.applicable_scenes || raw?.applicableScenes || raw?.suitable_scenes || raw?.apply_to || raw?.适用场景,
+    ).map((item: any) => String(item || '').trim()).filter(Boolean)))
+    const avoidScenes = Array.from(new Set([
+      ...asArray(raw?.avoid_scenes || raw?.avoidScenes || raw?.unsuitable_scenes || raw?.not_for || raw?.不适用场景),
+      ...asArray(raw?.forbidden_scenes || raw?.禁用场景),
+    ].map((item: any) => String(item || '').trim()).filter(Boolean)))
+    const selectionReason = String(raw?.selection_reason || raw?.selectionReason || raw?.match_reason || raw?.命中理由 || '').trim()
     const abstractUsage = String(raw?.abstract_usage || raw?.usage || '').trim()
     const unsafeDirectPhrases = [
       ...asArray(raw?.unsafe_direct_phrases),
@@ -4070,6 +4078,9 @@ export function normalizeStyleSampleBank(rawBank: any[] = []) {
       raw?.direct_phrase,
       raw?.forbidden_phrase,
     ].map((item: any) => String(item || '').trim()).filter(Boolean)
+    const sourceChapterNo = Number(raw?.source_chapter_no ?? raw?.sourceChapterNo ?? 0) || null
+    const sourceChapterId = Number(raw?.source_chapter_id ?? raw?.sourceChapterId ?? 0) || null
+    const sourceQualityScore = Number(raw?.source_quality_score ?? raw?.sourceQualityScore ?? raw?.quality_score ?? 0)
 
     normalized.push({
       sample_key: sampleKey,
@@ -4083,8 +4094,14 @@ export function normalizeStyleSampleBank(rawBank: any[] = []) {
         '；只学习节奏、句式密度、对白比例和情绪转折，不学习具体桥段、设定和原句。',
       ].join('').replace(/；+/g, '；'),
       unsafe_direct_phrases: Array.from(new Set(unsafeDirectPhrases)),
+      applicable_scenes: applicableScenes,
+      avoid_scenes: avoidScenes,
+      ...(selectionReason ? { selection_reason: selectionReason } : {}),
       suitable_genres: asArray(raw?.suitable_genres || raw?.genres).map((item: any) => String(item || '').trim()).filter(Boolean),
       forbidden_scenes: asArray(raw?.forbidden_scenes || raw?.禁用场景).map((item: any) => String(item || '').trim()).filter(Boolean),
+      ...(sourceChapterNo ? { source_chapter_no: sourceChapterNo } : {}),
+      ...(sourceChapterId ? { source_chapter_id: sourceChapterId } : {}),
+      ...(Number.isFinite(sourceQualityScore) && sourceQualityScore > 0 ? { source_quality_score: sourceQualityScore } : {}),
     })
   }
   return normalized
@@ -4175,6 +4192,381 @@ function resolveChapterBenchmarkSampleBank(project: any, contextPackage: any = {
   ])
 }
 
+function buildStyleSampleSelectionSignals(contextPackage: any = {}) {
+  const target = contextPackage?.chapter_target || {}
+  const sceneCards = asArray(target.scene_cards || target.sceneCards || target.scenes)
+  const endingHook = String(target.ending_hook || target.endingHook || '').trim()
+  const text = [
+    target.title,
+    target.summary,
+    target.goal,
+    target.chapter_goal,
+    target.conflict,
+    endingHook,
+    ...sceneCards.flatMap((card: any) => [
+      card?.title,
+      card?.purpose,
+      card?.summary,
+      card?.conflict,
+      card?.reader_payoff,
+      card?.ending_hook_seed,
+    ]),
+  ].map(item => String(item || '')).join(' ')
+  const signals = new Set<string>()
+  if (/规则|危机|压迫|反打|反制|强敌|战斗|冲突|围堵|压制|破局/.test(text)) {
+    signals.add('规则压迫')
+    signals.add('高压反打')
+    signals.add('危机压迫')
+    signals.add('战斗反制')
+  }
+  if (/对白|交锋|试探|信息差|质问|谈判|阻止|争执|斗嘴/.test(text)) {
+    signals.add('对白交锋')
+    signals.add('信息差试探')
+    signals.add('关系变化')
+  }
+  if (/线索|揭秘|真相|秘密|身份|伏笔|令牌|证据/.test(text)) {
+    signals.add('线索揭秘')
+    signals.add('伏笔回收')
+    signals.add('新问题抛出')
+  }
+  if (/情感|告别|关系|和解|背叛|选择|代价/.test(text)) {
+    signals.add('情感爆点')
+    signals.add('重大情感告别')
+  }
+  if (/解释|背景|设定|铺垫|过场/.test(text)) {
+    signals.add('纯背景说明')
+    signals.add('低压日常过场')
+  }
+  if (endingHook) {
+    signals.add('章末追读钩子')
+    signals.add('新问题抛出')
+  }
+  return { text, signals }
+}
+
+function styleSampleEffectivenessRows(contextPackage: any = {}) {
+  const report = contextPackage?.style_sample_effectiveness
+    || contextPackage?.styleSampleEffectiveness
+    || contextPackage?.chapter_target?.style_sample_effectiveness
+    || contextPackage?.chapter_target?.styleSampleEffectiveness
+    || {}
+  return asArray(report?.samples || report?.items || report)
+}
+
+function styleSampleEffectivenessForSample(sample: any, contextPackage: any = {}) {
+  const key = String(sample?.sample_key || '').trim()
+  if (!key) return null
+  return styleSampleEffectivenessRows(contextPackage)
+    .find((item: any) => String(item?.sample_key || item?.sampleKey || '').trim() === key) || null
+}
+
+function styleSampleEffectivenessAdjustment(effectiveness: any) {
+  if (!effectiveness) return 0
+  const usage = Number(effectiveness.usage_count || effectiveness.usageCount || 0) || 0
+  if (usage <= 0) return 0
+  const hitRate = Number(effectiveness.hit_rate ?? effectiveness.hitRate ?? 0) || 0
+  const missedCount = Number(effectiveness.missed_count || effectiveness.missedCount || 0) || 0
+  const copyRiskCount = Number(effectiveness.copy_risk_count || effectiveness.copyRiskCount || 0) || 0
+  const averageStyleScore = Number(effectiveness.average_style_score || effectiveness.averageStyleScore || 0) || 0
+  const riskLabel = String(effectiveness.risk_label || effectiveness.riskLabel || '')
+  let adjustment = 0
+  if (hitRate >= 95) adjustment += 14
+  else if (hitRate >= 85) adjustment += 10
+  else if (hitRate >= 75) adjustment += 5
+  else if (hitRate > 0 && hitRate < 60) adjustment -= 12
+  if (riskLabel === '表现稳定') adjustment += 8
+  if (riskLabel === '需复盘') adjustment -= 14
+  adjustment -= Math.min(18, missedCount * 3)
+  adjustment -= Math.min(24, copyRiskCount * 12)
+  if (averageStyleScore >= 88) adjustment += 4
+  if (averageStyleScore > 0 && averageStyleScore < 70) adjustment -= 4
+  return adjustment
+}
+
+function styleSampleEffectivenessShouldAvoid(effectiveness: any) {
+  if (!effectiveness) return false
+  const usage = Number(effectiveness.usage_count || effectiveness.usageCount || 0) || 0
+  if (usage < 2) return false
+  const hitRate = Number(effectiveness.hit_rate ?? effectiveness.hitRate ?? 0) || 0
+  const missedCount = Number(effectiveness.missed_count || effectiveness.missedCount || 0) || 0
+  const copyRiskCount = Number(effectiveness.copy_risk_count || effectiveness.copyRiskCount || 0) || 0
+  const riskLabel = String(effectiveness.risk_label || effectiveness.riskLabel || '')
+  return copyRiskCount > 0 || missedCount >= 3 || riskLabel === '需复盘' || (hitRate > 0 && hitRate < 60)
+}
+
+function styleSampleEffectivenessReason(effectiveness: any) {
+  if (!effectiveness) return ''
+  const usage = Number(effectiveness.usage_count || effectiveness.usageCount || 0) || 0
+  if (usage <= 0) return ''
+  const hitRate = Number(effectiveness.hit_rate ?? effectiveness.hitRate ?? 0) || 0
+  const missedCount = Number(effectiveness.missed_count || effectiveness.missedCount || 0) || 0
+  const copyRiskCount = Number(effectiveness.copy_risk_count || effectiveness.copyRiskCount || 0) || 0
+  const riskLabel = String(effectiveness.risk_label || effectiveness.riskLabel || '')
+  return [
+    hitRate > 0 ? `历史命中率${hitRate}%` : '',
+    riskLabel,
+    missedCount > 0 ? `历史缺口${missedCount}` : '',
+    copyRiskCount > 0 ? `照搬风险${copyRiskCount}` : '',
+  ].filter(Boolean).join('；')
+}
+
+function latestStyleSelectionReviewPayload(reviews: any[] = [], chapter: any, reviewType: string, payloadKey = '') {
+  const chapterId = Number(chapter?.id || 0)
+  const chapterNo = Number(chapter?.chapter_no || 0)
+  const review = asArray(reviews)
+    .filter((item: any) => item?.review_type === reviewType)
+    .filter((item: any) => {
+      const payload = parseJsonLikePayload(item?.payload) || {}
+      return Number(item?.chapter_id || 0) === chapterId
+        || Number(payload?.chapter_id || payload?.chapterId || 0) === chapterId
+        || Number(payload?.chapter_no || payload?.chapterNo || 0) === chapterNo
+    })
+    .slice()
+    .sort((a: any, b: any) => String(b.created_at || '').localeCompare(String(a.created_at || '')))[0]
+  const payload = parseJsonLikePayload(review?.payload) || {}
+  return payloadKey ? (payload[payloadKey] || payload?.result?.[payloadKey] || payload) : payload
+}
+
+function styleSelectionChapterQualityScore(chapter: any, reviews: any[] = []) {
+  const payload = latestStyleSelectionReviewPayload(reviews, chapter, 'prose_quality')
+  const score = Number(payload?.self_check?.review?.score ?? payload?.review?.score ?? payload?.score ?? 0)
+  return Number.isFinite(score) ? score : 0
+}
+
+function styleSelectionChapterStrategy(chapter: any) {
+  return chapter?.raw_payload?.pre_draft_brief?.style_sample_strategy
+    || chapter?.raw_payload?.context_package?.pre_draft_brief?.style_sample_strategy
+    || chapter?.raw_payload?.context_package?.chapter_target?.style_sample_strategy
+    || {}
+}
+
+function styleSelectionItemSampleKey(item: any) {
+  return String(item?.sample_key || item?.sampleKey || item?.key || '').trim()
+}
+
+function styleSelectionRoundAverage(values: number[]) {
+  const valid = values.filter(value => Number.isFinite(value) && value > 0)
+  if (!valid.length) return 0
+  return Math.round(valid.reduce((sum, value) => sum + value, 0) / valid.length)
+}
+
+export function buildStyleSampleEffectivenessForSelection(styleSampleBank: any[] = [], chapters: any[] = [], reviews: any[] = []) {
+  const rows = new Map<string, any>()
+  const ensureRow = (sample: any) => {
+    const key = String(sample?.sample_key || '').trim()
+    if (!key) return null
+    if (!rows.has(key)) {
+      rows.set(key, {
+        sample_key: key,
+        usage_count: 0,
+        style_scores: [],
+        quality_scores: [],
+        planned_count: 0,
+        delivered_count: 0,
+        missed_count: 0,
+        copy_risk_count: 0,
+      })
+    }
+    return rows.get(key)
+  }
+
+  normalizeStyleSampleBank(styleSampleBank).forEach(ensureRow)
+
+  for (const chapter of asArray(chapters)) {
+    const strategy = styleSelectionChapterStrategy(chapter)
+    const samples = normalizeStyleSampleBank(strategy?.samples || strategy?.style_sample_bank || [])
+    if (!samples.length) continue
+    const syncPayload = latestStyleSelectionReviewPayload(reviews, chapter, 'style_sample_sync', 'style_sample_sync')
+    const sync = syncPayload?.style_sample_sync || syncPayload || {}
+    const styleScore = Number(sync?.score || 0)
+    const qualityScore = styleSelectionChapterQualityScore(chapter, reviews)
+    const copyRiskItems = asArray(sync?.copied_phrases || sync?.copiedPhrases)
+    const planned = asArray(sync?.planned)
+    const delivered = asArray(sync?.delivered)
+    const missed = asArray(sync?.missed)
+
+    for (const sample of samples) {
+      const row = ensureRow(sample)
+      if (!row) continue
+      const key = row.sample_key
+      const plannedForSample = planned.filter((item: any) => styleSelectionItemSampleKey(item) === key).length
+      const deliveredForSample = delivered.filter((item: any) => styleSelectionItemSampleKey(item) === key).length
+      const missedForSample = missed.filter((item: any) => styleSelectionItemSampleKey(item) === key).length
+
+      row.usage_count += 1
+      if (styleScore > 0) row.style_scores.push(styleScore)
+      if (qualityScore > 0) row.quality_scores.push(qualityScore)
+      row.planned_count += plannedForSample
+      row.delivered_count += deliveredForSample
+      row.missed_count += missedForSample
+      row.copy_risk_count += missedForSample > 0 ? copyRiskItems.length : 0
+    }
+  }
+
+  const samples = Array.from(rows.values()).map(row => {
+    const hitRate = row.planned_count > 0 ? Math.round((row.delivered_count / row.planned_count) * 100) : 0
+    const riskLabel = row.usage_count === 0
+      ? '待验证'
+      : row.copy_risk_count > 0 || row.missed_count > 0 || (row.planned_count > 0 && hitRate < 80)
+        ? '需复盘'
+        : '表现稳定'
+    return {
+      sample_key: row.sample_key,
+      usage_count: row.usage_count,
+      hit_rate: hitRate,
+      missed_count: row.missed_count,
+      copy_risk_count: row.copy_risk_count,
+      average_style_score: styleSelectionRoundAverage(row.style_scores),
+      average_quality_score: styleSelectionRoundAverage(row.quality_scores),
+      risk_label: riskLabel,
+    }
+  })
+
+  return {
+    total_samples: samples.length,
+    used_sample_count: samples.filter((item: any) => item.usage_count > 0).length,
+    risky_sample_count: samples.filter((item: any) => item.risk_label === '需复盘').length,
+    samples,
+  }
+}
+
+function styleSampleSceneScore(sample: any, contextPackage: any = {}, index = 0) {
+  const { text, signals } = buildStyleSampleSelectionSignals(contextPackage)
+  const effectiveness = styleSampleEffectivenessForSample(sample, contextPackage)
+  const applicableScenes = asArray(sample?.applicable_scenes)
+    .map((item: any) => String(item || '').trim())
+    .filter(Boolean)
+  const avoidScenes = asArray(sample?.avoid_scenes || sample?.forbidden_scenes)
+    .map((item: any) => String(item || '').trim())
+    .filter(Boolean)
+  let score = 0
+  const matchedApplicable: string[] = []
+  const matchedSignals: string[] = []
+  for (const scene of applicableScenes) {
+    if (signals.has(scene) || (scene.length >= 2 && text.includes(scene))) {
+      score += 12
+      matchedApplicable.push(scene)
+    }
+  }
+  for (const scene of avoidScenes) {
+    if (signals.has(scene) || (scene.length >= 2 && text.includes(scene))) score -= 20
+  }
+  const sampleText = [
+    sample?.sample_key,
+    sample?.scene_function,
+    sample?.narrative_rhythm,
+    sample?.abstract_usage,
+  ].map(item => String(item || '')).join(' ')
+  if (/规则|危机|压迫|反打|反制|强敌|战斗|冲突|围堵|压制|破局/.test(text) && /规则|危机|压迫|反打|反制|战斗/.test(sampleText)) score += 10
+  if (/对白|交锋|试探|信息差|质问|谈判|阻止|争执|斗嘴/.test(text) && /对白|交锋|试探|信息差|关系/.test(sampleText)) score += 6
+  if (String(contextPackage?.chapter_target?.ending_hook || contextPackage?.chapter_target?.endingHook || '').trim() && /章末|追读|钩子|新问题|危险/.test(sampleText)) score += 4
+  for (const signal of signals) {
+    if (signal.length >= 2 && sampleText.includes(signal)) {
+      score += 4
+      matchedSignals.push(signal)
+    }
+  }
+  score += styleSampleEffectivenessAdjustment(effectiveness)
+  if (!applicableScenes.length) score += 1
+  const hitScenes = Array.from(new Set([...matchedApplicable, ...matchedSignals])).slice(0, 3)
+  const effectivenessReason = styleSampleEffectivenessReason(effectiveness)
+  const reasonParts = [
+    hitScenes.length > 0 ? `命中${hitScenes.join('、')}` : '',
+    avoidScenes.length > 0 ? `避开${avoidScenes.slice(0, 3).join('、')}` : '',
+    effectivenessReason,
+  ].filter(Boolean)
+  const selectionReason = reasonParts.length > 0 ? `${reasonParts.join('；')}。` : '保留为通用风格策略。'
+  return { sample, score, index, selectionReason, effectiveness, avoidByEffectiveness: styleSampleEffectivenessShouldAvoid(effectiveness) }
+}
+
+function selectStyleSamplesForChapter(samples: any[] = [], contextPackage: any = {}, options: any = {}) {
+  const excludeKeys = new Set(asArray(options?.exclude_keys || options?.excludeKeys)
+    .map((item: any) => String(item || '').trim())
+    .filter(Boolean))
+  const ranked = samples
+    .filter(sample => !excludeKeys.has(String(sample?.sample_key || '').trim()))
+    .map((sample, index) => styleSampleSceneScore(sample, contextPackage, index))
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+  const positive = ranked.filter(item => item.score > 0)
+  const preferred = positive.filter(item => !item.avoidByEffectiveness)
+  const fallback = ranked.filter(item => item.score >= 0)
+  const selected = preferred.length ? preferred.slice(0, 3) : (positive.length ? positive.slice(0, 3) : fallback.slice(0, 3))
+  return selected.map(item => ({
+    ...item.sample,
+    selection_reason: item.selectionReason,
+  }))
+}
+
+function styleSampleStrategyCopyGuards(strategy: any = {}, samples: any[] = []) {
+  return Array.from(new Set([
+    ...asArray(strategy?.do_not_copy || strategy?.copy_guard || strategy?.forbidden_copy),
+    ...samples.flatMap((sample: any) => asArray(sample?.unsafe_direct_phrases)),
+    '只学习叙述节奏、句式密度、对白比例和情绪转折',
+    '原句不能照搬',
+    '不得复制样章桥段、专有设定、角色名和核心梗',
+  ].map((item: any) => String(item || '').trim()).filter(Boolean)))
+}
+
+export function applyStyleSampleStrategyAuthorAction(project: any, contextPackage: any = {}, currentStrategy: any = {}, request: any = {}) {
+  const action = String(request?.action || 'lock').trim() || 'lock'
+  const now = String(request?.now || new Date().toISOString())
+  const currentSamples = normalizeStyleSampleBank(currentStrategy?.samples || currentStrategy?.style_sample_bank || [])
+  const currentKeys = currentSamples.map((sample: any) => String(sample?.sample_key || '').trim()).filter(Boolean)
+  const currentRound = Number(currentStrategy?.selection_round || currentStrategy?.selectionRound || 0) || 0
+
+  if (action === 'disable' || action === 'clear') {
+    return {
+      ...(currentStrategy || {}),
+      enabled: false,
+      samples: [],
+      apply_to: [],
+      do_not_copy: styleSampleStrategyCopyGuards(currentStrategy, []),
+      locked: true,
+      selection_mode: 'disabled_by_author',
+      author_locked_at: now,
+      selection_note: '作者确认本章不用风格样章，正文只执行任务书、场景卡和写作圣经。',
+    }
+  }
+
+  if (action === 'lock') {
+    return {
+      ...(currentStrategy || {}),
+      enabled: currentSamples.length > 0,
+      samples: currentSamples,
+      do_not_copy: styleSampleStrategyCopyGuards(currentStrategy, currentSamples),
+      locked: true,
+      selection_mode: 'author_locked',
+      author_locked_at: now,
+      selection_note: '作者已确认本章使用这组风格样章策略。',
+    }
+  }
+
+  const requestedKeys = asArray(request?.sample_keys || request?.sampleKeys)
+    .map((item: any) => String(item || '').trim())
+    .filter(Boolean)
+  const bank = resolveStyleSampleBank(project, contextPackage)
+  const bankByKey = new Map(bank.map((sample: any) => [String(sample?.sample_key || '').trim(), sample]))
+  const selected = requestedKeys.length > 0
+    ? requestedKeys.map((key: string) => bankByKey.get(key)).filter(Boolean)
+    : selectStyleSamplesForChapter(bank, contextPackage, { excludeKeys: currentKeys })
+  const nextSamples = selected.length > 0 ? selected : currentSamples
+
+  return {
+    ...(currentStrategy || {}),
+    enabled: nextSamples.length > 0,
+    samples: nextSamples,
+    apply_to: nextSamples.length > 0 ? ['开篇钩子', '高压冲突', '对白推进', '章末钩子'] : [],
+    do_not_copy: styleSampleStrategyCopyGuards(currentStrategy, nextSamples),
+    locked: false,
+    selection_mode: 'author_replaced',
+    selection_round: currentRound + 1,
+    author_updated_at: now,
+    selection_note: selected.length > 0
+      ? '作者已替换本章风格样章策略，生成前需要重新确认任务书。'
+      : '暂无可替换的风格样章，暂时保留当前策略。',
+  }
+}
+
 function buildMemeStrategy(project: any, contextPackage: any = {}) {
   const explicit = contextPackage?.chapter_target?.meme_strategy || contextPackage?.pre_draft_brief?.meme_strategy || null
   if (explicit && typeof explicit === 'object') {
@@ -4221,7 +4613,7 @@ function buildStyleSampleStrategy(project: any, contextPackage: any = {}) {
     }
   }
 
-  const samples = resolveStyleSampleBank(project, contextPackage).slice(0, 8)
+  const samples = selectStyleSamplesForChapter(resolveStyleSampleBank(project, contextPackage), contextPackage)
   return {
     enabled: samples.length > 0,
     samples,
@@ -5236,7 +5628,7 @@ export function createNovelWritingService(ctx: {
       '9. 只能学习参考作品的节奏、结构、爽点安排和信息密度；不得复制具体桥段、专有设定、原句、角色名和核心梗。',
       '10. 执行 setting_context：required 设定必须在正文中落地；forbidden 设定不得泄漏；ability_beats 必须写清代价/限制；item_beats 必须符合物品归属和位置；boss_move 必须符合 Boss 行动逻辑；rule_trigger 必须写出触发条件、代价和后果；角色只能知道 knowledge_scope 允许的信息。',
       '11. 执行 chapter_target.meme_strategy：网感只作为吐槽节奏、情绪共鸣、角色口吻或传播点；死亡、高压恐怖和关键情绪爆点处不得玩梗；不得直接复刻 meme_bank 的 unsafe_direct_phrases。',
-      '12. 执行 chapter_target.style_sample_strategy：只学习叙述节奏、句式密度、对白比例和情绪转折；do_not_copy 与 unsafe_direct_phrases 中的原句不能照搬。',
+      '12. 执行 chapter_target.style_sample_strategy：按 applicable_scenes / avoid_scenes 选择样章策略；只学习叙述节奏、句式密度、对白比例和情绪转折；do_not_copy 与 unsafe_direct_phrases 中的原句不能照搬。',
       '12A. 执行 chapter_target.chapter_benchmark_strategy：只学习开篇钩子、场景节拍、冲突升级、爽点兑现、对白推进、场面可视化和章末追读结构；不得复制样例桥段、角色名、专有设定和原句。',
       '13. 执行长篇作品罗盘：读者承诺、核心矛盾、创新卖点、长期爽点循环和结局方向不得漂移；新增人物、物品、支线或地图必须落在可调整区内。',
       '13A. 执行 chapter_target.chapter_launch_gate：读者承诺、本章目标、核心冲突、主线服务、读者回报、章末钩子必须在正文中可见落地；如果门禁信号为 warn/block，不得忽略，必须优先补成可见事件、选择、冲突结果或章末问题。',
@@ -5721,6 +6113,7 @@ export function createNovelWritingService(ctx: {
     const writingBible = project.reference_config?.writing_bible || buildWritingBible(project, worldbuilding, characters, outlines, reviews)
     const memeBank = resolveMemeBank(project, { writing_bible: writingBible })
     const styleSampleBank = resolveStyleSampleBank(project, { writing_bible: writingBible })
+    const styleSampleEffectiveness = buildStyleSampleEffectivenessForSelection(styleSampleBank, sorted, reviews)
     const first30RetentionContext = buildFirst30RetentionContext(chapter, reviews)
     const readerExpectationDebtContext = buildReaderExpectationDebtContext(chapter, sorted, reviews)
     const deliveryRiskCarryOverContext = buildDeliveryRiskCarryOverContext(chapter, sorted, reviews)
@@ -5880,7 +6273,13 @@ export function createNovelWritingService(ctx: {
         scene_cards: sceneCards,
         word_target: wordTarget,
         meme_strategy: buildMemeStrategy(project, { writing_bible: writingBible, chapter_target: chapter.raw_payload?.pre_draft_brief ? { meme_strategy: chapter.raw_payload.pre_draft_brief.meme_strategy } : {} }),
-        style_sample_strategy: buildStyleSampleStrategy(project, { writing_bible: writingBible, chapter_target: chapter.raw_payload?.pre_draft_brief ? { style_sample_strategy: chapter.raw_payload.pre_draft_brief.style_sample_strategy } : {} }),
+        style_sample_strategy: buildStyleSampleStrategy(project, {
+          writing_bible: writingBible,
+          style_sample_effectiveness: styleSampleEffectiveness,
+          chapter_target: chapter.raw_payload?.pre_draft_brief
+            ? { style_sample_strategy: chapter.raw_payload.pre_draft_brief.style_sample_strategy }
+            : {},
+        }),
         chapter_benchmark_strategy: buildChapterBenchmarkStrategy(project, { writing_bible: writingBible, chapter_target: chapter.raw_payload?.pre_draft_brief ? { chapter_benchmark_strategy: chapter.raw_payload.pre_draft_brief.chapter_benchmark_strategy } : {} }),
         first30_retention_brief: chapter.raw_payload?.pre_draft_brief?.first30_retention_brief || first30RetentionContext,
         story_unit_context: chapter.raw_payload?.pre_draft_brief?.story_unit_context || storyUnitContext,
@@ -5941,6 +6340,7 @@ export function createNovelWritingService(ctx: {
       longform_memory_capsule: longformMemoryCapsule,
       meme_bank: memeBank,
       style_sample_bank: styleSampleBank,
+      style_sample_effectiveness: styleSampleEffectiveness,
       first30_retention_context: first30RetentionContext,
       reader_expectation_debt_context: readerExpectationDebtContext,
       delivery_risk_carry_over: deliveryRiskCarryOverContext,
