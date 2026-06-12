@@ -5,6 +5,7 @@ import {
 import {
   ArrowLeftOutlined,
   BookOutlined,
+  BulbOutlined,
   ClockCircleOutlined,
   ControlOutlined,
   DatabaseOutlined,
@@ -21,6 +22,7 @@ import apiClient from '../api/client'
 import { createSSEClient, generateClientId, type SSEMessage } from '../utils/sse'
 import { AutoCreationDirectorWorkspace } from './novel-workspace/AutoCreationDirectorWorkspace'
 import { ChapterDirectorySidebar } from './novel-workspace/ChapterDirectorySidebar'
+import { CreativeAssistantPanel } from './novel-workspace/CreativeAssistantPanel'
 import type { EditorKind } from './novel-workspace/EditorModal'
 import { ReferencePanel } from './novel-workspace/ReferencePanel'
 import { StoryAssetsWorkspace } from './novel-workspace/StoryAssetsWorkspace'
@@ -44,6 +46,12 @@ import {
   selectTargetChapterForWriting,
   type WritingCockpitActionKey,
 } from './novel-workspace/writingCockpitModel'
+import {
+  normalizeCreativeAssistPayload,
+  type CreativeAssistCard,
+  type CreativeAssistResult,
+  type CreativeAssistantModeKey,
+} from './novel-workspace/creativeAssistantModel'
 import { useChapterAutosave } from './novel-workspace/useChapterAutosave'
 import { useChapterVersions } from './novel-workspace/useChapterVersions'
 import { useNovelWorkspaceData, type ChapterSortMode, type ChapterStatusFilter } from './novel-workspace/useNovelWorkspaceData'
@@ -127,6 +135,12 @@ export default function NovelProjectWorkspace() {
   const [creativeCommandOpen, setCreativeCommandOpen] = useState(false)
   const [creativeCommandText, setCreativeCommandText] = useState('')
   const [creativeCommandPlan, setCreativeCommandPlan] = useState<any | null>(null)
+  const [creativeAssistantOpen, setCreativeAssistantOpen] = useState(false)
+  const [creativeAssistantMode, setCreativeAssistantMode] = useState<CreativeAssistantModeKey>('prose_review')
+  const [creativeAssistantLoading, setCreativeAssistantLoading] = useState(false)
+  const [creativeAssistantResult, setCreativeAssistantResult] = useState<CreativeAssistResult | null>(null)
+  const [creativeAssistantError, setCreativeAssistantError] = useState('')
+  const [creativeAssistantSelectedText, setCreativeAssistantSelectedText] = useState('')
   const [backupImportOpen, setBackupImportOpen] = useState(false)
   const [backupImportText, setBackupImportText] = useState('')
   const [chapterGroupExecutingId, setChapterGroupExecutingId] = useState<number | null>(null)
@@ -4422,6 +4436,51 @@ export default function NovelProjectWorkspace() {
     }
   }
 
+  const openCreativeAssistant = () => {
+    const selection = typeof window !== 'undefined' ? window.getSelection()?.toString() || '' : ''
+    setCreativeAssistantSelectedText(selection.trim())
+    setCreativeAssistantOpen(true)
+  }
+
+  const copyCreativeAssistantCard = async (card: CreativeAssistCard) => {
+    const content = [
+      card.title,
+      card.intent ? `目的：${card.intent}` : '',
+      card.reason ? `依据：${card.reason}` : '',
+      card.suggestion ? `建议：${card.suggestion}` : '',
+      card.risk ? `风险：${card.risk}` : '',
+    ].filter(Boolean).join('\n')
+    try {
+      await navigator.clipboard?.writeText(content)
+      message.success('建议卡已复制')
+    } catch {
+      message.info(content)
+    }
+  }
+
+  const runCreativeAssistant = async (input: { mode: CreativeAssistantModeKey; question: string; researchQuery: string }) => {
+    setCreativeAssistantLoading(true)
+    setCreativeAssistantError('')
+    try {
+      const res = await apiClient.post(`/novel/projects/${projectId}/creative-assist`, {
+        mode: input.mode,
+        chapter_id: activeChapter?.id,
+        selected_text: creativeAssistantSelectedText,
+        question: input.question,
+        research_query: input.researchQuery,
+        model_id: selectedModelId,
+        save: true,
+      })
+      setCreativeAssistantResult(normalizeCreativeAssistPayload(res.data?.assist || res.data))
+      if (res.data?.review) await loadProjectModules()
+      message.success('创作参谋建议已生成')
+    } catch (error: any) {
+      setCreativeAssistantError(error?.response?.data?.error || error?.message || '创作参谋调用失败')
+    } finally {
+      setCreativeAssistantLoading(false)
+    }
+  }
+
   const openRunQueue = async () => {
     await runCommercialTool('queue', '后台任务队列', async () => {
       const res = await apiClient.get(`/novel/projects/${projectId}/run-queue`)
@@ -5587,6 +5646,16 @@ export default function NovelProjectWorkspace() {
             </Tooltip>
           )}
         </Space>
+        <Tooltip title="打开当前节点的创作参谋建议">
+          <Button
+            type="text"
+            size="small"
+            icon={<BulbOutlined />}
+            onClick={openCreativeAssistant}
+          >
+            创作参谋
+          </Button>
+        </Tooltip>
         {workspaceArea === 'chapterWriting' && (
           <Button
             className="novel-workspace-focus-toggle"
@@ -5709,6 +5778,23 @@ export default function NovelProjectWorkspace() {
           />
         </div>
       </div>
+
+      <CreativeAssistantPanel
+        open={creativeAssistantOpen}
+        loading={creativeAssistantLoading}
+        mode={creativeAssistantMode}
+        result={creativeAssistantResult}
+        project={selectedProject}
+        activeChapter={activeChapter}
+        selectedText={creativeAssistantSelectedText}
+        contextPackage={activeContextPackageData}
+        reviews={reviews}
+        error={creativeAssistantError}
+        onClose={() => setCreativeAssistantOpen(false)}
+        onModeChange={setCreativeAssistantMode}
+        onRun={runCreativeAssistant}
+        onCopyCard={copyCreativeAssistantCard}
+      />
 
       <DeferredWorkspaceSurfaces>
         <EditorModal

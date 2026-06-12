@@ -1,0 +1,65 @@
+.creative-assistant-panel .ant-drawer-body {
+  padding: 14px;
+  background: #f7f9fc;
+}
+
+.creative-assistant-context {
+  min-height: 28px;
+}
+
+.creative-assistant-modes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.creative-assistant-modes .ant-btn {
+  min-width: 0;
+  justify-content: flex-start;
+}
+
+.creative-assistant-prompt {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.creative-assistant-research-input {
+  margin-top: 2px;
+}
+
+.creative-assistant-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.creative-assistant-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 12px;
+  background: #fff;
+}
+
+.creative-assistant-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-bottom: 8px;
+}
+
+.creative-assistant-card-head .ant-typography {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.creative-assistant-card-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
