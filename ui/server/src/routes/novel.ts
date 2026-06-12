@@ -4,6 +4,7 @@ import { registerNovelAgentExecutionRoutes } from './novel-agent-execution-route
 import { registerNovelAgentRoutes } from './novel-agent-routes'
 import { registerNovelChapterContextRoutes } from './novel-chapter-context-routes'
 import { registerNovelCommercialOpsRoutes } from './novel-commercial-ops-routes'
+import { registerNovelCreativeAssistRoutes } from './novel-creative-assist-routes'
 import { registerNovelCoreRoutes } from './novel-core-routes'
 import { createNovelDashboardService } from './novel-dashboard-service'
 import { registerNovelEditorRoutes } from './novel-editor-routes'
@@ -66,6 +67,12 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
   registerNovelCommercialOpsRoutes(app, {
     getWorkspace,
     getProject,
+  })
+
+  registerNovelCreativeAssistRoutes(app, {
+    getWorkspace,
+    getProject,
+    buildChapterContextPackage: writingService.buildChapterContextPackage,
   })
 
   registerNovelProjectControlRoutes(app, {
