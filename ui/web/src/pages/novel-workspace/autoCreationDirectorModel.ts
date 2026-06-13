@@ -5078,6 +5078,49 @@ function buildSafeBatchExpansionStructureValidationTrend(args: {
     recurrence_chapter_nos: [],
     repeated_hotspot_segment: null,
   }
+  const defaultRecoveryVerdictRelapseRecords = expandedAfterRestore
+    .map(evaluation => {
+      const relapse = evaluation?.defaultFiveChapterRecoveryVerdictRelapse
+        || evaluation?.default_five_chapter_recovery_verdict_relapse
+        || safeBatchDefaultFiveChapterRecoveryVerdictRelapse(evaluation)
+        || null
+      if (!relapse || relapse.visible === false) return null
+      const hotspot = relapse.repeated_hotspot_segment || relapse.repeatedHotspotSegment || evaluation?.topHotspot || null
+      const segmentKey = text(hotspot?.key)
+      if (segmentKey && latestSegmentKey && segmentKey !== latestSegmentKey) return null
+      const relapsedFailureReasons = arrayValue(relapse.relapsed_failure_reasons || relapse.relapsedFailureReasons)
+        .map(item => text(item))
+        .filter(Boolean)
+      return {
+        relapse,
+        createdAt: text(evaluation?.latestBatchCreatedAt || relapse.relapse_batch_created_at || relapse.relapseBatchCreatedAt),
+        chapterNos: arrayValue(relapse.relapse_batch_chapter_nos || relapse.relapseBatchChapterNos || evaluation?.latestChapterNos)
+          .map(chapterNo => Number(chapterNo))
+          .filter(chapterNo => chapterNo > 0),
+        relapsedFailureReasons,
+      }
+    })
+    .filter((item): item is AnyRecord => Boolean(item))
+  const defaultRelapseReasonCounts = new Map<string, number>()
+  defaultRecoveryVerdictRelapseRecords.forEach(record => {
+    arrayValue(record.relapsedFailureReasons).forEach(reason => {
+      const key = text(reason)
+      if (!key) return
+      defaultRelapseReasonCounts.set(key, (defaultRelapseReasonCounts.get(key) || 0) + 1)
+    })
+  })
+  const defaultRecoveryVerdictRelapseTrend = defaultRecoveryVerdictRelapseRecords.length ? {
+    visible: true,
+    relapse_count: defaultRecoveryVerdictRelapseRecords.length,
+    relapsed_failure_reasons: Array.from(defaultRelapseReasonCounts.keys()),
+    repeated_failure_reasons: Array.from(defaultRelapseReasonCounts.entries())
+      .map(([reason, count]) => ({ reason, count })),
+    latest_relapse_batch_created_at: text(defaultRecoveryVerdictRelapseRecords[defaultRecoveryVerdictRelapseRecords.length - 1]?.createdAt),
+    latest_relapse_chapter_nos: arrayValue(defaultRecoveryVerdictRelapseRecords[defaultRecoveryVerdictRelapseRecords.length - 1]?.chapterNos)
+      .map(chapterNo => Number(chapterNo))
+      .filter(chapterNo => chapterNo > 0),
+    summary: `恢复判定失效 ${defaultRecoveryVerdictRelapseRecords.length} 次：${Array.from(defaultRelapseReasonCounts.keys()).join('、') || '同维风险复发'}。`,
+  } : null
   const failureSummary = failureReasons.length
     ? `，失败主因：${failureReasons.map(item => `${item.label}${item.count}`).join('、')}`
     : ''
@@ -5086,12 +5129,15 @@ function buildSafeBatchExpansionStructureValidationTrend(args: {
     : latestPassed
       ? '，恢复5章后暂无同段复发'
       : '，尚无通过的结构验证批'
+  const defaultRelapseSummary = defaultRecoveryVerdictRelapseTrend
+    ? `，${defaultRecoveryVerdictRelapseTrend.summary.replace(/。$/, '')}`
+    : ''
 
   return {
     visible: true,
     status: latestStatus === 'warn' || recurrenceAfterRestore.visible ? 'warn' as const : 'ok' as const,
     label: '扩批结构验证趋势',
-    summary: `${latest.segmentLabel}验证通过率 ${passRate}%（${passedBatchCount}/${validationBatchCount}批）${failureSummary}${recurrenceSummary}。`,
+    summary: `${latest.segmentLabel}验证通过率 ${passRate}%（${passedBatchCount}/${validationBatchCount}批）${failureSummary}${recurrenceSummary}${defaultRelapseSummary}。`,
     segment_key: latestSegmentKey,
     segment_label: latest.segmentLabel,
     validation_batch_count: validationBatchCount,
@@ -5103,12 +5149,46 @@ function buildSafeBatchExpansionStructureValidationTrend(args: {
     latest_chapter_nos: latest.chapterNos,
     failure_reasons: failureReasons,
     recurrence_after_restore: recurrenceAfterRestore,
+    ...(defaultRecoveryVerdictRelapseTrend ? {
+      default_five_chapter_recovery_verdict_relapse_trend: defaultRecoveryVerdictRelapseTrend,
+    } : {}),
   }
 }
 
 function safeBatchExpansionStructureTrendFailureCount(trend?: AnyRecord | null) {
   return arrayValue(trend?.failure_reasons || trend?.failureReasons)
     .reduce((sum, item) => sum + Number(item?.count || 0), 0)
+}
+
+function safeBatchDefaultRecoveryVerdictRelapseTrend(trend?: AnyRecord | null) {
+  const relapseTrend = trend?.default_five_chapter_recovery_verdict_relapse_trend
+    || trend?.defaultFiveChapterRecoveryVerdictRelapseTrend
+    || null
+  if (!relapseTrend || relapseTrend.visible === false) return null
+  return relapseTrend
+}
+
+function safeBatchDefaultRecoveryVerdictRelapseTrendCount(trend?: AnyRecord | null) {
+  const relapseTrend = safeBatchDefaultRecoveryVerdictRelapseTrend(trend)
+  return relapseTrend ? Number(relapseTrend.relapse_count ?? relapseTrend.relapseCount ?? 0) : 0
+}
+
+function safeBatchDefaultRecoveryVerdictRelapseReasonCounts(trend?: AnyRecord | null) {
+  const relapseTrend = safeBatchDefaultRecoveryVerdictRelapseTrend(trend)
+  const counts = new Map<string, number>()
+  if (!relapseTrend) return counts
+  arrayValue(relapseTrend.repeated_failure_reasons || relapseTrend.repeatedFailureReasons).forEach(item => {
+    const reason = text(item?.reason || item?.label || item)
+    if (!reason) return
+    const count = Number(item?.count ?? 1)
+    counts.set(reason, (counts.get(reason) || 0) + Math.max(1, Number.isFinite(count) ? count : 1))
+  })
+  arrayValue(relapseTrend.relapsed_failure_reasons || relapseTrend.relapsedFailureReasons).forEach(item => {
+    const reason = text(item)
+    if (!reason || counts.has(reason)) return
+    counts.set(reason, 1)
+  })
+  return counts
 }
 
 function safeBatchExpansionStructureTrendRecurrenceInterval(trend?: AnyRecord | null) {
@@ -5197,6 +5277,21 @@ function buildSafeBatchExpansionStructureRepairEffectiveness(args: {
   const currentFailureReasonCount = safeBatchExpansionStructureTrendFailureCount(currentTrend)
   const baselineRecurrenceInterval = safeBatchExpansionStructureTrendRecurrenceInterval(repair.trend)
   const currentRecurrenceInterval = safeBatchExpansionStructureTrendRecurrenceInterval(currentTrend)
+  const baselineRelapseCount = safeBatchDefaultRecoveryVerdictRelapseTrendCount(repair.trend)
+  const currentRelapseCount = safeBatchDefaultRecoveryVerdictRelapseTrendCount(currentTrend)
+  const baselineRelapseReasonCounts = safeBatchDefaultRecoveryVerdictRelapseReasonCounts(repair.trend)
+  const currentRelapseReasonCounts = safeBatchDefaultRecoveryVerdictRelapseReasonCounts(currentTrend)
+  const repeatedRelapseReasons = Array.from(new Set([
+    ...baselineRelapseReasonCounts.keys(),
+    ...currentRelapseReasonCounts.keys(),
+  ]))
+    .filter(reason => (baselineRelapseReasonCounts.get(reason) || 0) > 0 && (currentRelapseReasonCounts.get(reason) || 0) > 0)
+    .map(reason => ({
+      reason,
+      count: (baselineRelapseReasonCounts.get(reason) || 0) + (currentRelapseReasonCounts.get(reason) || 0),
+    }))
+  const repeatedRelapseCount = repeatedRelapseReasons.length > 0 ? baselineRelapseCount + currentRelapseCount : 0
+  const defaultRecoveryVerdictRelapseRepeated = repeatedRelapseCount >= 2 && repeatedRelapseReasons.length > 0
   const currentRecurrence = currentTrend.recurrence_after_restore || null
   const passRateDelta = currentPassRate - baselinePassRate
   const failureReasonDelta = currentFailureReasonCount - baselineFailureReasonCount
@@ -5205,8 +5300,10 @@ function buildSafeBatchExpansionStructureRepairEffectiveness(args: {
     : !currentRecurrence?.visible
   const improved = passRateDelta > 0 || failureReasonDelta < 0 || recurrenceImproved
   const regressed = passRateDelta < 0 || failureReasonDelta > 0 || (currentRecurrence?.visible && currentRecurrenceInterval > 0 && currentRecurrenceInterval <= baselineRecurrenceInterval)
-  const status = improved && !regressed ? 'ok' as const : 'warn' as const
-  const recommendation = status === 'ok' && currentPassRate >= 100 && currentFailureReasonCount <= 0 && !currentRecurrence?.visible
+  const status = defaultRecoveryVerdictRelapseRepeated ? 'warn' as const : improved && !regressed ? 'ok' as const : 'warn' as const
+  const recommendation = defaultRecoveryVerdictRelapseRepeated
+    ? 'escalate_structure_redesign'
+    : status === 'ok' && currentPassRate >= 100 && currentFailureReasonCount <= 0 && !currentRecurrence?.visible
     ? 'restore_five_chapter'
     : status === 'ok'
       ? 'continue_small_validation'
@@ -5214,12 +5311,26 @@ function buildSafeBatchExpansionStructureRepairEffectiveness(args: {
   const recurrenceSummary = currentRecurrence?.visible
     ? `修复后${currentRecurrence.interval_label || `第${currentRecurrenceInterval}个扩批批次复发`}`
     : '修复后暂无同段复发'
+  const defaultRecoveryVerdictRelapseTrend = baselineRelapseCount > 0 || currentRelapseCount > 0 ? {
+    visible: true,
+    baseline_relapse_count: baselineRelapseCount,
+    current_relapse_count: currentRelapseCount,
+    repeated_relapse_count: repeatedRelapseCount,
+    repeated_failure_reasons: repeatedRelapseReasons,
+    recommendation: defaultRecoveryVerdictRelapseRepeated ? 'escalate_structure_redesign' : 'continue_validation',
+    summary: defaultRecoveryVerdictRelapseRepeated
+      ? `连续 ${repeatedRelapseCount} 次恢复判定失效：${repeatedRelapseReasons.map(item => item.reason).join('、')}同维复发，默认档位结构重构。`
+      : `恢复判定失效观察：修复前 ${baselineRelapseCount} 次，修复后 ${currentRelapseCount} 次。`,
+  } : null
+  const defaultRelapseSummary = defaultRecoveryVerdictRelapseRepeated
+    ? `，${text(defaultRecoveryVerdictRelapseTrend?.summary, `连续 ${repeatedRelapseCount} 次恢复判定失效，默认档位结构重构。`).replace(/。$/, '')}`
+    : ''
 
   return {
     visible: true,
     status,
     label: '结构修复有效性',
-    summary: `${repair.segmentLabel}结构修复有效性：通过率 ${baselinePassRate}% -> ${currentPassRate}%，失败主因 ${baselineFailureReasonCount} -> ${currentFailureReasonCount}，${recurrenceSummary}。`,
+    summary: `${repair.segmentLabel}结构修复有效性：通过率 ${baselinePassRate}% -> ${currentPassRate}%，失败主因 ${baselineFailureReasonCount} -> ${currentFailureReasonCount}，${recurrenceSummary}${defaultRelapseSummary}。`,
     source_run_id: repair.sourceRunId,
     repaired_at: repair.repairedAt,
     segment_key: segmentKey,
@@ -5235,6 +5346,9 @@ function buildSafeBatchExpansionStructureRepairEffectiveness(args: {
     recommendation,
     baseline_trend: repair.trend,
     current_trend: currentTrend,
+    ...(defaultRecoveryVerdictRelapseTrend ? {
+      default_five_chapter_recovery_verdict_relapse_trend: defaultRecoveryVerdictRelapseTrend,
+    } : {}),
   }
 }
 

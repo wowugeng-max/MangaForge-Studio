@@ -1540,6 +1540,20 @@ export type SafeBatchExpansionStructureRepairEffectivenessSnapshot = {
   recommendation: string
   baselineTrend: any | null
   currentTrend: any | null
+  defaultFiveChapterRecoveryVerdictRelapseTrend: SafeBatchDefaultFiveChapterRecoveryVerdictRelapseTrendSnapshot | null
+}
+
+export type SafeBatchDefaultFiveChapterRecoveryVerdictRelapseTrendSnapshot = {
+  visible: boolean
+  baselineRelapseCount: number
+  currentRelapseCount: number
+  repeatedRelapseCount: number
+  repeatedFailureReasons: {
+    reason: string
+    count: number
+  }[]
+  recommendation: string
+  summary: string
 }
 
 export type SafeBatchExpansionStructureDecisionTrendSnapshot = {
@@ -1854,6 +1868,31 @@ function buildSafeBatchExpansionStructureValidationTrendSnapshot(trendLike: any)
   }
 }
 
+function buildSafeBatchDefaultFiveChapterRecoveryVerdictRelapseTrendSnapshot(trendLike: any): SafeBatchDefaultFiveChapterRecoveryVerdictRelapseTrendSnapshot | null {
+  const trend = parseJsonValue(trendLike) || trendLike || null
+  if (!trend || trend.visible === false) return null
+  const repeatedFailureReasons = (Array.isArray(trend?.repeated_failure_reasons)
+    ? trend.repeated_failure_reasons
+    : Array.isArray(trend?.repeatedFailureReasons)
+      ? trend.repeatedFailureReasons
+      : []
+  ).map((item: any) => ({
+    reason: compactEvidenceText(item?.reason || item?.label || item),
+    count: Number(item?.count || 0),
+  })).filter((item: any) => item.reason && item.count > 0)
+  const snapshot = {
+    visible: true,
+    baselineRelapseCount: Number(trend?.baseline_relapse_count ?? trend?.baselineRelapseCount ?? 0),
+    currentRelapseCount: Number(trend?.current_relapse_count ?? trend?.currentRelapseCount ?? 0),
+    repeatedRelapseCount: Number(trend?.repeated_relapse_count ?? trend?.repeatedRelapseCount ?? 0),
+    repeatedFailureReasons,
+    recommendation: compactEvidenceText(trend?.recommendation || ''),
+    summary: compactEvidenceText(trend?.summary || ''),
+  }
+  if (!snapshot.summary && !snapshot.repeatedFailureReasons.length && snapshot.repeatedRelapseCount <= 0) return null
+  return snapshot
+}
+
 function buildSafeBatchExpansionStructureRepairEffectivenessSnapshot(effectivenessLike: any): SafeBatchExpansionStructureRepairEffectivenessSnapshot | null {
   const effectiveness = parseJsonValue(effectivenessLike) || effectivenessLike || null
   if (!effectiveness || effectiveness.visible === false) return null
@@ -1879,6 +1918,9 @@ function buildSafeBatchExpansionStructureRepairEffectivenessSnapshot(effectivene
     recommendation: compactEvidenceText(effectiveness?.recommendation || ''),
     baselineTrend: effectiveness?.baseline_trend || effectiveness?.baselineTrend || null,
     currentTrend: effectiveness?.current_trend || effectiveness?.currentTrend || null,
+    defaultFiveChapterRecoveryVerdictRelapseTrend: buildSafeBatchDefaultFiveChapterRecoveryVerdictRelapseTrendSnapshot(
+      effectiveness?.default_five_chapter_recovery_verdict_relapse_trend || effectiveness?.defaultFiveChapterRecoveryVerdictRelapseTrend,
+    ),
   }
 }
 
@@ -2381,6 +2423,7 @@ function BatchProseRunSummary({ run }: { run: any }) {
   const expansionStructureTrend = expansionFeedback?.structureValidationTrend || null
   const expansionStructureFailureReason = expansionStructureTrend?.failureReasons?.[0] || null
   const expansionStructureEffectiveness = expansionFeedback?.structureRepairEffectiveness || null
+  const defaultRecoveryVerdictRelapseEffectiveness = expansionStructureEffectiveness?.defaultFiveChapterRecoveryVerdictRelapseTrend || null
   const expansionStructureDecisionTrend = expansionFeedback?.structureDecisionTrend || null
   const expansionStructureDecisionRequirement = expansionStructureDecisionTrend?.topFailedRequirement || null
   const defaultFiveChapterRegression = expansionFeedback?.defaultFiveChapterRegression || null
@@ -2547,6 +2590,11 @@ function BatchProseRunSummary({ run }: { run: any }) {
                     {expansionStructureEffectiveness?.visible && (
                       <Tag bordered={false}>
                         主因 {expansionStructureEffectiveness.baselineFailureReasonCount}{'->'}{expansionStructureEffectiveness.currentFailureReasonCount}
+                      </Tag>
+                    )}
+                    {defaultRecoveryVerdictRelapseEffectiveness && (
+                      <Tag color="gold" bordered={false}>
+                        恢复判定连续失效 {defaultRecoveryVerdictRelapseEffectiveness.repeatedRelapseCount}
                       </Tag>
                     )}
                     {expansionStructureDecisionTrend?.visible && (

@@ -1181,6 +1181,75 @@ describe('buildSafeBatchExpansionPolicySnapshot', () => {
     })
   })
 
+  test('keeps default recovery verdict relapse trend in repair effectiveness snapshot', () => {
+    const snapshot = buildSafeBatchExpansionPolicySnapshot({
+      safe_batch_expansion_policy: {
+        status: 'recovering',
+        label: '强化扩批规则',
+        summary: '连续恢复判定失效，升级默认档位结构重构。',
+        target_chapter_count: 1,
+        base_chapter_count: 3,
+        expanded_chapter_count: 5,
+        required_pass_streak: 3,
+        pass_streak: 3,
+        accepted_batch_count: 3,
+        failed_batch_count: 1,
+        latest_status: 'warn',
+        expansion_feedback: {
+          status: 'rollback_to_single_chapter',
+          label: '扩批热区反馈',
+          summary: '连续 2 次恢复判定失效，默认档位结构重构。',
+          target_chapter_count: 1,
+          latest_chapter_nos: [84, 85, 86, 87, 88],
+          risk_count: 3,
+          expansion_structure_repair_effectiveness: {
+            visible: true,
+            status: 'warn',
+            label: '结构修复有效性',
+            summary: '中段结构修复有效性：连续 2 次恢复判定失效，默认档位结构重构。',
+            source_run_id: 643,
+            segment_key: 'middle',
+            segment_label: '中段',
+            baseline_pass_rate: 100,
+            current_pass_rate: 100,
+            pass_rate_delta: 0,
+            baseline_failure_reason_count: 0,
+            current_failure_reason_count: 0,
+            failure_reason_delta: 0,
+            recommendation: 'escalate_structure_redesign',
+            default_five_chapter_recovery_verdict_relapse_trend: {
+              visible: true,
+              baseline_relapse_count: 1,
+              current_relapse_count: 1,
+              repeated_relapse_count: 2,
+              repeated_failure_reasons: [
+                { reason: '核心偏移', count: 2 },
+                { reason: '回报欠账', count: 2 },
+                { reason: '追读拉力', count: 2 },
+              ],
+              recommendation: 'escalate_structure_redesign',
+              summary: '连续 2 次恢复判定失效：核心偏移、回报欠账、追读拉力同维复发，默认档位结构重构。',
+            },
+          },
+        },
+      },
+    })
+
+    expect(snapshot?.expansionFeedback?.structureRepairEffectiveness?.defaultFiveChapterRecoveryVerdictRelapseTrend).toMatchObject({
+      visible: true,
+      baselineRelapseCount: 1,
+      currentRelapseCount: 1,
+      repeatedRelapseCount: 2,
+      repeatedFailureReasons: [
+        { reason: '核心偏移', count: 2 },
+        { reason: '回报欠账', count: 2 },
+        { reason: '追读拉力', count: 2 },
+      ],
+      recommendation: 'escalate_structure_redesign',
+    })
+    expect(snapshot?.expansionFeedback?.structureRepairEffectiveness?.defaultFiveChapterRecoveryVerdictRelapseTrend?.summary).toContain('默认档位结构重构')
+  })
+
   test('keeps expansion structure decision execution trend in the task-center snapshot', () => {
     const snapshot = buildSafeBatchExpansionPolicySnapshot({
       safe_batch_expansion_policy: {

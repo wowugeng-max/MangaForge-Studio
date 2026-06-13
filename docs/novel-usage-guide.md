@@ -1223,10 +1223,11 @@
 - 默认档位回退原因已接入下一批任务书。扩批结构任务闭环后，下一轮 3 章验证批的 `next_batch_brief.expansionStructureVerification` 与 `batch_preflight.safe_batch_expansion_structure_verification` 会继承 `default_five_chapter_regression`，保留失效批次、前置恢复批、原 3 章验证批、复发段位和失败维度；正文生成 prompt 的 `扩批结构验证` 段落会明确要求逐章证明核心守恒、显性回报和章末追读重新稳定。
 - 默认档位回退后的 3 章验证批复盘已对照原失败维度生成 `default_five_chapter_recovery_verdict`。验证批会把 `default_five_chapter_regression.failure_reasons` 映射到本批核心偏移、回报欠账、追读拉力计数，输出已清零/仍未清零列表；任务中心的 3 章验证批摘要会显示“默认档位恢复判定”，让作者能直接看到默认档位是否真的恢复，而不是只看总风险数。
 - 默认档位恢复判定已接入恢复 5 章后的观察批和默认档位批。`确认恢复5章扩批`、`5章观察批` 与 `默认5章档位` 会继续携带 `default_five_chapter_recovery_verdict`；若后续 5 章批在已清零维度上再次出现核心偏移、回报欠账或追读拉力失效，扩批反馈会写入 `default_five_chapter_recovery_verdict_relapse`，任务中心显示“恢复判定失效 -> 回到3章验证批”、复发批次、清零验证批和同维复发原因。
+- 恢复判定失效已接入二次 3 章验证后的结构趋势统计。`expansion_structure_validation_trend` 会沉淀 `default_five_chapter_recovery_verdict_relapse_trend`；若结构修复前后连续两次出现同维恢复判定失效，`expansion_structure_repair_effectiveness` 会把建议升级为 `escalate_structure_redesign`，总控台目标压回单章治理，任务中心显示“恢复判定连续失效”，避免反复做普通 3 章验证批。
 
 推荐下一步：
 
-- 将 `default_five_chapter_recovery_verdict_relapse` 接入二次 3 章验证后的趋势统计：连续两次“恢复判定失效”的同维复发应升级为默认档位结构重构，而不是重复做普通 3 章验证批。
+- 将“默认档位结构重构”接入下一批任务书和正文 prompt：当 `recommendation=escalate_structure_redesign` 且来源为恢复判定连续失效时，下一章/下一批应明确重写默认 5 章档位的段位职责、冲突轮换、回报密度和章末追读模板。
 
 ## 8. 使用说明维护规则
 
