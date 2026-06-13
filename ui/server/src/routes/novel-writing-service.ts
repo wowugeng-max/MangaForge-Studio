@@ -264,6 +264,62 @@ function handoffContractTextItems(value: any, limit = 12) {
   return result
 }
 
+function normalizeGovernanceRecheckMemoryContext(value: any) {
+  const raw = value?.governance_recheck_memory || value?.governanceRecheckMemory || value || null
+  if (!raw || typeof raw !== 'object') return null
+  const evidence = handoffContractTextItems([
+    ...asArray(raw.evidence),
+    ...asArray(raw.repaired_evidence),
+    ...asArray(raw.repairedEvidence),
+  ], 8)
+  const failedEvidence = handoffContractTextItems([
+    ...asArray(raw.failed_evidence),
+    ...asArray(raw.failedEvidence),
+  ], 8)
+  const watchItems = handoffContractTextItems([
+    ...asArray(raw.watch_items),
+    ...asArray(raw.watchItems),
+  ], 8)
+  const rawStatus = compactBriefText(raw.status)
+  const summary = compactBriefText(raw.summary)
+  const sourceRunId = raw.source_run_id ?? raw.sourceRunId ?? null
+  const storylineDecisionTaskCount = Math.max(0, Number(raw.storyline_decision_task_count ?? raw.storylineDecisionTaskCount ?? 0) || 0)
+  const hasMemory = Boolean(
+    rawStatus
+      || compactBriefText(raw.label)
+      || summary
+      || sourceRunId
+      || evidence.length
+      || failedEvidence.length
+      || watchItems.length
+      || storylineDecisionTaskCount,
+  )
+  if (!hasMemory) return null
+
+  const status = rawStatus === 'closed' && failedEvidence.length === 0 && storylineDecisionTaskCount === 0
+    ? 'closed'
+    : rawStatus === 'closed'
+      ? 'needs_followup'
+      : rawStatus === 'needs_followup'
+        ? 'needs_followup'
+        : failedEvidence.length > 0 || storylineDecisionTaskCount > 0
+          ? 'needs_followup'
+          : 'closed'
+
+  return {
+    source_run_id: sourceRunId,
+    status,
+    label: compactBriefText(raw.label, status === 'closed' ? '治理复查已记录' : '治理复查待处理'),
+    summary: summary || (status === 'closed'
+      ? '上一轮治理复查已闭环，本章继续继承修后证据和观察项。'
+      : '上一轮治理复查仍有待处理项，本章必须先承接失效依据和观察项。'),
+    evidence,
+    failed_evidence: failedEvidence,
+    watch_items: watchItems,
+    storyline_decision_task_count: storylineDecisionTaskCount,
+  }
+}
+
 function normalizeBatchChapterHandoffContract(value: any) {
   const raw = value?.chapter_handoff_contract || value?.chapterHandoffContract || value || {}
   const previousHandoff = compactBriefText(raw.previous_handoff || raw.previousHandoff)
@@ -4839,6 +4895,14 @@ export function buildChapterPreDraftBrief(project: any, contextPackage: any) {
     || contextPackage?.delivery_risk_carry_over
     || contextPackage?.deliveryRiskCarryOver,
   )
+  const governanceRecheckMemory = normalizeGovernanceRecheckMemoryContext(
+    contextPackage?.chapter_target?.governance_recheck_memory
+    || contextPackage?.chapter_target?.governanceRecheckMemory
+    || contextPackage?.governance_recheck_memory
+    || contextPackage?.governanceRecheckMemory
+    || contextPackage?.pre_draft_brief?.governance_recheck_memory
+    || contextPackage?.preDraftBrief?.governanceRecheckMemory,
+  )
   const readerExpectationDebtContext = applyReaderExpectationDebtAging(
     normalizeReaderExpectationDebtContext(chapterTarget.reader_expectation_debt_context || contextPackage?.reader_expectation_debt_context),
     Number(chapterTarget.chapter_no || 0),
@@ -4886,6 +4950,7 @@ export function buildChapterPreDraftBrief(project: any, contextPackage: any) {
     volume_climax_brief: volumeClimaxBrief,
     recent_fatigue_brief: recentFatigueBrief,
     delivery_risk_carry_over: deliveryRiskCarryOver,
+    governance_recheck_memory: governanceRecheckMemory,
     reader_expectation_debt: readerExpectationDebtContext,
     reader_expectation_ledger: readerExpectationLedger,
     innovation_brief: innovationBrief,
@@ -5032,6 +5097,14 @@ export function mergeConfirmedPreDraftBriefIntoContext(contextPackage: any, preD
     || (contextPackage || {}).delivery_risk_carry_over
     || (contextPackage || {}).deliveryRiskCarryOver,
   )
+  const governanceRecheckMemory = normalizeGovernanceRecheckMemoryContext(
+    preDraftBrief.governance_recheck_memory
+    || preDraftBrief.governanceRecheckMemory
+    || (contextPackage || {}).chapter_target?.governance_recheck_memory
+    || (contextPackage || {}).chapter_target?.governanceRecheckMemory
+    || (contextPackage || {}).governance_recheck_memory
+    || (contextPackage || {}).governanceRecheckMemory,
+  )
   const readerExpectationDebtContext = applyReaderExpectationDebtAging(
     normalizeReaderExpectationDebtContext(preDraftBrief.reader_expectation_debt || (contextPackage || {}).chapter_target?.reader_expectation_debt_context || (contextPackage || {}).reader_expectation_debt_context),
     Number((contextPackage || {}).chapter_target?.chapter_no || preDraftBrief.chapter_no || 0),
@@ -5059,6 +5132,7 @@ export function mergeConfirmedPreDraftBriefIntoContext(contextPackage: any, preD
     volume_climax_brief: volumeClimaxBrief || (contextPackage || {}).volume_climax_brief || null,
     recent_fatigue_brief: recentFatigueBrief || (contextPackage || {}).recent_fatigue_brief || null,
     delivery_risk_carry_over: deliveryRiskCarryOver || (contextPackage || {}).delivery_risk_carry_over || null,
+    governance_recheck_memory: governanceRecheckMemory || (contextPackage || {}).governance_recheck_memory || null,
     reader_expectation_debt_context: readerExpectationDebtContext,
     character_arc_context: characterArcBrief || (contextPackage || {}).character_arc_context || null,
     chapter_target: {
@@ -5086,6 +5160,7 @@ export function mergeConfirmedPreDraftBriefIntoContext(contextPackage: any, preD
       volume_climax_brief: volumeClimaxBrief || (contextPackage || {}).chapter_target?.volume_climax_brief || null,
       recent_fatigue_brief: recentFatigueBrief || (contextPackage || {}).chapter_target?.recent_fatigue_brief || null,
       delivery_risk_carry_over: deliveryRiskCarryOver || (contextPackage || {}).chapter_target?.delivery_risk_carry_over || null,
+      governance_recheck_memory: governanceRecheckMemory || (contextPackage || {}).chapter_target?.governance_recheck_memory || null,
       reader_expectation_debt_context: readerExpectationDebtContext,
       reader_expectation_ledger: preDraftBrief.reader_expectation_ledger || (contextPackage || {}).chapter_target?.reader_expectation_ledger || null,
       innovation_brief: preDraftBrief.innovation_brief || (contextPackage || {}).chapter_target?.innovation_brief || null,
@@ -5289,6 +5364,14 @@ export function createNovelWritingService(ctx: {
       || contextPackage?.longformBattleDesk,
     )
     const chapterLaunchGate = contextPackage?.chapter_target?.chapter_launch_gate || contextPackage?.chapter_launch_gate || null
+    const governanceRecheckMemory = normalizeGovernanceRecheckMemoryContext(
+      contextPackage?.chapter_target?.governance_recheck_memory
+      || contextPackage?.chapter_target?.governanceRecheckMemory
+      || contextPackage?.governance_recheck_memory
+      || contextPackage?.governanceRecheckMemory
+      || contextPackage?.pre_draft_brief?.governance_recheck_memory
+      || contextPackage?.preDraftBrief?.governanceRecheckMemory,
+    )
     const sceneBriefs = asArray(chapterTarget.scene_cards).map(sceneBriefFromCard)
     const coreContractRadar = buildCoreContractRadar(project, contextPackage, sceneBriefs, longformCompass, longformBattleContext)
     const nextBatchBrief = normalizeNextBatchBrief(
@@ -5439,6 +5522,15 @@ export function createNovelWritingService(ctx: {
       chapterLaunchGate ? '【本章开写门禁】' : '',
       chapterLaunchGate ? '硬性要求：本章必须逐条落实读者承诺、章节目标、核心冲突、主线服务、读者回报和章末钩子；不得把门禁中的 warn/block 项绕过去写。' : '',
       chapterLaunchGate ? JSON.stringify(chapterLaunchGate, null, 2).slice(0, 4000) : '',
+      '',
+      governanceRecheckMemory ? '【治理复查承接】' : '',
+      governanceRecheckMemory ? '硬性要求：执行 chapter_target.governance_recheck_memory；这是上一轮日终复查沉淀到本章的恢复依据。evidence 必须继续写成正文可见的冲突推进、对白执行、读者回报或剧情线动作；watch_items 必须在本章保持观察，不得因为只写单章就丢失。' : '',
+      governanceRecheckMemory?.source_run_id ? `来源审计：#${governanceRecheckMemory.source_run_id}` : '',
+      governanceRecheckMemory?.summary ? `复查摘要：${governanceRecheckMemory.summary}` : '',
+      governanceRecheckMemory?.evidence?.length ? `修后证据：${governanceRecheckMemory.evidence.join('；')}` : '',
+      governanceRecheckMemory?.failed_evidence?.length ? `当前失效依据：${governanceRecheckMemory.failed_evidence.join('；')}` : '',
+      governanceRecheckMemory?.watch_items?.length ? `仍需观察：${governanceRecheckMemory.watch_items.join('；')}` : '',
+      governanceRecheckMemory ? JSON.stringify(governanceRecheckMemory, null, 2).slice(0, 3000) : '',
       '',
       coreContractRadar ? '【核心契约】' : '',
       coreContractRadar ? '硬性要求：执行 chapter_target.core_contract_radar；must_serve 是本章必须服务的全书承诺、核心冲突、创新卖点和读者回报；no_drift 是不得漂移的红线；repair_focus 必须写成可见事件、选择、代价、规则判定、主线推进或章末问题。' : '',
@@ -5633,6 +5725,7 @@ export function createNovelWritingService(ctx: {
       '13. 执行长篇作品罗盘：读者承诺、核心矛盾、创新卖点、长期爽点循环和结局方向不得漂移；新增人物、物品、支线或地图必须落在可调整区内。',
       '13A. 执行 chapter_target.chapter_launch_gate：读者承诺、本章目标、核心冲突、主线服务、读者回报、章末钩子必须在正文中可见落地；如果门禁信号为 warn/block，不得忽略，必须优先补成可见事件、选择、冲突结果或章末问题。',
       '13A+. 执行 chapter_target.core_contract_radar：必须服务 must_serve 中的全书核心承诺、核心矛盾、创新卖点和读者回报；不得漂移 no_drift 中的红线；repair_focus 不能只靠解释，要落成正文中的冲突结果、规则判定、角色选择或章末钩子。',
+      '13A++. 执行 chapter_target.governance_recheck_memory：上一轮治理复查的修后证据和观察项必须进入本章任务执行；evidence 写成正文可见继承，failed_evidence 优先补救，watch_items 保持观察并避免再次失效。',
       '13B. 执行 chapter_target.longform_battle_context：核心守恒、读者拉力、剧情线调度、卷级爆点、创新/IP场面和生产燃料中的风险项必须在本章有可见承接；blocked/warn 风险优先于普通铺垫，不能写成空泛解释。',
       '14. 执行本批连载任务书：本章只完成 current_chapter_role 和本章读者回报；可以铺垫下一章，但不得提前解决 next_batch_brief.chapters 后续章节的冲突或钩子。',
       '14A. 执行 chapter_target.batch_preflight：如果安全连写预执行门禁提示近10章疲劳或批次风险，本章必须在冲突来源、回报形态、章末问题、可视化场面中至少改造一项；被 blocked_chapter_nos 拦截的后续章节内容不得提前写进本章。',

@@ -1462,6 +1462,18 @@ export function WorkspaceCenter({
                     <strong>红线：{draftBriefSummary.briefFields.longformMemoryRedLines || '不得偏离核心承诺'}</strong>
                   </div>
                 )}
+                {(draftBriefSummary.briefFields.governanceMemoryStatus || draftBriefSummary.briefFields.governanceMemoryEvidence || draftBriefSummary.briefFields.governanceMemoryWatchItems) && (
+                  <div className="novel-draft-brief-governance-memory">
+                    <span>治理复查承接</span>
+                    <strong>{draftBriefSummary.briefFields.governanceMemoryStatus || '治理复查已记录'}</strong>
+                    <strong>摘要：{draftBriefSummary.briefFields.governanceMemorySummary || '沿用上一轮修后证据'}</strong>
+                    <strong>修后证据：{draftBriefSummary.briefFields.governanceMemoryEvidence || '无'}</strong>
+                    {draftBriefSummary.briefFields.governanceMemoryFailedEvidence && (
+                      <strong>失效依据：{draftBriefSummary.briefFields.governanceMemoryFailedEvidence}</strong>
+                    )}
+                    <strong>观察项：{draftBriefSummary.briefFields.governanceMemoryWatchItems || '无'}</strong>
+                  </div>
+                )}
                 {(draftBriefSummary.briefFields.handoffPreviousEnding || draftBriefSummary.briefFields.handoffOpeningObligation || draftBriefSummary.briefFields.handoffMustCarry || draftBriefSummary.briefFields.handoffKeepAlive) && (
                   <div className="novel-draft-brief-handoff">
                     <span>上一章承接</span>

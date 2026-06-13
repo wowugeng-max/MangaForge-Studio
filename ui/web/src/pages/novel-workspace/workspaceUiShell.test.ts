@@ -518,6 +518,22 @@ describe('commercial writing workspace UI shell', () => {
     expect(service).toContain('【长篇作战承接】')
   })
 
+  test('shows governance recheck memory in the pre-draft brief', () => {
+    const workspaceCenter = source('WorkspaceCenter.tsx')
+    const workspaceCss = source('WorkspaceCenter.css')
+    const model = source('writingRecommendationModel.ts')
+    const service = readFileSync(join(import.meta.dir, '../../../../server/src/routes/novel-writing-service.ts'), 'utf8')
+
+    expect(workspaceCenter).toContain('治理复查承接')
+    expect(workspaceCenter).toContain('修后证据')
+    expect(workspaceCenter).toContain('观察项')
+    expect(workspaceCss).toContain('.novel-draft-brief-governance-memory')
+    expect(model).toContain('governance_recheck_memory')
+    expect(model).toContain('governanceMemoryEvidence')
+    expect(service).toContain('governance_recheck_memory')
+    expect(service).toContain('【治理复查承接】')
+  })
+
   test('shows storyline sync status in the delivery strip', () => {
     const workspaceCenter = source('WorkspaceCenter.tsx')
     const workspaceCss = source('WorkspaceCenter.css')

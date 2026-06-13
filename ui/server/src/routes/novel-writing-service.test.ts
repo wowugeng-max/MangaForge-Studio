@@ -697,6 +697,45 @@ describe('chapter prose word target', () => {
     expect(prompt).toContain('执行 chapter_target.chapter_launch_gate')
   })
 
+  test('injects governance recheck memory into paragraph prose prompt as single-chapter guardrails', () => {
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+
+    const prompt = service.buildParagraphProseContext(
+      { title: '超人的规则怪谈世界' },
+      {
+        governance_recheck_memory: {
+          source_run_id: 44,
+          status: 'closed',
+          label: '治理复查已记录',
+          summary: '恢复依据闭环 2/2，本章必须继续继承上一轮修后证据。',
+          evidence: ['第42章对白交锋已补回样章节奏'],
+          failed_evidence: [],
+          watch_items: ['下一章继续观察样章策略命中率'],
+          storyline_decision_task_count: 0,
+        },
+        chapter_target: {
+          chapter_no: 43,
+          title: '复查后的新局',
+          summary: '主角用新证据逼对手公开应答。',
+          conflict: '对手试图绕开上一轮修复后的对白交锋。',
+          ending_hook: '旧账本出现第二个签名。',
+          scene_cards: [],
+        },
+      },
+      null,
+      { chapter_no: 43, title: '复查后的新局' },
+    )
+
+    expect(prompt).toContain('【治理复查承接】')
+    expect(prompt).toContain('第42章对白交锋已补回样章节奏')
+    expect(prompt).toContain('下一章继续观察样章策略命中率')
+    expect(prompt).toContain('执行 chapter_target.governance_recheck_memory')
+  })
+
   test('injects core contract radar into paragraph prose prompt as hard guardrails', () => {
     const service = createNovelWritingService({
       getProject: async () => null,
@@ -1121,6 +1160,47 @@ describe('chapter pre-draft brief', () => {
     expect(brief.meme_strategy.intensity).toBe('轻度')
     expect(brief.meme_strategy.allowed_functions).toContain('用上班人共鸣化解高压后的半拍吐槽')
     expect(brief.meme_strategy.forbidden_usage).toContain('严肃死亡场景不玩梗')
+  })
+
+  test('carries governance recheck memory into single-chapter pre-draft brief and confirmed context', () => {
+    const contextPackage = {
+      governance_recheck_memory: {
+        source_run_id: 44,
+        status: 'closed',
+        label: '治理复查已记录',
+        summary: '恢复依据闭环 2/2，本章必须继续继承上一轮修后证据。',
+        evidence: ['第42章对白交锋已补回样章节奏'],
+        failed_evidence: [],
+        watch_items: ['下一章继续观察样章策略命中率'],
+        storyline_decision_task_count: 0,
+      },
+      chapter_target: {
+        chapter_no: 43,
+        title: '复查后的新局',
+        summary: '主角用新证据逼对手公开应答。',
+        conflict: '对手试图绕开上一轮修复后的对白交锋。',
+        ending_hook: '旧账本出现第二个签名。',
+        scene_cards: [{ title: '当堂应答', reader_payoff: '对白交锋压住旧臣。' }],
+      },
+    }
+
+    const brief = buildChapterPreDraftBrief({ title: '万字长篇' }, contextPackage)
+
+    expect(brief.governance_recheck_memory).toMatchObject({
+      source_run_id: 44,
+      status: 'closed',
+      label: '治理复查已记录',
+    })
+    expect(brief.governance_recheck_memory.evidence).toContain('第42章对白交锋已补回样章节奏')
+    expect(brief.governance_recheck_memory.watch_items).toContain('下一章继续观察样章策略命中率')
+
+    const confirmedContext = mergeConfirmedPreDraftBriefIntoContext(contextPackage, {
+      ...brief,
+      confirmed_at: '2026-06-13T10:00:00.000Z',
+    })
+
+    expect(confirmedContext.governance_recheck_memory.evidence).toContain('第42章对白交锋已补回样章节奏')
+    expect(confirmedContext.chapter_target.governance_recheck_memory.watch_items).toContain('下一章继续观察样章策略命中率')
   })
 
   test('builds a pre-draft brief from context package and commercial scene cards', () => {

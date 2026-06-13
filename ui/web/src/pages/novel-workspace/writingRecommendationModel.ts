@@ -447,6 +447,17 @@ export type NovelPreDraftBrief = {
     items?: string[]
     required_actions?: string[]
   }
+  governance_recheck_memory?: {
+    source_run_id?: number | string | null
+    status?: string
+    label?: string
+    summary?: string
+    evidence?: string[]
+    repaired_evidence?: string[]
+    failed_evidence?: string[]
+    watch_items?: string[]
+    storyline_decision_task_count?: number | null
+  }
   next_batch_brief?: {
     chapter_range_label?: string
     batch_goal?: string
@@ -551,6 +562,11 @@ export type NovelDraftBriefSummary = {
     deliveryRiskItems: string
     deliveryRiskPriority: string
     deliveryRiskActions: string
+    governanceMemoryStatus: string
+    governanceMemorySummary: string
+    governanceMemoryEvidence: string
+    governanceMemoryFailedEvidence: string
+    governanceMemoryWatchItems: string
     expectationMustDeliver: string
     expectationKeepAlive: string
     expectationMustNotBreak: string
@@ -643,6 +659,12 @@ export function buildNovelDraftBriefSummary({
 }): NovelDraftBriefSummary {
   const expectationListText = (items?: Array<{ text?: string; label?: string }>) => Array.isArray(items)
     ? items.map(item => item?.text || item?.label).filter(Boolean).join('、')
+    : ''
+  const textList = (items?: any[]) => Array.isArray(items)
+    ? items.map(item => {
+      if (typeof item === 'string') return item.trim()
+      return String(item?.text || item?.label || item?.summary || item?.detail || item?.title || item?.name || '').trim()
+    }).filter(Boolean).join('、')
     : ''
   const longformBattleLaneText = (items?: NovelPreDraftBrief['longform_battle_context']['risk_lanes']) => Array.isArray(items)
     ? items.map(item => [
@@ -748,6 +770,17 @@ export function buildNovelDraftBriefSummary({
     deliveryRiskItems: Array.isArray(preDraftBrief?.delivery_risk_carry_over?.items) ? preDraftBrief.delivery_risk_carry_over.items.filter(Boolean).join('、') : '',
     deliveryRiskPriority: preDraftBrief?.delivery_risk_carry_over?.priority_label?.trim() || '',
     deliveryRiskActions: Array.isArray(preDraftBrief?.delivery_risk_carry_over?.required_actions) ? preDraftBrief.delivery_risk_carry_over.required_actions.filter(Boolean).join('、') : '',
+    governanceMemoryStatus: [
+      preDraftBrief?.governance_recheck_memory?.label?.trim(),
+      preDraftBrief?.governance_recheck_memory?.source_run_id ? `#${preDraftBrief.governance_recheck_memory.source_run_id}` : '',
+    ].filter(Boolean).join(' · '),
+    governanceMemorySummary: preDraftBrief?.governance_recheck_memory?.summary?.trim() || '',
+    governanceMemoryEvidence: textList([
+      ...(preDraftBrief?.governance_recheck_memory?.evidence || []),
+      ...(preDraftBrief?.governance_recheck_memory?.repaired_evidence || []),
+    ]),
+    governanceMemoryFailedEvidence: textList(preDraftBrief?.governance_recheck_memory?.failed_evidence),
+    governanceMemoryWatchItems: textList(preDraftBrief?.governance_recheck_memory?.watch_items),
     expectationMustDeliver: expectationListText(preDraftBrief?.reader_expectation_ledger?.must_deliver),
     expectationKeepAlive: expectationListText(preDraftBrief?.reader_expectation_ledger?.keep_alive),
     expectationMustNotBreak: Array.isArray(preDraftBrief?.reader_expectation_ledger?.must_not_break) ? preDraftBrief.reader_expectation_ledger.must_not_break.filter(Boolean).join('、') : '',

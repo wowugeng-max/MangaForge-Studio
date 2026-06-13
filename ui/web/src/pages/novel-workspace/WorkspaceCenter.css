@@ -1743,6 +1743,35 @@
   white-space: nowrap;
 }
 
+.novel-draft-brief-governance-memory {
+  display: grid;
+  grid-template-columns: auto minmax(82px, 0.42fr) minmax(0, 1.2fr) minmax(0, 1.2fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 7px 8px;
+  border: 1px solid rgba(20, 184, 166, 0.2);
+  border-radius: 6px;
+  background: rgba(240, 253, 250, 0.92);
+}
+
+.novel-draft-brief-governance-memory span {
+  color: #0f766e;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.novel-draft-brief-governance-memory strong {
+  min-width: 0;
+  color: #0f172a;
+  font-size: 12px;
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .novel-draft-brief-handoff {
   display: grid;
   grid-template-columns: auto repeat(4, minmax(0, 1fr));
@@ -2502,6 +2531,18 @@
   }
 
   .novel-draft-brief-expectation-debt strong:nth-of-type(2) {
+    display: none;
+  }
+
+  .novel-draft-brief-governance-memory {
+    grid-template-columns: auto repeat(2, minmax(0, 1fr));
+    gap: 5px;
+    margin-top: 6px;
+    padding: 6px;
+  }
+
+  .novel-draft-brief-governance-memory strong:nth-of-type(3),
+  .novel-draft-brief-governance-memory strong:nth-of-type(4) {
     display: none;
   }
 

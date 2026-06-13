@@ -710,6 +710,37 @@ describe('buildNovelDraftBriefSummary', () => {
     expect(summary.briefFields.chapterBenchmarkForbidden).toContain('不得复制样例桥段')
   })
 
+  test('surfaces governance recheck memory in the chapter pre-draft brief summary', () => {
+    const summary = buildNovelDraftBriefSummary({
+      activeWordCount: 0,
+      chapterGoal: '主角夺回主动权',
+      conflict: '旧臣压制主角',
+      endingHook: '带血腰牌入席',
+      sceneCardCount: 2,
+      preDraftBrief: {
+        chapter_goal: '主角夺回主动权',
+        reader_promise: '主角第一次正面压住旧臣',
+        core_conflict: '旧臣压制主角',
+        ending_hook: '带血腰牌入席',
+        scene_briefs: [{ scene_no: 1, title: '当堂应答' }],
+        governance_recheck_memory: {
+          source_run_id: 44,
+          status: 'closed',
+          label: '治理复查已记录',
+          summary: '恢复依据闭环 2/2，本章继续继承修后证据。',
+          evidence: ['第42章对白交锋已补回样章节奏'],
+          failed_evidence: [],
+          watch_items: ['下一章继续观察样章策略命中率'],
+          storyline_decision_task_count: 0,
+        },
+      },
+    })
+
+    expect(summary.briefFields.governanceMemoryStatus).toContain('治理复查已记录')
+    expect(summary.briefFields.governanceMemoryEvidence).toContain('第42章对白交锋已补回样章节奏')
+    expect(summary.briefFields.governanceMemoryWatchItems).toContain('下一章继续观察样章策略命中率')
+  })
+
   test('shows an editable pre-draft brief when scene cards exist but the brief is not confirmed', () => {
     const summary = buildNovelDraftBriefSummary({
       activeWordCount: 0,
