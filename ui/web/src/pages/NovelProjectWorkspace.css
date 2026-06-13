@@ -21,6 +21,32 @@
   overflow: auto;
 }
 
+.novel-workspace-topbar {
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.novel-workspace-topbar::-webkit-scrollbar {
+  display: none;
+}
+
+.novel-workspace-area-tabs {
+  flex: 0 0 auto !important;
+  min-width: max-content !important;
+  white-space: nowrap;
+}
+
+.novel-workspace-area-tabs .ant-space-item {
+  flex: 0 0 auto;
+}
+
+.novel-workspace-topbar-meta,
+.novel-workspace-focus-toggle,
+.novel-workspace-task-entry {
+  flex: 0 0 auto;
+}
+
 .novel-mode-tab {
   border-radius: 8px;
   color: #475569;
@@ -98,7 +124,7 @@
 
 @media (min-width: 769px) {
   .novel-workspace-cockpit {
-    max-height: min(42vh, 420px);
+    max-height: min(30vh, 300px);
   }
 }
 
@@ -145,7 +171,7 @@
   }
 
   .novel-workspace-cockpit {
-    max-height: min(44vh, 360px);
+    max-height: min(34vh, 260px);
   }
 
   .novel-workspace-reference-shell {

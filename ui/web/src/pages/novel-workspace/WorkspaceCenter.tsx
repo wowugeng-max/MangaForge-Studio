@@ -50,6 +50,7 @@ type ChapterWordTargetMode = 'standard' | 'long' | 'custom'
 
 const EDITOR_DISPLAY_PREFS_KEY = 'novel.workspace.editorDisplayPrefs'
 const NOVEL_WRITING_DESK_COLLAPSED_KEY = 'novel.workspace.writingDeskCollapsed'
+const NOVEL_WRITING_AUX_COLLAPSED_KEY = 'novel.workspace.writingAuxCollapsed'
 const DEFAULT_EDITOR_DISPLAY_PREFS: EditorDisplayPrefs = { fontSize: 17, lineHeight: 32 }
 const EDITOR_DISPLAY_PRESETS: Array<EditorDisplayPrefs & { key: string; label: string }> = [
   { key: 'webNovel', label: '网文标准', fontSize: 17, lineHeight: 32 },
@@ -84,13 +85,27 @@ function saveEditorDisplayPrefs(prefs: EditorDisplayPrefs) {
 }
 
 function loadWritingDeskCollapsed() {
-  if (typeof window === 'undefined') return false
-  return window.localStorage.getItem(NOVEL_WRITING_DESK_COLLAPSED_KEY) === 'true'
+  if (typeof window === 'undefined') return true
+  const value = window.localStorage.getItem(NOVEL_WRITING_DESK_COLLAPSED_KEY)
+  if (value === null) return true
+  return value === 'true'
 }
 
 function saveWritingDeskCollapsed(collapsed: boolean) {
   if (typeof window === 'undefined') return
   window.localStorage.setItem(NOVEL_WRITING_DESK_COLLAPSED_KEY, collapsed ? 'true' : 'false')
+}
+
+function loadWritingAuxCollapsed() {
+  if (typeof window === 'undefined') return true
+  const value = window.localStorage.getItem(NOVEL_WRITING_AUX_COLLAPSED_KEY)
+  if (value === null) return true
+  return value === 'true'
+}
+
+function saveWritingAuxCollapsed(collapsed: boolean) {
+  if (typeof window === 'undefined') return
+  window.localStorage.setItem(NOVEL_WRITING_AUX_COLLAPSED_KEY, collapsed ? 'true' : 'false')
 }
 
 function SaveIndicator({ status }: { status: SaveStatus }) {
@@ -422,6 +437,7 @@ export function WorkspaceCenter({
 }) {
   const [editorDisplayPrefs, setEditorDisplayPrefs] = React.useState<EditorDisplayPrefs>(() => loadEditorDisplayPrefs())
   const [writingDeskCollapsed, setWritingDeskCollapsed] = React.useState(() => loadWritingDeskCollapsed())
+  const [writingAuxCollapsed, setWritingAuxCollapsed] = React.useState(() => loadWritingAuxCollapsed())
   const materialReady = !materialScore || Boolean(materialScore.can_generate)
   const materialRecommendations = Array.isArray(materialScore?.recommendations)
     ? materialScore.recommendations.filter(Boolean)
@@ -589,6 +605,22 @@ export function WorkspaceCenter({
             tags: deliverySummary.visible ? [deliverySummary.qualityLabel, deliverySummary.storyStateLabel].filter(Boolean) : ['待质检'],
           }
     : null
+  const draftBriefActionLoading = draftBriefSummary.actionKey === 'scene_cards'
+    ? generatingSceneCards
+    : ['build_brief', 'confirm_brief'].includes(String(draftBriefSummary.actionKey || ''))
+      ? Boolean(preDraftBriefLoading)
+      : generatingProse
+  const writingAuxToggleLabel = writingAuxCollapsed ? '展开辅助面板' : '收起辅助面板'
+  const writingAuxToggleHint = writingAuxCollapsed
+    ? '辅助面板已收起，编辑器优先显示'
+    : '辅助面板已展开，可查看队列、交稿和任务书'
+  const writingAuxQueueSummary = writingQueue?.visible
+    ? [
+        `可写 ${writingQueue.readyCount}`,
+        writingQueue.blockedCount > 0 ? `待补 ${writingQueue.blockedCount}` : '',
+        writingQueue.draftedCount > 0 ? `待质检 ${writingQueue.draftedCount}` : '',
+      ].filter(Boolean).join(' · ')
+    : ''
 
   React.useEffect(() => {
     saveEditorDisplayPrefs(editorDisplayPrefs)
@@ -597,6 +629,10 @@ export function WorkspaceCenter({
   React.useEffect(() => {
     saveWritingDeskCollapsed(writingDeskCollapsed)
   }, [writingDeskCollapsed])
+
+  React.useEffect(() => {
+    saveWritingAuxCollapsed(writingAuxCollapsed)
+  }, [writingAuxCollapsed])
 
   const secondaryActionMenu = (
     <div className="novel-editor-action-popover">
@@ -824,6 +860,66 @@ export function WorkspaceCenter({
             )}
           </div>
 
+          <div className={`novel-writing-aux-rail ${writingAuxCollapsed ? 'is-collapsed' : 'is-expanded'}`} aria-label="写作辅助面板状态">
+            <div className="novel-writing-aux-summary">
+              <Tag className="novel-writing-aux-role" bordered={false}>{aiResponsibility.roleLabel}</Tag>
+              <Tooltip title={`${recommendedAction.label}：${recommendedAction.reason}`}>
+                <Text className="novel-writing-aux-focus">{recommendedAction.label} · {aiResponsibility.actionLabel}</Text>
+              </Tooltip>
+              {writingQueue?.visible && <Tag bordered={false}>队列 {writingAuxQueueSummary}</Tag>}
+              {deliverySummary.visible && <Tag bordered={false}>交稿 {deliverySummary.statusLabel}</Tag>}
+              {chapterHandoffDesk?.visible && <Tag bordered={false}>交接 {chapterHandoffDesk.label}</Tag>}
+              {draftBriefSummary.visible && <Tag bordered={false}>任务书 {draftBriefSummary.statusLabel}</Tag>}
+            </div>
+            <Space className="novel-writing-aux-actions" size={6} wrap>
+              {writingAuxCollapsed && queueFocus && (
+                <Button
+                  size="small"
+                  type="primary"
+                  className="novel-writing-aux-action"
+                  loading={queueFocus.loading}
+                  disabled={queueFocus.disabled}
+                  onClick={queueFocus.run}
+                >
+                  {queueFocus.actionLabel}
+                </Button>
+              )}
+              {writingAuxCollapsed && !queueFocus && deliverySummary.actionKey && (
+                <Button
+                  size="small"
+                  className="novel-writing-aux-action"
+                  loading={deliveryActionLoading}
+                  onClick={() => onDeliveryAction?.(deliverySummary.actionKey!)}
+                >
+                  {deliverySummary.compactActionLabel}
+                </Button>
+              )}
+              {writingAuxCollapsed && !queueFocus && !deliverySummary.actionKey && draftBriefSummary.actionKey && (
+                <Button
+                  size="small"
+                  className="novel-writing-aux-action"
+                  loading={draftBriefActionLoading}
+                  onClick={runDraftBriefAction}
+                >
+                  {draftBriefSummary.actionLabel}
+                </Button>
+              )}
+              <Tooltip title={writingAuxToggleHint}>
+                <Button
+                  size="small"
+                  className="novel-writing-aux-toggle"
+                  icon={writingAuxCollapsed ? <DownOutlined /> : <UpOutlined />}
+                  aria-expanded={!writingAuxCollapsed}
+                  onClick={() => setWritingAuxCollapsed(prev => !prev)}
+                >
+                  {writingAuxToggleLabel}
+                </Button>
+              </Tooltip>
+            </Space>
+          </div>
+
+          {!writingAuxCollapsed && (
+            <div className="novel-writing-support-stack" aria-label="写作辅助面板">
           <div className={`novel-ai-responsibility-strip novel-ai-responsibility-strip-${aiResponsibility.tone}`}>
             <div className="novel-ai-responsibility-main">
               <span className="novel-ai-responsibility-label">AI 当前职责</span>
@@ -1546,18 +1642,14 @@ export function WorkspaceCenter({
                   className="novel-draft-brief-action"
                   type={draftBriefSummary.actionKey === 'generate' ? 'primary' : 'default'}
                   size="small"
-                  loading={
-                    draftBriefSummary.actionKey === 'scene_cards'
-                      ? generatingSceneCards
-                      : ['build_brief', 'confirm_brief'].includes(draftBriefSummary.actionKey)
-                        ? Boolean(preDraftBriefLoading)
-                        : generatingProse
-                  }
+                  loading={draftBriefActionLoading}
                   onClick={runDraftBriefAction}
                 >
                   {draftBriefSummary.actionLabel}
                 </Button>
               )}
+            </div>
+          )}
             </div>
           )}
 

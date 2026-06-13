@@ -146,6 +146,90 @@
   flex-shrink: 0;
 }
 
+.novel-writing-aux-rail {
+  min-height: 40px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 20px;
+  border-bottom: 1px solid #e6ebf2;
+  background: #fff;
+}
+
+.novel-writing-aux-rail.is-collapsed {
+  background: #fffdf7;
+}
+
+.novel-writing-aux-summary {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.novel-writing-aux-summary .ant-tag {
+  flex: 0 0 auto;
+  max-width: 180px;
+  margin-inline-end: 0;
+  font-weight: 750;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.novel-writing-aux-role.ant-tag {
+  color: #1d4ed8;
+  background: #e8f1ff;
+}
+
+.novel-writing-aux-focus {
+  min-width: 88px;
+  max-width: min(380px, 30vw);
+  color: #9a4b20 !important;
+  font-size: 13px;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.novel-writing-aux-actions {
+  flex: 0 0 auto;
+  justify-content: flex-end;
+}
+
+.novel-writing-aux-action.ant-btn,
+.novel-writing-aux-toggle.ant-btn {
+  height: 28px;
+  border-radius: 999px;
+  font-weight: 750;
+  flex-shrink: 0;
+}
+
+.novel-writing-aux-toggle.ant-btn {
+  border-color: #d8e0ea;
+  color: #405066;
+  background: #fff;
+}
+
+.novel-writing-support-stack {
+  flex-shrink: 0;
+  max-height: min(34vh, 320px);
+  overflow: auto;
+  border-bottom: 1px solid #dfe7f1;
+  background: #fff;
+}
+
+.novel-writing-support-stack > *:last-child {
+  border-bottom: 0;
+}
+
+.novel-writing-support-stack .novel-writing-queue-strip {
+  min-height: 0;
+}
+
 @media (max-width: 1500px) {
   .novel-editor-toolbar-collapsed {
     gap: 10px !important;
@@ -2155,6 +2239,50 @@
 
   .novel-editor-more-actions {
     display: inline-flex;
+  }
+
+  .novel-writing-aux-rail {
+    min-height: 36px;
+    padding: 5px 10px;
+    align-items: flex-start;
+    gap: 6px;
+  }
+
+  .novel-writing-aux-summary {
+    flex: 1;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .novel-writing-aux-summary::-webkit-scrollbar {
+    display: none;
+  }
+
+  .novel-writing-aux-focus {
+    max-width: 42vw;
+    font-size: 12px;
+  }
+
+  .novel-writing-aux-summary .ant-tag {
+    max-width: 128px;
+    font-size: 11px;
+    line-height: 20px;
+  }
+
+  .novel-writing-aux-actions {
+    max-width: 44vw;
+    gap: 4px !important;
+  }
+
+  .novel-writing-aux-action.ant-btn,
+  .novel-writing-aux-toggle.ant-btn {
+    height: 26px;
+    padding-inline: 8px;
+    font-size: 12px;
+  }
+
+  .novel-writing-support-stack {
+    max-height: min(40vh, 300px);
   }
 
   .novel-ai-responsibility-strip {
