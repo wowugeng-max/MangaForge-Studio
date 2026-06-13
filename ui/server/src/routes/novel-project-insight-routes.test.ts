@@ -140,6 +140,71 @@ describe('longform repair audit summary', () => {
     expect(audit.governance_recheck_memory.watch_items).toContain('下一批继续观察样章策略命中率')
   })
 
+  test('deposits single-chapter governance recheck repairs into governance memory audit', () => {
+    const run = {
+      id: 45,
+      output_ref: JSON.stringify({
+        report: {
+          summary: {
+            avg_quality_score: 80,
+            avg_readiness: 78,
+            failed_chapter_count: 0,
+          },
+          weak_count: 1,
+        },
+        tasks: [
+          {
+            source: 'review_annotation_risk',
+            task_type: 'repair_quality',
+            issue_type: 'recovery_evidence_mismatch',
+            annotation_source: 'governance_recheck_sync',
+            annotation_category: 'recovery_evidence',
+            task_status: 'resolved',
+            chapter_no: 42,
+            title: '第42章单章恢复依据回修',
+            recovery_evidence_review: {
+              status: 'ok',
+              summary: '单章治理复查已接住修后证据。',
+              failed_evidence: [],
+              repaired_evidence: ['第42章对白交锋已补回样章节奏'],
+              watch_items: ['下一章继续观察样章策略命中率'],
+            },
+          },
+        ],
+      }),
+    }
+    const trends = {
+      summary: {
+        avg_quality_score: 87,
+        avg_readiness: 84,
+        failed_chapter_count: 0,
+      },
+      weak_rows: [],
+      recommendations: [],
+    }
+
+    const audit = buildLongformRepairAuditSummary(run, trends)
+
+    expect(audit.recovery_evidence_closure).toEqual(expect.objectContaining({
+      status: 'closed',
+      total: 1,
+      resolved: 1,
+      single_chapter_count: 1,
+      batch_count: 0,
+    }))
+    expect(audit.recovery_evidence_closure.sources).toContain('single_chapter_governance_recheck')
+    expect(audit.recovery_evidence_closure.tasks[0]).toEqual(expect.objectContaining({
+      source: 'single_chapter_governance_recheck',
+      source_label: '单章治理复查',
+      chapter_no: 42,
+    }))
+    expect(audit.governance_recheck_memory.summary).toContain('单章治理复查')
+    expect(audit.governance_recheck_memory.evidence).toContain('第42章对白交锋已补回样章节奏')
+    expect(audit.governance_recheck_memory.watch_items).toContain('下一章继续观察样章策略命中率')
+    expect(audit.governance_recheck_memory.source_modes).toContain('single_chapter_governance_recheck')
+    expect(audit.conclusion.join('')).toContain('单章治理复查')
+  })
+
   test('keeps recovery evidence audit open when residual failed evidence remains', () => {
     const run = {
       id: 43,

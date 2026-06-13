@@ -80,6 +80,39 @@ describe('buildRepairTaskRevisionPrompt', () => {
     expect(prompt).toContain('修订后必须重新运行批次交稿复盘')
   })
 
+  test('uses single-chapter governance recheck wording for recovery evidence annotation repairs', () => {
+    const prompt = buildRepairTaskRevisionPrompt({
+      source: 'review_annotation_risk',
+      issue_type: 'recovery_evidence_mismatch',
+      annotation_source: 'governance_recheck_sync',
+      annotation_category: 'recovery_evidence',
+      chapter_no: 42,
+      message: '单章交稿未继承治理复查记忆。',
+      action: '按治理复查记忆回修本章，把修后证据和观察项写成正文可见动作。',
+      acceptance_criteria: [
+        '第42章对白交锋补回样章节奏',
+        'governance_recheck_sync 复检为 ok 且 failed_evidence 为空',
+      ],
+      recovery_evidence_review: {
+        status: 'warn',
+        summary: '恢复依据缺口 2',
+        failed_evidence: [
+          '第42章对白交锋已补回样章节奏',
+        ],
+        watch_items: [
+          '下一章继续观察样章策略命中率',
+        ],
+      },
+    })
+
+    expect(prompt).toContain('【单章恢复依据回修】')
+    expect(prompt).toContain('治理复查记忆')
+    expect(prompt).toContain('失效依据：第42章对白交锋已补回样章节奏')
+    expect(prompt).toContain('仍需观察：下一章继续观察样章策略命中率')
+    expect(prompt).toContain('修订后必须重新运行单章治理复查 / governance_recheck_sync')
+    expect(prompt).not.toContain('修订后必须重新运行批次交稿复盘')
+  })
+
   test('falls back to run input next batch brief when task lacks embedded context', () => {
     const prompt = buildRepairTaskRevisionPrompt(
       {
@@ -810,6 +843,48 @@ describe('buildRepairTaskRevisionPrompt', () => {
     expect(residual.taskStatus).toBe('needs_review')
     expect(residual.note).toContain('恢复依据仍有失效项')
     expect(residual.note).toContain('第42章样章已重审')
+  })
+
+  test('uses governance recheck closure wording for single-chapter recovery evidence repairs', () => {
+    const cleared = buildDeliveryRiskRevisionClosurePlan(
+      {
+        source: 'review_annotation_risk',
+        issue_type: 'recovery_evidence_mismatch',
+        annotation_source: 'governance_recheck_sync',
+      },
+      {
+        quality_refresh: { ok: true, score: 86 },
+        recovery_evidence_review: {
+          status: 'ok',
+          failed_evidence: [],
+          summary: '单章治理复查已接住修后证据。',
+        },
+      },
+    )
+
+    expect(cleared.taskStatus).toBe('resolved')
+    expect(cleared.note).toContain('单章治理复查通过')
+    expect(cleared.note).toContain('governance_recheck_sync')
+
+    const residual = buildDeliveryRiskRevisionClosurePlan(
+      {
+        source: 'review_annotation_risk',
+        issue_type: 'recovery_evidence_mismatch',
+        annotation_source: 'governance_recheck_sync',
+      },
+      {
+        quality_refresh: { ok: true, score: 82 },
+        recovery_evidence_review: {
+          status: 'warn',
+          failed_evidence: ['第42章对白交锋仍未形成可见反制'],
+          summary: '恢复依据缺口 1',
+        },
+      },
+    )
+
+    expect(residual.taskStatus).toBe('needs_review')
+    expect(residual.note).toContain('单章恢复依据仍有失效项')
+    expect(residual.note).toContain('第42章对白交锋仍未形成可见反制')
   })
 
   test('closes storyline decision tasks only after storyline sync recheck clears', () => {

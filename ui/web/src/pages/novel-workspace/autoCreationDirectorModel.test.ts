@@ -962,8 +962,11 @@ describe('buildAutoCreationDirectorModel', () => {
               status: 'needs_followup',
               recovery_evidence_closure: {
                 status: 'needs_followup',
-                total: 2,
+                total: 3,
                 resolved: 1,
+                single_chapter_count: 1,
+                batch_count: 2,
+                sources: ['single_chapter_governance_recheck', 'safe_batch_recovery_recheck'],
                 failed_evidence: ['样章任务书复检通过 1 项'],
                 watch_items: ['下一批继续观察样章策略命中率'],
               },
@@ -991,6 +994,9 @@ describe('buildAutoCreationDirectorModel', () => {
 
     expect(model.governanceClosureBrief.status).toBe('block')
     expect(model.governanceClosureBrief.summary).toContain('恢复依据审计')
+    expect(model.governanceClosureBrief.summary).toContain('单章治理复查 1')
+    expect(model.governanceClosureBrief.summary).toContain('批次恢复复查 2')
+    expect(model.governanceClosureBrief.sourceSummary).toBe('单章治理复查 1；批次恢复复查 2')
     expect(model.governanceClosureBrief.summary).toContain('剧情线决策')
     expect(model.governanceClosureBrief.action.key).toBe('review_governance_closure')
     expect(model.governanceClosureBrief.action.label).toBe('治理复查台')
@@ -999,6 +1005,7 @@ describe('buildAutoCreationDirectorModel', () => {
       recoveryEvidenceStatus: 'needs_followup',
       storylineDecisionTaskCount: 1,
       storylineDecisionTaskTitles: ['第45章剧情线回修'],
+      recoveryEvidenceSourceSummary: '单章治理复查 1；批次恢复复查 2',
     }))
     expect(model.serialCockpit.riskQueue[0]).toEqual(expect.objectContaining({
       key: 'governance_closure',

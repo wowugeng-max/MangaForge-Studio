@@ -102,9 +102,18 @@ function parseJsonValue(value: any) {
   }
 }
 
-function repairTaskActionLabel(task: any) {
+function isSingleChapterRecoveryEvidenceTask(task: any) {
+  if (String(task?.issue_type || '') !== 'recovery_evidence_mismatch') return false
+  const source = String(task?.source || '')
+  const annotationSource = String(task?.annotation_source || task?.annotationSource || '')
+  return source === 'review_annotation_risk' || annotationSource === 'governance_recheck_sync'
+}
+
+export function repairTaskActionLabel(task: any) {
   if (String(task?.issue_type || '') === 'batch_brief_mismatch') return '按批次修订'
-  if (String(task?.issue_type || '') === 'recovery_evidence_mismatch') return '按批次修订'
+  if (String(task?.issue_type || '') === 'recovery_evidence_mismatch') {
+    return isSingleChapterRecoveryEvidenceTask(task) ? '回修依据' : '按批次修订'
+  }
   if (String(task?.issue_type || '') === 'style_sample_task_book_rebuild') return '重审样章'
   if (String(task?.source || '') === 'reader_trial_review' || String(task?.issue_type || '') === 'reader_trial_drop_point') return '补试读'
   if (String(task?.issue_type || '') === 'volume_segment_missed') return '补阶段结算'
@@ -244,6 +253,14 @@ export type RecoveryEvidenceAuditView = {
   label: string
   total: number
   resolved: number
+  sourceSummary: string
+  sourceGroups: {
+    source: string
+    label: string
+    count: number
+    taskIndexes: number[]
+    chapterNos: number[]
+  }[]
   sourceRunId: any
   memoryLabel: string
   memorySummary: string
@@ -254,6 +271,8 @@ export type RecoveryEvidenceAuditView = {
     chapterId: number | null
     chapterNo: number | null
     taskIndex: number | null
+    source: string
+    sourceLabel: string
     status: string
     title: string
     summary: string
@@ -264,15 +283,68 @@ function compactAuditList(values: any[], limit = 8) {
   return Array.from(new Set(values.map(item => compactEvidenceText(item)).filter(Boolean))).slice(0, limit)
 }
 
+function recoveryEvidenceSourceSummary(closure: any) {
+  const tasks = Array.isArray(closure?.tasks) ? closure.tasks : []
+  const singleChapterCount = Number(closure?.single_chapter_count ?? closure?.singleChapterCount ?? 0)
+    || tasks.filter((task: any) => String(task?.source || task?.sourceMode || '') === 'single_chapter_governance_recheck').length
+  const batchCount = Number(closure?.batch_count ?? closure?.batchCount ?? 0)
+    || tasks.filter((task: any) => String(task?.source || task?.sourceMode || '') === 'safe_batch_recovery_recheck').length
+  const genericCount = Math.max(0, Number(closure?.total || 0) - singleChapterCount - batchCount)
+  return [
+    singleChapterCount > 0 ? `单章治理复查 ${singleChapterCount}` : '',
+    batchCount > 0 ? `批次恢复复查 ${batchCount}` : '',
+    genericCount > 0 ? `恢复依据复查 ${genericCount}` : '',
+  ].filter(Boolean).join('；')
+}
+
+function recoveryEvidenceTaskSourceMeta(task: any) {
+  const source = String(task?.source || task?.sourceMode || '')
+  const sourceLabel = compactEvidenceText(task?.source_label || task?.sourceLabel || '')
+  if (source === 'single_chapter_governance_recheck') return { source, label: sourceLabel || '单章治理复查' }
+  if (source === 'safe_batch_recovery_recheck') return { source, label: sourceLabel || '批次恢复复查' }
+  if (isSingleChapterRecoveryEvidenceTask(task)) return { source: 'single_chapter_governance_recheck', label: '单章治理复查' }
+  if (String(task?.source || '') === 'auto_creation_safe_batch_risk' || task?.segment) return { source: 'safe_batch_recovery_recheck', label: '批次恢复复查' }
+  return { source: 'recovery_evidence_recheck', label: sourceLabel || '恢复依据复查' }
+}
+
+function recoveryEvidenceSourceGroups(tasks: any[]) {
+  const groups = new Map<string, { source: string; label: string; count: number; taskIndexes: number[]; chapterNos: number[] }>()
+  for (const task of tasks) {
+    const meta = recoveryEvidenceTaskSourceMeta(task)
+    const existing = groups.get(meta.source) || { source: meta.source, label: meta.label, count: 0, taskIndexes: [], chapterNos: [] }
+    existing.count += 1
+    const taskIndex = Number(task?.task_index ?? task?.taskIndex)
+    if (Number.isFinite(taskIndex)) existing.taskIndexes.push(taskIndex)
+    const chapterNo = Number(task?.chapter_no ?? task?.chapterNo)
+    if (Number.isFinite(chapterNo) && chapterNo > 0 && !existing.chapterNos.includes(chapterNo)) existing.chapterNos.push(chapterNo)
+    groups.set(meta.source, existing)
+  }
+  const order: Record<string, number> = {
+    single_chapter_governance_recheck: 0,
+    safe_batch_recovery_recheck: 1,
+    recovery_evidence_recheck: 2,
+  }
+  return Array.from(groups.values())
+    .map(group => ({
+      ...group,
+      taskIndexes: Array.from(new Set(group.taskIndexes)).sort((a, b) => a - b),
+      chapterNos: group.chapterNos.sort((a, b) => a - b),
+    }))
+    .sort((a, b) => (order[a.source] ?? 99) - (order[b.source] ?? 99) || a.label.localeCompare(b.label))
+}
+
 export function buildRecoveryEvidenceAuditView(audit?: any | null): RecoveryEvidenceAuditView | null {
   const closure = audit?.recovery_evidence_closure || audit?.recoveryEvidenceClosure || null
   if (!closure || Number(closure.total || 0) <= 0) return null
   const memory = audit?.governance_recheck_memory || audit?.governanceRecheckMemory || null
+  const closureTasks = Array.isArray(closure.tasks) ? closure.tasks : []
   return {
     status: closure.status === 'closed' ? 'closed' : 'needs_followup',
     label: '恢复依据审计',
     total: Number(closure.total || 0),
     resolved: Number(closure.resolved || 0),
+    sourceSummary: recoveryEvidenceSourceSummary(closure),
+    sourceGroups: recoveryEvidenceSourceGroups(closureTasks),
     sourceRunId: memory?.source_run_id ?? memory?.sourceRunId ?? audit?.source_run_id ?? audit?.sourceRunId ?? null,
     memoryLabel: compactEvidenceText(memory?.label || ''),
     memorySummary: compactEvidenceText(memory?.summary || '', 200),
@@ -295,11 +367,13 @@ export function buildRecoveryEvidenceAuditView(audit?: any | null): RecoveryEvid
       ...(Array.isArray(closure.watch_items) ? closure.watch_items : []),
       ...(Array.isArray(closure.watchItems) ? closure.watchItems : []),
     ]),
-    relatedTasks: (Array.isArray(closure.tasks) ? closure.tasks : [])
+    relatedTasks: closureTasks
       .map((task: any) => ({
+        ...recoveryEvidenceTaskSourceMeta(task),
         chapterId: Number(task?.chapter_id ?? task?.chapterId ?? 0) || null,
         chapterNo: Number(task?.chapter_no ?? task?.chapterNo ?? 0) || null,
         taskIndex: Number.isFinite(Number(task?.task_index ?? task?.taskIndex)) ? Number(task?.task_index ?? task?.taskIndex) : null,
+        sourceLabel: recoveryEvidenceTaskSourceMeta(task).label,
         status: String(task?.task_status ?? task?.status ?? 'open'),
         title: compactEvidenceText(task?.title || task?.message || '恢复依据修复任务', 120),
         summary: compactEvidenceText(task?.summary || task?.message || task?.action || '', 160),
@@ -391,7 +465,7 @@ function RecoveryEvidenceReviewPreview({ task }: { task: any }) {
   return (
     <div style={{ marginTop: 4, padding: 8, border: '1px solid #f5d0fe', borderRadius: 6, background: '#fdf4ff' }}>
       <Space direction="vertical" size={4} style={{ width: '100%' }}>
-        <Text strong style={{ fontSize: 12 }}>恢复依据复盘</Text>
+        <Text strong style={{ fontSize: 12 }}>{isSingleChapterRecoveryEvidenceTask(task) ? '单章恢复依据复盘' : '恢复依据复盘'}</Text>
         {summary && (
           <Text type="danger" style={{ fontSize: 12 }}>
             复盘结论：{summary}
@@ -613,6 +687,7 @@ function RepairTaskRunSummary({
   const tasks = Array.isArray(output.tasks) ? output.tasks : []
   const audit = output.audit_summary || null
   const [focusedTaskIndex, setFocusedTaskIndex] = useState<number | null>(null)
+  const [focusedTaskSource, setFocusedTaskSource] = useState<string>('')
   const high = tasks.filter((task: any) => task.severity === 'high').length
   const medium = tasks.filter((task: any) => task.severity === 'medium').length
   const resolved = tasks.filter((task: any) => task.task_status === 'resolved').length
@@ -700,7 +775,26 @@ function RepairTaskRunSummary({
                 <Tag bordered={false}>已确认 {recoveryEvidenceAudit.resolved}/{recoveryEvidenceAudit.total}</Tag>
                 {recoveryEvidenceAudit.sourceRunId && <Tag bordered={false}>来源 #{recoveryEvidenceAudit.sourceRunId}</Tag>}
                 {recoveryEvidenceAudit.memoryLabel && <Tag color="purple" bordered={false}>{recoveryEvidenceAudit.memoryLabel}</Tag>}
+                {recoveryEvidenceAudit.sourceSummary && <Tag color="purple" bordered={false}>{recoveryEvidenceAudit.sourceSummary}</Tag>}
               </Space>
+              {recoveryEvidenceAudit.sourceGroups.length > 0 && (
+                <Space wrap size={[4, 4]}>
+                  <Text strong style={{ fontSize: 12 }}>按来源定位</Text>
+                  {recoveryEvidenceAudit.sourceGroups.map(group => (
+                    <Button
+                      key={group.source}
+                      size="small"
+                      type={focusedTaskSource === group.source ? 'primary' : 'default'}
+                      onClick={() => {
+                        setFocusedTaskSource(group.source)
+                        setFocusedTaskIndex(group.taskIndexes[0] ?? null)
+                      }}
+                    >
+                      {group.label} {group.count}
+                    </Button>
+                  ))}
+                </Space>
+              )}
               {recoveryEvidenceAudit.memorySummary && (
                 <Text type="secondary" style={{ fontSize: 12 }}>治理记忆：{recoveryEvidenceAudit.memorySummary}</Text>
               )}
@@ -725,7 +819,10 @@ function RepairTaskRunSummary({
                           {task.chapterNo ? `第${task.chapterNo}章 ` : ''}{task.title}{task.status ? ` · ${task.status}` : ''}{task.summary ? ` · ${task.summary}` : ''}
                         </Text>
                         {task.taskIndex !== null && (
-                          <Button size="small" type="link" onClick={() => setFocusedTaskIndex(task.taskIndex)}>定位任务</Button>
+                          <Button size="small" type="link" onClick={() => {
+                            setFocusedTaskSource('')
+                            setFocusedTaskIndex(task.taskIndex)
+                          }}>定位任务</Button>
                         )}
                         {chapterId && onSelectChapter && (
                           <Button size="small" type="link" onClick={() => onSelectChapter(chapterId)}>打开章节</Button>
@@ -756,9 +853,12 @@ function RepairTaskRunSummary({
           size="small"
           dataSource={tasks.slice(0, 40)}
           locale={{ emptyText: '暂无修复任务' }}
-          renderItem={(task: any, taskIndex: number) => (
-            <List.Item
-              style={focusedTaskIndex === taskIndex ? { border: '1px solid #a855f7', borderRadius: 6, paddingInline: 8, background: '#faf5ff' } : undefined}
+          renderItem={(task: any, taskIndex: number) => {
+            const sourceFocused = Boolean(focusedTaskSource && recoveryEvidenceTaskSourceMeta(task).source === focusedTaskSource)
+            const focused = focusedTaskIndex === taskIndex || sourceFocused
+            return (
+              <List.Item
+                style={focused ? { border: '1px solid #a855f7', borderRadius: 6, paddingInline: 8, background: '#faf5ff' } : undefined}
               actions={[
                 repairTaskActionLabel(task) && onExecuteTypedRepairTask && task.task_status !== 'resolved' ? <Button key="typed" size="small" type="primary" onClick={() => onExecuteTypedRepairTask(task, run, taskIndex)}>{repairTaskActionLabel(task)}</Button> : null,
                 onUpdateRepairTaskStatus && task.task_status !== 'resolved' ? <Button key="resolved" size="small" type="link" onClick={() => onUpdateRepairTaskStatus(task, run, 'resolved', taskIndex)}>已处理</Button> : null,
@@ -792,7 +892,8 @@ function RepairTaskRunSummary({
                 )}
               />
             </List.Item>
-          )}
+            )
+          }}
         />
       </Space>
     </Card>

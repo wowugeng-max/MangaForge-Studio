@@ -253,6 +253,19 @@ function recoveryRiskLabelsFromFailedItems(review: any) {
     ]), 120)
 }
 
+function recoveryEvidenceSourceMeta(task: any) {
+  const source = String(task?.source || '')
+  const annotationSource = String(task?.annotation_source || task?.annotationSource || '')
+  const annotationCategory = String(task?.annotation_category || task?.annotationCategory || '')
+  if (annotationSource === 'governance_recheck_sync' || (source === 'review_annotation_risk' && annotationCategory === 'recovery_evidence')) {
+    return { source: 'single_chapter_governance_recheck', label: '单章治理复查' }
+  }
+  if (source === 'auto_creation_safe_batch_risk' || task?.segment) {
+    return { source: 'safe_batch_recovery_recheck', label: '批次恢复复查' }
+  }
+  return { source: 'recovery_evidence_recheck', label: '恢复依据复查' }
+}
+
 function recoveryEvidenceClosureForAudit(tasks: any[], remainingTouchedRisks: any[]) {
   const recoveryTasks = tasks.filter((task: any) => String(task?.issue_type || task?.issueType || '') === 'recovery_evidence_mismatch')
   if (!recoveryTasks.length) {
@@ -260,6 +273,9 @@ function recoveryEvidenceClosureForAudit(tasks: any[], remainingTouchedRisks: an
       status: 'empty',
       total: 0,
       resolved: 0,
+      sources: [],
+      single_chapter_count: 0,
+      batch_count: 0,
       failed_evidence: [],
       repaired_evidence: [],
       watch_items: [],
@@ -269,6 +285,7 @@ function recoveryEvidenceClosureForAudit(tasks: any[], remainingTouchedRisks: an
 
   const weakByNo = new Map(remainingTouchedRisks.map((row: any) => [Number(row?.chapter_no || 0), row]))
   const taskRows = recoveryTasks.map((task: any, taskIndex: number) => {
+    const sourceMeta = recoveryEvidenceSourceMeta(task)
     const review = recoveryEvidenceReviewOf(task)
     const failedEvidence = uniqueCompactTexts([
       ...recoveryEvidenceFromFailedItems(review),
@@ -303,6 +320,8 @@ function recoveryEvidenceClosureForAudit(tasks: any[], remainingTouchedRisks: an
       chapter_no: chapterNo || null,
       task_index: taskIndex,
       task_status: task?.task_status || task?.status || 'open',
+      source: sourceMeta.source,
+      source_label: sourceMeta.label,
       title: task?.title || task?.message || '',
       status: review?.status || '',
       summary: compactText(review?.summary || task?.message || '', 200),
@@ -319,6 +338,9 @@ function recoveryEvidenceClosureForAudit(tasks: any[], remainingTouchedRisks: an
     status: unresolved.length || residual.length ? 'needs_followup' : 'closed',
     total: recoveryTasks.length,
     resolved: taskRows.filter(row => ['resolved', 'closed', 'done', 'completed'].includes(String(row.task_status || ''))).length,
+    sources: uniqueCompactTexts(taskRows.map(row => row.source), 120),
+    single_chapter_count: taskRows.filter(row => row.source === 'single_chapter_governance_recheck').length,
+    batch_count: taskRows.filter(row => row.source === 'safe_batch_recovery_recheck').length,
     failed_evidence: uniqueCompactTexts(taskRows.flatMap(row => row.failed_evidence)),
     repaired_evidence: uniqueCompactTexts(taskRows.flatMap(row => row.repaired_evidence)),
     watch_items: uniqueCompactTexts(taskRows.flatMap(row => row.watch_items), 200),
@@ -346,18 +368,29 @@ function governanceRecheckMemoryForAudit(recoveryEvidenceClosure: any, run: any)
     ...asArray(recoveryEvidenceClosure?.watch_items),
     ...asArray(recoveryEvidenceClosure?.watchItems),
   ], 200)
+  const sourceModes = uniqueCompactTexts([
+    ...asArray(recoveryEvidenceClosure?.sources),
+    ...asArray(recoveryEvidenceClosure?.sourceModes),
+  ], 120)
+  const hasSingleChapterRecheck = sourceModes.includes('single_chapter_governance_recheck')
+  const hasBatchRecheck = sourceModes.includes('safe_batch_recovery_recheck')
+  const closedSummary = hasSingleChapterRecheck && hasBatchRecheck
+    ? `恢复依据闭环 ${resolved}/${total}，单章治理复查与批次验收结果已写入次日生产记忆。`
+    : hasSingleChapterRecheck
+      ? `恢复依据闭环 ${resolved}/${total}，单章治理复查结果已写入次日生产记忆。`
+      : `恢复依据闭环 ${resolved}/${total}，本轮批次验收结果已写入次日生产记忆。`
+  const followupSummary = hasSingleChapterRecheck && !hasBatchRecheck
+    ? `恢复依据审计 ${resolved}/${total}，仍需处理单章治理复查失效依据或观察项后再扩大生产。`
+    : `恢复依据审计 ${resolved}/${total}，仍需处理失效依据或观察项后再扩大生产。`
   return {
     source_run_id: run?.id || null,
     status,
     label: status === 'closed' ? '治理复查已记录' : status === 'needs_followup' ? '治理复查待处理' : '治理复查',
-    summary: status === 'closed'
-      ? `恢复依据闭环 ${resolved}/${total}，本轮批次验收结果已写入次日生产记忆。`
-      : status === 'needs_followup'
-        ? `恢复依据审计 ${resolved}/${total}，仍需处理失效依据或观察项后再扩大生产。`
-        : '本轮没有可沉淀的恢复依据复查记忆。',
+    summary: status === 'closed' ? closedSummary : status === 'needs_followup' ? followupSummary : '本轮没有可沉淀的恢复依据复查记忆。',
     evidence: repairedEvidence,
     failed_evidence: status === 'closed' ? [] : failedEvidence,
     watch_items: watchItems,
+    source_modes: sourceModes,
     storyline_decision_task_count: 0,
   }
 }
@@ -452,7 +485,7 @@ export function buildLongformRepairAuditSummary(run: any, trends: any) {
     },
     conclusion: [
       tasks.length ? `本轮共处理 ${tasks.length} 项长线生产修复任务，已确认 ${Number(statusCounts.resolved || 0)} 项。` : '本轮没有生成修复任务。',
-      recoveryEvidenceClosure.total ? `恢复依据闭环 ${recoveryEvidenceClosure.resolved}/${recoveryEvidenceClosure.total}，${recoveryEvidenceClosure.status === 'closed' ? '失效依据已补成可复盘证据。' : '仍需继续复检失效依据。'}` : '',
+      recoveryEvidenceClosure.total ? `恢复依据闭环 ${recoveryEvidenceClosure.resolved}/${recoveryEvidenceClosure.total}，${recoveryEvidenceClosure.status === 'closed' ? `失效依据已补成可复盘证据。${asArray(recoveryEvidenceClosure.sources).includes('single_chapter_governance_recheck') ? '单章治理复查已沉淀。' : ''}` : '仍需继续复检失效依据。'}` : '',
       remainingTouchedRisks.length ? `仍有 ${remainingTouchedRisks.length} 个已触达章节处于薄弱状态，需要继续复查。` : '已触达章节暂无明显薄弱风险。',
       unresolved.length ? `还有 ${unresolved.length} 项任务未关闭。` : '本轮任务已全部关闭。',
     ].filter(Boolean),

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { buildRecoveryEvidenceAuditView, buildRepairClosureHighlights } from './TaskCenterDrawer'
+import { buildRecoveryEvidenceAuditView, buildRepairClosureHighlights, repairTaskActionLabel } from './TaskCenterDrawer'
 
 describe('buildRepairClosureHighlights', () => {
   test('summarizes resolved delivery risk repair tasks for task center closure evidence', () => {
@@ -109,8 +109,11 @@ describe('buildRecoveryEvidenceAuditView', () => {
       },
       recovery_evidence_closure: {
         status: 'closed',
-        total: 1,
-        resolved: 1,
+        total: 3,
+        resolved: 3,
+        single_chapter_count: 1,
+        batch_count: 2,
+        sources: ['single_chapter_governance_recheck', 'safe_batch_recovery_recheck'],
         failed_evidence: ['样章任务书复检通过 1 项'],
         repaired_evidence: ['第42章对白交锋已补回样章节奏'],
         watch_items: ['下一批继续观察样章策略命中率'],
@@ -120,8 +123,20 @@ describe('buildRecoveryEvidenceAuditView', () => {
             chapter_no: 42,
             task_index: 0,
             task_status: 'resolved',
+            source: 'single_chapter_governance_recheck',
+            source_label: '单章治理复查',
             title: '第42章恢复依据失效回修',
             summary: '恢复依据复检通过。',
+          },
+          {
+            chapter_id: 421,
+            chapter_no: 43,
+            task_index: 1,
+            task_status: 'resolved',
+            source: 'safe_batch_recovery_recheck',
+            source_label: '批次恢复复查',
+            title: '第43章批次恢复依据回修',
+            summary: '批次恢复复查通过。',
           },
         ],
       },
@@ -130,8 +145,9 @@ describe('buildRecoveryEvidenceAuditView', () => {
     expect(view).toEqual(expect.objectContaining({
       status: 'closed',
       label: '恢复依据审计',
-      total: 1,
-      resolved: 1,
+      total: 3,
+      resolved: 3,
+      sourceSummary: '单章治理复查 1；批次恢复复查 2',
       sourceRunId: 44,
       memoryLabel: '治理复查已记录',
       memorySummary: '恢复依据闭环 1/1，批次验收结果已写入次日生产记忆。',
@@ -139,18 +155,65 @@ describe('buildRecoveryEvidenceAuditView', () => {
       repairedEvidence: ['批次验收确认对白交锋已继承', '第42章对白交锋已补回样章节奏'],
       watchItems: ['下一批继续观察样章策略命中率'],
     }))
+    expect(view?.sourceGroups).toEqual([
+      expect.objectContaining({
+        source: 'single_chapter_governance_recheck',
+        label: '单章治理复查',
+        count: 1,
+        taskIndexes: [0],
+        chapterNos: [42],
+      }),
+      expect.objectContaining({
+        source: 'safe_batch_recovery_recheck',
+        label: '批次恢复复查',
+        count: 1,
+        taskIndexes: [1],
+        chapterNos: [43],
+      }),
+    ])
     expect(view?.relatedTasks).toEqual([
       expect.objectContaining({
         chapterId: 420,
         chapterNo: 42,
         taskIndex: 0,
         status: 'resolved',
+        source: 'single_chapter_governance_recheck',
+        sourceLabel: '单章治理复查',
         title: '第42章恢复依据失效回修',
+      }),
+      expect.objectContaining({
+        chapterId: 421,
+        chapterNo: 43,
+        taskIndex: 1,
+        status: 'resolved',
+        source: 'safe_batch_recovery_recheck',
+        sourceLabel: '批次恢复复查',
+        title: '第43章批次恢复依据回修',
       }),
     ])
   })
 
   test('hides recovery evidence audit when there is no closure payload', () => {
     expect(buildRecoveryEvidenceAuditView({ status: 'closed' })).toBeNull()
+  })
+})
+
+describe('repairTaskActionLabel', () => {
+  test('labels single-chapter governance recheck recovery evidence tasks as evidence repair', () => {
+    expect(repairTaskActionLabel({
+      source: 'review_annotation_risk',
+      issue_type: 'recovery_evidence_mismatch',
+      annotation_source: 'governance_recheck_sync',
+      annotation_category: 'recovery_evidence',
+      chapter_no: 42,
+    })).toBe('回修依据')
+  })
+
+  test('keeps batch recovery evidence repairs on the batch revision action', () => {
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'recovery_evidence_mismatch',
+      segment: '第41-43章',
+    })).toBe('按批次修订')
   })
 })

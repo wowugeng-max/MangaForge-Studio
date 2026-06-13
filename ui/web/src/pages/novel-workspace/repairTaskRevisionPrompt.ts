@@ -40,6 +40,13 @@ function limitedArray(...values: any[]) {
   return []
 }
 
+function isSingleChapterRecoveryEvidenceTask(task: AnyRecord) {
+  if (firstText(task?.issue_type, task?.issueType) !== 'recovery_evidence_mismatch') return false
+  const source = firstText(task?.source)
+  const annotationSource = firstText(task?.annotation_source, task?.annotationSource)
+  return source === 'review_annotation_risk' || annotationSource === 'governance_recheck_sync'
+}
+
 function summarizeEvidenceItem(value: any) {
   if (value === null || value === undefined) return ''
   if (typeof value !== 'object') return text(value)
@@ -365,6 +372,7 @@ export function buildDeliveryRiskRevisionClosurePlan(task: AnyRecord, revisionRe
 
   const isRecoveryEvidenceMismatch = firstText(task?.issue_type, task?.issueType) === 'recovery_evidence_mismatch'
   if (isRecoveryEvidenceMismatch) {
+    const singleChapterRecoveryEvidence = isSingleChapterRecoveryEvidenceTask(task)
     const quality = objectValue(revisionResult.quality_refresh)
     const recoveryReview = objectValue(revisionResult.recovery_evidence_review || revisionResult.recoveryEvidenceReview)
     const convergence = objectValue(revisionResult.delivery_risk_convergence)
@@ -388,7 +396,9 @@ export function buildDeliveryRiskRevisionClosurePlan(task: AnyRecord, revisionRe
         taskStatus: 'resolved',
         annotationStatus: '',
         annotationKey: '',
-        note: `恢复依据复检通过${scoreText}，failed_evidence 已清空。`,
+        note: singleChapterRecoveryEvidence
+          ? `单章治理复查通过${scoreText}，governance_recheck_sync failed_evidence 已清空。`
+          : `恢复依据复检通过${scoreText}，failed_evidence 已清空。`,
       }
     }
     if (!qualityOk) {
@@ -396,7 +406,9 @@ export function buildDeliveryRiskRevisionClosurePlan(task: AnyRecord, revisionRe
         taskStatus: 'needs_review',
         annotationStatus: '',
         annotationKey: '',
-        note: `恢复依据已回修，但自动复检未通过：${firstText(quality.error, '需要人工复查')}。`,
+        note: singleChapterRecoveryEvidence
+          ? `单章恢复依据已回修，但治理复查未通过：${firstText(quality.error, '需要人工复查')}。`
+          : `恢复依据已回修，但自动复检未通过：${firstText(quality.error, '需要人工复查')}。`,
       }
     }
     const evidenceSummary = failedEvidence.length > 0
@@ -406,7 +418,7 @@ export function buildDeliveryRiskRevisionClosurePlan(task: AnyRecord, revisionRe
       taskStatus: 'needs_review',
       annotationStatus: '',
       annotationKey: '',
-      note: `恢复依据仍有失效项：${evidenceSummary}${residualCount ? `，残留 ${residualCount} 项` : ''}。`,
+      note: `${singleChapterRecoveryEvidence ? '单章恢复依据' : '恢复依据'}仍有失效项：${evidenceSummary}${residualCount ? `，残留 ${residualCount} 项` : ''}。`,
     }
   }
 
@@ -509,13 +521,17 @@ function normalizeRecoveryEvidenceReview(task: AnyRecord) {
   const allEvidence = arrayValue(review.evidence)
     .map(item => summarizeEvidenceItem(item))
     .filter(Boolean)
+  const watchItems = arrayValue(review.watch_items || review.watchItems)
+    .map(item => summarizeEvidenceItem(item))
+    .filter(Boolean)
   const summary = firstText(review.summary, task.issue_type === 'recovery_evidence_mismatch' ? task.message : '')
-  if (!rows.length && !summary && !allEvidence.length && task.issue_type !== 'recovery_evidence_mismatch') return null
+  if (!rows.length && !summary && !allEvidence.length && !watchItems.length && task.issue_type !== 'recovery_evidence_mismatch') return null
   return {
     status: firstText(review.status),
     summary,
     rows,
     allEvidence,
+    watchItems,
   }
 }
 
@@ -523,6 +539,7 @@ export function buildRepairTaskRevisionPrompt(task: AnyRecord, run?: AnyRecord |
   const batchPlan = normalizeBatchPlanContext(task, run)
   const chapterPlan = batchPlan?.chapter_plan
   const recoveryEvidenceReview = normalizeRecoveryEvidenceReview(task)
+  const singleChapterRecoveryEvidence = isSingleChapterRecoveryEvidenceTask(task)
   const deliveryRisk = normalizeDeliveryRiskContext(task)
   const serialRhythmReview = task.serial_rhythm_review || task.serialRhythmReview || null
   const volumeSegmentReview = task.volume_segment_review || task.volumeSegmentReview || null
@@ -558,17 +575,32 @@ export function buildRepairTaskRevisionPrompt(task: AnyRecord, run?: AnyRecord |
     )
   }
   if (recoveryEvidenceReview) {
-    lines.push(
-      '【恢复依据失效回修】',
-      recoveryEvidenceReview.summary ? `复盘结论：${recoveryEvidenceReview.summary}` : '',
-      ...recoveryEvidenceReview.rows.flatMap(item => [
-        item.evidence ? `失效依据：${item.evidence}` : '',
-        item.riskLabels.length > 0 ? `对应风险：${item.riskLabels.join('；')}` : '',
-      ]),
-      recoveryEvidenceReview.allEvidence.length > 0 ? `全部恢复依据：${recoveryEvidenceReview.allEvidence.slice(0, 6).join('；')}` : '',
-      '修订要求：逐项把失效依据改成正文可见的兑现结果，优先补样章执行、读者回报、主线/剧情线和批次任务书承诺。',
-      '修订后必须重新运行批次交稿复盘，确认 recovery_evidence_review.status 为 ok、failed_evidence 为空，再关闭任务。',
-    )
+    if (singleChapterRecoveryEvidence) {
+      lines.push(
+        '【单章恢复依据回修】',
+        recoveryEvidenceReview.summary ? `治理复查记忆：${recoveryEvidenceReview.summary}` : '治理复查记忆：本章需要继承上一轮恢复依据。',
+        ...recoveryEvidenceReview.rows.flatMap(item => [
+          item.evidence ? `失效依据：${item.evidence}` : '',
+          item.riskLabels.length > 0 ? `对应风险：${item.riskLabels.join('；')}` : '',
+        ]),
+        recoveryEvidenceReview.allEvidence.length > 0 ? `全部恢复依据：${recoveryEvidenceReview.allEvidence.slice(0, 6).join('；')}` : '',
+        recoveryEvidenceReview.watchItems.length > 0 ? `仍需观察：${recoveryEvidenceReview.watchItems.slice(0, 6).join('；')}` : '',
+        '修订要求：逐项把失效依据和观察项改成本章正文可见的冲突推进、对白执行、读者回报或剧情线动作。',
+        '修订后必须重新运行单章治理复查 / governance_recheck_sync，确认 status 为 ok、failed_evidence 为空，再关闭任务。',
+      )
+    } else {
+      lines.push(
+        '【恢复依据失效回修】',
+        recoveryEvidenceReview.summary ? `复盘结论：${recoveryEvidenceReview.summary}` : '',
+        ...recoveryEvidenceReview.rows.flatMap(item => [
+          item.evidence ? `失效依据：${item.evidence}` : '',
+          item.riskLabels.length > 0 ? `对应风险：${item.riskLabels.join('；')}` : '',
+        ]),
+        recoveryEvidenceReview.allEvidence.length > 0 ? `全部恢复依据：${recoveryEvidenceReview.allEvidence.slice(0, 6).join('；')}` : '',
+        '修订要求：逐项把失效依据改成正文可见的兑现结果，优先补样章执行、读者回报、主线/剧情线和批次任务书承诺。',
+        '修订后必须重新运行批次交稿复盘，确认 recovery_evidence_review.status 为 ok、failed_evidence 为空，再关闭任务。',
+      )
+    }
   }
   if (serialRhythmReview) {
     lines.push(

@@ -464,6 +464,7 @@ export interface AutoCreationGovernanceClosureBrief {
   label: string
   summary: string
   count: number
+  sourceSummary: string
   failedEvidence: string[]
   watchItems: string[]
   action: AutoCreationDirectorAction
@@ -1954,6 +1955,21 @@ function compactUniqueText(values: any[], limit = 120) {
   return Array.from(new Set(values.map(item => firstText(item)).filter(Boolean).map(item => item.length > limit ? `${item.slice(0, limit)}…` : item)))
 }
 
+function recoveryEvidenceSourceSummary(recoveryClosure: AnyRecord | null) {
+  if (!recoveryClosure) return ''
+  const tasks = arrayValue(recoveryClosure?.tasks)
+  const singleChapterCount = Number(recoveryClosure?.single_chapter_count ?? recoveryClosure?.singleChapterCount ?? 0)
+    || tasks.filter((task: any) => text(task?.source || task?.sourceMode) === 'single_chapter_governance_recheck').length
+  const batchCount = Number(recoveryClosure?.batch_count ?? recoveryClosure?.batchCount ?? 0)
+    || tasks.filter((task: any) => text(task?.source || task?.sourceMode) === 'safe_batch_recovery_recheck').length
+  const genericCount = Math.max(0, Number(recoveryClosure?.total || 0) - singleChapterCount - batchCount)
+  return [
+    singleChapterCount > 0 ? `单章治理复查 ${singleChapterCount}` : '',
+    batchCount > 0 ? `批次恢复复查 ${batchCount}` : '',
+    genericCount > 0 ? `恢复依据复查 ${genericCount}` : '',
+  ].filter(Boolean).join('；')
+}
+
 function buildGovernanceClosureBrief(args: {
   runRecords: AnyRecord[]
   storylineDecisionGate: AutoCreationStorylineDecisionGate
@@ -1961,6 +1977,7 @@ function buildGovernanceClosureBrief(args: {
   const auditEntry = latestRepairAuditEntry(args.runRecords)
   const audit = auditEntry?.audit || null
   const recoveryClosure = audit?.recovery_evidence_closure || audit?.recoveryEvidenceClosure || null
+  const recoverySourceSummary = recoveryEvidenceSourceSummary(recoveryClosure)
   const failedEvidence = recoveryClosure && recoveryClosure.status !== 'closed' && Number(recoveryClosure.total || 0) > 0
     ? compactUniqueText([
       ...arrayValue(recoveryClosure.failed_evidence),
@@ -1974,7 +1991,7 @@ function buildGovernanceClosureBrief(args: {
     ], 120).slice(0, 4)
     : []
   const issueLabels = [
-    failedEvidence.length ? `恢复依据审计 ${Number(recoveryClosure?.resolved || 0)}/${Number(recoveryClosure?.total || 0)}` : '',
+    failedEvidence.length ? `恢复依据审计 ${Number(recoveryClosure?.resolved || 0)}/${Number(recoveryClosure?.total || 0)}${recoverySourceSummary ? `（${recoverySourceSummary}）` : ''}` : '',
     args.storylineDecisionGate.openCount > 0 ? `剧情线决策 ${args.storylineDecisionGate.openCount}` : '',
   ].filter(Boolean)
   const watchItems = compactUniqueText([
@@ -1989,6 +2006,7 @@ function buildGovernanceClosureBrief(args: {
       label: '治理闭环',
       summary: '长线治理闭环没有发现需要前置处理的恢复依据审计或剧情线决策任务。',
       count: 0,
+      sourceSummary: recoverySourceSummary,
       failedEvidence: [],
       watchItems: [],
       action: opsAction('open_task_center', '打开任务中心', '查看长线治理闭环记录。'),
@@ -2000,6 +2018,7 @@ function buildGovernanceClosureBrief(args: {
     label: '治理闭环',
     summary: `${issueLabels.join('；')} 未闭环：${watchItems.slice(0, 3).join('；') || '先回任务中心完成复查或修订。'}`,
     count: issueLabels.length,
+    sourceSummary: recoverySourceSummary,
     failedEvidence,
     watchItems,
     action: opsAction('review_governance_closure', '治理复查台', '生成最新恢复依据审计，并打开任务中心定位剧情线决策复检。', false, {
@@ -2007,6 +2026,7 @@ function buildGovernanceClosureBrief(args: {
       recoveryEvidenceStatus: text(recoveryClosure?.status),
       recoveryEvidenceResolved: Number(recoveryClosure?.resolved || 0),
       recoveryEvidenceTotal: Number(recoveryClosure?.total || 0),
+      recoveryEvidenceSourceSummary: recoverySourceSummary,
       failedEvidence,
       watchItems: recoveryWatchItems,
       storylineDecisionTaskCount: args.storylineDecisionGate.openCount,
