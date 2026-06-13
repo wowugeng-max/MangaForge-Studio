@@ -921,6 +921,7 @@ describe('buildAutoCreationDirectorModel', () => {
         },
       },
       activeTasks: [],
+      selectedModelId: 12,
       reviews: [
         {
           review_type: 'delivery_risk_annotations',
@@ -3722,6 +3723,63 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(model.dailyBattlePlan.steps.find(step => step.key === 'clear_risks')?.action.key).toBe('create_delivery_risk_repair')
     expect(model.dailyBattlePlan.steps.find(step => step.key === 'chapter_work')?.status).toBe('pending')
     expect(model.dailyBattlePlan.steps.find(step => step.key === 'batch_release')?.status).toBe('blocked')
+  })
+
+  test('routes single-chapter governance recheck misses into recovery evidence repair tasks', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        topStatus: {
+          ...basePlanning.topStatus,
+          future100Coverage: { ready: true, planned: 100, required: 100, missingChapters: [], label: '100/100' },
+        },
+        futureRoute: [
+          { chapterNo: 8, title: '试炼前夜', role: '当前章', coreHook: '阵盘裂纹被执事看见', status: 'ready' },
+          { chapterNo: 9, title: '钟声复验', role: '下一章', coreHook: '用修后证据反制执事', status: 'ready' },
+        ],
+      } as any,
+      writing: {
+        ...baseWriting,
+        chapterAcceptanceDesk: {
+          ...baseWriting.chapterAcceptanceDesk,
+          deliveryRiskQueue: {
+            totalCount: 2,
+            label: '待修复 2',
+            priorityLabel: '优先验恢复依据',
+            items: ['验恢复依据：恢复依据缺口 2'],
+          },
+        },
+      } as any,
+      selectedModelId: 12,
+      reviews: [
+        {
+          id: 305,
+          chapter_id: 8,
+          review_type: 'governance_recheck_sync',
+          created_at: '2026-06-04T01:05:00.000Z',
+          payload: JSON.stringify({
+            chapter_id: 8,
+            chapter_no: 8,
+            governance_recheck_sync: {
+              status: 'warn',
+              label: '恢复依据缺口 2',
+              missed_count: 2,
+              failed_evidence: ['第42章对白交锋已补回样章节奏'],
+              watch_items: ['下一章继续观察样章策略命中率'],
+              summary: '单章交稿没有继承治理复查记忆。',
+            },
+          }),
+        },
+      ],
+    } as any)
+
+    expect(model.deliveryRiskGate.status).toBe('block')
+    expect(model.deliveryRiskGate.totalOpen).toBe(2)
+    expect(model.deliveryRiskGate.highOpen).toBe(2)
+    expect(model.deliveryRiskGate.categories.map(item => item.label)).toContain('恢复依据')
+    expect(model.deliveryRiskGate.topRisks.join('｜')).toContain('恢复依据第8章：第42章对白交锋已补回样章节奏')
+    expect(model.mainAction.key).toBe('create_delivery_risk_repair')
+    expect(model.serialCockpit.riskQueue.find(item => item.key === 'delivery_risks')?.detail).toBe('优先验恢复依据')
   })
 
   test('ignores delivery annotations that have been resolved or cleared by convergence', () => {

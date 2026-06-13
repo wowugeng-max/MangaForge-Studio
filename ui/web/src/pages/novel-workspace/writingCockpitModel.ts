@@ -395,6 +395,14 @@ export interface ChapterAcceptanceDeskModel {
     scoreLabel: string
     missedCount: number
   } | null
+  governanceRecheckSync: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    failedEvidence: string[]
+    watchItems: string[]
+    summary: string
+  } | null
   deliveryRiskQueue: {
     totalCount: number
     label: string
@@ -2074,8 +2082,16 @@ function buildDeliveryRiskQueue(args: {
   styleSampleSync: ChapterAcceptanceDeskModel['styleSampleSync']
   innovationSync: ChapterAcceptanceDeskModel['innovationSync']
   volumeBeatSync: ChapterAcceptanceDeskModel['volumeBeatSync']
+  governanceRecheckSync: ChapterAcceptanceDeskModel['governanceRecheckSync']
 }): ChapterAcceptanceDeskModel['deliveryRiskQueue'] {
   const risks: Array<{ count: number; item: string; priorityLabel: string }> = []
+  if (args.governanceRecheckSync && args.governanceRecheckSync.missedCount > 0) {
+    risks.push({
+      count: args.governanceRecheckSync.missedCount,
+      item: `验恢复依据：${args.governanceRecheckSync.label}`,
+      priorityLabel: '优先验恢复依据',
+    })
+  }
   if (args.coreDrift && args.coreDrift.riskCount > 0) {
     risks.push({ count: args.coreDrift.riskCount, item: `守核心：${args.coreDrift.label}`, priorityLabel: '优先补核心' })
   }
@@ -2189,6 +2205,40 @@ function buildDeliveryRiskConvergenceSummary(review?: AnyRecord | null): Chapter
   }
 }
 
+function governanceRecheckSyncPayload(review?: AnyRecord | null) {
+  const payload = review ? reviewPayload(review) : {}
+  return payload?.governance_recheck_sync || payload?.result?.governance_recheck_sync || payload?.result || payload
+}
+
+function reviewItemTextArray(value: any): string[] {
+  if (!Array.isArray(value)) return stringArray(value)
+  return value.map(item => {
+    if (!item || typeof item !== 'object') return text(item)
+    return firstNonEmpty(item.text, item.label, item.summary, item.detail, item.name, item.title)
+  }).filter(Boolean)
+}
+
+function buildGovernanceRecheckSyncSummary(review?: AnyRecord | null): ChapterAcceptanceDeskModel['governanceRecheckSync'] {
+  if (!review) return null
+  const payload = governanceRecheckSyncPayload(review)
+  const payloadMissedCount = Number(payload?.missed_count ?? payload?.missedCount)
+  const failedEvidence = reviewItemTextArray(payload?.failed_evidence || payload?.failedEvidence)
+  const missedItems = reviewItemTextArray(payload?.missed || payload?.missed_items || payload?.missedItems)
+  const missedCount = Number.isFinite(payloadMissedCount)
+    ? payloadMissedCount
+    : failedEvidence.length + missedItems.length
+  const status: 'ok' | 'warn' = text(payload?.status || review?.status).toLowerCase() === 'ok' && missedCount === 0 ? 'ok' : 'warn'
+
+  return {
+    status,
+    label: status === 'ok' ? '恢复依据 OK' : text(payload?.label) || `恢复依据缺口 ${missedCount}`,
+    missedCount,
+    failedEvidence: failedEvidence.slice(0, 6),
+    watchItems: reviewItemTextArray(payload?.watch_items || payload?.watchItems).slice(0, 6),
+    summary: text(payload?.summary || review?.summary),
+  }
+}
+
 function extractQualityScore(quality: AnyRecord) {
   const value = quality?.score ?? quality?.overall_score ?? quality?.quality_score
   if (value === null || value === undefined || value === '') return null
@@ -2272,6 +2322,7 @@ function buildHiddenAcceptanceDesk(): ChapterAcceptanceDeskModel {
     first30RetentionRecheck: null,
     innovationSync: null,
     volumeBeatSync: null,
+    governanceRecheckSync: null,
     deliveryRiskQueue: null,
     deliveryRiskConvergence: null,
     qualityScore: null,
@@ -2324,6 +2375,7 @@ function buildChapterAcceptanceDesk(args: {
   const latestStyleSampleSyncRef = latestReviewRef(args.reviews, args.nextChapter, 'style_sample_sync')
   const latestInnovationSyncRef = latestReviewRef(args.reviews, args.nextChapter, 'innovation_sync')
   const latestVolumeBeatSyncRef = latestReviewRef(args.reviews, args.nextChapter, 'volume_beat_sync')
+  const latestGovernanceRecheckSyncRef = latestReviewRef(args.reviews, args.nextChapter, 'governance_recheck_sync')
   const latestDeliveryRiskConvergenceRef = latestReviewRef(args.reviews, args.nextChapter, 'delivery_risk_convergence')
   const latestQuality = latestQualityRef?.review || null
   const latestReport = latestReportRef?.review || null
@@ -2347,6 +2399,7 @@ function buildChapterAcceptanceDesk(args: {
   const first30RetentionRecheck = buildFirst30RetentionRecheckSummary(args.nextChapter, args.reviews)
   const innovationSync = buildInnovationSyncSummary(latestInnovationSyncRef?.review || null)
   const volumeBeatSync = buildVolumeBeatSyncSummary(latestVolumeBeatSyncRef?.review || null)
+  const governanceRecheckSync = buildGovernanceRecheckSyncSummary(latestGovernanceRecheckSyncRef?.review || null)
   const deliveryRiskConvergence = buildDeliveryRiskConvergenceSummary(latestDeliveryRiskConvergenceRef?.review || null)
   const quality = qualityPayload(latestQuality)
   const report = reportPayload(latestReport)
@@ -2378,6 +2431,7 @@ function buildChapterAcceptanceDesk(args: {
     styleSampleSync,
     innovationSync,
     volumeBeatSync,
+    governanceRecheckSync,
   })
   const storyStateSynced = Number(args.storyState?.last_updated_chapter || 0) >= Number(args.nextChapter?.chapter_no || 0)
   const latestEditorReportSummary = firstNonEmpty(report?.summary, latestReport?.summary)
@@ -2425,6 +2479,7 @@ function buildChapterAcceptanceDesk(args: {
       first30RetentionRecheck,
       innovationSync,
       volumeBeatSync,
+      governanceRecheckSync,
       deliveryRiskQueue,
       deliveryRiskConvergence,
       qualityScore: null,
@@ -2468,6 +2523,7 @@ function buildChapterAcceptanceDesk(args: {
       first30RetentionRecheck,
       innovationSync,
       volumeBeatSync,
+      governanceRecheckSync,
       deliveryRiskQueue,
       deliveryRiskConvergence,
       qualityScore: score,
@@ -2516,6 +2572,7 @@ function buildChapterAcceptanceDesk(args: {
       first30RetentionRecheck,
       innovationSync,
       volumeBeatSync,
+      governanceRecheckSync,
       deliveryRiskQueue,
       deliveryRiskConvergence,
       qualityScore: score,
@@ -2559,6 +2616,7 @@ function buildChapterAcceptanceDesk(args: {
       first30RetentionRecheck,
       innovationSync,
       volumeBeatSync,
+      governanceRecheckSync,
       deliveryRiskQueue,
       deliveryRiskConvergence,
       qualityScore: score,
@@ -2601,6 +2659,7 @@ function buildChapterAcceptanceDesk(args: {
     first30RetentionRecheck,
     innovationSync,
     volumeBeatSync,
+    governanceRecheckSync,
     deliveryRiskQueue,
     deliveryRiskConvergence,
     qualityScore: score,

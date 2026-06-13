@@ -1160,6 +1160,46 @@ describe('review annotations delivery risk intake', () => {
     expect(result.tasks[4].annotation_category).toBe('volume_beat')
     expect(result.tasks[4].action).toContain('卷级爆点')
   })
+
+  test('turns single-chapter governance recheck misses into recovery evidence repair tasks', () => {
+    const chapter = { id: 42, chapter_no: 42, title: '旧证重审', chapter_text: '正文', ending_hook: '旧账本出现第二个签名。' }
+    const annotations = buildReviewAnnotations({ id: 5, title: '超人的规则怪谈世界' }, [chapter], [
+      {
+        id: 31,
+        review_type: 'governance_recheck_sync',
+        created_at: '2026-06-13T08:00:00.000Z',
+        payload: JSON.stringify({
+          chapter_id: 42,
+          chapter_no: 42,
+          governance_recheck_sync: {
+            status: 'warn',
+            label: '恢复依据缺口 2',
+            missed_count: 2,
+            failed_evidence: ['第42章对白交锋已补回样章节奏'],
+            watch_items: ['下一章继续观察样章策略命中率'],
+            summary: '单章交稿未继承治理复查记忆。',
+          },
+        }),
+      },
+    ]).annotations
+
+    const recoveryAnnotation = annotations.find((item: any) => item.kind === 'recovery_evidence_mismatch')
+    const result = buildReviewAnnotationRepairTasks(annotations, [])
+
+    expect(recoveryAnnotation?.category).toBe('recovery_evidence')
+    expect(recoveryAnnotation?.title).toBe('恢复依据缺口 2')
+    expect(result.tasks).toHaveLength(1)
+    expect(result.tasks[0]).toEqual(expect.objectContaining({
+      issue_type: 'recovery_evidence_mismatch',
+      annotation_category: 'recovery_evidence',
+      chapter_id: 42,
+      chapter_no: 42,
+    }))
+    expect(result.tasks[0].message).toContain('第42章对白交锋已补回样章节奏')
+    expect(result.tasks[0].action).toContain('治理复查记忆')
+    expect(result.tasks[0].recovery_evidence_review.failed_evidence).toContain('第42章对白交锋已补回样章节奏')
+    expect(result.tasks[0].recovery_evidence_review.watch_items).toContain('下一章继续观察样章策略命中率')
+  })
 })
 
 describe('story state sync route source guards', () => {

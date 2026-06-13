@@ -773,6 +773,32 @@ function deliveryRiskConvergenceReview(overrides: Record<string, any> = {}) {
   }
 }
 
+function governanceRecheckSyncReview(overrides: Record<string, any> = {}) {
+  const payload = {
+    chapter_id: 101,
+    chapter_no: 1,
+    governance_recheck_sync: {
+      status: 'warn',
+      label: '恢复依据缺口 2',
+      missed_count: 2,
+      failed_evidence: ['第42章对白交锋已补回样章节奏'],
+      watch_items: ['下一章继续观察样章策略命中率'],
+      summary: '单章交稿未继承治理复查记忆。',
+    },
+    ...overrides.payload,
+  }
+
+  return {
+    id: overrides.id || 991,
+    review_type: 'governance_recheck_sync',
+    status: overrides.status || 'warn',
+    summary: overrides.summary || '治理复查记忆漏承接 2 项。',
+    created_at: overrides.created_at || '2026-05-24T01:19:00.000Z',
+    payload: JSON.stringify(payload),
+    ...overrides.record,
+  }
+}
+
 describe('buildWritingCockpitModel', () => {
   test('ready project data chooses the first planned unwritten chapter as daily target', () => {
     const model = buildWritingCockpitModel({
@@ -2164,6 +2190,30 @@ describe('buildWritingCockpitModel', () => {
     expect(model.chapterAcceptanceDesk.deliveryRiskQueue?.items).toContain('守核心：核心偏移 2')
     expect(model.chapterAcceptanceDesk.deliveryRiskQueue?.items).toContain('补追读：漏追读 2')
     expect(model.chapterAcceptanceDesk.deliveryRiskQueue?.items).toContain('补创新：创新缺口 2')
+    expect(model.chapterAcceptanceDesk.recommendedAcceptanceAction.key).toBe('accept_chapter_and_continue')
+  })
+
+  test('governance recheck memory misses are summarized as single-chapter recovery evidence risks', () => {
+    const model = buildWritingCockpitModel({
+      project: acceptedProject,
+      outlines,
+      chapters,
+      activeChapter: chapters[0],
+      materialScore: { score: 82, can_generate: true },
+      reviews: [
+        proseQualityReview(),
+        governanceRecheckSyncReview(),
+      ],
+    })
+
+    expect(model.chapterAcceptanceDesk.acceptanceStatus).toBe('ready_to_accept')
+    expect(model.chapterAcceptanceDesk.governanceRecheckSync?.status).toBe('warn')
+    expect(model.chapterAcceptanceDesk.governanceRecheckSync?.label).toBe('恢复依据缺口 2')
+    expect(model.chapterAcceptanceDesk.governanceRecheckSync?.missedCount).toBe(2)
+    expect(model.chapterAcceptanceDesk.governanceRecheckSync?.failedEvidence).toContain('第42章对白交锋已补回样章节奏')
+    expect(model.chapterAcceptanceDesk.governanceRecheckSync?.watchItems).toContain('下一章继续观察样章策略命中率')
+    expect(model.chapterAcceptanceDesk.deliveryRiskQueue?.items).toContain('验恢复依据：恢复依据缺口 2')
+    expect(model.chapterAcceptanceDesk.deliveryRiskQueue?.priorityLabel).toBe('优先验恢复依据')
     expect(model.chapterAcceptanceDesk.recommendedAcceptanceAction.key).toBe('accept_chapter_and_continue')
   })
 

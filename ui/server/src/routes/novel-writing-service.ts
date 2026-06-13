@@ -1189,6 +1189,8 @@ function deliveryRiskCountFromPayload(payload: any, keys: string[] = []) {
     payload?.weakDimensions,
     payload?.drift_risks,
     payload?.driftRisks,
+    payload?.failed_evidence,
+    payload?.failedEvidence,
     payload?.risks,
     payload?.risk_items,
     payload?.riskItems,
@@ -1210,6 +1212,7 @@ function deliveryRiskEvidence(payload: any) {
     ...asArray(payload?.missed),
     ...asArray(payload?.weak_dimensions || payload?.weakDimensions),
     ...asArray(payload?.drift_risks || payload?.driftRisks),
+    ...asArray(payload?.failed_evidence || payload?.failedEvidence),
     ...asArray(payload?.risks),
   ].map(deliveryRiskItemText).filter(Boolean).slice(0, 6)
 }
@@ -1280,6 +1283,7 @@ export function buildDeliveryRiskCarryOverContext(chapter: any, chapters: any[] 
     { type: 'style_sample_sync', prefix: '校风格', priority: '优先校风格', countKeys: ['missed_count', 'missedCount', 'copy_risk_count', 'copyRiskCount'] },
     { type: 'innovation_sync', prefix: '补创新', priority: '优先补创新', countKeys: ['missed_count', 'missedCount'] },
     { type: 'volume_beat_sync', prefix: '补爆点', priority: '优先补爆点', countKeys: ['missed_count', 'missedCount'] },
+    { type: 'governance_recheck_sync', prefix: '验恢复依据', priority: '优先验恢复依据', countKeys: ['missed_count', 'missedCount'] },
     { type: 'readability_review', prefix: '调可读性', priority: '优先调可读性', countKeys: ['risk_count', 'riskCount'] },
   ]
   const latestByType = new Map<string, any>()

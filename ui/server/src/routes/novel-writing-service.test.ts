@@ -1522,6 +1522,40 @@ describe('chapter pre-draft brief', () => {
     expect(prompt).toContain('补创新：创新缺口 1')
   })
 
+  test('carries single-chapter governance recheck misses into the next delivery risk brief', () => {
+    const deliveryRiskCarryOver = buildDeliveryRiskCarryOverContext(
+      { id: 43, chapter_no: 43, title: '复查后的新局' },
+      [
+        { id: 42, chapter_no: 42, title: '旧证重审' },
+        { id: 43, chapter_no: 43, title: '复查后的新局' },
+      ],
+      [
+        {
+          id: 301,
+          chapter_id: 42,
+          review_type: 'governance_recheck_sync',
+          created_at: '2026-06-13T08:00:00.000Z',
+          payload: JSON.stringify({
+            chapter_id: 42,
+            chapter_no: 42,
+            governance_recheck_sync: {
+              status: 'warn',
+              label: '恢复依据缺口 2',
+              missed_count: 2,
+              failed_evidence: ['第42章对白交锋已补回样章节奏'],
+              watch_items: ['下一章继续观察样章策略命中率'],
+            },
+          }),
+        },
+      ],
+    )
+
+    expect(deliveryRiskCarryOver?.label).toBe('待修复 2')
+    expect(deliveryRiskCarryOver?.priority_label).toBe('优先验恢复依据')
+    expect(deliveryRiskCarryOver?.items).toContain('验恢复依据：恢复依据缺口 2')
+    expect(deliveryRiskCarryOver?.required_actions.join('｜')).toContain('修复：第42章对白交锋已补回样章节奏')
+  })
+
   test('marks aged reader expectation debt as overdue in context, brief, and prose prompt', () => {
     const debtContext = buildReaderExpectationDebtContext(
       { id: 6, chapter_no: 6, title: '旧债压场' },

@@ -1370,6 +1370,27 @@ export function buildReviewAnnotations(project: any, chapters: any[], reviews: a
         severity: risk => countItems(risk?.rushed_ahead) > 0 || countItems(risk?.rushedAhead) > 0 || countItems(risk?.forbidden_touched) > 0 || countItems(risk?.forbiddenTouched) > 0 ? 'high' : 'medium',
       })
     }
+    if (review.review_type === 'governance_recheck_sync') {
+      pushDeliveryRiskAnnotation(review, payload, {
+        payloadKey: 'governance_recheck_sync',
+        sourceLabel: '恢复依据复盘',
+        category: 'recovery_evidence',
+        kind: 'recovery_evidence_mismatch',
+        count: risk => countPayloadNumber(
+          risk?.missed_count ?? risk?.missedCount,
+          countItems(risk?.failed_evidence || risk?.failedEvidence)
+            + countItems(risk?.missed || risk?.missed_items || risk?.missedItems),
+        ),
+        title: (risk, count) => String(risk?.label || `恢复依据缺口 ${count}`),
+        message: risk => [
+          ...asArray(risk?.failed_evidence || risk?.failedEvidence).map((item: any) => String(item?.text || item?.label || item)),
+          ...asArray(risk?.missed || risk?.missed_items || risk?.missedItems).map((item: any) => String(item?.text || item?.label || item)),
+          ...asArray(risk?.watch_items || risk?.watchItems).map((item: any) => `观察项：${item?.text || item?.label || item}`),
+        ].slice(0, 4).join('；') || '单章交稿没有继承治理复查记忆。',
+        action: '按治理复查记忆回修本章，把修后证据、失效依据和观察项写成正文可见的冲突推进、对白执行、读者回报或剧情线动作。',
+        severity: () => 'high',
+      })
+    }
     if (review.review_type === 'readability_review') {
       pushDeliveryRiskAnnotation(review, payload, {
         payloadKey: 'readability_review',
@@ -1490,6 +1511,7 @@ const DELIVERY_RISK_ANNOTATION_CATEGORIES = new Set([
   'volume_beat',
   'signature_scene',
   'runway',
+  'recovery_evidence',
   'innovation',
   'storyline',
   'story_unit',
@@ -1501,19 +1523,20 @@ function deliveryRiskAnnotationPriority(annotation: any) {
   const order: Record<string, number> = {
     delivery_core: 0,
     runway: 1,
-    story_unit: 2,
-    signature_scene: 3,
-    reader_expectation: 4,
-    volume_beat: 5,
-    reader_retention: 6,
-    chapter_attraction: 7,
-    story_drive: 8,
-    character_arc: 9,
-    style_sample: 10,
-    reader_payoff: 11,
-    innovation: 12,
-    storyline: 13,
-    readability: 14,
+    recovery_evidence: 2,
+    story_unit: 3,
+    signature_scene: 4,
+    reader_expectation: 5,
+    volume_beat: 6,
+    reader_retention: 7,
+    chapter_attraction: 8,
+    story_drive: 9,
+    character_arc: 10,
+    style_sample: 11,
+    reader_payoff: 12,
+    innovation: 13,
+    storyline: 14,
+    readability: 15,
   }
   return order[category] ?? 99
 }
@@ -1601,6 +1624,9 @@ export function buildReviewAnnotationRepairTasks(annotations: any[], runs: any[]
       review_id: annotation.review_id || null,
       created_from_annotation_at: annotation.created_at || '',
       payload: annotation.payload || {},
+      ...(String(annotation.kind || annotation.source || '') === 'recovery_evidence_mismatch'
+        ? { recovery_evidence_review: annotation.payload || {} }
+        : {}),
     })
   }
 

@@ -426,7 +426,7 @@ export interface AutoCreationBatchReviewQueue {
 }
 
 export interface AutoCreationDeliveryRiskGateCategory {
-  key: 'delivery_core' | 'runway' | 'reader_expectation' | 'reader_retention' | 'reader_payoff' | 'innovation' | 'signature_scene' | 'storyline' | 'story_unit' | 'story_drive' | 'character_arc' | 'chapter_attraction' | 'chapter_benchmark' | 'style_sample' | 'readability' | 'volume_beat'
+  key: 'delivery_core' | 'runway' | 'reader_expectation' | 'reader_retention' | 'reader_payoff' | 'innovation' | 'signature_scene' | 'storyline' | 'story_unit' | 'story_drive' | 'character_arc' | 'chapter_attraction' | 'chapter_benchmark' | 'style_sample' | 'readability' | 'volume_beat' | 'recovery_evidence'
   label: string
   count: number
   highCount: number
@@ -1202,6 +1202,19 @@ function chapterAttractionRiskCount(review: AnyRecord | null) {
   return weak > 0 ? weak : riskCountFromStatus(payload, review)
 }
 
+function governanceRecheckRiskCount(review: AnyRecord | null) {
+  if (!review) return 0
+  const payload = riskPayload(review, 'governance_recheck_sync')
+  const count = numberValue(payload?.missed_count ?? payload?.missedCount)
+  if (count !== null) return count
+  const inferred = arrayValue(payload?.failed_evidence).length
+    + arrayValue(payload?.failedEvidence).length
+    + arrayValue(payload?.missed).length
+    + arrayValue(payload?.missed_items).length
+    + arrayValue(payload?.missedItems).length
+  return inferred > 0 ? inferred : riskCountFromStatus(payload, review)
+}
+
 function readerTrialReport(review: AnyRecord | null) {
   if (!review) return null
   const payload = reviewPayload(review)
@@ -1590,6 +1603,23 @@ const DELIVERY_RISK_CONFIG: Record<string, {
     message: risk => issueTexts(arrayValue(risk?.missed), 2).join('；') || '卷级高潮、爽点或回报预算没有兑现',
     high: (_risk, count) => count >= 2,
   },
+  governance_recheck_sync: {
+    category: 'recovery_evidence',
+    label: '恢复依据',
+    kind: 'recovery_evidence_mismatch',
+    payloadKey: 'governance_recheck_sync',
+    issueType: 'recovery_evidence_mismatch',
+    count: governanceRecheckRiskCount,
+    title: (risk, count) => text(risk?.label, `恢复依据缺口 ${count}`),
+    message: risk => issueTexts([
+      ...arrayValue(risk?.failed_evidence),
+      ...arrayValue(risk?.failedEvidence),
+      ...arrayValue(risk?.missed),
+      ...arrayValue(risk?.watch_items),
+      ...arrayValue(risk?.watchItems),
+    ], 2).join('；') || '治理复查记忆没有在单章正文中落地',
+    high: () => true,
+  },
 }
 
 function buildResolvedDeliveryRiskIssueKeys(args: {
@@ -1664,6 +1694,7 @@ const DELIVERY_RISK_ISSUE_LABELS: Record<string, string> = {
   payoff_density_risk: '爽点密度',
   volume_beat_missed: '爆点',
   volume_segment_missed: '爆点',
+  recovery_evidence_mismatch: '恢复依据',
 }
 
 function deliveryRiskIssueLabel(issueType: string) {
@@ -2696,6 +2727,9 @@ function resolvedBatchRiskIssueTypes(issueType: string) {
   }
   if (issueType === 'volume_beat_missed' || issueType === 'volume_segment_missed') {
     return ['volume_beat_missed', 'volume_segment_missed']
+  }
+  if (issueType === 'recovery_evidence_mismatch') {
+    return ['recovery_evidence_mismatch']
   }
   if ([
     'readability_risk',
