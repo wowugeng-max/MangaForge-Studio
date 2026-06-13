@@ -491,6 +491,7 @@ function expansionStructureValidationBatchRun(args: {
   id: number
   createdAt: string
   chapterNos: number[]
+  source?: string
 }) {
   return {
     id: args.id,
@@ -498,7 +499,7 @@ function expansionStructureValidationBatchRun(args: {
     created_at: args.createdAt,
     status: 'success',
     input_ref: JSON.stringify({
-      source: 'auto_creation_safe_batch',
+      source: args.source || 'auto_creation_safe_batch',
       safety_limit: args.chapterNos.length,
       batch_preflight: {
         safe_chapter_count: args.chapterNos.length,
@@ -3866,6 +3867,82 @@ describe('buildAutoCreationDirectorModel', () => {
       status: 'ok',
       detail: expect.stringContaining('结构验证批通过'),
     })
+  })
+
+  test('feeds recovery validation batches back into review queue and five-chapter recovery roadmap', () => {
+    const validationChapterNos = [50, 51, 52]
+    const model = buildAutoCreationDirectorModel({
+      planning: readySafeBatchPlanning({ futureRoute: futureRouteRange(53, 5) }),
+      writing: readySafeBatchWriting({
+        nextChapter: { ...baseWriting.nextChapter, id: 53, chapterNo: 53, title: '恢复验证后53' },
+        previousChapter: { chapterNo: 52, title: '恢复验证52', wordCount: 3180, hasProse: true },
+      }),
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: { last_updated_chapter: 52 },
+      chapters: [...[41, 42, 43, 44, 45, 46, 47, 48, 49], ...validationChapterNos].map(chapterNo => ({
+        id: chapterNo,
+        chapter_no: chapterNo,
+        title: `恢复验证${chapterNo}`,
+        chapter_text: '恢复验证正文'.repeat(500),
+      })),
+      reviews: [
+        ...strengthenedAcceptanceQualityReviews([41, 42, 43], 5121, '2026-06-09T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([44, 45, 46], 5131, '2026-06-10T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([47, 48, 49], 5141, '2026-06-11T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews(validationChapterNos, 5151, '2026-06-14T01:00:00.000Z'),
+      ],
+      runRecords: [
+        strengthenedAcceptanceBatchRun({ id: 612, createdAt: '2026-06-09T00:00:00.000Z', chapterNos: [41, 42, 43] }),
+        strengthenedAcceptanceBatchRun({ id: 613, createdAt: '2026-06-10T00:00:00.000Z', chapterNos: [44, 45, 46] }),
+        strengthenedAcceptanceBatchRun({ id: 614, createdAt: '2026-06-11T00:00:00.000Z', chapterNos: [47, 48, 49] }),
+        expansionStructureValidationBatchRun({
+          id: 615,
+          createdAt: '2026-06-14T00:00:00.000Z',
+          chapterNos: validationChapterNos,
+          source: 'safe_batch_recovery_validation_batch',
+        }),
+      ],
+    } as any)
+
+    const policy = model.batchGuardrail.preflight.inputSnapshot.safe_batch_expansion_policy
+    const roadmap = policy.safe_batch_recovery_roadmap
+
+    expect(model.batchReviewQueue).toMatchObject({
+      visible: true,
+      status: 'done',
+      total: 3,
+      success: 3,
+      delivered: 3,
+      safeLimit: 3,
+      createdAt: '2026-06-14T00:00:00.000Z',
+    })
+    expect(model.batchReviewQueue.handoff.status).toBe('continue_batch')
+    expect(model.batchReviewQueue.handoff.evidence).toEqual(expect.arrayContaining([
+      expect.stringContaining('扩批结构验证批通过'),
+    ]))
+    expect(policy).toMatchObject({
+      status: 'expanded',
+      target_chapter_count: 5,
+      expansion_feedback: {
+        status: 'recovered',
+        target_chapter_count: 5,
+        expansion_structure_validation_result: {
+          status: 'ok',
+          validation_chapter_nos: validationChapterNos,
+          risk_count: 0,
+        },
+      },
+    })
+    expect(roadmap).toMatchObject({
+      current_lane: 'expanded_batch',
+      current_target_chapter_count: 5,
+      current_status: 'expanded',
+      current_reason: expect.stringContaining('恢复 5 章'),
+    })
+    expect(model.batchGuardrail.safeChapterCount).toBe(5)
+    expect(model.batchGuardrail.recommendedAction.key).toBe('start_safe_batch_generation')
+    expect(model.batchGuardrail.recommendedAction.description).toContain('连续生成 5 章')
   })
 
   test('keeps small-batch recovery when the structure validation batch fails', () => {

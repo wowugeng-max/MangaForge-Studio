@@ -5055,6 +5055,10 @@ function buildSafeBatchExpansionStructureRepairEffectiveness(args: {
   }
 }
 
+function isSafeBatchGenerationSource(source: string) {
+  return source === 'auto_creation_safe_batch' || source === 'safe_batch_recovery_validation_batch'
+}
+
 function buildSafeBatchExpansionFeedback(args: {
   runRecords: AnyRecord[]
   chapters: AnyRecord[]
@@ -5067,7 +5071,7 @@ function buildSafeBatchExpansionFeedback(args: {
       input: parsePayload(run?.input_ref) || {},
       output: parsePayload(run?.output_ref) || {},
     }))
-    .filter(entry => text(entry.input?.source) === 'auto_creation_safe_batch')
+    .filter(entry => isSafeBatchGenerationSource(text(entry.input?.source)))
     .map(entry => ({
       ...entry,
       preflight: entry.input?.batch_preflight || entry.input?.batchPreflight || null,
@@ -5085,7 +5089,7 @@ function buildSafeBatchExpansionFeedback(args: {
       input: parsePayload(run?.input_ref) || {},
       output: parsePayload(run?.output_ref) || {},
     }))
-    .filter(entry => text(entry.input?.source) === 'auto_creation_safe_batch')
+    .filter(entry => isSafeBatchGenerationSource(text(entry.input?.source)))
     .map(entry => ({
       ...entry,
       preflight: entry.input?.batch_preflight || entry.input?.batchPreflight || null,
@@ -5100,7 +5104,7 @@ function buildSafeBatchExpansionFeedback(args: {
       input: parsePayload(run?.input_ref) || {},
       output: parsePayload(run?.output_ref) || {},
     }))
-    .filter(entry => text(entry.input?.source) === 'auto_creation_safe_batch')
+    .filter(entry => isSafeBatchGenerationSource(text(entry.input?.source)))
     .map(entry => ({
       ...entry,
       preflight: entry.input?.batch_preflight || entry.input?.batchPreflight || null,
@@ -7490,10 +7494,13 @@ function buildBatchHandoff(args: {
   const closedRecoveryEvidence = recoveryEvidenceSignal?.status === 'ok' ? '恢复依据已闭环' : ''
   const strengthenedRepairAcceptanceSignal = args.riskRadar.signals.find(signal => signal.key === 'strengthened_repair_acceptance')
   const closedStrengthenedRepairAcceptance = strengthenedRepairAcceptanceSignal?.status === 'ok' ? '强化深修恢复验收已通过' : ''
+  const structureValidationSignal = args.riskRadar.signals.find(signal => signal.key === 'batch_expansion_structure')
+  const closedStructureValidation = structureValidationSignal?.status === 'ok' ? text(structureValidationSignal.detail) : ''
   const releaseEvidence = Array.from(new Set([
     ...arrayValue(args.releaseEvidence).map(item => text(item)).filter(Boolean),
     closedRecoveryEvidence,
     closedStrengthenedRepairAcceptance,
+    closedStructureValidation,
   ].filter(Boolean)))
 
   if (args.status === 'warn') {
@@ -10385,7 +10392,7 @@ function buildBatchReviewQueue(args: {
       input: parsePayload(run?.input_ref) || {},
       output: parsePayload(run?.output_ref) || {},
     }))
-    .filter(entry => text(entry.input?.source) === 'auto_creation_safe_batch')
+    .filter(entry => isSafeBatchGenerationSource(text(entry.input?.source)))
     .sort((a, b) => recordTime(b.run) - recordTime(a.run))
 
   const latest = safeBatchRuns[0]
