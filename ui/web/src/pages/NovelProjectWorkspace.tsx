@@ -3506,6 +3506,9 @@ export default function NovelProjectWorkspace() {
           source_count: queue.source_count,
           main_action: queue.main_action,
           next_cycle: queue.next_cycle,
+          source_run_id: payload?.sourceRunId,
+          source_task_index: payload?.sourceTaskIndex,
+          source_task: payload?.sourceTask,
           batch_preflight: payload?.batch_preflight || autoCreationDirectorModel.batchGuardrail.preflight.inputSnapshot,
         },
         output_ref: {
@@ -3517,6 +3520,8 @@ export default function NovelProjectWorkspace() {
             source_count: queue.source_count,
             main_action: queue.main_action,
             next_cycle: queue.next_cycle,
+            regovernance_source_run_id: payload?.sourceRunId,
+            regovernance_source_task_index: payload?.sourceTaskIndex,
             sources: queue.sources || [],
           },
           recommendations: queue.recommendations || [
@@ -6644,6 +6649,12 @@ export default function NovelProjectWorkspace() {
         onBulkUpdateRepairTaskStatus={(items, status) => { void bulkUpdateRepairTaskStatus(items, status) }}
         onRecheckStyleSampleTaskBooks={(items) => { void recheckStyleSampleTaskBookReviewTasks(items) }}
         onGenerateRepairAuditSummary={(run, options) => generateLongformRepairAuditSummary(run, options)}
+        onCreateRecoveryEvidenceGovernanceQueue={async (payload, run, taskIndex) => {
+          await createRecoveryEvidenceGovernanceQueue(payload)
+          if (run?.id && taskIndex >= 0) {
+            await updateRepairTaskStatus(run, taskIndex, 'needs_review', '已生成放行摘要再治理队列，等待治理闭环后复盘')
+          }
+        }}
         onPauseRun={async (run) => {
           await apiClient.post(`/novel/runs/${run.id}/pause`, { project_id: projectId })
           await loadProjectModules()

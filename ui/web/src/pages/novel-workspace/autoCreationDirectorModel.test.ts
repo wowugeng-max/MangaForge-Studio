@@ -2156,6 +2156,149 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(model.productionLicense.nextAction.key).toBe('start_safe_batch_generation')
   })
 
+  test('downgrades safe batching when the same recovery evidence source repeatedly fails after release', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        topStatus: {
+          ...basePlanning.topStatus,
+          future100Coverage: { ready: true, planned: 100, required: 100, missingChapters: [], label: '100/100' },
+        },
+        futureRoute: [
+          { chapterNo: 8, title: '试炼前夜', chapterTask: '主角拿到试炼资格', conflict: '执事设局阻拦', endingHook: '阵盘亮起第二道裂纹', mainlineProgress: '进入外门试炼核心局', riskTags: [] },
+          { chapterNo: 9, title: '阵盘裂纹', chapterTask: '阵盘异常暴露主角潜力', conflict: '同门围堵试探底牌', endingHook: '内门执事点名关注', mainlineProgress: '让宗门高层第一次注意主角', riskTags: [] },
+          { chapterNo: 10, title: '外门震动', chapterTask: '试炼结果引发宗门震动', conflict: '旧秩序压制新晋黑马', endingHook: '内门招揽提出苛刻条件', mainlineProgress: '打开内门势力线', riskTags: [] },
+        ],
+      },
+      writing: {
+        ...baseWriting,
+        chapterPlanningDesk: {
+          ...baseWriting.chapterPlanningDesk,
+          readiness: 'ready',
+          statusLabel: '本章可写',
+          scenePlanStatus: 'ready',
+          sceneCards: [
+            { title: '压迫升级', goal: '执事逼主角交阵盘' },
+            { title: '反向设局', goal: '主角用阵法拿回主动权' },
+          ],
+          recommendedPlannerAction: { key: 'confirm_plan_and_write_draft', label: '确认并生成' },
+        },
+        topStatus: {
+          ...baseWriting.topStatus,
+          nextActionLabel: '确认并生成',
+          primaryActionKey: 'confirm_plan_and_write_draft',
+        },
+        primaryActionKey: 'confirm_plan_and_write_draft',
+      },
+      activeTasks: [],
+      selectedModelId: 12,
+      runRecords: [
+        {
+          id: 501,
+          run_type: 'longform_production_repair',
+          created_at: '2026-06-06T00:00:00.000Z',
+          status: 'ready',
+          output_ref: JSON.stringify({
+            report: { source: 'auto_creation_safe_batch_risk' },
+            tasks: [
+              {
+                issue_type: 'recovery_evidence_mismatch',
+                recovery_evidence_review: {
+                  status: 'warn',
+                  failed_items: [
+                    {
+                      evidence: '单章治理复查：生产阻断已解除',
+                      source: 'recovery_evidence_release_summary',
+                      source_label: '安全连写放行摘要',
+                      source_action: 'single_chapter_governance_recheck',
+                      source_action_label: '复检单章',
+                      production_gate_source: 'single_chapter_governance_recheck',
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+        },
+        {
+          id: 502,
+          run_type: 'longform_production_repair',
+          created_at: '2026-06-07T00:00:00.000Z',
+          status: 'ready',
+          output_ref: JSON.stringify({
+            report: { source: 'auto_creation_safe_batch_risk' },
+            tasks: [
+              {
+                issue_type: 'recovery_evidence_mismatch',
+                recovery_evidence_regovernance_queue: {
+                  source: 'recovery_evidence_release_summary',
+                  tasks: [
+                    {
+                      issue_type: 'recovery_evidence_governance_queue',
+                      evidence: '单章治理复查：生产阻断已解除',
+                      source: 'single_chapter_governance_recheck',
+                      source_label: '单章治理复查',
+                      action_key: 'recheck_single_chapter',
+                      action_label: '复检单章',
+                    },
+                  ],
+                },
+                recovery_evidence_review: {
+                  status: 'warn',
+                  failed_items: [
+                    {
+                      evidence: '单章治理复查：生产阻断已解除',
+                      source: 'recovery_evidence_release_summary',
+                      source_label: '安全连写放行摘要',
+                      source_action: 'single_chapter_governance_recheck',
+                      source_action_label: '复检单章',
+                      production_gate_source: 'single_chapter_governance_recheck',
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+        },
+      ],
+      storyState: {
+        last_updated_chapter: 7,
+        global: {
+          core_promise: '李超用超人蛮力碰撞规则怪谈，张智负责拆解规则。',
+          current_volume_goal: '午夜校园中活过第一轮规则。',
+          open_questions: ['广播是谁发出的', '湿漉漉学生为什么敲门'],
+          payoff_queue: ['规则边界反制蛮力'],
+        },
+      },
+    } as any)
+
+    const profileSignal = model.batchGuardrail.guardrails.find(item => item.label === '恢复依据画像')
+
+    expect(model.batchGuardrail.status).toBe('caution')
+    expect(model.batchGuardrail.safeChapterCount).toBe(1)
+    expect(profileSignal?.status).toBe('warn')
+    expect(profileSignal?.detail).toContain('单章治理复查反复放行失败 2 次')
+    expect(model.batchGuardrail.preflight.inputSnapshot.recovery_evidence_source_risk_profile).toMatchObject({
+      status: 'warn',
+      repeat_source_count: 1,
+      sources: [
+        expect.objectContaining({
+          source: 'single_chapter_governance_recheck',
+          label: '单章治理复查',
+          release_failure_count: 2,
+        }),
+      ],
+    })
+    expect(model.productionLicense.status).toBe('single_chapter')
+    expect(model.productionLicense.reasons).toEqual(expect.arrayContaining([
+      expect.stringContaining('单章治理复查反复放行失败 2 次'),
+    ]))
+    expect(model.todayCommandDeck.releaseRationale.allowedCount).toBe(1)
+    expect(model.todayCommandDeck.releaseRationale.checks).toEqual(expect.arrayContaining([
+      expect.stringContaining('单章治理复查反复放行失败 2 次'),
+    ]))
+  })
+
   test('downgrades safe batching when the next batch still selects risky style samples', () => {
     const model = buildAutoCreationDirectorModel({
       planning: {
@@ -6446,6 +6589,42 @@ describe('buildAutoCreationDirectorModel', () => {
         source_action_label: '复盘批次',
       }),
     ]))
+    expect(recoveryTask?.recovery_evidence_regovernance_queue).toMatchObject({
+      source: 'recovery_evidence_release_summary',
+      status: 'needs_followup',
+      label: '安全连写放行摘要再治理',
+      next_cycle: {
+        type: 'release_summary_regovernance',
+        label: '放行摘要验收再治理',
+      },
+      tasks: expect.arrayContaining([
+        expect.objectContaining({
+          issue_type: 'recovery_evidence_governance_queue',
+          evidence: '恢复依据治理队列已闭环',
+          source: 'recovery_evidence_release_summary',
+          source_label: '安全连写放行摘要',
+          action_key: 'review_governance_closure',
+          action_label: '治理复查台',
+        }),
+        expect.objectContaining({
+          issue_type: 'recovery_evidence_governance_queue',
+          evidence: '单章治理复查：生产阻断已解除',
+          source: 'single_chapter_governance_recheck',
+          source_label: '单章治理复查',
+          action_key: 'recheck_single_chapter',
+          action_label: '复检单章',
+        }),
+        expect.objectContaining({
+          issue_type: 'recovery_evidence_governance_queue',
+          evidence: '批次恢复复查：生产阻断已解除',
+          source: 'safe_batch_recovery_recheck',
+          source_label: '批次恢复复查',
+          action_key: 'recheck_safe_batch',
+          action_label: '复盘批次',
+        }),
+      ]),
+    })
+    expect(recoveryTask?.recoveryEvidenceGovernanceQueue?.task_count).toBe(3)
     expect(model.batchReviewQueue.handoff.riskLabels).toContain('恢复依据')
   })
 

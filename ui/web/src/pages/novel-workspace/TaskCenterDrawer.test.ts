@@ -8,6 +8,7 @@ import {
   buildRecoveryEvidenceReviewResolvedFeedback,
   buildRecoveryEvidenceReviewRowAction,
   buildRecoveryEvidenceReviewRows,
+  buildRecoveryEvidenceRegovernanceSummary,
   buildRepairClosureHighlights,
   recoveryEvidenceSourceRecheckAction,
   repairTaskActionLabel,
@@ -510,6 +511,34 @@ describe('buildRecoveryEvidenceReviewRows', () => {
         riskLabels: ['风格样章缺口 1 项'],
       }),
     ])
+  })
+})
+
+describe('buildRecoveryEvidenceRegovernanceSummary', () => {
+  test('summarizes release summary regovernance queue drafts on recovery evidence tasks', () => {
+    expect(buildRecoveryEvidenceRegovernanceSummary({
+      issue_type: 'recovery_evidence_mismatch',
+      recovery_evidence_regovernance_queue: {
+        label: '安全连写放行摘要再治理',
+        summary: '第41-43章 放行摘要验收未通过，需回到恢复依据治理队列重新闭环。',
+        task_count: 3,
+        tasks: [
+          { action_label: '治理复查台' },
+          { action_label: '复检单章' },
+          { action_label: '复盘批次' },
+        ],
+      },
+    })).toEqual({
+      label: '安全连写放行摘要再治理',
+      summary: '第41-43章 放行摘要验收未通过，需回到恢复依据治理队列重新闭环。',
+      taskCount: 3,
+      actionLabel: '生成再治理队列',
+      actionLabels: ['治理复查台', '复检单章', '复盘批次'],
+    })
+
+    expect(buildRecoveryEvidenceRegovernanceSummary({
+      issue_type: 'core_drift',
+    })).toBeNull()
   })
 })
 

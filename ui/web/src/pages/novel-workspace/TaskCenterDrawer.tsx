@@ -464,6 +464,32 @@ export function buildRecoveryEvidenceReviewRows(task: any): RecoveryEvidenceRevi
   return rows.filter(item => item.evidence)
 }
 
+function recoveryEvidenceRegovernanceQueueOfTask(task: any) {
+  if (String(task?.issue_type || '') !== 'recovery_evidence_mismatch') return null
+  const queue = task?.recovery_evidence_regovernance_queue
+    || task?.recoveryEvidenceRegovernanceQueue
+    || task?.recoveryEvidenceGovernanceQueue
+    || null
+  const tasks = Array.isArray(queue?.tasks) ? queue.tasks : []
+  return tasks.length > 0 ? queue : null
+}
+
+export function buildRecoveryEvidenceRegovernanceSummary(task: any) {
+  const queue = recoveryEvidenceRegovernanceQueueOfTask(task)
+  if (!queue) return null
+  const tasks = Array.isArray(queue.tasks) ? queue.tasks : []
+  const actionLabels = Array.from(new Set(tasks
+    .map((item: any) => compactEvidenceText(item?.action_label || item?.actionLabel || ''))
+    .filter(Boolean)))
+  return {
+    label: compactEvidenceText(queue.label || '安全连写放行摘要再治理'),
+    summary: compactEvidenceText(queue.summary || '', 200),
+    taskCount: Number(queue.task_count || queue.taskCount || tasks.length || 0),
+    actionLabel: '生成再治理队列',
+    actionLabels,
+  }
+}
+
 export function buildRecoveryEvidenceReviewRowAction(row: RecoveryEvidenceReviewRow): RecoveryEvidenceReviewRowAction {
   const action = String(row.sourceAction || '')
   const productionGateSource = String(row.productionGateSource || '')
@@ -972,10 +998,12 @@ function repairTaskIssueTag(task: any) {
   return null
 }
 
-function compactEvidenceText(value: any) {
+function compactEvidenceText(value: any, maxLength?: number) {
   if (!value) return ''
-  if (typeof value !== 'object') return String(value)
-  return String(value.name || value.label || value.title || value.text || value.description || value.reason || value.message || '').trim()
+  const raw = typeof value !== 'object'
+    ? String(value)
+    : String(value.name || value.label || value.title || value.text || value.description || value.reason || value.message || '').trim()
+  return maxLength && raw.length > maxLength ? `${raw.slice(0, maxLength)}...` : raw
 }
 
 function deliveryRiskEvidenceLines(task: any) {
@@ -1100,6 +1128,27 @@ function RecoveryEvidenceReviewPreview({
             )}
           </Space>
         ))}
+      </Space>
+    </div>
+  )
+}
+
+function RecoveryEvidenceRegovernancePreview({ task }: { task: any }) {
+  const summary = buildRecoveryEvidenceRegovernanceSummary(task)
+  if (!summary) return null
+  return (
+    <div style={{ marginTop: 4, padding: 8, border: '1px solid #f0abfc', borderRadius: 6, background: '#fae8ff' }}>
+      <Space direction="vertical" size={4} style={{ width: '100%' }}>
+        <Space wrap size={[4, 2]}>
+          <Text strong style={{ fontSize: 12 }}>{summary.label}</Text>
+          <Tag color="purple" bordered={false}>队列 {summary.taskCount}</Tag>
+          {summary.actionLabels.slice(0, 3).map(label => (
+            <Tag key={label} color="gold" bordered={false}>{label}</Tag>
+          ))}
+        </Space>
+        {summary.summary && (
+          <Text type="secondary" style={{ fontSize: 12 }}>{summary.summary}</Text>
+        )}
       </Space>
     </div>
   )
@@ -1294,6 +1343,7 @@ function RepairTaskRunSummary({
   onBulkUpdateRepairTaskStatus,
   onRecheckStyleSampleTaskBooks,
   onGenerateRepairAuditSummary,
+  onCreateRecoveryEvidenceGovernanceQueue,
   onRefresh,
 }: {
   run: any
@@ -1307,6 +1357,7 @@ function RepairTaskRunSummary({
   onBulkUpdateRepairTaskStatus?: (items: any[], status: string) => void | Promise<void>
   onRecheckStyleSampleTaskBooks?: (items: any[]) => void
   onGenerateRepairAuditSummary?: (run: any, options?: RepairTaskActionOptions) => void | Promise<void>
+  onCreateRecoveryEvidenceGovernanceQueue?: (payload: any, run: any, taskIndex: number, options?: RepairTaskActionOptions) => void | Promise<void>
   onRefresh?: () => void | Promise<void>
 }) {
   const output = parseJsonValue(run.output_ref) || {}
@@ -1683,6 +1734,8 @@ function RepairTaskRunSummary({
           locale={{ emptyText: '暂无修复任务' }}
           renderItem={(task: any, taskIndex: number) => {
             const sourceFocused = Boolean(focusedTaskSource && recoveryEvidenceTaskSourceMeta(task).source === focusedTaskSource)
+            const regovernanceQueue = recoveryEvidenceRegovernanceQueueOfTask(task)
+            const regovernanceSummary = buildRecoveryEvidenceRegovernanceSummary(task)
             const refreshAnchorFocused = Boolean(
               recoveryEvidenceRefreshAnchor
               && (recoveryEvidenceRefreshAnchor.taskIndex === taskIndex || recoveryEvidenceRefreshAnchor.sourceTaskIndex === taskIndex),
@@ -1692,6 +1745,21 @@ function RepairTaskRunSummary({
               <List.Item
                 style={focused ? { border: '1px solid #a855f7', borderRadius: 6, paddingInline: 8, background: '#faf5ff' } : undefined}
               actions={[
+                regovernanceQueue && regovernanceSummary && onCreateRecoveryEvidenceGovernanceQueue && task.task_status !== 'resolved' ? (
+                  <Button
+                    key="regovernance"
+                    size="small"
+                    type="primary"
+                    onClick={() => onCreateRecoveryEvidenceGovernanceQueue({
+                      recoveryEvidenceGovernanceQueue: regovernanceQueue,
+                      sourceTask: task,
+                      sourceRunId: run?.id,
+                      sourceTaskIndex: taskIndex,
+                    }, run, taskIndex, { keepTaskCenterOpen: true })}
+                  >
+                    {regovernanceSummary.actionLabel}
+                  </Button>
+                ) : null,
                 repairTaskActionLabel(task) && onExecuteTypedRepairTask && task.task_status !== 'resolved' ? <Button key="typed" size="small" type="primary" onClick={() => onExecuteTypedRepairTask(task, run, taskIndex)}>{repairTaskActionLabel(task)}</Button> : null,
                 onUpdateRepairTaskStatus && task.task_status !== 'resolved' ? <Button key="resolved" size="small" type="link" onClick={() => onUpdateRepairTaskStatus(task, run, 'resolved', taskIndex)}>已处理</Button> : null,
                 onUpdateRepairTaskStatus && task.task_status !== 'needs_review' ? <Button key="review" size="small" type="link" onClick={() => onUpdateRepairTaskStatus(task, run, 'needs_review', taskIndex)}>需复查</Button> : null,
@@ -1726,6 +1794,7 @@ function RepairTaskRunSummary({
                       actionFeedbackByKey={recoveryEvidenceActionFeedbackByKey}
                       onRecoveryEvidenceReviewRowAction={(row, rowAction) => handleRecoveryEvidenceReviewRowAction(task, taskIndex, row, rowAction)}
                     />
+                    <RecoveryEvidenceRegovernancePreview task={task} />
                     <DeliveryRiskReviewPreview task={task} />
                   </Space>
                 )}
@@ -1917,6 +1986,7 @@ export function TaskCenterDrawer({
   onUpdateRepairTaskStatus,
   onBulkUpdateRepairTaskStatus,
   onGenerateRepairAuditSummary,
+  onCreateRecoveryEvidenceGovernanceQueue,
 }: {
   open: boolean
   activeTasks: WorkspaceActiveTask[]
@@ -1949,6 +2019,7 @@ export function TaskCenterDrawer({
   onUpdateRepairTaskStatus?: (task: any, run: any, status: string, taskIndex: number) => void | Promise<void>
   onBulkUpdateRepairTaskStatus?: (items: any[], status: string) => void | Promise<void>
   onGenerateRepairAuditSummary?: (run: any, options?: RepairTaskActionOptions) => void | Promise<void>
+  onCreateRecoveryEvidenceGovernanceQueue?: (payload: any, run: any, taskIndex: number, options?: RepairTaskActionOptions) => void | Promise<void>
 }) {
   const [detailRun, setDetailRun] = useState<any | null>(null)
   const [detailKnowledgeJob, setDetailKnowledgeJob] = useState<any | null>(null)
@@ -2293,6 +2364,10 @@ export function TaskCenterDrawer({
                   if (!options?.keepTaskCenterOpen) setDetailRun(null)
                   return onGenerateRepairAuditSummary?.(run, options)
                 }}
+                onCreateRecoveryEvidenceGovernanceQueue={(payload, run, taskIndex, options) => {
+                  if (!options?.keepTaskCenterOpen) setDetailRun(null)
+                  return onCreateRecoveryEvidenceGovernanceQueue?.(payload, run, taskIndex, options)
+                }}
               />
             )}
             {detailRun.run_type === 'longform_production_repair' && (
@@ -2327,6 +2402,10 @@ export function TaskCenterDrawer({
                 onGenerateRepairAuditSummary={(run, options) => {
                   if (!options?.keepTaskCenterOpen) setDetailRun(null)
                   return onGenerateRepairAuditSummary?.(run, options)
+                }}
+                onCreateRecoveryEvidenceGovernanceQueue={(payload, run, taskIndex, options) => {
+                  if (!options?.keepTaskCenterOpen) setDetailRun(null)
+                  return onCreateRecoveryEvidenceGovernanceQueue?.(payload, run, taskIndex, options)
                 }}
               />
             )}

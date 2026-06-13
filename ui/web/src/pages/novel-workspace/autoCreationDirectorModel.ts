@@ -3043,6 +3043,7 @@ function batchRepairTask(args: {
   styleSampleSync?: AnyRecord | null
   batchChecklistExecution?: AnyRecord | null
   recoveryEvidenceReview?: AnyRecord | null
+  recoveryEvidenceRegovernanceQueue?: AnyRecord | null
   actionArea?: string
   actionKey?: string
 }) {
@@ -3082,6 +3083,10 @@ function batchRepairTask(args: {
     ...(args.styleSampleSync ? { style_sample_sync: args.styleSampleSync } : {}),
     ...(args.batchChecklistExecution ? { batch_checklist_execution: args.batchChecklistExecution } : {}),
     ...(args.recoveryEvidenceReview ? { recovery_evidence_review: args.recoveryEvidenceReview } : {}),
+    ...(args.recoveryEvidenceRegovernanceQueue ? {
+      recovery_evidence_regovernance_queue: args.recoveryEvidenceRegovernanceQueue,
+      recoveryEvidenceGovernanceQueue: args.recoveryEvidenceRegovernanceQueue,
+    } : {}),
   }
 }
 
@@ -3218,6 +3223,254 @@ function buildRecoveryEvidenceReview(args: {
     summary: failedItems.length > 0
       ? `恢复放行依据 ${failedItems.length} 项未被本批交稿兑现：${failedItems.map(item => item.evidence).slice(0, 3).join('；')}`
       : evidence.length > 0 ? '恢复放行依据已被本批交稿复盘接住。' : '本批没有恢复放行依据。',
+  }
+}
+
+function recoveryEvidenceReleaseSummaryFromPreflight(preflight: AnyRecord | null | undefined) {
+  return parsePayload(preflight?.recovery_evidence_release_summary || preflight?.recoveryEvidenceReleaseSummary)
+    || preflight?.recovery_evidence_release_summary
+    || preflight?.recoveryEvidenceReleaseSummary
+    || null
+}
+
+function recoveryEvidenceRegovernanceActionForItem(item: AnyRecord) {
+  const sourceAction = text(item?.source_action || item?.sourceAction)
+  const gateSource = text(item?.production_gate_source || item?.productionGateSource)
+  if (gateSource === 'single_chapter_governance_recheck' || sourceAction === 'single_chapter_governance_recheck') {
+    return {
+      source: 'single_chapter_governance_recheck',
+      sourceLabel: '单章治理复查',
+      actionKey: 'recheck_single_chapter',
+      actionLabel: '复检单章',
+    }
+  }
+  if (gateSource === 'safe_batch_recovery_recheck' || sourceAction === 'safe_batch_recovery_recheck') {
+    return {
+      source: 'safe_batch_recovery_recheck',
+      sourceLabel: '批次恢复复查',
+      actionKey: 'recheck_safe_batch',
+      actionLabel: '复盘批次',
+    }
+  }
+  return {
+    source: 'recovery_evidence_release_summary',
+    sourceLabel: '安全连写放行摘要',
+    actionKey: 'review_governance_closure',
+    actionLabel: '治理复查台',
+  }
+}
+
+function buildRecoveryEvidenceRegovernanceQueue(args: {
+  preflight?: AnyRecord | null
+  review: AnyRecord
+}) {
+  const failedItems = arrayValue(args.review?.failed_items || args.review?.failedItems)
+    .filter(item => text(item?.source) === 'recovery_evidence_release_summary')
+  if (!failedItems.length) return null
+
+  const releaseSummary = recoveryEvidenceReleaseSummaryFromPreflight(args.preflight)
+  const releaseSources = arrayValue(releaseSummary?.cleared_sources || releaseSummary?.clearedSources)
+  const sourceByKey = new Map(releaseSources.map(source => [text(source?.source || source?.sourceMode), source]))
+  const allowedChapterNos = [
+    ...arrayValue(releaseSummary?.allowed_chapter_nos),
+    ...arrayValue(releaseSummary?.allowedChapterNos),
+  ].map(item => finiteNumberOrNull(item)).filter((item): item is number => item !== null)
+  const nextBatchLabel = firstText(releaseSummary?.next_batch_label, releaseSummary?.nextBatchLabel)
+
+  const tasks = failedItems.map((item, index) => {
+    const action = recoveryEvidenceRegovernanceActionForItem(item)
+    const sourceRecord = sourceByKey.get(action.source) || {}
+    const evidence = text(item?.evidence)
+    const chapterNos = [
+      ...arrayValue(item?.chapter_nos || item?.chapterNos),
+      ...arrayValue(sourceRecord?.chapter_nos || sourceRecord?.chapterNos),
+      ...(action.actionKey === 'recheck_single_chapter' ? allowedChapterNos.slice(0, 1) : []),
+    ].map(value => finiteNumberOrNull(value)).filter((value): value is number => value !== null)
+    const sourceTaskIndices = [
+      ...arrayValue(item?.source_task_indices || item?.sourceTaskIndices),
+      ...arrayValue(sourceRecord?.source_task_indices || sourceRecord?.sourceTaskIndices),
+    ].map(value => finiteNumberOrNull(value)).filter((value): value is number => value !== null)
+    const executionMeta = recoveryEvidenceGovernanceQueueExecutionMeta({
+      source: action.source,
+      source_task_indices: sourceTaskIndices,
+      chapter_nos: chapterNos,
+      source_tasks: [{
+        source_task_index: sourceTaskIndices[0],
+        chapter_no: chapterNos[0],
+      }],
+    }, action.actionKey)
+    return {
+      issue_type: 'recovery_evidence_governance_queue',
+      severity: action.actionKey === 'review_governance_closure' ? 'medium' : 'high',
+      task_status: 'needs_review',
+      source: action.source,
+      source_label: action.sourceLabel,
+      source_status: 'failed_after_release',
+      source_status_label: '放行后未继承',
+      action_key: action.actionKey,
+      action_label: action.actionLabel,
+      evidence,
+      failed_evidence: [evidence],
+      ...executionMeta,
+      title: `${action.sourceLabel}：${action.actionLabel}`,
+      message: `放行摘要验收失败：${evidence}`,
+      action: `${action.actionLabel}后刷新恢复依据审计，确认该放行依据重新被正文继承。`,
+      recovery_evidence_review: {
+        status: 'warn',
+        summary: `放行摘要验收失败：${evidence}`,
+        failed_evidence: [evidence],
+        failed_items: [item],
+      },
+      acceptance_criteria: [
+        '恢复依据审计重新生成',
+        '对应来源不再出现在放行摘要失效清单',
+        '下一轮批次复盘的 recovery_evidence_review 为 ok',
+      ],
+      queue_index: index,
+    }
+  })
+
+  return {
+    source: 'recovery_evidence_release_summary',
+    status: 'needs_followup',
+    label: '安全连写放行摘要再治理',
+    summary: nextBatchLabel
+      ? `${nextBatchLabel} 放行摘要验收未通过，需回到恢复依据治理队列重新闭环。`
+      : '安全连写放行摘要验收未通过，需回到恢复依据治理队列重新闭环。',
+    source_count: releaseSources.length || tasks.length,
+    task_count: tasks.length,
+    failed_evidence: failedItems.map(item => text(item?.evidence)).filter(Boolean),
+    next_batch_label: nextBatchLabel,
+    allowed_chapter_nos: allowedChapterNos,
+    main_action: {
+      action: text(tasks[0]?.action_key, 'review_governance_closure'),
+      label: text(tasks[0]?.action_label, '治理复查台'),
+      source: text(tasks[0]?.source, 'recovery_evidence_release_summary'),
+      sourceLabel: text(tasks[0]?.source_label, '安全连写放行摘要'),
+      status: 'failed_after_release',
+      residualEvidence: failedItems.map(item => text(item?.evidence)).filter(Boolean),
+    },
+    next_cycle: {
+      type: 'release_summary_regovernance',
+      label: '放行摘要验收再治理',
+    },
+    tasks,
+    recommendations: [
+      '先把放行摘要失效项沉淀为下一轮恢复依据治理队列，不要直接扩大安全连写。',
+      '按来源执行治理复查台、复检单章或复盘批次后，再刷新恢复依据审计。',
+      '审计重新闭环后，再恢复 2-3 章安全连写并观察下一批正文继承情况。',
+    ],
+  }
+}
+
+function recoveryEvidenceProfileSourceMeta(source: string, fallbackLabel = '') {
+  if (source === 'single_chapter_governance_recheck') return { source, label: '单章治理复查' }
+  if (source === 'safe_batch_recovery_recheck') return { source, label: '批次恢复复查' }
+  if (source === 'recovery_evidence_release_summary') return { source, label: '安全连写放行摘要' }
+  return { source: source || 'recovery_evidence_release_summary', label: fallbackLabel || '恢复依据来源' }
+}
+
+function recoveryEvidenceProfileSourceFromItem(item: AnyRecord) {
+  const gateSource = text(item?.production_gate_source || item?.productionGateSource)
+  const sourceAction = text(item?.source_action || item?.sourceAction)
+  if (gateSource) return recoveryEvidenceProfileSourceMeta(gateSource)
+  if (sourceAction === 'single_chapter_governance_recheck' || sourceAction === 'safe_batch_recovery_recheck') {
+    return recoveryEvidenceProfileSourceMeta(sourceAction)
+  }
+  return recoveryEvidenceProfileSourceMeta(text(item?.source || item?.sourceMode), text(item?.source_label || item?.sourceLabel))
+}
+
+function recoveryEvidenceReleaseFailureEventsFromTask(task: AnyRecord, run: AnyRecord, taskIndex: number) {
+  if (text(task?.issue_type || task?.issueType) !== 'recovery_evidence_mismatch') return []
+  const events: AnyRecord[] = []
+  const review = task?.recovery_evidence_review || task?.recoveryEvidenceReview || {}
+  arrayValue(review?.failed_items || review?.failedItems)
+    .filter(item => text(item?.source || item?.sourceMode) === 'recovery_evidence_release_summary')
+    .forEach(item => {
+      const sourceMeta = recoveryEvidenceProfileSourceFromItem(item)
+      events.push({
+        source: sourceMeta.source,
+        label: sourceMeta.label,
+        evidence: text(item?.evidence),
+        run_id: run?.id ?? null,
+        task_index: taskIndex,
+        failed_at: text(run?.created_at || run?.updated_at),
+      })
+    })
+
+  const queue = task?.recovery_evidence_regovernance_queue
+    || task?.recoveryEvidenceRegovernanceQueue
+    || task?.recoveryEvidenceGovernanceQueue
+    || null
+  arrayValue(queue?.tasks)
+    .filter(item => text(item?.issue_type || item?.issueType) === 'recovery_evidence_governance_queue')
+    .forEach(item => {
+      const sourceMeta = recoveryEvidenceProfileSourceMeta(text(item?.source || item?.sourceMode), text(item?.source_label || item?.sourceLabel))
+      events.push({
+        source: sourceMeta.source,
+        label: sourceMeta.label,
+        evidence: text(item?.evidence || arrayValue(item?.failed_evidence || item?.failedEvidence)[0]),
+        run_id: run?.id ?? null,
+        task_index: taskIndex,
+        failed_at: text(run?.created_at || run?.updated_at),
+      })
+    })
+  return events.filter(item => item.source && item.evidence)
+}
+
+function buildRecoveryEvidenceSourceRiskProfile(runRecords: AnyRecord[]) {
+  const seen = new Set<string>()
+  const bySource = new Map<string, AnyRecord>()
+  runRecords
+    .filter(run => text(run?.run_type) === 'longform_production_repair')
+    .forEach(run => {
+      const output = parsePayload(run?.output_ref) || {}
+      const tasks = [
+        ...arrayValue(output?.tasks),
+        ...arrayValue(output?.repairTasks),
+      ]
+      tasks.forEach((task, taskIndex) => {
+        recoveryEvidenceReleaseFailureEventsFromTask(task, run, taskIndex).forEach(event => {
+          const eventKey = [event.run_id, event.task_index, event.source, event.evidence].join('|')
+          if (seen.has(eventKey)) return
+          seen.add(eventKey)
+          const current = bySource.get(event.source) || {
+            source: event.source,
+            label: event.label,
+            release_failure_count: 0,
+            evidence: [],
+            source_run_ids: [],
+            latest_failed_at: '',
+          }
+          current.release_failure_count += 1
+          current.evidence = Array.from(new Set([...arrayValue(current.evidence), event.evidence])).slice(0, 6)
+          current.source_run_ids = Array.from(new Set([...arrayValue(current.source_run_ids), event.run_id].filter(Boolean))).slice(0, 8)
+          current.latest_failed_at = event.failed_at || current.latest_failed_at
+          bySource.set(event.source, current)
+        })
+      })
+    })
+
+  const sources = Array.from(bySource.values())
+    .sort((a, b) => Number(b.release_failure_count || 0) - Number(a.release_failure_count || 0))
+  const repeatedSources = sources.filter(source => Number(source.release_failure_count || 0) >= 2)
+  const topRepeated = repeatedSources[0]
+  const detail = topRepeated
+    ? `${topRepeated.label}反复放行失败 ${topRepeated.release_failure_count} 次：${arrayValue(topRepeated.evidence).slice(0, 2).join('；')}。本轮只允许单章推进，并先复盘更深层创作问题。`
+    : sources.length
+      ? '恢复依据放行后失效来源已有记录，但尚未形成反复失败画像。'
+      : '暂无反复放行失败的恢复依据来源。'
+
+  return {
+    visible: sources.length > 0,
+    status: repeatedSources.length > 0 ? 'warn' as const : 'ok' as const,
+    label: '恢复依据画像',
+    detail,
+    summary: detail,
+    source_count: sources.length,
+    repeat_source_count: repeatedSources.length,
+    total_failure_count: sources.reduce((sum, source) => sum + Number(source.release_failure_count || 0), 0),
+    sources,
   }
 }
 
@@ -3906,6 +4159,10 @@ function buildBatchRiskRadar(args: {
     : recoveryEvidenceReview
   const recoveryEvidenceRiskTotal = effectiveRecoveryEvidenceReview.failed_evidence.length
   if (recoveryEvidenceRiskTotal > 0 && successfulItems.length > 0) {
+    const recoveryEvidenceRegovernanceQueue = buildRecoveryEvidenceRegovernanceQueue({
+      preflight: args.batchPreflight,
+      review: effectiveRecoveryEvidenceReview,
+    })
     repairTasks.push(batchRepairTask({
       item: successfulItems[0],
       issueType: 'recovery_evidence_mismatch',
@@ -3914,6 +4171,7 @@ function buildBatchRiskRadar(args: {
       action: '按失效依据回修本批：逐项核对样章执行、读者回报、主线/剧情线和批次任务书，修完后重新运行交稿复盘。',
       metrics: { recovery_evidence_risk_count: recoveryEvidenceRiskTotal },
       recoveryEvidenceReview: effectiveRecoveryEvidenceReview,
+      recoveryEvidenceRegovernanceQueue,
     }))
   }
   if (serialRhythmRiskTotal > 0 && successfulItems.length > 0) {
@@ -4479,10 +4737,7 @@ function batchReleaseEvidenceItemsFromPreflight(preflight: AnyRecord | null | un
     || preflight?.recovery_evidence_production_gate
     || preflight?.recoveryEvidenceProductionGate
     || null
-  const releaseSummary = parsePayload(preflight?.recovery_evidence_release_summary || preflight?.recoveryEvidenceReleaseSummary)
-    || preflight?.recovery_evidence_release_summary
-    || preflight?.recoveryEvidenceReleaseSummary
-    || null
+  const releaseSummary = recoveryEvidenceReleaseSummaryFromPreflight(preflight)
   const recoveryEvidence = [
     ...arrayValue(preflight?.recovery_evidence),
     ...arrayValue(preflight?.recoveryEvidence),
@@ -4539,6 +4794,8 @@ function batchReleaseEvidenceItemsFromPreflight(preflight: AnyRecord | null | un
         source_action: action.action,
         source_action_label: action.label,
         production_gate_source: text(source?.source || source?.sourceMode),
+        chapter_nos: arrayValue(source?.chapter_nos || source?.chapterNos),
+        source_task_indices: arrayValue(source?.source_task_indices || source?.sourceTaskIndices),
       } : null
     })
     .filter(Boolean)
@@ -6282,6 +6539,7 @@ function buildBatchPreflight(args: {
   recoveryEvidence?: string[]
   recoveryEvidenceProductionGate?: AnyRecord | null
   recoveryEvidenceReleaseSummary?: AnyRecord | null
+  recoveryEvidenceSourceRiskProfile?: AnyRecord | null
 }): AutoCreationBatchPreflight {
   const allowedChapterNos = args.releaseWindow.allowedChapters.map(chapter => Number(chapter.chapterNo || 0)).filter(Boolean)
   const blockedChapterNos = args.releaseWindow.blockedChapters.map(chapter => Number(chapter.chapterNo || 0)).filter(Boolean)
@@ -6345,6 +6603,7 @@ function buildBatchPreflight(args: {
       ...(arrayValue(args.recoveryEvidence).length ? { recovery_evidence: arrayValue(args.recoveryEvidence) } : {}),
       ...(args.recoveryEvidenceProductionGate ? { recovery_evidence_production_gate: args.recoveryEvidenceProductionGate } : {}),
       ...(args.recoveryEvidenceReleaseSummary ? { recovery_evidence_release_summary: args.recoveryEvidenceReleaseSummary } : {}),
+      ...(args.recoveryEvidenceSourceRiskProfile?.visible ? { recovery_evidence_source_risk_profile: args.recoveryEvidenceSourceRiskProfile } : {}),
       storyline_decision_closure: storylineDecisionClosure,
       ...(governanceRecheckMemory ? { governance_recheck_memory: governanceRecheckMemory } : {}),
       ...(args.styleSampleBatchPreflight?.visible ? { style_sample_batch_preflight: args.styleSampleBatchPreflight } : {}),
@@ -6448,6 +6707,7 @@ function buildBatchGuardrail(args: {
       ? 'block'
       : 'warn'
   const recoveryEvidenceProductionGate = buildRecoveryEvidenceProductionGate(arrayValue(args.runRecords))
+  const recoveryEvidenceSourceRiskProfile = buildRecoveryEvidenceSourceRiskProfile(arrayValue(args.runRecords))
   const hasScenePlan = planningDesk.scenePlanStatus === 'ready' || arrayValue(planningDesk.sceneCards).length > 0
   const currentChapterDelivered = !Boolean(acceptance.visible) && !chapterHandoffVisible
   const chapterPlanIssue = text(arrayValue(planningDesk.reasons)[0], '当前章任务书或场景卡未就绪。')
@@ -6493,6 +6753,11 @@ function buildBatchGuardrail(args: {
       args.deliveryRiskGate.summary,
     ),
     recoveryEvidenceProductionGate.signal,
+    signal(
+      recoveryEvidenceSourceRiskProfile.label,
+      recoveryEvidenceSourceRiskProfile.status,
+      recoveryEvidenceSourceRiskProfile.detail,
+    ),
     signal(
       '未来10章规划',
       future10.ready ? 'ok' : 'block',
@@ -6595,6 +6860,8 @@ function buildBatchGuardrail(args: {
       recoveryEvidenceNextAction,
       recoveryEvidenceGovernanceQueue,
     })
+  } else if (warning?.label === '恢复依据画像') {
+    recommendedAction = opsAction('review_governance_closure', '治理复查台', recoveryEvidenceSourceRiskProfile.detail)
   } else if (blocking?.label === '长线记忆' || warning?.label === '长线记忆') {
     recommendedAction = canonRunway.action
   } else if (blocking?.label === '剧情单元' || warning?.label === '剧情单元') {
@@ -6696,6 +6963,7 @@ function buildBatchGuardrail(args: {
     recoveryEvidence,
     recoveryEvidenceProductionGate: recoveryEvidenceProductionGate.snapshot,
     recoveryEvidenceReleaseSummary,
+    recoveryEvidenceSourceRiskProfile,
   })
 
   if (status === 'ready') {
@@ -6761,6 +7029,8 @@ function buildBatchGuardrail(args: {
               ? `连载库存提示：${serialReleaseInventory.detail} 本轮只放行单章，先补存稿或后续规划。`
               : warning?.label === '近10章疲劳'
                 ? `近10章疲劳雷达提示：${fatigueDetail} 本轮建议只推进 1 章，并先更新滚动规划更换压迫来源、回报形态、章末问题或可视化场面。`
+                : warning?.label === '恢复依据画像'
+                  ? `恢复依据画像提示：${recoveryEvidenceSourceRiskProfile.detail}`
                 : warning?.label === '故事压力阶梯'
                   ? '故事压力阶梯提示压力不足，本轮建议只推进 1 章，并先更新滚动规划补明确压力源、升级赌注和反转逼迫。'
                   : warning?.label === '剧情单元'
@@ -7441,6 +7711,20 @@ function buildProductionLicense(args: {
       safeChapterCount: args.batchGuardrail.safeChapterCount,
       reasons: ['长线材料可用', '交稿风险已清', '剧情线决策已闭环', '下一批任务书可执行', ...recoveryEvidenceReleaseReasons],
       badges: [`安全 ${args.batchGuardrail.safeChapterCount}章`, args.batchGuardrail.nextBatchBrief.chapterRangeLabel].filter(Boolean),
+      nextAction: args.batchGuardrail.recommendedAction,
+    }
+  }
+
+  const recoveryEvidenceProfileWarning = args.batchGuardrail.guardrails.find(item => item.label === '恢复依据画像' && item.status === 'warn')
+  if (args.batchGuardrail.status === 'caution' && recoveryEvidenceProfileWarning) {
+    return {
+      status: 'single_chapter',
+      label: '生产许可',
+      modeLabel: '单章生产',
+      summary: '下一批护栏仍有谨慎项，只允许单章小步推进，避免批量生成时放大主线偏移或节奏疲劳。',
+      safeChapterCount: Math.max(1, Math.min(1, args.batchGuardrail.safeChapterCount || 1)),
+      reasons: [recoveryEvidenceProfileWarning.detail],
+      badges: ['禁止批量', '单章校验'],
       nextAction: args.batchGuardrail.recommendedAction,
     }
   }
