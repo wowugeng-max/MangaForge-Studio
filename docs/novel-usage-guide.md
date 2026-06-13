@@ -1222,10 +1222,11 @@
 - 默认 5 章档位复发后已生成轻量回退原因。默认档位批次一旦在同段出现核心偏移、回报欠账或追读拉力失效，扩批反馈会写入 `default_five_chapter_regression`，任务中心的扩批结构任务会直接显示失效批次、前置恢复批、3 章验证批和失败维度，并把动作改成“回到3章验证批或扩批结构修复层”，避免作者只看到普通扩批热区而不知道默认档位为何失效。
 - 默认档位回退原因已接入下一批任务书。扩批结构任务闭环后，下一轮 3 章验证批的 `next_batch_brief.expansionStructureVerification` 与 `batch_preflight.safe_batch_expansion_structure_verification` 会继承 `default_five_chapter_regression`，保留失效批次、前置恢复批、原 3 章验证批、复发段位和失败维度；正文生成 prompt 的 `扩批结构验证` 段落会明确要求逐章证明核心守恒、显性回报和章末追读重新稳定。
 - 默认档位回退后的 3 章验证批复盘已对照原失败维度生成 `default_five_chapter_recovery_verdict`。验证批会把 `default_five_chapter_regression.failure_reasons` 映射到本批核心偏移、回报欠账、追读拉力计数，输出已清零/仍未清零列表；任务中心的 3 章验证批摘要会显示“默认档位恢复判定”，让作者能直接看到默认档位是否真的恢复，而不是只看总风险数。
+- 默认档位恢复判定已接入恢复 5 章后的观察批和默认档位批。`确认恢复5章扩批`、`5章观察批` 与 `默认5章档位` 会继续携带 `default_five_chapter_recovery_verdict`；若后续 5 章批在已清零维度上再次出现核心偏移、回报欠账或追读拉力失效，扩批反馈会写入 `default_five_chapter_recovery_verdict_relapse`，任务中心显示“恢复判定失效 -> 回到3章验证批”、复发批次、清零验证批和同维复发原因。
 
 推荐下一步：
 
-- 将 `default_five_chapter_recovery_verdict` 接入恢复 5 章后的观察批：恢复批和默认档位批继续携带上一轮恢复判定，若同一维度再次复发，任务中心直接提示“恢复判定失效 -> 回到3章验证批”，形成默认档位长期闭环。
+- 将 `default_five_chapter_recovery_verdict_relapse` 接入二次 3 章验证后的趋势统计：连续两次“恢复判定失效”的同维复发应升级为默认档位结构重构，而不是重复做普通 3 章验证批。
 
 ## 8. 使用说明维护规则
 

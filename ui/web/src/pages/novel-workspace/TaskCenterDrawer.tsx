@@ -1404,6 +1404,7 @@ export type SafeBatchExpansionFeedbackSnapshot = {
   structureDecisionTrend: SafeBatchExpansionStructureDecisionTrendSnapshot | null
   recoveryRestoreStabilityEvidence: SafeBatchRecoveryRestoreStabilityEvidenceSnapshot | null
   defaultFiveChapterRegression: SafeBatchDefaultFiveChapterRegressionSnapshot | null
+  defaultFiveChapterRecoveryVerdictRelapse: SafeBatchDefaultFiveChapterRecoveryVerdictRelapseSnapshot | null
 }
 
 export type SafeBatchRecoveryRestoreStabilityEvidenceSnapshot = {
@@ -1450,6 +1451,34 @@ export type SafeBatchDefaultFiveChapterRecoveryVerdictSnapshot = {
   failureReasonStatuses: {
     reason: string
     status: 'cleared' | 'remaining'
+    riskCount: number
+  }[]
+}
+
+export type SafeBatchDefaultFiveChapterRecoveryVerdictRelapseSnapshot = {
+  visible: boolean
+  status: string
+  label: string
+  source: string
+  summary: string
+  defaultBatchChapterNos: number[]
+  restoreChapterNos: number[]
+  previousValidationChapterNos: number[]
+  validationChapterNos: number[]
+  relapseBatchChapterNos: number[]
+  relapsedChapterNos: number[]
+  repeatedHotspotSegment: {
+    key: string
+    label: string
+    riskCount: number
+  } | null
+  failureReasons: string[]
+  clearedFailureReasons: string[]
+  relapsedFailureReasons: string[]
+  stableFailureReasons: string[]
+  failureReasonStatuses: {
+    reason: string
+    status: 'relapsed' | 'stable'
     riskCount: number
   }[]
 }
@@ -1964,6 +1993,50 @@ function buildSafeBatchDefaultFiveChapterRecoveryVerdictSnapshot(verdictLike: an
   return snapshot
 }
 
+function buildSafeBatchDefaultFiveChapterRecoveryVerdictRelapseSnapshot(relapseLike: any): SafeBatchDefaultFiveChapterRecoveryVerdictRelapseSnapshot | null {
+  const relapse = parseJsonValue(relapseLike) || relapseLike || null
+  if (!relapse || relapse.visible === false) return null
+  const hotspot = relapse?.repeated_hotspot_segment || relapse?.repeatedHotspotSegment || null
+  const failureReasonStatuses = (Array.isArray(relapse?.failure_reason_statuses)
+    ? relapse.failure_reason_statuses
+    : Array.isArray(relapse?.failureReasonStatuses)
+      ? relapse.failureReasonStatuses
+      : []
+  ).map((item: any) => {
+    const itemStatus = compactEvidenceText(item?.status || '')
+    return {
+      reason: compactEvidenceText(item?.reason || ''),
+      status: itemStatus === 'stable' ? 'stable' as const : 'relapsed' as const,
+      riskCount: Number(item?.risk_count ?? item?.riskCount ?? 0),
+    }
+  }).filter((item: any) => item.reason)
+  const snapshot = {
+    visible: true,
+    status: compactEvidenceText(relapse?.status || 'relapsed'),
+    label: compactEvidenceText(relapse?.label || '恢复判定失效'),
+    source: compactEvidenceText(relapse?.source || ''),
+    summary: compactEvidenceText(relapse?.summary || ''),
+    defaultBatchChapterNos: normalizeChapterNos(relapse?.default_batch_chapter_nos || relapse?.defaultBatchChapterNos),
+    restoreChapterNos: normalizeChapterNos(relapse?.restore_chapter_nos || relapse?.restoreChapterNos),
+    previousValidationChapterNos: normalizeChapterNos(relapse?.previous_validation_chapter_nos || relapse?.previousValidationChapterNos),
+    validationChapterNos: normalizeChapterNos(relapse?.validation_chapter_nos || relapse?.validationChapterNos),
+    relapseBatchChapterNos: normalizeChapterNos(relapse?.relapse_batch_chapter_nos || relapse?.relapseBatchChapterNos),
+    relapsedChapterNos: normalizeChapterNos(relapse?.relapsed_chapter_nos || relapse?.relapsedChapterNos),
+    repeatedHotspotSegment: hotspot ? {
+      key: compactEvidenceText(hotspot?.key || ''),
+      label: compactEvidenceText(hotspot?.label || hotspot?.key || '复发段位'),
+      riskCount: Number(hotspot?.risk_count ?? hotspot?.riskCount ?? 0),
+    } : null,
+    failureReasons: normalizeEvidenceTextList(relapse?.failure_reasons || relapse?.failureReasons),
+    clearedFailureReasons: normalizeEvidenceTextList(relapse?.cleared_failure_reasons || relapse?.clearedFailureReasons),
+    relapsedFailureReasons: normalizeEvidenceTextList(relapse?.relapsed_failure_reasons || relapse?.relapsedFailureReasons),
+    stableFailureReasons: normalizeEvidenceTextList(relapse?.stable_failure_reasons || relapse?.stableFailureReasons),
+    failureReasonStatuses,
+  }
+  if (!snapshot.summary && !snapshot.relapsedFailureReasons.length && !snapshot.failureReasonStatuses.length) return null
+  return snapshot
+}
+
 function buildSafeBatchRecoveryRestoreStabilityEvidenceSnapshot(evidenceLike: any): SafeBatchRecoveryRestoreStabilityEvidenceSnapshot | null {
   const evidence = parseJsonValue(evidenceLike) || evidenceLike || null
   if (!evidence || evidence.visible === false) return null
@@ -2107,6 +2180,9 @@ function buildSafeBatchExpansionFeedbackSnapshot(feedbackLike: any): SafeBatchEx
     ),
     defaultFiveChapterRegression: buildSafeBatchDefaultFiveChapterRegressionSnapshot(
       feedback?.default_five_chapter_regression || feedback?.defaultFiveChapterRegression,
+    ),
+    defaultFiveChapterRecoveryVerdictRelapse: buildSafeBatchDefaultFiveChapterRecoveryVerdictRelapseSnapshot(
+      feedback?.default_five_chapter_recovery_verdict_relapse || feedback?.defaultFiveChapterRecoveryVerdictRelapse,
     ),
   }
 }
@@ -2308,6 +2384,7 @@ function BatchProseRunSummary({ run }: { run: any }) {
   const expansionStructureDecisionTrend = expansionFeedback?.structureDecisionTrend || null
   const expansionStructureDecisionRequirement = expansionStructureDecisionTrend?.topFailedRequirement || null
   const defaultFiveChapterRegression = expansionFeedback?.defaultFiveChapterRegression || null
+  const defaultRecoveryVerdictRelapse = expansionFeedback?.defaultFiveChapterRecoveryVerdictRelapse || null
   const recoveryRestoreStability = expansionFeedback?.recoveryRestoreStabilityEvidence || null
   const recoveryRestoreStabilityLane = expansionPolicy?.recoveryRestoreStabilityLane
     || buildSafeBatchRecoveryRestoreStabilityLaneSnapshot(
@@ -2501,8 +2578,32 @@ function BatchProseRunSummary({ run }: { run: any }) {
                         {defaultFiveChapterRegression.repeatedHotspotSegment.label}复发
                       </Tag>
                     )}
+                    {defaultRecoveryVerdictRelapse && (
+                      <Tag color="gold" bordered={false}>恢复判定失效</Tag>
+                    )}
+                    {defaultRecoveryVerdictRelapse?.relapsedFailureReasons.slice(0, 3).map(reason => (
+                      <Tag key={`relapse-${reason}`} color="gold" bordered={false}>{reason}复发</Tag>
+                    ))}
                   </Space>
                   <Text type="secondary" style={{ fontSize: 12 }}>{expansionFeedback.summary}</Text>
+                  {defaultRecoveryVerdictRelapse && (
+                    <Space direction="vertical" size={3} style={{ width: '100%' }}>
+                      <Space wrap size={[4, 4]}>
+                        {defaultRecoveryVerdictRelapse.validationChapterNos.length > 0 && (
+                          <Tag bordered={false}>清零验证 {compactChapterNos(defaultRecoveryVerdictRelapse.validationChapterNos)}</Tag>
+                        )}
+                        {defaultRecoveryVerdictRelapse.relapseBatchChapterNos.length > 0 && (
+                          <Tag color="gold" bordered={false}>复发批 {compactChapterNos(defaultRecoveryVerdictRelapse.relapseBatchChapterNos)}</Tag>
+                        )}
+                        {defaultRecoveryVerdictRelapse.repeatedHotspotSegment && (
+                          <Tag color="gold" bordered={false}>{defaultRecoveryVerdictRelapse.repeatedHotspotSegment.label}风险 {defaultRecoveryVerdictRelapse.repeatedHotspotSegment.riskCount}</Tag>
+                        )}
+                      </Space>
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        {defaultRecoveryVerdictRelapse.summary || '恢复判定失效，需要回到 3 章验证批重新证明核心、回报和追读稳定。'}
+                      </Text>
+                    </Space>
+                  )}
                   {defaultFiveChapterRegression && (
                     <Space direction="vertical" size={3} style={{ width: '100%' }}>
                       <Space wrap size={[4, 4]}>

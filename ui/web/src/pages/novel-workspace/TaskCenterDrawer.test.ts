@@ -984,6 +984,72 @@ describe('buildSafeBatchExpansionPolicySnapshot', () => {
     expect(snapshot?.expansionFeedback?.defaultFiveChapterRegression?.summary).toContain('默认5章档位回退原因')
   })
 
+  test('keeps default recovery verdict relapse evidence for task-center rollback review', () => {
+    const snapshot = buildSafeBatchExpansionPolicySnapshot({
+      safe_batch_expansion_policy: {
+        status: 'recovering',
+        label: '强化扩批规则',
+        summary: '恢复判定失效，回到3章验证批。',
+        target_chapter_count: 3,
+        base_chapter_count: 3,
+        expanded_chapter_count: 5,
+        required_pass_streak: 3,
+        pass_streak: 3,
+        accepted_batch_count: 3,
+        failed_batch_count: 1,
+        latest_status: 'warn',
+        expansion_feedback: {
+          status: 'rollback_to_small_batch',
+          label: '扩批热区反馈',
+          summary: '恢复判定失效 -> 回到3章验证批：核心偏移、回报欠账、追读拉力在中段复发。',
+          target_chapter_count: 3,
+          latest_chapter_nos: [76, 77, 78, 79, 80],
+          risk_count: 3,
+          default_five_chapter_recovery_verdict_relapse: {
+            visible: true,
+            status: 'relapsed',
+            label: '恢复判定失效',
+            source: 'default_five_chapter_recovery_verdict',
+            summary: '恢复判定失效 -> 回到3章验证批：核心偏移、回报欠账、追读拉力在中段第78、79章复发。',
+            default_batch_chapter_nos: [63, 64, 65, 66, 67],
+            restore_chapter_nos: [58, 59, 60, 61, 62],
+            previous_validation_chapter_nos: [50, 51, 52],
+            validation_chapter_nos: [68, 69, 70],
+            relapse_batch_chapter_nos: [76, 77, 78, 79, 80],
+            relapsed_chapter_nos: [78, 79],
+            repeated_hotspot_segment: { key: 'middle', label: '中段', risk_count: 3 },
+            failure_reasons: ['核心偏移', '回报欠账', '追读拉力'],
+            relapsed_failure_reasons: ['核心偏移', '回报欠账', '追读拉力'],
+            stable_failure_reasons: [],
+            failure_reason_statuses: [
+              { reason: '核心偏移', status: 'relapsed', risk_count: 1 },
+              { reason: '回报欠账', status: 'relapsed', risk_count: 1 },
+              { reason: '追读拉力', status: 'relapsed', risk_count: 1 },
+            ],
+          },
+        },
+      },
+    })
+
+    expect(snapshot?.expansionFeedback?.defaultFiveChapterRecoveryVerdictRelapse).toMatchObject({
+      visible: true,
+      status: 'relapsed',
+      label: '恢复判定失效',
+      source: 'default_five_chapter_recovery_verdict',
+      validationChapterNos: [68, 69, 70],
+      relapseBatchChapterNos: [76, 77, 78, 79, 80],
+      relapsedChapterNos: [78, 79],
+      repeatedHotspotSegment: {
+        key: 'middle',
+        label: '中段',
+        riskCount: 3,
+      },
+      failureReasons: ['核心偏移', '回报欠账', '追读拉力'],
+      relapsedFailureReasons: ['核心偏移', '回报欠账', '追读拉力'],
+    })
+    expect(snapshot?.expansionFeedback?.defaultFiveChapterRecoveryVerdictRelapse?.summary).toContain('恢复判定失效 -> 回到3章验证批')
+  })
+
   test('keeps expansion structure validation trend in the task-center snapshot', () => {
     const snapshot = buildSafeBatchExpansionPolicySnapshot({
       safe_batch_expansion_policy: {

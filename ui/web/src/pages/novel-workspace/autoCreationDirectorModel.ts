@@ -3972,6 +3972,9 @@ function buildSafeBatchRecoveryRestoreConfirmation(policy: AnyRecord | null | un
   if (!validationChapterNos.length) return null
   const chapterEvidence = compactChapterNoEvidence(validationChapterNos)
   const validationSummary = text(validation.summary)
+  const defaultFiveChapterRecoveryVerdict = validation.default_five_chapter_recovery_verdict
+    || validation.defaultFiveChapterRecoveryVerdict
+    || null
   return {
     status: 'ready',
     label: '确认恢复5章扩批',
@@ -3980,7 +3983,13 @@ function buildSafeBatchRecoveryRestoreConfirmation(policy: AnyRecord | null | un
     target_chapter_count: targetChapterCount,
     risk_count: riskCount,
     source: 'safe_batch_recovery_validation_result',
-    evidence: [validationSummary].filter(Boolean),
+    evidence: [
+      validationSummary,
+      text(defaultFiveChapterRecoveryVerdict?.summary),
+    ].filter(Boolean),
+    ...(defaultFiveChapterRecoveryVerdict ? {
+      default_five_chapter_recovery_verdict: defaultFiveChapterRecoveryVerdict,
+    } : {}),
   }
 }
 
@@ -4129,6 +4138,11 @@ function buildSafeBatchExpansionStructureReview(args: {
   const defaultFiveChapterRegression = args.expansionFeedback?.defaultFiveChapterRegression
     || args.expansionFeedback?.default_five_chapter_regression
     || null
+  const defaultFiveChapterRecoveryVerdictRelapse = args.expansionFeedback?.defaultFiveChapterRecoveryVerdictRelapse
+    || args.expansionFeedback?.default_five_chapter_recovery_verdict_relapse
+    || defaultFiveChapterRegression?.default_five_chapter_recovery_verdict_relapse
+    || defaultFiveChapterRegression?.defaultFiveChapterRecoveryVerdictRelapse
+    || null
   const defaultRegressionSegment = defaultFiveChapterRegression?.repeated_hotspot_segment
     || defaultFiveChapterRegression?.repeatedHotspotSegment
     || null
@@ -4172,11 +4186,14 @@ function buildSafeBatchExpansionStructureReview(args: {
   const segmentLabel = repeated.label || text(hotspot?.label, '复发段位')
   const rollbackPolicy = segmentReview?.rollbackPolicy || segmentReview?.rollback_policy || null
   const defaultRegressionVisible = Boolean(defaultFiveChapterRegression && defaultFiveChapterRegression.visible !== false)
+  const defaultRecoveryVerdictRelapseVisible = Boolean(defaultFiveChapterRecoveryVerdictRelapse && defaultFiveChapterRecoveryVerdictRelapse.visible !== false)
   return {
     visible: true,
     status: 'warn',
     label: '扩批结构修复',
-    summary: defaultRegressionVisible
+    summary: defaultRecoveryVerdictRelapseVisible
+      ? `${text(defaultFiveChapterRecoveryVerdictRelapse.summary, `恢复判定失效：${segmentLabel}复发。`)} 先回到扩批结构修复层，再用3章验证批重新证明默认档位可以恢复。`
+      : defaultRegressionVisible
       ? `${text(defaultFiveChapterRegression.summary, `默认5章档位在${segmentLabel}复发。`)} 先回到扩批结构修复层，再用3章验证批证明默认档位可以恢复。`
       : `${segmentLabel}连续 ${repeated.count} 次成为5章扩批热区，先做固定段落治理和批次结构改写，再恢复5章连写。`,
     repeated_hotspot_segment: repeated,
@@ -4184,6 +4201,9 @@ function buildSafeBatchExpansionStructureReview(args: {
     affected_chapter_nos: affectedChapterNos,
     hotspot_summaries: hotspotSummaries.length ? hotspotSummaries : [text(hotspot?.summary, repeated.summary)].filter(Boolean),
     structure_actions: [
+      defaultRecoveryVerdictRelapseVisible
+        ? `恢复判定失效：${text(defaultFiveChapterRecoveryVerdictRelapse.summary)} 下一轮回到3章验证批。`
+        : '',
       defaultRegressionVisible
         ? `默认档位回退：先把${segmentLabel}失效原因写入任务书，下一轮回到3章验证批。`
         : '',
@@ -4192,6 +4212,7 @@ function buildSafeBatchExpansionStructureReview(args: {
       '把复发段位写入下一批任务书，明确每章承担的冲突来源、回报兑现和章末翻页问题。',
     ].filter(Boolean),
     ...(defaultRegressionVisible ? { default_five_chapter_regression: defaultFiveChapterRegression } : {}),
+    ...(defaultRecoveryVerdictRelapseVisible ? { default_five_chapter_recovery_verdict_relapse: defaultFiveChapterRecoveryVerdictRelapse } : {}),
     rollback_policy: rollbackPolicy ? {
       mode: text(rollbackPolicy?.mode),
       target_chapter_count: Number(rollbackPolicy?.targetChapterCount ?? rollbackPolicy?.target_chapter_count ?? 0),
@@ -4791,6 +4812,9 @@ function safeBatchExpansionFeedbackSnapshot(feedback: AnyRecord) {
     ...(feedback?.defaultFiveChapterRegression ? {
       default_five_chapter_regression: feedback.defaultFiveChapterRegression,
     } : {}),
+    ...(feedback?.defaultFiveChapterRecoveryVerdictRelapse ? {
+      default_five_chapter_recovery_verdict_relapse: feedback.defaultFiveChapterRecoveryVerdictRelapse,
+    } : {}),
     rollback_policy: feedback?.rollbackPolicy ? {
       mode: text(feedback.rollbackPolicy?.mode),
       target_chapter_count: Number(feedback.rollbackPolicy?.targetChapterCount || 0),
@@ -4933,6 +4957,7 @@ function safeBatchExpansionEntryEvaluation(args: {
     recoveryRestoreConfirmation: safeBatchRecoveryRestoreConfirmationFromEntry(args.entry),
     recoveryRestoreValidationSegment: safeBatchRecoveryRestoreValidationSegmentFromEntry(args.entry),
     defaultFiveChapterLane: defaultFiveChapterLaneFromEntry(args.entry),
+    defaultFiveChapterRecoveryVerdict: defaultFiveChapterRecoveryVerdictFromEntry(args.entry),
     rawReview,
     effectiveReview,
     segmentResolved,
@@ -5248,6 +5273,37 @@ function safeBatchRecoveryRestoreValidationSegmentFromEntry(entry: AnyRecord) {
   }
 }
 
+function defaultFiveChapterRecoveryVerdictFromSource(source?: AnyRecord | null) {
+  if (!source) return null
+  const verdict = source.default_five_chapter_recovery_verdict
+    || source.defaultFiveChapterRecoveryVerdict
+    || null
+  if (!verdict || verdict.visible === false) return null
+  return verdict
+}
+
+function defaultFiveChapterRecoveryVerdictFromEntry(entry: AnyRecord) {
+  const input = entry?.input || {}
+  const preflight = entry?.preflight || {}
+  const policy = preflight.safe_batch_expansion_policy || preflight.safeBatchExpansionPolicy || null
+  const feedback = policy?.expansion_feedback || policy?.expansionFeedback || null
+  const sources = [
+    input,
+    input.recovery_restore_confirmation || input.recoveryRestoreConfirmation,
+    input.recovery_restore_stability_evidence || input.recoveryRestoreStabilityEvidence,
+    input.default_five_chapter_lane || input.defaultFiveChapterLane,
+    preflight.safe_batch_recovery_restore_confirmation || preflight.safeBatchRecoveryRestoreConfirmation,
+    preflight.safe_batch_recovery_restore_stability_lane || preflight.safeBatchRecoveryRestoreStabilityLane,
+    feedback?.recovery_restore_stability_evidence || feedback?.recoveryRestoreStabilityEvidence,
+    feedback?.expansion_structure_validation_result || feedback?.expansionStructureValidationResult,
+  ]
+  for (const source of sources) {
+    const verdict = defaultFiveChapterRecoveryVerdictFromSource(source)
+    if (verdict) return verdict
+  }
+  return null
+}
+
 function defaultFiveChapterLaneFromEntry(entry: AnyRecord) {
   return entry?.input?.default_five_chapter_lane
     || entry?.input?.defaultFiveChapterLane
@@ -5264,6 +5320,9 @@ function safeBatchRecoveryRestoreStabilityEvidence(evaluation: AnyRecord | null 
   const restoreChapterNos = arrayValue(evaluation.latestChapterNos)
     .map(chapterNo => Number(chapterNo))
     .filter(chapterNo => chapterNo > 0)
+  const defaultFiveChapterRecoveryVerdict = defaultFiveChapterRecoveryVerdictFromSource(evaluation.recoveryRestoreConfirmation)
+    || evaluation.defaultFiveChapterRecoveryVerdict
+    || null
   return {
     status: Number(evaluation.rawRiskCount || 0) > 0 ? 'relapsed' : 'passed',
     source: 'safe_batch_recovery_restore_five_batch',
@@ -5274,6 +5333,89 @@ function safeBatchRecoveryRestoreStabilityEvidence(evaluation: AnyRecord | null 
     summary: Number(evaluation.rawRiskCount || 0) > 0
       ? `恢复5章扩批稳定观察发现复发：${compactChapterNoEvidence(restoreChapterNos)}仍有核心/回报/追读热区。`
       : `恢复5章扩批稳定观察通过：${compactChapterNoEvidence(validationChapterNos)}验证批之后，${compactChapterNoEvidence(restoreChapterNos)}继续保持核心守恒、显性回报和章末追读稳定。`,
+    ...(defaultFiveChapterRecoveryVerdict ? {
+      default_five_chapter_recovery_verdict: defaultFiveChapterRecoveryVerdict,
+    } : {}),
+  }
+}
+
+function safeBatchDefaultFiveChapterRecoveryVerdictRelapse(evaluation: AnyRecord | null | undefined) {
+  if (!evaluation || Number(evaluation.rawRiskCount || 0) <= 0 || !evaluation.topHotspot) return null
+  const verdict = evaluation.defaultFiveChapterRecoveryVerdict
+    || defaultFiveChapterRecoveryVerdictFromSource(evaluation.defaultFiveChapterLane)
+    || defaultFiveChapterRecoveryVerdictFromSource(evaluation.recoveryRestoreConfirmation)
+    || null
+  if (!verdict || text(verdict.status) !== 'passed') return null
+  const failureReasons = arrayValue(verdict.cleared_failure_reasons || verdict.clearedFailureReasons)
+    .concat(arrayValue(verdict.failure_reasons || verdict.failureReasons))
+    .map(item => text(item))
+    .filter(Boolean)
+  const uniqueFailureReasons = Array.from(new Set(failureReasons))
+  if (!uniqueFailureReasons.length) return null
+  const hotspot = evaluation.topHotspot || {}
+  const counts = {
+    riskCount: Number(hotspot.riskCount || hotspot.risk_count || 0),
+    coreRiskCount: Number(hotspot.coreRiskCount || hotspot.core_risk_count || 0),
+    payoffDebtCount: Number(hotspot.payoffDebtCount || hotspot.payoff_debt_count || 0),
+    readerPullRiskCount: Number(hotspot.readerPullRiskCount || hotspot.reader_pull_risk_count || 0),
+  }
+  const reasonStatuses = uniqueFailureReasons.map(reason => {
+    const riskCount = safeBatchDefaultRecoveryRiskCountForReason(reason, counts)
+    return {
+      reason,
+      status: riskCount > 0 ? 'relapsed' : 'stable',
+      risk_count: riskCount,
+    }
+  })
+  const relapsedFailureReasons = reasonStatuses
+    .filter(item => item.status === 'relapsed')
+    .map(item => item.reason)
+  if (!relapsedFailureReasons.length) return null
+  const stableFailureReasons = reasonStatuses
+    .filter(item => item.status === 'stable')
+    .map(item => item.reason)
+  const relapseBatchChapterNos = arrayValue(evaluation.latestChapterNos)
+    .map(chapterNo => Number(chapterNo))
+    .filter(chapterNo => chapterNo > 0)
+  const relapsedChapterNos = arrayValue(hotspot.chapterNos || hotspot.chapter_nos)
+    .map(chapterNo => Number(chapterNo))
+    .filter(chapterNo => chapterNo > 0)
+  const validationChapterNos = arrayValue(verdict.validation_chapter_nos || verdict.validationChapterNos)
+    .map(chapterNo => Number(chapterNo))
+    .filter(chapterNo => chapterNo > 0)
+  const segmentLabel = text(hotspot.label, text(hotspot.key, '复发段位'))
+  const relapseChapterText = relapsedChapterNos.length ? compactChapterNoEvidence(relapsedChapterNos) : compactChapterNoEvidence(relapseBatchChapterNos)
+  return {
+    visible: true,
+    status: 'relapsed',
+    label: '恢复判定失效',
+    source: 'default_five_chapter_recovery_verdict',
+    summary: `恢复判定失效 -> 回到3章验证批：${relapsedFailureReasons.join('、')}在${segmentLabel}${relapseChapterText}复发，${compactChapterNoEvidence(validationChapterNos)}清零证据失效。`,
+    default_batch_chapter_nos: arrayValue(verdict.default_batch_chapter_nos || verdict.defaultBatchChapterNos)
+      .map(chapterNo => Number(chapterNo))
+      .filter(chapterNo => chapterNo > 0),
+    restore_chapter_nos: arrayValue(verdict.restore_chapter_nos || verdict.restoreChapterNos)
+      .map(chapterNo => Number(chapterNo))
+      .filter(chapterNo => chapterNo > 0),
+    previous_validation_chapter_nos: arrayValue(verdict.previous_validation_chapter_nos || verdict.previousValidationChapterNos)
+      .map(chapterNo => Number(chapterNo))
+      .filter(chapterNo => chapterNo > 0),
+    validation_chapter_nos: validationChapterNos,
+    relapse_batch_chapter_nos: relapseBatchChapterNos,
+    relapsed_chapter_nos: relapsedChapterNos,
+    repeated_hotspot_segment: {
+      key: text(hotspot.key),
+      label: segmentLabel,
+      risk_count: counts.riskCount,
+      core_risk_count: counts.coreRiskCount,
+      payoff_debt_count: counts.payoffDebtCount,
+      reader_pull_risk_count: counts.readerPullRiskCount,
+    },
+    failure_reasons: uniqueFailureReasons,
+    cleared_failure_reasons: uniqueFailureReasons,
+    relapsed_failure_reasons: relapsedFailureReasons,
+    stable_failure_reasons: stableFailureReasons,
+    failure_reason_statuses: reasonStatuses,
   }
 }
 
@@ -5302,6 +5444,7 @@ function safeBatchDefaultFiveChapterRegression(evaluation: AnyRecord | null | un
   const stablePassStreak = Number(lane.stable_pass_streak ?? lane.stablePassStreak ?? 0)
   const requiredStablePassStreak = Number(lane.required_stable_pass_streak ?? lane.requiredStablePassStreak ?? 2)
   const riskText = failureReasons.length ? `失效证据：${failureReasons.join('、')}。` : '核心/回报/追读证据失效。'
+  const defaultRecoveryVerdictRelapse = safeBatchDefaultFiveChapterRecoveryVerdictRelapse(evaluation)
 
   return {
     visible: true,
@@ -5327,7 +5470,12 @@ function safeBatchDefaultFiveChapterRegression(evaluation: AnyRecord | null | un
       summary: text(hotspot.summary),
     },
     failure_reasons: failureReasons,
-    summary: `默认5章档位回退原因：连续 ${stablePassStreak} 批恢复稳定后，${compactChapterNoEvidence(defaultBatchChapterNos)}默认档位在${segmentLabel}复发，${riskText}先回到3章验证批或扩批结构修复层。`,
+    summary: defaultRecoveryVerdictRelapse
+      ? `${defaultRecoveryVerdictRelapse.summary} 默认5章档位在${segmentLabel}复发，先回到扩批结构修复层。`
+      : `默认5章档位回退原因：连续 ${stablePassStreak} 批恢复稳定后，${compactChapterNoEvidence(defaultBatchChapterNos)}默认档位在${segmentLabel}复发，${riskText}先回到3章验证批或扩批结构修复层。`,
+    ...(defaultRecoveryVerdictRelapse ? {
+      default_five_chapter_recovery_verdict_relapse: defaultRecoveryVerdictRelapse,
+    } : {}),
   }
 }
 
@@ -5336,6 +5484,12 @@ function buildSafeBatchRecoveryRestoreStabilityLane(policy: AnyRecord | null | u
   const feedback = policy.expansionFeedback || policy.expansion_feedback || null
   const evidence = feedback?.recoveryRestoreStabilityEvidence
     || feedback?.recovery_restore_stability_evidence
+    || null
+  const validationResult = feedback?.expansionStructureValidationResult
+    || feedback?.expansion_structure_validation_result
+    || null
+  const defaultFiveChapterRecoveryVerdict = defaultFiveChapterRecoveryVerdictFromSource(evidence)
+    || defaultFiveChapterRecoveryVerdictFromSource(validationResult)
     || null
   const stablePassStreak = Number(evidence?.stable_pass_streak ?? evidence?.stablePassStreak ?? 0)
   if (!evidence || text(evidence.status) !== 'passed' || stablePassStreak <= 0) return null
@@ -5361,11 +5515,15 @@ function buildSafeBatchRecoveryRestoreStabilityLane(policy: AnyRecord | null | u
     restore_chapter_nos: restoreChapterNos,
     validation_chapter_nos: validationChapterNos,
     summary,
+    ...(defaultFiveChapterRecoveryVerdict ? {
+      default_five_chapter_recovery_verdict: defaultFiveChapterRecoveryVerdict,
+    } : {}),
   }
 }
 
 function safeBatchRecoveryRestoreObservationConfirmation(lane: AnyRecord | null | undefined, targetChapterCount: number) {
   if (!lane) return null
+  const defaultFiveChapterRecoveryVerdict = defaultFiveChapterRecoveryVerdictFromSource(lane)
   return {
     status: text(lane.status, 'observing'),
     label: text(lane.label, '5章观察批'),
@@ -5375,6 +5533,9 @@ function safeBatchRecoveryRestoreObservationConfirmation(lane: AnyRecord | null 
     risk_count: 0,
     source: 'recovery_restore_stability_evidence',
     evidence: [text(lane.summary)].filter(Boolean),
+    ...(defaultFiveChapterRecoveryVerdict ? {
+      default_five_chapter_recovery_verdict: defaultFiveChapterRecoveryVerdict,
+    } : {}),
   }
 }
 
@@ -5556,6 +5717,7 @@ function buildSafeBatchExpansionFeedback(args: {
     ? evaluations.filter(evaluation => text(evaluation.topHotspot?.key) === text(latest.topHotspot?.key)).length
     : 0
   const recoveryRestoreRelapseSegment = safeBatchRecoveryRestoreRelapseSegment(latest)
+  const defaultFiveChapterRecoveryVerdictRelapse = safeBatchDefaultFiveChapterRecoveryVerdictRelapse(latest)
   const defaultFiveChapterRegression = safeBatchDefaultFiveChapterRegression(latest)
   const repeatedHotspotSegment = recoveryRestoreRelapseSegment
     || defaultFiveChapterRegression?.repeated_hotspot_segment
@@ -5574,6 +5736,7 @@ function buildSafeBatchExpansionFeedback(args: {
     repeatedHotspotSegment,
     recoveryRestoreStabilityEvidence,
     defaultFiveChapterRegression,
+    defaultFiveChapterRecoveryVerdictRelapse,
   }
   const validationIsNewerThanLatestExpansion = latestStructureValidation
     ? Date.parse(text(latestStructureValidation.latestBatchCreatedAt)) > Date.parse(text(latest.latestBatchCreatedAt))
@@ -5652,6 +5815,8 @@ function buildSafeBatchExpansionFeedback(args: {
   })
   const summary = defaultFiveChapterRegression
     ? `${defaultFiveChapterRegression.summary}${text(rollbackPolicy?.summary)}`
+    : defaultFiveChapterRecoveryVerdictRelapse
+    ? `${defaultFiveChapterRecoveryVerdictRelapse.summary}${text(rollbackPolicy?.summary)}`
     : repeatedHotspotSegment
     ? `${repeatedHotspotSegment.summary}${text(rollbackPolicy?.summary)}`
     : text(rollbackPolicy?.summary, '扩批分段热区未闭环，下一轮回退到小批量安全连写。')
@@ -7225,6 +7390,7 @@ function buildBatchRiskRadar(args: {
     if (expansionStructureReview.visible) {
       const repeatedSegment = expansionStructureReview.repeated_hotspot_segment
       const defaultRegression = expansionStructureReview.default_five_chapter_regression || null
+      const defaultRecoveryVerdictRelapse = expansionStructureReview.default_five_chapter_recovery_verdict_relapse || null
       const expansionStructureReviewWithTrend = {
         ...expansionStructureReview,
         ...(safeBatchExpansionStructureValidationTrend?.visible ? {
@@ -7236,10 +7402,14 @@ function buildBatchRiskRadar(args: {
         issueType: 'safe_batch_expansion_structure_repair',
         taskType: 'repair_planning',
         severity: 'high',
-        message: defaultRegression
+        message: defaultRecoveryVerdictRelapse
+          ? `默认5章档位恢复判定失效：${text(defaultRecoveryVerdictRelapse.summary, `${repeatedSegment?.label || '扩批段位'}同维复发，需要回到3章验证批。`)}`
+          : defaultRegression
           ? `默认5章档位失效：${text(defaultRegression.summary, `${repeatedSegment?.label || '扩批段位'}复发，需要改写批次结构。`)}`
           : `${repeatedSegment?.label || '扩批段位'}连续 ${repeatedSegment?.count || 2} 次扩批热区，单修章节不足，需要改写批次结构。`,
-        action: defaultRegression
+        action: defaultRecoveryVerdictRelapse
+          ? `恢复判定失效 -> 回到3章验证批：先按${repeatedSegment?.label || '复发段位'}固定段落治理和批次结构改写，逐项重证${arrayValue(defaultRecoveryVerdictRelapse.relapsed_failure_reasons || defaultRecoveryVerdictRelapse.relapsedFailureReasons).map(item => text(item)).filter(Boolean).join('、') || '核心守恒、显性回报和章末追读'}已清零，再恢复默认5章档位。`
+          : defaultRegression
           ? `先按${repeatedSegment?.label || '复发段位'}固定段落治理和批次结构改写，下一轮回到3章验证批；验证核心守恒、显性回报和章末追读稳定后，再恢复默认5章档位。`
           : `先做${repeatedSegment?.label || '复发段位'}固定段落治理和批次结构改写，再按 ${expansionStructureReview.rollback_policy?.target_chapter_count || 3} 章以内恢复安全连写。`,
         metrics: {
@@ -7248,6 +7418,7 @@ function buildBatchRiskRadar(args: {
           target_chapter_count: effectiveSafeBatchExpansionSegmentReview.targetChapterCount,
           rollback_target_chapter_count: expansionStructureReview.rollback_policy?.target_chapter_count || 3,
           ...(defaultRegression ? { default_five_chapter_regression: 1 } : {}),
+          ...(defaultRecoveryVerdictRelapse ? { default_five_chapter_recovery_verdict_relapse: 1 } : {}),
         },
         ...(defaultRegression ? { actionKey: 'restore_default_lane_regression' } : {}),
         safeBatchExpansionStructureReview: expansionStructureReviewWithTrend,
