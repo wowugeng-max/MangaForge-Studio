@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { buildRepairClosureHighlights } from './TaskCenterDrawer'
+import { buildRecoveryEvidenceAuditView, buildRepairClosureHighlights } from './TaskCenterDrawer'
 
 describe('buildRepairClosureHighlights', () => {
   test('summarizes resolved delivery risk repair tasks for task center closure evidence', () => {
@@ -92,5 +92,35 @@ describe('buildRepairClosureHighlights', () => {
     ])
 
     expect(highlights).toEqual([])
+  })
+})
+
+describe('buildRecoveryEvidenceAuditView', () => {
+  test('maps recovery evidence closure into task center audit rows', () => {
+    const view = buildRecoveryEvidenceAuditView({
+      status: 'closed',
+      recovery_evidence_closure: {
+        status: 'closed',
+        total: 1,
+        resolved: 1,
+        failed_evidence: ['样章任务书复检通过 1 项'],
+        repaired_evidence: ['第42章对白交锋已补回样章节奏'],
+        watch_items: ['下一批继续观察样章策略命中率'],
+      },
+    })
+
+    expect(view).toEqual(expect.objectContaining({
+      status: 'closed',
+      label: '恢复依据审计',
+      total: 1,
+      resolved: 1,
+      failedEvidence: ['样章任务书复检通过 1 项'],
+      repairedEvidence: ['第42章对白交锋已补回样章节奏'],
+      watchItems: ['下一批继续观察样章策略命中率'],
+    }))
+  })
+
+  test('hides recovery evidence audit when there is no closure payload', () => {
+    expect(buildRecoveryEvidenceAuditView({ status: 'closed' })).toBeNull()
   })
 })

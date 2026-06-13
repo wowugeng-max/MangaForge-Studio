@@ -232,7 +232,103 @@ function buildLongformProductionRepairTasks(trends: any, limit = 60) {
   return tasks.slice(0, Math.max(1, Math.min(120, Number(limit || 60))))
 }
 
-function buildLongformRepairAuditSummary(run: any, trends: any) {
+function uniqueCompactTexts(values: any[], limit = 160) {
+  return Array.from(new Set(values.map(value => compactText(value, limit)).filter(Boolean)))
+}
+
+function recoveryEvidenceReviewOf(task: any) {
+  return task?.recovery_evidence_review || task?.recoveryEvidenceReview || {}
+}
+
+function recoveryEvidenceFromFailedItems(review: any) {
+  return asArray(review?.failed_items || review?.failedItems)
+    .map((item: any) => item?.evidence || item?.text || item?.message || item)
+}
+
+function recoveryRiskLabelsFromFailedItems(review: any) {
+  return uniqueCompactTexts(asArray(review?.failed_items || review?.failedItems)
+    .flatMap((item: any) => [
+      ...asArray(item?.risk_labels),
+      ...asArray(item?.riskLabels),
+    ]), 120)
+}
+
+function recoveryEvidenceClosureForAudit(tasks: any[], remainingTouchedRisks: any[]) {
+  const recoveryTasks = tasks.filter((task: any) => String(task?.issue_type || task?.issueType || '') === 'recovery_evidence_mismatch')
+  if (!recoveryTasks.length) {
+    return {
+      status: 'empty',
+      total: 0,
+      resolved: 0,
+      failed_evidence: [],
+      repaired_evidence: [],
+      watch_items: [],
+      tasks: [],
+    }
+  }
+
+  const weakByNo = new Map(remainingTouchedRisks.map((row: any) => [Number(row?.chapter_no || 0), row]))
+  const taskRows = recoveryTasks.map((task: any) => {
+    const review = recoveryEvidenceReviewOf(task)
+    const failedEvidence = uniqueCompactTexts([
+      ...recoveryEvidenceFromFailedItems(review),
+      ...asArray(review?.failed_evidence),
+      ...asArray(review?.failedEvidence),
+    ])
+    const repairedEvidence = uniqueCompactTexts([
+      ...asArray(review?.repaired_evidence),
+      ...asArray(review?.repairedEvidence),
+      ...asArray(review?.post_repair_evidence),
+      ...asArray(review?.postRepairEvidence),
+      ...asArray(review?.closure_evidence),
+      ...asArray(review?.closureEvidence),
+    ])
+    const riskLabels = recoveryRiskLabelsFromFailedItems(review)
+    const chapterNo = Number(task?.chapter_no || task?.chapterNo || 0)
+    const weakRow = chapterNo ? weakByNo.get(chapterNo) : null
+    const explicitWatchItems = [
+      ...asArray(review?.watch_items),
+      ...asArray(review?.watchItems),
+      ...asArray(task?.watch_items),
+      ...asArray(task?.watchItems),
+    ]
+    const watchItems = uniqueCompactTexts([
+      ...explicitWatchItems,
+      ...riskLabels.map(label => `后续继续观察：${label}`),
+      weakRow ? `第${weakRow.chapter_no}章仍需关注：${weakRow.status || '薄弱'}，质检 ${weakRow.quality_score ?? '-'}，准备度 ${weakRow.readiness ?? '-'}` : '',
+      !isResolvedRepairTaskStatus(task?.task_status || task?.status) ? task?.message || task?.action : '',
+    ], 200)
+    return {
+      chapter_no: chapterNo || null,
+      task_status: task?.task_status || task?.status || 'open',
+      title: task?.title || task?.message || '',
+      status: review?.status || '',
+      summary: compactText(review?.summary || task?.message || '', 200),
+      failed_evidence: failedEvidence,
+      repaired_evidence: repairedEvidence,
+      watch_items: watchItems,
+      risk_labels: riskLabels,
+    }
+  })
+  const unresolved = taskRows.filter(row => !['resolved', 'closed', 'done', 'completed'].includes(String(row.task_status || '')))
+  const residual = taskRows.filter(row => String(row.status || '') === 'warn' && row.failed_evidence.length > 0)
+
+  return {
+    status: unresolved.length || residual.length ? 'needs_followup' : 'closed',
+    total: recoveryTasks.length,
+    resolved: taskRows.filter(row => ['resolved', 'closed', 'done', 'completed'].includes(String(row.task_status || ''))).length,
+    failed_evidence: uniqueCompactTexts(taskRows.flatMap(row => row.failed_evidence)),
+    repaired_evidence: uniqueCompactTexts(taskRows.flatMap(row => row.repaired_evidence)),
+    watch_items: uniqueCompactTexts(taskRows.flatMap(row => row.watch_items), 200),
+    tasks: taskRows,
+  }
+}
+
+function isResolvedRepairTaskStatus(status: any) {
+  return ['resolved', 'closed', 'done', 'completed'].includes(String(status || ''))
+}
+
+export function buildLongformRepairAuditSummary(run: any, trends: any) {
   const payload = parseJsonLikePayload(run.output_ref) || {}
   const tasks = Array.isArray(payload.tasks) ? payload.tasks : []
   const baseline = payload.report?.summary || {}
@@ -267,6 +363,7 @@ function buildLongformRepairAuditSummary(run: any, trends: any) {
     .slice(0, 30)
   const statusCounts = countBy(tasks.map((task: any) => ({ ...task, task_status: task.task_status || 'open' })), 'task_status')
   const typeCounts = countBy(tasks, 'task_type')
+  const recoveryEvidenceClosure = recoveryEvidenceClosureForAudit(tasks, remainingTouchedRisks)
   return {
     created_at: new Date().toISOString(),
     source_run_id: run.id,
@@ -293,6 +390,7 @@ function buildLongformRepairAuditSummary(run: any, trends: any) {
         delta: Number.isFinite(Number(payload.report?.weak_count)) ? (trends.weak_rows || []).length - Number(payload.report.weak_count) : null,
       },
     },
+    recovery_evidence_closure: recoveryEvidenceClosure,
     remaining_risks: {
       unresolved_tasks: unresolved.slice(0, 30).map((task: any) => ({
         task_type: task.task_type,
@@ -314,9 +412,10 @@ function buildLongformRepairAuditSummary(run: any, trends: any) {
     },
     conclusion: [
       tasks.length ? `本轮共处理 ${tasks.length} 项长线生产修复任务，已确认 ${Number(statusCounts.resolved || 0)} 项。` : '本轮没有生成修复任务。',
+      recoveryEvidenceClosure.total ? `恢复依据闭环 ${recoveryEvidenceClosure.resolved}/${recoveryEvidenceClosure.total}，${recoveryEvidenceClosure.status === 'closed' ? '失效依据已补成可复盘证据。' : '仍需继续复检失效依据。'}` : '',
       remainingTouchedRisks.length ? `仍有 ${remainingTouchedRisks.length} 个已触达章节处于薄弱状态，需要继续复查。` : '已触达章节暂无明显薄弱风险。',
       unresolved.length ? `还有 ${unresolved.length} 项任务未关闭。` : '本轮任务已全部关闭。',
-    ],
+    ].filter(Boolean),
   }
 }
 

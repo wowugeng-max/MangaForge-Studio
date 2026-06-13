@@ -239,6 +239,43 @@ export function buildRepairClosureHighlights(tasks: any[], audit?: any | null): 
     .slice(0, 6)
 }
 
+export type RecoveryEvidenceAuditView = {
+  status: 'closed' | 'needs_followup'
+  label: string
+  total: number
+  resolved: number
+  failedEvidence: string[]
+  repairedEvidence: string[]
+  watchItems: string[]
+}
+
+function compactAuditList(values: any[], limit = 8) {
+  return Array.from(new Set(values.map(item => compactEvidenceText(item)).filter(Boolean))).slice(0, limit)
+}
+
+export function buildRecoveryEvidenceAuditView(audit?: any | null): RecoveryEvidenceAuditView | null {
+  const closure = audit?.recovery_evidence_closure || audit?.recoveryEvidenceClosure || null
+  if (!closure || Number(closure.total || 0) <= 0) return null
+  return {
+    status: closure.status === 'closed' ? 'closed' : 'needs_followup',
+    label: '恢复依据审计',
+    total: Number(closure.total || 0),
+    resolved: Number(closure.resolved || 0),
+    failedEvidence: compactAuditList([
+      ...(Array.isArray(closure.failed_evidence) ? closure.failed_evidence : []),
+      ...(Array.isArray(closure.failedEvidence) ? closure.failedEvidence : []),
+    ]),
+    repairedEvidence: compactAuditList([
+      ...(Array.isArray(closure.repaired_evidence) ? closure.repaired_evidence : []),
+      ...(Array.isArray(closure.repairedEvidence) ? closure.repairedEvidence : []),
+    ]),
+    watchItems: compactAuditList([
+      ...(Array.isArray(closure.watch_items) ? closure.watch_items : []),
+      ...(Array.isArray(closure.watchItems) ? closure.watchItems : []),
+    ]),
+  }
+}
+
 function repairTaskIssueTag(task: any) {
   if (String(task?.issue_type || '') === 'batch_brief_mismatch') return <Tag color="purple" bordered={false}>批次计划</Tag>
   if (String(task?.issue_type || '') === 'recovery_evidence_mismatch') return <Tag color="purple" bordered={false}>恢复依据</Tag>
@@ -547,6 +584,7 @@ function RepairTaskRunSummary({
   const resolved = tasks.filter((task: any) => task.task_status === 'resolved').length
   const needsReview = tasks.filter((task: any) => task.task_status === 'needs_review').length
   const closureHighlights = buildRepairClosureHighlights(tasks, audit)
+  const recoveryEvidenceAudit = buildRecoveryEvidenceAuditView(audit)
   const title = run.run_type === 'first30_retention_repair'
     ? '前30章留存修复任务'
     : run.run_type === 'longform_production_repair'
@@ -614,6 +652,28 @@ function RepairTaskRunSummary({
                   <Text type="secondary" style={{ fontSize: 12 }}>{item.detail}</Text>
                 </Space>
               ))}
+            </Space>
+          </div>
+        )}
+        {recoveryEvidenceAudit && (
+          <div style={{ padding: 8, border: '1px solid #f5d0fe', borderRadius: 6, background: '#fdf4ff' }}>
+            <Space direction="vertical" size={6} style={{ width: '100%' }}>
+              <Space wrap>
+                <Text strong style={{ fontSize: 12 }}>{recoveryEvidenceAudit.label}</Text>
+                <Tag color={recoveryEvidenceAudit.status === 'closed' ? 'green' : 'gold'} bordered={false}>
+                  {recoveryEvidenceAudit.status === 'closed' ? '已闭环' : '需跟进'}
+                </Tag>
+                <Tag bordered={false}>已确认 {recoveryEvidenceAudit.resolved}/{recoveryEvidenceAudit.total}</Tag>
+              </Space>
+              {recoveryEvidenceAudit.failedEvidence.length > 0 && (
+                <Text type="secondary" style={{ fontSize: 12 }}>失效依据：{recoveryEvidenceAudit.failedEvidence.join('；')}</Text>
+              )}
+              {recoveryEvidenceAudit.repairedEvidence.length > 0 && (
+                <Text type="secondary" style={{ fontSize: 12 }}>修后证据：{recoveryEvidenceAudit.repairedEvidence.join('；')}</Text>
+              )}
+              {recoveryEvidenceAudit.watchItems.length > 0 && (
+                <Text type="secondary" style={{ fontSize: 12 }}>仍需观察：{recoveryEvidenceAudit.watchItems.join('；')}</Text>
+              )}
             </Space>
           </div>
         )}

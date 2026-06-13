@@ -64,6 +64,61 @@ describe('creativeAssistantModel', () => {
     expect(chips.map(chip => chip.label)).toEqual(['当前章', '选中文本', '写作圣经', '上下文包', '质检', '参考'])
   })
 
+  test('surfaces longform governance closure risks in context chips and fallback cards', () => {
+    const runRecords = [
+      {
+        run_type: 'longform_production_repair',
+        created_at: '2026-06-13T08:00:00Z',
+        output_ref: JSON.stringify({
+          audit_summary: {
+            status: 'needs_followup',
+            recovery_evidence_closure: {
+              status: 'needs_followup',
+              total: 1,
+              resolved: 0,
+              failed_evidence: ['主线焦点已明确'],
+              watch_items: ['第45章仍需关注：quality_attention'],
+            },
+          },
+        }),
+      },
+      {
+        run_type: 'longform_production_repair',
+        created_at: '2026-06-13T09:00:00Z',
+        output_ref: JSON.stringify({
+          source: 'storyline_diff_decision',
+          tasks: [
+            {
+              source: 'storyline_diff_decision',
+              issue_type: 'storyline_diff_revise_prose',
+              task_status: 'needs_review',
+              title: '第45章剧情线回修',
+            },
+          ],
+        }),
+      },
+    ]
+
+    const chips = buildCreativeAssistantContextChips({
+      project: { reference_config: { writing_bible: { promise: '主线不偏' } } },
+      runRecords,
+    })
+    const cards = buildCreativeAssistantFallbackCards('next_chapter', {
+      project: { title: '万古长夜', reference_config: { writing_bible: { promise: '主线不偏' } } },
+      runRecords,
+    })
+
+    expect(chips).toContainEqual(expect.objectContaining({
+      key: 'longform_governance_closure',
+      label: '治理闭环待处理',
+      tone: 'warn',
+    }))
+    expect(cards[0].title).toContain('先处理长线治理闭环')
+    expect(cards[0].suggestion).toContain('主线焦点已明确')
+    expect(cards[0].suggestion).toContain('第45章剧情线回修')
+    expect(cards[0].action).toBe('open_task_center')
+  })
+
   test('normalizes backend cards with stable ids', () => {
     const normalized = normalizeCreativeAssistPayload({
       mode: 'prose_review',

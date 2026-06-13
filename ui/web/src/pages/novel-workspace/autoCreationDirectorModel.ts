@@ -457,6 +457,16 @@ export interface AutoCreationStorylineDecisionGate {
   taskTitles: string[]
 }
 
+export interface AutoCreationGovernanceClosureBrief {
+  status: 'ok' | 'block'
+  label: string
+  summary: string
+  count: number
+  failedEvidence: string[]
+  watchItems: string[]
+  action: AutoCreationDirectorAction
+}
+
 export interface AutoCreationWritingQueueFocus {
   visible: boolean
   status: 'empty' | 'needs_plan' | 'ready_to_draft' | 'draft_generated'
@@ -554,7 +564,7 @@ export interface AutoCreationChapterChainStep {
 }
 
 export interface AutoCreationRiskQueueItem {
-  key: 'delivery_risks' | 'storyline_decisions' | 'storylines' | 'reader_expectation' | 'first30_retention' | 'asset_intake' | 'batch_risks'
+  key: 'governance_closure' | 'delivery_risks' | 'storyline_decisions' | 'storylines' | 'reader_expectation' | 'first30_retention' | 'asset_intake' | 'batch_risks'
   label: string
   count: number
   status: AutoCreationSerialCockpitStatus
@@ -661,6 +671,7 @@ export interface AutoCreationDirectorModel {
   productionLicense: AutoCreationProductionLicense
   todayCommandDeck: AutoCreationTodayCommandDeck
   serialCockpit: AutoCreationSerialCockpit
+  governanceClosureBrief: AutoCreationGovernanceClosureBrief
   storylineDecisionGate: AutoCreationStorylineDecisionGate
   millionWordRunway: AutoCreationMillionWordRunway
   writingQueueFocus: AutoCreationWritingQueueFocus
@@ -1877,6 +1888,70 @@ function buildStorylineDecisionGate(runRecords: AnyRecord[]): AutoCreationStoryl
     summary: `还有 ${openCount} 个剧情线决策任务未闭环；先在任务中心完成回修或计划同步，并通过剧情线同步复检后，再放行安全连写。`,
     openCount,
     taskTitles,
+  }
+}
+
+function latestRepairAuditSummary(runRecords: AnyRecord[]) {
+  return runRecords
+    .filter(run => text(run?.run_type) === 'longform_production_repair')
+    .map(run => ({ run, output: parsePayload(run?.output_ref) || {} }))
+    .sort((a, b) => recordTime(b.run) - recordTime(a.run))
+    .map(item => item.output?.audit_summary || item.output?.auditSummary)
+    .find(Boolean) || null
+}
+
+function compactUniqueText(values: any[], limit = 120) {
+  return Array.from(new Set(values.map(item => firstText(item)).filter(Boolean).map(item => item.length > limit ? `${item.slice(0, limit)}…` : item)))
+}
+
+function buildGovernanceClosureBrief(args: {
+  runRecords: AnyRecord[]
+  storylineDecisionGate: AutoCreationStorylineDecisionGate
+}): AutoCreationGovernanceClosureBrief {
+  const audit = latestRepairAuditSummary(args.runRecords)
+  const recoveryClosure = audit?.recovery_evidence_closure || audit?.recoveryEvidenceClosure || null
+  const failedEvidence = recoveryClosure && recoveryClosure.status !== 'closed' && Number(recoveryClosure.total || 0) > 0
+    ? compactUniqueText([
+      ...arrayValue(recoveryClosure.failed_evidence),
+      ...arrayValue(recoveryClosure.failedEvidence),
+    ], 120).slice(0, 4)
+    : []
+  const recoveryWatchItems = recoveryClosure && recoveryClosure.status !== 'closed' && Number(recoveryClosure.total || 0) > 0
+    ? compactUniqueText([
+      ...arrayValue(recoveryClosure.watch_items),
+      ...arrayValue(recoveryClosure.watchItems),
+    ], 120).slice(0, 4)
+    : []
+  const issueLabels = [
+    failedEvidence.length ? `恢复依据审计 ${Number(recoveryClosure?.resolved || 0)}/${Number(recoveryClosure?.total || 0)}` : '',
+    args.storylineDecisionGate.openCount > 0 ? `剧情线决策 ${args.storylineDecisionGate.openCount}` : '',
+  ].filter(Boolean)
+  const watchItems = compactUniqueText([
+    ...failedEvidence,
+    ...recoveryWatchItems,
+    ...args.storylineDecisionGate.taskTitles,
+  ], 120).slice(0, 6)
+
+  if (!issueLabels.length) {
+    return {
+      status: 'ok',
+      label: '治理闭环',
+      summary: '长线治理闭环没有发现需要前置处理的恢复依据审计或剧情线决策任务。',
+      count: 0,
+      failedEvidence: [],
+      watchItems: [],
+      action: opsAction('open_task_center', '打开任务中心', '查看长线治理闭环记录。'),
+    }
+  }
+
+  return {
+    status: 'block',
+    label: '治理闭环',
+    summary: `${issueLabels.join('；')} 未闭环：${watchItems.slice(0, 3).join('；') || '先回任务中心完成复查或修订。'}`,
+    count: issueLabels.length,
+    failedEvidence,
+    watchItems,
+    action: opsAction('open_task_center', '打开任务中心', '先处理恢复依据审计或剧情线决策任务，再继续扩大安全连写。'),
   }
 }
 
@@ -6420,6 +6495,7 @@ function buildProductionLicense(args: {
   mainAction: AutoCreationDirectorAction
   dailyBattlePlan: AutoCreationDailyBattlePlan
   deliveryRiskGate: AutoCreationDeliveryRiskGate
+  governanceClosureBrief: AutoCreationGovernanceClosureBrief
   storylineDecisionGate: AutoCreationStorylineDecisionGate
   batchReviewQueue: AutoCreationBatchReviewQueue
   batchGuardrail: AutoCreationBatchGuardrail
@@ -6429,12 +6505,14 @@ function buildProductionLicense(args: {
   const currentStep = args.dailyBattlePlan.steps.find(step => step.key === args.dailyBattlePlan.currentStepKey)
     || args.dailyBattlePlan.steps[0]
   const hasOpenDeliveryRisk = args.deliveryRiskGate.status !== 'ok'
+  const hasOpenGovernanceClosure = args.governanceClosureBrief.status !== 'ok'
   const hasOpenStorylineDecision = args.storylineDecisionGate.status !== 'ok'
   const hasOpenBatchRisk = hasBatchReviewRisk(args.batchReviewQueue)
   const serialReleaseIssue = serialReleaseInventoryIssue(args.batchGuardrail)
   const serialReleaseBlocked = serialReleaseIssue?.status === 'block'
   const hardBlocked = !args.hasModel
     || hasOpenDeliveryRisk
+    || hasOpenGovernanceClosure
     || hasOpenStorylineDecision
     || hasOpenBatchRisk
     || serialReleaseBlocked
@@ -6444,6 +6522,7 @@ function buildProductionLicense(args: {
   const reasons = [
     !args.hasModel ? '未选择可用模型' : '',
     hasOpenDeliveryRisk ? args.deliveryRiskGate.summary : '',
+    hasOpenGovernanceClosure ? args.governanceClosureBrief.summary : '',
     hasOpenStorylineDecision ? args.storylineDecisionGate.summary : '',
     hasOpenBatchRisk ? args.batchReviewQueue.summary : '',
     serialReleaseBlocked ? serialReleaseIssue?.detail : '',
@@ -6460,8 +6539,10 @@ function buildProductionLicense(args: {
       summary: reasons[0] || '当前存在未处理门禁，先完成总控台唯一下一步，再继续生成正文或安全连写。',
       safeChapterCount: 0,
       reasons,
-      badges: ['禁止连写', hasOpenStorylineDecision ? args.storylineDecisionGate.label : serialReleaseBlocked ? '发布窗口阻塞' : currentStep.label],
-      nextAction: hasOpenStorylineDecision
+      badges: ['禁止连写', hasOpenGovernanceClosure ? args.governanceClosureBrief.label : hasOpenStorylineDecision ? args.storylineDecisionGate.label : serialReleaseBlocked ? '发布窗口阻塞' : currentStep.label],
+      nextAction: hasOpenGovernanceClosure
+        ? args.governanceClosureBrief.action
+        : hasOpenStorylineDecision
         ? opsAction('open_task_center', '打开任务中心', args.storylineDecisionGate.summary)
         : serialReleaseBlocked ? args.batchGuardrail.recommendedAction : currentStep.action || args.mainAction,
     }
@@ -7380,12 +7461,23 @@ function buildChapterChain(writing: WritingCockpitModel): AutoCreationChapterCha
 function buildSerialRiskQueue(args: {
   planning: PlanningWorkspaceModel
   writing: WritingCockpitModel
+  governanceClosureBrief: AutoCreationGovernanceClosureBrief
   deliveryRiskGate: AutoCreationDeliveryRiskGate
   storylineDecisionGate: AutoCreationStorylineDecisionGate
   batchReviewQueue: AutoCreationBatchReviewQueue
 }): AutoCreationRiskQueueItem[] {
   const acceptance = args.writing.chapterAcceptanceDesk
   const risks: AutoCreationRiskQueueItem[] = []
+  if (args.governanceClosureBrief.status !== 'ok') {
+    risks.push({
+      key: 'governance_closure',
+      label: args.governanceClosureBrief.label,
+      count: args.governanceClosureBrief.count,
+      status: 'block',
+      detail: args.governanceClosureBrief.summary,
+      action: args.governanceClosureBrief.action,
+    })
+  }
   if (args.deliveryRiskGate.totalOpen > 0 || acceptance.deliveryRiskQueue?.totalCount) {
     const count = Number(acceptance.deliveryRiskQueue?.totalCount || args.deliveryRiskGate.totalOpen || 0)
     risks.push({
@@ -7474,6 +7566,7 @@ function buildSerialCockpit(args: {
   creationContract: AutoCreationContractItem[]
   chapterLaunchGate: AutoCreationChapterLaunchGate
   deliveryRiskGate: AutoCreationDeliveryRiskGate
+  governanceClosureBrief: AutoCreationGovernanceClosureBrief
   storylineDecisionGate: AutoCreationStorylineDecisionGate
   longformCompass: AutoCreationLongformCompass
   millionWordRunway: AutoCreationMillionWordRunway
@@ -7525,6 +7618,7 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
     chapters: arrayValue(input.chapters),
   })
   const storylineDecisionGate = buildStorylineDecisionGate(runRecords)
+  const governanceClosureBrief = buildGovernanceClosureBrief({ runRecords, storylineDecisionGate })
   let batchReviewQueue = buildBatchReviewQueue({
     runRecords,
     chapters: arrayValue(input.chapters),
@@ -7709,6 +7803,7 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
     mainAction,
     dailyBattlePlan,
     deliveryRiskGate,
+    governanceClosureBrief,
     storylineDecisionGate,
     batchReviewQueue,
     batchGuardrail,
@@ -7732,6 +7827,7 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
     creationContract,
     chapterLaunchGate,
     deliveryRiskGate,
+    governanceClosureBrief,
     storylineDecisionGate,
     longformCompass,
     millionWordRunway,
@@ -7802,6 +7898,7 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
     productionLicense,
     todayCommandDeck,
     serialCockpit,
+    governanceClosureBrief,
     storylineDecisionGate,
     millionWordRunway,
     writingQueueFocus,

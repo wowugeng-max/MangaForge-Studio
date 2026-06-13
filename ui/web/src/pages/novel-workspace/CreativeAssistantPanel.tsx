@@ -57,6 +57,7 @@ export type CreativeAssistantPanelProps = {
   selectedText: string
   contextPackage: any
   reviews: any[]
+  runRecords?: any[]
   error?: string
   onClose: () => void
   onModeChange: (mode: CreativeAssistantModeKey) => void
@@ -74,6 +75,7 @@ export function CreativeAssistantPanel({
   selectedText,
   contextPackage,
   reviews,
+  runRecords,
   error,
   onClose,
   onModeChange,
@@ -89,13 +91,15 @@ export function CreativeAssistantPanel({
     selectedText,
     contextPackage,
     reviews,
-  }), [project, activeChapter, selectedText, contextPackage, reviews])
+    runRecords,
+  }), [project, activeChapter, selectedText, contextPackage, reviews, runRecords])
   const fallbackCards = useMemo(() => buildCreativeAssistantFallbackCards(mode, {
     project,
     activeChapter,
     selectedText,
     reviews,
-  }), [mode, project, activeChapter, selectedText, reviews])
+    runRecords,
+  }), [mode, project, activeChapter, selectedText, reviews, runRecords])
   const cards = result?.mode === mode && result.cards.length ? result.cards : fallbackCards
 
   return (

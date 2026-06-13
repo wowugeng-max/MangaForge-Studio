@@ -5791,6 +5791,7 @@ export default function NovelProjectWorkspace() {
         selectedText={creativeAssistantSelectedText}
         contextPackage={activeContextPackageData}
         reviews={reviews}
+        runRecords={runRecords}
         error={creativeAssistantError}
         onClose={() => setCreativeAssistantOpen(false)}
         onModeChange={setCreativeAssistantMode}

@@ -945,6 +945,62 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(model.serialCockpit.guardrails.find(item => item.key === 'serial_safety')?.status).toBe('warn')
   })
 
+  test('surfaces unresolved governance closure on director front page risk queue', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: basePlanning,
+      writing: baseWriting,
+      activeTasks: [],
+      selectedModelId: 12,
+      runRecords: [
+        {
+          id: 91,
+          run_type: 'longform_production_repair',
+          created_at: '2026-06-13T08:00:00Z',
+          output_ref: JSON.stringify({
+            audit_summary: {
+              status: 'needs_followup',
+              recovery_evidence_closure: {
+                status: 'needs_followup',
+                total: 2,
+                resolved: 1,
+                failed_evidence: ['样章任务书复检通过 1 项'],
+                watch_items: ['下一批继续观察样章策略命中率'],
+              },
+            },
+          }),
+        },
+        {
+          id: 92,
+          run_type: 'longform_production_repair',
+          created_at: '2026-06-13T09:00:00Z',
+          output_ref: JSON.stringify({
+            source: 'storyline_diff_decision',
+            tasks: [
+              {
+                source: 'storyline_diff_decision',
+                issue_type: 'storyline_diff_revise_prose',
+                task_status: 'needs_review',
+                title: '第45章剧情线回修',
+              },
+            ],
+          }),
+        },
+      ],
+    })
+
+    expect(model.governanceClosureBrief.status).toBe('block')
+    expect(model.governanceClosureBrief.summary).toContain('恢复依据审计')
+    expect(model.governanceClosureBrief.summary).toContain('剧情线决策')
+    expect(model.governanceClosureBrief.action.key).toBe('open_task_center')
+    expect(model.serialCockpit.riskQueue[0]).toEqual(expect.objectContaining({
+      key: 'governance_closure',
+      label: '治理闭环',
+      status: 'block',
+    }))
+    expect(model.serialCockpit.riskQueue[0].detail).toContain('样章任务书复检通过 1 项')
+    expect(model.productionLicense.reasons.join('')).toContain('恢复依据审计')
+  })
+
   test('serial cockpit degrades gracefully when chapter material is missing', () => {
     const model = buildAutoCreationDirectorModel({
       planning: {

@@ -40,6 +40,13 @@ export type CreativeAssistantContextChip = {
   tone: 'ready' | 'warn' | 'neutral'
 }
 
+type LongformGovernanceClosurePrompt = {
+  status: 'ok' | 'needs_followup'
+  issues: string[]
+  failedEvidence: string[]
+  watchItems: string[]
+}
+
 export const CREATIVE_ASSISTANT_MODES: CreativeAssistantMode[] = [
   { key: 'prose_review', label: '正文评析', description: '分析当前正文、节奏、钩子、人物声音和修改方向。' },
   { key: 'next_chapter', label: '下一章', description: '从当前结尾出发给出下一章多分支写法。' },
@@ -62,6 +69,75 @@ function compact(value: any, limit = 120, fallback = '') {
 
 function asArray(value: any) {
   return Array.isArray(value) ? value : []
+}
+
+function parsePayload(value: any) {
+  if (!value) return null
+  if (typeof value === 'object') return value
+  try {
+    return JSON.parse(String(value))
+  } catch {
+    return null
+  }
+}
+
+function recordTime(record: any) {
+  const timestamp = Date.parse(text(record?.created_at || record?.updated_at))
+  return Number.isFinite(timestamp) ? timestamp : 0
+}
+
+function isOpenTaskStatus(status: any) {
+  return !['resolved', 'closed', 'done', 'completed', 'ignored', 'false_positive'].includes(text(status))
+}
+
+function taskTitle(task: any) {
+  return compact(task?.title || task?.message || task?.summary || task?.issue_type || task?.issueType, 80)
+}
+
+function isStorylineDecisionTask(task: any, output: any) {
+  const source = text(task?.source || output?.source)
+  const issueType = text(task?.issue_type || task?.issueType)
+  return source === 'storyline_diff_decision'
+    || issueType.startsWith('storyline_diff_')
+    || Boolean(task?.decision_key || task?.decisionKey)
+}
+
+export function buildLongformGovernanceClosurePrompt(runRecords: any[] = []): LongformGovernanceClosurePrompt {
+  const issues: string[] = []
+  const failedEvidence: string[] = []
+  const watchItems: string[] = []
+  const repairRuns = asArray(runRecords)
+    .filter(run => text(run?.run_type) === 'longform_production_repair')
+    .map(run => ({ run, output: parsePayload(run?.output_ref) || {} }))
+    .sort((a, b) => recordTime(b.run) - recordTime(a.run))
+
+  const latestAudit = repairRuns.map(item => item.output?.audit_summary).find(Boolean)
+  const recoveryClosure = latestAudit?.recovery_evidence_closure || latestAudit?.recoveryEvidenceClosure || null
+  if (recoveryClosure && recoveryClosure.status !== 'closed' && Number(recoveryClosure.total || 0) > 0) {
+    issues.push(`恢复依据审计 ${Number(recoveryClosure.resolved || 0)}/${Number(recoveryClosure.total || 0)}`)
+    failedEvidence.push(...asArray(recoveryClosure.failed_evidence), ...asArray(recoveryClosure.failedEvidence))
+    watchItems.push(...asArray(recoveryClosure.watch_items), ...asArray(recoveryClosure.watchItems))
+  }
+
+  const storylineTitles: string[] = []
+  for (const { output } of repairRuns) {
+    const tasks = [...asArray(output?.tasks), ...asArray(output?.repairTasks)]
+    for (const task of tasks) {
+      if (!isStorylineDecisionTask(task, output) || !isOpenTaskStatus(task?.task_status ?? task?.status)) continue
+      storylineTitles.push(taskTitle(task))
+    }
+  }
+  if (storylineTitles.length > 0) {
+    issues.push(`剧情线决策 ${storylineTitles.length}`)
+    watchItems.push(...storylineTitles)
+  }
+
+  return {
+    status: issues.length > 0 ? 'needs_followup' : 'ok',
+    issues: Array.from(new Set(issues.filter(Boolean))).slice(0, 4),
+    failedEvidence: Array.from(new Set(failedEvidence.map(item => compact(item, 120)).filter(Boolean))).slice(0, 5),
+    watchItems: Array.from(new Set(watchItems.map(item => compact(item, 120)).filter(Boolean))).slice(0, 5),
+  }
 }
 
 function promiseOf(project: any) {
@@ -103,6 +179,7 @@ export function buildCreativeAssistantFallbackCards(
     outlines?: any[]
     reviews?: any[]
     selectedText?: string
+    runRecords?: any[]
   },
 ): CreativeAssistCard[] {
   const project = input.project || {}
@@ -115,9 +192,28 @@ export function buildCreativeAssistantFallbackCards(
   const protagonist = compact(characters[0]?.name, 32, '主角')
   const endingHook = compact(chapter?.ending_hook, 80, '章末问题尚未锁定')
   const route = compact(outlines[0]?.summary || outlines[0]?.title, 80, '后续路线尚未展开')
+  const governancePrompt = buildLongformGovernanceClosurePrompt(input.runRecords)
+  const governanceCard = governancePrompt.status === 'needs_followup'
+    ? card(mode, 0, {
+      id: `${mode}-governance-closure`,
+      type: 'governance',
+      title: '先处理长线治理闭环',
+      intent: '避免在恢复依据或剧情线决策未闭环时继续扩大自动创作。',
+      reason: governancePrompt.issues.join('；'),
+      suggestion: [
+        governancePrompt.failedEvidence.length ? `失效依据：${governancePrompt.failedEvidence.join('；')}` : '',
+        governancePrompt.watchItems.length ? `待处理：${governancePrompt.watchItems.join('；')}` : '',
+        '先打开任务中心完成复查或修订，再让创作参谋继续给下一章方案。',
+      ].filter(Boolean).join('。'),
+      risk: '未闭环就继续设计下一章，容易让核心偏移、样章失效或剧情线误判滚入后续批次。',
+      applies_to: 'longform_governance',
+      action: 'open_task_center',
+    })
+    : null
+  const withGovernance = (cards: CreativeAssistCard[]) => governanceCard ? [governanceCard, ...cards] : cards
 
   if (mode === 'prose_review') {
-    return [
+    return withGovernance([
       card(mode, 1, {
         type: 'evaluation',
         title: `${label}正文读感拆解`,
@@ -127,11 +223,11 @@ export function buildCreativeAssistantFallbackCards(
         applies_to: 'current_prose',
         action: 'turn_into_revision_task',
       }),
-    ]
+    ])
   }
 
   if (mode === 'next_chapter') {
-    return [
+    return withGovernance([
       card(mode, 1, {
         type: 'branch',
         title: '安全续写分支',
@@ -148,11 +244,11 @@ export function buildCreativeAssistantFallbackCards(
         risk: '强刺激不能绕开主角能动性。',
         applies_to: 'next_chapter_opening',
       }),
-    ]
+    ])
   }
 
   if (mode === 'outline_expand') {
-    return [
+    return withGovernance([
       card(mode, 1, {
         type: 'outline',
         title: '未来五章推进骨架',
@@ -162,11 +258,11 @@ export function buildCreativeAssistantFallbackCards(
         applies_to: 'future_outline',
         action: 'open_outline_editor',
       }),
-    ]
+    ])
   }
 
   if (mode === 'foreshadowing') {
-    return [
+    return withGovernance([
       card(mode, 1, {
         type: 'foreshadowing',
         title: '双层伏笔方案',
@@ -176,11 +272,11 @@ export function buildCreativeAssistantFallbackCards(
         applies_to: 'foreshadowing_arc',
         action: 'open_story_assets',
       }),
-    ]
+    ])
   }
 
   if (mode === 'character_arc') {
-    return [
+    return withGovernance([
       card(mode, 1, {
         type: 'character_arc',
         title: `${protagonist}的下一次选择`,
@@ -190,11 +286,11 @@ export function buildCreativeAssistantFallbackCards(
         applies_to: 'character_arc',
         action: 'open_character_editor',
       }),
-    ]
+    ])
   }
 
   if (mode === 'system_design') {
-    return [
+    return withGovernance([
       card(mode, 1, {
         type: 'system_rule',
         title: '能力/物品体系的代价闭环',
@@ -204,10 +300,10 @@ export function buildCreativeAssistantFallbackCards(
         applies_to: 'system_design',
         action: 'open_story_assets',
       }),
-    ]
+    ])
   }
 
-  return [
+  return withGovernance([
     card(mode, 1, {
       type: 'research',
       title: '资料卡生成',
@@ -216,7 +312,7 @@ export function buildCreativeAssistantFallbackCards(
       risk: '联网资料不能直接变成照搬设定或原句。',
       applies_to: 'research_cards',
     }),
-  ]
+  ])
 }
 
 export function buildCreativeAssistantContextChips(input: {
@@ -225,6 +321,7 @@ export function buildCreativeAssistantContextChips(input: {
   selectedText?: string
   contextPackage?: any
   reviews?: any[]
+  runRecords?: any[]
 }): CreativeAssistantContextChip[] {
   const chips: CreativeAssistantContextChip[] = []
   if (input.activeChapter) chips.push({ key: 'chapter', label: '当前章', tone: 'ready' })
@@ -235,6 +332,9 @@ export function buildCreativeAssistantContextChips(input: {
     chips.push({ key: 'reviews', label: '质检', tone: 'ready' })
   }
   if (asArray(input.project?.reference_config?.references).length > 0) chips.push({ key: 'references', label: '参考', tone: 'ready' })
+  if (buildLongformGovernanceClosurePrompt(input.runRecords).status === 'needs_followup') {
+    chips.push({ key: 'longform_governance_closure', label: '治理闭环待处理', tone: 'warn' })
+  }
   return chips
 }
 

@@ -242,6 +242,9 @@ export function AutoCreationDirectorWorkspace({
             {model.metrics.volumeBeatScore !== null && <Tag color={rhythmColor(model.longformRhythm.status)} bordered={false}>爆点预算 {model.metrics.volumeBeatScore}</Tag>}
             {model.metrics.longformRhythmScore !== null && <Tag color={rhythmColor(model.longformRhythm.status)} bordered={false}>长篇节奏 {model.metrics.longformRhythmScore}</Tag>}
             <Tag bordered={false}>剧情线 {model.metrics.storylineCount}</Tag>
+            {model.governanceClosureBrief.status !== 'ok' && (
+              <Tag color="red" bordered={false}>治理闭环</Tag>
+            )}
             {model.deliveryRiskGate.totalOpen > 0 && (
               <Tag color={model.deliveryRiskGate.status === 'block' ? 'red' : 'gold'} bordered={false}>
                 未清风险 {model.deliveryRiskGate.totalOpen}

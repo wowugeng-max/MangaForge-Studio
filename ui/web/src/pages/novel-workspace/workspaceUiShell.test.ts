@@ -1487,6 +1487,8 @@ describe('commercial writing workspace UI shell', () => {
     expect(directorWorkspace).toContain('自动创作总控台')
     expect(directorWorkspace).toContain('唯一下一步')
     expect(directorWorkspace).toContain('当前判断')
+    expect(directorWorkspace).toContain('model.governanceClosureBrief.status')
+    expect(directorWorkspace).toContain('治理闭环')
     expect(directorWorkspace).toContain('auto-director-judgement-card')
     expect(directorWorkspace).not.toContain('auto-director-next-card')
     expect(directorWorkspace).toContain('生产许可')
@@ -1757,6 +1759,7 @@ describe('commercial writing workspace UI shell', () => {
   test('shows the creative assistant panel shell', () => {
     const projectWorkspace = source('../NovelProjectWorkspace.tsx')
     const panel = source('CreativeAssistantPanel.tsx')
+    const model = source('creativeAssistantModel.ts')
     const css = source('CreativeAssistantPanel.css')
 
     expect(projectWorkspace).toContain('CreativeAssistantPanel')
@@ -1766,7 +1769,11 @@ describe('commercial writing workspace UI shell', () => {
     expect(projectWorkspace).toContain('runCreativeAssistant')
     expect(projectWorkspace).toContain('setCreativeAssistantOpen(true)')
     expect(projectWorkspace).toContain('apiClient.post(`/novel/projects/${projectId}/creative-assist`')
+    expect(projectWorkspace).toContain('runRecords={runRecords}')
     expect(projectWorkspace).toContain('onCopyCard')
+    expect(panel).toContain('runRecords')
+    expect(model).toContain('治理闭环待处理')
+    expect(model).toContain('先处理长线治理闭环')
     expect(panel).toContain('正文评析')
     expect(panel).toContain('下一章')
     expect(panel).toContain('后续大纲')
