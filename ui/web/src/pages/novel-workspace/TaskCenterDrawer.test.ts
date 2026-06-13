@@ -3,6 +3,9 @@ import {
   buildRecoveryEvidenceAuditView,
   buildRecoveryEvidenceReviewActionFeedback,
   buildRecoveryEvidenceReviewActionFeedbackKey,
+  buildRecoveryEvidenceReviewRefreshAnchor,
+  buildRecoveryEvidenceReviewRefreshFeedback,
+  buildRecoveryEvidenceReviewResolvedFeedback,
   buildRecoveryEvidenceReviewRowAction,
   buildRecoveryEvidenceReviewRows,
   buildRepairClosureHighlights,
@@ -372,6 +375,74 @@ describe('buildRecoveryEvidenceAuditView', () => {
     }))
   })
 
+  test('exposes a single main action for unresolved recovery evidence sources', () => {
+    const view = buildRecoveryEvidenceAuditView({
+      recovery_evidence_closure: {
+        status: 'needs_followup',
+        total: 2,
+        resolved: 0,
+        tasks: [
+          {
+            chapter_id: 420,
+            chapter_no: 42,
+            task_index: 0,
+            task_status: 'open',
+            source: 'single_chapter_governance_recheck',
+            source_label: '单章治理复查',
+          },
+          {
+            chapter_id: 421,
+            chapter_no: 43,
+            task_index: 1,
+            task_status: 'needs_review',
+            source: 'safe_batch_recovery_recheck',
+            source_label: '批次恢复复查',
+            recovery_evidence_review: {
+              status: 'warn',
+              failed_evidence: ['第43章读者回报仍未继承'],
+            },
+          },
+        ],
+      },
+    })
+
+    expect(view?.nextAction).toEqual(expect.objectContaining({
+      action: 'focus_task',
+      label: '定位批次任务',
+      source: 'safe_batch_recovery_recheck',
+      sourceLabel: '批次恢复复查',
+      taskIndex: 1,
+      residualEvidence: ['第43章读者回报仍未继承'],
+    }))
+  })
+
+  test('uses single-chapter recheck as the main action when the source is waiting for a conclusion', () => {
+    const view = buildRecoveryEvidenceAuditView({
+      recovery_evidence_closure: {
+        status: 'needs_followup',
+        total: 1,
+        resolved: 0,
+        tasks: [
+          {
+            chapter_id: 420,
+            chapter_no: 42,
+            task_index: 0,
+            task_status: 'open',
+            source: 'single_chapter_governance_recheck',
+            source_label: '单章治理复查',
+          },
+        ],
+      },
+    })
+
+    expect(view?.nextAction).toEqual(expect.objectContaining({
+      action: 'recheck_single_chapter',
+      label: '复检单章',
+      source: 'single_chapter_governance_recheck',
+      taskIndex: 0,
+    }))
+  })
+
   test('hides recovery evidence audit when there is no closure payload', () => {
     expect(buildRecoveryEvidenceAuditView({ status: 'closed' })).toBeNull()
   })
@@ -540,6 +611,241 @@ describe('buildRecoveryEvidenceReviewActionFeedback', () => {
       statusLabel: '已触发按批次修订',
       triggeredAt: '15:05',
       closureCondition: '关闭条件：完成批次修订并重新运行批次交稿复盘，recovery_evidence_review 为 ok。',
+    }))
+  })
+})
+
+describe('buildRecoveryEvidenceReviewRefreshAnchor', () => {
+  test('records the row and source task focus after refreshing a recovery evidence action', () => {
+    const row = {
+      evidence: '单章治理复查：生产阻断已解除',
+      riskLabels: [],
+      source: 'recovery_evidence_production_gate',
+      sourceLabel: '入口生产闸门',
+      sourceDetail: '单章治理复查 · 生产阻断已解除',
+      sourceAction: 'single_chapter_governance_recheck',
+      sourceActionLabel: '复检单章',
+      productionGateSource: 'single_chapter_governance_recheck',
+    }
+    const rowAction = buildRecoveryEvidenceReviewRowAction(row)
+
+    expect(buildRecoveryEvidenceReviewRefreshAnchor({
+      taskIndex: 2,
+      row,
+      rowAction,
+      sourceTaskIndex: 5,
+      refreshedAt: '14:22',
+    })).toEqual({
+      feedbackKey: '2|recovery_evidence_production_gate|single_chapter_governance_recheck|recheck_single_chapter|单章治理复查：生产阻断已解除',
+      taskIndex: 2,
+      sourceTaskIndex: 5,
+      focusSource: 'single_chapter_governance_recheck',
+      refreshedAt: '14:22',
+      statusLabel: '已刷新结果',
+    })
+  })
+})
+
+describe('buildRecoveryEvidenceReviewRefreshFeedback', () => {
+  test('turns local action feedback into a refreshed inline status while keeping closure guidance', () => {
+    const rowAction = {
+      action: 'recheck_safe_batch' as const,
+      label: '复盘批次',
+      focusSource: 'safe_batch_recovery_recheck',
+    }
+    const localFeedback = buildRecoveryEvidenceReviewActionFeedback(rowAction, '14:20')
+    const feedback = buildRecoveryEvidenceReviewRefreshFeedback(localFeedback, {
+      feedbackKey: 'feedback-key',
+      taskIndex: 3,
+      sourceTaskIndex: 4,
+      focusSource: 'safe_batch_recovery_recheck',
+      refreshedAt: '14:22',
+      statusLabel: '已刷新结果',
+    })
+
+    expect(feedback).toEqual(expect.objectContaining({
+      statusLabel: '已刷新结果',
+      triggeredAt: '14:22',
+      closureCondition: localFeedback.closureCondition,
+    }))
+    expect(feedback.detail).toContain('已刷新结果')
+    expect(feedback.detail).toContain('刷新后继续定位此依据')
+  })
+
+  test('does not override a real running status with the refreshed local status', () => {
+    const rowAction = {
+      action: 'recheck_safe_batch' as const,
+      label: '复盘批次',
+      focusSource: 'safe_batch_recovery_recheck',
+    }
+    const localFeedback = buildRecoveryEvidenceReviewRefreshFeedback(
+      buildRecoveryEvidenceReviewActionFeedback(rowAction, '14:20'),
+      {
+        feedbackKey: 'feedback-key',
+        taskIndex: 3,
+        sourceTaskIndex: 4,
+        focusSource: 'safe_batch_recovery_recheck',
+        refreshedAt: '14:22',
+        statusLabel: '已刷新结果',
+      },
+    )
+
+    const feedback = buildRecoveryEvidenceReviewResolvedFeedback({
+      task: {
+        issue_type: 'recovery_evidence_mismatch',
+        recovery_evidence_review: {
+          status: 'warn',
+          failed_evidence: ['批次恢复复查：生产阻断已解除'],
+        },
+      },
+      rowAction,
+      currentRun: { id: 44, run_type: 'longform_production_repair' },
+      runRecords: [
+        {
+          id: 44,
+          run_type: 'longform_production_repair',
+          status: 'running',
+          output_ref: JSON.stringify({ audit_summary: { status: 'needs_followup' } }),
+          created_at: '2026-06-13T10:00:00.000Z',
+        },
+      ],
+      localFeedback,
+    })
+
+    expect(feedback).toEqual(expect.objectContaining({
+      statusLabel: '运行中',
+      detail: '最近动作：复盘批次 · 运行中 · 长线生产修复正在回填恢复依据结果。',
+    }))
+  })
+})
+
+describe('buildRecoveryEvidenceReviewResolvedFeedback', () => {
+  test('marks a recovery evidence row as running from a matching repair audit run', () => {
+    const rowAction = {
+      action: 'recheck_safe_batch' as const,
+      label: '复盘批次',
+      focusSource: 'safe_batch_recovery_recheck',
+    }
+
+    const feedback = buildRecoveryEvidenceReviewResolvedFeedback({
+      task: {
+        issue_type: 'recovery_evidence_mismatch',
+        recovery_evidence_review: {
+          status: 'warn',
+          failed_evidence: ['批次恢复复查：生产阻断已解除'],
+        },
+      },
+      rowAction,
+      currentRun: { id: 44, run_type: 'longform_production_repair' },
+      runRecords: [
+        {
+          id: 44,
+          run_type: 'longform_production_repair',
+          status: 'running',
+          step_name: 'repair-audit',
+          output_ref: JSON.stringify({ audit_summary: { status: 'needs_followup' } }),
+          created_at: '2026-06-13T10:00:00.000Z',
+        },
+      ],
+    })
+
+    expect(feedback).toEqual(expect.objectContaining({
+      statusLabel: '运行中',
+      triggeredAt: '实时状态',
+      detail: '最近动作：复盘批次 · 运行中 · 长线生产修复正在回填恢复依据结果。',
+    }))
+  })
+
+  test('keeps local feedback when a completed repair run has no audit refresh payload', () => {
+    const rowAction = {
+      action: 'recheck_safe_batch' as const,
+      label: '复盘批次',
+      focusSource: 'safe_batch_recovery_recheck',
+    }
+    const localFeedback = buildRecoveryEvidenceReviewActionFeedback(rowAction, '14:20')
+
+    const feedback = buildRecoveryEvidenceReviewResolvedFeedback({
+      task: {
+        issue_type: 'recovery_evidence_mismatch',
+        recovery_evidence_review: {
+          status: 'warn',
+          failed_evidence: ['批次恢复复查：生产阻断已解除'],
+        },
+      },
+      rowAction,
+      currentRun: { id: 44, run_type: 'longform_production_repair' },
+      runRecords: [
+        {
+          id: 44,
+          run_type: 'longform_production_repair',
+          status: 'completed',
+          output_ref: JSON.stringify({ tasks: [{ issue_type: 'recovery_evidence_mismatch' }] }),
+          created_at: '2026-06-13T09:00:00.000Z',
+        },
+      ],
+      localFeedback,
+    })
+
+    expect(feedback).toEqual(localFeedback)
+  })
+
+  test('marks a recovery evidence row as backfilled after the task review clears failed evidence', () => {
+    const feedback = buildRecoveryEvidenceReviewResolvedFeedback({
+      task: {
+        issue_type: 'recovery_evidence_mismatch',
+        recovery_evidence_review: {
+          status: 'ok',
+          failed_evidence: [],
+          failed_items: [],
+        },
+      },
+      rowAction: {
+        action: 'execute_typed_repair' as const,
+        label: '按批次修订',
+        focusSource: '',
+      },
+      runRecords: [],
+    })
+
+    expect(feedback).toEqual(expect.objectContaining({
+      statusLabel: '已回填',
+      triggeredAt: '实时状态',
+      detail: '最近动作：按批次修订 · 已回填 · 恢复依据复盘已清空失效项。',
+    }))
+  })
+
+  test('marks a single-chapter recheck row as retryable when the matching quality run fails', () => {
+    const feedback = buildRecoveryEvidenceReviewResolvedFeedback({
+      task: {
+        issue_type: 'recovery_evidence_mismatch',
+        chapter_id: 42,
+        annotation_source: 'governance_recheck_sync',
+        recovery_evidence_review: {
+          status: 'warn',
+          failed_evidence: ['第42章对白交锋未继承'],
+        },
+      },
+      rowAction: {
+        action: 'recheck_single_chapter' as const,
+        label: '复检单章',
+        focusSource: 'single_chapter_governance_recheck',
+      },
+      runRecords: [
+        {
+          id: 92,
+          run_type: 'prose_quality',
+          status: 'failed',
+          input_ref: JSON.stringify({ chapter_id: 42, source: 'governance_recheck_sync' }),
+          error_message: '模型超时',
+          created_at: '2026-06-13T10:03:00.000Z',
+        },
+      ],
+    })
+
+    expect(feedback).toEqual(expect.objectContaining({
+      statusLabel: '失败需重试',
+      triggeredAt: '实时状态',
+      detail: '最近动作：复检单章 · 失败需重试 · 模型超时',
     }))
   })
 })

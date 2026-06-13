@@ -822,7 +822,7 @@ describe('commercial writing workspace UI shell', () => {
     const taskCenter = source('TaskCenterDrawer.tsx')
     expect(taskCenter).toContain('交稿风险修复任务')
     expect(taskCenter).toContain('按风险修订')
-    expect(taskCenter).toContain('onStartRepairTaskRevision?.(task, run, taskIndex)')
+    expect(taskCenter).toContain('onStartRepairTaskRevision?.(task, run, taskIndex, options)')
     expect(taskCenter).toContain('复检收敛')
     expect(taskCenter).toContain('onRecheckRepairTask(item.task, item.run, item.taskIndex)')
     expect(taskCenter).toContain('核心偏移')

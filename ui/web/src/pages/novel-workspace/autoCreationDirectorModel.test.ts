@@ -1344,6 +1344,13 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(recoveryGate?.detail).toContain('第43章读者回报仍未继承')
     expect(model.batchGuardrail.status).toBe('blocked')
     expect(model.batchGuardrail.recommendedAction.key).toBe('review_governance_closure')
+    expect(model.batchGuardrail.recommendedAction.label).toBe('定位批次任务')
+    expect(model.batchGuardrail.recommendedAction.payload?.recoveryEvidenceNextAction).toEqual(expect.objectContaining({
+      action: 'focus_task',
+      label: '定位批次任务',
+      source: 'safe_batch_recovery_recheck',
+      residualEvidence: ['第43章读者回报仍未继承'],
+    }))
     expect(model.batchGuardrail.preflight.inputSnapshot.recovery_evidence_production_gate).toMatchObject({
       status: 'block',
       label: '恢复依据生产闸门',
@@ -1364,9 +1371,90 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(model.batchGuardrail.recommendedAction.payload?.batch_preflight?.recovery_evidence_production_gate).toMatchObject({
       status: 'block',
       source_count: 2,
+      recommended_action: {
+        key: 'review_governance_closure',
+        label: '定位批次任务',
+      },
     })
     expect(model.todayCommandDeck.releaseRationale.checks.join('；')).toContain('恢复依据生产闸门')
     expect(model.productionLicense.status).toBe('blocked')
+  })
+
+  test('routes pending single-chapter recovery evidence gate to the single recheck main action', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        topStatus: {
+          ...basePlanning.topStatus,
+          future100Coverage: { ready: true, planned: 100, required: 100, missingChapters: [], label: '100/100' },
+        },
+        futureRoute: [
+          { chapterNo: 8, title: '试炼前夜', chapterTask: '主角拿到试炼资格', conflict: '执事设局阻拦', endingHook: '阵盘亮起第二道裂纹', mainlineProgress: '进入外门试炼核心局', riskTags: [] },
+        ],
+      },
+      writing: {
+        ...baseWriting,
+        chapterPlanningDesk: {
+          ...baseWriting.chapterPlanningDesk,
+          readiness: 'ready',
+          statusLabel: '本章可写',
+          scenePlanStatus: 'ready',
+          sceneCards: [
+            { title: '压迫升级', goal: '执事逼主角交阵盘' },
+          ],
+          recommendedPlannerAction: { key: 'confirm_plan_and_write_draft', label: '确认并生成' },
+        },
+        topStatus: {
+          ...baseWriting.topStatus,
+          nextActionLabel: '确认并生成',
+          primaryActionKey: 'confirm_plan_and_write_draft',
+        },
+        primaryActionKey: 'confirm_plan_and_write_draft',
+      },
+      activeTasks: [],
+      selectedModelId: 12,
+      runRecords: [
+        {
+          id: 903,
+          run_type: 'longform_production_repair',
+          created_at: '2026-06-14T10:00:00Z',
+          output_ref: {
+            audit_summary: {
+              status: 'closed',
+              recovery_evidence_closure: {
+                status: 'closed',
+                total: 1,
+                resolved: 1,
+                tasks: [
+                  {
+                    chapter_no: 42,
+                    task_index: 0,
+                    task_status: 'open',
+                    source: 'single_chapter_governance_recheck',
+                    source_label: '单章治理复查',
+                  },
+                ],
+              },
+            },
+          },
+        },
+      ],
+      storyState: {
+        last_updated_chapter: 7,
+        global: {
+          core_promise: '李超用超人蛮力碰撞规则怪谈，张智负责拆解规则。',
+          current_volume_goal: '午夜校园中活过第一轮规则。',
+        },
+      },
+    } as any)
+
+    expect(model.batchGuardrail.recommendedAction.key).toBe('review_governance_closure')
+    expect(model.batchGuardrail.recommendedAction.label).toBe('复检单章')
+    expect(model.batchGuardrail.recommendedAction.payload?.recoveryEvidenceNextAction).toEqual(expect.objectContaining({
+      action: 'recheck_single_chapter',
+      label: '复检单章',
+      source: 'single_chapter_governance_recheck',
+    }))
   })
 
   test('today command deck explains why production is downgraded to one chapter', () => {

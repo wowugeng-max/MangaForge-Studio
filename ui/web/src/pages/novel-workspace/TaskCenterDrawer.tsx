@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { Button, Card, Drawer, Empty, List, Modal, Popconfirm, Progress, Space, Tag, Typography } from 'antd'
 import { PauseCircleOutlined, PlayCircleOutlined, ReloadOutlined, StopOutlined } from '@ant-design/icons'
 
@@ -248,30 +248,42 @@ export function buildRepairClosureHighlights(tasks: any[], audit?: any | null): 
     .slice(0, 6)
 }
 
+export type RecoveryEvidenceAuditNextAction = {
+  action: 'revision' | 'focus_task' | 'recheck_single_chapter' | 'recheck_safe_batch' | 'review_governance_closure' | ''
+  label: string
+  source: string
+  sourceLabel: string
+  taskIndex: number | null
+  residualEvidence: string[]
+}
+
+export type RecoveryEvidenceAuditSourceGroup = {
+  source: string
+  label: string
+  count: number
+  taskIndexes: number[]
+  chapterNos: number[]
+  recheckAction: string
+  recheckLabel: string
+  resultStatus: 'closed' | 'needs_followup' | 'pending'
+  resultLabel: string
+  latestSummary: string
+  residualEvidence: string[]
+  residualAction: string
+  residualActionLabel: string
+  productionBlockStatus: 'cleared' | 'blocked' | 'pending'
+  productionBlockLabel: string
+  productionBlockDetail: string
+}
+
 export type RecoveryEvidenceAuditView = {
   status: 'closed' | 'needs_followup'
   label: string
   total: number
   resolved: number
   sourceSummary: string
-  sourceGroups: {
-    source: string
-    label: string
-    count: number
-    taskIndexes: number[]
-    chapterNos: number[]
-    recheckAction: string
-    recheckLabel: string
-    resultStatus: 'closed' | 'needs_followup' | 'pending'
-    resultLabel: string
-    latestSummary: string
-    residualEvidence: string[]
-    residualAction: string
-    residualActionLabel: string
-    productionBlockStatus: 'cleared' | 'blocked' | 'pending'
-    productionBlockLabel: string
-    productionBlockDetail: string
-  }[]
+  sourceGroups: RecoveryEvidenceAuditSourceGroup[]
+  nextAction: RecoveryEvidenceAuditNextAction | null
   sourceRunId: any
   memoryLabel: string
   memorySummary: string
@@ -367,6 +379,19 @@ export type RecoveryEvidenceReviewActionFeedback = {
   triggeredAt: string
   closureCondition: string
   detail: string
+}
+
+export type RecoveryEvidenceReviewRefreshAnchor = {
+  feedbackKey: string
+  taskIndex: number
+  sourceTaskIndex: number | null
+  focusSource: string
+  refreshedAt: string
+  statusLabel: '已刷新结果'
+}
+
+type RepairTaskActionOptions = {
+  keepTaskCenterOpen?: boolean
 }
 
 function recoveryEvidenceReviewSourceLabel(source: string) {
@@ -482,6 +507,203 @@ export function buildRecoveryEvidenceReviewActionFeedback(
     closureCondition,
     detail: `最近动作：${label} · ${triggeredAt} · 已触发，等待复检结果回填。`,
   }
+}
+
+export function buildRecoveryEvidenceReviewRefreshAnchor({
+  taskIndex,
+  row,
+  rowAction,
+  sourceTaskIndex,
+  refreshedAt,
+}: {
+  taskIndex: number
+  row: RecoveryEvidenceReviewRow
+  rowAction: RecoveryEvidenceReviewRowAction
+  sourceTaskIndex?: number | null
+  refreshedAt: string
+}): RecoveryEvidenceReviewRefreshAnchor {
+  return {
+    feedbackKey: buildRecoveryEvidenceReviewActionFeedbackKey(taskIndex, row, rowAction),
+    taskIndex,
+    sourceTaskIndex: sourceTaskIndex ?? null,
+    focusSource: rowAction.focusSource || '',
+    refreshedAt,
+    statusLabel: '已刷新结果',
+  }
+}
+
+export function buildRecoveryEvidenceReviewRefreshFeedback(
+  localFeedback: RecoveryEvidenceReviewActionFeedback | null,
+  refreshAnchor: RecoveryEvidenceReviewRefreshAnchor | null,
+): RecoveryEvidenceReviewActionFeedback | null {
+  if (!refreshAnchor && !localFeedback) return null
+  if (!refreshAnchor) return localFeedback
+  const triggeredAt = refreshAnchor.refreshedAt
+  const detail = localFeedback?.detail
+    ? `${localFeedback.detail.replace(/。$/, '')}；已刷新结果，刷新后继续定位此依据。`
+    : `最近动作：刷新 · ${triggeredAt} · 已刷新结果，刷新后继续定位此依据。`
+  return {
+    statusLabel: refreshAnchor.statusLabel,
+    triggeredAt,
+    closureCondition: localFeedback?.closureCondition || '关闭条件：查看刷新后的复检或修订结果。',
+    detail,
+  }
+}
+
+function recoveryEvidenceReviewIsCleared(task: any) {
+  const review = recoveryEvidenceReviewOfTask(task)
+  const reviewStatus = String(review?.status || '').toLowerCase()
+  if (reviewStatus === 'ok') return true
+  const hasKnownFailedLists = Array.isArray(review?.failed_evidence)
+    || Array.isArray(review?.failedEvidence)
+    || Array.isArray(review?.failed_items)
+    || Array.isArray(review?.failedItems)
+  return hasKnownFailedLists && recoveryEvidenceFailedTexts(review).length === 0
+}
+
+function recoveryEvidenceReviewRunPayload(run: any) {
+  return {
+    input: parseJsonValue(run?.input_ref) || {},
+    output: parseJsonValue(run?.output_ref) || {},
+  }
+}
+
+function recoveryEvidenceReviewRunTime(run: any) {
+  const value = Date.parse(String(run?.updated_at || run?.completed_at || run?.finished_at || run?.created_at || ''))
+  return Number.isFinite(value) ? value : 0
+}
+
+function recoveryEvidenceReviewRunHasAuditPayload(run: any) {
+  const { input, output } = recoveryEvidenceReviewRunPayload(run)
+  return Boolean(
+    input?.recovery_evidence_action
+    || input?.recoveryEvidenceAction
+    || output?.recovery_evidence_action
+    || output?.recoveryEvidenceAction
+    || output?.audit_summary
+    || output?.auditSummary
+    || output?.recovery_evidence_closure
+    || output?.recoveryEvidenceClosure
+    || output?.governance_recheck_memory
+    || output?.governanceRecheckMemory,
+  )
+}
+
+function recoveryEvidenceReviewRunMatchesAction(
+  run: any,
+  task: any,
+  rowAction: RecoveryEvidenceReviewRowAction,
+  currentRun?: any | null,
+) {
+  const runType = String(run?.run_type || '')
+  const { input, output } = recoveryEvidenceReviewRunPayload(run)
+  const taskChapterId = Number(task?.chapter_id || task?.chapterId || 0)
+  const inputChapterId = Number(input?.chapter_id || input?.chapterId || 0)
+  const currentRunId = Number(currentRun?.id || 0)
+  const runId = Number(run?.id || 0)
+  const sourceRunId = Number(input?.source_run_id || input?.sourceRunId || output?.source_run_id || output?.sourceRunId || output?.audit_summary?.source_run_id || output?.auditSummary?.sourceRunId || 0)
+  const source = String(input?.source || output?.source || '')
+
+  if (rowAction.action === 'recheck_single_chapter') {
+    return runType === 'prose_quality'
+      && taskChapterId > 0
+      && inputChapterId === taskChapterId
+      && source === 'governance_recheck_sync'
+  }
+
+  if (rowAction.action === 'recheck_safe_batch' || rowAction.action === 'review_governance_closure') {
+    return runType === 'longform_production_repair'
+      && recoveryEvidenceReviewRunHasAuditPayload(run)
+      && (runId === currentRunId || (currentRunId > 0 && sourceRunId === currentRunId))
+  }
+
+  if (rowAction.action === 'execute_typed_repair') {
+    if (!taskChapterId) return false
+    if (runType === 'prose_quality') return inputChapterId === taskChapterId && ['post_revision', 'governance_recheck_sync'].includes(source)
+    if (runType === 'editor_revision') return inputChapterId === taskChapterId
+  }
+
+  return false
+}
+
+function recoveryEvidenceReviewRunStatus(run: any) {
+  const status = String(run?.status || '').toLowerCase()
+  if (['running', 'queued', 'ready', 'pending'].includes(status)) return 'running'
+  if (['failed', 'error', 'canceled', 'cancelled'].includes(status)) return 'failed'
+  if (['success', 'ok', 'completed', 'done', 'closed'].includes(status)) return 'success'
+  return ''
+}
+
+function recoveryEvidenceReviewRunFailureDetail(run: any) {
+  const { output } = recoveryEvidenceReviewRunPayload(run)
+  return compactEvidenceText(
+    run?.error_message
+    || run?.error
+    || output?.error
+    || output?.message
+    || '对应复检运行失败，请重试。',
+  )
+}
+
+export function buildRecoveryEvidenceReviewResolvedFeedback({
+  task,
+  rowAction,
+  currentRun = null,
+  runRecords = [],
+  localFeedback = null,
+}: {
+  task: any
+  rowAction: RecoveryEvidenceReviewRowAction
+  currentRun?: any | null
+  runRecords?: any[] | null
+  localFeedback?: RecoveryEvidenceReviewActionFeedback | null
+}): RecoveryEvidenceReviewActionFeedback | null {
+  const label = rowAction.label || '处理'
+  const closureCondition = buildRecoveryEvidenceReviewActionFeedback(rowAction, '实时状态').closureCondition
+  if (recoveryEvidenceReviewIsCleared(task)) {
+    return {
+      statusLabel: '已回填',
+      triggeredAt: '实时状态',
+      closureCondition,
+      detail: `最近动作：${label} · 已回填 · 恢复依据复盘已清空失效项。`,
+    }
+  }
+
+  const latestRun = [...(Array.isArray(runRecords) ? runRecords : [])]
+    .filter(run => recoveryEvidenceReviewRunMatchesAction(run, task, rowAction, currentRun))
+    .sort((a, b) => recoveryEvidenceReviewRunTime(b) - recoveryEvidenceReviewRunTime(a))[0]
+  const runStatus = latestRun ? recoveryEvidenceReviewRunStatus(latestRun) : ''
+  if (runStatus === 'running') {
+    const runningDetail = rowAction.action === 'recheck_single_chapter'
+      ? '单章治理复查正在回填恢复依据结果。'
+      : rowAction.action === 'execute_typed_repair'
+        ? '修订复检正在回填恢复依据结果。'
+        : '长线生产修复正在回填恢复依据结果。'
+    return {
+      statusLabel: '运行中',
+      triggeredAt: '实时状态',
+      closureCondition,
+      detail: `最近动作：${label} · 运行中 · ${runningDetail}`,
+    }
+  }
+  if (runStatus === 'failed') {
+    return {
+      statusLabel: '失败需重试',
+      triggeredAt: '实时状态',
+      closureCondition,
+      detail: `最近动作：${label} · 失败需重试 · ${recoveryEvidenceReviewRunFailureDetail(latestRun)}`,
+    }
+  }
+  if (runStatus === 'success') {
+    return {
+      statusLabel: '已回填',
+      triggeredAt: '实时状态',
+      closureCondition,
+      detail: `最近动作：${label} · 已回填 · 对应复检运行已完成，等待失效依据复盘刷新。`,
+    }
+  }
+
+  return localFeedback
 }
 
 function recoveryEvidenceTaskResult(task: any) {
@@ -623,18 +845,69 @@ function recoveryEvidenceSourceGroups(tasks: any[], latestTasks: any[] = []) {
     .sort((a, b) => (order[a.source] ?? 99) - (order[b.source] ?? 99) || a.label.localeCompare(b.label))
 }
 
+function recoveryEvidenceAuditActionFromGroup(
+  group: RecoveryEvidenceAuditSourceGroup,
+  action: RecoveryEvidenceAuditNextAction['action'],
+  label: string,
+): RecoveryEvidenceAuditNextAction {
+  return {
+    action,
+    label,
+    source: group.source,
+    sourceLabel: group.label,
+    taskIndex: group.taskIndexes[0] ?? null,
+    residualEvidence: group.residualEvidence,
+  }
+}
+
+function buildRecoveryEvidenceAuditNextAction(sourceGroups: RecoveryEvidenceAuditSourceGroup[]): RecoveryEvidenceAuditNextAction | null {
+  const singleResidual = sourceGroups.find(group => group.source === 'single_chapter_governance_recheck' && group.residualAction === 'revision')
+  if (singleResidual) {
+    return recoveryEvidenceAuditActionFromGroup(singleResidual, 'revision', singleResidual.residualActionLabel || '回修依据')
+  }
+
+  const batchResidual = sourceGroups.find(group => group.source === 'safe_batch_recovery_recheck' && group.residualAction === 'focus_task')
+  if (batchResidual) {
+    return recoveryEvidenceAuditActionFromGroup(batchResidual, 'focus_task', batchResidual.residualActionLabel || '定位批次任务')
+  }
+
+  const genericResidual = sourceGroups.find(group => group.resultStatus === 'needs_followup' && group.residualAction)
+  if (genericResidual) {
+    return recoveryEvidenceAuditActionFromGroup(genericResidual, genericResidual.residualAction as RecoveryEvidenceAuditNextAction['action'], genericResidual.residualActionLabel || '定位任务')
+  }
+
+  const singlePending = sourceGroups.find(group => group.source === 'single_chapter_governance_recheck' && group.resultStatus === 'pending')
+  if (singlePending) {
+    return recoveryEvidenceAuditActionFromGroup(singlePending, 'recheck_single_chapter', singlePending.recheckLabel || '复检单章')
+  }
+
+  const batchPending = sourceGroups.find(group => group.source === 'safe_batch_recovery_recheck' && group.resultStatus === 'pending')
+  if (batchPending) {
+    return recoveryEvidenceAuditActionFromGroup(batchPending, 'recheck_safe_batch', batchPending.recheckLabel || '复盘批次')
+  }
+
+  const unresolved = sourceGroups.find(group => group.resultStatus !== 'closed')
+  if (unresolved) {
+    return recoveryEvidenceAuditActionFromGroup(unresolved, 'review_governance_closure', '治理复查台')
+  }
+
+  return null
+}
+
 export function buildRecoveryEvidenceAuditView(audit?: any | null, latestTasks: any[] = []): RecoveryEvidenceAuditView | null {
   const closure = audit?.recovery_evidence_closure || audit?.recoveryEvidenceClosure || null
   if (!closure || Number(closure.total || 0) <= 0) return null
   const memory = audit?.governance_recheck_memory || audit?.governanceRecheckMemory || null
   const closureTasks = Array.isArray(closure.tasks) ? closure.tasks : []
+  const sourceGroups = recoveryEvidenceSourceGroups(closureTasks, latestTasks)
   return {
     status: closure.status === 'closed' ? 'closed' : 'needs_followup',
     label: '恢复依据审计',
     total: Number(closure.total || 0),
     resolved: Number(closure.resolved || 0),
     sourceSummary: recoveryEvidenceSourceSummary(closure),
-    sourceGroups: recoveryEvidenceSourceGroups(closureTasks, latestTasks),
+    sourceGroups,
+    nextAction: buildRecoveryEvidenceAuditNextAction(sourceGroups),
     sourceRunId: memory?.source_run_id ?? memory?.sourceRunId ?? audit?.source_run_id ?? audit?.sourceRunId ?? null,
     memoryLabel: compactEvidenceText(memory?.label || ''),
     memorySummary: compactEvidenceText(memory?.summary || '', 200),
@@ -739,13 +1012,17 @@ function BatchPlanReviewPreview({ task }: { task: any }) {
 function RecoveryEvidenceReviewPreview({
   task,
   taskIndex = 0,
+  currentRun = null,
+  runRecords = [],
   actionFeedbackByKey = {},
   onRecoveryEvidenceReviewRowAction,
 }: {
   task: any
   taskIndex?: number
+  currentRun?: any | null
+  runRecords?: any[]
   actionFeedbackByKey?: Record<string, RecoveryEvidenceReviewActionFeedback>
-  onRecoveryEvidenceReviewRowAction?: (row: RecoveryEvidenceReviewRow, rowAction: RecoveryEvidenceReviewRowAction) => void
+  onRecoveryEvidenceReviewRowAction?: (row: RecoveryEvidenceReviewRow, rowAction: RecoveryEvidenceReviewRowAction) => void | Promise<void>
 }) {
   const recoveryEvidenceReview = task.recovery_evidence_review || task.recoveryEvidenceReview || null
   const rows = buildRecoveryEvidenceReviewRows(task)
@@ -764,7 +1041,13 @@ function RecoveryEvidenceReviewPreview({
           <Space key={`${item.evidence}-${index}`} direction="vertical" size={2} style={{ width: '100%' }}>
             {(() => {
               const rowAction = buildRecoveryEvidenceReviewRowAction(item)
-              const feedback = actionFeedbackByKey[buildRecoveryEvidenceReviewActionFeedbackKey(taskIndex, item, rowAction)]
+              const feedback = buildRecoveryEvidenceReviewResolvedFeedback({
+                task,
+                rowAction,
+                currentRun,
+                runRecords,
+                localFeedback: actionFeedbackByKey[buildRecoveryEvidenceReviewActionFeedbackKey(taskIndex, item, rowAction)] || null,
+              })
               return (
                 <>
                   {(item.sourceLabel || item.sourceDetail || item.sourceActionLabel) && (
@@ -782,7 +1065,7 @@ function RecoveryEvidenceReviewPreview({
                     size="small"
                     type="link"
                     icon={rowAction.action === 'recheck_single_chapter' || rowAction.action === 'recheck_safe_batch' || rowAction.action === 'review_governance_closure' ? <ReloadOutlined /> : undefined}
-                    onClick={() => onRecoveryEvidenceReviewRowAction?.(item, rowAction)}
+                    onClick={() => { void onRecoveryEvidenceReviewRowAction?.(item, rowAction) }}
                   >
                     {rowAction.label}
                   </Button>
@@ -990,6 +1273,7 @@ function ReleaseRepairRunSummary({ run }: { run: any }) {
 
 function RepairTaskRunSummary({
   run,
+  runRecords = [],
   onSelectChapter,
   onOpenChapterEditor,
   onStartRepairTaskRevision,
@@ -999,17 +1283,20 @@ function RepairTaskRunSummary({
   onBulkUpdateRepairTaskStatus,
   onRecheckStyleSampleTaskBooks,
   onGenerateRepairAuditSummary,
+  onRefresh,
 }: {
   run: any
-  onSelectChapter?: (chapterId: number) => void
-  onOpenChapterEditor?: (chapterId: number) => void
-  onStartRepairTaskRevision?: (task: any, run: any, taskIndex: number) => void
-  onExecuteTypedRepairTask?: (task: any, run: any, taskIndex: number) => void
-  onRecheckRepairTask?: (task: any, run: any, taskIndex: number) => void
-  onUpdateRepairTaskStatus?: (task: any, run: any, status: string, taskIndex: number) => void
-  onBulkUpdateRepairTaskStatus?: (items: any[], status: string) => void
+  runRecords?: any[]
+  onSelectChapter?: (chapterId: number) => void | Promise<void>
+  onOpenChapterEditor?: (chapterId: number) => void | Promise<void>
+  onStartRepairTaskRevision?: (task: any, run: any, taskIndex: number, options?: RepairTaskActionOptions) => void | Promise<void>
+  onExecuteTypedRepairTask?: (task: any, run: any, taskIndex: number, options?: RepairTaskActionOptions) => void | Promise<void>
+  onRecheckRepairTask?: (task: any, run: any, taskIndex: number, options?: RepairTaskActionOptions) => void | Promise<void>
+  onUpdateRepairTaskStatus?: (task: any, run: any, status: string, taskIndex: number) => void | Promise<void>
+  onBulkUpdateRepairTaskStatus?: (items: any[], status: string) => void | Promise<void>
   onRecheckStyleSampleTaskBooks?: (items: any[]) => void
-  onGenerateRepairAuditSummary?: (run: any) => void
+  onGenerateRepairAuditSummary?: (run: any, options?: RepairTaskActionOptions) => void | Promise<void>
+  onRefresh?: () => void | Promise<void>
 }) {
   const output = parseJsonValue(run.output_ref) || {}
   const tasks = Array.isArray(output.tasks) ? output.tasks : []
@@ -1017,6 +1304,7 @@ function RepairTaskRunSummary({
   const [focusedTaskIndex, setFocusedTaskIndex] = useState<number | null>(null)
   const [focusedTaskSource, setFocusedTaskSource] = useState<string>('')
   const [recoveryEvidenceActionFeedbackByKey, setRecoveryEvidenceActionFeedbackByKey] = useState<Record<string, RecoveryEvidenceReviewActionFeedback>>({})
+  const [recoveryEvidenceRefreshAnchor, setRecoveryEvidenceRefreshAnchor] = useState<RecoveryEvidenceReviewRefreshAnchor | null>(null)
   const high = tasks.filter((task: any) => task.severity === 'high').length
   const medium = tasks.filter((task: any) => task.severity === 'medium').length
   const resolved = tasks.filter((task: any) => task.task_status === 'resolved').length
@@ -1033,39 +1321,98 @@ function RepairTaskRunSummary({
       task: taskIndex !== null ? tasks[taskIndex] : null,
     }
   }
-  const handleRecoveryEvidenceReviewRowAction = (
+  const sourceTaskForRecoveryEvidenceAuditAction = (nextAction: RecoveryEvidenceAuditNextAction) => {
+    const groupedTask = sourceTaskForRecoveryEvidenceRow(nextAction.source)
+    const taskIndex = nextAction.taskIndex ?? groupedTask.taskIndex
+    return {
+      taskIndex,
+      task: taskIndex !== null ? tasks[taskIndex] : groupedTask.task,
+    }
+  }
+  const recoveryEvidenceAuditNextActionDisabled = (nextAction: RecoveryEvidenceAuditNextAction) => {
+    const sourceTask = sourceTaskForRecoveryEvidenceAuditAction(nextAction)
+    if (nextAction.action === 'revision') return !sourceTask.task || !onStartRepairTaskRevision
+    if (nextAction.action === 'recheck_single_chapter') return !sourceTask.task || !onRecheckRepairTask
+    if (nextAction.action === 'recheck_safe_batch' || nextAction.action === 'review_governance_closure') return !onGenerateRepairAuditSummary
+    return false
+  }
+  const handleRecoveryEvidenceAuditNextAction = (nextAction: RecoveryEvidenceAuditNextAction) => {
+    const sourceTask = sourceTaskForRecoveryEvidenceAuditAction(nextAction)
+    setFocusedTaskSource(nextAction.source)
+    setFocusedTaskIndex(sourceTask.taskIndex)
+    if (nextAction.action === 'revision' && sourceTask.task && onStartRepairTaskRevision) {
+      onStartRepairTaskRevision(sourceTask.task, run, sourceTask.taskIndex ?? 0)
+      return
+    }
+    if (nextAction.action === 'recheck_single_chapter' && sourceTask.task && onRecheckRepairTask) {
+      onRecheckRepairTask(sourceTask.task, run, sourceTask.taskIndex ?? 0)
+      return
+    }
+    if ((nextAction.action === 'recheck_safe_batch' || nextAction.action === 'review_governance_closure') && onGenerateRepairAuditSummary) {
+      onGenerateRepairAuditSummary(run)
+    }
+  }
+  const focusRecoveryEvidenceAnchor = (anchor: RecoveryEvidenceReviewRefreshAnchor) => {
+    setFocusedTaskSource(anchor.focusSource)
+    setFocusedTaskIndex(anchor.sourceTaskIndex ?? anchor.taskIndex)
+  }
+  const runRecoveryEvidenceActionWithRefresh = async (
+    actionFeedback: RecoveryEvidenceReviewActionFeedback,
+    refreshAnchor: RecoveryEvidenceReviewRefreshAnchor,
+    action: () => void | Promise<void>,
+  ) => {
+    setRecoveryEvidenceRefreshAnchor(refreshAnchor)
+    focusRecoveryEvidenceAnchor(refreshAnchor)
+    setRecoveryEvidenceActionFeedbackByKey(prev => ({ ...prev, [refreshAnchor.feedbackKey]: actionFeedback }))
+    await Promise.resolve(action())
+    if (onRefresh) await Promise.resolve(onRefresh())
+    const refreshedAnchor = { ...refreshAnchor, refreshedAt: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false }) }
+    setRecoveryEvidenceRefreshAnchor(refreshedAnchor)
+    focusRecoveryEvidenceAnchor(refreshedAnchor)
+    setRecoveryEvidenceActionFeedbackByKey(prev => {
+      const refreshedFeedback = buildRecoveryEvidenceReviewRefreshFeedback(prev[refreshAnchor.feedbackKey] || actionFeedback, refreshedAnchor)
+      return refreshedFeedback ? { ...prev, [refreshAnchor.feedbackKey]: refreshedFeedback } : prev
+    })
+  }
+  const handleRecoveryEvidenceReviewRowAction = async (
     task: any,
     taskIndex: number,
     row: RecoveryEvidenceReviewRow,
     rowAction: RecoveryEvidenceReviewRowAction,
   ) => {
-    const feedbackKey = buildRecoveryEvidenceReviewActionFeedbackKey(taskIndex, row, rowAction)
     const triggeredAt = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })
     const actionFeedback = buildRecoveryEvidenceReviewActionFeedback(rowAction, triggeredAt)
+    const runActionOptions = { keepTaskCenterOpen: true }
     if (rowAction.focusSource) {
-      setFocusedTaskSource(rowAction.focusSource)
       const sourceTask = sourceTaskForRecoveryEvidenceRow(rowAction.focusSource)
-      setFocusedTaskIndex(sourceTask.taskIndex)
+      const refreshAnchor = buildRecoveryEvidenceReviewRefreshAnchor({
+        taskIndex,
+        row,
+        rowAction,
+        sourceTaskIndex: sourceTask.taskIndex,
+        refreshedAt: triggeredAt,
+      })
       if (rowAction.action === 'recheck_single_chapter' && sourceTask.task && onRecheckRepairTask) {
-        setRecoveryEvidenceActionFeedbackByKey(prev => ({ ...prev, [feedbackKey]: actionFeedback }))
-        onRecheckRepairTask(sourceTask.task, run, sourceTask.taskIndex ?? 0)
+        await runRecoveryEvidenceActionWithRefresh(actionFeedback, refreshAnchor, () => onRecheckRepairTask(sourceTask.task, run, sourceTask.taskIndex ?? 0, runActionOptions))
       }
       if (rowAction.action === 'recheck_safe_batch' && onGenerateRepairAuditSummary) {
-        setRecoveryEvidenceActionFeedbackByKey(prev => ({ ...prev, [feedbackKey]: actionFeedback }))
-        onGenerateRepairAuditSummary(run)
+        await runRecoveryEvidenceActionWithRefresh(actionFeedback, refreshAnchor, () => onGenerateRepairAuditSummary(run, runActionOptions))
       }
       return
     }
-    setFocusedTaskSource('')
+    const refreshAnchor = buildRecoveryEvidenceReviewRefreshAnchor({
+      taskIndex,
+      row,
+      rowAction,
+      sourceTaskIndex: taskIndex,
+      refreshedAt: triggeredAt,
+    })
     if (rowAction.action === 'review_governance_closure' && onGenerateRepairAuditSummary) {
-      setRecoveryEvidenceActionFeedbackByKey(prev => ({ ...prev, [feedbackKey]: actionFeedback }))
-      onGenerateRepairAuditSummary(run)
+      await runRecoveryEvidenceActionWithRefresh(actionFeedback, refreshAnchor, () => onGenerateRepairAuditSummary(run, runActionOptions))
       return
     }
     if (rowAction.action === 'execute_typed_repair' && onExecuteTypedRepairTask) {
-      setFocusedTaskIndex(taskIndex)
-      setRecoveryEvidenceActionFeedbackByKey(prev => ({ ...prev, [feedbackKey]: actionFeedback }))
-      onExecuteTypedRepairTask(task, run, taskIndex)
+      await runRecoveryEvidenceActionWithRefresh(actionFeedback, refreshAnchor, () => onExecuteTypedRepairTask(task, run, taskIndex, runActionOptions))
     }
   }
   const title = run.run_type === 'first30_retention_repair'
@@ -1151,6 +1498,27 @@ function RepairTaskRunSummary({
                 {recoveryEvidenceAudit.memoryLabel && <Tag color="purple" bordered={false}>{recoveryEvidenceAudit.memoryLabel}</Tag>}
                 {recoveryEvidenceAudit.sourceSummary && <Tag color="purple" bordered={false}>{recoveryEvidenceAudit.sourceSummary}</Tag>}
               </Space>
+              {recoveryEvidenceAudit.nextAction && (
+                <Space wrap size={[4, 4]} style={{ padding: 6, border: '1px solid #f0abfc', borderRadius: 6, background: '#fae8ff' }}>
+                  <Tag color="gold" bordered={false}>下一步</Tag>
+                  <Text strong style={{ fontSize: 12 }}>{recoveryEvidenceAudit.nextAction.label}</Text>
+                  {recoveryEvidenceAudit.nextAction.sourceLabel && (
+                    <Text type="secondary" style={{ fontSize: 12 }}>{recoveryEvidenceAudit.nextAction.sourceLabel}</Text>
+                  )}
+                  {recoveryEvidenceAudit.nextAction.residualEvidence.length > 0 && (
+                    <Text type="danger" style={{ fontSize: 12 }}>{recoveryEvidenceAudit.nextAction.residualEvidence.join('；')}</Text>
+                  )}
+                  <Button
+                    size="small"
+                    type="primary"
+                    icon={['recheck_single_chapter', 'recheck_safe_batch', 'review_governance_closure'].includes(recoveryEvidenceAudit.nextAction.action) ? <ReloadOutlined /> : undefined}
+                    disabled={recoveryEvidenceAuditNextActionDisabled(recoveryEvidenceAudit.nextAction)}
+                    onClick={() => handleRecoveryEvidenceAuditNextAction(recoveryEvidenceAudit.nextAction!)}
+                  >
+                    {recoveryEvidenceAudit.nextAction.label}
+                  </Button>
+                </Space>
+              )}
               {recoveryEvidenceAudit.sourceGroups.length > 0 && (
                 <Space wrap size={[4, 4]}>
                   <Text strong style={{ fontSize: 12 }}>按来源定位</Text>
@@ -1302,7 +1670,11 @@ function RepairTaskRunSummary({
           locale={{ emptyText: '暂无修复任务' }}
           renderItem={(task: any, taskIndex: number) => {
             const sourceFocused = Boolean(focusedTaskSource && recoveryEvidenceTaskSourceMeta(task).source === focusedTaskSource)
-            const focused = focusedTaskIndex === taskIndex || sourceFocused
+            const refreshAnchorFocused = Boolean(
+              recoveryEvidenceRefreshAnchor
+              && (recoveryEvidenceRefreshAnchor.taskIndex === taskIndex || recoveryEvidenceRefreshAnchor.sourceTaskIndex === taskIndex),
+            )
+            const focused = focusedTaskIndex === taskIndex || sourceFocused || refreshAnchorFocused
             return (
               <List.Item
                 style={focused ? { border: '1px solid #a855f7', borderRadius: 6, paddingInline: 8, background: '#faf5ff' } : undefined}
@@ -1336,6 +1708,8 @@ function RepairTaskRunSummary({
                     <RecoveryEvidenceReviewPreview
                       task={task}
                       taskIndex={taskIndex}
+                      currentRun={run}
+                      runRecords={runRecords}
                       actionFeedbackByKey={recoveryEvidenceActionFeedbackByKey}
                       onRecoveryEvidenceReviewRowAction={(row, rowAction) => handleRecoveryEvidenceReviewRowAction(task, taskIndex, row, rowAction)}
                     />
@@ -1539,11 +1913,11 @@ export function TaskCenterDrawer({
   loading: boolean
   knowledgeJobsLoading: boolean
   onClose: () => void
-  onRefresh: () => void
-  onRefreshKnowledgeJobs: () => void
-  onPauseKnowledgeJob: (jobId: string) => void
-  onResumeKnowledgeJob: (jobId: string) => void
-  onCancelKnowledgeJob: (jobId: string) => void
+  onRefresh: () => void | Promise<void>
+  onRefreshKnowledgeJobs: () => void | Promise<void>
+  onPauseKnowledgeJob: (jobId: string) => void | Promise<void>
+  onResumeKnowledgeJob: (jobId: string) => void | Promise<void>
+  onCancelKnowledgeJob: (jobId: string) => void | Promise<void>
   chapterGroupExecutingId?: number | null
   releaseRepairExecutingId?: number | null
   onExecuteChapterGroup?: (run: any) => void
@@ -1554,14 +1928,14 @@ export function TaskCenterDrawer({
   onApproveChapterGroup?: (run: any, chapter: any) => void
   onRetryChapterGroup?: (run: any, chapter: any) => void
   onSkipChapterGroup?: (run: any, chapter: any) => void
-  onSelectChapter?: (chapterId: number) => void
-  onOpenChapterEditor?: (chapterId: number) => void
-  onStartRepairTaskRevision?: (task: any, run: any, taskIndex: number) => void
-  onExecuteTypedRepairTask?: (task: any, run: any, taskIndex: number) => void
-  onRecheckRepairTask?: (task: any, run: any, taskIndex: number) => void
-  onUpdateRepairTaskStatus?: (task: any, run: any, status: string, taskIndex: number) => void
-  onBulkUpdateRepairTaskStatus?: (items: any[], status: string) => void
-  onGenerateRepairAuditSummary?: (run: any) => void
+  onSelectChapter?: (chapterId: number) => void | Promise<void>
+  onOpenChapterEditor?: (chapterId: number) => void | Promise<void>
+  onStartRepairTaskRevision?: (task: any, run: any, taskIndex: number, options?: RepairTaskActionOptions) => void | Promise<void>
+  onExecuteTypedRepairTask?: (task: any, run: any, taskIndex: number, options?: RepairTaskActionOptions) => void | Promise<void>
+  onRecheckRepairTask?: (task: any, run: any, taskIndex: number, options?: RepairTaskActionOptions) => void | Promise<void>
+  onUpdateRepairTaskStatus?: (task: any, run: any, status: string, taskIndex: number) => void | Promise<void>
+  onBulkUpdateRepairTaskStatus?: (items: any[], status: string) => void | Promise<void>
+  onGenerateRepairAuditSummary?: (run: any, options?: RepairTaskActionOptions) => void | Promise<void>
 }) {
   const [detailRun, setDetailRun] = useState<any | null>(null)
   const [detailKnowledgeJob, setDetailKnowledgeJob] = useState<any | null>(null)
@@ -1571,6 +1945,11 @@ export function TaskCenterDrawer({
   const sortedKnowledgeJobs = useMemo(() => (
     [...knowledgeIngestJobs].sort((a, b) => String(b.updated_at || b.created_at || '').localeCompare(String(a.updated_at || a.created_at || '')))
   ), [knowledgeIngestJobs])
+  useEffect(() => {
+    if (!detailRun?.id) return
+    const nextRun = runRecords.find((run: any) => Number(run.id) === Number(detailRun.id))
+    if (nextRun && nextRun !== detailRun) setDetailRun(nextRun)
+  }, [runRecords, detailRun?.id])
   const normalizedTasks = Array.isArray(productionTasks?.tasks) ? productionTasks.tasks : []
   const activeNormalizedTasks = Array.isArray(productionTasks?.active) ? productionTasks.active : []
   const taskSummary = productionTasks?.summary || {}
@@ -1871,66 +2250,70 @@ export function TaskCenterDrawer({
             {['mechanical_qa_repair', 'first30_retention_repair'].includes(detailRun.run_type) && (
               <RepairTaskRunSummary
                 run={detailRun}
+                runRecords={runRecords}
+                onRefresh={onRefresh}
                 onSelectChapter={(chapterId) => {
                   setDetailRun(null)
-                  onSelectChapter?.(chapterId)
+                  return onSelectChapter?.(chapterId)
                 }}
                 onOpenChapterEditor={(chapterId) => {
                   setDetailRun(null)
-                  onOpenChapterEditor?.(chapterId)
+                  return onOpenChapterEditor?.(chapterId)
                 }}
-                onStartRepairTaskRevision={(task, run, taskIndex) => {
-                  setDetailRun(null)
-                  onStartRepairTaskRevision?.(task, run, taskIndex)
+                onStartRepairTaskRevision={(task, run, taskIndex, options) => {
+                  if (!options?.keepTaskCenterOpen) setDetailRun(null)
+                  return onStartRepairTaskRevision?.(task, run, taskIndex, options)
                 }}
-                onExecuteTypedRepairTask={(task, run, taskIndex) => {
-                  setDetailRun(null)
-                  onExecuteTypedRepairTask?.(task, run, taskIndex)
+                onExecuteTypedRepairTask={(task, run, taskIndex, options) => {
+                  if (!options?.keepTaskCenterOpen) setDetailRun(null)
+                  return onExecuteTypedRepairTask?.(task, run, taskIndex, options)
                 }}
-                onRecheckRepairTask={(task, run, taskIndex) => {
-                  setDetailRun(null)
-                  onRecheckRepairTask?.(task, run, taskIndex)
+                onRecheckRepairTask={(task, run, taskIndex, options) => {
+                  if (!options?.keepTaskCenterOpen) setDetailRun(null)
+                  return onRecheckRepairTask?.(task, run, taskIndex, options)
                 }}
                 onUpdateRepairTaskStatus={(task, run, status, taskIndex) => {
                   setDetailRun(null)
-                  onUpdateRepairTaskStatus?.(task, run, status, taskIndex)
+                  return onUpdateRepairTaskStatus?.(task, run, status, taskIndex)
                 }}
-                onGenerateRepairAuditSummary={(run) => {
-                  setDetailRun(null)
-                  onGenerateRepairAuditSummary?.(run)
+                onGenerateRepairAuditSummary={(run, options) => {
+                  if (!options?.keepTaskCenterOpen) setDetailRun(null)
+                  return onGenerateRepairAuditSummary?.(run, options)
                 }}
               />
             )}
             {detailRun.run_type === 'longform_production_repair' && (
               <RepairTaskRunSummary
                 run={detailRun}
+                runRecords={runRecords}
+                onRefresh={onRefresh}
                 onSelectChapter={(chapterId) => {
                   setDetailRun(null)
-                  onSelectChapter?.(chapterId)
+                  return onSelectChapter?.(chapterId)
                 }}
                 onOpenChapterEditor={(chapterId) => {
                   setDetailRun(null)
-                  onOpenChapterEditor?.(chapterId)
+                  return onOpenChapterEditor?.(chapterId)
                 }}
-                onStartRepairTaskRevision={(task, run, taskIndex) => {
-                  setDetailRun(null)
-                  onStartRepairTaskRevision?.(task, run, taskIndex)
+                onStartRepairTaskRevision={(task, run, taskIndex, options) => {
+                  if (!options?.keepTaskCenterOpen) setDetailRun(null)
+                  return onStartRepairTaskRevision?.(task, run, taskIndex, options)
                 }}
-                onExecuteTypedRepairTask={(task, run, taskIndex) => {
-                  setDetailRun(null)
-                  onExecuteTypedRepairTask?.(task, run, taskIndex)
+                onExecuteTypedRepairTask={(task, run, taskIndex, options) => {
+                  if (!options?.keepTaskCenterOpen) setDetailRun(null)
+                  return onExecuteTypedRepairTask?.(task, run, taskIndex, options)
                 }}
-                onRecheckRepairTask={(task, run, taskIndex) => {
-                  setDetailRun(null)
-                  onRecheckRepairTask?.(task, run, taskIndex)
+                onRecheckRepairTask={(task, run, taskIndex, options) => {
+                  if (!options?.keepTaskCenterOpen) setDetailRun(null)
+                  return onRecheckRepairTask?.(task, run, taskIndex, options)
                 }}
                 onUpdateRepairTaskStatus={(task, run, status, taskIndex) => {
                   setDetailRun(null)
-                  onUpdateRepairTaskStatus?.(task, run, status, taskIndex)
+                  return onUpdateRepairTaskStatus?.(task, run, status, taskIndex)
                 }}
-                onGenerateRepairAuditSummary={(run) => {
-                  setDetailRun(null)
-                  onGenerateRepairAuditSummary?.(run)
+                onGenerateRepairAuditSummary={(run, options) => {
+                  if (!options?.keepTaskCenterOpen) setDetailRun(null)
+                  return onGenerateRepairAuditSummary?.(run, options)
                 }}
               />
             )}

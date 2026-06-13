@@ -2021,6 +2021,62 @@ function recoveryEvidenceProductionStatusLabel(status: string) {
   return '暂缓安全连写'
 }
 
+function recoveryEvidenceProductionGateNextActionFromSource(source: AnyRecord, action: string, label: string) {
+  return {
+    action,
+    label,
+    source: text(source?.source || source?.sourceMode),
+    sourceLabel: text(source?.label || source?.sourceLabel),
+    status: text(source?.status),
+    residualEvidence: arrayValue(source?.residual_evidence || source?.residualEvidence).map(item => text(item)).filter(Boolean),
+  }
+}
+
+function buildRecoveryEvidenceProductionGateNextAction(sources: AnyRecord[]) {
+  const singleResidual = sources.find(source =>
+    text(source?.source) === 'single_chapter_governance_recheck'
+    && text(source?.status) === 'blocked'
+    && arrayValue(source?.residual_evidence || source?.residualEvidence).length > 0,
+  )
+  if (singleResidual) {
+    return recoveryEvidenceProductionGateNextActionFromSource(singleResidual, 'revision', '回修依据')
+  }
+
+  const batchResidual = sources.find(source =>
+    text(source?.source) === 'safe_batch_recovery_recheck'
+    && text(source?.status) === 'blocked'
+    && arrayValue(source?.residual_evidence || source?.residualEvidence).length > 0,
+  )
+  if (batchResidual) {
+    return recoveryEvidenceProductionGateNextActionFromSource(batchResidual, 'focus_task', '定位批次任务')
+  }
+
+  const genericResidual = sources.find(source =>
+    text(source?.status) === 'blocked'
+    && arrayValue(source?.residual_evidence || source?.residualEvidence).length > 0,
+  )
+  if (genericResidual) {
+    return recoveryEvidenceProductionGateNextActionFromSource(genericResidual, 'focus_task', '定位任务')
+  }
+
+  const singlePending = sources.find(source => text(source?.source) === 'single_chapter_governance_recheck' && text(source?.status) === 'pending')
+  if (singlePending) {
+    return recoveryEvidenceProductionGateNextActionFromSource(singlePending, 'recheck_single_chapter', '复检单章')
+  }
+
+  const batchPending = sources.find(source => text(source?.source) === 'safe_batch_recovery_recheck' && text(source?.status) === 'pending')
+  if (batchPending) {
+    return recoveryEvidenceProductionGateNextActionFromSource(batchPending, 'recheck_safe_batch', '复盘批次')
+  }
+
+  const unresolved = sources.find(source => text(source?.status) !== 'cleared')
+  if (unresolved) {
+    return recoveryEvidenceProductionGateNextActionFromSource(unresolved, 'review_governance_closure', '治理复查台')
+  }
+
+  return null
+}
+
 function buildRecoveryEvidenceProductionGate(runRecords: AnyRecord[]) {
   const auditEntry = latestRepairAuditEntry(runRecords)
   const audit = auditEntry?.audit || null
@@ -2036,6 +2092,7 @@ function buildRecoveryEvidenceProductionGate(runRecords: AnyRecord[]) {
         detail,
         source_count: 0,
         sources: [],
+        next_action: null,
       },
     }
   }
@@ -2079,6 +2136,7 @@ function buildRecoveryEvidenceProductionGate(runRecords: AnyRecord[]) {
       task_count: group.statuses.length,
     }
   })
+  const nextAction = buildRecoveryEvidenceProductionGateNextAction(sources)
 
   if (!blocked) {
     const detail = `恢复依据生产闸门：${sourceDetails.join('；')}，可恢复安全连写。`
@@ -2090,6 +2148,7 @@ function buildRecoveryEvidenceProductionGate(runRecords: AnyRecord[]) {
         detail,
         source_count: sources.length,
         sources,
+        next_action: nextAction,
       },
     }
   }
@@ -2102,6 +2161,7 @@ function buildRecoveryEvidenceProductionGate(runRecords: AnyRecord[]) {
       detail,
       source_count: sources.length,
       sources,
+      next_action: nextAction,
     },
   }
 }
@@ -6248,9 +6308,18 @@ function buildBatchGuardrail(args: {
   let recommendedAction = args.mainAction
 
   if (blocking?.label === '恢复依据生产闸门' || warning?.label === '恢复依据生产闸门') {
-    recommendedAction = opsAction('review_governance_closure', '治理复查台', recoveryEvidenceProductionGate.signal.detail, false, {
+    const recoveryEvidenceNextAction = recoveryEvidenceProductionGate.snapshot.next_action || {
+      action: 'review_governance_closure',
+      label: '治理复查台',
+      source: 'recovery_evidence_production_gate',
+      sourceLabel: '恢复依据生产闸门',
+      status: recoveryEvidenceProductionGate.snapshot.status,
+      residualEvidence: [],
+    }
+    recommendedAction = opsAction('review_governance_closure', recoveryEvidenceNextAction.label, recoveryEvidenceProductionGate.signal.detail, false, {
       source: 'recovery_evidence_production_gate',
       detail: recoveryEvidenceProductionGate.signal.detail,
+      recoveryEvidenceNextAction,
     })
   } else if (blocking?.label === '长线记忆' || warning?.label === '长线记忆') {
     recommendedAction = canonRunway.action

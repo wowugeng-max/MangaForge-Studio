@@ -84,6 +84,10 @@ const ReviewAnnotationsDrawer = lazy(() => import('./novel-workspace/ReviewAnnot
 const TaskCenterDrawer = lazy(() => import('./novel-workspace/TaskCenterDrawer').then(module => ({ default: module.TaskCenterDrawer })))
 const VersionDetailModal = lazy(() => import('./novel-workspace/VersionDetailModal').then(module => ({ default: module.VersionDetailModal })))
 
+type TaskCenterActionOptions = {
+  keepTaskCenterOpen?: boolean
+}
+
 function DeferredWorkspaceSurfaces({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={null}>{children}</Suspense>
 }
@@ -1784,12 +1788,12 @@ export default function NovelProjectWorkspace() {
     }
   }
 
-  const startRepairTaskRevision = async (task: any, run?: any, taskIndex = -1) => {
+  const startRepairTaskRevision = async (task: any, run?: any, taskIndex = -1, options: TaskCenterActionOptions = {}) => {
     const chapterId = Number(task?.chapter_id || 0)
     if (!chapterId) return message.warning('这个任务没有绑定章节')
     if (!selectedModelId) return message.warning('请先选择模型')
     if (!await selectChapterForWriting(chapterId)) return
-    setTaskCenterOpen(false)
+    if (!options.keepTaskCenterOpen) setTaskCenterOpen(false)
     await createEditorReportForChapter(chapterId, { sourceTask: task, sourceRun: run, sourceTaskIndex: taskIndex, autoRevision: true })
   }
 
@@ -1877,12 +1881,16 @@ export default function NovelProjectWorkspace() {
     }
   }
 
-  const generateLongformRepairAuditSummary = async (run: any) => {
+  const generateLongformRepairAuditSummary = async (run: any, options: TaskCenterActionOptions = {}) => {
     try {
       const res = await apiClient.post(`/novel/projects/${projectId}/longform-production-trends/repair-runs/${run.id}/audit-summary`)
       const audit = res.data?.audit || {}
       await loadProjectModules()
       await loadProductionTasks()
+      if (options.keepTaskCenterOpen) {
+        message.success('恢复依据复盘已刷新')
+        return
+      }
       Modal.info({
         title: '长线生产修复闭环审计',
         width: 760,
@@ -1914,7 +1922,7 @@ export default function NovelProjectWorkspace() {
     }
   }
 
-  const executeStyleSampleTaskBookRebuild = async (task: any, run?: any, taskIndex = -1) => {
+  const executeStyleSampleTaskBookRebuild = async (task: any, run?: any, taskIndex = -1, options: TaskCenterActionOptions = {}) => {
     const chapterId = Number(task?.chapter_id || 0)
     const chapterNo = Number(task?.chapter_no || task?.chapterNo || 0)
     const targetChapter = (chapterId ? sortedChapters.find(item => Number(item.id) === chapterId) : null)
@@ -1924,14 +1932,14 @@ export default function NovelProjectWorkspace() {
       message.warning('这个样章任务没有匹配章节')
       return
     }
-    setTaskCenterOpen(false)
+    if (!options.keepTaskCenterOpen) setTaskCenterOpen(false)
     const changed = await applyStyleSampleActionForChapter(targetChapter, 'replace', '已换样章并重审任务书，请重新确认任务书')
     if (changed && run?.id && taskIndex >= 0) {
       await updateRepairTaskStatus(run, taskIndex, 'needs_review', '已换样章并清除任务书确认状态，等待作者重审任务书')
     }
   }
 
-  const executeTypedRepairTask = async (task: any, run?: any, taskIndex = -1) => {
+  const executeTypedRepairTask = async (task: any, run?: any, taskIndex = -1, options: TaskCenterActionOptions = {}) => {
     const taskType = String(task?.task_type || '')
     const chapterId = Number(task?.chapter_id || 0)
     const markNeedsReview = async () => {
@@ -1940,13 +1948,13 @@ export default function NovelProjectWorkspace() {
       }
     }
     if (String(task?.issue_type || '') === 'style_sample_task_book_rebuild') {
-      await executeStyleSampleTaskBookRebuild(task, run, taskIndex)
+      await executeStyleSampleTaskBookRebuild(task, run, taskIndex, options)
       return
     }
     if (taskType === 'repair_skeleton') {
       const outlineId = Number(task?.outline_id || 0)
       const outline = outlineId ? outlines.find(item => Number(item.id) === outlineId) : null
-      setTaskCenterOpen(false)
+      if (!options.keepTaskCenterOpen) setTaskCenterOpen(false)
       if (outline) {
         openEditor('outline', outline)
         message.success('已打开骨架大纲，请补齐目标、冲突、回报和钩子')
@@ -1959,7 +1967,7 @@ export default function NovelProjectWorkspace() {
       return
     }
     if (taskType === 'repair_script_room' || String(task?.source || '') === 'rolling_script_room' || String(task?.issue_type || '') === 'script_room_layer_gap') {
-      setTaskCenterOpen(false)
+      if (!options.keepTaskCenterOpen) setTaskCenterOpen(false)
       const actionArea = String(task?.action_area || '')
       const actionKey = String(task?.action_key || '')
       if (actionArea === 'assets' || actionKey === 'open_story_assets') {
@@ -1975,7 +1983,7 @@ export default function NovelProjectWorkspace() {
       return
     }
     if (taskType === 'repair_assets') {
-      setTaskCenterOpen(false)
+      if (!options.keepTaskCenterOpen) setTaskCenterOpen(false)
       if (String(task?.source || '') === 'storyline_diff_decision') openStoryAssetsWorkspace()
       else openStoryAssetsWorkspace('discoveredAssets')
       await markNeedsReview()
@@ -1985,18 +1993,18 @@ export default function NovelProjectWorkspace() {
     if (taskType === 'repair_materials') {
       if (!selectedModelId) return message.warning('请先选择模型')
       if (!await selectChapterForWriting(chapterId)) return
-      setTaskCenterOpen(false)
+      if (!options.keepTaskCenterOpen) setTaskCenterOpen(false)
       await generateSceneCardsForChapter(chapterId, true)
       await markNeedsReview()
       return
     }
     if (taskType === 'repair_quality') {
-      await startRepairTaskRevision(task, run, taskIndex)
+      await startRepairTaskRevision(task, run, taskIndex, options)
       return
     }
     if (taskType === 'repair_similarity') {
       if (!await selectChapterForWriting(chapterId)) return
-      setTaskCenterOpen(false)
+      if (!options.keepTaskCenterOpen) setTaskCenterOpen(false)
       await runSimilarityForChapter(chapterId)
       await markNeedsReview()
       return
@@ -2019,7 +2027,7 @@ export default function NovelProjectWorkspace() {
       await markNeedsReview()
       return
     }
-    await startRepairTaskRevision(task, run, taskIndex)
+    await startRepairTaskRevision(task, run, taskIndex, options)
   }
 
   const refreshActiveProseQuality = async (source = 'manual_refresh', targetChapter: any = activeChapter) => {
@@ -2085,13 +2093,13 @@ export default function NovelProjectWorkspace() {
       || annotationCategory === 'recovery_evidence'
   }
 
-  const recheckRepairTaskConvergence = async (task: any, run: any, taskIndex: number) => {
+  const recheckRepairTaskConvergence = async (task: any, run: any, taskIndex: number, options: TaskCenterActionOptions = {}) => {
     const chapterId = Number(task?.chapter_id || 0)
     if (!chapterId) return message.warning('这个复查任务没有绑定章节')
     if (!selectedModelId) return message.warning('请先选择模型')
     if (!await selectChapterForWriting(chapterId)) return
     if (!await flushPendingSave()) return
-    setTaskCenterOpen(false)
+    if (!options.keepTaskCenterOpen) setTaskCenterOpen(false)
     setProseQualityLoading(true)
     try {
       const storylineDecisionRecheckMeta = { source: 'storyline_decision_recheck', storyline_decision_closure: true }
@@ -6492,13 +6500,13 @@ export default function NovelProjectWorkspace() {
         onSkipChapterGroup={skipChapterGroupStage}
         onSelectChapter={(chapterId) => { void locateRepairTaskChapter(chapterId) }}
         onOpenChapterEditor={(chapterId) => { void openRepairTaskChapterEditor(chapterId) }}
-        onStartRepairTaskRevision={(task, run, taskIndex) => { void startRepairTaskRevision(task, run, taskIndex) }}
-        onExecuteTypedRepairTask={(task, run, taskIndex) => { void executeTypedRepairTask(task, run, taskIndex) }}
-        onRecheckRepairTask={(task, run, taskIndex) => { void recheckRepairTaskConvergence(task, run, taskIndex) }}
+        onStartRepairTaskRevision={(task, run, taskIndex, options) => startRepairTaskRevision(task, run, taskIndex, options)}
+        onExecuteTypedRepairTask={(task, run, taskIndex, options) => executeTypedRepairTask(task, run, taskIndex, options)}
+        onRecheckRepairTask={(task, run, taskIndex, options) => recheckRepairTaskConvergence(task, run, taskIndex, options)}
         onUpdateRepairTaskStatus={(task, run, status, taskIndex) => { void updateRepairTaskStatus(run, taskIndex, status, task?.message || task?.title || '') }}
         onBulkUpdateRepairTaskStatus={(items, status) => { void bulkUpdateRepairTaskStatus(items, status) }}
         onRecheckStyleSampleTaskBooks={(items) => { void recheckStyleSampleTaskBookReviewTasks(items) }}
-        onGenerateRepairAuditSummary={(run) => { void generateLongformRepairAuditSummary(run) }}
+        onGenerateRepairAuditSummary={(run, options) => generateLongformRepairAuditSummary(run, options)}
         onPauseRun={async (run) => {
           await apiClient.post(`/novel/runs/${run.id}/pause`, { project_id: projectId })
           await loadProjectModules()
