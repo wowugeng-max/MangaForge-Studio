@@ -276,12 +276,45 @@ describe('buildRecoveryEvidenceAuditView', () => {
       resultLabel: '已闭环',
       latestSummary: '单章治理复查通过，证据已写入正文。',
       residualEvidence: [],
+      productionBlockStatus: 'cleared',
+      productionBlockLabel: '生产阻断已解除',
+      productionBlockDetail: '该来源已复检闭环，可作为恢复安全连写依据。',
     }))
     expect(batchGroup).toEqual(expect.objectContaining({
       resultStatus: 'needs_followup',
       resultLabel: '仍需复查',
       latestSummary: '批次复盘仍有恢复依据未落地。',
       residualEvidence: ['第43章读者回报仍未继承'],
+      productionBlockStatus: 'blocked',
+      productionBlockLabel: '暂缓安全连写',
+      productionBlockDetail: '残留依据未闭环，先定位批次任务并完成批次回修，再复盘后继续安全连写。',
+    }))
+  })
+
+  test('marks pending source rechecks as waiting before safe batching resumes', () => {
+    const view = buildRecoveryEvidenceAuditView({
+      recovery_evidence_closure: {
+        status: 'needs_followup',
+        total: 1,
+        resolved: 0,
+        tasks: [
+          {
+            chapter_id: 420,
+            chapter_no: 42,
+            task_index: 0,
+            task_status: 'open',
+            source: 'single_chapter_governance_recheck',
+            source_label: '单章治理复查',
+          },
+        ],
+      },
+    })
+
+    expect(view?.sourceGroups[0]).toEqual(expect.objectContaining({
+      resultStatus: 'pending',
+      productionBlockStatus: 'pending',
+      productionBlockLabel: '等待复检结论',
+      productionBlockDetail: '先完成来源复检，再决定是否恢复安全连写。',
     }))
   })
 

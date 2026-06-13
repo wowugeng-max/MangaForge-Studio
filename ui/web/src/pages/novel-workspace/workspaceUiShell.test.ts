@@ -856,6 +856,15 @@ describe('commercial writing workspace UI shell', () => {
     expect(taskCenter).toContain('setFocusedTaskIndex(sourceTaskIndex)')
   })
 
+  test('shows recovery evidence production block hints after source recheck', () => {
+    const taskCenter = source('TaskCenterDrawer.tsx')
+
+    expect(taskCenter).toContain('productionBlockLabel')
+    expect(taskCenter).toContain('生产阻断已解除')
+    expect(taskCenter).toContain('暂缓安全连写')
+    expect(taskCenter).toContain('等待复检结论')
+  })
+
   test('shows delivery risk convergence in the delivery strip', () => {
     const workspaceCenter = source('WorkspaceCenter.tsx')
     const workspaceCss = source('WorkspaceCenter.css')

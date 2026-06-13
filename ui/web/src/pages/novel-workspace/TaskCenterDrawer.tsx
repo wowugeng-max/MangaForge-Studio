@@ -268,6 +268,9 @@ export type RecoveryEvidenceAuditView = {
     residualEvidence: string[]
     residualAction: string
     residualActionLabel: string
+    productionBlockStatus: 'cleared' | 'blocked' | 'pending'
+    productionBlockLabel: string
+    productionBlockDetail: string
   }[]
   sourceRunId: any
   memoryLabel: string
@@ -375,6 +378,42 @@ function recoveryEvidenceResidualAction(source: string, resultStatus: string, re
   return { action: 'focus_task', label: '定位任务' }
 }
 
+function recoveryEvidenceProductionBlockHint(source: string, resultStatus: string) {
+  if (resultStatus === 'closed') {
+    return {
+      status: 'cleared' as const,
+      label: '生产阻断已解除',
+      detail: '该来源已复检闭环，可作为恢复安全连写依据。',
+    }
+  }
+  if (resultStatus === 'needs_followup') {
+    if (source === 'safe_batch_recovery_recheck') {
+      return {
+        status: 'blocked' as const,
+        label: '暂缓安全连写',
+        detail: '残留依据未闭环，先定位批次任务并完成批次回修，再复盘后继续安全连写。',
+      }
+    }
+    if (source === 'single_chapter_governance_recheck') {
+      return {
+        status: 'blocked' as const,
+        label: '暂缓安全连写',
+        detail: '残留依据未闭环，先回修依据并复检单章，再继续安全连写。',
+      }
+    }
+    return {
+      status: 'blocked' as const,
+      label: '暂缓安全连写',
+      detail: '残留依据未闭环，先定位任务并复检，再继续安全连写。',
+    }
+  }
+  return {
+    status: 'pending' as const,
+    label: '等待复检结论',
+    detail: '先完成来源复检，再决定是否恢复安全连写。',
+  }
+}
+
 function taskIndexOf(task: any, fallbackIndex: number | null = null) {
   const taskIndex = Number(task?.task_index ?? task?.taskIndex)
   if (Number.isFinite(taskIndex)) return taskIndex
@@ -422,6 +461,7 @@ function recoveryEvidenceSourceGroups(tasks: any[], latestTasks: any[] = []) {
           ? 'closed'
           : 'pending'
       const residualAction = recoveryEvidenceResidualAction(group.source, resultStatus, residualEvidence)
+      const productionBlock = recoveryEvidenceProductionBlockHint(group.source, resultStatus)
       return {
         source: group.source,
         label: group.label,
@@ -436,6 +476,9 @@ function recoveryEvidenceSourceGroups(tasks: any[], latestTasks: any[] = []) {
         residualEvidence,
         residualAction: residualAction.action,
         residualActionLabel: residualAction.label,
+        productionBlockStatus: productionBlock.status,
+        productionBlockLabel: productionBlock.label,
+        productionBlockDetail: productionBlock.detail,
       }
     })
     .sort((a, b) => (order[a.source] ?? 99) - (order[b.source] ?? 99) || a.label.localeCompare(b.label))
@@ -935,6 +978,12 @@ function RepairTaskRunSummary({
                         <Tag color={group.resultStatus === 'closed' ? 'green' : group.resultStatus === 'needs_followup' ? 'gold' : 'default'} bordered={false}>
                           {group.resultLabel}
                         </Tag>
+                        <Tag color={group.productionBlockStatus === 'cleared' ? 'green' : group.productionBlockStatus === 'blocked' ? 'red' : 'default'} bordered={false}>
+                          {group.productionBlockLabel}
+                        </Tag>
+                        <Text type={group.productionBlockStatus === 'blocked' ? 'danger' : 'secondary'} style={{ fontSize: 12 }}>
+                          {group.productionBlockDetail}
+                        </Text>
                         {group.latestSummary && (
                           <Text type="secondary" style={{ fontSize: 12 }}>{group.latestSummary}</Text>
                         )}

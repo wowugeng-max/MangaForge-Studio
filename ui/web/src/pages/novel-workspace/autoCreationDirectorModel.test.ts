@@ -1122,8 +1122,50 @@ describe('buildAutoCreationDirectorModel', () => {
       selectedModelId: 12,
       runRecords: [
         {
+          id: 902,
+          run_type: 'longform_production_repair',
+          created_at: '2026-06-14T09:00:00Z',
+          output_ref: {
+            audit_summary: {
+              status: 'closed',
+              recovery_evidence_closure: {
+                status: 'closed',
+                total: 2,
+                resolved: 2,
+                tasks: [
+                  {
+                    chapter_no: 42,
+                    task_index: 0,
+                    task_status: 'resolved',
+                    source: 'single_chapter_governance_recheck',
+                    source_label: '单章治理复查',
+                    recovery_evidence_review: {
+                      status: 'ok',
+                      summary: '单章治理复查通过。',
+                      failed_evidence: [],
+                    },
+                  },
+                  {
+                    chapter_no: 43,
+                    task_index: 1,
+                    task_status: 'resolved',
+                    source: 'safe_batch_recovery_recheck',
+                    source_label: '批次恢复复查',
+                    recovery_evidence_review: {
+                      status: 'ok',
+                      summary: '批次恢复复查通过。',
+                      failed_evidence: [],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        },
+        {
           id: 901,
           run_type: 'longform_production_repair',
+          created_at: '2026-06-14T08:00:00Z',
           status: 'ready',
           input_ref: {
             source: 'style_sample_batch_preflight',
@@ -1177,6 +1219,154 @@ describe('buildAutoCreationDirectorModel', () => {
       '样章任务书复检通过 2 项',
       '第9、10章样章已重审',
     ]))
+    expect(model.batchGuardrail.preflight.inputSnapshot.recovery_evidence_production_gate).toMatchObject({
+      status: 'ok',
+      label: '恢复依据生产闸门',
+      sources: [
+        expect.objectContaining({
+          source: 'single_chapter_governance_recheck',
+          status: 'cleared',
+          status_label: '生产阻断已解除',
+        }),
+        expect.objectContaining({
+          source: 'safe_batch_recovery_recheck',
+          status: 'cleared',
+          status_label: '生产阻断已解除',
+        }),
+      ],
+    })
+    expect(model.batchGuardrail.recommendedAction.payload?.batch_preflight?.recovery_evidence_production_gate).toMatchObject({
+      status: 'ok',
+      source_count: 2,
+    })
+  })
+
+  test('blocks safe batching at the director entry when recovery evidence sources still need recheck', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        topStatus: {
+          ...basePlanning.topStatus,
+          future100Coverage: { ready: true, planned: 100, required: 100, missingChapters: [], label: '100/100' },
+        },
+        futureRoute: [
+          { chapterNo: 8, title: '试炼前夜', chapterTask: '主角拿到试炼资格', conflict: '执事设局阻拦', endingHook: '阵盘亮起第二道裂纹', mainlineProgress: '进入外门试炼核心局', riskTags: [] },
+          { chapterNo: 9, title: '阵盘裂纹', chapterTask: '阵盘异常暴露主角潜力', conflict: '同门围堵试探底牌', endingHook: '内门执事点名关注', mainlineProgress: '让宗门高层第一次注意主角', riskTags: [] },
+          { chapterNo: 10, title: '外门震动', chapterTask: '试炼结果引发宗门震动', conflict: '旧秩序压制新晋黑马', endingHook: '内门招揽提出苛刻条件', mainlineProgress: '打开内门势力线', riskTags: [] },
+        ],
+      },
+      writing: {
+        ...baseWriting,
+        chapterPlanningDesk: {
+          ...baseWriting.chapterPlanningDesk,
+          readiness: 'ready',
+          statusLabel: '本章可写',
+          scenePlanStatus: 'ready',
+          sceneCards: [
+            { title: '压迫升级', goal: '执事逼主角交阵盘' },
+            { title: '反向设局', goal: '主角用阵法拿回主动权' },
+          ],
+          recommendedPlannerAction: { key: 'confirm_plan_and_write_draft', label: '确认并生成' },
+        },
+        topStatus: {
+          ...baseWriting.topStatus,
+          nextActionLabel: '确认并生成',
+          primaryActionKey: 'confirm_plan_and_write_draft',
+        },
+        primaryActionKey: 'confirm_plan_and_write_draft',
+      },
+      activeTasks: [],
+      selectedModelId: 12,
+      runRecords: [
+        {
+          id: 902,
+          run_type: 'longform_production_repair',
+          created_at: '2026-06-14T09:00:00Z',
+          output_ref: {
+            audit_summary: {
+              status: 'closed',
+              governance_recheck_memory: {
+                status: 'closed',
+                label: '治理复查已记录',
+                summary: '恢复依据闭环 2/2，剧情线决策无未关闭项。',
+                evidence: ['第42章对白交锋已补回样章节奏'],
+                failed_evidence: [],
+                watch_items: [],
+                storyline_decision_task_count: 0,
+                source_run_id: 902,
+              },
+              recovery_evidence_closure: {
+                status: 'closed',
+                total: 2,
+                resolved: 2,
+                tasks: [
+                  {
+                    chapter_no: 42,
+                    task_index: 0,
+                    task_status: 'open',
+                    source: 'single_chapter_governance_recheck',
+                    source_label: '单章治理复查',
+                  },
+                  {
+                    chapter_no: 43,
+                    task_index: 1,
+                    task_status: 'needs_review',
+                    source: 'safe_batch_recovery_recheck',
+                    source_label: '批次恢复复查',
+                    recovery_evidence_review: {
+                      status: 'warn',
+                      summary: '批次复盘仍有恢复依据未落地。',
+                      failed_evidence: ['第43章读者回报仍未继承'],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        },
+      ],
+      storyState: {
+        last_updated_chapter: 7,
+        global: {
+          core_promise: '李超用超人蛮力碰撞规则怪谈，张智负责拆解规则。',
+          current_volume_goal: '午夜校园中活过第一轮规则。',
+        },
+      },
+    } as any)
+
+    const recoveryGate = model.batchGuardrail.guardrails.find(item => item.label === '恢复依据生产闸门')
+
+    expect(recoveryGate).toEqual(expect.objectContaining({
+      status: 'block',
+      detail: expect.stringContaining('单章治理复查：等待复检结论'),
+    }))
+    expect(recoveryGate?.detail).toContain('批次恢复复查：暂缓安全连写')
+    expect(recoveryGate?.detail).toContain('第43章读者回报仍未继承')
+    expect(model.batchGuardrail.status).toBe('blocked')
+    expect(model.batchGuardrail.recommendedAction.key).toBe('review_governance_closure')
+    expect(model.batchGuardrail.preflight.inputSnapshot.recovery_evidence_production_gate).toMatchObject({
+      status: 'block',
+      label: '恢复依据生产闸门',
+      sources: [
+        expect.objectContaining({
+          source: 'single_chapter_governance_recheck',
+          status: 'pending',
+          status_label: '等待复检结论',
+        }),
+        expect.objectContaining({
+          source: 'safe_batch_recovery_recheck',
+          status: 'blocked',
+          status_label: '暂缓安全连写',
+          residual_evidence: ['第43章读者回报仍未继承'],
+        }),
+      ],
+    })
+    expect(model.batchGuardrail.recommendedAction.payload?.batch_preflight?.recovery_evidence_production_gate).toMatchObject({
+      status: 'block',
+      source_count: 2,
+    })
+    expect(model.todayCommandDeck.releaseRationale.checks.join('；')).toContain('恢复依据生产闸门')
+    expect(model.productionLicense.status).toBe('blocked')
   })
 
   test('today command deck explains why production is downgraded to one chapter', () => {
@@ -5780,6 +5970,124 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(recoverySignal?.detail).toContain('下一批继续观察样章策略命中率')
     expect(recoveryTask?.recovery_evidence_review?.failed_evidence).toContain('第42章对白交锋已补回样章节奏')
     expect(recoveryTask?.recovery_evidence_review?.failed_evidence).toContain('下一批继续观察样章策略命中率')
+    expect(model.batchReviewQueue.handoff.riskLabels).toContain('恢复依据')
+  })
+
+  test('turns cleared recovery evidence production gate sources into batch repair tasks when the batch stops inheriting them', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        topStatus: {
+          ...basePlanning.topStatus,
+          future100Coverage: { ready: true, planned: 100, required: 100, missingChapters: [], label: '100/100' },
+        },
+      },
+      writing: {
+        ...baseWriting,
+        nextChapter: { ...baseWriting.nextChapter, id: 44, chapterNo: 44, title: '闸门复盘后续' },
+        chapterPlanningDesk: {
+          ...baseWriting.chapterPlanningDesk,
+          readiness: 'ready',
+          statusLabel: '本章可写',
+          scenePlanStatus: 'ready',
+          sceneCards: [{ title: '闸门复盘', goal: '确认入口闸门解除来源是否被本批继承' }],
+          recommendedPlannerAction: { key: 'confirm_plan_and_write_draft', label: '确认并生成' },
+        },
+        topStatus: {
+          ...baseWriting.topStatus,
+          nextActionLabel: '确认并生成',
+          primaryActionKey: 'confirm_plan_and_write_draft',
+        },
+        primaryActionKey: 'confirm_plan_and_write_draft',
+      },
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: { last_updated_chapter: 43 },
+      chapters: [
+        { id: 41, chapter_no: 41, title: '闸门复盘一', chapter_text: '闸门复盘一'.repeat(500) },
+        { id: 42, chapter_no: 42, title: '闸门复盘二', chapter_text: '闸门复盘二'.repeat(500) },
+        { id: 43, chapter_no: 43, title: '闸门复盘三', chapter_text: '闸门复盘三'.repeat(500) },
+      ],
+      reviews: [
+        { id: 4301, chapter_id: 41, review_type: 'prose_quality', created_at: '2026-06-05T01:00:00.000Z', payload: JSON.stringify({ score: 84, passed: true }) },
+        { id: 4302, chapter_id: 42, review_type: 'prose_quality', created_at: '2026-06-05T01:01:00.000Z', payload: JSON.stringify({ score: 85, passed: true }) },
+        { id: 4303, chapter_id: 43, review_type: 'prose_quality', created_at: '2026-06-05T01:02:00.000Z', payload: JSON.stringify({ score: 86, passed: true }) },
+        {
+          id: 4304,
+          chapter_id: 42,
+          review_type: 'style_sample_sync',
+          created_at: '2026-06-05T01:03:00.000Z',
+          payload: JSON.stringify({
+            style_sample_sync: {
+              status: 'warn',
+              label: '风格缺口 2',
+              missed_count: 2,
+              missed: [
+                { label: '对白交锋', text: '入口闸门解除后，本批仍没有继承单章治理复查的对白交锋证据。' },
+                { label: '样章节奏', text: '入口闸门解除后，本批仍没有继承批次恢复复查的样章节奏证据。' },
+              ],
+              copied_phrases: [],
+            },
+          }),
+        },
+      ],
+      runRecords: [
+        {
+          id: 430,
+          run_type: 'batch_generate_prose',
+          created_at: '2026-06-05T00:00:00.000Z',
+          status: 'success',
+          input_ref: JSON.stringify({
+            source: 'auto_creation_safe_batch',
+            safety_limit: 3,
+            batch_preflight: {
+              recovery_evidence_production_gate: {
+                status: 'ok',
+                label: '恢复依据生产闸门',
+                source_count: 2,
+                sources: [
+                  {
+                    source: 'single_chapter_governance_recheck',
+                    label: '单章治理复查',
+                    status: 'cleared',
+                    status_label: '生产阻断已解除',
+                    residual_evidence: [],
+                    task_count: 1,
+                  },
+                  {
+                    source: 'safe_batch_recovery_recheck',
+                    label: '批次恢复复查',
+                    status: 'cleared',
+                    status_label: '生产阻断已解除',
+                    residual_evidence: [],
+                    task_count: 1,
+                  },
+                ],
+              },
+            },
+          }),
+          output_ref: JSON.stringify({
+            total: 3,
+            success: 3,
+            failed: 0,
+            chapters: [
+              { id: 41, chapter_no: 41, title: '闸门复盘一', status: 'success', score: 84, word_count: 3180 },
+              { id: 42, chapter_no: 42, title: '闸门复盘二', status: 'success', score: 85, word_count: 3090 },
+              { id: 43, chapter_no: 43, title: '闸门复盘三', status: 'success', score: 86, word_count: 3021 },
+            ],
+          }),
+        },
+      ],
+    } as any)
+
+    const recoverySignal = model.batchReviewQueue.riskRadar.signals.find(signal => signal.key === 'recovery_evidence')
+    const recoveryTask = model.batchReviewQueue.riskRadar.repairTasks.find((task: any) => task.issue_type === 'recovery_evidence_mismatch')
+
+    expect(model.batchReviewQueue.status).toBe('risk')
+    expect(recoverySignal?.detail).toContain('单章治理复查：生产阻断已解除')
+    expect(recoverySignal?.detail).toContain('批次恢复复查：生产阻断已解除')
+    expect(recoveryTask?.recovery_evidence_review?.failed_evidence).toContain('单章治理复查：生产阻断已解除')
+    expect(recoveryTask?.recovery_evidence_review?.failed_evidence).toContain('批次恢复复查：生产阻断已解除')
     expect(model.batchReviewQueue.handoff.riskLabels).toContain('恢复依据')
   })
 

@@ -1970,6 +1970,142 @@ function recoveryEvidenceSourceSummary(recoveryClosure: AnyRecord | null) {
   ].filter(Boolean).join('；')
 }
 
+function recoveryEvidenceSourceMeta(task: AnyRecord) {
+  const source = text(task?.source || task?.sourceMode)
+  const sourceLabel = firstText(task?.source_label, task?.sourceLabel)
+  if (source === 'single_chapter_governance_recheck') return { source, label: sourceLabel || '单章治理复查' }
+  if (source === 'safe_batch_recovery_recheck') return { source, label: sourceLabel || '批次恢复复查' }
+  if (text(task?.annotation_source || task?.annotationSource) === 'governance_recheck_sync') {
+    return { source: 'single_chapter_governance_recheck', label: sourceLabel || '单章治理复查' }
+  }
+  if (text(task?.source) === 'auto_creation_safe_batch_risk' || task?.segment) {
+    return { source: 'safe_batch_recovery_recheck', label: sourceLabel || '批次恢复复查' }
+  }
+  return { source: source || 'recovery_evidence_recheck', label: sourceLabel || '恢复依据复查' }
+}
+
+function recoveryEvidenceReview(task: AnyRecord) {
+  return task?.recovery_evidence_review || task?.recoveryEvidenceReview || {}
+}
+
+function recoveryEvidenceResidualTexts(task: AnyRecord) {
+  const review = recoveryEvidenceReview(task)
+  const failedItems = [
+    ...arrayValue(review?.failed_items),
+    ...arrayValue(review?.failedItems),
+  ]
+  return compactUniqueText([
+    ...arrayValue(review?.failed_evidence),
+    ...arrayValue(review?.failedEvidence),
+    ...failedItems.map((item: any) => firstText(item?.evidence, item)),
+  ], 100).slice(0, 3)
+}
+
+function recoveryEvidenceSourceTaskStatus(task: AnyRecord) {
+  const review = recoveryEvidenceReview(task)
+  const taskStatus = text(task?.task_status ?? task?.taskStatus ?? task?.status).toLowerCase()
+  const reviewStatus = text(review?.status).toLowerCase()
+  const residualEvidence = recoveryEvidenceResidualTexts(task)
+  const hasResidual = residualEvidence.length > 0 || reviewStatus === 'warn' || taskStatus === 'needs_review'
+  const closed = ['resolved', 'closed', 'done', 'completed'].includes(taskStatus) || reviewStatus === 'ok'
+  const resultStatus = hasResidual ? 'blocked' : closed ? 'cleared' : 'pending'
+  return {
+    resultStatus,
+    residualEvidence,
+  }
+}
+
+function recoveryEvidenceProductionStatusLabel(status: string) {
+  if (status === 'cleared') return '生产阻断已解除'
+  if (status === 'pending') return '等待复检结论'
+  return '暂缓安全连写'
+}
+
+function buildRecoveryEvidenceProductionGate(runRecords: AnyRecord[]) {
+  const auditEntry = latestRepairAuditEntry(runRecords)
+  const audit = auditEntry?.audit || null
+  const closure = audit?.recovery_evidence_closure || audit?.recoveryEvidenceClosure || null
+  const tasks = arrayValue(closure?.tasks)
+  if (!closure || tasks.length === 0) {
+    const detail = '暂无恢复依据来源复检阻断。'
+    return {
+      signal: signal('恢复依据生产闸门', 'ok', detail),
+      snapshot: {
+        status: 'ok',
+        label: '恢复依据生产闸门',
+        detail,
+        source_count: 0,
+        sources: [],
+      },
+    }
+  }
+
+  const groups = new Map<string, {
+    source: string
+    label: string
+    statuses: string[]
+    residualEvidence: string[]
+  }>()
+  for (const task of tasks) {
+    const meta = recoveryEvidenceSourceMeta(task)
+    const status = recoveryEvidenceSourceTaskStatus(task)
+    const group = groups.get(meta.source) || { source: meta.source, label: meta.label, statuses: [], residualEvidence: [] }
+    group.statuses.push(status.resultStatus)
+    group.residualEvidence.push(...status.residualEvidence)
+    groups.set(meta.source, group)
+  }
+
+  const sourceDetails = Array.from(groups.values()).map(group => {
+    const uniqueResiduals = compactUniqueText(group.residualEvidence, 80).slice(0, 2)
+    const sourceStatus = group.statuses.includes('blocked')
+      ? 'blocked'
+      : group.statuses.every(status => status === 'cleared') ? 'cleared' : 'pending'
+    if (sourceStatus === 'cleared') return `${group.label}：生产阻断已解除`
+    if (sourceStatus === 'pending') return `${group.label}：等待复检结论`
+    return `${group.label}：暂缓安全连写${uniqueResiduals.length ? `（${uniqueResiduals.join('；')}）` : ''}`
+  })
+  const blocked = sourceDetails.some(item => item.includes('暂缓安全连写') || item.includes('等待复检结论'))
+  const sources = Array.from(groups.values()).map(group => {
+    const residualEvidence = compactUniqueText(group.residualEvidence, 80).slice(0, 3)
+    const sourceStatus = group.statuses.includes('blocked')
+      ? 'blocked'
+      : group.statuses.every(status => status === 'cleared') ? 'cleared' : 'pending'
+    return {
+      source: group.source,
+      label: group.label,
+      status: sourceStatus,
+      status_label: recoveryEvidenceProductionStatusLabel(sourceStatus),
+      residual_evidence: residualEvidence,
+      task_count: group.statuses.length,
+    }
+  })
+
+  if (!blocked) {
+    const detail = `恢复依据生产闸门：${sourceDetails.join('；')}，可恢复安全连写。`
+    return {
+      signal: signal('恢复依据生产闸门', 'ok', detail),
+      snapshot: {
+        status: 'ok',
+        label: '恢复依据生产闸门',
+        detail,
+        source_count: sources.length,
+        sources,
+      },
+    }
+  }
+  const detail = `恢复依据生产闸门：${sourceDetails.join('；')}。先完成回修/复检，再恢复 2-3 章安全连写。`
+  return {
+    signal: signal('恢复依据生产闸门', 'block', detail),
+    snapshot: {
+      status: 'block',
+      label: '恢复依据生产闸门',
+      detail,
+      source_count: sources.length,
+      sources,
+    },
+  }
+}
+
 function buildGovernanceClosureBrief(args: {
   runRecords: AnyRecord[]
   storylineDecisionGate: AutoCreationStorylineDecisionGate
@@ -2800,6 +2936,15 @@ function recoveryEvidenceRiskMatches(evidence: string, counts: {
   if (normalized.includes('批次任务书') || normalized.includes('开工清单') || normalized.includes('安全批次')) {
     const count = counts.batchPlanRiskTotal + counts.batchChecklistRiskTotal
     if (count > 0) riskLabels.push(`批次计划/开工清单风险 ${count} 项`)
+  }
+  if (normalized.includes('治理复查') || normalized.includes('恢复复查') || normalized.includes('生产阻断已解除')) {
+    const count = counts.payoffDebtTotal
+      + counts.readerPullRiskTotal
+      + counts.storylineRiskTotal
+      + counts.styleSampleRiskTotal
+      + counts.batchPlanRiskTotal
+      + counts.batchChecklistRiskTotal
+    if (count > 0) riskLabels.push(`恢复依据来源继承风险 ${count} 项`)
   }
   return riskLabels
 }
@@ -4062,10 +4207,22 @@ function batchReleaseEvidenceFromPreflight(preflight: AnyRecord | null | undefin
     || preflight?.governance_recheck_memory
     || preflight?.governanceRecheckMemory
     || null
+  const productionGate = parsePayload(preflight?.recovery_evidence_production_gate || preflight?.recoveryEvidenceProductionGate)
+    || preflight?.recovery_evidence_production_gate
+    || preflight?.recoveryEvidenceProductionGate
+    || null
   const recoveryEvidence = [
     ...arrayValue(preflight?.recovery_evidence),
     ...arrayValue(preflight?.recoveryEvidence),
   ].map(item => text(item)).filter(Boolean)
+  const productionGateEvidence = arrayValue(productionGate?.sources)
+    .filter(source => text(source?.status) === 'cleared')
+    .map(source => {
+      const label = firstText(source?.label, source?.source_label, source?.sourceLabel, source?.source)
+      const statusLabel = firstText(source?.status_label, source?.statusLabel, '生产阻断已解除')
+      return label ? `${label}：${statusLabel}` : ''
+    })
+    .filter(Boolean)
   const governanceRecheckEvidence = [
     ...arrayValue(governanceMemory?.evidence),
     ...arrayValue(governanceMemory?.repaired_evidence),
@@ -4076,6 +4233,7 @@ function batchReleaseEvidenceFromPreflight(preflight: AnyRecord | null | undefin
   const evidence = [
     text(closure?.status) === 'ok' ? text(closure?.label, '剧情线决策已闭环') : '',
     ...recoveryEvidence,
+    ...productionGateEvidence,
     ...governanceRecheckEvidence,
   ]
   return Array.from(new Set(evidence.filter(Boolean)))
@@ -5721,6 +5879,7 @@ function buildBatchPreflight(args: {
   storylineDecisionGate: AutoCreationStorylineDecisionGate
   styleSampleBatchPreflight?: AnyRecord | null
   recoveryEvidence?: string[]
+  recoveryEvidenceProductionGate?: AnyRecord | null
 }): AutoCreationBatchPreflight {
   const allowedChapterNos = args.releaseWindow.allowedChapters.map(chapter => Number(chapter.chapterNo || 0)).filter(Boolean)
   const blockedChapterNos = args.releaseWindow.blockedChapters.map(chapter => Number(chapter.chapterNo || 0)).filter(Boolean)
@@ -5782,6 +5941,7 @@ function buildBatchPreflight(args: {
       model_pipeline: SAFE_BATCH_MODEL_PIPELINE,
       warnings,
       ...(arrayValue(args.recoveryEvidence).length ? { recovery_evidence: arrayValue(args.recoveryEvidence) } : {}),
+      ...(args.recoveryEvidenceProductionGate ? { recovery_evidence_production_gate: args.recoveryEvidenceProductionGate } : {}),
       storyline_decision_closure: storylineDecisionClosure,
       ...(governanceRecheckMemory ? { governance_recheck_memory: governanceRecheckMemory } : {}),
       ...(args.styleSampleBatchPreflight?.visible ? { style_sample_batch_preflight: args.styleSampleBatchPreflight } : {}),
@@ -5884,6 +6044,7 @@ function buildBatchGuardrail(args: {
     : args.deliveryRiskGate.status === 'block'
       ? 'block'
       : 'warn'
+  const recoveryEvidenceProductionGate = buildRecoveryEvidenceProductionGate(arrayValue(args.runRecords))
   const hasScenePlan = planningDesk.scenePlanStatus === 'ready' || arrayValue(planningDesk.sceneCards).length > 0
   const currentChapterDelivered = !Boolean(acceptance.visible) && !chapterHandoffVisible
   const chapterPlanIssue = text(arrayValue(planningDesk.reasons)[0], '当前章任务书或场景卡未就绪。')
@@ -5928,6 +6089,7 @@ function buildBatchGuardrail(args: {
       deliveryRiskStatus,
       args.deliveryRiskGate.summary,
     ),
+    recoveryEvidenceProductionGate.signal,
     signal(
       '未来10章规划',
       future10.ready ? 'ok' : 'block',
@@ -6014,7 +6176,12 @@ function buildBatchGuardrail(args: {
   const status: AutoCreationBatchGuardrailStatus = blocking ? 'blocked' : warning ? 'caution' : 'ready'
   let recommendedAction = args.mainAction
 
-  if (blocking?.label === '长线记忆' || warning?.label === '长线记忆') {
+  if (blocking?.label === '恢复依据生产闸门' || warning?.label === '恢复依据生产闸门') {
+    recommendedAction = opsAction('review_governance_closure', '治理复查台', recoveryEvidenceProductionGate.signal.detail, false, {
+      source: 'recovery_evidence_production_gate',
+      detail: recoveryEvidenceProductionGate.signal.detail,
+    })
+  } else if (blocking?.label === '长线记忆' || warning?.label === '长线记忆') {
     recommendedAction = canonRunway.action
   } else if (blocking?.label === '剧情单元' || warning?.label === '剧情单元') {
     recommendedAction = planningAction('update_rolling_plan', storyUnitDetail, '更新滚动规划', {
@@ -6102,6 +6269,7 @@ function buildBatchGuardrail(args: {
     storylineDecisionGate: args.storylineDecisionGate,
     styleSampleBatchPreflight,
     recoveryEvidence,
+    recoveryEvidenceProductionGate: recoveryEvidenceProductionGate.snapshot,
   })
 
   if (status === 'ready') {
@@ -6118,6 +6286,28 @@ function buildBatchGuardrail(args: {
         batch_preflight: preflight.inputSnapshot,
       },
     )
+  }
+  if (preflight.inputSnapshot.recovery_evidence_production_gate) {
+    preflight.inputSnapshot.recovery_evidence_production_gate = {
+      ...preflight.inputSnapshot.recovery_evidence_production_gate,
+      recommended_action: {
+        key: recommendedAction.key,
+        label: recommendedAction.label,
+        description: recommendedAction.description,
+      },
+    }
+    if (recommendedAction.payload) {
+      recommendedAction = {
+        ...recommendedAction,
+        payload: {
+          ...recommendedAction.payload,
+          batch_preflight: {
+            ...(recommendedAction.payload.batch_preflight || preflight.inputSnapshot),
+            recovery_evidence_production_gate: preflight.inputSnapshot.recovery_evidence_production_gate,
+          },
+        },
+      }
+    }
   }
   const briefRecovery = buildNextBatchBriefRecovery({
     status,
