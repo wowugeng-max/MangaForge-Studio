@@ -243,6 +243,14 @@ export function AutoCreationDirectorWorkspace({
   const safeBatchExpansionPolicy = batchPreflight.inputSnapshot?.safe_batch_expansion_policy
     || batchPreflight.inputSnapshot?.safeBatchExpansionPolicy
     || null
+  const safeBatchRecoveryRestoreConfirmation = batchPreflight.inputSnapshot?.safe_batch_recovery_restore_confirmation
+    || batchPreflight.inputSnapshot?.safeBatchRecoveryRestoreConfirmation
+    || null
+  const safeBatchRecoveryRestoreChapterNos = Array.isArray(safeBatchRecoveryRestoreConfirmation?.validation_chapter_nos)
+    ? safeBatchRecoveryRestoreConfirmation.validation_chapter_nos
+    : Array.isArray(safeBatchRecoveryRestoreConfirmation?.validationChapterNos)
+      ? safeBatchRecoveryRestoreConfirmation.validationChapterNos
+      : []
   const safeBatchExpansionFeedback = safeBatchExpansionPolicy?.expansion_feedback
     || safeBatchExpansionPolicy?.expansionFeedback
     || null
@@ -1142,6 +1150,27 @@ export function AutoCreationDirectorWorkspace({
                 <Tag key={step} bordered={false}>{step}</Tag>
               ))}
             </div>
+            {safeBatchRecoveryRestoreConfirmation && (
+              <div className="auto-director-batch-restore-confirmation">
+                <div className="auto-director-batch-memory-anchor-head">
+                  <Text strong>{safeBatchRecoveryRestoreConfirmation.label || '确认恢复5章扩批'}</Text>
+                  <Tag color="green" bordered={false}>3章验证批通过</Tag>
+                  <Tag bordered={false}>
+                    恢复 {Number(safeBatchRecoveryRestoreConfirmation.target_chapter_count || safeBatchRecoveryRestoreConfirmation.targetChapterCount || 5)} 章
+                  </Tag>
+                </div>
+                <Text type="secondary">
+                  {safeBatchRecoveryRestoreConfirmation.summary || '验证批已通过，本批可恢复5章扩批确认。'}
+                </Text>
+                {safeBatchRecoveryRestoreChapterNos.length > 0 && (
+                  <div className="auto-director-batch-memory-chips">
+                    <Tag bordered={false}>
+                      {safeBatchRecoveryRestoreChapterNos.map((chapterNo: any) => `第${chapterNo}章`).join('、')}
+                    </Tag>
+                  </div>
+                )}
+              </div>
+            )}
             {longformMemoryAnchor && (
               <div className="auto-director-batch-memory-anchor">
                 <div className="auto-director-batch-memory-anchor-head">

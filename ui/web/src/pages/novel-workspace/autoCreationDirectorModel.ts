@@ -3940,6 +3940,38 @@ function buildSafeBatchExpansionPolicy(
   }
 }
 
+function buildSafeBatchRecoveryRestoreConfirmation(policy: AnyRecord | null | undefined) {
+  if (!policy?.visible || text(policy.status) !== 'expanded') return null
+  const targetChapterCount = Number(policy.targetChapterCount ?? policy.target_chapter_count ?? 0)
+  if (targetChapterCount < 5) return null
+  const feedback = policy.expansionFeedback || policy.expansion_feedback || null
+  const validation = feedback?.expansionStructureValidationResult
+    || feedback?.expansion_structure_validation_result
+    || null
+  if (!validation || text(validation.status) !== 'ok') return null
+  const riskCount = Number(validation.risk_count ?? validation.riskCount ?? feedback?.risk_count ?? feedback?.riskCount ?? 0)
+  if (riskCount > 0) return null
+  const validationChapterNos = Array.from(new Set([
+    ...arrayValue(validation.validation_chapter_nos),
+    ...arrayValue(validation.validationChapterNos),
+    ...arrayValue(feedback?.latest_chapter_nos),
+    ...arrayValue(feedback?.latestChapterNos),
+  ].map(chapterNo => Number(chapterNo)).filter(chapterNo => chapterNo > 0)))
+  if (!validationChapterNos.length) return null
+  const chapterEvidence = compactChapterNoEvidence(validationChapterNos)
+  const validationSummary = text(validation.summary)
+  return {
+    status: 'ready',
+    label: '确认恢复5章扩批',
+    summary: `3章验证批已通过：${chapterEvidence}核心守恒、显性回报和章末追读稳定，可确认恢复 ${targetChapterCount} 章扩批。`,
+    validation_chapter_nos: validationChapterNos,
+    target_chapter_count: targetChapterCount,
+    risk_count: riskCount,
+    source: 'safe_batch_recovery_validation_result',
+    evidence: [validationSummary].filter(Boolean),
+  }
+}
+
 function safeBatchRecoveryFocusPayload(focusLike: AnyRecord | null | undefined) {
   if (!focusLike) return null
   return {
@@ -5056,7 +5088,9 @@ function buildSafeBatchExpansionStructureRepairEffectiveness(args: {
 }
 
 function isSafeBatchGenerationSource(source: string) {
-  return source === 'auto_creation_safe_batch' || source === 'safe_batch_recovery_validation_batch'
+  return source === 'auto_creation_safe_batch'
+    || source === 'safe_batch_recovery_validation_batch'
+    || source === 'safe_batch_recovery_restore_five_batch'
 }
 
 function buildSafeBatchExpansionFeedback(args: {
@@ -9614,6 +9648,7 @@ function buildBatchPreflight(args: {
   recoveryEvidenceSourceRiskProfile?: AnyRecord | null
   strengthenedRepairAcceptanceTrend?: AutoCreationStrengthenedRepairAcceptanceTrend | null
   safeBatchExpansionPolicy?: AnyRecord | null
+  safeBatchRecoveryRestoreConfirmation?: AnyRecord | null
 }): AutoCreationBatchPreflight {
   const allowedChapterNos = args.releaseWindow.allowedChapters.map(chapter => Number(chapter.chapterNo || 0)).filter(Boolean)
   const blockedChapterNos = args.releaseWindow.blockedChapters.map(chapter => Number(chapter.chapterNo || 0)).filter(Boolean)
@@ -9684,6 +9719,9 @@ function buildBatchPreflight(args: {
       } : {}),
       ...(args.safeBatchExpansionPolicy?.visible ? {
         safe_batch_expansion_policy: safeBatchExpansionPolicySnapshot(args.safeBatchExpansionPolicy),
+      } : {}),
+      ...(args.safeBatchRecoveryRestoreConfirmation ? {
+        safe_batch_recovery_restore_confirmation: args.safeBatchRecoveryRestoreConfirmation,
       } : {}),
       ...(expansionStructureVerification ? {
         safe_batch_expansion_structure_verification: expansionStructureVerification,
@@ -9806,6 +9844,7 @@ function buildBatchGuardrail(args: {
     reviews: arrayValue(args.reviews),
   })
   const safeBatchExpansionPolicy = buildSafeBatchExpansionPolicy(strengthenedRepairAcceptanceTrend, safeBatchExpansionFeedback)
+  const safeBatchRecoveryRestoreConfirmation = buildSafeBatchRecoveryRestoreConfirmation(safeBatchExpansionPolicy)
   const safeBatchRecoveryAction = safeBatchRecoveryRoadmapRecommendedAction(safeBatchExpansionPolicy.recoveryRoadmap)
   const expansionStructureVerificationSeed = buildResolvedSafeBatchExpansionStructureVerificationSeed(arrayValue(args.runRecords))
   const expansionStructureValidationActive = Boolean(
@@ -10127,6 +10166,7 @@ function buildBatchGuardrail(args: {
     recoveryEvidenceSourceRiskProfile,
     strengthenedRepairAcceptanceTrend,
     safeBatchExpansionPolicy,
+    safeBatchRecoveryRestoreConfirmation,
   })
 
   if (status === 'ready') {
@@ -10134,15 +10174,24 @@ function buildBatchGuardrail(args: {
       && safeBatchExpansionPolicy.status === 'recovering'
       && Number(safeBatchExpansionPolicy.targetChapterCount || 0) > 1
       && Number(safeBatchExpansionPolicy.targetChapterCount || 0) <= Number(safeBatchExpansionPolicy.baseChapterCount || 3)
+    const recoveryRestoreBatchActive = !safeBatchRecoveryAction
+      && Boolean(safeBatchRecoveryRestoreConfirmation)
+      && safeChapterCount >= Number(safeBatchRecoveryRestoreConfirmation?.target_chapter_count || 5)
     const startBatchSource = recoveryValidationBatchActive
       ? 'safe_batch_recovery_validation_batch'
-      : 'auto_creation_safe_batch'
+      : recoveryRestoreBatchActive
+        ? 'safe_batch_recovery_restore_five_batch'
+        : 'auto_creation_safe_batch'
     const startBatchLabel = recoveryValidationBatchActive
       ? `启动${safeChapterCount}章验证批`
-      : '开始安全连写'
+      : recoveryRestoreBatchActive
+        ? '确认恢复5章扩批'
+        : '开始安全连写'
     const startBatchDescription = recoveryValidationBatchActive
       ? `安全连写恢复路线图已没有黄色修复层；先启动${safeChapterCount}章验证批，逐章回填核心守恒、读者回报、追读拉力和结构决策执行，再判断是否恢复 ${safeBatchExpansionPolicy.expandedChapterCount} 章。`
-      : `按护栏建议连续生成 ${safeChapterCount} 章；每章仍会走字数门禁、质检修订和故事状态回填。`
+      : recoveryRestoreBatchActive
+        ? `${safeBatchRecoveryRestoreConfirmation?.summary} 点击后进入 ${safeChapterCount} 章预执行确认，每章继续保留核心守恒、显性回报、章末追读和结构决策执行回填。`
+        : `按护栏建议连续生成 ${safeChapterCount} 章；每章仍会走字数门禁、质检修订和故事状态回填。`
     recommendedAction = safeBatchRecoveryAction || opsAction(
       'start_safe_batch_generation',
       startBatchLabel,
@@ -10153,6 +10202,9 @@ function buildBatchGuardrail(args: {
         safety_limit: safeChapterCount,
         allowed_chapter_nos: preflight.allowedChapterNos,
         next_batch_brief: nextBatchBrief,
+        ...(recoveryRestoreBatchActive && safeBatchRecoveryRestoreConfirmation ? {
+          recovery_restore_confirmation: safeBatchRecoveryRestoreConfirmation,
+        } : {}),
         batch_preflight: preflight.inputSnapshot,
       },
     )
@@ -10905,24 +10957,47 @@ function buildProductionLicense(args: {
   if (args.batchGuardrail.status === 'ready' && args.batchGuardrail.recommendedAction.key === 'start_safe_batch_generation') {
     const recoveryEvidenceReleaseSummary = args.batchGuardrail.preflight.inputSnapshot?.recovery_evidence_release_summary || null
     const recoveryEvidenceReleaseReasons = arrayValue(recoveryEvidenceReleaseSummary?.evidence).slice(0, 3)
-    const isRecoveryValidationBatch = text(args.batchGuardrail.recommendedAction.payload?.source) === 'safe_batch_recovery_validation_batch'
+    const actionSource = text(args.batchGuardrail.recommendedAction.payload?.source)
+    const isRecoveryValidationBatch = actionSource === 'safe_batch_recovery_validation_batch'
+    const isRecoveryRestoreBatch = actionSource === 'safe_batch_recovery_restore_five_batch'
+    const recoveryRestoreConfirmation = args.batchGuardrail.recommendedAction.payload?.recovery_restore_confirmation
+      || args.batchGuardrail.preflight.inputSnapshot?.safe_batch_recovery_restore_confirmation
+      || null
+    const recoveryRestoreChapterNos = arrayValue(recoveryRestoreConfirmation?.validation_chapter_nos || recoveryRestoreConfirmation?.validationChapterNos)
+      .map(chapterNo => Number(chapterNo))
+      .filter(chapterNo => chapterNo > 0)
+    const recoveryRestoreSummary = text(
+      recoveryRestoreConfirmation?.summary,
+      recoveryRestoreChapterNos.length
+        ? `3章验证批已通过：${compactChapterNoEvidence(recoveryRestoreChapterNos)}核心守恒、显性回报和章末追读稳定，可确认恢复 ${args.batchGuardrail.safeChapterCount} 章扩批。`
+        : `3章验证批已通过，可确认恢复 ${args.batchGuardrail.safeChapterCount} 章扩批。`,
+    )
     return {
       status: 'batch_allowed',
       label: '生产许可',
-      modeLabel: isRecoveryValidationBatch ? `${args.batchGuardrail.safeChapterCount}章验证批` : '小批量连写',
-      summary: isRecoveryValidationBatch
-        ? `安全连写路线图已清掉黄色修复层，当前放行 ${args.batchGuardrail.safeChapterCount} 章验证批；每章继续回填核心守恒、读者回报、追读拉力和结构执行结果。`
-        : `当前长线材料、交稿风险和下一批任务书已通过检查，可按安全连写放行 ${args.batchGuardrail.safeChapterCount} 章。`,
+      modeLabel: isRecoveryRestoreBatch
+        ? '恢复5章扩批'
+        : isRecoveryValidationBatch ? `${args.batchGuardrail.safeChapterCount}章验证批` : '小批量连写',
+      summary: isRecoveryRestoreBatch
+        ? recoveryRestoreSummary
+        : isRecoveryValidationBatch
+          ? `安全连写路线图已清掉黄色修复层，当前放行 ${args.batchGuardrail.safeChapterCount} 章验证批；每章继续回填核心守恒、读者回报、追读拉力和结构执行结果。`
+          : `当前长线材料、交稿风险和下一批任务书已通过检查，可按安全连写放行 ${args.batchGuardrail.safeChapterCount} 章。`,
       safeChapterCount: args.batchGuardrail.safeChapterCount,
       reasons: [
         '长线材料可用',
         '交稿风险已清',
         '剧情线决策已闭环',
         '下一批任务书可执行',
+        ...(isRecoveryRestoreBatch ? ['3章验证批通过'] : []),
         ...(isRecoveryValidationBatch ? ['安全连写路线图已清掉黄色修复层'] : []),
+        ...arrayValue(recoveryRestoreConfirmation?.evidence).slice(0, 2),
         ...recoveryEvidenceReleaseReasons,
       ],
-      badges: [isRecoveryValidationBatch ? `验证 ${args.batchGuardrail.safeChapterCount}章` : `安全 ${args.batchGuardrail.safeChapterCount}章`, args.batchGuardrail.nextBatchBrief.chapterRangeLabel].filter(Boolean),
+      badges: [
+        isRecoveryRestoreBatch ? '恢复5章' : isRecoveryValidationBatch ? `验证 ${args.batchGuardrail.safeChapterCount}章` : `安全 ${args.batchGuardrail.safeChapterCount}章`,
+        args.batchGuardrail.nextBatchBrief.chapterRangeLabel,
+      ].filter(Boolean),
       nextAction: args.batchGuardrail.recommendedAction,
     }
   }

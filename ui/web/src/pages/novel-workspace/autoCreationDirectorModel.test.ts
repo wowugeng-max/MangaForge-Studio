@@ -3942,7 +3942,27 @@ describe('buildAutoCreationDirectorModel', () => {
     })
     expect(model.batchGuardrail.safeChapterCount).toBe(5)
     expect(model.batchGuardrail.recommendedAction.key).toBe('start_safe_batch_generation')
-    expect(model.batchGuardrail.recommendedAction.description).toContain('连续生成 5 章')
+    expect(model.batchGuardrail.recommendedAction.label).toBe('确认恢复5章扩批')
+    expect(model.batchGuardrail.recommendedAction.description).toContain('第50、51、52章')
+    expect(model.batchGuardrail.recommendedAction.payload).toMatchObject({
+      source: 'safe_batch_recovery_restore_five_batch',
+      safety_limit: 5,
+      recovery_restore_confirmation: {
+        status: 'ready',
+        label: '确认恢复5章扩批',
+        validation_chapter_nos: validationChapterNos,
+        target_chapter_count: 5,
+      },
+      batch_preflight: {
+        safe_batch_recovery_restore_confirmation: {
+          status: 'ready',
+          validation_chapter_nos: validationChapterNos,
+          target_chapter_count: 5,
+        },
+      },
+    })
+    expect(model.productionLicense.modeLabel).toBe('恢复5章扩批')
+    expect(model.productionLicense.summary).toContain('第50、51、52章')
   })
 
   test('keeps small-batch recovery when the structure validation batch fails', () => {
