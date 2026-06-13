@@ -748,6 +748,7 @@ describe('buildSafeBatchExpansionPolicySnapshot', () => {
       expansionFeedback: null,
       recoveryRoadmap: null,
       recoveryValidation: null,
+      recoveryRestoreStabilityLane: null,
     })
   })
 
@@ -880,6 +881,50 @@ describe('buildSafeBatchExpansionPolicySnapshot', () => {
       stablePassStreak: 1,
     })
     expect(snapshot?.expansionFeedback?.recoveryRestoreStabilityEvidence?.summary).toContain('恢复5章扩批稳定观察通过')
+  })
+
+  test('keeps recovery restore stability lane for task-center batch review filtering', () => {
+    const snapshot = buildSafeBatchExpansionPolicySnapshot({
+      safe_batch_recovery_restore_stability_lane: {
+        visible: true,
+        status: 'observing',
+        label: '5章观察批',
+        source: 'recovery_restore_stability_evidence',
+        stable_pass_streak: 1,
+        required_stable_pass_streak: 2,
+        default_five_chapter_ready: false,
+        restore_chapter_nos: [53, 54, 55, 56, 57],
+        validation_chapter_nos: [50, 51, 52],
+        summary: '恢复5章扩批已稳定 1/2 批，继续观察。',
+      },
+      safe_batch_expansion_policy: {
+        status: 'expanded',
+        label: '强化扩批规则',
+        summary: '恢复5章扩批已进入观察批。',
+        target_chapter_count: 5,
+        base_chapter_count: 3,
+        expanded_chapter_count: 5,
+        required_pass_streak: 3,
+        pass_streak: 3,
+        accepted_batch_count: 3,
+        failed_batch_count: 1,
+        latest_status: 'ok',
+      },
+    })
+
+    expect(snapshot?.recoveryRestoreStabilityLane).toMatchObject({
+      visible: true,
+      status: 'observing',
+      label: '5章观察批',
+      source: 'recovery_restore_stability_evidence',
+      stablePassStreak: 1,
+      requiredStablePassStreak: 2,
+      defaultFiveChapterReady: false,
+      restoreChapterNos: [53, 54, 55, 56, 57],
+      validationChapterNos: [50, 51, 52],
+      taskCenterFilterLabel: '批次复盘筛选：5章观察批',
+    })
+    expect(snapshot?.recoveryRestoreStabilityLane?.summary).toContain('继续观察')
   })
 
   test('keeps expansion structure validation trend in the task-center snapshot', () => {

@@ -1254,6 +1254,21 @@ export type SafeBatchExpansionPolicySnapshot = {
   expansionFeedback: SafeBatchExpansionFeedbackSnapshot | null
   recoveryRoadmap: SafeBatchRecoveryRoadmapSnapshot | null
   recoveryValidation: SafeBatchRecoveryValidationSnapshot | null
+  recoveryRestoreStabilityLane: SafeBatchRecoveryRestoreStabilityLaneSnapshot | null
+}
+
+export type SafeBatchRecoveryRestoreStabilityLaneSnapshot = {
+  visible: boolean
+  status: string
+  label: string
+  source: string
+  stablePassStreak: number
+  requiredStablePassStreak: number
+  defaultFiveChapterReady: boolean
+  restoreChapterNos: number[]
+  validationChapterNos: number[]
+  summary: string
+  taskCenterFilterLabel: string
 }
 
 export type SafeBatchRecoveryRoadmapSnapshot = {
@@ -1640,6 +1655,13 @@ export function buildSafeBatchExpansionPolicySnapshot(batchPreflight: any): Safe
   const expandedChapterCount = Number(policy?.expanded_chapter_count ?? policy?.expandedChapterCount ?? targetChapterCount)
   const expansionFeedback = buildSafeBatchExpansionFeedbackSnapshot(policy?.expansion_feedback || policy?.expansionFeedback)
   const recoveryRoadmap = buildSafeBatchRecoveryRoadmapSnapshot(policy?.safe_batch_recovery_roadmap || policy?.safeBatchRecoveryRoadmap || policy?.recoveryRoadmap)
+  const recoveryRestoreStabilityLane = buildSafeBatchRecoveryRestoreStabilityLaneSnapshot(
+    batchPreflight?.safe_batch_recovery_restore_stability_lane
+      || batchPreflight?.safeBatchRecoveryRestoreStabilityLane
+      || policy?.safe_batch_recovery_restore_stability_lane
+      || policy?.safeBatchRecoveryRestoreStabilityLane,
+    expansionFeedback?.recoveryRestoreStabilityEvidence || null,
+  )
 
   return {
     visible: true,
@@ -1657,6 +1679,7 @@ export function buildSafeBatchExpansionPolicySnapshot(batchPreflight: any): Safe
     expansionFeedback,
     recoveryRoadmap,
     recoveryValidation: buildSafeBatchRecoveryValidationSnapshot(expansionFeedback, recoveryRoadmap, expandedChapterCount),
+    recoveryRestoreStabilityLane,
   }
 }
 
@@ -1870,6 +1893,45 @@ function buildSafeBatchRecoveryRestoreStabilityEvidenceSnapshot(evidenceLike: an
     summary: compactEvidenceText(evidence?.summary || ''),
   }
   if (!snapshot.status && !snapshot.source && !snapshot.restoreChapterNos.length && !snapshot.validationChapterNos.length && !snapshot.summary) return null
+  return snapshot
+}
+
+function buildSafeBatchRecoveryRestoreStabilityLaneSnapshot(
+  laneLike: any,
+  fallbackEvidence?: SafeBatchRecoveryRestoreStabilityEvidenceSnapshot | null,
+): SafeBatchRecoveryRestoreStabilityLaneSnapshot | null {
+  const lane = parseJsonValue(laneLike) || laneLike || null
+  if (!lane || lane.visible === false) return null
+  const stablePassStreak = Number(lane?.stable_pass_streak ?? lane?.stablePassStreak ?? fallbackEvidence?.stablePassStreak ?? 0)
+  const requiredStablePassStreak = Number(lane?.required_stable_pass_streak ?? lane?.requiredStablePassStreak ?? 2)
+  const normalizedStablePassStreak = Number.isFinite(stablePassStreak) ? stablePassStreak : 0
+  const normalizedRequiredStablePassStreak = Number.isFinite(requiredStablePassStreak) && requiredStablePassStreak > 0
+    ? requiredStablePassStreak
+    : 2
+  const rawStatus = compactEvidenceText(lane?.status || '')
+  const explicitDefaultFiveChapterReady = lane?.default_five_chapter_ready ?? lane?.defaultFiveChapterReady
+  const defaultFiveChapterReady = explicitDefaultFiveChapterReady === undefined || explicitDefaultFiveChapterReady === null
+    ? rawStatus === 'ready' || normalizedStablePassStreak >= normalizedRequiredStablePassStreak
+    : Boolean(explicitDefaultFiveChapterReady)
+  const status = rawStatus || (defaultFiveChapterReady ? 'ready' : 'observing')
+  const label = compactEvidenceText(lane?.label || (defaultFiveChapterReady ? '默认5章档位' : '5章观察批'))
+  const restoreChapterNos = normalizeChapterNos(lane?.restore_chapter_nos || lane?.restoreChapterNos)
+  const validationChapterNos = normalizeChapterNos(lane?.validation_chapter_nos || lane?.validationChapterNos)
+  const summary = compactEvidenceText(lane?.summary || fallbackEvidence?.summary || '')
+  const snapshot = {
+    visible: true,
+    status,
+    label,
+    source: compactEvidenceText(lane?.source || fallbackEvidence?.source || ''),
+    stablePassStreak: normalizedStablePassStreak,
+    requiredStablePassStreak: normalizedRequiredStablePassStreak,
+    defaultFiveChapterReady,
+    restoreChapterNos: restoreChapterNos.length ? restoreChapterNos : fallbackEvidence?.restoreChapterNos || [],
+    validationChapterNos: validationChapterNos.length ? validationChapterNos : fallbackEvidence?.validationChapterNos || [],
+    summary,
+    taskCenterFilterLabel: compactEvidenceText(lane?.task_center_filter_label || lane?.taskCenterFilterLabel || `批次复盘筛选：${label}`),
+  }
+  if (!snapshot.status && !snapshot.label && !snapshot.restoreChapterNos.length && !snapshot.validationChapterNos.length && !snapshot.summary) return null
   return snapshot
 }
 
@@ -2122,12 +2184,26 @@ function BatchProseRunSummary({ run }: { run: any }) {
   const expansionStructureDecisionTrend = expansionFeedback?.structureDecisionTrend || null
   const expansionStructureDecisionRequirement = expansionStructureDecisionTrend?.topFailedRequirement || null
   const recoveryRestoreStability = expansionFeedback?.recoveryRestoreStabilityEvidence || null
-  const recoveryRestoreBatchText = recoveryRestoreStability?.restoreChapterNos.length
-    ? `恢复批 ${compactChapterNos(recoveryRestoreStability.restoreChapterNos)}`
+  const recoveryRestoreStabilityLane = expansionPolicy?.recoveryRestoreStabilityLane
+    || buildSafeBatchRecoveryRestoreStabilityLaneSnapshot(
+      input.default_five_chapter_lane
+        || input.defaultFiveChapterLane
+        || input.recovery_restore_stability_evidence
+        || input.recoveryRestoreStabilityEvidence,
+      recoveryRestoreStability,
+    )
+  const recoveryRestoreReview = recoveryRestoreStabilityLane || recoveryRestoreStability
+  const recoveryRestoreBatchText = recoveryRestoreReview?.restoreChapterNos.length
+    ? `恢复批 ${compactChapterNos(recoveryRestoreReview.restoreChapterNos)}`
     : ''
-  const recoveryRestoreValidationText = recoveryRestoreStability?.validationChapterNos.length
-    ? `验证 ${compactChapterNos(recoveryRestoreStability.validationChapterNos)}`
+  const recoveryRestoreValidationText = recoveryRestoreReview?.validationChapterNos.length
+    ? `验证 ${compactChapterNos(recoveryRestoreReview.validationChapterNos)}`
     : ''
+  const recoveryRestoreDecisionLabel = recoveryRestoreStabilityLane?.label
+    || (recoveryRestoreStability && recoveryRestoreStability.stablePassStreak >= 2 ? '默认5章档位' : '继续观察 1-2 批')
+  const recoveryRestoreSummary = recoveryRestoreStabilityLane?.summary
+    || recoveryRestoreStability?.summary
+    || '恢复 5 章后的稳定观察已沉淀，可继续作为扩批默认档位依据。'
   const recoveryRoadmap = expansionPolicy?.recoveryRoadmap || null
   const recoveryValidation = expansionPolicy?.recoveryValidation || null
 
@@ -2255,25 +2331,37 @@ function BatchProseRunSummary({ run }: { run: any }) {
                         漏项 {expansionStructureDecisionRequirement.label}{expansionStructureDecisionRequirement.count}
                       </Tag>
                     )}
-                    {recoveryRestoreStability && (
+                    {recoveryRestoreReview && (
                       <Tag color="green" bordered={false}>长期扩批稳定证据</Tag>
                     )}
-                    {recoveryRestoreStability && (
-                      <Tag bordered={false}>
-                        {recoveryRestoreStability.stablePassStreak >= 2 ? '默认5章档位' : '继续观察 1-2 批'}
+                    {recoveryRestoreStabilityLane && (
+                      <Tag color="blue" bordered={false}>批次复盘筛选</Tag>
+                    )}
+                    {recoveryRestoreReview && (
+                      <Tag color={recoveryRestoreStabilityLane?.defaultFiveChapterReady ? 'green' : undefined} bordered={false}>
+                        {recoveryRestoreDecisionLabel}
                       </Tag>
                     )}
                   </Space>
                   <Text type="secondary" style={{ fontSize: 12 }}>{expansionFeedback.summary}</Text>
-                  {recoveryRestoreStability && (
+                  {recoveryRestoreReview && (
                     <Space direction="vertical" size={3} style={{ width: '100%' }}>
                       <Space wrap size={[4, 4]}>
+                        {recoveryRestoreStabilityLane && (
+                          <Tag color="blue" bordered={false}>{recoveryRestoreStabilityLane.taskCenterFilterLabel}</Tag>
+                        )}
                         {recoveryRestoreBatchText && <Tag bordered={false}>{recoveryRestoreBatchText}</Tag>}
                         {recoveryRestoreValidationText && <Tag bordered={false}>{recoveryRestoreValidationText}</Tag>}
-                        <Tag color="green" bordered={false}>稳定连过 {recoveryRestoreStability.stablePassStreak}</Tag>
+                        {recoveryRestoreStabilityLane ? (
+                          <Tag color="green" bordered={false}>
+                            稳定连过 {recoveryRestoreStabilityLane.stablePassStreak}/{recoveryRestoreStabilityLane.requiredStablePassStreak}
+                          </Tag>
+                        ) : (
+                          <Tag color="green" bordered={false}>稳定连过 {recoveryRestoreReview.stablePassStreak}</Tag>
+                        )}
                       </Space>
                       <Text type="secondary" style={{ fontSize: 12 }}>
-                        {recoveryRestoreStability.summary || '恢复 5 章后的稳定观察已沉淀，可继续作为扩批默认档位依据。'}
+                        {recoveryRestoreSummary}
                       </Text>
                     </Space>
                   )}

@@ -269,18 +269,43 @@ export function AutoCreationDirectorWorkspace({
   const safeBatchRecoveryRestoreStabilityEvidence = safeBatchExpansionFeedback?.recovery_restore_stability_evidence
     || safeBatchExpansionFeedback?.recoveryRestoreStabilityEvidence
     || null
+  const safeBatchRecoveryRestoreStabilityLane = batchPreflight.inputSnapshot?.safe_batch_recovery_restore_stability_lane
+    || batchPreflight.inputSnapshot?.safeBatchRecoveryRestoreStabilityLane
+    || model.batchGuardrail.recommendedAction.payload?.recovery_restore_stability_evidence
+    || model.batchGuardrail.recommendedAction.payload?.default_five_chapter_lane
+    || null
+  const safeBatchRecoveryRestoreStabilityReview = safeBatchRecoveryRestoreStabilityLane
+    || safeBatchRecoveryRestoreStabilityEvidence
+    || null
+  const safeBatchRecoveryRestoreLaneReadyFlag = safeBatchRecoveryRestoreStabilityLane?.default_five_chapter_ready
+    ?? safeBatchRecoveryRestoreStabilityLane?.defaultFiveChapterReady
+  const safeBatchRecoveryRestoreLaneReady = safeBatchRecoveryRestoreLaneReadyFlag === undefined || safeBatchRecoveryRestoreLaneReadyFlag === null
+    ? String(safeBatchRecoveryRestoreStabilityLane?.status || '') === 'ready'
+    : Boolean(safeBatchRecoveryRestoreLaneReadyFlag)
+  const safeBatchRecoveryRestoreLaneLabel = String(
+    safeBatchRecoveryRestoreStabilityLane?.label
+      || (safeBatchRecoveryRestoreLaneReady ? '默认5章档位' : '5章观察批'),
+  )
+  const safeBatchRecoveryRestoreRequiredStreakRaw = Number(
+    safeBatchRecoveryRestoreStabilityLane?.required_stable_pass_streak
+      ?? safeBatchRecoveryRestoreStabilityLane?.requiredStablePassStreak
+      ?? 2,
+  )
+  const safeBatchRecoveryRestoreRequiredStreak = Number.isFinite(safeBatchRecoveryRestoreRequiredStreakRaw) && safeBatchRecoveryRestoreRequiredStreakRaw > 0
+    ? safeBatchRecoveryRestoreRequiredStreakRaw
+    : 2
   const safeBatchRecoveryRestoreStabilityStreak = Number(
-    safeBatchRecoveryRestoreStabilityEvidence?.stable_pass_streak
-      ?? safeBatchRecoveryRestoreStabilityEvidence?.stablePassStreak
+    safeBatchRecoveryRestoreStabilityReview?.stable_pass_streak
+      ?? safeBatchRecoveryRestoreStabilityReview?.stablePassStreak
       ?? 0,
   )
   const safeBatchRecoveryRestoreChapterNosForStability = safeBatchChapterNos(
-    safeBatchRecoveryRestoreStabilityEvidence?.restore_chapter_nos
-      || safeBatchRecoveryRestoreStabilityEvidence?.restoreChapterNos,
+    safeBatchRecoveryRestoreStabilityReview?.restore_chapter_nos
+      || safeBatchRecoveryRestoreStabilityReview?.restoreChapterNos,
   )
   const safeBatchRecoveryRestoreValidationNosForStability = safeBatchChapterNos(
-    safeBatchRecoveryRestoreStabilityEvidence?.validation_chapter_nos
-      || safeBatchRecoveryRestoreStabilityEvidence?.validationChapterNos,
+    safeBatchRecoveryRestoreStabilityReview?.validation_chapter_nos
+      || safeBatchRecoveryRestoreStabilityReview?.validationChapterNos,
   )
   const safeBatchRecoveryRestoreBatchText = safeBatchChapterNosText(safeBatchRecoveryRestoreChapterNosForStability)
   const safeBatchRecoveryRestoreValidationText = safeBatchChapterNosText(safeBatchRecoveryRestoreValidationNosForStability)
@@ -1336,37 +1361,50 @@ export function AutoCreationDirectorWorkspace({
                       -&gt;{Number(safeBatchExpansionStructureEffectiveness.current_failure_reason_count || safeBatchExpansionStructureEffectiveness.currentFailureReasonCount || 0)}
                     </Tag>
                   )}
-                  {safeBatchRecoveryRestoreStabilityEvidence && (
+                  {safeBatchRecoveryRestoreStabilityReview && (
                     <Tag color="green" bordered={false}>长期扩批稳定证据</Tag>
                   )}
-                  {safeBatchRecoveryRestoreStabilityEvidence && (
-                    <Tag bordered={false}>
-                      {safeBatchRecoveryRestoreStabilityStreak >= 2 ? '默认5章档位' : '继续观察 1-2 批'}
+                  {safeBatchRecoveryRestoreStabilityLane && (
+                    <Tag color="blue" bordered={false}>批次复盘筛选</Tag>
+                  )}
+                  {safeBatchRecoveryRestoreStabilityReview && (
+                    <Tag color={safeBatchRecoveryRestoreLaneReady ? 'green' : undefined} bordered={false}>
+                      {safeBatchRecoveryRestoreStabilityLane
+                        ? safeBatchRecoveryRestoreLaneLabel
+                        : safeBatchRecoveryRestoreStabilityStreak >= 2 ? '默认5章档位' : '继续观察 1-2 批'}
                     </Tag>
                   )}
                 </div>
                 <Text type="secondary">
                   {safeBatchExpansionFeedback.summary || '扩批分段复盘结果已接入下一轮安全连写策略。'}
                 </Text>
-                {safeBatchRecoveryRestoreStabilityEvidence && (
+                {safeBatchRecoveryRestoreStabilityReview && (
                   <div className="auto-director-batch-restore-stability">
                     <div className="auto-director-batch-memory-anchor-head">
                       <Text strong>长期扩批稳定证据</Text>
+                      {safeBatchRecoveryRestoreStabilityLane && (
+                        <Tag color="blue" bordered={false}>批次复盘筛选</Tag>
+                      )}
                       <Tag color="green" bordered={false}>
-                        {String(safeBatchRecoveryRestoreStabilityEvidence.status || '') === 'passed' ? '恢复批通过' : '恢复批观察'}
+                        {String(safeBatchRecoveryRestoreStabilityReview.status || '') === 'passed' ? '恢复批通过' : '恢复批观察'}
                       </Tag>
                       <Tag bordered={false}>
-                        {safeBatchRecoveryRestoreStabilityStreak >= 2 ? '默认5章档位' : '继续观察 1-2 批'}
+                        {safeBatchRecoveryRestoreStabilityLane
+                          ? safeBatchRecoveryRestoreLaneLabel
+                          : safeBatchRecoveryRestoreStabilityStreak >= 2 ? '默认5章档位' : '继续观察 1-2 批'}
                       </Tag>
                     </div>
                     <Text type="secondary">
-                      {safeBatchRecoveryRestoreStabilityEvidence.summary || '恢复 5 章后的稳定观察已沉淀，可继续作为扩批默认档位依据。'}
+                      {safeBatchRecoveryRestoreStabilityReview.summary || '恢复 5 章后的稳定观察已沉淀，可继续作为扩批默认档位依据。'}
                     </Text>
                     {(safeBatchRecoveryRestoreBatchText || safeBatchRecoveryRestoreValidationText) && (
                       <div className="auto-director-batch-memory-chips">
                         {safeBatchRecoveryRestoreBatchText && <Tag bordered={false}>恢复批 {safeBatchRecoveryRestoreBatchText}</Tag>}
                         {safeBatchRecoveryRestoreValidationText && <Tag bordered={false}>验证批 {safeBatchRecoveryRestoreValidationText}</Tag>}
-                        <Tag color="green" bordered={false}>稳定连过 {safeBatchRecoveryRestoreStabilityStreak}</Tag>
+                        <Tag color="green" bordered={false}>
+                          稳定连过 {safeBatchRecoveryRestoreStabilityStreak}
+                          {safeBatchRecoveryRestoreStabilityLane ? `/${safeBatchRecoveryRestoreRequiredStreak}` : ''}
+                        </Tag>
                       </div>
                     )}
                   </div>
