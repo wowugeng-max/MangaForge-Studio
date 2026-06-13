@@ -187,6 +187,17 @@ function formatWords(value: number) {
   return String(value)
 }
 
+function safeBatchChapterNos(value: any) {
+  return (Array.isArray(value) ? value : [])
+    .map((chapterNo: any) => Number(chapterNo))
+    .filter((chapterNo: number) => Number.isFinite(chapterNo) && chapterNo > 0)
+}
+
+function safeBatchChapterNosText(chapterNos: number[]) {
+  if (!chapterNos.length) return ''
+  return `${chapterNos.slice(0, 6).map(chapterNo => `第${chapterNo}章`).join('、')}${chapterNos.length > 6 ? `等${chapterNos.length}章` : ''}`
+}
+
 function actionClass(action: AutoCreationDirectorAction, primary = false) {
   return [
     primary ? 'auto-director-primary-action' : 'auto-director-secondary-action',
@@ -255,6 +266,24 @@ export function AutoCreationDirectorWorkspace({
     || safeBatchExpansionPolicy?.expansionFeedback
     || null
   const safeBatchExpansionFeedbackStatus = String(safeBatchExpansionFeedback?.status || '')
+  const safeBatchRecoveryRestoreStabilityEvidence = safeBatchExpansionFeedback?.recovery_restore_stability_evidence
+    || safeBatchExpansionFeedback?.recoveryRestoreStabilityEvidence
+    || null
+  const safeBatchRecoveryRestoreStabilityStreak = Number(
+    safeBatchRecoveryRestoreStabilityEvidence?.stable_pass_streak
+      ?? safeBatchRecoveryRestoreStabilityEvidence?.stablePassStreak
+      ?? 0,
+  )
+  const safeBatchRecoveryRestoreChapterNosForStability = safeBatchChapterNos(
+    safeBatchRecoveryRestoreStabilityEvidence?.restore_chapter_nos
+      || safeBatchRecoveryRestoreStabilityEvidence?.restoreChapterNos,
+  )
+  const safeBatchRecoveryRestoreValidationNosForStability = safeBatchChapterNos(
+    safeBatchRecoveryRestoreStabilityEvidence?.validation_chapter_nos
+      || safeBatchRecoveryRestoreStabilityEvidence?.validationChapterNos,
+  )
+  const safeBatchRecoveryRestoreBatchText = safeBatchChapterNosText(safeBatchRecoveryRestoreChapterNosForStability)
+  const safeBatchRecoveryRestoreValidationText = safeBatchChapterNosText(safeBatchRecoveryRestoreValidationNosForStability)
   const safeBatchExpansionFeedbackChapterNos = Array.isArray(safeBatchExpansionFeedback?.latest_chapter_nos)
     ? safeBatchExpansionFeedback.latest_chapter_nos
     : Array.isArray(safeBatchExpansionFeedback?.latestChapterNos)
@@ -1307,10 +1336,41 @@ export function AutoCreationDirectorWorkspace({
                       -&gt;{Number(safeBatchExpansionStructureEffectiveness.current_failure_reason_count || safeBatchExpansionStructureEffectiveness.currentFailureReasonCount || 0)}
                     </Tag>
                   )}
+                  {safeBatchRecoveryRestoreStabilityEvidence && (
+                    <Tag color="green" bordered={false}>长期扩批稳定证据</Tag>
+                  )}
+                  {safeBatchRecoveryRestoreStabilityEvidence && (
+                    <Tag bordered={false}>
+                      {safeBatchRecoveryRestoreStabilityStreak >= 2 ? '默认5章档位' : '继续观察 1-2 批'}
+                    </Tag>
+                  )}
                 </div>
                 <Text type="secondary">
                   {safeBatchExpansionFeedback.summary || '扩批分段复盘结果已接入下一轮安全连写策略。'}
                 </Text>
+                {safeBatchRecoveryRestoreStabilityEvidence && (
+                  <div className="auto-director-batch-restore-stability">
+                    <div className="auto-director-batch-memory-anchor-head">
+                      <Text strong>长期扩批稳定证据</Text>
+                      <Tag color="green" bordered={false}>
+                        {String(safeBatchRecoveryRestoreStabilityEvidence.status || '') === 'passed' ? '恢复批通过' : '恢复批观察'}
+                      </Tag>
+                      <Tag bordered={false}>
+                        {safeBatchRecoveryRestoreStabilityStreak >= 2 ? '默认5章档位' : '继续观察 1-2 批'}
+                      </Tag>
+                    </div>
+                    <Text type="secondary">
+                      {safeBatchRecoveryRestoreStabilityEvidence.summary || '恢复 5 章后的稳定观察已沉淀，可继续作为扩批默认档位依据。'}
+                    </Text>
+                    {(safeBatchRecoveryRestoreBatchText || safeBatchRecoveryRestoreValidationText) && (
+                      <div className="auto-director-batch-memory-chips">
+                        {safeBatchRecoveryRestoreBatchText && <Tag bordered={false}>恢复批 {safeBatchRecoveryRestoreBatchText}</Tag>}
+                        {safeBatchRecoveryRestoreValidationText && <Tag bordered={false}>验证批 {safeBatchRecoveryRestoreValidationText}</Tag>}
+                        <Tag color="green" bordered={false}>稳定连过 {safeBatchRecoveryRestoreStabilityStreak}</Tag>
+                      </div>
+                    )}
+                  </div>
+                )}
                 {safeBatchExpansionStructureTrend?.summary && (
                   <Text type="secondary">
                     {safeBatchExpansionStructureTrend.summary}

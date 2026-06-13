@@ -835,6 +835,53 @@ describe('buildSafeBatchExpansionPolicySnapshot', () => {
     })
   })
 
+  test('keeps recovery restore stability evidence in expansion feedback snapshot', () => {
+    const snapshot = buildSafeBatchExpansionPolicySnapshot({
+      safe_batch_expansion_policy: {
+        status: 'expanded',
+        label: '强化扩批规则',
+        summary: '恢复5章扩批稳定观察通过，长期扩批稳定证据已沉淀。',
+        target_chapter_count: 5,
+        base_chapter_count: 3,
+        expanded_chapter_count: 5,
+        required_pass_streak: 3,
+        pass_streak: 3,
+        accepted_batch_count: 3,
+        failed_batch_count: 1,
+        latest_status: 'ok',
+        expansion_feedback: {
+          status: 'passed',
+          label: '扩批热区反馈',
+          summary: '恢复5章扩批稳定观察通过：第50、51、52章验证批之后，第53、54、55、56、57章继续保持稳定。',
+          target_chapter_count: 5,
+          latest_chapter_nos: [53, 54, 55, 56, 57],
+          risk_count: 0,
+          stable_pass_streak: 1,
+          recent_expanded_batch_count: 1,
+          recovery_restore_stability_evidence: {
+            status: 'passed',
+            source: 'safe_batch_recovery_restore_five_batch',
+            restored_batch_created_at: '2026-06-15T00:00:00.000Z',
+            restore_chapter_nos: [53, 54, 55, 56, 57],
+            validation_chapter_nos: [50, 51, 52],
+            stable_pass_streak: 1,
+            summary: '恢复5章扩批稳定观察通过：第50、51、52章验证批之后，第53、54、55、56、57章继续保持核心守恒、显性回报和章末追读稳定。',
+          },
+        },
+      },
+    })
+
+    expect(snapshot?.expansionFeedback?.recoveryRestoreStabilityEvidence).toMatchObject({
+      status: 'passed',
+      source: 'safe_batch_recovery_restore_five_batch',
+      restoredBatchCreatedAt: '2026-06-15T00:00:00.000Z',
+      restoreChapterNos: [53, 54, 55, 56, 57],
+      validationChapterNos: [50, 51, 52],
+      stablePassStreak: 1,
+    })
+    expect(snapshot?.expansionFeedback?.recoveryRestoreStabilityEvidence?.summary).toContain('恢复5章扩批稳定观察通过')
+  })
+
   test('keeps expansion structure validation trend in the task-center snapshot', () => {
     const snapshot = buildSafeBatchExpansionPolicySnapshot({
       safe_batch_expansion_policy: {

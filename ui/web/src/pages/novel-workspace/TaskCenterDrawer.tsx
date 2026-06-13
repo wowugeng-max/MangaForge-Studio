@@ -224,6 +224,12 @@ function compactChapterNos(chapterNos: number[]) {
   return `第${chapterNos.slice(0, 6).join('、')}章${chapterNos.length > 6 ? `等${chapterNos.length}章` : ''}`
 }
 
+function normalizeChapterNos(value: any) {
+  return (Array.isArray(value) ? value : [])
+    .map((chapterNo: any) => Number(chapterNo))
+    .filter((chapterNo: number) => Number.isFinite(chapterNo) && chapterNo > 0)
+}
+
 export function buildRepairClosureHighlights(tasks: any[], audit?: any | null): RepairClosureHighlight[] {
   const groups = new Map<string, {
     label: string
@@ -1374,6 +1380,17 @@ export type SafeBatchExpansionFeedbackSnapshot = {
   structureValidationResult: SafeBatchExpansionStructureValidationResultSnapshot | null
   structureRepairEffectiveness: SafeBatchExpansionStructureRepairEffectivenessSnapshot | null
   structureDecisionTrend: SafeBatchExpansionStructureDecisionTrendSnapshot | null
+  recoveryRestoreStabilityEvidence: SafeBatchRecoveryRestoreStabilityEvidenceSnapshot | null
+}
+
+export type SafeBatchRecoveryRestoreStabilityEvidenceSnapshot = {
+  status: string
+  source: string
+  restoredBatchCreatedAt: string
+  restoreChapterNos: number[]
+  validationChapterNos: number[]
+  stablePassStreak: number
+  summary: string
 }
 
 export type SafeBatchExpansionStructureValidationResultSnapshot = {
@@ -1837,6 +1854,25 @@ function buildSafeBatchExpansionStructureValidationResultSnapshot(resultLike: an
   }
 }
 
+function buildSafeBatchRecoveryRestoreStabilityEvidenceSnapshot(evidenceLike: any): SafeBatchRecoveryRestoreStabilityEvidenceSnapshot | null {
+  const evidence = parseJsonValue(evidenceLike) || evidenceLike || null
+  if (!evidence || evidence.visible === false) return null
+  const restoreChapterNos = normalizeChapterNos(evidence?.restore_chapter_nos || evidence?.restoreChapterNos)
+  const validationChapterNos = normalizeChapterNos(evidence?.validation_chapter_nos || evidence?.validationChapterNos)
+  const stablePassStreak = Number(evidence?.stable_pass_streak ?? evidence?.stablePassStreak ?? 0)
+  const snapshot = {
+    status: compactEvidenceText(evidence?.status || ''),
+    source: compactEvidenceText(evidence?.source || ''),
+    restoredBatchCreatedAt: compactEvidenceText(evidence?.restored_batch_created_at || evidence?.restoredBatchCreatedAt || ''),
+    restoreChapterNos,
+    validationChapterNos,
+    stablePassStreak: Number.isFinite(stablePassStreak) ? stablePassStreak : 0,
+    summary: compactEvidenceText(evidence?.summary || ''),
+  }
+  if (!snapshot.status && !snapshot.source && !snapshot.restoreChapterNos.length && !snapshot.validationChapterNos.length && !snapshot.summary) return null
+  return snapshot
+}
+
 function buildSafeBatchExpansionFeedbackSnapshot(feedbackLike: any): SafeBatchExpansionFeedbackSnapshot | null {
   const feedback = parseJsonValue(feedbackLike) || feedbackLike || null
   if (!feedback || feedback.visible === false) return null
@@ -1882,6 +1918,9 @@ function buildSafeBatchExpansionFeedbackSnapshot(feedbackLike: any): SafeBatchEx
     ),
     structureDecisionTrend: buildSafeBatchExpansionStructureDecisionTrendSnapshot(
       feedback?.expansion_structure_decision_trend || feedback?.expansionStructureDecisionTrend,
+    ),
+    recoveryRestoreStabilityEvidence: buildSafeBatchRecoveryRestoreStabilityEvidenceSnapshot(
+      feedback?.recovery_restore_stability_evidence || feedback?.recoveryRestoreStabilityEvidence,
     ),
   }
 }
@@ -2082,6 +2121,13 @@ function BatchProseRunSummary({ run }: { run: any }) {
   const expansionStructureEffectiveness = expansionFeedback?.structureRepairEffectiveness || null
   const expansionStructureDecisionTrend = expansionFeedback?.structureDecisionTrend || null
   const expansionStructureDecisionRequirement = expansionStructureDecisionTrend?.topFailedRequirement || null
+  const recoveryRestoreStability = expansionFeedback?.recoveryRestoreStabilityEvidence || null
+  const recoveryRestoreBatchText = recoveryRestoreStability?.restoreChapterNos.length
+    ? `恢复批 ${compactChapterNos(recoveryRestoreStability.restoreChapterNos)}`
+    : ''
+  const recoveryRestoreValidationText = recoveryRestoreStability?.validationChapterNos.length
+    ? `验证 ${compactChapterNos(recoveryRestoreStability.validationChapterNos)}`
+    : ''
   const recoveryRoadmap = expansionPolicy?.recoveryRoadmap || null
   const recoveryValidation = expansionPolicy?.recoveryValidation || null
 
@@ -2209,8 +2255,28 @@ function BatchProseRunSummary({ run }: { run: any }) {
                         漏项 {expansionStructureDecisionRequirement.label}{expansionStructureDecisionRequirement.count}
                       </Tag>
                     )}
+                    {recoveryRestoreStability && (
+                      <Tag color="green" bordered={false}>长期扩批稳定证据</Tag>
+                    )}
+                    {recoveryRestoreStability && (
+                      <Tag bordered={false}>
+                        {recoveryRestoreStability.stablePassStreak >= 2 ? '默认5章档位' : '继续观察 1-2 批'}
+                      </Tag>
+                    )}
                   </Space>
                   <Text type="secondary" style={{ fontSize: 12 }}>{expansionFeedback.summary}</Text>
+                  {recoveryRestoreStability && (
+                    <Space direction="vertical" size={3} style={{ width: '100%' }}>
+                      <Space wrap size={[4, 4]}>
+                        {recoveryRestoreBatchText && <Tag bordered={false}>{recoveryRestoreBatchText}</Tag>}
+                        {recoveryRestoreValidationText && <Tag bordered={false}>{recoveryRestoreValidationText}</Tag>}
+                        <Tag color="green" bordered={false}>稳定连过 {recoveryRestoreStability.stablePassStreak}</Tag>
+                      </Space>
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        {recoveryRestoreStability.summary || '恢复 5 章后的稳定观察已沉淀，可继续作为扩批默认档位依据。'}
+                      </Text>
+                    </Space>
+                  )}
                   {expansionStructureTrend?.visible && (
                     <Text type="secondary" style={{ fontSize: 12 }}>{expansionStructureTrend.summary}</Text>
                   )}

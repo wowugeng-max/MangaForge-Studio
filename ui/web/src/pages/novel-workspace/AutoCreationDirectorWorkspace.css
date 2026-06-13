@@ -2087,6 +2087,14 @@
   gap: 6px;
 }
 
+.auto-director-batch-restore-stability {
+  min-width: 0;
+  border-top: 1px solid rgba(34, 197, 94, 0.22);
+  padding-top: 6px;
+  display: grid;
+  gap: 5px;
+}
+
 .auto-director-batch-governance-memory {
   min-width: 0;
   border: 1px solid #bbf7d0;
