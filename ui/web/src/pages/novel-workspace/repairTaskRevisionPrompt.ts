@@ -600,6 +600,7 @@ export function buildRepairTaskRevisionPrompt(task: AnyRecord, run?: AnyRecord |
   const readerTrialReview = task.reader_trial_review || task.readerTrialReview || null
   const first30Retention = task.first30_retention || task.first30Retention || null
   const expansionStructureReview = task.safe_batch_expansion_structure_review || task.safeBatchExpansionStructureReview || null
+  const expansionStructureDecisionReview = task.safe_batch_expansion_structure_decision_review || task.safeBatchExpansionStructureDecisionReview || null
   const lines = [
     '本次修订来自任务中心的商业留存/质检修复任务。',
     task.segment ? `分段：${task.segment}` : '',
@@ -671,6 +672,36 @@ export function buildRepairTaskRevisionPrompt(task: AnyRecord, run?: AnyRecord |
       volumeSegmentReview.gate_summary ? `卷段提示：${volumeSegmentReview.gate_summary}` : '',
       '修订要求：必须补成可见的阶段结果，例如身份变化、资源入场、关系改写、势力态度转变、阶段反派败退或新门槛开启。',
       '不能把阶段结算继续后移，不能用解释性旁白代替现场冲突和结果兑现，不能提前消费后续卷末爆点。',
+    )
+  }
+  if (expansionStructureDecisionReview) {
+    const review = objectValue(expansionStructureDecisionReview)
+    const observationMetrics = arrayValue(review.observation_metrics || review.observationMetrics)
+      .map(item => text(item))
+      .filter(Boolean)
+    const missedChapterNos = arrayValue(review.missed_chapter_nos || review.missedChapterNos)
+      .map(chapterNo => Number(chapterNo))
+      .filter(chapterNo => chapterNo > 0)
+    const failedItems = arrayValue(review.failed_items || review.failedItems)
+      .map(item => objectValue(item))
+      .map(item => ({
+        chapterNo: Number(item.chapter_no ?? item.chapterNo ?? 0),
+        label: firstText(item.label, item.key, '结构决策漏项'),
+        text: firstText(item.text, item.description, item.reason, item.issue),
+      }))
+      .filter(item => item.label || item.text)
+    lines.push(
+      '【扩批结构决策执行】',
+      firstText(review.recommendation) ? `决策：${firstText(review.recommendation)}` : '',
+      Number(review.target_chapter_count ?? review.targetChapterCount ?? 0) > 0 ? `目标批次：${Number(review.target_chapter_count ?? review.targetChapterCount)}章` : '',
+      firstText(review.segment_label, review.segmentLabel) ? `观察段位：${firstText(review.segment_label, review.segmentLabel)}` : '',
+      firstText(review.summary) ? `复盘结论：${firstText(review.summary)}` : '',
+      firstText(review.instruction) ? `执行口径：${firstText(review.instruction)}` : '',
+      observationMetrics.length > 0 ? `观察指标：${observationMetrics.join('；')}` : '',
+      missedChapterNos.length > 0 ? `漏项章节：第${missedChapterNos.join('、')}章` : '',
+      ...failedItems.map(item => `${item.chapterNo > 0 ? `第${item.chapterNo}章` : ''}${item.label}：${item.text || '未提供可见执行证据'}`),
+      '修订要求：逐章补齐扩批结构决策指定的段位职责、观察指标和必要的重构原则；恢复5章时不能淡化结构约束，小批验证时必须证明观察指标，单章重构时先改结构原则再写正文。',
+      '修订后必须重新回填 expansion_structure_decision_execution，并重新运行批次复盘，确认结构决策执行为 ok 后再放行下一批。',
     )
   }
   if (expansionStructureReview) {

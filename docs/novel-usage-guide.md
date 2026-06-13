@@ -1200,14 +1200,18 @@
 - 恢复 5 章后的扩批稳定观察已接入 `expansion_feedback`。系统会记录连续 5 章扩批通过次数、近期观察批次数和同段热区复发次数；如果同一段位再次成为热区，总控台摘要会优先提示固定段落治理和批次结构改写，而不是只缩小章数。
 - 同段热区复发已升级为 `safe_batch_expansion_structure_repair` 结构修复任务。任务中心显示 `扩批结构` 标签和 `改扩批结构` 主动作，修订提示词会带入复发段位、最近批次、高危章节、热区证据、回退策略和结构动作，要求先重写批次任务书、段位职责和章间节奏，不能只修单章语句或局部爽点；闭环后会归入 `扩批结构风险已清`。
 - `safe_batch_expansion_structure_repair` 的执行结果已回流到下一批验证任务书。结构修复闭环后，总控台会在 2-3 章验证批次的 `next_batch_brief.expansionStructureVerification` 和 `batch_preflight.safe_batch_expansion_structure_verification` 中写入复发段位、验证章节、固定段位职责、冲突来源轮换、显性回报和章末追读要求；正文生成 prompt 也会新增 `扩批结构验证` 硬性段落，避免修复任务只停留在任务中心。
-- 扩批结构验证批的交稿结果已沉淀为 `expansion_structure_validation_result`。验证批通过时，`safe_batch_expansion_policy.expansion_feedback` 会记录验证章节、复发段位和风险数为 0，并把目标批次恢复到 5 章；验证批失败时，风险雷达会显示 `扩批结构` 警告，生成结构修复任务，并在未修复前禁止继续放行下一批。
+- 扩批结构验证批的交稿结果已沉淀为 `expansion_structure_validation_result`。验证批通过时，`safe_batch_expansion_policy.expansion_feedback` 会记录验证章节、复发段位和风险数为 0；验证批失败时，风险雷达会显示 `扩批结构` 警告，生成结构修复任务，并在未修复前禁止继续放行下一批。
 - 扩批结构验证结果已进一步沉淀为 `expansion_structure_validation_trend`。系统会按复发段位统计验证通过率、失败主因和恢复 5 章后的再次复发间隔，并在总控台与任务中心的扩批反馈块中以 `验证通过率`、`失败主因`、`复发间隔` 三个短标签提示作者判断结构问题是偶发还是批次设计惯性。
 - `expansion_structure_validation_trend` 已反向写入下一轮 `safe_batch_expansion_structure_repair` 修订提示词。结构修复 prompt 会新增 `扩批结构验证趋势` 段落，带入长期复发段位、验证通过率、失败主因、最近验证批和恢复 5 章后的复发间隔，要求模型按长期惯性重写批次任务书、段位职责、冲突换源、显性回报和章末追读检查项，而不是只处理本批表面风险。
 - 趋势驱动的结构修复结果已回收为 `结构修复有效性`。系统会对比修复前后的验证通过率、失败主因数量和同段复发间隔，把结果写入 `safe_batch_expansion_policy.expansion_feedback.expansion_structure_repair_effectiveness`；总控台和任务中心都会用 `结构修复有效`、`主因 N->M` 和摘要说明提示作者这次结构改写是否足以恢复 5 章扩批，或是否还要继续小批验证。
+- `结构修复有效性` 已接入扩批策略决策。`recommendation=restore_five_chapter` 时，强化扩批规则可以恢复 5 章；`continue_small_validation` 时，即使最近验证批通过，也会继续保持 2-3 章验证，避免过早放大；`escalate_structure_redesign` 时会把目标压回单章治理，并在总控台摘要中提示升级批次设计重构。
+- 结构修复决策结果已写回下一批任务书和正文提示词。`next_batch_brief.expansionStructureDecision` 会记录推荐动作、目标章数、观察段位、有效性摘要和观察指标；正文生成 prompt 会新增 `扩批结构决策` 段落，恢复 5 章时要求继续明确各段职责，小批验证时要求逐章证明观察指标，单章重构时要求先重写批次设计原则再推进正文，并要求在 `scene_breakdown.expansion_structure_decision_execution` 中回填段位职责、观察指标和重构原则的执行回执。
+- `扩批结构决策` 的正文执行结果已纳入批次复盘。风险雷达会读取正文回执或 `safe_batch_expansion_structure_decision_sync` 复盘，检查每章是否落实段位职责、观察指标和重构原则；若没有落地，会生成 `safe_batch_expansion_structure_decision_mismatch` 修复任务，任务中心显示 `扩批结构决策` 标签和 `查结构决策` 动作，修订提示词会带入漏项章节、观察指标和执行口径，要求补完后重新回填执行回执并复盘。
+- `扩批结构决策` 的执行复盘结果已沉淀为长期 `expansion_structure_decision_trend`。系统会统计哪些推荐动作最容易执行失败、哪些段位职责或观察指标反复漏写、最近失败批次对应的章节和段位；最新趋势未稳时，`safe_batch_expansion_policy` 会把下一批压回 3 章以内恢复态，并在下一批 `expansionStructureDecision` 中写入“先按结构决策执行趋势补齐”的硬性口径和漏项观察指标。任务中心的批量生成摘要也会保留该趋势，作者回看历史批次时能直接看到结构决策是否落地、漏项职责和建议目标章数。
 
 推荐下一步：
 
-- 把 `结构修复有效性` 接入扩批策略决策：当修复有效且验证通过率、失败主因、复发间隔都收敛时自动恢复 5 章；仍待观察时继续 2-3 章验证；明显退化时升级为更深的批次设计重构。
+- 把强化验收、扩批热区、结构验证、结构修复有效性和结构决策执行趋势整合成一个更简单的“安全连写恢复路线图”，让作者一眼看到当前为什么只能写 1 章、3 章或 5 章，以及下一步最该修哪一层。
 
 ## 8. 使用说明维护规则
 

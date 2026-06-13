@@ -296,6 +296,7 @@ export interface AutoCreationNextBatchBrief {
   mainlineFocus: string
   forbiddenBoundary: string
   expansionStructureVerification?: AnyRecord | null
+  expansionStructureDecision?: AnyRecord | null
   startChecklist: AutoCreationNextBatchBriefStartChecklistItem[]
   chapters: AutoCreationNextBatchBriefChapter[]
 }
@@ -384,7 +385,7 @@ export interface AutoCreationBatchReviewItem {
 }
 
 export interface AutoCreationBatchRiskSignal {
-  key: 'quality' | 'core' | 'runway' | 'payoff' | 'reader_pull' | 'reader_trial' | 'first30_retention' | 'handoff' | 'storyline' | 'story_drive' | 'character_arc' | 'innovation' | 'signature_scene' | 'chapter_attraction' | 'chapter_benchmark' | 'style_sample' | 'readability' | 'serial_rhythm' | 'asset_growth' | 'volume_segment' | 'batch_plan' | 'batch_checklist' | 'recovery_evidence' | 'strengthened_repair_acceptance' | 'batch_expansion_segment' | 'batch_expansion_structure'
+  key: 'quality' | 'core' | 'runway' | 'payoff' | 'reader_pull' | 'reader_trial' | 'first30_retention' | 'handoff' | 'storyline' | 'story_drive' | 'character_arc' | 'innovation' | 'signature_scene' | 'chapter_attraction' | 'chapter_benchmark' | 'style_sample' | 'readability' | 'serial_rhythm' | 'asset_growth' | 'volume_segment' | 'batch_plan' | 'batch_checklist' | 'recovery_evidence' | 'strengthened_repair_acceptance' | 'batch_expansion_segment' | 'batch_expansion_structure' | 'batch_expansion_structure_decision'
   label: string
   status: AutoCreationBatchRiskStatus
   detail: string
@@ -439,6 +440,8 @@ export interface AutoCreationBatchRiskRadar {
   safeBatchExpansionSegmentReview?: AnyRecord | null
   safeBatchExpansionStructureValidationRiskCount: number
   safeBatchExpansionStructureValidationResult?: AnyRecord | null
+  safeBatchExpansionStructureDecisionRiskCount: number
+  safeBatchExpansionStructureDecisionReview?: AnyRecord | null
   checklistExecution: AutoCreationBatchChecklistExecution
   signals: AutoCreationBatchRiskSignal[]
   repairTasks: AnyRecord[]
@@ -1130,6 +1133,14 @@ function batchChapterDelivered(args: {
 function numberValue(value: any) {
   const normalized = Number(value)
   return Number.isFinite(normalized) ? normalized : null
+}
+
+function boolValue(value: any) {
+  if (value === true || value === false) return value
+  const normalized = text(value).toLowerCase()
+  if (['true', 'yes', 'ok', 'pass', 'passed', 'delivered', 'done'].includes(normalized)) return true
+  if (['false', 'no', 'warn', 'warning', 'fail', 'failed', 'missing', 'missed'].includes(normalized)) return false
+  return null
 }
 
 function riskPayload(review: AnyRecord | null, key: string) {
@@ -3138,6 +3149,7 @@ function batchRepairTask(args: {
   safeBatchExpansionSegmentReview?: AnyRecord | null
   safeBatchExpansionStructureReview?: AnyRecord | null
   safeBatchExpansionStructureValidationResult?: AnyRecord | null
+  safeBatchExpansionStructureDecisionReview?: AnyRecord | null
   actionArea?: string
   actionKey?: string
 }) {
@@ -3193,6 +3205,9 @@ function batchRepairTask(args: {
     ...(args.safeBatchExpansionStructureValidationResult ? {
       safe_batch_expansion_structure_validation_result: args.safeBatchExpansionStructureValidationResult,
     } : {}),
+    ...(args.safeBatchExpansionStructureDecisionReview ? {
+      safe_batch_expansion_structure_decision_review: args.safeBatchExpansionStructureDecisionReview,
+    } : {}),
   }
 }
 
@@ -3243,6 +3258,9 @@ function resolvedBatchRiskIssueTypes(issueType: string) {
   }
   if (issueType === 'safe_batch_expansion_structure_repair') {
     return ['safe_batch_expansion_structure_repair', 'safe_batch_expansion_segment_hotspot']
+  }
+  if (issueType === 'safe_batch_expansion_structure_decision_mismatch') {
+    return ['safe_batch_expansion_structure_decision_mismatch']
   }
   if ([
     'readability_risk',
@@ -3646,6 +3664,16 @@ function buildSafeBatchExpansionPolicy(
   const expandedChapterCount = 5
   const feedback = expansionFeedback?.visible ? expansionFeedback : null
   const feedbackStatus = text(feedback?.status)
+  const structureRepairEffectiveness = feedback?.expansionStructureRepairEffectiveness
+    || feedback?.expansion_structure_repair_effectiveness
+    || null
+  const structureDecisionTrend = feedback?.expansionStructureDecisionTrend
+    || feedback?.expansion_structure_decision_trend
+    || null
+  const structureRepairRecommendation = text(structureRepairEffectiveness?.recommendation)
+  const structureRepairNeedsMoreValidation = structureRepairRecommendation === 'continue_small_validation'
+  const structureRepairNeedsRedesign = structureRepairRecommendation === 'escalate_structure_redesign'
+  const structureDecisionTrendWarn = text(structureDecisionTrend?.status) === 'warn'
   const feedbackNeedsRecovery = feedbackStatus === 'rollback_to_single_chapter' || feedbackStatus === 'rollback_to_small_batch'
   const feedbackRecovered = feedbackStatus === 'recovered'
   const canExpandByTrend = Boolean(
@@ -3654,25 +3682,47 @@ function buildSafeBatchExpansionPolicy(
     && trend.latestStatus === 'ok'
     && trend.passStreak >= requiredPassStreak,
   )
-  const canExpand = canExpandByTrend && !feedbackNeedsRecovery
-  const targetChapterCount = canExpand
-    ? expandedChapterCount
-    : feedbackNeedsRecovery
-      ? Math.max(1, Math.min(baseChapterCount, Number(feedback?.targetChapterCount || baseChapterCount)))
-      : baseChapterCount
-  const summary = feedbackNeedsRecovery
-    ? `强化恢复验收连续 ${Math.max(0, trend.passStreak)}/${requiredPassStreak} 批通过，但最近一次5章扩批存在扩批分段热区；${text(feedback?.summary, `下一轮保持 ${targetChapterCount} 章以内安全连写。`)}`
-    : canExpand
-      ? feedbackRecovered
-        ? `强化恢复验收连续 ${trend.passStreak}/${requiredPassStreak} 批通过；${text(feedback?.summary, '扩批分段热区已修复并通过复检。')}本轮恢复 ${expandedChapterCount} 章安全连写。`
-        : `强化恢复验收连续 ${trend.passStreak}/${requiredPassStreak} 批通过，核心守恒、读者回报和追读拉力未复发，本轮可从 ${baseChapterCount} 章扩到 ${expandedChapterCount} 章安全连写。`
-    : trend.visible
-      ? `强化恢复验收连续 ${Math.max(0, trend.passStreak)}/${requiredPassStreak} 批通过；达到 ${requiredPassStreak} 批前继续保持 ${baseChapterCount} 章以内小批量安全连写。`
-      : `暂无强化恢复验收趋势，继续保持 ${baseChapterCount} 章以内小批量安全连写。`
+  const canExpand = canExpandByTrend
+    && !feedbackNeedsRecovery
+    && !structureRepairNeedsMoreValidation
+    && !structureRepairNeedsRedesign
+    && !structureDecisionTrendWarn
+  let targetChapterCount = baseChapterCount
+  if (canExpand) {
+    targetChapterCount = expandedChapterCount
+  } else if (structureRepairNeedsRedesign) {
+    targetChapterCount = 1
+  } else if (structureDecisionTrendWarn) {
+    targetChapterCount = Math.max(1, Math.min(
+      baseChapterCount,
+      Number(structureDecisionTrend?.suggested_target_chapter_count ?? structureDecisionTrend?.suggestedTargetChapterCount ?? baseChapterCount),
+    ))
+  } else if (structureRepairNeedsMoreValidation) {
+    targetChapterCount = baseChapterCount
+  } else if (feedbackNeedsRecovery) {
+    targetChapterCount = Math.max(1, Math.min(baseChapterCount, Number(feedback?.targetChapterCount || baseChapterCount)))
+  }
+  const structureRepairSummary = text(structureRepairEffectiveness?.summary)
+  let summary = trend.visible
+    ? `强化恢复验收连续 ${Math.max(0, trend.passStreak)}/${requiredPassStreak} 批通过；达到 ${requiredPassStreak} 批前继续保持 ${baseChapterCount} 章以内小批量安全连写。`
+    : `暂无强化恢复验收趋势，继续保持 ${baseChapterCount} 章以内小批量安全连写。`
+  if (structureRepairNeedsRedesign) {
+    summary = `强化恢复验收连续 ${Math.max(0, trend.passStreak)}/${requiredPassStreak} 批通过；${structureRepairSummary}结构修复有效性要求升级批次设计重构，下一轮回到单章治理。`
+  } else if (structureDecisionTrendWarn) {
+    summary = `强化恢复验收连续 ${Math.max(0, trend.passStreak)}/${requiredPassStreak} 批通过；${text(structureDecisionTrend?.summary)}结构决策执行趋势未稳，下一轮保持 ${targetChapterCount} 章以内安全连写。`
+  } else if (structureRepairNeedsMoreValidation) {
+    summary = `强化恢复验收连续 ${Math.max(0, trend.passStreak)}/${requiredPassStreak} 批通过；${structureRepairSummary}结构修复有效性建议继续小批验证，下一轮保持 ${baseChapterCount} 章以内安全连写。`
+  } else if (feedbackNeedsRecovery) {
+    summary = `强化恢复验收连续 ${Math.max(0, trend.passStreak)}/${requiredPassStreak} 批通过，但最近一次5章扩批存在扩批分段热区；${text(feedback?.summary, `下一轮保持 ${targetChapterCount} 章以内安全连写。`)}`
+  } else if (canExpand) {
+    summary = feedbackRecovered
+      ? `强化恢复验收连续 ${trend.passStreak}/${requiredPassStreak} 批通过；${text(feedback?.summary, '扩批分段热区已修复并通过复检。')}本轮恢复 ${expandedChapterCount} 章安全连写。`
+      : `强化恢复验收连续 ${trend.passStreak}/${requiredPassStreak} 批通过，核心守恒、读者回报和追读拉力未复发，本轮可从 ${baseChapterCount} 章扩到 ${expandedChapterCount} 章安全连写。`
+  }
 
   return {
     visible: true,
-    status: canExpand ? 'expanded' : feedbackNeedsRecovery ? 'recovering' : 'observing',
+    status: canExpand ? 'expanded' : feedbackNeedsRecovery || structureRepairNeedsMoreValidation || structureRepairNeedsRedesign || structureDecisionTrendWarn ? 'recovering' : 'observing',
     label: '强化扩批规则',
     summary,
     targetChapterCount,
@@ -3939,6 +3989,331 @@ function buildSafeBatchExpansionStructureValidationResult(args: {
   }
 }
 
+function safeBatchExpansionStructureDecisionFromContext(args: {
+  nextBatchBrief?: AnyRecord | null
+  batchPreflight?: AnyRecord | null
+}) {
+  const brief = args.nextBatchBrief
+    || args.batchPreflight?.next_batch_brief
+    || args.batchPreflight?.nextBatchBrief
+    || null
+  const raw = brief?.expansion_structure_decision
+    || brief?.expansionStructureDecision
+    || args.batchPreflight?.expansion_structure_decision
+    || args.batchPreflight?.expansionStructureDecision
+    || null
+  if (!raw || raw.visible === false) return null
+  const recommendation = firstText(raw.recommendation)
+  const instruction = firstText(raw.instruction)
+  const summary = firstText(raw.summary)
+  const observationMetrics = arrayValue(raw.observation_metrics || raw.observationMetrics)
+    .map(item => text(item))
+    .filter(Boolean)
+  if (!recommendation && !instruction && !summary && observationMetrics.length === 0) return null
+  return {
+    visible: true,
+    label: firstText(raw.label, '结构修复决策'),
+    recommendation,
+    target_chapter_count: numberValue(raw.target_chapter_count ?? raw.targetChapterCount) ?? 0,
+    mode_label: firstText(raw.mode_label, raw.modeLabel),
+    segment_key: firstText(raw.segment_key, raw.segmentKey),
+    segment_label: firstText(raw.segment_label, raw.segmentLabel),
+    summary,
+    instruction,
+    source_run_id: raw.source_run_id ?? raw.sourceRunId ?? null,
+    observation_metrics: observationMetrics,
+  }
+}
+
+function expansionStructureDecisionRequiresRedesign(decision: AnyRecord) {
+  return text(decision?.recommendation) === 'escalate_structure_redesign'
+    || Number(decision?.target_chapter_count || 0) === 1
+    || /单章重构|结构重构|重写批次设计|重构原则/.test([
+      decision?.mode_label,
+      decision?.summary,
+      decision?.instruction,
+    ].map(item => text(item)).join(' '))
+}
+
+function expansionStructureDecisionRequirements(decision: AnyRecord) {
+  const segmentLabel = text(decision?.segment_label, '段位')
+  const requirements = [
+    {
+      key: 'segment_role',
+      label: `${segmentLabel}职责`,
+      planned: firstText(decision?.instruction, decision?.summary, `${segmentLabel}职责必须写成可见事件。`),
+    },
+    {
+      key: 'observation_metrics',
+      label: '观察指标',
+      planned: arrayValue(decision?.observation_metrics).join('；') || '通过率、失败主因和同段复发必须有正文证据。',
+    },
+  ]
+  if (expansionStructureDecisionRequiresRedesign(decision)) {
+    requirements.push({
+      key: 'redesign_principles',
+      label: '重构原则',
+      planned: '单章重构时必须先落实批次结构设计原则，再推进正文。',
+    })
+  }
+  return requirements
+}
+
+function latestExpansionStructureDecisionSyncReview(reviews: AnyRecord[], chapter: AnyRecord, chapterNo: number) {
+  return [
+    latestReviewForChapter(reviews, chapter, chapterNo, 'safe_batch_expansion_structure_decision_sync'),
+    latestReviewForChapter(reviews, chapter, chapterNo, 'expansion_structure_decision_sync'),
+  ].filter(Boolean).sort((a, b) => recordTime(b || {}) - recordTime(a || {}))[0] || null
+}
+
+function expansionStructureDecisionSyncPayload(review: AnyRecord | null) {
+  const payload = reviewPayload(review)
+  return payload?.safe_batch_expansion_structure_decision_sync
+    || payload?.expansion_structure_decision_sync
+    || payload?.result?.safe_batch_expansion_structure_decision_sync
+    || payload?.result?.expansion_structure_decision_sync
+    || payload?.result
+    || payload
+}
+
+function chapterExpansionStructureDecisionReceipts(chapter: AnyRecord | null) {
+  const raw = parsePayload(chapter?.raw_payload || chapter?.rawPayload) || chapter?.raw_payload || chapter?.rawPayload || {}
+  const topLevel = [
+    raw?.expansion_structure_decision_execution,
+    raw?.expansionStructureDecisionExecution,
+    raw?.expansion_structure_execution,
+    raw?.expansionStructureExecution,
+    raw?.context_package?.chapter_target?.expansion_structure_decision_execution,
+    raw?.pre_draft_brief?.expansion_structure_decision_execution,
+  ]
+  const sceneReceipts = [
+    ...arrayValue(chapter?.scene_breakdown || chapter?.sceneBreakdown),
+    ...arrayValue(raw?.generated_scene_breakdown || raw?.generatedSceneBreakdown),
+  ].flatMap(scene => [
+    scene?.expansion_structure_decision_execution,
+    scene?.expansionStructureDecisionExecution,
+    scene?.expansion_structure_execution,
+    scene?.expansionStructureExecution,
+  ])
+  return [...topLevel, ...sceneReceipts].filter(receipt => receipt && typeof receipt === 'object')
+}
+
+function expansionStructureDecisionRequirementDelivered(args: {
+  key: string
+  payload: AnyRecord
+  receipts: AnyRecord[]
+}) {
+  const keys = args.key === 'segment_role'
+    ? ['segment_role_delivered', 'segmentRoleDelivered', 'segment_role_evidence', 'segmentRoleEvidence']
+    : args.key === 'observation_metrics'
+      ? ['observation_metrics_delivered', 'observationMetricsDelivered', 'observation_metric_evidence', 'observationMetricEvidence']
+      : ['redesign_principles_delivered', 'redesignPrinciplesDelivered', 'redesign_principle_evidence', 'redesignPrincipleEvidence']
+  for (const source of [args.payload, ...args.receipts]) {
+    for (const key of keys) {
+      const explicit = boolValue(source?.[key])
+      if (explicit !== null) return explicit
+      if (arrayValue(source?.[key]).map(item => text(item)).filter(Boolean).length > 0) return true
+      if (text(source?.[key])) return true
+    }
+  }
+  return null
+}
+
+function buildSafeBatchExpansionStructureDecisionExecutionReview(args: {
+  nextBatchBrief?: AnyRecord | null
+  batchPreflight?: AnyRecord | null
+  items: AutoCreationBatchReviewItem[]
+  chapters: AnyRecord[]
+  reviews: AnyRecord[]
+}) {
+  const decision = safeBatchExpansionStructureDecisionFromContext({
+    nextBatchBrief: args.nextBatchBrief,
+    batchPreflight: args.batchPreflight,
+  })
+  if (!decision) {
+    return {
+      visible: false,
+      status: 'ok' as const,
+      label: '扩批结构决策',
+      summary: '当前批次没有扩批结构决策。',
+      recommendation: '',
+      target_chapter_count: 0,
+      segment_label: '',
+      observation_metrics: [],
+      risk_count: 0,
+      missed_chapter_nos: [],
+      failed_items: [],
+      chapters: [],
+    }
+  }
+  const requirements = expansionStructureDecisionRequirements(decision)
+  const successfulItems = args.items.filter(item => item.status === 'success')
+  const chapterReviews = successfulItems.map(item => {
+    const chapter = findChapter(args.chapters, item)
+    const syncReview = chapter ? latestExpansionStructureDecisionSyncReview(args.reviews, chapter, item.chapterNo) : null
+    const payload = expansionStructureDecisionSyncPayload(syncReview)
+    const receipts = chapterExpansionStructureDecisionReceipts(chapter)
+    const explicitMissed = arrayValue(payload?.missed || payload?.misses || payload?.failed_items || payload?.failedItems)
+      .map((missed: any) => ({
+        chapter_no: item.chapterNo,
+        chapter_id: item.chapterId || null,
+        key: firstText(missed?.key, missed?.type, missed?.kind, 'expansion_structure_decision'),
+        label: firstText(missed?.label, missed?.title, missed?.key, '扩批结构决策'),
+        text: firstText(missed?.text, missed?.description, missed?.reason, missed?.issue),
+      }))
+      .filter((missed: AnyRecord) => missed.label || missed.text)
+    const payloadStatus = text(payload?.status).toLowerCase()
+    const passed = ['ok', 'pass', 'passed', 'success'].includes(payloadStatus) || payload?.passed === true
+    const missing = passed
+      ? []
+      : explicitMissed.length > 0
+        ? explicitMissed
+        : requirements
+          .filter(requirement => expansionStructureDecisionRequirementDelivered({
+            key: requirement.key,
+            payload,
+            receipts,
+          }) !== true)
+          .map(requirement => ({
+            chapter_no: item.chapterNo,
+            chapter_id: item.chapterId || null,
+            key: requirement.key,
+            label: requirement.label,
+            text: requirement.planned,
+          }))
+    return {
+      chapter_no: item.chapterNo,
+      chapter_id: item.chapterId || null,
+      title: item.title,
+      status: missing.length > 0 ? 'warn' as const : 'ok' as const,
+      missed: missing,
+      evidence: [
+        ...arrayValue(payload?.evidence).map(item => text(item)).filter(Boolean),
+        ...receipts.flatMap(receipt => arrayValue(receipt?.evidence).map(item => text(item)).filter(Boolean)),
+      ].slice(0, 6),
+    }
+  })
+  const failedItems = chapterReviews.flatMap(review => review.missed)
+  const missedChapterNos = Array.from(new Set(failedItems.map(item => Number(item.chapter_no || 0)).filter(chapterNo => chapterNo > 0)))
+  return {
+    visible: true,
+    status: failedItems.length > 0 ? 'warn' as const : 'ok' as const,
+    label: '扩批结构决策',
+    summary: failedItems.length > 0
+      ? `${decision.label}未落地：第${missedChapterNos.join('、')}章有 ${failedItems.length} 项段位职责、观察指标或重构原则缺口。`
+      : `${decision.label}已落地：本批章节均提供段位职责和观察指标执行证据。`,
+    recommendation: decision.recommendation,
+    target_chapter_count: decision.target_chapter_count,
+    mode_label: decision.mode_label,
+    segment_key: decision.segment_key,
+    segment_label: decision.segment_label,
+    source_run_id: decision.source_run_id,
+    instruction: decision.instruction,
+    observation_metrics: decision.observation_metrics,
+    risk_count: failedItems.length,
+    missed_chapter_nos: missedChapterNos,
+    failed_items: failedItems,
+    requirements,
+    chapters: chapterReviews,
+  }
+}
+
+function safeBatchExpansionStructureDecisionEntryEvaluation(args: {
+  entry: AnyRecord
+  chapters: AnyRecord[]
+  reviews: AnyRecord[]
+}) {
+  const review = buildSafeBatchExpansionStructureDecisionExecutionReview({
+    nextBatchBrief: args.entry.input?.next_batch_brief || args.entry.input?.nextBatchBrief || null,
+    batchPreflight: args.entry.preflight,
+    items: args.entry.items,
+    chapters: args.chapters,
+    reviews: args.reviews,
+  })
+  return {
+    review,
+    latestBatchCreatedAt: text(args.entry.run?.created_at),
+    latestChapterNos: arrayValue(args.entry.items).map(item => Number(item?.chapterNo || 0)).filter(Boolean),
+  }
+}
+
+function buildSafeBatchExpansionStructureDecisionTrend(args: {
+  decisionEvaluations: AnyRecord[]
+}) {
+  const evaluations = arrayValue(args.decisionEvaluations)
+    .filter(evaluation => evaluation?.review?.visible)
+    .sort((a, b) => Date.parse(text(b?.latestBatchCreatedAt)) - Date.parse(text(a?.latestBatchCreatedAt)))
+  if (!evaluations.length) return null
+
+  const failedEvaluations = evaluations.filter(evaluation => Number(evaluation?.review?.risk_count || 0) > 0)
+  const latest = evaluations[0]
+  const latestReview = latest.review || {}
+  const latestStatus = Number(latestReview.risk_count || 0) > 0 ? 'warn' as const : 'ok' as const
+  const recommendationCounts = new Map<string, AnyRecord>()
+  const requirementCounts = new Map<string, AnyRecord>()
+  const segmentCounts = new Map<string, AnyRecord>()
+  failedEvaluations.forEach(evaluation => {
+    const review = evaluation.review || {}
+    const recommendationKey = text(review.recommendation, 'unknown')
+    const recommendationRecord = recommendationCounts.get(recommendationKey) || {
+      key: recommendationKey,
+      label: text(review.mode_label, recommendationKey === 'unknown' ? '结构决策' : recommendationKey),
+      count: 0,
+    }
+    recommendationRecord.count += 1
+    recommendationCounts.set(recommendationKey, recommendationRecord)
+
+    const segmentKey = text(review.segment_key, 'unknown')
+    const segmentRecord = segmentCounts.get(segmentKey) || {
+      key: segmentKey,
+      label: text(review.segment_label, segmentKey === 'unknown' ? '复发段位' : segmentKey),
+      count: 0,
+    }
+    segmentRecord.count += 1
+    segmentCounts.set(segmentKey, segmentRecord)
+
+    arrayValue(review.failed_items).forEach(item => {
+      const key = text(item?.key, 'expansion_structure_decision')
+      const record = requirementCounts.get(key) || {
+        key,
+        label: text(item?.label, key),
+        count: 0,
+      }
+      record.count += 1
+      requirementCounts.set(key, record)
+    })
+  })
+  const byCountDesc = (a: AnyRecord, b: AnyRecord) => Number(b.count || 0) - Number(a.count || 0)
+  const topFailedRecommendation = Array.from(recommendationCounts.values()).sort(byCountDesc)[0] || null
+  const topFailedRequirement = Array.from(requirementCounts.values()).sort(byCountDesc)[0] || null
+  const topFailedSegment = Array.from(segmentCounts.values()).sort(byCountDesc)[0] || null
+  const suggestedTargetChapterCount = latestStatus === 'warn' ? 3 : 5
+  const summary = latestStatus === 'warn'
+    ? `结构决策执行趋势未稳：${text(topFailedRecommendation?.label, '结构决策')}最近复盘仍有漏项，${text(topFailedRequirement?.label, '执行要求')}累计 ${Number(topFailedRequirement?.count || 0)} 次未落地；下一批先保持 ${suggestedTargetChapterCount} 章小批验证。`
+    : failedEvaluations.length > 0
+      ? `结构决策执行趋势已恢复：最近批次已落地，但历史仍需关注${text(topFailedRequirement?.label, '执行要求')}漏项。`
+      : `结构决策执行趋势稳定：近 ${evaluations.length} 批均按推荐动作、段位职责和观察指标落地。`
+
+  return {
+    visible: true,
+    status: latestStatus,
+    label: '扩批结构决策执行趋势',
+    summary,
+    total_batch_count: evaluations.length,
+    passed_batch_count: evaluations.length - failedEvaluations.length,
+    failed_batch_count: failedEvaluations.length,
+    latest_status: latestStatus,
+    latest_batch_created_at: text(latest.latestBatchCreatedAt),
+    latest_chapter_nos: arrayValue(latest.latestChapterNos).map(chapterNo => Number(chapterNo)).filter(chapterNo => chapterNo > 0),
+    latest_segment_key: text(latestReview.segment_key),
+    latest_segment_label: text(latestReview.segment_label),
+    top_failed_recommendation: topFailedRecommendation,
+    top_failed_requirement: topFailedRequirement,
+    top_failed_segment: topFailedSegment,
+    suggested_target_chapter_count: suggestedTargetChapterCount,
+  }
+}
+
 function buildSafeBatchExpansionSegmentReview(args: {
   preflight?: AnyRecord | null
   chapterRisks: AnyRecord[]
@@ -4045,6 +4420,9 @@ function safeBatchExpansionFeedbackSnapshot(feedback: AnyRecord) {
     } : {}),
     ...(feedback?.expansionStructureRepairEffectiveness ? {
       expansion_structure_repair_effectiveness: feedback.expansionStructureRepairEffectiveness,
+    } : {}),
+    ...(feedback?.expansionStructureDecisionTrend ? {
+      expansion_structure_decision_trend: feedback.expansionStructureDecisionTrend,
     } : {}),
   }
 }
@@ -4484,6 +4862,24 @@ function buildSafeBatchExpansionFeedback(args: {
     }))
     .filter(entry => Boolean(safeBatchExpansionStructureVerificationFromPreflight(entry.preflight)))
     .sort((a, b) => recordTime(b.run) - recordTime(a.run))
+  const structureDecisionEntries = arrayValue(args.runRecords)
+    .filter(run => text(run?.run_type) === 'batch_generate_prose')
+    .map(run => ({
+      run,
+      input: parsePayload(run?.input_ref) || {},
+      output: parsePayload(run?.output_ref) || {},
+    }))
+    .filter(entry => text(entry.input?.source) === 'auto_creation_safe_batch')
+    .map(entry => ({
+      ...entry,
+      preflight: entry.input?.batch_preflight || entry.input?.batchPreflight || null,
+      items: safeBatchExpansionItemsFromOutput(entry.output),
+    }))
+    .filter(entry => Boolean(safeBatchExpansionStructureDecisionFromContext({
+      nextBatchBrief: entry.input?.next_batch_brief || entry.input?.nextBatchBrief || null,
+      batchPreflight: entry.preflight,
+    })))
+    .sort((a, b) => recordTime(b.run) - recordTime(a.run))
 
   const evaluations = expandedEntries
     .slice(0, 5)
@@ -4523,6 +4919,15 @@ function buildSafeBatchExpansionFeedback(args: {
     validationEvaluations: structureValidationEvaluations,
     expansionEvaluations: expansionEvaluationsForTrend,
   })
+  const expansionStructureDecisionTrend = buildSafeBatchExpansionStructureDecisionTrend({
+    decisionEvaluations: structureDecisionEntries
+      .slice(0, 12)
+      .map(entry => safeBatchExpansionStructureDecisionEntryEvaluation({
+        entry,
+        chapters: args.chapters,
+        reviews: args.reviews,
+      })),
+  })
   if (!latest) {
     if (latestStructureValidation) {
       const result = latestStructureValidation.result
@@ -4548,6 +4953,7 @@ function buildSafeBatchExpansionFeedback(args: {
         expansionStructureValidationResult: result,
         expansionStructureValidationTrend,
         expansionStructureRepairEffectiveness,
+        expansionStructureDecisionTrend,
       }
     }
     return {
@@ -4565,6 +4971,7 @@ function buildSafeBatchExpansionFeedback(args: {
       rollbackPolicy: null,
       expansionStructureValidationTrend,
       expansionStructureRepairEffectiveness,
+      expansionStructureDecisionTrend,
     }
   }
 
@@ -4616,6 +5023,7 @@ function buildSafeBatchExpansionFeedback(args: {
       expansionStructureValidationResult: result,
       expansionStructureValidationTrend,
       expansionStructureRepairEffectiveness,
+      expansionStructureDecisionTrend,
     }
   }
 
@@ -4635,6 +5043,7 @@ function buildSafeBatchExpansionFeedback(args: {
       rollbackPolicy: null,
       expansionStructureValidationTrend,
       expansionStructureRepairEffectiveness,
+      expansionStructureDecisionTrend,
     }
   }
   if (latest.segmentResolved && latest.effectiveRiskCount <= 0) {
@@ -4651,6 +5060,7 @@ function buildSafeBatchExpansionFeedback(args: {
       rollbackPolicy: null,
       expansionStructureValidationTrend,
       expansionStructureRepairEffectiveness,
+      expansionStructureDecisionTrend,
     }
   }
 
@@ -4675,6 +5085,7 @@ function buildSafeBatchExpansionFeedback(args: {
     rollbackPolicy,
     expansionStructureValidationTrend,
     expansionStructureRepairEffectiveness,
+    expansionStructureDecisionTrend,
   }
 }
 
@@ -6173,9 +6584,54 @@ function buildBatchRiskRadar(args: {
   const safeBatchExpansionStructureValidationRiskTotal = safeBatchExpansionStructureValidationResult.visible
     ? Number(safeBatchExpansionStructureValidationResult.risk_count || 0)
     : 0
+  const safeBatchExpansionStructureDecisionReview = buildSafeBatchExpansionStructureDecisionExecutionReview({
+    nextBatchBrief: args.nextBatchBrief,
+    batchPreflight: args.batchPreflight,
+    items: successfulItems,
+    chapters: args.chapters,
+    reviews: args.reviews,
+  })
+  const safeBatchExpansionStructureDecisionResolved = safeBatchExpansionStructureDecisionReview.visible
+    && arrayValue(safeBatchExpansionStructureDecisionReview.failed_items).length > 0
+    && arrayValue(safeBatchExpansionStructureDecisionReview.failed_items).every((failed: AnyRecord) => batchRiskIssueResolved(
+      args.resolvedIssueKeys,
+      { chapterId: failed.chapter_id ?? null, chapterNo: Number(failed.chapter_no || 0) },
+      'safe_batch_expansion_structure_decision_mismatch',
+    ))
+  const effectiveSafeBatchExpansionStructureDecisionReview = safeBatchExpansionStructureDecisionResolved
+    ? {
+      ...safeBatchExpansionStructureDecisionReview,
+      status: 'ok' as const,
+      risk_count: 0,
+      missed_chapter_nos: [],
+      failed_items: [],
+      summary: '扩批结构决策执行风险已修复并通过复检。',
+    }
+    : safeBatchExpansionStructureDecisionReview
+  const safeBatchExpansionStructureDecisionRiskTotal = effectiveSafeBatchExpansionStructureDecisionReview.visible
+    ? Number(effectiveSafeBatchExpansionStructureDecisionReview.risk_count || 0)
+    : 0
   const safeBatchExpansionStructureValidationTrend = args.expansionFeedback?.expansionStructureValidationTrend
     || args.expansionFeedback?.expansion_structure_validation_trend
     || null
+  if (safeBatchExpansionStructureDecisionRiskTotal > 0 && successfulItems.length > 0) {
+    const failedChapterNo = Number(effectiveSafeBatchExpansionStructureDecisionReview.missed_chapter_nos?.[0] || 0)
+    const failedItem = successfulItems.find(item => Number(item.chapterNo || 0) === failedChapterNo) || successfulItems[0]
+    repairTasks.push(batchRepairTask({
+      item: failedItem,
+      issueType: 'safe_batch_expansion_structure_decision_mismatch',
+      taskType: 'repair_planning',
+      severity: safeBatchExpansionStructureDecisionRiskTotal >= 3 || text(effectiveSafeBatchExpansionStructureDecisionReview.recommendation) === 'escalate_structure_redesign' ? 'high' : 'medium',
+      message: `扩批结构决策未落地，${safeBatchExpansionStructureDecisionRiskTotal} 项段位职责、观察指标或重构原则缺口会放大扩批复发风险。`,
+      action: '回到下一批任务书和正文：逐章补齐扩批结构决策的段位职责、观察指标和必要的重构原则，再重新运行批次复盘。',
+      metrics: {
+        safe_batch_expansion_structure_decision_risk_count: safeBatchExpansionStructureDecisionRiskTotal,
+        target_chapter_count: effectiveSafeBatchExpansionStructureDecisionReview.target_chapter_count,
+        recommendation: effectiveSafeBatchExpansionStructureDecisionReview.recommendation,
+      },
+      safeBatchExpansionStructureDecisionReview: effectiveSafeBatchExpansionStructureDecisionReview,
+    }))
+  }
   if (safeBatchExpansionSegmentRiskTotal > 0 && successfulItems.length > 0) {
     const hotspotChapterNo = Number(effectiveSafeBatchExpansionSegmentReview.hotspots?.[0]?.chapterNos?.[0] || 0)
     const hotspotItem = successfulItems.find(item => Number(item.chapterNo || 0) === hotspotChapterNo) || successfulItems[0]
@@ -6523,6 +6979,14 @@ function buildBatchRiskRadar(args: {
       detail: safeBatchExpansionStructureValidationResult.summary,
     })
   }
+  if (effectiveSafeBatchExpansionStructureDecisionReview.visible) {
+    signals.push({
+      key: 'batch_expansion_structure_decision',
+      label: '扩批结构决策',
+      status: safeBatchExpansionStructureDecisionRiskTotal > 0 ? 'warn' : 'ok',
+      detail: effectiveSafeBatchExpansionStructureDecisionReview.summary,
+    })
+  }
   const status: AutoCreationBatchRiskStatus = signals.some(signal => signal.status === 'warn') ? 'warn' : 'ok'
 
   return {
@@ -6556,6 +7020,8 @@ function buildBatchRiskRadar(args: {
     safeBatchExpansionSegmentReview: effectiveSafeBatchExpansionSegmentReview,
     safeBatchExpansionStructureValidationRiskCount: safeBatchExpansionStructureValidationRiskTotal,
     safeBatchExpansionStructureValidationResult,
+    safeBatchExpansionStructureDecisionRiskCount: safeBatchExpansionStructureDecisionRiskTotal,
+    safeBatchExpansionStructureDecisionReview: effectiveSafeBatchExpansionStructureDecisionReview,
     checklistExecution: effectiveBatchChecklistExecution,
     signals,
     repairTasks: repairTasks.slice(0, 40),
@@ -6624,6 +7090,7 @@ function buildBatchCompletionDashboard(args: {
     + args.riskRadar.strengthenedRepairAcceptanceRiskCount * 12
     + args.riskRadar.safeBatchExpansionSegmentRiskCount * 10
     + args.riskRadar.safeBatchExpansionStructureValidationRiskCount * 12
+    + args.riskRadar.safeBatchExpansionStructureDecisionRiskCount * 12
   const planScore = clampScore(100 - planPenalty)
   const checklistScore = args.riskRadar.checklistExecution.visible ? args.riskRadar.checklistExecution.score : 100
   const recoveryEvidenceSignal = args.riskRadar.signals.find(signal => signal.key === 'recovery_evidence')
@@ -6751,6 +7218,7 @@ function batchRiskLabels(riskRadar: AutoCreationBatchRiskRadar) {
     riskRadar.strengthenedRepairAcceptanceRiskCount > 0 ? '强化复盘' : '',
     riskRadar.safeBatchExpansionSegmentRiskCount > 0 ? '扩批分段' : '',
     riskRadar.safeBatchExpansionStructureValidationRiskCount > 0 ? '扩批结构' : '',
+    riskRadar.safeBatchExpansionStructureDecisionRiskCount > 0 ? '扩批结构决策' : '',
   ].filter(Boolean)
 }
 
@@ -8022,6 +8490,7 @@ function emptyNextBatchBrief(): AutoCreationNextBatchBrief {
     mainlineFocus: '',
     forbiddenBoundary: '',
     expansionStructureVerification: null,
+    expansionStructureDecision: null,
     startChecklist: [],
     chapters: [],
   }
@@ -8178,6 +8647,76 @@ function buildSafeBatchExpansionStructureVerification(args: {
   }
 }
 
+function buildSafeBatchExpansionStructureDecision(policy?: AnyRecord | null) {
+  if (!policy?.visible) return null
+  const feedback = policy.expansionFeedback || policy.expansion_feedback || null
+  const effectiveness = feedback?.expansionStructureRepairEffectiveness
+    || feedback?.expansion_structure_repair_effectiveness
+    || null
+  const decisionTrend = feedback?.expansionStructureDecisionTrend
+    || feedback?.expansion_structure_decision_trend
+    || null
+  const decisionTrendWarn = text(decisionTrend?.status) === 'warn'
+  if (!effectiveness?.visible && !decisionTrendWarn) return null
+  const effectivenessRecommendation = text(effectiveness?.recommendation)
+  const recommendation = decisionTrendWarn ? 'continue_small_validation' : effectivenessRecommendation
+  if (!recommendation) return null
+  const targetChapterCount = Number(policy.targetChapterCount ?? policy.target_chapter_count ?? 0)
+  const topFailedRequirement = decisionTrend?.top_failed_requirement || decisionTrend?.topFailedRequirement || null
+  const topFailedSegment = decisionTrend?.top_failed_segment || decisionTrend?.topFailedSegment || null
+  const segmentLabel = text(
+    effectiveness?.segment_label || effectiveness?.segmentLabel,
+    text(decisionTrend?.latest_segment_label || decisionTrend?.latestSegmentLabel, text(topFailedSegment?.label, '复发段位')),
+  )
+  const baselinePassRate = Number(effectiveness?.baseline_pass_rate ?? effectiveness?.baselinePassRate ?? 0)
+  const currentPassRate = Number(effectiveness?.current_pass_rate ?? effectiveness?.currentPassRate ?? 0)
+  const baselineFailureReasonCount = Number(effectiveness?.baseline_failure_reason_count ?? effectiveness?.baselineFailureReasonCount ?? 0)
+  const currentFailureReasonCount = Number(effectiveness?.current_failure_reason_count ?? effectiveness?.currentFailureReasonCount ?? 0)
+  const currentRecurrenceInterval = Number(effectiveness?.current_recurrence_interval_batch_count ?? effectiveness?.currentRecurrenceIntervalBatchCount ?? 0)
+  const modeLabel = decisionTrendWarn
+    ? '结构决策执行补齐'
+    : recommendation === 'restore_five_chapter'
+    ? '恢复5章扩批'
+    : recommendation === 'continue_small_validation'
+      ? '继续小批验证'
+      : '单章结构重构'
+  const baseInstruction = recommendation === 'restore_five_chapter'
+    ? `恢复 5 章扩批，但每章必须明确前段/中段/后段职责，${segmentLabel}不能再次变成空铺垫、掉回报或弱追读。`
+    : recommendation === 'continue_small_validation'
+      ? `继续 2-3 章小批验证，逐章观察通过率、失败主因和同段复发，不得提前恢复 5 章节奏。`
+      : `回到单章结构重构，先重写批次设计原则和${segmentLabel}职责，再恢复多章连写。`
+  const trendInstruction = decisionTrendWarn
+    ? `先按结构决策执行趋势补齐${text(topFailedRequirement?.label, '段位职责和观察指标')}，下一批保持 ${Math.max(1, targetChapterCount || 3)} 章小批验证；每章必须回填扩批结构决策执行回执。`
+    : ''
+  const instruction = trendInstruction
+    ? `${trendInstruction}${baseInstruction}`
+    : baseInstruction
+  const observationMetrics = [
+    ...(effectiveness?.visible ? [
+      `通过率 ${baselinePassRate}% -> ${currentPassRate}%`,
+      `失败主因 ${baselineFailureReasonCount} -> ${currentFailureReasonCount}`,
+      currentRecurrenceInterval > 0 ? `修复后第${currentRecurrenceInterval}个扩批批次复发` : '修复后暂无同段复发',
+    ] : []),
+    ...(decisionTrendWarn && topFailedRequirement ? [
+      `结构决策漏项：${text(topFailedRequirement.label, '执行要求')} ${Number(topFailedRequirement.count || 0)}`,
+    ] : []),
+  ]
+
+  return {
+    visible: true,
+    label: '结构修复决策',
+    recommendation,
+    targetChapterCount,
+    modeLabel,
+    summary: text(effectiveness?.summary, text(decisionTrend?.summary)),
+    instruction,
+    sourceRunId: effectiveness?.source_run_id ?? effectiveness?.sourceRunId ?? null,
+    segmentKey: text(effectiveness?.segment_key || effectiveness?.segmentKey || decisionTrend?.latest_segment_key || decisionTrend?.latestSegmentKey || topFailedSegment?.key),
+    segmentLabel,
+    observationMetrics,
+  }
+}
+
 function buildNextBatchBriefStartChecklist(args: {
   planning: PlanningWorkspaceModel
   chapters: AutoCreationNextBatchBriefChapter[]
@@ -8185,6 +8724,7 @@ function buildNextBatchBriefStartChecklist(args: {
   mainlineFocus: string
   forbiddenBoundary: string
   expansionStructureVerification?: AnyRecord | null
+  expansionStructureDecision?: AnyRecord | null
 }): AutoCreationNextBatchBriefStartChecklistItem[] {
   const chapterTasks = args.chapters
     .map(item => item.chapterTask || item.conflict)
@@ -8245,6 +8785,18 @@ function buildNextBatchBriefStartChecklist(args: {
       '已修复扩批结构，本批需要用2-3章验证固定段落职责、冲突换源、显性回报和章末追读。',
     ))
   }
+  if (args.expansionStructureDecision) {
+    checklist.push(checklistItem(
+      'expansion_structure',
+      '结构修复决策',
+      firstText(
+        args.expansionStructureDecision.instruction,
+        args.expansionStructureDecision.summary,
+        args.expansionStructureDecision.modeLabel,
+      ),
+      '结构修复有效性已决定本批扩批策略，必须按该决策执行章节职责和观察指标。',
+    ))
+  }
   return checklist
 }
 
@@ -8254,6 +8806,7 @@ function buildNextBatchBrief(args: {
   safeChapterCount: number
   chapters?: AnyRecord[] | null
   expansionStructureVerificationSeed?: AnyRecord | null
+  safeBatchExpansionPolicy?: AnyRecord | null
 }): AutoCreationNextBatchBrief {
   if (args.safeChapterCount <= 0) return emptyNextBatchBrief()
   const targetNo = Number(args.writing.nextChapter?.chapterNo || 0)
@@ -8314,6 +8867,7 @@ function buildNextBatchBrief(args: {
     seed: args.expansionStructureVerificationSeed,
     chapters,
   })
+  const expansionStructureDecision = buildSafeBatchExpansionStructureDecision(args.safeBatchExpansionPolicy)
 
   return {
     visible: true,
@@ -8323,6 +8877,7 @@ function buildNextBatchBrief(args: {
     mainlineFocus,
     forbiddenBoundary,
     expansionStructureVerification,
+    expansionStructureDecision,
     startChecklist: buildNextBatchBriefStartChecklist({
       planning: args.planning,
       chapters,
@@ -8330,6 +8885,7 @@ function buildNextBatchBrief(args: {
       mainlineFocus,
       forbiddenBoundary,
       expansionStructureVerification,
+      expansionStructureDecision,
     }),
     chapters,
   }
@@ -9167,6 +9723,7 @@ function buildBatchGuardrail(args: {
     safeChapterCount: queueLimitedPreliminarySafeChapterCount,
     chapters: args.chapters,
     expansionStructureVerificationSeed,
+    safeBatchExpansionPolicy,
   })
   const batchBriefSignal = buildNextBatchBriefSignal(preliminaryNextBatchBrief, queueLimitedPreliminarySafeChapterCount)
   const briefRepair = buildNextBatchBriefRepair(preliminaryNextBatchBrief, queueLimitedPreliminarySafeChapterCount, batchBriefSignal)
@@ -9280,7 +9837,7 @@ function buildBatchGuardrail(args: {
       : queueLimitedPreliminarySafeChapterCount
   const nextBatchBrief = safeChapterCount === queueLimitedPreliminarySafeChapterCount
     ? preliminaryNextBatchBrief
-    : buildNextBatchBrief({ planning, writing, safeChapterCount, chapters: args.chapters, expansionStructureVerificationSeed })
+    : buildNextBatchBrief({ planning, writing, safeChapterCount, chapters: args.chapters, expansionStructureVerificationSeed, safeBatchExpansionPolicy })
   const releaseWindow = buildBatchReleaseWindow(nextBatchBrief, queueRelease)
   const deliveryRiskCarryOver = normalizeSafeBatchDeliveryRiskCarryOver(
     planningDesk?.episodePlan?.deliveryRiskCarryOver

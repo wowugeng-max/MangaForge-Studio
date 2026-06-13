@@ -4149,7 +4149,7 @@ describe('buildAutoCreationDirectorModel', () => {
   })
 
   test('summarizes structure repair effectiveness after trend-driven repair improves validation', () => {
-    const chapterNos = [64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74]
+    const chapterNos = [41, 42, 43, 44, 45, 46, 47, 48, 49, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74]
     const model = buildAutoCreationDirectorModel({
       planning: readySafeBatchPlanning({ futureRoute: futureRouteRange(75, 5) }),
       writing: readySafeBatchWriting({
@@ -4166,11 +4166,17 @@ describe('buildAutoCreationDirectorModel', () => {
         chapter_text: '结构有效性正文'.repeat(500),
       })),
       reviews: [
+        ...strengthenedAcceptanceQualityReviews([41, 42, 43], 6241, '2026-06-13T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([44, 45, 46], 6244, '2026-06-14T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([47, 48, 49], 6247, '2026-06-15T01:00:00.000Z'),
         ...strengthenedAcceptanceQualityReviews([64, 65, 66], 6251, '2026-06-17T01:00:00.000Z'),
         ...strengthenedAcceptanceQualityReviews([67, 68, 69], 6261, '2026-06-18T01:00:00.000Z'),
         ...strengthenedAcceptanceQualityReviews([70, 71, 72, 73, 74], 6271, '2026-06-19T01:00:00.000Z'),
       ],
       runRecords: [
+        strengthenedAcceptanceBatchRun({ id: 622, createdAt: '2026-06-13T00:00:00.000Z', chapterNos: [41, 42, 43] }),
+        strengthenedAcceptanceBatchRun({ id: 623, createdAt: '2026-06-14T00:00:00.000Z', chapterNos: [44, 45, 46] }),
+        strengthenedAcceptanceBatchRun({ id: 624, createdAt: '2026-06-15T00:00:00.000Z', chapterNos: [47, 48, 49] }),
         {
           id: 625,
           run_type: 'longform_production_repair',
@@ -4224,6 +4230,7 @@ describe('buildAutoCreationDirectorModel', () => {
 
     const policy = model.batchGuardrail.preflight.inputSnapshot.safe_batch_expansion_policy
     const effectiveness = policy.expansion_feedback.expansion_structure_repair_effectiveness
+    const nextBatchBrief = model.batchGuardrail.nextBatchBrief
 
     expect(effectiveness).toMatchObject({
       visible: true,
@@ -4245,6 +4252,241 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(effectiveness.summary).toContain('通过率 67% -> 100%')
     expect(effectiveness.summary).toContain('失败主因 3 -> 0')
     expect(effectiveness.summary).toContain('暂无同段复发')
+    expect(nextBatchBrief.expansionStructureDecision).toMatchObject({
+      visible: true,
+      label: '结构修复决策',
+      recommendation: 'restore_five_chapter',
+      targetChapterCount: 5,
+      segmentLabel: '中段',
+    })
+    expect(nextBatchBrief.expansionStructureDecision.instruction).toContain('恢复 5 章')
+    expect(nextBatchBrief.expansionStructureDecision.observationMetrics).toEqual(expect.arrayContaining([
+      expect.stringContaining('通过率 67% -> 100%'),
+      expect.stringContaining('失败主因 3 -> 0'),
+    ]))
+    expect(nextBatchBrief.startChecklist).toContainEqual(expect.objectContaining({
+      key: 'expansion_structure',
+      label: '结构修复决策',
+      detail: expect.stringContaining('恢复 5 章'),
+    }))
+  })
+
+  test('keeps small validation when structure repair effectiveness is improved but inconclusive', () => {
+    const chapterNos = [41, 42, 43, 44, 45, 46, 47, 48, 49, 64, 65, 66, 67, 68, 69]
+    const model = buildAutoCreationDirectorModel({
+      planning: readySafeBatchPlanning({ futureRoute: futureRouteRange(70, 5) }),
+      writing: readySafeBatchWriting({
+        nextChapter: { ...baseWriting.nextChapter, id: 70, chapterNo: 70, title: '结构观察70' },
+        previousChapter: { chapterNo: 69, title: '结构观察69', wordCount: 3200, hasProse: true },
+      }),
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: { last_updated_chapter: 69 },
+      chapters: chapterNos.map(chapterNo => ({
+        id: chapterNo,
+        chapter_no: chapterNo,
+        title: `结构观察${chapterNo}`,
+        chapter_text: '结构观察正文'.repeat(500),
+      })),
+      reviews: [
+        ...strengthenedAcceptanceQualityReviews([41, 42, 43], 6281, '2026-06-14T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([44, 45, 46], 6291, '2026-06-15T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([47, 48, 49], 6301, '2026-06-16T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([64, 65, 66], 6311, '2026-06-17T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([67, 68, 69], 6321, '2026-06-18T01:00:00.000Z'),
+        {
+          id: 6331,
+          chapter_id: 65,
+          review_type: 'chapter_core_drift',
+          created_at: '2026-06-17T01:10:00.000Z',
+          payload: JSON.stringify({ chapter_core_drift: { status: 'warn', drift_risks: ['第一轮验证批中段仍偏离阵盘主线承诺'] } }),
+        },
+      ],
+      runRecords: [
+        strengthenedAcceptanceBatchRun({ id: 629, createdAt: '2026-06-14T00:00:00.000Z', chapterNos: [41, 42, 43] }),
+        strengthenedAcceptanceBatchRun({ id: 630, createdAt: '2026-06-15T00:00:00.000Z', chapterNos: [44, 45, 46] }),
+        strengthenedAcceptanceBatchRun({ id: 631, createdAt: '2026-06-16T00:00:00.000Z', chapterNos: [47, 48, 49] }),
+        {
+          id: 632,
+          run_type: 'longform_production_repair',
+          created_at: '2026-06-16T12:00:00.000Z',
+          completed_at: '2026-06-16T12:30:00.000Z',
+          status: 'success',
+          input_ref: JSON.stringify({ source: 'auto_creation_safe_batch_risk' }),
+          output_ref: JSON.stringify({
+            tasks: [{
+              issue_type: 'safe_batch_expansion_structure_repair',
+              task_status: 'resolved',
+              chapter_no: 61,
+              safe_batch_expansion_structure_review: {
+                repeated_hotspot_segment: { key: 'middle', label: '中段', count: 3 },
+                latest_chapter_nos: [59, 60, 61, 62, 63],
+                affected_chapter_nos: [61],
+                expansion_structure_validation_trend: {
+                  visible: true,
+                  status: 'warn',
+                  label: '扩批结构验证趋势',
+                  summary: '中段验证通过率 0%（0/2批），失败主因：核心偏移2、回报欠账1，恢复5章后第1个扩批批次复发。',
+                  segment_key: 'middle',
+                  segment_label: '中段',
+                  validation_batch_count: 2,
+                  passed_batch_count: 0,
+                  failed_batch_count: 2,
+                  pass_rate: 0,
+                  latest_status: 'warn',
+                  latest_chapter_nos: [56, 57, 58],
+                  failure_reasons: [
+                    { key: 'core', label: '核心偏移', count: 2 },
+                    { key: 'payoff', label: '回报欠账', count: 1 },
+                  ],
+                  recurrence_after_restore: {
+                    visible: true,
+                    interval_batch_count: 1,
+                    interval_label: '恢复5章后第1个扩批批次复发',
+                    recurrence_chapter_nos: [59, 60, 61, 62, 63],
+                  },
+                },
+              },
+            }],
+          }),
+        },
+        expansionStructureValidationBatchRun({ id: 633, createdAt: '2026-06-17T00:00:00.000Z', chapterNos: [64, 65, 66] }),
+        expansionStructureValidationBatchRun({ id: 634, createdAt: '2026-06-18T00:00:00.000Z', chapterNos: [67, 68, 69] }),
+      ],
+    } as any)
+
+    const policy = model.batchGuardrail.preflight.inputSnapshot.safe_batch_expansion_policy
+    const effectiveness = policy.expansion_feedback.expansion_structure_repair_effectiveness
+
+    expect(effectiveness).toMatchObject({
+      status: 'ok',
+      recommendation: 'continue_small_validation',
+      baseline_pass_rate: 0,
+      current_pass_rate: 50,
+      baseline_failure_reason_count: 3,
+      current_failure_reason_count: 1,
+    })
+    expect(policy).toMatchObject({
+      status: 'recovering',
+      target_chapter_count: 3,
+    })
+    expect(policy.summary).toContain('结构修复有效性建议继续小批验证')
+  })
+
+  test('downgrades to structure redesign when repair effectiveness regresses', () => {
+    const chapterNos = [41, 42, 43, 44, 45, 46, 47, 48, 49, 64, 65, 66]
+    const model = buildAutoCreationDirectorModel({
+      planning: readySafeBatchPlanning({ futureRoute: futureRouteRange(67, 5) }),
+      writing: readySafeBatchWriting({
+        nextChapter: { ...baseWriting.nextChapter, id: 67, chapterNo: 67, title: '结构重构67' },
+        previousChapter: { chapterNo: 66, title: '结构重构66', wordCount: 3200, hasProse: true },
+      }),
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: { last_updated_chapter: 66 },
+      chapters: chapterNos.map(chapterNo => ({
+        id: chapterNo,
+        chapter_no: chapterNo,
+        title: `结构重构${chapterNo}`,
+        chapter_text: '结构重构正文'.repeat(500),
+      })),
+      reviews: [
+        ...strengthenedAcceptanceQualityReviews([41, 42, 43], 6341, '2026-06-14T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([44, 45, 46], 6351, '2026-06-15T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([47, 48, 49], 6361, '2026-06-16T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([64, 65, 66], 6371, '2026-06-17T01:00:00.000Z'),
+        {
+          id: 6381,
+          chapter_id: 65,
+          review_type: 'chapter_core_drift',
+          created_at: '2026-06-17T01:10:00.000Z',
+          payload: JSON.stringify({ chapter_core_drift: { status: 'warn', drift_risks: ['修复后中段仍偏离阵盘主线承诺'] } }),
+        },
+        {
+          id: 6382,
+          chapter_id: 66,
+          review_type: 'reader_payoff_sync',
+          created_at: '2026-06-17T01:11:00.000Z',
+          payload: JSON.stringify({ reader_payoff_sync: { status: 'warn', debt_count: 1, missed: ['修复后中段回报仍没有显性兑现'] } }),
+        },
+        {
+          id: 6383,
+          chapter_id: 66,
+          review_type: 'reader_retention_sync',
+          created_at: '2026-06-17T01:12:00.000Z',
+          payload: JSON.stringify({ reader_retention_sync: { status: 'warn', missed_count: 1, missed: ['修复后中段章末追读问题仍重复'] } }),
+        },
+      ],
+      runRecords: [
+        strengthenedAcceptanceBatchRun({ id: 635, createdAt: '2026-06-14T00:00:00.000Z', chapterNos: [41, 42, 43] }),
+        strengthenedAcceptanceBatchRun({ id: 636, createdAt: '2026-06-15T00:00:00.000Z', chapterNos: [44, 45, 46] }),
+        strengthenedAcceptanceBatchRun({ id: 637, createdAt: '2026-06-16T00:00:00.000Z', chapterNos: [47, 48, 49] }),
+        {
+          id: 638,
+          run_type: 'longform_production_repair',
+          created_at: '2026-06-16T12:00:00.000Z',
+          completed_at: '2026-06-16T12:30:00.000Z',
+          status: 'success',
+          input_ref: JSON.stringify({ source: 'auto_creation_safe_batch_risk' }),
+          output_ref: JSON.stringify({
+            tasks: [{
+              issue_type: 'safe_batch_expansion_structure_repair',
+              task_status: 'resolved',
+              chapter_no: 61,
+              safe_batch_expansion_structure_review: {
+                repeated_hotspot_segment: { key: 'middle', label: '中段', count: 3 },
+                latest_chapter_nos: [59, 60, 61, 62, 63],
+                affected_chapter_nos: [61],
+                expansion_structure_validation_trend: {
+                  visible: true,
+                  status: 'warn',
+                  label: '扩批结构验证趋势',
+                  summary: '中段验证通过率 67%（2/3批），失败主因：核心偏移1、回报欠账1、追读拉力1，恢复5章后第1个扩批批次复发。',
+                  segment_key: 'middle',
+                  segment_label: '中段',
+                  validation_batch_count: 3,
+                  passed_batch_count: 2,
+                  failed_batch_count: 1,
+                  pass_rate: 67,
+                  latest_status: 'ok',
+                  latest_chapter_nos: [56, 57, 58],
+                  failure_reasons: [
+                    { key: 'core', label: '核心偏移', count: 1 },
+                    { key: 'payoff', label: '回报欠账', count: 1 },
+                    { key: 'reader_pull', label: '追读拉力', count: 1 },
+                  ],
+                  recurrence_after_restore: {
+                    visible: true,
+                    interval_batch_count: 1,
+                    interval_label: '恢复5章后第1个扩批批次复发',
+                    recurrence_chapter_nos: [59, 60, 61, 62, 63],
+                  },
+                },
+              },
+            }],
+          }),
+        },
+        expansionStructureValidationBatchRun({ id: 639, createdAt: '2026-06-17T00:00:00.000Z', chapterNos: [64, 65, 66] }),
+      ],
+    } as any)
+
+    const policy = model.batchGuardrail.preflight.inputSnapshot.safe_batch_expansion_policy
+    const effectiveness = policy.expansion_feedback.expansion_structure_repair_effectiveness
+
+    expect(effectiveness).toMatchObject({
+      status: 'warn',
+      recommendation: 'escalate_structure_redesign',
+      baseline_pass_rate: 67,
+      current_pass_rate: 0,
+      baseline_failure_reason_count: 3,
+      current_failure_reason_count: 3,
+    })
+    expect(policy).toMatchObject({
+      status: 'recovering',
+      target_chapter_count: 1,
+    })
+    expect(policy.summary).toContain('结构修复有效性要求升级批次设计重构')
+    expect(policy.summary).toContain('回到单章治理')
   })
 
   test('downgrades to single chapter when the latest strengthened recovery acceptance trend fails', () => {
@@ -8755,6 +8997,261 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(acceptanceMetric?.detail).toContain('强化深修恢复验收已通过')
     expect(model.batchReviewQueue.completionDashboard.summary).toContain('强化深修恢复验收已通过')
     expect(model.batchReviewQueue.handoff.evidence).toContain('强化深修恢复验收已通过')
+  })
+
+  test('turns missed expansion structure decision execution into a batch repair task', () => {
+    const chapterNos = [70, 71, 72, 73, 74]
+    const model = buildAutoCreationDirectorModel({
+      planning: readySafeBatchPlanning({ futureRoute: futureRouteRange(75, 5) }),
+      writing: readySafeBatchWriting({
+        nextChapter: { ...baseWriting.nextChapter, id: 75, chapterNo: 75, title: '结构决策后续' },
+        previousChapter: { chapterNo: 74, title: '结构决策五', wordCount: 3200, hasProse: true },
+      }),
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: { last_updated_chapter: 74 },
+      chapters: chapterNos.map(chapterNo => ({
+        id: chapterNo,
+        chapter_no: chapterNo,
+        title: `结构决策${chapterNo}`,
+        chapter_text: '结构决策正文'.repeat(500),
+        raw_payload: chapterNo === 72 ? {} : {
+          generated_scene_breakdown: [{
+            expansion_structure_decision_execution: {
+              segment_role_delivered: true,
+              observation_metrics_delivered: true,
+              redesign_principles_delivered: true,
+              evidence: [`第${chapterNo}章已按段位职责推进主线转折并回填观察指标。`],
+            },
+          }],
+        },
+      })),
+      reviews: [
+        ...strengthenedAcceptanceQualityReviews(chapterNos, 7001, '2026-06-20T01:00:00.000Z'),
+        {
+          id: 7101,
+          chapter_id: 72,
+          review_type: 'safe_batch_expansion_structure_decision_sync',
+          created_at: '2026-06-20T01:20:00.000Z',
+          payload: JSON.stringify({
+            expansion_structure_decision_sync: {
+              status: 'warn',
+              missed_count: 2,
+              missed: [
+                { key: 'segment_role', label: '中段职责', text: '第72章没有承担中段主线转折和显性回报职责。' },
+                { key: 'observation_metrics', label: '观察指标', text: '正文没有证明通过率和失败主因已按结构修复观察。' },
+              ],
+              segment_role_delivered: false,
+              observation_metrics_delivered: false,
+              redesign_principles_delivered: true,
+            },
+          }),
+        },
+      ],
+      runRecords: [
+        {
+          id: 710,
+          run_type: 'batch_generate_prose',
+          created_at: '2026-06-20T00:00:00.000Z',
+          status: 'success',
+          input_ref: JSON.stringify({
+            source: 'auto_creation_safe_batch',
+            safety_limit: 5,
+            next_batch_brief: {
+              chapter_range_label: '第70-74章',
+              expansion_structure_decision: {
+                visible: true,
+                label: '结构修复决策',
+                recommendation: 'restore_five_chapter',
+                target_chapter_count: 5,
+                mode_label: '恢复5章扩批',
+                segment_key: 'middle',
+                segment_label: '中段',
+                summary: '中段结构修复通过率 67% -> 100%，失败主因 3 -> 0。',
+                instruction: '恢复 5 章扩批，但每章必须明确前段/中段/后段职责，中段不得再次变成空铺垫。',
+                observation_metrics: ['通过率 67% -> 100%', '失败主因 3 -> 0', '修复后暂无同段复发'],
+              },
+            },
+          }),
+          output_ref: JSON.stringify({
+            total: 5,
+            success: 5,
+            failed: 0,
+            chapters: chapterNos.map((chapterNo, index) => ({
+              id: chapterNo,
+              chapter_no: chapterNo,
+              title: `结构决策${chapterNo}`,
+              status: 'success',
+              score: 84 + index,
+              word_count: 3100 + index * 20,
+            })),
+          }),
+        },
+      ],
+    } as any)
+
+    const decisionSignal = model.batchReviewQueue.riskRadar.signals.find(signal => signal.key === 'batch_expansion_structure_decision' as any)
+    const decisionTask = model.batchReviewQueue.riskRadar.repairTasks.find((task: any) => task.issue_type === 'safe_batch_expansion_structure_decision_mismatch')
+
+    expect(model.batchReviewQueue.status).toBe('risk')
+    expect((model.batchReviewQueue.riskRadar as any).safeBatchExpansionStructureDecisionRiskCount).toBe(2)
+    expect(decisionSignal?.label).toBe('扩批结构决策')
+    expect(decisionSignal?.status).toBe('warn')
+    expect(decisionSignal?.detail).toContain('结构修复决策未落地')
+    expect(decisionTask?.safe_batch_expansion_structure_decision_review).toMatchObject({
+      recommendation: 'restore_five_chapter',
+      target_chapter_count: 5,
+      segment_label: '中段',
+      missed_chapter_nos: [72],
+      failed_items: expect.arrayContaining([
+        expect.objectContaining({ chapter_no: 72, key: 'segment_role' }),
+        expect.objectContaining({ chapter_no: 72, key: 'observation_metrics' }),
+      ]),
+    })
+    expect(model.batchReviewQueue.handoff.riskLabels).toContain('扩批结构决策')
+  })
+
+  test('uses expansion structure decision execution trend to hold the next batch at small validation', () => {
+    const strengthenedChapterNos = [41, 42, 43, 44, 45, 46, 47, 48, 49]
+    const expansionChapterNos = [70, 71, 72, 73, 74]
+    const model = buildAutoCreationDirectorModel({
+      planning: readySafeBatchPlanning({ futureRoute: futureRouteRange(75, 5) }),
+      writing: readySafeBatchWriting({
+        nextChapter: { ...baseWriting.nextChapter, id: 75, chapterNo: 75, title: '结构决策趋势后续' },
+        previousChapter: { chapterNo: 74, title: '结构决策趋势五', wordCount: 3200, hasProse: true },
+      }),
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: { last_updated_chapter: 74 },
+      chapters: [
+        ...strengthenedChapterNos.map(chapterNo => ({
+          id: chapterNo,
+          chapter_no: chapterNo,
+          title: `强化趋势${chapterNo}`,
+          chapter_text: '强化趋势正文'.repeat(500),
+        })),
+        ...expansionChapterNos.map(chapterNo => ({
+          id: chapterNo,
+          chapter_no: chapterNo,
+          title: `结构决策趋势${chapterNo}`,
+          chapter_text: '结构决策趋势正文'.repeat(500),
+          raw_payload: chapterNo === 72 ? {} : {
+            generated_scene_breakdown: [{
+              expansion_structure_decision_execution: {
+                segment_role_delivered: true,
+                observation_metrics_delivered: true,
+                redesign_principles_delivered: true,
+                evidence: [`第${chapterNo}章已执行结构决策。`],
+              },
+            }],
+          },
+        })),
+      ],
+      reviews: [
+        ...strengthenedAcceptanceQualityReviews([41, 42, 43], 7201, '2026-06-14T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([44, 45, 46], 7211, '2026-06-15T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([47, 48, 49], 7221, '2026-06-16T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews(expansionChapterNos, 7231, '2026-06-20T01:00:00.000Z'),
+        {
+          id: 7241,
+          chapter_id: 72,
+          review_type: 'safe_batch_expansion_structure_decision_sync',
+          created_at: '2026-06-20T01:20:00.000Z',
+          payload: JSON.stringify({
+            expansion_structure_decision_sync: {
+              status: 'warn',
+              missed_count: 2,
+              missed: [
+                { key: 'segment_role', label: '中段职责', text: '第72章没有承担中段主线转折职责。' },
+                { key: 'observation_metrics', label: '观察指标', text: '第72章没有证明失败主因已收敛。' },
+              ],
+            },
+          }),
+        },
+      ],
+      runRecords: [
+        strengthenedAcceptanceBatchRun({ id: 720, createdAt: '2026-06-14T00:00:00.000Z', chapterNos: [41, 42, 43] }),
+        strengthenedAcceptanceBatchRun({ id: 721, createdAt: '2026-06-15T00:00:00.000Z', chapterNos: [44, 45, 46] }),
+        strengthenedAcceptanceBatchRun({ id: 722, createdAt: '2026-06-16T00:00:00.000Z', chapterNos: [47, 48, 49] }),
+        {
+          id: 723,
+          run_type: 'batch_generate_prose',
+          created_at: '2026-06-20T00:00:00.000Z',
+          status: 'success',
+          input_ref: JSON.stringify({
+            source: 'auto_creation_safe_batch',
+            safety_limit: 5,
+            batch_preflight: {
+              safe_chapter_count: 5,
+              allowed_chapter_nos: expansionChapterNos,
+              safe_batch_expansion_policy: {
+                status: 'expanded',
+                label: '强化扩批规则',
+                summary: '结构修复有效后恢复 5 章。',
+                target_chapter_count: 5,
+                base_chapter_count: 3,
+                expanded_chapter_count: 5,
+                required_pass_streak: 3,
+                pass_streak: 3,
+                accepted_batch_count: 3,
+                failed_batch_count: 0,
+                latest_status: 'ok',
+              },
+            },
+            next_batch_brief: {
+              chapter_range_label: '第70-74章',
+              expansion_structure_decision: {
+                visible: true,
+                label: '结构修复决策',
+                recommendation: 'restore_five_chapter',
+                target_chapter_count: 5,
+                mode_label: '恢复5章扩批',
+                segment_key: 'middle',
+                segment_label: '中段',
+                summary: '中段结构修复有效性：通过率 67% -> 100%，失败主因 3 -> 0。',
+                instruction: '恢复 5 章扩批，但每章必须明确前段/中段/后段职责。',
+                observation_metrics: ['通过率 67% -> 100%', '失败主因 3 -> 0'],
+              },
+            },
+          }),
+          output_ref: JSON.stringify({
+            total: 5,
+            success: 5,
+            failed: 0,
+            chapters: expansionChapterNos.map((chapterNo, index) => ({
+              id: chapterNo,
+              chapter_no: chapterNo,
+              title: `结构决策趋势${chapterNo}`,
+              status: 'success',
+              score: 84 + index,
+              word_count: 3100 + index * 20,
+            })),
+          }),
+        },
+      ],
+    } as any)
+
+    const policy = model.batchGuardrail.preflight.inputSnapshot.safe_batch_expansion_policy
+    const decisionTrend = policy.expansion_feedback.expansion_structure_decision_trend
+    const decision = model.batchGuardrail.nextBatchBrief.expansionStructureDecision
+
+    expect(decisionTrend).toMatchObject({
+      visible: true,
+      status: 'warn',
+      total_batch_count: 1,
+      failed_batch_count: 1,
+      latest_status: 'warn',
+      top_failed_recommendation: { key: 'restore_five_chapter', count: 1 },
+      top_failed_requirement: { key: 'segment_role', count: 1 },
+      suggested_target_chapter_count: 3,
+    })
+    expect(policy).toMatchObject({
+      status: 'recovering',
+      target_chapter_count: 3,
+    })
+    expect(policy.summary).toContain('结构决策执行趋势')
+    expect(decision.instruction).toContain('先按结构决策执行趋势补齐')
+    expect(decision.observationMetrics).toContain('结构决策漏项：中段职责 1')
   })
 
   test('shows recovery evidence closure in completion dashboard after repair recheck resolves it', () => {

@@ -579,6 +579,55 @@ describe('chapter prose word target', () => {
     expect(prompt).toContain('每章章末必须留下不同的追读问题')
   })
 
+  test('injects expansion structure decision into paragraph prose prompt', () => {
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+
+    const prompt = service.buildParagraphProseContext(
+      { title: '超人的规则怪谈世界' },
+      {
+        next_batch_brief: {
+          chapter_range_label: '第70-74章',
+          batch_goal: '恢复五章扩批但继续执行段位职责。',
+          expansion_structure_decision: {
+            visible: true,
+            label: '结构修复决策',
+            recommendation: 'restore_five_chapter',
+            target_chapter_count: 5,
+            mode_label: '恢复5章扩批',
+            segment_label: '中段',
+            summary: '中段结构修复有效性：通过率 67% -> 100%，失败主因 3 -> 0，修复后暂无同段复发。',
+            instruction: '恢复 5 章扩批，但每章必须明确前段/中段/后段职责，不能因为放大批次而淡化结构约束。',
+            observation_metrics: ['通过率 67% -> 100%', '失败主因 3 -> 0', '修复后暂无同段复发'],
+          },
+        },
+        chapter_target: {
+          chapter_no: 70,
+          title: '外门夜钟',
+          summary: '验证夜钟规则。',
+          conflict: '是否相信敌人提示。',
+          ending_hook: '钟声倒数。',
+          scene_cards: [],
+        },
+      },
+      null,
+      { chapter_no: 70, title: '外门夜钟' },
+    )
+
+    expect(prompt).toContain('【扩批结构决策】')
+    expect(prompt).toContain('执行 next_batch_brief.expansion_structure_decision')
+    expect(prompt).toContain('restore_five_chapter')
+    expect(prompt).toContain('恢复 5 章扩批')
+    expect(prompt).toContain('通过率 67% -> 100%')
+    expect(prompt).toContain('失败主因 3 -> 0')
+    expect(prompt).toContain('expansion_structure_decision_execution')
+    expect(prompt).toContain('segment_role_delivered')
+    expect(prompt).toContain('observation_metrics_delivered')
+  })
+
   test('injects longform memory anchor from safe batch preflight into paragraph prose prompt', () => {
     const service = createNovelWritingService({
       getProject: async () => null,

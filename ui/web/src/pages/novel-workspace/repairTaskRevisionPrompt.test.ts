@@ -234,6 +234,38 @@ describe('buildRepairTaskRevisionPrompt', () => {
     expect(prompt).toContain('重新运行5章扩批分段复盘')
   })
 
+  test('injects expansion structure decision execution evidence for batch repairs', () => {
+    const prompt = buildRepairTaskRevisionPrompt({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'safe_batch_expansion_structure_decision_mismatch',
+      severity: 'medium',
+      message: '扩批结构决策未落地。',
+      action: '逐章补齐段位职责和观察指标。',
+      safe_batch_expansion_structure_decision_review: {
+        recommendation: 'restore_five_chapter',
+        target_chapter_count: 5,
+        segment_label: '中段',
+        summary: '结构修复决策未落地：第72章有 2 项缺口。',
+        instruction: '恢复 5 章扩批，但每章必须明确前段/中段/后段职责。',
+        observation_metrics: ['通过率 67% -> 100%', '失败主因 3 -> 0'],
+        missed_chapter_nos: [72],
+        failed_items: [
+          { chapter_no: 72, key: 'segment_role', label: '中段职责', text: '第72章没有承担中段主线转折。' },
+          { chapter_no: 72, key: 'observation_metrics', label: '观察指标', text: '正文没有证明观察指标。' },
+        ],
+      },
+    })
+
+    expect(prompt).toContain('【扩批结构决策执行】')
+    expect(prompt).toContain('决策：restore_five_chapter')
+    expect(prompt).toContain('目标批次：5章')
+    expect(prompt).toContain('观察段位：中段')
+    expect(prompt).toContain('观察指标：通过率 67% -> 100%；失败主因 3 -> 0')
+    expect(prompt).toContain('漏项章节：第72章')
+    expect(prompt).toContain('中段职责：第72章没有承担中段主线转折。')
+    expect(prompt).toContain('重新回填 expansion_structure_decision_execution')
+  })
+
   test('injects expansion structure validation trend into structure repair prompts', () => {
     const prompt = buildRepairTaskRevisionPrompt({
       source: 'auto_creation_safe_batch_risk',

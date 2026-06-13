@@ -134,6 +134,7 @@ export function repairTaskActionLabel(task: any) {
   if (String(task?.issue_type || '') === 'style_sample_task_book_rebuild') return '重审样章'
   if (String(task?.source || '') === 'reader_trial_review' || String(task?.issue_type || '') === 'reader_trial_drop_point') return '补试读'
   if (String(task?.issue_type || '') === 'volume_segment_missed') return '补阶段结算'
+  if (String(task?.issue_type || '') === 'safe_batch_expansion_structure_decision_mismatch') return '查结构决策'
   if (String(task?.issue_type || '') === 'safe_batch_expansion_structure_repair') return '改扩批结构'
   if (String(task?.issue_type || '') === 'safe_batch_expansion_segment_hotspot') return '修扩批热区'
   if (String(task?.issue_type || '') === 'reader_pull_missed') return '补追读'
@@ -200,6 +201,7 @@ function repairClosureIssueMeta(task: any) {
   ) return { key: 'reader_pull', label: '追读', color: 'magenta' }
   if (key.includes('payoff')) return { key: 'payoff', label: '回报欠账', color: 'magenta' }
   if (key.includes('volume_beat') || key.includes('volume_segment')) return { key: 'volume_beat', label: '爆点', color: 'gold' }
+  if (key.includes('safe_batch_expansion_structure_decision') || key.includes('batch_expansion_structure_decision')) return { key: 'batch_expansion_structure_decision', label: '结构决策', color: 'blue' }
   if (key.includes('safe_batch_expansion_structure') || key.includes('batch_expansion_structure')) return { key: 'batch_expansion_structure', label: '扩批结构', color: 'blue' }
   if (key.includes('safe_batch_expansion_segment') || key.includes('batch_expansion_segment')) return { key: 'batch_expansion_segment', label: '扩批分段', color: 'blue' }
   if (key.includes('innovation')) return { key: 'innovation', label: '创新', color: 'geekblue' }
@@ -999,6 +1001,7 @@ function repairTaskIssueTag(task: any) {
   if (String(task?.issue_type || '') === 'style_sample_task_book_rebuild') return <Tag color="purple" bordered={false}>样章任务书</Tag>
   if (String(task?.source || '') === 'reader_trial_review' || String(task?.issue_type || '') === 'reader_trial_drop_point') return <Tag color="red" bordered={false}>读者试读</Tag>
   if (String(task?.issue_type || '') === 'volume_segment_missed') return <Tag color="gold" bordered={false}>卷级阶段</Tag>
+  if (String(task?.issue_type || '') === 'safe_batch_expansion_structure_decision_mismatch') return <Tag color="blue" bordered={false}>扩批结构决策</Tag>
   if (String(task?.issue_type || '') === 'safe_batch_expansion_structure_repair') return <Tag color="blue" bordered={false}>扩批结构</Tag>
   if (String(task?.issue_type || '') === 'safe_batch_expansion_segment_hotspot') return <Tag color="blue" bordered={false}>扩批分段</Tag>
   if (String(task?.issue_type || '') === 'reader_pull_missed') return <Tag color="magenta" bordered={false}>读者拉力</Tag>
@@ -1264,6 +1267,7 @@ export type SafeBatchExpansionFeedbackSnapshot = {
   } | null
   structureValidationTrend: SafeBatchExpansionStructureValidationTrendSnapshot | null
   structureRepairEffectiveness: SafeBatchExpansionStructureRepairEffectivenessSnapshot | null
+  structureDecisionTrend: SafeBatchExpansionStructureDecisionTrendSnapshot | null
 }
 
 export type SafeBatchExpansionStructureValidationTrendSnapshot = {
@@ -1312,6 +1316,37 @@ export type SafeBatchExpansionStructureRepairEffectivenessSnapshot = {
   recommendation: string
   baselineTrend: any | null
   currentTrend: any | null
+}
+
+export type SafeBatchExpansionStructureDecisionTrendSnapshot = {
+  visible: boolean
+  status: 'ok' | 'warn'
+  label: string
+  summary: string
+  totalBatchCount: number
+  passedBatchCount: number
+  failedBatchCount: number
+  latestStatus: 'none' | 'ok' | 'warn'
+  latestBatchCreatedAt: string
+  latestChapterNos: number[]
+  latestSegmentKey: string
+  latestSegmentLabel: string
+  topFailedRecommendation: {
+    key: string
+    label: string
+    count: number
+  } | null
+  topFailedRequirement: {
+    key: string
+    label: string
+    count: number
+  } | null
+  topFailedSegment: {
+    key: string
+    label: string
+    count: number
+  } | null
+  suggestedTargetChapterCount: number
 }
 
 export type RecoveryEvidenceSourceRiskProfileSnapshot = {
@@ -1475,6 +1510,50 @@ function buildSafeBatchExpansionStructureRepairEffectivenessSnapshot(effectivene
   }
 }
 
+function buildSafeBatchExpansionStructureDecisionTrendSnapshot(trendLike: any): SafeBatchExpansionStructureDecisionTrendSnapshot | null {
+  const trend = parseJsonValue(trendLike) || trendLike || null
+  if (!trend || trend.visible === false) return null
+  const rawStatus = String(trend?.status || '').trim()
+  const rawLatestStatus = String(trend?.latest_status || trend?.latestStatus || '').trim()
+  const latestStatus = rawLatestStatus === 'ok' || rawLatestStatus === 'warn' ? rawLatestStatus : 'none'
+  const latestChapterNos = (Array.isArray(trend?.latest_chapter_nos)
+    ? trend.latest_chapter_nos
+    : Array.isArray(trend?.latestChapterNos)
+      ? trend.latestChapterNos
+      : []
+  ).map((chapterNo: any) => Number(chapterNo)).filter((chapterNo: number) => chapterNo > 0)
+  const normalizeCount = (source: any) => {
+    if (!source) return null
+    const label = compactEvidenceText(source?.label || source?.key || '')
+    const count = Number(source?.count || 0)
+    if (!label || count <= 0) return null
+    return {
+      key: compactEvidenceText(source?.key || label),
+      label,
+      count,
+    }
+  }
+
+  return {
+    visible: true,
+    status: rawStatus === 'warn' ? 'warn' : 'ok',
+    label: compactEvidenceText(trend?.label || '扩批结构决策执行趋势'),
+    summary: compactEvidenceText(trend?.summary || '扩批结构决策执行趋势已沉淀。'),
+    totalBatchCount: Number(trend?.total_batch_count ?? trend?.totalBatchCount ?? 0),
+    passedBatchCount: Number(trend?.passed_batch_count ?? trend?.passedBatchCount ?? 0),
+    failedBatchCount: Number(trend?.failed_batch_count ?? trend?.failedBatchCount ?? 0),
+    latestStatus,
+    latestBatchCreatedAt: compactEvidenceText(trend?.latest_batch_created_at || trend?.latestBatchCreatedAt || ''),
+    latestChapterNos,
+    latestSegmentKey: compactEvidenceText(trend?.latest_segment_key || trend?.latestSegmentKey || ''),
+    latestSegmentLabel: compactEvidenceText(trend?.latest_segment_label || trend?.latestSegmentLabel || ''),
+    topFailedRecommendation: normalizeCount(trend?.top_failed_recommendation || trend?.topFailedRecommendation),
+    topFailedRequirement: normalizeCount(trend?.top_failed_requirement || trend?.topFailedRequirement),
+    topFailedSegment: normalizeCount(trend?.top_failed_segment || trend?.topFailedSegment),
+    suggestedTargetChapterCount: Number(trend?.suggested_target_chapter_count ?? trend?.suggestedTargetChapterCount ?? 0),
+  }
+}
+
 function buildSafeBatchExpansionFeedbackSnapshot(feedbackLike: any): SafeBatchExpansionFeedbackSnapshot | null {
   const feedback = parseJsonValue(feedbackLike) || feedbackLike || null
   if (!feedback || feedback.visible === false) return null
@@ -1514,6 +1593,9 @@ function buildSafeBatchExpansionFeedbackSnapshot(feedbackLike: any): SafeBatchEx
     ),
     structureRepairEffectiveness: buildSafeBatchExpansionStructureRepairEffectivenessSnapshot(
       feedback?.expansion_structure_repair_effectiveness || feedback?.expansionStructureRepairEffectiveness,
+    ),
+    structureDecisionTrend: buildSafeBatchExpansionStructureDecisionTrendSnapshot(
+      feedback?.expansion_structure_decision_trend || feedback?.expansionStructureDecisionTrend,
     ),
   }
 }
@@ -1712,6 +1794,8 @@ function BatchProseRunSummary({ run }: { run: any }) {
   const expansionStructureTrend = expansionFeedback?.structureValidationTrend || null
   const expansionStructureFailureReason = expansionStructureTrend?.failureReasons?.[0] || null
   const expansionStructureEffectiveness = expansionFeedback?.structureRepairEffectiveness || null
+  const expansionStructureDecisionTrend = expansionFeedback?.structureDecisionTrend || null
+  const expansionStructureDecisionRequirement = expansionStructureDecisionTrend?.topFailedRequirement || null
 
   return (
     <Card size="small" title="批量生成摘要">
@@ -1786,6 +1870,16 @@ function BatchProseRunSummary({ run }: { run: any }) {
                         主因 {expansionStructureEffectiveness.baselineFailureReasonCount}{'->'}{expansionStructureEffectiveness.currentFailureReasonCount}
                       </Tag>
                     )}
+                    {expansionStructureDecisionTrend?.visible && (
+                      <Tag color={expansionStructureDecisionTrend.status === 'warn' ? 'gold' : 'green'} bordered={false}>
+                        结构决策{expansionStructureDecisionTrend.status === 'warn' ? '待补齐' : '已落地'}
+                      </Tag>
+                    )}
+                    {expansionStructureDecisionRequirement && (
+                      <Tag color="gold" bordered={false}>
+                        漏项 {expansionStructureDecisionRequirement.label}{expansionStructureDecisionRequirement.count}
+                      </Tag>
+                    )}
                   </Space>
                   <Text type="secondary" style={{ fontSize: 12 }}>{expansionFeedback.summary}</Text>
                   {expansionStructureTrend?.visible && (
@@ -1793,6 +1887,9 @@ function BatchProseRunSummary({ run }: { run: any }) {
                   )}
                   {expansionStructureEffectiveness?.visible && (
                     <Text type="secondary" style={{ fontSize: 12 }}>{expansionStructureEffectiveness.summary}</Text>
+                  )}
+                  {expansionStructureDecisionTrend?.visible && (
+                    <Text type="secondary" style={{ fontSize: 12 }}>{expansionStructureDecisionTrend.summary}</Text>
                   )}
                 </Space>
               )}

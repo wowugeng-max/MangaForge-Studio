@@ -961,6 +961,62 @@ describe('buildSafeBatchExpansionPolicySnapshot', () => {
       recommendation: 'restore_five_chapter',
     })
   })
+
+  test('keeps expansion structure decision execution trend in the task-center snapshot', () => {
+    const snapshot = buildSafeBatchExpansionPolicySnapshot({
+      safe_batch_expansion_policy: {
+        status: 'recovering',
+        label: '强化扩批规则',
+        summary: '结构决策执行趋势未稳，下一轮保持 3 章以内安全连写。',
+        target_chapter_count: 3,
+        base_chapter_count: 3,
+        expanded_chapter_count: 5,
+        required_pass_streak: 3,
+        pass_streak: 3,
+        accepted_batch_count: 3,
+        failed_batch_count: 0,
+        latest_status: 'ok',
+        expansion_feedback: {
+          status: 'passed',
+          label: '扩批热区反馈',
+          summary: '结构决策执行趋势未稳，先补齐中段职责。',
+          target_chapter_count: 3,
+          latest_chapter_nos: [70, 71, 72, 73, 74],
+          risk_count: 0,
+          expansion_structure_decision_trend: {
+            visible: true,
+            status: 'warn',
+            label: '扩批结构决策执行趋势',
+            summary: '结构决策执行趋势未稳：恢复5章扩批最近复盘仍有漏项。',
+            total_batch_count: 1,
+            passed_batch_count: 0,
+            failed_batch_count: 1,
+            latest_status: 'warn',
+            latest_batch_created_at: '2026-06-20T00:00:00.000Z',
+            latest_chapter_nos: [70, 71, 72, 73, 74],
+            latest_segment_key: 'middle',
+            latest_segment_label: '中段',
+            top_failed_recommendation: { key: 'restore_five_chapter', label: '恢复5章扩批', count: 1 },
+            top_failed_requirement: { key: 'segment_role', label: '中段职责', count: 1 },
+            suggested_target_chapter_count: 3,
+          },
+        },
+      },
+    })
+
+    expect(snapshot?.expansionFeedback?.structureDecisionTrend).toMatchObject({
+      visible: true,
+      status: 'warn',
+      label: '扩批结构决策执行趋势',
+      totalBatchCount: 1,
+      failedBatchCount: 1,
+      latestStatus: 'warn',
+      latestSegmentLabel: '中段',
+      topFailedRecommendation: { key: 'restore_five_chapter', label: '恢复5章扩批', count: 1 },
+      topFailedRequirement: { key: 'segment_role', label: '中段职责', count: 1 },
+      suggestedTargetChapterCount: 3,
+    })
+  })
 })
 
 describe('buildRecoveryEvidenceReviewRowAction', () => {
@@ -1327,6 +1383,11 @@ describe('repairTaskActionLabel', () => {
       source: 'auto_creation_safe_batch_risk',
       issue_type: 'safe_batch_expansion_structure_repair',
     })).toBe('改扩批结构')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'safe_batch_expansion_structure_decision_mismatch',
+    })).toBe('查结构决策')
   })
 
   test('labels recovery evidence governance queue actions by their closure flow', () => {

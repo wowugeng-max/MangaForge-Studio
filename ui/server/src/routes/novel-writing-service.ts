@@ -1905,6 +1905,33 @@ function normalizeExpansionStructureVerification(value: any) {
   return hasContent ? normalized : null
 }
 
+function normalizeExpansionStructureDecision(value: any) {
+  const raw = value?.expansion_structure_decision || value?.expansionStructureDecision || value || {}
+  const observationMetrics = asArray(raw.observation_metrics || raw.observationMetrics)
+    .map((item: any) => compactBriefText(item))
+    .filter(Boolean)
+    .slice(0, 6)
+  const normalized = {
+    visible: raw.visible !== false,
+    label: compactBriefText(raw.label || '结构修复决策'),
+    recommendation: compactBriefText(raw.recommendation),
+    target_chapter_count: Number(raw.target_chapter_count ?? raw.targetChapterCount ?? 0),
+    mode_label: compactBriefText(raw.mode_label || raw.modeLabel),
+    summary: compactBriefText(raw.summary),
+    instruction: compactBriefText(raw.instruction),
+    source_run_id: raw.source_run_id ?? raw.sourceRunId ?? null,
+    segment_key: compactBriefText(raw.segment_key || raw.segmentKey),
+    segment_label: compactBriefText(raw.segment_label || raw.segmentLabel),
+    observation_metrics: observationMetrics,
+  }
+  const hasContent = normalized.recommendation
+    || normalized.mode_label
+    || normalized.summary
+    || normalized.instruction
+    || normalized.observation_metrics.length
+  return hasContent ? normalized : null
+}
+
 function normalizeNextBatchBrief(value: any, targetChapterNo = 0) {
   const raw = value?.next_batch_brief || value?.nextBatchBrief || value || {}
   const chapters = asArray(raw.chapters).map(normalizeNextBatchChapter).filter(Boolean).slice(0, 10)
@@ -1919,6 +1946,9 @@ function normalizeNextBatchBrief(value: any, targetChapterNo = 0) {
   const expansionStructureVerification = normalizeExpansionStructureVerification(
     raw.expansion_structure_verification || raw.expansionStructureVerification,
   )
+  const expansionStructureDecision = normalizeExpansionStructureDecision(
+    raw.expansion_structure_decision || raw.expansionStructureDecision,
+  )
   const normalized = {
     chapter_range_label: compactBriefText(raw.chapter_range_label || raw.chapterRangeLabel),
     batch_goal: compactBriefText(raw.batch_goal || raw.batchGoal),
@@ -1927,6 +1957,7 @@ function normalizeNextBatchBrief(value: any, targetChapterNo = 0) {
     forbidden_boundary: compactBriefText(raw.forbidden_boundary || raw.forbiddenBoundary),
     current_chapter_role: currentChapterRole,
     expansion_structure_verification: expansionStructureVerification,
+    expansion_structure_decision: expansionStructureDecision,
     start_checklist: startChecklist,
     chapters,
   }
@@ -1937,6 +1968,7 @@ function normalizeNextBatchBrief(value: any, targetChapterNo = 0) {
     || normalized.forbidden_boundary
     || normalized.current_chapter_role
     || normalized.expansion_structure_verification
+    || normalized.expansion_structure_decision
     || normalized.start_checklist.length
     || normalized.chapters.length
   return hasContent ? normalized : null
@@ -5420,6 +5452,7 @@ export function createNovelWritingService(ctx: {
       contextPackage?.chapter_target?.next_batch_brief || contextPackage?.next_batch_brief,
       Number(chapterDraft?.chapter_no || contextPackage?.chapter_target?.chapter_no || 0),
     )
+    const expansionStructureDecision = nextBatchBrief?.expansion_structure_decision || null
     const expansionStructureVerification = nextBatchBrief?.expansion_structure_verification || null
     const batchPreflight = contextPackage?.chapter_target?.batch_preflight || contextPackage?.batch_preflight || null
     const batchDeliveryRiskCarryOver = normalizeDeliveryRiskCarryOverContext(
@@ -5586,6 +5619,18 @@ export function createNovelWritingService(ctx: {
       nextBatchBrief ? '硬性要求：本章必须服务批次目标和当前章角色；不得提前消费后续章节爆点，不得跳过本章读者回报，不得抢跑批次后段的主线兑现。' : '',
       nextBatchBrief?.start_checklist?.length ? `批次开工清单：${nextBatchBrief.start_checklist.map((item: any) => `${item.label || item.key}：${item.detail || item.status}`).join('；')}` : '',
       nextBatchBrief ? JSON.stringify(nextBatchBrief, null, 2).slice(0, 4000) : '',
+      '',
+      expansionStructureDecision ? '【扩批结构决策】' : '',
+      expansionStructureDecision ? '硬性要求：执行 next_batch_brief.expansion_structure_decision；这是结构修复有效性对本批规模、段位职责和观察指标的最终判断。正文必须按 recommendation 执行，不得因为恢复扩批而淡化结构约束，也不得在小批验证或单章重构时抢跑后续批次。' : '',
+      expansionStructureDecision?.recommendation ? `决策：${expansionStructureDecision.recommendation}` : '',
+      expansionStructureDecision?.mode_label ? `模式：${expansionStructureDecision.mode_label}` : '',
+      expansionStructureDecision?.target_chapter_count ? `目标批次：${expansionStructureDecision.target_chapter_count}章` : '',
+      expansionStructureDecision?.segment_label ? `观察段位：${expansionStructureDecision.segment_label}` : '',
+      expansionStructureDecision?.summary ? `有效性摘要：${expansionStructureDecision.summary}` : '',
+      expansionStructureDecision?.instruction ? `执行口径：${expansionStructureDecision.instruction}` : '',
+      expansionStructureDecision?.observation_metrics?.length ? `观察指标：${expansionStructureDecision.observation_metrics.join('；')}` : '',
+      expansionStructureDecision ? '执行回执：scene_breakdown 中承担结构职责的场景必须回填 expansion_structure_decision_execution，字段包含 segment_role_delivered(boolean)、observation_metrics_delivered(boolean)、redesign_principles_delivered(boolean)、evidence(array)。' : '',
+      expansionStructureDecision ? JSON.stringify(expansionStructureDecision, null, 2).slice(0, 3000) : '',
       '',
       expansionStructureVerification ? '【扩批结构验证】' : '',
       expansionStructureVerification ? '硬性要求：执行 next_batch_brief.expansion_structure_verification；这是已修复的5章扩批热区进入本轮2-3章验证，正文必须证明结构修复真的落地，而不是只声明已经修好。' : '',
@@ -5783,6 +5828,7 @@ export function createNovelWritingService(ctx: {
       '13B. 执行 chapter_target.longform_battle_context：核心守恒、读者拉力、剧情线调度、卷级爆点、创新/IP场面和生产燃料中的风险项必须在本章有可见承接；blocked/warn 风险优先于普通铺垫，不能写成空泛解释。',
       '14. 执行本批连载任务书：本章只完成 current_chapter_role 和本章读者回报；可以铺垫下一章，但不得提前解决 next_batch_brief.chapters 后续章节的冲突或钩子。',
       '14A. 执行 chapter_target.batch_preflight：如果安全连写预执行门禁提示近10章疲劳或批次风险，本章必须在冲突来源、回报形态、章末问题、可视化场面中至少改造一项；被 blocked_chapter_nos 拦截的后续章节内容不得提前写进本章。',
+      expansionStructureDecision ? '14A0. 执行 next_batch_brief.expansion_structure_decision：按结构修复有效性决定本批写法；恢复5章时仍逐章落实段位职责，小批验证时逐章证明观察指标，单章重构时先重写批次设计原则后再推进正文。' : '',
       expansionStructureVerification ? '14A+. 执行 next_batch_brief.expansion_structure_verification：本章必须承担验证批中的结构职责，换冲突来源、给显性回报、留不同章末追读问题；不得把已修复的扩批热区再次写成中段转场或空铺垫。' : '',
       '14A++. 执行 batch_preflight.longform_memory_anchor：批量续写时必须遵守压缩正史锚点，不能改变角色状态、遗忘开放悬念、跳过回报债务或偏离核心承诺。',
       '14A+++. 执行 batch_preflight.delivery_risk_carry_over：安全连写第一章必须优先承接上一章残留风险；opening_actions 在前 300 字落地，middle_actions 在中段转成事件推进，ending_actions 在最后 300 字形成追读钩子。',
@@ -5794,6 +5840,7 @@ export function createNovelWritingService(ctx: {
       migrationPlan?.generation_prompt_addendum ? `16. ${migrationPlan.generation_prompt_addendum}` : '',
       chapterDraft?.chapter_no ? `17. 本次只生成第${chapterDraft.chapter_no}章，不得输出其他章节或续章内容。` : '',
       '',
+      expansionStructureDecision ? '输出附加要求：如果存在 next_batch_brief.expansion_structure_decision，scene_breakdown 的相关场景必须包含 expansion_structure_decision_execution，用 segment_role_delivered、observation_metrics_delivered、redesign_principles_delivered 和 evidence 说明是否真正执行。' : '',
       '输出 JSON，包含 prose_chapters 数组。数组只能有一项，且必须包含 chapter_no, title, chapter_text, scene_breakdown, continuity_notes。scene_breakdown 要回填每个场景的 scene_type、required_beats/action_beats 完成情况和 description_budget 执行情况。chapter_text 是完整正文，不要 markdown 标题。',
     ].filter(Boolean).join('\n')
   }
