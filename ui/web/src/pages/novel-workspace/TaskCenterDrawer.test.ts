@@ -747,6 +747,7 @@ describe('buildSafeBatchExpansionPolicySnapshot', () => {
       latestStatus: 'ok',
       expansionFeedback: null,
       recoveryRoadmap: null,
+      recoveryValidation: null,
     })
   })
 
@@ -1088,6 +1089,135 @@ describe('buildSafeBatchExpansionPolicySnapshot', () => {
       expect.objectContaining({ key: 'strengthened_acceptance', status: 'ok', targetChapterCount: 5 }),
       expect.objectContaining({ key: 'structure_decision_execution', status: 'warn', targetChapterCount: 3 }),
     ]))
+  })
+
+  test('summarizes passed recovery validation batches as a restore-five confirmation action', () => {
+    const snapshot = buildSafeBatchExpansionPolicySnapshot({
+      safe_batch_expansion_policy: {
+        status: 'expanded',
+        label: '强化扩批规则',
+        summary: '扩批结构验证批通过，准备恢复 5 章扩批。',
+        target_chapter_count: 5,
+        base_chapter_count: 3,
+        expanded_chapter_count: 5,
+        required_pass_streak: 3,
+        pass_streak: 3,
+        accepted_batch_count: 3,
+        failed_batch_count: 0,
+        latest_status: 'ok',
+        expansion_feedback: {
+          status: 'recovered',
+          label: '扩批热区反馈',
+          summary: '扩批结构验证批通过：第50、51、52章核心守恒、显性回报和章末追读稳定，可作为恢复5章扩批证据。',
+          target_chapter_count: 5,
+          latest_chapter_nos: [50, 51, 52],
+          risk_count: 0,
+          expansion_structure_validation_result: {
+            visible: true,
+            status: 'ok',
+            label: '扩批结构验证',
+            summary: '扩批结构验证批通过：第50、51、52章核心守恒、显性回报和章末追读稳定，可作为恢复5章扩批证据。',
+            validation_chapter_nos: [50, 51, 52],
+            failed_chapter_nos: [],
+            risk_count: 0,
+          },
+        },
+        safe_batch_recovery_roadmap: {
+          visible: true,
+          label: '安全连写恢复路线图',
+          current_lane: 'expanded_batch',
+          current_lane_label: '5章扩批',
+          current_target_chapter_count: 5,
+          current_status: 'expanded',
+          current_reason: '扩批结构验证批通过，恢复 5 章扩批。',
+          route_nodes: [
+            { key: 'structure_validation', label: '结构验证', status: 'ok', target_chapter_count: 5, detail: '验证批通过。' },
+          ],
+        },
+      },
+    })
+
+    expect(snapshot?.recoveryValidation).toMatchObject({
+      visible: true,
+      status: 'passed',
+      label: '3章验证批通过',
+      validationChapterNos: [50, 51, 52],
+      riskCount: 0,
+      targetChapterCount: 5,
+      nextActionKind: 'confirm_restore_five',
+      nextActionLabel: '确认恢复5章扩批',
+    })
+    expect(snapshot?.recoveryValidation?.summary).toContain('第50、51、52章')
+  })
+
+  test('summarizes failed recovery validation batches as a focused repair action', () => {
+    const snapshot = buildSafeBatchExpansionPolicySnapshot({
+      safe_batch_expansion_policy: {
+        status: 'recovering',
+        label: '强化扩批规则',
+        summary: '扩批结构验证批未通过，继续保持 3 章验证。',
+        target_chapter_count: 3,
+        base_chapter_count: 3,
+        expanded_chapter_count: 5,
+        required_pass_streak: 3,
+        pass_streak: 3,
+        accepted_batch_count: 3,
+        failed_batch_count: 0,
+        latest_status: 'warn',
+        expansion_feedback: {
+          status: 'rollback_to_small_batch',
+          label: '扩批热区反馈',
+          summary: '扩批结构验证批未通过：第51章仍有 2 项核心/回报/追读风险，结构修复不能恢复5章扩批。',
+          target_chapter_count: 3,
+          latest_chapter_nos: [50, 51, 52],
+          risk_count: 2,
+          expansion_structure_validation_result: {
+            visible: true,
+            status: 'warn',
+            label: '扩批结构验证',
+            summary: '扩批结构验证批未通过：第51章仍有 2 项核心/回报/追读风险，结构修复不能恢复5章扩批。',
+            validation_chapter_nos: [50, 51, 52],
+            failed_chapter_nos: [51],
+            risk_count: 2,
+          },
+        },
+        safe_batch_recovery_roadmap: {
+          visible: true,
+          label: '安全连写恢复路线图',
+          current_lane: 'small_batch',
+          current_lane_label: '3章验证',
+          current_target_chapter_count: 3,
+          current_status: 'recovering',
+          current_reason: '扩批结构验证批未通过，继续保持 3 章验证。',
+          next_repair_layer: {
+            key: 'structure_validation',
+            label: '结构验证',
+            status: 'warn',
+            action_label: '重写扩批结构',
+            detail: '第51章仍有结构验证风险。',
+          },
+          route_nodes: [
+            { key: 'structure_validation', label: '结构验证', status: 'warn', target_chapter_count: 3, detail: '验证批未通过。' },
+          ],
+        },
+      },
+    })
+
+    expect(snapshot?.recoveryValidation).toMatchObject({
+      visible: true,
+      status: 'failed',
+      label: '3章验证批未过',
+      validationChapterNos: [50, 51, 52],
+      failedChapterNos: [51],
+      riskCount: 2,
+      targetChapterCount: 3,
+      nextActionKind: 'focus_repair',
+      nextActionLabel: '聚焦重写扩批结构',
+      focus: {
+        issueType: 'safe_batch_expansion_structure_repair',
+        taskCenterFilterLabel: '扩批结构',
+      },
+    })
   })
 
   test('matches safe batch recovery focus to the intended task type and status', () => {

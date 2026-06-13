@@ -1247,6 +1247,7 @@ export type SafeBatchExpansionPolicySnapshot = {
   latestStatus: 'none' | 'ok' | 'warn'
   expansionFeedback: SafeBatchExpansionFeedbackSnapshot | null
   recoveryRoadmap: SafeBatchRecoveryRoadmapSnapshot | null
+  recoveryValidation: SafeBatchRecoveryValidationSnapshot | null
 }
 
 export type SafeBatchRecoveryRoadmapSnapshot = {
@@ -1271,6 +1272,20 @@ export type SafeBatchRecoveryFocusSnapshot = {
   source: string
   taskStatuses: string[]
   taskCenterFilterLabel: string
+}
+
+export type SafeBatchRecoveryValidationSnapshot = {
+  visible: boolean
+  status: 'passed' | 'failed'
+  label: string
+  summary: string
+  validationChapterNos: number[]
+  failedChapterNos: number[]
+  riskCount: number
+  targetChapterCount: number
+  nextActionKind: 'confirm_restore_five' | 'focus_repair'
+  nextActionLabel: string
+  focus: SafeBatchRecoveryFocusSnapshot | null
 }
 
 export type SafeBatchRecoveryRoadmapNodeSnapshot = {
@@ -1356,8 +1371,19 @@ export type SafeBatchExpansionFeedbackSnapshot = {
     summary: string
   } | null
   structureValidationTrend: SafeBatchExpansionStructureValidationTrendSnapshot | null
+  structureValidationResult: SafeBatchExpansionStructureValidationResultSnapshot | null
   structureRepairEffectiveness: SafeBatchExpansionStructureRepairEffectivenessSnapshot | null
   structureDecisionTrend: SafeBatchExpansionStructureDecisionTrendSnapshot | null
+}
+
+export type SafeBatchExpansionStructureValidationResultSnapshot = {
+  visible: boolean
+  status: 'ok' | 'warn'
+  label: string
+  summary: string
+  validationChapterNos: number[]
+  failedChapterNos: number[]
+  riskCount: number
 }
 
 export type SafeBatchExpansionStructureValidationTrendSnapshot = {
@@ -1594,6 +1620,9 @@ export function buildSafeBatchExpansionPolicySnapshot(batchPreflight: any): Safe
   const status = rawStatus === 'expanded' ? 'expanded' : rawStatus === 'recovering' ? 'recovering' : 'observing'
   const latestStatusText = String(policy?.latest_status || policy?.latestStatus || '').trim()
   const latestStatus = latestStatusText === 'ok' || latestStatusText === 'warn' ? latestStatusText : 'none'
+  const expandedChapterCount = Number(policy?.expanded_chapter_count ?? policy?.expandedChapterCount ?? targetChapterCount)
+  const expansionFeedback = buildSafeBatchExpansionFeedbackSnapshot(policy?.expansion_feedback || policy?.expansionFeedback)
+  const recoveryRoadmap = buildSafeBatchRecoveryRoadmapSnapshot(policy?.safe_batch_recovery_roadmap || policy?.safeBatchRecoveryRoadmap || policy?.recoveryRoadmap)
 
   return {
     visible: true,
@@ -1602,14 +1631,43 @@ export function buildSafeBatchExpansionPolicySnapshot(batchPreflight: any): Safe
     summary: compactEvidenceText(policy?.summary || '按强化恢复验收趋势决定是否扩大安全连写批次。'),
     targetChapterCount,
     baseChapterCount: Number(policy?.base_chapter_count ?? policy?.baseChapterCount ?? 3),
-    expandedChapterCount: Number(policy?.expanded_chapter_count ?? policy?.expandedChapterCount ?? targetChapterCount),
+    expandedChapterCount,
     requiredPassStreak: Number(policy?.required_pass_streak ?? policy?.requiredPassStreak ?? 3),
     passStreak: Number(policy?.pass_streak ?? policy?.passStreak ?? 0),
     acceptedBatchCount: Number(policy?.accepted_batch_count ?? policy?.acceptedBatchCount ?? 0),
     failedBatchCount: Number(policy?.failed_batch_count ?? policy?.failedBatchCount ?? 0),
     latestStatus,
-    expansionFeedback: buildSafeBatchExpansionFeedbackSnapshot(policy?.expansion_feedback || policy?.expansionFeedback),
-    recoveryRoadmap: buildSafeBatchRecoveryRoadmapSnapshot(policy?.safe_batch_recovery_roadmap || policy?.safeBatchRecoveryRoadmap || policy?.recoveryRoadmap),
+    expansionFeedback,
+    recoveryRoadmap,
+    recoveryValidation: buildSafeBatchRecoveryValidationSnapshot(expansionFeedback, recoveryRoadmap, expandedChapterCount),
+  }
+}
+
+function buildSafeBatchRecoveryValidationSnapshot(
+  expansionFeedback: SafeBatchExpansionFeedbackSnapshot | null,
+  recoveryRoadmap: SafeBatchRecoveryRoadmapSnapshot | null,
+  expandedChapterCount: number,
+): SafeBatchRecoveryValidationSnapshot | null {
+  const result = expansionFeedback?.structureValidationResult || null
+  if (!result?.visible) return null
+  const passed = result.status === 'ok' && result.riskCount <= 0
+  const focus = passed ? null : recoveryRoadmap?.recommendedFocus || recoveryRoadmap?.nextRepairLayer?.focus || null
+  const repairLabel = compactEvidenceText(focus?.actionLabel || recoveryRoadmap?.nextRepairLayer?.actionLabel || focus?.taskCenterFilterLabel || '下一层修复')
+
+  return {
+    visible: true,
+    status: passed ? 'passed' : 'failed',
+    label: passed ? '3章验证批通过' : '3章验证批未过',
+    summary: result.summary,
+    validationChapterNos: result.validationChapterNos,
+    failedChapterNos: result.failedChapterNos,
+    riskCount: result.riskCount,
+    targetChapterCount: passed
+      ? Math.max(5, recoveryRoadmap?.currentTargetChapterCount || expansionFeedback?.targetChapterCount || expandedChapterCount || 5)
+      : Math.max(1, recoveryRoadmap?.currentTargetChapterCount || expansionFeedback?.targetChapterCount || 3),
+    nextActionKind: passed ? 'confirm_restore_five' : 'focus_repair',
+    nextActionLabel: passed ? '确认恢复5章扩批' : `聚焦${repairLabel}`,
+    focus,
   }
 }
 
@@ -1751,6 +1809,34 @@ function buildSafeBatchExpansionStructureDecisionTrendSnapshot(trendLike: any): 
   }
 }
 
+function buildSafeBatchExpansionStructureValidationResultSnapshot(resultLike: any): SafeBatchExpansionStructureValidationResultSnapshot | null {
+  const result = parseJsonValue(resultLike) || resultLike || null
+  if (!result || result.visible === false) return null
+  const rawStatus = String(result?.status || '').trim()
+  const validationChapterNos = (Array.isArray(result?.validation_chapter_nos)
+    ? result.validation_chapter_nos
+    : Array.isArray(result?.validationChapterNos)
+      ? result.validationChapterNos
+      : []
+  ).map((chapterNo: any) => Number(chapterNo)).filter((chapterNo: number) => chapterNo > 0)
+  const failedChapterNos = (Array.isArray(result?.failed_chapter_nos)
+    ? result.failed_chapter_nos
+    : Array.isArray(result?.failedChapterNos)
+      ? result.failedChapterNos
+      : []
+  ).map((chapterNo: any) => Number(chapterNo)).filter((chapterNo: number) => chapterNo > 0)
+
+  return {
+    visible: true,
+    status: rawStatus === 'warn' ? 'warn' : 'ok',
+    label: compactEvidenceText(result?.label || '扩批结构验证'),
+    summary: compactEvidenceText(result?.summary || '扩批结构验证批已完成。'),
+    validationChapterNos,
+    failedChapterNos,
+    riskCount: Number(result?.risk_count ?? result?.riskCount ?? 0),
+  }
+}
+
 function buildSafeBatchExpansionFeedbackSnapshot(feedbackLike: any): SafeBatchExpansionFeedbackSnapshot | null {
   const feedback = parseJsonValue(feedbackLike) || feedbackLike || null
   if (!feedback || feedback.visible === false) return null
@@ -1787,6 +1873,9 @@ function buildSafeBatchExpansionFeedbackSnapshot(feedbackLike: any): SafeBatchEx
     } : null,
     structureValidationTrend: buildSafeBatchExpansionStructureValidationTrendSnapshot(
       feedback?.expansion_structure_validation_trend || feedback?.expansionStructureValidationTrend,
+    ),
+    structureValidationResult: buildSafeBatchExpansionStructureValidationResultSnapshot(
+      feedback?.expansion_structure_validation_result || feedback?.expansionStructureValidationResult,
     ),
     structureRepairEffectiveness: buildSafeBatchExpansionStructureRepairEffectivenessSnapshot(
       feedback?.expansion_structure_repair_effectiveness || feedback?.expansionStructureRepairEffectiveness,
@@ -1994,6 +2083,7 @@ function BatchProseRunSummary({ run }: { run: any }) {
   const expansionStructureDecisionTrend = expansionFeedback?.structureDecisionTrend || null
   const expansionStructureDecisionRequirement = expansionStructureDecisionTrend?.topFailedRequirement || null
   const recoveryRoadmap = expansionPolicy?.recoveryRoadmap || null
+  const recoveryValidation = expansionPolicy?.recoveryValidation || null
 
   return (
     <Card size="small" title="批量生成摘要">
@@ -2042,6 +2132,23 @@ function BatchProseRunSummary({ run }: { run: any }) {
                   </Space>
                   <Text type="secondary" style={{ fontSize: 12 }}>{recoveryRoadmap.currentReason}</Text>
                 </Space>
+              )}
+              {recoveryValidation?.visible && (
+                <div style={{ padding: 8, border: `1px solid ${recoveryValidation.status === 'passed' ? '#bbf7d0' : '#fde68a'}`, borderRadius: 6, background: recoveryValidation.status === 'passed' ? '#f0fdf4' : '#fffdf3' }}>
+                  <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                    <Space wrap size={[4, 4]}>
+                      <Tag color={recoveryValidation.status === 'passed' ? 'green' : 'gold'} bordered={false}>{recoveryValidation.label}</Tag>
+                      {recoveryValidation.validationChapterNos.length > 0 && (
+                        <Tag bordered={false}>第{recoveryValidation.validationChapterNos.join('、')}章</Tag>
+                      )}
+                      <Tag bordered={false}>风险 {recoveryValidation.riskCount}</Tag>
+                      <Tag color={recoveryValidation.status === 'passed' ? 'green' : 'blue'} bordered={false}>
+                        下一步 {recoveryValidation.nextActionLabel}
+                      </Tag>
+                    </Space>
+                    <Text type="secondary" style={{ fontSize: 12 }}>{recoveryValidation.summary}</Text>
+                  </Space>
+                </div>
               )}
               <Text type="secondary" style={{ fontSize: 12 }}>{expansionPolicy.summary}</Text>
               {expansionFeedback && (
