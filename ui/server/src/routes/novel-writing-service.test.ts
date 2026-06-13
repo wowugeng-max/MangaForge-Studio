@@ -533,6 +533,52 @@ describe('chapter prose word target', () => {
     expect(prompt).toContain('是谁在背后改试炼规则')
   })
 
+  test('injects safe batch expansion structure verification into paragraph prose prompt', () => {
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+
+    const prompt = service.buildParagraphProseContext(
+      { title: '超人的规则怪谈世界' },
+      {
+        next_batch_brief: {
+          chapter_range_label: '第18-20章',
+          batch_goal: '验证修后的中段扩批结构。',
+          expansion_structure_verification: {
+            source: 'safe_batch_expansion_structure_repair',
+            label: '扩批结构验证',
+            repeated_hotspot_segment: { key: 'middle', label: '中段', count: 2 },
+            validation_chapter_nos: [18, 19, 20],
+            fixed_segment_role: '中段固定职责：每批第3-4章必须完成主线转折、显性回报和章末追读。',
+            conflict_rotation: '未来验证批次每章必须更换冲突来源。',
+            explicit_payoff: '每章至少一个显性回报，不能只铺垫。',
+            ending_hook_requirement: '每章章末必须留下不同的追读问题。',
+            structure_actions: ['前段抛压，中段兑现并升级，后段留钩。'],
+          },
+        },
+        chapter_target: {
+          chapter_no: 18,
+          title: '外门夜钟',
+          summary: '验证夜钟规则。',
+          conflict: '是否相信敌人提示。',
+          ending_hook: '钟声倒数。',
+          scene_cards: [],
+        },
+      },
+      null,
+      { chapter_no: 18, title: '外门夜钟' },
+    )
+
+    expect(prompt).toContain('【扩批结构验证】')
+    expect(prompt).toContain('执行 next_batch_brief.expansion_structure_verification')
+    expect(prompt).toContain('中段连续 2 次')
+    expect(prompt).toContain('每章必须更换冲突来源')
+    expect(prompt).toContain('每章至少一个显性回报')
+    expect(prompt).toContain('每章章末必须留下不同的追读问题')
+  })
+
   test('injects longform memory anchor from safe batch preflight into paragraph prose prompt', () => {
     const service = createNovelWritingService({
       getProject: async () => null,

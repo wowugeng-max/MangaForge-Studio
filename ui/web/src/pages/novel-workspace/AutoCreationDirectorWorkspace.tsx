@@ -87,6 +87,19 @@ function batchSignalLabel(status: string) {
   return '阻塞'
 }
 
+function safeBatchExpansionFeedbackColor(status: string) {
+  if (status === 'recovered' || status === 'passed') return 'green'
+  if (status === 'rollback_to_single_chapter') return 'red'
+  if (status === 'rollback_to_small_batch') return 'gold'
+  return 'blue'
+}
+
+function safeBatchExpansionFeedbackLabel(status: string) {
+  if (status === 'recovered' || status === 'passed') return '扩批热区已清'
+  if (status === 'rollback_to_single_chapter' || status === 'rollback_to_small_batch') return '扩批热区待修'
+  return '扩批反馈'
+}
+
 function batchReviewColor(status: AutoCreationDirectorModel['batchReviewQueue']['status']) {
   if (status === 'ok' || status === 'done') return 'green'
   if (status === 'warn' || status === 'risk') return 'gold'
@@ -224,8 +237,42 @@ export function AutoCreationDirectorWorkspace({
   const activeStep = model.pipeline.find(step => step.status === 'active')
   const serialCockpit = model.serialCockpit
   const batchPreflight = model.batchGuardrail.preflight
+  const recoveryEvidenceTrend = model.batchGuardrail.recoveryEvidenceTrend
   const longformMemoryAnchor = batchPreflight.longformMemoryAnchor || null
   const governanceRecheckMemory = batchPreflight.governanceRecheckMemory || null
+  const safeBatchExpansionPolicy = batchPreflight.inputSnapshot?.safe_batch_expansion_policy
+    || batchPreflight.inputSnapshot?.safeBatchExpansionPolicy
+    || null
+  const safeBatchExpansionFeedback = safeBatchExpansionPolicy?.expansion_feedback
+    || safeBatchExpansionPolicy?.expansionFeedback
+    || null
+  const safeBatchExpansionFeedbackStatus = String(safeBatchExpansionFeedback?.status || '')
+  const safeBatchExpansionFeedbackChapterNos = Array.isArray(safeBatchExpansionFeedback?.latest_chapter_nos)
+    ? safeBatchExpansionFeedback.latest_chapter_nos
+    : Array.isArray(safeBatchExpansionFeedback?.latestChapterNos)
+      ? safeBatchExpansionFeedback.latestChapterNos
+      : []
+  const safeBatchExpansionStablePassStreak = Number(safeBatchExpansionFeedback?.stable_pass_streak || safeBatchExpansionFeedback?.stablePassStreak || 0)
+  const safeBatchExpansionRecentBatchCount = Number(safeBatchExpansionFeedback?.recent_expanded_batch_count || safeBatchExpansionFeedback?.recentExpandedBatchCount || 0)
+  const safeBatchExpansionRepeatedHotspot = safeBatchExpansionFeedback?.repeated_hotspot_segment
+    || safeBatchExpansionFeedback?.repeatedHotspotSegment
+    || null
+  const safeBatchExpansionStructureTrend = safeBatchExpansionFeedback?.expansion_structure_validation_trend
+    || safeBatchExpansionFeedback?.expansionStructureValidationTrend
+    || null
+  const safeBatchExpansionStructureEffectiveness = safeBatchExpansionFeedback?.expansion_structure_repair_effectiveness
+    || safeBatchExpansionFeedback?.expansionStructureRepairEffectiveness
+    || null
+  const safeBatchExpansionStructureEffectivenessStatus = String(safeBatchExpansionStructureEffectiveness?.status || '')
+  const safeBatchExpansionStructureFailureReasons = Array.isArray(safeBatchExpansionStructureTrend?.failure_reasons)
+    ? safeBatchExpansionStructureTrend.failure_reasons
+    : Array.isArray(safeBatchExpansionStructureTrend?.failureReasons)
+      ? safeBatchExpansionStructureTrend.failureReasons
+      : []
+  const safeBatchExpansionStructureTopFailure = safeBatchExpansionStructureFailureReasons[0] || null
+  const safeBatchExpansionStructureRecurrence = safeBatchExpansionStructureTrend?.recurrence_after_restore
+    || safeBatchExpansionStructureTrend?.recurrenceAfterRestore
+    || null
   const longformCharacterStates = Array.isArray(longformMemoryAnchor?.character_states) ? longformMemoryAnchor.character_states : []
   const longformOpenQuestions = Array.isArray(longformMemoryAnchor?.open_questions) ? longformMemoryAnchor.open_questions : []
   const longformPayoffDebts = Array.isArray(longformMemoryAnchor?.payoff_debts) ? longformMemoryAnchor.payoff_debts : []
@@ -1127,6 +1174,136 @@ export function AutoCreationDirectorWorkspace({
                   {(governanceRecheckMemory.evidence || []).slice(0, 2).map((item: any) => <Tag key={`governance-evidence-${item}`} bordered={false}>已补：{item}</Tag>)}
                   {(governanceRecheckMemory.watch_items || []).slice(0, 2).map((item: any) => <Tag key={`governance-watch-${item}`} bordered={false}>观察：{item}</Tag>)}
                 </div>
+              </div>
+            )}
+            {recoveryEvidenceTrend.visible && (
+              <div className={`auto-director-batch-recovery-trend auto-director-batch-recovery-trend-${recoveryEvidenceTrend.status}`}>
+                <div className="auto-director-batch-memory-anchor-head">
+                  <Text strong>恢复依据画像趋势</Text>
+                  <Tag color={recoveryEvidenceTrend.status === 'warn' ? 'gold' : 'green'} bordered={false}>
+                    反复来源 {recoveryEvidenceTrend.repeatSourceCount}
+                  </Tag>
+                  <Tag bordered={false}>失效 {recoveryEvidenceTrend.totalFailureCount} 次</Tag>
+                </div>
+                <Text type="secondary">{recoveryEvidenceTrend.summary}</Text>
+                {recoveryEvidenceTrend.strengthenedAcceptanceTrend?.visible && (
+                  <div className="auto-director-batch-recovery-trend-acceptance">
+                    <div className="auto-director-batch-memory-anchor-head">
+                      <Text strong>强化恢复验收趋势</Text>
+                      <Tag color={recoveryEvidenceTrend.strengthenedAcceptanceTrend.status === 'warn' ? 'gold' : 'green'} bordered={false}>
+                        {recoveryEvidenceTrend.strengthenedAcceptanceTrend.status === 'warn' ? '回到单章' : `连过 ${recoveryEvidenceTrend.strengthenedAcceptanceTrend.passStreak} 批`}
+                      </Tag>
+                      <Tag bordered={false}>通过 {recoveryEvidenceTrend.strengthenedAcceptanceTrend.acceptedBatchCount}</Tag>
+                      <Tag bordered={false}>未过 {recoveryEvidenceTrend.strengthenedAcceptanceTrend.failedBatchCount}</Tag>
+                    </div>
+                    <Text type="secondary">{recoveryEvidenceTrend.strengthenedAcceptanceTrend.summary}</Text>
+                    <div className="auto-director-batch-memory-chips">
+                      <Tag bordered={false}>核心 {recoveryEvidenceTrend.strengthenedAcceptanceTrend.dimensions.core.failedCount}</Tag>
+                      <Tag bordered={false}>回报 {recoveryEvidenceTrend.strengthenedAcceptanceTrend.dimensions.payoff.failedCount}</Tag>
+                      <Tag bordered={false}>拉力 {recoveryEvidenceTrend.strengthenedAcceptanceTrend.dimensions.readerPull.failedCount}</Tag>
+                    </div>
+                  </div>
+                )}
+                <div className="auto-director-batch-recovery-trend-list">
+                  {recoveryEvidenceTrend.sources.slice(0, 3).map(source => (
+                    <div key={source.source} className="auto-director-batch-recovery-trend-source">
+                      <span>
+                        <strong>{source.label}</strong>
+                        <Tag color={source.releaseFailureCount >= 2 ? 'gold' : 'default'} bordered={false}>
+                          {source.trendLabel}
+                        </Tag>
+                      </span>
+                      <Text type="secondary">深层修复方向：{source.deepRepairDirection.replace(/^深层修复方向：/, '')}</Text>
+                      {source.deepRepairEffect.status !== 'none' && (
+                        <Text type="secondary">
+                          深修结果：{source.deepRepairEffect.label}，{source.deepRepairEffect.summary}
+                        </Text>
+                      )}
+                      {source.deepRepairEffect.strengthenedClosure.status !== 'not_required' && (
+                        <Text type="secondary">
+                          强化复检：{source.deepRepairEffect.strengthenedClosure.label}，{source.deepRepairEffect.strengthenedClosure.summary}
+                        </Text>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {safeBatchExpansionFeedback && safeBatchExpansionFeedback.visible !== false && (
+              <div className={`auto-director-batch-expansion-feedback auto-director-batch-expansion-feedback-${safeBatchExpansionFeedbackStatus || 'none'}`}>
+                <div className="auto-director-batch-memory-anchor-head">
+                  <Text strong>扩批热区反馈</Text>
+                  <Tag color={safeBatchExpansionFeedbackColor(safeBatchExpansionFeedbackStatus)} bordered={false}>
+                    {safeBatchExpansionFeedbackLabel(safeBatchExpansionFeedbackStatus)}
+                  </Tag>
+                  {Number(safeBatchExpansionFeedback.target_chapter_count || safeBatchExpansionFeedback.targetChapterCount || 0) > 0 && (
+                    <Tag bordered={false}>
+                      反馈目标 {Number(safeBatchExpansionFeedback.target_chapter_count || safeBatchExpansionFeedback.targetChapterCount)} 章
+                    </Tag>
+                  )}
+                  {safeBatchExpansionStablePassStreak > 0 && (
+                    <Tag color="green" bordered={false}>稳定连过 {safeBatchExpansionStablePassStreak}</Tag>
+                  )}
+                  {safeBatchExpansionRecentBatchCount > 1 && (
+                    <Tag bordered={false}>观察 {safeBatchExpansionRecentBatchCount} 批</Tag>
+                  )}
+                  {safeBatchExpansionRepeatedHotspot && (
+                    <Tag color="gold" bordered={false}>
+                      {safeBatchExpansionRepeatedHotspot.label || '同段'}复发 {Number(safeBatchExpansionRepeatedHotspot.count || 0)}
+                    </Tag>
+                  )}
+                  {safeBatchExpansionStructureTrend?.visible !== false && safeBatchExpansionStructureTrend && (
+                    <Tag color={String(safeBatchExpansionStructureTrend.status || '') === 'warn' ? 'gold' : 'green'} bordered={false}>
+                      验证通过率 {Number(safeBatchExpansionStructureTrend.pass_rate || safeBatchExpansionStructureTrend.passRate || 0)}%
+                    </Tag>
+                  )}
+                  {safeBatchExpansionStructureTopFailure && (
+                    <Tag color="gold" bordered={false}>
+                      失败主因 {safeBatchExpansionStructureTopFailure.label}{Number(safeBatchExpansionStructureTopFailure.count || 0)}
+                    </Tag>
+                  )}
+                  {safeBatchExpansionStructureRecurrence?.visible && (
+                    <Tag color="gold" bordered={false}>
+                      复发间隔 {Number(safeBatchExpansionStructureRecurrence.interval_batch_count || safeBatchExpansionStructureRecurrence.intervalBatchCount || 0)}批
+                    </Tag>
+                  )}
+                  {safeBatchExpansionStructureEffectiveness?.visible !== false && safeBatchExpansionStructureEffectiveness && (
+                    <Tag color={safeBatchExpansionStructureEffectivenessStatus === 'ok' ? 'green' : 'gold'} bordered={false}>
+                      {safeBatchExpansionStructureEffectivenessStatus === 'ok' ? '结构修复有效' : '结构修复待观察'}
+                    </Tag>
+                  )}
+                  {safeBatchExpansionStructureEffectiveness?.visible !== false && safeBatchExpansionStructureEffectiveness && (
+                    <Tag bordered={false}>
+                      主因 {Number(safeBatchExpansionStructureEffectiveness.baseline_failure_reason_count || safeBatchExpansionStructureEffectiveness.baselineFailureReasonCount || 0)}
+                      -&gt;{Number(safeBatchExpansionStructureEffectiveness.current_failure_reason_count || safeBatchExpansionStructureEffectiveness.currentFailureReasonCount || 0)}
+                    </Tag>
+                  )}
+                </div>
+                <Text type="secondary">
+                  {safeBatchExpansionFeedback.summary || '扩批分段复盘结果已接入下一轮安全连写策略。'}
+                </Text>
+                {safeBatchExpansionStructureTrend?.summary && (
+                  <Text type="secondary">
+                    {safeBatchExpansionStructureTrend.summary}
+                  </Text>
+                )}
+                {safeBatchExpansionStructureEffectiveness?.visible !== false && safeBatchExpansionStructureEffectiveness && (
+                  <Text type="secondary">
+                    {safeBatchExpansionStructureEffectiveness.summary || `${safeBatchExpansionStructureEffectiveness.label || '结构修复有效性'}已进入扩批观察。`}
+                  </Text>
+                )}
+                {safeBatchExpansionFeedbackChapterNos.length > 0 && (
+                  <div className="auto-director-batch-memory-chips">
+                    <Tag bordered={false}>
+                      最近扩批 {safeBatchExpansionFeedbackChapterNos.map((chapterNo: any) => `第${chapterNo}章`).join('、')}
+                    </Tag>
+                    {Number(safeBatchExpansionFeedback.risk_count || safeBatchExpansionFeedback.riskCount || 0) > 0 && (
+                      <Tag color="gold" bordered={false}>
+                        热区风险 {Number(safeBatchExpansionFeedback.risk_count || safeBatchExpansionFeedback.riskCount)}
+                      </Tag>
+                    )}
+                  </div>
+                )}
               </div>
             )}
             {batchPreflight.warnings.length > 0 && (

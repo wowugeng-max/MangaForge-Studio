@@ -1872,6 +1872,39 @@ function normalizeNextBatchChecklistItem(item: any) {
   }
 }
 
+function normalizeExpansionStructureVerification(value: any) {
+  const raw = value?.expansion_structure_verification || value?.expansionStructureVerification || value || {}
+  const repeated = raw.repeated_hotspot_segment || raw.repeatedHotspotSegment || null
+  const normalized = {
+    source: compactBriefText(raw.source || 'safe_batch_expansion_structure_repair'),
+    label: compactBriefText(raw.label || '扩批结构验证'),
+    repeated_hotspot_segment: repeated ? {
+      key: compactBriefText(repeated.key),
+      label: compactBriefText(repeated.label),
+      count: Number(repeated.count || 0),
+    } : null,
+    validation_chapter_nos: asArray(raw.validation_chapter_nos || raw.validationChapterNos)
+      .map((chapterNo: any) => Number(chapterNo))
+      .filter((chapterNo: number) => chapterNo > 0)
+      .slice(0, 5),
+    fixed_segment_role: compactBriefText(raw.fixed_segment_role || raw.fixedSegmentRole),
+    conflict_rotation: compactBriefText(raw.conflict_rotation || raw.conflictRotation),
+    explicit_payoff: compactBriefText(raw.explicit_payoff || raw.explicitPayoff),
+    ending_hook_requirement: compactBriefText(raw.ending_hook_requirement || raw.endingHookRequirement),
+    structure_actions: asArray(raw.structure_actions || raw.structureActions)
+      .map((item: any) => compactBriefText(item))
+      .filter(Boolean)
+      .slice(0, 5),
+  }
+  const hasContent = normalized.validation_chapter_nos.length
+    || normalized.fixed_segment_role
+    || normalized.conflict_rotation
+    || normalized.explicit_payoff
+    || normalized.ending_hook_requirement
+    || normalized.structure_actions.length
+  return hasContent ? normalized : null
+}
+
 function normalizeNextBatchBrief(value: any, targetChapterNo = 0) {
   const raw = value?.next_batch_brief || value?.nextBatchBrief || value || {}
   const chapters = asArray(raw.chapters).map(normalizeNextBatchChapter).filter(Boolean).slice(0, 10)
@@ -1883,6 +1916,9 @@ function normalizeNextBatchBrief(value: any, targetChapterNo = 0) {
   const currentChapterRole = compactBriefText(
     raw.current_chapter_role || raw.currentChapterRole || currentChapter?.chapter_task || currentChapter?.conflict || currentChapter?.mainline_progress,
   )
+  const expansionStructureVerification = normalizeExpansionStructureVerification(
+    raw.expansion_structure_verification || raw.expansionStructureVerification,
+  )
   const normalized = {
     chapter_range_label: compactBriefText(raw.chapter_range_label || raw.chapterRangeLabel),
     batch_goal: compactBriefText(raw.batch_goal || raw.batchGoal),
@@ -1890,6 +1926,7 @@ function normalizeNextBatchBrief(value: any, targetChapterNo = 0) {
     mainline_focus: compactBriefText(raw.mainline_focus || raw.mainlineFocus),
     forbidden_boundary: compactBriefText(raw.forbidden_boundary || raw.forbiddenBoundary),
     current_chapter_role: currentChapterRole,
+    expansion_structure_verification: expansionStructureVerification,
     start_checklist: startChecklist,
     chapters,
   }
@@ -1899,6 +1936,7 @@ function normalizeNextBatchBrief(value: any, targetChapterNo = 0) {
     || normalized.mainline_focus
     || normalized.forbidden_boundary
     || normalized.current_chapter_role
+    || normalized.expansion_structure_verification
     || normalized.start_checklist.length
     || normalized.chapters.length
   return hasContent ? normalized : null
@@ -5382,6 +5420,7 @@ export function createNovelWritingService(ctx: {
       contextPackage?.chapter_target?.next_batch_brief || contextPackage?.next_batch_brief,
       Number(chapterDraft?.chapter_no || contextPackage?.chapter_target?.chapter_no || 0),
     )
+    const expansionStructureVerification = nextBatchBrief?.expansion_structure_verification || null
     const batchPreflight = contextPackage?.chapter_target?.batch_preflight || contextPackage?.batch_preflight || null
     const batchDeliveryRiskCarryOver = normalizeDeliveryRiskCarryOverContext(
       batchPreflight?.delivery_risk_carry_over
@@ -5547,6 +5586,17 @@ export function createNovelWritingService(ctx: {
       nextBatchBrief ? '硬性要求：本章必须服务批次目标和当前章角色；不得提前消费后续章节爆点，不得跳过本章读者回报，不得抢跑批次后段的主线兑现。' : '',
       nextBatchBrief?.start_checklist?.length ? `批次开工清单：${nextBatchBrief.start_checklist.map((item: any) => `${item.label || item.key}：${item.detail || item.status}`).join('；')}` : '',
       nextBatchBrief ? JSON.stringify(nextBatchBrief, null, 2).slice(0, 4000) : '',
+      '',
+      expansionStructureVerification ? '【扩批结构验证】' : '',
+      expansionStructureVerification ? '硬性要求：执行 next_batch_brief.expansion_structure_verification；这是已修复的5章扩批热区进入本轮2-3章验证，正文必须证明结构修复真的落地，而不是只声明已经修好。' : '',
+      expansionStructureVerification?.repeated_hotspot_segment ? `${expansionStructureVerification.repeated_hotspot_segment.label || '复发段位'}连续 ${expansionStructureVerification.repeated_hotspot_segment.count || 0} 次成为扩批热区，本批必须反证同一段位不会再次只铺垫、掉回报或丢章末追读。` : '',
+      expansionStructureVerification?.validation_chapter_nos?.length ? `验证章节：${expansionStructureVerification.validation_chapter_nos.map((chapterNo: number) => `第${chapterNo}章`).join('、')}` : '',
+      expansionStructureVerification?.fixed_segment_role ? `固定段落职责：${expansionStructureVerification.fixed_segment_role}` : '',
+      expansionStructureVerification?.conflict_rotation ? `冲突换源：${expansionStructureVerification.conflict_rotation}` : '',
+      expansionStructureVerification?.explicit_payoff ? `显性回报：${expansionStructureVerification.explicit_payoff}` : '',
+      expansionStructureVerification?.ending_hook_requirement ? `章末追读：${expansionStructureVerification.ending_hook_requirement}` : '',
+      expansionStructureVerification?.structure_actions?.length ? `结构动作：${expansionStructureVerification.structure_actions.join('；')}` : '',
+      expansionStructureVerification ? JSON.stringify(expansionStructureVerification, null, 2).slice(0, 3000) : '',
       '',
       longformMemoryAnchor ? '【长篇正史锚点】' : '',
       longformMemoryAnchor ? '硬性要求：这是本批连续生产的压缩正史。角色状态、开放悬念、回报债务和核心承诺不得被改写、遗忘或绕开；新增情节必须从这些锚点自然推进。' : '',
@@ -5733,10 +5783,11 @@ export function createNovelWritingService(ctx: {
       '13B. 执行 chapter_target.longform_battle_context：核心守恒、读者拉力、剧情线调度、卷级爆点、创新/IP场面和生产燃料中的风险项必须在本章有可见承接；blocked/warn 风险优先于普通铺垫，不能写成空泛解释。',
       '14. 执行本批连载任务书：本章只完成 current_chapter_role 和本章读者回报；可以铺垫下一章，但不得提前解决 next_batch_brief.chapters 后续章节的冲突或钩子。',
       '14A. 执行 chapter_target.batch_preflight：如果安全连写预执行门禁提示近10章疲劳或批次风险，本章必须在冲突来源、回报形态、章末问题、可视化场面中至少改造一项；被 blocked_chapter_nos 拦截的后续章节内容不得提前写进本章。',
-      '14A+. 执行 batch_preflight.longform_memory_anchor：批量续写时必须遵守压缩正史锚点，不能改变角色状态、遗忘开放悬念、跳过回报债务或偏离核心承诺。',
-      '14A++. 执行 batch_preflight.delivery_risk_carry_over：安全连写第一章必须优先承接上一章残留风险；opening_actions 在前 300 字落地，middle_actions 在中段转成事件推进，ending_actions 在最后 300 字形成追读钩子。',
-      '14A+++. 执行 batch_preflight.chapter_handoff_contract：安全连写第一章必须承接上一章最后一幕、开篇义务和读者期待债；must_deliver 写成可见回报，keep_alive 保持存在感，overdue 优先推进。',
-      '14A++++. 执行 chapter_target.longform_memory_capsule：单章开写也必须召回压缩正史，角色状态、开放悬念、回报债务、正史事实和 red_lines 不得遗忘、矛盾改写或跳过。',
+      expansionStructureVerification ? '14A+. 执行 next_batch_brief.expansion_structure_verification：本章必须承担验证批中的结构职责，换冲突来源、给显性回报、留不同章末追读问题；不得把已修复的扩批热区再次写成中段转场或空铺垫。' : '',
+      '14A++. 执行 batch_preflight.longform_memory_anchor：批量续写时必须遵守压缩正史锚点，不能改变角色状态、遗忘开放悬念、跳过回报债务或偏离核心承诺。',
+      '14A+++. 执行 batch_preflight.delivery_risk_carry_over：安全连写第一章必须优先承接上一章残留风险；opening_actions 在前 300 字落地，middle_actions 在中段转成事件推进，ending_actions 在最后 300 字形成追读钩子。',
+      '14A++++. 执行 batch_preflight.chapter_handoff_contract：安全连写第一章必须承接上一章最后一幕、开篇义务和读者期待债；must_deliver 写成可见回报，keep_alive 保持存在感，overdue 优先推进。',
+      '14A+++++. 执行 chapter_target.longform_memory_capsule：单章开写也必须召回压缩正史，角色状态、开放悬念、回报债务、正史事实和 red_lines 不得遗忘、矛盾改写或跳过。',
       '14B. 执行 chapter_target.million_word_runway：正文必须可见回答本章四问，守住 redLines，不丢 readerFuel；如果航线为 single_chapter 或 blocked，只写当前章可兑现内容，不得预支后续章节主线回收。',
       '14C. 执行 chapter_target.story_unit_context：正文必须完成当前剧情单元的 current_chapter_role；只推进本章职责需要的 pressure_escalation、setup_and_storyline 和 reader payoff，不得提前写完 mini_climax_payoff、exit_hook 或 forbidden_advance 标注的后续兑现。',
       '15. 如果参考迁移计划包含 transferable_model，只能采用其中 allowed_learning 的抽象功能；rewrite_requirements 必须执行；copy_guard_terms 和 forbidden_transfer 禁止出现在正文里。',

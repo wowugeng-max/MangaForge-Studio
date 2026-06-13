@@ -2000,6 +2000,54 @@ export default function NovelProjectWorkspace() {
       }
       return
     }
+    if (actionKey === 'deep_repair_single_brief') {
+      const chapterId = resolveRepairQueueTaskChapterId(task)
+      const chapterNo = Number(task?.chapter_no || task?.chapterNo || 0)
+      const targetChapter = chapterId
+        ? sortedChapters.find(item => Number(item.id || 0) === chapterId)
+        : chapterNo
+          ? sortedChapters.find(item => Number(item.chapter_no || 0) === chapterNo)
+          : null
+      if (targetChapter && !await selectChapterForWriting(Number(targetChapter.id))) return
+      await runRollingPlan({
+        fromChapter: Number(targetChapter?.chapter_no || chapterNo || activeChapter?.chapter_no || 0) || undefined,
+        intent: {
+          source: 'recovery_evidence_source_deep_repair',
+          action_key: actionKey,
+          repair_scope: 'single_chapter_brief',
+          chapter_id: Number(targetChapter?.id || chapterId || 0) || undefined,
+          chapter_no: Number(targetChapter?.chapter_no || chapterNo || 0) || undefined,
+          source_label: task?.source_label || task?.sourceLabel || '',
+          failed_evidence: task?.failed_evidence || task?.failedEvidence || task?.recovery_evidence_review?.failed_evidence || [],
+          deep_repair_direction: task?.deep_repair_direction || task?.deepRepairDirection || '',
+          instruction: '回到单章任务书，把恢复依据写成当前章可见的冲突行动、对白选择、读者回报和章末钩子；不要只补审计说明。',
+        },
+      })
+      if (run?.id && taskIndex >= 0) {
+        await updateRepairTaskStatus(run, taskIndex, 'needs_review', '已生成单章任务书深修意图，等待正文继承后复查')
+      }
+      if (!options.keepTaskCenterOpen) setTaskCenterOpen(false)
+      return
+    }
+    if (actionKey === 'deep_repair_batch_brief') {
+      await runRollingPlan({
+        intent: {
+          source: 'recovery_evidence_source_deep_repair',
+          action_key: actionKey,
+          repair_scope: 'batch_brief',
+          source_label: task?.source_label || task?.sourceLabel || '',
+          chapter_nos: task?.chapter_nos || task?.chapterNos || [],
+          failed_evidence: task?.failed_evidence || task?.failedEvidence || task?.recovery_evidence_review?.failed_evidence || [],
+          deep_repair_direction: task?.deep_repair_direction || task?.deepRepairDirection || '',
+          instruction: '复盘批次任务书，把多章恢复依据拆回每章冲突职责、剧情线推进、读者回报落点和章末钩子，再恢复批量连写。',
+        },
+      })
+      if (run?.id && taskIndex >= 0) {
+        await updateRepairTaskStatus(run, taskIndex, 'needs_review', '已生成批次任务书深修意图，等待批次复盘审计')
+      }
+      if (!options.keepTaskCenterOpen) setTaskCenterOpen(false)
+      return
+    }
     if (actionKey === 'recheck_safe_batch' || actionKey === 'focus_task' || actionKey === 'review_governance_closure') {
       if (!run?.id) return message.warning('这个治理队列没有绑定修复运行')
       await generateLongformRepairAuditSummary(run, { keepTaskCenterOpen: true })
@@ -3046,12 +3094,12 @@ export default function NovelProjectWorkspace() {
     })
   }
 
-  async function runRollingPlan(options?: { intent?: any }) {
+  async function runRollingPlan(options?: { intent?: any; fromChapter?: number }) {
     if (!selectedModelId) return message.warning('请先选择模型')
     await runCommercialTool('rollingPlan', '未来 10 章滚动规划', async () => {
       const res = await apiClient.post(`/novel/projects/${projectId}/rolling-plan`, {
         model_id: selectedModelId,
-        from_chapter: activeChapter?.chapter_no || undefined,
+        from_chapter: options?.fromChapter || activeChapter?.chapter_no || undefined,
         horizon: 10,
         rolling_plan_intent: options?.intent,
       })

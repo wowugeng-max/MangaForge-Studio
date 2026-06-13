@@ -535,6 +535,53 @@ function normalizeRecoveryEvidenceReview(task: AnyRecord) {
   }
 }
 
+function normalizeExpansionStructureValidationTrend(task: AnyRecord, review: AnyRecord) {
+  const trend = objectValue(
+    review.expansion_structure_validation_trend
+    || review.expansionStructureValidationTrend
+    || task.expansion_structure_validation_trend
+    || task.expansionStructureValidationTrend,
+  )
+  if (!Object.keys(trend).length || trend.visible === false) return null
+  const validationBatchCount = Number(trend.validation_batch_count ?? trend.validationBatchCount ?? 0)
+  const passedBatchCount = Number(trend.passed_batch_count ?? trend.passedBatchCount ?? 0)
+  const failedBatchCount = Number(trend.failed_batch_count ?? trend.failedBatchCount ?? 0)
+  const latestChapterNos = arrayValue(trend.latest_chapter_nos || trend.latestChapterNos)
+    .map(chapterNo => Number(chapterNo))
+    .filter(chapterNo => chapterNo > 0)
+  const failureReasons = arrayValue(trend.failure_reasons || trend.failureReasons)
+    .map(item => objectValue(item))
+    .map(item => ({
+      label: firstText(item.label, item.key),
+      count: Number(item.count || 0),
+    }))
+    .filter(item => item.label && item.count > 0)
+  const recurrence = objectValue(trend.recurrence_after_restore || trend.recurrenceAfterRestore)
+  const recurrenceChapterNos = arrayValue(recurrence.recurrence_chapter_nos || recurrence.recurrenceChapterNos)
+    .map(chapterNo => Number(chapterNo))
+    .filter(chapterNo => chapterNo > 0)
+
+  return {
+    status: firstText(trend.status),
+    label: firstText(trend.label, '扩批结构验证趋势'),
+    summary: firstText(trend.summary),
+    segmentLabel: firstText(trend.segment_label, trend.segmentLabel, '复发段位'),
+    passRate: Number(trend.pass_rate ?? trend.passRate ?? 0),
+    validationBatchCount,
+    passedBatchCount,
+    failedBatchCount,
+    latestStatus: firstText(trend.latest_status, trend.latestStatus),
+    latestChapterNos,
+    failureReasons,
+    recurrence: {
+      visible: Boolean(recurrence.visible),
+      intervalBatchCount: Number(recurrence.interval_batch_count ?? recurrence.intervalBatchCount ?? 0),
+      intervalLabel: firstText(recurrence.interval_label, recurrence.intervalLabel),
+      recurrenceChapterNos,
+    },
+  }
+}
+
 export function buildRepairTaskRevisionPrompt(task: AnyRecord, run?: AnyRecord | null) {
   const batchPlan = normalizeBatchPlanContext(task, run)
   const chapterPlan = batchPlan?.chapter_plan
@@ -552,6 +599,7 @@ export function buildRepairTaskRevisionPrompt(task: AnyRecord, run?: AnyRecord |
   const styleSampleSync = task.style_sample_sync || task.styleSampleSync || null
   const readerTrialReview = task.reader_trial_review || task.readerTrialReview || null
   const first30Retention = task.first30_retention || task.first30Retention || null
+  const expansionStructureReview = task.safe_batch_expansion_structure_review || task.safeBatchExpansionStructureReview || null
   const lines = [
     '本次修订来自任务中心的商业留存/质检修复任务。',
     task.segment ? `分段：${task.segment}` : '',
@@ -624,6 +672,51 @@ export function buildRepairTaskRevisionPrompt(task: AnyRecord, run?: AnyRecord |
       '修订要求：必须补成可见的阶段结果，例如身份变化、资源入场、关系改写、势力态度转变、阶段反派败退或新门槛开启。',
       '不能把阶段结算继续后移，不能用解释性旁白代替现场冲突和结果兑现，不能提前消费后续卷末爆点。',
     )
+  }
+  if (expansionStructureReview) {
+    const review = objectValue(expansionStructureReview)
+    const repeated = objectValue(review.repeated_hotspot_segment || review.repeatedHotspotSegment)
+    const repeatedLabel = firstText(repeated.label, repeated.key, '复发段位')
+    const repeatedCount = Number(repeated.count || 0)
+    const latestChapterNos = arrayValue(review.latest_chapter_nos || review.latestChapterNos)
+      .map(chapterNo => Number(chapterNo))
+      .filter(chapterNo => chapterNo > 0)
+    const affectedChapterNos = arrayValue(review.affected_chapter_nos || review.affectedChapterNos)
+      .map(chapterNo => Number(chapterNo))
+      .filter(chapterNo => chapterNo > 0)
+    const hotspotSummaries = arrayValue(review.hotspot_summaries || review.hotspotSummaries)
+      .map(item => text(item))
+      .filter(Boolean)
+    const structureActions = arrayValue(review.structure_actions || review.structureActions)
+      .map(item => text(item))
+      .filter(Boolean)
+    const rollback = objectValue(review.rollback_policy || review.rollbackPolicy)
+    const validationTrend = normalizeExpansionStructureValidationTrend(task, review)
+    lines.push(
+      '【扩批结构修复】',
+      repeatedCount > 0 ? `复发段位：${repeatedLabel}连续 ${repeatedCount} 次` : `复发段位：${repeatedLabel}`,
+      latestChapterNos.length > 0 ? `最近批次：第${latestChapterNos.join('、')}章` : '',
+      affectedChapterNos.length > 0 ? `高危章节：第${affectedChapterNos.join('、')}章` : '',
+      firstText(review.summary) ? `结构结论：${firstText(review.summary)}` : '',
+      ...hotspotSummaries.map(item => `热区证据：${item}`),
+      ...structureActions.map(item => `结构动作：${item}`),
+      firstText(rollback.summary) ? `回退策略：${firstText(rollback.summary)}` : '',
+      '修订要求：先改批次任务书、段位职责和章间节奏，不能只修单章语句或局部爽点；每章必须重新分配冲突来源、显性回报、主线推进和章末追读。',
+      '修订后必须重新运行5章扩批分段复盘，确认该段位不再成为核心/回报/追读热区，再恢复5章安全连写。',
+    )
+    if (validationTrend) {
+      lines.push(
+        '【扩批结构验证趋势】',
+        `趋势段位：${validationTrend.segmentLabel}`,
+        `验证通过率：${validationTrend.passRate}%（${validationTrend.passedBatchCount}/${validationTrend.validationBatchCount}批）`,
+        validationTrend.latestChapterNos.length > 0 ? `最近验证批：第${validationTrend.latestChapterNos.join('、')}章` : '',
+        validationTrend.failureReasons.length > 0 ? `失败主因：${validationTrend.failureReasons.map(item => `${item.label}${item.count}`).join('；')}` : '',
+        validationTrend.recurrence.visible && validationTrend.recurrence.intervalLabel ? `复发间隔：${validationTrend.recurrence.intervalLabel}` : '',
+        validationTrend.recurrence.recurrenceChapterNos.length > 0 ? `复发批次：第${validationTrend.recurrence.recurrenceChapterNos.join('、')}章` : '',
+        validationTrend.summary ? `趋势结论：${validationTrend.summary}` : '',
+        '修订要求：必须按长期复发惯性重写批次结构，把失败主因转成固定段位职责、冲突换源、显性回报和章末追读检查项；不能只处理本批表面风险。',
+      )
+    }
   }
   if (readerPullReview) {
     const missed = arrayValue(readerPullReview.missed)

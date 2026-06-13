@@ -9,7 +9,9 @@ import {
   buildRecoveryEvidenceReviewRowAction,
   buildRecoveryEvidenceReviewRows,
   buildRecoveryEvidenceRegovernanceSummary,
+  buildRecoveryEvidenceSourceRiskProfileSnapshot,
   buildRepairClosureHighlights,
+  buildSafeBatchExpansionPolicySnapshot,
   recoveryEvidenceSourceRecheckAction,
   repairTaskActionLabel,
 } from './TaskCenterDrawer'
@@ -73,6 +75,48 @@ describe('buildRepairClosureHighlights', () => {
     expect(highlights[0]?.chapterNos).toEqual([9, 10])
     expect(highlights[0]?.issueTypes).toEqual(['reader_pull_missed', 'reader_expectation_debt'])
     expect(highlights[0]?.detail).toContain('第9、10章')
+  })
+
+  test('groups resolved safe-batch expansion segment repairs as rollback evidence', () => {
+    const highlights = buildRepairClosureHighlights([
+      {
+        source: 'auto_creation_safe_batch_risk',
+        issue_type: 'safe_batch_expansion_segment_hotspot',
+        task_status: 'resolved',
+        chapter_no: 10,
+      },
+    ])
+
+    expect(highlights).toEqual([
+      expect.objectContaining({
+        key: 'batch_expansion_segment',
+        label: '扩批分段风险已清',
+        count: 1,
+        chapterNos: [10],
+        issueTypes: ['safe_batch_expansion_segment_hotspot'],
+      }),
+    ])
+  })
+
+  test('groups resolved safe-batch expansion structure repairs as structure governance evidence', () => {
+    const highlights = buildRepairClosureHighlights([
+      {
+        source: 'auto_creation_safe_batch_risk',
+        issue_type: 'safe_batch_expansion_structure_repair',
+        task_status: 'resolved',
+        chapter_no: 15,
+      },
+    ])
+
+    expect(highlights).toEqual([
+      expect.objectContaining({
+        key: 'batch_expansion_structure',
+        label: '扩批结构风险已清',
+        count: 1,
+        chapterNos: [15],
+        issueTypes: ['safe_batch_expansion_structure_repair'],
+      }),
+    ])
   })
 
   test('groups resolved recovery evidence repairs as closure evidence', () => {
@@ -542,6 +586,383 @@ describe('buildRecoveryEvidenceRegovernanceSummary', () => {
   })
 })
 
+describe('buildRecoveryEvidenceSourceRiskProfileSnapshot', () => {
+  test('summarizes safe-batch preflight recovery evidence source trend for task details', () => {
+    const snapshot = buildRecoveryEvidenceSourceRiskProfileSnapshot({
+      recovery_evidence_source_risk_profile: {
+        status: 'warn',
+        total_failure_count: 3,
+        repeat_source_count: 1,
+        sources: [
+          {
+            source: 'single_chapter_governance_recheck',
+            label: '单章治理复查',
+            release_failure_count: 2,
+            evidence: ['单章治理复查：生产阻断已解除'],
+            deep_repair_effect: {
+              status: 'observing',
+              label: '深修后暂无再失效',
+              summary: '单章治理复查最近一次深修后暂无新的放行后失效，继续观察下一批正文继承。',
+              latest_repair_action_label: '深修单章任务书',
+              post_repair_failure_count: 0,
+              strengthened_repair_closure: {
+                status: 'converged',
+                label: '强化深修已收敛',
+                summary: '单章治理复查强化深修后暂无新的同源放行后失效，可恢复小批量安全连写。',
+              },
+            },
+          },
+          {
+            source: 'safe_batch_recovery_recheck',
+            label: '批次恢复复查',
+            release_failure_count: 1,
+            evidence: ['批次恢复复查：生产阻断已解除'],
+          },
+        ],
+      },
+    })
+    const singleDeepRepairDirection = snapshot?.sources[0]?.deepRepairDirection || ''
+    const batchDeepRepairDirection = snapshot?.sources[1]?.deepRepairDirection || ''
+
+    expect(snapshot).toMatchObject({
+      visible: true,
+      status: 'warn',
+      label: '恢复依据画像趋势',
+      summary: '单章治理复查近2轮放行后失效，任务中心应先处理深层创作修复，再恢复多章安全连写。',
+      sources: [
+        expect.objectContaining({
+          source: 'single_chapter_governance_recheck',
+          label: '单章治理复查',
+          releaseFailureCount: 2,
+          trendLabel: '近2轮失败',
+          deepRepairEffect: expect.objectContaining({
+            status: 'observing',
+            label: '深修后暂无再失效',
+            latestRepairActionLabel: '深修单章任务书',
+            postRepairFailureCount: 0,
+            strengthenedClosure: expect.objectContaining({
+              status: 'converged',
+              label: '强化深修已收敛',
+            }),
+          }),
+        }),
+        expect.objectContaining({
+          source: 'safe_batch_recovery_recheck',
+          label: '批次恢复复查',
+          releaseFailureCount: 1,
+          trendLabel: '近1轮失败',
+        }),
+      ],
+    })
+    expect(singleDeepRepairDirection.includes('回到单章任务书')).toBe(true)
+    expect(batchDeepRepairDirection.includes('批次任务书')).toBe(true)
+  })
+
+  test('keeps strengthened recovery acceptance trend in batch task details', () => {
+    const snapshot = buildRecoveryEvidenceSourceRiskProfileSnapshot({
+      recovery_evidence_source_risk_profile: {
+        status: 'ok',
+        total_failure_count: 2,
+        repeat_source_count: 1,
+        sources: [
+          {
+            source: 'single_chapter_governance_recheck',
+            label: '单章治理复查',
+            release_failure_count: 2,
+          },
+        ],
+      },
+      strengthened_repair_acceptance_trend: {
+        visible: true,
+        status: 'warn',
+        label: '强化恢复验收趋势',
+        summary: '强化恢复验收最近 1 批未通过：核心守恒风险 1 项、读者拉力风险 2 项；本轮回到单章治理。',
+        accepted_batch_count: 2,
+        failed_batch_count: 1,
+        pass_streak: 0,
+        latest_status: 'warn',
+        latest_batch_label: '第41-43章',
+        latest_run_id: 9001,
+        source_evidence: ['单章治理复查：强化深修已收敛'],
+        dimensions: {
+          core: { label: '核心守恒', failed_count: 1 },
+          payoff: { label: '读者回报', failed_count: 0 },
+          reader_pull: { label: '读者拉力', failed_count: 2 },
+        },
+      },
+    })
+
+    expect(snapshot?.strengthenedAcceptanceTrend).toMatchObject({
+      visible: true,
+      status: 'warn',
+      label: '强化恢复验收趋势',
+      acceptedBatchCount: 2,
+      failedBatchCount: 1,
+      passStreak: 0,
+      latestStatus: 'warn',
+      latestBatchLabel: '第41-43章',
+      latestRunId: 9001,
+      sourceEvidence: ['单章治理复查：强化深修已收敛'],
+      dimensions: {
+        core: { label: '核心守恒', failedCount: 1 },
+        payoff: { label: '读者回报', failedCount: 0 },
+        readerPull: { label: '读者拉力', failedCount: 2 },
+      },
+    })
+  })
+})
+
+describe('buildSafeBatchExpansionPolicySnapshot', () => {
+  test('summarizes explicit expansion policy from safe-batch preflight', () => {
+    const snapshot = buildSafeBatchExpansionPolicySnapshot({
+      safe_batch_expansion_policy: {
+        status: 'expanded',
+        label: '强化扩批规则',
+        summary: '强化恢复验收连续 3/3 批通过，本轮可从 3 章扩到 5 章安全连写。',
+        target_chapter_count: 5,
+        base_chapter_count: 3,
+        expanded_chapter_count: 5,
+        required_pass_streak: 3,
+        pass_streak: 3,
+        accepted_batch_count: 3,
+        failed_batch_count: 0,
+        latest_status: 'ok',
+      },
+    })
+
+    expect(snapshot).toEqual({
+      visible: true,
+      status: 'expanded',
+      label: '强化扩批规则',
+      summary: '强化恢复验收连续 3/3 批通过，本轮可从 3 章扩到 5 章安全连写。',
+      targetChapterCount: 5,
+      baseChapterCount: 3,
+      expandedChapterCount: 5,
+      requiredPassStreak: 3,
+      passStreak: 3,
+      acceptedBatchCount: 3,
+      failedBatchCount: 0,
+      latestStatus: 'ok',
+      expansionFeedback: null,
+    })
+  })
+
+  test('summarizes expansion feedback from safe-batch preflight', () => {
+    const snapshot = buildSafeBatchExpansionPolicySnapshot({
+      safe_batch_expansion_policy: {
+        status: 'recovering',
+        label: '强化扩批规则',
+        summary: '最近一次5章扩批存在扩批分段热区，下一轮保持 3 章以内安全连写。',
+        target_chapter_count: 3,
+        base_chapter_count: 3,
+        expanded_chapter_count: 5,
+        required_pass_streak: 3,
+        pass_streak: 3,
+        accepted_batch_count: 3,
+        failed_batch_count: 0,
+        latest_status: 'ok',
+        expansion_feedback: {
+          status: 'rollback_to_small_batch',
+          label: '扩批热区反馈',
+          summary: '中段第10、11章出现扩批热区，下一轮回退到 2-3 章安全连写。',
+          target_chapter_count: 3,
+          latest_chapter_nos: [8, 9, 10, 11, 12],
+          risk_count: 3,
+        },
+      },
+    })
+
+    expect(snapshot).toMatchObject({
+      status: 'recovering',
+      targetChapterCount: 3,
+      expansionFeedback: {
+        status: 'rollback_to_small_batch',
+        label: '扩批热区待修',
+        summary: '中段第10、11章出现扩批热区，下一轮回退到 2-3 章安全连写。',
+        targetChapterCount: 3,
+        latestChapterNos: [8, 9, 10, 11, 12],
+        riskCount: 3,
+      },
+    })
+  })
+
+  test('summarizes expansion stability and repeated hotspot segment from preflight', () => {
+    const snapshot = buildSafeBatchExpansionPolicySnapshot({
+      safe_batch_expansion_policy: {
+        status: 'recovering',
+        label: '强化扩批规则',
+        summary: '中段连续 2 次扩批热区，先做中段固定段落治理和批次结构改写。',
+        target_chapter_count: 3,
+        base_chapter_count: 3,
+        expanded_chapter_count: 5,
+        required_pass_streak: 3,
+        pass_streak: 3,
+        accepted_batch_count: 3,
+        failed_batch_count: 0,
+        latest_status: 'ok',
+        expansion_feedback: {
+          status: 'rollback_to_small_batch',
+          label: '扩批热区反馈',
+          summary: '中段连续 2 次扩批热区，先做中段固定段落治理和批次结构改写。',
+          target_chapter_count: 3,
+          latest_chapter_nos: [13, 14, 15, 16, 17],
+          risk_count: 3,
+          stable_pass_streak: 0,
+          recent_expanded_batch_count: 2,
+          repeated_hotspot_segment: {
+            key: 'middle',
+            label: '中段',
+            count: 2,
+            summary: '中段连续 2 次扩批热区，先做中段固定段落治理和批次结构改写。',
+          },
+        },
+      },
+    })
+
+    expect(snapshot?.expansionFeedback).toMatchObject({
+      status: 'rollback_to_small_batch',
+      stablePassStreak: 0,
+      recentExpandedBatchCount: 2,
+      repeatedHotspotSegment: {
+        key: 'middle',
+        label: '中段',
+        count: 2,
+      },
+    })
+  })
+
+  test('keeps expansion structure validation trend in the task-center snapshot', () => {
+    const snapshot = buildSafeBatchExpansionPolicySnapshot({
+      safe_batch_expansion_policy: {
+        status: 'recovering',
+        label: '强化扩批规则',
+        summary: '扩批结构验证趋势显示中段仍有惯性风险。',
+        target_chapter_count: 3,
+        base_chapter_count: 3,
+        expanded_chapter_count: 5,
+        required_pass_streak: 3,
+        pass_streak: 3,
+        accepted_batch_count: 3,
+        failed_batch_count: 0,
+        latest_status: 'ok',
+        expansion_feedback: {
+          status: 'rollback_to_small_batch',
+          label: '扩批热区反馈',
+          summary: '中段验证通过率 67%，恢复5章后第1个扩批批次复发。',
+          target_chapter_count: 3,
+          latest_chapter_nos: [59, 60, 61, 62, 63],
+          risk_count: 1,
+          expansion_structure_validation_trend: {
+            visible: true,
+            status: 'warn',
+            label: '扩批结构验证趋势',
+            summary: '中段验证通过率 67%（2/3批），失败主因：核心偏移1、回报欠账1、追读拉力1，恢复5章后第1个扩批批次复发。',
+            segment_key: 'middle',
+            segment_label: '中段',
+            validation_batch_count: 3,
+            passed_batch_count: 2,
+            failed_batch_count: 1,
+            pass_rate: 67,
+            latest_status: 'ok',
+            latest_chapter_nos: [56, 57, 58],
+            failure_reasons: [
+              { key: 'core', label: '核心偏移', count: 1 },
+              { key: 'payoff', label: '回报欠账', count: 1 },
+              { key: 'reader_pull', label: '追读拉力', count: 1 },
+            ],
+            recurrence_after_restore: {
+              visible: true,
+              interval_batch_count: 1,
+              interval_label: '恢复5章后第1个扩批批次复发',
+              recurrence_chapter_nos: [59, 60, 61, 62, 63],
+            },
+          },
+        },
+      },
+    })
+
+    expect(snapshot?.expansionFeedback?.structureValidationTrend).toMatchObject({
+      visible: true,
+      status: 'warn',
+      label: '扩批结构验证趋势',
+      segmentLabel: '中段',
+      validationBatchCount: 3,
+      passedBatchCount: 2,
+      failedBatchCount: 1,
+      passRate: 67,
+      latestStatus: 'ok',
+      latestChapterNos: [56, 57, 58],
+      recurrenceAfterRestore: {
+        visible: true,
+        intervalBatchCount: 1,
+        intervalLabel: '恢复5章后第1个扩批批次复发',
+      },
+    })
+    expect(snapshot?.expansionFeedback?.structureValidationTrend?.failureReasons).toEqual([
+      { key: 'core', label: '核心偏移', count: 1 },
+      { key: 'payoff', label: '回报欠账', count: 1 },
+      { key: 'reader_pull', label: '追读拉力', count: 1 },
+    ])
+  })
+
+  test('keeps expansion structure repair effectiveness in the task-center snapshot', () => {
+    const snapshot = buildSafeBatchExpansionPolicySnapshot({
+      safe_batch_expansion_policy: {
+        status: 'expanded',
+        label: '强化扩批规则',
+        summary: '结构修复有效后恢复5章扩批。',
+        target_chapter_count: 5,
+        base_chapter_count: 3,
+        expanded_chapter_count: 5,
+        required_pass_streak: 3,
+        pass_streak: 3,
+        accepted_batch_count: 3,
+        failed_batch_count: 0,
+        latest_status: 'ok',
+        expansion_feedback: {
+          status: 'passed',
+          label: '扩批热区反馈',
+          summary: '结构修复后观察稳定。',
+          target_chapter_count: 5,
+          latest_chapter_nos: [70, 71, 72, 73, 74],
+          risk_count: 0,
+          expansion_structure_repair_effectiveness: {
+            visible: true,
+            status: 'ok',
+            label: '结构修复有效性',
+            summary: '中段结构修复有效性：通过率 67% -> 100%，失败主因 3 -> 0，修复后暂无同段复发。',
+            source_run_id: 625,
+            segment_key: 'middle',
+            segment_label: '中段',
+            baseline_pass_rate: 67,
+            current_pass_rate: 100,
+            pass_rate_delta: 33,
+            baseline_failure_reason_count: 3,
+            current_failure_reason_count: 0,
+            failure_reason_delta: -3,
+            recommendation: 'restore_five_chapter',
+          },
+        },
+      },
+    })
+
+    expect(snapshot?.expansionFeedback?.structureRepairEffectiveness).toMatchObject({
+      visible: true,
+      status: 'ok',
+      label: '结构修复有效性',
+      sourceRunId: 625,
+      segmentLabel: '中段',
+      baselinePassRate: 67,
+      currentPassRate: 100,
+      passRateDelta: 33,
+      baselineFailureReasonCount: 3,
+      currentFailureReasonCount: 0,
+      failureReasonDelta: -3,
+      recommendation: 'restore_five_chapter',
+    })
+  })
+})
+
 describe('buildRecoveryEvidenceReviewRowAction', () => {
   test('routes recovery evidence source rows to the natural clickable action', () => {
     expect(buildRecoveryEvidenceReviewRowAction({
@@ -896,6 +1317,16 @@ describe('repairTaskActionLabel', () => {
       issue_type: 'recovery_evidence_mismatch',
       segment: '第41-43章',
     })).toBe('按批次修订')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'safe_batch_expansion_segment_hotspot',
+    })).toBe('修扩批热区')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'safe_batch_expansion_structure_repair',
+    })).toBe('改扩批结构')
   })
 
   test('labels recovery evidence governance queue actions by their closure flow', () => {
@@ -918,5 +1349,22 @@ describe('repairTaskActionLabel', () => {
       issue_type: 'recovery_evidence_governance_queue',
       action_key: 'focus_task',
     })).toBe('已处理并复盘')
+
+    expect(repairTaskActionLabel({
+      issue_type: 'recovery_evidence_governance_queue',
+      action_key: 'deep_repair_single_brief',
+    })).toBe('深修单章任务书')
+
+    expect(repairTaskActionLabel({
+      issue_type: 'recovery_evidence_governance_queue',
+      action_key: 'deep_repair_batch_brief',
+    })).toBe('深修批次任务书')
+
+    expect(repairTaskActionLabel({
+      issue_type: 'recovery_evidence_governance_queue',
+      action_key: 'deep_repair_single_brief',
+      action_label: '强化单章任务书复盘',
+      deep_repair_level: 'escalated_after_recurrence',
+    })).toBe('强化单章任务书复盘')
   })
 })

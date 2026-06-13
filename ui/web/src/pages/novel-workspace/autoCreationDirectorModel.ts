@@ -157,6 +157,65 @@ export interface AutoCreationBatchGuardrailSignal {
   detail: string
 }
 
+export interface AutoCreationRecoveryEvidenceTrendSource {
+  source: string
+  label: string
+  releaseFailureCount: number
+  trendLabel: string
+  evidence: string[]
+  sourceRunIds: any[]
+  deepRepairDirection: string
+  deepRepairEffect: {
+    status: 'none' | 'pending' | 'observing' | 'recurred'
+    label: string
+    summary: string
+    latestRepairRunId: any | null
+    latestRepairActionLabel: string
+    latestRepairAt: string
+    postRepairFailureCount: number
+    postRepairEvidence: string[]
+    strengthenedClosure: {
+      status: 'not_required' | 'needs_repair' | 'pending_recheck' | 'converged' | 'recurred'
+      label: string
+      summary: string
+      latestRepairRunId: any | null
+      latestRepairAt: string
+      postRepairFailureCount: number
+      postRepairEvidence: string[]
+    }
+  }
+}
+
+export interface AutoCreationStrengthenedRepairAcceptanceTrend {
+  visible: boolean
+  status: AutoCreationBatchGuardrailSignalStatus
+  label: string
+  summary: string
+  acceptedBatchCount: number
+  failedBatchCount: number
+  passStreak: number
+  latestStatus: 'none' | 'ok' | 'warn'
+  latestBatchLabel: string
+  latestRunId: any | null
+  sourceEvidence: string[]
+  dimensions: {
+    core: { label: string; failedCount: number }
+    payoff: { label: string; failedCount: number }
+    readerPull: { label: string; failedCount: number }
+  }
+}
+
+export interface AutoCreationRecoveryEvidenceTrend {
+  visible: boolean
+  status: AutoCreationBatchGuardrailSignalStatus
+  label: string
+  summary: string
+  totalFailureCount: number
+  repeatSourceCount: number
+  sources: AutoCreationRecoveryEvidenceTrendSource[]
+  strengthenedAcceptanceTrend: AutoCreationStrengthenedRepairAcceptanceTrend
+}
+
 export interface AutoCreationBatchReleaseChapter {
   chapterNo: number
   title: string
@@ -220,6 +279,7 @@ export type AutoCreationNextBatchBriefStartChecklistKey =
   | 'reader_payoff'
   | 'innovation'
   | 'forbidden_boundary'
+  | 'expansion_structure'
 
 export interface AutoCreationNextBatchBriefStartChecklistItem {
   key: AutoCreationNextBatchBriefStartChecklistKey
@@ -235,6 +295,7 @@ export interface AutoCreationNextBatchBrief {
   readerPayoffPlan: string
   mainlineFocus: string
   forbiddenBoundary: string
+  expansionStructureVerification?: AnyRecord | null
   startChecklist: AutoCreationNextBatchBriefStartChecklistItem[]
   chapters: AutoCreationNextBatchBriefChapter[]
 }
@@ -296,6 +357,7 @@ export interface AutoCreationBatchGuardrail {
   releaseWindow: AutoCreationBatchReleaseWindow
   preflight: AutoCreationBatchPreflight
   nextBatchBrief: AutoCreationNextBatchBrief
+  recoveryEvidenceTrend: AutoCreationRecoveryEvidenceTrend
   briefRepair: AutoCreationBatchBriefRepair
   briefRecovery: AutoCreationBatchBriefRecovery
 }
@@ -322,7 +384,7 @@ export interface AutoCreationBatchReviewItem {
 }
 
 export interface AutoCreationBatchRiskSignal {
-  key: 'quality' | 'core' | 'runway' | 'payoff' | 'reader_pull' | 'reader_trial' | 'first30_retention' | 'handoff' | 'storyline' | 'story_drive' | 'character_arc' | 'innovation' | 'signature_scene' | 'chapter_attraction' | 'chapter_benchmark' | 'style_sample' | 'readability' | 'serial_rhythm' | 'asset_growth' | 'volume_segment' | 'batch_plan' | 'batch_checklist' | 'recovery_evidence'
+  key: 'quality' | 'core' | 'runway' | 'payoff' | 'reader_pull' | 'reader_trial' | 'first30_retention' | 'handoff' | 'storyline' | 'story_drive' | 'character_arc' | 'innovation' | 'signature_scene' | 'chapter_attraction' | 'chapter_benchmark' | 'style_sample' | 'readability' | 'serial_rhythm' | 'asset_growth' | 'volume_segment' | 'batch_plan' | 'batch_checklist' | 'recovery_evidence' | 'strengthened_repair_acceptance' | 'batch_expansion_segment' | 'batch_expansion_structure'
   label: string
   status: AutoCreationBatchRiskStatus
   detail: string
@@ -372,13 +434,18 @@ export interface AutoCreationBatchRiskRadar {
   batchPlanRiskCount: number
   batchChecklistRiskCount: number
   recoveryEvidenceRiskCount: number
+  strengthenedRepairAcceptanceRiskCount: number
+  safeBatchExpansionSegmentRiskCount: number
+  safeBatchExpansionSegmentReview?: AnyRecord | null
+  safeBatchExpansionStructureValidationRiskCount: number
+  safeBatchExpansionStructureValidationResult?: AnyRecord | null
   checklistExecution: AutoCreationBatchChecklistExecution
   signals: AutoCreationBatchRiskSignal[]
   repairTasks: AnyRecord[]
 }
 
 export interface AutoCreationBatchCompletionMetric {
-  key: 'generation' | 'delivery' | 'quality' | 'plan' | 'recovery_evidence' | 'checklist'
+  key: 'generation' | 'delivery' | 'quality' | 'plan' | 'recovery_evidence' | 'strengthened_repair_acceptance' | 'checklist'
   label: string
   value: number
   target: number
@@ -1697,6 +1764,7 @@ const DELIVERY_RISK_ISSUE_LABELS: Record<string, string> = {
   volume_beat_missed: '爆点',
   volume_segment_missed: '爆点',
   recovery_evidence_mismatch: '恢复依据',
+  strengthened_repair_acceptance_mismatch: '强化复盘',
 }
 
 function deliveryRiskIssueLabel(issueType: string) {
@@ -2153,6 +2221,28 @@ function recoveryEvidenceGovernanceQueueExecutionMeta(source: AnyRecord, actionK
       recheck_mode: 'manual_then_batch_audit',
       recheck_source: 'longform_repair_audit_summary',
       closure_status: 'blocked_until_batch_audit',
+      auto_recheck: false,
+      requires_manual_repair: true,
+    }
+  }
+
+  if (actionKey === 'deep_repair_single_brief') {
+    return {
+      ...meta,
+      recheck_mode: 'single_chapter_deep_repair',
+      recheck_source: 'recovery_evidence_source_deep_repair',
+      closure_status: 'blocked_until_single_brief_deep_repair',
+      auto_recheck: false,
+      requires_manual_repair: true,
+    }
+  }
+
+  if (actionKey === 'deep_repair_batch_brief') {
+    return {
+      ...meta,
+      recheck_mode: 'batch_brief_deep_repair',
+      recheck_source: 'recovery_evidence_source_deep_repair',
+      closure_status: 'blocked_until_batch_brief_deep_repair',
       auto_recheck: false,
       requires_manual_repair: true,
     }
@@ -3044,6 +3134,10 @@ function batchRepairTask(args: {
   batchChecklistExecution?: AnyRecord | null
   recoveryEvidenceReview?: AnyRecord | null
   recoveryEvidenceRegovernanceQueue?: AnyRecord | null
+  strengthenedRepairAcceptanceReview?: AnyRecord | null
+  safeBatchExpansionSegmentReview?: AnyRecord | null
+  safeBatchExpansionStructureReview?: AnyRecord | null
+  safeBatchExpansionStructureValidationResult?: AnyRecord | null
   actionArea?: string
   actionKey?: string
 }) {
@@ -3087,6 +3181,18 @@ function batchRepairTask(args: {
       recovery_evidence_regovernance_queue: args.recoveryEvidenceRegovernanceQueue,
       recoveryEvidenceGovernanceQueue: args.recoveryEvidenceRegovernanceQueue,
     } : {}),
+    ...(args.strengthenedRepairAcceptanceReview ? {
+      strengthened_repair_acceptance_review: args.strengthenedRepairAcceptanceReview,
+    } : {}),
+    ...(args.safeBatchExpansionSegmentReview ? {
+      safe_batch_expansion_segment_review: args.safeBatchExpansionSegmentReview,
+    } : {}),
+    ...(args.safeBatchExpansionStructureReview ? {
+      safe_batch_expansion_structure_review: args.safeBatchExpansionStructureReview,
+    } : {}),
+    ...(args.safeBatchExpansionStructureValidationResult ? {
+      safe_batch_expansion_structure_validation_result: args.safeBatchExpansionStructureValidationResult,
+    } : {}),
   }
 }
 
@@ -3117,6 +3223,9 @@ function resolvedBatchRiskIssueTypes(issueType: string) {
   if (issueType === 'opening_handoff_debt' || issueType === 'reader_expectation_debt') {
     return ['opening_handoff_debt', 'reader_expectation_debt']
   }
+  if (issueType === 'reader_pull_missed' || issueType === 'reader_retention_missed') {
+    return ['reader_pull_missed', 'reader_retention_missed', 'reader_expectation_debt']
+  }
   if (issueType === 'innovation_missed' || issueType === 'innovation_execution_missed') {
     return ['innovation_missed', 'innovation_execution_missed']
   }
@@ -3125,6 +3234,15 @@ function resolvedBatchRiskIssueTypes(issueType: string) {
   }
   if (issueType === 'recovery_evidence_mismatch') {
     return ['recovery_evidence_mismatch']
+  }
+  if (issueType === 'strengthened_repair_acceptance_mismatch') {
+    return ['strengthened_repair_acceptance_mismatch']
+  }
+  if (issueType === 'safe_batch_expansion_segment_hotspot') {
+    return ['safe_batch_expansion_segment_hotspot']
+  }
+  if (issueType === 'safe_batch_expansion_structure_repair') {
+    return ['safe_batch_expansion_structure_repair', 'safe_batch_expansion_segment_hotspot']
   }
   if ([
     'readability_risk',
@@ -3231,6 +3349,1333 @@ function recoveryEvidenceReleaseSummaryFromPreflight(preflight: AnyRecord | null
     || preflight?.recovery_evidence_release_summary
     || preflight?.recoveryEvidenceReleaseSummary
     || null
+}
+
+function isStrengthenedRepairReleaseEvidence(value: any) {
+  const normalized = text(value)
+  return normalized.includes('强化深修') || normalized.includes('强化复检')
+}
+
+function strengthenedRepairReleaseSourcesFromPreflight(preflight: AnyRecord | null | undefined) {
+  const releaseSummary = recoveryEvidenceReleaseSummaryFromPreflight(preflight)
+  const sources = [
+    ...arrayValue(releaseSummary?.strengthened_repair_sources),
+    ...arrayValue(releaseSummary?.strengthenedRepairSources),
+  ]
+  const seen = new Set<string>()
+  return sources
+    .map(source => {
+      const label = firstText(source?.label, source?.source_label, source?.sourceLabel, source?.source)
+      const status = text(source?.status)
+      const statusLabel = firstText(
+        source?.status_label,
+        source?.statusLabel,
+        status === 'converged' ? '强化深修已收敛' : '强化深修恢复',
+      )
+      const evidence = firstText(source?.evidence, source?.text, label && statusLabel ? `${label}：${statusLabel}` : statusLabel)
+      return evidence ? {
+        evidence,
+        source: text(source?.source || source?.sourceMode, 'strengthened_repair_recheck'),
+        source_label: label || '强化深修来源',
+        source_status: status,
+        status_label: statusLabel,
+      } : null
+    })
+    .filter((source): source is AnyRecord => {
+      if (!source) return false
+      const key = [source.source, source.evidence].join('|')
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+}
+
+function buildStrengthenedRepairAcceptanceReview(args: {
+  preflight?: AnyRecord | null
+  counts: {
+    coreRiskTotal: number
+    payoffDebtTotal: number
+    readerPullRiskTotal: number
+  }
+}) {
+  const sources = strengthenedRepairReleaseSourcesFromPreflight(args.preflight)
+  const sourceEvidence = sources.map(source => text(source?.evidence)).filter(Boolean)
+  const coreRiskCount = Math.max(0, Number(args.counts.coreRiskTotal || 0))
+  const payoffDebtCount = Math.max(0, Number(args.counts.payoffDebtTotal || 0))
+  const readerPullRiskCount = Math.max(0, Number(args.counts.readerPullRiskTotal || 0))
+  const failedEvidence = [
+    coreRiskCount > 0 ? `核心守恒风险 ${coreRiskCount} 项` : '',
+    payoffDebtCount > 0 ? `读者回报欠账 ${payoffDebtCount} 项` : '',
+    readerPullRiskCount > 0 ? `读者拉力风险 ${readerPullRiskCount} 项` : '',
+  ].filter(Boolean)
+  const riskCount = coreRiskCount + payoffDebtCount + readerPullRiskCount
+  const sourceSummary = sourceEvidence.slice(0, 2).join('；') || '强化深修来源'
+
+  return {
+    visible: sourceEvidence.length > 0,
+    status: riskCount > 0 ? 'warn' as const : 'ok' as const,
+    source_evidence: sourceEvidence,
+    sources,
+    failed_evidence: failedEvidence,
+    risk_count: riskCount,
+    core_risk_count: coreRiskCount,
+    payoff_debt_count: payoffDebtCount,
+    reader_pull_risk_count: readerPullRiskCount,
+    summary: riskCount > 0
+      ? `强化深修恢复验收未通过：${sourceSummary} 放行后仍有${failedEvidence.join('、')}。`
+      : `强化深修恢复验收已通过：${sourceSummary} 放行后核心守恒、读者回报和追读拉力正常。`,
+  }
+}
+
+function emptyStrengthenedRepairAcceptanceTrend(): AutoCreationStrengthenedRepairAcceptanceTrend {
+  return {
+    visible: false,
+    status: 'ok',
+    label: '强化恢复验收趋势',
+    summary: '暂无强化深修恢复后的批次验收记录。',
+    acceptedBatchCount: 0,
+    failedBatchCount: 0,
+    passStreak: 0,
+    latestStatus: 'none',
+    latestBatchLabel: '',
+    latestRunId: null,
+    sourceEvidence: [],
+    dimensions: {
+      core: { label: '核心守恒', failedCount: 0 },
+      payoff: { label: '读者回报', failedCount: 0 },
+      readerPull: { label: '读者拉力', failedCount: 0 },
+    },
+  }
+}
+
+function strengthenedAcceptanceFailedEvidence(counts: {
+  coreRiskCount: number
+  payoffDebtCount: number
+  readerPullRiskCount: number
+}) {
+  return [
+    counts.coreRiskCount > 0 ? `核心守恒风险 ${counts.coreRiskCount} 项` : '',
+    counts.payoffDebtCount > 0 ? `读者回报欠账 ${counts.payoffDebtCount} 项` : '',
+    counts.readerPullRiskCount > 0 ? `读者拉力风险 ${counts.readerPullRiskCount} 项` : '',
+  ].filter(Boolean)
+}
+
+function strengthenedAcceptanceBatchEvent(args: {
+  run: AnyRecord
+  chapters: AnyRecord[]
+  reviews: AnyRecord[]
+  storyState?: AnyRecord | null
+}) {
+  if (text(args.run?.run_type) !== 'batch_generate_prose') return null
+  const input = parsePayload(args.run?.input_ref) || {}
+  const output = parsePayload(args.run?.output_ref) || {}
+  const preflight = input?.batch_preflight || input?.batchPreflight || null
+  const sources = strengthenedRepairReleaseSourcesFromPreflight(preflight)
+  if (!sources.length) return null
+  const outputChapters = arrayValue(output?.chapters)
+  const items = outputChapters.map((chapter: any) => ({
+    chapterId: chapter?.id ?? chapter?.chapter_id ?? null,
+    chapterNo: Number(chapter?.chapter_no ?? chapter?.chapterNo ?? 0),
+    title: text(chapter?.title, `第${Number(chapter?.chapter_no ?? chapter?.chapterNo ?? 0)}章`),
+    status: text(chapter?.status) === 'success' ? 'success' as AutoCreationBatchReviewItemStatus : 'failed' as AutoCreationBatchReviewItemStatus,
+  })).filter(item => item.chapterNo > 0)
+  const deliveredItems = items.filter(item => {
+    if (item.status !== 'success') return false
+    const chapter = findChapter(args.chapters, item)
+    if (!chapter || !hasDeliveredProse(chapter)) return false
+    return qualityReviewPassed(latestQualityReviewForChapter(args.reviews, chapter, item.chapterNo))
+  })
+  if (!deliveredItems.length) return null
+
+  let coreRiskTotal = 0
+  let payoffDebtTotal = 0
+  let readerPullRiskTotal = 0
+  deliveredItems.forEach(item => {
+    const chapter = findChapter(args.chapters, item)
+    if (!chapter) return
+    const coreReview = latestReviewForChapter(args.reviews, chapter, item.chapterNo, 'chapter_core_drift')
+    const payoffReview = latestReviewForChapter(args.reviews, chapter, item.chapterNo, 'reader_payoff_sync')
+    const expectationReview = latestReviewForChapter(args.reviews, chapter, item.chapterNo, 'reader_expectation_sync')
+    const retentionReview = latestReviewForChapter(args.reviews, chapter, item.chapterNo, 'reader_retention_sync')
+    coreRiskTotal += coreRiskCount(coreReview)
+    payoffDebtTotal += payoffDebtCount(payoffReview)
+    readerPullRiskTotal += expectationRiskCount(expectationReview) + retentionRiskCount(retentionReview)
+  })
+  const failedEvidence = strengthenedAcceptanceFailedEvidence({
+    coreRiskCount: coreRiskTotal,
+    payoffDebtCount: payoffDebtTotal,
+    readerPullRiskCount: readerPullRiskTotal,
+  })
+  const releaseSummary = recoveryEvidenceReleaseSummaryFromPreflight(preflight)
+  const batchLabel = firstText(
+    releaseSummary?.next_batch_label,
+    releaseSummary?.nextBatchLabel,
+    deliveredItems.length ? `第${deliveredItems[0].chapterNo}-${deliveredItems[deliveredItems.length - 1].chapterNo}章` : '',
+  )
+
+  return {
+    status: failedEvidence.length ? 'warn' as const : 'ok' as const,
+    event_at: text(args.run?.created_at || args.run?.updated_at),
+    run_id: args.run?.id ?? null,
+    batch_label: batchLabel,
+    source_evidence: sources.map(source => text(source?.evidence)).filter(Boolean),
+    failed_evidence: failedEvidence,
+    core_risk_count: coreRiskTotal,
+    payoff_debt_count: payoffDebtTotal,
+    reader_pull_risk_count: readerPullRiskTotal,
+  }
+}
+
+function strengthenedAcceptanceRepairTaskEvents(runRecords: AnyRecord[]) {
+  return arrayValue(runRecords).flatMap(run => {
+    const output = parsePayload(run?.output_ref) || {}
+    return arrayValue(output?.tasks).map(task => {
+      if (text(task?.issue_type || task?.issueType) !== 'strengthened_repair_acceptance_mismatch') return null
+      if (isResolvedTaskStatus(task?.task_status || task?.taskStatus)) return null
+      const review = task?.strengthened_repair_acceptance_review || task?.strengthenedRepairAcceptanceReview || {}
+      const failedEvidence = arrayValue(review?.failed_evidence || review?.failedEvidence).map(item => text(item)).filter(Boolean)
+      const coreRiskCount = Number(review?.core_risk_count ?? review?.coreRiskCount ?? (failedEvidence.some(item => item.includes('核心')) ? 1 : 0))
+      const payoffDebtCount = Number(review?.payoff_debt_count ?? review?.payoffDebtCount ?? (failedEvidence.some(item => item.includes('回报')) ? 1 : 0))
+      const readerPullRiskCount = Number(review?.reader_pull_risk_count ?? review?.readerPullRiskCount ?? (failedEvidence.some(item => item.includes('拉力') || item.includes('追读')) ? 1 : 0))
+      return {
+        status: 'warn' as const,
+        event_at: text(run?.created_at || run?.updated_at),
+        run_id: run?.id ?? null,
+        batch_label: firstText(review?.batch_label, review?.batchLabel, task?.title, '强化复盘批次'),
+        source_evidence: arrayValue(review?.source_evidence || review?.sourceEvidence).map(item => text(item)).filter(Boolean),
+        failed_evidence: failedEvidence.length
+          ? failedEvidence
+          : strengthenedAcceptanceFailedEvidence({ coreRiskCount, payoffDebtCount, readerPullRiskCount }),
+        core_risk_count: Number.isFinite(coreRiskCount) ? coreRiskCount : 0,
+        payoff_debt_count: Number.isFinite(payoffDebtCount) ? payoffDebtCount : 0,
+        reader_pull_risk_count: Number.isFinite(readerPullRiskCount) ? readerPullRiskCount : 0,
+      }
+    }).filter(Boolean)
+  })
+}
+
+function buildStrengthenedRepairAcceptanceTrend(args: {
+  runRecords: AnyRecord[]
+  chapters: AnyRecord[]
+  reviews: AnyRecord[]
+  storyState?: AnyRecord | null
+}): AutoCreationStrengthenedRepairAcceptanceTrend {
+  const batchEvents = arrayValue(args.runRecords)
+    .map(run => strengthenedAcceptanceBatchEvent({
+      run,
+      chapters: args.chapters,
+      reviews: args.reviews,
+      storyState: args.storyState,
+    }))
+    .filter((event): event is AnyRecord => Boolean(event))
+  const events = [
+    ...batchEvents,
+    ...strengthenedAcceptanceRepairTaskEvents(args.runRecords),
+  ].sort((a, b) => recoveryEvidenceEventTime(a.event_at) - recoveryEvidenceEventTime(b.event_at))
+  if (!events.length) return emptyStrengthenedRepairAcceptanceTrend()
+
+  const acceptedBatchCount = events.filter(event => event.status === 'ok').length
+  const failedBatchCount = events.filter(event => event.status === 'warn').length
+  const latest = events[events.length - 1]
+  let passStreak = 0
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    if (events[index].status !== 'ok') break
+    passStreak += 1
+  }
+  const coreFailedCount = events.reduce((sum, event) => sum + Number(event.core_risk_count || 0), 0)
+  const payoffFailedCount = events.reduce((sum, event) => sum + Number(event.payoff_debt_count || 0), 0)
+  const readerPullFailedCount = events.reduce((sum, event) => sum + Number(event.reader_pull_risk_count || 0), 0)
+  const latestFailedEvidence = arrayValue(latest?.failed_evidence).map(item => text(item)).filter(Boolean)
+  const latestSourceEvidence = arrayValue(latest?.source_evidence).map(item => text(item)).filter(Boolean)
+  const status: AutoCreationBatchGuardrailSignalStatus = latest.status === 'warn' ? 'warn' : 'ok'
+  const summary = status === 'warn'
+    ? `强化恢复验收最近 1 批未通过：${latestFailedEvidence.slice(0, 3).join('、') || '核心/回报/追读仍需复盘'}；本轮回到单章治理。`
+    : `强化恢复验收连续 ${Math.max(1, passStreak)} 批通过，核心守恒、读者回报和追读拉力趋势稳定，可继续小批量扩批观察。`
+
+  return {
+    visible: true,
+    status,
+    label: '强化恢复验收趋势',
+    summary,
+    acceptedBatchCount,
+    failedBatchCount,
+    passStreak,
+    latestStatus: latest.status,
+    latestBatchLabel: text(latest.batch_label),
+    latestRunId: latest.run_id ?? null,
+    sourceEvidence: Array.from(new Set([
+      ...latestSourceEvidence,
+      ...events.flatMap(event => arrayValue(event.source_evidence).map(item => text(item)).filter(Boolean)),
+    ])).slice(0, 6),
+    dimensions: {
+      core: { label: '核心守恒', failedCount: coreFailedCount },
+      payoff: { label: '读者回报', failedCount: payoffFailedCount },
+      readerPull: { label: '读者拉力', failedCount: readerPullFailedCount },
+    },
+  }
+}
+
+function strengthenedRepairAcceptanceTrendSnapshot(trend: AutoCreationStrengthenedRepairAcceptanceTrend) {
+  if (!trend.visible) return null
+  return {
+    visible: true,
+    status: trend.status,
+    label: trend.label,
+    summary: trend.summary,
+    accepted_batch_count: trend.acceptedBatchCount,
+    failed_batch_count: trend.failedBatchCount,
+    pass_streak: trend.passStreak,
+    latest_status: trend.latestStatus,
+    latest_batch_label: trend.latestBatchLabel,
+    latest_run_id: trend.latestRunId,
+    source_evidence: trend.sourceEvidence,
+    dimensions: {
+      core: { label: trend.dimensions.core.label, failed_count: trend.dimensions.core.failedCount },
+      payoff: { label: trend.dimensions.payoff.label, failed_count: trend.dimensions.payoff.failedCount },
+      reader_pull: { label: trend.dimensions.readerPull.label, failed_count: trend.dimensions.readerPull.failedCount },
+    },
+  }
+}
+
+function buildSafeBatchExpansionPolicy(
+  trend: AutoCreationStrengthenedRepairAcceptanceTrend,
+  expansionFeedback?: AnyRecord | null,
+) {
+  const requiredPassStreak = 3
+  const baseChapterCount = 3
+  const expandedChapterCount = 5
+  const feedback = expansionFeedback?.visible ? expansionFeedback : null
+  const feedbackStatus = text(feedback?.status)
+  const feedbackNeedsRecovery = feedbackStatus === 'rollback_to_single_chapter' || feedbackStatus === 'rollback_to_small_batch'
+  const feedbackRecovered = feedbackStatus === 'recovered'
+  const canExpandByTrend = Boolean(
+    trend.visible
+    && trend.status === 'ok'
+    && trend.latestStatus === 'ok'
+    && trend.passStreak >= requiredPassStreak,
+  )
+  const canExpand = canExpandByTrend && !feedbackNeedsRecovery
+  const targetChapterCount = canExpand
+    ? expandedChapterCount
+    : feedbackNeedsRecovery
+      ? Math.max(1, Math.min(baseChapterCount, Number(feedback?.targetChapterCount || baseChapterCount)))
+      : baseChapterCount
+  const summary = feedbackNeedsRecovery
+    ? `强化恢复验收连续 ${Math.max(0, trend.passStreak)}/${requiredPassStreak} 批通过，但最近一次5章扩批存在扩批分段热区；${text(feedback?.summary, `下一轮保持 ${targetChapterCount} 章以内安全连写。`)}`
+    : canExpand
+      ? feedbackRecovered
+        ? `强化恢复验收连续 ${trend.passStreak}/${requiredPassStreak} 批通过；${text(feedback?.summary, '扩批分段热区已修复并通过复检。')}本轮恢复 ${expandedChapterCount} 章安全连写。`
+        : `强化恢复验收连续 ${trend.passStreak}/${requiredPassStreak} 批通过，核心守恒、读者回报和追读拉力未复发，本轮可从 ${baseChapterCount} 章扩到 ${expandedChapterCount} 章安全连写。`
+    : trend.visible
+      ? `强化恢复验收连续 ${Math.max(0, trend.passStreak)}/${requiredPassStreak} 批通过；达到 ${requiredPassStreak} 批前继续保持 ${baseChapterCount} 章以内小批量安全连写。`
+      : `暂无强化恢复验收趋势，继续保持 ${baseChapterCount} 章以内小批量安全连写。`
+
+  return {
+    visible: true,
+    status: canExpand ? 'expanded' : feedbackNeedsRecovery ? 'recovering' : 'observing',
+    label: '强化扩批规则',
+    summary,
+    targetChapterCount,
+    baseChapterCount,
+    expandedChapterCount,
+    requiredPassStreak,
+    passStreak: Math.max(0, Number(trend.passStreak || 0)),
+    acceptedBatchCount: Math.max(0, Number(trend.acceptedBatchCount || 0)),
+    failedBatchCount: Math.max(0, Number(trend.failedBatchCount || 0)),
+    latestStatus: trend.latestStatus,
+    expansionFeedback: feedback ? safeBatchExpansionFeedbackSnapshot(feedback) : null,
+  }
+}
+
+function safeBatchExpansionPolicySnapshot(policy: AnyRecord) {
+  return {
+    status: text(policy?.status, 'observing'),
+    label: text(policy?.label, '强化扩批规则'),
+    summary: text(policy?.summary),
+    target_chapter_count: Number(policy?.targetChapterCount || 0),
+    base_chapter_count: Number(policy?.baseChapterCount || 0),
+    expanded_chapter_count: Number(policy?.expandedChapterCount || 0),
+    required_pass_streak: Number(policy?.requiredPassStreak || 0),
+    pass_streak: Number(policy?.passStreak || 0),
+    accepted_batch_count: Number(policy?.acceptedBatchCount || 0),
+    failed_batch_count: Number(policy?.failedBatchCount || 0),
+    latest_status: text(policy?.latestStatus, 'none'),
+    ...(policy?.expansionFeedback ? { expansion_feedback: policy.expansionFeedback } : {}),
+  }
+}
+
+function safeBatchExpansionPolicyFromPreflight(preflight: AnyRecord | null | undefined) {
+  const policy = preflight?.safe_batch_expansion_policy || preflight?.safeBatchExpansionPolicy || null
+  const targetChapterCount = Number(policy?.target_chapter_count ?? policy?.targetChapterCount ?? 0)
+  if (!policy || text(policy?.status) !== 'expanded' || targetChapterCount < 5) return null
+  return {
+    status: 'expanded',
+    targetChapterCount,
+    baseChapterCount: Number(policy?.base_chapter_count ?? policy?.baseChapterCount ?? 3),
+    expandedChapterCount: Number(policy?.expanded_chapter_count ?? policy?.expandedChapterCount ?? targetChapterCount),
+    requiredPassStreak: Number(policy?.required_pass_streak ?? policy?.requiredPassStreak ?? 3),
+    passStreak: Number(policy?.pass_streak ?? policy?.passStreak ?? 0),
+    summary: text(policy?.summary, '强化恢复验收趋势允许本批扩批。'),
+  }
+}
+
+function safeBatchExpansionSegmentKey(index: number, total: number) {
+  const frontEnd = Math.max(1, Math.ceil(total * 0.4))
+  const middleEnd = Math.max(frontEnd + 1, Math.ceil(total * 0.8))
+  if (index < frontEnd) return { key: 'front', label: '前段' }
+  if (index < middleEnd) return { key: 'middle', label: '中段' }
+  return { key: 'ending', label: '后段' }
+}
+
+function safeBatchExpansionRollbackPolicy(args: {
+  riskCount: number
+  coreRiskCount: number
+  hotspotLabel: string
+}) {
+  const rollbackToSingle = args.coreRiskCount >= 2 || args.riskCount >= 5
+  const targetChapterCount = rollbackToSingle ? 1 : 3
+  return {
+    mode: rollbackToSingle ? 'rollback_to_single_chapter' : 'rollback_to_small_batch',
+    targetChapterCount,
+    label: rollbackToSingle ? '回到单章治理' : '回退到 2-3 章',
+    summary: rollbackToSingle
+      ? `${args.hotspotLabel || '扩批批次'}核心风险过高，下一轮回到单章治理，先逐章修复核心守恒、读者回报和追读拉力。`
+      : `${args.hotspotLabel || '扩批批次'}出现扩批热区，下一轮回退到 2-3 章安全连写，确认核心/回报/追读稳定后再扩到 5 章。`,
+  }
+}
+
+function safeBatchExpansionSegmentReviewSnapshot(review: AnyRecord) {
+  return {
+    visible: Boolean(review?.visible),
+    status: text(review?.status, 'ok'),
+    label: text(review?.label, '扩批分段复盘'),
+    summary: text(review?.summary),
+    target_chapter_count: Number(review?.targetChapterCount || 0),
+    actual_chapter_count: Number(review?.actualChapterCount || 0),
+    risk_count: Number(review?.riskCount || 0),
+    segments: arrayValue(review?.segments).map(segment => ({
+      key: text(segment?.key),
+      label: text(segment?.label),
+      chapter_nos: arrayValue(segment?.chapterNos),
+      risk_count: Number(segment?.riskCount || 0),
+      core_risk_count: Number(segment?.coreRiskCount || 0),
+      payoff_debt_count: Number(segment?.payoffDebtCount || 0),
+      reader_pull_risk_count: Number(segment?.readerPullRiskCount || 0),
+      summary: text(segment?.summary),
+    })),
+    hotspots: arrayValue(review?.hotspots).map(segment => ({
+      key: text(segment?.key),
+      label: text(segment?.label),
+      chapter_nos: arrayValue(segment?.chapterNos),
+      risk_count: Number(segment?.riskCount || 0),
+      core_risk_count: Number(segment?.coreRiskCount || 0),
+      payoff_debt_count: Number(segment?.payoffDebtCount || 0),
+      reader_pull_risk_count: Number(segment?.readerPullRiskCount || 0),
+      summary: text(segment?.summary),
+    })),
+    rollback_policy: {
+      mode: text(review?.rollbackPolicy?.mode),
+      target_chapter_count: Number(review?.rollbackPolicy?.targetChapterCount || 0),
+      label: text(review?.rollbackPolicy?.label),
+      summary: text(review?.rollbackPolicy?.summary),
+    },
+  }
+}
+
+function safeBatchExpansionRepeatedHotspotSegment(feedback?: AnyRecord | null) {
+  const segment = feedback?.repeatedHotspotSegment || feedback?.repeated_hotspot_segment || null
+  const count = Number(segment?.count || 0)
+  if (!segment || count < 2) return null
+  const key = text(segment?.key)
+  const label = text(segment?.label, key || '复发段位')
+  return {
+    key,
+    label,
+    count,
+    summary: text(segment?.summary),
+  }
+}
+
+function buildSafeBatchExpansionStructureReview(args: {
+  segmentReview?: AnyRecord | null
+  expansionFeedback?: AnyRecord | null
+}) {
+  const repeated = safeBatchExpansionRepeatedHotspotSegment(args.expansionFeedback)
+  const segmentReview = args.segmentReview
+  const hotspots = arrayValue(segmentReview?.hotspots)
+  const hotspot = repeated
+    ? hotspots.find(item => text(item?.key) === repeated.key) || hotspots[0] || null
+    : null
+  const affectedChapterNos = arrayValue(hotspot?.chapterNos || hotspot?.chapter_nos)
+    .map(chapterNo => Number(chapterNo))
+    .filter(chapterNo => chapterNo > 0)
+  const latestChapterNos = arrayValue(args.expansionFeedback?.latestChapterNos || args.expansionFeedback?.latest_chapter_nos)
+    .map(chapterNo => Number(chapterNo))
+    .filter(chapterNo => chapterNo > 0)
+  if (!repeated || !segmentReview?.visible || Number(segmentReview?.riskCount || segmentReview?.risk_count || 0) <= 0) {
+    return {
+      visible: false,
+      status: 'ok',
+      label: '扩批结构修复',
+      summary: '扩批结构暂未触发复发治理。',
+      repeated_hotspot_segment: null,
+      latest_chapter_nos: latestChapterNos,
+      affected_chapter_nos: [],
+      hotspot_summaries: [],
+      structure_actions: [],
+      rollback_policy: null,
+    }
+  }
+  const hotspotSummaries = hotspots
+    .filter(item => !repeated.key || text(item?.key) === repeated.key)
+    .map(item => text(item?.summary))
+    .filter(Boolean)
+  const segmentLabel = repeated.label || text(hotspot?.label, '复发段位')
+  const rollbackPolicy = segmentReview?.rollbackPolicy || segmentReview?.rollback_policy || null
+  return {
+    visible: true,
+    status: 'warn',
+    label: '扩批结构修复',
+    summary: `${segmentLabel}连续 ${repeated.count} 次成为5章扩批热区，先做固定段落治理和批次结构改写，再恢复5章连写。`,
+    repeated_hotspot_segment: repeated,
+    latest_chapter_nos: latestChapterNos,
+    affected_chapter_nos: affectedChapterNos,
+    hotspot_summaries: hotspotSummaries.length ? hotspotSummaries : [text(hotspot?.summary, repeated.summary)].filter(Boolean),
+    structure_actions: [
+      `重写${segmentLabel}固定职责：每批${segmentLabel}必须完成主线转折、显性回报和章末追读，不能只铺垫或转场。`,
+      '批次节奏重排：前段抛压，中段兑现并升级，后段留钩；下一次5章前先用2-3章验证。',
+      '把复发段位写入下一批任务书，明确每章承担的冲突来源、回报兑现和章末翻页问题。',
+    ],
+    rollback_policy: rollbackPolicy ? {
+      mode: text(rollbackPolicy?.mode),
+      target_chapter_count: Number(rollbackPolicy?.targetChapterCount ?? rollbackPolicy?.target_chapter_count ?? 0),
+      label: text(rollbackPolicy?.label),
+      summary: text(rollbackPolicy?.summary),
+    } : null,
+  }
+}
+
+function safeBatchExpansionStructureVerificationFromPreflight(preflight?: AnyRecord | null) {
+  return preflight?.safe_batch_expansion_structure_verification
+    || preflight?.safeBatchExpansionStructureVerification
+    || preflight?.next_batch_brief?.expansionStructureVerification
+    || preflight?.next_batch_brief?.expansion_structure_verification
+    || preflight?.nextBatchBrief?.expansionStructureVerification
+    || preflight?.nextBatchBrief?.expansion_structure_verification
+    || null
+}
+
+function buildSafeBatchExpansionStructureValidationResult(args: {
+  preflight?: AnyRecord | null
+  chapterRisks: AnyRecord[]
+}) {
+  const verification = safeBatchExpansionStructureVerificationFromPreflight(args.preflight)
+  if (!verification) {
+    return {
+      visible: false,
+      status: 'ok' as const,
+      label: '扩批结构验证',
+      summary: '当前批次没有扩批结构验证要求。',
+      source: '',
+      repeated_hotspot_segment: null,
+      validation_chapter_nos: [],
+      failed_chapter_nos: [],
+      risk_count: 0,
+      core_risk_count: 0,
+      payoff_debt_count: 0,
+      reader_pull_risk_count: 0,
+      fixed_segment_role: '',
+      conflict_rotation: '',
+      explicit_payoff: '',
+      ending_hook_requirement: '',
+      structure_actions: [],
+    }
+  }
+  const validationChapterNos = arrayValue(verification.validation_chapter_nos || verification.validationChapterNos)
+    .map(chapterNo => Number(chapterNo))
+    .filter(chapterNo => chapterNo > 0)
+  const validationNoSet = new Set(validationChapterNos)
+  const chapterRisks = arrayValue(args.chapterRisks)
+    .filter(chapter => validationNoSet.size === 0 || validationNoSet.has(Number(chapter?.chapterNo || chapter?.chapter_no || 0)))
+  const riskCount = chapterRisks.reduce((sum, chapter) => sum + Number(chapter?.riskCount || chapter?.risk_count || 0), 0)
+  const coreRiskCount = chapterRisks.reduce((sum, chapter) => sum + Number(chapter?.coreRiskCount || chapter?.core_risk_count || 0), 0)
+  const payoffDebtCount = chapterRisks.reduce((sum, chapter) => sum + Number(chapter?.payoffDebtCount || chapter?.payoff_debt_count || 0), 0)
+  const readerPullRiskCount = chapterRisks.reduce((sum, chapter) => sum + Number(chapter?.readerPullRiskCount || chapter?.reader_pull_risk_count || 0), 0)
+  const failedChapterNos = chapterRisks
+    .filter(chapter => Number(chapter?.riskCount || chapter?.risk_count || 0) > 0)
+    .map(chapter => Number(chapter?.chapterNo || chapter?.chapter_no || 0))
+    .filter(chapterNo => chapterNo > 0)
+  const repeated = verification.repeated_hotspot_segment || verification.repeatedHotspotSegment || null
+  const repeatedSegment = repeated ? {
+    key: text(repeated?.key),
+    label: text(repeated?.label, text(repeated?.key, '复发段位')),
+    count: Number(repeated?.count || 0),
+  } : null
+  const validationNos = validationChapterNos.length
+    ? validationChapterNos
+    : chapterRisks.map(chapter => Number(chapter?.chapterNo || chapter?.chapter_no || 0)).filter(chapterNo => chapterNo > 0)
+  const label = text(verification.label, '扩批结构验证')
+  const summary = riskCount > 0
+    ? `${label}批未通过：第${failedChapterNos.join('、') || validationNos.join('、')}章仍有 ${riskCount} 项核心/回报/追读风险，结构修复不能恢复5章扩批。`
+    : `${label}批通过：第${validationNos.join('、')}章核心守恒、显性回报和章末追读稳定，可作为恢复5章扩批证据。`
+  return {
+    visible: true,
+    status: riskCount > 0 ? 'warn' as const : 'ok' as const,
+    label,
+    summary,
+    source: text(verification.source, 'safe_batch_expansion_structure_repair'),
+    repeated_hotspot_segment: repeatedSegment,
+    validation_chapter_nos: validationNos,
+    failed_chapter_nos: failedChapterNos,
+    risk_count: riskCount,
+    core_risk_count: coreRiskCount,
+    payoff_debt_count: payoffDebtCount,
+    reader_pull_risk_count: readerPullRiskCount,
+    fixed_segment_role: text(verification.fixed_segment_role || verification.fixedSegmentRole),
+    conflict_rotation: text(verification.conflict_rotation || verification.conflictRotation),
+    explicit_payoff: text(verification.explicit_payoff || verification.explicitPayoff),
+    ending_hook_requirement: text(verification.ending_hook_requirement || verification.endingHookRequirement),
+    structure_actions: arrayValue(verification.structure_actions || verification.structureActions).map(item => text(item)).filter(Boolean),
+  }
+}
+
+function buildSafeBatchExpansionSegmentReview(args: {
+  preflight?: AnyRecord | null
+  chapterRisks: AnyRecord[]
+}) {
+  const policy = safeBatchExpansionPolicyFromPreflight(args.preflight)
+  const chapterRisks = arrayValue(args.chapterRisks)
+  if (!policy || chapterRisks.length < 5) {
+    return {
+      visible: false,
+      status: 'ok',
+      label: '扩批分段复盘',
+      summary: '当前批次不是 5 章扩批批次。',
+      targetChapterCount: Number(policy?.targetChapterCount || 0),
+      actualChapterCount: chapterRisks.length,
+      riskCount: 0,
+      segments: [],
+      hotspots: [],
+      rollbackPolicy: safeBatchExpansionRollbackPolicy({ riskCount: 0, coreRiskCount: 0, hotspotLabel: '' }),
+    }
+  }
+
+  const segmentMap = new Map<string, AnyRecord>()
+  chapterRisks.forEach((chapter, index) => {
+    const segmentKey = safeBatchExpansionSegmentKey(index, chapterRisks.length)
+    const current = segmentMap.get(segmentKey.key) || {
+      key: segmentKey.key,
+      label: segmentKey.label,
+      chapterNos: [] as number[],
+      riskCount: 0,
+      coreRiskCount: 0,
+      payoffDebtCount: 0,
+      readerPullRiskCount: 0,
+    }
+    current.chapterNos.push(Number(chapter.chapterNo || 0))
+    current.coreRiskCount += Number(chapter.coreRiskCount || 0)
+    current.payoffDebtCount += Number(chapter.payoffDebtCount || 0)
+    current.readerPullRiskCount += Number(chapter.readerPullRiskCount || 0)
+    current.riskCount += Number(chapter.riskCount || 0)
+    segmentMap.set(segmentKey.key, current)
+  })
+
+  const segments = Array.from(segmentMap.values()).map(segment => ({
+    ...segment,
+    status: segment.riskCount > 0 ? 'warn' : 'ok',
+    summary: segment.riskCount > 0
+      ? `${segment.label}第${segment.chapterNos.join('、')}章存在 ${segment.riskCount} 项扩批风险：核心 ${segment.coreRiskCount}、回报 ${segment.payoffDebtCount}、拉力 ${segment.readerPullRiskCount}。`
+      : `${segment.label}第${segment.chapterNos.join('、')}章核心、回报和追读拉力稳定。`,
+  }))
+  const hotspots = segments.filter(segment => segment.riskCount > 0).sort((a, b) => b.riskCount - a.riskCount)
+  const riskCount = segments.reduce((sum, segment) => sum + Number(segment.riskCount || 0), 0)
+  const coreRiskCount = segments.reduce((sum, segment) => sum + Number(segment.coreRiskCount || 0), 0)
+  const topHotspot = hotspots[0] || null
+  const rollbackPolicy = safeBatchExpansionRollbackPolicy({
+    riskCount,
+    coreRiskCount,
+    hotspotLabel: topHotspot ? `${topHotspot.label}第${topHotspot.chapterNos.join('、')}章` : '',
+  })
+
+  return {
+    visible: true,
+    status: riskCount > 0 ? 'warn' : 'ok',
+    label: '扩批分段复盘',
+    summary: riskCount > 0
+      ? `5章扩批${topHotspot?.label || '批次'}出现 ${riskCount} 项核心/回报/追读热区；${rollbackPolicy.summary}`
+      : `5章扩批分段验收通过：前段、中段、后段核心守恒、读者回报和追读拉力稳定。`,
+    targetChapterCount: policy.targetChapterCount,
+    actualChapterCount: chapterRisks.length,
+    riskCount,
+    segments,
+    hotspots,
+    rollbackPolicy,
+  }
+}
+
+function safeBatchExpansionFeedbackSnapshot(feedback: AnyRecord) {
+  return {
+    visible: Boolean(feedback?.visible),
+    status: text(feedback?.status, 'none'),
+    label: text(feedback?.label, '扩批热区反馈'),
+    summary: text(feedback?.summary),
+    target_chapter_count: Number(feedback?.targetChapterCount || 0),
+    latest_batch_created_at: text(feedback?.latestBatchCreatedAt),
+    latest_chapter_nos: arrayValue(feedback?.latestChapterNos).map(chapterNo => Number(chapterNo)).filter(chapterNo => chapterNo > 0),
+    risk_count: Number(feedback?.riskCount || 0),
+    stable_pass_streak: Number(feedback?.stablePassStreak || 0),
+    recent_expanded_batch_count: Number(feedback?.recentExpandedBatchCount || 0),
+    repeated_hotspot_segment: feedback?.repeatedHotspotSegment ? {
+      key: text(feedback.repeatedHotspotSegment?.key),
+      label: text(feedback.repeatedHotspotSegment?.label),
+      count: Number(feedback.repeatedHotspotSegment?.count || 0),
+      summary: text(feedback.repeatedHotspotSegment?.summary),
+    } : null,
+    rollback_policy: feedback?.rollbackPolicy ? {
+      mode: text(feedback.rollbackPolicy?.mode),
+      target_chapter_count: Number(feedback.rollbackPolicy?.targetChapterCount || 0),
+      label: text(feedback.rollbackPolicy?.label),
+      summary: text(feedback.rollbackPolicy?.summary),
+    } : null,
+    ...(feedback?.expansionStructureValidationResult ? {
+      expansion_structure_validation_result: feedback.expansionStructureValidationResult,
+    } : {}),
+    ...(feedback?.expansionStructureValidationTrend ? {
+      expansion_structure_validation_trend: feedback.expansionStructureValidationTrend,
+    } : {}),
+    ...(feedback?.expansionStructureRepairEffectiveness ? {
+      expansion_structure_repair_effectiveness: feedback.expansionStructureRepairEffectiveness,
+    } : {}),
+  }
+}
+
+function safeBatchExpansionItemsFromOutput(output: AnyRecord): AutoCreationBatchReviewItem[] {
+  return arrayValue(output?.chapters).map(chapter => ({
+    chapterId: chapter?.id ?? chapter?.chapter_id ?? null,
+    chapterNo: Number(chapter?.chapter_no ?? chapter?.chapterNo ?? 0),
+    title: text(chapter?.title, `第${Number(chapter?.chapter_no ?? chapter?.chapterNo ?? 0)}章`),
+    status: text(chapter?.status) === 'failed' ? 'failed' as const : 'success' as const,
+    score: Number.isFinite(Number(chapter?.score)) ? Number(chapter?.score) : null,
+    wordCount: Number.isFinite(Number(chapter?.word_count ?? chapter?.wordCount)) ? Number(chapter?.word_count ?? chapter?.wordCount) : null,
+    revised: Boolean(chapter?.revised),
+    delivered: false,
+    error: text(chapter?.error),
+  })).filter(item => item.chapterNo > 0)
+}
+
+function safeBatchExpansionChapterRisks(args: {
+  items: AutoCreationBatchReviewItem[]
+  chapters: AnyRecord[]
+  reviews: AnyRecord[]
+  resolvedIssueKeys?: Set<string>
+}) {
+  return arrayValue(args.items)
+    .filter(item => item.status === 'success')
+    .map(item => {
+      const chapter = findChapter(args.chapters, item)
+      if (!chapter) {
+        return {
+          chapterNo: item.chapterNo,
+          title: item.title,
+          coreRiskCount: 0,
+          payoffDebtCount: 0,
+          readerPullRiskCount: 0,
+          riskCount: 0,
+        }
+      }
+      const coreReview = latestReviewForChapter(args.reviews, chapter, item.chapterNo, 'chapter_core_drift')
+      const payoffReview = latestReviewForChapter(args.reviews, chapter, item.chapterNo, 'reader_payoff_sync')
+      const expectationReview = latestReviewForChapter(args.reviews, chapter, item.chapterNo, 'reader_expectation_sync')
+      const retentionReview = latestReviewForChapter(args.reviews, chapter, item.chapterNo, 'reader_retention_sync')
+      const coreCount = batchRiskIssueResolved(args.resolvedIssueKeys, item, 'core_drift') ? 0 : coreRiskCount(coreReview)
+      const payoffCount = batchRiskIssueResolved(args.resolvedIssueKeys, item, 'reader_payoff_debt') ? 0 : payoffDebtCount(payoffReview)
+      const readerPullCount = batchRiskIssueResolved(args.resolvedIssueKeys, item, 'reader_pull_missed')
+        ? 0
+        : expectationRiskCount(expectationReview) + retentionRiskCount(retentionReview)
+      return {
+        chapterNo: item.chapterNo,
+        title: item.title,
+        coreRiskCount: coreCount,
+        payoffDebtCount: payoffCount,
+        readerPullRiskCount: readerPullCount,
+        riskCount: coreCount + payoffCount + readerPullCount,
+      }
+    })
+}
+
+function safeBatchExpansionSegmentResolvedForItems(
+  resolvedIssueKeys: Set<string> | undefined,
+  items: AutoCreationBatchReviewItem[],
+  review: AnyRecord,
+) {
+  if (!resolvedIssueKeys || !items.length) return false
+  const hotspotChapterNos = new Set(
+    arrayValue(review?.hotspots)
+      .flatMap(hotspot => arrayValue(hotspot?.chapterNos ?? hotspot?.chapter_nos))
+      .map(chapterNo => Number(chapterNo))
+      .filter(chapterNo => chapterNo > 0),
+  )
+  const hotspotItems = hotspotChapterNos.size
+    ? items.filter(item => hotspotChapterNos.has(Number(item.chapterNo || 0)))
+    : []
+  const candidates = hotspotItems.length ? hotspotItems : items
+  return candidates.some(item => batchRiskIssueResolved(resolvedIssueKeys, item, 'safe_batch_expansion_segment_hotspot'))
+    || items.some(item => batchRiskIssueResolved(resolvedIssueKeys, item, 'safe_batch_expansion_segment_hotspot'))
+}
+
+function safeBatchExpansionEntryEvaluation(args: {
+  entry: AnyRecord
+  runRecords: AnyRecord[]
+  chapters: AnyRecord[]
+  reviews: AnyRecord[]
+}) {
+  const rawReview = buildSafeBatchExpansionSegmentReview({
+    preflight: args.entry.preflight,
+    chapterRisks: safeBatchExpansionChapterRisks({
+      items: args.entry.items,
+      chapters: args.chapters,
+      reviews: args.reviews,
+    }),
+  })
+  const resolvedIssueKeys = buildResolvedBatchRiskIssueKeys({
+    runRecords: args.runRecords,
+    batchCreatedAt: text(args.entry.run?.created_at),
+    chapters: args.chapters,
+    reviews: args.reviews,
+  })
+  let effectiveReview = buildSafeBatchExpansionSegmentReview({
+    preflight: args.entry.preflight,
+    chapterRisks: safeBatchExpansionChapterRisks({
+      items: args.entry.items,
+      chapters: args.chapters,
+      reviews: args.reviews,
+      resolvedIssueKeys,
+    }),
+  })
+  const segmentResolved = safeBatchExpansionSegmentResolvedForItems(resolvedIssueKeys, args.entry.items, rawReview)
+  if (segmentResolved && effectiveReview.visible) {
+    effectiveReview = {
+      ...effectiveReview,
+      status: 'ok' as const,
+      riskCount: 0,
+      hotspots: [],
+      summary: '5章扩批分段热区已修复并通过复检。',
+    }
+  }
+  const rawRiskCount = Number(rawReview.riskCount || 0)
+  const effectiveRiskCount = Number(effectiveReview.riskCount || 0)
+  const topHotspot = arrayValue(rawReview.hotspots)[0] || null
+  return {
+    rawReview,
+    effectiveReview,
+    segmentResolved,
+    rawRiskCount,
+    effectiveRiskCount,
+    topHotspot,
+    latestBatchCreatedAt: text(args.entry.run?.created_at),
+    latestChapterNos: arrayValue(args.entry.items).map(item => Number(item?.chapterNo || 0)).filter(Boolean),
+  }
+}
+
+function safeBatchExpansionStructureValidationEntryEvaluation(args: {
+  entry: AnyRecord
+  runRecords: AnyRecord[]
+  chapters: AnyRecord[]
+  reviews: AnyRecord[]
+}) {
+  const resolvedIssueKeys = buildResolvedBatchRiskIssueKeys({
+    runRecords: args.runRecords,
+    batchCreatedAt: text(args.entry.run?.created_at),
+    chapters: args.chapters,
+    reviews: args.reviews,
+  })
+  const result = buildSafeBatchExpansionStructureValidationResult({
+    preflight: args.entry.preflight,
+    chapterRisks: safeBatchExpansionChapterRisks({
+      items: args.entry.items,
+      chapters: args.chapters,
+      reviews: args.reviews,
+      resolvedIssueKeys,
+    }),
+  })
+  return {
+    result,
+    latestBatchCreatedAt: text(args.entry.run?.created_at),
+    latestChapterNos: arrayValue(args.entry.items).map(item => Number(item?.chapterNo || 0)).filter(Boolean),
+  }
+}
+
+function buildSafeBatchExpansionStructureValidationTrend(args: {
+  validationEvaluations: AnyRecord[]
+  expansionEvaluations: AnyRecord[]
+}) {
+  const validations = arrayValue(args.validationEvaluations)
+    .filter(evaluation => evaluation?.result?.visible)
+    .map(evaluation => {
+      const result = evaluation.result || {}
+      const repeated = result.repeated_hotspot_segment || result.repeatedHotspotSegment || null
+      const segmentKey = text(repeated?.key, 'unknown')
+      const segmentLabel = text(repeated?.label, segmentKey === 'unknown' ? '复发段位' : segmentKey)
+      return {
+        result,
+        segmentKey,
+        segmentLabel,
+        createdAt: text(evaluation.latestBatchCreatedAt),
+        chapterNos: arrayValue(evaluation.latestChapterNos || result.validation_chapter_nos || result.validationChapterNos)
+          .map(chapterNo => Number(chapterNo))
+          .filter(chapterNo => chapterNo > 0),
+        riskCount: Number(result.risk_count || result.riskCount || 0),
+        coreRiskCount: Number(result.core_risk_count || result.coreRiskCount || 0),
+        payoffDebtCount: Number(result.payoff_debt_count || result.payoffDebtCount || 0),
+        readerPullRiskCount: Number(result.reader_pull_risk_count || result.readerPullRiskCount || 0),
+      }
+    })
+    .filter(record => record.segmentKey || record.segmentLabel)
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+  if (!validations.length) return null
+
+  const latestSegmentKey = validations[0].segmentKey
+  const segmentRecords = validations.filter(record => record.segmentKey === latestSegmentKey)
+  const validationBatchCount = segmentRecords.length
+  const passedBatchCount = segmentRecords.filter(record => record.riskCount <= 0).length
+  const failedBatchCount = validationBatchCount - passedBatchCount
+  const passRate = Math.round((passedBatchCount / Math.max(1, validationBatchCount)) * 100)
+  const coreFailureCount = segmentRecords.reduce((sum, record) => sum + record.coreRiskCount, 0)
+  const payoffFailureCount = segmentRecords.reduce((sum, record) => sum + record.payoffDebtCount, 0)
+  const readerPullFailureCount = segmentRecords.reduce((sum, record) => sum + record.readerPullRiskCount, 0)
+  const failureReasons = [
+    { key: 'core', label: '核心偏移', count: coreFailureCount },
+    { key: 'payoff', label: '回报欠账', count: payoffFailureCount },
+    { key: 'reader_pull', label: '追读拉力', count: readerPullFailureCount },
+  ].filter(item => item.count > 0)
+  const latest = segmentRecords[0]
+  const latestStatus = latest.riskCount > 0 ? 'warn' as const : 'ok' as const
+  const latestPassed = segmentRecords.find(record => record.riskCount <= 0) || null
+  const restoreTime = latestPassed ? Date.parse(latestPassed.createdAt) : 0
+  const expandedAfterRestore = latestPassed
+    ? arrayValue(args.expansionEvaluations)
+      .filter(evaluation => Date.parse(text(evaluation?.latestBatchCreatedAt)) > restoreTime)
+      .sort((a, b) => Date.parse(text(a?.latestBatchCreatedAt)) - Date.parse(text(b?.latestBatchCreatedAt)))
+    : []
+  const recurrenceIndex = expandedAfterRestore.findIndex(evaluation => {
+    const hotspot = evaluation?.topHotspot || null
+    return Number(evaluation?.rawRiskCount || 0) > 0 && text(hotspot?.key) === latestSegmentKey
+  })
+  const recurrenceEvaluation = recurrenceIndex >= 0 ? expandedAfterRestore[recurrenceIndex] : null
+  const recurrenceHotspot = recurrenceEvaluation?.topHotspot || null
+  const recurrenceAfterRestore = recurrenceEvaluation ? {
+    visible: true,
+    interval_batch_count: recurrenceIndex + 1,
+    interval_label: `恢复5章后第${recurrenceIndex + 1}个扩批批次复发`,
+    restored_batch_created_at: latestPassed?.createdAt || '',
+    recurrence_batch_created_at: text(recurrenceEvaluation.latestBatchCreatedAt),
+    recurrence_chapter_nos: arrayValue(recurrenceEvaluation.latestChapterNos)
+      .map(chapterNo => Number(chapterNo))
+      .filter(chapterNo => chapterNo > 0),
+    repeated_hotspot_segment: {
+      key: text(recurrenceHotspot?.key, latestSegmentKey),
+      label: text(recurrenceHotspot?.label, latest.segmentLabel),
+      count: Number(recurrenceHotspot?.riskCount || 0),
+    },
+  } : {
+    visible: false,
+    interval_batch_count: 0,
+    interval_label: latestPassed ? '恢复5章后暂无同段复发' : '尚无通过的结构验证批',
+    restored_batch_created_at: latestPassed?.createdAt || '',
+    recurrence_batch_created_at: '',
+    recurrence_chapter_nos: [],
+    repeated_hotspot_segment: null,
+  }
+  const failureSummary = failureReasons.length
+    ? `，失败主因：${failureReasons.map(item => `${item.label}${item.count}`).join('、')}`
+    : ''
+  const recurrenceSummary = recurrenceAfterRestore.visible
+    ? `，${recurrenceAfterRestore.interval_label}`
+    : latestPassed
+      ? '，恢复5章后暂无同段复发'
+      : '，尚无通过的结构验证批'
+
+  return {
+    visible: true,
+    status: latestStatus === 'warn' || recurrenceAfterRestore.visible ? 'warn' as const : 'ok' as const,
+    label: '扩批结构验证趋势',
+    summary: `${latest.segmentLabel}验证通过率 ${passRate}%（${passedBatchCount}/${validationBatchCount}批）${failureSummary}${recurrenceSummary}。`,
+    segment_key: latestSegmentKey,
+    segment_label: latest.segmentLabel,
+    validation_batch_count: validationBatchCount,
+    passed_batch_count: passedBatchCount,
+    failed_batch_count: failedBatchCount,
+    pass_rate: passRate,
+    latest_status: latestStatus,
+    latest_batch_created_at: latest.createdAt,
+    latest_chapter_nos: latest.chapterNos,
+    failure_reasons: failureReasons,
+    recurrence_after_restore: recurrenceAfterRestore,
+  }
+}
+
+function safeBatchExpansionStructureTrendFailureCount(trend?: AnyRecord | null) {
+  return arrayValue(trend?.failure_reasons || trend?.failureReasons)
+    .reduce((sum, item) => sum + Number(item?.count || 0), 0)
+}
+
+function safeBatchExpansionStructureTrendRecurrenceInterval(trend?: AnyRecord | null) {
+  const recurrence = trend?.recurrence_after_restore || trend?.recurrenceAfterRestore || null
+  return recurrence?.visible ? Number(recurrence?.interval_batch_count ?? recurrence?.intervalBatchCount ?? 0) : 0
+}
+
+function latestResolvedSafeBatchExpansionStructureRepairWithTrend(runRecords: AnyRecord[]) {
+  const repairEntries = arrayValue(runRecords)
+    .filter(run => text(run?.run_type) === 'longform_production_repair')
+    .map(run => ({
+      run,
+      input: parsePayload(run?.input_ref) || {},
+      output: parsePayload(run?.output_ref) || {},
+    }))
+    .filter(entry => text(entry.input?.source) === 'auto_creation_safe_batch_risk')
+    .filter(entry => isCompletedRepairRun(entry.run))
+    .sort((a, b) => recordTime(b.run) - recordTime(a.run))
+
+  for (const entry of repairEntries) {
+    const tasks = [
+      ...arrayValue(entry.output?.tasks),
+      ...arrayValue(entry.output?.repairTasks),
+    ]
+    for (const task of tasks) {
+      if (text(task?.issue_type ?? task?.issueType) !== 'safe_batch_expansion_structure_repair') continue
+      if (!isResolvedTaskStatus(task?.task_status ?? task?.status)) continue
+      const review = task?.safe_batch_expansion_structure_review
+        || task?.safeBatchExpansionStructureReview
+        || task?.structure_review
+        || task?.structureReview
+        || {}
+      const trend = review?.expansion_structure_validation_trend
+        || review?.expansionStructureValidationTrend
+        || task?.expansion_structure_validation_trend
+        || task?.expansionStructureValidationTrend
+        || null
+      if (!trend || trend.visible === false) continue
+      const repeated = review?.repeated_hotspot_segment
+        || review?.repeatedHotspotSegment
+        || trend?.repeated_hotspot_segment
+        || trend?.repeatedHotspotSegment
+        || null
+      const segmentKey = text(trend?.segment_key || trend?.segmentKey || repeated?.key, 'unknown')
+      const segmentLabel = text(trend?.segment_label || trend?.segmentLabel || repeated?.label, segmentKey === 'unknown' ? '复发段位' : segmentKey)
+      return {
+        sourceRunId: entry.run?.id ?? null,
+        repairedAt: text(entry.run?.completed_at || entry.run?.finished_at || entry.run?.updated_at || entry.run?.created_at),
+        segmentKey,
+        segmentLabel,
+        trend,
+      }
+    }
+  }
+  return null
+}
+
+function buildSafeBatchExpansionStructureRepairEffectiveness(args: {
+  runRecords: AnyRecord[]
+  validationEvaluations: AnyRecord[]
+  expansionEvaluations: AnyRecord[]
+}) {
+  const repair = latestResolvedSafeBatchExpansionStructureRepairWithTrend(args.runRecords)
+  if (!repair) return null
+  const repairedAtMs = Date.parse(repair.repairedAt)
+  if (!Number.isFinite(repairedAtMs)) return null
+  const segmentKey = repair.segmentKey
+  const postValidationEvaluations = arrayValue(args.validationEvaluations)
+    .filter(evaluation => Date.parse(text(evaluation?.latestBatchCreatedAt)) > repairedAtMs)
+    .filter(evaluation => {
+      const repeated = evaluation?.result?.repeated_hotspot_segment || evaluation?.result?.repeatedHotspotSegment || null
+      return text(repeated?.key, 'unknown') === segmentKey
+    })
+  if (!postValidationEvaluations.length) return null
+  const postExpansionEvaluations = arrayValue(args.expansionEvaluations)
+    .filter(evaluation => Date.parse(text(evaluation?.latestBatchCreatedAt)) > repairedAtMs)
+  const currentTrend = buildSafeBatchExpansionStructureValidationTrend({
+    validationEvaluations: postValidationEvaluations,
+    expansionEvaluations: postExpansionEvaluations,
+  })
+  if (!currentTrend) return null
+
+  const baselinePassRate = Number(repair.trend?.pass_rate ?? repair.trend?.passRate ?? 0)
+  const currentPassRate = Number(currentTrend.pass_rate || 0)
+  const baselineFailureReasonCount = safeBatchExpansionStructureTrendFailureCount(repair.trend)
+  const currentFailureReasonCount = safeBatchExpansionStructureTrendFailureCount(currentTrend)
+  const baselineRecurrenceInterval = safeBatchExpansionStructureTrendRecurrenceInterval(repair.trend)
+  const currentRecurrenceInterval = safeBatchExpansionStructureTrendRecurrenceInterval(currentTrend)
+  const currentRecurrence = currentTrend.recurrence_after_restore || null
+  const passRateDelta = currentPassRate - baselinePassRate
+  const failureReasonDelta = currentFailureReasonCount - baselineFailureReasonCount
+  const recurrenceImproved = baselineRecurrenceInterval > 0
+    ? !currentRecurrence?.visible || currentRecurrenceInterval > baselineRecurrenceInterval
+    : !currentRecurrence?.visible
+  const improved = passRateDelta > 0 || failureReasonDelta < 0 || recurrenceImproved
+  const regressed = passRateDelta < 0 || failureReasonDelta > 0 || (currentRecurrence?.visible && currentRecurrenceInterval > 0 && currentRecurrenceInterval <= baselineRecurrenceInterval)
+  const status = improved && !regressed ? 'ok' as const : 'warn' as const
+  const recommendation = status === 'ok' && currentPassRate >= 100 && currentFailureReasonCount <= 0 && !currentRecurrence?.visible
+    ? 'restore_five_chapter'
+    : status === 'ok'
+      ? 'continue_small_validation'
+      : 'escalate_structure_redesign'
+  const recurrenceSummary = currentRecurrence?.visible
+    ? `修复后${currentRecurrence.interval_label || `第${currentRecurrenceInterval}个扩批批次复发`}`
+    : '修复后暂无同段复发'
+
+  return {
+    visible: true,
+    status,
+    label: '结构修复有效性',
+    summary: `${repair.segmentLabel}结构修复有效性：通过率 ${baselinePassRate}% -> ${currentPassRate}%，失败主因 ${baselineFailureReasonCount} -> ${currentFailureReasonCount}，${recurrenceSummary}。`,
+    source_run_id: repair.sourceRunId,
+    repaired_at: repair.repairedAt,
+    segment_key: segmentKey,
+    segment_label: repair.segmentLabel,
+    baseline_pass_rate: baselinePassRate,
+    current_pass_rate: currentPassRate,
+    pass_rate_delta: passRateDelta,
+    baseline_failure_reason_count: baselineFailureReasonCount,
+    current_failure_reason_count: currentFailureReasonCount,
+    failure_reason_delta: failureReasonDelta,
+    baseline_recurrence_interval_batch_count: baselineRecurrenceInterval,
+    current_recurrence_interval_batch_count: currentRecurrenceInterval,
+    recommendation,
+    baseline_trend: repair.trend,
+    current_trend: currentTrend,
+  }
+}
+
+function buildSafeBatchExpansionFeedback(args: {
+  runRecords: AnyRecord[]
+  chapters: AnyRecord[]
+  reviews: AnyRecord[]
+}) {
+  const expandedEntries = arrayValue(args.runRecords)
+    .filter(run => text(run?.run_type) === 'batch_generate_prose')
+    .map(run => ({
+      run,
+      input: parsePayload(run?.input_ref) || {},
+      output: parsePayload(run?.output_ref) || {},
+    }))
+    .filter(entry => text(entry.input?.source) === 'auto_creation_safe_batch')
+    .map(entry => ({
+      ...entry,
+      preflight: entry.input?.batch_preflight || entry.input?.batchPreflight || null,
+      items: safeBatchExpansionItemsFromOutput(entry.output),
+    }))
+    .filter(entry => {
+      const policy = safeBatchExpansionPolicyFromPreflight(entry.preflight)
+      return Boolean(policy && entry.items.filter(item => item.status === 'success').length >= 5)
+    })
+    .sort((a, b) => recordTime(b.run) - recordTime(a.run))
+  const structureValidationEntries = arrayValue(args.runRecords)
+    .filter(run => text(run?.run_type) === 'batch_generate_prose')
+    .map(run => ({
+      run,
+      input: parsePayload(run?.input_ref) || {},
+      output: parsePayload(run?.output_ref) || {},
+    }))
+    .filter(entry => text(entry.input?.source) === 'auto_creation_safe_batch')
+    .map(entry => ({
+      ...entry,
+      preflight: entry.input?.batch_preflight || entry.input?.batchPreflight || null,
+      items: safeBatchExpansionItemsFromOutput(entry.output),
+    }))
+    .filter(entry => Boolean(safeBatchExpansionStructureVerificationFromPreflight(entry.preflight)))
+    .sort((a, b) => recordTime(b.run) - recordTime(a.run))
+
+  const evaluations = expandedEntries
+    .slice(0, 5)
+    .map(entry => safeBatchExpansionEntryEvaluation({
+      entry,
+      runRecords: args.runRecords,
+      chapters: args.chapters,
+      reviews: args.reviews,
+    }))
+    .filter(evaluation => evaluation.rawReview.visible)
+  const latest = evaluations[0]
+  const structureValidationEvaluations = structureValidationEntries
+    .slice(0, 12)
+    .map(entry => safeBatchExpansionStructureValidationEntryEvaluation({
+      entry,
+      runRecords: args.runRecords,
+      chapters: args.chapters,
+      reviews: args.reviews,
+    }))
+  const expansionEvaluationsForTrend = expandedEntries
+    .slice(0, 12)
+    .map(entry => safeBatchExpansionEntryEvaluation({
+      entry,
+      runRecords: args.runRecords,
+      chapters: args.chapters,
+      reviews: args.reviews,
+    }))
+    .filter(evaluation => evaluation.rawReview.visible)
+  const latestStructureValidation = structureValidationEvaluations
+    .find(evaluation => evaluation.result.visible) || null
+  const expansionStructureValidationTrend = buildSafeBatchExpansionStructureValidationTrend({
+    validationEvaluations: structureValidationEvaluations,
+    expansionEvaluations: expansionEvaluationsForTrend,
+  })
+  const expansionStructureRepairEffectiveness = buildSafeBatchExpansionStructureRepairEffectiveness({
+    runRecords: args.runRecords,
+    validationEvaluations: structureValidationEvaluations,
+    expansionEvaluations: expansionEvaluationsForTrend,
+  })
+  if (!latest) {
+    if (latestStructureValidation) {
+      const result = latestStructureValidation.result
+      const riskCount = Number(result.risk_count || 0)
+      const rollbackPolicy = safeBatchExpansionRollbackPolicy({
+        riskCount,
+        coreRiskCount: Number(result.core_risk_count || 0),
+        hotspotLabel: text(result.repeated_hotspot_segment?.label),
+      })
+      return {
+        visible: true,
+        status: riskCount > 0 ? 'rollback_to_small_batch' : 'recovered',
+        label: '扩批热区反馈',
+        summary: riskCount > 0 ? `${result.summary}${rollbackPolicy.summary}` : result.summary,
+        targetChapterCount: riskCount > 0 ? Number(rollbackPolicy.targetChapterCount || 3) : 5,
+        latestBatchCreatedAt: latestStructureValidation.latestBatchCreatedAt,
+        latestChapterNos: latestStructureValidation.latestChapterNos,
+        riskCount,
+        stablePassStreak: 0,
+        recentExpandedBatchCount: 0,
+        repeatedHotspotSegment: result.repeated_hotspot_segment || null,
+        rollbackPolicy: riskCount > 0 ? rollbackPolicy : null,
+        expansionStructureValidationResult: result,
+        expansionStructureValidationTrend,
+        expansionStructureRepairEffectiveness,
+      }
+    }
+    return {
+      visible: false,
+      status: 'none',
+      label: '扩批热区反馈',
+      summary: '尚未产生5章扩批分段复盘。',
+      targetChapterCount: 0,
+      latestBatchCreatedAt: '',
+      latestChapterNos: [],
+      riskCount: 0,
+      stablePassStreak: 0,
+      recentExpandedBatchCount: 0,
+      repeatedHotspotSegment: null,
+      rollbackPolicy: null,
+      expansionStructureValidationTrend,
+      expansionStructureRepairEffectiveness,
+    }
+  }
+
+  let stablePassStreak = 0
+  for (const evaluation of evaluations) {
+    if (evaluation.rawRiskCount > 0) break
+    stablePassStreak += 1
+  }
+  const recentExpandedBatchCount = evaluations.length
+  const repeatedHotspotCount = latest.topHotspot
+    ? evaluations.filter(evaluation => text(evaluation.topHotspot?.key) === text(latest.topHotspot?.key)).length
+    : 0
+  const repeatedHotspotSegment = latest.topHotspot && repeatedHotspotCount >= 2
+    ? {
+      key: text(latest.topHotspot.key),
+      label: text(latest.topHotspot.label),
+      count: repeatedHotspotCount,
+      summary: `${text(latest.topHotspot.label)}连续 ${repeatedHotspotCount} 次扩批热区，先做${text(latest.topHotspot.label)}固定段落治理和批次结构改写。`,
+    }
+    : null
+  const feedbackBase = {
+    stablePassStreak,
+    recentExpandedBatchCount,
+    repeatedHotspotSegment,
+  }
+  const validationIsNewerThanLatestExpansion = latestStructureValidation
+    ? Date.parse(text(latestStructureValidation.latestBatchCreatedAt)) > Date.parse(text(latest.latestBatchCreatedAt))
+    : false
+  if (latestStructureValidation && validationIsNewerThanLatestExpansion) {
+    const result = latestStructureValidation.result
+    const riskCount = Number(result.risk_count || 0)
+    const rollbackPolicy = safeBatchExpansionRollbackPolicy({
+      riskCount,
+      coreRiskCount: Number(result.core_risk_count || 0),
+      hotspotLabel: text(result.repeated_hotspot_segment?.label),
+    })
+    return {
+      visible: true,
+      status: riskCount > 0 ? 'rollback_to_small_batch' : 'recovered',
+      label: '扩批热区反馈',
+      summary: riskCount > 0 ? `${result.summary}${rollbackPolicy.summary}` : result.summary,
+      targetChapterCount: riskCount > 0 ? Number(rollbackPolicy.targetChapterCount || 3) : 5,
+      latestBatchCreatedAt: latestStructureValidation.latestBatchCreatedAt,
+      latestChapterNos: latestStructureValidation.latestChapterNos,
+      riskCount,
+      ...feedbackBase,
+      repeatedHotspotSegment: result.repeated_hotspot_segment || repeatedHotspotSegment,
+      rollbackPolicy: riskCount > 0 ? rollbackPolicy : null,
+      expansionStructureValidationResult: result,
+      expansionStructureValidationTrend,
+      expansionStructureRepairEffectiveness,
+    }
+  }
+
+  if (latest.rawRiskCount <= 0) {
+    return {
+      visible: true,
+      status: 'passed',
+      label: '扩批热区反馈',
+      summary: stablePassStreak > 1
+        ? `连续 ${stablePassStreak} 批5章扩批通过，前段、中段、后段核心/回报/追读稳定，可继续观察 5 章安全连写。`
+        : '最近一次5章扩批分段复盘通过，前段、中段、后段核心/回报/追读稳定。',
+      targetChapterCount: 5,
+      latestBatchCreatedAt: latest.latestBatchCreatedAt,
+      latestChapterNos: latest.latestChapterNos,
+      riskCount: 0,
+      ...feedbackBase,
+      rollbackPolicy: null,
+      expansionStructureValidationTrend,
+      expansionStructureRepairEffectiveness,
+    }
+  }
+  if (latest.segmentResolved && latest.effectiveRiskCount <= 0) {
+    return {
+      visible: true,
+      status: 'recovered',
+      label: '扩批热区反馈',
+      summary: '扩批分段热区已修复并通过复检。',
+      targetChapterCount: 5,
+      latestBatchCreatedAt: latest.latestBatchCreatedAt,
+      latestChapterNos: latest.latestChapterNos,
+      riskCount: 0,
+      ...feedbackBase,
+      rollbackPolicy: null,
+      expansionStructureValidationTrend,
+      expansionStructureRepairEffectiveness,
+    }
+  }
+
+  const rollbackPolicy = latest.rawReview.rollbackPolicy || safeBatchExpansionRollbackPolicy({
+    riskCount: latest.rawRiskCount,
+    coreRiskCount: Number(latest.rawReview.coreRiskCount || 0),
+    hotspotLabel: '',
+  })
+  const summary = repeatedHotspotSegment
+    ? `${repeatedHotspotSegment.summary}${text(rollbackPolicy?.summary)}`
+    : text(rollbackPolicy?.summary, '扩批分段热区未闭环，下一轮回退到小批量安全连写。')
+  return {
+    visible: true,
+    status: text(rollbackPolicy?.mode, 'rollback_to_small_batch'),
+    label: '扩批热区反馈',
+    summary,
+    targetChapterCount: Number(rollbackPolicy?.targetChapterCount || 3),
+    latestBatchCreatedAt: latest.latestBatchCreatedAt,
+    latestChapterNos: latest.latestChapterNos,
+    riskCount: latest.rawRiskCount,
+    ...feedbackBase,
+    rollbackPolicy,
+    expansionStructureValidationTrend,
+    expansionStructureRepairEffectiveness,
+  }
 }
 
 function recoveryEvidenceRegovernanceActionForItem(item: AnyRecord) {
@@ -3418,9 +4863,242 @@ function recoveryEvidenceReleaseFailureEventsFromTask(task: AnyRecord, run: AnyR
   return events.filter(item => item.source && item.evidence)
 }
 
+function recoveryEvidenceEventTime(value: any) {
+  const timestamp = Date.parse(text(value))
+  return Number.isFinite(timestamp) ? timestamp : 0
+}
+
+function isRecoveryEvidenceDeepRepairAction(actionKey: string) {
+  return actionKey === 'deep_repair_single_brief' || actionKey === 'deep_repair_batch_brief'
+}
+
+function recoveryEvidenceDeepRepairEventsFromTask(task: AnyRecord, run: AnyRecord, taskIndex: number) {
+  if (text(task?.issue_type || task?.issueType) !== 'recovery_evidence_governance_queue') return []
+  const actionKey = text(task?.action_key || task?.actionKey)
+  if (!isRecoveryEvidenceDeepRepairAction(actionKey)) return []
+  const sourceMeta = recoveryEvidenceProfileSourceMeta(text(task?.source || task?.sourceMode), text(task?.source_label || task?.sourceLabel))
+  const taskStatus = text(task?.task_status || task?.taskStatus)
+  const completed = ['resolved', 'closed', 'done', 'passed'].includes(taskStatus)
+  const repairedAt = completed
+    ? firstText(task?.resolved_at, task?.resolvedAt, task?.completed_at, task?.completedAt, task?.updated_at, task?.updatedAt, run?.completed_at, run?.updated_at, run?.created_at)
+    : ''
+  const queuedAt = firstText(task?.created_at, task?.createdAt, run?.created_at, run?.updated_at)
+  return [{
+    source: sourceMeta.source,
+    label: sourceMeta.label,
+    action_key: actionKey,
+    action_label: text(task?.action_label || task?.actionLabel, recoveryEvidenceDeepRepairAction(sourceMeta.source).label),
+    deep_repair_level: text(task?.deep_repair_level || task?.deepRepairLevel, 'first_deep_repair'),
+    task_status: taskStatus,
+    completed,
+    run_id: run?.id ?? null,
+    task_index: taskIndex,
+    repaired_at: repairedAt,
+    queued_at: queuedAt,
+    event_at: repairedAt || queuedAt,
+  }].filter(item => item.source && item.event_at)
+}
+
+function recoveryEvidenceDefaultStrengthenedRepairClosure(label: string, status = 'not_required') {
+  const normalizedStatus = status === 'needs_repair' || status === 'pending_recheck' || status === 'converged' || status === 'recurred'
+    ? status
+    : 'not_required'
+  const defaultLabel = normalizedStatus === 'needs_repair'
+    ? '待强化深修'
+    : normalizedStatus === 'pending_recheck'
+      ? '强化深修待复检'
+      : normalizedStatus === 'converged'
+        ? '强化深修已收敛'
+        : normalizedStatus === 'recurred'
+          ? '强化深修后仍复发'
+          : '无需强化深修'
+  const summary = normalizedStatus === 'needs_repair'
+    ? `${label}普通深修后仍出现同源放行失败，需要生成强化深修复检。`
+    : normalizedStatus === 'pending_recheck'
+      ? `${label}强化深修任务已生成，等待执行后复检同源失败是否收敛。`
+      : normalizedStatus === 'converged'
+        ? `${label}强化深修后暂无新的同源放行后失效，可恢复小批量安全连写并继续观察。`
+        : normalizedStatus === 'recurred'
+          ? `${label}强化深修后仍出现同源放行失败，继续禁止放宽安全连写。`
+          : `${label}尚未触发强化深修。`
+  return {
+    status: normalizedStatus,
+    label: defaultLabel,
+    summary,
+    latest_repair_run_id: null,
+    latest_repair_at: '',
+    post_repair_failure_count: 0,
+    post_repair_evidence: [],
+  }
+}
+
+function recoveryEvidenceDefaultDeepRepairEffect(source: AnyRecord) {
+  const label = text(source?.label || source?.source_label || source?.sourceLabel || source?.source, '恢复依据来源')
+  return {
+    status: 'none',
+    label: '未深修',
+    summary: `${label}尚未生成深层修复队列。`,
+    latest_repair_run_id: null,
+    latest_repair_action_label: '',
+    latest_repair_at: '',
+    post_repair_failure_count: 0,
+    post_repair_evidence: [],
+    strengthened_repair_closure: recoveryEvidenceDefaultStrengthenedRepairClosure(label),
+  }
+}
+
+function buildRecoveryEvidenceStrengthenedRepairClosure(label: string, failures: AnyRecord[], repairs: AnyRecord[]) {
+  const completedEscalatedRepairs = repairs
+    .filter(event =>
+      text(event?.deep_repair_level || event?.deepRepairLevel) === 'escalated_after_recurrence'
+      && Boolean(event.completed)
+      && recoveryEvidenceEventTime(event.repaired_at) > 0,
+    )
+    .sort((a, b) => recoveryEvidenceEventTime(b.repaired_at) - recoveryEvidenceEventTime(a.repaired_at))
+  const pendingEscalatedRepairs = repairs
+    .filter(event =>
+      text(event?.deep_repair_level || event?.deepRepairLevel) === 'escalated_after_recurrence'
+      && !event.completed,
+    )
+    .sort((a, b) => recoveryEvidenceEventTime(b.event_at) - recoveryEvidenceEventTime(a.event_at))
+  const latestEscalatedRepair = completedEscalatedRepairs[0]
+
+  if (latestEscalatedRepair) {
+    const repairTime = recoveryEvidenceEventTime(latestEscalatedRepair.repaired_at)
+    const postRepairFailures = failures
+      .filter(event => recoveryEvidenceEventTime(event.failed_at) > repairTime)
+      .sort((a, b) => recoveryEvidenceEventTime(a.failed_at) - recoveryEvidenceEventTime(b.failed_at))
+    if (postRepairFailures.length) {
+      return {
+        status: 'recurred',
+        label: '强化深修后仍复发',
+        summary: `${label}最近一次${text(latestEscalatedRepair.action_label, '强化深修')}后又放行失败 ${postRepairFailures.length} 次，不能恢复多章安全连写。`,
+        latest_repair_run_id: latestEscalatedRepair.run_id ?? null,
+        latest_repair_at: text(latestEscalatedRepair.repaired_at),
+        post_repair_failure_count: postRepairFailures.length,
+        post_repair_evidence: Array.from(new Set(postRepairFailures.map(event => text(event.evidence)).filter(Boolean))).slice(0, 4),
+      }
+    }
+    return {
+      status: 'converged',
+      label: '强化深修已收敛',
+      summary: `${label}强化深修后暂无新的同源放行后失效，可恢复小批量安全连写并继续观察。`,
+      latest_repair_run_id: latestEscalatedRepair.run_id ?? null,
+      latest_repair_at: text(latestEscalatedRepair.repaired_at),
+      post_repair_failure_count: 0,
+      post_repair_evidence: [],
+    }
+  }
+
+  const pendingEscalatedRepair = pendingEscalatedRepairs[0]
+  if (pendingEscalatedRepair) {
+    return {
+      status: 'pending_recheck',
+      label: '强化深修待复检',
+      summary: `${label}已有${text(pendingEscalatedRepair.action_label, '强化深修')}任务，等待执行后确认同源失败是否收敛。`,
+      latest_repair_run_id: pendingEscalatedRepair.run_id ?? null,
+      latest_repair_at: text(pendingEscalatedRepair.event_at),
+      post_repair_failure_count: 0,
+      post_repair_evidence: [],
+    }
+  }
+
+  const completedRepairs = repairs.filter(event => Boolean(event.completed) && recoveryEvidenceEventTime(event.repaired_at) > 0)
+  const hasRecurrenceAfterRepair = completedRepairs.some(repair => {
+    const repairTime = recoveryEvidenceEventTime(repair.repaired_at)
+    return failures.some(event => recoveryEvidenceEventTime(event.failed_at) > repairTime)
+  })
+  if (hasRecurrenceAfterRepair) {
+    return recoveryEvidenceDefaultStrengthenedRepairClosure(label, 'needs_repair')
+  }
+
+  return recoveryEvidenceDefaultStrengthenedRepairClosure(label)
+}
+
+function buildRecoveryEvidenceDeepRepairEffects(failureEvents: AnyRecord[], deepRepairEvents: AnyRecord[]) {
+  const bySource = new Map<string, AnyRecord[]>()
+  const repairsBySource = new Map<string, AnyRecord[]>()
+
+  failureEvents.forEach(event => {
+    const source = text(event?.source)
+    if (!source) return
+    bySource.set(source, [...(bySource.get(source) || []), event])
+  })
+  deepRepairEvents.forEach(event => {
+    const source = text(event?.source)
+    if (!source) return
+    repairsBySource.set(source, [...(repairsBySource.get(source) || []), event])
+  })
+
+  const effects = new Map<string, AnyRecord>()
+  for (const [source, failures] of bySource.entries()) {
+    const label = text(failures[0]?.label || source, '恢复依据来源')
+    const repairs = (repairsBySource.get(source) || [])
+      .slice()
+      .sort((a, b) => recoveryEvidenceEventTime(b.event_at) - recoveryEvidenceEventTime(a.event_at))
+    const completedRepairs = repairs
+      .filter(event => Boolean(event.completed) && recoveryEvidenceEventTime(event.repaired_at) > 0)
+      .sort((a, b) => recoveryEvidenceEventTime(b.repaired_at) - recoveryEvidenceEventTime(a.repaired_at))
+    const latestRepair = completedRepairs[0]
+    const strengthenedRepairClosure = buildRecoveryEvidenceStrengthenedRepairClosure(label, failures, repairs)
+
+    if (latestRepair) {
+      const repairTime = recoveryEvidenceEventTime(latestRepair.repaired_at)
+      const postRepairFailures = failures
+        .filter(event => recoveryEvidenceEventTime(event.failed_at) > repairTime)
+        .sort((a, b) => recoveryEvidenceEventTime(a.failed_at) - recoveryEvidenceEventTime(b.failed_at))
+      if (postRepairFailures.length) {
+        effects.set(source, {
+          status: 'recurred',
+          label: '深修后仍失效',
+          summary: `${label}最近一次${text(latestRepair.action_label, '深修')}后又放行失败 ${postRepairFailures.length} 次，需要升级任务书修复口径。`,
+          latest_repair_run_id: latestRepair.run_id ?? null,
+          latest_repair_action_label: text(latestRepair.action_label),
+          latest_repair_at: text(latestRepair.repaired_at),
+          post_repair_failure_count: postRepairFailures.length,
+          post_repair_evidence: Array.from(new Set(postRepairFailures.map(event => text(event.evidence)).filter(Boolean))).slice(0, 4),
+          strengthened_repair_closure: strengthenedRepairClosure,
+        })
+      } else {
+        effects.set(source, {
+          status: 'observing',
+          label: '深修后暂无再失效',
+          summary: `${label}最近一次${text(latestRepair.action_label, '深修')}后暂无新的放行后失效，继续观察下一批正文继承。`,
+          latest_repair_run_id: latestRepair.run_id ?? null,
+          latest_repair_action_label: text(latestRepair.action_label),
+          latest_repair_at: text(latestRepair.repaired_at),
+          post_repair_failure_count: 0,
+          post_repair_evidence: [],
+          strengthened_repair_closure: strengthenedRepairClosure,
+        })
+      }
+      continue
+    }
+
+    const pendingRepair = repairs[0]
+    if (pendingRepair) {
+      effects.set(source, {
+        status: 'pending',
+        label: '深修待复查',
+        summary: `${label}已有${text(pendingRepair.action_label, '深修')}任务，等待执行后观察同源是否继续失效。`,
+        latest_repair_run_id: pendingRepair.run_id ?? null,
+        latest_repair_action_label: text(pendingRepair.action_label),
+        latest_repair_at: text(pendingRepair.event_at),
+        post_repair_failure_count: 0,
+        post_repair_evidence: [],
+        strengthened_repair_closure: strengthenedRepairClosure,
+      })
+    }
+  }
+
+  return effects
+}
+
 function buildRecoveryEvidenceSourceRiskProfile(runRecords: AnyRecord[]) {
   const seen = new Set<string>()
   const bySource = new Map<string, AnyRecord>()
+  const failureEvents: AnyRecord[] = []
+  const deepRepairEvents: AnyRecord[] = []
   runRecords
     .filter(run => text(run?.run_type) === 'longform_production_repair')
     .forEach(run => {
@@ -3430,10 +5108,12 @@ function buildRecoveryEvidenceSourceRiskProfile(runRecords: AnyRecord[]) {
         ...arrayValue(output?.repairTasks),
       ]
       tasks.forEach((task, taskIndex) => {
+        deepRepairEvents.push(...recoveryEvidenceDeepRepairEventsFromTask(task, run, taskIndex))
         recoveryEvidenceReleaseFailureEventsFromTask(task, run, taskIndex).forEach(event => {
           const eventKey = [event.run_id, event.task_index, event.source, event.evidence].join('|')
           if (seen.has(eventKey)) return
           seen.add(eventKey)
+          failureEvents.push(event)
           const current = bySource.get(event.source) || {
             source: event.source,
             label: event.label,
@@ -3450,20 +5130,31 @@ function buildRecoveryEvidenceSourceRiskProfile(runRecords: AnyRecord[]) {
         })
       })
     })
+  const deepRepairEffects = buildRecoveryEvidenceDeepRepairEffects(failureEvents, deepRepairEvents)
 
   const sources = Array.from(bySource.values())
+    .map(source => ({
+      ...source,
+      deep_repair_effect: deepRepairEffects.get(text(source?.source)) || recoveryEvidenceDefaultDeepRepairEffect(source),
+    }))
     .sort((a, b) => Number(b.release_failure_count || 0) - Number(a.release_failure_count || 0))
   const repeatedSources = sources.filter(source => Number(source.release_failure_count || 0) >= 2)
-  const topRepeated = repeatedSources[0]
-  const detail = topRepeated
-    ? `${topRepeated.label}反复放行失败 ${topRepeated.release_failure_count} 次：${arrayValue(topRepeated.evidence).slice(0, 2).join('；')}。本轮只允许单章推进，并先复盘更深层创作问题。`
+  const unresolvedRepeatedSources = repeatedSources.filter(source =>
+    text(source?.deep_repair_effect?.strengthened_repair_closure?.status || source?.deepRepairEffect?.strengthenedRepairClosure?.status) !== 'converged',
+  )
+  const topUnresolved = unresolvedRepeatedSources[0]
+  const topRepeated = topUnresolved || repeatedSources[0]
+  const detail = topUnresolved
+    ? `${topUnresolved.label}反复放行失败 ${topUnresolved.release_failure_count} 次：${arrayValue(topUnresolved.evidence).slice(0, 2).join('；')}。本轮只允许单章推进，并先复盘更深层创作问题。`
+    : topRepeated
+      ? `${topRepeated.label}强化深修已收敛，历史 ${topRepeated.release_failure_count} 次放行后失效进入观察；可恢复小批量安全连写。`
     : sources.length
       ? '恢复依据放行后失效来源已有记录，但尚未形成反复失败画像。'
       : '暂无反复放行失败的恢复依据来源。'
 
   return {
     visible: sources.length > 0,
-    status: repeatedSources.length > 0 ? 'warn' as const : 'ok' as const,
+    status: unresolvedRepeatedSources.length > 0 ? 'warn' as const : 'ok' as const,
     label: '恢复依据画像',
     detail,
     summary: detail,
@@ -3471,6 +5162,235 @@ function buildRecoveryEvidenceSourceRiskProfile(runRecords: AnyRecord[]) {
     repeat_source_count: repeatedSources.length,
     total_failure_count: sources.reduce((sum, source) => sum + Number(source.release_failure_count || 0), 0),
     sources,
+  }
+}
+
+function recoveryEvidenceDeepRepairDirection(source: string, label: string) {
+  if (source === 'single_chapter_governance_recheck') {
+    return '深层修复方向：回到单章任务书，确认治理复查证据已经写成正文里的可见冲突、对白动作、读者回报和章末钩子。'
+  }
+  if (source === 'safe_batch_recovery_recheck') {
+    return '深层修复方向：复盘批次任务书，把多章承诺拆回每章冲突职责、回报落点和剧情线推进，再恢复批量连写。'
+  }
+  if (source === 'review_governance_closure') {
+    return '深层修复方向：回到治理复查台，重新确认修后证据、观察项和关闭条件，再让后续正文承接。'
+  }
+  return `深层修复方向：复查${label || '恢复依据来源'}的关闭条件，把抽象依据改成下一章可执行的事件、选择、代价和回报。`
+}
+
+function normalizeRecoveryEvidenceDeepRepairEffect(effect: AnyRecord | null | undefined, fallbackLabel: string) {
+  const status = text(effect?.status)
+  const normalizedStatus: AutoCreationRecoveryEvidenceTrendSource['deepRepairEffect']['status'] =
+    status === 'pending' || status === 'observing' || status === 'recurred' ? status : 'none'
+  const defaultLabel = normalizedStatus === 'recurred'
+    ? '深修后仍失效'
+    : normalizedStatus === 'observing'
+      ? '深修后暂无再失效'
+      : normalizedStatus === 'pending'
+        ? '深修待复查'
+        : '未深修'
+  const strengthenedClosure = normalizeRecoveryEvidenceStrengthenedRepairClosure(
+    effect?.strengthened_repair_closure || effect?.strengthenedRepairClosure,
+    fallbackLabel,
+    normalizedStatus,
+  )
+  return {
+    status: normalizedStatus,
+    label: text(effect?.label, defaultLabel),
+    summary: text(effect?.summary, `${fallbackLabel || '恢复依据来源'}尚未生成深层修复队列。`),
+    latestRepairRunId: effect?.latest_repair_run_id ?? effect?.latestRepairRunId ?? null,
+    latestRepairActionLabel: text(effect?.latest_repair_action_label || effect?.latestRepairActionLabel),
+    latestRepairAt: text(effect?.latest_repair_at || effect?.latestRepairAt),
+    postRepairFailureCount: Number(effect?.post_repair_failure_count ?? effect?.postRepairFailureCount ?? 0),
+    postRepairEvidence: arrayValue(effect?.post_repair_evidence || effect?.postRepairEvidence).map(item => text(item)).filter(Boolean).slice(0, 4),
+    strengthenedClosure,
+  }
+}
+
+function normalizeRecoveryEvidenceStrengthenedRepairClosure(
+  closure: AnyRecord | null | undefined,
+  fallbackLabel: string,
+  effectStatus: AutoCreationRecoveryEvidenceTrendSource['deepRepairEffect']['status'],
+): AutoCreationRecoveryEvidenceTrendSource['deepRepairEffect']['strengthenedClosure'] {
+  const status = text(closure?.status)
+  const normalizedStatus: AutoCreationRecoveryEvidenceTrendSource['deepRepairEffect']['strengthenedClosure']['status'] =
+    status === 'needs_repair' || status === 'pending_recheck' || status === 'converged' || status === 'recurred'
+      ? status
+      : effectStatus === 'recurred'
+        ? 'needs_repair'
+        : 'not_required'
+  const defaults = recoveryEvidenceDefaultStrengthenedRepairClosure(fallbackLabel || '恢复依据来源', normalizedStatus)
+  return {
+    status: normalizedStatus,
+    label: text(closure?.label, defaults.label),
+    summary: text(closure?.summary, defaults.summary),
+    latestRepairRunId: closure?.latest_repair_run_id ?? closure?.latestRepairRunId ?? defaults.latest_repair_run_id,
+    latestRepairAt: text(closure?.latest_repair_at || closure?.latestRepairAt || defaults.latest_repair_at),
+    postRepairFailureCount: Number(closure?.post_repair_failure_count ?? closure?.postRepairFailureCount ?? defaults.post_repair_failure_count),
+    postRepairEvidence: arrayValue(closure?.post_repair_evidence || closure?.postRepairEvidence || defaults.post_repair_evidence).map(item => text(item)).filter(Boolean).slice(0, 4),
+  }
+}
+
+function buildRecoveryEvidenceTrend(
+  profile: AnyRecord | null | undefined,
+  strengthenedAcceptanceTrend: AutoCreationStrengthenedRepairAcceptanceTrend = emptyStrengthenedRepairAcceptanceTrend(),
+): AutoCreationRecoveryEvidenceTrend {
+  const sources = arrayValue(profile?.sources)
+    .map(item => {
+      const source = text(item?.source || item?.sourceMode)
+      const label = text(item?.label || item?.source_label || item?.sourceLabel || item?.source, '恢复依据来源')
+      const releaseFailureCount = Number(item?.release_failure_count || item?.releaseFailureCount || 0)
+      const deepRepairEffect = normalizeRecoveryEvidenceDeepRepairEffect(item?.deep_repair_effect || item?.deepRepairEffect, label)
+      return {
+        source,
+        label,
+        releaseFailureCount,
+        trendLabel: `近${Math.max(1, releaseFailureCount || 1)}轮失败`,
+        evidence: arrayValue(item?.evidence).map((entry: any) => text(entry)).filter(Boolean).slice(0, 4),
+        sourceRunIds: arrayValue(item?.source_run_ids || item?.sourceRunIds).filter(Boolean).slice(0, 8),
+        deepRepairDirection: recoveryEvidenceDeepRepairDirection(source, label),
+        deepRepairEffect,
+      }
+    })
+    .filter(item => item.source && item.releaseFailureCount > 0)
+    .sort((a, b) => b.releaseFailureCount - a.releaseFailureCount)
+  const repeatedSources = sources.filter(item => item.releaseFailureCount >= 2)
+  const unresolvedRepeatedSources = repeatedSources.filter(item => item.deepRepairEffect.strengthenedClosure.status !== 'converged')
+  const focus = unresolvedRepeatedSources[0] || repeatedSources[0] || sources[0] || null
+  const status: AutoCreationBatchGuardrailSignalStatus = unresolvedRepeatedSources.length > 0 || text(profile?.status) === 'warn' && unresolvedRepeatedSources.length > 0
+    ? 'warn'
+    : 'ok'
+  const summary = focus
+    ? focus.releaseFailureCount >= 2
+      ? focus.deepRepairEffect.strengthenedClosure.status === 'converged'
+        ? `${focus.label}强化深修已收敛，可恢复小批量安全连写并继续观察同源继承。`
+        : `${focus.label}近${focus.releaseFailureCount}轮放行后失效，任务中心应先处理深层创作修复，再恢复多章安全连写。`
+      : `${focus.label}已有放行后失效记录，本轮继续观察来源稳定性。`
+    : '暂无恢复依据来源失效趋势。'
+
+  return {
+    visible: sources.length > 0,
+    status,
+    label: '恢复依据画像趋势',
+    summary,
+    totalFailureCount: Number(profile?.total_failure_count || profile?.totalFailureCount || sources.reduce((sum, item) => sum + item.releaseFailureCount, 0)),
+    repeatSourceCount: Number(profile?.repeat_source_count || profile?.repeatSourceCount || repeatedSources.length),
+    sources,
+    strengthenedAcceptanceTrend,
+  }
+}
+
+function recoveryEvidenceDeepRepairAction(source: string) {
+  if (source === 'single_chapter_governance_recheck') {
+    return { actionKey: 'deep_repair_single_brief', label: '深修单章任务书' }
+  }
+  if (source === 'safe_batch_recovery_recheck') {
+    return { actionKey: 'deep_repair_batch_brief', label: '深修批次任务书' }
+  }
+  return { actionKey: 'review_governance_closure', label: '治理复查台' }
+}
+
+function buildRecoveryEvidenceDeepRepairQueue(trend: AutoCreationRecoveryEvidenceTrend) {
+  const repeatedSources = trend.sources.filter(source => source.releaseFailureCount >= 2)
+  const actionableSources = repeatedSources.filter(source =>
+    source.deepRepairEffect.status === 'none'
+    || (
+      source.deepRepairEffect.status === 'recurred'
+      && !['pending_recheck', 'converged'].includes(source.deepRepairEffect.strengthenedClosure.status)
+    ),
+  )
+  const tasks = actionableSources.map((source, index) => {
+    const action = recoveryEvidenceDeepRepairAction(source.source)
+    const escalated = source.deepRepairEffect.status === 'recurred'
+    const actionLabel = escalated && action.actionKey === 'deep_repair_single_brief'
+      ? '强化单章任务书复盘'
+      : escalated && action.actionKey === 'deep_repair_batch_brief'
+        ? '强化批次任务书复盘'
+        : action.label
+    const evidence = source.evidence.length
+      ? source.evidence
+      : [`${source.label}近${source.releaseFailureCount}轮放行后失效`]
+    const executionMeta = recoveryEvidenceGovernanceQueueExecutionMeta({
+      source: source.source,
+      source_run_ids: source.sourceRunIds,
+    }, action.actionKey)
+
+    return {
+      issue_type: 'recovery_evidence_governance_queue',
+      severity: 'high',
+      task_status: 'needs_review',
+      source: source.source,
+      source_label: source.label,
+      source_status: 'repeated_release_failure',
+      source_status_label: '反复放行后失效',
+      action_key: action.actionKey,
+      action_label: actionLabel,
+      deep_repair_level: escalated ? 'escalated_after_recurrence' : 'first_deep_repair',
+      deep_repair_direction: source.deepRepairDirection,
+      deep_repair_effect: source.deepRepairEffect,
+      release_failure_count: source.releaseFailureCount,
+      trend_label: source.trendLabel,
+      source_run_ids: source.sourceRunIds,
+      failed_evidence: evidence,
+      ...executionMeta,
+      title: `${source.label}：${actionLabel}`,
+      message: `${source.label}${source.trendLabel}，需要先做深层创作修复，再恢复多章安全连写。`,
+      action: escalated
+        ? `${source.deepRepairEffect.summary} ${source.deepRepairDirection} 这次需要把任务书修复口径升级到可验收的场景职责。`
+        : source.deepRepairDirection,
+      recovery_evidence_review: {
+        status: 'warn',
+        summary: `${source.label}${source.trendLabel}：${evidence.join('；')}`,
+        failed_evidence: evidence,
+      },
+      acceptance_criteria: [
+        source.deepRepairDirection,
+        '下一轮正文必须可见继承恢复依据，而不是只在审计里声明已处理',
+        '恢复依据画像趋势不再出现同来源连续放行后失效',
+      ],
+      queue_index: index,
+    }
+  })
+  const escalated = tasks.some(task => task.deep_repair_level === 'escalated_after_recurrence')
+  const pendingStrengthened = repeatedSources.some(source => source.deepRepairEffect.strengthenedClosure.status === 'pending_recheck')
+  const convergedStrengthened = repeatedSources.some(source => source.deepRepairEffect.strengthenedClosure.status === 'converged')
+
+  return {
+    source: 'recovery_evidence_source_risk_profile',
+    status: tasks.length ? 'needs_followup' : 'ok',
+    label: escalated ? '恢复依据画像强化深修' : pendingStrengthened ? '恢复依据画像强化复检' : '恢复依据画像深层修复',
+    summary: tasks.length
+      ? escalated
+        ? `${tasks.length} 类恢复依据来源深修后仍失效，需要升级任务书复盘口径。`
+        : `${tasks.length} 类恢复依据来源反复放行后失效，需要先生成深层修复队列。`
+      : pendingStrengthened
+        ? '强化深修任务已生成，等待复检收敛；暂不重复生成深修队列。'
+        : convergedStrengthened
+          ? '强化深修已收敛，恢复依据画像进入安全连写观察。'
+          : '恢复依据画像来源已进入深修观察或待复查，不重复生成深修队列。',
+    source_count: trend.sources.length,
+    repeat_source_count: repeatedSources.length,
+    total_failure_count: trend.totalFailureCount,
+    task_count: tasks.length,
+    sources: trend.sources,
+    main_action: {
+      action: text(tasks[0]?.action_key, 'review_governance_closure'),
+      label: text(tasks[0]?.action_label, '治理复查台'),
+      source: text(tasks[0]?.source, 'recovery_evidence_source_risk_profile'),
+      sourceLabel: text(tasks[0]?.source_label, '恢复依据画像'),
+      status: text(tasks[0]?.source_status, 'repeated_release_failure'),
+      residualEvidence: arrayValue(tasks[0]?.failed_evidence),
+    },
+    next_cycle: {
+      type: 'recovery_evidence_source_deep_repair',
+      label: '恢复依据画像深层修复',
+    },
+    tasks,
+    recommendations: tasks.length
+      ? tasks.map(task => `${task.source_label}：${task.deep_repair_direction}`)
+      : pendingStrengthened
+        ? ['等待强化深修复检回填；复检收敛前只允许单章推进。']
+        : ['继续观察恢复依据画像趋势，深修后暂无再失效的来源不重复生成队列。'],
   }
 }
 
@@ -3746,6 +5666,7 @@ function buildBatchRiskRadar(args: {
   resolvedIssueKeys?: Set<string>
   nextBatchBrief?: AnyRecord | null
   batchPreflight?: AnyRecord | null
+  expansionFeedback?: AnyRecord | null
 }): AutoCreationBatchRiskRadar {
   const successfulItems = args.items.filter(item => item.status === 'success')
   const qualityScores = successfulItems
@@ -3780,6 +5701,7 @@ function buildBatchRiskRadar(args: {
   let volumeSegmentRiskTotal = 0
   let forbiddenBoundaryRiskTotal = 0
   const handoffRiskLabels: string[] = []
+  const expansionChapterRisks: AnyRecord[] = []
   const serialRhythmReview = buildSerialRhythmReview({
     items: successfulItems,
     chapters: args.chapters,
@@ -3868,6 +5790,14 @@ function buildBatchRiskRadar(args: {
       ? coreCount + payoffCount + storylineCount
       : 0
     const lowQuality = qualityScore !== null && qualityScore < BATCH_DELIVERY_QUALITY_THRESHOLD
+    expansionChapterRisks.push({
+      chapterNo: item.chapterNo,
+      title: item.title,
+      coreRiskCount: coreCount,
+      payoffDebtCount: payoffCount,
+      readerPullRiskCount: readerPullCount,
+      riskCount: coreCount + payoffCount + readerPullCount,
+    })
 
     coreRiskTotal += coreCount
     runwayRiskTotal += runwayCount
@@ -4174,6 +6104,176 @@ function buildBatchRiskRadar(args: {
       recoveryEvidenceRegovernanceQueue,
     }))
   }
+  const strengthenedRepairAcceptanceReview = buildStrengthenedRepairAcceptanceReview({
+    preflight: args.batchPreflight,
+    counts: {
+      coreRiskTotal,
+      payoffDebtTotal,
+      readerPullRiskTotal,
+    },
+  })
+  const strengthenedRepairAcceptanceResolved = successfulItems.length > 0
+    && batchRiskIssueResolved(args.resolvedIssueKeys, successfulItems[0], 'strengthened_repair_acceptance_mismatch')
+  const effectiveStrengthenedRepairAcceptanceReview = strengthenedRepairAcceptanceResolved && strengthenedRepairAcceptanceReview.visible
+    ? {
+      ...strengthenedRepairAcceptanceReview,
+      status: 'ok' as const,
+      failed_evidence: [],
+      risk_count: 0,
+      core_risk_count: 0,
+      payoff_debt_count: 0,
+      reader_pull_risk_count: 0,
+      summary: '强化深修恢复验收风险已修复并通过复检。',
+    }
+    : strengthenedRepairAcceptanceReview
+  const strengthenedRepairAcceptanceRiskTotal = effectiveStrengthenedRepairAcceptanceReview.visible
+    ? Number(effectiveStrengthenedRepairAcceptanceReview.risk_count || 0)
+    : 0
+  if (strengthenedRepairAcceptanceRiskTotal > 0 && successfulItems.length > 0) {
+    repairTasks.push(batchRepairTask({
+      item: successfulItems[0],
+      issueType: 'strengthened_repair_acceptance_mismatch',
+      severity: effectiveStrengthenedRepairAcceptanceReview.core_risk_count > 0 || strengthenedRepairAcceptanceRiskTotal >= 2 ? 'high' : 'medium',
+      message: `强化深修恢复验收未通过，核心守恒、读者回报或追读拉力仍有 ${strengthenedRepairAcceptanceRiskTotal} 项风险。`,
+      action: '按强化深修恢复验收重修本批：先校准全书核心承诺，再补齐显性爽点回报和章末追读动力，复查通过前不放宽下一批。',
+      metrics: {
+        strengthened_repair_acceptance_risk_count: strengthenedRepairAcceptanceRiskTotal,
+        core_risk_count: effectiveStrengthenedRepairAcceptanceReview.core_risk_count,
+        payoff_debt_count: effectiveStrengthenedRepairAcceptanceReview.payoff_debt_count,
+        reader_pull_risk_count: effectiveStrengthenedRepairAcceptanceReview.reader_pull_risk_count,
+      },
+      strengthenedRepairAcceptanceReview: effectiveStrengthenedRepairAcceptanceReview,
+    }))
+  }
+  const safeBatchExpansionSegmentReview = buildSafeBatchExpansionSegmentReview({
+    preflight: args.batchPreflight,
+    chapterRisks: expansionChapterRisks,
+  })
+  const safeBatchExpansionSegmentResolved = safeBatchExpansionSegmentResolvedForItems(
+    args.resolvedIssueKeys,
+    successfulItems,
+    safeBatchExpansionSegmentReview,
+  )
+  const effectiveSafeBatchExpansionSegmentReview = safeBatchExpansionSegmentResolved && safeBatchExpansionSegmentReview.visible
+    ? {
+      ...safeBatchExpansionSegmentReview,
+      status: 'ok' as const,
+      riskCount: 0,
+      hotspots: [],
+      summary: '5章扩批分段热区已修复并通过复检。',
+    }
+    : safeBatchExpansionSegmentReview
+  const safeBatchExpansionSegmentRiskTotal = effectiveSafeBatchExpansionSegmentReview.visible
+    ? Number(effectiveSafeBatchExpansionSegmentReview.riskCount || 0)
+    : 0
+  const safeBatchExpansionStructureValidationResult = buildSafeBatchExpansionStructureValidationResult({
+    preflight: args.batchPreflight,
+    chapterRisks: expansionChapterRisks,
+  })
+  const safeBatchExpansionStructureValidationRiskTotal = safeBatchExpansionStructureValidationResult.visible
+    ? Number(safeBatchExpansionStructureValidationResult.risk_count || 0)
+    : 0
+  const safeBatchExpansionStructureValidationTrend = args.expansionFeedback?.expansionStructureValidationTrend
+    || args.expansionFeedback?.expansion_structure_validation_trend
+    || null
+  if (safeBatchExpansionSegmentRiskTotal > 0 && successfulItems.length > 0) {
+    const hotspotChapterNo = Number(effectiveSafeBatchExpansionSegmentReview.hotspots?.[0]?.chapterNos?.[0] || 0)
+    const hotspotItem = successfulItems.find(item => Number(item.chapterNo || 0) === hotspotChapterNo) || successfulItems[0]
+    const expansionStructureReview = buildSafeBatchExpansionStructureReview({
+      segmentReview: effectiveSafeBatchExpansionSegmentReview,
+      expansionFeedback: args.expansionFeedback,
+    })
+    if (expansionStructureReview.visible) {
+      const repeatedSegment = expansionStructureReview.repeated_hotspot_segment
+      const expansionStructureReviewWithTrend = {
+        ...expansionStructureReview,
+        ...(safeBatchExpansionStructureValidationTrend?.visible ? {
+          expansion_structure_validation_trend: safeBatchExpansionStructureValidationTrend,
+        } : {}),
+      }
+      repairTasks.push(batchRepairTask({
+        item: hotspotItem,
+        issueType: 'safe_batch_expansion_structure_repair',
+        taskType: 'repair_planning',
+        severity: 'high',
+        message: `${repeatedSegment?.label || '扩批段位'}连续 ${repeatedSegment?.count || 2} 次扩批热区，单修章节不足，需要改写批次结构。`,
+        action: `先做${repeatedSegment?.label || '复发段位'}固定段落治理和批次结构改写，再按 ${expansionStructureReview.rollback_policy?.target_chapter_count || 3} 章以内恢复安全连写。`,
+        metrics: {
+          safe_batch_expansion_structure_risk_count: safeBatchExpansionSegmentRiskTotal,
+          repeated_hotspot_count: repeatedSegment?.count || 0,
+          target_chapter_count: effectiveSafeBatchExpansionSegmentReview.targetChapterCount,
+          rollback_target_chapter_count: expansionStructureReview.rollback_policy?.target_chapter_count || 3,
+        },
+        safeBatchExpansionStructureReview: expansionStructureReviewWithTrend,
+      }))
+    } else {
+      repairTasks.push(batchRepairTask({
+        item: hotspotItem,
+        issueType: 'safe_batch_expansion_segment_hotspot',
+        severity: effectiveSafeBatchExpansionSegmentReview.rollbackPolicy?.mode === 'rollback_to_single_chapter' ? 'high' : 'medium',
+        message: `${effectiveSafeBatchExpansionSegmentReview.label}未通过，${effectiveSafeBatchExpansionSegmentReview.summary}`,
+        action: `${effectiveSafeBatchExpansionSegmentReview.rollbackPolicy?.summary || '先按热区章节重修，再缩小下一批安全连写。'}`,
+        metrics: {
+          safe_batch_expansion_segment_risk_count: safeBatchExpansionSegmentRiskTotal,
+          target_chapter_count: effectiveSafeBatchExpansionSegmentReview.targetChapterCount,
+          rollback_target_chapter_count: effectiveSafeBatchExpansionSegmentReview.rollbackPolicy?.targetChapterCount || 3,
+        },
+        safeBatchExpansionSegmentReview: safeBatchExpansionSegmentReviewSnapshot(effectiveSafeBatchExpansionSegmentReview),
+      }))
+    }
+  }
+  if (safeBatchExpansionStructureValidationRiskTotal > 0 && successfulItems.length > 0) {
+    const failedChapterNo = Number(safeBatchExpansionStructureValidationResult.failed_chapter_nos?.[0] || 0)
+    const failedItem = successfulItems.find(item => Number(item.chapterNo || 0) === failedChapterNo) || successfulItems[0]
+    const rollbackPolicy = safeBatchExpansionRollbackPolicy({
+      riskCount: safeBatchExpansionStructureValidationRiskTotal,
+      coreRiskCount: Number(safeBatchExpansionStructureValidationResult.core_risk_count || 0),
+      hotspotLabel: text(safeBatchExpansionStructureValidationResult.repeated_hotspot_segment?.label),
+    })
+    const structureReview = {
+      visible: true,
+      status: 'warn',
+      label: '扩批结构修复',
+      summary: safeBatchExpansionStructureValidationResult.summary,
+      repeated_hotspot_segment: safeBatchExpansionStructureValidationResult.repeated_hotspot_segment || null,
+      latest_chapter_nos: safeBatchExpansionStructureValidationResult.validation_chapter_nos,
+      affected_chapter_nos: safeBatchExpansionStructureValidationResult.failed_chapter_nos,
+      hotspot_summaries: [safeBatchExpansionStructureValidationResult.summary],
+      structure_actions: [
+        safeBatchExpansionStructureValidationResult.fixed_segment_role,
+        safeBatchExpansionStructureValidationResult.conflict_rotation,
+        safeBatchExpansionStructureValidationResult.explicit_payoff,
+        safeBatchExpansionStructureValidationResult.ending_hook_requirement,
+        ...arrayValue(safeBatchExpansionStructureValidationResult.structure_actions),
+      ].map(item => text(item)).filter(Boolean),
+      validation_result: safeBatchExpansionStructureValidationResult,
+      rollback_policy: {
+        mode: rollbackPolicy.mode,
+        target_chapter_count: rollbackPolicy.targetChapterCount,
+        label: rollbackPolicy.label,
+        summary: rollbackPolicy.summary,
+      },
+      ...(safeBatchExpansionStructureValidationTrend?.visible ? {
+        expansion_structure_validation_trend: safeBatchExpansionStructureValidationTrend,
+      } : {}),
+    }
+    repairTasks.push(batchRepairTask({
+      item: failedItem,
+      issueType: 'safe_batch_expansion_structure_repair',
+      taskType: 'repair_planning',
+      severity: safeBatchExpansionStructureValidationResult.core_risk_count > 0 || safeBatchExpansionStructureValidationRiskTotal >= 2 ? 'high' : 'medium',
+      message: `扩批结构验证未通过，验证批仍有 ${safeBatchExpansionStructureValidationRiskTotal} 项核心/回报/追读风险。`,
+      action: '回到扩批结构任务书：重写验证批段位职责、冲突轮换、显性回报和章末追读，再用2-3章复验；复验通过前不恢复5章扩批。',
+      metrics: {
+        safe_batch_expansion_structure_validation_risk_count: safeBatchExpansionStructureValidationRiskTotal,
+        core_risk_count: safeBatchExpansionStructureValidationResult.core_risk_count,
+        payoff_debt_count: safeBatchExpansionStructureValidationResult.payoff_debt_count,
+        reader_pull_risk_count: safeBatchExpansionStructureValidationResult.reader_pull_risk_count,
+      },
+      safeBatchExpansionStructureReview: structureReview,
+      safeBatchExpansionStructureValidationResult,
+    }))
+  }
   if (serialRhythmRiskTotal > 0 && successfulItems.length > 0) {
     const firstItem = successfulItems[0]
     repairTasks.push(batchRepairTask({
@@ -4399,6 +6499,30 @@ function buildBatchRiskRadar(args: {
       detail: effectiveRecoveryEvidenceReview.summary,
     })
   }
+  if (effectiveStrengthenedRepairAcceptanceReview.visible) {
+    signals.push({
+      key: 'strengthened_repair_acceptance',
+      label: '强化复盘',
+      status: strengthenedRepairAcceptanceRiskTotal > 0 ? 'warn' : 'ok',
+      detail: effectiveStrengthenedRepairAcceptanceReview.summary,
+    })
+  }
+  if (effectiveSafeBatchExpansionSegmentReview.visible) {
+    signals.push({
+      key: 'batch_expansion_segment',
+      label: '扩批分段',
+      status: safeBatchExpansionSegmentRiskTotal > 0 ? 'warn' : 'ok',
+      detail: effectiveSafeBatchExpansionSegmentReview.summary,
+    })
+  }
+  if (safeBatchExpansionStructureValidationResult.visible) {
+    signals.push({
+      key: 'batch_expansion_structure',
+      label: '扩批结构',
+      status: safeBatchExpansionStructureValidationRiskTotal > 0 ? 'warn' : 'ok',
+      detail: safeBatchExpansionStructureValidationResult.summary,
+    })
+  }
   const status: AutoCreationBatchRiskStatus = signals.some(signal => signal.status === 'warn') ? 'warn' : 'ok'
 
   return {
@@ -4427,6 +6551,11 @@ function buildBatchRiskRadar(args: {
     batchPlanRiskCount: batchPlanRiskTotal,
     batchChecklistRiskCount: batchChecklistRiskTotal,
     recoveryEvidenceRiskCount: recoveryEvidenceRiskTotal,
+    strengthenedRepairAcceptanceRiskCount: strengthenedRepairAcceptanceRiskTotal,
+    safeBatchExpansionSegmentRiskCount: safeBatchExpansionSegmentRiskTotal,
+    safeBatchExpansionSegmentReview: effectiveSafeBatchExpansionSegmentReview,
+    safeBatchExpansionStructureValidationRiskCount: safeBatchExpansionStructureValidationRiskTotal,
+    safeBatchExpansionStructureValidationResult,
     checklistExecution: effectiveBatchChecklistExecution,
     signals,
     repairTasks: repairTasks.slice(0, 40),
@@ -4492,10 +6621,15 @@ function buildBatchCompletionDashboard(args: {
     + args.riskRadar.batchPlanRiskCount * 10
     + args.riskRadar.batchChecklistRiskCount * 8
     + args.riskRadar.recoveryEvidenceRiskCount * 10
+    + args.riskRadar.strengthenedRepairAcceptanceRiskCount * 12
+    + args.riskRadar.safeBatchExpansionSegmentRiskCount * 10
+    + args.riskRadar.safeBatchExpansionStructureValidationRiskCount * 12
   const planScore = clampScore(100 - planPenalty)
   const checklistScore = args.riskRadar.checklistExecution.visible ? args.riskRadar.checklistExecution.score : 100
   const recoveryEvidenceSignal = args.riskRadar.signals.find(signal => signal.key === 'recovery_evidence')
   const recoveryEvidenceClosed = Boolean(recoveryEvidenceSignal && recoveryEvidenceSignal.status === 'ok')
+  const strengthenedRepairAcceptanceSignal = args.riskRadar.signals.find(signal => signal.key === 'strengthened_repair_acceptance')
+  const strengthenedRepairAccepted = Boolean(strengthenedRepairAcceptanceSignal && strengthenedRepairAcceptanceSignal.status === 'ok')
   const score = args.riskRadar.checklistExecution.visible
     ? clampScore(generationScore * 0.28 + deliveryScore * 0.23 + qualityScore * 0.24 + planScore * 0.17 + checklistScore * 0.08)
     : clampScore(generationScore * 0.3 + deliveryScore * 0.25 + qualityScore * 0.25 + planScore * 0.2)
@@ -4552,6 +6686,14 @@ function buildBatchCompletionDashboard(args: {
         ? recoveryEvidenceSignal.detail
         : `恢复依据已闭环：${recoveryEvidenceSignal.detail}`,
     } as AutoCreationBatchCompletionMetric] : []),
+    ...(strengthenedRepairAcceptanceSignal ? [{
+      key: 'strengthened_repair_acceptance',
+      label: '强化复盘',
+      value: strengthenedRepairAccepted ? 100 : Math.max(0, 100 - args.riskRadar.strengthenedRepairAcceptanceRiskCount * 20),
+      target: 100,
+      status: args.riskRadar.strengthenedRepairAcceptanceRiskCount > 0 ? 'warn' : 'ok',
+      detail: strengthenedRepairAcceptanceSignal.detail,
+    } as AutoCreationBatchCompletionMetric] : []),
     ...(args.riskRadar.checklistExecution.visible ? [{
       key: 'checklist',
       label: '开工清单',
@@ -4570,7 +6712,7 @@ function buildBatchCompletionDashboard(args: {
     score,
     label: completionStatus === 'ready_next' ? '可开下一批' : completionStatus === 'needs_repair' ? '待修复' : '交稿中',
     summary: completionStatus === 'ready_next'
-      ? `本批生成、交稿和复盘已闭环${recoveryEvidenceClosed ? '，恢复依据已闭环' : ''}，可以按护栏开启下一批。`
+      ? `本批生成、交稿和复盘已闭环${recoveryEvidenceClosed ? '，恢复依据已闭环' : ''}${strengthenedRepairAccepted ? '，强化深修恢复验收已通过' : ''}，可以按护栏开启下一批。`
       : completionStatus === 'needs_repair'
         ? failed > 0
           ? '批次生成存在失败章节，先处理失败和风险再继续。'
@@ -4606,6 +6748,9 @@ function batchRiskLabels(riskRadar: AutoCreationBatchRiskRadar) {
     riskRadar.batchPlanRiskCount > 0 ? '批次计划' : '',
     riskRadar.batchChecklistRiskCount > 0 ? '开工清单' : '',
     riskRadar.recoveryEvidenceRiskCount > 0 ? '恢复依据' : '',
+    riskRadar.strengthenedRepairAcceptanceRiskCount > 0 ? '强化复盘' : '',
+    riskRadar.safeBatchExpansionSegmentRiskCount > 0 ? '扩批分段' : '',
+    riskRadar.safeBatchExpansionStructureValidationRiskCount > 0 ? '扩批结构' : '',
   ].filter(Boolean)
 }
 
@@ -4644,9 +6789,12 @@ function buildBatchHandoff(args: {
   const riskLabels = batchRiskLabels(args.riskRadar)
   const recoveryEvidenceSignal = args.riskRadar.signals.find(signal => signal.key === 'recovery_evidence')
   const closedRecoveryEvidence = recoveryEvidenceSignal?.status === 'ok' ? '恢复依据已闭环' : ''
+  const strengthenedRepairAcceptanceSignal = args.riskRadar.signals.find(signal => signal.key === 'strengthened_repair_acceptance')
+  const closedStrengthenedRepairAcceptance = strengthenedRepairAcceptanceSignal?.status === 'ok' ? '强化深修恢复验收已通过' : ''
   const releaseEvidence = Array.from(new Set([
     ...arrayValue(args.releaseEvidence).map(item => text(item)).filter(Boolean),
     closedRecoveryEvidence,
+    closedStrengthenedRepairAcceptance,
   ].filter(Boolean)))
 
   if (args.status === 'warn') {
@@ -4806,6 +6954,7 @@ function batchReleaseEvidenceItemsFromPreflight(preflight: AnyRecord | null | un
     ...arrayValue(releaseSummary?.releaseEvidence),
   ].map(item => text(item)).filter(Boolean)
     .filter(item => !releaseClearedEvidenceSet.has(item))
+    .filter(item => !isStrengthenedRepairReleaseEvidence(item))
     .map(item => ({
       evidence: item,
       source: 'recovery_evidence_release_summary',
@@ -5872,6 +8021,7 @@ function emptyNextBatchBrief(): AutoCreationNextBatchBrief {
     readerPayoffPlan: '',
     mainlineFocus: '',
     forbiddenBoundary: '',
+    expansionStructureVerification: null,
     startChecklist: [],
     chapters: [],
   }
@@ -5952,12 +8102,89 @@ function checklistItem(
   }
 }
 
+function buildResolvedSafeBatchExpansionStructureVerificationSeed(runRecords: AnyRecord[]) {
+  const repairEntries = arrayValue(runRecords)
+    .filter(run => text(run?.run_type) === 'longform_production_repair')
+    .map(run => ({
+      run,
+      input: parsePayload(run?.input_ref) || {},
+      output: parsePayload(run?.output_ref) || {},
+    }))
+    .filter(entry => text(entry.input?.source) === 'auto_creation_safe_batch_risk')
+    .filter(entry => isCompletedRepairRun(entry.run))
+    .sort((a, b) => recordTime(b.run) - recordTime(a.run))
+
+  for (const entry of repairEntries) {
+    const tasks = [
+      ...arrayValue(entry.output?.tasks),
+      ...arrayValue(entry.output?.repairTasks),
+    ]
+    for (const task of tasks) {
+      if (text(task?.issue_type ?? task?.issueType) !== 'safe_batch_expansion_structure_repair') continue
+      if (!isResolvedTaskStatus(task?.task_status ?? task?.status)) continue
+      const review = task?.safe_batch_expansion_structure_review
+        || task?.safeBatchExpansionStructureReview
+        || task?.structure_review
+        || task?.structureReview
+        || {}
+      const repeated = review?.repeated_hotspot_segment || review?.repeatedHotspotSegment || null
+      const segmentLabel = firstText(repeated?.label, '复发段位')
+      const actions = arrayValue(review?.structure_actions || review?.structureActions)
+        .map(item => text(item))
+        .filter(Boolean)
+      return {
+        source: 'safe_batch_expansion_structure_repair',
+        label: '扩批结构验证',
+        source_run_id: entry.run?.id ?? null,
+        repaired_at: text(entry.run?.completed_at || entry.run?.finished_at || entry.run?.updated_at || entry.run?.created_at),
+        repeated_hotspot_segment: repeated ? {
+          key: text(repeated?.key),
+          label: segmentLabel,
+          count: Number(repeated?.count || 0),
+        } : null,
+        latest_chapter_nos: arrayValue(review?.latest_chapter_nos || review?.latestChapterNos)
+          .map(chapterNo => Number(chapterNo))
+          .filter(chapterNo => chapterNo > 0),
+        affected_chapter_nos: arrayValue(review?.affected_chapter_nos || review?.affectedChapterNos)
+          .map(chapterNo => Number(chapterNo))
+          .filter(chapterNo => chapterNo > 0),
+        fixed_segment_role: firstText(
+          actions.find(item => item.includes('固定职责')),
+          `${segmentLabel}固定职责：每批该段必须完成主线转折、显性回报和章末追读。`,
+        ),
+        conflict_rotation: `${segmentLabel}验证批次每章必须更换冲突来源，不能连续复用上一批热区压迫方式。`,
+        explicit_payoff: '每章至少一个显性回报，不能只铺垫或转场。',
+        ending_hook_requirement: '每章章末必须留下不同的章末追读问题，并把下一章必看理由压到最后一幕。',
+        structure_actions: actions,
+      }
+    }
+  }
+  return null
+}
+
+function buildSafeBatchExpansionStructureVerification(args: {
+  seed?: AnyRecord | null
+  chapters: AutoCreationNextBatchBriefChapter[]
+}) {
+  if (!args.seed) return null
+  const validationChapterNos = args.chapters
+    .slice(0, 3)
+    .map(chapter => Number(chapter.chapterNo || 0))
+    .filter(chapterNo => chapterNo > 0)
+  if (!validationChapterNos.length) return null
+  return {
+    ...args.seed,
+    validation_chapter_nos: validationChapterNos,
+  }
+}
+
 function buildNextBatchBriefStartChecklist(args: {
   planning: PlanningWorkspaceModel
   chapters: AutoCreationNextBatchBriefChapter[]
   readerPayoffPlan: string
   mainlineFocus: string
   forbiddenBoundary: string
+  expansionStructureVerification?: AnyRecord | null
 }): AutoCreationNextBatchBriefStartChecklistItem[] {
   const chapterTasks = args.chapters
     .map(item => item.chapterTask || item.conflict)
@@ -5974,7 +8201,7 @@ function buildNextBatchBriefStartChecklist(args: {
     args.planning.mainline.readerPromise,
   )
 
-  return [
+  const checklist = [
     checklistItem(
       'core_promise',
       '核心承诺',
@@ -6006,6 +8233,19 @@ function buildNextBatchBriefStartChecklist(args: {
       '缺禁写边界，批量生成可能跳过质检、提前揭底或误改长期设定。',
     ),
   ]
+  if (args.expansionStructureVerification) {
+    checklist.push(checklistItem(
+      'expansion_structure',
+      '扩批结构验证',
+      firstText(
+        args.expansionStructureVerification.fixed_segment_role,
+        args.expansionStructureVerification.conflict_rotation,
+        args.expansionStructureVerification.explicit_payoff,
+      ),
+      '已修复扩批结构，本批需要用2-3章验证固定段落职责、冲突换源、显性回报和章末追读。',
+    ))
+  }
+  return checklist
 }
 
 function buildNextBatchBrief(args: {
@@ -6013,6 +8253,7 @@ function buildNextBatchBrief(args: {
   writing: WritingCockpitModel
   safeChapterCount: number
   chapters?: AnyRecord[] | null
+  expansionStructureVerificationSeed?: AnyRecord | null
 }): AutoCreationNextBatchBrief {
   if (args.safeChapterCount <= 0) return emptyNextBatchBrief()
   const targetNo = Number(args.writing.nextChapter?.chapterNo || 0)
@@ -6069,6 +8310,10 @@ function buildNextBatchBrief(args: {
     args.planning.mainline.risks[0] ? `避开风险：${args.planning.mainline.risks[0]}` : '',
     conflicts.length ? `冲突必须逐章落地：${conflicts.slice(0, 3).join(' / ')}` : '',
   ].filter(Boolean).join('；')
+  const expansionStructureVerification = buildSafeBatchExpansionStructureVerification({
+    seed: args.expansionStructureVerificationSeed,
+    chapters,
+  })
 
   return {
     visible: true,
@@ -6077,12 +8322,14 @@ function buildNextBatchBrief(args: {
     readerPayoffPlan,
     mainlineFocus,
     forbiddenBoundary,
+    expansionStructureVerification,
     startChecklist: buildNextBatchBriefStartChecklist({
       planning: args.planning,
       chapters,
       readerPayoffPlan,
       mainlineFocus,
       forbiddenBoundary,
+      expansionStructureVerification,
     }),
     chapters,
   }
@@ -6418,10 +8665,35 @@ function buildRecoveryEvidenceReleaseSummary(args: {
   allowedChapterNos: number[]
   nextBatchBrief: AutoCreationNextBatchBrief
   recoveryEvidenceProductionGate?: AnyRecord | null
+  recoveryEvidenceSourceRiskProfile?: AnyRecord | null
 }) {
   const gate = args.recoveryEvidenceProductionGate || null
-  if (args.status !== 'ready' || text(gate?.status) !== 'ok') return null
-  const clearedSources = arrayValue(gate?.sources)
+  const profile = args.recoveryEvidenceSourceRiskProfile || null
+  if (args.status !== 'ready') return null
+  const strengthenedRepairSources = arrayValue(profile?.sources)
+    .filter(source => {
+      const releaseFailureCount = Number(source?.release_failure_count || source?.releaseFailureCount || 0)
+      const closure = source?.deep_repair_effect?.strengthened_repair_closure
+        || source?.deepRepairEffect?.strengthenedRepairClosure
+        || null
+      return releaseFailureCount >= 2 && text(closure?.status) === 'converged'
+    })
+    .map(source => {
+      const closure = source?.deep_repair_effect?.strengthened_repair_closure
+        || source?.deepRepairEffect?.strengthenedRepairClosure
+        || null
+      return {
+        source: text(source?.source || source?.sourceMode),
+        label: text(source?.label || source?.sourceLabel || source?.source, '恢复依据来源'),
+        status: 'converged',
+        status_label: text(closure?.label, '强化深修已收敛'),
+        latest_repair_run_id: closure?.latest_repair_run_id ?? closure?.latestRepairRunId ?? null,
+        latest_repair_at: text(closure?.latest_repair_at || closure?.latestRepairAt),
+      }
+    })
+    .filter(source => source.source)
+  if (text(gate?.status) !== 'ok' && !strengthenedRepairSources.length) return null
+  const clearedSources = text(gate?.status) === 'ok' ? arrayValue(gate?.sources)
     .filter(source => text(source?.status) === 'cleared')
     .map(source => ({
       source: text(source?.source || source?.sourceMode),
@@ -6432,20 +8704,26 @@ function buildRecoveryEvidenceReleaseSummary(args: {
       chapter_nos: arrayValue(source?.chapter_nos || source?.chapterNos),
       source_task_indices: arrayValue(source?.source_task_indices || source?.sourceTaskIndices),
     }))
-  if (!clearedSources.length) return null
+    : []
+  if (!clearedSources.length && !strengthenedRepairSources.length) return null
   const evidence = [
-    '恢复依据治理队列已闭环',
+    clearedSources.length ? '恢复依据治理队列已闭环' : '',
     ...clearedSources.map(source => `${source.label}：生产阻断已解除`),
-  ]
+    ...strengthenedRepairSources.map(source => `${source.label}：${source.status_label}`),
+  ].filter(Boolean)
   return {
     status: 'released',
-    source: 'recovery_evidence_governance_queue',
-    summary: `恢复依据治理队列已闭环，可恢复 ${Math.max(2, args.safeChapterCount)} 章安全连写。`,
+    source: clearedSources.length ? 'recovery_evidence_governance_queue' : 'recovery_evidence_source_risk_profile',
+    summary: clearedSources.length
+      ? `恢复依据治理队列已闭环，可恢复 ${Math.max(2, args.safeChapterCount)} 章安全连写。`
+      : `恢复依据画像强化深修已收敛，可恢复 ${Math.max(2, args.safeChapterCount)} 章安全连写。`,
     safe_chapter_count: args.safeChapterCount,
     allowed_chapter_nos: args.allowedChapterNos,
     next_batch_label: args.nextBatchBrief.chapterRangeLabel,
     cleared_source_count: clearedSources.length,
     cleared_sources: clearedSources,
+    strengthened_repair_source_count: strengthenedRepairSources.length,
+    strengthened_repair_sources: strengthenedRepairSources,
     evidence,
   }
 }
@@ -6540,6 +8818,8 @@ function buildBatchPreflight(args: {
   recoveryEvidenceProductionGate?: AnyRecord | null
   recoveryEvidenceReleaseSummary?: AnyRecord | null
   recoveryEvidenceSourceRiskProfile?: AnyRecord | null
+  strengthenedRepairAcceptanceTrend?: AutoCreationStrengthenedRepairAcceptanceTrend | null
+  safeBatchExpansionPolicy?: AnyRecord | null
 }): AutoCreationBatchPreflight {
   const allowedChapterNos = args.releaseWindow.allowedChapters.map(chapter => Number(chapter.chapterNo || 0)).filter(Boolean)
   const blockedChapterNos = args.releaseWindow.blockedChapters.map(chapter => Number(chapter.chapterNo || 0)).filter(Boolean)
@@ -6550,6 +8830,7 @@ function buildBatchPreflight(args: {
     .map(chapter => `第${chapter.chapterNo}章《${chapter.title}》被拦截：${chapter.reason}`)
   const warnings = Array.from(new Set([...guardrailWarnings, ...blockedWarnings])).slice(0, 8)
   const visible = args.nextBatchBrief.visible || allowedChapterNos.length > 0 || blockedChapterNos.length > 0
+  const expansionStructureVerification = args.nextBatchBrief.expansionStructureVerification || null
   const summary = args.status === 'ready'
     ? `本批将按护栏放行 ${allowedChapterNos.length} 章：${args.nextBatchBrief.chapterRangeLabel || allowedChapterNos.map(no => `第${no}章`).join('、')}。`
     : args.status === 'caution'
@@ -6604,6 +8885,15 @@ function buildBatchPreflight(args: {
       ...(args.recoveryEvidenceProductionGate ? { recovery_evidence_production_gate: args.recoveryEvidenceProductionGate } : {}),
       ...(args.recoveryEvidenceReleaseSummary ? { recovery_evidence_release_summary: args.recoveryEvidenceReleaseSummary } : {}),
       ...(args.recoveryEvidenceSourceRiskProfile?.visible ? { recovery_evidence_source_risk_profile: args.recoveryEvidenceSourceRiskProfile } : {}),
+      ...(args.strengthenedRepairAcceptanceTrend?.visible ? {
+        strengthened_repair_acceptance_trend: strengthenedRepairAcceptanceTrendSnapshot(args.strengthenedRepairAcceptanceTrend),
+      } : {}),
+      ...(args.safeBatchExpansionPolicy?.visible ? {
+        safe_batch_expansion_policy: safeBatchExpansionPolicySnapshot(args.safeBatchExpansionPolicy),
+      } : {}),
+      ...(expansionStructureVerification ? {
+        safe_batch_expansion_structure_verification: expansionStructureVerification,
+      } : {}),
       storyline_decision_closure: storylineDecisionClosure,
       ...(governanceRecheckMemory ? { governance_recheck_memory: governanceRecheckMemory } : {}),
       ...(args.styleSampleBatchPreflight?.visible ? { style_sample_batch_preflight: args.styleSampleBatchPreflight } : {}),
@@ -6628,6 +8918,7 @@ function buildBatchGuardrail(args: {
   chapterLaunchGate: AutoCreationChapterLaunchGate
   storyState?: AnyRecord | null
   chapters?: AnyRecord[] | null
+  reviews?: AnyRecord[] | null
   styleSampleEffectiveness?: AnyRecord | null
   runRecords?: AnyRecord[] | null
 }): AutoCreationBatchGuardrail {
@@ -6708,6 +8999,39 @@ function buildBatchGuardrail(args: {
       : 'warn'
   const recoveryEvidenceProductionGate = buildRecoveryEvidenceProductionGate(arrayValue(args.runRecords))
   const recoveryEvidenceSourceRiskProfile = buildRecoveryEvidenceSourceRiskProfile(arrayValue(args.runRecords))
+  const strengthenedRepairAcceptanceTrend = buildStrengthenedRepairAcceptanceTrend({
+    runRecords: arrayValue(args.runRecords),
+    chapters: arrayValue(args.chapters),
+    reviews: arrayValue(args.reviews),
+    storyState: args.storyState || {},
+  })
+  const recoveryEvidenceTrend = buildRecoveryEvidenceTrend(recoveryEvidenceSourceRiskProfile, strengthenedRepairAcceptanceTrend)
+  const safeBatchExpansionFeedback = buildSafeBatchExpansionFeedback({
+    runRecords: arrayValue(args.runRecords),
+    chapters: arrayValue(args.chapters),
+    reviews: arrayValue(args.reviews),
+  })
+  const safeBatchExpansionPolicy = buildSafeBatchExpansionPolicy(strengthenedRepairAcceptanceTrend, safeBatchExpansionFeedback)
+  const expansionStructureVerificationSeed = buildResolvedSafeBatchExpansionStructureVerificationSeed(arrayValue(args.runRecords))
+  const expansionStructureValidationActive = Boolean(
+    expansionStructureVerificationSeed
+    && safeBatchExpansionPolicy.status === 'recovering'
+    && Number(safeBatchExpansionPolicy.targetChapterCount || 0) > 1,
+  )
+  const expansionStructureValidationTarget = expansionStructureValidationActive
+    ? Math.max(1, Math.min(
+      3,
+      Number(safeBatchExpansionPolicy.targetChapterCount || 3),
+      Number(future10.planned || 3),
+      Number(planning.volumeBeatBudget?.plannedChapterCount || 3),
+    ))
+    : 0
+  const strengthenedRepairAcceptanceSignalStatus = expansionStructureValidationActive && strengthenedRepairAcceptanceTrend.status === 'warn'
+    ? 'ok'
+    : strengthenedRepairAcceptanceTrend.status
+  const strengthenedRepairAcceptanceSignalSummary = expansionStructureValidationActive && strengthenedRepairAcceptanceTrend.status === 'warn'
+    ? `${strengthenedRepairAcceptanceTrend.summary}；扩批结构修复已闭环，本轮进入 ${expansionStructureValidationTarget} 章验证批。`
+    : strengthenedRepairAcceptanceTrend.summary
   const hasScenePlan = planningDesk.scenePlanStatus === 'ready' || arrayValue(planningDesk.sceneCards).length > 0
   const currentChapterDelivered = !Boolean(acceptance.visible) && !chapterHandoffVisible
   const chapterPlanIssue = text(arrayValue(planningDesk.reasons)[0], '当前章任务书或场景卡未就绪。')
@@ -6758,6 +9082,11 @@ function buildBatchGuardrail(args: {
       recoveryEvidenceSourceRiskProfile.status,
       recoveryEvidenceSourceRiskProfile.detail,
     ),
+    ...(strengthenedRepairAcceptanceTrend.visible ? [signal(
+      strengthenedRepairAcceptanceTrend.label,
+      strengthenedRepairAcceptanceSignalStatus,
+      strengthenedRepairAcceptanceSignalSummary,
+    )] : []),
     signal(
       '未来10章规划',
       future10.ready ? 'ok' : 'block',
@@ -6772,6 +9101,11 @@ function buildBatchGuardrail(args: {
       serialReleaseInventory.label,
       serialReleaseInventory.status,
       serialReleaseInventory.detail,
+    ),
+    signal(
+      safeBatchExpansionPolicy.label,
+      'ok',
+      safeBatchExpansionPolicy.summary,
     ),
     signal(
       '百万字产能',
@@ -6817,8 +9151,12 @@ function buildBatchGuardrail(args: {
   const preliminarySafeChapterCount = preliminaryStatus === 'blocked'
     ? 0
     : preliminaryStatus === 'caution'
-      ? 1
-      : Math.max(1, Math.min(3, Number(future10.planned || 3), Number(planning.volumeBeatBudget?.plannedChapterCount || 3)))
+      ? expansionStructureValidationActive ? expansionStructureValidationTarget : 1
+      : Math.max(1, Math.min(
+        Number(safeBatchExpansionPolicy.targetChapterCount || 3),
+        Number(future10.planned || safeBatchExpansionPolicy.targetChapterCount || 3),
+        Number(planning.volumeBeatBudget?.plannedChapterCount || safeBatchExpansionPolicy.targetChapterCount || 3),
+      ))
   const queueRelease = writingQueueRelease(writing, preliminarySafeChapterCount)
   const queueLimitedPreliminarySafeChapterCount = queueRelease.signal.status === 'block'
     ? 0
@@ -6828,6 +9166,7 @@ function buildBatchGuardrail(args: {
     writing,
     safeChapterCount: queueLimitedPreliminarySafeChapterCount,
     chapters: args.chapters,
+    expansionStructureVerificationSeed,
   })
   const batchBriefSignal = buildNextBatchBriefSignal(preliminaryNextBatchBrief, queueLimitedPreliminarySafeChapterCount)
   const briefRepair = buildNextBatchBriefRepair(preliminaryNextBatchBrief, queueLimitedPreliminarySafeChapterCount, batchBriefSignal)
@@ -6861,7 +9200,30 @@ function buildBatchGuardrail(args: {
       recoveryEvidenceGovernanceQueue,
     })
   } else if (warning?.label === '恢复依据画像') {
-    recommendedAction = opsAction('review_governance_closure', '治理复查台', recoveryEvidenceSourceRiskProfile.detail)
+    const recoveryEvidenceGovernanceQueue = buildRecoveryEvidenceDeepRepairQueue(recoveryEvidenceTrend)
+    const hasEscalatedDeepRepair = arrayValue(recoveryEvidenceGovernanceQueue.tasks)
+      .some(task => text(task?.deep_repair_level || task?.deepRepairLevel) === 'escalated_after_recurrence')
+    if (Number(recoveryEvidenceGovernanceQueue.task_count || 0) > 0) {
+      recommendedAction = opsAction('create_recovery_evidence_governance_queue', hasEscalatedDeepRepair ? '生成强化深修队列' : '生成深层修复队列', recoveryEvidenceGovernanceQueue.summary || recoveryEvidenceTrend.summary || recoveryEvidenceSourceRiskProfile.detail, false, {
+        source: 'recovery_evidence_source_risk_profile',
+        detail: recoveryEvidenceSourceRiskProfile.detail,
+        recoveryEvidenceTrend,
+        recoveryEvidenceGovernanceQueue,
+      })
+    } else {
+      const hasPendingStrengthenedRecheck = recoveryEvidenceTrend.sources.some(source => source.deepRepairEffect.strengthenedClosure.status === 'pending_recheck')
+      recommendedAction = opsAction('open_task_center', hasPendingStrengthenedRecheck ? '查看强化深修复检' : '查看深修观察', recoveryEvidenceGovernanceQueue.summary || recoveryEvidenceTrend.summary || recoveryEvidenceSourceRiskProfile.detail, false, {
+        source: 'recovery_evidence_source_risk_profile',
+        detail: recoveryEvidenceSourceRiskProfile.detail,
+        recoveryEvidenceTrend,
+        recoveryEvidenceGovernanceQueue,
+      })
+    }
+  } else if (warning?.label === '强化恢复验收趋势') {
+    recommendedAction = opsAction('open_task_center', '查看强化复盘', strengthenedRepairAcceptanceTrend.summary, false, {
+      source: 'strengthened_repair_acceptance_trend',
+      strengthenedRepairAcceptanceTrend,
+    })
   } else if (blocking?.label === '长线记忆' || warning?.label === '长线记忆') {
     recommendedAction = canonRunway.action
   } else if (blocking?.label === '剧情单元' || warning?.label === '剧情单元') {
@@ -6912,11 +9274,13 @@ function buildBatchGuardrail(args: {
   const safeChapterCount = status === 'blocked'
     ? 0
     : status === 'caution'
-      ? Math.max(1, Math.min(1, queueLimitedPreliminarySafeChapterCount || 1))
+      ? expansionStructureValidationActive
+        ? Math.max(1, Math.min(expansionStructureValidationTarget, queueLimitedPreliminarySafeChapterCount || expansionStructureValidationTarget))
+        : Math.max(1, Math.min(1, queueLimitedPreliminarySafeChapterCount || 1))
       : queueLimitedPreliminarySafeChapterCount
   const nextBatchBrief = safeChapterCount === queueLimitedPreliminarySafeChapterCount
     ? preliminaryNextBatchBrief
-    : buildNextBatchBrief({ planning, writing, safeChapterCount, chapters: args.chapters })
+    : buildNextBatchBrief({ planning, writing, safeChapterCount, chapters: args.chapters, expansionStructureVerificationSeed })
   const releaseWindow = buildBatchReleaseWindow(nextBatchBrief, queueRelease)
   const deliveryRiskCarryOver = normalizeSafeBatchDeliveryRiskCarryOver(
     planningDesk?.episodePlan?.deliveryRiskCarryOver
@@ -6936,6 +9300,7 @@ function buildBatchGuardrail(args: {
     allowedChapterNos: releaseWindow.allowedChapters.map(chapter => Number(chapter.chapterNo || 0)).filter(Boolean),
     nextBatchBrief,
     recoveryEvidenceProductionGate: recoveryEvidenceProductionGate.snapshot,
+    recoveryEvidenceSourceRiskProfile,
   })
   const recoveryEvidenceReleaseEvidence = arrayValue(recoveryEvidenceReleaseSummary?.evidence)
   const recoveryEvidence = buildNextBatchBriefRecoveryEvidence({
@@ -6964,6 +9329,8 @@ function buildBatchGuardrail(args: {
     recoveryEvidenceProductionGate: recoveryEvidenceProductionGate.snapshot,
     recoveryEvidenceReleaseSummary,
     recoveryEvidenceSourceRiskProfile,
+    strengthenedRepairAcceptanceTrend,
+    safeBatchExpansionPolicy,
   })
 
   if (status === 'ready') {
@@ -7031,6 +9398,8 @@ function buildBatchGuardrail(args: {
                 ? `近10章疲劳雷达提示：${fatigueDetail} 本轮建议只推进 1 章，并先更新滚动规划更换压迫来源、回报形态、章末问题或可视化场面。`
                 : warning?.label === '恢复依据画像'
                   ? `恢复依据画像提示：${recoveryEvidenceSourceRiskProfile.detail}`
+                : warning?.label === '强化恢复验收趋势'
+                  ? `强化恢复验收提示：${strengthenedRepairAcceptanceTrend.summary}`
                 : warning?.label === '故事压力阶梯'
                   ? '故事压力阶梯提示压力不足，本轮建议只推进 1 章，并先更新滚动规划补明确压力源、升级赌注和反转逼迫。'
                   : warning?.label === '剧情单元'
@@ -7043,6 +9412,7 @@ function buildBatchGuardrail(args: {
     releaseWindow,
     preflight,
     nextBatchBrief,
+    recoveryEvidenceTrend,
     briefRepair,
     briefRecovery,
   }
@@ -7293,6 +9663,11 @@ function buildBatchReviewQueue(args: {
     chapters: args.chapters,
     reviews,
   })
+  const expansionFeedback = buildSafeBatchExpansionFeedback({
+    runRecords,
+    chapters: args.chapters,
+    reviews,
+  })
   const riskRadar = buildBatchRiskRadar({
     items,
     chapters: args.chapters,
@@ -7301,6 +9676,7 @@ function buildBatchReviewQueue(args: {
     resolvedIssueKeys,
     nextBatchBrief: latest.input?.next_batch_brief || latest.input?.nextBatchBrief || null,
     batchPreflight,
+    expansionFeedback,
   })
   const hasDeliveredBatchRisk = allSuccessfulChaptersDelivered && riskRadar.status === 'warn'
   const status: AutoCreationBatchReviewStatus = hasFailure
@@ -8936,6 +11312,7 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
     chapterLaunchGate,
     storyState: input.storyState || {},
     chapters: arrayValue(input.chapters),
+    reviews,
     styleSampleEffectiveness: input.styleSampleEffectiveness || null,
     runRecords,
   })

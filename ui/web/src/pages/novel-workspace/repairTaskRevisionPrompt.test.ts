@@ -194,6 +194,99 @@ describe('buildRepairTaskRevisionPrompt', () => {
     expect(prompt).toContain('不能把阶段结算继续后移')
   })
 
+  test('injects expansion structure repair evidence for repeated five-chapter hotspots', () => {
+    const prompt = buildRepairTaskRevisionPrompt({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'safe_batch_expansion_structure_repair',
+      severity: 'high',
+      message: '中段连续 2 次扩批热区，需要先改批次结构。',
+      action: '先做中段固定段落治理和批次结构改写，再恢复5章连写。',
+      safe_batch_expansion_structure_review: {
+        repeated_hotspot_segment: {
+          key: 'middle',
+          label: '中段',
+          count: 2,
+          summary: '中段连续 2 次扩批热区。',
+        },
+        latest_chapter_nos: [13, 14, 15, 16, 17],
+        affected_chapter_nos: [15, 16],
+        hotspot_summaries: [
+          '中段第15、16章存在 3 项扩批风险：核心 1、回报 1、拉力 1。',
+        ],
+        structure_actions: [
+          '重写中段固定职责：每批第3-4章必须完成主线转折、显性回报和章末追读。',
+          '批次节奏重排：前段抛压，中段兑现并升级，后段留钩，不允许中段只铺垫。',
+        ],
+        rollback_policy: {
+          target_chapter_count: 3,
+          summary: '下一轮回退到 2-3 章安全连写。',
+        },
+      },
+    })
+
+    expect(prompt).toContain('【扩批结构修复】')
+    expect(prompt).toContain('复发段位：中段连续 2 次')
+    expect(prompt).toContain('最近批次：第13、14、15、16、17章')
+    expect(prompt).toContain('高危章节：第15、16章')
+    expect(prompt).toContain('中段固定职责')
+    expect(prompt).toContain('批次节奏重排')
+    expect(prompt).toContain('不能只修单章语句或局部爽点')
+    expect(prompt).toContain('重新运行5章扩批分段复盘')
+  })
+
+  test('injects expansion structure validation trend into structure repair prompts', () => {
+    const prompt = buildRepairTaskRevisionPrompt({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'safe_batch_expansion_structure_repair',
+      severity: 'high',
+      message: '中段验证后仍复发，需要按长期趋势重写结构。',
+      action: '根据扩批结构验证趋势重写批次结构。',
+      safe_batch_expansion_structure_review: {
+        repeated_hotspot_segment: {
+          key: 'middle',
+          label: '中段',
+          count: 3,
+        },
+        latest_chapter_nos: [59, 60, 61, 62, 63],
+        affected_chapter_nos: [61],
+        expansion_structure_validation_trend: {
+          visible: true,
+          status: 'warn',
+          label: '扩批结构验证趋势',
+          summary: '中段验证通过率 67%（2/3批），失败主因：核心偏移1、回报欠账1、追读拉力1，恢复5章后第1个扩批批次复发。',
+          segment_key: 'middle',
+          segment_label: '中段',
+          validation_batch_count: 3,
+          passed_batch_count: 2,
+          failed_batch_count: 1,
+          pass_rate: 67,
+          latest_status: 'ok',
+          latest_chapter_nos: [56, 57, 58],
+          failure_reasons: [
+            { key: 'core', label: '核心偏移', count: 1 },
+            { key: 'payoff', label: '回报欠账', count: 1 },
+            { key: 'reader_pull', label: '追读拉力', count: 1 },
+          ],
+          recurrence_after_restore: {
+            visible: true,
+            interval_batch_count: 1,
+            interval_label: '恢复5章后第1个扩批批次复发',
+            recurrence_chapter_nos: [59, 60, 61, 62, 63],
+          },
+        },
+      },
+    })
+
+    expect(prompt).toContain('【扩批结构验证趋势】')
+    expect(prompt).toContain('趋势段位：中段')
+    expect(prompt).toContain('验证通过率：67%（2/3批）')
+    expect(prompt).toContain('最近验证批：第56、57、58章')
+    expect(prompt).toContain('失败主因：核心偏移1；回报欠账1；追读拉力1')
+    expect(prompt).toContain('复发间隔：恢复5章后第1个扩批批次复发')
+    expect(prompt).toContain('复发批次：第59、60、61、62、63章')
+    expect(prompt).toContain('必须按长期复发惯性重写批次结构')
+  })
+
   test('injects reader pull and innovation evidence for safe-batch repair tasks', () => {
     const readerPrompt = buildRepairTaskRevisionPrompt({
       issue_type: 'reader_pull_missed',

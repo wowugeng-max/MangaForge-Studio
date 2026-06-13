@@ -113,14 +113,20 @@ export function repairTaskActionLabel(task: any) {
   if (String(task?.issue_type || '') === 'batch_brief_mismatch') return '按批次修订'
   if (String(task?.issue_type || '') === 'recovery_evidence_governance_queue') {
     const actionKey = String(task?.action_key || task?.actionKey || '')
+    const explicitActionLabel = String(task?.action_label || task?.actionLabel || '')
+    if (String(task?.deep_repair_level || task?.deepRepairLevel || '') === 'escalated_after_recurrence' && explicitActionLabel) {
+      return explicitActionLabel
+    }
     const map: Record<string, string> = {
       revision: '回修依据并复检',
       recheck_single_chapter: '复检单章',
       recheck_safe_batch: '复盘批次',
       focus_task: '已处理并复盘',
       review_governance_closure: '治理复查台',
+      deep_repair_single_brief: '深修单章任务书',
+      deep_repair_batch_brief: '深修批次任务书',
     }
-    return map[actionKey] || String(task?.action_label || task?.actionLabel || '')
+    return map[actionKey] || explicitActionLabel
   }
   if (String(task?.issue_type || '') === 'recovery_evidence_mismatch') {
     return isSingleChapterRecoveryEvidenceTask(task) ? '回修依据' : '按批次修订'
@@ -128,6 +134,8 @@ export function repairTaskActionLabel(task: any) {
   if (String(task?.issue_type || '') === 'style_sample_task_book_rebuild') return '重审样章'
   if (String(task?.source || '') === 'reader_trial_review' || String(task?.issue_type || '') === 'reader_trial_drop_point') return '补试读'
   if (String(task?.issue_type || '') === 'volume_segment_missed') return '补阶段结算'
+  if (String(task?.issue_type || '') === 'safe_batch_expansion_structure_repair') return '改扩批结构'
+  if (String(task?.issue_type || '') === 'safe_batch_expansion_segment_hotspot') return '修扩批热区'
   if (String(task?.issue_type || '') === 'reader_pull_missed') return '补追读'
   if (String(task?.issue_type || '') === 'innovation_execution_missed') return '补创新'
   if (String(task?.source || '') === 'rolling_script_room' || String(task?.issue_type || '') === 'script_room_layer_gap') return '按剧本室修复'
@@ -192,6 +200,8 @@ function repairClosureIssueMeta(task: any) {
   ) return { key: 'reader_pull', label: '追读', color: 'magenta' }
   if (key.includes('payoff')) return { key: 'payoff', label: '回报欠账', color: 'magenta' }
   if (key.includes('volume_beat') || key.includes('volume_segment')) return { key: 'volume_beat', label: '爆点', color: 'gold' }
+  if (key.includes('safe_batch_expansion_structure') || key.includes('batch_expansion_structure')) return { key: 'batch_expansion_structure', label: '扩批结构', color: 'blue' }
+  if (key.includes('safe_batch_expansion_segment') || key.includes('batch_expansion_segment')) return { key: 'batch_expansion_segment', label: '扩批分段', color: 'blue' }
   if (key.includes('innovation')) return { key: 'innovation', label: '创新', color: 'geekblue' }
   if (key.includes('signature_scene')) return { key: 'signature_scene', label: '强场面', color: 'volcano' }
   if (key.includes('storyline')) return { key: 'storyline', label: '剧情线', color: 'purple' }
@@ -989,6 +999,8 @@ function repairTaskIssueTag(task: any) {
   if (String(task?.issue_type || '') === 'style_sample_task_book_rebuild') return <Tag color="purple" bordered={false}>样章任务书</Tag>
   if (String(task?.source || '') === 'reader_trial_review' || String(task?.issue_type || '') === 'reader_trial_drop_point') return <Tag color="red" bordered={false}>读者试读</Tag>
   if (String(task?.issue_type || '') === 'volume_segment_missed') return <Tag color="gold" bordered={false}>卷级阶段</Tag>
+  if (String(task?.issue_type || '') === 'safe_batch_expansion_structure_repair') return <Tag color="blue" bordered={false}>扩批结构</Tag>
+  if (String(task?.issue_type || '') === 'safe_batch_expansion_segment_hotspot') return <Tag color="blue" bordered={false}>扩批分段</Tag>
   if (String(task?.issue_type || '') === 'reader_pull_missed') return <Tag color="magenta" bordered={false}>读者拉力</Tag>
   if (String(task?.issue_type || '') === 'innovation_execution_missed') return <Tag color="geekblue" bordered={false}>创新/IP</Tag>
   if (String(task?.source || '') === 'rolling_script_room' || String(task?.issue_type || '') === 'script_room_layer_gap') return <Tag color="blue" bordered={false}>剧本室</Tag>
@@ -1169,6 +1181,28 @@ function DeliveryRiskReviewPreview({ task }: { task: any }) {
   )
 }
 
+function SafeBatchExpansionSegmentPreview({ task }: { task: any }) {
+  const review = task.safe_batch_expansion_segment_review || task.safeBatchExpansionSegmentReview || null
+  const hotspots = Array.isArray(review?.hotspots) ? review.hotspots : []
+  const rollback = review?.rollback_policy || review?.rollbackPolicy || null
+  if (!hotspots.length && !rollback) return null
+  return (
+    <div style={{ marginTop: 4, padding: 8, border: '1px solid #bfdbfe', borderRadius: 6, background: '#eff6ff' }}>
+      <Space direction="vertical" size={4} style={{ width: '100%' }}>
+        <Text strong style={{ fontSize: 12 }}>扩批热区</Text>
+        {hotspots.slice(0, 3).map((hotspot: any) => (
+          <Text key={`${hotspot.key}-${hotspot.chapter_nos?.join?.('-') || hotspot.label}`} type="secondary" style={{ fontSize: 12 }}>
+            {hotspot.label || '热区'}：第{(hotspot.chapter_nos || hotspot.chapterNos || []).join('、')}章，风险 {hotspot.risk_count ?? hotspot.riskCount ?? 0} 项
+          </Text>
+        ))}
+        {rollback?.summary && (
+          <Text type="secondary" style={{ fontSize: 12 }}>回退：{rollback.summary}</Text>
+        )}
+      </Space>
+    </div>
+  )
+}
+
 function repairTaskStatusTag(status?: string) {
   if (status === 'resolved') return <Tag color="green" bordered={false}>已处理</Tag>
   if (status === 'needs_review') return <Tag color="gold" bordered={false}>需复查</Tag>
@@ -1176,10 +1210,488 @@ function repairTaskStatusTag(status?: string) {
   return <Tag bordered={false}>待处理</Tag>
 }
 
+export type StrengthenedRepairAcceptanceTrendSnapshot = {
+  visible: boolean
+  status: 'ok' | 'warn'
+  label: string
+  summary: string
+  acceptedBatchCount: number
+  failedBatchCount: number
+  passStreak: number
+  latestStatus: 'none' | 'ok' | 'warn'
+  latestBatchLabel: string
+  latestRunId: any | null
+  sourceEvidence: string[]
+  dimensions: {
+    core: { label: string; failedCount: number }
+    payoff: { label: string; failedCount: number }
+    readerPull: { label: string; failedCount: number }
+  }
+}
+
+export type SafeBatchExpansionPolicySnapshot = {
+  visible: boolean
+  status: 'observing' | 'expanded' | 'recovering'
+  label: string
+  summary: string
+  targetChapterCount: number
+  baseChapterCount: number
+  expandedChapterCount: number
+  requiredPassStreak: number
+  passStreak: number
+  acceptedBatchCount: number
+  failedBatchCount: number
+  latestStatus: 'none' | 'ok' | 'warn'
+  expansionFeedback: SafeBatchExpansionFeedbackSnapshot | null
+}
+
+export type SafeBatchExpansionFeedbackSnapshot = {
+  visible: boolean
+  status: 'none' | 'passed' | 'recovered' | 'rollback_to_small_batch' | 'rollback_to_single_chapter'
+  label: string
+  summary: string
+  targetChapterCount: number
+  latestBatchCreatedAt: string
+  latestChapterNos: number[]
+  riskCount: number
+  stablePassStreak: number
+  recentExpandedBatchCount: number
+  repeatedHotspotSegment: {
+    key: string
+    label: string
+    count: number
+    summary: string
+  } | null
+  structureValidationTrend: SafeBatchExpansionStructureValidationTrendSnapshot | null
+  structureRepairEffectiveness: SafeBatchExpansionStructureRepairEffectivenessSnapshot | null
+}
+
+export type SafeBatchExpansionStructureValidationTrendSnapshot = {
+  visible: boolean
+  status: 'ok' | 'warn'
+  label: string
+  summary: string
+  segmentKey: string
+  segmentLabel: string
+  validationBatchCount: number
+  passedBatchCount: number
+  failedBatchCount: number
+  passRate: number
+  latestStatus: 'none' | 'ok' | 'warn'
+  latestChapterNos: number[]
+  failureReasons: {
+    key: string
+    label: string
+    count: number
+  }[]
+  recurrenceAfterRestore: {
+    visible: boolean
+    intervalBatchCount: number
+    intervalLabel: string
+    recurrenceChapterNos: number[]
+  }
+}
+
+export type SafeBatchExpansionStructureRepairEffectivenessSnapshot = {
+  visible: boolean
+  status: 'ok' | 'warn'
+  label: string
+  summary: string
+  sourceRunId: any | null
+  repairedAt: string
+  segmentKey: string
+  segmentLabel: string
+  baselinePassRate: number
+  currentPassRate: number
+  passRateDelta: number
+  baselineFailureReasonCount: number
+  currentFailureReasonCount: number
+  failureReasonDelta: number
+  baselineRecurrenceIntervalBatchCount: number
+  currentRecurrenceIntervalBatchCount: number
+  recommendation: string
+  baselineTrend: any | null
+  currentTrend: any | null
+}
+
+export type RecoveryEvidenceSourceRiskProfileSnapshot = {
+  visible: boolean
+  status: 'ok' | 'warn'
+  label: string
+  summary: string
+  totalFailureCount: number
+  repeatSourceCount: number
+  strengthenedAcceptanceTrend: StrengthenedRepairAcceptanceTrendSnapshot | null
+  sources: {
+    source: string
+    label: string
+    releaseFailureCount: number
+    trendLabel: string
+    evidence: string[]
+    deepRepairDirection: string
+    deepRepairEffect: {
+      status: 'none' | 'pending' | 'observing' | 'recurred'
+      label: string
+      summary: string
+      latestRepairRunId: any | null
+      latestRepairActionLabel: string
+      latestRepairAt: string
+      postRepairFailureCount: number
+      postRepairEvidence: string[]
+      strengthenedClosure: {
+        status: 'not_required' | 'needs_repair' | 'pending_recheck' | 'converged' | 'recurred'
+        label: string
+        summary: string
+        latestRepairRunId: any | null
+        latestRepairAt: string
+        postRepairFailureCount: number
+        postRepairEvidence: string[]
+      }
+    }
+  }[]
+}
+
+export function buildSafeBatchExpansionPolicySnapshot(batchPreflight: any): SafeBatchExpansionPolicySnapshot | null {
+  const policy = parseJsonValue(
+    batchPreflight?.safe_batch_expansion_policy
+      || batchPreflight?.safeBatchExpansionPolicy,
+  ) || batchPreflight?.safe_batch_expansion_policy || batchPreflight?.safeBatchExpansionPolicy || null
+  if (!policy) return null
+  const targetChapterCount = Number(policy?.target_chapter_count ?? policy?.targetChapterCount ?? 0)
+  if (!Number.isFinite(targetChapterCount) || targetChapterCount <= 0) return null
+  const rawStatus = String(policy?.status || '').trim()
+  const status = rawStatus === 'expanded' ? 'expanded' : rawStatus === 'recovering' ? 'recovering' : 'observing'
+  const latestStatusText = String(policy?.latest_status || policy?.latestStatus || '').trim()
+  const latestStatus = latestStatusText === 'ok' || latestStatusText === 'warn' ? latestStatusText : 'none'
+
+  return {
+    visible: true,
+    status,
+    label: compactEvidenceText(policy?.label || '强化扩批规则'),
+    summary: compactEvidenceText(policy?.summary || '按强化恢复验收趋势决定是否扩大安全连写批次。'),
+    targetChapterCount,
+    baseChapterCount: Number(policy?.base_chapter_count ?? policy?.baseChapterCount ?? 3),
+    expandedChapterCount: Number(policy?.expanded_chapter_count ?? policy?.expandedChapterCount ?? targetChapterCount),
+    requiredPassStreak: Number(policy?.required_pass_streak ?? policy?.requiredPassStreak ?? 3),
+    passStreak: Number(policy?.pass_streak ?? policy?.passStreak ?? 0),
+    acceptedBatchCount: Number(policy?.accepted_batch_count ?? policy?.acceptedBatchCount ?? 0),
+    failedBatchCount: Number(policy?.failed_batch_count ?? policy?.failedBatchCount ?? 0),
+    latestStatus,
+    expansionFeedback: buildSafeBatchExpansionFeedbackSnapshot(policy?.expansion_feedback || policy?.expansionFeedback),
+  }
+}
+
+function safeBatchExpansionFeedbackLabel(status: SafeBatchExpansionFeedbackSnapshot['status'], fallback: string) {
+  if (status === 'recovered' || status === 'passed') return '扩批热区已清'
+  if (status === 'rollback_to_small_batch' || status === 'rollback_to_single_chapter') return '扩批热区待修'
+  return fallback || '扩批反馈'
+}
+
+function safeBatchExpansionFeedbackColor(status: SafeBatchExpansionFeedbackSnapshot['status']) {
+  if (status === 'recovered' || status === 'passed') return 'green'
+  if (status === 'rollback_to_single_chapter') return 'red'
+  if (status === 'rollback_to_small_batch') return 'gold'
+  return 'blue'
+}
+
+function buildSafeBatchExpansionStructureValidationTrendSnapshot(trendLike: any): SafeBatchExpansionStructureValidationTrendSnapshot | null {
+  const trend = parseJsonValue(trendLike) || trendLike || null
+  if (!trend || trend.visible === false) return null
+  const rawStatus = String(trend?.status || '').trim()
+  const rawLatestStatus = String(trend?.latest_status || trend?.latestStatus || '').trim()
+  const latestStatus = rawLatestStatus === 'ok' || rawLatestStatus === 'warn' ? rawLatestStatus : 'none'
+  const failureReasons = (Array.isArray(trend?.failure_reasons)
+    ? trend.failure_reasons
+    : Array.isArray(trend?.failureReasons)
+      ? trend.failureReasons
+      : []
+  ).map((item: any) => ({
+    key: compactEvidenceText(item?.key || ''),
+    label: compactEvidenceText(item?.label || ''),
+    count: Number(item?.count || 0),
+  })).filter((item: any) => item.label && item.count > 0)
+  const recurrence = trend?.recurrence_after_restore || trend?.recurrenceAfterRestore || {}
+  const recurrenceChapterNos = (Array.isArray(recurrence?.recurrence_chapter_nos)
+    ? recurrence.recurrence_chapter_nos
+    : Array.isArray(recurrence?.recurrenceChapterNos)
+      ? recurrence.recurrenceChapterNos
+      : []
+  ).map((chapterNo: any) => Number(chapterNo)).filter((chapterNo: number) => chapterNo > 0)
+  const latestChapterNos = (Array.isArray(trend?.latest_chapter_nos)
+    ? trend.latest_chapter_nos
+    : Array.isArray(trend?.latestChapterNos)
+      ? trend.latestChapterNos
+      : []
+  ).map((chapterNo: any) => Number(chapterNo)).filter((chapterNo: number) => chapterNo > 0)
+
+  return {
+    visible: true,
+    status: rawStatus === 'warn' ? 'warn' : 'ok',
+    label: compactEvidenceText(trend?.label || '扩批结构验证趋势'),
+    summary: compactEvidenceText(trend?.summary || '扩批结构验证趋势已沉淀。'),
+    segmentKey: compactEvidenceText(trend?.segment_key || trend?.segmentKey || ''),
+    segmentLabel: compactEvidenceText(trend?.segment_label || trend?.segmentLabel || '复发段位'),
+    validationBatchCount: Number(trend?.validation_batch_count ?? trend?.validationBatchCount ?? 0),
+    passedBatchCount: Number(trend?.passed_batch_count ?? trend?.passedBatchCount ?? 0),
+    failedBatchCount: Number(trend?.failed_batch_count ?? trend?.failedBatchCount ?? 0),
+    passRate: Number(trend?.pass_rate ?? trend?.passRate ?? 0),
+    latestStatus,
+    latestChapterNos,
+    failureReasons,
+    recurrenceAfterRestore: {
+      visible: Boolean(recurrence?.visible),
+      intervalBatchCount: Number(recurrence?.interval_batch_count ?? recurrence?.intervalBatchCount ?? 0),
+      intervalLabel: compactEvidenceText(recurrence?.interval_label || recurrence?.intervalLabel || ''),
+      recurrenceChapterNos,
+    },
+  }
+}
+
+function buildSafeBatchExpansionStructureRepairEffectivenessSnapshot(effectivenessLike: any): SafeBatchExpansionStructureRepairEffectivenessSnapshot | null {
+  const effectiveness = parseJsonValue(effectivenessLike) || effectivenessLike || null
+  if (!effectiveness || effectiveness.visible === false) return null
+  const rawStatus = String(effectiveness?.status || '').trim()
+
+  return {
+    visible: true,
+    status: rawStatus === 'warn' ? 'warn' : 'ok',
+    label: compactEvidenceText(effectiveness?.label || '结构修复有效性'),
+    summary: compactEvidenceText(effectiveness?.summary || '结构修复有效性已接入扩批反馈。'),
+    sourceRunId: effectiveness?.source_run_id ?? effectiveness?.sourceRunId ?? null,
+    repairedAt: compactEvidenceText(effectiveness?.repaired_at || effectiveness?.repairedAt || ''),
+    segmentKey: compactEvidenceText(effectiveness?.segment_key || effectiveness?.segmentKey || ''),
+    segmentLabel: compactEvidenceText(effectiveness?.segment_label || effectiveness?.segmentLabel || ''),
+    baselinePassRate: Number(effectiveness?.baseline_pass_rate ?? effectiveness?.baselinePassRate ?? 0),
+    currentPassRate: Number(effectiveness?.current_pass_rate ?? effectiveness?.currentPassRate ?? 0),
+    passRateDelta: Number(effectiveness?.pass_rate_delta ?? effectiveness?.passRateDelta ?? 0),
+    baselineFailureReasonCount: Number(effectiveness?.baseline_failure_reason_count ?? effectiveness?.baselineFailureReasonCount ?? 0),
+    currentFailureReasonCount: Number(effectiveness?.current_failure_reason_count ?? effectiveness?.currentFailureReasonCount ?? 0),
+    failureReasonDelta: Number(effectiveness?.failure_reason_delta ?? effectiveness?.failureReasonDelta ?? 0),
+    baselineRecurrenceIntervalBatchCount: Number(effectiveness?.baseline_recurrence_interval_batch_count ?? effectiveness?.baselineRecurrenceIntervalBatchCount ?? 0),
+    currentRecurrenceIntervalBatchCount: Number(effectiveness?.current_recurrence_interval_batch_count ?? effectiveness?.currentRecurrenceIntervalBatchCount ?? 0),
+    recommendation: compactEvidenceText(effectiveness?.recommendation || ''),
+    baselineTrend: effectiveness?.baseline_trend || effectiveness?.baselineTrend || null,
+    currentTrend: effectiveness?.current_trend || effectiveness?.currentTrend || null,
+  }
+}
+
+function buildSafeBatchExpansionFeedbackSnapshot(feedbackLike: any): SafeBatchExpansionFeedbackSnapshot | null {
+  const feedback = parseJsonValue(feedbackLike) || feedbackLike || null
+  if (!feedback || feedback.visible === false) return null
+  const rawStatus = String(feedback?.status || '').trim()
+  const status = ([
+    'passed',
+    'recovered',
+    'rollback_to_small_batch',
+    'rollback_to_single_chapter',
+  ].includes(rawStatus) ? rawStatus : 'none') as SafeBatchExpansionFeedbackSnapshot['status']
+  const latestChapterNos = (Array.isArray(feedback?.latest_chapter_nos)
+    ? feedback.latest_chapter_nos
+    : Array.isArray(feedback?.latestChapterNos)
+      ? feedback.latestChapterNos
+      : []
+  ).map((chapterNo: any) => Number(chapterNo)).filter((chapterNo: number) => chapterNo > 0)
+
+  return {
+    visible: true,
+    status,
+    label: safeBatchExpansionFeedbackLabel(status, compactEvidenceText(feedback?.label || '扩批反馈')),
+    summary: compactEvidenceText(feedback?.summary || '扩批反馈已写入安全连写策略。'),
+    targetChapterCount: Number(feedback?.target_chapter_count ?? feedback?.targetChapterCount ?? 0),
+    latestBatchCreatedAt: compactEvidenceText(feedback?.latest_batch_created_at || feedback?.latestBatchCreatedAt || ''),
+    latestChapterNos,
+    riskCount: Number(feedback?.risk_count ?? feedback?.riskCount ?? 0),
+    stablePassStreak: Number(feedback?.stable_pass_streak ?? feedback?.stablePassStreak ?? 0),
+    recentExpandedBatchCount: Number(feedback?.recent_expanded_batch_count ?? feedback?.recentExpandedBatchCount ?? 0),
+    repeatedHotspotSegment: feedback?.repeated_hotspot_segment || feedback?.repeatedHotspotSegment ? {
+      key: compactEvidenceText((feedback?.repeated_hotspot_segment || feedback?.repeatedHotspotSegment)?.key || ''),
+      label: compactEvidenceText((feedback?.repeated_hotspot_segment || feedback?.repeatedHotspotSegment)?.label || ''),
+      count: Number((feedback?.repeated_hotspot_segment || feedback?.repeatedHotspotSegment)?.count || 0),
+      summary: compactEvidenceText((feedback?.repeated_hotspot_segment || feedback?.repeatedHotspotSegment)?.summary || ''),
+    } : null,
+    structureValidationTrend: buildSafeBatchExpansionStructureValidationTrendSnapshot(
+      feedback?.expansion_structure_validation_trend || feedback?.expansionStructureValidationTrend,
+    ),
+    structureRepairEffectiveness: buildSafeBatchExpansionStructureRepairEffectivenessSnapshot(
+      feedback?.expansion_structure_repair_effectiveness || feedback?.expansionStructureRepairEffectiveness,
+    ),
+  }
+}
+
+function normalizeStrengthenedRepairAcceptanceTrend(trendLike: any): StrengthenedRepairAcceptanceTrendSnapshot | null {
+  const trend = parseJsonValue(trendLike) || trendLike || null
+  if (!trend || trend.visible === false) return null
+  const status = String(trend?.status || '') === 'warn' ? 'warn' : 'ok'
+  const latestStatusText = String(trend?.latest_status || trend?.latestStatus || '').trim()
+  const latestStatus = latestStatusText === 'ok' || latestStatusText === 'warn' ? latestStatusText : 'none'
+  const dimensions = trend?.dimensions || {}
+  const normalizeDimension = (source: any, fallbackLabel: string) => ({
+    label: compactEvidenceText(source?.label || fallbackLabel),
+    failedCount: Number(source?.failed_count ?? source?.failedCount ?? 0),
+  })
+
+  return {
+    visible: true,
+    status,
+    label: compactEvidenceText(trend?.label || '强化恢复验收趋势'),
+    summary: compactEvidenceText(trend?.summary || '强化深修恢复后的核心守恒、读者回报和追读拉力趋势已沉淀。'),
+    acceptedBatchCount: Number(trend?.accepted_batch_count ?? trend?.acceptedBatchCount ?? 0),
+    failedBatchCount: Number(trend?.failed_batch_count ?? trend?.failedBatchCount ?? 0),
+    passStreak: Number(trend?.pass_streak ?? trend?.passStreak ?? 0),
+    latestStatus,
+    latestBatchLabel: compactEvidenceText(trend?.latest_batch_label || trend?.latestBatchLabel || ''),
+    latestRunId: trend?.latest_run_id ?? trend?.latestRunId ?? null,
+    sourceEvidence: compactAuditList(
+      Array.isArray(trend?.source_evidence)
+        ? trend.source_evidence
+        : Array.isArray(trend?.sourceEvidence)
+          ? trend.sourceEvidence
+          : [],
+      6,
+    ),
+    dimensions: {
+      core: normalizeDimension(dimensions.core, '核心守恒'),
+      payoff: normalizeDimension(dimensions.payoff, '读者回报'),
+      readerPull: normalizeDimension(dimensions.reader_pull || dimensions.readerPull, '读者拉力'),
+    },
+  }
+}
+
+function recoveryEvidenceSourceDeepRepairDirection(source: string, label: string) {
+  if (source === 'single_chapter_governance_recheck') {
+    return '回到单章任务书，确认治理复查证据已经写成正文里的可见冲突、对白动作、读者回报和章末钩子。'
+  }
+  if (source === 'safe_batch_recovery_recheck') {
+    return '复盘批次任务书，把多章承诺拆回每章冲突职责、回报落点和剧情线推进，再恢复批量连写。'
+  }
+  if (source === 'review_governance_closure') {
+    return '回到治理复查台，重新确认修后证据、观察项和关闭条件，再让后续正文承接。'
+  }
+  return `复查${label || '恢复依据来源'}的关闭条件，把抽象依据改成下一章可执行的事件、选择、代价和回报。`
+}
+
+function normalizeRecoveryEvidenceSourceDeepRepairEffect(effect: any, fallbackLabel: string): RecoveryEvidenceSourceRiskProfileSnapshot['sources'][number]['deepRepairEffect'] {
+  const status = String(effect?.status || '').trim()
+  const normalizedStatus = status === 'pending' || status === 'observing' || status === 'recurred' ? status : 'none'
+  const defaultLabel = normalizedStatus === 'recurred'
+    ? '深修后仍失效'
+    : normalizedStatus === 'observing'
+      ? '深修后暂无再失效'
+      : normalizedStatus === 'pending'
+        ? '深修待复查'
+        : '未深修'
+  const strengthenedClosure = normalizeRecoveryEvidenceSourceStrengthenedClosure(
+    effect?.strengthened_repair_closure || effect?.strengthenedRepairClosure,
+    fallbackLabel,
+    normalizedStatus,
+  )
+  return {
+    status: normalizedStatus,
+    label: compactEvidenceText(effect?.label || defaultLabel),
+    summary: compactEvidenceText(effect?.summary || `${fallbackLabel || '恢复依据来源'}尚未生成深层修复队列。`),
+    latestRepairRunId: effect?.latest_repair_run_id ?? effect?.latestRepairRunId ?? null,
+    latestRepairActionLabel: compactEvidenceText(effect?.latest_repair_action_label || effect?.latestRepairActionLabel || ''),
+    latestRepairAt: compactEvidenceText(effect?.latest_repair_at || effect?.latestRepairAt || ''),
+    postRepairFailureCount: Number(effect?.post_repair_failure_count ?? effect?.postRepairFailureCount ?? 0),
+    postRepairEvidence: compactAuditList(Array.isArray(effect?.post_repair_evidence) ? effect.post_repair_evidence : Array.isArray(effect?.postRepairEvidence) ? effect.postRepairEvidence : [], 4),
+    strengthenedClosure,
+  }
+}
+
+function normalizeRecoveryEvidenceSourceStrengthenedClosure(
+  closure: any,
+  fallbackLabel: string,
+  effectStatus: RecoveryEvidenceSourceRiskProfileSnapshot['sources'][number]['deepRepairEffect']['status'],
+): RecoveryEvidenceSourceRiskProfileSnapshot['sources'][number]['deepRepairEffect']['strengthenedClosure'] {
+  const status = String(closure?.status || '').trim()
+  const normalizedStatus = status === 'needs_repair' || status === 'pending_recheck' || status === 'converged' || status === 'recurred'
+    ? status
+    : effectStatus === 'recurred'
+      ? 'needs_repair'
+      : 'not_required'
+  const defaultLabel = normalizedStatus === 'needs_repair'
+    ? '待强化深修'
+    : normalizedStatus === 'pending_recheck'
+      ? '强化深修待复检'
+      : normalizedStatus === 'converged'
+        ? '强化深修已收敛'
+        : normalizedStatus === 'recurred'
+          ? '强化深修后仍复发'
+          : '无需强化深修'
+  const defaultSummary = normalizedStatus === 'needs_repair'
+    ? `${fallbackLabel || '恢复依据来源'}普通深修后仍出现同源放行失败，需要生成强化深修复检。`
+    : normalizedStatus === 'pending_recheck'
+      ? `${fallbackLabel || '恢复依据来源'}强化深修任务已生成，等待执行后复检同源失败是否收敛。`
+      : normalizedStatus === 'converged'
+        ? `${fallbackLabel || '恢复依据来源'}强化深修后暂无新的同源放行后失效，可恢复小批量安全连写并继续观察。`
+        : normalizedStatus === 'recurred'
+          ? `${fallbackLabel || '恢复依据来源'}强化深修后仍出现同源放行失败，继续禁止放宽安全连写。`
+          : `${fallbackLabel || '恢复依据来源'}尚未触发强化深修。`
+  return {
+    status: normalizedStatus,
+    label: compactEvidenceText(closure?.label || defaultLabel),
+    summary: compactEvidenceText(closure?.summary || defaultSummary),
+    latestRepairRunId: closure?.latest_repair_run_id ?? closure?.latestRepairRunId ?? null,
+    latestRepairAt: compactEvidenceText(closure?.latest_repair_at || closure?.latestRepairAt || ''),
+    postRepairFailureCount: Number(closure?.post_repair_failure_count ?? closure?.postRepairFailureCount ?? 0),
+    postRepairEvidence: compactAuditList(Array.isArray(closure?.post_repair_evidence) ? closure.post_repair_evidence : Array.isArray(closure?.postRepairEvidence) ? closure.postRepairEvidence : [], 4),
+  }
+}
+
+export function buildRecoveryEvidenceSourceRiskProfileSnapshot(batchPreflight: any): RecoveryEvidenceSourceRiskProfileSnapshot | null {
+  const profile = parseJsonValue(
+    batchPreflight?.recovery_evidence_source_risk_profile
+      || batchPreflight?.recoveryEvidenceSourceRiskProfile,
+  ) || batchPreflight?.recovery_evidence_source_risk_profile || batchPreflight?.recoveryEvidenceSourceRiskProfile || null
+  const strengthenedAcceptanceTrend = normalizeStrengthenedRepairAcceptanceTrend(
+    batchPreflight?.strengthened_repair_acceptance_trend
+      || batchPreflight?.strengthenedRepairAcceptanceTrend,
+  )
+  const sources = [
+    ...(Array.isArray(profile?.sources) ? profile.sources : []),
+  ].map((item: any) => {
+    const source = String(item?.source || item?.sourceMode || '').trim()
+    const label = compactEvidenceText(item?.label || item?.source_label || item?.sourceLabel || item?.source || '恢复依据来源')
+    const releaseFailureCount = Number(item?.release_failure_count || item?.releaseFailureCount || 0)
+    const deepRepairEffect = normalizeRecoveryEvidenceSourceDeepRepairEffect(item?.deep_repair_effect || item?.deepRepairEffect, label)
+    return {
+      source,
+      label,
+      releaseFailureCount,
+      trendLabel: `近${Math.max(1, releaseFailureCount || 1)}轮失败`,
+      evidence: compactAuditList(Array.isArray(item?.evidence) ? item.evidence : [], 4),
+      deepRepairDirection: recoveryEvidenceSourceDeepRepairDirection(source, label),
+      deepRepairEffect,
+    }
+  }).filter(item => item.source && item.releaseFailureCount > 0)
+    .sort((a, b) => b.releaseFailureCount - a.releaseFailureCount)
+
+  if (!sources.length && !strengthenedAcceptanceTrend) return null
+  const repeatedSources = sources.filter(item => item.releaseFailureCount >= 2)
+  const focus = repeatedSources[0] || sources[0]
+  const status = repeatedSources.length > 0 || String(profile?.status || '') === 'warn' || strengthenedAcceptanceTrend?.status === 'warn' ? 'warn' : 'ok'
+  return {
+    visible: true,
+    status,
+    label: '恢复依据画像趋势',
+    summary: focus
+      ? focus.releaseFailureCount >= 2
+        ? `${focus.label}近${focus.releaseFailureCount}轮放行后失效，任务中心应先处理深层创作修复，再恢复多章安全连写。`
+        : `${focus.label}已有放行后失效记录，任务中心继续观察来源稳定性。`
+      : strengthenedAcceptanceTrend?.summary || '暂无恢复依据来源失效趋势。',
+    totalFailureCount: Number(profile?.total_failure_count || profile?.totalFailureCount || sources.reduce((sum, item) => sum + item.releaseFailureCount, 0)),
+    repeatSourceCount: Number(profile?.repeat_source_count || profile?.repeatSourceCount || repeatedSources.length),
+    strengthenedAcceptanceTrend,
+    sources,
+  }
+}
+
 function BatchProseRunSummary({ run }: { run: any }) {
   const input = parseJsonValue(run.input_ref) || {}
   const output = parseJsonValue(run.output_ref) || {}
   const batchPreflight = input.batch_preflight || input.batchPreflight || null
+  const expansionPolicy = buildSafeBatchExpansionPolicySnapshot(batchPreflight)
+  const recoveryEvidenceProfile = buildRecoveryEvidenceSourceRiskProfileSnapshot(batchPreflight)
   const recoveryEvidence = [
     ...(Array.isArray(batchPreflight?.recovery_evidence) ? batchPreflight.recovery_evidence : []),
     ...(Array.isArray(batchPreflight?.recoveryEvidence) ? batchPreflight.recoveryEvidence : []),
@@ -1193,6 +1705,13 @@ function BatchProseRunSummary({ run }: { run: any }) {
   const scoreText = avgScore.length > 0
     ? Math.round(avgScore.reduce((sum: number, score: number) => sum + score, 0) / avgScore.length)
     : null
+  const expansionFeedback = expansionPolicy?.expansionFeedback || null
+  const expansionFeedbackChapterText = expansionFeedback?.latestChapterNos.length
+    ? `第${expansionFeedback.latestChapterNos.join('、')}章`
+    : ''
+  const expansionStructureTrend = expansionFeedback?.structureValidationTrend || null
+  const expansionStructureFailureReason = expansionStructureTrend?.failureReasons?.[0] || null
+  const expansionStructureEffectiveness = expansionFeedback?.structureRepairEffectiveness || null
 
   return (
     <Card size="small" title="批量生成摘要">
@@ -1206,6 +1725,80 @@ function BatchProseRunSummary({ run }: { run: any }) {
           {scoreText !== null && <Tag color={scoreText >= 78 ? 'green' : 'gold'} bordered={false}>平均质检 {scoreText} 分</Tag>}
           <Tag bordered={false}>耗时 {run.duration_ms ? `${Math.round(Number(run.duration_ms) / 1000)}s` : '-'}</Tag>
         </Space>
+        {expansionPolicy?.visible && (
+          <div style={{ padding: 8, border: '1px solid #bfdbfe', borderRadius: 6, background: '#eff6ff' }}>
+            <Space direction="vertical" size={6} style={{ width: '100%' }}>
+              <Space wrap size={[4, 4]}>
+                <Text strong style={{ fontSize: 12 }}>{expansionPolicy.label}</Text>
+                <Tag color={expansionPolicy.status === 'expanded' ? 'green' : 'blue'} bordered={false}>
+                  目标 {expansionPolicy.targetChapterCount} 章
+                </Tag>
+                <Tag bordered={false}>连续 {expansionPolicy.passStreak}/{expansionPolicy.requiredPassStreak}</Tag>
+                <Tag bordered={false}>通过 {expansionPolicy.acceptedBatchCount}</Tag>
+                <Tag bordered={false}>未过 {expansionPolicy.failedBatchCount}</Tag>
+              </Space>
+              <Text type="secondary" style={{ fontSize: 12 }}>{expansionPolicy.summary}</Text>
+              {expansionFeedback && (
+                <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                  <Space wrap size={[4, 4]}>
+                    <Tag color={safeBatchExpansionFeedbackColor(expansionFeedback.status)} bordered={false}>
+                      {expansionFeedback.label}
+                    </Tag>
+                    {expansionFeedback.targetChapterCount > 0 && (
+                      <Tag bordered={false}>反馈目标 {expansionFeedback.targetChapterCount} 章</Tag>
+                    )}
+                    {expansionFeedbackChapterText && (
+                      <Tag bordered={false}>{expansionFeedbackChapterText}</Tag>
+                    )}
+                    {expansionFeedback.stablePassStreak > 0 && (
+                      <Tag color="green" bordered={false}>稳定连过 {expansionFeedback.stablePassStreak}</Tag>
+                    )}
+                    {expansionFeedback.recentExpandedBatchCount > 1 && (
+                      <Tag bordered={false}>观察 {expansionFeedback.recentExpandedBatchCount} 批</Tag>
+                    )}
+                    {expansionFeedback.repeatedHotspotSegment && (
+                      <Tag color="gold" bordered={false}>
+                        {expansionFeedback.repeatedHotspotSegment.label}复发 {expansionFeedback.repeatedHotspotSegment.count}
+                      </Tag>
+                    )}
+                    {expansionStructureTrend?.visible && (
+                      <Tag color={expansionStructureTrend.status === 'warn' ? 'gold' : 'green'} bordered={false}>
+                        验证通过率 {expansionStructureTrend.passRate}%
+                      </Tag>
+                    )}
+                    {expansionStructureFailureReason && (
+                      <Tag color="gold" bordered={false}>
+                        失败主因 {expansionStructureFailureReason.label}{expansionStructureFailureReason.count}
+                      </Tag>
+                    )}
+                    {expansionStructureTrend?.recurrenceAfterRestore.visible && (
+                      <Tag color="gold" bordered={false}>
+                        复发间隔 {expansionStructureTrend.recurrenceAfterRestore.intervalBatchCount}批
+                      </Tag>
+                    )}
+                    {expansionStructureEffectiveness?.visible && (
+                      <Tag color={expansionStructureEffectiveness.status === 'ok' ? 'green' : 'gold'} bordered={false}>
+                        {expansionStructureEffectiveness.status === 'ok' ? '结构修复有效' : '结构修复待观察'}
+                      </Tag>
+                    )}
+                    {expansionStructureEffectiveness?.visible && (
+                      <Tag bordered={false}>
+                        主因 {expansionStructureEffectiveness.baselineFailureReasonCount}{'->'}{expansionStructureEffectiveness.currentFailureReasonCount}
+                      </Tag>
+                    )}
+                  </Space>
+                  <Text type="secondary" style={{ fontSize: 12 }}>{expansionFeedback.summary}</Text>
+                  {expansionStructureTrend?.visible && (
+                    <Text type="secondary" style={{ fontSize: 12 }}>{expansionStructureTrend.summary}</Text>
+                  )}
+                  {expansionStructureEffectiveness?.visible && (
+                    <Text type="secondary" style={{ fontSize: 12 }}>{expansionStructureEffectiveness.summary}</Text>
+                  )}
+                </Space>
+              )}
+            </Space>
+          </div>
+        )}
         {recoveryEvidence.length > 0 && (
           <div style={{ padding: 8, border: '1px solid #bbf7d0', borderRadius: 6, background: '#f0fdf4' }}>
             <Space direction="vertical" size={6} style={{ width: '100%' }}>
@@ -1215,6 +1808,65 @@ function BatchProseRunSummary({ run }: { run: any }) {
                   <Tag key={item} color="green" bordered={false}>{item}</Tag>
                 ))}
               </Space>
+            </Space>
+          </div>
+        )}
+        {recoveryEvidenceProfile?.visible && (
+          <div style={{ padding: 8, border: '1px solid #fde68a', borderRadius: 6, background: '#fffdf3' }}>
+            <Space direction="vertical" size={6} style={{ width: '100%' }}>
+              <Space wrap size={[4, 4]}>
+                <Text strong style={{ fontSize: 12 }}>{recoveryEvidenceProfile.label}</Text>
+                <Tag color={recoveryEvidenceProfile.status === 'warn' ? 'gold' : 'green'} bordered={false}>反复来源 {recoveryEvidenceProfile.repeatSourceCount}</Tag>
+                <Tag bordered={false}>失效 {recoveryEvidenceProfile.totalFailureCount} 次</Tag>
+              </Space>
+              <Text type="secondary" style={{ fontSize: 12 }}>{recoveryEvidenceProfile.summary}</Text>
+              {recoveryEvidenceProfile.strengthenedAcceptanceTrend?.visible && (
+                <div style={{ padding: 8, border: '1px solid #bfdbfe', borderRadius: 6, background: '#eff6ff' }}>
+                  <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                    <Space wrap size={[4, 4]}>
+                      <Text strong style={{ fontSize: 12 }}>{recoveryEvidenceProfile.strengthenedAcceptanceTrend.label}</Text>
+                      <Tag color={recoveryEvidenceProfile.strengthenedAcceptanceTrend.status === 'warn' ? 'gold' : 'green'} bordered={false}>
+                        {recoveryEvidenceProfile.strengthenedAcceptanceTrend.status === 'warn' ? '回到单章' : `连过 ${recoveryEvidenceProfile.strengthenedAcceptanceTrend.passStreak} 批`}
+                      </Tag>
+                      <Tag bordered={false}>通过 {recoveryEvidenceProfile.strengthenedAcceptanceTrend.acceptedBatchCount}</Tag>
+                      <Tag bordered={false}>未过 {recoveryEvidenceProfile.strengthenedAcceptanceTrend.failedBatchCount}</Tag>
+                      {recoveryEvidenceProfile.strengthenedAcceptanceTrend.latestBatchLabel && (
+                        <Tag bordered={false}>{recoveryEvidenceProfile.strengthenedAcceptanceTrend.latestBatchLabel}</Tag>
+                      )}
+                    </Space>
+                    <Text type="secondary" style={{ fontSize: 12 }}>{recoveryEvidenceProfile.strengthenedAcceptanceTrend.summary}</Text>
+                    <Space wrap size={[4, 4]}>
+                      <Tag bordered={false}>核心 {recoveryEvidenceProfile.strengthenedAcceptanceTrend.dimensions.core.failedCount}</Tag>
+                      <Tag bordered={false}>回报 {recoveryEvidenceProfile.strengthenedAcceptanceTrend.dimensions.payoff.failedCount}</Tag>
+                      <Tag bordered={false}>拉力 {recoveryEvidenceProfile.strengthenedAcceptanceTrend.dimensions.readerPull.failedCount}</Tag>
+                    </Space>
+                    {recoveryEvidenceProfile.strengthenedAcceptanceTrend.sourceEvidence.length > 0 && (
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        依据：{recoveryEvidenceProfile.strengthenedAcceptanceTrend.sourceEvidence.join('；')}
+                      </Text>
+                    )}
+                  </Space>
+                </div>
+              )}
+              {recoveryEvidenceProfile.sources.slice(0, 3).map(source => (
+                <Space key={source.source} direction="vertical" size={2} style={{ width: '100%' }}>
+                  <Space wrap size={[4, 4]}>
+                    <Tag color={source.releaseFailureCount >= 2 ? 'gold' : 'default'} bordered={false}>{source.label}</Tag>
+                    <Tag bordered={false}>{source.trendLabel}</Tag>
+                  </Space>
+                  <Text type="secondary" style={{ fontSize: 12 }}>深层修复方向：{source.deepRepairDirection}</Text>
+                  {source.deepRepairEffect.status !== 'none' && (
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      深修结果：{source.deepRepairEffect.label}，{source.deepRepairEffect.summary}
+                    </Text>
+                  )}
+                  {source.deepRepairEffect.strengthenedClosure.status !== 'not_required' && (
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      强化复检：{source.deepRepairEffect.strengthenedClosure.label}，{source.deepRepairEffect.strengthenedClosure.summary}
+                    </Text>
+                  )}
+                </Space>
+              ))}
             </Space>
           </div>
         )}
@@ -1795,6 +2447,7 @@ function RepairTaskRunSummary({
                       onRecoveryEvidenceReviewRowAction={(row, rowAction) => handleRecoveryEvidenceReviewRowAction(task, taskIndex, row, rowAction)}
                     />
                     <RecoveryEvidenceRegovernancePreview task={task} />
+                    <SafeBatchExpansionSegmentPreview task={task} />
                     <DeliveryRiskReviewPreview task={task} />
                   </Space>
                 )}

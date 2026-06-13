@@ -198,6 +198,357 @@ const baseWriting = {
   canonUpdatePreview: [],
 } as any
 
+const safeBatchFutureRoute = [
+  { chapterNo: 8, title: '试炼前夜', chapterTask: '主角拿到试炼资格', conflict: '执事设局阻拦', endingHook: '阵盘亮起第二道裂纹', mainlineProgress: '进入外门试炼核心局', riskTags: [] },
+  { chapterNo: 9, title: '阵盘裂纹', chapterTask: '阵盘异常暴露主角潜力', conflict: '同门围堵试探底牌', endingHook: '内门执事点名关注', mainlineProgress: '让宗门高层第一次注意主角', riskTags: [] },
+  { chapterNo: 10, title: '外门震动', chapterTask: '试炼结果引发宗门震动', conflict: '旧秩序压制新晋黑马', endingHook: '内门招揽提出苛刻条件', mainlineProgress: '打开内门势力线', riskTags: [] },
+]
+
+function futureRouteRange(start: number, count: number) {
+  return Array.from({ length: count }, (_, index) => {
+    const chapterNo = start + index
+    return {
+      chapterNo,
+      title: `稳定扩批${chapterNo}`,
+      chapterTask: `第${chapterNo}章推进扩批后的内门主线`,
+      conflict: `第${chapterNo}章用新压力测试主角选择`,
+      endingHook: `第${chapterNo + 1}章压力升级`,
+      mainlineProgress: `内门规则谜团推进到第${chapterNo}章节点`,
+      riskTags: [],
+    }
+  })
+}
+
+function readySafeBatchPlanning(overrides: any = {}) {
+  return {
+    ...basePlanning,
+    topStatus: {
+      ...basePlanning.topStatus,
+      future100Coverage: { ready: true, planned: 100, required: 100, missingChapters: [], label: '100/100' },
+      ...(overrides.topStatus || {}),
+    },
+    futureRoute: safeBatchFutureRoute,
+    ...overrides,
+  }
+}
+
+function readySafeBatchWriting(overrides: any = {}) {
+  return {
+    ...baseWriting,
+    chapterPlanningDesk: {
+      ...baseWriting.chapterPlanningDesk,
+      readiness: 'ready',
+      statusLabel: '本章可写',
+      scenePlanStatus: 'ready',
+      sceneCards: [
+        { title: '压迫升级', goal: '执事逼主角交阵盘' },
+        { title: '反向设局', goal: '主角用阵法拿回主动权' },
+      ],
+      recommendedPlannerAction: { key: 'confirm_plan_and_write_draft', label: '确认并生成' },
+      ...(overrides.chapterPlanningDesk || {}),
+    },
+    topStatus: {
+      ...baseWriting.topStatus,
+      nextActionLabel: '确认并生成',
+      primaryActionKey: 'confirm_plan_and_write_draft',
+      ...(overrides.topStatus || {}),
+    },
+    primaryActionKey: 'confirm_plan_and_write_draft',
+    ...overrides,
+  }
+}
+
+function recoveryEvidenceFailureRun(id: number, createdAt: string) {
+  return {
+    id,
+    run_type: 'longform_production_repair',
+    created_at: createdAt,
+    status: 'ready',
+    output_ref: JSON.stringify({
+      report: { source: 'auto_creation_safe_batch_risk' },
+      tasks: [
+        {
+          issue_type: 'recovery_evidence_mismatch',
+          recovery_evidence_review: {
+            status: 'warn',
+            failed_items: [
+              {
+                evidence: '单章治理复查：生产阻断已解除',
+                source: 'recovery_evidence_release_summary',
+                source_label: '安全连写放行摘要',
+                source_action: 'single_chapter_governance_recheck',
+                source_action_label: '复检单章',
+                production_gate_source: 'single_chapter_governance_recheck',
+              },
+            ],
+          },
+        },
+      ],
+    }),
+  }
+}
+
+function recoveryEvidenceDeepRepairRun(args: {
+  id: number
+  createdAt: string
+  updatedAt?: string
+  taskStatus: string
+  actionLabel: string
+  deepRepairLevel: 'first_deep_repair' | 'escalated_after_recurrence'
+}) {
+  return {
+    id: args.id,
+    run_type: 'longform_production_repair',
+    created_at: args.createdAt,
+    updated_at: args.updatedAt || args.createdAt,
+    status: 'ready',
+    output_ref: JSON.stringify({
+      report: { source: 'recovery_evidence_governance_queue' },
+      tasks: [
+        {
+          issue_type: 'recovery_evidence_governance_queue',
+          source: 'single_chapter_governance_recheck',
+          source_label: '单章治理复查',
+          source_status: 'repeated_release_failure',
+          action_key: 'deep_repair_single_brief',
+          action_label: args.actionLabel,
+          deep_repair_level: args.deepRepairLevel,
+          task_status: args.taskStatus,
+          updated_at: args.updatedAt || args.createdAt,
+          recovery_evidence_review: {
+            failed_evidence: ['单章治理复查：生产阻断已解除'],
+          },
+        },
+      ],
+    }),
+  }
+}
+
+function strengthenedRepairReleaseSummary(chapterNos = [41, 42, 43]) {
+  return {
+    status: 'released',
+    source: 'recovery_evidence_source_risk_profile',
+    summary: `恢复依据画像强化深修已收敛，可恢复 ${chapterNos.length} 章安全连写。`,
+    safe_chapter_count: chapterNos.length,
+    allowed_chapter_nos: chapterNos,
+    next_batch_label: `第${chapterNos[0]}-${chapterNos[chapterNos.length - 1]}章`,
+    strengthened_repair_source_count: 1,
+    strengthened_repair_sources: [
+      {
+        source: 'single_chapter_governance_recheck',
+        label: '单章治理复查',
+        status: 'converged',
+        status_label: '强化深修已收敛',
+      },
+    ],
+    evidence: ['单章治理复查：强化深修已收敛'],
+  }
+}
+
+function buildStrengthenedRepairAcceptanceInput(extraReviews: any[] = []) {
+  return {
+    planning: readySafeBatchPlanning(),
+    writing: readySafeBatchWriting({
+      nextChapter: { ...baseWriting.nextChapter, id: 44, chapterNo: 44, title: '强化复盘后续' },
+    }),
+    activeTasks: [],
+    selectedModelId: 12,
+    storyState: { last_updated_chapter: 43 },
+    chapters: [
+      { id: 41, chapter_no: 41, title: '强化复盘一', chapter_text: '强化复盘一'.repeat(500) },
+      { id: 42, chapter_no: 42, title: '强化复盘二', chapter_text: '强化复盘二'.repeat(500) },
+      { id: 43, chapter_no: 43, title: '强化复盘三', chapter_text: '强化复盘三'.repeat(500) },
+    ],
+    reviews: [
+      { id: 4501, chapter_id: 41, review_type: 'prose_quality', created_at: '2026-06-06T01:00:00.000Z', payload: JSON.stringify({ score: 84, passed: true }) },
+      { id: 4502, chapter_id: 42, review_type: 'prose_quality', created_at: '2026-06-06T01:01:00.000Z', payload: JSON.stringify({ score: 85, passed: true }) },
+      { id: 4503, chapter_id: 43, review_type: 'prose_quality', created_at: '2026-06-06T01:02:00.000Z', payload: JSON.stringify({ score: 86, passed: true }) },
+      ...extraReviews,
+    ],
+    runRecords: [
+      {
+        id: 450,
+        run_type: 'batch_generate_prose',
+        created_at: '2026-06-06T00:00:00.000Z',
+        status: 'success',
+        input_ref: JSON.stringify({
+          source: 'auto_creation_safe_batch',
+          safety_limit: 3,
+          batch_preflight: {
+            recovery_evidence_release_summary: strengthenedRepairReleaseSummary(),
+          },
+        }),
+        output_ref: JSON.stringify({
+          total: 3,
+          success: 3,
+          failed: 0,
+          chapters: [
+            { id: 41, chapter_no: 41, title: '强化复盘一', status: 'success', score: 84, word_count: 3180 },
+            { id: 42, chapter_no: 42, title: '强化复盘二', status: 'success', score: 85, word_count: 3090 },
+            { id: 43, chapter_no: 43, title: '强化复盘三', status: 'success', score: 86, word_count: 3021 },
+          ],
+        }),
+      },
+    ],
+  } as any
+}
+
+function strengthenedAcceptanceBatchRun(args: {
+  id: number
+  createdAt: string
+  chapterNos: number[]
+}) {
+  return {
+    id: args.id,
+    run_type: 'batch_generate_prose',
+    created_at: args.createdAt,
+    status: 'success',
+    input_ref: JSON.stringify({
+      source: 'auto_creation_safe_batch',
+      safety_limit: args.chapterNos.length,
+      batch_preflight: {
+        recovery_evidence_release_summary: strengthenedRepairReleaseSummary(args.chapterNos),
+      },
+    }),
+    output_ref: JSON.stringify({
+      total: args.chapterNos.length,
+      success: args.chapterNos.length,
+      failed: 0,
+      chapters: args.chapterNos.map((chapterNo, index) => ({
+        id: chapterNo,
+        chapter_no: chapterNo,
+        title: `强化趋势${chapterNo}`,
+        status: 'success',
+        score: 84 + index,
+        word_count: 3000 + index * 10,
+      })),
+    }),
+  }
+}
+
+function expandedSafeBatchRun(args: {
+  id: number
+  createdAt: string
+  chapterNos: number[]
+}) {
+  return {
+    id: args.id,
+    run_type: 'batch_generate_prose',
+    created_at: args.createdAt,
+    status: 'success',
+    input_ref: JSON.stringify({
+      source: 'auto_creation_safe_batch',
+      safety_limit: args.chapterNos.length,
+      batch_preflight: {
+        safe_chapter_count: args.chapterNos.length,
+        allowed_chapter_nos: args.chapterNos,
+        safe_batch_expansion_policy: {
+          status: 'expanded',
+          label: '强化扩批规则',
+          summary: '强化恢复验收连续 3/3 批通过，本轮可从 3 章扩到 5 章安全连写。',
+          target_chapter_count: 5,
+          base_chapter_count: 3,
+          expanded_chapter_count: 5,
+          required_pass_streak: 3,
+          pass_streak: 3,
+          accepted_batch_count: 3,
+          failed_batch_count: 0,
+          latest_status: 'ok',
+        },
+      },
+    }),
+    output_ref: JSON.stringify({
+      total: args.chapterNos.length,
+      success: args.chapterNos.length,
+      failed: 0,
+      chapters: args.chapterNos.map((chapterNo, index) => ({
+        id: chapterNo,
+        chapter_no: chapterNo,
+        title: `扩批验收${chapterNo}`,
+        status: 'success',
+        score: 84 + index,
+        word_count: 3000 + index * 10,
+      })),
+    }),
+  }
+}
+
+function expansionStructureVerification(chapterNos = [50, 51, 52]) {
+  return {
+    source: 'safe_batch_expansion_structure_repair',
+    label: '扩批结构验证',
+    repeated_hotspot_segment: { key: 'middle', label: '中段', count: 2 },
+    validation_chapter_nos: chapterNos,
+    fixed_segment_role: '中段固定职责：每批第3-4章必须完成主线转折、显性回报和章末追读。',
+    conflict_rotation: '验证批次每章必须更换冲突来源。',
+    explicit_payoff: '每章至少一个显性回报，不能只铺垫。',
+    ending_hook_requirement: '每章章末必须留下不同的章末追读问题。',
+    structure_actions: ['前段抛压，中段兑现并升级，后段留钩。'],
+  }
+}
+
+function expansionStructureValidationBatchRun(args: {
+  id: number
+  createdAt: string
+  chapterNos: number[]
+}) {
+  return {
+    id: args.id,
+    run_type: 'batch_generate_prose',
+    created_at: args.createdAt,
+    status: 'success',
+    input_ref: JSON.stringify({
+      source: 'auto_creation_safe_batch',
+      safety_limit: args.chapterNos.length,
+      batch_preflight: {
+        safe_chapter_count: args.chapterNos.length,
+        allowed_chapter_nos: args.chapterNos,
+        safe_batch_expansion_policy: {
+          status: 'recovering',
+          label: '强化扩批规则',
+          summary: '扩批结构修复后进入2-3章验证批。',
+          target_chapter_count: args.chapterNos.length,
+          base_chapter_count: 3,
+          expanded_chapter_count: 5,
+          required_pass_streak: 3,
+          pass_streak: 3,
+          accepted_batch_count: 3,
+          failed_batch_count: 1,
+          latest_status: 'warn',
+        },
+        safe_batch_expansion_structure_verification: expansionStructureVerification(args.chapterNos),
+      },
+      next_batch_brief: {
+        chapter_range_label: `第${args.chapterNos[0]}-${args.chapterNos[args.chapterNos.length - 1]}章`,
+        expansionStructureVerification: expansionStructureVerification(args.chapterNos),
+      },
+    }),
+    output_ref: JSON.stringify({
+      total: args.chapterNos.length,
+      success: args.chapterNos.length,
+      failed: 0,
+      chapters: args.chapterNos.map((chapterNo, index) => ({
+        id: chapterNo,
+        chapter_no: chapterNo,
+        title: `结构验证${chapterNo}`,
+        status: 'success',
+        score: 86 + index,
+        word_count: 3100 + index * 20,
+      })),
+    }),
+  }
+}
+
+function strengthenedAcceptanceQualityReviews(chapterNos: number[], startId = 4600, createdAt = '2026-06-10T01:00:00.000Z') {
+  return chapterNos.map((chapterNo, index) => ({
+    id: startId + index,
+    chapter_id: chapterNo,
+    review_type: 'prose_quality',
+    created_at: createdAt.replace('01:00', `01:${String(index).padStart(2, '0')}`),
+    payload: JSON.stringify({ score: 84 + index, passed: true }),
+  }))
+}
+
 describe('buildAutoCreationDirectorModel', () => {
   test('reuses the story planning creation pipeline as the director source of truth', () => {
     const model = buildAutoCreationDirectorModel({
@@ -2260,6 +2611,32 @@ describe('buildAutoCreationDirectorModel', () => {
             ],
           }),
         },
+        {
+          id: 503,
+          run_type: 'longform_production_repair',
+          created_at: '2026-06-06T12:00:00.000Z',
+          updated_at: '2026-06-06T12:30:00.000Z',
+          status: 'ready',
+          output_ref: JSON.stringify({
+            report: { source: 'recovery_evidence_governance_queue' },
+            tasks: [
+              {
+                issue_type: 'recovery_evidence_governance_queue',
+                source: 'single_chapter_governance_recheck',
+                source_label: '单章治理复查',
+                source_status: 'repeated_release_failure',
+                action_key: 'deep_repair_single_brief',
+                action_label: '深修单章任务书',
+                task_status: 'resolved',
+                updated_at: '2026-06-06T12:30:00.000Z',
+                deep_repair_direction: '深层修复方向：回到单章任务书，确认治理复查证据已经写成正文里的可见冲突、对白动作、读者回报和章末钩子。',
+                recovery_evidence_review: {
+                  failed_evidence: ['单章治理复查：生产阻断已解除'],
+                },
+              },
+            ],
+          }),
+        },
       ],
       storyState: {
         last_updated_chapter: 7,
@@ -2273,6 +2650,7 @@ describe('buildAutoCreationDirectorModel', () => {
     } as any)
 
     const profileSignal = model.batchGuardrail.guardrails.find(item => item.label === '恢复依据画像')
+    const deepRepairDirection = model.batchGuardrail.recoveryEvidenceTrend.sources[0]?.deepRepairDirection || ''
 
     expect(model.batchGuardrail.status).toBe('caution')
     expect(model.batchGuardrail.safeChapterCount).toBe(1)
@@ -2286,9 +2664,61 @@ describe('buildAutoCreationDirectorModel', () => {
           source: 'single_chapter_governance_recheck',
           label: '单章治理复查',
           release_failure_count: 2,
+          deep_repair_effect: expect.objectContaining({
+            status: 'recurred',
+            label: '深修后仍失效',
+            post_repair_failure_count: 1,
+            latest_repair_action_label: '深修单章任务书',
+          }),
         }),
       ],
     })
+    expect(model.batchGuardrail.recoveryEvidenceTrend).toMatchObject({
+      visible: true,
+      status: 'warn',
+      totalFailureCount: 2,
+      repeatSourceCount: 1,
+      sources: [
+        expect.objectContaining({
+          source: 'single_chapter_governance_recheck',
+          label: '单章治理复查',
+          releaseFailureCount: 2,
+          trendLabel: '近2轮失败',
+          deepRepairEffect: expect.objectContaining({
+            status: 'recurred',
+            label: '深修后仍失效',
+            postRepairFailureCount: 1,
+            latestRepairActionLabel: '深修单章任务书',
+          }),
+        }),
+      ],
+    })
+    expect(model.batchGuardrail.recoveryEvidenceTrend.summary).toContain('单章治理复查近2轮放行后失效')
+    expect(deepRepairDirection.includes('回到单章任务书')).toBe(true)
+    expect(model.batchGuardrail.recommendedAction.key).toBe('create_recovery_evidence_governance_queue')
+    expect(model.batchGuardrail.recommendedAction.label).toBe('生成强化深修队列')
+    expect(model.batchGuardrail.recommendedAction.payload?.recoveryEvidenceGovernanceQueue).toEqual(expect.objectContaining({
+      source: 'recovery_evidence_source_risk_profile',
+      label: '恢复依据画像强化深修',
+      task_count: 1,
+      tasks: [
+        expect.objectContaining({
+          issue_type: 'recovery_evidence_governance_queue',
+          source: 'single_chapter_governance_recheck',
+          source_status: 'repeated_release_failure',
+          action_key: 'deep_repair_single_brief',
+          action_label: '强化单章任务书复盘',
+          deep_repair_level: 'escalated_after_recurrence',
+          deep_repair_direction: expect.stringContaining('回到单章任务书'),
+          recovery_evidence_review: expect.objectContaining({
+            failed_evidence: ['单章治理复查：生产阻断已解除'],
+          }),
+        }),
+      ],
+    }))
+    expect(model.batchGuardrail.recommendedAction.payload?.recoveryEvidenceGovernanceQueue?.recommendations).toEqual(expect.arrayContaining([
+      expect.stringContaining('回到单章任务书'),
+    ]))
     expect(model.productionLicense.status).toBe('single_chapter')
     expect(model.productionLicense.reasons).toEqual(expect.arrayContaining([
       expect.stringContaining('单章治理复查反复放行失败 2 次'),
@@ -2297,6 +2727,1623 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(model.todayCommandDeck.releaseRationale.checks).toEqual(expect.arrayContaining([
       expect.stringContaining('单章治理复查反复放行失败 2 次'),
     ]))
+  })
+
+  test('keeps recovered recovery evidence sources under observation instead of regenerating deep repair tasks', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        topStatus: {
+          ...basePlanning.topStatus,
+          future100Coverage: { ready: true, planned: 100, required: 100, missingChapters: [], label: '100/100' },
+        },
+        futureRoute: [
+          { chapterNo: 8, title: '试炼前夜', chapterTask: '主角拿到试炼资格', conflict: '执事设局阻拦', endingHook: '阵盘亮起第二道裂纹', mainlineProgress: '进入外门试炼核心局', riskTags: [] },
+          { chapterNo: 9, title: '阵盘裂纹', chapterTask: '阵盘异常暴露主角潜力', conflict: '同门围堵试探底牌', endingHook: '内门执事点名关注', mainlineProgress: '让宗门高层第一次注意主角', riskTags: [] },
+          { chapterNo: 10, title: '外门震动', chapterTask: '试炼结果引发宗门震动', conflict: '旧秩序压制新晋黑马', endingHook: '内门招揽提出苛刻条件', mainlineProgress: '打开内门势力线', riskTags: [] },
+        ],
+      },
+      writing: {
+        ...baseWriting,
+        chapterPlanningDesk: {
+          ...baseWriting.chapterPlanningDesk,
+          readiness: 'ready',
+          statusLabel: '本章可写',
+          scenePlanStatus: 'ready',
+          sceneCards: [
+            { title: '压迫升级', goal: '执事逼主角交阵盘' },
+            { title: '反向设局', goal: '主角用阵法拿回主动权' },
+          ],
+          recommendedPlannerAction: { key: 'confirm_plan_and_write_draft', label: '确认并生成' },
+        },
+        topStatus: {
+          ...baseWriting.topStatus,
+          nextActionLabel: '确认并生成',
+          primaryActionKey: 'confirm_plan_and_write_draft',
+        },
+        primaryActionKey: 'confirm_plan_and_write_draft',
+      },
+      activeTasks: [],
+      selectedModelId: 12,
+      runRecords: [
+        {
+          id: 511,
+          run_type: 'longform_production_repair',
+          created_at: '2026-06-06T00:00:00.000Z',
+          status: 'ready',
+          output_ref: JSON.stringify({
+            report: { source: 'auto_creation_safe_batch_risk' },
+            tasks: [
+              {
+                issue_type: 'recovery_evidence_mismatch',
+                recovery_evidence_review: {
+                  status: 'warn',
+                  failed_items: [
+                    {
+                      evidence: '单章治理复查：生产阻断已解除',
+                      source: 'recovery_evidence_release_summary',
+                      source_action: 'single_chapter_governance_recheck',
+                      production_gate_source: 'single_chapter_governance_recheck',
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+        },
+        {
+          id: 512,
+          run_type: 'longform_production_repair',
+          created_at: '2026-06-07T00:00:00.000Z',
+          status: 'ready',
+          output_ref: JSON.stringify({
+            report: { source: 'auto_creation_safe_batch_risk' },
+            tasks: [
+              {
+                issue_type: 'recovery_evidence_mismatch',
+                recovery_evidence_review: {
+                  status: 'warn',
+                  failed_items: [
+                    {
+                      evidence: '单章治理复查：生产阻断已解除',
+                      source: 'recovery_evidence_release_summary',
+                      source_action: 'single_chapter_governance_recheck',
+                      production_gate_source: 'single_chapter_governance_recheck',
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+        },
+        {
+          id: 513,
+          run_type: 'longform_production_repair',
+          created_at: '2026-06-08T00:00:00.000Z',
+          updated_at: '2026-06-08T00:30:00.000Z',
+          status: 'ready',
+          output_ref: JSON.stringify({
+            report: { source: 'recovery_evidence_governance_queue' },
+            tasks: [
+              {
+                issue_type: 'recovery_evidence_governance_queue',
+                source: 'single_chapter_governance_recheck',
+                source_label: '单章治理复查',
+                source_status: 'repeated_release_failure',
+                action_key: 'deep_repair_single_brief',
+                action_label: '深修单章任务书',
+                task_status: 'resolved',
+                updated_at: '2026-06-08T00:30:00.000Z',
+              },
+            ],
+          }),
+        },
+      ],
+      storyState: {
+        last_updated_chapter: 7,
+        global: {
+          core_promise: '李超用超人蛮力碰撞规则怪谈，张智负责拆解规则。',
+          current_volume_goal: '午夜校园中活过第一轮规则。',
+          open_questions: ['广播是谁发出的', '湿漉漉学生为什么敲门'],
+          payoff_queue: ['规则边界反制蛮力'],
+        },
+      },
+    } as any)
+
+    expect(model.batchGuardrail.recoveryEvidenceTrend.sources[0]?.deepRepairEffect).toMatchObject({
+      status: 'observing',
+      label: '深修后暂无再失效',
+      postRepairFailureCount: 0,
+    })
+    expect(model.batchGuardrail.recommendedAction.key).toBe('open_task_center')
+    expect(model.batchGuardrail.recommendedAction.label).toBe('查看深修观察')
+    expect(model.batchGuardrail.recommendedAction.payload?.recoveryEvidenceGovernanceQueue?.task_count).toBe(0)
+  })
+
+  test('keeps safe batching downgraded while strengthened recovery evidence repair is waiting for recheck', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: readySafeBatchPlanning(),
+      writing: readySafeBatchWriting(),
+      activeTasks: [],
+      selectedModelId: 12,
+      runRecords: [
+        recoveryEvidenceFailureRun(521, '2026-06-06T00:00:00.000Z'),
+        recoveryEvidenceDeepRepairRun({
+          id: 522,
+          createdAt: '2026-06-06T12:00:00.000Z',
+          updatedAt: '2026-06-06T12:30:00.000Z',
+          taskStatus: 'resolved',
+          actionLabel: '深修单章任务书',
+          deepRepairLevel: 'first_deep_repair',
+        }),
+        recoveryEvidenceFailureRun(523, '2026-06-07T00:00:00.000Z'),
+        recoveryEvidenceDeepRepairRun({
+          id: 524,
+          createdAt: '2026-06-08T00:00:00.000Z',
+          taskStatus: 'needs_review',
+          actionLabel: '强化单章任务书复盘',
+          deepRepairLevel: 'escalated_after_recurrence',
+        }),
+      ],
+      storyState: {
+        last_updated_chapter: 7,
+        global: {
+          core_promise: '李超用超人蛮力碰撞规则怪谈，张智负责拆解规则。',
+          current_volume_goal: '午夜校园中活过第一轮规则。',
+        },
+      },
+    } as any)
+
+    expect(model.batchGuardrail.status).toBe('caution')
+    expect(model.batchGuardrail.safeChapterCount).toBe(1)
+    expect(model.productionLicense.status).toBe('single_chapter')
+    expect(model.batchGuardrail.recommendedAction.key).toBe('open_task_center')
+    expect(model.batchGuardrail.recommendedAction.label).toBe('查看强化深修复检')
+    expect(model.batchGuardrail.recommendedAction.payload?.recoveryEvidenceGovernanceQueue?.task_count).toBe(0)
+    expect(model.batchGuardrail.recoveryEvidenceTrend.sources[0]?.deepRepairEffect).toMatchObject({
+      status: 'recurred',
+      strengthenedClosure: {
+        status: 'pending_recheck',
+        label: '强化深修待复检',
+      },
+    })
+    expect(model.batchGuardrail.preflight.inputSnapshot.recovery_evidence_source_risk_profile).toMatchObject({
+      status: 'warn',
+      sources: [
+        expect.objectContaining({
+          source: 'single_chapter_governance_recheck',
+          deep_repair_effect: expect.objectContaining({
+            strengthened_repair_closure: expect.objectContaining({
+              status: 'pending_recheck',
+              label: '强化深修待复检',
+            }),
+          }),
+        }),
+      ],
+    })
+  })
+
+  test('restores safe batching after strengthened recovery evidence repair converges', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: readySafeBatchPlanning(),
+      writing: readySafeBatchWriting(),
+      activeTasks: [],
+      selectedModelId: 12,
+      runRecords: [
+        recoveryEvidenceFailureRun(531, '2026-06-06T00:00:00.000Z'),
+        recoveryEvidenceDeepRepairRun({
+          id: 532,
+          createdAt: '2026-06-06T12:00:00.000Z',
+          updatedAt: '2026-06-06T12:30:00.000Z',
+          taskStatus: 'resolved',
+          actionLabel: '深修单章任务书',
+          deepRepairLevel: 'first_deep_repair',
+        }),
+        recoveryEvidenceFailureRun(533, '2026-06-07T00:00:00.000Z'),
+        recoveryEvidenceDeepRepairRun({
+          id: 534,
+          createdAt: '2026-06-08T00:00:00.000Z',
+          updatedAt: '2026-06-08T00:30:00.000Z',
+          taskStatus: 'resolved',
+          actionLabel: '强化单章任务书复盘',
+          deepRepairLevel: 'escalated_after_recurrence',
+        }),
+      ],
+      storyState: {
+        last_updated_chapter: 7,
+        global: {
+          core_promise: '李超用超人蛮力碰撞规则怪谈，张智负责拆解规则。',
+          current_volume_goal: '午夜校园中活过第一轮规则。',
+        },
+      },
+    } as any)
+
+    expect(model.batchGuardrail.status).toBe('ready')
+    expect(model.batchGuardrail.safeChapterCount).toBe(3)
+    expect(model.batchGuardrail.recommendedAction.key).toBe('start_safe_batch_generation')
+    expect(model.productionLicense.status).toBe('batch_allowed')
+    expect(model.productionLicense.safeChapterCount).toBe(3)
+    expect(model.batchGuardrail.recoveryEvidenceTrend).toMatchObject({
+      status: 'ok',
+      sources: [
+        expect.objectContaining({
+          source: 'single_chapter_governance_recheck',
+          deepRepairEffect: expect.objectContaining({
+            status: 'observing',
+            label: '深修后暂无再失效',
+            latestRepairActionLabel: '强化单章任务书复盘',
+            strengthenedClosure: expect.objectContaining({
+              status: 'converged',
+              label: '强化深修已收敛',
+            }),
+          }),
+        }),
+      ],
+    })
+    expect(model.batchGuardrail.preflight.inputSnapshot.recovery_evidence_source_risk_profile).toMatchObject({
+      status: 'ok',
+      sources: [
+        expect.objectContaining({
+          source: 'single_chapter_governance_recheck',
+          deep_repair_effect: expect.objectContaining({
+            strengthened_repair_closure: expect.objectContaining({
+              status: 'converged',
+              label: '强化深修已收敛',
+            }),
+          }),
+        }),
+      ],
+    })
+    expect(model.batchGuardrail.preflight.inputSnapshot.recovery_evidence_release_summary).toMatchObject({
+      status: 'released',
+      strengthened_repair_source_count: 1,
+      evidence: expect.arrayContaining([
+        '单章治理复查：强化深修已收敛',
+      ]),
+    })
+    expect(model.productionLicense.reasons).toContain('单章治理复查：强化深修已收敛')
+  })
+
+  test('records a long-term trend when strengthened recovery batches pass core payoff and reader pull acceptance', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: readySafeBatchPlanning(),
+      writing: readySafeBatchWriting(),
+      activeTasks: [],
+      selectedModelId: 12,
+      runRecords: [
+        recoveryEvidenceFailureRun(541, '2026-06-06T00:00:00.000Z'),
+        recoveryEvidenceDeepRepairRun({
+          id: 542,
+          createdAt: '2026-06-06T12:00:00.000Z',
+          updatedAt: '2026-06-06T12:30:00.000Z',
+          taskStatus: 'resolved',
+          actionLabel: '深修单章任务书',
+          deepRepairLevel: 'first_deep_repair',
+        }),
+        recoveryEvidenceFailureRun(543, '2026-06-07T00:00:00.000Z'),
+        recoveryEvidenceDeepRepairRun({
+          id: 544,
+          createdAt: '2026-06-08T00:00:00.000Z',
+          updatedAt: '2026-06-08T00:30:00.000Z',
+          taskStatus: 'resolved',
+          actionLabel: '强化单章任务书复盘',
+          deepRepairLevel: 'escalated_after_recurrence',
+        }),
+        strengthenedAcceptanceBatchRun({ id: 545, createdAt: '2026-06-09T00:00:00.000Z', chapterNos: [41, 42, 43] }),
+        strengthenedAcceptanceBatchRun({ id: 546, createdAt: '2026-06-10T00:00:00.000Z', chapterNos: [44, 45, 46] }),
+      ],
+      chapters: [41, 42, 43, 44, 45, 46].map(chapterNo => ({
+        id: chapterNo,
+        chapter_no: chapterNo,
+        title: `强化趋势${chapterNo}`,
+        chapter_text: '强化趋势正文'.repeat(500),
+      })),
+      reviews: [
+        ...strengthenedAcceptanceQualityReviews([41, 42, 43], 4601, '2026-06-09T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([44, 45, 46], 4611, '2026-06-10T01:00:00.000Z'),
+      ],
+      storyState: {
+        last_updated_chapter: 46,
+        global: {
+          core_promise: '李超用超人蛮力碰撞规则怪谈，张智负责拆解规则。',
+          current_volume_goal: '午夜校园中活过第一轮规则。',
+        },
+      },
+    } as any)
+
+    const acceptanceTrend = (model.batchGuardrail.recoveryEvidenceTrend as any).strengthenedAcceptanceTrend
+    const trendSignal = model.batchGuardrail.guardrails.find(item => item.label === '强化恢复验收趋势')
+
+    expect(model.batchGuardrail.status).toBe('ready')
+    expect(model.batchGuardrail.safeChapterCount).toBe(3)
+    expect(trendSignal?.status).toBe('ok')
+    expect(acceptanceTrend).toMatchObject({
+      visible: true,
+      status: 'ok',
+      acceptedBatchCount: 2,
+      failedBatchCount: 0,
+      passStreak: 2,
+      latestStatus: 'ok',
+      dimensions: {
+        core: { failedCount: 0 },
+        payoff: { failedCount: 0 },
+        readerPull: { failedCount: 0 },
+      },
+    })
+    expect(acceptanceTrend.summary).toContain('连续 2 批通过')
+    expect(model.batchGuardrail.preflight.inputSnapshot.strengthened_repair_acceptance_trend).toMatchObject({
+      status: 'ok',
+      pass_streak: 2,
+    })
+    expect(model.productionLicense.status).toBe('batch_allowed')
+  })
+
+  test('expands the safe batch only after three strengthened recovery acceptance passes', () => {
+    const expandedFutureRoute = [
+      ...safeBatchFutureRoute,
+      { chapterNo: 11, title: '内门门槛', chapterTask: '主角第一次触碰内门条件', conflict: '招揽背后藏着交换代价', endingHook: '长老递来一枚禁阵令', mainlineProgress: '进入内门势力博弈', riskTags: [] },
+      { chapterNo: 12, title: '禁阵令', chapterTask: '主角用禁阵令反逼对手表态', conflict: '同门要求主角公开阵盘来源', endingHook: '阵盘浮出第二层铭文', mainlineProgress: '扩大阵盘主线谜团', riskTags: [] },
+    ]
+    const model = buildAutoCreationDirectorModel({
+      planning: readySafeBatchPlanning({ futureRoute: expandedFutureRoute }),
+      writing: readySafeBatchWriting(),
+      activeTasks: [],
+      selectedModelId: 12,
+      runRecords: [
+        strengthenedAcceptanceBatchRun({ id: 565, createdAt: '2026-06-09T00:00:00.000Z', chapterNos: [41, 42, 43] }),
+        strengthenedAcceptanceBatchRun({ id: 566, createdAt: '2026-06-10T00:00:00.000Z', chapterNos: [44, 45, 46] }),
+        strengthenedAcceptanceBatchRun({ id: 567, createdAt: '2026-06-11T00:00:00.000Z', chapterNos: [47, 48, 49] }),
+      ],
+      chapters: [41, 42, 43, 44, 45, 46, 47, 48, 49].map(chapterNo => ({
+        id: chapterNo,
+        chapter_no: chapterNo,
+        title: `强化扩批${chapterNo}`,
+        chapter_text: '强化扩批正文'.repeat(500),
+      })),
+      reviews: [
+        ...strengthenedAcceptanceQualityReviews([41, 42, 43], 4631, '2026-06-09T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([44, 45, 46], 4641, '2026-06-10T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([47, 48, 49], 4651, '2026-06-11T01:00:00.000Z'),
+      ],
+      storyState: {
+        last_updated_chapter: 49,
+        global: {
+          core_promise: '李超用超人蛮力碰撞规则怪谈，张智负责拆解规则。',
+          current_volume_goal: '午夜校园中活过第一轮规则。',
+        },
+      },
+    } as any)
+
+    const expansionSignal = model.batchGuardrail.guardrails.find(item => item.label === '强化扩批规则')
+
+    expect(model.batchGuardrail.status).toBe('ready')
+    expect(model.batchGuardrail.safeChapterCount).toBe(5)
+    expect(model.batchGuardrail.preflight.allowedChapterNos).toEqual([8, 9, 10, 11, 12])
+    expect(expansionSignal?.status).toBe('ok')
+    expect(expansionSignal?.detail).toContain('连续 3/3 批通过')
+    expect(model.batchGuardrail.preflight.inputSnapshot.safe_batch_expansion_policy).toMatchObject({
+      status: 'expanded',
+      target_chapter_count: 5,
+      required_pass_streak: 3,
+      pass_streak: 3,
+    })
+    expect(model.productionLicense.safeChapterCount).toBe(5)
+  })
+
+  test('segments five-chapter expansion reviews into hotspots and rollback policy', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: readySafeBatchPlanning(),
+      writing: readySafeBatchWriting({
+        nextChapter: { ...baseWriting.nextChapter, id: 13, chapterNo: 13, title: '扩批后续' },
+      }),
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: { last_updated_chapter: 12 },
+      chapters: [8, 9, 10, 11, 12].map(chapterNo => ({
+        id: chapterNo,
+        chapter_no: chapterNo,
+        title: `扩批验收${chapterNo}`,
+        chapter_text: '扩批验收正文'.repeat(500),
+      })),
+      reviews: [
+        ...strengthenedAcceptanceQualityReviews([8, 9, 10, 11, 12], 4661, '2026-06-12T01:00:00.000Z'),
+        {
+          id: 4671,
+          chapter_id: 10,
+          review_type: 'chapter_core_drift',
+          created_at: '2026-06-12T01:10:00.000Z',
+          payload: JSON.stringify({ chapter_core_drift: { status: 'warn', drift_risks: ['中段偏离阵盘主线承诺'] } }),
+        },
+        {
+          id: 4672,
+          chapter_id: 11,
+          review_type: 'reader_payoff_sync',
+          created_at: '2026-06-12T01:11:00.000Z',
+          payload: JSON.stringify({ reader_payoff_sync: { status: 'warn', debt_count: 1, missed: ['内门门槛回报没有显性兑现'] } }),
+        },
+        {
+          id: 4673,
+          chapter_id: 11,
+          review_type: 'reader_retention_sync',
+          created_at: '2026-06-12T01:12:00.000Z',
+          payload: JSON.stringify({ reader_retention_sync: { status: 'warn', missed_count: 1, missed: ['第11章章末没有留下下一章必看问题'] } }),
+        },
+      ],
+      runRecords: [
+        {
+          id: 568,
+          run_type: 'batch_generate_prose',
+          created_at: '2026-06-12T00:00:00.000Z',
+          status: 'success',
+          input_ref: JSON.stringify({
+            source: 'auto_creation_safe_batch',
+            safety_limit: 5,
+            batch_preflight: {
+              safe_chapter_count: 5,
+              allowed_chapter_nos: [8, 9, 10, 11, 12],
+              safe_batch_expansion_policy: {
+                status: 'expanded',
+                label: '强化扩批规则',
+                summary: '强化恢复验收连续 3/3 批通过，本轮可从 3 章扩到 5 章安全连写。',
+                target_chapter_count: 5,
+                base_chapter_count: 3,
+                expanded_chapter_count: 5,
+                required_pass_streak: 3,
+                pass_streak: 3,
+                accepted_batch_count: 3,
+                failed_batch_count: 0,
+                latest_status: 'ok',
+              },
+            },
+          }),
+          output_ref: JSON.stringify({
+            total: 5,
+            success: 5,
+            failed: 0,
+            chapters: [8, 9, 10, 11, 12].map((chapterNo, index) => ({
+              id: chapterNo,
+              chapter_no: chapterNo,
+              title: `扩批验收${chapterNo}`,
+              status: 'success',
+              score: 84 + index,
+              word_count: 3000 + index * 10,
+            })),
+          }),
+        },
+      ],
+    } as any)
+
+    const segmentSignal = model.batchReviewQueue.riskRadar.signals.find(signal => signal.key === 'batch_expansion_segment' as any)
+    const segmentTask = model.batchReviewQueue.riskRadar.repairTasks.find((task: any) => task.issue_type === 'safe_batch_expansion_segment_hotspot')
+    const segmentReview = (model.batchReviewQueue.riskRadar as any).safeBatchExpansionSegmentReview
+
+    expect(model.batchReviewQueue.status).toBe('risk')
+    expect(segmentSignal?.status).toBe('warn')
+    expect(segmentSignal?.detail).toContain('中段')
+    expect(segmentTask?.safe_batch_expansion_segment_review?.hotspots[0]).toMatchObject({
+      key: 'middle',
+      label: '中段',
+      risk_count: 3,
+      chapter_nos: [10, 11],
+    })
+    expect(segmentTask?.safe_batch_expansion_segment_review?.rollback_policy).toMatchObject({
+      target_chapter_count: 3,
+      mode: 'rollback_to_small_batch',
+    })
+    expect(segmentReview.rollbackPolicy.summary).toContain('回退到 2-3 章')
+    expect(model.batchReviewQueue.handoff.riskLabels).toContain('扩批分段')
+  })
+
+  test('keeps expansion on small batches while a five-chapter segment hotspot is unresolved', () => {
+    const expandedFutureRoute = [
+      { chapterNo: 13, title: '禁阵回声', chapterTask: '主角确认禁阵令后果', conflict: '内门要求立刻站队', endingHook: '禁阵令映出长老旧名', mainlineProgress: '推进内门规则谜团', riskTags: [] },
+      { chapterNo: 14, title: '旧名', chapterTask: '主角用旧名反逼长老解释', conflict: '长老否认旧名并封锁现场', endingHook: '张智发现旧名对应禁阵卷宗', mainlineProgress: '打开禁阵旧案线', riskTags: [] },
+      { chapterNo: 15, title: '卷宗裂页', chapterTask: '主角拿到禁阵卷宗残页', conflict: '同门夺页导致阵纹暴走', endingHook: '残页写着主角家族姓氏', mainlineProgress: '把家族线接入阵盘主线', riskTags: [] },
+      { chapterNo: 16, title: '家族姓氏', chapterTask: '主角追问家族与禁阵关系', conflict: '内门弟子以家族罪名压迫主角', endingHook: '阵盘主动吞掉罪名烙印', mainlineProgress: '升级主角身世压力', riskTags: [] },
+      { chapterNo: 17, title: '烙印消失', chapterTask: '主角公开反击罪名烙印', conflict: '长老必须在众人面前裁决', endingHook: '裁决钟响起第二声', mainlineProgress: '进入内门裁决小高潮', riskTags: [] },
+    ]
+    const model = buildAutoCreationDirectorModel({
+      planning: readySafeBatchPlanning({ futureRoute: expandedFutureRoute }),
+      writing: readySafeBatchWriting({
+        nextChapter: { ...baseWriting.nextChapter, id: 13, chapterNo: 13, title: '扩批后续' },
+        previousChapter: { chapterNo: 12, title: '禁阵令', wordCount: 3180, hasProse: true },
+      }),
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: { last_updated_chapter: 49 },
+      chapters: [41, 42, 43, 44, 45, 46, 47, 48, 49, 8, 9, 10, 11, 12].map(chapterNo => ({
+        id: chapterNo,
+        chapter_no: chapterNo,
+        title: `扩批反馈${chapterNo}`,
+        chapter_text: '扩批反馈正文'.repeat(500),
+      })),
+      reviews: [
+        ...strengthenedAcceptanceQualityReviews([41, 42, 43], 4701, '2026-06-09T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([44, 45, 46], 4711, '2026-06-10T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([47, 48, 49], 4721, '2026-06-11T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([8, 9, 10, 11, 12], 4731, '2026-06-12T01:00:00.000Z'),
+        {
+          id: 4741,
+          chapter_id: 10,
+          review_type: 'chapter_core_drift',
+          created_at: '2026-06-12T01:10:00.000Z',
+          payload: JSON.stringify({ chapter_core_drift: { status: 'warn', drift_risks: ['中段偏离阵盘主线承诺'] } }),
+        },
+        {
+          id: 4742,
+          chapter_id: 11,
+          review_type: 'reader_payoff_sync',
+          created_at: '2026-06-12T01:11:00.000Z',
+          payload: JSON.stringify({ reader_payoff_sync: { status: 'warn', debt_count: 1, missed: ['内门门槛回报没有显性兑现'] } }),
+        },
+        {
+          id: 4743,
+          chapter_id: 11,
+          review_type: 'reader_retention_sync',
+          created_at: '2026-06-12T01:12:00.000Z',
+          payload: JSON.stringify({ reader_retention_sync: { status: 'warn', missed_count: 1, missed: ['第11章章末没有留下下一章必看问题'] } }),
+        },
+      ],
+      runRecords: [
+        strengthenedAcceptanceBatchRun({ id: 570, createdAt: '2026-06-09T00:00:00.000Z', chapterNos: [41, 42, 43] }),
+        strengthenedAcceptanceBatchRun({ id: 571, createdAt: '2026-06-10T00:00:00.000Z', chapterNos: [44, 45, 46] }),
+        strengthenedAcceptanceBatchRun({ id: 572, createdAt: '2026-06-11T00:00:00.000Z', chapterNos: [47, 48, 49] }),
+        expandedSafeBatchRun({ id: 573, createdAt: '2026-06-12T00:00:00.000Z', chapterNos: [8, 9, 10, 11, 12] }),
+      ],
+    } as any)
+
+    const policy = model.batchGuardrail.preflight.inputSnapshot.safe_batch_expansion_policy
+
+    expect(policy).toMatchObject({
+      status: 'recovering',
+      target_chapter_count: 3,
+      expansion_feedback: {
+        status: 'rollback_to_small_batch',
+        target_chapter_count: 3,
+        latest_chapter_nos: [8, 9, 10, 11, 12],
+      },
+    })
+    expect(policy.summary).toContain('扩批分段热区')
+  })
+
+  test('restores five-chapter expansion after segment hotspot repair passes recheck', () => {
+    const expandedFutureRoute = [
+      ...safeBatchFutureRoute,
+      { chapterNo: 11, title: '内门门槛', chapterTask: '主角第一次触碰内门条件', conflict: '招揽背后藏着交换代价', endingHook: '长老递来一枚禁阵令', mainlineProgress: '进入内门势力博弈', riskTags: [] },
+      { chapterNo: 12, title: '禁阵令', chapterTask: '主角用禁阵令反逼对手表态', conflict: '同门要求主角公开阵盘来源', endingHook: '阵盘浮出第二层铭文', mainlineProgress: '扩大阵盘主线谜团', riskTags: [] },
+    ]
+    const model = buildAutoCreationDirectorModel({
+      planning: readySafeBatchPlanning({ futureRoute: expandedFutureRoute }),
+      writing: readySafeBatchWriting({
+        nextChapter: { ...baseWriting.nextChapter, id: 13, chapterNo: 13, title: '扩批后续' },
+        previousChapter: { chapterNo: 12, title: '禁阵令', wordCount: 3180, hasProse: true },
+      }),
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: { last_updated_chapter: 49 },
+      chapters: [41, 42, 43, 44, 45, 46, 47, 48, 49, 8, 9, 10, 11, 12].map(chapterNo => ({
+        id: chapterNo,
+        chapter_no: chapterNo,
+        title: `扩批反馈${chapterNo}`,
+        chapter_text: '扩批反馈正文'.repeat(500),
+      })),
+      reviews: [
+        ...strengthenedAcceptanceQualityReviews([41, 42, 43], 4751, '2026-06-09T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([44, 45, 46], 4761, '2026-06-10T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([47, 48, 49], 4771, '2026-06-11T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([8, 9, 10, 11, 12], 4781, '2026-06-12T01:00:00.000Z'),
+        {
+          id: 4791,
+          chapter_id: 10,
+          review_type: 'chapter_core_drift',
+          created_at: '2026-06-12T01:10:00.000Z',
+          payload: JSON.stringify({ chapter_core_drift: { status: 'warn', drift_risks: ['中段偏离阵盘主线承诺'] } }),
+        },
+        {
+          id: 4792,
+          chapter_id: 11,
+          review_type: 'reader_payoff_sync',
+          created_at: '2026-06-12T01:11:00.000Z',
+          payload: JSON.stringify({ reader_payoff_sync: { status: 'warn', debt_count: 1, missed: ['内门门槛回报没有显性兑现'] } }),
+        },
+        {
+          id: 4793,
+          chapter_id: 11,
+          review_type: 'reader_retention_sync',
+          created_at: '2026-06-12T01:12:00.000Z',
+          payload: JSON.stringify({ reader_retention_sync: { status: 'warn', missed_count: 1, missed: ['第11章章末没有留下下一章必看问题'] } }),
+        },
+        {
+          id: 4794,
+          chapter_id: 10,
+          review_type: 'prose_quality',
+          created_at: '2026-06-12T02:30:00.000Z',
+          payload: JSON.stringify({ score: 90, passed: true }),
+        },
+        {
+          id: 4795,
+          chapter_id: 11,
+          review_type: 'prose_quality',
+          created_at: '2026-06-12T02:31:00.000Z',
+          payload: JSON.stringify({ score: 91, passed: true }),
+        },
+      ],
+      runRecords: [
+        strengthenedAcceptanceBatchRun({ id: 574, createdAt: '2026-06-09T00:00:00.000Z', chapterNos: [41, 42, 43] }),
+        strengthenedAcceptanceBatchRun({ id: 575, createdAt: '2026-06-10T00:00:00.000Z', chapterNos: [44, 45, 46] }),
+        strengthenedAcceptanceBatchRun({ id: 576, createdAt: '2026-06-11T00:00:00.000Z', chapterNos: [47, 48, 49] }),
+        expandedSafeBatchRun({ id: 577, createdAt: '2026-06-12T00:00:00.000Z', chapterNos: [8, 9, 10, 11, 12] }),
+        {
+          id: 578,
+          run_type: 'longform_production_repair',
+          created_at: '2026-06-12T02:00:00.000Z',
+          completed_at: '2026-06-12T02:20:00.000Z',
+          status: 'success',
+          input_ref: JSON.stringify({
+            source: 'auto_creation_safe_batch_risk',
+            batch_created_at: '2026-06-12T00:00:00.000Z',
+          }),
+          output_ref: JSON.stringify({
+            tasks: [
+              { issue_type: 'safe_batch_expansion_segment_hotspot', task_status: 'resolved', chapter_no: 10, resolved_at: '2026-06-12T02:15:00.000Z' },
+              { issue_type: 'core_drift', task_status: 'resolved', chapter_no: 10, resolved_at: '2026-06-12T02:16:00.000Z' },
+              { issue_type: 'reader_payoff_debt', task_status: 'resolved', chapter_no: 11, resolved_at: '2026-06-12T02:17:00.000Z' },
+              { issue_type: 'reader_pull_missed', task_status: 'resolved', chapter_no: 11, resolved_at: '2026-06-12T02:18:00.000Z' },
+            ],
+          }),
+        },
+      ],
+    } as any)
+
+    const segmentSignal = model.batchReviewQueue.riskRadar.signals.find(signal => signal.key === 'batch_expansion_segment' as any)
+    const policy = model.batchGuardrail.preflight.inputSnapshot.safe_batch_expansion_policy
+
+    expect(model.batchReviewQueue.status).toBe('done')
+    expect(segmentSignal?.status).toBe('ok')
+    expect(policy).toMatchObject({
+      status: 'expanded',
+      target_chapter_count: 5,
+      expansion_feedback: {
+        status: 'recovered',
+        target_chapter_count: 5,
+        latest_chapter_nos: [8, 9, 10, 11, 12],
+      },
+    })
+    expect(policy.summary).toContain('扩批分段热区已修复')
+  })
+
+  test('tracks consecutive clean five-chapter expansion batches as a stability streak', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: readySafeBatchPlanning({ futureRoute: futureRouteRange(18, 5) }),
+      writing: readySafeBatchWriting({
+        nextChapter: { ...baseWriting.nextChapter, id: 18, chapterNo: 18, title: '稳定扩批18' },
+        previousChapter: { chapterNo: 17, title: '稳定扩批17', wordCount: 3180, hasProse: true },
+      }),
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: { last_updated_chapter: 49 },
+      chapters: [41, 42, 43, 44, 45, 46, 47, 48, 49, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17].map(chapterNo => ({
+        id: chapterNo,
+        chapter_no: chapterNo,
+        title: `稳定扩批${chapterNo}`,
+        chapter_text: '稳定扩批正文'.repeat(500),
+      })),
+      reviews: [
+        ...strengthenedAcceptanceQualityReviews([41, 42, 43], 4801, '2026-06-09T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([44, 45, 46], 4811, '2026-06-10T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([47, 48, 49], 4821, '2026-06-11T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([8, 9, 10, 11, 12], 4831, '2026-06-12T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([13, 14, 15, 16, 17], 4841, '2026-06-13T01:00:00.000Z'),
+      ],
+      runRecords: [
+        strengthenedAcceptanceBatchRun({ id: 579, createdAt: '2026-06-09T00:00:00.000Z', chapterNos: [41, 42, 43] }),
+        strengthenedAcceptanceBatchRun({ id: 580, createdAt: '2026-06-10T00:00:00.000Z', chapterNos: [44, 45, 46] }),
+        strengthenedAcceptanceBatchRun({ id: 581, createdAt: '2026-06-11T00:00:00.000Z', chapterNos: [47, 48, 49] }),
+        expandedSafeBatchRun({ id: 582, createdAt: '2026-06-12T00:00:00.000Z', chapterNos: [8, 9, 10, 11, 12] }),
+        expandedSafeBatchRun({ id: 583, createdAt: '2026-06-13T00:00:00.000Z', chapterNos: [13, 14, 15, 16, 17] }),
+      ],
+    } as any)
+
+    const policy = model.batchGuardrail.preflight.inputSnapshot.safe_batch_expansion_policy
+
+    expect(policy).toMatchObject({
+      status: 'expanded',
+      target_chapter_count: 5,
+      expansion_feedback: {
+        status: 'passed',
+        target_chapter_count: 5,
+        latest_chapter_nos: [13, 14, 15, 16, 17],
+        stable_pass_streak: 2,
+        recent_expanded_batch_count: 2,
+      },
+    })
+    expect(policy.expansion_feedback.summary).toContain('连续 2 批5章扩批通过')
+  })
+
+  test('prioritizes structure repair when the same expansion segment becomes hot again', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: readySafeBatchPlanning({ futureRoute: futureRouteRange(18, 5) }),
+      writing: readySafeBatchWriting({
+        nextChapter: { ...baseWriting.nextChapter, id: 18, chapterNo: 18, title: '稳定扩批18' },
+        previousChapter: { chapterNo: 17, title: '稳定扩批17', wordCount: 3180, hasProse: true },
+      }),
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: { last_updated_chapter: 49 },
+      chapters: [41, 42, 43, 44, 45, 46, 47, 48, 49, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17].map(chapterNo => ({
+        id: chapterNo,
+        chapter_no: chapterNo,
+        title: `复发扩批${chapterNo}`,
+        chapter_text: '复发扩批正文'.repeat(500),
+      })),
+      reviews: [
+        ...strengthenedAcceptanceQualityReviews([41, 42, 43], 4851, '2026-06-09T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([44, 45, 46], 4861, '2026-06-10T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([47, 48, 49], 4871, '2026-06-11T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([8, 9, 10, 11, 12], 4881, '2026-06-12T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([13, 14, 15, 16, 17], 4891, '2026-06-13T01:00:00.000Z'),
+        {
+          id: 4901,
+          chapter_id: 10,
+          review_type: 'chapter_core_drift',
+          created_at: '2026-06-12T01:10:00.000Z',
+          payload: JSON.stringify({ chapter_core_drift: { status: 'warn', drift_risks: ['中段第一次偏离阵盘主线承诺'] } }),
+        },
+        {
+          id: 4902,
+          chapter_id: 11,
+          review_type: 'reader_payoff_sync',
+          created_at: '2026-06-12T01:11:00.000Z',
+          payload: JSON.stringify({ reader_payoff_sync: { status: 'warn', debt_count: 1, missed: ['第一次中段回报没有显性兑现'] } }),
+        },
+        {
+          id: 4903,
+          chapter_id: 15,
+          review_type: 'chapter_core_drift',
+          created_at: '2026-06-13T01:10:00.000Z',
+          payload: JSON.stringify({ chapter_core_drift: { status: 'warn', drift_risks: ['中段第二次偏离阵盘主线承诺'] } }),
+        },
+        {
+          id: 4904,
+          chapter_id: 16,
+          review_type: 'reader_payoff_sync',
+          created_at: '2026-06-13T01:11:00.000Z',
+          payload: JSON.stringify({ reader_payoff_sync: { status: 'warn', debt_count: 1, missed: ['第二次中段回报没有显性兑现'] } }),
+        },
+        {
+          id: 4905,
+          chapter_id: 16,
+          review_type: 'reader_retention_sync',
+          created_at: '2026-06-13T01:12:00.000Z',
+          payload: JSON.stringify({ reader_retention_sync: { status: 'warn', missed_count: 1, missed: ['第二次中段章末没有留下下一章必看问题'] } }),
+        },
+      ],
+      runRecords: [
+        strengthenedAcceptanceBatchRun({ id: 584, createdAt: '2026-06-09T00:00:00.000Z', chapterNos: [41, 42, 43] }),
+        strengthenedAcceptanceBatchRun({ id: 585, createdAt: '2026-06-10T00:00:00.000Z', chapterNos: [44, 45, 46] }),
+        strengthenedAcceptanceBatchRun({ id: 586, createdAt: '2026-06-11T00:00:00.000Z', chapterNos: [47, 48, 49] }),
+        expandedSafeBatchRun({ id: 587, createdAt: '2026-06-12T00:00:00.000Z', chapterNos: [8, 9, 10, 11, 12] }),
+        expandedSafeBatchRun({ id: 588, createdAt: '2026-06-13T00:00:00.000Z', chapterNos: [13, 14, 15, 16, 17] }),
+      ],
+    } as any)
+
+    const policy = model.batchGuardrail.preflight.inputSnapshot.safe_batch_expansion_policy
+    const structureTask = model.batchReviewQueue.riskRadar.repairTasks.find((task: any) => task.issue_type === 'safe_batch_expansion_structure_repair')
+
+    expect(policy).toMatchObject({
+      status: 'recovering',
+      target_chapter_count: 3,
+      expansion_feedback: {
+        status: 'rollback_to_small_batch',
+        stable_pass_streak: 0,
+        repeated_hotspot_segment: {
+          key: 'middle',
+          label: '中段',
+          count: 2,
+        },
+      },
+    })
+    expect(policy.expansion_feedback.summary).toContain('中段连续 2 次扩批热区')
+    expect(policy.expansion_feedback.summary).toContain('批次结构改写')
+    expect(structureTask).toMatchObject({
+      task_type: 'repair_planning',
+      issue_type: 'safe_batch_expansion_structure_repair',
+      severity: 'high',
+      safe_batch_expansion_structure_review: {
+        repeated_hotspot_segment: {
+          key: 'middle',
+          label: '中段',
+          count: 2,
+        },
+        structure_actions: expect.arrayContaining([
+          expect.stringContaining('中段固定职责'),
+          expect.stringContaining('批次节奏重排'),
+        ]),
+      },
+    })
+    expect(structureTask?.action).toContain('批次结构改写')
+    expect(structureTask?.action).toContain('中段固定段落治理')
+  })
+
+  test('feeds resolved expansion structure repair into the next small validation batch brief', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: readySafeBatchPlanning({ futureRoute: futureRouteRange(50, 5) }),
+      writing: readySafeBatchWriting({
+        nextChapter: { ...baseWriting.nextChapter, id: 50, chapterNo: 50, title: '结构验证50' },
+        previousChapter: { chapterNo: 49, title: '强化趋势49', wordCount: 3180, hasProse: true },
+      }),
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: { last_updated_chapter: 49 },
+      chapters: [41, 42, 43, 44, 45, 46, 47, 48, 49, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17].map(chapterNo => ({
+        id: chapterNo,
+        chapter_no: chapterNo,
+        title: `结构验证${chapterNo}`,
+        chapter_text: '结构验证正文'.repeat(500),
+      })),
+      reviews: [
+        ...strengthenedAcceptanceQualityReviews([41, 42, 43], 4911, '2026-06-09T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([44, 45, 46], 4921, '2026-06-10T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([47, 48, 49], 4931, '2026-06-11T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([8, 9, 10, 11, 12], 4941, '2026-06-12T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([13, 14, 15, 16, 17], 4951, '2026-06-13T01:00:00.000Z'),
+        {
+          id: 4961,
+          chapter_id: 10,
+          review_type: 'chapter_core_drift',
+          created_at: '2026-06-12T01:10:00.000Z',
+          payload: JSON.stringify({ chapter_core_drift: { status: 'warn', drift_risks: ['中段第一次偏离阵盘主线承诺'] } }),
+        },
+        {
+          id: 4962,
+          chapter_id: 11,
+          review_type: 'reader_payoff_sync',
+          created_at: '2026-06-12T01:11:00.000Z',
+          payload: JSON.stringify({ reader_payoff_sync: { status: 'warn', debt_count: 1, missed: ['第一次中段回报没有显性兑现'] } }),
+        },
+        {
+          id: 4963,
+          chapter_id: 15,
+          review_type: 'chapter_core_drift',
+          created_at: '2026-06-13T01:10:00.000Z',
+          payload: JSON.stringify({ chapter_core_drift: { status: 'warn', drift_risks: ['中段第二次偏离阵盘主线承诺'] } }),
+        },
+        {
+          id: 4964,
+          chapter_id: 16,
+          review_type: 'reader_payoff_sync',
+          created_at: '2026-06-13T01:11:00.000Z',
+          payload: JSON.stringify({ reader_payoff_sync: { status: 'warn', debt_count: 1, missed: ['第二次中段回报没有显性兑现'] } }),
+        },
+        {
+          id: 4965,
+          chapter_id: 16,
+          review_type: 'reader_retention_sync',
+          created_at: '2026-06-13T01:12:00.000Z',
+          payload: JSON.stringify({ reader_retention_sync: { status: 'warn', missed_count: 1, missed: ['第二次中段章末没有留下下一章必看问题'] } }),
+        },
+        {
+          id: 4971,
+          chapter_id: 10,
+          review_type: 'prose_quality',
+          created_at: '2026-06-13T02:28:00.000Z',
+          payload: JSON.stringify({ score: 88, passed: true }),
+        },
+        {
+          id: 4972,
+          chapter_id: 11,
+          review_type: 'prose_quality',
+          created_at: '2026-06-13T02:29:00.000Z',
+          payload: JSON.stringify({ score: 89, passed: true }),
+        },
+        {
+          id: 4973,
+          chapter_id: 15,
+          review_type: 'prose_quality',
+          created_at: '2026-06-13T02:30:00.000Z',
+          payload: JSON.stringify({ score: 89, passed: true }),
+        },
+        {
+          id: 4974,
+          chapter_id: 16,
+          review_type: 'prose_quality',
+          created_at: '2026-06-13T02:31:00.000Z',
+          payload: JSON.stringify({ score: 90, passed: true }),
+        },
+      ],
+      runRecords: [
+        strengthenedAcceptanceBatchRun({ id: 589, createdAt: '2026-06-09T00:00:00.000Z', chapterNos: [41, 42, 43] }),
+        strengthenedAcceptanceBatchRun({ id: 590, createdAt: '2026-06-10T00:00:00.000Z', chapterNos: [44, 45, 46] }),
+        strengthenedAcceptanceBatchRun({ id: 591, createdAt: '2026-06-11T00:00:00.000Z', chapterNos: [47, 48, 49] }),
+        expandedSafeBatchRun({ id: 592, createdAt: '2026-06-12T00:00:00.000Z', chapterNos: [8, 9, 10, 11, 12] }),
+        expandedSafeBatchRun({ id: 593, createdAt: '2026-06-13T00:00:00.000Z', chapterNos: [13, 14, 15, 16, 17] }),
+        {
+          id: 594,
+          run_type: 'longform_production_repair',
+          created_at: '2026-06-13T02:00:00.000Z',
+          completed_at: '2026-06-13T02:20:00.000Z',
+          status: 'success',
+          input_ref: JSON.stringify({ source: 'auto_creation_safe_batch_risk' }),
+          output_ref: JSON.stringify({
+            tasks: [
+              {
+                issue_type: 'safe_batch_expansion_structure_repair',
+                task_status: 'resolved',
+                chapter_no: 15,
+                safe_batch_expansion_structure_review: {
+                  repeated_hotspot_segment: { key: 'middle', label: '中段', count: 2 },
+                  latest_chapter_nos: [13, 14, 15, 16, 17],
+                  affected_chapter_nos: [15, 16],
+                  structure_actions: [
+                    '重写中段固定职责：每批第3-4章必须完成主线转折、显性回报和章末追读。',
+                    '批次节奏重排：前段抛压，中段兑现并升级，后段留钩。',
+                  ],
+                },
+              },
+              { issue_type: 'core_drift', task_status: 'resolved', chapter_no: 15, resolved_at: '2026-06-13T02:12:00.000Z' },
+              { issue_type: 'core_drift', task_status: 'resolved', chapter_no: 10, resolved_at: '2026-06-13T02:12:00.000Z' },
+              { issue_type: 'reader_payoff_debt', task_status: 'resolved', chapter_no: 11, resolved_at: '2026-06-13T02:13:00.000Z' },
+              { issue_type: 'reader_pull_missed', task_status: 'resolved', chapter_no: 11, resolved_at: '2026-06-13T02:14:00.000Z' },
+              { issue_type: 'reader_payoff_debt', task_status: 'resolved', chapter_no: 16, resolved_at: '2026-06-13T02:13:00.000Z' },
+              { issue_type: 'reader_pull_missed', task_status: 'resolved', chapter_no: 16, resolved_at: '2026-06-13T02:14:00.000Z' },
+            ],
+          }),
+        },
+      ],
+    } as any)
+
+    const verification = model.batchGuardrail.nextBatchBrief.expansionStructureVerification
+
+    expect(model.batchGuardrail.safeChapterCount).toBe(3)
+    expect(model.batchGuardrail.nextBatchBrief.chapterRangeLabel).toBe('第50-52章')
+    expect(verification).toMatchObject({
+      source: 'safe_batch_expansion_structure_repair',
+      repeated_hotspot_segment: {
+        key: 'middle',
+        label: '中段',
+        count: 2,
+      },
+      validation_chapter_nos: [50, 51, 52],
+    })
+    expect(verification?.fixed_segment_role).toContain('中段固定职责')
+    expect(verification?.conflict_rotation).toContain('冲突来源')
+    expect(verification?.explicit_payoff).toContain('显性回报')
+    expect(verification?.ending_hook_requirement).toContain('章末追读')
+    expect(model.batchGuardrail.nextBatchBrief.startChecklist.find(item => item.key === 'expansion_structure')).toMatchObject({
+      status: 'ok',
+      detail: expect.stringContaining('中段固定职责'),
+    })
+    expect(model.batchGuardrail.preflight.inputSnapshot.next_batch_brief.expansionStructureVerification).toMatchObject({
+      validation_chapter_nos: [50, 51, 52],
+    })
+    expect(model.batchGuardrail.preflight.inputSnapshot.safe_batch_expansion_structure_verification).toMatchObject({
+      validation_chapter_nos: [50, 51, 52],
+    })
+  })
+
+  test('restores five-chapter expansion after the structure validation batch passes', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: readySafeBatchPlanning({ futureRoute: futureRouteRange(53, 5) }),
+      writing: readySafeBatchWriting({
+        nextChapter: { ...baseWriting.nextChapter, id: 53, chapterNo: 53, title: '结构验证后53' },
+        previousChapter: { chapterNo: 52, title: '结构验证52', wordCount: 3180, hasProse: true },
+      }),
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: { last_updated_chapter: 52 },
+      chapters: [41, 42, 43, 44, 45, 46, 47, 48, 49, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 50, 51, 52].map(chapterNo => ({
+        id: chapterNo,
+        chapter_no: chapterNo,
+        title: `结构验证${chapterNo}`,
+        chapter_text: '结构验证正文'.repeat(500),
+      })),
+      reviews: [
+        ...strengthenedAcceptanceQualityReviews([41, 42, 43], 4981, '2026-06-09T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([44, 45, 46], 4991, '2026-06-10T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([47, 48, 49], 5001, '2026-06-11T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([8, 9, 10, 11, 12], 5011, '2026-06-12T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([13, 14, 15, 16, 17], 5021, '2026-06-13T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([50, 51, 52], 5031, '2026-06-14T01:00:00.000Z'),
+        {
+          id: 5041,
+          chapter_id: 10,
+          review_type: 'chapter_core_drift',
+          created_at: '2026-06-12T01:10:00.000Z',
+          payload: JSON.stringify({ chapter_core_drift: { status: 'warn', drift_risks: ['中段第一次偏离阵盘主线承诺'] } }),
+        },
+        {
+          id: 5042,
+          chapter_id: 11,
+          review_type: 'reader_payoff_sync',
+          created_at: '2026-06-12T01:11:00.000Z',
+          payload: JSON.stringify({ reader_payoff_sync: { status: 'warn', debt_count: 1, missed: ['第一次中段回报没有显性兑现'] } }),
+        },
+        {
+          id: 5043,
+          chapter_id: 15,
+          review_type: 'chapter_core_drift',
+          created_at: '2026-06-13T01:10:00.000Z',
+          payload: JSON.stringify({ chapter_core_drift: { status: 'warn', drift_risks: ['中段第二次偏离阵盘主线承诺'] } }),
+        },
+        {
+          id: 5044,
+          chapter_id: 16,
+          review_type: 'reader_payoff_sync',
+          created_at: '2026-06-13T01:11:00.000Z',
+          payload: JSON.stringify({ reader_payoff_sync: { status: 'warn', debt_count: 1, missed: ['第二次中段回报没有显性兑现'] } }),
+        },
+        {
+          id: 5045,
+          chapter_id: 16,
+          review_type: 'reader_retention_sync',
+          created_at: '2026-06-13T01:12:00.000Z',
+          payload: JSON.stringify({ reader_retention_sync: { status: 'warn', missed_count: 1, missed: ['第二次中段章末没有留下下一章必看问题'] } }),
+        },
+        {
+          id: 5046,
+          chapter_id: 10,
+          review_type: 'prose_quality',
+          created_at: '2026-06-13T02:28:00.000Z',
+          payload: JSON.stringify({ score: 88, passed: true }),
+        },
+        {
+          id: 5047,
+          chapter_id: 11,
+          review_type: 'prose_quality',
+          created_at: '2026-06-13T02:29:00.000Z',
+          payload: JSON.stringify({ score: 89, passed: true }),
+        },
+        {
+          id: 5048,
+          chapter_id: 15,
+          review_type: 'prose_quality',
+          created_at: '2026-06-13T02:30:00.000Z',
+          payload: JSON.stringify({ score: 89, passed: true }),
+        },
+        {
+          id: 5049,
+          chapter_id: 16,
+          review_type: 'prose_quality',
+          created_at: '2026-06-13T02:31:00.000Z',
+          payload: JSON.stringify({ score: 90, passed: true }),
+        },
+      ],
+      runRecords: [
+        strengthenedAcceptanceBatchRun({ id: 595, createdAt: '2026-06-09T00:00:00.000Z', chapterNos: [41, 42, 43] }),
+        strengthenedAcceptanceBatchRun({ id: 596, createdAt: '2026-06-10T00:00:00.000Z', chapterNos: [44, 45, 46] }),
+        strengthenedAcceptanceBatchRun({ id: 597, createdAt: '2026-06-11T00:00:00.000Z', chapterNos: [47, 48, 49] }),
+        expandedSafeBatchRun({ id: 598, createdAt: '2026-06-12T00:00:00.000Z', chapterNos: [8, 9, 10, 11, 12] }),
+        expandedSafeBatchRun({ id: 599, createdAt: '2026-06-13T00:00:00.000Z', chapterNos: [13, 14, 15, 16, 17] }),
+        {
+          id: 600,
+          run_type: 'longform_production_repair',
+          created_at: '2026-06-13T02:00:00.000Z',
+          completed_at: '2026-06-13T02:20:00.000Z',
+          status: 'success',
+          input_ref: JSON.stringify({ source: 'auto_creation_safe_batch_risk' }),
+          output_ref: JSON.stringify({
+            tasks: [{
+              issue_type: 'safe_batch_expansion_structure_repair',
+              task_status: 'resolved',
+              chapter_no: 15,
+              safe_batch_expansion_structure_review: {
+                repeated_hotspot_segment: { key: 'middle', label: '中段', count: 2 },
+                latest_chapter_nos: [13, 14, 15, 16, 17],
+                affected_chapter_nos: [15, 16],
+                structure_actions: ['重写中段固定职责：每批第3-4章必须完成主线转折、显性回报和章末追读。'],
+              },
+            },
+            { issue_type: 'core_drift', task_status: 'resolved', chapter_no: 10, resolved_at: '2026-06-13T02:12:00.000Z' },
+            { issue_type: 'reader_payoff_debt', task_status: 'resolved', chapter_no: 11, resolved_at: '2026-06-13T02:13:00.000Z' },
+            { issue_type: 'reader_pull_missed', task_status: 'resolved', chapter_no: 11, resolved_at: '2026-06-13T02:14:00.000Z' },
+            { issue_type: 'core_drift', task_status: 'resolved', chapter_no: 15, resolved_at: '2026-06-13T02:12:00.000Z' },
+            { issue_type: 'reader_payoff_debt', task_status: 'resolved', chapter_no: 16, resolved_at: '2026-06-13T02:13:00.000Z' },
+            { issue_type: 'reader_pull_missed', task_status: 'resolved', chapter_no: 16, resolved_at: '2026-06-13T02:14:00.000Z' }],
+          }),
+        },
+        expansionStructureValidationBatchRun({ id: 601, createdAt: '2026-06-14T00:00:00.000Z', chapterNos: [50, 51, 52] }),
+      ],
+    } as any)
+
+    const policy = model.batchGuardrail.preflight.inputSnapshot.safe_batch_expansion_policy
+    const structureSignal = model.batchReviewQueue.riskRadar.signals.find(signal => signal.key === 'batch_expansion_structure' as any)
+
+    expect(model.batchGuardrail.safeChapterCount).toBe(5)
+    expect(policy).toMatchObject({
+      status: 'expanded',
+      target_chapter_count: 5,
+      expansion_feedback: {
+        status: 'recovered',
+        target_chapter_count: 5,
+        expansion_structure_validation_result: {
+          status: 'ok',
+          validation_chapter_nos: [50, 51, 52],
+          risk_count: 0,
+        },
+      },
+    })
+    expect(structureSignal).toMatchObject({
+      status: 'ok',
+      detail: expect.stringContaining('结构验证批通过'),
+    })
+  })
+
+  test('keeps small-batch recovery when the structure validation batch fails', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: readySafeBatchPlanning({ futureRoute: futureRouteRange(53, 5) }),
+      writing: readySafeBatchWriting({
+        nextChapter: { ...baseWriting.nextChapter, id: 53, chapterNo: 53, title: '结构验证后53' },
+        previousChapter: { chapterNo: 52, title: '结构验证52', wordCount: 3180, hasProse: true },
+      }),
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: { last_updated_chapter: 52 },
+      chapters: [41, 42, 43, 44, 45, 46, 47, 48, 49, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 50, 51, 52].map(chapterNo => ({
+        id: chapterNo,
+        chapter_no: chapterNo,
+        title: `结构验证${chapterNo}`,
+        chapter_text: '结构验证正文'.repeat(500),
+      })),
+      reviews: [
+        ...strengthenedAcceptanceQualityReviews([41, 42, 43], 5051, '2026-06-09T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([44, 45, 46], 5061, '2026-06-10T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([47, 48, 49], 5071, '2026-06-11T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([8, 9, 10, 11, 12], 5081, '2026-06-12T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([13, 14, 15, 16, 17], 5091, '2026-06-13T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([50, 51, 52], 5101, '2026-06-14T01:00:00.000Z'),
+        {
+          id: 5111,
+          chapter_id: 10,
+          review_type: 'chapter_core_drift',
+          created_at: '2026-06-12T01:10:00.000Z',
+          payload: JSON.stringify({ chapter_core_drift: { status: 'warn', drift_risks: ['中段第一次偏离阵盘主线承诺'] } }),
+        },
+        {
+          id: 5112,
+          chapter_id: 11,
+          review_type: 'reader_payoff_sync',
+          created_at: '2026-06-12T01:11:00.000Z',
+          payload: JSON.stringify({ reader_payoff_sync: { status: 'warn', debt_count: 1, missed: ['第一次中段回报没有显性兑现'] } }),
+        },
+        {
+          id: 5113,
+          chapter_id: 15,
+          review_type: 'chapter_core_drift',
+          created_at: '2026-06-13T01:10:00.000Z',
+          payload: JSON.stringify({ chapter_core_drift: { status: 'warn', drift_risks: ['中段第二次偏离阵盘主线承诺'] } }),
+        },
+        {
+          id: 5114,
+          chapter_id: 16,
+          review_type: 'reader_payoff_sync',
+          created_at: '2026-06-13T01:11:00.000Z',
+          payload: JSON.stringify({ reader_payoff_sync: { status: 'warn', debt_count: 1, missed: ['第二次中段回报没有显性兑现'] } }),
+        },
+        {
+          id: 5115,
+          chapter_id: 16,
+          review_type: 'reader_retention_sync',
+          created_at: '2026-06-13T01:12:00.000Z',
+          payload: JSON.stringify({ reader_retention_sync: { status: 'warn', missed_count: 1, missed: ['第二次中段章末没有留下下一章必看问题'] } }),
+        },
+        {
+          id: 5116,
+          chapter_id: 10,
+          review_type: 'prose_quality',
+          created_at: '2026-06-13T02:28:00.000Z',
+          payload: JSON.stringify({ score: 88, passed: true }),
+        },
+        {
+          id: 5117,
+          chapter_id: 11,
+          review_type: 'prose_quality',
+          created_at: '2026-06-13T02:29:00.000Z',
+          payload: JSON.stringify({ score: 89, passed: true }),
+        },
+        {
+          id: 5118,
+          chapter_id: 15,
+          review_type: 'prose_quality',
+          created_at: '2026-06-13T02:30:00.000Z',
+          payload: JSON.stringify({ score: 89, passed: true }),
+        },
+        {
+          id: 5119,
+          chapter_id: 16,
+          review_type: 'prose_quality',
+          created_at: '2026-06-13T02:31:00.000Z',
+          payload: JSON.stringify({ score: 90, passed: true }),
+        },
+        {
+          id: 5121,
+          chapter_id: 51,
+          review_type: 'chapter_core_drift',
+          created_at: '2026-06-14T01:10:00.000Z',
+          payload: JSON.stringify({ chapter_core_drift: { status: 'warn', drift_risks: ['验证批中段仍偏离阵盘主线承诺'] } }),
+        },
+        {
+          id: 5122,
+          chapter_id: 52,
+          review_type: 'reader_payoff_sync',
+          created_at: '2026-06-14T01:11:00.000Z',
+          payload: JSON.stringify({ reader_payoff_sync: { status: 'warn', debt_count: 1, missed: ['验证批回报仍没有显性兑现'] } }),
+        },
+        {
+          id: 5123,
+          chapter_id: 52,
+          review_type: 'reader_retention_sync',
+          created_at: '2026-06-14T01:12:00.000Z',
+          payload: JSON.stringify({ reader_retention_sync: { status: 'warn', missed_count: 1, missed: ['验证批章末追读问题仍重复'] } }),
+        },
+      ],
+      runRecords: [
+        strengthenedAcceptanceBatchRun({ id: 602, createdAt: '2026-06-09T00:00:00.000Z', chapterNos: [41, 42, 43] }),
+        strengthenedAcceptanceBatchRun({ id: 603, createdAt: '2026-06-10T00:00:00.000Z', chapterNos: [44, 45, 46] }),
+        strengthenedAcceptanceBatchRun({ id: 604, createdAt: '2026-06-11T00:00:00.000Z', chapterNos: [47, 48, 49] }),
+        expandedSafeBatchRun({ id: 605, createdAt: '2026-06-12T00:00:00.000Z', chapterNos: [8, 9, 10, 11, 12] }),
+        expandedSafeBatchRun({ id: 606, createdAt: '2026-06-13T00:00:00.000Z', chapterNos: [13, 14, 15, 16, 17] }),
+        {
+          id: 607,
+          run_type: 'longform_production_repair',
+          created_at: '2026-06-13T02:00:00.000Z',
+          completed_at: '2026-06-13T02:20:00.000Z',
+          status: 'success',
+          input_ref: JSON.stringify({ source: 'auto_creation_safe_batch_risk' }),
+          output_ref: JSON.stringify({
+            tasks: [{
+              issue_type: 'safe_batch_expansion_structure_repair',
+              task_status: 'resolved',
+              chapter_no: 15,
+              safe_batch_expansion_structure_review: {
+                repeated_hotspot_segment: { key: 'middle', label: '中段', count: 2 },
+                latest_chapter_nos: [13, 14, 15, 16, 17],
+                affected_chapter_nos: [15, 16],
+                structure_actions: ['重写中段固定职责：每批第3-4章必须完成主线转折、显性回报和章末追读。'],
+              },
+            },
+            { issue_type: 'core_drift', task_status: 'resolved', chapter_no: 10, resolved_at: '2026-06-13T02:12:00.000Z' },
+            { issue_type: 'reader_payoff_debt', task_status: 'resolved', chapter_no: 11, resolved_at: '2026-06-13T02:13:00.000Z' },
+            { issue_type: 'reader_pull_missed', task_status: 'resolved', chapter_no: 11, resolved_at: '2026-06-13T02:14:00.000Z' },
+            { issue_type: 'core_drift', task_status: 'resolved', chapter_no: 15, resolved_at: '2026-06-13T02:12:00.000Z' },
+            { issue_type: 'reader_payoff_debt', task_status: 'resolved', chapter_no: 16, resolved_at: '2026-06-13T02:13:00.000Z' },
+            { issue_type: 'reader_pull_missed', task_status: 'resolved', chapter_no: 16, resolved_at: '2026-06-13T02:14:00.000Z' }],
+          }),
+        },
+        expansionStructureValidationBatchRun({ id: 608, createdAt: '2026-06-14T00:00:00.000Z', chapterNos: [50, 51, 52] }),
+      ],
+    } as any)
+
+    const policy = model.batchGuardrail.preflight.inputSnapshot.safe_batch_expansion_policy
+    const structureSignal = model.batchReviewQueue.riskRadar.signals.find(signal => signal.key === 'batch_expansion_structure' as any)
+    const structureTask = model.batchReviewQueue.riskRadar.repairTasks.find((task: any) => task.issue_type === 'safe_batch_expansion_structure_repair')
+
+    expect(model.batchGuardrail.safeChapterCount).toBe(0)
+    expect(policy).toMatchObject({
+      status: 'recovering',
+      target_chapter_count: 3,
+      expansion_feedback: {
+        status: 'rollback_to_small_batch',
+        expansion_structure_validation_result: {
+          status: 'warn',
+          validation_chapter_nos: [50, 51, 52],
+          risk_count: 3,
+        },
+      },
+    })
+    expect(structureSignal).toMatchObject({
+      status: 'warn',
+      detail: expect.stringContaining('结构验证批未通过'),
+    })
+    expect(structureTask).toMatchObject({
+      issue_type: 'safe_batch_expansion_structure_repair',
+      safe_batch_expansion_structure_review: {
+        repeated_hotspot_segment: { key: 'middle', label: '中段', count: 2 },
+        validation_result: {
+          risk_count: 3,
+          failed_chapter_nos: [51, 52],
+        },
+        expansion_structure_validation_trend: {
+          visible: true,
+          status: 'warn',
+          segment_key: 'middle',
+          segment_label: '中段',
+          validation_batch_count: 1,
+          passed_batch_count: 0,
+          failed_batch_count: 1,
+          pass_rate: 0,
+          latest_status: 'warn',
+        },
+      },
+    })
+  })
+
+  test('summarizes expansion structure validation trend by repeated segment', () => {
+    const chapterNos = [50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63]
+    const model = buildAutoCreationDirectorModel({
+      planning: readySafeBatchPlanning({ futureRoute: futureRouteRange(64, 5) }),
+      writing: readySafeBatchWriting({
+        nextChapter: { ...baseWriting.nextChapter, id: 64, chapterNo: 64, title: '结构趋势64' },
+        previousChapter: { chapterNo: 63, title: '结构趋势63', wordCount: 3180, hasProse: true },
+      }),
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: { last_updated_chapter: 63 },
+      chapters: chapterNos.map(chapterNo => ({
+        id: chapterNo,
+        chapter_no: chapterNo,
+        title: `结构趋势${chapterNo}`,
+        chapter_text: '结构趋势正文'.repeat(500),
+      })),
+      reviews: [
+        ...strengthenedAcceptanceQualityReviews([50, 51, 52], 6201, '2026-06-14T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([53, 54, 55], 6211, '2026-06-15T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([56, 57, 58], 6221, '2026-06-16T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([59, 60, 61, 62, 63], 6231, '2026-06-17T01:00:00.000Z'),
+        {
+          id: 6241,
+          chapter_id: 54,
+          review_type: 'chapter_core_drift',
+          created_at: '2026-06-15T01:10:00.000Z',
+          payload: JSON.stringify({ chapter_core_drift: { status: 'warn', drift_risks: ['第二次验证批中段仍偏离主线承诺'] } }),
+        },
+        {
+          id: 6242,
+          chapter_id: 55,
+          review_type: 'reader_payoff_sync',
+          created_at: '2026-06-15T01:11:00.000Z',
+          payload: JSON.stringify({ reader_payoff_sync: { status: 'warn', debt_count: 1, missed: ['第二次验证批中段没有显性兑现'] } }),
+        },
+        {
+          id: 6243,
+          chapter_id: 55,
+          review_type: 'reader_retention_sync',
+          created_at: '2026-06-15T01:12:00.000Z',
+          payload: JSON.stringify({ reader_retention_sync: { status: 'warn', missed_count: 1, missed: ['第二次验证批章末追读问题重复'] } }),
+        },
+        {
+          id: 6244,
+          chapter_id: 61,
+          review_type: 'chapter_core_drift',
+          created_at: '2026-06-17T01:10:00.000Z',
+          payload: JSON.stringify({ chapter_core_drift: { status: 'warn', drift_risks: ['恢复5章后中段再次偏离主线承诺'] } }),
+        },
+      ],
+      runRecords: [
+        expansionStructureValidationBatchRun({ id: 621, createdAt: '2026-06-14T00:00:00.000Z', chapterNos: [50, 51, 52] }),
+        expansionStructureValidationBatchRun({ id: 622, createdAt: '2026-06-15T00:00:00.000Z', chapterNos: [53, 54, 55] }),
+        expansionStructureValidationBatchRun({ id: 623, createdAt: '2026-06-16T00:00:00.000Z', chapterNos: [56, 57, 58] }),
+        expandedSafeBatchRun({ id: 624, createdAt: '2026-06-17T00:00:00.000Z', chapterNos: [59, 60, 61, 62, 63] }),
+      ],
+    } as any)
+
+    const policy = model.batchGuardrail.preflight.inputSnapshot.safe_batch_expansion_policy
+    const trend = policy.expansion_feedback.expansion_structure_validation_trend
+
+    expect(trend).toMatchObject({
+      visible: true,
+      status: 'warn',
+      label: '扩批结构验证趋势',
+      segment_key: 'middle',
+      segment_label: '中段',
+      validation_batch_count: 3,
+      passed_batch_count: 2,
+      failed_batch_count: 1,
+      pass_rate: 67,
+      latest_status: 'ok',
+      latest_chapter_nos: [56, 57, 58],
+      recurrence_after_restore: {
+        visible: true,
+        interval_batch_count: 1,
+        interval_label: '恢复5章后第1个扩批批次复发',
+        recurrence_chapter_nos: [59, 60, 61, 62, 63],
+        repeated_hotspot_segment: { key: 'middle', label: '中段' },
+      },
+    })
+    expect(trend.failure_reasons).toEqual([
+      { key: 'core', label: '核心偏移', count: 1 },
+      { key: 'payoff', label: '回报欠账', count: 1 },
+      { key: 'reader_pull', label: '追读拉力', count: 1 },
+    ])
+    expect(trend.summary).toContain('中段验证通过率 67%')
+    expect(trend.summary).toContain('恢复5章后第1个扩批批次复发')
+  })
+
+  test('summarizes structure repair effectiveness after trend-driven repair improves validation', () => {
+    const chapterNos = [64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74]
+    const model = buildAutoCreationDirectorModel({
+      planning: readySafeBatchPlanning({ futureRoute: futureRouteRange(75, 5) }),
+      writing: readySafeBatchWriting({
+        nextChapter: { ...baseWriting.nextChapter, id: 75, chapterNo: 75, title: '结构有效性75' },
+        previousChapter: { chapterNo: 74, title: '结构有效性74', wordCount: 3200, hasProse: true },
+      }),
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: { last_updated_chapter: 74 },
+      chapters: chapterNos.map(chapterNo => ({
+        id: chapterNo,
+        chapter_no: chapterNo,
+        title: `结构有效性${chapterNo}`,
+        chapter_text: '结构有效性正文'.repeat(500),
+      })),
+      reviews: [
+        ...strengthenedAcceptanceQualityReviews([64, 65, 66], 6251, '2026-06-17T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([67, 68, 69], 6261, '2026-06-18T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([70, 71, 72, 73, 74], 6271, '2026-06-19T01:00:00.000Z'),
+      ],
+      runRecords: [
+        {
+          id: 625,
+          run_type: 'longform_production_repair',
+          created_at: '2026-06-16T12:00:00.000Z',
+          completed_at: '2026-06-16T12:30:00.000Z',
+          status: 'success',
+          input_ref: JSON.stringify({ source: 'auto_creation_safe_batch_risk' }),
+          output_ref: JSON.stringify({
+            tasks: [{
+              issue_type: 'safe_batch_expansion_structure_repair',
+              task_status: 'resolved',
+              chapter_no: 61,
+              safe_batch_expansion_structure_review: {
+                repeated_hotspot_segment: { key: 'middle', label: '中段', count: 3 },
+                latest_chapter_nos: [59, 60, 61, 62, 63],
+                affected_chapter_nos: [61],
+                expansion_structure_validation_trend: {
+                  visible: true,
+                  status: 'warn',
+                  label: '扩批结构验证趋势',
+                  summary: '中段验证通过率 67%（2/3批），失败主因：核心偏移1、回报欠账1、追读拉力1，恢复5章后第1个扩批批次复发。',
+                  segment_key: 'middle',
+                  segment_label: '中段',
+                  validation_batch_count: 3,
+                  passed_batch_count: 2,
+                  failed_batch_count: 1,
+                  pass_rate: 67,
+                  latest_status: 'ok',
+                  latest_chapter_nos: [56, 57, 58],
+                  failure_reasons: [
+                    { key: 'core', label: '核心偏移', count: 1 },
+                    { key: 'payoff', label: '回报欠账', count: 1 },
+                    { key: 'reader_pull', label: '追读拉力', count: 1 },
+                  ],
+                  recurrence_after_restore: {
+                    visible: true,
+                    interval_batch_count: 1,
+                    interval_label: '恢复5章后第1个扩批批次复发',
+                    recurrence_chapter_nos: [59, 60, 61, 62, 63],
+                  },
+                },
+              },
+            }],
+          }),
+        },
+        expansionStructureValidationBatchRun({ id: 626, createdAt: '2026-06-17T00:00:00.000Z', chapterNos: [64, 65, 66] }),
+        expansionStructureValidationBatchRun({ id: 627, createdAt: '2026-06-18T00:00:00.000Z', chapterNos: [67, 68, 69] }),
+        expandedSafeBatchRun({ id: 628, createdAt: '2026-06-19T00:00:00.000Z', chapterNos: [70, 71, 72, 73, 74] }),
+      ],
+    } as any)
+
+    const policy = model.batchGuardrail.preflight.inputSnapshot.safe_batch_expansion_policy
+    const effectiveness = policy.expansion_feedback.expansion_structure_repair_effectiveness
+
+    expect(effectiveness).toMatchObject({
+      visible: true,
+      status: 'ok',
+      label: '结构修复有效性',
+      source_run_id: 625,
+      segment_key: 'middle',
+      segment_label: '中段',
+      baseline_pass_rate: 67,
+      current_pass_rate: 100,
+      pass_rate_delta: 33,
+      baseline_failure_reason_count: 3,
+      current_failure_reason_count: 0,
+      failure_reason_delta: -3,
+      baseline_recurrence_interval_batch_count: 1,
+      current_recurrence_interval_batch_count: 0,
+      recommendation: 'restore_five_chapter',
+    })
+    expect(effectiveness.summary).toContain('通过率 67% -> 100%')
+    expect(effectiveness.summary).toContain('失败主因 3 -> 0')
+    expect(effectiveness.summary).toContain('暂无同段复发')
+  })
+
+  test('downgrades to single chapter when the latest strengthened recovery acceptance trend fails', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: readySafeBatchPlanning(),
+      writing: readySafeBatchWriting(),
+      activeTasks: [],
+      selectedModelId: 12,
+      runRecords: [
+        recoveryEvidenceFailureRun(551, '2026-06-06T00:00:00.000Z'),
+        recoveryEvidenceDeepRepairRun({
+          id: 552,
+          createdAt: '2026-06-06T12:00:00.000Z',
+          updatedAt: '2026-06-06T12:30:00.000Z',
+          taskStatus: 'resolved',
+          actionLabel: '深修单章任务书',
+          deepRepairLevel: 'first_deep_repair',
+        }),
+        recoveryEvidenceFailureRun(553, '2026-06-07T00:00:00.000Z'),
+        recoveryEvidenceDeepRepairRun({
+          id: 554,
+          createdAt: '2026-06-08T00:00:00.000Z',
+          updatedAt: '2026-06-08T00:30:00.000Z',
+          taskStatus: 'resolved',
+          actionLabel: '强化单章任务书复盘',
+          deepRepairLevel: 'escalated_after_recurrence',
+        }),
+        strengthenedAcceptanceBatchRun({ id: 555, createdAt: '2026-06-09T00:00:00.000Z', chapterNos: [41, 42, 43] }),
+        {
+          id: 556,
+          run_type: 'longform_production_repair',
+          created_at: '2026-06-10T00:00:00.000Z',
+          status: 'ready',
+          output_ref: JSON.stringify({
+            report: { source: 'auto_creation_safe_batch_risk' },
+            tasks: [
+              {
+                issue_type: 'strengthened_repair_acceptance_mismatch',
+                task_status: 'open',
+                chapter_no: 44,
+                strengthened_repair_acceptance_review: {
+                  status: 'warn',
+                  source_evidence: ['单章治理复查：强化深修已收敛'],
+                  failed_evidence: ['核心守恒风险 1 项', '读者回报欠账 1 项', '读者拉力风险 1 项'],
+                  risk_count: 3,
+                  core_risk_count: 1,
+                  payoff_debt_count: 1,
+                  reader_pull_risk_count: 1,
+                  summary: '强化深修恢复验收未通过：单章治理复查：强化深修已收敛 放行后仍有核心守恒风险 1 项、读者回报欠账 1 项、读者拉力风险 1 项。',
+                },
+              },
+            ],
+          }),
+        },
+      ],
+      chapters: [41, 42, 43].map(chapterNo => ({
+        id: chapterNo,
+        chapter_no: chapterNo,
+        title: `强化趋势${chapterNo}`,
+        chapter_text: '强化趋势正文'.repeat(500),
+      })),
+      reviews: strengthenedAcceptanceQualityReviews([41, 42, 43], 4621, '2026-06-09T01:00:00.000Z'),
+      storyState: {
+        last_updated_chapter: 43,
+        global: {
+          core_promise: '李超用超人蛮力碰撞规则怪谈，张智负责拆解规则。',
+          current_volume_goal: '午夜校园中活过第一轮规则。',
+        },
+      },
+    } as any)
+
+    const acceptanceTrend = (model.batchGuardrail.recoveryEvidenceTrend as any).strengthenedAcceptanceTrend
+    const trendSignal = model.batchGuardrail.guardrails.find(item => item.label === '强化恢复验收趋势')
+
+    expect(model.batchGuardrail.status).toBe('caution')
+    expect(model.batchGuardrail.safeChapterCount).toBe(1)
+    expect(model.productionLicense.status).toBe('single_chapter')
+    expect(model.batchGuardrail.recommendedAction.key).toBe('open_task_center')
+    expect(model.batchGuardrail.recommendedAction.label).toBe('查看强化复盘')
+    expect(trendSignal?.status).toBe('warn')
+    expect(acceptanceTrend).toMatchObject({
+      visible: true,
+      status: 'warn',
+      acceptedBatchCount: 1,
+      failedBatchCount: 1,
+      passStreak: 0,
+      latestStatus: 'warn',
+      dimensions: {
+        core: { failedCount: 1 },
+        payoff: { failedCount: 1 },
+        readerPull: { failedCount: 1 },
+      },
+    })
+    expect(acceptanceTrend.summary).toContain('最近 1 批未通过')
+    expect(model.batchGuardrail.preflight.inputSnapshot.strengthened_repair_acceptance_trend).toMatchObject({
+      status: 'warn',
+      latest_status: 'warn',
+      failed_batch_count: 1,
+    })
   })
 
   test('downgrades safe batching when the next batch still selects risky style samples', () => {
@@ -6626,6 +8673,88 @@ describe('buildAutoCreationDirectorModel', () => {
     })
     expect(recoveryTask?.recoveryEvidenceGovernanceQueue?.task_count).toBe(3)
     expect(model.batchReviewQueue.handoff.riskLabels).toContain('恢复依据')
+  })
+
+  test('holds strengthened repair recovery when core and reader payoff acceptance fails', () => {
+    const model = buildAutoCreationDirectorModel(buildStrengthenedRepairAcceptanceInput([
+      {
+        id: 4510,
+        chapter_id: 42,
+        review_type: 'chapter_core_drift',
+        created_at: '2026-06-06T01:03:00.000Z',
+        payload: JSON.stringify({
+          core_drift: {
+            status: 'warn',
+            score: 68,
+            drift_risks: ['强化深修恢复后主线承诺仍被支线挤压'],
+          },
+        }),
+      },
+      {
+        id: 4511,
+        chapter_id: 43,
+        review_type: 'reader_payoff_sync',
+        created_at: '2026-06-06T01:04:00.000Z',
+        payload: JSON.stringify({
+          reader_payoff_sync: {
+            status: 'warn',
+            debt_count: 1,
+            missed: ['强化深修恢复后没有兑现阵盘反压爽点'],
+          },
+        }),
+      },
+      {
+        id: 4512,
+        chapter_id: 43,
+        review_type: 'reader_expectation_sync',
+        created_at: '2026-06-06T01:05:00.000Z',
+        payload: JSON.stringify({
+          reader_expectation_sync: {
+            status: 'warn',
+            missed_count: 1,
+            missed: ['章末追读问题没有接住下一章期待'],
+          },
+        }),
+      },
+    ]))
+
+    const acceptanceSignal = model.batchReviewQueue.riskRadar.signals.find(signal => signal.key === 'strengthened_repair_acceptance' as any)
+    const acceptanceTask = model.batchReviewQueue.riskRadar.repairTasks.find((task: any) => task.issue_type === 'strengthened_repair_acceptance_mismatch')
+
+    expect(model.batchReviewQueue.status).toBe('risk')
+    expect((model.batchReviewQueue.riskRadar as any).strengthenedRepairAcceptanceRiskCount).toBe(3)
+    expect(acceptanceSignal?.label).toBe('强化复盘')
+    expect(acceptanceSignal?.status).toBe('warn')
+    expect(acceptanceSignal?.detail).toContain('强化深修恢复验收未通过')
+    expect(acceptanceSignal?.detail).toContain('单章治理复查：强化深修已收敛')
+    expect(acceptanceTask?.strengthened_repair_acceptance_review).toMatchObject({
+      status: 'warn',
+      source_evidence: ['单章治理复查：强化深修已收敛'],
+      failed_evidence: expect.arrayContaining([
+        '核心守恒风险 1 项',
+        '读者回报欠账 1 项',
+        '读者拉力风险 1 项',
+      ]),
+    })
+    expect(model.batchReviewQueue.handoff.riskLabels).toContain('强化复盘')
+    expect(model.batchReviewQueue.completionDashboard.metrics.find(metric => metric.key === 'strengthened_repair_acceptance' as any)?.status).toBe('warn')
+  })
+
+  test('shows strengthened repair recovery acceptance after core and reader payoff pass', () => {
+    const model = buildAutoCreationDirectorModel(buildStrengthenedRepairAcceptanceInput())
+
+    const acceptanceSignal = model.batchReviewQueue.riskRadar.signals.find(signal => signal.key === 'strengthened_repair_acceptance' as any)
+    const acceptanceMetric = model.batchReviewQueue.completionDashboard.metrics.find(metric => metric.key === 'strengthened_repair_acceptance' as any)
+
+    expect(model.batchReviewQueue.status).toBe('done')
+    expect((model.batchReviewQueue.riskRadar as any).strengthenedRepairAcceptanceRiskCount).toBe(0)
+    expect(acceptanceSignal?.label).toBe('强化复盘')
+    expect(acceptanceSignal?.status).toBe('ok')
+    expect(acceptanceSignal?.detail).toContain('强化深修恢复验收已通过')
+    expect(acceptanceMetric?.status).toBe('ok')
+    expect(acceptanceMetric?.detail).toContain('强化深修恢复验收已通过')
+    expect(model.batchReviewQueue.completionDashboard.summary).toContain('强化深修恢复验收已通过')
+    expect(model.batchReviewQueue.handoff.evidence).toContain('强化深修恢复验收已通过')
   })
 
   test('shows recovery evidence closure in completion dashboard after repair recheck resolves it', () => {
