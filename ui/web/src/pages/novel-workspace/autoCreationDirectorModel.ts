@@ -1984,12 +1984,82 @@ function buildGovernanceClosureBrief(args: {
   }
 }
 
+function governanceMemoryFromAudit(
+  audit: AnyRecord | null,
+  auditEntry: { run: AnyRecord; audit: AnyRecord } | null,
+  storylineDecisionGate: AutoCreationStorylineDecisionGate,
+): AutoCreationGovernanceRecheckMemory | null {
+  const memory = audit?.governance_recheck_memory || audit?.governanceRecheckMemory || null
+  if (!memory) return null
+  const rawStatus = text(memory?.status)
+  if (!['closed', 'needs_followup'].includes(rawStatus)) return null
+  const storylineDecisionTaskCount = Math.max(
+    Number(memory?.storyline_decision_task_count ?? memory?.storylineDecisionTaskCount ?? 0),
+    storylineDecisionGate.openCount,
+  )
+  const status: AutoCreationGovernanceRecheckMemoryStatus = rawStatus === 'closed' && storylineDecisionTaskCount === 0
+    ? 'closed'
+    : 'needs_followup'
+  const evidence = compactUniqueText([
+    ...arrayValue(memory?.evidence),
+    ...arrayValue(memory?.repaired_evidence),
+    ...arrayValue(memory?.repairedEvidence),
+  ], 120).slice(0, 5)
+  const failedEvidence = compactUniqueText([
+    ...arrayValue(memory?.failed_evidence),
+    ...arrayValue(memory?.failedEvidence),
+  ], 120).slice(0, 5)
+  const watchItems = compactUniqueText([
+    ...arrayValue(memory?.watch_items),
+    ...arrayValue(memory?.watchItems),
+    ...storylineDecisionGate.taskTitles,
+  ], 120).slice(0, 6)
+  const sourceRunId = memory?.source_run_id ?? memory?.sourceRunId ?? auditEntry?.run?.id ?? null
+
+  if (status === 'closed') {
+    return {
+      visible: true,
+      status,
+      label: text(memory?.label, '治理复查已记录'),
+      summary: text(memory?.summary, '恢复依据审计已闭环，今日生产可沿用上一轮复查证据。'),
+      evidence,
+      failedEvidence,
+      watchItems,
+      storylineDecisionTaskCount: 0,
+      sourceRunId,
+      action: opsAction('open_task_center', '查看治理记录', '打开任务中心查看恢复依据审计和复查证据。'),
+    }
+  }
+
+  return {
+    visible: true,
+    status,
+    label: text(memory?.label, '治理复查待处理'),
+    summary: text(memory?.summary, '仍有治理复查记忆需要处理或观察。'),
+    evidence,
+    failedEvidence,
+    watchItems,
+    storylineDecisionTaskCount,
+    sourceRunId,
+    action: opsAction('review_governance_closure', '治理复查台', '刷新恢复依据审计，并打开任务中心定位剧情线决策复检。', false, {
+      repairAuditRunId: sourceRunId,
+      recoveryEvidenceStatus: rawStatus,
+      failedEvidence,
+      watchItems,
+      storylineDecisionTaskCount,
+      storylineDecisionTaskTitles: storylineDecisionGate.taskTitles.slice(0, 6),
+    }),
+  }
+}
+
 function buildGovernanceRecheckMemory(args: {
   runRecords: AnyRecord[]
   storylineDecisionGate: AutoCreationStorylineDecisionGate
 }): AutoCreationGovernanceRecheckMemory {
   const auditEntry = latestRepairAuditEntry(args.runRecords)
   const audit = auditEntry?.audit || null
+  const explicitMemory = governanceMemoryFromAudit(audit, auditEntry, args.storylineDecisionGate)
+  if (explicitMemory) return explicitMemory
   const recoveryClosure = audit?.recovery_evidence_closure || audit?.recoveryEvidenceClosure || null
   const total = Number(recoveryClosure?.total || 0)
   const resolved = Number(recoveryClosure?.resolved || 0)
@@ -3934,13 +4004,25 @@ function buildBatchHandoff(args: {
 
 function batchReleaseEvidenceFromPreflight(preflight: AnyRecord | null | undefined) {
   const closure = preflight?.storyline_decision_closure || preflight?.storylineDecisionClosure || null
+  const governanceMemory = parsePayload(preflight?.governance_recheck_memory || preflight?.governanceRecheckMemory)
+    || preflight?.governance_recheck_memory
+    || preflight?.governanceRecheckMemory
+    || null
   const recoveryEvidence = [
     ...arrayValue(preflight?.recovery_evidence),
     ...arrayValue(preflight?.recoveryEvidence),
   ].map(item => text(item)).filter(Boolean)
+  const governanceRecheckEvidence = [
+    ...arrayValue(governanceMemory?.evidence),
+    ...arrayValue(governanceMemory?.repaired_evidence),
+    ...arrayValue(governanceMemory?.repairedEvidence),
+    ...arrayValue(governanceMemory?.watch_items),
+    ...arrayValue(governanceMemory?.watchItems),
+  ].map(item => text(item)).filter(Boolean)
   const evidence = [
     text(closure?.status) === 'ok' ? text(closure?.label, '剧情线决策已闭环') : '',
     ...recoveryEvidence,
+    ...governanceRecheckEvidence,
   ]
   return Array.from(new Set(evidence.filter(Boolean)))
 }

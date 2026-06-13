@@ -115,8 +115,20 @@ export function buildLongformGovernanceClosurePrompt(runRecords: any[] = []): Lo
     .sort((a, b) => recordTime(b.run) - recordTime(a.run))
 
   const latestAudit = repairRuns.map(item => item.output?.audit_summary || item.output?.auditSummary).find(Boolean)
+  const governanceMemory = latestAudit?.governance_recheck_memory || latestAudit?.governanceRecheckMemory || null
   const recoveryClosure = latestAudit?.recovery_evidence_closure || latestAudit?.recoveryEvidenceClosure || null
-  if (recoveryClosure && recoveryClosure.status !== 'closed' && Number(recoveryClosure.total || 0) > 0) {
+  if (governanceMemory && text(governanceMemory.status) === 'needs_followup') {
+    issues.push('恢复依据审计')
+    failedEvidence.push(...asArray(governanceMemory.failed_evidence), ...asArray(governanceMemory.failedEvidence))
+    watchItems.push(...asArray(governanceMemory.watch_items), ...asArray(governanceMemory.watchItems))
+  } else if (governanceMemory && text(governanceMemory.status) === 'closed') {
+    repairedEvidence.push(
+      ...asArray(governanceMemory.evidence),
+      ...asArray(governanceMemory.repaired_evidence),
+      ...asArray(governanceMemory.repairedEvidence),
+    )
+    watchItems.push(...asArray(governanceMemory.watch_items), ...asArray(governanceMemory.watchItems))
+  } else if (recoveryClosure && recoveryClosure.status !== 'closed' && Number(recoveryClosure.total || 0) > 0) {
     issues.push(`恢复依据审计 ${Number(recoveryClosure.resolved || 0)}/${Number(recoveryClosure.total || 0)}`)
     failedEvidence.push(...asArray(recoveryClosure.failed_evidence), ...asArray(recoveryClosure.failedEvidence))
     watchItems.push(...asArray(recoveryClosure.watch_items), ...asArray(recoveryClosure.watchItems))

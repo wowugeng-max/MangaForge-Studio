@@ -127,11 +127,12 @@ describe('creativeAssistantModel', () => {
         output_ref: JSON.stringify({
           audit_summary: {
             status: 'closed',
-            recovery_evidence_closure: {
+            governance_recheck_memory: {
               status: 'closed',
-              total: 2,
-              resolved: 2,
-              repaired_evidence: ['第42章对白交锋已补回样章节奏', '章末读者回报已兑现'],
+              label: '治理复查已记录',
+              summary: '恢复依据闭环 2/2，批次验收结果已写入次日生产记忆。',
+              evidence: ['第42章对白交锋已补回样章节奏', '章末读者回报已兑现'],
+              failed_evidence: [],
               watch_items: ['下一批继续观察样章策略命中率'],
             },
           },

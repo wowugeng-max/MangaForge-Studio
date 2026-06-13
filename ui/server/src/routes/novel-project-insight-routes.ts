@@ -268,7 +268,7 @@ function recoveryEvidenceClosureForAudit(tasks: any[], remainingTouchedRisks: an
   }
 
   const weakByNo = new Map(remainingTouchedRisks.map((row: any) => [Number(row?.chapter_no || 0), row]))
-  const taskRows = recoveryTasks.map((task: any) => {
+  const taskRows = recoveryTasks.map((task: any, taskIndex: number) => {
     const review = recoveryEvidenceReviewOf(task)
     const failedEvidence = uniqueCompactTexts([
       ...recoveryEvidenceFromFailedItems(review),
@@ -299,7 +299,9 @@ function recoveryEvidenceClosureForAudit(tasks: any[], remainingTouchedRisks: an
       !isResolvedRepairTaskStatus(task?.task_status || task?.status) ? task?.message || task?.action : '',
     ], 200)
     return {
+      chapter_id: Number(task?.chapter_id || task?.chapterId || 0) || null,
       chapter_no: chapterNo || null,
+      task_index: taskIndex,
       task_status: task?.task_status || task?.status || 'open',
       title: task?.title || task?.message || '',
       status: review?.status || '',
@@ -321,6 +323,42 @@ function recoveryEvidenceClosureForAudit(tasks: any[], remainingTouchedRisks: an
     repaired_evidence: uniqueCompactTexts(taskRows.flatMap(row => row.repaired_evidence)),
     watch_items: uniqueCompactTexts(taskRows.flatMap(row => row.watch_items), 200),
     tasks: taskRows,
+  }
+}
+
+function governanceRecheckMemoryForAudit(recoveryEvidenceClosure: any, run: any) {
+  const total = Number(recoveryEvidenceClosure?.total || 0)
+  const resolved = Number(recoveryEvidenceClosure?.resolved || 0)
+  const status = total <= 0
+    ? 'empty'
+    : String(recoveryEvidenceClosure?.status || '') === 'closed'
+      ? 'closed'
+      : 'needs_followup'
+  const failedEvidence = uniqueCompactTexts([
+    ...asArray(recoveryEvidenceClosure?.failed_evidence),
+    ...asArray(recoveryEvidenceClosure?.failedEvidence),
+  ])
+  const repairedEvidence = uniqueCompactTexts([
+    ...asArray(recoveryEvidenceClosure?.repaired_evidence),
+    ...asArray(recoveryEvidenceClosure?.repairedEvidence),
+  ])
+  const watchItems = uniqueCompactTexts([
+    ...asArray(recoveryEvidenceClosure?.watch_items),
+    ...asArray(recoveryEvidenceClosure?.watchItems),
+  ], 200)
+  return {
+    source_run_id: run?.id || null,
+    status,
+    label: status === 'closed' ? '治理复查已记录' : status === 'needs_followup' ? '治理复查待处理' : '治理复查',
+    summary: status === 'closed'
+      ? `恢复依据闭环 ${resolved}/${total}，本轮批次验收结果已写入次日生产记忆。`
+      : status === 'needs_followup'
+        ? `恢复依据审计 ${resolved}/${total}，仍需处理失效依据或观察项后再扩大生产。`
+        : '本轮没有可沉淀的恢复依据复查记忆。',
+    evidence: repairedEvidence,
+    failed_evidence: status === 'closed' ? [] : failedEvidence,
+    watch_items: watchItems,
+    storyline_decision_task_count: 0,
   }
 }
 
@@ -364,6 +402,7 @@ export function buildLongformRepairAuditSummary(run: any, trends: any) {
   const statusCounts = countBy(tasks.map((task: any) => ({ ...task, task_status: task.task_status || 'open' })), 'task_status')
   const typeCounts = countBy(tasks, 'task_type')
   const recoveryEvidenceClosure = recoveryEvidenceClosureForAudit(tasks, remainingTouchedRisks)
+  const governanceRecheckMemory = governanceRecheckMemoryForAudit(recoveryEvidenceClosure, run)
   return {
     created_at: new Date().toISOString(),
     source_run_id: run.id,
@@ -391,6 +430,7 @@ export function buildLongformRepairAuditSummary(run: any, trends: any) {
       },
     },
     recovery_evidence_closure: recoveryEvidenceClosure,
+    governance_recheck_memory: governanceRecheckMemory,
     remaining_risks: {
       unresolved_tasks: unresolved.slice(0, 30).map((task: any) => ({
         task_type: task.task_type,

@@ -99,6 +99,14 @@ describe('buildRecoveryEvidenceAuditView', () => {
   test('maps recovery evidence closure into task center audit rows', () => {
     const view = buildRecoveryEvidenceAuditView({
       status: 'closed',
+      governance_recheck_memory: {
+        source_run_id: 44,
+        status: 'closed',
+        label: '治理复查已记录',
+        summary: '恢复依据闭环 1/1，批次验收结果已写入次日生产记忆。',
+        evidence: ['批次验收确认对白交锋已继承'],
+        watch_items: ['下一批继续观察样章策略命中率'],
+      },
       recovery_evidence_closure: {
         status: 'closed',
         total: 1,
@@ -106,6 +114,16 @@ describe('buildRecoveryEvidenceAuditView', () => {
         failed_evidence: ['样章任务书复检通过 1 项'],
         repaired_evidence: ['第42章对白交锋已补回样章节奏'],
         watch_items: ['下一批继续观察样章策略命中率'],
+        tasks: [
+          {
+            chapter_id: 420,
+            chapter_no: 42,
+            task_index: 0,
+            task_status: 'resolved',
+            title: '第42章恢复依据失效回修',
+            summary: '恢复依据复检通过。',
+          },
+        ],
       },
     })
 
@@ -114,10 +132,22 @@ describe('buildRecoveryEvidenceAuditView', () => {
       label: '恢复依据审计',
       total: 1,
       resolved: 1,
+      sourceRunId: 44,
+      memoryLabel: '治理复查已记录',
+      memorySummary: '恢复依据闭环 1/1，批次验收结果已写入次日生产记忆。',
       failedEvidence: ['样章任务书复检通过 1 项'],
-      repairedEvidence: ['第42章对白交锋已补回样章节奏'],
+      repairedEvidence: ['批次验收确认对白交锋已继承', '第42章对白交锋已补回样章节奏'],
       watchItems: ['下一批继续观察样章策略命中率'],
     }))
+    expect(view?.relatedTasks).toEqual([
+      expect.objectContaining({
+        chapterId: 420,
+        chapterNo: 42,
+        taskIndex: 0,
+        status: 'resolved',
+        title: '第42章恢复依据失效回修',
+      }),
+    ])
   })
 
   test('hides recovery evidence audit when there is no closure payload', () => {

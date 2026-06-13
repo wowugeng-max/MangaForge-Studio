@@ -244,9 +244,20 @@ export type RecoveryEvidenceAuditView = {
   label: string
   total: number
   resolved: number
+  sourceRunId: any
+  memoryLabel: string
+  memorySummary: string
   failedEvidence: string[]
   repairedEvidence: string[]
   watchItems: string[]
+  relatedTasks: {
+    chapterId: number | null
+    chapterNo: number | null
+    taskIndex: number | null
+    status: string
+    title: string
+    summary: string
+  }[]
 }
 
 function compactAuditList(values: any[], limit = 8) {
@@ -256,23 +267,45 @@ function compactAuditList(values: any[], limit = 8) {
 export function buildRecoveryEvidenceAuditView(audit?: any | null): RecoveryEvidenceAuditView | null {
   const closure = audit?.recovery_evidence_closure || audit?.recoveryEvidenceClosure || null
   if (!closure || Number(closure.total || 0) <= 0) return null
+  const memory = audit?.governance_recheck_memory || audit?.governanceRecheckMemory || null
   return {
     status: closure.status === 'closed' ? 'closed' : 'needs_followup',
     label: '恢复依据审计',
     total: Number(closure.total || 0),
     resolved: Number(closure.resolved || 0),
+    sourceRunId: memory?.source_run_id ?? memory?.sourceRunId ?? audit?.source_run_id ?? audit?.sourceRunId ?? null,
+    memoryLabel: compactEvidenceText(memory?.label || ''),
+    memorySummary: compactEvidenceText(memory?.summary || '', 200),
     failedEvidence: compactAuditList([
+      ...(Array.isArray(memory?.failed_evidence) ? memory.failed_evidence : []),
+      ...(Array.isArray(memory?.failedEvidence) ? memory.failedEvidence : []),
       ...(Array.isArray(closure.failed_evidence) ? closure.failed_evidence : []),
       ...(Array.isArray(closure.failedEvidence) ? closure.failedEvidence : []),
     ]),
     repairedEvidence: compactAuditList([
+      ...(Array.isArray(memory?.evidence) ? memory.evidence : []),
+      ...(Array.isArray(memory?.repaired_evidence) ? memory.repaired_evidence : []),
+      ...(Array.isArray(memory?.repairedEvidence) ? memory.repairedEvidence : []),
       ...(Array.isArray(closure.repaired_evidence) ? closure.repaired_evidence : []),
       ...(Array.isArray(closure.repairedEvidence) ? closure.repairedEvidence : []),
     ]),
     watchItems: compactAuditList([
+      ...(Array.isArray(memory?.watch_items) ? memory.watch_items : []),
+      ...(Array.isArray(memory?.watchItems) ? memory.watchItems : []),
       ...(Array.isArray(closure.watch_items) ? closure.watch_items : []),
       ...(Array.isArray(closure.watchItems) ? closure.watchItems : []),
     ]),
+    relatedTasks: (Array.isArray(closure.tasks) ? closure.tasks : [])
+      .map((task: any) => ({
+        chapterId: Number(task?.chapter_id ?? task?.chapterId ?? 0) || null,
+        chapterNo: Number(task?.chapter_no ?? task?.chapterNo ?? 0) || null,
+        taskIndex: Number.isFinite(Number(task?.task_index ?? task?.taskIndex)) ? Number(task?.task_index ?? task?.taskIndex) : null,
+        status: String(task?.task_status ?? task?.status ?? 'open'),
+        title: compactEvidenceText(task?.title || task?.message || '恢复依据修复任务', 120),
+        summary: compactEvidenceText(task?.summary || task?.message || task?.action || '', 160),
+      }))
+      .filter((task: any) => task.title || task.summary)
+      .slice(0, 6),
   }
 }
 
@@ -579,6 +612,7 @@ function RepairTaskRunSummary({
   const output = parseJsonValue(run.output_ref) || {}
   const tasks = Array.isArray(output.tasks) ? output.tasks : []
   const audit = output.audit_summary || null
+  const [focusedTaskIndex, setFocusedTaskIndex] = useState<number | null>(null)
   const high = tasks.filter((task: any) => task.severity === 'high').length
   const medium = tasks.filter((task: any) => task.severity === 'medium').length
   const resolved = tasks.filter((task: any) => task.task_status === 'resolved').length
@@ -664,7 +698,12 @@ function RepairTaskRunSummary({
                   {recoveryEvidenceAudit.status === 'closed' ? '已闭环' : '需跟进'}
                 </Tag>
                 <Tag bordered={false}>已确认 {recoveryEvidenceAudit.resolved}/{recoveryEvidenceAudit.total}</Tag>
+                {recoveryEvidenceAudit.sourceRunId && <Tag bordered={false}>来源 #{recoveryEvidenceAudit.sourceRunId}</Tag>}
+                {recoveryEvidenceAudit.memoryLabel && <Tag color="purple" bordered={false}>{recoveryEvidenceAudit.memoryLabel}</Tag>}
               </Space>
+              {recoveryEvidenceAudit.memorySummary && (
+                <Text type="secondary" style={{ fontSize: 12 }}>治理记忆：{recoveryEvidenceAudit.memorySummary}</Text>
+              )}
               {recoveryEvidenceAudit.failedEvidence.length > 0 && (
                 <Text type="secondary" style={{ fontSize: 12 }}>失效依据：{recoveryEvidenceAudit.failedEvidence.join('；')}</Text>
               )}
@@ -673,6 +712,31 @@ function RepairTaskRunSummary({
               )}
               {recoveryEvidenceAudit.watchItems.length > 0 && (
                 <Text type="secondary" style={{ fontSize: 12 }}>仍需观察：{recoveryEvidenceAudit.watchItems.join('；')}</Text>
+              )}
+              {recoveryEvidenceAudit.relatedTasks.length > 0 && (
+                <Space direction="vertical" size={2} style={{ width: '100%' }}>
+                  <Text strong style={{ fontSize: 12 }}>关联批次修复任务</Text>
+                  {recoveryEvidenceAudit.relatedTasks.map((task, index) => {
+                    const sourceTask = task.taskIndex !== null ? tasks[task.taskIndex] : null
+                    const chapterId = task.chapterId || Number(sourceTask?.chapter_id || sourceTask?.chapterId || 0) || null
+                    return (
+                      <Space key={`${task.chapterNo || 'task'}-${index}`} wrap size={[4, 2]}>
+                        <Text type="secondary" style={{ fontSize: 12 }}>
+                          {task.chapterNo ? `第${task.chapterNo}章 ` : ''}{task.title}{task.status ? ` · ${task.status}` : ''}{task.summary ? ` · ${task.summary}` : ''}
+                        </Text>
+                        {task.taskIndex !== null && (
+                          <Button size="small" type="link" onClick={() => setFocusedTaskIndex(task.taskIndex)}>定位任务</Button>
+                        )}
+                        {chapterId && onSelectChapter && (
+                          <Button size="small" type="link" onClick={() => onSelectChapter(chapterId)}>打开章节</Button>
+                        )}
+                        {sourceTask && onStartRepairTaskRevision && (
+                          <Button size="small" type="link" onClick={() => onStartRepairTaskRevision(sourceTask, run, task.taskIndex ?? index)}>生成修订稿</Button>
+                        )}
+                      </Space>
+                    )
+                  })}
+                </Space>
               )}
             </Space>
           </div>
@@ -694,6 +758,7 @@ function RepairTaskRunSummary({
           locale={{ emptyText: '暂无修复任务' }}
           renderItem={(task: any, taskIndex: number) => (
             <List.Item
+              style={focusedTaskIndex === taskIndex ? { border: '1px solid #a855f7', borderRadius: 6, paddingInline: 8, background: '#faf5ff' } : undefined}
               actions={[
                 repairTaskActionLabel(task) && onExecuteTypedRepairTask && task.task_status !== 'resolved' ? <Button key="typed" size="small" type="primary" onClick={() => onExecuteTypedRepairTask(task, run, taskIndex)}>{repairTaskActionLabel(task)}</Button> : null,
                 onUpdateRepairTaskStatus && task.task_status !== 'resolved' ? <Button key="resolved" size="small" type="link" onClick={() => onUpdateRepairTaskStatus(task, run, 'resolved', taskIndex)}>已处理</Button> : null,

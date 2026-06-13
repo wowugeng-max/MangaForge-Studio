@@ -1671,12 +1671,15 @@ describe('buildAutoCreationDirectorModel', () => {
           output_ref: JSON.stringify({
             audit_summary: {
               status: 'closed',
-              recovery_evidence_closure: {
+              governance_recheck_memory: {
                 status: 'closed',
-                total: 2,
-                resolved: 2,
-                repaired_evidence: ['第42章对白交锋已补回样章节奏', '章末读者回报已兑现'],
+                label: '治理复查已记录',
+                summary: '恢复依据闭环 2/2，剧情线决策无未关闭项；今日生产可沿用上一轮复查证据。',
+                evidence: ['第42章对白交锋已补回样章节奏', '章末读者回报已兑现'],
+                failed_evidence: [],
                 watch_items: ['下一批继续观察样章策略命中率'],
+                storyline_decision_task_count: 0,
+                source_run_id: 94,
               },
             },
           }),
@@ -5606,6 +5609,112 @@ describe('buildAutoCreationDirectorModel', () => {
     const recoveryTask = model.batchReviewQueue.riskRadar.repairTasks.find((task: any) => task.issue_type === 'recovery_evidence_mismatch')
     expect(recoveryTask?.recovery_evidence_review?.failed_evidence).toContain('样章任务书复检通过 1 项')
     expect(recoveryTask?.recovery_evidence_review?.failed_evidence).toContain('第42章样章已重审')
+    expect(model.batchReviewQueue.handoff.riskLabels).toContain('恢复依据')
+  })
+
+  test('turns missed governance recheck memory into a batch repair task', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        topStatus: {
+          ...basePlanning.topStatus,
+          future100Coverage: { ready: true, planned: 100, required: 100, missingChapters: [], label: '100/100' },
+        },
+      },
+      writing: {
+        ...baseWriting,
+        nextChapter: { ...baseWriting.nextChapter, id: 44, chapterNo: 44, title: '治理复查后续' },
+        chapterPlanningDesk: {
+          ...baseWriting.chapterPlanningDesk,
+          readiness: 'ready',
+          statusLabel: '本章可写',
+          scenePlanStatus: 'ready',
+          sceneCards: [{ title: '治理复查', goal: '确认治理复查记忆是否进入下一批验收' }],
+          recommendedPlannerAction: { key: 'confirm_plan_and_write_draft', label: '确认并生成' },
+        },
+        topStatus: {
+          ...baseWriting.topStatus,
+          nextActionLabel: '确认并生成',
+          primaryActionKey: 'confirm_plan_and_write_draft',
+        },
+        primaryActionKey: 'confirm_plan_and_write_draft',
+      },
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: { last_updated_chapter: 43 },
+      chapters: [
+        { id: 41, chapter_no: 41, title: '治理复查一', chapter_text: '治理复查一'.repeat(500) },
+        { id: 42, chapter_no: 42, title: '治理复查二', chapter_text: '治理复查二'.repeat(500) },
+        { id: 43, chapter_no: 43, title: '治理复查三', chapter_text: '治理复查三'.repeat(500) },
+      ],
+      reviews: [
+        { id: 4201, chapter_id: 41, review_type: 'prose_quality', created_at: '2026-06-04T01:00:00.000Z', payload: JSON.stringify({ score: 84, passed: true }) },
+        { id: 4202, chapter_id: 42, review_type: 'prose_quality', created_at: '2026-06-04T01:01:00.000Z', payload: JSON.stringify({ score: 85, passed: true }) },
+        { id: 4203, chapter_id: 43, review_type: 'prose_quality', created_at: '2026-06-04T01:02:00.000Z', payload: JSON.stringify({ score: 86, passed: true }) },
+        {
+          id: 4204,
+          chapter_id: 42,
+          review_type: 'style_sample_sync',
+          created_at: '2026-06-04T01:03:00.000Z',
+          payload: JSON.stringify({
+            style_sample_sync: {
+              status: 'warn',
+              label: '风格缺口 2',
+              missed_count: 2,
+              missed: [
+                { label: '对白交锋', text: '治理复查记忆要求的对白交锋仍没有写成推进。' },
+                { label: '样章节奏', text: '下一批观察项要求的样章策略命中率仍未达标。' },
+              ],
+              copied_phrases: [],
+            },
+          }),
+        },
+      ],
+      runRecords: [
+        {
+          id: 420,
+          run_type: 'batch_generate_prose',
+          created_at: '2026-06-04T00:00:00.000Z',
+          status: 'success',
+          input_ref: JSON.stringify({
+            source: 'auto_creation_safe_batch',
+            safety_limit: 3,
+            batch_preflight: {
+              governance_recheck_memory: {
+                status: 'closed',
+                label: '治理复查已记录',
+                evidence: [
+                  '第42章对白交锋已补回样章节奏',
+                ],
+                watch_items: [
+                  '下一批继续观察样章策略命中率',
+                ],
+                storyline_decision_task_count: 0,
+              },
+            },
+          }),
+          output_ref: JSON.stringify({
+            total: 3,
+            success: 3,
+            failed: 0,
+            chapters: [
+              { id: 41, chapter_no: 41, title: '治理复查一', status: 'success', score: 84, word_count: 3180 },
+              { id: 42, chapter_no: 42, title: '治理复查二', status: 'success', score: 85, word_count: 3090 },
+              { id: 43, chapter_no: 43, title: '治理复查三', status: 'success', score: 86, word_count: 3021 },
+            ],
+          }),
+        },
+      ],
+    } as any)
+
+    const recoverySignal = model.batchReviewQueue.riskRadar.signals.find(signal => signal.key === 'recovery_evidence')
+    const recoveryTask = model.batchReviewQueue.riskRadar.repairTasks.find((task: any) => task.issue_type === 'recovery_evidence_mismatch')
+
+    expect(model.batchReviewQueue.status).toBe('risk')
+    expect(recoverySignal?.detail).toContain('第42章对白交锋已补回样章节奏')
+    expect(recoverySignal?.detail).toContain('下一批继续观察样章策略命中率')
+    expect(recoveryTask?.recovery_evidence_review?.failed_evidence).toContain('第42章对白交锋已补回样章节奏')
+    expect(recoveryTask?.recovery_evidence_review?.failed_evidence).toContain('下一批继续观察样章策略命中率')
     expect(model.batchReviewQueue.handoff.riskLabels).toContain('恢复依据')
   })
 

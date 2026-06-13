@@ -80,6 +80,66 @@ describe('longform repair audit summary', () => {
     expect(audit.conclusion.join('')).toContain('恢复依据闭环 1/1')
   })
 
+  test('emits governance recheck memory from recovery evidence audit for next-day preflight', () => {
+    const run = {
+      id: 44,
+      output_ref: JSON.stringify({
+        report: {
+          summary: {
+            avg_quality_score: 79,
+            avg_readiness: 76,
+            failed_chapter_count: 0,
+          },
+          weak_count: 1,
+        },
+        tasks: [
+          {
+            source: 'auto_creation_safe_batch_risk',
+            task_type: 'repair_quality',
+            issue_type: 'recovery_evidence_mismatch',
+            task_status: 'resolved',
+            chapter_no: 42,
+            title: '第42章治理复查记忆回修',
+            recovery_evidence_review: {
+              status: 'ok',
+              summary: '治理复查记忆已被本批正文继承。',
+              failed_items: [
+                {
+                  evidence: '第42章对白交锋已补回样章节奏',
+                  risk_labels: ['风格样章缺口 1 项'],
+                },
+              ],
+              failed_evidence: [],
+              repaired_evidence: ['批次验收确认对白交锋已继承'],
+              watch_items: ['下一批继续观察样章策略命中率'],
+            },
+          },
+        ],
+      }),
+    }
+    const trends = {
+      summary: {
+        avg_quality_score: 86,
+        avg_readiness: 83,
+        failed_chapter_count: 0,
+      },
+      weak_rows: [],
+      recommendations: [],
+    }
+
+    const audit = buildLongformRepairAuditSummary(run, trends)
+
+    expect(audit.governance_recheck_memory).toEqual(expect.objectContaining({
+      source_run_id: 44,
+      status: 'closed',
+      label: '治理复查已记录',
+    }))
+    expect(audit.governance_recheck_memory.summary).toContain('恢复依据闭环 1/1')
+    expect(audit.governance_recheck_memory.evidence).toContain('批次验收确认对白交锋已继承')
+    expect(audit.governance_recheck_memory.failed_evidence).toEqual([])
+    expect(audit.governance_recheck_memory.watch_items).toContain('下一批继续观察样章策略命中率')
+  })
+
   test('keeps recovery evidence audit open when residual failed evidence remains', () => {
     const run = {
       id: 43,
