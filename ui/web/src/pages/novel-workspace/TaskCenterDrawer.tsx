@@ -111,6 +111,17 @@ function isSingleChapterRecoveryEvidenceTask(task: any) {
 
 export function repairTaskActionLabel(task: any) {
   if (String(task?.issue_type || '') === 'batch_brief_mismatch') return '按批次修订'
+  if (String(task?.issue_type || '') === 'recovery_evidence_governance_queue') {
+    const actionKey = String(task?.action_key || task?.actionKey || '')
+    const map: Record<string, string> = {
+      revision: '回修依据并复检',
+      recheck_single_chapter: '复检单章',
+      recheck_safe_batch: '复盘批次',
+      focus_task: '已处理并复盘',
+      review_governance_closure: '治理复查台',
+    }
+    return map[actionKey] || String(task?.action_label || task?.actionLabel || '')
+  }
   if (String(task?.issue_type || '') === 'recovery_evidence_mismatch') {
     return isSingleChapterRecoveryEvidenceTask(task) ? '回修依据' : '按批次修订'
   }
@@ -948,7 +959,7 @@ export function buildRecoveryEvidenceAuditView(audit?: any | null, latestTasks: 
 
 function repairTaskIssueTag(task: any) {
   if (String(task?.issue_type || '') === 'batch_brief_mismatch') return <Tag color="purple" bordered={false}>批次计划</Tag>
-  if (String(task?.issue_type || '') === 'recovery_evidence_mismatch') return <Tag color="purple" bordered={false}>恢复依据</Tag>
+  if (['recovery_evidence_mismatch', 'recovery_evidence_governance_queue'].includes(String(task?.issue_type || ''))) return <Tag color="purple" bordered={false}>恢复依据</Tag>
   if (String(task?.issue_type || '') === 'style_sample_task_book_rebuild') return <Tag color="purple" bordered={false}>样章任务书</Tag>
   if (String(task?.source || '') === 'reader_trial_review' || String(task?.issue_type || '') === 'reader_trial_drop_point') return <Tag color="red" bordered={false}>读者试读</Tag>
   if (String(task?.issue_type || '') === 'volume_segment_missed') return <Tag color="gold" bordered={false}>卷级阶段</Tag>
@@ -1426,7 +1437,9 @@ function RepairTaskRunSummary({
             ? '百章剧本室修复任务'
             : output.report?.source === 'reader_trial_review'
               ? '读者试读修复任务'
-              : '长线生产修复任务'
+              : output.report?.source === 'recovery_evidence_governance_queue'
+                ? '恢复依据治理队列'
+                : '长线生产修复任务'
       : '机械质检修复任务'
   return (
     <Card size="small" title={title}>

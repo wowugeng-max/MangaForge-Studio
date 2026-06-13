@@ -21,6 +21,7 @@ export type AutoCreationDirectorActionKey =
   | 'start_safe_batch_generation'
   | 'create_safe_batch_risk_repair'
   | 'create_style_sample_batch_repair'
+  | 'create_recovery_evidence_governance_queue'
   | 'create_delivery_risk_repair'
   | 'create_script_room_repair'
   | 'select_model'
@@ -830,7 +831,7 @@ function writingAction(key: WritingCockpitActionKey, description: string, label?
 }
 
 function opsAction(
-  key: 'open_task_center' | 'select_model' | 'review_governance_closure' | 'start_safe_batch_generation' | 'create_safe_batch_risk_repair' | 'create_style_sample_batch_repair' | 'create_delivery_risk_repair' | 'create_script_room_repair',
+  key: 'open_task_center' | 'select_model' | 'review_governance_closure' | 'start_safe_batch_generation' | 'create_safe_batch_risk_repair' | 'create_style_sample_batch_repair' | 'create_recovery_evidence_governance_queue' | 'create_delivery_risk_repair' | 'create_script_room_repair',
   label: string,
   description: string,
   disabled = false,
@@ -2021,6 +2022,11 @@ function recoveryEvidenceProductionStatusLabel(status: string) {
   return '暂缓安全连写'
 }
 
+function finiteNumberOrNull(value: any) {
+  const numeric = Number(value)
+  return Number.isFinite(numeric) ? numeric : null
+}
+
 function recoveryEvidenceProductionGateNextActionFromSource(source: AnyRecord, action: string, label: string) {
   return {
     action,
@@ -2077,6 +2083,158 @@ function buildRecoveryEvidenceProductionGateNextAction(sources: AnyRecord[]) {
   return null
 }
 
+function recoveryEvidenceGovernanceQueueTaskAction(source: AnyRecord) {
+  const sourceKey = text(source?.source || source?.sourceMode)
+  const status = text(source?.status)
+  const residualEvidence = arrayValue(source?.residual_evidence || source?.residualEvidence).map(item => text(item)).filter(Boolean)
+  if (status === 'blocked' && residualEvidence.length > 0) {
+    if (sourceKey === 'single_chapter_governance_recheck') return { actionKey: 'revision', label: '回修依据' }
+    if (sourceKey === 'safe_batch_recovery_recheck') return { actionKey: 'focus_task', label: '定位批次任务' }
+    return { actionKey: 'focus_task', label: '定位任务' }
+  }
+  if (status === 'pending') {
+    if (sourceKey === 'single_chapter_governance_recheck') return { actionKey: 'recheck_single_chapter', label: '复检单章' }
+    if (sourceKey === 'safe_batch_recovery_recheck') return { actionKey: 'recheck_safe_batch', label: '复盘批次' }
+  }
+  return { actionKey: 'review_governance_closure', label: '治理复查台' }
+}
+
+function recoveryEvidenceGovernanceQueueExecutionMeta(source: AnyRecord, actionKey: string) {
+  const sourceTasks = arrayValue(source?.source_tasks || source?.sourceTasks)
+  const firstTask = sourceTasks[0] || {}
+  const sourceTaskIndex = finiteNumberOrNull(firstTask?.source_task_index ?? firstTask?.sourceTaskIndex ?? firstTask?.task_index ?? firstTask?.taskIndex)
+  const chapterId = finiteNumberOrNull(firstTask?.chapter_id ?? firstTask?.chapterId)
+  const chapterNo = finiteNumberOrNull(firstTask?.chapter_no ?? firstTask?.chapterNo)
+  const meta: AnyRecord = {
+    source_task_index: sourceTaskIndex,
+    source_task_indices: arrayValue(source?.source_task_indices || source?.sourceTaskIndices),
+    chapter_id: chapterId,
+    chapter_no: chapterNo,
+    chapter_ids: arrayValue(source?.chapter_ids || source?.chapterIds),
+    chapter_nos: arrayValue(source?.chapter_nos || source?.chapterNos),
+  }
+
+  if (actionKey === 'revision') {
+    return {
+      ...meta,
+      recheck_mode: 'single_chapter',
+      recheck_source: 'governance_recheck_sync',
+      closure_status: 'blocked_until_recheck',
+      auto_recheck: true,
+      requires_manual_repair: false,
+    }
+  }
+
+  if (actionKey === 'recheck_single_chapter') {
+    return {
+      ...meta,
+      recheck_mode: 'single_chapter',
+      recheck_source: 'governance_recheck_sync',
+      closure_status: 'blocked_until_recheck',
+      auto_recheck: true,
+      requires_manual_repair: false,
+    }
+  }
+
+  if (actionKey === 'recheck_safe_batch') {
+    return {
+      ...meta,
+      recheck_mode: 'batch_audit',
+      recheck_source: 'longform_repair_audit_summary',
+      closure_status: 'blocked_until_batch_audit',
+      auto_recheck: true,
+      requires_manual_repair: false,
+    }
+  }
+
+  if (actionKey === 'focus_task') {
+    return {
+      ...meta,
+      recheck_mode: 'manual_then_batch_audit',
+      recheck_source: 'longform_repair_audit_summary',
+      closure_status: 'blocked_until_batch_audit',
+      auto_recheck: false,
+      requires_manual_repair: true,
+    }
+  }
+
+  return {
+    ...meta,
+    recheck_mode: 'governance_closure',
+    recheck_source: 'longform_repair_audit_summary',
+    closure_status: 'blocked_until_governance_review',
+    auto_recheck: false,
+    requires_manual_repair: false,
+  }
+}
+
+function buildRecoveryEvidenceGovernanceQueue(snapshot: AnyRecord, nextAction: AnyRecord | null) {
+  const sources = arrayValue(snapshot?.sources)
+  const unresolvedSources = sources.filter(source => text(source?.status) !== 'cleared')
+  const mainAction = nextAction || {
+    action: 'review_governance_closure',
+    label: '治理复查台',
+    source: 'recovery_evidence_production_gate',
+    sourceLabel: '恢复依据生产闸门',
+    status: text(snapshot?.status),
+    residualEvidence: [],
+  }
+  const tasks = unresolvedSources.map((source, index) => {
+    const action = recoveryEvidenceGovernanceQueueTaskAction(source)
+    const residualEvidence = arrayValue(source?.residual_evidence || source?.residualEvidence).map(item => text(item)).filter(Boolean)
+    const sourceLabel = text(source?.label || source?.sourceLabel || source?.source, '恢复依据来源')
+    const statusLabel = text(source?.status_label || source?.statusLabel, recoveryEvidenceProductionStatusLabel(text(source?.status)))
+    const executionMeta = recoveryEvidenceGovernanceQueueExecutionMeta(source, action.actionKey)
+    return {
+      issue_type: 'recovery_evidence_governance_queue',
+      severity: text(source?.status) === 'blocked' ? 'high' : 'medium',
+      task_status: 'needs_review',
+      source: text(source?.source || source?.sourceMode),
+      source_label: sourceLabel,
+      source_status: text(source?.status),
+      source_status_label: statusLabel,
+      action_key: action.actionKey,
+      action_label: action.label,
+      ...executionMeta,
+      title: `${sourceLabel}：${action.label}`,
+      message: residualEvidence.length
+        ? `${statusLabel}：${residualEvidence.join('；')}`
+        : `${statusLabel}，需要先完成${action.label}再恢复安全连写。`,
+      action: `${action.label}后刷新恢复依据审计，确认该来源从暂缓安全连写/等待复检结论变为生产阻断已解除。`,
+      recovery_evidence_review: {
+        status: residualEvidence.length ? 'warn' : 'pending',
+        summary: residualEvidence.length ? `残留依据：${residualEvidence.join('；')}` : '等待复检结论回填。',
+        failed_evidence: residualEvidence,
+      },
+      acceptance_criteria: [
+        `${sourceLabel}显示生产阻断已解除`,
+        '恢复依据审计无残留 failed_evidence',
+        '总控台恢复依据生产闸门允许继续安全连写',
+      ],
+      queue_index: index,
+    }
+  })
+  const nextCycleType = ['revision', 'focus_task'].includes(text(mainAction.action)) ? 'revision_batch' : 'recheck_summary'
+  return {
+    source: 'recovery_evidence_production_gate',
+    status: text(snapshot?.status),
+    summary: `恢复依据生产闸门阻断，先执行「${text(mainAction.label, '治理复查台')}」并沉淀为连续治理队列。`,
+    main_action: mainAction,
+    source_count: Number(snapshot?.source_count || sources.length || 0),
+    sources,
+    tasks,
+    next_cycle: {
+      type: nextCycleType,
+      label: nextCycleType === 'revision_batch' ? '下一轮修订批次' : '下一轮复检批次摘要',
+    },
+    recommendations: [
+      `先处理主动作「${text(mainAction.label, '治理复查台')}」，不要带着未解除恢复依据进入安全连写。`,
+      '处理后重新生成恢复依据审计摘要，确认单章/批次来源均变为生产阻断已解除。',
+      '审计闭环后再回到总控台恢复 2-3 章安全连写。',
+    ],
+  }
+}
+
 function buildRecoveryEvidenceProductionGate(runRecords: AnyRecord[]) {
   const auditEntry = latestRepairAuditEntry(runRecords)
   const audit = auditEntry?.audit || null
@@ -2102,13 +2260,19 @@ function buildRecoveryEvidenceProductionGate(runRecords: AnyRecord[]) {
     label: string
     statuses: string[]
     residualEvidence: string[]
+    sourceTasks: AnyRecord[]
   }>()
-  for (const task of tasks) {
+  for (const [taskIndex, task] of tasks.entries()) {
     const meta = recoveryEvidenceSourceMeta(task)
     const status = recoveryEvidenceSourceTaskStatus(task)
-    const group = groups.get(meta.source) || { source: meta.source, label: meta.label, statuses: [], residualEvidence: [] }
+    const group = groups.get(meta.source) || { source: meta.source, label: meta.label, statuses: [], residualEvidence: [], sourceTasks: [] }
     group.statuses.push(status.resultStatus)
     group.residualEvidence.push(...status.residualEvidence)
+    const sourceTaskIndex = finiteNumberOrNull(task?.task_index ?? task?.taskIndex)
+    group.sourceTasks.push({
+      ...task,
+      source_task_index: sourceTaskIndex ?? taskIndex,
+    })
     groups.set(meta.source, group)
   }
 
@@ -2127,6 +2291,9 @@ function buildRecoveryEvidenceProductionGate(runRecords: AnyRecord[]) {
     const sourceStatus = group.statuses.includes('blocked')
       ? 'blocked'
       : group.statuses.every(status => status === 'cleared') ? 'cleared' : 'pending'
+    const sourceTaskIndices = Array.from(new Set(group.sourceTasks.map(task => finiteNumberOrNull(task?.source_task_index ?? task?.sourceTaskIndex)).filter(item => item !== null)))
+    const chapterIds = Array.from(new Set(group.sourceTasks.map(task => finiteNumberOrNull(task?.chapter_id ?? task?.chapterId)).filter(item => item !== null)))
+    const chapterNos = Array.from(new Set(group.sourceTasks.map(task => finiteNumberOrNull(task?.chapter_no ?? task?.chapterNo)).filter(item => item !== null)))
     return {
       source: group.source,
       label: group.label,
@@ -2134,6 +2301,13 @@ function buildRecoveryEvidenceProductionGate(runRecords: AnyRecord[]) {
       status_label: recoveryEvidenceProductionStatusLabel(sourceStatus),
       residual_evidence: residualEvidence,
       task_count: group.statuses.length,
+      source_task_index: sourceTaskIndices[0] ?? null,
+      source_task_indices: sourceTaskIndices,
+      chapter_id: chapterIds[0] ?? null,
+      chapter_ids: chapterIds,
+      chapter_no: chapterNos[0] ?? null,
+      chapter_nos: chapterNos,
+      source_tasks: group.sourceTasks,
     }
   })
   const nextAction = buildRecoveryEvidenceProductionGateNextAction(sources)
@@ -2997,7 +3171,13 @@ function recoveryEvidenceRiskMatches(evidence: string, counts: {
     const count = counts.batchPlanRiskTotal + counts.batchChecklistRiskTotal
     if (count > 0) riskLabels.push(`批次计划/开工清单风险 ${count} 项`)
   }
-  if (normalized.includes('治理复查') || normalized.includes('恢复复查') || normalized.includes('生产阻断已解除')) {
+  if (
+    normalized.includes('治理复查')
+    || normalized.includes('恢复复查')
+    || normalized.includes('生产阻断已解除')
+    || normalized.includes('治理队列已闭环')
+    || normalized.includes('放行摘要')
+  ) {
     const count = counts.payoffDebtTotal
       + counts.readerPullRiskTotal
       + counts.storylineRiskTotal
@@ -4299,6 +4479,10 @@ function batchReleaseEvidenceItemsFromPreflight(preflight: AnyRecord | null | un
     || preflight?.recovery_evidence_production_gate
     || preflight?.recoveryEvidenceProductionGate
     || null
+  const releaseSummary = parsePayload(preflight?.recovery_evidence_release_summary || preflight?.recoveryEvidenceReleaseSummary)
+    || preflight?.recovery_evidence_release_summary
+    || preflight?.recoveryEvidenceReleaseSummary
+    || null
   const recoveryEvidence = [
     ...arrayValue(preflight?.recovery_evidence),
     ...arrayValue(preflight?.recoveryEvidence),
@@ -4327,6 +4511,52 @@ function batchReleaseEvidenceItemsFromPreflight(preflight: AnyRecord | null | un
       } : null
     })
     .filter(Boolean)
+  const releaseNextBatchLabel = firstText(releaseSummary?.next_batch_label, releaseSummary?.nextBatchLabel)
+  const releaseAllowedChapters = [
+    ...arrayValue(releaseSummary?.allowed_chapter_nos),
+    ...arrayValue(releaseSummary?.allowedChapterNos),
+  ].map(item => text(item)).filter(Boolean)
+  const releaseDetailBase = [
+    '放行摘要',
+    releaseNextBatchLabel,
+    releaseAllowedChapters.length ? `放行章节 ${releaseAllowedChapters.join('、')}` : '',
+  ].filter(Boolean).join(' · ')
+  const releaseClearedSourceItems = arrayValue(releaseSummary?.cleared_sources || releaseSummary?.clearedSources)
+    .filter(source => !text(source?.status) || text(source?.status) === 'cleared' || text(source?.status) === 'released')
+    .map(source => {
+      const label = firstText(source?.label, source?.source_label, source?.sourceLabel, source?.source)
+      const statusLabel = firstText(source?.status_label, source?.statusLabel, '生产阻断已解除')
+      const action = recoveryEvidenceProductionGateSourceAction(source)
+      return label ? {
+        evidence: `${label}：${statusLabel}`,
+        source: 'recovery_evidence_release_summary',
+        source_label: '安全连写放行摘要',
+        source_detail: [
+          releaseDetailBase,
+          label,
+          statusLabel,
+        ].filter(Boolean).join(' · '),
+        source_action: action.action,
+        source_action_label: action.label,
+        production_gate_source: text(source?.source || source?.sourceMode),
+      } : null
+    })
+    .filter(Boolean)
+  const releaseClearedEvidenceSet = new Set(releaseClearedSourceItems.map(item => text(item?.evidence)).filter(Boolean))
+  const releaseSummaryEvidence = [
+    ...arrayValue(releaseSummary?.evidence),
+    ...arrayValue(releaseSummary?.release_evidence),
+    ...arrayValue(releaseSummary?.releaseEvidence),
+  ].map(item => text(item)).filter(Boolean)
+    .filter(item => !releaseClearedEvidenceSet.has(item))
+    .map(item => ({
+      evidence: item,
+      source: 'recovery_evidence_release_summary',
+      source_label: '安全连写放行摘要',
+      source_detail: releaseDetailBase || '放行摘要',
+      source_action: 'review_governance_closure',
+      source_action_label: '治理复查台',
+    }))
   const repairedMemoryEvidence = [
     ...arrayValue(governanceMemory?.evidence),
     ...arrayValue(governanceMemory?.repaired_evidence),
@@ -4361,6 +4591,8 @@ function batchReleaseEvidenceItemsFromPreflight(preflight: AnyRecord | null | un
     } : null,
     ...recoveryEvidence,
     ...productionGateEvidence,
+    ...releaseSummaryEvidence,
+    ...releaseClearedSourceItems,
     ...repairedMemoryEvidence,
     ...watchMemoryEvidence,
   ].filter(Boolean) as AnyRecord[])
@@ -5923,6 +6155,44 @@ function buildNextBatchBriefRecoveryEvidence(args: {
   ].filter(Boolean)
 }
 
+function buildRecoveryEvidenceReleaseSummary(args: {
+  status: AutoCreationBatchGuardrailStatus
+  safeChapterCount: number
+  allowedChapterNos: number[]
+  nextBatchBrief: AutoCreationNextBatchBrief
+  recoveryEvidenceProductionGate?: AnyRecord | null
+}) {
+  const gate = args.recoveryEvidenceProductionGate || null
+  if (args.status !== 'ready' || text(gate?.status) !== 'ok') return null
+  const clearedSources = arrayValue(gate?.sources)
+    .filter(source => text(source?.status) === 'cleared')
+    .map(source => ({
+      source: text(source?.source || source?.sourceMode),
+      label: text(source?.label || source?.sourceLabel || source?.source, '恢复依据来源'),
+      status: 'cleared',
+      status_label: text(source?.status_label || source?.statusLabel, '生产阻断已解除'),
+      task_count: Number(source?.task_count || source?.taskCount || 0),
+      chapter_nos: arrayValue(source?.chapter_nos || source?.chapterNos),
+      source_task_indices: arrayValue(source?.source_task_indices || source?.sourceTaskIndices),
+    }))
+  if (!clearedSources.length) return null
+  const evidence = [
+    '恢复依据治理队列已闭环',
+    ...clearedSources.map(source => `${source.label}：生产阻断已解除`),
+  ]
+  return {
+    status: 'released',
+    source: 'recovery_evidence_governance_queue',
+    summary: `恢复依据治理队列已闭环，可恢复 ${Math.max(2, args.safeChapterCount)} 章安全连写。`,
+    safe_chapter_count: args.safeChapterCount,
+    allowed_chapter_nos: args.allowedChapterNos,
+    next_batch_label: args.nextBatchBrief.chapterRangeLabel,
+    cleared_source_count: clearedSources.length,
+    cleared_sources: clearedSources,
+    evidence,
+  }
+}
+
 function buildNextBatchBriefRecovery(args: {
   status: AutoCreationBatchGuardrailStatus
   safeChapterCount: number
@@ -6011,6 +6281,7 @@ function buildBatchPreflight(args: {
   styleSampleBatchPreflight?: AnyRecord | null
   recoveryEvidence?: string[]
   recoveryEvidenceProductionGate?: AnyRecord | null
+  recoveryEvidenceReleaseSummary?: AnyRecord | null
 }): AutoCreationBatchPreflight {
   const allowedChapterNos = args.releaseWindow.allowedChapters.map(chapter => Number(chapter.chapterNo || 0)).filter(Boolean)
   const blockedChapterNos = args.releaseWindow.blockedChapters.map(chapter => Number(chapter.chapterNo || 0)).filter(Boolean)
@@ -6073,6 +6344,7 @@ function buildBatchPreflight(args: {
       warnings,
       ...(arrayValue(args.recoveryEvidence).length ? { recovery_evidence: arrayValue(args.recoveryEvidence) } : {}),
       ...(args.recoveryEvidenceProductionGate ? { recovery_evidence_production_gate: args.recoveryEvidenceProductionGate } : {}),
+      ...(args.recoveryEvidenceReleaseSummary ? { recovery_evidence_release_summary: args.recoveryEvidenceReleaseSummary } : {}),
       storyline_decision_closure: storylineDecisionClosure,
       ...(governanceRecheckMemory ? { governance_recheck_memory: governanceRecheckMemory } : {}),
       ...(args.styleSampleBatchPreflight?.visible ? { style_sample_batch_preflight: args.styleSampleBatchPreflight } : {}),
@@ -6316,10 +6588,12 @@ function buildBatchGuardrail(args: {
       status: recoveryEvidenceProductionGate.snapshot.status,
       residualEvidence: [],
     }
-    recommendedAction = opsAction('review_governance_closure', recoveryEvidenceNextAction.label, recoveryEvidenceProductionGate.signal.detail, false, {
+    const recoveryEvidenceGovernanceQueue = buildRecoveryEvidenceGovernanceQueue(recoveryEvidenceProductionGate.snapshot, recoveryEvidenceNextAction)
+    recommendedAction = opsAction('create_recovery_evidence_governance_queue', '生成恢复依据治理队列', recoveryEvidenceProductionGate.signal.detail, false, {
       source: 'recovery_evidence_production_gate',
       detail: recoveryEvidenceProductionGate.signal.detail,
       recoveryEvidenceNextAction,
+      recoveryEvidenceGovernanceQueue,
     })
   } else if (blocking?.label === '长线记忆' || warning?.label === '长线记忆') {
     recommendedAction = canonRunway.action
@@ -6389,12 +6663,23 @@ function buildBatchGuardrail(args: {
     writing,
     Number(nextBatchBrief.chapters[0]?.chapterNo || 0) || null,
   )
+  const recoveryEvidenceReleaseSummary = buildRecoveryEvidenceReleaseSummary({
+    status,
+    safeChapterCount,
+    allowedChapterNos: releaseWindow.allowedChapters.map(chapter => Number(chapter.chapterNo || 0)).filter(Boolean),
+    nextBatchBrief,
+    recoveryEvidenceProductionGate: recoveryEvidenceProductionGate.snapshot,
+  })
+  const recoveryEvidenceReleaseEvidence = arrayValue(recoveryEvidenceReleaseSummary?.evidence)
   const recoveryEvidence = buildNextBatchBriefRecoveryEvidence({
     status,
     safeChapterCount,
     nextBatchBrief,
     batchBriefSignal,
-    evidence: styleSampleRecoveryEvidence,
+    evidence: [
+      ...styleSampleRecoveryEvidence,
+      ...recoveryEvidenceReleaseEvidence,
+    ],
   })
   const preflight = buildBatchPreflight({
     status,
@@ -6410,6 +6695,7 @@ function buildBatchGuardrail(args: {
     styleSampleBatchPreflight,
     recoveryEvidence,
     recoveryEvidenceProductionGate: recoveryEvidenceProductionGate.snapshot,
+    recoveryEvidenceReleaseSummary,
   })
 
   if (status === 'ready') {
@@ -6455,7 +6741,10 @@ function buildBatchGuardrail(args: {
     nextBatchBrief,
     batchBriefSignal,
     recommendedAction,
-    evidence: styleSampleRecoveryEvidence,
+    evidence: [
+      ...styleSampleRecoveryEvidence,
+      ...recoveryEvidenceReleaseEvidence,
+    ],
   })
 
   return {
@@ -7142,13 +7431,15 @@ function buildProductionLicense(args: {
   }
 
   if (args.batchGuardrail.status === 'ready' && args.batchGuardrail.recommendedAction.key === 'start_safe_batch_generation') {
+    const recoveryEvidenceReleaseSummary = args.batchGuardrail.preflight.inputSnapshot?.recovery_evidence_release_summary || null
+    const recoveryEvidenceReleaseReasons = arrayValue(recoveryEvidenceReleaseSummary?.evidence).slice(0, 3)
     return {
       status: 'batch_allowed',
       label: '生产许可',
       modeLabel: '小批量连写',
       summary: `当前长线材料、交稿风险和下一批任务书已通过检查，可按安全连写放行 ${args.batchGuardrail.safeChapterCount} 章。`,
       safeChapterCount: args.batchGuardrail.safeChapterCount,
-      reasons: ['长线材料可用', '交稿风险已清', '剧情线决策已闭环', '下一批任务书可执行'],
+      reasons: ['长线材料可用', '交稿风险已清', '剧情线决策已闭环', '下一批任务书可执行', ...recoveryEvidenceReleaseReasons],
       badges: [`安全 ${args.batchGuardrail.safeChapterCount}章`, args.batchGuardrail.nextBatchBrief.chapterRangeLabel].filter(Boolean),
       nextAction: args.batchGuardrail.recommendedAction,
     }

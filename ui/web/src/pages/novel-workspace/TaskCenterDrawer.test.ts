@@ -868,4 +868,26 @@ describe('repairTaskActionLabel', () => {
       segment: '第41-43章',
     })).toBe('按批次修订')
   })
+
+  test('labels recovery evidence governance queue actions by their closure flow', () => {
+    expect(repairTaskActionLabel({
+      issue_type: 'recovery_evidence_governance_queue',
+      action_key: 'revision',
+    })).toBe('回修依据并复检')
+
+    expect(repairTaskActionLabel({
+      issue_type: 'recovery_evidence_governance_queue',
+      action_key: 'recheck_single_chapter',
+    })).toBe('复检单章')
+
+    expect(repairTaskActionLabel({
+      issue_type: 'recovery_evidence_governance_queue',
+      action_key: 'recheck_safe_batch',
+    })).toBe('复盘批次')
+
+    expect(repairTaskActionLabel({
+      issue_type: 'recovery_evidence_governance_queue',
+      action_key: 'focus_task',
+    })).toBe('已处理并复盘')
+  })
 })

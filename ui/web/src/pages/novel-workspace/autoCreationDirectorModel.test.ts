@@ -1239,6 +1239,26 @@ describe('buildAutoCreationDirectorModel', () => {
       status: 'ok',
       source_count: 2,
     })
+    expect(model.batchGuardrail.preflight.inputSnapshot.recovery_evidence_release_summary).toMatchObject({
+      status: 'released',
+      source: 'recovery_evidence_governance_queue',
+      safe_chapter_count: 3,
+      allowed_chapter_nos: [8, 9, 10],
+      next_batch_label: '第8-10章',
+      cleared_source_count: 2,
+    })
+    expect(model.batchGuardrail.preflight.inputSnapshot.recovery_evidence_release_summary.evidence).toEqual(expect.arrayContaining([
+      '恢复依据治理队列已闭环',
+      '单章治理复查：生产阻断已解除',
+      '批次恢复复查：生产阻断已解除',
+    ]))
+    expect(model.batchGuardrail.recommendedAction.payload?.batch_preflight?.recovery_evidence_release_summary).toMatchObject({
+      status: 'released',
+      cleared_source_count: 2,
+    })
+    expect(model.batchGuardrail.briefRecovery.evidence).toContain('恢复依据治理队列已闭环')
+    expect(model.productionLicense.reasons).toContain('恢复依据治理队列已闭环')
+    expect(model.todayCommandDeck.releaseRationale.checks).toContain('恢复依据治理队列已闭环')
   })
 
   test('blocks safe batching at the director entry when recovery evidence sources still need recheck', () => {
@@ -1343,13 +1363,52 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(recoveryGate?.detail).toContain('批次恢复复查：暂缓安全连写')
     expect(recoveryGate?.detail).toContain('第43章读者回报仍未继承')
     expect(model.batchGuardrail.status).toBe('blocked')
-    expect(model.batchGuardrail.recommendedAction.key).toBe('review_governance_closure')
-    expect(model.batchGuardrail.recommendedAction.label).toBe('定位批次任务')
+    expect(model.batchGuardrail.recommendedAction.key).toBe('create_recovery_evidence_governance_queue')
+    expect(model.batchGuardrail.recommendedAction.label).toBe('生成恢复依据治理队列')
     expect(model.batchGuardrail.recommendedAction.payload?.recoveryEvidenceNextAction).toEqual(expect.objectContaining({
       action: 'focus_task',
       label: '定位批次任务',
       source: 'safe_batch_recovery_recheck',
       residualEvidence: ['第43章读者回报仍未继承'],
+    }))
+    expect(model.batchGuardrail.recommendedAction.payload?.recoveryEvidenceGovernanceQueue).toEqual(expect.objectContaining({
+      source: 'recovery_evidence_production_gate',
+      summary: expect.stringContaining('定位批次任务'),
+      main_action: expect.objectContaining({
+        action: 'focus_task',
+        label: '定位批次任务',
+        source: 'safe_batch_recovery_recheck',
+      }),
+      source_count: 2,
+      tasks: [
+        expect.objectContaining({
+          issue_type: 'recovery_evidence_governance_queue',
+          source: 'single_chapter_governance_recheck',
+          action_key: 'recheck_single_chapter',
+          recheck_mode: 'single_chapter',
+          recheck_source: 'governance_recheck_sync',
+          source_task_index: 0,
+          chapter_no: 42,
+          closure_status: 'blocked_until_recheck',
+          auto_recheck: true,
+          task_status: 'needs_review',
+        }),
+        expect.objectContaining({
+          issue_type: 'recovery_evidence_governance_queue',
+          source: 'safe_batch_recovery_recheck',
+          action_key: 'focus_task',
+          recheck_mode: 'manual_then_batch_audit',
+          recheck_source: 'longform_repair_audit_summary',
+          source_task_index: 1,
+          chapter_no: 43,
+          requires_manual_repair: true,
+          closure_status: 'blocked_until_batch_audit',
+          task_status: 'needs_review',
+          recovery_evidence_review: expect.objectContaining({
+            failed_evidence: ['第43章读者回报仍未继承'],
+          }),
+        }),
+      ],
     }))
     expect(model.batchGuardrail.preflight.inputSnapshot.recovery_evidence_production_gate).toMatchObject({
       status: 'block',
@@ -1372,8 +1431,8 @@ describe('buildAutoCreationDirectorModel', () => {
       status: 'block',
       source_count: 2,
       recommended_action: {
-        key: 'review_governance_closure',
-        label: '定位批次任务',
+        key: 'create_recovery_evidence_governance_queue',
+        label: '生成恢复依据治理队列',
       },
     })
     expect(model.todayCommandDeck.releaseRationale.checks.join('；')).toContain('恢复依据生产闸门')
@@ -1448,12 +1507,33 @@ describe('buildAutoCreationDirectorModel', () => {
       },
     } as any)
 
-    expect(model.batchGuardrail.recommendedAction.key).toBe('review_governance_closure')
-    expect(model.batchGuardrail.recommendedAction.label).toBe('复检单章')
+    expect(model.batchGuardrail.recommendedAction.key).toBe('create_recovery_evidence_governance_queue')
+    expect(model.batchGuardrail.recommendedAction.label).toBe('生成恢复依据治理队列')
     expect(model.batchGuardrail.recommendedAction.payload?.recoveryEvidenceNextAction).toEqual(expect.objectContaining({
       action: 'recheck_single_chapter',
       label: '复检单章',
       source: 'single_chapter_governance_recheck',
+    }))
+    expect(model.batchGuardrail.recommendedAction.payload?.recoveryEvidenceGovernanceQueue).toEqual(expect.objectContaining({
+      source: 'recovery_evidence_production_gate',
+      summary: expect.stringContaining('复检单章'),
+      main_action: expect.objectContaining({
+        action: 'recheck_single_chapter',
+        label: '复检单章',
+      }),
+      tasks: [
+        expect.objectContaining({
+          source: 'single_chapter_governance_recheck',
+          action_key: 'recheck_single_chapter',
+          recheck_mode: 'single_chapter',
+          recheck_source: 'governance_recheck_sync',
+          source_task_index: 0,
+          chapter_no: 42,
+          closure_status: 'blocked_until_recheck',
+          auto_recheck: true,
+          task_status: 'needs_review',
+        }),
+      ],
     }))
   })
 
@@ -6219,6 +6299,150 @@ describe('buildAutoCreationDirectorModel', () => {
         source: 'recovery_evidence_production_gate',
         source_label: '入口生产闸门',
         source_detail: '批次恢复复查 · 生产阻断已解除',
+        source_action_label: '复盘批次',
+      }),
+    ]))
+    expect(model.batchReviewQueue.handoff.riskLabels).toContain('恢复依据')
+  })
+
+  test('turns release summary evidence into batch repair tasks when the batch stops inheriting it', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        topStatus: {
+          ...basePlanning.topStatus,
+          future100Coverage: { ready: true, planned: 100, required: 100, missingChapters: [], label: '100/100' },
+        },
+      },
+      writing: {
+        ...baseWriting,
+        nextChapter: { ...baseWriting.nextChapter, id: 44, chapterNo: 44, title: '放行摘要后续' },
+        chapterPlanningDesk: {
+          ...baseWriting.chapterPlanningDesk,
+          readiness: 'ready',
+          statusLabel: '本章可写',
+          scenePlanStatus: 'ready',
+          sceneCards: [{ title: '放行摘要复盘', goal: '确认安全连写放行摘要是否被本批继承' }],
+          recommendedPlannerAction: { key: 'confirm_plan_and_write_draft', label: '确认并生成' },
+        },
+        topStatus: {
+          ...baseWriting.topStatus,
+          nextActionLabel: '确认并生成',
+          primaryActionKey: 'confirm_plan_and_write_draft',
+        },
+        primaryActionKey: 'confirm_plan_and_write_draft',
+      },
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: { last_updated_chapter: 43 },
+      chapters: [
+        { id: 41, chapter_no: 41, title: '放行摘要一', chapter_text: '放行摘要一'.repeat(500) },
+        { id: 42, chapter_no: 42, title: '放行摘要二', chapter_text: '放行摘要二'.repeat(500) },
+        { id: 43, chapter_no: 43, title: '放行摘要三', chapter_text: '放行摘要三'.repeat(500) },
+      ],
+      reviews: [
+        { id: 4401, chapter_id: 41, review_type: 'prose_quality', created_at: '2026-06-05T01:00:00.000Z', payload: JSON.stringify({ score: 84, passed: true }) },
+        { id: 4402, chapter_id: 42, review_type: 'prose_quality', created_at: '2026-06-05T01:01:00.000Z', payload: JSON.stringify({ score: 85, passed: true }) },
+        { id: 4403, chapter_id: 43, review_type: 'prose_quality', created_at: '2026-06-05T01:02:00.000Z', payload: JSON.stringify({ score: 86, passed: true }) },
+        {
+          id: 4404,
+          chapter_id: 42,
+          review_type: 'style_sample_sync',
+          created_at: '2026-06-05T01:03:00.000Z',
+          payload: JSON.stringify({
+            style_sample_sync: {
+              status: 'warn',
+              label: '风格缺口 3',
+              missed_count: 3,
+              missed: [
+                { label: '治理队列闭环', text: '恢复依据治理队列已闭环，但本批没有继承其放行摘要。' },
+                { label: '单章复查', text: '本批仍没有继承单章治理复查解除后的对白交锋。' },
+                { label: '批次复查', text: '本批仍没有继承批次恢复复查解除后的样章节奏。' },
+              ],
+              copied_phrases: [],
+            },
+          }),
+        },
+      ],
+      runRecords: [
+        {
+          id: 440,
+          run_type: 'batch_generate_prose',
+          created_at: '2026-06-05T00:00:00.000Z',
+          status: 'success',
+          input_ref: JSON.stringify({
+            source: 'auto_creation_safe_batch',
+            safety_limit: 3,
+            batch_preflight: {
+              recovery_evidence_release_summary: {
+                status: 'released',
+                source: 'recovery_evidence_governance_queue',
+                summary: '恢复依据治理队列已闭环，可恢复 3 章安全连写。',
+                safe_chapter_count: 3,
+                allowed_chapter_nos: [41, 42, 43],
+                next_batch_label: '第41-43章',
+                cleared_source_count: 2,
+                cleared_sources: [
+                  {
+                    source: 'single_chapter_governance_recheck',
+                    label: '单章治理复查',
+                    status: 'cleared',
+                    status_label: '生产阻断已解除',
+                  },
+                  {
+                    source: 'safe_batch_recovery_recheck',
+                    label: '批次恢复复查',
+                    status: 'cleared',
+                    status_label: '生产阻断已解除',
+                  },
+                ],
+                evidence: [
+                  '恢复依据治理队列已闭环',
+                  '单章治理复查：生产阻断已解除',
+                  '批次恢复复查：生产阻断已解除',
+                ],
+              },
+            },
+          }),
+          output_ref: JSON.stringify({
+            total: 3,
+            success: 3,
+            failed: 0,
+            chapters: [
+              { id: 41, chapter_no: 41, title: '放行摘要一', status: 'success', score: 84, word_count: 3180 },
+              { id: 42, chapter_no: 42, title: '放行摘要二', status: 'success', score: 85, word_count: 3090 },
+              { id: 43, chapter_no: 43, title: '放行摘要三', status: 'success', score: 86, word_count: 3021 },
+            ],
+          }),
+        },
+      ],
+    } as any)
+
+    const recoverySignal = model.batchReviewQueue.riskRadar.signals.find(signal => signal.key === 'recovery_evidence')
+    const recoveryTask = model.batchReviewQueue.riskRadar.repairTasks.find((task: any) => task.issue_type === 'recovery_evidence_mismatch')
+
+    expect(model.batchReviewQueue.status).toBe('risk')
+    expect(recoverySignal?.detail).toContain('恢复依据治理队列已闭环')
+    expect(recoveryTask?.recovery_evidence_review?.failed_evidence).toContain('恢复依据治理队列已闭环')
+    expect(recoveryTask?.recovery_evidence_review?.failed_items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        evidence: '恢复依据治理队列已闭环',
+        source: 'recovery_evidence_release_summary',
+        source_label: '安全连写放行摘要',
+        source_action_label: '治理复查台',
+      }),
+      expect.objectContaining({
+        evidence: '单章治理复查：生产阻断已解除',
+        source: 'recovery_evidence_release_summary',
+        source_label: '安全连写放行摘要',
+        source_detail: expect.stringContaining('单章治理复查'),
+        source_action_label: '复检单章',
+      }),
+      expect.objectContaining({
+        evidence: '批次恢复复查：生产阻断已解除',
+        source: 'recovery_evidence_release_summary',
+        source_label: '安全连写放行摘要',
+        source_detail: expect.stringContaining('批次恢复复查'),
         source_action_label: '复盘批次',
       }),
     ]))

@@ -88,6 +88,14 @@ type TaskCenterActionOptions = {
   keepTaskCenterOpen?: boolean
 }
 
+type EditorReportForChapterOptions = {
+  sourceTask?: any
+  sourceRun?: any
+  sourceTaskIndex?: number
+  autoRevision?: boolean
+  skipRevisionConfirm?: boolean
+}
+
 function DeferredWorkspaceSurfaces({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={null}>{children}</Suspense>
 }
@@ -1740,7 +1748,7 @@ export default function NovelProjectWorkspace() {
     await createEditorReportForChapter(activeChapter.id)
   }
 
-  const createEditorReportForChapter = async (chapterId: number, options: { sourceTask?: any; sourceRun?: any; sourceTaskIndex?: number; autoRevision?: boolean } = {}) => {
+  const createEditorReportForChapter = async (chapterId: number, options: EditorReportForChapterOptions = {}) => {
     if (!selectedModelId) return message.warning('请先选择模型')
     if (!await flushPendingSave()) return
     setEditorReportLoading(true)
@@ -1754,18 +1762,22 @@ export default function NovelProjectWorkspace() {
       setRightPanelTab('editorReports')
       if (options.autoRevision && res.data?.review) {
         const task = options.sourceTask || {}
-        await applyEditorRevision(res.data.review, {
+        const revisionResult = await applyEditorRevision(res.data.review, {
           revisionMode: String(task.message || task.issue_type || '').includes('钩子') ? 'restore_hook' : 'tighten_pacing',
           prompt: buildRepairTaskRevisionPrompt(task, options.sourceRun),
           sourceTask: task,
           sourceRun: options.sourceRun,
           sourceTaskIndex: options.sourceTaskIndex,
+          skipConfirm: options.skipRevisionConfirm,
         })
+        return revisionResult
       } else {
         message.success('编辑报告已生成')
       }
+      return res.data
     } catch (error: any) {
       message.error(error?.response?.data?.error || error?.message || '编辑报告生成失败')
+      return null
     } finally {
       setEditorReportLoading(false)
     }
@@ -1939,6 +1951,69 @@ export default function NovelProjectWorkspace() {
     }
   }
 
+  const resolveRepairQueueTaskChapterId = (task: any) => {
+    const chapterId = Number(task?.chapter_id || task?.chapterId || 0)
+    if (chapterId) return chapterId
+    const chapterNo = Number(task?.chapter_no || task?.chapterNo || 0)
+    if (!chapterNo) return 0
+    const chapter = sortedChapters.find(item => Number(item.chapter_no ?? item.chapterNo ?? 0) === chapterNo)
+    return Number(chapter?.id || 0)
+  }
+
+  const buildRecoveryEvidenceQueueRecheckTask = (task: any) => {
+    const chapterId = resolveRepairQueueTaskChapterId(task)
+    return {
+      ...task,
+      chapter_id: chapterId || task?.chapter_id || task?.chapterId,
+      issue_type: 'recovery_evidence_mismatch',
+      source: 'review_annotation_risk',
+      annotation_source: 'governance_recheck_sync',
+      annotation_category: 'recovery_evidence',
+      task_type: 'repair_quality',
+    }
+  }
+
+  const executeRecoveryEvidenceGovernanceQueueTask = async (task: any, run?: any, taskIndex = -1, options: TaskCenterActionOptions = {}) => {
+    const actionKey = String(task?.action_key || task?.actionKey || '')
+    const keepOpenOptions = { ...options, keepTaskCenterOpen: true }
+    if (actionKey === 'recheck_single_chapter') {
+      const recheckTask = buildRecoveryEvidenceQueueRecheckTask(task)
+      await recheckRepairTaskConvergence(recheckTask, run, taskIndex, keepOpenOptions)
+      return
+    }
+    if (actionKey === 'revision') {
+      const recheckTask = buildRecoveryEvidenceQueueRecheckTask(task)
+      const chapterId = Number(recheckTask.chapter_id || 0)
+      if (!chapterId) return message.warning('这个治理队列任务没有匹配章节')
+      if (!selectedModelId) return message.warning('请先选择模型')
+      if (!await selectChapterForWriting(chapterId)) return
+      if (!options.keepTaskCenterOpen) setTaskCenterOpen(false)
+      const revisionResult = await createEditorReportForChapter(chapterId, {
+        sourceTask: recheckTask,
+        sourceRun: run,
+        sourceTaskIndex: taskIndex,
+        autoRevision: true,
+        skipRevisionConfirm: true,
+      })
+      if (revisionResult) {
+        await recheckRepairTaskConvergence(recheckTask, run, taskIndex, { keepTaskCenterOpen: true })
+      }
+      return
+    }
+    if (actionKey === 'recheck_safe_batch' || actionKey === 'focus_task' || actionKey === 'review_governance_closure') {
+      if (!run?.id) return message.warning('这个治理队列没有绑定修复运行')
+      await generateLongformRepairAuditSummary(run, { keepTaskCenterOpen: true })
+      if (run?.id && taskIndex >= 0) {
+        const note = actionKey === 'focus_task'
+          ? '已按作者确认处理批次残留，等待恢复依据复盘回填'
+          : '已触发恢复依据复盘，等待审计回填'
+        await updateRepairTaskStatus(run, taskIndex, 'needs_review', note)
+      }
+      return
+    }
+    message.warning('这个治理队列动作暂不支持自动执行')
+  }
+
   const executeTypedRepairTask = async (task: any, run?: any, taskIndex = -1, options: TaskCenterActionOptions = {}) => {
     const taskType = String(task?.task_type || '')
     const chapterId = Number(task?.chapter_id || 0)
@@ -1949,6 +2024,10 @@ export default function NovelProjectWorkspace() {
     }
     if (String(task?.issue_type || '') === 'style_sample_task_book_rebuild') {
       await executeStyleSampleTaskBookRebuild(task, run, taskIndex, options)
+      return
+    }
+    if (String(task?.issue_type || '') === 'recovery_evidence_governance_queue') {
+      await executeRecoveryEvidenceGovernanceQueueTask(task, run, taskIndex, options)
       return
     }
     if (taskType === 'repair_skeleton') {
@@ -2214,8 +2293,7 @@ export default function NovelProjectWorkspace() {
       }
     }
     if (options.skipConfirm) {
-      await runRevision()
-      return
+      return await runRevision()
     }
     Modal.confirm({
       title: revisionLabels[revisionMode] || revisionLabels.from_report,
@@ -2227,6 +2305,7 @@ export default function NovelProjectWorkspace() {
       okText: isSelfCheckRevision ? '按自检修订' : isDeliveryRiskRevision ? '按风险修订' : '生成修订稿',
       onOk: runRevision,
     })
+    return null
   }
 
   const fillWritingBibleForm = (bible: any) => {
@@ -3400,6 +3479,59 @@ export default function NovelProjectWorkspace() {
       message.success(`已生成样章任务书修复任务：${tasks.length} 项`)
     } catch (error: any) {
       message.error(error?.response?.data?.error || error?.message || '生成样章任务书修复任务失败')
+    } finally {
+      setAutoDirectorActionLoadingKey('')
+    }
+  }
+
+  const createRecoveryEvidenceGovernanceQueue = async (payload?: any) => {
+    const queue = payload?.recoveryEvidenceGovernanceQueue
+      || autoCreationDirectorModel.batchGuardrail.recommendedAction.payload?.recoveryEvidenceGovernanceQueue
+      || {}
+    const tasks = Array.isArray(queue.tasks) ? queue.tasks : []
+    if (!tasks.length) {
+      message.info('当前恢复依据生产闸门没有需要生成队列的未闭环来源。')
+      return
+    }
+    setAutoDirectorActionLoadingKey('create_recovery_evidence_governance_queue')
+    try {
+      await apiClient.post('/novel/runs', {
+        project_id: projectId,
+        run_type: 'longform_production_repair',
+        step_name: `recovery-evidence-governance-queue-${tasks.length}`,
+        status: 'ready',
+        input_ref: {
+          source: 'recovery_evidence_governance_queue',
+          status: queue.status,
+          source_count: queue.source_count,
+          main_action: queue.main_action,
+          next_cycle: queue.next_cycle,
+          batch_preflight: payload?.batch_preflight || autoCreationDirectorModel.batchGuardrail.preflight.inputSnapshot,
+        },
+        output_ref: {
+          report: {
+            source: 'recovery_evidence_governance_queue',
+            summary: queue.summary,
+            status: queue.status,
+            task_count: tasks.length,
+            source_count: queue.source_count,
+            main_action: queue.main_action,
+            next_cycle: queue.next_cycle,
+            sources: queue.sources || [],
+          },
+          recommendations: queue.recommendations || [
+            '先处理恢复依据生产闸门未闭环来源，再恢复安全连写。',
+            '处理后重新生成恢复依据审计摘要，确认生产阻断已解除。',
+          ],
+          tasks,
+        },
+      })
+      await loadProjectModules()
+      await loadProductionTasks()
+      setTaskCenterOpen(true)
+      message.success(`已生成恢复依据治理队列：${tasks.length} 项`)
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '生成恢复依据治理队列失败')
     } finally {
       setAutoDirectorActionLoadingKey('')
     }
@@ -5361,6 +5493,11 @@ export default function NovelProjectWorkspace() {
 
     if (action.key === 'create_style_sample_batch_repair') {
       void createStyleSampleBatchRepairQueue()
+      return
+    }
+
+    if (action.key === 'create_recovery_evidence_governance_queue') {
+      void createRecoveryEvidenceGovernanceQueue(action.payload)
       return
     }
 
