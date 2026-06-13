@@ -230,6 +230,12 @@ function normalizeChapterNos(value: any) {
     .filter((chapterNo: number) => Number.isFinite(chapterNo) && chapterNo > 0)
 }
 
+function normalizeEvidenceTextList(value: any) {
+  return (Array.isArray(value) ? value : [])
+    .map((item: any) => compactEvidenceText(item))
+    .filter(Boolean)
+}
+
 export function buildRepairClosureHighlights(tasks: any[], audit?: any | null): RepairClosureHighlight[] {
   const groups = new Map<string, {
     label: string
@@ -1307,6 +1313,7 @@ export type SafeBatchRecoveryValidationSnapshot = {
   nextActionKind: 'confirm_restore_five' | 'focus_repair'
   nextActionLabel: string
   focus: SafeBatchRecoveryFocusSnapshot | null
+  defaultFiveChapterRecoveryVerdict: SafeBatchDefaultFiveChapterRecoveryVerdictSnapshot | null
 }
 
 export type SafeBatchRecoveryRoadmapNodeSnapshot = {
@@ -1428,6 +1435,25 @@ export type SafeBatchDefaultFiveChapterRegressionSnapshot = {
   summary: string
 }
 
+export type SafeBatchDefaultFiveChapterRecoveryVerdictSnapshot = {
+  visible: boolean
+  status: 'passed' | 'failed'
+  label: string
+  summary: string
+  defaultBatchChapterNos: number[]
+  restoreChapterNos: number[]
+  previousValidationChapterNos: number[]
+  validationChapterNos: number[]
+  failureReasons: string[]
+  clearedFailureReasons: string[]
+  remainingFailureReasons: string[]
+  failureReasonStatuses: {
+    reason: string
+    status: 'cleared' | 'remaining'
+    riskCount: number
+  }[]
+}
+
 export type SafeBatchExpansionStructureValidationResultSnapshot = {
   visible: boolean
   status: 'ok' | 'warn'
@@ -1436,6 +1462,7 @@ export type SafeBatchExpansionStructureValidationResultSnapshot = {
   validationChapterNos: number[]
   failedChapterNos: number[]
   riskCount: number
+  defaultFiveChapterRecoveryVerdict: SafeBatchDefaultFiveChapterRecoveryVerdictSnapshot | null
 }
 
 export type SafeBatchExpansionStructureValidationTrendSnapshot = {
@@ -1728,6 +1755,7 @@ function buildSafeBatchRecoveryValidationSnapshot(
     nextActionKind: passed ? 'confirm_restore_five' : 'focus_repair',
     nextActionLabel: passed ? '确认恢复5章扩批' : `聚焦${repairLabel}`,
     focus,
+    defaultFiveChapterRecoveryVerdict: result.defaultFiveChapterRecoveryVerdict || null,
   }
 }
 
@@ -1894,7 +1922,46 @@ function buildSafeBatchExpansionStructureValidationResultSnapshot(resultLike: an
     validationChapterNos,
     failedChapterNos,
     riskCount: Number(result?.risk_count ?? result?.riskCount ?? 0),
+    defaultFiveChapterRecoveryVerdict: buildSafeBatchDefaultFiveChapterRecoveryVerdictSnapshot(
+      result?.default_five_chapter_recovery_verdict || result?.defaultFiveChapterRecoveryVerdict,
+    ),
   }
+}
+
+function buildSafeBatchDefaultFiveChapterRecoveryVerdictSnapshot(verdictLike: any): SafeBatchDefaultFiveChapterRecoveryVerdictSnapshot | null {
+  const verdict = parseJsonValue(verdictLike) || verdictLike || null
+  if (!verdict || verdict.visible === false) return null
+  const rawStatus = compactEvidenceText(verdict?.status || '')
+  const status = rawStatus === 'failed' ? 'failed' : 'passed'
+  const failureReasonStatuses = (Array.isArray(verdict?.failure_reason_statuses)
+    ? verdict.failure_reason_statuses
+    : Array.isArray(verdict?.failureReasonStatuses)
+      ? verdict.failureReasonStatuses
+      : []
+  ).map((item: any) => {
+    const itemStatus = compactEvidenceText(item?.status || '')
+    return {
+      reason: compactEvidenceText(item?.reason || ''),
+      status: itemStatus === 'remaining' ? 'remaining' as const : 'cleared' as const,
+      riskCount: Number(item?.risk_count ?? item?.riskCount ?? 0),
+    }
+  }).filter((item: any) => item.reason)
+  const snapshot = {
+    visible: true,
+    status,
+    label: compactEvidenceText(verdict?.label || '默认档位恢复判定'),
+    summary: compactEvidenceText(verdict?.summary || ''),
+    defaultBatchChapterNos: normalizeChapterNos(verdict?.default_batch_chapter_nos || verdict?.defaultBatchChapterNos),
+    restoreChapterNos: normalizeChapterNos(verdict?.restore_chapter_nos || verdict?.restoreChapterNos),
+    previousValidationChapterNos: normalizeChapterNos(verdict?.previous_validation_chapter_nos || verdict?.previousValidationChapterNos),
+    validationChapterNos: normalizeChapterNos(verdict?.validation_chapter_nos || verdict?.validationChapterNos),
+    failureReasons: normalizeEvidenceTextList(verdict?.failure_reasons || verdict?.failureReasons),
+    clearedFailureReasons: normalizeEvidenceTextList(verdict?.cleared_failure_reasons || verdict?.clearedFailureReasons),
+    remainingFailureReasons: normalizeEvidenceTextList(verdict?.remaining_failure_reasons || verdict?.remainingFailureReasons),
+    failureReasonStatuses,
+  }
+  if (!snapshot.summary && !snapshot.failureReasons.length && !snapshot.failureReasonStatuses.length) return null
+  return snapshot
 }
 
 function buildSafeBatchRecoveryRestoreStabilityEvidenceSnapshot(evidenceLike: any): SafeBatchRecoveryRestoreStabilityEvidenceSnapshot | null {
@@ -2273,6 +2340,7 @@ function BatchProseRunSummary({ run }: { run: any }) {
     : ''
   const recoveryRoadmap = expansionPolicy?.recoveryRoadmap || null
   const recoveryValidation = expansionPolicy?.recoveryValidation || null
+  const defaultRecoveryVerdict = recoveryValidation?.defaultFiveChapterRecoveryVerdict || null
 
   return (
     <Card size="small" title="批量生成摘要">
@@ -2336,6 +2404,22 @@ function BatchProseRunSummary({ run }: { run: any }) {
                       </Tag>
                     </Space>
                     <Text type="secondary" style={{ fontSize: 12 }}>{recoveryValidation.summary}</Text>
+                    {defaultRecoveryVerdict && (
+                      <Space direction="vertical" size={3} style={{ width: '100%' }}>
+                        <Space wrap size={[4, 4]}>
+                          <Tag color={defaultRecoveryVerdict.status === 'passed' ? 'green' : 'gold'} bordered={false}>
+                            {defaultRecoveryVerdict.label}
+                          </Tag>
+                          {defaultRecoveryVerdict.clearedFailureReasons.slice(0, 3).map(reason => (
+                            <Tag key={`cleared-${reason}`} color="green" bordered={false}>{reason}已清零</Tag>
+                          ))}
+                          {defaultRecoveryVerdict.remainingFailureReasons.slice(0, 3).map(reason => (
+                            <Tag key={`remaining-${reason}`} color="gold" bordered={false}>{reason}未清零</Tag>
+                          ))}
+                        </Space>
+                        <Text type="secondary" style={{ fontSize: 12 }}>{defaultRecoveryVerdict.summary}</Text>
+                      </Space>
+                    )}
                   </Space>
                 </div>
               )}

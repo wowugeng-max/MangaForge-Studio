@@ -4211,6 +4211,79 @@ function safeBatchExpansionStructureVerificationFromPreflight(preflight?: AnyRec
     || null
 }
 
+function safeBatchDefaultRecoveryRiskCountForReason(reason: string, counts: {
+  riskCount: number
+  coreRiskCount: number
+  payoffDebtCount: number
+  readerPullRiskCount: number
+}) {
+  const reasonText = text(reason)
+  if (reasonText.includes('核心')) return counts.coreRiskCount
+  if (reasonText.includes('回报')) return counts.payoffDebtCount
+  if (reasonText.includes('追读') || reasonText.includes('拉力')) return counts.readerPullRiskCount
+  return counts.riskCount
+}
+
+function buildDefaultFiveChapterRecoveryVerdict(args: {
+  verification: AnyRecord
+  validationChapterNos: number[]
+  riskCount: number
+  coreRiskCount: number
+  payoffDebtCount: number
+  readerPullRiskCount: number
+}) {
+  const regression = args.verification?.default_five_chapter_regression
+    || args.verification?.defaultFiveChapterRegression
+    || null
+  if (!regression || regression.visible === false) return null
+  const failureReasons = arrayValue(regression.failure_reasons || regression.failureReasons)
+    .map(item => text(item))
+    .filter(Boolean)
+  if (!failureReasons.length) return null
+  const reasonStatuses = failureReasons.map(reason => {
+    const riskCount = safeBatchDefaultRecoveryRiskCountForReason(reason, args)
+    return {
+      reason,
+      status: riskCount > 0 ? 'remaining' : 'cleared',
+      risk_count: riskCount,
+    }
+  })
+  const clearedFailureReasons = reasonStatuses
+    .filter(item => item.status === 'cleared')
+    .map(item => item.reason)
+  const remainingFailureReasons = reasonStatuses
+    .filter(item => item.status === 'remaining')
+    .map(item => item.reason)
+  const defaultBatchChapterNos = arrayValue(regression.default_batch_chapter_nos || regression.defaultBatchChapterNos)
+    .map(chapterNo => Number(chapterNo))
+    .filter(chapterNo => chapterNo > 0)
+  const restoreChapterNos = arrayValue(regression.restore_chapter_nos || regression.restoreChapterNos)
+    .map(chapterNo => Number(chapterNo))
+    .filter(chapterNo => chapterNo > 0)
+  const previousValidationChapterNos = arrayValue(regression.validation_chapter_nos || regression.validationChapterNos)
+    .map(chapterNo => Number(chapterNo))
+    .filter(chapterNo => chapterNo > 0)
+  const status = remainingFailureReasons.length ? 'failed' : 'passed'
+  const summary = status === 'passed'
+    ? `默认档位恢复判定：${clearedFailureReasons.join('、')}已清零，${compactChapterNoEvidence(args.validationChapterNos)}可作为默认5章档位恢复证据。`
+    : `默认档位恢复判定：${remainingFailureReasons.join('、')}仍未清零，${compactChapterNoEvidence(args.validationChapterNos)}不能恢复默认5章档位。`
+
+  return {
+    visible: true,
+    status,
+    label: '默认档位恢复判定',
+    summary,
+    default_batch_chapter_nos: defaultBatchChapterNos,
+    restore_chapter_nos: restoreChapterNos,
+    previous_validation_chapter_nos: previousValidationChapterNos,
+    validation_chapter_nos: args.validationChapterNos,
+    failure_reasons: failureReasons,
+    cleared_failure_reasons: clearedFailureReasons,
+    remaining_failure_reasons: remainingFailureReasons,
+    failure_reason_statuses: reasonStatuses,
+  }
+}
+
 function buildSafeBatchExpansionStructureValidationResult(args: {
   preflight?: AnyRecord | null
   chapterRisks: AnyRecord[]
@@ -4264,6 +4337,14 @@ function buildSafeBatchExpansionStructureValidationResult(args: {
   const summary = riskCount > 0
     ? `${label}批未通过：第${failedChapterNos.join('、') || validationNos.join('、')}章仍有 ${riskCount} 项核心/回报/追读风险，结构修复不能恢复5章扩批。`
     : `${label}批通过：第${validationNos.join('、')}章核心守恒、显性回报和章末追读稳定，可作为恢复5章扩批证据。`
+  const defaultFiveChapterRecoveryVerdict = buildDefaultFiveChapterRecoveryVerdict({
+    verification,
+    validationChapterNos: validationNos,
+    riskCount,
+    coreRiskCount,
+    payoffDebtCount,
+    readerPullRiskCount,
+  })
   return {
     visible: true,
     status: riskCount > 0 ? 'warn' as const : 'ok' as const,
@@ -4282,6 +4363,7 @@ function buildSafeBatchExpansionStructureValidationResult(args: {
     explicit_payoff: text(verification.explicit_payoff || verification.explicitPayoff),
     ending_hook_requirement: text(verification.ending_hook_requirement || verification.endingHookRequirement),
     structure_actions: arrayValue(verification.structure_actions || verification.structureActions).map(item => text(item)).filter(Boolean),
+    ...(defaultFiveChapterRecoveryVerdict ? { default_five_chapter_recovery_verdict: defaultFiveChapterRecoveryVerdict } : {}),
   }
 }
 

@@ -1299,6 +1299,73 @@ describe('buildSafeBatchExpansionPolicySnapshot', () => {
     expect(snapshot?.recoveryValidation?.summary).toContain('第50、51、52章')
   })
 
+  test('keeps default five-chapter recovery verdict in recovery validation summary', () => {
+    const snapshot = buildSafeBatchExpansionPolicySnapshot({
+      safe_batch_expansion_policy: {
+        status: 'expanded',
+        label: '强化扩批规则',
+        summary: '默认档位回退后的3章验证批通过。',
+        target_chapter_count: 5,
+        base_chapter_count: 3,
+        expanded_chapter_count: 5,
+        required_pass_streak: 3,
+        pass_streak: 3,
+        accepted_batch_count: 3,
+        failed_batch_count: 0,
+        latest_status: 'ok',
+        expansion_feedback: {
+          status: 'recovered',
+          label: '扩批热区反馈',
+          summary: '扩批结构验证批通过，默认档位恢复判定已清零。',
+          target_chapter_count: 5,
+          latest_chapter_nos: [68, 69, 70],
+          risk_count: 0,
+          expansion_structure_validation_result: {
+            visible: true,
+            status: 'ok',
+            label: '扩批结构验证',
+            summary: '扩批结构验证批通过：第68、69、70章核心守恒、显性回报和章末追读稳定。',
+            validation_chapter_nos: [68, 69, 70],
+            failed_chapter_nos: [],
+            risk_count: 0,
+            default_five_chapter_recovery_verdict: {
+              visible: true,
+              status: 'passed',
+              label: '默认档位恢复判定',
+              summary: '默认档位恢复判定：核心偏移、回报欠账、追读拉力已清零。',
+              default_batch_chapter_nos: [63, 64, 65, 66, 67],
+              restore_chapter_nos: [58, 59, 60, 61, 62],
+              previous_validation_chapter_nos: [50, 51, 52],
+              validation_chapter_nos: [68, 69, 70],
+              failure_reasons: ['核心偏移', '回报欠账', '追读拉力'],
+              cleared_failure_reasons: ['核心偏移', '回报欠账', '追读拉力'],
+              remaining_failure_reasons: [],
+              failure_reason_statuses: [
+                { reason: '核心偏移', status: 'cleared', risk_count: 0 },
+                { reason: '回报欠账', status: 'cleared', risk_count: 0 },
+                { reason: '追读拉力', status: 'cleared', risk_count: 0 },
+              ],
+            },
+          },
+        },
+      },
+    })
+
+    expect(snapshot?.recoveryValidation?.defaultFiveChapterRecoveryVerdict).toMatchObject({
+      visible: true,
+      status: 'passed',
+      label: '默认档位恢复判定',
+      defaultBatchChapterNos: [63, 64, 65, 66, 67],
+      restoreChapterNos: [58, 59, 60, 61, 62],
+      previousValidationChapterNos: [50, 51, 52],
+      validationChapterNos: [68, 69, 70],
+      failureReasons: ['核心偏移', '回报欠账', '追读拉力'],
+      clearedFailureReasons: ['核心偏移', '回报欠账', '追读拉力'],
+      remainingFailureReasons: [],
+    })
+    expect(snapshot?.recoveryValidation?.defaultFiveChapterRecoveryVerdict?.summary).toContain('已清零')
+  })
+
   test('summarizes failed recovery validation batches as a focused repair action', () => {
     const snapshot = buildSafeBatchExpansionPolicySnapshot({
       safe_batch_expansion_policy: {

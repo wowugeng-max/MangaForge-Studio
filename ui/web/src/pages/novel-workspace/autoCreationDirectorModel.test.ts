@@ -683,6 +683,63 @@ function expansionStructureValidationBatchRun(args: {
   }
 }
 
+function defaultRegressionValidationBatchRun(args: {
+  id: number
+  createdAt: string
+  chapterNos: number[]
+  defaultRegression: any
+}) {
+  const verification = {
+    ...expansionStructureVerification(args.chapterNos),
+    default_five_chapter_regression: args.defaultRegression,
+  }
+  return {
+    id: args.id,
+    run_type: 'batch_generate_prose',
+    created_at: args.createdAt,
+    status: 'success',
+    input_ref: JSON.stringify({
+      source: 'safe_batch_recovery_validation_batch',
+      safety_limit: args.chapterNos.length,
+      batch_preflight: {
+        safe_chapter_count: args.chapterNos.length,
+        allowed_chapter_nos: args.chapterNos,
+        safe_batch_expansion_policy: {
+          status: 'recovering',
+          label: '强化扩批规则',
+          summary: '默认档位回退后进入3章验证批。',
+          target_chapter_count: args.chapterNos.length,
+          base_chapter_count: 3,
+          expanded_chapter_count: 5,
+          required_pass_streak: 3,
+          pass_streak: 3,
+          accepted_batch_count: 3,
+          failed_batch_count: 1,
+          latest_status: 'warn',
+        },
+        safe_batch_expansion_structure_verification: verification,
+      },
+      next_batch_brief: {
+        chapter_range_label: `第${args.chapterNos[0]}-${args.chapterNos[args.chapterNos.length - 1]}章`,
+        expansionStructureVerification: verification,
+      },
+    }),
+    output_ref: JSON.stringify({
+      total: args.chapterNos.length,
+      success: args.chapterNos.length,
+      failed: 0,
+      chapters: args.chapterNos.map((chapterNo, index) => ({
+        id: chapterNo,
+        chapter_no: chapterNo,
+        title: `默认档验证${chapterNo}`,
+        status: 'success',
+        score: 88 + index,
+        word_count: 3200 + index * 20,
+      })),
+    }),
+  }
+}
+
 function strengthenedAcceptanceQualityReviews(chapterNos: number[], startId = 4600, createdAt = '2026-06-10T01:00:00.000Z') {
   return chapterNos.map((chapterNo, index) => ({
     id: startId + index,
@@ -4617,6 +4674,84 @@ describe('buildAutoCreationDirectorModel', () => {
         default_batch_chapter_nos: defaultLaneChapterNos,
       },
     })
+  })
+
+  test('marks default five-chapter recovery verdict when validation clears original failure dimensions', () => {
+    const originalValidationChapterNos = [50, 51, 52]
+    const restoreChapterNos = [58, 59, 60, 61, 62]
+    const defaultLaneChapterNos = [63, 64, 65, 66, 67]
+    const validationChapterNos = [68, 69, 70]
+    const defaultRegression = {
+      visible: true,
+      status: 'regressed',
+      label: '默认5章档位回退原因',
+      source: 'default_five_chapter_lane',
+      stable_pass_streak: 2,
+      required_stable_pass_streak: 2,
+      default_batch_chapter_nos: defaultLaneChapterNos,
+      restore_chapter_nos: restoreChapterNos,
+      validation_chapter_nos: originalValidationChapterNos,
+      repeated_hotspot_segment: { key: 'middle', label: '中段', count: 1, chapter_nos: [65, 66], risk_count: 3 },
+      failure_reasons: ['核心偏移', '回报欠账', '追读拉力'],
+      summary: '默认5章档位回退原因：连续 2 批恢复稳定后，第63、64、65、66、67章默认档位在中段复发。',
+    }
+    const model = buildAutoCreationDirectorModel({
+      planning: readySafeBatchPlanning({ futureRoute: futureRouteRange(71, 5) }),
+      writing: readySafeBatchWriting({
+        nextChapter: { ...baseWriting.nextChapter, id: 71, chapterNo: 71, title: '默认档恢复后71' },
+        previousChapter: { chapterNo: 70, title: '默认档验证70', wordCount: 3180, hasProse: true },
+      }),
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: { last_updated_chapter: 70 },
+      chapters: [
+        ...[41, 42, 43, 44, 45, 46, 47, 48, 49],
+        ...validationChapterNos,
+      ].map(chapterNo => ({
+        id: chapterNo,
+        chapter_no: chapterNo,
+        title: `默认档恢复${chapterNo}`,
+        chapter_text: '默认档恢复正文'.repeat(500),
+      })),
+      reviews: [
+        ...strengthenedAcceptanceQualityReviews([41, 42, 43], 5551, '2026-06-09T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([44, 45, 46], 5561, '2026-06-10T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([47, 48, 49], 5571, '2026-06-11T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews(validationChapterNos, 5581, '2026-06-18T01:00:00.000Z'),
+      ],
+      runRecords: [
+        strengthenedAcceptanceBatchRun({ id: 666, createdAt: '2026-06-09T00:00:00.000Z', chapterNos: [41, 42, 43] }),
+        strengthenedAcceptanceBatchRun({ id: 667, createdAt: '2026-06-10T00:00:00.000Z', chapterNos: [44, 45, 46] }),
+        strengthenedAcceptanceBatchRun({ id: 668, createdAt: '2026-06-11T00:00:00.000Z', chapterNos: [47, 48, 49] }),
+        defaultRegressionValidationBatchRun({
+          id: 669,
+          createdAt: '2026-06-18T00:00:00.000Z',
+          chapterNos: validationChapterNos,
+          defaultRegression,
+        }),
+      ],
+    } as any)
+
+    const result = model.batchGuardrail.preflight.inputSnapshot.safe_batch_expansion_policy.expansion_feedback.expansion_structure_validation_result
+
+    expect(result).toMatchObject({
+      status: 'ok',
+      validation_chapter_nos: validationChapterNos,
+      risk_count: 0,
+      default_five_chapter_recovery_verdict: {
+        visible: true,
+        status: 'passed',
+        label: '默认档位恢复判定',
+        default_batch_chapter_nos: defaultLaneChapterNos,
+        restore_chapter_nos: restoreChapterNos,
+        previous_validation_chapter_nos: originalValidationChapterNos,
+        validation_chapter_nos: validationChapterNos,
+        failure_reasons: ['核心偏移', '回报欠账', '追读拉力'],
+        cleared_failure_reasons: ['核心偏移', '回报欠账', '追读拉力'],
+        remaining_failure_reasons: [],
+      },
+    })
+    expect(result.default_five_chapter_recovery_verdict.summary).toContain('核心偏移、回报欠账、追读拉力已清零')
   })
 
   test('routes restored five-chapter same-segment relapse back to structure repair', () => {
