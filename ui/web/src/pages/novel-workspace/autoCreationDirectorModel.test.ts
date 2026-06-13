@@ -553,6 +553,69 @@ function restoredFiveChapterBatchRun(args: {
   }
 }
 
+function defaultFiveChapterLaneBatchRun(args: {
+  id: number
+  createdAt: string
+  chapterNos: number[]
+  restoreChapterNos: number[]
+  validationChapterNos: number[]
+}) {
+  const lane = {
+    visible: true,
+    status: 'ready',
+    label: '默认5章档位',
+    source: 'recovery_restore_stability_evidence',
+    stable_pass_streak: 2,
+    required_stable_pass_streak: 2,
+    default_five_chapter_ready: true,
+    restore_chapter_nos: args.restoreChapterNos,
+    validation_chapter_nos: args.validationChapterNos,
+    summary: `恢复5章扩批连续 2 批稳定，第${args.restoreChapterNos.join('、')}章已可作为默认5章档位证据。`,
+  }
+  return {
+    id: args.id,
+    run_type: 'batch_generate_prose',
+    created_at: args.createdAt,
+    status: 'success',
+    input_ref: JSON.stringify({
+      source: 'auto_creation_safe_batch',
+      safety_limit: args.chapterNos.length,
+      default_five_chapter_lane: lane,
+      batch_preflight: {
+        safe_chapter_count: args.chapterNos.length,
+        allowed_chapter_nos: args.chapterNos,
+        safe_batch_recovery_restore_stability_lane: lane,
+        safe_batch_expansion_policy: {
+          status: 'expanded',
+          label: '强化扩批规则',
+          summary: '恢复5章扩批连续 2 批稳定，本轮作为默认5章档位生产。',
+          target_chapter_count: 5,
+          base_chapter_count: 3,
+          expanded_chapter_count: 5,
+          required_pass_streak: 3,
+          pass_streak: 3,
+          accepted_batch_count: 3,
+          failed_batch_count: 1,
+          latest_status: 'ok',
+        },
+      },
+    }),
+    output_ref: JSON.stringify({
+      total: args.chapterNos.length,
+      success: args.chapterNos.length,
+      failed: 0,
+      chapters: args.chapterNos.map((chapterNo, index) => ({
+        id: chapterNo,
+        chapter_no: chapterNo,
+        title: `默认档${chapterNo}`,
+        status: 'success',
+        score: 87 + index,
+        word_count: 3180 + index * 15,
+      })),
+    }),
+  }
+}
+
 function expansionStructureVerification(chapterNos = [50, 51, 52]) {
   return {
     source: 'safe_batch_expansion_structure_repair',
@@ -3610,6 +3673,7 @@ describe('buildAutoCreationDirectorModel', () => {
 
     const policy = model.batchGuardrail.preflight.inputSnapshot.safe_batch_expansion_policy
     const structureTask = model.batchReviewQueue.riskRadar.repairTasks.find((task: any) => task.issue_type === 'safe_batch_expansion_structure_repair')
+    const roadmap = policy.safe_batch_recovery_roadmap
 
     expect(policy).toMatchObject({
       status: 'recovering',
@@ -4243,6 +4307,138 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(model.productionLicense.reasons).toEqual(expect.arrayContaining([
       expect.stringContaining('恢复5章扩批连续 2 批稳定'),
     ]))
+  })
+
+  test('explains why a default five-chapter lane regresses before returning to validation', () => {
+    const validationChapterNos = [50, 51, 52]
+    const firstRestoreChapterNos = [53, 54, 55, 56, 57]
+    const secondRestoreChapterNos = [58, 59, 60, 61, 62]
+    const defaultLaneChapterNos = [63, 64, 65, 66, 67]
+    const model = buildAutoCreationDirectorModel({
+      planning: readySafeBatchPlanning({ futureRoute: futureRouteRange(68, 5) }),
+      writing: readySafeBatchWriting({
+        nextChapter: { ...baseWriting.nextChapter, id: 68, chapterNo: 68, title: '默认档复发后68' },
+        previousChapter: { chapterNo: 67, title: '默认档复发67', wordCount: 3180, hasProse: true },
+      }),
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: { last_updated_chapter: 67 },
+      chapters: [
+        ...[41, 42, 43, 44, 45, 46, 47, 48, 49],
+        ...validationChapterNos,
+        ...firstRestoreChapterNos,
+        ...secondRestoreChapterNos,
+        ...defaultLaneChapterNos,
+      ].map(chapterNo => ({
+        id: chapterNo,
+        chapter_no: chapterNo,
+        title: `默认档复发${chapterNo}`,
+        chapter_text: '默认档复发正文'.repeat(500),
+      })),
+      reviews: [
+        ...strengthenedAcceptanceQualityReviews([41, 42, 43], 5411, '2026-06-09T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([44, 45, 46], 5421, '2026-06-10T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([47, 48, 49], 5431, '2026-06-11T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews(validationChapterNos, 5441, '2026-06-14T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews(firstRestoreChapterNos, 5451, '2026-06-15T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews(secondRestoreChapterNos, 5461, '2026-06-16T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews(defaultLaneChapterNos, 5471, '2026-06-17T01:00:00.000Z'),
+        {
+          id: 5472,
+          chapter_id: 65,
+          review_type: 'chapter_core_drift',
+          created_at: '2026-06-17T01:10:00.000Z',
+          payload: JSON.stringify({ chapter_core_drift: { status: 'warn', drift_risks: ['默认5章档位中段偏离阵盘主线承诺'] } }),
+        },
+        {
+          id: 5473,
+          chapter_id: 66,
+          review_type: 'reader_payoff_sync',
+          created_at: '2026-06-17T01:11:00.000Z',
+          payload: JSON.stringify({ reader_payoff_sync: { status: 'warn', debt_count: 1, missed: ['默认5章档位中段显性回报缺失'] } }),
+        },
+        {
+          id: 5474,
+          chapter_id: 66,
+          review_type: 'reader_retention_sync',
+          created_at: '2026-06-17T01:12:00.000Z',
+          payload: JSON.stringify({ reader_retention_sync: { status: 'warn', missed_count: 1, missed: ['默认5章档位中段章末追读重复'] } }),
+        },
+      ],
+      runRecords: [
+        strengthenedAcceptanceBatchRun({ id: 651, createdAt: '2026-06-09T00:00:00.000Z', chapterNos: [41, 42, 43] }),
+        strengthenedAcceptanceBatchRun({ id: 652, createdAt: '2026-06-10T00:00:00.000Z', chapterNos: [44, 45, 46] }),
+        strengthenedAcceptanceBatchRun({ id: 653, createdAt: '2026-06-11T00:00:00.000Z', chapterNos: [47, 48, 49] }),
+        expansionStructureValidationBatchRun({
+          id: 654,
+          createdAt: '2026-06-14T00:00:00.000Z',
+          chapterNos: validationChapterNos,
+          source: 'safe_batch_recovery_validation_batch',
+        }),
+        restoredFiveChapterBatchRun({
+          id: 655,
+          createdAt: '2026-06-15T00:00:00.000Z',
+          chapterNos: firstRestoreChapterNos,
+          validationChapterNos,
+        }),
+        restoredFiveChapterBatchRun({
+          id: 656,
+          createdAt: '2026-06-16T00:00:00.000Z',
+          chapterNos: secondRestoreChapterNos,
+          validationChapterNos,
+        }),
+        defaultFiveChapterLaneBatchRun({
+          id: 657,
+          createdAt: '2026-06-17T00:00:00.000Z',
+          chapterNos: defaultLaneChapterNos,
+          restoreChapterNos: secondRestoreChapterNos,
+          validationChapterNos,
+        }),
+      ],
+    } as any)
+
+    const policy = model.batchGuardrail.preflight.inputSnapshot.safe_batch_expansion_policy
+    const structureTask = model.batchReviewQueue.riskRadar.repairTasks.find((task: any) => task.issue_type === 'safe_batch_expansion_structure_repair')
+    const roadmap = policy.safe_batch_recovery_roadmap
+
+    expect(policy).toMatchObject({
+      status: 'recovering',
+      target_chapter_count: 3,
+      expansion_feedback: {
+        default_five_chapter_regression: {
+          visible: true,
+          status: 'regressed',
+          label: '默认5章档位回退原因',
+          default_batch_chapter_nos: defaultLaneChapterNos,
+          restore_chapter_nos: secondRestoreChapterNos,
+          validation_chapter_nos: validationChapterNos,
+          stable_pass_streak: 2,
+          repeated_hotspot_segment: {
+            key: 'middle',
+            label: '中段',
+          },
+          failure_reasons: expect.arrayContaining(['核心偏移', '回报欠账', '追读拉力']),
+        },
+      },
+    })
+    expect(policy.expansion_feedback.summary).toContain('默认5章档位回退原因')
+    expect(roadmap.next_repair_layer.focus).toMatchObject({
+      issue_type: 'safe_batch_expansion_structure_repair',
+      task_center_filter_label: '扩批结构',
+    })
+    expect(structureTask).toMatchObject({
+      issue_type: 'safe_batch_expansion_structure_repair',
+      action_key: 'restore_default_lane_regression',
+      safe_batch_expansion_structure_review: {
+        default_five_chapter_regression: {
+          status: 'regressed',
+          default_batch_chapter_nos: defaultLaneChapterNos,
+          validation_chapter_nos: validationChapterNos,
+        },
+      },
+    })
+    expect(structureTask?.message).toContain('默认5章档位失效')
+    expect(structureTask?.action).toContain('3章验证批')
   })
 
   test('routes restored five-chapter same-segment relapse back to structure repair', () => {

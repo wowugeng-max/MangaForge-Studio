@@ -1396,6 +1396,7 @@ export type SafeBatchExpansionFeedbackSnapshot = {
   structureRepairEffectiveness: SafeBatchExpansionStructureRepairEffectivenessSnapshot | null
   structureDecisionTrend: SafeBatchExpansionStructureDecisionTrendSnapshot | null
   recoveryRestoreStabilityEvidence: SafeBatchRecoveryRestoreStabilityEvidenceSnapshot | null
+  defaultFiveChapterRegression: SafeBatchDefaultFiveChapterRegressionSnapshot | null
 }
 
 export type SafeBatchRecoveryRestoreStabilityEvidenceSnapshot = {
@@ -1405,6 +1406,25 @@ export type SafeBatchRecoveryRestoreStabilityEvidenceSnapshot = {
   restoreChapterNos: number[]
   validationChapterNos: number[]
   stablePassStreak: number
+  summary: string
+}
+
+export type SafeBatchDefaultFiveChapterRegressionSnapshot = {
+  visible: boolean
+  status: string
+  label: string
+  source: string
+  stablePassStreak: number
+  requiredStablePassStreak: number
+  defaultBatchChapterNos: number[]
+  restoreChapterNos: number[]
+  validationChapterNos: number[]
+  repeatedHotspotSegment: {
+    key: string
+    label: string
+    riskCount: number
+  } | null
+  failureReasons: string[]
   summary: string
 }
 
@@ -1935,6 +1955,40 @@ function buildSafeBatchRecoveryRestoreStabilityLaneSnapshot(
   return snapshot
 }
 
+function buildSafeBatchDefaultFiveChapterRegressionSnapshot(regressionLike: any): SafeBatchDefaultFiveChapterRegressionSnapshot | null {
+  const regression = parseJsonValue(regressionLike) || regressionLike || null
+  if (!regression || regression.visible === false) return null
+  const hotspot = regression?.repeated_hotspot_segment || regression?.repeatedHotspotSegment || null
+  const stablePassStreak = Number(regression?.stable_pass_streak ?? regression?.stablePassStreak ?? 0)
+  const requiredStablePassStreak = Number(regression?.required_stable_pass_streak ?? regression?.requiredStablePassStreak ?? 2)
+  const failureReasons = (Array.isArray(regression?.failure_reasons)
+    ? regression.failure_reasons
+    : Array.isArray(regression?.failureReasons)
+      ? regression.failureReasons
+      : []
+  ).map((item: any) => compactEvidenceText(item)).filter(Boolean)
+  const snapshot = {
+    visible: true,
+    status: compactEvidenceText(regression?.status || ''),
+    label: compactEvidenceText(regression?.label || '默认5章档位回退原因'),
+    source: compactEvidenceText(regression?.source || ''),
+    stablePassStreak: Number.isFinite(stablePassStreak) ? stablePassStreak : 0,
+    requiredStablePassStreak: Number.isFinite(requiredStablePassStreak) && requiredStablePassStreak > 0 ? requiredStablePassStreak : 2,
+    defaultBatchChapterNos: normalizeChapterNos(regression?.default_batch_chapter_nos || regression?.defaultBatchChapterNos),
+    restoreChapterNos: normalizeChapterNos(regression?.restore_chapter_nos || regression?.restoreChapterNos),
+    validationChapterNos: normalizeChapterNos(regression?.validation_chapter_nos || regression?.validationChapterNos),
+    repeatedHotspotSegment: hotspot ? {
+      key: compactEvidenceText(hotspot?.key || ''),
+      label: compactEvidenceText(hotspot?.label || hotspot?.key || '复发段位'),
+      riskCount: Number(hotspot?.risk_count ?? hotspot?.riskCount ?? 0),
+    } : null,
+    failureReasons,
+    summary: compactEvidenceText(regression?.summary || ''),
+  }
+  if (!snapshot.status && !snapshot.defaultBatchChapterNos.length && !snapshot.summary) return null
+  return snapshot
+}
+
 function buildSafeBatchExpansionFeedbackSnapshot(feedbackLike: any): SafeBatchExpansionFeedbackSnapshot | null {
   const feedback = parseJsonValue(feedbackLike) || feedbackLike || null
   if (!feedback || feedback.visible === false) return null
@@ -1983,6 +2037,9 @@ function buildSafeBatchExpansionFeedbackSnapshot(feedbackLike: any): SafeBatchEx
     ),
     recoveryRestoreStabilityEvidence: buildSafeBatchRecoveryRestoreStabilityEvidenceSnapshot(
       feedback?.recovery_restore_stability_evidence || feedback?.recoveryRestoreStabilityEvidence,
+    ),
+    defaultFiveChapterRegression: buildSafeBatchDefaultFiveChapterRegressionSnapshot(
+      feedback?.default_five_chapter_regression || feedback?.defaultFiveChapterRegression,
     ),
   }
 }
@@ -2183,6 +2240,7 @@ function BatchProseRunSummary({ run }: { run: any }) {
   const expansionStructureEffectiveness = expansionFeedback?.structureRepairEffectiveness || null
   const expansionStructureDecisionTrend = expansionFeedback?.structureDecisionTrend || null
   const expansionStructureDecisionRequirement = expansionStructureDecisionTrend?.topFailedRequirement || null
+  const defaultFiveChapterRegression = expansionFeedback?.defaultFiveChapterRegression || null
   const recoveryRestoreStability = expansionFeedback?.recoveryRestoreStabilityEvidence || null
   const recoveryRestoreStabilityLane = expansionPolicy?.recoveryRestoreStabilityLane
     || buildSafeBatchRecoveryRestoreStabilityLaneSnapshot(
@@ -2204,6 +2262,15 @@ function BatchProseRunSummary({ run }: { run: any }) {
   const recoveryRestoreSummary = recoveryRestoreStabilityLane?.summary
     || recoveryRestoreStability?.summary
     || '恢复 5 章后的稳定观察已沉淀，可继续作为扩批默认档位依据。'
+  const defaultRegressionBatchText = defaultFiveChapterRegression?.defaultBatchChapterNos.length
+    ? `失效批 ${compactChapterNos(defaultFiveChapterRegression.defaultBatchChapterNos)}`
+    : ''
+  const defaultRegressionRestoreText = defaultFiveChapterRegression?.restoreChapterNos.length
+    ? `默认依据 ${compactChapterNos(defaultFiveChapterRegression.restoreChapterNos)}`
+    : ''
+  const defaultRegressionValidationText = defaultFiveChapterRegression?.validationChapterNos.length
+    ? `前置验证 ${compactChapterNos(defaultFiveChapterRegression.validationChapterNos)}`
+    : ''
   const recoveryRoadmap = expansionPolicy?.recoveryRoadmap || null
   const recoveryValidation = expansionPolicy?.recoveryValidation || null
 
@@ -2342,8 +2409,34 @@ function BatchProseRunSummary({ run }: { run: any }) {
                         {recoveryRestoreDecisionLabel}
                       </Tag>
                     )}
+                    {defaultFiveChapterRegression && (
+                      <Tag color="gold" bordered={false}>默认档位回退原因</Tag>
+                    )}
+                    {defaultFiveChapterRegression?.repeatedHotspotSegment && (
+                      <Tag color="gold" bordered={false}>
+                        {defaultFiveChapterRegression.repeatedHotspotSegment.label}复发
+                      </Tag>
+                    )}
                   </Space>
                   <Text type="secondary" style={{ fontSize: 12 }}>{expansionFeedback.summary}</Text>
+                  {defaultFiveChapterRegression && (
+                    <Space direction="vertical" size={3} style={{ width: '100%' }}>
+                      <Space wrap size={[4, 4]}>
+                        {defaultRegressionBatchText && <Tag color="gold" bordered={false}>{defaultRegressionBatchText}</Tag>}
+                        {defaultRegressionRestoreText && <Tag bordered={false}>{defaultRegressionRestoreText}</Tag>}
+                        {defaultRegressionValidationText && <Tag bordered={false}>{defaultRegressionValidationText}</Tag>}
+                        <Tag color="green" bordered={false}>
+                          原稳定 {defaultFiveChapterRegression.stablePassStreak}/{defaultFiveChapterRegression.requiredStablePassStreak}
+                        </Tag>
+                        {defaultFiveChapterRegression.failureReasons.slice(0, 3).map(reason => (
+                          <Tag key={reason} color="gold" bordered={false}>{reason}</Tag>
+                        ))}
+                      </Space>
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        {defaultFiveChapterRegression.summary || '默认 5 章档位出现复发，需要回到 3 章验证批或扩批结构修复层。'}
+                      </Text>
+                    </Space>
+                  )}
                   {recoveryRestoreReview && (
                     <Space direction="vertical" size={3} style={{ width: '100%' }}>
                       <Space wrap size={[4, 4]}>

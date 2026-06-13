@@ -927,6 +927,63 @@ describe('buildSafeBatchExpansionPolicySnapshot', () => {
     expect(snapshot?.recoveryRestoreStabilityLane?.summary).toContain('继续观察')
   })
 
+  test('keeps default five-chapter regression evidence for task-center rollback review', () => {
+    const snapshot = buildSafeBatchExpansionPolicySnapshot({
+      safe_batch_expansion_policy: {
+        status: 'recovering',
+        label: '强化扩批规则',
+        summary: '默认5章档位复发，回到3章验证批。',
+        target_chapter_count: 3,
+        base_chapter_count: 3,
+        expanded_chapter_count: 5,
+        required_pass_streak: 3,
+        pass_streak: 3,
+        accepted_batch_count: 3,
+        failed_batch_count: 1,
+        latest_status: 'warn',
+        expansion_feedback: {
+          status: 'rollback_to_small_batch',
+          label: '扩批热区反馈',
+          summary: '默认5章档位回退原因：第63、64、65、66、67章默认档位在中段复发。',
+          target_chapter_count: 3,
+          latest_chapter_nos: [63, 64, 65, 66, 67],
+          risk_count: 3,
+          default_five_chapter_regression: {
+            visible: true,
+            status: 'regressed',
+            label: '默认5章档位回退原因',
+            source: 'default_five_chapter_lane',
+            stable_pass_streak: 2,
+            required_stable_pass_streak: 2,
+            default_batch_chapter_nos: [63, 64, 65, 66, 67],
+            restore_chapter_nos: [58, 59, 60, 61, 62],
+            validation_chapter_nos: [50, 51, 52],
+            repeated_hotspot_segment: { key: 'middle', label: '中段', risk_count: 3 },
+            failure_reasons: ['核心偏移', '回报欠账', '追读拉力'],
+            summary: '默认5章档位回退原因：连续 2 批恢复稳定后，第63、64、65、66、67章默认档位在中段复发。',
+          },
+        },
+      },
+    })
+
+    expect(snapshot?.expansionFeedback?.defaultFiveChapterRegression).toMatchObject({
+      visible: true,
+      status: 'regressed',
+      label: '默认5章档位回退原因',
+      stablePassStreak: 2,
+      requiredStablePassStreak: 2,
+      defaultBatchChapterNos: [63, 64, 65, 66, 67],
+      restoreChapterNos: [58, 59, 60, 61, 62],
+      validationChapterNos: [50, 51, 52],
+      repeatedHotspotSegment: {
+        key: 'middle',
+        label: '中段',
+      },
+      failureReasons: ['核心偏移', '回报欠账', '追读拉力'],
+    })
+    expect(snapshot?.expansionFeedback?.defaultFiveChapterRegression?.summary).toContain('默认5章档位回退原因')
+  })
+
   test('keeps expansion structure validation trend in the task-center snapshot', () => {
     const snapshot = buildSafeBatchExpansionPolicySnapshot({
       safe_batch_expansion_policy: {

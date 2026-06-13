@@ -3768,7 +3768,10 @@ function buildSafeBatchRecoveryRoadmap(args: {
       : 'pending'
   const feedbackRepeatedHotspot = feedback?.repeatedHotspotSegment || feedback?.repeated_hotspot_segment || null
   const feedbackRestoreRelapse = text(feedbackRepeatedHotspot?.source) === 'safe_batch_recovery_restore_five_batch'
-  const feedbackFocus = feedbackRestoreRelapse
+  const feedbackDefaultRegression = feedback?.defaultFiveChapterRegression || feedback?.default_five_chapter_regression || null
+  const feedbackDefaultRegressionRelapse = Boolean(feedbackDefaultRegression && feedbackDefaultRegression.visible !== false)
+  const feedbackNeedsStructureValidation = feedbackRestoreRelapse || feedbackDefaultRegressionRelapse
+  const feedbackFocus = feedbackNeedsStructureValidation
     ? safeBatchRecoveryRoadmapFocus('structure_validation', '结构验证', safeBatchRecoveryRoadmapActionLabel('structure_validation'))
     : null
   const validationStatus = validationTrend?.visible
@@ -3799,7 +3802,7 @@ function buildSafeBatchRecoveryRoadmap(args: {
       status: feedbackNodeStatus,
       targetChapterCount: feedbackNodeStatus === 'warn' ? Number(feedback?.targetChapterCount || args.baseChapterCount) : args.expandedChapterCount,
       detail: text(feedback?.summary, '尚未产生5章扩批热区复盘。'),
-      actionLabel: feedbackRestoreRelapse
+      actionLabel: feedbackNeedsStructureValidation
         ? safeBatchRecoveryRoadmapActionLabel('structure_validation')
         : safeBatchRecoveryRoadmapActionLabel('expansion_feedback'),
       focus: feedbackFocus,
@@ -4123,7 +4126,20 @@ function buildSafeBatchExpansionStructureReview(args: {
   segmentReview?: AnyRecord | null
   expansionFeedback?: AnyRecord | null
 }) {
+  const defaultFiveChapterRegression = args.expansionFeedback?.defaultFiveChapterRegression
+    || args.expansionFeedback?.default_five_chapter_regression
+    || null
+  const defaultRegressionSegment = defaultFiveChapterRegression?.repeated_hotspot_segment
+    || defaultFiveChapterRegression?.repeatedHotspotSegment
+    || null
   const repeated = safeBatchExpansionRepeatedHotspotSegment(args.expansionFeedback)
+    || (defaultFiveChapterRegression?.visible !== false && defaultRegressionSegment ? {
+      key: text(defaultRegressionSegment?.key),
+      label: text(defaultRegressionSegment?.label, text(defaultRegressionSegment?.key, '复发段位')),
+      count: Math.max(1, Number(defaultRegressionSegment?.count || 1)),
+      summary: text(defaultRegressionSegment?.summary || defaultFiveChapterRegression?.summary),
+      source: 'default_five_chapter_lane',
+    } : null)
   const segmentReview = args.segmentReview
   const hotspots = arrayValue(segmentReview?.hotspots)
   const hotspot = repeated
@@ -4155,20 +4171,27 @@ function buildSafeBatchExpansionStructureReview(args: {
     .filter(Boolean)
   const segmentLabel = repeated.label || text(hotspot?.label, '复发段位')
   const rollbackPolicy = segmentReview?.rollbackPolicy || segmentReview?.rollback_policy || null
+  const defaultRegressionVisible = Boolean(defaultFiveChapterRegression && defaultFiveChapterRegression.visible !== false)
   return {
     visible: true,
     status: 'warn',
     label: '扩批结构修复',
-    summary: `${segmentLabel}连续 ${repeated.count} 次成为5章扩批热区，先做固定段落治理和批次结构改写，再恢复5章连写。`,
+    summary: defaultRegressionVisible
+      ? `${text(defaultFiveChapterRegression.summary, `默认5章档位在${segmentLabel}复发。`)} 先回到扩批结构修复层，再用3章验证批证明默认档位可以恢复。`
+      : `${segmentLabel}连续 ${repeated.count} 次成为5章扩批热区，先做固定段落治理和批次结构改写，再恢复5章连写。`,
     repeated_hotspot_segment: repeated,
     latest_chapter_nos: latestChapterNos,
     affected_chapter_nos: affectedChapterNos,
     hotspot_summaries: hotspotSummaries.length ? hotspotSummaries : [text(hotspot?.summary, repeated.summary)].filter(Boolean),
     structure_actions: [
+      defaultRegressionVisible
+        ? `默认档位回退：先把${segmentLabel}失效原因写入任务书，下一轮回到3章验证批。`
+        : '',
       `重写${segmentLabel}固定职责：每批${segmentLabel}必须完成主线转折、显性回报和章末追读，不能只铺垫或转场。`,
       '批次节奏重排：前段抛压，中段兑现并升级，后段留钩；下一次5章前先用2-3章验证。',
       '把复发段位写入下一批任务书，明确每章承担的冲突来源、回报兑现和章末翻页问题。',
-    ],
+    ].filter(Boolean),
+    ...(defaultRegressionVisible ? { default_five_chapter_regression: defaultFiveChapterRegression } : {}),
     rollback_policy: rollbackPolicy ? {
       mode: text(rollbackPolicy?.mode),
       target_chapter_count: Number(rollbackPolicy?.targetChapterCount ?? rollbackPolicy?.target_chapter_count ?? 0),
@@ -4683,6 +4706,9 @@ function safeBatchExpansionFeedbackSnapshot(feedback: AnyRecord) {
     ...(feedback?.recoveryRestoreStabilityEvidence ? {
       recovery_restore_stability_evidence: feedback.recoveryRestoreStabilityEvidence,
     } : {}),
+    ...(feedback?.defaultFiveChapterRegression ? {
+      default_five_chapter_regression: feedback.defaultFiveChapterRegression,
+    } : {}),
     rollback_policy: feedback?.rollbackPolicy ? {
       mode: text(feedback.rollbackPolicy?.mode),
       target_chapter_count: Number(feedback.rollbackPolicy?.targetChapterCount || 0),
@@ -4824,6 +4850,7 @@ function safeBatchExpansionEntryEvaluation(args: {
     source: text(args.entry.input?.source),
     recoveryRestoreConfirmation: safeBatchRecoveryRestoreConfirmationFromEntry(args.entry),
     recoveryRestoreValidationSegment: safeBatchRecoveryRestoreValidationSegmentFromEntry(args.entry),
+    defaultFiveChapterLane: defaultFiveChapterLaneFromEntry(args.entry),
     rawReview,
     effectiveReview,
     segmentResolved,
@@ -5139,6 +5166,14 @@ function safeBatchRecoveryRestoreValidationSegmentFromEntry(entry: AnyRecord) {
   }
 }
 
+function defaultFiveChapterLaneFromEntry(entry: AnyRecord) {
+  return entry?.input?.default_five_chapter_lane
+    || entry?.input?.defaultFiveChapterLane
+    || entry?.preflight?.safe_batch_recovery_restore_stability_lane
+    || entry?.preflight?.safeBatchRecoveryRestoreStabilityLane
+    || null
+}
+
 function safeBatchRecoveryRestoreStabilityEvidence(evaluation: AnyRecord | null | undefined, stablePassStreak: number) {
   if (!evaluation || text(evaluation.source) !== 'safe_batch_recovery_restore_five_batch') return null
   const validationChapterNos = arrayValue(evaluation.recoveryRestoreConfirmation?.validation_chapter_nos || evaluation.recoveryRestoreConfirmation?.validationChapterNos)
@@ -5157,6 +5192,60 @@ function safeBatchRecoveryRestoreStabilityEvidence(evaluation: AnyRecord | null 
     summary: Number(evaluation.rawRiskCount || 0) > 0
       ? `恢复5章扩批稳定观察发现复发：${compactChapterNoEvidence(restoreChapterNos)}仍有核心/回报/追读热区。`
       : `恢复5章扩批稳定观察通过：${compactChapterNoEvidence(validationChapterNos)}验证批之后，${compactChapterNoEvidence(restoreChapterNos)}继续保持核心守恒、显性回报和章末追读稳定。`,
+  }
+}
+
+function safeBatchDefaultFiveChapterRegression(evaluation: AnyRecord | null | undefined) {
+  if (!evaluation || text(evaluation.source) !== 'auto_creation_safe_batch') return null
+  const lane = evaluation.defaultFiveChapterLane || null
+  if (!lane || Number(evaluation.rawRiskCount || 0) <= 0 || !evaluation.topHotspot) return null
+  const defaultReady = lane.default_five_chapter_ready ?? lane.defaultFiveChapterReady
+  if (defaultReady === false || text(lane.status) !== 'ready') return null
+  const defaultBatchChapterNos = arrayValue(evaluation.latestChapterNos)
+    .map(chapterNo => Number(chapterNo))
+    .filter(chapterNo => chapterNo > 0)
+  const restoreChapterNos = arrayValue(lane.restore_chapter_nos || lane.restoreChapterNos)
+    .map(chapterNo => Number(chapterNo))
+    .filter(chapterNo => chapterNo > 0)
+  const validationChapterNos = arrayValue(lane.validation_chapter_nos || lane.validationChapterNos)
+    .map(chapterNo => Number(chapterNo))
+    .filter(chapterNo => chapterNo > 0)
+  const hotspot = evaluation.topHotspot || {}
+  const failureReasons = [
+    Number(hotspot.coreRiskCount || hotspot.core_risk_count || 0) > 0 ? '核心偏移' : '',
+    Number(hotspot.payoffDebtCount || hotspot.payoff_debt_count || 0) > 0 ? '回报欠账' : '',
+    Number(hotspot.readerPullRiskCount || hotspot.reader_pull_risk_count || 0) > 0 ? '追读拉力' : '',
+  ].filter(Boolean)
+  const segmentLabel = text(hotspot.label, text(hotspot.key, '复发段位'))
+  const stablePassStreak = Number(lane.stable_pass_streak ?? lane.stablePassStreak ?? 0)
+  const requiredStablePassStreak = Number(lane.required_stable_pass_streak ?? lane.requiredStablePassStreak ?? 2)
+  const riskText = failureReasons.length ? `失效证据：${failureReasons.join('、')}。` : '核心/回报/追读证据失效。'
+
+  return {
+    visible: true,
+    status: 'regressed',
+    label: '默认5章档位回退原因',
+    source: 'default_five_chapter_lane',
+    stable_pass_streak: stablePassStreak,
+    required_stable_pass_streak: Number.isFinite(requiredStablePassStreak) && requiredStablePassStreak > 0 ? requiredStablePassStreak : 2,
+    default_five_chapter_ready: false,
+    default_batch_created_at: text(evaluation.latestBatchCreatedAt),
+    default_batch_chapter_nos: defaultBatchChapterNos,
+    restore_chapter_nos: restoreChapterNos,
+    validation_chapter_nos: validationChapterNos,
+    repeated_hotspot_segment: {
+      key: text(hotspot.key),
+      label: segmentLabel,
+      count: 1,
+      chapter_nos: arrayValue(hotspot.chapterNos || hotspot.chapter_nos).map(chapterNo => Number(chapterNo)).filter(chapterNo => chapterNo > 0),
+      risk_count: Number(hotspot.riskCount || hotspot.risk_count || 0),
+      core_risk_count: Number(hotspot.coreRiskCount || hotspot.core_risk_count || 0),
+      payoff_debt_count: Number(hotspot.payoffDebtCount || hotspot.payoff_debt_count || 0),
+      reader_pull_risk_count: Number(hotspot.readerPullRiskCount || hotspot.reader_pull_risk_count || 0),
+      summary: text(hotspot.summary),
+    },
+    failure_reasons: failureReasons,
+    summary: `默认5章档位回退原因：连续 ${stablePassStreak} 批恢复稳定后，${compactChapterNoEvidence(defaultBatchChapterNos)}默认档位在${segmentLabel}复发，${riskText}先回到3章验证批或扩批结构修复层。`,
   }
 }
 
@@ -5385,7 +5474,9 @@ function buildSafeBatchExpansionFeedback(args: {
     ? evaluations.filter(evaluation => text(evaluation.topHotspot?.key) === text(latest.topHotspot?.key)).length
     : 0
   const recoveryRestoreRelapseSegment = safeBatchRecoveryRestoreRelapseSegment(latest)
+  const defaultFiveChapterRegression = safeBatchDefaultFiveChapterRegression(latest)
   const repeatedHotspotSegment = recoveryRestoreRelapseSegment
+    || defaultFiveChapterRegression?.repeated_hotspot_segment
     || (latest.topHotspot && repeatedHotspotCount >= 2
       ? {
         key: text(latest.topHotspot.key),
@@ -5400,6 +5491,7 @@ function buildSafeBatchExpansionFeedback(args: {
     recentExpandedBatchCount,
     repeatedHotspotSegment,
     recoveryRestoreStabilityEvidence,
+    defaultFiveChapterRegression,
   }
   const validationIsNewerThanLatestExpansion = latestStructureValidation
     ? Date.parse(text(latestStructureValidation.latestBatchCreatedAt)) > Date.parse(text(latest.latestBatchCreatedAt))
@@ -5476,7 +5568,9 @@ function buildSafeBatchExpansionFeedback(args: {
     coreRiskCount: Number(latest.rawReview.coreRiskCount || 0),
     hotspotLabel: '',
   })
-  const summary = repeatedHotspotSegment
+  const summary = defaultFiveChapterRegression
+    ? `${defaultFiveChapterRegression.summary}${text(rollbackPolicy?.summary)}`
+    : repeatedHotspotSegment
     ? `${repeatedHotspotSegment.summary}${text(rollbackPolicy?.summary)}`
     : text(rollbackPolicy?.summary, '扩批分段热区未闭环，下一轮回退到小批量安全连写。')
   return {
@@ -7048,6 +7142,7 @@ function buildBatchRiskRadar(args: {
     })
     if (expansionStructureReview.visible) {
       const repeatedSegment = expansionStructureReview.repeated_hotspot_segment
+      const defaultRegression = expansionStructureReview.default_five_chapter_regression || null
       const expansionStructureReviewWithTrend = {
         ...expansionStructureReview,
         ...(safeBatchExpansionStructureValidationTrend?.visible ? {
@@ -7059,14 +7154,20 @@ function buildBatchRiskRadar(args: {
         issueType: 'safe_batch_expansion_structure_repair',
         taskType: 'repair_planning',
         severity: 'high',
-        message: `${repeatedSegment?.label || '扩批段位'}连续 ${repeatedSegment?.count || 2} 次扩批热区，单修章节不足，需要改写批次结构。`,
-        action: `先做${repeatedSegment?.label || '复发段位'}固定段落治理和批次结构改写，再按 ${expansionStructureReview.rollback_policy?.target_chapter_count || 3} 章以内恢复安全连写。`,
+        message: defaultRegression
+          ? `默认5章档位失效：${text(defaultRegression.summary, `${repeatedSegment?.label || '扩批段位'}复发，需要改写批次结构。`)}`
+          : `${repeatedSegment?.label || '扩批段位'}连续 ${repeatedSegment?.count || 2} 次扩批热区，单修章节不足，需要改写批次结构。`,
+        action: defaultRegression
+          ? `先按${repeatedSegment?.label || '复发段位'}固定段落治理和批次结构改写，下一轮回到3章验证批；验证核心守恒、显性回报和章末追读稳定后，再恢复默认5章档位。`
+          : `先做${repeatedSegment?.label || '复发段位'}固定段落治理和批次结构改写，再按 ${expansionStructureReview.rollback_policy?.target_chapter_count || 3} 章以内恢复安全连写。`,
         metrics: {
           safe_batch_expansion_structure_risk_count: safeBatchExpansionSegmentRiskTotal,
           repeated_hotspot_count: repeatedSegment?.count || 0,
           target_chapter_count: effectiveSafeBatchExpansionSegmentReview.targetChapterCount,
           rollback_target_chapter_count: expansionStructureReview.rollback_policy?.target_chapter_count || 3,
+          ...(defaultRegression ? { default_five_chapter_regression: 1 } : {}),
         },
+        ...(defaultRegression ? { actionKey: 'restore_default_lane_regression' } : {}),
         safeBatchExpansionStructureReview: expansionStructureReviewWithTrend,
       }))
     } else {
