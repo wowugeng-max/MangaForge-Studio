@@ -55,6 +55,7 @@ import { useChapterAutosave } from './novel-workspace/useChapterAutosave'
 import { useChapterVersions } from './novel-workspace/useChapterVersions'
 import { useNovelWorkspaceData, type ChapterSortMode, type ChapterStatusFilter } from './novel-workspace/useNovelWorkspaceData'
 import { buildDeliveryRiskRevisionClosurePlan, buildRepairTaskRevisionPrompt } from './novel-workspace/repairTaskRevisionPrompt'
+import type { SafeBatchRecoveryFocusSnapshot } from './novel-workspace/TaskCenterDrawer'
 import { useReferenceWorkflow } from './novel-workspace/useReferenceWorkflow'
 import { useWorkspaceTasks } from './novel-workspace/useWorkspaceTasks'
 import {
@@ -86,6 +87,31 @@ const VersionDetailModal = lazy(() => import('./novel-workspace/VersionDetailMod
 
 type TaskCenterActionOptions = {
   keepTaskCenterOpen?: boolean
+}
+
+function safeBatchRecoveryFocusFromPayload(payload: any): SafeBatchRecoveryFocusSnapshot | null {
+  if (!payload) return null
+  const focus = payload.safeBatchRecoveryFocus || payload.safe_batch_recovery_focus || payload
+  const layerKey = String(focus?.layerKey || focus?.layer_key || '').trim()
+  const layerLabel = String(focus?.layerLabel || focus?.layer_label || '').trim()
+  const issueType = String(focus?.issueType || focus?.issue_type || '').trim()
+  const targetView = String(focus?.targetView || focus?.target_view || '').trim()
+  if (!layerKey || !issueType && !targetView) return null
+  const statuses = Array.isArray(focus?.taskStatuses)
+    ? focus.taskStatuses
+    : Array.isArray(focus?.task_statuses)
+      ? focus.task_statuses
+      : []
+  return {
+    layerKey,
+    layerLabel,
+    actionLabel: String(focus?.actionLabel || focus?.action_label || layerLabel).trim(),
+    targetView,
+    issueType,
+    source: String(focus?.source || '').trim(),
+    taskStatuses: statuses.map((item: any) => String(item || '').trim()).filter(Boolean),
+    taskCenterFilterLabel: String(focus?.taskCenterFilterLabel || focus?.task_center_filter_label || layerLabel).trim(),
+  }
 }
 
 type EditorReportForChapterOptions = {
@@ -202,6 +228,7 @@ export default function NovelProjectWorkspace() {
   const [chapterDrawerOpen, setChapterDrawerOpen] = useState(false)
   const [outlineTreeOpen, setOutlineTreeOpen] = useState(false)
   const [taskCenterOpen, setTaskCenterOpen] = useState(false)
+  const [taskCenterRecoveryFocus, setTaskCenterRecoveryFocus] = useState<SafeBatchRecoveryFocusSnapshot | null>(null)
 
   // ── 章节多选 + 章节重组 ──
   const [selectedChapterIds, setSelectedChapterIds] = useState<Set<number>>(new Set())
@@ -5513,6 +5540,7 @@ export default function NovelProjectWorkspace() {
     }
 
     if (action.key === 'open_task_center') {
+      setTaskCenterRecoveryFocus(safeBatchRecoveryFocusFromPayload(action.payload))
       setTaskCenterOpen(true)
       return
     }
@@ -6674,7 +6702,11 @@ export default function NovelProjectWorkspace() {
         knowledgeIngestJobs={knowledgeIngestJobs}
         loading={loading || productionTasksLoading}
         knowledgeJobsLoading={knowledgeJobsLoading}
-        onClose={() => setTaskCenterOpen(false)}
+        safeBatchRecoveryFocus={taskCenterRecoveryFocus}
+        onClose={() => {
+          setTaskCenterOpen(false)
+          setTaskCenterRecoveryFocus(null)
+        }}
         onRefresh={async () => { if (await flushPendingSave()) { await loadProjectModules(); await loadProductionTasks() } }}
         onRefreshKnowledgeJobs={loadKnowledgeIngestJobs}
         onPauseKnowledgeJob={(jobId) => { void pauseKnowledgeIngestJob(jobId) }}

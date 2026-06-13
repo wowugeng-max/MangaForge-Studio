@@ -12,8 +12,10 @@ import {
   buildRecoveryEvidenceSourceRiskProfileSnapshot,
   buildRepairClosureHighlights,
   buildSafeBatchExpansionPolicySnapshot,
+  buildSafeBatchRecoveryFocusReviewState,
   recoveryEvidenceSourceRecheckAction,
   repairTaskActionLabel,
+  safeBatchRecoveryFocusMatchesTask,
 } from './TaskCenterDrawer'
 
 describe('buildRepairClosureHighlights', () => {
@@ -744,6 +746,7 @@ describe('buildSafeBatchExpansionPolicySnapshot', () => {
       failedBatchCount: 0,
       latestStatus: 'ok',
       expansionFeedback: null,
+      recoveryRoadmap: null,
     })
   })
 
@@ -1015,6 +1018,144 @@ describe('buildSafeBatchExpansionPolicySnapshot', () => {
       topFailedRecommendation: { key: 'restore_five_chapter', label: '恢复5章扩批', count: 1 },
       topFailedRequirement: { key: 'segment_role', label: '中段职责', count: 1 },
       suggestedTargetChapterCount: 3,
+    })
+  })
+
+  test('keeps safe batch recovery roadmap in the task-center snapshot', () => {
+    const snapshot = buildSafeBatchExpansionPolicySnapshot({
+      safe_batch_expansion_policy: {
+        status: 'recovering',
+        label: '强化扩批规则',
+        summary: '结构决策执行趋势未稳，下一轮保持 3 章以内安全连写。',
+        target_chapter_count: 3,
+        base_chapter_count: 3,
+        expanded_chapter_count: 5,
+        required_pass_streak: 3,
+        pass_streak: 3,
+        accepted_batch_count: 3,
+        failed_batch_count: 0,
+        latest_status: 'ok',
+        safe_batch_recovery_roadmap: {
+          visible: true,
+          label: '安全连写恢复路线图',
+          current_lane: 'small_batch',
+          current_lane_label: '3章验证',
+          current_target_chapter_count: 3,
+          current_reason: '结构决策执行趋势未稳，下一轮保持 3 章以内安全连写。',
+          next_repair_layer: {
+            key: 'structure_decision_execution',
+            label: '结构决策执行',
+            status: 'warn',
+            action_label: '补齐结构决策执行',
+            detail: '中段职责漏项 1 次。',
+          },
+          route_nodes: [
+            { key: 'strengthened_acceptance', label: '强化验收', status: 'ok', target_chapter_count: 5, detail: '连续 3/3 批通过。' },
+            { key: 'expansion_feedback', label: '扩批热区', status: 'ok', target_chapter_count: 5, detail: '扩批热区已清。' },
+            { key: 'structure_decision_execution', label: '结构决策执行', status: 'warn', target_chapter_count: 3, detail: '中段职责漏项 1 次。' },
+          ],
+        },
+      },
+    })
+
+    expect(snapshot?.recoveryRoadmap).toMatchObject({
+      visible: true,
+      label: '安全连写恢复路线图',
+      currentLane: 'small_batch',
+      currentLaneLabel: '3章验证',
+      currentTargetChapterCount: 3,
+      recommendedFocus: {
+        layerKey: 'structure_decision_execution',
+        layerLabel: '结构决策执行',
+        actionLabel: '补齐结构决策执行',
+        targetView: 'repair_task',
+        issueType: 'safe_batch_expansion_structure_decision_mismatch',
+        taskCenterFilterLabel: '扩批结构决策',
+      },
+      nextRepairLayer: {
+        key: 'structure_decision_execution',
+        label: '结构决策执行',
+        status: 'warn',
+        actionLabel: '补齐结构决策执行',
+        focus: {
+          targetView: 'repair_task',
+          issueType: 'safe_batch_expansion_structure_decision_mismatch',
+          taskCenterFilterLabel: '扩批结构决策',
+        },
+      },
+    })
+    expect(snapshot?.recoveryRoadmap?.routeNodes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ key: 'strengthened_acceptance', status: 'ok', targetChapterCount: 5 }),
+      expect.objectContaining({ key: 'structure_decision_execution', status: 'warn', targetChapterCount: 3 }),
+    ]))
+  })
+
+  test('matches safe batch recovery focus to the intended task type and status', () => {
+    const focus = {
+      layerKey: 'structure_decision_execution',
+      layerLabel: '结构决策执行',
+      actionLabel: '补齐结构决策执行',
+      targetView: 'repair_task',
+      issueType: 'safe_batch_expansion_structure_decision_mismatch',
+      source: 'safe_batch_expansion_structure_decision_trend',
+      taskStatuses: ['open', 'needs_review'],
+      taskCenterFilterLabel: '扩批结构决策',
+    }
+
+    expect(safeBatchRecoveryFocusMatchesTask(focus, {
+      issue_type: 'safe_batch_expansion_structure_decision_mismatch',
+      task_status: 'needs_review',
+    })).toBe(true)
+    expect(safeBatchRecoveryFocusMatchesTask(focus, {
+      issue_type: 'safe_batch_expansion_structure_decision_mismatch',
+      task_status: 'resolved',
+    })).toBe(false)
+    expect(safeBatchRecoveryFocusMatchesTask(focus, {
+      issue_type: 'safe_batch_expansion_structure_repair',
+      task_status: 'open',
+    })).toBe(false)
+  })
+
+  test('summarizes safe batch recovery focus after matched tasks are resolved', () => {
+    const focus = {
+      layerKey: 'structure_decision_execution',
+      layerLabel: '结构决策执行',
+      actionLabel: '补齐结构决策执行',
+      targetView: 'repair_task',
+      issueType: 'safe_batch_expansion_structure_decision_mismatch',
+      source: 'safe_batch_expansion_structure_decision_trend',
+      taskStatuses: ['open', 'needs_review'],
+      taskCenterFilterLabel: '扩批结构决策',
+    }
+
+    expect(buildSafeBatchRecoveryFocusReviewState(focus, [
+      {
+        task: {
+          issue_type: 'safe_batch_expansion_structure_decision_mismatch',
+          task_status: 'open',
+        },
+      },
+    ])).toMatchObject({
+      status: 'active',
+      matchedCount: 1,
+      activeCount: 1,
+      resolvedCount: 0,
+      nextActionLabel: '继续补齐结构决策执行',
+    })
+
+    expect(buildSafeBatchRecoveryFocusReviewState(focus, [
+      {
+        task: {
+          issue_type: 'safe_batch_expansion_structure_decision_mismatch',
+          task_status: 'resolved',
+        },
+      },
+    ])).toMatchObject({
+      status: 'ready_for_recheck',
+      matchedCount: 1,
+      activeCount: 0,
+      resolvedCount: 1,
+      nextActionLabel: '刷新路线图并启动验证批',
     })
   })
 })

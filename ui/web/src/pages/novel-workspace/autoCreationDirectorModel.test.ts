@@ -4301,6 +4301,17 @@ describe('buildAutoCreationDirectorModel', () => {
           created_at: '2026-06-17T01:10:00.000Z',
           payload: JSON.stringify({ chapter_core_drift: { status: 'warn', drift_risks: ['第一轮验证批中段仍偏离阵盘主线承诺'] } }),
         },
+        {
+          id: 6332,
+          chapter_id: 65,
+          review_type: 'delivery_risk_convergence',
+          created_at: '2026-06-17T01:20:00.000Z',
+          payload: JSON.stringify({
+            chapter_id: 65,
+            chapter_no: 65,
+            delivery_risk_convergence: { status: 'cleared', after_count: 0, label: '验证批风险已清零' },
+          }),
+        },
       ],
       runRecords: [
         strengthenedAcceptanceBatchRun({ id: 629, createdAt: '2026-06-14T00:00:00.000Z', chapterNos: [41, 42, 43] }),
@@ -4357,6 +4368,7 @@ describe('buildAutoCreationDirectorModel', () => {
 
     const policy = model.batchGuardrail.preflight.inputSnapshot.safe_batch_expansion_policy
     const effectiveness = policy.expansion_feedback.expansion_structure_repair_effectiveness
+    const roadmap = policy.safe_batch_recovery_roadmap
 
     expect(effectiveness).toMatchObject({
       status: 'ok',
@@ -4371,6 +4383,30 @@ describe('buildAutoCreationDirectorModel', () => {
       target_chapter_count: 3,
     })
     expect(policy.summary).toContain('结构修复有效性建议继续小批验证')
+    expect(roadmap).toMatchObject({
+      current_lane: 'small_batch',
+      current_target_chapter_count: 3,
+      current_status: 'recovering',
+      next_repair_layer: {
+        key: 'structure_decision_execution',
+        status: 'pending',
+      },
+    })
+    expect(roadmap.recommended_focus).toBeUndefined()
+    expect(model.batchGuardrail.status).toBe('ready')
+    expect(model.batchGuardrail.safeChapterCount).toBe(3)
+    expect(model.batchGuardrail.recommendedAction).toMatchObject({
+      key: 'start_safe_batch_generation',
+      label: '启动3章验证批',
+      payload: {
+        source: 'safe_batch_recovery_validation_batch',
+        safety_limit: 3,
+      },
+    })
+    expect(model.batchGuardrail.recommendedAction.description).toContain('3章验证批')
+    expect(model.productionLicense.status).toBe('batch_allowed')
+    expect(model.productionLicense.modeLabel).toBe('3章验证批')
+    expect(model.productionLicense.summary).toContain('验证批')
   })
 
   test('downgrades to structure redesign when repair effectiveness regresses', () => {
@@ -9252,6 +9288,50 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(policy.summary).toContain('结构决策执行趋势')
     expect(decision.instruction).toContain('先按结构决策执行趋势补齐')
     expect(decision.observationMetrics).toContain('结构决策漏项：中段职责 1')
+    expect(policy.safe_batch_recovery_roadmap).toMatchObject({
+      visible: true,
+      current_lane: 'small_batch',
+      current_target_chapter_count: 3,
+      current_reason: expect.stringContaining('结构决策执行趋势'),
+      next_repair_layer: {
+        key: 'structure_decision_execution',
+        label: '结构决策执行',
+        action_label: '补齐结构决策执行',
+        focus: {
+          target_view: 'repair_task',
+          issue_type: 'safe_batch_expansion_structure_decision_mismatch',
+          task_center_filter_label: '扩批结构决策',
+        },
+      },
+      recommended_focus: {
+        layer_key: 'structure_decision_execution',
+        layer_label: '结构决策执行',
+        action_label: '补齐结构决策执行',
+        target_view: 'repair_task',
+        issue_type: 'safe_batch_expansion_structure_decision_mismatch',
+        task_center_filter_label: '扩批结构决策',
+      },
+    })
+    expect(policy.safe_batch_recovery_roadmap.route_nodes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ key: 'strengthened_acceptance', status: 'ok' }),
+      expect.objectContaining({ key: 'expansion_feedback', status: 'ok' }),
+      expect.objectContaining({ key: 'structure_decision_execution', status: 'warn' }),
+    ]))
+    expect(model.batchGuardrail.recommendedAction).toMatchObject({
+      key: 'open_task_center',
+      label: '补齐结构决策执行',
+      payload: {
+        source: 'safe_batch_recovery_roadmap',
+        safeBatchRecoveryFocus: {
+          layerKey: 'structure_decision_execution',
+          layerLabel: '结构决策执行',
+          actionLabel: '补齐结构决策执行',
+          targetView: 'repair_task',
+          issueType: 'safe_batch_expansion_structure_decision_mismatch',
+          taskCenterFilterLabel: '扩批结构决策',
+        },
+      },
+    })
   })
 
   test('shows recovery evidence closure in completion dashboard after repair recheck resolves it', () => {

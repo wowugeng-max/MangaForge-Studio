@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { Button, Card, Drawer, Empty, List, Modal, Popconfirm, Progress, Space, Tag, Typography } from 'antd'
+import { Alert, Button, Card, Drawer, Empty, List, Modal, Popconfirm, Progress, Space, Tag, Typography } from 'antd'
 import { PauseCircleOutlined, PlayCircleOutlined, ReloadOutlined, StopOutlined } from '@ant-design/icons'
 
 const { Text, Paragraph } = Typography
@@ -1246,6 +1246,96 @@ export type SafeBatchExpansionPolicySnapshot = {
   failedBatchCount: number
   latestStatus: 'none' | 'ok' | 'warn'
   expansionFeedback: SafeBatchExpansionFeedbackSnapshot | null
+  recoveryRoadmap: SafeBatchRecoveryRoadmapSnapshot | null
+}
+
+export type SafeBatchRecoveryRoadmapSnapshot = {
+  visible: boolean
+  label: string
+  currentLane: string
+  currentLaneLabel: string
+  currentTargetChapterCount: number
+  currentStatus: string
+  currentReason: string
+  recommendedFocus: SafeBatchRecoveryFocusSnapshot | null
+  nextRepairLayer: SafeBatchRecoveryRoadmapNodeSnapshot | null
+  routeNodes: SafeBatchRecoveryRoadmapNodeSnapshot[]
+}
+
+export type SafeBatchRecoveryFocusSnapshot = {
+  layerKey: string
+  layerLabel: string
+  actionLabel: string
+  targetView: string
+  issueType: string
+  source: string
+  taskStatuses: string[]
+  taskCenterFilterLabel: string
+}
+
+export type SafeBatchRecoveryRoadmapNodeSnapshot = {
+  key: string
+  label: string
+  status: 'ok' | 'warn' | 'pending'
+  targetChapterCount: number
+  detail: string
+  actionLabel: string
+  focus: SafeBatchRecoveryFocusSnapshot | null
+}
+
+export function safeBatchRecoveryFocusMatchesTask(focus: SafeBatchRecoveryFocusSnapshot | null | undefined, task: any) {
+  if (!focus || !task) return false
+  const issueType = compactEvidenceText(task?.issue_type || task?.issueType || '')
+  const source = compactEvidenceText(task?.source || task?.sourceMode || '')
+  const status = compactEvidenceText(task?.task_status || task?.taskStatus || task?.status || '')
+  const statusMatches = !focus.taskStatuses.length || focus.taskStatuses.includes(status)
+  if (!statusMatches) return false
+  if (focus.issueType && issueType === focus.issueType) return true
+  return Boolean(focus.source && source === focus.source)
+}
+
+function safeBatchRecoveryFocusMatchesTaskIdentity(focus: SafeBatchRecoveryFocusSnapshot | null | undefined, task: any) {
+  if (!focus || !task) return false
+  const issueType = compactEvidenceText(task?.issue_type || task?.issueType || '')
+  const source = compactEvidenceText(task?.source || task?.sourceMode || '')
+  if (focus.issueType && issueType === focus.issueType) return true
+  return Boolean(focus.source && source === focus.source)
+}
+
+export function buildSafeBatchRecoveryFocusReviewState(focus: SafeBatchRecoveryFocusSnapshot | null | undefined, items: any[] = []) {
+  const matchedItems = focus ? items.filter((item: any) => safeBatchRecoveryFocusMatchesTaskIdentity(focus, item?.task || item)) : []
+  const activeItems = matchedItems.filter((item: any) => safeBatchRecoveryFocusMatchesTask(focus, item?.task || item))
+  const resolvedItems = matchedItems.filter((item: any) => {
+    const task = item?.task || item
+    const status = compactEvidenceText(task?.task_status || task?.taskStatus || task?.status || '')
+    return status === 'resolved'
+  })
+  const actionLabel = compactEvidenceText(focus?.actionLabel || focus?.layerLabel || '路线图聚焦')
+  const status = activeItems.length > 0
+    ? 'active'
+    : resolvedItems.length > 0
+      ? 'ready_for_recheck'
+      : 'empty'
+  const nextActionLabel = status === 'active'
+    ? `继续${actionLabel}`
+    : status === 'ready_for_recheck'
+      ? '刷新路线图并启动验证批'
+      : '等待匹配任务'
+  const summary = status === 'active'
+    ? `${actionLabel}仍有 ${activeItems.length} 个待处理任务，先闭环后再回到安全连写验证。`
+    : status === 'ready_for_recheck'
+      ? `${actionLabel}已处理 ${resolvedItems.length} 个匹配任务，刷新路线图后可判断启动验证批还是继续修下一层。`
+      : '暂未找到路线图匹配任务，可打开最近安全连写或修复历史查看复盘记录。'
+  return {
+    status,
+    matchedCount: matchedItems.length,
+    activeCount: activeItems.length,
+    resolvedCount: resolvedItems.length,
+    activeItems,
+    resolvedItems,
+    nextActionLabel,
+    summary,
+  }
 }
 
 export type SafeBatchExpansionFeedbackSnapshot = {
@@ -1386,6 +1476,112 @@ export type RecoveryEvidenceSourceRiskProfileSnapshot = {
   }[]
 }
 
+function buildSafeBatchRecoveryRoadmapSnapshot(roadmapLike: any): SafeBatchRecoveryRoadmapSnapshot | null {
+  const roadmap = parseJsonValue(roadmapLike) || roadmapLike || null
+  if (!roadmap || roadmap.visible === false) return null
+  const focusMap: Record<string, Partial<SafeBatchRecoveryFocusSnapshot>> = {
+    strengthened_acceptance: {
+      targetView: 'recovery_review',
+      issueType: 'strengthened_repair_acceptance_mismatch',
+      source: 'strengthened_repair_acceptance_trend',
+      taskCenterFilterLabel: '强化复盘',
+    },
+    expansion_feedback: {
+      targetView: 'repair_task',
+      issueType: 'safe_batch_expansion_segment_hotspot',
+      source: 'safe_batch_expansion_feedback',
+      taskCenterFilterLabel: '扩批分段',
+    },
+    structure_validation: {
+      targetView: 'repair_task',
+      issueType: 'safe_batch_expansion_structure_repair',
+      source: 'safe_batch_expansion_structure_validation',
+      taskCenterFilterLabel: '扩批结构',
+    },
+    structure_repair_effectiveness: {
+      targetView: 'repair_task',
+      issueType: 'safe_batch_expansion_structure_repair',
+      source: 'safe_batch_expansion_structure_repair_effectiveness',
+      taskCenterFilterLabel: '扩批结构',
+    },
+    structure_decision_execution: {
+      targetView: 'repair_task',
+      issueType: 'safe_batch_expansion_structure_decision_mismatch',
+      source: 'safe_batch_expansion_structure_decision_trend',
+      taskCenterFilterLabel: '扩批结构决策',
+    },
+  }
+  const normalizeStatus = (value: any): SafeBatchRecoveryRoadmapNodeSnapshot['status'] => {
+    const status = String(value || '').trim()
+    if (status === 'ok' || status === 'warn' || status === 'pending') return status
+    return 'pending'
+  }
+  const normalizeFocus = (focusLike: any, nodeKey = '', nodeLabel = '', nodeActionLabel = ''): SafeBatchRecoveryFocusSnapshot | null => {
+    const focus = parseJsonValue(focusLike) || focusLike || null
+    const key = compactEvidenceText(focus?.layer_key || focus?.layerKey || nodeKey)
+    const fallback = focusMap[key] || null
+    if (!focus && !fallback) return null
+    const layerLabel = compactEvidenceText(focus?.layer_label || focus?.layerLabel || nodeLabel)
+    const actionLabel = compactEvidenceText(focus?.action_label || focus?.actionLabel || nodeActionLabel || layerLabel)
+    const targetView = compactEvidenceText(focus?.target_view || focus?.targetView || fallback?.targetView || '')
+    const issueType = compactEvidenceText(focus?.issue_type || focus?.issueType || fallback?.issueType || '')
+    if (!key || !targetView && !issueType) return null
+    const statuses = Array.isArray(focus?.task_statuses)
+      ? focus.task_statuses
+      : Array.isArray(focus?.taskStatuses)
+        ? focus.taskStatuses
+        : []
+    return {
+      layerKey: key,
+      layerLabel,
+      actionLabel,
+      targetView,
+      issueType,
+      source: compactEvidenceText(focus?.source || fallback?.source || 'safe_batch_recovery_roadmap'),
+      taskStatuses: statuses.map((item: any) => compactEvidenceText(item)).filter(Boolean),
+      taskCenterFilterLabel: compactEvidenceText(focus?.task_center_filter_label || focus?.taskCenterFilterLabel || fallback?.taskCenterFilterLabel || layerLabel),
+    }
+  }
+  const normalizeNode = (node: any): SafeBatchRecoveryRoadmapNodeSnapshot | null => {
+    if (!node) return null
+    const key = compactEvidenceText(node?.key || '')
+    const label = compactEvidenceText(node?.label || key)
+    if (!key || !label) return null
+    const actionLabel = compactEvidenceText(node?.action_label || node?.actionLabel || '')
+    return {
+      key,
+      label,
+      status: normalizeStatus(node?.status),
+      targetChapterCount: Number(node?.target_chapter_count ?? node?.targetChapterCount ?? 0),
+      detail: compactEvidenceText(node?.detail || ''),
+      actionLabel,
+      focus: normalizeFocus(node?.focus, key, label, actionLabel),
+    }
+  }
+  const routeNodes = (Array.isArray(roadmap?.route_nodes)
+    ? roadmap.route_nodes
+    : Array.isArray(roadmap?.routeNodes)
+      ? roadmap.routeNodes
+      : []
+  ).map(normalizeNode).filter(Boolean) as SafeBatchRecoveryRoadmapNodeSnapshot[]
+  const nextRepairLayer = normalizeNode(roadmap?.next_repair_layer || roadmap?.nextRepairLayer)
+  const recommendedFocus = normalizeFocus(roadmap?.recommended_focus || roadmap?.recommendedFocus)
+    || (nextRepairLayer?.status === 'warn' ? nextRepairLayer.focus : null)
+
+  return {
+    visible: true,
+    label: compactEvidenceText(roadmap?.label || '安全连写恢复路线图'),
+    currentLane: compactEvidenceText(roadmap?.current_lane || roadmap?.currentLane || ''),
+    currentLaneLabel: compactEvidenceText(roadmap?.current_lane_label || roadmap?.currentLaneLabel || ''),
+    currentTargetChapterCount: Number(roadmap?.current_target_chapter_count ?? roadmap?.currentTargetChapterCount ?? 0),
+    currentStatus: compactEvidenceText(roadmap?.current_status || roadmap?.currentStatus || ''),
+    currentReason: compactEvidenceText(roadmap?.current_reason || roadmap?.currentReason || ''),
+    recommendedFocus,
+    nextRepairLayer,
+    routeNodes,
+  }
+}
+
 export function buildSafeBatchExpansionPolicySnapshot(batchPreflight: any): SafeBatchExpansionPolicySnapshot | null {
   const policy = parseJsonValue(
     batchPreflight?.safe_batch_expansion_policy
@@ -1413,6 +1609,7 @@ export function buildSafeBatchExpansionPolicySnapshot(batchPreflight: any): Safe
     failedBatchCount: Number(policy?.failed_batch_count ?? policy?.failedBatchCount ?? 0),
     latestStatus,
     expansionFeedback: buildSafeBatchExpansionFeedbackSnapshot(policy?.expansion_feedback || policy?.expansionFeedback),
+    recoveryRoadmap: buildSafeBatchRecoveryRoadmapSnapshot(policy?.safe_batch_recovery_roadmap || policy?.safeBatchRecoveryRoadmap || policy?.recoveryRoadmap),
   }
 }
 
@@ -1796,6 +1993,7 @@ function BatchProseRunSummary({ run }: { run: any }) {
   const expansionStructureEffectiveness = expansionFeedback?.structureRepairEffectiveness || null
   const expansionStructureDecisionTrend = expansionFeedback?.structureDecisionTrend || null
   const expansionStructureDecisionRequirement = expansionStructureDecisionTrend?.topFailedRequirement || null
+  const recoveryRoadmap = expansionPolicy?.recoveryRoadmap || null
 
   return (
     <Card size="small" title="批量生成摘要">
@@ -1821,6 +2019,30 @@ function BatchProseRunSummary({ run }: { run: any }) {
                 <Tag bordered={false}>通过 {expansionPolicy.acceptedBatchCount}</Tag>
                 <Tag bordered={false}>未过 {expansionPolicy.failedBatchCount}</Tag>
               </Space>
+              {recoveryRoadmap?.visible && (
+                <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                  <Space wrap size={[4, 4]}>
+                    <Tag color={recoveryRoadmap.currentTargetChapterCount >= 5 ? 'green' : recoveryRoadmap.currentTargetChapterCount <= 1 ? 'red' : 'blue'} bordered={false}>
+                      {recoveryRoadmap.currentLaneLabel || `目标 ${recoveryRoadmap.currentTargetChapterCount} 章`}
+                    </Tag>
+                    {recoveryRoadmap.nextRepairLayer && (
+                      <Tag color={recoveryRoadmap.nextRepairLayer.status === 'warn' ? 'gold' : 'default'} bordered={false}>
+                        下一层 {recoveryRoadmap.nextRepairLayer.actionLabel || recoveryRoadmap.nextRepairLayer.label}
+                      </Tag>
+                    )}
+                    {recoveryRoadmap.routeNodes.slice(0, 5).map(node => (
+                      <Tag
+                        key={node.key}
+                        color={node.status === 'ok' ? 'green' : node.status === 'warn' ? 'gold' : 'default'}
+                        bordered={false}
+                      >
+                        {node.label}
+                      </Tag>
+                    ))}
+                  </Space>
+                  <Text type="secondary" style={{ fontSize: 12 }}>{recoveryRoadmap.currentReason}</Text>
+                </Space>
+              )}
               <Text type="secondary" style={{ fontSize: 12 }}>{expansionPolicy.summary}</Text>
               {expansionFeedback && (
                 <Space direction="vertical" size={4} style={{ width: '100%' }}>
@@ -2093,6 +2315,7 @@ function RepairTaskRunSummary({
   onRecheckStyleSampleTaskBooks,
   onGenerateRepairAuditSummary,
   onCreateRecoveryEvidenceGovernanceQueue,
+  safeBatchRecoveryFocus,
   onRefresh,
 }: {
   run: any
@@ -2107,6 +2330,7 @@ function RepairTaskRunSummary({
   onRecheckStyleSampleTaskBooks?: (items: any[]) => void
   onGenerateRepairAuditSummary?: (run: any, options?: RepairTaskActionOptions) => void | Promise<void>
   onCreateRecoveryEvidenceGovernanceQueue?: (payload: any, run: any, taskIndex: number, options?: RepairTaskActionOptions) => void | Promise<void>
+  safeBatchRecoveryFocus?: SafeBatchRecoveryFocusSnapshot | null
   onRefresh?: () => void | Promise<void>
 }) {
   const output = parseJsonValue(run.output_ref) || {}
@@ -2132,6 +2356,13 @@ function RepairTaskRunSummary({
       task: taskIndex !== null ? tasks[taskIndex] : null,
     }
   }
+  useEffect(() => {
+    if (!safeBatchRecoveryFocus) return
+    const taskIndex = tasks.findIndex((task: any) => safeBatchRecoveryFocusMatchesTask(safeBatchRecoveryFocus, task))
+    if (taskIndex < 0) return
+    setFocusedTaskSource('')
+    setFocusedTaskIndex(taskIndex)
+  }, [run?.id, safeBatchRecoveryFocus?.layerKey, safeBatchRecoveryFocus?.issueType, safeBatchRecoveryFocus?.source])
   const sourceTaskForRecoveryEvidenceAuditAction = (nextAction: RecoveryEvidenceAuditNextAction) => {
     const groupedTask = sourceTaskForRecoveryEvidenceRow(nextAction.source)
     const taskIndex = nextAction.taskIndex ?? groupedTask.taskIndex
@@ -2477,6 +2708,14 @@ function RepairTaskRunSummary({
           </div>
         )}
         {output.report?.summary && <Text type="secondary" style={{ fontSize: 12 }}>{output.report.summary}</Text>}
+        {safeBatchRecoveryFocus && (
+          <Alert
+            type="info"
+            showIcon
+            message={`路线图聚焦：${safeBatchRecoveryFocus.actionLabel || safeBatchRecoveryFocus.layerLabel}`}
+            description={safeBatchRecoveryFocus.taskCenterFilterLabel || safeBatchRecoveryFocus.issueType || '按安全连写恢复路线图定位下一层修复任务。'}
+          />
+        )}
         <List
           size="small"
           dataSource={tasks.slice(0, 40)}
@@ -2489,7 +2728,8 @@ function RepairTaskRunSummary({
               recoveryEvidenceRefreshAnchor
               && (recoveryEvidenceRefreshAnchor.taskIndex === taskIndex || recoveryEvidenceRefreshAnchor.sourceTaskIndex === taskIndex),
             )
-            const focused = focusedTaskIndex === taskIndex || sourceFocused || refreshAnchorFocused
+            const roadmapFocused = safeBatchRecoveryFocusMatchesTask(safeBatchRecoveryFocus, task)
+            const focused = focusedTaskIndex === taskIndex || sourceFocused || refreshAnchorFocused || roadmapFocused
             return (
               <List.Item
                 style={focused ? { border: '1px solid #a855f7', borderRadius: 6, paddingInline: 8, background: '#faf5ff' } : undefined}
@@ -2737,6 +2977,7 @@ export function TaskCenterDrawer({
   onBulkUpdateRepairTaskStatus,
   onGenerateRepairAuditSummary,
   onCreateRecoveryEvidenceGovernanceQueue,
+  safeBatchRecoveryFocus,
 }: {
   open: boolean
   activeTasks: WorkspaceActiveTask[]
@@ -2770,6 +3011,7 @@ export function TaskCenterDrawer({
   onBulkUpdateRepairTaskStatus?: (items: any[], status: string) => void | Promise<void>
   onGenerateRepairAuditSummary?: (run: any, options?: RepairTaskActionOptions) => void | Promise<void>
   onCreateRecoveryEvidenceGovernanceQueue?: (payload: any, run: any, taskIndex: number, options?: RepairTaskActionOptions) => void | Promise<void>
+  safeBatchRecoveryFocus?: SafeBatchRecoveryFocusSnapshot | null
 }) {
   const [detailRun, setDetailRun] = useState<any | null>(null)
   const [detailKnowledgeJob, setDetailKnowledgeJob] = useState<any | null>(null)
@@ -2806,6 +3048,32 @@ export function TaskCenterDrawer({
       .filter((item: any) => item.task?.task_status === 'needs_review')
   }), [sortedRuns])
   const styleSampleReviewTasks = reviewTasks.filter((item: any) => String(item.task?.issue_type || '') === 'style_sample_task_book_rebuild')
+  const repairTaskItems = useMemo(() => {
+    return sortedRuns.flatMap((run: any) => {
+      if (!['longform_production_repair', 'first30_retention_repair', 'mechanical_qa_repair'].includes(run.run_type)) return []
+      const payload = getRunPayload(run)
+      const tasks = Array.isArray(payload.tasks) ? payload.tasks : []
+      return tasks
+        .map((task: any, taskIndex: number) => ({ run, task, taskIndex }))
+    })
+  }, [sortedRuns])
+  const safeBatchRecoveryFocusReviewState = useMemo(() => (
+    buildSafeBatchRecoveryFocusReviewState(safeBatchRecoveryFocus, repairTaskItems)
+  ), [safeBatchRecoveryFocus, repairTaskItems])
+  const safeBatchRecoveryFocusTasks = safeBatchRecoveryFocusReviewState.activeItems.length > 0
+    ? safeBatchRecoveryFocusReviewState.activeItems
+    : safeBatchRecoveryFocusReviewState.resolvedItems
+  const handleUpdateRepairTaskStatus = async (task: any, run: any, status: string, taskIndex: number) => {
+    const shouldRefreshRoadmap = status === 'resolved' && safeBatchRecoveryFocusMatchesTask(safeBatchRecoveryFocus, task)
+    await Promise.resolve(onUpdateRepairTaskStatus?.(task, run, status, taskIndex))
+    if (shouldRefreshRoadmap) await Promise.resolve(onRefresh())
+  }
+
+  useEffect(() => {
+    if (!open || !safeBatchRecoveryFocus || detailRun) return
+    const focusedTask = safeBatchRecoveryFocusTasks[0]
+    if (focusedTask?.run) setDetailRun(focusedTask.run)
+  }, [open, detailRun, safeBatchRecoveryFocus, safeBatchRecoveryFocusTasks])
 
   return (
     <>
@@ -2910,6 +3178,51 @@ export function TaskCenterDrawer({
             </Space>
           </Card>
 
+          {safeBatchRecoveryFocus && (
+            <Card size="small" title="路线图聚焦">
+              <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                <Space wrap>
+                  <Tag color="blue" bordered={false}>{safeBatchRecoveryFocus.layerLabel || '安全连写恢复'}</Tag>
+                  <Tag color={safeBatchRecoveryFocusReviewState.status === 'ready_for_recheck' ? 'green' : 'gold'} bordered={false}>
+                    {safeBatchRecoveryFocus.taskCenterFilterLabel || safeBatchRecoveryFocus.issueType || '待处理'}
+                  </Tag>
+                  {safeBatchRecoveryFocusReviewState.matchedCount > 0 && <Tag color="green" bordered={false}>命中 {safeBatchRecoveryFocusReviewState.matchedCount}</Tag>}
+                  {safeBatchRecoveryFocusReviewState.activeCount > 0 && <Tag color="gold" bordered={false}>待处理 {safeBatchRecoveryFocusReviewState.activeCount}</Tag>}
+                  {safeBatchRecoveryFocusReviewState.resolvedCount > 0 && <Tag color="green" bordered={false}>已处理 {safeBatchRecoveryFocusReviewState.resolvedCount}</Tag>}
+                </Space>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  {safeBatchRecoveryFocusReviewState.summary}
+                </Text>
+                <Space wrap>
+                  <Button
+                    size="small"
+                    type={safeBatchRecoveryFocusReviewState.status === 'ready_for_recheck' ? 'primary' : 'default'}
+                    icon={<ReloadOutlined />}
+                    onClick={() => onRefresh()}
+                  >
+                    {safeBatchRecoveryFocusReviewState.nextActionLabel}
+                  </Button>
+                </Space>
+                {safeBatchRecoveryFocusTasks.length > 0 ? (
+                  <List
+                    size="small"
+                    dataSource={safeBatchRecoveryFocusTasks.slice(0, 5)}
+                    renderItem={(item: any) => (
+                      <List.Item actions={[<Button key="open" size="small" type="link" onClick={() => setDetailRun(item.run)}>打开</Button>]}>
+                        <List.Item.Meta
+                          title={<Text>{item.task?.chapter_no ? `第${item.task.chapter_no}章 ` : ''}{item.task?.title || item.task?.message || '路线图任务'}</Text>}
+                          description={<Text type="secondary" style={{ fontSize: 12 }}>{runTypeLabel(item.run?.run_type)} · {repairTaskActionLabel(item.task) || item.task?.action || '-'}</Text>}
+                        />
+                      </List.Item>
+                    )}
+                  />
+                ) : (
+                  <Text type="secondary" style={{ fontSize: 12 }}>暂未找到匹配的待复查任务，可打开最近的安全连写/修复历史查看复盘记录。</Text>
+                )}
+              </Space>
+            </Card>
+          )}
+
           {reviewTasks.length > 0 && (
             <Card
               size="small"
@@ -2937,10 +3250,11 @@ export function TaskCenterDrawer({
                 dataSource={reviewTasks.slice(0, 30)}
                 renderItem={(item: any) => (
                   <List.Item
+                    style={safeBatchRecoveryFocusMatchesTask(safeBatchRecoveryFocus, item.task) ? { border: '1px solid #a855f7', borderRadius: 6, paddingInline: 8, background: '#faf5ff' } : undefined}
                     actions={[
                       item.task?.chapter_id && onSelectChapter ? <Button key="select" size="small" type="link" onClick={() => onSelectChapter(Number(item.task.chapter_id))}>定位</Button> : null,
                       item.task?.chapter_id && onRecheckRepairTask ? <Button key="recheck" size="small" type="link" onClick={() => onRecheckRepairTask(item.task, item.run, item.taskIndex)}>复检收敛</Button> : null,
-                      onUpdateRepairTaskStatus ? <Button key="resolve" size="small" type="link" onClick={() => onUpdateRepairTaskStatus(item.task, item.run, 'resolved', item.taskIndex)}>确认通过</Button> : null,
+                      onUpdateRepairTaskStatus ? <Button key="resolve" size="small" type="link" onClick={() => handleUpdateRepairTaskStatus(item.task, item.run, 'resolved', item.taskIndex)}>确认通过</Button> : null,
                     ].filter(Boolean)}
                   >
                     <List.Item.Meta
@@ -3085,6 +3399,7 @@ export function TaskCenterDrawer({
               <RepairTaskRunSummary
                 run={detailRun}
                 runRecords={runRecords}
+                safeBatchRecoveryFocus={safeBatchRecoveryFocus}
                 onRefresh={onRefresh}
                 onSelectChapter={(chapterId) => {
                   setDetailRun(null)
@@ -3108,7 +3423,7 @@ export function TaskCenterDrawer({
                 }}
                 onUpdateRepairTaskStatus={(task, run, status, taskIndex) => {
                   setDetailRun(null)
-                  return onUpdateRepairTaskStatus?.(task, run, status, taskIndex)
+                  return handleUpdateRepairTaskStatus(task, run, status, taskIndex)
                 }}
                 onGenerateRepairAuditSummary={(run, options) => {
                   if (!options?.keepTaskCenterOpen) setDetailRun(null)
@@ -3124,6 +3439,7 @@ export function TaskCenterDrawer({
               <RepairTaskRunSummary
                 run={detailRun}
                 runRecords={runRecords}
+                safeBatchRecoveryFocus={safeBatchRecoveryFocus}
                 onRefresh={onRefresh}
                 onSelectChapter={(chapterId) => {
                   setDetailRun(null)
@@ -3147,7 +3463,7 @@ export function TaskCenterDrawer({
                 }}
                 onUpdateRepairTaskStatus={(task, run, status, taskIndex) => {
                   setDetailRun(null)
-                  return onUpdateRepairTaskStatus?.(task, run, status, taskIndex)
+                  return handleUpdateRepairTaskStatus(task, run, status, taskIndex)
                 }}
                 onGenerateRepairAuditSummary={(run, options) => {
                   if (!options?.keepTaskCenterOpen) setDetailRun(null)

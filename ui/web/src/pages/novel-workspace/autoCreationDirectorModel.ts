@@ -3655,6 +3655,197 @@ function strengthenedRepairAcceptanceTrendSnapshot(trend: AutoCreationStrengthen
   }
 }
 
+function safeBatchRecoveryRoadmapLane(targetChapterCount: number) {
+  if (targetChapterCount <= 1) return { key: 'single_chapter', label: '1章治理' }
+  if (targetChapterCount >= 5) return { key: 'expanded_batch', label: '5章连写' }
+  return { key: 'small_batch', label: `${Math.max(1, targetChapterCount)}章验证` }
+}
+
+function safeBatchRecoveryRoadmapNode(args: {
+  key: string
+  label: string
+  status: string
+  targetChapterCount: number
+  detail: string
+  actionLabel: string
+}) {
+  const focus = safeBatchRecoveryRoadmapFocus(args.key, args.label, args.actionLabel)
+  return {
+    key: args.key,
+    label: args.label,
+    status: ['ok', 'warn', 'pending'].includes(args.status) ? args.status : 'pending',
+    target_chapter_count: Math.max(0, Number(args.targetChapterCount || 0)),
+    detail: text(args.detail),
+    action_label: text(args.actionLabel),
+    ...(focus ? { focus } : {}),
+  }
+}
+
+function safeBatchRecoveryRoadmapActionLabel(key: string) {
+  if (key === 'strengthened_acceptance') return '查看强化复盘'
+  if (key === 'expansion_feedback') return '修扩批热区'
+  if (key === 'structure_validation') return '修扩批结构'
+  if (key === 'structure_repair_effectiveness') return '重做结构修复'
+  if (key === 'structure_decision_execution') return '补齐结构决策执行'
+  return '查看安全连写'
+}
+
+function safeBatchRecoveryRoadmapFocus(key: string, label: string, actionLabel: string) {
+  const focusMap: Record<string, AnyRecord> = {
+    strengthened_acceptance: {
+      target_view: 'recovery_review',
+      issue_type: 'strengthened_repair_acceptance_mismatch',
+      source: 'strengthened_repair_acceptance_trend',
+      task_center_filter_label: '强化复盘',
+    },
+    expansion_feedback: {
+      target_view: 'repair_task',
+      issue_type: 'safe_batch_expansion_segment_hotspot',
+      source: 'safe_batch_expansion_feedback',
+      task_center_filter_label: '扩批分段',
+    },
+    structure_validation: {
+      target_view: 'repair_task',
+      issue_type: 'safe_batch_expansion_structure_repair',
+      source: 'safe_batch_expansion_structure_validation',
+      task_center_filter_label: '扩批结构',
+    },
+    structure_repair_effectiveness: {
+      target_view: 'repair_task',
+      issue_type: 'safe_batch_expansion_structure_repair',
+      source: 'safe_batch_expansion_structure_repair_effectiveness',
+      task_center_filter_label: '扩批结构',
+    },
+    structure_decision_execution: {
+      target_view: 'repair_task',
+      issue_type: 'safe_batch_expansion_structure_decision_mismatch',
+      source: 'safe_batch_expansion_structure_decision_trend',
+      task_center_filter_label: '扩批结构决策',
+    },
+  }
+  const focus = focusMap[key]
+  if (!focus) return null
+  return {
+    layer_key: key,
+    layer_label: label,
+    action_label: actionLabel,
+    task_statuses: ['open', 'needs_review'],
+    ...focus,
+  }
+}
+
+function buildSafeBatchRecoveryRoadmap(args: {
+  trend: AutoCreationStrengthenedRepairAcceptanceTrend
+  feedback?: AnyRecord | null
+  policyStatus: string
+  policySummary: string
+  targetChapterCount: number
+  baseChapterCount: number
+  expandedChapterCount: number
+  requiredPassStreak: number
+}) {
+  const feedback = args.feedback || null
+  const feedbackStatus = text(feedback?.status, 'none')
+  const validationTrend = feedback?.expansionStructureValidationTrend
+    || feedback?.expansion_structure_validation_trend
+    || null
+  const repairEffectiveness = feedback?.expansionStructureRepairEffectiveness
+    || feedback?.expansion_structure_repair_effectiveness
+    || null
+  const decisionTrend = feedback?.expansionStructureDecisionTrend
+    || feedback?.expansion_structure_decision_trend
+    || null
+  const strengthenedStatus = args.trend.status === 'warn' || args.trend.latestStatus === 'warn'
+    ? 'warn'
+    : args.trend.passStreak >= args.requiredPassStreak
+      ? 'ok'
+      : 'pending'
+  const feedbackNodeStatus = ['rollback_to_single_chapter', 'rollback_to_small_batch'].includes(feedbackStatus)
+    ? 'warn'
+    : ['passed', 'recovered'].includes(feedbackStatus)
+      ? 'ok'
+      : 'pending'
+  const validationStatus = validationTrend?.visible
+    ? text(validationTrend?.status) === 'warn' ? 'warn' : 'ok'
+    : 'pending'
+  const repairRecommendation = text(repairEffectiveness?.recommendation)
+  const repairStatus = repairEffectiveness?.visible
+    ? repairRecommendation === 'escalate_structure_redesign' ? 'warn' : 'ok'
+    : 'pending'
+  const decisionStatus = decisionTrend?.visible
+    ? text(decisionTrend?.status) === 'warn' ? 'warn' : 'ok'
+    : 'pending'
+  const topDecisionRequirement = decisionTrend?.top_failed_requirement || decisionTrend?.topFailedRequirement || null
+  const routeNodes = [
+    safeBatchRecoveryRoadmapNode({
+      key: 'strengthened_acceptance',
+      label: '强化验收',
+      status: strengthenedStatus,
+      targetChapterCount: strengthenedStatus === 'ok' ? args.expandedChapterCount : args.baseChapterCount,
+      detail: args.trend.visible
+        ? args.trend.summary
+        : `尚未形成强化验收趋势，先保持 ${args.baseChapterCount} 章以内。`,
+      actionLabel: safeBatchRecoveryRoadmapActionLabel('strengthened_acceptance'),
+    }),
+    safeBatchRecoveryRoadmapNode({
+      key: 'expansion_feedback',
+      label: '扩批热区',
+      status: feedbackNodeStatus,
+      targetChapterCount: feedbackNodeStatus === 'warn' ? Number(feedback?.targetChapterCount || args.baseChapterCount) : args.expandedChapterCount,
+      detail: text(feedback?.summary, '尚未产生5章扩批热区复盘。'),
+      actionLabel: safeBatchRecoveryRoadmapActionLabel('expansion_feedback'),
+    }),
+    safeBatchRecoveryRoadmapNode({
+      key: 'structure_validation',
+      label: '结构验证',
+      status: validationStatus,
+      targetChapterCount: validationStatus === 'warn' ? args.baseChapterCount : args.expandedChapterCount,
+      detail: text(validationTrend?.summary, '尚未进入扩批结构验证批。'),
+      actionLabel: safeBatchRecoveryRoadmapActionLabel('structure_validation'),
+    }),
+    safeBatchRecoveryRoadmapNode({
+      key: 'structure_repair_effectiveness',
+      label: '结构修复有效性',
+      status: repairStatus,
+      targetChapterCount: repairRecommendation === 'escalate_structure_redesign' ? 1 : repairRecommendation === 'continue_small_validation' ? args.baseChapterCount : args.expandedChapterCount,
+      detail: text(repairEffectiveness?.summary, '尚未形成结构修复有效性结论。'),
+      actionLabel: safeBatchRecoveryRoadmapActionLabel('structure_repair_effectiveness'),
+    }),
+    safeBatchRecoveryRoadmapNode({
+      key: 'structure_decision_execution',
+      label: '结构决策执行',
+      status: decisionStatus,
+      targetChapterCount: decisionStatus === 'warn'
+        ? Number(decisionTrend?.suggested_target_chapter_count ?? decisionTrend?.suggestedTargetChapterCount ?? args.baseChapterCount)
+        : args.expandedChapterCount,
+      detail: topDecisionRequirement
+        ? `结构决策漏项：${text(topDecisionRequirement.label, '执行要求')} ${Number(topDecisionRequirement.count || 0)}。${text(decisionTrend?.summary)}`
+        : text(decisionTrend?.summary, '尚未形成结构决策执行趋势。'),
+      actionLabel: safeBatchRecoveryRoadmapActionLabel('structure_decision_execution'),
+    }),
+  ]
+  const nextRepairLayer = routeNodes.find(node => node.status === 'warn')
+    || routeNodes.find(node => node.status === 'pending')
+    || null
+  const lane = safeBatchRecoveryRoadmapLane(args.targetChapterCount)
+  const recommendedFocus = nextRepairLayer?.status === 'warn'
+    ? nextRepairLayer.focus || safeBatchRecoveryRoadmapFocus(nextRepairLayer.key, nextRepairLayer.label, nextRepairLayer.action_label)
+    : null
+
+  return {
+    visible: true,
+    label: '安全连写恢复路线图',
+    current_lane: lane.key,
+    current_lane_label: lane.label,
+    current_target_chapter_count: Math.max(1, Number(args.targetChapterCount || 1)),
+    current_status: text(args.policyStatus, 'observing'),
+    current_reason: text(args.policySummary),
+    next_repair_layer: nextRepairLayer,
+    ...(recommendedFocus ? { recommended_focus: recommendedFocus } : {}),
+    route_nodes: routeNodes,
+  }
+}
+
 function buildSafeBatchExpansionPolicy(
   trend: AutoCreationStrengthenedRepairAcceptanceTrend,
   expansionFeedback?: AnyRecord | null,
@@ -3719,10 +3910,21 @@ function buildSafeBatchExpansionPolicy(
       ? `强化恢复验收连续 ${trend.passStreak}/${requiredPassStreak} 批通过；${text(feedback?.summary, '扩批分段热区已修复并通过复检。')}本轮恢复 ${expandedChapterCount} 章安全连写。`
       : `强化恢复验收连续 ${trend.passStreak}/${requiredPassStreak} 批通过，核心守恒、读者回报和追读拉力未复发，本轮可从 ${baseChapterCount} 章扩到 ${expandedChapterCount} 章安全连写。`
   }
+  const status = canExpand ? 'expanded' : feedbackNeedsRecovery || structureRepairNeedsMoreValidation || structureRepairNeedsRedesign || structureDecisionTrendWarn ? 'recovering' : 'observing'
+  const recoveryRoadmap = buildSafeBatchRecoveryRoadmap({
+    trend,
+    feedback,
+    policyStatus: status,
+    policySummary: summary,
+    targetChapterCount,
+    baseChapterCount,
+    expandedChapterCount,
+    requiredPassStreak,
+  })
 
   return {
     visible: true,
-    status: canExpand ? 'expanded' : feedbackNeedsRecovery || structureRepairNeedsMoreValidation || structureRepairNeedsRedesign || structureDecisionTrendWarn ? 'recovering' : 'observing',
+    status,
     label: '强化扩批规则',
     summary,
     targetChapterCount,
@@ -3734,7 +3936,35 @@ function buildSafeBatchExpansionPolicy(
     failedBatchCount: Math.max(0, Number(trend.failedBatchCount || 0)),
     latestStatus: trend.latestStatus,
     expansionFeedback: feedback ? safeBatchExpansionFeedbackSnapshot(feedback) : null,
+    recoveryRoadmap,
   }
+}
+
+function safeBatchRecoveryFocusPayload(focusLike: AnyRecord | null | undefined) {
+  if (!focusLike) return null
+  return {
+    layerKey: text(focusLike.layer_key || focusLike.layerKey),
+    layerLabel: text(focusLike.layer_label || focusLike.layerLabel),
+    actionLabel: text(focusLike.action_label || focusLike.actionLabel),
+    targetView: text(focusLike.target_view || focusLike.targetView),
+    issueType: text(focusLike.issue_type || focusLike.issueType),
+    source: text(focusLike.source),
+    taskStatuses: arrayValue(focusLike.task_statuses || focusLike.taskStatuses).map(item => text(item)).filter(Boolean),
+    taskCenterFilterLabel: text(focusLike.task_center_filter_label || focusLike.taskCenterFilterLabel),
+  }
+}
+
+function safeBatchRecoveryRoadmapRecommendedAction(roadmapLike: AnyRecord | null | undefined) {
+  const roadmap = roadmapLike || null
+  const focus = safeBatchRecoveryFocusPayload(roadmap?.recommended_focus || roadmap?.recommendedFocus)
+  const nextLayer = roadmap?.next_repair_layer || roadmap?.nextRepairLayer || null
+  if (!focus || !focus.layerKey || text(nextLayer?.status) !== 'warn') return null
+  const label = focus.actionLabel || text(nextLayer?.action_label || nextLayer?.actionLabel || nextLayer?.label, '查看安全连写路线')
+  const detail = text(nextLayer?.detail, text(roadmap?.current_reason || roadmap?.currentReason, '任务中心会定位到安全连写恢复路线图指出的下一层。'))
+  return opsAction('open_task_center', label, detail, false, {
+    source: 'safe_batch_recovery_roadmap',
+    safeBatchRecoveryFocus: focus,
+  })
 }
 
 function safeBatchExpansionPolicySnapshot(policy: AnyRecord) {
@@ -3751,6 +3981,7 @@ function safeBatchExpansionPolicySnapshot(policy: AnyRecord) {
     failed_batch_count: Number(policy?.failedBatchCount || 0),
     latest_status: text(policy?.latestStatus, 'none'),
     ...(policy?.expansionFeedback ? { expansion_feedback: policy.expansionFeedback } : {}),
+    ...(policy?.recoveryRoadmap ? { safe_batch_recovery_roadmap: policy.recoveryRoadmap } : {}),
   }
 }
 
@@ -9568,6 +9799,7 @@ function buildBatchGuardrail(args: {
     reviews: arrayValue(args.reviews),
   })
   const safeBatchExpansionPolicy = buildSafeBatchExpansionPolicy(strengthenedRepairAcceptanceTrend, safeBatchExpansionFeedback)
+  const safeBatchRecoveryAction = safeBatchRecoveryRoadmapRecommendedAction(safeBatchExpansionPolicy.recoveryRoadmap)
   const expansionStructureVerificationSeed = buildResolvedSafeBatchExpansionStructureVerificationSeed(arrayValue(args.runRecords))
   const expansionStructureValidationActive = Boolean(
     expansionStructureVerificationSeed
@@ -9891,13 +10123,26 @@ function buildBatchGuardrail(args: {
   })
 
   if (status === 'ready') {
-    recommendedAction = opsAction(
+    const recoveryValidationBatchActive = !safeBatchRecoveryAction
+      && safeBatchExpansionPolicy.status === 'recovering'
+      && Number(safeBatchExpansionPolicy.targetChapterCount || 0) > 1
+      && Number(safeBatchExpansionPolicy.targetChapterCount || 0) <= Number(safeBatchExpansionPolicy.baseChapterCount || 3)
+    const startBatchSource = recoveryValidationBatchActive
+      ? 'safe_batch_recovery_validation_batch'
+      : 'auto_creation_safe_batch'
+    const startBatchLabel = recoveryValidationBatchActive
+      ? `启动${safeChapterCount}章验证批`
+      : '开始安全连写'
+    const startBatchDescription = recoveryValidationBatchActive
+      ? `安全连写恢复路线图已没有黄色修复层；先启动${safeChapterCount}章验证批，逐章回填核心守恒、读者回报、追读拉力和结构决策执行，再判断是否恢复 ${safeBatchExpansionPolicy.expandedChapterCount} 章。`
+      : `按护栏建议连续生成 ${safeChapterCount} 章；每章仍会走字数门禁、质检修订和故事状态回填。`
+    recommendedAction = safeBatchRecoveryAction || opsAction(
       'start_safe_batch_generation',
-      '开始安全连写',
-      `按护栏建议连续生成 ${safeChapterCount} 章；每章仍会走字数门禁、质检修订和故事状态回填。`,
+      startBatchLabel,
+      startBatchDescription,
       false,
       {
-        source: 'auto_creation_safe_batch',
+        source: startBatchSource,
         safety_limit: safeChapterCount,
         allowed_chapter_nos: preflight.allowedChapterNos,
         next_batch_brief: nextBatchBrief,
@@ -10633,17 +10878,44 @@ function buildProductionLicense(args: {
     }
   }
 
+  const safeBatchRecoveryFocus = args.batchGuardrail.recommendedAction.payload?.safeBatchRecoveryFocus || null
+  if (args.batchGuardrail.status === 'ready' && args.batchGuardrail.recommendedAction.key === 'open_task_center' && safeBatchRecoveryFocus) {
+    return {
+      status: 'single_chapter',
+      label: '生产许可',
+      modeLabel: args.batchGuardrail.safeChapterCount > 1 ? '小批验证待复盘' : '单章治理待复盘',
+      summary: `安全连写路线图提示先处理「${text(safeBatchRecoveryFocus.actionLabel || safeBatchRecoveryFocus.layerLabel, '下一层修复')}」，再按 ${args.batchGuardrail.safeChapterCount} 章验证批放行。`,
+      safeChapterCount: Math.max(1, args.batchGuardrail.safeChapterCount || 1),
+      reasons: [args.batchGuardrail.recommendedAction.description],
+      badges: [
+        text(safeBatchRecoveryFocus.taskCenterFilterLabel || safeBatchRecoveryFocus.layerLabel, '路线图聚焦'),
+        `验证 ${args.batchGuardrail.safeChapterCount}章`,
+      ],
+      nextAction: args.batchGuardrail.recommendedAction,
+    }
+  }
+
   if (args.batchGuardrail.status === 'ready' && args.batchGuardrail.recommendedAction.key === 'start_safe_batch_generation') {
     const recoveryEvidenceReleaseSummary = args.batchGuardrail.preflight.inputSnapshot?.recovery_evidence_release_summary || null
     const recoveryEvidenceReleaseReasons = arrayValue(recoveryEvidenceReleaseSummary?.evidence).slice(0, 3)
+    const isRecoveryValidationBatch = text(args.batchGuardrail.recommendedAction.payload?.source) === 'safe_batch_recovery_validation_batch'
     return {
       status: 'batch_allowed',
       label: '生产许可',
-      modeLabel: '小批量连写',
-      summary: `当前长线材料、交稿风险和下一批任务书已通过检查，可按安全连写放行 ${args.batchGuardrail.safeChapterCount} 章。`,
+      modeLabel: isRecoveryValidationBatch ? `${args.batchGuardrail.safeChapterCount}章验证批` : '小批量连写',
+      summary: isRecoveryValidationBatch
+        ? `安全连写路线图已清掉黄色修复层，当前放行 ${args.batchGuardrail.safeChapterCount} 章验证批；每章继续回填核心守恒、读者回报、追读拉力和结构执行结果。`
+        : `当前长线材料、交稿风险和下一批任务书已通过检查，可按安全连写放行 ${args.batchGuardrail.safeChapterCount} 章。`,
       safeChapterCount: args.batchGuardrail.safeChapterCount,
-      reasons: ['长线材料可用', '交稿风险已清', '剧情线决策已闭环', '下一批任务书可执行', ...recoveryEvidenceReleaseReasons],
-      badges: [`安全 ${args.batchGuardrail.safeChapterCount}章`, args.batchGuardrail.nextBatchBrief.chapterRangeLabel].filter(Boolean),
+      reasons: [
+        '长线材料可用',
+        '交稿风险已清',
+        '剧情线决策已闭环',
+        '下一批任务书可执行',
+        ...(isRecoveryValidationBatch ? ['安全连写路线图已清掉黄色修复层'] : []),
+        ...recoveryEvidenceReleaseReasons,
+      ],
+      badges: [isRecoveryValidationBatch ? `验证 ${args.batchGuardrail.safeChapterCount}章` : `安全 ${args.batchGuardrail.safeChapterCount}章`, args.batchGuardrail.nextBatchBrief.chapterRangeLabel].filter(Boolean),
       nextAction: args.batchGuardrail.recommendedAction,
     }
   }
