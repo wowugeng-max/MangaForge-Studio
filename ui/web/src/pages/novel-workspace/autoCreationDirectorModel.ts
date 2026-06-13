@@ -3668,8 +3668,9 @@ function safeBatchRecoveryRoadmapNode(args: {
   targetChapterCount: number
   detail: string
   actionLabel: string
+  focus?: AnyRecord | null
 }) {
-  const focus = safeBatchRecoveryRoadmapFocus(args.key, args.label, args.actionLabel)
+  const focus = args.focus || safeBatchRecoveryRoadmapFocus(args.key, args.label, args.actionLabel)
   return {
     key: args.key,
     label: args.label,
@@ -3765,6 +3766,11 @@ function buildSafeBatchRecoveryRoadmap(args: {
     : ['passed', 'recovered'].includes(feedbackStatus)
       ? 'ok'
       : 'pending'
+  const feedbackRepeatedHotspot = feedback?.repeatedHotspotSegment || feedback?.repeated_hotspot_segment || null
+  const feedbackRestoreRelapse = text(feedbackRepeatedHotspot?.source) === 'safe_batch_recovery_restore_five_batch'
+  const feedbackFocus = feedbackRestoreRelapse
+    ? safeBatchRecoveryRoadmapFocus('structure_validation', '结构验证', safeBatchRecoveryRoadmapActionLabel('structure_validation'))
+    : null
   const validationStatus = validationTrend?.visible
     ? text(validationTrend?.status) === 'warn' ? 'warn' : 'ok'
     : 'pending'
@@ -3793,7 +3799,10 @@ function buildSafeBatchRecoveryRoadmap(args: {
       status: feedbackNodeStatus,
       targetChapterCount: feedbackNodeStatus === 'warn' ? Number(feedback?.targetChapterCount || args.baseChapterCount) : args.expandedChapterCount,
       detail: text(feedback?.summary, '尚未产生5章扩批热区复盘。'),
-      actionLabel: safeBatchRecoveryRoadmapActionLabel('expansion_feedback'),
+      actionLabel: feedbackRestoreRelapse
+        ? safeBatchRecoveryRoadmapActionLabel('structure_validation')
+        : safeBatchRecoveryRoadmapActionLabel('expansion_feedback'),
+      focus: feedbackFocus,
     }),
     safeBatchRecoveryRoadmapNode({
       key: 'structure_validation',
@@ -4106,6 +4115,7 @@ function safeBatchExpansionRepeatedHotspotSegment(feedback?: AnyRecord | null) {
     label,
     count,
     summary: text(segment?.summary),
+    source: text(segment?.source),
   }
 }
 
@@ -4668,7 +4678,11 @@ function safeBatchExpansionFeedbackSnapshot(feedback: AnyRecord) {
       label: text(feedback.repeatedHotspotSegment?.label),
       count: Number(feedback.repeatedHotspotSegment?.count || 0),
       summary: text(feedback.repeatedHotspotSegment?.summary),
+      ...(text(feedback.repeatedHotspotSegment?.source) ? { source: text(feedback.repeatedHotspotSegment?.source) } : {}),
     } : null,
+    ...(feedback?.recoveryRestoreStabilityEvidence ? {
+      recovery_restore_stability_evidence: feedback.recoveryRestoreStabilityEvidence,
+    } : {}),
     rollback_policy: feedback?.rollbackPolicy ? {
       mode: text(feedback.rollbackPolicy?.mode),
       target_chapter_count: Number(feedback.rollbackPolicy?.targetChapterCount || 0),
@@ -4807,6 +4821,9 @@ function safeBatchExpansionEntryEvaluation(args: {
   const effectiveRiskCount = Number(effectiveReview.riskCount || 0)
   const topHotspot = arrayValue(rawReview.hotspots)[0] || null
   return {
+    source: text(args.entry.input?.source),
+    recoveryRestoreConfirmation: safeBatchRecoveryRestoreConfirmationFromEntry(args.entry),
+    recoveryRestoreValidationSegment: safeBatchRecoveryRestoreValidationSegmentFromEntry(args.entry),
     rawReview,
     effectiveReview,
     segmentResolved,
@@ -5093,6 +5110,73 @@ function isSafeBatchGenerationSource(source: string) {
     || source === 'safe_batch_recovery_restore_five_batch'
 }
 
+function safeBatchRecoveryRestoreConfirmationFromEntry(entry: AnyRecord) {
+  return entry?.input?.recovery_restore_confirmation
+    || entry?.input?.recoveryRestoreConfirmation
+    || entry?.preflight?.safe_batch_recovery_restore_confirmation
+    || entry?.preflight?.safeBatchRecoveryRestoreConfirmation
+    || null
+}
+
+function safeBatchRecoveryRestoreValidationSegmentFromEntry(entry: AnyRecord) {
+  const policy = entry?.preflight?.safe_batch_expansion_policy || entry?.preflight?.safeBatchExpansionPolicy || null
+  const feedback = policy?.expansion_feedback || policy?.expansionFeedback || null
+  const validation = feedback?.expansion_structure_validation_result
+    || feedback?.expansionStructureValidationResult
+    || null
+  const segment = validation?.repeated_hotspot_segment
+    || validation?.repeatedHotspotSegment
+    || feedback?.repeated_hotspot_segment
+    || feedback?.repeatedHotspotSegment
+    || null
+  if (!segment) return null
+  const key = text(segment?.key)
+  const label = text(segment?.label, key || '复发段位')
+  return {
+    key,
+    label,
+    count: Math.max(0, Number(segment?.count || 0)),
+  }
+}
+
+function safeBatchRecoveryRestoreStabilityEvidence(evaluation: AnyRecord | null | undefined, stablePassStreak: number) {
+  if (!evaluation || text(evaluation.source) !== 'safe_batch_recovery_restore_five_batch') return null
+  const validationChapterNos = arrayValue(evaluation.recoveryRestoreConfirmation?.validation_chapter_nos || evaluation.recoveryRestoreConfirmation?.validationChapterNos)
+    .map(chapterNo => Number(chapterNo))
+    .filter(chapterNo => chapterNo > 0)
+  const restoreChapterNos = arrayValue(evaluation.latestChapterNos)
+    .map(chapterNo => Number(chapterNo))
+    .filter(chapterNo => chapterNo > 0)
+  return {
+    status: Number(evaluation.rawRiskCount || 0) > 0 ? 'relapsed' : 'passed',
+    source: 'safe_batch_recovery_restore_five_batch',
+    restored_batch_created_at: text(evaluation.latestBatchCreatedAt),
+    restore_chapter_nos: restoreChapterNos,
+    validation_chapter_nos: validationChapterNos,
+    stable_pass_streak: Math.max(0, Number(stablePassStreak || 0)),
+    summary: Number(evaluation.rawRiskCount || 0) > 0
+      ? `恢复5章扩批稳定观察发现复发：${compactChapterNoEvidence(restoreChapterNos)}仍有核心/回报/追读热区。`
+      : `恢复5章扩批稳定观察通过：${compactChapterNoEvidence(validationChapterNos)}验证批之后，${compactChapterNoEvidence(restoreChapterNos)}继续保持核心守恒、显性回报和章末追读稳定。`,
+  }
+}
+
+function safeBatchRecoveryRestoreRelapseSegment(evaluation: AnyRecord | null | undefined) {
+  if (!evaluation || text(evaluation.source) !== 'safe_batch_recovery_restore_five_batch') return null
+  if (Number(evaluation.rawRiskCount || 0) <= 0 || !evaluation.topHotspot) return null
+  const validationSegment = evaluation.recoveryRestoreValidationSegment || null
+  const hotspotKey = text(evaluation.topHotspot?.key)
+  if (validationSegment?.key && hotspotKey && validationSegment.key !== hotspotKey) return null
+  const label = text(validationSegment?.label, text(evaluation.topHotspot?.label, hotspotKey || '复发段位'))
+  const count = Math.max(2, Number(validationSegment?.count || 1) + 1)
+  return {
+    key: hotspotKey || text(validationSegment?.key),
+    label,
+    count,
+    source: 'safe_batch_recovery_restore_five_batch',
+    summary: `恢复5章后${label}再次复发，说明验证批通过后的批次结构仍会放大同段热区，先回到扩批结构修复层。`,
+  }
+}
+
 function buildSafeBatchExpansionFeedback(args: {
   runRecords: AnyRecord[]
   chapters: AnyRecord[]
@@ -5253,18 +5337,22 @@ function buildSafeBatchExpansionFeedback(args: {
   const repeatedHotspotCount = latest.topHotspot
     ? evaluations.filter(evaluation => text(evaluation.topHotspot?.key) === text(latest.topHotspot?.key)).length
     : 0
-  const repeatedHotspotSegment = latest.topHotspot && repeatedHotspotCount >= 2
-    ? {
-      key: text(latest.topHotspot.key),
-      label: text(latest.topHotspot.label),
-      count: repeatedHotspotCount,
-      summary: `${text(latest.topHotspot.label)}连续 ${repeatedHotspotCount} 次扩批热区，先做${text(latest.topHotspot.label)}固定段落治理和批次结构改写。`,
-    }
-    : null
+  const recoveryRestoreRelapseSegment = safeBatchRecoveryRestoreRelapseSegment(latest)
+  const repeatedHotspotSegment = recoveryRestoreRelapseSegment
+    || (latest.topHotspot && repeatedHotspotCount >= 2
+      ? {
+        key: text(latest.topHotspot.key),
+        label: text(latest.topHotspot.label),
+        count: repeatedHotspotCount,
+        summary: `${text(latest.topHotspot.label)}连续 ${repeatedHotspotCount} 次扩批热区，先做${text(latest.topHotspot.label)}固定段落治理和批次结构改写。`,
+      }
+      : null)
+  const recoveryRestoreStabilityEvidence = safeBatchRecoveryRestoreStabilityEvidence(latest, stablePassStreak)
   const feedbackBase = {
     stablePassStreak,
     recentExpandedBatchCount,
     repeatedHotspotSegment,
+    recoveryRestoreStabilityEvidence,
   }
   const validationIsNewerThanLatestExpansion = latestStructureValidation
     ? Date.parse(text(latestStructureValidation.latestBatchCreatedAt)) > Date.parse(text(latest.latestBatchCreatedAt))
@@ -5297,13 +5385,16 @@ function buildSafeBatchExpansionFeedback(args: {
   }
 
   if (latest.rawRiskCount <= 0) {
+    const summary = recoveryRestoreStabilityEvidence
+      ? `${recoveryRestoreStabilityEvidence.summary} 已沉淀为长期扩批稳定证据。`
+      : stablePassStreak > 1
+        ? `连续 ${stablePassStreak} 批5章扩批通过，前段、中段、后段核心/回报/追读稳定，可继续观察 5 章安全连写。`
+        : '最近一次5章扩批分段复盘通过，前段、中段、后段核心/回报/追读稳定。'
     return {
       visible: true,
       status: 'passed',
       label: '扩批热区反馈',
-      summary: stablePassStreak > 1
-        ? `连续 ${stablePassStreak} 批5章扩批通过，前段、中段、后段核心/回报/追读稳定，可继续观察 5 章安全连写。`
-        : '最近一次5章扩批分段复盘通过，前段、中段、后段核心/回报/追读稳定。',
+      summary,
       targetChapterCount: 5,
       latestBatchCreatedAt: latest.latestBatchCreatedAt,
       latestChapterNos: latest.latestChapterNos,

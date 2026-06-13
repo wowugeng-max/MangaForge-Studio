@@ -473,6 +473,86 @@ function expandedSafeBatchRun(args: {
   }
 }
 
+function restoredFiveChapterBatchRun(args: {
+  id: number
+  createdAt: string
+  chapterNos: number[]
+  validationChapterNos?: number[]
+}) {
+  const validationChapterNos = args.validationChapterNos || [50, 51, 52]
+  return {
+    id: args.id,
+    run_type: 'batch_generate_prose',
+    created_at: args.createdAt,
+    status: 'success',
+    input_ref: JSON.stringify({
+      source: 'safe_batch_recovery_restore_five_batch',
+      safety_limit: args.chapterNos.length,
+      recovery_restore_confirmation: {
+        status: 'ready',
+        label: '确认恢复5章扩批',
+        validation_chapter_nos: validationChapterNos,
+        target_chapter_count: 5,
+      },
+      batch_preflight: {
+        safe_chapter_count: args.chapterNos.length,
+        allowed_chapter_nos: args.chapterNos,
+        safe_batch_recovery_restore_confirmation: {
+          status: 'ready',
+          label: '确认恢复5章扩批',
+          validation_chapter_nos: validationChapterNos,
+          target_chapter_count: 5,
+        },
+        safe_batch_expansion_policy: {
+          status: 'expanded',
+          label: '强化扩批规则',
+          summary: '3章验证批通过，本轮确认恢复 5 章扩批。',
+          target_chapter_count: 5,
+          base_chapter_count: 3,
+          expanded_chapter_count: 5,
+          required_pass_streak: 3,
+          pass_streak: 3,
+          accepted_batch_count: 3,
+          failed_batch_count: 1,
+          latest_status: 'ok',
+          expansion_feedback: {
+            visible: true,
+            status: 'recovered',
+            label: '扩批热区反馈',
+            summary: '扩批结构验证批通过，可恢复5章扩批。',
+            target_chapter_count: 5,
+            latest_chapter_nos: validationChapterNos,
+            risk_count: 0,
+            repeated_hotspot_segment: { key: 'middle', label: '中段', count: 2 },
+            expansion_structure_validation_result: {
+              visible: true,
+              status: 'ok',
+              label: '扩批结构验证',
+              summary: '扩批结构验证批通过。',
+              validation_chapter_nos: validationChapterNos,
+              risk_count: 0,
+              repeated_hotspot_segment: { key: 'middle', label: '中段', count: 2 },
+            },
+          },
+        },
+      },
+    }),
+    output_ref: JSON.stringify({
+      total: args.chapterNos.length,
+      success: args.chapterNos.length,
+      failed: 0,
+      chapters: args.chapterNos.map((chapterNo, index) => ({
+        id: chapterNo,
+        chapter_no: chapterNo,
+        title: `恢复扩批${chapterNo}`,
+        status: 'success',
+        score: 88 + index,
+        word_count: 3150 + index * 20,
+      })),
+    }),
+  }
+}
+
 function expansionStructureVerification(chapterNos = [50, 51, 52]) {
   return {
     source: 'safe_batch_expansion_structure_repair',
@@ -3963,6 +4043,168 @@ describe('buildAutoCreationDirectorModel', () => {
     })
     expect(model.productionLicense.modeLabel).toBe('恢复5章扩批')
     expect(model.productionLicense.summary).toContain('第50、51、52章')
+  })
+
+  test('records stability evidence after the restored five-chapter batch passes', () => {
+    const validationChapterNos = [50, 51, 52]
+    const restoreChapterNos = [53, 54, 55, 56, 57]
+    const model = buildAutoCreationDirectorModel({
+      planning: readySafeBatchPlanning({ futureRoute: futureRouteRange(58, 5) }),
+      writing: readySafeBatchWriting({
+        nextChapter: { ...baseWriting.nextChapter, id: 58, chapterNo: 58, title: '恢复扩批后58' },
+        previousChapter: { chapterNo: 57, title: '恢复扩批57', wordCount: 3180, hasProse: true },
+      }),
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: { last_updated_chapter: 57 },
+      chapters: [...[41, 42, 43, 44, 45, 46, 47, 48, 49], ...validationChapterNos, ...restoreChapterNos].map(chapterNo => ({
+        id: chapterNo,
+        chapter_no: chapterNo,
+        title: `恢复稳定${chapterNo}`,
+        chapter_text: '恢复稳定正文'.repeat(500),
+      })),
+      reviews: [
+        ...strengthenedAcceptanceQualityReviews([41, 42, 43], 5161, '2026-06-09T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([44, 45, 46], 5171, '2026-06-10T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([47, 48, 49], 5181, '2026-06-11T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews(validationChapterNos, 5191, '2026-06-14T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews(restoreChapterNos, 5201, '2026-06-15T01:00:00.000Z'),
+      ],
+      runRecords: [
+        strengthenedAcceptanceBatchRun({ id: 616, createdAt: '2026-06-09T00:00:00.000Z', chapterNos: [41, 42, 43] }),
+        strengthenedAcceptanceBatchRun({ id: 617, createdAt: '2026-06-10T00:00:00.000Z', chapterNos: [44, 45, 46] }),
+        strengthenedAcceptanceBatchRun({ id: 618, createdAt: '2026-06-11T00:00:00.000Z', chapterNos: [47, 48, 49] }),
+        expansionStructureValidationBatchRun({
+          id: 619,
+          createdAt: '2026-06-14T00:00:00.000Z',
+          chapterNos: validationChapterNos,
+          source: 'safe_batch_recovery_validation_batch',
+        }),
+        restoredFiveChapterBatchRun({
+          id: 620,
+          createdAt: '2026-06-15T00:00:00.000Z',
+          chapterNos: restoreChapterNos,
+          validationChapterNos,
+        }),
+      ],
+    } as any)
+
+    const feedback = model.batchGuardrail.preflight.inputSnapshot.safe_batch_expansion_policy.expansion_feedback
+
+    expect(feedback).toMatchObject({
+      status: 'passed',
+      target_chapter_count: 5,
+      latest_chapter_nos: restoreChapterNos,
+      stable_pass_streak: 1,
+      recent_expanded_batch_count: 1,
+      recovery_restore_stability_evidence: {
+        status: 'passed',
+        source: 'safe_batch_recovery_restore_five_batch',
+        restore_chapter_nos: restoreChapterNos,
+        validation_chapter_nos: validationChapterNos,
+        stable_pass_streak: 1,
+      },
+    })
+    expect(feedback.summary).toContain('恢复5章扩批稳定观察')
+    expect(feedback.summary).toContain('第50、51、52章')
+  })
+
+  test('routes restored five-chapter same-segment relapse back to structure repair', () => {
+    const validationChapterNos = [50, 51, 52]
+    const restoreChapterNos = [53, 54, 55, 56, 57]
+    const model = buildAutoCreationDirectorModel({
+      planning: readySafeBatchPlanning({ futureRoute: futureRouteRange(58, 5) }),
+      writing: readySafeBatchWriting({
+        nextChapter: { ...baseWriting.nextChapter, id: 58, chapterNo: 58, title: '恢复复发后58' },
+        previousChapter: { chapterNo: 57, title: '恢复复发57', wordCount: 3180, hasProse: true },
+      }),
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: { last_updated_chapter: 57 },
+      chapters: [...[41, 42, 43, 44, 45, 46, 47, 48, 49], ...validationChapterNos, ...restoreChapterNos].map(chapterNo => ({
+        id: chapterNo,
+        chapter_no: chapterNo,
+        title: `恢复复发${chapterNo}`,
+        chapter_text: '恢复复发正文'.repeat(500),
+      })),
+      reviews: [
+        ...strengthenedAcceptanceQualityReviews([41, 42, 43], 5211, '2026-06-09T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([44, 45, 46], 5221, '2026-06-10T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([47, 48, 49], 5231, '2026-06-11T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews(validationChapterNos, 5241, '2026-06-14T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews(restoreChapterNos, 5251, '2026-06-15T01:00:00.000Z'),
+        {
+          id: 5261,
+          chapter_id: 55,
+          review_type: 'chapter_core_drift',
+          created_at: '2026-06-15T01:10:00.000Z',
+          payload: JSON.stringify({ chapter_core_drift: { status: 'warn', drift_risks: ['恢复5章后中段再次偏离阵盘主线承诺'] } }),
+        },
+        {
+          id: 5262,
+          chapter_id: 56,
+          review_type: 'reader_payoff_sync',
+          created_at: '2026-06-15T01:11:00.000Z',
+          payload: JSON.stringify({ reader_payoff_sync: { status: 'warn', debt_count: 1, missed: ['恢复5章后中段显性回报再次缺失'] } }),
+        },
+        {
+          id: 5263,
+          chapter_id: 56,
+          review_type: 'reader_retention_sync',
+          created_at: '2026-06-15T01:12:00.000Z',
+          payload: JSON.stringify({ reader_retention_sync: { status: 'warn', missed_count: 1, missed: ['恢复5章后中段章末追读再次重复'] } }),
+        },
+      ],
+      runRecords: [
+        strengthenedAcceptanceBatchRun({ id: 625, createdAt: '2026-06-09T00:00:00.000Z', chapterNos: [41, 42, 43] }),
+        strengthenedAcceptanceBatchRun({ id: 626, createdAt: '2026-06-10T00:00:00.000Z', chapterNos: [44, 45, 46] }),
+        strengthenedAcceptanceBatchRun({ id: 627, createdAt: '2026-06-11T00:00:00.000Z', chapterNos: [47, 48, 49] }),
+        expansionStructureValidationBatchRun({
+          id: 628,
+          createdAt: '2026-06-14T00:00:00.000Z',
+          chapterNos: validationChapterNos,
+          source: 'safe_batch_recovery_validation_batch',
+        }),
+        restoredFiveChapterBatchRun({
+          id: 629,
+          createdAt: '2026-06-15T00:00:00.000Z',
+          chapterNos: restoreChapterNos,
+          validationChapterNos,
+        }),
+      ],
+    } as any)
+
+    const policy = model.batchGuardrail.preflight.inputSnapshot.safe_batch_expansion_policy
+    const structureTask = model.batchReviewQueue.riskRadar.repairTasks.find((task: any) => task.issue_type === 'safe_batch_expansion_structure_repair')
+    const roadmap = policy.safe_batch_recovery_roadmap
+
+    expect(policy).toMatchObject({
+      status: 'recovering',
+      target_chapter_count: 3,
+      expansion_feedback: {
+        status: 'rollback_to_small_batch',
+        repeated_hotspot_segment: {
+          key: 'middle',
+          label: '中段',
+          source: 'safe_batch_recovery_restore_five_batch',
+        },
+      },
+    })
+    expect(policy.expansion_feedback.summary).toContain('恢复5章后中段再次复发')
+    expect(roadmap.next_repair_layer.focus).toMatchObject({
+      issue_type: 'safe_batch_expansion_structure_repair',
+      task_center_filter_label: '扩批结构',
+    })
+    expect(structureTask).toMatchObject({
+      issue_type: 'safe_batch_expansion_structure_repair',
+      safe_batch_expansion_structure_review: {
+        repeated_hotspot_segment: {
+          key: 'middle',
+          label: '中段',
+          source: 'safe_batch_recovery_restore_five_batch',
+        },
+      },
+    })
   })
 
   test('keeps small-batch recovery when the structure validation batch fails', () => {
