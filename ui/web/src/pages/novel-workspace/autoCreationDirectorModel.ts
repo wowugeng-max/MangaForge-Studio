@@ -2960,11 +2960,12 @@ function buildRecoveryEvidenceReview(args: {
     batchChecklistRiskTotal: number
   }
 }) {
-  const evidence = batchReleaseEvidenceFromPreflight(args.preflight)
-  const failedItems = evidence
+  const evidenceItems = batchReleaseEvidenceItemsFromPreflight(args.preflight)
+  const evidence = Array.from(new Set(evidenceItems.map(item => item.evidence).filter(Boolean)))
+  const failedItems = evidenceItems
     .map(item => ({
-      evidence: item,
-      risk_labels: recoveryEvidenceRiskMatches(item, args.counts),
+      ...item,
+      risk_labels: recoveryEvidenceRiskMatches(item.evidence, args.counts),
     }))
     .filter(item => item.risk_labels.length > 0)
 
@@ -4201,7 +4202,34 @@ function buildBatchHandoff(args: {
   }
 }
 
-function batchReleaseEvidenceFromPreflight(preflight: AnyRecord | null | undefined) {
+function recoveryEvidenceProductionGateSourceAction(source: AnyRecord) {
+  const key = text(source?.source || source?.sourceMode)
+  if (key === 'single_chapter_governance_recheck') {
+    return { action: 'single_chapter_governance_recheck', label: '复检单章' }
+  }
+  if (key === 'safe_batch_recovery_recheck') {
+    return { action: 'safe_batch_recovery_recheck', label: '复盘批次' }
+  }
+  return { action: 'review_governance_closure', label: '治理复查台' }
+}
+
+function uniqueRecoveryEvidenceItems(items: AnyRecord[]) {
+  const seen = new Set<string>()
+  return items.filter(item => {
+    const evidence = text(item?.evidence)
+    if (!evidence) return false
+    const key = [
+      text(item?.source),
+      text(item?.source_detail || item?.sourceDetail),
+      evidence,
+    ].join('|')
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+function batchReleaseEvidenceItemsFromPreflight(preflight: AnyRecord | null | undefined) {
   const closure = preflight?.storyline_decision_closure || preflight?.storylineDecisionClosure || null
   const governanceMemory = parsePayload(preflight?.governance_recheck_memory || preflight?.governanceRecheckMemory)
     || preflight?.governance_recheck_memory
@@ -4214,29 +4242,72 @@ function batchReleaseEvidenceFromPreflight(preflight: AnyRecord | null | undefin
   const recoveryEvidence = [
     ...arrayValue(preflight?.recovery_evidence),
     ...arrayValue(preflight?.recoveryEvidence),
-  ].map(item => text(item)).filter(Boolean)
+  ].map(item => text(item)).filter(Boolean).map(item => ({
+    evidence: item,
+    source: 'recovery_evidence',
+    source_label: '恢复放行依据',
+    source_detail: '安全连写预检 · 恢复放行依据',
+    source_action: 'create_safe_batch_risk_repair',
+    source_action_label: '按批次修订',
+  }))
   const productionGateEvidence = arrayValue(productionGate?.sources)
     .filter(source => text(source?.status) === 'cleared')
     .map(source => {
       const label = firstText(source?.label, source?.source_label, source?.sourceLabel, source?.source)
       const statusLabel = firstText(source?.status_label, source?.statusLabel, '生产阻断已解除')
-      return label ? `${label}：${statusLabel}` : ''
+      const action = recoveryEvidenceProductionGateSourceAction(source)
+      return label ? {
+        evidence: `${label}：${statusLabel}`,
+        source: 'recovery_evidence_production_gate',
+        source_label: '入口生产闸门',
+        source_detail: [label, statusLabel].filter(Boolean).join(' · '),
+        source_action: action.action,
+        source_action_label: action.label,
+        production_gate_source: text(source?.source || source?.sourceMode),
+      } : null
     })
     .filter(Boolean)
-  const governanceRecheckEvidence = [
+  const repairedMemoryEvidence = [
     ...arrayValue(governanceMemory?.evidence),
     ...arrayValue(governanceMemory?.repaired_evidence),
     ...arrayValue(governanceMemory?.repairedEvidence),
+  ].map(item => text(item)).filter(Boolean).map(item => ({
+    evidence: item,
+    source: 'governance_recheck_memory',
+    source_label: '治理复查记忆',
+    source_detail: '治理复查记忆 · 修后证据',
+    source_action: 'review_governance_closure',
+    source_action_label: '治理复查台',
+  }))
+  const watchMemoryEvidence = [
     ...arrayValue(governanceMemory?.watch_items),
     ...arrayValue(governanceMemory?.watchItems),
-  ].map(item => text(item)).filter(Boolean)
-  const evidence = [
-    text(closure?.status) === 'ok' ? text(closure?.label, '剧情线决策已闭环') : '',
+  ].map(item => text(item)).filter(Boolean).map(item => ({
+    evidence: item,
+    source: 'governance_recheck_memory',
+    source_label: '治理复查记忆',
+    source_detail: '治理复查记忆 · 观察项',
+    source_action: 'review_governance_closure',
+    source_action_label: '治理复查台',
+  }))
+  return uniqueRecoveryEvidenceItems([
+    text(closure?.status) === 'ok' ? {
+      evidence: text(closure?.label, '剧情线决策已闭环'),
+      source: 'storyline_decision_closure',
+      source_label: '剧情线决策闭环',
+      source_detail: '安全连写预检 · 剧情线决策',
+      source_action: 'sync_storyline_board',
+      source_action_label: '同步计划',
+    } : null,
     ...recoveryEvidence,
     ...productionGateEvidence,
-    ...governanceRecheckEvidence,
-  ]
-  return Array.from(new Set(evidence.filter(Boolean)))
+    ...repairedMemoryEvidence,
+    ...watchMemoryEvidence,
+  ].filter(Boolean) as AnyRecord[])
+}
+
+function batchReleaseEvidenceFromPreflight(preflight: AnyRecord | null | undefined) {
+  return Array.from(new Set(batchReleaseEvidenceItemsFromPreflight(preflight).map(item => text(item?.evidence)).filter(Boolean)))
 }
 
 function latestLongformCreationReport(reviews: AnyRecord[]) {

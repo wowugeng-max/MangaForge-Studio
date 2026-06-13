@@ -1,5 +1,14 @@
 import { describe, expect, test } from 'bun:test'
-import { buildRecoveryEvidenceAuditView, buildRepairClosureHighlights, recoveryEvidenceSourceRecheckAction, repairTaskActionLabel } from './TaskCenterDrawer'
+import {
+  buildRecoveryEvidenceAuditView,
+  buildRecoveryEvidenceReviewActionFeedback,
+  buildRecoveryEvidenceReviewActionFeedbackKey,
+  buildRecoveryEvidenceReviewRowAction,
+  buildRecoveryEvidenceReviewRows,
+  buildRepairClosureHighlights,
+  recoveryEvidenceSourceRecheckAction,
+  repairTaskActionLabel,
+} from './TaskCenterDrawer'
 
 describe('buildRepairClosureHighlights', () => {
   test('summarizes resolved delivery risk repair tasks for task center closure evidence', () => {
@@ -382,6 +391,156 @@ describe('recoveryEvidenceSourceRecheckAction', () => {
       action: '',
       label: '',
     })
+  })
+})
+
+describe('buildRecoveryEvidenceReviewRows', () => {
+  test('keeps source details and source actions visible for failed recovery evidence', () => {
+    const rows = buildRecoveryEvidenceReviewRows({
+      issue_type: 'recovery_evidence_mismatch',
+      recovery_evidence_review: {
+        status: 'warn',
+        failed_items: [
+          {
+            evidence: '单章治理复查：生产阻断已解除',
+            source: 'recovery_evidence_production_gate',
+            source_label: '入口生产闸门',
+            source_detail: '单章治理复查 · 生产阻断已解除',
+            source_action_label: '复检单章',
+            risk_labels: ['恢复依据来源继承风险 2 项'],
+          },
+          {
+            evidence: '第42章对白交锋已补回样章节奏',
+            source: 'governance_recheck_memory',
+            source_label: '治理复查记忆',
+            source_detail: '治理复查记忆 · 修后证据',
+            source_action_label: '治理复查台',
+            risk_labels: ['风格样章缺口 1 项'],
+          },
+        ],
+      },
+    })
+
+    expect(rows).toEqual([
+      expect.objectContaining({
+        evidence: '单章治理复查：生产阻断已解除',
+        source: 'recovery_evidence_production_gate',
+        sourceLabel: '入口生产闸门',
+        sourceDetail: '单章治理复查 · 生产阻断已解除',
+        sourceActionLabel: '复检单章',
+        riskLabels: ['恢复依据来源继承风险 2 项'],
+      }),
+      expect.objectContaining({
+        evidence: '第42章对白交锋已补回样章节奏',
+        source: 'governance_recheck_memory',
+        sourceLabel: '治理复查记忆',
+        sourceDetail: '治理复查记忆 · 修后证据',
+        sourceActionLabel: '治理复查台',
+        riskLabels: ['风格样章缺口 1 项'],
+      }),
+    ])
+  })
+})
+
+describe('buildRecoveryEvidenceReviewRowAction', () => {
+  test('routes recovery evidence source rows to the natural clickable action', () => {
+    expect(buildRecoveryEvidenceReviewRowAction({
+      evidence: '单章治理复查：生产阻断已解除',
+      riskLabels: [],
+      source: 'recovery_evidence_production_gate',
+      sourceLabel: '入口生产闸门',
+      sourceDetail: '单章治理复查 · 生产阻断已解除',
+      sourceAction: 'single_chapter_governance_recheck',
+      sourceActionLabel: '复检单章',
+      productionGateSource: 'single_chapter_governance_recheck',
+    })).toEqual({
+      action: 'recheck_single_chapter',
+      label: '复检单章',
+      focusSource: 'single_chapter_governance_recheck',
+    })
+
+    expect(buildRecoveryEvidenceReviewRowAction({
+      evidence: '批次恢复复查：生产阻断已解除',
+      riskLabels: [],
+      source: 'recovery_evidence_production_gate',
+      sourceLabel: '入口生产闸门',
+      sourceDetail: '批次恢复复查 · 生产阻断已解除',
+      sourceAction: 'safe_batch_recovery_recheck',
+      sourceActionLabel: '复盘批次',
+      productionGateSource: 'safe_batch_recovery_recheck',
+    })).toEqual({
+      action: 'recheck_safe_batch',
+      label: '复盘批次',
+      focusSource: 'safe_batch_recovery_recheck',
+    })
+
+    expect(buildRecoveryEvidenceReviewRowAction({
+      evidence: '第42章对白交锋已补回样章节奏',
+      riskLabels: [],
+      source: 'governance_recheck_memory',
+      sourceLabel: '治理复查记忆',
+      sourceDetail: '治理复查记忆 · 修后证据',
+      sourceAction: 'review_governance_closure',
+      sourceActionLabel: '治理复查台',
+      productionGateSource: '',
+    })).toEqual({
+      action: 'review_governance_closure',
+      label: '治理复查台',
+      focusSource: '',
+    })
+
+    expect(buildRecoveryEvidenceReviewRowAction({
+      evidence: '样章任务书复检通过 1 项',
+      riskLabels: [],
+      source: 'recovery_evidence',
+      sourceLabel: '恢复放行依据',
+      sourceDetail: '安全连写预检 · 恢复放行依据',
+      sourceAction: 'create_safe_batch_risk_repair',
+      sourceActionLabel: '按批次修订',
+      productionGateSource: '',
+    })).toEqual({
+      action: 'execute_typed_repair',
+      label: '按批次修订',
+      focusSource: '',
+    })
+  })
+})
+
+describe('buildRecoveryEvidenceReviewActionFeedback', () => {
+  test('summarizes the triggered action and next closure condition for a recovery evidence row', () => {
+    const row = {
+      evidence: '单章治理复查：生产阻断已解除',
+      riskLabels: [],
+      source: 'recovery_evidence_production_gate',
+      sourceLabel: '入口生产闸门',
+      sourceDetail: '单章治理复查 · 生产阻断已解除',
+      sourceAction: 'single_chapter_governance_recheck',
+      sourceActionLabel: '复检单章',
+      productionGateSource: 'single_chapter_governance_recheck',
+    }
+    const rowAction = buildRecoveryEvidenceReviewRowAction(row)
+
+    expect(buildRecoveryEvidenceReviewActionFeedbackKey(2, row, rowAction)).toBe(
+      '2|recovery_evidence_production_gate|single_chapter_governance_recheck|recheck_single_chapter|单章治理复查：生产阻断已解除',
+    )
+    expect(buildRecoveryEvidenceReviewActionFeedback(rowAction, '14:20')).toEqual({
+      statusLabel: '已触发复检单章',
+      triggeredAt: '14:20',
+      closureCondition: '关闭条件：单章复查为 ok 或 failed_evidence 为空。',
+      detail: '最近动作：复检单章 · 14:20 · 已触发，等待复检结果回填。',
+    })
+  })
+
+  test('uses batch repair closure wording for release evidence revision actions', () => {
+    expect(buildRecoveryEvidenceReviewActionFeedback({
+      action: 'execute_typed_repair',
+      label: '按批次修订',
+      focusSource: '',
+    }, '15:05')).toEqual(expect.objectContaining({
+      statusLabel: '已触发按批次修订',
+      triggeredAt: '15:05',
+      closureCondition: '关闭条件：完成批次修订并重新运行批次交稿复盘，recovery_evidence_review 为 ok。',
+    }))
   })
 })
 

@@ -345,6 +345,145 @@ function recoveryEvidenceFailedTexts(review: any) {
   ], 6)
 }
 
+export type RecoveryEvidenceReviewRow = {
+  evidence: string
+  riskLabels: string[]
+  source: string
+  sourceLabel: string
+  sourceDetail: string
+  sourceAction: string
+  sourceActionLabel: string
+  productionGateSource: string
+}
+
+export type RecoveryEvidenceReviewRowAction = {
+  action: 'recheck_single_chapter' | 'recheck_safe_batch' | 'review_governance_closure' | 'execute_typed_repair' | ''
+  label: string
+  focusSource: string
+}
+
+export type RecoveryEvidenceReviewActionFeedback = {
+  statusLabel: string
+  triggeredAt: string
+  closureCondition: string
+  detail: string
+}
+
+function recoveryEvidenceReviewSourceLabel(source: string) {
+  if (source === 'recovery_evidence') return '恢复放行依据'
+  if (source === 'governance_recheck_memory') return '治理复查记忆'
+  if (source === 'recovery_evidence_production_gate') return '入口生产闸门'
+  if (source === 'storyline_decision_closure') return '剧情线决策闭环'
+  if (source === 'single_chapter_governance_recheck') return '单章治理复查'
+  if (source === 'safe_batch_recovery_recheck') return '批次恢复复查'
+  return ''
+}
+
+function recoveryEvidenceReviewFallbackSource(evidence: string, task: any) {
+  if (evidence.includes('生产阻断已解除')) return 'recovery_evidence_production_gate'
+  if (isSingleChapterRecoveryEvidenceTask(task)) return 'single_chapter_governance_recheck'
+  return ''
+}
+
+export function buildRecoveryEvidenceReviewRows(task: any): RecoveryEvidenceReviewRow[] {
+  const recoveryEvidenceReview = task?.recovery_evidence_review || task?.recoveryEvidenceReview || null
+  const failedItems = [
+    ...(Array.isArray(recoveryEvidenceReview?.failed_items) ? recoveryEvidenceReview.failed_items : []),
+    ...(Array.isArray(recoveryEvidenceReview?.failedItems) ? recoveryEvidenceReview.failedItems : []),
+  ]
+  const failedEvidence = [
+    ...(Array.isArray(recoveryEvidenceReview?.failed_evidence) ? recoveryEvidenceReview.failed_evidence : []),
+    ...(Array.isArray(recoveryEvidenceReview?.failedEvidence) ? recoveryEvidenceReview.failedEvidence : []),
+  ]
+  const rows = failedItems.length > 0
+    ? failedItems.map((item: any) => {
+      const evidence = compactEvidenceText(item?.evidence || item)
+      const source = String(item?.source || item?.sourceMode || recoveryEvidenceReviewFallbackSource(evidence, task))
+      const sourceLabel = compactEvidenceText(item?.source_label || item?.sourceLabel || recoveryEvidenceReviewSourceLabel(source))
+      return {
+        evidence,
+        riskLabels: Array.isArray(item?.risk_labels) ? item.risk_labels : Array.isArray(item?.riskLabels) ? item.riskLabels : [],
+        source,
+        sourceLabel,
+        sourceDetail: compactEvidenceText(item?.source_detail || item?.sourceDetail || ''),
+        sourceAction: compactEvidenceText(item?.source_action || item?.sourceAction || ''),
+        sourceActionLabel: compactEvidenceText(item?.source_action_label || item?.sourceActionLabel || ''),
+        productionGateSource: compactEvidenceText(item?.production_gate_source || item?.productionGateSource || ''),
+      }
+    })
+    : failedEvidence.map((item: any) => {
+      const evidence = compactEvidenceText(item)
+      const source = recoveryEvidenceReviewFallbackSource(evidence, task)
+      return {
+        evidence,
+        riskLabels: [],
+        source,
+        sourceLabel: recoveryEvidenceReviewSourceLabel(source),
+        sourceDetail: '',
+        sourceAction: '',
+        sourceActionLabel: '',
+        productionGateSource: '',
+      }
+    })
+  return rows.filter(item => item.evidence)
+}
+
+export function buildRecoveryEvidenceReviewRowAction(row: RecoveryEvidenceReviewRow): RecoveryEvidenceReviewRowAction {
+  const action = String(row.sourceAction || '')
+  const productionGateSource = String(row.productionGateSource || '')
+  if (row.source === 'recovery_evidence_production_gate') {
+    if (productionGateSource === 'single_chapter_governance_recheck' || action === 'single_chapter_governance_recheck') {
+      return { action: 'recheck_single_chapter', label: row.sourceActionLabel || '复检单章', focusSource: 'single_chapter_governance_recheck' }
+    }
+    if (productionGateSource === 'safe_batch_recovery_recheck' || action === 'safe_batch_recovery_recheck') {
+      return { action: 'recheck_safe_batch', label: row.sourceActionLabel || '复盘批次', focusSource: 'safe_batch_recovery_recheck' }
+    }
+  }
+  if (row.source === 'governance_recheck_memory' || action === 'review_governance_closure') {
+    return { action: 'review_governance_closure', label: row.sourceActionLabel || '治理复查台', focusSource: '' }
+  }
+  if (row.source === 'recovery_evidence' || action === 'create_safe_batch_risk_repair') {
+    return { action: 'execute_typed_repair', label: row.sourceActionLabel || '按批次修订', focusSource: '' }
+  }
+  return { action: '', label: '', focusSource: '' }
+}
+
+export function buildRecoveryEvidenceReviewActionFeedbackKey(
+  taskIndex: number,
+  row: RecoveryEvidenceReviewRow,
+  rowAction: RecoveryEvidenceReviewRowAction,
+) {
+  return [
+    taskIndex,
+    row.source,
+    row.productionGateSource,
+    rowAction.action,
+    row.evidence,
+  ].join('|')
+}
+
+export function buildRecoveryEvidenceReviewActionFeedback(
+  rowAction: RecoveryEvidenceReviewRowAction,
+  triggeredAt: string,
+): RecoveryEvidenceReviewActionFeedback {
+  const label = rowAction.label || '处理'
+  const closureCondition = rowAction.action === 'recheck_single_chapter'
+    ? '关闭条件：单章复查为 ok 或 failed_evidence 为空。'
+    : rowAction.action === 'recheck_safe_batch'
+      ? '关闭条件：长线生产修复审计重新生成，来源行显示生产阻断已解除。'
+      : rowAction.action === 'review_governance_closure'
+        ? '关闭条件：恢复依据审计闭环，治理复查记忆不再列出当前失效依据。'
+        : rowAction.action === 'execute_typed_repair'
+          ? '关闭条件：完成批次修订并重新运行批次交稿复盘，recovery_evidence_review 为 ok。'
+          : '关闭条件：等待对应复检或修订结果回填。'
+  return {
+    statusLabel: `已触发${label}`,
+    triggeredAt,
+    closureCondition,
+    detail: `最近动作：${label} · ${triggeredAt} · 已触发，等待复检结果回填。`,
+  }
+}
+
 function recoveryEvidenceTaskResult(task: any) {
   const review = recoveryEvidenceReviewOfTask(task)
   const taskStatus = String(task?.task_status ?? task?.status ?? '').toLowerCase()
@@ -597,20 +736,19 @@ function BatchPlanReviewPreview({ task }: { task: any }) {
   )
 }
 
-function RecoveryEvidenceReviewPreview({ task }: { task: any }) {
+function RecoveryEvidenceReviewPreview({
+  task,
+  taskIndex = 0,
+  actionFeedbackByKey = {},
+  onRecoveryEvidenceReviewRowAction,
+}: {
+  task: any
+  taskIndex?: number
+  actionFeedbackByKey?: Record<string, RecoveryEvidenceReviewActionFeedback>
+  onRecoveryEvidenceReviewRowAction?: (row: RecoveryEvidenceReviewRow, rowAction: RecoveryEvidenceReviewRowAction) => void
+}) {
   const recoveryEvidenceReview = task.recovery_evidence_review || task.recoveryEvidenceReview || null
-  const failedItems = Array.isArray(recoveryEvidenceReview?.failed_items) ? recoveryEvidenceReview.failed_items : []
-  const failedEvidence = Array.isArray(recoveryEvidenceReview?.failed_evidence) ? recoveryEvidenceReview.failed_evidence : []
-  const rows = (failedItems.length > 0
-    ? failedItems.map((item: any) => ({
-      evidence: compactEvidenceText(item?.evidence || item),
-      riskLabels: Array.isArray(item?.risk_labels) ? item.risk_labels : Array.isArray(item?.riskLabels) ? item.riskLabels : [],
-    }))
-    : failedEvidence.map((item: any) => ({
-      evidence: compactEvidenceText(item),
-      riskLabels: [],
-    })))
-    .filter((item: any) => item.evidence)
+  const rows = buildRecoveryEvidenceReviewRows(task)
   const summary = String(recoveryEvidenceReview?.summary || '').trim()
   if (!rows.length && !summary) return null
   return (
@@ -624,6 +762,44 @@ function RecoveryEvidenceReviewPreview({ task }: { task: any }) {
         )}
         {rows.slice(0, 4).map((item: any, index: number) => (
           <Space key={`${item.evidence}-${index}`} direction="vertical" size={2} style={{ width: '100%' }}>
+            {(() => {
+              const rowAction = buildRecoveryEvidenceReviewRowAction(item)
+              const feedback = actionFeedbackByKey[buildRecoveryEvidenceReviewActionFeedbackKey(taskIndex, item, rowAction)]
+              return (
+                <>
+                  {(item.sourceLabel || item.sourceDetail || item.sourceActionLabel) && (
+              <Space wrap size={[4, 2]}>
+                {item.sourceLabel && <Tag color="purple" bordered={false}>来源：{item.sourceLabel}</Tag>}
+                {item.sourceDetail && (
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    {item.sourceLabel && item.sourceDetail.startsWith(`${item.sourceLabel} · `)
+                      ? item.sourceDetail.slice(item.sourceLabel.length + 3)
+                      : item.sourceDetail}
+                  </Text>
+                )}
+                {rowAction.action && onRecoveryEvidenceReviewRowAction ? (
+                  <Button
+                    size="small"
+                    type="link"
+                    icon={rowAction.action === 'recheck_single_chapter' || rowAction.action === 'recheck_safe_batch' || rowAction.action === 'review_governance_closure' ? <ReloadOutlined /> : undefined}
+                    onClick={() => onRecoveryEvidenceReviewRowAction?.(item, rowAction)}
+                  >
+                    {rowAction.label}
+                  </Button>
+                ) : item.sourceActionLabel ? (
+                  <Tag color="blue" bordered={false}>下一步：{item.sourceActionLabel}</Tag>
+                ) : null}
+              </Space>
+                  )}
+                  {feedback && (
+                    <Space direction="vertical" size={1} style={{ width: '100%' }}>
+                      <Text type="secondary" style={{ fontSize: 12 }}>{feedback.detail}</Text>
+                      <Text type="secondary" style={{ fontSize: 12 }}>{feedback.closureCondition}</Text>
+                    </Space>
+                  )}
+                </>
+              )
+            })()}
             <Text type="secondary" style={{ fontSize: 12 }}>失效依据：{item.evidence}</Text>
             {item.riskLabels.length > 0 && (
               <Text type="secondary" style={{ fontSize: 12 }}>对应风险：{item.riskLabels.slice(0, 3).join('；')}</Text>
@@ -840,12 +1016,58 @@ function RepairTaskRunSummary({
   const audit = output.audit_summary || null
   const [focusedTaskIndex, setFocusedTaskIndex] = useState<number | null>(null)
   const [focusedTaskSource, setFocusedTaskSource] = useState<string>('')
+  const [recoveryEvidenceActionFeedbackByKey, setRecoveryEvidenceActionFeedbackByKey] = useState<Record<string, RecoveryEvidenceReviewActionFeedback>>({})
   const high = tasks.filter((task: any) => task.severity === 'high').length
   const medium = tasks.filter((task: any) => task.severity === 'medium').length
   const resolved = tasks.filter((task: any) => task.task_status === 'resolved').length
   const needsReview = tasks.filter((task: any) => task.task_status === 'needs_review').length
   const closureHighlights = buildRepairClosureHighlights(tasks, audit)
   const recoveryEvidenceAudit = buildRecoveryEvidenceAuditView(audit, tasks)
+  const sourceTaskForRecoveryEvidenceRow = (focusSource: string) => {
+    const group = recoveryEvidenceAudit?.sourceGroups.find(item => item.source === focusSource)
+    const taskIndex = group?.taskIndexes.find(index => tasks[index] && Number(tasks[index]?.chapter_id || tasks[index]?.chapterId || 0))
+      ?? group?.taskIndexes[0]
+      ?? null
+    return {
+      taskIndex,
+      task: taskIndex !== null ? tasks[taskIndex] : null,
+    }
+  }
+  const handleRecoveryEvidenceReviewRowAction = (
+    task: any,
+    taskIndex: number,
+    row: RecoveryEvidenceReviewRow,
+    rowAction: RecoveryEvidenceReviewRowAction,
+  ) => {
+    const feedbackKey = buildRecoveryEvidenceReviewActionFeedbackKey(taskIndex, row, rowAction)
+    const triggeredAt = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })
+    const actionFeedback = buildRecoveryEvidenceReviewActionFeedback(rowAction, triggeredAt)
+    if (rowAction.focusSource) {
+      setFocusedTaskSource(rowAction.focusSource)
+      const sourceTask = sourceTaskForRecoveryEvidenceRow(rowAction.focusSource)
+      setFocusedTaskIndex(sourceTask.taskIndex)
+      if (rowAction.action === 'recheck_single_chapter' && sourceTask.task && onRecheckRepairTask) {
+        setRecoveryEvidenceActionFeedbackByKey(prev => ({ ...prev, [feedbackKey]: actionFeedback }))
+        onRecheckRepairTask(sourceTask.task, run, sourceTask.taskIndex ?? 0)
+      }
+      if (rowAction.action === 'recheck_safe_batch' && onGenerateRepairAuditSummary) {
+        setRecoveryEvidenceActionFeedbackByKey(prev => ({ ...prev, [feedbackKey]: actionFeedback }))
+        onGenerateRepairAuditSummary(run)
+      }
+      return
+    }
+    setFocusedTaskSource('')
+    if (rowAction.action === 'review_governance_closure' && onGenerateRepairAuditSummary) {
+      setRecoveryEvidenceActionFeedbackByKey(prev => ({ ...prev, [feedbackKey]: actionFeedback }))
+      onGenerateRepairAuditSummary(run)
+      return
+    }
+    if (rowAction.action === 'execute_typed_repair' && onExecuteTypedRepairTask) {
+      setFocusedTaskIndex(taskIndex)
+      setRecoveryEvidenceActionFeedbackByKey(prev => ({ ...prev, [feedbackKey]: actionFeedback }))
+      onExecuteTypedRepairTask(task, run, taskIndex)
+    }
+  }
   const title = run.run_type === 'first30_retention_repair'
     ? '前30章留存修复任务'
     : run.run_type === 'longform_production_repair'
@@ -1111,7 +1333,12 @@ function RepairTaskRunSummary({
                       <Text type="secondary" style={{ fontSize: 12 }}>验收：{task.acceptance_criteria.slice(0, 2).join('；')}</Text>
                     )}
                     <BatchPlanReviewPreview task={task} />
-                    <RecoveryEvidenceReviewPreview task={task} />
+                    <RecoveryEvidenceReviewPreview
+                      task={task}
+                      taskIndex={taskIndex}
+                      actionFeedbackByKey={recoveryEvidenceActionFeedbackByKey}
+                      onRecoveryEvidenceReviewRowAction={(row, rowAction) => handleRecoveryEvidenceReviewRowAction(task, taskIndex, row, rowAction)}
+                    />
                     <DeliveryRiskReviewPreview task={task} />
                   </Space>
                 )}

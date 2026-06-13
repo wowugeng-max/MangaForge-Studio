@@ -5864,6 +5864,20 @@ describe('buildAutoCreationDirectorModel', () => {
     const recoveryTask = model.batchReviewQueue.riskRadar.repairTasks.find((task: any) => task.issue_type === 'recovery_evidence_mismatch')
     expect(recoveryTask?.recovery_evidence_review?.failed_evidence).toContain('样章任务书复检通过 1 项')
     expect(recoveryTask?.recovery_evidence_review?.failed_evidence).toContain('第42章样章已重审')
+    expect(recoveryTask?.recovery_evidence_review?.failed_items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        evidence: '样章任务书复检通过 1 项',
+        source: 'recovery_evidence',
+        source_label: '恢复放行依据',
+        source_action_label: '按批次修订',
+      }),
+      expect.objectContaining({
+        evidence: '第42章样章已重审',
+        source: 'recovery_evidence',
+        source_label: '恢复放行依据',
+        source_action_label: '按批次修订',
+      }),
+    ]))
     expect(model.batchReviewQueue.handoff.riskLabels).toContain('恢复依据')
   })
 
@@ -5970,6 +5984,22 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(recoverySignal?.detail).toContain('下一批继续观察样章策略命中率')
     expect(recoveryTask?.recovery_evidence_review?.failed_evidence).toContain('第42章对白交锋已补回样章节奏')
     expect(recoveryTask?.recovery_evidence_review?.failed_evidence).toContain('下一批继续观察样章策略命中率')
+    expect(recoveryTask?.recovery_evidence_review?.failed_items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        evidence: '第42章对白交锋已补回样章节奏',
+        source: 'governance_recheck_memory',
+        source_label: '治理复查记忆',
+        source_detail: '治理复查记忆 · 修后证据',
+        source_action_label: '治理复查台',
+      }),
+      expect.objectContaining({
+        evidence: '下一批继续观察样章策略命中率',
+        source: 'governance_recheck_memory',
+        source_label: '治理复查记忆',
+        source_detail: '治理复查记忆 · 观察项',
+        source_action_label: '治理复查台',
+      }),
+    ]))
     expect(model.batchReviewQueue.handoff.riskLabels).toContain('恢复依据')
   })
 
@@ -6088,6 +6118,22 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(recoverySignal?.detail).toContain('批次恢复复查：生产阻断已解除')
     expect(recoveryTask?.recovery_evidence_review?.failed_evidence).toContain('单章治理复查：生产阻断已解除')
     expect(recoveryTask?.recovery_evidence_review?.failed_evidence).toContain('批次恢复复查：生产阻断已解除')
+    expect(recoveryTask?.recovery_evidence_review?.failed_items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        evidence: '单章治理复查：生产阻断已解除',
+        source: 'recovery_evidence_production_gate',
+        source_label: '入口生产闸门',
+        source_detail: '单章治理复查 · 生产阻断已解除',
+        source_action_label: '复检单章',
+      }),
+      expect.objectContaining({
+        evidence: '批次恢复复查：生产阻断已解除',
+        source: 'recovery_evidence_production_gate',
+        source_label: '入口生产闸门',
+        source_detail: '批次恢复复查 · 生产阻断已解除',
+        source_action_label: '复盘批次',
+      }),
+    ]))
     expect(model.batchReviewQueue.handoff.riskLabels).toContain('恢复依据')
   })
 
