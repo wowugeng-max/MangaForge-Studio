@@ -4109,6 +4109,142 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(feedback.summary).toContain('第50、51、52章')
   })
 
+  test('keeps the first restored five-chapter pass as an observation batch before defaulting', () => {
+    const validationChapterNos = [50, 51, 52]
+    const restoreChapterNos = [53, 54, 55, 56, 57]
+    const model = buildAutoCreationDirectorModel({
+      planning: readySafeBatchPlanning({ futureRoute: futureRouteRange(58, 5) }),
+      writing: readySafeBatchWriting({
+        nextChapter: { ...baseWriting.nextChapter, id: 58, chapterNo: 58, title: '恢复观察后58' },
+        previousChapter: { chapterNo: 57, title: '恢复观察57', wordCount: 3180, hasProse: true },
+      }),
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: { last_updated_chapter: 57 },
+      chapters: [...[41, 42, 43, 44, 45, 46, 47, 48, 49], ...validationChapterNos, ...restoreChapterNos].map(chapterNo => ({
+        id: chapterNo,
+        chapter_no: chapterNo,
+        title: `恢复观察${chapterNo}`,
+        chapter_text: '恢复观察正文'.repeat(500),
+      })),
+      reviews: [
+        ...strengthenedAcceptanceQualityReviews([41, 42, 43], 5301, '2026-06-09T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([44, 45, 46], 5311, '2026-06-10T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([47, 48, 49], 5321, '2026-06-11T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews(validationChapterNos, 5331, '2026-06-14T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews(restoreChapterNos, 5341, '2026-06-15T01:00:00.000Z'),
+      ],
+      runRecords: [
+        strengthenedAcceptanceBatchRun({ id: 640, createdAt: '2026-06-09T00:00:00.000Z', chapterNos: [41, 42, 43] }),
+        strengthenedAcceptanceBatchRun({ id: 641, createdAt: '2026-06-10T00:00:00.000Z', chapterNos: [44, 45, 46] }),
+        strengthenedAcceptanceBatchRun({ id: 642, createdAt: '2026-06-11T00:00:00.000Z', chapterNos: [47, 48, 49] }),
+        expansionStructureValidationBatchRun({
+          id: 643,
+          createdAt: '2026-06-14T00:00:00.000Z',
+          chapterNos: validationChapterNos,
+          source: 'safe_batch_recovery_validation_batch',
+        }),
+        restoredFiveChapterBatchRun({
+          id: 644,
+          createdAt: '2026-06-15T00:00:00.000Z',
+          chapterNos: restoreChapterNos,
+          validationChapterNos,
+        }),
+      ],
+    } as any)
+
+    expect(model.batchGuardrail.safeChapterCount).toBe(5)
+    expect(model.batchGuardrail.recommendedAction.label).toBe('继续5章观察批')
+    expect(model.batchGuardrail.recommendedAction.payload).toMatchObject({
+      source: 'safe_batch_recovery_restore_five_batch',
+      safety_limit: 5,
+      recovery_restore_stability_evidence: {
+        status: 'observing',
+        stable_pass_streak: 1,
+        default_five_chapter_ready: false,
+      },
+    })
+    expect(model.productionLicense.modeLabel).toBe('5章观察批')
+    expect(model.productionLicense.summary).toContain('继续观察')
+  })
+
+  test('uses restored stability evidence to default back to five chapters after two stable passes', () => {
+    const validationChapterNos = [50, 51, 52]
+    const firstRestoreChapterNos = [53, 54, 55, 56, 57]
+    const secondRestoreChapterNos = [58, 59, 60, 61, 62]
+    const model = buildAutoCreationDirectorModel({
+      planning: readySafeBatchPlanning({ futureRoute: futureRouteRange(63, 5) }),
+      writing: readySafeBatchWriting({
+        nextChapter: { ...baseWriting.nextChapter, id: 63, chapterNo: 63, title: '默认档后63' },
+        previousChapter: { chapterNo: 62, title: '默认档62', wordCount: 3180, hasProse: true },
+      }),
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: { last_updated_chapter: 62 },
+      chapters: [...[41, 42, 43, 44, 45, 46, 47, 48, 49], ...validationChapterNos, ...firstRestoreChapterNos, ...secondRestoreChapterNos].map(chapterNo => ({
+        id: chapterNo,
+        chapter_no: chapterNo,
+        title: `默认档${chapterNo}`,
+        chapter_text: '默认档正文'.repeat(500),
+      })),
+      reviews: [
+        ...strengthenedAcceptanceQualityReviews([41, 42, 43], 5351, '2026-06-09T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([44, 45, 46], 5361, '2026-06-10T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([47, 48, 49], 5371, '2026-06-11T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews(validationChapterNos, 5381, '2026-06-14T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews(firstRestoreChapterNos, 5391, '2026-06-15T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews(secondRestoreChapterNos, 5401, '2026-06-16T01:00:00.000Z'),
+      ],
+      runRecords: [
+        strengthenedAcceptanceBatchRun({ id: 645, createdAt: '2026-06-09T00:00:00.000Z', chapterNos: [41, 42, 43] }),
+        strengthenedAcceptanceBatchRun({ id: 646, createdAt: '2026-06-10T00:00:00.000Z', chapterNos: [44, 45, 46] }),
+        strengthenedAcceptanceBatchRun({ id: 647, createdAt: '2026-06-11T00:00:00.000Z', chapterNos: [47, 48, 49] }),
+        expansionStructureValidationBatchRun({
+          id: 648,
+          createdAt: '2026-06-14T00:00:00.000Z',
+          chapterNos: validationChapterNos,
+          source: 'safe_batch_recovery_validation_batch',
+        }),
+        restoredFiveChapterBatchRun({
+          id: 649,
+          createdAt: '2026-06-15T00:00:00.000Z',
+          chapterNos: firstRestoreChapterNos,
+          validationChapterNos,
+        }),
+        restoredFiveChapterBatchRun({
+          id: 650,
+          createdAt: '2026-06-16T00:00:00.000Z',
+          chapterNos: secondRestoreChapterNos,
+          validationChapterNos,
+        }),
+      ],
+    } as any)
+
+    const feedback = model.batchGuardrail.preflight.inputSnapshot.safe_batch_expansion_policy.expansion_feedback
+
+    expect(feedback.recovery_restore_stability_evidence).toMatchObject({
+      status: 'passed',
+      stable_pass_streak: 2,
+      restore_chapter_nos: secondRestoreChapterNos,
+      validation_chapter_nos: validationChapterNos,
+    })
+    expect(model.batchGuardrail.safeChapterCount).toBe(5)
+    expect(model.batchGuardrail.recommendedAction.label).toBe('启动默认5章档位')
+    expect(model.batchGuardrail.recommendedAction.payload).toMatchObject({
+      source: 'auto_creation_safe_batch',
+      safety_limit: 5,
+      default_five_chapter_lane: {
+        status: 'ready',
+        stable_pass_streak: 2,
+        default_five_chapter_ready: true,
+      },
+    })
+    expect(model.productionLicense.modeLabel).toBe('默认5章档位')
+    expect(model.productionLicense.reasons).toEqual(expect.arrayContaining([
+      expect.stringContaining('恢复5章扩批连续 2 批稳定'),
+    ]))
+  })
+
   test('routes restored five-chapter same-segment relapse back to structure repair', () => {
     const validationChapterNos = [50, 51, 52]
     const restoreChapterNos = [53, 54, 55, 56, 57]
