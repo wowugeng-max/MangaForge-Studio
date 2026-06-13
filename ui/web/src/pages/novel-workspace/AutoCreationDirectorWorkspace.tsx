@@ -225,6 +225,7 @@ export function AutoCreationDirectorWorkspace({
   const serialCockpit = model.serialCockpit
   const batchPreflight = model.batchGuardrail.preflight
   const longformMemoryAnchor = batchPreflight.longformMemoryAnchor || null
+  const governanceRecheckMemory = batchPreflight.governanceRecheckMemory || null
   const longformCharacterStates = Array.isArray(longformMemoryAnchor?.character_states) ? longformMemoryAnchor.character_states : []
   const longformOpenQuestions = Array.isArray(longformMemoryAnchor?.open_questions) ? longformMemoryAnchor.open_questions : []
   const longformPayoffDebts = Array.isArray(longformMemoryAnchor?.payoff_debts) ? longformMemoryAnchor.payoff_debts : []
@@ -300,6 +301,21 @@ export function AutoCreationDirectorWorkspace({
             {serialCockpit.command.reasons.length > 0 && (
               <div className="auto-director-command-reasons">
                 {serialCockpit.command.reasons.slice(0, 3).map(reason => <Text key={reason} type="secondary">{reason}</Text>)}
+              </div>
+            )}
+            {serialCockpit.command.governanceMemory.visible && (
+              <div className={`auto-director-command-memory auto-director-command-memory-${serialCockpit.command.governanceMemory.status}`}>
+                <Space wrap size={[6, 4]}>
+                  <Tag color={serialCockpit.command.governanceMemory.status === 'closed' ? 'green' : 'gold'} bordered={false}>治理复查记忆</Tag>
+                  <Tag bordered={false}>{serialCockpit.command.governanceMemory.label}</Tag>
+                </Space>
+                <Text type="secondary">{serialCockpit.command.governanceMemory.summary}</Text>
+                {(serialCockpit.command.governanceMemory.evidence.length > 0 || serialCockpit.command.governanceMemory.watchItems.length > 0) && (
+                  <div className="auto-director-command-memory-lines">
+                    {serialCockpit.command.governanceMemory.evidence.slice(0, 2).map(item => <Text key={`evidence-${item}`} type="secondary">{item}</Text>)}
+                    {serialCockpit.command.governanceMemory.watchItems.slice(0, 2).map(item => <Text key={`watch-${item}`} type="secondary">{item}</Text>)}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -1097,6 +1113,19 @@ export function AutoCreationDirectorWorkspace({
                   {longformMemoryAnchor.current_volume_goal && <Tag bordered={false}>卷目标：{longformMemoryAnchor.current_volume_goal}</Tag>}
                   {longformOpenQuestions.slice(0, 2).map((item: any) => <Tag key={`question-${item}`} bordered={false}>悬念：{item}</Tag>)}
                   {longformPayoffDebts.slice(0, 2).map((item: any) => <Tag key={`payoff-${item}`} bordered={false}>待兑现：{item}</Tag>)}
+                </div>
+              </div>
+            )}
+            {governanceRecheckMemory && (
+              <div className={`auto-director-batch-governance-memory auto-director-batch-governance-memory-${governanceRecheckMemory.status}`}>
+                <div className="auto-director-batch-memory-anchor-head">
+                  <Text strong>治理复查记忆</Text>
+                  <Tag color={governanceRecheckMemory.status === 'closed' ? 'green' : 'gold'} bordered={false}>{governanceRecheckMemory.label}</Tag>
+                </div>
+                <Text type="secondary">{governanceRecheckMemory.summary}</Text>
+                <div className="auto-director-batch-memory-chips">
+                  {(governanceRecheckMemory.evidence || []).slice(0, 2).map((item: any) => <Tag key={`governance-evidence-${item}`} bordered={false}>已补：{item}</Tag>)}
+                  {(governanceRecheckMemory.watch_items || []).slice(0, 2).map((item: any) => <Tag key={`governance-watch-${item}`} bordered={false}>观察：{item}</Tag>)}
                 </div>
               </div>
             )}

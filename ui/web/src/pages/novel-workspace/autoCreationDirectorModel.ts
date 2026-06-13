@@ -17,6 +17,7 @@ export type AutoCreationDirectorActionKey =
   | WritingCockpitActionKey
   | 'open_task_center'
   | 'open_story_assets'
+  | 'review_governance_closure'
   | 'start_safe_batch_generation'
   | 'create_safe_batch_risk_repair'
   | 'create_style_sample_batch_repair'
@@ -178,6 +179,7 @@ export interface AutoCreationBatchPreflight {
   modelPipeline: string[]
   warnings: string[]
   longformMemoryAnchor?: AnyRecord | null
+  governanceRecheckMemory?: AnyRecord | null
   chapterHandoffContract?: AnyRecord | null
   inputSnapshot: AnyRecord
 }
@@ -521,6 +523,21 @@ export interface AutoCreationTodayQualityGate {
   detail: string
 }
 
+export type AutoCreationGovernanceRecheckMemoryStatus = 'empty' | 'closed' | 'needs_followup'
+
+export interface AutoCreationGovernanceRecheckMemory {
+  visible: boolean
+  status: AutoCreationGovernanceRecheckMemoryStatus
+  label: string
+  summary: string
+  evidence: string[]
+  failedEvidence: string[]
+  watchItems: string[]
+  storylineDecisionTaskCount: number
+  sourceRunId: any
+  action: AutoCreationDirectorAction
+}
+
 export interface AutoCreationReleaseRationale {
   mode: string
   allowedCount: number
@@ -539,6 +556,7 @@ export interface AutoCreationTodayCommandDeck {
   action: AutoCreationDirectorAction
   actionLabel: string
   releaseRationale: AutoCreationReleaseRationale
+  governanceMemory: AutoCreationGovernanceRecheckMemory
   qualityGates: AutoCreationTodayQualityGate[]
   flow: AutoCreationTodayCommandFlowItem[]
 }
@@ -761,6 +779,7 @@ const MODEL_CALL_ACTIONS = new Set<string>([
   'apply_editor_revision',
   'repair_materials',
   'refresh_context_package',
+  'review_governance_closure',
   'start_safe_batch_generation',
 ])
 
@@ -810,7 +829,7 @@ function writingAction(key: WritingCockpitActionKey, description: string, label?
 }
 
 function opsAction(
-  key: 'open_task_center' | 'select_model' | 'start_safe_batch_generation' | 'create_safe_batch_risk_repair' | 'create_style_sample_batch_repair' | 'create_delivery_risk_repair' | 'create_script_room_repair',
+  key: 'open_task_center' | 'select_model' | 'review_governance_closure' | 'start_safe_batch_generation' | 'create_safe_batch_risk_repair' | 'create_style_sample_batch_repair' | 'create_delivery_risk_repair' | 'create_script_room_repair',
   label: string,
   description: string,
   disabled = false,
@@ -1891,13 +1910,13 @@ function buildStorylineDecisionGate(runRecords: AnyRecord[]): AutoCreationStoryl
   }
 }
 
-function latestRepairAuditSummary(runRecords: AnyRecord[]) {
+function latestRepairAuditEntry(runRecords: AnyRecord[]) {
   return runRecords
     .filter(run => text(run?.run_type) === 'longform_production_repair')
     .map(run => ({ run, output: parsePayload(run?.output_ref) || {} }))
     .sort((a, b) => recordTime(b.run) - recordTime(a.run))
-    .map(item => item.output?.audit_summary || item.output?.auditSummary)
-    .find(Boolean) || null
+    .map(item => ({ run: item.run, audit: item.output?.audit_summary || item.output?.auditSummary }))
+    .find(item => item.audit) || null
 }
 
 function compactUniqueText(values: any[], limit = 120) {
@@ -1908,7 +1927,8 @@ function buildGovernanceClosureBrief(args: {
   runRecords: AnyRecord[]
   storylineDecisionGate: AutoCreationStorylineDecisionGate
 }): AutoCreationGovernanceClosureBrief {
-  const audit = latestRepairAuditSummary(args.runRecords)
+  const auditEntry = latestRepairAuditEntry(args.runRecords)
+  const audit = auditEntry?.audit || null
   const recoveryClosure = audit?.recovery_evidence_closure || audit?.recoveryEvidenceClosure || null
   const failedEvidence = recoveryClosure && recoveryClosure.status !== 'closed' && Number(recoveryClosure.total || 0) > 0
     ? compactUniqueText([
@@ -1951,7 +1971,97 @@ function buildGovernanceClosureBrief(args: {
     count: issueLabels.length,
     failedEvidence,
     watchItems,
-    action: opsAction('open_task_center', '打开任务中心', '先处理恢复依据审计或剧情线决策任务，再继续扩大安全连写。'),
+    action: opsAction('review_governance_closure', '治理复查台', '生成最新恢复依据审计，并打开任务中心定位剧情线决策复检。', false, {
+      repairAuditRunId: auditEntry?.run?.id || null,
+      recoveryEvidenceStatus: text(recoveryClosure?.status),
+      recoveryEvidenceResolved: Number(recoveryClosure?.resolved || 0),
+      recoveryEvidenceTotal: Number(recoveryClosure?.total || 0),
+      failedEvidence,
+      watchItems: recoveryWatchItems,
+      storylineDecisionTaskCount: args.storylineDecisionGate.openCount,
+      storylineDecisionTaskTitles: args.storylineDecisionGate.taskTitles.slice(0, 6),
+    }),
+  }
+}
+
+function buildGovernanceRecheckMemory(args: {
+  runRecords: AnyRecord[]
+  storylineDecisionGate: AutoCreationStorylineDecisionGate
+}): AutoCreationGovernanceRecheckMemory {
+  const auditEntry = latestRepairAuditEntry(args.runRecords)
+  const audit = auditEntry?.audit || null
+  const recoveryClosure = audit?.recovery_evidence_closure || audit?.recoveryEvidenceClosure || null
+  const total = Number(recoveryClosure?.total || 0)
+  const resolved = Number(recoveryClosure?.resolved || 0)
+  const repairedEvidence = compactUniqueText([
+    ...arrayValue(recoveryClosure?.repaired_evidence),
+    ...arrayValue(recoveryClosure?.repairedEvidence),
+  ], 120).slice(0, 5)
+  const failedEvidence = compactUniqueText([
+    ...arrayValue(recoveryClosure?.failed_evidence),
+    ...arrayValue(recoveryClosure?.failedEvidence),
+  ], 120).slice(0, 5)
+  const watchItems = compactUniqueText([
+    ...arrayValue(recoveryClosure?.watch_items),
+    ...arrayValue(recoveryClosure?.watchItems),
+    ...args.storylineDecisionGate.taskTitles,
+  ], 120).slice(0, 6)
+  const closed = Boolean(recoveryClosure && text(recoveryClosure.status) === 'closed' && total > 0 && args.storylineDecisionGate.openCount === 0)
+  const needsFollowup = Boolean((recoveryClosure && text(recoveryClosure.status) !== 'closed' && total > 0) || args.storylineDecisionGate.openCount > 0)
+
+  if (!closed && !needsFollowup) {
+    return {
+      visible: false,
+      status: 'empty',
+      label: '治理复查',
+      summary: '还没有可沉淀的治理复查记录。',
+      evidence: [],
+      failedEvidence: [],
+      watchItems: [],
+      storylineDecisionTaskCount: 0,
+      sourceRunId: null,
+      action: opsAction('open_task_center', '打开任务中心', '查看长线治理闭环记录。'),
+    }
+  }
+
+  if (closed) {
+    return {
+      visible: true,
+      status: 'closed',
+      label: '治理复查已记录',
+      summary: `恢复依据闭环 ${resolved}/${total}，剧情线决策无未关闭项；今日生产可沿用上一轮复查证据。`,
+      evidence: repairedEvidence,
+      failedEvidence,
+      watchItems,
+      storylineDecisionTaskCount: 0,
+      sourceRunId: auditEntry?.run?.id || null,
+      action: opsAction('open_task_center', '查看治理记录', '打开任务中心查看恢复依据审计和复查证据。'),
+    }
+  }
+
+  return {
+    visible: true,
+    status: 'needs_followup',
+    label: '治理复查待处理',
+    summary: [
+      total > 0 ? `恢复依据审计 ${resolved}/${total}` : '',
+      args.storylineDecisionGate.openCount > 0 ? `剧情线决策 ${args.storylineDecisionGate.openCount}` : '',
+    ].filter(Boolean).join('；') || '仍有治理闭环任务需要复查。',
+    evidence: repairedEvidence,
+    failedEvidence,
+    watchItems,
+    storylineDecisionTaskCount: args.storylineDecisionGate.openCount,
+    sourceRunId: auditEntry?.run?.id || null,
+    action: opsAction('review_governance_closure', '治理复查台', '刷新恢复依据审计，并打开任务中心定位剧情线决策复检。', false, {
+      repairAuditRunId: auditEntry?.run?.id || null,
+      recoveryEvidenceStatus: text(recoveryClosure?.status),
+      recoveryEvidenceResolved: resolved,
+      recoveryEvidenceTotal: total,
+      failedEvidence,
+      watchItems,
+      storylineDecisionTaskCount: args.storylineDecisionGate.openCount,
+      storylineDecisionTaskTitles: args.storylineDecisionGate.taskTitles.slice(0, 6),
+    }),
   }
 }
 
@@ -5469,6 +5579,7 @@ function buildBatchPreflight(args: {
   nextBatchBrief: AutoCreationNextBatchBrief
   guardrails: AutoCreationBatchGuardrailSignal[]
   storyState?: AnyRecord | null
+  governanceRecheckMemory?: AutoCreationGovernanceRecheckMemory | null
   deliveryRiskCarryOver?: AnyRecord | null
   chapterHandoffContract?: AnyRecord | null
   storylineDecisionGate: AutoCreationStorylineDecisionGate
@@ -5497,6 +5608,18 @@ function buildBatchPreflight(args: {
     summary: args.storylineDecisionGate.summary,
     tasks: args.storylineDecisionGate.taskTitles,
   }
+  const governanceRecheckMemory = args.governanceRecheckMemory?.visible
+    ? {
+      source_run_id: args.governanceRecheckMemory.sourceRunId || null,
+      status: args.governanceRecheckMemory.status,
+      label: args.governanceRecheckMemory.label,
+      summary: args.governanceRecheckMemory.summary,
+      evidence: args.governanceRecheckMemory.evidence,
+      failed_evidence: args.governanceRecheckMemory.failedEvidence,
+      watch_items: args.governanceRecheckMemory.watchItems,
+      storyline_decision_task_count: args.governanceRecheckMemory.storylineDecisionTaskCount,
+    }
+    : null
 
   return {
     visible,
@@ -5508,6 +5631,7 @@ function buildBatchPreflight(args: {
     modelPipeline: SAFE_BATCH_MODEL_PIPELINE,
     warnings,
     longformMemoryAnchor,
+    governanceRecheckMemory,
     chapterHandoffContract: args.chapterHandoffContract || null,
     inputSnapshot: {
       source: 'auto_creation_safe_batch_preflight',
@@ -5523,6 +5647,7 @@ function buildBatchPreflight(args: {
       warnings,
       ...(arrayValue(args.recoveryEvidence).length ? { recovery_evidence: arrayValue(args.recoveryEvidence) } : {}),
       storyline_decision_closure: storylineDecisionClosure,
+      ...(governanceRecheckMemory ? { governance_recheck_memory: governanceRecheckMemory } : {}),
       ...(args.styleSampleBatchPreflight?.visible ? { style_sample_batch_preflight: args.styleSampleBatchPreflight } : {}),
       ...(args.deliveryRiskCarryOver ? { delivery_risk_carry_over: args.deliveryRiskCarryOver } : {}),
       ...(args.chapterHandoffContract ? { chapter_handoff_contract: args.chapterHandoffContract } : {}),
@@ -5540,6 +5665,7 @@ function buildBatchGuardrail(args: {
   mainAction: AutoCreationDirectorAction
   longformCapacity: AutoCreationLongformCapacity
   deliveryRiskGate: AutoCreationDeliveryRiskGate
+  governanceRecheckMemory: AutoCreationGovernanceRecheckMemory
   storylineDecisionGate: AutoCreationStorylineDecisionGate
   chapterLaunchGate: AutoCreationChapterLaunchGate
   storyState?: AnyRecord | null
@@ -5834,6 +5960,7 @@ function buildBatchGuardrail(args: {
     nextBatchBrief,
     guardrails,
     storyState: args.storyState || {},
+    governanceRecheckMemory: args.governanceRecheckMemory,
     deliveryRiskCarryOver,
     chapterHandoffContract,
     storylineDecisionGate: args.storylineDecisionGate,
@@ -6605,6 +6732,7 @@ function buildTodayCommandDeck(args: {
   creationContract: AutoCreationContractItem[]
   chapterLaunchGate: AutoCreationChapterLaunchGate
   deliveryRiskGate: AutoCreationDeliveryRiskGate
+  governanceRecheckMemory: AutoCreationGovernanceRecheckMemory
   storylineDecisionGate: AutoCreationStorylineDecisionGate
   batchGuardrail: AutoCreationBatchGuardrail
   millionWordRunway: AutoCreationMillionWordRunway
@@ -6627,6 +6755,7 @@ function buildTodayCommandDeck(args: {
     action: args.productionLicense.nextAction,
     actionLabel: args.productionLicense.nextAction.label,
     releaseRationale: buildReleaseRationale(args),
+    governanceMemory: args.governanceRecheckMemory,
     qualityGates: buildTodayQualityGates(args),
     flow: args.dailyBattlePlan.steps.map(step => ({
       key: step.key,
@@ -7619,6 +7748,7 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
   })
   const storylineDecisionGate = buildStorylineDecisionGate(runRecords)
   const governanceClosureBrief = buildGovernanceClosureBrief({ runRecords, storylineDecisionGate })
+  const governanceRecheckMemory = buildGovernanceRecheckMemory({ runRecords, storylineDecisionGate })
   let batchReviewQueue = buildBatchReviewQueue({
     runRecords,
     chapters: arrayValue(input.chapters),
@@ -7760,6 +7890,7 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
     mainAction,
     longformCapacity,
     deliveryRiskGate,
+    governanceRecheckMemory,
     storylineDecisionGate,
     chapterLaunchGate,
     storyState: input.storyState || {},
@@ -7816,6 +7947,7 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
     creationContract,
     chapterLaunchGate,
     deliveryRiskGate,
+    governanceRecheckMemory,
     storylineDecisionGate,
     batchGuardrail,
     millionWordRunway,

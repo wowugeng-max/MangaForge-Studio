@@ -5291,6 +5291,20 @@ export default function NovelProjectWorkspace() {
       return
     }
 
+    if (action.key === 'review_governance_closure') {
+      setTaskCenterOpen(true)
+      const repairRunId = Number(action.payload?.repairAuditRunId || 0)
+      const repairRun = repairRunId ? runRecords.find(run => Number(run.id) === repairRunId) : null
+      if (repairRun) {
+        void Promise.resolve(generateLongformRepairAuditSummary(repairRun))
+          .finally(() => setAutoDirectorActionLoadingKey(''))
+      } else {
+        message.info('已打开任务中心，请逐项处理治理闭环任务。')
+        setAutoDirectorActionLoadingKey('')
+      }
+      return
+    }
+
     if (action.key === 'open_task_center') {
       setTaskCenterOpen(true)
       return

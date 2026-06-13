@@ -991,7 +991,14 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(model.governanceClosureBrief.status).toBe('block')
     expect(model.governanceClosureBrief.summary).toContain('恢复依据审计')
     expect(model.governanceClosureBrief.summary).toContain('剧情线决策')
-    expect(model.governanceClosureBrief.action.key).toBe('open_task_center')
+    expect(model.governanceClosureBrief.action.key).toBe('review_governance_closure')
+    expect(model.governanceClosureBrief.action.label).toBe('治理复查台')
+    expect(model.governanceClosureBrief.action.payload).toEqual(expect.objectContaining({
+      repairAuditRunId: 91,
+      recoveryEvidenceStatus: 'needs_followup',
+      storylineDecisionTaskCount: 1,
+      storylineDecisionTaskTitles: ['第45章剧情线回修'],
+    }))
     expect(model.serialCockpit.riskQueue[0]).toEqual(expect.objectContaining({
       key: 'governance_closure',
       label: '治理闭环',
@@ -999,6 +1006,43 @@ describe('buildAutoCreationDirectorModel', () => {
     }))
     expect(model.serialCockpit.riskQueue[0].detail).toContain('样章任务书复检通过 1 项')
     expect(model.productionLicense.reasons.join('')).toContain('恢复依据审计')
+  })
+
+  test('records closed governance recheck memory in today command deck', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: basePlanning,
+      writing: baseWriting,
+      activeTasks: [],
+      selectedModelId: 12,
+      runRecords: [
+        {
+          id: 93,
+          run_type: 'longform_production_repair',
+          created_at: '2026-06-13T22:00:00Z',
+          output_ref: JSON.stringify({
+            audit_summary: {
+              status: 'closed',
+              recovery_evidence_closure: {
+                status: 'closed',
+                total: 2,
+                resolved: 2,
+                failed_evidence: ['样章任务书复检通过 1 项'],
+                repaired_evidence: ['第42章对白交锋已补回样章节奏', '章末读者回报已兑现'],
+                watch_items: ['下一批继续观察样章策略命中率'],
+              },
+            },
+          }),
+        },
+      ],
+    })
+
+    expect(model.governanceClosureBrief.status).toBe('ok')
+    expect(model.todayCommandDeck.governanceMemory.visible).toBe(true)
+    expect(model.todayCommandDeck.governanceMemory.status).toBe('closed')
+    expect(model.todayCommandDeck.governanceMemory.label).toBe('治理复查已记录')
+    expect(model.todayCommandDeck.governanceMemory.summary).toContain('恢复依据闭环 2/2')
+    expect(model.todayCommandDeck.governanceMemory.evidence).toContain('第42章对白交锋已补回样章节奏')
+    expect(model.todayCommandDeck.governanceMemory.watchItems).toContain('下一批继续观察样章策略命中率')
   })
 
   test('serial cockpit degrades gracefully when chapter material is missing', () => {
@@ -1619,6 +1663,25 @@ describe('buildAutoCreationDirectorModel', () => {
       },
       activeTasks: [],
       selectedModelId: 12,
+      runRecords: [
+        {
+          id: 94,
+          run_type: 'longform_production_repair',
+          created_at: '2026-06-14T08:00:00Z',
+          output_ref: JSON.stringify({
+            audit_summary: {
+              status: 'closed',
+              recovery_evidence_closure: {
+                status: 'closed',
+                total: 2,
+                resolved: 2,
+                repaired_evidence: ['第42章对白交锋已补回样章节奏', '章末读者回报已兑现'],
+                watch_items: ['下一批继续观察样章策略命中率'],
+              },
+            },
+          }),
+        },
+      ],
       storyState: {
         last_updated_chapter: 7,
         global: {
@@ -1699,6 +1762,16 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(model.batchGuardrail.preflight.inputSnapshot.longform_memory_anchor.character_states.join('｜')).toContain('李超')
     expect(model.batchGuardrail.preflight.inputSnapshot.longform_memory_anchor.open_questions).toContain('广播是谁发出的')
     expect(model.batchGuardrail.preflight.inputSnapshot.longform_memory_anchor.payoff_debts).toContain('规则边界反制蛮力')
+    expect(model.batchGuardrail.preflight.inputSnapshot.governance_recheck_memory).toMatchObject({
+      status: 'closed',
+      summary: expect.stringContaining('恢复依据闭环 2/2'),
+      evidence: expect.arrayContaining(['第42章对白交锋已补回样章节奏']),
+      watch_items: expect.arrayContaining(['下一批继续观察样章策略命中率']),
+    })
+    expect(model.batchGuardrail.recommendedAction.payload?.batch_preflight?.governance_recheck_memory).toMatchObject({
+      source_run_id: 94,
+      status: 'closed',
+    })
     expect(model.batchGuardrail.briefRepair.visible).toBe(false)
     expect(model.batchGuardrail.briefRecovery.visible).toBe(true)
     expect(model.batchGuardrail.briefRecovery.title).toBe('已恢复多章安全连写')
@@ -1983,7 +2056,8 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(model.batchGuardrail.status).toBe('ready')
     expect(model.productionLicense.status).toBe('blocked')
     expect(model.productionLicense.summary).toContain('剧情线决策')
-    expect(model.productionLicense.nextAction.key).toBe('open_task_center')
+    expect(model.productionLicense.nextAction.key).toBe('review_governance_closure')
+    expect(model.productionLicense.nextAction.payload?.storylineDecisionTaskCount).toBe(1)
     expect(model.todayCommandDeck.releaseRationale.limits).toContain('剧情线决策未闭环')
     expect(model.todayCommandDeck.qualityGates.find(item => item.key === 'serial_safety')?.detail).toContain('剧情线决策')
   })

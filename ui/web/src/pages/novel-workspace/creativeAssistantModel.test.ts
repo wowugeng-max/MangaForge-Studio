@@ -119,6 +119,45 @@ describe('creativeAssistantModel', () => {
     expect(cards[0].action).toBe('open_task_center')
   })
 
+  test('carries closed governance recheck memory into creative assistant context', () => {
+    const runRecords = [
+      {
+        run_type: 'longform_production_repair',
+        created_at: '2026-06-13T22:00:00Z',
+        output_ref: JSON.stringify({
+          audit_summary: {
+            status: 'closed',
+            recovery_evidence_closure: {
+              status: 'closed',
+              total: 2,
+              resolved: 2,
+              repaired_evidence: ['第42章对白交锋已补回样章节奏', '章末读者回报已兑现'],
+              watch_items: ['下一批继续观察样章策略命中率'],
+            },
+          },
+        }),
+      },
+    ]
+
+    const chips = buildCreativeAssistantContextChips({
+      project: { reference_config: { writing_bible: { promise: '主线不偏' } } },
+      runRecords,
+    })
+    const cards = buildCreativeAssistantFallbackCards('next_chapter', {
+      project: { title: '万古长夜', reference_config: { writing_bible: { promise: '主线不偏' } } },
+      runRecords,
+    })
+
+    expect(chips).toContainEqual(expect.objectContaining({
+      key: 'longform_governance_memory',
+      label: '治理复查已记录',
+      tone: 'ready',
+    }))
+    expect(cards[0].title).toContain('沿用治理复查结果')
+    expect(cards[0].suggestion).toContain('第42章对白交锋已补回样章节奏')
+    expect(cards[0].suggestion).toContain('下一批继续观察样章策略命中率')
+  })
+
   test('normalizes backend cards with stable ids', () => {
     const normalized = normalizeCreativeAssistPayload({
       mode: 'prose_review',

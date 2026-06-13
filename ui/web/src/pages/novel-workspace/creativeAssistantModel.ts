@@ -41,10 +41,12 @@ export type CreativeAssistantContextChip = {
 }
 
 type LongformGovernanceClosurePrompt = {
-  status: 'ok' | 'needs_followup'
+  status: 'ok' | 'needs_followup' | 'closed'
   issues: string[]
   failedEvidence: string[]
+  repairedEvidence: string[]
   watchItems: string[]
+  summary: string
 }
 
 export const CREATIVE_ASSISTANT_MODES: CreativeAssistantMode[] = [
@@ -105,17 +107,21 @@ function isStorylineDecisionTask(task: any, output: any) {
 export function buildLongformGovernanceClosurePrompt(runRecords: any[] = []): LongformGovernanceClosurePrompt {
   const issues: string[] = []
   const failedEvidence: string[] = []
+  const repairedEvidence: string[] = []
   const watchItems: string[] = []
   const repairRuns = asArray(runRecords)
     .filter(run => text(run?.run_type) === 'longform_production_repair')
     .map(run => ({ run, output: parsePayload(run?.output_ref) || {} }))
     .sort((a, b) => recordTime(b.run) - recordTime(a.run))
 
-  const latestAudit = repairRuns.map(item => item.output?.audit_summary).find(Boolean)
+  const latestAudit = repairRuns.map(item => item.output?.audit_summary || item.output?.auditSummary).find(Boolean)
   const recoveryClosure = latestAudit?.recovery_evidence_closure || latestAudit?.recoveryEvidenceClosure || null
   if (recoveryClosure && recoveryClosure.status !== 'closed' && Number(recoveryClosure.total || 0) > 0) {
     issues.push(`恢复依据审计 ${Number(recoveryClosure.resolved || 0)}/${Number(recoveryClosure.total || 0)}`)
     failedEvidence.push(...asArray(recoveryClosure.failed_evidence), ...asArray(recoveryClosure.failedEvidence))
+    watchItems.push(...asArray(recoveryClosure.watch_items), ...asArray(recoveryClosure.watchItems))
+  } else if (recoveryClosure && recoveryClosure.status === 'closed' && Number(recoveryClosure.total || 0) > 0) {
+    repairedEvidence.push(...asArray(recoveryClosure.repaired_evidence), ...asArray(recoveryClosure.repairedEvidence))
     watchItems.push(...asArray(recoveryClosure.watch_items), ...asArray(recoveryClosure.watchItems))
   }
 
@@ -132,11 +138,27 @@ export function buildLongformGovernanceClosurePrompt(runRecords: any[] = []): Lo
     watchItems.push(...storylineTitles)
   }
 
+  const normalizedIssues = Array.from(new Set(issues.filter(Boolean))).slice(0, 4)
+  const normalizedFailedEvidence = Array.from(new Set(failedEvidence.map(item => compact(item, 120)).filter(Boolean))).slice(0, 5)
+  const normalizedRepairedEvidence = Array.from(new Set(repairedEvidence.map(item => compact(item, 120)).filter(Boolean))).slice(0, 5)
+  const normalizedWatchItems = Array.from(new Set(watchItems.map(item => compact(item, 120)).filter(Boolean))).slice(0, 5)
+  const status = normalizedIssues.length > 0
+    ? 'needs_followup'
+    : normalizedRepairedEvidence.length > 0 || normalizedWatchItems.length > 0
+      ? 'closed'
+      : 'ok'
+
   return {
-    status: issues.length > 0 ? 'needs_followup' : 'ok',
-    issues: Array.from(new Set(issues.filter(Boolean))).slice(0, 4),
-    failedEvidence: Array.from(new Set(failedEvidence.map(item => compact(item, 120)).filter(Boolean))).slice(0, 5),
-    watchItems: Array.from(new Set(watchItems.map(item => compact(item, 120)).filter(Boolean))).slice(0, 5),
+    status,
+    issues: normalizedIssues,
+    failedEvidence: normalizedFailedEvidence,
+    repairedEvidence: normalizedRepairedEvidence,
+    watchItems: normalizedWatchItems,
+    summary: status === 'closed'
+      ? `治理复查已记录：${normalizedRepairedEvidence[0] || normalizedWatchItems[0] || '恢复依据已闭环'}`
+      : status === 'needs_followup'
+        ? `治理闭环待处理：${normalizedIssues.join('；')}`
+        : '治理闭环正常。',
   }
 }
 
@@ -209,6 +231,22 @@ export function buildCreativeAssistantFallbackCards(
       applies_to: 'longform_governance',
       action: 'open_task_center',
     })
+    : governancePrompt.status === 'closed'
+      ? card(mode, 0, {
+        id: `${mode}-governance-memory`,
+        type: 'governance_memory',
+        title: '沿用治理复查结果',
+        intent: '把上一轮恢复依据和剧情线复查结果带入今天的创作判断。',
+        reason: governancePrompt.summary,
+        suggestion: [
+          governancePrompt.repairedEvidence.length ? `已补证据：${governancePrompt.repairedEvidence.join('；')}` : '',
+          governancePrompt.watchItems.length ? `继续观察：${governancePrompt.watchItems.join('；')}` : '',
+          '今天给下一章方案时，优先继承这些闭环证据和观察项。',
+        ].filter(Boolean).join('。'),
+        risk: '不要把已闭环证据当成可随意改写的设定；它们是下一轮安全连写的生产记忆。',
+        applies_to: 'longform_governance_memory',
+        action: 'copy',
+      })
     : null
   const withGovernance = (cards: CreativeAssistCard[]) => governanceCard ? [governanceCard, ...cards] : cards
 
@@ -332,8 +370,11 @@ export function buildCreativeAssistantContextChips(input: {
     chips.push({ key: 'reviews', label: '质检', tone: 'ready' })
   }
   if (asArray(input.project?.reference_config?.references).length > 0) chips.push({ key: 'references', label: '参考', tone: 'ready' })
-  if (buildLongformGovernanceClosurePrompt(input.runRecords).status === 'needs_followup') {
+  const governancePrompt = buildLongformGovernanceClosurePrompt(input.runRecords)
+  if (governancePrompt.status === 'needs_followup') {
     chips.push({ key: 'longform_governance_closure', label: '治理闭环待处理', tone: 'warn' })
+  } else if (governancePrompt.status === 'closed') {
+    chips.push({ key: 'longform_governance_memory', label: '治理复查已记录', tone: 'ready' })
   }
   return chips
 }
