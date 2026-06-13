@@ -579,6 +579,61 @@ describe('chapter prose word target', () => {
     expect(prompt).toContain('每章章末必须留下不同的追读问题')
   })
 
+  test('injects default five-chapter rollback evidence into expansion validation prose prompt', () => {
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+
+    const prompt = service.buildParagraphProseContext(
+      { title: '超人的规则怪谈世界' },
+      {
+        next_batch_brief: {
+          chapter_range_label: '第68-70章',
+          batch_goal: '默认5章档位回退后的3章验证。',
+          expansion_structure_verification: {
+            source: 'safe_batch_expansion_structure_repair',
+            label: '扩批结构验证',
+            repeated_hotspot_segment: { key: 'middle', label: '中段', count: 1 },
+            validation_chapter_nos: [68, 69, 70],
+            fixed_segment_role: '默认档位回退：中段必须重新证明主线转折、显性回报和章末追读。',
+            conflict_rotation: '验证批每章必须更换冲突来源。',
+            explicit_payoff: '每章至少一个显性回报。',
+            ending_hook_requirement: '每章章末必须留下不同追读问题。',
+            default_five_chapter_regression: {
+              status: 'regressed',
+              label: '默认5章档位回退原因',
+              default_batch_chapter_nos: [63, 64, 65, 66, 67],
+              restore_chapter_nos: [58, 59, 60, 61, 62],
+              validation_chapter_nos: [50, 51, 52],
+              repeated_hotspot_segment: { key: 'middle', label: '中段', risk_count: 3 },
+              failure_reasons: ['核心偏移', '回报欠账', '追读拉力'],
+              summary: '默认5章档位回退原因：连续 2 批恢复稳定后，第63、64、65、66、67章默认档位在中段复发。',
+            },
+          },
+        },
+        chapter_target: {
+          chapter_no: 68,
+          title: '外门夜钟',
+          summary: '验证默认档位回退后的中段结构。',
+          conflict: '是否相信敌人提示。',
+          ending_hook: '钟声倒数。',
+          scene_cards: [],
+        },
+      },
+      null,
+      { chapter_no: 68, title: '外门夜钟' },
+    )
+
+    expect(prompt).toContain('默认5章档位回退')
+    expect(prompt).toContain('失效批次：第63章、第64章、第65章、第66章、第67章')
+    expect(prompt).toContain('恢复依据：第58章、第59章、第60章、第61章、第62章')
+    expect(prompt).toContain('前置3章验证：第50章、第51章、第52章')
+    expect(prompt).toContain('失败维度：核心偏移、回报欠账、追读拉力')
+    expect(prompt).toContain('逐章证明核心守恒、显性回报和章末追读')
+  })
+
   test('injects expansion structure decision into paragraph prose prompt', () => {
     const service = createNovelWritingService({
       getProject: async () => null,

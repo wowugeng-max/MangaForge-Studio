@@ -9108,8 +9108,16 @@ function buildResolvedSafeBatchExpansionStructureVerificationSeed(runRecords: An
         || task?.structureReview
         || {}
       const repeated = review?.repeated_hotspot_segment || review?.repeatedHotspotSegment || null
+      const defaultFiveChapterRegression = review?.default_five_chapter_regression
+        || review?.defaultFiveChapterRegression
+        || null
+      const defaultRegressionVisible = Boolean(defaultFiveChapterRegression && defaultFiveChapterRegression.visible !== false)
       const segmentLabel = firstText(repeated?.label, '复发段位')
       const actions = arrayValue(review?.structure_actions || review?.structureActions)
+        .map(item => text(item))
+        .filter(Boolean)
+      const defaultRegressionAction = actions.find(item => item.includes('默认档位回退')) || ''
+      const defaultFailureReasons = arrayValue(defaultFiveChapterRegression?.failure_reasons || defaultFiveChapterRegression?.failureReasons)
         .map(item => text(item))
         .filter(Boolean)
       return {
@@ -9128,14 +9136,26 @@ function buildResolvedSafeBatchExpansionStructureVerificationSeed(runRecords: An
         affected_chapter_nos: arrayValue(review?.affected_chapter_nos || review?.affectedChapterNos)
           .map(chapterNo => Number(chapterNo))
           .filter(chapterNo => chapterNo > 0),
-        fixed_segment_role: firstText(
-          actions.find(item => item.includes('固定职责')),
-          `${segmentLabel}固定职责：每批该段必须完成主线转折、显性回报和章末追读。`,
-        ),
-        conflict_rotation: `${segmentLabel}验证批次每章必须更换冲突来源，不能连续复用上一批热区压迫方式。`,
-        explicit_payoff: '每章至少一个显性回报，不能只铺垫或转场。',
-        ending_hook_requirement: '每章章末必须留下不同的章末追读问题，并把下一章必看理由压到最后一幕。',
+        fixed_segment_role: defaultRegressionVisible
+          ? firstText(
+            defaultRegressionAction,
+            `${segmentLabel}默认档位回退验证：每章必须重新证明主线转折、显性回报和章末追读稳定。`,
+          )
+          : firstText(
+            actions.find(item => item.includes('固定职责')),
+            `${segmentLabel}固定职责：每批该段必须完成主线转折、显性回报和章末追读。`,
+          ),
+        conflict_rotation: defaultRegressionVisible
+          ? `${segmentLabel}验证批次每章必须更换冲突来源，并逐章证明默认5章档位失效维度不再复发。`
+          : `${segmentLabel}验证批次每章必须更换冲突来源，不能连续复用上一批热区压迫方式。`,
+        explicit_payoff: defaultRegressionVisible
+          ? `每章至少一个显性回报，不能只铺垫或转场；${defaultFailureReasons.includes('回报欠账') ? '必须逐章补清回报欠账。' : '必须逐章证明显性回报稳定。'}`
+          : '每章至少一个显性回报，不能只铺垫或转场。',
+        ending_hook_requirement: defaultRegressionVisible
+          ? `每章章末必须留下不同的章末追读问题，并把下一章必看理由压到最后一幕；${defaultFailureReasons.includes('追读拉力') ? '必须逐章修复追读拉力。' : '必须逐章证明章末追读稳定。'}`
+          : '每章章末必须留下不同的章末追读问题，并把下一章必看理由压到最后一幕。',
         structure_actions: actions,
+        ...(defaultRegressionVisible ? { default_five_chapter_regression: defaultFiveChapterRegression } : {}),
       }
     }
   }

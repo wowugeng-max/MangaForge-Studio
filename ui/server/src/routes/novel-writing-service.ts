@@ -1872,9 +1872,62 @@ function normalizeNextBatchChecklistItem(item: any) {
   }
 }
 
+function chapterNosBrief(chapterNos: any[] = []) {
+  return asArray(chapterNos)
+    .map((chapterNo: any) => Number(chapterNo))
+    .filter((chapterNo: number) => chapterNo > 0)
+    .map((chapterNo: number) => `第${chapterNo}章`)
+    .join('、')
+}
+
+function normalizeDefaultFiveChapterRegression(value: any) {
+  const raw = value?.default_five_chapter_regression || value?.defaultFiveChapterRegression || value || {}
+  if (!raw || raw.visible === false) return null
+  const repeated = raw.repeated_hotspot_segment || raw.repeatedHotspotSegment || null
+  const normalized = {
+    visible: true,
+    status: compactBriefText(raw.status || ''),
+    label: compactBriefText(raw.label || '默认5章档位回退原因'),
+    source: compactBriefText(raw.source || ''),
+    stable_pass_streak: Number(raw.stable_pass_streak ?? raw.stablePassStreak ?? 0),
+    required_stable_pass_streak: Number(raw.required_stable_pass_streak ?? raw.requiredStablePassStreak ?? 0),
+    default_batch_chapter_nos: asArray(raw.default_batch_chapter_nos || raw.defaultBatchChapterNos)
+      .map((chapterNo: any) => Number(chapterNo))
+      .filter((chapterNo: number) => chapterNo > 0)
+      .slice(0, 10),
+    restore_chapter_nos: asArray(raw.restore_chapter_nos || raw.restoreChapterNos)
+      .map((chapterNo: any) => Number(chapterNo))
+      .filter((chapterNo: number) => chapterNo > 0)
+      .slice(0, 10),
+    validation_chapter_nos: asArray(raw.validation_chapter_nos || raw.validationChapterNos)
+      .map((chapterNo: any) => Number(chapterNo))
+      .filter((chapterNo: number) => chapterNo > 0)
+      .slice(0, 10),
+    repeated_hotspot_segment: repeated ? {
+      key: compactBriefText(repeated.key),
+      label: compactBriefText(repeated.label || repeated.key),
+      risk_count: Number(repeated.risk_count ?? repeated.riskCount ?? 0),
+    } : null,
+    failure_reasons: asArray(raw.failure_reasons || raw.failureReasons)
+      .map((item: any) => compactBriefText(item))
+      .filter(Boolean)
+      .slice(0, 6),
+    summary: compactBriefText(raw.summary || ''),
+  }
+  const hasContent = normalized.default_batch_chapter_nos.length
+    || normalized.restore_chapter_nos.length
+    || normalized.validation_chapter_nos.length
+    || normalized.failure_reasons.length
+    || normalized.summary
+  return hasContent ? normalized : null
+}
+
 function normalizeExpansionStructureVerification(value: any) {
   const raw = value?.expansion_structure_verification || value?.expansionStructureVerification || value || {}
   const repeated = raw.repeated_hotspot_segment || raw.repeatedHotspotSegment || null
+  const defaultFiveChapterRegression = normalizeDefaultFiveChapterRegression(
+    raw.default_five_chapter_regression || raw.defaultFiveChapterRegression,
+  )
   const normalized = {
     source: compactBriefText(raw.source || 'safe_batch_expansion_structure_repair'),
     label: compactBriefText(raw.label || '扩批结构验证'),
@@ -1895,6 +1948,7 @@ function normalizeExpansionStructureVerification(value: any) {
       .map((item: any) => compactBriefText(item))
       .filter(Boolean)
       .slice(0, 5),
+    default_five_chapter_regression: defaultFiveChapterRegression,
   }
   const hasContent = normalized.validation_chapter_nos.length
     || normalized.fixed_segment_role
@@ -1902,6 +1956,7 @@ function normalizeExpansionStructureVerification(value: any) {
     || normalized.explicit_payoff
     || normalized.ending_hook_requirement
     || normalized.structure_actions.length
+    || normalized.default_five_chapter_regression
   return hasContent ? normalized : null
 }
 
@@ -5454,6 +5509,7 @@ export function createNovelWritingService(ctx: {
     )
     const expansionStructureDecision = nextBatchBrief?.expansion_structure_decision || null
     const expansionStructureVerification = nextBatchBrief?.expansion_structure_verification || null
+    const defaultFiveChapterRegression = expansionStructureVerification?.default_five_chapter_regression || null
     const batchPreflight = contextPackage?.chapter_target?.batch_preflight || contextPackage?.batch_preflight || null
     const batchDeliveryRiskCarryOver = normalizeDeliveryRiskCarryOverContext(
       batchPreflight?.delivery_risk_carry_over
@@ -5641,6 +5697,12 @@ export function createNovelWritingService(ctx: {
       expansionStructureVerification?.explicit_payoff ? `显性回报：${expansionStructureVerification.explicit_payoff}` : '',
       expansionStructureVerification?.ending_hook_requirement ? `章末追读：${expansionStructureVerification.ending_hook_requirement}` : '',
       expansionStructureVerification?.structure_actions?.length ? `结构动作：${expansionStructureVerification.structure_actions.join('；')}` : '',
+      defaultFiveChapterRegression ? `默认5章档位回退：${defaultFiveChapterRegression.summary || defaultFiveChapterRegression.label || '默认档位复发，需要回到3章验证批。'}` : '',
+      defaultFiveChapterRegression?.default_batch_chapter_nos?.length ? `失效批次：${chapterNosBrief(defaultFiveChapterRegression.default_batch_chapter_nos)}` : '',
+      defaultFiveChapterRegression?.restore_chapter_nos?.length ? `恢复依据：${chapterNosBrief(defaultFiveChapterRegression.restore_chapter_nos)}` : '',
+      defaultFiveChapterRegression?.validation_chapter_nos?.length ? `前置3章验证：${chapterNosBrief(defaultFiveChapterRegression.validation_chapter_nos)}` : '',
+      defaultFiveChapterRegression?.failure_reasons?.length ? `失败维度：${defaultFiveChapterRegression.failure_reasons.join('、')}` : '',
+      defaultFiveChapterRegression ? '默认档位验证要求：本批每章都必须逐章证明核心守恒、显性回报和章末追读已经重新稳定；不能只修复单章句子，也不能把中段继续写成铺垫、转场或弱钩子。' : '',
       expansionStructureVerification ? JSON.stringify(expansionStructureVerification, null, 2).slice(0, 3000) : '',
       '',
       longformMemoryAnchor ? '【长篇正史锚点】' : '',
