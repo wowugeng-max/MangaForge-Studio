@@ -2075,6 +2075,16 @@ export default function NovelProjectWorkspace() {
     return plan
   }
 
+  const isSingleChapterRecoveryEvidenceRepairTask = (task: any) => {
+    if (String(task?.issue_type || '') !== 'recovery_evidence_mismatch') return false
+    const source = String(task?.source || '')
+    const annotationSource = String(task?.annotation_source || task?.annotationSource || '')
+    const annotationCategory = String(task?.annotation_category || task?.annotationCategory || '')
+    return source === 'review_annotation_risk'
+      || annotationSource === 'governance_recheck_sync'
+      || annotationCategory === 'recovery_evidence'
+  }
+
   const recheckRepairTaskConvergence = async (task: any, run: any, taskIndex: number) => {
     const chapterId = Number(task?.chapter_id || 0)
     if (!chapterId) return message.warning('这个复查任务没有绑定章节')
@@ -2085,9 +2095,12 @@ export default function NovelProjectWorkspace() {
     setProseQualityLoading(true)
     try {
       const storylineDecisionRecheckMeta = { source: 'storyline_decision_recheck', storyline_decision_closure: true }
+      const singleChapterRecoveryRecheckMeta = { source: 'governance_recheck_sync', storyline_decision_closure: false }
       const recheckMeta = String(task?.source || '') === 'storyline_diff_decision'
         ? storylineDecisionRecheckMeta
-        : { source: 'repair_task_recheck', storyline_decision_closure: false }
+        : isSingleChapterRecoveryEvidenceRepairTask(task)
+          ? singleChapterRecoveryRecheckMeta
+          : { source: 'repair_task_recheck', storyline_decision_closure: false }
       const qualityRes = await apiClient.post(`/novel/chapters/${chapterId}/prose-quality`, {
         project_id: projectId,
         model_id: selectedModelId,
@@ -2112,10 +2125,11 @@ export default function NovelProjectWorkspace() {
       })
       setRightPanelOpen(true)
       setRightPanelTab('proseQuality')
+      const recheckLabel = recheckMeta.source === 'governance_recheck_sync' ? '单章治理复查' : '复检收敛'
       if (closurePlan?.taskStatus === 'resolved') {
-        message.success(`复检收敛完成，评分 ${qualityRes.data?.self_check?.score ?? '-'}，风险已清零，任务已关闭`)
+        message.success(`${recheckLabel}完成，评分 ${qualityRes.data?.self_check?.score ?? '-'}，风险已清零，任务已关闭`)
       } else {
-        message.warning(`复检收敛完成，评分 ${qualityRes.data?.self_check?.score ?? '-'}，仍需复查`)
+        message.warning(`${recheckLabel}完成，评分 ${qualityRes.data?.self_check?.score ?? '-'}，仍需复查`)
       }
     } catch (error: any) {
       message.error(error?.response?.data?.error || error?.message || '复检收敛失败')

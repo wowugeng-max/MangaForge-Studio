@@ -833,6 +833,29 @@ describe('commercial writing workspace UI shell', () => {
     expect(taskCenter).toContain('可读性')
   })
 
+  test('routes recovery evidence source actions to single-chapter and batch rechecks', () => {
+    const projectWorkspace = readFileSync(join(import.meta.dir, '../NovelProjectWorkspace.tsx'), 'utf8')
+    const taskCenter = source('TaskCenterDrawer.tsx')
+
+    expect(taskCenter).toContain('recoveryEvidenceSourceRecheckAction')
+    expect(taskCenter).toContain('复检单章')
+    expect(taskCenter).toContain('复盘批次')
+    expect(taskCenter).toContain('onRecheckRepairTask?.(sourceTask, run')
+    expect(taskCenter).toContain('onGenerateRepairAuditSummary?.(run)')
+    expect(projectWorkspace).toContain('isSingleChapterRecoveryEvidenceRepairTask')
+    expect(projectWorkspace).toContain("source: 'governance_recheck_sync'")
+  })
+
+  test('routes recovery evidence residuals into the next repair action', () => {
+    const taskCenter = source('TaskCenterDrawer.tsx')
+
+    expect(taskCenter).toContain('residualActionLabel')
+    expect(taskCenter).toContain('回修依据')
+    expect(taskCenter).toContain('定位批次任务')
+    expect(taskCenter).toContain('onStartRepairTaskRevision?.(sourceTask, run')
+    expect(taskCenter).toContain('setFocusedTaskIndex(sourceTaskIndex)')
+  })
+
   test('shows delivery risk convergence in the delivery strip', () => {
     const workspaceCenter = source('WorkspaceCenter.tsx')
     const workspaceCss = source('WorkspaceCenter.css')

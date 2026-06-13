@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { buildRecoveryEvidenceAuditView, buildRepairClosureHighlights, repairTaskActionLabel } from './TaskCenterDrawer'
+import { buildRecoveryEvidenceAuditView, buildRepairClosureHighlights, recoveryEvidenceSourceRecheckAction, repairTaskActionLabel } from './TaskCenterDrawer'
 
 describe('buildRepairClosureHighlights', () => {
   test('summarizes resolved delivery risk repair tasks for task center closure evidence', () => {
@@ -162,6 +162,8 @@ describe('buildRecoveryEvidenceAuditView', () => {
         count: 1,
         taskIndexes: [0],
         chapterNos: [42],
+        recheckAction: 'single_chapter_governance_recheck',
+        recheckLabel: '复检单章',
       }),
       expect.objectContaining({
         source: 'safe_batch_recovery_recheck',
@@ -169,6 +171,8 @@ describe('buildRecoveryEvidenceAuditView', () => {
         count: 1,
         taskIndexes: [1],
         chapterNos: [43],
+        recheckAction: 'safe_batch_recovery_recheck',
+        recheckLabel: '复盘批次',
       }),
     ])
     expect(view?.relatedTasks).toEqual([
@@ -193,8 +197,158 @@ describe('buildRecoveryEvidenceAuditView', () => {
     ])
   })
 
+  test('merges latest task recheck results into source groups', () => {
+    const audit = {
+      recovery_evidence_closure: {
+        status: 'needs_followup',
+        total: 2,
+        resolved: 0,
+        tasks: [
+          {
+            chapter_id: 420,
+            chapter_no: 42,
+            task_index: 0,
+            task_status: 'needs_review',
+            source: 'single_chapter_governance_recheck',
+            source_label: '单章治理复查',
+            title: '第42章恢复依据失效回修',
+            recovery_evidence_review: {
+              status: 'warn',
+              summary: '单章仍缺少样章对白执行。',
+              failed_evidence: ['样章对白执行仍未落地'],
+            },
+          },
+          {
+            chapter_id: 421,
+            chapter_no: 43,
+            task_index: 1,
+            task_status: 'needs_review',
+            source: 'safe_batch_recovery_recheck',
+            source_label: '批次恢复复查',
+            title: '第43章批次恢复依据回修',
+            recovery_evidence_review: {
+              status: 'warn',
+              summary: '批次复盘仍有恢复依据未落地。',
+              failed_evidence: ['第43章读者回报仍未继承'],
+            },
+          },
+        ],
+      },
+    }
+    const latestTasks = [
+      {
+        chapter_id: 420,
+        chapter_no: 42,
+        task_status: 'resolved',
+        source: 'review_annotation_risk',
+        issue_type: 'recovery_evidence_mismatch',
+        annotation_source: 'governance_recheck_sync',
+        annotation_category: 'recovery_evidence',
+        status_note: '单章治理复查通过，governance_recheck_sync failed_evidence 已清空。',
+        recovery_evidence_review: {
+          status: 'ok',
+          summary: '单章治理复查通过，证据已写入正文。',
+          failed_evidence: [],
+          repaired_evidence: ['第42章对白交锋已补回样章节奏'],
+        },
+      },
+      {
+        chapter_id: 421,
+        chapter_no: 43,
+        task_status: 'needs_review',
+        source: 'auto_creation_safe_batch_risk',
+        issue_type: 'recovery_evidence_mismatch',
+        segment: '第43-45章',
+        recovery_evidence_review: {
+          status: 'warn',
+          summary: '批次复盘仍有恢复依据未落地。',
+          failed_evidence: ['第43章读者回报仍未继承'],
+        },
+      },
+    ]
+
+    const view = buildRecoveryEvidenceAuditView(audit, latestTasks)
+    const singleGroup = view?.sourceGroups.find(group => group.source === 'single_chapter_governance_recheck')
+    const batchGroup = view?.sourceGroups.find(group => group.source === 'safe_batch_recovery_recheck')
+
+    expect(singleGroup).toEqual(expect.objectContaining({
+      resultStatus: 'closed',
+      resultLabel: '已闭环',
+      latestSummary: '单章治理复查通过，证据已写入正文。',
+      residualEvidence: [],
+    }))
+    expect(batchGroup).toEqual(expect.objectContaining({
+      resultStatus: 'needs_followup',
+      resultLabel: '仍需复查',
+      latestSummary: '批次复盘仍有恢复依据未落地。',
+      residualEvidence: ['第43章读者回报仍未继承'],
+    }))
+  })
+
+  test('exposes the next residual action for each source group', () => {
+    const view = buildRecoveryEvidenceAuditView({
+      recovery_evidence_closure: {
+        status: 'needs_followup',
+        total: 2,
+        resolved: 0,
+        tasks: [
+          {
+            chapter_id: 420,
+            chapter_no: 42,
+            task_index: 0,
+            task_status: 'needs_review',
+            source: 'single_chapter_governance_recheck',
+            source_label: '单章治理复查',
+            recovery_evidence_review: {
+              status: 'warn',
+              failed_evidence: ['样章对白执行仍未落地'],
+            },
+          },
+          {
+            chapter_id: 421,
+            chapter_no: 43,
+            task_index: 1,
+            task_status: 'needs_review',
+            source: 'safe_batch_recovery_recheck',
+            source_label: '批次恢复复查',
+            recovery_evidence_review: {
+              status: 'warn',
+              failed_evidence: ['第43章读者回报仍未继承'],
+            },
+          },
+        ],
+      },
+    })
+
+    expect(view?.sourceGroups.find(group => group.source === 'single_chapter_governance_recheck')).toEqual(expect.objectContaining({
+      residualAction: 'revision',
+      residualActionLabel: '回修依据',
+    }))
+    expect(view?.sourceGroups.find(group => group.source === 'safe_batch_recovery_recheck')).toEqual(expect.objectContaining({
+      residualAction: 'focus_task',
+      residualActionLabel: '定位批次任务',
+    }))
+  })
+
   test('hides recovery evidence audit when there is no closure payload', () => {
     expect(buildRecoveryEvidenceAuditView({ status: 'closed' })).toBeNull()
+  })
+})
+
+describe('recoveryEvidenceSourceRecheckAction', () => {
+  test('routes source groups to the natural recheck action', () => {
+    expect(recoveryEvidenceSourceRecheckAction('single_chapter_governance_recheck')).toEqual({
+      action: 'single_chapter_governance_recheck',
+      label: '复检单章',
+    })
+    expect(recoveryEvidenceSourceRecheckAction('safe_batch_recovery_recheck')).toEqual({
+      action: 'safe_batch_recovery_recheck',
+      label: '复盘批次',
+    })
+    expect(recoveryEvidenceSourceRecheckAction('recovery_evidence_recheck')).toEqual({
+      action: '',
+      label: '',
+    })
   })
 })
 
