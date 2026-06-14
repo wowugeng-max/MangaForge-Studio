@@ -1635,7 +1635,7 @@ describe('buildSafeBatchExpansionPolicySnapshot', () => {
               visible: true,
               status: 'failed',
               label: '默认档位模板回检',
-              summary: '默认档位模板回检未通过：第91章缺回报密度，不能恢复默认5章档位。',
+              summary: '默认档位模板回检未通过：生产后验仍复发：回报欠账。',
               validation_chapter_nos: [90, 91, 92],
               requirements: [
                 { key: 'default_lane_segment_duty', label: '默认档位段位职责', status: 'fulfilled' },
@@ -1646,6 +1646,28 @@ describe('buildSafeBatchExpansionPolicySnapshot', () => {
               missing_count: 1,
               missing_requirements: [
                 { key: 'default_lane_payoff_density', label: '回报密度', chapter_nos: [91] },
+              ],
+              production_failed_count: 1,
+              production_relapse_verdict: {
+                visible: true,
+                status: 'failed',
+                label: '默认档位模板生产后验判定',
+                template_version_id: 'safe_batch_expansion_structure_repair:668',
+                default_batch_chapter_nos: [86, 87, 88, 89, 90],
+                restore_chapter_nos: [81, 82, 83, 84, 85],
+                previous_validation_chapter_nos: [78, 79, 80],
+                validation_chapter_nos: [90, 91, 92],
+                failure_reasons: ['回报欠账'],
+                cleared_failure_reasons: [],
+                remaining_failure_reasons: ['回报欠账'],
+                failed_count: 1,
+                failed_requirements: [
+                  { key: 'default_lane_payoff_density', label: '回报密度', failure_reason: '回报欠账', chapter_nos: [90, 91, 92] },
+                ],
+                summary: '默认档位模板生产后验仍复发：回报欠账未清零。',
+              },
+              production_failed_requirements: [
+                { key: 'default_lane_payoff_density', label: '回报密度', failure_reason: '回报欠账', chapter_nos: [90, 91, 92] },
               ],
             },
           },
@@ -1662,6 +1684,17 @@ describe('buildSafeBatchExpansionPolicySnapshot', () => {
       missingRequirements: [
         { key: 'default_lane_payoff_density', label: '回报密度', chapterNos: [91] },
       ],
+      productionFailedCount: 1,
+      productionRelapseVerdict: {
+        status: 'failed',
+        templateVersionId: 'safe_batch_expansion_structure_repair:668',
+        defaultBatchChapterNos: [86, 87, 88, 89, 90],
+        validationChapterNos: [90, 91, 92],
+        remainingFailureReasons: ['回报欠账'],
+      },
+      productionFailedRequirements: [
+        { key: 'default_lane_payoff_density', label: '回报密度', failureReason: '回报欠账', chapterNos: [90, 91, 92] },
+      ],
       requirements: [
         { key: 'default_lane_segment_duty', label: '默认档位段位职责', status: 'fulfilled' },
         { key: 'default_lane_conflict_rotation', label: '冲突轮换', status: 'fulfilled' },
@@ -1669,7 +1702,7 @@ describe('buildSafeBatchExpansionPolicySnapshot', () => {
         { key: 'default_lane_ending_hook_template', label: '章末追读模板', status: 'fulfilled' },
       ],
     })
-    expect(snapshot?.recoveryValidation?.defaultFiveChapterLaneTemplateVerdict?.summary).toContain('第91章缺回报密度')
+    expect(snapshot?.recoveryValidation?.defaultFiveChapterLaneTemplateVerdict?.summary).toContain('生产后验仍复发')
   })
 
   test('keeps default lane template stability profile in expansion feedback snapshot', () => {
@@ -2092,6 +2125,34 @@ describe('default lane repair task card helpers', () => {
     expect(tags).toEqual(expect.arrayContaining([
       { key: 'default_lane_template_redesign', label: '默认档位模板重构', color: 'gold' },
       { key: 'default_lane_payoff_density', label: '重写回报密度', color: 'gold' },
+    ]))
+  })
+
+  test('extracts production relapse verdict tags from structure repair tasks', async () => {
+    const taskCenter = await import('./TaskCenterDrawer')
+    const tags = (taskCenter as any).buildDefaultLaneRepairTaskTags?.({
+      issue_type: 'safe_batch_expansion_structure_repair',
+      safe_batch_expansion_structure_review: {
+        default_five_chapter_lane_template_repair: {
+          visible: true,
+          label: '默认档位模板验证缺项',
+          production_failed_count: 2,
+          production_relapse_verdict: {
+            status: 'failed',
+            remaining_failure_reasons: ['核心偏移', '回报欠账'],
+          },
+          production_failed_requirements: [
+            { key: 'default_lane_segment_duty', label: '默认档位段位职责', failure_reason: '核心偏移' },
+            { key: 'default_lane_payoff_density', label: '回报密度', failure_reason: '回报欠账' },
+          ],
+        },
+      },
+    })
+
+    expect(tags).toEqual(expect.arrayContaining([
+      { key: 'default_lane_production_relapse', label: '生产后验仍复发', color: 'gold' },
+      { key: 'default_lane_segment_duty', label: '核心偏移未修', color: 'gold' },
+      { key: 'default_lane_payoff_density', label: '回报欠账未修', color: 'gold' },
     ]))
   })
 })

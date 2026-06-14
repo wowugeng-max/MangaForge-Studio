@@ -3820,6 +3820,21 @@ function buildSafeBatchRecoveryRoadmap(args: {
   const templateVersionStatus = text(latestTemplateVersionProfile?.status)
   const templateVersionPassStreak = Number(latestTemplateVersionProfile?.pass_streak ?? latestTemplateVersionProfile?.passStreak ?? 0)
   const templateVersionRequiredPassStreak = Number(latestTemplateVersionProfile?.required_pass_streak ?? latestTemplateVersionProfile?.requiredPassStreak ?? defaultLaneTemplateStabilityProfile?.required_pass_streak ?? defaultLaneTemplateStabilityProfile?.requiredPassStreak ?? 2)
+  const latestProductionRelapseVerdict = latestTemplateVersionProfile?.latest_production_relapse_verdict
+    || latestTemplateVersionProfile?.latestProductionRelapseVerdict
+    || null
+  const latestProductionRelapseStatus = text(latestProductionRelapseVerdict?.status)
+  const latestProductionRelapseRemainingReasons = arrayValue(latestProductionRelapseVerdict?.remaining_failure_reasons || latestProductionRelapseVerdict?.remainingFailureReasons)
+    .map((reason: any) => text(reason))
+    .filter(Boolean)
+  const latestProductionRelapseClearedReasons = arrayValue(latestProductionRelapseVerdict?.cleared_failure_reasons || latestProductionRelapseVerdict?.clearedFailureReasons)
+    .map((reason: any) => text(reason))
+    .filter(Boolean)
+  const latestProductionRelapseText = latestProductionRelapseStatus === 'failed'
+    ? `生产后验仍复发：${latestProductionRelapseRemainingReasons.join('、') || '真实生产失败维度'}。`
+    : latestProductionRelapseStatus === 'passed'
+      ? `生产后验已修复：${latestProductionRelapseClearedReasons.join('、') || '真实生产失败维度'}已清零。`
+      : ''
   const defaultLaneTemplateStatus = text(defaultLaneTemplateStabilityProfile?.status)
   const defaultLaneTemplateVersionWarn = ['relapsed', 'redesign'].includes(defaultLaneTemplateStatus)
     || ['relapsed', 'redesign'].includes(templateVersionStatus)
@@ -3834,7 +3849,9 @@ function buildSafeBatchRecoveryRoadmap(args: {
         ? 'ok'
         : 'pending'
   const defaultLaneTemplateVersionActionLabel = defaultLaneTemplateVersionStatus === 'warn'
-    ? defaultLaneTemplateStatus === 'redesign' || templateVersionStatus === 'redesign'
+    ? latestProductionRelapseStatus === 'failed'
+      ? '修生产后验'
+      : defaultLaneTemplateStatus === 'redesign' || templateVersionStatus === 'redesign'
       ? '重构当前模板版本'
       : '修当前模板版本'
     : defaultLaneTemplateVersionStatus === 'ok'
@@ -3842,7 +3859,7 @@ function buildSafeBatchRecoveryRoadmap(args: {
       : '观察当前模板版本'
   const defaultLaneTemplateVersionFocus = defaultLaneTemplateVersionStatus === 'warn'
     ? safeBatchRecoveryRoadmapFocus('default_lane_template_version', '默认档位模板版本', defaultLaneTemplateVersionActionLabel, {
-      task_center_filter_label: '当前模板版本',
+      task_center_filter_label: latestProductionRelapseStatus === 'failed' ? '生产后验仍复发' : '当前模板版本',
       requirement_key: 'default_lane_template',
       template_version_id: templateVersionId,
     })
@@ -3906,7 +3923,11 @@ function buildSafeBatchRecoveryRoadmap(args: {
         ? defaultLaneTemplateStatus === 'redesign' || templateVersionStatus === 'redesign' ? 1 : args.baseChapterCount
         : defaultLaneTemplateVersionStatus === 'ok' ? args.expandedChapterCount : args.baseChapterCount,
       detail: templateVersionId
-        ? `${text(defaultLaneTemplateStabilityProfile?.summary, '默认档位模板版本仍在观察。')}当前模板版本 ${templateVersionId} 连过 ${Math.max(0, templateVersionPassStreak)}/${Math.max(1, templateVersionRequiredPassStreak || 2)}。`
+        ? [
+          text(defaultLaneTemplateStabilityProfile?.summary, '默认档位模板版本仍在观察。'),
+          latestProductionRelapseText,
+          `当前模板版本 ${templateVersionId} 连过 ${Math.max(0, templateVersionPassStreak)}/${Math.max(1, templateVersionRequiredPassStreak || 2)}。`,
+        ].filter(Boolean).join(' ')
         : text(defaultLaneTemplateStabilityProfile?.summary, '尚未形成默认档位模板版本稳定证据。'),
       actionLabel: defaultLaneTemplateVersionActionLabel,
       focus: defaultLaneTemplateVersionFocus,

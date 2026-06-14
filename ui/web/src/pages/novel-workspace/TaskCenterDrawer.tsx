@@ -1078,6 +1078,37 @@ function defaultLaneTemplateRedesignQueueOfTask(task: any) {
   return queue
 }
 
+function defaultLaneTemplateRepairOfTask(task: any) {
+  const review = structureRepairReviewOfTask(task)
+  const repair = review?.default_five_chapter_lane_template_repair
+    || review?.defaultFiveChapterLaneTemplateRepair
+    || null
+  if (!repair || repair.visible === false) return null
+  return repair
+}
+
+function defaultLaneTemplateRepairProductionFailedRequirementsOfTask(task: any) {
+  const repair = defaultLaneTemplateRepairOfTask(task)
+  if (!repair) return []
+  const verdict = repair.production_relapse_verdict || repair.productionRelapseVerdict || null
+  const rawRequirements = Array.isArray(repair.production_failed_requirements)
+    ? repair.production_failed_requirements
+    : Array.isArray(repair.productionFailedRequirements)
+      ? repair.productionFailedRequirements
+      : Array.isArray(verdict?.failed_requirements)
+        ? verdict.failed_requirements
+        : Array.isArray(verdict?.failedRequirements)
+          ? verdict.failedRequirements
+          : []
+  return rawRequirements
+    .map((item: any) => ({
+      key: compactEvidenceText(item?.key || ''),
+      label: compactEvidenceText(item?.label || item?.name || item?.key || ''),
+      failureReason: compactEvidenceText(item?.failure_reason || item?.failureReason || ''),
+    }))
+    .filter((item: any) => item.key || item.label || item.failureReason)
+}
+
 function defaultLaneFailedRequirementsOfTask(task: any) {
   const review = structureDecisionRepairReviewOfTask(task)
   const failedItems = Array.isArray(review?.failed_items)
@@ -1112,17 +1143,34 @@ function defaultLaneFailedRequirementsOfTask(task: any) {
 export function buildDefaultLaneRepairTaskTags(task: any): RepairTaskTagMeta[] {
   const issueType = compactEvidenceText(task?.issue_type || task?.issueType)
   if (issueType === 'safe_batch_expansion_structure_repair') {
+    const tags: RepairTaskTagMeta[] = []
     const redesignQueue = defaultLaneTemplateRedesignQueueOfTask(task)
-    if (!redesignQueue) return []
-    const topFailed = redesignQueue.top_failed_requirement || redesignQueue.topFailedRequirement || null
-    const topFailedKey = compactEvidenceText(topFailed?.key || '')
-    const topFailedLabel = compactEvidenceText(topFailed?.label || topFailed?.key || '')
-    const tags: RepairTaskTagMeta[] = [
-      { key: 'default_lane_template_redesign', label: '默认档位模板重构', color: 'gold' },
-    ]
-    if (topFailedKey && topFailedLabel) {
-      tags.push({ key: topFailedKey, label: `重写${topFailedLabel}`, color: 'gold' })
+    if (redesignQueue) {
+      const topFailed = redesignQueue.top_failed_requirement || redesignQueue.topFailedRequirement || null
+      const topFailedKey = compactEvidenceText(topFailed?.key || '')
+      const topFailedLabel = compactEvidenceText(topFailed?.label || topFailed?.key || '')
+      tags.push({ key: 'default_lane_template_redesign', label: '默认档位模板重构', color: 'gold' })
+      if (topFailedKey && topFailedLabel) {
+        tags.push({ key: topFailedKey, label: `重写${topFailedLabel}`, color: 'gold' })
+      }
     }
+    const templateRepair = defaultLaneTemplateRepairOfTask(task)
+    const productionRelapseVerdict = templateRepair?.production_relapse_verdict
+      || templateRepair?.productionRelapseVerdict
+      || null
+    const productionRelapseStatus = compactEvidenceText(productionRelapseVerdict?.status || '')
+    const productionFailedRequirements = defaultLaneTemplateRepairProductionFailedRequirementsOfTask(task)
+    if (productionRelapseStatus === 'failed' || productionFailedRequirements.length) {
+      tags.push({ key: 'default_lane_production_relapse', label: '生产后验仍复发', color: 'gold' })
+      productionFailedRequirements.slice(0, 4).forEach(item => {
+        const key = item.key || item.failureReason || item.label
+        const label = item.failureReason ? `${item.failureReason}未修` : `重修${item.label || item.key}`
+        if (key && label) tags.push({ key, label, color: 'gold' })
+      })
+    } else if (productionRelapseStatus === 'passed') {
+      tags.push({ key: 'default_lane_production_repaired', label: '生产后验已修复', color: 'green' })
+    }
+    if (!tags.length) return []
     return tags
   }
   if (issueType !== 'safe_batch_expansion_structure_decision_mismatch') return []
@@ -1158,10 +1206,16 @@ function buildDefaultLaneFocusObligationStatuses(
   if (focus?.requirementKey !== 'default_lane_template') return []
   if (!activeItems.length && !resolvedItems.length) return []
   const activeFailed = new Set(activeItems.flatMap((item: any) => (
-    defaultLaneFailedRequirementsOfTask(item?.task || item).map(requirement => requirement.key)
+    [
+      ...defaultLaneFailedRequirementsOfTask(item?.task || item).map(requirement => requirement.key),
+      ...defaultLaneTemplateRepairProductionFailedRequirementsOfTask(item?.task || item).map(requirement => requirement.key),
+    ]
   )))
   const resolvedFailed = new Set(resolvedItems.flatMap((item: any) => (
-    defaultLaneFailedRequirementsOfTask(item?.task || item).map(requirement => requirement.key)
+    [
+      ...defaultLaneFailedRequirementsOfTask(item?.task || item).map(requirement => requirement.key),
+      ...defaultLaneTemplateRepairProductionFailedRequirementsOfTask(item?.task || item).map(requirement => requirement.key),
+    ]
   )))
   return DEFAULT_LANE_TEMPLATE_REQUIREMENTS.map(requirement => {
     if (activeFailed.has(requirement.key)) {
@@ -1657,6 +1711,37 @@ type SafeBatchDefaultFiveChapterLaneTemplateVersionSnapshot = {
   passStreak?: number
   requiredPassStreak?: number
   status?: string
+  productionValidationFailedCount?: number
+  latestProductionRelapseVerdict?: SafeBatchDefaultFiveChapterLaneTemplateProductionRelapseVerdictSnapshot | null
+}
+
+export type SafeBatchDefaultFiveChapterLaneTemplateFailedRequirementSnapshot = {
+  key: string
+  label: string
+  failureReason: string
+  chapterNos: number[]
+}
+
+export type SafeBatchDefaultFiveChapterLaneTemplateProductionRelapseVerdictSnapshot = {
+  visible: boolean
+  status: 'passed' | 'failed'
+  label: string
+  templateVersionId: string
+  defaultBatchChapterNos: number[]
+  restoreChapterNos: number[]
+  previousValidationChapterNos: number[]
+  validationChapterNos: number[]
+  failureReasons: string[]
+  clearedFailureReasons: string[]
+  remainingFailureReasons: string[]
+  failureReasonStatuses: {
+    reason: string
+    status: 'cleared' | 'remaining'
+    riskCount: number
+  }[]
+  failedCount: number
+  failedRequirements: SafeBatchDefaultFiveChapterLaneTemplateFailedRequirementSnapshot[]
+  summary: string
 }
 
 export type SafeBatchDefaultFiveChapterLaneTemplateVerdictSnapshot = {
@@ -1676,6 +1761,9 @@ export type SafeBatchDefaultFiveChapterLaneTemplateVerdictSnapshot = {
     label: string
     chapterNos: number[]
   }[]
+  productionFailedCount: number
+  productionRelapseVerdict: SafeBatchDefaultFiveChapterLaneTemplateProductionRelapseVerdictSnapshot | null
+  productionFailedRequirements: SafeBatchDefaultFiveChapterLaneTemplateFailedRequirementSnapshot[]
   templateVersion: SafeBatchDefaultFiveChapterLaneTemplateVersionSnapshot | null
 }
 
@@ -2356,6 +2444,58 @@ function buildSafeBatchExpansionStructureValidationResultSnapshot(resultLike: an
   }
 }
 
+function buildSafeBatchDefaultFiveChapterLaneTemplateFailedRequirementsSnapshot(requirementsLike: any): SafeBatchDefaultFiveChapterLaneTemplateFailedRequirementSnapshot[] {
+  const requirements = Array.isArray(requirementsLike) ? requirementsLike : []
+  return requirements
+    .map((item: any) => ({
+      key: compactEvidenceText(item?.key || ''),
+      label: compactEvidenceText(item?.label || item?.name || item?.key || ''),
+      failureReason: compactEvidenceText(item?.failure_reason || item?.failureReason || ''),
+      chapterNos: normalizeChapterNos(item?.chapter_nos || item?.chapterNos),
+    }))
+    .filter((item: any) => item.key || item.label || item.failureReason || item.chapterNos.length)
+}
+
+function buildSafeBatchDefaultFiveChapterLaneTemplateProductionRelapseVerdictSnapshot(verdictLike: any): SafeBatchDefaultFiveChapterLaneTemplateProductionRelapseVerdictSnapshot | null {
+  const verdict = parseJsonValue(verdictLike) || verdictLike || null
+  if (!verdict || verdict.visible === false) return null
+  const rawStatus = compactEvidenceText(verdict?.status || '')
+  const failedRequirements = buildSafeBatchDefaultFiveChapterLaneTemplateFailedRequirementsSnapshot(
+    verdict?.failed_requirements || verdict?.failedRequirements,
+  )
+  const snapshot = {
+    visible: true,
+    status: rawStatus === 'failed' ? 'failed' as const : 'passed' as const,
+    label: compactEvidenceText(verdict?.label || '默认档位模板生产后验判定'),
+    templateVersionId: compactEvidenceText(verdict?.template_version_id || verdict?.templateVersionId || ''),
+    defaultBatchChapterNos: normalizeChapterNos(verdict?.default_batch_chapter_nos || verdict?.defaultBatchChapterNos),
+    restoreChapterNos: normalizeChapterNos(verdict?.restore_chapter_nos || verdict?.restoreChapterNos),
+    previousValidationChapterNos: normalizeChapterNos(verdict?.previous_validation_chapter_nos || verdict?.previousValidationChapterNos),
+    validationChapterNos: normalizeChapterNos(verdict?.validation_chapter_nos || verdict?.validationChapterNos),
+    failureReasons: normalizeEvidenceTextList(verdict?.failure_reasons || verdict?.failureReasons),
+    clearedFailureReasons: normalizeEvidenceTextList(verdict?.cleared_failure_reasons || verdict?.clearedFailureReasons),
+    remainingFailureReasons: normalizeEvidenceTextList(verdict?.remaining_failure_reasons || verdict?.remainingFailureReasons),
+    failureReasonStatuses: (Array.isArray(verdict?.failure_reason_statuses)
+      ? verdict.failure_reason_statuses
+      : Array.isArray(verdict?.failureReasonStatuses)
+        ? verdict.failureReasonStatuses
+        : []
+    ).map((item: any) => {
+      const statusText = compactEvidenceText(item?.status || '')
+      return {
+        reason: compactEvidenceText(item?.reason || ''),
+        status: statusText === 'remaining' ? 'remaining' as const : 'cleared' as const,
+        riskCount: Number(item?.risk_count ?? item?.riskCount ?? 0),
+      }
+    }).filter((item: any) => item.reason),
+    failedCount: Number(verdict?.failed_count ?? verdict?.failedCount ?? failedRequirements.length),
+    failedRequirements,
+    summary: compactEvidenceText(verdict?.summary || ''),
+  }
+  if (!snapshot.summary && !snapshot.failureReasons.length && !snapshot.failedRequirements.length) return null
+  return snapshot
+}
+
 function buildSafeBatchDefaultFiveChapterLaneTemplateVersionSnapshot(versionLike: any): SafeBatchDefaultFiveChapterLaneTemplateVersionSnapshot | null {
   const version = parseJsonValue(versionLike) || versionLike || null
   if (!version || version.visible === false) return null
@@ -2376,6 +2516,10 @@ function buildSafeBatchDefaultFiveChapterLaneTemplateVersionSnapshot(versionLike
     passStreak: Number(version?.pass_streak ?? version?.passStreak ?? 0),
     requiredPassStreak: Number(version?.required_pass_streak ?? version?.requiredPassStreak ?? 0),
     status: compactEvidenceText(version?.status || ''),
+    productionValidationFailedCount: Number(version?.production_validation_failed_count ?? version?.productionValidationFailedCount ?? 0),
+    latestProductionRelapseVerdict: buildSafeBatchDefaultFiveChapterLaneTemplateProductionRelapseVerdictSnapshot(
+      version?.latest_production_relapse_verdict || version?.latestProductionRelapseVerdict,
+    ),
   }
   if (!snapshot.id && !snapshot.summary && !snapshot.sourceRunId && !snapshot.redesignSource) return null
   return snapshot
@@ -2414,6 +2558,15 @@ function buildSafeBatchDefaultFiveChapterLaneTemplateVerdictSnapshot(verdictLike
     chapterNos: normalizeChapterNos(item?.chapter_nos || item?.chapterNos),
   })).filter((item: any) => item.key || item.label || item.chapterNos.length)
   const missingCount = Number(verdict?.missing_count ?? verdict?.missingCount ?? missingRequirements.reduce((sum: number, item: any) => sum + item.chapterNos.length, 0))
+  const productionRelapseVerdict = buildSafeBatchDefaultFiveChapterLaneTemplateProductionRelapseVerdictSnapshot(
+    verdict?.production_relapse_verdict || verdict?.productionRelapseVerdict,
+  )
+  const productionFailedRequirements = buildSafeBatchDefaultFiveChapterLaneTemplateFailedRequirementsSnapshot(
+    verdict?.production_failed_requirements
+      || verdict?.productionFailedRequirements
+      || productionRelapseVerdict?.failedRequirements,
+  )
+  const productionFailedCount = Number(verdict?.production_failed_count ?? verdict?.productionFailedCount ?? productionRelapseVerdict?.failedCount ?? productionFailedRequirements.length)
   const snapshot = {
     visible: true,
     status,
@@ -2423,11 +2576,14 @@ function buildSafeBatchDefaultFiveChapterLaneTemplateVerdictSnapshot(verdictLike
     requirements,
     missingCount: Number.isFinite(missingCount) ? missingCount : 0,
     missingRequirements,
+    productionFailedCount: Number.isFinite(productionFailedCount) ? productionFailedCount : 0,
+    productionRelapseVerdict,
+    productionFailedRequirements,
     templateVersion: buildSafeBatchDefaultFiveChapterLaneTemplateVersionSnapshot(
       verdict?.template_version || verdict?.templateVersion,
     ),
   }
-  if (!snapshot.summary && !snapshot.requirements.length && !snapshot.missingRequirements.length) return null
+  if (!snapshot.summary && !snapshot.requirements.length && !snapshot.missingRequirements.length && !snapshot.productionRelapseVerdict) return null
   return snapshot
 }
 
@@ -2985,6 +3141,8 @@ function BatchProseRunSummary({ run }: { run: any }) {
   const recoveryValidation = expansionPolicy?.recoveryValidation || null
   const defaultRecoveryVerdict = recoveryValidation?.defaultFiveChapterRecoveryVerdict || null
   const defaultLaneTemplateVerdict = recoveryValidation?.defaultFiveChapterLaneTemplateVerdict || null
+  const defaultLaneTemplateProductionRelapse = defaultLaneTemplateVerdict?.productionRelapseVerdict || null
+  const defaultLaneTemplateVersionProductionRelapse = defaultLaneTemplateVersion?.latestProductionRelapseVerdict || null
 
   return (
     <Card size="small" title="批量生成摘要">
@@ -3083,8 +3241,22 @@ function BatchProseRunSummary({ run }: { run: any }) {
                               {compactChapterNos(requirement.chapterNos)}缺{requirement.label}
                             </Tag>
                           ))}
+                          {defaultLaneTemplateProductionRelapse && (
+                            <Tag color={defaultLaneTemplateProductionRelapse.status === 'passed' ? 'green' : 'gold'} bordered={false}>
+                              {defaultLaneTemplateProductionRelapse.status === 'passed' ? '生产后验已修复' : '生产后验仍复发'}
+                            </Tag>
+                          )}
+                          {defaultLaneTemplateProductionRelapse?.remainingFailureReasons.slice(0, 3).map(reason => (
+                            <Tag key={`default-lane-production-remaining-${reason}`} color="gold" bordered={false}>{reason}未修</Tag>
+                          ))}
+                          {defaultLaneTemplateProductionRelapse?.clearedFailureReasons.slice(0, 3).map(reason => (
+                            <Tag key={`default-lane-production-cleared-${reason}`} color="green" bordered={false}>{reason}已修复</Tag>
+                          ))}
                         </Space>
                         <Text type="secondary" style={{ fontSize: 12 }}>{defaultLaneTemplateVerdict.summary}</Text>
+                        {defaultLaneTemplateProductionRelapse?.summary && (
+                          <Text type="secondary" style={{ fontSize: 12 }}>{defaultLaneTemplateProductionRelapse.summary}</Text>
+                        )}
                       </Space>
                     )}
                   </Space>
@@ -3178,10 +3350,21 @@ function BatchProseRunSummary({ run }: { run: any }) {
                       </Tag>
                     )}
                     {defaultLaneTemplateVersion && (
-                      <Tag color={defaultLaneTemplateVersion.status === 'ready' ? 'green' : 'blue'} bordered={false}>
+                      <Tag color={defaultLaneTemplateVersion.status === 'ready' ? 'green' : defaultLaneTemplateVersion.status === 'relapsed' || defaultLaneTemplateVersion.status === 'redesign' ? 'gold' : 'blue'} bordered={false}>
                         模板版本连过 {defaultLaneTemplateVersion.passStreak || 0}/{defaultLaneTemplateVersion.requiredPassStreak || defaultLaneTemplateStability?.requiredPassStreak || 0}
                       </Tag>
                     )}
+                    {defaultLaneTemplateVersionProductionRelapse && (
+                      <Tag color={defaultLaneTemplateVersionProductionRelapse.status === 'passed' ? 'green' : 'gold'} bordered={false}>
+                        {defaultLaneTemplateVersionProductionRelapse.status === 'passed' ? '生产后验已修复' : '生产后验仍复发'}
+                      </Tag>
+                    )}
+                    {defaultLaneTemplateVersionProductionRelapse?.remainingFailureReasons.slice(0, 3).map(reason => (
+                      <Tag key={`default-lane-version-production-remaining-${reason}`} color="gold" bordered={false}>{reason}未修</Tag>
+                    ))}
+                    {defaultLaneTemplateVersionProductionRelapse?.clearedFailureReasons.slice(0, 3).map(reason => (
+                      <Tag key={`default-lane-version-production-cleared-${reason}`} color="green" bordered={false}>{reason}已修复</Tag>
+                    ))}
                     {recoveryRestoreReview && (
                       <Tag color="green" bordered={false}>长期扩批稳定证据</Tag>
                     )}

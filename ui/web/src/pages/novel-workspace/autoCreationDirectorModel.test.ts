@@ -6427,6 +6427,17 @@ describe('buildAutoCreationDirectorModel', () => {
       .toContain('回报欠账')
     expect(latestTemplateVersionProfile.latest_production_relapse_verdict.remaining_failure_reasons)
       .toContain('追读拉力')
+    const templateVersionRoadmapNode = policy.safe_batch_recovery_roadmap.route_nodes.find((node: any) => node.key === 'default_lane_template_version')
+    expect(templateVersionRoadmapNode.detail).toContain('生产后验仍复发')
+    expect(policy.safe_batch_recovery_roadmap.next_repair_layer).toMatchObject({
+      key: 'default_lane_template_version',
+      action_label: '修生产后验',
+      focus: {
+        task_center_filter_label: '生产后验仍复发',
+        requirement_key: 'default_lane_template',
+        template_version_id: 'safe_batch_expansion_structure_repair:668',
+      },
+    })
     const templateRepair = structureTask?.safe_batch_expansion_structure_review.default_five_chapter_lane_template_repair
     expect(templateRepair).toMatchObject({
       production_relapse_verdict: {
@@ -6524,7 +6535,8 @@ describe('buildAutoCreationDirectorModel', () => {
       ],
     } as any)
 
-    const verdict = model.batchGuardrail.preflight.inputSnapshot.safe_batch_expansion_policy.expansion_feedback.expansion_structure_validation_result.default_five_chapter_lane_template_verdict
+    const policy = model.batchGuardrail.preflight.inputSnapshot.safe_batch_expansion_policy
+    const verdict = policy.expansion_feedback.expansion_structure_validation_result.default_five_chapter_lane_template_verdict
 
     expect(verdict).toMatchObject({
       status: 'passed',
@@ -6541,6 +6553,8 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(verdict.production_relapse_verdict.cleared_failure_reasons).toContain('回报欠账')
     expect(verdict.production_relapse_verdict.cleared_failure_reasons).toContain('追读拉力')
     expect(verdict.summary).toContain('生产后验已修复')
+    const templateVersionRoadmapNode = policy.safe_batch_recovery_roadmap.route_nodes.find((node: any) => node.key === 'default_lane_template_version')
+    expect(templateVersionRoadmapNode.detail).toContain('生产后验已修复')
   })
 
   test('accumulates default lane template verdicts into a stability profile', () => {
