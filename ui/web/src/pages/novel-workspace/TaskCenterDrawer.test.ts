@@ -1647,6 +1647,69 @@ describe('buildSafeBatchExpansionPolicySnapshot', () => {
     expect(snapshot?.recoveryValidation?.defaultFiveChapterLaneTemplateVerdict?.summary).toContain('第91章缺回报密度')
   })
 
+  test('keeps default lane template stability profile in expansion feedback snapshot', () => {
+    const snapshot = buildSafeBatchExpansionPolicySnapshot({
+      safe_batch_expansion_policy: {
+        status: 'recovering',
+        label: '强化扩批规则',
+        summary: '默认档位模板进入稳定性观察。',
+        target_chapter_count: 3,
+        base_chapter_count: 3,
+        expanded_chapter_count: 5,
+        required_pass_streak: 3,
+        pass_streak: 3,
+        accepted_batch_count: 3,
+        failed_batch_count: 1,
+        latest_status: 'ok',
+        expansion_feedback: {
+          status: 'recovered',
+          label: '扩批热区反馈',
+          summary: '默认档位模板最近通过，但历史仍有回报密度失败 1 次；继续3章观察。',
+          target_chapter_count: 5,
+          latest_chapter_nos: [93, 94, 95],
+          risk_count: 0,
+          default_five_chapter_lane_template_stability_profile: {
+            visible: true,
+            status: 'observing',
+            label: '默认档位模板稳定性',
+            summary: '默认档位模板最近通过，但历史仍有回报密度失败 1 次；继续3章观察 1/2 批。',
+            latest_status: 'passed',
+            latest_chapter_nos: [93, 94, 95],
+            validation_batch_count: 2,
+            passed_batch_count: 1,
+            failed_batch_count: 1,
+            pass_streak: 1,
+            required_pass_streak: 2,
+            recommendation: 'continue_validation',
+            failed_requirement_count: 1,
+            requirements: [
+              { key: 'default_lane_payoff_density', label: '回报密度', passed_count: 1, failed_count: 1, latest_status: 'fulfilled' },
+            ],
+          },
+        },
+      },
+    })
+
+    expect(snapshot?.expansionFeedback?.defaultFiveChapterLaneTemplateStabilityProfile).toMatchObject({
+      visible: true,
+      status: 'observing',
+      label: '默认档位模板稳定性',
+      latestStatus: 'passed',
+      latestChapterNos: [93, 94, 95],
+      validationBatchCount: 2,
+      passedBatchCount: 1,
+      failedBatchCount: 1,
+      passStreak: 1,
+      requiredPassStreak: 2,
+      recommendation: 'continue_validation',
+      failedRequirementCount: 1,
+      requirements: [
+        { key: 'default_lane_payoff_density', label: '回报密度', passedCount: 1, failedCount: 1, latestStatus: 'fulfilled' },
+      ],
+    })
+    expect(snapshot?.expansionFeedback?.defaultFiveChapterLaneTemplateStabilityProfile?.summary).toContain('继续3章观察')
+  })
+
   test('summarizes failed recovery validation batches as a focused repair action', () => {
     const snapshot = buildSafeBatchExpansionPolicySnapshot({
       safe_batch_expansion_policy: {

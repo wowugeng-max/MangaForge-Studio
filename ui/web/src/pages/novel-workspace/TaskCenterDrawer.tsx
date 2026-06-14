@@ -1546,6 +1546,7 @@ export type SafeBatchExpansionFeedbackSnapshot = {
   structureValidationResult: SafeBatchExpansionStructureValidationResultSnapshot | null
   structureRepairEffectiveness: SafeBatchExpansionStructureRepairEffectivenessSnapshot | null
   structureDecisionTrend: SafeBatchExpansionStructureDecisionTrendSnapshot | null
+  defaultFiveChapterLaneTemplateStabilityProfile: SafeBatchDefaultFiveChapterLaneTemplateStabilityProfileSnapshot | null
   recoveryRestoreStabilityEvidence: SafeBatchRecoveryRestoreStabilityEvidenceSnapshot | null
   defaultFiveChapterRegression: SafeBatchDefaultFiveChapterRegressionSnapshot | null
   defaultFiveChapterRecoveryVerdictRelapse: SafeBatchDefaultFiveChapterRecoveryVerdictRelapseSnapshot | null
@@ -1616,6 +1617,36 @@ export type SafeBatchDefaultFiveChapterLaneTemplateVerdictSnapshot = {
     label: string
     chapterNos: number[]
   }[]
+}
+
+export type SafeBatchDefaultFiveChapterLaneTemplateStabilityProfileSnapshot = {
+  visible: boolean
+  status: string
+  label: string
+  summary: string
+  latestStatus: string
+  latestBatchCreatedAt: string
+  latestChapterNos: number[]
+  validationBatchCount: number
+  passedBatchCount: number
+  failedBatchCount: number
+  passStreak: number
+  requiredPassStreak: number
+  recommendation: string
+  failedRequirementCount: number
+  requirements: {
+    key: string
+    label: string
+    passedCount: number
+    failedCount: number
+    latestStatus: string
+    latestMissingChapterNos: number[]
+  }[]
+  topFailedRequirement: {
+    key: string
+    label: string
+    failedCount: number
+  } | null
 }
 
 export type SafeBatchDefaultFiveChapterRecoveryVerdictRelapseSnapshot = {
@@ -2302,6 +2333,52 @@ function buildSafeBatchDefaultFiveChapterLaneTemplateVerdictSnapshot(verdictLike
   return snapshot
 }
 
+function buildSafeBatchDefaultFiveChapterLaneTemplateStabilityProfileSnapshot(profileLike: any): SafeBatchDefaultFiveChapterLaneTemplateStabilityProfileSnapshot | null {
+  const profile = parseJsonValue(profileLike) || profileLike || null
+  if (!profile || profile.visible === false) return null
+  const requirements = (Array.isArray(profile?.requirements)
+    ? profile.requirements
+    : Array.isArray(profile?.items)
+      ? profile.items
+      : []
+  ).map((item: any) => ({
+    key: compactEvidenceText(item?.key || ''),
+    label: compactEvidenceText(item?.label || item?.name || item?.key || ''),
+    passedCount: Number(item?.passed_count ?? item?.passedCount ?? 0),
+    failedCount: Number(item?.failed_count ?? item?.failedCount ?? 0),
+    latestStatus: compactEvidenceText(item?.latest_status || item?.latestStatus || ''),
+    latestMissingChapterNos: normalizeChapterNos(item?.latest_missing_chapter_nos || item?.latestMissingChapterNos),
+  })).filter((item: any) => item.key || item.label || item.passedCount > 0 || item.failedCount > 0)
+  const topFailedRaw = profile?.top_failed_requirement || profile?.topFailedRequirement || null
+  const topFailedRequirement = topFailedRaw ? {
+    key: compactEvidenceText(topFailedRaw?.key || ''),
+    label: compactEvidenceText(topFailedRaw?.label || topFailedRaw?.name || topFailedRaw?.key || ''),
+    failedCount: Number(topFailedRaw?.failed_count ?? topFailedRaw?.failedCount ?? 0),
+  } : null
+  const snapshot = {
+    visible: true,
+    status: compactEvidenceText(profile?.status || ''),
+    label: compactEvidenceText(profile?.label || '默认档位模板稳定性'),
+    summary: compactEvidenceText(profile?.summary || ''),
+    latestStatus: compactEvidenceText(profile?.latest_status || profile?.latestStatus || ''),
+    latestBatchCreatedAt: compactEvidenceText(profile?.latest_batch_created_at || profile?.latestBatchCreatedAt || ''),
+    latestChapterNos: normalizeChapterNos(profile?.latest_chapter_nos || profile?.latestChapterNos),
+    validationBatchCount: Number(profile?.validation_batch_count ?? profile?.validationBatchCount ?? 0),
+    passedBatchCount: Number(profile?.passed_batch_count ?? profile?.passedBatchCount ?? 0),
+    failedBatchCount: Number(profile?.failed_batch_count ?? profile?.failedBatchCount ?? 0),
+    passStreak: Number(profile?.pass_streak ?? profile?.passStreak ?? 0),
+    requiredPassStreak: Number(profile?.required_pass_streak ?? profile?.requiredPassStreak ?? 0),
+    recommendation: compactEvidenceText(profile?.recommendation || ''),
+    failedRequirementCount: Number(profile?.failed_requirement_count ?? profile?.failedRequirementCount ?? 0),
+    requirements,
+    topFailedRequirement: topFailedRequirement && (topFailedRequirement.key || topFailedRequirement.label || topFailedRequirement.failedCount > 0)
+      ? topFailedRequirement
+      : null,
+  }
+  if (!snapshot.summary && !snapshot.requirements.length && snapshot.validationBatchCount <= 0) return null
+  return snapshot
+}
+
 function buildSafeBatchDefaultFiveChapterRecoveryVerdictSnapshot(verdictLike: any): SafeBatchDefaultFiveChapterRecoveryVerdictSnapshot | null {
   const verdict = parseJsonValue(verdictLike) || verdictLike || null
   if (!verdict || verdict.visible === false) return null
@@ -2520,6 +2597,9 @@ function buildSafeBatchExpansionFeedbackSnapshot(feedbackLike: any): SafeBatchEx
     structureDecisionTrend: buildSafeBatchExpansionStructureDecisionTrendSnapshot(
       feedback?.expansion_structure_decision_trend || feedback?.expansionStructureDecisionTrend,
     ),
+    defaultFiveChapterLaneTemplateStabilityProfile: buildSafeBatchDefaultFiveChapterLaneTemplateStabilityProfileSnapshot(
+      feedback?.default_five_chapter_lane_template_stability_profile || feedback?.defaultFiveChapterLaneTemplateStabilityProfile,
+    ),
     recoveryRestoreStabilityEvidence: buildSafeBatchRecoveryRestoreStabilityEvidenceSnapshot(
       feedback?.recovery_restore_stability_evidence || feedback?.recoveryRestoreStabilityEvidence,
     ),
@@ -2733,6 +2813,10 @@ function BatchProseRunSummary({ run }: { run: any }) {
   const defaultLaneMissedRequirements = defaultLaneRedesign?.missedRequirements || []
   const defaultFiveChapterRegression = expansionFeedback?.defaultFiveChapterRegression || null
   const defaultRecoveryVerdictRelapse = expansionFeedback?.defaultFiveChapterRecoveryVerdictRelapse || null
+  const defaultLaneTemplateStability = expansionFeedback?.defaultFiveChapterLaneTemplateStabilityProfile || null
+  const defaultLaneTemplateStabilityTop = defaultLaneTemplateStability?.topFailedRequirement
+    || defaultLaneTemplateStability?.requirements.find(requirement => requirement.failedCount > 0)
+    || null
   const recoveryRestoreStability = expansionFeedback?.recoveryRestoreStabilityEvidence || null
   const recoveryRestoreStabilityLane = expansionPolicy?.recoveryRestoreStabilityLane
     || buildSafeBatchRecoveryRestoreStabilityLaneSnapshot(
@@ -2944,6 +3028,21 @@ function BatchProseRunSummary({ run }: { run: any }) {
                         缺{requirement.label}
                       </Tag>
                     ))}
+                    {defaultLaneTemplateStability && (
+                      <Tag color={defaultLaneTemplateStability.status === 'ready' ? 'green' : defaultLaneTemplateStability.status === 'redesign' || defaultLaneTemplateStability.status === 'relapsed' ? 'gold' : 'blue'} bordered={false}>
+                        {defaultLaneTemplateStability.label}
+                      </Tag>
+                    )}
+                    {defaultLaneTemplateStability && (
+                      <Tag bordered={false}>
+                        模板连过 {defaultLaneTemplateStability.passStreak}/{defaultLaneTemplateStability.requiredPassStreak}
+                      </Tag>
+                    )}
+                    {defaultLaneTemplateStabilityTop && (
+                      <Tag color="gold" bordered={false}>
+                        {defaultLaneTemplateStabilityTop.label}失败 {defaultLaneTemplateStabilityTop.failedCount}
+                      </Tag>
+                    )}
                     {recoveryRestoreReview && (
                       <Tag color="green" bordered={false}>长期扩批稳定证据</Tag>
                     )}
@@ -2971,6 +3070,9 @@ function BatchProseRunSummary({ run }: { run: any }) {
                     ))}
                   </Space>
                   <Text type="secondary" style={{ fontSize: 12 }}>{expansionFeedback.summary}</Text>
+                  {defaultLaneTemplateStability && (
+                    <Text type="secondary" style={{ fontSize: 12 }}>{defaultLaneTemplateStability.summary}</Text>
+                  )}
                   {defaultRecoveryVerdictRelapse && (
                     <Space direction="vertical" size={3} style={{ width: '100%' }}>
                       <Space wrap size={[4, 4]}>

@@ -1234,10 +1234,11 @@
 - 默认档位模板验证判定已展示到任务中心批量生成摘要。3 章验证批完成后，摘要会在 `3章验证批` 卡片里直接显示 `默认档位模板回检`：全部通过时标出四项模板全过；未通过时按章节显示缺的是 `默认档位段位职责`、`冲突轮换`、`回报密度` 还是 `章末追读模板`，作者不用再打开 JSON 复盘查漏项。
 - 默认档位模板验证缺项已反向写入后续结构修复任务书。如果 3 章验证批缺某项模板，风险雷达会把 `default_five_chapter_lane_template_verdict` 翻译为 `default_five_chapter_lane_template_repair`，写入 `safe_batch_expansion_structure_repair` 的 message/action 和修订 prompt；修复提示会明确 `第91章缺回报密度` 这类缺项、对应修复动作，以及必须回填的 `default_lane_*_delivered` 字段。
 - 默认档位模板缺项修复结果已回流进下一轮验证批任务书。已解决的 `safe_batch_expansion_structure_repair` 若包含 `default_five_chapter_lane_template_repair`，下一轮 `next_batch_brief.expansionStructureVerification.default_five_chapter_lane_template` 会继承来源 run、`repaired_missing_requirements` 和 `repair_actions`；preflight 快照与正文 prompt 会明确 `第91章缺回报密度` 这类原始缺口和修复动作，要求验证批逐章证明这些缺项没有复发。
+- 默认档位模板缺项修复后的验证通过/复发已沉淀为长期模板稳定性证据。系统会累计最近的 `default_five_chapter_lane_template_verdict`，生成 `default_five_chapter_lane_template_stability_profile`，按四项模板记录通过批、失败批、连续通过数和高频缺项；当画像仍在观察期时，总控台会保持 `启动3章验证批`，连续稳定后才恢复默认 5 章，反复同项复发时会提示升级模板重构。任务中心批量生成摘要也会显示 `默认档位模板稳定性`、模板连过次数和失败项。
 
 推荐下一步：
 
-- 将默认档位模板缺项修复后的验证通过/复发趋势沉淀为长期模板稳定性证据：当验证批通过或再次复发时，`default_five_chapter_lane_template_verdict` 应累计到默认 5 章档位稳定性画像，用于判断继续 3 章观察、恢复默认 5 章，还是升级模板重构。
+- 将默认档位模板稳定性画像反向驱动重构队列：当 `default_five_chapter_lane_template_stability_profile.recommendation=escalate_template_redesign` 时，任务中心应生成更明确的默认档位模板重构任务，要求重写四项模板和下一轮验证标准，而不是只做普通结构修复。
 
 ## 8. 使用说明维护规则
 

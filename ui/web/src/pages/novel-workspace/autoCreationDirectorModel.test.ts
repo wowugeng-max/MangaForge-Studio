@@ -5447,6 +5447,108 @@ describe('buildAutoCreationDirectorModel', () => {
     })
   })
 
+  test('accumulates default lane template verdicts into a stability profile', () => {
+    const failedValidationChapterNos = [90, 91, 92]
+    const passedValidationChapterNos = [93, 94, 95]
+    const chapterWithTemplateReceipts = (chapterNo: number, payoffDelivered = true) => ({
+      id: chapterNo,
+      chapter_no: chapterNo,
+      title: `模板稳定${chapterNo}`,
+      chapter_text: '模板稳定正文'.repeat(500),
+      raw_payload: {
+        generated_scene_breakdown: [{
+          expansion_structure_decision_execution: {
+            segment_role_delivered: true,
+            observation_metrics_delivered: true,
+            redesign_principles_delivered: true,
+            default_lane_segment_duty_delivered: true,
+            default_lane_conflict_rotation_delivered: true,
+            default_lane_payoff_density_delivered: payoffDelivered,
+            default_lane_ending_hook_template_delivered: true,
+            evidence: [`第${chapterNo}章默认档位模板回执。`],
+          },
+        }],
+      },
+    })
+    const model = buildAutoCreationDirectorModel({
+      planning: readySafeBatchPlanning({ futureRoute: futureRouteRange(96, 5) }),
+      writing: readySafeBatchWriting({
+        nextChapter: { ...baseWriting.nextChapter, id: 96, chapterNo: 96, title: '模板稳定后96' },
+        previousChapter: { chapterNo: 95, title: '模板稳定95', wordCount: 3200, hasProse: true },
+      }),
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: { last_updated_chapter: 95 },
+      chapters: [
+        ...[41, 42, 43, 44, 45, 46, 47, 48, 49].map(chapterNo => ({
+          id: chapterNo,
+          chapter_no: chapterNo,
+          title: `强化趋势${chapterNo}`,
+          chapter_text: '强化趋势正文'.repeat(500),
+        })),
+        ...failedValidationChapterNos.map(chapterNo => chapterWithTemplateReceipts(chapterNo, chapterNo !== 91)),
+        ...passedValidationChapterNos.map(chapterNo => chapterWithTemplateReceipts(chapterNo, true)),
+      ],
+      reviews: [
+        ...strengthenedAcceptanceQualityReviews([41, 42, 43], 6501, '2026-06-19T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([44, 45, 46], 6511, '2026-06-20T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([47, 48, 49], 6521, '2026-06-21T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews(failedValidationChapterNos, 6531, '2026-06-22T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews(passedValidationChapterNos, 6541, '2026-06-23T01:00:00.000Z'),
+      ],
+      runRecords: [
+        strengthenedAcceptanceBatchRun({ id: 650, createdAt: '2026-06-19T00:00:00.000Z', chapterNos: [41, 42, 43] }),
+        strengthenedAcceptanceBatchRun({ id: 651, createdAt: '2026-06-20T00:00:00.000Z', chapterNos: [44, 45, 46] }),
+        strengthenedAcceptanceBatchRun({ id: 652, createdAt: '2026-06-21T00:00:00.000Z', chapterNos: [47, 48, 49] }),
+        defaultLaneTemplateValidationBatchRun({
+          id: 653,
+          createdAt: '2026-06-22T00:00:00.000Z',
+          chapterNos: failedValidationChapterNos,
+        }),
+        defaultLaneTemplateValidationBatchRun({
+          id: 654,
+          createdAt: '2026-06-23T00:00:00.000Z',
+          chapterNos: passedValidationChapterNos,
+        }),
+      ],
+    } as any)
+
+    const policy = model.batchGuardrail.preflight.inputSnapshot.safe_batch_expansion_policy
+    const profile = policy.expansion_feedback.default_five_chapter_lane_template_stability_profile
+
+    expect(profile).toMatchObject({
+      visible: true,
+      status: 'observing',
+      label: '默认档位模板稳定性',
+      latest_status: 'passed',
+      validation_batch_count: 2,
+      passed_batch_count: 1,
+      failed_batch_count: 1,
+      pass_streak: 1,
+      required_pass_streak: 2,
+      recommendation: 'continue_validation',
+      latest_chapter_nos: passedValidationChapterNos,
+      failed_requirement_count: 1,
+      requirements: expect.arrayContaining([
+        expect.objectContaining({
+          key: 'default_lane_payoff_density',
+          label: '回报密度',
+          passed_count: 1,
+          failed_count: 1,
+          latest_status: 'fulfilled',
+        }),
+      ]),
+    })
+    expect(profile.summary).toContain('继续3章观察')
+    expect(profile.summary).toContain('回报密度')
+    expect(policy).toMatchObject({
+      status: 'recovering',
+      target_chapter_count: 3,
+    })
+    expect(model.batchGuardrail.safeChapterCount).toBe(3)
+    expect(model.batchGuardrail.recommendedAction.label).toBe('启动3章验证批')
+  })
+
   test('summarizes expansion structure validation trend by repeated segment', () => {
     const chapterNos = [50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63]
     const model = buildAutoCreationDirectorModel({

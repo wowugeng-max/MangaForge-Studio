@@ -3891,9 +3891,20 @@ function buildSafeBatchExpansionPolicy(
   const structureDecisionTrend = feedback?.expansionStructureDecisionTrend
     || feedback?.expansion_structure_decision_trend
     || null
+  const defaultLaneTemplateStabilityProfile = feedback?.defaultFiveChapterLaneTemplateStabilityProfile
+    || feedback?.default_five_chapter_lane_template_stability_profile
+    || null
   const structureRepairRecommendation = text(structureRepairEffectiveness?.recommendation)
+  const defaultLaneTemplateRecommendation = text(defaultLaneTemplateStabilityProfile?.recommendation)
+  const defaultLaneTemplateStatus = text(defaultLaneTemplateStabilityProfile?.status)
   const structureRepairNeedsMoreValidation = structureRepairRecommendation === 'continue_small_validation'
   const structureRepairNeedsRedesign = structureRepairRecommendation === 'escalate_structure_redesign'
+  const defaultLaneTemplateNeedsObservation = defaultLaneTemplateRecommendation === 'continue_validation'
+    || defaultLaneTemplateStatus === 'observing'
+  const defaultLaneTemplateNeedsRepair = defaultLaneTemplateRecommendation === 'repair_template'
+    || defaultLaneTemplateStatus === 'relapsed'
+  const defaultLaneTemplateNeedsRedesign = defaultLaneTemplateRecommendation === 'escalate_template_redesign'
+    || defaultLaneTemplateStatus === 'redesign'
   const structureDecisionTrendWarn = text(structureDecisionTrend?.status) === 'warn'
   const feedbackNeedsRecovery = feedbackStatus === 'rollback_to_single_chapter' || feedbackStatus === 'rollback_to_small_batch'
   const feedbackRecovered = feedbackStatus === 'recovered'
@@ -3907,18 +3918,21 @@ function buildSafeBatchExpansionPolicy(
     && !feedbackNeedsRecovery
     && !structureRepairNeedsMoreValidation
     && !structureRepairNeedsRedesign
+    && !defaultLaneTemplateNeedsObservation
+    && !defaultLaneTemplateNeedsRepair
+    && !defaultLaneTemplateNeedsRedesign
     && !structureDecisionTrendWarn
   let targetChapterCount = baseChapterCount
   if (canExpand) {
     targetChapterCount = expandedChapterCount
-  } else if (structureRepairNeedsRedesign) {
+  } else if (structureRepairNeedsRedesign || defaultLaneTemplateNeedsRedesign) {
     targetChapterCount = 1
   } else if (structureDecisionTrendWarn) {
     targetChapterCount = Math.max(1, Math.min(
       baseChapterCount,
       Number(structureDecisionTrend?.suggested_target_chapter_count ?? structureDecisionTrend?.suggestedTargetChapterCount ?? baseChapterCount),
     ))
-  } else if (structureRepairNeedsMoreValidation) {
+  } else if (structureRepairNeedsMoreValidation || defaultLaneTemplateNeedsObservation || defaultLaneTemplateNeedsRepair) {
     targetChapterCount = baseChapterCount
   } else if (feedbackNeedsRecovery) {
     targetChapterCount = Math.max(1, Math.min(baseChapterCount, Number(feedback?.targetChapterCount || baseChapterCount)))
@@ -3929,10 +3943,16 @@ function buildSafeBatchExpansionPolicy(
     : `暂无强化恢复验收趋势，继续保持 ${baseChapterCount} 章以内小批量安全连写。`
   if (structureRepairNeedsRedesign) {
     summary = `强化恢复验收连续 ${Math.max(0, trend.passStreak)}/${requiredPassStreak} 批通过；${structureRepairSummary}结构修复有效性要求升级批次设计重构，下一轮回到单章治理。`
+  } else if (defaultLaneTemplateNeedsRedesign) {
+    summary = `强化恢复验收连续 ${Math.max(0, trend.passStreak)}/${requiredPassStreak} 批通过；${text(defaultLaneTemplateStabilityProfile?.summary)}默认档位模板稳定性要求升级模板重构，下一轮回到单章治理。`
   } else if (structureDecisionTrendWarn) {
     summary = `强化恢复验收连续 ${Math.max(0, trend.passStreak)}/${requiredPassStreak} 批通过；${text(structureDecisionTrend?.summary)}结构决策执行趋势未稳，下一轮保持 ${targetChapterCount} 章以内安全连写。`
   } else if (structureRepairNeedsMoreValidation) {
     summary = `强化恢复验收连续 ${Math.max(0, trend.passStreak)}/${requiredPassStreak} 批通过；${structureRepairSummary}结构修复有效性建议继续小批验证，下一轮保持 ${baseChapterCount} 章以内安全连写。`
+  } else if (defaultLaneTemplateNeedsObservation) {
+    summary = `强化恢复验收连续 ${Math.max(0, trend.passStreak)}/${requiredPassStreak} 批通过；${text(defaultLaneTemplateStabilityProfile?.summary)}下一轮继续保持 ${baseChapterCount} 章模板观察批。`
+  } else if (defaultLaneTemplateNeedsRepair) {
+    summary = `强化恢复验收连续 ${Math.max(0, trend.passStreak)}/${requiredPassStreak} 批通过；${text(defaultLaneTemplateStabilityProfile?.summary)}默认档位模板仍需回修，下一轮保持 ${baseChapterCount} 章以内验证。`
   } else if (feedbackNeedsRecovery) {
     summary = `强化恢复验收连续 ${Math.max(0, trend.passStreak)}/${requiredPassStreak} 批通过，但最近一次5章扩批存在扩批分段热区；${text(feedback?.summary, `下一轮保持 ${targetChapterCount} 章以内安全连写。`)}`
   } else if (canExpand) {
@@ -3940,7 +3960,13 @@ function buildSafeBatchExpansionPolicy(
       ? `强化恢复验收连续 ${trend.passStreak}/${requiredPassStreak} 批通过；${text(feedback?.summary, '扩批分段热区已修复并通过复检。')}本轮恢复 ${expandedChapterCount} 章安全连写。`
       : `强化恢复验收连续 ${trend.passStreak}/${requiredPassStreak} 批通过，核心守恒、读者回报和追读拉力未复发，本轮可从 ${baseChapterCount} 章扩到 ${expandedChapterCount} 章安全连写。`
   }
-  const status = canExpand ? 'expanded' : feedbackNeedsRecovery || structureRepairNeedsMoreValidation || structureRepairNeedsRedesign || structureDecisionTrendWarn ? 'recovering' : 'observing'
+  const status = canExpand ? 'expanded' : feedbackNeedsRecovery
+    || structureRepairNeedsMoreValidation
+    || structureRepairNeedsRedesign
+    || defaultLaneTemplateNeedsObservation
+    || defaultLaneTemplateNeedsRepair
+    || defaultLaneTemplateNeedsRedesign
+    || structureDecisionTrendWarn ? 'recovering' : 'observing'
   const recoveryRoadmap = buildSafeBatchRecoveryRoadmap({
     trend,
     feedback,
@@ -5081,6 +5107,9 @@ function safeBatchExpansionFeedbackSnapshot(feedback: AnyRecord) {
     ...(feedback?.expansionStructureValidationTrend ? {
       expansion_structure_validation_trend: feedback.expansionStructureValidationTrend,
     } : {}),
+    ...(feedback?.defaultFiveChapterLaneTemplateStabilityProfile ? {
+      default_five_chapter_lane_template_stability_profile: feedback.defaultFiveChapterLaneTemplateStabilityProfile,
+    } : {}),
     ...(feedback?.expansionStructureRepairEffectiveness ? {
       expansion_structure_repair_effectiveness: feedback.expansionStructureRepairEffectiveness,
     } : {}),
@@ -5407,6 +5436,138 @@ function buildSafeBatchExpansionStructureValidationTrend(args: {
     ...(defaultRecoveryVerdictRelapseTrend ? {
       default_five_chapter_recovery_verdict_relapse_trend: defaultRecoveryVerdictRelapseTrend,
     } : {}),
+  }
+}
+
+function buildDefaultFiveChapterLaneTemplateStabilityProfile(args: {
+  validationEvaluations: AnyRecord[]
+}) {
+  const verdictEvents = arrayValue(args.validationEvaluations)
+    .map(evaluation => {
+      const result = evaluation?.result || {}
+      const verdict = result.default_five_chapter_lane_template_verdict
+        || result.defaultFiveChapterLaneTemplateVerdict
+        || null
+      if (!verdict || verdict.visible === false) return null
+      const status = text(verdict.status) === 'failed' ? 'failed' : 'passed'
+      const missingRequirements = arrayValue(verdict.missing_requirements || verdict.missingRequirements)
+        .map((item: AnyRecord) => ({
+          key: text(item?.key),
+          label: text(item?.label || item?.key, '模板缺项'),
+          chapter_nos: arrayValue(item?.chapter_nos || item?.chapterNos)
+            .map((chapterNo: any) => Number(chapterNo))
+            .filter((chapterNo: number) => chapterNo > 0),
+        }))
+        .filter((item: AnyRecord) => item.key || item.label || item.chapter_nos.length)
+      const requirements = arrayValue(verdict.requirements)
+        .map((item: AnyRecord) => ({
+          key: text(item?.key),
+          label: text(item?.label || item?.key, '模板要求'),
+          status: text(item?.status, 'fulfilled'),
+        }))
+        .filter((item: AnyRecord) => item.key || item.label)
+      return {
+        status,
+        createdAt: text(evaluation.latestBatchCreatedAt),
+        chapterNos: arrayValue(evaluation.latestChapterNos || verdict.validation_chapter_nos || verdict.validationChapterNos)
+          .map((chapterNo: any) => Number(chapterNo))
+          .filter((chapterNo: number) => chapterNo > 0),
+        summary: text(verdict.summary),
+        missingCount: Number(verdict.missing_count ?? verdict.missingCount ?? missingRequirements.reduce((sum: number, item: AnyRecord) => sum + item.chapter_nos.length, 0)),
+        missingRequirements,
+        requirements,
+      }
+    })
+    .filter(Boolean)
+
+  if (!verdictEvents.length) return null
+
+  const latest = verdictEvents[0]
+  let passStreak = 0
+  for (const event of verdictEvents) {
+    if (event.status !== 'passed') break
+    passStreak += 1
+  }
+  const validationBatchCount = verdictEvents.length
+  const passedBatchCount = verdictEvents.filter(event => event.status === 'passed').length
+  const failedBatchCount = validationBatchCount - passedBatchCount
+  const requiredPassStreak = 2
+  const allRequirementLabels = new Map(
+    DEFAULT_FIVE_CHAPTER_LANE_TEMPLATE_REQUIREMENTS.map(requirement => [requirement.key, requirement.label]),
+  )
+  verdictEvents.forEach(event => {
+    arrayValue(event.requirements).forEach((requirement: AnyRecord) => {
+      const key = text(requirement?.key)
+      if (key) allRequirementLabels.set(key, text(requirement?.label, key))
+    })
+    arrayValue(event.missingRequirements).forEach((requirement: AnyRecord) => {
+      const key = text(requirement?.key)
+      if (key) allRequirementLabels.set(key, text(requirement?.label, key))
+    })
+  })
+  const requirementStats = Array.from(allRequirementLabels.entries()).map(([key, label]) => {
+    const failedEvents = verdictEvents.filter(event => arrayValue(event.missingRequirements).some((item: AnyRecord) => text(item?.key) === key))
+    const latestRequirement = arrayValue(latest.requirements).find((item: AnyRecord) => text(item?.key) === key)
+    return {
+      key,
+      label,
+      passed_count: validationBatchCount - failedEvents.length,
+      failed_count: failedEvents.length,
+      latest_status: text(latestRequirement?.status, failedEvents.some(event => event === latest) ? 'missing' : 'fulfilled'),
+      latest_missing_chapter_nos: arrayValue(latest.missingRequirements)
+        .filter((item: AnyRecord) => text(item?.key) === key)
+        .flatMap((item: AnyRecord) => arrayValue(item.chapter_nos))
+        .map((chapterNo: any) => Number(chapterNo))
+        .filter((chapterNo: number) => chapterNo > 0),
+    }
+  })
+  const failedRequirementCount = requirementStats.reduce((sum, item) => sum + item.failed_count, 0)
+  const topFailedRequirement = requirementStats
+    .filter(item => item.failed_count > 0)
+    .sort((a, b) => b.failed_count - a.failed_count)[0] || null
+  const latestStatus = latest.status
+  const repeatedLatestFailure = latestStatus === 'failed'
+    && arrayValue(latest.missingRequirements).some((item: AnyRecord) => {
+      const key = text(item?.key)
+      return key && (requirementStats.find(requirement => requirement.key === key)?.failed_count || 0) >= 2
+    })
+  const status = latestStatus === 'passed'
+    ? passStreak >= requiredPassStreak ? 'ready' : 'observing'
+    : repeatedLatestFailure ? 'redesign' : 'relapsed'
+  const recommendation = status === 'ready'
+    ? 'restore_default_lane'
+    : status === 'observing'
+      ? 'continue_validation'
+      : status === 'redesign'
+        ? 'escalate_template_redesign'
+        : 'repair_template'
+  const latestChapterText = compactChapterNoEvidence(latest.chapterNos)
+  const topFailureText = topFailedRequirement ? `${topFailedRequirement.label}失败 ${topFailedRequirement.failed_count} 次` : ''
+  const summary = status === 'ready'
+    ? `默认档位模板连续 ${passStreak} 批通过，${latestChapterText}四项模板稳定，可作为恢复默认5章档位证据。`
+    : status === 'observing'
+      ? `默认档位模板最近通过，但历史仍有${topFailureText || '模板缺项'}；继续3章观察 ${passStreak}/${requiredPassStreak} 批，确认四项模板不复发后再恢复默认5章。`
+      : status === 'redesign'
+        ? `默认档位模板同项复发，${topFailureText || '模板缺项'}需要升级模板重构，暂缓恢复默认5章档位。`
+        : `默认档位模板最近复发，${text(latest.summary, topFailureText || '模板缺项未清')}；先修复模板缺项并回到3章验证批。`
+
+  return {
+    visible: true,
+    status,
+    label: '默认档位模板稳定性',
+    summary,
+    latest_status: latestStatus,
+    latest_batch_created_at: latest.createdAt,
+    latest_chapter_nos: latest.chapterNos,
+    validation_batch_count: validationBatchCount,
+    passed_batch_count: passedBatchCount,
+    failed_batch_count: failedBatchCount,
+    pass_streak: passStreak,
+    required_pass_streak: requiredPassStreak,
+    failed_requirement_count: failedRequirementCount,
+    recommendation,
+    requirements: requirementStats,
+    ...(topFailedRequirement ? { top_failed_requirement: topFailedRequirement } : {}),
   }
 }
 
@@ -6015,6 +6176,9 @@ function buildSafeBatchExpansionFeedback(args: {
     validationEvaluations: structureValidationEvaluations,
     expansionEvaluations: expansionEvaluationsForTrend,
   })
+  const defaultFiveChapterLaneTemplateStabilityProfile = buildDefaultFiveChapterLaneTemplateStabilityProfile({
+    validationEvaluations: structureValidationEvaluations,
+  })
   const expansionStructureRepairEffectiveness = buildSafeBatchExpansionStructureRepairEffectiveness({
     runRecords: args.runRecords,
     validationEvaluations: structureValidationEvaluations,
@@ -6053,6 +6217,7 @@ function buildSafeBatchExpansionFeedback(args: {
         rollbackPolicy: riskCount > 0 ? rollbackPolicy : null,
         expansionStructureValidationResult: result,
         expansionStructureValidationTrend,
+        defaultFiveChapterLaneTemplateStabilityProfile,
         expansionStructureRepairEffectiveness,
         expansionStructureDecisionTrend,
       }
@@ -6071,6 +6236,7 @@ function buildSafeBatchExpansionFeedback(args: {
       repeatedHotspotSegment: null,
       rollbackPolicy: null,
       expansionStructureValidationTrend,
+      defaultFiveChapterLaneTemplateStabilityProfile,
       expansionStructureRepairEffectiveness,
       expansionStructureDecisionTrend,
     }
@@ -6106,6 +6272,7 @@ function buildSafeBatchExpansionFeedback(args: {
     recoveryRestoreStabilityEvidence,
     defaultFiveChapterRegression,
     defaultFiveChapterRecoveryVerdictRelapse,
+    defaultFiveChapterLaneTemplateStabilityProfile,
   }
   const validationIsNewerThanLatestExpansion = latestStructureValidation
     ? Date.parse(text(latestStructureValidation.latestBatchCreatedAt)) > Date.parse(text(latest.latestBatchCreatedAt))
