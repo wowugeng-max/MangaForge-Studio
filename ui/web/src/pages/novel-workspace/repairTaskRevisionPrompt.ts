@@ -676,8 +676,12 @@ export function buildRepairTaskRevisionPrompt(task: AnyRecord, run?: AnyRecord |
   }
   if (expansionStructureDecisionReview) {
     const review = objectValue(expansionStructureDecisionReview)
+    const defaultLaneRedesign = objectValue(review.default_five_chapter_lane_redesign || review.defaultFiveChapterLaneRedesign)
     const observationMetrics = arrayValue(review.observation_metrics || review.observationMetrics)
       .map(item => text(item))
+      .filter(Boolean)
+    const repeatedFailureReasons = arrayValue(defaultLaneRedesign.repeated_failure_reasons || defaultLaneRedesign.repeatedFailureReasons)
+      .map(item => firstText(item?.reason, item?.label, item))
       .filter(Boolean)
     const missedChapterNos = arrayValue(review.missed_chapter_nos || review.missedChapterNos)
       .map(chapterNo => Number(chapterNo))
@@ -698,9 +702,17 @@ export function buildRepairTaskRevisionPrompt(task: AnyRecord, run?: AnyRecord |
       firstText(review.summary) ? `复盘结论：${firstText(review.summary)}` : '',
       firstText(review.instruction) ? `执行口径：${firstText(review.instruction)}` : '',
       observationMetrics.length > 0 ? `观察指标：${observationMetrics.join('；')}` : '',
+      Object.keys(defaultLaneRedesign).length ? '【默认5章档位结构重构】' : '',
+      Number(defaultLaneRedesign.relapse_count ?? defaultLaneRedesign.relapseCount ?? 0) > 0 ? `恢复判定连续失效：${Number(defaultLaneRedesign.relapse_count ?? defaultLaneRedesign.relapseCount)}次` : '',
+      repeatedFailureReasons.length > 0 ? `同维复发：${repeatedFailureReasons.join('、')}` : '',
+      firstText(defaultLaneRedesign.segment_duty_rewrite, defaultLaneRedesign.segmentDutyRewrite) ? `段位职责重写：${firstText(defaultLaneRedesign.segment_duty_rewrite, defaultLaneRedesign.segmentDutyRewrite)}` : '',
+      firstText(defaultLaneRedesign.conflict_rotation, defaultLaneRedesign.conflictRotation) ? `冲突轮换：${firstText(defaultLaneRedesign.conflict_rotation, defaultLaneRedesign.conflictRotation)}` : '',
+      firstText(defaultLaneRedesign.payoff_density, defaultLaneRedesign.payoffDensity) ? `回报密度：${firstText(defaultLaneRedesign.payoff_density, defaultLaneRedesign.payoffDensity)}` : '',
+      firstText(defaultLaneRedesign.ending_hook_template, defaultLaneRedesign.endingHookTemplate) ? `章末追读模板：${firstText(defaultLaneRedesign.ending_hook_template, defaultLaneRedesign.endingHookTemplate)}` : '',
       missedChapterNos.length > 0 ? `漏项章节：第${missedChapterNos.join('、')}章` : '',
       ...failedItems.map(item => `${item.chapterNo > 0 ? `第${item.chapterNo}章` : ''}${item.label}：${item.text || '未提供可见执行证据'}`),
       '修订要求：逐章补齐扩批结构决策指定的段位职责、观察指标和必要的重构原则；恢复5章时不能淡化结构约束，小批验证时必须证明观察指标，单章重构时先改结构原则再写正文。',
+      Object.keys(defaultLaneRedesign).length ? '默认档位回填要求：expansion_structure_decision_execution 必须显式回填 default_lane_segment_duty_delivered、default_lane_conflict_rotation_delivered、default_lane_payoff_density_delivered、default_lane_ending_hook_template_delivered，并在 evidence 中说明四项模板如何落到正文。' : '',
       '修订后必须重新回填 expansion_structure_decision_execution，并重新运行批次复盘，确认结构决策执行为 ok 后再放行下一批。',
     )
   }

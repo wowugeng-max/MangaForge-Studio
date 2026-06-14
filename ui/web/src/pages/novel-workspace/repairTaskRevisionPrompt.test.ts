@@ -266,6 +266,49 @@ describe('buildRepairTaskRevisionPrompt', () => {
     expect(prompt).toContain('重新回填 expansion_structure_decision_execution')
   })
 
+  test('injects default lane redesign obligations into structure decision repair prompts', () => {
+    const prompt = buildRepairTaskRevisionPrompt({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'safe_batch_expansion_structure_decision_mismatch',
+      severity: 'high',
+      message: '默认5章档位模板未落地。',
+      action: '补齐默认档位四项模板。',
+      safe_batch_expansion_structure_decision_review: {
+        recommendation: 'escalate_structure_redesign',
+        target_chapter_count: 1,
+        segment_label: '中段',
+        summary: '默认5章档位模板未落地：第89章有 4 项缺口。',
+        instruction: '默认 5 章档位连续恢复判定失效，先重写默认档位结构。',
+        observation_metrics: ['恢复判定连续失效 2 次', '同维复发：核心偏移、回报欠账、追读拉力'],
+        default_five_chapter_lane_redesign: {
+          reason: 'repeated_recovery_verdict_relapse',
+          relapse_count: 2,
+          repeated_failure_reasons: ['核心偏移', '回报欠账', '追读拉力'],
+          segment_duty_rewrite: '段位职责重写：定义默认 5 章前段、中段、后段职责。',
+          conflict_rotation: '冲突轮换：五章内轮换规则压迫、人物对抗、信息误导。',
+          payoff_density: '回报密度：每章都有显性回报，不能连续两章只铺垫。',
+          ending_hook_template: '章末追读模板：最后 300 字给触发事件、读者问题、下一章风险。',
+        },
+        missed_chapter_nos: [89],
+        failed_items: [
+          { chapter_no: 89, key: 'default_lane_segment_duty', label: '默认档位段位职责', text: '没有回填默认5章段位职责模板。' },
+          { chapter_no: 89, key: 'default_lane_conflict_rotation', label: '冲突轮换', text: '没有回填五章冲突轮换模板。' },
+          { chapter_no: 89, key: 'default_lane_payoff_density', label: '回报密度', text: '没有回填每章显性回报密度。' },
+          { chapter_no: 89, key: 'default_lane_ending_hook_template', label: '章末追读模板', text: '没有回填最后300字追读三件套。' },
+        ],
+      },
+    })
+
+    expect(prompt).toContain('默认5章档位结构重构')
+    expect(prompt).toContain('恢复判定连续失效：2次')
+    expect(prompt).toContain('同维复发：核心偏移、回报欠账、追读拉力')
+    expect(prompt).toContain('段位职责重写：定义默认 5 章前段、中段、后段职责。')
+    expect(prompt).toContain('冲突轮换：五章内轮换规则压迫、人物对抗、信息误导。')
+    expect(prompt).toContain('回报密度：每章都有显性回报，不能连续两章只铺垫。')
+    expect(prompt).toContain('章末追读模板：最后 300 字给触发事件、读者问题、下一章风险。')
+    expect(prompt).toContain('default_lane_conflict_rotation_delivered')
+  })
+
   test('injects expansion structure validation trend into structure repair prompts', () => {
     const prompt = buildRepairTaskRevisionPrompt({
       source: 'auto_creation_safe_batch_risk',

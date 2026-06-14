@@ -738,6 +738,10 @@ describe('chapter prose word target', () => {
     expect(prompt).toContain('回报密度')
     expect(prompt).toContain('章末追读模板')
     expect(prompt).toContain('repeated_recovery_verdict_relapse')
+    expect(prompt).toContain('default_lane_segment_duty_delivered')
+    expect(prompt).toContain('default_lane_conflict_rotation_delivered')
+    expect(prompt).toContain('default_lane_payoff_density_delivered')
+    expect(prompt).toContain('default_lane_ending_hook_template_delivered')
   })
 
   test('injects longform memory anchor from safe batch preflight into paragraph prose prompt', () => {

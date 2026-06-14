@@ -5727,6 +5727,7 @@ export function createNovelWritingService(ctx: {
       defaultFiveChapterLaneRedesign?.conflict_rotation ? `冲突轮换：${defaultFiveChapterLaneRedesign.conflict_rotation}` : '',
       defaultFiveChapterLaneRedesign?.payoff_density ? `回报密度：${defaultFiveChapterLaneRedesign.payoff_density}` : '',
       defaultFiveChapterLaneRedesign?.ending_hook_template ? `章末追读模板：${defaultFiveChapterLaneRedesign.ending_hook_template}` : '',
+      defaultFiveChapterLaneRedesign ? '默认档位回执字段：expansion_structure_decision_execution 必须额外回填 default_lane_segment_duty_delivered(boolean)、default_lane_conflict_rotation_delivered(boolean)、default_lane_payoff_density_delivered(boolean)、default_lane_ending_hook_template_delivered(boolean)，并在 evidence 中说明四项模板如何落到正文。' : '',
       expansionStructureDecision ? '执行回执：scene_breakdown 中承担结构职责的场景必须回填 expansion_structure_decision_execution，字段包含 segment_role_delivered(boolean)、observation_metrics_delivered(boolean)、redesign_principles_delivered(boolean)、evidence(array)。' : '',
       expansionStructureDecision ? JSON.stringify(expansionStructureDecision, null, 2).slice(0, 3000) : '',
       '',
@@ -5946,6 +5947,7 @@ export function createNovelWritingService(ctx: {
       chapterDraft?.chapter_no ? `17. 本次只生成第${chapterDraft.chapter_no}章，不得输出其他章节或续章内容。` : '',
       '',
       expansionStructureDecision ? '输出附加要求：如果存在 next_batch_brief.expansion_structure_decision，scene_breakdown 的相关场景必须包含 expansion_structure_decision_execution，用 segment_role_delivered、observation_metrics_delivered、redesign_principles_delivered 和 evidence 说明是否真正执行。' : '',
+      defaultFiveChapterLaneRedesign ? '输出附加要求：如果存在 default_five_chapter_lane_redesign，expansion_structure_decision_execution 还必须包含 default_lane_segment_duty_delivered、default_lane_conflict_rotation_delivered、default_lane_payoff_density_delivered、default_lane_ending_hook_template_delivered，并分别给出 evidence。' : '',
       '输出 JSON，包含 prose_chapters 数组。数组只能有一项，且必须包含 chapter_no, title, chapter_text, scene_breakdown, continuity_notes。scene_breakdown 要回填每个场景的 scene_type、required_beats/action_beats 完成情况和 description_budget 执行情况。chapter_text 是完整正文，不要 markdown 标题。',
     ].filter(Boolean).join('\n')
   }

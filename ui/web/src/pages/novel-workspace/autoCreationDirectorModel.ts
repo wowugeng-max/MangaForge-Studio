@@ -4408,7 +4408,8 @@ function safeBatchExpansionStructureDecisionFromContext(args: {
   const observationMetrics = arrayValue(raw.observation_metrics || raw.observationMetrics)
     .map(item => text(item))
     .filter(Boolean)
-  if (!recommendation && !instruction && !summary && observationMetrics.length === 0) return null
+  const defaultFiveChapterLaneRedesign = defaultFiveChapterLaneRedesignFromDecision(raw)
+  if (!recommendation && !instruction && !summary && observationMetrics.length === 0 && !defaultFiveChapterLaneRedesign) return null
   return {
     visible: true,
     label: firstText(raw.label, '结构修复决策'),
@@ -4421,7 +4422,37 @@ function safeBatchExpansionStructureDecisionFromContext(args: {
     instruction,
     source_run_id: raw.source_run_id ?? raw.sourceRunId ?? null,
     observation_metrics: observationMetrics,
+    ...(defaultFiveChapterLaneRedesign ? { default_five_chapter_lane_redesign: defaultFiveChapterLaneRedesign } : {}),
   }
+}
+
+function defaultFiveChapterLaneRedesignFromDecision(decision: AnyRecord | null | undefined) {
+  const raw = decision?.default_five_chapter_lane_redesign || decision?.defaultFiveChapterLaneRedesign || null
+  if (!raw || typeof raw !== 'object') return null
+  const repeatedFailureReasons = arrayValue(raw.repeated_failure_reasons || raw.repeatedFailureReasons)
+    .map(item => text(item?.reason || item?.label || item))
+    .filter(Boolean)
+  const normalized = {
+    reason: text(raw.reason),
+    label: text(raw.label, '默认5章档位结构重构'),
+    summary: text(raw.summary),
+    relapse_count: Number(raw.relapse_count ?? raw.relapseCount ?? 0),
+    repeated_failure_reasons: repeatedFailureReasons,
+    segment_duty_rewrite: text(raw.segment_duty_rewrite || raw.segmentDutyRewrite),
+    conflict_rotation: text(raw.conflict_rotation || raw.conflictRotation),
+    payoff_density: text(raw.payoff_density || raw.payoffDensity),
+    ending_hook_template: text(raw.ending_hook_template || raw.endingHookTemplate),
+  }
+  return normalized.reason
+    || normalized.summary
+    || normalized.relapse_count > 0
+    || normalized.repeated_failure_reasons.length
+    || normalized.segment_duty_rewrite
+    || normalized.conflict_rotation
+    || normalized.payoff_density
+    || normalized.ending_hook_template
+    ? normalized
+    : null
 }
 
 function expansionStructureDecisionRequiresRedesign(decision: AnyRecord) {
@@ -4436,6 +4467,7 @@ function expansionStructureDecisionRequiresRedesign(decision: AnyRecord) {
 
 function expansionStructureDecisionRequirements(decision: AnyRecord) {
   const segmentLabel = text(decision?.segment_label, '段位')
+  const defaultLaneRedesign = defaultFiveChapterLaneRedesignFromDecision(decision)
   const requirements = [
     {
       key: 'segment_role',
@@ -4454,6 +4486,30 @@ function expansionStructureDecisionRequirements(decision: AnyRecord) {
       label: '重构原则',
       planned: '单章重构时必须先落实批次结构设计原则，再推进正文。',
     })
+  }
+  if (defaultLaneRedesign) {
+    requirements.push(
+      {
+        key: 'default_lane_segment_duty',
+        label: '默认档位段位职责',
+        planned: firstText(defaultLaneRedesign.segment_duty_rewrite, '默认 5 章档位必须回填前段、中段、后段的段位职责模板。'),
+      },
+      {
+        key: 'default_lane_conflict_rotation',
+        label: '冲突轮换',
+        planned: firstText(defaultLaneRedesign.conflict_rotation, '默认 5 章档位必须回填冲突来源轮换模板。'),
+      },
+      {
+        key: 'default_lane_payoff_density',
+        label: '回报密度',
+        planned: firstText(defaultLaneRedesign.payoff_density, '默认 5 章档位必须回填逐章显性回报密度模板。'),
+      },
+      {
+        key: 'default_lane_ending_hook_template',
+        label: '章末追读模板',
+        planned: firstText(defaultLaneRedesign.ending_hook_template, '默认 5 章档位必须回填最后 300 字追读模板。'),
+      },
+    )
   }
   return requirements
 }
@@ -4506,8 +4562,21 @@ function expansionStructureDecisionRequirementDelivered(args: {
     ? ['segment_role_delivered', 'segmentRoleDelivered', 'segment_role_evidence', 'segmentRoleEvidence']
     : args.key === 'observation_metrics'
       ? ['observation_metrics_delivered', 'observationMetricsDelivered', 'observation_metric_evidence', 'observationMetricEvidence']
-      : ['redesign_principles_delivered', 'redesignPrinciplesDelivered', 'redesign_principle_evidence', 'redesignPrincipleEvidence']
-  for (const source of [args.payload, ...args.receipts]) {
+      : args.key === 'default_lane_segment_duty'
+        ? ['default_lane_segment_duty_delivered', 'defaultLaneSegmentDutyDelivered', 'segment_duty_rewrite_delivered', 'segmentDutyRewriteDelivered', 'default_lane_segment_duty_evidence', 'defaultLaneSegmentDutyEvidence']
+        : args.key === 'default_lane_conflict_rotation'
+          ? ['default_lane_conflict_rotation_delivered', 'defaultLaneConflictRotationDelivered', 'conflict_rotation_delivered', 'conflictRotationDelivered', 'default_lane_conflict_rotation_evidence', 'defaultLaneConflictRotationEvidence']
+          : args.key === 'default_lane_payoff_density'
+            ? ['default_lane_payoff_density_delivered', 'defaultLanePayoffDensityDelivered', 'payoff_density_delivered', 'payoffDensityDelivered', 'default_lane_payoff_density_evidence', 'defaultLanePayoffDensityEvidence']
+            : args.key === 'default_lane_ending_hook_template'
+              ? ['default_lane_ending_hook_template_delivered', 'defaultLaneEndingHookTemplateDelivered', 'ending_hook_template_delivered', 'endingHookTemplateDelivered', 'default_lane_ending_hook_template_evidence', 'defaultLaneEndingHookTemplateEvidence']
+              : ['redesign_principles_delivered', 'redesignPrinciplesDelivered', 'redesign_principle_evidence', 'redesignPrincipleEvidence']
+  const nestedSources = [args.payload, ...args.receipts].flatMap(source => [
+    source,
+    source?.default_five_chapter_lane_redesign_execution,
+    source?.defaultFiveChapterLaneRedesignExecution,
+  ]).filter(Boolean)
+  for (const source of nestedSources) {
     for (const key of keys) {
       const explicit = boolValue(source?.[key])
       if (explicit !== null) return explicit
@@ -4546,6 +4615,7 @@ function buildSafeBatchExpansionStructureDecisionExecutionReview(args: {
     }
   }
   const requirements = expansionStructureDecisionRequirements(decision)
+  const defaultFiveChapterLaneRedesign = defaultFiveChapterLaneRedesignFromDecision(decision)
   const successfulItems = args.items.filter(item => item.status === 'success')
   const chapterReviews = successfulItems.map(item => {
     const chapter = findChapter(args.chapters, item)
@@ -4609,6 +4679,7 @@ function buildSafeBatchExpansionStructureDecisionExecutionReview(args: {
     source_run_id: decision.source_run_id,
     instruction: decision.instruction,
     observation_metrics: decision.observation_metrics,
+    ...(defaultFiveChapterLaneRedesign ? { default_five_chapter_lane_redesign: defaultFiveChapterLaneRedesign } : {}),
     risk_count: failedItems.length,
     missed_chapter_nos: missedChapterNos,
     failed_items: failedItems,
@@ -7473,6 +7544,10 @@ function buildBatchRiskRadar(args: {
   const safeBatchExpansionStructureDecisionRiskTotal = effectiveSafeBatchExpansionStructureDecisionReview.visible
     ? Number(effectiveSafeBatchExpansionStructureDecisionReview.risk_count || 0)
     : 0
+  const safeBatchExpansionStructureDecisionDefaultLane = Boolean(
+    effectiveSafeBatchExpansionStructureDecisionReview.default_five_chapter_lane_redesign
+    || effectiveSafeBatchExpansionStructureDecisionReview.defaultFiveChapterLaneRedesign,
+  )
   const safeBatchExpansionStructureValidationTrend = args.expansionFeedback?.expansionStructureValidationTrend
     || args.expansionFeedback?.expansion_structure_validation_trend
     || null
@@ -7484,8 +7559,12 @@ function buildBatchRiskRadar(args: {
       issueType: 'safe_batch_expansion_structure_decision_mismatch',
       taskType: 'repair_planning',
       severity: safeBatchExpansionStructureDecisionRiskTotal >= 3 || text(effectiveSafeBatchExpansionStructureDecisionReview.recommendation) === 'escalate_structure_redesign' ? 'high' : 'medium',
-      message: `扩批结构决策未落地，${safeBatchExpansionStructureDecisionRiskTotal} 项段位职责、观察指标或重构原则缺口会放大扩批复发风险。`,
-      action: '回到下一批任务书和正文：逐章补齐扩批结构决策的段位职责、观察指标和必要的重构原则，再重新运行批次复盘。',
+      message: safeBatchExpansionStructureDecisionDefaultLane
+        ? `默认5章档位模板未落地，${safeBatchExpansionStructureDecisionRiskTotal} 项段位职责、冲突轮换、回报密度或章末追读模板缺口会导致恢复判定再次失效。`
+        : `扩批结构决策未落地，${safeBatchExpansionStructureDecisionRiskTotal} 项段位职责、观察指标或重构原则缺口会放大扩批复发风险。`,
+      action: safeBatchExpansionStructureDecisionDefaultLane
+        ? '回到下一批任务书和正文：补齐默认5章档位的段位职责、冲突轮换、回报密度和章末追读模板，再重新回填结构决策执行并运行批次复盘。'
+        : '回到下一批任务书和正文：逐章补齐扩批结构决策的段位职责、观察指标和必要的重构原则，再重新运行批次复盘。',
       metrics: {
         safe_batch_expansion_structure_decision_risk_count: safeBatchExpansionStructureDecisionRiskTotal,
         target_chapter_count: effectiveSafeBatchExpansionStructureDecisionReview.target_chapter_count,

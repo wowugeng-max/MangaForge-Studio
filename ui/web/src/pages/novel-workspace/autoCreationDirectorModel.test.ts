@@ -10498,6 +10498,105 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(model.batchReviewQueue.handoff.riskLabels).toContain('扩批结构决策')
   })
 
+  test('turns missed default five-chapter lane redesign execution into a batch repair task', () => {
+    const chapterNos = [89]
+    const model = buildAutoCreationDirectorModel({
+      planning: readySafeBatchPlanning({ futureRoute: futureRouteRange(90, 5) }),
+      writing: readySafeBatchWriting({
+        nextChapter: { ...baseWriting.nextChapter, id: 90, chapterNo: 90, title: '默认档模板复检' },
+        previousChapter: { chapterNo: 89, title: '默认档重构章', wordCount: 3200, hasProse: true },
+      }),
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: { last_updated_chapter: 89 },
+      chapters: [{
+        id: 89,
+        chapter_no: 89,
+        title: '默认档重构章',
+        chapter_text: '默认档重构正文'.repeat(500),
+        raw_payload: {
+          generated_scene_breakdown: [{
+            expansion_structure_decision_execution: {
+              segment_role_delivered: true,
+              observation_metrics_delivered: true,
+              redesign_principles_delivered: true,
+              evidence: ['第89章只回填了旧结构决策三项，没有写默认5章档位模板。'],
+            },
+          }],
+        },
+      }],
+      reviews: strengthenedAcceptanceQualityReviews(chapterNos, 7301, '2026-06-24T01:00:00.000Z'),
+      runRecords: [{
+        id: 730,
+        run_type: 'batch_generate_prose',
+        created_at: '2026-06-24T00:00:00.000Z',
+        status: 'success',
+        input_ref: JSON.stringify({
+          source: 'auto_creation_safe_batch',
+          safety_limit: 1,
+          next_batch_brief: {
+            chapter_range_label: '第89章',
+            expansion_structure_decision: {
+              visible: true,
+              label: '结构修复决策',
+              recommendation: 'escalate_structure_redesign',
+              target_chapter_count: 1,
+              mode_label: '单章结构重构',
+              segment_key: 'middle',
+              segment_label: '中段',
+              summary: '连续 2 次恢复判定失效，默认档位结构重构。',
+              instruction: '默认 5 章档位连续恢复判定失效，先重写默认档位结构。',
+              observation_metrics: ['恢复判定连续失效 2 次', '同维复发：核心偏移、回报欠账、追读拉力'],
+              default_five_chapter_lane_redesign: {
+                reason: 'repeated_recovery_verdict_relapse',
+                relapse_count: 2,
+                repeated_failure_reasons: ['核心偏移', '回报欠账', '追读拉力'],
+                segment_duty_rewrite: '段位职责重写：定义默认 5 章前段、中段、后段职责。',
+                conflict_rotation: '冲突轮换：五章内轮换规则压迫、人物对抗、信息误导。',
+                payoff_density: '回报密度：每章都有显性回报，不能连续两章只铺垫。',
+                ending_hook_template: '章末追读模板：最后 300 字给触发事件、读者问题、下一章风险。',
+              },
+            },
+          },
+        }),
+        output_ref: JSON.stringify({
+          total: 1,
+          success: 1,
+          failed: 0,
+          chapters: [{
+            id: 89,
+            chapter_no: 89,
+            title: '默认档重构章',
+            status: 'success',
+            score: 86,
+            word_count: 3300,
+          }],
+        }),
+      }],
+    } as any)
+
+    const decisionTask = model.batchReviewQueue.riskRadar.repairTasks.find((task: any) => task.issue_type === 'safe_batch_expansion_structure_decision_mismatch')
+
+    expect(model.batchReviewQueue.status).toBe('risk')
+    expect((model.batchReviewQueue.riskRadar as any).safeBatchExpansionStructureDecisionRiskCount).toBe(4)
+    expect(decisionTask?.message).toContain('默认5章档位模板')
+    expect(decisionTask?.safe_batch_expansion_structure_decision_review).toMatchObject({
+      recommendation: 'escalate_structure_redesign',
+      target_chapter_count: 1,
+      default_five_chapter_lane_redesign: {
+        reason: 'repeated_recovery_verdict_relapse',
+        relapse_count: 2,
+        repeated_failure_reasons: ['核心偏移', '回报欠账', '追读拉力'],
+      },
+      failed_items: expect.arrayContaining([
+        expect.objectContaining({ chapter_no: 89, key: 'default_lane_segment_duty', label: '默认档位段位职责' }),
+        expect.objectContaining({ chapter_no: 89, key: 'default_lane_conflict_rotation', label: '冲突轮换' }),
+        expect.objectContaining({ chapter_no: 89, key: 'default_lane_payoff_density', label: '回报密度' }),
+        expect.objectContaining({ chapter_no: 89, key: 'default_lane_ending_hook_template', label: '章末追读模板' }),
+      ]),
+    })
+  })
+
   test('uses expansion structure decision execution trend to hold the next batch at small validation', () => {
     const strengthenedChapterNos = [41, 42, 43, 44, 45, 46, 47, 48, 49]
     const expansionChapterNos = [70, 71, 72, 73, 74]
