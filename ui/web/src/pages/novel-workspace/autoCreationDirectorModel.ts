@@ -4290,6 +4290,48 @@ function safeBatchDefaultRecoveryRiskCountForReason(reason: string, counts: {
   return counts.riskCount
 }
 
+function normalizeDefaultFiveChapterLaneTemplateVersion(template: AnyRecord | null | undefined) {
+  if (!template || template.visible === false) return null
+  const redesignedTemplates = arrayValue(template.redesigned_templates || template.redesignedTemplates)
+    .map((item: AnyRecord) => ({
+      key: text(item?.key),
+      label: text(item?.label || item?.name || item?.key, '模板项'),
+      template: firstText(item?.template, item?.rewrite, item?.instruction, item?.text, item?.detail),
+    }))
+    .filter((item: AnyRecord) => item.key || item.label || item.template)
+  const validationStandard = arrayValue(template.validation_standard || template.validationStandard)
+    .map(item => text(item))
+    .filter(Boolean)
+  const requiredReceipts = arrayValue(template.required_receipts || template.requiredReceipts || template.receipts)
+    .map(item => text(item))
+    .filter(Boolean)
+  const explicitId = firstText(template.template_version_id, template.templateVersionId, template.version_id, template.versionId)
+  const source = firstText(template.source, 'default_five_chapter_lane_template')
+  const sourceRunId = template.source_run_id ?? template.sourceRunId ?? null
+  const id = explicitId || (sourceRunId !== null && sourceRunId !== undefined && text(sourceRunId) ? `${source}:${sourceRunId}` : '')
+  const redesignSource = firstText(template.redesign_source, template.redesignSource)
+  const hasVersionEvidence = Boolean(
+    id
+    || redesignSource
+    || redesignedTemplates.length
+    || validationStandard.length
+    || requiredReceipts.length,
+  )
+  if (!hasVersionEvidence) return null
+  return {
+    id: id || source,
+    label: text(template.label, '默认5章档位模板'),
+    source,
+    redesign_source: redesignSource,
+    source_run_id: sourceRunId,
+    repaired_at: text(template.repaired_at || template.repairedAt),
+    summary: text(template.summary),
+    redesigned_templates: redesignedTemplates,
+    validation_standard: validationStandard,
+    required_receipts: requiredReceipts,
+  }
+}
+
 function buildDefaultFiveChapterRecoveryVerdict(args: {
   verification: AnyRecord
   validationChapterNos: number[]
@@ -4359,6 +4401,7 @@ function buildDefaultFiveChapterLaneTemplateVerdict(args: {
     || args.verification?.defaultFiveChapterLaneTemplate
     || null
   if (!template || template.visible === false) return null
+  const templateVersion = normalizeDefaultFiveChapterLaneTemplateVersion(template)
   const templateRequirements = arrayValue(template.requirements)
   const labelForKey = (key: string, fallback: string) => text(
     templateRequirements.find((item: AnyRecord) => text(item?.key) === key)?.label,
@@ -4397,9 +4440,10 @@ function buildDefaultFiveChapterLaneTemplateVerdict(args: {
     status,
     label: '默认档位模板回检',
     summary: status === 'passed'
-      ? `默认档位模板回检通过：${compactChapterNoEvidence(args.validationChapterNos)}已逐章继承段位职责、冲突轮换、回报密度和章末追读模板。`
-      : `默认档位模板回检未通过：${missingSummary}，不能恢复默认5章档位。`,
+      ? `默认档位模板回检通过：${templateVersion?.id ? `版本 ${templateVersion.id} ` : ''}${compactChapterNoEvidence(args.validationChapterNos)}已逐章继承段位职责、冲突轮换、回报密度和章末追读模板。`
+      : `默认档位模板回检未通过：${templateVersion?.id ? `版本 ${templateVersion.id} ` : ''}${missingSummary}，不能恢复默认5章档位。`,
     validation_chapter_nos: args.validationChapterNos,
+    ...(templateVersion ? { template_version: templateVersion } : {}),
     requirements: requirements.map(requirement => ({
       ...requirement,
       status: missingRequirements.some((item: AnyRecord) => item.key === requirement.key) ? 'missing' : 'fulfilled',
@@ -5535,6 +5579,12 @@ function buildDefaultFiveChapterLaneTemplateStabilityProfile(args: {
           status: text(item?.status, 'fulfilled'),
         }))
         .filter((item: AnyRecord) => item.key || item.label)
+      const templateVersion = normalizeDefaultFiveChapterLaneTemplateVersion(
+        verdict.template_version
+        || verdict.templateVersion
+        || verdict.default_five_chapter_lane_template
+        || verdict.defaultFiveChapterLaneTemplate,
+      )
       return {
         status,
         createdAt: text(evaluation.latestBatchCreatedAt),
@@ -5545,6 +5595,7 @@ function buildDefaultFiveChapterLaneTemplateStabilityProfile(args: {
         missingCount: Number(verdict.missing_count ?? verdict.missingCount ?? missingRequirements.reduce((sum: number, item: AnyRecord) => sum + item.chapter_nos.length, 0)),
         missingRequirements,
         requirements,
+        templateVersion,
       }
     })
     .filter(Boolean)
@@ -5594,6 +5645,54 @@ function buildDefaultFiveChapterLaneTemplateStabilityProfile(args: {
   const topFailedRequirement = requirementStats
     .filter(item => item.failed_count > 0)
     .sort((a, b) => b.failed_count - a.failed_count)[0] || null
+  const templateVersionProfiles = Array.from(new Set(
+    verdictEvents
+      .map(event => text(event.templateVersion?.id))
+      .filter(Boolean),
+  )).map(versionId => {
+    const versionEvents = verdictEvents.filter(event => text(event.templateVersion?.id) === versionId)
+    const latestVersionEvent = versionEvents[0]
+    let versionPassStreak = 0
+    for (const event of versionEvents) {
+      if (event.status !== 'passed') break
+      versionPassStreak += 1
+    }
+    const versionPassedBatchCount = versionEvents.filter(event => event.status === 'passed').length
+    const versionFailedBatchCount = versionEvents.length - versionPassedBatchCount
+    const versionFailedRequirementStats = DEFAULT_FIVE_CHAPTER_LANE_TEMPLATE_REQUIREMENTS.map(requirement => {
+      const failedEvents = versionEvents.filter(event => arrayValue(event.missingRequirements).some((item: AnyRecord) => text(item?.key) === requirement.key))
+      return {
+        key: requirement.key,
+        label: requirement.label,
+        failed_count: failedEvents.length,
+      }
+    })
+    const versionTopFailedRequirement = versionFailedRequirementStats
+      .filter(item => item.failed_count > 0)
+      .sort((a, b) => b.failed_count - a.failed_count)[0] || null
+    const latestVersionStatus = latestVersionEvent?.status || ''
+    const versionStatus = latestVersionStatus === 'passed'
+      ? versionPassStreak >= requiredPassStreak ? 'ready' : 'observing'
+      : versionFailedBatchCount >= 2 ? 'redesign' : 'relapsed'
+    return {
+      ...latestVersionEvent.templateVersion,
+      status: versionStatus,
+      latest_status: latestVersionStatus,
+      latest_batch_created_at: text(latestVersionEvent?.createdAt),
+      latest_chapter_nos: arrayValue(latestVersionEvent?.chapterNos)
+        .map((chapterNo: any) => Number(chapterNo))
+        .filter((chapterNo: number) => chapterNo > 0),
+      validation_batch_count: versionEvents.length,
+      passed_batch_count: versionPassedBatchCount,
+      failed_batch_count: versionFailedBatchCount,
+      pass_streak: versionPassStreak,
+      required_pass_streak: requiredPassStreak,
+      ...(versionTopFailedRequirement ? { top_failed_requirement: versionTopFailedRequirement } : {}),
+    }
+  })
+  const latestTemplateVersionProfile = latest.templateVersion
+    ? templateVersionProfiles.find(item => text(item.id) === text(latest.templateVersion?.id)) || null
+    : null
   const latestStatus = latest.status
   const repeatedLatestFailure = latestStatus === 'failed'
     && arrayValue(latest.missingRequirements).some((item: AnyRecord) => {
@@ -5612,10 +5711,13 @@ function buildDefaultFiveChapterLaneTemplateStabilityProfile(args: {
         : 'repair_template'
   const latestChapterText = compactChapterNoEvidence(latest.chapterNos)
   const topFailureText = topFailedRequirement ? `${topFailedRequirement.label}失败 ${topFailedRequirement.failed_count} 次` : ''
+  const latestVersionText = latestTemplateVersionProfile?.id
+    ? `版本 ${latestTemplateVersionProfile.id} 连过 ${latestTemplateVersionProfile.pass_streak}/${latestTemplateVersionProfile.required_pass_streak} 批；`
+    : ''
   const summary = status === 'ready'
     ? `默认档位模板连续 ${passStreak} 批通过，${latestChapterText}四项模板稳定，可作为恢复默认5章档位证据。`
     : status === 'observing'
-      ? `默认档位模板最近通过，但历史仍有${topFailureText || '模板缺项'}；继续3章观察 ${passStreak}/${requiredPassStreak} 批，确认四项模板不复发后再恢复默认5章。`
+      ? `默认档位模板最近通过，${latestVersionText}但历史仍有${topFailureText || '模板缺项'}；继续3章观察 ${passStreak}/${requiredPassStreak} 批，确认四项模板不复发后再恢复默认5章。`
       : status === 'redesign'
         ? `默认档位模板同项复发，${topFailureText || '模板缺项'}需要升级模板重构，暂缓恢复默认5章档位。`
         : `默认档位模板最近复发，${text(latest.summary, topFailureText || '模板缺项未清')}；先修复模板缺项并回到3章验证批。`
@@ -5637,6 +5739,8 @@ function buildDefaultFiveChapterLaneTemplateStabilityProfile(args: {
     recommendation,
     requirements: requirementStats,
     ...(topFailedRequirement ? { top_failed_requirement: topFailedRequirement } : {}),
+    ...(templateVersionProfiles.length ? { template_version_profiles: templateVersionProfiles } : {}),
+    ...(latestTemplateVersionProfile ? { latest_template_version_profile: latestTemplateVersionProfile } : {}),
   }
 }
 

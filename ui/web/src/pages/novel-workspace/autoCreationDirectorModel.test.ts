@@ -5587,6 +5587,165 @@ describe('buildAutoCreationDirectorModel', () => {
     })
   })
 
+  test('tracks redesigned default lane template version in validation verdicts', () => {
+    const validationChapterNos = [96, 97, 98]
+    const versionedTemplate = {
+      visible: true,
+      status: 'fulfilled',
+      label: '默认5章档位模板重构',
+      source: 'safe_batch_expansion_structure_repair',
+      redesign_source: 'default_five_chapter_lane_template_redesign_queue',
+      source_run_id: 663,
+      summary: '默认档位模板已重构：回报密度失败 2 次已改为逐章显性结算。',
+      segment_duty_rewrite: '新模板：第1章抛出规则压迫，第2章制造误导反转，第3章兑现阶段收益。',
+      conflict_rotation: '新模板：规则压迫、人物对抗、信息误导按章轮换。',
+      payoff_density: '新模板：每章必须有可见收益、反制结果或阶段结算。',
+      ending_hook_template: '新模板：最后300字必须落触发事件、读者问题和下一章风险。',
+      redesigned_templates: [
+        { key: 'default_lane_payoff_density', label: '回报密度', template: '新模板：每章必须有可见收益、反制结果或阶段结算。' },
+      ],
+      validation_standard: [
+        '下一轮3章验证批必须逐章回填 default_lane_*_delivered。',
+        '连续2批模板全过后才能恢复默认5章档位。',
+      ],
+      required_receipts: [
+        'default_lane_segment_duty_delivered',
+        'default_lane_conflict_rotation_delivered',
+        'default_lane_payoff_density_delivered',
+        'default_lane_ending_hook_template_delivered',
+      ],
+      requirements: [
+        { key: 'default_lane_segment_duty', label: '默认档位段位职责', status: 'fulfilled' },
+        { key: 'default_lane_conflict_rotation', label: '冲突轮换', status: 'fulfilled' },
+        { key: 'default_lane_payoff_density', label: '回报密度', status: 'fulfilled' },
+        { key: 'default_lane_ending_hook_template', label: '章末追读模板', status: 'fulfilled' },
+      ],
+    }
+    const model = buildAutoCreationDirectorModel({
+      planning: readySafeBatchPlanning({ futureRoute: futureRouteRange(99, 5) }),
+      writing: readySafeBatchWriting({
+        nextChapter: { ...baseWriting.nextChapter, id: 99, chapterNo: 99, title: '模板版本后99' },
+        previousChapter: { chapterNo: 98, title: '模板版本98', wordCount: 3200, hasProse: true },
+      }),
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: { last_updated_chapter: 98 },
+      chapters: [
+        ...[41, 42, 43, 44, 45, 46, 47, 48, 49].map(chapterNo => ({
+          id: chapterNo,
+          chapter_no: chapterNo,
+          title: `强化趋势${chapterNo}`,
+          chapter_text: '强化趋势正文'.repeat(500),
+        })),
+        ...validationChapterNos.map(chapterNo => ({
+          id: chapterNo,
+          chapter_no: chapterNo,
+          title: `模板版本${chapterNo}`,
+          chapter_text: '模板版本正文'.repeat(500),
+          raw_payload: {
+            generated_scene_breakdown: [{
+              expansion_structure_decision_execution: {
+                segment_role_delivered: true,
+                observation_metrics_delivered: true,
+                redesign_principles_delivered: true,
+                default_lane_segment_duty_delivered: true,
+                default_lane_conflict_rotation_delivered: true,
+                default_lane_payoff_density_delivered: true,
+                default_lane_ending_hook_template_delivered: true,
+                evidence: [`第${chapterNo}章默认档位模板版本回执。`],
+              },
+            }],
+          },
+        })),
+      ],
+      reviews: [
+        ...strengthenedAcceptanceQualityReviews([41, 42, 43], 6601, '2026-06-19T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([44, 45, 46], 6611, '2026-06-20T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([47, 48, 49], 6621, '2026-06-21T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews(validationChapterNos, 6631, '2026-06-25T01:00:00.000Z'),
+      ],
+      runRecords: [
+        strengthenedAcceptanceBatchRun({ id: 660, createdAt: '2026-06-19T00:00:00.000Z', chapterNos: [41, 42, 43] }),
+        strengthenedAcceptanceBatchRun({ id: 661, createdAt: '2026-06-20T00:00:00.000Z', chapterNos: [44, 45, 46] }),
+        strengthenedAcceptanceBatchRun({ id: 662, createdAt: '2026-06-21T00:00:00.000Z', chapterNos: [47, 48, 49] }),
+        {
+          ...defaultLaneTemplateValidationBatchRun({
+            id: 663,
+            createdAt: '2026-06-25T00:00:00.000Z',
+            chapterNos: validationChapterNos,
+          }),
+          input_ref: JSON.stringify({
+            source: 'safe_batch_recovery_validation_batch',
+            safety_limit: validationChapterNos.length,
+            batch_preflight: {
+              safe_chapter_count: validationChapterNos.length,
+              allowed_chapter_nos: validationChapterNos,
+              safe_batch_expansion_structure_verification: {
+                ...expansionStructureVerification(validationChapterNos),
+                source: 'safe_batch_expansion_structure_repair',
+                default_five_chapter_lane_template: versionedTemplate,
+              },
+            },
+            next_batch_brief: {
+              chapter_range_label: '第96-98章',
+              expansionStructureVerification: {
+                ...expansionStructureVerification(validationChapterNos),
+                source: 'safe_batch_expansion_structure_repair',
+                default_five_chapter_lane_template: versionedTemplate,
+              },
+            },
+          }),
+        },
+      ],
+    } as any)
+
+    const policy = model.batchGuardrail.preflight.inputSnapshot.safe_batch_expansion_policy
+    const verdict = policy.expansion_feedback.expansion_structure_validation_result.default_five_chapter_lane_template_verdict
+    const profile = policy.expansion_feedback.default_five_chapter_lane_template_stability_profile
+
+    expect(verdict).toMatchObject({
+      status: 'passed',
+      template_version: {
+        id: 'safe_batch_expansion_structure_repair:663',
+        source: 'safe_batch_expansion_structure_repair',
+        redesign_source: 'default_five_chapter_lane_template_redesign_queue',
+        source_run_id: 663,
+        summary: expect.stringContaining('回报密度失败 2 次'),
+        redesigned_templates: expect.arrayContaining([
+          expect.objectContaining({ key: 'default_lane_payoff_density', template: expect.stringContaining('可见收益') }),
+        ]),
+        validation_standard: expect.arrayContaining([
+          '连续2批模板全过后才能恢复默认5章档位。',
+        ]),
+        required_receipts: expect.arrayContaining([
+          'default_lane_payoff_density_delivered',
+        ]),
+      },
+    })
+    expect(verdict.summary).toContain('版本 safe_batch_expansion_structure_repair:663')
+    expect(profile).toMatchObject({
+      latest_template_version_profile: {
+        id: 'safe_batch_expansion_structure_repair:663',
+        source_run_id: 663,
+        latest_status: 'passed',
+        validation_batch_count: 1,
+        passed_batch_count: 1,
+        failed_batch_count: 0,
+        pass_streak: 1,
+      },
+      template_version_profiles: expect.arrayContaining([
+        expect.objectContaining({
+          id: 'safe_batch_expansion_structure_repair:663',
+          status: 'observing',
+          validation_batch_count: 1,
+          passed_batch_count: 1,
+          failed_batch_count: 0,
+        }),
+      ]),
+    })
+    expect(profile.summary).toContain('版本 safe_batch_expansion_structure_repair:663')
+  })
+
   test('accumulates default lane template verdicts into a stability profile', () => {
     const failedValidationChapterNos = [90, 91, 92]
     const passedValidationChapterNos = [93, 94, 95]

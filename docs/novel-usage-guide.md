@@ -1237,10 +1237,11 @@
 - 默认档位模板缺项修复后的验证通过/复发已沉淀为长期模板稳定性证据。系统会累计最近的 `default_five_chapter_lane_template_verdict`，生成 `default_five_chapter_lane_template_stability_profile`，按四项模板记录通过批、失败批、连续通过数和高频缺项；当画像仍在观察期时，总控台会保持 `启动3章验证批`，连续稳定后才恢复默认 5 章，反复同项复发时会提示升级模板重构。任务中心批量生成摘要也会显示 `默认档位模板稳定性`、模板连过次数和失败项。
 - 默认档位模板稳定性画像已反向驱动重构队列。当 `default_five_chapter_lane_template_stability_profile.recommendation=escalate_template_redesign` 时，风险雷达会在 `safe_batch_expansion_structure_repair.safe_batch_expansion_structure_review` 里写入 `default_five_chapter_lane_template_redesign_queue`，任务卡显示 `默认档位模板重构` 和 `重写回报密度` 等高频缺项标签；修订 prompt 会单独展开 `默认档位模板重构队列`，要求先重写段位职责、冲突轮换、回报密度、章末追读模板和下一轮验证标准，而不是只做普通结构修复。
 - 默认档位模板重构队列执行结果已回流进下一轮验证批任务书和正文 prompt。已解决的 `safe_batch_expansion_structure_repair` 若包含 `default_five_chapter_lane_template_redesign_queue`，下一轮 `next_batch_brief.expansionStructureVerification.default_five_chapter_lane_template` 会生成 `redesign_source`、四项 `redesigned_templates`、`validation_standard` 和 `required_receipts`；正文 prompt 会显式写出模板重构来源、高频缺项、重构模板、下一轮验证标准和逐章回填字段，要求 3 章验证批证明新默认档位模板不再复发。
+- 重构后的默认档位模板版本已接入验证批复盘和稳定性画像。`default_five_chapter_lane_template_verdict` 会标明当前验证的是哪一版 `redesigned_templates`，并保留来源 run、重构来源、验证标准和逐章回执要求；长期 `default_five_chapter_lane_template_stability_profile` 会按模板版本统计最近状态、连续通过数、失败批和高频缺项，任务中心摘要显示 `模板版本连过 x/y`，帮助作者分辨哪一版默认档位模板真正稳定。
 
 推荐下一步：
 
-- 将重构后的默认档位模板版本接入验证批复盘和稳定性画像：后续 `default_five_chapter_lane_template_verdict` 应能标明验证的是哪一版 `redesigned_templates`，并在任务中心显示该版本连续通过/复发次数，避免多次重构后作者不知道哪一版模板真正稳定。
+- 将默认档位模板版本稳定性反向驱动恢复默认 5 章档位的判定说明和任务中心筛选：只有当前模板版本连续稳定后才显示恢复默认 5 章，并在复发时把任务中心聚焦到该版本的缺项/重构记录，避免旧版本稳定证据误导当前恢复判断。
 
 ## 8. 使用说明维护规则
 

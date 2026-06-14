@@ -1685,6 +1685,30 @@ describe('buildSafeBatchExpansionPolicySnapshot', () => {
             requirements: [
               { key: 'default_lane_payoff_density', label: '回报密度', passed_count: 1, failed_count: 1, latest_status: 'fulfilled' },
             ],
+            latest_template_version_profile: {
+              id: 'safe_batch_expansion_structure_repair:663',
+              label: '默认5章档位模板重构',
+              source_run_id: 663,
+              latest_status: 'passed',
+              validation_batch_count: 1,
+              passed_batch_count: 1,
+              failed_batch_count: 0,
+              pass_streak: 1,
+              status: 'observing',
+            },
+            template_version_profiles: [
+              {
+                id: 'safe_batch_expansion_structure_repair:663',
+                label: '默认5章档位模板重构',
+                source_run_id: 663,
+                latest_status: 'passed',
+                validation_batch_count: 1,
+                passed_batch_count: 1,
+                failed_batch_count: 0,
+                pass_streak: 1,
+                status: 'observing',
+              },
+            ],
           },
         },
       },
@@ -1705,6 +1729,24 @@ describe('buildSafeBatchExpansionPolicySnapshot', () => {
       failedRequirementCount: 1,
       requirements: [
         { key: 'default_lane_payoff_density', label: '回报密度', passedCount: 1, failedCount: 1, latestStatus: 'fulfilled' },
+      ],
+      latestTemplateVersionProfile: {
+        id: 'safe_batch_expansion_structure_repair:663',
+        sourceRunId: 663,
+        latestStatus: 'passed',
+        validationBatchCount: 1,
+        passedBatchCount: 1,
+        failedBatchCount: 0,
+        passStreak: 1,
+        status: 'observing',
+      },
+      templateVersionProfiles: [
+        expect.objectContaining({
+          id: 'safe_batch_expansion_structure_repair:663',
+          sourceRunId: 663,
+          latestStatus: 'passed',
+          validationBatchCount: 1,
+        }),
       ],
     })
     expect(snapshot?.expansionFeedback?.defaultFiveChapterLaneTemplateStabilityProfile?.summary).toContain('继续3章观察')

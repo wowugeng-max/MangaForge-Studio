@@ -1632,6 +1632,24 @@ export type SafeBatchDefaultFiveChapterRecoveryVerdictSnapshot = {
   }[]
 }
 
+type SafeBatchDefaultFiveChapterLaneTemplateVersionSnapshot = {
+  id: string
+  label: string
+  source: string
+  redesignSource: string
+  sourceRunId: any
+  summary: string
+  latestStatus?: string
+  latestBatchCreatedAt?: string
+  latestChapterNos?: number[]
+  validationBatchCount?: number
+  passedBatchCount?: number
+  failedBatchCount?: number
+  passStreak?: number
+  requiredPassStreak?: number
+  status?: string
+}
+
 export type SafeBatchDefaultFiveChapterLaneTemplateVerdictSnapshot = {
   visible: boolean
   status: 'passed' | 'failed'
@@ -1649,6 +1667,7 @@ export type SafeBatchDefaultFiveChapterLaneTemplateVerdictSnapshot = {
     label: string
     chapterNos: number[]
   }[]
+  templateVersion: SafeBatchDefaultFiveChapterLaneTemplateVersionSnapshot | null
 }
 
 export type SafeBatchDefaultFiveChapterLaneTemplateStabilityProfileSnapshot = {
@@ -1679,6 +1698,8 @@ export type SafeBatchDefaultFiveChapterLaneTemplateStabilityProfileSnapshot = {
     label: string
     failedCount: number
   } | null
+  templateVersionProfiles: SafeBatchDefaultFiveChapterLaneTemplateVersionSnapshot[]
+  latestTemplateVersionProfile: SafeBatchDefaultFiveChapterLaneTemplateVersionSnapshot | null
 }
 
 export type SafeBatchDefaultFiveChapterRecoveryVerdictRelapseSnapshot = {
@@ -2318,6 +2339,31 @@ function buildSafeBatchExpansionStructureValidationResultSnapshot(resultLike: an
   }
 }
 
+function buildSafeBatchDefaultFiveChapterLaneTemplateVersionSnapshot(versionLike: any): SafeBatchDefaultFiveChapterLaneTemplateVersionSnapshot | null {
+  const version = parseJsonValue(versionLike) || versionLike || null
+  if (!version || version.visible === false) return null
+  const id = compactEvidenceText(version?.id || version?.template_version_id || version?.templateVersionId || version?.version_id || version?.versionId || '')
+  const snapshot = {
+    id,
+    label: compactEvidenceText(version?.label || '默认5章档位模板版本'),
+    source: compactEvidenceText(version?.source || ''),
+    redesignSource: compactEvidenceText(version?.redesign_source || version?.redesignSource || ''),
+    sourceRunId: version?.source_run_id ?? version?.sourceRunId ?? null,
+    summary: compactEvidenceText(version?.summary || ''),
+    latestStatus: compactEvidenceText(version?.latest_status || version?.latestStatus || ''),
+    latestBatchCreatedAt: compactEvidenceText(version?.latest_batch_created_at || version?.latestBatchCreatedAt || ''),
+    latestChapterNos: normalizeChapterNos(version?.latest_chapter_nos || version?.latestChapterNos),
+    validationBatchCount: Number(version?.validation_batch_count ?? version?.validationBatchCount ?? 0),
+    passedBatchCount: Number(version?.passed_batch_count ?? version?.passedBatchCount ?? 0),
+    failedBatchCount: Number(version?.failed_batch_count ?? version?.failedBatchCount ?? 0),
+    passStreak: Number(version?.pass_streak ?? version?.passStreak ?? 0),
+    requiredPassStreak: Number(version?.required_pass_streak ?? version?.requiredPassStreak ?? 0),
+    status: compactEvidenceText(version?.status || ''),
+  }
+  if (!snapshot.id && !snapshot.summary && !snapshot.sourceRunId && !snapshot.redesignSource) return null
+  return snapshot
+}
+
 function buildSafeBatchDefaultFiveChapterLaneTemplateVerdictSnapshot(verdictLike: any): SafeBatchDefaultFiveChapterLaneTemplateVerdictSnapshot | null {
   const verdict = parseJsonValue(verdictLike) || verdictLike || null
   if (!verdict || verdict.visible === false) return null
@@ -2360,6 +2406,9 @@ function buildSafeBatchDefaultFiveChapterLaneTemplateVerdictSnapshot(verdictLike
     requirements,
     missingCount: Number.isFinite(missingCount) ? missingCount : 0,
     missingRequirements,
+    templateVersion: buildSafeBatchDefaultFiveChapterLaneTemplateVersionSnapshot(
+      verdict?.template_version || verdict?.templateVersion,
+    ),
   }
   if (!snapshot.summary && !snapshot.requirements.length && !snapshot.missingRequirements.length) return null
   return snapshot
@@ -2387,6 +2436,16 @@ function buildSafeBatchDefaultFiveChapterLaneTemplateStabilityProfileSnapshot(pr
     label: compactEvidenceText(topFailedRaw?.label || topFailedRaw?.name || topFailedRaw?.key || ''),
     failedCount: Number(topFailedRaw?.failed_count ?? topFailedRaw?.failedCount ?? 0),
   } : null
+  const templateVersionProfiles = (Array.isArray(profile?.template_version_profiles)
+    ? profile.template_version_profiles
+    : Array.isArray(profile?.templateVersionProfiles)
+      ? profile.templateVersionProfiles
+      : []
+  ).map(buildSafeBatchDefaultFiveChapterLaneTemplateVersionSnapshot)
+    .filter(Boolean) as SafeBatchDefaultFiveChapterLaneTemplateVersionSnapshot[]
+  const latestTemplateVersionProfile = buildSafeBatchDefaultFiveChapterLaneTemplateVersionSnapshot(
+    profile?.latest_template_version_profile || profile?.latestTemplateVersionProfile,
+  )
   const snapshot = {
     visible: true,
     status: compactEvidenceText(profile?.status || ''),
@@ -2406,6 +2465,8 @@ function buildSafeBatchDefaultFiveChapterLaneTemplateStabilityProfileSnapshot(pr
     topFailedRequirement: topFailedRequirement && (topFailedRequirement.key || topFailedRequirement.label || topFailedRequirement.failedCount > 0)
       ? topFailedRequirement
       : null,
+    templateVersionProfiles,
+    latestTemplateVersionProfile,
   }
   if (!snapshot.summary && !snapshot.requirements.length && snapshot.validationBatchCount <= 0) return null
   return snapshot
@@ -2849,6 +2910,7 @@ function BatchProseRunSummary({ run }: { run: any }) {
   const defaultLaneTemplateStabilityTop = defaultLaneTemplateStability?.topFailedRequirement
     || defaultLaneTemplateStability?.requirements.find(requirement => requirement.failedCount > 0)
     || null
+  const defaultLaneTemplateVersion = defaultLaneTemplateStability?.latestTemplateVersionProfile || null
   const recoveryRestoreStability = expansionFeedback?.recoveryRestoreStabilityEvidence || null
   const recoveryRestoreStabilityLane = expansionPolicy?.recoveryRestoreStabilityLane
     || buildSafeBatchRecoveryRestoreStabilityLaneSnapshot(
@@ -3073,6 +3135,11 @@ function BatchProseRunSummary({ run }: { run: any }) {
                     {defaultLaneTemplateStabilityTop && (
                       <Tag color="gold" bordered={false}>
                         {defaultLaneTemplateStabilityTop.label}失败 {defaultLaneTemplateStabilityTop.failedCount}
+                      </Tag>
+                    )}
+                    {defaultLaneTemplateVersion && (
+                      <Tag color={defaultLaneTemplateVersion.status === 'ready' ? 'green' : 'blue'} bordered={false}>
+                        模板版本连过 {defaultLaneTemplateVersion.passStreak || 0}/{defaultLaneTemplateVersion.requiredPassStreak || defaultLaneTemplateStability?.requiredPassStreak || 0}
                       </Tag>
                     )}
                     {recoveryRestoreReview && (
