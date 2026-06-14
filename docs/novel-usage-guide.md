@@ -1236,10 +1236,11 @@
 - 默认档位模板缺项修复结果已回流进下一轮验证批任务书。已解决的 `safe_batch_expansion_structure_repair` 若包含 `default_five_chapter_lane_template_repair`，下一轮 `next_batch_brief.expansionStructureVerification.default_five_chapter_lane_template` 会继承来源 run、`repaired_missing_requirements` 和 `repair_actions`；preflight 快照与正文 prompt 会明确 `第91章缺回报密度` 这类原始缺口和修复动作，要求验证批逐章证明这些缺项没有复发。
 - 默认档位模板缺项修复后的验证通过/复发已沉淀为长期模板稳定性证据。系统会累计最近的 `default_five_chapter_lane_template_verdict`，生成 `default_five_chapter_lane_template_stability_profile`，按四项模板记录通过批、失败批、连续通过数和高频缺项；当画像仍在观察期时，总控台会保持 `启动3章验证批`，连续稳定后才恢复默认 5 章，反复同项复发时会提示升级模板重构。任务中心批量生成摘要也会显示 `默认档位模板稳定性`、模板连过次数和失败项。
 - 默认档位模板稳定性画像已反向驱动重构队列。当 `default_five_chapter_lane_template_stability_profile.recommendation=escalate_template_redesign` 时，风险雷达会在 `safe_batch_expansion_structure_repair.safe_batch_expansion_structure_review` 里写入 `default_five_chapter_lane_template_redesign_queue`，任务卡显示 `默认档位模板重构` 和 `重写回报密度` 等高频缺项标签；修订 prompt 会单独展开 `默认档位模板重构队列`，要求先重写段位职责、冲突轮换、回报密度、章末追读模板和下一轮验证标准，而不是只做普通结构修复。
+- 默认档位模板重构队列执行结果已回流进下一轮验证批任务书和正文 prompt。已解决的 `safe_batch_expansion_structure_repair` 若包含 `default_five_chapter_lane_template_redesign_queue`，下一轮 `next_batch_brief.expansionStructureVerification.default_five_chapter_lane_template` 会生成 `redesign_source`、四项 `redesigned_templates`、`validation_standard` 和 `required_receipts`；正文 prompt 会显式写出模板重构来源、高频缺项、重构模板、下一轮验证标准和逐章回填字段，要求 3 章验证批证明新默认档位模板不再复发。
 
 推荐下一步：
 
-- 将默认档位模板重构队列的执行结果回流进下一轮验证批任务书和正文 prompt：已闭环的 `default_five_chapter_lane_template_redesign_queue` 应生成新的四项模板版本、验证标准和逐章回填要求，供后续 3 章验证批证明重构后的默认档位不再复发。
+- 将重构后的默认档位模板版本接入验证批复盘和稳定性画像：后续 `default_five_chapter_lane_template_verdict` 应能标明验证的是哪一版 `redesigned_templates`，并在任务中心显示该版本连续通过/复发次数，避免多次重构后作者不知道哪一版模板真正稳定。
 
 ## 8. 使用说明维护规则
 

@@ -1951,11 +1951,30 @@ function normalizeDefaultFiveChapterLaneTemplate(value: any) {
     .filter((item: any) => item.key || item.label || item.chapter_nos.length)
     .slice(0, 8)
   const repairActions = uniqueBriefStrings(raw.repair_actions || raw.repairActions || [], 8)
+  const redesignedTemplates = asArray(raw.redesigned_templates || raw.redesignedTemplates || raw.templates)
+    .map((item: any) => ({
+      key: compactBriefText(item?.key),
+      label: compactBriefText(item?.label || item?.name || item?.key),
+      template: compactBriefText(item?.template || item?.rewrite || item?.instruction || item?.text || item?.detail),
+    }))
+    .filter((item: any) => item.key || item.label || item.template)
+    .slice(0, 8)
+  const validationStandard = uniqueBriefStrings(raw.validation_standard || raw.validationStandard || [], 8)
+  const requiredReceipts = uniqueBriefStrings(raw.required_receipts || raw.requiredReceipts || raw.receipts || [], 8)
+  const topFailedRaw = raw.top_failed_requirement || raw.topFailedRequirement || null
+  const topFailedRequirement = topFailedRaw && typeof topFailedRaw === 'object' && !Array.isArray(topFailedRaw)
+    ? {
+      key: compactBriefText(topFailedRaw.key),
+      label: compactBriefText(topFailedRaw.label || topFailedRaw.key),
+      failed_count: Number(topFailedRaw.failed_count ?? topFailedRaw.failedCount ?? 0),
+    }
+    : null
   const normalized = {
     visible: true,
     status: compactBriefText(raw.status || 'fulfilled'),
     label: compactBriefText(raw.label || '默认5章档位模板回检'),
     source: compactBriefText(raw.source || ''),
+    redesign_source: compactBriefText(raw.redesign_source || raw.redesignSource),
     source_run_id: raw.source_run_id ?? raw.sourceRunId ?? null,
     repaired_at: compactBriefText(raw.repaired_at || raw.repairedAt),
     summary: compactBriefText(raw.summary || ''),
@@ -1963,6 +1982,10 @@ function normalizeDefaultFiveChapterLaneTemplate(value: any) {
     conflict_rotation: compactBriefText(raw.conflict_rotation || raw.conflictRotation),
     payoff_density: compactBriefText(raw.payoff_density || raw.payoffDensity),
     ending_hook_template: compactBriefText(raw.ending_hook_template || raw.endingHookTemplate),
+    top_failed_requirement: topFailedRequirement,
+    redesigned_templates: redesignedTemplates,
+    validation_standard: validationStandard,
+    required_receipts: requiredReceipts,
     repaired_missing_requirements: repairedMissingRequirements,
     repair_actions: repairActions,
     requirements,
@@ -1972,6 +1995,10 @@ function normalizeDefaultFiveChapterLaneTemplate(value: any) {
     || normalized.conflict_rotation
     || normalized.payoff_density
     || normalized.ending_hook_template
+    || normalized.redesign_source
+    || normalized.redesigned_templates.length
+    || normalized.validation_standard.length
+    || normalized.required_receipts.length
     || normalized.repaired_missing_requirements.length
     || normalized.repair_actions.length
     || normalized.requirements.length
@@ -5620,6 +5647,29 @@ export function createNovelWritingService(ctx: {
       defaultFiveChapterLaneTemplate?.repair_actions || defaultFiveChapterLaneTemplate?.repairActions || [],
       8,
     )
+    const defaultFiveChapterLaneTemplateRedesignSource = compactBriefText(
+      defaultFiveChapterLaneTemplate?.redesign_source || defaultFiveChapterLaneTemplate?.redesignSource,
+    )
+    const defaultFiveChapterLaneTemplateTopFailed = defaultFiveChapterLaneTemplate?.top_failed_requirement
+      || defaultFiveChapterLaneTemplate?.topFailedRequirement
+      || null
+    const defaultFiveChapterLaneTemplateRedesignLines = asArray(
+      defaultFiveChapterLaneTemplate?.redesigned_templates || defaultFiveChapterLaneTemplate?.redesignedTemplates,
+    )
+      .map((item: any) => {
+        const label = compactBriefText(item?.label || item?.key || '模板项')
+        const template = compactBriefText(item?.template || item?.rewrite || item?.instruction || item?.text || item?.detail)
+        return label && template ? `${label}：${template}` : ''
+      })
+      .filter(Boolean)
+    const defaultFiveChapterLaneTemplateValidationStandard = uniqueBriefStrings(
+      defaultFiveChapterLaneTemplate?.validation_standard || defaultFiveChapterLaneTemplate?.validationStandard || [],
+      8,
+    )
+    const defaultFiveChapterLaneTemplateRequiredReceipts = uniqueBriefStrings(
+      defaultFiveChapterLaneTemplate?.required_receipts || defaultFiveChapterLaneTemplate?.requiredReceipts || [],
+      8,
+    )
     const batchPreflight = contextPackage?.chapter_target?.batch_preflight || contextPackage?.batch_preflight || null
     const batchDeliveryRiskCarryOver = normalizeDeliveryRiskCarryOverContext(
       batchPreflight?.delivery_risk_carry_over
@@ -5822,6 +5872,11 @@ export function createNovelWritingService(ctx: {
       defaultFiveChapterLaneTemplate?.conflict_rotation ? `冲突轮换：${defaultFiveChapterLaneTemplate.conflict_rotation}` : '',
       defaultFiveChapterLaneTemplate?.payoff_density ? `回报密度：${defaultFiveChapterLaneTemplate.payoff_density}` : '',
       defaultFiveChapterLaneTemplate?.ending_hook_template ? `章末追读模板：${defaultFiveChapterLaneTemplate.ending_hook_template}` : '',
+      defaultFiveChapterLaneTemplateRedesignSource ? `模板重构来源：${defaultFiveChapterLaneTemplateRedesignSource}` : '',
+      defaultFiveChapterLaneTemplateTopFailed ? `高频缺项：${compactBriefText(defaultFiveChapterLaneTemplateTopFailed.label || defaultFiveChapterLaneTemplateTopFailed.key || '模板缺项')}失败 ${Number(defaultFiveChapterLaneTemplateTopFailed.failed_count ?? defaultFiveChapterLaneTemplateTopFailed.failedCount ?? 0)} 次` : '',
+      ...defaultFiveChapterLaneTemplateRedesignLines.map(item => `重构模板：${item}`),
+      defaultFiveChapterLaneTemplateValidationStandard.length ? `下一轮验证标准：${defaultFiveChapterLaneTemplateValidationStandard.join('；')}` : '',
+      defaultFiveChapterLaneTemplateRequiredReceipts.length ? `逐章回填字段：${defaultFiveChapterLaneTemplateRequiredReceipts.join('、')}` : '',
       defaultFiveChapterLaneTemplateRepairSummaries.length ? `模板缺项修复：${defaultFiveChapterLaneTemplateRepairSummaries.join('；')}` : '',
       defaultFiveChapterLaneTemplateRepairActions.length ? `缺项修复动作：${defaultFiveChapterLaneTemplateRepairActions.join('；')}` : '',
       defaultFiveChapterLaneTemplate ? '默认档位模板验证要求：下一轮验证批逐章继承段位职责、冲突轮换、回报密度和章末追读模板，并逐章证明四项模板没有复发。' : '',

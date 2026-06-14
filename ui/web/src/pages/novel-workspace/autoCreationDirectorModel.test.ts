@@ -4069,6 +4069,146 @@ describe('buildAutoCreationDirectorModel', () => {
     ])
   })
 
+  test('feeds resolved default lane template redesign queue into the next validation batch brief', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: readySafeBatchPlanning({ futureRoute: futureRouteRange(96, 5) }),
+      writing: readySafeBatchWriting({
+        nextChapter: { ...baseWriting.nextChapter, id: 96, chapterNo: 96, title: '模板重构验证96' },
+        previousChapter: { chapterNo: 95, title: '模板重构95', wordCount: 3200, hasProse: true },
+      }),
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: { last_updated_chapter: 95 },
+      runRecords: [
+        strengthenedAcceptanceBatchRun({ id: 660, createdAt: '2026-06-19T00:00:00.000Z', chapterNos: [41, 42, 43] }),
+        strengthenedAcceptanceBatchRun({ id: 661, createdAt: '2026-06-20T00:00:00.000Z', chapterNos: [44, 45, 46] }),
+        strengthenedAcceptanceBatchRun({ id: 662, createdAt: '2026-06-21T00:00:00.000Z', chapterNos: [47, 48, 49] }),
+        {
+          id: 663,
+          run_type: 'longform_production_repair',
+          created_at: '2026-06-24T02:00:00.000Z',
+          completed_at: '2026-06-24T02:20:00.000Z',
+          status: 'success',
+          input_ref: JSON.stringify({ source: 'auto_creation_safe_batch_risk' }),
+          output_ref: JSON.stringify({
+            tasks: [{
+              issue_type: 'safe_batch_expansion_structure_repair',
+              task_status: 'resolved',
+              chapter_no: 94,
+              safe_batch_expansion_structure_review: {
+                repeated_hotspot_segment: { key: 'middle', label: '中段', count: 2 },
+                latest_chapter_nos: [93, 94, 95],
+                affected_chapter_nos: [94],
+                default_five_chapter_lane_template_redesign_queue: {
+                  visible: true,
+                  status: 'resolved',
+                  label: '默认档位模板重构队列',
+                  source: 'default_five_chapter_lane_template_stability_profile',
+                  summary: '默认档位模板已重构：回报密度失败 2 次已改为逐章显性结算。',
+                  latest_chapter_nos: [93, 94, 95],
+                  validation_batch_count: 2,
+                  failed_batch_count: 2,
+                  top_failed_requirement: {
+                    key: 'default_lane_payoff_density',
+                    label: '回报密度',
+                    failed_count: 2,
+                  },
+                  redesigned_templates: [
+                    {
+                      key: 'default_lane_segment_duty',
+                      label: '默认档位段位职责',
+                      template: '新模板：第1章抛出规则压迫，第2章制造误导反转，第3章兑现阶段收益。',
+                    },
+                    {
+                      key: 'default_lane_conflict_rotation',
+                      label: '冲突轮换',
+                      template: '新模板：规则压迫、人物对抗、信息误导按章轮换，不连续复用同一压力。',
+                    },
+                    {
+                      key: 'default_lane_payoff_density',
+                      label: '回报密度',
+                      template: '新模板：每章必须有可见收益、反制结果或阶段结算，禁止连续两章只铺垫。',
+                    },
+                    {
+                      key: 'default_lane_ending_hook_template',
+                      label: '章末追读模板',
+                      template: '新模板：最后300字必须落触发事件、读者问题和下一章风险。',
+                    },
+                  ],
+                  validation_standard: [
+                    '下一轮3章验证批必须逐章回填 default_lane_*_delivered。',
+                    '连续2批模板全过后才能恢复默认5章档位。',
+                  ],
+                  required_receipts: [
+                    'default_lane_segment_duty_delivered',
+                    'default_lane_conflict_rotation_delivered',
+                    'default_lane_payoff_density_delivered',
+                    'default_lane_ending_hook_template_delivered',
+                  ],
+                },
+                structure_actions: [
+                  '升级默认档位模板重构：先重写四项模板，再做3章验证批。',
+                ],
+              },
+            }],
+          }),
+        },
+      ],
+    } as any)
+
+    const verification = model.batchGuardrail.nextBatchBrief.expansionStructureVerification
+    const template = verification?.default_five_chapter_lane_template
+
+    expect(model.batchGuardrail.safeChapterCount).toBe(3)
+    expect(model.batchGuardrail.nextBatchBrief.chapterRangeLabel).toBe('第96-98章')
+    expect(verification).toMatchObject({
+      source: 'safe_batch_expansion_structure_repair',
+      validation_chapter_nos: [96, 97, 98],
+      repeated_hotspot_segment: { key: 'middle', label: '中段', count: 2 },
+    })
+    expect(template).toMatchObject({
+      visible: true,
+      status: 'fulfilled',
+      source: 'safe_batch_expansion_structure_repair',
+      redesign_source: 'default_five_chapter_lane_template_redesign_queue',
+      source_run_id: 663,
+      top_failed_requirement: {
+        key: 'default_lane_payoff_density',
+        label: '回报密度',
+        failed_count: 2,
+      },
+      validation_standard: [
+        '下一轮3章验证批必须逐章回填 default_lane_*_delivered。',
+        '连续2批模板全过后才能恢复默认5章档位。',
+      ],
+      required_receipts: [
+        'default_lane_segment_duty_delivered',
+        'default_lane_conflict_rotation_delivered',
+        'default_lane_payoff_density_delivered',
+        'default_lane_ending_hook_template_delivered',
+      ],
+    })
+    expect(template?.summary).toContain('回报密度失败 2 次')
+    expect(template?.segment_duty_rewrite).toContain('第1章抛出规则压迫')
+    expect(template?.conflict_rotation).toContain('按章轮换')
+    expect(template?.payoff_density).toContain('每章必须有可见收益')
+    expect(template?.ending_hook_template).toContain('最后300字')
+    expect(template?.redesigned_templates).toEqual(expect.arrayContaining([
+      expect.objectContaining({ key: 'default_lane_payoff_density', template: expect.stringContaining('禁止连续两章只铺垫') }),
+    ]))
+    expect(template?.requirements).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        key: 'default_lane_payoff_density',
+        status: 'fulfilled',
+        verification_requirement: expect.stringContaining('default_lane_payoff_density_delivered'),
+      }),
+    ]))
+    expect(model.batchGuardrail.preflight.inputSnapshot.safe_batch_expansion_structure_verification.default_five_chapter_lane_template).toMatchObject({
+      redesign_source: 'default_five_chapter_lane_template_redesign_queue',
+      required_receipts: expect.arrayContaining(['default_lane_payoff_density_delivered']),
+    })
+  })
+
   test('restores five-chapter expansion after the structure validation batch passes', () => {
     const model = buildAutoCreationDirectorModel({
       planning: readySafeBatchPlanning({ futureRoute: futureRouteRange(53, 5) }),

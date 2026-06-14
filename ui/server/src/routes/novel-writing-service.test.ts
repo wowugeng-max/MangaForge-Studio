@@ -707,6 +707,85 @@ describe('chapter prose word target', () => {
     expect(prompt).toContain('default_lane_ending_hook_template_delivered')
   })
 
+  test('injects default lane template redesign execution standards into paragraph prose prompt', () => {
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+
+    const prompt = service.buildParagraphProseContext(
+      { title: '超人的规则怪谈世界' },
+      {
+        next_batch_brief: {
+          chapter_range_label: '第96-98章',
+          batch_goal: '默认档位模板重构后进入3章验证批。',
+          expansion_structure_verification: {
+            source: 'safe_batch_expansion_structure_repair',
+            validation_chapter_nos: [96, 97, 98],
+            fixed_segment_role: '中段固定职责：验证新默认档位模板。',
+            conflict_rotation: '验证批每章更换冲突来源。',
+            explicit_payoff: '验证批每章必须有显性回报。',
+            ending_hook_requirement: '验证批每章章末必须留下追读问题。',
+            default_five_chapter_lane_template: {
+              visible: true,
+              status: 'fulfilled',
+              label: '默认5章档位模板重构',
+              source: 'safe_batch_expansion_structure_repair',
+              redesign_source: 'default_five_chapter_lane_template_redesign_queue',
+              summary: '默认档位模板已重构：回报密度失败 2 次已改为逐章显性结算。',
+              top_failed_requirement: {
+                key: 'default_lane_payoff_density',
+                label: '回报密度',
+                failed_count: 2,
+              },
+              segment_duty_rewrite: '新模板：第1章抛出规则压迫，第2章制造误导反转，第3章兑现阶段收益。',
+              conflict_rotation: '新模板：规则压迫、人物对抗、信息误导按章轮换。',
+              payoff_density: '新模板：每章必须有可见收益、反制结果或阶段结算。',
+              ending_hook_template: '新模板：最后300字必须落触发事件、读者问题和下一章风险。',
+              redesigned_templates: [
+                { key: 'default_lane_payoff_density', label: '回报密度', template: '新模板：每章必须有可见收益、反制结果或阶段结算。' },
+              ],
+              validation_standard: [
+                '下一轮3章验证批必须逐章回填 default_lane_*_delivered。',
+                '连续2批模板全过后才能恢复默认5章档位。',
+              ],
+              required_receipts: [
+                'default_lane_segment_duty_delivered',
+                'default_lane_conflict_rotation_delivered',
+                'default_lane_payoff_density_delivered',
+                'default_lane_ending_hook_template_delivered',
+              ],
+              requirements: [
+                { key: 'default_lane_segment_duty', label: '默认档位段位职责', status: 'fulfilled' },
+                { key: 'default_lane_conflict_rotation', label: '冲突轮换', status: 'fulfilled' },
+                { key: 'default_lane_payoff_density', label: '回报密度', status: 'fulfilled' },
+                { key: 'default_lane_ending_hook_template', label: '章末追读模板', status: 'fulfilled' },
+              ],
+            },
+          },
+        },
+        chapter_target: {
+          chapter_no: 96,
+          title: '模板重构验证一',
+          summary: '验证默认档位模板重构是否稳定。',
+          conflict: '新模板第一章是否能守住回报密度。',
+          ending_hook: '验证失败的风险抬头。',
+          scene_cards: [],
+        },
+      },
+      null,
+      { chapter_no: 96, title: '模板重构验证一' },
+    )
+
+    expect(prompt).toContain('模板重构来源：default_five_chapter_lane_template_redesign_queue')
+    expect(prompt).toContain('高频缺项：回报密度失败 2 次')
+    expect(prompt).toContain('重构模板：回报密度：新模板：每章必须有可见收益')
+    expect(prompt).toContain('下一轮验证标准：下一轮3章验证批必须逐章回填 default_lane_*_delivered。；连续2批模板全过后才能恢复默认5章档位。')
+    expect(prompt).toContain('逐章回填字段：default_lane_segment_duty_delivered、default_lane_conflict_rotation_delivered、default_lane_payoff_density_delivered、default_lane_ending_hook_template_delivered')
+    expect(prompt).toContain('默认5章档位模板验证：本章必须继承已补齐的段位职责')
+  })
+
   test('injects expansion structure decision into paragraph prose prompt', () => {
     const service = createNovelWritingService({
       getProject: async () => null,

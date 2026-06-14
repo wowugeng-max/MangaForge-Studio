@@ -9997,6 +9997,30 @@ const DEFAULT_FIVE_CHAPTER_LANE_TEMPLATE_REQUIREMENTS = [
   { key: 'default_lane_ending_hook_template', label: '章末追读模板' },
 ]
 
+const DEFAULT_FIVE_CHAPTER_LANE_TEMPLATE_RECEIPTS = [
+  'default_lane_segment_duty_delivered',
+  'default_lane_conflict_rotation_delivered',
+  'default_lane_payoff_density_delivered',
+  'default_lane_ending_hook_template_delivered',
+]
+
+function defaultFiveChapterLaneTemplateReceiptKey(key: string) {
+  if (key === 'default_lane_segment_duty') return 'default_lane_segment_duty_delivered'
+  if (key === 'default_lane_conflict_rotation') return 'default_lane_conflict_rotation_delivered'
+  if (key === 'default_lane_payoff_density') return 'default_lane_payoff_density_delivered'
+  if (key === 'default_lane_ending_hook_template') return 'default_lane_ending_hook_template_delivered'
+  return ''
+}
+
+function defaultFiveChapterLaneTemplateFieldValue(source: AnyRecord, key: string) {
+  if (!source) return ''
+  if (key === 'default_lane_segment_duty') return firstText(source.segment_duty_rewrite, source.segmentDutyRewrite)
+  if (key === 'default_lane_conflict_rotation') return firstText(source.conflict_rotation, source.conflictRotation)
+  if (key === 'default_lane_payoff_density') return firstText(source.payoff_density, source.payoffDensity)
+  if (key === 'default_lane_ending_hook_template') return firstText(source.ending_hook_template, source.endingHookTemplate)
+  return ''
+}
+
 function defaultFiveChapterLaneTemplateFromTask(task: AnyRecord, run: AnyRecord) {
   const review = task?.safe_batch_expansion_structure_decision_review
     || task?.safeBatchExpansionStructureDecisionReview
@@ -10057,6 +10081,120 @@ function defaultFiveChapterLaneTemplateFromTask(task: AnyRecord, run: AnyRecord)
   }
 }
 
+function normalizeDefaultFiveChapterLaneTemplateRedesignedTemplates(queue: AnyRecord) {
+  const explicitTemplates = arrayValue(queue.redesigned_templates || queue.redesignedTemplates || queue.templates)
+    .map((item: AnyRecord) => ({
+      key: text(item?.key),
+      label: text(item?.label || item?.name || item?.key, '模板项'),
+      template: firstText(item?.template, item?.rewrite, item?.instruction, item?.text, item?.detail),
+    }))
+    .filter((item: AnyRecord) => item.key || item.label || item.template)
+  if (explicitTemplates.length) return explicitTemplates
+  return arrayValue(queue.redesign_requirements || queue.redesignRequirements)
+    .map((item: AnyRecord) => ({
+      key: text(item?.key),
+      label: text(item?.label || item?.name || item?.key, '模板项'),
+      template: firstText(item?.template, item?.rewrite, item?.instruction, item?.text, item?.detail),
+    }))
+    .filter((item: AnyRecord) => item.key || item.label || item.template)
+}
+
+function defaultFiveChapterLaneTemplateFromRedesignQueue(
+  queue: AnyRecord,
+  run: AnyRecord,
+  fallbackTemplate?: AnyRecord | null,
+) {
+  if (!queue || queue.visible === false) return null
+  const fallback = fallbackTemplate || {}
+  const redesignedTemplates = normalizeDefaultFiveChapterLaneTemplateRedesignedTemplates(queue)
+  const templateByKey = new Map(redesignedTemplates.map((item: AnyRecord) => [item.key, item]))
+  const topFailedRaw = queue.top_failed_requirement || queue.topFailedRequirement || null
+  const topFailedRequirement = topFailedRaw && typeof topFailedRaw === 'object' && !Array.isArray(topFailedRaw)
+    ? {
+      key: text(topFailedRaw.key),
+      label: text(topFailedRaw.label || topFailedRaw.key, '模板缺项'),
+      failed_count: Number(topFailedRaw.failed_count ?? topFailedRaw.failedCount ?? 0),
+    }
+    : null
+  const validationStandard = arrayValue(queue.validation_standard || queue.validationStandard)
+    .map(item => text(item))
+    .filter(Boolean)
+  const requiredReceipts = arrayValue(queue.required_receipts || queue.requiredReceipts || queue.receipts)
+    .map(item => text(item))
+    .filter(Boolean)
+  const effectiveReceipts = requiredReceipts.length ? Array.from(new Set(requiredReceipts)) : DEFAULT_FIVE_CHAPTER_LANE_TEMPLATE_RECEIPTS
+  const templateForRequirement = (key: string, fallbackText: string) => firstText(
+    templateByKey.get(key)?.template,
+    defaultFiveChapterLaneTemplateFieldValue(queue, key),
+    defaultFiveChapterLaneTemplateFieldValue(fallback, key),
+    fallbackText,
+  )
+  const segmentDutyRewrite = templateForRequirement(
+    'default_lane_segment_duty',
+    '默认 5 章档位验证批必须逐章继承前段、中段、后段的段位职责模板。',
+  )
+  const conflictRotation = templateForRequirement(
+    'default_lane_conflict_rotation',
+    '默认 5 章档位验证批必须逐章轮换冲突来源，避免同一压迫方式复发。',
+  )
+  const payoffDensity = templateForRequirement(
+    'default_lane_payoff_density',
+    '默认 5 章档位验证批必须逐章交付显性回报，不能连续铺垫。',
+  )
+  const endingHookTemplate = templateForRequirement(
+    'default_lane_ending_hook_template',
+    '默认 5 章档位验证批必须逐章落地章末追读模板。',
+  )
+  const topFailureSummary = topFailedRequirement
+    ? `${topFailedRequirement.label}失败 ${topFailedRequirement.failed_count} 次`
+    : ''
+
+  return {
+    visible: true,
+    status: 'fulfilled',
+    label: '默认5章档位模板重构',
+    source: 'safe_batch_expansion_structure_repair',
+    redesign_source: 'default_five_chapter_lane_template_redesign_queue',
+    source_run_id: run?.id ?? null,
+    repaired_at: text(run?.completed_at || run?.finished_at || run?.updated_at || run?.created_at),
+    source_repair_summary: text(queue.summary),
+    ...(topFailedRequirement ? { top_failed_requirement: topFailedRequirement } : {}),
+    latest_chapter_nos: arrayValue(queue.latest_chapter_nos || queue.latestChapterNos)
+      .map((chapterNo: any) => Number(chapterNo))
+      .filter((chapterNo: number) => chapterNo > 0),
+    validation_batch_count: Number(queue.validation_batch_count ?? queue.validationBatchCount ?? 0),
+    failed_batch_count: Number(queue.failed_batch_count ?? queue.failedBatchCount ?? 0),
+    summary: text(
+      queue.summary,
+      `默认5章档位模板已完成重构${topFailureSummary ? `：${topFailureSummary}` : ''}。下一轮验证批逐章执行新模板，并证明四项模板没有复发。`,
+    ),
+    segment_duty_rewrite: segmentDutyRewrite,
+    conflict_rotation: conflictRotation,
+    payoff_density: payoffDensity,
+    ending_hook_template: endingHookTemplate,
+    redesigned_templates: DEFAULT_FIVE_CHAPTER_LANE_TEMPLATE_REQUIREMENTS.map(requirement => ({
+      key: requirement.key,
+      label: text(templateByKey.get(requirement.key)?.label, requirement.label),
+      template: templateForRequirement(requirement.key, ''),
+    })),
+    validation_standard: validationStandard,
+    required_receipts: effectiveReceipts,
+    requirements: DEFAULT_FIVE_CHAPTER_LANE_TEMPLATE_REQUIREMENTS.map(requirement => {
+      const receiptKey = defaultFiveChapterLaneTemplateReceiptKey(requirement.key)
+      const templateText = templateForRequirement(requirement.key, '')
+      return {
+        ...requirement,
+        status: 'fulfilled',
+        verification_requirement: [
+          templateText ? `${requirement.label}新模板：${templateText}` : `${requirement.label}已重构`,
+          receiptKey ? `下一轮验证批必须逐章回填 ${receiptKey}` : '',
+          '并证明该模板没有复发。',
+        ].filter(Boolean).join('；'),
+      }
+    }),
+  }
+}
+
 function defaultFiveChapterLaneTemplateFromStructureRepairTask(
   task: AnyRecord,
   run: AnyRecord,
@@ -10067,6 +10205,15 @@ function defaultFiveChapterLaneTemplateFromStructureRepairTask(
     || task?.structure_review
     || task?.structureReview
     || null
+  const redesignQueue = review?.default_five_chapter_lane_template_redesign_queue
+    || review?.defaultFiveChapterLaneTemplateRedesignQueue
+    || null
+  const templateFromRedesignQueue = defaultFiveChapterLaneTemplateFromRedesignQueue(
+    redesignQueue,
+    run,
+    fallbackTemplate,
+  )
+  if (templateFromRedesignQueue) return templateFromRedesignQueue
   const repair = review?.default_five_chapter_lane_template_repair
     || review?.defaultFiveChapterLaneTemplateRepair
     || review?.validation_result?.default_five_chapter_lane_template_verdict
