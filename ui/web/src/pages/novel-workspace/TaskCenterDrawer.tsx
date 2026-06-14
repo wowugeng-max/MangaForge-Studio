@@ -230,6 +230,52 @@ function normalizeChapterNos(value: any) {
     .filter((chapterNo: number) => Number.isFinite(chapterNo) && chapterNo > 0)
 }
 
+export type ProductionRelapseCtaExecutionSnapshot = {
+  visible: boolean
+  source: string
+  kind: string
+  label: string
+  templateVersionId: string
+  defaultBatchChapterNos: number[]
+  validationChapterNos: number[]
+  clearedFailureReasons: string[]
+  remainingFailureReasons: string[]
+  targetChapterCount: number
+  summary: string
+}
+
+export function buildProductionRelapseCtaExecutionSnapshot(batchPreflight: any): ProductionRelapseCtaExecutionSnapshot | null {
+  const raw = batchPreflight?.production_relapse_cta_execution
+    || batchPreflight?.productionRelapseCtaExecution
+    || batchPreflight
+    || null
+  if (!raw || typeof raw !== 'object') return null
+  const source = compactEvidenceText(raw.source)
+  const kind = compactEvidenceText(raw.kind)
+  const label = compactEvidenceText(raw.label || kind || '生产后验 CTA')
+  const templateVersionId = compactEvidenceText(raw.template_version_id || raw.templateVersionId)
+  const clearedFailureReasons = normalizeEvidenceTextList(raw.cleared_failure_reasons || raw.clearedFailureReasons)
+  const remainingFailureReasons = normalizeEvidenceTextList(raw.remaining_failure_reasons || raw.remainingFailureReasons)
+  const defaultBatchChapterNos = normalizeChapterNos(raw.default_batch_chapter_nos || raw.defaultBatchChapterNos)
+  const validationChapterNos = normalizeChapterNos(raw.validation_chapter_nos || raw.validationChapterNos)
+  const targetChapterCount = Number(raw.target_chapter_count || raw.targetChapterCount || 0)
+  const hasEvidence = Boolean(source || kind || label || templateVersionId || clearedFailureReasons.length || remainingFailureReasons.length || defaultBatchChapterNos.length || validationChapterNos.length || targetChapterCount)
+  if (!hasEvidence) return null
+  return {
+    visible: true,
+    source,
+    kind,
+    label,
+    templateVersionId,
+    defaultBatchChapterNos,
+    validationChapterNos,
+    clearedFailureReasons,
+    remainingFailureReasons,
+    targetChapterCount: Number.isFinite(targetChapterCount) ? targetChapterCount : 0,
+    summary: `生产后验 CTA：${label}；模板 ${templateVersionId || '当前模板'}；已修复 ${clearedFailureReasons.length ? clearedFailureReasons.join('、') : '无'}；剩余 ${remainingFailureReasons.length ? remainingFailureReasons.join('、') : '无'}。`,
+  }
+}
+
 function normalizeEvidenceTextList(value: any) {
   return (Array.isArray(value) ? value : [])
     .map((item: any) => compactEvidenceText(item))
@@ -3201,6 +3247,7 @@ function BatchProseRunSummary({ run }: { run: any }) {
   const input = parseJsonValue(run.input_ref) || {}
   const output = parseJsonValue(run.output_ref) || {}
   const batchPreflight = input.batch_preflight || input.batchPreflight || null
+  const productionRelapseCtaExecution = buildProductionRelapseCtaExecutionSnapshot(batchPreflight || input)
   const expansionPolicy = buildSafeBatchExpansionPolicySnapshot(batchPreflight)
   const recoveryEvidenceProfile = buildRecoveryEvidenceSourceRiskProfileSnapshot(batchPreflight)
   const recoveryEvidence = [
@@ -3284,6 +3331,28 @@ function BatchProseRunSummary({ run }: { run: any }) {
           {scoreText !== null && <Tag color={scoreText >= 78 ? 'green' : 'gold'} bordered={false}>平均质检 {scoreText} 分</Tag>}
           <Tag bordered={false}>耗时 {run.duration_ms ? `${Math.round(Number(run.duration_ms) / 1000)}s` : '-'}</Tag>
         </Space>
+        {productionRelapseCtaExecution?.visible && (
+          <div style={{ padding: 8, border: '1px solid #c7d2fe', borderRadius: 6, background: '#eef2ff' }}>
+            <Space direction="vertical" size={4} style={{ width: '100%' }}>
+              <Space wrap size={[4, 4]}>
+                <Tag color="purple" bordered={false}>{productionRelapseCtaExecution.label}</Tag>
+                {productionRelapseCtaExecution.templateVersionId && (
+                  <Tag bordered={false}>{productionRelapseCtaExecution.templateVersionId}</Tag>
+                )}
+                {productionRelapseCtaExecution.targetChapterCount > 0 && (
+                  <Tag bordered={false}>目标 {productionRelapseCtaExecution.targetChapterCount} 章</Tag>
+                )}
+                {productionRelapseCtaExecution.clearedFailureReasons.slice(0, 3).map(reason => (
+                  <Tag key={`cta-cleared-${reason}`} color="green" bordered={false}>{reason}已修复</Tag>
+                ))}
+                {productionRelapseCtaExecution.remainingFailureReasons.slice(0, 3).map(reason => (
+                  <Tag key={`cta-remaining-${reason}`} color="gold" bordered={false}>{reason}待修</Tag>
+                ))}
+              </Space>
+              <Text type="secondary" style={{ fontSize: 12 }}>{productionRelapseCtaExecution.summary}</Text>
+            </Space>
+          </div>
+        )}
         {expansionPolicy?.visible && (
           <div style={{ padding: 8, border: '1px solid #bfdbfe', borderRadius: 6, background: '#eff6ff' }}>
             <Space direction="vertical" size={6} style={{ width: '100%' }}>

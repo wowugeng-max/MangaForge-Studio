@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'fs'
 import { join } from 'path'
-import { buildLongformCreationDiagnosis, buildReaderTrialRepairTasks, buildReaderTrialReview } from './novel-commercial-ops-routes'
+import { buildLongformCreationDiagnosis, buildLongformPressureTest, buildReaderTrialRepairTasks, buildReaderTrialReview } from './novel-commercial-ops-routes'
 
 const project = {
   id: 1,
@@ -128,6 +128,58 @@ describe('longform creation diagnosis', () => {
     expect(source).toContain("review_type: 'longform_creation_diagnosis'")
     expect(source).toContain("run_type: 'longform_creation_diagnosis'")
     expect(source).toContain('buildLongformCreationDiagnosis')
+  })
+
+  test('builds 30/100/300 chapter stress gates and canon memory audit for long-run pressure', () => {
+    const report = buildLongformPressureTest(
+      {
+        ...project,
+        target_words: 10000000,
+        reference_config: {
+          ...project.reference_config,
+          story_state: {
+            last_updated_chapter: 30,
+            version: 'state-v30',
+            global: {
+              core_promise: '寒门少年用阵法低成本破局',
+              current_volume_goal: '宗门试炼结算',
+              open_questions: ['祖阵是谁留下的'],
+              payoff_queue: ['内门资格必须兑现'],
+            },
+            characters: [
+              { name: '陆沉', status: '试炼胜者', location: '宗门外门' },
+              { name: '执事', status: '被反制', location: '执法堂' },
+            ],
+          },
+        },
+      },
+      healthyChapters,
+      healthyOutlines,
+      healthyCharacters,
+      healthyWorldbuilding,
+      healthyReviews,
+    )
+
+    expect(report.target_words).toBe(10000000)
+    expect(report.target_words_range).toEqual({ min: 3000000, max: 10000000 })
+    expect(report.stress_gates.map((item: any) => item.key)).toEqual([
+      'chapter_30',
+      'chapter_100',
+      'chapter_300',
+      'memory_canon',
+    ])
+    expect(report.stress_gates.find((item: any) => item.key === 'chapter_30')?.detail).toContain('前30章')
+    expect(report.stress_gates.find((item: any) => item.key === 'chapter_100')?.detail).toContain('未来100章')
+    expect(report.stress_gates.find((item: any) => item.key === 'chapter_300')?.detail).toContain('300章')
+    expect(report.memory_canon_audit).toMatchObject({
+      status: 'ok',
+      latest_state_chapter: 30,
+      state_version: 'state-v30',
+      character_state_count: 2,
+      open_question_count: 1,
+      payoff_debt_count: 1,
+    })
+    expect(report.next_actions).toContain('用30/100/300章压力门复查核心承诺、卷级闭环、扩容引擎和正史记忆。')
   })
 
   test('builds a reader trial review against Qidian 10k subscription reader pull', () => {

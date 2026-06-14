@@ -1332,6 +1332,128 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(action?.modelCall).toBe(true)
   })
 
+  test('surfaces a first manual test calibration gate before claiming longform readiness', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        topStatus: {
+          ...basePlanning.topStatus,
+          targetWords: 10000000,
+        },
+      },
+      writing: baseWriting,
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: {
+        last_updated_chapter: 7,
+        global: {
+          core_promise: '寒门少年以阵法反压宗门秩序',
+          current_volume_goal: '进入内门视野',
+        },
+      },
+    })
+
+    expect(model.manualTestReadiness.status).toBe('blocked')
+    expect(model.manualTestReadiness.label).toContain('首测校准')
+    expect(model.manualTestReadiness.primaryAction.key).toBe('longform_creation_diagnosis')
+    expect(model.manualTestReadiness.gates.map(item => item.key)).toEqual([
+      'commercial_benchmark',
+      'reader_trial',
+      'longrun_stress',
+      'memory_canon',
+    ])
+    expect(model.manualTestReadiness.gates.find(item => item.key === 'commercial_benchmark')?.detail).toContain('起点1万均订')
+    expect(model.manualTestReadiness.gates.find(item => item.key === 'reader_trial')?.action.key).toBe('run_reader_trial_review')
+    expect(model.manualTestReadiness.gates.find(item => item.key === 'longrun_stress')?.detail).toContain('30/100/300章')
+    expect(model.manualTestReadiness.handoffChecklist).toContain('先跑长篇创作健康诊断，确认核心不偏、故事强度、创新差异和读者吸引。')
+  })
+
+  test('marks first manual test calibration ready only after commercial, reader and long-run reports pass', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        topStatus: {
+          ...basePlanning.topStatus,
+          targetWords: 10000000,
+        },
+      },
+      writing: baseWriting,
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: {
+        last_updated_chapter: 7,
+        global: {
+          core_promise: '寒门少年以阵法反压宗门秩序',
+          current_volume_goal: '进入内门视野',
+          open_questions: ['祖阵来源仍需追问'],
+          payoff_queue: ['内门视野必须给出新资源回报'],
+        },
+        characters: [
+          { name: '陆沉', status: '外门试炼胜者', location: '宗门外门' },
+        ],
+      },
+      reviews: [
+        {
+          id: 901,
+          review_type: 'longform_creation_diagnosis',
+          created_at: '2026-06-10T01:00:00.000Z',
+          payload: JSON.stringify({
+            report: {
+              score: 88,
+              status: 'ready',
+              quality_bar_label: '起点1万均订基础线',
+              dimensions: [
+                { key: 'core', label: '核心不偏', status: 'ok', detail: '核心稳定', evidence: ['承诺清晰'] },
+                { key: 'story', label: '故事强度', status: 'ok', detail: '故事稳定', evidence: ['压力阶梯'] },
+                { key: 'innovation', label: '创新差异', status: 'ok', detail: '机制新鲜', evidence: ['阵法代价'] },
+                { key: 'reader_pull', label: '读者吸引', status: 'ok', detail: '追读稳定', evidence: ['前30章 86分'] },
+              ],
+            },
+          }),
+        },
+        {
+          id: 902,
+          review_type: 'reader_trial_review',
+          created_at: '2026-06-10T01:10:00.000Z',
+          payload: JSON.stringify({
+            report: {
+              score: 84,
+              status: 'ready',
+              quality_bar_label: '起点1万均订试读基准',
+              summary: '读者试读吸引力达到稳定追读基础。',
+              drop_points: [],
+              repair_actions: [],
+            },
+          }),
+        },
+        {
+          id: 903,
+          review_type: 'longform_pressure_test',
+          created_at: '2026-06-10T01:20:00.000Z',
+          payload: JSON.stringify({
+            report: {
+              score: 88,
+              status: 'scalable',
+              summary: '具备千万字级长线扩容基础。',
+              target_words_range: { min: 3000000, max: 10000000 },
+              stress_gates: [
+                { key: 'chapter_30', label: '30章试读段', status: 'ok', detail: '开篇追读稳定。' },
+                { key: 'chapter_100', label: '100章卷级闭环', status: 'ok', detail: '未来100章储备充足。' },
+                { key: 'chapter_300', label: '300章扩容引擎', status: 'ok', detail: '扩展引擎可持续。' },
+                { key: 'memory_canon', label: '正史记忆/版本', status: 'ok', detail: '状态机、开放悬念和回报债可回溯。' },
+              ],
+            },
+          }),
+        },
+      ],
+    })
+
+    expect(model.manualTestReadiness.status).toBe('ready')
+    expect(model.manualTestReadiness.primaryAction.key).toBe('enter_chapter_writing')
+    expect(model.manualTestReadiness.gates.every(item => item.status === 'ok')).toBe(true)
+    expect(model.manualTestReadiness.summary).toContain('可以进入第一次手工测试')
+  })
+
   test('uses chapter writing desk action when project governance is ready', () => {
     const model = buildAutoCreationDirectorModel({
       planning: {
@@ -6669,6 +6791,21 @@ describe('buildAutoCreationDirectorModel', () => {
           cleared_failure_reasons: ['核心偏移', '回报欠账', '追读拉力'],
         },
       },
+    })
+    expect(model.batchGuardrail.recommendedAction.payload?.production_relapse_cta_execution).toMatchObject({
+      source: 'safe_batch_production_relapse_review_cta',
+      kind: 'enter_five_chapter_observation',
+      label: '进入5章观察批',
+      template_version_id: 'safe_batch_expansion_structure_repair:704',
+      cleared_failure_reasons: ['核心偏移', '回报欠账', '追读拉力'],
+      remaining_failure_reasons: [],
+      target_chapter_count: 5,
+    })
+    expect(model.batchGuardrail.recommendedAction.payload?.batch_preflight?.production_relapse_cta_execution).toMatchObject({
+      source: 'safe_batch_production_relapse_review_cta',
+      template_version_id: 'safe_batch_expansion_structure_repair:704',
+      cleared_failure_reasons: ['核心偏移', '回报欠账', '追读拉力'],
+      remaining_failure_reasons: [],
     })
     expect(model.productionLicense.modeLabel).toBe('5章观察批')
     expect(model.productionLicense.summary).toContain('生产后验已修复')

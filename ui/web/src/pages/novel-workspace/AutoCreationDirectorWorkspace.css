@@ -262,6 +262,104 @@
   line-height: 18px;
 }
 
+.auto-director-manual-test {
+  border-color: #dbe4ef;
+  background: #fff;
+}
+
+.auto-director-manual-test-ready {
+  border-color: #bbf7d0;
+}
+
+.auto-director-manual-test-needs_calibration {
+  border-color: #fde68a;
+}
+
+.auto-director-manual-test-blocked {
+  border-color: #fecaca;
+}
+
+.auto-director-manual-test-body {
+  display: grid;
+  grid-template-columns: minmax(240px, 0.8fr) minmax(320px, 1.2fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.auto-director-manual-test-copy,
+.auto-director-manual-test-checklist {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.auto-director-manual-test-checklist .ant-typography {
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.auto-director-manual-test-gates {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.auto-director-manual-test-gate {
+  min-width: 0;
+  min-height: 118px;
+  border: 1px solid #e5eaf2;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 10px;
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.auto-director-manual-test-gate:hover {
+  border-color: #93c5fd;
+  background: #eff6ff;
+}
+
+.auto-director-manual-test-gate-ok {
+  border-color: #bbf7d0;
+  background: #f7fff9;
+}
+
+.auto-director-manual-test-gate-warn {
+  border-color: #fde68a;
+  background: #fffdf3;
+}
+
+.auto-director-manual-test-gate-block {
+  border-color: #fecaca;
+  background: #fff8f8;
+}
+
+.auto-director-manual-test-gate span {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.auto-director-manual-test-gate .ant-typography-secondary,
+.auto-director-manual-test-gate em {
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.auto-director-manual-test-gate em {
+  color: #64748b;
+  font-style: normal;
+}
+
 .auto-director-command-quality-gates {
   min-width: 0;
   display: grid;
@@ -2966,6 +3064,10 @@
     grid-template-columns: 1fr;
   }
 
+  .auto-director-manual-test-body {
+    grid-template-columns: 1fr;
+  }
+
   .auto-director-creation-stages {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
@@ -3044,6 +3146,11 @@
   }
 
   .auto-director-cockpit-guardrails {
+    grid-template-columns: 1fr;
+  }
+
+  .auto-director-manual-test-body,
+  .auto-director-manual-test-gates {
     grid-template-columns: 1fr;
   }
 

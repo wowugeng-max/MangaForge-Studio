@@ -2256,6 +2256,37 @@ describe('buildSafeBatchExpansionPolicySnapshot', () => {
 })
 
 describe('default lane repair task card helpers', () => {
+  test('extracts production relapse CTA execution from safe-batch preflight', async () => {
+    const taskCenter = await import('./TaskCenterDrawer')
+    const snapshot = (taskCenter as any).buildProductionRelapseCtaExecutionSnapshot?.({
+      production_relapse_cta_execution: {
+        source: 'safe_batch_production_relapse_review_cta',
+        kind: 'enter_five_chapter_observation',
+        label: '进入5章观察批',
+        template_version_id: 'safe_batch_expansion_structure_repair:704',
+        default_batch_chapter_nos: [119, 120, 121, 122, 123],
+        validation_chapter_nos: [124, 125, 126],
+        cleared_failure_reasons: ['核心偏移', '回报欠账', '追读拉力'],
+        remaining_failure_reasons: [],
+        target_chapter_count: 5,
+      },
+    })
+
+    expect(snapshot).toEqual({
+      visible: true,
+      source: 'safe_batch_production_relapse_review_cta',
+      kind: 'enter_five_chapter_observation',
+      label: '进入5章观察批',
+      templateVersionId: 'safe_batch_expansion_structure_repair:704',
+      defaultBatchChapterNos: [119, 120, 121, 122, 123],
+      validationChapterNos: [124, 125, 126],
+      clearedFailureReasons: ['核心偏移', '回报欠账', '追读拉力'],
+      remainingFailureReasons: [],
+      targetChapterCount: 5,
+      summary: '生产后验 CTA：进入5章观察批；模板 safe_batch_expansion_structure_repair:704；已修复 核心偏移、回报欠账、追读拉力；剩余 无。',
+    })
+  })
+
   test('extracts default lane template gap tags from structure decision repair tasks', async () => {
     const taskCenter = await import('./TaskCenterDrawer')
     const tags = (taskCenter as any).buildDefaultLaneRepairTaskTags?.({

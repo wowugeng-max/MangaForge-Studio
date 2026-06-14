@@ -39,6 +39,7 @@ export type AutoCreationBatchHandoffStatus = 'empty' | 'failed' | 'deliver_chapt
 export type AutoCreationChapterLaunchGateStatus = 'ready' | 'warn' | 'blocked'
 export type AutoCreationLongformCapacityStatus = 'ready' | 'caution' | 'blocked'
 export type AutoCreationDeliveryRiskGateStatus = 'ok' | 'warn' | 'block'
+export type AutoCreationManualTestReadinessStatus = 'ready' | 'needs_calibration' | 'blocked'
 export type AutoCreationDailyBattleStepKey = 'clear_risks' | 'fuel_materials' | 'chapter_work' | 'batch_release'
 export type AutoCreationRollingScriptRoomStatus = 'ready' | 'needs_attention' | 'blocked'
 export type AutoCreationRollingScriptLayerKey = 'current_chapter' | 'next_10' | 'future_100' | 'current_volume' | 'book_compass'
@@ -149,6 +150,24 @@ export interface AutoCreationLongformCompass {
   axes: AutoCreationLongformCompassAxis[]
   immutableRules: string[]
   flexibleZones: string[]
+}
+
+export interface AutoCreationManualTestGate {
+  key: 'commercial_benchmark' | 'reader_trial' | 'longrun_stress' | 'memory_canon'
+  label: string
+  status: AutoCreationBatchGuardrailSignalStatus
+  detail: string
+  evidence: string[]
+  action: AutoCreationDirectorAction
+}
+
+export interface AutoCreationManualTestReadiness {
+  status: AutoCreationManualTestReadinessStatus
+  label: string
+  summary: string
+  gates: AutoCreationManualTestGate[]
+  primaryAction: AutoCreationDirectorAction
+  handoffChecklist: string[]
 }
 
 export interface AutoCreationBatchGuardrailSignal {
@@ -755,6 +774,7 @@ export interface AutoCreationDirectorModel {
   longformBattleDesk: PlanningWorkspaceModel['longformBattleDesk']
   longformCapacity: AutoCreationLongformCapacity
   longformCompass: AutoCreationLongformCompass
+  manualTestReadiness: AutoCreationManualTestReadiness
   creationContract: AutoCreationContractItem[]
   chapterLaunchGate: AutoCreationChapterLaunchGate
   dailyBattlePlan: AutoCreationDailyBattlePlan
@@ -843,6 +863,8 @@ const MODEL_CALL_ACTIONS = new Set<string>([
   'reference_diagnosis',
   'run_first30_retention',
   'create_first30_repair',
+  'run_reader_trial_review',
+  'create_reader_trial_repair',
   'build_scene_plan',
   'write_draft',
   'confirm_plan_and_write_draft',
@@ -6818,6 +6840,45 @@ function productionRelapseReviewCtaPayload(cta: AnyRecord) {
   }
 }
 
+function productionRelapseCtaExecutionPayload(cta: AnyRecord | null | undefined, source: string) {
+  if (!cta) return null
+  const verdict = cta.production_relapse_verdict || cta.productionRelapseVerdict || {}
+  const templateVersionId = text(
+    verdict.template_version_id
+    || verdict.templateVersionId
+    || cta.template_version_id
+    || cta.templateVersionId,
+  )
+  const remainingFailureReasons = arrayValue(cta.remaining_failure_reasons || cta.remainingFailureReasons || verdict.remaining_failure_reasons || verdict.remainingFailureReasons)
+    .map(item => text(item))
+    .filter(Boolean)
+  const clearedFailureReasons = arrayValue(cta.cleared_failure_reasons || cta.clearedFailureReasons || verdict.cleared_failure_reasons || verdict.clearedFailureReasons)
+    .map(item => text(item))
+    .filter(Boolean)
+  return {
+    source,
+    kind: text(cta.kind),
+    label: text(cta.label),
+    summary: text(cta.summary),
+    template_version_id: templateVersionId,
+    default_batch_chapter_nos: arrayValue(verdict.default_batch_chapter_nos || verdict.defaultBatchChapterNos)
+      .map(chapterNo => Number(chapterNo))
+      .filter(chapterNo => chapterNo > 0),
+    restore_chapter_nos: arrayValue(verdict.restore_chapter_nos || verdict.restoreChapterNos)
+      .map(chapterNo => Number(chapterNo))
+      .filter(chapterNo => chapterNo > 0),
+    validation_chapter_nos: arrayValue(verdict.validation_chapter_nos || verdict.validationChapterNos)
+      .map(chapterNo => Number(chapterNo))
+      .filter(chapterNo => chapterNo > 0),
+    remaining_failure_reasons: remainingFailureReasons,
+    cleared_failure_reasons: clearedFailureReasons,
+    target_chapter_count: Number(cta.target_chapter_count || cta.targetChapterCount || 0),
+    close_condition: remainingFailureReasons.length
+      ? 'repair remaining_failure_reasons, then rerun production_relapse_verdict.status=passed'
+      : 'production_relapse_verdict.status=passed && remaining_failure_reasons empty',
+  }
+}
+
 function buildProductionRelapseReviewCta(policy: AnyRecord | null | undefined, recoveryRestoreStabilityLane: AnyRecord | null | undefined) {
   const verdict = latestProductionRelapseVerdictFromExpansionPolicy(policy)
   const status = text(verdict?.status)
@@ -9653,7 +9714,205 @@ function latestLongformCreationReport(reviews: AnyRecord[]) {
     .filter(item => text(item?.review_type) === 'longform_creation_diagnosis')
     .sort((a, b) => recordTime(b) - recordTime(a))[0]
   const payload = parsePayload(review?.payload) || {}
-  return payload.report || payload.result?.report || payload
+  const report = payload.report || payload.result?.report || payload
+  return Object.keys(report || {}).length ? report : null
+}
+
+function latestReviewReport(reviews: AnyRecord[], reviewType: string) {
+  const review = reviews
+    .filter(item => text(item?.review_type) === reviewType)
+    .sort((a, b) => recordTime(b) - recordTime(a))[0]
+  const payload = parsePayload(review?.payload) || {}
+  const report = payload.report || payload.result?.report || payload.result || payload
+  return Object.keys(report || {}).length ? report : null
+}
+
+function reportScore(report: AnyRecord | null | undefined) {
+  return numberValue(report?.score ?? report?.quality_score ?? report?.qualityScore)
+}
+
+function reportStatus(report: AnyRecord | null | undefined) {
+  return text(report?.status).toLowerCase()
+}
+
+function reportIsBlocked(report: AnyRecord | null | undefined) {
+  return ['blocked', 'block', 'failed', 'fail'].includes(reportStatus(report))
+}
+
+function reportNeedsRepair(report: AnyRecord | null | undefined) {
+  return ['needs_repair', 'warn', 'warning', 'fragile'].includes(reportStatus(report))
+}
+
+function stressGateStatus(report: AnyRecord | null | undefined, key: string) {
+  const gate = arrayValue(report?.stress_gates || report?.stressGates).find(item => text(item?.key) === key)
+  const status = text(gate?.status).toLowerCase()
+  if (['block', 'blocked', 'failed'].includes(status)) return 'block' as const
+  if (['warn', 'warning', 'fragile', 'needs_repair'].includes(status)) return 'warn' as const
+  if (status === 'ok' || status === 'ready' || status === 'scalable') return 'ok' as const
+  return null
+}
+
+function latestWrittenChapterNo(chapters: AnyRecord[]) {
+  return chapters
+    .filter(chapter => hasDeliveredProse(chapter))
+    .reduce((max, chapter) => Math.max(max, Number(chapter?.chapter_no ?? chapter?.chapterNo ?? 0)), 0)
+}
+
+function manualTestGate(
+  key: AutoCreationManualTestGate['key'],
+  label: string,
+  status: AutoCreationBatchGuardrailSignalStatus,
+  detail: string,
+  evidence: string[],
+  action: AutoCreationDirectorAction,
+): AutoCreationManualTestGate {
+  return { key, label, status, detail, evidence: evidence.map(item => text(item)).filter(Boolean).slice(0, 4), action }
+}
+
+function buildManualTestReadiness(args: {
+  planning: PlanningWorkspaceModel
+  writing: WritingCockpitModel
+  reviews: AnyRecord[]
+  chapters: AnyRecord[]
+  storyState?: AnyRecord | null
+}): AutoCreationManualTestReadiness {
+  const targetWords = Number(args.planning.topStatus.targetWords || 0)
+  const targetBand = targetWords >= 8000000 ? '1000万字级' : targetWords >= 3000000 ? '300万字级' : '长篇'
+  const commercialReport = latestLongformCreationReport(args.reviews)
+  const readerTrial = readerTrialReport(latestReaderTrialReview(args.reviews))
+  const pressureReport = latestReviewReport(args.reviews, 'longform_pressure_test')
+  const storyState = args.storyState || {}
+  const stateGlobal = storyState.global || storyState
+  const latestChapterNo = Math.max(
+    Number(args.writing.previousChapter?.chapterNo || 0),
+    latestWrittenChapterNo(args.chapters),
+  )
+  const stateChapter = Number(storyState.last_updated_chapter || stateGlobal.last_updated_chapter || 0)
+  const stateFresh = latestChapterNo <= 0 || stateChapter >= Math.max(0, latestChapterNo - 1)
+  const memoryAnchor = buildLongformMemoryAnchor(storyState)
+  const pressureScore = reportScore(pressureReport)
+  const pressureStressGates = arrayValue(pressureReport?.stress_gates || pressureReport?.stressGates)
+  const pressureHasNewStressGates = ['chapter_30', 'chapter_100', 'chapter_300', 'memory_canon']
+    .every(key => pressureStressGates.some(item => text(item?.key) === key))
+  const pressureMemoryStatus = stressGateStatus(pressureReport, 'memory_canon')
+
+  const commercialScore = reportScore(commercialReport)
+  const commercialGateStatus: AutoCreationBatchGuardrailSignalStatus = !commercialReport
+    ? 'block'
+    : reportIsBlocked(commercialReport) || commercialScore !== null && commercialScore < 75
+      ? 'block'
+      : reportNeedsRepair(commercialReport) || commercialScore !== null && commercialScore < 82
+        ? 'warn'
+        : 'ok'
+  const readerScore = reportScore(readerTrial)
+  const readerDropPoints = arrayValue(readerTrial?.drop_points || readerTrial?.dropPoints).map(item => text(item)).filter(Boolean)
+  const readerGateStatus: AutoCreationBatchGuardrailSignalStatus = !readerTrial
+    ? 'block'
+    : reportIsBlocked(readerTrial) || readerScore !== null && readerScore < 65
+      ? 'block'
+      : reportNeedsRepair(readerTrial) || readerScore !== null && readerScore < 80 || readerDropPoints.length > 0
+        ? 'warn'
+        : 'ok'
+  const longrunGateStatus: AutoCreationBatchGuardrailSignalStatus = !pressureReport
+    ? 'block'
+    : reportIsBlocked(pressureReport) || pressureScore !== null && pressureScore < 62
+      ? 'block'
+      : reportNeedsRepair(pressureReport)
+        || pressureScore !== null && pressureScore < (targetWords >= 8000000 ? 86 : 80)
+        || !pressureHasNewStressGates
+        || ['chapter_100', 'chapter_300'].some(key => stressGateStatus(pressureReport, key) !== null && stressGateStatus(pressureReport, key) !== 'ok')
+        ? 'warn'
+        : 'ok'
+  const memoryGateStatus: AutoCreationBatchGuardrailSignalStatus = !stateFresh
+    ? 'block'
+    : pressureMemoryStatus === 'block'
+      ? 'block'
+      : !memoryAnchor || pressureMemoryStatus === 'warn'
+        ? 'warn'
+        : 'ok'
+
+  const gates: AutoCreationManualTestGate[] = [
+    manualTestGate(
+      'commercial_benchmark',
+      '万订商业校准',
+      commercialGateStatus,
+      commercialReport
+        ? `${text(commercialReport.quality_bar_label || commercialReport.qualityBarLabel, '起点1万均订基础线')} ${commercialScore ?? '-'} 分：${text(commercialReport.summary, '已生成商业诊断。')}`
+        : '缺起点1万均订商业校准报告，不能只按内部规则判断作品可生产。',
+      [
+        commercialScore !== null ? `创作诊断 ${commercialScore}分` : '',
+        ...arrayValue(commercialReport?.next_actions || commercialReport?.nextActions).slice(0, 2),
+      ],
+      planningAction('longform_creation_diagnosis', '按起点1万均订基础线检查核心不偏、故事强度、创新差异和读者吸引。'),
+    ),
+    manualTestGate(
+      'reader_trial',
+      '试读追读校准',
+      readerGateStatus,
+      readerTrial
+        ? `${text(readerTrial.quality_bar_label || readerTrial.qualityBarLabel, '起点1万均订试读基准')} ${readerScore ?? '-'} 分：${text(readerTrial.summary, '已完成读者试读复盘。')}`
+        : '缺读者试读复盘，无法判断开篇三章、试读十章和付费前追读是否会掉线。',
+      [
+        readerScore !== null ? `试读 ${readerScore}分` : '',
+        ...readerDropPoints.slice(0, 2),
+      ],
+      readerDropPoints.length || readerGateStatus === 'warn'
+        ? planningAction('create_reader_trial_repair', '把试读弃读点转成任务中心修复队列。')
+        : planningAction('run_reader_trial_review', '按起点1万均订试读基准模拟读者弃读点、追读拉力和修复动作。'),
+    ),
+    manualTestGate(
+      'longrun_stress',
+      '长跑压力校准',
+      longrunGateStatus,
+      pressureReport
+        ? `${targetBand}长线压力 ${pressureScore ?? '-'} 分；${pressureHasNewStressGates ? '已覆盖30/100/300章压力门。' : '缺30/100/300章新版压力门。'}`
+        : `缺30/100/300章长跑压力测试，无法证明 ${targetBand} 能持续不塌线。`,
+      [
+        pressureScore !== null ? `压力测试 ${pressureScore}分` : '',
+        ...arrayValue(pressureReport?.weak_points || pressureReport?.weakPoints).slice(0, 2).map((item: any) => `${text(item?.area)}：${text(item?.issue)}`),
+      ],
+      planningAction('longform_pressure', '运行长线压力测试，验证30章试读、100章卷级闭环、300章扩容引擎和正史记忆。'),
+    ),
+    manualTestGate(
+      'memory_canon',
+      '正史记忆锚点',
+      memoryGateStatus,
+      !stateFresh
+        ? `故事状态只同步到第${stateChapter || 0}章，落后于第${latestChapterNo}章，长篇生产会放大设定漂移。`
+        : memoryAnchor
+          ? '正史锚点已有核心承诺、卷目标、人物状态、开放悬念或回报债，可进入首测观察。'
+          : '缺正史记忆锚点，建议先同步故事状态，补角色状态、开放悬念和回报债。',
+      [
+        stateChapter ? `状态机第${stateChapter}章` : '',
+        memoryAnchor?.core_promise ? `核心承诺：${memoryAnchor.core_promise}` : '',
+        memoryAnchor?.open_questions?.length ? `开放悬念 ${memoryAnchor.open_questions.length}` : '',
+        memoryAnchor?.payoff_debts?.length ? `回报债 ${memoryAnchor.payoff_debts.length}` : '',
+      ],
+      writingAction('sync_story_state', '同步故事状态，沉淀角色状态、开放悬念、回报债和核心承诺。'),
+    ),
+  ]
+
+  const blocking = gates.find(item => item.status === 'block')
+  const warning = gates.find(item => item.status === 'warn')
+  const status: AutoCreationManualTestReadinessStatus = blocking ? 'blocked' : warning ? 'needs_calibration' : 'ready'
+  const primaryAction = (blocking || warning)?.action || planningAction('enter_chapter_writing', '校准通过，可以进入当前章写作并开始第一次手工测试。')
+  const handoffChecklist = [
+    '先跑长篇创作健康诊断，确认核心不偏、故事强度、创新差异和读者吸引。',
+    '再跑读者试读复盘，确认开篇三章、试读十章和付费前追读没有高危弃读点。',
+    '运行长线压力测试，用30/100/300章压力门检查卷级闭环、扩容引擎和正史记忆。',
+    '首测时按“今日唯一动作 -> 当前章生产链 -> 任务中心风险 -> 安全连写预检”的顺序走查。',
+  ]
+
+  return {
+    status,
+    label: status === 'ready' ? '首测校准已通过' : status === 'blocked' ? '首测校准阻塞' : '首测校准待补强',
+    summary: status === 'ready'
+      ? '商业标杆、试读追读、长跑压力和正史记忆都已具备，可以进入第一次手工测试。'
+      : `${(blocking || warning)?.label || '首测校准'}仍未达标，先处理这一步，再用手工测试验证真实创作链路。`,
+    gates,
+    primaryAction,
+    handoffChecklist,
+  }
 }
 
 const COMPASS_AXIS_LABELS: Record<AutoCreationLongformCompassAxis['key'], string> = {
@@ -12466,9 +12725,14 @@ function buildBatchGuardrail(args: {
   let recommendedAction = args.mainAction
 
   if (productionRelapseReviewNeedsRepair && productionRelapseReviewCta) {
+    const productionRelapseCtaExecution = productionRelapseCtaExecutionPayload(
+      productionRelapseReviewCta,
+      'safe_batch_production_relapse_review_cta',
+    )
     recommendedAction = opsAction('open_task_center', productionRelapseReviewCta.label, productionRelapseReviewCta.summary, false, {
       source: 'safe_batch_production_relapse_review_cta',
       production_relapse_review_cta: productionRelapseReviewCta,
+      ...(productionRelapseCtaExecution ? { production_relapse_cta_execution: productionRelapseCtaExecution } : {}),
     })
   } else if (blocking?.label === '恢复依据生产闸门' || warning?.label === '恢复依据生产闸门') {
     const recoveryEvidenceNextAction = recoveryEvidenceProductionGate.snapshot.next_action || {
@@ -12706,8 +12970,14 @@ function buildBatchGuardrail(args: {
         : recoveryRestoreObservationActive
           ? `${safeBatchRecoveryRestoreStabilityLane?.summary} 本批继续按 5 章观察，仍逐章回填核心守恒、显性回报、章末追读和结构决策执行。`
           : defaultFiveChapterLaneActive
-            ? `${safeBatchRecoveryRestoreStabilityLane?.summary} 本批可作为默认 5 章档位继续生产。`
+          ? `${safeBatchRecoveryRestoreStabilityLane?.summary} 本批可作为默认 5 章档位继续生产。`
             : `按护栏建议连续生成 ${safeChapterCount} 章；每章仍会走字数门禁、质检修订和故事状态回填。`
+    const productionRelapseCtaExecution = productionRelapseReviewStartsBatch
+      ? productionRelapseCtaExecutionPayload(productionRelapseReviewCta, startBatchSource)
+      : null
+    if (productionRelapseCtaExecution) {
+      preflight.inputSnapshot.production_relapse_cta_execution = productionRelapseCtaExecution
+    }
     recommendedAction = productionRelapseReviewStartsBatch || !safeBatchRecoveryAction ? opsAction(
       'start_safe_batch_generation',
       startBatchLabel,
@@ -12720,6 +12990,9 @@ function buildBatchGuardrail(args: {
         next_batch_brief: nextBatchBrief,
         ...(productionRelapseReviewStartsBatch && productionRelapseReviewCta ? {
           production_relapse_review_cta: productionRelapseReviewCta,
+        } : {}),
+        ...(productionRelapseCtaExecution ? {
+          production_relapse_cta_execution: productionRelapseCtaExecution,
         } : {}),
         ...(productionRelapseValidationActive ? {
           production_relapse_validation: {
@@ -14664,6 +14937,13 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
   const longformBattleDesk = buildDirectorBattleDesk(planning)
   const chapterLaunchGate = buildChapterLaunchGate(planning, writing, longformCompass)
   const longformCapacity = buildLongformCapacity(planning)
+  const manualTestReadiness = buildManualTestReadiness({
+    planning,
+    writing,
+    reviews,
+    chapters: arrayValue(input.chapters),
+    storyState: input.storyState || {},
+  })
   const canonRunway = buildCanonRunway(writing)
   const deliveryRiskGate = buildDeliveryRiskGate({
     reviews,
@@ -14949,6 +15229,7 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
     longformBattleDesk,
     longformCapacity,
     longformCompass,
+    manualTestReadiness,
     creationContract,
     chapterLaunchGate,
     dailyBattlePlan,

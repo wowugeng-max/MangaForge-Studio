@@ -744,8 +744,11 @@ export function buildReaderTrialRepairTasks(report: any) {
   return tasks.slice(0, 60)
 }
 
-function buildLongformPressureTest(project: any, chapters: any[], outlines: any[], characters: any[], worldbuilding: any[], reviews: any[]) {
-  const targetWords = 3000000
+export function buildLongformPressureTest(project: any, chapters: any[], outlines: any[], characters: any[], worldbuilding: any[], reviews: any[]) {
+  const config = project.reference_config || {}
+  const bible = config.writing_bible || {}
+  const targetWordsInput = Number(project.target_words ?? project.targetWords ?? bible.target_words ?? bible.targetWords ?? 3000000)
+  const targetWords = Math.max(3000000, Math.min(10000000, Number.isFinite(targetWordsInput) && targetWordsInput > 0 ? targetWordsInput : 3000000))
   const writtenChapters = chapters.filter(chapter => chapter.chapter_text)
   const writtenWords = writtenChapters.reduce((sum, chapter) => sum + wc(chapter.chapter_text || ''), 0)
   const avgWords = writtenChapters.length ? Math.round(writtenWords / writtenChapters.length) : 3000
@@ -755,9 +758,8 @@ function buildLongformPressureTest(project: any, chapters: any[], outlines: any[
     at_4000: Math.ceil(targetWords / 4000),
     based_on_current_average: Math.ceil(targetWords / Math.max(1200, avgWords)),
   }
-  const config = project.reference_config || {}
-  const bible = config.writing_bible || {}
   const state = config.story_state || {}
+  const stateGlobal = state.global || state
   const volumeOutlines = outlines.filter(item => ['volume', 'arc', 'part'].includes(String(item.outline_type || '')))
   const chapterOutlines = outlines.filter(item => String(item.outline_type || '') === 'chapter')
   const longText = [
@@ -781,6 +783,94 @@ function buildLongformPressureTest(project: any, chapters: any[], outlines: any[
   const payoffScore = Math.min(100, payoffSignals.filter(word => longText.includes(word)).length * 8)
   const storyStateFresh = Number(state.last_updated_chapter || 0) >= Math.max(0, ...writtenChapters.map(chapter => Number(chapter.chapter_no || 0))) - 1
   const reviewDebt = reviews.filter(review => ['warn', 'blocked', 'fail'].includes(review.status)).length
+  const first30Report = latestReport(reviews, 'first30_retention_diagnosis')
+  const first30Score = Number(first30Report?.score || 0)
+  const activeCharacterCount = characters.filter(item => item.status !== 'archived').length
+  const characterStates = asArray(state.characters || stateGlobal.characters)
+  const openQuestions = [
+    ...asArray(state.open_questions),
+    ...asArray(stateGlobal.open_questions),
+  ]
+  const payoffDebts = [
+    ...asArray(state.payoff_queue),
+    ...asArray(state.payoff_debts),
+    ...asArray(stateGlobal.payoff_queue),
+    ...asArray(stateGlobal.payoff_debts),
+  ]
+  const stateVersion = String(state.version || state.state_version || stateGlobal.version || stateGlobal.state_version || '').trim()
+  const memoryCanonStatus = !storyStateFresh
+    ? 'block'
+    : stateVersion || characterStates.length || openQuestions.length || payoffDebts.length
+      ? 'ok'
+      : 'warn'
+  const stressGate = (key: string, label: string, status: string, detail: string, evidence: any[]) => ({
+    key,
+    label,
+    status,
+    detail,
+    evidence: evidence.map(item => String(item || '').trim()).filter(Boolean).slice(0, 5),
+  })
+  const chapter30Status = first30Score >= 80 && writtenChapters.length >= 30
+    ? 'ok'
+    : first30Score >= 65 || writtenChapters.length >= 10
+      ? 'warn'
+      : 'block'
+  const chapter100Status = chapterOutlines.length >= 100 && volumeOutlines.length >= 3
+    ? 'ok'
+    : chapterOutlines.length >= 50 || outlines.length >= 100
+      ? 'warn'
+      : 'block'
+  const chapter300Status = volumeOutlines.length >= 8 && activeCharacterCount >= 10 && worldbuilding.length >= 8 && expansionScore >= 50
+    ? 'ok'
+    : volumeOutlines.length >= 4 && activeCharacterCount >= 6 && worldbuilding.length >= 4
+      ? 'warn'
+      : 'block'
+  const stressGates = [
+    stressGate(
+      'chapter_30',
+      '30章试读段',
+      chapter30Status,
+      first30Score ? `前30章留存 ${first30Score} 分，已写 ${writtenChapters.length} 章。` : `前30章试读段缺留存报告，已写 ${writtenChapters.length} 章。`,
+      [first30Report?.summary, first30Score ? `前30章 ${first30Score}分` : '前30章未诊断'],
+    ),
+    stressGate(
+      'chapter_100',
+      '100章卷级闭环',
+      chapter100Status,
+      `未来100章储备：章节大纲 ${chapterOutlines.length} 条，分卷/阶段 ${volumeOutlines.length} 个。`,
+      [`章节大纲 ${chapterOutlines.length}`, `分卷/阶段 ${volumeOutlines.length}`],
+    ),
+    stressGate(
+      'chapter_300',
+      '300章扩容引擎',
+      chapter300Status,
+      `300章扩容需要分卷、人物池、世界资产和地图/规则引擎轮转；当前分卷 ${volumeOutlines.length}、角色 ${activeCharacterCount}、世界资产 ${worldbuilding.length}。`,
+      [`扩展信号 ${expansionScore}`, `冲突阶梯 ${conflictScore}`, `回报循环 ${payoffScore}`],
+    ),
+    stressGate(
+      'memory_canon',
+      '正史记忆/版本',
+      memoryCanonStatus,
+      storyStateFresh
+        ? `故事状态同步到第${Number(state.last_updated_chapter || 0)}章，正史记忆可回溯。`
+        : `故事状态同步到第${Number(state.last_updated_chapter || 0)}章，落后于已写正文。`,
+      [stateVersion ? `版本 ${stateVersion}` : '', `角色状态 ${characterStates.length}`, `开放悬念 ${openQuestions.length}`, `回报债 ${payoffDebts.length}`],
+    ),
+  ]
+  const memoryCanonAudit = {
+    status: memoryCanonStatus,
+    latest_state_chapter: Number(state.last_updated_chapter || 0),
+    state_version: stateVersion,
+    character_state_count: characterStates.length,
+    open_question_count: openQuestions.length,
+    payoff_debt_count: payoffDebts.length,
+    story_state_fresh: storyStateFresh,
+    summary: memoryCanonStatus === 'ok'
+      ? '状态机、角色状态、开放悬念和回报债具备长跑回溯基础。'
+      : memoryCanonStatus === 'block'
+        ? '故事状态机落后于正文，必须先同步正史记忆。'
+        : '正史记忆缺少版本、角色状态、开放悬念或回报债，建议首测前补齐。',
+  }
 
   if (volumeOutlines.length < 8) addWeak('high', '分卷结构', `分卷/阶段不足，当前 ${volumeOutlines.length} 个。`, '按300万字目标至少拆出8-12个大阶段，每阶段有目标、反派压力、地图/身份变化和结算奖励。')
   if (chapterOutlines.length < 80) addWeak('medium', '章节储备', `章节级大纲储备偏少，当前 ${chapterOutlines.length} 条。`, '先做未来100章骨架，避免日更时现想主线。')
@@ -828,11 +918,14 @@ function buildLongformPressureTest(project: any, chapters: any[], outlines: any[
     report_id: `longform-${Date.now()}`,
     created_at: new Date().toISOString(),
     target_words: targetWords,
+    target_words_range: { min: 3000000, max: 10000000 },
     score,
     status: score >= 80 ? 'scalable' : score >= 62 ? 'fragile' : 'blocked',
     summary: score >= 80 ? '具备长线扩容基础，可以进入百章骨架和日更流水线。' : score >= 62 ? '存在长篇潜力，但需要先补分卷、人物和冲突阶梯。' : '当前材料不足以支撑300万字以上长篇，直接生成会高度塌线。',
     estimated_chapters: estimatedChapters,
     capacity,
+    stress_gates: stressGates,
+    memory_canon_audit: memoryCanonAudit,
     weak_points: weakPoints,
     volume_pressure: volumePressure,
     expansion_plan: [
@@ -846,6 +939,7 @@ function buildLongformPressureTest(project: any, chapters: any[], outlines: any[
       weakPoints.some(item => item.area === '人物池') ? '补角色池和反派阶梯，确保每卷都有关系张力和竞争压力。' : '',
       weakPoints.some(item => item.area === '世界/题材资产') ? '补可复用世界资产：地图、组织、规则、资源、禁忌。' : '',
       !storyStateFresh ? '同步故事状态机后再继续批量生成。' : '',
+      '用30/100/300章压力门复查核心承诺、卷级闭环、扩容引擎和正史记忆。',
       '建立“前30章诊断 -> 未来10章滚动规划 -> 机械质检 -> 传播债务”的日更循环。',
     ].filter(Boolean),
   }

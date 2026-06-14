@@ -521,6 +521,55 @@ export function AutoCreationDirectorWorkspace({
         </div>
       </section>
 
+      <section className={`auto-director-panel auto-director-manual-test auto-director-manual-test-${model.manualTestReadiness.status}`}>
+        <div className="auto-director-panel-title">
+          <CheckCircleOutlined />
+          <span>首测校准台</span>
+          <Tag
+            color={model.manualTestReadiness.status === 'ready' ? 'green' : model.manualTestReadiness.status === 'blocked' ? 'red' : 'gold'}
+            bordered={false}
+          >
+            {model.manualTestReadiness.label}
+          </Tag>
+        </div>
+        <div className="auto-director-manual-test-body">
+          <div className="auto-director-manual-test-copy">
+            <Text strong>{model.manualTestReadiness.summary}</Text>
+            <div className="auto-director-manual-test-checklist">
+              {model.manualTestReadiness.handoffChecklist.slice(0, 4).map(item => (
+                <Text key={item} type="secondary">{item}</Text>
+              ))}
+            </div>
+            <ActionButton
+              primary={model.manualTestReadiness.status !== 'ready'}
+              action={model.manualTestReadiness.primaryAction}
+              loadingActionKey={loadingActionKey}
+              onAction={onAction}
+            />
+          </div>
+          <div className="auto-director-manual-test-gates">
+            {model.manualTestReadiness.gates.map(gate => (
+              <button
+                key={gate.key}
+                type="button"
+                className={`auto-director-manual-test-gate auto-director-manual-test-gate-${gate.status}`}
+                disabled={Boolean(loadingActionKey)}
+                onClick={() => onAction(gate.action)}
+              >
+                <span>
+                  <Text strong>{gate.label}</Text>
+                  <Tag color={gate.status === 'ok' ? 'green' : gate.status === 'block' ? 'red' : 'gold'} bordered={false}>
+                    {batchSignalLabel(gate.status)}
+                  </Tag>
+                </span>
+                <Text type="secondary">{gate.detail}</Text>
+                {gate.evidence.length > 0 && <em>{gate.evidence.slice(0, 2).join('；')}</em>}
+              </button>
+            ))}
+          </div>
+        </div>
+      </section>
+
       <details className="auto-director-detail-drawer">
         <summary className="auto-director-detail-summary">
           <span>展开详细依据</span>
