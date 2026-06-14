@@ -10534,6 +10534,23 @@ describe('buildAutoCreationDirectorModel', () => {
         input_ref: JSON.stringify({
           source: 'auto_creation_safe_batch',
           safety_limit: 1,
+          batch_preflight: {
+            safe_chapter_count: 1,
+            allowed_chapter_nos: [89],
+            safe_batch_expansion_policy: {
+              status: 'recovering',
+              label: '强化扩批规则',
+              summary: '连续恢复判定失效，进入默认档位结构重构。',
+              target_chapter_count: 1,
+              base_chapter_count: 3,
+              expanded_chapter_count: 5,
+              required_pass_streak: 3,
+              pass_streak: 3,
+              accepted_batch_count: 3,
+              failed_batch_count: 1,
+              latest_status: 'warn',
+            },
+          },
           next_batch_brief: {
             chapter_range_label: '第89章',
             expansion_structure_decision: {
@@ -10782,6 +10799,159 @@ describe('buildAutoCreationDirectorModel', () => {
           targetView: 'repair_task',
           issueType: 'safe_batch_expansion_structure_decision_mismatch',
           taskCenterFilterLabel: '扩批结构决策',
+        },
+      },
+    })
+  })
+
+  test('focuses default lane template repair when structure decision trend comes from lane redesign gaps', () => {
+    const strengthenedChapterNos = [41, 42, 43, 44, 45, 46, 47, 48, 49]
+    const expansionChapterNos = [85, 86, 87, 88, 89]
+    const model = buildAutoCreationDirectorModel({
+      planning: readySafeBatchPlanning({ futureRoute: futureRouteRange(90, 5) }),
+      writing: readySafeBatchWriting({
+        nextChapter: { ...baseWriting.nextChapter, id: 90, chapterNo: 90, title: '默认档位模板后续' },
+        previousChapter: { chapterNo: 89, title: '默认档位模板五', wordCount: 3200, hasProse: true },
+      }),
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: { last_updated_chapter: 89 },
+      chapters: [
+        ...strengthenedChapterNos.map(chapterNo => ({
+          id: chapterNo,
+          chapter_no: chapterNo,
+          title: `强化趋势${chapterNo}`,
+          chapter_text: '强化趋势正文'.repeat(500),
+        })),
+        ...expansionChapterNos.map(chapterNo => ({
+          id: chapterNo,
+          chapter_no: chapterNo,
+          title: `默认档位模板${chapterNo}`,
+          chapter_text: '默认档位模板正文'.repeat(500),
+          raw_payload: {
+            generated_scene_breakdown: [{
+              expansion_structure_decision_execution: chapterNo === 89 ? {
+                segment_role_delivered: true,
+                observation_metrics_delivered: true,
+                redesign_principles_delivered: true,
+                evidence: ['第89章只回填旧结构决策，没有写默认5章档位模板。'],
+              } : {
+                segment_role_delivered: true,
+                observation_metrics_delivered: true,
+                redesign_principles_delivered: true,
+                default_lane_segment_duty_delivered: true,
+                default_lane_conflict_rotation_delivered: true,
+                default_lane_payoff_density_delivered: true,
+                default_lane_ending_hook_template_delivered: true,
+                evidence: [`第${chapterNo}章已执行默认档位模板。`],
+              },
+            }],
+          },
+        })),
+      ],
+      reviews: [
+        ...strengthenedAcceptanceQualityReviews([41, 42, 43], 7301, '2026-06-21T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([44, 45, 46], 7311, '2026-06-22T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([47, 48, 49], 7321, '2026-06-23T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews(expansionChapterNos, 7331, '2026-06-24T01:00:00.000Z'),
+      ],
+      runRecords: [
+        strengthenedAcceptanceBatchRun({ id: 730, createdAt: '2026-06-21T00:00:00.000Z', chapterNos: [41, 42, 43] }),
+        strengthenedAcceptanceBatchRun({ id: 731, createdAt: '2026-06-22T00:00:00.000Z', chapterNos: [44, 45, 46] }),
+        strengthenedAcceptanceBatchRun({ id: 732, createdAt: '2026-06-23T00:00:00.000Z', chapterNos: [47, 48, 49] }),
+        {
+          id: 733,
+          run_type: 'batch_generate_prose',
+          created_at: '2026-06-24T00:00:00.000Z',
+          status: 'success',
+          input_ref: JSON.stringify({
+            source: 'auto_creation_safe_batch',
+            safety_limit: 5,
+            batch_preflight: {
+              safe_chapter_count: 5,
+              allowed_chapter_nos: expansionChapterNos,
+              safe_batch_expansion_policy: {
+                status: 'expanded',
+                label: '强化扩批规则',
+                summary: '恢复5章后进入默认档位结构重构观察。',
+                target_chapter_count: 5,
+                base_chapter_count: 3,
+                expanded_chapter_count: 5,
+                required_pass_streak: 3,
+                pass_streak: 3,
+                accepted_batch_count: 3,
+                failed_batch_count: 0,
+                latest_status: 'ok',
+              },
+            },
+            next_batch_brief: {
+              chapter_range_label: '第85-89章',
+              expansion_structure_decision: {
+                visible: true,
+                label: '结构修复决策',
+                recommendation: 'escalate_structure_redesign',
+                target_chapter_count: 1,
+                mode_label: '单章结构重构',
+                segment_key: 'middle',
+                segment_label: '中段',
+                summary: '连续 2 次恢复判定失效，默认档位结构重构。',
+                instruction: '默认 5 章档位连续恢复判定失效，先重写默认档位结构。',
+                observation_metrics: ['恢复判定连续失效 2 次', '同维复发：核心偏移、回报欠账、追读拉力'],
+                default_five_chapter_lane_redesign: {
+                  reason: 'repeated_recovery_verdict_relapse',
+                  relapse_count: 2,
+                  repeated_failure_reasons: ['核心偏移', '回报欠账', '追读拉力'],
+                  segment_duty_rewrite: '段位职责重写：定义默认 5 章前段、中段、后段职责。',
+                  conflict_rotation: '冲突轮换：五章内轮换规则压迫、人物对抗、信息误导。',
+                  payoff_density: '回报密度：每章都有显性回报，不能连续两章只铺垫。',
+                  ending_hook_template: '章末追读模板：最后 300 字给触发事件、读者问题、下一章风险。',
+                },
+              },
+            },
+          }),
+          output_ref: JSON.stringify({
+            total: 5,
+            success: 5,
+            failed: 0,
+            chapters: expansionChapterNos.map((chapterNo, index) => ({
+              id: chapterNo,
+              chapter_no: chapterNo,
+              title: `默认档位模板${chapterNo}`,
+              status: 'success',
+              score: 84 + index,
+              word_count: 3100 + index * 20,
+            })),
+          }),
+        },
+      ],
+    } as any)
+
+    const policy = model.batchGuardrail.preflight.inputSnapshot.safe_batch_expansion_policy
+
+    expect(policy.expansion_feedback.expansion_structure_decision_trend).toMatchObject({
+      status: 'warn',
+      suggested_target_chapter_count: 1,
+      default_five_chapter_lane_redesign: {
+        reason: 'repeated_recovery_verdict_relapse',
+        relapse_count: 2,
+      },
+    })
+    expect(policy.safe_batch_recovery_roadmap).toMatchObject({
+      current_lane: 'single_chapter',
+      recommended_focus: {
+        action_label: '补默认档位模板',
+        task_center_filter_label: '默认档位模板',
+        requirement_key: 'default_lane_template',
+      },
+    })
+    expect(model.batchGuardrail.recommendedAction).toMatchObject({
+      key: 'open_task_center',
+      label: '补默认档位模板',
+      payload: {
+        safeBatchRecoveryFocus: {
+          actionLabel: '补默认档位模板',
+          taskCenterFilterLabel: '默认档位模板',
+          requirementKey: 'default_lane_template',
         },
       },
     })

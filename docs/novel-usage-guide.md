@@ -1228,10 +1228,11 @@
 - 正文生成 prompt 已展开“默认5章档位结构重构”硬性段落。模型会直接看到连续恢复判定失效、同维复发原因和四项重构义务，并被要求在正文场景中先证明新模板能守住核心、显性回报和章末追读，不能只修单章句子或局部爽点。
 - 默认档位结构重构的四项义务已接入正文执行复盘。`expansion_structure_decision_execution` 现在会检查 `default_lane_segment_duty_delivered`、`default_lane_conflict_rotation_delivered`、`default_lane_payoff_density_delivered`、`default_lane_ending_hook_template_delivered`；若正文只回填旧的段位职责、观察指标和重构原则，而没有明确默认 5 章档位模板，风险雷达会生成 `safe_batch_expansion_structure_decision_mismatch` 修复任务，并把默认档位重构来源、连续失效次数、同维复发原因和四项漏项带入修订 prompt。
 - 默认档位模板漏项已展示到任务中心批量生成摘要。`expansion_structure_decision_trend` 会保留完整 `failed_requirements`，当漏项来自默认 5 章档位重构时，批量生成摘要会直接显示 `默认档位模板漏项`，并标出缺的是 `默认档位段位职责`、`冲突轮换`、`回报密度` 还是 `章末追读模板`，同时保留连续恢复判定失效次数和同维复发原因。
+- 默认档位模板漏项已前置到任务中心修复任务卡片与路线图筛选。`safe_batch_expansion_structure_decision_mismatch` 若来自默认 5 章档位重构，任务列表会显示 `默认档位模板` 和四项 `缺...` 标签；总控台路线图也会把下一层动作改成 `补默认档位模板`，并携带 `requirement_key=default_lane_template`，任务中心只聚焦真正带默认档位模板漏项的结构决策任务。
 
 推荐下一步：
 
-- 将默认档位模板漏项前置到任务中心修复任务卡片与筛选：当 `safe_batch_expansion_structure_decision_mismatch` 来自默认 5 章档位重构时，任务列表直接显示四项漏项标签，并允许总控台路线图聚焦时优先定位默认档位模板任务。
+- 将默认档位模板修复后的回检提示细化到四项义务：任务处理后，路线图聚焦卡片应显示段位职责、冲突轮换、回报密度、章末追读模板分别是否已补齐，而不是只显示泛化的“结构决策任务已处理”。
 
 ## 8. 使用说明维护规则
 

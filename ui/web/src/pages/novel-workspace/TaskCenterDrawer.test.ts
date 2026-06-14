@@ -1673,6 +1673,44 @@ describe('buildSafeBatchExpansionPolicySnapshot', () => {
     })).toBe(false)
   })
 
+  test('matches default lane template focus only to structure decision tasks with default lane gaps', () => {
+    const focus = {
+      layerKey: 'structure_decision_execution',
+      layerLabel: '结构决策执行',
+      actionLabel: '补默认档位模板',
+      targetView: 'repair_task',
+      issueType: 'safe_batch_expansion_structure_decision_mismatch',
+      source: 'safe_batch_expansion_structure_decision_trend',
+      taskStatuses: ['open', 'needs_review'],
+      taskCenterFilterLabel: '默认档位模板',
+      requirementKey: 'default_lane_template',
+    }
+
+    const genericStructureTask = {
+      issue_type: 'safe_batch_expansion_structure_decision_mismatch',
+      task_status: 'open',
+      safe_batch_expansion_structure_decision_review: {
+        failed_items: [{ key: 'segment_role', label: '中段职责', count: 1 }],
+      },
+    }
+    const defaultLaneTask = {
+      issue_type: 'safe_batch_expansion_structure_decision_mismatch',
+      task_status: 'open',
+      safe_batch_expansion_structure_decision_review: {
+        default_five_chapter_lane_redesign: {
+          reason: 'repeated_recovery_verdict_relapse',
+          relapse_count: 2,
+        },
+        failed_items: [
+          { key: 'default_lane_segment_duty', label: '默认档位段位职责', count: 1 },
+        ],
+      },
+    }
+
+    expect(safeBatchRecoveryFocusMatchesTask(focus as any, genericStructureTask)).toBe(false)
+    expect(safeBatchRecoveryFocusMatchesTask(focus as any, defaultLaneTask)).toBe(true)
+  })
+
   test('summarizes safe batch recovery focus after matched tasks are resolved', () => {
     const focus = {
       layerKey: 'structure_decision_execution',
@@ -1714,6 +1752,36 @@ describe('buildSafeBatchExpansionPolicySnapshot', () => {
       resolvedCount: 1,
       nextActionLabel: '刷新路线图并启动验证批',
     })
+  })
+})
+
+describe('default lane repair task card helpers', () => {
+  test('extracts default lane template gap tags from structure decision repair tasks', async () => {
+    const taskCenter = await import('./TaskCenterDrawer')
+    const tags = (taskCenter as any).buildDefaultLaneRepairTaskTags?.({
+      issue_type: 'safe_batch_expansion_structure_decision_mismatch',
+      safe_batch_expansion_structure_decision_review: {
+        default_five_chapter_lane_redesign: {
+          reason: 'repeated_recovery_verdict_relapse',
+          relapse_count: 2,
+        },
+        failed_items: [
+          { key: 'default_lane_segment_duty', label: '默认档位段位职责', count: 1 },
+          { key: 'default_lane_conflict_rotation', label: '冲突轮换', count: 1 },
+          { key: 'default_lane_payoff_density', label: '回报密度', count: 1 },
+          { key: 'default_lane_ending_hook_template', label: '章末追读模板', count: 1 },
+        ],
+      },
+    })
+
+    expect(tags).toEqual([
+      { key: 'default_lane_template', label: '默认档位模板', color: 'gold' },
+      { key: 'default_lane_segment_duty', label: '缺默认档位段位职责', color: 'gold' },
+      { key: 'default_lane_conflict_rotation', label: '缺冲突轮换', color: 'gold' },
+      { key: 'default_lane_payoff_density', label: '缺回报密度', color: 'gold' },
+      { key: 'default_lane_ending_hook_template', label: '缺章末追读模板', color: 'gold' },
+      { key: 'default_lane_relapse', label: '连续失效2次', color: 'gold' },
+    ])
   })
 })
 

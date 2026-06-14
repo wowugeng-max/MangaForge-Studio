@@ -1025,6 +1025,85 @@ function repairTaskIssueTag(task: any) {
   return null
 }
 
+type RepairTaskTagMeta = {
+  key: string
+  label: string
+  color: string
+}
+
+function structureDecisionRepairReviewOfTask(task: any) {
+  return task?.safe_batch_expansion_structure_decision_review
+    || task?.safeBatchExpansionStructureDecisionReview
+    || task?.payload?.safe_batch_expansion_structure_decision_review
+    || task?.payload?.safeBatchExpansionStructureDecisionReview
+    || null
+}
+
+function defaultLaneRedesignOfTask(task: any) {
+  const review = structureDecisionRepairReviewOfTask(task)
+  return review?.default_five_chapter_lane_redesign
+    || review?.defaultFiveChapterLaneRedesign
+    || null
+}
+
+function defaultLaneFailedRequirementsOfTask(task: any) {
+  const review = structureDecisionRepairReviewOfTask(task)
+  const failedItems = Array.isArray(review?.failed_items)
+    ? review.failed_items
+    : Array.isArray(review?.failedItems)
+      ? review.failedItems
+      : []
+  const explicitMissed = Array.isArray(review?.default_five_chapter_lane_redesign?.missed_requirements)
+    ? review.default_five_chapter_lane_redesign.missed_requirements
+    : Array.isArray(review?.defaultFiveChapterLaneRedesign?.missedRequirements)
+      ? review.defaultFiveChapterLaneRedesign.missedRequirements
+      : []
+  const byKey = new Map<string, { key: string; label: string; count: number }>()
+  ;[...failedItems, ...explicitMissed].forEach((item: any) => {
+    const key = compactEvidenceText(item?.key || '')
+    if (!isDefaultFiveChapterLaneRequirementKey(key)) return
+    const current = byKey.get(key)
+    byKey.set(key, {
+      key,
+      label: compactEvidenceText(item?.label || key),
+      count: Math.max(Number(current?.count || 0), Number(item?.count || 1)),
+    })
+  })
+  const order = ['default_lane_segment_duty', 'default_lane_conflict_rotation', 'default_lane_payoff_density', 'default_lane_ending_hook_template']
+  return Array.from(byKey.values())
+    .sort((a, b) => {
+      const orderA = order.indexOf(a.key)
+      const orderB = order.indexOf(b.key)
+      return (orderA < 0 ? 99 : orderA) - (orderB < 0 ? 99 : orderB)
+    })
+}
+
+export function buildDefaultLaneRepairTaskTags(task: any): RepairTaskTagMeta[] {
+  if (compactEvidenceText(task?.issue_type || task?.issueType) !== 'safe_batch_expansion_structure_decision_mismatch') return []
+  const missedRequirements = defaultLaneFailedRequirementsOfTask(task)
+  const redesign = defaultLaneRedesignOfTask(task)
+  if (!redesign && !missedRequirements.length) return []
+  const relapseCount = Number(redesign?.relapse_count ?? redesign?.relapseCount ?? 0)
+  const tags: RepairTaskTagMeta[] = [
+    { key: 'default_lane_template', label: '默认档位模板', color: 'gold' },
+    ...missedRequirements.slice(0, 4).map(item => ({
+      key: item.key,
+      label: `缺${item.label}`,
+      color: 'gold',
+    })),
+  ]
+  if (Number.isFinite(relapseCount) && relapseCount > 0) {
+    tags.push({ key: 'default_lane_relapse', label: `连续失效${relapseCount}次`, color: 'gold' })
+  }
+  return tags
+}
+
+function repairTaskFocusRequirementMatches(requirementKey: string, task: any) {
+  if (!requirementKey) return true
+  if (requirementKey === 'default_lane_template') return buildDefaultLaneRepairTaskTags(task).length > 0
+  return defaultLaneFailedRequirementsOfTask(task).some(item => item.key === requirementKey)
+}
+
 function compactEvidenceText(value: any, maxLength?: number) {
   if (!value) return ''
   const raw = typeof value !== 'object'
@@ -1299,6 +1378,7 @@ export type SafeBatchRecoveryFocusSnapshot = {
   source: string
   taskStatuses: string[]
   taskCenterFilterLabel: string
+  requirementKey?: string
 }
 
 export type SafeBatchRecoveryValidationSnapshot = {
@@ -1333,6 +1413,7 @@ export function safeBatchRecoveryFocusMatchesTask(focus: SafeBatchRecoveryFocusS
   const status = compactEvidenceText(task?.task_status || task?.taskStatus || task?.status || '')
   const statusMatches = !focus.taskStatuses.length || focus.taskStatuses.includes(status)
   if (!statusMatches) return false
+  if (!repairTaskFocusRequirementMatches(focus.requirementKey, task)) return false
   if (focus.issueType && issueType === focus.issueType) return true
   return Boolean(focus.source && source === focus.source)
 }
@@ -1341,6 +1422,7 @@ function safeBatchRecoveryFocusMatchesTaskIdentity(focus: SafeBatchRecoveryFocus
   if (!focus || !task) return false
   const issueType = compactEvidenceText(task?.issue_type || task?.issueType || '')
   const source = compactEvidenceText(task?.source || task?.sourceMode || '')
+  if (!repairTaskFocusRequirementMatches(focus.requirementKey, task)) return false
   if (focus.issueType && issueType === focus.issueType) return true
   return Boolean(focus.source && source === focus.source)
 }
@@ -1708,6 +1790,7 @@ function buildSafeBatchRecoveryRoadmapSnapshot(roadmapLike: any): SafeBatchRecov
       source: compactEvidenceText(focus?.source || fallback?.source || 'safe_batch_recovery_roadmap'),
       taskStatuses: statuses.map((item: any) => compactEvidenceText(item)).filter(Boolean),
       taskCenterFilterLabel: compactEvidenceText(focus?.task_center_filter_label || focus?.taskCenterFilterLabel || fallback?.taskCenterFilterLabel || layerLabel),
+      requirementKey: compactEvidenceText(focus?.requirement_key || focus?.requirementKey || ''),
     }
   }
   const normalizeNode = (node: any): SafeBatchRecoveryRoadmapNodeSnapshot | null => {
@@ -3420,6 +3503,7 @@ function RepairTaskRunSummary({
               && (recoveryEvidenceRefreshAnchor.taskIndex === taskIndex || recoveryEvidenceRefreshAnchor.sourceTaskIndex === taskIndex),
             )
             const roadmapFocused = safeBatchRecoveryFocusMatchesTask(safeBatchRecoveryFocus, task)
+            const defaultLaneTags = buildDefaultLaneRepairTaskTags(task)
             const focused = focusedTaskIndex === taskIndex || sourceFocused || refreshAnchorFocused || roadmapFocused
             return (
               <List.Item
@@ -3453,6 +3537,9 @@ function RepairTaskRunSummary({
                   <Space wrap>
                     <Tag color={task.severity === 'high' ? 'red' : task.severity === 'medium' ? 'gold' : 'default'} bordered={false}>{task.severity || 'task'}</Tag>
                     {repairTaskIssueTag(task)}
+                    {defaultLaneTags.map(tag => (
+                      <Tag key={tag.key} color={tag.color} bordered={false}>{tag.label}</Tag>
+                    ))}
                     {repairTaskStatusTag(task.task_status)}
                     <Text>{task.chapter_no ? `第${task.chapter_no}章 ` : ''}{task.title || task.message}</Text>
                     {task.segment && <Tag bordered={false}>{task.segment}</Tag>}
@@ -3952,6 +4039,9 @@ export function TaskCenterDrawer({
                       title={(
                         <Space wrap>
                           <Tag color="gold" bordered={false}>需复查</Tag>
+                          {buildDefaultLaneRepairTaskTags(item.task).map(tag => (
+                            <Tag key={tag.key} color={tag.color} bordered={false}>{tag.label}</Tag>
+                          ))}
                           <Text>{item.task?.chapter_no ? `第${item.task.chapter_no}章 ` : ''}{item.task?.title || item.task?.message || '修复任务'}</Text>
                         </Space>
                       )}

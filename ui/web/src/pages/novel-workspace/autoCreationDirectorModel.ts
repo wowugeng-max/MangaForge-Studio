@@ -3691,7 +3691,7 @@ function safeBatchRecoveryRoadmapActionLabel(key: string) {
   return '查看安全连写'
 }
 
-function safeBatchRecoveryRoadmapFocus(key: string, label: string, actionLabel: string) {
+function safeBatchRecoveryRoadmapFocus(key: string, label: string, actionLabel: string, overrides: AnyRecord | null = null) {
   const focusMap: Record<string, AnyRecord> = {
     strengthened_acceptance: {
       target_view: 'recovery_review',
@@ -3732,6 +3732,7 @@ function safeBatchRecoveryRoadmapFocus(key: string, label: string, actionLabel: 
     action_label: actionLabel,
     task_statuses: ['open', 'needs_review'],
     ...focus,
+    ...(overrides || {}),
   }
 }
 
@@ -3785,6 +3786,22 @@ function buildSafeBatchRecoveryRoadmap(args: {
     ? text(decisionTrend?.status) === 'warn' ? 'warn' : 'ok'
     : 'pending'
   const topDecisionRequirement = decisionTrend?.top_failed_requirement || decisionTrend?.topFailedRequirement || null
+  const decisionFailedRequirements = arrayValue(decisionTrend?.failed_requirements || decisionTrend?.failedRequirements)
+  const decisionHasDefaultLaneTemplateGap = Boolean(
+    decisionTrend?.default_five_chapter_lane_redesign
+    || decisionTrend?.defaultFiveChapterLaneRedesign
+    || text(topDecisionRequirement?.key).startsWith('default_lane_')
+    || decisionFailedRequirements.some((item: AnyRecord) => text(item?.key).startsWith('default_lane_')),
+  )
+  const decisionActionLabel = decisionHasDefaultLaneTemplateGap
+    ? '补默认档位模板'
+    : safeBatchRecoveryRoadmapActionLabel('structure_decision_execution')
+  const decisionFocus = decisionHasDefaultLaneTemplateGap
+    ? safeBatchRecoveryRoadmapFocus('structure_decision_execution', '结构决策执行', decisionActionLabel, {
+      task_center_filter_label: '默认档位模板',
+      requirement_key: 'default_lane_template',
+    })
+    : null
   const routeNodes = [
     safeBatchRecoveryRoadmapNode({
       key: 'strengthened_acceptance',
@@ -3833,7 +3850,8 @@ function buildSafeBatchRecoveryRoadmap(args: {
       detail: topDecisionRequirement
         ? `结构决策漏项：${text(topDecisionRequirement.label, '执行要求')} ${Number(topDecisionRequirement.count || 0)}。${text(decisionTrend?.summary)}`
         : text(decisionTrend?.summary, '尚未形成结构决策执行趋势。'),
-      actionLabel: safeBatchRecoveryRoadmapActionLabel('structure_decision_execution'),
+      actionLabel: decisionActionLabel,
+      focus: decisionFocus,
     }),
   ]
   const nextRepairLayer = routeNodes.find(node => node.status === 'warn')
@@ -4004,6 +4022,7 @@ function safeBatchRecoveryFocusPayload(focusLike: AnyRecord | null | undefined) 
     source: text(focusLike.source),
     taskStatuses: arrayValue(focusLike.task_statuses || focusLike.taskStatuses).map(item => text(item)).filter(Boolean),
     taskCenterFilterLabel: text(focusLike.task_center_filter_label || focusLike.taskCenterFilterLabel),
+    requirementKey: text(focusLike.requirement_key || focusLike.requirementKey),
   }
 }
 
