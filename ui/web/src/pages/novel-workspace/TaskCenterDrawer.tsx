@@ -1450,6 +1450,7 @@ export type SafeBatchRecoveryValidationSnapshot = {
   nextActionLabel: string
   focus: SafeBatchRecoveryFocusSnapshot | null
   defaultFiveChapterRecoveryVerdict: SafeBatchDefaultFiveChapterRecoveryVerdictSnapshot | null
+  defaultFiveChapterLaneTemplateVerdict: SafeBatchDefaultFiveChapterLaneTemplateVerdictSnapshot | null
 }
 
 export type SafeBatchRecoveryRoadmapNodeSnapshot = {
@@ -1598,6 +1599,25 @@ export type SafeBatchDefaultFiveChapterRecoveryVerdictSnapshot = {
   }[]
 }
 
+export type SafeBatchDefaultFiveChapterLaneTemplateVerdictSnapshot = {
+  visible: boolean
+  status: 'passed' | 'failed'
+  label: string
+  summary: string
+  validationChapterNos: number[]
+  requirements: {
+    key: string
+    label: string
+    status: 'fulfilled' | 'missing' | 'unverified'
+  }[]
+  missingCount: number
+  missingRequirements: {
+    key: string
+    label: string
+    chapterNos: number[]
+  }[]
+}
+
 export type SafeBatchDefaultFiveChapterRecoveryVerdictRelapseSnapshot = {
   visible: boolean
   status: string
@@ -1649,6 +1669,7 @@ export type SafeBatchExpansionStructureValidationResultSnapshot = {
   failedChapterNos: number[]
   riskCount: number
   defaultFiveChapterRecoveryVerdict: SafeBatchDefaultFiveChapterRecoveryVerdictSnapshot | null
+  defaultFiveChapterLaneTemplateVerdict: SafeBatchDefaultFiveChapterLaneTemplateVerdictSnapshot | null
 }
 
 export type SafeBatchExpansionStructureValidationTrendSnapshot = {
@@ -1963,6 +1984,7 @@ function buildSafeBatchRecoveryValidationSnapshot(
     nextActionLabel: passed ? '确认恢复5章扩批' : `聚焦${repairLabel}`,
     focus,
     defaultFiveChapterRecoveryVerdict: result.defaultFiveChapterRecoveryVerdict || null,
+    defaultFiveChapterLaneTemplateVerdict: result.defaultFiveChapterLaneTemplateVerdict || null,
   }
 }
 
@@ -2227,7 +2249,57 @@ function buildSafeBatchExpansionStructureValidationResultSnapshot(resultLike: an
     defaultFiveChapterRecoveryVerdict: buildSafeBatchDefaultFiveChapterRecoveryVerdictSnapshot(
       result?.default_five_chapter_recovery_verdict || result?.defaultFiveChapterRecoveryVerdict,
     ),
+    defaultFiveChapterLaneTemplateVerdict: buildSafeBatchDefaultFiveChapterLaneTemplateVerdictSnapshot(
+      result?.default_five_chapter_lane_template_verdict || result?.defaultFiveChapterLaneTemplateVerdict,
+    ),
   }
+}
+
+function buildSafeBatchDefaultFiveChapterLaneTemplateVerdictSnapshot(verdictLike: any): SafeBatchDefaultFiveChapterLaneTemplateVerdictSnapshot | null {
+  const verdict = parseJsonValue(verdictLike) || verdictLike || null
+  if (!verdict || verdict.visible === false) return null
+  const rawStatus = compactEvidenceText(verdict?.status || '')
+  const status = rawStatus === 'failed' ? 'failed' : 'passed'
+  const requirements = (Array.isArray(verdict?.requirements)
+    ? verdict.requirements
+    : Array.isArray(verdict?.items)
+      ? verdict.items
+      : []
+  ).map((item: any) => {
+    const itemStatus = compactEvidenceText(item?.status || '')
+    return {
+      key: compactEvidenceText(item?.key || ''),
+      label: compactEvidenceText(item?.label || item?.name || item?.key || ''),
+      status: itemStatus === 'missing'
+        ? 'missing' as const
+        : itemStatus === 'unverified'
+          ? 'unverified' as const
+          : 'fulfilled' as const,
+    }
+  }).filter((item: any) => item.key || item.label)
+  const missingRequirements = (Array.isArray(verdict?.missing_requirements)
+    ? verdict.missing_requirements
+    : Array.isArray(verdict?.missingRequirements)
+      ? verdict.missingRequirements
+      : []
+  ).map((item: any) => ({
+    key: compactEvidenceText(item?.key || ''),
+    label: compactEvidenceText(item?.label || item?.name || item?.key || ''),
+    chapterNos: normalizeChapterNos(item?.chapter_nos || item?.chapterNos),
+  })).filter((item: any) => item.key || item.label || item.chapterNos.length)
+  const missingCount = Number(verdict?.missing_count ?? verdict?.missingCount ?? missingRequirements.reduce((sum: number, item: any) => sum + item.chapterNos.length, 0))
+  const snapshot = {
+    visible: true,
+    status,
+    label: compactEvidenceText(verdict?.label || '默认档位模板回检'),
+    summary: compactEvidenceText(verdict?.summary || ''),
+    validationChapterNos: normalizeChapterNos(verdict?.validation_chapter_nos || verdict?.validationChapterNos),
+    requirements,
+    missingCount: Number.isFinite(missingCount) ? missingCount : 0,
+    missingRequirements,
+  }
+  if (!snapshot.summary && !snapshot.requirements.length && !snapshot.missingRequirements.length) return null
+  return snapshot
 }
 
 function buildSafeBatchDefaultFiveChapterRecoveryVerdictSnapshot(verdictLike: any): SafeBatchDefaultFiveChapterRecoveryVerdictSnapshot | null {
@@ -2694,6 +2766,7 @@ function BatchProseRunSummary({ run }: { run: any }) {
   const recoveryRoadmap = expansionPolicy?.recoveryRoadmap || null
   const recoveryValidation = expansionPolicy?.recoveryValidation || null
   const defaultRecoveryVerdict = recoveryValidation?.defaultFiveChapterRecoveryVerdict || null
+  const defaultLaneTemplateVerdict = recoveryValidation?.defaultFiveChapterLaneTemplateVerdict || null
 
   return (
     <Card size="small" title="批量生成摘要">
@@ -2771,6 +2844,29 @@ function BatchProseRunSummary({ run }: { run: any }) {
                           ))}
                         </Space>
                         <Text type="secondary" style={{ fontSize: 12 }}>{defaultRecoveryVerdict.summary}</Text>
+                      </Space>
+                    )}
+                    {defaultLaneTemplateVerdict && (
+                      <Space direction="vertical" size={3} style={{ width: '100%' }}>
+                        <Space wrap size={[4, 4]}>
+                          <Tag color={defaultLaneTemplateVerdict.status === 'passed' ? 'green' : 'gold'} bordered={false}>
+                            {defaultLaneTemplateVerdict.label}
+                          </Tag>
+                          <Tag color={defaultLaneTemplateVerdict.status === 'passed' ? 'green' : 'gold'} bordered={false}>
+                            {defaultLaneTemplateVerdict.status === 'passed' ? '四项模板全过' : `缺项 ${defaultLaneTemplateVerdict.missingCount}`}
+                          </Tag>
+                          {defaultLaneTemplateVerdict.status === 'passed' && defaultLaneTemplateVerdict.requirements.slice(0, 4).map(requirement => (
+                            <Tag key={`default-lane-template-pass-${requirement.key || requirement.label}`} color="green" bordered={false}>
+                              {requirement.label}通过
+                            </Tag>
+                          ))}
+                          {defaultLaneTemplateVerdict.missingRequirements.slice(0, 4).map(requirement => (
+                            <Tag key={`default-lane-template-missing-${requirement.key || requirement.label}`} color="gold" bordered={false}>
+                              {compactChapterNos(requirement.chapterNos)}缺{requirement.label}
+                            </Tag>
+                          ))}
+                        </Space>
+                        <Text type="secondary" style={{ fontSize: 12 }}>{defaultLaneTemplateVerdict.summary}</Text>
                       </Space>
                     )}
                   </Space>

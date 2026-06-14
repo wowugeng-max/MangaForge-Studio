@@ -1577,6 +1577,76 @@ describe('buildSafeBatchExpansionPolicySnapshot', () => {
     expect(snapshot?.recoveryValidation?.defaultFiveChapterRecoveryVerdict?.summary).toContain('已清零')
   })
 
+  test('keeps default lane template validation verdict in recovery validation summary', () => {
+    const snapshot = buildSafeBatchExpansionPolicySnapshot({
+      safe_batch_expansion_policy: {
+        status: 'recovering',
+        label: '强化扩批规则',
+        summary: '默认档位模板回检未通过，继续保持 3 章验证。',
+        target_chapter_count: 3,
+        base_chapter_count: 3,
+        expanded_chapter_count: 5,
+        required_pass_streak: 3,
+        pass_streak: 3,
+        accepted_batch_count: 3,
+        failed_batch_count: 1,
+        latest_status: 'warn',
+        expansion_feedback: {
+          status: 'rollback_to_small_batch',
+          label: '扩批热区反馈',
+          summary: '默认档位模板回检未通过：第91章缺回报密度，不能恢复默认5章档位。',
+          target_chapter_count: 3,
+          latest_chapter_nos: [90, 91, 92],
+          risk_count: 1,
+          expansion_structure_validation_result: {
+            visible: true,
+            status: 'warn',
+            label: '扩批结构验证',
+            summary: '扩批结构验证批未通过：默认档位模板回检未通过：第91章缺回报密度，不能恢复默认5章档位。',
+            validation_chapter_nos: [90, 91, 92],
+            failed_chapter_nos: [91],
+            risk_count: 1,
+            default_five_chapter_lane_template_verdict: {
+              visible: true,
+              status: 'failed',
+              label: '默认档位模板回检',
+              summary: '默认档位模板回检未通过：第91章缺回报密度，不能恢复默认5章档位。',
+              validation_chapter_nos: [90, 91, 92],
+              requirements: [
+                { key: 'default_lane_segment_duty', label: '默认档位段位职责', status: 'fulfilled' },
+                { key: 'default_lane_conflict_rotation', label: '冲突轮换', status: 'fulfilled' },
+                { key: 'default_lane_payoff_density', label: '回报密度', status: 'missing' },
+                { key: 'default_lane_ending_hook_template', label: '章末追读模板', status: 'fulfilled' },
+              ],
+              missing_count: 1,
+              missing_requirements: [
+                { key: 'default_lane_payoff_density', label: '回报密度', chapter_nos: [91] },
+              ],
+            },
+          },
+        },
+      },
+    })
+
+    expect(snapshot?.recoveryValidation?.defaultFiveChapterLaneTemplateVerdict).toMatchObject({
+      visible: true,
+      status: 'failed',
+      label: '默认档位模板回检',
+      validationChapterNos: [90, 91, 92],
+      missingCount: 1,
+      missingRequirements: [
+        { key: 'default_lane_payoff_density', label: '回报密度', chapterNos: [91] },
+      ],
+      requirements: [
+        { key: 'default_lane_segment_duty', label: '默认档位段位职责', status: 'fulfilled' },
+        { key: 'default_lane_conflict_rotation', label: '冲突轮换', status: 'fulfilled' },
+        { key: 'default_lane_payoff_density', label: '回报密度', status: 'missing' },
+        { key: 'default_lane_ending_hook_template', label: '章末追读模板', status: 'fulfilled' },
+      ],
+    })
+    expect(snapshot?.recoveryValidation?.defaultFiveChapterLaneTemplateVerdict?.summary).toContain('第91章缺回报密度')
+  })
+
   test('summarizes failed recovery validation batches as a focused repair action', () => {
     const snapshot = buildSafeBatchExpansionPolicySnapshot({
       safe_batch_expansion_policy: {
