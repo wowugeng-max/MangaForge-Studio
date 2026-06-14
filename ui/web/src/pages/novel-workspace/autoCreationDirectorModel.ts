@@ -3688,6 +3688,7 @@ function safeBatchRecoveryRoadmapActionLabel(key: string) {
   if (key === 'structure_validation') return '修扩批结构'
   if (key === 'structure_repair_effectiveness') return '重做结构修复'
   if (key === 'structure_decision_execution') return '补齐结构决策执行'
+  if (key === 'default_lane_template_version') return '修当前模板版本'
   return '查看安全连写'
 }
 
@@ -3723,6 +3724,13 @@ function safeBatchRecoveryRoadmapFocus(key: string, label: string, actionLabel: 
       source: 'safe_batch_expansion_structure_decision_trend',
       task_center_filter_label: '扩批结构决策',
     },
+    default_lane_template_version: {
+      target_view: 'repair_task',
+      issue_type: 'safe_batch_expansion_structure_repair',
+      source: 'default_five_chapter_lane_template_stability_profile',
+      task_center_filter_label: '当前模板版本',
+      requirement_key: 'default_lane_template',
+    },
   }
   const focus = focusMap[key]
   if (!focus) return null
@@ -3756,6 +3764,12 @@ function buildSafeBatchRecoveryRoadmap(args: {
     || null
   const decisionTrend = feedback?.expansionStructureDecisionTrend
     || feedback?.expansion_structure_decision_trend
+    || null
+  const defaultLaneTemplateStabilityProfile = feedback?.defaultFiveChapterLaneTemplateStabilityProfile
+    || feedback?.default_five_chapter_lane_template_stability_profile
+    || null
+  const latestTemplateVersionProfile = defaultLaneTemplateStabilityProfile?.latest_template_version_profile
+    || defaultLaneTemplateStabilityProfile?.latestTemplateVersionProfile
     || null
   const strengthenedStatus = args.trend.status === 'warn' || args.trend.latestStatus === 'warn'
     ? 'warn'
@@ -3800,6 +3814,37 @@ function buildSafeBatchRecoveryRoadmap(args: {
     ? safeBatchRecoveryRoadmapFocus('structure_decision_execution', '结构决策执行', decisionActionLabel, {
       task_center_filter_label: '默认档位模板',
       requirement_key: 'default_lane_template',
+    })
+    : null
+  const templateVersionId = text(latestTemplateVersionProfile?.id || latestTemplateVersionProfile?.template_version_id || latestTemplateVersionProfile?.templateVersionId)
+  const templateVersionStatus = text(latestTemplateVersionProfile?.status)
+  const templateVersionPassStreak = Number(latestTemplateVersionProfile?.pass_streak ?? latestTemplateVersionProfile?.passStreak ?? 0)
+  const templateVersionRequiredPassStreak = Number(latestTemplateVersionProfile?.required_pass_streak ?? latestTemplateVersionProfile?.requiredPassStreak ?? defaultLaneTemplateStabilityProfile?.required_pass_streak ?? defaultLaneTemplateStabilityProfile?.requiredPassStreak ?? 2)
+  const defaultLaneTemplateStatus = text(defaultLaneTemplateStabilityProfile?.status)
+  const defaultLaneTemplateVersionWarn = ['relapsed', 'redesign'].includes(defaultLaneTemplateStatus)
+    || ['relapsed', 'redesign'].includes(templateVersionStatus)
+  const defaultLaneTemplateVersionReady = Boolean(defaultLaneTemplateStabilityProfile)
+    && !defaultLaneTemplateVersionWarn
+    && (templateVersionStatus === 'ready' || (!templateVersionId && defaultLaneTemplateStatus === 'ready'))
+  const defaultLaneTemplateVersionStatus = !defaultLaneTemplateStabilityProfile
+    ? 'pending'
+    : defaultLaneTemplateVersionWarn
+      ? 'warn'
+      : defaultLaneTemplateVersionReady
+        ? 'ok'
+        : 'pending'
+  const defaultLaneTemplateVersionActionLabel = defaultLaneTemplateVersionStatus === 'warn'
+    ? defaultLaneTemplateStatus === 'redesign' || templateVersionStatus === 'redesign'
+      ? '重构当前模板版本'
+      : '修当前模板版本'
+    : defaultLaneTemplateVersionStatus === 'ok'
+      ? '当前模板版本稳定'
+      : '观察当前模板版本'
+  const defaultLaneTemplateVersionFocus = defaultLaneTemplateVersionStatus === 'warn'
+    ? safeBatchRecoveryRoadmapFocus('default_lane_template_version', '默认档位模板版本', defaultLaneTemplateVersionActionLabel, {
+      task_center_filter_label: '当前模板版本',
+      requirement_key: 'default_lane_template',
+      template_version_id: templateVersionId,
     })
     : null
   const routeNodes = [
@@ -3853,8 +3898,25 @@ function buildSafeBatchRecoveryRoadmap(args: {
       actionLabel: decisionActionLabel,
       focus: decisionFocus,
     }),
+    safeBatchRecoveryRoadmapNode({
+      key: 'default_lane_template_version',
+      label: '默认档位模板版本',
+      status: defaultLaneTemplateVersionStatus,
+      targetChapterCount: defaultLaneTemplateVersionStatus === 'warn'
+        ? defaultLaneTemplateStatus === 'redesign' || templateVersionStatus === 'redesign' ? 1 : args.baseChapterCount
+        : defaultLaneTemplateVersionStatus === 'ok' ? args.expandedChapterCount : args.baseChapterCount,
+      detail: templateVersionId
+        ? `${text(defaultLaneTemplateStabilityProfile?.summary, '默认档位模板版本仍在观察。')}当前模板版本 ${templateVersionId} 连过 ${Math.max(0, templateVersionPassStreak)}/${Math.max(1, templateVersionRequiredPassStreak || 2)}。`
+        : text(defaultLaneTemplateStabilityProfile?.summary, '尚未形成默认档位模板版本稳定证据。'),
+      actionLabel: defaultLaneTemplateVersionActionLabel,
+      focus: defaultLaneTemplateVersionFocus,
+    }),
   ]
-  const nextRepairLayer = routeNodes.find(node => node.status === 'warn')
+  const preferredTemplateVersionLayer = defaultLaneTemplateVersionStatus === 'warn'
+    ? routeNodes.find(node => node.key === 'default_lane_template_version') || null
+    : null
+  const nextRepairLayer = preferredTemplateVersionLayer
+    || routeNodes.find(node => node.status === 'warn')
     || routeNodes.find(node => node.status === 'pending')
     || null
   const lane = safeBatchRecoveryRoadmapLane(args.targetChapterCount)
@@ -4049,6 +4111,7 @@ function safeBatchRecoveryFocusPayload(focusLike: AnyRecord | null | undefined) 
     taskStatuses: arrayValue(focusLike.task_statuses || focusLike.taskStatuses).map(item => text(item)).filter(Boolean),
     taskCenterFilterLabel: text(focusLike.task_center_filter_label || focusLike.taskCenterFilterLabel),
     requirementKey: text(focusLike.requirement_key || focusLike.requirementKey),
+    templateVersionId: text(focusLike.template_version_id || focusLike.templateVersionId),
   }
 }
 
@@ -4547,6 +4610,9 @@ function buildDefaultFiveChapterLaneTemplateRedesignQueue(profile?: AnyRecord | 
   const topFailureText = topFailedRequirement
     ? `${topFailedRequirement.label}失败 ${topFailedRequirement.failed_count} 次`
     : '同项模板反复失败'
+  const latestTemplateVersionProfile = profile.latest_template_version_profile
+    || profile.latestTemplateVersionProfile
+    || null
   const redesignRequirements = DEFAULT_FIVE_CHAPTER_LANE_TEMPLATE_REQUIREMENTS.map(requirement => {
     const stat = requirementStats.find((item: AnyRecord) => item.key === requirement.key)
     return {
@@ -4569,6 +4635,7 @@ function buildDefaultFiveChapterLaneTemplateRedesignQueue(profile?: AnyRecord | 
       .filter((chapterNo: number) => chapterNo > 0),
     validation_batch_count: Number(profile.validation_batch_count ?? profile.validationBatchCount ?? 0),
     failed_batch_count: Number(profile.failed_batch_count ?? profile.failedBatchCount ?? 0),
+    ...(latestTemplateVersionProfile ? { latest_template_version_profile: latestTemplateVersionProfile } : {}),
     ...(topFailedRequirement ? { top_failed_requirement: topFailedRequirement } : {}),
     redesign_requirements: redesignRequirements,
     validation_standard: [
@@ -6182,12 +6249,50 @@ function safeBatchDefaultFiveChapterRegression(evaluation: AnyRecord | null | un
   }
 }
 
+function latestDefaultFiveChapterLaneTemplateVersionProfile(profileLike: AnyRecord | null | undefined) {
+  const profile = profileLike?.latest_template_version_profile
+    || profileLike?.latestTemplateVersionProfile
+    || null
+  if (!profile || profile.visible === false) return null
+  const id = firstText(profile.id, profile.template_version_id, profile.templateVersionId, profile.version_id, profile.versionId)
+  const passStreak = Number(profile.pass_streak ?? profile.passStreak ?? 0)
+  const requiredPassStreak = Number(profile.required_pass_streak ?? profile.requiredPassStreak ?? profileLike?.required_pass_streak ?? profileLike?.requiredPassStreak ?? 2)
+  const latestStatus = firstText(profile.latest_status, profile.latestStatus)
+  const status = firstText(profile.status)
+  if (!id && !status && !latestStatus && passStreak <= 0) return null
+  return {
+    ...profile,
+    id,
+    label: firstText(profile.label, '默认5章档位模板版本'),
+    status,
+    latest_status: latestStatus,
+    pass_streak: Number.isFinite(passStreak) ? passStreak : 0,
+    required_pass_streak: Number.isFinite(requiredPassStreak) && requiredPassStreak > 0 ? requiredPassStreak : 2,
+  }
+}
+
+function defaultFiveChapterLaneTemplateVersionReady(profile: AnyRecord | null | undefined) {
+  if (!profile) return true
+  const status = text(profile.status)
+  const latestStatus = text(profile.latest_status || profile.latestStatus)
+  if (['relapsed', 'redesign'].includes(status) || latestStatus === 'failed') return false
+  const passStreak = Number(profile.pass_streak ?? profile.passStreak ?? 0)
+  const requiredPassStreak = Number(profile.required_pass_streak ?? profile.requiredPassStreak ?? 2)
+  if (status === 'ready') return true
+  return passStreak >= Math.max(1, Number.isFinite(requiredPassStreak) ? requiredPassStreak : 2)
+}
+
 function buildSafeBatchRecoveryRestoreStabilityLane(policy: AnyRecord | null | undefined) {
   if (!policy?.visible || text(policy.status) !== 'expanded' || Number(policy.targetChapterCount ?? policy.target_chapter_count ?? 0) < 5) return null
   const feedback = policy.expansionFeedback || policy.expansion_feedback || null
   const evidence = feedback?.recoveryRestoreStabilityEvidence
     || feedback?.recovery_restore_stability_evidence
     || null
+  const templateStabilityProfile = feedback?.defaultFiveChapterLaneTemplateStabilityProfile
+    || feedback?.default_five_chapter_lane_template_stability_profile
+    || null
+  const latestTemplateVersionProfile = latestDefaultFiveChapterLaneTemplateVersionProfile(templateStabilityProfile)
+  const templateVersionReady = defaultFiveChapterLaneTemplateVersionReady(latestTemplateVersionProfile)
   const validationResult = feedback?.expansionStructureValidationResult
     || feedback?.expansion_structure_validation_result
     || null
@@ -6203,14 +6308,22 @@ function buildSafeBatchRecoveryRestoreStabilityLane(policy: AnyRecord | null | u
     .map(chapterNo => Number(chapterNo))
     .filter(chapterNo => chapterNo > 0)
   const requiredStablePassStreak = 2
-  const defaultReady = stablePassStreak >= requiredStablePassStreak
+  const restoreStableReady = stablePassStreak >= requiredStablePassStreak
+  const defaultReady = restoreStableReady && templateVersionReady
+  const templateVersionId = text(latestTemplateVersionProfile?.id)
+  const templateVersionPassText = latestTemplateVersionProfile
+    ? `模板版本 ${templateVersionId || text(latestTemplateVersionProfile.label, '当前版本')} 连过 ${Number(latestTemplateVersionProfile.pass_streak || 0)}/${Number(latestTemplateVersionProfile.required_pass_streak || 2)}`
+    : ''
   const summary = defaultReady
-    ? `恢复5章扩批连续 ${stablePassStreak} 批稳定，${compactChapterNoEvidence(restoreChapterNos)}已可作为默认5章档位证据。`
-    : `恢复5章扩批已稳定 ${stablePassStreak}/${requiredStablePassStreak} 批，${compactChapterNoEvidence(restoreChapterNos)}通过后仍需继续观察 1-2 批，再把5章连写设为默认档位。`
+    ? `恢复5章扩批连续 ${stablePassStreak} 批稳定，${templateVersionPassText ? `${templateVersionPassText}，` : ''}${compactChapterNoEvidence(restoreChapterNos)}已可作为默认5章档位证据。`
+    : restoreStableReady && latestTemplateVersionProfile
+      ? `恢复5章扩批连续 ${stablePassStreak} 批稳定，但当前${templateVersionPassText}；继续5章观察批，确认当前模板版本不复发后再把5章连写设为默认档位。`
+      : `恢复5章扩批已稳定 ${stablePassStreak}/${requiredStablePassStreak} 批，${compactChapterNoEvidence(restoreChapterNos)}通过后仍需继续观察 1-2 批，再把5章连写设为默认档位。`
+  const label = defaultReady ? '默认5章档位' : '5章观察批'
   return {
     visible: true,
     status: defaultReady ? 'ready' : 'observing',
-    label: defaultReady ? '默认5章档位' : '5章观察批',
+    label,
     source: 'recovery_restore_stability_evidence',
     stable_pass_streak: stablePassStreak,
     required_stable_pass_streak: requiredStablePassStreak,
@@ -6218,6 +6331,12 @@ function buildSafeBatchRecoveryRestoreStabilityLane(policy: AnyRecord | null | u
     restore_chapter_nos: restoreChapterNos,
     validation_chapter_nos: validationChapterNos,
     summary,
+    task_center_filter_label: templateVersionId
+      ? `批次复盘筛选：${label} / 当前模板版本 ${templateVersionId}`
+      : `批次复盘筛选：${label}`,
+    ...(latestTemplateVersionProfile ? {
+      latest_template_version_profile: latestTemplateVersionProfile,
+    } : {}),
     ...(defaultFiveChapterRecoveryVerdict ? {
       default_five_chapter_recovery_verdict: defaultFiveChapterRecoveryVerdict,
     } : {}),
@@ -6227,6 +6346,9 @@ function buildSafeBatchRecoveryRestoreStabilityLane(policy: AnyRecord | null | u
 function safeBatchRecoveryRestoreObservationConfirmation(lane: AnyRecord | null | undefined, targetChapterCount: number) {
   if (!lane) return null
   const defaultFiveChapterRecoveryVerdict = defaultFiveChapterRecoveryVerdictFromSource(lane)
+  const latestTemplateVersionProfile = lane.latest_template_version_profile
+    || lane.latestTemplateVersionProfile
+    || null
   return {
     status: text(lane.status, 'observing'),
     label: text(lane.label, '5章观察批'),
@@ -6236,6 +6358,9 @@ function safeBatchRecoveryRestoreObservationConfirmation(lane: AnyRecord | null 
     risk_count: 0,
     source: 'recovery_restore_stability_evidence',
     evidence: [text(lane.summary)].filter(Boolean),
+    ...(latestTemplateVersionProfile ? {
+      latest_template_version_profile: latestTemplateVersionProfile,
+    } : {}),
     ...(defaultFiveChapterRecoveryVerdict ? {
       default_five_chapter_recovery_verdict: defaultFiveChapterRecoveryVerdict,
     } : {}),

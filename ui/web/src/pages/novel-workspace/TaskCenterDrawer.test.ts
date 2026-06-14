@@ -1649,6 +1649,31 @@ describe('buildSafeBatchExpansionPolicySnapshot', () => {
 
   test('keeps default lane template stability profile in expansion feedback snapshot', () => {
     const snapshot = buildSafeBatchExpansionPolicySnapshot({
+      safe_batch_recovery_restore_stability_lane: {
+        visible: true,
+        status: 'observing',
+        label: '5章观察批',
+        source: 'recovery_restore_stability_evidence',
+        stable_pass_streak: 2,
+        required_stable_pass_streak: 2,
+        default_five_chapter_ready: false,
+        restore_chapter_nos: [104, 105, 106, 107, 108],
+        validation_chapter_nos: [96, 97, 98],
+        latest_template_version_profile: {
+          id: 'safe_batch_expansion_structure_repair:663',
+          label: '默认5章档位模板重构',
+          source_run_id: 663,
+          latest_status: 'passed',
+          validation_batch_count: 1,
+          passed_batch_count: 1,
+          failed_batch_count: 0,
+          pass_streak: 1,
+          required_pass_streak: 2,
+          status: 'observing',
+        },
+        task_center_filter_label: '批次复盘筛选：5章观察批 / 当前模板版本 safe_batch_expansion_structure_repair:663',
+        summary: '恢复5章扩批连续 2 批稳定，但当前模板版本 safe_batch_expansion_structure_repair:663 连过 1/2，继续观察。',
+      },
       safe_batch_expansion_policy: {
         status: 'recovering',
         label: '强化扩批规则',
@@ -1750,6 +1775,19 @@ describe('buildSafeBatchExpansionPolicySnapshot', () => {
       ],
     })
     expect(snapshot?.expansionFeedback?.defaultFiveChapterLaneTemplateStabilityProfile?.summary).toContain('继续3章观察')
+    expect(snapshot?.recoveryRestoreStabilityLane).toMatchObject({
+      status: 'observing',
+      defaultFiveChapterReady: false,
+      stablePassStreak: 2,
+      requiredStablePassStreak: 2,
+      taskCenterFilterLabel: '批次复盘筛选：5章观察批 / 当前模板版本 safe_batch_expansion_structure_repair:663',
+      latestTemplateVersionProfile: {
+        id: 'safe_batch_expansion_structure_repair:663',
+        status: 'observing',
+        passStreak: 1,
+        requiredPassStreak: 2,
+      },
+    })
   })
 
   test('summarizes failed recovery validation batches as a focused repair action', () => {

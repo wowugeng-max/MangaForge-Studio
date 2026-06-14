@@ -1442,6 +1442,7 @@ export type SafeBatchRecoveryRestoreStabilityLaneSnapshot = {
   validationChapterNos: number[]
   summary: string
   taskCenterFilterLabel: string
+  latestTemplateVersionProfile: SafeBatchDefaultFiveChapterLaneTemplateVersionSnapshot | null
 }
 
 export type SafeBatchRecoveryRoadmapSnapshot = {
@@ -1467,6 +1468,7 @@ export type SafeBatchRecoveryFocusSnapshot = {
   taskStatuses: string[]
   taskCenterFilterLabel: string
   requirementKey?: string
+  templateVersionId?: string
 }
 
 export type SafeBatchRecoveryValidationSnapshot = {
@@ -1926,6 +1928,13 @@ function buildSafeBatchRecoveryRoadmapSnapshot(roadmapLike: any): SafeBatchRecov
       source: 'safe_batch_expansion_structure_decision_trend',
       taskCenterFilterLabel: '扩批结构决策',
     },
+    default_lane_template_version: {
+      targetView: 'repair_task',
+      issueType: 'safe_batch_expansion_structure_repair',
+      source: 'default_five_chapter_lane_template_stability_profile',
+      taskCenterFilterLabel: '当前模板版本',
+      requirementKey: 'default_lane_template',
+    },
   }
   const normalizeStatus = (value: any): SafeBatchRecoveryRoadmapNodeSnapshot['status'] => {
     const status = String(value || '').trim()
@@ -1956,7 +1965,8 @@ function buildSafeBatchRecoveryRoadmapSnapshot(roadmapLike: any): SafeBatchRecov
       source: compactEvidenceText(focus?.source || fallback?.source || 'safe_batch_recovery_roadmap'),
       taskStatuses: statuses.map((item: any) => compactEvidenceText(item)).filter(Boolean),
       taskCenterFilterLabel: compactEvidenceText(focus?.task_center_filter_label || focus?.taskCenterFilterLabel || fallback?.taskCenterFilterLabel || layerLabel),
-      requirementKey: compactEvidenceText(focus?.requirement_key || focus?.requirementKey || ''),
+      requirementKey: compactEvidenceText(focus?.requirement_key || focus?.requirementKey || fallback?.requirementKey || ''),
+      templateVersionId: compactEvidenceText(focus?.template_version_id || focus?.templateVersionId || ''),
     }
   }
   const normalizeNode = (node: any): SafeBatchRecoveryRoadmapNodeSnapshot | null => {
@@ -2593,6 +2603,9 @@ function buildSafeBatchRecoveryRestoreStabilityLaneSnapshot(
   const restoreChapterNos = normalizeChapterNos(lane?.restore_chapter_nos || lane?.restoreChapterNos)
   const validationChapterNos = normalizeChapterNos(lane?.validation_chapter_nos || lane?.validationChapterNos)
   const summary = compactEvidenceText(lane?.summary || fallbackEvidence?.summary || '')
+  const latestTemplateVersionProfile = buildSafeBatchDefaultFiveChapterLaneTemplateVersionSnapshot(
+    lane?.latest_template_version_profile || lane?.latestTemplateVersionProfile,
+  )
   const snapshot = {
     visible: true,
     status,
@@ -2605,6 +2618,7 @@ function buildSafeBatchRecoveryRestoreStabilityLaneSnapshot(
     validationChapterNos: validationChapterNos.length ? validationChapterNos : fallbackEvidence?.validationChapterNos || [],
     summary,
     taskCenterFilterLabel: compactEvidenceText(lane?.task_center_filter_label || lane?.taskCenterFilterLabel || `批次复盘筛选：${label}`),
+    latestTemplateVersionProfile,
   }
   if (!snapshot.status && !snapshot.label && !snapshot.restoreChapterNos.length && !snapshot.validationChapterNos.length && !snapshot.summary) return null
   return snapshot
