@@ -1241,10 +1241,11 @@
 - 默认档位模板版本稳定性已反向驱动恢复默认 5 章档位。即使恢复 5 章扩批已经连续 2 批稳定，只要当前 `latest_template_version_profile` 仍是 `observing`，总控台也只显示 `继续5章观察批`，并在预执行确认、生产许可和任务中心筛选里写明 `当前模板版本 ... 连过 x/y`；当当前模板版本复发或进入重构态时，安全连写路线图会优先聚焦 `默认档位模板版本`，打开任务中心时筛到该版本对应的缺项/重构任务，避免旧版本稳定证据误导恢复判断。
 - 当前模板版本证据已接入默认 5 章真实生产后的批次复盘。默认档位生产批会携带 `template_version_id`，若真实生产复发，`default_five_chapter_regression` 会记录该版本、失效批次和 `核心偏移/回报欠账/追读拉力` 对应的模板缺项；长期模板画像会把当前版本标为 `relapsed` 并记录生产复发次数，任务中心摘要显示模板版本标签，结构修复任务会生成 `default_five_chapter_lane_template_redesign_queue`，要求按这次生产复发重写当前版本模板。
 - 生产复发后的模板版本重构标准已回流到下一轮 3 章验证批任务书和正文 prompt。生产复发队列会保留 `production_relapse_review`，包含 `template_version_id`、真实 5 章复发章节、前置验证批、恢复依据、失败维度和模板缺项；结构修复完成后，下一轮 `default_five_chapter_lane_template` 会继承这些生产后验证据，正文 prompt 会明确写出模板版本、生产复发章节、真实失败维度和逐章后验验证要求，要求 3 章验证批证明新版模板能修掉真实生产问题，而不是只复验四项字段存在。
+- 生产后验证据已接入默认档位模板验证判定。下一轮 3 章验证批的 `default_five_chapter_lane_template_verdict` 不只检查四项 `default_lane_*_delivered` 回执，还会读取 `production_relapse_review`，按真实生产复发章节和 `核心偏移/回报欠账/追读拉力` 失败维度输出 `production_relapse_verdict`；若生产后验仍复发，模板版本稳定性画像会把当前版本标为 `relapsed`，后续结构修复任务会携带 `production_failed_requirements`，要求继续按真实生产失败维度重修。
 
 推荐下一步：
 
-- 将生产后验证据继续接入 `default_five_chapter_lane_template_verdict`：3 章验证批复盘不只判断四项 `default_lane_*_delivered` 是否存在，还要按 `production_relapse_review` 对照真实复发章节和失败维度，输出“生产后验已修复/仍复发”的版本级判定。
+- 将 `production_relapse_verdict` 的“生产后验已修复/仍复发”进一步展示到任务中心批次摘要、结构修复卡片标签和总控台路线图聚焦文案里，让作者不用打开 JSON 就能知道当前模板版本是可以恢复默认 5 章，还是必须继续按真实生产失败维度重构。
 
 ## 8. 使用说明维护规则
 

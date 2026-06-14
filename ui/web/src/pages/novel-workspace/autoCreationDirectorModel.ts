@@ -4375,7 +4375,16 @@ function normalizeDefaultFiveChapterLaneTemplateVersion(template: AnyRecord | nu
   const requiredReceipts = arrayValue(template.required_receipts || template.requiredReceipts || template.receipts)
     .map(item => text(item))
     .filter(Boolean)
-  const explicitId = firstText(template.template_version_id, template.templateVersionId, template.version_id, template.versionId)
+  const productionRelapseReview = template.production_relapse_review || template.productionRelapseReview || null
+  const explicitId = firstText(
+    template.template_version_id,
+    template.templateVersionId,
+    template.version_id,
+    template.versionId,
+    template.id,
+    productionRelapseReview?.template_version_id,
+    productionRelapseReview?.templateVersionId,
+  )
   const source = firstText(template.source, 'default_five_chapter_lane_template')
   const sourceRunId = template.source_run_id ?? template.sourceRunId ?? null
   const id = explicitId || (sourceRunId !== null && sourceRunId !== undefined && text(sourceRunId) ? `${source}:${sourceRunId}` : '')
@@ -4466,6 +4475,10 @@ function buildDefaultFiveChapterLaneTemplateVerdict(args: {
   verification: AnyRecord
   validationChapterNos: number[]
   chapters: AnyRecord[]
+  riskCount?: number
+  coreRiskCount?: number
+  payoffDebtCount?: number
+  readerPullRiskCount?: number
 }) {
   const template = args.verification?.default_five_chapter_lane_template
     || args.verification?.defaultFiveChapterLaneTemplate
@@ -4501,17 +4514,40 @@ function buildDefaultFiveChapterLaneTemplateVerdict(args: {
     })
     .filter(Boolean)
   const missingCount = missingRequirements.reduce((sum: number, item: AnyRecord) => sum + arrayValue(item?.chapter_nos).length, 0)
-  const status = missingCount > 0 ? 'failed' : 'passed'
   const missingSummary = missingRequirements
     .map((item: AnyRecord) => `${compactChapterNoEvidence(arrayValue(item.chapter_nos).map((chapterNo: any) => Number(chapterNo)).filter(Boolean))}缺${item.label}`)
     .join('；')
+  const productionRelapseVerdict = buildDefaultFiveChapterLaneTemplateProductionRelapseVerdict({
+    template,
+    validationChapterNos: args.validationChapterNos,
+    riskCount: Number(args.riskCount || 0),
+    coreRiskCount: Number(args.coreRiskCount || 0),
+    payoffDebtCount: Number(args.payoffDebtCount || 0),
+    readerPullRiskCount: Number(args.readerPullRiskCount || 0),
+  })
+  const productionFailedCount = Number(productionRelapseVerdict?.failed_count || 0)
+  const productionFailedRequirements = arrayValue(productionRelapseVerdict?.failed_requirements)
+  const productionSummary = productionRelapseVerdict
+    ? productionRelapseVerdict.status === 'failed'
+      ? `生产后验仍复发：${arrayValue(productionRelapseVerdict.remaining_failure_reasons).join('、')}。`
+      : `生产后验已修复：${arrayValue(productionRelapseVerdict.cleared_failure_reasons).join('、')}已清零。`
+    : ''
+  const status = missingCount > 0 || productionFailedCount > 0 ? 'failed' : 'passed'
+  const passedSummary = [
+    `默认档位模板回检通过：${templateVersion?.id ? `版本 ${templateVersion.id} ` : ''}${compactChapterNoEvidence(args.validationChapterNos)}已逐章继承段位职责、冲突轮换、回报密度和章末追读模板。`,
+    productionSummary,
+  ].filter(Boolean).join(' ')
+  const failedSummaryParts = [
+    missingSummary,
+    productionRelapseVerdict?.status === 'failed' ? productionSummary : '',
+  ].filter(Boolean)
   return {
     visible: true,
     status,
     label: '默认档位模板回检',
     summary: status === 'passed'
-      ? `默认档位模板回检通过：${templateVersion?.id ? `版本 ${templateVersion.id} ` : ''}${compactChapterNoEvidence(args.validationChapterNos)}已逐章继承段位职责、冲突轮换、回报密度和章末追读模板。`
-      : `默认档位模板回检未通过：${templateVersion?.id ? `版本 ${templateVersion.id} ` : ''}${missingSummary}，不能恢复默认5章档位。`,
+      ? passedSummary
+      : `默认档位模板回检未通过：${templateVersion?.id ? `版本 ${templateVersion.id} ` : ''}${failedSummaryParts.join('；')}，不能恢复默认5章档位。`,
     validation_chapter_nos: args.validationChapterNos,
     ...(templateVersion ? { template_version: templateVersion } : {}),
     requirements: requirements.map(requirement => ({
@@ -4520,6 +4556,92 @@ function buildDefaultFiveChapterLaneTemplateVerdict(args: {
     })),
     missing_count: missingCount,
     missing_requirements: missingRequirements,
+    ...(productionRelapseVerdict ? {
+      production_failed_count: productionFailedCount,
+      production_relapse_verdict: productionRelapseVerdict,
+      production_failed_requirements: productionFailedRequirements,
+    } : {}),
+  }
+}
+
+function buildDefaultFiveChapterLaneTemplateProductionRelapseVerdict(args: {
+  template: AnyRecord
+  validationChapterNos: number[]
+  riskCount: number
+  coreRiskCount: number
+  payoffDebtCount: number
+  readerPullRiskCount: number
+}) {
+  const review = normalizeDefaultFiveChapterLaneTemplateProductionRelapseReview(args.template)
+  if (!review) return null
+  const failureReasons = arrayValue(review.failure_reasons || review.failureReasons)
+    .map(item => text(item))
+    .filter(Boolean)
+  const failedRequirements = arrayValue(review.failed_requirements || review.failedRequirements)
+    .map((item: AnyRecord) => ({
+      key: text(item?.key),
+      label: text(item?.label || item?.key, '模板要求'),
+      failure_reason: text(item?.failure_reason || item?.failureReason),
+      failed_count: Number(item?.failed_count ?? item?.failedCount ?? 1),
+      chapter_nos: arrayValue(item?.chapter_nos || item?.chapterNos).length
+        ? arrayValue(item?.chapter_nos || item?.chapterNos)
+          .map((chapterNo: any) => Number(chapterNo))
+          .filter((chapterNo: number) => chapterNo > 0)
+        : args.validationChapterNos,
+    }))
+    .filter((item: AnyRecord) => item.key || item.label || item.failure_reason)
+  const reasonStatuses = failureReasons.map(reason => {
+    const riskCount = safeBatchDefaultRecoveryRiskCountForReason(reason, args)
+    return {
+      reason,
+      status: riskCount > 0 ? 'remaining' : 'cleared',
+      risk_count: riskCount,
+    }
+  })
+  const remainingFailureReasons = reasonStatuses
+    .filter(item => item.status === 'remaining')
+    .map(item => item.reason)
+  const clearedFailureReasons = reasonStatuses
+    .filter(item => item.status === 'cleared')
+    .map(item => item.reason)
+  const remainingFailedRequirements = failedRequirements
+    .filter((item: AnyRecord) => {
+      const reason = text(item.failure_reason)
+      return !reason || remainingFailureReasons.includes(reason)
+    })
+  const status = remainingFailureReasons.length ? 'failed' : 'passed'
+  const templateVersionId = firstText(
+    review.template_version_id,
+    review.templateVersionId,
+    args.template?.template_version_id,
+    args.template?.templateVersionId,
+    args.template?.template_version?.id,
+    args.template?.templateVersion?.id,
+  )
+  return {
+    visible: true,
+    status,
+    label: '默认档位模板生产后验判定',
+    template_version_id: templateVersionId,
+    default_batch_chapter_nos: arrayValue(review.default_batch_chapter_nos || review.defaultBatchChapterNos)
+      .map((chapterNo: any) => Number(chapterNo))
+      .filter((chapterNo: number) => chapterNo > 0),
+    restore_chapter_nos: arrayValue(review.restore_chapter_nos || review.restoreChapterNos)
+      .map((chapterNo: any) => Number(chapterNo))
+      .filter((chapterNo: number) => chapterNo > 0),
+    previous_validation_chapter_nos: arrayValue(review.validation_chapter_nos || review.validationChapterNos)
+      .map((chapterNo: any) => Number(chapterNo))
+      .filter((chapterNo: number) => chapterNo > 0),
+    validation_chapter_nos: args.validationChapterNos,
+    failure_reasons: failureReasons,
+    cleared_failure_reasons: clearedFailureReasons,
+    remaining_failure_reasons: remainingFailureReasons,
+    failure_reason_statuses: reasonStatuses,
+    failed_count: remainingFailedRequirements.length,
+    failed_requirements: remainingFailedRequirements,
+    summary: status === 'passed'
+      ? `默认档位模板生产后验已修复：${clearedFailureReasons.join('、') || '真实生产失败维度'}已清零，${compactChapterNoEvidence(args.validationChapterNos)}可作为版本级验证证据。`
+      : `默认档位模板生产后验仍复发：${remainingFailureReasons.join('、')}未清零，${compactChapterNoEvidence(args.validationChapterNos)}不能作为当前模板版本恢复证据。`,
   }
 }
 
@@ -4552,18 +4674,49 @@ function buildDefaultFiveChapterLaneTemplateRepair(verdict?: AnyRecord | null) {
       }
     })
     .filter((item: AnyRecord) => item.key || item.label || item.chapter_nos.length)
-  if (!missingRequirements.length) return null
+  const productionRelapseVerdict = verdict.production_relapse_verdict
+    || verdict.productionRelapseVerdict
+    || null
+  const productionFailedRequirements = arrayValue(verdict.production_failed_requirements || verdict.productionFailedRequirements || productionRelapseVerdict?.failed_requirements || productionRelapseVerdict?.failedRequirements)
+    .map((item: AnyRecord) => {
+      const chapterNos = arrayValue(item?.chapter_nos || item?.chapterNos).length
+        ? arrayValue(item?.chapter_nos || item?.chapterNos)
+          .map((chapterNo: any) => Number(chapterNo))
+          .filter((chapterNo: number) => chapterNo > 0)
+        : arrayValue(verdict.validation_chapter_nos || verdict.validationChapterNos)
+          .map((chapterNo: any) => Number(chapterNo))
+          .filter((chapterNo: number) => chapterNo > 0)
+      return {
+        key: text(item?.key),
+        label: text(item?.label || item?.key, '模板缺项'),
+        failure_reason: text(item?.failure_reason || item?.failureReason),
+        chapter_nos: chapterNos,
+      }
+    })
+    .filter((item: AnyRecord) => item.key || item.label || item.failure_reason || item.chapter_nos.length)
+  if (!missingRequirements.length && !productionFailedRequirements.length) return null
   const missingText = missingRequirements
     .map((item: AnyRecord) => `${compactChapterNoEvidence(item.chapter_nos)}缺${item.label}`)
     .join('；')
+  const productionFailedText = productionFailedRequirements
+    .map((item: AnyRecord) => `${item.label}${item.failure_reason ? `/${item.failure_reason}` : ''}`)
+    .join('；')
   const repairActions = missingRequirements
     .map(defaultFiveChapterLaneTemplateRepairAction)
+    .concat(productionFailedRequirements.map((item: AnyRecord) => {
+      const action = defaultFiveChapterLaneTemplateRepairAction(item)
+      return item.failure_reason ? `${action} 生产后验失败维度：${item.failure_reason}。` : action
+    }))
     .filter(Boolean)
+  const repairSummary = [
+    missingText,
+    productionFailedText ? `生产后验仍复发：${productionFailedText}` : '',
+  ].filter(Boolean).join('；')
   return {
     visible: true,
     status: 'failed',
     label: '默认档位模板验证缺项',
-    summary: text(verdict.summary, `默认档位模板回检未通过：${missingText}，下一轮结构修复必须写入任务书。`),
+    summary: text(verdict.summary, `默认档位模板回检未通过：${repairSummary}，下一轮结构修复必须写入任务书。`),
     validation_chapter_nos: arrayValue(verdict.validation_chapter_nos || verdict.validationChapterNos)
       .map((chapterNo: any) => Number(chapterNo))
       .filter((chapterNo: number) => chapterNo > 0),
@@ -4574,8 +4727,13 @@ function buildDefaultFiveChapterLaneTemplateRepair(verdict?: AnyRecord | null) {
     })).filter((item: AnyRecord) => item.key || item.label),
     missing_count: Number(verdict.missing_count ?? verdict.missingCount ?? missingRequirements.length),
     missing_requirements: missingRequirements,
+    ...(productionRelapseVerdict ? { production_relapse_verdict: productionRelapseVerdict } : {}),
+    ...(productionFailedRequirements.length ? {
+      production_failed_count: productionFailedRequirements.length,
+      production_failed_requirements: productionFailedRequirements,
+    } : {}),
     repair_actions: repairActions,
-    repair_summary: missingText,
+    repair_summary: repairSummary,
   }
 }
 
@@ -4794,6 +4952,10 @@ function buildSafeBatchExpansionStructureValidationResult(args: {
     verification,
     validationChapterNos: validationNos,
     chapters: arrayValue(args.chapters),
+    riskCount: deliveryRiskCount,
+    coreRiskCount,
+    payoffDebtCount,
+    readerPullRiskCount,
   })
   const templateRiskCount = Number(defaultFiveChapterLaneTemplateVerdict?.missing_count || 0)
   const riskCount = deliveryRiskCount + templateRiskCount
@@ -5735,6 +5897,19 @@ function buildDefaultFiveChapterLaneTemplateStabilityProfile(args: {
             .filter((chapterNo: number) => chapterNo > 0),
         }))
         .filter((item: AnyRecord) => item.key || item.label || item.chapter_nos.length)
+      const productionRelapseVerdict = verdict.production_relapse_verdict
+        || verdict.productionRelapseVerdict
+        || null
+      const productionFailedRequirements = arrayValue(verdict.production_failed_requirements || verdict.productionFailedRequirements || productionRelapseVerdict?.failed_requirements || productionRelapseVerdict?.failedRequirements)
+        .map((item: AnyRecord) => ({
+          key: text(item?.key),
+          label: text(item?.label || item?.key, '模板缺项'),
+          failure_reason: text(item?.failure_reason || item?.failureReason),
+          chapter_nos: arrayValue(item?.chapter_nos || item?.chapterNos)
+            .map((chapterNo: any) => Number(chapterNo))
+            .filter((chapterNo: number) => chapterNo > 0),
+        }))
+        .filter((item: AnyRecord) => item.key || item.label || item.failure_reason || item.chapter_nos.length)
       const requirements = arrayValue(verdict.requirements)
         .map((item: AnyRecord) => ({
           key: text(item?.key),
@@ -5757,6 +5932,8 @@ function buildDefaultFiveChapterLaneTemplateStabilityProfile(args: {
         summary: text(verdict.summary),
         missingCount: Number(verdict.missing_count ?? verdict.missingCount ?? missingRequirements.reduce((sum: number, item: AnyRecord) => sum + item.chapter_nos.length, 0)),
         missingRequirements,
+        productionRelapseVerdict,
+        productionFailedRequirements,
         requirements,
         templateVersion,
       }
@@ -5793,9 +5970,16 @@ function buildDefaultFiveChapterLaneTemplateStabilityProfile(args: {
       const key = text(requirement?.key)
       if (key) allRequirementLabels.set(key, text(requirement?.label, key))
     })
+    arrayValue(event.productionFailedRequirements).forEach((requirement: AnyRecord) => {
+      const key = text(requirement?.key)
+      if (key) allRequirementLabels.set(key, text(requirement?.label, key))
+    })
   })
   const requirementStats = Array.from(allRequirementLabels.entries()).map(([key, label]) => {
-    const failedEvents = verdictEvents.filter(event => arrayValue(event.missingRequirements).some((item: AnyRecord) => text(item?.key) === key))
+    const failedEvents = verdictEvents.filter(event => (
+      arrayValue(event.missingRequirements).some((item: AnyRecord) => text(item?.key) === key)
+      || arrayValue(event.productionFailedRequirements).some((item: AnyRecord) => text(item?.key) === key)
+    ))
     const latestRequirement = arrayValue(latest.requirements).find((item: AnyRecord) => text(item?.key) === key)
     return {
       key,
@@ -5808,6 +5992,7 @@ function buildDefaultFiveChapterLaneTemplateStabilityProfile(args: {
         .flatMap((item: AnyRecord) => arrayValue(item.chapter_nos))
         .map((chapterNo: any) => Number(chapterNo))
         .filter((chapterNo: number) => chapterNo > 0),
+      latest_failure_reason: text(arrayValue(latest.productionFailedRequirements).find((item: AnyRecord) => text(item?.key) === key)?.failure_reason),
     }
   })
   const failedRequirementCount = requirementStats.reduce((sum, item) => sum + item.failed_count, 0)
@@ -5836,11 +6021,17 @@ function buildDefaultFiveChapterLaneTemplateStabilityProfile(args: {
     const versionPassedBatchCount = versionEvents.filter(event => event.status === 'passed').length
     const versionFailedBatchCount = versionEvents.length - versionPassedBatchCount
     const versionFailedRequirementStats = DEFAULT_FIVE_CHAPTER_LANE_TEMPLATE_REQUIREMENTS.map(requirement => {
-      const failedEvents = versionEvents.filter(event => arrayValue(event.missingRequirements).some((item: AnyRecord) => text(item?.key) === requirement.key))
+      const failedEvents = versionEvents.filter(event => (
+        arrayValue(event.missingRequirements).some((item: AnyRecord) => text(item?.key) === requirement.key)
+        || arrayValue(event.productionFailedRequirements).some((item: AnyRecord) => text(item?.key) === requirement.key)
+      ))
+      const latestProductionFailure = arrayValue(latestVersionEvent?.productionFailedRequirements)
+        .find((item: AnyRecord) => text(item?.key) === requirement.key)
       return {
         key: requirement.key,
         label: requirement.label,
         failed_count: failedEvents.length,
+        failure_reason: text(latestProductionFailure?.failure_reason),
       }
     })
     const versionTopFailedRequirement = versionFailedRequirementStats
@@ -5854,6 +6045,8 @@ function buildDefaultFiveChapterLaneTemplateStabilityProfile(args: {
       }))
       .filter((item: AnyRecord) => item.key || item.label || item.failure_reason)
     const latestVersionStatus = latestVersionEvent?.status || ''
+    const versionProductionValidationFailures = versionEvents
+      .filter(event => text(event.productionRelapseVerdict?.status) === 'failed')
     const productionRelapseIsLatest = latestVersionProductionRelapse
       && (!latestVersionEvent || Date.parse(text(latestVersionProductionRelapse.default_batch_created_at || latestVersionProductionRelapse.defaultBatchCreatedAt)) > Date.parse(text(latestVersionEvent.createdAt)))
     const versionStatus = productionRelapseIsLatest
@@ -5880,6 +6073,10 @@ function buildDefaultFiveChapterLaneTemplateStabilityProfile(args: {
       pass_streak: versionPassStreak,
       required_pass_streak: requiredPassStreak,
       production_relapse_count: versionProductionRelapses.length,
+      production_validation_failed_count: versionProductionValidationFailures.length,
+      ...(latestVersionEvent?.productionRelapseVerdict ? {
+        latest_production_relapse_verdict: latestVersionEvent.productionRelapseVerdict,
+      } : {}),
       ...(latestVersionProductionRelapse ? {
         latest_production_relapse: {
           default_batch_created_at: text(latestVersionProductionRelapse.default_batch_created_at || latestVersionProductionRelapse.defaultBatchCreatedAt),
@@ -5894,6 +6091,9 @@ function buildDefaultFiveChapterLaneTemplateStabilityProfile(args: {
         },
       } : {}),
       ...(versionTopFailedRequirement ? { top_failed_requirement: versionTopFailedRequirement } : {}),
+      ...(arrayValue(latestVersionEvent?.productionFailedRequirements).length ? {
+        production_validation_failed_requirements: latestVersionEvent.productionFailedRequirements,
+      } : {}),
       ...(productionFailedRequirements.length ? { production_failed_requirements: productionFailedRequirements } : {}),
     }
   })
