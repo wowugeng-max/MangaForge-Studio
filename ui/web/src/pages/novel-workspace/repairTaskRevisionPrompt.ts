@@ -609,6 +609,53 @@ function defaultLaneTemplateRedesignInstructionForPrompt(requirement: AnyRecord)
   return '重写该模板项，并给下一轮验证批设置逐章可回填标准。'
 }
 
+function normalizeDefaultLaneTemplateProductionFailedRequirements(source: AnyRecord, fallback: AnyRecord | null = null) {
+  return arrayValue(
+    source.production_failed_requirements
+    || source.productionFailedRequirements
+    || fallback?.failed_requirements
+    || fallback?.failedRequirements,
+  )
+    .map(item => objectValue(item))
+    .map(item => ({
+      key: firstText(item.key),
+      label: firstText(item.label, item.name, item.key, '模板要求'),
+      failureReason: firstText(item.failure_reason, item.failureReason),
+      chapterNos: arrayValue(item.chapter_nos || item.chapterNos)
+        .map(chapterNo => Number(chapterNo))
+        .filter(chapterNo => chapterNo > 0),
+    }))
+    .filter(item => item.key || item.label || item.failureReason || item.chapterNos.length)
+}
+
+function normalizeDefaultLaneTemplateProductionRelapseVerdict(source: AnyRecord) {
+  const verdict = objectValue(source.production_relapse_verdict || source.productionRelapseVerdict)
+  if (!Object.keys(verdict).length || verdict.visible === false) return null
+  return {
+    status: firstText(verdict.status),
+    label: firstText(verdict.label, '默认档位模板生产后验判定'),
+    templateVersionId: firstText(verdict.template_version_id, verdict.templateVersionId),
+    defaultBatchChapterNos: arrayValue(verdict.default_batch_chapter_nos || verdict.defaultBatchChapterNos)
+      .map(chapterNo => Number(chapterNo))
+      .filter(chapterNo => chapterNo > 0),
+    restoreChapterNos: arrayValue(verdict.restore_chapter_nos || verdict.restoreChapterNos)
+      .map(chapterNo => Number(chapterNo))
+      .filter(chapterNo => chapterNo > 0),
+    previousValidationChapterNos: arrayValue(verdict.previous_validation_chapter_nos || verdict.previousValidationChapterNos)
+      .map(chapterNo => Number(chapterNo))
+      .filter(chapterNo => chapterNo > 0),
+    validationChapterNos: arrayValue(verdict.validation_chapter_nos || verdict.validationChapterNos)
+      .map(chapterNo => Number(chapterNo))
+      .filter(chapterNo => chapterNo > 0),
+    failureReasons: arrayValue(verdict.failure_reasons || verdict.failureReasons).map(item => text(item)).filter(Boolean),
+    clearedFailureReasons: arrayValue(verdict.cleared_failure_reasons || verdict.clearedFailureReasons).map(item => text(item)).filter(Boolean),
+    remainingFailureReasons: arrayValue(verdict.remaining_failure_reasons || verdict.remainingFailureReasons).map(item => text(item)).filter(Boolean),
+    failedCount: Number(verdict.failed_count ?? verdict.failedCount ?? 0),
+    failedRequirements: normalizeDefaultLaneTemplateProductionFailedRequirements({}, verdict),
+    summary: firstText(verdict.summary),
+  }
+}
+
 function normalizeDefaultFiveChapterLaneTemplateRepair(review: AnyRecord) {
   const explicit = objectValue(
     review.default_five_chapter_lane_template_repair
@@ -631,7 +678,9 @@ function normalizeDefaultFiveChapterLaneTemplateRepair(review: AnyRecord) {
         .filter(chapterNo => chapterNo > 0),
     }))
     .filter(item => item.key || item.label || item.chapterNos.length)
-  if (!missingRequirements.length) return null
+  const productionRelapseVerdict = normalizeDefaultLaneTemplateProductionRelapseVerdict(source)
+  const productionFailedRequirements = normalizeDefaultLaneTemplateProductionFailedRequirements(source, productionRelapseVerdict as any)
+  if (!missingRequirements.length && !productionFailedRequirements.length && productionRelapseVerdict?.status !== 'failed') return null
   const repairActions = arrayValue(source.repair_actions || source.repairActions)
     .map(item => text(item))
     .filter(Boolean)
@@ -649,6 +698,9 @@ function normalizeDefaultFiveChapterLaneTemplateRepair(review: AnyRecord) {
     repairActions: repairActions.length
       ? repairActions
       : missingRequirements.map(defaultLaneTemplateRepairActionForPrompt),
+    productionRelapseVerdict,
+    productionFailedCount: Number(source.production_failed_count ?? source.productionFailedCount ?? productionRelapseVerdict?.failedCount ?? productionFailedRequirements.length),
+    productionFailedRequirements,
   }
 }
 
@@ -873,16 +925,47 @@ export function buildRepairTaskRevisionPrompt(task: AnyRecord, run?: AnyRecord |
       )
     }
     if (defaultLaneTemplateRepair) {
-      lines.push(
-        '【默认档位模板验证缺项】',
-        defaultLaneTemplateRepair.validationChapterNos.length > 0 ? `验证批次：${compactChapterNosForPrompt(defaultLaneTemplateRepair.validationChapterNos)}` : '',
-        defaultLaneTemplateRepair.summary ? `验证结论：${defaultLaneTemplateRepair.summary}` : '',
-        defaultLaneTemplateRepair.missingText ? `缺项章节：${defaultLaneTemplateRepair.missingText}` : '',
-        defaultLaneTemplateRepair.missingCount > 0 ? `缺项数：${defaultLaneTemplateRepair.missingCount}` : '',
-        ...defaultLaneTemplateRepair.repairActions.map(item => item),
-        '修订要求：把缺失模板转成下一轮批次任务书的段位职责、冲突轮换、显性回报密度和章末追读检查项；不能只在说明里承认缺项。',
-        '回填要求：修订后必须重新检查 expansion_structure_decision_execution，并显式回填 default_lane_segment_duty_delivered、default_lane_conflict_rotation_delivered、default_lane_payoff_density_delivered、default_lane_ending_hook_template_delivered。',
-      )
+      const hasTemplateReceiptGap = defaultLaneTemplateRepair.missingRequirements.length > 0
+        || defaultLaneTemplateRepair.missingCount > 0
+        || Boolean(defaultLaneTemplateRepair.missingText)
+      if (hasTemplateReceiptGap) {
+        lines.push(
+          '【默认档位模板验证缺项】',
+          defaultLaneTemplateRepair.validationChapterNos.length > 0 ? `验证批次：${compactChapterNosForPrompt(defaultLaneTemplateRepair.validationChapterNos)}` : '',
+          defaultLaneTemplateRepair.summary ? `验证结论：${defaultLaneTemplateRepair.summary}` : '',
+          defaultLaneTemplateRepair.missingText ? `缺项章节：${defaultLaneTemplateRepair.missingText}` : '',
+          defaultLaneTemplateRepair.missingCount > 0 ? `缺项数：${defaultLaneTemplateRepair.missingCount}` : '',
+          ...defaultLaneTemplateRepair.repairActions.map(item => item),
+          '修订要求：把缺失模板转成下一轮批次任务书的段位职责、冲突轮换、显性回报密度和章末追读检查项；不能只在说明里承认缺项。',
+          '回填要求：修订后必须重新检查 expansion_structure_decision_execution，并显式回填 default_lane_segment_duty_delivered、default_lane_conflict_rotation_delivered、default_lane_payoff_density_delivered、default_lane_ending_hook_template_delivered。',
+        )
+      }
+      const productionRelapseVerdict = defaultLaneTemplateRepair.productionRelapseVerdict
+      if (productionRelapseVerdict || defaultLaneTemplateRepair.productionFailedRequirements.length) {
+        const productionFailedRequirements = defaultLaneTemplateRepair.productionFailedRequirements.length
+          ? defaultLaneTemplateRepair.productionFailedRequirements
+          : productionRelapseVerdict?.failedRequirements || []
+        lines.push(
+          '【默认档位模板生产后验】',
+          productionRelapseVerdict?.templateVersionId ? `模板版本：${productionRelapseVerdict.templateVersionId}` : '',
+          productionRelapseVerdict?.defaultBatchChapterNos.length ? `真实复发批：${compactChapterNosForPrompt(productionRelapseVerdict.defaultBatchChapterNos)}` : '',
+          productionRelapseVerdict?.restoreChapterNos.length ? `前置恢复批：${compactChapterNosForPrompt(productionRelapseVerdict.restoreChapterNos)}` : '',
+          productionRelapseVerdict?.previousValidationChapterNos.length ? `前置验证批：${compactChapterNosForPrompt(productionRelapseVerdict.previousValidationChapterNos)}` : '',
+          (productionRelapseVerdict?.validationChapterNos.length || defaultLaneTemplateRepair.validationChapterNos.length)
+            ? `本轮验证批：${compactChapterNosForPrompt(productionRelapseVerdict?.validationChapterNos.length ? productionRelapseVerdict.validationChapterNos : defaultLaneTemplateRepair.validationChapterNos)}`
+            : '',
+          productionRelapseVerdict?.summary ? `生产后验结论：${productionRelapseVerdict.summary}` : '',
+          productionRelapseVerdict?.remainingFailureReasons.length ? `仍复发维度：${productionRelapseVerdict.remainingFailureReasons.join('、')}` : '',
+          productionRelapseVerdict?.clearedFailureReasons.length ? `已修复维度：${productionRelapseVerdict.clearedFailureReasons.join('、')}` : '',
+          ...productionFailedRequirements.map(item => {
+            const chapterText = item.chapterNos.length ? `：${compactChapterNosForPrompt(item.chapterNos)}` : ''
+            const reasonText = item.failureReason ? `/${item.failureReason}` : ''
+            return `生产失败项：${item.label || item.key}${reasonText}${chapterText}`
+          }),
+          '修订要求：必须把真实5章生产复发原因改写进当前模板版本，逐项重写段位职责、冲突轮换、回报密度和章末追读模板；不能只修验证批表面字段。',
+          '关闭口径：下一轮3章验证批必须输出 production_relapse_verdict.status=passed，remaining_failure_reasons 为空；不能只补 default_lane_*_delivered 字段。',
+        )
+      }
     }
     if (validationTrend) {
       lines.push(

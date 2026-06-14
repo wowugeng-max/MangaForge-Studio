@@ -1243,10 +1243,11 @@
 - 生产复发后的模板版本重构标准已回流到下一轮 3 章验证批任务书和正文 prompt。生产复发队列会保留 `production_relapse_review`，包含 `template_version_id`、真实 5 章复发章节、前置验证批、恢复依据、失败维度和模板缺项；结构修复完成后，下一轮 `default_five_chapter_lane_template` 会继承这些生产后验证据，正文 prompt 会明确写出模板版本、生产复发章节、真实失败维度和逐章后验验证要求，要求 3 章验证批证明新版模板能修掉真实生产问题，而不是只复验四项字段存在。
 - 生产后验证据已接入默认档位模板验证判定。下一轮 3 章验证批的 `default_five_chapter_lane_template_verdict` 不只检查四项 `default_lane_*_delivered` 回执，还会读取 `production_relapse_review`，按真实生产复发章节和 `核心偏移/回报欠账/追读拉力` 失败维度输出 `production_relapse_verdict`；若生产后验仍复发，模板版本稳定性画像会把当前版本标为 `relapsed`，后续结构修复任务会携带 `production_failed_requirements`，要求继续按真实生产失败维度重修。
 - 生产后验判定已展示到任务中心和总控台路线图。3 章验证批摘要会显示 `生产后验已修复` 或 `生产后验仍复发`，并列出 `核心偏移/回报欠账/追读拉力` 的已修复或未修维度；结构修复任务卡会显示 `生产后验仍复发` 与对应失败维度标签；总控台 `默认档位模板版本` 路线图节点会把下一层动作改成 `修生产后验`，任务中心筛选也会聚焦到真实生产失败维度。
+- 生产后验失败维度已接入结构修复 prompt 和闭环复检口径。当结构修复任务携带 `production_relapse_verdict` 或 `production_failed_requirements` 时，`按批次修订` 会单独展开 `默认档位模板生产后验`，列出当前模板版本、真实 5 章复发批、前置恢复/验证批、本轮验证批、仍复发/已修复维度和逐项生产失败要求；关闭口径改为下一轮 3 章验证批必须输出 `production_relapse_verdict.status=passed` 且 `remaining_failure_reasons` 为空，避免只补四项 `default_lane_*_delivered` 回执就误判闭环。
 
 推荐下一步：
 
-- 将生产后验失败维度继续接入结构修复 prompt 和闭环复检：当任务卡显示 `生产后验仍复发` 时，修订提示词要单独展开真实 5 章复发章节、失败原因和 `production_failed_requirements`，并要求下一轮验证批以“生产后验已修复”为关闭口径，而不是只补四项回执字段。
+- 将同一关闭口径展示到任务中心聚焦态和已处理态：当任务卡显示 `生产后验仍复发` 时，作者在任务列表和路线图聚焦卡就能看到“等待生产后验验证批 / 下一轮以 `production_relapse_verdict.status=passed` 关闭”，无需打开修订 prompt 才知道验收标准。
 
 ## 8. 使用说明维护规则
 

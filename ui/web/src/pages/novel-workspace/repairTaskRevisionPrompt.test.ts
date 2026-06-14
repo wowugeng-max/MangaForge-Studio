@@ -408,6 +408,73 @@ describe('buildRepairTaskRevisionPrompt', () => {
     expect(prompt).toContain('default_lane_payoff_density_delivered')
   })
 
+  test('injects production relapse evidence into default lane template structure repair prompts', () => {
+    const prompt = buildRepairTaskRevisionPrompt({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'safe_batch_expansion_structure_repair',
+      severity: 'high',
+      message: '默认档位模板生产后验仍复发。',
+      action: '按真实5章生产失败维度重修当前模板版本。',
+      safe_batch_expansion_structure_review: {
+        repeated_hotspot_segment: {
+          key: 'middle',
+          label: '中段',
+          count: 2,
+        },
+        default_five_chapter_lane_template_repair: {
+          visible: true,
+          status: 'failed',
+          label: '默认档位模板验证缺项',
+          summary: '默认档位模板回检未通过：生产后验仍复发：核心偏移、回报欠账。',
+          validation_chapter_nos: [114, 115, 116],
+          missing_count: 0,
+          missing_requirements: [],
+          production_failed_count: 2,
+          production_relapse_verdict: {
+            visible: true,
+            status: 'failed',
+            label: '默认档位模板生产后验判定',
+            template_version_id: 'safe_batch_expansion_structure_repair:668',
+            default_batch_chapter_nos: [109, 110, 111, 112, 113],
+            restore_chapter_nos: [104, 105, 106, 107, 108],
+            previous_validation_chapter_nos: [96, 97, 98],
+            validation_chapter_nos: [114, 115, 116],
+            failure_reasons: ['核心偏移', '回报欠账', '追读拉力'],
+            cleared_failure_reasons: ['追读拉力'],
+            remaining_failure_reasons: ['核心偏移', '回报欠账'],
+            failed_count: 2,
+            failed_requirements: [
+              { key: 'default_lane_segment_duty', label: '默认档位段位职责', failure_reason: '核心偏移', chapter_nos: [114, 115, 116] },
+              { key: 'default_lane_payoff_density', label: '回报密度', failure_reason: '回报欠账', chapter_nos: [114, 115, 116] },
+            ],
+            summary: '默认档位模板生产后验仍复发：核心偏移、回报欠账未清零。',
+          },
+          production_failed_requirements: [
+            { key: 'default_lane_segment_duty', label: '默认档位段位职责', failure_reason: '核心偏移', chapter_nos: [114, 115, 116] },
+            { key: 'default_lane_payoff_density', label: '回报密度', failure_reason: '回报欠账', chapter_nos: [114, 115, 116] },
+          ],
+          repair_actions: [
+            '段位职责修复：必须把默认5章职责压回主线选择。',
+            '回报密度修复：必须把真实生产欠账改成可见结算。',
+          ],
+        },
+      },
+    })
+
+    expect(prompt).toContain('【默认档位模板生产后验】')
+    expect(prompt).toContain('模板版本：safe_batch_expansion_structure_repair:668')
+    expect(prompt).toContain('真实复发批：第109、110、111、112、113章')
+    expect(prompt).toContain('前置恢复批：第104、105、106、107、108章')
+    expect(prompt).toContain('前置验证批：第96、97、98章')
+    expect(prompt).toContain('本轮验证批：第114、115、116章')
+    expect(prompt).toContain('仍复发维度：核心偏移、回报欠账')
+    expect(prompt).toContain('已修复维度：追读拉力')
+    expect(prompt).toContain('生产失败项：默认档位段位职责/核心偏移：第114、115、116章')
+    expect(prompt).toContain('生产失败项：回报密度/回报欠账：第114、115、116章')
+    expect(prompt).toContain('关闭口径：下一轮3章验证批必须输出 production_relapse_verdict.status=passed')
+    expect(prompt).toContain('不能只补 default_lane_*_delivered 字段')
+  })
+
   test('injects default lane template redesign queue into structure repair prompts', () => {
     const prompt = buildRepairTaskRevisionPrompt({
       source: 'auto_creation_safe_batch_risk',
