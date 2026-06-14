@@ -1657,8 +1657,8 @@ describe('buildSafeBatchExpansionPolicySnapshot', () => {
                 restore_chapter_nos: [81, 82, 83, 84, 85],
                 previous_validation_chapter_nos: [78, 79, 80],
                 validation_chapter_nos: [90, 91, 92],
-                failure_reasons: ['回报欠账'],
-                cleared_failure_reasons: [],
+                failure_reasons: ['核心偏移', '回报欠账'],
+                cleared_failure_reasons: ['核心偏移'],
                 remaining_failure_reasons: ['回报欠账'],
                 failed_count: 1,
                 failed_requirements: [
@@ -1703,6 +1703,92 @@ describe('buildSafeBatchExpansionPolicySnapshot', () => {
       ],
     })
     expect(snapshot?.recoveryValidation?.defaultFiveChapterLaneTemplateVerdict?.summary).toContain('生产后验仍复发')
+    expect(snapshot?.recoveryValidation?.nextActionLabel).toBe('修生产后验')
+    expect(snapshot?.recoveryValidation?.reviewCta).toMatchObject({
+      kind: 'repair_production_relapse',
+      label: '修生产后验',
+      remainingFailureReasons: ['回报欠账'],
+    })
+    expect(snapshot?.recoveryValidation?.reviewCta?.summary).toContain('回报欠账')
+    expect(snapshot?.recoveryValidation?.reviewCta?.summary).not.toContain('核心偏移')
+  })
+
+  test('surfaces a single restore CTA after production relapse validation passes', () => {
+    const snapshot = buildSafeBatchExpansionPolicySnapshot({
+      safe_batch_expansion_policy: {
+        status: 'expanded',
+        label: '强化扩批规则',
+        summary: '生产后验验证批通过，进入5章观察。',
+        target_chapter_count: 5,
+        base_chapter_count: 3,
+        expanded_chapter_count: 5,
+        required_pass_streak: 3,
+        pass_streak: 3,
+        accepted_batch_count: 3,
+        failed_batch_count: 0,
+        latest_status: 'ok',
+        expansion_feedback: {
+          status: 'recovered',
+          label: '扩批热区反馈',
+          summary: '默认档位模板生产后验已修复。',
+          target_chapter_count: 5,
+          latest_chapter_nos: [114, 115, 116],
+          risk_count: 0,
+          expansion_structure_validation_result: {
+            visible: true,
+            status: 'ok',
+            label: '扩批结构验证',
+            summary: '默认档位模板生产后验已修复：核心偏移、回报欠账、追读拉力已清零。',
+            validation_chapter_nos: [114, 115, 116],
+            failed_chapter_nos: [],
+            risk_count: 0,
+            default_five_chapter_lane_template_verdict: {
+              visible: true,
+              status: 'passed',
+              label: '默认档位模板回检',
+              summary: '默认档位模板生产后验已修复。',
+              validation_chapter_nos: [114, 115, 116],
+              requirements: [
+                { key: 'default_lane_segment_duty', label: '默认档位段位职责', status: 'fulfilled' },
+                { key: 'default_lane_conflict_rotation', label: '冲突轮换', status: 'fulfilled' },
+                { key: 'default_lane_payoff_density', label: '回报密度', status: 'fulfilled' },
+                { key: 'default_lane_ending_hook_template', label: '章末追读模板', status: 'fulfilled' },
+              ],
+              missing_count: 0,
+              missing_requirements: [],
+              production_failed_count: 0,
+              production_relapse_verdict: {
+                visible: true,
+                status: 'passed',
+                label: '默认档位模板生产后验判定',
+                template_version_id: 'safe_batch_expansion_structure_repair:668',
+                default_batch_chapter_nos: [109, 110, 111, 112, 113],
+                restore_chapter_nos: [104, 105, 106, 107, 108],
+                previous_validation_chapter_nos: [96, 97, 98],
+                validation_chapter_nos: [114, 115, 116],
+                failure_reasons: ['核心偏移', '回报欠账', '追读拉力'],
+                cleared_failure_reasons: ['核心偏移', '回报欠账', '追读拉力'],
+                remaining_failure_reasons: [],
+                failed_count: 0,
+                failed_requirements: [],
+                summary: '默认档位模板生产后验已修复：核心偏移、回报欠账、追读拉力已清零。',
+              },
+            },
+          },
+        },
+      },
+    })
+
+    expect(snapshot?.recoveryValidation?.status).toBe('passed')
+    expect(snapshot?.recoveryValidation?.nextActionLabel).toBe('进入5章观察批')
+    expect(snapshot?.recoveryValidation?.reviewCta).toMatchObject({
+      kind: 'enter_five_chapter_observation',
+      label: '进入5章观察批',
+      clearedFailureReasons: ['核心偏移', '回报欠账', '追读拉力'],
+      remainingFailureReasons: [],
+    })
+    expect(snapshot?.recoveryValidation?.reviewCta?.summary).toContain('生产后验已修复')
+    expect(snapshot?.recoveryValidation?.reviewCta?.summary).toContain('5章观察')
   })
 
   test('keeps default lane template stability profile in expansion feedback snapshot', () => {

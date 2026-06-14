@@ -1596,9 +1596,20 @@ export type SafeBatchRecoveryValidationSnapshot = {
   targetChapterCount: number
   nextActionKind: 'confirm_restore_five' | 'focus_repair'
   nextActionLabel: string
+  reviewCta: SafeBatchRecoveryValidationReviewCtaSnapshot | null
   focus: SafeBatchRecoveryFocusSnapshot | null
   defaultFiveChapterRecoveryVerdict: SafeBatchDefaultFiveChapterRecoveryVerdictSnapshot | null
   defaultFiveChapterLaneTemplateVerdict: SafeBatchDefaultFiveChapterLaneTemplateVerdictSnapshot | null
+}
+
+export type SafeBatchRecoveryValidationReviewCtaSnapshot = {
+  kind: 'enter_five_chapter_observation' | 'restore_default_lane' | 'repair_production_relapse'
+  label: string
+  summary: string
+  targetChapterCount: number
+  remainingFailureReasons: string[]
+  clearedFailureReasons: string[]
+  focus: SafeBatchRecoveryFocusSnapshot | null
 }
 
 export type SafeBatchRecoveryRoadmapNodeSnapshot = {
@@ -2209,7 +2220,7 @@ export function buildSafeBatchExpansionPolicySnapshot(batchPreflight: any): Safe
     latestStatus,
     expansionFeedback,
     recoveryRoadmap,
-    recoveryValidation: buildSafeBatchRecoveryValidationSnapshot(expansionFeedback, recoveryRoadmap, expandedChapterCount),
+    recoveryValidation: buildSafeBatchRecoveryValidationSnapshot(expansionFeedback, recoveryRoadmap, expandedChapterCount, recoveryRestoreStabilityLane),
     recoveryRestoreStabilityLane,
   }
 }
@@ -2218,12 +2229,23 @@ function buildSafeBatchRecoveryValidationSnapshot(
   expansionFeedback: SafeBatchExpansionFeedbackSnapshot | null,
   recoveryRoadmap: SafeBatchRecoveryRoadmapSnapshot | null,
   expandedChapterCount: number,
+  recoveryRestoreStabilityLane: SafeBatchRecoveryRestoreStabilityLaneSnapshot | null = null,
 ): SafeBatchRecoveryValidationSnapshot | null {
   const result = expansionFeedback?.structureValidationResult || null
   if (!result?.visible) return null
   const passed = result.status === 'ok' && result.riskCount <= 0
   const focus = passed ? null : recoveryRoadmap?.recommendedFocus || recoveryRoadmap?.nextRepairLayer?.focus || null
   const repairLabel = compactEvidenceText(focus?.actionLabel || recoveryRoadmap?.nextRepairLayer?.actionLabel || focus?.taskCenterFilterLabel || '下一层修复')
+  const productionRelapseVerdict = result.defaultFiveChapterLaneTemplateVerdict?.productionRelapseVerdict || null
+  const reviewCta = buildProductionRelapseRecoveryValidationCta({
+    passed,
+    productionRelapseVerdict,
+    recoveryRestoreStabilityLane,
+    fallbackFocus: focus,
+    fallbackTargetChapterCount: passed
+      ? Math.max(5, recoveryRoadmap?.currentTargetChapterCount || expansionFeedback?.targetChapterCount || expandedChapterCount || 5)
+      : Math.max(1, recoveryRoadmap?.currentTargetChapterCount || expansionFeedback?.targetChapterCount || 3),
+  })
 
   return {
     visible: true,
@@ -2237,11 +2259,50 @@ function buildSafeBatchRecoveryValidationSnapshot(
       ? Math.max(5, recoveryRoadmap?.currentTargetChapterCount || expansionFeedback?.targetChapterCount || expandedChapterCount || 5)
       : Math.max(1, recoveryRoadmap?.currentTargetChapterCount || expansionFeedback?.targetChapterCount || 3),
     nextActionKind: passed ? 'confirm_restore_five' : 'focus_repair',
-    nextActionLabel: passed ? '确认恢复5章扩批' : `聚焦${repairLabel}`,
+    nextActionLabel: reviewCta?.label || (passed ? '确认恢复5章扩批' : `聚焦${repairLabel}`),
+    reviewCta,
     focus,
     defaultFiveChapterRecoveryVerdict: result.defaultFiveChapterRecoveryVerdict || null,
     defaultFiveChapterLaneTemplateVerdict: result.defaultFiveChapterLaneTemplateVerdict || null,
   }
+}
+
+function buildProductionRelapseRecoveryValidationCta(args: {
+  passed: boolean
+  productionRelapseVerdict: SafeBatchDefaultFiveChapterLaneTemplateProductionRelapseVerdictSnapshot | null
+  recoveryRestoreStabilityLane: SafeBatchRecoveryRestoreStabilityLaneSnapshot | null
+  fallbackFocus: SafeBatchRecoveryFocusSnapshot | null
+  fallbackTargetChapterCount: number
+}): SafeBatchRecoveryValidationReviewCtaSnapshot | null {
+  const verdict = args.productionRelapseVerdict
+  if (!verdict) return null
+  if (args.passed && verdict.status === 'passed') {
+    const readyForDefault = Boolean(args.recoveryRestoreStabilityLane?.defaultFiveChapterReady)
+    const label = readyForDefault ? '恢复默认5章档位' : '进入5章观察批'
+    return {
+      kind: readyForDefault ? 'restore_default_lane' : 'enter_five_chapter_observation',
+      label,
+      summary: readyForDefault
+        ? `生产后验已修复：${verdict.clearedFailureReasons.join('、') || '真实生产失败维度'}已清零，可恢复默认5章档位。`
+        : `生产后验已修复：${verdict.clearedFailureReasons.join('、') || '真实生产失败维度'}已清零，先进入5章观察批确认默认档位稳定。`,
+      targetChapterCount: Math.max(5, Number(args.recoveryRestoreStabilityLane?.stablePassStreak || 0) > 0 ? 5 : args.fallbackTargetChapterCount || 5),
+      remainingFailureReasons: verdict.remainingFailureReasons,
+      clearedFailureReasons: verdict.clearedFailureReasons,
+      focus: null,
+    }
+  }
+  if (!args.passed && verdict.status === 'failed') {
+    return {
+      kind: 'repair_production_relapse',
+      label: '修生产后验',
+      summary: `生产后验验证批仍复发：${verdict.remainingFailureReasons.join('、') || '真实生产失败维度'}；下一张修复任务只携带 remaining_failure_reasons，继续重修当前模板版本。`,
+      targetChapterCount: Math.max(1, args.fallbackTargetChapterCount || 3),
+      remainingFailureReasons: verdict.remainingFailureReasons,
+      clearedFailureReasons: verdict.clearedFailureReasons,
+      focus: args.fallbackFocus,
+    }
+  }
+  return null
 }
 
 function safeBatchExpansionFeedbackLabel(status: SafeBatchExpansionFeedbackSnapshot['status'], fallback: string) {

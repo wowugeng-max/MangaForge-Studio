@@ -1246,10 +1246,11 @@
 - 生产后验失败维度已接入结构修复 prompt 和闭环复检口径。当结构修复任务携带 `production_relapse_verdict` 或 `production_failed_requirements` 时，`按批次修订` 会单独展开 `默认档位模板生产后验`，列出当前模板版本、真实 5 章复发批、前置恢复/验证批、本轮验证批、仍复发/已修复维度和逐项生产失败要求；关闭口径改为下一轮 3 章验证批必须输出 `production_relapse_verdict.status=passed` 且 `remaining_failure_reasons` 为空，避免只补四项 `default_lane_*_delivered` 回执就误判闭环。
 - 生产后验关闭口径已展示到任务中心路线图聚焦态和已处理态。当任务卡显示 `生产后验仍复发` 时，聚焦卡摘要会直接写出“等待生产后验验证批”、真实 5 章复发批、仍复发维度、下一轮以 `production_relapse_verdict.status=passed` 关闭且 `remaining_failure_reasons` 为空；任务标为已处理后，聚焦卡仍会保留该验收标准，提醒作者启动验证批，而不是只看四项模板回执已补齐。
 - 生产后验验证批已接入已处理后的主动作和生产许可。默认档位模板生产复发任务标为已处理后，任务中心路线图聚焦按钮会显示 `启动生产后验验证批`；总控台安全连写推荐动作会把带有 `production_relapse_review` 的下一轮 3 章验证批标为 `safe_batch_production_relapse_validation_batch`，生产许可显示 `生产后验验证批`，并明确本轮必须以 `production_relapse_verdict.status=passed` 且 `remaining_failure_reasons` 为空关闭。
+- 生产后验验证批完成后的复盘 CTA 已收敛成任务中心单一下一步。验证批 `production_relapse_verdict.status=passed` 时，恢复验证卡会直接显示 `进入5章观察批`，若恢复默认档位已满足稳定条件则显示 `恢复默认5章档位`；验证失败时只按 `remaining_failure_reasons` 生成 `修生产后验` 下一步，复盘摘要不再混入已清零维度，避免作者在批次摘要、路线图和任务列表之间来回找结论。
 
 推荐下一步：
 
-- 将生产后验验证批完成后的复盘 CTA 做成单一下一步：`passed` 时任务中心直接提示“进入5章观察批/恢复默认5章档位”，`failed` 时只按 `remaining_failure_reasons` 生成下一张 `修生产后验` 任务，避免作者在批次摘要、路线图和任务列表之间来回找结论。
+- 将同一条生产后验复盘 CTA 接入总控台今日指令/安全连写主动作：验证批完成后首页也只给一个动作，`passed` 继续观察或恢复默认档位，`failed` 直接进入 `修生产后验`，避免作者必须打开任务中心才知道下一步。
 
 ## 8. 使用说明维护规则
 
