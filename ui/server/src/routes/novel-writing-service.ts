@@ -1922,11 +1922,49 @@ function normalizeDefaultFiveChapterRegression(value: any) {
   return hasContent ? normalized : null
 }
 
+function normalizeDefaultFiveChapterLaneTemplate(value: any) {
+  const raw = value?.default_five_chapter_lane_template || value?.defaultFiveChapterLaneTemplate || value || {}
+  if (!raw || raw.visible === false) return null
+  const requirements = asArray(raw.requirements || raw.items)
+    .map((item: any) => ({
+      key: compactBriefText(item?.key),
+      label: compactBriefText(item?.label || item?.name || item?.key),
+      status: compactBriefText(item?.status || 'fulfilled'),
+      verification_requirement: compactBriefText(item?.verification_requirement || item?.verificationRequirement || item?.detail),
+    }))
+    .filter((item: any) => item.key || item.label || item.verification_requirement)
+    .slice(0, 8)
+  const normalized = {
+    visible: true,
+    status: compactBriefText(raw.status || 'fulfilled'),
+    label: compactBriefText(raw.label || '默认5章档位模板回检'),
+    source: compactBriefText(raw.source || ''),
+    source_run_id: raw.source_run_id ?? raw.sourceRunId ?? null,
+    repaired_at: compactBriefText(raw.repaired_at || raw.repairedAt),
+    summary: compactBriefText(raw.summary || ''),
+    segment_duty_rewrite: compactBriefText(raw.segment_duty_rewrite || raw.segmentDutyRewrite),
+    conflict_rotation: compactBriefText(raw.conflict_rotation || raw.conflictRotation),
+    payoff_density: compactBriefText(raw.payoff_density || raw.payoffDensity),
+    ending_hook_template: compactBriefText(raw.ending_hook_template || raw.endingHookTemplate),
+    requirements,
+  }
+  const hasContent = normalized.summary
+    || normalized.segment_duty_rewrite
+    || normalized.conflict_rotation
+    || normalized.payoff_density
+    || normalized.ending_hook_template
+    || normalized.requirements.length
+  return hasContent ? normalized : null
+}
+
 function normalizeExpansionStructureVerification(value: any) {
   const raw = value?.expansion_structure_verification || value?.expansionStructureVerification || value || {}
   const repeated = raw.repeated_hotspot_segment || raw.repeatedHotspotSegment || null
   const defaultFiveChapterRegression = normalizeDefaultFiveChapterRegression(
     raw.default_five_chapter_regression || raw.defaultFiveChapterRegression,
+  )
+  const defaultFiveChapterLaneTemplate = normalizeDefaultFiveChapterLaneTemplate(
+    raw.default_five_chapter_lane_template || raw.defaultFiveChapterLaneTemplate,
   )
   const normalized = {
     source: compactBriefText(raw.source || 'safe_batch_expansion_structure_repair'),
@@ -1949,6 +1987,7 @@ function normalizeExpansionStructureVerification(value: any) {
       .filter(Boolean)
       .slice(0, 5),
     default_five_chapter_regression: defaultFiveChapterRegression,
+    default_five_chapter_lane_template: defaultFiveChapterLaneTemplate,
   }
   const hasContent = normalized.validation_chapter_nos.length
     || normalized.fixed_segment_role
@@ -1957,6 +1996,7 @@ function normalizeExpansionStructureVerification(value: any) {
     || normalized.ending_hook_requirement
     || normalized.structure_actions.length
     || normalized.default_five_chapter_regression
+    || normalized.default_five_chapter_lane_template
   return hasContent ? normalized : null
 }
 
@@ -5544,6 +5584,10 @@ export function createNovelWritingService(ctx: {
     const defaultFiveChapterLaneRedesign = expansionStructureDecision?.default_five_chapter_lane_redesign || null
     const expansionStructureVerification = nextBatchBrief?.expansion_structure_verification || null
     const defaultFiveChapterRegression = expansionStructureVerification?.default_five_chapter_regression || null
+    const defaultFiveChapterLaneTemplate = expansionStructureVerification?.default_five_chapter_lane_template || null
+    const defaultFiveChapterLaneTemplateRequirementLabels = asArray(defaultFiveChapterLaneTemplate?.requirements)
+      .map((item: any) => compactBriefText(item?.label || item?.key))
+      .filter(Boolean)
     const batchPreflight = contextPackage?.chapter_target?.batch_preflight || contextPackage?.batch_preflight || null
     const batchDeliveryRiskCarryOver = normalizeDeliveryRiskCarryOverContext(
       batchPreflight?.delivery_risk_carry_over
@@ -5740,6 +5784,13 @@ export function createNovelWritingService(ctx: {
       expansionStructureVerification?.explicit_payoff ? `显性回报：${expansionStructureVerification.explicit_payoff}` : '',
       expansionStructureVerification?.ending_hook_requirement ? `章末追读：${expansionStructureVerification.ending_hook_requirement}` : '',
       expansionStructureVerification?.structure_actions?.length ? `结构动作：${expansionStructureVerification.structure_actions.join('；')}` : '',
+      defaultFiveChapterLaneTemplate ? `默认5章档位模板回检：${defaultFiveChapterLaneTemplate.summary || defaultFiveChapterLaneTemplate.label}` : '',
+      defaultFiveChapterLaneTemplateRequirementLabels.length ? `四项模板：${defaultFiveChapterLaneTemplateRequirementLabels.join('、')}` : '',
+      defaultFiveChapterLaneTemplate?.segment_duty_rewrite ? `段位职责重写：${defaultFiveChapterLaneTemplate.segment_duty_rewrite}` : '',
+      defaultFiveChapterLaneTemplate?.conflict_rotation ? `冲突轮换：${defaultFiveChapterLaneTemplate.conflict_rotation}` : '',
+      defaultFiveChapterLaneTemplate?.payoff_density ? `回报密度：${defaultFiveChapterLaneTemplate.payoff_density}` : '',
+      defaultFiveChapterLaneTemplate?.ending_hook_template ? `章末追读模板：${defaultFiveChapterLaneTemplate.ending_hook_template}` : '',
+      defaultFiveChapterLaneTemplate ? '默认档位模板验证要求：下一轮验证批逐章继承段位职责、冲突轮换、回报密度和章末追读模板，并逐章证明四项模板没有复发。' : '',
       defaultFiveChapterRegression ? `默认5章档位回退：${defaultFiveChapterRegression.summary || defaultFiveChapterRegression.label || '默认档位复发，需要回到3章验证批。'}` : '',
       defaultFiveChapterRegression?.default_batch_chapter_nos?.length ? `失效批次：${chapterNosBrief(defaultFiveChapterRegression.default_batch_chapter_nos)}` : '',
       defaultFiveChapterRegression?.restore_chapter_nos?.length ? `恢复依据：${chapterNosBrief(defaultFiveChapterRegression.restore_chapter_nos)}` : '',
@@ -5936,6 +5987,7 @@ export function createNovelWritingService(ctx: {
       expansionStructureDecision ? '14A0. 执行 next_batch_brief.expansion_structure_decision：按结构修复有效性决定本批写法；恢复5章时仍逐章落实段位职责，小批验证时逐章证明观察指标，单章重构时先重写批次设计原则后再推进正文。' : '',
       defaultFiveChapterLaneRedesign ? '14A0+. 默认5章档位结构重构：因连续恢复判定失效，本章必须输出可被后续5章复用的段位职责、冲突轮换、回报密度和章末追读模板；正文场景必须先证明这个模板能守住核心、回报和追读。' : '',
       expansionStructureVerification ? '14A+. 执行 next_batch_brief.expansion_structure_verification：本章必须承担验证批中的结构职责，换冲突来源、给显性回报、留不同章末追读问题；不得把已修复的扩批热区再次写成中段转场或空铺垫。' : '',
+      defaultFiveChapterLaneTemplate ? '14A+0. 默认5章档位模板验证：本章必须继承已补齐的段位职责、冲突轮换、回报密度和章末追读模板；每个结构职责场景都要证明四项模板没有复发，不能只把模板写在说明里。' : '',
       '14A++. 执行 batch_preflight.longform_memory_anchor：批量续写时必须遵守压缩正史锚点，不能改变角色状态、遗忘开放悬念、跳过回报债务或偏离核心承诺。',
       '14A+++. 执行 batch_preflight.delivery_risk_carry_over：安全连写第一章必须优先承接上一章残留风险；opening_actions 在前 300 字落地，middle_actions 在中段转成事件推进，ending_actions 在最后 300 字形成追读钩子。',
       '14A++++. 执行 batch_preflight.chapter_handoff_contract：安全连写第一章必须承接上一章最后一幕、开篇义务和读者期待债；must_deliver 写成可见回报，keep_alive 保持存在感，overdue 优先推进。',
@@ -5948,6 +6000,7 @@ export function createNovelWritingService(ctx: {
       '',
       expansionStructureDecision ? '输出附加要求：如果存在 next_batch_brief.expansion_structure_decision，scene_breakdown 的相关场景必须包含 expansion_structure_decision_execution，用 segment_role_delivered、observation_metrics_delivered、redesign_principles_delivered 和 evidence 说明是否真正执行。' : '',
       defaultFiveChapterLaneRedesign ? '输出附加要求：如果存在 default_five_chapter_lane_redesign，expansion_structure_decision_execution 还必须包含 default_lane_segment_duty_delivered、default_lane_conflict_rotation_delivered、default_lane_payoff_density_delivered、default_lane_ending_hook_template_delivered，并分别给出 evidence。' : '',
+      defaultFiveChapterLaneTemplate ? '输出附加要求：如果存在 default_five_chapter_lane_template，expansion_structure_decision_execution 必须继续包含 default_lane_segment_duty_delivered、default_lane_conflict_rotation_delivered、default_lane_payoff_density_delivered、default_lane_ending_hook_template_delivered，并用 evidence 说明四项模板在验证批中没有复发。' : '',
       '输出 JSON，包含 prose_chapters 数组。数组只能有一项，且必须包含 chapter_no, title, chapter_text, scene_breakdown, continuity_notes。scene_breakdown 要回填每个场景的 scene_type、required_beats/action_beats 完成情况和 description_budget 执行情况。chapter_text 是完整正文，不要 markdown 标题。',
     ].filter(Boolean).join('\n')
   }

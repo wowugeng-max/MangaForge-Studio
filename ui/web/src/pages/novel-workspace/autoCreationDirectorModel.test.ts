@@ -744,6 +744,79 @@ function defaultRegressionValidationBatchRun(args: {
   }
 }
 
+function defaultLaneTemplateValidationBatchRun(args: {
+  id: number
+  createdAt: string
+  chapterNos: number[]
+}) {
+  const template = {
+    visible: true,
+    status: 'fulfilled',
+    label: '默认5章档位模板回检',
+    summary: '默认5章档位模板已补齐。下一轮验证批逐章继承四项模板。',
+    segment_duty_rewrite: '段位职责重写：前段压迫、中段兑现、后段升级钩子。',
+    conflict_rotation: '冲突轮换：规则压迫、人物对抗、信息误导三类轮换。',
+    payoff_density: '回报密度：每章至少交付一个显性回报。',
+    ending_hook_template: '章末追读模板：最后 300 字落触发事件、读者问题、下一章风险。',
+    requirements: [
+      { key: 'default_lane_segment_duty', label: '默认档位段位职责', status: 'fulfilled' },
+      { key: 'default_lane_conflict_rotation', label: '冲突轮换', status: 'fulfilled' },
+      { key: 'default_lane_payoff_density', label: '回报密度', status: 'fulfilled' },
+      { key: 'default_lane_ending_hook_template', label: '章末追读模板', status: 'fulfilled' },
+    ],
+  }
+  const verification = {
+    ...expansionStructureVerification(args.chapterNos),
+    source: 'safe_batch_expansion_structure_decision_mismatch',
+    default_five_chapter_lane_template: template,
+  }
+  return {
+    id: args.id,
+    run_type: 'batch_generate_prose',
+    created_at: args.createdAt,
+    status: 'success',
+    input_ref: JSON.stringify({
+      source: 'safe_batch_recovery_validation_batch',
+      safety_limit: args.chapterNos.length,
+      batch_preflight: {
+        safe_chapter_count: args.chapterNos.length,
+        allowed_chapter_nos: args.chapterNos,
+        safe_batch_expansion_policy: {
+          status: 'recovering',
+          label: '强化扩批规则',
+          summary: '默认档位模板修复后进入3章验证批。',
+          target_chapter_count: args.chapterNos.length,
+          base_chapter_count: 3,
+          expanded_chapter_count: 5,
+          required_pass_streak: 3,
+          pass_streak: 3,
+          accepted_batch_count: 3,
+          failed_batch_count: 1,
+          latest_status: 'warn',
+        },
+        safe_batch_expansion_structure_verification: verification,
+      },
+      next_batch_brief: {
+        chapter_range_label: `第${args.chapterNos[0]}-${args.chapterNos[args.chapterNos.length - 1]}章`,
+        expansionStructureVerification: verification,
+      },
+    }),
+    output_ref: JSON.stringify({
+      total: args.chapterNos.length,
+      success: args.chapterNos.length,
+      failed: 0,
+      chapters: args.chapterNos.map((chapterNo, index) => ({
+        id: chapterNo,
+        chapter_no: chapterNo,
+        title: `模板验证${chapterNo}`,
+        status: 'success',
+        score: 88 + index,
+        word_count: 3200 + index * 20,
+      })),
+    }),
+  }
+}
+
 function strengthenedAcceptanceQualityReviews(chapterNos: number[], startId = 4600, createdAt = '2026-06-10T01:00:00.000Z') {
   return chapterNos.map((chapterNo, index) => ({
     id: startId + index,
@@ -3886,6 +3959,28 @@ describe('buildAutoCreationDirectorModel', () => {
                   ],
                 },
               },
+              {
+                issue_type: 'safe_batch_expansion_structure_decision_mismatch',
+                task_status: 'resolved',
+                chapter_no: 50,
+                safe_batch_expansion_structure_decision_review: {
+                  default_five_chapter_lane_redesign: {
+                    reason: 'repeated_recovery_verdict_relapse',
+                    relapse_count: 2,
+                    repeated_failure_reasons: ['核心偏移', '回报欠账', '追读拉力'],
+                    segment_duty_rewrite: '段位职责重写：默认 5 章内前段压迫、中段兑现、后段升级钩子。',
+                    conflict_rotation: '冲突轮换：规则压迫、人物对抗、信息误导至少三类轮换。',
+                    payoff_density: '回报密度：每章至少交付一个显性回报。',
+                    ending_hook_template: '章末追读模板：最后 300 字落触发事件、读者问题、下一章风险。',
+                  },
+                  failed_items: [
+                    { key: 'default_lane_segment_duty', label: '默认档位段位职责', count: 1 },
+                    { key: 'default_lane_conflict_rotation', label: '冲突轮换', count: 1 },
+                    { key: 'default_lane_payoff_density', label: '回报密度', count: 1 },
+                    { key: 'default_lane_ending_hook_template', label: '章末追读模板', count: 1 },
+                  ],
+                },
+              },
               { issue_type: 'core_drift', task_status: 'resolved', chapter_no: 15, resolved_at: '2026-06-13T02:12:00.000Z' },
               { issue_type: 'core_drift', task_status: 'resolved', chapter_no: 10, resolved_at: '2026-06-13T02:12:00.000Z' },
               { issue_type: 'reader_payoff_debt', task_status: 'resolved', chapter_no: 11, resolved_at: '2026-06-13T02:13:00.000Z' },
@@ -3915,6 +4010,23 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(verification?.conflict_rotation).toContain('冲突来源')
     expect(verification?.explicit_payoff).toContain('显性回报')
     expect(verification?.ending_hook_requirement).toContain('章末追读')
+    expect(verification?.default_five_chapter_lane_template).toMatchObject({
+      visible: true,
+      status: 'fulfilled',
+      source: 'safe_batch_expansion_structure_decision_mismatch',
+      source_run_id: 594,
+      requirements: [
+        { key: 'default_lane_segment_duty', label: '默认档位段位职责', status: 'fulfilled' },
+        { key: 'default_lane_conflict_rotation', label: '冲突轮换', status: 'fulfilled' },
+        { key: 'default_lane_payoff_density', label: '回报密度', status: 'fulfilled' },
+        { key: 'default_lane_ending_hook_template', label: '章末追读模板', status: 'fulfilled' },
+      ],
+    })
+    expect(verification?.default_five_chapter_lane_template?.summary).toContain('下一轮验证批逐章继承')
+    expect(verification?.default_five_chapter_lane_template?.segment_duty_rewrite).toContain('前段压迫')
+    expect(verification?.default_five_chapter_lane_template?.conflict_rotation).toContain('三类轮换')
+    expect(verification?.default_five_chapter_lane_template?.payoff_density).toContain('显性回报')
+    expect(verification?.default_five_chapter_lane_template?.ending_hook_template).toContain('最后 300 字')
     expect(model.batchGuardrail.nextBatchBrief.startChecklist.find(item => item.key === 'expansion_structure')).toMatchObject({
       status: 'ok',
       detail: expect.stringContaining('中段固定职责'),
@@ -3922,9 +4034,17 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(model.batchGuardrail.preflight.inputSnapshot.next_batch_brief.expansionStructureVerification).toMatchObject({
       validation_chapter_nos: [50, 51, 52],
     })
+    expect(model.batchGuardrail.preflight.inputSnapshot.next_batch_brief.expansionStructureVerification.default_five_chapter_lane_template?.status).toBe('fulfilled')
+    expect(model.batchGuardrail.preflight.inputSnapshot.next_batch_brief.expansionStructureVerification.default_five_chapter_lane_template?.requirements).toEqual(expect.arrayContaining([
+      expect.objectContaining({ key: 'default_lane_segment_duty', status: 'fulfilled' }),
+    ]))
     expect(model.batchGuardrail.preflight.inputSnapshot.safe_batch_expansion_structure_verification).toMatchObject({
       validation_chapter_nos: [50, 51, 52],
     })
+    expect(model.batchGuardrail.preflight.inputSnapshot.safe_batch_expansion_structure_verification.default_five_chapter_lane_template?.status).toBe('fulfilled')
+    expect(model.batchGuardrail.preflight.inputSnapshot.safe_batch_expansion_structure_verification.default_five_chapter_lane_template?.requirements).toEqual(expect.arrayContaining([
+      expect.objectContaining({ key: 'default_lane_ending_hook_template', status: 'fulfilled' }),
+    ]))
   })
 
   test('restores five-chapter expansion after the structure validation batch passes', () => {
@@ -5203,6 +5323,87 @@ describe('buildAutoCreationDirectorModel', () => {
         },
       },
     })
+  })
+
+  test('checks default lane template receipts during recovery validation batches', () => {
+    const validationChapterNos = [90, 91, 92]
+    const model = buildAutoCreationDirectorModel({
+      planning: readySafeBatchPlanning({ futureRoute: futureRouteRange(93, 5) }),
+      writing: readySafeBatchWriting({
+        nextChapter: { ...baseWriting.nextChapter, id: 93, chapterNo: 93, title: '模板验证后93' },
+        previousChapter: { chapterNo: 92, title: '模板验证92', wordCount: 3200, hasProse: true },
+      }),
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: { last_updated_chapter: 92 },
+      chapters: [
+        ...[41, 42, 43, 44, 45, 46, 47, 48, 49].map(chapterNo => ({
+          id: chapterNo,
+          chapter_no: chapterNo,
+          title: `强化趋势${chapterNo}`,
+          chapter_text: '强化趋势正文'.repeat(500),
+        })),
+        ...validationChapterNos.map(chapterNo => ({
+          id: chapterNo,
+          chapter_no: chapterNo,
+          title: `模板验证${chapterNo}`,
+          chapter_text: '模板验证正文'.repeat(500),
+          raw_payload: {
+            generated_scene_breakdown: [{
+              expansion_structure_decision_execution: {
+                segment_role_delivered: true,
+                observation_metrics_delivered: true,
+                redesign_principles_delivered: true,
+                default_lane_segment_duty_delivered: true,
+                default_lane_conflict_rotation_delivered: true,
+                default_lane_payoff_density_delivered: chapterNo !== 91,
+                default_lane_ending_hook_template_delivered: true,
+                evidence: [`第${chapterNo}章默认档位模板回执。`],
+              },
+            }],
+          },
+        })),
+      ],
+      reviews: [
+        ...strengthenedAcceptanceQualityReviews([41, 42, 43], 6461, '2026-06-19T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([44, 45, 46], 6471, '2026-06-20T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([47, 48, 49], 6481, '2026-06-21T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews(validationChapterNos, 6491, '2026-06-22T01:00:00.000Z'),
+      ],
+      runRecords: [
+        strengthenedAcceptanceBatchRun({ id: 646, createdAt: '2026-06-19T00:00:00.000Z', chapterNos: [41, 42, 43] }),
+        strengthenedAcceptanceBatchRun({ id: 647, createdAt: '2026-06-20T00:00:00.000Z', chapterNos: [44, 45, 46] }),
+        strengthenedAcceptanceBatchRun({ id: 648, createdAt: '2026-06-21T00:00:00.000Z', chapterNos: [47, 48, 49] }),
+        defaultLaneTemplateValidationBatchRun({
+          id: 649,
+          createdAt: '2026-06-22T00:00:00.000Z',
+          chapterNos: validationChapterNos,
+        }),
+      ],
+    } as any)
+
+    const policy = model.batchGuardrail.preflight.inputSnapshot.safe_batch_expansion_policy
+    const validationResult = policy.expansion_feedback.expansion_structure_validation_result
+    const templateVerdict = validationResult.default_five_chapter_lane_template_verdict
+
+    expect(validationResult).toMatchObject({
+      status: 'warn',
+      risk_count: 1,
+      validation_chapter_nos: validationChapterNos,
+    })
+    expect(templateVerdict).toMatchObject({
+      visible: true,
+      status: 'failed',
+      missing_count: 1,
+      missing_requirements: [
+        {
+          key: 'default_lane_payoff_density',
+          label: '回报密度',
+          chapter_nos: [91],
+        },
+      ],
+    })
+    expect(templateVerdict.summary).toContain('第91章缺回报密度')
   })
 
   test('summarizes expansion structure validation trend by repeated segment', () => {

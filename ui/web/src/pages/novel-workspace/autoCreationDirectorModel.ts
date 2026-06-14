@@ -4324,9 +4324,69 @@ function buildDefaultFiveChapterRecoveryVerdict(args: {
   }
 }
 
+function buildDefaultFiveChapterLaneTemplateVerdict(args: {
+  verification: AnyRecord
+  validationChapterNos: number[]
+  chapters: AnyRecord[]
+}) {
+  const template = args.verification?.default_five_chapter_lane_template
+    || args.verification?.defaultFiveChapterLaneTemplate
+    || null
+  if (!template || template.visible === false) return null
+  const templateRequirements = arrayValue(template.requirements)
+  const labelForKey = (key: string, fallback: string) => text(
+    templateRequirements.find((item: AnyRecord) => text(item?.key) === key)?.label,
+    fallback,
+  )
+  const requirements = DEFAULT_FIVE_CHAPTER_LANE_TEMPLATE_REQUIREMENTS.map(requirement => ({
+    key: requirement.key,
+    label: labelForKey(requirement.key, requirement.label),
+  }))
+  const missingRequirements = requirements
+    .map(requirement => {
+      const missingChapterNos = args.validationChapterNos.filter(chapterNo => {
+        const chapter = findChapter(args.chapters, { chapterNo })
+        const receipts = chapterExpansionStructureDecisionReceipts(chapter)
+        return expansionStructureDecisionRequirementDelivered({
+          key: requirement.key,
+          payload: {},
+          receipts,
+        }) !== true
+      })
+      return missingChapterNos.length
+        ? {
+          ...requirement,
+          chapter_nos: missingChapterNos,
+        }
+        : null
+    })
+    .filter(Boolean)
+  const missingCount = missingRequirements.reduce((sum: number, item: AnyRecord) => sum + arrayValue(item?.chapter_nos).length, 0)
+  const status = missingCount > 0 ? 'failed' : 'passed'
+  const missingSummary = missingRequirements
+    .map((item: AnyRecord) => `${compactChapterNoEvidence(arrayValue(item.chapter_nos).map((chapterNo: any) => Number(chapterNo)).filter(Boolean))}缺${item.label}`)
+    .join('；')
+  return {
+    visible: true,
+    status,
+    label: '默认档位模板回检',
+    summary: status === 'passed'
+      ? `默认档位模板回检通过：${compactChapterNoEvidence(args.validationChapterNos)}已逐章继承段位职责、冲突轮换、回报密度和章末追读模板。`
+      : `默认档位模板回检未通过：${missingSummary}，不能恢复默认5章档位。`,
+    validation_chapter_nos: args.validationChapterNos,
+    requirements: requirements.map(requirement => ({
+      ...requirement,
+      status: missingRequirements.some((item: AnyRecord) => item.key === requirement.key) ? 'missing' : 'fulfilled',
+    })),
+    missing_count: missingCount,
+    missing_requirements: missingRequirements,
+  }
+}
+
 function buildSafeBatchExpansionStructureValidationResult(args: {
   preflight?: AnyRecord | null
   chapterRisks: AnyRecord[]
+  chapters?: AnyRecord[]
 }) {
   const verification = safeBatchExpansionStructureVerificationFromPreflight(args.preflight)
   if (!verification) {
@@ -4356,7 +4416,7 @@ function buildSafeBatchExpansionStructureValidationResult(args: {
   const validationNoSet = new Set(validationChapterNos)
   const chapterRisks = arrayValue(args.chapterRisks)
     .filter(chapter => validationNoSet.size === 0 || validationNoSet.has(Number(chapter?.chapterNo || chapter?.chapter_no || 0)))
-  const riskCount = chapterRisks.reduce((sum, chapter) => sum + Number(chapter?.riskCount || chapter?.risk_count || 0), 0)
+  const deliveryRiskCount = chapterRisks.reduce((sum, chapter) => sum + Number(chapter?.riskCount || chapter?.risk_count || 0), 0)
   const coreRiskCount = chapterRisks.reduce((sum, chapter) => sum + Number(chapter?.coreRiskCount || chapter?.core_risk_count || 0), 0)
   const payoffDebtCount = chapterRisks.reduce((sum, chapter) => sum + Number(chapter?.payoffDebtCount || chapter?.payoff_debt_count || 0), 0)
   const readerPullRiskCount = chapterRisks.reduce((sum, chapter) => sum + Number(chapter?.readerPullRiskCount || chapter?.reader_pull_risk_count || 0), 0)
@@ -4373,9 +4433,25 @@ function buildSafeBatchExpansionStructureValidationResult(args: {
   const validationNos = validationChapterNos.length
     ? validationChapterNos
     : chapterRisks.map(chapter => Number(chapter?.chapterNo || chapter?.chapter_no || 0)).filter(chapterNo => chapterNo > 0)
+  const defaultFiveChapterLaneTemplateVerdict = buildDefaultFiveChapterLaneTemplateVerdict({
+    verification,
+    validationChapterNos: validationNos,
+    chapters: arrayValue(args.chapters),
+  })
+  const templateRiskCount = Number(defaultFiveChapterLaneTemplateVerdict?.missing_count || 0)
+  const riskCount = deliveryRiskCount + templateRiskCount
+  const allFailedChapterNos = Array.from(new Set([
+    ...failedChapterNos,
+    ...arrayValue(defaultFiveChapterLaneTemplateVerdict?.missing_requirements)
+      .flatMap((item: AnyRecord) => arrayValue(item?.chapter_nos))
+      .map((chapterNo: any) => Number(chapterNo))
+      .filter((chapterNo: number) => chapterNo > 0),
+  ])).sort((a, b) => a - b)
   const label = text(verification.label, '扩批结构验证')
   const summary = riskCount > 0
-    ? `${label}批未通过：第${failedChapterNos.join('、') || validationNos.join('、')}章仍有 ${riskCount} 项核心/回报/追读风险，结构修复不能恢复5章扩批。`
+    ? templateRiskCount > 0 && deliveryRiskCount === 0
+      ? `${label}批未通过：${text(defaultFiveChapterLaneTemplateVerdict?.summary)}`
+      : `${label}批未通过：第${allFailedChapterNos.join('、') || validationNos.join('、')}章仍有 ${riskCount} 项核心/回报/追读或模板回执风险，结构修复不能恢复5章扩批。`
     : `${label}批通过：第${validationNos.join('、')}章核心守恒、显性回报和章末追读稳定，可作为恢复5章扩批证据。`
   const defaultFiveChapterRecoveryVerdict = buildDefaultFiveChapterRecoveryVerdict({
     verification,
@@ -4393,7 +4469,7 @@ function buildSafeBatchExpansionStructureValidationResult(args: {
     source: text(verification.source, 'safe_batch_expansion_structure_repair'),
     repeated_hotspot_segment: repeatedSegment,
     validation_chapter_nos: validationNos,
-    failed_chapter_nos: failedChapterNos,
+    failed_chapter_nos: allFailedChapterNos,
     risk_count: riskCount,
     core_risk_count: coreRiskCount,
     payoff_debt_count: payoffDebtCount,
@@ -4404,6 +4480,7 @@ function buildSafeBatchExpansionStructureValidationResult(args: {
     ending_hook_requirement: text(verification.ending_hook_requirement || verification.endingHookRequirement),
     structure_actions: arrayValue(verification.structure_actions || verification.structureActions).map(item => text(item)).filter(Boolean),
     ...(defaultFiveChapterRecoveryVerdict ? { default_five_chapter_recovery_verdict: defaultFiveChapterRecoveryVerdict } : {}),
+    ...(defaultFiveChapterLaneTemplateVerdict ? { default_five_chapter_lane_template_verdict: defaultFiveChapterLaneTemplateVerdict } : {}),
   }
 }
 
@@ -5104,6 +5181,7 @@ function safeBatchExpansionStructureValidationEntryEvaluation(args: {
   })
   const result = buildSafeBatchExpansionStructureValidationResult({
     preflight: args.entry.preflight,
+    chapters: args.chapters,
     chapterRisks: safeBatchExpansionChapterRisks({
       items: args.entry.items,
       chapters: args.chapters,
@@ -7563,6 +7641,7 @@ function buildBatchRiskRadar(args: {
   const safeBatchExpansionStructureValidationResult = buildSafeBatchExpansionStructureValidationResult({
     preflight: args.batchPreflight,
     chapterRisks: expansionChapterRisks,
+    chapters: args.chapters,
   })
   const safeBatchExpansionStructureValidationRiskTotal = safeBatchExpansionStructureValidationResult.visible
     ? Number(safeBatchExpansionStructureValidationResult.risk_count || 0)
@@ -9578,7 +9657,100 @@ function checklistItem(
   }
 }
 
+const DEFAULT_FIVE_CHAPTER_LANE_TEMPLATE_REQUIREMENTS = [
+  { key: 'default_lane_segment_duty', label: '默认档位段位职责' },
+  { key: 'default_lane_conflict_rotation', label: '冲突轮换' },
+  { key: 'default_lane_payoff_density', label: '回报密度' },
+  { key: 'default_lane_ending_hook_template', label: '章末追读模板' },
+]
+
+function defaultFiveChapterLaneTemplateFromTask(task: AnyRecord, run: AnyRecord) {
+  const review = task?.safe_batch_expansion_structure_decision_review
+    || task?.safeBatchExpansionStructureDecisionReview
+    || task?.payload?.safe_batch_expansion_structure_decision_review
+    || task?.payload?.safeBatchExpansionStructureDecisionReview
+    || null
+  const redesign = review?.default_five_chapter_lane_redesign
+    || review?.defaultFiveChapterLaneRedesign
+    || null
+  const failedItems = [
+    ...arrayValue(review?.failed_items || review?.failedItems),
+    ...arrayValue(redesign?.missed_requirements || redesign?.missedRequirements),
+  ]
+  const hasDefaultLaneTemplate = Boolean(
+    redesign
+    || failedItems.some(item => text(item?.key).startsWith('default_lane_')),
+  )
+  if (!hasDefaultLaneTemplate) return null
+  const requirementLabels = DEFAULT_FIVE_CHAPTER_LANE_TEMPLATE_REQUIREMENTS.map(item => item.label)
+  return {
+    visible: true,
+    status: 'fulfilled',
+    label: '默认5章档位模板回检',
+    source: 'safe_batch_expansion_structure_decision_mismatch',
+    source_run_id: run?.id ?? null,
+    repaired_at: text(run?.completed_at || run?.finished_at || run?.updated_at || run?.created_at),
+    reason: text(redesign?.reason),
+    relapse_count: Number(redesign?.relapse_count ?? redesign?.relapseCount ?? 0),
+    repeated_failure_reasons: arrayValue(redesign?.repeated_failure_reasons || redesign?.repeatedFailureReasons)
+      .map(item => text(item?.reason || item?.label || item))
+      .filter(Boolean),
+    segment_duty_rewrite: firstText(
+      redesign?.segment_duty_rewrite,
+      redesign?.segmentDutyRewrite,
+      '默认 5 章档位验证批必须逐章继承前段、中段、后段的段位职责模板。',
+    ),
+    conflict_rotation: firstText(
+      redesign?.conflict_rotation,
+      redesign?.conflictRotation,
+      '默认 5 章档位验证批必须逐章轮换冲突来源，避免同一压迫方式复发。',
+    ),
+    payoff_density: firstText(
+      redesign?.payoff_density,
+      redesign?.payoffDensity,
+      '默认 5 章档位验证批必须逐章交付显性回报，不能连续铺垫。',
+    ),
+    ending_hook_template: firstText(
+      redesign?.ending_hook_template,
+      redesign?.endingHookTemplate,
+      '默认 5 章档位验证批必须逐章落地章末追读模板。',
+    ),
+    requirements: DEFAULT_FIVE_CHAPTER_LANE_TEMPLATE_REQUIREMENTS.map(requirement => ({
+      ...requirement,
+      status: 'fulfilled',
+      verification_requirement: `${requirement.label}已补齐，下一轮验证批必须逐章继承并证明没有复发。`,
+    })),
+    summary: `默认5章档位模板已补齐：${requirementLabels.join('、')}。下一轮验证批逐章继承四项模板，并在复盘里证明核心守恒、显性回报和章末追读没有复发。`,
+  }
+}
+
+function buildResolvedDefaultFiveChapterLaneTemplateSeed(runRecords: AnyRecord[]) {
+  const repairEntries = arrayValue(runRecords)
+    .filter(run => text(run?.run_type) === 'longform_production_repair')
+    .map(run => ({
+      run,
+      output: parsePayload(run?.output_ref) || {},
+    }))
+    .filter(entry => isCompletedRepairRun(entry.run))
+    .sort((a, b) => recordTime(b.run) - recordTime(a.run))
+
+  for (const entry of repairEntries) {
+    const tasks = [
+      ...arrayValue(entry.output?.tasks),
+      ...arrayValue(entry.output?.repairTasks),
+    ]
+    for (const task of tasks) {
+      if (text(task?.issue_type ?? task?.issueType) !== 'safe_batch_expansion_structure_decision_mismatch') continue
+      if (!isResolvedTaskStatus(task?.task_status ?? task?.status)) continue
+      const template = defaultFiveChapterLaneTemplateFromTask(task, entry.run)
+      if (template) return template
+    }
+  }
+  return null
+}
+
 function buildResolvedSafeBatchExpansionStructureVerificationSeed(runRecords: AnyRecord[]) {
+  const defaultFiveChapterLaneTemplate = buildResolvedDefaultFiveChapterLaneTemplateSeed(runRecords)
   const repairEntries = arrayValue(runRecords)
     .filter(run => text(run?.run_type) === 'longform_production_repair')
     .map(run => ({
@@ -9651,8 +9823,31 @@ function buildResolvedSafeBatchExpansionStructureVerificationSeed(runRecords: An
           ? `每章章末必须留下不同的章末追读问题，并把下一章必看理由压到最后一幕；${defaultFailureReasons.includes('追读拉力') ? '必须逐章修复追读拉力。' : '必须逐章证明章末追读稳定。'}`
           : '每章章末必须留下不同的章末追读问题，并把下一章必看理由压到最后一幕。',
         structure_actions: actions,
+        ...(defaultFiveChapterLaneTemplate ? { default_five_chapter_lane_template: defaultFiveChapterLaneTemplate } : {}),
         ...(defaultRegressionVisible ? { default_five_chapter_regression: defaultFiveChapterRegression } : {}),
       }
+    }
+  }
+  if (defaultFiveChapterLaneTemplate) {
+    return {
+      source: 'safe_batch_expansion_structure_decision_mismatch',
+      label: '扩批结构验证',
+      source_run_id: defaultFiveChapterLaneTemplate.source_run_id,
+      repaired_at: defaultFiveChapterLaneTemplate.repaired_at,
+      repeated_hotspot_segment: null,
+      latest_chapter_nos: [],
+      affected_chapter_nos: [],
+      fixed_segment_role: defaultFiveChapterLaneTemplate.segment_duty_rewrite,
+      conflict_rotation: defaultFiveChapterLaneTemplate.conflict_rotation,
+      explicit_payoff: defaultFiveChapterLaneTemplate.payoff_density,
+      ending_hook_requirement: defaultFiveChapterLaneTemplate.ending_hook_template,
+      structure_actions: [
+        defaultFiveChapterLaneTemplate.segment_duty_rewrite,
+        defaultFiveChapterLaneTemplate.conflict_rotation,
+        defaultFiveChapterLaneTemplate.payoff_density,
+        defaultFiveChapterLaneTemplate.ending_hook_template,
+      ].filter(Boolean),
+      default_five_chapter_lane_template: defaultFiveChapterLaneTemplate,
     }
   }
   return null

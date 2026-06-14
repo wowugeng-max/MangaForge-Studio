@@ -634,6 +634,71 @@ describe('chapter prose word target', () => {
     expect(prompt).toContain('逐章证明核心守恒、显性回报和章末追读')
   })
 
+  test('injects default five-chapter lane template verification into paragraph prose prompt', () => {
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+
+    const prompt = service.buildParagraphProseContext(
+      { title: '超人的规则怪谈世界' },
+      {
+        next_batch_brief: {
+          chapter_range_label: '第90-92章',
+          batch_goal: '默认档位模板修复后进入3章验证批。',
+          expansion_structure_verification: {
+            source: 'safe_batch_expansion_structure_decision_mismatch',
+            validation_chapter_nos: [90, 91, 92],
+            fixed_segment_role: '默认 5 章档位验证批必须逐章继承前段、中段、后段的段位职责模板。',
+            conflict_rotation: '默认 5 章档位验证批必须逐章轮换冲突来源。',
+            explicit_payoff: '默认 5 章档位验证批必须逐章交付显性回报。',
+            ending_hook_requirement: '默认 5 章档位验证批必须逐章落地章末追读模板。',
+            default_five_chapter_lane_template: {
+              visible: true,
+              status: 'fulfilled',
+              label: '默认5章档位模板回检',
+              summary: '默认5章档位模板已补齐。下一轮验证批逐章继承四项模板。',
+              segment_duty_rewrite: '段位职责重写：前段压迫、中段兑现、后段升级钩子。',
+              conflict_rotation: '冲突轮换：规则压迫、人物对抗、信息误导三类轮换。',
+              payoff_density: '回报密度：每章至少交付一个显性回报。',
+              ending_hook_template: '章末追读模板：最后 300 字落触发事件、读者问题、下一章风险。',
+              requirements: [
+                { key: 'default_lane_segment_duty', label: '默认档位段位职责', status: 'fulfilled' },
+                { key: 'default_lane_conflict_rotation', label: '冲突轮换', status: 'fulfilled' },
+                { key: 'default_lane_payoff_density', label: '回报密度', status: 'fulfilled' },
+                { key: 'default_lane_ending_hook_template', label: '章末追读模板', status: 'fulfilled' },
+              ],
+            },
+          },
+        },
+        chapter_target: {
+          chapter_no: 90,
+          title: '模板验证一',
+          summary: '验证默认档位模板是否稳定。',
+          conflict: '是否按新模板推进第一章。',
+          ending_hook: '新模板第一处风险抬头。',
+          scene_cards: [],
+        },
+      },
+      null,
+      { chapter_no: 90, title: '模板验证一' },
+    )
+
+    expect(prompt).toContain('默认5章档位模板回检')
+    expect(prompt).toContain('下一轮验证批逐章继承')
+    expect(prompt).toContain('默认档位段位职责、冲突轮换、回报密度、章末追读模板')
+    expect(prompt).toContain('段位职责重写：前段压迫')
+    expect(prompt).toContain('冲突轮换：规则压迫')
+    expect(prompt).toContain('回报密度：每章至少交付')
+    expect(prompt).toContain('章末追读模板：最后 300 字')
+    expect(prompt).toContain('逐章证明四项模板没有复发')
+    expect(prompt).toContain('default_lane_segment_duty_delivered')
+    expect(prompt).toContain('default_lane_conflict_rotation_delivered')
+    expect(prompt).toContain('default_lane_payoff_density_delivered')
+    expect(prompt).toContain('default_lane_ending_hook_template_delivered')
+  })
+
   test('injects expansion structure decision into paragraph prose prompt', () => {
     const service = createNovelWritingService({
       getProject: async () => null,
