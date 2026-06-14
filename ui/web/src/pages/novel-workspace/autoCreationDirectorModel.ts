@@ -12545,6 +12545,31 @@ function buildBatchGuardrail(args: {
       && safeBatchExpansionPolicy.status === 'recovering'
       && Number(safeBatchExpansionPolicy.targetChapterCount || 0) > 1
       && Number(safeBatchExpansionPolicy.targetChapterCount || 0) <= Number(safeBatchExpansionPolicy.baseChapterCount || 3)
+    const expansionStructureVerification = nextBatchBrief?.expansionStructureVerification
+      || nextBatchBrief?.expansion_structure_verification
+      || null
+    const productionRelapseValidationTemplate = expansionStructureVerification?.default_five_chapter_lane_template
+      || expansionStructureVerification?.defaultFiveChapterLaneTemplate
+      || null
+    const productionRelapseReview = productionRelapseValidationTemplate?.production_relapse_review
+      || productionRelapseValidationTemplate?.productionRelapseReview
+      || null
+    const productionRelapseValidationActive = !safeBatchRecoveryAction
+      && Boolean(productionRelapseReview)
+      && Number(safeChapterCount || 0) > 1
+      && Number(safeChapterCount || 0) <= Number(safeBatchExpansionPolicy.baseChapterCount || 3)
+    const productionRelapseTemplateVersionId = text(
+      productionRelapseReview?.template_version_id
+      || productionRelapseReview?.templateVersionId
+      || productionRelapseValidationTemplate?.template_version_id
+      || productionRelapseValidationTemplate?.templateVersionId,
+    )
+    const productionRelapseChapterNos = arrayValue(productionRelapseReview?.default_batch_chapter_nos || productionRelapseReview?.defaultBatchChapterNos)
+      .map(chapterNo => Number(chapterNo))
+      .filter(chapterNo => chapterNo > 0)
+    const productionRelapseFailureReasons = arrayValue(productionRelapseReview?.failure_reasons || productionRelapseReview?.failureReasons)
+      .map(reason => text(reason))
+      .filter(Boolean)
     const recoveryRestoreBatchActive = !safeBatchRecoveryAction
       && Boolean(safeBatchRecoveryRestoreConfirmation)
       && safeChapterCount >= Number(safeBatchRecoveryRestoreConfirmation?.target_chapter_count || 5)
@@ -12557,12 +12582,16 @@ function buildBatchGuardrail(args: {
     const recoveryRestoreObservationConfirmation = recoveryRestoreObservationActive
       ? safeBatchRecoveryRestoreObservationConfirmation(safeBatchRecoveryRestoreStabilityLane, safeChapterCount)
       : null
-    const startBatchSource = recoveryValidationBatchActive
+    const startBatchSource = productionRelapseValidationActive
+      ? 'safe_batch_production_relapse_validation_batch'
+      : recoveryValidationBatchActive
       ? 'safe_batch_recovery_validation_batch'
       : recoveryRestoreBatchActive || recoveryRestoreObservationActive
         ? 'safe_batch_recovery_restore_five_batch'
         : 'auto_creation_safe_batch'
-    const startBatchLabel = recoveryValidationBatchActive
+    const startBatchLabel = productionRelapseValidationActive
+      ? '启动生产后验验证批'
+      : recoveryValidationBatchActive
       ? `启动${safeChapterCount}章验证批`
       : recoveryRestoreBatchActive
         ? '确认恢复5章扩批'
@@ -12571,7 +12600,13 @@ function buildBatchGuardrail(args: {
           : defaultFiveChapterLaneActive
             ? '启动默认5章档位'
             : '开始安全连写'
-    const startBatchDescription = recoveryValidationBatchActive
+    const startBatchDescription = productionRelapseValidationActive
+      ? [
+        `启动${safeChapterCount}章生产后验验证批，逐章对照${productionRelapseTemplateVersionId ? `模板版本 ${productionRelapseTemplateVersionId}` : '当前模板版本'}和真实生产复发章节${productionRelapseChapterNos.length ? compactChapterNoEvidence(productionRelapseChapterNos) : '记录'}。`,
+        productionRelapseFailureReasons.length ? `本轮只验证真实失败维度：${productionRelapseFailureReasons.join('、')}。` : '本轮只验证真实生产失败维度。',
+        '关闭口径：必须输出 production_relapse_verdict.status=passed，且 remaining_failure_reasons 为空；不能只补 default_lane_*_delivered。',
+      ].join(' ')
+      : recoveryValidationBatchActive
       ? `安全连写恢复路线图已没有黄色修复层；先启动${safeChapterCount}章验证批，逐章回填核心守恒、读者回报、追读拉力和结构决策执行，再判断是否恢复 ${safeBatchExpansionPolicy.expandedChapterCount} 章。`
       : recoveryRestoreBatchActive
         ? `${safeBatchRecoveryRestoreConfirmation?.summary} 点击后进入 ${safeChapterCount} 章预执行确认，每章继续保留核心守恒、显性回报、章末追读和结构决策执行回填。`
@@ -12590,6 +12625,14 @@ function buildBatchGuardrail(args: {
         safety_limit: safeChapterCount,
         allowed_chapter_nos: preflight.allowedChapterNos,
         next_batch_brief: nextBatchBrief,
+        ...(productionRelapseValidationActive ? {
+          production_relapse_validation: {
+            template_version_id: productionRelapseTemplateVersionId,
+            default_batch_chapter_nos: productionRelapseChapterNos,
+            failure_reasons: productionRelapseFailureReasons,
+            close_condition: 'production_relapse_verdict.status=passed && remaining_failure_reasons empty',
+          },
+        } : {}),
         ...(recoveryRestoreBatchActive && safeBatchRecoveryRestoreConfirmation ? {
           recovery_restore_confirmation: safeBatchRecoveryRestoreConfirmation,
         } : {}),
@@ -13353,8 +13396,17 @@ function buildProductionLicense(args: {
     const recoveryEvidenceReleaseSummary = args.batchGuardrail.preflight.inputSnapshot?.recovery_evidence_release_summary || null
     const recoveryEvidenceReleaseReasons = arrayValue(recoveryEvidenceReleaseSummary?.evidence).slice(0, 3)
     const actionSource = text(args.batchGuardrail.recommendedAction.payload?.source)
+    const isProductionRelapseValidationBatch = actionSource === 'safe_batch_production_relapse_validation_batch'
     const isRecoveryValidationBatch = actionSource === 'safe_batch_recovery_validation_batch'
     const isRecoveryRestoreBatch = actionSource === 'safe_batch_recovery_restore_five_batch'
+    const productionRelapseValidation = args.batchGuardrail.recommendedAction.payload?.production_relapse_validation || null
+    const productionRelapseValidationChapterNos = arrayValue(productionRelapseValidation?.default_batch_chapter_nos || productionRelapseValidation?.defaultBatchChapterNos)
+      .map(chapterNo => Number(chapterNo))
+      .filter(chapterNo => chapterNo > 0)
+    const productionRelapseValidationReasons = arrayValue(productionRelapseValidation?.failure_reasons || productionRelapseValidation?.failureReasons)
+      .map(reason => text(reason))
+      .filter(Boolean)
+    const productionRelapseValidationSummary = `生产后验验证批：对照${productionRelapseValidation?.template_version_id ? `模板版本 ${productionRelapseValidation.template_version_id}` : '当前模板版本'}和真实生产复发章节${productionRelapseValidationChapterNos.length ? compactChapterNoEvidence(productionRelapseValidationChapterNos) : '记录'}；${productionRelapseValidationReasons.length ? `只验证剩余真实失败维度 ${productionRelapseValidationReasons.join('、')}` : '只验证真实生产失败维度'}，本轮必须输出 production_relapse_verdict.status=passed 且 remaining_failure_reasons 为空。`
     const restoreStabilityLane = args.batchGuardrail.recommendedAction.payload?.recovery_restore_stability_evidence
       || args.batchGuardrail.recommendedAction.payload?.default_five_chapter_lane
       || args.batchGuardrail.preflight.inputSnapshot?.safe_batch_recovery_restore_stability_lane
@@ -13381,6 +13433,8 @@ function buildProductionLicense(args: {
         ? '5章观察批'
         : isDefaultFiveChapterLane
           ? '默认5章档位'
+          : isProductionRelapseValidationBatch
+            ? '生产后验验证批'
           : isRecoveryRestoreBatch
         ? '恢复5章扩批'
         : isRecoveryValidationBatch ? `${args.batchGuardrail.safeChapterCount}章验证批` : '小批量连写',
@@ -13388,6 +13442,8 @@ function buildProductionLicense(args: {
         ? text(restoreStabilityLane?.summary, `恢复5章扩批仍需继续观察 1-2 批，本批放行 ${args.batchGuardrail.safeChapterCount} 章观察。`)
         : isDefaultFiveChapterLane
           ? text(restoreStabilityLane?.summary, `恢复5章扩批已形成长期稳定证据，本批进入默认5章档位。`)
+          : isProductionRelapseValidationBatch
+            ? productionRelapseValidationSummary
           : isRecoveryRestoreBatch
         ? recoveryRestoreSummary
         : isRecoveryValidationBatch
@@ -13402,6 +13458,7 @@ function buildProductionLicense(args: {
         ...(isRecoveryRestoreBatch && !isRecoveryRestoreObservationBatch ? ['3章验证批通过'] : []),
         ...(isRecoveryRestoreObservationBatch ? ['恢复5章扩批仍在观察'] : []),
         ...(isDefaultFiveChapterLane ? [`恢复5章扩批连续 ${Number(restoreStabilityLane?.stable_pass_streak || 0)} 批稳定`] : []),
+        ...(isProductionRelapseValidationBatch ? ['生产后验验证批'] : []),
         ...(isRecoveryValidationBatch ? ['安全连写路线图已清掉黄色修复层'] : []),
         ...arrayValue(recoveryRestoreConfirmation?.evidence).slice(0, 2),
         ...recoveryEvidenceReleaseReasons,
@@ -13411,7 +13468,9 @@ function buildProductionLicense(args: {
           ? '观察5章'
           : isDefaultFiveChapterLane
             ? '默认5章'
-            : isRecoveryRestoreBatch ? '恢复5章' : isRecoveryValidationBatch ? `验证 ${args.batchGuardrail.safeChapterCount}章` : `安全 ${args.batchGuardrail.safeChapterCount}章`,
+            : isProductionRelapseValidationBatch
+              ? '生产后验验证'
+              : isRecoveryRestoreBatch ? '恢复5章' : isRecoveryValidationBatch ? `验证 ${args.batchGuardrail.safeChapterCount}章` : `安全 ${args.batchGuardrail.safeChapterCount}章`,
         args.batchGuardrail.nextBatchBrief.chapterRangeLabel,
       ].filter(Boolean),
       nextAction: args.batchGuardrail.recommendedAction,

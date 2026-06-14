@@ -1646,16 +1646,18 @@ export function buildSafeBatchRecoveryFocusReviewState(focus: SafeBatchRecoveryF
     : resolvedItems.length > 0
       ? 'ready_for_recheck'
       : 'empty'
+  const productionRelapseClosure = buildDefaultLaneProductionRelapseClosure(focus, activeItems, resolvedItems)
   const nextActionLabel = status === 'active'
     ? `继续${actionLabel}`
     : status === 'ready_for_recheck'
-      ? '刷新路线图并启动验证批'
+      ? productionRelapseClosure
+        ? '启动生产后验验证批'
+        : '刷新路线图并启动验证批'
       : '等待匹配任务'
   const obligationStatuses = buildDefaultLaneFocusObligationStatuses(focus, activeItems, resolvedItems)
   const obligationSummary = obligationStatuses.length
     ? `四项回检：${obligationStatuses.map(item => item.text).join('、')}。`
       : ''
-  const productionRelapseClosure = buildDefaultLaneProductionRelapseClosure(focus, activeItems, resolvedItems)
   const productionRelapseSummary = productionRelapseClosure
     ? `${productionRelapseClosure.closeText}${productionRelapseClosure.detailText ? `${productionRelapseClosure.detailText}。` : ''}不能只补 default_lane_*_delivered。`
     : ''

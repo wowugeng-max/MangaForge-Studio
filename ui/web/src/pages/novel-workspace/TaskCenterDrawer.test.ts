@@ -2157,7 +2157,7 @@ describe('buildSafeBatchExpansionPolicySnapshot', () => {
     }])
 
     expect(state.status).toBe('ready_for_recheck')
-    expect(state.nextActionLabel).toBe('刷新路线图并启动验证批')
+    expect(state.nextActionLabel).toBe('启动生产后验验证批')
     expect(state.summary).toContain('已处理 1 个匹配任务')
     expect(state.summary).toContain('下一轮以 production_relapse_verdict.status=passed 关闭')
     expect(state.summary).toContain('remaining_failure_reasons 为空')

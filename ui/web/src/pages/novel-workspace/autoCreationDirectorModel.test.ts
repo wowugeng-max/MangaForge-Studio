@@ -4309,6 +4309,18 @@ describe('buildAutoCreationDirectorModel', () => {
     const template = verification?.default_five_chapter_lane_template
 
     expect(model.batchGuardrail.safeChapterCount).toBe(3)
+    expect(model.batchGuardrail.recommendedAction).toMatchObject({
+      key: 'start_safe_batch_generation',
+      label: '启动生产后验验证批',
+      payload: {
+        source: 'safe_batch_production_relapse_validation_batch',
+      },
+    })
+    expect(model.batchGuardrail.recommendedAction.description).toContain('production_relapse_verdict.status=passed')
+    expect(model.batchGuardrail.recommendedAction.description).toContain('remaining_failure_reasons 为空')
+    expect(model.productionLicense.modeLabel).toBe('生产后验验证批')
+    expect(model.productionLicense.summary).toContain('真实生产复发章节')
+    expect(model.productionLicense.summary).toContain('production_relapse_verdict.status=passed')
     expect(verification).toMatchObject({
       source: 'safe_batch_expansion_structure_repair',
       validation_chapter_nos: validationChapterNos,
