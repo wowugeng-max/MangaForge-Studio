@@ -6569,6 +6569,230 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(templateVersionRoadmapNode.detail).toContain('生产后验已修复')
   })
 
+  test('routes passed production relapse validation to a single five-chapter observation command on the director front page', () => {
+    const validationChapterNos = [124, 125, 126]
+    const productionRelapseChapterNos = [119, 120, 121, 122, 123]
+    const versionedTemplate = {
+      visible: true,
+      status: 'fulfilled',
+      label: '默认档位模板生产复发重构',
+      source: 'safe_batch_expansion_structure_repair',
+      redesign_source: 'default_five_chapter_lane_template_redesign_queue',
+      source_run_id: 704,
+      template_version_id: 'safe_batch_expansion_structure_repair:704',
+      summary: '默认档位模板版本 safe_batch_expansion_structure_repair:704 在真实5章生产复发，已按生产后验重构。',
+      production_relapse_review: {
+        template_version_id: 'safe_batch_expansion_structure_repair:704',
+        default_batch_chapter_nos: productionRelapseChapterNos,
+        restore_chapter_nos: [114, 115, 116, 117, 118],
+        validation_chapter_nos: [106, 107, 108],
+        failure_reasons: ['核心偏移', '回报欠账', '追读拉力'],
+        failed_requirements: [
+          { key: 'default_lane_segment_duty', label: '默认档位段位职责', failure_reason: '核心偏移' },
+          { key: 'default_lane_payoff_density', label: '回报密度', failure_reason: '回报欠账' },
+          { key: 'default_lane_ending_hook_template', label: '章末追读模板', failure_reason: '追读拉力' },
+        ],
+      },
+      requirements: [
+        { key: 'default_lane_segment_duty', label: '默认档位段位职责', status: 'fulfilled' },
+        { key: 'default_lane_conflict_rotation', label: '冲突轮换', status: 'fulfilled' },
+        { key: 'default_lane_payoff_density', label: '回报密度', status: 'fulfilled' },
+        { key: 'default_lane_ending_hook_template', label: '章末追读模板', status: 'fulfilled' },
+      ],
+    }
+    const model = buildAutoCreationDirectorModel({
+      planning: readySafeBatchPlanning({ futureRoute: futureRouteRange(127, 5) }),
+      writing: readySafeBatchWriting({
+        nextChapter: { ...baseWriting.nextChapter, id: 127, chapterNo: 127, title: '生产后验通过后127' },
+        previousChapter: { chapterNo: 126, title: '生产后验通过126', wordCount: 3200, hasProse: true },
+      }),
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: { last_updated_chapter: 126 },
+      chapters: [
+        ...[41, 42, 43, 44, 45, 46, 47, 48, 49].map(chapterNo => ({
+          id: chapterNo,
+          chapter_no: chapterNo,
+          title: `强化趋势${chapterNo}`,
+          chapter_text: '强化趋势正文'.repeat(500),
+        })),
+        ...validationChapterNos.map(chapterNo => ({
+          id: chapterNo,
+          chapter_no: chapterNo,
+          title: `生产后验通过${chapterNo}`,
+          chapter_text: '生产后验通过正文'.repeat(500),
+          raw_payload: {
+            generated_scene_breakdown: [{
+              expansion_structure_decision_execution: {
+                segment_role_delivered: true,
+                observation_metrics_delivered: true,
+                redesign_principles_delivered: true,
+                default_lane_segment_duty_delivered: true,
+                default_lane_conflict_rotation_delivered: true,
+                default_lane_payoff_density_delivered: true,
+                default_lane_ending_hook_template_delivered: true,
+                evidence: [`第${chapterNo}章默认档位模板生产后验已修复。`],
+              },
+            }],
+          },
+        })),
+      ],
+      reviews: [
+        ...strengthenedAcceptanceQualityReviews([41, 42, 43], 7041, '2026-07-01T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([44, 45, 46], 7051, '2026-07-02T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([47, 48, 49], 7061, '2026-07-03T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews(validationChapterNos, 7071, '2026-07-04T01:00:00.000Z'),
+      ],
+      runRecords: [
+        strengthenedAcceptanceBatchRun({ id: 704, createdAt: '2026-07-01T00:00:00.000Z', chapterNos: [41, 42, 43] }),
+        strengthenedAcceptanceBatchRun({ id: 705, createdAt: '2026-07-02T00:00:00.000Z', chapterNos: [44, 45, 46] }),
+        strengthenedAcceptanceBatchRun({ id: 706, createdAt: '2026-07-03T00:00:00.000Z', chapterNos: [47, 48, 49] }),
+        defaultLaneTemplateValidationBatchRun({
+          id: 707,
+          createdAt: '2026-07-04T00:00:00.000Z',
+          chapterNos: validationChapterNos,
+          template: versionedTemplate,
+        }),
+      ],
+    } as any)
+
+    expect(model.batchGuardrail.recommendedAction).toMatchObject({
+      key: 'start_safe_batch_generation',
+      label: '进入5章观察批',
+      payload: {
+        source: 'safe_batch_production_relapse_review_cta',
+        safety_limit: 5,
+        production_relapse_review_cta: {
+          kind: 'enter_five_chapter_observation',
+          label: '进入5章观察批',
+          remaining_failure_reasons: [],
+          cleared_failure_reasons: ['核心偏移', '回报欠账', '追读拉力'],
+        },
+      },
+    })
+    expect(model.productionLicense.modeLabel).toBe('5章观察批')
+    expect(model.productionLicense.summary).toContain('生产后验已修复')
+    expect(model.productionLicense.summary).toContain('5章观察')
+    expect(model.todayCommandDeck.actionLabel).toBe('进入5章观察批')
+    expect(model.todayCommandDeck.summary).toContain('生产后验已修复')
+    expect(model.todayCommandDeck.releaseRationale.primaryReason).toContain('5章观察')
+  })
+
+  test('routes failed production relapse validation to a single repair command on the director front page', () => {
+    const validationChapterNos = [134, 135, 136]
+    const productionRelapseChapterNos = [129, 130, 131, 132, 133]
+    const versionedTemplate = {
+      visible: true,
+      status: 'fulfilled',
+      label: '默认档位模板生产复发重构',
+      source: 'safe_batch_expansion_structure_repair',
+      redesign_source: 'default_five_chapter_lane_template_redesign_queue',
+      source_run_id: 714,
+      template_version_id: 'safe_batch_expansion_structure_repair:714',
+      summary: '默认档位模板版本 safe_batch_expansion_structure_repair:714 在真实5章生产复发，已按生产后验重构。',
+      production_relapse_review: {
+        template_version_id: 'safe_batch_expansion_structure_repair:714',
+        default_batch_chapter_nos: productionRelapseChapterNos,
+        restore_chapter_nos: [124, 125, 126, 127, 128],
+        validation_chapter_nos: [116, 117, 118],
+        failure_reasons: ['核心偏移', '回报欠账', '追读拉力'],
+        failed_requirements: [
+          { key: 'default_lane_segment_duty', label: '默认档位段位职责', failure_reason: '核心偏移' },
+          { key: 'default_lane_payoff_density', label: '回报密度', failure_reason: '回报欠账' },
+          { key: 'default_lane_ending_hook_template', label: '章末追读模板', failure_reason: '追读拉力' },
+        ],
+      },
+      requirements: [
+        { key: 'default_lane_segment_duty', label: '默认档位段位职责', status: 'fulfilled' },
+        { key: 'default_lane_conflict_rotation', label: '冲突轮换', status: 'fulfilled' },
+        { key: 'default_lane_payoff_density', label: '回报密度', status: 'fulfilled' },
+        { key: 'default_lane_ending_hook_template', label: '章末追读模板', status: 'fulfilled' },
+      ],
+    }
+    const model = buildAutoCreationDirectorModel({
+      planning: readySafeBatchPlanning({ futureRoute: futureRouteRange(137, 5) }),
+      writing: readySafeBatchWriting({
+        nextChapter: { ...baseWriting.nextChapter, id: 137, chapterNo: 137, title: '生产后验失败后137' },
+        previousChapter: { chapterNo: 136, title: '生产后验失败136', wordCount: 3200, hasProse: true },
+      }),
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: { last_updated_chapter: 136 },
+      chapters: [
+        ...[41, 42, 43, 44, 45, 46, 47, 48, 49].map(chapterNo => ({
+          id: chapterNo,
+          chapter_no: chapterNo,
+          title: `强化趋势${chapterNo}`,
+          chapter_text: '强化趋势正文'.repeat(500),
+        })),
+        ...validationChapterNos.map(chapterNo => ({
+          id: chapterNo,
+          chapter_no: chapterNo,
+          title: `生产后验失败${chapterNo}`,
+          chapter_text: '生产后验失败正文'.repeat(500),
+          raw_payload: {
+            generated_scene_breakdown: [{
+              expansion_structure_decision_execution: {
+                segment_role_delivered: true,
+                observation_metrics_delivered: true,
+                redesign_principles_delivered: true,
+                default_lane_segment_duty_delivered: true,
+                default_lane_conflict_rotation_delivered: true,
+                default_lane_payoff_density_delivered: true,
+                default_lane_ending_hook_template_delivered: true,
+                evidence: [`第${chapterNo}章默认档位模板生产后验仍需复盘。`],
+              },
+            }],
+          },
+        })),
+      ],
+      reviews: [
+        ...strengthenedAcceptanceQualityReviews([41, 42, 43], 7141, '2026-07-05T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([44, 45, 46], 7151, '2026-07-06T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([47, 48, 49], 7161, '2026-07-07T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews(validationChapterNos, 7171, '2026-07-08T01:00:00.000Z'),
+        {
+          id: 7174,
+          chapter_id: 135,
+          review_type: 'reader_payoff_sync',
+          created_at: '2026-07-08T01:11:00.000Z',
+          payload: JSON.stringify({ reader_payoff_sync: { status: 'warn', debt_count: 1, missed: ['生产后验验证仍有显性回报欠账'] } }),
+        },
+      ],
+      runRecords: [
+        strengthenedAcceptanceBatchRun({ id: 714, createdAt: '2026-07-05T00:00:00.000Z', chapterNos: [41, 42, 43] }),
+        strengthenedAcceptanceBatchRun({ id: 715, createdAt: '2026-07-06T00:00:00.000Z', chapterNos: [44, 45, 46] }),
+        strengthenedAcceptanceBatchRun({ id: 716, createdAt: '2026-07-07T00:00:00.000Z', chapterNos: [47, 48, 49] }),
+        defaultLaneTemplateValidationBatchRun({
+          id: 717,
+          createdAt: '2026-07-08T00:00:00.000Z',
+          chapterNos: validationChapterNos,
+          template: versionedTemplate,
+        }),
+      ],
+    } as any)
+
+    expect(model.batchGuardrail.recommendedAction).toMatchObject({
+      key: 'open_task_center',
+      label: '修生产后验',
+      payload: {
+        source: 'safe_batch_production_relapse_review_cta',
+        production_relapse_review_cta: {
+          kind: 'repair_production_relapse',
+          label: '修生产后验',
+          remaining_failure_reasons: ['回报欠账'],
+        },
+      },
+    })
+    expect(model.productionLicense.modeLabel).toBe('生产后验待修')
+    expect(model.productionLicense.summary).toContain('回报欠账')
+    expect(model.productionLicense.summary).not.toContain('核心偏移')
+    expect(model.productionLicense.summary).not.toContain('追读拉力')
+    expect(model.todayCommandDeck.actionLabel).toBe('修生产后验')
+    expect(model.todayCommandDeck.summary).toContain('回报欠账')
+    expect(model.todayCommandDeck.summary).not.toContain('核心偏移')
+  })
+
   test('accumulates default lane template verdicts into a stability profile', () => {
     const failedValidationChapterNos = [90, 91, 92]
     const passedValidationChapterNos = [93, 94, 95]
