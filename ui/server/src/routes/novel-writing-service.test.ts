@@ -786,6 +786,99 @@ describe('chapter prose word target', () => {
     expect(prompt).toContain('默认5章档位模板验证：本章必须继承已补齐的段位职责')
   })
 
+  test('injects production relapse template version proof into paragraph prose prompt', () => {
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+
+    const prompt = service.buildParagraphProseContext(
+      { title: '超人的规则怪谈世界' },
+      {
+        next_batch_brief: {
+          chapter_range_label: '第114-116章',
+          batch_goal: '默认档位模板生产复发后进入3章验证批。',
+          expansion_structure_verification: {
+            source: 'safe_batch_expansion_structure_repair',
+            validation_chapter_nos: [114, 115, 116],
+            fixed_segment_role: '中段固定职责：验证生产后验新模板。',
+            conflict_rotation: '验证批每章更换冲突来源。',
+            explicit_payoff: '验证批每章必须有显性回报。',
+            ending_hook_requirement: '验证批每章章末必须留下追读问题。',
+            default_five_chapter_lane_template: {
+              visible: true,
+              status: 'fulfilled',
+              label: '默认档位模板生产复发重构',
+              source: 'safe_batch_expansion_structure_repair',
+              redesign_source: 'default_five_chapter_lane_template_redesign_queue',
+              summary: '默认档位模板版本 safe_batch_expansion_structure_repair:668 在真实5章生产复发，已按生产后验重构。',
+              template_version_id: 'safe_batch_expansion_structure_repair:668',
+              production_relapse_count: 1,
+              production_relapse_review: {
+                template_version_id: 'safe_batch_expansion_structure_repair:668',
+                default_batch_chapter_nos: [109, 110, 111, 112, 113],
+                restore_chapter_nos: [104, 105, 106, 107, 108],
+                validation_chapter_nos: [96, 97, 98],
+                failure_reasons: ['核心偏移', '回报欠账', '追读拉力'],
+                failed_requirements: [
+                  { key: 'default_lane_segment_duty', label: '默认档位段位职责', failure_reason: '核心偏移' },
+                  { key: 'default_lane_payoff_density', label: '回报密度', failure_reason: '回报欠账' },
+                  { key: 'default_lane_ending_hook_template', label: '章末追读模板', failure_reason: '追读拉力' },
+                ],
+                summary: '第109-113章真实生产复发，当前模板版本必须证明核心、回报、追读三项后验修复。',
+              },
+              failed_requirements: [
+                { key: 'default_lane_segment_duty', label: '默认档位段位职责', failure_reason: '核心偏移', failed_count: 1 },
+                { key: 'default_lane_payoff_density', label: '回报密度', failure_reason: '回报欠账', failed_count: 1 },
+                { key: 'default_lane_ending_hook_template', label: '章末追读模板', failure_reason: '追读拉力', failed_count: 1 },
+              ],
+              redesigned_templates: [
+                { key: 'default_lane_payoff_density', label: '回报密度', template: '生产后验新模板：每章必须落一个可见收益、反制结果或阶段结算。' },
+              ],
+              validation_standard: [
+                '下一轮3章验证批必须逐章对照 template_version_id safe_batch_expansion_structure_repair:668 和真实生产复发章节。',
+                '逐章证明新版模板已修掉真实生产失败维度：核心偏移、回报欠账、追读拉力。',
+              ],
+              required_receipts: [
+                'default_lane_segment_duty_delivered',
+                'default_lane_conflict_rotation_delivered',
+                'default_lane_payoff_density_delivered',
+                'default_lane_ending_hook_template_delivered',
+              ],
+              requirements: [
+                { key: 'default_lane_segment_duty', label: '默认档位段位职责', status: 'fulfilled' },
+                { key: 'default_lane_conflict_rotation', label: '冲突轮换', status: 'fulfilled' },
+                { key: 'default_lane_payoff_density', label: '回报密度', status: 'fulfilled' },
+                { key: 'default_lane_ending_hook_template', label: '章末追读模板', status: 'fulfilled' },
+              ],
+            },
+          },
+        },
+        chapter_target: {
+          chapter_no: 114,
+          title: '生产后验验证一',
+          summary: '验证当前模板版本是否修掉真实生产复发。',
+          conflict: '新模板第一章是否能守住核心和回报。',
+          ending_hook: '复发风险再次抬头。',
+          scene_cards: [],
+        },
+      },
+      null,
+      { chapter_no: 114, title: '生产后验验证一' },
+    )
+
+    expect(prompt).toContain('模板版本：safe_batch_expansion_structure_repair:668')
+    expect(prompt).toContain('生产复发次数：1')
+    expect(prompt).toContain('生产复发章节：第109章、第110章、第111章、第112章、第113章')
+    expect(prompt).toContain('生产复发前验证：第96章、第97章、第98章')
+    expect(prompt).toContain('生产恢复依据：第104章、第105章、第106章、第107章、第108章')
+    expect(prompt).toContain('真实生产失败维度：核心偏移、回报欠账、追读拉力')
+    expect(prompt).toContain('生产复发模板缺项：默认档位段位职责/核心偏移；回报密度/回报欠账；章末追读模板/追读拉力')
+    expect(prompt).toContain('模板版本后验验证：本轮3章验证批必须逐章对照 template_version_id safe_batch_expansion_structure_repair:668')
+    expect(prompt).toContain('逐章证明新版模板已修掉真实生产失败维度：核心偏移、回报欠账、追读拉力')
+  })
+
   test('injects expansion structure decision into paragraph prose prompt', () => {
     const service = createNovelWritingService({
       getProject: async () => null,

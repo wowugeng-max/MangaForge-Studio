@@ -1922,6 +1922,54 @@ function normalizeDefaultFiveChapterRegression(value: any) {
   return hasContent ? normalized : null
 }
 
+function normalizeDefaultFiveChapterLaneTemplateFailedRequirements(value: any) {
+  return asArray(value?.failed_requirements || value?.failedRequirements || value?.template_version_failed_requirements || value?.templateVersionFailedRequirements)
+    .map((item: any) => ({
+      key: compactBriefText(item?.key),
+      label: compactBriefText(item?.label || item?.name || item?.key),
+      failure_reason: compactBriefText(item?.failure_reason || item?.failureReason || item?.reason),
+      failed_count: Number(item?.failed_count ?? item?.failedCount ?? 1),
+    }))
+    .filter((item: any) => item.key || item.label || item.failure_reason)
+    .slice(0, 8)
+}
+
+function normalizeDefaultFiveChapterLaneTemplateProductionRelapseReview(value: any, fallback: any = {}) {
+  const raw = value?.production_relapse_review || value?.productionRelapseReview || value || {}
+  if (!raw || raw.visible === false) return null
+  const failedRequirements = normalizeDefaultFiveChapterLaneTemplateFailedRequirements(raw)
+  const fallbackFailedRequirements = asArray(fallback.failed_requirements || fallback.failedRequirements)
+  const normalized = {
+    template_version_id: compactBriefText(raw.template_version_id || raw.templateVersionId || fallback.template_version_id || fallback.templateVersionId),
+    default_batch_chapter_nos: asArray(raw.default_batch_chapter_nos || raw.defaultBatchChapterNos)
+      .map((chapterNo: any) => Number(chapterNo))
+      .filter((chapterNo: number) => chapterNo > 0)
+      .slice(0, 10),
+    restore_chapter_nos: asArray(raw.restore_chapter_nos || raw.restoreChapterNos)
+      .map((chapterNo: any) => Number(chapterNo))
+      .filter((chapterNo: number) => chapterNo > 0)
+      .slice(0, 10),
+    validation_chapter_nos: asArray(raw.validation_chapter_nos || raw.validationChapterNos)
+      .map((chapterNo: any) => Number(chapterNo))
+      .filter((chapterNo: number) => chapterNo > 0)
+      .slice(0, 10),
+    failure_reasons: asArray(raw.failure_reasons || raw.failureReasons)
+      .map((item: any) => compactBriefText(item))
+      .filter(Boolean)
+      .slice(0, 8),
+    failed_requirements: failedRequirements.length ? failedRequirements : fallbackFailedRequirements.slice(0, 8),
+    summary: compactBriefText(raw.summary || fallback.summary),
+  }
+  const hasContent = normalized.template_version_id
+    || normalized.default_batch_chapter_nos.length
+    || normalized.restore_chapter_nos.length
+    || normalized.validation_chapter_nos.length
+    || normalized.failure_reasons.length
+    || normalized.failed_requirements.length
+    || normalized.summary
+  return hasContent ? normalized : null
+}
+
 function normalizeDefaultFiveChapterLaneTemplate(value: any) {
   const raw = value?.default_five_chapter_lane_template || value?.defaultFiveChapterLaneTemplate || value || {}
   if (!raw || raw.visible === false) return null
@@ -1961,12 +2009,25 @@ function normalizeDefaultFiveChapterLaneTemplate(value: any) {
     .slice(0, 8)
   const validationStandard = uniqueBriefStrings(raw.validation_standard || raw.validationStandard || [], 8)
   const requiredReceipts = uniqueBriefStrings(raw.required_receipts || raw.requiredReceipts || raw.receipts || [], 8)
+  const failedRequirements = normalizeDefaultFiveChapterLaneTemplateFailedRequirements(raw)
+  const templateVersionId = compactBriefText(
+    raw.template_version_id
+    || raw.templateVersionId
+    || raw.template_version?.id
+    || raw.templateVersion?.id,
+  )
+  const productionRelapseReview = normalizeDefaultFiveChapterLaneTemplateProductionRelapseReview(raw, {
+    template_version_id: templateVersionId,
+    failed_requirements: failedRequirements,
+    summary: raw.summary,
+  })
   const topFailedRaw = raw.top_failed_requirement || raw.topFailedRequirement || null
   const topFailedRequirement = topFailedRaw && typeof topFailedRaw === 'object' && !Array.isArray(topFailedRaw)
     ? {
       key: compactBriefText(topFailedRaw.key),
       label: compactBriefText(topFailedRaw.label || topFailedRaw.key),
       failed_count: Number(topFailedRaw.failed_count ?? topFailedRaw.failedCount ?? 0),
+      failure_reason: compactBriefText(topFailedRaw.failure_reason || topFailedRaw.failureReason),
     }
     : null
   const normalized = {
@@ -1977,6 +2038,9 @@ function normalizeDefaultFiveChapterLaneTemplate(value: any) {
     redesign_source: compactBriefText(raw.redesign_source || raw.redesignSource),
     source_run_id: raw.source_run_id ?? raw.sourceRunId ?? null,
     repaired_at: compactBriefText(raw.repaired_at || raw.repairedAt),
+    template_version_id: templateVersionId,
+    production_relapse_count: Number(raw.production_relapse_count ?? raw.productionRelapseCount ?? 0),
+    production_relapse_review: productionRelapseReview,
     summary: compactBriefText(raw.summary || ''),
     segment_duty_rewrite: compactBriefText(raw.segment_duty_rewrite || raw.segmentDutyRewrite),
     conflict_rotation: compactBriefText(raw.conflict_rotation || raw.conflictRotation),
@@ -1986,6 +2050,7 @@ function normalizeDefaultFiveChapterLaneTemplate(value: any) {
     redesigned_templates: redesignedTemplates,
     validation_standard: validationStandard,
     required_receipts: requiredReceipts,
+    failed_requirements: failedRequirements,
     repaired_missing_requirements: repairedMissingRequirements,
     repair_actions: repairActions,
     requirements,
@@ -1996,9 +2061,13 @@ function normalizeDefaultFiveChapterLaneTemplate(value: any) {
     || normalized.payoff_density
     || normalized.ending_hook_template
     || normalized.redesign_source
+    || normalized.template_version_id
+    || normalized.production_relapse_count
+    || normalized.production_relapse_review
     || normalized.redesigned_templates.length
     || normalized.validation_standard.length
     || normalized.required_receipts.length
+    || normalized.failed_requirements.length
     || normalized.repaired_missing_requirements.length
     || normalized.repair_actions.length
     || normalized.requirements.length
@@ -5670,6 +5739,54 @@ export function createNovelWritingService(ctx: {
       defaultFiveChapterLaneTemplate?.required_receipts || defaultFiveChapterLaneTemplate?.requiredReceipts || [],
       8,
     )
+    const defaultFiveChapterLaneTemplateVersionId = compactBriefText(
+      defaultFiveChapterLaneTemplate?.template_version_id
+      || defaultFiveChapterLaneTemplate?.templateVersionId
+      || defaultFiveChapterLaneTemplate?.template_version?.id
+      || defaultFiveChapterLaneTemplate?.templateVersion?.id,
+    )
+    const defaultFiveChapterLaneTemplateProductionRelapseCount = Number(
+      defaultFiveChapterLaneTemplate?.production_relapse_count
+      ?? defaultFiveChapterLaneTemplate?.productionRelapseCount
+      ?? 0,
+    )
+    const defaultFiveChapterLaneTemplateProductionRelapseReview = defaultFiveChapterLaneTemplate?.production_relapse_review
+      || defaultFiveChapterLaneTemplate?.productionRelapseReview
+      || null
+    const defaultFiveChapterLaneTemplateProductionRelapseChapterNos = chapterNosBrief(
+      defaultFiveChapterLaneTemplateProductionRelapseReview?.default_batch_chapter_nos
+      || defaultFiveChapterLaneTemplateProductionRelapseReview?.defaultBatchChapterNos
+      || [],
+    )
+    const defaultFiveChapterLaneTemplateProductionRelapseRestoreNos = chapterNosBrief(
+      defaultFiveChapterLaneTemplateProductionRelapseReview?.restore_chapter_nos
+      || defaultFiveChapterLaneTemplateProductionRelapseReview?.restoreChapterNos
+      || [],
+    )
+    const defaultFiveChapterLaneTemplateProductionRelapseValidationNos = chapterNosBrief(
+      defaultFiveChapterLaneTemplateProductionRelapseReview?.validation_chapter_nos
+      || defaultFiveChapterLaneTemplateProductionRelapseReview?.validationChapterNos
+      || [],
+    )
+    const defaultFiveChapterLaneTemplateProductionFailureReasons = uniqueBriefStrings(
+      defaultFiveChapterLaneTemplateProductionRelapseReview?.failure_reasons
+      || defaultFiveChapterLaneTemplateProductionRelapseReview?.failureReasons
+      || [],
+      8,
+    )
+    const defaultFiveChapterLaneTemplateProductionFailedRequirements = asArray(
+      defaultFiveChapterLaneTemplateProductionRelapseReview?.failed_requirements
+      || defaultFiveChapterLaneTemplateProductionRelapseReview?.failedRequirements
+      || defaultFiveChapterLaneTemplate?.failed_requirements
+      || defaultFiveChapterLaneTemplate?.failedRequirements,
+    )
+      .map((item: any) => {
+        const label = compactBriefText(item?.label || item?.key || '模板缺项')
+        const reason = compactBriefText(item?.failure_reason || item?.failureReason || item?.reason)
+        return label && reason ? `${label}/${reason}` : label || reason
+      })
+      .filter(Boolean)
+      .slice(0, 8)
     const batchPreflight = contextPackage?.chapter_target?.batch_preflight || contextPackage?.batch_preflight || null
     const batchDeliveryRiskCarryOver = normalizeDeliveryRiskCarryOverContext(
       batchPreflight?.delivery_risk_carry_over
@@ -5873,6 +5990,14 @@ export function createNovelWritingService(ctx: {
       defaultFiveChapterLaneTemplate?.payoff_density ? `回报密度：${defaultFiveChapterLaneTemplate.payoff_density}` : '',
       defaultFiveChapterLaneTemplate?.ending_hook_template ? `章末追读模板：${defaultFiveChapterLaneTemplate.ending_hook_template}` : '',
       defaultFiveChapterLaneTemplateRedesignSource ? `模板重构来源：${defaultFiveChapterLaneTemplateRedesignSource}` : '',
+      defaultFiveChapterLaneTemplateVersionId ? `模板版本：${defaultFiveChapterLaneTemplateVersionId}` : '',
+      defaultFiveChapterLaneTemplateProductionRelapseCount ? `生产复发次数：${defaultFiveChapterLaneTemplateProductionRelapseCount}` : '',
+      defaultFiveChapterLaneTemplateProductionRelapseChapterNos ? `生产复发章节：${defaultFiveChapterLaneTemplateProductionRelapseChapterNos}` : '',
+      defaultFiveChapterLaneTemplateProductionRelapseValidationNos ? `生产复发前验证：${defaultFiveChapterLaneTemplateProductionRelapseValidationNos}` : '',
+      defaultFiveChapterLaneTemplateProductionRelapseRestoreNos ? `生产恢复依据：${defaultFiveChapterLaneTemplateProductionRelapseRestoreNos}` : '',
+      defaultFiveChapterLaneTemplateProductionFailureReasons.length ? `真实生产失败维度：${defaultFiveChapterLaneTemplateProductionFailureReasons.join('、')}` : '',
+      defaultFiveChapterLaneTemplateProductionFailedRequirements.length ? `生产复发模板缺项：${defaultFiveChapterLaneTemplateProductionFailedRequirements.join('；')}` : '',
+      defaultFiveChapterLaneTemplateProductionRelapseReview ? `模板版本后验验证：本轮3章验证批必须逐章对照 template_version_id ${defaultFiveChapterLaneTemplateVersionId || defaultFiveChapterLaneTemplateProductionRelapseReview.template_version_id || '当前版本'}${defaultFiveChapterLaneTemplateProductionRelapseChapterNos ? ` 和真实生产复发章节 ${defaultFiveChapterLaneTemplateProductionRelapseChapterNos}` : ''}，证明新版模板能修掉生产后验问题。` : '',
       defaultFiveChapterLaneTemplateTopFailed ? `高频缺项：${compactBriefText(defaultFiveChapterLaneTemplateTopFailed.label || defaultFiveChapterLaneTemplateTopFailed.key || '模板缺项')}失败 ${Number(defaultFiveChapterLaneTemplateTopFailed.failed_count ?? defaultFiveChapterLaneTemplateTopFailed.failedCount ?? 0)} 次` : '',
       ...defaultFiveChapterLaneTemplateRedesignLines.map(item => `重构模板：${item}`),
       defaultFiveChapterLaneTemplateValidationStandard.length ? `下一轮验证标准：${defaultFiveChapterLaneTemplateValidationStandard.join('；')}` : '',

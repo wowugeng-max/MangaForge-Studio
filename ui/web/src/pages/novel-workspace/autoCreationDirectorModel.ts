@@ -4674,6 +4674,19 @@ function buildDefaultFiveChapterLaneTemplateProductionRelapseQueue(regression?: 
     .slice()
     .sort((a, b) => b.failed_count - a.failed_count)[0] || null
   const productionRelapseCount = Number(templateVersion?.production_relapse_count ?? templateVersion?.productionRelapseCount ?? 1)
+  const defaultBatchChapterNos = arrayValue(regression.default_batch_chapter_nos || regression.defaultBatchChapterNos)
+    .map((chapterNo: any) => Number(chapterNo))
+    .filter((chapterNo: number) => chapterNo > 0)
+  const restoreChapterNos = arrayValue(regression.restore_chapter_nos || regression.restoreChapterNos)
+    .map((chapterNo: any) => Number(chapterNo))
+    .filter((chapterNo: number) => chapterNo > 0)
+  const validationChapterNos = arrayValue(regression.validation_chapter_nos || regression.validationChapterNos)
+    .map((chapterNo: any) => Number(chapterNo))
+    .filter((chapterNo: number) => chapterNo > 0)
+  const failureReasons = arrayValue(regression.failure_reasons || regression.failureReasons)
+    .map((reason: any) => text(reason))
+    .filter(Boolean)
+  const repeated = regression.repeated_hotspot_segment || regression.repeatedHotspotSegment || null
   return {
     visible: true,
     status: productionRelapseCount >= 2 ? 'redesign' : 'relapsed',
@@ -4684,6 +4697,22 @@ function buildDefaultFiveChapterLaneTemplateProductionRelapseQueue(regression?: 
     template_version_id: templateVersionId,
     template_version: templateVersion ? { ...templateVersion, id: templateVersionId } : { id: templateVersionId },
     production_relapse_count: Math.max(1, Number.isFinite(productionRelapseCount) ? productionRelapseCount : 1),
+    production_relapse_review: {
+      template_version_id: templateVersionId,
+      default_batch_chapter_nos: defaultBatchChapterNos,
+      restore_chapter_nos: restoreChapterNos,
+      validation_chapter_nos: validationChapterNos,
+      failure_reasons: failureReasons,
+      failed_requirements: failedRequirements,
+      ...(repeated ? {
+        repeated_hotspot_segment: {
+          key: text(repeated.key),
+          label: text(repeated.label || repeated.key),
+          risk_count: Number(repeated.risk_count ?? repeated.riskCount ?? repeated.count ?? 0),
+        },
+      } : {}),
+      summary: text(regression.summary),
+    },
     failed_requirements: failedRequirements,
     ...(topFailedRequirement ? {
       top_failed_requirement: {
@@ -10530,6 +10559,76 @@ function normalizeDefaultFiveChapterLaneTemplateRedesignedTemplates(queue: AnyRe
     .filter((item: AnyRecord) => item.key || item.label || item.template)
 }
 
+function normalizeDefaultFiveChapterLaneTemplateFailedRequirements(source: AnyRecord | null | undefined) {
+  return arrayValue(source?.failed_requirements || source?.failedRequirements || source?.template_version_failed_requirements || source?.templateVersionFailedRequirements)
+    .map((item: AnyRecord) => ({
+      key: text(item?.key),
+      label: text(item?.label || item?.name || item?.key, '模板要求'),
+      failure_reason: text(item?.failure_reason || item?.failureReason || item?.reason),
+      failed_count: Number(item?.failed_count ?? item?.failedCount ?? 1),
+    }))
+    .filter((item: AnyRecord) => item.key || item.label || item.failure_reason)
+}
+
+function normalizeDefaultFiveChapterLaneTemplateProductionRelapseReview(
+  source: AnyRecord | null | undefined,
+  fallback: {
+    templateVersionId?: string
+    failedRequirements?: AnyRecord[]
+    summary?: string
+  } = {},
+) {
+  const raw = source?.production_relapse_review || source?.productionRelapseReview || source || null
+  if (!raw) return null
+  const templateVersionId = firstText(
+    raw.template_version_id,
+    raw.templateVersionId,
+    fallback.templateVersionId,
+  )
+  const defaultBatchChapterNos = arrayValue(raw.default_batch_chapter_nos || raw.defaultBatchChapterNos)
+    .map((chapterNo: any) => Number(chapterNo))
+    .filter((chapterNo: number) => chapterNo > 0)
+  const restoreChapterNos = arrayValue(raw.restore_chapter_nos || raw.restoreChapterNos)
+    .map((chapterNo: any) => Number(chapterNo))
+    .filter((chapterNo: number) => chapterNo > 0)
+  const validationChapterNos = arrayValue(raw.validation_chapter_nos || raw.validationChapterNos)
+    .map((chapterNo: any) => Number(chapterNo))
+    .filter((chapterNo: number) => chapterNo > 0)
+  const failureReasons = arrayValue(raw.failure_reasons || raw.failureReasons)
+    .map((reason: any) => text(reason))
+    .filter(Boolean)
+  const failedRequirements = normalizeDefaultFiveChapterLaneTemplateFailedRequirements(raw)
+  const effectiveFailedRequirements = failedRequirements.length
+    ? failedRequirements
+    : arrayValue(fallback.failedRequirements)
+  const repeated = raw.repeated_hotspot_segment || raw.repeatedHotspotSegment || null
+  const summary = firstText(raw.summary, fallback.summary)
+  const hasContent = templateVersionId
+    || defaultBatchChapterNos.length
+    || restoreChapterNos.length
+    || validationChapterNos.length
+    || failureReasons.length
+    || effectiveFailedRequirements.length
+    || summary
+  if (!hasContent) return null
+  return {
+    ...(templateVersionId ? { template_version_id: templateVersionId } : {}),
+    default_batch_chapter_nos: defaultBatchChapterNos,
+    restore_chapter_nos: restoreChapterNos,
+    validation_chapter_nos: validationChapterNos,
+    failure_reasons: failureReasons,
+    failed_requirements: effectiveFailedRequirements,
+    ...(repeated ? {
+      repeated_hotspot_segment: {
+        key: text(repeated.key),
+        label: text(repeated.label || repeated.key),
+        risk_count: Number(repeated.risk_count ?? repeated.riskCount ?? repeated.count ?? 0),
+      },
+    } : {}),
+    ...(summary ? { summary } : {}),
+  }
+}
+
 function defaultFiveChapterLaneTemplateFromRedesignQueue(
   queue: AnyRecord,
   run: AnyRecord,
@@ -10545,11 +10644,46 @@ function defaultFiveChapterLaneTemplateFromRedesignQueue(
       key: text(topFailedRaw.key),
       label: text(topFailedRaw.label || topFailedRaw.key, '模板缺项'),
       failed_count: Number(topFailedRaw.failed_count ?? topFailedRaw.failedCount ?? 0),
+      failure_reason: text(topFailedRaw.failure_reason || topFailedRaw.failureReason),
     }
     : null
+  const templateVersion = queue.template_version || queue.templateVersion || null
+  const templateVersionId = firstText(
+    queue.template_version_id,
+    queue.templateVersionId,
+    templateVersion?.id,
+    fallback.template_version_id,
+    fallback.templateVersionId,
+  )
+  const failedRequirements = normalizeDefaultFiveChapterLaneTemplateFailedRequirements(queue)
+  const productionRelapseReview = normalizeDefaultFiveChapterLaneTemplateProductionRelapseReview(queue, {
+    templateVersionId,
+    failedRequirements,
+    summary: text(queue.summary),
+  })
+  const explicitProductionRelapseCount = Number(queue.production_relapse_count ?? queue.productionRelapseCount ?? 0)
+  const productionRelapseCount = explicitProductionRelapseCount > 0
+    ? explicitProductionRelapseCount
+    : productionRelapseReview ? 1 : 0
+  const productionFailureReasons = arrayValue(productionRelapseReview?.failure_reasons || productionRelapseReview?.failureReasons)
+    .map((reason: any) => text(reason))
+    .filter(Boolean)
+  const productionChapterNos = arrayValue(productionRelapseReview?.default_batch_chapter_nos || productionRelapseReview?.defaultBatchChapterNos)
+    .map((chapterNo: any) => Number(chapterNo))
+    .filter((chapterNo: number) => chapterNo > 0)
   const validationStandard = arrayValue(queue.validation_standard || queue.validationStandard)
     .map(item => text(item))
     .filter(Boolean)
+  const productionValidationStandard = productionRelapseReview
+    ? [
+      templateVersionId ? `下一轮3章验证批必须逐章对照 template_version_id ${templateVersionId} 和真实生产复发章节。` : '',
+      productionFailureReasons.length ? `逐章证明新版模板已修掉真实生产失败维度：${productionFailureReasons.join('、')}。` : '',
+    ].filter(Boolean)
+    : []
+  const effectiveValidationStandard = Array.from(new Set([
+    ...validationStandard,
+    ...productionValidationStandard,
+  ]))
   const requiredReceipts = arrayValue(queue.required_receipts || queue.requiredReceipts || queue.receipts)
     .map(item => text(item))
     .filter(Boolean)
@@ -10579,6 +10713,16 @@ function defaultFiveChapterLaneTemplateFromRedesignQueue(
   const topFailureSummary = topFailedRequirement
     ? `${topFailedRequirement.label}失败 ${topFailedRequirement.failed_count} 次`
     : ''
+  const productionRelapseSummary = productionRelapseReview
+    ? [
+      productionChapterNos.length ? `生产复发章节：${compactChapterNoEvidence(productionChapterNos)}` : '',
+      productionFailureReasons.length ? `失败维度：${productionFailureReasons.join('、')}` : '',
+    ].filter(Boolean).join('；')
+    : ''
+  const baseSummary = text(
+    queue.summary,
+    `默认5章档位模板已完成重构${topFailureSummary ? `：${topFailureSummary}` : ''}。下一轮验证批逐章执行新模板，并证明四项模板没有复发。`,
+  )
 
   return {
     visible: true,
@@ -10589,16 +10733,18 @@ function defaultFiveChapterLaneTemplateFromRedesignQueue(
     source_run_id: run?.id ?? null,
     repaired_at: text(run?.completed_at || run?.finished_at || run?.updated_at || run?.created_at),
     source_repair_summary: text(queue.summary),
+    ...(templateVersionId ? { template_version_id: templateVersionId } : {}),
+    ...(templateVersion ? { template_version: { ...templateVersion, id: templateVersionId || text(templateVersion.id) } } : {}),
+    ...(productionRelapseCount > 0 ? { production_relapse_count: productionRelapseCount } : {}),
+    ...(failedRequirements.length ? { failed_requirements: failedRequirements } : {}),
+    ...(productionRelapseReview ? { production_relapse_review: productionRelapseReview } : {}),
     ...(topFailedRequirement ? { top_failed_requirement: topFailedRequirement } : {}),
     latest_chapter_nos: arrayValue(queue.latest_chapter_nos || queue.latestChapterNos)
       .map((chapterNo: any) => Number(chapterNo))
       .filter((chapterNo: number) => chapterNo > 0),
     validation_batch_count: Number(queue.validation_batch_count ?? queue.validationBatchCount ?? 0),
     failed_batch_count: Number(queue.failed_batch_count ?? queue.failedBatchCount ?? 0),
-    summary: text(
-      queue.summary,
-      `默认5章档位模板已完成重构${topFailureSummary ? `：${topFailureSummary}` : ''}。下一轮验证批逐章执行新模板，并证明四项模板没有复发。`,
-    ),
+    summary: productionRelapseSummary ? `${baseSummary} ${productionRelapseSummary}。` : baseSummary,
     segment_duty_rewrite: segmentDutyRewrite,
     conflict_rotation: conflictRotation,
     payoff_density: payoffDensity,
@@ -10608,17 +10754,19 @@ function defaultFiveChapterLaneTemplateFromRedesignQueue(
       label: text(templateByKey.get(requirement.key)?.label, requirement.label),
       template: templateForRequirement(requirement.key, ''),
     })),
-    validation_standard: validationStandard,
+    validation_standard: effectiveValidationStandard,
     required_receipts: effectiveReceipts,
     requirements: DEFAULT_FIVE_CHAPTER_LANE_TEMPLATE_REQUIREMENTS.map(requirement => {
       const receiptKey = defaultFiveChapterLaneTemplateReceiptKey(requirement.key)
       const templateText = templateForRequirement(requirement.key, '')
+      const productionFailure = failedRequirements.find((item: AnyRecord) => item.key === requirement.key)
       return {
         ...requirement,
         status: 'fulfilled',
         verification_requirement: [
           templateText ? `${requirement.label}新模板：${templateText}` : `${requirement.label}已重构`,
           receiptKey ? `下一轮验证批必须逐章回填 ${receiptKey}` : '',
+          productionFailure?.failure_reason ? `真实生产失败维度：${productionFailure.failure_reason}` : '',
           '并证明该模板没有复发。',
         ].filter(Boolean).join('；'),
       }

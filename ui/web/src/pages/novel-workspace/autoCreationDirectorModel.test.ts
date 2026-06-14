@@ -4215,6 +4215,139 @@ describe('buildAutoCreationDirectorModel', () => {
     })
   })
 
+  test('feeds production relapse template version proof into the next validation batch brief after repair', () => {
+    const productionRelapseChapterNos = [109, 110, 111, 112, 113]
+    const validationChapterNos = [114, 115, 116]
+    const model = buildAutoCreationDirectorModel({
+      planning: readySafeBatchPlanning({ futureRoute: futureRouteRange(114, 5) }),
+      writing: readySafeBatchWriting({
+        nextChapter: { ...baseWriting.nextChapter, id: 114, chapterNo: 114, title: '生产后验验证114' },
+        previousChapter: { chapterNo: 113, title: '生产后验113', wordCount: 3200, hasProse: true },
+      }),
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: { last_updated_chapter: 113 },
+      runRecords: [
+        strengthenedAcceptanceBatchRun({ id: 681, createdAt: '2026-06-27T00:00:00.000Z', chapterNos: [90, 91, 92] }),
+        strengthenedAcceptanceBatchRun({ id: 682, createdAt: '2026-06-28T00:00:00.000Z', chapterNos: [96, 97, 98] }),
+        strengthenedAcceptanceBatchRun({ id: 683, createdAt: '2026-06-29T00:00:00.000Z', chapterNos: [104, 105, 106] }),
+        {
+          id: 684,
+          run_type: 'longform_production_repair',
+          created_at: '2026-06-30T02:00:00.000Z',
+          completed_at: '2026-06-30T02:20:00.000Z',
+          status: 'success',
+          input_ref: JSON.stringify({ source: 'auto_creation_safe_batch_risk' }),
+          output_ref: JSON.stringify({
+            tasks: [{
+              issue_type: 'safe_batch_expansion_structure_repair',
+              task_status: 'resolved',
+              chapter_no: 112,
+              safe_batch_expansion_structure_review: {
+                repeated_hotspot_segment: { key: 'middle', label: '中段', count: 1 },
+                latest_chapter_nos: productionRelapseChapterNos,
+                affected_chapter_nos: [111, 112],
+                default_five_chapter_lane_template_redesign_queue: {
+                  visible: true,
+                  status: 'resolved',
+                  label: '默认档位模板生产复发队列',
+                  source: 'default_five_chapter_lane_production_relapse',
+                  recommendation: 'redesign_template_after_production_relapse',
+                  summary: '默认档位模板版本 safe_batch_expansion_structure_repair:668 在真实5章生产复发，已按生产后验重构。',
+                  template_version_id: 'safe_batch_expansion_structure_repair:668',
+                  template_version: {
+                    id: 'safe_batch_expansion_structure_repair:668',
+                    status: 'relapsed',
+                    pass_streak: 2,
+                    required_pass_streak: 2,
+                  },
+                  production_relapse_count: 1,
+                  production_relapse_review: {
+                    template_version_id: 'safe_batch_expansion_structure_repair:668',
+                    default_batch_chapter_nos: productionRelapseChapterNos,
+                    restore_chapter_nos: [104, 105, 106, 107, 108],
+                    validation_chapter_nos: [96, 97, 98],
+                    failure_reasons: ['核心偏移', '回报欠账', '追读拉力'],
+                    failed_requirements: [
+                      { key: 'default_lane_segment_duty', label: '默认档位段位职责', failure_reason: '核心偏移' },
+                      { key: 'default_lane_payoff_density', label: '回报密度', failure_reason: '回报欠账' },
+                      { key: 'default_lane_ending_hook_template', label: '章末追读模板', failure_reason: '追读拉力' },
+                    ],
+                    summary: '第109-113章真实生产复发，当前模板版本必须证明核心、回报、追读三项后验修复。',
+                  },
+                  failed_requirements: [
+                    { key: 'default_lane_segment_duty', label: '默认档位段位职责', failure_reason: '核心偏移', failed_count: 1 },
+                    { key: 'default_lane_payoff_density', label: '回报密度', failure_reason: '回报欠账', failed_count: 1 },
+                    { key: 'default_lane_ending_hook_template', label: '章末追读模板', failure_reason: '追读拉力', failed_count: 1 },
+                  ],
+                  redesigned_templates: [
+                    { key: 'default_lane_segment_duty', label: '默认档位段位职责', template: '生产后验新模板：每章先标明本章在默认5章中的职责，并用主线选择压住核心。' },
+                    { key: 'default_lane_payoff_density', label: '回报密度', template: '生产后验新模板：每章必须落一个可见收益、反制结果或阶段结算。' },
+                    { key: 'default_lane_ending_hook_template', label: '章末追读模板', template: '生产后验新模板：最后300字必须留下新的风险问题和下一章必看理由。' },
+                  ],
+                  validation_standard: [
+                    '下一轮3章验证批必须逐章回填 default_lane_*_delivered。',
+                  ],
+                  required_receipts: [
+                    'default_lane_segment_duty_delivered',
+                    'default_lane_conflict_rotation_delivered',
+                    'default_lane_payoff_density_delivered',
+                    'default_lane_ending_hook_template_delivered',
+                  ],
+                },
+                structure_actions: [
+                  '按真实生产复发重构当前默认档位模板版本，再回到3章验证批。',
+                ],
+              },
+            }],
+          }),
+        },
+      ],
+    } as any)
+
+    const verification = model.batchGuardrail.nextBatchBrief.expansionStructureVerification
+    const template = verification?.default_five_chapter_lane_template
+
+    expect(model.batchGuardrail.safeChapterCount).toBe(3)
+    expect(verification).toMatchObject({
+      source: 'safe_batch_expansion_structure_repair',
+      validation_chapter_nos: validationChapterNos,
+    })
+    expect(template).toMatchObject({
+      template_version_id: 'safe_batch_expansion_structure_repair:668',
+      production_relapse_count: 1,
+      production_relapse_review: {
+        template_version_id: 'safe_batch_expansion_structure_repair:668',
+        default_batch_chapter_nos: productionRelapseChapterNos,
+        restore_chapter_nos: [104, 105, 106, 107, 108],
+        validation_chapter_nos: [96, 97, 98],
+        failure_reasons: expect.arrayContaining(['核心偏移', '回报欠账', '追读拉力']),
+        failed_requirements: expect.arrayContaining([
+          expect.objectContaining({ key: 'default_lane_segment_duty', failure_reason: '核心偏移' }),
+          expect.objectContaining({ key: 'default_lane_payoff_density', failure_reason: '回报欠账' }),
+          expect.objectContaining({ key: 'default_lane_ending_hook_template', failure_reason: '追读拉力' }),
+        ]),
+      },
+      validation_standard: expect.arrayContaining([
+        '下一轮3章验证批必须逐章对照 template_version_id safe_batch_expansion_structure_repair:668 和真实生产复发章节。',
+      ]),
+    })
+    expect(template?.summary).toContain('safe_batch_expansion_structure_repair:668')
+    expect(template?.summary).toContain('第109、110、111、112、113章')
+    expect(template?.requirements).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        key: 'default_lane_payoff_density',
+        verification_requirement: expect.stringContaining('回报欠账'),
+      }),
+    ]))
+    expect(model.batchGuardrail.preflight.inputSnapshot.safe_batch_expansion_structure_verification.default_five_chapter_lane_template).toMatchObject({
+      template_version_id: 'safe_batch_expansion_structure_repair:668',
+      production_relapse_review: {
+        default_batch_chapter_nos: productionRelapseChapterNos,
+      },
+    })
+  })
+
   test('restores five-chapter expansion after the structure validation batch passes', () => {
     const model = buildAutoCreationDirectorModel({
       planning: readySafeBatchPlanning({ futureRoute: futureRouteRange(53, 5) }),
@@ -5154,6 +5287,16 @@ describe('buildAutoCreationDirectorModel', () => {
         id: 'safe_batch_expansion_structure_repair:668',
       },
       production_relapse_count: 1,
+      production_relapse_review: {
+        template_version_id: 'safe_batch_expansion_structure_repair:668',
+        default_batch_chapter_nos: defaultLaneChapterNos,
+        failure_reasons: expect.arrayContaining(['核心偏移', '回报欠账', '追读拉力']),
+        failed_requirements: expect.arrayContaining([
+          expect.objectContaining({ key: 'default_lane_segment_duty', failure_reason: '核心偏移' }),
+          expect.objectContaining({ key: 'default_lane_payoff_density', failure_reason: '回报欠账' }),
+          expect.objectContaining({ key: 'default_lane_ending_hook_template', failure_reason: '追读拉力' }),
+        ]),
+      },
       failed_requirements: expect.arrayContaining([
         expect.objectContaining({ key: 'default_lane_payoff_density', failure_reason: '回报欠账' }),
       ]),
