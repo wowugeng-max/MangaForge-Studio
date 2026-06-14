@@ -3953,6 +3953,19 @@ describe('buildAutoCreationDirectorModel', () => {
                   repeated_hotspot_segment: { key: 'middle', label: '中段', count: 2 },
                   latest_chapter_nos: [13, 14, 15, 16, 17],
                   affected_chapter_nos: [15, 16],
+                  default_five_chapter_lane_template_repair: {
+                    visible: true,
+                    label: '默认档位模板验证缺项',
+                    summary: '默认档位模板回检未通过：第91章缺回报密度，结构修复已补入下一轮任务书。',
+                    validation_chapter_nos: [90, 91, 92],
+                    missing_count: 1,
+                    missing_requirements: [
+                      { key: 'default_lane_payoff_density', label: '回报密度', chapter_nos: [91] },
+                    ],
+                    repair_actions: [
+                      '回报密度修复：第91章必须补出显性回报，让读者看到收益、反制结果或阶段结算。',
+                    ],
+                  },
                   structure_actions: [
                     '重写中段固定职责：每批第3-4章必须完成主线转折、显性回报和章末追读。',
                     '批次节奏重排：前段抛压，中段兑现并升级，后段留钩。',
@@ -4013,8 +4026,11 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(verification?.default_five_chapter_lane_template).toMatchObject({
       visible: true,
       status: 'fulfilled',
-      source: 'safe_batch_expansion_structure_decision_mismatch',
+      source: 'safe_batch_expansion_structure_repair',
       source_run_id: 594,
+      repaired_missing_requirements: [
+        { key: 'default_lane_payoff_density', label: '回报密度', chapter_nos: [91] },
+      ],
       requirements: [
         { key: 'default_lane_segment_duty', label: '默认档位段位职责', status: 'fulfilled' },
         { key: 'default_lane_conflict_rotation', label: '冲突轮换', status: 'fulfilled' },
@@ -4022,7 +4038,9 @@ describe('buildAutoCreationDirectorModel', () => {
         { key: 'default_lane_ending_hook_template', label: '章末追读模板', status: 'fulfilled' },
       ],
     })
+    expect((verification?.default_five_chapter_lane_template?.repair_actions || []).join('\n')).toContain('第91章必须补出显性回报')
     expect(verification?.default_five_chapter_lane_template?.summary).toContain('下一轮验证批逐章继承')
+    expect(verification?.default_five_chapter_lane_template?.summary).toContain('第91章缺回报密度')
     expect(verification?.default_five_chapter_lane_template?.segment_duty_rewrite).toContain('前段压迫')
     expect(verification?.default_five_chapter_lane_template?.conflict_rotation).toContain('三类轮换')
     expect(verification?.default_five_chapter_lane_template?.payoff_density).toContain('显性回报')
@@ -4038,6 +4056,7 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(model.batchGuardrail.preflight.inputSnapshot.next_batch_brief.expansionStructureVerification.default_five_chapter_lane_template?.requirements).toEqual(expect.arrayContaining([
       expect.objectContaining({ key: 'default_lane_segment_duty', status: 'fulfilled' }),
     ]))
+    expect((model.batchGuardrail.preflight.inputSnapshot.next_batch_brief.expansionStructureVerification.default_five_chapter_lane_template?.repair_actions || []).join('\n')).toContain('第91章必须补出显性回报')
     expect(model.batchGuardrail.preflight.inputSnapshot.safe_batch_expansion_structure_verification).toMatchObject({
       validation_chapter_nos: [50, 51, 52],
     })
@@ -4045,6 +4064,9 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(model.batchGuardrail.preflight.inputSnapshot.safe_batch_expansion_structure_verification.default_five_chapter_lane_template?.requirements).toEqual(expect.arrayContaining([
       expect.objectContaining({ key: 'default_lane_ending_hook_template', status: 'fulfilled' }),
     ]))
+    expect(model.batchGuardrail.preflight.inputSnapshot.safe_batch_expansion_structure_verification.default_five_chapter_lane_template?.repaired_missing_requirements).toEqual([
+      expect.objectContaining({ key: 'default_lane_payoff_density', chapter_nos: [91] }),
+    ])
   })
 
   test('restores five-chapter expansion after the structure validation batch passes', () => {

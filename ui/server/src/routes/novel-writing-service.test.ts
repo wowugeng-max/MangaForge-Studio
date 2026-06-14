@@ -663,6 +663,12 @@ describe('chapter prose word target', () => {
               conflict_rotation: '冲突轮换：规则压迫、人物对抗、信息误导三类轮换。',
               payoff_density: '回报密度：每章至少交付一个显性回报。',
               ending_hook_template: '章末追读模板：最后 300 字落触发事件、读者问题、下一章风险。',
+              repaired_missing_requirements: [
+                { key: 'default_lane_payoff_density', label: '回报密度', chapter_nos: [91] },
+              ],
+              repair_actions: [
+                '回报密度修复：第91章必须补出显性回报，让读者看到收益、反制结果或阶段结算。',
+              ],
               requirements: [
                 { key: 'default_lane_segment_duty', label: '默认档位段位职责', status: 'fulfilled' },
                 { key: 'default_lane_conflict_rotation', label: '冲突轮换', status: 'fulfilled' },
@@ -692,6 +698,8 @@ describe('chapter prose word target', () => {
     expect(prompt).toContain('冲突轮换：规则压迫')
     expect(prompt).toContain('回报密度：每章至少交付')
     expect(prompt).toContain('章末追读模板：最后 300 字')
+    expect(prompt).toContain('模板缺项修复：第91章缺回报密度')
+    expect(prompt).toContain('缺项修复动作：回报密度修复：第91章必须补出显性回报')
     expect(prompt).toContain('逐章证明四项模板没有复发')
     expect(prompt).toContain('default_lane_segment_duty_delivered')
     expect(prompt).toContain('default_lane_conflict_rotation_delivered')

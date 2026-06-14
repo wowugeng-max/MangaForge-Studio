@@ -1233,10 +1233,11 @@
 - 默认档位模板四项回检结果已写入下一轮验证批任务书、正文 prompt 和复盘。已处理的 `safe_batch_expansion_structure_decision_mismatch` 会回流为 `next_batch_brief.expansionStructureVerification.default_five_chapter_lane_template`，验证批 prompt 会要求逐章继承段位职责、冲突轮换、回报密度和章末追读模板；验证批复盘会输出 `default_five_chapter_lane_template_verdict`，若任一章节漏回填 `default_lane_*_delivered`，会把该项计入结构验证风险，阻止直接恢复默认 5 章档位。
 - 默认档位模板验证判定已展示到任务中心批量生成摘要。3 章验证批完成后，摘要会在 `3章验证批` 卡片里直接显示 `默认档位模板回检`：全部通过时标出四项模板全过；未通过时按章节显示缺的是 `默认档位段位职责`、`冲突轮换`、`回报密度` 还是 `章末追读模板`，作者不用再打开 JSON 复盘查漏项。
 - 默认档位模板验证缺项已反向写入后续结构修复任务书。如果 3 章验证批缺某项模板，风险雷达会把 `default_five_chapter_lane_template_verdict` 翻译为 `default_five_chapter_lane_template_repair`，写入 `safe_batch_expansion_structure_repair` 的 message/action 和修订 prompt；修复提示会明确 `第91章缺回报密度` 这类缺项、对应修复动作，以及必须回填的 `default_lane_*_delivered` 字段。
+- 默认档位模板缺项修复结果已回流进下一轮验证批任务书。已解决的 `safe_batch_expansion_structure_repair` 若包含 `default_five_chapter_lane_template_repair`，下一轮 `next_batch_brief.expansionStructureVerification.default_five_chapter_lane_template` 会继承来源 run、`repaired_missing_requirements` 和 `repair_actions`；preflight 快照与正文 prompt 会明确 `第91章缺回报密度` 这类原始缺口和修复动作，要求验证批逐章证明这些缺项没有复发。
 
 推荐下一步：
 
-- 将默认档位模板缺项修复结果回流进下一轮验证批任务书：当 `safe_batch_expansion_structure_repair` 解决了某章的模板缺项后，下一轮 `next_batch_brief.expansionStructureVerification` 应继承本次缺项修复动作，要求验证批逐章证明这些缺项没有复发。
+- 将默认档位模板缺项修复后的验证通过/复发趋势沉淀为长期模板稳定性证据：当验证批通过或再次复发时，`default_five_chapter_lane_template_verdict` 应累计到默认 5 章档位稳定性画像，用于判断继续 3 章观察、恢复默认 5 章，还是升级模板重构。
 
 ## 8. 使用说明维护规则
 

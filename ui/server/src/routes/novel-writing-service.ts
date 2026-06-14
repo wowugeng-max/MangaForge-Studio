@@ -1934,6 +1934,23 @@ function normalizeDefaultFiveChapterLaneTemplate(value: any) {
     }))
     .filter((item: any) => item.key || item.label || item.verification_requirement)
     .slice(0, 8)
+  const repairedMissingRequirements = asArray(
+    raw.repaired_missing_requirements
+      || raw.repairedMissingRequirements
+      || raw.missing_requirements
+      || raw.missingRequirements,
+  )
+    .map((item: any) => ({
+      key: compactBriefText(item?.key),
+      label: compactBriefText(item?.label || item?.name || item?.key),
+      chapter_nos: asArray(item?.chapter_nos || item?.chapterNos || item?.chapters)
+        .map((chapterNo: any) => Number(chapterNo))
+        .filter((chapterNo: number) => chapterNo > 0)
+        .slice(0, 10),
+    }))
+    .filter((item: any) => item.key || item.label || item.chapter_nos.length)
+    .slice(0, 8)
+  const repairActions = uniqueBriefStrings(raw.repair_actions || raw.repairActions || [], 8)
   const normalized = {
     visible: true,
     status: compactBriefText(raw.status || 'fulfilled'),
@@ -1946,6 +1963,8 @@ function normalizeDefaultFiveChapterLaneTemplate(value: any) {
     conflict_rotation: compactBriefText(raw.conflict_rotation || raw.conflictRotation),
     payoff_density: compactBriefText(raw.payoff_density || raw.payoffDensity),
     ending_hook_template: compactBriefText(raw.ending_hook_template || raw.endingHookTemplate),
+    repaired_missing_requirements: repairedMissingRequirements,
+    repair_actions: repairActions,
     requirements,
   }
   const hasContent = normalized.summary
@@ -1953,6 +1972,8 @@ function normalizeDefaultFiveChapterLaneTemplate(value: any) {
     || normalized.conflict_rotation
     || normalized.payoff_density
     || normalized.ending_hook_template
+    || normalized.repaired_missing_requirements.length
+    || normalized.repair_actions.length
     || normalized.requirements.length
   return hasContent ? normalized : null
 }
@@ -5588,6 +5609,17 @@ export function createNovelWritingService(ctx: {
     const defaultFiveChapterLaneTemplateRequirementLabels = asArray(defaultFiveChapterLaneTemplate?.requirements)
       .map((item: any) => compactBriefText(item?.label || item?.key))
       .filter(Boolean)
+    const defaultFiveChapterLaneTemplateRepairSummaries = asArray(defaultFiveChapterLaneTemplate?.repaired_missing_requirements)
+      .map((item: any) => {
+        const label = compactBriefText(item?.label || item?.key || '模板要求')
+        const chapters = chapterNosBrief(item?.chapter_nos || item?.chapterNos)
+        return label ? `${chapters ? `${chapters}缺` : '缺'}${label}` : ''
+      })
+      .filter(Boolean)
+    const defaultFiveChapterLaneTemplateRepairActions = uniqueBriefStrings(
+      defaultFiveChapterLaneTemplate?.repair_actions || defaultFiveChapterLaneTemplate?.repairActions || [],
+      8,
+    )
     const batchPreflight = contextPackage?.chapter_target?.batch_preflight || contextPackage?.batch_preflight || null
     const batchDeliveryRiskCarryOver = normalizeDeliveryRiskCarryOverContext(
       batchPreflight?.delivery_risk_carry_over
@@ -5790,6 +5822,8 @@ export function createNovelWritingService(ctx: {
       defaultFiveChapterLaneTemplate?.conflict_rotation ? `冲突轮换：${defaultFiveChapterLaneTemplate.conflict_rotation}` : '',
       defaultFiveChapterLaneTemplate?.payoff_density ? `回报密度：${defaultFiveChapterLaneTemplate.payoff_density}` : '',
       defaultFiveChapterLaneTemplate?.ending_hook_template ? `章末追读模板：${defaultFiveChapterLaneTemplate.ending_hook_template}` : '',
+      defaultFiveChapterLaneTemplateRepairSummaries.length ? `模板缺项修复：${defaultFiveChapterLaneTemplateRepairSummaries.join('；')}` : '',
+      defaultFiveChapterLaneTemplateRepairActions.length ? `缺项修复动作：${defaultFiveChapterLaneTemplateRepairActions.join('；')}` : '',
       defaultFiveChapterLaneTemplate ? '默认档位模板验证要求：下一轮验证批逐章继承段位职责、冲突轮换、回报密度和章末追读模板，并逐章证明四项模板没有复发。' : '',
       defaultFiveChapterRegression ? `默认5章档位回退：${defaultFiveChapterRegression.summary || defaultFiveChapterRegression.label || '默认档位复发，需要回到3章验证批。'}` : '',
       defaultFiveChapterRegression?.default_batch_chapter_nos?.length ? `失效批次：${chapterNosBrief(defaultFiveChapterRegression.default_batch_chapter_nos)}` : '',

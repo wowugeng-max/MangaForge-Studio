@@ -9798,6 +9798,85 @@ function defaultFiveChapterLaneTemplateFromTask(task: AnyRecord, run: AnyRecord)
   }
 }
 
+function defaultFiveChapterLaneTemplateFromStructureRepairTask(
+  task: AnyRecord,
+  run: AnyRecord,
+  fallbackTemplate?: AnyRecord | null,
+) {
+  const review = task?.safe_batch_expansion_structure_review
+    || task?.safeBatchExpansionStructureReview
+    || task?.structure_review
+    || task?.structureReview
+    || null
+  const repair = review?.default_five_chapter_lane_template_repair
+    || review?.defaultFiveChapterLaneTemplateRepair
+    || review?.validation_result?.default_five_chapter_lane_template_verdict
+    || review?.validationResult?.defaultFiveChapterLaneTemplateVerdict
+    || null
+  if (!repair || repair.visible === false) return null
+  const repairedMissingRequirements = arrayValue(repair.missing_requirements || repair.missingRequirements)
+    .map((item: AnyRecord) => ({
+      key: text(item?.key),
+      label: text(item?.label || item?.key, '模板缺项'),
+      chapter_nos: arrayValue(item?.chapter_nos || item?.chapterNos)
+        .map((chapterNo: any) => Number(chapterNo))
+        .filter((chapterNo: number) => chapterNo > 0),
+    }))
+    .filter((item: AnyRecord) => item.key || item.label || item.chapter_nos.length)
+  if (!repairedMissingRequirements.length) return null
+  const repairActions = arrayValue(repair.repair_actions || repair.repairActions)
+    .map(item => text(item))
+    .filter(Boolean)
+  const repairSummary = text(repair.repair_summary || repair.repairSummary)
+    || repairedMissingRequirements
+      .map((item: AnyRecord) => `${compactChapterNoEvidence(item.chapter_nos)}缺${item.label}`)
+      .join('；')
+  const requirementLabels = DEFAULT_FIVE_CHAPTER_LANE_TEMPLATE_REQUIREMENTS.map(item => item.label)
+  const fallback = fallbackTemplate || {}
+  return {
+    visible: true,
+    status: 'fulfilled',
+    label: text(fallback.label, '默认5章档位模板回检'),
+    source: 'safe_batch_expansion_structure_repair',
+    source_run_id: run?.id ?? null,
+    repaired_at: text(run?.completed_at || run?.finished_at || run?.updated_at || run?.created_at),
+    source_repair_summary: text(repair.summary),
+    segment_duty_rewrite: firstText(
+      fallback.segment_duty_rewrite,
+      fallback.segmentDutyRewrite,
+      '默认 5 章档位验证批必须逐章继承前段、中段、后段的段位职责模板。',
+    ),
+    conflict_rotation: firstText(
+      fallback.conflict_rotation,
+      fallback.conflictRotation,
+      '默认 5 章档位验证批必须逐章轮换冲突来源，避免同一压迫方式复发。',
+    ),
+    payoff_density: firstText(
+      fallback.payoff_density,
+      fallback.payoffDensity,
+      '默认 5 章档位验证批必须逐章交付显性回报，不能连续铺垫。',
+    ),
+    ending_hook_template: firstText(
+      fallback.ending_hook_template,
+      fallback.endingHookTemplate,
+      '默认 5 章档位验证批必须逐章落地章末追读模板。',
+    ),
+    repaired_missing_requirements: repairedMissingRequirements,
+    repair_actions: repairActions,
+    requirements: DEFAULT_FIVE_CHAPTER_LANE_TEMPLATE_REQUIREMENTS.map(requirement => {
+      const repaired = repairedMissingRequirements.find((item: AnyRecord) => item.key === requirement.key)
+      return {
+        ...requirement,
+        status: 'fulfilled',
+        verification_requirement: repaired
+          ? `${requirement.label}已按${compactChapterNoEvidence(repaired.chapter_nos)}缺项修复，下一轮验证批必须逐章证明没有复发。`
+          : `${requirement.label}已补齐，下一轮验证批必须逐章继承并证明没有复发。`,
+      }
+    }),
+    summary: `默认5章档位模板已补齐：${requirementLabels.join('、')}。${repairSummary}已写入结构修复，下一轮验证批逐章继承四项模板，并证明这些缺项没有复发。`,
+  }
+}
+
 function buildResolvedDefaultFiveChapterLaneTemplateSeed(runRecords: AnyRecord[]) {
   const repairEntries = arrayValue(runRecords)
     .filter(run => text(run?.run_type) === 'longform_production_repair')
@@ -9862,6 +9941,12 @@ function buildResolvedSafeBatchExpansionStructureVerificationSeed(runRecords: An
       const defaultFailureReasons = arrayValue(defaultFiveChapterRegression?.failure_reasons || defaultFiveChapterRegression?.failureReasons)
         .map(item => text(item))
         .filter(Boolean)
+      const defaultFiveChapterLaneTemplateFromRepair = defaultFiveChapterLaneTemplateFromStructureRepairTask(
+        task,
+        entry.run,
+        defaultFiveChapterLaneTemplate,
+      )
+      const effectiveDefaultFiveChapterLaneTemplate = defaultFiveChapterLaneTemplateFromRepair || defaultFiveChapterLaneTemplate
       return {
         source: 'safe_batch_expansion_structure_repair',
         label: '扩批结构验证',
@@ -9897,7 +9982,7 @@ function buildResolvedSafeBatchExpansionStructureVerificationSeed(runRecords: An
           ? `每章章末必须留下不同的章末追读问题，并把下一章必看理由压到最后一幕；${defaultFailureReasons.includes('追读拉力') ? '必须逐章修复追读拉力。' : '必须逐章证明章末追读稳定。'}`
           : '每章章末必须留下不同的章末追读问题，并把下一章必看理由压到最后一幕。',
         structure_actions: actions,
-        ...(defaultFiveChapterLaneTemplate ? { default_five_chapter_lane_template: defaultFiveChapterLaneTemplate } : {}),
+        ...(effectiveDefaultFiveChapterLaneTemplate ? { default_five_chapter_lane_template: effectiveDefaultFiveChapterLaneTemplate } : {}),
         ...(defaultRegressionVisible ? { default_five_chapter_regression: defaultFiveChapterRegression } : {}),
       }
     }
