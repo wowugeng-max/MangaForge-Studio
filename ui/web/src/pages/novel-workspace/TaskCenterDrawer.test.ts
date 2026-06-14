@@ -1753,6 +1753,50 @@ describe('buildSafeBatchExpansionPolicySnapshot', () => {
       nextActionLabel: '刷新路线图并启动验证批',
     })
   })
+
+  test('summarizes resolved default lane template focus by four obligations', () => {
+    const focus = {
+      layerKey: 'structure_decision_execution',
+      layerLabel: '结构决策执行',
+      actionLabel: '补默认档位模板',
+      targetView: 'repair_task',
+      issueType: 'safe_batch_expansion_structure_decision_mismatch',
+      source: 'safe_batch_expansion_structure_decision_trend',
+      taskStatuses: ['open', 'needs_review'],
+      taskCenterFilterLabel: '默认档位模板',
+      requirementKey: 'default_lane_template',
+    }
+    const state = buildSafeBatchRecoveryFocusReviewState(focus, [{
+      task: {
+        issue_type: 'safe_batch_expansion_structure_decision_mismatch',
+        task_status: 'resolved',
+        safe_batch_expansion_structure_decision_review: {
+          default_five_chapter_lane_redesign: {
+            reason: 'repeated_recovery_verdict_relapse',
+            relapse_count: 2,
+          },
+          failed_items: [
+            { key: 'default_lane_segment_duty', label: '默认档位段位职责', count: 1 },
+            { key: 'default_lane_conflict_rotation', label: '冲突轮换', count: 1 },
+            { key: 'default_lane_payoff_density', label: '回报密度', count: 1 },
+            { key: 'default_lane_ending_hook_template', label: '章末追读模板', count: 1 },
+          ],
+        },
+      },
+    }])
+
+    expect(state.status).toBe('ready_for_recheck')
+    expect(state.summary).toContain('默认档位段位职责已补齐')
+    expect(state.summary).toContain('冲突轮换已补齐')
+    expect(state.summary).toContain('回报密度已补齐')
+    expect(state.summary).toContain('章末追读模板已补齐')
+    expect((state as any).obligationStatuses).toEqual([
+      { key: 'default_lane_segment_duty', label: '默认档位段位职责', status: 'fulfilled', text: '默认档位段位职责已补齐', color: 'green' },
+      { key: 'default_lane_conflict_rotation', label: '冲突轮换', status: 'fulfilled', text: '冲突轮换已补齐', color: 'green' },
+      { key: 'default_lane_payoff_density', label: '回报密度', status: 'fulfilled', text: '回报密度已补齐', color: 'green' },
+      { key: 'default_lane_ending_hook_template', label: '章末追读模板', status: 'fulfilled', text: '章末追读模板已补齐', color: 'green' },
+    ])
+  })
 })
 
 describe('default lane repair task card helpers', () => {

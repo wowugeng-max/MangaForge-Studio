@@ -1031,6 +1031,21 @@ type RepairTaskTagMeta = {
   color: string
 }
 
+const DEFAULT_LANE_TEMPLATE_REQUIREMENTS = [
+  { key: 'default_lane_segment_duty', label: '默认档位段位职责' },
+  { key: 'default_lane_conflict_rotation', label: '冲突轮换' },
+  { key: 'default_lane_payoff_density', label: '回报密度' },
+  { key: 'default_lane_ending_hook_template', label: '章末追读模板' },
+]
+
+type DefaultLaneObligationStatus = {
+  key: string
+  label: string
+  status: 'fulfilled' | 'missing' | 'unverified'
+  text: string
+  color: string
+}
+
 function structureDecisionRepairReviewOfTask(task: any) {
   return task?.safe_batch_expansion_structure_decision_review
     || task?.safeBatchExpansionStructureDecisionReview
@@ -1069,11 +1084,10 @@ function defaultLaneFailedRequirementsOfTask(task: any) {
       count: Math.max(Number(current?.count || 0), Number(item?.count || 1)),
     })
   })
-  const order = ['default_lane_segment_duty', 'default_lane_conflict_rotation', 'default_lane_payoff_density', 'default_lane_ending_hook_template']
   return Array.from(byKey.values())
     .sort((a, b) => {
-      const orderA = order.indexOf(a.key)
-      const orderB = order.indexOf(b.key)
+      const orderA = DEFAULT_LANE_TEMPLATE_REQUIREMENTS.findIndex(item => item.key === a.key)
+      const orderB = DEFAULT_LANE_TEMPLATE_REQUIREMENTS.findIndex(item => item.key === b.key)
       return (orderA < 0 ? 99 : orderA) - (orderB < 0 ? 99 : orderB)
     })
 }
@@ -1102,6 +1116,48 @@ function repairTaskFocusRequirementMatches(requirementKey: string, task: any) {
   if (!requirementKey) return true
   if (requirementKey === 'default_lane_template') return buildDefaultLaneRepairTaskTags(task).length > 0
   return defaultLaneFailedRequirementsOfTask(task).some(item => item.key === requirementKey)
+}
+
+function buildDefaultLaneFocusObligationStatuses(
+  focus: SafeBatchRecoveryFocusSnapshot | null | undefined,
+  activeItems: any[],
+  resolvedItems: any[],
+): DefaultLaneObligationStatus[] {
+  if (focus?.requirementKey !== 'default_lane_template') return []
+  if (!activeItems.length && !resolvedItems.length) return []
+  const activeFailed = new Set(activeItems.flatMap((item: any) => (
+    defaultLaneFailedRequirementsOfTask(item?.task || item).map(requirement => requirement.key)
+  )))
+  const resolvedFailed = new Set(resolvedItems.flatMap((item: any) => (
+    defaultLaneFailedRequirementsOfTask(item?.task || item).map(requirement => requirement.key)
+  )))
+  return DEFAULT_LANE_TEMPLATE_REQUIREMENTS.map(requirement => {
+    if (activeFailed.has(requirement.key)) {
+      return {
+        ...requirement,
+        status: 'missing' as const,
+        text: `${requirement.label}待补齐`,
+        color: 'gold',
+      }
+    }
+    if (resolvedItems.length > 0) {
+      const text = resolvedFailed.has(requirement.key)
+        ? `${requirement.label}已补齐`
+        : `${requirement.label}已具备`
+      return {
+        ...requirement,
+        status: 'fulfilled' as const,
+        text,
+        color: 'green',
+      }
+    }
+    return {
+      ...requirement,
+      status: 'unverified' as const,
+      text: `${requirement.label}待确认`,
+      color: 'default',
+    }
+  })
 }
 
 function compactEvidenceText(value: any, maxLength?: number) {
@@ -1446,10 +1502,14 @@ export function buildSafeBatchRecoveryFocusReviewState(focus: SafeBatchRecoveryF
     : status === 'ready_for_recheck'
       ? '刷新路线图并启动验证批'
       : '等待匹配任务'
+  const obligationStatuses = buildDefaultLaneFocusObligationStatuses(focus, activeItems, resolvedItems)
+  const obligationSummary = obligationStatuses.length
+    ? `四项回检：${obligationStatuses.map(item => item.text).join('、')}。`
+      : ''
   const summary = status === 'active'
-    ? `${actionLabel}仍有 ${activeItems.length} 个待处理任务，先闭环后再回到安全连写验证。`
+    ? `${actionLabel}仍有 ${activeItems.length} 个待处理任务，${obligationSummary}先闭环后再回到安全连写验证。`
     : status === 'ready_for_recheck'
-      ? `${actionLabel}已处理 ${resolvedItems.length} 个匹配任务，刷新路线图后可判断启动验证批还是继续修下一层。`
+      ? `${actionLabel}已处理 ${resolvedItems.length} 个匹配任务，${obligationSummary}刷新路线图后可判断启动验证批还是继续修下一层。`
       : '暂未找到路线图匹配任务，可打开最近安全连写或修复历史查看复盘记录。'
   return {
     status,
@@ -1460,6 +1520,7 @@ export function buildSafeBatchRecoveryFocusReviewState(focus: SafeBatchRecoveryF
     resolvedItems,
     nextActionLabel,
     summary,
+    obligationStatuses,
   }
 }
 
@@ -3971,6 +4032,13 @@ export function TaskCenterDrawer({
                 <Text type="secondary" style={{ fontSize: 12 }}>
                   {safeBatchRecoveryFocusReviewState.summary}
                 </Text>
+                {safeBatchRecoveryFocusReviewState.obligationStatuses.length > 0 && (
+                  <Space wrap>
+                    {safeBatchRecoveryFocusReviewState.obligationStatuses.map(item => (
+                      <Tag key={item.key} color={item.color} bordered={false}>{item.text}</Tag>
+                    ))}
+                  </Space>
+                )}
                 <Space wrap>
                   <Button
                     size="small"
