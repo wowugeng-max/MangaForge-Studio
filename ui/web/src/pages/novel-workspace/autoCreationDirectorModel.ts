@@ -4465,6 +4465,75 @@ function buildDefaultFiveChapterLaneTemplateRepair(verdict?: AnyRecord | null) {
   }
 }
 
+function defaultFiveChapterLaneTemplateRedesignInstruction(requirement: AnyRecord) {
+  const key = text(requirement?.key)
+  if (key === 'default_lane_segment_duty') return '重写每章在5章档位中的前段/中段/后段职责，明确这一章承担抛压、转折、兑现或留钩中的哪一段。'
+  if (key === 'default_lane_conflict_rotation') return '重写规则压迫、人物对抗、信息误导的轮换顺序，避免验证批连续使用同一冲突来源。'
+  if (key === 'default_lane_payoff_density') return '重写每章显性回报预算，规定每章至少交付收益、反制结果或阶段结算，避免连续铺垫。'
+  if (key === 'default_lane_ending_hook_template') return '重写最后300字触发事件、读者问题和下一章风险，让章末追读模板逐章可验证。'
+  return '重写该模板项，并给下一轮验证批设置逐章可回填的交付标准。'
+}
+
+function buildDefaultFiveChapterLaneTemplateRedesignQueue(profile?: AnyRecord | null) {
+  if (!profile || profile.visible === false) return null
+  const recommendation = text(profile.recommendation)
+  const status = text(profile.status)
+  if (recommendation !== 'escalate_template_redesign' && status !== 'redesign') return null
+
+  const requirementStats = arrayValue(profile.requirements || profile.template_requirements || profile.templateRequirements)
+    .map((item: AnyRecord) => ({
+      key: text(item?.key),
+      label: text(item?.label || item?.key, '模板项'),
+      failed_count: Number(item?.failed_count ?? item?.failedCount ?? 0),
+      passed_count: Number(item?.passed_count ?? item?.passedCount ?? 0),
+      latest_status: text(item?.latest_status || item?.latestStatus),
+    }))
+    .filter((item: AnyRecord) => item.key || item.label)
+  const explicitTop = profile.top_failed_requirement || profile.topFailedRequirement || null
+  const topSource = explicitTop && typeof explicitTop === 'object' && !Array.isArray(explicitTop)
+    ? explicitTop
+    : requirementStats
+      .filter((item: AnyRecord) => item.failed_count > 0)
+      .sort((a: AnyRecord, b: AnyRecord) => b.failed_count - a.failed_count)[0] || null
+  const topFailedRequirement = topSource ? {
+    key: text(topSource.key),
+    label: text(topSource.label || topSource.key, '模板缺项'),
+    failed_count: Number(topSource.failed_count ?? topSource.failedCount ?? 0),
+  } : null
+  const topFailureText = topFailedRequirement
+    ? `${topFailedRequirement.label}失败 ${topFailedRequirement.failed_count} 次`
+    : '同项模板反复失败'
+  const redesignRequirements = DEFAULT_FIVE_CHAPTER_LANE_TEMPLATE_REQUIREMENTS.map(requirement => {
+    const stat = requirementStats.find((item: AnyRecord) => item.key === requirement.key)
+    return {
+      key: requirement.key,
+      label: text(stat?.label, requirement.label),
+      failed_count: Number(stat?.failed_count || 0),
+      instruction: defaultFiveChapterLaneTemplateRedesignInstruction(requirement),
+    }
+  })
+
+  return {
+    visible: true,
+    status: 'redesign',
+    label: '默认档位模板重构队列',
+    source: 'default_five_chapter_lane_template_stability_profile',
+    recommendation: 'escalate_template_redesign',
+    summary: text(profile.summary, `默认档位模板同项复发，${topFailureText}，需要升级模板重构。`),
+    latest_chapter_nos: arrayValue(profile.latest_chapter_nos || profile.latestChapterNos)
+      .map((chapterNo: any) => Number(chapterNo))
+      .filter((chapterNo: number) => chapterNo > 0),
+    validation_batch_count: Number(profile.validation_batch_count ?? profile.validationBatchCount ?? 0),
+    failed_batch_count: Number(profile.failed_batch_count ?? profile.failedBatchCount ?? 0),
+    ...(topFailedRequirement ? { top_failed_requirement: topFailedRequirement } : {}),
+    redesign_requirements: redesignRequirements,
+    validation_standard: [
+      '下一轮3章验证批必须逐章回填 default_lane_*_delivered。',
+      '连续2批模板全过后才能恢复默认5章档位。',
+    ],
+  }
+}
+
 function buildSafeBatchExpansionStructureValidationResult(args: {
   preflight?: AnyRecord | null
   chapterRisks: AnyRecord[]
@@ -7903,6 +7972,9 @@ function buildBatchRiskRadar(args: {
   const safeBatchExpansionStructureValidationTrend = args.expansionFeedback?.expansionStructureValidationTrend
     || args.expansionFeedback?.expansion_structure_validation_trend
     || null
+  const defaultLaneTemplateStabilityProfile = args.expansionFeedback?.defaultFiveChapterLaneTemplateStabilityProfile
+    || args.expansionFeedback?.default_five_chapter_lane_template_stability_profile
+    || null
   if (safeBatchExpansionStructureDecisionRiskTotal > 0 && successfulItems.length > 0) {
     const failedChapterNo = Number(effectiveSafeBatchExpansionStructureDecisionReview.missed_chapter_nos?.[0] || 0)
     const failedItem = successfulItems.find(item => Number(item.chapterNo || 0) === failedChapterNo) || successfulItems[0]
@@ -7990,9 +8062,15 @@ function buildBatchRiskRadar(args: {
     const defaultLaneTemplateRepair = buildDefaultFiveChapterLaneTemplateRepair(
       safeBatchExpansionStructureValidationResult.default_five_chapter_lane_template_verdict,
     )
+    const defaultLaneTemplateRedesignQueue = buildDefaultFiveChapterLaneTemplateRedesignQueue(
+      defaultLaneTemplateStabilityProfile,
+    )
     const defaultLaneTemplateRepairSummary = text(defaultLaneTemplateRepair?.repair_summary)
     const defaultLaneTemplateRepairActions = arrayValue(defaultLaneTemplateRepair?.repair_actions)
       .map(item => text(item))
+      .filter(Boolean)
+    const defaultLaneTemplateRedesignActions = arrayValue(defaultLaneTemplateRedesignQueue?.redesign_requirements)
+      .map((item: AnyRecord) => text(item?.instruction))
       .filter(Boolean)
     const rollbackPolicy = safeBatchExpansionRollbackPolicy({
       riskCount: safeBatchExpansionStructureValidationRiskTotal,
@@ -8011,7 +8089,14 @@ function buildBatchRiskRadar(args: {
       ...(defaultLaneTemplateRepair ? {
         default_five_chapter_lane_template_repair: defaultLaneTemplateRepair,
       } : {}),
+      ...(defaultLaneTemplateStabilityProfile ? {
+        default_five_chapter_lane_template_stability_profile: defaultLaneTemplateStabilityProfile,
+      } : {}),
+      ...(defaultLaneTemplateRedesignQueue ? {
+        default_five_chapter_lane_template_redesign_queue: defaultLaneTemplateRedesignQueue,
+      } : {}),
       structure_actions: [
+        ...defaultLaneTemplateRedesignActions,
         ...defaultLaneTemplateRepairActions,
         safeBatchExpansionStructureValidationResult.fixed_segment_role,
         safeBatchExpansionStructureValidationResult.conflict_rotation,
@@ -8034,11 +8119,15 @@ function buildBatchRiskRadar(args: {
       item: failedItem,
       issueType: 'safe_batch_expansion_structure_repair',
       taskType: 'repair_planning',
-      severity: safeBatchExpansionStructureValidationResult.core_risk_count > 0 || safeBatchExpansionStructureValidationRiskTotal >= 2 ? 'high' : 'medium',
-      message: defaultLaneTemplateRepair
+      severity: defaultLaneTemplateRedesignQueue || safeBatchExpansionStructureValidationResult.core_risk_count > 0 || safeBatchExpansionStructureValidationRiskTotal >= 2 ? 'high' : 'medium',
+      message: defaultLaneTemplateRedesignQueue
+        ? `默认档位模板稳定性画像要求升级重构，${text(defaultLaneTemplateRedesignQueue.summary, defaultLaneTemplateRepairSummary || '同项模板复发')}，不能只做普通结构修复。`
+        : defaultLaneTemplateRepair
         ? `默认档位模板回检未通过，${defaultLaneTemplateRepairSummary || `${safeBatchExpansionStructureValidationRiskTotal} 项模板缺口`}会阻止恢复默认5章档位。`
         : `扩批结构验证未通过，验证批仍有 ${safeBatchExpansionStructureValidationRiskTotal} 项核心/回报/追读风险。`,
-      action: defaultLaneTemplateRepair
+      action: defaultLaneTemplateRedesignQueue
+        ? '升级默认档位模板重构：先重写默认5章档位的段位职责、冲突轮换、回报密度和章末追读模板，再写下一轮验证标准；复验连续2批全过前不恢复默认5章档位。'
+        : defaultLaneTemplateRepair
         ? `回到扩批结构任务书：${defaultLaneTemplateRepairSummary}；把缺失模板写成下一轮段位职责、冲突轮换、显性回报密度和章末追读检查项，再用2-3章复验；复验通过前不恢复默认5章档位。`
         : '回到扩批结构任务书：重写验证批段位职责、冲突轮换、显性回报和章末追读，再用2-3章复验；复验通过前不恢复5章扩批。',
       metrics: {
@@ -8048,6 +8137,9 @@ function buildBatchRiskRadar(args: {
         reader_pull_risk_count: safeBatchExpansionStructureValidationResult.reader_pull_risk_count,
         ...(defaultLaneTemplateRepair ? {
           default_five_chapter_lane_template_missing_count: defaultLaneTemplateRepair.missing_count,
+        } : {}),
+        ...(defaultLaneTemplateRedesignQueue ? {
+          default_five_chapter_lane_template_redesign_queue: 1,
         } : {}),
       },
       safeBatchExpansionStructureReview: structureReview,

@@ -408,6 +408,52 @@ describe('buildRepairTaskRevisionPrompt', () => {
     expect(prompt).toContain('default_lane_payoff_density_delivered')
   })
 
+  test('injects default lane template redesign queue into structure repair prompts', () => {
+    const prompt = buildRepairTaskRevisionPrompt({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'safe_batch_expansion_structure_repair',
+      severity: 'high',
+      message: '默认档位模板稳定性画像要求升级模板重构。',
+      action: '升级默认档位模板重构：重写四项模板和下一轮验证标准。',
+      safe_batch_expansion_structure_review: {
+        default_five_chapter_lane_template_redesign_queue: {
+          visible: true,
+          status: 'redesign',
+          source: 'default_five_chapter_lane_template_stability_profile',
+          recommendation: 'escalate_template_redesign',
+          label: '默认档位模板重构队列',
+          summary: '默认档位模板同项复发，回报密度失败 2 次，需要升级模板重构。',
+          latest_chapter_nos: [93, 94, 95],
+          validation_batch_count: 2,
+          failed_batch_count: 2,
+          top_failed_requirement: {
+            key: 'default_lane_payoff_density',
+            label: '回报密度',
+            failed_count: 2,
+          },
+          redesign_requirements: [
+            { key: 'default_lane_segment_duty', label: '默认档位段位职责', instruction: '重写每章在5章档位中的前段/中段/后段职责。' },
+            { key: 'default_lane_conflict_rotation', label: '冲突轮换', instruction: '重写规则压迫、人物对抗、信息误导的轮换顺序。' },
+            { key: 'default_lane_payoff_density', label: '回报密度', instruction: '重写每章显性回报预算，避免连续铺垫。' },
+            { key: 'default_lane_ending_hook_template', label: '章末追读模板', instruction: '重写最后300字触发事件、读者问题和下一章风险。' },
+          ],
+          validation_standard: [
+            '下一轮3章验证批必须逐章回填 default_lane_*_delivered。',
+            '连续2批模板全过后才能恢复默认5章档位。',
+          ],
+        },
+      },
+    })
+
+    expect(prompt).toContain('【默认档位模板重构队列】')
+    expect(prompt).toContain('稳定性画像：默认档位模板同项复发，回报密度失败 2 次')
+    expect(prompt).toContain('高频缺项：回报密度失败 2 次')
+    expect(prompt).toContain('重构模板：默认档位段位职责：重写每章在5章档位中的前段/中段/后段职责。')
+    expect(prompt).toContain('重构模板：回报密度：重写每章显性回报预算，避免连续铺垫。')
+    expect(prompt).toContain('下一轮验证标准：下一轮3章验证批必须逐章回填 default_lane_*_delivered。；连续2批模板全过后才能恢复默认5章档位。')
+    expect(prompt).toContain('必须先重写默认5章档位的段位职责、冲突轮换、回报密度和章末追读模板')
+  })
+
   test('injects reader pull and innovation evidence for safe-batch repair tasks', () => {
     const readerPrompt = buildRepairTaskRevisionPrompt({
       issue_type: 'reader_pull_missed',

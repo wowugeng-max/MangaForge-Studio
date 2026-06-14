@@ -5549,6 +5549,115 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(model.batchGuardrail.recommendedAction.label).toBe('启动3章验证批')
   })
 
+  test('turns repeated default lane template stability failures into a redesign queue', () => {
+    const firstValidationChapterNos = [90, 91, 92]
+    const secondValidationChapterNos = [93, 94, 95]
+    const chapterWithTemplateReceipts = (chapterNo: number, payoffDelivered = true) => ({
+      id: chapterNo,
+      chapter_no: chapterNo,
+      title: `模板重构${chapterNo}`,
+      chapter_text: '模板重构正文'.repeat(500),
+      raw_payload: {
+        generated_scene_breakdown: [{
+          expansion_structure_decision_execution: {
+            segment_role_delivered: true,
+            observation_metrics_delivered: true,
+            redesign_principles_delivered: true,
+            default_lane_segment_duty_delivered: true,
+            default_lane_conflict_rotation_delivered: true,
+            default_lane_payoff_density_delivered: payoffDelivered,
+            default_lane_ending_hook_template_delivered: true,
+            evidence: [`第${chapterNo}章默认档位模板回执。`],
+          },
+        }],
+      },
+    })
+    const model = buildAutoCreationDirectorModel({
+      planning: readySafeBatchPlanning({ futureRoute: futureRouteRange(96, 5) }),
+      writing: readySafeBatchWriting({
+        nextChapter: { ...baseWriting.nextChapter, id: 96, chapterNo: 96, title: '模板重构后96' },
+        previousChapter: { chapterNo: 95, title: '模板重构95', wordCount: 3200, hasProse: true },
+      }),
+      activeTasks: [],
+      selectedModelId: 12,
+      storyState: { last_updated_chapter: 95 },
+      chapters: [
+        ...[41, 42, 43, 44, 45, 46, 47, 48, 49].map(chapterNo => ({
+          id: chapterNo,
+          chapter_no: chapterNo,
+          title: `强化趋势${chapterNo}`,
+          chapter_text: '强化趋势正文'.repeat(500),
+        })),
+        ...firstValidationChapterNos.map(chapterNo => chapterWithTemplateReceipts(chapterNo, chapterNo !== 91)),
+        ...secondValidationChapterNos.map(chapterNo => chapterWithTemplateReceipts(chapterNo, chapterNo !== 94)),
+      ],
+      reviews: [
+        ...strengthenedAcceptanceQualityReviews([41, 42, 43], 6551, '2026-06-19T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([44, 45, 46], 6561, '2026-06-20T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews([47, 48, 49], 6571, '2026-06-21T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews(firstValidationChapterNos, 6581, '2026-06-22T01:00:00.000Z'),
+        ...strengthenedAcceptanceQualityReviews(secondValidationChapterNos, 6591, '2026-06-23T01:00:00.000Z'),
+      ],
+      runRecords: [
+        strengthenedAcceptanceBatchRun({ id: 655, createdAt: '2026-06-19T00:00:00.000Z', chapterNos: [41, 42, 43] }),
+        strengthenedAcceptanceBatchRun({ id: 656, createdAt: '2026-06-20T00:00:00.000Z', chapterNos: [44, 45, 46] }),
+        strengthenedAcceptanceBatchRun({ id: 657, createdAt: '2026-06-21T00:00:00.000Z', chapterNos: [47, 48, 49] }),
+        defaultLaneTemplateValidationBatchRun({
+          id: 658,
+          createdAt: '2026-06-22T00:00:00.000Z',
+          chapterNos: firstValidationChapterNos,
+        }),
+        defaultLaneTemplateValidationBatchRun({
+          id: 659,
+          createdAt: '2026-06-23T00:00:00.000Z',
+          chapterNos: secondValidationChapterNos,
+        }),
+      ],
+    } as any)
+
+    const policy = model.batchGuardrail.preflight.inputSnapshot.safe_batch_expansion_policy
+    const profile = policy.expansion_feedback.default_five_chapter_lane_template_stability_profile
+    const structureTask = model.batchReviewQueue.riskRadar.repairTasks.find((task: any) => task.issue_type === 'safe_batch_expansion_structure_repair')
+
+    expect(profile).toMatchObject({
+      status: 'redesign',
+      recommendation: 'escalate_template_redesign',
+      latest_status: 'failed',
+      pass_streak: 0,
+      top_failed_requirement: expect.objectContaining({
+        key: 'default_lane_payoff_density',
+        label: '回报密度',
+        failed_count: 2,
+      }),
+    })
+    expect(policy).toMatchObject({
+      status: 'recovering',
+      target_chapter_count: 1,
+    })
+    expect(structureTask).toMatchObject({
+      issue_type: 'safe_batch_expansion_structure_repair',
+      message: expect.stringContaining('默认档位模板稳定性'),
+      action: expect.stringContaining('升级默认档位模板重构'),
+      safe_batch_expansion_structure_review: {
+        default_five_chapter_lane_template_redesign_queue: {
+          visible: true,
+          status: 'redesign',
+          source: 'default_five_chapter_lane_template_stability_profile',
+          recommendation: 'escalate_template_redesign',
+          top_failed_requirement: {
+            key: 'default_lane_payoff_density',
+            label: '回报密度',
+            failed_count: 2,
+          },
+          redesign_requirements: expect.arrayContaining([
+            expect.objectContaining({ key: 'default_lane_payoff_density', label: '回报密度' }),
+          ]),
+        },
+      },
+    })
+    expect(structureTask?.safe_batch_expansion_structure_review.default_five_chapter_lane_template_redesign_queue.summary).toContain('回报密度失败 2 次')
+  })
+
   test('summarizes expansion structure validation trend by repeated segment', () => {
     const chapterNos = [50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63]
     const model = buildAutoCreationDirectorModel({

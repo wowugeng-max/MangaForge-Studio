@@ -1054,11 +1054,28 @@ function structureDecisionRepairReviewOfTask(task: any) {
     || null
 }
 
+function structureRepairReviewOfTask(task: any) {
+  return task?.safe_batch_expansion_structure_review
+    || task?.safeBatchExpansionStructureReview
+    || task?.payload?.safe_batch_expansion_structure_review
+    || task?.payload?.safeBatchExpansionStructureReview
+    || null
+}
+
 function defaultLaneRedesignOfTask(task: any) {
   const review = structureDecisionRepairReviewOfTask(task)
   return review?.default_five_chapter_lane_redesign
     || review?.defaultFiveChapterLaneRedesign
     || null
+}
+
+function defaultLaneTemplateRedesignQueueOfTask(task: any) {
+  const review = structureRepairReviewOfTask(task)
+  const queue = review?.default_five_chapter_lane_template_redesign_queue
+    || review?.defaultFiveChapterLaneTemplateRedesignQueue
+    || null
+  if (!queue || queue.visible === false) return null
+  return queue
 }
 
 function defaultLaneFailedRequirementsOfTask(task: any) {
@@ -1093,7 +1110,22 @@ function defaultLaneFailedRequirementsOfTask(task: any) {
 }
 
 export function buildDefaultLaneRepairTaskTags(task: any): RepairTaskTagMeta[] {
-  if (compactEvidenceText(task?.issue_type || task?.issueType) !== 'safe_batch_expansion_structure_decision_mismatch') return []
+  const issueType = compactEvidenceText(task?.issue_type || task?.issueType)
+  if (issueType === 'safe_batch_expansion_structure_repair') {
+    const redesignQueue = defaultLaneTemplateRedesignQueueOfTask(task)
+    if (!redesignQueue) return []
+    const topFailed = redesignQueue.top_failed_requirement || redesignQueue.topFailedRequirement || null
+    const topFailedKey = compactEvidenceText(topFailed?.key || '')
+    const topFailedLabel = compactEvidenceText(topFailed?.label || topFailed?.key || '')
+    const tags: RepairTaskTagMeta[] = [
+      { key: 'default_lane_template_redesign', label: '默认档位模板重构', color: 'gold' },
+    ]
+    if (topFailedKey && topFailedLabel) {
+      tags.push({ key: topFailedKey, label: `重写${topFailedLabel}`, color: 'gold' })
+    }
+    return tags
+  }
+  if (issueType !== 'safe_batch_expansion_structure_decision_mismatch') return []
   const missedRequirements = defaultLaneFailedRequirementsOfTask(task)
   const redesign = defaultLaneRedesignOfTask(task)
   if (!redesign && !missedRequirements.length) return []

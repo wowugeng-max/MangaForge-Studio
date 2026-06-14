@@ -1960,6 +1960,35 @@ describe('default lane repair task card helpers', () => {
       { key: 'default_lane_relapse', label: '连续失效2次', color: 'gold' },
     ])
   })
+
+  test('extracts default lane template redesign tags from structure repair tasks', async () => {
+    const taskCenter = await import('./TaskCenterDrawer')
+    const tags = (taskCenter as any).buildDefaultLaneRepairTaskTags?.({
+      issue_type: 'safe_batch_expansion_structure_repair',
+      safe_batch_expansion_structure_review: {
+        default_five_chapter_lane_template_redesign_queue: {
+          visible: true,
+          label: '默认档位模板重构队列',
+          top_failed_requirement: {
+            key: 'default_lane_payoff_density',
+            label: '回报密度',
+            failed_count: 2,
+          },
+          redesign_requirements: [
+            { key: 'default_lane_segment_duty', label: '默认档位段位职责' },
+            { key: 'default_lane_conflict_rotation', label: '冲突轮换' },
+            { key: 'default_lane_payoff_density', label: '回报密度' },
+            { key: 'default_lane_ending_hook_template', label: '章末追读模板' },
+          ],
+        },
+      },
+    })
+
+    expect(tags).toEqual(expect.arrayContaining([
+      { key: 'default_lane_template_redesign', label: '默认档位模板重构', color: 'gold' },
+      { key: 'default_lane_payoff_density', label: '重写回报密度', color: 'gold' },
+    ]))
+  })
 })
 
 describe('buildRecoveryEvidenceReviewRowAction', () => {

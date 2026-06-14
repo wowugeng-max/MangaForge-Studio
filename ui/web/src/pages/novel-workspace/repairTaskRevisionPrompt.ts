@@ -600,6 +600,15 @@ function defaultLaneTemplateRepairActionForPrompt(requirement: AnyRecord) {
   return `${label}修复：${chapterText}必须补成正文可见模板回执。`
 }
 
+function defaultLaneTemplateRedesignInstructionForPrompt(requirement: AnyRecord) {
+  const key = firstText(requirement.key)
+  if (key === 'default_lane_segment_duty') return '重写每章在5章档位中的前段/中段/后段职责。'
+  if (key === 'default_lane_conflict_rotation') return '重写规则压迫、人物对抗、信息误导的轮换顺序。'
+  if (key === 'default_lane_payoff_density') return '重写每章显性回报预算，避免连续铺垫。'
+  if (key === 'default_lane_ending_hook_template') return '重写最后300字触发事件、读者问题和下一章风险。'
+  return '重写该模板项，并给下一轮验证批设置逐章可回填标准。'
+}
+
 function normalizeDefaultFiveChapterLaneTemplateRepair(review: AnyRecord) {
   const explicit = objectValue(
     review.default_five_chapter_lane_template_repair
@@ -640,6 +649,46 @@ function normalizeDefaultFiveChapterLaneTemplateRepair(review: AnyRecord) {
     repairActions: repairActions.length
       ? repairActions
       : missingRequirements.map(defaultLaneTemplateRepairActionForPrompt),
+  }
+}
+
+function normalizeDefaultFiveChapterLaneTemplateRedesignQueue(review: AnyRecord) {
+  const source = objectValue(
+    review.default_five_chapter_lane_template_redesign_queue
+    || review.defaultFiveChapterLaneTemplateRedesignQueue,
+  )
+  if (!Object.keys(source).length || source.visible === false) return null
+  const topSource = objectValue(source.top_failed_requirement || source.topFailedRequirement)
+  const topFailedRequirement = Object.keys(topSource).length ? {
+    key: firstText(topSource.key),
+    label: firstText(topSource.label, topSource.key, '模板缺项'),
+    failedCount: Number(topSource.failed_count ?? topSource.failedCount ?? 0),
+  } : null
+  const redesignRequirements = arrayValue(source.redesign_requirements || source.redesignRequirements)
+    .map(item => objectValue(item))
+    .map(item => ({
+      key: firstText(item.key),
+      label: firstText(item.label, item.key, '模板项'),
+      instruction: firstText(item.instruction, item.action, item.description, defaultLaneTemplateRedesignInstructionForPrompt(item)),
+    }))
+    .filter(item => item.key || item.label || item.instruction)
+  const validationStandard = arrayValue(source.validation_standard || source.validationStandard)
+    .map(item => text(item))
+    .filter(Boolean)
+  return {
+    label: firstText(source.label, '默认档位模板重构队列'),
+    summary: firstText(source.summary),
+    status: firstText(source.status),
+    source: firstText(source.source),
+    recommendation: firstText(source.recommendation),
+    latestChapterNos: arrayValue(source.latest_chapter_nos || source.latestChapterNos)
+      .map(chapterNo => Number(chapterNo))
+      .filter(chapterNo => chapterNo > 0),
+    validationBatchCount: Number(source.validation_batch_count ?? source.validationBatchCount ?? 0),
+    failedBatchCount: Number(source.failed_batch_count ?? source.failedBatchCount ?? 0),
+    topFailedRequirement,
+    redesignRequirements,
+    validationStandard,
   }
 }
 
@@ -797,6 +846,7 @@ export function buildRepairTaskRevisionPrompt(task: AnyRecord, run?: AnyRecord |
     const rollback = objectValue(review.rollback_policy || review.rollbackPolicy)
     const validationTrend = normalizeExpansionStructureValidationTrend(task, review)
     const defaultLaneTemplateRepair = normalizeDefaultFiveChapterLaneTemplateRepair(review)
+    const defaultLaneTemplateRedesignQueue = normalizeDefaultFiveChapterLaneTemplateRedesignQueue(review)
     lines.push(
       '【扩批结构修复】',
       repeatedCount > 0 ? `复发段位：${repeatedLabel}连续 ${repeatedCount} 次` : `复发段位：${repeatedLabel}`,
@@ -809,6 +859,19 @@ export function buildRepairTaskRevisionPrompt(task: AnyRecord, run?: AnyRecord |
       '修订要求：先改批次任务书、段位职责和章间节奏，不能只修单章语句或局部爽点；每章必须重新分配冲突来源、显性回报、主线推进和章末追读。',
       '修订后必须重新运行5章扩批分段复盘，确认该段位不再成为核心/回报/追读热区，再恢复5章安全连写。',
     )
+    if (defaultLaneTemplateRedesignQueue) {
+      lines.push(
+        '【默认档位模板重构队列】',
+        defaultLaneTemplateRedesignQueue.summary ? `稳定性画像：${defaultLaneTemplateRedesignQueue.summary}` : '',
+        defaultLaneTemplateRedesignQueue.latestChapterNos.length > 0 ? `最近验证批：${compactChapterNosForPrompt(defaultLaneTemplateRedesignQueue.latestChapterNos)}` : '',
+        defaultLaneTemplateRedesignQueue.validationBatchCount > 0 ? `验证批统计：失败 ${defaultLaneTemplateRedesignQueue.failedBatchCount}/${defaultLaneTemplateRedesignQueue.validationBatchCount} 批` : '',
+        defaultLaneTemplateRedesignQueue.topFailedRequirement ? `高频缺项：${defaultLaneTemplateRedesignQueue.topFailedRequirement.label}失败 ${defaultLaneTemplateRedesignQueue.topFailedRequirement.failedCount} 次` : '',
+        ...defaultLaneTemplateRedesignQueue.redesignRequirements.map(item => `重构模板：${item.label}：${item.instruction}`),
+        defaultLaneTemplateRedesignQueue.validationStandard.length > 0 ? `下一轮验证标准：${defaultLaneTemplateRedesignQueue.validationStandard.join('；')}` : '',
+        '修订要求：必须先重写默认5章档位的段位职责、冲突轮换、回报密度和章末追读模板，再改正文或批次任务书；不能只修单章缺项。',
+        '回填要求：下一轮验证批必须逐章回填 default_lane_segment_duty_delivered、default_lane_conflict_rotation_delivered、default_lane_payoff_density_delivered、default_lane_ending_hook_template_delivered，并在连续2批全过后再恢复默认5章档位。',
+      )
+    }
     if (defaultLaneTemplateRepair) {
       lines.push(
         '【默认档位模板验证缺项】',
