@@ -1224,10 +1224,12 @@
 - 默认档位回退后的 3 章验证批复盘已对照原失败维度生成 `default_five_chapter_recovery_verdict`。验证批会把 `default_five_chapter_regression.failure_reasons` 映射到本批核心偏移、回报欠账、追读拉力计数，输出已清零/仍未清零列表；任务中心的 3 章验证批摘要会显示“默认档位恢复判定”，让作者能直接看到默认档位是否真的恢复，而不是只看总风险数。
 - 默认档位恢复判定已接入恢复 5 章后的观察批和默认档位批。`确认恢复5章扩批`、`5章观察批` 与 `默认5章档位` 会继续携带 `default_five_chapter_recovery_verdict`；若后续 5 章批在已清零维度上再次出现核心偏移、回报欠账或追读拉力失效，扩批反馈会写入 `default_five_chapter_recovery_verdict_relapse`，任务中心显示“恢复判定失效 -> 回到3章验证批”、复发批次、清零验证批和同维复发原因。
 - 恢复判定失效已接入二次 3 章验证后的结构趋势统计。`expansion_structure_validation_trend` 会沉淀 `default_five_chapter_recovery_verdict_relapse_trend`；若结构修复前后连续两次出现同维恢复判定失效，`expansion_structure_repair_effectiveness` 会把建议升级为 `escalate_structure_redesign`，总控台目标压回单章治理，任务中心显示“恢复判定连续失效”，避免反复做普通 3 章验证批。
+- 默认档位结构重构已接入下一章任务书和正文 prompt。当 `expansion_structure_repair_effectiveness.recommendation=escalate_structure_redesign` 且来源为恢复判定连续失效时，`next_batch_brief.expansionStructureDecision.defaultFiveChapterLaneRedesign` 会写入 `repeated_recovery_verdict_relapse` 来源、连续失效次数、同维复发原因，以及段位职责重写、冲突轮换、回报密度、章末追读模板四项义务；即使安全连写被未清交稿风险挡住，系统也会保留 1 章治理任务书，供下一章/修复 prompt 执行默认 5 章档位重构。
+- 正文生成 prompt 已展开“默认5章档位结构重构”硬性段落。模型会直接看到连续恢复判定失效、同维复发原因和四项重构义务，并被要求在正文场景中先证明新模板能守住核心、显性回报和章末追读，不能只修单章句子或局部爽点。
 
 推荐下一步：
 
-- 将“默认档位结构重构”接入下一批任务书和正文 prompt：当 `recommendation=escalate_structure_redesign` 且来源为恢复判定连续失效时，下一章/下一批应明确重写默认 5 章档位的段位职责、冲突轮换、回报密度和章末追读模板。
+- 将“默认档位结构重构”的四项义务接入正文执行复盘：检查 `scene_breakdown.expansion_structure_decision_execution` 是否明确回填段位职责、冲突轮换、回报密度和章末追读模板，若漏项则生成针对默认档位模板的结构决策修复任务。
 
 ## 8. 使用说明维护规则
 

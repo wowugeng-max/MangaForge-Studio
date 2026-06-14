@@ -5824,6 +5824,7 @@ describe('buildAutoCreationDirectorModel', () => {
 
     const policy = model.batchGuardrail.preflight.inputSnapshot.safe_batch_expansion_policy
     const effectiveness = policy.expansion_feedback.expansion_structure_repair_effectiveness
+    const nextBatchBrief = model.batchGuardrail.nextBatchBrief
 
     expect(effectiveness).toMatchObject({
       status: 'warn',
@@ -5851,6 +5852,28 @@ describe('buildAutoCreationDirectorModel', () => {
       target_chapter_count: 1,
     })
     expect(policy.summary).toContain('默认档位结构重构')
+    expect(nextBatchBrief.expansionStructureDecision).toMatchObject({
+      visible: true,
+      recommendation: 'escalate_structure_redesign',
+      targetChapterCount: 1,
+      defaultFiveChapterLaneRedesign: {
+        reason: 'repeated_recovery_verdict_relapse',
+        relapseCount: 2,
+        repeatedFailureReasons: ['核心偏移', '回报欠账', '追读拉力'],
+        segmentDutyRewrite: expect.stringContaining('段位职责'),
+        conflictRotation: expect.stringContaining('冲突轮换'),
+        payoffDensity: expect.stringContaining('回报密度'),
+        endingHookTemplate: expect.stringContaining('章末追读模板'),
+      },
+    })
+    expect(nextBatchBrief.expansionStructureDecision.instruction).toContain('默认 5 章档位')
+    expect(nextBatchBrief.expansionStructureDecision.instruction).toContain('连续恢复判定失效')
+    expect(nextBatchBrief.expansionStructureDecision.observationMetrics).toEqual(expect.arrayContaining([
+      expect.stringContaining('恢复判定连续失效 2 次'),
+      expect.stringContaining('核心偏移'),
+      expect.stringContaining('回报欠账'),
+      expect.stringContaining('追读拉力'),
+    ]))
   })
 
   test('downgrades to single chapter when the latest strengthened recovery acceptance trend fails', () => {

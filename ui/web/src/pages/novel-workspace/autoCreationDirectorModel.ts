@@ -9545,6 +9545,36 @@ function buildSafeBatchExpansionStructureVerification(args: {
   }
 }
 
+function safeBatchDefaultFiveChapterLaneRedesignPayload(effectiveness: AnyRecord | null | undefined, segmentLabel: string) {
+  if (text(effectiveness?.recommendation) !== 'escalate_structure_redesign') return null
+  const trend = effectiveness?.default_five_chapter_recovery_verdict_relapse_trend
+    || effectiveness?.defaultFiveChapterRecoveryVerdictRelapseTrend
+    || null
+  if (text(trend?.recommendation) !== 'escalate_structure_redesign') return null
+  const relapseCount = Number(
+    trend?.repeated_relapse_count
+    ?? trend?.repeatedRelapseCount
+    ?? (Number(trend?.baseline_relapse_count ?? trend?.baselineRelapseCount ?? 0) + Number(trend?.current_relapse_count ?? trend?.currentRelapseCount ?? 0)),
+  )
+  if (relapseCount < 2) return null
+  const repeatedFailureReasons = arrayValue(trend?.repeated_failure_reasons || trend?.repeatedFailureReasons)
+    .map(item => text(item?.reason || item?.label || item))
+    .filter(Boolean)
+  const reasonLabel = repeatedFailureReasons.length ? repeatedFailureReasons.join('、') : '已清零维度'
+  const dutySegment = text(segmentLabel, '复发段位')
+  return {
+    reason: 'repeated_recovery_verdict_relapse',
+    label: '默认5章档位结构重构',
+    summary: text(trend?.summary, `恢复判定连续失效 ${relapseCount} 次：${reasonLabel}同维复发，默认档位结构重构。`),
+    relapseCount,
+    repeatedFailureReasons,
+    segmentDutyRewrite: `段位职责重写：重写默认 5 章档位内前段、中段、后段和${dutySegment}的承载职责，明确每章负责冲突推进、信息增量、读者回报或章末钩子中的哪一项，禁止把${dutySegment}继续写成转场铺垫。`,
+    conflictRotation: `冲突轮换：默认 5 章内必须轮换至少三类冲突来源，避免连续使用同一压迫、同一解释或同一对手推进；${dutySegment}必须换成可见事件或选择代价。`,
+    payoffDensity: '回报密度：默认 5 章每章都要交付显性回报，至少包含信息增量、能力展示、关系变化、爽点兑现或小回收之一，不能连续两章只铺垫。',
+    endingHookTemplate: '章末追读模板：每章最后 300 字必须落成触发事件、读者问题、下一章风险升级三件套，不能用空泛总结替代章末追读。',
+  }
+}
+
 function buildSafeBatchExpansionStructureDecision(policy?: AnyRecord | null) {
   if (!policy?.visible) return null
   const feedback = policy.expansionFeedback || policy.expansion_feedback || null
@@ -9571,6 +9601,7 @@ function buildSafeBatchExpansionStructureDecision(policy?: AnyRecord | null) {
   const baselineFailureReasonCount = Number(effectiveness?.baseline_failure_reason_count ?? effectiveness?.baselineFailureReasonCount ?? 0)
   const currentFailureReasonCount = Number(effectiveness?.current_failure_reason_count ?? effectiveness?.currentFailureReasonCount ?? 0)
   const currentRecurrenceInterval = Number(effectiveness?.current_recurrence_interval_batch_count ?? effectiveness?.currentRecurrenceIntervalBatchCount ?? 0)
+  const defaultFiveChapterLaneRedesign = safeBatchDefaultFiveChapterLaneRedesignPayload(effectiveness, segmentLabel)
   const modeLabel = decisionTrendWarn
     ? '结构决策执行补齐'
     : recommendation === 'restore_five_chapter'
@@ -9582,7 +9613,9 @@ function buildSafeBatchExpansionStructureDecision(policy?: AnyRecord | null) {
     ? `恢复 5 章扩批，但每章必须明确前段/中段/后段职责，${segmentLabel}不能再次变成空铺垫、掉回报或弱追读。`
     : recommendation === 'continue_small_validation'
       ? `继续 2-3 章小批验证，逐章观察通过率、失败主因和同段复发，不得提前恢复 5 章节奏。`
-      : `回到单章结构重构，先重写批次设计原则和${segmentLabel}职责，再恢复多章连写。`
+      : defaultFiveChapterLaneRedesign
+        ? `默认 5 章档位连续恢复判定失效，回到单章结构重构；先重写默认 5 章档位的段位职责、冲突轮换、回报密度和章末追读模板，再恢复多章连写。`
+        : `回到单章结构重构，先重写批次设计原则和${segmentLabel}职责，再恢复多章连写。`
   const trendInstruction = decisionTrendWarn
     ? `先按结构决策执行趋势补齐${text(topFailedRequirement?.label, '段位职责和观察指标')}，下一批保持 ${Math.max(1, targetChapterCount || 3)} 章小批验证；每章必须回填扩批结构决策执行回执。`
     : ''
@@ -9598,6 +9631,10 @@ function buildSafeBatchExpansionStructureDecision(policy?: AnyRecord | null) {
     ...(decisionTrendWarn && topFailedRequirement ? [
       `结构决策漏项：${text(topFailedRequirement.label, '执行要求')} ${Number(topFailedRequirement.count || 0)}`,
     ] : []),
+    ...(defaultFiveChapterLaneRedesign ? [
+      `恢复判定连续失效 ${defaultFiveChapterLaneRedesign.relapseCount} 次`,
+      ...defaultFiveChapterLaneRedesign.repeatedFailureReasons.map((reason: string) => `同维复发：${reason}`),
+    ] : []),
   ]
 
   return {
@@ -9612,6 +9649,7 @@ function buildSafeBatchExpansionStructureDecision(policy?: AnyRecord | null) {
     segmentKey: text(effectiveness?.segment_key || effectiveness?.segmentKey || decisionTrend?.latest_segment_key || decisionTrend?.latestSegmentKey || topFailedSegment?.key),
     segmentLabel,
     observationMetrics,
+    ...(defaultFiveChapterLaneRedesign ? { defaultFiveChapterLaneRedesign } : {}),
   }
 }
 
@@ -10477,6 +10515,13 @@ function buildBatchGuardrail(args: {
   const safeBatchRecoveryRestoreConfirmation = buildSafeBatchRecoveryRestoreConfirmation(safeBatchExpansionPolicy)
   const safeBatchRecoveryRestoreStabilityLane = buildSafeBatchRecoveryRestoreStabilityLane(safeBatchExpansionPolicy)
   const safeBatchRecoveryAction = safeBatchRecoveryRoadmapRecommendedAction(safeBatchExpansionPolicy.recoveryRoadmap)
+  const safeBatchExpansionPolicyFeedback = safeBatchExpansionPolicy.expansionFeedback
+    || safeBatchExpansionPolicy.expansion_feedback
+    || null
+  const safeBatchStructureRepairEffectiveness = safeBatchExpansionPolicyFeedback?.expansionStructureRepairEffectiveness
+    || safeBatchExpansionPolicyFeedback?.expansion_structure_repair_effectiveness
+    || null
+  const expansionStructureRedesignDecisionActive = text(safeBatchStructureRepairEffectiveness?.recommendation) === 'escalate_structure_redesign'
   const expansionStructureVerificationSeed = buildResolvedSafeBatchExpansionStructureVerificationSeed(arrayValue(args.runRecords))
   const expansionStructureValidationActive = Boolean(
     expansionStructureVerificationSeed
@@ -10744,9 +10789,14 @@ function buildBatchGuardrail(args: {
         ? Math.max(1, Math.min(expansionStructureValidationTarget, queueLimitedPreliminarySafeChapterCount || expansionStructureValidationTarget))
         : Math.max(1, Math.min(1, queueLimitedPreliminarySafeChapterCount || 1))
       : queueLimitedPreliminarySafeChapterCount
-  const nextBatchBrief = safeChapterCount === queueLimitedPreliminarySafeChapterCount
+  const nextBatchBriefChapterCount = safeChapterCount > 0
+    ? safeChapterCount
+    : expansionStructureRedesignDecisionActive
+      ? 1
+      : 0
+  const nextBatchBrief = nextBatchBriefChapterCount === queueLimitedPreliminarySafeChapterCount
     ? preliminaryNextBatchBrief
-    : buildNextBatchBrief({ planning, writing, safeChapterCount, chapters: args.chapters, expansionStructureVerificationSeed, safeBatchExpansionPolicy })
+    : buildNextBatchBrief({ planning, writing, safeChapterCount: nextBatchBriefChapterCount, chapters: args.chapters, expansionStructureVerificationSeed, safeBatchExpansionPolicy })
   const releaseWindow = buildBatchReleaseWindow(nextBatchBrief, queueRelease)
   const deliveryRiskCarryOver = normalizeSafeBatchDeliveryRiskCarryOver(
     planningDesk?.episodePlan?.deliveryRiskCarryOver

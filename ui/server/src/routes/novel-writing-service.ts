@@ -1960,12 +1960,43 @@ function normalizeExpansionStructureVerification(value: any) {
   return hasContent ? normalized : null
 }
 
+function normalizeDefaultFiveChapterLaneRedesign(value: any) {
+  const raw = value?.default_five_chapter_lane_redesign || value?.defaultFiveChapterLaneRedesign || value || {}
+  const repeatedFailureReasons = asArray(raw.repeated_failure_reasons || raw.repeatedFailureReasons)
+    .map((item: any) => compactBriefText(item?.reason || item?.label || item))
+    .filter(Boolean)
+    .slice(0, 8)
+  const normalized = {
+    reason: compactBriefText(raw.reason),
+    label: compactBriefText(raw.label || '默认5章档位结构重构'),
+    summary: compactBriefText(raw.summary),
+    relapse_count: Number(raw.relapse_count ?? raw.relapseCount ?? 0),
+    repeated_failure_reasons: repeatedFailureReasons,
+    segment_duty_rewrite: compactBriefText(raw.segment_duty_rewrite || raw.segmentDutyRewrite),
+    conflict_rotation: compactBriefText(raw.conflict_rotation || raw.conflictRotation),
+    payoff_density: compactBriefText(raw.payoff_density || raw.payoffDensity),
+    ending_hook_template: compactBriefText(raw.ending_hook_template || raw.endingHookTemplate),
+  }
+  const hasContent = normalized.reason
+    || normalized.summary
+    || normalized.relapse_count > 0
+    || normalized.repeated_failure_reasons.length
+    || normalized.segment_duty_rewrite
+    || normalized.conflict_rotation
+    || normalized.payoff_density
+    || normalized.ending_hook_template
+  return hasContent ? normalized : null
+}
+
 function normalizeExpansionStructureDecision(value: any) {
   const raw = value?.expansion_structure_decision || value?.expansionStructureDecision || value || {}
   const observationMetrics = asArray(raw.observation_metrics || raw.observationMetrics)
     .map((item: any) => compactBriefText(item))
     .filter(Boolean)
     .slice(0, 6)
+  const defaultFiveChapterLaneRedesign = normalizeDefaultFiveChapterLaneRedesign(
+    raw.default_five_chapter_lane_redesign || raw.defaultFiveChapterLaneRedesign,
+  )
   const normalized = {
     visible: raw.visible !== false,
     label: compactBriefText(raw.label || '结构修复决策'),
@@ -1978,12 +2009,14 @@ function normalizeExpansionStructureDecision(value: any) {
     segment_key: compactBriefText(raw.segment_key || raw.segmentKey),
     segment_label: compactBriefText(raw.segment_label || raw.segmentLabel),
     observation_metrics: observationMetrics,
+    default_five_chapter_lane_redesign: defaultFiveChapterLaneRedesign,
   }
   const hasContent = normalized.recommendation
     || normalized.mode_label
     || normalized.summary
     || normalized.instruction
     || normalized.observation_metrics.length
+    || normalized.default_five_chapter_lane_redesign
   return hasContent ? normalized : null
 }
 
@@ -5508,6 +5541,7 @@ export function createNovelWritingService(ctx: {
       Number(chapterDraft?.chapter_no || contextPackage?.chapter_target?.chapter_no || 0),
     )
     const expansionStructureDecision = nextBatchBrief?.expansion_structure_decision || null
+    const defaultFiveChapterLaneRedesign = expansionStructureDecision?.default_five_chapter_lane_redesign || null
     const expansionStructureVerification = nextBatchBrief?.expansion_structure_verification || null
     const defaultFiveChapterRegression = expansionStructureVerification?.default_five_chapter_regression || null
     const batchPreflight = contextPackage?.chapter_target?.batch_preflight || contextPackage?.batch_preflight || null
@@ -5685,6 +5719,14 @@ export function createNovelWritingService(ctx: {
       expansionStructureDecision?.summary ? `有效性摘要：${expansionStructureDecision.summary}` : '',
       expansionStructureDecision?.instruction ? `执行口径：${expansionStructureDecision.instruction}` : '',
       expansionStructureDecision?.observation_metrics?.length ? `观察指标：${expansionStructureDecision.observation_metrics.join('；')}` : '',
+      defaultFiveChapterLaneRedesign ? '默认5章档位结构重构：连续恢复判定失效后，本章不得只修单章句子，必须先重写默认 5 章档位的段位职责、冲突轮换、回报密度和章末追读模板。' : '',
+      defaultFiveChapterLaneRedesign?.reason ? `重构来源：${defaultFiveChapterLaneRedesign.reason}` : '',
+      defaultFiveChapterLaneRedesign?.relapse_count ? `连续恢复判定失效：${defaultFiveChapterLaneRedesign.relapse_count}次` : '',
+      defaultFiveChapterLaneRedesign?.repeated_failure_reasons?.length ? `同维复发：${defaultFiveChapterLaneRedesign.repeated_failure_reasons.join('、')}` : '',
+      defaultFiveChapterLaneRedesign?.segment_duty_rewrite ? `段位职责重写：${defaultFiveChapterLaneRedesign.segment_duty_rewrite}` : '',
+      defaultFiveChapterLaneRedesign?.conflict_rotation ? `冲突轮换：${defaultFiveChapterLaneRedesign.conflict_rotation}` : '',
+      defaultFiveChapterLaneRedesign?.payoff_density ? `回报密度：${defaultFiveChapterLaneRedesign.payoff_density}` : '',
+      defaultFiveChapterLaneRedesign?.ending_hook_template ? `章末追读模板：${defaultFiveChapterLaneRedesign.ending_hook_template}` : '',
       expansionStructureDecision ? '执行回执：scene_breakdown 中承担结构职责的场景必须回填 expansion_structure_decision_execution，字段包含 segment_role_delivered(boolean)、observation_metrics_delivered(boolean)、redesign_principles_delivered(boolean)、evidence(array)。' : '',
       expansionStructureDecision ? JSON.stringify(expansionStructureDecision, null, 2).slice(0, 3000) : '',
       '',
@@ -5891,6 +5933,7 @@ export function createNovelWritingService(ctx: {
       '14. 执行本批连载任务书：本章只完成 current_chapter_role 和本章读者回报；可以铺垫下一章，但不得提前解决 next_batch_brief.chapters 后续章节的冲突或钩子。',
       '14A. 执行 chapter_target.batch_preflight：如果安全连写预执行门禁提示近10章疲劳或批次风险，本章必须在冲突来源、回报形态、章末问题、可视化场面中至少改造一项；被 blocked_chapter_nos 拦截的后续章节内容不得提前写进本章。',
       expansionStructureDecision ? '14A0. 执行 next_batch_brief.expansion_structure_decision：按结构修复有效性决定本批写法；恢复5章时仍逐章落实段位职责，小批验证时逐章证明观察指标，单章重构时先重写批次设计原则后再推进正文。' : '',
+      defaultFiveChapterLaneRedesign ? '14A0+. 默认5章档位结构重构：因连续恢复判定失效，本章必须输出可被后续5章复用的段位职责、冲突轮换、回报密度和章末追读模板；正文场景必须先证明这个模板能守住核心、回报和追读。' : '',
       expansionStructureVerification ? '14A+. 执行 next_batch_brief.expansion_structure_verification：本章必须承担验证批中的结构职责，换冲突来源、给显性回报、留不同章末追读问题；不得把已修复的扩批热区再次写成中段转场或空铺垫。' : '',
       '14A++. 执行 batch_preflight.longform_memory_anchor：批量续写时必须遵守压缩正史锚点，不能改变角色状态、遗忘开放悬念、跳过回报债务或偏离核心承诺。',
       '14A+++. 执行 batch_preflight.delivery_risk_carry_over：安全连写第一章必须优先承接上一章残留风险；opening_actions 在前 300 字落地，middle_actions 在中段转成事件推进，ending_actions 在最后 300 字形成追读钩子。',

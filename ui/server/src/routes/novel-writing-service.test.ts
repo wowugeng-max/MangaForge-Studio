@@ -683,6 +683,63 @@ describe('chapter prose word target', () => {
     expect(prompt).toContain('observation_metrics_delivered')
   })
 
+  test('injects default five-chapter lane redesign obligations into paragraph prose prompt', () => {
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+
+    const prompt = service.buildParagraphProseContext(
+      { title: '超人的规则怪谈世界' },
+      {
+        next_batch_brief: {
+          chapter_range_label: '第89章',
+          batch_goal: '恢复判定连续失效后先重写默认五章档位。',
+          expansion_structure_decision: {
+            visible: true,
+            label: '结构修复决策',
+            recommendation: 'escalate_structure_redesign',
+            target_chapter_count: 1,
+            mode_label: '单章结构重构',
+            segment_label: '中段',
+            summary: '连续 2 次恢复判定失效：核心偏移、回报欠账、追读拉力同维复发，默认档位结构重构。',
+            instruction: '默认 5 章档位连续恢复判定失效，本章先重写默认档位结构。',
+            observation_metrics: ['恢复判定连续失效 2 次', '同维复发：核心偏移、回报欠账、追读拉力'],
+            default_five_chapter_lane_redesign: {
+              reason: 'repeated_recovery_verdict_relapse',
+              relapse_count: 2,
+              repeated_failure_reasons: ['核心偏移', '回报欠账', '追读拉力'],
+              segment_duty_rewrite: '段位职责重写：定义默认 5 章内前段、中段、后段各自承担的冲突、信息、回报和钩子职责。',
+              conflict_rotation: '冲突轮换：五章内至少更换规则压迫、人物对抗、信息误导三类冲突来源。',
+              payoff_density: '回报密度：每章都要有显性回报，不能连续两章只铺垫。',
+              ending_hook_template: '章末追读模板：每章最后 300 字给出触发事件、读者问题、下一章风险升级。',
+            },
+          },
+        },
+        chapter_target: {
+          chapter_no: 89,
+          title: '默认档重构',
+          summary: '重写五章档位结构。',
+          conflict: '是否暂停扩批并重设节奏。',
+          ending_hook: '新的五章模板露出第一处风险。',
+          scene_cards: [],
+        },
+      },
+      null,
+      { chapter_no: 89, title: '默认档重构' },
+    )
+
+    expect(prompt).toContain('默认5章档位结构重构')
+    expect(prompt).toContain('连续恢复判定失效')
+    expect(prompt).toContain('核心偏移、回报欠账、追读拉力')
+    expect(prompt).toContain('段位职责重写')
+    expect(prompt).toContain('冲突轮换')
+    expect(prompt).toContain('回报密度')
+    expect(prompt).toContain('章末追读模板')
+    expect(prompt).toContain('repeated_recovery_verdict_relapse')
+  })
+
   test('injects longform memory anchor from safe batch preflight into paragraph prose prompt', () => {
     const service = createNovelWritingService({
       getProject: async () => null,
