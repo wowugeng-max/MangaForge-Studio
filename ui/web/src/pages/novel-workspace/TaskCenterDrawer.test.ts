@@ -960,6 +960,19 @@ describe('buildSafeBatchExpansionPolicySnapshot', () => {
             validation_chapter_nos: [50, 51, 52],
             repeated_hotspot_segment: { key: 'middle', label: '中段', risk_count: 3 },
             failure_reasons: ['核心偏移', '回报欠账', '追读拉力'],
+            template_version_id: 'safe_batch_expansion_structure_repair:668',
+            template_version: {
+              id: 'safe_batch_expansion_structure_repair:668',
+              label: '默认5章档位模板重构',
+              status: 'relapsed',
+              pass_streak: 2,
+              required_pass_streak: 2,
+            },
+            template_version_failed_requirements: [
+              { key: 'default_lane_segment_duty', label: '默认档位段位职责', failure_reason: '核心偏移' },
+              { key: 'default_lane_payoff_density', label: '回报密度', failure_reason: '回报欠账' },
+              { key: 'default_lane_ending_hook_template', label: '章末追读模板', failure_reason: '追读拉力' },
+            ],
             summary: '默认5章档位回退原因：连续 2 批恢复稳定后，第63、64、65、66、67章默认档位在中段复发。',
           },
         },
@@ -980,6 +993,18 @@ describe('buildSafeBatchExpansionPolicySnapshot', () => {
         label: '中段',
       },
       failureReasons: ['核心偏移', '回报欠账', '追读拉力'],
+      templateVersionId: 'safe_batch_expansion_structure_repair:668',
+      templateVersion: {
+        id: 'safe_batch_expansion_structure_repair:668',
+        status: 'relapsed',
+        passStreak: 2,
+        requiredPassStreak: 2,
+      },
+      templateVersionFailedRequirements: [
+        { key: 'default_lane_segment_duty', label: '默认档位段位职责', failureReason: '核心偏移' },
+        { key: 'default_lane_payoff_density', label: '回报密度', failureReason: '回报欠账' },
+        { key: 'default_lane_ending_hook_template', label: '章末追读模板', failureReason: '追读拉力' },
+      ],
     })
     expect(snapshot?.expansionFeedback?.defaultFiveChapterRegression?.summary).toContain('默认5章档位回退原因')
   })

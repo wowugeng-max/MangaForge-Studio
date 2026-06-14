@@ -1612,6 +1612,13 @@ export type SafeBatchDefaultFiveChapterRegressionSnapshot = {
     riskCount: number
   } | null
   failureReasons: string[]
+  templateVersionId: string
+  templateVersion: SafeBatchDefaultFiveChapterLaneTemplateVersionSnapshot | null
+  templateVersionFailedRequirements: {
+    key: string
+    label: string
+    failureReason: string
+  }[]
   summary: string
 }
 
@@ -2636,6 +2643,22 @@ function buildSafeBatchDefaultFiveChapterRegressionSnapshot(regressionLike: any)
       ? regression.failureReasons
       : []
   ).map((item: any) => compactEvidenceText(item)).filter(Boolean)
+  const templateVersion = buildSafeBatchDefaultFiveChapterLaneTemplateVersionSnapshot(
+    regression?.template_version || regression?.templateVersion,
+  )
+  const templateVersionId = compactEvidenceText(
+    regression?.template_version_id || regression?.templateVersionId || templateVersion?.id || '',
+  )
+  const templateVersionFailedRequirements = (Array.isArray(regression?.template_version_failed_requirements)
+    ? regression.template_version_failed_requirements
+    : Array.isArray(regression?.templateVersionFailedRequirements)
+      ? regression.templateVersionFailedRequirements
+      : []
+  ).map((item: any) => ({
+    key: compactEvidenceText(item?.key || ''),
+    label: compactEvidenceText(item?.label || item?.key || ''),
+    failureReason: compactEvidenceText(item?.failure_reason || item?.failureReason || ''),
+  })).filter((item: any) => item.key || item.label || item.failureReason)
   const snapshot = {
     visible: true,
     status: compactEvidenceText(regression?.status || ''),
@@ -2652,6 +2675,9 @@ function buildSafeBatchDefaultFiveChapterRegressionSnapshot(regressionLike: any)
       riskCount: Number(hotspot?.risk_count ?? hotspot?.riskCount ?? 0),
     } : null,
     failureReasons,
+    templateVersionId,
+    templateVersion,
+    templateVersionFailedRequirements,
     summary: compactEvidenceText(regression?.summary || ''),
   }
   if (!snapshot.status && !snapshot.defaultBatchChapterNos.length && !snapshot.summary) return null
@@ -3175,6 +3201,11 @@ function BatchProseRunSummary({ run }: { run: any }) {
                         {defaultFiveChapterRegression.repeatedHotspotSegment.label}复发
                       </Tag>
                     )}
+                    {defaultFiveChapterRegression?.templateVersionId && (
+                      <Tag color="gold" bordered={false}>
+                        模板版本 {defaultFiveChapterRegression.templateVersionId}
+                      </Tag>
+                    )}
                     {defaultRecoveryVerdictRelapse && (
                       <Tag color="gold" bordered={false}>恢复判定失效</Tag>
                     )}
@@ -3215,6 +3246,11 @@ function BatchProseRunSummary({ run }: { run: any }) {
                         </Tag>
                         {defaultFiveChapterRegression.failureReasons.slice(0, 3).map(reason => (
                           <Tag key={reason} color="gold" bordered={false}>{reason}</Tag>
+                        ))}
+                        {defaultFiveChapterRegression.templateVersionFailedRequirements.slice(0, 3).map(requirement => (
+                          <Tag key={`template-version-${requirement.key || requirement.failureReason}`} color="gold" bordered={false}>
+                            {requirement.label || requirement.failureReason}
+                          </Tag>
                         ))}
                       </Space>
                       <Text type="secondary" style={{ fontSize: 12 }}>

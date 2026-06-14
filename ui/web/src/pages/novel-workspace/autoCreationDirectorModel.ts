@@ -4295,6 +4295,7 @@ function buildSafeBatchExpansionStructureReview(args: {
   const rollbackPolicy = segmentReview?.rollbackPolicy || segmentReview?.rollback_policy || null
   const defaultRegressionVisible = Boolean(defaultFiveChapterRegression && defaultFiveChapterRegression.visible !== false)
   const defaultRecoveryVerdictRelapseVisible = Boolean(defaultFiveChapterRecoveryVerdictRelapse && defaultFiveChapterRecoveryVerdictRelapse.visible !== false)
+  const defaultLaneTemplateProductionRelapseQueue = buildDefaultFiveChapterLaneTemplateProductionRelapseQueue(defaultFiveChapterRegression)
   return {
     visible: true,
     status: 'warn',
@@ -4315,12 +4316,18 @@ function buildSafeBatchExpansionStructureReview(args: {
       defaultRegressionVisible
         ? `默认档位回退：先把${segmentLabel}失效原因写入任务书，下一轮回到3章验证批。`
         : '',
+      defaultLaneTemplateProductionRelapseQueue
+        ? `当前模板版本生产复发：${text(defaultLaneTemplateProductionRelapseQueue.summary)}`
+        : '',
       `重写${segmentLabel}固定职责：每批${segmentLabel}必须完成主线转折、显性回报和章末追读，不能只铺垫或转场。`,
       '批次节奏重排：前段抛压，中段兑现并升级，后段留钩；下一次5章前先用2-3章验证。',
       '把复发段位写入下一批任务书，明确每章承担的冲突来源、回报兑现和章末翻页问题。',
     ].filter(Boolean),
     ...(defaultRegressionVisible ? { default_five_chapter_regression: defaultFiveChapterRegression } : {}),
     ...(defaultRecoveryVerdictRelapseVisible ? { default_five_chapter_recovery_verdict_relapse: defaultFiveChapterRecoveryVerdictRelapse } : {}),
+    ...(defaultLaneTemplateProductionRelapseQueue ? {
+      default_five_chapter_lane_template_redesign_queue: defaultLaneTemplateProductionRelapseQueue,
+    } : {}),
     rollback_policy: rollbackPolicy ? {
       mode: text(rollbackPolicy?.mode),
       target_chapter_count: Number(rollbackPolicy?.targetChapterCount ?? rollbackPolicy?.target_chapter_count ?? 0),
@@ -4641,6 +4648,65 @@ function buildDefaultFiveChapterLaneTemplateRedesignQueue(profile?: AnyRecord | 
     validation_standard: [
       '下一轮3章验证批必须逐章回填 default_lane_*_delivered。',
       '连续2批模板全过后才能恢复默认5章档位。',
+    ],
+  }
+}
+
+function buildDefaultFiveChapterLaneTemplateProductionRelapseQueue(regression?: AnyRecord | null) {
+  if (!regression || regression.visible === false) return null
+  const templateVersion = regression.template_version || regression.templateVersion || null
+  const templateVersionId = text(regression.template_version_id || regression.templateVersionId || templateVersion?.id)
+  if (!templateVersionId) return null
+  const failedRequirements = arrayValue(regression.template_version_failed_requirements || regression.templateVersionFailedRequirements)
+    .map((item: AnyRecord) => ({
+      key: text(item?.key),
+      label: text(item?.label || item?.key, '模板要求'),
+      failure_reason: text(item?.failure_reason || item?.failureReason),
+      failed_count: Number(item?.failed_count ?? item?.failedCount ?? 1),
+      instruction: defaultFiveChapterLaneTemplateRedesignInstruction({
+        key: text(item?.key),
+        label: text(item?.label || item?.key, '模板要求'),
+      }),
+    }))
+    .filter((item: AnyRecord) => item.key || item.label)
+  if (!failedRequirements.length) return null
+  const topFailedRequirement = failedRequirements
+    .slice()
+    .sort((a, b) => b.failed_count - a.failed_count)[0] || null
+  const productionRelapseCount = Number(templateVersion?.production_relapse_count ?? templateVersion?.productionRelapseCount ?? 1)
+  return {
+    visible: true,
+    status: productionRelapseCount >= 2 ? 'redesign' : 'relapsed',
+    label: '默认档位模板生产复发队列',
+    source: 'default_five_chapter_lane_production_relapse',
+    recommendation: 'redesign_template_after_production_relapse',
+    summary: `默认档位模板版本 ${templateVersionId} 在真实5章生产复发：${failedRequirements.map(item => `${item.label}/${item.failure_reason}`).join('、')}，需要把失败维度回写到当前版本模板。`,
+    template_version_id: templateVersionId,
+    template_version: templateVersion ? { ...templateVersion, id: templateVersionId } : { id: templateVersionId },
+    production_relapse_count: Math.max(1, Number.isFinite(productionRelapseCount) ? productionRelapseCount : 1),
+    failed_requirements: failedRequirements,
+    ...(topFailedRequirement ? {
+      top_failed_requirement: {
+        key: topFailedRequirement.key,
+        label: topFailedRequirement.label,
+        failure_reason: topFailedRequirement.failure_reason,
+        failed_count: topFailedRequirement.failed_count,
+      },
+    } : {}),
+    redesign_requirements: DEFAULT_FIVE_CHAPTER_LANE_TEMPLATE_REQUIREMENTS.map(requirement => {
+      const failed = failedRequirements.find((item: AnyRecord) => item.key === requirement.key)
+      return {
+        key: requirement.key,
+        label: requirement.label,
+        failed_count: Number(failed?.failed_count || 0),
+        failure_reason: text(failed?.failure_reason),
+        instruction: defaultFiveChapterLaneTemplateRedesignInstruction(requirement),
+      }
+    }),
+    validation_standard: [
+      '下一轮3章验证批必须逐章回填 default_lane_*_delivered。',
+      '默认档位真实生产批必须记录 template_version_id 并做版本级后验复盘。',
+      '当前版本连续验证与生产后验都稳定后才能恢复默认5章档位。',
     ],
   }
 }
@@ -5621,6 +5687,7 @@ function buildSafeBatchExpansionStructureValidationTrend(args: {
 
 function buildDefaultFiveChapterLaneTemplateStabilityProfile(args: {
   validationEvaluations: AnyRecord[]
+  expansionEvaluations?: AnyRecord[]
 }) {
   const verdictEvents = arrayValue(args.validationEvaluations)
     .map(evaluation => {
@@ -5670,6 +5737,12 @@ function buildDefaultFiveChapterLaneTemplateStabilityProfile(args: {
   if (!verdictEvents.length) return null
 
   const latest = verdictEvents[0]
+  const productionRelapses = arrayValue(args.expansionEvaluations)
+    .map(evaluation => safeBatchDefaultFiveChapterRegression(evaluation))
+    .filter((regression: AnyRecord | null) => regression && regression.visible !== false && text(regression.template_version_id || regression.templateVersionId)) as AnyRecord[]
+  const latestProductionRelapse = productionRelapses
+    .slice()
+    .sort((a, b) => Date.parse(text(b.default_batch_created_at || b.defaultBatchCreatedAt)) - Date.parse(text(a.default_batch_created_at || a.defaultBatchCreatedAt)))[0] || null
   let passStreak = 0
   for (const event of verdictEvents) {
     if (event.status !== 'passed') break
@@ -5712,13 +5785,20 @@ function buildDefaultFiveChapterLaneTemplateStabilityProfile(args: {
   const topFailedRequirement = requirementStats
     .filter(item => item.failed_count > 0)
     .sort((a, b) => b.failed_count - a.failed_count)[0] || null
-  const templateVersionProfiles = Array.from(new Set(
-    verdictEvents
+  const templateVersionProfiles = Array.from(new Set([
+    ...verdictEvents
       .map(event => text(event.templateVersion?.id))
       .filter(Boolean),
-  )).map(versionId => {
+    ...productionRelapses
+      .map(regression => text(regression.template_version_id || regression.templateVersionId))
+      .filter(Boolean),
+  ])).map(versionId => {
     const versionEvents = verdictEvents.filter(event => text(event.templateVersion?.id) === versionId)
     const latestVersionEvent = versionEvents[0]
+    const versionProductionRelapses = productionRelapses
+      .filter(regression => text(regression.template_version_id || regression.templateVersionId) === versionId)
+      .sort((a, b) => Date.parse(text(b.default_batch_created_at || b.defaultBatchCreatedAt)) - Date.parse(text(a.default_batch_created_at || a.defaultBatchCreatedAt)))
+    const latestVersionProductionRelapse = versionProductionRelapses[0] || null
     let versionPassStreak = 0
     for (const event of versionEvents) {
       if (event.status !== 'passed') break
@@ -5737,16 +5817,32 @@ function buildDefaultFiveChapterLaneTemplateStabilityProfile(args: {
     const versionTopFailedRequirement = versionFailedRequirementStats
       .filter(item => item.failed_count > 0)
       .sort((a, b) => b.failed_count - a.failed_count)[0] || null
+    const productionFailedRequirements = arrayValue(latestVersionProductionRelapse?.template_version_failed_requirements || latestVersionProductionRelapse?.templateVersionFailedRequirements)
+      .map((item: AnyRecord) => ({
+        key: text(item?.key),
+        label: text(item?.label || item?.key, '模板要求'),
+        failure_reason: text(item?.failure_reason || item?.failureReason),
+      }))
+      .filter((item: AnyRecord) => item.key || item.label || item.failure_reason)
     const latestVersionStatus = latestVersionEvent?.status || ''
-    const versionStatus = latestVersionStatus === 'passed'
-      ? versionPassStreak >= requiredPassStreak ? 'ready' : 'observing'
-      : versionFailedBatchCount >= 2 ? 'redesign' : 'relapsed'
+    const productionRelapseIsLatest = latestVersionProductionRelapse
+      && (!latestVersionEvent || Date.parse(text(latestVersionProductionRelapse.default_batch_created_at || latestVersionProductionRelapse.defaultBatchCreatedAt)) > Date.parse(text(latestVersionEvent.createdAt)))
+    const versionStatus = productionRelapseIsLatest
+      ? versionProductionRelapses.length >= 2 ? 'redesign' : 'relapsed'
+      : latestVersionStatus === 'passed'
+        ? versionPassStreak >= requiredPassStreak ? 'ready' : 'observing'
+        : versionFailedBatchCount >= 2 ? 'redesign' : 'relapsed'
     return {
-      ...latestVersionEvent.templateVersion,
+      ...(latestVersionEvent?.templateVersion || latestVersionProductionRelapse?.template_version || latestVersionProductionRelapse?.templateVersion || {}),
+      id: versionId,
       status: versionStatus,
-      latest_status: latestVersionStatus,
-      latest_batch_created_at: text(latestVersionEvent?.createdAt),
-      latest_chapter_nos: arrayValue(latestVersionEvent?.chapterNos)
+      latest_status: productionRelapseIsLatest ? 'production_relapsed' : latestVersionStatus,
+      latest_batch_created_at: productionRelapseIsLatest
+        ? text(latestVersionProductionRelapse?.default_batch_created_at || latestVersionProductionRelapse?.defaultBatchCreatedAt)
+        : text(latestVersionEvent?.createdAt),
+      latest_chapter_nos: arrayValue(productionRelapseIsLatest
+        ? latestVersionProductionRelapse?.default_batch_chapter_nos || latestVersionProductionRelapse?.defaultBatchChapterNos
+        : latestVersionEvent?.chapterNos)
         .map((chapterNo: any) => Number(chapterNo))
         .filter((chapterNo: number) => chapterNo > 0),
       validation_batch_count: versionEvents.length,
@@ -5754,19 +5850,40 @@ function buildDefaultFiveChapterLaneTemplateStabilityProfile(args: {
       failed_batch_count: versionFailedBatchCount,
       pass_streak: versionPassStreak,
       required_pass_streak: requiredPassStreak,
+      production_relapse_count: versionProductionRelapses.length,
+      ...(latestVersionProductionRelapse ? {
+        latest_production_relapse: {
+          default_batch_created_at: text(latestVersionProductionRelapse.default_batch_created_at || latestVersionProductionRelapse.defaultBatchCreatedAt),
+          default_batch_chapter_nos: arrayValue(latestVersionProductionRelapse.default_batch_chapter_nos || latestVersionProductionRelapse.defaultBatchChapterNos)
+            .map((chapterNo: any) => Number(chapterNo))
+            .filter((chapterNo: number) => chapterNo > 0),
+          failure_reasons: arrayValue(latestVersionProductionRelapse.failure_reasons || latestVersionProductionRelapse.failureReasons)
+            .map((reason: any) => text(reason))
+            .filter(Boolean),
+          failed_requirements: productionFailedRequirements,
+          summary: text(latestVersionProductionRelapse.summary),
+        },
+      } : {}),
       ...(versionTopFailedRequirement ? { top_failed_requirement: versionTopFailedRequirement } : {}),
+      ...(productionFailedRequirements.length ? { production_failed_requirements: productionFailedRequirements } : {}),
     }
   })
-  const latestTemplateVersionProfile = latest.templateVersion
-    ? templateVersionProfiles.find(item => text(item.id) === text(latest.templateVersion?.id)) || null
-    : null
-  const latestStatus = latest.status
+  const latestTemplateVersionProfile = latestProductionRelapse
+    ? templateVersionProfiles.find(item => text(item.id) === text(latestProductionRelapse.template_version_id || latestProductionRelapse.templateVersionId)) || null
+    : latest.templateVersion
+      ? templateVersionProfiles.find(item => text(item.id) === text(latest.templateVersion?.id)) || null
+      : null
+  const productionRelapseIsLatest = latestProductionRelapse
+    && Date.parse(text(latestProductionRelapse.default_batch_created_at || latestProductionRelapse.defaultBatchCreatedAt)) > Date.parse(text(latest.createdAt))
+  const latestStatus = productionRelapseIsLatest ? 'production_relapsed' : latest.status
   const repeatedLatestFailure = latestStatus === 'failed'
     && arrayValue(latest.missingRequirements).some((item: AnyRecord) => {
       const key = text(item?.key)
       return key && (requirementStats.find(requirement => requirement.key === key)?.failed_count || 0) >= 2
     })
-  const status = latestStatus === 'passed'
+  const status = productionRelapseIsLatest
+    ? 'relapsed'
+    : latestStatus === 'passed'
     ? passStreak >= requiredPassStreak ? 'ready' : 'observing'
     : repeatedLatestFailure ? 'redesign' : 'relapsed'
   const recommendation = status === 'ready'
@@ -5781,7 +5898,9 @@ function buildDefaultFiveChapterLaneTemplateStabilityProfile(args: {
   const latestVersionText = latestTemplateVersionProfile?.id
     ? `版本 ${latestTemplateVersionProfile.id} 连过 ${latestTemplateVersionProfile.pass_streak}/${latestTemplateVersionProfile.required_pass_streak} 批；`
     : ''
-  const summary = status === 'ready'
+  const summary = productionRelapseIsLatest
+    ? `默认档位模板版本 ${text(latestTemplateVersionProfile?.id, '当前版本')} 在真实5章生产复发，${arrayValue(latestProductionRelapse?.failure_reasons || latestProductionRelapse?.failureReasons).map(item => text(item)).filter(Boolean).join('、') || '核心/回报/追读'}需要回写版本画像和模板重构队列。`
+    : status === 'ready'
     ? `默认档位模板连续 ${passStreak} 批通过，${latestChapterText}四项模板稳定，可作为恢复默认5章档位证据。`
     : status === 'observing'
       ? `默认档位模板最近通过，${latestVersionText}但历史仍有${topFailureText || '模板缺项'}；继续3章观察 ${passStreak}/${requiredPassStreak} 批，确认四项模板不复发后再恢复默认5章。`
@@ -5795,8 +5914,14 @@ function buildDefaultFiveChapterLaneTemplateStabilityProfile(args: {
     label: '默认档位模板稳定性',
     summary,
     latest_status: latestStatus,
-    latest_batch_created_at: latest.createdAt,
-    latest_chapter_nos: latest.chapterNos,
+    latest_batch_created_at: productionRelapseIsLatest
+      ? text(latestProductionRelapse?.default_batch_created_at || latestProductionRelapse?.defaultBatchCreatedAt)
+      : latest.createdAt,
+    latest_chapter_nos: productionRelapseIsLatest
+      ? arrayValue(latestProductionRelapse?.default_batch_chapter_nos || latestProductionRelapse?.defaultBatchChapterNos)
+        .map((chapterNo: any) => Number(chapterNo))
+        .filter((chapterNo: number) => chapterNo > 0)
+      : latest.chapterNos,
     validation_batch_count: validationBatchCount,
     passed_batch_count: passedBatchCount,
     failed_batch_count: failedBatchCount,
@@ -6189,6 +6314,64 @@ function safeBatchDefaultFiveChapterRecoveryVerdictRelapse(evaluation: AnyRecord
   }
 }
 
+function defaultFiveChapterLaneTemplateVersionFromLane(lane: AnyRecord | null | undefined) {
+  if (!lane) return null
+  const rawVersion = lane.latest_template_version_profile
+    || lane.latestTemplateVersionProfile
+    || lane.template_version
+    || lane.templateVersion
+    || null
+  const normalizedProfile = latestDefaultFiveChapterLaneTemplateVersionProfile({ latest_template_version_profile: rawVersion })
+  const normalizedTemplate = normalizeDefaultFiveChapterLaneTemplateVersion(rawVersion)
+  const explicitId = firstText(lane.template_version_id, lane.templateVersionId)
+  const version = normalizedProfile || normalizedTemplate || null
+  const id = explicitId || text(version?.id)
+  if (!id && !version) return null
+  return {
+    ...(version || {}),
+    id: id || text(version?.id),
+    label: firstText(version?.label, '默认5章档位模板版本'),
+  }
+}
+
+function defaultFiveChapterLaneTemplateRequirementForFailureReason(reason: string) {
+  if (reason === '核心偏移') {
+    return {
+      key: 'default_lane_segment_duty',
+      label: '默认档位段位职责',
+      failure_reason: reason,
+    }
+  }
+  if (reason === '回报欠账') {
+    return {
+      key: 'default_lane_payoff_density',
+      label: '回报密度',
+      failure_reason: reason,
+    }
+  }
+  if (reason === '追读拉力') {
+    return {
+      key: 'default_lane_ending_hook_template',
+      label: '章末追读模板',
+      failure_reason: reason,
+    }
+  }
+  return {
+    key: 'default_lane_conflict_rotation',
+    label: '冲突轮换',
+    failure_reason: reason,
+  }
+}
+
+function defaultFiveChapterLaneTemplateRequirementsForFailureReasons(reasons: string[]) {
+  const byKey = new Map<string, AnyRecord>()
+  reasons.forEach(reason => {
+    const requirement = defaultFiveChapterLaneTemplateRequirementForFailureReason(reason)
+    byKey.set(requirement.key, requirement)
+  })
+  return Array.from(byKey.values())
+}
+
 function safeBatchDefaultFiveChapterRegression(evaluation: AnyRecord | null | undefined) {
   if (!evaluation || text(evaluation.source) !== 'auto_creation_safe_batch') return null
   const lane = evaluation.defaultFiveChapterLane || null
@@ -6215,6 +6398,10 @@ function safeBatchDefaultFiveChapterRegression(evaluation: AnyRecord | null | un
   const requiredStablePassStreak = Number(lane.required_stable_pass_streak ?? lane.requiredStablePassStreak ?? 2)
   const riskText = failureReasons.length ? `失效证据：${failureReasons.join('、')}。` : '核心/回报/追读证据失效。'
   const defaultRecoveryVerdictRelapse = safeBatchDefaultFiveChapterRecoveryVerdictRelapse(evaluation)
+  const templateVersion = defaultFiveChapterLaneTemplateVersionFromLane(lane)
+  const templateVersionId = text(templateVersion?.id)
+  const templateVersionFailedRequirements = defaultFiveChapterLaneTemplateRequirementsForFailureReasons(failureReasons)
+  const templateVersionText = templateVersionId ? `版本 ${templateVersionId} ` : ''
 
   return {
     visible: true,
@@ -6240,9 +6427,14 @@ function safeBatchDefaultFiveChapterRegression(evaluation: AnyRecord | null | un
       summary: text(hotspot.summary),
     },
     failure_reasons: failureReasons,
+    ...(templateVersionId ? { template_version_id: templateVersionId } : {}),
+    ...(templateVersion ? { template_version: templateVersion } : {}),
+    ...(templateVersionFailedRequirements.length ? {
+      template_version_failed_requirements: templateVersionFailedRequirements,
+    } : {}),
     summary: defaultRecoveryVerdictRelapse
-      ? `${defaultRecoveryVerdictRelapse.summary} 默认5章档位在${segmentLabel}复发，先回到扩批结构修复层。`
-      : `默认5章档位回退原因：连续 ${stablePassStreak} 批恢复稳定后，${compactChapterNoEvidence(defaultBatchChapterNos)}默认档位在${segmentLabel}复发，${riskText}先回到3章验证批或扩批结构修复层。`,
+      ? `${defaultRecoveryVerdictRelapse.summary} ${templateVersionText}默认5章档位在${segmentLabel}复发，先回到扩批结构修复层。`
+      : `默认5章档位回退原因：连续 ${stablePassStreak} 批恢复稳定后，${compactChapterNoEvidence(defaultBatchChapterNos)}${templateVersionText}默认档位在${segmentLabel}复发，${riskText}先回到3章验证批或扩批结构修复层。`,
     ...(defaultRecoveryVerdictRelapse ? {
       default_five_chapter_recovery_verdict_relapse: defaultRecoveryVerdictRelapse,
     } : {}),
@@ -6476,6 +6668,7 @@ function buildSafeBatchExpansionFeedback(args: {
   })
   const defaultFiveChapterLaneTemplateStabilityProfile = buildDefaultFiveChapterLaneTemplateStabilityProfile({
     validationEvaluations: structureValidationEvaluations,
+    expansionEvaluations: expansionEvaluationsForTrend,
   })
   const expansionStructureRepairEffectiveness = buildSafeBatchExpansionStructureRepairEffectiveness({
     runRecords: args.runRecords,
@@ -8237,6 +8430,13 @@ function buildBatchRiskRadar(args: {
       const repeatedSegment = expansionStructureReview.repeated_hotspot_segment
       const defaultRegression = expansionStructureReview.default_five_chapter_regression || null
       const defaultRecoveryVerdictRelapse = expansionStructureReview.default_five_chapter_recovery_verdict_relapse || null
+      const defaultLaneTemplateProductionRelapseQueue = expansionStructureReview.default_five_chapter_lane_template_redesign_queue || null
+      const defaultLaneTemplateProductionRelapseVersionId = text(
+        defaultLaneTemplateProductionRelapseQueue?.template_version_id
+        || defaultLaneTemplateProductionRelapseQueue?.templateVersionId
+        || defaultLaneTemplateProductionRelapseQueue?.template_version?.id
+        || defaultLaneTemplateProductionRelapseQueue?.templateVersion?.id,
+      )
       const expansionStructureReviewWithTrend = {
         ...expansionStructureReview,
         ...(safeBatchExpansionStructureValidationTrend?.visible ? {
@@ -8250,6 +8450,8 @@ function buildBatchRiskRadar(args: {
         severity: 'high',
         message: defaultRecoveryVerdictRelapse
           ? `默认5章档位恢复判定失效：${text(defaultRecoveryVerdictRelapse.summary, `${repeatedSegment?.label || '扩批段位'}同维复发，需要回到3章验证批。`)}`
+          : defaultLaneTemplateProductionRelapseQueue
+          ? `默认5章档位模板版本 ${defaultLaneTemplateProductionRelapseVersionId || '当前版本'} 真实生产复发：${text(defaultLaneTemplateProductionRelapseQueue.summary)}`
           : defaultRegression
           ? `默认5章档位失效：${text(defaultRegression.summary, `${repeatedSegment?.label || '扩批段位'}复发，需要改写批次结构。`)}`
           : `${repeatedSegment?.label || '扩批段位'}连续 ${repeatedSegment?.count || 2} 次扩批热区，单修章节不足，需要改写批次结构。`,
