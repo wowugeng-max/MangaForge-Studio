@@ -1046,6 +1046,18 @@ type DefaultLaneObligationStatus = {
   color: string
 }
 
+type DefaultLaneProductionRelapseClosure = {
+  status: string
+  templateVersionId: string
+  defaultBatchChapterNos: number[]
+  validationChapterNos: number[]
+  remainingFailureReasons: string[]
+  clearedFailureReasons: string[]
+  failedRequirements: Array<{ key: string; label: string; failureReason: string }>
+  closeText: string
+  detailText: string
+}
+
 function structureDecisionRepairReviewOfTask(task: any) {
   return task?.safe_batch_expansion_structure_decision_review
     || task?.safeBatchExpansionStructureDecisionReview
@@ -1107,6 +1119,40 @@ function defaultLaneTemplateRepairProductionFailedRequirementsOfTask(task: any) 
       failureReason: compactEvidenceText(item?.failure_reason || item?.failureReason || ''),
     }))
     .filter((item: any) => item.key || item.label || item.failureReason)
+}
+
+function defaultLaneTemplateProductionRelapseClosureOfTask(task: any): DefaultLaneProductionRelapseClosure | null {
+  const repair = defaultLaneTemplateRepairOfTask(task)
+  if (!repair) return null
+  const verdict = repair.production_relapse_verdict || repair.productionRelapseVerdict || null
+  if (verdict?.visible === false) return null
+  const failedRequirements = defaultLaneTemplateRepairProductionFailedRequirementsOfTask(task)
+  const status = compactEvidenceText(verdict?.status || repair.production_relapse_status || repair.productionRelapseStatus || '')
+  const remainingFailureReasons = normalizeEvidenceTextList(verdict?.remaining_failure_reasons || verdict?.remainingFailureReasons)
+  const clearedFailureReasons = normalizeEvidenceTextList(verdict?.cleared_failure_reasons || verdict?.clearedFailureReasons)
+  const defaultBatchChapterNos = normalizeChapterNos(verdict?.default_batch_chapter_nos || verdict?.defaultBatchChapterNos)
+  const validationChapterNos = normalizeChapterNos(verdict?.validation_chapter_nos || verdict?.validationChapterNos || repair.validation_chapter_nos || repair.validationChapterNos)
+  const templateVersionId = compactEvidenceText(verdict?.template_version_id || verdict?.templateVersionId || repair.template_version_id || repair.templateVersionId || '')
+  if (!status && !failedRequirements.length && !remainingFailureReasons.length && !defaultBatchChapterNos.length) return null
+  const detailParts = [
+    templateVersionId ? `模板版本：${templateVersionId}` : '',
+    defaultBatchChapterNos.length ? `真实复发批：${compactChapterNos(defaultBatchChapterNos)}` : '',
+    validationChapterNos.length ? `验证批：${compactChapterNos(validationChapterNos)}` : '',
+    remainingFailureReasons.length ? `仍复发维度：${remainingFailureReasons.join('、')}` : '',
+    clearedFailureReasons.length ? `已修复维度：${clearedFailureReasons.join('、')}` : '',
+    failedRequirements.length ? `生产失败项：${failedRequirements.map(item => item.failureReason || item.label || item.key).filter(Boolean).join('、')}` : '',
+  ].filter(Boolean)
+  return {
+    status,
+    templateVersionId,
+    defaultBatchChapterNos,
+    validationChapterNos,
+    remainingFailureReasons,
+    clearedFailureReasons,
+    failedRequirements,
+    closeText: '等待生产后验验证批：下一轮以 production_relapse_verdict.status=passed 关闭，且 remaining_failure_reasons 为空。',
+    detailText: detailParts.join('；'),
+  }
 }
 
 function defaultLaneFailedRequirementsOfTask(task: any) {
@@ -1244,6 +1290,20 @@ function buildDefaultLaneFocusObligationStatuses(
       color: 'default',
     }
   })
+}
+
+function buildDefaultLaneProductionRelapseClosure(
+  focus: SafeBatchRecoveryFocusSnapshot | null | undefined,
+  activeItems: any[],
+  resolvedItems: any[],
+): DefaultLaneProductionRelapseClosure | null {
+  if (focus?.requirementKey !== 'default_lane_template') return null
+  const closures = [...activeItems, ...resolvedItems]
+    .map((item: any) => defaultLaneTemplateProductionRelapseClosureOfTask(item?.task || item))
+    .filter(Boolean) as DefaultLaneProductionRelapseClosure[]
+  if (!closures.length) return null
+  return closures.find(item => item.status === 'failed' || item.remainingFailureReasons.length > 0 || item.failedRequirements.length > 0)
+    || closures[0]
 }
 
 function compactEvidenceText(value: any, maxLength?: number) {
@@ -1595,10 +1655,14 @@ export function buildSafeBatchRecoveryFocusReviewState(focus: SafeBatchRecoveryF
   const obligationSummary = obligationStatuses.length
     ? `四项回检：${obligationStatuses.map(item => item.text).join('、')}。`
       : ''
+  const productionRelapseClosure = buildDefaultLaneProductionRelapseClosure(focus, activeItems, resolvedItems)
+  const productionRelapseSummary = productionRelapseClosure
+    ? `${productionRelapseClosure.closeText}${productionRelapseClosure.detailText ? `${productionRelapseClosure.detailText}。` : ''}不能只补 default_lane_*_delivered。`
+    : ''
   const summary = status === 'active'
-    ? `${actionLabel}仍有 ${activeItems.length} 个待处理任务，${obligationSummary}先闭环后再回到安全连写验证。`
+    ? `${actionLabel}仍有 ${activeItems.length} 个待处理任务，${obligationSummary}${productionRelapseSummary}先闭环后再回到安全连写验证。`
     : status === 'ready_for_recheck'
-      ? `${actionLabel}已处理 ${resolvedItems.length} 个匹配任务，${obligationSummary}刷新路线图后可判断启动验证批还是继续修下一层。`
+      ? `${actionLabel}已处理 ${resolvedItems.length} 个匹配任务，${obligationSummary}${productionRelapseSummary}刷新路线图后可判断启动验证批还是继续修下一层。`
       : '暂未找到路线图匹配任务，可打开最近安全连写或修复历史查看复盘记录。'
   return {
     status,
@@ -1610,6 +1674,7 @@ export function buildSafeBatchRecoveryFocusReviewState(focus: SafeBatchRecoveryF
     nextActionLabel,
     summary,
     obligationStatuses,
+    productionRelapseClosure,
   }
 }
 

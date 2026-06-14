@@ -2068,6 +2068,105 @@ describe('buildSafeBatchExpansionPolicySnapshot', () => {
       { key: 'default_lane_ending_hook_template', label: '章末追读模板', status: 'fulfilled', text: '章末追读模板已补齐', color: 'green' },
     ])
   })
+
+  test('surfaces production relapse closure criteria in active default lane template focus', () => {
+    const focus = {
+      layerKey: 'default_lane_template_version',
+      layerLabel: '默认档位模板版本',
+      actionLabel: '修生产后验',
+      targetView: 'repair_task',
+      issueType: 'safe_batch_expansion_structure_repair',
+      source: 'safe_batch_recovery_roadmap',
+      taskStatuses: ['open', 'needs_review'],
+      taskCenterFilterLabel: '生产后验仍复发',
+      requirementKey: 'default_lane_template',
+      templateVersionId: 'safe_batch_expansion_structure_repair:668',
+    }
+    const state = buildSafeBatchRecoveryFocusReviewState(focus, [{
+      task: {
+        issue_type: 'safe_batch_expansion_structure_repair',
+        task_status: 'open',
+        safe_batch_expansion_structure_review: {
+          default_five_chapter_lane_template_repair: {
+            visible: true,
+            status: 'failed',
+            production_relapse_verdict: {
+              visible: true,
+              status: 'failed',
+              template_version_id: 'safe_batch_expansion_structure_repair:668',
+              default_batch_chapter_nos: [109, 110, 111, 112, 113],
+              validation_chapter_nos: [114, 115, 116],
+              remaining_failure_reasons: ['核心偏移', '回报欠账'],
+            },
+            production_failed_requirements: [
+              { key: 'default_lane_segment_duty', label: '默认档位段位职责', failure_reason: '核心偏移' },
+              { key: 'default_lane_payoff_density', label: '回报密度', failure_reason: '回报欠账' },
+            ],
+          },
+        },
+      },
+    }])
+
+    expect(state.status).toBe('active')
+    expect(state.summary).toContain('等待生产后验验证批')
+    expect(state.summary).toContain('真实复发批：第109、110、111、112、113章')
+    expect(state.summary).toContain('仍复发维度：核心偏移、回报欠账')
+    expect(state.summary).toContain('production_relapse_verdict.status=passed')
+    expect((state as any).productionRelapseClosure).toMatchObject({
+      status: 'failed',
+      templateVersionId: 'safe_batch_expansion_structure_repair:668',
+      closeText: '等待生产后验验证批：下一轮以 production_relapse_verdict.status=passed 关闭，且 remaining_failure_reasons 为空。',
+    })
+  })
+
+  test('surfaces production relapse closure criteria after default lane template focus is resolved', () => {
+    const focus = {
+      layerKey: 'default_lane_template_version',
+      layerLabel: '默认档位模板版本',
+      actionLabel: '修生产后验',
+      targetView: 'repair_task',
+      issueType: 'safe_batch_expansion_structure_repair',
+      source: 'safe_batch_recovery_roadmap',
+      taskStatuses: ['open', 'needs_review'],
+      taskCenterFilterLabel: '生产后验仍复发',
+      requirementKey: 'default_lane_template',
+    }
+    const state = buildSafeBatchRecoveryFocusReviewState(focus, [{
+      task: {
+        issue_type: 'safe_batch_expansion_structure_repair',
+        task_status: 'resolved',
+        safe_batch_expansion_structure_review: {
+          default_five_chapter_lane_template_repair: {
+            visible: true,
+            status: 'failed',
+            production_relapse_verdict: {
+              visible: true,
+              status: 'failed',
+              template_version_id: 'safe_batch_expansion_structure_repair:668',
+              default_batch_chapter_nos: [109, 110, 111, 112, 113],
+              validation_chapter_nos: [114, 115, 116],
+              remaining_failure_reasons: ['核心偏移'],
+              cleared_failure_reasons: ['追读拉力'],
+            },
+            production_failed_requirements: [
+              { key: 'default_lane_segment_duty', label: '默认档位段位职责', failure_reason: '核心偏移' },
+            ],
+          },
+        },
+      },
+    }])
+
+    expect(state.status).toBe('ready_for_recheck')
+    expect(state.nextActionLabel).toBe('刷新路线图并启动验证批')
+    expect(state.summary).toContain('已处理 1 个匹配任务')
+    expect(state.summary).toContain('下一轮以 production_relapse_verdict.status=passed 关闭')
+    expect(state.summary).toContain('remaining_failure_reasons 为空')
+    expect(state.summary).toContain('不能只补 default_lane_*_delivered')
+    expect((state as any).productionRelapseClosure).toMatchObject({
+      status: 'failed',
+      closeText: '等待生产后验验证批：下一轮以 production_relapse_verdict.status=passed 关闭，且 remaining_failure_reasons 为空。',
+    })
+  })
 })
 
 describe('default lane repair task card helpers', () => {
