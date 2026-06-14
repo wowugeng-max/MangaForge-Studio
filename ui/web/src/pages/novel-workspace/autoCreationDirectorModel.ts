@@ -4383,6 +4383,62 @@ function buildDefaultFiveChapterLaneTemplateVerdict(args: {
   }
 }
 
+function defaultFiveChapterLaneTemplateRepairAction(requirement: AnyRecord) {
+  const label = text(requirement?.label || requirement?.key, '模板缺项')
+  const chapterText = compactChapterNoEvidence(
+    arrayValue(requirement?.chapter_nos || requirement?.chapterNos)
+      .map((chapterNo: any) => Number(chapterNo))
+      .filter((chapterNo: number) => chapterNo > 0),
+  )
+  const key = text(requirement?.key)
+  if (key === 'default_lane_segment_duty') return `段位职责修复：${chapterText}必须明确本章在默认5章档位里的前段/中段/后段职责，不能只写单章事件。`
+  if (key === 'default_lane_conflict_rotation') return `冲突轮换修复：${chapterText}必须换掉重复冲突来源，写清本章使用规则压迫、人物对抗或信息误导中的哪一类。`
+  if (key === 'default_lane_payoff_density') return `回报密度修复：${chapterText}必须补出显性回报，至少让读者看到一个可感知收益、反制结果或阶段结算。`
+  if (key === 'default_lane_ending_hook_template') return `章末追读模板修复：${chapterText}最后300字必须落触发事件、读者问题和下一章风险。`
+  return `${label}修复：${chapterText}必须补成正文可见模板回执。`
+}
+
+function buildDefaultFiveChapterLaneTemplateRepair(verdict?: AnyRecord | null) {
+  if (!verdict || verdict.visible === false) return null
+  const missingRequirements = arrayValue(verdict.missing_requirements || verdict.missingRequirements)
+    .map((item: AnyRecord) => {
+      const chapterNos = arrayValue(item?.chapter_nos || item?.chapterNos)
+        .map((chapterNo: any) => Number(chapterNo))
+        .filter((chapterNo: number) => chapterNo > 0)
+      return {
+        key: text(item?.key),
+        label: text(item?.label || item?.key, '模板缺项'),
+        chapter_nos: chapterNos,
+      }
+    })
+    .filter((item: AnyRecord) => item.key || item.label || item.chapter_nos.length)
+  if (!missingRequirements.length) return null
+  const missingText = missingRequirements
+    .map((item: AnyRecord) => `${compactChapterNoEvidence(item.chapter_nos)}缺${item.label}`)
+    .join('；')
+  const repairActions = missingRequirements
+    .map(defaultFiveChapterLaneTemplateRepairAction)
+    .filter(Boolean)
+  return {
+    visible: true,
+    status: 'failed',
+    label: '默认档位模板验证缺项',
+    summary: text(verdict.summary, `默认档位模板回检未通过：${missingText}，下一轮结构修复必须写入任务书。`),
+    validation_chapter_nos: arrayValue(verdict.validation_chapter_nos || verdict.validationChapterNos)
+      .map((chapterNo: any) => Number(chapterNo))
+      .filter((chapterNo: number) => chapterNo > 0),
+    requirements: arrayValue(verdict.requirements).map((item: AnyRecord) => ({
+      key: text(item?.key),
+      label: text(item?.label || item?.key),
+      status: text(item?.status || 'fulfilled'),
+    })).filter((item: AnyRecord) => item.key || item.label),
+    missing_count: Number(verdict.missing_count ?? verdict.missingCount ?? missingRequirements.length),
+    missing_requirements: missingRequirements,
+    repair_actions: repairActions,
+    repair_summary: missingText,
+  }
+}
+
 function buildSafeBatchExpansionStructureValidationResult(args: {
   preflight?: AnyRecord | null
   chapterRisks: AnyRecord[]
@@ -7764,6 +7820,13 @@ function buildBatchRiskRadar(args: {
   if (safeBatchExpansionStructureValidationRiskTotal > 0 && successfulItems.length > 0) {
     const failedChapterNo = Number(safeBatchExpansionStructureValidationResult.failed_chapter_nos?.[0] || 0)
     const failedItem = successfulItems.find(item => Number(item.chapterNo || 0) === failedChapterNo) || successfulItems[0]
+    const defaultLaneTemplateRepair = buildDefaultFiveChapterLaneTemplateRepair(
+      safeBatchExpansionStructureValidationResult.default_five_chapter_lane_template_verdict,
+    )
+    const defaultLaneTemplateRepairSummary = text(defaultLaneTemplateRepair?.repair_summary)
+    const defaultLaneTemplateRepairActions = arrayValue(defaultLaneTemplateRepair?.repair_actions)
+      .map(item => text(item))
+      .filter(Boolean)
     const rollbackPolicy = safeBatchExpansionRollbackPolicy({
       riskCount: safeBatchExpansionStructureValidationRiskTotal,
       coreRiskCount: Number(safeBatchExpansionStructureValidationResult.core_risk_count || 0),
@@ -7778,7 +7841,11 @@ function buildBatchRiskRadar(args: {
       latest_chapter_nos: safeBatchExpansionStructureValidationResult.validation_chapter_nos,
       affected_chapter_nos: safeBatchExpansionStructureValidationResult.failed_chapter_nos,
       hotspot_summaries: [safeBatchExpansionStructureValidationResult.summary],
+      ...(defaultLaneTemplateRepair ? {
+        default_five_chapter_lane_template_repair: defaultLaneTemplateRepair,
+      } : {}),
       structure_actions: [
+        ...defaultLaneTemplateRepairActions,
         safeBatchExpansionStructureValidationResult.fixed_segment_role,
         safeBatchExpansionStructureValidationResult.conflict_rotation,
         safeBatchExpansionStructureValidationResult.explicit_payoff,
@@ -7801,13 +7868,20 @@ function buildBatchRiskRadar(args: {
       issueType: 'safe_batch_expansion_structure_repair',
       taskType: 'repair_planning',
       severity: safeBatchExpansionStructureValidationResult.core_risk_count > 0 || safeBatchExpansionStructureValidationRiskTotal >= 2 ? 'high' : 'medium',
-      message: `扩批结构验证未通过，验证批仍有 ${safeBatchExpansionStructureValidationRiskTotal} 项核心/回报/追读风险。`,
-      action: '回到扩批结构任务书：重写验证批段位职责、冲突轮换、显性回报和章末追读，再用2-3章复验；复验通过前不恢复5章扩批。',
+      message: defaultLaneTemplateRepair
+        ? `默认档位模板回检未通过，${defaultLaneTemplateRepairSummary || `${safeBatchExpansionStructureValidationRiskTotal} 项模板缺口`}会阻止恢复默认5章档位。`
+        : `扩批结构验证未通过，验证批仍有 ${safeBatchExpansionStructureValidationRiskTotal} 项核心/回报/追读风险。`,
+      action: defaultLaneTemplateRepair
+        ? `回到扩批结构任务书：${defaultLaneTemplateRepairSummary}；把缺失模板写成下一轮段位职责、冲突轮换、显性回报密度和章末追读检查项，再用2-3章复验；复验通过前不恢复默认5章档位。`
+        : '回到扩批结构任务书：重写验证批段位职责、冲突轮换、显性回报和章末追读，再用2-3章复验；复验通过前不恢复5章扩批。',
       metrics: {
         safe_batch_expansion_structure_validation_risk_count: safeBatchExpansionStructureValidationRiskTotal,
         core_risk_count: safeBatchExpansionStructureValidationResult.core_risk_count,
         payoff_debt_count: safeBatchExpansionStructureValidationResult.payoff_debt_count,
         reader_pull_risk_count: safeBatchExpansionStructureValidationResult.reader_pull_risk_count,
+        ...(defaultLaneTemplateRepair ? {
+          default_five_chapter_lane_template_missing_count: defaultLaneTemplateRepair.missing_count,
+        } : {}),
       },
       safeBatchExpansionStructureReview: structureReview,
       safeBatchExpansionStructureValidationResult,

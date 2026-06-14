@@ -5385,6 +5385,7 @@ describe('buildAutoCreationDirectorModel', () => {
     const policy = model.batchGuardrail.preflight.inputSnapshot.safe_batch_expansion_policy
     const validationResult = policy.expansion_feedback.expansion_structure_validation_result
     const templateVerdict = validationResult.default_five_chapter_lane_template_verdict
+    const structureTask = model.batchReviewQueue.riskRadar.repairTasks.find((task: any) => task.issue_type === 'safe_batch_expansion_structure_repair')
 
     expect(validationResult).toMatchObject({
       status: 'warn',
@@ -5404,6 +5405,24 @@ describe('buildAutoCreationDirectorModel', () => {
       ],
     })
     expect(templateVerdict.summary).toContain('第91章缺回报密度')
+    expect(structureTask).toMatchObject({
+      issue_type: 'safe_batch_expansion_structure_repair',
+      message: expect.stringContaining('默认档位模板回检未通过'),
+      action: expect.stringContaining('第91章缺回报密度'),
+      safe_batch_expansion_structure_review: {
+        default_five_chapter_lane_template_repair: {
+          visible: true,
+          label: '默认档位模板验证缺项',
+          missing_requirements: [
+            {
+              key: 'default_lane_payoff_density',
+              label: '回报密度',
+              chapter_nos: [91],
+            },
+          ],
+        },
+      },
+    })
   })
 
   test('summarizes expansion structure validation trend by repeated segment', () => {

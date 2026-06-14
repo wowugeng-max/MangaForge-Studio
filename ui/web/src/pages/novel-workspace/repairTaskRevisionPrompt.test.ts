@@ -362,6 +362,52 @@ describe('buildRepairTaskRevisionPrompt', () => {
     expect(prompt).toContain('必须按长期复发惯性重写批次结构')
   })
 
+  test('injects default lane template validation gaps into structure repair prompts', () => {
+    const prompt = buildRepairTaskRevisionPrompt({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'safe_batch_expansion_structure_repair',
+      severity: 'medium',
+      message: '默认档位模板回检未通过。',
+      action: '第91章缺回报密度，下一轮结构修复任务书必须补齐。',
+      safe_batch_expansion_structure_review: {
+        repeated_hotspot_segment: {
+          key: 'middle',
+          label: '中段',
+          count: 2,
+        },
+        latest_chapter_nos: [90, 91, 92],
+        affected_chapter_nos: [91],
+        validation_result: {
+          visible: true,
+          status: 'warn',
+          label: '扩批结构验证',
+          summary: '默认档位模板回检未通过：第91章缺回报密度，不能恢复默认5章档位。',
+          validation_chapter_nos: [90, 91, 92],
+          failed_chapter_nos: [91],
+          risk_count: 1,
+          default_five_chapter_lane_template_verdict: {
+            visible: true,
+            status: 'failed',
+            label: '默认档位模板回检',
+            summary: '默认档位模板回检未通过：第91章缺回报密度，不能恢复默认5章档位。',
+            validation_chapter_nos: [90, 91, 92],
+            missing_count: 1,
+            missing_requirements: [
+              { key: 'default_lane_payoff_density', label: '回报密度', chapter_nos: [91] },
+            ],
+          },
+        },
+      },
+    })
+
+    expect(prompt).toContain('【默认档位模板验证缺项】')
+    expect(prompt).toContain('验证结论：默认档位模板回检未通过：第91章缺回报密度')
+    expect(prompt).toContain('缺项章节：第91章缺回报密度')
+    expect(prompt).toContain('修订要求：把缺失模板转成下一轮批次任务书的段位职责、冲突轮换、显性回报密度和章末追读检查项')
+    expect(prompt).toContain('回报密度修复：第91章必须补出显性回报')
+    expect(prompt).toContain('default_lane_payoff_density_delivered')
+  })
+
   test('injects reader pull and innovation evidence for safe-batch repair tasks', () => {
     const readerPrompt = buildRepairTaskRevisionPrompt({
       issue_type: 'reader_pull_missed',

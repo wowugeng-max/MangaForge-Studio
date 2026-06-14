@@ -582,6 +582,67 @@ function normalizeExpansionStructureValidationTrend(task: AnyRecord, review: Any
   }
 }
 
+function compactChapterNosForPrompt(chapterNos: number[]) {
+  if (!chapterNos.length) return '相关章节'
+  return `第${chapterNos.slice(0, 6).join('、')}章${chapterNos.length > 6 ? `等${chapterNos.length}章` : ''}`
+}
+
+function defaultLaneTemplateRepairActionForPrompt(requirement: AnyRecord) {
+  const key = firstText(requirement.key)
+  const label = firstText(requirement.label, requirement.key, '模板缺项')
+  const chapterText = compactChapterNosForPrompt(arrayValue(requirement.chapter_nos || requirement.chapterNos)
+    .map(chapterNo => Number(chapterNo))
+    .filter(chapterNo => chapterNo > 0))
+  if (key === 'default_lane_segment_duty') return `段位职责修复：${chapterText}必须明确本章在默认5章档位里的段位职责，不能只写单章事件。`
+  if (key === 'default_lane_conflict_rotation') return `冲突轮换修复：${chapterText}必须更换冲突来源，写清规则压迫、人物对抗或信息误导的轮换位置。`
+  if (key === 'default_lane_payoff_density') return `回报密度修复：${chapterText}必须补出显性回报，让读者看到收益、反制结果或阶段结算。`
+  if (key === 'default_lane_ending_hook_template') return `章末追读模板修复：${chapterText}最后300字必须落触发事件、读者问题和下一章风险。`
+  return `${label}修复：${chapterText}必须补成正文可见模板回执。`
+}
+
+function normalizeDefaultFiveChapterLaneTemplateRepair(review: AnyRecord) {
+  const explicit = objectValue(
+    review.default_five_chapter_lane_template_repair
+    || review.defaultFiveChapterLaneTemplateRepair,
+  )
+  const validationResult = objectValue(review.validation_result || review.validationResult)
+  const verdict = objectValue(
+    validationResult.default_five_chapter_lane_template_verdict
+    || validationResult.defaultFiveChapterLaneTemplateVerdict,
+  )
+  const source = Object.keys(explicit).length ? explicit : verdict
+  if (!Object.keys(source).length || source.visible === false) return null
+  const missingRequirements = arrayValue(source.missing_requirements || source.missingRequirements)
+    .map(item => objectValue(item))
+    .map(item => ({
+      key: firstText(item.key),
+      label: firstText(item.label, item.name, item.key, '模板缺项'),
+      chapterNos: arrayValue(item.chapter_nos || item.chapterNos)
+        .map(chapterNo => Number(chapterNo))
+        .filter(chapterNo => chapterNo > 0),
+    }))
+    .filter(item => item.key || item.label || item.chapterNos.length)
+  if (!missingRequirements.length) return null
+  const repairActions = arrayValue(source.repair_actions || source.repairActions)
+    .map(item => text(item))
+    .filter(Boolean)
+  const missingText = firstText(source.repair_summary, source.repairSummary)
+    || missingRequirements.map(item => `${compactChapterNosForPrompt(item.chapterNos)}缺${item.label}`).join('；')
+  return {
+    label: firstText(source.label, verdict.label, '默认档位模板验证缺项'),
+    summary: firstText(source.summary, verdict.summary),
+    validationChapterNos: arrayValue(source.validation_chapter_nos || source.validationChapterNos || verdict.validation_chapter_nos || verdict.validationChapterNos)
+      .map(chapterNo => Number(chapterNo))
+      .filter(chapterNo => chapterNo > 0),
+    missingCount: Number(source.missing_count ?? source.missingCount ?? verdict.missing_count ?? verdict.missingCount ?? missingRequirements.length),
+    missingRequirements,
+    missingText,
+    repairActions: repairActions.length
+      ? repairActions
+      : missingRequirements.map(defaultLaneTemplateRepairActionForPrompt),
+  }
+}
+
 export function buildRepairTaskRevisionPrompt(task: AnyRecord, run?: AnyRecord | null) {
   const batchPlan = normalizeBatchPlanContext(task, run)
   const chapterPlan = batchPlan?.chapter_plan
@@ -735,6 +796,7 @@ export function buildRepairTaskRevisionPrompt(task: AnyRecord, run?: AnyRecord |
       .filter(Boolean)
     const rollback = objectValue(review.rollback_policy || review.rollbackPolicy)
     const validationTrend = normalizeExpansionStructureValidationTrend(task, review)
+    const defaultLaneTemplateRepair = normalizeDefaultFiveChapterLaneTemplateRepair(review)
     lines.push(
       '【扩批结构修复】',
       repeatedCount > 0 ? `复发段位：${repeatedLabel}连续 ${repeatedCount} 次` : `复发段位：${repeatedLabel}`,
@@ -747,6 +809,18 @@ export function buildRepairTaskRevisionPrompt(task: AnyRecord, run?: AnyRecord |
       '修订要求：先改批次任务书、段位职责和章间节奏，不能只修单章语句或局部爽点；每章必须重新分配冲突来源、显性回报、主线推进和章末追读。',
       '修订后必须重新运行5章扩批分段复盘，确认该段位不再成为核心/回报/追读热区，再恢复5章安全连写。',
     )
+    if (defaultLaneTemplateRepair) {
+      lines.push(
+        '【默认档位模板验证缺项】',
+        defaultLaneTemplateRepair.validationChapterNos.length > 0 ? `验证批次：${compactChapterNosForPrompt(defaultLaneTemplateRepair.validationChapterNos)}` : '',
+        defaultLaneTemplateRepair.summary ? `验证结论：${defaultLaneTemplateRepair.summary}` : '',
+        defaultLaneTemplateRepair.missingText ? `缺项章节：${defaultLaneTemplateRepair.missingText}` : '',
+        defaultLaneTemplateRepair.missingCount > 0 ? `缺项数：${defaultLaneTemplateRepair.missingCount}` : '',
+        ...defaultLaneTemplateRepair.repairActions.map(item => item),
+        '修订要求：把缺失模板转成下一轮批次任务书的段位职责、冲突轮换、显性回报密度和章末追读检查项；不能只在说明里承认缺项。',
+        '回填要求：修订后必须重新检查 expansion_structure_decision_execution，并显式回填 default_lane_segment_duty_delivered、default_lane_conflict_rotation_delivered、default_lane_payoff_density_delivered、default_lane_ending_hook_template_delivered。',
+      )
+    }
     if (validationTrend) {
       lines.push(
         '【扩批结构验证趋势】',
