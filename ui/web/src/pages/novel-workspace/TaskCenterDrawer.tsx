@@ -1483,6 +1483,20 @@ export type SafeBatchDefaultFiveChapterRecoveryVerdictRelapseSnapshot = {
   }[]
 }
 
+export type SafeBatchDefaultFiveChapterLaneRedesignSnapshot = {
+  visible: boolean
+  label: string
+  reason: string
+  relapseCount: number
+  repeatedFailureReasons: string[]
+  missedRequirements: {
+    key: string
+    label: string
+    count: number
+  }[]
+  summary: string
+}
+
 export type SafeBatchExpansionStructureValidationResultSnapshot = {
   visible: boolean
   status: 'ok' | 'warn'
@@ -1579,11 +1593,17 @@ export type SafeBatchExpansionStructureDecisionTrendSnapshot = {
     label: string
     count: number
   } | null
+  failedRequirements: {
+    key: string
+    label: string
+    count: number
+  }[]
   topFailedSegment: {
     key: string
     label: string
     count: number
   } | null
+  defaultFiveChapterLaneRedesign: SafeBatchDefaultFiveChapterLaneRedesignSnapshot | null
   suggestedTargetChapterCount: number
 }
 
@@ -1924,6 +1944,61 @@ function buildSafeBatchExpansionStructureRepairEffectivenessSnapshot(effectivene
   }
 }
 
+function isDefaultFiveChapterLaneRequirementKey(key: string) {
+  return key.startsWith('default_lane_')
+}
+
+function normalizeDecisionRequirementCountList(value: any) {
+  return (Array.isArray(value) ? value : [])
+    .map((item: any) => {
+      const label = compactEvidenceText(item?.label || item?.key || '')
+      const count = Number(item?.count || 0)
+      if (!label || count <= 0) return null
+      return {
+        key: compactEvidenceText(item?.key || label),
+        label,
+        count,
+      }
+    })
+    .filter(Boolean) as { key: string; label: string; count: number }[]
+}
+
+function buildSafeBatchDefaultFiveChapterLaneRedesignSnapshot(
+  redesignLike: any,
+  failedRequirements: { key: string; label: string; count: number }[],
+): SafeBatchDefaultFiveChapterLaneRedesignSnapshot | null {
+  const redesign = parseJsonValue(redesignLike) || redesignLike || null
+  if (redesign?.visible === false) return null
+  const defaultLaneFailedRequirements = failedRequirements.filter(item => isDefaultFiveChapterLaneRequirementKey(item.key))
+  const explicitMissedRequirements = normalizeDecisionRequirementCountList(
+    redesign?.missed_requirements || redesign?.missedRequirements,
+  )
+  const missedRequirements = explicitMissedRequirements.length
+    ? explicitMissedRequirements
+    : defaultLaneFailedRequirements
+  if (!redesign && !missedRequirements.length) return null
+  const repeatedFailureReasons = normalizeEvidenceTextList(
+    redesign?.repeated_failure_reasons || redesign?.repeatedFailureReasons,
+  )
+  const missedRequirementText = missedRequirements.map(item => item.label).join('、')
+  const relapseCount = Number(redesign?.relapse_count ?? redesign?.relapseCount ?? 0)
+  const summary = compactEvidenceText(redesign?.summary || (
+    missedRequirementText
+      ? `默认5章档位模板漏项：${missedRequirementText}。`
+      : '默认5章档位结构重构需要补齐模板回执。'
+  ))
+
+  return {
+    visible: true,
+    label: compactEvidenceText(redesign?.label || '默认档位模板漏项'),
+    reason: compactEvidenceText(redesign?.reason || ''),
+    relapseCount: Number.isFinite(relapseCount) ? relapseCount : 0,
+    repeatedFailureReasons,
+    missedRequirements,
+    summary,
+  }
+}
+
 function buildSafeBatchExpansionStructureDecisionTrendSnapshot(trendLike: any): SafeBatchExpansionStructureDecisionTrendSnapshot | null {
   const trend = parseJsonValue(trendLike) || trendLike || null
   if (!trend || trend.visible === false) return null
@@ -1947,6 +2022,13 @@ function buildSafeBatchExpansionStructureDecisionTrendSnapshot(trendLike: any): 
       count,
     }
   }
+  const failedRequirements = normalizeDecisionRequirementCountList(trend?.failed_requirements || trend?.failedRequirements)
+  const topFailedRequirement = normalizeCount(trend?.top_failed_requirement || trend?.topFailedRequirement)
+  const fallbackFailedRequirements = failedRequirements.length
+    ? failedRequirements
+    : topFailedRequirement
+      ? [topFailedRequirement]
+      : []
 
   return {
     visible: true,
@@ -1962,8 +2044,13 @@ function buildSafeBatchExpansionStructureDecisionTrendSnapshot(trendLike: any): 
     latestSegmentKey: compactEvidenceText(trend?.latest_segment_key || trend?.latestSegmentKey || ''),
     latestSegmentLabel: compactEvidenceText(trend?.latest_segment_label || trend?.latestSegmentLabel || ''),
     topFailedRecommendation: normalizeCount(trend?.top_failed_recommendation || trend?.topFailedRecommendation),
-    topFailedRequirement: normalizeCount(trend?.top_failed_requirement || trend?.topFailedRequirement),
+    topFailedRequirement,
+    failedRequirements: fallbackFailedRequirements,
     topFailedSegment: normalizeCount(trend?.top_failed_segment || trend?.topFailedSegment),
+    defaultFiveChapterLaneRedesign: buildSafeBatchDefaultFiveChapterLaneRedesignSnapshot(
+      trend?.default_five_chapter_lane_redesign || trend?.defaultFiveChapterLaneRedesign,
+      fallbackFailedRequirements,
+    ),
     suggestedTargetChapterCount: Number(trend?.suggested_target_chapter_count ?? trend?.suggestedTargetChapterCount ?? 0),
   }
 }
@@ -2426,6 +2513,8 @@ function BatchProseRunSummary({ run }: { run: any }) {
   const defaultRecoveryVerdictRelapseEffectiveness = expansionStructureEffectiveness?.defaultFiveChapterRecoveryVerdictRelapseTrend || null
   const expansionStructureDecisionTrend = expansionFeedback?.structureDecisionTrend || null
   const expansionStructureDecisionRequirement = expansionStructureDecisionTrend?.topFailedRequirement || null
+  const defaultLaneRedesign = expansionStructureDecisionTrend?.defaultFiveChapterLaneRedesign || null
+  const defaultLaneMissedRequirements = defaultLaneRedesign?.missedRequirements || []
   const defaultFiveChapterRegression = expansionFeedback?.defaultFiveChapterRegression || null
   const defaultRecoveryVerdictRelapse = expansionFeedback?.defaultFiveChapterRecoveryVerdictRelapse || null
   const recoveryRestoreStability = expansionFeedback?.recoveryRestoreStabilityEvidence || null
@@ -2607,6 +2696,14 @@ function BatchProseRunSummary({ run }: { run: any }) {
                         漏项 {expansionStructureDecisionRequirement.label}{expansionStructureDecisionRequirement.count}
                       </Tag>
                     )}
+                    {defaultLaneRedesign && (
+                      <Tag color="gold" bordered={false}>默认档位模板漏项</Tag>
+                    )}
+                    {defaultLaneMissedRequirements.slice(0, 4).map(requirement => (
+                      <Tag key={`default-lane-missed-${requirement.key}`} color="gold" bordered={false}>
+                        缺{requirement.label}
+                      </Tag>
+                    ))}
                     {recoveryRestoreReview && (
                       <Tag color="green" bordered={false}>长期扩批稳定证据</Tag>
                     )}
@@ -2699,6 +2796,13 @@ function BatchProseRunSummary({ run }: { run: any }) {
                   )}
                   {expansionStructureDecisionTrend?.visible && (
                     <Text type="secondary" style={{ fontSize: 12 }}>{expansionStructureDecisionTrend.summary}</Text>
+                  )}
+                  {defaultLaneRedesign && (
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      {defaultLaneRedesign.summary}
+                      {defaultLaneRedesign.relapseCount > 0 ? ` 连续失效 ${defaultLaneRedesign.relapseCount} 次。` : ''}
+                      {defaultLaneRedesign.repeatedFailureReasons.length ? ` 同维复发：${defaultLaneRedesign.repeatedFailureReasons.join('、')}。` : ''}
+                    </Text>
                   )}
                 </Space>
               )}

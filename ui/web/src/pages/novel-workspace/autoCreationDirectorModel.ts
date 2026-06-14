@@ -4756,10 +4756,37 @@ function buildSafeBatchExpansionStructureDecisionTrend(args: {
   const byCountDesc = (a: AnyRecord, b: AnyRecord) => Number(b.count || 0) - Number(a.count || 0)
   const topFailedRecommendation = Array.from(recommendationCounts.values()).sort(byCountDesc)[0] || null
   const topFailedRequirement = Array.from(requirementCounts.values()).sort(byCountDesc)[0] || null
+  const failedRequirements = Array.from(requirementCounts.values()).sort(byCountDesc)
   const topFailedSegment = Array.from(segmentCounts.values()).sort(byCountDesc)[0] || null
-  const suggestedTargetChapterCount = latestStatus === 'warn' ? 3 : 5
+  const latestDefaultFiveChapterLaneRedesign = failedEvaluations
+    .map(evaluation => evaluation?.review?.default_five_chapter_lane_redesign || evaluation?.review?.defaultFiveChapterLaneRedesign)
+    .find(Boolean) || null
+  const defaultLaneFailedRequirements = failedRequirements
+    .filter(item => text(item?.key).startsWith('default_lane_'))
+  const defaultFiveChapterLaneRedesign = (latestDefaultFiveChapterLaneRedesign || defaultLaneFailedRequirements.length)
+    ? {
+      ...(latestDefaultFiveChapterLaneRedesign || {}),
+      visible: true,
+      label: text(latestDefaultFiveChapterLaneRedesign?.label, '默认档位模板漏项'),
+      missed_requirements: defaultLaneFailedRequirements,
+      summary: text(
+        latestDefaultFiveChapterLaneRedesign?.summary,
+        defaultLaneFailedRequirements.length
+          ? `默认5章档位模板漏项：${defaultLaneFailedRequirements.map(item => text(item?.label)).filter(Boolean).join('、')}。`
+          : '默认5章档位结构重构需要补齐模板回执。',
+      ),
+    }
+    : null
+  const suggestedTargetChapterCount = latestStatus === 'warn'
+    ? Boolean(defaultLaneFailedRequirements.length) || text(topFailedRecommendation?.key) === 'escalate_structure_redesign'
+      ? 1
+      : 3
+    : 5
+  const suggestedTargetLabel = suggestedTargetChapterCount <= 1
+    ? '1章单章治理'
+    : `${suggestedTargetChapterCount}章小批验证`
   const summary = latestStatus === 'warn'
-    ? `结构决策执行趋势未稳：${text(topFailedRecommendation?.label, '结构决策')}最近复盘仍有漏项，${text(topFailedRequirement?.label, '执行要求')}累计 ${Number(topFailedRequirement?.count || 0)} 次未落地；下一批先保持 ${suggestedTargetChapterCount} 章小批验证。`
+    ? `结构决策执行趋势未稳：${text(topFailedRecommendation?.label, '结构决策')}最近复盘仍有漏项，${text(topFailedRequirement?.label, '执行要求')}累计 ${Number(topFailedRequirement?.count || 0)} 次未落地；下一批先保持 ${suggestedTargetLabel}。`
     : failedEvaluations.length > 0
       ? `结构决策执行趋势已恢复：最近批次已落地，但历史仍需关注${text(topFailedRequirement?.label, '执行要求')}漏项。`
       : `结构决策执行趋势稳定：近 ${evaluations.length} 批均按推荐动作、段位职责和观察指标落地。`
@@ -4779,7 +4806,11 @@ function buildSafeBatchExpansionStructureDecisionTrend(args: {
     latest_segment_label: text(latestReview.segment_label),
     top_failed_recommendation: topFailedRecommendation,
     top_failed_requirement: topFailedRequirement,
+    failed_requirements: failedRequirements,
     top_failed_segment: topFailedSegment,
+    ...(defaultFiveChapterLaneRedesign ? {
+      default_five_chapter_lane_redesign: defaultFiveChapterLaneRedesign,
+    } : {}),
     suggested_target_chapter_count: suggestedTargetChapterCount,
   }
 }

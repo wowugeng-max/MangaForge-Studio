@@ -1306,6 +1306,82 @@ describe('buildSafeBatchExpansionPolicySnapshot', () => {
     })
   })
 
+  test('keeps default lane redesign missing template items in the batch summary snapshot', () => {
+    const snapshot = buildSafeBatchExpansionPolicySnapshot({
+      safe_batch_expansion_policy: {
+        status: 'recovering',
+        label: '强化扩批规则',
+        summary: '默认档位结构重构未落地，下一轮保持单章治理。',
+        target_chapter_count: 1,
+        base_chapter_count: 3,
+        expanded_chapter_count: 5,
+        required_pass_streak: 3,
+        pass_streak: 3,
+        accepted_batch_count: 3,
+        failed_batch_count: 1,
+        latest_status: 'warn',
+        expansion_feedback: {
+          status: 'rollback_to_single_chapter',
+          label: '扩批热区反馈',
+          summary: '默认档位结构重构漏项，需要补齐四项模板。',
+          target_chapter_count: 1,
+          latest_chapter_nos: [89],
+          risk_count: 4,
+          expansion_structure_decision_trend: {
+            visible: true,
+            status: 'warn',
+            label: '扩批结构决策执行趋势',
+            summary: '默认5章档位模板未落地：段位职责、冲突轮换、回报密度、章末追读模板缺失。',
+            total_batch_count: 1,
+            passed_batch_count: 0,
+            failed_batch_count: 1,
+            latest_status: 'warn',
+            latest_batch_created_at: '2026-06-24T00:00:00.000Z',
+            latest_chapter_nos: [89],
+            latest_segment_key: 'middle',
+            latest_segment_label: '中段',
+            top_failed_recommendation: { key: 'escalate_structure_redesign', label: '单章结构重构', count: 1 },
+            top_failed_requirement: { key: 'default_lane_segment_duty', label: '默认档位段位职责', count: 1 },
+            failed_requirements: [
+              { key: 'default_lane_segment_duty', label: '默认档位段位职责', count: 1 },
+              { key: 'default_lane_conflict_rotation', label: '冲突轮换', count: 1 },
+              { key: 'default_lane_payoff_density', label: '回报密度', count: 1 },
+              { key: 'default_lane_ending_hook_template', label: '章末追读模板', count: 1 },
+            ],
+            suggested_target_chapter_count: 1,
+            default_five_chapter_lane_redesign: {
+              reason: 'repeated_recovery_verdict_relapse',
+              relapse_count: 2,
+              repeated_failure_reasons: ['核心偏移', '回报欠账', '追读拉力'],
+            },
+          },
+        },
+      },
+    })
+
+    expect(snapshot?.expansionFeedback?.structureDecisionTrend).toMatchObject({
+      suggestedTargetChapterCount: 1,
+      failedRequirements: [
+        { key: 'default_lane_segment_duty', label: '默认档位段位职责', count: 1 },
+        { key: 'default_lane_conflict_rotation', label: '冲突轮换', count: 1 },
+        { key: 'default_lane_payoff_density', label: '回报密度', count: 1 },
+        { key: 'default_lane_ending_hook_template', label: '章末追读模板', count: 1 },
+      ],
+      defaultFiveChapterLaneRedesign: {
+        visible: true,
+        reason: 'repeated_recovery_verdict_relapse',
+        relapseCount: 2,
+        repeatedFailureReasons: ['核心偏移', '回报欠账', '追读拉力'],
+        missedRequirements: [
+          { key: 'default_lane_segment_duty', label: '默认档位段位职责', count: 1 },
+          { key: 'default_lane_conflict_rotation', label: '冲突轮换', count: 1 },
+          { key: 'default_lane_payoff_density', label: '回报密度', count: 1 },
+          { key: 'default_lane_ending_hook_template', label: '章末追读模板', count: 1 },
+        ],
+      },
+    })
+  })
+
   test('keeps safe batch recovery roadmap in the task-center snapshot', () => {
     const snapshot = buildSafeBatchExpansionPolicySnapshot({
       safe_batch_expansion_policy: {

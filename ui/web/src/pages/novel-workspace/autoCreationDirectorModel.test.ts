@@ -10729,6 +10729,9 @@ describe('buildAutoCreationDirectorModel', () => {
       latest_status: 'warn',
       top_failed_recommendation: { key: 'restore_five_chapter', count: 1 },
       top_failed_requirement: { key: 'segment_role', count: 1 },
+      failed_requirements: expect.arrayContaining([
+        expect.objectContaining({ key: 'segment_role', label: '中段职责', count: 1 }),
+      ]),
       suggested_target_chapter_count: 3,
     })
     expect(policy).toMatchObject({
