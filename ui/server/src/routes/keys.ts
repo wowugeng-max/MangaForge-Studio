@@ -293,7 +293,6 @@ function headersForOpenAIResponsesSdk(headers: Record<string, string>) {
     if (normalized === 'authorization') continue
     if (normalized === 'content-type') continue
     if (normalized === 'accept') continue
-    if (normalized === 'user-agent') continue
     if (normalized === 'x-api-key') continue
     sdkHeaders[key] = value
   }

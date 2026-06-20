@@ -78,8 +78,10 @@ describe('ConfiguredProviderAdapter endpoint normalization', () => {
 
 describe('ConfiguredProviderAdapter Codex Responses requests', () => {
   test('sends Codex client compatibility fields through the OpenAI SDK transport', async () => {
+    let capturedCall: any = null
     let capturedBody: any = null
     setOpenAIResponsesCreateForTest(async call => {
+      capturedCall = call
       capturedBody = call.body
       return { output_text: 'OK', status: 'completed' }
     })
@@ -96,7 +98,7 @@ describe('ConfiguredProviderAdapter Codex Responses requests', () => {
         default_base_url: 'https://api.openai.com/v1',
         is_active: true,
         endpoints: { responses: '/responses' },
-        custom_headers: {},
+        custom_headers: { 'X-Provider': 'codex-proxy', 'User-Agent': 'CustomMangaForge/2.0' },
       },
       {
         id: 1,
@@ -146,6 +148,10 @@ describe('ConfiguredProviderAdapter Codex Responses requests', () => {
     expect(capturedBody.client_metadata).toMatchObject({
       session_id: capturedBody.prompt_cache_key,
       thread_id: capturedBody.prompt_cache_key,
+    })
+    expect(capturedCall.headers).toMatchObject({
+      'X-Provider': 'codex-proxy',
+      'User-Agent': 'CustomMangaForge/2.0',
     })
     expect(capturedBody).not.toHaveProperty('reasoning')
     expect(capturedBody).not.toHaveProperty('messages')
@@ -309,6 +315,84 @@ describe('ConfiguredProviderAdapter Codex Responses requests', () => {
 
     expect(capturedHeaders.Accept).toBe('text/event-stream')
     expect(capturedBody.stream).toBe(true)
+  })
+
+  test('applies model-level response mode and custom header overrides for configured probes', async () => {
+    let capturedBody: any = null
+    let capturedHeaders: Record<string, string> = {}
+    globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+      capturedHeaders = Object.fromEntries(new Headers(init?.headers || {}).entries())
+      capturedBody = JSON.parse(String(init?.body || '{}'))
+      return new Response([
+        'data: {"type":"response.output_text.delta","delta":"OK"}',
+        'data: {"type":"response.completed","response":{"status":"completed"}}',
+        'data: [DONE]',
+        '',
+      ].join('\n\n'), { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+    }) as typeof fetch
+    setOpenAIResponsesCreateForTest(async call => {
+      throw new Error(`OpenAI SDK should not be used for AnyRouter Codex Responses probes: ${call.baseURL}`)
+    })
+
+    const adapter = new ConfiguredProviderAdapter(
+      {
+        id: 'any',
+        display_name: 'AnyRouter',
+        service_type: 'llm',
+        api_format: 'codex_responses',
+        auth_type: 'bearer',
+        response_mode: 'non_stream',
+        supported_modalities: ['chat'],
+        default_base_url: 'https://anyrouter.top/v1',
+        is_active: true,
+        endpoints: {},
+        custom_headers: {
+          'X-Client': 'provider-client',
+          'User-Agent': 'ProviderUA/1.0',
+        },
+      },
+      {
+        id: 1,
+        provider: 'any',
+        key: 'sk-test',
+        description: '',
+        is_active: true,
+        quota_total: 0,
+        quota_used: 0,
+        tags: [],
+      },
+      {
+        id: 1,
+        api_key_id: 1,
+        provider: 'any',
+        display_name: 'codex-test-model',
+        model_name: 'codex-test-model',
+        capabilities: { chat: true },
+        health_status: 'unknown',
+        is_favorite: false,
+        is_manual: true,
+        context_ui_params: {
+          response_mode: 'stream',
+          custom_headers: {
+            'X-Client': 'model-client',
+            'X-Model-Only': 'model-header',
+            'User-Agent': 'ModelUA/2.0',
+          },
+        },
+      },
+    )
+
+    await adapter.execute({
+      model: 'balanced',
+      messages: [{ role: 'user', content: 'Return exactly: OK' }],
+      response_format: 'text',
+    })
+
+    expect(capturedBody.stream).toBe(true)
+    expect(capturedHeaders.accept).toBe('text/event-stream')
+    expect(capturedHeaders['x-client']).toBe('model-client')
+    expect(capturedHeaders['x-model-only']).toBe('model-header')
+    expect(capturedHeaders['user-agent']).toBe('ModelUA/2.0')
   })
 })
 

@@ -80,6 +80,7 @@ export const MODEL_HEALTH_STATUS_MAP: Record<string, { color: string; text: stri
   healthy: { color: 'success', text: '可用' },
   quota_exhausted: { color: 'error', text: '额度耗尽' },
   unauthorized: { color: 'warning', text: '无权限' },
+  client_restricted: { color: 'warning', text: '客户端受限' },
   upstream_busy: { color: 'warning', text: '上游繁忙' },
   network_error: { color: 'error', text: '网络错误' },
   key_disabled: { color: 'default', text: 'Key停用' },

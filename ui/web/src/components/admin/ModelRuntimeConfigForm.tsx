@@ -1,9 +1,11 @@
 import React, { useEffect } from 'react'
-import { Form, InputNumber, Select, Space, Tag, Typography } from 'antd'
+import { Button, Form, Input, InputNumber, Radio, Select, Space, Tag, Typography } from 'antd'
+import { MinusCircleOutlined, PlusOutlined } from '@ant-design/icons'
 import {
   API_FORMAT_OPTIONS,
   CONTEXT_WINDOW_PRESETS,
   DEFAULT_CONTEXT_WINDOW,
+  RESPONSE_MODE_OPTIONS,
   resolveContextWindowPreset,
 } from './modelRuntimeConfig'
 
@@ -39,6 +41,18 @@ export const ModelRuntimeConfigForm: React.FC<Props> = ({ form, compact = false 
         />
       </Form.Item>
 
+      <Form.Item
+        name="response_mode"
+        label="响应返回模式"
+        extra="未设置时跟随厂商配置；单个模型可覆盖为流式或非流式。"
+      >
+        <Radio.Group optionType="button" buttonStyle="solid">
+          {RESPONSE_MODE_OPTIONS.map(item => (
+            <Radio.Button key={item.value} value={item.value}>{item.label}</Radio.Button>
+          ))}
+        </Radio.Group>
+      </Form.Item>
+
       <div style={{ display: 'grid', gap: 8 }}>
         <Space wrap align="center">
           <Text strong>上下文窗口</Text>
@@ -69,6 +83,39 @@ export const ModelRuntimeConfigForm: React.FC<Props> = ({ form, compact = false 
           <InputNumber min={0} max={2} step={0.1} style={{ width: '100%' }} />
         </Form.Item>
       </Space>
+
+      <div style={{ display: 'grid', gap: 8 }}>
+        <Text strong>模型级 Header 覆盖</Text>
+        <Form.List name="custom_headers_list">
+          {(fields, { add, remove }) => (
+            <>
+              {fields.map(({ key, name, ...restField }) => (
+                <Space key={key} style={{ display: 'flex' }} align="baseline">
+                  <Form.Item
+                    {...restField}
+                    name={[name, 'key']}
+                    rules={[{ required: true, message: 'Header 名称不能为空' }]}
+                    style={{ marginBottom: 8 }}
+                  >
+                    <Input placeholder="Header Key" style={{ width: 210 }} />
+                  </Form.Item>
+                  <Form.Item
+                    {...restField}
+                    name={[name, 'value']}
+                    style={{ marginBottom: 8 }}
+                  >
+                    <Input placeholder="Header Value" style={{ width: 280 }} />
+                  </Form.Item>
+                  <Button icon={<MinusCircleOutlined />} onClick={() => remove(name)} />
+                </Space>
+              ))}
+              <Button type="dashed" icon={<PlusOutlined />} onClick={() => add()}>
+                添加自定义 Header
+              </Button>
+            </>
+          )}
+        </Form.List>
+      </div>
     </div>
   )
 }

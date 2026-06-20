@@ -4,6 +4,8 @@ export type RuntimeConfigValues = {
   context_window?: number
   max_tokens?: number
   temperature?: number
+  response_mode?: 'auto' | 'stream' | 'non_stream' | string
+  custom_headers_list?: Array<{ key?: string; value?: string }>
 }
 
 export type RuntimeConfigBase = {
@@ -33,12 +35,39 @@ export const API_FORMAT_OPTIONS = [
   { label: 'Google Gemini 原生', value: 'gemini_native' },
 ] as const
 
+export const RESPONSE_MODE_OPTIONS = [
+  { label: '跟随厂商', value: 'auto' },
+  { label: '流式 Stream', value: 'stream' },
+  { label: '非流式', value: 'non_stream' },
+] as const
+
 export const CONTEXT_WINDOW_SELECT_OPTIONS = CONTEXT_WINDOW_PRESETS
   .filter(item => item.tokens)
   .map(item => ({ label: item.label, value: item.tokens as number }))
 
 function objectOrEmpty(value: unknown): Record<string, any> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {}
+}
+
+function normalizeResponseMode(value: unknown) {
+  const normalized = String(value || '').trim()
+  return RESPONSE_MODE_OPTIONS.some(item => item.value === normalized) ? normalized : 'auto'
+}
+
+function customHeadersToList(value: unknown) {
+  return Object.entries(objectOrEmpty(value))
+    .map(([key, rawValue]) => ({ key, value: String(rawValue ?? '') }))
+    .filter(item => item.key)
+}
+
+function customHeadersFromList(value: RuntimeConfigValues['custom_headers_list']) {
+  const headers: Record<string, string> = {}
+  ;(value || []).forEach(item => {
+    const key = String(item?.key || '').trim()
+    if (!key) return
+    headers[key] = String(item?.value ?? '')
+  })
+  return headers
 }
 
 function finiteNumber(value: unknown, fallback: number) {
@@ -118,6 +147,8 @@ export function buildModelRuntimeInitialValues(record?: RuntimeConfigBase): Runt
     context_window: contextWindow,
     max_tokens: maxTokens,
     temperature,
+    response_mode: normalizeResponseMode(params.response_mode ?? params.responseMode),
+    custom_headers_list: customHeadersToList(params.custom_headers ?? params.customHeaders),
   }
 }
 
@@ -141,6 +172,8 @@ export function buildModelRuntimeSavePayload(values: RuntimeConfigValues, base?:
     context_window_preset: preset,
     max_tokens: maxTokens,
     temperature,
+    response_mode: normalizeResponseMode(values.response_mode),
+    custom_headers: customHeadersFromList(values.custom_headers_list),
   }
   const textParams = buildTextRuntimeParams({ contextWindow, maxTokens, temperature })
   if (shouldExposeTextMode(capabilities, params, 'chat')) nextParams.chat = textParams

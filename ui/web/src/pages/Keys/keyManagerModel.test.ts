@@ -80,6 +80,7 @@ describe('Key manager migration behavior', () => {
   test('maps model health statuses and exposes the persisted last error in tooltip text', () => {
     expect(MODEL_HEALTH_STATUS_MAP.network_error.text).toBe('网络错误')
     expect(MODEL_HEALTH_STATUS_MAP.upstream_busy.text).toBe('上游繁忙')
+    expect(MODEL_HEALTH_STATUS_MAP.client_restricted.text).toBe('客户端受限')
     expect(MODEL_HEALTH_STATUS_MAP.key_disabled.text).toBe('Key停用')
 
     const tooltip = modelHealthTooltipTitle({

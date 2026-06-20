@@ -8,6 +8,11 @@ import {
   applyClaudeCodeBodyMetadata,
   applyClaudeCodeHeaders,
 } from './anthropic-context'
+import {
+  mergeHeadersCaseInsensitive,
+  modelCustomHeaders,
+  shouldStreamWithModelOverride,
+} from './model-runtime-overrides'
 import type { APIKeyRecord } from '../key-store'
 import type { ModelRecord } from '../model-store'
 import type { ProviderRecord } from '../provider-store'
@@ -377,7 +382,6 @@ function headersForOpenAIResponsesSdk(headers: Record<string, string>) {
     const normalized = key.toLowerCase()
     if (normalized === 'authorization') continue
     if (normalized === 'content-type') continue
-    if (normalized === 'user-agent') continue
     if (normalized === 'x-api-key') continue
     sdkHeaders[key] = value
   }
@@ -792,14 +796,8 @@ function buildConfiguredRouteBody(routeConfig: unknown, request: LLMRequest, fal
   return fallback()
 }
 
-function shouldStreamConfiguredRequest(request: LLMRequest, provider: ProviderRecord) {
-  const requestMode = String(request.response_mode || 'auto')
-  const providerMode = String(provider.response_mode || 'auto')
-  if (requestMode === 'stream') return true
-  if (requestMode === 'non_stream') return false
-  if (providerMode === 'stream') return true
-  if (providerMode === 'non_stream') return false
-  return Boolean(request.stream)
+function shouldStreamConfiguredRequest(request: LLMRequest, provider: ProviderRecord, model?: ModelRecord) {
+  return shouldStreamWithModelOverride(request, provider, model)
 }
 
 export class ConfiguredProviderAdapter implements NovelLLMAdapter {
@@ -820,16 +818,21 @@ export class ConfiguredProviderAdapter implements NovelLLMAdapter {
     const isCodex = providerFormat.includes('codex')
     const isResponses = providerFormat.includes('responses')
     const isGeminiNative = isGeminiNativeFormat(providerFormat)
+    const shouldStream = shouldStreamConfiguredRequest(modelRequest, this.provider, this.model)
     const body = buildConfiguredRouteBody(routeConfig, modelRequest, () => isCodex
-      ? buildCodexResponsesBody(modelRequest, this.model.model_name || request.model, shouldStreamConfiguredRequest(modelRequest, this.provider), {
+      ? buildCodexResponsesBody(modelRequest, this.model.model_name || request.model, shouldStream, {
         baseUrl: effectiveBaseUrl,
         reasoning: this.model.context_ui_params?.reasoning,
         reasoningEffort: this.model.context_ui_params?.reasoning_effort ?? this.model.context_ui_params?.model_reasoning_effort,
       })
       : isResponses ? buildOpenAIResponsesBody(modelRequest) : (isGeminiNative ? buildGeminiGenerateContentBody(modelRequest) : (isAnthropic ? buildAnthropicMessagesBody(modelRequest, this.model, this.provider, effectiveBaseUrl) : (isMediaRouteType(routeType) ? buildOpenAIMediaBody(modelRequest) : buildOpenAIChatBody(modelRequest)))))
-    const headers = applyProviderAuth({ ...(this.provider.custom_headers || {}) }, this.provider, this.apiKey.key, providerFormat, effectiveBaseUrl)
+    if (isAnthropic && shouldStream) body.stream = true
+    const headers: Record<string, string> = {}
+    mergeHeadersCaseInsensitive(headers, this.provider.custom_headers || {})
     const routeHeaders = routeDslValue(routeConfig, 'headers', 'customHeaders')
-    if (routeHeaders && typeof routeHeaders === 'object') Object.assign(headers, routeHeaders)
+    mergeHeadersCaseInsensitive(headers, routeHeaders)
+    mergeHeadersCaseInsensitive(headers, modelCustomHeaders(this.model))
+    applyProviderAuth(headers, this.provider, this.apiKey.key, providerFormat, effectiveBaseUrl)
     if (isAnthropic) {
       applyClaudeCodeHeaders(headers, this.model, { provider: this.provider, baseUrl: effectiveBaseUrl })
       if (providerFormat === 'claude_code') {

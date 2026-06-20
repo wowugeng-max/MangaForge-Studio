@@ -57,6 +57,35 @@ async function call(handler: any, req: any = {}) {
   return res
 }
 
+async function writeMuyuanCodexFixture(workspace: string) {
+  await writeFile(join(workspace, 'providers.json'), JSON.stringify([
+    {
+      id: 'jun',
+      display_name: 'jun',
+      service_type: 'llm',
+      api_format: 'codex_responses',
+      auth_type: 'bearer',
+      supported_modalities: ['chat'],
+      default_base_url: 'https://muyuan.do/v1',
+      is_active: true,
+    },
+  ]))
+  await writeFile(join(workspace, 'keys.json'), JSON.stringify([
+    { id: 6, provider: 'jun', key: 'sk-muyuan-test', is_active: true },
+  ]))
+  await writeFile(join(workspace, 'models.json'), JSON.stringify([
+    {
+      id: 131,
+      api_key_id: 6,
+      provider: 'jun',
+      display_name: 'gpt-5.4',
+      model_name: 'gpt-5.4',
+      capabilities: { chat: true },
+      health_status: 'unknown',
+    },
+  ]))
+}
+
 afterEach(async () => {
   await Promise.all(workspaces.map(workspace => rm(workspace, { recursive: true, force: true })))
   workspaces = []
@@ -298,6 +327,63 @@ describe('model health probes', () => {
     } finally {
       globalThis.fetch = previousFetch
     }
+  })
+
+  test('diagnoses Codex channel client restrictions separately from invalid credentials', async () => {
+    const workspace = await tempWorkspace()
+    await writeMuyuanCodexFixture(workspace)
+
+    setOpenAIResponsesCreateForTest(async () => {
+      throw {
+        status: 403,
+        error: {
+          error: {
+            code: 'channel:client_restricted',
+            message: 'This channel does not allow the current client (detected: MangaForge-Studio/1.0)',
+            type: 'new_api_error',
+          },
+        },
+      }
+    })
+
+    const { registerModelRoutes } = await import('./models')
+    const { app, handlers } = createRouteHarness()
+    registerModelRoutes(app as any, () => workspace)
+
+    const response = await call(handlers.get('POST /api/models/:id/test'), { params: { id: '131' } })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.body.status).toBe('client_restricted')
+    expect(response.body.message).toContain('客户端受限')
+    expect(response.body.message).toContain('不是普通 Key 无权限')
+    expect(response.body.message).toContain('channel:client_restricted')
+
+    const stored = JSON.parse(await readFile(join(workspace, 'models.json'), 'utf8'))
+    expect(stored[0].health_status).toBe('client_restricted')
+    expect(stored[0].last_error).toContain('MangaForge-Studio/1.0')
+  })
+
+  test('diagnoses muyuan.do Codex SDK blocks as client restrictions', async () => {
+    const workspace = await tempWorkspace()
+    await writeMuyuanCodexFixture(workspace)
+
+    setOpenAIResponsesCreateForTest(async () => {
+      throw {
+        status: 403,
+        error: { error: 'Your request was blocked.' },
+      }
+    })
+
+    const { registerModelRoutes } = await import('./models')
+    const { app, handlers } = createRouteHarness()
+    registerModelRoutes(app as any, () => workspace)
+
+    const response = await call(handlers.get('POST /api/models/:id/test'), { params: { id: '131' } })
+
+    expect(response.body.status).toBe('client_restricted')
+    expect(response.body.message).toContain('客户端受限')
+    expect(response.body.message).toContain('muyuan.do')
+    expect(response.body.message).toContain('Your request was blocked')
   })
 
   test('lists models by upstream mode capability and key id filters', async () => {

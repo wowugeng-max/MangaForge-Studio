@@ -177,7 +177,7 @@ describe('provider key protocol tests', () => {
       auth_type: 'bearer',
       default_base_url: 'https://api.openai.com/v1',
       probe_model: 'gpt-5-codex',
-      custom_headers: { 'X-Provider': 'codex-proxy' },
+      custom_headers: { 'X-Provider': 'codex-proxy', 'User-Agent': 'CustomMangaForge/2.0' },
       endpoints: {},
     }
     const key = {
@@ -207,7 +207,7 @@ describe('provider key protocol tests', () => {
       expect(capturedCall).toMatchObject({
         apiKey: 'sk-test',
         baseURL: 'https://api.openai.com/v1',
-        headers: { 'X-Provider': 'codex-proxy' },
+        headers: { 'X-Provider': 'codex-proxy', 'User-Agent': 'CustomMangaForge/2.0' },
       })
       expect(capturedCall.body).toMatchObject({
         model: 'gpt-5-codex',

@@ -23,6 +23,11 @@ import {
   applyClaudeCodeBodyMetadata,
   applyClaudeCodeHeaders,
 } from './anthropic-context'
+import {
+  mergeHeadersCaseInsensitive,
+  modelCustomHeaders,
+  shouldStreamWithModelOverride,
+} from './model-runtime-overrides'
 
 // ════════════════════════════════════════════════════════════
 // provider-runtime.ts — Reference: Claude Code API client
@@ -294,7 +299,6 @@ function headersForOpenAIResponsesSdk(headers: Record<string, string>) {
     const normalized = key.toLowerCase()
     if (normalized === 'authorization') continue
     if (normalized === 'content-type') continue
-    if (normalized === 'user-agent') continue
     if (normalized === 'x-api-key') continue
     sdkHeaders[key] = value
   }
@@ -314,7 +318,18 @@ function buildHeaders(selection: RuntimeModelSelection): Record<string, string> 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     'User-Agent': 'MangaForge-Studio/1.0',
-    ...(selection.provider.custom_headers || {}),
+  }
+  mergeHeadersCaseInsensitive(headers, selection.provider.custom_headers || {})
+
+  const routeHeaders = routeDslValue(selection.routeConfig, 'headers', 'customHeaders')
+  mergeHeadersCaseInsensitive(headers, routeHeaders)
+  mergeHeadersCaseInsensitive(headers, modelCustomHeaders(selection.model))
+
+  if (isClaudeCodeFormat(selection.apiFormat)) {
+    applyClaudeCodeHeaders(headers, selection.model, {
+      provider: selection.provider,
+      baseUrl: selection.baseUrl,
+    })
   }
 
   // Authentication — matches Claude Code's configureApiKeyHeaders
@@ -326,27 +341,12 @@ function buildHeaders(selection: RuntimeModelSelection): Record<string, string> 
         baseUrl: selection.baseUrl,
       })
     } else if (isGeminiNativeFormat(selection.apiFormat)) {
-      headers['x-goog-api-key'] = selection.key.key
+      mergeHeadersCaseInsensitive(headers, { 'x-goog-api-key': selection.key.key })
     } else if (authType === 'x-api-key' || authType === 'api-key') {
-      headers['x-api-key'] = selection.key.key
+      mergeHeadersCaseInsensitive(headers, { 'x-api-key': selection.key.key })
     } else {
-      headers['Authorization'] = `Bearer ${selection.key.key}`
+      mergeHeadersCaseInsensitive(headers, { Authorization: `Bearer ${selection.key.key}` })
     }
-  }
-
-  const routeHeaders = routeDslValue(selection.routeConfig, 'headers', 'customHeaders')
-  if (routeHeaders && typeof routeHeaders === 'object') {
-    Object.assign(headers, routeHeaders)
-  }
-  if (isClaudeCodeFormat(selection.apiFormat)) {
-    applyClaudeCodeHeaders(headers, selection.model, {
-      provider: selection.provider,
-      baseUrl: selection.baseUrl,
-    })
-    applyClaudeCodeAuthHeaders(headers, selection.key.key, selection.provider.auth_type, selection.model, {
-      provider: selection.provider,
-      baseUrl: selection.baseUrl,
-    })
   }
 
   return headers
@@ -355,13 +355,7 @@ function buildHeaders(selection: RuntimeModelSelection): Record<string, string> 
 // ── Request Body ────────────────────────────────────────────
 
 function shouldStreamRequest(request: LLMRequest, selection: RuntimeModelSelection) {
-  const requestMode = String(request.response_mode || 'auto')
-  const responseMode = String(selection.provider.response_mode || 'auto')
-  if (requestMode === 'stream') return true
-  if (requestMode === 'non_stream') return false
-  if (responseMode === 'stream') return true
-  if (responseMode === 'non_stream') return false
-  return Boolean(request.stream)
+  return shouldStreamWithModelOverride(request, selection.provider, selection.model)
 }
 
 function isMediaRouteType(routeType?: string) {

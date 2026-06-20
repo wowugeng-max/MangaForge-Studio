@@ -137,6 +137,22 @@ function isUpstreamCapacityError(error: unknown) {
   return /get_channel_failed|负载已经达到上限|上游.*繁忙|capacity|overload|overloaded|no available channel/i.test(raw)
 }
 
+function isMuyuanProvider(provider?: ProviderRecord) {
+  if (!provider) return false
+  const fingerprint = [
+    provider.id,
+    provider.display_name,
+    provider.default_base_url,
+  ].map(value => String(value || '').toLowerCase()).join(' ')
+  return fingerprint.includes('muyuan.do')
+}
+
+function isCodexClientRestrictedError(error: unknown, provider?: ProviderRecord) {
+  const raw = String(error || '')
+  if (/channel:client_restricted|client_restricted|only codex clients can use this group|does not allow the current client/i.test(raw)) return true
+  return isMuyuanProvider(provider) && /your request was blocked/i.test(raw)
+}
+
 function classifyHealthError(
   error: unknown,
   context: { model?: ModelRecord; provider?: ProviderRecord; sentModelName?: string } = {},
@@ -152,6 +168,15 @@ function classifyHealthError(
   }
   if (msg.includes('429') || msg.includes('quota') || msg.includes('rate limit')) {
     return { status: 'quota_exhausted', message: '测试失败：额度耗尽' }
+  }
+  if (isCodexClientRestrictedError(error, context.provider)) {
+    const upstream = extractUpstreamErrorSummary(error)
+    const code = extractUpstreamErrorCode(error)
+    const providerLabel = context.provider?.default_base_url || context.provider?.display_name || context.provider?.id || '供应商'
+    return {
+      status: 'client_restricted',
+      message: `测试失败：客户端受限。请求已到达供应商 ${providerLabel}，但上游渠道只允许官方 Codex 客户端或指定客户端身份；这不是普通 Key 无权限。${code ? `代码：${code}。` : ''}上游返回：${upstream}`,
+    }
   }
   if (msg.includes('401') || msg.includes('403') || msg.includes('unauthorized') || msg.includes('auth')) {
     if (isAnyRouterProvider(context.provider) && isClaudeCodeModel(context.model, context.provider)) {

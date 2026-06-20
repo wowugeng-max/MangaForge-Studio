@@ -2339,7 +2339,7 @@ describe('codex responses provider runtime', () => {
           default_base_url: 'https://api.openai.com/v1',
           is_active: true,
           endpoints: {},
-          custom_headers: { 'X-Provider': 'codex-proxy' },
+          custom_headers: { 'X-Provider': 'codex-proxy', 'User-Agent': 'CustomMangaForge/2.0' },
         },
       ]))
       await writeFile(join(workspace, 'keys.json'), JSON.stringify([
@@ -2369,7 +2369,7 @@ describe('codex responses provider runtime', () => {
       expect(capturedCall).toMatchObject({
         apiKey: 'sk-test',
         baseURL: 'https://api.openai.com/v1',
-        headers: { 'X-Provider': 'codex-proxy' },
+        headers: { 'X-Provider': 'codex-proxy', 'User-Agent': 'CustomMangaForge/2.0' },
       })
       expect(capturedCall.body).toMatchObject({
         model: 'gpt-5-codex',
@@ -2438,6 +2438,102 @@ describe('codex responses provider runtime', () => {
     }, selection())
 
     expect(body.stream).toBe(true)
+  })
+
+  test('lets model-level response mode override provider stream defaults', () => {
+    const body = buildProviderRequestBody({
+      model: 'balanced',
+      messages: [{ role: 'user', content: 'write prose' }],
+      stream: true,
+      response_format: 'text',
+    }, selection({
+      provider: {
+        ...selection().provider,
+        response_mode: 'stream',
+      },
+      model: {
+        ...selection().model,
+        context_ui_params: {
+          response_mode: 'non_stream',
+        },
+      },
+    }))
+
+    expect(body.stream).toBe(false)
+  })
+
+  test('lets model-level custom headers override provider headers during runtime execution', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-runtime-model-headers-'))
+    try {
+      await writeFile(join(workspace, 'providers.json'), JSON.stringify([
+        {
+          id: 'any',
+          display_name: 'AnyRouter',
+          service_type: 'llm',
+          api_format: 'codex_responses',
+          auth_type: 'bearer',
+          response_mode: 'non_stream',
+          supported_modalities: ['chat'],
+          default_base_url: 'https://anyrouter.top/v1',
+          is_active: true,
+          endpoints: {},
+          custom_headers: {
+            'X-Client': 'provider-client',
+            'User-Agent': 'ProviderUA/1.0',
+          },
+        },
+      ]))
+      await writeFile(join(workspace, 'keys.json'), JSON.stringify([
+        { id: 1, provider: 'any', key: 'secret-key', is_active: true },
+      ]))
+      await writeFile(join(workspace, 'models.json'), JSON.stringify([
+        {
+          id: 1,
+          api_key_id: 1,
+          provider: 'any',
+          display_name: 'GPT Codex',
+          model_name: 'gpt-5-codex',
+          capabilities: { chat: true },
+          health_status: 'healthy',
+          context_ui_params: {
+            response_mode: 'stream',
+            custom_headers: {
+              'X-Client': 'model-client',
+              'X-Model-Only': 'model-header',
+              'User-Agent': 'ModelUA/2.0',
+            },
+          },
+        },
+      ]))
+
+      let capturedHeaders: Record<string, string> = {}
+      let capturedBody: any = null
+      globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+        capturedHeaders = Object.fromEntries(new Headers(init?.headers || {}).entries())
+        capturedBody = JSON.parse(String(init?.body || '{}'))
+        return new Response([
+          'data: {"type":"response.output_text.delta","delta":"OK"}',
+          'data: {"type":"response.completed","response":{"status":"completed"}}',
+          'data: [DONE]',
+          '',
+        ].join('\n\n'), { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+      }) as typeof fetch
+
+      const result = await executeWithRuntimeModel(workspace, {
+        model: 'balanced',
+        messages: [{ role: 'user', content: 'ping' }],
+        response_format: 'text',
+      }, 1, { maxRetries: 0 })
+
+      expect(result.content).toBe('OK')
+      expect(capturedBody.stream).toBe(true)
+      expect(capturedHeaders.accept).toBe('text/event-stream')
+      expect(capturedHeaders['x-client']).toBe('model-client')
+      expect(capturedHeaders['x-model-only']).toBe('model-header')
+      expect(capturedHeaders['user-agent']).toBe('ModelUA/2.0')
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
   })
 
   test('parses non-streaming Responses payloads', () => {

@@ -34,6 +34,24 @@ describe('model runtime config helpers', () => {
     })
   })
 
+  test('hydrates model-level response mode and custom headers from runtime params', () => {
+    expect(buildModelRuntimeInitialValues({
+      context_ui_params: {
+        response_mode: 'non_stream',
+        custom_headers: {
+          'X-Client': 'model-client',
+          'X-Model-Only': 'model-header',
+        },
+      },
+    })).toMatchObject({
+      response_mode: 'non_stream',
+      custom_headers_list: [
+        { key: 'X-Client', value: 'model-client' },
+        { key: 'X-Model-Only', value: 'model-header' },
+      ],
+    })
+  })
+
   test('serializes structured runtime fields into model payload while preserving custom params', () => {
     const payload = buildModelRuntimeSavePayload({
       api_format: 'claude_code',
@@ -41,6 +59,12 @@ describe('model runtime config helpers', () => {
       context_window: 1_000_000,
       max_tokens: 16_384,
       temperature: 0.6,
+      response_mode: 'stream',
+      custom_headers_list: [
+        { key: 'User-Agent', value: 'ModelUA/2.0' },
+        { key: 'X-Model-Route', value: 'opus-only' },
+        { key: '', value: 'ignored' },
+      ],
     }, {
       context_ui_params: {
         text_to_image: [{ name: 'size', type: 'select' }],
@@ -55,6 +79,11 @@ describe('model runtime config helpers', () => {
       context_window_preset: '1m',
       max_tokens: 16_384,
       temperature: 0.6,
+      response_mode: 'stream',
+      custom_headers: {
+        'User-Agent': 'ModelUA/2.0',
+        'X-Model-Route': 'opus-only',
+      },
       text_to_image: [{ name: 'size', type: 'select' }],
     })
     expect(payload.context_ui_params.chat).toEqual(expect.arrayContaining([
