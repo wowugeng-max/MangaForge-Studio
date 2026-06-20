@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { Button, Card, Col, Drawer, Form, Input, message, Popconfirm, Row, Select, Space, Switch, Table, Tag, Typography, Badge, Tooltip, Radio, Checkbox, Modal, InputNumber, Spin } from 'antd'
-import { DeleteOutlined, EditOutlined, PlusOutlined, ReloadOutlined, CheckCircleOutlined, CloudSyncOutlined, ApiOutlined, SettingOutlined, StarOutlined, StarFilled, SearchOutlined } from '@ant-design/icons'
+import { DeleteOutlined, EditOutlined, PlusOutlined, ReloadOutlined, CloudSyncOutlined, ApiOutlined, SettingOutlined, StarOutlined, StarFilled, SearchOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { keyApi } from '../../api/keys'
 import { modelApi } from '../../api/models'
@@ -114,7 +114,6 @@ export default function KeyManager() {
   const isKeyRequired = selectedProviderObj ? selectedProviderObj.auth_type?.toLowerCase() !== 'none' : true
   const handleServiceTypeChange = () => form.setFieldsValue({ provider: undefined, base_url: undefined })
 
-  const [testLoading, setTestLoading] = useState<number | null>(null)
   const [syncLoading, setSyncLoading] = useState<number | null>(null)
   const [drawerVisible, setDrawerVisible] = useState(false)
   const [currentKeyForModels, setCurrentKeyForModels] = useState<APIKey | null>(null)
@@ -171,19 +170,6 @@ export default function KeyManager() {
     } finally { setSyncLoading(null) }
   }
 
-  const handleTest = async (id: number) => {
-    setTestLoading(id)
-    try {
-      const res = await keyApi.test(id)
-      if (res.data.valid) message.success(`测试成功，剩余额度: ${res.data.quota_remaining ?? '未知'}`)
-      else if (res.data.retryable) message.warning(res.data.error || '供应商暂时不可用，请稍后重试')
-      else message.error(res.data.error || '测试失败')
-      fetchKeys()
-    } catch (error: any) {
-      message.error(error.response?.data?.error || '测试请求失败')
-    } finally { setTestLoading(null) }
-  }
-
   const handleDelete = async (id: number) => { try { await keyApi.delete(id); message.success('删除成功'); fetchKeys() } catch { message.error('删除失败') } }
   const openModal = (key?: APIKey) => { setEditingKey(key || null); form.resetFields(); if (key) { const keyProviderObj = dbProviders.find(p => p.id === key.provider); form.setFieldsValue({ ...key, service_type: keyProviderObj?.service_type || 'llm', tags: key.tags?.join(', ') }) } else { form.setFieldsValue(getCreateKeyFormValues()) } setModalVisible(true) }
   const closeKeyModal = () => { setModalVisible(false); setEditingKey(null); form.resetFields(); form.setFieldsValue(getCreateKeyFormValues()) }
@@ -200,7 +186,7 @@ export default function KeyManager() {
     { title: '提供商', dataIndex: 'provider', key: 'provider', width: 100, render: text => <Tag color="blue">{text}</Tag> },
     { title: '备注', dataIndex: 'description', key: 'description', ellipsis: true },
     { title: '状态', dataIndex: 'is_active', key: 'is_active', width: 80, render: active => <Tag color={active ? 'green' : 'red'}>{active ? '启用' : '禁用'}</Tag> },
-    { title: '操作', key: 'action', width: 320, render: (_, record) => { const recordProviderObj = dbProviders.find(p => p.id === record.provider); const isLLM = recordProviderObj?.service_type === 'llm'; return <Space><Tooltip title="管理该 Key 下的模型"><Button size="small" type="primary" ghost icon={<SettingOutlined />} onClick={() => openModelDrawer(record)}>管理模型</Button></Tooltip><Tooltip title="编辑 Key 信息"><Button size="small" icon={<EditOutlined />} onClick={() => openModal(record)} /></Tooltip>{isLLM && <Tooltip title="同步官方/中转站模型列表"><Button size="small" type="dashed" icon={<CloudSyncOutlined />} loading={syncLoading === record.id} onClick={() => handleSyncModels(record)} /></Tooltip>}<Tooltip title="测试连通性"><Button size="small" icon={<CheckCircleOutlined />} loading={testLoading === record.id} onClick={() => handleTest(record.id)} /></Tooltip><Popconfirm title="确定删除吗？" onConfirm={() => handleDelete(record.id)}><Button size="small" danger icon={<DeleteOutlined />} /></Popconfirm></Space> } },
+    { title: '操作', key: 'action', width: 280, render: (_, record) => { const recordProviderObj = dbProviders.find(p => p.id === record.provider); const isLLM = recordProviderObj?.service_type === 'llm'; return <Space><Tooltip title="管理该 Key 下的模型"><Button size="small" type="primary" ghost icon={<SettingOutlined />} onClick={() => openModelDrawer(record)}>管理模型</Button></Tooltip><Tooltip title="编辑 Key 信息"><Button size="small" icon={<EditOutlined />} onClick={() => openModal(record)} /></Tooltip>{isLLM && <Tooltip title="同步官方/中转站模型列表"><Button size="small" type="dashed" icon={<CloudSyncOutlined />} loading={syncLoading === record.id} onClick={() => handleSyncModels(record)} /></Tooltip>}<Popconfirm title="确定删除吗？" onConfirm={() => handleDelete(record.id)}><Button size="small" danger icon={<DeleteOutlined />} /></Popconfirm></Space> } },
   ]
 
   const modelColumns = [
@@ -217,7 +203,7 @@ export default function KeyManager() {
     <Card style={{ borderRadius: 20, boxShadow: '0 16px 40px rgba(15, 23, 42, 0.08)' }} styles={{ body: { padding: 24 } }}>
       <Space direction="vertical" style={{ width: '100%' }} size={20}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16 }}>
-          <div><Title level={3} style={{ margin: 0 }}>Key 管理</Title><Text type="secondary">管理 API Key、测试连通性并触发模型同步</Text></div>
+          <div><Title level={3} style={{ margin: 0 }}>Key 管理</Title><Text type="secondary">管理 API Key、模型库与同步</Text></div>
           <Space><Button icon={<ReloadOutlined />} onClick={fetchKeys} style={{ borderRadius: 12 }}>刷新</Button><Button type="primary" icon={<PlusOutlined />} onClick={() => openModal()} style={{ borderRadius: 12, boxShadow: '0 10px 24px rgba(24, 144, 255, 0.25)' }}>新增 Key</Button></Space>
         </div>
         <Table rowKey="id" loading={loading} dataSource={keys} columns={columns} pagination={{ pageSize: 10 }} scroll={{ x: 1000 }} style={{ borderRadius: 16, overflow: 'hidden' }} />

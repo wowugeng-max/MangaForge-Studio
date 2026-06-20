@@ -107,4 +107,16 @@ describe('Key manager migration behavior', () => {
     expect(source).toContain('autoComplete="off"')
     expect(source).toContain('autoComplete="new-password"')
   })
+
+  test('does not expose manual key connectivity testing from key management', async () => {
+    const pageSource = await Bun.file(new URL('./index.tsx', import.meta.url)).text()
+    const apiSource = await Bun.file(new URL('../../api/keys.ts', import.meta.url)).text()
+
+    expect(pageSource).not.toContain('测试连通性')
+    expect(pageSource).not.toContain('const handleTest =')
+    expect(pageSource).not.toContain('handleTest(record.id)')
+    expect(pageSource).not.toContain('testLoading')
+    expect(apiSource).not.toContain('/keys/${id}/test')
+    expect(apiSource).not.toContain('/keys/test-all')
+  })
 })
