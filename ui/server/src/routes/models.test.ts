@@ -404,6 +404,28 @@ describe('model health probes', () => {
     expect(imageForKey.body.map((model: any) => model.id)).toEqual([3])
   })
 
+  test('hides models whose bound API key is disabled from workspace selectors', async () => {
+    const workspace = await tempWorkspace()
+    await writeFile(join(workspace, 'keys.json'), JSON.stringify([
+      { id: 10, provider: 'p', key: 'sk-active', is_active: true },
+      { id: 11, provider: 'p', key: 'sk-disabled', is_active: false },
+    ]))
+    await writeFile(join(workspace, 'models.json'), JSON.stringify([
+      { id: 1, api_key_id: 10, provider: 'p', display_name: 'Active Key Model', model_name: 'active-key-model', capabilities: { chat: true }, health_status: 'healthy' },
+      { id: 2, api_key_id: 11, provider: 'p', display_name: 'Disabled Key Model', model_name: 'disabled-key-model', capabilities: { chat: true }, health_status: 'healthy' },
+      { id: 3, provider: 'legacy', display_name: 'Legacy Model', model_name: 'legacy-model', capabilities: { chat: true }, health_status: 'healthy' },
+    ]))
+    const { registerModelRoutes } = await import('./models')
+    const { app, handlers } = createRouteHarness()
+    registerModelRoutes(app as any, () => workspace)
+
+    const listed = await call(handlers.get('GET /api/models'))
+    expect(listed.body.map((model: any) => model.id)).toEqual([1, 3])
+
+    const disabledKeyModels = await call(handlers.get('GET /api/models'), { query: { key_id: '11' } })
+    expect(disabledKeyModels.body).toEqual([])
+  })
+
   test('normalizes legacy model records when listing models', async () => {
     const workspace = await tempWorkspace()
     await writeFile(join(workspace, 'models.json'), JSON.stringify([

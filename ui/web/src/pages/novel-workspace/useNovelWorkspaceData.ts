@@ -10,6 +10,12 @@ import {
 export type ChapterStatusFilter = 'all' | 'written' | 'unwritten' | 'placeholder'
 export type ChapterSortMode = 'chapter_no_asc' | 'chapter_no_desc' | 'word_count_desc' | 'title_asc'
 
+export function resolveSelectedWorkspaceModelId(currentId: number | undefined, models: any[]) {
+  if (!Array.isArray(models) || models.length === 0) return undefined
+  if (currentId && models.some((model: any) => Number(model.id) === Number(currentId))) return currentId
+  return models.find((model: any) => model.is_favorite)?.id || models[0]?.id
+}
+
 export function useNovelWorkspaceData({
   projectId,
   chapterSearch,
@@ -61,7 +67,7 @@ export function useNovelWorkspaceData({
       setReviews(nextReviews)
       setAgentExecution(null)
       setModels(nextModels)
-      setSelectedModelId(prev => prev || (nextModels.find((m: any) => m.is_favorite)?.id || nextModels[0]?.id))
+      setSelectedModelId(prev => resolveSelectedWorkspaceModelId(prev, nextModels))
       const act = nextChapters.find?.((c: any) => c.chapter_text) || nextChapters[0] || null
       setActiveChapterId(act?.id || null)
     } catch {

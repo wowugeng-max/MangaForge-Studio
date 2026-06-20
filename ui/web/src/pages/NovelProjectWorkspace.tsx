@@ -678,6 +678,20 @@ export default function NovelProjectWorkspace() {
     && activeChapterContextPackage?.updatedAt === activeChapterUpdatedAt
     ? activeChapterContextPackage.data
     : null
+  const modelOptions = useMemo(() => models.map((model: any) => {
+    const modelName = String(model.display_name || model.model_name || '未命名模型')
+    const providerName = String(model.provider || '未知厂商')
+    const fullLabel = `${modelName} · ${providerName}`
+    return {
+      value: model.id,
+      label: (
+        <span className="novel-model-option" title={fullLabel}>
+          <span className="novel-model-option-name">{modelName}</span>
+          <span className="novel-model-option-provider">· {providerName}</span>
+        </span>
+      ),
+    }
+  }), [models])
   const activeMemorySummary = useMemo(() => {
     if (!projectId) return null
     if (!Array.isArray(memoryPalaceProjects)) return null
@@ -6081,8 +6095,9 @@ export default function NovelProjectWorkspace() {
           className="novel-workspace-model-select"
           size="small" value={selectedModelId}
           onChange={(v) => setSelectedModelId(v)}
-          options={models.map(m => ({ value: m.id, label: `${m.display_name || m.model_name} · ${m.provider}` }))}
-          style={{ width: 220 }} placeholder="选择模型"
+          options={modelOptions}
+          popupMatchSelectWidth={440}
+          placeholder="选择模型"
         />
         <Space className="novel-workspace-area-tabs" size={4} style={{ flex: 1, minWidth: 0 }}>
           {workspaceAreaTabs.map(tab => (

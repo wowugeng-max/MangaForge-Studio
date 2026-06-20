@@ -262,6 +262,11 @@ export function registerModelRoutes(app: Express, getWorkspace: () => string) {
       const keyId = Number(req.query.key_id || req.query.keyId || req.query.api_key_id || 0)
       const mode = String(req.query.mode || '').trim()
       let models = (await readModels(getWorkspace())).filter(model => model.is_active !== false)
+      const keys = await readKeys(getWorkspace())
+      if (keys.length > 0) {
+        const activeKeyIds = new Set(keys.filter(key => key.is_active !== false).map(key => Number(key.id)))
+        models = models.filter(model => !Number(model.api_key_id || 0) || activeKeyIds.has(Number(model.api_key_id || 0)))
+      }
       if (keyId) models = models.filter(model => Number(model.api_key_id || 0) === keyId)
       if (mode) models = models.filter(model => modelMatchesMode(model, mode))
       res.json(models)
