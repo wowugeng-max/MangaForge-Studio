@@ -103,6 +103,37 @@ describe('provider routes', () => {
     ])
   })
 
+  test('drops string undefined endpoint placeholders when listing providers', async () => {
+    const workspace = await tempWorkspace()
+    await writeFile(join(workspace, 'providers.json'), JSON.stringify([
+      {
+        id: 'chatgpt2api',
+        display_name: 'chatgpt2api',
+        service_type: 'llm',
+        api_format: 'openai_compatible',
+        auth_type: 'Bearer',
+        default_base_url: 'https://gpt2api.example/v1',
+        supported_modalities: ['chat'],
+        is_active: true,
+        endpoints: {
+          chat: 'undefined',
+          responses: 'undefined',
+          text_to_image: '',
+          image_to_image: null,
+          vision: '/chat/completions',
+        },
+      },
+    ]))
+
+    const { registerProviderRoutes } = await import('./providers')
+    const { app, handlers } = createRouteHarness()
+    registerProviderRoutes(app as any, () => workspace)
+
+    const response = await call(handlers.get('GET /api/providers'))
+
+    expect(response.body[0].endpoints).toEqual({ vision: '/chat/completions' })
+  })
+
   test('normalizes legacy camelCase provider records when listing providers', async () => {
     const workspace = await tempWorkspace()
     await writeFile(join(workspace, 'providers.json'), JSON.stringify([

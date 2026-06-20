@@ -57,6 +57,19 @@ export function buildKeySubmitPayload(values: Record<string, any>) {
   return { ...restValues, tags }
 }
 
+export function getCreateKeyFormValues() {
+  return {
+    service_type: 'llm',
+    provider: undefined,
+    base_url: undefined,
+    key: undefined,
+    description: undefined,
+    is_active: true,
+    quota_total: 0,
+    tags: undefined,
+  }
+}
+
 export function formatKeySubmitError(error: any): string {
   const detail = error?.response?.data?.detail ?? error?.response?.data?.error
   if (!detail) return '操作失败'
@@ -67,6 +80,7 @@ export const MODEL_HEALTH_STATUS_MAP: Record<string, { color: string; text: stri
   healthy: { color: 'success', text: '可用' },
   quota_exhausted: { color: 'error', text: '额度耗尽' },
   unauthorized: { color: 'warning', text: '无权限' },
+  upstream_busy: { color: 'warning', text: '上游繁忙' },
   network_error: { color: 'error', text: '网络错误' },
   key_disabled: { color: 'default', text: 'Key停用' },
   no_key: { color: 'default', text: '缺Key' },
@@ -171,8 +185,9 @@ export default function KeyManager() {
   }
 
   const handleDelete = async (id: number) => { try { await keyApi.delete(id); message.success('删除成功'); fetchKeys() } catch { message.error('删除失败') } }
-  const openModal = (key?: APIKey) => { setEditingKey(key || null); setModalVisible(true); setTimeout(() => { if (key) { const keyProviderObj = dbProviders.find(p => p.id === key.provider); form.setFieldsValue({ ...key, service_type: keyProviderObj?.service_type || 'llm', tags: key.tags?.join(', ') }) } else { form.resetFields() } }, 0) }
-  const handleModalOk = async () => { try { const values = await form.validateFields(); const payload = buildKeySubmitPayload(values); if (editingKey) { await keyApi.update(editingKey.id, payload); message.success('更新成功') } else { await keyApi.create(payload); message.success('创建成功') } setModalVisible(false); fetchKeys() } catch (error: any) { message.error(formatKeySubmitError(error)) } }
+  const openModal = (key?: APIKey) => { setEditingKey(key || null); form.resetFields(); if (key) { const keyProviderObj = dbProviders.find(p => p.id === key.provider); form.setFieldsValue({ ...key, service_type: keyProviderObj?.service_type || 'llm', tags: key.tags?.join(', ') }) } else { form.setFieldsValue(getCreateKeyFormValues()) } setModalVisible(true) }
+  const closeKeyModal = () => { setModalVisible(false); setEditingKey(null); form.resetFields(); form.setFieldsValue(getCreateKeyFormValues()) }
+  const handleModalOk = async () => { try { const values = await form.validateFields(); const payload = buildKeySubmitPayload(values); if (editingKey) { await keyApi.update(editingKey.id, payload); message.success('更新成功') } else { await keyApi.create(payload); message.success('创建成功') } closeKeyModal(); fetchKeys() } catch (error: any) { message.error(formatKeySubmitError(error)) } }
   const openModelDrawer = async (keyRecord: APIKey) => { setCurrentKeyForModels(keyRecord); setDrawerVisible(true); fetchModels(keyRecord.id) }
   const openModelModal = (model?: any) => { setEditingModel(model || null); setModelModalVisible(true); setTimeout(() => { if (model) { const caps = Object.keys(model.capabilities).filter(k => model.capabilities[k]); modelForm.setFieldsValue({ ...model, capabilities: caps }) } else { modelForm.resetFields(); modelForm.setFieldsValue({ capabilities: DEFAULT_MANUAL_MODEL_CAPABILITIES }) } }, 0) }
   const handleModelModalOk = async () => { const values = await modelForm.validateFields(); const payload = { ...values, provider: currentKeyForModels?.provider, api_key_id: currentKeyForModels?.id, capabilities: buildModelCapabilityPayload(values.capabilities), is_manual: true, context_ui_params: editingModel?.context_ui_params || {} }; if (editingModel) await modelApi.update(editingModel.id, payload); else await modelApi.create(payload); setModelModalVisible(false); fetchModels(currentKeyForModels!.id) }
@@ -209,13 +224,13 @@ export default function KeyManager() {
       </Space>
     </Card>
     {/* 保持原弹窗/抽屉结构，后续可再细化样式 */}
-    <Modal title={editingKey ? '编辑 API Key' : '添加 API Key'} open={modalVisible} onOk={handleModalOk} onCancel={() => setModalVisible(false)} destroyOnHidden>
-      <Form form={form} layout="vertical" initialValues={{ is_active: true, quota_total: 0, service_type: 'llm' }}>
+    <Modal title={editingKey ? '编辑 API Key' : '添加 API Key'} open={modalVisible} onOk={handleModalOk} onCancel={closeKeyModal} destroyOnHidden>
+      <Form form={form} layout="vertical" initialValues={getCreateKeyFormValues()} autoComplete="off">
         <Form.Item name="service_type" label="服务大类"><Radio.Group onChange={handleServiceTypeChange} optionType="button" buttonStyle="solid"><Radio value="llm">🤖 大模型 API</Radio><Radio value="comfyui">🚀 ComfyUI 算力</Radio></Radio.Group></Form.Item>
         <Form.Item name="provider" label="提供商" rules={[{ required: true, message: '请选择提供商' }]}><Select options={providerOptions} placeholder="请选择平台" /></Form.Item>
-        <Form.Item name="base_url" label="自定义网关 (Base URL)" rules={[{ required: serviceType === 'comfyui', message: 'ComfyUI 类型必须填写网关地址' }]}><Input placeholder={serviceType === 'comfyui' ? (selectedProviderObj?.default_base_url || '例如: http://127.0.0.1:8188') : '选填：透明反代地址或中转站地址。若直连官方请留空'} /></Form.Item>
-        <Form.Item name="key" label="API Key / Token" rules={[{ required: isKeyRequired, message: '请填写 API Key' }]}><Input.Password placeholder={isKeyRequired ? '请填入平台颁发的 API Key' : '本地算力平台 (Auth=None) 可留空'} /></Form.Item>
-        <Form.Item name="description" label="备注"><Input placeholder="例如：家里的 5090 / 便宜的中转站" /></Form.Item>
+        <Form.Item name="base_url" label="自定义网关 (Base URL)" rules={[{ required: serviceType === 'comfyui', message: 'ComfyUI 类型必须填写网关地址' }]}><Input autoComplete="off" placeholder={serviceType === 'comfyui' ? (selectedProviderObj?.default_base_url || '例如: http://127.0.0.1:8188') : '选填：透明反代地址或中转站地址。若直连官方请留空'} /></Form.Item>
+        <Form.Item name="key" label="API Key / Token" rules={[{ required: isKeyRequired, message: '请填写 API Key' }]}><Input.Password autoComplete="new-password" placeholder={isKeyRequired ? '请填入平台颁发的 API Key' : '本地算力平台 (Auth=None) 可留空'} /></Form.Item>
+        <Form.Item name="description" label="备注"><Input autoComplete="off" placeholder="例如：家里的 5090 / 便宜的中转站" /></Form.Item>
         <Form.Item name="is_active" label="启用状态" valuePropName="checked"><Switch /></Form.Item>
         <Form.Item name="quota_total" label="总配额"><InputNumber style={{ width: '100%' }} min={0} /></Form.Item>
       </Form>

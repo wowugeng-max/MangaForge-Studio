@@ -1,5 +1,6 @@
 import { imageUrlFromLLMContentPart, stringifyLLMMessageContent, stringifyLLMMessageTextContent, textFromLLMContentPart, type LLMRequest, type LLMResponse, type LLMToolCall } from './types'
 import { buildCodexResponsesBody } from './codex-responses'
+import { createOpenAIResponseViaSdk } from './openai-responses-sdk'
 import {
   applyClaudeCodeAuthHeaders,
   anthropicModelNameForRequest,
@@ -270,7 +271,9 @@ function isGeminiNativeProvider(provider: ProviderRecord) {
 }
 
 function effectiveApiFormat(provider: ProviderRecord, model?: ModelRecord) {
-  return String(model?.api_format || provider.api_format || 'openai_compatible').toLowerCase()
+  const modelFormat = String(model?.api_format || '').trim().toLowerCase()
+  if (modelFormat) return modelFormat
+  return String(provider.api_format || 'openai_compatible').trim().toLowerCase()
 }
 
 function isClaudeCodeFormat(apiFormat: string) {
@@ -299,11 +302,125 @@ function applyProviderAuth(headers: Record<string, string>, provider: ProviderRe
 
 async function postJson(url: string, body: any, apiKey?: string, headersExtra: Record<string, string> = {}) {
   const headers: Record<string, string> = { 'Content-Type': 'application/json', ...headersExtra }
+  if (body?.stream && !headers.Accept) headers.Accept = 'text/event-stream'
   if (apiKey) headers.Authorization = apiKey.toLowerCase().startsWith('bearer ') ? apiKey : `Bearer ${apiKey}`
+  logProviderRequestSummary(url, body, headers)
   const response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) })
   const text = await response.text()
   if (!response.ok) throw new Error(`LLM request failed with status ${response.status}: ${text}`)
+  const contentType = response.headers.get('content-type') || ''
+  if (contentType.includes('text/event-stream') || /^\s*data:/m.test(text)) return parseResponsesEventStreamText(text)
   try { return JSON.parse(text) } catch { return { content: text } }
+}
+
+function logProviderRequestSummary(url: string, body: any, headers: Record<string, string>) {
+  if (process.env.LLM_DEBUG_REQUESTS !== '1') return
+  if (!/anyrouter\.top/i.test(url)) return
+  console.log(`[llm-adapter] AnyRouter request summary: ${JSON.stringify({
+    url,
+    model: body?.model,
+    stream: body?.stream,
+    accept: headers.Accept || headers.accept || '',
+    content_type: headers['Content-Type'] || headers['content-type'] || '',
+    body_keys: body && typeof body === 'object' ? Object.keys(body).sort() : [],
+    input_count: Array.isArray(body?.input) ? body.input.length : 0,
+    has_messages: Object.prototype.hasOwnProperty.call(body || {}, 'messages'),
+    has_input: Object.prototype.hasOwnProperty.call(body || {}, 'input'),
+    include: body?.include,
+    reasoning_effort: body?.reasoning?.effort,
+  })}`)
+}
+
+function parseResponsesEventStreamText(text: string) {
+  let content = ''
+  let finalResponse: any = null
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim()
+    if (!line.startsWith('data:')) continue
+    const payload = line.slice(5).trim()
+    if (!payload || payload === '[DONE]') continue
+    const chunk = tryParseJson(payload)
+    if (!chunk) continue
+    if (typeof chunk.delta === 'string') content += chunk.delta
+    if (typeof chunk.text === 'string' && !String(chunk.type || '').includes('.done')) content += chunk.text
+    const choice = Array.isArray(chunk.choices) ? chunk.choices[0] : null
+    if (typeof choice?.delta?.content === 'string') content += choice.delta.content
+    if (typeof choice?.message?.content === 'string') content += choice.message.content
+    if (chunk.type === 'response.completed') finalResponse = chunk.response || chunk
+  }
+  return {
+    ...(finalResponse || {}),
+    output_text: content || finalResponse?.output_text || '',
+    content: content || finalResponse?.output_text || '',
+    status: finalResponse?.status || 'completed',
+    usage: finalResponse?.usage,
+  }
+}
+
+function isAnyRouterTopEndpoint(provider: ProviderRecord, endpoint = '', baseUrl = provider.default_base_url || '') {
+  return /anyrouter\.top/i.test(`${provider.id || ''} ${provider.display_name || ''} ${provider.default_base_url || ''} ${baseUrl} ${endpoint}`)
+}
+
+function shouldUseOpenAIResponsesSdk(apiFormat: string, routeConfig: unknown, provider: ProviderRecord, endpoint: string) {
+  const normalized = String(apiFormat || '').toLowerCase()
+  if (!normalized.includes('codex') && !normalized.includes('responses')) return false
+  if (isRouteObject(routeConfig)) return false
+  if (isAnyRouterTopEndpoint(provider, endpoint)) return false
+  if (!/\/responses(?:[?#].*)?$/i.test(endpoint)) return false
+  const authType = String(provider.auth_type || 'bearer').toLowerCase()
+  return authType === 'bearer' || authType === 'authorization' || authType === 'oauth'
+}
+
+function headersForOpenAIResponsesSdk(headers: Record<string, string>) {
+  const sdkHeaders: Record<string, string> = {}
+  for (const [key, value] of Object.entries(headers)) {
+    const normalized = key.toLowerCase()
+    if (normalized === 'authorization') continue
+    if (normalized === 'content-type') continue
+    if (normalized === 'user-agent') continue
+    if (normalized === 'x-api-key') continue
+    sdkHeaders[key] = value
+  }
+  return sdkHeaders
+}
+
+function openAIResponsesSdkBaseUrlFromEndpoint(endpoint: string, fallbackBaseUrl: string) {
+  const stripped = String(endpoint || '').replace(/\/responses(?:[?#].*)?$/i, '')
+  return stripped || fallbackBaseUrl
+}
+
+function statusFromProviderError(error: any) {
+  const status = Number(error?.status ?? error?.statusCode ?? error?.response?.status ?? 0)
+  return Number.isFinite(status) ? status : 0
+}
+
+function bodyTextFromProviderError(error: any) {
+  const raw = error?.error ?? error?.response?.data ?? error?.body
+  if (typeof raw === 'string') return raw
+  if (raw !== undefined) {
+    try {
+      return JSON.stringify(raw)
+    } catch {
+      return String(raw)
+    }
+  }
+  return String(error?.message || error)
+}
+
+async function postOpenAIResponsesViaSdk(endpoint: string, body: any, apiKey: string, headers: Record<string, string>, fallbackBaseUrl: string) {
+  try {
+    return await createOpenAIResponseViaSdk({
+      apiKey: String(apiKey || '').replace(/^Bearer\s+/i, ''),
+      baseURL: openAIResponsesSdkBaseUrlFromEndpoint(endpoint, fallbackBaseUrl),
+      headers: headersForOpenAIResponsesSdk(headers),
+      body,
+      timeoutMs: 600000,
+    })
+  } catch (error: any) {
+    const status = statusFromProviderError(error)
+    if (status) throw new Error(`LLM request failed with status ${status}: ${bodyTextFromProviderError(error)}`)
+    throw error
+  }
 }
 
 async function getJson(url: string, headersExtra: Record<string, string> = {}) {
@@ -382,19 +499,33 @@ function routeConfigForModel(route: any, modelName: string) {
   return merged
 }
 
+function usableRouteConfig(value: any): any {
+  if (typeof value !== 'string') return value
+  const trimmed = value.trim()
+  if (!trimmed) return ''
+  if (/^(undefined|null|none|false)$/i.test(trimmed)) return ''
+  return value
+}
+
+function firstUsableRouteConfig(...values: any[]) {
+  return values.map(usableRouteConfig).find(Boolean) || ''
+}
+
 function selectProviderRoute(provider: ProviderRecord, request?: LLMRequest, model?: ModelRecord) {
   const endpoints = provider.endpoints || {}
   const providerFormat = effectiveApiFormat(provider, model)
-  if (isClaudeCodeFormat(providerFormat)) return endpoints.messages || endpoints.chat || endpoints.completions || endpoints.llm || ''
+  if (isClaudeCodeFormat(providerFormat)) return firstUsableRouteConfig(endpoints.messages, endpoints.chat, endpoints.completions, endpoints.llm)
   if (!providerFormat.includes('responses') && !providerFormat.includes('codex')) {
     const routeType = request ? requestRouteType(request, model) : ''
-    if (routeType && endpoints[routeType]) return routeConfigForModel(endpoints[routeType], model?.model_name || '')
+    const routeConfig = routeType ? usableRouteConfig(endpoints[routeType]) : ''
+    if (routeConfig) return routeConfigForModel(routeConfig, model?.model_name || '')
     const broadType = routeType.includes('image') ? 'image' : routeType.includes('video') ? 'video' : ''
-    if (broadType && endpoints[broadType]) return routeConfigForModel(endpoints[broadType], model?.model_name || '')
+    const broadConfig = broadType ? usableRouteConfig(endpoints[broadType]) : ''
+    if (broadConfig) return routeConfigForModel(broadConfig, model?.model_name || '')
   }
   return providerFormat.includes('responses') || providerFormat.includes('codex')
-    ? endpoints.responses || endpoints.chat || endpoints.completions || endpoints.llm || ''
-    : endpoints.chat || endpoints.responses || endpoints.completions || endpoints.llm || ''
+    ? firstUsableRouteConfig(endpoints.responses, endpoints.chat, endpoints.completions, endpoints.llm)
+    : firstUsableRouteConfig(endpoints.chat, endpoints.completions, endpoints.llm)
 }
 
 function defaultEndpointPath(provider: ProviderRecord, routeType = '', apiFormat = provider.api_format) {
@@ -661,6 +792,16 @@ function buildConfiguredRouteBody(routeConfig: unknown, request: LLMRequest, fal
   return fallback()
 }
 
+function shouldStreamConfiguredRequest(request: LLMRequest, provider: ProviderRecord) {
+  const requestMode = String(request.response_mode || 'auto')
+  const providerMode = String(provider.response_mode || 'auto')
+  if (requestMode === 'stream') return true
+  if (requestMode === 'non_stream') return false
+  if (providerMode === 'stream') return true
+  if (providerMode === 'non_stream') return false
+  return Boolean(request.stream)
+}
+
 export class ConfiguredProviderAdapter implements NovelLLMAdapter {
   name: string
   constructor(private provider: ProviderRecord, private apiKey: APIKeyRecord, private model: ModelRecord) {
@@ -680,8 +821,10 @@ export class ConfiguredProviderAdapter implements NovelLLMAdapter {
     const isResponses = providerFormat.includes('responses')
     const isGeminiNative = isGeminiNativeFormat(providerFormat)
     const body = buildConfiguredRouteBody(routeConfig, modelRequest, () => isCodex
-      ? buildCodexResponsesBody(modelRequest, this.model.model_name || request.model, false, {
+      ? buildCodexResponsesBody(modelRequest, this.model.model_name || request.model, shouldStreamConfiguredRequest(modelRequest, this.provider), {
         baseUrl: effectiveBaseUrl,
+        reasoning: this.model.context_ui_params?.reasoning,
+        reasoningEffort: this.model.context_ui_params?.reasoning_effort ?? this.model.context_ui_params?.model_reasoning_effort,
       })
       : isResponses ? buildOpenAIResponsesBody(modelRequest) : (isGeminiNative ? buildGeminiGenerateContentBody(modelRequest) : (isAnthropic ? buildAnthropicMessagesBody(modelRequest, this.model, this.provider, effectiveBaseUrl) : (isMediaRouteType(routeType) ? buildOpenAIMediaBody(modelRequest) : buildOpenAIChatBody(modelRequest)))))
     const headers = applyProviderAuth({ ...(this.provider.custom_headers || {}) }, this.provider, this.apiKey.key, providerFormat, effectiveBaseUrl)
@@ -700,7 +843,10 @@ export class ConfiguredProviderAdapter implements NovelLLMAdapter {
         baseUrl: effectiveBaseUrl,
       })
     }
-    const raw = await pollConfiguredTask(this.provider, endpoint, routeConfig, await postJson(endpoint, body, undefined, headers), headers, effectiveBaseUrl)
+    const initialRaw = shouldUseOpenAIResponsesSdk(providerFormat, routeConfig, this.provider, endpoint)
+      ? await postOpenAIResponsesViaSdk(endpoint, body, this.apiKey.key, headers, effectiveBaseUrl)
+      : await postJson(endpoint, body, undefined, headers)
+    const raw = await pollConfiguredTask(this.provider, endpoint, routeConfig, initialRaw, headers, effectiveBaseUrl)
     if (isGeminiNative) return normalizeToolCallsFromResponse(normalizeLLMResponse<T>(normalizeGeminiGenerateContentPayload(raw)))
     const resultExtractor = routeDslValue(routeConfig, 'result_extractor', 'resultExtractor')
     if (resultExtractor) {

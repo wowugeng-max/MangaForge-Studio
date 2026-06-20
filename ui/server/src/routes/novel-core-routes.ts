@@ -6,16 +6,19 @@ import {
   createNovelCharacter,
   createNovelOutline,
   createNovelProject,
+  createNovelProjectSeedDraft,
   createNovelWorldbuilding,
   deleteNovelChapter,
   deleteNovelOutline,
   deleteNovelProject,
+  deleteNovelProjectSeedDraft,
   getNovelProject,
   listChapterVersions,
   listNovelCharacters,
   listNovelChapters,
   listNovelOutlines,
   listNovelProjects,
+  listNovelProjectSeedDrafts,
   listNovelWorldbuilding,
   rollbackChapterVersion,
   updateNovelCharacter,
@@ -25,7 +28,7 @@ import {
   updateNovelWorldbuilding,
 } from '../novel'
 import { executeNovelAgent, previewNovelKnowledgeInjection } from '../llm'
-import { parseJsonLikePayload } from './novel-route-utils'
+import { extractLLMText, parseJsonLikePayload } from './novel-route-utils'
 import { purgeMemoryPalaceProject } from '../memory-service'
 
 function parseOptionalBoolean(value: any) {
@@ -60,6 +63,10 @@ async function listProjectsWithWritingAggregates(activeWorkspace: string) {
 
 function asSeedArray(value: any) {
   return Array.isArray(value) ? value : []
+}
+
+function firstSeedArray(...values: any[]) {
+  return values.find(Array.isArray) || []
 }
 
 function firstSeedText(...values: any[]) {
@@ -108,6 +115,633 @@ function hasObjectText(value: any, keys: string[]) {
   return keys.some(key => firstSeedText(record[key]))
 }
 
+function compactSeedText(value: any, maxLength = 240) {
+  return String(value || '').replace(/\s+/g, ' ').trim().slice(0, maxLength)
+}
+
+function uniqueSeedTexts(values: any[], limit = 8) {
+  const seen = new Set<string>()
+  const output: string[] = []
+  values
+    .flatMap(value => {
+      if (!value) return []
+      if (typeof value === 'string') return value.split(/\r?\n/)
+      if (typeof value === 'object') return [JSON.stringify(value)]
+      return [String(value)]
+    })
+    .map(value => compactSeedText(value, 260))
+    .filter(Boolean)
+    .forEach(value => {
+      if (seen.has(value) || output.length >= limit) return
+      seen.add(value)
+      output.push(value)
+    })
+  return output
+}
+
+function seedFieldMissing(seed: any) {
+  const root = parseNestedSeed(seed)
+  const missing: string[] = []
+  if (!firstSeedText(root.synopsis, root.project_summary, root.summary)) missing.push('synopsis')
+  if (!firstSeedText(root.logline, root.hook)) missing.push('logline')
+  if (!firstSeedText(root.core_premise, root.premise, root.setting)) missing.push('core_premise')
+  if (!firstSeedText(root.main_conflict, root.conflict)) missing.push('main_conflict')
+  if (!hasObjectText(root.protagonist, ['name', 'identity', 'goal', 'power_or_cheat'])
+    && !asSeedArray(root.characters).some(character => hasObjectText(character, ['name', 'identity', 'role_type', 'goal', 'summary']))) {
+    missing.push('protagonist')
+  }
+  if (!hasObjectText(root.worldbuilding, ['world_summary', 'summary', 'power_system', 'rules'])) missing.push('worldbuilding')
+  if (!asSeedArray(root.volume_outlines).length) missing.push('volume_outlines')
+  if (!asSeedArray(root.chapter_outlines).length) missing.push('chapter_outlines')
+  return missing
+}
+
+function resultContentPreview(result: any) {
+  return compactSeedText(
+    resultContentText(result),
+    3000,
+  )
+}
+
+function resultContentText(result: any) {
+  if (!result) return ''
+  return String(
+    result?.content
+    || (typeof result?.output === 'string' ? result.output : '')
+    || extractLLMText(result)
+    || result?.raw?.choices?.[0]?.message?.content
+    || result?.raw?.candidates?.[0]?.content?.parts?.map((part: any) => part?.text).filter(Boolean).join('\n')
+    || '',
+  )
+}
+
+const INVALID_SEED_CHARACTER_NAMES = new Set([
+  '怎么',
+  '如何',
+  '什么',
+  '为何',
+  '为什么',
+  '哪里',
+  '哪个',
+  '这些',
+  '已有',
+  '根据',
+  '主角',
+  '反派',
+  '阶段对手',
+  '竞争者',
+  '反派/竞争者',
+])
+
+function cleanSeedCharacterName(value: any) {
+  const raw = firstSeedText(value).trim()
+  if (!raw || INVALID_SEED_CHARACTER_NAMES.has(raw)) return ''
+  if (/^(怎么|如何|什么|为何|为什么|哪里|哪个)/.test(raw)) return ''
+  return raw
+}
+
+function inferSeedCharacterName(text: string) {
+  const match = String(text || '').match(/([一-龥]{2,4})(?:靠|在|从|因|发现|望|说|必须|要|与|和|被|将|进入|来到)/)
+  return cleanSeedCharacterName(match?.[1] || '')
+}
+
+function extractBalancedJsonValue(raw: string, key: string) {
+  const match = new RegExp(`["']?${key}["']?\\s*:`, 'i').exec(raw)
+  if (!match) return null
+  let cursor = match.index + match[0].length
+  while (cursor < raw.length && /\s/.test(raw[cursor])) cursor += 1
+  const opener = raw[cursor]
+  const closer = opener === '{' ? '}' : opener === '[' ? ']' : opener
+  if (!['{', '[', '"'].includes(opener)) return null
+  let depth = 0
+  let inString = false
+  let escaped = false
+  for (let index = cursor; index < raw.length; index += 1) {
+    const char = raw[index]
+    if (inString) {
+      if (escaped) {
+        escaped = false
+      } else if (char === '\\') {
+        escaped = true
+      } else if (char === '"') {
+        inString = false
+        if (opener === '"' && depth === 0) return raw.slice(cursor, index + 1)
+      }
+      continue
+    }
+    if (char === '"') {
+      inString = true
+      continue
+    }
+    if (char === opener && opener !== '"') depth += 1
+    if (char === closer && opener !== '"') {
+      depth -= 1
+      if (depth === 0) return raw.slice(cursor, index + 1)
+    }
+  }
+  return null
+}
+
+function extractJsonProperty(raw: string, key: string) {
+  const value = extractBalancedJsonValue(raw, key)
+  if (!value) return undefined
+  try {
+    return JSON.parse(value)
+  } catch {
+    return parseJsonLikePayload(value) ?? undefined
+  }
+}
+
+function extractProjectSeedFactsFromText(rawText: string) {
+  const raw = String(rawText || '').trim()
+  if (!raw) return {}
+  const parsed = parseJsonLikePayload(raw) || parseJsonLikePayload(`{${raw}}`)
+  const facts = parseNestedSeed(parsed)
+  const extracted: any = Object.keys(facts).length ? { ...facts } : {}
+  for (const key of [
+    'protagonist',
+    'antagonist',
+    'worldbuilding',
+    'plot_engine',
+    'writing_bible',
+    'master_outline',
+    'commercial_positioning',
+  ]) {
+    if (!extracted[key]) {
+      const value = extractJsonProperty(raw, key)
+      if (value !== undefined) extracted[key] = value
+    }
+  }
+  for (const key of [
+    'characters',
+    'volume_outlines',
+    'chapter_outlines',
+    'foreshadowing_plan',
+    'open_questions',
+    'next_steps',
+  ]) {
+    if (!Array.isArray(extracted[key])) {
+      const value = extractJsonProperty(raw, key)
+      if (Array.isArray(value)) extracted[key] = value
+    }
+  }
+  return extracted
+}
+
+function seedOutlineLooksTemplate(value: any, kind: 'volume' | 'chapter') {
+  const record = parseNestedSeed(value)
+  const textValue = compactSeedText([
+    record.title,
+    record.name,
+    record.summary,
+    record.goal,
+    record.chapter_goal,
+  ].join(' '), 500)
+  if (!textValue) return false
+  if (/开篇承诺验证|第\d+阶段长线扩容/.test(textValue)) return true
+  if (/异象开端|第\d+章压力升级/.test(textValue)) return true
+  if (/主角在已有线索基础上|围绕.+继续扩展地图/.test(textValue)) return true
+  if (kind === 'chapter' && chapterTitleLooksStructural(record.title || record.name)) return true
+  return kind === 'chapter' && /主角接触.+第一条异常规则/.test(textValue)
+}
+
+const STRUCTURAL_CHAPTER_TITLES = new Set([
+  '异象开端',
+  '旧识断口',
+  '第一条规则',
+  '首次反击',
+  '公开破局',
+  '第一场败仗',
+  '楚影照面',
+  '逼问真相',
+  '反向设局',
+  '伏笔回收',
+  '镇外大火',
+  '首卷决战',
+  '更大地图',
+  '大荒开门',
+])
+
+const SHANHAI_FALLBACK_CHAPTER_TITLES = [
+  '蛾虫入药',
+  '旧经生疑',
+  '药性初验',
+  '药铺夜问',
+  '伏藏试蛾',
+  '小镇追索',
+  '禁忌反噬',
+  '残篇显影',
+  '镇中反击',
+  '镇门封锁',
+  '山路截杀',
+  '缺页交易',
+  '临时盟约',
+  '旧案翻面',
+  '宗门试探',
+  '代价失控',
+  '假线入局',
+  '残篇争夺',
+  '众目破局',
+  '第一败',
+  '夜入禁地',
+  '双规互噬',
+  '首敌照面',
+  '残篇口供',
+  '药铺反局',
+  '蛾虫旧债',
+  '镇外火线',
+  '剑烛照荒台',
+  '荒门债契',
+  '门后异文',
+]
+
+const GENERIC_FALLBACK_CHAPTER_TITLES = [
+  '异常入局',
+  '旧法失准',
+  '初次验证',
+  '夜半问答',
+  '低险试验',
+  '追索入城',
+  '代价显形',
+  '核心线索',
+  '第一次反击',
+  '封锁危局',
+  '路上截杀',
+  '暗线交易',
+  '临时盟约',
+  '旧案翻面',
+  '高层试探',
+  '副作用失控',
+  '假线入局',
+  '核心争夺',
+  '众目破局',
+  '第一败',
+  '夜入禁地',
+  '规则互噬',
+  '敌手现身',
+  '真相口供',
+  '反局落子',
+  '旧线回响',
+  '城外火线',
+  '阶段决局',
+  '新图债契',
+  '门后答案',
+]
+
+function chapterTitleLooksStructural(value: any) {
+  const title = firstSeedText(value)
+  return Boolean(title && (STRUCTURAL_CHAPTER_TITLES.has(title) || /^第\d+章压力升级$/.test(title)))
+}
+
+function fallbackChapterDisplayTitle(
+  beatTitle: any,
+  index: number,
+  title: string,
+  protagonistName: string,
+  summary = '',
+  contextText = '',
+) {
+  const context = `${title} ${protagonistName} ${summary} ${contextText}`
+  const titles = /山海|蛾虫|异兽|大荒|残篇|药铺|剑烛/.test(context)
+    ? SHANHAI_FALLBACK_CHAPTER_TITLES
+    : GENERIC_FALLBACK_CHAPTER_TITLES
+  const fallback = titles[index] || `${compactSeedText(title, 8) || '主线'}第${index + 1}局`
+  const explicit = firstSeedText(beatTitle)
+  return chapterTitleLooksStructural(explicit) ? fallback : firstSeedText(explicit, fallback)
+}
+
+function preferSeedArray(primary: any, fallback: any, kind: 'volume' | 'chapter' | 'other') {
+  const primaryArray = asSeedArray(primary)
+  const fallbackArray = asSeedArray(fallback)
+  if (!primaryArray.length) return fallbackArray
+  if (fallbackArray.length && kind !== 'other' && primaryArray.every(item => seedOutlineLooksTemplate(item, kind))) {
+    return fallbackArray
+  }
+  return primaryArray
+}
+
+function mergeProjectSeedInput(primary: any, fallback: any) {
+  const source = parseNestedSeed(primary)
+  const extracted = parseNestedSeed(fallback)
+  const sourceProtagonist = parseNestedSeed(source.protagonist)
+  const extractedProtagonist = parseNestedSeed(extracted.protagonist)
+  const sourceAntagonist = parseNestedSeed(source.antagonist)
+  const extractedAntagonist = parseNestedSeed(extracted.antagonist)
+  const sourceProtagonistName = firstSeedText(sourceProtagonist.name, sourceProtagonist.title)
+  const sourceAntagonistName = firstSeedText(sourceAntagonist.name, sourceAntagonist.title)
+  return {
+    ...extracted,
+    ...source,
+    protagonist: sourceProtagonistName && !cleanSeedCharacterName(sourceProtagonistName) && cleanSeedCharacterName(firstSeedText(extractedProtagonist.name, extractedProtagonist.title))
+      ? { ...sourceProtagonist, ...extractedProtagonist }
+      : { ...extractedProtagonist, ...sourceProtagonist },
+    antagonist: sourceAntagonistName && !cleanSeedCharacterName(sourceAntagonistName) && cleanSeedCharacterName(firstSeedText(extractedAntagonist.name, extractedAntagonist.title))
+      ? { ...sourceAntagonist, ...extractedAntagonist }
+      : { ...extractedAntagonist, ...sourceAntagonist },
+    worldbuilding: { ...parseNestedSeed(extracted.worldbuilding), ...parseNestedSeed(source.worldbuilding) },
+    plot_engine: { ...parseNestedSeed(extracted.plot_engine), ...parseNestedSeed(source.plot_engine) },
+    master_outline: { ...parseNestedSeed(extracted.master_outline), ...parseNestedSeed(source.master_outline) },
+    characters: preferSeedArray(source.characters, extracted.characters, 'other'),
+    volume_outlines: preferSeedArray(source.volume_outlines, extracted.volume_outlines, 'volume'),
+    chapter_outlines: preferSeedArray(source.chapter_outlines, extracted.chapter_outlines, 'chapter'),
+    foreshadowing_plan: preferSeedArray(source.foreshadowing_plan, extracted.foreshadowing_plan, 'other'),
+    open_questions: preferSeedArray(source.open_questions, extracted.open_questions, 'other'),
+    raw_payload: {
+      ...parseNestedSeed(source.raw_payload),
+      ...extracted,
+    },
+  }
+}
+
+function fallbackVolumeCount(lengthTarget: string) {
+  switch (normalizeLengthTarget(lengthTarget)) {
+    case 'epic':
+      return 5
+    case 'long':
+      return 4
+    case 'short':
+      return 1
+    default:
+      return 3
+  }
+}
+
+function fallbackChapterCount(lengthTarget: string) {
+  switch (normalizeLengthTarget(lengthTarget)) {
+    case 'epic':
+    case 'long':
+      return 30
+    case 'short':
+      return 12
+    default:
+      return 20
+  }
+}
+
+function buildFallbackVolumeOutlines(title: string, protagonistName: string, lengthTarget: string, pitch: string) {
+  const count = fallbackVolumeCount(lengthTarget)
+  const chapterCount = lengthTarget === 'epic' ? 60 : lengthTarget === 'long' ? 40 : 20
+  return [
+    {
+      title: '开局规则验证',
+      summary: `${protagonistName}在${title}的第一处高压现场验证核心规则，建立读者承诺、能力代价和第一批敌意。`,
+      hook: pitch,
+      chapter_count: chapterCount,
+    },
+    {
+      title: '第一敌手入局',
+      summary: `${protagonistName}带着开局收益离开安全区，遭遇更高层势力试探，核心线索从生存工具变成争夺目标。`,
+      hook: `${protagonistName}发现第一阶段胜利只是更大规则的入口。`,
+      chapter_count: chapterCount,
+    },
+    {
+      title: '地图与势力扩容',
+      summary: `故事从局部事件扩展到组织、地图和资源链，盟友、债务、禁忌与反派阶梯同时加压。`,
+      hook: '旧规则在新地图失效，主角必须付出更高代价重新破局。',
+      chapter_count: chapterCount,
+    },
+    {
+      title: '核心秘密反噬',
+      summary: `${protagonistName}接近${title}底层真相，早期收益开始反噬，人物关系和主线目标出现不可逆选择。`,
+      hook: '主角得到答案，也暴露了真正的长线敌人。',
+      chapter_count: chapterCount,
+    },
+    {
+      title: '大荒主线开门',
+      summary: `第一轮世界规则、敌人和资产池完成升级，故事打开更大地图，为百万字以后持续连载预留主线引擎。`,
+      hook: '首卷答案引出全书级问题，主角必须主动进入更危险的棋局。',
+      chapter_count: chapterCount,
+    },
+  ].slice(0, count)
+}
+
+function buildFallbackChapterOutlines(
+  title: string,
+  protagonistName: string,
+  lengthTarget: string,
+  mainConflict: string,
+  pitch: string,
+  diagnostics: any,
+) {
+  const retained = asSeedArray(diagnostics?.retained_fragments).slice(0, 3).join('、') || title
+  const beats = [
+    ['异象开端', `${protagonistName}在日常位置撞见第一条异常规则，${retained}从传闻变成可验证危机。`, mainConflict, '异常规则留下第二个未解口。'],
+    ['旧识断口', `${protagonistName}试图按旧经验处理危机，却发现这个世界的常识与自己认知互相矛盾。`, '旧认知不能直接套用，新世界规则要求主角付出试错成本。', '旧答案指向一处更危险的证据。'],
+    ['第一条规则', `${protagonistName}完成第一次小规模验证，得到收益，也暴露能力线索。`, '收益和暴露同时发生，主角必须决定藏拙还是继续追查。', '有人开始追踪主角的异常判断。'],
+    ['药铺夜问', `安全地点在夜里变成审问场，${protagonistName}被迫解释线索来源。`, '主角需要保护秘密，又要说服关键人物暂时合作。', '对方提出一个无法回避的现场验证。'],
+    ['伏藏试验', `${protagonistName}主动设计低风险试验，把碎片知识变成可重复使用的破局方法。`, '试验需要诱饵、时间和旁人信任，任何一步失败都会招来惩罚。', '试验结果比主角预想的更像禁术。'],
+    ['小镇追索', `第一批追索者进入小镇，${protagonistName}的收益开始变成明面资源。`, '外部压力压缩主角的活动空间，迫使他做出第一次反击。', '追索者说出一个主角不该知道的名字。'],
+    ['禁忌代价', `${protagonistName}发现使用规则会留下代价，早期爽点不再是免费能力。`, '继续使用能救人也会留下后患，放弃使用则会失去关键证据。', '代价在最不该出现的对象身上显形。'],
+    ['残篇显影', `核心物品或线索第一次显形，把${title}的局部危机连到更大势力。`, '主角必须在公开抢夺前判断残篇真假。', '残篇背面出现反派势力印记。'],
+    ['首次反击', `${protagonistName}不再被动逃避，利用已验证规则打出第一场有回报的反击。`, '反击会救下眼前人，也会让敌人确认主角价值。', '敌人没有退走，而是换了更高权限的人来。'],
+    ['镇门危局', `危机从私下试探升级到公开封锁，主角的小世界第一次被外力挤压。`, '主角要同时保住身份、线索和身边人的安全。', '封锁令背后藏着一次诱捕。'],
+    ['山路截杀', `${protagonistName}离开熟悉地点，第一场移动战暴露规则在野外的限制。`, '环境变化让旧方案失效，主角必须临场重组信息。', '截杀者带着主角熟悉却变形的知识。'],
+    ['异兽交易', `主角把线索变成交易筹码，第一次接触更大的资源网络。`, '交易能换来破局资源，也会把主角挂上明面名单。', '交易对象交出一份故意缺页的资料。'],
+    ['盟友入局', `潜在盟友因利益或旧案靠近${protagonistName}，关系从利用开始。`, '双方都不完全信任，却必须共同处理眼前危机。', '盟友知道主角秘密的一小部分。'],
+    ['旧案翻面', `早期看似独立的异常事件翻出旧案，证明敌人的布局早已开始。`, '主角发现自己不是第一个验证规则的人。', '旧案幸存者留下反向警告。'],
+    ['宗门试探', `更高层势力正式试探${protagonistName}，奖励、威胁和招揽同时出现。`, '主角要拿到入场资格，又不能交出核心秘密。', '试探结果被送到真正反派手里。'],
+    ['代价失控', `主角连续使用规则导致副作用扩大，能力边界第一次压到人物关系。`, '继续推进会伤害身边人，停下则会错过追查窗口。', '副作用暴露了规则源头的一角。'],
+    ['假线索', `敌人抛出一条看似吻合的线索，引诱${protagonistName}犯经验主义错误。`, '主角必须分辨证据、诱饵和自己的执念。', '假线索背后藏着真目标。'],
+    ['残篇争夺', `多方势力围绕残篇正式碰撞，主角从旁观者变成争夺焦点。`, '主角没有绝对武力，只能用信息差制造局部优势。', '残篇选择了主角无法拒绝的开启方式。'],
+    ['公开破局', `${protagonistName}在众目睽睽下完成一次破局，建立第一阶段名声。`, '名声带来保护，也带来更高层审视。', '有人当场指出主角知识来源不属于此世。'],
+    ['第一场败仗', `敌人用更完整的规则压制主角，打碎他对金手指的过度自信。`, '主角必须承认现有知识不够，付出实质损失换逃生机会。', '失败留下一个可回收的反制缺口。'],
+    ['夜入禁地', `主角带着失败教训潜入禁地，寻找能解释规则差异的证据。`, '禁地规则和主角记忆相似却不相同，错误判断会立刻致命。', '禁地深处有人提前等他。'],
+    ['规则互咬', `两条规则在同一事件里互相冲突，${protagonistName}发现可以借冲突反杀。`, '借力会放大风险，也可能改变规则归属。', '反杀成功后，规则留下新的债务。'],
+    ['敌手现身', `阶段敌手正面出现，明确其目标、方法和对主角的认知优势。`, '敌手掌握更多世界资源，主角只能守住关键秘密。', '敌手说出与主角前世记忆有关的词。'],
+    ['逼问真相', `主角抓住一个敌方节点，第一次逼近残篇和世界真相的因果链。`, '逼问对象可能撒谎、反咬或主动求死。', '真相指向主角穿越并非偶然。'],
+    ['反向设局', `${protagonistName}用前几章积累的线索反向布置一场局，准备夺回主动权。`, '设局需要牺牲一部分安全感，逼敌人按他的节奏行动。', '敌人踩局，却带来计划外变量。'],
+    ['伏笔回收', `开篇留下的小线索第一次回收，证明主角不是靠巧合赢，而是靠规则理解。`, '回收能建立爽点，但也会把更深伏笔暴露出来。', '回收结果打开首卷决战入口。'],
+    ['镇外大火', `敌人将冲突升级为不可隐藏的公共灾难，逼主角在秘密和救人之间选择。`, '主角必须公开一部分能力，换取保住核心人物。', '大火中出现不属于当前地图的力量。'],
+    ['首卷决战', `${protagonistName}把信息差、盟友和规则代价压进第一场阶段决战。`, '胜利不能只靠力量，必须兑现前文承诺并解决阶段敌人。', '阶段敌人败退前交出更大敌人的坐标。'],
+    ['更大地图', `决战后的小世界秩序改变，主角获得进入更大地图的资格和债务。`, '新资格不是奖励，而是被迫承担更危险的身份。', '新地图的第一条规则已经盯上主角。'],
+    ['大荒开门', `前30章完成开局闭环，${protagonistName}带着秘密、盟友、敌意和代价进入长线主线。`, '主角必须主动选择继续深入，而不是被剧情推着走。', '真正的全书级问题在门后露出第一行字。'],
+  ]
+  return beats.slice(0, fallbackChapterCount(lengthTarget)).map(([beatTitle, summary, conflict, endingHook], index) => ({
+    chapter_no: index + 1,
+    title: fallbackChapterDisplayTitle(beatTitle, index, title, protagonistName, summary, `${retained} ${pitch}`),
+    story_function: beatTitle,
+    summary,
+    conflict,
+    ending_hook: endingHook,
+    must_advance: index === 0 ? pitch : summary,
+    forbidden_repeats: '不得重复上一章的信息揭示、震惊反应或单纯解释设定。',
+  }))
+}
+
+function chapterAnchor(chapters: any[], index: number, fallbackNo: number) {
+  const record = parseNestedSeed(chapters[index] || {})
+  const chapterNo = Number(record.chapter_no || record.chapter_number || record.no || fallbackNo) || fallbackNo
+  const title = firstSeedText(record.title, record.name)
+  return title ? `第${chapterNo}章《${title}》` : `第${chapterNo}章`
+}
+
+function volumeAnchor(volumes: any[], index: number, fallbackName: string) {
+  const record = parseNestedSeed(volumes[index] || {})
+  return firstSeedText(record.title, record.name, fallbackName)
+}
+
+function buildFallbackForeshadowingPlan(seed: any, idea = '') {
+  const root = parseNestedSeed(seed)
+  const protagonist = parseNestedSeed(root.protagonist)
+  const antagonist = parseNestedSeed(root.antagonist)
+  const world = parseNestedSeed(root.worldbuilding)
+  const chapters = asSeedArray(root.chapter_outlines)
+  const volumes = asSeedArray(root.volume_outlines)
+  const title = firstSeedText(root.title, root.logline, '本书')
+  const protagonistName = firstSeedText(cleanSeedCharacterName(protagonist.name), cleanSeedCharacterName(protagonist.title), '主角')
+  const antagonistName = firstSeedText(cleanSeedCharacterName(antagonist.name), cleanSeedCharacterName(antagonist.title), '阶段对手')
+  const ruleName = firstSeedText(world.power_system, world.rules?.[0], root.core_premise, root.main_conflict, idea, `${title}核心规则`)
+  const firstVolume = volumeAnchor(volumes, 0, '第一卷')
+  const secondVolume = volumeAnchor(volumes, 1, '第二卷')
+  const anchors = [
+    chapterAnchor(chapters, 0, 1),
+    chapterAnchor(chapters, 2, 3),
+    chapterAnchor(chapters, 4, 5),
+    chapterAnchor(chapters, 7, 8),
+    chapterAnchor(chapters, 10, 11),
+    chapterAnchor(chapters, 14, 15),
+    chapterAnchor(chapters, 18, 19),
+    chapterAnchor(chapters, 23, 24),
+    chapterAnchor(chapters, 27, 28),
+    chapterAnchor(chapters, 29, 30),
+  ]
+  const payoffAnchors = [
+    chapterAnchor(chapters, 8, 9),
+    chapterAnchor(chapters, 12, 13),
+    chapterAnchor(chapters, 16, 17),
+    chapterAnchor(chapters, 20, 21),
+    chapterAnchor(chapters, 24, 25),
+    chapterAnchor(chapters, 27, 28),
+    chapterAnchor(chapters, 29, 30),
+    `${firstVolume}结尾`,
+    `${secondVolume}中段`,
+    `${secondVolume}结尾`,
+  ]
+  return [
+    ['异兽/规则异常', `${protagonistName}第一次发现${ruleName}并不完全符合常识。`, '看似是开局奇遇，真实含义是世界规则存在被篡改或缺页。', '证明主角的信息差不是外挂摆设，而是后续破局方法。'],
+    ['知识来源破绽', `${protagonistName}说出一个此世不该知道的词。`, `${antagonistName}或更高层势力由此锁定主角的异常来源。`, '让主角每次使用知识都伴随暴露风险。'],
+    ['规则代价', `第一次成功利用${ruleName}后留下身体、记忆或因果上的轻微反噬。`, '力量不是免费升级，代价会在首卷决战前集中爆发。', '给爽点增加限制，避免无限开挂。'],
+    ['禁忌边界', `旁人提到一个不能触碰的禁忌，却没有解释原因。`, '禁忌其实是长期扩容边界，触碰后会打开更大地图。', '把第一卷事件接到超长篇主线。'],
+    ['反派旧识', `${antagonistName}对${protagonistName}的判断快得反常。`, '反派并非单纯追杀者，而是掌握残篇、前史或多重身份。', '为后期身份反转和长线敌意埋线。'],
+    ['第一位见证者', `同盟或路人记住${protagonistName}一次看似随手的选择。`, '这次选择会变成主角道德底线的公开证据。', '帮助读者确认主角不是只靠利益驱动。'],
+    ['残缺地图/残篇', '出现一块不完整地图、残页、药方、符号或旧物。', '它对应第二卷入口，也解释第一卷很多异常不是孤立事件。', '提供首卷胜利后的下一步追读理由。'],
+    ['错误答案', `${protagonistName}用错误理解得到一次小胜。`, '小胜会误导主角，直到回收时才发现真正规则更残酷。', '制造反转和失败后的二次爽点。'],
+    ['爽点债务', '首卷中段给出一次明显爽点，但故意留下未完全兑现的债务。', '首卷结尾必须用更大回报偿还，形成读者长期期待。', '把“赢一次”升级成“赢得有代价、有余波”。'],
+    ['全书级谜面', `${firstVolume}收束前露出一句和${title}核心真相有关的话。`, '这不是阶段谜题，而是 300 万字以上主线的第一行答案。', '让项目具备超长篇持续扩容方向。'],
+  ].map(([name, description, trueMeaning, impact], index) => ({
+    name,
+    plant_at: anchors[index],
+    payoff_at: payoffAnchors[index],
+    description,
+    surface: description,
+    true_meaning: trueMeaning,
+    impact,
+    source: 'auto_gap_repair',
+  }))
+}
+
+function buildAuthorConfirmations(seed: any, idea = '') {
+  const root = parseNestedSeed(seed)
+  const protagonist = parseNestedSeed(root.protagonist)
+  const world = parseNestedSeed(root.worldbuilding)
+  const volumes = asSeedArray(root.volume_outlines).map(parseNestedSeed)
+  const questions = asSeedArray(root.open_questions).map(item => firstSeedText(item)).filter(Boolean)
+  const title = firstSeedText(root.title, root.logline, '本书')
+  const protagonistName = firstSeedText(cleanSeedCharacterName(protagonist.name), cleanSeedCharacterName(protagonist.title), '主角')
+  const protagonistGoal = firstSeedText(protagonist.goal, root.main_conflict, root.logline, idea, `破解${title}的核心规则`)
+  const ruleName = firstSeedText(world.power_system, world.rules?.[0], root.core_premise, root.main_conflict, `${title}核心规则`)
+  const firstVolume = volumes[0] || {}
+  const firstVolumeGoal = firstSeedText(firstVolume.goal, firstVolume.summary, firstVolume.hook, '完成开局承诺并赢下第一阶段对手')
+  const base = [
+    {
+      key: 'protagonist_final_desire',
+      label: '最终欲望',
+      question: questions.find(item => /最终欲望|不可退让|道德底线/.test(item)) || `请确认${protagonistName}的最终欲望、道德底线和不可退让目标。`,
+      answer: `${protagonistName}的最终欲望是${protagonistGoal}；道德底线是不主动牺牲无辜者换取升级；不可退让目标是守住知识来源和第一批重要同伴。`,
+    },
+    {
+      key: 'rule_cost_boundary',
+      label: '规则代价',
+      question: questions.find(item => /代价|禁忌|扩容边界|核心规则/.test(item)) || '请确认核心规则的代价、禁忌和长期扩容边界。',
+      answer: `${ruleName}的代价是每次使用都会增加暴露、反噬或因果债；禁忌是不能无验证地套用旧知识；长期扩容边界是从个人破局扩展到残篇、势力、地图和世界真相。`,
+    },
+    {
+      key: 'first_volume_payoff',
+      label: '第一卷爽点回报',
+      question: questions.find(item => /第一卷|爽点|回报|期待/.test(item)) || '请确认第一卷读者最期待的爽点回报是什么。',
+      answer: `第一卷最核心的爽点回报是：${protagonistName}用前文埋下的规则线索完成公开破局，兑现“${firstVolumeGoal}”，同时打开更大地图和更危险敌意。`,
+    },
+  ]
+  return base.map(item => ({ ...item, source: 'auto_gap_repair' }))
+}
+
+function mergeGeneratedFields(existing: any, additions: string[]) {
+  const seen = new Set<string>()
+  return [...asSeedArray(existing), ...additions]
+    .map(item => String(item || '').trim())
+    .filter(item => item && !seen.has(item) && seen.add(item))
+}
+
+export function repairProjectSeedGaps(seed: any, idea = '') {
+  const root = parseNestedSeed(seed)
+  if (!root || !Object.keys(root).length) return root
+  const generated: string[] = []
+  const existingForeshadowing = asSeedArray(root.foreshadowing_plan)
+  const existingConfirmations = asSeedArray(root.author_confirmations)
+  const openQuestions = asSeedArray(root.open_questions).map(item => firstSeedText(item)).filter(Boolean)
+  const foreshadowingPlan = existingForeshadowing.length ? existingForeshadowing : buildFallbackForeshadowingPlan(root, idea)
+  if (!existingForeshadowing.length && foreshadowingPlan.length) generated.push('foreshadowing_plan')
+  const authorConfirmations = existingConfirmations.length ? existingConfirmations : (openQuestions.length ? buildAuthorConfirmations(root, idea) : [])
+  if (!existingConfirmations.length && authorConfirmations.length) generated.push('author_confirmations')
+  const seedDiagnostics = parseNestedSeed(root.seed_diagnostics)
+  return {
+    ...root,
+    foreshadowing_plan: foreshadowingPlan,
+    author_confirmations: authorConfirmations,
+    open_questions: authorConfirmations.length ? [] : openQuestions,
+    seed_diagnostics: {
+      ...seedDiagnostics,
+      generated_fields: mergeGeneratedFields(seedDiagnostics.generated_fields, generated),
+    },
+  }
+}
+
+export function buildProjectSeedDiagnostics(seed: any, idea = '', result: any = null) {
+  const root = parseNestedSeed(seed)
+  const rawPayload = parseNestedSeed(root.raw_payload)
+  const rawPreview = resultContentPreview(result)
+  const missingFields = seedFieldMissing(root)
+  const retainedFragments = uniqueSeedTexts([
+    root.title,
+    root.genre,
+    root.synopsis,
+    root.logline,
+    root.core_premise,
+    root.main_conflict,
+    root.worldbuilding,
+    root.protagonist,
+    root.characters,
+    rawPayload,
+    idea,
+    rawPreview,
+  ], 10)
+  return {
+    status: hasUsableProjectSeed(root) ? 'ready' : 'needs_model_expansion',
+    usable: hasUsableProjectSeed(root),
+    missing_fields: missingFields,
+    retained_fragments: retainedFragments,
+    raw_preview: rawPreview.slice(0, 1200),
+    suggestion: missingFields.length
+      ? '模型返回偏薄。系统已保留有效材料，并会把缺口清单与可编辑草稿交给同一个模型继续补齐。'
+      : '模型返回具备项目种子基础结构。',
+  }
+}
+
+function projectSeedNeedsReview(diagnostics: any) {
+  const status = String(diagnostics?.status || '').trim()
+  return status === 'needs_author_review' || status === 'needs_model_expansion'
+}
+
 export function hasUsableProjectSeed(seed: any) {
   const root = parseNestedSeed(seed)
   if (!root || !Object.keys(root).length) return false
@@ -143,6 +777,29 @@ function normalizeProjectSeedPayload(payload: any, rawIdea: string, requestedLen
   const protagonist = parseNestedSeed(source.protagonist || root.protagonist)
   const antagonist = parseNestedSeed(source.antagonist || root.antagonist)
   const writingBible = parseNestedSeed(source.writing_bible || root.writing_bible)
+  const volumeOutlines = firstSeedArray(
+    source.volume_outlines,
+    source.volumes,
+    root.volume_outlines,
+    root.volumes,
+    masterOutline.volume_outlines,
+    masterOutline.volumes,
+    plotEngine.volume_outlines,
+    plotEngine.volumes,
+  )
+  const chapterOutlines = firstSeedArray(
+    source.chapter_outlines,
+    source.chapters,
+    source.first_30_chapters,
+    root.chapter_outlines,
+    root.chapters,
+    root.first_30_chapters,
+    masterOutline.chapter_outlines,
+    masterOutline.chapters,
+    plotEngine.chapter_outlines,
+    plotEngine.chapters,
+    plotEngine.first_30_chapters,
+  )
   return {
     title: firstSeedText(source.title, source.project_title, source.book_title, source.name, source.working_title, masterOutline.title),
     genre: firstSeedText(source.genre, source.main_genre, source.category, inferSeedGenre(rawForInference)),
@@ -160,8 +817,8 @@ function normalizeProjectSeedPayload(payload: any, rawIdea: string, requestedLen
     worldbuilding,
     plot_engine: plotEngine,
     writing_bible: writingBible,
-    volume_outlines: asSeedArray(source.volume_outlines).length ? asSeedArray(source.volume_outlines) : asSeedArray(root.volume_outlines),
-    chapter_outlines: asSeedArray(source.chapter_outlines).length ? asSeedArray(source.chapter_outlines) : asSeedArray(root.chapter_outlines),
+    volume_outlines: volumeOutlines,
+    chapter_outlines: chapterOutlines,
     foreshadowing_plan: asSeedArray(source.foreshadowing_plan).length ? asSeedArray(source.foreshadowing_plan) : asSeedArray(root.foreshadowing_plan),
     characters: asSeedArray(source.characters).length ? asSeedArray(source.characters) : asSeedArray(root.characters),
     open_questions: asSeedArray(source.open_questions).length ? asSeedArray(source.open_questions) : asSeedArray(source.questions),
@@ -169,6 +826,178 @@ function normalizeProjectSeedPayload(payload: any, rawIdea: string, requestedLen
     raw_idea: rawIdea,
     raw_payload: root,
   }
+}
+
+export function buildRecoverableProjectSeed(seed: any, idea = '', requestedTitle = '', requestedLengthTarget = '', result: any = null) {
+  const lengthTarget = normalizeLengthTarget(requestedLengthTarget) || normalizeLengthTarget(seed?.length_target) || 'medium'
+  const rawText = [
+    idea,
+    resultContentText(result),
+    JSON.stringify(parseNestedSeed(seed?.raw_payload || seed || {})),
+  ].filter(Boolean).join('\n')
+  const extractedFacts = extractProjectSeedFactsFromText(rawText)
+  const mergedSeed = mergeProjectSeedInput(seed || {}, extractedFacts)
+  const normalized = normalizeProjectSeedPayload(mergedSeed, idea, lengthTarget)
+  const normalizedProtagonist = parseNestedSeed(normalized.protagonist)
+  const normalizedAntagonist = parseNestedSeed(normalized.antagonist)
+  const diagnostics = buildProjectSeedDiagnostics(mergedSeed, idea, result)
+  const title = firstSeedText(requestedTitle, normalized.title, seed?.title, inferSeedCharacterName(rawText) ? `${inferSeedCharacterName(rawText)}长篇` : '', '未命名小说')
+  const protagonistName = firstSeedText(
+    cleanSeedCharacterName(normalizedProtagonist.name),
+    cleanSeedCharacterName(normalizedProtagonist.title),
+    asSeedArray(normalized.characters)
+      .map(character => parseNestedSeed(character))
+      .map(character => /主角|protagonist/i.test(firstSeedText(character.role_type, character.role, character.identity)) ? cleanSeedCharacterName(character.name || character.title) : '')
+      .find(Boolean),
+    inferSeedCharacterName(rawText),
+    '主角',
+  )
+  const antagonistName = firstSeedText(
+    cleanSeedCharacterName(normalizedAntagonist.name),
+    cleanSeedCharacterName(normalizedAntagonist.title),
+    asSeedArray(normalized.characters)
+      .map(character => parseNestedSeed(character))
+      .map(character => /反派|对手|antagonist|rival/i.test(firstSeedText(character.role_type, character.role, character.identity)) ? cleanSeedCharacterName(character.name || character.title) : '')
+      .find(Boolean),
+  )
+  const usableCharacters = asSeedArray(normalized.characters)
+    .map(character => parseNestedSeed(character))
+    .filter(character => {
+      const rawName = firstSeedText(character.name, character.title)
+      if (rawName && !cleanSeedCharacterName(rawName)) return false
+      return Boolean(firstSeedText(cleanSeedCharacterName(rawName), character.role_type, character.role, character.identity, character.goal, character.summary))
+    })
+  const worldSummary = firstSeedText(
+    normalized.worldbuilding?.world_summary,
+    normalized.worldbuilding?.summary,
+    normalized.core_premise,
+    normalized.synopsis,
+    rawText,
+    `${title}的世界仍需模型补齐，但已有灵感将作为正史草稿保留。`,
+  )
+  const corePremise = firstSeedText(
+    normalized.core_premise,
+    normalized.synopsis,
+    normalized.logline,
+    `${protagonistName}进入${title}的核心事件，在未知规则、力量代价和长期敌意中寻找破局方式。`,
+  )
+  const mainConflict = firstSeedText(
+    normalized.main_conflict,
+    `${protagonistName}必须利用已知线索破解世界规则，同时面对资源、敌人和认知差带来的连续压力。`,
+  )
+  const pitch = firstSeedText(
+    normalized.logline,
+    `${protagonistName}凭借独特线索闯入${title}，把看似零散的世界规则变成持续升级的生存与修炼优势。`,
+  )
+  const synopsis = firstSeedText(
+    normalized.synopsis,
+    compactSeedText(`${corePremise} ${mainConflict} 已有材料：${diagnostics.retained_fragments.join('；')}`, 500),
+  )
+  const volumes = asSeedArray(normalized.volume_outlines).length
+    ? asSeedArray(normalized.volume_outlines)
+    : buildFallbackVolumeOutlines(title, protagonistName, lengthTarget, pitch)
+  const chapters = asSeedArray(normalized.chapter_outlines).length
+    ? asSeedArray(normalized.chapter_outlines)
+    : buildFallbackChapterOutlines(title, protagonistName, lengthTarget, mainConflict, pitch, diagnostics)
+  const recoveredSeed = repairProjectSeedGaps({
+    ...normalized,
+    title,
+    genre: firstSeedText(normalized.genre, inferSeedGenre(rawText), '其他'),
+    length_target: lengthTarget,
+    synopsis,
+    logline: pitch,
+    core_premise: corePremise,
+    main_conflict: mainConflict,
+    worldbuilding: {
+      ...parseNestedSeed(normalized.worldbuilding),
+      world_summary: worldSummary,
+      power_system: firstSeedText(normalized.worldbuilding?.power_system, '根据已有线索建立可升级、有限制、可反复制造选择压力的能力/规则体系。'),
+      rules: asSeedArray(normalized.worldbuilding?.rules).length ? asSeedArray(normalized.worldbuilding?.rules) : diagnostics.retained_fragments.slice(0, 5),
+    },
+    protagonist: {
+      ...normalizedProtagonist,
+      name: protagonistName,
+      identity: firstSeedText(normalizedProtagonist.identity, '持有关键线索的开局主角'),
+      goal: firstSeedText(normalizedProtagonist.goal, `在${title}里活下来、理解核心规则并打开大荒级长线主线。`),
+      limitation: firstSeedText(normalizedProtagonist.limitation, '对世界真相掌握不足，每次使用线索都要付出代价或暴露风险。'),
+    },
+    antagonist: antagonistName ? {
+      ...normalizedAntagonist,
+      name: antagonistName,
+      identity: firstSeedText(normalizedAntagonist.identity, normalizedAntagonist.role_type, '阶段反派/竞争者'),
+      goal: firstSeedText(normalizedAntagonist.goal, '阻止主角取得第一阶段真相或资源'),
+    } : normalizedAntagonist,
+    characters: usableCharacters.length ? usableCharacters : [
+      { name: protagonistName, role_type: '主角', goal: `破解${title}的核心规则`, current_state: '待作者审阅补强' },
+      antagonistName
+        ? { name: antagonistName, role_type: firstSeedText(normalizedAntagonist.role_type, normalizedAntagonist.identity, '反派/竞争者'), goal: firstSeedText(normalizedAntagonist.goal, '阻止主角取得第一阶段真相或资源'), current_state: '待作者审阅补强' }
+        : { role_type: '反派/竞争者', goal: '阻止主角取得第一阶段真相或资源', current_state: '由模型二次补种子细化' },
+    ].filter(character => firstSeedText(character.name, character.role_type, character.goal)),
+    volume_outlines: volumes,
+    chapter_outlines: chapters,
+    open_questions: asSeedArray(normalized.open_questions).length ? asSeedArray(normalized.open_questions) : [
+      `请确认${protagonistName}的最终欲望、道德底线和不可退让目标。`,
+      '请确认核心规则的代价、禁忌和长期扩容边界。',
+      '请确认第一卷读者最期待的爽点回报是什么。',
+    ],
+    next_steps: [
+      '先让模型根据这份恢复草稿补齐商业钩子、人物池、世界规则、分卷和前30章。',
+      '作者审阅深度孵化草稿，保留有效灵感，删掉不符合口味的自动补位。',
+      '定稿前检查核心承诺、主线矛盾、前30章追读和超长篇扩容引擎。',
+    ],
+  }, idea)
+  const generatedFields = mergeGeneratedFields(
+    seedFieldMissing(seed || {}).filter(field => !seedFieldMissing(recoveredSeed).includes(field)),
+    recoveredSeed.seed_diagnostics?.generated_fields || [],
+  )
+  const recoveredDiagnostics = {
+    ...diagnostics,
+    status: 'needs_model_expansion',
+    usable: hasUsableProjectSeed(recoveredSeed),
+    generated_fields: generatedFields,
+    recovery_strategy: 'local_scaffold_then_same_model_expansion',
+    suggestion: '模型首轮返回偏薄。系统已把已有有效信息搭成可编辑草稿，并会继续要求同一模型按缺口清单扩写。',
+  }
+  return {
+    seed: {
+      ...recoveredSeed,
+      seed_diagnostics: recoveredDiagnostics,
+    },
+    diagnostics: recoveredDiagnostics,
+  }
+}
+
+export function buildProjectSeedRecoveryPrompt(seed: any, diagnostics: any, idea = '', requestedTitle = '', requestedLengthTarget = '') {
+  const lengthTarget = normalizeLengthTarget(requestedLengthTarget || seed?.length_target) || 'medium'
+  return [
+    '任务：上一次项目种子输出偏薄，但里面有可用灵感。请基于这些有效信息补齐小说项目种子。只输出 JSON object，不要 Markdown，不要解释。',
+    '关键原则：不要要求作者更换模型；不要丢弃已有线索；不要重新开一个无关故事；必须保留已有有效信息，并围绕缺口清单补齐。',
+    requestedTitle ? `用户指定作品名：${requestedTitle}` : '',
+    describeLengthTarget(lengthTarget),
+    '',
+    '【用户原始想法】',
+    idea.slice(0, 12000) || '用户只提供了标题或很短的灵感，请在不推翻标题/灵感的前提下原创扩写。',
+    '',
+    '【已有可用信息/恢复草稿】',
+    JSON.stringify(seed || {}, null, 2).slice(0, 26000),
+    '',
+    '【缺口清单】',
+    asSeedArray(diagnostics?.missing_fields).length ? asSeedArray(diagnostics.missing_fields).join('、') : '请复查所有必填字段是否足够支撑项目创建。',
+    '',
+    '【必须补齐】',
+    'title, genre, sub_genres, target_audience, length_target, style_tags, commercial_tags',
+    'synopsis, logline, core_premise, main_conflict',
+    'protagonist, antagonist, worldbuilding, plot_engine, writing_bible, characters',
+    'master_outline, volume_outlines, chapter_outlines, foreshadowing_plan, open_questions, next_steps',
+    '',
+    '要求：',
+    '1. synopsis 至少150字，必须包含主角、世界、核心矛盾、长期爽点和读者期待。',
+    '2. protagonist 必须有 name, identity, goal, wound_or_need, power_or_cheat, limitation。',
+    '3. worldbuilding 必须有 world_summary, power_system, rules, taboos。',
+    '4. 超长篇至少5卷，长篇至少3卷；中篇至少2卷；短篇可1卷。',
+    '5. 长篇/超长篇 chapter_outlines 至少前30章，每章包含 chapter_no,title,summary,conflict,ending_hook。',
+    '6. 不要生成正文；不要照搬任何现有作品专有设定、角色名、桥段或原句。',
+  ].filter(Boolean).join('\n')
 }
 
 export function buildProjectSeedPrompt(idea: string, requestedTitle = '', requestedLengthTarget = '') {
@@ -262,7 +1091,7 @@ async function deriveProjectSeedWithModel(activeWorkspace: string, idea: string,
     temperature: 0.42,
     skipMemory: true,
   })
-  const seed = normalizeProjectSeedPayload((result as any).output || parseJsonLikePayload((result as any).content) || {}, idea, lengthTarget)
+  const seed = repairProjectSeedGaps(normalizeProjectSeedPayload((result as any).output || parseJsonLikePayload((result as any).content) || {}, idea, lengthTarget), idea)
   if (requestedTitle && !seed.title) seed.title = requestedTitle
   return { seed, result }
 }
@@ -291,9 +1120,112 @@ async function finalizeProjectSeedWithModel(activeWorkspace: string, draft: any,
     temperature: 0.35,
     skipMemory: true,
   })
-  const seed = normalizeProjectSeedPayload((result as any).output || parseJsonLikePayload((result as any).content) || {}, idea, draft?.length_target)
+  const seed = repairProjectSeedGaps(normalizeProjectSeedPayload((result as any).output || parseJsonLikePayload((result as any).content) || {}, idea, draft?.length_target), idea)
   if (requestedTitle && !seed.title) seed.title = requestedTitle
   return { seed, result }
+}
+
+async function expandThinProjectSeedWithModel(
+  activeWorkspace: string,
+  seed: any,
+  result: any,
+  idea: string,
+  modelId: string,
+  requestedTitle = '',
+  requestedLengthTarget = '',
+) {
+  const recovered = buildRecoverableProjectSeed(seed, idea, requestedTitle, requestedLengthTarget, result)
+  const lengthTarget = normalizeLengthTarget(requestedLengthTarget || recovered.seed?.length_target) || 'medium'
+  const prompt = buildProjectSeedRecoveryPrompt(recovered.seed, recovered.diagnostics, idea, requestedTitle, lengthTarget)
+  const projectStub = {
+    id: 0,
+    title: requestedTitle || recovered.seed.title || '项目种子补全',
+    genre: recovered.seed.genre || '',
+    sub_genres: recovered.seed.sub_genres || [],
+    synopsis: recovered.seed.synopsis || idea.slice(0, 500),
+    length_target: lengthTarget,
+    target_audience: recovered.seed.target_audience || '',
+    style_tags: recovered.seed.style_tags || [],
+    commercial_tags: recovered.seed.commercial_tags || [],
+    reference_config: {},
+    status: 'draft',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }
+
+  try {
+    const recoveryResult = await executeNovelAgent('outline-agent', projectStub as any, { task: prompt }, {
+      activeWorkspace,
+      modelId,
+      maxTokens: 10000,
+      temperature: 0.36,
+      skipMemory: true,
+    })
+    const expandedSeed = repairProjectSeedGaps(normalizeProjectSeedPayload((recoveryResult as any).output || parseJsonLikePayload((recoveryResult as any).content) || {}, idea, lengthTarget), idea)
+    if (requestedTitle && !expandedSeed.title) expandedSeed.title = requestedTitle
+    if (!(recoveryResult as any).error && hasUsableProjectSeed(expandedSeed)) {
+      const diagnostics = {
+        ...buildProjectSeedDiagnostics(expandedSeed, idea, recoveryResult),
+        status: 'recovered_by_model',
+        usable: true,
+        initial_missing_fields: recovered.diagnostics.missing_fields,
+        retained_fragments: recovered.diagnostics.retained_fragments,
+        recovery_strategy: 'same_model_second_pass',
+        suggestion: '首轮返回偏薄，系统已保留有效线索并让同一模型补齐为可审阅项目种子。',
+      }
+      return {
+        seed: { ...expandedSeed, seed_diagnostics: diagnostics },
+        result: {
+          ...recoveryResult,
+          seed_recovery: {
+            attempted: true,
+            status: 'recovered_by_model',
+            initial_result: result,
+          },
+        },
+        seed_diagnostics: diagnostics,
+      }
+    }
+
+    const diagnostics = {
+      ...recovered.diagnostics,
+      status: 'needs_author_review',
+      recovery_model_error: String((recoveryResult as any).error || ''),
+      recovery_model_preview: resultContentPreview(recoveryResult).slice(0, 1200),
+      suggestion: '同一模型二次补种子仍偏薄。系统已保留有效材料并生成可编辑草稿，请作者先审阅补几处关键设定后再定稿。',
+    }
+    return {
+      seed: { ...recovered.seed, seed_diagnostics: diagnostics },
+      result: {
+        ...recoveryResult,
+        seed_recovery: {
+          attempted: true,
+          status: 'needs_author_review',
+          initial_result: result,
+        },
+      },
+      seed_diagnostics: diagnostics,
+    }
+  } catch (error: any) {
+    const diagnostics = {
+      ...recovered.diagnostics,
+      status: 'needs_author_review',
+      recovery_model_error: String(error?.message || error),
+      suggestion: '同一模型二次补种子调用失败。系统已保留有效材料并生成可编辑草稿，请作者先审阅补几处关键设定后再定稿。',
+    }
+    return {
+      seed: { ...recovered.seed, seed_diagnostics: diagnostics },
+      result: {
+        error: String(error?.message || error),
+        seed_recovery: {
+          attempted: true,
+          status: 'needs_author_review',
+          initial_result: result,
+        },
+      },
+      seed_diagnostics: diagnostics,
+    }
+  }
 }
 
 function getSeedRaw(seed: any) {
@@ -301,38 +1233,98 @@ function getSeedRaw(seed: any) {
   return Object.keys(raw).length ? raw : parseNestedSeed(seed)
 }
 
+function firstNonEmptySeedArray(...values: any[]) {
+  return values.find(value => Array.isArray(value) && value.length > 0) || []
+}
+
 function getSeedChapterOutlines(seed: any) {
   const raw = getSeedRaw(seed)
-  const candidates = [
+  return firstNonEmptySeedArray(
     raw.chapter_outlines,
     raw.chapters,
     seed?.chapter_outlines,
     seed?.chapters,
-  ]
-  return candidates.find(Array.isArray) || []
+  )
 }
 
 function getSeedVolumeOutlines(seed: any) {
   const raw = getSeedRaw(seed)
-  const candidates = [
+  return firstNonEmptySeedArray(
     raw.volume_outlines,
     raw.volumes,
     seed?.volume_outlines,
     seed?.volumes,
-  ]
-  return candidates.find(Array.isArray) || []
+  )
 }
 
-function normalizeChapterSeed(chapter: any, index: number) {
+function normalizeChapterSeed(chapter: any, index: number, seed: any = {}) {
   const chapterNo = Number(chapter?.chapter_no || chapter?.no || index + 1)
+  const rawTitle = firstSeedText(chapter?.title, chapter?.name)
+  const protagonist = parseNestedSeed(seed?.protagonist)
+  const title = chapterTitleLooksStructural(rawTitle)
+    ? fallbackChapterDisplayTitle(
+      rawTitle,
+      index,
+      firstSeedText(seed?.title, seed?.logline, '本书'),
+      firstSeedText(cleanSeedCharacterName(protagonist.name), cleanSeedCharacterName(protagonist.title), '主角'),
+      firstSeedText(chapter?.chapter_summary, chapter?.summary, chapter?.chapter_goal, chapter?.goal),
+      compactSeedText(JSON.stringify(seed || {}).slice(0, 1200), 1200),
+    )
+    : firstSeedText(rawTitle, `第${chapterNo}章`)
   return {
     chapter_no: chapterNo,
-    title: firstSeedText(chapter?.title, `第${chapterNo}章`),
+    title,
     chapter_goal: firstSeedText(chapter?.chapter_goal, chapter?.goal, chapter?.summary),
     chapter_summary: firstSeedText(chapter?.chapter_summary, chapter?.summary),
     conflict: firstSeedText(chapter?.conflict),
     ending_hook: firstSeedText(chapter?.ending_hook, chapter?.hook),
-    raw_payload: chapter || {},
+    raw_payload: {
+      ...(chapter || {}),
+      story_function: firstSeedText(chapter?.story_function, chapterTitleLooksStructural(rawTitle) ? rawTitle : ''),
+    },
+  }
+}
+
+function hasUsableWritingBible(value: any) {
+  const bible = parseNestedSeed(value)
+  return Boolean(firstSeedText(
+    bible.promise,
+    bible.reader_promise,
+    bible.mainline?.title,
+    bible.mainline?.hook,
+    bible.mainline_title,
+    bible.mainline_hook,
+  ))
+}
+
+function buildFallbackWritingBible(seed: any, project: any = {}) {
+  const root = parseNestedSeed(seed)
+  const world = parseNestedSeed(root.worldbuilding)
+  const plotEngine = parseNestedSeed(root.plot_engine)
+  const existing = parseNestedSeed(root.writing_bible)
+  if (hasUsableWritingBible(existing)) return existing
+  const promise = firstSeedText(root.logline, root.synopsis, root.core_premise, project.synopsis, `${root.title || project.title || '本书'}的核心读者承诺待补齐`)
+  const mainlineGoal = firstSeedText(root.main_conflict, plotEngine.long_term_goal, root.core_premise, promise)
+  return {
+    ...existing,
+    promise,
+    reader_promise: firstSeedText(existing.reader_promise, promise),
+    mainline: {
+      ...parseNestedSeed(existing.mainline),
+      title: firstSeedText(existing.mainline?.title, root.title, project.title, '全书主线'),
+      hook: firstSeedText(existing.mainline?.hook, root.logline, root.main_conflict, promise),
+      goal: firstSeedText(existing.mainline?.goal, mainlineGoal),
+    },
+    world_rules: firstSeedText(existing.world_rules, world.power_system, asSeedArray(world.rules).join('；'), world.world_summary, root.core_premise),
+    volume_plan: asSeedArray(existing.volume_plan).length ? asSeedArray(existing.volume_plan) : asSeedArray(root.volume_outlines).map((volume: any, index: number) => ({
+      title: firstSeedText(volume?.title, volume?.name, `第${index + 1}卷`),
+      goal: firstSeedText(volume?.goal, volume?.summary, volume?.hook, `完成第${index + 1}卷阶段承诺`),
+      chapter_count: volume?.chapter_count || '',
+    })),
+    style_lock: firstSeedText(existing.style_lock, asSeedArray(root.style_tags).join('、'), '保持强情节推进、清晰因果、持续悬念和商业连载节奏。'),
+    forbidden: firstSeedText(existing.forbidden, '不得推翻已确认主角动机、世界规则、章节细纲和伏笔回收计划；不得用无代价巧合解决核心冲突。'),
+    safety_policy: firstSeedText(existing.safety_policy, '生成内容必须服务原创设定，避免照搬现有作品专有表达、角色关系和桥段。'),
+    source: firstSeedText(existing.source, 'project_seed_fallback'),
   }
 }
 
@@ -340,7 +1332,8 @@ async function materializeProjectSeed(activeWorkspace: string, project: any, see
   const raw = getSeedRaw(seed)
   const master = parseNestedSeed(raw.master_outline || seed.master_outline)
   const volumeOutlines = getSeedVolumeOutlines(seed)
-  const chapterOutlines = getSeedChapterOutlines(seed).map(normalizeChapterSeed)
+  const chapterOutlines = getSeedChapterOutlines(seed).map((chapter: any, index: number) => normalizeChapterSeed(chapter, index, seed))
+  const writingBible = buildFallbackWritingBible(seed, project)
   const created: any = { worldbuilding: 0, characters: 0, outlines: 0, chapters: 0 }
 
   const world = parseNestedSeed(seed.worldbuilding)
@@ -428,7 +1421,7 @@ async function materializeProjectSeed(activeWorkspace: string, project: any, see
       materialized_counts: created,
     },
     writing_bible: {
-      ...(seed.writing_bible || {}),
+      ...writingBible,
       updated_at: new Date().toISOString(),
     },
     commercial_positioning: project.reference_config?.commercial_positioning || {
@@ -459,31 +1452,32 @@ async function materializeProjectSeed(activeWorkspace: string, project: any, see
 }
 
 async function createProjectFromSeed(activeWorkspace: string, seed: any, options: { title?: string; idea?: string } = {}) {
-  const title = firstSeedText(options.title, seed.title, seed.logline, '未命名小说').slice(0, 64)
+  const repairedSeed = repairProjectSeedGaps(seed, options.idea || seed.raw_idea || '')
+  const title = firstSeedText(options.title, repairedSeed.title, repairedSeed.logline, '未命名小说').slice(0, 64)
   const seedForProject = {
-    ...seed,
+    ...repairedSeed,
     title,
-    raw_idea: options.idea || seed.raw_idea || '',
-    derived_at: seed.derived_at || new Date().toISOString(),
+    raw_idea: options.idea || repairedSeed.raw_idea || '',
+    derived_at: repairedSeed.derived_at || new Date().toISOString(),
   }
   const project = await createNovelProject(activeWorkspace, {
     title,
-    genre: seed.genre || '',
-    sub_genres: asSeedArray(seed.sub_genres),
-    length_target: seed.length_target || 'medium',
-    target_audience: seed.target_audience || '',
-    style_tags: asSeedArray(seed.style_tags),
-    commercial_tags: asSeedArray(seed.commercial_tags),
-    synopsis: seed.synopsis || seed.logline || seed.core_premise || '',
+    genre: repairedSeed.genre || '',
+    sub_genres: asSeedArray(repairedSeed.sub_genres),
+    length_target: repairedSeed.length_target || 'medium',
+    target_audience: repairedSeed.target_audience || '',
+    style_tags: asSeedArray(repairedSeed.style_tags),
+    commercial_tags: asSeedArray(repairedSeed.commercial_tags),
+    synopsis: repairedSeed.synopsis || repairedSeed.logline || repairedSeed.core_premise || '',
     status: 'draft',
     reference_config: {
       project_seed: seedForProject,
-      writing_bible: seed.writing_bible || {},
+      writing_bible: repairedSeed.writing_bible || {},
       commercial_positioning: {
-        reader_promise: seed.logline || seed.synopsis || '',
-        selling_points: asSeedArray(seed.commercial_positioning?.selling_points).length
-          ? asSeedArray(seed.commercial_positioning?.selling_points)
-          : asSeedArray(seed.commercial_tags),
+        reader_promise: repairedSeed.logline || repairedSeed.synopsis || '',
+        selling_points: asSeedArray(repairedSeed.commercial_positioning?.selling_points).length
+          ? asSeedArray(repairedSeed.commercial_positioning?.selling_points)
+          : asSeedArray(repairedSeed.commercial_tags),
         seed: true,
       },
     },
@@ -510,10 +1504,57 @@ export function registerNovelCoreRoutes(app: Express, getWorkspace: () => string
       const project = await createNovelProject(activeWorkspace, req.body)
       const seed = req.body?.reference_config?.project_seed
       if (seed && req.body?.auto_materialize_seed !== false) {
-        const materialized = await materializeProjectSeed(activeWorkspace, project, seed)
+        const repairedSeed = repairProjectSeedGaps(seed, req.body?.raw_idea || seed.raw_idea || '')
+        const materialized = await materializeProjectSeed(activeWorkspace, project, repairedSeed)
         return res.json({ ...(materialized.project || project), seed_materialization: materialized.created })
       }
       res.json(project)
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.get('/api/novel/project-seed/drafts', async (_req, res) => {
+    try {
+      const activeWorkspace = getWorkspace()
+      await ensureWorkspaceStructure(activeWorkspace)
+      res.json({ ok: true, drafts: await listNovelProjectSeedDrafts(activeWorkspace) })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.post('/api/novel/project-seed/drafts', async (req, res) => {
+    try {
+      const activeWorkspace = getWorkspace()
+      await ensureWorkspaceStructure(activeWorkspace)
+      const seed = parseNestedSeed(req.body?.seed || {})
+      if (!seed || !Object.keys(seed).length) return res.status(400).json({ error: 'seed is required' })
+      const title = firstSeedText(req.body?.title, seed.title, seed.project_title, seed.book_title, '未命名孵化草稿')
+      const draft = await createNovelProjectSeedDraft(activeWorkspace, {
+        title,
+        idea: String(req.body?.idea || seed.raw_idea || ''),
+        seed,
+        review_model: parseNestedSeed(req.body?.review_model || {}),
+        diagnostics: parseNestedSeed(req.body?.diagnostics || seed.seed_diagnostics || {}),
+        model_id: req.body?.model_id === undefined || req.body?.model_id === null ? null : Number(req.body.model_id) || null,
+        source: String(req.body?.source || 'deep_draft'),
+      })
+      res.json({ ok: true, draft })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.delete('/api/novel/project-seed/drafts/:id', async (req, res) => {
+    try {
+      const activeWorkspace = getWorkspace()
+      await ensureWorkspaceStructure(activeWorkspace)
+      const id = Number(req.params.id)
+      if (!id) return res.status(400).json({ error: 'id is required' })
+      const ok = await deleteNovelProjectSeedDraft(activeWorkspace, id)
+      if (!ok) return res.status(404).json({ error: 'draft not found' })
+      res.json({ ok: true })
     } catch (error) {
       res.status(500).json({ error: String(error) })
     }
@@ -529,14 +1570,23 @@ export function registerNovelCoreRoutes(app: Express, getWorkspace: () => string
       if (!idea && !title) return res.status(400).json({ error: 'title or idea is required' })
       const modelId = req.body?.model_id ? String(req.body.model_id) : undefined
       if (!modelId) return res.status(400).json({ error: 'model_id is required' })
-      const { seed, result } = await deriveProjectSeedWithModel(activeWorkspace, idea, modelId, title, lengthTarget)
-      if ((result as any).error || !seed || typeof seed !== 'object' || Array.isArray(seed) || !Object.keys(seed).length || !hasUsableProjectSeed(seed)) {
+      let { seed, result } = await deriveProjectSeedWithModel(activeWorkspace, idea, modelId, title, lengthTarget)
+      let seedDiagnostics = buildProjectSeedDiagnostics(seed, idea, result)
+      if (!seed || typeof seed !== 'object' || Array.isArray(seed) || !Object.keys(seed).length || !hasUsableProjectSeed(seed)) {
+        const recovered = await expandThinProjectSeedWithModel(activeWorkspace, seed, result, idea, modelId, title, lengthTarget)
+        seed = recovered.seed
+        result = recovered.result
+        seedDiagnostics = recovered.seed_diagnostics
+      }
+      if (!seed || typeof seed !== 'object' || Array.isArray(seed) || !Object.keys(seed).length || !hasUsableProjectSeed(seed)) {
         return res.status(502).json({
-          error: (result as any).error || '模型返回的项目种子过薄，请重试或换一个更适合长文本结构化输出的模型',
+          error: (result as any).error || '模型返回的项目种子仍不足，已保留可用信息，请补充草稿后重试',
           raw_preview: String((result as any).content || '').slice(0, 3000),
+          seed,
+          seed_diagnostics: seedDiagnostics,
         })
       }
-      res.json({ ok: true, seed, result })
+      res.json({ ok: true, seed, result, seed_diagnostics: seedDiagnostics })
     } catch (error) {
       res.status(500).json({ error: String(error) })
     }
@@ -552,14 +1602,54 @@ export function registerNovelCoreRoutes(app: Express, getWorkspace: () => string
       if (!draft || !Object.keys(draft).length) return res.status(400).json({ error: 'draft is required' })
       const modelId = req.body?.model_id ? String(req.body.model_id) : undefined
       if (!modelId) return res.status(400).json({ error: 'model_id is required' })
-      const { seed, result } = await finalizeProjectSeedWithModel(activeWorkspace, draft, idea, modelId, title)
-      if ((result as any).error || !seed || typeof seed !== 'object' || Array.isArray(seed) || !Object.keys(seed).length || !hasUsableProjectSeed(seed)) {
+      const authorConfirmed = Boolean(req.body?.author_confirmed || req.body?.confirmed_by_author)
+      let { seed, result } = await finalizeProjectSeedWithModel(activeWorkspace, draft, idea, modelId, title)
+      let seedDiagnostics = buildProjectSeedDiagnostics(seed, idea, result)
+      if (!seed || typeof seed !== 'object' || Array.isArray(seed) || !Object.keys(seed).length || !hasUsableProjectSeed(seed)) {
+        const recovered = await expandThinProjectSeedWithModel(activeWorkspace, seed || draft, result, idea, modelId, title, draft?.length_target)
+        seed = recovered.seed
+        result = recovered.result
+        seedDiagnostics = recovered.seed_diagnostics
+      }
+      if (!seed || typeof seed !== 'object' || Array.isArray(seed) || !Object.keys(seed).length || !hasUsableProjectSeed(seed)) {
         return res.status(502).json({
-          error: (result as any).error || '模型返回的确定版项目种子过薄，请补充草稿后重试或换一个更适合长文本结构化输出的模型',
+          error: (result as any).error || '模型返回的确定版项目种子仍不足，已保留可用信息，请补充草稿后重试',
           raw_preview: String((result as any).content || '').slice(0, 3000),
+          seed,
+          seed_diagnostics: seedDiagnostics,
         })
       }
-      res.json({ ok: true, seed, result })
+      if (req.body?.create_project) {
+        if (projectSeedNeedsReview(seedDiagnostics) && !authorConfirmed) {
+          return res.status(409).json({
+            error: '确定版项目种子仍需要作者确认，已保留可编辑草稿，暂不创建项目',
+            seed,
+            seed_diagnostics: seedDiagnostics,
+            raw_preview: String((result as any).content || '').slice(0, 3000),
+          })
+        }
+        if (authorConfirmed && projectSeedNeedsReview(seedDiagnostics)) {
+          seedDiagnostics = {
+            ...seedDiagnostics,
+            status: 'confirmed_by_author',
+            confirmed_by_author: true,
+            confirmed_at: new Date().toISOString(),
+            suggestion: '作者已确认当前项目种子可用于创建，系统保留诊断信息并继续创建项目。',
+          }
+          seed = { ...seed, seed_diagnostics: seedDiagnostics }
+        }
+        const created = await createProjectFromSeed(activeWorkspace, seed, { title, idea })
+        return res.json({
+          ok: true,
+          seed: created.seed,
+          project: created.project,
+          project_id: created.project?.id,
+          seed_materialization: created.created,
+          result,
+          seed_diagnostics: seedDiagnostics,
+        })
+      }
+      res.json({ ok: true, seed, result, seed_diagnostics: seedDiagnostics })
     } catch (error) {
       res.status(500).json({ error: String(error) })
     }
@@ -588,9 +1678,32 @@ export function registerNovelCoreRoutes(app: Express, getWorkspace: () => string
           raw_preview: String((result as any)?.content || '').slice(0, 3000),
         })
       }
+      let seedDiagnostics = buildProjectSeedDiagnostics(seed, idea, result)
+      if (!hasUsableProjectSeed(seed)) {
+        if (!modelId) {
+          const recovered = buildRecoverableProjectSeed(seed, idea, title, lengthTarget, result)
+          seed = recovered.seed
+          seedDiagnostics = recovered.diagnostics
+        } else {
+          const recovered = await expandThinProjectSeedWithModel(activeWorkspace, seed, result, idea, modelId, title, lengthTarget)
+          seed = recovered.seed
+          result = recovered.result
+          seedDiagnostics = recovered.seed_diagnostics
+        }
+      }
       if (!hasUsableProjectSeed(seed)) {
         return res.status(502).json({
-          error: '模型返回的项目种子过薄，请重试或换一个更适合长文本结构化输出的模型',
+          error: '模型返回的项目种子仍不足，已保留可用信息，请补充草稿后重试',
+          raw_preview: String((result as any)?.content || '').slice(0, 3000),
+          seed,
+          seed_diagnostics: seedDiagnostics,
+        })
+      }
+      if (seedDiagnostics?.status === 'needs_author_review' || seedDiagnostics?.status === 'needs_model_expansion') {
+        return res.status(409).json({
+          error: '项目种子已恢复为可编辑草稿，但仍需要作者确认后再自动创建',
+          seed,
+          seed_diagnostics: seedDiagnostics,
           raw_preview: String((result as any)?.content || '').slice(0, 3000),
         })
       }
@@ -601,6 +1714,7 @@ export function registerNovelCoreRoutes(app: Express, getWorkspace: () => string
         seed: created.seed,
         seed_materialization: created.created,
         result,
+        seed_diagnostics: seedDiagnostics,
       })
     } catch (error) {
       res.status(500).json({ error: String(error) })

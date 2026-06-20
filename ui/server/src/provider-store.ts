@@ -25,6 +25,21 @@ function objectOrEmpty(value: unknown): Record<string, any> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {}
 }
 
+export function normalizeProviderEndpoints(value: unknown): Record<string, any> {
+  const raw = objectOrEmpty(value)
+  const endpoints: Record<string, any> = {}
+  for (const [key, endpoint] of Object.entries(raw)) {
+    if (typeof endpoint === 'string') {
+      const trimmed = endpoint.trim()
+      if (!trimmed || /^(undefined|null|none|false)$/i.test(trimmed)) continue
+      endpoints[key] = trimmed
+    } else if (endpoint && typeof endpoint === 'object' && !Array.isArray(endpoint)) {
+      endpoints[key] = endpoint
+    }
+  }
+  return endpoints
+}
+
 function normalizeProviderRecord(raw: Partial<ProviderRecord> & Record<string, any>): ProviderRecord {
   const id = String(raw.id ?? '')
   const responseMode = raw.response_mode ?? raw.responseMode ?? 'auto'
@@ -47,7 +62,7 @@ function normalizeProviderRecord(raw: Partial<ProviderRecord> & Record<string, a
     default_base_url: String(raw.default_base_url ?? raw.defaultBaseUrl ?? ''),
     is_active: coerceBoolean(raw.is_active ?? raw.isActive, true),
     icon: String(raw.icon ?? ''),
-    endpoints: objectOrEmpty(raw.endpoints),
+    endpoints: normalizeProviderEndpoints(raw.endpoints),
     custom_headers: objectOrEmpty(raw.custom_headers ?? raw.customHeaders),
   }
 }

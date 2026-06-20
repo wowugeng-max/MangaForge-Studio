@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 import {
   buildDeepDraftReviewModel,
+  buildSeedRecoveryDiagnosticsView,
   deepDraftReviewModelToSeed,
+  repairDeepDraftReviewModelGaps,
   type DeepDraftReviewModel,
 } from './deepDraftReviewModel'
 
@@ -110,6 +112,80 @@ describe('deepDraftReviewModel', () => {
     expect(model.characters).toEqual([])
   })
 
+  test('keeps real protagonist and antagonist names instead of showing recovery filler names', () => {
+    const model = buildDeepDraftReviewModel({
+      title: '剑烛大荒',
+      protagonist: {
+        name: '丁松言',
+        identity: '现代地球穿越者，原为民俗学研究生',
+        goal: '验证山海经异兽食性并破解大荒规则',
+      },
+      antagonist: {
+        name: '楚天行（首席反派，后期揭示为多重身份）',
+        identity: '大荒宗门首席',
+        goal: '夺取山海经残篇',
+      },
+      characters: [
+        { name: '怎么', role_type: '主角', goal: '破解剑烛大荒的核心规则' },
+        { name: '阶段对手', role_type: '反派/竞争者', goal: '阻止主角取得第一阶段真相' },
+      ],
+      volume_outlines: [
+        { title: '药铺异兽案', summary: '丁松言从边陲药铺识破蛾虫药性。' },
+      ],
+      chapter_outlines: [
+        { chapter_no: 1, title: '蛾虫入药', summary: '丁松言发现药铺里的蛾虫与山海经记忆不一致。' },
+      ],
+    })
+
+    expect(model.characters.map(character => character.name)).toContain('丁松言')
+    expect(model.characters.map(character => character.name)).toContain('楚天行（首席反派，后期揭示为多重身份）')
+    expect(model.characters.map(character => character.name)).not.toContain('怎么')
+    expect(model.characters.map(character => character.name)).not.toContain('阶段对手')
+    expect(model.volumes[0]).toEqual({ title: '药铺异兽案', goal: '丁松言从边陲药铺识破蛾虫药性。' })
+    expect(model.chapters[0]).toEqual({ chapterNo: 1, title: '蛾虫入药', goal: '丁松言发现药铺里的蛾虫与山海经记忆不一致。' })
+  })
+
+  test('prefers raw model facts over local recovery outline templates', () => {
+    const model = buildDeepDraftReviewModel({
+      title: '剑烛大荒',
+      protagonist: { name: '主角', goal: '在剑烛大荒里活下来' },
+      antagonist: { role_type: '反派/竞争者', goal: '阻止主角取得第一阶段真相' },
+      volume_outlines: [
+        { title: '开篇承诺验证', summary: '用主角、核心规则和第一场高压事件验证读者承诺。' },
+        { title: '第2阶段长线扩容', summary: '围绕剑烛大荒继续扩展地图、敌对压力。' },
+      ],
+      chapter_outlines: [
+        { chapter_no: 1, title: '异象开端', summary: '主角接触剑烛大荒的第一条异常规则。' },
+        { chapter_no: 2, title: '第2章压力升级', summary: '主角在已有线索基础上推进规则验证。' },
+      ],
+      raw_payload: {
+        protagonist: {
+          name: '丁松言',
+          identity: '现代地球穿越者，原为民俗学研究生',
+          goal: '验证异兽食性并破解大荒规则',
+        },
+        antagonist: {
+          name: '楚天行（首席反派，后期揭示为多重身份）',
+          identity: '大荒宗门首席',
+          goal: '夺取山海经残篇',
+        },
+        volume_outlines: [
+          { title: '边陲药铺与蛾虫秘传', summary: '丁松言在药铺发现山海经食性规则。' },
+        ],
+        chapter_outlines: [
+          { chapter_no: 1, title: '蛾虫入药', summary: '丁松言发现蛾虫药性与记忆不一致。' },
+        ],
+      },
+    })
+
+    expect(model.characters.map(character => character.name)).toEqual([
+      '丁松言',
+      '楚天行（首席反派，后期揭示为多重身份）',
+    ])
+    expect(model.volumes[0]).toEqual({ title: '边陲药铺与蛾虫秘传', goal: '丁松言在药铺发现山海经食性规则。' })
+    expect(model.chapters[0]).toEqual({ chapterNo: 1, title: '蛾虫入药', goal: '丁松言发现蛾虫药性与记忆不一致。' })
+  })
+
   test('converts edited review fields back to a seed without losing raw structures', () => {
     const seed = {
       title: '阵库长明',
@@ -159,5 +235,67 @@ describe('deepDraftReviewModel', () => {
     expect(nextSeed.chapter_outlines[0]).toMatchObject({ chapter_no: 1, title: '夜守阵库', chapter_goal: '开局被夺资格', extra: '保留' })
     expect(nextSeed.foreshadowing_plan).toEqual([{ name: '黑色阵旗 -> 第80章回收' }])
     expect(nextSeed.open_questions).toEqual(['阵盟为何封锁阵图？'])
+  })
+
+  test('repairs empty foreshadowing and confirmation questions into editable draft fields', () => {
+    const seed = {
+      title: '剑烛大荒',
+      genre: '仙侠',
+      synopsis: '丁松言在边陲药铺发现山海经异兽食性与此世规则不一致。',
+      protagonist: { name: '丁松言', identity: '边陲药铺学徒', goal: '破解大荒规则' },
+      antagonist: { name: '楚天行', identity: '宗门首席', goal: '夺取残篇' },
+      worldbuilding: { world_summary: '大荒异兽食性、禁忌和残篇构成修炼规则。', power_system: '辨认异兽食性并承担禁忌代价。' },
+      volume_outlines: [{ title: '药铺异兽案', summary: '识破蛾虫药性。' }],
+      chapter_outlines: Array.from({ length: 30 }, (_, index) => ({
+        chapter_no: index + 1,
+        title: `第${index + 1}章`,
+        summary: index === 0 ? '丁松言发现蛾虫药性异常。' : `第${index + 1}章推进规则压力。`,
+      })),
+      foreshadowing_plan: [],
+      open_questions: [
+        '请确认丁松言的最终欲望、道德底线和不可退让目标。',
+        '请确认核心规则的代价、禁忌和长期扩容边界。',
+        '请确认第一卷读者最期待的爽点回报是什么。',
+      ],
+    }
+
+    const repaired = repairDeepDraftReviewModelGaps(buildDeepDraftReviewModel(seed), seed)
+    const nextSeed = deepDraftReviewModelToSeed(seed, repaired)
+
+    expect(repaired.continuity.foreshadowing.split('\n').filter(Boolean).length).toBeGreaterThanOrEqual(8)
+    expect(repaired.continuity.foreshadowing).toContain('第1章')
+    expect(repaired.continuity.foreshadowing).toContain('回收')
+    expect(repaired.continuity.openQuestions).toContain('最终欲望')
+    expect(repaired.continuity.openQuestions).not.toContain('请确认')
+    expect(nextSeed.foreshadowing_plan.length).toBeGreaterThanOrEqual(8)
+    expect(nextSeed.open_questions).toEqual([])
+    expect(nextSeed.author_confirmations.length).toBeGreaterThanOrEqual(3)
+  })
+
+  test('summarizes thin seed recovery diagnostics for the deep draft review UI', () => {
+    const view = buildSeedRecoveryDiagnosticsView({
+      seed_diagnostics: {
+        status: 'needs_author_review',
+        retained_fragments: ['蛾虫，食之擅伏蜇藏', '丁松在大荒遗迹里按异兽食性修炼'],
+        missing_fields: ['main_conflict', 'chapter_outlines'],
+        generated_fields: ['worldbuilding', 'volume_outlines'],
+        suggestion: '同一模型二次补种子仍偏薄。系统已保留有效材料并生成可编辑草稿。',
+      },
+    })
+
+    expect(view.visible).toBe(true)
+    expect(view.type).toBe('warning')
+    expect(view.title).toContain('已保留薄返回中的有效材料')
+    expect(view.retainedFragments).toContain('蛾虫，食之擅伏蜇藏')
+    expect(view.missingFields).toEqual(['main_conflict', 'chapter_outlines'])
+    expect(view.generatedFields).toEqual(['worldbuilding', 'volume_outlines'])
+  })
+
+  test('hides seed recovery diagnostics when the seed is already ready', () => {
+    const view = buildSeedRecoveryDiagnosticsView({
+      seed_diagnostics: { status: 'ready', retained_fragments: ['完整种子'] },
+    })
+
+    expect(view.visible).toBe(false)
   })
 })

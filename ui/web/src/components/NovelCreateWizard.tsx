@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from 'react'
-import { Alert, Button, Card, Form, Input, List, Modal, Result, Select, Space, Steps, Tag, Typography, message } from 'antd'
-import { ArrowLeftOutlined, ArrowRightOutlined, CheckCircleOutlined, RocketOutlined } from '@ant-design/icons'
+import { Alert, Button, Card, Form, Input, List, Modal, Popconfirm, Result, Select, Space, Steps, Tag, Typography, message } from 'antd'
+import { ArrowLeftOutlined, ArrowRightOutlined, CheckCircleOutlined, DeleteOutlined, FolderOpenOutlined, RocketOutlined, SaveOutlined } from '@ant-design/icons'
 import apiClient from '../api/client'
 import {
   buildLaunchpadSeedPatch,
@@ -12,7 +12,9 @@ import {
 } from './novel-entry/launchpadModel'
 import {
   buildDeepDraftReviewModel,
+  buildSeedRecoveryDiagnosticsView,
   deepDraftReviewModelToSeed,
+  repairDeepDraftReviewModelGaps,
   type DeepDraftChapter,
   type DeepDraftCharacter,
   type DeepDraftReviewModel,
@@ -83,6 +85,17 @@ const COMMERCIAL_TAGS = [
 ]
 
 type CreateMode = 'manual' | 'quick_ai' | 'deep_draft'
+type ProjectSeedDraft = {
+  id: number
+  title: string
+  idea?: string
+  seed?: any
+  review_model?: Partial<DeepDraftReviewModel>
+  diagnostics?: any
+  model_id?: number | null
+  created_at?: string
+  updated_at?: string
+}
 
 function asStringArray(value: any): string[] {
   if (!Array.isArray(value)) return []
@@ -95,6 +108,11 @@ function firstText(...values: any[]) {
 
 function asObject(value: any) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
+}
+
+function buildDeepDraftReviewForUi(seed: any) {
+  const model = buildDeepDraftReviewModel(seed)
+  return repairDeepDraftReviewModelGaps(model, seed)
 }
 
 function inferGenreFromText(text: string) {
@@ -158,6 +176,11 @@ function pickGenre(value: any) {
   return matched?.value || raw || '其他'
 }
 
+function seedDiagnosticsNeedReview(value: any) {
+  const status = String(value?.status || '').trim()
+  return status === 'needs_author_review' || status === 'needs_model_expansion'
+}
+
 export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCreateWizardProps) {
   const [current, setCurrent] = useState(0)
   const [creating, setCreating] = useState(false)
@@ -168,8 +191,9 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
   const [finalizingSeed, setFinalizingSeed] = useState(false)
   const [autoCreating, setAutoCreating] = useState(false)
   const [seed, setSeed] = useState<any | null>(null)
+  const [seedDiagnostics, setSeedDiagnostics] = useState<any | null>(null)
   const [seedFinalized, setSeedFinalized] = useState(false)
-  const [deepDraftReview, setDeepDraftReview] = useState<DeepDraftReviewModel>(() => buildDeepDraftReviewModel({}))
+  const [deepDraftReview, setDeepDraftReview] = useState<DeepDraftReviewModel>(() => buildDeepDraftReviewForUi({}))
   const [launchpad, setLaunchpad] = useState<LaunchpadFields>(() => createEmptyLaunchpadFields())
   const [modelsLoading, setModelsLoading] = useState(false)
   const [models, setModels] = useState<any[]>([])
@@ -177,6 +201,11 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
     const parsed = Number(typeof window === 'undefined' ? 0 : window.localStorage.getItem(projectSeedModelStorageKey) || 0)
     return parsed || undefined
   })
+  const [seedDrafts, setSeedDrafts] = useState<ProjectSeedDraft[]>([])
+  const [selectedSeedDraftId, setSelectedSeedDraftId] = useState<number | undefined>()
+  const [seedDraftsLoading, setSeedDraftsLoading] = useState(false)
+  const [savingSeedDraft, setSavingSeedDraft] = useState(false)
+  const [deletingSeedDraft, setDeletingSeedDraft] = useState(false)
   const [form] = Form.useForm<NovelFormValues>()
   // 手动管理的表单数据 — 用 state 保存，不依赖 Form 的条件渲染
   const [data, setData] = useState({
@@ -194,6 +223,23 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
   React.useEffect(() => {
     form.setFieldsValue(data)
   }, [data, form])
+
+  const loadSeedDrafts = useCallback(async () => {
+    setSeedDraftsLoading(true)
+    try {
+      const res = await apiClient.get('/novel/project-seed/drafts')
+      setSeedDrafts(Array.isArray(res.data?.drafts) ? res.data.drafts : [])
+    } catch {
+      message.error('无法加载孵化草稿')
+    } finally {
+      setSeedDraftsLoading(false)
+    }
+  }, [])
+
+  React.useEffect(() => {
+    if (!open || createMode !== 'deep_draft') return
+    loadSeedDrafts()
+  }, [open, createMode, loadSeedDrafts])
 
   React.useEffect(() => {
     if (!open || models.length > 0 || modelsLoading) return
@@ -266,6 +312,17 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
 
   const first30Summary = summarizeFirst30Plan(seed)
   const launchpadReadiness = evaluateLaunchpadReadiness(launchpad, seed, data.length_target)
+  const seedRecoveryView = buildSeedRecoveryDiagnosticsView(seed || {}, seedDiagnostics)
+  const effectiveForeshadowingCount = createMode === 'deep_draft'
+    ? deepDraftReview.continuity.foreshadowing.split(/\r?\n/).map(line => line.trim()).filter(Boolean).length
+    : (seed?.foreshadowing_plan?.length || 0)
+  const seedConfirmationSummary = Array.isArray(seed?.author_confirmations)
+    ? seed.author_confirmations
+      .map((item: any) => firstText(item?.label, item?.key, item?.question))
+      .filter(Boolean)
+      .slice(0, 3)
+      .join('；')
+    : ''
 
   const handleNext = useCallback(async () => {
     if (current === 0) {
@@ -300,18 +357,18 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
     setCurrent(c => Math.max(0, c - 1))
   }
 
-  const buildCreatePayload = (projectSeed = seed) => {
-    const readiness = evaluateLaunchpadReadiness(launchpad, projectSeed, data.length_target)
-    const seedWithLaunchpad = buildLaunchpadSeedPatch(projectSeed || {}, launchpad, readiness.risks)
+  const buildCreatePayload = (projectSeed = seed, payloadData = data, payloadLaunchpad = launchpad) => {
+    const readiness = evaluateLaunchpadReadiness(payloadLaunchpad, projectSeed, payloadData.length_target)
+    const seedWithLaunchpad = buildLaunchpadSeedPatch(projectSeed || {}, payloadLaunchpad, readiness.risks)
     return {
-      title: data.title,
-      genre: data.genre || '',
-      sub_genres: data.sub_genres || [],
-      length_target: data.length_target || 'medium',
-      target_audience: data.target_audience || '',
-      style_tags: data.style_tags || [],
-      commercial_tags: data.commercial_tags || [],
-      synopsis: data.synopsis || launchpad.reader_promise || '',
+      title: payloadData.title,
+      genre: payloadData.genre || '',
+      sub_genres: payloadData.sub_genres || [],
+      length_target: payloadData.length_target || 'medium',
+      target_audience: payloadData.target_audience || '',
+      style_tags: payloadData.style_tags || [],
+      commercial_tags: payloadData.commercial_tags || [],
+      synopsis: payloadData.synopsis || payloadLaunchpad.reader_promise || '',
       status: 'draft',
       reference_config: {
         project_seed: {
@@ -321,7 +378,7 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
         },
         writing_bible: projectSeed?.writing_bible || {},
         commercial_positioning: {
-          reader_promise: launchpad.reader_promise || projectSeed?.logline || projectSeed?.synopsis || '',
+          reader_promise: payloadLaunchpad.reader_promise || projectSeed?.logline || projectSeed?.synopsis || '',
           selling_points: asStringArray(projectSeed?.commercial_positioning?.selling_points).length
             ? asStringArray(projectSeed?.commercial_positioning?.selling_points)
             : asStringArray(projectSeed?.commercial_tags),
@@ -330,6 +387,61 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
       },
       auto_materialize_seed: Boolean(projectSeed),
     }
+  }
+
+  const buildFinalizedSeedCreatePayload = (projectSeed: any) => {
+    const normalizedSeed = normalizeProjectSeedForUi(projectSeed)
+    const extractedLaunchpad = extractLaunchpadFieldsFromSeed(normalizedSeed)
+    const payloadData = {
+      title: String(normalizedSeed.title || data.title || normalizedSeed.logline || '').trim().slice(0, 32),
+      genre: pickGenre(normalizedSeed.genre || data.genre),
+      sub_genres: asStringArray(normalizedSeed.sub_genres).length ? asStringArray(normalizedSeed.sub_genres) : data.sub_genres,
+      length_target: normalizeLengthTarget(normalizedSeed.length_target || data.length_target),
+      target_audience: String(normalizedSeed.target_audience || data.target_audience || '').trim(),
+      style_tags: asStringArray(normalizedSeed.style_tags).length ? asStringArray(normalizedSeed.style_tags).slice(0, 5) : data.style_tags,
+      commercial_tags: asStringArray(normalizedSeed.commercial_tags).length ? asStringArray(normalizedSeed.commercial_tags).slice(0, 3) : data.commercial_tags,
+      synopsis: String(normalizedSeed.synopsis || normalizedSeed.logline || data.synopsis || '').trim().slice(0, 500),
+    }
+    const payloadLaunchpad = {
+      reader_promise: extractedLaunchpad.reader_promise || launchpad.reader_promise,
+      core_selling_point: extractedLaunchpad.core_selling_point || launchpad.core_selling_point,
+      protagonist_situation: extractedLaunchpad.protagonist_situation || launchpad.protagonist_situation,
+      protagonist_pressure: extractedLaunchpad.protagonist_pressure || launchpad.protagonist_pressure,
+      opening_hook: extractedLaunchpad.opening_hook || launchpad.opening_hook,
+      mainline_goal: extractedLaunchpad.mainline_goal || launchpad.mainline_goal,
+      long_term_conflict: extractedLaunchpad.long_term_conflict || launchpad.long_term_conflict,
+      growth_engine: extractedLaunchpad.growth_engine || launchpad.growth_engine,
+      volume_direction: extractedLaunchpad.volume_direction || launchpad.volume_direction,
+      expandable_assets: extractedLaunchpad.expandable_assets || launchpad.expandable_assets,
+      future100_note: extractedLaunchpad.future100_note || launchpad.future100_note,
+      first_writing_task: extractedLaunchpad.first_writing_task || launchpad.first_writing_task,
+      first30_plan: {
+        chapters_1_3: extractedLaunchpad.first30_plan.chapters_1_3 || launchpad.first30_plan.chapters_1_3,
+        chapters_4_10: extractedLaunchpad.first30_plan.chapters_4_10 || launchpad.first30_plan.chapters_4_10,
+        chapters_11_30: extractedLaunchpad.first30_plan.chapters_11_30 || launchpad.first30_plan.chapters_11_30,
+      },
+    }
+    return buildCreatePayload(normalizedSeed, payloadData, payloadLaunchpad)
+  }
+
+  const createProjectFromFinalizedSeed = async (projectSeed: any) => {
+    const res = await apiClient.post('/novel/projects', buildFinalizedSeedCreatePayload(projectSeed))
+    const projectId = res.data?.id || res.data?.project?.id || res.data?.project_id
+    if (!projectId) throw new Error('项目创建接口未返回项目 ID')
+    const counts = res.data?.seed_materialization || {}
+    message.success(`已定稿并创建项目：分卷/大纲 ${counts.outlines || 0}，章节 ${counts.chapters || 0}`)
+    onSuccess(projectId)
+    handleReset()
+  }
+
+  const finishCreatedProjectFromFinalizeResponse = (responseData: any) => {
+    const projectId = responseData?.project_id || responseData?.project?.id
+    if (!projectId) return false
+    const counts = responseData?.seed_materialization || {}
+    message.success(`已定稿并创建项目：分卷/大纲 ${counts.outlines || 0}，章节 ${counts.chapters || 0}`)
+    onSuccess(projectId)
+    handleReset()
+    return true
   }
 
   const handleCreate = async () => {
@@ -377,7 +489,19 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
       onSuccess(projectId)
       handleReset()
     } catch (error: any) {
-      message.error(error?.response?.data?.error || error?.message || '自动建项失败')
+      const fallbackSeed = error?.response?.data?.seed
+      if (fallbackSeed) {
+        const diagnostics = error?.response?.data?.seed_diagnostics || fallbackSeed.seed_diagnostics || null
+        const nextSeed = normalizeProjectSeedForUi(fallbackSeed)
+        setSeed(nextSeed)
+        setSeedDiagnostics(diagnostics)
+        setCreateMode('deep_draft')
+        setSeedFinalized(false)
+        applySeedToForm(nextSeed)
+        message.warning(error?.response?.data?.error || '模型返回偏薄，已转为可编辑深度孵化草稿')
+      } else {
+        message.error(error?.response?.data?.error || error?.message || '自动建项失败')
+      }
     } finally {
       setAutoCreating(false)
     }
@@ -398,8 +522,12 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
     setFinalizingSeed(false)
     setAutoCreating(false)
     setSeed(null)
+    setSeedDiagnostics(null)
     setSeedFinalized(false)
-    setDeepDraftReview(buildDeepDraftReviewModel({}))
+    setSelectedSeedDraftId(undefined)
+    setSavingSeedDraft(false)
+    setDeletingSeedDraft(false)
+    setDeepDraftReview(buildDeepDraftReviewForUi({}))
     setLaunchpad(createEmptyLaunchpadFields())
     setData({
       title: '',
@@ -446,10 +574,19 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
     }))
     .filter(option => option.value)
 
+  const seedDraftOptions = seedDrafts.map(draft => {
+    const time = String(draft.updated_at || draft.created_at || '').slice(0, 16).replace('T', ' ')
+    const chapterCount = Array.isArray(draft.seed?.chapter_outlines) ? draft.seed.chapter_outlines.length : 0
+    return {
+      value: Number(draft.id),
+      label: `${draft.title || `草稿 #${draft.id}`}${chapterCount ? ` · ${chapterCount}章` : ''}${time ? ` · ${time}` : ''}`,
+    }
+  })
+
   const applySeedToForm = (nextSeed: any) => {
     const normalizedSeed = normalizeProjectSeedForUi(nextSeed)
     const extractedLaunchpad = extractLaunchpadFieldsFromSeed(normalizedSeed)
-    setDeepDraftReview(buildDeepDraftReviewModel(normalizedSeed))
+    setDeepDraftReview(buildDeepDraftReviewForUi(normalizedSeed))
     const nextData = {
       title: String(normalizedSeed.title || data.title || normalizedSeed.logline || '').trim().slice(0, 32),
       genre: pickGenre(normalizedSeed.genre || data.genre),
@@ -482,6 +619,95 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
     }))
   }
 
+  const restoreDeepDraftReview = (draftSeed: any, savedReview: any) => {
+    const baseReview = buildDeepDraftReviewForUi(draftSeed)
+    const review = asObject(savedReview)
+    return repairDeepDraftReviewModelGaps({
+      basics: { ...baseReview.basics, ...asObject(review.basics) },
+      world: { ...baseReview.world, ...asObject(review.world) },
+      characters: Array.isArray(review.characters) ? review.characters : baseReview.characters,
+      volumes: Array.isArray(review.volumes) ? review.volumes : baseReview.volumes,
+      chapters: Array.isArray(review.chapters) ? review.chapters : baseReview.chapters,
+      continuity: { ...baseReview.continuity, ...asObject(review.continuity) },
+    }, draftSeed)
+  }
+
+  const repairCurrentDeepDraftGaps = () => {
+    if (!seed) return message.warning('请先生成或载入深度孵化草稿')
+    const repairedReview = repairDeepDraftReviewModelGaps(deepDraftReview, seed)
+    const repairedSeed = normalizeProjectSeedForUi(deepDraftReviewModelToSeed(seed, repairedReview))
+    setDeepDraftReview(repairedReview)
+    setSeed(repairedSeed)
+    setSeedFinalized(false)
+    message.success('已补齐待确认项和伏笔计划，可继续编辑')
+  }
+
+  const saveCurrentSeedDraft = async () => {
+    if (!seed) return message.warning('请先生成或载入深度孵化草稿')
+    const draftSeed = normalizeProjectSeedForUi(deepDraftReviewModelToSeed({ ...(seed || {}), length_target: data.length_target }, deepDraftReview))
+    const title = firstText(deepDraftReview.basics.title, data.title, draftSeed.title, '未命名孵化草稿')
+    setSavingSeedDraft(true)
+    try {
+      const res = await apiClient.post('/novel/project-seed/drafts', {
+        title,
+        idea: seedIdea,
+        seed: draftSeed,
+        review_model: deepDraftReview,
+        diagnostics: seedDiagnostics || draftSeed.seed_diagnostics || {},
+        model_id: seedModelId || null,
+        source: 'deep_draft_review',
+      })
+      const savedDraft = res.data?.draft
+      if (savedDraft?.id) {
+        setSeedDrafts(prev => [savedDraft, ...prev.filter(item => item.id !== savedDraft.id)])
+        setSelectedSeedDraftId(savedDraft.id)
+      } else {
+        await loadSeedDrafts()
+      }
+      setSeed(draftSeed)
+      setSeedFinalized(false)
+      message.success('孵化草稿已保存')
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '保存孵化草稿失败')
+    } finally {
+      setSavingSeedDraft(false)
+    }
+  }
+
+  const loadSelectedSeedDraft = () => {
+    const draft = seedDrafts.find(item => Number(item.id) === Number(selectedSeedDraftId))
+    if (!draft) return message.warning('请选择要载入的孵化草稿')
+    const draftSeed = normalizeProjectSeedForUi(draft.seed || {})
+    setCreateMode('deep_draft')
+    setSeed(draftSeed)
+    setSeedIdea(String(draft.idea || ''))
+    setSeedDiagnostics(draft.diagnostics || draftSeed.seed_diagnostics || null)
+    setSeedFinalized(false)
+    if (draft.model_id) {
+      setSeedModelId(Number(draft.model_id))
+      if (typeof window !== 'undefined') window.localStorage.setItem(projectSeedModelStorageKey, String(draft.model_id))
+    }
+    applySeedToForm(draftSeed)
+    setDeepDraftReview(restoreDeepDraftReview(draftSeed, draft.review_model))
+    message.success('已载入孵化草稿')
+  }
+
+  const deleteSelectedSeedDraft = async () => {
+    const id = Number(selectedSeedDraftId || 0)
+    if (!id) return message.warning('请选择要删除的孵化草稿')
+    setDeletingSeedDraft(true)
+    try {
+      await apiClient.delete(`/novel/project-seed/drafts/${id}`)
+      setSeedDrafts(prev => prev.filter(item => Number(item.id) !== id))
+      setSelectedSeedDraftId(undefined)
+      message.success('孵化草稿已删除')
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '删除孵化草稿失败')
+    } finally {
+      setDeletingSeedDraft(false)
+    }
+  }
+
   const deriveProjectSeed = async () => {
     if (!seedIdea.trim() && !data.title.trim()) return message.warning('请输入作品名称，或粘贴创意草稿')
     if (!seedModelId) return message.warning('请先选择用于整理创意的模型')
@@ -494,11 +720,19 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
         length_target: data.length_target,
       })
       const nextSeed = normalizeProjectSeedForUi(res.data?.seed || {})
+      const diagnostics = res.data?.seed_diagnostics || nextSeed.seed_diagnostics || null
       setSeed(nextSeed)
-      setSeedFinalized(createMode !== 'deep_draft')
+      setSeedDiagnostics(diagnostics)
+      setSeedFinalized(createMode !== 'deep_draft' && !seedDiagnosticsNeedReview(diagnostics))
       applySeedToForm(nextSeed)
       if (typeof window !== 'undefined') window.localStorage.setItem(projectSeedModelStorageKey, String(seedModelId))
-      message.success('已整理创意草稿，可继续编辑后创建项目')
+      if (seedDiagnosticsNeedReview(diagnostics)) {
+        message.warning('模型返回偏薄，已保留有效信息并生成可编辑草稿')
+      } else if (diagnostics?.status === 'recovered_by_model') {
+        message.success('首轮返回偏薄，已自动补种子为可审阅草稿')
+      } else {
+        message.success('已整理创意草稿，可继续编辑后创建项目')
+      }
     } catch (error: any) {
       message.error(error?.response?.data?.error || error?.message || '创意草稿整理失败')
     } finally {
@@ -506,7 +740,8 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
     }
   }
 
-  const finalizeProjectSeed = async () => {
+  const finalizeProjectSeed = async (authorConfirmed = false) => {
+    const confirmedByAuthor = authorConfirmed === true
     if (!seedModelId) return message.warning('请先选择用于定稿的模型')
     const draft = createMode === 'deep_draft' ? deepDraftReviewModelToSeed({ ...(seed || {}), length_target: data.length_target }, deepDraftReview) : seed
     if (!draft || !Object.keys(draft).length) return message.warning('请先生成或填写项目草稿')
@@ -517,15 +752,37 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
         title: data.title,
         draft,
         model_id: seedModelId,
+        create_project: true,
+        author_confirmed: confirmedByAuthor,
       })
       const nextSeed = normalizeProjectSeedForUi(res.data?.seed || {})
+      const diagnostics = res.data?.seed_diagnostics || nextSeed.seed_diagnostics || null
       setSeed(nextSeed)
-      setSeedFinalized(true)
+      setSeedDiagnostics(diagnostics)
       applySeedToForm(nextSeed)
       if (typeof window !== 'undefined') window.localStorage.setItem(projectSeedModelStorageKey, String(seedModelId))
-      message.success('已生成确定版项目种子，可继续确认创建')
+      if (seedDiagnosticsNeedReview(diagnostics)) {
+        setSeedFinalized(false)
+        message.warning('模型定稿仍偏薄，已保留可编辑草稿，请先补强关键设定')
+      } else {
+        setSeedFinalized(true)
+        if (!finishCreatedProjectFromFinalizeResponse(res.data)) {
+          await createProjectFromFinalizedSeed(nextSeed)
+        }
+      }
     } catch (error: any) {
-      message.error(error?.response?.data?.error || error?.message || '项目种子定稿失败')
+      const fallbackSeed = error?.response?.data?.seed
+      if (fallbackSeed) {
+        const diagnostics = error?.response?.data?.seed_diagnostics || fallbackSeed.seed_diagnostics || null
+        const nextSeed = normalizeProjectSeedForUi(fallbackSeed)
+        setSeed(nextSeed)
+        setSeedDiagnostics(diagnostics)
+        setSeedFinalized(false)
+        applySeedToForm(nextSeed)
+        message.warning(error?.response?.data?.error || '项目种子需要作者确认后再创建')
+        return
+      }
+      message.error(error?.response?.data?.error || error?.message || '项目种子定稿或创建失败')
     } finally {
       setFinalizingSeed(false)
     }
@@ -581,7 +838,7 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
                         type="button"
                         onClick={() => {
                           setCreateMode(item.key as CreateMode)
-                          setSeedFinalized(item.key !== 'deep_draft' && Boolean(seed))
+                          setSeedFinalized(item.key !== 'deep_draft' && Boolean(seed) && !seedDiagnosticsNeedReview(seedDiagnostics))
                         }}
                         style={{
                           textAlign: 'left',
@@ -660,6 +917,46 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
                         {createMode === 'deep_draft' ? '生成详细草稿' : 'AI整理创意'}
                       </Button>
                     </Space.Compact>
+                    {createMode === 'deep_draft' && (
+                      <Card size="small" title="已保存孵化草稿" styles={{ body: { padding: 10 } }}>
+                        <Space.Compact block>
+                          <Select
+                            style={{ width: '58%' }}
+                            value={selectedSeedDraftId}
+                            loading={seedDraftsLoading}
+                            placeholder={seedDrafts.length ? '选择草稿' : '暂无已保存草稿'}
+                            options={seedDraftOptions}
+                            onChange={setSelectedSeedDraftId}
+                            allowClear
+                          />
+                          <Button
+                            style={{ width: '21%' }}
+                            icon={<FolderOpenOutlined />}
+                            disabled={!selectedSeedDraftId}
+                            onClick={loadSelectedSeedDraft}
+                          >
+                            载入
+                          </Button>
+                          <Popconfirm
+                            title="删除这个孵化草稿？"
+                            okText="删除"
+                            cancelText="取消"
+                            onConfirm={deleteSelectedSeedDraft}
+                            disabled={!selectedSeedDraftId}
+                          >
+                            <Button
+                              danger
+                              style={{ width: '21%' }}
+                              icon={<DeleteOutlined />}
+                              loading={deletingSeedDraft}
+                              disabled={!selectedSeedDraftId}
+                            >
+                              删除
+                            </Button>
+                          </Popconfirm>
+                        </Space.Compact>
+                      </Card>
+                    )}
                     {createMode === 'quick_ai' && (
                       <Button
                         block
@@ -682,6 +979,31 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
                           type={seedFinalized ? 'success' : 'warning'}
                           showIcon
                           message={seedFinalized ? '当前是确定版项目种子' : '当前是草稿。请先审阅并修改下方创作资料，再点击“模型整理为确定版”。'}
+                        />
+                      )}
+                      {seedRecoveryView.visible && (
+                        <Alert
+                          type={seedRecoveryView.type}
+                          showIcon
+                          message={seedRecoveryView.title}
+                          description={(
+                            <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                              <Text type="secondary" style={{ fontSize: 12 }}>{seedRecoveryView.message}</Text>
+                              {seedRecoveryView.retainedFragments.length > 0 && (
+                                <Text style={{ fontSize: 12 }}>
+                                  保留：{seedRecoveryView.retainedFragments.slice(0, 3).join('；')}
+                                </Text>
+                              )}
+                              <Space wrap size={[4, 4]}>
+                                {seedRecoveryView.generatedFields.slice(0, 4).map(field => (
+                                  <Tag key={`generated-${field}`} color="green" bordered={false}>已补 {field}</Tag>
+                                ))}
+                                {seedRecoveryView.missingFields.slice(0, 4).map(field => (
+                                  <Tag key={`missing-${field}`} color="gold" bordered={false}>待确认 {field}</Tag>
+                                ))}
+                              </Space>
+                            </Space>
+                          )}
                         />
                       )}
                       <Space wrap>
@@ -726,8 +1048,13 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
                         <Space wrap>
                           <Tag color="purple" bordered={false}>分卷 {seed.volume_outlines?.length || 0}</Tag>
                           <Tag color="geekblue" bordered={false}>章节细纲 {seed.chapter_outlines?.length || 0}</Tag>
-                          <Tag color="cyan" bordered={false}>伏笔 {seed.foreshadowing_plan?.length || 0}</Tag>
+                          <Tag color="cyan" bordered={false}>伏笔 {effectiveForeshadowingCount}</Tag>
                         </Space>
+                      )}
+                      {seedConfirmationSummary && (
+                        <Text type="secondary" style={{ fontSize: 12 }}>
+                          已补确认：{seedConfirmationSummary}
+                        </Text>
                       )}
                       {asStringArray(seed.open_questions).length > 0 && (
                         <Text type="secondary" style={{ fontSize: 12 }}>
@@ -826,6 +1153,10 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
                                 </div>
                               </Card>
 
+                              <Space wrap align="center">
+                                <Text strong>伏笔与确认项</Text>
+                                <Button size="small" onClick={repairCurrentDeepDraftGaps}>自动补齐待确认/伏笔</Button>
+                              </Space>
                               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 8 }}>
                                 <Input.TextArea
                                   rows={4}
@@ -837,14 +1168,22 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
                                   rows={4}
                                   value={deepDraftReview.continuity.openQuestions}
                                   onChange={event => updateDeepDraftReview({ continuity: { ...deepDraftReview.continuity, openQuestions: event.target.value } })}
-                                  placeholder="待确认问题，每行一个"
+                                  placeholder="确认项或待确认问题，每行一个；确认项会随项目种子保存"
                                 />
                               </div>
                             </Space>
                           </Card>
                           <Space.Compact block>
                             <Button
-                              style={{ width: '50%' }}
+                              style={{ width: '33.333%' }}
+                              icon={<SaveOutlined />}
+                              loading={savingSeedDraft}
+                              onClick={saveCurrentSeedDraft}
+                            >
+                              保存草稿
+                            </Button>
+                            <Button
+                              style={{ width: '33.333%' }}
                               onClick={() => {
                                 const nextSeed = normalizeProjectSeedForUi(deepDraftReviewModelToSeed(seed || {}, deepDraftReview))
                                 setSeed(nextSeed)
@@ -857,13 +1196,23 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
                             </Button>
                             <Button
                               type="primary"
-                              style={{ width: '50%' }}
+                              style={{ width: '33.333%' }}
                               loading={finalizingSeed}
-                              onClick={finalizeProjectSeed}
+                              onClick={() => finalizeProjectSeed(false)}
                             >
-                              模型整理为确定版
+                              定稿并创建项目
                             </Button>
                           </Space.Compact>
+                          {seedDiagnosticsNeedReview(seedDiagnostics) && (
+                            <Button
+                              block
+                              type="primary"
+                              loading={finalizingSeed}
+                              onClick={() => finalizeProjectSeed(true)}
+                            >
+                              我已确认，创建项目
+                            </Button>
+                          )}
                           <details>
                             <summary style={{ cursor: 'pointer', color: '#1677ff' }}>查看完整项目种子 JSON（高级）</summary>
                             <pre style={{ maxHeight: 260, overflow: 'auto', marginTop: 8, padding: 10, background: '#f8fafc', borderRadius: 8, fontSize: 12, whiteSpace: 'pre-wrap' }}>
@@ -1094,7 +1443,7 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
                 <Space wrap>
                   <Tag color="purple" bordered={false}>分卷 {seed.volume_outlines?.length || 0}</Tag>
                   <Tag color="geekblue" bordered={false}>章节细纲 {seed.chapter_outlines?.length || 0}</Tag>
-                  <Tag color="cyan" bordered={false}>伏笔 {seed.foreshadowing_plan?.length || 0}</Tag>
+                  <Tag color="cyan" bordered={false}>伏笔 {effectiveForeshadowingCount}</Tag>
                   <Tag color="blue" bordered={false}>人物 {seed.characters?.length || 0}</Tag>
                 </Space>
               </Card>

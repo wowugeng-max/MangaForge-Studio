@@ -1,53 +1,5 @@
 [
   {
-    "id": "dsapi",
-    "display_name": "deepseek",
-    "service_type": "llm",
-    "api_format": "openai_compatible",
-    "auth_type": "bearer",
-    "supported_modalities": [
-      "chat",
-      "vision"
-    ],
-    "default_base_url": "https://ds2api.mailyplus.com/v1",
-    "is_active": true,
-    "icon": "",
-    "endpoints": {},
-    "custom_headers": {}
-  },
-  {
-    "id": "chatgpt2api",
-    "display_name": "chatgpt",
-    "service_type": "llm",
-    "api_format": "openai_compatible",
-    "auth_type": "bearer",
-    "supported_modalities": [
-      "chat",
-      "vision"
-    ],
-    "default_base_url": "https://gpt2api.mailyplus.com/v1/complete",
-    "is_active": true,
-    "icon": "",
-    "endpoints": {},
-    "custom_headers": {}
-  },
-  {
-    "id": "dslocaltest",
-    "display_name": "dstest",
-    "service_type": "llm",
-    "api_format": "openai_compatible",
-    "auth_type": "bearer",
-    "supported_modalities": [
-      "chat",
-      "vision"
-    ],
-    "default_base_url": "http://127.0.0.1:5001/v1",
-    "is_active": true,
-    "icon": "",
-    "endpoints": {},
-    "custom_headers": {}
-  },
-  {
     "id": "cliproxyapi",
     "display_name": "CPA",
     "service_type": "llm",
@@ -58,6 +10,108 @@
       "chat"
     ],
     "default_base_url": "https://api.aicomic.site/v1",
+    "is_active": true,
+    "icon": "",
+    "endpoints": {},
+    "custom_headers": {}
+  },
+  {
+    "id": "grok",
+    "display_name": "grok",
+    "service_type": "llm",
+    "api_format": "openai_compatible",
+    "auth_type": "bearer",
+    "response_mode": "stream",
+    "supported_modalities": [
+      "chat"
+    ],
+    "default_base_url": "https://grok.mailyplus.com/v1/",
+    "is_active": true,
+    "icon": "",
+    "endpoints": {},
+    "custom_headers": {}
+  },
+  {
+    "id": "any",
+    "display_name": "anyrouter",
+    "service_type": "llm",
+    "api_format": "codex_responses",
+    "auth_type": "bearer",
+    "response_mode": "stream",
+    "supported_modalities": [
+      "chat",
+      "vision"
+    ],
+    "default_base_url": "https://anyrouter.top/v1",
+    "is_active": true,
+    "icon": "",
+    "endpoints": {},
+    "custom_headers": {}
+  },
+  {
+    "id": "jun",
+    "display_name": "jun",
+    "service_type": "llm",
+    "api_format": "codex_responses",
+    "auth_type": "bearer",
+    "response_mode": "stream",
+    "supported_modalities": [
+      "chat",
+      "vision"
+    ],
+    "default_base_url": "https://muyuan.do/v1",
+    "is_active": true,
+    "icon": "",
+    "endpoints": {},
+    "custom_headers": {}
+  },
+  {
+    "id": "free",
+    "display_name": "free",
+    "service_type": "llm",
+    "api_format": "codex_responses",
+    "auth_type": "bearer",
+    "response_mode": "stream",
+    "supported_modalities": [
+      "chat",
+      "vision"
+    ],
+    "default_base_url": "https://apifree.this52.cn/v1",
+    "is_active": true,
+    "icon": "",
+    "endpoints": {},
+    "custom_headers": {}
+  },
+  {
+    "id": "Krill",
+    "display_name": "Krill",
+    "service_type": "llm",
+    "api_format": "openai_compatible",
+    "auth_type": "bearer",
+    "response_mode": "stream",
+    "supported_modalities": [
+      "chat"
+    ],
+    "default_base_url": "https://api-slb.krill-ai.com/coding/v1",
+    "is_active": true,
+    "icon": "",
+    "endpoints": {},
+    "custom_headers": {}
+  },
+  {
+    "id": "chatgpt2api",
+    "display_name": "chatgpt2api",
+    "service_type": "llm",
+    "api_format": "openai_compatible",
+    "auth_type": "Bearer",
+    "response_mode": "stream",
+    "supported_modalities": [
+      "chat",
+      "vision",
+      "text_to_image",
+      "image_to_image"
+    ],
+    "default_base_url": "https://gpt2api.mailyplus.com/v1",
     "is_active": true,
     "icon": "",
     "endpoints": {},

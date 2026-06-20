@@ -5,6 +5,7 @@ import { readModels, writeModels, type ModelRecord } from '../model-store'
 import { ConfiguredProviderAdapter } from '../llm/adapter'
 import { anyRouterOfficialMessagesEndpoint, applyClaudeCodeAuthHeaders, applyClaudeCodeHeaders } from '../llm/anthropic-context'
 import { buildCodexResponsesBody } from '../llm/codex-responses'
+import { createOpenAIResponseViaSdk } from '../llm/openai-responses-sdk'
 import { coerceBoolean } from '../boolean-utils'
 
 function redactSecret(value?: string) {
@@ -55,9 +56,20 @@ function extractRetryAfter(errorBody: string): number | undefined {
 function classifyProviderTestFailure(status: number, body: string) {
   const parsed = tryParseJson<any>(body, null)
   const message = String(parsed?.detail || parsed?.message || parsed?.error?.message || parsed?.error || body || '').trim()
+  const code = String(parsed?.code || parsed?.error?.code || '').trim()
   const retryAfter = extractRetryAfter(body)
+  const isCapacityError = /get_channel_failed|负载已经达到上限|上游.*繁忙|capacity|overload|overloaded|no available channel/i.test(`${code} ${message} ${body}`)
   const isCloudflare = Boolean(parsed?.cloudflare_error || /cloudflare|ray_id|origin_bad_gateway/i.test(body))
   const retryable = Boolean(parsed?.retryable) || status === 429 || status === 524 || (status >= 500 && status < 600)
+  if (isCapacityError) {
+    return {
+      valid: false,
+      status,
+      retryable: true,
+      retry_after: retryAfter,
+      error: `供应商上游临时繁忙 (${status})，请求格式已被接受但当前模型通道已满，请稍后重试。${code ? `代码：${code}。` : ''}${message.slice(0, 220)}`,
+    }
+  }
   const summary = retryable
     ? `供应商上游临时不可用 (${status})${isCloudflare ? '：Cloudflare/源站网关错误' : ''}${retryAfter ? `，建议 ${retryAfter}s 后重试` : '，稍后重试'}`
     : `供应商测试失败 (${status})`
@@ -144,7 +156,16 @@ function normalizeKeyInput(body: any, fallback?: APIKeyRecord): APIKeyRecord {
   }
 }
 
-function buildProbeRequestBody(apiFormat: string) {
+function isAnyRouterTopProvider(provider: any, key?: APIKeyRecord) {
+  return /anyrouter\.top/i.test(`${key?.base_url || ''} ${provider?.default_base_url || ''} ${provider?.base_url || ''} ${provider?.baseUrl || ''}`)
+}
+
+function codexProbeModelName(provider: any, key?: APIKeyRecord) {
+  if (isAnyRouterTopProvider(provider, key)) return 'gpt-5.5'
+  return String(provider?.probe_model || provider?.test_model || 'test')
+}
+
+function buildProbeRequestBody(apiFormat: string, provider?: any, key?: APIKeyRecord) {
   const providerFormat = String(apiFormat || '').toLowerCase()
   if (providerFormat === 'gemini_native') {
     return {
@@ -153,7 +174,13 @@ function buildProbeRequestBody(apiFormat: string) {
     }
   }
   if (providerFormat.includes('responses') || providerFormat.includes('codex')) {
-    return buildCodexResponsesBody({ model: 'test', messages: [{ role: 'user', content: 'ping' }] }, 'test', false)
+    const modelName = codexProbeModelName(provider, key)
+    return buildCodexResponsesBody(
+      { model: modelName, messages: [{ role: 'user', content: 'ping' }] },
+      modelName,
+      false,
+      { baseUrl: String(key?.base_url || provider?.default_base_url || provider?.base_url || provider?.baseUrl || '') },
+    )
   }
   if (providerFormat === 'claude_code' || providerFormat.includes('anthropic')) return { model: 'test', messages: [{ role: 'user', content: 'ping' }], max_tokens: 1, temperature: 0 }
   return { model: 'test', messages: [{ role: 'user', content: 'ping' }], max_tokens: 1, temperature: 0 }
@@ -221,9 +248,9 @@ function resolveKeyProbeEndpoint(provider: any, key: APIKeyRecord) {
   )
   const rawEndpoint = routeUrl(rawRoute).replace(/\/$/, '')
   const baseUrl = String(key.base_url || provider.default_base_url || '').replace(/\/$/, '')
-  if (!rawEndpoint) return baseUrl ? buildFallbackTestUrl(baseUrl, provider.api_format) : ''
-  if (/^https?:\/\//i.test(rawEndpoint)) return buildFallbackTestUrl(rawEndpoint, provider.api_format)
-  return baseUrl ? `${baseUrl}/${rawEndpoint.replace(/^\/+/, '')}` : buildFallbackTestUrl(rawEndpoint, provider.api_format)
+  if (!rawEndpoint) return baseUrl ? buildFallbackTestUrl(baseUrl, providerFormat) : ''
+  if (/^https?:\/\//i.test(rawEndpoint)) return buildFallbackTestUrl(rawEndpoint, providerFormat)
+  return baseUrl ? `${baseUrl}/${rawEndpoint.replace(/^\/+/, '')}` : buildFallbackTestUrl(rawEndpoint, providerFormat)
 }
 
 function buildKeyProbeRequest(provider: any, key: APIKeyRecord, keyValue: string) {
@@ -239,13 +266,66 @@ function buildKeyProbeRequest(provider: any, key: APIKeyRecord, keyValue: string
       requestBodyKeys: [] as string[],
     }
   }
-  const requestBody = buildProbeRequestBody(provider.api_format)
+  const requestBody = buildProbeRequestBody(apiFormat, provider, key)
+  if ((requestBody as any)?.stream) headers.Accept = 'text/event-stream'
   return {
     testUrl,
     fetchInit: { method: 'POST', headers, body: JSON.stringify(requestBody) } as RequestInit,
     requestKind: 'fallback-chat',
     requestBodyKeys: Object.keys(requestBody),
   }
+}
+
+function shouldUseOpenAIResponsesSdkForKeyProbe(provider: any, probeRequest: ReturnType<typeof buildKeyProbeRequest>) {
+  if (!probeRequest) return false
+  const providerFormat = String(provider.api_format || '').toLowerCase()
+  if (!providerFormat.includes('responses') && !providerFormat.includes('codex')) return false
+  if (!/\/responses(?:[?#].*)?$/i.test(probeRequest.testUrl)) return false
+  if (/anyrouter\.top/i.test(`${provider?.id || ''} ${provider?.display_name || ''} ${provider?.default_base_url || ''} ${probeRequest.testUrl}`)) return false
+  const authType = String(provider.auth_type || 'bearer').toLowerCase()
+  return authType === 'bearer' || authType === 'authorization' || authType === 'oauth'
+}
+
+function headersForOpenAIResponsesSdk(headers: Record<string, string>) {
+  const sdkHeaders: Record<string, string> = {}
+  for (const [key, value] of Object.entries(headers)) {
+    const normalized = key.toLowerCase()
+    if (normalized === 'authorization') continue
+    if (normalized === 'content-type') continue
+    if (normalized === 'accept') continue
+    if (normalized === 'user-agent') continue
+    if (normalized === 'x-api-key') continue
+    sdkHeaders[key] = value
+  }
+  return sdkHeaders
+}
+
+function openAIResponsesSdkBaseUrlFromProbeUrl(testUrl: string) {
+  return String(testUrl || '').replace(/\/responses(?:[?#].*)?$/i, '')
+}
+
+function bodyFromProbeRequest(probeRequest: ReturnType<typeof buildKeyProbeRequest>) {
+  const raw = probeRequest?.fetchInit?.body
+  if (typeof raw !== 'string') return {}
+  return tryParseJson<Record<string, any>>(raw, {})
+}
+
+function statusFromProviderError(error: any) {
+  const status = Number(error?.status ?? error?.statusCode ?? error?.response?.status ?? 0)
+  return Number.isFinite(status) ? status : 0
+}
+
+function bodyTextFromProviderError(error: any) {
+  const raw = error?.error ?? error?.response?.data ?? error?.body
+  if (typeof raw === 'string') return raw
+  if (raw !== undefined) {
+    try {
+      return JSON.stringify(raw)
+    } catch {
+      return String(raw)
+    }
+  }
+  return String(error?.message || error)
 }
 
 export function applyKeyProbeState(key: APIKeyRecord, result: any, latency: number, checkedAt: string) {
@@ -257,6 +337,8 @@ export function applyKeyProbeState(key: APIKeyRecord, result: any, latency: numb
       key.quota_remaining = Number(result.quota_remaining)
     }
     key.avg_latency = key.avg_latency ? Math.round(key.avg_latency * 0.9 + latency * 0.1) : latency
+  } else if (result?.retryable && Number(result?.status || 0) >= 500) {
+    return
   } else {
     key.failure_count = Number(key.failure_count || 0) + 1
     if (key.failure_count >= 3) key.is_active = false
@@ -312,12 +394,25 @@ export async function probeKeyFallback(provider: any, key: APIKeyRecord) {
   const probeRequest = buildKeyProbeRequest(provider, key, keyValue)
   if (!probeRequest) return { valid: false, status: 400, retryable: false, error: 'provider endpoint not configured' }
   try {
+    if (shouldUseOpenAIResponsesSdkForKeyProbe(provider, probeRequest)) {
+      await createOpenAIResponseViaSdk({
+        apiKey: keyValue.replace(/^Bearer\s+/i, ''),
+        baseURL: openAIResponsesSdkBaseUrlFromProbeUrl(probeRequest.testUrl),
+        headers: headersForOpenAIResponsesSdk((probeRequest.fetchInit.headers || {}) as Record<string, string>),
+        body: bodyFromProbeRequest(probeRequest),
+        timeoutMs: 600000,
+      })
+      return { valid: true, status: 200, retryable: false, message: 'Key test passed', quota_remaining: Math.max((key.quota_total || 0) - (key.quota_used || 0), 0) }
+    }
+
     const response = await fetch(probeRequest.testUrl, probeRequest.fetchInit)
     const text = await response.text()
     if (!response.ok) return classifyProviderTestFailure(response.status, text)
     const dashScopeQuota = await fetchDashScopeQuota(provider, keyValue)
     return { valid: true, status: response.status, retryable: false, message: 'Key test passed', quota_remaining: dashScopeQuota ?? Math.max((key.quota_total || 0) - (key.quota_used || 0), 0) }
   } catch (error: any) {
+    const status = statusFromProviderError(error)
+    if (status) return classifyProviderTestFailure(status, bodyTextFromProviderError(error))
     const errorText = String(error?.message || error)
     return {
       valid: false,

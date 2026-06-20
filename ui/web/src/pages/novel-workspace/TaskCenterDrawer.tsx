@@ -139,6 +139,10 @@ export function repairTaskActionLabel(task: any) {
   if (String(task?.issue_type || '') === 'safe_batch_expansion_segment_hotspot') return '修扩批热区'
   if (String(task?.issue_type || '') === 'reader_pull_missed') return '补追读'
   if (String(task?.issue_type || '') === 'innovation_execution_missed') return '补创新'
+  if (String(task?.task_type || '') === 'chapter_retention_patch') {
+    const issueText = [task?.issue_type, task?.message, task?.action].filter(Boolean).join(' ')
+    return issueText.includes('缺正文') || issueText.includes('生成正文') ? '生成正文' : '补留存'
+  }
   if (String(task?.source || '') === 'rolling_script_room' || String(task?.issue_type || '') === 'script_room_layer_gap') return '按剧本室修复'
   if (String(task?.source || '') === 'storyline_diff_decision' && String(task?.issue_type || '') === 'storyline_diff_accept_as_plan') return '同步计划'
   if (String(task?.source || '') === 'storyline_diff_decision') return '按决策修订'
@@ -4720,6 +4724,9 @@ export function TaskCenterDrawer({
                           </Paragraph>
                         )}
                         <Space wrap>
+                          {task.can_process_repair_tasks && (
+                            <Button size="small" type="primary" onClick={() => openTaskDetail(task)}>处理修复</Button>
+                          )}
                           {task.can_pause && onPauseRun && (
                             <Button size="small" icon={<PauseCircleOutlined />} onClick={() => onPauseRun(task)}>暂停</Button>
                           )}
@@ -4919,6 +4926,7 @@ export function TaskCenterDrawer({
                       run.run_type === 'chapter_group_generation' && ['ready', 'paused', 'failed'].includes(run.status) && onResumeRun ? <Button key="resume-group" type="link" size="small" onClick={() => onResumeRun(run)}>继续</Button> : null,
                       run.run_type === 'chapter_group_generation' && ['ready', 'paused', 'failed', 'running'].includes(run.status) && onExecuteChapterGroup ? <Button key="execute-group" type="link" size="small" loading={chapterGroupExecutingId === run.id} onClick={() => onExecuteChapterGroup(run)}>执行</Button> : null,
                       ['release_quality_batch', 'release_similarity_batch'].includes(run.run_type) && ['queued', 'ready', 'failed'].includes(run.status) && onExecuteReleaseRepairRun ? <Button key="execute-release" type="link" size="small" loading={releaseRepairExecutingId === run.id} onClick={() => onExecuteReleaseRepairRun(run)}>执行发布批量</Button> : null,
+                      ['longform_production_repair', 'first30_retention_repair', 'mechanical_qa_repair'].includes(run.run_type) && ['ready', 'paused', 'failed', 'running'].includes(run.status) ? <Button key="process-repair" type="link" size="small" onClick={() => setDetailRun(run)}>处理修复</Button> : null,
                       run.run_type === 'chapter_group_generation' && run.status === 'running' && onPauseRun ? <Button key="pause-group" type="link" size="small" onClick={() => onPauseRun(run)}>暂停</Button> : null,
                       <Button key="detail" type="link" size="small" onClick={() => setDetailRun(run)}>详情</Button>,
                     ].filter(Boolean)}

@@ -699,13 +699,6 @@ export function WritingCockpitPanel({
     if (forceCollapsed) setCockpitCollapsed(true)
   }, [forceCollapsed])
 
-  const primaryAction = primaryActionOverride ?? {
-    label: model.topStatus.nextActionLabel,
-    reason: '',
-    actionKey: model.topStatus.primaryActionKey,
-    onClick: () => onAction(model.topStatus.primaryActionKey),
-  }
-
   if (cockpitCollapsed) {
     return (
       <div className="writing-cockpit-panel is-collapsed" style={{ width: '100%' }}>
@@ -732,22 +725,7 @@ export function WritingCockpitPanel({
               </Space>
             </Col>
             <Col flex="none">
-              <Space className="writing-cockpit-collapsed-actions" wrap size={[6, 6]} style={{ justifyContent: 'flex-end' }}>
-                <Button
-                  type="primary"
-                  size="small"
-                  loading={loading}
-                  icon={actionIcon(primaryAction.actionKey, recommendedRole)}
-                  onClick={primaryAction.onClick}
-                >
-                  {primaryAction.label}
-                </Button>
-                {primaryActionOverride && <span className="novel-editor-recommended-badge">推荐下一步</span>}
-                {primaryActionOverride?.reason && (
-                  <Text className="writing-cockpit-next-action-reason" type="secondary" style={{ maxWidth: 260, fontSize: 12 }}>
-                    {primaryActionOverride.reason}
-                  </Text>
-                )}
+              <Space className="writing-cockpit-collapsed-controls" wrap size={[6, 6]} style={{ justifyContent: 'flex-end' }}>
                 <Button size="small" icon={<DownOutlined />} onClick={() => setCockpitCollapsed(false)}>
                   展开写作指挥台
                 </Button>

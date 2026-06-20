@@ -244,22 +244,14 @@
   font-weight: 750;
 }
 
-.writing-cockpit-collapsed-actions {
+.writing-cockpit-collapsed-controls {
   padding-left: 10px;
   border-left: 1px solid #e6ebf2;
 }
 
-.writing-cockpit-collapsed-actions .ant-btn {
+.writing-cockpit-collapsed-controls .ant-btn {
   border-radius: 999px;
   font-weight: 750;
-}
-
-.writing-cockpit-next-action-reason {
-  display: inline-block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  vertical-align: middle;
 }
 
 @media (max-width: 768px) {
@@ -278,7 +270,7 @@
     padding: 8px 10px;
   }
 
-  .writing-cockpit-collapsed-actions {
+  .writing-cockpit-collapsed-controls {
     width: 100%;
     padding-left: 0;
     border-left: 0;

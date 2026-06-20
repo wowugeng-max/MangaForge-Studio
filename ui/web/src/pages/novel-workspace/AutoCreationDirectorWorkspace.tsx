@@ -198,11 +198,73 @@ function safeBatchChapterNosText(chapterNos: number[]) {
   return `${chapterNos.slice(0, 6).map(chapterNo => `第${chapterNo}章`).join('、')}${chapterNos.length > 6 ? `等${chapterNos.length}章` : ''}`
 }
 
+type ActionExecutionKind = 'model' | 'background' | 'task' | 'panel' | 'local'
+
+const ACTION_EXECUTION_LABELS: Record<ActionExecutionKind, string> = {
+  model: '调用大模型',
+  background: '后台执行',
+  task: '创建任务',
+  panel: '打开面板',
+  local: '本地计算',
+}
+
+function actionExecutionMeta(action: AutoCreationDirectorAction): { kind: ActionExecutionKind; label: string } {
+  const key = String(action.key)
+  if (key === 'start_safe_batch_generation') return { kind: 'background', label: ACTION_EXECUTION_LABELS.background }
+  if (action.modelCall) return { kind: 'model', label: ACTION_EXECUTION_LABELS.model }
+  if (key.startsWith('create_') || key.includes('repair') || key.includes('_queue')) {
+    return { kind: 'task', label: ACTION_EXECUTION_LABELS.task }
+  }
+  if (key.startsWith('open_') || key.startsWith('enter_') || key === 'select_model') {
+    return { kind: 'panel', label: ACTION_EXECUTION_LABELS.panel }
+  }
+  return { kind: 'local', label: ACTION_EXECUTION_LABELS.local }
+}
+
+function actionModelHint(action: AutoCreationDirectorAction) {
+  return action.modelCall ? '会调用大模型' : '不调用大模型'
+}
+
+function buildActionTooltip(action: AutoCreationDirectorAction) {
+  const meta = actionExecutionMeta(action)
+  return `${meta.label}（${actionModelHint(action)}）：${action.description || action.label}`
+}
+
+function staticActionTooltip(kind: ActionExecutionKind, description: string, modelCall = false) {
+  return `${ACTION_EXECUTION_LABELS[kind]}（${modelCall ? '会调用大模型' : '不调用大模型'}）：${description}`
+}
+
+function ActionKindTag({ action }: { action: AutoCreationDirectorAction }) {
+  const meta = actionExecutionMeta(action)
+  return (
+    <span className={`auto-director-action-kind auto-director-action-kind-${meta.kind}`}>
+      {meta.label}
+    </span>
+  )
+}
+
+function StaticActionKindTag({ kind }: { kind: ActionExecutionKind }) {
+  return (
+    <span className={`auto-director-action-kind auto-director-action-kind-${kind}`}>
+      {ACTION_EXECUTION_LABELS[kind]}
+    </span>
+  )
+}
+
 function actionClass(action: AutoCreationDirectorAction, primary = false) {
+  const meta = actionExecutionMeta(action)
   return [
     primary ? 'auto-director-primary-action' : 'auto-director-secondary-action',
     action.modelCall ? 'auto-director-model-action' : '',
+    `auto-director-action-${meta.kind}`,
   ].filter(Boolean).join(' ')
+}
+
+function actionDisabledState(action: AutoCreationDirectorAction, loadingActionKey?: string, disabled = false) {
+  const key = String(action.key)
+  const loading = loadingActionKey === key
+  const busyElsewhere = Boolean(loadingActionKey && !loading)
+  return { key, loading, disabled: disabled || Boolean(action.disabled) || busyElsewhere }
 }
 
 function ActionButton({
@@ -216,23 +278,99 @@ function ActionButton({
   loadingActionKey?: string
   onAction: (action: AutoCreationDirectorAction) => void
 }) {
-  const key = String(action.key)
-  const loading = loadingActionKey === key
-  const busyElsewhere = Boolean(loadingActionKey && !loading)
+  const { loading, disabled } = actionDisabledState(action, loadingActionKey)
   const button = (
     <Button
       type={primary ? 'primary' : 'default'}
       className={actionClass(action, primary)}
       icon={action.modelCall ? <ThunderboltOutlined /> : undefined}
       loading={loading}
-      disabled={action.disabled || busyElsewhere}
+      disabled={disabled}
+      aria-label={`${action.label}，${buildActionTooltip(action)}`}
       onClick={() => onAction(action)}
     >
-      {action.label}
+      <span className="auto-director-action-content">
+        <span>{action.label}</span>
+        <ActionKindTag action={action} />
+      </span>
     </Button>
   )
-  if (!action.description) return button
-  return <Tooltip title={action.description}>{button}</Tooltip>
+  return <Tooltip title={buildActionTooltip(action)}>{button}</Tooltip>
+}
+
+function ActionSurfaceButton({
+  action,
+  className,
+  loadingActionKey,
+  disabled,
+  onAction,
+  children,
+}: {
+  action: AutoCreationDirectorAction
+  className: string
+  loadingActionKey?: string
+  disabled?: boolean
+  onAction: (action: AutoCreationDirectorAction) => void
+  children: React.ReactNode
+}) {
+  const state = actionDisabledState(action, loadingActionKey, disabled)
+  const meta = actionExecutionMeta(action)
+  const button = (
+    <button
+      type="button"
+      className={[
+        className,
+        action.modelCall ? 'auto-director-model-action' : '',
+        `auto-director-action-${meta.kind}`,
+        state.loading ? 'is-loading' : '',
+      ].filter(Boolean).join(' ')}
+      disabled={state.disabled}
+      aria-label={`${action.label}，${buildActionTooltip(action)}`}
+      onClick={() => onAction(action)}
+    >
+      {children}
+      <ActionKindTag action={action} />
+    </button>
+  )
+  return (
+    <Tooltip title={buildActionTooltip(action)}>
+      <span className="auto-director-action-surface-wrap">{button}</span>
+    </Tooltip>
+  )
+}
+
+function HintedSurfaceButton({
+  className,
+  tooltip,
+  kind = 'panel',
+  disabled,
+  onClick,
+  children,
+}: {
+  className: string
+  tooltip: string
+  kind?: ActionExecutionKind
+  disabled?: boolean
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  const button = (
+    <button
+      type="button"
+      className={[className, `auto-director-action-${kind}`].filter(Boolean).join(' ')}
+      disabled={disabled}
+      aria-label={tooltip}
+      onClick={onClick}
+    >
+      {children}
+      <StaticActionKindTag kind={kind} />
+    </button>
+  )
+  return (
+    <Tooltip title={tooltip}>
+      <span className="auto-director-action-surface-wrap">{button}</span>
+    </Tooltip>
+  )
 }
 
 export function AutoCreationDirectorWorkspace({
@@ -368,15 +506,15 @@ export function AutoCreationDirectorWorkspace({
           <Text className="auto-director-headline">{model.headline}</Text>
           <Paragraph className="auto-director-summary">{model.summary}</Paragraph>
           {model.targetChapter ? (
-            <button
-              type="button"
+            <HintedSurfaceButton
               className="auto-director-target"
+              tooltip={staticActionTooltip('panel', `定位到第 ${model.targetChapter.chapterNo} 章，查看当前目标章节。`)}
               onClick={() => onSelectChapter(model.targetChapter?.chapterNo || 0)}
             >
               <span>当前目标</span>
               <strong>第 {model.targetChapter.chapterNo} 章 · {model.targetChapter.title}</strong>
               <em>{model.targetChapter.hasProse ? `${model.targetChapter.wordCount} 字，进入交稿` : '未生成正文，等待开写'}</em>
-            </button>
+            </HintedSurfaceButton>
           ) : (
             <Alert type="warning" showIcon message="还没有可写章节" description="先补齐大纲或创建章节，再进入自动创作链路。" />
           )}
@@ -439,12 +577,12 @@ export function AutoCreationDirectorWorkspace({
         <div className="auto-director-cockpit-guardrails" aria-label="万订五项护栏">
           <Text className="auto-director-cockpit-section-title">万订五项护栏</Text>
           {serialCockpit.guardrails.map(item => (
-            <button
+            <ActionSurfaceButton
               key={item.key}
-              type="button"
+              action={item.action}
               className={`auto-director-cockpit-guardrail auto-director-cockpit-guardrail-${item.status}`}
-              disabled={Boolean(loadingActionKey)}
-              onClick={() => onAction(item.action)}
+              loadingActionKey={loadingActionKey}
+              onAction={onAction}
             >
               <span>
                 <Tag color={cockpitStatusColor(item.status)} bordered={false}>
@@ -454,7 +592,7 @@ export function AutoCreationDirectorWorkspace({
                 {item.count > 0 && <Tag bordered={false}>{item.count}</Tag>}
               </span>
               <Text type="secondary">{item.detail}</Text>
-            </button>
+            </ActionSurfaceButton>
           ))}
         </div>
 
@@ -462,12 +600,12 @@ export function AutoCreationDirectorWorkspace({
           <div className="auto-director-cockpit-chain" aria-label="当前章生产链">
             <Text className="auto-director-cockpit-section-title">当前章生产链</Text>
             {serialCockpit.chapterChain.map((step, index) => (
-              <button
+              <ActionSurfaceButton
                 key={step.key}
-                type="button"
+                action={step.action}
                 className={`auto-director-cockpit-chain-step auto-director-cockpit-chain-step-${step.status}`}
-                disabled={Boolean(loadingActionKey)}
-                onClick={() => onAction(step.action)}
+                loadingActionKey={loadingActionKey}
+                onAction={onAction}
               >
                 <span className="auto-director-cockpit-chain-index">{index + 1}</span>
                 <span className="auto-director-cockpit-chain-copy">
@@ -477,7 +615,7 @@ export function AutoCreationDirectorWorkspace({
                 <Tag color={cockpitStatusColor(step.status)} bordered={false}>
                   {cockpitChainLabel(step.status)}
                 </Tag>
-              </button>
+              </ActionSurfaceButton>
             ))}
           </div>
 
@@ -499,19 +637,19 @@ export function AutoCreationDirectorWorkspace({
               <Text className="auto-director-cockpit-section-title">待处理风险</Text>
               {serialCockpit.riskQueue.length > 0 ? (
                 serialCockpit.riskQueue.slice(0, 6).map(item => (
-                  <button
+                  <ActionSurfaceButton
                     key={item.key}
-                    type="button"
+                    action={item.action}
                     className={`auto-director-cockpit-risk auto-director-cockpit-risk-${item.status}`}
-                    disabled={Boolean(loadingActionKey)}
-                    onClick={() => onAction(item.action)}
+                    loadingActionKey={loadingActionKey}
+                    onAction={onAction}
                   >
                     <span>
                       <Tag color={cockpitStatusColor(item.status)} bordered={false}>{item.label}</Tag>
                       {item.count > 0 && <Tag bordered={false}>{item.count}</Tag>}
                     </span>
                     <Text type="secondary">{item.detail}</Text>
-                  </button>
+                  </ActionSurfaceButton>
                 ))
               ) : (
                 <Text type="secondary">当前没有阻塞连载推进的聚合风险。</Text>
@@ -549,12 +687,12 @@ export function AutoCreationDirectorWorkspace({
           </div>
           <div className="auto-director-manual-test-gates">
             {model.manualTestReadiness.gates.map(gate => (
-              <button
+              <ActionSurfaceButton
                 key={gate.key}
-                type="button"
+                action={gate.action}
                 className={`auto-director-manual-test-gate auto-director-manual-test-gate-${gate.status}`}
-                disabled={Boolean(loadingActionKey)}
-                onClick={() => onAction(gate.action)}
+                loadingActionKey={loadingActionKey}
+                onAction={onAction}
               >
                 <span>
                   <Text strong>{gate.label}</Text>
@@ -564,7 +702,7 @@ export function AutoCreationDirectorWorkspace({
                 </span>
                 <Text type="secondary">{gate.detail}</Text>
                 {gate.evidence.length > 0 && <em>{gate.evidence.slice(0, 2).join('；')}</em>}
-              </button>
+              </ActionSurfaceButton>
             ))}
           </div>
         </div>
@@ -600,15 +738,16 @@ export function AutoCreationDirectorWorkspace({
           </div>
           <div className="auto-director-creation-stages">
             {model.creationPipeline.stages.map((stage, index) => (
-              <button
+              <ActionSurfaceButton
                 key={stage.key}
-                type="button"
+                action={stage.action}
                 className={[
                   'auto-director-creation-stage',
                   `auto-director-creation-stage-${stage.status}`,
                   stage.active ? 'is-active' : '',
                 ].filter(Boolean).join(' ')}
-                onClick={() => onStageAction(stage.action)}
+                loadingActionKey={loadingActionKey}
+                onAction={() => onStageAction(stage.action)}
               >
                 <span className="auto-director-creation-stage-head">
                   <span className="auto-director-creation-stage-index" style={{ color: pipelineColor(stage.status) }}>
@@ -621,7 +760,7 @@ export function AutoCreationDirectorWorkspace({
                 <Progress percent={Math.max(0, Math.min(100, stage.score))} size="small" showInfo={false} />
                 <Text type="secondary">{stage.detail}</Text>
                 <Text className="auto-director-creation-action-label">{stage.action.label}</Text>
-              </button>
+              </ActionSurfaceButton>
             ))}
           </div>
         </div>
@@ -642,29 +781,33 @@ export function AutoCreationDirectorWorkspace({
             <Text type="secondary">同故事规划页共用六条生产线，避免总控台和规划页给出两套判断。</Text>
           </div>
           <div className="auto-director-battle-lanes">
-            {model.longformBattleDesk.lanes.map(lane => (
-              <button
-                key={lane.key}
-                type="button"
-                className={`auto-director-battle-lane auto-director-battle-lane-${lane.status}`}
-                onClick={() => onAction({
+            {model.longformBattleDesk.lanes.map(lane => {
+              const laneAction: AutoCreationDirectorAction = {
                   area: 'planning',
                   key: lane.actionKey,
                   label: lane.label,
                   description: lane.detail,
                   modelCall: false,
-                })}
-              >
-                <span>
-                  <Tag color={battleDeskColor(lane.status)} bordered={false}>
-                    {lane.status === 'ok' ? '稳' : lane.status === 'block' ? '阻' : '警'}
-                  </Tag>
-                  <Text strong>{lane.label || battleLaneLabel(lane.key)}</Text>
-                </span>
-                <Progress percent={Math.max(0, Math.min(100, lane.score))} size="small" showInfo={false} />
-                <Text type="secondary">{lane.detail}</Text>
-              </button>
-            ))}
+                }
+              return (
+                <ActionSurfaceButton
+                  key={lane.key}
+                  action={laneAction}
+                  className={`auto-director-battle-lane auto-director-battle-lane-${lane.status}`}
+                  loadingActionKey={loadingActionKey}
+                  onAction={onAction}
+                >
+                  <span>
+                    <Tag color={battleDeskColor(lane.status)} bordered={false}>
+                      {lane.status === 'ok' ? '稳' : lane.status === 'block' ? '阻' : '警'}
+                    </Tag>
+                    <Text strong>{lane.label || battleLaneLabel(lane.key)}</Text>
+                  </span>
+                  <Progress percent={Math.max(0, Math.min(100, lane.score))} size="small" showInfo={false} />
+                  <Text type="secondary">{lane.detail}</Text>
+                </ActionSurfaceButton>
+              )
+            })}
           </div>
         </div>
       </section>
@@ -679,15 +822,16 @@ export function AutoCreationDirectorWorkspace({
           <Text className="auto-director-serial-summary">{model.serialWorkflow.summary}</Text>
           <div className="auto-director-serial-stages">
             {model.serialWorkflow.stages.map((stage, index) => (
-              <button
+              <ActionSurfaceButton
                 key={stage.key}
-                type="button"
+                action={stage.action}
                 className={[
                   'auto-director-serial-stage',
                   'auto-director-serial-stage-button',
                   `auto-director-serial-stage-${stage.status}`,
                 ].join(' ')}
-                onClick={() => onStageAction(stage.action)}
+                loadingActionKey={loadingActionKey}
+                onAction={() => onStageAction(stage.action)}
               >
                 <div className="auto-director-serial-stage-head">
                   <span className="auto-director-serial-index" style={{ color: pipelineColor(stage.status) }}>
@@ -704,7 +848,7 @@ export function AutoCreationDirectorWorkspace({
                 </div>
                 <Text type="secondary">{stage.detail}</Text>
                 <Text className="auto-director-serial-action-label">{stage.action.label}</Text>
-              </button>
+              </ActionSurfaceButton>
             ))}
           </div>
         </div>
@@ -810,11 +954,12 @@ export function AutoCreationDirectorWorkspace({
         <div className="auto-director-runway-layout">
           <div className="auto-director-runway-gates">
             {model.millionWordRunway.gates.map(gate => (
-              <button
+              <ActionSurfaceButton
                 key={gate.key}
-                type="button"
+                action={model.millionWordRunway.recommendedAction}
                 className={`auto-director-runway-gate auto-director-runway-gate-${gate.status}`}
-                onClick={() => onAction(model.millionWordRunway.recommendedAction)}
+                loadingActionKey={loadingActionKey}
+                onAction={onAction}
               >
                 <span>
                   <strong>{gate.label}</strong>
@@ -823,7 +968,7 @@ export function AutoCreationDirectorWorkspace({
                   </Tag>
                 </span>
                 <Text type="secondary">{gate.detail}</Text>
-              </button>
+              </ActionSurfaceButton>
             ))}
           </div>
           <div className="auto-director-runway-brief">
@@ -880,9 +1025,17 @@ export function AutoCreationDirectorWorkspace({
             </div>
             <div className="auto-director-writing-queue-focus-actions">
               {model.writingQueueFocus.currentChapterNo && (
-                <Button onClick={() => onSelectChapter(model.writingQueueFocus.currentChapterNo || 0)}>
-                  定位章节
-                </Button>
+                <Tooltip title={staticActionTooltip('panel', '定位到写作队列当前章节。')}>
+                  <Button
+                    aria-label={staticActionTooltip('panel', '定位到写作队列当前章节。')}
+                    onClick={() => onSelectChapter(model.writingQueueFocus.currentChapterNo || 0)}
+                  >
+                    <span className="auto-director-action-content">
+                      <span>定位章节</span>
+                      <StaticActionKindTag kind="panel" />
+                    </span>
+                  </Button>
+                </Tooltip>
               )}
               <ActionButton
                 action={model.writingQueueFocus.action}
@@ -940,11 +1093,12 @@ export function AutoCreationDirectorWorkspace({
         <div className="auto-director-script-room-layout">
           <div className="auto-director-script-room-layers">
             {model.rollingScriptRoom.layers.map(layer => (
-              <button
+              <ActionSurfaceButton
                 key={layer.key}
-                type="button"
+                action={layer.action}
                 className={`auto-director-script-room-layer auto-director-script-room-layer-${layer.status}`}
-                onClick={() => onAction(layer.action)}
+                loadingActionKey={loadingActionKey}
+                onAction={onAction}
               >
                 <span>
                   <strong>{layer.label}</strong>
@@ -954,7 +1108,7 @@ export function AutoCreationDirectorWorkspace({
                 {layer.evidence.length > 0 && (
                   <em>{layer.evidence.slice(0, 2).join('；')}</em>
                 )}
-              </button>
+              </ActionSurfaceButton>
             ))}
           </div>
           <div className="auto-director-script-room-route">
@@ -979,15 +1133,15 @@ export function AutoCreationDirectorWorkspace({
             {model.rollingScriptRoom.nextChapters.length > 0 ? (
               <div className="auto-director-script-room-chapters">
                 {model.rollingScriptRoom.nextChapters.slice(0, 6).map(chapter => (
-                  <button
+                  <HintedSurfaceButton
                     key={chapter.chapterNo}
-                    type="button"
                     className="auto-director-script-room-chapter"
+                    tooltip={staticActionTooltip('panel', `定位到第 ${chapter.chapterNo} 章，查看短期排期与章节职责。`)}
                     onClick={() => onSelectChapter(chapter.chapterNo)}
                   >
                     <span>第{chapter.chapterNo}章 · {chapter.title}</span>
                     <Text type="secondary">{chapter.chapterTask || chapter.conflict || '待补章节职责'}</Text>
-                  </button>
+                  </HintedSurfaceButton>
                 ))}
               </div>
             ) : (
@@ -1035,31 +1189,35 @@ export function AutoCreationDirectorWorkspace({
           <Tag bordered={false}>核心不偏 · 故事强度 · 创新差异 · 读者吸引</Tag>
         </div>
         <div className="auto-director-contract-grid">
-          {model.creationContract.map(item => (
-            <button
-              key={item.key}
-              type="button"
-              className={`auto-director-contract-item auto-director-contract-${item.status}`}
-              onClick={() => onAction({
+          {model.creationContract.map(item => {
+            const contractAction: AutoCreationDirectorAction = {
                 area: item.key === 'core' ? 'assets' : 'planning',
                 key: item.actionKey,
                 label: item.label,
                 description: item.detail,
                 modelCall: false,
-              })}
-            >
-              <span className="auto-director-contract-topline">
-                <strong>{item.label}</strong>
-                <Tag color={contractColor(item.status)} bordered={false}>{contractLabel(item.status)}</Tag>
-              </span>
-              <Text type="secondary">{item.detail}</Text>
-              {item.evidence.length > 0 && (
-                <span className="auto-director-contract-evidence">
-                  {item.evidence.slice(0, 2).map(evidence => <em key={evidence}>{evidence}</em>)}
+              }
+            return (
+              <ActionSurfaceButton
+                key={item.key}
+                action={contractAction}
+                className={`auto-director-contract-item auto-director-contract-${item.status}`}
+                loadingActionKey={loadingActionKey}
+                onAction={onAction}
+              >
+                <span className="auto-director-contract-topline">
+                  <strong>{item.label}</strong>
+                  <Tag color={contractColor(item.status)} bordered={false}>{contractLabel(item.status)}</Tag>
                 </span>
-              )}
-            </button>
-          ))}
+                <Text type="secondary">{item.detail}</Text>
+                {item.evidence.length > 0 && (
+                  <span className="auto-director-contract-evidence">
+                    {item.evidence.slice(0, 2).map(evidence => <em key={evidence}>{evidence}</em>)}
+                  </span>
+                )}
+              </ActionSurfaceButton>
+            )
+          })}
         </div>
       </section>
 
@@ -1141,27 +1299,31 @@ export function AutoCreationDirectorWorkspace({
         </div>
         <Text className="auto-director-rhythm-summary">{model.longformRhythm.summary}</Text>
         <div className="auto-director-rhythm-grid">
-          {model.longformRhythm.signals.map(signal => (
-            <button
-              key={signal.key}
-              type="button"
-              className={`auto-director-rhythm-signal auto-director-rhythm-signal-${signal.status}`}
-              onClick={() => onAction({
+          {model.longformRhythm.signals.map(signal => {
+            const signalAction: AutoCreationDirectorAction = {
                 area: 'planning',
                 key: signal.actionKey,
                 label: signal.label,
                 description: signal.detail,
                 modelCall: false,
-              })}
-            >
-              <span>
-                <strong>{signal.label}</strong>
-                <Tag color={rhythmColor(signal.status)} bordered={false}>{rhythmLabel(signal.status)}</Tag>
-              </span>
-              <em>{signal.score}</em>
-              <Text type="secondary">{signal.detail}</Text>
-            </button>
-          ))}
+              }
+            return (
+              <ActionSurfaceButton
+                key={signal.key}
+                action={signalAction}
+                className={`auto-director-rhythm-signal auto-director-rhythm-signal-${signal.status}`}
+                loadingActionKey={loadingActionKey}
+                onAction={onAction}
+              >
+                <span>
+                  <strong>{signal.label}</strong>
+                  <Tag color={rhythmColor(signal.status)} bordered={false}>{rhythmLabel(signal.status)}</Tag>
+                </span>
+                <em>{signal.score}</em>
+                <Text type="secondary">{signal.detail}</Text>
+              </ActionSurfaceButton>
+            )
+          })}
         </div>
       </section>
 
@@ -1175,27 +1337,31 @@ export function AutoCreationDirectorWorkspace({
         </div>
         <Text className="auto-director-capacity-summary">{model.longformCapacity.summary}</Text>
         <div className="auto-director-capacity-grid">
-          {model.longformCapacity.signals.map(signal => (
-            <button
-              key={signal.key}
-              type="button"
-              className={`auto-director-capacity-signal auto-director-capacity-signal-${signal.status}`}
-              onClick={() => onAction({
+          {model.longformCapacity.signals.map(signal => {
+            const signalAction: AutoCreationDirectorAction = {
                 area: 'planning',
                 key: signal.actionKey,
                 label: signal.label,
                 description: signal.detail,
                 modelCall: false,
-              })}
-            >
-              <span>
-                <strong>{signal.label}</strong>
-                <Tag color={signal.status === 'ok' ? 'green' : signal.status === 'warn' ? 'gold' : 'red'} bordered={false}>{batchSignalLabel(signal.status)}</Tag>
-              </span>
-              <em>{signal.score}</em>
-              <Text type="secondary">{signal.detail}</Text>
-            </button>
-          ))}
+              }
+            return (
+              <ActionSurfaceButton
+                key={signal.key}
+                action={signalAction}
+                className={`auto-director-capacity-signal auto-director-capacity-signal-${signal.status}`}
+                loadingActionKey={loadingActionKey}
+                onAction={onAction}
+              >
+                <span>
+                  <strong>{signal.label}</strong>
+                  <Tag color={signal.status === 'ok' ? 'green' : signal.status === 'warn' ? 'gold' : 'red'} bordered={false}>{batchSignalLabel(signal.status)}</Tag>
+                </span>
+                <em>{signal.score}</em>
+                <Text type="secondary">{signal.detail}</Text>
+              </ActionSurfaceButton>
+            )
+          })}
         </div>
         {model.longformCapacity.fuelQueue.length > 0 && (
           <div className="auto-director-fuel-queue">
@@ -1498,26 +1664,26 @@ export function AutoCreationDirectorWorkspace({
           </div>
           <div className="auto-director-batch-release-list">
             {model.batchGuardrail.releaseWindow.allowedChapters.map(chapter => (
-              <button
+              <HintedSurfaceButton
                 key={`allowed-${chapter.chapterNo}`}
-                type="button"
                 className="auto-director-batch-release-chapter auto-director-batch-release-chapter-allowed"
+                tooltip={staticActionTooltip('panel', `定位到第 ${chapter.chapterNo} 章，查看已放行章节。`)}
                 onClick={() => onSelectChapter(chapter.chapterNo)}
               >
                 <span>第 {chapter.chapterNo} 章 · {chapter.title}</span>
                 <Tag color="green" bordered={false}>{chapter.reason}</Tag>
-              </button>
+              </HintedSurfaceButton>
             ))}
             {model.batchGuardrail.releaseWindow.blockedChapters.map(chapter => (
-              <button
+              <HintedSurfaceButton
                 key={`blocked-${chapter.chapterNo}`}
-                type="button"
                 className="auto-director-batch-release-chapter auto-director-batch-release-chapter-blocked"
+                tooltip={staticActionTooltip('panel', `定位到第 ${chapter.chapterNo} 章，查看阻塞原因。`)}
                 onClick={() => onSelectChapter(chapter.chapterNo)}
               >
                 <span>第 {chapter.chapterNo} 章 · {chapter.title}</span>
                 <Tag color="gold" bordered={false}>{chapter.reason}</Tag>
-              </button>
+              </HintedSurfaceButton>
             ))}
           </div>
         </div>
@@ -1582,15 +1748,15 @@ export function AutoCreationDirectorWorkspace({
             )}
             <div className="auto-director-batch-brief-chapters">
               {model.batchGuardrail.nextBatchBrief.chapters.map(chapter => (
-                <button
+                <HintedSurfaceButton
                   key={chapter.chapterNo}
-                  type="button"
                   className="auto-director-batch-brief-chapter"
+                  tooltip={staticActionTooltip('panel', `定位到第 ${chapter.chapterNo} 章，查看下一批任务书。`)}
                   onClick={() => onSelectChapter(chapter.chapterNo)}
                 >
                   <span>第 {chapter.chapterNo} 章 · {chapter.title}</span>
                   <Text type="secondary">{chapter.chapterTask || chapter.conflict || '待补章节任务'} · 钩子：{chapter.endingHook || '待补'}</Text>
-                </button>
+                </HintedSurfaceButton>
               ))}
             </div>
           </div>
@@ -1746,10 +1912,10 @@ export function AutoCreationDirectorWorkspace({
             </div>
             <div className="auto-director-batch-review-list">
               {model.batchReviewQueue.items.slice(0, 6).map(item => (
-                <button
+                <HintedSurfaceButton
                   key={`${item.chapterId || item.chapterNo}-${item.title}`}
-                  type="button"
                   className={`auto-director-batch-review-item auto-director-batch-review-item-${item.status}`}
+                  tooltip={staticActionTooltip('panel', `定位到第 ${item.chapterNo} 章，查看批次复盘结果。`)}
                   onClick={() => onSelectChapter(item.chapterNo)}
                 >
                   <span>
@@ -1763,7 +1929,7 @@ export function AutoCreationDirectorWorkspace({
                       ? `${item.wordCount ? `${item.wordCount} 字` : '正文已生成'}${item.score !== null ? ` · 质检 ${item.score}` : ''}${item.revised ? ' · 已修订' : ''}`
                       : item.error || '等待查看失败原因'}
                   </Text>
-                </button>
+                </HintedSurfaceButton>
               ))}
             </div>
           </div>

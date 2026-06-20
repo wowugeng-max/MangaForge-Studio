@@ -2711,6 +2711,20 @@ describe('buildRecoveryEvidenceReviewResolvedFeedback', () => {
 })
 
 describe('repairTaskActionLabel', () => {
+  test('shows an executable action for first30 chapter retention patch tasks', () => {
+    expect(repairTaskActionLabel({
+      task_type: 'chapter_retention_patch',
+      issue_type: '缺正文、章末钩子弱',
+      chapter_id: 1,
+    })).toBe('生成正文')
+
+    expect(repairTaskActionLabel({
+      task_type: 'chapter_retention_patch',
+      issue_type: '章末钩子弱',
+      chapter_id: 1,
+    })).toBe('补留存')
+  })
+
   test('labels single-chapter governance recheck recovery evidence tasks as evidence repair', () => {
     expect(repairTaskActionLabel({
       source: 'review_annotation_risk',

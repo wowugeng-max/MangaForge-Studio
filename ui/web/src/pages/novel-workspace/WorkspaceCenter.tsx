@@ -49,7 +49,6 @@ type EditorDisplayPrefs = { fontSize: number; lineHeight: number }
 type ChapterWordTargetMode = 'standard' | 'long' | 'custom'
 
 const EDITOR_DISPLAY_PREFS_KEY = 'novel.workspace.editorDisplayPrefs'
-const NOVEL_WRITING_DESK_COLLAPSED_KEY = 'novel.workspace.writingDeskCollapsed'
 const NOVEL_WRITING_AUX_COLLAPSED_KEY = 'novel.workspace.writingAuxCollapsed'
 const DEFAULT_EDITOR_DISPLAY_PREFS: EditorDisplayPrefs = { fontSize: 17, lineHeight: 32 }
 const EDITOR_DISPLAY_PRESETS: Array<EditorDisplayPrefs & { key: string; label: string }> = [
@@ -82,18 +81,6 @@ function loadEditorDisplayPrefs(): EditorDisplayPrefs {
 function saveEditorDisplayPrefs(prefs: EditorDisplayPrefs) {
   if (typeof window === 'undefined') return
   window.localStorage.setItem(EDITOR_DISPLAY_PREFS_KEY, JSON.stringify(prefs))
-}
-
-function loadWritingDeskCollapsed() {
-  if (typeof window === 'undefined') return true
-  const value = window.localStorage.getItem(NOVEL_WRITING_DESK_COLLAPSED_KEY)
-  if (value === null) return true
-  return value === 'true'
-}
-
-function saveWritingDeskCollapsed(collapsed: boolean) {
-  if (typeof window === 'undefined') return
-  window.localStorage.setItem(NOVEL_WRITING_DESK_COLLAPSED_KEY, collapsed ? 'true' : 'false')
 }
 
 function loadWritingAuxCollapsed() {
@@ -436,7 +423,6 @@ export function WorkspaceCenter({
   onDeliveryAction?: (key: NovelDeliveryActionKey) => void
 }) {
   const [editorDisplayPrefs, setEditorDisplayPrefs] = React.useState<EditorDisplayPrefs>(() => loadEditorDisplayPrefs())
-  const [writingDeskCollapsed, setWritingDeskCollapsed] = React.useState(() => loadWritingDeskCollapsed())
   const [writingAuxCollapsed, setWritingAuxCollapsed] = React.useState(() => loadWritingAuxCollapsed())
   const materialReady = !materialScore || Boolean(materialScore.can_generate)
   const materialRecommendations = Array.isArray(materialScore?.recommendations)
@@ -605,11 +591,20 @@ export function WorkspaceCenter({
             tags: deliverySummary.visible ? [deliverySummary.qualityLabel, deliverySummary.storyStateLabel].filter(Boolean) : ['待质检'],
           }
     : null
-  const draftBriefActionLoading = draftBriefSummary.actionKey === 'scene_cards'
-    ? generatingSceneCards
-    : ['build_brief', 'confirm_brief'].includes(String(draftBriefSummary.actionKey || ''))
-      ? Boolean(preDraftBriefLoading)
-      : generatingProse
+  const recommendedToolbarLoading = recommendedAction.key === 'diagnostics'
+    ? diagnosticsLoading
+    : recommendedAction.key === 'scene_cards'
+      ? generatingSceneCards
+      : recommendedAction.key === 'quality_card'
+        ? false
+        : generatingProse
+  const runRecommendedToolbarAction = () => {
+    if (recommendedAction.key === 'diagnostics') onOpenGenerationDiagnostics()
+    if (recommendedAction.key === 'scene_cards') onGenerateSceneCards()
+    if (recommendedAction.key === 'repair_generate') onRepairAndGenerateCurrentChapter()
+    if (recommendedAction.key === 'generate') onGenerateCurrentChapterProse()
+    if (recommendedAction.key === 'quality_card') onOpenQualityCard()
+  }
   const writingAuxToggleLabel = writingAuxCollapsed ? '展开辅助面板' : '收起辅助面板'
   const writingAuxToggleHint = writingAuxCollapsed
     ? '辅助面板已收起，编辑器优先显示'
@@ -627,15 +622,11 @@ export function WorkspaceCenter({
   }, [editorDisplayPrefs])
 
   React.useEffect(() => {
-    saveWritingDeskCollapsed(writingDeskCollapsed)
-  }, [writingDeskCollapsed])
-
-  React.useEffect(() => {
     saveWritingAuxCollapsed(writingAuxCollapsed)
   }, [writingAuxCollapsed])
 
   const secondaryActionMenu = (
-    <div className="novel-editor-action-popover">
+    <div className="novel-editor-action-popover novel-editor-secondary-actions">
       <div className="novel-editor-action-group novel-editor-action-group-prep">
         <div className="novel-editor-action-group-heading">
           <Text className="novel-editor-action-group-label">写前准备</Text>
@@ -733,7 +724,7 @@ export function WorkspaceCenter({
 
       {!isEmptyProject && activeChapter && (
         <>
-          <div className={`novel-editor-toolbar ${writingDeskCollapsed ? 'novel-editor-toolbar-collapsed' : ''}`} style={{
+          <div className="novel-editor-toolbar" style={{
             flexShrink: 0,
           }}>
             <div className="novel-editor-toolbar-meta">
@@ -751,159 +742,40 @@ export function WorkspaceCenter({
                 )}
               </div>
             </div>
+            <div className="novel-editor-primary-entry">
+              <Tag className="novel-editor-primary-phase" bordered={false}>{aiResponsibility.phaseLabel}</Tag>
+              <Tooltip title={`${recommendedAction.label}：${recommendedAction.reason}`}>
+                <Button
+                  type="primary"
+                  size="small"
+                  className={commandClass(recommendedAction.key, 'novel-editor-primary-command novel-editor-primary-action-main')}
+                  icon={<PlayCircleOutlined />}
+                  loading={recommendedToolbarLoading}
+                  onClick={runRecommendedToolbarAction}
+                >
+                  {recommendedAction.label}
+                </Button>
+              </Tooltip>
+              {recommendedAction.phase === 'draft' && renderWordTargetControl()}
+            </div>
             <div className="novel-editor-toolbar-controls">
               <Text className="novel-editor-word-count" type="secondary">{wc(activeChapter.chapter_text)} 字</Text>
               <SaveIndicator status={saveStatus} />
               <EditorDisplayControls prefs={editorDisplayPrefs} onChange={setEditorDisplayPrefs} />
-              <Tooltip title={writingDeskCollapsed ? '展开写作指挥台' : '收起写作指挥台'}>
-                <Button
-                  size="small"
-                  className="novel-editor-desk-toggle"
-                  icon={writingDeskCollapsed ? <DownOutlined /> : <UpOutlined />}
-                  onClick={() => setWritingDeskCollapsed(prev => !prev)}
-                >
-                  {writingDeskCollapsed ? '展开指挥台' : '收起指挥台'}
-                </Button>
-              </Tooltip>
+              <Popover content={secondaryActionMenu} trigger="click" placement="bottomRight">
+                <Button className="novel-editor-more-actions" size="small" icon={<MoreOutlined />}>更多</Button>
+              </Popover>
             </div>
-            <Tooltip title={`${recommendedAction.label}：${recommendedAction.reason}`}>
-              <Text className="novel-editor-toolbar-recommendation">
-                推荐：{recommendedAction.label} · {recommendedAction.reason}
-              </Text>
-            </Tooltip>
-            {writingDeskCollapsed ? (
-              <div className="novel-editor-collapsed-summary">
-                <Tag className="novel-editor-collapsed-phase" bordered={false}>{aiResponsibility.phaseLabel}</Tag>
-                <Tooltip title={`${recommendedAction.reason}；${aiResponsibility.actionLabel}`}>
-                  <Text className="novel-editor-collapsed-recommendation">推荐：{recommendedAction.label}</Text>
-                </Tooltip>
-                <Space className="novel-editor-collapsed-actions" size={6}>
-                  <Popover content={secondaryActionMenu} trigger="click" placement="bottomRight">
-                    <Button size="small" className="novel-editor-more-actions-inline" icon={<MoreOutlined />}>更多操作</Button>
-                  </Popover>
-                </Space>
-              </div>
-            ) : (
-              <Space className="novel-editor-action-row novel-editor-toolbar-actions" size={10} wrap>
-                <div className="novel-editor-action-flow novel-editor-stagebar">
-                  <div className="novel-editor-action-group novel-editor-stage novel-editor-stage-prep novel-editor-action-group-prep">
-                    <div className="novel-editor-action-group-heading">
-                      <Text className="novel-editor-action-group-label">写前准备</Text>
-                      {recommendedBadge('prep')}
-                    </div>
-                    <Space className="novel-editor-command-cluster" size={4}>
-                      <Tooltip title="生成前诊断">
-                        <Button size="small" className={commandClass('diagnostics', 'novel-editor-icon-command')} loading={diagnosticsLoading} onClick={onOpenGenerationDiagnostics}>诊断</Button>
-                      </Tooltip>
-                      <Tooltip title="生成或刷新场景卡">
-                        <Button size="small" className={commandClass('scene_cards', 'novel-editor-icon-command')} icon={<FileTextOutlined />} loading={generatingSceneCards} onClick={onGenerateSceneCards}>场景卡</Button>
-                      </Tooltip>
-                    </Space>
-                  </div>
-                  <div className="novel-editor-action-group novel-editor-stage novel-editor-stage-draft novel-editor-action-group-primary novel-editor-action-group-draft">
-                    <div className="novel-editor-action-group-heading">
-                      <Text className="novel-editor-action-group-label">生成正文</Text>
-                      {recommendedBadge('draft')}
-                    </div>
-                    <Space className="novel-editor-command-cluster" size={4}>
-                      <Tooltip title="创建可恢复流水线，并停在场景卡确认阶段">
-                        <Button size="small" className={commandClass(undefined, 'novel-editor-muted-command')} loading={pipelineLoading} onClick={onStartChapterPipeline}>流水线</Button>
-                      </Tooltip>
-                      {!materialReady && (
-                        <Tooltip title={materialRecommendations.slice(0, 4).join('；') || '自动生成场景卡后继续正文生成'}>
-                          <Button
-                            type="primary"
-                            size="small"
-                            className={commandClass('repair_generate', 'novel-editor-primary-command')}
-                            icon={<PlayCircleOutlined />}
-                            loading={generatingProse}
-                            onClick={onRepairAndGenerateCurrentChapter}
-                          >
-                            补齐并生成
-                          </Button>
-                        </Tooltip>
-                      )}
-                      <Tooltip title={materialReady ? '生成正文' : '材料不足时建议先使用“补齐并生成”；仍可直接生成并在弹窗中选择是否继续'}>
-                        <Button
-                          type={materialReady ? 'primary' : 'default'}
-                          size="small"
-                          className={commandClass('generate', materialReady ? 'novel-editor-primary-command' : '')}
-                          icon={<PlayCircleOutlined />}
-                          loading={generatingProse}
-                          onClick={onGenerateCurrentChapterProse}
-                        >
-                          生成
-                        </Button>
-                      </Tooltip>
-                    </Space>
-                    {renderWordTargetControl()}
-                  </div>
-                  <div className="novel-editor-action-group novel-editor-stage novel-editor-stage-review novel-editor-action-group-review">
-                    <div className="novel-editor-action-group-heading">
-                      <Text className="novel-editor-action-group-label">写后复检</Text>
-                      {recommendedBadge('review')}
-                    </div>
-                    <Space className="novel-editor-command-cluster" size={4}>
-                      <Tooltip title="快速验收当前版本是否达到交稿条件">
-                        <Button size="small" className={commandClass('quality_card')} onClick={onOpenQualityCard}>交稿质检</Button>
-                      </Tooltip>
-                      <Tooltip title="生成深度编辑报告，用于定位问题和指导修订">
-                        <Button size="small" className={commandClass(undefined, 'novel-editor-muted-command')} loading={editorReportLoading} onClick={onCreateEditorReport}>编辑报告</Button>
-                      </Tooltip>
-                    </Space>
-                  </div>
-                </div>
-                <Popover content={secondaryActionMenu} trigger="click" placement="bottomRight">
-                  <Button className="novel-editor-more-actions" size="small" icon={<MoreOutlined />}>更多操作</Button>
-                </Popover>
-              </Space>
-            )}
           </div>
 
           <div className={`novel-writing-aux-rail ${writingAuxCollapsed ? 'is-collapsed' : 'is-expanded'}`} aria-label="写作辅助面板状态">
             <div className="novel-writing-aux-summary">
-              <Tag className="novel-writing-aux-role" bordered={false}>{aiResponsibility.roleLabel}</Tag>
-              <Tooltip title={`${recommendedAction.label}：${recommendedAction.reason}`}>
-                <Text className="novel-writing-aux-focus">{recommendedAction.label} · {aiResponsibility.actionLabel}</Text>
-              </Tooltip>
               {writingQueue?.visible && <Tag bordered={false}>队列 {writingAuxQueueSummary}</Tag>}
               {deliverySummary.visible && <Tag bordered={false}>交稿 {deliverySummary.statusLabel}</Tag>}
               {chapterHandoffDesk?.visible && <Tag bordered={false}>交接 {chapterHandoffDesk.label}</Tag>}
               {draftBriefSummary.visible && <Tag bordered={false}>任务书 {draftBriefSummary.statusLabel}</Tag>}
             </div>
-            <Space className="novel-writing-aux-actions" size={6} wrap>
-              {writingAuxCollapsed && queueFocus && (
-                <Button
-                  size="small"
-                  type="primary"
-                  className="novel-writing-aux-action"
-                  loading={queueFocus.loading}
-                  disabled={queueFocus.disabled}
-                  onClick={queueFocus.run}
-                >
-                  {queueFocus.actionLabel}
-                </Button>
-              )}
-              {writingAuxCollapsed && !queueFocus && deliverySummary.actionKey && (
-                <Button
-                  size="small"
-                  className="novel-writing-aux-action"
-                  loading={deliveryActionLoading}
-                  onClick={() => onDeliveryAction?.(deliverySummary.actionKey!)}
-                >
-                  {deliverySummary.compactActionLabel}
-                </Button>
-              )}
-              {writingAuxCollapsed && !queueFocus && !deliverySummary.actionKey && draftBriefSummary.actionKey && (
-                <Button
-                  size="small"
-                  className="novel-writing-aux-action"
-                  loading={draftBriefActionLoading}
-                  onClick={runDraftBriefAction}
-                >
-                  {draftBriefSummary.actionLabel}
-                </Button>
-              )}
+            <Space className="novel-writing-aux-controls" size={6} wrap>
               <Tooltip title={writingAuxToggleHint}>
                 <Button
                   size="small"
@@ -920,18 +792,6 @@ export function WorkspaceCenter({
 
           {!writingAuxCollapsed && (
             <div className="novel-writing-support-stack" aria-label="写作辅助面板">
-          <div className={`novel-ai-responsibility-strip novel-ai-responsibility-strip-${aiResponsibility.tone}`}>
-            <div className="novel-ai-responsibility-main">
-              <span className="novel-ai-responsibility-label">AI 当前职责</span>
-              <Tag className="novel-ai-responsibility-role" bordered={false}>{aiResponsibility.roleLabel}</Tag>
-              <Text className="novel-ai-responsibility-focus">{aiResponsibility.focus}</Text>
-            </div>
-            <div className="novel-ai-responsibility-next">
-              <Text type="secondary">{aiResponsibility.phaseLabel}</Text>
-              <strong>{aiResponsibility.actionLabel}</strong>
-            </div>
-          </div>
-
           {writingQueue?.visible && (
             <div className="novel-writing-queue-strip" aria-label="写作队列，滚动规划章节会自动进入">
               <div className="novel-writing-queue-head">
@@ -1001,16 +861,6 @@ export function WorkspaceCenter({
                     {queueFocus.tags.map(label => (
                       <Tag key={label} color={queueFocus.tone === 'delivery' ? 'blue' : queueFocus.tone === 'draft' ? 'green' : 'gold'} bordered={false}>{label}</Tag>
                     ))}
-                    <Button
-                      size="small"
-                      type="primary"
-                      className="novel-writing-queue-focus-action"
-                      loading={queueFocus.loading}
-                      disabled={queueFocus.disabled}
-                      onClick={queueFocus.run}
-                    >
-                      {queueFocus.actionLabel}
-                    </Button>
                   </Space>
                 </div>
               )}
@@ -1312,18 +1162,6 @@ export function WorkspaceCenter({
                 )}
                 <Text className="novel-delivery-status-reason">{deliverySummary.reason}</Text>
               </div>
-              {deliverySummary.actionKey && (
-                <Button
-                  className="novel-delivery-status-action"
-                  type={deliverySummary.tone === 'ready' ? 'primary' : 'default'}
-                  size="small"
-                  loading={deliveryActionLoading}
-                  onClick={() => onDeliveryAction?.(deliverySummary.actionKey!)}
-                >
-                  <span className="novel-delivery-status-action-full">{deliverySummary.actionLabel}</span>
-                  <span className="novel-delivery-status-action-compact">{deliverySummary.compactActionLabel}</span>
-                </Button>
-              )}
             </div>
           )}
 
@@ -1649,17 +1487,6 @@ export function WorkspaceCenter({
                   </div>
                 )}
               </div>
-              {draftBriefSummary.actionKey && (
-                <Button
-                  className="novel-draft-brief-action"
-                  type={draftBriefSummary.actionKey === 'generate' ? 'primary' : 'default'}
-                  size="small"
-                  loading={draftBriefActionLoading}
-                  onClick={runDraftBriefAction}
-                >
-                  {draftBriefSummary.actionLabel}
-                </Button>
-              )}
             </div>
           )}
             </div>

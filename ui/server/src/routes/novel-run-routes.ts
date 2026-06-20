@@ -41,6 +41,16 @@ const AUDIT_SOURCE_LABELS: Record<string, string> = {
   propagation_debt_llm: 'AI传播债务方案',
 }
 
+const REPAIR_TASK_RUN_TYPES = new Set([
+  'mechanical_qa_repair',
+  'first30_retention_repair',
+  'longform_production_repair',
+])
+
+function isRepairTaskRunType(runType: any) {
+  return REPAIR_TASK_RUN_TYPES.has(String(runType || ''))
+}
+
 function compactAuditText(value: any, limit = 160) {
   return String(value || '').replace(/\s+/g, ' ').trim().slice(0, limit)
 }
@@ -328,8 +338,23 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
       const normalizeRun = (run: any) => {
         const payload = parseJsonLikePayload(run.output_ref) || {}
         const chapters = Array.isArray(payload.chapters) ? payload.chapters : []
+        const repairTasks = Array.isArray(payload.tasks) ? payload.tasks : []
+        const isRepairTaskRun = isRepairTaskRunType(run.run_type)
         const done = chapters.filter((item: any) => ['success', 'skipped', 'written'].includes(item.status)).length
-        const percent = chapters.length ? Math.round((done / chapters.length) * 100) : ['success', 'ok', 'completed'].includes(run.status) ? 100 : ['running'].includes(run.status) ? 50 : 0
+        const repairResolved = repairTasks.filter((task: any) => task.task_status === 'resolved').length
+        const repairNeedsReview = repairTasks.filter((task: any) => task.task_status === 'needs_review').length
+        const repairOpen = repairTasks.filter((task: any) => !task.task_status || task.task_status === 'open' || task.task_status === 'in_progress').length
+        const repairPercent = repairTasks.length
+          ? Math.round(((repairResolved + repairNeedsReview * 0.5) / repairTasks.length) * 100)
+          : 0
+        const percent = isRepairTaskRun && repairTasks.length
+          ? repairPercent
+          : chapters.length
+            ? Math.round((done / chapters.length) * 100)
+            : ['success', 'ok', 'completed'].includes(run.status) ? 100 : ['running'].includes(run.status) ? 50 : 0
+        const repairPhase = repairTasks.length
+          ? `待处理 ${repairOpen} 项，需复查 ${repairNeedsReview} 项，已处理 ${repairResolved}/${repairTasks.length}`
+          : ''
         const lastError = payload.last_error?.error || payload.error || run.error_message || ''
         return {
           id: run.id,
@@ -365,16 +390,24 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
                       : run.run_type,
           step_name: run.step_name,
           status: run.status,
-          phase: payload.phase || payload.current_step || run.step_name || '',
+          phase: payload.phase || (isRepairTaskRun ? repairPhase : payload.current_step) || run.step_name || '',
           progress: percent,
           current_index: payload.current_index ?? null,
           chapter_count: chapters.length,
+          task_count: repairTasks.length,
+          repair_task_summary: isRepairTaskRun ? {
+            total: repairTasks.length,
+            open: repairOpen,
+            needs_review: repairNeedsReview,
+            resolved: repairResolved,
+          } : null,
           production_mode: payload.production_mode || payload.policy?.production_mode || '',
           failed_count: chapters.filter((item: any) => item.status === 'failed').length,
           approval_count: chapters.filter((item: any) => item.status === 'needs_approval').length,
-          can_pause: ['running', 'ready'].includes(run.status),
-          can_resume: ['paused', 'failed', 'ready'].includes(run.status),
+          can_pause: !isRepairTaskRun && ['running', 'ready'].includes(run.status),
+          can_resume: !isRepairTaskRun && ['paused', 'failed', 'ready'].includes(run.status),
           can_execute: run.run_type === 'chapter_group_generation' && ['ready', 'paused', 'failed', 'running'].includes(run.status),
+          can_process_repair_tasks: isRepairTaskRun && repairTasks.length > 0 && ['ready', 'paused', 'failed', 'running'].includes(run.status),
           error: lastError,
           recovery_plan: lastError ? (payload.last_error?.recovery_plan || null) : null,
           created_at: run.created_at,
@@ -663,6 +696,12 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
           output_ref: JSON.stringify({ ...payload, phase: '等待继续执行', resumed_at: new Date().toISOString() }),
         })
         return res.json({ ok: true, run: updated, execute_endpoint: `/api/novel/projects/${run.project_id}/chapter-groups/${run.id}/execute`, group: parseJsonLikePayload(updated?.output_ref) })
+      }
+      if (isRepairTaskRunType(run.run_type)) {
+        return res.status(400).json({
+          error: '修复任务需要在任务详情中逐项处理，不支持流水线继续。',
+          error_code: 'REPAIR_TASK_RUN_NOT_RESUMABLE',
+        })
       }
       const steps = Array.isArray(payload.steps) ? payload.steps : ctx.buildPipelineSteps()
       const currentStep = String(req.body.current_step || payload.can_resume_from || payload.current_step || 'draft')

@@ -1,5 +1,5 @@
 import type { Express } from 'express'
-import { readProviders, writeProviders, type ProviderRecord } from '../provider-store'
+import { normalizeProviderEndpoints, readProviders, writeProviders, type ProviderRecord } from '../provider-store'
 import { readKeys } from '../key-store'
 import { coerceBoolean } from '../boolean-utils'
 
@@ -28,7 +28,7 @@ function normalizeProviderInput(body: any, fallback?: ProviderRecord): ProviderR
     default_base_url: String(body.default_base_url ?? body.defaultBaseUrl ?? fallback?.default_base_url ?? ''),
     is_active: coerceBoolean(body.is_active ?? body.isActive, fallback?.is_active ?? true),
     icon: String(body.icon ?? fallback?.icon ?? ''),
-    endpoints: body.endpoints && typeof body.endpoints === 'object' ? body.endpoints : (fallback?.endpoints ?? {}),
+    endpoints: normalizeProviderEndpoints(body.endpoints && typeof body.endpoints === 'object' ? body.endpoints : (fallback?.endpoints ?? {})),
     custom_headers: body.custom_headers && typeof body.custom_headers === 'object'
       ? body.custom_headers
       : body.customHeaders && typeof body.customHeaders === 'object'

@@ -4,6 +4,7 @@ import { readFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { buildFallbackTestUrl } from './keys'
+import { resetOpenAIResponsesCreateForTest, setOpenAIResponsesCreateForTest } from '../llm/openai-responses-sdk'
 
 let workspaces: string[] = []
 
@@ -60,6 +61,7 @@ async function call(handler: any, req: any = {}) {
 afterEach(async () => {
   await Promise.all(workspaces.map(workspace => rm(workspace, { recursive: true, force: true })))
   workspaces = []
+  resetOpenAIResponsesCreateForTest()
 })
 
 describe('provider key protocol tests', () => {
@@ -89,6 +91,147 @@ describe('provider key protocol tests', () => {
     expect(source).toContain("provider.endpoints?.responses")
     expect(source).toContain('buildCodexResponsesBody')
     expect(source).not.toContain("input: [{ role: 'user', content: 'ping' }]")
+  })
+
+  test('fallback key probe sends AnyRouter Codex Responses requests through fetch SSE transport', async () => {
+    const { probeKeyFallback } = await import('./keys')
+    const provider = {
+      id: 'any',
+      display_name: 'AnyRouter',
+      api_format: 'codex_responses',
+      auth_type: 'bearer',
+      default_base_url: 'https://anyrouter.top/v1',
+      custom_headers: { 'X-Provider': 'anyrouter' },
+      endpoints: {},
+    }
+    const key = {
+      id: 1,
+      provider: 'any',
+      key: 'sk-test',
+      is_active: true,
+      quota_total: 0,
+      quota_used: 0,
+      tags: [],
+    } as any
+
+    const calls: any[] = []
+    const previousFetch = globalThis.fetch
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({
+        url: String(url),
+        headers: init?.headers as Record<string, string>,
+        body: JSON.parse(String(init?.body || '{}')),
+      })
+      return new Response([
+        'data: {"type":"response.output_text.delta","delta":"OK"}',
+        'data: {"type":"response.completed","response":{"status":"completed"}}',
+        'data: [DONE]',
+        '',
+      ].join('\n\n'), { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+    }) as any
+    setOpenAIResponsesCreateForTest(async call => {
+      throw new Error(`OpenAI SDK should not be used for AnyRouter Codex Responses key probes: ${call.baseURL}`)
+    })
+
+    try {
+      const result = await probeKeyFallback(provider, key)
+
+      expect(result.valid).toBe(true)
+      expect(calls).toHaveLength(1)
+      expect(calls[0].url).toBe('https://anyrouter.top/v1/responses')
+      expect(calls[0].headers.Authorization).toBe('Bearer sk-test')
+      expect(calls[0].headers.Accept).toBe('text/event-stream')
+      expect(calls[0].headers['X-Provider']).toBe('anyrouter')
+      expect(calls[0].body).toMatchObject({
+        model: 'gpt-5.5',
+        input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'ping' }] }],
+        tools: [],
+        tool_choice: 'auto',
+        parallel_tool_calls: true,
+        store: false,
+        stream: true,
+        include: ['reasoning.encrypted_content'],
+        reasoning: { effort: 'xhigh' },
+        instructions: 'You are Codex, a coding agent based on GPT-5.',
+        text: { format: { type: 'text' } },
+      })
+      expect(calls[0].body.prompt_cache_key).toBeTruthy()
+      expect(calls[0].body.client_metadata).toMatchObject({
+        session_id: calls[0].body.prompt_cache_key,
+        thread_id: calls[0].body.prompt_cache_key,
+      })
+      expect(calls[0].body).not.toHaveProperty('messages')
+      expect(calls[0].body).not.toHaveProperty('temperature')
+      expect(calls[0].body).not.toHaveProperty('max_tokens')
+    } finally {
+      globalThis.fetch = previousFetch
+    }
+  })
+
+  test('fallback key probe sends Codex client compatibility fields through the OpenAI SDK transport', async () => {
+    const { probeKeyFallback } = await import('./keys')
+    const provider = {
+      id: 'codex-proxy',
+      display_name: 'Codex Proxy',
+      api_format: 'codex_responses',
+      auth_type: 'bearer',
+      default_base_url: 'https://api.openai.com/v1',
+      probe_model: 'gpt-5-codex',
+      custom_headers: { 'X-Provider': 'codex-proxy' },
+      endpoints: {},
+    }
+    const key = {
+      id: 1,
+      provider: 'codex-proxy',
+      key: 'sk-test',
+      is_active: true,
+      quota_total: 0,
+      quota_used: 0,
+      tags: [],
+    } as any
+
+    let capturedCall: any = null
+    const previousFetch = globalThis.fetch
+    globalThis.fetch = (async () => {
+      throw new Error('fetch should not be used for OpenAI SDK Codex Responses key probes')
+    }) as any
+    setOpenAIResponsesCreateForTest(async call => {
+      capturedCall = call
+      return { output_text: 'OK', status: 'completed' }
+    })
+
+    try {
+      const result = await probeKeyFallback(provider, key)
+
+      expect(result.valid).toBe(true)
+      expect(capturedCall).toMatchObject({
+        apiKey: 'sk-test',
+        baseURL: 'https://api.openai.com/v1',
+        headers: { 'X-Provider': 'codex-proxy' },
+      })
+      expect(capturedCall.body).toMatchObject({
+        model: 'gpt-5-codex',
+        input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'ping' }] }],
+        tools: [],
+        tool_choice: 'auto',
+        parallel_tool_calls: true,
+        store: false,
+        stream: false,
+        include: ['reasoning.encrypted_content'],
+        instructions: 'You are Codex, a coding agent based on GPT-5.',
+        text: { format: { type: 'text' } },
+      })
+      expect(capturedCall.body.prompt_cache_key).toBeTruthy()
+      expect(capturedCall.body.client_metadata).toMatchObject({
+        session_id: capturedCall.body.prompt_cache_key,
+        thread_id: capturedCall.body.prompt_cache_key,
+      })
+      expect(capturedCall.body).not.toHaveProperty('messages')
+      expect(capturedCall.body).not.toHaveProperty('temperature')
+      expect(capturedCall.body).not.toHaveProperty('max_tokens')
+    } finally {
+      globalThis.fetch = previousFetch
+    }
   })
 
   test('does not shadow the upstream model sync route from key routes', () => {
@@ -971,6 +1114,72 @@ describe('provider key protocol tests', () => {
       expect(stored[0]).toMatchObject({
         is_active: false,
         failure_count: 3,
+      })
+      expect(stored[0].last_checked).toBeTruthy()
+    } finally {
+      globalThis.fetch = previousFetch
+    }
+  })
+
+  test('single key test keeps retryable AnyRouter capacity failures from disabling the key', async () => {
+    const workspace = await tempWorkspace()
+    await writeFile(join(workspace, 'providers.json'), JSON.stringify([
+      {
+        id: 'any',
+        display_name: 'AnyRouter',
+        service_type: 'llm',
+        api_format: 'codex_responses',
+        auth_type: 'bearer',
+        supported_modalities: ['chat'],
+        default_base_url: 'https://anyrouter.top/v1',
+        is_active: true,
+      },
+    ]))
+    await writeFile(join(workspace, 'keys.json'), JSON.stringify([
+      { id: 1, provider: 'any', key: 'sk-test', is_active: true, failure_count: 2 },
+    ]))
+    await writeFile(join(workspace, 'models.json'), JSON.stringify([
+      {
+        id: 11,
+        api_key_id: 1,
+        provider: 'any',
+        display_name: 'gpt-5.5',
+        model_name: 'gpt-5.5',
+        capabilities: { chat: true },
+        health_status: 'unknown',
+      },
+    ]))
+
+    const previousFetch = globalThis.fetch
+    globalThis.fetch = (async () => new Response(JSON.stringify({
+      message: '当前模型 gpt-5.5 负载已经达到上限，请稍后重试',
+      type: 'new_api_error',
+      code: 'get_channel_failed',
+    }), { status: 500 })) as any
+    setOpenAIResponsesCreateForTest(async () => {
+      throw new Error('OpenAI SDK should not be used for AnyRouter capacity probes')
+    })
+
+    try {
+      const { registerKeyRoutes } = await import('./keys')
+      const { app, handlers } = createRouteHarness()
+      registerKeyRoutes(app as any, () => workspace)
+
+      const response = await call(handlers.get('POST /api/keys/:id/test'), { params: { id: '1' } })
+
+      expect(response.statusCode).toBe(200)
+      expect(response.body).toMatchObject({
+        valid: false,
+        status: 500,
+        retryable: true,
+      })
+      expect(response.body.error).toContain('上游临时繁忙')
+      expect(response.body.error).toContain('gpt-5.5')
+
+      const stored = JSON.parse(await readFile(join(workspace, 'keys.json'), 'utf8'))
+      expect(stored[0]).toMatchObject({
+        is_active: true,
+        failure_count: 2,
       })
       expect(stored[0].last_checked).toBeTruthy()
     } finally {

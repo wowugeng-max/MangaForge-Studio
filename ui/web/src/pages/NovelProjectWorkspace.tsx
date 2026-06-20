@@ -272,7 +272,192 @@ export default function NovelProjectWorkspace() {
 
   const proseEditorRef = useRef<EditorView | null>(null)
 
-  const renderPreflightModalContent = (payload: any) => {
+  type GenerationPreflightRepairAction = {
+    key: string
+    label: string
+    description: string
+    modelCall: boolean
+    primary?: boolean
+    run: () => Promise<void> | void
+  }
+
+  const generationPreflightChecks = (payload: any) => {
+    const preflight = payload?.preflight || payload?.context_package?.preflight || {}
+    return Array.isArray(preflight.checks) ? preflight.checks : []
+  }
+
+  const generationPreflightMissingKeys = (payload: any) => {
+    const checks = generationPreflightChecks(payload)
+    return new Set(checks.filter((check: any) => !check.ok).map((check: any) => String(check.key || '').trim()).filter(Boolean))
+  }
+
+  const generationPreflightTargetChapterId = (payload: any, fallbackChapterId?: number) => {
+    const candidates = [
+      fallbackChapterId,
+      payload?.chapter_id,
+      payload?.chapter?.id,
+      payload?.context_package?.chapter_target?.id,
+      payload?.contextPackage?.chapter_target?.id,
+      payload?.contextPackage?.chapterTarget?.id,
+    ]
+    return Number(candidates.find(item => Number(item || 0) > 0) || 0)
+  }
+
+  const repairGenerationPreflightGaps = async (payload: any, options: { targetChapterId?: number; repairKeys?: string[]; continueAfterRepair?: () => void; closeModal?: () => void } = {}) => {
+    const targetChapterId = generationPreflightTargetChapterId(payload, options.targetChapterId)
+    if (!targetChapterId) return message.warning('无法定位需要补齐的章节')
+    if (!selectedModelId) return message.warning('请先选择写作模型')
+    if (!await flushPendingSave()) return
+
+    const missingKeys = options.repairKeys?.length ? new Set(options.repairKeys) : generationPreflightMissingKeys(payload)
+    const needsCharacterRepair = ['characters', 'character_state', 'no_repeat'].some(key => missingKeys.has(key))
+    const needsSettingWorkshop = missingKeys.has('setting_workshop')
+    const needsChapterSettingUsage = missingKeys.has('chapter_setting_usage')
+    if (!needsCharacterRepair && !needsSettingWorkshop && !needsChapterSettingUsage) {
+      options.closeModal?.()
+      return message.info('当前没有可自动补齐的前置检查缺口')
+    }
+
+    const messageKey = 'generation-preflight-repair'
+    message.loading({ content: '正在自动补齐生成材料...', key: messageKey, duration: 0 })
+    try {
+      const repaired: string[] = []
+      if (needsCharacterRepair) {
+        const res = await apiClient.post(`/novel/chapters/${targetChapterId}/auto-repair-context`, {
+          project_id: projectId,
+          model_id: selectedModelId,
+        })
+        const applied = Array.isArray(res.data?.applied) ? res.data.applied : []
+        const characterCreatedCount = applied.filter((item: any) => item.type === 'character_created').length
+        repaired.push(characterCreatedCount > 0 ? `角色卡已补 ${characterCreatedCount} 张` : '角色材料已刷新，未新增角色卡')
+      }
+      if (needsSettingWorkshop) {
+        const res = await apiClient.post(`/novel/projects/${projectId}/settings/incubate-from-project`, {
+          use_model: true,
+          model_id: selectedModelId,
+        })
+        repaired.push(`设定工坊不足 ${res.data?.total || 0} 条`)
+      }
+      if (needsChapterSettingUsage) {
+        const res = await apiClient.post(`/novel/chapters/${targetChapterId}/settings-usage/suggest`, {
+          project_id: projectId,
+          model_id: selectedModelId,
+          use_model: true,
+          apply: true,
+        })
+        repaired.push(`本章设定调用不足 ${res.data?.total || 0} 条`)
+      }
+      await loadProjectModules()
+      options.closeModal?.()
+      message.success({ content: repaired.length ? `已自动补齐：${repaired.join('；')}` : '材料已刷新', key: messageKey, duration: 3 })
+      options.continueAfterRepair?.()
+    } catch (error: any) {
+      message.error({ content: error?.response?.data?.error || error?.message || '自动补齐生成材料失败', key: messageKey, duration: 4 })
+    }
+  }
+
+  const buildGenerationPreflightRepairActions = (payload: any, options: { targetChapterId?: number; onRepairComplete?: () => void; closeModal?: () => void } = {}): GenerationPreflightRepairAction[] => {
+    const missingKeys = generationPreflightMissingKeys(payload)
+    const targetChapterId = generationPreflightTargetChapterId(payload, options.targetChapterId)
+    const actions: GenerationPreflightRepairAction[] = []
+    const repairableKeys = ['characters', 'character_state', 'no_repeat', 'setting_workshop', 'chapter_setting_usage'].filter(key => missingKeys.has(key))
+    if (repairableKeys.length > 1 && options.onRepairComplete) {
+      actions.push({
+        key: 'repair_all_generation_preflight',
+        label: '自动补齐并继续生成',
+        description: '依次处理角色卡不足、设定工坊不足、本章设定调用不足，刷新材料后重新生成。',
+        modelCall: true,
+        primary: true,
+        run: () => repairGenerationPreflightGaps(payload, {
+          targetChapterId,
+          repairKeys: repairableKeys,
+          continueAfterRepair: options.onRepairComplete,
+          closeModal: options.closeModal,
+        }),
+      })
+    }
+    if (missingKeys.has('characters') || missingKeys.has('character_state') || missingKeys.has('no_repeat')) {
+      actions.push({
+        key: 'repair_character_cards',
+        label: '补角色卡',
+        description: '修复角色卡不足：调用大模型补齐角色卡、角色当前状态和本章禁止重复材料。',
+        modelCall: true,
+        run: () => repairGenerationPreflightGaps(payload, {
+          targetChapterId,
+          repairKeys: ['characters', 'character_state', 'no_repeat'],
+          closeModal: options.closeModal,
+        }),
+      })
+    }
+    if (missingKeys.has('setting_workshop')) {
+      actions.push({
+        key: 'incubate_setting_workshop',
+        label: '提炼设定工坊',
+        description: '修复设定工坊不足：调用大模型从项目资料、世界观、角色和大纲提炼设定资产。',
+        modelCall: true,
+        run: () => repairGenerationPreflightGaps(payload, {
+          targetChapterId,
+          repairKeys: ['setting_workshop'],
+          closeModal: options.closeModal,
+        }),
+      })
+    }
+    if (missingKeys.has('chapter_setting_usage')) {
+      actions.push({
+        key: 'match_chapter_setting_usage',
+        label: '匹配本章设定调用',
+        description: '修复本章设定调用不足：调用大模型为本章标记必用、允许和禁揭设定。',
+        modelCall: true,
+        run: () => repairGenerationPreflightGaps(payload, {
+          targetChapterId,
+          repairKeys: ['chapter_setting_usage'],
+          closeModal: options.closeModal,
+        }),
+      })
+    }
+    if (missingKeys.has('setting_workshop') || missingKeys.has('chapter_setting_usage')) {
+      actions.push({
+        key: 'open_setting_workshop',
+        label: '打开设定工坊',
+        description: '不调用大模型，只跳转到设定资产工作台手动补齐。',
+        modelCall: false,
+        run: () => {
+          options.closeModal?.()
+          openStoryAssetsWorkspace()
+        },
+      })
+    }
+    return actions
+  }
+
+  const renderGenerationPreflightRepairActions = (actions: GenerationPreflightRepairAction[]) => {
+    if (!actions.length) return null
+    return (
+      <div>
+        <Text strong>可自动处理</Text>
+        <Space direction="vertical" size={8} style={{ width: '100%', marginTop: 8 }}>
+          {actions.map(action => (
+            <div key={action.key} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+              <Space direction="vertical" size={2} style={{ flex: '1 1 320px' }}>
+                <Space size={6} wrap>
+                  <Text>{action.label}</Text>
+                  <Tag color={action.modelCall ? 'blue' : 'default'} bordered={false}>{action.modelCall ? '调用大模型' : '不调用大模型'}</Tag>
+                </Space>
+                <Text type="secondary">{action.description}</Text>
+              </Space>
+              <Tooltip title={action.description}>
+                <Button type={action.primary ? 'primary' : 'default'} size="small" onClick={() => { void action.run() }}>
+                  {action.label}
+                </Button>
+              </Tooltip>
+            </div>
+          ))}
+        </Space>
+      </div>
+    )
+  }
+
+  const renderPreflightModalContent = (payload: any, repairActions: GenerationPreflightRepairAction[] = []) => {
     const preflight = payload?.preflight || payload?.context_package?.preflight || {}
     const checks = Array.isArray(preflight.checks) ? preflight.checks : []
     const blockers = Array.isArray(preflight.blockers) ? preflight.blockers : []
@@ -320,6 +505,7 @@ export default function NovelProjectWorkspace() {
             {warnings.join('\n')}
           </Paragraph>
         )}
+        {renderGenerationPreflightRepairActions(repairActions)}
         {safetyDecision && (
           <Alert
             type={safetyDecision.blocked ? 'error' : 'info'}
@@ -332,13 +518,16 @@ export default function NovelProjectWorkspace() {
     )
   }
 
-  const showGenerationBlockedModal = (payload: any, onContinue?: () => void) => {
+  const showGenerationBlockedModal = (payload: any, onContinue?: () => void, options: { targetChapterId?: number; onRepairComplete?: () => void } = {}) => {
     const isSafetyBlocked = payload?.error_code === 'REFERENCE_SAFETY_BLOCKED'
-    Modal.confirm({
+    let modalRef: ReturnType<typeof Modal.confirm> | null = null
+    const closeModal = () => { modalRef?.destroy() }
+    const repairActions = isSafetyBlocked ? [] : buildGenerationPreflightRepairActions(payload, { ...options, closeModal })
+    modalRef = Modal.confirm({
       title: isSafetyBlocked ? '仿写安全阈值未通过' : '章节生成前置检查未通过',
       width: 760,
       icon: null,
-      content: renderPreflightModalContent(payload),
+      content: renderPreflightModalContent(payload, repairActions),
       okText: onContinue && !isSafetyBlocked ? '允许缺材料继续' : '知道了',
       cancelText: onContinue && !isSafetyBlocked ? '先补齐材料' : undefined,
       okButtonProps: isSafetyBlocked ? { danger: true } : undefined,
@@ -1013,7 +1202,7 @@ export default function NovelProjectWorkspace() {
           try { data = raw ? JSON.parse(raw) : null } catch { data = null }
           if (!resp.ok) {
             if (data?.error_code === 'PROSE_PREFLIGHT_BLOCKED' || data?.error_code === 'REFERENCE_SAFETY_BLOCKED') {
-              showGenerationBlockedModal(data)
+              showGenerationBlockedModal(data, undefined, { targetChapterId: ch.id })
             }
             throw new Error(data?.error || data?.detail || raw || `HTTP ${resp.status}`)
           }
@@ -1221,7 +1410,10 @@ export default function NovelProjectWorkspace() {
     } catch (error: any) {
       const payload = error?.response?.data
       if (payload?.error_code === 'SCENE_PREFLIGHT_BLOCKED') {
-        showGenerationBlockedModal(payload, () => { void generateSceneCardsForChapter(chapterId, true) })
+        showGenerationBlockedModal(payload, () => { void generateSceneCardsForChapter(chapterId, true) }, {
+          targetChapterId: chapterId,
+          onRepairComplete: () => { void generateSceneCardsForChapter(chapterId, false) },
+        })
       } else {
         message.error(payload?.error || error?.message || '场景卡生成失败')
       }
@@ -2141,6 +2333,19 @@ export default function NovelProjectWorkspace() {
       if (String(task?.source || '') === 'storyline_diff_decision') openStoryAssetsWorkspace()
       else openStoryAssetsWorkspace('discoveredAssets')
       await markNeedsReview()
+      return
+    }
+    if (taskType === 'chapter_retention_patch') {
+      if (!chapterId) return message.warning('这个任务没有绑定章节')
+      const issueText = [task?.issue_type, task?.message, task?.action].filter(Boolean).join(' ')
+      if (issueText.includes('缺正文') || issueText.includes('生成正文')) {
+        if (!selectedModelId) return message.warning('请先选择模型')
+        if (!options.keepTaskCenterOpen) setTaskCenterOpen(false)
+        await generateCurrentChapterProse({ allowIncomplete: true, forceSceneCards: true, targetChapterId: chapterId })
+        await markNeedsReview()
+        return
+      }
+      await startRepairTaskRevision(task, run, taskIndex, options)
       return
     }
     if (!chapterId) return message.warning('这个任务没有绑定章节')
@@ -4904,7 +5109,10 @@ export default function NovelProjectWorkspace() {
         let payload: any = null
         try { payload = raw ? JSON.parse(raw) : null } catch { payload = null }
         if (payload?.error_code === 'PROSE_PREFLIGHT_BLOCKED' || payload?.error_code === 'REFERENCE_SAFETY_BLOCKED') {
-          showGenerationBlockedModal(payload, () => { void generateCurrentChapterProse({ ...options, allowIncomplete: true }) })
+          showGenerationBlockedModal(payload, () => { void generateCurrentChapterProse({ ...options, allowIncomplete: true }) }, {
+            targetChapterId: targetChapter.id,
+            onRepairComplete: () => { void generateCurrentChapterProse({ ...options, allowIncomplete: false, forceSceneCards: true, targetChapterId: targetChapter.id }) },
+          })
         }
         throw new Error(payload?.error || raw || `HTTP ${resp.status}`)
       }
@@ -4926,7 +5134,10 @@ export default function NovelProjectWorkspace() {
           else if (p.type === 'done') done = p
           else if (p.type === 'error') {
             if (p.error_code === 'PROSE_PREFLIGHT_BLOCKED' || p.error_code === 'REFERENCE_SAFETY_BLOCKED') {
-              showGenerationBlockedModal(p, () => { void generateCurrentChapterProse({ ...options, allowIncomplete: true }) })
+              showGenerationBlockedModal(p, () => { void generateCurrentChapterProse({ ...options, allowIncomplete: true }) }, {
+                targetChapterId: targetChapter.id,
+                onRepairComplete: () => { void generateCurrentChapterProse({ ...options, allowIncomplete: false, forceSceneCards: true, targetChapterId: targetChapter.id }) },
+              })
             }
             throw new Error(p.error || '正文生成失败')
           }
@@ -5509,6 +5720,7 @@ export default function NovelProjectWorkspace() {
     if (action.area === 'planning' || action.area === 'assets') {
       if (action.key === 'open_story_assets') {
         openStoryAssetsWorkspace()
+        setAutoDirectorActionLoadingKey('')
         return
       }
       if (action.key === 'update_rolling_plan' && (action.payload?.source === 'batch_brief_repair' || action.payload?.source === 'recent_fatigue_repair')) {
@@ -5516,12 +5728,14 @@ export default function NovelProjectWorkspace() {
           .finally(() => setAutoDirectorActionLoadingKey(''))
         return
       }
-      handlePlanningAction(action.key as PlanningActionKey)
+      void Promise.resolve(handlePlanningAction(action.key as PlanningActionKey))
+        .finally(() => setAutoDirectorActionLoadingKey(''))
       return
     }
 
     if (action.area === 'writing' || action.area === 'quality') {
-      handleWritingCockpitAction(action.key as WritingCockpitActionKey)
+      void Promise.resolve(handleWritingCockpitAction(action.key as WritingCockpitActionKey))
+        .finally(() => setAutoDirectorActionLoadingKey(''))
       return
     }
 
@@ -5542,6 +5756,7 @@ export default function NovelProjectWorkspace() {
     if (action.key === 'open_task_center') {
       setTaskCenterRecoveryFocus(safeBatchRecoveryFocusFromPayload(action.payload))
       setTaskCenterOpen(true)
+      setAutoDirectorActionLoadingKey('')
       return
     }
 

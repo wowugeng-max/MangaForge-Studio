@@ -117,11 +117,39 @@ function extractUpstreamErrorSummary(error: unknown) {
   return raw.slice(0, 240)
 }
 
+function extractUpstreamErrorCode(error: unknown) {
+  const raw = String(error || '')
+  const jsonMatch = raw.match(/\{[\s\S]*\}/)
+  if (jsonMatch) {
+    try {
+      const parsed = JSON.parse(jsonMatch[0])
+      const code = parsed?.error?.code || parsed?.code || ''
+      if (code) return String(code)
+    } catch {
+      // Fall through to text match below.
+    }
+  }
+  return raw.includes('get_channel_failed') ? 'get_channel_failed' : ''
+}
+
+function isUpstreamCapacityError(error: unknown) {
+  const raw = String(error || '')
+  return /get_channel_failed|负载已经达到上限|上游.*繁忙|capacity|overload|overloaded|no available channel/i.test(raw)
+}
+
 function classifyHealthError(
   error: unknown,
   context: { model?: ModelRecord; provider?: ProviderRecord; sentModelName?: string } = {},
 ): { status: string; message: string } {
   const msg = String(error || '').toLowerCase()
+  if (isUpstreamCapacityError(error)) {
+    const upstream = extractUpstreamErrorSummary(error)
+    const code = extractUpstreamErrorCode(error)
+    return {
+      status: 'upstream_busy',
+      message: `测试失败：上游临时繁忙，请稍后重试。请求已到达供应商且模型 ${context.sentModelName || context.model?.model_name || ''} 已被识别。${code ? `代码：${code}。` : ''}上游返回：${upstream}`,
+    }
+  }
   if (msg.includes('429') || msg.includes('quota') || msg.includes('rate limit')) {
     return { status: 'quota_exhausted', message: '测试失败：额度耗尽' }
   }

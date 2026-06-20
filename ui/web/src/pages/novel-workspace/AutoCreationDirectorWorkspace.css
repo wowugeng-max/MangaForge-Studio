@@ -122,6 +122,76 @@
   font-weight: 700;
 }
 
+.auto-director-action-content {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.auto-director-action-surface-wrap {
+  min-width: 0;
+  max-width: 100%;
+  display: block;
+  height: 100%;
+}
+
+.auto-director-action-surface-wrap > button {
+  width: 100%;
+  min-height: 100%;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.auto-director-action-kind {
+  width: fit-content;
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 1px 6px;
+  border: 1px solid #dbe4ef;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 11px;
+  line-height: 17px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.auto-director-action-kind-model {
+  border-color: #ddd6fe;
+  background: #f5f3ff;
+  color: #6d28d9;
+}
+
+.auto-director-action-kind-background {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.auto-director-action-kind-task {
+  border-color: #fed7aa;
+  background: #fff7ed;
+  color: #c2410c;
+}
+
+.auto-director-action-kind-panel {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+  color: #334155;
+}
+
+.auto-director-action-kind-local {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+  color: #15803d;
+}
+
 .auto-director-primary-action {
   min-height: 38px;
 }
@@ -422,7 +492,7 @@
 
 .auto-director-battle-lanes {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 8px;
 }
 
@@ -913,7 +983,7 @@
 
 .auto-director-creation-stages {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 8px;
 }
 
@@ -1127,7 +1197,7 @@
 
 .auto-director-daily-steps {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 10px;
 }
 
@@ -1247,14 +1317,14 @@
 
 .auto-director-runway-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 360px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
   gap: 12px;
   align-items: start;
 }
 
 .auto-director-runway-gates {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 8px;
 }
 
@@ -1488,14 +1558,14 @@
 
 .auto-director-script-room-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1.24fr) minmax(280px, 0.76fr);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
   gap: 12px;
   align-items: start;
 }
 
 .auto-director-script-room-layers {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 8px;
 }
 
@@ -1541,6 +1611,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  flex-wrap: wrap;
   min-width: 0;
 }
 
@@ -1548,12 +1619,13 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  flex-wrap: wrap;
   min-width: 0;
 }
 
 .auto-director-script-room-repair-entry .ant-typography {
   font-size: 12px;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .auto-director-script-room-layer strong {
@@ -1692,7 +1764,7 @@
 
 .auto-director-contract-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 10px;
 }
 
@@ -1737,15 +1809,24 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  flex-wrap: wrap;
   min-width: 0;
 }
 
 .auto-director-contract-topline strong {
   min-width: 0;
   color: #0f172a;
+  overflow-wrap: anywhere;
+}
+
+.auto-director-contract-item .ant-typography,
+.auto-director-script-room-layer .ant-typography,
+.auto-director-script-room-layer em {
+  overflow-wrap: anywhere;
 }
 
 .auto-director-contract-evidence {
+  min-width: 0;
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
@@ -1760,9 +1841,8 @@
   color: #64748b;
   font-size: 12px;
   font-style: normal;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .auto-director-risk-fuse {
@@ -3204,4 +3284,31 @@
   .auto-director-batch-brief-chapters {
     grid-template-columns: 1fr;
   }
+}
+
+.auto-director-shell .auto-director-action-kind {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.auto-director-cockpit-chain-step > .auto-director-action-kind,
+.auto-director-creation-stage > .auto-director-action-kind,
+.auto-director-battle-lane > .auto-director-action-kind,
+.auto-director-serial-stage > .auto-director-action-kind,
+.auto-director-runway-gate > .auto-director-action-kind,
+.auto-director-script-room-layer > .auto-director-action-kind,
+.auto-director-contract-item > .auto-director-action-kind,
+.auto-director-batch-review-item > .auto-director-action-kind,
+.auto-director-batch-release-chapter > .auto-director-action-kind,
+.auto-director-batch-brief-chapter > .auto-director-action-kind,
+.auto-director-script-room-chapter > .auto-director-action-kind,
+.auto-director-target > .auto-director-action-kind {
+  justify-self: start;
+}
+
+.auto-director-rhythm-signal > .auto-director-action-kind,
+.auto-director-capacity-signal > .auto-director-action-kind {
+  grid-column: 1 / -1;
+  justify-self: start;
 }

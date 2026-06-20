@@ -147,11 +147,23 @@ describe('novel generate prose route source guards', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
     const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'")
     const draftStart = source.indexOf('const resultPayload = getNovelPayload(result)', routeStart)
-    const failureStart = source.indexOf("if ((result as any).error || !chapterText)", draftStart)
+    const failureStart = source.indexOf("if (!chapterText)", draftStart)
     const draftBlock = source.slice(draftStart, failureStart)
 
     expect(draftBlock).toContain('extractPlainProseFallback(result, 800)')
     expect(draftBlock).toContain('|| plainProseFallback')
+  })
+
+  test('does not fail draft generation solely because a recovered result still has an error field', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
+    const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'")
+    const draftStart = source.indexOf('const resultPayload = getNovelPayload(result)', routeStart)
+    const failureStart = source.indexOf('const resultError = String(', draftStart)
+    const failureBlock = source.slice(draftStart, failureStart)
+
+    expect(failureBlock).toContain('const chapterText =')
+    expect(failureBlock).toContain('if (!chapterText)')
+    expect(failureBlock).not.toContain('(result as any).error || !chapterText')
   })
 
   test('stores LLM diagnostics when standalone scene-card generation returns no cards', () => {

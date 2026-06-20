@@ -934,7 +934,7 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
       const chapterText = targetProse?.chapter_text || resultPayload?.chapter_text || plainProseFallback
       const sceneBreakdown = targetProse?.scene_breakdown || resultPayload?.scene_breakdown || []
       const continuityNotes = targetProse?.continuity_notes || resultPayload?.continuity_notes || []
-      if ((result as any).error || !chapterText) {
+      if (!chapterText) {
         const resultError = String((result as any).error || (result as any).fallbackReason || '模型未返回正文')
         const runtimeDiagnostics = {
           result_error: resultError,

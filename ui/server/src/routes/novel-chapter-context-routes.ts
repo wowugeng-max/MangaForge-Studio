@@ -71,6 +71,95 @@ function normalizeGeneratedCharacter(item: any) {
   }
 }
 
+function firstTextValue(...values: any[]) {
+  for (const value of values) {
+    if (Array.isArray(value)) {
+      const nested = firstTextValue(...value)
+      if (nested) return nested
+      continue
+    }
+    if (value && typeof value === 'object') {
+      const nested = firstTextValue(value.name, value.title, value.label)
+      if (nested) return nested
+      continue
+    }
+    const text = String(value || '').trim()
+    if (text) return text
+  }
+  return ''
+}
+
+function inferLikelyCharacterName(...values: any[]) {
+  const text = values.map(value => String(value || '')).join(' ').replace(/\s+/g, ' ')
+  const stopNames = new Set(['主角', '主人公', '少年', '少女', '世界', '现实', '家族', '异象', '规则', '危机', '敌人', '宗门', '王朝'])
+  const patterns = [
+    /穿越者([\u4e00-\u9fa5]{2,4})(?:穿越|进入|发现|凭借|在|，|,)/,
+    /(?:主角|主人公)(?:名叫|叫|为|是|：|:|“|")([\u4e00-\u9fa5]{2,4})/,
+    /([\u4e00-\u9fa5]{2,4})(?:穿越|进入|发现|首次|被迫|利用|凭借|确认|触碰|感知|觉醒|直面)/,
+  ]
+  for (const pattern of patterns) {
+    const match = text.match(pattern)
+    const name = String(match?.[1] || '').trim()
+    if (name && !stopNames.has(name)) return name
+  }
+  return ''
+}
+
+export function buildFallbackGeneratedCharacters(project: any, chapter: any, contextPackage: any) {
+  const writingBible = project?.reference_config?.writing_bible || contextPackage?.writing_bible || {}
+  const storyState = contextPackage?.story_state?.global || project?.reference_config?.story_state || {}
+  const chapterNo = Number(chapter?.chapter_no || contextPackage?.chapter_target?.chapter_no || 1)
+  const chapterTitle = String(chapter?.title || contextPackage?.chapter_target?.title || '当前章节').trim()
+  const protagonistName = firstTextValue(
+    writingBible.protagonist,
+    writingBible.main_character,
+    writingBible.mainCharacter,
+    writingBible.characters,
+    storyState.protagonist,
+    storyState.main_character,
+    chapter?.raw_payload?.protagonist,
+    chapter?.raw_payload?.main_character,
+    project?.protagonist,
+    inferLikelyCharacterName(chapter?.chapter_summary, chapter?.chapter_goal, project?.synopsis, project?.reference_config?.project_seed?.raw_idea),
+    '主角',
+  )
+  const chapterLabel = `第${chapterNo}章《${chapterTitle}》`
+  return [{
+    name: protagonistName,
+    role_type: 'protagonist',
+    archetype: '被当前章推动入局的主角',
+    identity: firstTextValue(writingBible.protagonist_identity, storyState.protagonist_identity, project?.genre, '核心视角人物'),
+    appearance: '',
+    personality: ['警觉', '目标感强'],
+    abilities: [],
+    items: [],
+    knowledge_scope: ['只知道当前章已揭示的信息'],
+    information_boundaries: ['不得提前知道后续真相'],
+    motivation: firstTextValue(chapter?.chapter_goal, contextPackage?.chapter_target?.goal, project?.synopsis, '弄清当前危机并活下来'),
+    goal: firstTextValue(chapter?.chapter_goal, contextPackage?.chapter_target?.goal, '完成本章目标'),
+    conflict: firstTextValue(chapter?.conflict, contextPackage?.chapter_target?.conflict, '与当前章核心冲突正面相撞'),
+    backstory: firstTextValue(project?.synopsis, writingBible.reader_promise, '待后续补完'),
+    secret: '',
+    relationships: [],
+    growth_arc: firstTextValue(writingBible.character_arc, '从被动卷入到主动理解规则和代价'),
+    current_state: {
+      location: `${chapterLabel}开场`,
+      physical_condition: '可行动',
+      emotional_state: '警觉',
+      items: [],
+      knowledge_scope: ['只知道当前章已揭示的信息'],
+      information_boundaries: ['不得提前知道后续真相'],
+      ability_status: '未确认',
+      relationship_attitudes: {},
+      last_seen_chapter: chapterNo,
+    },
+    raw_payload: {
+      source: 'auto_repair_context_fallback',
+      fallback_reason: 'model_returned_no_usable_character_cards',
+    },
+  }]
+}
+
 function fallbackForbiddenRepeats(project: any, chapter: any, contextPackage: any) {
   const storyState = contextPackage?.story_state?.global || project?.reference_config?.story_state || {}
   return [
@@ -392,9 +481,23 @@ export function registerNovelChapterContextRoutes(app: Express, ctx: ChapterCont
       const applied: any[] = []
       const existingByName = new Map(characters.map(char => [String(char.name || '').trim(), char]).filter(([name]) => Boolean(name)) as any)
       if (needsCharacters) {
-        for (const raw of asArray(payload.characters).slice(0, 8)) {
-          const normalized = normalizeGeneratedCharacter(raw)
-          if (!normalized.name || existingByName.has(normalized.name)) continue
+        let characterCandidates = asArray(payload.characters)
+          .map(normalizeGeneratedCharacter)
+          .filter((item: any) => item.name && !existingByName.has(item.name))
+        if (characterCandidates.length === 0) {
+          characterCandidates = buildFallbackGeneratedCharacters(project, chapter, contextPackage)
+            .map(normalizeGeneratedCharacter)
+            .filter((item: any) => item.name && !existingByName.has(item.name))
+          payload.characters = [
+            ...asArray(payload.characters),
+            ...characterCandidates.map((item: any) => ({ ...item.raw_payload, ...item })),
+          ]
+          payload.repair_summary = [
+            payload.repair_summary,
+            '模型未返回可入库角色卡，已创建本地兜底主角卡。',
+          ].filter(Boolean).join('；')
+        }
+        for (const normalized of characterCandidates.slice(0, 8)) {
           const created = await createNovelCharacter(activeWorkspace, {
             project_id: projectId,
             ...normalized,

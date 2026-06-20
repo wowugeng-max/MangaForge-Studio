@@ -7354,7 +7354,7 @@ export function createNovelWritingService(ctx: {
     const targetProse = selectProseForChapter(resultPayload, chapter)
     const plainProseFallback = extractPlainProseFallback(draftResult, 800)
     const chapterText = targetProse?.chapter_text || resultPayload?.chapter_text || plainProseFallback
-    if ((draftResult as any).error || !chapterText) {
+    if (!chapterText) {
       await onStage('draft', {
         status: 'failed',
         error: String((draftResult as any).error || (draftResult as any).fallbackReason || '模型未返回正文'),

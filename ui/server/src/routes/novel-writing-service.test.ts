@@ -41,7 +41,7 @@ import {
   proseMaxTokensForWordTarget,
   resolveChapterWordTarget,
 } from './novel-writing-service'
-import { buildLLMResultDiagnostics, extractPlainProseFallback, getStyleLock } from './novel-route-utils'
+import { buildLLMResultDiagnostics, extractPlainProseFallback, getNovelPayload, getStyleLock } from './novel-route-utils'
 
 describe('normalizeSceneCardsPayload', () => {
   test('converts target chapter outlines into fallback scene cards', () => {
@@ -202,6 +202,50 @@ describe('chapter prose word target', () => {
     expect(diagnostics.usage.output_tokens).toBe(20)
     expect(diagnostics.raw_keys).toContain('stream_chunks_tail')
     expect(diagnostics.stream_tail.length).toBe(1)
+  })
+
+  test('recovers prose payload from Anthropic content blocks when normalized content is empty', () => {
+    const chapterText = '丁松言睁开眼的时候，脑子里正在响一个不属于他的声音。'.repeat(20)
+    const payload = getNovelPayload({
+      content: '',
+      raw: {
+        content: [
+          {
+            type: 'text',
+            text: `\`\`\`json\n{"prose_chapters":[{"chapter_no":1,"title":"异象初临","chapter_text":"${chapterText}","scene_breakdown":[{"scene_no":1}],"continuity_notes":["保留异象钩子"]}]}\n\`\`\``,
+          },
+        ],
+        stop_reason: 'end_turn',
+      },
+    })
+
+    expect(payload.prose_chapters?.[0]?.chapter_text).toBe(chapterText)
+    expect(payload.prose_chapters?.[0]?.scene_breakdown).toHaveLength(1)
+  })
+
+  test('skips text-block output wrappers before recovering the prose payload', () => {
+    const chapterText = '祠堂废墟里，半透明的兽影与梁柱重叠。'.repeat(20)
+    const payload = getNovelPayload({
+      output: {
+        type: 'text',
+        text: `\`\`\`json\n{"prose_chapters":[{"chapter_no":1,"title":"异象初临","chapter_text":"${chapterText}"}]}\n\`\`\``,
+      },
+      content: '',
+    })
+
+    expect(payload.prose_chapters?.[0]?.chapter_text).toBe(chapterText)
+  })
+
+  test('recovers prose payload from escaped fenced JSON content', () => {
+    const chapterText = '丁松言握着手心里的残骨，沿着祠堂后院废墟往前走。'.repeat(20)
+    const payload = getNovelPayload({
+      content: `\`\`\`json\n{\\"prose_chapters\\":[{\\"chapter_no\\":2,\\"title\\":\\"灭门阴影\\",\\"chapter_text\\":\\"${chapterText}\\",\\"scene_breakdown\\":[{\\"scene_no\\":1}],\\"continuity_notes\\":[\\"承接第一章\\"]}]}\n\`\`\``,
+      finish_reason: 'end_turn',
+    })
+
+    expect(payload.prose_chapters?.[0]?.chapter_no).toBe(2)
+    expect(payload.prose_chapters?.[0]?.chapter_text).toBe(chapterText)
+    expect(payload.prose_chapters?.[0]?.scene_breakdown).toHaveLength(1)
   })
 
   test('defaults normal chapters to roughly 3000 Chinese characters', () => {
@@ -4624,6 +4668,18 @@ describe('chapter context word target source guards', () => {
     expect(ensureBlock).toContain('maxExpansionAttempts')
     expect(ensureBlock).toContain('for (let attempt = 1; attempt <= maxExpansionAttempts; attempt += 1)')
     expect(ensureBlock).toContain('attempts.push')
+  })
+
+  test('does not fail chapter production solely because a recovered draft result still has an error field', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const draftStart = source.indexOf('const resultPayload = getNovelPayload(draftResult)')
+    const failureStart = source.indexOf("await onStage('draft'", draftStart)
+    const failureBlock = source.slice(draftStart, failureStart)
+
+    expect(draftStart).toBeGreaterThanOrEqual(0)
+    expect(failureBlock).toContain('const chapterText =')
+    expect(failureBlock).toContain('if (!chapterText)')
+    expect(failureBlock).not.toContain('(draftResult as any).error || !chapterText')
   })
 
   test('requires scene-card prompts to plan commercial reader hooks before prose generation', () => {

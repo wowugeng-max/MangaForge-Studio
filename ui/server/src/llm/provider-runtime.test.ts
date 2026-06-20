@@ -12,6 +12,7 @@ import {
   summarizeProviderRequestBodyForLog,
   type RuntimeModelSelection,
 } from './provider-runtime'
+import { resetOpenAIResponsesCreateForTest, setOpenAIResponsesCreateForTest } from './openai-responses-sdk'
 
 function selection(overrides: Partial<RuntimeModelSelection> = {}): RuntimeModelSelection {
   return {
@@ -61,9 +62,28 @@ const originalFetch = globalThis.fetch
 
 afterEach(() => {
   globalThis.fetch = originalFetch
+  resetOpenAIResponsesCreateForTest()
 })
 
 describe('codex responses provider runtime', () => {
+  test('ignores string undefined endpoint placeholders for OpenAI-compatible providers', () => {
+    expect(endpointForProvider({
+      id: 'chatgpt2api',
+      display_name: 'chatgpt2api',
+      service_type: 'llm',
+      api_format: 'openai_compatible',
+      auth_type: 'Bearer',
+      supported_modalities: ['chat'],
+      default_base_url: 'https://gpt2api.example/v1',
+      is_active: true,
+      endpoints: {
+        chat: 'undefined',
+        responses: 'undefined',
+      },
+      custom_headers: {},
+    })).toBe('chat/completions')
+  })
+
   test('routes claude_code providers to the Claude messages endpoint', () => {
     expect(endpointForProvider({
       id: 'claude-code',
@@ -2063,19 +2083,99 @@ describe('codex responses provider runtime', () => {
       tools: [],
       tool_choice: 'auto',
       parallel_tool_calls: false,
-      reasoning: null,
       store: false,
       stream: false,
       include: ['reasoning.encrypted_content'],
+      text: { format: { type: 'json_schema', name: 'response', schema: { type: 'object' } } },
     })
+    expect(body).not.toHaveProperty('reasoning')
     expect(body).not.toHaveProperty('messages')
     expect(body).not.toHaveProperty('max_tokens')
     expect(body).not.toHaveProperty('max_output_tokens')
     expect(body).not.toHaveProperty('temperature')
-    expect(body).not.toHaveProperty('text')
   })
 
-  test('keeps AnyRouter bare GPT model ids while adding encrypted reasoning include', () => {
+  test('builds official Responses schema fields when explicitly requested', () => {
+    const body = buildProviderRequestBody({
+      model: 'balanced',
+      messages: [
+        { role: 'system', content: 'You are a coding agent.' },
+        {
+          role: 'user',
+          content: [
+            { type: 'input_text', text: 'Inspect this file and image.' },
+            { type: 'input_image', image_url: 'data:image/png;base64,abc', detail: 'high' },
+            { type: 'input_file', file_url: 'https://example.com/spec.pdf', filename: 'spec.pdf' },
+          ],
+        },
+        { role: 'assistant', content: 'I found the relevant section.', phase: 'final_answer' } as any,
+        { role: 'tool', tool_call_id: 'call_1', content: '{"ok":true}' },
+      ],
+      tools: [{
+        name: 'lookup_spec',
+        description: 'Look up a spec section',
+        parameters: { type: 'object', properties: { section: { type: 'string' } }, required: ['section'] },
+        strict: true,
+      } as any],
+      tool_choice: 'auto',
+      response_format: {
+        type: 'json_schema',
+        name: 'inspection_result',
+        schema: { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'], additionalProperties: false },
+        strict: true,
+      } as any,
+      previous_response_id: 'resp_previous',
+      max_output_tokens: 2048,
+      truncation: 'auto',
+    } as any, selection())
+
+    expect(body).toMatchObject({
+      model: 'gpt-5-codex',
+      instructions: 'You are a coding agent.',
+      input: [
+        {
+          type: 'message',
+          role: 'user',
+          content: [
+            { type: 'input_text', text: 'Inspect this file and image.' },
+            { type: 'input_image', image_url: 'data:image/png;base64,abc', detail: 'high' },
+            { type: 'input_file', file_url: 'https://example.com/spec.pdf', filename: 'spec.pdf' },
+          ],
+        },
+        {
+          type: 'message',
+          role: 'assistant',
+          phase: 'final_answer',
+          content: [{ type: 'output_text', text: 'I found the relevant section.' }],
+        },
+        { type: 'function_call_output', call_id: 'call_1', output: '{"ok":true}' },
+      ],
+      tools: [{
+        type: 'function',
+        name: 'lookup_spec',
+        description: 'Look up a spec section',
+        parameters: { type: 'object', properties: { section: { type: 'string' } }, required: ['section'] },
+        strict: true,
+      }],
+      text: {
+        format: {
+          type: 'json_schema',
+          name: 'inspection_result',
+          schema: { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'], additionalProperties: false },
+          strict: true,
+        },
+      },
+      previous_response_id: 'resp_previous',
+      max_output_tokens: 2048,
+      truncation: 'auto',
+      parallel_tool_calls: true,
+    })
+    expect(body).not.toHaveProperty('messages')
+    expect(body).not.toHaveProperty('max_tokens')
+    expect(body).not.toHaveProperty('temperature')
+  })
+
+  test('builds Codex Responses bodies for AnyRouter bare GPT models', () => {
     const body = buildProviderRequestBody({
       model: 'balanced',
       messages: [{ role: 'user', content: 'Return exactly: OK' }],
@@ -2083,14 +2183,123 @@ describe('codex responses provider runtime', () => {
       response_format: 'text',
     }, selection({
       baseUrl: 'https://anyrouter.top/v1',
+      apiFormat: 'codex_responses',
+      provider: {
+        ...selection().provider,
+        id: 'any',
+        display_name: 'AnyRouter',
+        default_base_url: 'https://anyrouter.top/v1',
+      },
       model: {
         ...selection().model,
         model_name: 'gpt-5.5',
       },
     }))
 
-    expect(body.model).toBe('gpt-5.5')
-    expect(body.include).toEqual(['reasoning.encrypted_content'])
+    expect(body).toMatchObject({
+      model: 'gpt-5.5',
+      input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Return exactly: OK' }] }],
+      tools: [],
+      tool_choice: 'auto',
+      parallel_tool_calls: true,
+      store: false,
+      stream: true,
+      include: ['reasoning.encrypted_content'],
+      reasoning: { effort: 'xhigh' },
+      instructions: 'You are Codex, a coding agent based on GPT-5.',
+      text: { format: { type: 'text' } },
+    })
+    expect(body.prompt_cache_key).toBeTruthy()
+    expect(body.client_metadata).toMatchObject({
+      session_id: body.prompt_cache_key,
+      thread_id: body.prompt_cache_key,
+    })
+    expect(body).not.toHaveProperty('messages')
+    expect(body).not.toHaveProperty('max_tokens')
+    expect(body).not.toHaveProperty('max_output_tokens')
+    expect(body).not.toHaveProperty('temperature')
+  })
+
+  test('sends default AnyRouter Codex Responses requests through fetch SSE transport', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-runtime-anyrouter-sse-'))
+    try {
+      await writeFile(join(workspace, 'providers.json'), JSON.stringify([
+        {
+          id: 'any',
+          display_name: 'AnyRouter',
+          service_type: 'llm',
+          api_format: 'codex_responses',
+          auth_type: 'bearer',
+          response_mode: 'auto',
+          supported_modalities: ['chat'],
+          default_base_url: 'https://anyrouter.top/v1',
+          is_active: true,
+          endpoints: {},
+          custom_headers: { 'X-Provider': 'anyrouter' },
+        },
+      ]))
+      await writeFile(join(workspace, 'keys.json'), JSON.stringify([
+        { id: 5, provider: 'any', key: 'sk-test', description: '', is_active: true, quota_total: 0, quota_used: 0, tags: [] },
+      ]))
+      await writeFile(join(workspace, 'models.json'), JSON.stringify([
+        { id: 128, api_key_id: 5, provider: 'any', display_name: 'gpt-5.5', model_name: 'gpt-5.5', capabilities: { chat: true }, health_status: 'healthy', is_favorite: false, is_manual: true, context_ui_params: {} },
+      ]))
+
+      const calls: any[] = []
+      globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+        calls.push({
+          url: String(url),
+          headers: init?.headers as Record<string, string>,
+          body: JSON.parse(String(init?.body || '{}')),
+        })
+        return new Response([
+          'data: {"type":"response.output_text.delta","delta":"SSE OK"}',
+          'data: {"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":1,"output_tokens":2,"total_tokens":3}}}',
+          'data: [DONE]',
+          '',
+        ].join('\n\n'), { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+      }) as any
+      setOpenAIResponsesCreateForTest(async call => {
+        throw new Error(`OpenAI SDK should not be used for AnyRouter Codex Responses runtime requests: ${call.baseURL}`)
+      })
+
+      const result = await executeWithRuntimeModel(
+        workspace,
+        { model: 'balanced', messages: [{ role: 'user', content: 'ping' }], response_format: 'text' },
+        128,
+        { maxRetries: 0 },
+      )
+
+      expect(result.content).toBe('SSE OK')
+      expect(calls).toHaveLength(1)
+      expect(calls[0].url).toBe('https://anyrouter.top/v1/responses')
+      expect(calls[0].headers.Authorization).toBe('Bearer sk-test')
+      expect(calls[0].headers.Accept).toBe('text/event-stream')
+      expect(calls[0].headers['X-Provider']).toBe('anyrouter')
+      expect(calls[0].body).toMatchObject({
+        model: 'gpt-5.5',
+        input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'ping' }] }],
+        tools: [],
+        tool_choice: 'auto',
+        parallel_tool_calls: true,
+        store: false,
+        stream: true,
+        include: ['reasoning.encrypted_content'],
+        reasoning: { effort: 'xhigh' },
+        instructions: 'You are Codex, a coding agent based on GPT-5.',
+        text: { format: { type: 'text' } },
+      })
+      expect(calls[0].body.prompt_cache_key).toBeTruthy()
+      expect(calls[0].body.client_metadata).toMatchObject({
+        session_id: calls[0].body.prompt_cache_key,
+        thread_id: calls[0].body.prompt_cache_key,
+      })
+      expect(calls[0].body).not.toHaveProperty('messages')
+      expect(calls[0].body).not.toHaveProperty('max_tokens')
+      expect(calls[0].body).not.toHaveProperty('temperature')
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
   })
 
   test('omits text format for plain text Codex key probes', () => {
@@ -2113,6 +2322,78 @@ describe('codex responses provider runtime', () => {
     expect(body).not.toHaveProperty('max_output_tokens')
     expect(body).not.toHaveProperty('temperature')
     expect(body).not.toHaveProperty('text')
+  })
+
+  test('sends Codex client compatibility fields through the OpenAI SDK runtime transport', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-runtime-codex-sdk-'))
+    try {
+      await writeFile(join(workspace, 'providers.json'), JSON.stringify([
+        {
+          id: 'codex-proxy',
+          display_name: 'Codex Proxy',
+          service_type: 'llm',
+          api_format: 'codex_responses',
+          auth_type: 'bearer',
+          response_mode: 'auto',
+          supported_modalities: ['chat'],
+          default_base_url: 'https://api.openai.com/v1',
+          is_active: true,
+          endpoints: {},
+          custom_headers: { 'X-Provider': 'codex-proxy' },
+        },
+      ]))
+      await writeFile(join(workspace, 'keys.json'), JSON.stringify([
+        { id: 6, provider: 'codex-proxy', key: 'sk-test', description: '', is_active: true, quota_total: 0, quota_used: 0, tags: [] },
+      ]))
+      await writeFile(join(workspace, 'models.json'), JSON.stringify([
+        { id: 129, api_key_id: 6, provider: 'codex-proxy', display_name: 'gpt-5-codex', model_name: 'gpt-5-codex', capabilities: { chat: true }, health_status: 'healthy', is_favorite: false, is_manual: true, context_ui_params: {} },
+      ]))
+
+      let capturedCall: any = null
+      globalThis.fetch = (async () => {
+        throw new Error('fetch should not be used for OpenAI SDK Codex Responses runtime requests')
+      }) as any
+      setOpenAIResponsesCreateForTest(async call => {
+        capturedCall = call
+        return { output_text: 'SDK OK', status: 'completed' }
+      })
+
+      const result = await executeWithRuntimeModel(
+        workspace,
+        { model: 'balanced', messages: [{ role: 'user', content: 'ping' }], response_format: 'text' },
+        129,
+        { maxRetries: 0 },
+      )
+
+      expect(result.content).toBe('SDK OK')
+      expect(capturedCall).toMatchObject({
+        apiKey: 'sk-test',
+        baseURL: 'https://api.openai.com/v1',
+        headers: { 'X-Provider': 'codex-proxy' },
+      })
+      expect(capturedCall.body).toMatchObject({
+        model: 'gpt-5-codex',
+        input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'ping' }] }],
+        tools: [],
+        tool_choice: 'auto',
+        parallel_tool_calls: true,
+        store: false,
+        stream: false,
+        include: ['reasoning.encrypted_content'],
+        instructions: 'You are Codex, a coding agent based on GPT-5.',
+        text: { format: { type: 'text' } },
+      })
+      expect(capturedCall.body.prompt_cache_key).toBeTruthy()
+      expect(capturedCall.body.client_metadata).toMatchObject({
+        session_id: capturedCall.body.prompt_cache_key,
+        thread_id: capturedCall.body.prompt_cache_key,
+      })
+      expect(capturedCall.body).not.toHaveProperty('messages')
+      expect(capturedCall.body).not.toHaveProperty('max_tokens')
+      expect(capturedCall.body).not.toHaveProperty('temperature')
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
   })
 
   test('streams Codex auto mode when long-running agents request streaming', () => {
@@ -2293,7 +2574,7 @@ describe('codex responses provider runtime', () => {
     expect(JSON.stringify(summary)).not.toContain('secret prompt')
   })
 
-  test('includes selected provider and URL when a Codex request cannot connect', async () => {
+  test('includes selected provider and Codex Responses URL when an AnyRouter GPT request cannot connect', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-runtime-error-'))
     await writeFile(join(workspace, 'providers.json'), JSON.stringify([
       {
@@ -2333,7 +2614,9 @@ describe('codex responses provider runtime', () => {
       expect(result.error).toContain('POST https://anyrouter.top/v1/responses')
       expect(result.error).toContain('provider=any')
       expect(result.error).toContain('model=gpt-5.5')
+      expect(result.error).toContain('format=codex_responses')
       expect(result.runtimeSelection?.provider.id).toBe('any')
+      expect(result.runtimeSelection?.apiFormat).toBe('codex_responses')
     } finally {
       await rm(workspace, { recursive: true, force: true })
     }

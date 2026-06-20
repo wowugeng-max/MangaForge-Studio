@@ -15,6 +15,7 @@ import {
 } from './types'
 import { normalizeLLMResponse } from './adapter'
 import { buildCodexResponsesBody } from './codex-responses'
+import { createOpenAIResponseViaSdk } from './openai-responses-sdk'
 import {
   applyClaudeCodeAuthHeaders,
   anthropicModelNameForRequest,
@@ -269,6 +270,37 @@ function routeDslValue(routeConfig: unknown, snakeKey: string, camelKey: string 
   return routeConfig[snakeKey] ?? routeConfig[camelKey]
 }
 
+function shouldUseOpenAIResponsesSdk(selection: RuntimeModelSelection) {
+  if (!isCodexResponsesFormat(selection.apiFormat)) return false
+  if (isRouteObject(selection.routeConfig)) return false
+  if (isAnyRouterTopSelection(selection)) return false
+  const authType = String(selection.provider.auth_type || 'bearer').toLowerCase()
+  return authType === 'bearer' || authType === 'authorization' || authType === 'oauth'
+}
+
+function isAnyRouterTopSelection(selection: RuntimeModelSelection) {
+  return /anyrouter\.top/i.test(`${selection.provider.id || ''} ${selection.provider.display_name || ''} ${selection.provider.default_base_url || ''} ${selection.baseUrl || ''} ${selection.endpoint || ''}`)
+}
+
+function openAIResponsesSdkBaseUrl(selection: RuntimeModelSelection, requestUrl: string) {
+  const responseSuffix = /\/responses\/?$/i
+  if (responseSuffix.test(requestUrl)) return requestUrl.replace(responseSuffix, '')
+  return selection.baseUrl
+}
+
+function headersForOpenAIResponsesSdk(headers: Record<string, string>) {
+  const sdkHeaders: Record<string, string> = {}
+  for (const [key, value] of Object.entries(headers)) {
+    const normalized = key.toLowerCase()
+    if (normalized === 'authorization') continue
+    if (normalized === 'content-type') continue
+    if (normalized === 'user-agent') continue
+    if (normalized === 'x-api-key') continue
+    sdkHeaders[key] = value
+  }
+  return sdkHeaders
+}
+
 // ── Headers ─────────────────────────────────────────────────
 
 /**
@@ -394,6 +426,8 @@ function toOpenAIBody(request: LLMRequest, selection: RuntimeModelSelection): Re
 function toCodexResponsesBody(request: LLMRequest, selection: RuntimeModelSelection): Record<string, any> {
   return buildCodexResponsesBody(request, selection.model.model_name || request.model, shouldStreamRequest(request, selection), {
     baseUrl: selection.baseUrl,
+    reasoning: selection.model.context_ui_params?.reasoning,
+    reasoningEffort: selection.model.context_ui_params?.reasoning_effort ?? selection.model.context_ui_params?.model_reasoning_effort,
   })
 }
 
@@ -1048,6 +1082,24 @@ function describeFetchError(error: any): string {
   return Array.from(new Set(parts)).join(' | ') || String(error || 'Unknown network error')
 }
 
+function statusFromProviderError(error: any) {
+  const status = Number(error?.status ?? error?.statusCode ?? error?.response?.status ?? 0)
+  return Number.isFinite(status) ? status : 0
+}
+
+function bodyTextFromProviderError(error: any) {
+  const raw = error?.error ?? error?.response?.data ?? error?.body
+  if (typeof raw === 'string') return raw
+  if (raw !== undefined) {
+    try {
+      return JSON.stringify(raw)
+    } catch {
+      return String(raw)
+    }
+  }
+  return String(error?.message || error)
+}
+
 function describeProviderRequestContext(selection: RuntimeModelSelection, url: string): string {
   return `POST ${url} | provider=${selection.provider.id} | model=${selection.model.model_name} | format=${selection.apiFormat}`
 }
@@ -1108,15 +1160,29 @@ function routeConfigForModel(route: any, modelName: string) {
   return merged
 }
 
+function usableRouteConfig(value: any): any {
+  if (typeof value !== 'string') return value
+  const trimmed = value.trim()
+  if (!trimmed) return ''
+  if (/^(undefined|null|none|false)$/i.test(trimmed)) return ''
+  return value
+}
+
+function firstUsableRouteConfig(...values: any[]) {
+  return values.map(usableRouteConfig).find(Boolean) || ''
+}
+
 function routeConfigForRequest(provider: ProviderRecord, request: LLMRequest, model: ModelRecord): any {
   const endpoints = provider.endpoints || {}
   const apiFormat = effectiveApiFormat(provider, model)
-  if (isClaudeCodeFormat(apiFormat)) return endpoints.messages || endpoints.chat || endpoints.llm || ''
-  if (isCodexResponsesFormat(apiFormat)) return endpoints.responses || endpoints.chat || endpoints.llm || ''
+  if (isClaudeCodeFormat(apiFormat)) return firstUsableRouteConfig(endpoints.messages, endpoints.chat, endpoints.llm)
+  if (isCodexResponsesFormat(apiFormat)) return firstUsableRouteConfig(endpoints.responses, endpoints.chat, endpoints.llm)
   const routeType = requestRouteType(request, model)
-  if (routeType && endpoints[routeType]) return routeConfigForModel(endpoints[routeType], model.model_name)
+  const routeConfig = routeType ? usableRouteConfig(endpoints[routeType]) : ''
+  if (routeConfig) return routeConfigForModel(routeConfig, model.model_name)
   const broadType = routeType.includes('image') ? 'image' : routeType.includes('video') ? 'video' : ''
-  if (broadType && endpoints[broadType]) return routeConfigForModel(endpoints[broadType], model.model_name)
+  const broadConfig = broadType ? usableRouteConfig(endpoints[broadType]) : ''
+  if (broadConfig) return routeConfigForModel(broadConfig, model.model_name)
   return routeConfigForProvider(provider)
 }
 
@@ -1125,6 +1191,9 @@ function normalizeGeminiModelName(modelName = '') {
 }
 
 function endpointForRoute(provider: ProviderRecord, route: any, routeType = '', modelName = '', apiFormat = provider.api_format) {
+  const usableRoute = usableRouteConfig(route)
+  if (!usableRoute) return fallbackEndpointForProvider(provider, routeType, modelName, apiFormat)
+  route = usableRoute
   if (isRouteObject(route)) return String(route.url || route.endpoint || fallbackEndpointForProvider(provider, routeType, modelName, apiFormat))
   if (route) return String(route)
   return fallbackEndpointForProvider(provider, routeType, modelName, apiFormat)
@@ -1273,6 +1342,8 @@ async function postProviderJson<T = any>(
   const body = buildProviderRequestBody(request, routedSelection)
   const isStreaming = Boolean((body as any).stream)
   const headers = buildHeaders(routedSelection)
+  if (isStreaming && isCodexResponsesFormat(routedSelection.apiFormat)) headers.Accept = 'text/event-stream'
+  const useOpenAIResponsesSdk = shouldUseOpenAIResponsesSdk(routedSelection)
   const maxRetries = Number(options.maxRetries ?? process.env.LLM_MAX_RETRIES ?? 5)
   const timeoutMs = Number(options.timeoutMs ?? process.env.LLM_TIMEOUT_MS ?? 600000) // 600s default, matches Claude Code foreground
   const keyMask = (selection.key.key || '').slice(0, 8) + '...'
@@ -1280,7 +1351,7 @@ async function postProviderJson<T = any>(
   const requestModelName = String((body as any).model || routedSelection.model.model_name || request.model || '')
 
   console.log(
-    `[provider-runtime] POST ${url} | model: ${requestModelName} | format: ${routedSelection.apiFormat} | responseMode=${routedSelection.provider.response_mode || 'auto'} | stream=${isStreaming ? 'on' : 'off'} | key: ${keyMask} | timeout=${timeoutMs}ms | retries=${maxRetries}`,
+    `[provider-runtime] POST ${url} | model: ${requestModelName} | format: ${routedSelection.apiFormat} | transport=${useOpenAIResponsesSdk ? 'openai-sdk' : 'fetch'} | responseMode=${routedSelection.provider.response_mode || 'auto'} | stream=${isStreaming ? 'on' : 'off'} | key: ${keyMask} | timeout=${timeoutMs}ms | retries=${maxRetries}`,
   )
   if (isCodexResponsesFormat(routedSelection.apiFormat)) {
     console.log(`[provider-runtime] Codex body summary: ${JSON.stringify(summarizeProviderRequestBodyForLog(body))}`)
@@ -1324,6 +1395,20 @@ async function postProviderJson<T = any>(
 
     let response: Response
     try {
+      if (useOpenAIResponsesSdk) {
+        const raw = await createOpenAIResponseViaSdk({
+          apiKey: routedSelection.key.key,
+          baseURL: openAIResponsesSdkBaseUrl(routedSelection, url),
+          headers: headersForOpenAIResponsesSdk(headers),
+          body,
+          timeoutMs,
+          signal: controller.signal,
+        })
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1)
+        console.log(`[provider-runtime] Response: sdk | ${routedSelection.model.model_name} | ${isStreaming ? 'streaming' : 'json'} | ${elapsed}s`)
+        return parseProviderResponsePayload<T>(raw, routedSelection)
+      }
+
       response = await fetch(url, {
         method: 'POST',
         headers,
@@ -1333,6 +1418,24 @@ async function postProviderJson<T = any>(
     } catch (err: any) {
       if (options.signal?.aborted) {
         throw new Error('Request canceled')
+      }
+      if (useOpenAIResponsesSdk) {
+        const status = statusFromProviderError(err)
+        if (status > 0) {
+          lastStatus = status
+          const text = bodyTextFromProviderError(err)
+          console.log(
+            `[provider-runtime] Response: ${status} | ${routedSelection.model.model_name} | SDK error preview: ${text.slice(0, 300)}`,
+          )
+          if (status === 401) throw new Error(`Invalid API key (401): ${text.slice(0, 500)}`)
+          if (status === 400) throw new Error(`Bad request (400): ${text.slice(0, 500)}`)
+          if (status === 404) throw new Error(`Endpoint not found (404): ${text.slice(0, 500)}`)
+          const errorMsg = `Provider request failed ${status}: ${text.slice(0, 500)}`
+          if (!isRetryable(status, text)) throw new Error(errorMsg)
+          lastError = errorMsg
+          console.warn(`[provider-runtime] Retryable SDK error ${status}, will retry...`)
+          continue
+        }
       }
       const errMsg = describeFetchError(err)
       lastError = errMsg
@@ -1559,14 +1662,16 @@ export function endpointForProvider(provider: ProviderRecord): string {
 }
 
 function effectiveApiFormat(provider: ProviderRecord, model?: ModelRecord): string {
-  return String(model?.api_format || provider.api_format || 'openai_compatible')
+  const modelFormat = String(model?.api_format || '').trim().toLowerCase()
+  if (modelFormat) return modelFormat
+  return String(provider.api_format || 'openai_compatible').trim().toLowerCase()
 }
 
 function routeConfigForProvider(provider: ProviderRecord, apiFormat = provider.api_format): any {
   const endpoints = provider.endpoints || {}
-  if (isClaudeCodeFormat(apiFormat)) return endpoints.messages || endpoints.chat || endpoints.llm || ''
-  if (isCodexResponsesFormat(apiFormat)) return endpoints.responses || endpoints.chat || endpoints.llm || ''
-  return endpoints.chat || endpoints.responses || endpoints.completions || ''
+  if (isClaudeCodeFormat(apiFormat)) return firstUsableRouteConfig(endpoints.messages, endpoints.chat, endpoints.llm)
+  if (isCodexResponsesFormat(apiFormat)) return firstUsableRouteConfig(endpoints.responses, endpoints.chat, endpoints.llm)
+  return firstUsableRouteConfig(endpoints.chat, endpoints.completions, endpoints.llm)
 }
 
 function fallbackEndpointForProvider(provider: ProviderRecord, routeType = '', modelName = '', apiFormat = provider.api_format) {

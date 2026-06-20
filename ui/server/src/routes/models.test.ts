@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { buildProbeRequest, determineProbeType } from './models'
+import { resetOpenAIResponsesCreateForTest, setOpenAIResponsesCreateForTest } from '../llm/openai-responses-sdk'
 
 let workspaces: string[] = []
 
@@ -59,6 +60,7 @@ async function call(handler: any, req: any = {}) {
 afterEach(async () => {
   await Promise.all(workspaces.map(workspace => rm(workspace, { recursive: true, force: true })))
   workspaces = []
+  resetOpenAIResponsesCreateForTest()
 })
 
 describe('model health probes', () => {
@@ -233,6 +235,66 @@ describe('model health probes', () => {
       expect(stored[0].health_status).toBe('unauthorized')
       expect(stored[0].last_error).toContain('AnyRouter')
       expect(stored[0].last_error).toContain('No permission')
+    } finally {
+      globalThis.fetch = previousFetch
+    }
+  })
+
+  test('diagnoses AnyRouter get_channel_failed as temporary upstream capacity and persists it', async () => {
+    const workspace = await tempWorkspace()
+    await writeFile(join(workspace, 'providers.json'), JSON.stringify([
+      {
+        id: 'any',
+        display_name: 'AnyRouter',
+        service_type: 'llm',
+        api_format: 'codex_responses',
+        auth_type: 'bearer',
+        supported_modalities: ['chat'],
+        default_base_url: 'https://anyrouter.top/v1',
+        is_active: true,
+      },
+    ]))
+    await writeFile(join(workspace, 'keys.json'), JSON.stringify([
+      { id: 10, provider: 'any', key: 'sk-ar-test', is_active: true },
+    ]))
+    await writeFile(join(workspace, 'models.json'), JSON.stringify([
+      {
+        id: 1,
+        api_key_id: 10,
+        provider: 'any',
+        display_name: 'gpt-5.5',
+        model_name: 'gpt-5.5',
+        capabilities: { chat: true },
+        health_status: 'unknown',
+      },
+    ]))
+
+    const previousFetch = globalThis.fetch
+    globalThis.fetch = (async () => new Response(JSON.stringify({
+      message: '当前模型 gpt-5.5 负载已经达到上限，请稍后重试',
+      type: 'new_api_error',
+      code: 'get_channel_failed',
+    }), { status: 500 })) as any
+    setOpenAIResponsesCreateForTest(async () => {
+      throw new Error('OpenAI SDK should not be used for AnyRouter capacity probes')
+    })
+
+    try {
+      const { registerModelRoutes } = await import('./models')
+      const { app, handlers } = createRouteHarness()
+      registerModelRoutes(app as any, () => workspace)
+
+      const response = await call(handlers.get('POST /api/models/:id/test'), { params: { id: '1' } })
+
+      expect(response.statusCode).toBe(200)
+      expect(response.body.status).toBe('upstream_busy')
+      expect(response.body.message).toContain('上游临时繁忙')
+      expect(response.body.message).toContain('gpt-5.5')
+      expect(response.body.message).toContain('稍后重试')
+
+      const stored = JSON.parse(await readFile(join(workspace, 'models.json'), 'utf8'))
+      expect(stored[0].health_status).toBe('upstream_busy')
+      expect(stored[0].last_error).toContain('get_channel_failed')
     } finally {
       globalThis.fetch = previousFetch
     }

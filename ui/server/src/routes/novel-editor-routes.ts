@@ -13,7 +13,7 @@ import {
   updateNovelChapter,
 } from '../novel'
 import { executeNovelAgent, previewNovelKnowledgeInjection } from '../llm'
-import { asArray, clampScore, getNovelPayload, getSafetyPolicy, normalizeIssue, parseJsonLikePayload } from './novel-route-utils'
+import { asArray, buildLLMResultDiagnostics, clampScore, extractLLMText, getNovelPayload, getSafetyPolicy, normalizeIssue, parseJsonLikePayload } from './novel-route-utils'
 
 type EditorRoutesContext = {
   getWorkspace: () => string
@@ -36,6 +36,9 @@ type EditorRoutesContext = {
   diffTexts: (before: string, after: string) => any
   updateStoryStateMachine: (workspace: string, project: any, chapter: any, contextPackage: any, chapterText: string, modelId?: number) => Promise<any>
 }
+
+const REVISION_MAX_TOKENS = 8000
+const COMPACT_REVISION_RETRY_MAX_TOKENS = 5000
 
 async function loadChapterBundle(ctx: EditorRoutesContext, projectId: number, chapterId: number) {
   const activeWorkspace = ctx.getWorkspace()
@@ -98,6 +101,81 @@ function firstPatchText(...values: any[]) {
   return values.map(value => String(value || '').trim()).find(Boolean) || ''
 }
 
+function firstReplacementText(...values: any[]) {
+  for (const value of values) {
+    if (value === undefined || value === null) continue
+    const text = String(value)
+    if (text.trim()) return text.trim()
+    if (typeof value === 'string') return ''
+  }
+  return null
+}
+
+function firstAnchorText(...values: any[]) {
+  for (const value of values) {
+    if (value === undefined || value === null) continue
+    const text = String(value)
+    if (text.trim()) return text
+  }
+  return ''
+}
+
+function whitespaceInsensitiveIndex(source: string, anchor: string) {
+  const sourceMap: number[] = []
+  let normalizedSource = ''
+  for (let i = 0; i < source.length; i += 1) {
+    const char = source[i]
+    if (/\s/.test(char)) continue
+    sourceMap.push(i)
+    normalizedSource += char
+  }
+  const normalizedAnchor = anchor.replace(/\s+/g, '')
+  if (!normalizedAnchor) return null
+  const normalizedIndex = normalizedSource.indexOf(normalizedAnchor)
+  if (normalizedIndex < 0 || normalizedSource.indexOf(normalizedAnchor, normalizedIndex + 1) >= 0) return null
+  const start = sourceMap[normalizedIndex]
+  const end = sourceMap[normalizedIndex + normalizedAnchor.length - 1] + 1
+  return { index: start, anchor: source.slice(start, end), match: 'normalized_whitespace' }
+}
+
+function findPatchAnchor(source: string, anchor: string) {
+  let index = source.indexOf(anchor)
+  if (index >= 0) return { index, anchor, match: 'exact' }
+  const trimmed = anchor.trim()
+  if (trimmed && trimmed !== anchor) {
+    index = source.indexOf(trimmed)
+    if (index >= 0) return { index, anchor: trimmed, match: 'trimmed' }
+  }
+  const normalizedMatch = whitespaceInsensitiveIndex(source, anchor)
+  if (normalizedMatch) return normalizedMatch
+  return { index: -1, anchor, match: 'none' }
+}
+
+export function isRevisionOutputTruncated(result: any) {
+  const finishReason = String(
+    result?.finish_reason
+    || result?.raw?.finish_reason
+    || result?.raw?.stop_reason
+    || result?.raw?.stopReason
+    || result?.raw?.status
+    || result?.raw?.choices?.[0]?.finish_reason
+    || '',
+  ).toLowerCase()
+  return finishReason === 'max_tokens'
+    || finishReason === 'length'
+    || finishReason.includes('max_token')
+    || finishReason.includes('max output')
+}
+
+export function shouldRetryRevisionPatch(payload: any, patchResult: any, result?: any) {
+  if (isRevisionOutputTruncated(result)) return true
+  const hasPatchShape = asArray(payload?.replacements || payload?.replace || payload?.patches).length > 0
+    || asArray(payload?.insertions || payload?.insert).length > 0
+  if (!hasPatchShape) return false
+  if (asArray(patchResult?.applied).length > 0) return false
+  return asArray(patchResult?.unapplied).some((item: any) => String(item?.reason || '') === 'anchor_not_found')
+}
+
 function textHash(value: string) {
   return createHash('sha256').update(value || '').digest('hex').slice(0, 16)
 }
@@ -158,7 +236,7 @@ export function buildStorylineDiffDecisionReviewPayload(input: any, now = new Da
   }
 }
 
-function applySurgicalRevisionPatch(originalText: string, payload: any) {
+export function applySurgicalRevisionPatch(originalText: string, payload: any) {
   const fullText = firstPatchText(payload?.chapter_text, payload?.prose_chapters?.[0]?.chapter_text)
   if (fullText) {
     return { chapterText: fullText, applied: [{ type: 'full_text', chars: fullText.length }], unapplied: [] as any[] }
@@ -169,19 +247,20 @@ function applySurgicalRevisionPatch(originalText: string, payload: any) {
   const unapplied: any[] = []
   const replacements = asArray(payload?.replacements || payload?.replace || payload?.patches)
   for (const item of replacements) {
-    const find = firstPatchText(item?.find, item?.old_text, item?.original, item?.target)
-    const replace = firstPatchText(item?.replace, item?.new_text, item?.replacement, item?.text)
-    if (!find || !replace) {
+    const find = firstAnchorText(item?.find, item?.old_text, item?.original, item?.target)
+    const replace = firstReplacementText(item?.replace, item?.new_text, item?.replacement, item?.text)
+    if (!find || replace === null) {
       unapplied.push({ type: 'replacement', reason: 'missing_find_or_replace', item })
       continue
     }
-    const index = chapterText.indexOf(find)
+    const match = findPatchAnchor(chapterText, find)
+    const index = match.index
     if (index < 0) {
       unapplied.push({ type: 'replacement', reason: 'anchor_not_found', find: find.slice(0, 120) })
       continue
     }
-    chapterText = `${chapterText.slice(0, index)}${replace}${chapterText.slice(index + find.length)}`
-    applied.push({ type: 'replacement', find: find.slice(0, 80), replace: replace.slice(0, 80) })
+    chapterText = `${chapterText.slice(0, index)}${replace}${chapterText.slice(index + match.anchor.length)}`
+    applied.push({ type: 'replacement', match: match.match, find: match.anchor.slice(0, 80), replace: replace.slice(0, 80) })
   }
 
   const insertions = asArray(payload?.insertions || payload?.insert)
@@ -199,16 +278,17 @@ function applySurgicalRevisionPatch(originalText: string, payload: any) {
       applied.push({ type: 'insertion', position: anchor ? position : 'append_or_prepend', text: text.slice(0, 80) })
       continue
     }
-    const index = chapterText.indexOf(anchor)
+    const match = findPatchAnchor(chapterText, anchor)
+    const index = match.index
     if (index < 0) {
       unapplied.push({ type: 'insertion', reason: 'anchor_not_found', anchor: anchor.slice(0, 120), text: text.slice(0, 120) })
       continue
     }
-    const offset = position === 'before' ? index : index + anchor.length
+    const offset = position === 'before' ? index : index + match.anchor.length
     const prefix = position === 'before' ? '' : '\n\n'
     const suffix = position === 'before' ? '\n\n' : ''
     chapterText = `${chapterText.slice(0, offset)}${prefix}${text}${suffix}${chapterText.slice(offset)}`
-    applied.push({ type: 'insertion', position, anchor: anchor.slice(0, 80), text: text.slice(0, 80) })
+    applied.push({ type: 'insertion', position, match: match.match, anchor: match.anchor.slice(0, 80), text: text.slice(0, 80) })
   }
 
   return { chapterText, applied, unapplied }
@@ -689,6 +769,7 @@ export function buildEditorRevisionPrompt({
     '正文工艺硬约束：不要用环境描写替代剧情推进；涉及战斗/行动时必须补足动作链、空间变化、代价和结果；删改时不得破坏连续性。',
     '交稿风险硬约束：如果交稿风险清单不为空，必须优先修复清单中的核心偏移、追读漏项、回报欠账、创新缺口、剧情线风险和出戏风险；不得只按普通润色处理。',
     '为了避免长连接失败，优先输出局部补丁，不要输出完整正文。',
+    '补丁长度硬约束：每条 find/anchor 控制在 30-300 字，必须是原文中唯一可精确匹配的短片段；不要把整章或多段长正文塞进 find/anchor。需要大幅删减时拆成多条短 replacement；删除时 replace 允许为空字符串。',
     '【编辑报告】',
     JSON.stringify(report, null, 2).slice(0, 7000),
     '【交稿风险清单】',
@@ -706,6 +787,46 @@ export function buildEditorRevisionPrompt({
     '  "revision_summary": "简述修了什么"',
     '}',
     '只有在补丁无法表达时，才输出 chapter_text 完整修订正文。',
+  ].join('\n')
+}
+
+export function buildCompactEditorRevisionPrompt({
+  project,
+  chapter,
+  report,
+  deliveryRiskBrief,
+  revisionMode,
+  userPrompt,
+  previousOutputPreview,
+}: {
+  project: any
+  chapter: any
+  report: any
+  deliveryRiskBrief?: any
+  revisionMode: string
+  userPrompt?: string
+  previousOutputPreview?: string
+}) {
+  return [
+    '任务：上一次修订输出被截断。现在只生成极短、可应用的 JSON 补丁。不要输出 Markdown，不要输出代码块，不要解释。',
+    `项目：${project.title}`,
+    `本次修订模式：${revisionMode}。${REVISION_MODE_GUIDE[revisionMode] || REVISION_MODE_GUIDE.from_report}`,
+    '硬性格式：只输出一个 JSON object，字段只允许 revision_mode, replacements, insertions, continuity_notes, revision_summary。',
+    '硬性限制：禁止输出 chapter_text。最多 6 条 replacements，最多 3 条 insertions。',
+    'replacement 限制：find 控制在 20-160 字，必须从原文精确复制且能唯一定位；replace 控制在 0-900 字。删除时 replace 用空字符串。不要把整段长正文塞进 find 或 replace。',
+    'insertion 限制：anchor 控制在 20-160 字，text 控制在 20-900 字。',
+    '如果修不完，只修最高优先级的 1-3 个问题，保证 JSON 完整闭合。',
+    '【编辑报告】',
+    JSON.stringify(report, null, 2).slice(0, 3000),
+    '【交稿风险清单】',
+    JSON.stringify(deliveryRiskBrief || {}, null, 2).slice(0, 2500),
+    '【修订提示】',
+    String(userPrompt || report.one_click_revision_prompt || ''),
+    '【上一次被截断输出片段，仅用于避免重复犯错】',
+    String(previousOutputPreview || '').slice(0, 1200),
+    '【原章节正文】',
+    String(chapter.chapter_text || '').slice(0, 12000),
+    'JSON 示例：{"revision_mode":"patch","replacements":[{"find":"原文中唯一短锚点","replace":""}],"insertions":[],"continuity_notes":[],"revision_summary":"修了最高优先级问题"}',
   ].join('\n')
 }
 
@@ -1959,19 +2080,82 @@ export function registerNovelEditorRoutes(app: Express, ctx: EditorRoutesContext
         userPrompt: req.body.prompt,
       })
       const modelId = ctx.getStageModelId(project, 'revise', Number(req.body.model_id || 0) || undefined)
-      const result = await executeNovelAgent('prose-agent', project, { task: prompt }, {
+      let result = await executeNovelAgent('prose-agent', project, { task: prompt }, {
         activeWorkspace,
         modelId: modelId ? String(modelId) : undefined,
-        maxTokens: 2600,
+        maxTokens: REVISION_MAX_TOKENS,
         temperature: ctx.getStageTemperature(project, 'revise', 0.62),
         responseMode: 'stream',
         skipMemory: true,
       })
       if ((result as any).error) return res.status(502).json({ error: (result as any).error, result })
-      const resultPayload = getNovelPayload(result)
-      const patchResult = applySurgicalRevisionPatch(String(chapter.chapter_text || ''), resultPayload)
-      const nextText = patchResult.chapterText
+      let resultPayload = getNovelPayload(result)
+      let patchResult = applySurgicalRevisionPatch(String(chapter.chapter_text || ''), resultPayload)
+      let nextText = patchResult.chapterText
       if (!nextText || (!patchResult.applied.length && !resultPayload?.chapter_text && !resultPayload?.prose_chapters?.[0]?.chapter_text)) {
+        if (shouldRetryRevisionPatch(resultPayload, patchResult, result)) {
+          const retryReason = isRevisionOutputTruncated(result) ? 'initial_output_truncated' : 'initial_patch_not_applicable'
+          const retryPrompt = buildCompactEditorRevisionPrompt({
+            project,
+            chapter,
+            report,
+            deliveryRiskBrief,
+            revisionMode,
+            userPrompt: req.body.prompt,
+            previousOutputPreview: extractLLMText(result),
+          })
+          const retryResult = await executeNovelAgent('prose-agent', project, { task: retryPrompt }, {
+            activeWorkspace,
+            modelId: modelId ? String(modelId) : undefined,
+            maxTokens: COMPACT_REVISION_RETRY_MAX_TOKENS,
+            temperature: 0.15,
+            responseMode: 'stream',
+            skipMemory: true,
+          })
+          if (!(retryResult as any).error) {
+            const retryPayload = getNovelPayload(retryResult)
+            const retryPatchResult = applySurgicalRevisionPatch(String(chapter.chapter_text || ''), retryPayload)
+            const retryNextText = retryPatchResult.chapterText
+            if (retryNextText && (retryPatchResult.applied.length || retryPayload?.chapter_text || retryPayload?.prose_chapters?.[0]?.chapter_text)) {
+              result = {
+                ...(retryResult as any),
+                revision_retry: {
+                  reason: retryReason,
+                  source_finish_reason: (result as any)?.finish_reason || (result as any)?.raw?.finish_reason || (result as any)?.raw?.stop_reason || '',
+                },
+              }
+              resultPayload = retryPayload
+              patchResult = {
+                ...retryPatchResult,
+                retry: 'revision_retry',
+              }
+              nextText = retryNextText
+            } else {
+              return res.status(502).json({
+                error: isRevisionOutputTruncated(retryResult) ? '修订重试输出仍被截断，未形成完整 JSON 补丁' : '修订重试未返回可应用补丁',
+                error_code: isRevisionOutputTruncated(retryResult) ? 'REVISION_RETRY_OUTPUT_TRUNCATED' : 'REVISION_RETRY_NO_APPLICABLE_PATCH',
+                result,
+                retry_result: retryResult,
+                llm_diagnostics: buildLLMResultDiagnostics(result),
+                retry_llm_diagnostics: buildLLMResultDiagnostics(retryResult),
+                patch_result: retryPatchResult,
+              })
+            }
+          } else {
+            return res.status(502).json({ error: (retryResult as any).error, result, retry_result: retryResult })
+          }
+        }
+      }
+      if (!nextText || (!patchResult.applied.length && !resultPayload?.chapter_text && !resultPayload?.prose_chapters?.[0]?.chapter_text)) {
+        if (isRevisionOutputTruncated(result)) {
+          return res.status(502).json({
+            error: '修订输出被截断，未形成完整 JSON 补丁',
+            error_code: 'REVISION_OUTPUT_TRUNCATED',
+            result,
+            llm_diagnostics: buildLLMResultDiagnostics(result),
+            patch_result: patchResult,
+          })
+        }
         return res.status(502).json({ error: '修订未返回可应用补丁', result, patch_result: patchResult })
       }
       const updated = await updateNovelChapter(activeWorkspace, chapter.id, {

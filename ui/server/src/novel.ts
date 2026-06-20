@@ -22,6 +22,7 @@ export type NovelChapterVersionSource = 'manual_edit' | 'agent_execute' | 'repai
 export type NovelChapterVersionRecord = { id: number; chapter_id: number; project_id: number; version_no: number; chapter_text: string; scene_breakdown: any[]; continuity_notes: string[]; source: NovelChapterVersionSource; created_at: string }
 export type NovelReviewRecord = { id: number; project_id: number; review_type: string; status: string; summary: string; issues: string[]; created_at: string; payload?: string }
 export type NovelRunRecord = { id: number; project_id: number; run_type: string; step_name: string; status: string; input_ref?: string; output_ref?: string; duration_ms?: number; error_message?: string; created_at: string }
+export type NovelProjectSeedDraftRecord = { id: number; title: string; idea?: string; seed: any; review_model?: any; diagnostics?: any; model_id?: number | null; source?: string; created_at: string; updated_at: string }
 export type NovelSettingEntityRecord = {
   id: number
   project_id: number
@@ -225,6 +226,18 @@ CREATE TABLE IF NOT EXISTS runs (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS project_seed_drafts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title TEXT NOT NULL,
+  idea TEXT DEFAULT '',
+  seed TEXT NOT NULL DEFAULT '{}',
+  review_model TEXT DEFAULT '{}',
+  diagnostics TEXT DEFAULT '{}',
+  model_id INTEGER DEFAULT NULL,
+  source TEXT DEFAULT 'deep_draft',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 CREATE TABLE IF NOT EXISTS setting_entities (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   project_id INTEGER NOT NULL,
@@ -274,6 +287,7 @@ CREATE INDEX IF NOT EXISTS idx_chapters_chapter_no ON chapters(chapter_no);
 CREATE INDEX IF NOT EXISTS idx_chapter_versions_chapter_id ON chapter_versions(chapter_id);
 CREATE INDEX IF NOT EXISTS idx_reviews_project_id ON reviews(project_id);
 CREATE INDEX IF NOT EXISTS idx_runs_project_id ON runs(project_id);
+CREATE INDEX IF NOT EXISTS idx_project_seed_drafts_updated_at ON project_seed_drafts(updated_at);
 CREATE INDEX IF NOT EXISTS idx_setting_entities_project_type ON setting_entities(project_id, entity_type);
 CREATE INDEX IF NOT EXISTS idx_setting_entities_project_name ON setting_entities(project_id, name);
 CREATE INDEX IF NOT EXISTS idx_chapter_setting_usage_chapter ON chapter_setting_usage(chapter_id);
@@ -286,6 +300,7 @@ CREATE INDEX IF NOT EXISTS idx_chapter_setting_usage_entity ON chapter_setting_u
     outlines: [['beats', "TEXT DEFAULT '[]'"], ['target_length', "TEXT DEFAULT ''"], ['version', 'INTEGER DEFAULT 1'], ['raw_payload', "TEXT DEFAULT '{}'"], ['created_at', "TEXT DEFAULT ''"]],
     chapters: [['scene_list', "TEXT DEFAULT '[]'"], ['items_in_play', "TEXT DEFAULT '[]'"], ['foreshadowing', "TEXT DEFAULT '[]'"], ['timeline_note', "TEXT DEFAULT ''"], ['version', 'INTEGER DEFAULT 1'], ['published_at', 'TEXT DEFAULT NULL'], ['raw_payload', "TEXT DEFAULT '{}'"]],
     reviews: [['payload', "TEXT DEFAULT ''"], ['status', "TEXT DEFAULT 'ok'"]],
+    project_seed_drafts: [['review_model', "TEXT DEFAULT '{}'"], ['diagnostics', "TEXT DEFAULT '{}'"], ['model_id', 'INTEGER DEFAULT NULL'], ['source', "TEXT DEFAULT 'deep_draft'"]],
     setting_entities: [['payload_json', "TEXT DEFAULT '{}'"], ['state_json', "TEXT DEFAULT '{}'"], ['constraints_json', "TEXT DEFAULT '{}'"]],
     chapter_setting_usage: [['expected_state_change', "TEXT DEFAULT '{}'"], ['actual_state_change', "TEXT DEFAULT '{}'"]],
   } as Record<string, Array<[string, string]>>)) {
@@ -483,6 +498,36 @@ function normalizeChapterRecord(data: Partial<NovelChapterRecord>, existing?: Pa
 }
 function normalizeReviewRecord(data: Partial<NovelReviewRecord>, existing?: Partial<NovelReviewRecord>): NovelReviewRecord { return { id: Number(existing?.id || data.id || 0), project_id: Number(data.project_id ?? existing?.project_id ?? 0), review_type: String(data.review_type ?? existing?.review_type ?? 'continuity'), status: String(data.status ?? existing?.status ?? 'ok'), summary: String(data.summary ?? existing?.summary ?? ''), issues: toStringArray(data.issues ?? existing?.issues), created_at: String(existing?.created_at ?? data.created_at ?? nowIso()), payload: String(data.payload ?? existing?.payload ?? '') } }
 function normalizeRunRecord(data: Partial<NovelRunRecord>, existing?: Partial<NovelRunRecord>): NovelRunRecord { return { id: Number(existing?.id || data.id || 0), project_id: Number(data.project_id ?? existing?.project_id ?? 0), run_type: String(data.run_type ?? existing?.run_type ?? 'plan'), step_name: String(data.step_name ?? existing?.step_name ?? 'step'), status: String(data.status ?? existing?.status ?? 'pending'), input_ref: String(data.input_ref ?? existing?.input_ref ?? ''), output_ref: String(data.output_ref ?? existing?.output_ref ?? ''), duration_ms: Number(data.duration_ms ?? existing?.duration_ms ?? 0), error_message: String(data.error_message ?? existing?.error_message ?? ''), created_at: String(existing?.created_at ?? data.created_at ?? nowIso()) } }
+function normalizeProjectSeedDraftRecord(data: Partial<NovelProjectSeedDraftRecord>, existing?: Partial<NovelProjectSeedDraftRecord>): NovelProjectSeedDraftRecord {
+  const seed = data.seed ?? existing?.seed ?? {}
+  const title = String(data.title ?? existing?.title ?? seed?.title ?? seed?.project_title ?? '未命名孵化草稿').trim() || '未命名孵化草稿'
+  return {
+    id: Number(existing?.id || data.id || 0),
+    title,
+    idea: String(data.idea ?? existing?.idea ?? ''),
+    seed,
+    review_model: data.review_model ?? existing?.review_model ?? {},
+    diagnostics: data.diagnostics ?? existing?.diagnostics ?? {},
+    model_id: data.model_id === undefined ? (existing?.model_id ?? null) : (data.model_id === null ? null : Number(data.model_id) || null),
+    source: String(data.source ?? existing?.source ?? 'deep_draft'),
+    created_at: String(existing?.created_at ?? data.created_at ?? nowIso()),
+    updated_at: String(data.updated_at ?? nowIso()),
+  }
+}
+function projectSeedDraftFromRow(row: any): NovelProjectSeedDraftRecord {
+  return {
+    id: Number(row.id || 0),
+    title: String(row.title || ''),
+    idea: String(row.idea || ''),
+    seed: parseDbJson(row.seed, {}),
+    review_model: parseDbJson(row.review_model, {}),
+    diagnostics: parseDbJson(row.diagnostics, {}),
+    model_id: row.model_id === null || row.model_id === undefined ? null : Number(row.model_id) || null,
+    source: String(row.source || 'deep_draft'),
+    created_at: String(row.created_at || ''),
+    updated_at: String(row.updated_at || ''),
+  }
+}
 function normalizeSettingEntityRecord(data: Partial<NovelSettingEntityRecord>, existing?: Partial<NovelSettingEntityRecord>): NovelSettingEntityRecord {
   const raw = { ...(existing?.payload_json || {}), ...(data.payload_json || {}), ...data }
   return {
@@ -581,3 +626,46 @@ export async function createNovelReview(activeWorkspace: string, data: Partial<N
 export async function listNovelRuns(activeWorkspace: string, projectId: number) { const store = await readStore(activeWorkspace); return store.runs.filter(item => item.project_id === projectId).sort((a, b) => b.created_at.localeCompare(a.created_at)) }
 export async function appendNovelRun(activeWorkspace: string, data: Partial<NovelRunRecord>) { const store = await readStore(activeWorkspace); const record = normalizeRunRecord(data, { id: store.runs.reduce((max, item) => Math.max(max, item.id), 0) + 1 }); store.runs.push(record); await writeStore(activeWorkspace, store); return record }
 export async function updateNovelRun(activeWorkspace: string, id: number, data: Partial<NovelRunRecord>) { const store = await readStore(activeWorkspace); const idx = store.runs.findIndex(item => item.id === id); if (idx < 0) return null; store.runs[idx] = normalizeRunRecord(data, store.runs[idx]); await writeStore(activeWorkspace, store); return store.runs[idx] }
+export async function listNovelProjectSeedDrafts(activeWorkspace: string) {
+  const db = openDb(activeWorkspace)
+  try {
+    ensureSqliteSchema(db)
+    const rows = db.query('SELECT * FROM project_seed_drafts ORDER BY updated_at DESC, id DESC').all() as any[]
+    return rows.map(projectSeedDraftFromRow)
+  } finally {
+    db.close()
+  }
+}
+export async function createNovelProjectSeedDraft(activeWorkspace: string, data: Partial<NovelProjectSeedDraftRecord>) {
+  const draft = normalizeProjectSeedDraftRecord(data)
+  const db = openDb(activeWorkspace)
+  try {
+    ensureSqliteSchema(db)
+    const result = db.query('INSERT INTO project_seed_drafts (title,idea,seed,review_model,diagnostics,model_id,source,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)').run(
+      draft.title,
+      draft.idea || '',
+      jsonText(draft.seed, {}),
+      jsonText(draft.review_model, {}),
+      jsonText(draft.diagnostics, {}),
+      draft.model_id ?? null,
+      draft.source || 'deep_draft',
+      draft.created_at,
+      draft.updated_at,
+    ) as any
+    const id = Number(result?.lastInsertRowid || (db.query('SELECT last_insert_rowid() AS id').get() as any)?.id || 0)
+    const row = db.query('SELECT * FROM project_seed_drafts WHERE id=?').get(id) as any
+    return projectSeedDraftFromRow(row)
+  } finally {
+    db.close()
+  }
+}
+export async function deleteNovelProjectSeedDraft(activeWorkspace: string, id: number) {
+  const db = openDb(activeWorkspace)
+  try {
+    ensureSqliteSchema(db)
+    const result = db.query('DELETE FROM project_seed_drafts WHERE id=?').run(id) as any
+    return Number(result?.changes || 0) > 0
+  } finally {
+    db.close()
+  }
+}

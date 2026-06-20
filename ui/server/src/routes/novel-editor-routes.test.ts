@@ -7,8 +7,11 @@ import {
   buildChapterQualityCard,
   buildDeliveryRiskConvergenceReport,
   buildEditorReportPrompt,
+  buildCompactEditorRevisionPrompt,
   buildEditorRevisionPrompt,
   buildStorylineDiffDecisionReviewPayload,
+  applySurgicalRevisionPatch,
+  isRevisionOutputTruncated,
 } from './novel-editor-routes'
 
 describe('buildChapterQualityCard', () => {
@@ -53,6 +56,113 @@ describe('buildChapterQualityCard', () => {
     expect(wordTargetDimension?.evidence).toContain('目标 2800-3500 字')
     expect(card.must_fix.some((item: string) => item.includes('扩写'))).toBe(true)
     expect(card.next_actions.some((item: string) => item.includes('目标字数'))).toBe(true)
+  })
+})
+
+describe('applySurgicalRevisionPatch', () => {
+  test('applies deletion replacements returned by revision patches', () => {
+    const originalText = '他心里有一种说不清道不明的感觉。\n\n门外传来脚步声。'
+
+    const result = applySurgicalRevisionPatch(originalText, {
+      revision_mode: 'patch',
+      replacements: [
+        { find: '他心里有一种说不清道不明的感觉。\n\n', replace: '' },
+      ],
+      revision_summary: '删除抽象重复描写。',
+    })
+
+    expect(result.chapterText).toBe('门外传来脚步声。')
+    expect(result.applied).toHaveLength(1)
+    expect(result.applied[0]).toMatchObject({ type: 'replacement' })
+    expect(result.unapplied).toEqual([])
+  })
+
+  test('matches replacement anchors across whitespace differences', () => {
+    const originalText = '丁松言醒来的时候，嘴里全是石灰和木屑的味道。他撑着地面坐起来，指尖按进泥里。'
+
+    const result = applySurgicalRevisionPatch(originalText, {
+      revision_mode: 'patch',
+      replacements: [
+        {
+          find: '丁松言醒来的时候，嘴里全是石灰和木屑的味道。\n\n他撑着地面坐起来，指尖按进泥里。',
+          replace: '丁松言醒来时，嘴里全是石灰和木屑的味道。他撑着地面坐起，指尖按进泥里。',
+        },
+      ],
+    })
+
+    expect(result.chapterText).toBe('丁松言醒来时，嘴里全是石灰和木屑的味道。他撑着地面坐起，指尖按进泥里。')
+    expect(result.applied[0]).toMatchObject({ type: 'replacement', match: 'normalized_whitespace' })
+    expect(result.unapplied).toEqual([])
+  })
+})
+
+describe('editor revision route safeguards', () => {
+  test('detects max-token truncated revision output before reporting missing patches', () => {
+    expect(isRevisionOutputTruncated({
+      finish_reason: 'max_tokens',
+      usage: { output_tokens: 2600 },
+      raw: { stop_reason: 'max_tokens' },
+    })).toBe(true)
+  })
+
+  test('requests enough output tokens for long local revision patches', async () => {
+    const { readFileSync } = await import('fs')
+    const { join } = await import('path')
+    const source = readFileSync(join(import.meta.dir, 'novel-editor-routes.ts'), 'utf8')
+
+    expect(source).toContain('REVISION_MAX_TOKENS')
+    expect(source).not.toContain('maxTokens: 2600')
+  })
+
+  test('tells the revision model to keep patch anchors compact and allow deletions', () => {
+    const prompt = buildEditorRevisionPrompt({
+      project: { title: '超人的规则怪谈世界' },
+      chapter: { chapter_text: '旧段落。\n\n下一段。' },
+      report: { must_fix: ['删除重复抽象描写'] },
+      revisionMode: 'from_report',
+      userPrompt: '',
+    })
+
+    expect(prompt).toContain('find/anchor 控制在')
+    expect(prompt).toContain('replace 允许为空字符串')
+  })
+
+  test('builds a compact retry prompt for truncated revision output', () => {
+    const prompt = buildCompactEditorRevisionPrompt({
+      project: { title: '超人的规则怪谈世界' },
+      chapter: { chapter_text: '第一段。\n\n第二段。\n\n第三段。' },
+      report: { must_fix: ['删掉重复抽象描写'] },
+      deliveryRiskBrief: { revision_directives: ['削减抽象描写'] },
+      revisionMode: 'from_report',
+      userPrompt: '',
+      previousOutputPreview: '{"replacements":[{"find":"超长未闭合',
+    })
+
+    expect(prompt).toContain('上一次修订输出被截断')
+    expect(prompt).toContain('最多 6 条 replacements')
+    expect(prompt).toContain('不要输出 Markdown')
+    expect(prompt).toContain('禁止输出 chapter_text')
+    expect(prompt).toContain('find 控制在 20-160 字')
+    expect(prompt).toContain('replace 控制在 0-900 字')
+  })
+
+  test('routes truncated revision output through a compact retry before returning failure', async () => {
+    const { readFileSync } = await import('fs')
+    const { join } = await import('path')
+    const source = readFileSync(join(import.meta.dir, 'novel-editor-routes.ts'), 'utf8')
+
+    expect(source).toContain('buildCompactEditorRevisionPrompt')
+    expect(source).toContain('retryResult')
+    expect(source).toContain('revision_retry')
+  })
+
+  test('routes anchor-miss revision output through a compact retry before returning failure', async () => {
+    const { readFileSync } = await import('fs')
+    const { join } = await import('path')
+    const source = readFileSync(join(import.meta.dir, 'novel-editor-routes.ts'), 'utf8')
+
+    expect(source).toContain('initial_patch_not_applicable')
+    expect(source).toContain('shouldRetryRevisionPatch')
   })
 })
 

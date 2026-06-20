@@ -5,6 +5,7 @@ import {
   DEFAULT_BULK_UI_PARAMS_CAPABILITY,
   DEFAULT_MANUAL_MODEL_CAPABILITIES,
   formatKeySubmitError,
+  getCreateKeyFormValues,
   MANUAL_MODEL_CAPABILITY_OPTIONS,
   MODEL_HEALTH_STATUS_MAP,
   modelHealthTooltipTitle,
@@ -78,6 +79,7 @@ describe('Key manager migration behavior', () => {
 
   test('maps model health statuses and exposes the persisted last error in tooltip text', () => {
     expect(MODEL_HEALTH_STATUS_MAP.network_error.text).toBe('网络错误')
+    expect(MODEL_HEALTH_STATUS_MAP.upstream_busy.text).toBe('上游繁忙')
     expect(MODEL_HEALTH_STATUS_MAP.key_disabled.text).toBe('Key停用')
 
     const tooltip = modelHealthTooltipTitle({
@@ -87,5 +89,22 @@ describe('Key manager migration behavior', () => {
 
     expect(tooltip).toContain('最后测试')
     expect(tooltip).toContain('AnyRouter Claude/Anthropic')
+  })
+
+  test('prevents add-key modal fields from reusing previous provider credentials', async () => {
+    expect(getCreateKeyFormValues()).toMatchObject({
+      service_type: 'llm',
+      provider: undefined,
+      base_url: undefined,
+      key: undefined,
+      is_active: true,
+      quota_total: 0,
+    })
+
+    const source = await Bun.file(new URL('./index.tsx', import.meta.url)).text()
+
+    expect(source).toContain('getCreateKeyFormValues')
+    expect(source).toContain('autoComplete="off"')
+    expect(source).toContain('autoComplete="new-password"')
   })
 })

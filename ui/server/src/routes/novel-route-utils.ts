@@ -1,13 +1,26 @@
 export function parseJsonLikePayload(value: any) {
   if (!value) return null
-  if (typeof value === 'object') return value
+  if (Array.isArray(value)) {
+    const text = textFromOutputParts(value)
+    return text ? parseJsonLikePayload(text) : value
+  }
+  if (typeof value === 'object') {
+    const text = textFromContentValue(value)
+    const parsedText = text ? parseJsonLikePayload(text) : null
+    return parsedText && typeof parsedText === 'object' && !Array.isArray(parsedText) ? parsedText : value
+  }
   const raw = String(value || '').trim()
   if (!raw) return null
-  const candidates = [
+  const baseCandidates = [
     raw,
+    raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, ''),
     raw.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1] || '',
     raw.match(/\{[\s\S]*\}/)?.[0] || '',
   ].filter(Boolean)
+  const candidates = baseCandidates.flatMap(candidate => {
+    const decoded = decodeEscapedJsonCandidate(candidate)
+    return decoded ? [candidate, decoded] : [candidate]
+  })
   for (const candidate of candidates) {
     try {
       return JSON.parse(candidate)
@@ -18,12 +31,33 @@ export function parseJsonLikePayload(value: any) {
   return null
 }
 
+function decodeEscapedJsonCandidate(value: string) {
+  const text = String(value || '').trim()
+  if (!text || !/(\\")/.test(text)) return ''
+  if (!/\\?"?(prose_chapters|chapter_text|revision_mode|replacements)\\?"?/.test(text)) return ''
+  const decoded = text
+    .replace(/\\"/g, '"')
+    .replace(/\\n/g, '\n')
+    .replace(/\\r/g, '\r')
+    .replace(/\\t/g, '\t')
+  return decoded !== text ? decoded : ''
+}
+
 export function getNovelPayload(result: any) {
   const rawChoicesContent = result?.raw?.choices?.[0]?.message?.content
-  const candidates = [result?.output, result?.parsed, result?.content, result?.raw?.content, rawChoicesContent]
+  const candidates = [
+    result?.output,
+    result?.parsed,
+    result?.content,
+    result?.raw?.content,
+    result?.raw?.output_text,
+    result?.raw?.response?.output_text,
+    rawChoicesContent,
+    extractLLMText(result),
+  ]
   for (const candidate of candidates) {
     const payload = parseJsonLikePayload(candidate)
-    if (payload && typeof payload === 'object') return payload
+    if (payload && typeof payload === 'object' && !Array.isArray(payload)) return payload
   }
   return {}
 }
@@ -46,10 +80,20 @@ function textFromOutputItems(items: any[]) {
     .join('\n')
 }
 
+function textFromContentValue(value: any) {
+  if (typeof value === 'string') return value
+  if (Array.isArray(value)) return textFromOutputParts(value)
+  if (value && typeof value === 'object') {
+    if (Array.isArray(value.content)) return textFromOutputParts(value.content)
+    return String(value.text || value.content || value.value || '')
+  }
+  return ''
+}
+
 export function extractLLMText(result: any) {
   const candidates = [
-    result?.content,
-    result?.raw?.content,
+    textFromContentValue(result?.content),
+    textFromContentValue(result?.raw?.content),
     result?.raw?.output_text,
     result?.raw?.response?.output_text,
     result?.raw?.choices?.[0]?.message?.content,
