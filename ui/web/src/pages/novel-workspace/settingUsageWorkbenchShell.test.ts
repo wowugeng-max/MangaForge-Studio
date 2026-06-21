@@ -31,4 +31,18 @@ describe('setting usage workbench shell', () => {
     expect(component).toContain('<details className="setting-workshop-state-change"')
     expect(component).not.toContain('<Card size="small" style={{ width: \'100%\' }} title={<Space size={4}><Text strong>{setting.name}</Text>')
   })
+
+  test('keeps the usage workbench compact and long names contained', () => {
+    const css = source('SettingWorkshopPanel.css')
+
+    expect(css).toContain('.setting-workshop-usage-board')
+    expect(css).toContain('.setting-workshop-filter-strip')
+    expect(css).toContain('overflow-x: auto')
+    expect(css).toContain('.setting-workshop-asset-card')
+    expect(css).toContain('.setting-workshop-asset-name')
+    expect(css).toContain('text-overflow: ellipsis')
+    expect(css).toContain('.setting-workshop-asset-tags .ant-tag')
+    expect(css).toContain('max-width: 100%')
+    expect(css).toContain('@media (max-width: 760px)')
+  })
 })
