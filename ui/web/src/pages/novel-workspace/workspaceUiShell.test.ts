@@ -366,6 +366,7 @@ describe('commercial writing workspace UI shell', () => {
 
   test('shows storyline workshop types and draft brief storyline section', () => {
     const settingPanel = source('SettingWorkshopPanel.tsx')
+    const usageModel = source('settingUsageWorkbenchModel.ts')
     const workspaceCenter = source('WorkspaceCenter.tsx')
     const workspaceCss = source('WorkspaceCenter.css')
 
@@ -376,8 +377,9 @@ describe('commercial writing workspace UI shell', () => {
     expect(settingPanel).toContain("value: 'relationship_arc'")
     expect(settingPanel).toContain("value: 'faction_arc'")
     expect(settingPanel).toContain("value: 'foreshadowing_arc'")
-    expect(settingPanel).toContain("value: 'advance'")
-    expect(settingPanel).toContain("value: 'payoff'")
+    expect(settingPanel).toContain('usageSegmentOptions')
+    expect(usageModel).toContain("value: 'advance'")
+    expect(usageModel).toContain("value: 'payoff'")
     expect(settingPanel).toContain('/storylines/suggest')
     expect(settingPanel).toContain('匹配剧情线')
     expect(workspaceCenter).toContain('剧情线推进')
