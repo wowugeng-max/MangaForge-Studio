@@ -455,6 +455,7 @@ export function SettingAssetGraphPanel({ projectId }: { projectId: number }) {
                 <DetailRow label="年龄" value={selectedNode.metadata?.age} />
                 <DetailRow label="境界" value={selectedNode.metadata?.realm} />
                 <DetailRow label="能力" value={selectedNode.metadata?.abilities} />
+                <DetailRow label="功法" value={selectedNode.metadata?.techniques} />
                 <DetailRow label="势力" value={selectedNode.metadata?.faction} />
                 <DetailRow label="剧情线" value={storylineRelations} />
                 <DetailRow label="开始章节" value={displayChapterNo(selectedNode.metadata?.first_chapter_no)} />

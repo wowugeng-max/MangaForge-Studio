@@ -25,6 +25,7 @@ describe('setting asset relationship graph shell', () => {
     expect(panel).toContain('年龄')
     expect(panel).toContain('境界')
     expect(panel).toContain('能力')
+    expect(panel).toContain('功法')
     expect(panel).toContain('势力')
     expect(panel).toContain('剧情线')
     expect(panel).toContain('开始章节')

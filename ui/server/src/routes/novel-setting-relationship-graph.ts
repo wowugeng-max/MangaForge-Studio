@@ -202,6 +202,17 @@ function mergeCharacterMetadata(setting: any, charactersById: Map<number, any>, 
     age: state.age ?? character.age ?? character.current_state?.age ?? payload.age,
     realm: state.realm ?? state.cultivation_realm ?? character.current_state?.realm ?? character.current_state?.cultivation_realm ?? payload.realm,
     abilities: stringValues(state.abilities ?? character.abilities ?? payload.abilities),
+    techniques: stringValues(
+      state.techniques
+      ?? state.cultivation_method
+      ?? state.cultivation_methods
+      ?? state.methods
+      ?? character.current_state?.techniques
+      ?? character.current_state?.cultivation_method
+      ?? character.techniques
+      ?? payload.techniques
+      ?? payload.cultivation_method,
+    ),
     faction: state.faction ?? state.affiliation ?? character.current_state?.faction ?? character.current_state?.affiliation ?? payload.faction,
     relationships: state.relationships ?? character.relationships ?? payload.relationships ?? [],
     character_id: relatedCharacter?.id || namedCharacter?.id || payload.character_id || null,

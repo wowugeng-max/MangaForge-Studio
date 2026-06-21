@@ -16,6 +16,7 @@ describe('buildSettingRelationshipGraph', () => {
             age: 17,
             realm: '炼骨境',
             abilities: ['食兽感应'],
+            techniques: ['血河炼骨术'],
             faction: '荒门',
             relationships: [{ target: '鹿九', type: '盟友', state: '初步信任' }],
           },
@@ -43,6 +44,7 @@ describe('buildSettingRelationshipGraph', () => {
       realm: '炼骨境',
       faction: '荒门',
       abilities: ['食兽感应'],
+      techniques: ['血河炼骨术'],
     })
     expect(graph.edges.map(edge => edge.relation_type)).toEqual(expect.arrayContaining([
       'has_ability',
