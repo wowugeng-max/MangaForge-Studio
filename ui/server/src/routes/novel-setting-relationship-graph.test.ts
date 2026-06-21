@@ -80,4 +80,103 @@ describe('buildSettingRelationshipGraph', () => {
       missing_owner_count: 1,
     })
   })
+
+  test('preserves relationship timeline, state changes, and reasonability diagnostics', () => {
+    const graph = buildSettingRelationshipGraph({
+      settings: [
+        {
+          id: 1,
+          project_id: 7,
+          entity_type: 'character',
+          name: '迟正',
+          first_chapter_no: 3,
+          state_json: {
+            abilities: [{ name: '食兽感应', start_chapter_no: 4 }],
+            relationships: [
+              {
+                target: '鹿九',
+                type: '盟友',
+                status: '信任建立',
+                start_chapter_no: 2,
+                state_changes: [{ chapter_no: 5, status: '救命后信任提升' }],
+              },
+            ],
+          },
+        },
+        {
+          id: 2,
+          project_id: 7,
+          entity_type: 'character',
+          name: '鹿九',
+          first_chapter_no: 5,
+          state_json: { abilities: ['食兽感应'] },
+        },
+        {
+          id: 3,
+          project_id: 7,
+          entity_type: 'ability',
+          name: '食兽感应',
+          first_chapter_no: 4,
+          state_json: { owner: '迟正' },
+        },
+        {
+          id: 4,
+          project_id: 7,
+          entity_type: 'character',
+          name: '无起始关系人',
+          state_json: { relationships: ['鹿九'] },
+        },
+      ],
+      chapters: [
+        { id: 11, project_id: 7, chapter_no: 6, title: '血夜同行' },
+      ],
+      usage: [
+        {
+          id: 31,
+          project_id: 7,
+          chapter_id: 11,
+          entity_id: 1,
+          usage_type: 'advance',
+          reveal_level: 'partial',
+          expected_state_change: { relationship: '迟正开始信任鹿九' },
+          actual_state_change: { relationship: '鹿九救下迟正' },
+        },
+      ],
+    })
+
+    const relationshipEdge = graph.edges.find(edge => edge.source === 'setting-1' && edge.target === 'setting-2' && edge.relation_type === 'character_relation')
+    expect(relationshipEdge).toMatchObject({
+      label: '盟友',
+      status: '信任建立',
+      start_chapter_no: 2,
+      state: {
+        relation_type: '盟友',
+        status: '信任建立',
+      },
+      state_changes: [
+        { chapter_no: 5, status: '救命后信任提升' },
+      ],
+    })
+
+    const usageEdge = graph.edges.find(edge => edge.source === 'setting-1' && edge.target === 'chapter-11' && edge.relation_type === 'advanced_in_chapter')
+    expect(usageEdge?.state_changes?.[0]).toMatchObject({
+      chapter_id: 11,
+      chapter_no: 6,
+      usage_type: 'advance',
+      reveal_level: 'partial',
+      expected_state_change: { relationship: '迟正开始信任鹿九' },
+      actual_state_change: { relationship: '鹿九救下迟正' },
+    })
+
+    expect(graph.diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'timeline_conflict', entity_id: 1, evidence: 'start_chapter_no' }),
+      expect.objectContaining({ type: 'owner_ability_mismatch', entity_id: 3, evidence: 'state_json.abilities' }),
+      expect.objectContaining({ type: 'missing_start_chapter', entity_id: 4, evidence: 'relationship_graph' }),
+    ]))
+    expect(graph.summary).toMatchObject({
+      timeline_conflict_count: 1,
+      owner_mismatch_count: 1,
+      missing_start_chapter_count: 1,
+    })
+  })
 })

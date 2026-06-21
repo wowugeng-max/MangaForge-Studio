@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Empty, List, Space, Spin, Tag, Typography } from 'antd'
+import { Alert, Button, Empty, List, Segmented, Select, Space, Spin, Tag, Typography } from 'antd'
 import { BranchesOutlined, ReloadOutlined, WarningOutlined } from '@ant-design/icons'
 import ReactFlow, {
   Background,
@@ -38,7 +38,19 @@ type SettingRelationshipEdge = {
   label: string
   confidence: 'explicit' | 'inferred' | 'usage'
   start_chapter_no?: number | null
+  end_chapter_no?: number | null
+  status?: string
   state?: any
+  state_changes?: Array<{
+    chapter_id?: number
+    chapter_no?: number | null
+    usage_type?: string
+    reveal_level?: string
+    expected_state_change?: any
+    actual_state_change?: any
+    status?: string
+    note?: string
+  }>
   evidence?: string
 }
 
@@ -61,6 +73,8 @@ type SettingRelationshipGraph = {
     isolated_key_asset_count: number
     missing_owner_count: number
     missing_start_chapter_count: number
+    timeline_conflict_count: number
+    owner_mismatch_count: number
   }
 }
 
@@ -68,6 +82,8 @@ type AssetNodeData = {
   label: React.ReactNode
   source: SettingRelationshipNode
 }
+
+type GraphMode = 'all' | 'character' | 'storyline' | 'risk'
 
 const EMPTY_GRAPH: SettingRelationshipGraph = {
   nodes: [],
@@ -79,6 +95,8 @@ const EMPTY_GRAPH: SettingRelationshipGraph = {
     isolated_key_asset_count: 0,
     missing_owner_count: 0,
     missing_start_chapter_count: 0,
+    timeline_conflict_count: 0,
+    owner_mismatch_count: 0,
   },
 }
 
@@ -122,6 +140,15 @@ const typeOrder = [
   'chapter',
 ]
 
+const storylineNodeTypes = new Set(['mainline', 'subplot', 'character_arc', 'relationship_arc', 'faction_arc', 'foreshadowing_arc'])
+
+const graphModeOptions = [
+  { label: '全部', value: 'all' },
+  { label: '角色中心', value: 'character' },
+  { label: '剧情线', value: 'storyline' },
+  { label: '风险', value: 'risk' },
+]
+
 function nodeKindKey(node: SettingRelationshipNode) {
   if (node.kind === 'chapter') return 'chapter'
   return String(node.entity_type || 'rule')
@@ -155,9 +182,48 @@ function severityColor(severity?: string) {
   return 'blue'
 }
 
+function diagnosticTypeLabel(type?: string) {
+  if (type === 'timeline_conflict') return '时间冲突'
+  if (type === 'owner_ability_mismatch') return '归属冲突'
+  if (type === 'missing_start_chapter') return '缺开始章节'
+  if (type === 'missing_owner') return '缺拥有者'
+  if (type === 'dangling_relation') return '引用缺失'
+  if (type === 'isolated_key_asset') return '孤立资产'
+  return type || '关系诊断'
+}
+
 function displayMetadataValue(value: any) {
   const text = displayValue(value)
   return text || '未记录'
+}
+
+function displayChapterNo(value: any) {
+  const number = Number(value || 0)
+  return number > 0 ? `第${number}章` : '未记录'
+}
+
+function filterGraphByMode(graph: SettingRelationshipGraph, graphMode: GraphMode): SettingRelationshipGraph {
+  if (graphMode === 'all') return graph
+  const seedIds = new Set<string>()
+  const diagnosticEntityIds = new Set(graph.diagnostics.map(item => Number(item.entity_id || 0)).filter(Boolean))
+  for (const node of graph.nodes) {
+    if (graphMode === 'character' && node.entity_type === 'character') seedIds.add(node.id)
+    if (graphMode === 'storyline' && storylineNodeTypes.has(String(node.entity_type || ''))) seedIds.add(node.id)
+    if (graphMode === 'risk' && node.entity_id && diagnosticEntityIds.has(Number(node.entity_id))) seedIds.add(node.id)
+  }
+  if (seedIds.size === 0) return { ...graph, nodes: [], edges: [] }
+  const visibleIds = new Set(seedIds)
+  for (const edge of graph.edges) {
+    if (seedIds.has(edge.source) || seedIds.has(edge.target)) {
+      visibleIds.add(edge.source)
+      visibleIds.add(edge.target)
+    }
+  }
+  return {
+    ...graph,
+    nodes: graph.nodes.filter(node => visibleIds.has(node.id)),
+    edges: graph.edges.filter(edge => visibleIds.has(edge.source) && visibleIds.has(edge.target)),
+  }
 }
 
 function buildFlowNodes(graph: SettingRelationshipGraph): Node<AssetNodeData>[] {
@@ -242,6 +308,7 @@ export function SettingAssetGraphPanel({ projectId }: { projectId: number }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [selectedNodeId, setSelectedNodeId] = useState<string>('')
+  const [graphMode, setGraphMode] = useState<GraphMode>('all')
   const [nodes, setNodes, onNodesChange] = useNodesState<AssetNodeData>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
 
@@ -267,9 +334,16 @@ export function SettingAssetGraphPanel({ projectId }: { projectId: number }) {
     loadGraph()
   }, [loadGraph])
 
-  const flowNodes = useMemo(() => buildFlowNodes(graph), [graph])
-  const flowEdges = useMemo(() => buildFlowEdges(graph), [graph])
-  const selectedNode = graph.nodes.find(node => node.id === selectedNodeId) || graph.nodes[0] || null
+  const filteredGraph = useMemo(() => filterGraphByMode(graph, graphMode), [graph, graphMode])
+  const flowNodes = useMemo(() => buildFlowNodes(filteredGraph), [filteredGraph])
+  const flowEdges = useMemo(() => buildFlowEdges(filteredGraph), [filteredGraph])
+  const selectedNode = graph.nodes.find(node => node.id === selectedNodeId) || filteredGraph.nodes[0] || graph.nodes[0] || null
+  const assetSelectOptions = useMemo(() => graph.nodes
+    .filter(node => node.kind === 'setting')
+    .map(node => ({
+      value: node.id,
+      label: `${node.name} · ${typeLabel(node.entity_type)}`,
+    })), [graph.nodes])
   const connectedEdges = selectedNode
     ? graph.edges.filter(edge => edge.source === selectedNode.id || edge.target === selectedNode.id)
     : []
@@ -278,6 +352,9 @@ export function SettingAssetGraphPanel({ projectId }: { projectId: number }) {
       .filter(edge => edge.relation_type === 'in_storyline')
       .map(edge => findRelatedNode(graph, edge.source === selectedNode.id ? edge.target : edge.source)?.name)
       .filter(Boolean)
+    : []
+  const selectedStateChanges = selectedNode
+    ? connectedEdges.flatMap(edge => (edge.state_changes || []).map(change => ({ edge, change })))
     : []
 
   useEffect(() => {
@@ -305,8 +382,34 @@ export function SettingAssetGraphPanel({ projectId }: { projectId: number }) {
           <Tag color="blue">资产 {graph.summary.node_count}</Tag>
           <Tag color="cyan">关系 {graph.summary.edge_count}</Tag>
           <Tag color={graph.summary.missing_owner_count ? 'red' : 'green'}>缺拥有者 {graph.summary.missing_owner_count}</Tag>
+          <Tag color={graph.summary.missing_start_chapter_count ? 'gold' : 'green'}>缺开始 {graph.summary.missing_start_chapter_count}</Tag>
+          <Tag color={graph.summary.timeline_conflict_count ? 'red' : 'green'}>时间冲突 {graph.summary.timeline_conflict_count}</Tag>
+          <Tag color={graph.summary.owner_mismatch_count ? 'gold' : 'green'}>归属冲突 {graph.summary.owner_mismatch_count}</Tag>
           <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={loadGraph}>刷新</Button>
         </Space>
+      </div>
+
+      <div className="setting-asset-graph-controls">
+        <Segmented
+          size="small"
+          value={graphMode}
+          options={graphModeOptions}
+          onChange={value => setGraphMode(value as GraphMode)}
+        />
+        <Select
+          allowClear
+          showSearch
+          size="small"
+          className="setting-asset-graph-locator"
+          placeholder="定位资产"
+          optionFilterProp="label"
+          value={selectedNodeId || undefined}
+          options={assetSelectOptions}
+          onChange={value => {
+            setSelectedNodeId(value || '')
+            if (value) setGraphMode('all')
+          }}
+        />
       </div>
 
       {error ? <Alert className="setting-asset-graph-alert" type="error" showIcon message={error} /> : null}
@@ -354,7 +457,7 @@ export function SettingAssetGraphPanel({ projectId }: { projectId: number }) {
                 <DetailRow label="能力" value={selectedNode.metadata?.abilities} />
                 <DetailRow label="势力" value={selectedNode.metadata?.faction} />
                 <DetailRow label="剧情线" value={storylineRelations} />
-                <DetailRow label="首次章节" value={selectedNode.metadata?.first_chapter_no} />
+                <DetailRow label="开始章节" value={displayChapterNo(selectedNode.metadata?.first_chapter_no)} />
                 <DetailRow label="状态" value={selectedNode.metadata?.status} />
               </div>
               <div className="setting-asset-graph-relations">
@@ -372,7 +475,38 @@ export function SettingAssetGraphPanel({ projectId }: { projectId: number }) {
                           <Space size={6} wrap>
                             <Tag color={edge.confidence === 'usage' ? 'blue' : edge.confidence === 'explicit' ? 'cyan' : 'default'}>{edge.label}</Tag>
                             <Text>{related?.name || '未知资产'}</Text>
-                            {edge.start_chapter_no ? <Text type="secondary">第{edge.start_chapter_no}章起</Text> : null}
+                            <Text type="secondary">开始章节 {displayChapterNo(edge.start_chapter_no)}</Text>
+                            {edge.status ? <Text type="secondary">关系状态 {edge.status}</Text> : null}
+                            {edge.evidence ? <Text type="secondary">证据 {edge.evidence}</Text> : null}
+                          </Space>
+                        </List.Item>
+                      )
+                    }}
+                  />
+                )}
+              </div>
+              <div className="setting-asset-graph-timeline">
+                <Text strong>状态变化</Text>
+                {selectedStateChanges.length === 0 ? (
+                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无状态变化记录" />
+                ) : (
+                  <List
+                    size="small"
+                    dataSource={selectedStateChanges}
+                    renderItem={({ edge, change }) => {
+                      const related = findRelatedNode(graph, edge.source === selectedNode.id ? edge.target : edge.source)
+                      return (
+                        <List.Item>
+                          <Space size={6} direction="vertical" className="setting-asset-graph-change-item">
+                            <Space size={6} wrap>
+                              <Tag color="blue">{displayChapterNo(change.chapter_no)}</Tag>
+                              <Text>{edge.label}</Text>
+                              <Text>{related?.name || '未知资产'}</Text>
+                              {change.usage_type ? <Text type="secondary">{change.usage_type}</Text> : null}
+                            </Space>
+                            <Text type="secondary">
+                              {displayValue(change.actual_state_change) || displayValue(change.expected_state_change) || change.status || change.note || '状态变化已记录'}
+                            </Text>
                           </Space>
                         </List.Item>
                       )
@@ -391,6 +525,7 @@ export function SettingAssetGraphPanel({ projectId }: { projectId: number }) {
         <Space size={8} align="center">
           <WarningOutlined />
           <Text strong>关系诊断</Text>
+          <Tag color="blue">合理性</Tag>
           <Tag color={graph.diagnostics.length ? 'gold' : 'green'}>{graph.diagnostics.length}</Tag>
         </Space>
         {graph.diagnostics.length === 0 ? (
@@ -402,10 +537,11 @@ export function SettingAssetGraphPanel({ projectId }: { projectId: number }) {
             renderItem={item => (
               <List.Item>
                 <Space size={8} wrap>
+                  <Tag>{diagnosticTypeLabel(item.type)}</Tag>
                   <Tag color={severityColor(item.severity)}>{item.severity}</Tag>
                   <Text strong>{item.entity_name || '资产'}</Text>
                   <Text>{item.message}</Text>
-                  {item.evidence ? <Text type="secondary">{item.evidence}</Text> : null}
+                  {item.evidence ? <Text type="secondary">证据 {item.evidence}</Text> : null}
                 </Space>
               </List.Item>
             )}

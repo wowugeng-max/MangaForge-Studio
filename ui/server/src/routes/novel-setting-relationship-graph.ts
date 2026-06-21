@@ -1,6 +1,17 @@
 export type SettingRelationshipNodeKind = 'setting' | 'chapter'
 export type SettingRelationshipConfidence = 'explicit' | 'inferred' | 'usage'
 
+export type SettingRelationshipStateChange = {
+  chapter_id?: number
+  chapter_no?: number | null
+  usage_type?: string
+  reveal_level?: string
+  expected_state_change?: any
+  actual_state_change?: any
+  status?: string
+  note?: string
+}
+
 export type SettingRelationshipNode = {
   id: string
   kind: SettingRelationshipNodeKind
@@ -20,7 +31,10 @@ export type SettingRelationshipEdge = {
   label: string
   confidence: SettingRelationshipConfidence
   start_chapter_no?: number | null
+  end_chapter_no?: number | null
+  status?: string
   state?: any
+  state_changes?: SettingRelationshipStateChange[]
   evidence?: string
 }
 
@@ -43,6 +57,8 @@ export type SettingRelationshipGraph = {
     isolated_key_asset_count: number
     missing_owner_count: number
     missing_start_chapter_count: number
+    timeline_conflict_count: number
+    owner_mismatch_count: number
   }
 }
 
@@ -89,12 +105,60 @@ function stringValues(value: any): string[] {
     .filter(Boolean)
 }
 
+function firstText(...values: any[]) {
+  for (const value of values) {
+    const text = String(value || '').trim()
+    if (text) return text
+  }
+  return ''
+}
+
 function firstNumber(...values: any[]) {
   for (const value of values) {
     const number = Number(value || 0)
     if (number > 0) return number
   }
   return null
+}
+
+function meaningfulObject(value: any) {
+  return value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length > 0
+}
+
+function normalizeStateChanges(value: any): SettingRelationshipStateChange[] {
+  return asArray(value)
+    .map(item => {
+      if (!item) return null
+      if (typeof item === 'object' && !Array.isArray(item)) return item as SettingRelationshipStateChange
+      return { note: String(item) }
+    })
+    .filter(Boolean) as SettingRelationshipStateChange[]
+}
+
+function relationRefs(value: any) {
+  return asArray(value)
+    .map(item => {
+      if (typeof item === 'string' || typeof item === 'number') return { name: String(item).trim() }
+      if (!item || typeof item !== 'object') return null
+      const name = firstText(item.name, item.title, item.target, item.target_name, item.character, item.faction, item.realm, item.owner)
+      if (!name) return null
+      return {
+        name,
+        relation_type: firstText(item.type, item.relation_type, item.relationship, item.role),
+        status: firstText(item.status, item.state, item.current_state),
+        start_chapter_no: firstNumber(item.start_chapter_no, item.start_chapter, item.chapter_no),
+        end_chapter_no: firstNumber(item.end_chapter_no, item.end_chapter),
+        state_changes: normalizeStateChanges(item.state_changes ?? item.changes ?? item.timeline),
+      }
+    })
+    .filter(Boolean) as Array<{
+      name: string
+      relation_type?: string
+      status?: string
+      start_chapter_no?: number | null
+      end_chapter_no?: number | null
+      state_changes?: SettingRelationshipStateChange[]
+    }>
 }
 
 function relationLabel(type: string) {
@@ -145,14 +209,43 @@ function mergeCharacterMetadata(setting: any, charactersById: Map<number, any>, 
 }
 
 function addEdge(edges: SettingRelationshipEdge[], edge: Omit<SettingRelationshipEdge, 'id' | 'label'> & { label?: string }) {
-  if (!edge.source || !edge.target || edge.source === edge.target) return
+  if (!edge.source || !edge.target || edge.source === edge.target) return null
   const id = uniqueEdgeId(edge.source, edge.target, edge.relation_type)
-  if (edges.some(item => item.id === id)) return
-  edges.push({
+  const existing = edges.find(item => item.id === id)
+  if (existing) {
+    const currentStart = firstNumber(existing.start_chapter_no)
+    const nextStart = firstNumber(edge.start_chapter_no)
+    if (!currentStart || (nextStart && nextStart < currentStart)) existing.start_chapter_no = nextStart
+    if (edge.end_chapter_no && !existing.end_chapter_no) existing.end_chapter_no = edge.end_chapter_no
+    if (edge.status && !existing.status) existing.status = edge.status
+    if (edge.state && typeof edge.state === 'object') existing.state = { ...(existing.state || {}), ...edge.state }
+    if (edge.state_changes?.length) existing.state_changes = [...(existing.state_changes || []), ...edge.state_changes]
+    return existing
+  }
+  const next = {
     id,
     label: edge.label || relationLabel(edge.relation_type),
     ...edge,
-  })
+  }
+  edges.push(next)
+  return next
+}
+
+function usageStateChange(item: any, chapter: any): SettingRelationshipStateChange {
+  return {
+    chapter_id: Number(item.chapter_id || 0) || undefined,
+    chapter_no: chapter?.chapter_no ?? null,
+    usage_type: String(item.usage_type || 'allowed'),
+    reveal_level: item.reveal_level ? String(item.reveal_level) : undefined,
+    expected_state_change: item.expected_state_change || {},
+    actual_state_change: item.actual_state_change || {},
+  }
+}
+
+function mergedUsageState(item: any) {
+  const expected = meaningfulObject(item.expected_state_change) ? item.expected_state_change : {}
+  const actual = meaningfulObject(item.actual_state_change) ? item.actual_state_change : {}
+  return { ...expected, ...actual }
 }
 
 export function buildSettingRelationshipGraph(input: SettingRelationshipGraphInput): SettingRelationshipGraph {
@@ -255,29 +348,44 @@ export function buildSettingRelationshipGraph(input: SettingRelationshipGraphInp
     const payload = setting.payload_json || {}
 
     if (setting.entity_type === 'character') {
-      const abilityNames = stringValues(state.abilities ?? payload.abilities)
-      for (const name of abilityNames) {
-        const target = settingsByName.get(name)
-        if (target) addEdge(edges, { source, target: settingNodeId(target), relation_type: 'has_ability', confidence: 'inferred', start_chapter_no: firstNumber(setting.first_chapter_no, target.first_chapter_no), evidence: 'state_json.abilities' })
+      const abilityRefs = relationRefs(state.abilities ?? payload.abilities)
+      for (const ref of abilityRefs) {
+        const target = settingsByName.get(ref.name)
+        if (target) addEdge(edges, { source, target: settingNodeId(target), relation_type: 'has_ability', confidence: 'inferred', start_chapter_no: firstNumber(ref.start_chapter_no, setting.first_chapter_no, target.first_chapter_no), end_chapter_no: ref.end_chapter_no, status: ref.status, state_changes: ref.state_changes, evidence: 'state_json.abilities' })
       }
-      for (const name of stringValues(state.realm ?? state.cultivation_realm ?? payload.realm)) {
-        const target = settingsByName.get(name)
-        if (target) addEdge(edges, { source, target: settingNodeId(target), relation_type: 'in_realm', confidence: 'inferred', start_chapter_no: firstNumber(setting.first_chapter_no, target.first_chapter_no), evidence: 'state_json.realm' })
+      for (const ref of relationRefs(state.realm ?? state.cultivation_realm ?? payload.realm)) {
+        const target = settingsByName.get(ref.name)
+        if (target) addEdge(edges, { source, target: settingNodeId(target), relation_type: 'in_realm', confidence: 'inferred', start_chapter_no: firstNumber(ref.start_chapter_no, setting.first_chapter_no, target.first_chapter_no), end_chapter_no: ref.end_chapter_no, status: ref.status, state_changes: ref.state_changes, evidence: 'state_json.realm' })
       }
-      for (const name of stringValues(state.faction ?? state.affiliation ?? payload.faction)) {
-        const target = settingsByName.get(name)
-        if (target) addEdge(edges, { source, target: settingNodeId(target), relation_type: 'member_of', confidence: 'inferred', start_chapter_no: firstNumber(setting.first_chapter_no, target.first_chapter_no), evidence: 'state_json.faction' })
+      for (const ref of relationRefs(state.faction ?? state.affiliation ?? payload.faction)) {
+        const target = settingsByName.get(ref.name)
+        if (target) addEdge(edges, { source, target: settingNodeId(target), relation_type: 'member_of', confidence: 'inferred', start_chapter_no: firstNumber(ref.start_chapter_no, setting.first_chapter_no, target.first_chapter_no), end_chapter_no: ref.end_chapter_no, status: ref.status, state_changes: ref.state_changes, evidence: 'state_json.faction' })
       }
-      for (const name of stringValues(state.relationships ?? payload.relationships)) {
-        const target = settingsByName.get(name)
-        if (target) addEdge(edges, { source, target: settingNodeId(target), relation_type: 'character_relation', confidence: 'inferred', start_chapter_no: firstNumber(setting.first_chapter_no, target.first_chapter_no), evidence: 'state_json.relationships' })
+      for (const ref of relationRefs(state.relationships ?? payload.relationships)) {
+        const target = settingsByName.get(ref.name)
+        if (target) addEdge(edges, {
+          source,
+          target: settingNodeId(target),
+          relation_type: 'character_relation',
+          label: ref.relation_type || relationLabel('character_relation'),
+          confidence: 'inferred',
+          start_chapter_no: firstNumber(ref.start_chapter_no, setting.first_chapter_no),
+          end_chapter_no: ref.end_chapter_no,
+          status: ref.status,
+          state: {
+            ...(ref.relation_type ? { relation_type: ref.relation_type } : {}),
+            ...(ref.status ? { status: ref.status } : {}),
+          },
+          state_changes: ref.state_changes,
+          evidence: 'state_json.relationships',
+        })
       }
     }
 
     if (['ability', 'item'].includes(String(setting.entity_type || ''))) {
       for (const name of stringValues(state.owner ?? payload.owner)) {
         const target = settingsByName.get(name)
-        if (target) addEdge(edges, { source: settingNodeId(target), target: source, relation_type: setting.entity_type === 'ability' ? 'has_ability' : 'related', confidence: 'inferred', start_chapter_no: firstNumber(target.first_chapter_no, setting.first_chapter_no), evidence: 'state_json.owner' })
+        if (target) addEdge(edges, { source: settingNodeId(target), target: source, relation_type: setting.entity_type === 'ability' ? 'has_ability' : 'related', confidence: 'inferred', start_chapter_no: firstNumber(setting.first_chapter_no, target.first_chapter_no), evidence: 'state_json.owner' })
       }
     }
 
@@ -296,13 +404,15 @@ export function buildSettingRelationshipGraph(input: SettingRelationshipGraphInp
     ensureChapterNode(chapterId)
     if (!chapterNodes.has(chapterId)) continue
     const relationType = usageRelationType(String(item.usage_type || 'allowed'))
+    const chapter = chaptersById.get(chapterId)
     addEdge(edges, {
       source: settingNodeId(setting),
       target: chapterNodeId(chapterId),
       relation_type: relationType,
       confidence: 'usage',
-      start_chapter_no: chaptersById.get(chapterId)?.chapter_no ?? null,
-      state: item.expected_state_change || item.actual_state_change || {},
+      start_chapter_no: chapter?.chapter_no ?? null,
+      state: mergedUsageState(item),
+      state_changes: [usageStateChange(item, chapter)],
       evidence: 'chapter_setting_usage',
     })
   }
@@ -314,6 +424,64 @@ export function buildSettingRelationshipGraph(input: SettingRelationshipGraphInp
     if (edge.target.startsWith('chapter-') || edge.source.startsWith('chapter-')) continue
     connectedByNonChapterEdge.add(edge.source)
     connectedByNonChapterEdge.add(edge.target)
+  }
+
+  const missingStartEdgeIds = new Set<string>()
+  const timelineConflictEdgeIds = new Set<string>()
+
+  for (const edge of edges) {
+    if (edge.target.startsWith('chapter-') || edge.source.startsWith('chapter-')) continue
+    const sourceSetting = settingsById.get(Number(edge.source.replace('setting-', '')))
+    const targetSetting = settingsById.get(Number(edge.target.replace('setting-', '')))
+    if (!sourceSetting || !targetSetting) continue
+    if (!firstNumber(edge.start_chapter_no) && !missingStartEdgeIds.has(edge.id)) {
+      missingStartEdgeIds.add(edge.id)
+      diagnostics.push({
+        type: 'missing_start_chapter',
+        severity: 'info',
+        entity_id: Number(sourceSetting.id),
+        entity_name: sourceSetting.name,
+        message: `${sourceSetting.name} 与 ${targetSetting.name} 的关系缺少开始章节`,
+        evidence: 'relationship_graph',
+      })
+    }
+    const start = firstNumber(edge.start_chapter_no)
+    const sourceFirst = firstNumber(sourceSetting.first_chapter_no)
+    const targetFirst = firstNumber(targetSetting.first_chapter_no)
+    if (start && ((sourceFirst && start < sourceFirst) || (targetFirst && start < targetFirst)) && !timelineConflictEdgeIds.has(edge.id)) {
+      timelineConflictEdgeIds.add(edge.id)
+      diagnostics.push({
+        type: 'timeline_conflict',
+        severity: 'warning',
+        entity_id: Number(sourceSetting.id),
+        entity_name: sourceSetting.name,
+        message: `${sourceSetting.name} 与 ${targetSetting.name} 的关系开始于第${start}章，早于资产登场时间`,
+        evidence: 'start_chapter_no',
+      })
+    }
+  }
+
+  const ownerMismatchKeys = new Set<string>()
+  for (const ability of settings.filter(item => item.entity_type === 'ability')) {
+    const declaredOwner = relationRefs(ability.state_json?.owner ?? ability.payload_json?.owner)[0]?.name
+    if (!declaredOwner) continue
+    for (const character of settings.filter(item => item.entity_type === 'character')) {
+      if (String(character.name || '').trim() === declaredOwner) continue
+      const ownsAbility = relationRefs(character.state_json?.abilities ?? character.payload_json?.abilities)
+        .some(ref => ref.name === ability.name)
+      if (!ownsAbility) continue
+      const key = `${ability.id}:${character.id}`
+      if (ownerMismatchKeys.has(key)) continue
+      ownerMismatchKeys.add(key)
+      diagnostics.push({
+        type: 'owner_ability_mismatch',
+        severity: 'warning',
+        entity_id: Number(ability.id),
+        entity_name: ability.name,
+        message: `${ability.name} 的拥有者是 ${declaredOwner}，但 ${character.name} 的能力列表也引用了它`,
+        evidence: 'state_json.abilities',
+      })
+    }
   }
 
   for (const setting of settings) {
@@ -343,7 +511,9 @@ export function buildSettingRelationshipGraph(input: SettingRelationshipGraphInp
 
   const isolatedKeyAssetCount = diagnostics.filter(item => item.type === 'isolated_key_asset').length
   const missingOwnerCount = diagnostics.filter(item => item.type === 'missing_owner').length
-  const missingStartChapterCount = edges.filter(edge => edge.start_chapter_no === null || edge.start_chapter_no === undefined).length
+  const missingStartChapterCount = diagnostics.filter(item => item.type === 'missing_start_chapter').length
+  const timelineConflictCount = diagnostics.filter(item => item.type === 'timeline_conflict').length
+  const ownerMismatchCount = diagnostics.filter(item => item.type === 'owner_ability_mismatch').length
 
   return {
     nodes,
@@ -355,6 +525,8 @@ export function buildSettingRelationshipGraph(input: SettingRelationshipGraphInp
       isolated_key_asset_count: isolatedKeyAssetCount,
       missing_owner_count: missingOwnerCount,
       missing_start_chapter_count: missingStartChapterCount,
+      timeline_conflict_count: timelineConflictCount,
+      owner_mismatch_count: ownerMismatchCount,
     },
   }
 }
