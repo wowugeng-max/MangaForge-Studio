@@ -10,6 +10,7 @@ export function StoryAssetsWorkspace({
   projectId,
   activeChapter,
   selectedModelId,
+  projectSettings,
   worldbuildingCount,
   characterCount,
   outlineCount,
@@ -24,6 +25,7 @@ export function StoryAssetsWorkspace({
   projectId: number
   activeChapter?: any | null
   selectedModelId?: number
+  projectSettings?: any[]
   worldbuildingCount: number
   characterCount: number
   outlineCount: number
@@ -70,6 +72,7 @@ export function StoryAssetsWorkspace({
           projectId={projectId}
           activeChapter={activeChapter}
           selectedModelId={selectedModelId}
+          initialSettings={projectSettings}
           layout="workspace"
           focusDiscoveredAssetsToken={focusDiscoveredAssetsToken}
           onAssetsApplied={onAssetsApplied}

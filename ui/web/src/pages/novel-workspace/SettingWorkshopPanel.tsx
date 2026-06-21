@@ -49,6 +49,8 @@ const settingTypes = [
   { value: 'foreshadowing_arc', label: '伏笔线' },
 ]
 
+const EMPTY_INITIAL_SETTINGS: any[] = []
+
 function splitList(value: any) {
   if (Array.isArray(value)) return value.map(item => String(item)).map(item => item.trim()).filter(Boolean)
   return String(value || '').split(/[\n,，]/).map(item => item.trim()).filter(Boolean)
@@ -127,6 +129,7 @@ export function SettingWorkshopPanel({
   projectId,
   activeChapter,
   selectedModelId,
+  initialSettings = EMPTY_INITIAL_SETTINGS,
   layout = 'compact',
   focusDiscoveredAssetsToken = 0,
   onAssetsApplied,
@@ -134,13 +137,14 @@ export function SettingWorkshopPanel({
   projectId: number
   activeChapter?: any | null
   selectedModelId?: number
+  initialSettings?: any[]
   layout?: 'compact' | 'workspace'
   focusDiscoveredAssetsToken?: number
   onAssetsApplied?: () => void
 }) {
   const [loading, setLoading] = useState(false)
   const [actionLoadingKey, setActionLoadingKey] = useState<SettingWorkshopActionKey | ''>('')
-  const [settings, setSettings] = useState<any[]>([])
+  const [settings, setSettings] = useState<any[]>(initialSettings)
   const [usage, setUsage] = useState<any[]>([])
   const [discoveredAssets, setDiscoveredAssets] = useState<any[]>([])
   const [selectedDiscoveredAssetKeys, setSelectedDiscoveredAssetKeys] = useState<string[]>([])
@@ -200,6 +204,10 @@ export function SettingWorkshopPanel({
     void load()
   }, [projectId, activeChapter?.id])
 
+  useEffect(() => {
+    setSettings(initialSettings)
+  }, [projectId, initialSettings])
+
   const grouped = useMemo(() => settings.reduce((acc: Record<string, any[]>, item) => {
     const key = item.entity_type || 'rule'
     acc[key] = acc[key] || []
@@ -209,10 +217,6 @@ export function SettingWorkshopPanel({
 
   const usageMap = useMemo(() => new Map(usage.map(item => [Number(item.entity_id), item])), [usage])
   const usageSummary = useMemo(() => buildUsageSummary(usage), [usage])
-  const filteredTypeSettings = useMemo(
-    () => filterSettingsForUsage(settings, usageMap, activeType, activeUsageFilter),
-    [settings, usageMap, activeType, activeUsageFilter],
-  )
   const activeUsageFilterLabel = usageFilterOptions.find(item => item.key === activeUsageFilter)?.label || '本章相关'
   const isActionBusy = Boolean(actionLoadingKey)
   const isActionLoading = (key: SettingWorkshopActionKey) => actionLoadingKey === key
@@ -687,91 +691,94 @@ export function SettingWorkshopPanel({
         activeKey={activeType}
         onChange={setActiveType}
         size="small"
-        items={settingTypes.map(item => ({
-          key: item.value,
-          label: `${item.label}${grouped[item.value]?.length ? ` ${grouped[item.value].length}` : ''}`,
-          children: filteredTypeSettings.length ? (
-            <List
-              className="setting-workshop-asset-list"
-              size="small"
-              dataSource={filteredTypeSettings}
-              renderItem={(setting: any) => {
-                const current = usageFromMap(usageMap, setting)
-                const compactTags = buildCompactSettingTags(setting)
-                const usageType = normalizeUsageType(current)
-                return (
-                  <List.Item>
-                    <article className={`setting-workshop-asset-card setting-workshop-asset-${usageType}`}>
-                      <header className="setting-workshop-asset-header">
-                        <div className="setting-workshop-asset-titleblock">
-                          <Space size={6} wrap>
-                            <Text strong className="setting-workshop-asset-name">{setting.name}</Text>
-                            <Tag bordered={false}>{typeLabel(setting.entity_type)}</Tag>
-                            {setting.status && <Tag bordered={false}>{setting.status === 'active' ? '启用' : setting.status === 'retired' ? '退场' : '草稿'}</Tag>}
-                            {setting.visibility && <Tag color={setting.visibility === 'spoiler' ? 'red' : setting.visibility === 'hidden' ? 'gold' : 'blue'} bordered={false}>{setting.visibility === 'public' ? '公开' : setting.visibility === 'hidden' ? '隐藏' : '剧透'}</Tag>}
-                            {setting.first_chapter_no && <Tag bordered={false}>初登 第{setting.first_chapter_no}章</Tag>}
-                            {setting.last_chapter_no && <Tag bordered={false}>末次 第{setting.last_chapter_no}章</Tag>}
+        items={settingTypes.map(item => {
+          const typeSettings = filterSettingsForUsage(settings, usageMap, item.value, activeUsageFilter)
+          return {
+            key: item.value,
+            label: `${item.label}${grouped[item.value]?.length ? ` ${grouped[item.value].length}` : ''}`,
+            children: typeSettings.length ? (
+              <List
+                className="setting-workshop-asset-list"
+                size="small"
+                dataSource={typeSettings}
+                renderItem={(setting: any) => {
+                  const current = usageFromMap(usageMap, setting)
+                  const compactTags = buildCompactSettingTags(setting)
+                  const usageType = normalizeUsageType(current)
+                  return (
+                    <List.Item>
+                      <article className={`setting-workshop-asset-card setting-workshop-asset-${usageType}`}>
+                        <header className="setting-workshop-asset-header">
+                          <div className="setting-workshop-asset-titleblock">
+                            <Space size={6} wrap>
+                              <Text strong className="setting-workshop-asset-name">{setting.name}</Text>
+                              <Tag bordered={false}>{typeLabel(setting.entity_type)}</Tag>
+                              {setting.status && <Tag bordered={false}>{setting.status === 'active' ? '启用' : setting.status === 'retired' ? '退场' : '草稿'}</Tag>}
+                              {setting.visibility && <Tag color={setting.visibility === 'spoiler' ? 'red' : setting.visibility === 'hidden' ? 'gold' : 'blue'} bordered={false}>{setting.visibility === 'public' ? '公开' : setting.visibility === 'hidden' ? '隐藏' : '剧透'}</Tag>}
+                              {setting.first_chapter_no && <Tag bordered={false}>初登 第{setting.first_chapter_no}章</Tag>}
+                              {setting.last_chapter_no && <Tag bordered={false}>末次 第{setting.last_chapter_no}章</Tag>}
+                            </Space>
+                            <Paragraph className="setting-workshop-asset-summary" ellipsis={{ rows: 2, expandable: true, symbol: '展开' }}>
+                              {setting.summary || '暂无摘要'}
+                            </Paragraph>
+                          </div>
+                          <Space size={4} className="setting-workshop-asset-actions">
+                            <Button size="small" type="link" onClick={() => openEditor(setting)}>编辑</Button>
+                            <Button size="small" type="link" danger onClick={() => deleteSetting(setting)}>删除</Button>
                           </Space>
-                          <Paragraph className="setting-workshop-asset-summary" ellipsis={{ rows: 2, expandable: true, symbol: '展开' }}>
-                            {setting.summary || '暂无摘要'}
-                          </Paragraph>
-                        </div>
-                        <Space size={4} className="setting-workshop-asset-actions">
-                          <Button size="small" type="link" onClick={() => openEditor(setting)}>编辑</Button>
-                          <Button size="small" type="link" danger onClick={() => deleteSetting(setting)}>删除</Button>
-                        </Space>
-                      </header>
+                        </header>
 
-                      <div className="setting-workshop-asset-controls">
-                        <div className="setting-workshop-control-row">
-                          <Text type="secondary">用途</Text>
-                          <Segmented
-                            className="setting-workshop-usage-segment"
+                        <div className="setting-workshop-asset-controls">
+                          <div className="setting-workshop-control-row">
+                            <Text type="secondary">用途</Text>
+                            <Segmented
+                              className="setting-workshop-usage-segment"
+                              size="small"
+                              value={usageType}
+                              options={usageSegmentOptions}
+                              onChange={value => updateUsage(setting, { usage_type: String(value) })}
+                            />
+                          </div>
+                          <div className="setting-workshop-control-row">
+                            <Text type="secondary">揭示</Text>
+                            <Segmented
+                              className="setting-workshop-reveal-segment"
+                              size="small"
+                              value={current.reveal_level || 'none'}
+                              options={revealSegmentOptions}
+                              onChange={value => updateUsage(setting, { reveal_level: String(value) })}
+                            />
+                          </div>
+                        </div>
+
+                        {compactTags.length > 0 && (
+                          <div className="setting-workshop-asset-tags">
+                            {compactTags.map(tag => (
+                              <Tag key={`${tag.group}:${tag.label}`} color={tag.group === 'constraint' ? 'volcano' : 'geekblue'} bordered={false}>
+                                {tag.label}
+                              </Tag>
+                            ))}
+                          </div>
+                        )}
+
+                        <details className="setting-workshop-state-change">
+                          <summary>本章状态变化</summary>
+                          <Input.TextArea
                             size="small"
-                            value={usageType}
-                            options={usageSegmentOptions}
-                            onChange={value => updateUsage(setting, { usage_type: String(value) })}
+                            rows={2}
+                            placeholder="例如：断臂神纹首次灼痛；某物品转移给迟正"
+                            value={displayValue(current.expected_state_change || '')}
+                            onChange={e => updateUsage(setting, { expected_state_change: e.target.value ? { note: e.target.value } : {} })}
                           />
-                        </div>
-                        <div className="setting-workshop-control-row">
-                          <Text type="secondary">揭示</Text>
-                          <Segmented
-                            className="setting-workshop-reveal-segment"
-                            size="small"
-                            value={current.reveal_level || 'none'}
-                            options={revealSegmentOptions}
-                            onChange={value => updateUsage(setting, { reveal_level: String(value) })}
-                          />
-                        </div>
-                      </div>
-
-                      {compactTags.length > 0 && (
-                        <div className="setting-workshop-asset-tags">
-                          {compactTags.map(tag => (
-                            <Tag key={`${tag.group}:${tag.label}`} color={tag.group === 'constraint' ? 'volcano' : 'geekblue'} bordered={false}>
-                              {tag.label}
-                            </Tag>
-                          ))}
-                        </div>
-                      )}
-
-                      <details className="setting-workshop-state-change">
-                        <summary>本章状态变化</summary>
-                        <Input.TextArea
-                          size="small"
-                          rows={2}
-                          placeholder="例如：断臂神纹首次灼痛；某物品转移给迟正"
-                          value={displayValue(current.expected_state_change || '')}
-                          onChange={e => updateUsage(setting, { expected_state_change: e.target.value ? { note: e.target.value } : {} })}
-                        />
-                      </details>
-                    </article>
-                  </List.Item>
-                )
-              }}
-            />
-          ) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={`${typeLabel(item.value)}没有命中「${activeUsageFilterLabel}」的设定`} />,
-        }))}
+                        </details>
+                      </article>
+                    </List.Item>
+                  )
+                }}
+              />
+            ) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={`${typeLabel(item.value)}没有命中「${activeUsageFilterLabel}」的设定`} />,
+          }
+        })}
       />
 
       <Modal

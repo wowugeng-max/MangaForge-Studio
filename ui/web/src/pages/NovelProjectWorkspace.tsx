@@ -6129,6 +6129,7 @@ export default function NovelProjectWorkspace() {
           projectId={projectId}
           activeChapter={activeChapter}
           selectedModelId={selectedModelId}
+          projectSettings={projectSettings}
           worldbuildingCount={worldbuilding.length}
           characterCount={characters.length}
           outlineCount={outlines.length}
