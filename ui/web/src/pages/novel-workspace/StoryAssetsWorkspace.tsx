@@ -1,6 +1,7 @@
 import React from 'react'
 import { Button, Card, Space, Statistic, Tag, Typography } from 'antd'
 import { BookOutlined, DatabaseOutlined, SettingOutlined, TeamOutlined } from '@ant-design/icons'
+import { SettingAssetGraphPanel } from './SettingAssetGraphPanel'
 import { SettingWorkshopPanel } from './SettingWorkshopPanel'
 import './StoryAssetsWorkspace.css'
 
@@ -66,6 +67,8 @@ export function StoryAssetsWorkspace({
         <Card size="small"><Statistic title="大纲节点" value={outlineCount} suffix="个" /></Card>
         <Card size="small"><Statistic title="当前章节" value={activeChapter?.chapter_no || '-'} prefix="第" suffix={activeChapter?.chapter_no ? '章' : ''} /></Card>
       </div>
+
+      <SettingAssetGraphPanel projectId={projectId} />
 
       <Card className="novel-story-assets-workbench" bordered={false}>
         <SettingWorkshopPanel

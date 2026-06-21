@@ -16,6 +16,7 @@ import {
 } from '../novel'
 import { executeNovelAgent } from '../llm'
 import { getNovelPayload, parseJsonLikePayload } from './novel-route-utils'
+import { buildSettingRelationshipGraph } from './novel-setting-relationship-graph'
 
 type NovelSettingRoutesContext = {
   getWorkspace: () => string
@@ -579,6 +580,20 @@ export async function applyDiscoveredAssetsToProject(activeWorkspace: string, pr
 }
 
 export function registerNovelSettingRoutes(app: Express, ctx: NovelSettingRoutesContext) {
+  app.get('/api/novel/projects/:id/settings/relationship-graph', async (req, res) => {
+    const activeWorkspace = ctx.getWorkspace()
+    const projectId = Number(req.params.id)
+    const project = await ctx.getProject(activeWorkspace, projectId)
+    if (!project) return res.status(404).json({ error: 'project not found' })
+    const [settings, characters, chapters, usage] = await Promise.all([
+      listNovelSettingEntities(activeWorkspace, projectId),
+      listNovelCharacters(activeWorkspace, projectId),
+      listNovelChapters(activeWorkspace, projectId),
+      listNovelChapterSettingUsage(activeWorkspace, projectId),
+    ])
+    res.json(buildSettingRelationshipGraph({ settings, characters, chapters, usage }))
+  })
+
   app.get('/api/novel/projects/:id/settings', async (req, res) => {
     const activeWorkspace = ctx.getWorkspace()
     const projectId = Number(req.params.id)

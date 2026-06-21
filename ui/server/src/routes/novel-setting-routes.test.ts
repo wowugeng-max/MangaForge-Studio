@@ -142,6 +142,16 @@ describe('setting agent workflow', () => {
     expect(source).toContain('payoff')
     expect(source).toContain('pause')
   })
+
+  test('exposes a relationship graph route for setting assets', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-setting-routes.ts'), 'utf8')
+
+    expect(source).toContain("app.get('/api/novel/projects/:id/settings/relationship-graph'")
+    expect(source).toContain('buildSettingRelationshipGraph')
+    expect(source).toContain('listNovelChapterSettingUsage')
+    expect(source).toContain('listNovelCharacters')
+    expect(source).toContain('listNovelChapters')
+  })
 })
 
 describe('discovered asset intake route', () => {
