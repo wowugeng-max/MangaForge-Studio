@@ -63,6 +63,7 @@ import {
   summarizeOutlineExecution,
   wc,
 } from './novel-workspace/utils'
+import { buildSerialPipelineViewModel } from './novel-workspace/serialPipelineModel'
 import './NovelProjectWorkspace.css'
 
 const { Title, Text, Paragraph } = Typography
@@ -647,6 +648,7 @@ export default function NovelProjectWorkspace() {
     reviews,
     agentExecution,
     setAgentExecution,
+    pipeline,
     models,
     selectedModelId,
     setSelectedModelId,
@@ -917,6 +919,7 @@ export default function NovelProjectWorkspace() {
     storyState: selectedProject?.reference_config?.story_state || {},
     styleSampleEffectiveness,
   }), [planningWorkspaceModel, writingCockpitModel, activeTasks, selectedModelId, reviews, runRecords, sortedChapters, selectedProject?.reference_config?.story_state, styleSampleEffectiveness])
+  const serialPipelineModel = useMemo(() => buildSerialPipelineViewModel(pipeline), [pipeline])
 
   useEffect(() => {
     if (!projectId) return
@@ -2606,7 +2609,14 @@ export default function NovelProjectWorkspace() {
     const styleLock = mergeCommercialWebNovelStyleDefaults(bible.style_lock || selectedProject?.reference_config?.style_lock || {})
     const styleSampleBank = mergeCommercialWebNovelStyleSampleDefaults(bible.style_sample_bank || selectedProject?.reference_config?.style_sample_bank || [])
     writingBibleForm.setFieldsValue({
-      promise: bible.promise || '',
+      reader_promise: bible.reader_promise || bible.readerPromise || bible.promise || '',
+      protagonist_drive: bible.protagonist_drive || bible.protagonistDrive || bible.protagonist_motivation || bible.main_character_drive || '',
+      core_conflict: bible.core_conflict || bible.coreConflict || bible.main_conflict || bible.mainline?.conflict || bible.mainline?.core_conflict || '',
+      current_volume_goal: bible.current_volume_goal || bible.currentVolumeGoal || bible.volume_goal || bible.volume_plan?.[0]?.goal || bible.volume_plan?.[0]?.summary || '',
+      innovation_hook: bible.innovation_hook || bible.innovationHook || bible.original_hook || bible.unique_selling_point || '',
+      first30_plan: bible.first30_plan || bible.first30Plan || bible.first_30_plan || bible.opening_strategy || bible.retention_plan || '',
+      longform_capacity: bible.longform_capacity || bible.longformCapacity || bible.million_word_spine || bible.longform_spine || bible.serial_engine || '',
+      promise: bible.promise || bible.reader_promise || '',
       narrative_person: styleLock.narrative_person || '',
       sentence_length: styleLock.sentence_length || '',
       dialogue_ratio: styleLock.dialogue_ratio || '',
@@ -2931,7 +2941,14 @@ export default function NovelProjectWorkspace() {
       const chapterBenchmarkSampleBank = parseJson(v.chapter_benchmark_sample_bank, [])
       const writingBible = {
         ...(selectedProject?.reference_config?.writing_bible || {}),
-        promise: v.promise || '',
+        reader_promise: v.reader_promise || v.promise || '',
+        protagonist_drive: v.protagonist_drive || '',
+        core_conflict: v.core_conflict || '',
+        current_volume_goal: v.current_volume_goal || '',
+        innovation_hook: v.innovation_hook || '',
+        first30_plan: v.first30_plan || '',
+        longform_capacity: v.longform_capacity || '',
+        promise: v.promise || v.reader_promise || '',
         world_rules: parseJson(v.world_rules, []),
         mainline: parseJson(v.mainline, {}),
         volume_plan: parseJson(v.volume_plan, []),
@@ -5827,6 +5844,118 @@ export default function NovelProjectWorkspace() {
     }
   }
 
+  const handleSerialPipelineAction = (key: string) => {
+    switch (key) {
+      case 'open_writing_bible':
+        openStoryAssetsWorkspace()
+        void openWritingBibleEditor()
+        break
+      case 'enter_story_planning':
+        setWorkspaceArea('storyPlanning')
+        break
+      case 'confirm_plan_and_write_draft':
+        handleWritingCockpitAction('confirm_plan_and_write_draft')
+        break
+      case 'refresh_current_quality':
+        handleWritingCockpitAction('refresh_current_quality')
+        break
+      case 'create_editor_report':
+        handleWritingCockpitAction('create_editor_report')
+        break
+      case 'apply_editor_revision':
+        handleWritingCockpitAction('apply_editor_revision')
+        break
+      case 'sync_story_state':
+        handleWritingCockpitAction('sync_story_state')
+        break
+      case 'start_safe_batch':
+        setWorkspaceArea('autoCreation')
+        handleAutoCreationDirectorAction({ key: 'start_safe_batch_generation' } as AutoCreationDirectorAction)
+        break
+      case 'open_longform_governance':
+        setWorkspaceArea('productionOps')
+        void openLongformProductionTrends()
+        break
+      default:
+        if (serialPipelineModel.primaryAction.workspace_area) setWorkspaceArea(serialPipelineModel.primaryAction.workspace_area as WorkspaceArea)
+    }
+  }
+
+  const renderSerialPipeline = () => {
+    if (!serialPipelineModel.visible) return null
+    const tagColor = (tone: string) => {
+      if (tone === 'done') return 'green'
+      if (tone === 'active') return 'blue'
+      if (tone === 'blocked') return 'red'
+      return 'default'
+    }
+
+    return (
+      <div className="novel-serial-pipeline">
+        <div className="novel-serial-pipeline-main">
+          <Space direction="vertical" size={2} className="novel-serial-pipeline-copy">
+            <Text strong>小说流水线 · {serialPipelineModel.currentStageLabel || '待同步'}</Text>
+            <Text type="secondary">{serialPipelineModel.summary || '按创建契约、规划、正文、验收、批次、治理推进。'}</Text>
+          </Space>
+          <Button
+            size="small"
+            type="primary"
+            onClick={() => handleSerialPipelineAction(serialPipelineModel.primaryAction.key)}
+          >
+            {serialPipelineModel.primaryAction.label || '查看下一步'}
+          </Button>
+        </div>
+        {serialPipelineModel.currentIssues.length > 0 && (
+          <div className="novel-serial-pipeline-issues">
+            {serialPipelineModel.currentIssues.map(issue => (
+              <span key={`${issue.status}-${issue.label}`} className={`novel-serial-pipeline-issue is-${issue.status}`}>
+                <strong>{issue.label}</strong>
+                <span>{issue.detail}</span>
+              </span>
+            ))}
+          </div>
+        )}
+        {serialPipelineModel.currentAgentSteps.length > 0 && (
+          <div className="novel-serial-pipeline-agent-strip" aria-label="当前阶段能力链">
+            {serialPipelineModel.currentAgentSteps.map(agent => (
+              <button
+                key={agent.key}
+                type="button"
+                className="novel-serial-pipeline-agent"
+                onClick={() => handleSerialPipelineAction(agent.actionKey || serialPipelineModel.primaryAction.key)}
+                title={agent.description}
+              >
+                <span className="novel-serial-pipeline-agent-name">{agent.label}</span>
+                {agent.agent && <span className="novel-serial-pipeline-agent-id">{agent.agent}</span>}
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="novel-serial-pipeline-stages">
+          {serialPipelineModel.stageCards.map(stage => (
+            <button
+              key={stage.key}
+              type="button"
+              className={`novel-serial-pipeline-stage is-${stage.tone}`}
+              onClick={() => handleSerialPipelineAction(stage.action.key)}
+              title={stage.summary}
+            >
+              <span className="novel-serial-pipeline-stage-label">{stage.label}</span>
+              <Tag color={tagColor(stage.tone)} bordered={false}>
+                {stage.statusLabel}
+              </Tag>
+              {(stage.blockerCount > 0 || stage.warningCount > 0) && (
+                <span className="novel-serial-pipeline-stage-risk">
+                  {stage.blockerCount ? `阻${stage.blockerCount}` : `提${stage.warningCount}`}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
   const activeChapterSceneCards = (
     activeChapter && Array.isArray(activeChapter.scene_list) && activeChapter.scene_list.length > 0
       ? activeChapter.scene_list
@@ -6224,6 +6353,7 @@ export default function NovelProjectWorkspace() {
               onAction={handleWritingCockpitAction}
             />
           </div>
+          {renderSerialPipeline()}
           <Suspense fallback={null}>
             {renderWorkspaceArea()}
           </Suspense>
@@ -6656,6 +6786,31 @@ export default function NovelProjectWorkspace() {
           message="可以从项目简介、世界观、角色、大纲、章节和参考配置自动生成写作圣经；风格锁定会先按当前商业网文阅读习惯填入默认值，生成后仍可人工微调。"
         />
         <Form form={writingBibleForm} layout="vertical">
+          <Card size="small" title="创建契约" style={{ marginBottom: 12 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
+              <Form.Item name="reader_promise" label="读者承诺" style={{ marginBottom: 0 }}>
+                <Input.TextArea rows={2} />
+              </Form.Item>
+              <Form.Item name="protagonist_drive" label="主角驱动力" style={{ marginBottom: 0 }}>
+                <Input.TextArea rows={2} />
+              </Form.Item>
+              <Form.Item name="core_conflict" label="核心矛盾" style={{ marginBottom: 0 }}>
+                <Input.TextArea rows={2} />
+              </Form.Item>
+              <Form.Item name="current_volume_goal" label="当前卷目标" style={{ marginBottom: 0 }}>
+                <Input.TextArea rows={2} />
+              </Form.Item>
+              <Form.Item name="innovation_hook" label="创新钩子" style={{ marginBottom: 0 }}>
+                <Input.TextArea rows={2} />
+              </Form.Item>
+              <Form.Item name="first30_plan" label="前30章策略" style={{ marginBottom: 0 }}>
+                <Input.TextArea rows={2} />
+              </Form.Item>
+            </div>
+            <Form.Item name="longform_capacity" label="长篇容量" style={{ marginTop: 12, marginBottom: 0 }}>
+              <Input.TextArea rows={2} />
+            </Form.Item>
+          </Card>
           <Form.Item name="promise" label="读者承诺 / 核心卖点">
             <Input.TextArea rows={3} />
           </Form.Item>

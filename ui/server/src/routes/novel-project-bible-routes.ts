@@ -655,9 +655,33 @@ function mergeStyleLockDefaults(project: any, fallback: any, payload: any) {
   return next
 }
 
-function normalizeGeneratedWritingBible(project: any, payload: any, fallback: any = {}) {
+function firstText(...values: any[]) {
+  for (const value of values) {
+    if (Array.isArray(value)) {
+      const item = value.map(entry => String(entry || '').trim()).find(Boolean)
+      if (item) return item
+      continue
+    }
+    const text = String(value || '').trim()
+    if (text) return text
+  }
+  return ''
+}
+
+export function normalizeGeneratedWritingBible(project: any, payload: any, fallback: any = {}) {
   const styleLock = mergeStyleLockDefaults(project, fallback?.style_lock, payload?.style_lock)
   const safety = payload?.safety_policy || fallback?.safety_policy || project.reference_config?.safety || {}
+  const mainline = payload?.mainline || fallback?.mainline || {}
+  const volumePlan = asArray(payload?.volume_plan).length ? payload.volume_plan : asArray(fallback?.volume_plan)
+  const firstVolume = volumePlan[0] || {}
+  const commercialPositioning = payload?.commercial_positioning || fallback?.commercial_positioning || {}
+  const readerPromise = firstText(payload?.reader_promise, payload?.readerPromise, payload?.promise, fallback?.reader_promise, fallback?.promise, project.synopsis)
+  const protagonistDrive = firstText(payload?.protagonist_drive, payload?.protagonistDrive, mainline.protagonist_drive, mainline.protagonistDrive, fallback?.protagonist_drive, fallback?.protagonistDrive)
+  const coreConflict = firstText(payload?.core_conflict, payload?.coreConflict, mainline.core_conflict, mainline.coreConflict, mainline.conflict, fallback?.core_conflict, fallback?.mainline?.core_conflict, project.main_conflict)
+  const currentVolumeGoal = firstText(payload?.current_volume_goal, payload?.currentVolumeGoal, payload?.volume_goal, firstVolume.goal, firstVolume.summary, fallback?.current_volume_goal, fallback?.volume_goal)
+  const innovationHook = firstText(payload?.innovation_hook, payload?.innovationHook, commercialPositioning.innovation_hook, commercialPositioning.unique_selling_point, commercialPositioning.selling_points?.[0], fallback?.innovation_hook, fallback?.commercial_positioning?.selling_points?.[0])
+  const first30Plan = firstText(payload?.first30_plan, payload?.first30Plan, payload?.first_30_plan, payload?.opening_strategy, commercialPositioning.first30_plan, commercialPositioning.retention_strategy, fallback?.first30_plan, fallback?.commercial_positioning?.retention_strategy)
+  const longformCapacity = firstText(payload?.longform_capacity, payload?.longformCapacity, mainline.longform_capacity, mainline.longformCapacity, mainline.long_term_question, fallback?.longform_capacity, fallback?.mainline?.longform_capacity)
   return {
     ...(fallback || {}),
     project: {
@@ -670,11 +694,18 @@ function normalizeGeneratedWritingBible(project: any, payload: any, fallback: an
       style_tags: asArray(payload?.project?.style_tags).length ? asArray(payload.project.style_tags) : (project.style_tags || fallback?.project?.style_tags || []),
       length_target: payload?.project?.length_target || project.length_target || fallback?.project?.length_target || '',
     },
-    promise: String(payload?.promise || fallback?.promise || project.synopsis || ''),
+    reader_promise: readerPromise,
+    protagonist_drive: protagonistDrive,
+    core_conflict: coreConflict,
+    current_volume_goal: currentVolumeGoal,
+    innovation_hook: innovationHook,
+    first30_plan: first30Plan,
+    longform_capacity: longformCapacity,
+    promise: String(payload?.promise || readerPromise || fallback?.promise || project.synopsis || ''),
     world_summary: String(payload?.world_summary || fallback?.world_summary || ''),
     world_rules: asArray(payload?.world_rules).length ? payload.world_rules : asArray(fallback?.world_rules),
-    mainline: payload?.mainline || fallback?.mainline || {},
-    volume_plan: asArray(payload?.volume_plan).length ? payload.volume_plan : asArray(fallback?.volume_plan),
+    mainline,
+    volume_plan: volumePlan,
     characters: asArray(payload?.characters).length ? payload.characters : asArray(fallback?.characters),
     style_lock: {
       ...(styleLock || {}),
@@ -697,7 +728,7 @@ function normalizeGeneratedWritingBible(project: any, payload: any, fallback: an
       forbidden: asArray(safety?.forbidden),
     },
     forbidden: asArray(payload?.forbidden).length ? payload.forbidden : asArray(safety?.forbidden || fallback?.forbidden),
-    commercial_positioning: payload?.commercial_positioning || fallback?.commercial_positioning || {},
+    commercial_positioning: commercialPositioning,
     generation_rules: asArray(payload?.generation_rules).length ? payload.generation_rules : asArray(fallback?.generation_rules),
     updated_at: new Date().toISOString(),
   }
@@ -802,6 +833,13 @@ export function registerNovelProjectBibleRoutes(app: Express, ctx: ProjectBibleR
         '{',
         '  "project": {"title","genre","synopsis","target_audience","style_tags","length_target"},',
         '  "promise": "读者承诺/核心卖点，100-300字",',
+        '  "reader_promise": "读者每章/每卷能稳定获得的情绪回报",',
+        '  "protagonist_drive": "主角为什么必须持续往前走",',
+        '  "core_conflict": "贯穿全书的长期矛盾",',
+        '  "current_volume_goal": "当前卷必须抵达的阶段目标",',
+        '  "innovation_hook": "区别于同类作品的原创新鲜点",',
+        '  "first30_plan": "前三十章留存、爽点、转折和付费前蓄势策略",',
+        '  "longform_capacity": "支撑长篇/超长篇推进的卷轴、升级、谜团或矛盾扩展方式",',
         '  "world_summary": "世界观摘要",',
         '  "world_rules": ["稳定世界规则，包含力量体系/禁忌/代价/社会秩序"],',
         '  "mainline": {"core_conflict","protagonist_drive","antagonist_pressure","long_term_question","ending_direction","must_payoff":[]},',

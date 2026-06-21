@@ -12,6 +12,7 @@ import { registerNovelGenerationRoutes } from './novel-generation-routes'
 import { registerNovelMemoryRoutes } from './novel-memory-routes'
 import { registerNovelModuleRoutes } from './novel-module-routes'
 import { createNovelOriginalIncubatorService } from './novel-original-incubator-service'
+import { registerNovelPipelineRoutes } from './novel-pipeline-routes'
 import { registerNovelPlanningRoutes } from './novel-planning-routes'
 import { registerNovelPlanRoutes } from './novel-plan-routes'
 import { createNovelProductionService, createNovelRunExecutionService } from './novel-production-service'
@@ -73,6 +74,11 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
     getWorkspace,
     getProject,
     buildChapterContextPackage: writingService.buildChapterContextPackage,
+  })
+
+  registerNovelPipelineRoutes(app, {
+    getWorkspace,
+    getProject,
   })
 
   registerNovelProjectControlRoutes(app, {

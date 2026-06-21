@@ -36,6 +36,7 @@ export function useNovelWorkspaceData({
   const [runRecords, setRunRecords] = useState<any[]>([])
   const [reviews, setReviews] = useState<any[]>([])
   const [agentExecution, setAgentExecution] = useState<any | null>(null)
+  const [pipeline, setPipeline] = useState<any | null>(null)
   const [models, setModels] = useState<any[]>([])
   const [selectedModelId, setSelectedModelId] = useState<number | undefined>()
   const [activeChapterId, setActiveChapterId] = useState<number | null>(null)
@@ -44,7 +45,7 @@ export function useNovelWorkspaceData({
     if (!projectId) return
     setLoading(true)
     try {
-      const [pr, wr, cr, olr, chr, rnr, revr, mr] = await Promise.all([
+      const [pr, wr, cr, olr, chr, rnr, revr, plr, mr] = await Promise.all([
         apiClient.get(`/novel/projects/${projectId}`),
         apiClient.get(`/novel/projects/${projectId}/worldbuilding`),
         apiClient.get(`/novel/projects/${projectId}/characters`),
@@ -52,6 +53,7 @@ export function useNovelWorkspaceData({
         apiClient.get(`/novel/projects/${projectId}/chapters`),
         apiClient.get('/novel/runs', { params: { project_id: projectId } }),
         apiClient.get(`/novel/projects/${projectId}/reviews`),
+        apiClient.get(`/novel/projects/${projectId}/pipeline`).catch(() => ({ data: null })),
         apiClient.get('/models').catch(() => ({ data: [] })),
       ])
       const nextChapters = Array.isArray(chr.data) ? chr.data : []
@@ -66,6 +68,7 @@ export function useNovelWorkspaceData({
       setRunRecords(Array.isArray(rnr.data) ? rnr.data : [])
       setReviews(nextReviews)
       setAgentExecution(null)
+      setPipeline(plr.data?.pipeline || null)
       setModels(nextModels)
       setSelectedModelId(prev => resolveSelectedWorkspaceModelId(prev, nextModels))
       const act = nextChapters.find?.((c: any) => c.chapter_text) || nextChapters[0] || null
@@ -165,6 +168,7 @@ export function useNovelWorkspaceData({
     reviews,
     agentExecution,
     setAgentExecution,
+    pipeline,
     models,
     selectedModelId,
     setSelectedModelId,

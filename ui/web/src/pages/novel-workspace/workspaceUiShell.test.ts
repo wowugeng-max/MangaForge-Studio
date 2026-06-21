@@ -193,6 +193,47 @@ describe('commercial writing workspace UI shell', () => {
     expect(css).toContain('.auto-director-creation-stage.is-active')
   })
 
+  test('shows the current agent chain inside the shared novel pipeline', () => {
+    const projectWorkspace = source('../NovelProjectWorkspace.tsx')
+    const css = source('../NovelProjectWorkspace.css')
+
+    expect(projectWorkspace).toContain('serialPipelineModel.currentAgentSteps')
+    expect(projectWorkspace).toContain('novel-serial-pipeline-agent-strip')
+    expect(projectWorkspace).toContain('novel-serial-pipeline-agent')
+    expect(projectWorkspace).toContain('agent.description')
+    expect(projectWorkspace).toContain('agent.agent')
+    expect(projectWorkspace).toContain("case 'create_editor_report'")
+    expect(projectWorkspace).toContain("case 'apply_editor_revision'")
+    expect(css).toContain('.novel-serial-pipeline-agent-strip')
+    expect(css).toContain('.novel-serial-pipeline-agent')
+    expect(css).toContain('.novel-serial-pipeline-agent-name')
+  })
+
+  test('keeps the shared novel pipeline stage rail compact enough to scan at once', () => {
+    const projectWorkspace = source('../NovelProjectWorkspace.tsx')
+    const css = source('../NovelProjectWorkspace.css')
+
+    expect(projectWorkspace).toContain('`阻${stage.blockerCount}`')
+    expect(projectWorkspace).toContain('`提${stage.warningCount}`')
+    expect(css).toContain('grid-template-columns: repeat(6, minmax(0, 1fr))')
+    expect(css).toContain('.novel-serial-pipeline-stage .ant-tag')
+  })
+
+  test('exposes creation contract fields in the writing bible editor', () => {
+    const projectWorkspace = source('../NovelProjectWorkspace.tsx')
+
+    expect(projectWorkspace).toContain('创建契约')
+    expect(projectWorkspace).toContain('name="reader_promise"')
+    expect(projectWorkspace).toContain('name="protagonist_drive"')
+    expect(projectWorkspace).toContain('name="core_conflict"')
+    expect(projectWorkspace).toContain('name="current_volume_goal"')
+    expect(projectWorkspace).toContain('name="innovation_hook"')
+    expect(projectWorkspace).toContain('name="first30_plan"')
+    expect(projectWorkspace).toContain('name="longform_capacity"')
+    expect(projectWorkspace).toContain('reader_promise: v.reader_promise')
+    expect(projectWorkspace).toContain('protagonist_drive: v.protagonist_drive')
+  })
+
   test('keeps longform governance rails inside the auto creation detail drawer', () => {
     const component = source('AutoCreationDirectorWorkspace.tsx')
 

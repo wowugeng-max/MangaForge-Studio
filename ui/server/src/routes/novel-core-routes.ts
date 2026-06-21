@@ -1302,25 +1302,63 @@ function buildFallbackWritingBible(seed: any, project: any = {}) {
   const world = parseNestedSeed(root.worldbuilding)
   const plotEngine = parseNestedSeed(root.plot_engine)
   const existing = parseNestedSeed(root.writing_bible)
-  if (hasUsableWritingBible(existing)) return existing
   const promise = firstSeedText(root.logline, root.synopsis, root.core_premise, project.synopsis, `${root.title || project.title || '本书'}的核心读者承诺待补齐`)
   const mainlineGoal = firstSeedText(root.main_conflict, plotEngine.long_term_goal, root.core_premise, promise)
+  const volumePlan = asSeedArray(existing.volume_plan).length ? asSeedArray(existing.volume_plan) : asSeedArray(root.volume_outlines).map((volume: any, index: number) => ({
+    title: firstSeedText(volume?.title, volume?.name, `第${index + 1}卷`),
+    goal: firstSeedText(volume?.goal, volume?.summary, volume?.hook, `完成第${index + 1}卷阶段承诺`),
+    chapter_count: volume?.chapter_count || '',
+  }))
+  const firstVolume = volumePlan[0] || {}
+  const protagonist = parseNestedSeed(root.protagonist)
+  const protagonistDrive = firstSeedText(
+    existing.protagonist_drive,
+    existing.mainline?.protagonist_drive,
+    protagonist.goal,
+    protagonist.motivation,
+    protagonist.wound_or_need,
+    asSeedArray(root.characters).find((item: any) => item?.goal || item?.motivation)?.goal,
+  )
+  const coreConflict = firstSeedText(existing.core_conflict, existing.mainline?.core_conflict, root.main_conflict, plotEngine.long_term_goal, root.synopsis, mainlineGoal)
+  const currentVolumeGoal = firstSeedText(
+    existing.current_volume_goal,
+    existing.volume_goal,
+    firstVolume.title && firstVolume.goal ? `${firstVolume.title}：${firstVolume.goal}` : '',
+    firstVolume.goal,
+    firstVolume.summary,
+  )
+  const innovationHook = firstSeedText(existing.innovation_hook, root.logline, root.core_premise, asSeedArray(root.commercial_tags)[0], promise)
+  const first30Plan = firstSeedText(
+    existing.first30_plan,
+    plotEngine.first_10_chapters_direction,
+    asSeedArray(root.chapter_outlines).length ? `前30章围绕「${promise}」推进，完成开局压迫、能力验证、敌对势力亮相和阶段钩子。` : '',
+  )
+  const longformCapacity = firstSeedText(
+    existing.longform_capacity,
+    existing.mainline?.longform_capacity,
+    `${project.length_target || root.length_target || 'longform'}：${volumePlan.map((volume: any) => firstSeedText(volume.title, volume.goal)).filter(Boolean).join(' / ')}`,
+  )
   return {
     ...existing,
     promise,
     reader_promise: firstSeedText(existing.reader_promise, promise),
+    protagonist_drive: protagonistDrive,
+    core_conflict: coreConflict,
+    current_volume_goal: currentVolumeGoal,
+    innovation_hook: innovationHook,
+    first30_plan: first30Plan,
+    longform_capacity: longformCapacity,
     mainline: {
       ...parseNestedSeed(existing.mainline),
       title: firstSeedText(existing.mainline?.title, root.title, project.title, '全书主线'),
       hook: firstSeedText(existing.mainline?.hook, root.logline, root.main_conflict, promise),
       goal: firstSeedText(existing.mainline?.goal, mainlineGoal),
+      protagonist_drive: firstSeedText(existing.mainline?.protagonist_drive, protagonistDrive),
+      core_conflict: firstSeedText(existing.mainline?.core_conflict, coreConflict),
+      longform_capacity: firstSeedText(existing.mainline?.longform_capacity, longformCapacity),
     },
     world_rules: firstSeedText(existing.world_rules, world.power_system, asSeedArray(world.rules).join('；'), world.world_summary, root.core_premise),
-    volume_plan: asSeedArray(existing.volume_plan).length ? asSeedArray(existing.volume_plan) : asSeedArray(root.volume_outlines).map((volume: any, index: number) => ({
-      title: firstSeedText(volume?.title, volume?.name, `第${index + 1}卷`),
-      goal: firstSeedText(volume?.goal, volume?.summary, volume?.hook, `完成第${index + 1}卷阶段承诺`),
-      chapter_count: volume?.chapter_count || '',
-    })),
+    volume_plan: volumePlan,
     style_lock: firstSeedText(existing.style_lock, asSeedArray(root.style_tags).join('、'), '保持强情节推进、清晰因果、持续悬念和商业连载节奏。'),
     forbidden: firstSeedText(existing.forbidden, '不得推翻已确认主角动机、世界规则、章节细纲和伏笔回收计划；不得用无代价巧合解决核心冲突。'),
     safety_policy: firstSeedText(existing.safety_policy, '生成内容必须服务原创设定，避免照搬现有作品专有表达、角色关系和桥段。'),
