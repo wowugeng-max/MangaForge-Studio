@@ -23040,6 +23040,9 @@ function chapterBlueprintFirstPayoffIndex(blueprint: any, chapterText: string) {
 
 const BLUEPRINT_BEAT_DENSITY_EVENT_PATTERN = /[“「]|逼|问|答|说|喊|吼|拿|取|递|交|按|握|抓|扣|抢|夺|拦|挡|推|拉|撤|退|站|跪|倒|抬|低|看|听|发现|看见|听见|露出|显出|浮出|滑出|掉出|亮出|压上|毁|撕|烧|打开|进入|潜入|追|查|证明|反证|揭露|改口|倒戈|站队|选择|决定|必须|否则|代价|收益|洗清|暴露|改变|触发|阻止|失败|完成/
 const BLUEPRINT_BEAT_DENSITY_SUMMARY_PATTERN = /解释了|有些尴尬|众人都知道|所有人都知道|大家都知道|事情进入下一阶段|进入下一阶段|暂时继续|顺利完成|问题解决|告一段落|由此可见|这说明/
+const BLUEPRINT_EXPANDED_BEAT_FUNCTION_PATTERN = /爽点|打脸|高潮|卖点|关键揭露|揭露|反转|回报|破局|爆点|冲刺|强冲突/
+const BLUEPRINT_COMPRESSED_BEAT_FUNCTION_PATTERN = /过渡|赶路|信息交代|时间跳转|转场|过场/
+const BLUEPRINT_FUNCTION_PADDING_PATTERN = /回廊很长|灯很冷|墙上|影子|风从|窗缝|想起很多|心里非常复杂|脚步.*沉重|环境|景色|天色|月光|微风|落叶/
 
 function chapterBlueprintBeatDensityContractFromBlueprint(blueprint: any) {
   const explicit = blueprint?.beat_density_contract || blueprint?.beatDensityContract
@@ -23087,6 +23090,144 @@ function buildChapterBlueprintBeatDensityCheck(blueprint: any, chapterText: stri
   }
 }
 
+function chapterBlueprintBeatFunctionTagFromText(value: any) {
+  const text = compactBriefText(value)
+  const match = text.match(/[【\[]([^】\]]+)[】\]]|功能标签[:：]\s*([^；，。]+)/)
+  return compactBriefText(match?.[1] || match?.[2] || '')
+}
+
+function stripChapterBlueprintBeatFunctionMarkers(value: any) {
+  return compactBriefText(value)
+    .replace(/[【\[][^】\]]+[】\]]/g, '')
+    .replace(/功能标签[:：][^；，。]+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function normalizeChapterBlueprintBeatFunctionRows(blueprint: any) {
+  return asArray(blueprint?.beat_sequence || blueprint?.beatSequence)
+    .map((item: any, index: number) => {
+      const rawText = typeof item === 'string'
+        ? item
+        : item?.beat || item?.text || item?.event || item?.action || item?.summary || item?.title || item?.description || ''
+      const tag = compactBriefText(
+        typeof item === 'string'
+          ? chapterBlueprintBeatFunctionTagFromText(item)
+          : item?.function_tag
+            || item?.functionTag
+            || item?.purpose_tag
+            || item?.purposeTag
+            || asArray(item?.purpose_tags || item?.purposeTags)[0]
+            || item?.tag
+            || chapterBlueprintBeatFunctionTagFromText(rawText),
+      )
+      const text = stripChapterBlueprintBeatFunctionMarkers(rawText)
+      const expectation = BLUEPRINT_EXPANDED_BEAT_FUNCTION_PATTERN.test(tag)
+        ? 'expand'
+        : BLUEPRINT_COMPRESSED_BEAT_FUNCTION_PATTERN.test(tag)
+          ? 'compress'
+          : ''
+      return text && expectation ? {
+        index,
+        text,
+        tag,
+        expectation,
+      } : null
+    })
+    .filter(Boolean)
+}
+
+function chapterBlueprintBeatFunctionEvidence(row: any, chapterText: string) {
+  const body = proseBodyWithoutTitleLine(chapterText)
+  const lineCandidates = body
+    .split(/\n+/)
+    .map(line => compactBriefText(line, 360))
+    .filter(Boolean)
+  const sentenceCandidates = body
+    .split(/(?<=[。！？!?])/)
+    .map(clause => compactBriefText(clause, 220))
+    .filter(Boolean)
+  const paragraphCandidates = proseParagraphsWithoutTitle(chapterText)
+    .map(paragraph => compactBriefText(paragraph, 360))
+    .filter(Boolean)
+  const candidates = Array.from(new Set([
+    ...lineCandidates,
+    ...sentenceCandidates,
+    ...paragraphCandidates,
+  ]))
+  const scored = candidates
+    .map(evidence => ({ evidence, match: anchorMatchScore(row.text, evidence) }))
+    .sort((a, b) => {
+      const scoreDelta = b.match.score - a.match.score
+      if (Math.abs(scoreDelta) <= 20 && a.match.score >= 24 && b.match.score >= 24) {
+        return countProseChars(a.evidence) - countProseChars(b.evidence)
+      }
+      return scoreDelta || b.match.matched.length - a.match.matched.length
+    })
+  const best = scored[0] || { evidence: '', match: { score: 0, matched: [] } }
+  return {
+    evidence: best.evidence,
+    score: best.match.score,
+    matched: best.match.matched,
+  }
+}
+
+function hasExpandedBeatDetail(evidence: string) {
+  const punctuationCount = (String(evidence || '').match(/[，；。！？!?“「]/g) || []).length
+  return [
+    countProseChars(evidence) >= 70,
+    /[“「]/.test(evidence),
+    /先|又|再|却|因为|否则|压上|反扣|扣住|抢|挡|问|改口|倒戈|站队|退后/.test(evidence),
+    /(有人|旁观|执事|证人|林青禾|弟子).*(退后|改口|倒戈|站队|抢|挡|沉默|僵住|低头)/.test(evidence),
+    /代价|收益|暴露|洗清|结果|余波/.test(evidence),
+    punctuationCount >= 4,
+  ].filter(Boolean).length >= 2
+}
+
+function isCompressedBeatOverwritten(evidence: string) {
+  if (!evidence) return false
+  return countProseChars(evidence) > 70 || BLUEPRINT_FUNCTION_PADDING_PATTERN.test(evidence)
+}
+
+function buildChapterBlueprintBeatFunctionDetailCheck(blueprint: any, chapterText: string) {
+  const rows = normalizeChapterBlueprintBeatFunctionRows(blueprint)
+  if (!rows.length) return null
+  const results = rows.map((row: any) => {
+    const evidence = chapterBlueprintBeatFunctionEvidence(row, chapterText)
+    const matched = evidence.score >= 24 || evidence.matched.length >= 2
+    const delivered = row.expectation === 'expand'
+      ? matched && hasExpandedBeatDetail(evidence.evidence)
+      : !matched || !isCompressedBeatOverwritten(evidence.evidence)
+    return {
+      ...row,
+      status: delivered ? 'ok' : 'warn',
+      delivered,
+      evidence: evidence.evidence || `未定位：${row.text}`,
+      score: evidence.score,
+      issue: delivered
+        ? ''
+        : row.expectation === 'expand'
+          ? `${row.tag}情节点被写成摘要，缺少出手过程、对话交锋、配角反应或结果余波。`
+          : `${row.tag}情节点被过度展开，疑似用环境/心理/装饰描写水字数。`,
+    }
+  })
+  const missed = results.filter((item: any) => !item.delivered)
+  return {
+    key: 'beat_function_detail_balance',
+    label: '目的词详略',
+    status: missed.length ? 'warn' : 'ok',
+    evidence: results
+      .map((item: any) => `${item.tag}(${item.expectation === 'expand' ? '展开' : '带过'})：${compactBriefText(item.evidence, 120)}`)
+      .join('；'),
+    expected_count: rows.length,
+    missed_count: missed.length,
+    missed_items: missed.map((item: any) => `${item.tag}：${item.text}`).slice(0, 8),
+    fix: missed.length
+      ? `按 oh-story 情节点功能标签修复目的词详略：${missed.map((item: any) => `${item.tag}《${item.text}》`).join('；')}。爽点/打脸/高潮/卖点/关键揭露/反转必须展开危机期待、出手过程、对话交锋、配角差异化反应和结果余波；过渡/赶路/信息交代/时间跳转压成 1-2 句，不能用环境描写、重复情绪或内心独白凑字数。`
+      : '',
+  }
+}
+
 function buildChapterBlueprintCraftChecks(blueprint: any, chapterText: string) {
   const body = proseBodyWithoutTitleLine(chapterText)
   const compactBody = body.replace(/\s+/g, '')
@@ -23097,6 +23238,8 @@ function buildChapterBlueprintCraftChecks(blueprint: any, chapterText: string) {
 
   const beatDensityCheck = buildChapterBlueprintBeatDensityCheck(blueprint, chapterText)
   if (beatDensityCheck) checks.push(beatDensityCheck)
+  const beatFunctionDetailCheck = buildChapterBlueprintBeatFunctionDetailCheck(blueprint, chapterText)
+  if (beatFunctionDetailCheck) checks.push(beatFunctionDetailCheck)
 
   const payoffIndex = chapterBlueprintFirstPayoffIndex(blueprint, body)
   const setupText = payoffIndex > 0 ? compactBody.slice(0, payoffIndex) : compactBody.slice(0, 220)
@@ -23728,6 +23871,7 @@ export function buildChapterBlueprintSyncReport(project: any, chapter: any, cont
       text: item.text || item.expected,
     }))
   const beatDensityMissed = craftMissed.some((item: any) => item.key === 'craft_beat_density')
+  const beatFunctionDetailMissed = craftMissed.some((item: any) => item.key === 'craft_beat_function_detail_balance')
   const delivered = checked.filter(item => item.delivered)
   const missed = [...checked.filter(item => !item.delivered), ...craftMissed, ...causalChainMissed]
   const missedCount = missed.length
@@ -23763,6 +23907,7 @@ export function buildChapterBlueprintSyncReport(project: any, chapter: any, cont
           '下一次修订优先补足章节细纲 missed 项，把缺口写成可见事件、人物动作、信息反转、关系变化、代价兑现或章尾新问题。',
           causalChainMissed.length ? '按五幕因果链修复：开局埋因，发展让果变下一因，转折让冲突性质质变，行动白热化，结局收束并埋下一因；不能跳步、不能乱序。' : '',
           beatDensityMissed ? '按情节点密度修复：约 200-300 字/个情节点，先补足动作过程、对话交锋、信息变化、选择代价、收益兑现和章尾钩子铺垫，再扩写句子。' : '',
+          beatFunctionDetailMissed ? '按目的词详略修复：爽点/打脸/高潮/卖点/关键揭露/反转必须展开，过渡/赶路/信息交代/时间跳转压成 1-2 句，避免平均用力或装饰性水文。' : '',
           '按 oh-story craft 修复：爽点前补危机/期待铺垫，揭露/打脸后补在场配角差异化反应，过渡点压缩、卖点和回报点展开。',
           '如果正文只是概述大纲，按章节细纲重排开篇钩子、五段式内容概括、多线推进和章尾承接。',
         ].filter(Boolean),

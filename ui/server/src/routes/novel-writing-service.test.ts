@@ -38425,6 +38425,48 @@ describe('readability and restrained meme workflow', () => {
     expect(summaryReport.next_actions.join('；')).toContain('情节点密度')
   })
 
+  test('checks chapter blueprint beat function detail allocation after delivery', () => {
+    const project = { title: '残阵问道', reference_config: {} }
+    const chapter = { id: 32, chapter_no: 32, title: '详略复核' }
+    const contextPackage = {
+      chapter_target: {
+        chapter_no: 32,
+        chapter_blueprint: {
+          target_emotion: '压迫后细节反证',
+          opening_hook: '审判庭开场逼江辰按下认罪书血印',
+          core_payoff: '江辰用旧印章让账册调包当众暴露',
+          beat_sequence: [
+            { beat: '江辰把旧印章压上编号，账册调包痕迹浮出', function_tag: '关键揭露' },
+            { beat: '执事抢证失败后改口，旁观弟子倒戈站队', function_tag: '打脸' },
+            { beat: '江辰穿过回廊去偏厅', function_tag: '过渡' },
+          ],
+        },
+      },
+    }
+    const allocatedText = [
+      '审判庭开场，执事逼江辰按下认罪书血印。',
+      '江辰把旧印章压上编号，墨迹先断成两截，又沿着账册缺页浮出调包痕迹；林青禾盯住页角，低声问：“这枚印是谁保管？”执事伸手就抢。',
+      '江辰扣住他的手腕，把旧印章往灯下一翻，印背暗纹正对第二本账册的编号。有人退后，有人当场改口，旁观弟子倒戈站队。',
+      '代价是江辰暴露第二本账册，收益是当众证明账册调包。',
+      '他穿过回廊去偏厅。',
+    ].join('\n')
+    const flatText = [
+      '审判庭开场，执事逼江辰按下认罪书血印。',
+      '江辰用旧印章证明了账册调包，执事抢证失败后改口，旁观弟子都很震惊。',
+      '他穿过回廊，回廊很长，灯很冷，墙上的影子一层接一层，风从窗缝里吹进来，他想起很多往事，心里非常复杂，脚步也变得沉重。',
+      '事情进入下一阶段。',
+    ].join('\n')
+
+    const okReport = buildChapterBlueprintSyncReport(project, chapter, contextPackage, allocatedText)
+    const warnReport = buildChapterBlueprintSyncReport(project, chapter, contextPackage, flatText)
+
+    expect(okReport.craft_checks.find((item: any) => item.key === 'beat_function_detail_balance')?.status).toBe('ok')
+    expect(warnReport.status).toBe('warn')
+    expect(warnReport.craft_checks.find((item: any) => item.key === 'beat_function_detail_balance')?.status).toBe('warn')
+    expect(warnReport.missed.find((item: any) => item.key === 'craft_beat_function_detail_balance')?.text).toContain('关键揭露')
+    expect(warnReport.next_actions.join('；')).toContain('目的词详略')
+  })
+
   test('reads chapter blueprint sync contract from camelCase chapter raw preDraftBrief', () => {
     const project = { title: '残阵问道', reference_config: {} }
     const chapter = {
