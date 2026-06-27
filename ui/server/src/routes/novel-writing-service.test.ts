@@ -36869,6 +36869,57 @@ describe('chapter pre-draft brief', () => {
     expect(prompt).toContain('旧印章完整归属不能提前公开')
   })
 
+  test('applies oh-story layered memory archive policy to pre-draft brief and prose prompt', () => {
+    const project = { title: '万古长夜', reference_config: {} }
+    const contextPackage = {
+      layered_memory_context: {
+        recent_chapter_details: [
+          { chapter_no: 44, summary: '旧案外门审问开场。' },
+          { chapter_no: 45, summary: '李玄第一次触碰旧印纹。' },
+          { chapter_no: 46, summary: '旧阵塔入口打开。' },
+          { chapter_no: 47, summary: '林青禾有限作证。' },
+          { chapter_no: 48, summary: '半枚旧印纹被确认。' },
+          { chapter_no: 49, summary: '残阵缺口回应旧塔禁制。' },
+          { chapter_no: 50, summary: '第七层门影出现。' },
+        ],
+        ten_chapter_summaries: [
+          { range: '第41-50章', core_events: '旧案线进入旧阵塔。' },
+        ],
+        archive_index: [
+          { range: '第1-40章', path: '追踪/归档/第001-040章.md', summary: '外门压迫线和旧案前史已压缩归档。' },
+        ],
+        red_lines: ['旧印章完整归属不能提前公开'],
+      },
+      chapter_target: {
+        chapter_no: 51,
+        title: '第七层旧影',
+        summary: '李玄追查旧阵塔第七层的人影。',
+        scene_cards: [],
+      },
+    }
+
+    const brief = buildChapterPreDraftBrief(project, contextPackage)
+    const context = mergeConfirmedPreDraftBriefIntoContext(contextPackage, {
+      ...brief,
+      confirmed_at: '2026-06-10T08:00:00.000Z',
+    })
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+    const prompt = service.buildParagraphProseContext(project, context, null, { chapter_no: 51, title: '第七层旧影' })
+
+    expect(brief.layered_memory_context.recent_chapter_details).toHaveLength(5)
+    expect(brief.layered_memory_context.recent_chapter_details.join('｜')).not.toContain('第44章')
+    expect(brief.layered_memory_context.recent_chapter_details.join('｜')).not.toContain('第45章')
+    expect(brief.layered_memory_context.recent_chapter_details.join('｜')).toContain('第50章')
+    expect(context.chapter_target.layered_memory_context.archive_refs[0]).toContain('追踪/归档/第001-040章.md')
+    expect(prompt).toContain('归档索引')
+    expect(prompt).toContain('第1-40章')
+    expect(prompt).toContain('外门压迫线和旧案前史已压缩归档')
+  })
+
   test('carries oh-story daily progress summary into the next pre-draft brief and prose prompt', () => {
     const project = {
       title: '万古长夜',

@@ -18132,6 +18132,38 @@ function normalizeLayeredMemoryDetail(item: any) {
   return compactBriefText(parts.join('｜'))
 }
 
+function normalizeLayeredMemoryArchiveRef(item: any) {
+  if (typeof item === 'string') return compactBriefText(item)
+  if (!item || typeof item !== 'object') return ''
+  const range = compactBriefText(item.range || item.chapter_range || item.chapterRange || item.label || item.title)
+  const path = compactBriefText(item.path || item.file || item.file_path || item.filePath || item.archive_path || item.archivePath)
+  const summary = compactBriefText(item.summary || item.description || item.core_events || item.coreEvents || item.text)
+  return compactBriefText([range, path, summary].filter(Boolean).join('｜'))
+}
+
+function layeredMemoryChapterNo(text: string) {
+  const match = String(text || '').match(/第\s*([0-9]+)\s*章/)
+  return match ? Number(match[1] || 0) : 0
+}
+
+function latestFiveLayeredMemoryDetails(details: string[]) {
+  const unique = uniqueBriefStrings(details, 12)
+  if (unique.length <= 5) return unique
+  const chapterNos = unique
+    .map(layeredMemoryChapterNo)
+    .filter(chapterNo => chapterNo > 0)
+    .sort((a, b) => b - a)
+    .slice(0, 5)
+  if (!chapterNos.length) return unique.slice(-5)
+  const latest = new Set(chapterNos)
+  const selected = unique.filter((text, index) => {
+    const chapterNo = layeredMemoryChapterNo(text)
+    if (chapterNo > 0) return latest.has(chapterNo)
+    return index >= unique.length - 5
+  })
+  return selected.length > 5 ? selected.slice(-5) : selected
+}
+
 function normalizeLayeredMemoryContext(value: any) {
   const raw = value?.layered_memory_context
     || value?.layeredMemoryContext
@@ -18139,14 +18171,14 @@ function normalizeLayeredMemoryContext(value: any) {
     || value?.longformLayeredMemory
     || value
     || {}
-  const recentChapterDetails = uniqueBriefStrings([
+  const recentChapterDetails = latestFiveLayeredMemoryDetails([
     ...asArray(raw.recent_chapter_details),
     ...asArray(raw.recentChapterDetails),
     ...asArray(raw.recent_chapters),
     ...asArray(raw.recentChapters),
     ...asArray(raw.near_5_chapter_details),
     ...asArray(raw.near5ChapterDetails),
-  ].map(normalizeLayeredMemoryDetail).filter(Boolean), 8)
+  ].map(normalizeLayeredMemoryDetail).filter(Boolean))
   const tenChapterSummaries = uniqueBriefStrings([
     ...asArray(raw.ten_chapter_summaries),
     ...asArray(raw.tenChapterSummaries),
@@ -18167,17 +18199,26 @@ function normalizeLayeredMemoryContext(value: any) {
     ...asArray(raw.immutable_rules),
     ...asArray(raw.immutableRules),
   ].map(normalizeMemoryTextItem).filter(Boolean), 10)
+  const archiveRefs = uniqueBriefStrings([
+    ...asArray(raw.archive_refs),
+    ...asArray(raw.archiveRefs),
+    ...asArray(raw.archive_index),
+    ...asArray(raw.archiveIndex),
+    ...asArray(raw.archives),
+  ].map(normalizeLayeredMemoryArchiveRef).filter(Boolean), 10)
   const context = {
     source: compactBriefText(raw.source, 'oh_story_layered_memory_v1'),
     recent_chapter_details: recentChapterDetails,
     ten_chapter_summaries: tenChapterSummaries,
     volume_overview: volumeOverview,
+    archive_refs: archiveRefs,
     red_lines: redLines,
   }
   const hasContext = Boolean(
     context.recent_chapter_details.length
     || context.ten_chapter_summaries.length
     || context.volume_overview.length
+    || context.archive_refs.length
     || context.red_lines.length
   )
   return hasContext ? context : null
@@ -18221,9 +18262,13 @@ export function buildMergedLayeredMemoryContext(prev: any, delta: any, chapter: 
   if (!previous && !next) return null
   const merged = {
     source: next?.source || previous?.source || 'oh_story_layered_memory_v1',
-    recent_chapter_details: next?.recent_chapter_details?.length ? next.recent_chapter_details : previous?.recent_chapter_details || [],
+    recent_chapter_details: latestFiveLayeredMemoryDetails(next?.recent_chapter_details?.length ? next.recent_chapter_details : previous?.recent_chapter_details || []),
     ten_chapter_summaries: next?.ten_chapter_summaries?.length ? next.ten_chapter_summaries : previous?.ten_chapter_summaries || [],
     volume_overview: next?.volume_overview?.length ? next.volume_overview : previous?.volume_overview || [],
+    archive_refs: uniqueBriefStrings([
+      ...asArray(previous?.archive_refs),
+      ...asArray(next?.archive_refs),
+    ], 10),
     red_lines: uniqueBriefStrings([
       ...asArray(previous?.red_lines),
       ...asArray(next?.red_lines),
@@ -47459,6 +47504,7 @@ export function createNovelWritingService(ctx: {
       layeredMemoryContext?.recent_chapter_details?.length ? `近5章详记：${layeredMemoryContext.recent_chapter_details.join('；')}` : '',
       layeredMemoryContext?.ten_chapter_summaries?.length ? `十章概要：${layeredMemoryContext.ten_chapter_summaries.join('；')}` : '',
       layeredMemoryContext?.volume_overview?.length ? `卷级总览：${layeredMemoryContext.volume_overview.join('；')}` : '',
+      layeredMemoryContext?.archive_refs?.length ? `归档索引：${layeredMemoryContext.archive_refs.join('；')}` : '',
       layeredMemoryContext?.red_lines?.length ? `分层记忆红线：${layeredMemoryContext.red_lines.join('；')}` : '',
       layeredMemoryContext ? JSON.stringify(layeredMemoryContext, null, 2).slice(0, 4000) : '',
       '',
@@ -47739,7 +47785,7 @@ export function createNovelWritingService(ctx: {
       '输出 JSON，字段：',
       'state_delta: {timeline, current_time, active_locations, character_positions, character_relationships, relationship_graph, known_secrets, secret_visibility, item_ownership, resource_status, foreshadowing_status, payoff_queue, mainline_progress, volume_progress, unresolved_conflicts, open_questions, recent_repeated_information, next_chapter_priorities, layered_memory_context, progress_summary}',
       'state_delta.timeline/current_time/active_locations 要尽量带 source_excerpt 或 evidence：timeline 可用对象数组 {event/source_excerpt}，active_locations 可用对象数组 {name/source_excerpt}；如果 current_time 是字符串，也必须在 timeline 或 location 相关记录中补正文原句证据。',
-      'state_delta.layered_memory_context: 按 oh-story 已写内容分层摘要输出完整可覆盖版本，字段包含 recent_chapter_details(array, 近5章详记，每项写第X章+事件+状态变化+伏笔), ten_chapter_summaries(array, 每10章概要), volume_overview(array, 卷级总览), red_lines(array)。超过30章时必须维护；不足30章也可输出最近章节详记。',
+      'state_delta.layered_memory_context: 按 oh-story 已写内容分层摘要输出完整可覆盖版本，字段包含 recent_chapter_details(array, 只保留最近5章详记，每项写第X章+事件+状态变化+伏笔), ten_chapter_summaries(array, 每10章概要), volume_overview(array, 卷级总览), archive_refs(array, 追踪/归档/第XXX-YYY章.md 等归档索引), red_lines(array)。超过30章时必须维护；每50章或卷结束时保留最近5章详记，将更早内容压缩进 archive_refs 和 ten_chapter_summaries；不足30章也可输出最近章节详记。',
       'state_delta.progress_summary: 按 oh-story Step 4「追踪/上下文.md」输出本章完成后的日更断点摘要，字段包含 last_completed_chapter, updated_at, completed_chapter_count, completed_word_count, active_foreshadowing_count, recent_changed_characters, next_outline_status, notes。notes 是注意事项，只写需要下一章记住的关键决策或变更，不复制详细伏笔表、时间线表或角色状态表。',
       'character_updates: array，每项包含 name,current_state,source_excerpt 或 evidence。current_state 可包含 age, location, physical_condition, appearance_delta, outfit, items, item_changes, ability_status, resource_status, emotional_state, relationship_attitudes, knowledge_scope, newly_learned, information_boundaries, secrets_known, injuries, goals, next_intent, last_seen_chapter；source_excerpt/evidence 必须引用本章正文中支撑该状态变化的原句。',
       'setting_updates: array，每项包含 entity_id 或 name, entity_type, state_delta, actual_state_change, source_excerpt 或 evidence。用于更新设定工坊里的境界、能力、物品、Boss、规则、伏笔、地点、时间线等状态；source_excerpt/evidence 必须引用本章正文中支撑资产归属、可见性、触发条件、限制、风险、后果、时间或地点变化的原句。',
