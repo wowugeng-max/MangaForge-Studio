@@ -24543,6 +24543,69 @@ function styleFingerprintTextFromContext(contextPackage: any, strategy: any) {
   ].map((item: any) => compactBriefText(item, '')).filter(Boolean), 8).join('；')
 }
 
+function styleFingerprintContractCandidates(contextPackage: any, project: any) {
+  const target = {
+    ...(contextPackage?.chapterTarget || {}),
+    ...(contextPackage?.chapter_target || {}),
+  }
+  const brief = {
+    ...(contextPackage?.preDraftBrief || {}),
+    ...(contextPackage?.pre_draft_brief || {}),
+    ...(target?.preDraftBrief || {}),
+    ...(target?.pre_draft_brief || {}),
+  }
+  const storyState = {
+    ...(project?.referenceConfig?.storyState || {}),
+    ...(project?.reference_config?.story_state || {}),
+    ...(project?.storyState || {}),
+    ...(project?.story_state || {}),
+    ...(contextPackage?.storyState || {}),
+    ...(contextPackage?.story_state || {}),
+  }
+  return [
+    target.style_fingerprint_contract,
+    target.styleFingerprintContract,
+    brief.style_fingerprint_contract,
+    brief.styleFingerprintContract,
+    storyState.style_fingerprint_contract,
+    storyState.styleFingerprintContract,
+  ].filter((item: any) => item && typeof item === 'object')
+}
+
+function buildStyleFingerprintPromptHandoff(contextPackage: any = {}, project: any = {}, strategy: any = null) {
+  const projectStoryState = {
+    ...(project?.referenceConfig?.storyState || {}),
+    ...(project?.reference_config?.story_state || {}),
+    ...(project?.storyState || {}),
+    ...(project?.story_state || {}),
+  }
+  const sourceText = uniqueBriefStrings([
+    styleFingerprintTextFromContext(contextPackage, strategy),
+    projectStoryState.style_fingerprint,
+    projectStoryState.styleFingerprint,
+    projectStoryState.style_profile_summary,
+    projectStoryState.styleProfileSummary,
+  ].map((item: any) => compactBriefText(item, '')).filter(Boolean), 8).join('；')
+  const contract = styleFingerprintContractCandidates(contextPackage, project)[0] || {}
+  const contractBand = compactBriefText(contract.target_sentence_band || contract.targetSentenceBand, '')
+  const band = styleFingerprintSentenceBand([contractBand, sourceText].filter(Boolean).join('；'))
+  if (!sourceText && !contractBand && !Object.keys(contract).length) return null
+  const policy = compactBriefText(
+    contract.policy,
+    '每章写前按文风指纹/文风.md/原文锚点确定句长节奏；续写衔接剧情，不以可能已漂移的上一章句式节奏为准。',
+  )
+  const sourceExcerpt = compactBriefText(contract.source_excerpt || contract.sourceExcerpt || sourceText, 360)
+  return {
+    source: compactBriefText(contract.source, 'story_state_style_fingerprint'),
+    style_fingerprint: sourceText,
+    target_sentence_band: contractBand || (band ? `${band.min}-${band.max}字` : ''),
+    min_sentence_chars: Number(contract.min_sentence_chars ?? contract.minSentenceChars ?? band?.min) || null,
+    max_sentence_chars: Number(contract.max_sentence_chars ?? contract.maxSentenceChars ?? band?.max) || null,
+    policy,
+    source_excerpt: sourceExcerpt,
+  }
+}
+
 function styleFingerprintSentenceBand(text: string) {
   const source = compactBriefText(text, '')
   if (!source) return null
@@ -46532,6 +46595,7 @@ export function createNovelWritingService(ctx: {
     )
     const millionWordRunway = millionWordRunwayFromContext(contextPackage, preDraftBrief)
     const styleSampleStrategy = contextPackage?.chapter_target?.style_sample_strategy || buildStyleSampleStrategy(project, contextPackage)
+    const styleFingerprintHandoff = buildStyleFingerprintPromptHandoff(contextPackage, project, styleSampleStrategy)
     const chapterBenchmarkStrategy = contextPackage?.chapter_target?.chapter_benchmark_strategy || buildChapterBenchmarkStrategy(project, contextPackage)
     const first30RetentionBrief = first30RetentionBriefFromContext(contextPackage, preDraftBrief)
     const readerDropRiskBrief = normalizeReaderDropRiskBrief(
@@ -47518,6 +47582,14 @@ export function createNovelWritingService(ctx: {
       progressSummary?.next_outline_status ? `下一章细纲状态：${progressSummary.next_outline_status}` : '',
       progressSummary?.notes?.length ? `注意事项：${progressSummary.notes.join('；')}` : '',
       progressSummary ? JSON.stringify(progressSummary, null, 2).slice(0, 2000) : '',
+      '',
+      styleFingerprintHandoff ? '【文风指纹断点】' : '',
+      styleFingerprintHandoff ? '硬性要求：执行 story_state.style_fingerprint；这是 oh-story 追踪/上下文.md 的文风指纹锚。续写只承接剧情、状态和情绪债，不继承可能已漂移的上一章句式节奏。写完后按目标句长带检查碎句、逗号结巴和中长句呼吸。' : '',
+      styleFingerprintHandoff?.target_sentence_band ? `目标句长带：${styleFingerprintHandoff.target_sentence_band}` : '',
+      styleFingerprintHandoff?.style_fingerprint ? `文风指纹：${styleFingerprintHandoff.style_fingerprint}` : '',
+      styleFingerprintHandoff?.policy ? `防漂移策略：${styleFingerprintHandoff.policy}` : '',
+      styleFingerprintHandoff?.source_excerpt ? `来源摘录：${styleFingerprintHandoff.source_excerpt}` : '',
+      styleFingerprintHandoff ? JSON.stringify(styleFingerprintHandoff, null, 2).slice(0, 1600) : '',
       '',
       storyUnitContext ? '【剧情单元任务】' : '',
       storyUnitContext ? '硬性要求：执行 chapter_target.story_unit_context；本章只完成 current_chapter_role，并服务 unit_goal。可以铺垫 pressure_escalation 和 setup_and_storyline，但不得提前消费 mini_climax_payoff、exit_hook 或 forbidden_advance 中的后段爆点。' : '',

@@ -36967,6 +36967,40 @@ describe('chapter pre-draft brief', () => {
     expect(prompt).toContain('第51章先接旧阵塔第七层入口')
   })
 
+  test('injects story-state style fingerprint as a prose prompt handoff anchor', () => {
+    const project = {
+      title: '万古长夜',
+      reference_config: {
+        story_state: {
+          style_fingerprint: '文风指纹：目标句长带 20-42 字，旧上下文已锁定，中长句呼吸为主。',
+          style_fingerprint_contract: {
+            target_sentence_band: '20-42字',
+            policy: '每章写前按文风指纹确定句长节奏，不以可能已漂移的上一章句式节奏为准。',
+          },
+        },
+      },
+    }
+    const contextPackage = {
+      chapter_target: {
+        chapter_no: 51,
+        title: '第七层旧影',
+        summary: '李玄追查旧阵塔第七层的人影。',
+        scene_cards: [],
+      },
+    }
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+    const prompt = service.buildParagraphProseContext(project, contextPackage, null, { chapter_no: 51, title: '第七层旧影' })
+
+    expect(prompt).toContain('【文风指纹断点】')
+    expect(prompt).toContain('目标句长带：20-42字')
+    expect(prompt).toContain('旧上下文已锁定')
+    expect(prompt).toContain('不以可能已漂移的上一章句式节奏为准')
+  })
+
   test('adds story unit context to the pre-draft brief', () => {
     const brief = buildChapterPreDraftBrief(
       { title: '超人的规则怪谈世界' },
