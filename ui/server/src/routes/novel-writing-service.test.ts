@@ -10500,6 +10500,10 @@ describe('chapter prose word target', () => {
     expect(prompt).toContain('新版细纲优先读取内容概括、情节安排、人物关系和出场顺序')
     expect(prompt).toContain('旧版细纲缺这些字段不阻塞')
     expect(prompt).toContain('回退到核心事件、目标情绪、章首/章尾钩子和字数目标')
+    expect(prompt).toContain('新版细纲进入意图确认时')
+    expect(prompt).toContain('内容概括决定起承转合')
+    expect(prompt).toContain('人物关系和出场顺序决定镜头进入顺序')
+    expect(prompt).toContain('情节细化决定代价兑现/收益兑现')
     expect(prompt).toContain('不得提前消费后续章节爆点')
     expect(prompt).toContain('第8章只负责夜钟规则第一次显形')
   })
@@ -37300,6 +37304,10 @@ describe('chapter pre-draft brief', () => {
     expect(brief.next_batch_brief.workflow_rules.join('｜')).toContain('新版细纲优先读取内容概括、情节安排、人物关系和出场顺序')
     expect(brief.next_batch_brief.workflow_rules.join('｜')).toContain('旧版细纲缺这些字段不阻塞')
     expect(brief.next_batch_brief.workflow_rules.join('｜')).toContain('回退到核心事件、目标情绪、章首/章尾钩子和字数目标')
+    expect(brief.next_batch_brief.workflow_rules.join('｜')).toContain('新版细纲进入意图确认时')
+    expect(brief.next_batch_brief.workflow_rules.join('｜')).toContain('内容概括决定起承转合')
+    expect(brief.next_batch_brief.workflow_rules.join('｜')).toContain('人物关系和出场顺序决定镜头进入顺序')
+    expect(brief.next_batch_brief.workflow_rules.join('｜')).toContain('情节细化决定代价兑现/收益兑现')
   })
 
   test('merges runtime chapterTarget next batch brief into the pre-draft brief when chapter_target already exists', () => {
