@@ -18319,9 +18319,10 @@ function normalizeForeshadowingConsistencyRadar(value: any = {}, targetChapterNo
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
   const targetNo = Number(targetChapterNo || raw.target_chapter_no || raw.targetChapterNo || raw.chapter_no || raw.chapterNo || 0)
   const textItem = (item: any) => compactBriefText(item?.text || item?.summary || item?.detail || item?.name || item)
-  const directActive = uniqueBriefStrings(asArray(raw.active || raw.active_items || raw.activeItems)
+  const directActiveRows = asArray(raw.active || raw.active_items || raw.activeItems)
     .map(textItem)
-    .filter(Boolean), 12)
+    .filter(Boolean)
+  const directActive = uniqueBriefStrings(directActiveRows, 12)
   const directOverdue = uniqueBriefStrings(asArray(raw.overdue || raw.overdue_items || raw.overdueItems)
     .map(textItem)
     .filter(Boolean), 12)
@@ -18340,11 +18341,14 @@ function normalizeForeshadowingConsistencyRadar(value: any = {}, targetChapterNo
       : []
   const payoffRows = asArray(raw.payoff_queue || raw.payoffQueue)
     .map((item: any, index: number) => [`payoff_queue_${index + 1}`, typeof item === 'object' ? item : { name: item, status: 'active' }])
+  const explicitDensityWarnings = uniqueBriefStrings(asArray(raw.density_warnings || raw.densityWarnings || raw.foreshadowing_density_warnings || raw.foreshadowingDensityWarnings)
+    .map(textItem)
+    .filter(Boolean), 8)
   const entries = [...statusRows, ...payoffRows]
     .map(([key, item]: any) => {
       const source = item && typeof item === 'object' && !Array.isArray(item) ? item : { note: item }
       const name = compactBriefText(source.name || source.title || source.key || key)
-      if (!name || ['source', 'active_count', 'activeCount', 'overdue_count', 'overdueCount'].includes(name)) return null
+      if (!name || ['source', 'active_count', 'activeCount', 'overdue_count', 'overdueCount', 'density_warnings', 'densityWarnings'].includes(name)) return null
       const status = compactBriefText(source.status || source.state || source.payoff_status || source.payoffStatus || source.resolution_status || source.resolutionStatus, 'active')
       const normalizedStatus = status.toLowerCase()
       const closed = ['paid', 'done', 'resolved', 'closed', 'complete', 'completed', 'settled'].includes(normalizedStatus)
@@ -18382,6 +18386,8 @@ function normalizeForeshadowingConsistencyRadar(value: any = {}, targetChapterNo
       const note = compactBriefText(source.note || source.notes || source.summary || source.detail || source.evidence || source.source_excerpt || source.sourceExcerpt)
       const overdue = Boolean(source.overdue ?? source.is_overdue ?? source.isOverdue)
         || (age > 50 && !closed)
+      const volumeNo = Number(source.volume_no ?? source.volumeNo ?? source.volume ?? source.arc_no ?? source.arcNo ?? 0)
+        || (plantedChapter ? Math.max(1, Math.ceil(plantedChapter / 50)) : 0)
       const text = [
         name,
         status ? `状态：${status}` : '',
@@ -18391,7 +18397,7 @@ function normalizeForeshadowingConsistencyRadar(value: any = {}, targetChapterNo
         plannedPayoffChapter ? `计划回收：第${plannedPayoffChapter}章` : '',
         note,
       ].filter(Boolean).join('；')
-      return { name, text, overdue }
+      return { name, text, overdue, volumeNo }
     })
     .filter(Boolean)
   const active = uniqueBriefStrings([
@@ -18402,16 +18408,36 @@ function normalizeForeshadowingConsistencyRadar(value: any = {}, targetChapterNo
     ...directOverdue,
     ...entries.filter((item: any) => item.overdue).map((item: any) => item.text),
   ], 12)
-  if (!active.length && !overdue.length) return null
+  const densityWarnings = uniqueBriefStrings([
+    ...explicitDensityWarnings,
+    ...Array.from(entries.reduce((map: Map<number, number>, item: any) => {
+      const volumeNo = Number(item.volumeNo || 0)
+      if (!volumeNo) return map
+      map.set(volumeNo, (map.get(volumeNo) || 0) + 1)
+      return map
+    }, new Map<number, number>()).entries())
+      .map(([volumeNo, count]: any) => {
+        if (count > 15) return `SC-FORESHADOW：第${volumeNo}卷活跃伏笔${count}条，伏笔太密，读者可能记不住且互相冲淡；按 S4 提醒，下一章优先推进、合并或休眠说明。`
+        if (count > 0 && count < 3) return `SC-FORESHADOW：第${volumeNo}卷活跃伏笔${count}条，伏笔太疏，连载悬念和粘性可能不足；按 S4 提醒，下一章可补自然线索或明确本卷主悬念。`
+        return ''
+      })
+      .filter(Boolean),
+  ], 8)
+  if (!active.length && !overdue.length && !densityWarnings.length) return null
+  const activeTotalCount = Number(raw.active_count ?? raw.activeCount ?? 0)
+    || Math.max(entries.length, directActiveRows.length, active.length)
   return {
     source: compactBriefText(raw.source, 'oh_story_consistency_checker_foreshadowing_v1'),
     active,
-    active_count: Number(raw.active_count ?? raw.activeCount ?? active.length) || active.length,
+    active_count: activeTotalCount,
     overdue,
     overdue_count: Number(raw.overdue_count ?? raw.overdueCount ?? overdue.length) || overdue.length,
+    density_warnings: densityWarnings,
+    density_warning_count: Number(raw.density_warning_count ?? raw.densityWarningCount ?? densityWarnings.length) || densityWarnings.length,
     guardrails: uniqueBriefStrings([
       ...asArray(raw.guardrails || raw.guardrail || raw.rules).map(textItem),
       '超过50章未回收的伏笔按 S4 关注，下一章要推进、保持存在感或明确暂缓理由。',
+      'SC-FORESHADOW 伏笔密度只作为 S4 建议：3-15 个/卷为参考范围，太密要合并/推进/休眠，太疏要补自然线索或明确主悬念。',
       '伏笔回收不得和后续新增设定、角色知识边界、时间线或物品归属冲突。',
     ].filter(Boolean), 8),
   }
@@ -47912,6 +47938,7 @@ export function createNovelWritingService(ctx: {
       foreshadowingConsistencyRadar?.overdue_count ? `超期伏笔：${foreshadowingConsistencyRadar.overdue_count}条` : '',
       foreshadowingConsistencyRadar?.active?.length ? `活跃伏笔清单：${foreshadowingConsistencyRadar.active.join('；')}` : '',
       foreshadowingConsistencyRadar?.overdue?.length ? `超期伏笔清单：${foreshadowingConsistencyRadar.overdue.join('；')}` : '',
+      foreshadowingConsistencyRadar?.density_warnings?.length ? `伏笔密度提醒：${foreshadowingConsistencyRadar.density_warnings.join('；')}` : '',
       foreshadowingConsistencyRadar?.guardrails?.length ? `一致性红线：${foreshadowingConsistencyRadar.guardrails.join('；')}` : '',
       foreshadowingConsistencyRadar ? JSON.stringify(foreshadowingConsistencyRadar, null, 2).slice(0, 2400) : '',
       '',

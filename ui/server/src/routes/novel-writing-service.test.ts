@@ -37078,6 +37078,57 @@ describe('chapter pre-draft brief', () => {
     expect(prompt).toContain('旧印章完整归属不能提前公开')
   })
 
+  test('carries oh-story foreshadowing density warnings into the next pre-draft brief and prose prompt', () => {
+    const foreshadowingStatus = Object.fromEntries(
+      Array.from({ length: 16 }, (_, index) => [
+        `第三卷暗线${index + 1}`,
+        {
+          status: 'active',
+          planted_chapter: 41 + index,
+          volume_no: 3,
+          note: `第三卷暗线${index + 1}仍待推进。`,
+        },
+      ]),
+    )
+    const project = {
+      title: '万古长夜',
+      reference_config: {
+        story_state: {
+          foreshadowing_status: foreshadowingStatus,
+        },
+      },
+    }
+    const contextPackage = {
+      chapter_target: {
+        chapter_no: 58,
+        title: '暗线过密',
+        summary: '李玄进入第三卷密集伏笔段。',
+        scene_cards: [],
+      },
+    }
+
+    const brief = buildChapterPreDraftBrief(project, contextPackage)
+    const context = mergeConfirmedPreDraftBriefIntoContext(contextPackage, {
+      ...brief,
+      confirmed_at: '2026-06-10T08:00:00.000Z',
+    })
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+    const prompt = service.buildParagraphProseContext(project, context, null, { chapter_no: 58, title: '暗线过密' })
+
+    expect(brief.foreshadowing_consistency_radar.active_count).toBe(16)
+    expect(brief.foreshadowing_consistency_radar.density_warnings.join('｜')).toContain('SC-FORESHADOW')
+    expect(brief.foreshadowing_consistency_radar.density_warnings.join('｜')).toContain('第3卷')
+    expect(brief.foreshadowing_consistency_radar.density_warnings.join('｜')).toContain('太密')
+    expect(context.chapter_target.foreshadowing_consistency_radar.density_warnings.join('｜')).toContain('16条')
+    expect(prompt).toContain('伏笔密度提醒')
+    expect(prompt).toContain('SC-FORESHADOW')
+    expect(prompt).toContain('第3卷活跃伏笔16条')
+  })
+
   test('injects story-state style fingerprint as a prose prompt handoff anchor', () => {
     const project = {
       title: '万古长夜',
