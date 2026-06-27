@@ -22491,6 +22491,14 @@ describe('chapter pre-draft brief', () => {
     expect(brief.prose_craft_contract.baimiao_sensory_rules.join('｜')).toContain('两到三种感官')
     expect(brief.prose_craft_contract.baimiao_sensory_rules.join('｜')).toContain('视觉/听觉/触觉/嗅觉/味觉')
     expect(brief.prose_craft_contract.baimiao_sensory_rules.join('｜')).toContain('五感必须服务情绪')
+    expect(brief.prose_craft_contract.transition_bridge_rules.join('｜')).toContain('场景切换与转场')
+    expect(brief.prose_craft_contract.transition_bridge_rules.join('｜')).toContain('相似物')
+    expect(brief.prose_craft_contract.transition_bridge_rules.join('｜')).toContain('相似五感')
+    expect(brief.prose_craft_contract.transition_bridge_rules.join('｜')).toContain('相似情绪')
+    expect(brief.prose_craft_contract.transition_bridge_rules.join('｜')).toContain('时间跳转')
+    expect(brief.prose_craft_contract.transition_bridge_rules.join('｜')).toContain('动作或物件衔接')
+    expect(brief.prose_craft_contract.transition_bridge_rules.join('｜')).toContain('空间跳转')
+    expect(brief.prose_craft_contract.transition_bridge_rules.join('｜')).toContain('声音或光影衔接')
     expect(brief.prose_craft_contract.rhythm_rules.join('｜')).toContain('一动一静')
     expect(brief.prose_craft_contract.object_number_rules.join('｜')).toContain('具体数字')
     expect(brief.prose_craft_contract.section_structure_rules.join('｜')).toContain('一个主事件')
@@ -22533,6 +22541,10 @@ describe('chapter pre-draft brief', () => {
     expect(prompt).toContain('五感')
     expect(prompt).toContain('两到三种感官')
     expect(prompt).toContain('服务情绪')
+    expect(prompt).toContain('场景切换与转场')
+    expect(prompt).toContain('相似物')
+    expect(prompt).toContain('动作或物件')
+    expect(prompt).toContain('声音或光影')
     expect(prompt).toContain('小节内部结构')
     expect(prompt).toContain('一个主事件')
     expect(prompt).toContain('3-5 个子事件')
@@ -22600,6 +22612,7 @@ describe('chapter pre-draft brief', () => {
     expect(brief.prose_craft_contract.then_what_rules.join('｜')).toContain('然后呢')
     expect(brief.prose_craft_contract.core_emotion_alignment_rules.join('｜')).toContain('核心情绪')
     expect(brief.prose_craft_contract.baimiao_sensory_rules.join('｜')).toContain('白描')
+    expect(brief.prose_craft_contract.transition_bridge_rules.join('｜')).toContain('场景切换与转场')
     expect(brief.prose_craft_contract.object_number_rules.join('｜')).toContain('具体数字')
     expect(brief.prose_craft_contract.section_structure_rules.join('｜')).toContain('一个主事件')
     expect(brief.prose_craft_contract.section_structure_rules.join('｜')).toContain('下一节开头快速接续')
@@ -22608,7 +22621,7 @@ describe('chapter pre-draft brief', () => {
     expect(brief.prose_craft_contract.concept_anchor_rules.join('｜')).toContain('新名词')
   })
 
-  test('preserves explicit camelCase prose craft subject-name rhythm indirect description three-camera then-what core emotion and baimiao sensory rules', () => {
+  test('preserves explicit camelCase prose craft subject-name rhythm indirect description three-camera then-what core emotion baimiao sensory and transition rules', () => {
     const project = {
       title: '雪夜反证',
       genre: '悬疑逆袭',
@@ -22623,6 +22636,7 @@ describe('chapter pre-draft brief', () => {
         thenWhatRules: ['自定义然后呢基点法：每段最后一个信息点必须引出下一动作、下一疑问或下一反应，不能写成死段。'],
         coreEmotionAlignmentRules: ['自定义核心情绪对齐：每个动作、物件、冲突和配角反应都必须服务复仇被认可的读者情绪。'],
         baimiaoSensoryRules: ['自定义白描五感：只保留最准确的动作名词和触觉/听觉锚点，所有感官都服务审判压迫感。'],
+        transitionBridgeRules: ['自定义转场：时间跳转用账本翻页或钥匙落掌承接，空间跳转用门缝光和脚步声带到新地点。'],
       },
       chapter_target: {
         chapter_no: 12,
@@ -22641,6 +22655,7 @@ describe('chapter pre-draft brief', () => {
     expect(brief.prose_craft_contract.then_what_rules).toEqual(['自定义然后呢基点法：每段最后一个信息点必须引出下一动作、下一疑问或下一反应，不能写成死段。'])
     expect(brief.prose_craft_contract.core_emotion_alignment_rules).toEqual(['自定义核心情绪对齐：每个动作、物件、冲突和配角反应都必须服务复仇被认可的读者情绪。'])
     expect(brief.prose_craft_contract.baimiao_sensory_rules).toEqual(['自定义白描五感：只保留最准确的动作名词和触觉/听觉锚点，所有感官都服务审判压迫感。'])
+    expect(brief.prose_craft_contract.transition_bridge_rules).toEqual(['自定义转场：时间跳转用账本翻页或钥匙落掌承接，空间跳转用门缝光和脚步声带到新地点。'])
   })
 
   test('adds an oh-story quality audit contract to pre-draft brief and prose prompt', () => {
@@ -49907,6 +49922,11 @@ describe('chapter context word target source guards', () => {
     expect(repairBlock).toContain('baimiao_sensory_rules')
     expect(repairBlock).toContain('白描')
     expect(repairBlock).toContain('五感必须服务情绪')
+    expect(repairBlock).toContain('transition_bridge_rules')
+    expect(repairBlock).toContain('场景切换与转场')
+    expect(repairBlock).toContain('时间跳转')
+    expect(repairBlock).toContain('动作或物件衔接')
+    expect(repairBlock).toContain('声音或光影衔接')
     expect(repairBlock).toContain('section_density_rules')
     expect(repairBlock).toContain('anti_padding_rules')
     expect(repairBlock).toContain('小节密度诊断')
@@ -54869,6 +54889,9 @@ describe('chapter context word target source guards', () => {
     expect(reviewPrompt).toContain('baimiao_sensory_rules')
     expect(reviewPrompt).toContain('白描')
     expect(reviewPrompt).toContain('五感')
+    expect(reviewPrompt).toContain('transition_bridge_rules')
+    expect(reviewPrompt).toContain('场景切换与转场')
+    expect(reviewPrompt).toContain('相似物')
     expect(revisionPrompt).toContain('prose_craft_checks')
     expect(revisionPrompt).toContain('正文工艺')
     expect(revisionPrompt).toContain('间接描写法')
@@ -54882,6 +54905,9 @@ describe('chapter context word target source guards', () => {
     expect(revisionPrompt).toContain('白描')
     expect(revisionPrompt).toContain('最少的字')
     expect(revisionPrompt).toContain('感官')
+    expect(revisionPrompt).toContain('场景切换')
+    expect(revisionPrompt).toContain('时间跳转')
+    expect(revisionPrompt).toContain('声音或光影')
     expect(shouldReviseBlock).toContain('prose_craft_checks')
     expect(reviewNormalizeBlock).toContain('prose_craft_checks')
     expect(reviewNormalizeBlock).toContain('reviewPayload?.prose_craft_checks')
