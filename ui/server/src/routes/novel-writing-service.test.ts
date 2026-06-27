@@ -21822,6 +21822,9 @@ describe('chapter pre-draft brief', () => {
     expect(brief.showdown_contract.trump_card_reserve_rules.join('｜')).toContain('2-3个未揭示的底牌')
     expect(brief.showdown_contract.trump_card_reserve_rules.join('｜')).toContain('每次只出1个')
     expect(brief.showdown_contract.trump_card_reserve_rules.join('｜')).toContain('新技能')
+    expect(brief.showdown_contract.invincible_protagonist_rules.join('｜')).toContain('主角登场时一点都不能拖拉')
+    expect(brief.showdown_contract.invincible_protagonist_rules.join('｜')).toContain('杀伐果断')
+    expect(brief.showdown_contract.invincible_protagonist_rules.join('｜')).toContain('战力前置无敌')
     expect(confirmedContext.chapter_target.showdown_contract.quality_checks.join('｜')).toContain('爽点到位')
     expect(prompt).toContain('【高潮对抗合同】')
     expect(prompt).toContain('执行 chapter_target.showdown_contract')
@@ -21834,6 +21837,8 @@ describe('chapter pre-draft brief', () => {
     expect(prompt).toContain('预判反制')
     expect(prompt).toContain('底牌管理')
     expect(prompt).toContain('未揭示底牌')
+    expect(prompt).toContain('无敌文主角')
+    expect(prompt).toContain('战力前置无敌')
     expect(prompt).toContain('showdown_checks')
     expect(prompt.indexOf('【高潮对抗合同】')).toBeLessThan(prompt.indexOf('【结构化上下文包】'))
   })
@@ -21913,7 +21918,34 @@ describe('chapter pre-draft brief', () => {
     expect(brief.showdown_contract.shock_chain_rules.join('｜')).toContain('不是统一的“倒吸一口凉气”')
     expect(brief.showdown_contract.counterplay_layers.join('｜')).toContain('反预判')
     expect(brief.showdown_contract.trump_card_reserve_rules.join('｜')).toContain('每次只出1个')
+    expect(brief.showdown_contract.invincible_protagonist_rules.join('｜')).toContain('主角登场时一点都不能拖拉')
     expect(brief.showdown_contract.revision_priorities.join('｜')).toContain('补爽点释放强度')
+  })
+
+  test('hydrates explicit showdown invincible protagonist rules from camel case input', () => {
+    const brief = buildChapterPreDraftBrief(
+      {
+        title: '审判台上的旧账',
+        genre: '都市逆袭打脸',
+        synopsis: '主角被旧账本构陷，在公开审判里放出底牌反制会长。',
+      },
+      {
+        chapter_target: {
+          chapter_no: 22,
+          title: '旧账反压',
+          summary: '反派在审判台公开旧账本，主角用第二本账册和证人链完成打脸。',
+          conflict: '会长铺好观众和长老席，逼主角当众认罪。',
+          showdown_contract: {
+            source: 'manual_showdown',
+            invincibleProtagonistRules: ['自定义：主角登场三句内完成压制。'],
+          },
+        },
+      },
+    )
+
+    expect(brief.showdown_contract.source).toBe('manual_showdown')
+    expect(brief.showdown_contract.invincible_protagonist_rules).toEqual(['自定义：主角登场三句内完成压制。'])
+    expect(brief.showdown_contract.payoff_release_rules.join('｜')).toContain('该爽不爽')
   })
 
   test('adds an oh-story bridge unit contract to pre-draft brief and prose prompt', () => {
@@ -49638,6 +49670,8 @@ describe('chapter context word target source guards', () => {
     expect(repairBlock).toContain('急 -> 缓 -> 急')
     expect(repairBlock).toContain('底牌管理')
     expect(repairBlock).toContain('每次只出1个')
+    expect(repairBlock).toContain('invincible_protagonist_rules')
+    expect(repairBlock).toContain('主角登场即杀伐果断')
   })
 
   test('auto-repairs unattended chapter blueprint with oh-story bridge unit contract', () => {
@@ -52931,12 +52965,15 @@ describe('chapter context word target source guards', () => {
     expect(reviewPrompt).toContain('三层破局')
     expect(reviewPrompt).toContain('预判反制')
     expect(reviewPrompt).toContain('反预判')
+    expect(reviewPrompt).toContain('无敌文主角不拖拉')
+    expect(reviewPrompt).toContain('主角登场即杀伐果断')
     expect(revisionPrompt).toContain('showdown_checks')
     expect(revisionPrompt).toContain('高潮对抗')
     expect(revisionPrompt).toContain('补爽点释放强度')
     expect(revisionPrompt).toContain('群众层/中间层/核心层')
     expect(revisionPrompt).toContain('反派出A')
     expect(revisionPrompt).toContain('预设B')
+    expect(revisionPrompt).toContain('不一击必杀时必须有明确理由')
     expect(revisionPrompt).toContain('急-缓-急')
     expect(shouldReviseBlock).toContain('showdown_checks')
     expect(reviewNormalizeBlock).toContain('showdown_checks')
