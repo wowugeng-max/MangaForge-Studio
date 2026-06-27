@@ -19735,8 +19735,11 @@ describe('chapter pre-draft brief', () => {
     expect(reviewPromptBlock).toContain('page_turn_question')
     expect(reviewPromptBlock).toContain('Hook上瘾模型')
     expect(reviewPromptBlock).toContain('触发 -> 行动 -> 奖励 -> 投入')
+    expect(reviewPromptBlock).toContain('留存四大支柱')
+    expect(reviewPromptBlock).toContain('升级、资源困境、目标、解密')
     expect(revisionPromptBlock).toContain('reader_retention_checks')
     expect(revisionPromptBlock).toContain('奖励随机性')
+    expect(revisionPromptBlock).toContain('留存四大支柱')
     expect(shouldReviseBlock).toContain('reader_retention_checks')
     expect(normalizedReviewBlock).toContain('reader_retention_checks')
     expect(normalizedReviewBlock).toContain('reviewPayload?.reader_retention_checks')
@@ -23136,6 +23139,10 @@ describe('chapter pre-draft brief', () => {
     expect(brief.reader_retention_brief.retention_double_engine.emotion_engine).toContain('超人开挂')
     expect(brief.reader_retention_brief.retention_double_engine.hunger_engine).toContain('阴影')
     expect(brief.reader_retention_brief.retention_double_engine.onion_layers).toContain('章节开头植入小问号')
+    expect(brief.reader_retention_brief.retention_pillars.upgrade).toContain('规则边界反制')
+    expect(brief.reader_retention_brief.retention_pillars.resource_pressure).toContain('张智必须阻止')
+    expect(brief.reader_retention_brief.retention_pillars.goal_stack).toContain('大目标 + 小目标 + 假目标')
+    expect(brief.reader_retention_brief.retention_pillars.mystery_unlock).toContain('阴影')
     expect(brief.reader_retention_brief.forbidden_cliches).toContain('只写环境氛围不推进目标')
   })
 
@@ -37801,6 +37808,12 @@ describe('chapter pre-draft brief', () => {
           emotionalReward: '压迫后给一次证据反杀的爽感。',
           shortDramaScene: '雨巷门槛内外对峙，烛火把旧影压成两半。',
           endingQuestion: '旧影回头后指向的禁库门牌是谁留下的。',
+          retentionPillars: {
+            upgrade: '李玄拿到禁库门牌权限。',
+            resourcePressure: '旧证缺页只能换一次开门机会。',
+            goalStack: '大目标 + 小目标 + 假目标：查禁库，先过雨巷门槛。',
+            mysteryUnlock: '旧影为什么只在门槛内回头。',
+          },
         },
         confirmed_at: '2026-06-09T10:00:00.000Z',
       },
@@ -37814,9 +37827,12 @@ describe('chapter pre-draft brief', () => {
 
     expect(context.chapter_target.reader_retention_brief.opening_hook).toContain('雨巷门槛')
     expect(context.chapter_target.reader_retention_brief.ending_question).toContain('禁库门牌')
+    expect(context.chapter_target.reader_retention_brief.retention_pillars.goal_stack).toContain('大目标 + 小目标 + 假目标')
     expect(context.chapter_target.serial_rhythm_brief.opening_hook_deadline).toContain('雨巷门槛')
     expect(context.chapter_target.serial_rhythm_brief.ending_hook_guardrail).toContain('禁库门牌')
     expect(prompt).toContain('执行 chapter_target.reader_retention_brief')
+    expect(prompt).toContain('留存四大支柱')
+    expect(prompt).toContain('升级、资源困境、目标、解密')
     expect(prompt).toContain('第一段直接落在雨巷门槛旧影回头')
     expect(prompt).toContain('旧影回头后指向的禁库门牌')
   })
@@ -48438,6 +48454,12 @@ describe('reader retention sync report', () => {
               hunger_engine: '门外人为什么知道李超的童年小名。',
               onion_layers: '章节开头植入小问号，章末卡住关键信息：旧学生证为什么写着李超的生日。',
             },
+            retention_pillars: {
+              upgrade: '他们挡住门外人，还意外拿到一张写着第零条规则碎片的旧学生证。',
+              resource_pressure: '门外人用童年小名逼李超回应。',
+              goal_stack: '大目标 + 小目标 + 假目标：追查广播源头，先盯住门缝里的影子。',
+              mystery_unlock: '旧学生证为什么写着李超的生日。',
+            },
           },
         },
       },
@@ -48455,6 +48477,33 @@ describe('reader retention sync report', () => {
     expect(report.missed).toHaveLength(0)
     expect(report.delivered.map((item: any) => item.key)).toContain('hook_addiction_model')
     expect(report.delivered.map((item: any) => item.key)).toContain('retention_double_engine')
+    expect(report.delivered.map((item: any) => item.key)).toContain('retention_pillars')
+  })
+
+  test('warns when retention four pillars are planned but not delivered', () => {
+    const report = buildReaderRetentionSyncReport(
+      { title: '超人的规则怪谈世界' },
+      { id: 18, chapter_no: 8, title: '四支柱测试' },
+      {
+        chapter_target: {
+          reader_retention_brief: {
+            opening_hook: '李超在门口听见广播喊出自己的童年小名。',
+            retention_pillars: {
+              upgrade: '宿舍小队拿到第零条规则碎片。',
+              resource_pressure: '门外人用童年小名逼李超回应。',
+              goal_stack: '大目标 + 小目标 + 假目标：追查广播源头，先盯住门缝里的影子。',
+              mystery_unlock: '旧学生证为什么写着李超的生日。',
+            },
+          },
+        },
+      },
+      '李超坐在床边想了很久。张智把窗帘拉上，大家决定明天再讨论。',
+    )
+
+    expect(report.status).toBe('warn')
+    expect(report.missed.map((item: any) => item.key)).toContain('retention_pillars')
+    expect(report.missed.find((item: any) => item.key === 'retention_pillars')?.label).toBe('留存四大支柱')
+    expect(report.next_actions.join('；')).toContain('升级、资源困境、目标、解密')
   })
 
   test('reads raw camelCase reader retention brief after chapter text is written', () => {

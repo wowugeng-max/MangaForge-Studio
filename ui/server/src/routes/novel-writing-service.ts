@@ -5401,6 +5401,46 @@ function buildReaderRetentionBrief(project: any, contextPackage: any, sceneBrief
   const readerPayoffs = sceneBriefs.map((item: any) => item.reader_payoff).filter(Boolean)
   const informationGaps = sceneBriefs.map((item: any) => item.information_gap).filter(Boolean)
   const reversals = sceneBriefs.map((item: any) => item.reversal).filter(Boolean)
+  const retentionPillars = {
+    upgrade: compactBriefText(firstDefined(
+      readerPayoffs.join('；'),
+      chapterTarget.upgrade_payoff,
+      chapterTarget.upgradePayoff,
+      chapterTarget.reader_payoff,
+      chapterTarget.payoff,
+      writingBible?.style_lock?.payoff_density,
+      retentionContract.upgrade,
+      retentionContract.retention_pillars?.upgrade,
+      retentionContract.retentionPillars?.upgrade,
+    )),
+    resource_pressure: compactBriefText(firstDefined(
+      chapterTarget.resource_pressure,
+      chapterTarget.resourcePressure,
+      firstScene.conflict,
+      chapterTarget.conflict,
+      informationGaps.join('；'),
+      retentionContract.resource_pressure,
+      retentionContract.resourcePressure,
+      retentionContract.retention_pillars?.resource_pressure,
+      retentionContract.retentionPillars?.resourcePressure,
+    )),
+    goal_stack: compactBriefText([
+      '大目标 + 小目标 + 假目标',
+      firstDefined(chapterTarget.summary, project?.synopsis),
+      firstDefined(chapterTarget.conflict, firstScene.purpose),
+      firstDefined(chapterTarget.ending_hook, lastScene.ending_hook_seed),
+    ].filter(Boolean).join('：')),
+    mystery_unlock: compactBriefText(firstDefined(
+      informationGaps.join('；'),
+      chapterTarget.information_gap,
+      chapterTarget.ending_hook,
+      lastScene.ending_hook_seed,
+      retentionContract.mystery_unlock,
+      retentionContract.mysteryUnlock,
+      retentionContract.retention_pillars?.mystery_unlock,
+      retentionContract.retentionPillars?.mysteryUnlock,
+    )),
+  }
   const retentionStrategy = firstDefined(
     writingBible?.commercial_positioning?.retention_strategy,
     writingBible?.retention_strategy,
@@ -5468,6 +5508,7 @@ function buildReaderRetentionBrief(project: any, contextPackage: any, sceneBrief
       ].filter(Boolean).join('；')),
       policy: '留存=情绪+饥饿：情绪负责快速代入和共鸣，饥饿负责用信息差植入问号。',
     },
+    retention_pillars: retentionPillars,
     hook_addiction_model: {
       trigger: compactBriefText(firstDefined(
         chapterTarget.hook_trigger,
@@ -5510,6 +5551,7 @@ function normalizeReaderRetentionBrief(value: any) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
   const retentionDoubleEngine = raw.retention_double_engine || raw.retentionDoubleEngine || {}
   const hookAddictionModel = raw.hook_addiction_model || raw.hookAddictionModel || {}
+  const retentionPillars = raw.retention_pillars || raw.retentionPillars || {}
   const normalized = {
     opening_hook: compactBriefText(raw.opening_hook || raw.openingHook),
     payoff_promise: compactBriefText(raw.payoff_promise || raw.payoffPromise),
@@ -5523,6 +5565,12 @@ function normalizeReaderRetentionBrief(value: any) {
       onion_layers: compactBriefText(retentionDoubleEngine.onion_layers || retentionDoubleEngine.onionLayers),
       policy: compactBriefText(retentionDoubleEngine.policy),
     },
+    retention_pillars: {
+      upgrade: compactBriefText(retentionPillars.upgrade || retentionPillars.growth || retentionPillars.level_up || retentionPillars.levelUp),
+      resource_pressure: compactBriefText(retentionPillars.resource_pressure || retentionPillars.resourcePressure || retentionPillars.resource_dilemma || retentionPillars.resourceDilemma),
+      goal_stack: compactBriefText(retentionPillars.goal_stack || retentionPillars.goalStack || retentionPillars.goals),
+      mystery_unlock: compactBriefText(retentionPillars.mystery_unlock || retentionPillars.mysteryUnlock || retentionPillars.decryption),
+    },
     hook_addiction_model: {
       trigger: compactBriefText(hookAddictionModel.trigger),
       action: compactBriefText(hookAddictionModel.action),
@@ -5534,8 +5582,9 @@ function normalizeReaderRetentionBrief(value: any) {
   }
   const hasNestedContent = Object.values(normalized.retention_double_engine).some(Boolean)
     || Object.values(normalized.hook_addiction_model).some(Boolean)
+    || Object.values(normalized.retention_pillars).some(Boolean)
   const hasContent = Object.entries(normalized)
-    .filter(([key]) => key !== 'retention_double_engine' && key !== 'hook_addiction_model')
+    .filter(([key]) => key !== 'retention_double_engine' && key !== 'hook_addiction_model' && key !== 'retention_pillars')
     .some(([, item]) => Array.isArray(item) ? item.length > 0 : Boolean(item))
   return hasContent || hasNestedContent ? normalized : null
 }
@@ -25147,6 +25196,42 @@ function normalizeRetentionDoubleEngineCheck(value: any, chapterText: string) {
   }
 }
 
+function normalizeRetentionPillarsCheck(value: any, chapterText: string) {
+  const raw = typeof value === 'string' ? { goal_stack: value } : (value || {})
+  const pillars = [
+    { step: 'upgrade', label: '升级', text: compactText(firstDefined(raw.upgrade, raw.growth, raw.level_up, raw.levelUp), 180) },
+    { step: 'resource_pressure', label: '资源困境', text: compactText(firstDefined(raw.resource_pressure, raw.resourcePressure, raw.resource_dilemma, raw.resourceDilemma), 180) },
+    { step: 'goal_stack', label: '目标', text: compactText(firstDefined(raw.goal_stack, raw.goalStack, raw.goals), 220) },
+    { step: 'mystery_unlock', label: '解密', text: compactText(firstDefined(raw.mystery_unlock, raw.mysteryUnlock, raw.decryption), 180) },
+  ].filter(item => Boolean(item.text))
+  if (!pillars.length) return null
+  const checked = pillars.map(item => {
+    const match = anchorMatchScore(item.text, chapterText)
+    return {
+      ...item,
+      score: match.score,
+      evidence: match.matched,
+      delivered: match.score >= 48,
+    }
+  })
+  const deliveredPillars = checked.filter(item => item.delivered)
+  const missedPillars = checked.filter(item => !item.delivered)
+  const requiredCount = Math.min(2, checked.length)
+  const delivered = deliveredPillars.length >= requiredCount
+  return {
+    key: 'retention_pillars',
+    label: '留存四大支柱',
+    text: '升级、资源困境、目标、解密',
+    match_scope: 'full',
+    score: checked.length ? Math.round((deliveredPillars.length / checked.length) * 100) : 0,
+    evidence: checked.flatMap(item => asArray(item.evidence)).slice(0, 12),
+    delivered,
+    steps: checked,
+    missed_steps: missedPillars.map(item => item.label),
+    missed_items: missedPillars.map(item => item.text || item.label),
+  }
+}
+
 export function buildReaderRetentionSyncReport(project: any, chapter: any, contextPackage: any, chapterText: string) {
   const retentionBrief = retentionBriefFromContext(contextPackage, chapter)
   const planned = [
@@ -25158,6 +25243,7 @@ export function buildReaderRetentionSyncReport(project: any, chapter: any, conte
     normalizeRetentionBeat('ending_question', '章末追读', retentionBrief.ending_question || retentionBrief.endingQuestion, 'tail'),
     normalizeHookAddictionModelCheck(retentionBrief.hook_addiction_model || retentionBrief.hookAddictionModel, chapterText),
     normalizeRetentionDoubleEngineCheck(retentionBrief.retention_double_engine || retentionBrief.retentionDoubleEngine, chapterText),
+    normalizeRetentionPillarsCheck(retentionBrief.retention_pillars || retentionBrief.retentionPillars, chapterText),
   ].filter(Boolean)
   const checked = planned.map(item => Object.prototype.hasOwnProperty.call(item, 'delivered') ? item : retentionBeatMatch(item, chapterText))
   const delivered = checked.filter(item => item.delivered)
@@ -25188,6 +25274,7 @@ export function buildReaderRetentionSyncReport(project: any, chapter: any, conte
           '下一次修订优先补足追读雷达 missed 项，尤其是前 300 字钩子和最后一幕追读问题。',
           '优先补Hook上瘾模型：按触发 -> 行动 -> 奖励 -> 投入重写，并强化奖励随机性，让收获不只兑现预期，还留下资源、关系、权限、排名或线索沉没成本。',
           '补足留存双引擎：情绪 + 饥饿必须同时落地；情绪要让读者快速代入，饥饿要用信息差植入问号，并按剥洋葱方式把关键信息卡到章末。',
+          '补足留存四大支柱：升级、资源困境、目标、解密至少两项必须在正文落地，避免只写氛围或说明。',
           '如果正文只是解释设定或铺氛围，改为现场危机、可视化冲突和明确读者回报。',
         ],
   }
@@ -48279,7 +48366,7 @@ export function createNovelWritingService(ctx: {
       '2A+. 执行 scene_cards.dialogue_goals、scene_cards.style_directives、scene_cards.benchmark_recall_directives、scene_cards.concept_anchor_rules 和 scene_cards.prose_craft_directives：对白目标必须变成角色差异化对话和潜台词，文风/对标召回只学习节奏与句式呼吸，新名词/新设定首次出现必须用动作反应、对话半句或物理后果建立当下作用锚点，不得写整段来历、原理或等级说明。',
       '2A+. 如果存在 chapter_target.previous_handoff 或 continuity.previous_chapter，开篇前 300 字必须承接上一章最后一幕或章末钩子，先处理连续危机、角色反应和期待欠账，再展开新的场景信息。',
       '2A++. 执行 chapter_target.delivery_risk_carry_over：上一章交稿后残留的吸引力、追读、创新、故事力、剧情线、强场面或可读性风险，必须在本章变成可见修复动作；尤其优先级指向开篇或章末时，必须在前 300 字或最后 300 字落地。',
-      '2B. 执行 chapter_target.reader_retention_brief：开篇钩子必须在前 300 字落地；爽点承诺、信息缺口、情绪回报和短剧化场面必须转成可见行动；retention_double_engine 必须按留存=情绪+饥饿落地，情绪让读者快速代入，饥饿用信息差植入问号并按剥洋葱把关键信息卡到章末；hook_addiction_model 必须按触发 -> 行动 -> 奖励 -> 投入落地，并用奖励随机性给出出乎意料的额外收获或沉没投入；章末追读问题必须压到最后一幕。',
+      '2B. 执行 chapter_target.reader_retention_brief：开篇钩子必须在前 300 字落地；爽点承诺、信息缺口、情绪回报和短剧化场面必须转成可见行动；retention_double_engine 必须按留存=情绪+饥饿落地，情绪让读者快速代入，饥饿用信息差植入问号并按剥洋葱把关键信息卡到章末；retention_pillars 必须按留存四大支柱落地，升级、资源困境、目标、解密至少两项要转成正文证据；hook_addiction_model 必须按触发 -> 行动 -> 奖励 -> 投入落地，并用奖励随机性给出出乎意料的额外收获或沉没投入；章末追读问题必须压到最后一幕。',
       '2B+. 执行 chapter_target.reader_expectation_ledger：must_deliver 是本章必须还给读者的期待账，必须写成可见事件、冲突结果、情绪回报或章末钩子；keep_alive 可以保留但不能遗忘或矛盾改写。',
       '2B++. 执行 reader_expectation_debt_context：must_carry 来自上一章或最近章节的期待欠账，本章必须给可见推进；keep_alive 是继续悬念，必须保持存在感，不得被正文遗忘、反向改写或突然换线。',
       '2C. 执行 chapter_target.innovation_brief：本章必须有可见的创新执行点；把 chapter_angle 写成选择、规则、机制、反差或场面，不得写成普通套路章；ip_adaptation_hooks 要尽量落成可视化场面。',
@@ -49766,8 +49853,8 @@ export function createNovelWritingService(ctx: {
     '17++. chapter_benchmark_checks 每项包含 key,label,status,benchmark_dimension,expected_method,delivered_evidence,originality_guard,fix,remaining_risk；title_uniqueness_checks 每项包含 key,label,status,old_title,new_title,outline_title_synced,file_name_synced,chapter_title_line_synced,evidence,remaining_risk；blueprint_consumption_checks 每项包含 key,label,status,blueprint_field,expected,delivered_evidence,missing_gap,fix,remaining_risk；word_count_checks 每项包含 key,label,status,current_count,target_count,min_required_count,evidence,remaining_risk。',
     '17C. 如果 chapter_target.core_contract_radar.periodic_drift_check.due=true，必须执行十章卖点复核：回答“当初吸引读者的卖点还在吗”，检查核心吸引元素是否被稀释或替换；缺失时 issues 输出 key=ten_chapter_selling_point 或在 fix/revision_directives 中明确 ten_chapter_selling_point，并给出补核心卖点、能力使用、规则限制、读者回报或章末新期待的修法。',
     '17D. 如果 chapter_target.core_contract_radar.theme_unity_rules 存在，必须执行主题统一检查：随机翻开一章，情绪是否仍指向全书核心；升级/复仇/寻宝/日常等小情绪是否服从大情绪；情绪散乱、多头并行或旁枝情绪线稀释核心时，必须在 issues 或 core_contract_checks 中输出 key=theme_unity_rules。',
-    '17A. 是否兑现 chapter_target.reader_retention_brief：检查开篇钩子、爽点承诺、信息缺口、情绪回报、短剧化场面、章末追读；如果存在 retention_double_engine，必须按留存双引擎检查情绪 + 饥饿是否同时落地，情绪是否快速代入，饥饿是否用信息差植入问号并剥洋葱卡住关键信息；如果存在 hook_addiction_model，必须按 Hook上瘾模型检查触发 -> 行动 -> 奖励 -> 投入，并确认奖励随机性是否给出出乎意料的额外收获或沉没投入；必须输出 reader_retention_checks。',
-    '17B. reader_retention_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),retention_engine,emotional_payoff,information_hunger,page_turn_question,evidence,fix,remaining_risk；缺前300字钩子、缺正文可见回报、缺信息缺口、章尾无追读、留存双引擎缺情绪或饥饿、Hook上瘾模型缺奖励随机性或投入沉没成本时必须给出 S1/S2 finding，category=structure 或 platform。',
+    '17A. 是否兑现 chapter_target.reader_retention_brief：检查开篇钩子、爽点承诺、信息缺口、情绪回报、短剧化场面、章末追读；如果存在 retention_double_engine，必须按留存双引擎检查情绪 + 饥饿是否同时落地，情绪是否快速代入，饥饿是否用信息差植入问号并剥洋葱卡住关键信息；如果存在 retention_pillars，必须按留存四大支柱检查升级、资源困境、目标、解密是否至少两项落成正文证据；如果存在 hook_addiction_model，必须按 Hook上瘾模型检查触发 -> 行动 -> 奖励 -> 投入，并确认奖励随机性是否给出出乎意料的额外收获或沉没投入；必须输出 reader_retention_checks。',
+    '17B. reader_retention_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),retention_engine,retention_pillars,emotional_payoff,information_hunger,page_turn_question,evidence,fix,remaining_risk；缺前300字钩子、缺正文可见回报、缺信息缺口、章尾无追读、留存四大支柱不足两项、留存双引擎缺情绪或饥饿、Hook上瘾模型缺奖励随机性或投入沉没成本时必须给出 S1/S2 finding，category=structure 或 platform。',
     '18. 是否兑现 chapter_target.target_reader_contract：按 oh-story 自嗨判定法检查“我这书写给谁看、目标读者想看什么、本书本章给了什么”三问是否都有正文证据；同时执行情绪缺口分析，检查核心痛苦、深层情结、高频情绪关键词和未满足需求是否被写成角色当下压力与读者回报；必须输出 target_reader_checks。',
     '19. target_reader_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),target_reader_profile,reader_desire,emotion_gap,chapter_hit,platform_taste,evidence,fix,remaining_risk；目标读者画像空泛、读者渴望和本章卖点错位、情绪缺口缺核心痛苦/深层情结/高频情绪关键词/未满足需求、平台口味错位或只展示作者自嗨设定时必须给出 S1/S2 finding，category=platform 或 structure。',
     '20. 是否兑现 chapter_target.genre_positioning_contract：按 oh-story 题材定位口径检查题材标签、读者心理、核心梗、类型公式、金手指贴合、必备场景、微创新边界、70/20/10元素法则、五种微创新手法、平台适配、拉长板而非补短板、题材长板和书名简介内容三位一体；必须输出 genre_positioning_checks。',
@@ -49865,7 +49952,7 @@ export function createNovelWritingService(ctx: {
     '如果存在 chapter_target.chapter_handoff_contract、batch_preflight.chapter_handoff_contract、previous_handoff、opening_obligations、must_deliver、keep_alive 或 overdue，必须输出 chapter_handoff_checks；不能只写“承接自然”，必须用正文证据逐项确认章首承接、上一章待处理、期待债、逾期项和章末交接是否闭环。',
     '如果存在 chapter_target.platform_rubric，必须输出 rubric、rubric_source、platform_checks；rubric_source 优先取 chapter_target.platform_rubric.source。',
     '如果存在 chapter_target.content_rubric，必须输出 content_rubric_source、content_rubric_checks；content_rubric_source 优先取 chapter_target.content_rubric.source。',
-    '如果存在 chapter_target.reader_retention_brief，必须输出 reader_retention_checks；不能只用“追读还行/不行”一句话带过，必须明确留存双引擎的情绪 + 饥饿、信息差植入问号、剥洋葱卡关键信息，以及 Hook上瘾模型的触发 -> 行动 -> 奖励 -> 投入和奖励随机性是否落地。',
+    '如果存在 chapter_target.reader_retention_brief，必须输出 reader_retention_checks；不能只用“追读还行/不行”一句话带过，必须明确留存四大支柱的升级、资源困境、目标、解密，留存双引擎的情绪 + 饥饿、信息差植入问号、剥洋葱卡关键信息，以及 Hook上瘾模型的触发 -> 行动 -> 奖励 -> 投入和奖励随机性是否落地。',
     '如果存在 chapter_target.target_reader_contract，必须输出 target_reader_checks；不能只用“读者会喜欢/不喜欢”一句话带过，必须明确目标读者画像、读者欲望、情绪缺口、核心痛苦、深层情结、高频情绪关键词、未满足需求和本章可感知回报是否都有正文证据。',
     '如果存在 chapter_target.genre_positioning_contract，必须输出 genre_positioning_checks；不能只用“题材清楚/不清楚”一句话带过。',
     '如果存在 chapter_target.female_audience_contract，必须输出 female_audience_checks；不能只用“女频感还行/不行”一句话带过。',
@@ -49960,7 +50047,7 @@ export function createNovelWritingService(ctx: {
     '10. 如果自检结果包含 platform_checks，必须优先修复 status=fail/warn 的平台不匹配项；按 label/evidence/fix 找到开篇、节奏、设定释放、回报密度或章末拉力缺口，修到正文可见证据里。',
     '11. 如果自检结果包含 content_rubric_checks，必须优先修复 status=fail/warn 的内容基准缺口；按 label/evidence/fix 补核心卖点、冲突推进、剧情循环反馈、角色动机、章末期待或自然文字证据。',
     '11B. 如果自检结果包含 factual_checks，必须优先处理 status=fail/warn 的外部事实查证缺口；按 claim 和 verification_status 降级或删除未查证断言，把真实世界细节改成架空可控设定、角色正在核验的疑问，或只保留上下文已有证据支持的事实。',
-    '11A. 如果自检结果包含 reader_retention_checks，必须优先修复 status=fail/warn 的追读雷达缺口；按 key/label/evidence/fix 补前300字钩子、可见爽点、信息缺口、章末追读、留存双引擎的情绪 + 饥饿，以及 Hook上瘾模型的触发 -> 行动 -> 奖励 -> 投入。饥饿缺口必须用信息差植入问号并按剥洋葱把关键信息卡到章末；奖励缺口必须补奖励随机性：在预期回报之外给出出乎意料的额外收获、线索、权限、关系或地位变化，并形成沉没投入。',
+    '11A. 如果自检结果包含 reader_retention_checks，必须优先修复 status=fail/warn 的追读雷达缺口；按 key/label/evidence/fix 补前300字钩子、可见爽点、信息缺口、章末追读、留存四大支柱（升级、资源困境、目标、解密）、留存双引擎的情绪 + 饥饿，以及 Hook上瘾模型的触发 -> 行动 -> 奖励 -> 投入。四支柱缺口至少补两项：升级写成实力/地位/资源变化，资源困境写成当前资源压力，目标写成大目标 + 小目标 + 假目标，解密写成冰山一角到层层解密；饥饿缺口必须用信息差植入问号并按剥洋葱把关键信息卡到章末；奖励缺口必须补奖励随机性：在预期回报之外给出出乎意料的额外收获、线索、权限、关系或地位变化，并形成沉没投入。',
     '12. 如果自检结果包含 target_reader_checks，必须优先修复 status=fail/warn 的目标读者缺口；按 key/label/evidence/fix 补清读者画像、读者想看内容、情绪缺口、本章命中点、平台口味和可见读者回报。情绪缺口缺口必须先补核心痛苦、深层情结、高频情绪关键词和未满足需求，再把它们写成冲突压力、角色选择、即时反馈或尊严/安全感/掌控感补偿。',
     '13. 如果自检结果包含 genre_positioning_checks，必须优先修复 status=fail/warn 的题材定位缺口；按 key/label/evidence/fix 校准题材标签、核心梗、类型公式、金手指贴合、必备场景、微创新边界、70/20/10元素法则、五种微创新手法、长板聚焦和书名简介内容三位一体，修掉挂羊头卖狗肉；微创新修复必须按70/20/10元素法则稳住模板底座，并从精炼法、升级法、加料法、反套路法、组合法中选一种服务当前核心梗；拉长题材长板而非补短板，删除会稀释核心卖点的支线，把同一卖点扩成至少 3 个角度的正文证据。',
     '13A. 如果自检结果包含 female_audience_checks，必须优先修复 status=fail/warn 的女频长篇缺口；按 key/label/evidence/fix 补安全感锚点，把女主被动改成女主自己做决定、自己推进，把感情升级踩到事业/成长节点上，虐后补反转或糖，控制连续虐戏剂量，并校准平台安全感密度和货板一致。',
