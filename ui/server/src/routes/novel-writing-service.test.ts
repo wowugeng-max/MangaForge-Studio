@@ -37015,6 +37015,69 @@ describe('chapter pre-draft brief', () => {
     expect(prompt).toContain('待处理线索：第七层门影是谁')
   })
 
+  test('carries oh-story foreshadowing consistency radar into the next pre-draft brief and prose prompt', () => {
+    const project = {
+      title: '万古长夜',
+      reference_config: {
+        story_state: {
+          foreshadowing_status: {
+            旧印章完整归属: {
+              status: 'active',
+              planted_chapter: 1,
+              last_touched_chapter: 20,
+              planned_payoff_chapter: 60,
+              note: '旧印章完整归属不能提前公开，只能先验证半枚旧印纹。',
+            },
+            第七层门影是谁: {
+              status: 'active',
+              planted_chapter: 50,
+              last_touched_chapter: 50,
+              note: '第51章只推进身份轮廓。',
+            },
+            已回收旧门牌: {
+              status: 'paid',
+              planted_chapter: 12,
+              payoff_chapter: 18,
+              note: '已经回收，不再作为债务。',
+            },
+          },
+        },
+      },
+    }
+    const contextPackage = {
+      chapter_target: {
+        chapter_no: 52,
+        title: '旧印回声',
+        summary: '李玄继续验证旧印章和第七层门影。',
+        scene_cards: [],
+      },
+    }
+
+    const brief = buildChapterPreDraftBrief(project, contextPackage)
+    const context = mergeConfirmedPreDraftBriefIntoContext(contextPackage, {
+      ...brief,
+      confirmed_at: '2026-06-10T08:00:00.000Z',
+    })
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+    const prompt = service.buildParagraphProseContext(project, context, null, { chapter_no: 52, title: '旧印回声' })
+
+    expect(brief.foreshadowing_consistency_radar.overdue_count).toBe(1)
+    expect(brief.foreshadowing_consistency_radar.overdue.join('｜')).toContain('旧印章完整归属')
+    expect(brief.foreshadowing_consistency_radar.overdue.join('｜')).toContain('已延迟51章')
+    expect(brief.foreshadowing_consistency_radar.active.join('｜')).toContain('第七层门影是谁')
+    expect(brief.foreshadowing_consistency_radar.active.join('｜')).not.toContain('已回收旧门牌')
+    expect(context.chapter_target.foreshadowing_consistency_radar.overdue_count).toBe(1)
+    expect(prompt).toContain('【伏笔一致性雷达】')
+    expect(prompt).toContain('超期伏笔')
+    expect(prompt).toContain('旧印章完整归属')
+    expect(prompt).toContain('计划回收：第60章')
+    expect(prompt).toContain('旧印章完整归属不能提前公开')
+  })
+
   test('injects story-state style fingerprint as a prose prompt handoff anchor', () => {
     const project = {
       title: '万古长夜',

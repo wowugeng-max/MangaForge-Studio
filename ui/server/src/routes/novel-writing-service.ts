@@ -18309,6 +18309,114 @@ function normalizeDailyContextSnapshot(value: any = {}) {
   }
 }
 
+function normalizeForeshadowingConsistencyRadar(value: any = {}, targetChapterNo = 0) {
+  const raw = value?.foreshadowing_consistency_radar
+    || value?.foreshadowingConsistencyRadar
+    || value?.foreshadowing_debt_context
+    || value?.foreshadowingDebtContext
+    || value
+    || {}
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const targetNo = Number(targetChapterNo || raw.target_chapter_no || raw.targetChapterNo || raw.chapter_no || raw.chapterNo || 0)
+  const textItem = (item: any) => compactBriefText(item?.text || item?.summary || item?.detail || item?.name || item)
+  const directActive = uniqueBriefStrings(asArray(raw.active || raw.active_items || raw.activeItems)
+    .map(textItem)
+    .filter(Boolean), 12)
+  const directOverdue = uniqueBriefStrings(asArray(raw.overdue || raw.overdue_items || raw.overdueItems)
+    .map(textItem)
+    .filter(Boolean), 12)
+  const hasDirectLists = directActive.length || directOverdue.length
+  const statusSource = raw.foreshadowing_status
+    || raw.foreshadowingStatus
+    || raw.items
+    || raw.foreshadowing
+    || raw.foreshadowing_items
+    || raw.foreshadowingItems
+    || (!hasDirectLists ? raw : null)
+  const statusRows = Array.isArray(statusSource)
+    ? statusSource.map((item: any) => ['', item])
+    : statusSource && typeof statusSource === 'object'
+      ? Object.entries(statusSource)
+      : []
+  const payoffRows = asArray(raw.payoff_queue || raw.payoffQueue)
+    .map((item: any, index: number) => [`payoff_queue_${index + 1}`, typeof item === 'object' ? item : { name: item, status: 'active' }])
+  const entries = [...statusRows, ...payoffRows]
+    .map(([key, item]: any) => {
+      const source = item && typeof item === 'object' && !Array.isArray(item) ? item : { note: item }
+      const name = compactBriefText(source.name || source.title || source.key || key)
+      if (!name || ['source', 'active_count', 'activeCount', 'overdue_count', 'overdueCount'].includes(name)) return null
+      const status = compactBriefText(source.status || source.state || source.payoff_status || source.payoffStatus || source.resolution_status || source.resolutionStatus, 'active')
+      const normalizedStatus = status.toLowerCase()
+      const closed = ['paid', 'done', 'resolved', 'closed', 'complete', 'completed', 'settled'].includes(normalizedStatus)
+        || /^(已回收|已兑现|完成|关闭)$/.test(status)
+      if (closed) return null
+      const plantedChapter = Number(
+        source.planted_chapter
+        ?? source.plantedChapter
+        ?? source.first_chapter_no
+        ?? source.firstChapterNo
+        ?? source.chapter_no
+        ?? source.chapterNo
+        ?? 0,
+      )
+      const lastTouchedChapter = Number(
+        source.last_touched_chapter
+        ?? source.lastTouchedChapter
+        ?? source.last_update_chapter
+        ?? source.lastUpdateChapter
+        ?? source.last_updated_chapter
+        ?? source.lastUpdatedChapter
+        ?? 0,
+      )
+      const plannedPayoffChapter = Number(
+        source.planned_payoff_chapter
+        ?? source.plannedPayoffChapter
+        ?? source.payoff_chapter
+        ?? source.payoffChapter
+        ?? source.target_payoff_chapter
+        ?? source.targetPayoffChapter
+        ?? 0,
+      )
+      const age = Number(source.age ?? source.chapter_age ?? source.chapterAge ?? 0)
+        || (targetNo && plantedChapter ? Math.max(0, targetNo - plantedChapter) : 0)
+      const note = compactBriefText(source.note || source.notes || source.summary || source.detail || source.evidence || source.source_excerpt || source.sourceExcerpt)
+      const overdue = Boolean(source.overdue ?? source.is_overdue ?? source.isOverdue)
+        || (age > 50 && !closed)
+      const text = [
+        name,
+        status ? `状态：${status}` : '',
+        age ? `已延迟${age}章` : '',
+        plantedChapter ? `埋设：第${plantedChapter}章` : '',
+        lastTouchedChapter ? `最近触碰：第${lastTouchedChapter}章` : '',
+        plannedPayoffChapter ? `计划回收：第${plannedPayoffChapter}章` : '',
+        note,
+      ].filter(Boolean).join('；')
+      return { name, text, overdue }
+    })
+    .filter(Boolean)
+  const active = uniqueBriefStrings([
+    ...directActive,
+    ...entries.map((item: any) => item.text),
+  ], 12)
+  const overdue = uniqueBriefStrings([
+    ...directOverdue,
+    ...entries.filter((item: any) => item.overdue).map((item: any) => item.text),
+  ], 12)
+  if (!active.length && !overdue.length) return null
+  return {
+    source: compactBriefText(raw.source, 'oh_story_consistency_checker_foreshadowing_v1'),
+    active,
+    active_count: Number(raw.active_count ?? raw.activeCount ?? active.length) || active.length,
+    overdue,
+    overdue_count: Number(raw.overdue_count ?? raw.overdueCount ?? overdue.length) || overdue.length,
+    guardrails: uniqueBriefStrings([
+      ...asArray(raw.guardrails || raw.guardrail || raw.rules).map(textItem),
+      '超过50章未回收的伏笔按 S4 关注，下一章要推进、保持存在感或明确暂缓理由。',
+      '伏笔回收不得和后续新增设定、角色知识边界、时间线或物品归属冲突。',
+    ].filter(Boolean), 8),
+  }
+}
+
 export function buildMergedLayeredMemoryContext(prev: any, delta: any, chapter: any = {}) {
   const previous = normalizeLayeredMemoryContext(prev)
   const next = normalizeLayeredMemoryContext(delta)
@@ -43234,6 +43342,46 @@ export function buildChapterPreDraftBrief(project: any, contextPackage: any) {
     || project?.story_state?.dailyContextSnapshot
     || project?.storyState?.dailyContextSnapshot,
   )
+  const foreshadowingConsistencyRadar = normalizeForeshadowingConsistencyRadar(
+    contextPackage?.chapter_target?.foreshadowing_consistency_radar
+    || contextPackage?.chapter_target?.foreshadowingConsistencyRadar
+    || contextPackage?.pre_draft_brief?.foreshadowing_consistency_radar
+    || contextPackage?.pre_draft_brief?.foreshadowingConsistencyRadar
+    || contextPackage?.preDraftBrief?.foreshadowing_consistency_radar
+    || contextPackage?.preDraftBrief?.foreshadowingConsistencyRadar
+    || contextPackage?.foreshadowing_consistency_radar
+    || contextPackage?.foreshadowingConsistencyRadar
+    || contextPackage?.story_state?.foreshadowing_consistency_radar
+    || contextPackage?.story_state?.foreshadowingConsistencyRadar
+    || contextPackage?.storyState?.foreshadowingConsistencyRadar
+    || project?.reference_config?.story_state?.foreshadowing_consistency_radar
+    || project?.reference_config?.story_state?.foreshadowingConsistencyRadar
+    || project?.reference_config?.storyState?.foreshadowingConsistencyRadar
+    || project?.story_state?.foreshadowing_consistency_radar
+    || project?.story_state?.foreshadowingConsistencyRadar
+    || project?.storyState?.foreshadowingConsistencyRadar
+    || {
+      foreshadowing_status: contextPackage?.story_state?.foreshadowing_status
+        || contextPackage?.story_state?.foreshadowingStatus
+        || contextPackage?.storyState?.foreshadowingStatus
+        || project?.reference_config?.story_state?.foreshadowing_status
+        || project?.reference_config?.story_state?.foreshadowingStatus
+        || project?.reference_config?.storyState?.foreshadowingStatus
+        || project?.story_state?.foreshadowing_status
+        || project?.story_state?.foreshadowingStatus
+        || project?.storyState?.foreshadowingStatus,
+      payoff_queue: contextPackage?.story_state?.payoff_queue
+        || contextPackage?.story_state?.payoffQueue
+        || contextPackage?.storyState?.payoffQueue
+        || project?.reference_config?.story_state?.payoff_queue
+        || project?.reference_config?.story_state?.payoffQueue
+        || project?.reference_config?.storyState?.payoffQueue
+        || project?.story_state?.payoff_queue
+        || project?.story_state?.payoffQueue
+        || project?.storyState?.payoffQueue,
+    },
+    Number(chapterTarget.chapter_no || 0),
+  )
   const nextBatchBrief = normalizeNextBatchBrief(nextBatchBriefFromContext(contextPackage), Number(chapterTarget.chapter_no || 0))
   const storyUnitContext = storyUnitContextFromContext(contextPackage, { chapter_no: chapterTarget.chapter_no })
   const readerRetentionBrief = buildReaderRetentionBrief(project, contextPackage, sceneBriefs)
@@ -43523,6 +43671,7 @@ export function buildChapterPreDraftBrief(project: any, contextPackage: any) {
     layered_memory_context: layeredMemoryContext,
     progress_summary: progressSummary,
     daily_context_snapshot: dailyContextSnapshot,
+    foreshadowing_consistency_radar: foreshadowingConsistencyRadar,
     next_batch_brief: nextBatchBrief,
     story_unit_context: storyUnitContext,
     chapter_blueprint: chapterBlueprint,
@@ -43595,6 +43744,26 @@ export function mergeConfirmedPreDraftBriefIntoContext(contextPackage: any, preD
     || (contextPackage || {}).storyState?.dailyContextSnapshot,
   )
   const targetChapterNo = Number((contextPackage || {}).chapter_target?.chapter_no || preDraftBrief.chapter_no || 0)
+  const foreshadowingConsistencyRadar = normalizeForeshadowingConsistencyRadar(
+    preDraftBrief.foreshadowing_consistency_radar
+    || preDraftBrief.foreshadowingConsistencyRadar
+    || (contextPackage || {}).chapter_target?.foreshadowing_consistency_radar
+    || (contextPackage || {}).chapter_target?.foreshadowingConsistencyRadar
+    || (contextPackage || {}).foreshadowing_consistency_radar
+    || (contextPackage || {}).foreshadowingConsistencyRadar
+    || (contextPackage || {}).story_state?.foreshadowing_consistency_radar
+    || (contextPackage || {}).story_state?.foreshadowingConsistencyRadar
+    || (contextPackage || {}).storyState?.foreshadowingConsistencyRadar
+    || {
+      foreshadowing_status: (contextPackage || {}).story_state?.foreshadowing_status
+        || (contextPackage || {}).story_state?.foreshadowingStatus
+        || (contextPackage || {}).storyState?.foreshadowingStatus,
+      payoff_queue: (contextPackage || {}).story_state?.payoff_queue
+        || (contextPackage || {}).story_state?.payoffQueue
+        || (contextPackage || {}).storyState?.payoffQueue,
+    },
+    targetChapterNo,
+  )
   const nextBatchBrief = normalizeNextBatchBrief(nextBatchBriefFromContext(contextPackage, preDraftBrief), targetChapterNo)
   const storyUnitContext = storyUnitContextFromContext({
     ...(contextPackage || {}),
@@ -44111,6 +44280,7 @@ export function mergeConfirmedPreDraftBriefIntoContext(contextPackage: any, preD
     layered_memory_context: layeredMemoryContext || null,
     progress_summary: progressSummary || null,
     daily_context_snapshot: dailyContextSnapshot || null,
+    foreshadowing_consistency_radar: foreshadowingConsistencyRadar || null,
     next_batch_brief: nextBatchBrief || null,
     story_unit_context: storyUnitContext || null,
     scene_briefs: sceneBriefs,
@@ -44162,6 +44332,7 @@ export function mergeConfirmedPreDraftBriefIntoContext(contextPackage: any, preD
     layered_memory_context: layeredMemoryContext || (contextPackage || {}).layered_memory_context || null,
     progress_summary: progressSummary || (contextPackage || {}).progress_summary || null,
     daily_context_snapshot: dailyContextSnapshot || (contextPackage || {}).daily_context_snapshot || null,
+    foreshadowing_consistency_radar: foreshadowingConsistencyRadar || (contextPackage || {}).foreshadowing_consistency_radar || null,
     next_batch_brief: nextBatchBrief || (contextPackage || {}).next_batch_brief || null,
     story_unit_context: storyUnitContext || (contextPackage || {}).story_unit_context || null,
     reader_drop_risk_brief: readerDropRiskBrief || (contextPackage || {}).reader_drop_risk_brief || (contextPackage || {}).readerDropRiskBrief || null,
@@ -44251,6 +44422,7 @@ export function mergeConfirmedPreDraftBriefIntoContext(contextPackage: any, preD
       layered_memory_context: layeredMemoryContext || (contextPackage || {}).chapter_target?.layered_memory_context || null,
       progress_summary: progressSummary || (contextPackage || {}).chapter_target?.progress_summary || null,
       daily_context_snapshot: dailyContextSnapshot || (contextPackage || {}).chapter_target?.daily_context_snapshot || null,
+      foreshadowing_consistency_radar: foreshadowingConsistencyRadar || (contextPackage || {}).chapter_target?.foreshadowing_consistency_radar || null,
       next_batch_brief: nextBatchBrief || (contextPackage || {}).chapter_target?.next_batch_brief || null,
       story_unit_context: storyUnitContext || (contextPackage || {}).chapter_target?.story_unit_context || null,
       chapter_blueprint: chapterBlueprint,
@@ -46697,6 +46869,44 @@ export function createNovelWritingService(ctx: {
       || project?.story_state?.dailyContextSnapshot
       || project?.storyState?.dailyContextSnapshot,
     )
+    const foreshadowingConsistencyRadar = normalizeForeshadowingConsistencyRadar(
+      contextPackage?.chapter_target?.foreshadowing_consistency_radar
+      || contextPackage?.chapter_target?.foreshadowingConsistencyRadar
+      || preDraftBrief.foreshadowing_consistency_radar
+      || preDraftBrief.foreshadowingConsistencyRadar
+      || contextPackage?.foreshadowing_consistency_radar
+      || contextPackage?.foreshadowingConsistencyRadar
+      || contextPackage?.story_state?.foreshadowing_consistency_radar
+      || contextPackage?.story_state?.foreshadowingConsistencyRadar
+      || contextPackage?.storyState?.foreshadowingConsistencyRadar
+      || project?.reference_config?.story_state?.foreshadowing_consistency_radar
+      || project?.reference_config?.story_state?.foreshadowingConsistencyRadar
+      || project?.reference_config?.storyState?.foreshadowingConsistencyRadar
+      || project?.story_state?.foreshadowing_consistency_radar
+      || project?.story_state?.foreshadowingConsistencyRadar
+      || project?.storyState?.foreshadowingConsistencyRadar
+      || {
+        foreshadowing_status: contextPackage?.story_state?.foreshadowing_status
+          || contextPackage?.story_state?.foreshadowingStatus
+          || contextPackage?.storyState?.foreshadowingStatus
+          || project?.reference_config?.story_state?.foreshadowing_status
+          || project?.reference_config?.story_state?.foreshadowingStatus
+          || project?.reference_config?.storyState?.foreshadowingStatus
+          || project?.story_state?.foreshadowing_status
+          || project?.story_state?.foreshadowingStatus
+          || project?.storyState?.foreshadowingStatus,
+        payoff_queue: contextPackage?.story_state?.payoff_queue
+          || contextPackage?.story_state?.payoffQueue
+          || contextPackage?.storyState?.payoffQueue
+          || project?.reference_config?.story_state?.payoff_queue
+          || project?.reference_config?.story_state?.payoffQueue
+          || project?.reference_config?.storyState?.payoffQueue
+          || project?.story_state?.payoff_queue
+          || project?.story_state?.payoffQueue
+          || project?.storyState?.payoffQueue,
+      },
+      Number(chapterDraft?.chapter_no || contextPackage?.chapter_target?.chapter_no || 0),
+    )
     const millionWordRunway = millionWordRunwayFromContext(contextPackage, preDraftBrief)
     const styleSampleStrategy = contextPackage?.chapter_target?.style_sample_strategy || buildStyleSampleStrategy(project, contextPackage)
     const styleFingerprintHandoff = buildStyleFingerprintPromptHandoff(contextPackage, project, styleSampleStrategy)
@@ -47695,6 +47905,15 @@ export function createNovelWritingService(ctx: {
       dailyContextSnapshot?.writing_changes?.length ? `本次写作变更：${dailyContextSnapshot.writing_changes.join('；')}` : '',
       dailyContextSnapshot?.pending_clues?.length ? `待处理线索：${dailyContextSnapshot.pending_clues.join('；')}` : '',
       dailyContextSnapshot ? JSON.stringify(dailyContextSnapshot, null, 2).slice(0, 2000) : '',
+      '',
+      foreshadowingConsistencyRadar ? '【伏笔一致性雷达】' : '',
+      foreshadowingConsistencyRadar ? '硬性要求：执行 oh-story consistency-checker 的伏笔状态扫描；这是事实一致性债务，不是文学评价。活跃伏笔必须保持存在感，超期伏笔要推进、暂缓说明或进入回收路径；回收时不得改写角色知识边界、时间线、物品归属或后续新增设定。' : '',
+      foreshadowingConsistencyRadar?.active_count ? `活跃伏笔：${foreshadowingConsistencyRadar.active_count}条` : '',
+      foreshadowingConsistencyRadar?.overdue_count ? `超期伏笔：${foreshadowingConsistencyRadar.overdue_count}条` : '',
+      foreshadowingConsistencyRadar?.active?.length ? `活跃伏笔清单：${foreshadowingConsistencyRadar.active.join('；')}` : '',
+      foreshadowingConsistencyRadar?.overdue?.length ? `超期伏笔清单：${foreshadowingConsistencyRadar.overdue.join('；')}` : '',
+      foreshadowingConsistencyRadar?.guardrails?.length ? `一致性红线：${foreshadowingConsistencyRadar.guardrails.join('；')}` : '',
+      foreshadowingConsistencyRadar ? JSON.stringify(foreshadowingConsistencyRadar, null, 2).slice(0, 2400) : '',
       '',
       styleFingerprintHandoff ? '【文风指纹断点】' : '',
       styleFingerprintHandoff ? '硬性要求：执行 story_state.style_fingerprint；这是 oh-story 追踪/上下文.md 的文风指纹锚。续写只承接剧情、状态和情绪债，不继承可能已漂移的上一章句式节奏。写完后按目标句长带检查碎句、逗号结巴和中长句呼吸。' : '',
@@ -49014,6 +49233,29 @@ export function createNovelWritingService(ctx: {
       || project?.story_state?.dailyContextSnapshot
       || project?.storyState?.dailyContextSnapshot,
     )
+    const foreshadowingConsistencyRadar = normalizeForeshadowingConsistencyRadar(
+      project?.reference_config?.story_state?.foreshadowing_consistency_radar
+      || project?.reference_config?.story_state?.foreshadowingConsistencyRadar
+      || project?.reference_config?.storyState?.foreshadowingConsistencyRadar
+      || project?.story_state?.foreshadowing_consistency_radar
+      || project?.story_state?.foreshadowingConsistencyRadar
+      || project?.storyState?.foreshadowingConsistencyRadar
+      || {
+        foreshadowing_status: project?.reference_config?.story_state?.foreshadowing_status
+          || project?.reference_config?.story_state?.foreshadowingStatus
+          || project?.reference_config?.storyState?.foreshadowingStatus
+          || project?.story_state?.foreshadowing_status
+          || project?.story_state?.foreshadowingStatus
+          || project?.storyState?.foreshadowingStatus,
+        payoff_queue: project?.reference_config?.story_state?.payoff_queue
+          || project?.reference_config?.story_state?.payoffQueue
+          || project?.reference_config?.storyState?.payoffQueue
+          || project?.story_state?.payoff_queue
+          || project?.story_state?.payoffQueue
+          || project?.storyState?.payoffQueue,
+      },
+      Number(chapter.chapter_no || 0),
+    )
     const [settingEntities, storedChapterSettingUsage, projectSettingUsage] = await Promise.all([
       listNovelSettingEntities(activeWorkspace, project.id).catch(() => []),
       listNovelChapterSettingUsage(activeWorkspace, project.id, chapter.id).catch(() => []),
@@ -49195,6 +49437,7 @@ export function createNovelWritingService(ctx: {
           : deliveryRiskCarryOverContext,
         progress_summary: progressSummary,
         daily_context_snapshot: dailyContextSnapshot,
+        foreshadowing_consistency_radar: foreshadowingConsistencyRadar,
         continuity_notes: chapter.continuity_notes || [],
         must_advance: asArray(chapter.raw_payload?.must_advance),
         forbidden_repeats: asArray(chapter.raw_payload?.forbidden_repeats),
@@ -49215,6 +49458,7 @@ export function createNovelWritingService(ctx: {
         global: getStoryState(project),
         progress_summary: progressSummary,
         daily_context_snapshot: dailyContextSnapshot,
+        foreshadowing_consistency_radar: foreshadowingConsistencyRadar,
         recent_state_entries: preflight.recent_state_entries,
         worldbuilding: worldbuilding[0] || null,
         characters: characters.map(char => ({
@@ -49255,6 +49499,7 @@ export function createNovelWritingService(ctx: {
       layered_memory_context: layeredMemoryContext,
       progress_summary: progressSummary,
       daily_context_snapshot: dailyContextSnapshot,
+      foreshadowing_consistency_radar: foreshadowingConsistencyRadar,
       meme_bank: memeBank,
       style_sample_bank: styleSampleBank,
       style_sample_effectiveness: styleSampleEffectiveness,
