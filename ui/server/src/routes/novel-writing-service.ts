@@ -46671,6 +46671,7 @@ export function createNovelWritingService(ctx: {
       beatDensityContract ? `情节点密度：${beatDensityContract.rule || OH_STORY_BEAT_DENSITY_RULE}` : '',
       beatDensityContract ? `密度预算：本章目标 ${beatDensityContract.target_word_count || '?'} 字，建议 ${beatDensityContract.min_beat_count || '?'}-${beatDensityContract.max_beat_count || '?'} 个情节点，目标 ${beatDensityContract.target_beat_count || '?'} 个；当前蓝图 ${beatDensityContract.current_beat_count || 0} 个，缺口 ${beatDensityContract.density_gap || 0} 个。` : '',
       beatDensityContract?.execution_rules?.length ? `密度执行规则：${beatDensityContract.execution_rules.join('；')}` : '',
+      chapterBlueprint ? 'beat_sequence.function_tag 决定每个情节点展开或带过：关键揭露/打脸/高潮/爽点必须展开；过渡/赶路/信息交代必须压缩。' : '',
       chapterBlueprint ? '执行方式：爽点/高潮出手前必须铺出可指认的危机或期待；装逼、打脸、揭露或反证章必须写出在场角色的差异化反应；过场点带过，卖点/回报点展开，不得均匀注水。' : '',
       chapterBlueprint ? JSON.stringify(chapterBlueprint, null, 2).slice(0, 5000) : '',
       '',
@@ -50124,7 +50125,7 @@ export function createNovelWritingService(ctx: {
             task: [
               '任务：为无人值守章节写作补齐本章蓝图。只输出 JSON，不写正文。',
               '输出字段：title, chapter_goal, chapter_summary, conflict, ending_hook, chapter_blueprint, emotional_arc_contract, chapter_hook_contract, paragraph_hook_contract, opening_contract, suspense_contract, reversal_contract, showdown_contract, bridge_unit_contract, style_boundary_contract, plot_dynamics_contract, information_flow_contract, expectation_threshold_contract, story_loop_contract, prose_craft_contract, punctuation_tone_contract, quality_audit_contract, dialogue_contract, continuity_heat_contract, character_relation_contract, character_behavior_contract, asset_linkage_contract, state_tracking_contract, intent_confirmation_contract, target_reader_contract, genre_positioning_contract, female_audience_contract, upgrade_rhythm_contract, conflict_structure_contract, must_advance(array), forbidden_repeats(array), repair_summary。',
-              'chapter_blueprint 必须包含 target_emotion, opening_hook, core_payoff, content_outline(cause/development/turn/climax/ending), causal_chain_contract(act_order/act_functions/quality_checks), plot_lines(mainline/subplot/event_line/relationship_line/logic_line), character_order, beat_sequence, cost_and_reward, ending_contract(final_state/unresolved_question/next_chapter_pull)；causal_chain_contract 必须按 oh-story 五幕式输出种子/生长/转折/冲刺/完成，要求不能跳步、不能乱序。',
+              'chapter_blueprint 必须包含 target_emotion, opening_hook, core_payoff, content_outline(cause/development/turn/climax/ending), causal_chain_contract(act_order/act_functions/quality_checks), plot_lines(mainline/subplot/event_line/relationship_line/logic_line), character_order, beat_sequence, beat_density_contract, cost_and_reward, ending_contract(final_state/unresolved_question/next_chapter_pull)；causal_chain_contract 必须按 oh-story 五幕式输出种子/生长/转折/冲刺/完成，要求不能跳步、不能乱序；beat_sequence 每项必须包含 beat_no/scene_no/action/function_tag/payoff，function_tag 必须决定展开还是带过，关键揭露/打脸/高潮/爽点必须展开，过渡/赶路/信息交代必须压缩。',
               '情绪弧合同 emotional_arc_contract 必须按 oh-story 情绪弧与 emotional-methods 输出 arc_shape, emotion_formula, pressure_methods, payoff_types, payoff_reverse_design, payoff_tier_rules, payoff_density_rules, emotion_module_recomposition_rules, payoff_escalation_rules, expectation_rules, safety_rules, bonding_setup_rules, emotional_tear_rules, lingering_aftertaste_rules, emotional_turning_rules, failure_mode_guards, quality_checks，明确本章如何完成平静 -> 调动 -> 释放 -> 爽、爽点倒推法（先定爽点类型 -> 再定期待点 -> 最后倒推铺垫，正文按铺垫 -> 期待升高 -> 爽点释放呈现）、装逼层级（日常小装逼/核心爽点/偏离爽点）、多爽点密度（不要拉长单个爽点铺垫，800-1200 字内要有信息增量/能力展示/危机反制/关系变化/小回收）、情绪模块重组（戏剧性会磨损，情绪不会磨损；复用套路必须换场景/换对手/加新情绪或提高 stakes/奖励复杂度）、情绪三板斧（羁绊铺设/情感撕裂/余韵钝痛）和每 3-5 个小节的事件触发情绪转向，并让连续爽点按影响范围、揭示深度或身份落差递增。',
               '章级钩子合同 chapter_hook_contract 必须按 oh-story 章首/章尾钩子输出 opening_hook_type, ending_hook_type, hook_strength, opening_hook_rules, ending_hook_rules, forbidden_patterns, quality_checks，明确前 100-300 字和最后 300 字如何制造追读。',
               '段落级钩子合同 paragraph_hook_contract 必须按 oh-story 段落级钩子输出 micro_hook_types, hook_combinations, dialogue_escalation, spectator_layers, forbidden_patterns, quality_checks，明确本章每 3-5 段如何制造信息、风险、情绪或关系变化。',
@@ -50198,6 +50199,14 @@ export function createNovelWritingService(ctx: {
         .filter(Boolean)
       const fallbackCharacterOrder = characters.map((item: any) => compactBriefText(item.name)).filter(Boolean).slice(0, 8)
       const beatSequence = asArray(payloadBlueprint.beat_sequence || payloadBlueprint.beatSequence)
+      const repairedBeatSequence = beatSequence.length ? beatSequence : [{
+        beat_no: 1,
+        scene_no: 1,
+        title: nextTitle,
+        action: nextSummary,
+        function_tag: '开篇钩子/推进/章尾承接',
+        payoff: nextGoal,
+      }]
       const repairedChapterBlueprint = {
         version: payloadBlueprint.version || 'oh_story_chapter_blueprint_v1',
         source: payloadBlueprint.source || 'unattended_preflight_repair',
@@ -50226,14 +50235,12 @@ export function createNovelWritingService(ctx: {
           logic_line: compactBriefText(payloadPlotLines.logic_line || payloadPlotLines.logicLine || [nextSummary, nextConflict, nextGoal, nextHook].filter(Boolean).join(' -> ')),
         },
         character_order: characterOrder.length ? characterOrder : fallbackCharacterOrder,
-        beat_sequence: beatSequence.length ? beatSequence : [{
-          beat_no: 1,
-          scene_no: 1,
-          title: nextTitle,
-          action: nextSummary,
-          function_tag: '开篇钩子/推进/章尾承接',
-          payoff: nextGoal,
-        }],
+        beat_sequence: repairedBeatSequence,
+        beat_density_contract: buildChapterBlueprintBeatDensityContract(
+          resolveChapterWordTarget(project, chapter, { word_target: contextPackage?.chapter_target?.word_target || contextPackage?.chapterTarget?.wordTarget }),
+          repairedBeatSequence,
+          payloadBlueprint.beat_density_contract || payloadBlueprint.beatDensityContract,
+        ),
         cost_and_reward: compactBriefText(payloadBlueprint.cost_and_reward || payloadBlueprint.costAndReward || payload?.cost_and_reward || `代价/压力：${nextConflict}；收益/推进：${nextGoal}`),
         ending_contract: {
           final_state: compactBriefText(payloadEndingContract.final_state || payloadEndingContract.finalState || nextHook),
