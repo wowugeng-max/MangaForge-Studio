@@ -22477,6 +22477,10 @@ describe('chapter pre-draft brief', () => {
     expect(brief.prose_craft_contract.three_camera_rules.join('｜')).toContain('机位2')
     expect(brief.prose_craft_contract.three_camera_rules.join('｜')).toContain('机位3')
     expect(brief.prose_craft_contract.three_camera_rules.join('｜')).toContain('设定都由冲突引出')
+    expect(brief.prose_craft_contract.then_what_rules.join('｜')).toContain('然后呢')
+    expect(brief.prose_craft_contract.then_what_rules.join('｜')).toContain('每一段文字')
+    expect(brief.prose_craft_contract.then_what_rules.join('｜')).toContain('信息点')
+    expect(brief.prose_craft_contract.then_what_rules.join('｜')).toContain('立刻用下一个信息点接上')
     expect(brief.prose_craft_contract.rhythm_rules.join('｜')).toContain('一动一静')
     expect(brief.prose_craft_contract.object_number_rules.join('｜')).toContain('具体数字')
     expect(brief.prose_craft_contract.section_structure_rules.join('｜')).toContain('一个主事件')
@@ -22509,6 +22513,9 @@ describe('chapter pre-draft brief', () => {
     expect(prompt).toContain('机位1')
     expect(prompt).toContain('机位2')
     expect(prompt).toContain('机位3')
+    expect(prompt).toContain('然后呢')
+    expect(prompt).toContain('每段')
+    expect(prompt).toContain('信息点')
     expect(prompt).toContain('小节内部结构')
     expect(prompt).toContain('一个主事件')
     expect(prompt).toContain('3-5 个子事件')
@@ -22573,6 +22580,7 @@ describe('chapter pre-draft brief', () => {
     expect(brief.prose_craft_contract.subject_name_rhythm_rules.join('｜')).toContain('主语与名字节奏')
     expect(brief.prose_craft_contract.indirect_description_rules.join('｜')).toContain('间接描写法')
     expect(brief.prose_craft_contract.three_camera_rules.join('｜')).toContain('三机位法')
+    expect(brief.prose_craft_contract.then_what_rules.join('｜')).toContain('然后呢')
     expect(brief.prose_craft_contract.object_number_rules.join('｜')).toContain('具体数字')
     expect(brief.prose_craft_contract.section_structure_rules.join('｜')).toContain('一个主事件')
     expect(brief.prose_craft_contract.section_structure_rules.join('｜')).toContain('下一节开头快速接续')
@@ -22581,7 +22589,7 @@ describe('chapter pre-draft brief', () => {
     expect(brief.prose_craft_contract.concept_anchor_rules.join('｜')).toContain('新名词')
   })
 
-  test('preserves explicit camelCase prose craft subject-name rhythm indirect description and three-camera rules', () => {
+  test('preserves explicit camelCase prose craft subject-name rhythm indirect description three-camera and then-what rules', () => {
     const project = {
       title: '雪夜反证',
       genre: '悬疑逆袭',
@@ -22593,6 +22601,7 @@ describe('chapter pre-draft brief', () => {
         subjectNameRhythmRules: ['自定义主语与名字节奏：段首点名，段中用代词和动作承接，关键转折再点名。'],
         indirectDescriptionRules: ['自定义间接描写法：不要说证据厉害，用旁观者停筷、反派改口和熟人后退证明爽点。'],
         threeCameraRules: ['自定义三机位法：机位1贴主角手上动作，机位2给旁观者退后和环境变化，机位3只补一句冲突触发的设定。'],
+        thenWhatRules: ['自定义然后呢基点法：每段最后一个信息点必须引出下一动作、下一疑问或下一反应，不能写成死段。'],
       },
       chapter_target: {
         chapter_no: 12,
@@ -22608,6 +22617,7 @@ describe('chapter pre-draft brief', () => {
     expect(brief.prose_craft_contract.subject_name_rhythm_rules).toEqual(['自定义主语与名字节奏：段首点名，段中用代词和动作承接，关键转折再点名。'])
     expect(brief.prose_craft_contract.indirect_description_rules).toEqual(['自定义间接描写法：不要说证据厉害，用旁观者停筷、反派改口和熟人后退证明爽点。'])
     expect(brief.prose_craft_contract.three_camera_rules).toEqual(['自定义三机位法：机位1贴主角手上动作，机位2给旁观者退后和环境变化，机位3只补一句冲突触发的设定。'])
+    expect(brief.prose_craft_contract.then_what_rules).toEqual(['自定义然后呢基点法：每段最后一个信息点必须引出下一动作、下一疑问或下一反应，不能写成死段。'])
   })
 
   test('adds an oh-story quality audit contract to pre-draft brief and prose prompt', () => {
@@ -49865,6 +49875,9 @@ describe('chapter context word target source guards', () => {
     expect(repairBlock).toContain('three_camera_rules')
     expect(repairBlock).toContain('三机位法')
     expect(repairBlock).toContain('设定都由冲突引出')
+    expect(repairBlock).toContain('then_what_rules')
+    expect(repairBlock).toContain('然后呢')
+    expect(repairBlock).toContain('每一段文字')
     expect(repairBlock).toContain('section_density_rules')
     expect(repairBlock).toContain('anti_padding_rules')
     expect(repairBlock).toContain('小节密度诊断')
@@ -54820,12 +54833,16 @@ describe('chapter context word target source guards', () => {
     expect(reviewPrompt).toContain('三机位法')
     expect(reviewPrompt).toContain('机位1')
     expect(reviewPrompt).toContain('机位2')
+    expect(reviewPrompt).toContain('然后呢')
+    expect(reviewPrompt).toContain('信息点')
     expect(revisionPrompt).toContain('prose_craft_checks')
     expect(revisionPrompt).toContain('正文工艺')
     expect(revisionPrompt).toContain('间接描写法')
     expect(revisionPrompt).toContain('不要直接宣布')
     expect(revisionPrompt).toContain('三机位法')
     expect(revisionPrompt).toContain('设定都由冲突引出')
+    expect(revisionPrompt).toContain('然后呢')
+    expect(revisionPrompt).toContain('接上')
     expect(shouldReviseBlock).toContain('prose_craft_checks')
     expect(reviewNormalizeBlock).toContain('prose_craft_checks')
     expect(reviewNormalizeBlock).toContain('reviewPayload?.prose_craft_checks')
