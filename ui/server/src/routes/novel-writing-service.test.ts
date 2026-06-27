@@ -44824,6 +44824,8 @@ describe('story unit sync report', () => {
     expect(promptBlock).toContain('current_emotion_target')
     expect(promptBlock).toContain('writing_changes')
     expect(promptBlock).toContain('pending_clues')
+    expect(promptBlock).toContain('daily_context_snapshot 只保存追踪/上下文.md 的进度元信息')
+    expect(promptBlock).toContain('不得复制详细伏笔表、时间线表或角色状态表')
     expect(normalizeBlock).toContain('daily_context_snapshot')
     expect(normalizeBlock).toContain('dailyContextSnapshot')
     expect(mergeBlock).toContain('daily_context_snapshot')
