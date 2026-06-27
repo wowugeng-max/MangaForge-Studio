@@ -222,6 +222,7 @@ export function getContextContract(contextPackage: any, contractField: string) {
 const STRUCTURED_REVIEW_CHECK_FIELDS = [
   ['platform_checks', 'platformChecks'],
   ['content_rubric_checks', 'contentRubricChecks'],
+  ['factual_checks', 'factualChecks'],
   ['innovation_checks', 'innovationChecks'],
   ['chapter_attraction_checks', 'chapterAttractionChecks'],
   ['story_drive_checks', 'storyDriveChecks'],
@@ -473,6 +474,17 @@ const STRUCTURED_REVIEW_REQUIRED_FIELDS: Record<string, string[]> = {
     'read_status',
     'used_as_fact',
     'chapter_evidence',
+    'fix',
+    'remaining_risk',
+  ],
+  factual_checks: [
+    'key',
+    'label',
+    'status',
+    'fact_type',
+    'claim',
+    'verification_status',
+    'evidence',
     'fix',
     'remaining_risk',
   ],
@@ -47263,6 +47275,7 @@ export function createNovelWritingService(ctx: {
       '句式节奏：打斗/紧张用 3-8 字短句制造速度，日常用 8-15 字承载动作和信息，描写句必须读起来不卡；长短句交错，不要通篇同长度、同语气、同段落密度。',
       '对白口吻：对话必须口语化，符合角色身份和关系阶段；不要把“我认为此事不妥”这类书面语塞进角色嘴里，能用动作或半句话表达的，不用旁白说明。',
       '章尾收束：章尾用动作、对话或悬念收束，让情节本身制造余韵；不得用总结性感悟、哲理升华或作者预告收尾，例如“他终于明白”“这一夜注定”“更大的风暴即将来临”。',
+      '外部事实查证：如果写作涉及历史年代、地理方位、职业细节、法律/医疗/技术流程、真实机构或真实地名且当前上下文没有可靠来源，必须按 oh-story 资料研究流程标记待查证、改成架空/模糊表达，或把信息留作角色待验证线索；不得编造确定事实。',
       '',
       previousHandoff ? '【上一章尾段原文承接】' : '',
       previousHandoff ? '硬性要求：按 oh-story 日更串行流程，先读取上一章刚写入正文尾段再续写。前300字必须接住上一章最后一幕、动作链、角色反应、钩子、危机、欠账或未解问题；不能只复述摘要或改写成新的开场，也不得重新从泛环境描写、空泛醒来或无关解释开场。' : '',
@@ -49588,6 +49601,7 @@ export function createNovelWritingService(ctx: {
     '9. 是否存在过度环境描写、连续纯氛围段落、用阴冷/压抑/雨雾等描写替代剧情推进。',
     '10. 每 3-5 段是否有可见行动、选择、信息变化或关系变化。',
     '10A. 执行 oh-story 快速自检口诀：一事一段，镜头自然断；对话要像人说话；心情不写心里话；章尾不搞大升华；打斗不写流水账。发现段落机械断裂、对白书面化、心理告知、章末升华或打斗只有结果时，必须输出 prose_craft_checks、dialogue_checks、chapter_hook_checks 或 deslop_checks，并给出正文证据。',
+    '10B. 外部事实查证：如果正文涉及历史年代、地理方位、职业细节、法律/医疗/技术流程、真实机构或真实地名，但上下文没有可靠来源，必须输出 factual_checks，字段 key,label,status(pass|warn|fail),fact_type,claim,verification_status,evidence,fix,remaining_risk；未查证却写成确定事实时必须给出 issue，category=factual。',
     '11. 是否违反 setting_context：境界/战力矛盾、能力代价缺失、物品归属错误、Boss行动逻辑不一致、禁揭设定泄漏、规则触发没有代价、角色知识越界、伏笔误用、预期状态变化缺失。',
     '12. 是否兑现 chapter_target.chapter_blueprint：目标情绪、开篇钩子、核心回报、五段式内容概括、多线推进、人物出场顺序、情节点功能标签、代价/收益和章尾承接是否都有正文证据。',
     '13. 是否出现写作工程词混入正文：按 oh-story 正文元信息扫描，标题行以外不得出现第[一二三四五六七八九十百千万两0-9]+章|上一章|上章|前一章|本章|这一章|前文|后文|伏笔|细纲|读者；命中必须输出 prose_meta_checks，字段 key,label,status,matched_term,location,replacement,evidence,remaining_risk，并要求改成角色当下能感知的事件锚点或相对时间，除非角色在故事世界内真实讨论。',
@@ -49601,7 +49615,7 @@ export function createNovelWritingService(ctx: {
     '15. 是否兑现 chapter_target.platform_rubric：按 Rubric: fanqie | qidian | zhihu | generic web-fiction 检查目标平台适配；必须逐项输出 platform_checks，字段 key,label,status(pass|warn|fail),evidence,fix。平台不匹配且影响留存/节奏/读者期待时必须输出 S1/S2 finding，category=platform。',
     '16. 是否兑现 chapter_target.content_rubric：按 oh-story 通用网文内容审查基准逐项检查核心卖点、冲突推进、情绪曲线、钩子与期待、角色动机、对话质量、设定一致性、文字自然度、最小剧情循环和高潮构建；必须逐项输出 content_rubric_checks，字段 key,label,status(pass|warn|fail),core_selling_point,conflict_progression,chapter_change,page_turn_reason,evidence,fix,remaining_risk。',
     '17. 黄金三问必须有正文证据：读者为什么翻下一页？本章改变了什么？哪个正文证据支持判断？任一问题答不出时，content_rubric_checks 对应项必须 warn/fail，并输出 S1/S2 finding。',
-    '17+. 如果上下文包含创新、章节吸引力、故事驱动、人物弧、章节 benchmark、标题唯一性、蓝图消费或字数目标诊断，必须输出对应结构化检查：innovation_checks 每项含 key,label,status,innovation_type,differentiating_mechanism,visualized_scene,reader_retellable_hook,long_term_fit,evidence,fix,remaining_risk；chapter_attraction_checks 每项含 key,label,status,attraction_dimension,opening_hook,scene_goal_obstacle_turn_reward,payoff_density,ending_page_turn,spreadable_scene,evidence,fix,remaining_risk；story_drive_checks 每项含 key,label,status,protagonist_choice,obstacle,cost,state_change,next_causality,evidence,fix,remaining_risk；character_arc_checks 每项含 key,label,status,character,desire,flaw_pressure,relationship_change,growth_beat,voice_anchor,evidence,fix,remaining_risk。',
+    '17+. 如果上下文包含创新、章节吸引力、故事驱动、人物弧、章节 benchmark、标题唯一性、蓝图消费、外部事实查证或字数目标诊断，必须输出对应结构化检查：innovation_checks 每项含 key,label,status,innovation_type,differentiating_mechanism,visualized_scene,reader_retellable_hook,long_term_fit,evidence,fix,remaining_risk；chapter_attraction_checks 每项含 key,label,status,attraction_dimension,opening_hook,scene_goal_obstacle_turn_reward,payoff_density,ending_page_turn,spreadable_scene,evidence,fix,remaining_risk；story_drive_checks 每项含 key,label,status,protagonist_choice,obstacle,cost,state_change,next_causality,evidence,fix,remaining_risk；character_arc_checks 每项含 key,label,status,character,desire,flaw_pressure,relationship_change,growth_beat,voice_anchor,evidence,fix,remaining_risk；factual_checks 每项含 key,label,status,fact_type,claim,verification_status,evidence,fix,remaining_risk。',
     '17++. chapter_benchmark_checks 每项包含 key,label,status,benchmark_dimension,expected_method,delivered_evidence,originality_guard,fix,remaining_risk；title_uniqueness_checks 每项包含 key,label,status,old_title,new_title,outline_title_synced,file_name_synced,chapter_title_line_synced,evidence,remaining_risk；blueprint_consumption_checks 每项包含 key,label,status,blueprint_field,expected,delivered_evidence,missing_gap,fix,remaining_risk；word_count_checks 每项包含 key,label,status,current_count,target_count,min_required_count,evidence,remaining_risk。',
     '17C. 如果 chapter_target.core_contract_radar.periodic_drift_check.due=true，必须执行十章卖点复核：回答“当初吸引读者的卖点还在吗”，检查核心吸引元素是否被稀释或替换；缺失时 issues 输出 key=ten_chapter_selling_point 或在 fix/revision_directives 中明确 ten_chapter_selling_point，并给出补核心卖点、能力使用、规则限制、读者回报或章末新期待的修法。',
     '17D. 如果 chapter_target.core_contract_radar.theme_unity_rules 存在，必须执行主题统一检查：随机翻开一章，情绪是否仍指向全书核心；升级/复仇/寻宝/日常等小情绪是否服从大情绪；情绪散乱、多头并行或旁枝情绪线稀释核心时，必须在 issues 或 core_contract_checks 中输出 key=theme_unity_rules。',
@@ -49748,7 +49762,7 @@ export function createNovelWritingService(ctx: {
     '【待审校正文】',
     chapterText.slice(0, 16000),
     '',
-    '输出 JSON，字段：passed(boolean), score(0-100), rubric, rubric_source, platform_checks(array), content_rubric_source, content_rubric_checks(array), innovation_checks(array), chapter_attraction_checks(array), story_drive_checks(array), character_arc_checks(array), chapter_benchmark_checks(array), title_uniqueness_checks(array), prose_meta_checks(array), banned_words_checks(array), blueprint_consumption_checks(array), word_count_checks(array), reader_retention_checks(array), target_reader_checks(array), genre_positioning_checks(array), core_contract_checks(array), female_audience_checks(array), upgrade_rhythm_checks(array), structure_checks(array), progression_checks(array), information_checks(array), conflict_structure_checks(array), perspective_verdicts(array), deslop_level("无"|"轻度"|"中度"|"重度"), deslop_checks(array), dialogue_checks(array), plot_dynamics_checks(array), continuity_heat_checks(array), character_relation_checks(array), character_behavior_checks(array), asset_linkage_checks(array), state_tracking_checks(array), status_filter_receipts(array), source_readiness_checks(array), write_preparation_checks(array), next_chapter_quality_plan_receipts(array), chapter_handoff_checks(array), intent_confirmation_checks(array), benchmark_recall_checks(array), style_boundary_checks(array), style_sample_checks(array), information_flow_checks(array), expectation_threshold_checks(array), story_loop_checks(array), emotional_arc_checks(array), chapter_hook_checks(array), chapter_hook_quality_checks(array), paragraph_hook_checks(array), suspense_checks(array), reversal_checks(array), showdown_checks(array), bridge_unit_checks(array), opening_checks(array), prose_craft_checks(array), serial_risk_repair_checks(array), revision_receipt_checks(array), deslop_repair_checks(array), punctuation_tone_checks(array), quality_audit_checks(array), longform_checks(array), five_dimension_scores({core_consistency,surface_rewrite,format_consistency,readability,logic_coherence}，每项含 score/evidence/fix), craft_metrics({action_detail_score,description_overuse_score,event_density_score,combat_process_score,setting_consistency_score}), focused_revision_modes(array，可取 expand_action/cut_description/tighten_pacing/add_consequence/restore_hook/repair_setting_violation), setting_violations(array), delivery_risk_receipts(array), next_chapter_quality_plan({version,quality_focus,opening_actions,middle_actions,ending_actions,avoid_repetition,evidence_basis,ending_contract:{final_state,unresolved_question,next_chapter_pull,handoff_to_next}}), issues(array，使用上面的统一 Findings Schema), revision_directives(array), needs_revision(boolean)。只返回 JSON。',
+    '输出 JSON，字段：passed(boolean), score(0-100), rubric, rubric_source, platform_checks(array), content_rubric_source, content_rubric_checks(array), factual_checks(array), innovation_checks(array), chapter_attraction_checks(array), story_drive_checks(array), character_arc_checks(array), chapter_benchmark_checks(array), title_uniqueness_checks(array), prose_meta_checks(array), banned_words_checks(array), blueprint_consumption_checks(array), word_count_checks(array), reader_retention_checks(array), target_reader_checks(array), genre_positioning_checks(array), core_contract_checks(array), female_audience_checks(array), upgrade_rhythm_checks(array), structure_checks(array), progression_checks(array), information_checks(array), conflict_structure_checks(array), perspective_verdicts(array), deslop_level("无"|"轻度"|"中度"|"重度"), deslop_checks(array), dialogue_checks(array), plot_dynamics_checks(array), continuity_heat_checks(array), character_relation_checks(array), character_behavior_checks(array), asset_linkage_checks(array), state_tracking_checks(array), status_filter_receipts(array), source_readiness_checks(array), write_preparation_checks(array), next_chapter_quality_plan_receipts(array), chapter_handoff_checks(array), intent_confirmation_checks(array), benchmark_recall_checks(array), style_boundary_checks(array), style_sample_checks(array), information_flow_checks(array), expectation_threshold_checks(array), story_loop_checks(array), emotional_arc_checks(array), chapter_hook_checks(array), chapter_hook_quality_checks(array), paragraph_hook_checks(array), suspense_checks(array), reversal_checks(array), showdown_checks(array), bridge_unit_checks(array), opening_checks(array), prose_craft_checks(array), serial_risk_repair_checks(array), revision_receipt_checks(array), deslop_repair_checks(array), punctuation_tone_checks(array), quality_audit_checks(array), longform_checks(array), five_dimension_scores({core_consistency,surface_rewrite,format_consistency,readability,logic_coherence}，每项含 score/evidence/fix), craft_metrics({action_detail_score,description_overuse_score,event_density_score,combat_process_score,setting_consistency_score}), focused_revision_modes(array，可取 expand_action/cut_description/tighten_pacing/add_consequence/restore_hook/repair_setting_violation), setting_violations(array), delivery_risk_receipts(array), next_chapter_quality_plan({version,quality_focus,opening_actions,middle_actions,ending_actions,avoid_repetition,evidence_basis,ending_contract:{final_state,unresolved_question,next_chapter_pull,handoff_to_next}}), issues(array，使用上面的统一 Findings Schema), revision_directives(array), needs_revision(boolean)。只返回 JSON。',
   ].join('\n')
 
   const buildProseRevisionPrompt = (project: any, contextPackage: any, chapterText: string, review: any) => {
@@ -49791,12 +49805,14 @@ export function createNovelWritingService(ctx: {
     '7C. 不改长期方向：rewrite 只能重写问题段落的剧情落点和表达方式，不能把本章改成新主题、新地图、新敌人、新关系线或新的长期承诺；compress/de_ai/polish 只能改表达密度和自然度，不能删除有功能信息。',
     '7D. 字数对比与修订幅度守恒：修订后与原文字数差异超过 30% 或 800 字（取较大值）时，必须在 revision_scope_guard.scope_warning 写明原因；不得为了润色大幅删掉伏笔、钩子、角色特征、情节推进或必要转折，也不得无证据新增支线、设定、关系或时间线。',
     '7E. 修订前必须按 workflow-revision 做上下文对照，并输出 revision_context_receipts：逐项检查 previous_chapter、current_chapter、next_chapter 或下一章细纲、foreshadowing、character_cards、timeline、setting_context、资产归属、关系边界、正文元信息扫描、禁用词扫描。字段 key,label,status(pass|warn|fail),evidence,fix,source_excerpt；无法确认某个来源时 status 写 warn/fail，fix 写下一章或本章必须如何兜住，不能假设已经一致。',
+    '7F. 外部事实查证守恒：如果自检结果包含 factual_checks，必须按 claim/fact_type/verification_status 修复。能从上下文确认的才保留为确定事实；不能确认的改成架空/模糊表达、角色待查证线索或明确 remaining_risk，不得把未查证内容改写成确定事实，也不得新增无来源的真实历史、地理、职业、法律、医疗或技术细节。',
     '8. 输出 revision_receipts：逐条对应自检 issues，字段 issue_index(从0开始), severity, category, original_evidence, applied_fix, changed_evidence, remaining_risk, affected_chapters(array), cascade_impacts(array)。changed_evidence 必须引用修订后正文中的具体句子或场景变化；如果仍有残余风险，remaining_risk 写清楚。若本次修改改变伏笔、时间线、角色状态、资产归属或关系边界，cascade_impacts 必须逐项写 type, target, impact, required_action, evidence 或 source_excerpt，说明后续章节如何同步，evidence/source_excerpt 必须引用修订后正文中支撑正史变更的原句；没有级联影响时写空数组。',
     '8A. 输出 revision_scope_guard：字段 original_word_count, revised_word_count, delta_word_count, delta_ratio, allowed_delta_word_count, scope_warning, reason。original_word_count 为原正文估算字数，revised_word_count 为修订后正文估算字数，allowed_delta_word_count = max(原文 30%, 800 字)。',
     '9. 如果自检结果包含 delivery_risk_receipts，必须逐条修复 delivery_risk_receipts 中每条 delivered=false 或 remaining_risk 非空的承接残留；按 risk_item/required_action/remaining_risk 找到未兑现的上一章风险债，必须修到正文中可见的开篇承接、场景推进、读者回报或章末钩子里，不得只在旁白中声明已处理。opening_actions 失败项必须修到前300字；middle_actions 失败项必须修到中段事件推进；ending_actions 失败项必须修到最后300字，不得把章末风险挪到开篇或中段。revision_receipts 必须逐条对应 delivery_risk_receipts 的失败项，写清原始 risk_item、required_action、repair_segment、applied_fix、changed_evidence 和 remaining_risk；不能只修第一条，也不能用一条汇总回执代替多条风险债。',
     '9A. 如果自检结果包含 prose_meta_checks，必须优先修复 status=fail/warn 的工程词泄露；按 term/line/evidence/fix 把“上一章/本章/前文/后文/伏笔/细纲/读者/第X章”等改成角色当下能感知的事件锚点或相对时间。',
     '10. 如果自检结果包含 platform_checks，必须优先修复 status=fail/warn 的平台不匹配项；按 label/evidence/fix 找到开篇、节奏、设定释放、回报密度或章末拉力缺口，修到正文可见证据里。',
     '11. 如果自检结果包含 content_rubric_checks，必须优先修复 status=fail/warn 的内容基准缺口；按 label/evidence/fix 补核心卖点、冲突推进、剧情循环反馈、角色动机、章末期待或自然文字证据。',
+    '11B. 如果自检结果包含 factual_checks，必须优先处理 status=fail/warn 的外部事实查证缺口；按 claim 和 verification_status 降级或删除未查证断言，把真实世界细节改成架空可控设定、角色正在核验的疑问，或只保留上下文已有证据支持的事实。',
     '11A. 如果自检结果包含 reader_retention_checks，必须优先修复 status=fail/warn 的追读雷达缺口；按 key/label/evidence/fix 补前300字钩子、可见爽点、信息缺口、章末追读、留存双引擎的情绪 + 饥饿，以及 Hook上瘾模型的触发 -> 行动 -> 奖励 -> 投入。饥饿缺口必须用信息差植入问号并按剥洋葱把关键信息卡到章末；奖励缺口必须补奖励随机性：在预期回报之外给出出乎意料的额外收获、线索、权限、关系或地位变化，并形成沉没投入。',
     '12. 如果自检结果包含 target_reader_checks，必须优先修复 status=fail/warn 的目标读者缺口；按 key/label/evidence/fix 补清读者画像、读者想看内容、情绪缺口、本章命中点、平台口味和可见读者回报。情绪缺口缺口必须先补核心痛苦、深层情结、高频情绪关键词和未满足需求，再把它们写成冲突压力、角色选择、即时反馈或尊严/安全感/掌控感补偿。',
     '13. 如果自检结果包含 genre_positioning_checks，必须优先修复 status=fail/warn 的题材定位缺口；按 key/label/evidence/fix 校准题材标签、核心梗、类型公式、金手指贴合、必备场景、微创新边界、长板聚焦和书名简介内容三位一体，修掉挂羊头卖狗肉；拉长题材长板而非补短板，删除会稀释核心卖点的支线，把同一卖点扩成至少 3 个角度的正文证据。',
@@ -49919,6 +49935,8 @@ export function createNovelWritingService(ctx: {
     const deslopDiagnosticConcernCount = Number(deslopGateDiagnostics?.concern_gate_count ?? deslopGateDiagnostics?.concernGateCount ?? 0)
     const hasDeslopGateDiagnosticConcern = deslopDiagnosticConcernCount > 0
       || deslopDiagnosticGates.some((gate: any) => platformCheckNeedsCarryOver(gate))
+    const factualChecks = asArray(review?.factual_checks || review?.factualChecks)
+    const hasFactualConcern = factualChecks.some(platformCheckNeedsCarryOver)
     const proseMetaChecks = asArray(review?.prose_meta_checks || review?.proseMetaChecks)
     const hasProseMetaConcern = proseMetaChecks.some(platformCheckNeedsCarryOver)
     const dialogueChecks = asArray(review?.dialogue_checks || review?.dialogueChecks)
@@ -49996,7 +50014,7 @@ export function createNovelWritingService(ctx: {
     const hasQualityAuditConcern = qualityAuditChecks.some(platformCheckNeedsCarryOver)
     const hasNextChapterQualityPlanConcern = nextChapterQualityPlanNeedsRepair(review)
     const revisionThreshold = Math.max(78, Number(options.quality_threshold || 0))
-    return Boolean(review?.needs_revision) || Number(review?.score || 100) < revisionThreshold || hasHighIssue || hasPerspectiveConcern || hasDeslopConcern || hasDeslopGateDiagnosticConcern || hasProseMetaConcern || hasDialogueConcern || hasPlotDynamicsConcern || hasContinuityHeatConcern || hasCharacterRelationConcern || hasCharacterBehaviorConcern || hasAssetLinkageConcern || hasStateTrackingConcern || hasSourceReadinessConcern || hasWritePreparationConcern || hasNextChapterQualityPlanReceiptConcern || hasChapterHandoffConcern || hasReaderRetentionConcern || hasIntentConfirmationConcern || hasBenchmarkRecallConcern || hasStyleBoundaryConcern || hasStyleSampleConcern || hasInformationFlowConcern || hasExpectationThresholdConcern || hasTargetReaderConcern || hasGenrePositioningConcern || hasFemaleAudienceConcern || hasUpgradeRhythmConcern || hasConflictStructureConcern || hasStoryLoopConcern || hasEmotionalArcConcern || hasChapterHookConcern || hasParagraphHookConcern || hasSuspenseConcern || hasReversalConcern || hasShowdownConcern || hasBridgeUnitConcern || hasOpeningConcern || hasProseCraftConcern || hasPunctuationToneConcern || hasQualityAuditConcern || hasNextChapterQualityPlanConcern
+    return Boolean(review?.needs_revision) || Number(review?.score || 100) < revisionThreshold || hasHighIssue || hasPerspectiveConcern || hasDeslopConcern || hasDeslopGateDiagnosticConcern || hasFactualConcern || hasProseMetaConcern || hasDialogueConcern || hasPlotDynamicsConcern || hasContinuityHeatConcern || hasCharacterRelationConcern || hasCharacterBehaviorConcern || hasAssetLinkageConcern || hasStateTrackingConcern || hasSourceReadinessConcern || hasWritePreparationConcern || hasNextChapterQualityPlanReceiptConcern || hasChapterHandoffConcern || hasReaderRetentionConcern || hasIntentConfirmationConcern || hasBenchmarkRecallConcern || hasStyleBoundaryConcern || hasStyleSampleConcern || hasInformationFlowConcern || hasExpectationThresholdConcern || hasTargetReaderConcern || hasGenrePositioningConcern || hasFemaleAudienceConcern || hasUpgradeRhythmConcern || hasConflictStructureConcern || hasStoryLoopConcern || hasEmotionalArcConcern || hasChapterHookConcern || hasParagraphHookConcern || hasSuspenseConcern || hasReversalConcern || hasShowdownConcern || hasBridgeUnitConcern || hasOpeningConcern || hasProseCraftConcern || hasPunctuationToneConcern || hasQualityAuditConcern || hasNextChapterQualityPlanConcern
   }
 
   const runProseSelfReviewAndRevision = async (activeWorkspace: string, project: any, contextPackage: any, chapterText: string, modelId?: number, options: any = {}) => {
@@ -50269,6 +50287,7 @@ export function createNovelWritingService(ctx: {
         : Array.isArray(reviewPayload?.contentRubricChecks)
           ? reviewPayload.contentRubricChecks
           : [],
+      factual_checks: reviewChecks('factual_checks', 'factualChecks'),
       innovation_checks: asArray(reviewPayload?.innovation_checks || reviewPayload?.innovationChecks),
       chapter_attraction_checks: asArray(reviewPayload?.chapter_attraction_checks || reviewPayload?.chapterAttractionChecks),
       story_drive_checks: asArray(reviewPayload?.story_drive_checks || reviewPayload?.storyDriveChecks),

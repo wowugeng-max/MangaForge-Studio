@@ -54462,6 +54462,32 @@ describe('chapter context word target source guards', () => {
     expect(revisionPrompt).toContain('这句话一落')
   })
 
+  test('asks prose generation self review and revision to enforce oh-story external fact research guard', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
+    const prosePromptEnd = source.indexOf('const ensureProseMeetsWordTarget =', prosePromptStart)
+    const prosePromptBlock = source.slice(prosePromptStart, prosePromptEnd)
+    const reviewPrompt = source.slice(
+      source.indexOf('const buildProseReviewPrompt'),
+      source.indexOf('const buildProseRevisionPrompt'),
+    )
+    const revisionPrompt = source.slice(
+      source.indexOf('const buildProseRevisionPrompt'),
+      source.indexOf('const shouldReviseProse'),
+    )
+
+    expect(prosePromptStart).toBeGreaterThanOrEqual(0)
+    expect(prosePromptBlock).toContain('外部事实查证')
+    expect(prosePromptBlock).toContain('历史年代、地理方位、职业细节')
+    expect(prosePromptBlock).toContain('不得编造')
+    expect(prosePromptBlock).toContain('资料研究')
+    expect(reviewPrompt).toContain('外部事实查证')
+    expect(reviewPrompt).toContain('factual_checks')
+    expect(reviewPrompt).toContain('category=factual')
+    expect(revisionPrompt).toContain('factual_checks')
+    expect(revisionPrompt).toContain('不得把未查证内容改写成确定事实')
+  })
+
   test('asks prose generation self review and revision to enforce oh-story section density diagnosis', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
