@@ -54488,6 +54488,31 @@ describe('chapter context word target source guards', () => {
     expect(revisionPrompt).toContain('不得把未查证内容改写成确定事实')
   })
 
+  test('asks prose generation self review and revision to enforce oh-story supporting-character buffer zones', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
+    const prosePromptEnd = source.indexOf('const ensureProseMeetsWordTarget =', prosePromptStart)
+    const prosePromptBlock = source.slice(prosePromptStart, prosePromptEnd)
+    const reviewPrompt = source.slice(
+      source.indexOf('const buildProseReviewPrompt'),
+      source.indexOf('const buildProseRevisionPrompt'),
+    )
+    const revisionPrompt = source.slice(
+      source.indexOf('const buildProseRevisionPrompt'),
+      source.indexOf('const shouldReviseProse'),
+    )
+
+    expect(prosePromptStart).toBeGreaterThanOrEqual(0)
+    expect(prosePromptBlock).toContain('配角攻略缓冲区')
+    expect(prosePromptBlock).toContain('信息差、地位差距、亲密度差距或信任程度')
+    expect(prosePromptBlock).toContain('配角不能像 NPC 一样站着等主角触发')
+    expect(reviewPrompt).toContain('配角攻略缓冲区')
+    expect(reviewPrompt).toContain('buffer_zone')
+    expect(reviewPrompt).toContain('character_relation_checks')
+    expect(revisionPrompt).toContain('配角攻略缓冲区')
+    expect(revisionPrompt).toContain('信息差、地位差距、亲密度差距或信任程度')
+  })
+
   test('asks prose generation self review and revision to enforce oh-story section density diagnosis', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')

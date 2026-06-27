@@ -903,6 +903,7 @@ const STRUCTURED_REVIEW_REQUIRED_FIELDS: Record<string, string[]> = {
     'agency_choice',
     'cost',
     'relation_shift',
+    'buffer_zone',
     'evidence',
     'fix',
     'remaining_risk',
@@ -36138,12 +36139,19 @@ const OH_STORY_CHARACTER_RELATION_EXPECTATION_HUB_RULES = [
   '人物下线时必须带来更大的好处，用歪打误撞收获更多转化读者损失厌恶。',
 ]
 
+const OH_STORY_CHARACTER_RELATION_BUFFER_RULES = [
+  '配角攻略缓冲区：始终保留信息差、地位差距、亲密度差距或信任程度之一，让配角态度变化有过程。',
+  '配角不能像 NPC 一样站着等主角触发，必须有自己的行动、误判、顾虑、资源交换或代价。',
+  '关键拐点必须写清配角从旁观/质疑/拒绝/试探到行动/协助/设限的态度变化，让变化本身产生期待感。',
+]
+
 const OH_STORY_CHARACTER_RELATION_CHECKS = [
   '关系类型明确：重要关系必须归类为冲突型、联盟型、亲密型或权威型之一。',
   '关系有弧线：重要关系至少经历一次考验、误解、牺牲、背叛、信任变化或态度变化。',
   '主角目标独立：主角必须主动追求自己的目标，不能只是帮别人实现目标。',
   '角色不止恋爱：角色生命中必须有恋爱之外的内容，不能只是单薄的情感工具人。',
   '配角期待枢纽：至少一个关键配角承担任务基地功能，同时承载短期和长期期待，并在单元结束后开启下一轮新剧情。',
+  '配角攻略缓冲区：通过信息差、地位差距、亲密度差距或信任程度维持攻略过程，拐点处必须有态度变化证据。',
   '配角有行动：配角不能像 NPC 一样等主角触发，必须有自己的顾虑、目标、行动或代价。',
   '关系功能服务情节：甜、虐、作证、背叛、保护或压迫必须推进情节或改变状态。',
   '态度变化可见：关键拐点必须写出配角态度、信息差、信任程度或地位差距的变化。',
@@ -40133,6 +40141,7 @@ function buildCharacterRelationContract(contextPackage: any = {}) {
     const explicitGoalOwnershipRules = asArray(explicit.goal_ownership_rules || explicit.goalOwnershipRules).map((item: any) => compactBriefText(item)).filter(Boolean)
     const explicitRelationshipLifeRules = asArray(explicit.relationship_life_rules || explicit.relationshipLifeRules).map((item: any) => compactBriefText(item)).filter(Boolean)
     const explicitExpectationHubRules = asArray(explicit.expectation_hub_rules || explicit.expectationHubRules).map((item: any) => compactBriefText(item)).filter(Boolean)
+    const explicitBufferZoneRules = asArray(explicit.buffer_zone_rules || explicit.bufferZoneRules || explicit.supporting_character_buffer_rules || explicit.supportingCharacterBufferRules).map((item: any) => compactBriefText(item)).filter(Boolean)
     const explicitTestsOrPressure = asArray(explicit.tests_or_pressure || explicit.testsOrPressure).map((item: any) => compactBriefText(item)).filter(Boolean)
     const explicitAttitudeShifts = asArray(explicit.attitude_shifts || explicit.attitudeShifts).map((item: any) => compactBriefText(item)).filter(Boolean)
     const explicitSupportRoles = asArray(explicit.support_roles || explicit.supportRoles).map((item: any) => compactBriefText(item)).filter(Boolean)
@@ -40153,6 +40162,9 @@ function buildCharacterRelationContract(contextPackage: any = {}) {
       expectation_hub_rules: explicitExpectationHubRules.length
         ? explicitExpectationHubRules
         : asArray(derived.expectation_hub_rules || derived.expectationHubRules).length ? asArray(derived.expectation_hub_rules || derived.expectationHubRules) : OH_STORY_CHARACTER_RELATION_EXPECTATION_HUB_RULES,
+      buffer_zone_rules: explicitBufferZoneRules.length
+        ? explicitBufferZoneRules
+        : asArray(derived.buffer_zone_rules || derived.bufferZoneRules).length ? asArray(derived.buffer_zone_rules || derived.bufferZoneRules) : OH_STORY_CHARACTER_RELATION_BUFFER_RULES,
       tests_or_pressure: explicitTestsOrPressure.length ? explicitTestsOrPressure : asArray(derived.tests_or_pressure),
       attitude_shifts: explicitAttitudeShifts.length ? explicitAttitudeShifts : asArray(derived.attitude_shifts),
       support_roles: explicitSupportRoles.length ? explicitSupportRoles : asArray(derived.support_roles),
@@ -40161,7 +40173,7 @@ function buildCharacterRelationContract(contextPackage: any = {}) {
         : OH_STORY_CHARACTER_RELATION_CHECKS,
       revision_priorities: asArray(explicit.revision_priorities || explicit.revisionPriorities).length
         ? asArray(explicit.revision_priorities || explicit.revisionPriorities).map((item: any) => compactBriefText(item)).filter(Boolean)
-        : ['明确关系类型', '补关系考验/变化', '补主角独立目标', '补配角期待枢纽', '让配角主动行动', '写出态度变化'],
+        : ['明确关系类型', '补关系考验/变化', '补主角独立目标', '补配角期待枢纽', '维护攻略缓冲区', '让配角主动行动', '写出态度变化'],
     }
   }
 
@@ -40243,11 +40255,12 @@ function buildCharacterRelationContract(contextPackage: any = {}) {
     goal_ownership_rules: OH_STORY_CHARACTER_RELATION_GOAL_OWNERSHIP_RULES,
     relationship_life_rules: OH_STORY_CHARACTER_RELATION_LIFE_RULES,
     expectation_hub_rules: OH_STORY_CHARACTER_RELATION_EXPECTATION_HUB_RULES,
+    buffer_zone_rules: OH_STORY_CHARACTER_RELATION_BUFFER_RULES,
     tests_or_pressure: testsOrPressure,
     attitude_shifts: attitudeShifts,
     support_roles: supportRoles,
     quality_checks: OH_STORY_CHARACTER_RELATION_CHECKS,
-    revision_priorities: ['明确关系类型', '补关系考验/变化', '补主角独立目标', '补配角期待枢纽', '让配角主动行动', '写出态度变化'],
+    revision_priorities: ['明确关系类型', '补关系考验/变化', '补主角独立目标', '补配角期待枢纽', '维护攻略缓冲区', '让配角主动行动', '写出态度变化'],
   }
 }
 
@@ -47666,16 +47679,18 @@ export function createNovelWritingService(ctx: {
       characterRelationContract ? '目标归属：主角目标必须属于自己的，关系线可以互助，但主角必须保留自己的诉求、主动选择和代价，不能只是在帮别人实现目标。' : '',
       characterRelationContract ? '角色不止恋爱：角色生命中必须有恋爱之外的内容，重要关系可以提供情绪价值，但角色还要保留事业、责任、资源、身份、家族、风险或行动线。' : '',
       characterRelationContract ? '配角期待枢纽：选一个配角做任务基地，一个人物同时承载多个短期和长期期待；主角每次解决事件装完逼后回到该人物处开始新一轮装逼；人物下线时必须带来更大好处，用歪打误撞收获更多转化损失厌恶。' : '',
+      characterRelationContract ? '配角攻略缓冲区：配角不能像 NPC 一样站着等主角触发；必须保留信息差、地位差距、亲密度差距或信任程度，并在关键拐点写出配角从旁观/质疑/拒绝/试探到行动/协助/设限的态度变化。' : '',
       characterRelationContract?.relationship_types?.length ? `关系类型：${characterRelationContract.relationship_types.join('；')}` : '',
       characterRelationContract?.important_relationships?.length ? `重要关系：${characterRelationContract.important_relationships.join('；')}` : '',
       characterRelationContract?.independent_goals?.length ? `独立目标：${characterRelationContract.independent_goals.join('；')}` : '',
       characterRelationContract?.goal_ownership_rules?.length ? `目标归属：${characterRelationContract.goal_ownership_rules.join('；')}` : '',
       characterRelationContract?.relationship_life_rules?.length ? `角色不止恋爱：${characterRelationContract.relationship_life_rules.join('；')}` : '',
       characterRelationContract?.expectation_hub_rules?.length ? `配角期待枢纽：${characterRelationContract.expectation_hub_rules.join('；')}` : '',
+      characterRelationContract?.buffer_zone_rules?.length ? `配角攻略缓冲区：${characterRelationContract.buffer_zone_rules.join('；')}` : '',
       characterRelationContract?.tests_or_pressure?.length ? `考验/压力：${characterRelationContract.tests_or_pressure.join('；')}` : '',
       characterRelationContract?.attitude_shifts?.length ? `态度变化：${characterRelationContract.attitude_shifts.join('；')}` : '',
       characterRelationContract?.quality_checks?.length ? `质量检查：${characterRelationContract.quality_checks.join('；')}` : '',
-      characterRelationContract ? '交稿自检必须输出 character_relation_checks，并用正文证据检查关系类型、关系弧线、主角目标独立性、目标归属、角色不止恋爱、配角期待枢纽、配角主动行动、态度变化和阶段匹配。' : '',
+      characterRelationContract ? '交稿自检必须输出 character_relation_checks，并用正文证据检查关系类型、关系弧线、主角目标独立性、目标归属、角色不止恋爱、配角期待枢纽、配角攻略缓冲区、配角主动行动、态度变化和阶段匹配。' : '',
       characterRelationContract ? JSON.stringify(characterRelationContract, null, 2).slice(0, 2500) : '',
       '',
       characterBehaviorContract ? '【角色行为合同】' : '',
@@ -49645,8 +49660,8 @@ export function createNovelWritingService(ctx: {
     '29. plot_dynamics_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),goal,obstacle,action,cost_or_feedback,new_expectation,evidence,fix,remaining_risk；缺少行动、代价、反馈、假胜、崩解、悬置收尾或多线错峰时必须给出 S1/S2 finding，category=structure。',
     '30. 是否兑现 chapter_target.continuity_heat_contract：按 oh-story 连续性热度追踪检查 hot/warm/cold/archived 元素；hot 必须推进，warm 必须有效触达，cold 回收前必须升温，archived 不得误激活；必须输出 continuity_heat_checks。',
     '31. continuity_heat_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),heat_state,hot_progress,warm_keepalive,cold_warmup,archived_boundary,evidence,fix,remaining_risk；冷伏笔突然回收、核心角色断温、重要支线无休眠说明、只提名字不推进时必须给出 S1/S2 finding，category=consistency 或 structure。',
-    '32. 是否兑现 chapter_target.character_relation_contract：按 oh-story 角色关系手册检查关系类型明确、关系有弧线、主角目标独立、目标归属清楚、角色不止恋爱、配角期待枢纽、配角有主动行动、态度变化可见、亲密/好感行为匹配阶段；目标归属必须检查主角目标是否属于自己的，不能只是帮别人实现目标，关系线可以互助但主角必须保留自己的诉求、主动选择和代价；角色不止恋爱必须检查角色生命中是否有恋爱之外的事业、责任、资源、身份、家族、风险或行动线，不能只是发糖/陪伴/情绪支持的情感工具人；配角期待枢纽必须检查是否有一个关键配角作为任务基地，同时承载短期和长期期待，并在主角解决事件后开启新一轮装逼、新任务或新剧情，人物下线时是否带来更大好处来转化损失厌恶；必须输出 character_relation_checks。',
-    '33. character_relation_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),relation_type,protagonist_goal,agency_choice,cost,relation_shift,evidence,fix,remaining_risk；主角沦为帮别人办事、主角没有自己的诉求/主动选择/代价、角色只负责恋爱/发糖/陪伴/情绪支持、配角站桩、关系没有考验/变化、所有人你好我好时必须给出 S1/S2 finding，category=character 或 structure。',
+    '32. 是否兑现 chapter_target.character_relation_contract：按 oh-story 角色关系手册检查关系类型明确、关系有弧线、主角目标独立、目标归属清楚、角色不止恋爱、配角期待枢纽、配角攻略缓冲区、配角有主动行动、态度变化可见、亲密/好感行为匹配阶段；目标归属必须检查主角目标是否属于自己的，不能只是帮别人实现目标，关系线可以互助但主角必须保留自己的诉求、主动选择和代价；角色不止恋爱必须检查角色生命中是否有恋爱之外的事业、责任、资源、身份、家族、风险或行动线，不能只是发糖/陪伴/情绪支持的情感工具人；配角期待枢纽必须检查是否有一个关键配角作为任务基地，同时承载短期和长期期待，并在主角解决事件后开启新一轮装逼、新任务或新剧情，人物下线时是否带来更大好处来转化损失厌恶；配角攻略缓冲区必须检查信息差、地位差距、亲密度差距或信任程度是否存在，配角不能像 NPC 一样站着等主角触发，关键拐点必须写出态度变化；必须输出 character_relation_checks。',
+    '33. character_relation_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),relation_type,protagonist_goal,agency_choice,cost,relation_shift,buffer_zone,evidence,fix,remaining_risk；主角沦为帮别人办事、主角没有自己的诉求/主动选择/代价、角色只负责恋爱/发糖/陪伴/情绪支持、配角站桩、关系没有考验/变化、缺配角攻略缓冲区、所有人你好我好时必须给出 S1/S2 finding，category=character 或 structure。',
     '34. 是否兑现 chapter_target.character_behavior_contract：按 oh-story 角色行为口径检查主角行为三必须、动机链、动机具体性、三层标签反差、人设强关联、展示优于告知、主角逼格反应、记忆锚点、配角功能、反派内在逻辑、反派分量、反派自我叙事和反派层级退场；动机具体性必须检查起因是否具体（不能只写“被欺负/被针对”）、动机是否是情感层面（不能只写“要成为最强/想变强”）、动机演变是否有触发事件或代价铺垫；主角逼格反应必须检查升级线与主角反应线是否分开，升级是否只提升实力/能力而不改变从容反应，面对低级挑衅时是否被牵着走，是否出现暴怒、面红耳赤、歇斯底里式反击；人设强关联必须检查每个重要角色至少 3 个强关联设定是否可见，是否直接影响剧情走向、核心梗装逼爽点或人物碰撞，外貌/爱好/身高体重等弱关联是否喧宾夺主；反派分量必须按反派建立四要素检查实力展示、动机可信、真实威胁、终极意图时机；反派自我叙事必须按“反派也有梦想”检查他是否是自己故事的主人公、是否有旧痛/创伤、优势即致命缺陷和理念冲突；反派层级必须按反派层级表检查篇幅与层级匹配、小反派/中等反派/大弧 Boss/最终 Boss 的功能和退场方式，最终Boss从第一章就有伏笔；必须输出 character_behavior_checks。',
     '35. character_behavior_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),character,concrete_motive,emotional_reason,trigger_change,visible_choice,cost,evidence,fix,remaining_risk；主角行为不可理解/不可共鸣/不可接受、动机链缺失、起因空泛、动机只是“要成为最强/想变强”、动机演变无铺垫、三层标签反差只停在设定、主角升级后被低级挑衅拖入暴怒失态或缺轻描淡写/短句/行动压制、人设强关联少于3个或只剩外貌爱好等弱关联、角色靠旁白贴标签、配角无功能发言、反派降智、反派缺实力展示/真实威胁/终极意图时机、反派只是工具人/纯粹的坏/缺自己的梦想旧痛和理念冲突、反派层级篇幅不匹配、小反派拖太久、大 Boss 草率退场、最终 Boss 无第一章伏笔，或主角赢得没含金量时必须给出 S1/S2 finding，category=character 或 structure。',
     '36. 是否兑现 chapter_target.asset_linkage_contract：按 oh-story 资产挂钩口径检查关键资产是否绑定功能、归属、触发条件、限制、后果，是否摆脱孤立资产，是否通过冲突释放设定信息；必须输出 asset_linkage_checks。',
@@ -49828,7 +49843,7 @@ export function createNovelWritingService(ctx: {
     '15. 如果自检结果包含 dialogue_checks，必须优先修复 status=fail/warn 的对白缺口；按 key/label/evidence/fix 补角色声线差异、潜台词与议程、权力博弈、信息嵌入和情绪递进；按压制/反转/心死模式重排对白，让短句方成为权力上位，亮底牌句压到 ≤10 字，被压制方保留 ≥20 字辩解或失态；把真实目的改成借口、试探、回避或动作反应，按关系、场合、目的重定语气；用命令式、否定式或为你好式压迫制造情绪，按事件→情绪反应→内心思考→采取行动修复跳步，并让对白强化期待、爽感或悬念；把说明书式设定改成角色语气、立场、追问、误导或动作承接，用下行质疑、上行证据和核心信息兑现形成信息拉扯；按口癖、节奏、信息偏好、身份措辞和关系阶段重写角色声线，避免所有角色同腔；按普通人震惊、专业人士分析、特殊身份者反应重排群众/弹幕递进，每条群众反应短小精悍，不代替主线；连续多轮对话后插入换气，紧张段落改短促，关键信息放到对话开头或结尾，动作和表情只保留在关键转折处；读者已知信息改成叙事一句话概括，能用突发状况替代的对话直接替换，用配角对话替代主角旁白平铺直叙，新增配角必须绑定主线戏份；同一场景超过3个配角发言时，只保留功能最强的3个，其余合并为旁观反应、动作、沉默或叙事概括；把梗式对白改成角色说不出来但意思到了的口吻，用梗强化记忆点或高潮落点，不得直接复刻热梗原句；把大量信息必须靠对白展示的段落拆成情节、心理、旁白、环境或动作，把问答式的一问一答改成主动发言、反应、动作、沉默和心理承接，确保遮住角色名仍能区分是谁在说话，单次对话不超过全节 40%，逐句改成自然口语交流，并让对话结尾预示接下来的节奏变化。',
     '16. 如果自检结果包含 plot_dynamics_checks，必须优先修复 status=fail/warn 的剧情动力缺口；按 key/label/evidence/fix 补目标阻碍行动反馈闭环、假胜崩解、代价反馈、A/B情绪交替、驱动方式、多线错峰或悬置收尾；驱动方式缺口要按题材修：番茄爽文/打脸文每章补一个外部结果（赢、升级、对手栽），追妻/虐心/世情补持续人物心结，混合模式让主线事件推进并每 3-5 章插情感停顿。',
     '17. 如果自检结果包含 continuity_heat_checks，必须优先修复 status=fail/warn 的连续性热度缺口；按 key/label/evidence/fix 补 hot 元素推进、warm 元素保温、cold 元素升温、archived 线不误激活或合理休眠说明。',
-    '18. 如果自检结果包含 character_relation_checks，必须优先修复 status=fail/warn 的角色关系缺口；按 key/label/evidence/fix 补关系类型、关系考验/变化、主角独立目标、目标归属、角色不止恋爱、配角期待枢纽/人物扣、配角主动行动、态度变化和阶段匹配；目标归属缺口要把“帮别人实现目标”改成主角自己的诉求、主动选择和代价，再让配角目标与主角目标摩擦或互补；角色不止恋爱缺口要给关系角色补事业、责任、资源、身份、家族、风险或行动线，让情感推进踩在自己的选择和代价上；配角期待枢纽缺口要选一个关键配角做任务基地，同时挂短期和长期期待，让主角解决事件装完逼后回到该人物处开启下一轮新任务/新剧情，若人物下线则补更大好处来转化损失厌恶。',
+    '18. 如果自检结果包含 character_relation_checks，必须优先修复 status=fail/warn 的角色关系缺口；按 key/label/evidence/fix 补关系类型、关系考验/变化、主角独立目标、目标归属、角色不止恋爱、配角期待枢纽/人物扣、配角攻略缓冲区、配角主动行动、态度变化和阶段匹配；目标归属缺口要把“帮别人实现目标”改成主角自己的诉求、主动选择和代价，再让配角目标与主角目标摩擦或互补；角色不止恋爱缺口要给关系角色补事业、责任、资源、身份、家族、风险或行动线，让情感推进踩在自己的选择和代价上；配角期待枢纽缺口要选一个关键配角做任务基地，同时挂短期和长期期待，让主角解决事件装完逼后回到该人物处开启下一轮新任务/新剧情，若人物下线则补更大好处来转化损失厌恶；配角攻略缓冲区缺口要补信息差、地位差距、亲密度差距或信任程度，并让配角从旁观/质疑/拒绝/试探转为行动/协助/设限，不能只等主角触发。',
     '19. 如果自检结果包含 character_behavior_checks，必须优先修复 status=fail/warn 的角色行为缺口；按 key/label/evidence/fix 补动机链、动机具体性、主角行为三必须、行为证据、三层标签反差、主角逼格反应、人设强关联、记忆锚点、配角功能、反派内在逻辑、反派分量、反派自我叙事和反派层级退场；动机具体性缺口要把“被欺负/被针对”改成具体事件，把“要成为最强/想变强”改成情感层面的理由，并补动机变化的触发事件、关系压力或代价；主角逼格反应缺口要把升级后暴怒、面红耳赤、歇斯底里或被低级挑衅牵着走，改成升级只提升实力/能力、主角仍轻描淡写、短句反锁或行动压制，必要时用旁观者认知变化放大爽点；强关联缺口要为重要角色补至少3个影响剧情走向、核心梗装逼爽点或人物碰撞的实力/资源/人脉/背景/技能/证据/关系锚点，弱关联只能留作记忆点；反派分量缺口要补真实威胁、可信动机、终极意图时机，并让反派长处照出主角弱点；反派自我叙事缺口要补梦想、创伤/旧痛、让人恨不起来的侧面和理念冲突；反派层级缺口要按小反派/中等反派/大弧 Boss/最终 Boss 修正篇幅、功能和退场方式。',
     '20. 如果自检结果包含 asset_linkage_checks，必须优先修复 status=fail/warn 的资产挂钩缺口；按 key/label/evidence/fix 补资产功能、归属、触发条件、限制、后果、状态变化、贯穿物件三次出现和设定随冲突释放。',
     '21. 如果自检结果包含 state_tracking_checks，必须优先修复 status=fail/warn 的状态筛选缺口；按 key/label/evidence/fix 修角色状态、上一章承接、伏笔前史、世界约束、来源边界和上下文过载问题，并在修订后的 oh_story_delivery_receipts.pre_draft_execution_receipts.status_filter_receipts 中逐项更新 used_in_chapter/evidence/excluded_reason/remaining_risk。',
