@@ -24187,6 +24187,33 @@ function benchmarkRecallHardGapMisses(brief: any = {}) {
   }]
 }
 
+function benchmarkRecallAnchorExcerptCopyRisks(brief: any = {}, chapterText: string) {
+  const text = String(chapterText || '')
+  return asArray(brief?.anchor_excerpts || brief?.anchorExcerpts)
+    .map((excerpt: any, index: number) => {
+      const rawExcerpt = String(excerpt || '').replace(/\s+/g, ' ').trim()
+      if (!rawExcerpt) return null
+      const candidates = uniqueBriefStrings([
+        rawExcerpt,
+        ...rawExcerpt.split(/[。！？!?；;\n\r]+/g),
+        ...rawExcerpt.split(/[，,、：:]/g),
+      ].map((item: any) => String(item || '').trim()).filter(item => countProseChars(item) >= 10), 12)
+      const copied = candidates.find(candidate => text.includes(candidate))
+      if (!copied) return null
+      return {
+        key: 'benchmark_anchor_excerpt_copy_risk',
+        label: '原文锚点复制风险',
+        text: `anchor_excerpts 第${index + 1}段出现可定位原句复制：${compactBriefText(copied, 120)}`,
+        evidence: copied,
+        delivered: false,
+        status: 'warn',
+        score: 0,
+        fix: '删除或改写锚点原句；只保留句长、停顿、潜台词和信息释放手法，换成本书人物、事件、设定和措辞。',
+      }
+    })
+    .filter(Boolean)
+}
+
 export function buildBenchmarkRecallSyncReport(project: any, chapter: any, contextPackage: any, chapterText: string) {
   const brief = benchmarkRecallBriefFromContext(contextPackage, chapter)
   const hasCanonicalConflict = [
@@ -24206,10 +24233,11 @@ export function buildBenchmarkRecallSyncReport(project: any, chapter: any, conte
   const checked = planned.map(item => benchmarkRecallBeatMatch(item, chapterText))
   const delivered = checked.filter(item => item.delivered)
   const hardGapMisses = benchmarkRecallHardGapMisses(brief)
-  const missed = [...hardGapMisses, ...checked.filter(item => !item.delivered)]
+  const anchorCopyRisks = benchmarkRecallAnchorExcerptCopyRisks(brief, chapterText)
+  const missed = [...hardGapMisses, ...anchorCopyRisks, ...checked.filter(item => !item.delivered)]
   const missedCount = missed.length
   const score = Math.max(0, Math.min(100, Math.round(
-    hardGapMisses.length ? 0 : planned.length ? (delivered.length / planned.length) * 100 : 82,
+    hardGapMisses.length ? 0 : planned.length ? (delivered.length / planned.length) * 100 - anchorCopyRisks.length * 18 : 82 - anchorCopyRisks.length * 18,
   )))
   const status = missedCount > 0 || score < 78 ? 'warn' : 'ok'
 
@@ -24230,10 +24258,12 @@ export function buildBenchmarkRecallSyncReport(project: any, chapter: any, conte
     planned,
     delivered,
     missed,
+    copied_anchor_excerpts: anchorCopyRisks.map((item: any) => item.evidence),
     next_actions: status === 'ok'
       ? ['保持文风召回：模块进情绪，节奏进爆发，技法只学抽象功能，不复制原文。']
       : [
           '下一次修订优先补足文风召回 missed 项，把节奏参照、情绪模块和匹配章技法写成正文可见的压迫、爆发、冷却、反应或章尾承接。',
+          anchorCopyRisks.length ? '存在原文锚点复制风险：删除或改写锚点原句，只保留句长、停顿、潜台词和信息释放手法。' : '',
           missed.some((item: any) => item.key === 'benchmark_authority_rule') ? '存在召回权威缺口：情绪模块/节奏参照优先，文风只管表达，不得压低情绪爆发或覆盖节奏。' : '',
           missed.some((item: any) => item.key === 'benchmark_canonical_source_rule') ? '存在召回来源权威缺口：按 剧情/情绪模块.md 和 剧情/节奏.md 执行，情绪模块/节奏参照优先，文风.md 只管表达层。' : '',
           hardGapMisses.length ? '重跑 /story-long-analyze Stage 3+ 或重新 /story-import，补齐情绪模块、节奏参照或文风画像后再进入正文生成。' : '',

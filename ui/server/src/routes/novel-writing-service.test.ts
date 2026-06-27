@@ -38884,6 +38884,36 @@ describe('readability and restrained meme workflow', () => {
     expect(warnReport.next_actions.join('；')).toContain('文风召回')
   })
 
+  test('flags copied benchmark anchor excerpts after delivery', () => {
+    const project = { title: '旧城维修师', reference_config: {} }
+    const chapter = { id: 18, chapter_no: 18, title: '雨夜反证' }
+    const contextPackage = {
+      chapter_target: {
+        benchmark_recall_brief: {
+          selected_emotion_module: 'M03 信息差反杀',
+          rhythm_reference: '先压三轮质问，再用证据爆发。',
+          style_profile_summary: '短句推进审讯压力，对白留半拍。',
+          anchor_excerpts: [
+            '雨声贴着瓦檐往下压。掌柜没有立刻辩解，只把账册翻到缺页前一行，让所有人先看见那枚旧印。',
+          ],
+        },
+      },
+    }
+    const copiedText = [
+      '执事第一轮压问旧账从哪里来，李玄没有立刻答。',
+      '雨声贴着瓦檐往下压。掌柜没有立刻辩解，只把账册翻到缺页前一行，让所有人先看见那枚旧印。',
+      '他才把缺页和旧印推到灯下，旁观弟子当场倒戈。',
+    ].join('\n')
+
+    const report = buildBenchmarkRecallSyncReport(project, chapter, contextPackage, copiedText)
+
+    expect(report.status).toBe('warn')
+    expect(report.missed.map((item: any) => item.key)).toContain('benchmark_anchor_excerpt_copy_risk')
+    expect(report.missed.find((item: any) => item.key === 'benchmark_anchor_excerpt_copy_risk')?.label).toBe('原文锚点复制风险')
+    expect(report.copied_anchor_excerpts.join('｜')).toContain('账册翻到缺页前一行')
+    expect(report.next_actions.join('；')).toContain('锚点原句')
+  })
+
   test('keeps benchmark recall sync open when primary module or rhythm contract is missing', () => {
     const report = buildBenchmarkRecallSyncReport(
       { title: '残阵问道', reference_config: {} },
