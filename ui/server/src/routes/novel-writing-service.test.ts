@@ -19279,6 +19279,84 @@ describe('chapter pre-draft brief', () => {
     expect(reviewPromptBlock).toContain('副书文风污染')
   })
 
+  test('orders secondary benchmark recall by oh-story relevance and trims entries within stage budget', () => {
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+    const contextPackage = {
+      chapter_target: {
+        chapter_no: 18,
+        title: '雨夜反证',
+        summary: '李玄在雨夜审讯中用旧账册反证执事换证。',
+        conflict: '执事抢先定义证词，旁观弟子准备倒向他。',
+        benchmark_recall_brief: {
+          selected_emotion_module: 'M03 信息差反杀',
+          rhythm_reference: '先压三轮质问，再用证据爆发。',
+          style_profile_summary: '主对标文风：短句推进审讯压力，对白留半拍。',
+          secondary_benchmark_total_budget: 5,
+          benchmark_registry_missing: true,
+          secondary_benchmark_recall_summary: [
+            {
+              book_title: '副弱书',
+              citation_strength: '参考',
+              relevance: '弱相关',
+              recall_stage: '设定',
+              recall_count: 2,
+              usage: '只参考组织层级，不进入文风。',
+            },
+            {
+              book_title: '副同题材辅书',
+              citation_strength: '辅',
+              relevance: '同题材',
+              recall_stage: '大纲',
+              recall_count: 4,
+              registry_order: 2,
+              usage: '只参考证据链分批释放结构。',
+            },
+            {
+              book_title: '副同题材参考书',
+              citation_strength: '参考',
+              relevance: '同题材',
+              recall_stage: '大纲',
+              recall_count: 3,
+              registry_order: 1,
+              usage: '只参考章节钩子组合。',
+            },
+          ],
+        },
+        scene_cards: [],
+      },
+    }
+
+    const brief = buildChapterPreDraftBrief({ title: '旧城维修师' }, contextPackage)
+    const confirmedContext = mergeConfirmedPreDraftBriefIntoContext(contextPackage, {
+      ...brief,
+      confirmed_at: '2026-06-22T13:02:00.000Z',
+    })
+    const prompt = service.buildParagraphProseContext(
+      { title: '旧城维修师' },
+      confirmedContext,
+      null,
+      { chapter_no: 18, title: '雨夜反证' },
+    )
+    const rows = brief.benchmark_recall_brief.secondary_benchmark_recall_summary
+
+    expect(rows.map((row: any) => row.book_title)).toEqual(['副同题材辅书', '副同题材参考书', '副弱书'])
+    expect(rows.reduce((sum: number, row: any) => sum + Number(row.recall_count || 0), 0)).toBe(5)
+    expect(rows[1].budget_trimmed).toBe(true)
+    expect(rows[1].recall_count).toBe(1)
+    expect(rows[2].recall_count).toBe(0)
+    expect(brief.benchmark_recall_brief.gaps.join('｜')).toContain('benchmark_registry_missing')
+    expect(brief.benchmark_recall_brief.secondary_benchmark_boundary_rules.join('｜')).toContain('同题材 > 弱相关 > 参考')
+    expect(brief.benchmark_recall_brief.secondary_benchmark_boundary_rules.join('｜')).toContain('裁剪召回条目，不删除书目记录')
+    expect(prompt).toContain('副同题材辅书')
+    expect(prompt.indexOf('副同题材辅书')).toBeLessThan(prompt.indexOf('副同题材参考书'))
+    expect(prompt).toContain('benchmark_registry_missing')
+    expect(prompt).toContain('裁剪召回条目，不删除书目记录')
+  })
+
   test('asks prose generation to output intent confirmation and benchmark recall execution receipts', () => {
     const service = createNovelWritingService({
       getProject: async () => null,

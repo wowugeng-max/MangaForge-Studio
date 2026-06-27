@@ -42458,6 +42458,9 @@ const SECONDARY_BENCHMARK_BOUNDARY_RULES = [
   '副书不进文风、不进原文锚点；正文 prompt 不读取副书文风.md、副书原文或副书原句。',
   '主对标最多 1 本用于文风和原文锚点；副对标只能提供可抽象复用的结构、情绪、设定或角色关系参考。',
   '若副对标与主对标口吻冲突，主对标文风和当前作品契约优先，副对标只保留结构用途。',
+  '副对标执行排序：同题材 > 弱相关 > 参考；同级再按引用强度 辅 > 参考，最后按对标书列表顺序或书名稳定排序。',
+  '副书数量不限；超过阶段预算时裁剪召回条目，不删除书目记录。',
+  '缺少对标书列表或有副书未登记时，保留 gaps.benchmark_registry_missing，提示补全清单。',
 ]
 
 const OH_STORY_BENCHMARK_CANONICAL_SOURCE_RULES = [
@@ -42515,14 +42518,79 @@ function secondaryBenchmarkRecallSources(value: any) {
   ]
 }
 
+function secondaryBenchmarkRankText(value: any) {
+  return compactBriefText(value).toLowerCase()
+}
+
+function secondaryBenchmarkRelevanceRank(value: any) {
+  const text = secondaryBenchmarkRankText(value)
+  if (/同题材|same/.test(text)) return 0
+  if (/弱相关|weak/.test(text)) return 1
+  if (/参考|reference|ref/.test(text)) return 2
+  if (/不相关|irrelevant/.test(text)) return 9
+  return 3
+}
+
+function secondaryBenchmarkStrengthRank(value: any) {
+  const text = secondaryBenchmarkRankText(value)
+  if (/辅|support|secondary/.test(text)) return 0
+  if (/参考|reference|ref/.test(text)) return 1
+  return 2
+}
+
+function secondaryBenchmarkTotalBudget(...sources: any[]) {
+  const candidates = sources.flatMap(source => [
+    source?.secondary_benchmark_total_budget,
+    source?.secondaryBenchmarkTotalBudget,
+    source?.secondary_benchmark_stage_budget,
+    source?.secondaryBenchmarkStageBudget,
+    source?.benchmark_recall?.secondary_benchmark_total_budget,
+    source?.benchmarkRecall?.secondaryBenchmarkTotalBudget,
+    source?.style_recall?.secondary_benchmark_total_budget,
+    source?.styleRecall?.secondaryBenchmarkTotalBudget,
+  ])
+  const budget = candidates.map(value => Number(value)).find(value => Number.isFinite(value) && value >= 0)
+  return budget ?? null
+}
+
+function applySecondaryBenchmarkBudget(rows: any[], totalBudget: number | null) {
+  if (totalBudget === null) return rows
+  let remaining = Math.max(0, Math.floor(totalBudget))
+  return rows.map(row => {
+    const requested = Math.max(0, Number(row.recall_count || 0) || 0)
+    const allowed = Math.min(requested, remaining)
+    remaining -= allowed
+    return {
+      ...row,
+      recall_count: allowed,
+      requested_recall_count: requested,
+      budget_trimmed: allowed < requested,
+      budget_note: allowed < requested ? `阶段总预算剩余不足，按 oh-story 跨书召回规则裁剪 ${requested - allowed} 条召回内容但保留书目记录。` : '',
+    }
+  })
+}
+
+function secondaryBenchmarkRegistryMissing(...sources: any[]) {
+  return sources.some(source => {
+    if (!source || typeof source !== 'object') return false
+    if (source.benchmark_registry_missing || source.benchmarkRegistryMissing || source.registry_missing || source.registryMissing) return true
+    if (benchmarkRecallHasGap(benchmarkRecallGapStrings(source.gaps || source.recall_gaps || source.recallGaps), /benchmark_registry_missing|对标书列表.*缺|未登记/)) return true
+    return secondaryBenchmarkRecallSources(source)
+      .flatMap(item => asArray(item))
+      .some((row: any) => row?.benchmark_registry_missing || row?.benchmarkRegistryMissing || row?.registry_order_missing || row?.registryOrderMissing)
+  })
+}
+
 function normalizeSecondaryBenchmarkRecallSummary(...sources: any[]) {
-  return uniqueObjectReferences(
+  const totalBudget = secondaryBenchmarkTotalBudget(...sources)
+  const rows = uniqueObjectReferences(
     sources.flatMap(source => secondaryBenchmarkRecallSources(source).flatMap(item => asArray(item))),
   )
-    .map((row: any) => {
+    .map((row: any, index: number) => {
       const bookTitle = compactBriefText(row?.book_title || row?.bookTitle || row?.book || row?.title || row?.name)
       const usage = compactBriefText(row?.usage || row?.usage_method || row?.usageMethod || row?.use || row?.summary || row?.note)
       if (!bookTitle && !usage) return null
+      const registryOrder = Number(row?.registry_order ?? row?.registryOrder ?? row?.benchmark_order ?? row?.benchmarkOrder ?? row?.order)
       return {
         book_title: bookTitle || '副对标',
         citation_strength: compactBriefText(row?.citation_strength || row?.citationStrength || row?.reference_strength || row?.referenceStrength || row?.strength, '参考'),
@@ -42530,10 +42598,21 @@ function normalizeSecondaryBenchmarkRecallSummary(...sources: any[]) {
         recall_stage: compactBriefText(row?.recall_stage || row?.recallStage || row?.stage, '正文'),
         recall_count: Number(row?.recall_count ?? row?.recallCount ?? row?.count ?? 0) || 0,
         usage,
+        registry_order: Number.isFinite(registryOrder) ? registryOrder : null,
+        _source_index: index,
       }
     })
     .filter(Boolean)
+    .sort((a: any, b: any) => (
+      secondaryBenchmarkRelevanceRank(a.relevance) - secondaryBenchmarkRelevanceRank(b.relevance)
+      || secondaryBenchmarkStrengthRank(a.citation_strength) - secondaryBenchmarkStrengthRank(b.citation_strength)
+      || (a.registry_order ?? Number.MAX_SAFE_INTEGER) - (b.registry_order ?? Number.MAX_SAFE_INTEGER)
+      || String(a.book_title || '').localeCompare(String(b.book_title || ''), 'zh-Hans-CN')
+      || Number(a._source_index || 0) - Number(b._source_index || 0)
+    ))
+    .map(({ _source_index, ...row }: any) => row)
     .slice(0, 8)
+  return applySecondaryBenchmarkBudget(rows, totalBudget)
 }
 
 function buildBenchmarkRecallBrief(contextPackage: any = {}, options: any = {}) {
@@ -42567,7 +42646,10 @@ function buildBenchmarkRecallBrief(contextPackage: any = {}, options: any = {}) 
         : contextPackage?.chapter_target,
     }, options) || {}
     const authority = benchmarkRecallAuthorityFromGaps(explicit, gaps.length ? gaps : asArray(derived.gaps))
-    const effectiveGaps = gaps.length ? gaps : asArray(derived.gaps)
+    const effectiveGaps = uniqueBriefStrings([
+      ...(gaps.length ? gaps : asArray(derived.gaps)),
+      secondaryBenchmarkRegistryMissing(explicit, derived) ? 'benchmark_registry_missing' : '',
+    ], 12)
     if (benchmarkRecallIsNoBenchmark(effectiveGaps)) return null
     const toneMatchFailed = benchmarkRecallHasGap(effectiveGaps, /tone_match_failed|基调匹配失败|tone match failed/i)
     const profileDegenerate = benchmarkRecallHasGap(effectiveGaps, /profile_degenerate|文风不可用|文风画像退化|profile degenerate/i)
@@ -42693,16 +42775,20 @@ function buildBenchmarkRecallBrief(contextPackage: any = {}, options: any = {}) 
     benchmarkStrategy?.benchmark_recall?.gaps,
     benchmarkStrategy?.benchmarkRecall?.gaps,
   )
-  if (benchmarkRecallIsNoBenchmark(gaps)) return null
-  const toneMatchFailed = benchmarkRecallHasGap(gaps, /tone_match_failed|基调匹配失败|tone match failed/i)
-  const profileDegenerate = benchmarkRecallHasGap(gaps, /profile_degenerate|文风不可用|文风画像退化|profile degenerate/i)
-  const hasRecall = Boolean(selectedEmotionModule || rhythmReference || styleProfileSummary || matchedChapter || matchedTechniques.length || styleDirectives.length || sourcePaths.length || anchorExcerpts.length || gaps.length)
+  const effectiveGaps = uniqueBriefStrings([
+    ...gaps,
+    secondaryBenchmarkRegistryMissing(styleStrategy, benchmarkStrategy) ? 'benchmark_registry_missing' : '',
+  ], 12)
+  if (benchmarkRecallIsNoBenchmark(effectiveGaps)) return null
+  const toneMatchFailed = benchmarkRecallHasGap(effectiveGaps, /tone_match_failed|基调匹配失败|tone match failed/i)
+  const profileDegenerate = benchmarkRecallHasGap(effectiveGaps, /profile_degenerate|文风不可用|文风画像退化|profile degenerate/i)
+  const hasRecall = Boolean(selectedEmotionModule || rhythmReference || styleProfileSummary || matchedChapter || matchedTechniques.length || styleDirectives.length || sourcePaths.length || anchorExcerpts.length || effectiveGaps.length)
   if (!hasRecall) return null
   const authority = benchmarkRecallAuthorityFromGaps({
     selected_emotion_module: selectedEmotionModule,
     rhythm_reference: rhythmReference,
     style_profile_summary: styleProfileSummary,
-  }, gaps)
+  }, effectiveGaps)
   return {
     version: 'oh_story_benchmark_recall_v1',
     source: 'oh_story_workflow_daily_step_2_3',
@@ -42718,7 +42804,7 @@ function buildBenchmarkRecallBrief(contextPackage: any = {}, options: any = {}) 
     canonical_source_rules: OH_STORY_BENCHMARK_CANONICAL_SOURCE_RULES,
     secondary_benchmark_recall_summary: secondaryBenchmarkRecallSummary,
     secondary_benchmark_boundary_rules: secondaryBenchmarkBoundaryRules,
-    gaps,
+    gaps: effectiveGaps,
     authority_rules: authority.authority_rules,
     conflict_resolution: authority.conflict_resolution,
     quality_checks: [
