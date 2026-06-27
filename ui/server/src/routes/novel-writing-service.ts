@@ -41100,6 +41100,7 @@ const OH_STORY_STATE_TRACKING_SOURCE_REQUIREMENTS = [
   '追踪/伏笔.md',
   '追踪/时间线.md',
   '追踪/角色状态.md 或对应角色设定',
+  '已加载判定：只承认本轮 workflow 内实际读取或刚更新的来源，不承认未标明来源的聊天记忆。',
 ]
 
 const OH_STORY_STATE_TRACKING_CHECKS = [
@@ -41108,7 +41109,7 @@ const OH_STORY_STATE_TRACKING_CHECKS = [
   '前史因果接住：上一章钩子、待回收伏笔和本章开场/冲突之间必须有可见承接。',
   '世界约束生效：规则、地点、能力限制、触发条件和代价必须影响本章行动选择。',
   '上下文不过载：不得把无关背景、纯百科设定或本章不会使用的信息塞进正文。',
-  '来源边界清楚：不得用未标明来源的聊天记忆替代角色状态、伏笔或时间线。',
+  '来源边界清楚：已加载只指本轮 workflow 内实际读取或刚更新；不得用未标明来源的聊天记忆替代角色状态、伏笔或时间线。',
 ]
 
 function stateTrackingExplicitContract(contextPackage: any = {}) {
@@ -47706,6 +47707,7 @@ export function createNovelWritingService(ctx: {
       stateTrackingContract ? '【状态筛选合同】' : '',
       stateTrackingContract ? '硬性要求：执行 chapter_target.state_tracking_contract；这是来自 oh-story state-tracking / workflow-daily Step 2.2 的本节速记口径，写正文前必须只加载/只使用会影响本章正确性的状态，也就是“如果不知道这个，本章会写错”的信息。' : '',
       stateTrackingContract ? '执行方式：本节速记必须分成角色状态、相关伏笔/前史、世界约束；角色状态不得漂移，上一章钩子和待回收伏笔必须接住，世界规则/地点/能力限制必须影响行动选择。' : '',
+      stateTrackingContract ? '来源边界：source_requirements 的“已加载”只承认本轮 workflow 内实际读取或刚更新的本章细纲、上一章正文/尾段、追踪/上下文、追踪/伏笔、追踪/时间线、追踪/角色状态或对应角色设定；不得用未标明来源的聊天记忆替代。' : '',
       stateTrackingContract?.source_readiness?.length ? `来源就绪表：${JSON.stringify(stateTrackingContract.source_readiness).slice(0, 1800)}` : '',
       stateTrackingContract?.character_states?.length ? `角色状态：${stateTrackingContract.character_states.join('；')}` : '',
       stateTrackingContract?.historical_causality?.length ? `相关伏笔/前史：${stateTrackingContract.historical_causality.join('；')}` : '',

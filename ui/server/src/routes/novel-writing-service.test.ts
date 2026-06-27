@@ -18192,6 +18192,8 @@ describe('chapter pre-draft brief', () => {
     expect(prompt).toContain('角色状态')
     expect(prompt).toContain('相关伏笔/前史')
     expect(prompt).toContain('世界约束')
+    expect(prompt).toContain('本轮 workflow 内实际读取或刚更新')
+    expect(prompt).toContain('不得用未标明来源的聊天记忆替代')
     expect(prompt).toContain('state_tracking_checks')
     expect(prompt.indexOf('【状态筛选合同】')).toBeLessThan(prompt.indexOf('【结构化上下文包】'))
   })
