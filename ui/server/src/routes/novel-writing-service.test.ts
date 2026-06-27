@@ -85,6 +85,7 @@ import {
   buildStoryUnitSyncReport,
   buildVolumeBeatSyncReport,
   buildStoryStateSyncContextPackage,
+  buildStyleFingerprintStateSnapshot,
   buildSceneCardConsumptionChecks,
   scanSceneCardReceiptRisks,
   verifiedSceneBreakdownForStateSync,
@@ -435,6 +436,36 @@ describe('normalizeSceneCardsPayload', () => {
     expect(sceneCards[1].style_directives.join('｜')).toContain('按文风指纹/文风.md')
     expect(sceneCards[0].style_directives.join('｜')).toContain('不要模仿可能已漂移的上一章句式节奏')
     expect(sceneCards[0].serial_risk_repairs).toContain('文风指纹')
+  })
+
+  test('builds a durable story-state style fingerprint snapshot from the target sentence band', () => {
+    const snapshot = buildStyleFingerprintStateSnapshot({
+      chapter_target: {
+        style_sample_strategy: {
+          style_profile_summary: '文风指纹：目标句长带 18-36 字，允许半拍停顿，但整体保持中长句呼吸。',
+        },
+      },
+    })
+
+    expect(snapshot?.style_fingerprint).toContain('目标句长带 18-36 字')
+    expect(snapshot?.style_fingerprint_contract?.target_sentence_band).toBe('18-36字')
+    expect(snapshot?.style_fingerprint_contract?.policy).toContain('不以可能已漂移的上一章句式节奏为准')
+  })
+
+  test('keeps an existing story-state style fingerprint instead of overwriting it', () => {
+    const snapshot = buildStyleFingerprintStateSnapshot({
+      chapter_target: {
+        style_sample_strategy: {
+          style_profile_summary: '文风指纹：目标句长带 18-36 字。',
+        },
+      },
+    }, {}, {
+      style_fingerprint: '文风指纹：目标句长带 20-42 字，旧上下文已锁定。',
+    })
+
+    expect(snapshot?.style_fingerprint).toContain('20-42 字')
+    expect(snapshot?.style_fingerprint).not.toContain('18-36 字')
+    expect(snapshot?.style_fingerprint_contract?.source).toBe('existing_story_state')
   })
 
   test('projects dialogue carry-over into scene dialogue goals', () => {
@@ -52664,6 +52695,19 @@ describe('chapter context word target source guards', () => {
     expect(generationReturnBlock).toContain('intent_confirmation_sync')
     expect(generationReturnBlock).toContain('benchmark_recall_sync')
     expect(generationReturnBlock).toContain('style_sample_sync')
+  })
+
+  test('persists the style fingerprint snapshot through the story state machine update', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const stateMachineBlock = source.slice(
+      source.indexOf('const updateStoryStateMachine = async'),
+      source.indexOf('const runProseGeneration', source.indexOf('const updateStoryStateMachine = async')),
+    )
+
+    expect(stateMachineBlock).toContain('buildStyleFingerprintStateSnapshot(contextPackage, project, project.reference_config?.story_state || {})')
+    expect(stateMachineBlock).toContain('stateDeltaWithStyleFingerprint')
+    expect(stateMachineBlock).toContain('story_state: mergeStoryState(project.reference_config?.story_state || {}, stateDeltaWithStyleFingerprint, chapter)')
+    expect(stateMachineBlock).toContain('payload.style_fingerprint = stateDeltaWithStyleFingerprint.style_fingerprint')
   })
 
   test('returns status filter receipt sync for unattended post-delivery gates', () => {

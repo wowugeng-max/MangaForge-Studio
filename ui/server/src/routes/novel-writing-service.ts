@@ -24179,6 +24179,62 @@ function styleFingerprintSentenceBeat(contextPackage: any, strategy: any) {
   }
 }
 
+export function buildStyleFingerprintStateSnapshot(contextPackage: any = {}, project: any = {}, existingStoryState: any = {}) {
+  const existingState = {
+    ...(project?.reference_config?.story_state || {}),
+    ...(project?.referenceConfig?.storyState || {}),
+    ...(existingStoryState || {}),
+  }
+  const existingText = compactBriefText(existingState.style_fingerprint || existingState.styleFingerprint, '')
+  if (existingText) {
+    const existingBand = styleFingerprintSentenceBand(existingText)
+    return {
+      style_fingerprint: existingText,
+      style_fingerprint_contract: existingState.style_fingerprint_contract || existingState.styleFingerprintContract || {
+        source: 'existing_story_state',
+        target_sentence_band: existingBand ? `${existingBand.min}-${existingBand.max}字` : '',
+        min_sentence_chars: existingBand?.min || null,
+        max_sentence_chars: existingBand?.max || null,
+        policy: '每章写前按文风指纹确定句长节奏，不以可能已漂移的上一章句式节奏为准。',
+      },
+    }
+  }
+
+  const target = {
+    ...(contextPackage?.chapterTarget || {}),
+    ...(contextPackage?.chapter_target || {}),
+  }
+  const brief = {
+    ...(contextPackage?.preDraftBrief || {}),
+    ...(contextPackage?.pre_draft_brief || {}),
+    ...(target?.preDraftBrief || {}),
+    ...(target?.pre_draft_brief || {}),
+  }
+  const strategy = target.style_sample_strategy
+    || target.styleSampleStrategy
+    || brief.style_sample_strategy
+    || brief.styleSampleStrategy
+  const source = styleFingerprintTextFromContext(contextPackage, strategy)
+  const band = styleFingerprintSentenceBand(source)
+  if (!band) return null
+
+  const sourceExcerpt = compactBriefText(band.source || source, 220)
+  return {
+    style_fingerprint: compactBriefText(
+      `文风指纹：目标句长带 ${band.min}-${band.max} 字；${sourceExcerpt}；每章写前按此定句长节奏，不照抄可能已漂移的上一章。`,
+      360,
+    ),
+    style_fingerprint_contract: {
+      source: 'context_style_fingerprint',
+      target_sentence_band: `${band.min}-${band.max}字`,
+      min_sentence_chars: band.min,
+      max_sentence_chars: band.max,
+      source_excerpt: sourceExcerpt,
+      policy: '每章写前按文风指纹/文风.md/原文锚点确定句长节奏；续写衔接剧情，不以可能已漂移的上一章句式节奏为准。',
+    },
+  }
+}
+
 function proseSegmentLengths(chapterText: string) {
   return String(chapterText || '')
     .split(/[。！？!?，,、；;：:\n\r]+/g)
@@ -47228,6 +47284,8 @@ export function createNovelWritingService(ctx: {
       next_chapter_priorities: asArray(source.next_chapter_priorities || source.nextChapterPriorities),
       layered_memory_context: source.layered_memory_context || source.layeredMemoryContext,
       progress_summary: source.progress_summary || source.progressSummary,
+      style_fingerprint: source.style_fingerprint ?? source.styleFingerprint,
+      style_fingerprint_contract: source.style_fingerprint_contract || source.styleFingerprintContract,
     }
   }
 
@@ -47268,11 +47326,17 @@ export function createNovelWritingService(ctx: {
     })
     const payload = getNovelPayload(result)
     const stateDelta = normalizeStoryStateDeltaForStorage(payload?.state_delta || payload?.stateDelta || {})
+    const styleFingerprintSnapshot = buildStyleFingerprintStateSnapshot(contextPackage, project, project.reference_config?.story_state || {})
+    const stateDeltaWithStyleFingerprint = styleFingerprintSnapshot
+      ? { ...stateDelta, ...styleFingerprintSnapshot }
+      : stateDelta
     const nextReferenceConfig = {
       ...(project.reference_config || {}),
-      story_state: mergeStoryState(project.reference_config?.story_state || {}, stateDelta, chapter),
+      story_state: mergeStoryState(project.reference_config?.story_state || {}, stateDeltaWithStyleFingerprint, chapter),
     }
     await updateNovelProject(activeWorkspace, project.id, { reference_config: nextReferenceConfig } as any)
+    payload.style_fingerprint = stateDeltaWithStyleFingerprint.style_fingerprint
+    payload.style_fingerprint_contract = stateDeltaWithStyleFingerprint.style_fingerprint_contract
     const chapters = await listNovelChapters(activeWorkspace, project.id)
     const chapterTitleUniquenessSync = buildChapterTitleUniquenessSyncReport(chapters, chapter)
     await createNovelReview(activeWorkspace, {
