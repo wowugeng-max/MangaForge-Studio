@@ -5097,6 +5097,8 @@ export function buildProseWordTargetExpansionPrompt(project: any, contextPackage
   const attempt = Number(options.attempt || 1)
   const maxAttempts = Number(options.maxAttempts || 1)
   const deficit = Math.max(0, Number(evaluation.deficit || 0))
+  const targetCount = Number(evaluation.target || target.target || 0)
+  const underNinetyPercent = targetCount > 0 && Number(evaluation.actual || 0) < Math.ceil(targetCount * 0.9)
   return [
     '任务：将本章正文扩写到商业网文标准章节长度。',
     `作品标题：${project.title || '未命名作品'}`,
@@ -5104,6 +5106,8 @@ export function buildProseWordTargetExpansionPrompt(project: any, contextPackage
     maxAttempts > 1 ? `这是第 ${attempt} 轮补写，共最多 ${maxAttempts} 轮。` : '',
     `当前正文约 ${evaluation.actual} 字，目标 ${evaluation.target || target.target || 3000} 字，至少 ${evaluation.min || target.min || 2800} 字，可接受上限 ${evaluation.max || target.max || 3500} 字。`,
     deficit > 0 ? `当前仍缺至少 ${deficit} 字；本轮必须优先补足缺口，再检查章节结尾是否自然。` : '',
+    underNinetyPercent ? 'oh-story 90% 字数门禁：当前低于目标 90%，先回到 chapter_blueprint 补充更多子事件/情节点，再把新增子事件写成正文；优先把承载爽点/卖点的情节点展开成具体事例，过渡点保持带过，爽点/卖点优先保扩，不得均匀注水。' : '',
+    underNinetyPercent ? '蓝图回补回执：输出 expansion_blueprint_patch，字段 added_beats(array, 新增情节点), expanded_beats(array, 原情节点补充的子事件), compressed_beats(array, 过渡点保持带过的理由)；每项必须写 beat_no/scene_no/action/function_tag/payoff 或 reason。' : '',
     '硬性要求：不得删改已有效内容，不得把正文改成大纲、摘要或设定说明；必须保留本章主线、角色状态、章末钩子和已经成立的连续性。',
     '扩写重点：扩写动作过程、选择代价、对话交锋、章末钩子铺垫；补足每个场景的行动链、反应链、信息变化和后果，不要靠堆砌环境描写凑字数。',
     'oh-story 扩写守恒：不得用环境描写、重复情绪或内心独白凑字数；优先补感官细节、身体动作、对话交锋、阻碍/反应/发现/递进，每段只补 1-2 个有功能细节；不新增支线、设定、关系或时间线。',
@@ -5116,7 +5120,9 @@ export function buildProseWordTargetExpansionPrompt(project: any, contextPackage
     '【当前过短正文】',
     chapterText.slice(0, 18000),
     '',
-    '输出 JSON，包含 prose_chapters 数组。数组只能有一项，且必须包含 chapter_no, title, chapter_text, scene_breakdown, continuity_notes。scene_breakdown 必须保留并更新 scene_start_anchor、scene_end_anchor 和 scene_card_receipts。chapter_text 必须返回扩写后的完整正文，不要只返回新增段落，不要 markdown 标题。',
+    underNinetyPercent
+      ? '输出 JSON，包含 prose_chapters 数组。数组只能有一项，且必须包含 chapter_no, title, chapter_text, scene_breakdown, continuity_notes, expansion_blueprint_patch。scene_breakdown 必须保留并更新 scene_start_anchor、scene_end_anchor 和 scene_card_receipts。chapter_text 必须返回扩写后的完整正文，不要只返回新增段落，不要 markdown 标题。'
+      : '输出 JSON，包含 prose_chapters 数组。数组只能有一项，且必须包含 chapter_no, title, chapter_text, scene_breakdown, continuity_notes。scene_breakdown 必须保留并更新 scene_start_anchor、scene_end_anchor 和 scene_card_receipts。chapter_text 必须返回扩写后的完整正文，不要只返回新增段落，不要 markdown 标题。',
   ].filter(Boolean).join('\n')
 }
 
@@ -5132,6 +5138,11 @@ export function extractProseExpansionPayload(result: any) {
     text: String(expandedFirst?.chapter_text || expandedFirst?.chapterText || payload?.chapter_text || payload?.chapterText || ''),
     scene_breakdown: expandedFirst?.scene_breakdown || expandedFirst?.sceneBreakdown || payload?.scene_breakdown || payload?.sceneBreakdown || [],
     continuity_notes: expandedFirst?.continuity_notes || expandedFirst?.continuityNotes || payload?.continuity_notes || payload?.continuityNotes || [],
+    expansion_blueprint_patch: expandedFirst?.expansion_blueprint_patch
+      || expandedFirst?.expansionBlueprintPatch
+      || payload?.expansion_blueprint_patch
+      || payload?.expansionBlueprintPatch
+      || null,
     payload,
   }
 }
@@ -50074,6 +50085,7 @@ export function createNovelWritingService(ctx: {
           expansion: {
             scene_breakdown: extracted.scene_breakdown,
             continuity_notes: extracted.continuity_notes,
+            expansion_blueprint_patch: extracted.expansion_blueprint_patch,
             attempts,
             modelName: (expansionResult as any).modelName,
           },

@@ -9940,6 +9940,37 @@ describe('chapter prose word target', () => {
     expect(prompt).toContain('不新增支线、设定、关系或时间线')
   })
 
+  test('asks word-target expansion to patch blueprint beats before prose when below ninety percent', () => {
+    const target = resolveChapterWordTarget({}, { chapter_no: 1 }, {})
+    const evaluation = evaluateProseWordTarget('字'.repeat(1732), target)
+    const prompt = buildProseWordTargetExpansionPrompt(
+      { title: '审判庭旧账' },
+      {
+        chapter_target: {
+          chapter_no: 1,
+          title: '旧账开封',
+          word_target: target,
+          chapter_blueprint: {
+            beat_sequence: [
+              { beat_no: 1, scene_no: 1, action: '主角发现账册缺页', function_tag: '关键揭露', payoff: '旧账可反证' },
+              { beat_no: 2, scene_no: 1, action: '执事带人赶到', function_tag: '打脸', payoff: '公开压迫主角' },
+            ],
+          },
+        },
+      },
+      '字'.repeat(1732),
+      evaluation,
+    )
+
+    expect(prompt).toContain('oh-story 90% 字数门禁')
+    expect(prompt).toContain('先回到 chapter_blueprint 补充更多子事件/情节点')
+    expect(prompt).toContain('expansion_blueprint_patch')
+    expect(prompt).toContain('added_beats')
+    expect(prompt).toContain('expanded_beats')
+    expect(prompt).toContain('过渡点保持带过')
+    expect(prompt).toContain('爽点/卖点优先保扩')
+  })
+
   test('reads runtime camelCase chapterTarget word target when building expansion prompts', () => {
     const runtimeTarget = resolveChapterWordTarget({}, { chapter_no: 8 }, { word_target_mode: 'custom', target_word_count: 5200 })
     const evaluation = evaluateProseWordTarget('字'.repeat(3600), runtimeTarget)
@@ -10000,6 +10031,25 @@ describe('chapter prose word target', () => {
     expect(extracted.text).toBe('扩写后的正文')
     expect(extracted.scene_breakdown).toHaveLength(1)
     expect(extracted.continuity_notes).toEqual(['保留钩子'])
+  })
+
+  test('extracts blueprint expansion patch receipts from word-target expansion payloads', () => {
+    const extracted = extractProseExpansionPayload({
+      content: JSON.stringify({
+        prose_chapters: [{
+          chapter_text: '扩写后的正文',
+          expansion_blueprint_patch: {
+            added_beats: [{ beat_no: 3, function_tag: '爽点', action: '主角亮出第二本账册' }],
+            expanded_beats: [{ beat_no: 1, added_sub_events: ['账册缺页先引出质疑'] }],
+            compressed_beats: [{ beat_no: 2, reason: '赶路过渡带过' }],
+          },
+        }],
+      }),
+    })
+
+    expect(extracted.expansion_blueprint_patch.added_beats[0].function_tag).toBe('爽点')
+    expect(extracted.expansion_blueprint_patch.expanded_beats[0].added_sub_events[0]).toContain('账册缺页')
+    expect(extracted.expansion_blueprint_patch.compressed_beats[0].reason).toContain('带过')
   })
 
   test('recovers plain prose when a draft model ignores the JSON envelope', () => {
