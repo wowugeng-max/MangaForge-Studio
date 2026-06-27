@@ -22526,6 +22526,13 @@ describe('chapter pre-draft brief', () => {
     expect(brief.prose_craft_contract.concept_anchor_rules.join('｜')).toContain('新名词')
     expect(brief.prose_craft_contract.concept_anchor_rules.join('｜')).toContain('动作反应')
     expect(brief.prose_craft_contract.concept_anchor_rules.join('｜')).toContain('物理后果')
+    expect(brief.prose_craft_contract.description_limits.join('｜')).toContain('水分控制')
+    expect(brief.prose_craft_contract.description_limits.join('｜')).toContain('删掉这段')
+    expect(brief.prose_craft_contract.description_limits.join('｜')).toContain('读者不会困惑')
+    expect(brief.prose_craft_contract.anti_ai_smell_rules.join('｜')).toContain('高危词')
+    expect(brief.prose_craft_contract.anti_ai_smell_rules.join('｜')).toContain('仿佛')
+    expect(brief.prose_craft_contract.anti_ai_smell_rules.join('｜')).toContain('章末总结体')
+    expect(brief.prose_craft_contract.anti_ai_smell_rules.join('｜')).toContain('叠加式描写')
     expect(brief.prose_craft_contract.forbidden_patterns.join('｜')).toContain('他不知道的是')
     expect(confirmedContext.chapter_target.prose_craft_contract.quality_checks.join('｜')).toContain('每个详写子事件')
     expect(confirmedContext.chapter_target.prose_craft_contract.quality_checks.join('｜')).toContain('偏短小节')
@@ -22576,6 +22583,13 @@ describe('chapter pre-draft brief', () => {
     expect(prompt).toContain('新名词')
     expect(prompt).toContain('动作反应')
     expect(prompt).toContain('物理后果')
+    expect(prompt).toContain('description_limits')
+    expect(prompt).toContain('水分控制')
+    expect(prompt).toContain('删掉这段')
+    expect(prompt).toContain('anti_ai_smell_rules')
+    expect(prompt).toContain('高危词')
+    expect(prompt).toContain('章末总结体')
+    expect(prompt).toContain('叠加式描写')
     expect(prompt).toContain('prose_craft_checks')
     expect(prompt.indexOf('【正文工艺合同】')).toBeLessThan(prompt.indexOf('【结构化上下文包】'))
   })
@@ -22642,9 +22656,11 @@ describe('chapter pre-draft brief', () => {
     expect(brief.prose_craft_contract.section_density_rules.join('｜')).toContain('小节密度诊断')
     expect(brief.prose_craft_contract.anti_padding_rules.join('｜')).toContain('不得为凑字数加环境描写')
     expect(brief.prose_craft_contract.concept_anchor_rules.join('｜')).toContain('新名词')
+    expect(brief.prose_craft_contract.description_limits.join('｜')).toContain('水分控制')
+    expect(brief.prose_craft_contract.anti_ai_smell_rules.join('｜')).toContain('高危词')
   })
 
-  test('preserves explicit camelCase prose craft subject-name rhythm indirect description three-camera then-what core emotion baimiao sensory dynamic shot and transition rules', () => {
+  test('preserves explicit camelCase prose craft subject-name rhythm indirect description three-camera then-what core emotion baimiao sensory dynamic shot transition description-limit and anti-ai rules', () => {
     const project = {
       title: '雪夜反证',
       genre: '悬疑逆袭',
@@ -22662,6 +22678,8 @@ describe('chapter pre-draft brief', () => {
         dynamicDescriptionRules: ['自定义动态描写：人物特征只用动作和反应展现，环境只在角色行动中穿插点染。'],
         shotRhythmRules: ['自定义镜头节奏：冲突用近景和特写压短句，余波用中景和长句放慢，不连续远景铺环境。'],
         transitionBridgeRules: ['自定义转场：时间跳转用账本翻页或钥匙落掌承接，空间跳转用门缝光和脚步声带到新地点。'],
+        descriptionLimits: ['自定义描写限额：删掉不影响读者理解的环境句，只保留伏笔、氛围营造或角色互动中的暗流。'],
+        antiAiSmellRules: ['自定义去AI味：清掉仿佛、一丝、深吸一口气、章末总结体和叠加式描写。'],
       },
       chapter_target: {
         chapter_no: 12,
@@ -22683,6 +22701,8 @@ describe('chapter pre-draft brief', () => {
     expect(brief.prose_craft_contract.dynamic_description_rules).toEqual(['自定义动态描写：人物特征只用动作和反应展现，环境只在角色行动中穿插点染。'])
     expect(brief.prose_craft_contract.shot_rhythm_rules).toEqual(['自定义镜头节奏：冲突用近景和特写压短句，余波用中景和长句放慢，不连续远景铺环境。'])
     expect(brief.prose_craft_contract.transition_bridge_rules).toEqual(['自定义转场：时间跳转用账本翻页或钥匙落掌承接，空间跳转用门缝光和脚步声带到新地点。'])
+    expect(brief.prose_craft_contract.description_limits).toEqual(['自定义描写限额：删掉不影响读者理解的环境句，只保留伏笔、氛围营造或角色互动中的暗流。'])
+    expect(brief.prose_craft_contract.anti_ai_smell_rules).toEqual(['自定义去AI味：清掉仿佛、一丝、深吸一口气、章末总结体和叠加式描写。'])
   })
 
   test('adds an oh-story quality audit contract to pre-draft brief and prose prompt', () => {
@@ -49965,6 +49985,13 @@ describe('chapter context word target source guards', () => {
     expect(repairBlock).toContain('section_density_rules')
     expect(repairBlock).toContain('anti_padding_rules')
     expect(repairBlock).toContain('小节密度诊断')
+    expect(repairBlock).toContain('description_limits')
+    expect(repairBlock).toContain('水分控制')
+    expect(repairBlock).toContain('删掉这段后读者会不会困惑')
+    expect(repairBlock).toContain('anti_ai_smell_rules')
+    expect(repairBlock).toContain('高危词')
+    expect(repairBlock).toContain('章末总结体')
+    expect(repairBlock).toContain('叠加式描写')
     expect(repairBlock).toContain('语气标点合同')
     expect(repairBlock).toContain('质量诊断合同')
     expect(repairBlock).toContain('maxTokens: 6800')
@@ -54933,6 +54960,12 @@ describe('chapter context word target source guards', () => {
     expect(reviewPrompt).toContain('transition_bridge_rules')
     expect(reviewPrompt).toContain('场景切换与转场')
     expect(reviewPrompt).toContain('相似物')
+    expect(reviewPrompt).toContain('description_limits')
+    expect(reviewPrompt).toContain('水分控制')
+    expect(reviewPrompt).toContain('anti_ai_smell_rules')
+    expect(reviewPrompt).toContain('高危词')
+    expect(reviewPrompt).toContain('章末总结体')
+    expect(reviewPrompt).toContain('叠加式描写')
     expect(revisionPrompt).toContain('prose_craft_checks')
     expect(revisionPrompt).toContain('正文工艺')
     expect(revisionPrompt).toContain('间接描写法')
@@ -54955,6 +54988,11 @@ describe('chapter context word target source guards', () => {
     expect(revisionPrompt).toContain('场景切换')
     expect(revisionPrompt).toContain('时间跳转')
     expect(revisionPrompt).toContain('声音或光影')
+    expect(revisionPrompt).toContain('水分控制')
+    expect(revisionPrompt).toContain('删掉读者不会困惑')
+    expect(revisionPrompt).toContain('高危词')
+    expect(revisionPrompt).toContain('章末总结体')
+    expect(revisionPrompt).toContain('叠加式描写')
     expect(shouldReviseBlock).toContain('prose_craft_checks')
     expect(reviewNormalizeBlock).toContain('prose_craft_checks')
     expect(reviewNormalizeBlock).toContain('reviewPayload?.prose_craft_checks')
