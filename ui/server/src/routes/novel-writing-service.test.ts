@@ -9707,6 +9707,44 @@ describe('normalizeSceneCardsPayload', () => {
     expect(prompt).toContain('角色当下能感知的事件锚点或相对时间')
   })
 
+  test('adds previous chapter ending excerpt to the paragraph prose prompt for serial handoff continuity', () => {
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+    const previousEnding = '旧楼门牌在雨水里翻成黑面，林青禾听见门内第三次敲击。李玄按住她的手腕，没有让她开门，只说等钟声停。'
+    const prompt = service.buildParagraphProseContext(
+      { title: '袖口旧印' },
+      {
+        continuity: {
+          previous_chapter: {
+            chapter_no: 7,
+            title: '黑面门牌',
+            ending_hook: '钟声停下前不能开门。',
+            ending_excerpt: previousEnding,
+          },
+        },
+        chapter_target: {
+          chapter_no: 8,
+          title: '停钟以后',
+          summary: '李玄必须在钟声停后处理门后的人。',
+          conflict: '开门会触发旧楼规则，不开门会丢失证人。',
+          ending_hook: '证人袖口露出旧印编号。',
+          scene_cards: [{ title: '停钟门前', conflict: '是否开门', purpose: '承接上一章黑面门牌余波' }],
+        },
+      },
+      null,
+      { chapter_no: 8, title: '停钟以后' },
+    )
+
+    expect(prompt).toContain('【上一章尾段原文承接】')
+    expect(prompt).toContain('第7章《黑面门牌》')
+    expect(prompt).toContain(previousEnding)
+    expect(prompt).toContain('前300字必须接住上一章最后一幕')
+    expect(prompt).toContain('不能只复述摘要或改写成新的开场')
+  })
+
   test('asks paragraph prose prompt to execute oh-story scene-card directive fields', () => {
     const service = createNovelWritingService({
       getProject: async () => null,
@@ -12011,9 +12049,10 @@ describe('chapter prose word target', () => {
       { chapter_no: 3, title: '门外学生' },
     )
 
-    expect(prompt).toContain('【上一章承接】')
-    expect(prompt).toContain('前 300 字必须接住上一章最后一幕')
+    expect(prompt).toContain('【上一章尾段原文承接】')
+    expect(prompt).toContain('前300字必须接住上一章最后一幕')
     expect(prompt).toContain('湿漉漉学生敲响玻璃门')
+    expect(prompt).toContain('不能只复述摘要或改写成新的开场')
     expect(prompt).toContain('不得重新从泛环境描写、空泛醒来或无关解释开场')
   })
 
@@ -12042,9 +12081,10 @@ describe('chapter prose word target', () => {
       { chapter_no: 3, title: '门外学生' },
     )
 
-    expect(prompt).toContain('【上一章承接】')
-    expect(prompt).toContain('前 300 字必须接住上一章最后一幕')
+    expect(prompt).toContain('【上一章尾段原文承接】')
+    expect(prompt).toContain('前300字必须接住上一章最后一幕')
     expect(prompt).toContain('湿漉漉学生敲响玻璃门')
+    expect(prompt).toContain('不能只复述摘要或改写成新的开场')
   })
 
   test('injects pre-draft camelCase chapter handoff contract into paragraph prose prompt', () => {
@@ -12074,9 +12114,10 @@ describe('chapter prose word target', () => {
       { chapter_no: 3, title: '门外学生' },
     )
 
-    expect(prompt).toContain('【上一章承接】')
-    expect(prompt).toContain('前 300 字必须接住上一章最后一幕')
+    expect(prompt).toContain('【上一章尾段原文承接】')
+    expect(prompt).toContain('前300字必须接住上一章最后一幕')
     expect(prompt).toContain('湿漉漉学生敲响玻璃门')
+    expect(prompt).toContain('不能只复述摘要或改写成新的开场')
   })
 
   test('injects pre-draft camelCase chapter blueprint into paragraph prose prompt', () => {
