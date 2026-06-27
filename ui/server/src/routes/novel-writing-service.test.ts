@@ -411,6 +411,32 @@ describe('normalizeSceneCardsPayload', () => {
     expect(sceneCards[1].serial_risk_repairs).toContain('文风指纹')
   })
 
+  test('projects story-state style fingerprint sentence band into scene style directives', () => {
+    const sceneCards = normalizeSceneCardsPayload({
+      scene_cards: [
+        {
+          title: '雨巷开门',
+          purpose: '承接上一章审讯余波',
+          beat: '李玄带着旧账进入雨巷。',
+        },
+        {
+          title: '账册复核',
+          purpose: '复核旧账证据',
+          beat: '第二个证人确认旧账缺页。',
+        },
+      ],
+    }, {
+      story_state: {
+        style_fingerprint: '文风指纹：目标句长带 18-36 字，允许半拍停顿，但整体保持中长句呼吸。',
+      },
+    })
+
+    expect(sceneCards[0].style_directives.join('｜')).toContain('目标句长带 18-36 字')
+    expect(sceneCards[1].style_directives.join('｜')).toContain('按文风指纹/文风.md')
+    expect(sceneCards[0].style_directives.join('｜')).toContain('不要模仿可能已漂移的上一章句式节奏')
+    expect(sceneCards[0].serial_risk_repairs).toContain('文风指纹')
+  })
+
   test('projects dialogue carry-over into scene dialogue goals', () => {
     const dialogueRepair = '按 oh-story dialogue-mastery 修复：删说明书式对白和问答式一问一答；信息型配角不能当科普嘴；高压/生死/悲痛 beat 中轻快声线让位；每句对白必须回应上一句情绪。'
     const sceneCards = normalizeSceneCardsPayload({

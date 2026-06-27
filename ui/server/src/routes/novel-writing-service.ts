@@ -43679,7 +43679,8 @@ export function normalizeSceneCardsPayload(payload: any, contextPackage: any = {
     exit_state: String(card?.exit_state || card?.exitState || ''),
   })).filter((card: any) => card.beat || card.purpose || card.title)
   const intentBaselineCards = applyIntentDialogueBaselineToSceneCards(normalizedCards, contextPackage)
-  return applyDeliveryRiskCarryOverToSceneCards(intentBaselineCards, contextPackage)
+  const styleFingerprintCards = applyStyleFingerprintToSceneCards(intentBaselineCards, contextPackage)
+  return applyDeliveryRiskCarryOverToSceneCards(styleFingerprintCards, contextPackage)
 }
 
 function mergeSceneCardStringList(existing: any, additions: any, limit = 18) {
@@ -43695,6 +43696,40 @@ function appendSceneCardText(existing: any, additions: any, limit = 260) {
     ...asArray(additions).map((item: any) => compactBriefText(item)).filter(Boolean),
   ], 8)
   return compactBriefText(parts.join('；'), limit)
+}
+
+function styleFingerprintSceneDirective(contextPackage: any = {}) {
+  const target = {
+    ...(contextPackage?.chapterTarget || {}),
+    ...(contextPackage?.chapter_target || {}),
+  }
+  const brief = {
+    ...(contextPackage?.preDraftBrief || {}),
+    ...(contextPackage?.pre_draft_brief || {}),
+    ...(target?.preDraftBrief || {}),
+    ...(target?.pre_draft_brief || {}),
+  }
+  const strategy = target.style_sample_strategy
+    || target.styleSampleStrategy
+    || brief.style_sample_strategy
+    || brief.styleSampleStrategy
+  const source = styleFingerprintTextFromContext(contextPackage, strategy)
+  const band = styleFingerprintSentenceBand(source)
+  if (!band) return ''
+  return compactBriefText(
+    `按文风指纹/文风.md 目标句长带 ${band.min}-${band.max} 字合并逗号碎句，恢复中长句呼吸；不要模仿可能已漂移的上一章句式节奏。来源：${compactBriefText(band.source, '')}`,
+    320,
+  )
+}
+
+function applyStyleFingerprintToSceneCards(sceneCards: any[], contextPackage: any = {}) {
+  const directive = styleFingerprintSceneDirective(contextPackage)
+  if (!directive) return sceneCards
+  return sceneCards.map(card => ({
+    ...card,
+    style_directives: mergeSceneCardStringList(card.style_directives, [directive]),
+    serial_risk_repairs: mergeSceneCardStringList(card.serial_risk_repairs, ['文风指纹']),
+  }))
 }
 
 function deliveryRiskStyleDirectiveActions(carryOvers: any[]) {
