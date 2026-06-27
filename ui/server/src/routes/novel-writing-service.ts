@@ -18763,6 +18763,7 @@ const OH_STORY_NEXT_BATCH_WORKFLOW_RULES = [
   '不得跳过 Step 2.2 状态筛选或 Step 2.3 文风召回；每章写前都要重新确认来源、状态、文风召回和意图确认。',
   '必须串行逐章写作，不得并发生成多章；下一章必须读取上一章刚写入的正文、回执和追踪更新后再开始。',
   '章间不重复询问是否继续，除非用户明确要求逐章确认、章节号冲突、细纲缺失/冲突、请求范围越界、用户要求改变大纲/追踪或出现会导致写错的阻塞信息。',
+  '批量写作模式跳过单章 story-review lean 提示；本批全部写完后再统一执行 Phase 5 质量检查，避免每章后打断连写。',
 ]
 
 function normalizeDefaultFiveChapterRegression(value: any) {

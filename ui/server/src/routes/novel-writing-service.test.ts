@@ -10493,6 +10493,8 @@ describe('chapter prose word target', () => {
     expect(prompt).toContain('章间不重复询问是否继续')
     expect(prompt).toContain('细纲缺失')
     expect(prompt).toContain('用户要求改变大纲/追踪')
+    expect(prompt).toContain('批量写作模式跳过单章 story-review lean')
+    expect(prompt).toContain('全部写完后再统一执行 Phase 5 质量检查')
     expect(prompt).toContain('不得提前消费后续章节爆点')
     expect(prompt).toContain('第8章只负责夜钟规则第一次显形')
   })
@@ -37286,6 +37288,8 @@ describe('chapter pre-draft brief', () => {
     expect(brief.next_batch_brief.workflow_rules.join('｜')).toContain('章间不重复询问是否继续')
     expect(brief.next_batch_brief.workflow_rules.join('｜')).toContain('细纲缺失')
     expect(brief.next_batch_brief.workflow_rules.join('｜')).toContain('用户要求改变大纲/追踪')
+    expect(brief.next_batch_brief.workflow_rules.join('｜')).toContain('批量写作模式跳过单章 story-review lean')
+    expect(brief.next_batch_brief.workflow_rules.join('｜')).toContain('全部写完后再统一执行 Phase 5 质量检查')
   })
 
   test('merges runtime chapterTarget next batch brief into the pre-draft brief when chapter_target already exists', () => {
