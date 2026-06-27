@@ -5352,6 +5352,15 @@ function sceneBriefFromCard(card: any, index: number) {
     word_budget: compactBriefText(card?.word_budget || card?.description_budget),
     serial_risk_repairs: asArray(card?.serial_risk_repairs || card?.serialRiskRepairs || card?.risk_repairs || card?.riskRepairs).map((item: any) => compactBriefText(typeof item === 'string' ? item : JSON.stringify(item))).filter(Boolean),
     recent_fatigue_action: compactBriefText(card?.recent_fatigue_action || card?.recentFatigueAction || card?.fatigue_repair_action || card?.fatigueRepairAction),
+    character_voice: compactBriefText(card?.character_voice || card?.characterVoice || card?.voice_focus || card?.voiceFocus),
+    dialogue_goals: asArray(card?.dialogue_goals || card?.dialogueGoals || card?.dialogue_contract_goals || card?.dialogueContractGoals).map((item: any) => compactBriefText(item)).filter(Boolean),
+    style_directives: asArray(card?.style_directives || card?.styleDirectives || card?.style_boundary_directives || card?.styleBoundaryDirectives).map((item: any) => compactBriefText(item)).filter(Boolean),
+    benchmark_recall_directives: asArray(card?.benchmark_recall_directives || card?.benchmarkRecallDirectives || card?.benchmark_directives || card?.benchmarkDirectives).map((item: any) => compactBriefText(item)).filter(Boolean),
+    concept_anchor_rules: asArray(card?.concept_anchor_rules || card?.conceptAnchorRules || card?.new_concept_anchor_rules || card?.newConceptAnchorRules).map((item: any) => compactBriefText(item)).filter(Boolean),
+    prose_craft_directives: asArray(card?.prose_craft_directives || card?.proseCraftDirectives || card?.prose_craft_rules || card?.proseCraftRules).map((item: any) => compactBriefText(item)).filter(Boolean),
+    emotional_tone: compactBriefText(card?.emotional_tone || card?.emotionalTone || card?.tone),
+    key_dialogue: compactBriefText(card?.key_dialogue || card?.keyDialogue || card?.dialogue_focus || card?.dialogueFocus),
+    dialogue_goal: compactBriefText(card?.dialogue_goal || card?.dialogueGoal),
   }
 }
 
@@ -41697,6 +41706,31 @@ function continuityHeatItemText(value: any) {
   )
 }
 
+function intentDialogueToneBaselineFromContext(contextPackage: any = {}) {
+  const contract = contextPackage?.chapter_target?.intent_confirmation_contract
+    || contextPackage?.chapter_target?.intentConfirmationContract
+    || contextPackage?.intent_confirmation_contract
+    || contextPackage?.intentConfirmationContract
+    || contextPackage?.pre_draft_brief?.intent_confirmation_contract
+    || contextPackage?.preDraftBrief?.intentConfirmationContract
+  return uniqueBriefStrings(
+    asArray(contract?.dialogue_tone_baseline || contract?.dialogueToneBaseline)
+      .map((item: any) => compactBriefText(item))
+      .filter(Boolean),
+    8,
+  )
+}
+
+function applyIntentDialogueBaselineToSceneCards(sceneCards: any[], contextPackage: any = {}) {
+  const baseline = intentDialogueToneBaselineFromContext(contextPackage)
+  if (!sceneCards.length || !baseline.length) return sceneCards
+  return sceneCards.map(card => ({
+    ...card,
+    dialogue_goals: mergeSceneCardStringList(card.dialogue_goals, baseline, 24),
+    serial_risk_repairs: mergeSceneCardStringList(card.serial_risk_repairs, ['意图确认']),
+  }))
+}
+
 function storylineUsageByAnyType(storylineContext: any, types: string[]) {
   return asArray(storylineContext?.chapter_usage)
     .filter((item: any) => types.includes(String(item?.usage_type || item?.usageType || item?.type || '').toLowerCase()))
@@ -43644,7 +43678,8 @@ export function normalizeSceneCardsPayload(payload: any, contextPackage: any = {
     transition_from_previous: String(card?.transition_from_previous || card?.transitionFromPrevious || ''),
     exit_state: String(card?.exit_state || card?.exitState || ''),
   })).filter((card: any) => card.beat || card.purpose || card.title)
-  return applyDeliveryRiskCarryOverToSceneCards(normalizedCards, contextPackage)
+  const intentBaselineCards = applyIntentDialogueBaselineToSceneCards(normalizedCards, contextPackage)
+  return applyDeliveryRiskCarryOverToSceneCards(intentBaselineCards, contextPackage)
 }
 
 function mergeSceneCardStringList(existing: any, additions: any, limit = 18) {

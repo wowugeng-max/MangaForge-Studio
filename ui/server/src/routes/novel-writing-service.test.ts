@@ -289,6 +289,47 @@ describe('normalizeSceneCardsPayload', () => {
     expect(sceneCards[0].prose_craft_directives).toContain('不得用整段来历/等级解释蓝晶。')
   })
 
+  test('keeps dialogue scene directives after pre-draft confirmation and projects intent baseline into scene goals', () => {
+    const contextPackage = {
+      chapter_target: {
+        chapter_no: 18,
+        title: '血封条问证',
+        summary: '李玄在血封条失控前逼证人说出账本来源。',
+        conflict: '执事用长篇解释拖时间，证人害怕牵连家人。',
+        emotional_curve: '高压 -> 生死逼近 -> 信息差反杀',
+        scene_cards: [
+          {
+            scene_no: 1,
+            title: '封条渗血',
+            purpose: '用高压问证逼出账本来源。',
+            conflict: '执事想把证人变成科普嘴拖住现场。',
+            emotional_tone: '高压/生死',
+            character_voice: '李玄短句压问；证人只说事实；轻快配角暂时闭嘴。',
+            dialogue_goals: ['让证人用半句说漏账本来源，不能科普血封条来历。'],
+            key_dialogue: '“谁让你把账本送进祠堂？”',
+          },
+        ],
+      },
+    }
+
+    const brief = buildChapterPreDraftBrief({ title: '禁门账本' }, contextPackage)
+    const confirmedContext = mergeConfirmedPreDraftBriefIntoContext(contextPackage, {
+      ...brief,
+      confirmed_at: '2026-06-27T10:00:00.000Z',
+    })
+    const confirmedScene = confirmedContext.chapter_target.scene_cards[0]
+    const normalizedScenes = normalizeSceneCardsPayload({
+      scene_cards: confirmedContext.chapter_target.scene_cards,
+    }, confirmedContext)
+
+    expect(confirmedScene.character_voice).toContain('李玄短句压问')
+    expect(confirmedScene.dialogue_goals).toContain('让证人用半句说漏账本来源，不能科普血封条来历。')
+    expect(normalizedScenes[0].dialogue_goals.join('｜')).toContain('不能科普血封条来历')
+    expect(normalizedScenes[0].dialogue_goals.join('｜')).toContain('搞笑担当/轻快配角声线让位')
+    expect(normalizedScenes[0].dialogue_goals.join('｜')).toContain('对话逐句承接对方情绪')
+    expect(normalizedScenes[0].serial_risk_repairs).toContain('意图确认')
+  })
+
   test('asks scene-card generation to emit oh-story execution directive fields', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
