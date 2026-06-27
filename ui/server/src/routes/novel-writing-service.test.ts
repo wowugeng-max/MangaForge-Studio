@@ -18890,6 +18890,52 @@ describe('chapter pre-draft brief', () => {
     expect(prompt.indexOf('【文风召回简报】')).toBeLessThan(prompt.indexOf('【结构化上下文包】'))
   })
 
+  test('passes primary benchmark anchor excerpts into prose prompt with copy boundary', () => {
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+    const contextPackage = {
+      chapter_target: {
+        chapter_no: 18,
+        title: '雨夜反证',
+        summary: '李玄在雨夜审讯中用旧账册反证执事换证。',
+        conflict: '执事抢先定义证词，旁观弟子准备倒向他。',
+        benchmark_recall_brief: {
+          selected_emotion_module: 'M03 信息差反杀',
+          rhythm_reference: '先压三轮质问，再用证据爆发。',
+          style_profile_summary: '主对标文风：短句推进审讯压力，对白留半拍。',
+          matched_chapter: '主对标第12章_雨巷审讯',
+          matched_chapter_techniques: ['三轮压问', '证据晚半拍亮出'],
+          anchor_excerpts: [
+            '雨声贴着瓦檐往下压。掌柜没有立刻辩解，只把账册翻到缺页前一行，让所有人先看见那枚旧印。',
+            '他问得很轻，像把刀背放在桌上。等对面第三次否认，才把缺口推到灯下。',
+          ],
+        },
+        scene_cards: [],
+      },
+    }
+
+    const brief = buildChapterPreDraftBrief({ title: '旧城维修师' }, contextPackage)
+    const confirmedContext = mergeConfirmedPreDraftBriefIntoContext(contextPackage, {
+      ...brief,
+      confirmed_at: '2026-06-22T13:03:00.000Z',
+    })
+    const prompt = service.buildParagraphProseContext(
+      { title: '旧城维修师' },
+      confirmedContext,
+      null,
+      { chapter_no: 18, title: '雨夜反证' },
+    )
+
+    expect(brief.benchmark_recall_brief.anchor_excerpts.join('｜')).toContain('账册翻到缺页前一行')
+    expect(prompt).toContain('原文锚点片段')
+    expect(prompt).toContain('账册翻到缺页前一行')
+    expect(prompt).toContain('只用于学习句长、停顿、潜台词和信息释放手法')
+    expect(prompt).toContain('不得复制锚点原句、桥段、设定、角色名或专名')
+  })
+
   test('reads camelCase preDraftBrief Step 2 contracts in paragraph prose prompt', () => {
     const service = createNovelWritingService({
       getProject: async () => null,
@@ -19181,6 +19227,7 @@ describe('chapter pre-draft brief', () => {
           selected_emotion_module: 'M03 信息差反杀',
           rhythm_reference: '先压三轮质问，再用证据爆发，爆发后短冷却接章尾钩子',
           matched_chapter_techniques: ['三轮压问', '证据晚半拍亮出'],
+          anchor_excerpts: ['原文锚点只学半拍亮证据的停顿，不进入正文。'],
         },
         scene_cards: [
           {
@@ -19212,6 +19259,7 @@ describe('chapter pre-draft brief', () => {
     expect(prompt).toContain('oh_story_delivery_receipts.pre_draft_execution_receipts.benchmark_recall_checks')
     expect(prompt).toContain('selected_emotion_module')
     expect(prompt).toContain('matched_chapter_techniques')
+    expect(prompt).toContain('style_directives、anchor_excerpts、canonical_source_rules')
     expect(prompt).toContain('未完成时 delivered=false')
   })
 

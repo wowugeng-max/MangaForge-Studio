@@ -41686,6 +41686,15 @@ function benchmarkRecallSourcePaths(...strategies: any[]) {
   )), 12)
 }
 
+function benchmarkRecallAnchorExcerpts(...strategies: any[]) {
+  return uniqueBriefStrings(strategies.flatMap(strategy => [
+    ...styleRecallList(strategy, 'anchor_excerpts'),
+    ...styleRecallList(strategy, 'anchor_excerpt'),
+    ...styleRecallList(strategy, 'original_anchor_excerpts'),
+    ...styleRecallList(strategy, 'source_anchor_excerpts'),
+  ]), 3)
+}
+
 function secondaryBenchmarkRecallSources(value: any) {
   return [
     value?.secondary_benchmark_recall_summary,
@@ -41760,6 +41769,7 @@ function buildBenchmarkRecallBrief(contextPackage: any = {}, options: any = {}) 
     const toneMatchFailed = benchmarkRecallHasGap(effectiveGaps, /tone_match_failed|基调匹配失败|tone match failed/i)
     const profileDegenerate = benchmarkRecallHasGap(effectiveGaps, /profile_degenerate|文风不可用|文风画像退化|profile degenerate/i)
     const secondaryBenchmarkRecallSummary = normalizeSecondaryBenchmarkRecallSummary(explicit, derived)
+    const anchorExcerpts = benchmarkRecallAnchorExcerpts(explicit, derived)
     const secondaryBenchmarkBoundaryRules = secondaryBenchmarkRecallSummary.length
       ? uniqueBriefStrings([
           ...asArray(explicit.secondary_benchmark_boundary_rules || explicit.secondaryBenchmarkBoundaryRules),
@@ -41788,6 +41798,7 @@ function buildBenchmarkRecallBrief(contextPackage: any = {}, options: any = {}) 
         ...asArray(explicit.source_paths || explicit.sourcePaths),
         ...asArray(derived.source_paths),
       ], 12),
+      anchor_excerpts: anchorExcerpts,
       canonical_source_rules: uniqueBriefStrings([
         ...asArray(explicit.canonical_source_rules || explicit.canonicalSourceRules),
         ...asArray(derived.canonical_source_rules),
@@ -41861,6 +41872,7 @@ function buildBenchmarkRecallBrief(contextPackage: any = {}, options: any = {}) 
     ]),
   ], 8)
   const sourcePaths = benchmarkRecallSourcePaths(styleStrategy, benchmarkStrategy)
+  const anchorExcerpts = benchmarkRecallAnchorExcerpts(styleStrategy, benchmarkStrategy)
   const secondaryBenchmarkRecallSummary = normalizeSecondaryBenchmarkRecallSummary(styleStrategy, benchmarkStrategy)
   const secondaryBenchmarkBoundaryRules = secondaryBenchmarkRecallSummary.length ? SECONDARY_BENCHMARK_BOUNDARY_RULES : []
   const gaps = benchmarkRecallGapStrings(
@@ -41874,7 +41886,7 @@ function buildBenchmarkRecallBrief(contextPackage: any = {}, options: any = {}) 
   if (benchmarkRecallIsNoBenchmark(gaps)) return null
   const toneMatchFailed = benchmarkRecallHasGap(gaps, /tone_match_failed|基调匹配失败|tone match failed/i)
   const profileDegenerate = benchmarkRecallHasGap(gaps, /profile_degenerate|文风不可用|文风画像退化|profile degenerate/i)
-  const hasRecall = Boolean(selectedEmotionModule || rhythmReference || styleProfileSummary || matchedChapter || matchedTechniques.length || styleDirectives.length || sourcePaths.length || gaps.length)
+  const hasRecall = Boolean(selectedEmotionModule || rhythmReference || styleProfileSummary || matchedChapter || matchedTechniques.length || styleDirectives.length || sourcePaths.length || anchorExcerpts.length || gaps.length)
   if (!hasRecall) return null
   const authority = benchmarkRecallAuthorityFromGaps({
     selected_emotion_module: selectedEmotionModule,
@@ -41891,6 +41903,7 @@ function buildBenchmarkRecallBrief(contextPackage: any = {}, options: any = {}) 
     matched_chapter_techniques: (toneMatchFailed || profileDegenerate) ? [] : matchedTechniques,
     style_directives: profileDegenerate ? [] : styleDirectives,
     source_paths: sourcePaths,
+    anchor_excerpts: (toneMatchFailed || profileDegenerate) ? [] : anchorExcerpts,
     canonical_source_rules: OH_STORY_BENCHMARK_CANONICAL_SOURCE_RULES,
     secondary_benchmark_recall_summary: secondaryBenchmarkRecallSummary,
     secondary_benchmark_boundary_rules: secondaryBenchmarkBoundaryRules,
@@ -47230,6 +47243,8 @@ export function createNovelWritingService(ctx: {
       benchmarkRecallBrief?.matched_chapter_techniques?.length ? `matched_chapter_techniques：${benchmarkRecallBrief.matched_chapter_techniques.join('；')}` : '',
       benchmarkRecallBrief?.style_directives?.length ? `style_directives：${benchmarkRecallBrief.style_directives.join('；')}` : '',
       benchmarkRecallBrief?.source_paths?.length ? `source_paths：${benchmarkRecallBrief.source_paths.join('；')}` : '',
+      benchmarkRecallBrief?.anchor_excerpts?.length ? '原文锚点片段：只用于学习句长、停顿、潜台词和信息释放手法；不得复制锚点原句、桥段、设定、角色名或专名。' : '',
+      benchmarkRecallBrief?.anchor_excerpts?.length ? benchmarkRecallBrief.anchor_excerpts.map((excerpt: string, index: number) => `锚点${index + 1}：${excerpt}`).join('\n') : '',
       benchmarkRecallBrief?.canonical_source_rules?.length ? `canonical_source_rules：${benchmarkRecallBrief.canonical_source_rules.join('；')}` : '',
       benchmarkRecallBrief?.secondary_benchmark_recall_summary?.length ? '副对标召回摘要：' : '',
       benchmarkRecallBrief?.secondary_benchmark_recall_summary?.length ? JSON.stringify(benchmarkRecallBrief.secondary_benchmark_recall_summary, null, 2).slice(0, 2000) : '',
@@ -47651,7 +47666,7 @@ export function createNovelWritingService(ctx: {
       writePreparationBrief ? '输出附加要求：oh_story_delivery_receipts.pre_draft_execution_receipts.write_preparation_checks 必须逐项覆盖【写前准备卡】中的 source_gaps、asset_risks、delivery_risk_actions、creation_contract_checklist、blueprint_focus、reader_payoff_focus 和 must_confirm；创作契约必须逐项说明目标读者、题材定位、核心承诺、追读留存是否被正文证据兑现；每项必须有 delivered(boolean)、evidence、remaining_risk，未完成时 delivered=false 并写明下一章需要承接的风险。' : '',
       deliveryRiskCarryOver ? '输出附加要求：oh_story_delivery_receipts.pre_draft_execution_receipts.next_chapter_quality_plan_receipts 必须逐项覆盖上一章质量续航计划和 chapter_target.delivery_risk_carry_over 中的 quality_focus、opening_actions、middle_actions、ending_actions、forbidden_repeats/avoid_repetition、evidence_basis；每项包含 key,label,delivered,evidence,remaining_risk，证明质量续航不是只写在任务书里，而是落成正文动作、信息变化、章末钩子或禁用重复。' : '',
       intentConfirmationContract ? '输出附加要求：oh_story_delivery_receipts.pre_draft_execution_receipts.intent_confirmation_checks 必须逐项覆盖 chapter_target.intent_confirmation_contract 中的 confirmed_intent、rhythm_and_style、structure_inputs、dialogue_tone_baseline、logic_line、appearance_order、cost_and_reward、ending_handoff 和 quality_checks；每项包含 key,label,delivered,evidence,remaining_risk，未完成时 delivered=false 并写明下一章需要承接的意图偏移。' : '',
-      benchmarkRecallBrief ? '输出附加要求：oh_story_delivery_receipts.pre_draft_execution_receipts.benchmark_recall_checks 必须逐项覆盖 chapter_target.benchmark_recall_brief 中的 selected_emotion_module、rhythm_reference、style_profile_summary、matched_chapter_techniques、style_directives、canonical_source_rules、gaps 和 quality_checks；每项包含 key,label,delivered,evidence,remaining_risk，未完成时 delivered=false 并写明下一章需要承接的文风召回缺口；不得复制对标桥段、设定、角色名或原句。' : '',
+      benchmarkRecallBrief ? '输出附加要求：oh_story_delivery_receipts.pre_draft_execution_receipts.benchmark_recall_checks 必须逐项覆盖 chapter_target.benchmark_recall_brief 中的 selected_emotion_module、rhythm_reference、style_profile_summary、matched_chapter_techniques、style_directives、anchor_excerpts、canonical_source_rules、gaps 和 quality_checks；每项包含 key,label,delivered,evidence,remaining_risk，未完成时 delivered=false 并写明下一章需要承接的文风召回缺口；anchor_excerpts 只能证明句长、停顿、潜台词和信息释放手法被抽象学习，evidence 不得复述锚点原句；不得复制对标桥段、设定、角色名或原句。' : '',
       '输出附加要求：oh_story_delivery_receipts 中所有 evidence / changed_evidence 必须引用 chapter_text 中可定位的动作、对话、信息变化或关系变化；changed_evidence 必须引用 chapter_text，不能只写“已完成”“已处理”“见正文”。如果没有完成，delivered 必须为 false 并写 remaining_risk。',
       '输出 JSON，包含 prose_chapters 数组。数组只能有一项，且必须包含 chapter_no, title, chapter_text, scene_breakdown, continuity_notes, oh_story_delivery_receipts。scene_breakdown 要回填每个场景的 scene_type、purpose_tag 目的词执行情况、required_beats/action_beats 完成情况、description_budget 执行情况、density_level 执行情况、scene_start_anchor、scene_end_anchor、scene_card_receipts 和 blueprint_receipts（如有章节蓝图合同）。chapter_text 是完整正文，不要 markdown 标题。',
     ].filter(Boolean).join('\n')
