@@ -38938,6 +38938,20 @@ const OH_STORY_GENRE_POSITIONING_MICRO_INNOVATION_RULES = [
   '模板内创新可以新鲜，模板外炫技会造成读者误判题材。',
 ]
 
+const OH_STORY_GENRE_POSITIONING_MICRO_INNOVATION_702010_RULES = [
+  '70%来自过去经历和记忆：用共同代际记忆、流行文化、类型阅读记忆和熟悉生活细节稳住模板底座。',
+  '20%来自当前生活状态：把工作、爱好、感情、家庭压力、消费处境或平台读者当下情绪嵌入角色处境。',
+  '10%来自时事热点话题和趋势：只取能服务题材承诺的热点点缀，不能让热点盖过核心梗和类型期待。',
+]
+
+const OH_STORY_GENRE_POSITIONING_MICRO_INNOVATION_METHODS = [
+  '精炼法：把已有套路做到极致，删掉噪音，让核心爽点更清晰、更可复述。',
+  '升级法：框架不变但元素升级，把既有卖点推到更高压力、更强回报或更可见场面。',
+  '加料法：在已有框架里加一个兼容元素，例如职业、关系、场景、反馈口吻或现实压力。',
+  '反套路法：只反转读者熟悉套路中的一个小点，最终仍兑现类型期待。',
+  '组合法：组合两个兼容套路制造新鲜感，避免引入第三个分散主线的卖点。',
+]
+
 const OH_STORY_GENRE_POSITIONING_LONGBOARD_FOCUS_RULES = [
   '拉长板而非补短板：优先强化题材长板、核心卖点、目标情绪和最高频爽点。',
   '不得为补短板引入会稀释核心卖点的支线。',
@@ -39018,6 +39032,8 @@ function inferGenrePositioningProfile(project: any = {}, contextPackage: any = {
     core_hook_rules: coreHookRules,
     goldfinger_fit_rules: OH_STORY_GENRE_POSITIONING_GOLDFINGER_FIT_RULES,
     micro_innovation_rules: OH_STORY_GENRE_POSITIONING_MICRO_INNOVATION_RULES,
+    micro_innovation_702010_rules: OH_STORY_GENRE_POSITIONING_MICRO_INNOVATION_702010_RULES,
+    micro_innovation_methods: OH_STORY_GENRE_POSITIONING_MICRO_INNOVATION_METHODS,
     longboard_focus_rules: OH_STORY_GENRE_POSITIONING_LONGBOARD_FOCUS_RULES,
     must_have_scenes: mustHaveScenes,
     platform_fit_rules: [
@@ -39093,6 +39109,8 @@ function buildGenrePositioningContract(project: any = {}, contextPackage: any = 
       .filter(Boolean)
     const explicitGoldfingerFitRules = asArray(explicit.goldfinger_fit_rules || explicit.goldfingerFitRules).map((item: any) => compactBriefText(item)).filter(Boolean)
     const explicitMicroInnovationRules = asArray(explicit.micro_innovation_rules || explicit.microInnovationRules).map((item: any) => compactBriefText(item)).filter(Boolean)
+    const explicitMicroInnovation702010Rules = asArray(explicit.micro_innovation_702010_rules || explicit.microInnovation702010Rules).map((item: any) => compactBriefText(item)).filter(Boolean)
+    const explicitMicroInnovationMethods = asArray(explicit.micro_innovation_methods || explicit.microInnovationMethods).map((item: any) => compactBriefText(item)).filter(Boolean)
     const explicitLongboardFocusRules = asArray(explicit.longboard_focus_rules || explicit.longboardFocusRules)
       .concat(compactBriefText(explicit.long_board || explicit.longBoard))
       .concat(compactBriefText(explicit.innovation_boundary || explicit.innovationBoundary))
@@ -39118,6 +39136,12 @@ function buildGenrePositioningContract(project: any = {}, contextPackage: any = 
       micro_innovation_rules: explicitMicroInnovationRules.length
         ? explicitMicroInnovationRules
         : asArray(derived.micro_innovation_rules).length ? asArray(derived.micro_innovation_rules) : OH_STORY_GENRE_POSITIONING_MICRO_INNOVATION_RULES,
+      micro_innovation_702010_rules: explicitMicroInnovation702010Rules.length
+        ? explicitMicroInnovation702010Rules
+        : asArray(derived.micro_innovation_702010_rules).length ? asArray(derived.micro_innovation_702010_rules) : OH_STORY_GENRE_POSITIONING_MICRO_INNOVATION_702010_RULES,
+      micro_innovation_methods: explicitMicroInnovationMethods.length
+        ? explicitMicroInnovationMethods
+        : asArray(derived.micro_innovation_methods).length ? asArray(derived.micro_innovation_methods) : OH_STORY_GENRE_POSITIONING_MICRO_INNOVATION_METHODS,
       longboard_focus_rules: explicitLongboardFocusRules.length
         ? explicitLongboardFocusRules
         : asArray(derived.longboard_focus_rules).length ? asArray(derived.longboard_focus_rules) : OH_STORY_GENRE_POSITIONING_LONGBOARD_FOCUS_RULES,
@@ -47394,11 +47418,13 @@ export function createNovelWritingService(ctx: {
       genrePositioningContract?.core_hook_rules?.length ? `核心梗规则：${genrePositioningContract.core_hook_rules.join('；')}` : '',
       genrePositioningContract?.goldfinger_fit_rules?.length ? `金手指贴合：${genrePositioningContract.goldfinger_fit_rules.join('；')}` : '',
       genrePositioningContract?.micro_innovation_rules?.length ? `微创新边界：${genrePositioningContract.micro_innovation_rules.join('；')}` : '',
+      genrePositioningContract?.micro_innovation_702010_rules?.length ? `70/20/10元素法则：${genrePositioningContract.micro_innovation_702010_rules.join('；')}` : '',
+      genrePositioningContract?.micro_innovation_methods?.length ? `五种微创新手法：${genrePositioningContract.micro_innovation_methods.join('；')}` : '',
       genrePositioningContract?.longboard_focus_rules?.length ? `长板聚焦：${genrePositioningContract.longboard_focus_rules.join('；')}` : '',
       genrePositioningContract?.must_have_scenes?.length ? `必备场景：${genrePositioningContract.must_have_scenes.join('；')}` : '',
       genrePositioningContract?.platform_fit_rules?.length ? `平台/题材适配：${genrePositioningContract.platform_fit_rules.join('；')}` : '',
       genrePositioningContract?.quality_checks?.length ? `genre_positioning_checks：${genrePositioningContract.quality_checks.join('；')}` : '',
-      genrePositioningContract ? '交稿自检必须输出 genre_positioning_checks，并用正文证据检查题材标签、核心梗、类型公式、金手指贴合、必备场景、微创新边界、长板聚焦和书名简介内容三位一体。' : '',
+      genrePositioningContract ? '交稿自检必须输出 genre_positioning_checks，并用正文证据检查题材标签、核心梗、类型公式、金手指贴合、必备场景、微创新边界、70/20/10元素法则、五种微创新手法、长板聚焦和书名简介内容三位一体。' : '',
       genrePositioningContract ? JSON.stringify(genrePositioningContract, null, 2).slice(0, 2500) : '',
       '',
       femaleAudienceContract ? '【女频长篇合同】' : '',
@@ -49675,8 +49701,8 @@ export function createNovelWritingService(ctx: {
     '17B. reader_retention_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),retention_engine,emotional_payoff,information_hunger,page_turn_question,evidence,fix,remaining_risk；缺前300字钩子、缺正文可见回报、缺信息缺口、章尾无追读、留存双引擎缺情绪或饥饿、Hook上瘾模型缺奖励随机性或投入沉没成本时必须给出 S1/S2 finding，category=structure 或 platform。',
     '18. 是否兑现 chapter_target.target_reader_contract：按 oh-story 自嗨判定法检查“我这书写给谁看、目标读者想看什么、本书本章给了什么”三问是否都有正文证据；同时执行情绪缺口分析，检查核心痛苦、深层情结、高频情绪关键词和未满足需求是否被写成角色当下压力与读者回报；必须输出 target_reader_checks。',
     '19. target_reader_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),target_reader_profile,reader_desire,emotion_gap,chapter_hit,platform_taste,evidence,fix,remaining_risk；目标读者画像空泛、读者渴望和本章卖点错位、情绪缺口缺核心痛苦/深层情结/高频情绪关键词/未满足需求、平台口味错位或只展示作者自嗨设定时必须给出 S1/S2 finding，category=platform 或 structure。',
-    '20. 是否兑现 chapter_target.genre_positioning_contract：按 oh-story 题材定位口径检查题材标签、读者心理、核心梗、类型公式、金手指贴合、必备场景、微创新边界、平台适配、拉长板而非补短板、题材长板和书名简介内容三位一体；必须输出 genre_positioning_checks。',
-    '21. genre_positioning_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),genre_tag,core_hook,type_formula,genre_strength,book_title_blurb_alignment,evidence,fix,remaining_risk；核心梗不清、公式缺失、金手指脱离主角生活/职业、微创新超过3个、题材长板未强化、为补短板新增支线稀释核心卖点、平台/类型错位或挂羊头卖狗肉时必须给出 S1/S2 finding，category=platform 或 structure。',
+    '20. 是否兑现 chapter_target.genre_positioning_contract：按 oh-story 题材定位口径检查题材标签、读者心理、核心梗、类型公式、金手指贴合、必备场景、微创新边界、70/20/10元素法则、五种微创新手法、平台适配、拉长板而非补短板、题材长板和书名简介内容三位一体；必须输出 genre_positioning_checks。',
+    '21. genre_positioning_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),genre_tag,core_hook,type_formula,genre_strength,book_title_blurb_alignment,evidence,fix,remaining_risk；核心梗不清、公式缺失、金手指脱离主角生活/职业、微创新超过3个、70/20/10元素法则失衡、五种微创新手法选型不清、题材长板未强化、为补短板新增支线稀释核心卖点、平台/类型错位或挂羊头卖狗肉时必须给出 S1/S2 finding，category=platform 或 structure。',
     '21A. 是否兑现 chapter_target.female_audience_contract：按 oh-story 女频长篇口径检查安全感优先、代入感优先、女主主动性、情绪即产品是否落地；检查女频深层需求是否体现被认可、被珍视、被尊重；检查状态→困境→行动→成功和女主成功暗示是否兑现；检查感情线双轴是否让感情升级踩在事业/成长节点上；检查虐戏是否每段虐后有反转或糖，是否避免连续整卷只虐；检查平台对位和货板一致；必须输出 female_audience_checks。',
     '21B. female_audience_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),security_anchor,reader_identification,heroine_agency,relationship_axis,post_abuse_payoff,evidence,fix,remaining_risk；安全感断裂、女主被安排着赢、感情线脱离成长线、为虐而虐、平台节奏错位或书名简介正文货不对板时必须给出 S1/S2 finding，category=character 或 platform。',
     '22. 是否兑现 chapter_target.upgrade_rhythm_contract：按 oh-story 升级感三步法检查起点、终点、情绪缺口、即时反馈、延迟反馈、升级前后铺垫、桥段功能位、升级后能完成以前做不到的事，以及金手指演进；金手指核心作用可发展但不能突然换赛道，升华到世界/天道/规则层级前必须有伏笔；必须按“金手指 + 矛盾”检查金手指是否刚好解决当前矛盾，解决后是否暴露更大矛盾；必须按金手指反馈法检查给出金手指后是否有即时变化，是否把反馈过程掺杂在故事里，是否用动作/判断/物件变化/角色反应/局势变化展示，而不是只写绑定成功或说明规则；必须按“金手指简单是核心”检查功能、触发条件、奖励反馈和升级规则是否一眼就懂，是否避免说明书式规则树和万能外挂；必须按“金手指多维成长”检查词条、功能、品质、熟练度或条件-反馈是否至少两条线同步变化，是否避免只剩品质/数值/等级单线提升；如果出现排行榜/榜单/排名，必须按排行榜三功能检查：排名提升提供升级动力、榜单介绍新对手、榜单出现产生装逼余震；必须输出 upgrade_rhythm_checks。',
@@ -49867,7 +49893,7 @@ export function createNovelWritingService(ctx: {
     '11B. 如果自检结果包含 factual_checks，必须优先处理 status=fail/warn 的外部事实查证缺口；按 claim 和 verification_status 降级或删除未查证断言，把真实世界细节改成架空可控设定、角色正在核验的疑问，或只保留上下文已有证据支持的事实。',
     '11A. 如果自检结果包含 reader_retention_checks，必须优先修复 status=fail/warn 的追读雷达缺口；按 key/label/evidence/fix 补前300字钩子、可见爽点、信息缺口、章末追读、留存双引擎的情绪 + 饥饿，以及 Hook上瘾模型的触发 -> 行动 -> 奖励 -> 投入。饥饿缺口必须用信息差植入问号并按剥洋葱把关键信息卡到章末；奖励缺口必须补奖励随机性：在预期回报之外给出出乎意料的额外收获、线索、权限、关系或地位变化，并形成沉没投入。',
     '12. 如果自检结果包含 target_reader_checks，必须优先修复 status=fail/warn 的目标读者缺口；按 key/label/evidence/fix 补清读者画像、读者想看内容、情绪缺口、本章命中点、平台口味和可见读者回报。情绪缺口缺口必须先补核心痛苦、深层情结、高频情绪关键词和未满足需求，再把它们写成冲突压力、角色选择、即时反馈或尊严/安全感/掌控感补偿。',
-    '13. 如果自检结果包含 genre_positioning_checks，必须优先修复 status=fail/warn 的题材定位缺口；按 key/label/evidence/fix 校准题材标签、核心梗、类型公式、金手指贴合、必备场景、微创新边界、长板聚焦和书名简介内容三位一体，修掉挂羊头卖狗肉；拉长题材长板而非补短板，删除会稀释核心卖点的支线，把同一卖点扩成至少 3 个角度的正文证据。',
+    '13. 如果自检结果包含 genre_positioning_checks，必须优先修复 status=fail/warn 的题材定位缺口；按 key/label/evidence/fix 校准题材标签、核心梗、类型公式、金手指贴合、必备场景、微创新边界、70/20/10元素法则、五种微创新手法、长板聚焦和书名简介内容三位一体，修掉挂羊头卖狗肉；微创新修复必须按70/20/10元素法则稳住模板底座，并从精炼法、升级法、加料法、反套路法、组合法中选一种服务当前核心梗；拉长题材长板而非补短板，删除会稀释核心卖点的支线，把同一卖点扩成至少 3 个角度的正文证据。',
     '13A. 如果自检结果包含 female_audience_checks，必须优先修复 status=fail/warn 的女频长篇缺口；按 key/label/evidence/fix 补安全感锚点，把女主被动改成女主自己做决定、自己推进，把感情升级踩到事业/成长节点上，虐后补反转或糖，控制连续虐戏剂量，并校准平台安全感密度和货板一致。',
     '14. 如果自检结果包含 upgrade_rhythm_checks，必须优先修复 status=fail/warn 的升级节奏缺口；按 key/label/evidence/fix 补升级前情绪缺口、即时反馈、延迟反馈、升级后变化、新危机/新门槛、桥段功能位和金手指演进；金手指必须保留核心作用，只增加新的使用方式，升华到世界/规则层级前先补伏笔；金手指必须刚好解决当前矛盾，不能一键清场或完全无效，解决后要暴露更大矛盾、更高门槛或下一目标；金手指反馈法缺口要把金手指带来的变化过程掺进故事：用主角动作、判断、物件变化、角色反应或局势变化展示即时反馈，删掉只写绑定成功/规则说明/弹窗结算的空反馈；金手指简单是核心，功能、触发条件、奖励反馈和升级规则必须一眼就懂，删掉说明书式规则树和万能外挂；金手指多维成长必须补足词条、功能、品质、熟练度或条件-反馈中的至少两条线，避免只剩品质/数值单线提升；榜单缺口要补排名提升后的下一名次/下一目标、通过排行榜介绍新对手，并让装逼余震改变态度、报价、资源、权限或规则评价。',
     '15. 如果自检结果包含 conflict_structure_checks，必须优先修复 status=fail/warn 的冲突结构缺口；按 key/label/evidence/fix 补阻止者、有进无出、冲突升级阶梯、行动阻拦、明确胜负结果、压势不压人、主角主动破局、矛盾网和下一冲突种子；有进无出缺口要让读者相信主角非踏入不可，明确肉体/身份职场/心理死亡赌注或退出代价，并用杀人理由、工作职责、道德责任或实体场所作为黏结剂，让对立双方都无法轻易脱身；矛盾网缺口必须补到2-3条矛盾线互相牵连，并让解决一条后激活或加深另一条。',
@@ -50932,7 +50958,7 @@ export function createNovelWritingService(ctx: {
               '状态跟踪合同 state_tracking_contract 必须按 oh-story state-tracking 输出 character_states, historical_causality, world_constraints, source_requirements, source_readiness, filter_rules, quality_checks，确保写正文前只保留会影响本章正确性的状态。',
               '意图确认合同 intent_confirmation_contract 必须按 oh-story workflow-daily 输出 confirmed_intent, rhythm_and_style, structure_inputs, logic_line, appearance_order, cost_and_reward, ending_handoff, quality_checks，确保正文按本章意图统一发力。',
               '目标读者合同 target_reader_contract 必须按 oh-story 自嗨判定法输出 reader_profile, reader_desires, chapter_attractions, validation_questions, correction_methods, quality_checks，确保本章清楚写给谁、满足什么阅读欲望、给出什么可感知回报。',
-              '题材定位合同 genre_positioning_contract 必须按 oh-story 题材定位输出 genre_label, reader_psychology, genre_formula, core_hook_rules, goldfinger_fit_rules, must_have_scenes, platform_fit_rules, micro_innovation_rules, longboard_focus_rules, quality_checks，确保题材承诺和正文场景一致；longboard_focus_rules 必须包含“拉长板而非补短板”、题材长板、核心卖点背后的情绪清晰、同一卖点至少 3 个角度和不得稀释核心卖点。',
+              '题材定位合同 genre_positioning_contract 必须按 oh-story 题材定位输出 genre_label, reader_psychology, genre_formula, core_hook_rules, goldfinger_fit_rules, must_have_scenes, platform_fit_rules, micro_innovation_rules, micro_innovation_702010_rules, micro_innovation_methods, longboard_focus_rules, quality_checks，确保题材承诺和正文场景一致；micro_innovation_702010_rules 必须包含“70%来自过去经历和记忆”“20%来自当前生活状态”“10%来自时事热点话题和趋势”；micro_innovation_methods 必须包含精炼法、升级法、加料法、反套路法和组合法；longboard_focus_rules 必须包含“拉长板而非补短板”、题材长板、核心卖点背后的情绪清晰、同一卖点至少 3 个角度和不得稀释核心卖点。',
               '女频长篇合同 female_audience_contract 必须在项目为女频/女生频道/女主导向时按 oh-story female-audience-writing 输出 audience_mode, core_principles, reader_need_rules, copy_promise_rules, longform_genre_rules, romance_axis_rules, abuse_dosage_rules, platform_fit_rules, revision_priorities, quality_checks；core_principles 必须包含安全感优先、代入感优先、女主主动性、情绪即产品；reader_need_rules 必须包含被认可、被珍视、被尊重；romance_axis_rules 必须包含感情线双轴和感情升级踩在事业/成长节点；abuse_dosage_rules 必须包含每段虐后必给反转或糖，避免连续整卷只虐；platform_fit_rules 必须按番茄女生/起点女生/晋江/七猫校准安全感密度和节奏；quality_checks 必须包含货板一致。',
               '升级节奏合同 upgrade_rhythm_contract 必须按 oh-story 升级感三步法输出 upgrade_gap, upgrade_gain_plan, feedback_loop, emotion_modules, bridge_rhythm, ranking_ladder_rules, goldfinger_feedback_rules, goldfinger_simplicity_rules, goldfinger_multi_dimension_growth_rules, quality_checks，确保升级前缺口、升级后变化和即时/延迟反馈都可见；ranking_ladder_rules 必须包含“排行榜提供升级动力”、通过排行榜介绍新对手和榜单出现后要有装逼余震；goldfinger_feedback_rules 必须包含“给出金手指后必须有即时变化”、“把金手指带来变化的过程掺杂在故事里”、金手指契合主角当前职业/身份/生活困境，以及金手指不能替代全部行动链；goldfinger_simplicity_rules 必须包含“金手指简单是核心”和“一眼就懂”，并要求功能、触发条件、奖励反馈和升级规则清晰；goldfinger_multi_dimension_growth_rules 必须包含“金手指提升要有多维度”、词条、功能、品质和条件-反馈模型，避免只剩品质/数值单线提升。',
               '冲突结构合同 conflict_structure_contract 必须按 oh-story 矛盾与结构设计输出 conflict_ladder, motivation_sources, antagonist_pressure_rules, protagonist_agency_rules, event_value_changes, next_conflict_seeds, conflict_network_layers, no_exit_rules, quality_checks，确保每个主要场景都有明确阻力、胜负变化、下一冲突种子和有进无出；conflict_network_layers 必须包含 vertical_conflict, horizontal_conflict, cross_conflict, weaving_order，按定地图→定阵营→定角色编织纵向/横向/交叉三层矛盾；no_exit_rules 必须包含主角非踏入不可、死亡赌注/退出代价、黏结剂（杀人理由/工作职责/道德责任/实体场所）和对立双方无法轻易脱身。',

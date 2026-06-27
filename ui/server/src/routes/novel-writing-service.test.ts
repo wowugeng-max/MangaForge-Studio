@@ -20389,6 +20389,14 @@ describe('chapter pre-draft brief', () => {
     expect(brief.genre_positioning_contract.core_hook_rules.join('｜')).toContain('核心梗')
     expect(brief.genre_positioning_contract.goldfinger_fit_rules.join('｜')).toContain('生活/职业')
     expect(brief.genre_positioning_contract.micro_innovation_rules.join('｜')).toContain('最多3个')
+    expect(brief.genre_positioning_contract.micro_innovation_702010_rules.join('｜')).toContain('70%来自过去经历和记忆')
+    expect(brief.genre_positioning_contract.micro_innovation_702010_rules.join('｜')).toContain('20%来自当前生活状态')
+    expect(brief.genre_positioning_contract.micro_innovation_702010_rules.join('｜')).toContain('10%来自时事热点话题和趋势')
+    expect(brief.genre_positioning_contract.micro_innovation_methods.join('｜')).toContain('精炼法')
+    expect(brief.genre_positioning_contract.micro_innovation_methods.join('｜')).toContain('升级法')
+    expect(brief.genre_positioning_contract.micro_innovation_methods.join('｜')).toContain('加料法')
+    expect(brief.genre_positioning_contract.micro_innovation_methods.join('｜')).toContain('反套路法')
+    expect(brief.genre_positioning_contract.micro_innovation_methods.join('｜')).toContain('组合法')
     expect(brief.genre_positioning_contract.longboard_focus_rules.join('｜')).toContain('拉长板而非补短板')
     expect(brief.genre_positioning_contract.longboard_focus_rules.join('｜')).toContain('核心卖点背后的情绪清晰')
     expect(brief.genre_positioning_contract.longboard_focus_rules.join('｜')).toContain('至少 3 个角度')
@@ -20398,6 +20406,8 @@ describe('chapter pre-draft brief', () => {
     expect(prompt).toContain('执行 chapter_target.genre_positioning_contract')
     expect(prompt).toContain('都市系统/逆袭长篇')
     expect(prompt).toContain('系统评价+主角吐槽')
+    expect(prompt).toContain('70/20/10元素法则')
+    expect(prompt).toContain('五种微创新手法')
     expect(prompt).toContain('拉长板而非补短板')
     expect(prompt).toContain('题材长板')
     expect(prompt).toContain('genre_positioning_checks')
@@ -20455,6 +20465,34 @@ describe('chapter pre-draft brief', () => {
     expect(brief.genre_positioning_contract.must_have_scenes.join('｜')).toContain('系统面板')
     expect(brief.genre_positioning_contract.platform_fit_rules.join('｜')).toContain('番茄偏快节奏')
     expect(brief.genre_positioning_contract.longboard_focus_rules.join('｜')).toContain('拉长板而非补短板')
+    expect(brief.genre_positioning_contract.micro_innovation_702010_rules.join('｜')).toContain('70%来自过去经历和记忆')
+  })
+
+  test('hydrates explicit genre micro innovation methods from camel case input', () => {
+    const brief = buildChapterPreDraftBrief(
+      {
+        title: '离婚后系统让我翻盘',
+        genre: '都市系统逆袭',
+        synopsis: '中年失业又离婚的主角获得职业成长系统，用生活化技能逐步翻盘。',
+      },
+      {
+        chapter_target: {
+          chapter_no: 2,
+          title: '报废边缘',
+          summary: '主角收到系统面板，发现自己被评价为报废边缘。',
+          genre_positioning_contract: {
+            source: 'manual_genre',
+            microInnovation702010Rules: ['自定义：70%生活记忆，20%当下压力，10%热搜话题。'],
+            microInnovationMethods: ['自定义：只用升级法做订单场景升级。'],
+          },
+        },
+      },
+    )
+
+    expect(brief.genre_positioning_contract.source).toBe('manual_genre')
+    expect(brief.genre_positioning_contract.micro_innovation_702010_rules).toEqual(['自定义：70%生活记忆，20%当下压力，10%热搜话题。'])
+    expect(brief.genre_positioning_contract.micro_innovation_methods).toEqual(['自定义：只用升级法做订单场景升级。'])
+    expect(brief.genre_positioning_contract.micro_innovation_rules.join('｜')).toContain('最多3个')
   })
 
   test('adds an oh-story female audience contract to pre-draft brief and prose prompt', () => {
@@ -49657,6 +49695,10 @@ describe('chapter context word target source guards', () => {
     expect(repairBlock).toContain('conflict_structure_contract: repairedEmotionAndHookBrief.conflict_structure_contract')
     expect(repairBlock).toContain('目标读者合同')
     expect(repairBlock).toContain('题材定位合同')
+    expect(repairBlock).toContain('micro_innovation_702010_rules')
+    expect(repairBlock).toContain('70%来自过去经历和记忆')
+    expect(repairBlock).toContain('micro_innovation_methods')
+    expect(repairBlock).toContain('精炼法')
     expect(repairBlock).toContain('升级节奏合同')
     expect(repairBlock).toContain('ranking_ladder_rules')
     expect(repairBlock).toContain('排行榜提供升级动力')
@@ -52860,10 +52902,13 @@ describe('chapter context word target source guards', () => {
     expect(reviewPrompt).toContain('挂羊头卖狗肉')
     expect(reviewPrompt).toContain('拉长板而非补短板')
     expect(reviewPrompt).toContain('题材长板')
+    expect(reviewPrompt).toContain('70/20/10元素法则')
+    expect(reviewPrompt).toContain('五种微创新手法')
     expect(revisionPrompt).toContain('genre_positioning_checks')
     expect(revisionPrompt).toContain('题材定位')
     expect(revisionPrompt).toContain('长板')
     expect(revisionPrompt).toContain('稀释核心卖点')
+    expect(revisionPrompt).toContain('70/20/10')
     expect(shouldReviseBlock).toContain('genre_positioning_checks')
     expect(reviewNormalizeBlock).toContain('genre_positioning_checks')
     expect(reviewNormalizeBlock).toContain('reviewPayload?.genre_positioning_checks')
