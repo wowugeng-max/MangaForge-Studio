@@ -10504,6 +10504,11 @@ describe('chapter prose word target', () => {
     expect(prompt).toContain('内容概括决定起承转合')
     expect(prompt).toContain('人物关系和出场顺序决定镜头进入顺序')
     expect(prompt).toContain('情节细化决定代价兑现/收益兑现')
+    expect(prompt).toContain('Step 2.4 craft')
+    expect(prompt).toContain('爽点出手前先铺可指认的危机/期待')
+    expect(prompt).toContain('不铺=空洞')
+    expect(prompt).toContain('在场配角放大成差异化反应')
+    expect(prompt).toContain('信息型配角不当科普嘴')
     expect(prompt).toContain('不得提前消费后续章节爆点')
     expect(prompt).toContain('第8章只负责夜钟规则第一次显形')
   })
@@ -37308,6 +37313,11 @@ describe('chapter pre-draft brief', () => {
     expect(brief.next_batch_brief.workflow_rules.join('｜')).toContain('内容概括决定起承转合')
     expect(brief.next_batch_brief.workflow_rules.join('｜')).toContain('人物关系和出场顺序决定镜头进入顺序')
     expect(brief.next_batch_brief.workflow_rules.join('｜')).toContain('情节细化决定代价兑现/收益兑现')
+    expect(brief.next_batch_brief.workflow_rules.join('｜')).toContain('Step 2.4 craft')
+    expect(brief.next_batch_brief.workflow_rules.join('｜')).toContain('爽点出手前先铺可指认的危机/期待')
+    expect(brief.next_batch_brief.workflow_rules.join('｜')).toContain('不铺=空洞')
+    expect(brief.next_batch_brief.workflow_rules.join('｜')).toContain('在场配角放大成差异化反应')
+    expect(brief.next_batch_brief.workflow_rules.join('｜')).toContain('信息型配角不当科普嘴')
   })
 
   test('merges runtime chapterTarget next batch brief into the pre-draft brief when chapter_target already exists', () => {
