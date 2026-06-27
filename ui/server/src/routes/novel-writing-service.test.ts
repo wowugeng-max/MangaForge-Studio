@@ -37644,6 +37644,77 @@ describe('chapter pre-draft brief', () => {
     expect(prompt).toContain('旧印章完整归属不能提前公开')
   })
 
+  test('carries oh-story foreshadowing status semantics into the next pre-draft brief and prose prompt', () => {
+    const project = {
+      title: '万古长夜',
+      reference_config: {
+        story_state: {
+          foreshadowing_status: {
+            血契真正代价: {
+              status: '未埋',
+              planned_payoff_chapter: 60,
+              note: '只在本卷规划中存在，正文尚未正式埋下。',
+            },
+            第七层门影是谁: {
+              status: '已埋',
+              planted_chapter: 40,
+              last_touched_chapter: 41,
+              note: '已经用门影和旧印回声埋下，下一章只推进一层身份轮廓。',
+            },
+            已回收旧门牌: {
+              status: '已回收',
+              planted_chapter: 12,
+              payoff_chapter: 18,
+              note: '已经在第18章回收，不应再报警。',
+            },
+            错过血契窗口: {
+              status: '已过期',
+              planted_chapter: 36,
+              planned_payoff_chapter: 41,
+              note: '错过原定回收窗口，需要 story-review 或显式修复。',
+            },
+          },
+        },
+      },
+    }
+    const contextPackage = {
+      chapter_target: {
+        chapter_no: 42,
+        title: '旧印回声',
+        summary: '李玄继续验证旧印章和第七层门影。',
+        scene_cards: [],
+      },
+    }
+
+    const brief = buildChapterPreDraftBrief(project, contextPackage)
+    const context = mergeConfirmedPreDraftBriefIntoContext(contextPackage, {
+      ...brief,
+      confirmed_at: '2026-06-10T08:00:00.000Z',
+    })
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+    const prompt = service.buildParagraphProseContext(project, context, null, { chapter_no: 42, title: '旧印回声' })
+
+    expect(brief.foreshadowing_consistency_radar.overdue_count).toBe(1)
+    expect(brief.foreshadowing_consistency_radar.overdue.join('｜')).toContain('错过血契窗口')
+    expect(brief.foreshadowing_consistency_radar.overdue.join('｜')).toContain('状态：已过期')
+    expect(brief.foreshadowing_consistency_radar.active.join('｜')).toContain('血契真正代价')
+    expect(brief.foreshadowing_consistency_radar.active.join('｜')).toContain('状态：未埋')
+    expect(brief.foreshadowing_consistency_radar.active.join('｜')).toContain('第七层门影是谁')
+    expect(brief.foreshadowing_consistency_radar.active.join('｜')).toContain('状态：已埋')
+    expect(brief.foreshadowing_consistency_radar.active.join('｜')).not.toContain('已回收旧门牌')
+    expect(brief.foreshadowing_consistency_radar.status_rules.join('｜')).toContain('未埋、已埋、已回收属于正常状态')
+    expect(brief.foreshadowing_consistency_radar.status_rules.join('｜')).toContain('只有已过期需要 /story-review 或显式修复')
+    expect(brief.foreshadowing_consistency_radar.status_rules.join('｜')).toContain('SessionStart 不应因未埋、已埋或已回收报警')
+    expect(prompt).toContain('伏笔状态语义')
+    expect(prompt).toContain('未埋、已埋、已回收属于正常状态')
+    expect(prompt).toContain('只有已过期需要 /story-review 或显式修复')
+    expect(prompt).toContain('SessionStart 不应因未埋、已埋或已回收报警')
+  })
+
   test('carries oh-story foreshadowing density warnings into the next pre-draft brief and prose prompt', () => {
     const foreshadowingStatus = Object.fromEntries(
       Array.from({ length: 16 }, (_, index) => [

@@ -18377,6 +18377,12 @@ const OH_STORY_FORESHADOWING_DAILY_SCOPE_RULES = [
   '全量伏笔审计只在 /story-review 或用户明确要求“全面检查伏笔”时执行。',
 ]
 
+const OH_STORY_FORESHADOWING_STATUS_RULES = [
+  '未埋、已埋、已回收属于正常状态，不应自动当作一致性债务。',
+  '只有已过期需要 /story-review 或显式修复，修复前不得强行改写正文事实。',
+  'SessionStart 不应因未埋、已埋或已回收报警；日更只处理本轮新增、推进或回收的伏笔。',
+]
+
 function normalizeForeshadowingConsistencyRadar(value: any = {}, targetChapterNo = 0) {
   const raw = value?.foreshadowing_consistency_radar
     || value?.foreshadowingConsistencyRadar
@@ -18421,6 +18427,8 @@ function normalizeForeshadowingConsistencyRadar(value: any = {}, targetChapterNo
       const normalizedStatus = status.toLowerCase()
       const closed = ['paid', 'done', 'resolved', 'closed', 'complete', 'completed', 'settled'].includes(normalizedStatus)
         || /^(已回收|已兑现|完成|关闭)$/.test(status)
+      const expired = ['expired', 'overdue', 'stale'].includes(normalizedStatus)
+        || /^(已过期|过期|错过回收窗口)$/.test(status)
       if (closed) return null
       const plantedChapter = Number(
         source.planted_chapter
@@ -18453,6 +18461,7 @@ function normalizeForeshadowingConsistencyRadar(value: any = {}, targetChapterNo
         || (targetNo && plantedChapter ? Math.max(0, targetNo - plantedChapter) : 0)
       const note = compactBriefText(source.note || source.notes || source.summary || source.detail || source.evidence || source.source_excerpt || source.sourceExcerpt)
       const overdue = Boolean(source.overdue ?? source.is_overdue ?? source.isOverdue)
+        || expired
         || (age > 50 && !closed)
       const volumeNo = Number(source.volume_no ?? source.volumeNo ?? source.volume ?? source.arc_no ?? source.arcNo ?? 0)
         || (plantedChapter ? Math.max(1, Math.ceil(plantedChapter / 50)) : 0)
@@ -18505,6 +18514,10 @@ function normalizeForeshadowingConsistencyRadar(value: any = {}, targetChapterNo
     scope_rules: uniqueBriefStrings([
       ...asArray(raw.scope_rules || raw.scopeRules || raw.daily_scope_rules || raw.dailyScopeRules).map(textItem),
       ...OH_STORY_FORESHADOWING_DAILY_SCOPE_RULES,
+    ].filter(Boolean), 8),
+    status_rules: uniqueBriefStrings([
+      ...asArray(raw.status_rules || raw.statusRules || raw.status_semantics || raw.statusSemantics).map(textItem),
+      ...OH_STORY_FORESHADOWING_STATUS_RULES,
     ].filter(Boolean), 8),
     guardrails: uniqueBriefStrings([
       ...asArray(raw.guardrails || raw.guardrail || raw.rules).map(textItem),
@@ -48551,6 +48564,7 @@ export function createNovelWritingService(ctx: {
       foreshadowingConsistencyRadar?.overdue?.length ? `超期伏笔清单：${foreshadowingConsistencyRadar.overdue.join('；')}` : '',
       foreshadowingConsistencyRadar?.density_warnings?.length ? `伏笔密度提醒：${foreshadowingConsistencyRadar.density_warnings.join('；')}` : '',
       foreshadowingConsistencyRadar?.scope_rules?.length ? `伏笔盘点范围：${foreshadowingConsistencyRadar.scope_rules.join('；')}` : '',
+      foreshadowingConsistencyRadar?.status_rules?.length ? `伏笔状态语义：${foreshadowingConsistencyRadar.status_rules.join('；')}` : '',
       foreshadowingConsistencyRadar?.guardrails?.length ? `一致性红线：${foreshadowingConsistencyRadar.guardrails.join('；')}` : '',
       foreshadowingConsistencyRadar ? JSON.stringify(foreshadowingConsistencyRadar, null, 2).slice(0, 2400) : '',
       '',
