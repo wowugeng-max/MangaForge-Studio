@@ -10444,6 +10444,11 @@ describe('chapter prose word target', () => {
     expect(prompt).toContain('批次开工清单')
     expect(prompt).toContain('核心承诺')
     expect(prompt).toContain('三章内进入内门视野')
+    expect(prompt).toContain('批量流程规则')
+    expect(prompt).toContain('继续/续写/日更只表示继续当前日更批量流程')
+    expect(prompt).toContain('不得跳过 Step 2.2 状态筛选或 Step 2.3 文风召回')
+    expect(prompt).toContain('必须串行逐章写作，不得并发生成多章')
+    expect(prompt).toContain('章间不重复询问是否继续')
     expect(prompt).toContain('不得提前消费后续章节爆点')
     expect(prompt).toContain('第8章只负责夜钟规则第一次显形')
   })
@@ -37150,6 +37155,10 @@ describe('chapter pre-draft brief', () => {
     expect(brief.next_batch_brief.forbidden_boundary).toContain('规则源头')
     expect(brief.next_batch_brief.start_checklist.map((item: any) => item.key)).toEqual(['core_promise', 'forbidden_boundary'])
     expect(brief.next_batch_brief.start_checklist[0].detail).toContain('规则反制')
+    expect(brief.next_batch_brief.workflow_rules.join('｜')).toContain('继续/续写/日更只表示继续当前日更批量流程')
+    expect(brief.next_batch_brief.workflow_rules.join('｜')).toContain('不得跳过 Step 2.2 状态筛选或 Step 2.3 文风召回')
+    expect(brief.next_batch_brief.workflow_rules.join('｜')).toContain('必须串行逐章写作，不得并发生成多章')
+    expect(brief.next_batch_brief.workflow_rules.join('｜')).toContain('章间不重复询问是否继续')
   })
 
   test('merges runtime chapterTarget next batch brief into the pre-draft brief when chapter_target already exists', () => {

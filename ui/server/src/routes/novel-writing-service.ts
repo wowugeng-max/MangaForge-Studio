@@ -18744,6 +18744,13 @@ function chapterNosBrief(chapterNos: any[] = []) {
     .join('、')
 }
 
+const OH_STORY_NEXT_BATCH_WORKFLOW_RULES = [
+  '继续/续写/日更只表示继续当前日更批量流程，不得解释为跳过写前准备的直接正文续写。',
+  '不得跳过 Step 2.2 状态筛选或 Step 2.3 文风召回；每章写前都要重新确认来源、状态、文风召回和意图确认。',
+  '必须串行逐章写作，不得并发生成多章；下一章必须读取上一章刚写入的正文、回执和追踪更新后再开始。',
+  '章间不重复询问是否继续，除非用户明确要求逐章确认、章节号/细纲冲突、请求范围越界或出现会导致写错的阻塞信息。',
+]
+
 function normalizeDefaultFiveChapterRegression(value: any) {
   const raw = value?.default_five_chapter_regression || value?.defaultFiveChapterRegression || value || {}
   if (!raw || raw.visible === false) return null
@@ -19065,6 +19072,10 @@ function normalizeNextBatchBrief(value: any, targetChapterNo = 0) {
     mainline_focus: compactBriefText(raw.mainline_focus || raw.mainlineFocus),
     forbidden_boundary: compactBriefText(raw.forbidden_boundary || raw.forbiddenBoundary),
     current_chapter_role: currentChapterRole,
+    workflow_rules: uniqueBriefStrings([
+      ...asArray(raw.workflow_rules || raw.workflowRules || raw.batch_workflow_rules || raw.batchWorkflowRules).map((item: any) => compactBriefText(item)).filter(Boolean),
+      ...OH_STORY_NEXT_BATCH_WORKFLOW_RULES,
+    ], 8),
     expansion_structure_verification: expansionStructureVerification,
     expansion_structure_decision: expansionStructureDecision,
     start_checklist: startChecklist,
@@ -48346,6 +48357,7 @@ export function createNovelWritingService(ctx: {
       nextBatchBrief ? '【本批连载任务书】' : '',
       nextBatchBrief ? '硬性要求：本章必须服务批次目标和当前章角色；不得提前消费后续章节爆点，不得跳过本章读者回报，不得抢跑批次后段的主线兑现。' : '',
       nextBatchBrief?.start_checklist?.length ? `批次开工清单：${nextBatchBrief.start_checklist.map((item: any) => `${item.label || item.key}：${item.detail || item.status}`).join('；')}` : '',
+      nextBatchBrief?.workflow_rules?.length ? `批量流程规则：${nextBatchBrief.workflow_rules.join('；')}` : '',
       nextBatchBrief ? JSON.stringify(nextBatchBrief, null, 2).slice(0, 4000) : '',
       '',
       expansionStructureDecision ? '【扩批结构决策】' : '',
