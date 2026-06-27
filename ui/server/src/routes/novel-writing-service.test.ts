@@ -21274,6 +21274,11 @@ describe('chapter pre-draft brief', () => {
     expect(brief.emotional_arc_contract.reaction_structure_rules.join('｜')).toContain('后反应')
     expect(brief.emotional_arc_contract.reaction_structure_rules.join('｜')).toContain('以小搏大')
     expect(brief.emotional_arc_contract.reaction_structure_rules.join('｜')).toContain('士气如虹')
+    expect(brief.emotional_arc_contract.ideological_conflict_rules.join('｜')).toContain('理念之争')
+    expect(brief.emotional_arc_contract.ideological_conflict_rules.join('｜')).toContain('利益之争')
+    expect(brief.emotional_arc_contract.ideological_conflict_rules.join('｜')).toContain('理念认同')
+    expect(brief.emotional_arc_contract.ideological_conflict_rules.join('｜')).toContain('人设认同')
+    expect(brief.emotional_arc_contract.ideological_conflict_rules.join('｜')).toContain('追求和牺牲')
     expect(brief.emotional_arc_contract.failure_mode_guards.join('｜')).toContain('假虐')
     expect(confirmedContext.chapter_target.emotional_arc_contract.quality_checks.join('｜')).toContain('调动')
     expect(confirmedContext.chapter_target.emotional_arc_contract.quality_checks.join('｜')).toContain('先入为主')
@@ -21312,6 +21317,9 @@ describe('chapter pre-draft brief', () => {
     expect(prompt).toContain('复现')
     expect(prompt).toContain('后反应')
     expect(prompt).toContain('以小搏大')
+    expect(prompt).toContain('理念矛盾')
+    expect(prompt).toContain('理念之争')
+    expect(prompt).toContain('追求和牺牲')
     expect(prompt).toContain('emotional_arc_checks')
     expect(prompt.indexOf('【情绪弧合同】')).toBeLessThan(prompt.indexOf('【结构化上下文包】'))
   })
@@ -21375,9 +21383,10 @@ describe('chapter pre-draft brief', () => {
     expect(brief.emotional_arc_contract.peak_end_rules.join('｜')).toContain('峰终定律')
     expect(brief.emotional_arc_contract.emotion_layer_rules.join('｜')).toContain('读者实际感受')
     expect(brief.emotional_arc_contract.reaction_structure_rules.join('｜')).toContain('前反应')
+    expect(brief.emotional_arc_contract.ideological_conflict_rules.join('｜')).toContain('理念之争')
   })
 
-  test('preserves explicit camelCase emotional arc first-impression peak-end and emotion-layer rules', () => {
+  test('preserves explicit camelCase emotional arc first-impression peak-end emotion-layer and ideology rules', () => {
     const project = {
       title: '当众反证',
       genre: '都市逆袭',
@@ -21390,6 +21399,7 @@ describe('chapter pre-draft brief', () => {
         peakEndRules: ['自定义峰终定律：结尾情绪必须高于起点。'],
         emotionLayerRules: ['自定义三层情绪：角色情绪屈辱，文本传递隐忍，读者实际感受爽前蓄力。'],
         reactionStructureRules: ['自定义前反应-复现-后反应：先预知坏结果，再复现冲击，最后让主角振作。'],
+        ideologicalConflictRules: ['自定义理念矛盾：把公平和权威的冲突写成主角与对手的原则碰撞。'],
       },
       chapter_target: {
         chapter_no: 17,
@@ -21407,6 +21417,7 @@ describe('chapter pre-draft brief', () => {
     expect(brief.emotional_arc_contract.peak_end_rules).toEqual(['自定义峰终定律：结尾情绪必须高于起点。'])
     expect(brief.emotional_arc_contract.emotion_layer_rules).toEqual(['自定义三层情绪：角色情绪屈辱，文本传递隐忍，读者实际感受爽前蓄力。'])
     expect(brief.emotional_arc_contract.reaction_structure_rules).toEqual(['自定义前反应-复现-后反应：先预知坏结果，再复现冲击，最后让主角振作。'])
+    expect(brief.emotional_arc_contract.ideological_conflict_rules).toEqual(['自定义理念矛盾：把公平和权威的冲突写成主角与对手的原则碰撞。'])
   })
 
   test('asks prose self review to enforce oh-story emotional three-blade methods', () => {
@@ -49784,11 +49795,13 @@ describe('chapter context word target source guards', () => {
     expect(repairBlock).toContain('peak_end_rules')
     expect(repairBlock).toContain('emotion_layer_rules')
     expect(repairBlock).toContain('reaction_structure_rules')
+    expect(repairBlock).toContain('ideological_conflict_rules')
     expect(repairBlock).toContain('先入为主')
     expect(repairBlock).toContain('峰终定律')
     expect(repairBlock).toContain('三层情绪')
     expect(repairBlock).toContain('前反应')
     expect(repairBlock).toContain('以小搏大')
+    expect(repairBlock).toContain('理念矛盾')
     expect(repairBlock).toContain('反转合同')
   })
 
@@ -54283,6 +54296,8 @@ describe('chapter context word target source guards', () => {
     expect(reviewPrompt).toContain('读者实际感受')
     expect(reviewPrompt).toContain('前反应')
     expect(reviewPrompt).toContain('以小搏大')
+    expect(reviewPrompt).toContain('理念矛盾')
+    expect(reviewPrompt).toContain('理念之争')
     expect(revisionPrompt).toContain('emotional_arc_checks')
     expect(revisionPrompt).toContain('情绪弧')
     expect(revisionPrompt).toContain('爽点递增')
@@ -54293,6 +54308,8 @@ describe('chapter context word target source guards', () => {
     expect(revisionPrompt).toContain('读者实际感受')
     expect(revisionPrompt).toContain('前反应')
     expect(revisionPrompt).toContain('以小搏大')
+    expect(revisionPrompt).toContain('理念矛盾')
+    expect(revisionPrompt).toContain('追求和牺牲')
     expect(shouldReviseBlock).toContain('emotional_arc_checks')
     expect(reviewNormalizeBlock).toContain('emotional_arc_checks')
     expect(reviewNormalizeBlock).toContain('reviewPayload?.emotional_arc_checks')
