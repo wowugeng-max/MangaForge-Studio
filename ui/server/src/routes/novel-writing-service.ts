@@ -10516,6 +10516,7 @@ function deliveryRiskEvidence(payload: any) {
     ...asArray(payload?.next_actions || payload?.nextActions),
   ].flatMap((item: any) => [
     deliveryRiskItemText(item),
+    deliveryRiskItemText(item?.key),
     deliveryRiskItemText(item?.evidence || item?.source_excerpt || item?.sourceExcerpt),
     deliveryRiskItemText(item?.evidence_location_risk || item?.evidenceLocationRisk),
     deliveryRiskItemText(item?.required_action || item?.requiredAction),
@@ -14432,6 +14433,21 @@ function makeDeliveryRiskItem(prefix: string, payload: any, count: number) {
 
 function genericSyncRiskStagedActions(reviewType: string, evidence: string[]) {
   const firstEvidence = evidence[0] || '同步风险缺少可见承接。'
+  const evidenceText = evidence.join('；')
+  if (reviewType === 'benchmark_recall_sync' && /benchmark_anchor_excerpt_copy_risk|原文锚点复制|锚点原句|anchor_excerpts|copied_anchor/i.test(evidenceText)) {
+    const anchorEvidence = evidence.find((item: string) => /删除|改写|锚点原句|信息释放手法|anchor_excerpts|原文锚点/i.test(item)) || firstEvidence
+    return {
+      openingActions: [
+        `文风召回开篇修复：前300字先清理上一章 benchmark_anchor_excerpt_copy_risk，不得延续或复述锚点原句；${anchorEvidence}`,
+      ],
+      middleActions: [
+        `文风召回中段修复：只保留锚点的句长、停顿、潜台词和信息释放手法，全部换成本书人物、事件、设定和措辞；${anchorEvidence}`,
+      ],
+      endingActions: [
+        `文风召回章尾复核：章尾检查锚点复制风险是否清零，保留抽象技法但不得出现原文锚点句、桥段、角色名或专名；${anchorEvidence}`,
+      ],
+    }
+  }
   return {
     openingActions: [
       `同步风险开篇承接：前300字先回应 ${reviewType} 的上一章缺口，把它转成当前场景目标、阻碍、证据或状态压力；${firstEvidence}`,

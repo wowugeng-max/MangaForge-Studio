@@ -30738,6 +30738,86 @@ describe('chapter pre-draft brief', () => {
     expect(prompt).toContain('旁观者差异化反应')
   })
 
+  test('carries copied benchmark anchor excerpt risk into staged next-chapter repair actions', () => {
+    const deliveryRiskCarryOver = buildDeliveryRiskCarryOverContext(
+      { id: 8, chapter_no: 8, title: '第二个证人' },
+      [
+        { id: 7, chapter_no: 7, title: '旧印章反推' },
+        { id: 8, chapter_no: 8, title: '第二个证人' },
+      ],
+      [
+        {
+          id: 217,
+          chapter_id: 7,
+          review_type: 'benchmark_recall_sync',
+          created_at: '2026-06-09T08:16:00.000Z',
+          payload: JSON.stringify({
+            chapter_id: 7,
+            chapter_no: 7,
+            benchmark_recall_sync: {
+              status: 'warn',
+              label: '召回缺口 1',
+              summary: '正文复制了原文锚点片段。',
+              missed_count: 1,
+              missed: [
+                {
+                  key: 'benchmark_anchor_excerpt_copy_risk',
+                  label: '原文锚点复制风险',
+                  text: 'anchor_excerpts 第1段出现可定位原句复制：账册翻到缺页前一行',
+                  evidence: '账册翻到缺页前一行',
+                  fix: '删除或改写锚点原句；只保留句长、停顿、潜台词和信息释放手法。',
+                },
+              ],
+              copied_anchor_excerpts: ['账册翻到缺页前一行'],
+              next_actions: [
+                '存在原文锚点复制风险：删除或改写锚点原句，只保留句长、停顿、潜台词和信息释放手法。',
+              ],
+            },
+          }),
+        },
+      ],
+    )
+    const project = { title: '残阵问道', reference_config: {} }
+    const contextPackage = {
+      delivery_risk_carry_over: deliveryRiskCarryOver,
+      chapter_target: {
+        chapter_no: 8,
+        title: '第二个证人',
+        summary: '李玄顺着旧印章背面的名字追出第二个证人。',
+        conflict: '执事试图抢先灭口，旁观弟子开始分裂站队。',
+        ending_hook: '第二个证人说出旧案当晚还有第三个人。',
+        scene_cards: [
+          { scene_no: 1, title: '证人现身', reader_payoff: '清理锚点复制后继续执行召回技法。' },
+        ],
+      },
+    }
+    const brief = buildChapterPreDraftBrief(project, contextPackage)
+    const context = mergeConfirmedPreDraftBriefIntoContext(contextPackage, {
+      ...brief,
+      confirmed_at: '2026-06-10T08:02:00.000Z',
+    })
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+    const prompt = service.buildParagraphProseContext(
+      project,
+      context,
+      null,
+      { chapter_no: 8, title: '第二个证人' },
+    )
+
+    expect(deliveryRiskCarryOver?.priority_label).toBe('优先补召回')
+    expect(brief.delivery_risk_carry_over.required_actions.join('｜')).toContain('benchmark_anchor_excerpt_copy_risk')
+    expect(brief.delivery_risk_carry_over.required_actions.join('｜')).toContain('删除或改写锚点原句')
+    expect(brief.delivery_risk_carry_over.opening_actions.join('｜')).toContain('锚点原句')
+    expect(brief.delivery_risk_carry_over.middle_actions.join('｜')).toContain('信息释放手法')
+    expect(brief.delivery_risk_carry_over.ending_actions.join('｜')).toContain('锚点复制')
+    expect(prompt).toContain('删除或改写锚点原句')
+    expect(prompt).toContain('只保留句长、停顿、潜台词和信息释放手法')
+  })
+
   test('carries style boundary sync misses into the next pre-draft brief and prose prompt', () => {
     const deliveryRiskCarryOver = buildDeliveryRiskCarryOverContext(
       { id: 8, chapter_no: 8, title: '第二个证人' },
