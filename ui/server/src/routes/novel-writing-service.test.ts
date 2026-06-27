@@ -22491,6 +22491,10 @@ describe('chapter pre-draft brief', () => {
     expect(brief.prose_craft_contract.baimiao_sensory_rules.join('｜')).toContain('两到三种感官')
     expect(brief.prose_craft_contract.baimiao_sensory_rules.join('｜')).toContain('视觉/听觉/触觉/嗅觉/味觉')
     expect(brief.prose_craft_contract.baimiao_sensory_rules.join('｜')).toContain('五感必须服务情绪')
+    expect(brief.prose_craft_contract.dynamic_description_rules.join('｜')).toContain('动态描写优于静态描写')
+    expect(brief.prose_craft_contract.dynamic_description_rules.join('｜')).toContain('动作和反应展现')
+    expect(brief.prose_craft_contract.dynamic_description_rules.join('｜')).toContain('环境不要大段铺陈')
+    expect(brief.prose_craft_contract.dynamic_description_rules.join('｜')).toContain('角色行动中穿插点染')
     expect(brief.prose_craft_contract.transition_bridge_rules.join('｜')).toContain('场景切换与转场')
     expect(brief.prose_craft_contract.transition_bridge_rules.join('｜')).toContain('相似物')
     expect(brief.prose_craft_contract.transition_bridge_rules.join('｜')).toContain('相似五感')
@@ -22541,6 +22545,9 @@ describe('chapter pre-draft brief', () => {
     expect(prompt).toContain('五感')
     expect(prompt).toContain('两到三种感官')
     expect(prompt).toContain('服务情绪')
+    expect(prompt).toContain('动态描写优于静态描写')
+    expect(prompt).toContain('动作和反应')
+    expect(prompt).toContain('角色行动中穿插点染')
     expect(prompt).toContain('场景切换与转场')
     expect(prompt).toContain('相似物')
     expect(prompt).toContain('动作或物件')
@@ -22612,6 +22619,7 @@ describe('chapter pre-draft brief', () => {
     expect(brief.prose_craft_contract.then_what_rules.join('｜')).toContain('然后呢')
     expect(brief.prose_craft_contract.core_emotion_alignment_rules.join('｜')).toContain('核心情绪')
     expect(brief.prose_craft_contract.baimiao_sensory_rules.join('｜')).toContain('白描')
+    expect(brief.prose_craft_contract.dynamic_description_rules.join('｜')).toContain('动态描写优于静态描写')
     expect(brief.prose_craft_contract.transition_bridge_rules.join('｜')).toContain('场景切换与转场')
     expect(brief.prose_craft_contract.object_number_rules.join('｜')).toContain('具体数字')
     expect(brief.prose_craft_contract.section_structure_rules.join('｜')).toContain('一个主事件')
@@ -22621,7 +22629,7 @@ describe('chapter pre-draft brief', () => {
     expect(brief.prose_craft_contract.concept_anchor_rules.join('｜')).toContain('新名词')
   })
 
-  test('preserves explicit camelCase prose craft subject-name rhythm indirect description three-camera then-what core emotion baimiao sensory and transition rules', () => {
+  test('preserves explicit camelCase prose craft subject-name rhythm indirect description three-camera then-what core emotion baimiao sensory dynamic and transition rules', () => {
     const project = {
       title: '雪夜反证',
       genre: '悬疑逆袭',
@@ -22636,6 +22644,7 @@ describe('chapter pre-draft brief', () => {
         thenWhatRules: ['自定义然后呢基点法：每段最后一个信息点必须引出下一动作、下一疑问或下一反应，不能写成死段。'],
         coreEmotionAlignmentRules: ['自定义核心情绪对齐：每个动作、物件、冲突和配角反应都必须服务复仇被认可的读者情绪。'],
         baimiaoSensoryRules: ['自定义白描五感：只保留最准确的动作名词和触觉/听觉锚点，所有感官都服务审判压迫感。'],
+        dynamicDescriptionRules: ['自定义动态描写：人物特征只用动作和反应展现，环境只在角色行动中穿插点染。'],
         transitionBridgeRules: ['自定义转场：时间跳转用账本翻页或钥匙落掌承接，空间跳转用门缝光和脚步声带到新地点。'],
       },
       chapter_target: {
@@ -22655,6 +22664,7 @@ describe('chapter pre-draft brief', () => {
     expect(brief.prose_craft_contract.then_what_rules).toEqual(['自定义然后呢基点法：每段最后一个信息点必须引出下一动作、下一疑问或下一反应，不能写成死段。'])
     expect(brief.prose_craft_contract.core_emotion_alignment_rules).toEqual(['自定义核心情绪对齐：每个动作、物件、冲突和配角反应都必须服务复仇被认可的读者情绪。'])
     expect(brief.prose_craft_contract.baimiao_sensory_rules).toEqual(['自定义白描五感：只保留最准确的动作名词和触觉/听觉锚点，所有感官都服务审判压迫感。'])
+    expect(brief.prose_craft_contract.dynamic_description_rules).toEqual(['自定义动态描写：人物特征只用动作和反应展现，环境只在角色行动中穿插点染。'])
     expect(brief.prose_craft_contract.transition_bridge_rules).toEqual(['自定义转场：时间跳转用账本翻页或钥匙落掌承接，空间跳转用门缝光和脚步声带到新地点。'])
   })
 
@@ -49922,6 +49932,10 @@ describe('chapter context word target source guards', () => {
     expect(repairBlock).toContain('baimiao_sensory_rules')
     expect(repairBlock).toContain('白描')
     expect(repairBlock).toContain('五感必须服务情绪')
+    expect(repairBlock).toContain('dynamic_description_rules')
+    expect(repairBlock).toContain('动态描写优于静态描写')
+    expect(repairBlock).toContain('动作和反应展现')
+    expect(repairBlock).toContain('角色行动中穿插点染')
     expect(repairBlock).toContain('transition_bridge_rules')
     expect(repairBlock).toContain('场景切换与转场')
     expect(repairBlock).toContain('时间跳转')
@@ -54889,6 +54903,9 @@ describe('chapter context word target source guards', () => {
     expect(reviewPrompt).toContain('baimiao_sensory_rules')
     expect(reviewPrompt).toContain('白描')
     expect(reviewPrompt).toContain('五感')
+    expect(reviewPrompt).toContain('dynamic_description_rules')
+    expect(reviewPrompt).toContain('动态描写优于静态描写')
+    expect(reviewPrompt).toContain('动作和反应')
     expect(reviewPrompt).toContain('transition_bridge_rules')
     expect(reviewPrompt).toContain('场景切换与转场')
     expect(reviewPrompt).toContain('相似物')
@@ -54905,6 +54922,9 @@ describe('chapter context word target source guards', () => {
     expect(revisionPrompt).toContain('白描')
     expect(revisionPrompt).toContain('最少的字')
     expect(revisionPrompt).toContain('感官')
+    expect(revisionPrompt).toContain('动态描写')
+    expect(revisionPrompt).toContain('动作和反应')
+    expect(revisionPrompt).toContain('环境铺陈')
     expect(revisionPrompt).toContain('场景切换')
     expect(revisionPrompt).toContain('时间跳转')
     expect(revisionPrompt).toContain('声音或光影')
