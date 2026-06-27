@@ -10809,6 +10809,54 @@ function proseQualityHighSeverityFindings(payload: any) {
     .filter(Boolean)
 }
 
+function normalizeNextChapterQualityPlanEndingContract(plan: any) {
+  const raw = plan?.ending_contract
+    || plan?.endingContract
+    || plan?.chapter_handoff_contract
+    || plan?.chapterHandoffContract
+    || {}
+  const finalState = firstCompactText(
+    raw?.final_state,
+    raw?.finalState,
+    plan?.final_state,
+    plan?.finalState,
+  )
+  const unresolvedQuestion = firstCompactText(
+    raw?.unresolved_question,
+    raw?.unresolvedQuestion,
+    raw?.open_question,
+    raw?.openQuestion,
+    plan?.unresolved_question,
+    plan?.unresolvedQuestion,
+  )
+  const nextChapterPull = firstCompactText(
+    raw?.next_chapter_pull,
+    raw?.nextChapterPull,
+    raw?.next_pull,
+    raw?.nextPull,
+    plan?.next_chapter_pull,
+    plan?.nextChapterPull,
+  )
+  const handoffToNext = firstCompactText(
+    raw?.handoff_to_next,
+    raw?.handoffToNext,
+    raw?.chapter_handoff,
+    raw?.chapterHandoff,
+    raw?.next_chapter_handoff,
+    raw?.nextChapterHandoff,
+    raw?.handoff,
+    plan?.handoff_to_next,
+    plan?.handoffToNext,
+  )
+  if (!finalState && !unresolvedQuestion && !nextChapterPull && !handoffToNext) return null
+  return {
+    final_state: finalState,
+    unresolved_question: unresolvedQuestion,
+    next_chapter_pull: nextChapterPull,
+    handoff_to_next: handoffToNext,
+  }
+}
+
 function proseQualityNextChapterPlanRisks(payload: any) {
   const selfCheck = payload?.self_check || payload?.selfCheck || payload || {}
   const review = selfCheck?.review || selfCheck?.initial_review || payload?.review || payload || {}
@@ -10833,12 +10881,40 @@ function proseQualityNextChapterPlanRisks(payload: any) {
   const endingActions = uniqueBriefStrings(asArray(plan?.ending_actions || plan?.endingActions).map(deliveryRiskItemText).filter(Boolean), 8)
   const avoidRepetition = uniqueBriefStrings(asArray(plan?.avoid_repetition || plan?.avoidRepetition).map(deliveryRiskItemText).filter(Boolean), 8)
   const evidenceBasis = uniqueBriefStrings(asArray(plan?.evidence_basis || plan?.evidenceBasis).map(deliveryRiskItemText).filter(Boolean), 8)
+  const endingContract = normalizeNextChapterQualityPlanEndingContract(plan)
+  const endingContractEvidence = endingContract
+    ? uniqueBriefStrings([
+      endingContract.final_state ? `final_state：${endingContract.final_state}` : '',
+      endingContract.unresolved_question ? `unresolved_question：${endingContract.unresolved_question}` : '',
+      endingContract.next_chapter_pull ? `next_chapter_pull：${endingContract.next_chapter_pull}` : '',
+      endingContract.handoff_to_next ? `handoff_to_next：${endingContract.handoff_to_next}` : '',
+    ], 8)
+    : []
+  const endingContractOpeningActions = endingContract
+    ? uniqueBriefStrings([
+      endingContract.final_state ? `上章最后状态：${endingContract.final_state}` : '',
+      endingContract.handoff_to_next ? `章首承接：${endingContract.handoff_to_next}` : '',
+      endingContract.next_chapter_pull ? `章首承接下一章推动力：${endingContract.next_chapter_pull}` : '',
+    ], 8)
+    : []
+  const endingContractMiddleActions = endingContract
+    ? uniqueBriefStrings([
+      endingContract.unresolved_question ? `未解决问题：${endingContract.unresolved_question}` : '',
+    ], 8)
+    : []
+  const endingContractEndingActions = endingContract
+    ? uniqueBriefStrings([
+      endingContract.next_chapter_pull ? `下一章推动力：${endingContract.next_chapter_pull}` : '',
+      endingContract.handoff_to_next ? `章尾复核承接：${endingContract.handoff_to_next}` : '',
+    ], 8)
+    : []
   const count = qualityFocus.length
     + openingActions.length
     + middleActions.length
     + endingActions.length
     + avoidRepetition.length
     + evidenceBasis.length
+    + endingContractEvidence.length
   if (count <= 0) return null
   return {
     count,
@@ -10848,6 +10924,11 @@ function proseQualityNextChapterPlanRisks(payload: any) {
     endingActions,
     avoidRepetition,
     evidenceBasis,
+    endingContract,
+    endingContractEvidence,
+    endingContractOpeningActions,
+    endingContractMiddleActions,
+    endingContractEndingActions,
   }
 }
 
@@ -15199,12 +15280,22 @@ export function buildDeliveryRiskCarryOverContext(chapter: any, chapters: any[] 
         priorityLabel: '优先执行质量续航',
         evidence: [
           ...nextChapterPlanRisks.qualityFocus,
+          ...nextChapterPlanRisks.endingContractEvidence,
           ...nextChapterPlanRisks.avoidRepetition,
           ...nextChapterPlanRisks.evidenceBasis,
         ].slice(0, 8),
-        openingActions: nextChapterPlanRisks.openingActions,
-        middleActions: nextChapterPlanRisks.middleActions,
-        endingActions: nextChapterPlanRisks.endingActions,
+        openingActions: [
+          ...nextChapterPlanRisks.endingContractOpeningActions,
+          ...nextChapterPlanRisks.openingActions,
+        ],
+        middleActions: [
+          ...nextChapterPlanRisks.endingContractMiddleActions,
+          ...nextChapterPlanRisks.middleActions,
+        ],
+        endingActions: [
+          ...nextChapterPlanRisks.endingContractEndingActions,
+          ...nextChapterPlanRisks.endingActions,
+        ],
         forbiddenRepeats: nextChapterPlanRisks.avoidRepetition,
         sourceReviewId: proseQualityEntry.review?.id || null,
       })
@@ -20294,7 +20385,7 @@ export function buildNextChapterQualityPlanReceiptSyncReport(chapter: any, conte
     next_actions: status === 'ok'
       ? ['保持 next_chapter_quality_plan_receipts 逐项引用本章正文证据，证明上一章质量续航计划已落成。']
       : [
-          '补齐 next_chapter_quality_plan_receipts；逐项覆盖 quality_focus、opening_actions、middle_actions、ending_actions、avoid_repetition 和 evidence_basis。',
+          '补齐 next_chapter_quality_plan_receipts；逐项覆盖 quality_focus、opening_actions、middle_actions、ending_actions、avoid_repetition、evidence_basis 和 ending_contract。',
           '每条回执必须写 delivered/status、evidence 或 source_excerpt；仍未兑现的项必须写 remaining_risk 和下一轮修复动作。',
         ],
   }
@@ -49018,7 +49109,7 @@ export function createNovelWritingService(ctx: {
     '每条 issue 必须有正文证据 evidence 和可执行修法 fix；没有证据不要输出 finding。',
     '如果存在 chapter_target.delivery_risk_carry_over 或 batch_preflight.delivery_risk_carry_over，必须输出 delivery_risk_receipts：数组字段 risk_item, required_action, delivered(boolean), evidence, remaining_risk；每个 items/required_actions/opening_actions/middle_actions/ending_actions 都必须有一条对应 receipt，不能只汇总成一条。分段承接动作没有正文证据时 delivered=false：opening_actions 查前300字，middle_actions 查中段事件推进，ending_actions 查最后300字。承接动作没有正文证据时 delivered=false，并在 issues 中给出 S1/S2 finding。',
     '如果存在 chapter_target.delivery_risk_carry_over、batch_preflight.delivery_risk_carry_over 或 oh_story_delivery_receipts.pre_draft_execution_receipts.next_chapter_quality_plan_receipts，必须输出 next_chapter_quality_plan_receipts；不能只输出 delivery_risk_receipts 或 next_chapter_quality_plan。next_chapter_quality_plan_receipts 必须逐项复核上一章质量续航计划是否在本章落地，字段 key,label,status(pass|warn|fail),delivered,evidence,fix,remaining_risk。',
-    '必须输出 next_chapter_quality_plan；它是写后诊断给下一章的质量续航计划，不是本章总结。字段必须包含 version, quality_focus, opening_actions, middle_actions, ending_actions, avoid_repetition, evidence_basis。quality_focus 写下一章最该守住的1-3个质量目标；opening_actions 写前300字必须执行的动作；middle_actions 写中段必须落成的冲突/信息/状态变化；ending_actions 写最后300字必须形成的追读钩子或承接余波；avoid_repetition 写下一章禁止复现的表达、结构或收尾套路；evidence_basis 写这些计划来自本章哪些正文证据、S1/S2/S3问题、五维评分、追读/钩子/承接风险或 oh-story 质量清单。',
+    '必须输出 next_chapter_quality_plan；它是写后诊断给下一章的质量续航计划，不是本章总结。字段必须包含 version, quality_focus, opening_actions, middle_actions, ending_actions, avoid_repetition, evidence_basis, ending_contract。quality_focus 写下一章最该守住的1-3个质量目标；opening_actions 写前300字必须执行的动作；middle_actions 写中段必须落成的冲突/信息/状态变化；ending_actions 写最后300字必须形成的追读钩子或承接余波；avoid_repetition 写下一章禁止复现的表达、结构或收尾套路；evidence_basis 写这些计划来自本章哪些正文证据、S1/S2/S3问题、五维评分、追读/钩子/承接风险或 oh-story 质量清单；ending_contract 必须包含 final_state, unresolved_question, next_chapter_pull, handoff_to_next，分别记录本章收束状态、未解决问题、下一章推动力、下一章如何开篇承接。',
     '如果存在 batch_preflight.delivery_risk_carry_over.creation_contract_carry_over，必须额外输出 target_reader_checks、genre_positioning_checks、core_contract_checks、reader_retention_checks；delivery_risk_receipts 只能记录承接动作，不能代替四类创作契约复检。',
     '如果存在 chapter_target.write_preparation_brief 或 oh_story_delivery_receipts.pre_draft_execution_receipts.write_preparation_checks，必须输出 write_preparation_checks；不能只写“写前准备已处理”，必须用正文证据逐项确认来源缺口、资产风险、上一轮待修复、创作契约清单 creation_contract_checklist、蓝图焦点、读者回报和必确认项是否闭环。',
     '如果存在 chapter_target.chapter_handoff_contract、batch_preflight.chapter_handoff_contract、previous_handoff、opening_obligations、must_deliver、keep_alive 或 overdue，必须输出 chapter_handoff_checks；不能只写“承接自然”，必须用正文证据逐项确认章首承接、上一章待处理、期待债、逾期项和章末交接是否闭环。',
@@ -49068,7 +49159,7 @@ export function createNovelWritingService(ctx: {
     '【待审校正文】',
     chapterText.slice(0, 16000),
     '',
-    '输出 JSON，字段：passed(boolean), score(0-100), rubric, rubric_source, platform_checks(array), content_rubric_source, content_rubric_checks(array), innovation_checks(array), chapter_attraction_checks(array), story_drive_checks(array), character_arc_checks(array), chapter_benchmark_checks(array), title_uniqueness_checks(array), prose_meta_checks(array), banned_words_checks(array), blueprint_consumption_checks(array), word_count_checks(array), reader_retention_checks(array), target_reader_checks(array), genre_positioning_checks(array), core_contract_checks(array), female_audience_checks(array), upgrade_rhythm_checks(array), structure_checks(array), progression_checks(array), information_checks(array), conflict_structure_checks(array), perspective_verdicts(array), deslop_level("无"|"轻度"|"中度"|"重度"), deslop_checks(array), dialogue_checks(array), plot_dynamics_checks(array), continuity_heat_checks(array), character_relation_checks(array), character_behavior_checks(array), asset_linkage_checks(array), state_tracking_checks(array), status_filter_receipts(array), source_readiness_checks(array), write_preparation_checks(array), next_chapter_quality_plan_receipts(array), chapter_handoff_checks(array), intent_confirmation_checks(array), benchmark_recall_checks(array), style_boundary_checks(array), style_sample_checks(array), information_flow_checks(array), expectation_threshold_checks(array), story_loop_checks(array), emotional_arc_checks(array), chapter_hook_checks(array), chapter_hook_quality_checks(array), paragraph_hook_checks(array), suspense_checks(array), reversal_checks(array), showdown_checks(array), bridge_unit_checks(array), opening_checks(array), prose_craft_checks(array), serial_risk_repair_checks(array), revision_receipt_checks(array), deslop_repair_checks(array), punctuation_tone_checks(array), quality_audit_checks(array), longform_checks(array), five_dimension_scores({core_consistency,surface_rewrite,format_consistency,readability,logic_coherence}，每项含 score/evidence/fix), craft_metrics({action_detail_score,description_overuse_score,event_density_score,combat_process_score,setting_consistency_score}), focused_revision_modes(array，可取 expand_action/cut_description/tighten_pacing/add_consequence/restore_hook/repair_setting_violation), setting_violations(array), delivery_risk_receipts(array), next_chapter_quality_plan({version,quality_focus,opening_actions,middle_actions,ending_actions,avoid_repetition,evidence_basis}), issues(array，使用上面的统一 Findings Schema), revision_directives(array), needs_revision(boolean)。只返回 JSON。',
+    '输出 JSON，字段：passed(boolean), score(0-100), rubric, rubric_source, platform_checks(array), content_rubric_source, content_rubric_checks(array), innovation_checks(array), chapter_attraction_checks(array), story_drive_checks(array), character_arc_checks(array), chapter_benchmark_checks(array), title_uniqueness_checks(array), prose_meta_checks(array), banned_words_checks(array), blueprint_consumption_checks(array), word_count_checks(array), reader_retention_checks(array), target_reader_checks(array), genre_positioning_checks(array), core_contract_checks(array), female_audience_checks(array), upgrade_rhythm_checks(array), structure_checks(array), progression_checks(array), information_checks(array), conflict_structure_checks(array), perspective_verdicts(array), deslop_level("无"|"轻度"|"中度"|"重度"), deslop_checks(array), dialogue_checks(array), plot_dynamics_checks(array), continuity_heat_checks(array), character_relation_checks(array), character_behavior_checks(array), asset_linkage_checks(array), state_tracking_checks(array), status_filter_receipts(array), source_readiness_checks(array), write_preparation_checks(array), next_chapter_quality_plan_receipts(array), chapter_handoff_checks(array), intent_confirmation_checks(array), benchmark_recall_checks(array), style_boundary_checks(array), style_sample_checks(array), information_flow_checks(array), expectation_threshold_checks(array), story_loop_checks(array), emotional_arc_checks(array), chapter_hook_checks(array), chapter_hook_quality_checks(array), paragraph_hook_checks(array), suspense_checks(array), reversal_checks(array), showdown_checks(array), bridge_unit_checks(array), opening_checks(array), prose_craft_checks(array), serial_risk_repair_checks(array), revision_receipt_checks(array), deslop_repair_checks(array), punctuation_tone_checks(array), quality_audit_checks(array), longform_checks(array), five_dimension_scores({core_consistency,surface_rewrite,format_consistency,readability,logic_coherence}，每项含 score/evidence/fix), craft_metrics({action_detail_score,description_overuse_score,event_density_score,combat_process_score,setting_consistency_score}), focused_revision_modes(array，可取 expand_action/cut_description/tighten_pacing/add_consequence/restore_hook/repair_setting_violation), setting_violations(array), delivery_risk_receipts(array), next_chapter_quality_plan({version,quality_focus,opening_actions,middle_actions,ending_actions,avoid_repetition,evidence_basis,ending_contract:{final_state,unresolved_question,next_chapter_pull,handoff_to_next}}), issues(array，使用上面的统一 Findings Schema), revision_directives(array), needs_revision(boolean)。只返回 JSON。',
   ].join('\n')
 
   const buildProseRevisionPrompt = (project: any, contextPackage: any, chapterText: string, review: any) => {
@@ -49169,8 +49260,8 @@ export function createNovelWritingService(ctx: {
     '29A. 如果 punctuation_tone_checks 指出语气标点功能拍问题，必须用动作打断、换行或短句替代破折号/硬停顿；用冒号或短句制造信息揭示落点，删掉论文式长分号链，不改变剧情信息。',
     '30. 如果自检结果包含 quality_audit_checks，必须优先修复 status=fail/warn 的质量诊断缺口；按 key/label/evidence/fix/strategy 先补本章一句话概括和目的词（铺垫/高潮/爽点/打脸/人物塑造/设定），再按目的词重排详略，修章节结构、开篇钩子、中段推进、局势变化、章尾翻页、水文段落、事件内容比重、信息传递、五维低分项和卖点表达。事件内容比重缺口必须把旁白强塞的设定、背景和情绪改成动作、选择、阻碍、代价或局势变化；卖点表达必须隐性展示，删除“这是核心卖点/本章很爽/读者会喜欢”等告知句，改成开头暗示 -> 中间深化 -> 高潮爆发的剧情、对话和反应，并按 rewrite/compress/de_ai/polish 选择对应精修动作。',
     '30A. 输出 quality_audit_repair_receipts：逐条对应 quality_audit_checks 中 status=fail/warn 的诊断项，字段 check_key, label, original_evidence, applied_fix, changed_evidence, remaining_risk, strategy。changed_evidence 必须引用修订后正文具体句子或场景变化；如果某项仍未完全修复，remaining_risk 写清下一轮要继续处理什么。',
-    '30B. 输出 next_chapter_quality_plan：它必须基于修订后的终稿正文重新判断，而不是照抄初稿自检计划。字段必须包含 version, quality_focus, opening_actions, middle_actions, ending_actions, avoid_repetition, evidence_basis。quality_focus 写下一章最该守住的1-3个质量目标；opening_actions 写前300字必须执行的动作；middle_actions 写中段必须落成的冲突/信息/状态变化；ending_actions 写最后300字必须形成的追读钩子或承接余波；avoid_repetition 写下一章禁止复现的表达、结构或收尾套路；evidence_basis 写这些计划来自修订后哪些正文证据、仍需续航的质量问题、回执残留或 oh-story 质量清单。',
-    '30C. 输出 next_chapter_quality_plan_receipts：如果上下文、写前准备卡、delivery_risk_carry_over 或自检结果包含上一章的 next_chapter_quality_plan，必须在修订后的 oh_story_delivery_receipts.pre_draft_execution_receipts.next_chapter_quality_plan_receipts 中逐项证明本章已执行上一章质量续航计划；覆盖 quality_focus、opening_actions、middle_actions、ending_actions、avoid_repetition、evidence_basis，每项包含 key,label,delivered,evidence,remaining_risk。next_chapter_quality_plan_receipts 中 opening_actions 的 evidence 必须来自修订后前300字；middle_actions 的 evidence 必须来自修订后中段事件推进；ending_actions 的 evidence 必须来自修订后最后300字。',
+    '30B. 输出 next_chapter_quality_plan：它必须基于修订后的终稿正文重新判断，而不是照抄初稿自检计划。字段必须包含 version, quality_focus, opening_actions, middle_actions, ending_actions, avoid_repetition, evidence_basis, ending_contract。quality_focus 写下一章最该守住的1-3个质量目标；opening_actions 写前300字必须执行的动作；middle_actions 写中段必须落成的冲突/信息/状态变化；ending_actions 写最后300字必须形成的追读钩子或承接余波；avoid_repetition 写下一章禁止复现的表达、结构或收尾套路；evidence_basis 写这些计划来自修订后哪些正文证据、仍需续航的质量问题、回执残留或 oh-story 质量清单；ending_contract 必须包含 final_state, unresolved_question, next_chapter_pull, handoff_to_next，按 oh-story 结尾设定记录收束状态、未解决问题、下一章推动力和承接方式。',
+    '30C. 输出 next_chapter_quality_plan_receipts：如果上下文、写前准备卡、delivery_risk_carry_over 或自检结果包含上一章的 next_chapter_quality_plan，必须在修订后的 oh_story_delivery_receipts.pre_draft_execution_receipts.next_chapter_quality_plan_receipts 中逐项证明本章已执行上一章质量续航计划；覆盖 quality_focus、opening_actions、middle_actions、ending_actions、avoid_repetition、evidence_basis、ending_contract，每项包含 key,label,delivered,evidence,remaining_risk。next_chapter_quality_plan_receipts 中 opening_actions 的 evidence 必须来自修订后前300字；middle_actions 的 evidence 必须来自修订后中段事件推进；ending_actions 的 evidence 必须来自修订后最后300字。',
     '',
     '【结构化上下文包】',
     JSON.stringify(contextPackage, null, 2).slice(0, 6000),
@@ -49193,7 +49284,7 @@ export function createNovelWritingService(ctx: {
     '【初稿正文】',
     chapterText.slice(0, 16000),
     '',
-      '请输出 JSON，包含 prose_chapters 数组。数组第一项必须包含 chapter_no, title, chapter_text, scene_breakdown, continuity_notes, revision_context_receipts, revision_receipts, deslop_repair_receipts, quality_audit_repair_receipts, revision_scope_guard, next_chapter_quality_plan, oh_story_delivery_receipts。revision_context_receipts(array) 必须逐项记录 previous_chapter、next_chapter、foreshadowing、character_cards、timeline、setting_context 等上下文核对结果。next_chapter_quality_plan 字段包含 version, quality_focus, opening_actions, middle_actions, ending_actions, avoid_repetition, evidence_basis，必须基于修订后终稿正文。oh_story_delivery_receipts 必须包含 chapter_blueprint, scene_card_receipts, delivery_risk_receipts, revision_context_receipts(array), revision_receipts, deslop_repair_receipts, quality_audit_repair_receipts, pre_draft_execution_receipts；所有修订回执必须同时写入 oh_story_delivery_receipts，不能只散落在章节顶层或 scene_breakdown。若修订涉及状态筛选、来源就绪、写前准备、意图确认、文风召回、样章策略或质量续航，必须在 oh_story_delivery_receipts.pre_draft_execution_receipts.status_filter_receipts、oh_story_delivery_receipts.pre_draft_execution_receipts.source_readiness_checks、oh_story_delivery_receipts.pre_draft_execution_receipts.write_preparation_checks、oh_story_delivery_receipts.pre_draft_execution_receipts.intent_confirmation_checks、oh_story_delivery_receipts.pre_draft_execution_receipts.benchmark_recall_checks、oh_story_delivery_receipts.pre_draft_execution_receipts.style_sample_checks、oh_story_delivery_receipts.pre_draft_execution_receipts.next_chapter_quality_plan_receipts 中逐项更新 delivered/evidence/remaining_risk、status/evidence/fix 或 used_in_chapter/evidence/excluded_reason/remaining_risk。scene_breakdown 必须保留并更新 scene_start_anchor、scene_end_anchor 和 scene_card_receipts；scene_start_anchor/scene_end_anchor 必须摘自修订后对应场景正文。revision_receipts 中如修改影响后续伏笔、时间线、角色状态、资产归属或关系边界，必须填写 affected_chapters 和 cascade_impacts。chapter_text 是修订后的完整正文，不要 markdown 标题。',
+      '请输出 JSON，包含 prose_chapters 数组。数组第一项必须包含 chapter_no, title, chapter_text, scene_breakdown, continuity_notes, revision_context_receipts, revision_receipts, deslop_repair_receipts, quality_audit_repair_receipts, revision_scope_guard, next_chapter_quality_plan, oh_story_delivery_receipts。revision_context_receipts(array) 必须逐项记录 previous_chapter、next_chapter、foreshadowing、character_cards、timeline、setting_context 等上下文核对结果。next_chapter_quality_plan 字段包含 version, quality_focus, opening_actions, middle_actions, ending_actions, avoid_repetition, evidence_basis, ending_contract({final_state,unresolved_question,next_chapter_pull,handoff_to_next})，必须基于修订后终稿正文。oh_story_delivery_receipts 必须包含 chapter_blueprint, scene_card_receipts, delivery_risk_receipts, revision_context_receipts(array), revision_receipts, deslop_repair_receipts, quality_audit_repair_receipts, pre_draft_execution_receipts；所有修订回执必须同时写入 oh_story_delivery_receipts，不能只散落在章节顶层或 scene_breakdown。若修订涉及状态筛选、来源就绪、写前准备、意图确认、文风召回、样章策略或质量续航，必须在 oh_story_delivery_receipts.pre_draft_execution_receipts.status_filter_receipts、oh_story_delivery_receipts.pre_draft_execution_receipts.source_readiness_checks、oh_story_delivery_receipts.pre_draft_execution_receipts.write_preparation_checks、oh_story_delivery_receipts.pre_draft_execution_receipts.intent_confirmation_checks、oh_story_delivery_receipts.pre_draft_execution_receipts.benchmark_recall_checks、oh_story_delivery_receipts.pre_draft_execution_receipts.style_sample_checks、oh_story_delivery_receipts.pre_draft_execution_receipts.next_chapter_quality_plan_receipts 中逐项更新 delivered/evidence/remaining_risk、status/evidence/fix 或 used_in_chapter/evidence/excluded_reason/remaining_risk。scene_breakdown 必须保留并更新 scene_start_anchor、scene_end_anchor 和 scene_card_receipts；scene_start_anchor/scene_end_anchor 必须摘自修订后对应场景正文。revision_receipts 中如修改影响后续伏笔、时间线、角色状态、资产归属或关系边界，必须填写 affected_chapters 和 cascade_impacts。chapter_text 是修订后的完整正文，不要 markdown 标题。',
     ].join('\n')
   }
 
@@ -49205,7 +49296,7 @@ export function createNovelWritingService(ctx: {
       || deliveryReceipts?.nextChapterQualityPlan
       || null
     if (!plan || typeof plan !== 'object') return true
-    return [
+    const missingActionFields = [
       ['quality_focus', 'qualityFocus'],
       ['opening_actions', 'openingActions'],
       ['middle_actions', 'middleActions'],
@@ -49214,6 +49305,17 @@ export function createNovelWritingService(ctx: {
       ['evidence_basis', 'evidenceBasis'],
     ].some(([snakeField, camelField]) => !asArray(plan?.[snakeField] || plan?.[camelField])
       .some((item: any) => compactBriefText(item)))
+    if (missingActionFields) return true
+    const endingContract = normalizeNextChapterQualityPlanEndingContract({
+      ...plan,
+      ending_contract: plan?.ending_contract || plan?.endingContract || plan?.chapter_handoff_contract || plan?.chapterHandoffContract,
+    })
+    return [
+      ['final_state', 'finalState'],
+      ['unresolved_question', 'unresolvedQuestion'],
+      ['next_chapter_pull', 'nextChapterPull'],
+      ['handoff_to_next', 'handoffToNext'],
+    ].some(([snakeField]) => !compactBriefText(endingContract?.[snakeField]))
   }
 
   const shouldReviseProse = (review: any, options: any = {}) => {

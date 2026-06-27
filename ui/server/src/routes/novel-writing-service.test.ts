@@ -27776,6 +27776,11 @@ describe('chapter pre-draft brief', () => {
     expect(reviewPrompt).toContain('ending_actions')
     expect(reviewPrompt).toContain('avoid_repetition')
     expect(reviewPrompt).toContain('evidence_basis')
+    expect(reviewPrompt).toContain('ending_contract')
+    expect(reviewPrompt).toContain('final_state')
+    expect(reviewPrompt).toContain('unresolved_question')
+    expect(reviewPrompt).toContain('next_chapter_pull')
+    expect(reviewPrompt).toContain('handoff_to_next')
   })
 
   test('asks prose revision to output a final next-chapter quality continuity plan', () => {
@@ -27792,6 +27797,11 @@ describe('chapter pre-draft brief', () => {
     expect(revisionPrompt).toContain('ending_actions')
     expect(revisionPrompt).toContain('avoid_repetition')
     expect(revisionPrompt).toContain('evidence_basis')
+    expect(revisionPrompt).toContain('ending_contract')
+    expect(revisionPrompt).toContain('final_state')
+    expect(revisionPrompt).toContain('unresolved_question')
+    expect(revisionPrompt).toContain('next_chapter_pull')
+    expect(revisionPrompt).toContain('handoff_to_next')
     expect(revisionPrompt).toContain('修订后')
     expect(revisionPrompt).toContain('next_chapter_quality_plan_receipts')
   })
@@ -27870,6 +27880,83 @@ describe('chapter pre-draft brief', () => {
     expect(prompt).toContain('不要再用“他知道，这只是开始”总结体收尾')
     expect(prompt).toContain('上一章章末只留下门外学生消失')
     expect(prompt).toContain('next_chapter_quality_plan_receipts')
+  })
+
+  test('carries next-chapter quality plan ending contracts into the next pre-draft brief and prose prompt', () => {
+    const deliveryRiskCarryOver = buildDeliveryRiskCarryOverContext(
+      { id: 3, chapter_no: 3, title: '门外学生' },
+      [
+        { id: 2, chapter_no: 2, title: '第一条规则' },
+        { id: 3, chapter_no: 3, title: '门外学生' },
+      ],
+      [
+        {
+          id: 207,
+          chapter_id: 2,
+          review_type: 'prose_quality',
+          created_at: '2026-06-09T08:07:00.000Z',
+          payload: JSON.stringify({
+            chapter_id: 2,
+            chapter_no: 2,
+            self_check: {
+              review: {
+                score: 84,
+                passed: true,
+                next_chapter_quality_plan: {
+                  version: 'oh_story_next_chapter_quality_plan_v1',
+                  quality_focus: ['下一章必须接住校徽反光，不改成新支线。'],
+                  opening_actions: ['前300字让主角用半枚校徽反光定位值班室。'],
+                  middle_actions: ['中段让第二条规则改变救人判断。'],
+                  ending_actions: ['章末让值班室名单出现主角母亲旧名。'],
+                  avoid_repetition: ['不要再用门口犹豫开篇。'],
+                  evidence_basis: ['上一章最后只剩半枚校徽反光，没有解释第二条规则。'],
+                  ending_contract: {
+                    final_state: '门外学生消失后，玻璃门只剩半枚校徽反光。',
+                    unresolved_question: '第二条规则是谁写在校徽背面？',
+                    next_chapter_pull: '值班室名单里出现主角母亲旧名。',
+                    handoff_to_next: '开篇必须从半枚校徽反光直接追到值班室名单。',
+                  },
+                },
+              },
+            },
+          }),
+        },
+      ],
+    )
+    const project = { title: '超人的规则怪谈世界', reference_config: {} }
+    const contextPackage = {
+      delivery_risk_carry_over: deliveryRiskCarryOver,
+      chapter_target: {
+        chapter_no: 3,
+        title: '门外学生',
+        summary: '判断门外学生是否是规则诱饵。',
+        conflict: '救人还是守规。',
+        ending_hook: '玻璃门上的水迹拼出一个名字。',
+        scene_cards: [
+          { scene_no: 1, title: '门前对峙', reader_payoff: '识破门外学生的第一层规则诱饵。' },
+        ],
+      },
+    }
+    const brief = buildChapterPreDraftBrief(project, contextPackage)
+    const context = mergeConfirmedPreDraftBriefIntoContext(contextPackage, {
+      ...brief,
+      confirmed_at: '2026-06-10T08:00:00.000Z',
+    })
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+    const prompt = service.buildParagraphProseContext(project, context, null, { chapter_no: 3, title: '门外学生' })
+
+    expect(brief.delivery_risk_carry_over.opening_actions.join('｜')).toContain('上章最后状态：门外学生消失后，玻璃门只剩半枚校徽反光')
+    expect(brief.delivery_risk_carry_over.opening_actions.join('｜')).toContain('开篇必须从半枚校徽反光直接追到值班室名单')
+    expect(brief.delivery_risk_carry_over.middle_actions.join('｜')).toContain('未解决问题：第二条规则是谁写在校徽背面')
+    expect(brief.delivery_risk_carry_over.ending_actions.join('｜')).toContain('下一章推动力：值班室名单里出现主角母亲旧名')
+    expect(prompt).toContain('ending_contract')
+    expect(prompt).toContain('final_state')
+    expect(prompt).toContain('第二条规则是谁写在校徽背面')
+    expect(prompt).toContain('开篇必须从半枚校徽反光直接追到值班室名单')
   })
 
   test('turns next-chapter avoid-repetition plan into forbidden repeats', () => {
@@ -28042,6 +28129,11 @@ describe('chapter pre-draft brief', () => {
     expect(revisionDecisionBlock).toContain('ending_actions')
     expect(revisionDecisionBlock).toContain('avoid_repetition')
     expect(revisionDecisionBlock).toContain('evidence_basis')
+    expect(revisionDecisionBlock).toContain('ending_contract')
+    expect(revisionDecisionBlock).toContain('final_state')
+    expect(revisionDecisionBlock).toContain('unresolved_question')
+    expect(revisionDecisionBlock).toContain('next_chapter_pull')
+    expect(revisionDecisionBlock).toContain('handoff_to_next')
     expect(revisionDecisionBlock).toContain('hasNextChapterQualityPlanConcern')
     expect(reviewNormalizeBlock).toContain('const hasNextChapterQualityPlanConcern = nextChapterQualityPlanNeedsRepair(normalizedReview)')
     expect(reviewNormalizeBlock).toContain('normalizedReview.needs_revision =')
