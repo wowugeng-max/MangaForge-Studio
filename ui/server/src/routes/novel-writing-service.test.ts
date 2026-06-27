@@ -22452,6 +22452,10 @@ describe('chapter pre-draft brief', () => {
     expect(brief.prose_craft_contract.pov_rules.join('｜')).toContain('深度限知')
     expect(brief.prose_craft_contract.expression_rules.join('｜')).toContain('身体细节替代情绪词')
     expect(brief.prose_craft_contract.scene_weaving_rules.join('｜')).toContain('三维度揉进')
+    expect(brief.prose_craft_contract.subject_name_rhythm_rules.join('｜')).toContain('主语与名字节奏')
+    expect(brief.prose_craft_contract.subject_name_rhythm_rules.join('｜')).toContain('段首、场景切换、多人同场、视角重置')
+    expect(brief.prose_craft_contract.subject_name_rhythm_rules.join('｜')).toContain('每句都在报名字')
+    expect(brief.prose_craft_contract.subject_name_rhythm_rules.join('｜')).toContain('指代不清')
     expect(brief.prose_craft_contract.rhythm_rules.join('｜')).toContain('一动一静')
     expect(brief.prose_craft_contract.object_number_rules.join('｜')).toContain('具体数字')
     expect(brief.prose_craft_contract.section_structure_rules.join('｜')).toContain('一个主事件')
@@ -22474,6 +22478,9 @@ describe('chapter pre-draft brief', () => {
     expect(prompt).toContain('执行 chapter_target.prose_craft_contract')
     expect(prompt).toContain('身体细节替代情绪词')
     expect(prompt).toContain('三维度揉进')
+    expect(prompt).toContain('subject_name_rhythm_rules')
+    expect(prompt).toContain('主语与名字节奏')
+    expect(prompt).toContain('段中用代词/省略流动')
     expect(prompt).toContain('小节内部结构')
     expect(prompt).toContain('一个主事件')
     expect(prompt).toContain('3-5 个子事件')
@@ -22535,12 +22542,38 @@ describe('chapter pre-draft brief', () => {
     expect(brief.prose_craft_contract.scene_anchors.join('｜')).toContain('一块钱的转账单')
     expect(brief.prose_craft_contract.pov_rules.join('｜')).toContain('深度限知')
     expect(brief.prose_craft_contract.expression_rules.join('｜')).toContain('身体细节替代情绪词')
+    expect(brief.prose_craft_contract.subject_name_rhythm_rules.join('｜')).toContain('主语与名字节奏')
     expect(brief.prose_craft_contract.object_number_rules.join('｜')).toContain('具体数字')
     expect(brief.prose_craft_contract.section_structure_rules.join('｜')).toContain('一个主事件')
     expect(brief.prose_craft_contract.section_structure_rules.join('｜')).toContain('下一节开头快速接续')
     expect(brief.prose_craft_contract.section_density_rules.join('｜')).toContain('小节密度诊断')
     expect(brief.prose_craft_contract.anti_padding_rules.join('｜')).toContain('不得为凑字数加环境描写')
     expect(brief.prose_craft_contract.concept_anchor_rules.join('｜')).toContain('新名词')
+  })
+
+  test('preserves explicit camelCase prose craft subject-name rhythm rules', () => {
+    const project = {
+      title: '雪夜反证',
+      genre: '悬疑逆袭',
+      synopsis: '主角在雪夜审讯里用账本、旧疤和具体数字拆穿伪证。',
+    }
+    const contextPackage = {
+      proseCraftContract: {
+        source: 'manual_complete',
+        subjectNameRhythmRules: ['自定义主语与名字节奏：段首点名，段中用代词和动作承接，关键转折再点名。'],
+      },
+      chapter_target: {
+        chapter_no: 12,
+        title: '旧疤和八万块',
+        summary: '主角在审讯室里通过旧疤、账本金额和对手动作识破伪证。',
+        conflict: '对手逼主角签认罪书，主角必须从现场细节里找出破绽。',
+      },
+    }
+
+    const brief = buildChapterPreDraftBrief(project, contextPackage)
+
+    expect(brief.prose_craft_contract.source).toBe('manual_complete')
+    expect(brief.prose_craft_contract.subject_name_rhythm_rules).toEqual(['自定义主语与名字节奏：段首点名，段中用代词和动作承接，关键转折再点名。'])
   })
 
   test('adds an oh-story quality audit contract to pre-draft brief and prose prompt', () => {
@@ -49788,6 +49821,8 @@ describe('chapter context word target source guards', () => {
     expect(repairBlock).toContain('期待接力法')
     expect(repairBlock).toContain('故事循环合同')
     expect(repairBlock).toContain('正文工艺合同')
+    expect(repairBlock).toContain('subject_name_rhythm_rules')
+    expect(repairBlock).toContain('主语与名字节奏')
     expect(repairBlock).toContain('section_density_rules')
     expect(repairBlock).toContain('anti_padding_rules')
     expect(repairBlock).toContain('小节密度诊断')

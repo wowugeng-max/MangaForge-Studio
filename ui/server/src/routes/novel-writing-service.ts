@@ -38104,6 +38104,14 @@ const OH_STORY_PROSE_CRAFT_SCENE_WEAVING_RULES = [
   '每个段落是一个镜头，必须有明确拍摄对象：动作、物件、表情、空间变化或关键信息。',
 ]
 
+const OH_STORY_PROSE_CRAFT_SUBJECT_NAME_RHYTHM_RULES = [
+  '主语与名字节奏：段首、场景切换、多人同场、视角重置时，用角色名建立主语。',
+  '同一动作链/同一段内部，段中用代词/省略流动，优先用“他/她”、动作承接或省略主语。',
+  '关键转折、情绪爆点、身份反差或读者需要重新盯住主角时，再点名强化。',
+  '反面信号：连续多句或连续多段都以同一角色名开头，读起来像每句都在报名字。',
+  '不要为了省主语造成指代不清；多人同场必须在段首、场景切换或视角重置处点名。',
+]
+
 const OH_STORY_PROSE_CRAFT_RHYTHM_RULES = [
   '一动一静：每个小节至少有1个动和1个静，动后必静，静后可动。',
   '不连续两节全动，避免暴力疲劳；不连续两节全静，避免节奏拖沓。',
@@ -38350,6 +38358,7 @@ function buildProseCraftContract(project: any = {}, contextPackage: any = {}) {
     const explicitPovRules = asArray(explicit.pov_rules || explicit.povRules).map((item: any) => compactBriefText(item)).filter(Boolean)
     const explicitExpressionRules = asArray(explicit.expression_rules || explicit.expressionRules).map((item: any) => compactBriefText(item)).filter(Boolean)
     const explicitSceneWeavingRules = asArray(explicit.scene_weaving_rules || explicit.sceneWeavingRules).map((item: any) => compactBriefText(item)).filter(Boolean)
+    const explicitSubjectNameRhythmRules = asArray(explicit.subject_name_rhythm_rules || explicit.subjectNameRhythmRules).map((item: any) => compactBriefText(item)).filter(Boolean)
     const explicitRhythmRules = asArray(explicit.rhythm_rules || explicit.rhythmRules).map((item: any) => compactBriefText(item)).filter(Boolean)
     const explicitObjectNumberRules = asArray(explicit.object_number_rules || explicit.objectNumberRules).map((item: any) => compactBriefText(item)).filter(Boolean)
     const explicitSectionStructureRules = asArray(explicit.section_structure_rules || explicit.sectionStructureRules).map((item: any) => compactBriefText(item)).filter(Boolean)
@@ -38366,6 +38375,7 @@ function buildProseCraftContract(project: any = {}, contextPackage: any = {}) {
       pov_rules: explicitPovRules.length ? explicitPovRules : asArray(derived.pov_rules),
       expression_rules: explicitExpressionRules.length ? explicitExpressionRules : asArray(derived.expression_rules),
       scene_weaving_rules: explicitSceneWeavingRules.length ? explicitSceneWeavingRules : asArray(derived.scene_weaving_rules),
+      subject_name_rhythm_rules: explicitSubjectNameRhythmRules.length ? explicitSubjectNameRhythmRules : asArray(derived.subject_name_rhythm_rules),
       rhythm_rules: explicitRhythmRules.length ? explicitRhythmRules : asArray(derived.rhythm_rules),
       object_number_rules: explicitObjectNumberRules.length ? explicitObjectNumberRules : asArray(derived.object_number_rules),
       section_structure_rules: explicitSectionStructureRules.length ? explicitSectionStructureRules : asArray(derived.section_structure_rules),
@@ -38387,6 +38397,7 @@ function buildProseCraftContract(project: any = {}, contextPackage: any = {}) {
     pov_rules: OH_STORY_PROSE_CRAFT_POV_RULES,
     expression_rules: OH_STORY_PROSE_CRAFT_EXPRESSION_RULES,
     scene_weaving_rules: OH_STORY_PROSE_CRAFT_SCENE_WEAVING_RULES,
+    subject_name_rhythm_rules: OH_STORY_PROSE_CRAFT_SUBJECT_NAME_RHYTHM_RULES,
     rhythm_rules: OH_STORY_PROSE_CRAFT_RHYTHM_RULES,
     object_number_rules: OH_STORY_PROSE_CRAFT_OBJECT_NUMBER_RULES,
     section_structure_rules: OH_STORY_PROSE_CRAFT_SECTION_STRUCTURE_RULES,
@@ -47859,6 +47870,7 @@ export function createNovelWritingService(ctx: {
       proseCraftContract?.pov_rules?.length ? `视角规则：${proseCraftContract.pov_rules.join('；')}` : '',
       proseCraftContract?.expression_rules?.length ? `表达规则：${proseCraftContract.expression_rules.join('；')}` : '',
       proseCraftContract?.scene_weaving_rules?.length ? `场景写法：${proseCraftContract.scene_weaving_rules.join('；')}` : '',
+      proseCraftContract?.subject_name_rhythm_rules?.length ? `主语与名字节奏：${proseCraftContract.subject_name_rhythm_rules.join('；')}` : '',
       proseCraftContract?.rhythm_rules?.length ? `节奏规则：${proseCraftContract.rhythm_rules.join('；')}` : '',
       proseCraftContract?.object_number_rules?.length ? `道具/数字规则：${proseCraftContract.object_number_rules.join('；')}` : '',
       proseCraftContract?.section_structure_rules?.length ? `小节内部结构/衔接：${proseCraftContract.section_structure_rules.join('；')}` : '',
@@ -51163,7 +51175,7 @@ export function createNovelWritingService(ctx: {
               '信息流合同 information_flow_contract 必须输出 scene_information_units, reveal_order, suspense_responses, transition_compression_rules, no_infodump_guardrails, quality_checks，确保信息随冲突释放，不写背景说明书；transition_compression_rules 必须包含过渡不是填充、没有信息量就删掉、纯移动/寒暄/环境描写直接跳过或压缩。',
               '期待阈值合同 expectation_threshold_contract 必须输出 current_expectations, payoff_or_delay_plan, next_open_loop, vacuum_guardrails, expectation_before_payoff_rules, expectation_relay_rules, three_expectation_lines, quality_checks；expectation_before_payoff_rules 必须包含期待感 > 爽点、铺垫篇幅不少于释放篇幅和延迟满足；expectation_relay_rules 必须包含期待接力法、旧期待闭环前下一开环已经运行、当一层即将满足时先铺好下一层期待、至少两条期待线并行运行；确保兑现旧期待前先种下新期待，并保持剧情期待 + 主题甜头 + 新鲜感三线并存。',
               '故事循环合同 story_loop_contract 必须输出 setup, escalation, payoff, carry_over, map_transition_rules, nested_loop_rules, quality_checks，确保本章不是孤立事件而是长线循环的一环；map_transition_rules 必须包含旧地图核心冲突阶段性解决、新地图 = 新环境 + 新角色 + 新规则 + 新目标 + 新冲突、前5章建立代入感和期待感、保留贯穿主线、人际关系动了 -> 主角再动、避免旧线全抛和新设定一次性倒出；nested_loop_rules 必须包含“小循环 -> 中循环 -> 大循环”、小循环中必须铺垫大循环的期待，以及同一核心卖点的不同角度/不同矛盾。',
-              '正文工艺合同 prose_craft_contract 必须输出 pov_rules, body_detail_rules, scene_weaving_rules, rhythm_rules, object_number_rules, section_structure_rules, section_density_rules, anti_padding_rules, concept_anchor_rules, description_limits, anti_ai_smell_rules, quality_checks；section_structure_rules 必须包含一个主事件、3-5 个子事件、一个情绪变化、一条读者新获知的信息、3-5 轮对话交锋、小节结尾钩子、下一节开头快速接续和情绪跨节递进；section_density_rules 必须包含小节密度诊断，anti_padding_rules 必须禁止为凑字数加环境描写、重复情绪、内心独白总结或无意义动作，concept_anchor_rules 必须要求新名词/新设定首次出现有动作反应、对话半句或物理后果锚点，确保正文不靠抽象心理、堆设定或模板句撑场。',
+              '正文工艺合同 prose_craft_contract 必须输出 pov_rules, body_detail_rules, scene_weaving_rules, subject_name_rhythm_rules, rhythm_rules, object_number_rules, section_structure_rules, section_density_rules, anti_padding_rules, concept_anchor_rules, description_limits, anti_ai_smell_rules, quality_checks；subject_name_rhythm_rules 必须包含主语与名字节奏：段首/场景切换/多人同场/视角重置时点名，同一动作链段中用代词/省略/动作承接，避免每句都在报名字和指代不清；section_structure_rules 必须包含一个主事件、3-5 个子事件、一个情绪变化、一条读者新获知的信息、3-5 轮对话交锋、小节结尾钩子、下一节开头快速接续和情绪跨节递进；section_density_rules 必须包含小节密度诊断，anti_padding_rules 必须禁止为凑字数加环境描写、重复情绪、内心独白总结或无意义动作，concept_anchor_rules 必须要求新名词/新设定首次出现有动作反应、对话半句或物理后果锚点，确保正文不靠抽象心理、堆设定或模板句撑场。',
               '语气标点合同 punctuation_tone_contract 必须输出 tone_targets, punctuation_rules, dialogue_pause_rules, forbidden_punctuation_patterns, quality_checks，确保标点服务语气和人物声线。',
               '质量诊断合同 quality_audit_contract 必须输出 audit_dimensions, chapter_purpose_rules, water_detection_rules, event_content_rules, score_thresholds, required_receipts, quality_checks；chapter_purpose_rules 必须包含每章一句话概括内容，并标注目的词（铺垫/高潮/爽点/打脸/人物塑造/设定）；event_content_rules 必须包含事件内容比重不能小于一半、事件是价值改变的契机、设定尽量通过事件演绎而非旁白强塞，确保交稿自检可诊断结构、吸引力、目的跑偏、水文和事件含量问题。',
               '对白合同 dialogue_contract 必须按 oh-story dialogue-mastery 输出 scene_modes, voice_anchors, dialogue_goals, key_lines, relationship_moves, mode_playbooks, power_length_rules, subtext_agenda_rules, tone_context_rules, emotion_push_rules, emotion_continuity_rules, dialogue_drive_rules, information_embed_rules, information_tension_rules, voice_differentiation_rules, spectator_dialogue_rules, supporting_speaker_limit_rules, dialogue_rhythm_rules, dialogue_volume_rules, dialogue_meme_rules, dialogue_audit_rules, revision_priorities, quality_checks；power_length_rules 必须包含“掌控者/主角亮底牌时对白 ≤ 10 字”和“被压制方对白 ≥ 20 字”；subtext_agenda_rules 必须包含“真实动机绝对不能浅显地写在台词里”，tone_context_rules 必须包含“关系 × 场合 × 目的 = 语气”，emotion_push_rules 必须包含“命令式+否定式最能激发读者情绪”，emotion_continuity_rules 必须要求每次情绪转变有事件触发，dialogue_drive_rules 必须要求对白强化期待、爽感或悬念，information_embed_rules 必须包含“用角色的语气和立场包裹信息”，information_tension_rules 必须要求通过质疑、证据和核心信息兑现形成拉扯，voice_differentiation_rules 必须包含口癖和惯用语、说话节奏、信息偏好、身份影响措辞、性格影响语气和关系阶段不同，spectator_dialogue_rules 必须包含普通人震惊、专业人士分析、特殊身份者反应、短小精悍和不代替主线，supporting_speaker_limit_rules 必须包含“同一场景配角不超过 3 个有台词”“没有功能的角色不要出场”和“配角退场要主动规划”，dialogue_rhythm_rules 必须包含连续多轮对话后需要换气、穿插动作描写、紧张段落对话短促、关键信息放对话开头或结尾，dialogue_volume_rules 必须包含读者已知信息、叙事一句话概括、突发状况替代、主角旁白平铺直叙和新人物必须安排主线戏份，dialogue_meme_rules 必须包含说不出来但意思到了、梗或骚话、强化记忆点、高潮点和不得直接复刻，dialogue_audit_rules 必须包含大量信息都必须用对话来展示、问答式的一问一答、依赖对话来推动剧情或人物变化、遮住角色名后能否区分、单次对话不超过全节 40%、自然口语交流和对话结尾能否预示接下来的节奏变化，确保对白推进剧情、增加期待或展示人设，而不是说明书。',
