@@ -526,6 +526,38 @@ describe('normalizeSceneCardsPayload', () => {
     expect(sceneCards[1].serial_risk_repairs).toContain('新概念锚点')
   })
 
+  test('projects explicit first-appearance setting usage into scene concept anchor rules', () => {
+    const sceneCards = normalizeSceneCardsPayload({
+      scene_cards: [
+        {
+          title: '蓝晶入手',
+          purpose: '让蓝晶第一次改变证据判断',
+          beat: '李玄从旧匣里取出蓝晶。',
+        },
+        {
+          title: '账册复核',
+          purpose: '复核旧账证据',
+          beat: '第二个证人确认旧账缺页。',
+        },
+      ],
+    }, {
+      setting_context: {
+        chapter_usage: [
+          {
+            name: '蓝晶',
+            entity_type: 'item',
+            new_concept: true,
+          },
+        ],
+      },
+    })
+
+    expect(sceneCards[0].concept_anchor_rules.join('｜')).toContain('“蓝晶”首次出现')
+    expect(sceneCards[0].concept_anchor_rules.join('｜')).toContain('动作反应、对话半句或物理后果')
+    expect(sceneCards[0].serial_risk_repairs).toContain('新概念锚点')
+    expect(sceneCards[1].concept_anchor_rules.join('｜')).not.toContain('蓝晶')
+  })
+
   test('projects benchmark recall carry-over into scene benchmark directives', () => {
     const benchmarkRepair = '下一章必须补足文风召回 missed 项，把节奏参照和匹配章技法写成正文可见的压迫、爆发、冷却或反应；只学习节奏，不复制桥段。'
     const sceneCards = normalizeSceneCardsPayload({

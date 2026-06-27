@@ -43736,7 +43736,8 @@ export function normalizeSceneCardsPayload(payload: any, contextPackage: any = {
   })).filter((card: any) => card.beat || card.purpose || card.title)
   const intentBaselineCards = applyIntentDialogueBaselineToSceneCards(normalizedCards, contextPackage)
   const styleFingerprintCards = applyStyleFingerprintToSceneCards(intentBaselineCards, contextPackage)
-  return applyDeliveryRiskCarryOverToSceneCards(styleFingerprintCards, contextPackage)
+  const conceptAnchorCards = applyExplicitNewConceptAnchorsToSceneCards(styleFingerprintCards, contextPackage)
+  return applyDeliveryRiskCarryOverToSceneCards(conceptAnchorCards, contextPackage)
 }
 
 function mergeSceneCardStringList(existing: any, additions: any, limit = 18) {
@@ -43786,6 +43787,63 @@ function applyStyleFingerprintToSceneCards(sceneCards: any[], contextPackage: an
     style_directives: mergeSceneCardStringList(card.style_directives, [directive]),
     serial_risk_repairs: mergeSceneCardStringList(card.serial_risk_repairs, ['文风指纹']),
   }))
+}
+
+function sceneCardConceptSearchText(card: any) {
+  return [
+    card?.title,
+    card?.purpose,
+    card?.conflict,
+    card?.beat,
+    card?.opening_hook,
+    card?.reader_payoff,
+    card?.fear_point,
+    card?.rule_pressure,
+    card?.information_gap,
+    card?.reversal,
+    card?.ending_hook_seed,
+    card?.character_voice,
+    card?.key_dialogue,
+    card?.dialogue_goal,
+    card?.sensory_anchor,
+    card?.turning_point,
+    card?.exit_state,
+    ...asArray(card?.purpose_tags),
+    ...asArray(card?.required_beats),
+    ...asArray(card?.action_beats),
+    ...asArray(card?.required_information),
+    ...asArray(card?.used_settings),
+    ...asArray(card?.revealed_settings),
+    ...asArray(card?.ability_beats),
+    ...asArray(card?.item_beats),
+    ...asArray(card?.state_changes_expected),
+  ]
+    .map((item: any) => String(item || ''))
+    .filter(Boolean)
+    .join('\n')
+}
+
+function sceneCardMentionsConcept(card: any, name: string) {
+  const text = sceneCardConceptSearchText(card)
+  if (!text || !name) return false
+  return text.includes(name) || text.toLowerCase().includes(name.toLowerCase())
+}
+
+function applyExplicitNewConceptAnchorsToSceneCards(sceneCards: any[], contextPackage: any = {}) {
+  if (!sceneCards.length) return sceneCards
+  const names = explicitNewConceptNames(contextPackage)
+  if (!names.length) return sceneCards
+
+  return sceneCards.map(card => {
+    const matchedNames = names.filter(name => sceneCardMentionsConcept(card, name))
+    if (!matchedNames.length) return card
+    const conceptAnchorRules = matchedNames.map(name => `“${name}”首次出现必须用角色动作反应、对话半句或物理后果带出当下作用；不得整段讲来历、原理或等级。`)
+    return {
+      ...card,
+      concept_anchor_rules: mergeSceneCardStringList(card.concept_anchor_rules, conceptAnchorRules),
+      serial_risk_repairs: mergeSceneCardStringList(card.serial_risk_repairs, ['新概念锚点']),
+    }
+  })
 }
 
 function deliveryRiskStyleDirectiveActions(carryOvers: any[]) {
