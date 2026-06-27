@@ -38373,6 +38373,58 @@ describe('readability and restrained meme workflow', () => {
     expect(warnReport.next_actions.join('；')).toContain('五幕因果链')
   })
 
+  test('checks chapter blueprint beat density contract after delivery', () => {
+    const project = { title: '残阵问道', reference_config: {} }
+    const chapter = { id: 31, chapter_no: 31, title: '密度复核' }
+    const contextPackage = {
+      chapter_target: {
+        chapter_no: 31,
+        chapter_blueprint: {
+          target_emotion: '压迫后密集反证',
+          opening_hook: '审判庭开场逼江辰按下认罪书血印',
+          core_payoff: '江辰用第二本账册当众反证并洗清罪名',
+          beat_density_contract: {
+            version: 'oh_story_beat_density_v1',
+            target_word_count: 3000,
+            min_beat_count: 10,
+            target_beat_count: 12,
+            max_beat_count: 15,
+            current_beat_count: 2,
+            density_gap: 8,
+            rule: '按字数目标反推情节点数量：约 200-300 字/个情节点；下限 10 个；常规 3000 字章节 10-15 个。',
+          },
+        },
+      },
+    }
+    const denseText = [
+      '审判庭开场，执事逼江辰按下认罪书血印。',
+      '江辰把手腕往后一撤，先让血印落空。',
+      '林青禾带证人入场，证人交出旧账册缺页。',
+      '执事伸手抢账册，江辰反扣住他的腕骨。',
+      '第二本账册从证人袖中滑出，编号正对旧账缺页。',
+      '江辰把旧印章压上编号，墨迹立刻浮出调包痕迹。',
+      '执事改口前还想毁页，林青禾挡住火折子。',
+      '旁观弟子分成两拨，有人退后，有人站到江辰身侧。',
+      '江辰当众反证完成，洗清罪名，却暴露了第二本账册。',
+      '账册夹层露出禁地钥匙，第二扇门后的名字被血印遮住。',
+    ].join('\n')
+    const summaryText = [
+      '江辰在审判庭解释了账册问题。',
+      '执事有些尴尬，众人都知道他没错了。',
+      '事情进入下一阶段。',
+    ].join('\n')
+
+    const denseReport = buildChapterBlueprintSyncReport(project, chapter, contextPackage, denseText)
+    const summaryReport = buildChapterBlueprintSyncReport(project, chapter, contextPackage, summaryText)
+
+    expect(denseReport.craft_checks.find((item: any) => item.key === 'beat_density')?.status).toBe('ok')
+    expect(summaryReport.status).toBe('warn')
+    expect(summaryReport.craft_checks.find((item: any) => item.key === 'beat_density')?.status).toBe('warn')
+    expect(summaryReport.missed.map((item: any) => item.label)).toContain('情节点密度')
+    expect(summaryReport.missed.find((item: any) => item.key === 'craft_beat_density')?.text).toContain('200-300 字/个情节点')
+    expect(summaryReport.next_actions.join('；')).toContain('情节点密度')
+  })
+
   test('reads chapter blueprint sync contract from camelCase chapter raw preDraftBrief', () => {
     const project = { title: '残阵问道', reference_config: {} }
     const chapter = {

@@ -23038,6 +23038,55 @@ function chapterBlueprintFirstPayoffIndex(blueprint: any, chapterText: string) {
   return indexes.length ? Math.min(...indexes) : -1
 }
 
+const BLUEPRINT_BEAT_DENSITY_EVENT_PATTERN = /[“「]|逼|问|答|说|喊|吼|拿|取|递|交|按|握|抓|扣|抢|夺|拦|挡|推|拉|撤|退|站|跪|倒|抬|低|看|听|发现|看见|听见|露出|显出|浮出|滑出|掉出|亮出|压上|毁|撕|烧|打开|进入|潜入|追|查|证明|反证|揭露|改口|倒戈|站队|选择|决定|必须|否则|代价|收益|洗清|暴露|改变|触发|阻止|失败|完成/
+const BLUEPRINT_BEAT_DENSITY_SUMMARY_PATTERN = /解释了|有些尴尬|众人都知道|所有人都知道|大家都知道|事情进入下一阶段|进入下一阶段|暂时继续|顺利完成|问题解决|告一段落|由此可见|这说明/
+
+function chapterBlueprintBeatDensityContractFromBlueprint(blueprint: any) {
+  const explicit = blueprint?.beat_density_contract || blueprint?.beatDensityContract
+  if (!explicit) return null
+  return buildChapterBlueprintBeatDensityContract(null, asArray(blueprint?.beat_sequence || blueprint?.beatSequence), explicit)
+}
+
+function countDeliveredBeatDensityEvents(chapterText: string) {
+  const clauses = proseBodyWithoutTitleLine(chapterText)
+    .split(/[。！？!?；;\n]+/)
+    .map(clause => compactBriefText(clause, 120))
+    .filter(Boolean)
+  const eventClauses = clauses.filter(clause => {
+    if (countProseChars(clause) < 6) return false
+    BLUEPRINT_BEAT_DENSITY_SUMMARY_PATTERN.lastIndex = 0
+    if (BLUEPRINT_BEAT_DENSITY_SUMMARY_PATTERN.test(clause)) return false
+    BLUEPRINT_BEAT_DENSITY_EVENT_PATTERN.lastIndex = 0
+    return BLUEPRINT_BEAT_DENSITY_EVENT_PATTERN.test(clause)
+  })
+  return {
+    count: eventClauses.length,
+    evidence: eventClauses.slice(0, 10),
+  }
+}
+
+function buildChapterBlueprintBeatDensityCheck(blueprint: any, chapterText: string) {
+  const contract = chapterBlueprintBeatDensityContractFromBlueprint(blueprint)
+  if (!contract) return null
+  const minBeatCount = Number(contract.min_beat_count || contract.minBeatCount || 0)
+  if (!minBeatCount) return null
+  const actual = countDeliveredBeatDensityEvents(chapterText)
+  const delivered = actual.count >= minBeatCount
+  return {
+    key: 'beat_density',
+    label: '情节点密度',
+    status: delivered ? 'ok' : 'warn',
+    expected_count: minBeatCount,
+    actual_count: actual.count,
+    evidence: actual.evidence.length
+      ? `事件化情节点 ${actual.count}/${minBeatCount}：${actual.evidence.join('；')}`
+      : `事件化情节点 ${actual.count}/${minBeatCount}，正文偏摘要。`,
+    fix: delivered
+      ? ''
+      : `按 oh-story 情节细化修复：${contract.rule || OH_STORY_BEAT_DENSITY_RULE} 当前正文只有 ${actual.count}/${minBeatCount} 个可见动作/对话/信息变化情节点；补足动作过程、对话交锋、信息变化、选择代价、收益兑现和章尾钩子铺垫，不得用环境描写或重复心理凑字数。`,
+  }
+}
+
 function buildChapterBlueprintCraftChecks(blueprint: any, chapterText: string) {
   const body = proseBodyWithoutTitleLine(chapterText)
   const compactBody = body.replace(/\s+/g, '')
@@ -23045,6 +23094,9 @@ function buildChapterBlueprintCraftChecks(blueprint: any, chapterText: string) {
   const checks: any[] = []
   const hasBlueprint = Boolean(blueprint && typeof blueprint === 'object' && Object.keys(blueprint).length > 0)
   if (!hasBlueprint) return checks
+
+  const beatDensityCheck = buildChapterBlueprintBeatDensityCheck(blueprint, chapterText)
+  if (beatDensityCheck) checks.push(beatDensityCheck)
 
   const payoffIndex = chapterBlueprintFirstPayoffIndex(blueprint, body)
   const setupText = payoffIndex > 0 ? compactBody.slice(0, payoffIndex) : compactBody.slice(0, 220)
@@ -23675,6 +23727,7 @@ export function buildChapterBlueprintSyncReport(project: any, chapter: any, cont
       ...item,
       text: item.text || item.expected,
     }))
+  const beatDensityMissed = craftMissed.some((item: any) => item.key === 'craft_beat_density')
   const delivered = checked.filter(item => item.delivered)
   const missed = [...checked.filter(item => !item.delivered), ...craftMissed, ...causalChainMissed]
   const missedCount = missed.length
@@ -23709,6 +23762,7 @@ export function buildChapterBlueprintSyncReport(project: any, chapter: any, cont
       : [
           '下一次修订优先补足章节细纲 missed 项，把缺口写成可见事件、人物动作、信息反转、关系变化、代价兑现或章尾新问题。',
           causalChainMissed.length ? '按五幕因果链修复：开局埋因，发展让果变下一因，转折让冲突性质质变，行动白热化，结局收束并埋下一因；不能跳步、不能乱序。' : '',
+          beatDensityMissed ? '按情节点密度修复：约 200-300 字/个情节点，先补足动作过程、对话交锋、信息变化、选择代价、收益兑现和章尾钩子铺垫，再扩写句子。' : '',
           '按 oh-story craft 修复：爽点前补危机/期待铺垫，揭露/打脸后补在场配角差异化反应，过渡点压缩、卖点和回报点展开。',
           '如果正文只是概述大纲，按章节细纲重排开篇钩子、五段式内容概括、多线推进和章尾承接。',
         ].filter(Boolean),
