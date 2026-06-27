@@ -22467,6 +22467,11 @@ describe('chapter pre-draft brief', () => {
     expect(brief.prose_craft_contract.subject_name_rhythm_rules.join('｜')).toContain('段首、场景切换、多人同场、视角重置')
     expect(brief.prose_craft_contract.subject_name_rhythm_rules.join('｜')).toContain('每句都在报名字')
     expect(brief.prose_craft_contract.subject_name_rhythm_rules.join('｜')).toContain('指代不清')
+    expect(brief.prose_craft_contract.indirect_description_rules.join('｜')).toContain('间接描写法')
+    expect(brief.prose_craft_contract.indirect_description_rules.join('｜')).toContain('正面描写只是铺垫')
+    expect(brief.prose_craft_contract.indirect_description_rules.join('｜')).toContain('侧面反应才是爽点')
+    expect(brief.prose_craft_contract.indirect_description_rules.join('｜')).toContain('嚼饼')
+    expect(brief.prose_craft_contract.indirect_description_rules.join('｜')).toContain('哄抢')
     expect(brief.prose_craft_contract.rhythm_rules.join('｜')).toContain('一动一静')
     expect(brief.prose_craft_contract.object_number_rules.join('｜')).toContain('具体数字')
     expect(brief.prose_craft_contract.section_structure_rules.join('｜')).toContain('一个主事件')
@@ -22492,6 +22497,9 @@ describe('chapter pre-draft brief', () => {
     expect(prompt).toContain('subject_name_rhythm_rules')
     expect(prompt).toContain('主语与名字节奏')
     expect(prompt).toContain('段中用代词/省略流动')
+    expect(prompt).toContain('间接描写法')
+    expect(prompt).toContain('侧面反应')
+    expect(prompt).toContain('不要直接宣布')
     expect(prompt).toContain('小节内部结构')
     expect(prompt).toContain('一个主事件')
     expect(prompt).toContain('3-5 个子事件')
@@ -22554,6 +22562,7 @@ describe('chapter pre-draft brief', () => {
     expect(brief.prose_craft_contract.pov_rules.join('｜')).toContain('深度限知')
     expect(brief.prose_craft_contract.expression_rules.join('｜')).toContain('身体细节替代情绪词')
     expect(brief.prose_craft_contract.subject_name_rhythm_rules.join('｜')).toContain('主语与名字节奏')
+    expect(brief.prose_craft_contract.indirect_description_rules.join('｜')).toContain('间接描写法')
     expect(brief.prose_craft_contract.object_number_rules.join('｜')).toContain('具体数字')
     expect(brief.prose_craft_contract.section_structure_rules.join('｜')).toContain('一个主事件')
     expect(brief.prose_craft_contract.section_structure_rules.join('｜')).toContain('下一节开头快速接续')
@@ -22562,7 +22571,7 @@ describe('chapter pre-draft brief', () => {
     expect(brief.prose_craft_contract.concept_anchor_rules.join('｜')).toContain('新名词')
   })
 
-  test('preserves explicit camelCase prose craft subject-name rhythm rules', () => {
+  test('preserves explicit camelCase prose craft subject-name rhythm and indirect description rules', () => {
     const project = {
       title: '雪夜反证',
       genre: '悬疑逆袭',
@@ -22572,6 +22581,7 @@ describe('chapter pre-draft brief', () => {
       proseCraftContract: {
         source: 'manual_complete',
         subjectNameRhythmRules: ['自定义主语与名字节奏：段首点名，段中用代词和动作承接，关键转折再点名。'],
+        indirectDescriptionRules: ['自定义间接描写法：不要说证据厉害，用旁观者停筷、反派改口和熟人后退证明爽点。'],
       },
       chapter_target: {
         chapter_no: 12,
@@ -22585,6 +22595,7 @@ describe('chapter pre-draft brief', () => {
 
     expect(brief.prose_craft_contract.source).toBe('manual_complete')
     expect(brief.prose_craft_contract.subject_name_rhythm_rules).toEqual(['自定义主语与名字节奏：段首点名，段中用代词和动作承接，关键转折再点名。'])
+    expect(brief.prose_craft_contract.indirect_description_rules).toEqual(['自定义间接描写法：不要说证据厉害，用旁观者停筷、反派改口和熟人后退证明爽点。'])
   })
 
   test('adds an oh-story quality audit contract to pre-draft brief and prose prompt', () => {
@@ -49836,6 +49847,9 @@ describe('chapter context word target source guards', () => {
     expect(repairBlock).toContain('正文工艺合同')
     expect(repairBlock).toContain('subject_name_rhythm_rules')
     expect(repairBlock).toContain('主语与名字节奏')
+    expect(repairBlock).toContain('indirect_description_rules')
+    expect(repairBlock).toContain('间接描写法')
+    expect(repairBlock).toContain('侧面反应才是爽点')
     expect(repairBlock).toContain('section_density_rules')
     expect(repairBlock).toContain('anti_padding_rules')
     expect(repairBlock).toContain('小节密度诊断')
@@ -54786,8 +54800,12 @@ describe('chapter context word target source guards', () => {
     expect(reviewPrompt).toContain('prose_craft_checks')
     expect(reviewPrompt).toContain('身体细节替代情绪词')
     expect(reviewPrompt).toContain('三维度揉进')
+    expect(reviewPrompt).toContain('间接描写法')
+    expect(reviewPrompt).toContain('侧面反应')
     expect(revisionPrompt).toContain('prose_craft_checks')
     expect(revisionPrompt).toContain('正文工艺')
+    expect(revisionPrompt).toContain('间接描写法')
+    expect(revisionPrompt).toContain('不要直接宣布')
     expect(shouldReviseBlock).toContain('prose_craft_checks')
     expect(reviewNormalizeBlock).toContain('prose_craft_checks')
     expect(reviewNormalizeBlock).toContain('reviewPayload?.prose_craft_checks')
