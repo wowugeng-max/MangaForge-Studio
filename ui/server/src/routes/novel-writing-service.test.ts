@@ -9674,9 +9674,11 @@ describe('normalizeSceneCardsPayload', () => {
     )
 
     expect(prompt).toContain('【章节标题去重】')
+    expect(prompt).toContain('oh-story Step 2.1 标题预检')
     expect(prompt).toContain('第1章《第1章 门外学生》')
     expect(prompt).toContain('输出 JSON 的 title 必须改成不重复的新标题')
     expect(prompt).toContain('本章核心事件、冲突转折、关键资产或章尾钩子')
+    expect(prompt).toContain('同步细纲标题与正文文件名')
   })
 
   test('adds default prose meta hygiene rules to the paragraph prose prompt', () => {
