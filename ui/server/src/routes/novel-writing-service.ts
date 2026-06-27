@@ -36365,6 +36365,7 @@ const OH_STORY_EMOTIONAL_ARC_CHECKS = [
   '戏剧性会磨损，情绪不会磨损：同一种爽感可以重复，但复用套路时必须换场景、换对手、加新情绪或提高 stakes/奖励复杂度。',
   '先入为主：前100字必须让读者知道核心矛盾或情绪判断，先呈现的信息影响力更大；否定提前会放大否定感，必须谨慎排序。',
   '峰终定律：结尾情绪必须高于起点，结尾情绪强度按题材校验，虐≥8、爽≥7、治愈≥6；章尾必须是具体动作/对话/画面，禁止总结式反思。',
+  '三层情绪必须分离：角色自己的情绪、文本传递的情绪、读者实际感受不能混为一谈；负面角色情绪必须转成读者收益。',
   '断期待禁止：闭合一个期待时，下一个开环必须已经在运行。',
   '下行情节要给读者安全感：锅是别人的，功是主角的，并保留潜在解法、底牌或收获。',
   '情绪表达优先写行为、动作、对话和场面反应，避免只用抽象心理词告诉读者该怎么感受。',
@@ -36477,6 +36478,13 @@ const OH_STORY_EMOTIONAL_PEAK_END_RULES = [
   '结尾情绪必须高于起点；结尾情绪强度按题材校验：虐≥8、爽≥7、治愈≥6。',
   '结尾必须是具体动作、对话或画面，禁止用总结、反思或作者预告替代最后一击。',
   '结尾要有余韵和翻页压力：读者应带着未解问题、情绪回声或下一动作冲动继续读。',
+]
+
+const OH_STORY_EMOTIONAL_LAYER_RULES = [
+  '三层情绪必须分离：角色自己的情绪、文本传递的情绪、读者实际感受要分别设计。',
+  '同一场景三层可以完全不同：角色在哭，文本在撩，读者在爽。',
+  '负面角色情绪要转成读者收益：屈辱、压迫、恐惧或难过必须让读者得到爽前蓄力、安全感、尊严感、期待感或余韵。',
+  '自检时不能把“角色很痛苦”当成读者已被打动，必须指出文本如何让读者产生真正体验。',
 ]
 
 const OH_STORY_EMOTIONAL_FAILURE_MODE_GUARDS = [
@@ -36623,6 +36631,7 @@ function buildEmotionalArcContract(project: any = {}, contextPackage: any = {}) 
     const explicitEmotionalTurningRules = asArray(explicit.emotional_turning_rules || explicit.emotionalTurningRules).map((item: any) => compactBriefText(item)).filter(Boolean)
     const explicitFirstImpressionRules = asArray(explicit.first_impression_rules || explicit.firstImpressionRules).map((item: any) => compactBriefText(item)).filter(Boolean)
     const explicitPeakEndRules = asArray(explicit.peak_end_rules || explicit.peakEndRules).map((item: any) => compactBriefText(item)).filter(Boolean)
+    const explicitEmotionLayerRules = asArray(explicit.emotion_layer_rules || explicit.emotionLayerRules).map((item: any) => compactBriefText(item)).filter(Boolean)
     const explicitFailureModeGuards = asArray(explicit.failure_mode_guards || explicit.failureModeGuards).map((item: any) => compactBriefText(item)).filter(Boolean)
     return {
       version: explicit.version || 'oh_story_emotional_arc_v1',
@@ -36669,6 +36678,9 @@ function buildEmotionalArcContract(project: any = {}, contextPackage: any = {}) 
       peak_end_rules: explicitPeakEndRules.length
         ? explicitPeakEndRules
         : asArray(derived.peak_end_rules).length ? asArray(derived.peak_end_rules) : OH_STORY_EMOTIONAL_PEAK_END_RULES,
+      emotion_layer_rules: explicitEmotionLayerRules.length
+        ? explicitEmotionLayerRules
+        : asArray(derived.emotion_layer_rules).length ? asArray(derived.emotion_layer_rules) : OH_STORY_EMOTIONAL_LAYER_RULES,
       failure_mode_guards: explicitFailureModeGuards.length
         ? explicitFailureModeGuards
         : asArray(derived.failure_mode_guards).length ? asArray(derived.failure_mode_guards) : OH_STORY_EMOTIONAL_FAILURE_MODE_GUARDS,
@@ -36718,6 +36730,7 @@ function buildEmotionalArcContract(project: any = {}, contextPackage: any = {}) 
     emotional_turning_rules: OH_STORY_EMOTIONAL_TURNING_RULES,
     first_impression_rules: OH_STORY_EMOTIONAL_FIRST_IMPRESSION_RULES,
     peak_end_rules: OH_STORY_EMOTIONAL_PEAK_END_RULES,
+    emotion_layer_rules: OH_STORY_EMOTIONAL_LAYER_RULES,
     failure_mode_guards: OH_STORY_EMOTIONAL_FAILURE_MODE_GUARDS,
     quality_checks: OH_STORY_EMOTIONAL_ARC_CHECKS,
     revision_priorities: ['补调动铺垫', '补释放爽点', '修断期待', '补下行情节安全感', '让爽点递增'],
@@ -47683,6 +47696,7 @@ export function createNovelWritingService(ctx: {
       emotionalArcContract ? '情绪模块重组：戏剧性会磨损，情绪不会磨损；同一种爽感可以重复，但不能重复同一个戏剧单元。复用套路时必须换场景、换对手、加新情绪或提高 stakes/奖励复杂度。' : '',
       emotionalArcContract ? '先入为主/第一印象：前100字必须让读者知道核心矛盾、主角处境或本章最重要的不公平/异常；先呈现的信息影响力更大，否定提前会放大否定感，信息顺序必须服务本章情绪判断。' : '',
       emotionalArcContract ? '峰终定律/结尾情绪强度：章尾情绪必须高于起点；按题材检查结尾情绪强度，虐≥8、爽≥7、治愈≥6；最后一击必须落成具体动作、对话或画面，禁止总结/反思/作者预告。' : '',
+      emotionalArcContract ? '三层情绪：每个关键场景必须分清角色自己的情绪、文本传递的情绪、读者实际感受；角色在哭不等于读者要哭，角色屈辱/压迫/恐惧要转成读者的爽前蓄力、安全感、尊严感、期待感或余韵。' : '',
       emotionalArcContract?.emotion_formula ? `情绪公式：${emotionalArcContract.emotion_formula}` : '',
       emotionalArcContract?.arc_shape ? `弧线类型：${emotionalArcContract.arc_shape}` : '',
       emotionalArcContract?.scene_emotion_steps?.length ? `场景情绪步骤：${emotionalArcContract.scene_emotion_steps.join('；')}` : '',
@@ -47701,9 +47715,10 @@ export function createNovelWritingService(ctx: {
       emotionalArcContract?.emotional_turning_rules?.length ? `情绪转向：${emotionalArcContract.emotional_turning_rules.join('；')}` : '',
       emotionalArcContract?.first_impression_rules?.length ? `先入为主/第一印象：${emotionalArcContract.first_impression_rules.join('；')}` : '',
       emotionalArcContract?.peak_end_rules?.length ? `峰终定律/结尾情绪强度：${emotionalArcContract.peak_end_rules.join('；')}` : '',
+      emotionalArcContract?.emotion_layer_rules?.length ? `三层情绪：${emotionalArcContract.emotion_layer_rules.join('；')}` : '',
       emotionalArcContract?.failure_mode_guards?.length ? `情绪失败模式防线：${emotionalArcContract.failure_mode_guards.join('；')}` : '',
       emotionalArcContract?.quality_checks?.length ? `质量检查：${emotionalArcContract.quality_checks.join('；')}` : '',
-      emotionalArcContract ? '交稿自检必须输出 emotional_arc_checks，并用正文证据检查调动/释放、弧线类型、情绪三板斧（羁绊铺设/情感撕裂/余韵钝痛）、每 3-5 个小节情绪转向、先入为主/第一印象、峰终定律/结尾情绪强度、情绪模块重组（换场景/换对手/加新情绪/stakes）、爽点递增对比（影响范围、揭示深度、身份落差）、断期待禁止、下行情节安全感和情绪外化。' : '',
+      emotionalArcContract ? '交稿自检必须输出 emotional_arc_checks，并用正文证据检查调动/释放、弧线类型、情绪三板斧（羁绊铺设/情感撕裂/余韵钝痛）、每 3-5 个小节情绪转向、先入为主/第一印象、峰终定律/结尾情绪强度、三层情绪（角色自己的情绪/文本传递的情绪/读者实际感受）、情绪模块重组（换场景/换对手/加新情绪/stakes）、爽点递增对比（影响范围、揭示深度、身份落差）、断期待禁止、下行情节安全感和情绪外化。' : '',
       emotionalArcContract ? JSON.stringify(emotionalArcContract, null, 2).slice(0, 2500) : '',
       '',
       chapterHookContract ? '【章级钩子合同】' : '',
@@ -49931,9 +49946,9 @@ export function createNovelWritingService(ctx: {
     '37. expectation_threshold_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),reader_question,stakes,choice_pressure,payoff_promise,next_chapter_pull,evidence,fix,remaining_risk；短期期待过多、长期期待断线、剧情期待/主题甜头/新鲜感任一缺失、期待接力法断裂、没有期待铺垫就立刻释放爽点、大目标一步解决、门槛脱离卖点或跨过门槛后没有新门槛时必须给出 S1/S2 finding，category=structure。',
     '38. 是否兑现 chapter_target.story_loop_contract：按 oh-story 卡文对策检查“题材 + 金手指 + 主角身份 = 循环模式”是否清晰，本章是否执行指定循环模式、循环燃料、循环步骤、地图资源闭环、地位-环境同步和换地图承接；换地图/换阶段必须检查旧地图核心冲突是否阶段性解决、新地图五件套（新环境/新角色/新规则/新目标/新冲突）是否可见、前5章代入感和期待感是否建立、是否保留贯穿主线、是否做到人际关系动了 -> 主角再动、是否避免旧角色一刀切抛弃和新设定一次性倒出；必须按多级嵌套检查小循环 -> 中循环 -> 大循环是否可见，小循环中是否铺垫大循环的期待，是否避免核心不扩展、只反复用同一个梗换对象；必须输出 story_loop_checks。',
     '39. story_loop_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),setup_question,obstacle,choice,cost,payoff_or_answer_fragment,new_question,evidence,fix,remaining_risk；循环模式缺失、循环燃料断供、案件/扮猪/资源/反转/组织/公路循环步骤不闭合、资源闭环无收益、地位环境不同步、换地图承接缺旧地图收束/新地图五件套/贯穿主线/人际关系先行/前5章期待/循环升级、小循环没有铺垫中循环/大循环期待、核心不扩展或只换对象重复时必须给出 S1/S2 finding，category=structure。',
-    '40. 是否兑现 chapter_target.emotional_arc_contract：按 oh-story 情绪弧检查平静 -> 调动 -> 释放 -> 爽 是否有正文证据，弧线类型是否匹配本章效果，是否按爽点倒推法先定爽点类型、再定期待点、最后倒推铺垫，正文是否呈现铺垫 -> 期待升高 -> 爽点释放，是否按装逼层级区分日常小装逼、核心爽点、偏离爽点，核心爽点是否切在主线目标上，是否存在背离主线去别处装逼，是否遵守多爽点密度规则（不要拉长单个爽点铺垫、800-1200 字内有信息增量/能力展示/危机反制/关系变化/小回收），是否执行先入为主：前100字给核心矛盾/主角处境/不公平异常并正确排序否定提前，是否执行峰终定律：结尾情绪必须高于起点且结尾情绪强度达到虐≥8、爽≥7、治愈≥6，复用同一情绪模块时是否按“戏剧性会磨损，情绪不会磨损”完成换场景/换对手/加新情绪/stakes 重组，是否存在只有调动没有释放、只有释放没有铺垫、爽点递增对比缺影响范围/揭示深度/身份落差、断期待禁止、下行情节缺少安全感；必须输出 emotional_arc_checks。',
+    '40. 是否兑现 chapter_target.emotional_arc_contract：按 oh-story 情绪弧检查平静 -> 调动 -> 释放 -> 爽 是否有正文证据，弧线类型是否匹配本章效果，是否按爽点倒推法先定爽点类型、再定期待点、最后倒推铺垫，正文是否呈现铺垫 -> 期待升高 -> 爽点释放，是否按装逼层级区分日常小装逼、核心爽点、偏离爽点，核心爽点是否切在主线目标上，是否存在背离主线去别处装逼，是否遵守多爽点密度规则（不要拉长单个爽点铺垫、800-1200 字内有信息增量/能力展示/危机反制/关系变化/小回收），是否执行先入为主：前100字给核心矛盾/主角处境/不公平异常并正确排序否定提前，是否执行峰终定律：结尾情绪必须高于起点且结尾情绪强度达到虐≥8、爽≥7、治愈≥6，是否执行三层情绪：角色自己的情绪、文本传递的情绪、读者实际感受分离，角色在哭时读者实际感受仍被转成爽前蓄力/安全感/尊严感/期待感/余韵，复用同一情绪模块时是否按“戏剧性会磨损，情绪不会磨损”完成换场景/换对手/加新情绪/stakes 重组，是否存在只有调动没有释放、只有释放没有铺垫、爽点递增对比缺影响范围/揭示深度/身份落差、断期待禁止、下行情节缺少安全感；必须输出 emotional_arc_checks。',
     '40A. 情绪三板斧必须单独检查：羁绊铺设是否用具体物件、具体数字、重复动作建立关系质感；情感撕裂是否用反差法、错位法或延迟真相法制造“读者以为 A 实际是 B”的情绪落差；余韵钝痛是否用安静细节、物件回声或“不解释/不回头/不流泪”收束，而不是大段抒情。每 3-5 个小节应有一次由事件触发的情绪转向；结尾必须是具体动作/对话/画面而不是总结/反思；出现太平/太赶/假虐/割裂/烂尾/人设崩时必须写入 emotional_arc_checks。',
-    '41. emotional_arc_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),calm_or_pressure,mobilization,counteraction,release,reader_payoff,evidence,fix,remaining_risk；情绪弧不清、情绪三板斧缺证据、先入为主失败、前100字没有核心矛盾、峰终定律失败、结尾情绪强度不足、重复同一个戏剧单元且没有换场景/换对手/加新情绪/stakes、爽点未按影响范围/揭示深度/身份落差递增、期待闭环后没有新开环、负面情绪没有转成读者收益、情绪转向无事件触发或情绪只靠抽象心理词时必须给出 S1/S2 finding，category=structure 或 prose。',
+    '41. emotional_arc_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),calm_or_pressure,mobilization,counteraction,release,reader_payoff,evidence,fix,remaining_risk；情绪弧不清、情绪三板斧缺证据、先入为主失败、前100字没有核心矛盾、峰终定律失败、结尾情绪强度不足、三层情绪混淆、只写角色情绪没有读者实际感受、重复同一个戏剧单元且没有换场景/换对手/加新情绪/stakes、爽点未按影响范围/揭示深度/身份落差递增、期待闭环后没有新开环、负面情绪没有转成读者收益、情绪转向无事件触发或情绪只靠抽象心理词时必须给出 S1/S2 finding，category=structure 或 prose。',
     '42. 是否兑现 chapter_target.chapter_hook_contract：按 oh-story 章级钩子检查章首 7 式、章尾 13 式、钩子强度与章节阶段匹配、前 100 字钩子、最后约 100 字翻页钩子、兑现路径和钩子禁忌；必须输出 chapter_hook_checks。',
     '43. chapter_hook_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),hook_position,trigger,reader_question,next_chapter_pressure,delivered_evidence,fix,remaining_risk；开篇纯风景/背景、章尾无翻页问题、假悬念、机械降神、低风险钩、过度留白或同类型连用时必须给出 S1/S2 finding，category=structure。',
     '43A. 章钩质量必须单独输出 chapter_hook_quality_checks，字段为数组，每项包含 key,label,status(pass|warn|fail),hook_position,trigger_type,concrete_question,danger_or_choice,next_action_link,evidence,fix,remaining_risk；逐项复核 chapter_hook_contract.quality_checks：章首是否由现场异常/危险/选择/冲突/对话逼问触发，章尾是否留下具体问题、危险、发现、选择或下一章行动压力，章尾钩子是否和下一章行动直接相连；不能只把结论混在 chapter_hook_checks。',
@@ -50004,7 +50019,7 @@ export function createNovelWritingService(ctx: {
     '如果存在 chapter_target.information_flow_contract，必须输出 information_flow_checks；不能只用“节奏还行/不行”一句话带过。',
     '如果存在 chapter_target.expectation_threshold_contract，必须输出 expectation_threshold_checks；不能只用“期待感还行/不行”一句话带过，必须明确两长一短、剧情期待 + 主题甜头 + 新鲜感、期待感 > 爽点 / 铺垫篇幅不少于释放篇幅、延迟满足、门槛拆分、动态加码和下一开环是否都有正文证据。',
     '如果存在 chapter_target.story_loop_contract，必须输出 story_loop_checks；不能只用“剧情循环还行/不行”一句话带过。',
-    '如果存在 chapter_target.emotional_arc_contract，必须输出 emotional_arc_checks；不能只用“情绪还行/不行”一句话带过，必须明确爽点倒推法、装逼层级、多爽点密度、先入为主、峰终定律、结尾情绪强度、调动释放、爽点类型、递增对比和下行情节安全感是否都有正文证据。',
+    '如果存在 chapter_target.emotional_arc_contract，必须输出 emotional_arc_checks；不能只用“情绪还行/不行”一句话带过，必须明确爽点倒推法、装逼层级、多爽点密度、先入为主、峰终定律、结尾情绪强度、三层情绪、读者实际感受、调动释放、爽点类型、递增对比和下行情节安全感是否都有正文证据。',
     '如果存在 chapter_target.chapter_hook_contract，必须输出 chapter_hook_checks 和 chapter_hook_quality_checks；不能只用“钩子还行/不行”一句话带过。',
     '如果存在 chapter_target.paragraph_hook_contract，必须输出 paragraph_hook_checks；不能只用“段落有吸引力/没吸引力”一句话带过。',
     '如果存在 chapter_target.suspense_contract，必须输出 suspense_checks；不能只用“悬念还行/不行”一句话带过。',
@@ -50105,7 +50120,7 @@ export function createNovelWritingService(ctx: {
     '19. 如果自检结果包含 information_flow_checks，必须优先修复 status=fail/warn 的信息团衔接缺口；按 key/label/evidence/fix 压缩无关信息团、补场景递进、回应上一场悬念、修情绪衔接、删无信息量过渡；过渡压缩缺口要直接删除纯移动/寒暄/环境描写，或压成一句并改成信息、风险、情绪余波或下一步目标。',
     '20. 如果自检结果包含 expectation_threshold_checks，必须优先修复 status=fail/warn 的期待门槛缺口；按 key/label/evidence/fix 补两长一短期待、剧情期待 + 主题甜头 + 新鲜感、期待铺垫、期待感 > 爽点、铺垫不少于释放、期待接力法、系统性门槛、分批提出、动态加码、低密度期待点和下一个门槛；闭环一个期待前，必须让下一个开环或更大问题已经进入场景行动。',
     '21. 如果自检结果包含 story_loop_checks，必须优先修复 status=fail/warn 的故事循环缺口；按 key/label/evidence/fix 补循环模式、循环燃料、地图资源闭环、地位环境同步、换地图承接，以及“题材 + 金手指 + 主角身份”推导出的本章循环步骤；换地图承接缺口要补旧地图阶段性收束、新地图五件套、前5章期待、贯穿主线/旧关系承接、人际关系动了 -> 主角再动和循环升级，不能旧线全抛或新设定一次性倒完；小循环中必须铺垫大循环的期待，并把同一核心卖点的不同角度/不同矛盾写成正文推进，不能只反复用同一个梗换对象。',
-    '22. 如果自检结果包含 emotional_arc_checks，必须优先修复 status=fail/warn 的情绪弧缺口；按 key/label/evidence/fix 补平静 -> 调动 -> 释放 -> 爽、爽点倒推法（先定爽点类型 -> 再定期待点 -> 最后倒推铺垫，正文按铺垫 -> 期待升高 -> 爽点释放呈现）、装逼层级（日常小装逼只维持耐心，核心爽点切在主线目标，偏离主线去别处装逼必须删或改成主线推进）、多爽点密度（不要拉长单个爽点铺垫，每 800-1200 字至少补信息增量/能力展示/危机反制/关系变化/小回收之一）、先入为主（前100字补核心矛盾/主角处境/不公平异常并调整否定提前顺序）、峰终定律（结尾情绪必须高于起点，结尾情绪强度补到虐≥8、爽≥7、治愈≥6，并落成具体动作/对话/画面）、情绪模块重组（戏剧性会磨损，情绪不会磨损；复用套路必须换场景/换对手/加新情绪或提高 stakes/奖励复杂度）、情绪三板斧（羁绊铺设/情感撕裂/余韵钝痛）、每 3-5 个小节事件触发的情绪转向、弧线类型、爽点递增对比（影响范围/揭示深度/身份落差）、断期待禁止、下行情节安全感和动作/对话/反应外化。',
+    '22. 如果自检结果包含 emotional_arc_checks，必须优先修复 status=fail/warn 的情绪弧缺口；按 key/label/evidence/fix 补平静 -> 调动 -> 释放 -> 爽、爽点倒推法（先定爽点类型 -> 再定期待点 -> 最后倒推铺垫，正文按铺垫 -> 期待升高 -> 爽点释放呈现）、装逼层级（日常小装逼只维持耐心，核心爽点切在主线目标，偏离主线去别处装逼必须删或改成主线推进）、多爽点密度（不要拉长单个爽点铺垫，每 800-1200 字至少补信息增量/能力展示/危机反制/关系变化/小回收之一）、先入为主（前100字补核心矛盾/主角处境/不公平异常并调整否定提前顺序）、峰终定律（结尾情绪必须高于起点，结尾情绪强度补到虐≥8、爽≥7、治愈≥6，并落成具体动作/对话/画面）、三层情绪（分清角色自己的情绪、文本传递的情绪、读者实际感受，把角色在哭/屈辱/恐惧转成读者爽前蓄力、安全感、尊严感、期待感或余韵）、情绪模块重组（戏剧性会磨损，情绪不会磨损；复用套路必须换场景/换对手/加新情绪或提高 stakes/奖励复杂度）、情绪三板斧（羁绊铺设/情感撕裂/余韵钝痛）、每 3-5 个小节事件触发的情绪转向、弧线类型、爽点递增对比（影响范围/揭示深度/身份落差）、断期待禁止、下行情节安全感和动作/对话/反应外化。',
     '23. 如果自检结果包含 chapter_hook_checks 或 chapter_hook_quality_checks，必须优先修复 status=fail/warn 的章级钩子缺口；按 key/label/evidence/fix 重做前100字章首钩子、最后约100字章尾翻页钩子、钩子强度、兑现路径、现场触发和下一章行动压力，并修掉假悬念、机械降神、低风险钩、过度留白和同类型连用。',
     '24. 如果自检结果包含 paragraph_hook_checks，必须优先修复 status=fail/warn 的段落级钩子缺口；按 key/label/evidence/fix 补段落级钩子 11 种、钩子组合、对话情绪五级递进、围观者质量层级、不公平伤害，并修掉假悬念、低风险钩和同类型连用。',
     '25. 如果自检结果包含 suspense_checks，必须优先修复 status=fail/warn 的悬念编排缺口；按 key/label/evidence/fix 重排四种悬念信息顺序模板、补悬念强度5级、期待接力、多线悬念、信息差运用、读者预知法、底牌前置法、种养收、悬念伏笔边界、角色反应、震惊分层、信息差兑现，并确保解决问题后有新困境或新期待；悬念伏笔边界缺口要按“伏笔不是谜语人”修：短期紧张补疑问/提示/答案路径，长期伏笔藏进动作/物件/误判/环境回声并持续推进，信息延迟超过3章且中间无推进就提前给或删掉。',
@@ -51119,7 +51134,7 @@ export function createNovelWritingService(ctx: {
               '任务：为无人值守章节写作补齐本章蓝图。只输出 JSON，不写正文。',
               '输出字段：title, chapter_goal, chapter_summary, conflict, ending_hook, chapter_blueprint, emotional_arc_contract, chapter_hook_contract, paragraph_hook_contract, opening_contract, suspense_contract, reversal_contract, showdown_contract, bridge_unit_contract, style_boundary_contract, plot_dynamics_contract, information_flow_contract, expectation_threshold_contract, story_loop_contract, prose_craft_contract, punctuation_tone_contract, quality_audit_contract, dialogue_contract, continuity_heat_contract, character_relation_contract, character_behavior_contract, asset_linkage_contract, state_tracking_contract, intent_confirmation_contract, target_reader_contract, genre_positioning_contract, female_audience_contract, upgrade_rhythm_contract, conflict_structure_contract, must_advance(array), forbidden_repeats(array), repair_summary。',
               'chapter_blueprint 必须包含 target_emotion, opening_hook, core_payoff, content_outline(cause/development/turn/climax/ending), causal_chain_contract(act_order/act_functions/quality_checks), plot_lines(mainline/subplot/event_line/relationship_line/logic_line), character_order, beat_sequence, beat_density_contract, cost_and_reward, ending_contract(final_state/unresolved_question/next_chapter_pull)；causal_chain_contract 必须按 oh-story 五幕式输出种子/生长/转折/冲刺/完成，要求不能跳步、不能乱序；beat_sequence 每项必须包含 beat_no/scene_no/action/function_tag/payoff，function_tag 必须决定展开还是带过，关键揭露/打脸/高潮/爽点必须展开，过渡/赶路/信息交代必须压缩。',
-              '情绪弧合同 emotional_arc_contract 必须按 oh-story 情绪弧与 emotional-methods 输出 arc_shape, emotion_formula, pressure_methods, payoff_types, payoff_reverse_design, payoff_tier_rules, payoff_density_rules, emotion_module_recomposition_rules, payoff_escalation_rules, expectation_rules, safety_rules, bonding_setup_rules, emotional_tear_rules, lingering_aftertaste_rules, emotional_turning_rules, first_impression_rules, peak_end_rules, failure_mode_guards, quality_checks，明确本章如何完成平静 -> 调动 -> 释放 -> 爽、爽点倒推法（先定爽点类型 -> 再定期待点 -> 最后倒推铺垫，正文按铺垫 -> 期待升高 -> 爽点释放呈现）、装逼层级（日常小装逼/核心爽点/偏离爽点）、多爽点密度（不要拉长单个爽点铺垫，800-1200 字内要有信息增量/能力展示/危机反制/关系变化/小回收）、先入为主（前100字先给核心矛盾/主角处境/不公平异常，注意否定提前）、峰终定律（结尾情绪必须高于起点，结尾情绪强度虐≥8、爽≥7、治愈≥6，最后一击必须是动作/对话/画面）、情绪模块重组（戏剧性会磨损，情绪不会磨损；复用套路必须换场景/换对手/加新情绪或提高 stakes/奖励复杂度）、情绪三板斧（羁绊铺设/情感撕裂/余韵钝痛）和每 3-5 个小节的事件触发情绪转向，并让连续爽点按影响范围、揭示深度或身份落差递增。',
+              '情绪弧合同 emotional_arc_contract 必须按 oh-story 情绪弧与 emotional-methods 输出 arc_shape, emotion_formula, pressure_methods, payoff_types, payoff_reverse_design, payoff_tier_rules, payoff_density_rules, emotion_module_recomposition_rules, payoff_escalation_rules, expectation_rules, safety_rules, bonding_setup_rules, emotional_tear_rules, lingering_aftertaste_rules, emotional_turning_rules, first_impression_rules, peak_end_rules, emotion_layer_rules, failure_mode_guards, quality_checks，明确本章如何完成平静 -> 调动 -> 释放 -> 爽、爽点倒推法（先定爽点类型 -> 再定期待点 -> 最后倒推铺垫，正文按铺垫 -> 期待升高 -> 爽点释放呈现）、装逼层级（日常小装逼/核心爽点/偏离爽点）、多爽点密度（不要拉长单个爽点铺垫，800-1200 字内要有信息增量/能力展示/危机反制/关系变化/小回收）、先入为主（前100字先给核心矛盾/主角处境/不公平异常，注意否定提前）、峰终定律（结尾情绪必须高于起点，结尾情绪强度虐≥8、爽≥7、治愈≥6，最后一击必须是动作/对话/画面）、三层情绪（角色自己的情绪、文本传递的情绪、读者实际感受分离，角色在哭不等于读者哭，必须转成读者收益）、情绪模块重组（戏剧性会磨损，情绪不会磨损；复用套路必须换场景/换对手/加新情绪或提高 stakes/奖励复杂度）、情绪三板斧（羁绊铺设/情感撕裂/余韵钝痛）和每 3-5 个小节的事件触发情绪转向，并让连续爽点按影响范围、揭示深度或身份落差递增。',
               '章级钩子合同 chapter_hook_contract 必须按 oh-story 章首/章尾钩子输出 opening_hook_type, ending_hook_type, hook_strength, opening_hook_rules, ending_hook_rules, forbidden_patterns, quality_checks，明确前 100-300 字和最后 300 字如何制造追读。',
               '段落级钩子合同 paragraph_hook_contract 必须按 oh-story 段落级钩子输出 micro_hook_types, hook_combinations, dialogue_escalation, spectator_layers, forbidden_patterns, quality_checks，明确本章每 3-5 段如何制造信息、风险、情绪或关系变化。',
               '开篇合同 opening_contract 必须按 oh-story 开篇检查输出 protagonist_entry, first_100_char_hook, event_density, body_anchor, five_essentials_rules, forbidden_opening_patterns, quality_checks；five_essentials_rules 必须包含开头五要诀“简单/不偏/快/爽/不平”，确保开篇不是风景/醒来/解释起手。',

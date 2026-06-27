@@ -21264,10 +21264,16 @@ describe('chapter pre-draft brief', () => {
     expect(brief.emotional_arc_contract.peak_end_rules.join('｜')).toContain('峰终定律')
     expect(brief.emotional_arc_contract.peak_end_rules.join('｜')).toContain('结尾情绪必须高于起点')
     expect(brief.emotional_arc_contract.peak_end_rules.join('｜')).toContain('爽≥7')
+    expect(brief.emotional_arc_contract.emotion_layer_rules.join('｜')).toContain('角色自己的情绪')
+    expect(brief.emotional_arc_contract.emotion_layer_rules.join('｜')).toContain('文本传递的情绪')
+    expect(brief.emotional_arc_contract.emotion_layer_rules.join('｜')).toContain('读者实际感受')
+    expect(brief.emotional_arc_contract.emotion_layer_rules.join('｜')).toContain('角色在哭')
+    expect(brief.emotional_arc_contract.emotion_layer_rules.join('｜')).toContain('读者在爽')
     expect(brief.emotional_arc_contract.failure_mode_guards.join('｜')).toContain('假虐')
     expect(confirmedContext.chapter_target.emotional_arc_contract.quality_checks.join('｜')).toContain('调动')
     expect(confirmedContext.chapter_target.emotional_arc_contract.quality_checks.join('｜')).toContain('先入为主')
     expect(confirmedContext.chapter_target.emotional_arc_contract.quality_checks.join('｜')).toContain('峰终定律')
+    expect(confirmedContext.chapter_target.emotional_arc_contract.quality_checks.join('｜')).toContain('三层情绪')
     expect(prompt).toContain('【情绪弧合同】')
     expect(prompt).toContain('执行 chapter_target.emotional_arc_contract')
     expect(prompt).toContain('情绪三板斧')
@@ -21293,6 +21299,9 @@ describe('chapter pre-draft brief', () => {
     expect(prompt).toContain('先入为主')
     expect(prompt).toContain('峰终定律')
     expect(prompt).toContain('结尾情绪强度')
+    expect(prompt).toContain('三层情绪')
+    expect(prompt).toContain('读者实际感受')
+    expect(prompt).toContain('角色在哭')
     expect(prompt).toContain('emotional_arc_checks')
     expect(prompt.indexOf('【情绪弧合同】')).toBeLessThan(prompt.indexOf('【结构化上下文包】'))
   })
@@ -21354,9 +21363,10 @@ describe('chapter pre-draft brief', () => {
     expect(brief.emotional_arc_contract.lingering_aftertaste_rules.join('｜')).toContain('安静细节')
     expect(brief.emotional_arc_contract.first_impression_rules.join('｜')).toContain('先入为主')
     expect(brief.emotional_arc_contract.peak_end_rules.join('｜')).toContain('峰终定律')
+    expect(brief.emotional_arc_contract.emotion_layer_rules.join('｜')).toContain('读者实际感受')
   })
 
-  test('preserves explicit camelCase emotional arc first-impression and peak-end rules', () => {
+  test('preserves explicit camelCase emotional arc first-impression peak-end and emotion-layer rules', () => {
     const project = {
       title: '当众反证',
       genre: '都市逆袭',
@@ -21367,6 +21377,7 @@ describe('chapter pre-draft brief', () => {
         source: 'manual_complete',
         firstImpressionRules: ['自定义先入为主：前100字先给核心矛盾。'],
         peakEndRules: ['自定义峰终定律：结尾情绪必须高于起点。'],
+        emotionLayerRules: ['自定义三层情绪：角色情绪屈辱，文本传递隐忍，读者实际感受爽前蓄力。'],
       },
       chapter_target: {
         chapter_no: 17,
@@ -21382,6 +21393,7 @@ describe('chapter pre-draft brief', () => {
     expect(brief.emotional_arc_contract.source).toBe('manual_complete')
     expect(brief.emotional_arc_contract.first_impression_rules).toEqual(['自定义先入为主：前100字先给核心矛盾。'])
     expect(brief.emotional_arc_contract.peak_end_rules).toEqual(['自定义峰终定律：结尾情绪必须高于起点。'])
+    expect(brief.emotional_arc_contract.emotion_layer_rules).toEqual(['自定义三层情绪：角色情绪屈辱，文本传递隐忍，读者实际感受爽前蓄力。'])
   })
 
   test('asks prose self review to enforce oh-story emotional three-blade methods', () => {
@@ -49724,8 +49736,10 @@ describe('chapter context word target source guards', () => {
     expect(repairBlock).toContain('底牌前置法')
     expect(repairBlock).toContain('first_impression_rules')
     expect(repairBlock).toContain('peak_end_rules')
+    expect(repairBlock).toContain('emotion_layer_rules')
     expect(repairBlock).toContain('先入为主')
     expect(repairBlock).toContain('峰终定律')
+    expect(repairBlock).toContain('三层情绪')
     expect(repairBlock).toContain('反转合同')
   })
 
@@ -54214,12 +54228,16 @@ describe('chapter context word target source guards', () => {
     expect(reviewPrompt).toContain('先入为主')
     expect(reviewPrompt).toContain('峰终定律')
     expect(reviewPrompt).toContain('结尾情绪强度')
+    expect(reviewPrompt).toContain('三层情绪')
+    expect(reviewPrompt).toContain('读者实际感受')
     expect(revisionPrompt).toContain('emotional_arc_checks')
     expect(revisionPrompt).toContain('情绪弧')
     expect(revisionPrompt).toContain('爽点递增')
     expect(revisionPrompt).toContain('先入为主')
     expect(revisionPrompt).toContain('峰终定律')
     expect(revisionPrompt).toContain('结尾情绪强度')
+    expect(revisionPrompt).toContain('三层情绪')
+    expect(revisionPrompt).toContain('读者实际感受')
     expect(shouldReviseBlock).toContain('emotional_arc_checks')
     expect(reviewNormalizeBlock).toContain('emotional_arc_checks')
     expect(reviewNormalizeBlock).toContain('reviewPayload?.emotional_arc_checks')
