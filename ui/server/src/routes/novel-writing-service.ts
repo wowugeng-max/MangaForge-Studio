@@ -36976,6 +36976,31 @@ const OH_STORY_SUSPENSE_EXPECTATION_LAYERS = [
   '不间断钩子链：主角得到答案、资源或爽点之前，必须套上另一个更具体的钩子。',
 ]
 
+const OH_STORY_SUSPENSE_MULTI_LINE_RULES = [
+  '多线悬念：短弧2-3章，中弧5-8章，长弧贯穿整卷。',
+  '任何时刻至少两条悬念线运行，不能在当前谜题兑现后清空期待。',
+  '短弧给下章翻页，中弧给剧情单元牵引，长弧给卷目标或主线谜团持续存在感。',
+]
+
+const OH_STORY_SUSPENSE_READER_PREKNOWLEDGE_RULES = [
+  '读者预知法：提前告诉读者将发生大事件，让读者知道但主角不知道。',
+  '倒计时变体：每隔1-2章放一小段进展，让读者持续等主角撞上真相。',
+  '预知信息必须转化为压力、误判或行动选择，不能只做旁白剧透。',
+]
+
+const OH_STORY_SUSPENSE_INFORMATION_GAP_RULES = [
+  '信息差运用：读者知道主角获得强力物品或底牌，但配角/反派不知道。',
+  '反派恰好被主角底牌或规则理解克制，读者提前知道克制关系。',
+  '别人拿更好装备却失败，主角用信息差或规则理解反杀。',
+  '信息差抹平时 = 爽点爆发，必须让角色反应和局势变化同时兑现。',
+]
+
+const OH_STORY_SUSPENSE_TRUMP_CARD_PREPOSITION_RULES = [
+  '底牌前置法：先展示主角底牌，再安排找事冲突。',
+  '必须同时准备两对信息组合：底牌 + 即将发生的冲突。',
+  '底牌展示不能直接剧透结果，要让读者知道有反制可能，但还想看怎样兑现。',
+]
+
 const OH_STORY_SUSPENSE_FORESHADOWING_BOUNDARY_RULES = [
   '谜语人是故意不说明，伏笔是巧妙融入剧情、自然不刻意。',
   '信息延迟超过3章且中间无任何推进，就是谜语人，必须删掉或提前给。',
@@ -37007,6 +37032,9 @@ const OH_STORY_SUSPENSE_CHECKS = [
   '触发型分层钩子必须有角色反应验证力度，不能只靠旁白说紧张。',
   '震惊分层必须从点、网、深度或高位者反应中选择合适层级，并用可视化变化支撑。',
   '信息差必须存在且有兑现路径，读者/角色/反派之间的信息差抹平时要形成爽点释放。',
+  '读者预知法必须给出“读者知道但主角不知道”的压力，并在1-2章内推进倒计时或后果。',
+  '底牌前置法必须同时交代底牌 + 即将发生的冲突，让读者期待底牌如何兑现。',
+  '多线悬念必须保持短弧、中弧、长弧至少两条同时运行。',
   '麻烦不能消失：每次解决后必须留下新困境、新问题或更高层期待。',
 ]
 
@@ -37081,6 +37109,10 @@ function buildSuspenseContract(project: any = {}, contextPackage: any = {}) {
     const explicitTriggerLayers = asArray(explicit.trigger_layers || explicit.triggerLayers).map((item: any) => compactBriefText(item)).filter(Boolean)
     const explicitExpectationLayers = asArray(explicit.expectation_layers || explicit.expectationLayers).map((item: any) => compactBriefText(item)).filter(Boolean)
     const explicitExpectationChain = normalizeSuspenseExpectationChainContract(explicit.expectation_chain || explicit.expectationChain)
+    const explicitMultiLineSuspenseRules = asArray(explicit.multi_line_suspense_rules || explicit.multiLineSuspenseRules).map((item: any) => compactBriefText(item)).filter(Boolean)
+    const explicitReaderPreknowledgeRules = asArray(explicit.reader_preknowledge_rules || explicit.readerPreknowledgeRules || explicit.reader_precognition_rules || explicit.readerPrecognitionRules).map((item: any) => compactBriefText(item)).filter(Boolean)
+    const explicitInformationGapRules = asArray(explicit.information_gap_rules || explicit.informationGapRules).map((item: any) => compactBriefText(item)).filter(Boolean)
+    const explicitTrumpCardPrepositionRules = asArray(explicit.trump_card_preposition_rules || explicit.trumpCardPrepositionRules).map((item: any) => compactBriefText(item)).filter(Boolean)
     const explicitForeshadowingBoundaryRules = asArray(explicit.foreshadowing_boundary_rules || explicit.foreshadowingBoundaryRules).map((item: any) => compactBriefText(item)).filter(Boolean)
     const explicitShockLayers = asArray(explicit.shock_layers || explicit.shockLayers).map((item: any) => compactBriefText(item)).filter(Boolean)
     const explicitForbiddenPatterns = asArray(explicit.forbidden_patterns || explicit.forbiddenPatterns).map((item: any) => compactBriefText(item)).filter(Boolean)
@@ -37095,6 +37127,18 @@ function buildSuspenseContract(project: any = {}, contextPackage: any = {}) {
       trigger_layers: explicitTriggerLayers.length ? explicitTriggerLayers : asArray(derived.trigger_layers),
       expectation_layers: explicitExpectationLayers.length ? explicitExpectationLayers : asArray(derived.expectation_layers),
       expectation_chain: explicitExpectationChain || normalizeSuspenseExpectationChainContract(derived.expectation_chain || derived.expectationChain),
+      multi_line_suspense_rules: explicitMultiLineSuspenseRules.length
+        ? explicitMultiLineSuspenseRules
+        : asArray(derived.multi_line_suspense_rules).length ? asArray(derived.multi_line_suspense_rules) : OH_STORY_SUSPENSE_MULTI_LINE_RULES,
+      reader_preknowledge_rules: explicitReaderPreknowledgeRules.length
+        ? explicitReaderPreknowledgeRules
+        : asArray(derived.reader_preknowledge_rules).length ? asArray(derived.reader_preknowledge_rules) : OH_STORY_SUSPENSE_READER_PREKNOWLEDGE_RULES,
+      information_gap_rules: explicitInformationGapRules.length
+        ? explicitInformationGapRules
+        : asArray(derived.information_gap_rules).length ? asArray(derived.information_gap_rules) : OH_STORY_SUSPENSE_INFORMATION_GAP_RULES,
+      trump_card_preposition_rules: explicitTrumpCardPrepositionRules.length
+        ? explicitTrumpCardPrepositionRules
+        : asArray(derived.trump_card_preposition_rules).length ? asArray(derived.trump_card_preposition_rules) : OH_STORY_SUSPENSE_TRUMP_CARD_PREPOSITION_RULES,
       foreshadowing_boundary_rules: explicitForeshadowingBoundaryRules.length
         ? explicitForeshadowingBoundaryRules
         : asArray(derived.foreshadowing_boundary_rules).length ? asArray(derived.foreshadowing_boundary_rules) : OH_STORY_SUSPENSE_FORESHADOWING_BOUNDARY_RULES,
@@ -37141,6 +37185,10 @@ function buildSuspenseContract(project: any = {}, contextPackage: any = {}) {
       carry_rules: ['至少两条期待线必须同时运行，当前谜题兑现后不能清空期待。'],
       next_open_loop: ['每章结尾至少留下一个未解决问题、未达成期待、新门槛、新线索或新困境。'],
     },
+    multi_line_suspense_rules: OH_STORY_SUSPENSE_MULTI_LINE_RULES,
+    reader_preknowledge_rules: OH_STORY_SUSPENSE_READER_PREKNOWLEDGE_RULES,
+    information_gap_rules: OH_STORY_SUSPENSE_INFORMATION_GAP_RULES,
+    trump_card_preposition_rules: OH_STORY_SUSPENSE_TRUMP_CARD_PREPOSITION_RULES,
     foreshadowing_boundary_rules: OH_STORY_SUSPENSE_FORESHADOWING_BOUNDARY_RULES,
     shock_layers: OH_STORY_SUSPENSE_SHOCK_LAYERS,
     forbidden_patterns: OH_STORY_SUSPENSE_FORBIDDEN,
@@ -47571,6 +47619,8 @@ export function createNovelWritingService(ctx: {
       suspenseContract ? '【悬念编排合同】' : '',
       suspenseContract ? '硬性要求：执行 chapter_target.suspense_contract；这是来自 oh-story hooks-suspense 的悬念编排口径，正文必须把疑问、提示、误导、答案、期待接力和震惊反应排成可追踪链条。' : '',
       suspenseContract ? '执行方式：按四种悬念信息顺序模板选择本章结构；悬念强度5级必须匹配章节定位；前30%种、中50%养、末20%收或延迟引爆；章末必须保留至少一个未解问题或未达成期待，并让至少两条期待线继续运行。' : '',
+      suspenseContract ? '信息差与预知：执行读者预知法、信息差运用和底牌前置法；让读者知道但主角不知道的倒计时持续推进，先展示底牌再安排冲突，并在信息差抹平时形成爽点爆发。' : '',
+      suspenseContract ? '多线悬念：短弧2-3章、中弧5-8章、长弧整卷要至少保留两条运行；当前疑问兑现前先铺下一开环，不能让悬念线一次性清空。' : '',
       suspenseContract ? '伏笔不是谜语人：短期紧张用悬念，长期线索用伏笔；信息延迟超过3章且中间无推进时必须提前给或删掉。伏笔要自然藏进动作、物件、误判、环境回声或角色习惯，正文不要直接写“这是伏笔”。' : '',
       suspenseContract?.information_order_templates?.length ? `四种悬念信息顺序模板/本章优先：${suspenseContract.information_order_templates.join('；')}` : '',
       suspenseContract?.suspense_strength ? `悬念强度5级：${suspenseContract.suspense_strength}` : '',
@@ -47578,11 +47628,15 @@ export function createNovelWritingService(ctx: {
       suspenseContract?.trigger_layers?.length ? `触发型分层钩子：${suspenseContract.trigger_layers.join('；')}` : '',
       suspenseContract?.expectation_layers?.length ? `期待接力：${suspenseContract.expectation_layers.join('；')}` : '',
       suspenseContract?.expectation_chain ? `期待链：活跃线=${asArray(suspenseContract.expectation_chain.active_lines).join('、')}；承接规则=${asArray(suspenseContract.expectation_chain.carry_rules).join('；')}；下一开环=${asArray(suspenseContract.expectation_chain.next_open_loop).join('；')}` : '',
+      suspenseContract?.multi_line_suspense_rules?.length ? `多线悬念：${suspenseContract.multi_line_suspense_rules.join('；')}` : '',
+      suspenseContract?.reader_preknowledge_rules?.length ? `读者预知法：${suspenseContract.reader_preknowledge_rules.join('；')}` : '',
+      suspenseContract?.information_gap_rules?.length ? `信息差运用：${suspenseContract.information_gap_rules.join('；')}` : '',
+      suspenseContract?.trump_card_preposition_rules?.length ? `底牌前置法：${suspenseContract.trump_card_preposition_rules.join('；')}` : '',
       suspenseContract?.foreshadowing_boundary_rules?.length ? `悬念伏笔边界：${suspenseContract.foreshadowing_boundary_rules.join('；')}` : '',
       suspenseContract?.shock_layers?.length ? `震惊分层：${suspenseContract.shock_layers.join('；')}` : '',
       suspenseContract?.forbidden_patterns?.length ? `悬念禁忌：${suspenseContract.forbidden_patterns.join('；')}` : '',
       suspenseContract?.quality_checks?.length ? `suspense_checks：${suspenseContract.quality_checks.join('；')}` : '',
-      suspenseContract ? '交稿自检必须输出 suspense_checks，并用正文证据检查悬念等级、信息顺序、期待链、种养收、悬念伏笔边界、角色反应、震惊分层、信息差兑现和麻烦不能消失。' : '',
+      suspenseContract ? '交稿自检必须输出 suspense_checks，并用正文证据检查悬念等级、信息顺序、期待链、多线悬念、读者预知法、信息差运用、底牌前置法、种养收、悬念伏笔边界、角色反应、震惊分层、信息差兑现和麻烦不能消失。' : '',
       suspenseContract ? JSON.stringify(suspenseContract, null, 2).slice(0, 2500) : '',
       '',
       reversalContract ? '【反转设计合同】' : '',
@@ -49769,8 +49823,8 @@ export function createNovelWritingService(ctx: {
     '43A. 章钩质量必须单独输出 chapter_hook_quality_checks，字段为数组，每项包含 key,label,status(pass|warn|fail),hook_position,trigger_type,concrete_question,danger_or_choice,next_action_link,evidence,fix,remaining_risk；逐项复核 chapter_hook_contract.quality_checks：章首是否由现场异常/危险/选择/冲突/对话逼问触发，章尾是否留下具体问题、危险、发现、选择或下一章行动压力，章尾钩子是否和下一章行动直接相连；不能只把结论混在 chapter_hook_checks。',
     '44. 是否兑现 chapter_target.paragraph_hook_contract：按 oh-story 段落级钩子检查段落级钩子 11 种、钩子组合、对话情绪五级递增、围观者质量层级、不公平伤害和钩子禁忌；必须输出 paragraph_hook_checks。',
     '45. paragraph_hook_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),paragraph_range,hook_type,micro_change,information_or_risk_delta,emotion_or_relation_delta,evidence,fix,remaining_risk；连续段落无信息/风险/情绪变化、对话无递进、公开打脸没有高质量围观者、假悬念、低风险钩或同类型连用时必须给出 S1/S2 finding，category=structure 或 prose。',
-    '46. 是否兑现 chapter_target.suspense_contract：按 oh-story 悬念编排检查四种悬念信息顺序模板、悬念强度5级、期待接力、期待链、三段钩子种养收、悬念伏笔边界、触发型分层钩子、震惊分层、信息差和麻烦不能消失；期待链必须保持至少两条期待线同时运行，当前谜题兑现后章尾仍有新门槛、新线索、新困境或长期期待；伏笔不是谜语人，短期紧张用悬念，长期线索用伏笔，信息延迟超过3章且中间无推进时必须提前给或删除；必须输出 suspense_checks。',
-    '47. suspense_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),question,misdirect,partial_answer,new_expectation,evidence,fix,remaining_risk；疑问无答案路径、虚假提示不可信、悬念强度不足、期待链断裂、伏笔像谜语人、信息延迟超过3章且中间无推进、无角色反应、震惊无层次或解决后麻烦消失时必须给出 S1/S2 finding，category=structure。',
+    '46. 是否兑现 chapter_target.suspense_contract：按 oh-story 悬念编排检查四种悬念信息顺序模板、悬念强度5级、期待接力、期待链、多线悬念、读者预知法、信息差运用、底牌前置法、三段钩子种养收、悬念伏笔边界、触发型分层钩子、震惊分层、信息差和麻烦不能消失；期待链和多线悬念必须保持至少两条期待线/悬念线同时运行，当前谜题兑现后章尾仍有新门槛、新线索、新困境或长期期待；读者预知法必须让读者知道但主角不知道的事件持续推进，底牌前置法必须同时有底牌 + 即将发生的冲突；伏笔不是谜语人，短期紧张用悬念，长期线索用伏笔，信息延迟超过3章且中间无推进时必须提前给或删除；必须输出 suspense_checks。',
+    '47. suspense_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),question,misdirect,partial_answer,new_expectation,evidence,fix,remaining_risk；疑问无答案路径、虚假提示不可信、悬念强度不足、期待链断裂、多线悬念断线、读者预知法无倒计时推进、底牌前置法缺冲突承接、伏笔像谜语人、信息延迟超过3章且中间无推进、无角色反应、震惊无层次或解决后麻烦消失时必须给出 S1/S2 finding，category=structure。',
     '48. 是否兑现 chapter_target.reversal_contract：按 oh-story 反转设计检查反转类型、3处暗示、误导技巧、揭示时机、公平性、非作弊性、反转影响和打脸节奏；必须输出 reversal_checks。',
     '49. reversal_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),reversal_type,fair_clues,misdirect,reveal_timing,impact_after_reveal,evidence,fix,remaining_risk；天降反转、前文无铺垫、大段解释、反转无情绪冲击、引入新信息作弊、红鲱鱼无剧情功能或压抑过长时必须给出 S1/S2 finding，category=structure。',
     '49A. 是否兑现 chapter_target.showdown_contract：按 oh-story 高潮对抗口径检查爽点释放、底牌管理、无敌文主角不拖拉、三压一爆三震、装逼打脸舞台、人际关系/利益传递通道、群众层 -> 中间层 -> 核心层震惊传递链、战斗/智斗是否服务爽点；底牌管理要求每次只出1个底牌，保留2-3个未揭示底牌，并在出牌后补新技能、新后手、新目标或更高门槛，不能一次性摊空后续期待；无敌文主角必须主角登场即杀伐果断，使用战力前置无敌建立期待，不一击必杀时也要有明确理由；三压一爆三震必须检查友好势力、敌方势力、中立势力是否先各自形成压力，主角一爆碾压后，三方是否各自震动；打斗是一场表演，必须展示主角收获；以弱胜强是否有信息差/环境/心理博弈；强敌压迫时是否有三层破局：硬碰硬、预判反制、反预判，尤其是反派出A，主角早准备B克制A，反派针对A时主角利用A作陷阱引入预设B；情绪是否急 -> 缓 -> 急；必须输出 showdown_checks。',
@@ -49938,7 +49992,7 @@ export function createNovelWritingService(ctx: {
     '22. 如果自检结果包含 emotional_arc_checks，必须优先修复 status=fail/warn 的情绪弧缺口；按 key/label/evidence/fix 补平静 -> 调动 -> 释放 -> 爽、爽点倒推法（先定爽点类型 -> 再定期待点 -> 最后倒推铺垫，正文按铺垫 -> 期待升高 -> 爽点释放呈现）、装逼层级（日常小装逼只维持耐心，核心爽点切在主线目标，偏离主线去别处装逼必须删或改成主线推进）、多爽点密度（不要拉长单个爽点铺垫，每 800-1200 字至少补信息增量/能力展示/危机反制/关系变化/小回收之一）、情绪模块重组（戏剧性会磨损，情绪不会磨损；复用套路必须换场景/换对手/加新情绪或提高 stakes/奖励复杂度）、情绪三板斧（羁绊铺设/情感撕裂/余韵钝痛）、每 3-5 个小节事件触发的情绪转向、弧线类型、爽点递增对比（影响范围/揭示深度/身份落差）、断期待禁止、下行情节安全感和动作/对话/反应外化。',
     '23. 如果自检结果包含 chapter_hook_checks 或 chapter_hook_quality_checks，必须优先修复 status=fail/warn 的章级钩子缺口；按 key/label/evidence/fix 重做前100字章首钩子、最后约100字章尾翻页钩子、钩子强度、兑现路径、现场触发和下一章行动压力，并修掉假悬念、机械降神、低风险钩、过度留白和同类型连用。',
     '24. 如果自检结果包含 paragraph_hook_checks，必须优先修复 status=fail/warn 的段落级钩子缺口；按 key/label/evidence/fix 补段落级钩子 11 种、钩子组合、对话情绪五级递进、围观者质量层级、不公平伤害，并修掉假悬念、低风险钩和同类型连用。',
-    '25. 如果自检结果包含 suspense_checks，必须优先修复 status=fail/warn 的悬念编排缺口；按 key/label/evidence/fix 重排四种悬念信息顺序模板、补悬念强度5级、期待接力、种养收、悬念伏笔边界、角色反应、震惊分层、信息差兑现，并确保解决问题后有新困境或新期待；悬念伏笔边界缺口要按“伏笔不是谜语人”修：短期紧张补疑问/提示/答案路径，长期伏笔藏进动作/物件/误判/环境回声并持续推进，信息延迟超过3章且中间无推进就提前给或删掉。',
+    '25. 如果自检结果包含 suspense_checks，必须优先修复 status=fail/warn 的悬念编排缺口；按 key/label/evidence/fix 重排四种悬念信息顺序模板、补悬念强度5级、期待接力、多线悬念、信息差运用、读者预知法、底牌前置法、种养收、悬念伏笔边界、角色反应、震惊分层、信息差兑现，并确保解决问题后有新困境或新期待；悬念伏笔边界缺口要按“伏笔不是谜语人”修：短期紧张补疑问/提示/答案路径，长期伏笔藏进动作/物件/误判/环境回声并持续推进，信息延迟超过3章且中间无推进就提前给或删掉。',
     '26. 如果自检结果包含 reversal_checks，必须优先修复 status=fail/warn 的反转设计缺口；按 key/label/evidence/fix 补足3处暗示、公平误导、反转类型、揭示时机、揭示后影响和打脸节奏，删除天降反转、作弊新信息和大段解释独白。',
     '26A. 如果自检结果包含 showdown_checks，必须优先修复 status=fail/warn 的高潮对抗缺口；按 key/label/evidence/fix 补爽点释放强度，确保底牌释放后反派受到对应压制，并修复底牌管理：每次只出1个底牌，保留2-3个未揭示底牌，出牌后补新技能、新后手、新目标或更高门槛，不得把所有底牌一次性摊空；修复无敌文主角不拖拉：主角登场即杀伐果断，该压制时直接压制，不一击必杀时必须有明确理由，并给出战力前置无敌或强势解决信号；修复三压一爆三震：先补友好势力觉得主角是大佬，再补敌方势力两次不服并逼主角上，再补中立势力观望/加压，主角一爆碾压后分别补友方、敌方、中立方的不同震动；建立群众层/中间层/核心层舞台，并补装逼前的人际关系铺垫/利益传递通道，让主角与关键旁观者有旧情、救助、欠债、认可或共同目标，爽点释放后经由这条通道改变态度、声望、资源或规则评价；让震惊分层基于角色利益，确保战斗服务爽点；以弱胜强必须补信息差、环境利用或心理博弈；三层破局缺口必须补预判反制和反预判：反派出A，主角早准备B克制A，反派针对A时主角利用A作陷阱引入预设B；并把情绪调整为急-缓-急。',
     '26B. 如果自检结果包含 bridge_unit_checks，必须优先修复 status=fail/warn 的桥段节奏缺口；按 key/label/evidence/fix 补连续期待、桥段位置、章尾新目标、高潮中埋钩子或连续小期待；连续 2 章没有目标推进时提高冲突密度，连续 2 章只爆点时补关系/伏笔/状态承接余波。',
@@ -50953,7 +51007,7 @@ export function createNovelWritingService(ctx: {
               '章级钩子合同 chapter_hook_contract 必须按 oh-story 章首/章尾钩子输出 opening_hook_type, ending_hook_type, hook_strength, opening_hook_rules, ending_hook_rules, forbidden_patterns, quality_checks，明确前 100-300 字和最后 300 字如何制造追读。',
               '段落级钩子合同 paragraph_hook_contract 必须按 oh-story 段落级钩子输出 micro_hook_types, hook_combinations, dialogue_escalation, spectator_layers, forbidden_patterns, quality_checks，明确本章每 3-5 段如何制造信息、风险、情绪或关系变化。',
               '开篇合同 opening_contract 必须按 oh-story 开篇检查输出 protagonist_entry, first_100_char_hook, event_density, body_anchor, five_essentials_rules, forbidden_opening_patterns, quality_checks；five_essentials_rules 必须包含开头五要诀“简单/不偏/快/爽/不平”，确保开篇不是风景/醒来/解释起手。',
-              '悬念合同 suspense_contract 必须按 oh-story 悬念检查输出 suspense_type, threat, delay_plan, payoff_distance, false_alarm_guardrails, foreshadowing_boundary_rules, quality_checks，确保威胁有代价、有延迟、有兑现路径；foreshadowing_boundary_rules 必须包含“伏笔不是谜语人”、短期紧张用悬念、长期线索用伏笔、信息延迟超过3章且中间无推进时提前给或删除、伏笔自然融入动作/物件/误判/环境回声。',
+              '悬念合同 suspense_contract 必须按 oh-story 悬念检查输出 suspense_type, threat, delay_plan, payoff_distance, false_alarm_guardrails, information_order_templates, suspense_strength, suspense_cycle, trigger_layers, expectation_layers, expectation_chain, multi_line_suspense_rules, reader_preknowledge_rules, information_gap_rules, trump_card_preposition_rules, foreshadowing_boundary_rules, shock_layers, quality_checks，确保威胁有代价、有延迟、有兑现路径；multi_line_suspense_rules 必须包含短弧2-3章、中弧5-8章、长弧整卷和至少两条悬念线运行；reader_preknowledge_rules 必须包含读者预知法和读者知道但主角不知道；information_gap_rules 必须包含信息差运用和信息差抹平时爽点爆发；trump_card_preposition_rules 必须包含底牌前置法、先展示主角底牌、底牌 + 即将发生的冲突；foreshadowing_boundary_rules 必须包含“伏笔不是谜语人”、短期紧张用悬念、长期线索用伏笔、信息延迟超过3章且中间无推进时提前给或删除、伏笔自然融入动作/物件/误判/环境回声。',
               '反转合同 reversal_contract 必须按 oh-story 反转检查输出 reversal_type, setup_clues, misdirection, reveal_timing, emotional_impact, cheat_guardrails, quality_checks，确保反转有铺垫、不靠天降新信息。',
               '高潮对抗合同 showdown_contract 必须按 oh-story style-combat-face / hooks-suspense / plot-frameworks 输出 payoff_release_rules, trump_card_reserve_rules, invincible_protagonist_rules, three_pressure_shock_rules, stage_chain_rules, transmission_channel_rules, shock_chain_rules, combat_design_rules, weak_over_strong_rules, counterplay_layers, emotion_rhythm_rules, revision_priorities, quality_checks；payoff_release_rules 必须包含爽点释放和“反派就要受到对应的压制”，trump_card_reserve_rules 必须包含底牌管理、手里保持2-3个未揭示底牌、每次只出1个、出牌后获得新技能/新后手/新目标，invincible_protagonist_rules 必须包含“主角登场即杀伐果断”、战力前置无敌、主角登场时一点都不能拖拉、不一击必杀时必须有明确理由，three_pressure_shock_rules 必须包含三压一爆三震、友好势力、敌方势力、中立势力、一爆碾压和三方震动，stage_chain_rules 必须包含“群众层 -> 中间层 -> 核心层”，transmission_channel_rules 必须包含“装逼前必须先铺设人际关系，否则没有传递通道”和爽点释放后改变态度/利益/声望/规则评价，shock_chain_rules 必须包含震惊分层基于自身利益和目标，combat_design_rules 必须包含“打斗是一场表演”，counterplay_layers 必须包含“预判反制”和“反预判”，emotion_rhythm_rules 必须包含“急 -> 缓 -> 急”。',
               '桥段节奏合同 bridge_unit_contract 必须按 oh-story outline-rhythm / commercial-core-methods 输出 bridge_position, bridge_unit_plan, four_chapter_roles, expectation_chain_rules, climax_duration_rules, transition_rules, fatigue_repair_rules, revision_priorities, quality_checks；four_chapter_roles 必须包含“四章一桥段”和“结尾必须让主角开始装”，expectation_chain_rules 必须包含“高潮中埋钩子”，transition_rules 必须包含“连续小期待”，fatigue_repair_rules 必须包含“连续 2 章没有目标推进”。',

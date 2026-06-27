@@ -21652,6 +21652,10 @@ describe('chapter pre-draft brief', () => {
     expect(brief.suspense_contract.information_order_templates.join('｜')).toContain('意外剧情')
     expect(brief.suspense_contract.suspense_strength).toContain('中悬念')
     expect(brief.suspense_contract.expectation_layers.join('｜')).toContain('两长一短')
+    expect(brief.suspense_contract.multi_line_suspense_rules.join('｜')).toContain('任何时刻至少两条悬念线运行')
+    expect(brief.suspense_contract.reader_preknowledge_rules.join('｜')).toContain('读者知道但主角不知道')
+    expect(brief.suspense_contract.information_gap_rules.join('｜')).toContain('读者知道')
+    expect(brief.suspense_contract.trump_card_preposition_rules.join('｜')).toContain('底牌 + 即将发生的冲突')
     expect(brief.suspense_contract.foreshadowing_boundary_rules.join('｜')).toContain('谜语人是故意不说明')
     expect(brief.suspense_contract.foreshadowing_boundary_rules.join('｜')).toContain('信息延迟超过3章')
     expect(brief.suspense_contract.shock_layers.join('｜')).toContain('深度震惊')
@@ -21660,6 +21664,9 @@ describe('chapter pre-draft brief', () => {
     expect(prompt).toContain('执行 chapter_target.suspense_contract')
     expect(prompt).toContain('四种悬念信息顺序模板')
     expect(prompt).toContain('悬念强度5级')
+    expect(prompt).toContain('读者预知法')
+    expect(prompt).toContain('底牌前置法')
+    expect(prompt).toContain('多线悬念')
     expect(prompt).toContain('伏笔不是谜语人')
     expect(prompt).toContain('信息延迟超过3章')
     expect(prompt).toContain('suspense_checks')
@@ -21718,7 +21725,44 @@ describe('chapter pre-draft brief', () => {
     expect(brief.suspense_contract.suspense_cycle.join('｜')).toContain('假提示')
     expect(brief.suspense_contract.suspense_cycle.join('｜')).toContain('第二行字')
     expect(brief.suspense_contract.expectation_layers.join('｜')).toContain('两长一短')
+    expect(brief.suspense_contract.multi_line_suspense_rules.join('｜')).toContain('短弧2-3章')
+    expect(brief.suspense_contract.reader_preknowledge_rules.join('｜')).toContain('读者知道但主角不知道')
+    expect(brief.suspense_contract.information_gap_rules.join('｜')).toContain('信息差抹平时')
+    expect(brief.suspense_contract.trump_card_preposition_rules.join('｜')).toContain('先展示主角底牌')
     expect(brief.suspense_contract.shock_layers.join('｜')).toContain('深度震惊')
+  })
+
+  test('preserves explicit suspense information-gap rules from camelCase contract', () => {
+    const project = {
+      title: '午夜规则簿',
+      genre: '规则怪谈',
+      synopsis: '读者提前知道广播倒计时，主角还不知道缺页和钟声有关。',
+    }
+    const contextPackage = {
+      chapter_target: {
+        chapter_no: 8,
+        title: '钟声前夜',
+        summary: '主角追查广播倒计时。',
+        conflict: '学生会要求立刻交出规则簿。',
+        ending_hook: '旧钟背面出现下一次倒计时。',
+        suspenseContract: {
+          source: 'manual_camel_case',
+          informationGapRules: ['读者知道旧钟是底牌，但学生会不知道。'],
+          readerPreknowledgeRules: ['读者知道但主角不知道：零点会锁门。'],
+          trumpCardPrepositionRules: ['底牌 + 即将发生的冲突：先展示旧钟裂纹，再安排学生会逼交规则簿。'],
+          multiLineSuspenseRules: ['短弧2-3章，中弧5-8章，任何时刻至少两条悬念线运行。'],
+        },
+      },
+    }
+
+    const brief = buildChapterPreDraftBrief(project, contextPackage)
+
+    expect(brief.suspense_contract.source).toBe('manual_camel_case')
+    expect(brief.suspense_contract.information_gap_rules).toEqual(['读者知道旧钟是底牌，但学生会不知道。'])
+    expect(brief.suspense_contract.reader_preknowledge_rules).toEqual(['读者知道但主角不知道：零点会锁门。'])
+    expect(brief.suspense_contract.trump_card_preposition_rules).toEqual(['底牌 + 即将发生的冲突：先展示旧钟裂纹，再安排学生会逼交规则簿。'])
+    expect(brief.suspense_contract.multi_line_suspense_rules).toEqual(['短弧2-3章，中弧5-8章，任何时刻至少两条悬念线运行。'])
+    expect(brief.suspense_contract.quality_checks.join('｜')).toContain('读者预知法')
   })
 
   test('adds an oh-story reversal design contract to pre-draft brief and prose prompt', () => {
@@ -49584,6 +49628,10 @@ describe('chapter context word target source guards', () => {
     expect(repairBlock).toContain('段落级钩子合同')
     expect(repairBlock).toContain('开篇合同')
     expect(repairBlock).toContain('悬念合同')
+    expect(repairBlock).toContain('reader_preknowledge_rules')
+    expect(repairBlock).toContain('trump_card_preposition_rules')
+    expect(repairBlock).toContain('读者预知法')
+    expect(repairBlock).toContain('底牌前置法')
     expect(repairBlock).toContain('反转合同')
   })
 
@@ -54186,10 +54234,16 @@ describe('chapter context word target source guards', () => {
     expect(reviewPrompt).toContain('悬念强度5级')
     expect(reviewPrompt).toContain('期待链')
     expect(reviewPrompt).toContain('至少两条期待线')
+    expect(reviewPrompt).toContain('读者预知法')
+    expect(reviewPrompt).toContain('底牌前置法')
+    expect(reviewPrompt).toContain('多线悬念')
     expect(reviewPrompt).toContain('伏笔不是谜语人')
     expect(reviewPrompt).toContain('信息延迟超过3章')
     expect(revisionPrompt).toContain('suspense_checks')
     expect(revisionPrompt).toContain('悬念编排')
+    expect(revisionPrompt).toContain('信息差运用')
+    expect(revisionPrompt).toContain('读者预知法')
+    expect(revisionPrompt).toContain('底牌前置法')
     expect(revisionPrompt).toContain('伏笔不是谜语人')
     expect(shouldReviseBlock).toContain('suspense_checks')
     expect(reviewNormalizeBlock).toContain('suspense_checks')
