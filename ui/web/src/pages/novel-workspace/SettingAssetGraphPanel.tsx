@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Empty, List, Segmented, Select, Space, Spin, Tag, Typography } from 'antd'
-import { BranchesOutlined, ReloadOutlined, WarningOutlined } from '@ant-design/icons'
+import { Alert, Button, Checkbox, Empty, List, message, Modal, Segmented, Select, Space, Spin, Tag, Tooltip, Typography } from 'antd'
+import { BranchesOutlined, EyeInvisibleOutlined, EyeOutlined, FullscreenOutlined, ReloadOutlined, WarningOutlined } from '@ant-design/icons'
 import ReactFlow, {
   Background,
   Controls,
@@ -84,6 +84,19 @@ type AssetNodeData = {
 }
 
 type GraphMode = 'all' | 'character' | 'storyline' | 'risk'
+
+type RelationshipRepairPatch = {
+  source_id: number
+  source_name: string
+  source_type: string
+  target_id: number
+  target_name: string
+  target_type: string
+  patch_type: string
+  relation_type: string
+  reason: string
+  confidence: number
+}
 
 const EMPTY_GRAPH: SettingRelationshipGraph = {
   nodes: [],
@@ -202,6 +215,29 @@ function displayChapterNo(value: any) {
   return number > 0 ? `第${number}章` : '未记录'
 }
 
+function toggleDetailLabel(detailCollapsed: boolean) {
+  return detailCollapsed ? '显示详情' : '隐藏详情'
+}
+
+function repairPatchKey(patch: RelationshipRepairPatch) {
+  return `${patch.source_id}-${patch.target_id}-${patch.patch_type}`
+}
+
+function patchTypeLabel(type: string) {
+  const labels: Record<string, string> = {
+    related_entity_ids: '显式关联',
+    state_owner: '补拥有者',
+    state_abilities: '补能力',
+    state_realm: '补境界',
+    state_faction: '补势力',
+    state_relationships: '补人物关系',
+    payload_related_characters: '挂角色',
+    payload_related_factions: '挂势力',
+    payload_related_foreshadowing: '挂伏笔',
+  }
+  return labels[type] || type
+}
+
 function filterGraphByMode(graph: SettingRelationshipGraph, graphMode: GraphMode): SettingRelationshipGraph {
   if (graphMode === 'all') return graph
   const seedIds = new Set<string>()
@@ -303,12 +339,20 @@ function DetailRow({ label, value }: { label: string; value: any }) {
   )
 }
 
-export function SettingAssetGraphPanel({ projectId }: { projectId: number }) {
+export function SettingAssetGraphPanel({ projectId, selectedModelId }: { projectId: number; selectedModelId?: number }) {
   const [graph, setGraph] = useState<SettingRelationshipGraph>(EMPTY_GRAPH)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [selectedNodeId, setSelectedNodeId] = useState<string>('')
   const [graphMode, setGraphMode] = useState<GraphMode>('all')
+  const [graphExpandedOpen, setGraphExpandedOpen] = useState(false)
+  const [graphDetailCollapsed, setGraphDetailCollapsed] = useState(false)
+  const [modalGraphDetailCollapsed, setModalGraphDetailCollapsed] = useState(false)
+  const [repairModalOpen, setRepairModalOpen] = useState(false)
+  const [repairLoading, setRepairLoading] = useState(false)
+  const [repairApplying, setRepairApplying] = useState(false)
+  const [repairPatches, setRepairPatches] = useState<RelationshipRepairPatch[]>([])
+  const [selectedRepairPatchKeys, setSelectedRepairPatchKeys] = useState<string[]>([])
   const [nodes, setNodes, onNodesChange] = useNodesState<AssetNodeData>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
 
@@ -366,6 +410,176 @@ export function SettingAssetGraphPanel({ projectId }: { projectId: number }) {
     if (flowNodes.length === 0) setSelectedNodeId('')
   }, [flowNodes, flowEdges, selectedNodeId, setEdges, setNodes])
 
+  const suggestRelationshipRepair = async () => {
+    if (!selectedModelId) return message.warning('请先选择模型')
+    setRepairLoading(true)
+    try {
+      const res = await apiClient.post(`/novel/projects/${projectId}/settings/relationship-repair/suggest`, {
+        model_id: selectedModelId,
+      })
+      const patches = Array.isArray(res.data?.patches) ? res.data.patches : []
+      setRepairPatches(patches)
+      const preferredKeys = patches
+        .filter((patch: RelationshipRepairPatch) => Number(patch.confidence || 0) >= 0.7)
+        .map(repairPatchKey)
+      setSelectedRepairPatchKeys(preferredKeys.length ? preferredKeys : patches.map(repairPatchKey))
+      setRepairModalOpen(true)
+      message.success(`模型建议 ${patches.length} 条关系补丁`)
+    } catch (err: any) {
+      message.error(err?.response?.data?.error || err?.message || '模型挂钩孤立资产失败')
+    } finally {
+      setRepairLoading(false)
+    }
+  }
+
+  const applySelectedRelationshipPatches = async () => {
+    const patches = repairPatches.filter(patch => selectedRepairPatchKeys.includes(repairPatchKey(patch)))
+    if (patches.length === 0) return message.warning('请先选择要应用的关系补丁')
+    setRepairApplying(true)
+    try {
+      const res = await apiClient.post(`/novel/projects/${projectId}/settings/relationship-repair/apply`, {
+        patches,
+      })
+      message.success(`已应用 ${res.data?.total || 0} 条关系补丁`)
+      setRepairModalOpen(false)
+      setRepairPatches([])
+      setSelectedRepairPatchKeys([])
+      await loadGraph()
+    } catch (err: any) {
+      message.error(err?.response?.data?.error || err?.message || '应用关系补丁失败')
+    } finally {
+      setRepairApplying(false)
+    }
+  }
+
+  const renderGraphCanvas = (expanded = false) => (
+    <div className={`setting-asset-graph-canvas ${expanded ? 'setting-asset-graph-modal-canvas' : ''}`}>
+      <Spin spinning={loading}>
+        {nodes.length === 0 ? (
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无设定资产关系" />
+        ) : (
+          <ReactFlowProvider>
+            <ReactFlow
+              nodes={nodes}
+              edges={edges}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              onNodeClick={(_, node) => setSelectedNodeId(node.id)}
+              fitView
+              nodesDraggable
+              nodesConnectable={false}
+              elementsSelectable
+              minZoom={0.25}
+              maxZoom={1.6}
+            >
+              <MiniMap pannable zoomable nodeStrokeWidth={2} />
+              <Controls />
+              <Background gap={18} color="#e5e7eb" />
+            </ReactFlow>
+          </ReactFlowProvider>
+        )}
+      </Spin>
+    </div>
+  )
+
+  const renderGraphDetail = (expanded = false) => (
+    <aside className={`setting-asset-graph-detail ${expanded ? 'setting-asset-graph-modal-detail' : ''}`}>
+      {selectedNode ? (
+        <>
+          <div className="setting-asset-graph-detail-title">
+            <Text strong>{selectedNode.name}</Text>
+            <Tag>{typeLabel(selectedNode.kind === 'chapter' ? 'chapter' : selectedNode.entity_type)}</Tag>
+          </div>
+          {selectedNode.summary ? <Text type="secondary">{selectedNode.summary}</Text> : null}
+          <div className="setting-asset-graph-detail-grid">
+            <DetailRow label="年龄" value={selectedNode.metadata?.age} />
+            <DetailRow label="境界" value={selectedNode.metadata?.realm} />
+            <DetailRow label="能力" value={selectedNode.metadata?.abilities} />
+            <DetailRow label="功法" value={selectedNode.metadata?.techniques} />
+            <DetailRow label="势力" value={selectedNode.metadata?.faction} />
+            <DetailRow label="剧情线" value={storylineRelations} />
+            <DetailRow label="开始章节" value={displayChapterNo(selectedNode.metadata?.first_chapter_no)} />
+            <DetailRow label="状态" value={selectedNode.metadata?.status} />
+          </div>
+          <div className="setting-asset-graph-relations">
+            <Text strong>相邻关系</Text>
+            {connectedEdges.length === 0 ? (
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无相邻关系" />
+            ) : (
+              <List
+                size="small"
+                dataSource={connectedEdges}
+                renderItem={edge => {
+                  const related = findRelatedNode(graph, edge.source === selectedNode.id ? edge.target : edge.source)
+                  return (
+                    <List.Item>
+                      <Space size={6} wrap>
+                        <Tag color={edge.confidence === 'usage' ? 'blue' : edge.confidence === 'explicit' ? 'cyan' : 'default'}>{edge.label}</Tag>
+                        <Text>{related?.name || '未知资产'}</Text>
+                        <Text type="secondary">开始章节 {displayChapterNo(edge.start_chapter_no)}</Text>
+                        {edge.status ? <Text type="secondary">关系状态 {edge.status}</Text> : null}
+                        {edge.evidence ? <Text type="secondary">证据 {edge.evidence}</Text> : null}
+                      </Space>
+                    </List.Item>
+                  )
+                }}
+              />
+            )}
+          </div>
+          <div className="setting-asset-graph-timeline">
+            <Text strong>状态变化</Text>
+            {selectedStateChanges.length === 0 ? (
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无状态变化记录" />
+            ) : (
+              <List
+                size="small"
+                dataSource={selectedStateChanges}
+                renderItem={({ edge, change }) => {
+                  const related = findRelatedNode(graph, edge.source === selectedNode.id ? edge.target : edge.source)
+                  return (
+                    <List.Item>
+                      <Space size={6} direction="vertical" className="setting-asset-graph-change-item">
+                        <Space size={6} wrap>
+                          <Tag color="blue">{displayChapterNo(change.chapter_no)}</Tag>
+                          <Text>{edge.label}</Text>
+                          <Text>{related?.name || '未知资产'}</Text>
+                          {change.usage_type ? <Text type="secondary">{change.usage_type}</Text> : null}
+                        </Space>
+                        <Text type="secondary">
+                          {displayValue(change.actual_state_change) || displayValue(change.expected_state_change) || change.status || change.note || '状态变化已记录'}
+                        </Text>
+                      </Space>
+                    </List.Item>
+                  )
+                }}
+              />
+            )}
+          </div>
+        </>
+      ) : (
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="选择一个资产查看详情" />
+      )}
+    </aside>
+  )
+
+  const renderGraphWorkspace = (expanded = false, detailCollapsed = false, onToggleDetail?: () => void) => (
+    <div className="setting-asset-graph-workspace">
+      <div className="setting-asset-graph-toolbar">
+        <Button
+          size="small"
+          icon={detailCollapsed ? <EyeOutlined /> : <EyeInvisibleOutlined />}
+          onClick={onToggleDetail}
+        >
+          {toggleDetailLabel(detailCollapsed)}
+        </Button>
+      </div>
+      <div className={`setting-asset-graph-body ${expanded ? 'setting-asset-graph-modal-body' : ''} ${detailCollapsed ? 'is-detail-collapsed' : ''}`}>
+        {renderGraphCanvas(expanded)}
+        {!detailCollapsed && renderGraphDetail(expanded)}
+      </div>
+    </div>
+  )
+
   return (
     <section className="setting-asset-graph-panel">
       <div className="setting-asset-graph-header">
@@ -385,6 +599,9 @@ export function SettingAssetGraphPanel({ projectId }: { projectId: number }) {
           <Tag color={graph.summary.missing_start_chapter_count ? 'gold' : 'green'}>缺开始 {graph.summary.missing_start_chapter_count}</Tag>
           <Tag color={graph.summary.timeline_conflict_count ? 'red' : 'green'}>时间冲突 {graph.summary.timeline_conflict_count}</Tag>
           <Tag color={graph.summary.owner_mismatch_count ? 'gold' : 'green'}>归属冲突 {graph.summary.owner_mismatch_count}</Tag>
+          <Tooltip title="在大窗口中查看关系图">
+            <Button size="small" icon={<FullscreenOutlined />} onClick={() => setGraphExpandedOpen(true)}>大窗口查看</Button>
+          </Tooltip>
           <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={loadGraph}>刷新</Button>
         </Space>
       </div>
@@ -414,121 +631,29 @@ export function SettingAssetGraphPanel({ projectId }: { projectId: number }) {
 
       {error ? <Alert className="setting-asset-graph-alert" type="error" showIcon message={error} /> : null}
 
-      <div className="setting-asset-graph-body">
-        <div className="setting-asset-graph-canvas">
-          <Spin spinning={loading}>
-            {nodes.length === 0 ? (
-              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无设定资产关系" />
-            ) : (
-              <ReactFlowProvider>
-                <ReactFlow
-                  nodes={nodes}
-                  edges={edges}
-                  onNodesChange={onNodesChange}
-                  onEdgesChange={onEdgesChange}
-                  onNodeClick={(_, node) => setSelectedNodeId(node.id)}
-                  fitView
-                  nodesDraggable
-                  nodesConnectable={false}
-                  elementsSelectable
-                  minZoom={0.25}
-                  maxZoom={1.6}
-                >
-                  <MiniMap pannable zoomable nodeStrokeWidth={2} />
-                  <Controls />
-                  <Background gap={18} color="#e5e7eb" />
-                </ReactFlow>
-              </ReactFlowProvider>
-            )}
-          </Spin>
-        </div>
-
-        <aside className="setting-asset-graph-detail">
-          {selectedNode ? (
-            <>
-              <div className="setting-asset-graph-detail-title">
-                <Text strong>{selectedNode.name}</Text>
-                <Tag>{typeLabel(selectedNode.kind === 'chapter' ? 'chapter' : selectedNode.entity_type)}</Tag>
-              </div>
-              {selectedNode.summary ? <Text type="secondary">{selectedNode.summary}</Text> : null}
-              <div className="setting-asset-graph-detail-grid">
-                <DetailRow label="年龄" value={selectedNode.metadata?.age} />
-                <DetailRow label="境界" value={selectedNode.metadata?.realm} />
-                <DetailRow label="能力" value={selectedNode.metadata?.abilities} />
-                <DetailRow label="功法" value={selectedNode.metadata?.techniques} />
-                <DetailRow label="势力" value={selectedNode.metadata?.faction} />
-                <DetailRow label="剧情线" value={storylineRelations} />
-                <DetailRow label="开始章节" value={displayChapterNo(selectedNode.metadata?.first_chapter_no)} />
-                <DetailRow label="状态" value={selectedNode.metadata?.status} />
-              </div>
-              <div className="setting-asset-graph-relations">
-                <Text strong>相邻关系</Text>
-                {connectedEdges.length === 0 ? (
-                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无相邻关系" />
-                ) : (
-                  <List
-                    size="small"
-                    dataSource={connectedEdges}
-                    renderItem={edge => {
-                      const related = findRelatedNode(graph, edge.source === selectedNode.id ? edge.target : edge.source)
-                      return (
-                        <List.Item>
-                          <Space size={6} wrap>
-                            <Tag color={edge.confidence === 'usage' ? 'blue' : edge.confidence === 'explicit' ? 'cyan' : 'default'}>{edge.label}</Tag>
-                            <Text>{related?.name || '未知资产'}</Text>
-                            <Text type="secondary">开始章节 {displayChapterNo(edge.start_chapter_no)}</Text>
-                            {edge.status ? <Text type="secondary">关系状态 {edge.status}</Text> : null}
-                            {edge.evidence ? <Text type="secondary">证据 {edge.evidence}</Text> : null}
-                          </Space>
-                        </List.Item>
-                      )
-                    }}
-                  />
-                )}
-              </div>
-              <div className="setting-asset-graph-timeline">
-                <Text strong>状态变化</Text>
-                {selectedStateChanges.length === 0 ? (
-                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无状态变化记录" />
-                ) : (
-                  <List
-                    size="small"
-                    dataSource={selectedStateChanges}
-                    renderItem={({ edge, change }) => {
-                      const related = findRelatedNode(graph, edge.source === selectedNode.id ? edge.target : edge.source)
-                      return (
-                        <List.Item>
-                          <Space size={6} direction="vertical" className="setting-asset-graph-change-item">
-                            <Space size={6} wrap>
-                              <Tag color="blue">{displayChapterNo(change.chapter_no)}</Tag>
-                              <Text>{edge.label}</Text>
-                              <Text>{related?.name || '未知资产'}</Text>
-                              {change.usage_type ? <Text type="secondary">{change.usage_type}</Text> : null}
-                            </Space>
-                            <Text type="secondary">
-                              {displayValue(change.actual_state_change) || displayValue(change.expected_state_change) || change.status || change.note || '状态变化已记录'}
-                            </Text>
-                          </Space>
-                        </List.Item>
-                      )
-                    }}
-                  />
-                )}
-              </div>
-            </>
-          ) : (
-            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="选择一个资产查看详情" />
-          )}
-        </aside>
-      </div>
+      {renderGraphWorkspace(false, graphDetailCollapsed, () => setGraphDetailCollapsed(value => !value))}
 
       <div className="setting-asset-graph-diagnostics">
-        <Space size={8} align="center">
-          <WarningOutlined />
-          <Text strong>关系诊断</Text>
-          <Tag color="blue">合理性</Tag>
-          <Tag color={graph.diagnostics.length ? 'gold' : 'green'}>{graph.diagnostics.length}</Tag>
-        </Space>
+        <div className="setting-asset-graph-diagnostics-header">
+          <Space size={8} align="center" wrap>
+            <WarningOutlined />
+            <Text strong>关系诊断</Text>
+            <Tag color="blue">合理性</Tag>
+            <Tag color={graph.diagnostics.length ? 'gold' : 'green'}>{graph.diagnostics.length}</Tag>
+          </Space>
+          <Tooltip title={!selectedModelId ? '请先选择模型' : graph.summary.isolated_key_asset_count ? '让模型生成可审核的资产关系补丁' : '当前没有孤立资产'}>
+            <Button
+              size="small"
+              type="primary"
+              ghost
+              loading={repairLoading}
+              disabled={!selectedModelId || !graph.summary.isolated_key_asset_count}
+              onClick={suggestRelationshipRepair}
+            >
+              模型挂钩孤立资产
+            </Button>
+          </Tooltip>
+        </div>
         {graph.diagnostics.length === 0 ? (
           <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无关系诊断问题" />
         ) : (
@@ -549,6 +674,87 @@ export function SettingAssetGraphPanel({ projectId }: { projectId: number }) {
           />
         )}
       </div>
+
+      <Modal
+        className="setting-asset-graph-repair-modal"
+        title="关系补丁确认"
+        open={repairModalOpen}
+        width={860}
+        okText="应用已选补丁"
+        cancelText="取消"
+        okButtonProps={{ loading: repairApplying, disabled: selectedRepairPatchKeys.length === 0 }}
+        onOk={applySelectedRelationshipPatches}
+        onCancel={() => setRepairModalOpen(false)}
+      >
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Alert
+            type="info"
+            showIcon
+            message="模型只生成候选补丁，应用后才会写入资产字段。"
+            description="补丁会写入 related_entity_ids、state_json 或 payload_json，关系图刷新后才会出现新边。"
+          />
+          <Space size={8} wrap>
+            <Checkbox
+              checked={repairPatches.length > 0 && selectedRepairPatchKeys.length === repairPatches.length}
+              indeterminate={selectedRepairPatchKeys.length > 0 && selectedRepairPatchKeys.length < repairPatches.length}
+              onChange={event => setSelectedRepairPatchKeys(event.target.checked ? repairPatches.map(repairPatchKey) : [])}
+            >
+              全选
+            </Checkbox>
+            <Tag color="blue" bordered={false}>建议 {repairPatches.length}</Tag>
+            <Tag color="green" bordered={false}>已选 {selectedRepairPatchKeys.length}</Tag>
+          </Space>
+          {repairPatches.length === 0 ? (
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无可应用的关系补丁" />
+          ) : (
+            <List
+              size="small"
+              dataSource={repairPatches}
+              renderItem={patch => {
+                const key = repairPatchKey(patch)
+                const checked = selectedRepairPatchKeys.includes(key)
+                return (
+                  <List.Item>
+                    <Checkbox
+                      checked={checked}
+                      onChange={event => {
+                        setSelectedRepairPatchKeys(prev => {
+                          if (event.target.checked) return prev.includes(key) ? prev : [...prev, key]
+                          return prev.filter(item => item !== key)
+                        })
+                      }}
+                    >
+                      <Space direction="vertical" size={4} className="setting-asset-graph-repair-item">
+                        <Space size={6} wrap>
+                          <Tag>{patchTypeLabel(patch.patch_type)}</Tag>
+                          <Text strong>{patch.source_name}</Text>
+                          <Text type="secondary">→</Text>
+                          <Text strong>{patch.target_name}</Text>
+                          <Tag color={Number(patch.confidence || 0) >= 0.8 ? 'green' : Number(patch.confidence || 0) >= 0.6 ? 'gold' : 'default'} bordered={false}>
+                            置信 {Math.round(Number(patch.confidence || 0) * 100)}%
+                          </Tag>
+                        </Space>
+                        <Text type="secondary">{patch.reason}</Text>
+                      </Space>
+                    </Checkbox>
+                  </List.Item>
+                )
+              }}
+            />
+          )}
+        </Space>
+      </Modal>
+
+      <Modal
+        className="setting-asset-graph-modal"
+        title="资产关系图谱"
+        open={graphExpandedOpen}
+        width="min(1280px, 94vw)"
+        footer={null}
+        onCancel={() => setGraphExpandedOpen(false)}
+      >
+        {renderGraphWorkspace(true, modalGraphDetailCollapsed, () => setModalGraphDetailCollapsed(value => !value))}
+      </Modal>
     </section>
   )
 }

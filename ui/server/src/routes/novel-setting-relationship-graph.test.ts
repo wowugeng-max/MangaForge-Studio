@@ -63,6 +63,23 @@ describe('buildSettingRelationshipGraph', () => {
     }))
   })
 
+  test('links foreshadowing assets referenced by storyline payloads', () => {
+    const graph = buildSettingRelationshipGraph({
+      settings: [
+        { id: 1, project_id: 7, entity_type: 'foreshadowing_arc', name: '断臂神纹回收线', payload_json: { related_foreshadowing: ['断臂神纹'] } },
+        { id: 2, project_id: 7, entity_type: 'foreshadowing', name: '断臂神纹' },
+      ],
+    })
+
+    expect(graph.edges).toContainEqual(expect.objectContaining({
+      source: 'setting-2',
+      target: 'setting-1',
+      relation_type: 'in_storyline',
+      evidence: 'payload_json.related_foreshadowing',
+    }))
+    expect(graph.summary.isolated_key_asset_count).toBe(0)
+  })
+
   test('diagnoses missing owners, dangling ids, and isolated key assets', () => {
     const graph = buildSettingRelationshipGraph({
       settings: [

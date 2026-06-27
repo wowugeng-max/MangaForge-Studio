@@ -13,6 +13,7 @@ import {
   HistoryOutlined,
   PlayCircleOutlined,
   RetweetOutlined,
+  RocketOutlined,
   SafetyOutlined,
   TeamOutlined,
   ToolOutlined,
@@ -97,6 +98,12 @@ function compactPlanValue(value: string, fallback: string) {
   return value && value.trim() ? value : fallback
 }
 
+function continuityStageLabel(stage: string) {
+  if (stage === 'opening') return '开篇'
+  if (stage === 'ending') return '章末'
+  return '中段'
+}
+
 const wrapTextStyle: React.CSSProperties = {
   display: 'block',
   minWidth: 0,
@@ -136,6 +143,76 @@ function compactNumber(value: number) {
   return Number(value || 0).toLocaleString('zh-CN')
 }
 
+function workflowStageColor(status: string) {
+  if (status === 'ready') return 'green'
+  if (status === 'blocked') return 'red'
+  if (status === 'needs_action') return 'gold'
+  return 'default'
+}
+
+function workflowStageStatusLabel(status: string) {
+  if (status === 'ready') return '已就绪'
+  if (status === 'blocked') return '阻塞'
+  if (status === 'needs_action') return '待处理'
+  return '等待'
+}
+
+function LongformWorkflowStrip({
+  model,
+  loading,
+  onAction,
+}: {
+  model: WritingCockpitModel
+  loading: boolean
+  onAction: (key: WritingCockpitActionKey) => void
+}) {
+  const workflow = model.longformWorkflow
+  return (
+    <div className="writing-cockpit-workflow-strip">
+      <div className="writing-cockpit-workflow-head">
+        <Space wrap size={[6, 4]}>
+          <Tag icon={<SafetyOutlined />} color={workflowStageColor(workflow.currentStage.status)} bordered={false}>
+            当前：{workflow.currentStage.label}
+          </Tag>
+          <Tag bordered={false}>风险 {workflow.riskCount}</Tag>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            {workflow.currentStage.evidence[0] || workflow.currentStage.actionLabel}
+          </Text>
+        </Space>
+        <Button
+          size="small"
+          loading={loading}
+          icon={actionIcon(workflow.primaryAction.key, model.modelTeam.recommendedRole)}
+          onClick={() => onAction(workflow.primaryAction.key)}
+          style={{ whiteSpace: 'normal', height: 'auto', lineHeight: 1.25 }}
+        >
+          {workflow.primaryAction.label}
+        </Button>
+      </div>
+      <div className="writing-cockpit-workflow-stages">
+        {workflow.stages.map(stage => (
+          <button
+            key={stage.key}
+            type="button"
+            className={`writing-cockpit-workflow-stage writing-cockpit-workflow-stage-${stage.status}${stage.key === workflow.currentStage.key ? ' is-current' : ''}`}
+            disabled={loading}
+            onClick={() => onAction(stage.actionKey)}
+            title={stage.evidence.join('；')}
+          >
+            <span className="writing-cockpit-workflow-stage-top">
+              <span>{stage.label}</span>
+              <Tag color={workflowStageColor(stage.status)} bordered={false}>{workflowStageStatusLabel(stage.status)}</Tag>
+            </span>
+            <span className="writing-cockpit-workflow-evidence">
+              {stage.evidence.slice(0, 2).join('；')}
+            </span>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function ChapterPlanningDesk({
   model,
   loading,
@@ -153,6 +230,7 @@ function ChapterPlanningDesk({
   }, [desk.shouldAutoExpandPlanner, model.nextChapter?.id])
 
   const plan = desk.episodePlan
+  const writePreparationBrief = desk.writePreparationBrief
   const coreContract = plan.coreContract
   const readerDropRisk = plan.readerDropRisk
   const storyPressure = plan.storyPressure
@@ -161,6 +239,7 @@ function ChapterPlanningDesk({
   const pageTurnHook = plan.pageTurnHook
   const volumeClimax = plan.volumeClimax
   const deliveryRiskCarryOver = plan.deliveryRiskCarryOver
+  const qualityContinuitySceneMap = desk.qualityContinuitySceneMap || []
   const hasCoreContract = Boolean(
     coreContract.summary
     || coreContract.mustServe.length
@@ -216,11 +295,14 @@ function ChapterPlanningDesk({
     deliveryRiskCarryOver.label
     || deliveryRiskCarryOver.priorityLabel
     || deliveryRiskCarryOver.items.length
+    || deliveryRiskCarryOver.evidence.length
     || deliveryRiskCarryOver.requiredActions.length
     || deliveryRiskCarryOver.openingActions.length
     || deliveryRiskCarryOver.middleActions.length
-    || deliveryRiskCarryOver.endingActions.length,
+    || deliveryRiskCarryOver.endingActions.length
+    || deliveryRiskCarryOver.forbiddenRepeats.length,
   )
+  const hasQualityContinuitySceneMap = qualityContinuitySceneMap.length > 0
 
   return (
     <div
@@ -264,6 +346,43 @@ function ChapterPlanningDesk({
           <Row gutter={[12, 10]}>
             <Col xs={24} lg={10} style={{ minWidth: 0 }}>
               <div style={{ background: '#fafafa', borderRadius: 6, padding: 10, minWidth: 0 }}>
+                {writePreparationBrief && (
+                  <div className="writing-cockpit-write-preparation-brief" style={{ background: '#fff', border: '1px solid #edf0f5', borderRadius: 6, padding: 8, marginBottom: 10, minWidth: 0 }}>
+                    <Space direction="vertical" size={6} style={{ width: '100%', minWidth: 0 }}>
+                      <Space wrap size={[4, 4]}>
+                        <Tag color={writePreparationBrief.readinessStatus === 'ready' ? 'green' : 'gold'} bordered={false}>写前准备</Tag>
+                        <Tag bordered={false}>{writePreparationBrief.readinessStatus === 'ready' ? '已就绪' : '待确认'}</Tag>
+                        {writePreparationBrief.sourceGaps.length > 0 && (
+                          <Tag color="gold" bordered={false}>来源缺口 {writePreparationBrief.sourceGaps.length}</Tag>
+                        )}
+                        {writePreparationBrief.assetRisks.length > 0 && (
+                          <Tag color="red" bordered={false}>资产风险 {writePreparationBrief.assetRisks.length}</Tag>
+                        )}
+                        {writePreparationBrief.deliveryRiskActions.length > 0 && (
+                          <Tag color="volcano" bordered={false}>交稿动作 {writePreparationBrief.deliveryRiskActions.length}</Tag>
+                        )}
+                      </Space>
+                      {writePreparationBrief.sourceGaps.length > 0 && (
+                        <Text type="secondary" style={wrapTextStyle}>来源缺口：{writePreparationBrief.sourceGaps.slice(0, 2).join('；')}</Text>
+                      )}
+                      {writePreparationBrief.assetRisks.length > 0 && (
+                        <Text type="secondary" style={wrapTextStyle}>资产关系：{writePreparationBrief.assetRisks.slice(0, 2).join('；')}</Text>
+                      )}
+                      {writePreparationBrief.deliveryRiskActions.length > 0 && (
+                        <Text type="secondary" style={wrapTextStyle}>交稿动作：{writePreparationBrief.deliveryRiskActions.slice(0, 2).join('；')}</Text>
+                      )}
+                      {writePreparationBrief.mustConfirm.length > 0 && (
+                        <Text style={wrapTextStyle}>确认项：{writePreparationBrief.mustConfirm.slice(0, 2).join('；')}</Text>
+                      )}
+                      {writePreparationBrief.mustConfirm.length === 0 && writePreparationBrief.blueprintFocus.length > 0 && (
+                        <Text type="secondary" style={wrapTextStyle}>蓝图焦点：{writePreparationBrief.blueprintFocus.slice(0, 2).join('；')}</Text>
+                      )}
+                      {writePreparationBrief.mustConfirm.length === 0 && writePreparationBrief.readerPayoffFocus.length > 0 && (
+                        <Text type="secondary" style={wrapTextStyle}>读者回报：{writePreparationBrief.readerPayoffFocus.slice(0, 2).join('；')}</Text>
+                      )}
+                    </Space>
+                  </div>
+                )}
                 <Text strong style={{ ...wrapTextStyle, marginBottom: 6 }}>本章编剧计划</Text>
                 <Space direction="vertical" size={6} style={{ width: '100%', minWidth: 0 }}>
                   <Text strong style={wrapTextStyle}>{compactPlanValue(plan.chapterObjective, '待补章节目标')}</Text>
@@ -293,6 +412,9 @@ function ChapterPlanningDesk({
                       {deliveryRiskCarryOver.items.length > 0 && (
                         <Text type="secondary" style={wrapTextStyle}>风险：{deliveryRiskCarryOver.items.slice(0, 3).join('；')}</Text>
                       )}
+                      {deliveryRiskCarryOver.evidence.length > 0 && (
+                        <Text type="secondary" style={wrapTextStyle}>证据：{deliveryRiskCarryOver.evidence.slice(0, 2).join('；')}</Text>
+                      )}
                       {deliveryRiskCarryOver.openingActions.length > 0 && (
                         <Text type="secondary" style={wrapTextStyle}>开篇修复：{deliveryRiskCarryOver.openingActions.slice(0, 2).join('；')}</Text>
                       )}
@@ -302,9 +424,37 @@ function ChapterPlanningDesk({
                       {deliveryRiskCarryOver.endingActions.length > 0 && (
                         <Text type="secondary" style={wrapTextStyle}>章末追读：{deliveryRiskCarryOver.endingActions.slice(0, 2).join('；')}</Text>
                       )}
+                      {deliveryRiskCarryOver.forbiddenRepeats.length > 0 && (
+                        <Text type="secondary" style={wrapTextStyle}>禁用重复：{deliveryRiskCarryOver.forbiddenRepeats.slice(0, 2).join('；')}</Text>
+                      )}
                       {deliveryRiskCarryOver.requiredActions.length > 0 && (
                         <Text type="secondary" style={wrapTextStyle}>动作：{deliveryRiskCarryOver.requiredActions.slice(0, 3).join('；')}</Text>
                       )}
+                    </div>
+                  )}
+                  {hasQualityContinuitySceneMap && (
+                    <div className="writing-cockpit-quality-continuity-scenes">
+                      <Space wrap size={[4, 4]}>
+                        <Tag color="gold" bordered={false}>场景续航落点</Tag>
+                        <Tag bordered={false}>{qualityContinuitySceneMap.length} 场</Tag>
+                      </Space>
+                      <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                        {qualityContinuitySceneMap.slice(0, 4).map(item => (
+                          <div key={`quality-continuity-${item.sceneNo}-${item.title}`} style={{ minWidth: 0 }}>
+                            <Space wrap size={[4, 4]}>
+                              <Tag color={item.stage === 'opening' ? 'blue' : item.stage === 'ending' ? 'volcano' : 'cyan'} bordered={false}>
+                                {continuityStageLabel(item.stage)}
+                              </Tag>
+                              <Tag bordered={false}>场景{item.sceneNo}</Tag>
+                              <Text strong style={wrapTextStyle}>{item.title}</Text>
+                            </Space>
+                            <Text type="secondary" style={wrapTextStyle}>动作：{item.action}</Text>
+                            {item.forbiddenRepeats.length > 0 && (
+                              <Text type="secondary" style={wrapTextStyle}>禁用重复：{item.forbiddenRepeats.slice(0, 2).join('；')}</Text>
+                            )}
+                          </div>
+                        ))}
+                      </Space>
                     </div>
                   )}
                   {hasCoreContract && (
@@ -678,12 +828,14 @@ export function WritingCockpitPanel({
   loading = false,
   forceCollapsed = false,
   primaryActionOverride,
+  onOpenProductionOps,
   onAction,
 }: {
   model: WritingCockpitModel
   loading?: boolean
   forceCollapsed?: boolean
   primaryActionOverride?: WritingCockpitPrimaryActionOverride | null
+  onOpenProductionOps?: () => void
   onAction: (key: WritingCockpitActionKey) => void
 }) {
   const recommendedRole = model.modelTeam.recommendedRole
@@ -726,6 +878,11 @@ export function WritingCockpitPanel({
             </Col>
             <Col flex="none">
               <Space className="writing-cockpit-collapsed-controls" wrap size={[6, 6]} style={{ justifyContent: 'flex-end' }}>
+                {onOpenProductionOps && (
+                  <Button size="small" icon={<RocketOutlined />} onClick={onOpenProductionOps}>
+                    无人值守
+                  </Button>
+                )}
                 <Button size="small" icon={<DownOutlined />} onClick={() => setCockpitCollapsed(false)}>
                   展开写作指挥台
                 </Button>
@@ -754,9 +911,16 @@ export function WritingCockpitPanel({
               </Space>
             </Col>
             <Col flex="none">
-              <Button size="small" icon={<UpOutlined />} onClick={() => setCockpitCollapsed(true)}>
-                收起写作指挥台
-              </Button>
+              <Space wrap size={[6, 6]} style={{ justifyContent: 'flex-end' }}>
+                {onOpenProductionOps && (
+                  <Button size="small" icon={<RocketOutlined />} onClick={onOpenProductionOps}>
+                    无人值守
+                  </Button>
+                )}
+                <Button size="small" icon={<UpOutlined />} onClick={() => setCockpitCollapsed(true)}>
+                  收起写作指挥台
+                </Button>
+              </Space>
             </Col>
           </Row>
 
@@ -825,6 +989,8 @@ export function WritingCockpitPanel({
               </Button>
             </Col>
           </Row>
+
+          <LongformWorkflowStrip model={model} loading={loading} onAction={onAction} />
 
           {blockerAlert(model, loading, onAction)}
 

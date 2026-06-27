@@ -1,6 +1,6 @@
 import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Alert, Badge, Button, Card, Checkbox, Form, Input, List, message, Modal, Progress, Select, Space, Typography, Tooltip, Tag,
+  Alert, Badge, Button, Card, Checkbox, Form, Input, InputNumber, List, message, Modal, Progress, Select, Space, Typography, Tooltip, Tag,
 } from 'antd'
 import {
   ArrowLeftOutlined,
@@ -66,6 +66,8 @@ import {
 import { buildSerialPipelineViewModel } from './novel-workspace/serialPipelineModel'
 import './NovelProjectWorkspace.css'
 
+type AnyRecord = Record<string, any>
+
 const { Title, Text, Paragraph } = Typography
 
 const AgentExecutionModal = lazy(() => import('./novel-workspace/AgentExecutionModal').then(module => ({ default: module.AgentExecutionModal })))
@@ -113,6 +115,16 @@ function safeBatchRecoveryFocusFromPayload(payload: any): SafeBatchRecoveryFocus
     taskStatuses: statuses.map((item: any) => String(item || '').trim()).filter(Boolean),
     taskCenterFilterLabel: String(focus?.taskCenterFilterLabel || focus?.task_center_filter_label || layerLabel).trim(),
   }
+}
+
+function formatRunResumeErrorMessage(error: any) {
+  const payload = error?.response?.data || {}
+  if (payload?.error_code === 'APPROVAL_BLOCKER_REQUIRES_REPAIR') {
+    const chapterLabel = payload.chapter_no ? `第${payload.chapter_no}章` : '当前章节'
+    const actions = Array.isArray(payload.recovery_plan?.actions) ? payload.recovery_plan.actions.filter(Boolean).slice(0, 2).join('；') : ''
+    return `${chapterLabel}仍有入库阻断，不能直接继续无人值守。${actions || '请先修复阻断并重新运行正文质检和入库门禁。'}`
+  }
+  return payload?.error || error?.message || '任务继续失败'
 }
 
 type EditorReportForChapterOptions = {
@@ -186,6 +198,7 @@ export default function NovelProjectWorkspace() {
   const [releaseRepairExecutingId, setReleaseRepairExecutingId] = useState<number | null>(null)
   const [commercialToolLoading, setCommercialToolLoading] = useState('')
   const [productionMode, setProductionMode] = useState('draft_review_revise_store')
+  const [unattendedTargetChapter, setUnattendedTargetChapter] = useState(10)
   const [chapterWordTargetMode, setChapterWordTargetMode] = useState<ChapterWordTargetMode>('standard')
   const [chapterTargetWordCount, setChapterTargetWordCount] = useState(3000)
   const [activeChapterDiagnostics, setActiveChapterDiagnostics] = useState<ChapterOwnedData | null>(null)
@@ -262,10 +275,12 @@ export default function NovelProjectWorkspace() {
   const [rightPanelTab, setRightPanelTab] = useState('worldbuilding')
   const [workspaceArea, setWorkspaceArea] = useState<WorkspaceArea>('autoCreation')
   const [focusWritingMode, setFocusWritingMode] = useState(false)
+  const [directoryCollapsed, setDirectoryCollapsed] = useState(false)
   const [storyAssetsFocusDiscoveredToken, setStoryAssetsFocusDiscoveredToken] = useState(0)
   const [autoDirectorActionLoadingKey, setAutoDirectorActionLoadingKey] = useState('')
 
   const isWritingFocusMode = focusWritingMode && workspaceArea === 'chapterWriting'
+  const directoryShellClassName = directoryCollapsed ? 'novel-workspace-directory-shell is-collapsed' : 'novel-workspace-directory-shell'
 
   useEffect(() => {
     if (workspaceArea !== 'chapterWriting') setFocusWritingMode(false)
@@ -1476,7 +1491,7 @@ export default function NovelProjectWorkspace() {
     try {
       const res = await apiClient.post(`/novel/chapters/${activeChapter.id}/pre-draft-brief/confirm`, {
         project_id: projectId,
-        brief: activeChapter.raw_payload?.pre_draft_brief,
+        brief: activeChapter.raw_payload?.pre_draft_brief || activeChapter.raw_payload?.preDraftBrief,
       })
       if (res.data?.chapter) {
         setChapters(prev => prev.map(c => c.id === res.data.chapter.id ? res.data.chapter : c))
@@ -1485,6 +1500,27 @@ export default function NovelProjectWorkspace() {
       message.success('章节开写任务书已确认')
     } catch (error: any) {
       message.error(error?.response?.data?.error || error?.message || '任务书确认失败')
+    } finally {
+      setCommercialToolLoading('')
+    }
+  }
+
+  const savePreDraftBriefForActiveChapter = async (brief: any) => {
+    if (!activeChapter) return message.warning('请先选择章节')
+    if (!await flushPendingSave()) return
+    setCommercialToolLoading('preDraftBrief')
+    try {
+      const res = await apiClient.put(`/novel/chapters/${activeChapter.id}/pre-draft-brief`, {
+        project_id: projectId,
+        brief,
+      })
+      if (res.data?.chapter) {
+        setChapters(prev => prev.map(c => c.id === res.data.chapter.id ? res.data.chapter : c))
+      }
+      await loadProjectModules()
+      message.success('章节开写任务书已保存')
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '任务书保存失败')
     } finally {
       setCommercialToolLoading('')
     }
@@ -1974,6 +2010,47 @@ export default function NovelProjectWorkspace() {
       } else {
         message.error(payload?.error || error?.message || '从未来100章骨架入队失败')
       }
+    } finally {
+      setCommercialToolLoading('')
+    }
+  }
+
+  const startUnattendedWritingGoal = async () => {
+    if (!selectedProject) return
+    if (!selectedModelId) return message.warning('请先选择模型')
+    const startChapter = Number(activeChapter?.chapter_no || sortedChapters.find((chapter: any) => !chapter.chapter_text)?.chapter_no || 1)
+    if (!Number(unattendedTargetChapter || 0) || Number(unattendedTargetChapter) < startChapter) {
+      return message.warning(`目标章号需要不小于第${startChapter}章`)
+    }
+    setCommercialToolLoading('unattendedGoal')
+    try {
+      const res = await apiClient.post(`/novel/projects/${projectId}/chapter-groups/start-unattended`, {
+        model_id: selectedModelId,
+        start_chapter: startChapter,
+        target_chapter: unattendedTargetChapter,
+        create_missing: true,
+        sync_chapter_fields: true,
+        allow_incomplete: false,
+        force_scene_cards: true,
+        ...chapterWordTargetPayload(),
+      })
+      await apiClient.post(`/novel/projects/${projectId}/run-queue/start-worker`, {
+        model_id: selectedModelId,
+        max_runs: Math.max(1, Number(unattendedTargetChapter || 0) - startChapter + 2),
+        max_chapters_per_run: 1,
+        idle_wait_ms: 300000,
+        idle_poll_ms: 1000,
+        production_mode: 'full_auto',
+        allow_incomplete: false,
+        force_scene_cards: true,
+        ...chapterWordTargetPayload(),
+      })
+      await loadProjectModules()
+      await loadProductionTasks()
+      setTaskCenterOpen(true)
+      message.success(`无人值守已启动：目标第${res.data?.summary?.target_chapter || unattendedTargetChapter}章，入队 ${res.data?.summary?.queued || 0} 章`)
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '无人值守启动失败')
     } finally {
       setCommercialToolLoading('')
     }
@@ -2848,8 +2925,13 @@ export default function NovelProjectWorkspace() {
     try {
       const contextPackage = activeContextPackageData?.context_package || activeContextPackageData || null
       const nextStyleSampleStrategy = activeChapter?.raw_payload?.pre_draft_brief?.style_sample_strategy
+        || activeChapter?.raw_payload?.preDraftBrief?.style_sample_strategy
+        || activeChapter?.raw_payload?.preDraftBrief?.styleSampleStrategy
         || contextPackage?.pre_draft_brief?.style_sample_strategy
+        || contextPackage?.preDraftBrief?.style_sample_strategy
+        || contextPackage?.preDraftBrief?.styleSampleStrategy
         || contextPackage?.chapter_target?.style_sample_strategy
+        || contextPackage?.chapter_target?.styleSampleStrategy
         || null
       const reviewRes = await apiClient.post(`/novel/projects/${projectId}/writing-bible/style-sample-adjustments/post-apply-review`, {
         chapter_id: activeChapter?.id || null,
@@ -3962,10 +4044,10 @@ export default function NovelProjectWorkspace() {
     }
   }
 
-  const createDeliveryRiskRepairQueue = async () => {
+  const createDeliveryRiskRepairQueue = async (payload?: AnyRecord) => {
     setAutoDirectorActionLoadingKey('create_delivery_risk_repair')
     try {
-      const res = await apiClient.post(`/novel/projects/${projectId}/review-annotations/repair-queue`)
+      const res = await apiClient.post(`/novel/projects/${projectId}/review-annotations/repair-queue`, payload || {})
       const tasks = res.data?.tasks || []
       await loadProjectModules()
       await loadProductionTasks()
@@ -5571,7 +5653,7 @@ export default function NovelProjectWorkspace() {
       create_first30_repair: () => { void createFirst30RetentionRepairQueue() },
       run_reader_trial_review: () => { void runReaderTrialReview() },
       create_reader_trial_repair: () => { void createReaderTrialRepairQueue() },
-      create_delivery_risk_repair: () => { void createDeliveryRiskRepairQueue() },
+      create_delivery_risk_repair: () => { void createDeliveryRiskRepairQueue(options?.intent?.payload) },
       record_storyline_diff_decision: () => { void recordStorylineDiffDecision(options?.intent) },
       create_storyline_decision_tasks: () => { void createStorylineDecisionTasks() },
       open_task_center: () => setTaskCenterOpen(true),
@@ -5673,6 +5755,9 @@ export default function NovelProjectWorkspace() {
         break
       case 'open_task_center':
         setTaskCenterOpen(true)
+        break
+      case 'open_story_assets':
+        openStoryAssetsWorkspace()
         break
       case 'refresh_current_quality':
         setWorkspaceArea('chapterWriting')
@@ -5834,7 +5919,7 @@ export default function NovelProjectWorkspace() {
     }
 
     if (action.key === 'create_delivery_risk_repair') {
-      void createDeliveryRiskRepairQueue()
+      void createDeliveryRiskRepairQueue(action.payload)
       return
     }
 
@@ -5974,6 +6059,14 @@ export default function NovelProjectWorkspace() {
       materialRecommendations,
       sceneCardCount: activeChapterSceneCards.length,
       activeWordCount: wc(activeChapter?.chapter_text),
+      deliveryRiskCarryOverActionCount: [
+        ...(writingCockpitModel.chapterPlanningDesk.episodePlan.deliveryRiskCarryOver.requiredActions || []),
+        ...(writingCockpitModel.chapterPlanningDesk.episodePlan.deliveryRiskCarryOver.openingActions || []),
+        ...(writingCockpitModel.chapterPlanningDesk.episodePlan.deliveryRiskCarryOver.middleActions || []),
+        ...(writingCockpitModel.chapterPlanningDesk.episodePlan.deliveryRiskCarryOver.endingActions || []),
+        ...(writingCockpitModel.chapterPlanningDesk.episodePlan.deliveryRiskCarryOver.forbiddenRepeats || []),
+      ].length,
+      qualityContinuitySceneMapCount: writingCockpitModel.chapterPlanningDesk.qualityContinuitySceneMap.length,
     })
   })()
 
@@ -6092,6 +6185,7 @@ export default function NovelProjectWorkspace() {
           onGenerateSceneCards={() => generateSceneCardsForActiveChapter()}
           onBuildPreDraftBrief={() => { void buildPreDraftBriefForActiveChapter() }}
           onConfirmPreDraftBrief={() => { void confirmPreDraftBriefForActiveChapter() }}
+          onSavePreDraftBrief={(brief) => savePreDraftBriefForActiveChapter(brief)}
           onLockStyleSamples={() => { void applyStyleSampleActionForActiveChapter('lock') }}
           onReplaceStyleSamples={() => { void applyStyleSampleActionForActiveChapter('replace') }}
           onDisableStyleSamples={() => { void applyStyleSampleActionForActiveChapter('disable') }}
@@ -6147,6 +6241,12 @@ export default function NovelProjectWorkspace() {
     const groups: Record<Exclude<WorkspaceArea, 'autoCreation' | 'storyPlanning' | 'chapterWriting' | 'storyAssets'>, {
       title: string
       desc: string
+      highlightTitle?: string
+      highlightDesc?: string
+      highlightTarget?: number
+      highlightAction?: () => void
+      highlightLoading?: boolean
+      highlightDisabled?: boolean
       actions: Array<{ label: string; onClick: () => void; loading?: boolean; primary?: boolean; disabled?: boolean }>
     }> = {
       qualityRevision: {
@@ -6166,6 +6266,12 @@ export default function NovelProjectWorkspace() {
       productionOps: {
         title: '生产运营',
         desc: '管理章节群、任务队列、生产趋势、Agent 审计、模型诊断和交付导出。',
+        highlightTitle: '无人值守到目标章',
+        highlightDesc: '按写前蓝图、场景卡、正文、复检和任务中心自动推进；达标后进入下一章。',
+        highlightTarget: unattendedTargetChapter,
+        highlightAction: startUnattendedWritingGoal,
+        highlightLoading: commercialToolLoading === 'unattendedGoal',
+        highlightDisabled: !selectedModelId,
         actions: [
           { label: '章节生产台', onClick: openProductionDesk, primary: true, loading: commercialToolLoading === 'productionDesk' },
           { label: '生产看板', onClick: () => { void openProductionDashboard() }, loading: dashboardLoading },
@@ -6186,6 +6292,32 @@ export default function NovelProjectWorkspace() {
         <Card title={group.title} extra={<Button onClick={() => setWorkspaceArea('storyPlanning')}>返回故事规划</Button>}>
           <Space direction="vertical" size={16} style={{ width: '100%' }}>
             <Text type="secondary">{group.desc}</Text>
+            {group.highlightTitle && (
+              <Card size="small" title={group.highlightTitle}>
+                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                  <Text type="secondary" style={{ fontSize: 12 }}>{group.highlightDesc}</Text>
+                  <Space.Compact style={{ width: '100%' }}>
+                    <InputNumber
+                      min={1}
+                      precision={0}
+                      value={group.highlightTarget}
+                      onChange={(value) => setUnattendedTargetChapter(Number(value || 1))}
+                      style={{ width: 160 }}
+                      addonBefore="到第"
+                      addonAfter="章"
+                    />
+                    <Button
+                      type="primary"
+                      loading={group.highlightLoading}
+                      disabled={group.highlightDisabled}
+                      onClick={group.highlightAction}
+                    >
+                      启动无人值守
+                    </Button>
+                  </Space.Compact>
+                </Space>
+              </Card>
+            )}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
               {group.actions.map(action => (
                 <Button
@@ -6243,6 +6375,16 @@ export default function NovelProjectWorkspace() {
             </Button>
           ))}
         </Space>
+        <Tooltip title="进入无人值守生产入口">
+          <Button
+            className={`novel-unattended-topbar-entry ${workspaceArea === 'productionOps' ? 'is-active' : ''}`}
+            size="small"
+            icon={<RocketOutlined />}
+            onClick={() => setWorkspaceArea('productionOps')}
+          >
+            无人值守
+          </Button>
+        </Tooltip>
         <Space className="novel-workspace-topbar-meta" size={6}>
           {referenceSummary.count > 0 && (
             <Tag color="purple" bordered={false}>{referenceSummary.strengthLabel} · {referenceSummary.count} 部参考</Tag>
@@ -6296,8 +6438,10 @@ export default function NovelProjectWorkspace() {
       {/* ═══ BODY: 3-column layout ═══ */}
       <div className="novel-workspace-body" style={{ flex: 1, minHeight: 0, display: 'flex', overflow: 'hidden' }}>
 
-        <div className="novel-workspace-directory-shell" aria-hidden={isWritingFocusMode || undefined}>
+        <div className={directoryShellClassName} aria-hidden={isWritingFocusMode || undefined}>
           <ChapterDirectorySidebar
+            collapsed={directoryCollapsed}
+            onCollapsedChange={setDirectoryCollapsed}
             planningMode={workspaceArea === 'storyPlanning'}
             selectedModelId={selectedModelId}
             stepOutlineLoading={stepOutlineLoading}
@@ -6351,6 +6495,7 @@ export default function NovelProjectWorkspace() {
               loading={stepProseLoading || generatingProse || generatingSceneCards || diagnosticsLoading || contextPackageLoading || commercialToolLoading === 'storyStateSync'}
               forceCollapsed={isWritingFocusMode}
               primaryActionOverride={cockpitPrimaryActionOverride}
+              onOpenProductionOps={() => setWorkspaceArea('productionOps')}
               onAction={handleWritingCockpitAction}
             />
           </div>
@@ -6597,6 +6742,30 @@ export default function NovelProjectWorkspace() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
             <Card size="small" title="生产稳定性">
               <Space direction="vertical" style={{ width: '100%' }}>
+                <Card size="small" title="无人值守到目标章">
+                  <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                    <Text type="secondary" style={{ fontSize: 12 }}>从当前章开始自动补材料、写正文、复检，达标后进入下一章。</Text>
+                    <Space.Compact style={{ width: '100%' }}>
+                      <InputNumber
+                        min={1}
+                        precision={0}
+                        value={unattendedTargetChapter}
+                        onChange={(value) => setUnattendedTargetChapter(Number(value || 1))}
+                        style={{ width: '45%' }}
+                        addonBefore="到第"
+                        addonAfter="章"
+                      />
+                      <Button
+                        type="primary"
+                        loading={commercialToolLoading === 'unattendedGoal'}
+                        disabled={!selectedModelId}
+                        onClick={startUnattendedWritingGoal}
+                      >
+                        启动无人值守
+                      </Button>
+                    </Space.Compact>
+                  </Space>
+                </Card>
                 <Button block loading={commercialToolLoading === 'productionDesk'} onClick={openProductionDesk}>章节生产台</Button>
                 <Button block loading={commercialToolLoading === 'materialRepair'} onClick={openMaterialRepairPlan}>材料补齐计划</Button>
                 <Button block loading={commercialToolLoading === 'readyGroup'} onClick={startReadyChapterGroupGeneration}>智能章节群入队</Button>
@@ -7127,9 +7296,13 @@ export default function NovelProjectWorkspace() {
           message.success('任务已暂停')
         }}
         onResumeRun={async (run) => {
-          const res = await apiClient.post(`/novel/runs/${run.id}/resume`, { project_id: projectId })
-          await loadProjectModules()
-          message.success(res.data?.execute_endpoint ? '章节群已标记可继续，可点击执行' : res.data?.resume_endpoint ? '任务已标记可继续，请从当前章节继续生成正文' : '任务已继续')
+          try {
+            const res = await apiClient.post(`/novel/runs/${run.id}/resume`, { project_id: projectId })
+            await loadProjectModules()
+            message.success(res.data?.execute_endpoint ? '章节群已标记可继续，可点击执行' : res.data?.resume_endpoint ? '任务已标记可继续，请从当前章节继续生成正文' : '任务已继续')
+          } catch (error: any) {
+            message.error(formatRunResumeErrorMessage(error))
+          }
         }}
       />
 

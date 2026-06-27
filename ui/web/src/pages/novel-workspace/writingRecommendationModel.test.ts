@@ -53,6 +53,26 @@ describe('buildNovelWritingRecommendation', () => {
     expect(responsibility.focus).toContain('生成正文初稿')
   })
 
+  test('recommends quality-continuity scene mapping before drafting when carry-over is unmapped', () => {
+    const recommendation = buildNovelWritingRecommendation({
+      materialReady: true,
+      materialRecommendations: [],
+      sceneCardCount: 1,
+      activeWordCount: 0,
+      deliveryRiskCarryOverActionCount: 3,
+      qualityContinuitySceneMapCount: 0,
+    })
+    const responsibility = buildNovelWritingResponsibility(recommendation)
+
+    expect(recommendation.key).toBe('scene_cards')
+    expect(recommendation.phase).toBe('prep')
+    expect(recommendation.label).toBe('补续航场景')
+    expect(recommendation.reason).toContain('质量续航')
+    expect(recommendation.reason).toContain('场景卡')
+    expect(responsibility.roleLabel).toBe('分集策划')
+    expect(responsibility.focus).toContain('质量续航')
+  })
+
   test('recommends quality review and assigns revision editor responsibility after prose exists', () => {
     const recommendation = buildNovelWritingRecommendation({
       materialReady: true,
@@ -455,6 +475,270 @@ describe('buildNovelDeliverySummary', () => {
     expect(summary.deliveryRiskConvergence?.nextAction).toContain('继续处理')
     expect(summary.actionKey).toBe('accept_chapter_and_continue')
   })
+
+  test('surfaces chapter blueprint receipts without changing delivery action', () => {
+    const summary = buildNovelDeliverySummary({
+      visible: true,
+      acceptanceStatus: 'ready_to_accept',
+      statusLabel: '可验收',
+      acceptanceReasons: ['质量复检通过，故事状态已同步，可以进入下一章。'],
+      qualityScore: 86,
+      storyStateSynced: true,
+      blueprintReceipt: {
+        status: 'warn',
+        label: '蓝图缺口 1',
+        scoreLabel: '蓝图兑现 2/3',
+        deliveredCount: 2,
+        totalCount: 3,
+        missedCount: 1,
+        evidence: ['先被伪证逼到绝境，再用账本反证。'],
+        missed: ['章尾承接'],
+      },
+      recommendedAcceptanceAction: { key: 'accept_chapter_and_continue', label: '验收并进入下一章' },
+    })
+
+    expect(summary.blueprintReceipt?.status).toBe('warn')
+    expect(summary.blueprintReceipt?.label).toBe('蓝图缺口 1')
+    expect(summary.blueprintReceipt?.scoreLabel).toBe('蓝图兑现 2/3')
+    expect(summary.actionKey).toBe('accept_chapter_and_continue')
+  })
+
+  test('surfaces prose revision receipts without changing delivery action', () => {
+    const summary = buildNovelDeliverySummary({
+      visible: true,
+      acceptanceStatus: 'ready_to_accept',
+      statusLabel: '可验收',
+      acceptanceReasons: ['质量复检通过，故事状态已同步，可以进入下一章。'],
+      qualityScore: 86,
+      storyStateSynced: true,
+      revisionReceipt: {
+        status: 'warn',
+        label: '修订残留 1',
+        scoreLabel: '修订闭环 1/2',
+        closedCount: 1,
+        totalCount: 2,
+        riskCount: 1,
+        evidence: ['谢怀安把腰牌翻到血迹那面。'],
+        risks: ['守将动机仍需下一章补证据。'],
+      },
+      recommendedAcceptanceAction: { key: 'accept_chapter_and_continue', label: '验收并进入下一章' },
+    })
+
+    expect(summary.revisionReceipt?.status).toBe('warn')
+    expect(summary.revisionReceipt?.label).toBe('修订残留 1')
+    expect(summary.revisionReceipt?.scoreLabel).toBe('修订闭环 1/2')
+    expect(summary.actionKey).toBe('accept_chapter_and_continue')
+  })
+
+  test('surfaces delivery risk receipts without changing delivery action', () => {
+    const summary = buildNovelDeliverySummary({
+      visible: true,
+      acceptanceStatus: 'ready_to_accept',
+      statusLabel: '可验收',
+      acceptanceReasons: ['质量复检通过，故事状态已同步，可以进入下一章。'],
+      qualityScore: 86,
+      storyStateSynced: true,
+      deliveryRiskReceipt: {
+        status: 'warn',
+        label: '承接残留 1',
+        scoreLabel: '承接闭环 1/2',
+        closedCount: 1,
+        totalCount: 2,
+        riskCount: 1,
+        evidence: ['水迹在玻璃上拼出第二个名字。'],
+        risks: ['开篇仍只写宿舍环境，没有追查湿漉漉学生身份。'],
+      },
+      recommendedAcceptanceAction: { key: 'accept_chapter_and_continue', label: '验收并进入下一章' },
+    })
+
+    expect(summary.deliveryRiskReceipt?.status).toBe('warn')
+    expect(summary.deliveryRiskReceipt?.label).toBe('承接残留 1')
+    expect(summary.deliveryRiskReceipt?.scoreLabel).toBe('承接闭环 1/2')
+    expect(summary.actionKey).toBe('accept_chapter_and_continue')
+  })
+
+  test('surfaces scene-card receipt gaps without changing delivery action', () => {
+    const summary = buildNovelDeliverySummary({
+      visible: true,
+      acceptanceStatus: 'ready_to_accept',
+      statusLabel: '可验收',
+      acceptanceReasons: ['质量复检通过，故事状态已同步，可以进入下一章。'],
+      qualityScore: 84,
+      storyStateSynced: true,
+      sceneCardReceipt: {
+        status: 'warn',
+        label: '场景回执缺口 1',
+        riskCount: 1,
+        evidence: ['场景2《盟友改口》scene_card_receipts 标记未兑现。'],
+        scenes: ['场景2'],
+        fields: ['目标/阻碍/状态变化', '感知锚点'],
+      },
+      recommendedAcceptanceAction: { key: 'accept_chapter_and_continue', label: '验收并进入下一章' },
+    })
+
+    expect(summary.sceneCardReceipt?.status).toBe('warn')
+    expect(summary.sceneCardReceipt?.label).toBe('场景回执缺口 1')
+    expect(summary.sceneCardReceipt?.fields).toContain('感知锚点')
+    expect(summary.actionKey).toBe('accept_chapter_and_continue')
+  })
+
+  test('surfaces quality audit gaps without changing delivery action', () => {
+    const summary = buildNovelDeliverySummary({
+      visible: true,
+      acceptanceStatus: 'ready_to_accept',
+      statusLabel: '可验收',
+      acceptanceReasons: ['质量复检通过，故事状态已同步，可以进入下一章。'],
+      qualityScore: 84,
+      storyStateSynced: true,
+      qualityAudit: {
+        status: 'warn',
+        label: '质量诊断缺口 1',
+        riskCount: 1,
+        evidence: ['爽点场景只用一句摘要带过。'],
+        checks: ['目的词详略分配'],
+        fixes: ['按目的词重排详略。'],
+        strategies: ['rewrite'],
+      },
+      recommendedAcceptanceAction: { key: 'accept_chapter_and_continue', label: '验收并进入下一章' },
+    })
+
+    expect(summary.qualityAudit?.status).toBe('warn')
+    expect(summary.qualityAudit?.label).toBe('质量诊断缺口 1')
+    expect(summary.qualityAudit?.checks).toContain('目的词详略分配')
+    expect(summary.actionKey).toBe('accept_chapter_and_continue')
+  })
+
+  test('surfaces quality audit carry-over without changing delivery action', () => {
+    const summary = buildNovelDeliverySummary({
+      visible: true,
+      acceptanceStatus: 'ready_to_accept',
+      statusLabel: '可验收',
+      acceptanceReasons: ['质量复检通过，故事状态已同步，可以进入下一章。'],
+      qualityScore: 84,
+      storyStateSynced: true,
+      qualityAuditSync: {
+        status: 'warn',
+        label: '质量诊断缺口 2',
+        missedCount: 2,
+        evidence: ['信息负载：一章新增 4 个概念，信息没有跟冲突走。'],
+        nextActions: ['下一章必须证明本章不可删除，并把新概念压到 3 个以内。'],
+      },
+      recommendedAcceptanceAction: { key: 'accept_chapter_and_continue', label: '验收并进入下一章' },
+    })
+
+    expect(summary.qualityAuditSync?.status).toBe('warn')
+    expect(summary.qualityAuditSync?.label).toBe('质量诊断缺口 2')
+    expect(summary.qualityAuditSync?.evidence.join('｜')).toContain('信息负载')
+    expect(summary.actionKey).toBe('accept_chapter_and_continue')
+  })
+
+  test('surfaces quality audit repair receipt sync without changing delivery action', () => {
+    const summary = buildNovelDeliverySummary({
+      visible: true,
+      acceptanceStatus: 'ready_to_accept',
+      statusLabel: '可验收',
+      acceptanceReasons: ['质量复检通过，故事状态已同步，可以进入下一章。'],
+      qualityScore: 84,
+      storyStateSynced: true,
+      qualityAuditRepairReceiptSync: {
+        status: 'warn',
+        label: '质量诊断修复回执缺口 1',
+        missedCount: 1,
+        receiptCount: 2,
+        evidence: ['目的词详略分配：changed_evidence 为空。'],
+        nextActions: ['重新修订并逐条输出 quality_audit_repair_receipts.changed_evidence。'],
+      },
+      recommendedAcceptanceAction: { key: 'accept_chapter_and_continue', label: '验收并进入下一章' },
+    })
+
+    expect(summary.qualityAuditRepairReceiptSync?.status).toBe('warn')
+    expect(summary.qualityAuditRepairReceiptSync?.label).toBe('质量诊断修复回执缺口 1')
+    expect(summary.qualityAuditRepairReceiptSync?.receiptCount).toBe(2)
+    expect(summary.qualityAuditRepairReceiptSync?.evidence.join('｜')).toContain('changed_evidence')
+    expect(summary.actionKey).toBe('accept_chapter_and_continue')
+  })
+
+  test('surfaces write-preparation execution gaps without changing delivery action', () => {
+    const summary = buildNovelDeliverySummary({
+      visible: true,
+      acceptanceStatus: 'ready_to_accept',
+      statusLabel: '可验收',
+      acceptanceReasons: ['质量复检通过，故事状态已同步，可以进入下一章。'],
+      qualityScore: 84,
+      storyStateSynced: true,
+      writePreparation: {
+        status: 'warn',
+        label: '写前准备缺口 1',
+        missedCount: 1,
+        evidence: ['孤立资产仍未挂到主线证据链。'],
+        nextActions: ['下一章先把旧钥匙和母亲旧铺印记挂钩。'],
+      },
+      recommendedAcceptanceAction: { key: 'accept_chapter_and_continue', label: '验收并进入下一章' },
+    })
+
+    expect(summary.writePreparation?.status).toBe('warn')
+    expect(summary.writePreparation?.label).toBe('写前准备缺口 1')
+    expect(summary.writePreparation?.evidence.join('｜')).toContain('孤立资产仍未挂到主线证据链')
+    expect(summary.actionKey).toBe('accept_chapter_and_continue')
+  })
+
+  test('surfaces chapter handoff sync gaps without changing delivery action', () => {
+    const summary = buildNovelDeliverySummary({
+      visible: true,
+      acceptanceStatus: 'ready_to_accept',
+      statusLabel: '可验收',
+      acceptanceReasons: ['质量复检通过，故事状态已同步，可以进入下一章。'],
+      qualityScore: 84,
+      storyStateSynced: true,
+      chapterHandoffSync: {
+        status: 'warn',
+        label: '章首承接缺口 2',
+        missedCount: 2,
+        evidence: ['开篇没有接住敲门、湿漉漉学生和不能开门的警告。'],
+        nextActions: ['下一章开篇先回到玻璃门水痕。'],
+      },
+      chapterHandoffDeltaSync: {
+        status: 'warn',
+        label: '章末交接缺口 1',
+        missedCount: 1,
+        evidence: ['第二个证人的章末追读没有写入下一章优先事项。'],
+        nextActions: ['下一章先追查第三个人。'],
+      },
+      recommendedAcceptanceAction: { key: 'accept_chapter_and_continue', label: '验收并进入下一章' },
+    })
+
+    expect(summary.chapterHandoffSync?.label).toBe('章首承接缺口 2')
+    expect(summary.chapterHandoffSync?.evidence.join('｜')).toContain('湿漉漉学生')
+    expect(summary.chapterHandoffDeltaSync?.label).toBe('章末交接缺口 1')
+    expect(summary.chapterHandoffDeltaSync?.nextActions.join('｜')).toContain('第三个人')
+    expect(summary.actionKey).toBe('accept_chapter_and_continue')
+  })
+
+  test('surfaces approval blockers for the delivery status strip', () => {
+    const summary = buildNovelDeliverySummary({
+      visible: true,
+      acceptanceStatus: 'needs_revision',
+      statusLabel: '需修订',
+      acceptanceReasons: ['仿写安全阻断：连续三段与参考材料高度相似'],
+      qualityScore: 84,
+      storyStateSynced: false,
+      approvalBlocker: {
+        type: 'reference_safety_blocked',
+        status: 'warn',
+        label: '仿写安全阻断',
+        detail: '连续三段与参考材料高度相似',
+        scoreLabel: '入库阻断 84',
+        reasons: ['连续三段与参考材料高度相似'],
+      },
+      recommendedAcceptanceAction: { key: 'create_editor_report', label: '生成编辑报告' },
+    })
+
+    expect(summary.tone).toBe('revision')
+    expect(summary.approvalBlocker?.label).toBe('仿写安全阻断')
+    expect(summary.approvalBlocker?.scoreLabel).toBe('入库阻断 84')
+    expect(summary.approvalBlocker?.detail).toContain('连续三段')
+    expect(summary.actionKey).toBe('create_editor_report')
+  })
 })
 
 describe('buildNovelDraftBriefSummary', () => {
@@ -506,6 +790,10 @@ describe('buildNovelDraftBriefSummary', () => {
           priority_label: '优先修章末',
           items: ['修章末翻页：上一章没有把追杀信号压成翻页问题。', '补创新：制度漏洞反压不够新鲜。'],
           required_actions: ['本章前 300 字直接接追杀信号。', '章末必须留下新的未解问题。'],
+          opening_actions: ['前 300 字让主角立刻处理门外追杀信号。'],
+          middle_actions: ['中段用制度漏洞反压旧臣。'],
+          ending_actions: ['章末把带血腰牌变成新的未解问题。'],
+          evidence: ['上一章最后 300 字只写门外响动，没有让追杀信号形成明确翻页问题。'],
         },
         key_settings: ['带血腰牌'],
         storyline_advances: ['夺权主线'],
@@ -657,6 +945,10 @@ describe('buildNovelDraftBriefSummary', () => {
     expect(summary.briefFields.deliveryRiskLabel).toContain('待修复')
     expect(summary.briefFields.deliveryRiskItems).toContain('修章末翻页')
     expect(summary.briefFields.deliveryRiskPriority).toContain('优先修章末')
+    expect(summary.briefFields.deliveryRiskOpeningActions).toContain('前 300 字')
+    expect(summary.briefFields.deliveryRiskMiddleActions).toContain('制度漏洞')
+    expect(summary.briefFields.deliveryRiskEndingActions).toContain('带血腰牌')
+    expect(summary.briefFields.deliveryRiskEvidence).toContain('最后 300 字')
     expect(summary.briefFields.keySettings).toContain('带血腰牌')
     expect(summary.briefFields.storylineAdvances).toContain('夺权主线')
     expect(summary.briefFields.storylinePlants).toContain('旧臣背刺伏笔线')
@@ -741,6 +1033,102 @@ describe('buildNovelDraftBriefSummary', () => {
     expect(summary.briefFields.governanceMemoryWatchItems).toContain('下一章继续观察样章策略命中率')
   })
 
+  test('surfaces nested next-chapter quality plan in the chapter pre-draft brief summary', () => {
+    const summary = buildNovelDraftBriefSummary({
+      activeWordCount: 0,
+      chapterGoal: '追查校徽反光里的第二条规则',
+      conflict: '主角必须在值班室名单被销毁前取证',
+      endingHook: '名单背面出现第三个名字',
+      sceneCardCount: 3,
+      preDraftBrief: {
+        confirmed_at: '2026-06-20T00:00:00.000Z',
+        reader_promise: '本章兑现规则验证和身份推进。',
+        core_conflict: '主角要在值班室名单被销毁前取证。',
+        oh_story_delivery_receipts: {
+          next_chapter_quality_plan: {
+            quality_focus: ['开篇必须用校徽反光直接触发行动', '中段用规则反制而不是旁白解释'],
+            opening_actions: ['前300字用校徽反光定位值班室名单'],
+            middle_actions: ['中段让玻璃门规则反制蛮力'],
+            ending_actions: ['章末让名单背面露出第三个名字'],
+            avoid_repetition: ['不要再用“他知道，这只是开始”总结体收尾'],
+            evidence_basis: ['上一章自检指出身份追查没有落成可见行动'],
+          },
+        },
+      },
+    })
+
+    expect(summary.briefFields.nextChapterQualityFocus).toContain('开篇必须用校徽反光')
+    expect(summary.briefFields.nextChapterQualityOpening).toContain('前300字用校徽反光定位值班室名单')
+    expect(summary.briefFields.nextChapterQualityMiddle).toContain('玻璃门规则反制蛮力')
+    expect(summary.briefFields.nextChapterQualityEnding).toContain('第三个名字')
+    expect(summary.briefFields.nextChapterQualityAvoid).toContain('总结体收尾')
+    expect(summary.briefFields.nextChapterQualityEvidence).toContain('身份追查没有落成可见行动')
+  })
+
+  test('normalizes camelCase pre-draft brief fields for the writing brief summary', () => {
+    const summary = buildNovelDraftBriefSummary({
+      activeWordCount: 0,
+      chapterGoal: '主角进入倒悬教室',
+      conflict: '监考人抹掉主角身份',
+      endingHook: '粉笔灰拼出下一间教室',
+      sceneCardCount: 2,
+      preDraftBrief: {
+        chapterGoal: '主角进入倒悬教室验证镜面规则',
+        readerPromise: '主角用镜面规则反证监考人撒谎',
+        coreConflict: '监考人试图用点名册抹掉主角身份',
+        readerRetentionBrief: {
+          openingHook: '天花板倒悬的课桌忽然点名主角。',
+          payoffPromise: '主角用镜面规则反证监考人撒谎。',
+          endingQuestion: '下一间教室为什么提前写着主角名字。',
+        },
+        readerDropRiskBrief: {
+          status: 'needs_repair',
+          dropPoints: ['中段解释规则过密，试读用户可能弃读。'],
+          openingGuardrail: '前300字给倒悬教室危机。',
+        },
+        first30RetentionBrief: {
+          segmentLabel: '试读十章',
+          flags: ['开篇钩子弱'],
+          requiredActions: ['前300字给倒悬教室危机'],
+        },
+        storyUnitContext: {
+          currentChapterRole: '规则验证章',
+          unitGoal: '三章内完成镜面规则第一轮验证。',
+          forbiddenAdvance: ['不得提前揭晓点名册幕后者'],
+        },
+        recentFatigueBrief: {
+          nextActions: ['减少解释，改成现场危险'],
+        },
+        styleSampleStrategy: {
+          locked: true,
+          samples: [
+            {
+              sampleKey: '规则怪谈压迫语感',
+              abstractUsage: '只学习规则压迫下的短句推进。',
+              selectionReason: '命中规则验证和身份抹除场景。',
+            },
+          ],
+          doNotCopy: ['不得复制样章原句'],
+        },
+      } as any,
+    })
+
+    expect(summary.briefFields.readerPromise).toContain('镜面规则')
+    expect(summary.briefFields.retentionOpeningHook).toContain('倒悬')
+    expect(summary.briefFields.retentionPayoffPromise).toContain('反证监考人')
+    expect(summary.briefFields.readerDropRisks).toContain('解释规则过密')
+    expect(summary.briefFields.readerDropOpening).toContain('前300字')
+    expect(summary.briefFields.first30RetentionSegment).toContain('试读十章')
+    expect(summary.briefFields.first30RetentionActions).toContain('倒悬教室危机')
+    expect(summary.briefFields.storyUnitRole).toContain('规则验证章')
+    expect(summary.briefFields.storyUnitForbidden).toContain('点名册幕后者')
+    expect(summary.briefFields.recentFatigueActions).toContain('现场危险')
+    expect(summary.briefFields.styleSampleKeys).toContain('规则怪谈压迫语感')
+    expect(summary.briefFields.styleSampleUsage).toContain('短句推进')
+    expect(summary.briefFields.styleSampleReasons).toContain('身份抹除')
+    expect(summary.briefFields.styleSampleForbidden).toContain('不得复制样章原句')
+  })
+
   test('shows an editable pre-draft brief when scene cards exist but the brief is not confirmed', () => {
     const summary = buildNovelDraftBriefSummary({
       activeWordCount: 0,
@@ -773,6 +1161,106 @@ describe('buildNovelDraftBriefSummary', () => {
     expect(summary.briefFields.forbiddenContent).toContain('幕后主使')
     expect(summary.briefFields.innovationAngle).toContain('公开规则反杀')
     expect(summary.briefFields.innovationExecution).toContain('腰牌资格')
+  })
+
+  test('surfaces oh-story chapter blueprint contract in the pre-draft brief summary', () => {
+    const summary = buildNovelDraftBriefSummary({
+      activeWordCount: 0,
+      chapterGoal: '阵堂公开反证',
+      conflict: '执事逼主角认罪',
+      endingHook: '禁库旧阵第二层纹路亮起',
+      sceneCardCount: 3,
+      preDraftBrief: {
+        chapter_goal: '阵堂公开反证',
+        reader_promise: '主角当众反证并夺回主动权',
+        core_conflict: '执事逼主角认罪',
+        chapter_blueprint: {
+          version: 'oh_story_chapter_blueprint_v1',
+          target_emotion: '压迫 -> 反证 -> 爽感释放',
+          opening_hook: '第一句就是认罪书砸到主角面前。',
+          core_payoff: '当众反证打脸并夺回主动权。',
+          content_outline: {
+            cause: '执事拿伪证逼主角认罪。',
+            development: '主角用账本逐项反证。',
+            turn: '证人临阵翻供。',
+            climax: '旧阵纹响应主角血印。',
+            ending: '禁库第二层纹路亮起。',
+          },
+          plot_lines: {
+            mainline: '阵堂审判从压制转为公开反证。',
+            subplot: '证人动摇暴露幕后交易。',
+            event_line: '伪证、账本、旧阵纹三段推进。',
+            relationship_line: '旁观弟子从质疑转为站队。',
+            logic_line: '每个证据都要形成因果闭环。',
+          },
+          character_order: ['执事', '主角', '证人', '旁观弟子'],
+          relationship_change: '主角和旁观弟子的信任从零到初步站队。',
+          information_gap: '幕后谁调换了第一本账册。',
+          beat_sequence: [
+            { scene_no: 1, title: '审判开场', function_tag: '开篇钩子/铺垫', required_payoff: '主角被逼到绝境' },
+            { scene_no: 2, title: '账本反证', function_tag: '转折/反证', required_payoff: '伪证破口' },
+            { scene_no: 3, title: '旧阵响应', function_tag: '高潮/章尾钩子', required_payoff: '禁库第二层亮起' },
+          ],
+          cost_and_reward: '代价是暴露血印，回报是当众打脸并夺回审判主动权。',
+          ending_contract: {
+            final_image: '禁库旧阵第二层纹路在黑暗里亮起。',
+            next_chapter_pull: '第二本账册是谁藏进禁库。',
+          },
+          writing_intent: '把本章写成先被压制、再用证据反杀、最后抛出禁库追读。',
+        },
+        scene_briefs: [{ scene_no: 1, title: '审判开场' }],
+        ending_hook: '禁库旧阵第二层纹路亮起',
+      },
+    })
+
+    expect(summary.briefFields.blueprintVersion).toBe('oh_story_chapter_blueprint_v1')
+    expect(summary.briefFields.blueprintTargetEmotion).toContain('爽感释放')
+    expect(summary.briefFields.blueprintOpeningHook).toContain('认罪书')
+    expect(summary.briefFields.blueprintCorePayoff).toContain('夺回主动权')
+    expect(summary.briefFields.blueprintOutline).toContain('起因：执事拿伪证逼主角认罪')
+    expect(summary.briefFields.blueprintOutline).toContain('高潮：旧阵纹响应主角血印')
+    expect(summary.briefFields.blueprintPlotLines).toContain('主线：阵堂审判从压制转为公开反证')
+    expect(summary.briefFields.blueprintPlotLines).toContain('关系线：旁观弟子从质疑转为站队')
+    expect(summary.briefFields.blueprintCharacterOrder).toBe('执事、主角、证人、旁观弟子')
+    expect(summary.briefFields.blueprintRelationshipChange).toContain('初步站队')
+    expect(summary.briefFields.blueprintInformationGap).toContain('第一本账册')
+    expect(summary.briefFields.blueprintBeatSequence).toContain('场景1 审判开场：开篇钩子/铺垫')
+    expect(summary.briefFields.blueprintBeatSequence).toContain('回报：禁库第二层亮起')
+    expect(summary.briefFields.blueprintCostAndReward).toContain('暴露血印')
+    expect(summary.briefFields.blueprintEndingContract).toContain('终幕：禁库旧阵第二层纹路在黑暗里亮起')
+    expect(summary.briefFields.blueprintWritingIntent).toContain('证据反杀')
+  })
+
+  test('surfaces platform rubric in the pre-draft brief summary', () => {
+    const summary = buildNovelDraftBriefSummary({
+      activeWordCount: 0,
+      chapterGoal: '阵堂公开反证',
+      conflict: '执事逼主角认罪',
+      endingHook: '禁库旧阵第二层纹路亮起',
+      sceneCardCount: 3,
+      preDraftBrief: {
+        chapter_goal: '阵堂公开反证',
+        platform_rubric: {
+          platform: 'fanqie',
+          label: '番茄小说',
+          source: 'oh_story_embedded_fallback',
+          checks: ['前 3 段包含冲突/悬念/钩子', '短段落、快节奏、高信息密度'],
+          revision_priorities: ['强化前三段钩子', '补章末翻页动力'],
+        },
+        chapter_blueprint: {
+          version: 'oh_story_chapter_blueprint_v1',
+          platform_rubric: {
+            platform: 'fanqie',
+            label: '番茄小说',
+          },
+        },
+      },
+    })
+
+    expect(summary.briefFields.platformRubricLabel).toBe('番茄小说')
+    expect(summary.briefFields.platformRubricSource).toBe('oh_story_embedded_fallback')
+    expect(summary.briefFields.platformRubricChecks).toContain('前 3 段包含冲突')
+    expect(summary.briefFields.platformRubricPriorities).toContain('章末翻页动力')
   })
 
   test('surfaces volume climax budget in the pre-draft brief summary', () => {
@@ -917,5 +1405,36 @@ describe('buildNovelDraftBriefSummary', () => {
     expect(summary.briefFields.pageTurnTrigger).toContain('内门长老认出')
     expect(summary.briefFields.pageTurnPull).toContain('解释师承')
     expect(summary.briefFields.pageTurnForbidden).toContain('不得在本章解释完整答案')
+  })
+
+  test('surfaces write preparation brief in the pre-draft brief summary', () => {
+    const summary = buildNovelDraftBriefSummary({
+      activeWordCount: 0,
+      chapterGoal: '主角公开夺回阵图',
+      conflict: '守堂执事拖延审查',
+      endingHook: '内门长老认出禁库旧阵',
+      sceneCardCount: 2,
+      preDraftBrief: {
+        write_preparation_brief: {
+          version: 'oh_story_write_preparation_v1',
+          readiness_status: 'needs_context',
+          source_gaps: ['上一章正文或上一章承接｜状态=missing｜缺少上一章承接'],
+          asset_risks: ['旧钥匙(isolated_key_asset)：旧钥匙还没有和禁门规则建立现场关系'],
+          delivery_risk_actions: ['前 300 字先接住上一章门外黑影压迫'],
+          blueprint_focus: ['开篇钩子：警钟第三响压入筵席'],
+          reader_payoff_focus: ['读者回报：失势皇子第一次当众夺回主动权'],
+          must_confirm: ['补上旧钥匙的现场功能和代价。'],
+        },
+        confirmed_at: '2026-06-10T11:00:00.000Z',
+      },
+    })
+
+    expect(summary.briefFields.writePreparationStatus).toBe('needs_context')
+    expect(summary.briefFields.writePreparationSourceGaps).toContain('上一章正文')
+    expect(summary.briefFields.writePreparationAssetRisks).toContain('旧钥匙')
+    expect(summary.briefFields.writePreparationDeliveryActions).toContain('前 300 字')
+    expect(summary.briefFields.writePreparationMustConfirm).toContain('补上旧钥匙')
+    expect(summary.briefFields.writePreparationBlueprintFocus).toContain('开篇钩子')
+    expect(summary.briefFields.writePreparationReaderPayoff).toContain('读者回报')
   })
 })

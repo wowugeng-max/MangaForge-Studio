@@ -1,5 +1,5 @@
 import React from 'react'
-import { Button, Card, Col, InputNumber, Popover, Progress, Row, Slider, Space, Tag, Tooltip, Typography } from 'antd'
+import { Button, Card, Col, Input, InputNumber, Modal, Popover, Progress, Row, Slider, Space, Tag, Tooltip, Typography } from 'antd'
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
 import { EditorState } from '@codemirror/state'
 import {
@@ -39,7 +39,7 @@ import {
   type NovelWritingRecommendedActionKey,
   type NovelWritingRecommendation,
 } from './writingRecommendationModel'
-import type { ChapterHandoffDeskModel, WritingQueueItem, WritingQueueModel } from './writingCockpitModel'
+import type { ChapterHandoffDeskModel, DeslopGateDiagnosticsModel, WritingQueueItem, WritingQueueModel } from './writingCockpitModel'
 import './WorkspaceCenter.css'
 
 const { Title, Text, Paragraph } = Typography
@@ -56,6 +56,48 @@ const EDITOR_DISPLAY_PRESETS: Array<EditorDisplayPrefs & { key: string; label: s
   { key: 'review', label: '宽松审稿', fontSize: 18, lineHeight: 38 },
   { key: 'sprint', label: '紧凑冲刺', fontSize: 16, lineHeight: 28 },
 ]
+
+function deslopGateTone(status: string) {
+  const normalized = String(status || '').toLowerCase()
+  if (normalized === 'fail' || normalized === 'failed' || normalized === 'blocker') return 'fail'
+  if (normalized === 'warn' || normalized === 'warning') return 'warn'
+  return 'pass'
+}
+
+function DeslopGateDiagnosticsPanel({ diagnostics }: { diagnostics?: DeslopGateDiagnosticsModel | null }) {
+  if (!diagnostics?.gates?.length) return null
+  const concernGates = diagnostics.gates.filter(gate => deslopGateTone(gate.status) !== 'pass' || gate.count > 0)
+  const visibleGates = (concernGates.length ? concernGates : diagnostics.gates).slice(0, 7)
+  const hasConcern = concernGates.length > 0 || diagnostics.concernGateCount > 0
+
+  return (
+    <details className={`novel-deslop-gate-panel novel-deslop-gate-panel-${hasConcern ? 'warn' : 'pass'}`} open={hasConcern}>
+      <summary className="novel-deslop-gate-summary">
+        <span>去AI味门禁</span>
+        <Tag color={hasConcern ? 'gold' : 'green'} bordered={false}>{hasConcern ? `需处理 ${diagnostics.concernGateCount || concernGates.length}` : '已通过'}</Tag>
+        <Text type="secondary">{diagnostics.summary}</Text>
+      </summary>
+      <div className="novel-deslop-gate-grid">
+        {visibleGates.map(gate => {
+          const tone = deslopGateTone(gate.status)
+          const evidence = gate.evidence.slice(0, 2).join('；') || gate.patterns.slice(0, 3).join('、')
+          const fix = gate.fix || '按本章语境重写成具体动作、感官或角色选择。'
+          return (
+            <div key={`${gate.gate}-${gate.label}`} className={`novel-deslop-gate-card novel-deslop-gate-card-${tone}`}>
+              <div className="novel-deslop-gate-card-head">
+                <Tag bordered={false}>{gate.gate ? `Gate ${gate.gate}` : 'Gate'}</Tag>
+                <strong>{gate.label || '未命名门禁'}</strong>
+                <span>{gate.count > 0 ? `${gate.count} 处` : '无命中'}</span>
+              </div>
+              {evidence && <Text className="novel-deslop-gate-evidence">证据：{evidence}</Text>}
+              <Text className="novel-deslop-gate-fix">修法：{fix}</Text>
+            </div>
+          )
+        })}
+      </div>
+    </details>
+  )
+}
 
 function clampNumber(value: unknown, min: number, max: number, fallback: number) {
   const numeric = Number(value)
@@ -339,6 +381,7 @@ export function WorkspaceCenter({
   onGenerateSceneCards,
   onBuildPreDraftBrief,
   onConfirmPreDraftBrief,
+  onSavePreDraftBrief,
   onLockStyleSamples,
   onReplaceStyleSamples,
   onDisableStyleSamples,
@@ -398,6 +441,7 @@ export function WorkspaceCenter({
   onGenerateSceneCards: () => void
   onBuildPreDraftBrief?: () => void
   onConfirmPreDraftBrief?: () => void
+  onSavePreDraftBrief?: (brief: any) => Promise<void> | void
   onLockStyleSamples?: () => void
   onReplaceStyleSamples?: () => void
   onDisableStyleSamples?: () => void
@@ -424,6 +468,9 @@ export function WorkspaceCenter({
 }) {
   const [editorDisplayPrefs, setEditorDisplayPrefs] = React.useState<EditorDisplayPrefs>(() => loadEditorDisplayPrefs())
   const [writingAuxCollapsed, setWritingAuxCollapsed] = React.useState(() => loadWritingAuxCollapsed())
+  const [blueprintEditorOpen, setBlueprintEditorOpen] = React.useState(false)
+  const [blueprintEditorText, setBlueprintEditorText] = React.useState('')
+  const [blueprintEditorError, setBlueprintEditorError] = React.useState('')
   const materialReady = !materialScore || Boolean(materialScore.can_generate)
   const materialRecommendations = Array.isArray(materialScore?.recommendations)
     ? materialScore.recommendations.filter(Boolean)
@@ -452,6 +499,7 @@ export function WorkspaceCenter({
   })
   const aiResponsibility = buildNovelWritingResponsibility(recommendedAction)
   const deliverySummary = buildNovelDeliverySummary(chapterAcceptanceDesk)
+  const activePreDraftBrief = activeChapter?.raw_payload?.pre_draft_brief || activeChapter?.raw_payload?.preDraftBrief || null
   const ipSceneIntakeTooltip = deliverySummary.ipSceneIntake?.candidates?.length ? (
     <div className="novel-delivery-ip-scene-tooltip">
       {deliverySummary.ipSceneIntake.candidates.slice(0, 3).map((candidate, index) => (
@@ -470,9 +518,32 @@ export function WorkspaceCenter({
     conflict: activeChapter?.conflict,
     endingHook: activeChapter?.ending_hook,
     sceneCardCount: sceneCards.length,
-    preDraftBrief: activeChapter?.raw_payload?.pre_draft_brief || null,
+    preDraftBrief: activePreDraftBrief,
   })
   const styleSampleActionDisabled = !activeChapter || Boolean(styleSampleActionLoading || preDraftBriefLoading || generatingProse)
+  const openChapterBlueprintEditor = () => {
+    setBlueprintEditorText(JSON.stringify(activePreDraftBrief?.chapter_blueprint || {}, null, 2))
+    setBlueprintEditorError('')
+    setBlueprintEditorOpen(true)
+  }
+  const saveChapterBlueprintEditor = async () => {
+    try {
+      const parsed = JSON.parse(blueprintEditorText)
+      if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
+        setBlueprintEditorError('蓝图 JSON 必须是对象')
+        return
+      }
+      const nextBrief = {
+        ...(activePreDraftBrief || {}),
+        chapter_blueprint: parsed,
+      }
+      delete nextBrief.confirmed_at
+      await onSavePreDraftBrief?.(nextBrief)
+      setBlueprintEditorOpen(false)
+    } catch (error: any) {
+      setBlueprintEditorError(error?.message || '蓝图 JSON 格式不正确')
+    }
+  }
   const recommendedClass = (key: NovelWritingRecommendedActionKey) => key === recommendedAction.key ? 'novel-editor-recommended-action' : undefined
   const commandClass = (key?: NovelWritingRecommendedActionKey, extra = '') => [
     'novel-editor-command-pill',
@@ -1145,6 +1216,190 @@ export function WorkspaceCenter({
                     )}
                   </>
                 )}
+                {deliverySummary.blueprintReceipt && (
+                  <Tooltip
+                    title={[
+                      deliverySummary.blueprintReceipt.missed.length ? `缺口：${deliverySummary.blueprintReceipt.missed.join('、')}` : '',
+                      deliverySummary.blueprintReceipt.evidence.length ? `证据：${deliverySummary.blueprintReceipt.evidence.join('；')}` : '',
+                    ].filter(Boolean).join('；') || deliverySummary.blueprintReceipt.label}
+                  >
+                    <Tag
+                      className={`novel-delivery-blueprint-tag novel-delivery-blueprint-tag-${deliverySummary.blueprintReceipt.status}`}
+                      bordered={false}
+                    >
+                      {deliverySummary.blueprintReceipt.scoreLabel}
+                    </Tag>
+                  </Tooltip>
+                )}
+                {deliverySummary.revisionReceipt && (
+                  <Tooltip
+                    title={[
+                      deliverySummary.revisionReceipt.risks.length ? `残余：${deliverySummary.revisionReceipt.risks.join('、')}` : '',
+                      deliverySummary.revisionReceipt.evidence.length ? `修后证据：${deliverySummary.revisionReceipt.evidence.join('；')}` : '',
+                    ].filter(Boolean).join('；') || deliverySummary.revisionReceipt.label}
+                  >
+                    <Tag
+                      className={`novel-delivery-revision-tag novel-delivery-revision-tag-${deliverySummary.revisionReceipt.status}`}
+                      bordered={false}
+                    >
+                      {deliverySummary.revisionReceipt.scoreLabel}
+                    </Tag>
+                  </Tooltip>
+                )}
+                {deliverySummary.deliveryRiskReceipt && (
+                  <Tooltip
+                    title={[
+                      deliverySummary.deliveryRiskReceipt.risks.length ? `残余：${deliverySummary.deliveryRiskReceipt.risks.join('、')}` : '',
+                      deliverySummary.deliveryRiskReceipt.evidence.length ? `承接证据：${deliverySummary.deliveryRiskReceipt.evidence.join('；')}` : '',
+                    ].filter(Boolean).join('；') || deliverySummary.deliveryRiskReceipt.label}
+                  >
+                    <Tag
+                      className={`novel-delivery-risk-receipt-tag novel-delivery-risk-receipt-tag-${deliverySummary.deliveryRiskReceipt.status}`}
+                      bordered={false}
+                    >
+                      {deliverySummary.deliveryRiskReceipt.scoreLabel}
+                    </Tag>
+                  </Tooltip>
+                )}
+                {deliverySummary.sceneCardReceipt && (
+                  <Tooltip
+                    title={[
+                      deliverySummary.sceneCardReceipt.scenes.length ? `场景：${deliverySummary.sceneCardReceipt.scenes.join('、')}` : '',
+                      deliverySummary.sceneCardReceipt.fields.length ? `字段：${deliverySummary.sceneCardReceipt.fields.join('、')}` : '',
+                      deliverySummary.sceneCardReceipt.evidence.length ? `证据：${deliverySummary.sceneCardReceipt.evidence.join('；')}` : '',
+                    ].filter(Boolean).join('；') || deliverySummary.sceneCardReceipt.label}
+                  >
+                    <Tag
+                      className={`novel-delivery-scene-card-receipt-tag novel-delivery-scene-card-receipt-tag-${deliverySummary.sceneCardReceipt.status}`}
+                      bordered={false}
+                    >
+                      {deliverySummary.sceneCardReceipt.label}
+                    </Tag>
+                  </Tooltip>
+                )}
+                {deliverySummary.qualityAudit && (
+                  <Tooltip
+                    title={[
+                      deliverySummary.qualityAudit.checks.length ? `检查：${deliverySummary.qualityAudit.checks.join('、')}` : '',
+                      deliverySummary.qualityAudit.evidence.length ? `证据：${deliverySummary.qualityAudit.evidence.join('；')}` : '',
+                      deliverySummary.qualityAudit.fixes.length ? `修法：${deliverySummary.qualityAudit.fixes.join('；')}` : '',
+                      deliverySummary.qualityAudit.strategies.length ? `策略：${deliverySummary.qualityAudit.strategies.join('、')}` : '',
+                    ].filter(Boolean).join('；') || deliverySummary.qualityAudit.label}
+                  >
+                    <Tag
+                      className={`novel-delivery-quality-audit-tag novel-delivery-quality-audit-tag-${deliverySummary.qualityAudit.status}`}
+                      bordered={false}
+                    >
+                      {deliverySummary.qualityAudit.label}
+                    </Tag>
+                  </Tooltip>
+                )}
+                {deliverySummary.qualityAuditSync && (
+                  <Tooltip
+                    title={[
+                      deliverySummary.qualityAuditSync.evidence.length ? `证据：${deliverySummary.qualityAuditSync.evidence.join('；')}` : '',
+                      deliverySummary.qualityAuditSync.nextActions.length ? `动作：${deliverySummary.qualityAuditSync.nextActions.join('；')}` : '',
+                    ].filter(Boolean).join('；') || deliverySummary.qualityAuditSync.label}
+                  >
+                    <Tag
+                      className={`novel-delivery-quality-sync-tag novel-delivery-quality-sync-tag-${deliverySummary.qualityAuditSync.status}`}
+                      bordered={false}
+                    >
+                      诊断承接 · {deliverySummary.qualityAuditSync.label}
+                    </Tag>
+                  </Tooltip>
+                )}
+                {deliverySummary.qualityAuditRepairReceiptSync && (
+                  <Tooltip
+                    title={[
+                      deliverySummary.qualityAuditRepairReceiptSync.evidence.length ? `证据：${deliverySummary.qualityAuditRepairReceiptSync.evidence.join('；')}` : '',
+                      deliverySummary.qualityAuditRepairReceiptSync.nextActions.length ? `动作：${deliverySummary.qualityAuditRepairReceiptSync.nextActions.join('；')}` : '',
+                    ].filter(Boolean).join('；') || deliverySummary.qualityAuditRepairReceiptSync.label}
+                  >
+                    <Tag
+                      className={`novel-delivery-quality-repair-receipt-tag novel-delivery-quality-repair-receipt-tag-${deliverySummary.qualityAuditRepairReceiptSync.status}`}
+                      bordered={false}
+                    >
+                      质量回执 · {deliverySummary.qualityAuditRepairReceiptSync.label}
+                    </Tag>
+                  </Tooltip>
+                )}
+                {deliverySummary.chapterHandoffSync && (
+                  <Tooltip
+                    title={[
+                      deliverySummary.chapterHandoffSync.evidence.length ? `证据：${deliverySummary.chapterHandoffSync.evidence.join('；')}` : '',
+                      deliverySummary.chapterHandoffSync.nextActions.length ? `动作：${deliverySummary.chapterHandoffSync.nextActions.join('；')}` : '',
+                    ].filter(Boolean).join('；') || deliverySummary.chapterHandoffSync.label}
+                  >
+                    <Tag
+                      className={`novel-delivery-handoff-sync-tag novel-delivery-handoff-sync-tag-${deliverySummary.chapterHandoffSync.status}`}
+                      bordered={false}
+                    >
+                      章首承接 · {deliverySummary.chapterHandoffSync.label}
+                    </Tag>
+                  </Tooltip>
+                )}
+                {deliverySummary.chapterHandoffDeltaSync && (
+                  <Tooltip
+                    title={[
+                      deliverySummary.chapterHandoffDeltaSync.evidence.length ? `证据：${deliverySummary.chapterHandoffDeltaSync.evidence.join('；')}` : '',
+                      deliverySummary.chapterHandoffDeltaSync.nextActions.length ? `动作：${deliverySummary.chapterHandoffDeltaSync.nextActions.join('；')}` : '',
+                    ].filter(Boolean).join('；') || deliverySummary.chapterHandoffDeltaSync.label}
+                  >
+                    <Tag
+                      className={`novel-delivery-handoff-delta-tag novel-delivery-handoff-delta-tag-${deliverySummary.chapterHandoffDeltaSync.status}`}
+                      bordered={false}
+                    >
+                      章末交接 · {deliverySummary.chapterHandoffDeltaSync.label}
+                    </Tag>
+                  </Tooltip>
+                )}
+                {deliverySummary.writePreparation && (
+                  <Tooltip
+                    title={[
+                      deliverySummary.writePreparation.evidence.length ? `证据：${deliverySummary.writePreparation.evidence.join('；')}` : '',
+                      deliverySummary.writePreparation.nextActions.length ? `动作：${deliverySummary.writePreparation.nextActions.join('；')}` : '',
+                    ].filter(Boolean).join('；') || deliverySummary.writePreparation.label}
+                  >
+                    <Tag
+                      className={`novel-delivery-write-preparation-tag novel-delivery-write-preparation-tag-${deliverySummary.writePreparation.status}`}
+                      bordered={false}
+                    >
+                      写前准备 · {deliverySummary.writePreparation.label}
+                    </Tag>
+                  </Tooltip>
+                )}
+                {deliverySummary.approvalBlocker && (
+                  <Tooltip
+                    title={[
+                      deliverySummary.approvalBlocker.detail,
+                      deliverySummary.approvalBlocker.reasons.length ? `原因：${deliverySummary.approvalBlocker.reasons.join('；')}` : '',
+                    ].filter(Boolean).join('；') || deliverySummary.approvalBlocker.label}
+                  >
+                    <Tag
+                      className={`novel-delivery-approval-blocker-tag novel-delivery-approval-blocker-tag-${deliverySummary.approvalBlocker.status}`}
+                      bordered={false}
+                    >
+                      {deliverySummary.approvalBlocker.scoreLabel} · {deliverySummary.approvalBlocker.label}
+                    </Tag>
+                  </Tooltip>
+                )}
+                {deliverySummary.platformRubric && (
+                  <Tooltip
+                    title={[
+                      deliverySummary.platformRubric.missed.length ? `未达标：${deliverySummary.platformRubric.missed.join('、')}` : '',
+                      deliverySummary.platformRubric.evidence.length ? `证据：${deliverySummary.platformRubric.evidence.join('；')}` : '',
+                      deliverySummary.platformRubric.rubricSource ? `来源：${deliverySummary.platformRubric.rubricSource}` : '',
+                    ].filter(Boolean).join('；') || deliverySummary.platformRubric.label}
+                  >
+                    <Tag
+                      className={`novel-delivery-platform-tag novel-delivery-platform-tag-${deliverySummary.platformRubric.status}`}
+                      bordered={false}
+                    >
+                      {deliverySummary.platformRubric.scoreLabel}
+                    </Tag>
+                  </Tooltip>
+                )}
                 {deliverySummary.readabilityReview && (
                   <>
                     <Tag className="novel-delivery-readability-tag" bordered={false}>
@@ -1154,9 +1409,15 @@ export function WorkspaceCenter({
                       {deliverySummary.readabilityReview.memeLabel}
                     </Tag>
                     {deliverySummary.readabilityReview.riskCount > 0 && (
-                      <Tag className="novel-delivery-readability-tag novel-delivery-readability-tag-warn" bordered={false}>
-                        {deliverySummary.readabilityReview.riskLabel}
-                      </Tag>
+                      <Tooltip
+                        title={deliverySummary.readabilityReview.aiSmellTactics?.length
+                          ? `去AI味建议：${deliverySummary.readabilityReview.aiSmellTactics.join('；')}`
+                          : deliverySummary.readabilityReview.riskLabel}
+                      >
+                        <Tag className="novel-delivery-readability-tag novel-delivery-readability-tag-warn" bordered={false}>
+                          {deliverySummary.readabilityReview.riskLabel}
+                        </Tag>
+                      </Tooltip>
                     )}
                   </>
                 )}
@@ -1164,6 +1425,8 @@ export function WorkspaceCenter({
               </div>
             </div>
           )}
+
+          <DeslopGateDiagnosticsPanel diagnostics={deliverySummary.deslopGateDiagnostics} />
 
           {chapterHandoffDesk?.visible && (
             <div className={`novel-chapter-handoff-strip novel-chapter-handoff-strip-${chapterHandoffDesk.status}`}>
@@ -1242,6 +1505,46 @@ export function WorkspaceCenter({
                   <div><span>字数目标</span><strong>{draftBriefSummary.briefFields.wordBudget || `${generationTargetWordCount} 字`}</strong></div>
                   <div><span>章末钩子</span><strong>{draftBriefSummary.briefFields.endingHook || '待补齐'}</strong></div>
                 </div>
+                {(draftBriefSummary.briefFields.writePreparationStatus || draftBriefSummary.briefFields.writePreparationSourceGaps || draftBriefSummary.briefFields.writePreparationMustConfirm) && (
+                  <div className="novel-draft-brief-write-preparation">
+                    <span>写前准备确认</span>
+                    <strong>状态：{draftBriefSummary.briefFields.writePreparationStatus || 'ready'}</strong>
+                    <strong>来源缺口：{draftBriefSummary.briefFields.writePreparationSourceGaps || '无'}</strong>
+                    <strong>资产关系：{draftBriefSummary.briefFields.writePreparationAssetRisks || '无'}</strong>
+                    <strong>交稿动作：{draftBriefSummary.briefFields.writePreparationDeliveryActions || '无'}</strong>
+                    <strong>蓝图焦点：{draftBriefSummary.briefFields.writePreparationBlueprintFocus || '按章节蓝图执行'}</strong>
+                    <strong>读者回报：{draftBriefSummary.briefFields.writePreparationReaderPayoff || draftBriefSummary.briefFields.readerPromise || '按追读雷达兑现'}</strong>
+                    <strong>必须确认：{draftBriefSummary.briefFields.writePreparationMustConfirm || '无'}</strong>
+                  </div>
+                )}
+                {(draftBriefSummary.briefFields.blueprintOutline || draftBriefSummary.briefFields.blueprintPlotLines || draftBriefSummary.briefFields.blueprintBeatSequence) && (
+                  <div className="novel-draft-brief-blueprint">
+                    <span>章节蓝图合同</span>
+                    <Button
+                      className="novel-draft-brief-blueprint-edit"
+                      size="small"
+                      icon={<EditOutlined />}
+                      disabled={!onSavePreDraftBrief || Boolean(preDraftBriefLoading || generatingProse)}
+                      onClick={openChapterBlueprintEditor}
+                    >
+                      编辑蓝图
+                    </Button>
+                    <strong>目标情绪：{draftBriefSummary.briefFields.blueprintTargetEmotion || draftBriefSummary.briefFields.emotionalCurve || '明确本章读者情绪走向'}</strong>
+                    <strong>开篇钩子：{draftBriefSummary.briefFields.blueprintOpeningHook || draftBriefSummary.briefFields.retentionOpeningHook || '前300字要有可见抓手'}</strong>
+                    <strong>核心回报：{draftBriefSummary.briefFields.blueprintCorePayoff || draftBriefSummary.briefFields.readerPromise || '明确本章兑现给读者的爽点/信息/关系变化'}</strong>
+                    <strong>五段式：{draftBriefSummary.briefFields.blueprintOutline || '按起因、发展、转折、高潮、收束执行'}</strong>
+                    <strong>多线推进：{draftBriefSummary.briefFields.blueprintPlotLines || '主线、副线、事件线、关系线和逻辑线都要落到正文'}</strong>
+                    <strong>人物顺序：{draftBriefSummary.briefFields.blueprintCharacterOrder || '按场景需要控制出场'}</strong>
+                    <strong>关系变化：{draftBriefSummary.briefFields.blueprintRelationshipChange || draftBriefSummary.briefFields.characterArcRelationshipShift || '写成站队、亏欠、误解或信任变化'}</strong>
+                    <strong>信息缺口：{draftBriefSummary.briefFields.blueprintInformationGap || draftBriefSummary.briefFields.retentionInformationGap || '保留可追读的问题'}</strong>
+                    <strong>节拍功能：{draftBriefSummary.briefFields.blueprintBeatSequence || '每个场景要有功能标签和回报'}</strong>
+                    <strong>代价收益：{draftBriefSummary.briefFields.blueprintCostAndReward || '主角选择必须有代价和读者回报'}</strong>
+                    <strong>章尾承接：{draftBriefSummary.briefFields.blueprintEndingContract || draftBriefSummary.briefFields.endingHook || '最后一幕压到下一章拉力'}</strong>
+                    {draftBriefSummary.briefFields.blueprintWritingIntent && (
+                      <strong>写作意图：{draftBriefSummary.briefFields.blueprintWritingIntent}</strong>
+                    )}
+                  </div>
+                )}
                 <div className="novel-draft-brief-retention">
                   <span>追读雷达</span>
                   <strong>开篇钩子：{draftBriefSummary.briefFields.retentionOpeningHook || '前300字要有抓手'}</strong>
@@ -1321,6 +1624,19 @@ export function WorkspaceCenter({
                     <strong>继续悬念：{draftBriefSummary.briefFields.handoffKeepAlive || '无跨章悬念'}</strong>
                   </div>
                 )}
+                {(draftBriefSummary.briefFields.nextChapterQualityFocus || draftBriefSummary.briefFields.nextChapterQualityOpening || draftBriefSummary.briefFields.nextChapterQualityAvoid) && (
+                  <div className="novel-draft-brief-next-quality">
+                    <span>下一章质量续航</span>
+                    <strong>质量目标：{draftBriefSummary.briefFields.nextChapterQualityFocus || '承接上一章自检质量目标'}</strong>
+                    <strong>开篇：{draftBriefSummary.briefFields.nextChapterQualityOpening || '前300字接住上一章风险'}</strong>
+                    <strong>中段：{draftBriefSummary.briefFields.nextChapterQualityMiddle || '把风险写成可见冲突或信息变化'}</strong>
+                    <strong>章末：{draftBriefSummary.briefFields.nextChapterQualityEnding || '压出下一章追读问题'}</strong>
+                    <strong>禁用重复：{draftBriefSummary.briefFields.nextChapterQualityAvoid || '避免复现上一章自检指出的套路'}</strong>
+                    {draftBriefSummary.briefFields.nextChapterQualityEvidence && (
+                      <strong>依据：{draftBriefSummary.briefFields.nextChapterQualityEvidence}</strong>
+                    )}
+                  </div>
+                )}
                 {(draftBriefSummary.briefFields.deliveryRiskLabel || draftBriefSummary.briefFields.deliveryRiskItems || draftBriefSummary.briefFields.deliveryRiskActions) && (
                   <div className="novel-draft-brief-delivery-risk">
                     <span>交稿风险承接</span>
@@ -1328,6 +1644,18 @@ export function WorkspaceCenter({
                     <strong>优先：{draftBriefSummary.briefFields.deliveryRiskPriority || '先处理最高风险'}</strong>
                     <strong>风险：{draftBriefSummary.briefFields.deliveryRiskItems || '无明确残留风险'}</strong>
                     <strong>动作：{draftBriefSummary.briefFields.deliveryRiskActions || '写成开篇承接、场景推进或章末钩子'}</strong>
+                    {draftBriefSummary.briefFields.deliveryRiskOpeningActions && (
+                      <strong>开篇：{draftBriefSummary.briefFields.deliveryRiskOpeningActions}</strong>
+                    )}
+                    {draftBriefSummary.briefFields.deliveryRiskMiddleActions && (
+                      <strong>中段：{draftBriefSummary.briefFields.deliveryRiskMiddleActions}</strong>
+                    )}
+                    {draftBriefSummary.briefFields.deliveryRiskEndingActions && (
+                      <strong>章末：{draftBriefSummary.briefFields.deliveryRiskEndingActions}</strong>
+                    )}
+                    {draftBriefSummary.briefFields.deliveryRiskEvidence && (
+                      <strong>证据：{draftBriefSummary.briefFields.deliveryRiskEvidence}</strong>
+                    )}
                   </div>
                 )}
                 {(draftBriefSummary.briefFields.expectationMustDeliver || draftBriefSummary.briefFields.expectationKeepAlive) && (
@@ -1489,6 +1817,30 @@ export function WorkspaceCenter({
               </div>
             </div>
           )}
+          <Modal
+            title="编辑章节蓝图合同"
+            open={blueprintEditorOpen}
+            width={860}
+            okText="保存蓝图"
+            cancelText="取消"
+            confirmLoading={Boolean(preDraftBriefLoading)}
+            onOk={saveChapterBlueprintEditor}
+            onCancel={() => setBlueprintEditorOpen(false)}
+            destroyOnClose
+          >
+            <Space direction="vertical" size={8} style={{ width: '100%' }}>
+              <Input.TextArea
+                value={blueprintEditorText}
+                onChange={(event) => {
+                  setBlueprintEditorText(event.target.value)
+                  if (blueprintEditorError) setBlueprintEditorError('')
+                }}
+                autoSize={{ minRows: 16, maxRows: 26 }}
+                style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: 12 }}
+              />
+              {blueprintEditorError && <Text type="danger">{blueprintEditorError}</Text>}
+            </Space>
+          </Modal>
             </div>
           )}
 

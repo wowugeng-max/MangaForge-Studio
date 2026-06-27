@@ -15,14 +15,41 @@ import {
 } from '../novel'
 import { generateNovelChapterProse } from '../llm'
 import { buildMaterialScore } from './novel-chapter-context-routes'
-import { asArray, buildLLMResultDiagnostics, extractPlainProseFallback, getNovelPayload, normalizeSceneProduction, parseJsonLikePayload } from './novel-route-utils'
-import { applyChapterWordTargetToContext, countProseChars, proseMaxTokensForWordTarget, resolveChapterWordTarget } from './novel-writing-service'
+import { asArray, buildLLMResultDiagnostics, extractPlainProseFallback, formatReviewIssueForStorage, getNovelPayload, normalizeSceneProduction, parseJsonLikePayload } from './novel-route-utils'
+import { applyChapterWordTargetToContext, countProseChars, normalizeDeliveryRiskReceipts, proseMaxTokensForWordTarget, resolveChapterWordTarget } from './novel-writing-service'
 
 function outlineChapterNo(outline: any) {
   const rawNo = Number(outline.raw_payload?.chapter_no || outline.raw_payload?.future100?.chapter_no || 0)
   if (rawNo) return rawNo
   const match = String(outline.title || '').match(/第\s*(\d+)\s*章/)
   return match ? Number(match[1]) : 0
+}
+
+function activeChapterNo(chapters: any[] = []) {
+  return chapters.reduce((max, chapter) => Math.max(max, Number(chapter?.chapter_no || 0)), 0)
+}
+
+function isApprovalBlockerChapter(item: any = {}, payload: any = {}, stage = '') {
+  return String(stage || '') === 'approval_blocker'
+    || item?.error_code === 'APPROVAL_BLOCKER'
+    || payload?.last_error?.error_code === 'APPROVAL_BLOCKER'
+    || item?.approval_stage === 'approval_blocker'
+    || payload?.last_error?.approval_stage === 'approval_blocker'
+}
+
+function approvalBlockerRoutePayload(item: any = {}, payload: any = {}, action = '继续') {
+  return {
+    error: `当前章节存在入库阻断，不能${action}绕过。`,
+    error_code: 'APPROVAL_BLOCKER_REQUIRES_REPAIR',
+    chapter_id: item.id || null,
+    chapter_no: item.chapter_no || null,
+    approval_stage: 'approval_blocker',
+    approval_context: item.approval_context || payload.last_error?.approval_context || null,
+    recovery_plan: payload.last_error?.recovery_plan || item.recovery_plan || {
+      type: 'approval_blocker',
+      actions: ['按入库阻断原因修订正文', '重新运行正文质检和入库门禁', '确认阻断解除后再继续后续章节生成'],
+    },
+  }
 }
 
 function futureSkeletonFromOutline(outline: any) {
@@ -86,22 +113,24 @@ function applyRequestChapterLaunchGate(contextPackage: any, req: any) {
   }
 }
 
-function applyRequestBatchPreflight(contextPackage: any, req: any) {
-  if (!req.body?.batch_preflight) return contextPackage
-  const deliveryRiskCarryOver = req.body.batch_preflight?.delivery_risk_carry_over || req.body.batch_preflight?.deliveryRiskCarryOver || null
-  const chapterHandoffContract = req.body.batch_preflight?.chapter_handoff_contract || req.body.batch_preflight?.chapterHandoffContract || null
+export function applyRequestBatchPreflight(contextPackage: any, req: any) {
+  const batchPreflight = req.body?.batch_preflight || req.body?.batchPreflight
+  if (!batchPreflight) return contextPackage
+  const deliveryRiskCarryOver = batchPreflight?.delivery_risk_carry_over || batchPreflight?.deliveryRiskCarryOver || null
+  const chapterHandoffContract = batchPreflight?.chapter_handoff_contract || batchPreflight?.chapterHandoffContract || null
+  const previousHandoff = chapterHandoffContract?.previous_handoff || chapterHandoffContract?.previousHandoff || null
   return {
     ...contextPackage,
-    batch_preflight: req.body.batch_preflight,
+    batch_preflight: batchPreflight,
     ...(deliveryRiskCarryOver ? { delivery_risk_carry_over: deliveryRiskCarryOver } : {}),
     ...(chapterHandoffContract ? { chapter_handoff_contract: chapterHandoffContract } : {}),
-    ...(chapterHandoffContract?.previous_handoff ? { previous_handoff: chapterHandoffContract.previous_handoff } : {}),
+    ...(previousHandoff ? { previous_handoff: previousHandoff } : {}),
     chapter_target: {
       ...contextPackage.chapter_target,
-      batch_preflight: req.body.batch_preflight,
+      batch_preflight: batchPreflight,
       ...(deliveryRiskCarryOver ? { delivery_risk_carry_over: deliveryRiskCarryOver } : {}),
       ...(chapterHandoffContract ? { chapter_handoff_contract: chapterHandoffContract } : {}),
-      ...(chapterHandoffContract?.previous_handoff ? { previous_handoff: chapterHandoffContract.previous_handoff } : {}),
+      ...(previousHandoff ? { previous_handoff: previousHandoff } : {}),
     },
   }
 }
@@ -173,29 +202,138 @@ function buildTextDiffSummary(before: string, after: string) {
   }
 }
 
-function selectTargetProsePayload(resultPayload: any, targetChapterNo: number) {
-  const proseArr = Array.isArray(resultPayload?.prose_chapters) ? resultPayload.prose_chapters : []
-  const topLevelChapterNo = Number(resultPayload?.chapter_no || 0)
+export function selectTargetProsePayload(resultPayload: any, targetChapterNo: number) {
+  const proseArr = Array.isArray(resultPayload?.prose_chapters)
+    ? resultPayload.prose_chapters
+    : Array.isArray(resultPayload?.proseChapters)
+      ? resultPayload.proseChapters
+      : []
+  const topLevelChapterNo = Number(resultPayload?.chapter_no || resultPayload?.chapterNo || 0)
   if (topLevelChapterNo && topLevelChapterNo !== targetChapterNo) {
     throw new Error(`模型返回的章节号与目标章节不一致：目标第${targetChapterNo}章，返回第${topLevelChapterNo}章`)
   }
-  const matched = proseArr.find(item => Number(item?.chapter_no || 0) === targetChapterNo)
+  const matched = proseArr.find(item => Number(item?.chapter_no || item?.chapterNo || 0) === targetChapterNo)
   if (matched) {
     return matched
   }
   if (proseArr.length === 1) {
     const single = proseArr[0]
-    const singleChapterNo = Number(single?.chapter_no || 0)
+    const singleChapterNo = Number(single?.chapter_no || single?.chapterNo || 0)
     if (!singleChapterNo || singleChapterNo === targetChapterNo) {
       return single
     }
     throw new Error(`模型返回的章节号与目标章节不一致：目标第${targetChapterNo}章，返回第${singleChapterNo}章`)
   }
   if (proseArr.length > 1) {
-    const foundNos = proseArr.map(item => item?.chapter_no).filter(Boolean).join('、') || '无'
+    const foundNos = proseArr.map(item => item?.chapter_no || item?.chapterNo).filter(Boolean).join('、') || '无'
     throw new Error(`模型返回的正文章节中没有第${targetChapterNo}章，实际章节号为：${foundNos}`)
   }
   return resultPayload || {}
+}
+
+function firstReceiptValue(primary: any, fallback: any, snakeKey: string, camelKey: string) {
+  const primaryNested = primary?.oh_story_delivery_receipts || primary?.ohStoryDeliveryReceipts || {}
+  const fallbackNested = fallback?.oh_story_delivery_receipts || fallback?.ohStoryDeliveryReceipts || {}
+  const primaryNestedValue = primaryNested?.[snakeKey] ?? primaryNested?.[camelKey]
+  if (primaryNestedValue !== undefined && primaryNestedValue !== null) return primaryNestedValue
+  const primaryValue = primary?.[snakeKey] ?? primary?.[camelKey]
+  if (primaryValue !== undefined && primaryValue !== null) return primaryValue
+  const fallbackNestedValue = fallbackNested?.[snakeKey] ?? fallbackNested?.[camelKey]
+  if (fallbackNestedValue !== undefined && fallbackNestedValue !== null) return fallbackNestedValue
+  return fallback?.[snakeKey] ?? fallback?.[camelKey]
+}
+
+export function extractOhStoryDeliveryReceipts(targetProse: any = {}, resultPayload: any = {}) {
+  return {
+    chapter_blueprint: firstReceiptValue(targetProse, resultPayload, 'chapter_blueprint', 'chapterBlueprint') || {},
+    pre_draft_execution_receipts: firstReceiptValue(targetProse, resultPayload, 'pre_draft_execution_receipts', 'preDraftExecutionReceipts') || {},
+    scene_card_receipts: firstReceiptValue(targetProse, resultPayload, 'scene_card_receipts', 'sceneCardReceipts') || [],
+    delivery_risk_receipts: firstReceiptValue(targetProse, resultPayload, 'delivery_risk_receipts', 'deliveryRiskReceipts') || [],
+    revision_receipts: firstReceiptValue(targetProse, resultPayload, 'revision_receipts', 'revisionReceipts') || [],
+    deslop_repair_receipts: firstReceiptValue(targetProse, resultPayload, 'deslop_repair_receipts', 'deslopRepairReceipts') || [],
+    quality_audit_repair_receipts: firstReceiptValue(targetProse, resultPayload, 'quality_audit_repair_receipts', 'qualityAuditRepairReceipts') || [],
+  }
+}
+
+function sceneCardReceiptsFromBreakdown(sceneBreakdown: any[] = []) {
+  return asArray(sceneBreakdown)
+    .map((scene: any) => scene?.scene_card_receipts || scene?.sceneCardReceipts)
+    .filter(Boolean)
+}
+
+function refreshedSceneCardReceipts(selfCheck: any = {}, finalSceneBreakdown: any[] = []) {
+  const revision = selfCheck?.revision || {}
+  const revisionDeliveryReceipts = revision?.oh_story_delivery_receipts || revision?.ohStoryDeliveryReceipts || {}
+  const candidates = [
+    asArray(revisionDeliveryReceipts?.scene_card_receipts || revisionDeliveryReceipts?.sceneCardReceipts),
+    sceneCardReceiptsFromBreakdown(revision?.scene_breakdown || revision?.sceneBreakdown),
+    sceneCardReceiptsFromBreakdown(finalSceneBreakdown),
+    asArray(revision?.scene_card_receipts || revision?.sceneCardReceipts),
+  ]
+  return candidates.find(items => items.length > 0) || []
+}
+
+export function refreshOhStoryDeliveryReceiptsAfterRevision(currentReceipts: any = {}, selfCheck: any = {}, finalText = '', finalSceneBreakdown: any[] = [], contextPackage: any = {}) {
+  const revision = selfCheck?.revision || {}
+  const revisionDeliveryReceipts = revision?.oh_story_delivery_receipts || revision?.ohStoryDeliveryReceipts || {}
+  const sceneCardReceipts = refreshedSceneCardReceipts(selfCheck, finalSceneBreakdown)
+  const currentDeliveryRiskReceipts = asArray(currentReceipts?.delivery_risk_receipts || currentReceipts?.deliveryRiskReceipts)
+  const contextDeliveryReceipts = contextPackage?.oh_story_delivery_receipts || contextPackage?.ohStoryDeliveryReceipts || {}
+  const revisionDeliveryRiskReceipts = asArray(revisionDeliveryReceipts?.delivery_risk_receipts || revisionDeliveryReceipts?.deliveryRiskReceipts)
+  const fallbackDeliveryRiskReceipts = revisionDeliveryRiskReceipts.length > 0
+    ? revisionDeliveryRiskReceipts
+    : currentDeliveryRiskReceipts.length > 0
+      ? currentDeliveryRiskReceipts
+      : asArray(contextDeliveryReceipts?.delivery_risk_receipts || contextDeliveryReceipts?.deliveryRiskReceipts)
+  const preDraftExecutionReceipts = revisionDeliveryReceipts?.pre_draft_execution_receipts
+    || revisionDeliveryReceipts?.preDraftExecutionReceipts
+    || revision?.pre_draft_execution_receipts
+    || revision?.preDraftExecutionReceipts
+    || currentReceipts?.pre_draft_execution_receipts
+    || currentReceipts?.preDraftExecutionReceipts
+    || {}
+  const deliveryRiskContext = {
+    ...contextPackage,
+    oh_story_delivery_receipts: {
+      ...contextDeliveryReceipts,
+      delivery_risk_receipts: fallbackDeliveryRiskReceipts,
+    },
+  }
+  const deliveryRiskReceipts = normalizeDeliveryRiskReceipts(selfCheck?.review || {}, deliveryRiskContext, finalText)
+  const revisionReceipts = [
+    ...asArray(revisionDeliveryReceipts?.revision_receipts || revisionDeliveryReceipts?.revisionReceipts),
+    ...asArray(revision?.revision_receipts || revision?.revisionReceipts),
+    ...asArray(selfCheck?.revision_receipts || selfCheck?.revisionReceipts),
+  ]
+  const deslopRepairReceipts = [
+    ...asArray(revisionDeliveryReceipts?.deslop_repair_receipts || revisionDeliveryReceipts?.deslopRepairReceipts),
+    ...asArray(revision?.deslop_repair_receipts || revision?.deslopRepairReceipts),
+    ...asArray(selfCheck?.deslop_repair_receipts || selfCheck?.deslopRepairReceipts),
+  ]
+  const qualityAuditRepairReceipts = [
+    ...asArray(revisionDeliveryReceipts?.quality_audit_repair_receipts || revisionDeliveryReceipts?.qualityAuditRepairReceipts),
+    ...asArray(revision?.quality_audit_repair_receipts || revision?.qualityAuditRepairReceipts),
+    ...asArray(selfCheck?.quality_audit_repair_receipts || selfCheck?.qualityAuditRepairReceipts),
+  ]
+  return {
+    chapter_blueprint: currentReceipts?.chapter_blueprint || currentReceipts?.chapterBlueprint || {},
+    pre_draft_execution_receipts: preDraftExecutionReceipts,
+    scene_card_receipts: sceneCardReceipts.length > 0
+      ? sceneCardReceipts
+      : asArray(currentReceipts?.scene_card_receipts || currentReceipts?.sceneCardReceipts),
+    delivery_risk_receipts: deliveryRiskReceipts.length > 0
+      ? deliveryRiskReceipts
+      : asArray(currentReceipts?.delivery_risk_receipts || currentReceipts?.deliveryRiskReceipts),
+    revision_receipts: revisionReceipts.length > 0
+      ? revisionReceipts
+      : asArray(currentReceipts?.revision_receipts || currentReceipts?.revisionReceipts),
+    deslop_repair_receipts: deslopRepairReceipts.length > 0
+      ? deslopRepairReceipts
+      : asArray(currentReceipts?.deslop_repair_receipts || currentReceipts?.deslopRepairReceipts),
+    quality_audit_repair_receipts: qualityAuditRepairReceipts.length > 0
+      ? qualityAuditRepairReceipts
+      : asArray(currentReceipts?.quality_audit_repair_receipts || currentReceipts?.qualityAuditRepairReceipts),
+  }
 }
 
 export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoutesContext) {
@@ -504,6 +642,180 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
     }
   })
 
+  app.post('/api/novel/projects/:id/chapter-groups/start-unattended', async (req, res) => {
+    try {
+      const activeWorkspace = ctx.getWorkspace()
+      const project = await ctx.getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      let chapters = await listNovelChapters(activeWorkspace, project.id)
+      const outlines = await listNovelOutlines(activeWorkspace, project.id)
+      const firstUnwritten = chapters.find(chapter => !chapter.chapter_text)
+      const startNo = Math.max(1, Number(req.body.start_chapter || firstUnwritten?.chapter_no || activeChapterNo(chapters) + 1 || 1))
+      const rawTargetNo = Number(req.body.target_chapter || req.body.target_chapter_no || 0)
+      if (!rawTargetNo) return res.status(400).json({ error: 'target_chapter required' })
+      if (rawTargetNo < startNo) return res.status(400).json({ error: 'target_chapter must be greater than or equal to start_chapter', error_code: 'UNATTENDED_TARGET_BEFORE_START', start_chapter: startNo, target_chapter: rawTargetNo })
+      const targetNo = rawTargetNo
+      const maxRange = Math.max(1, Math.min(80, Number(req.body.max_chapters || 50)))
+      if (targetNo - startNo + 1 > maxRange) {
+        return res.status(400).json({ error: `无人值守单次最多 ${maxRange} 章，请缩小目标范围`, error_code: 'UNATTENDED_RANGE_TOO_LARGE', start_chapter: startNo, target_chapter: targetNo, max_chapters: maxRange })
+      }
+      const createMissing = req.body.create_missing !== false
+      const syncChapterFields = req.body.sync_chapter_fields !== false
+      const includeWritten = req.body.include_written === true
+      const chapterByNo = new Map(chapters.map(chapter => [Number(chapter.chapter_no || 0), chapter]))
+      const outlinesByChapterNo = new Map(outlines
+        .filter(outline => String(outline.outline_type || '') === 'chapter')
+        .map(outline => [outlineChapterNo(outline), outline])
+        .filter(([chapterNo]) => Number(chapterNo || 0) > 0) as Array<[number, any]>)
+      const createdChapters: any[] = []
+      const updatedChapters: any[] = []
+      const skipped: any[] = []
+      const selected: any[] = []
+
+      for (let chapterNo = startNo; chapterNo <= targetNo; chapterNo += 1) {
+        const outline = outlinesByChapterNo.get(chapterNo)
+        const skeleton = outline ? futureSkeletonFromOutline(outline) : null
+        let chapter = chapterByNo.get(chapterNo)
+        if (!chapter && createMissing) {
+          chapter = await createNovelChapter(activeWorkspace, {
+            project_id: project.id,
+            outline_id: outline?.id || null,
+            chapter_no: chapterNo,
+            title: skeleton?.title || outline?.title || `第${chapterNo}章`,
+            chapter_goal: skeleton?.chapter_goal || outline?.summary || `承接前文推进第${chapterNo}章核心冲突，并为下一章留下钩子。`,
+            chapter_summary: [skeleton?.conflict, skeleton?.payoff, skeleton?.commercial_purpose].filter(Boolean).join('；') || outline?.summary || '',
+            conflict: skeleton?.conflict || asArray(outline?.conflict_points)[0] || '',
+            ending_hook: skeleton?.ending_hook || outline?.hook || '',
+            status: 'draft',
+            raw_payload: {
+              source: 'unattended_goal',
+              unattended_goal: {
+                target_chapter: targetNo,
+                created_by: 'start-unattended',
+                needs_agent_completion: !outline,
+              },
+              ...(skeleton ? { future100: skeleton } : {}),
+            },
+          } as any)
+          chapterByNo.set(chapterNo, chapter)
+          createdChapters.push(chapter)
+        }
+        if (chapter && syncChapterFields && outline) {
+          const patch: any = {
+            outline_id: chapter.outline_id || outline.id,
+            title: chapter.title || skeleton?.title || outline.title,
+            chapter_goal: chapter.chapter_goal || skeleton?.chapter_goal || outline.summary || '',
+            chapter_summary: chapter.chapter_summary || [skeleton?.conflict, skeleton?.payoff, skeleton?.commercial_purpose].filter(Boolean).join('；') || outline.summary || '',
+            conflict: chapter.conflict || skeleton?.conflict || asArray(outline.conflict_points)[0] || '',
+            ending_hook: chapter.ending_hook || skeleton?.ending_hook || outline.hook || '',
+            raw_payload: {
+              ...(chapter.raw_payload || {}),
+              unattended_goal: {
+                ...(chapter.raw_payload?.unattended_goal || {}),
+                target_chapter: targetNo,
+                outline_id: outline.id,
+                auto_repair_missing_material: true,
+              },
+            },
+          }
+          const updated = await updateNovelChapter(activeWorkspace, chapter.id, patch, { createVersion: false })
+          if (updated) {
+            chapter = updated
+            chapterByNo.set(chapterNo, updated)
+            updatedChapters.push(updated)
+          }
+        }
+        if (!chapter) {
+          skipped.push({ chapter_no: chapterNo, reason: '缺章节记录，且未允许自动创建' })
+          continue
+        }
+        if (chapter.chapter_text && !includeWritten) {
+          skipped.push({ chapter_id: chapter.id, chapter_no: chapterNo, title: chapter.title, reason: '已有正文' })
+          continue
+        }
+        selected.push(chapter)
+      }
+
+      if (!selected.length) {
+        return res.status(409).json({ error: '无人值守目标范围内没有可入队章节', error_code: 'NO_UNATTENDED_CHAPTERS', start_chapter: startNo, target_chapter: targetNo, skipped })
+      }
+
+      chapters = await listNovelChapters(activeWorkspace, project.id)
+      const modelStrategy = project.reference_config?.model_strategy || ctx.getModelStrategy(project, Number(req.body.model_id || 0) || undefined)
+      const approvalPolicy = { ...(project.reference_config?.approval_policy || ctx.getApprovalPolicy(project)), allow_full_auto: true }
+      const configSnapshot = ctx.buildAgentConfigSnapshot(project, Number(req.body.model_id || 0) || undefined)
+      const qualityThreshold = Number(req.body.quality_threshold || project.reference_config?.quality_gate?.min_score || 78)
+      const output = {
+        chapter_ids: selected.map(chapter => chapter.id),
+        chapters: selected.map(chapter => ({
+          id: chapter.id,
+          chapter_no: chapter.chapter_no,
+          title: chapter.title,
+          status: chapter.chapter_text ? 'written' : 'pending',
+          material_score: chapter.chapter_goal && chapter.ending_hook ? 80 : 60,
+          scenes: normalizeSceneProduction(asArray(chapter.scene_breakdown).length ? chapter.scene_breakdown : asArray(chapter.scene_list), [], chapter.chapter_text ? 'accepted' : 'pending'),
+          stages: ctx.buildChapterGroupStages(),
+        })),
+        skipped_chapters: skipped,
+        created_chapters: createdChapters.map(chapter => ({ id: chapter.id, chapter_no: chapter.chapter_no, title: chapter.title })),
+        updated_chapters: updatedChapters.map(chapter => ({ id: chapter.id, chapter_no: chapter.chapter_no, title: chapter.title })),
+        current_index: 0,
+        mode: 'unattended_goal',
+        production_mode: 'full_auto',
+        model_strategy: modelStrategy,
+        approval_policy: approvalPolicy,
+        config_snapshot: configSnapshot,
+        unattended: {
+          enabled: true,
+          start_chapter: startNo,
+          target_chapter: targetNo,
+          allow_incomplete: req.body.allow_incomplete === true,
+          force_scene_cards: req.body.force_scene_cards !== false,
+          auto_repair_missing_material: true,
+          auto_repair_quality_gate: true,
+          advance_rule: 'quality_gate_passed_then_next_chapter',
+        },
+        policy: {
+          stop_on_failure: req.body.stop_on_failure !== false,
+          allow_incomplete: req.body.allow_incomplete === true,
+          force_scene_cards: req.body.force_scene_cards !== false,
+          require_scene_confirmation: false,
+          quality_threshold: qualityThreshold,
+          production_mode: 'full_auto',
+          auto_repair_missing_material: true,
+          auto_repair_quality_gate: true,
+        },
+      }
+      const run = await appendNovelRun(activeWorkspace, {
+        project_id: project.id,
+        run_type: 'chapter_group_generation',
+        step_name: `unattended-chapter-${startNo}-${targetNo}`,
+        status: 'ready',
+        input_ref: JSON.stringify(req.body || {}),
+        output_ref: JSON.stringify(output),
+      })
+      res.json({
+        ok: true,
+        run,
+        group: output,
+        worker_start_endpoint: `/api/novel/projects/${project.id}/run-queue/start-worker`,
+        summary: {
+          start_chapter: startNo,
+          target_chapter: targetNo,
+          queued: selected.length,
+          skipped: skipped.length,
+          created: createdChapters.length,
+          updated: updatedChapters.length,
+          quality_threshold: qualityThreshold,
+          auto_repair_missing_material: true,
+        },
+        chapters: chapters.filter(chapter => chapter.chapter_no >= startNo && chapter.chapter_no <= targetNo),
+      })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
   app.post('/api/novel/projects/:id/chapter-groups/:runId/execute', async (req, res) => {
     try {
       const activeWorkspace = ctx.getWorkspace()
@@ -512,6 +824,10 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
       const runs = await listNovelRuns(activeWorkspace, project.id)
       const run = runs.find(item => item.id === Number(req.params.runId))
       if (!run || run.run_type !== 'chapter_group_generation') return res.status(404).json({ error: 'chapter group run not found' })
+      const payload = parseJsonLikePayload(run.output_ref) || {}
+      const chapters = Array.isArray(payload.chapters) ? payload.chapters : []
+      const item = chapters[Number(payload.current_index || 0)] || {}
+      if (isApprovalBlockerChapter(item, payload)) return res.status(409).json(approvalBlockerRoutePayload(item, payload, '直接执行'))
       const result = await ctx.executeChapterGroupRunRecord(activeWorkspace, project, run, req.body || {})
       res.json({ ok: true, ...result })
     } catch (error) {
@@ -534,6 +850,7 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
       const index = chapterId ? chapters.findIndex((item: any) => Number(item.id) === chapterId) : Number(payload.current_index || 0)
       if (index < 0 || !chapters[index]) return res.status(404).json({ error: 'chapter in run not found' })
       const item = chapters[index]
+      if (isApprovalBlockerChapter(item, payload, stage)) return res.status(409).json(approvalBlockerRoutePayload(item, payload, '用人工确认直接'))
       const approvals = {
         ...(item.approvals || {}),
         [stage]: {
@@ -575,6 +892,8 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
       const chapterId = Number(req.body.chapter_id || 0)
       const index = chapterId ? chapters.findIndex((item: any) => Number(item.id) === chapterId) : Number(payload.current_index || 0)
       if (index < 0 || !chapters[index]) return res.status(404).json({ error: 'chapter in run not found' })
+      const item = chapters[index]
+      if (isApprovalBlockerChapter(item, payload)) return res.status(409).json(approvalBlockerRoutePayload(item, payload, '直接重试'))
       chapters[index] = { ...chapters[index], status: 'ready', next_run_at: '', error: '', error_code: '' }
       const updated = await updateNovelRun(activeWorkspace, run.id, {
         status: 'ready',
@@ -601,6 +920,7 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
       const index = chapterId ? chapters.findIndex((item: any) => Number(item.id) === chapterId) : Number(payload.current_index || 0)
       if (index < 0 || !chapters[index]) return res.status(404).json({ error: 'chapter in run not found' })
       const item = chapters[index]
+      if (isApprovalBlockerChapter(item, payload)) return res.status(409).json(approvalBlockerRoutePayload(item, payload, '跳过章节'))
       const stages = (Array.isArray(item.stages) && item.stages.length ? item.stages : ctx.buildChapterGroupStages())
         .map((stage: any) => ['success', 'skipped'].includes(stage.status) ? stage : { ...stage, status: 'skipped', skipped_at: new Date().toISOString() })
       const nextIndex = Number(payload.current_index || 0) <= index ? index + 1 : Number(payload.current_index || 0)
@@ -931,9 +1251,10 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
         return res.status(502).json(errorPayload)
       }
       const plainProseFallback = extractPlainProseFallback(result, 800)
-      const chapterText = targetProse?.chapter_text || resultPayload?.chapter_text || plainProseFallback
-      const sceneBreakdown = targetProse?.scene_breakdown || resultPayload?.scene_breakdown || []
-      const continuityNotes = targetProse?.continuity_notes || resultPayload?.continuity_notes || []
+      const chapterText = targetProse?.chapter_text || targetProse?.chapterText || resultPayload?.chapter_text || resultPayload?.chapterText || plainProseFallback
+      const sceneBreakdown = targetProse?.scene_breakdown || targetProse?.sceneBreakdown || resultPayload?.scene_breakdown || resultPayload?.sceneBreakdown || []
+      const continuityNotes = targetProse?.continuity_notes || targetProse?.continuityNotes || resultPayload?.continuity_notes || resultPayload?.continuityNotes || []
+      let ohStoryDeliveryReceipts = extractOhStoryDeliveryReceipts(targetProse, resultPayload)
       if (!chapterText) {
         const resultError = String((result as any).error || (result as any).fallbackReason || '模型未返回正文')
         const runtimeDiagnostics = {
@@ -1101,6 +1422,7 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
         }
         return res.status(502).json(errorPayload)
       }
+      ohStoryDeliveryReceipts = refreshOhStoryDeliveryReceiptsAfterRevision(ohStoryDeliveryReceipts, selfCheck, finalText, finalSceneBreakdown, contextPackage)
 
       try {
         const review = selfCheck?.review || {}
@@ -1109,7 +1431,7 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
           review_type: 'prose_quality',
           status: review.passed === false || Number(review.score || 100) < 78 ? 'warn' : 'ok',
           summary: `章节自检评分 ${review.score ?? '-'}${selfCheck?.revised ? '，已生成修订稿' : ''}`,
-          issues: Array.isArray(review.issues) ? review.issues.map((issue: any) => `${issue.severity || 'medium'}｜${issue.description || issue}`) : [],
+          issues: Array.isArray(review.issues) ? review.issues.map(formatReviewIssueForStorage) : [],
           payload: JSON.stringify({ chapter_id: chapter.id, context_package: contextPackage, editor_rewrite: editorRewrite, self_check: selfCheck, pipeline, config_snapshot: configSnapshot }),
         })
       } catch (reviewStoreError) {
@@ -1146,7 +1468,18 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
       const updated = await updateNovelChapter(activeWorkspace, chapter.id, {
         chapter_text: finalText,
         continuity_notes: finalContinuityNotes,
-        raw_payload: { ...(chapter.raw_payload || {}), generated_scene_breakdown: finalSceneBreakdown },
+        raw_payload: {
+          ...(chapter.raw_payload || {}),
+          generated_scene_breakdown: finalSceneBreakdown,
+          oh_story_delivery_receipts: ohStoryDeliveryReceipts,
+          chapter_blueprint: ohStoryDeliveryReceipts.chapter_blueprint,
+          pre_draft_execution_receipts: ohStoryDeliveryReceipts.pre_draft_execution_receipts,
+          scene_card_receipts: ohStoryDeliveryReceipts.scene_card_receipts,
+          delivery_risk_receipts: ohStoryDeliveryReceipts.delivery_risk_receipts,
+          revision_receipts: ohStoryDeliveryReceipts.revision_receipts,
+          deslop_repair_receipts: ohStoryDeliveryReceipts.deslop_repair_receipts,
+          quality_audit_repair_receipts: ohStoryDeliveryReceipts.quality_audit_repair_receipts,
+        },
         status: 'draft',
       }, { versionSource: selfCheck?.revised ? 'repair' : editorRewrite?.edited ? 'editor_rewrite' : 'agent_execute' })
       const versionsAfterStore = await listChapterVersions(activeWorkspace, chapter.id).catch(() => [])
@@ -1161,7 +1494,7 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
       } catch (stateError) {
         markStage('story_state', '故事状态机更新失败', 'warn', String(stateError).slice(0, 200))
       }
-      const pipelineResult = { context_package: contextPackage, editor_rewrite: editorRewrite, self_check: selfCheck, pipeline, diff: generationDiff, previous_version: previousVersion, config_snapshot: configSnapshot }
+      const pipelineResult = { context_package: contextPackage, editor_rewrite: editorRewrite, self_check: selfCheck, oh_story_delivery_receipts: ohStoryDeliveryReceipts, pipeline, diff: generationDiff, previous_version: previousVersion, config_snapshot: configSnapshot }
       await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'success', input_ref: JSON.stringify(req.body), output_ref: JSON.stringify({ outputSource: (result as any).outputSource, modelId: (result as any).modelId, modelName: (result as any).modelName, providerId: (result as any).providerId, usage: (result as any).usage, reference_report: referenceReport, safety_decision: safetyDecision, safety_explanation: safetyExplanation, migration_audit: migrationAudit, story_state_update: storyStateUpdate, ...pipelineResult }) })
       if (!wantsStream) return res.json({ chapter: updated, result, reference_report: referenceReport, safety_decision: safetyDecision, safety_explanation: safetyExplanation, migration_audit: migrationAudit, story_state_update: storyStateUpdate, ...pipelineResult })
       const fullText = String(finalText || '')

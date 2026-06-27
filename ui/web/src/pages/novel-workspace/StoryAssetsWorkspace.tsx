@@ -68,7 +68,7 @@ export function StoryAssetsWorkspace({
         <Card size="small"><Statistic title="当前章节" value={activeChapter?.chapter_no || '-'} prefix="第" suffix={activeChapter?.chapter_no ? '章' : ''} /></Card>
       </div>
 
-      <SettingAssetGraphPanel projectId={projectId} />
+      <SettingAssetGraphPanel projectId={projectId} selectedModelId={selectedModelId} />
 
       <Card className="novel-story-assets-workbench" bordered={false}>
         <SettingWorkshopPanel

@@ -92,6 +92,58 @@ describe('novel project seed prompt', () => {
     expect(epicPrompt).toContain('长期追读')
   })
 
+  test('asks seed generation to output oh-story creation contracts', async () => {
+    const { buildProjectSeedPrompt } = await import('./novel-core-routes')
+
+    const prompt = buildProjectSeedPrompt('双主角规则怪谈', '规则测试', 'epic')
+
+    expect(prompt).toContain('target_reader_contract')
+    expect(prompt).toContain('genre_positioning_contract')
+    expect(prompt).toContain('core_contract_radar')
+    expect(prompt).toContain('reader_retention_contract')
+    expect(prompt).toContain('写给谁看')
+    expect(prompt).toContain('读者想看什么')
+    expect(prompt).toContain('本章给什么')
+    expect(prompt).toContain('拉长板而非补短板')
+    expect(prompt).toContain('当初吸引读者的卖点还在吗')
+    expect(prompt).toContain('前300字')
+  })
+
+  test('preserves model generated creation contracts while recovering project seeds', async () => {
+    const { buildRecoverableProjectSeed } = await import('./novel-core-routes')
+
+    const recovered = buildRecoverableProjectSeed({
+      title: '灰域双生',
+      genre: '都市规则怪谈',
+      synopsis: '双主角进入灰域规则副本。',
+      logline: '一个负责打到怪物露出规则，一个负责拆出胜利条件。',
+      worldbuilding: { world_summary: '灰域污染现实地点。' },
+      protagonist: { name: '林野', goal: '打穿灰域' },
+      commercial_positioning: {
+        platform: '番茄',
+        reader_promise: '每章都有规则发现、代价压力和反制爽点。',
+        selling_points: ['莽夫破局', '规则分析'],
+        risks: ['不能写成纯打怪'],
+      },
+      writing_bible: {
+        target_reader_contract: { reader_profile: '番茄男频规则怪谈读者' },
+        genre_positioning_contract: { genre_tags: ['都市规则怪谈'] },
+        core_contract_radar: { must_serve: ['规则发现'] },
+        reader_retention_contract: { opening_hook_rule: '前300字承接上一章压力' },
+      },
+      volume_outlines: [{ title: '第一卷', summary: '员工餐厅副本' }],
+      chapter_outlines: [{ chapter_no: 1, title: '午夜入职', summary: '读到第一份规则' }],
+    }, '双主角规则怪谈', '灰域双生', 'epic')
+
+    expect(recovered.seed.commercial_positioning.platform).toBe('番茄')
+    expect(recovered.seed.commercial_positioning.reader_promise).toContain('每章都有规则发现')
+    expect(recovered.seed.commercial_positioning.risks.join('｜')).toContain('不能写成纯打怪')
+    expect(recovered.seed.writing_bible.target_reader_contract.reader_profile).toContain('番茄男频')
+    expect(recovered.seed.writing_bible.genre_positioning_contract.genre_tags.join('｜')).toContain('都市规则怪谈')
+    expect(recovered.seed.writing_bible.core_contract_radar.must_serve.join('｜')).toContain('规则发现')
+    expect(recovered.seed.writing_bible.reader_retention_contract.opening_hook_rule).toContain('前300字')
+  })
+
   test('rejects sparse seeds that would render an empty deep draft review', async () => {
     const { hasUsableProjectSeed } = await import('./novel-core-routes')
 
@@ -419,6 +471,75 @@ describe('novel project seed prompt', () => {
     const chapters = await listNovelChapters(workspace, response.body.id)
     expect(chapters).toHaveLength(30)
     expect(chapters[0].title).toBe('第1章')
+  })
+
+  test('materializes oh-story creation contracts into the writing bible', async () => {
+    const workspace = await tempDir('mangaforge-novel-materialize-creation-contracts-')
+    const { registerNovelCoreRoutes } = await import('./novel-core-routes')
+    const { app, handlers } = createRouteHarness()
+    registerNovelCoreRoutes(app as any, () => workspace)
+    const createProject = handlers.get('POST /api/novel/projects')
+    expect(createProject).toBeTruthy()
+
+    const seed = {
+      title: '灰域双生',
+      genre: '都市规则怪谈',
+      sub_genres: ['双主角', '无限流'],
+      length_target: 'epic',
+      target_audience: '18-30 岁番茄男频读者，喜欢规则破解、强反差搭档和持续追更钩子。',
+      synopsis: '莽夫林野和规则分析师沈砚被卷入灰域副本，用武力试错和规则推演反制怪谈。',
+      logline: '一个负责把怪物打到暴露规则，一个负责把规则拆成胜利条件。',
+      main_conflict: '灰域规则不断升级，双主角必须在代价失控前找出副本漏洞。',
+      commercial_tags: ['规则破解爽点', '双主角互补', '副本升级'],
+      commercial_positioning: {
+        platform: '番茄',
+        reader_promise: '每章都有规则发现、代价压力和一次可感知反制。',
+        selling_points: ['莽夫破局制造反差', '规则分析带来智斗爽感'],
+        risks: ['不能写成纯打怪', '不能让规则分析停留在解释'],
+      },
+      protagonist: { name: '林野', goal: '打穿灰域副本并救出妹妹', motivation: '把不可控规则变成可打破的秩序' },
+      worldbuilding: {
+        world_summary: '灰域会把现实地点污染成带规则的副本。',
+        rules: ['违反规则会支付记忆或身体代价', '副本漏洞必须由行动触发'],
+      },
+      volume_outlines: [{ title: '第一卷：午夜员工餐厅', summary: '建立双主角互补和灰域规则升级压力。' }],
+      chapter_outlines: [{ chapter_no: 1, title: '午夜入职', summary: '两人第一次读到员工餐厅规则。' }],
+    }
+
+    const response = await callRoute(createProject, {
+      body: {
+        title: seed.title,
+        genre: seed.genre,
+        length_target: seed.length_target,
+        target_audience: seed.target_audience,
+        synopsis: seed.synopsis,
+        reference_config: { project_seed: seed },
+        auto_materialize_seed: true,
+      },
+    })
+
+    expect(response.statusCode).toBe(200)
+    const bible = response.body.reference_config.writing_bible
+    expect(bible.target_reader_contract.source).toBe('oh_story_creation_contract_v1')
+    expect(bible.target_reader_contract.reader_profile).toContain('18-30')
+    expect(bible.target_reader_contract.reader_desires.join('｜')).toContain('规则破解爽点')
+    expect(bible.target_reader_contract.chapter_value_test.join('｜')).toContain('写给谁看')
+    expect(bible.genre_positioning_contract.source).toBe('oh_story_creation_contract_v1')
+    expect(bible.genre_positioning_contract.genre_tags.join('｜')).toContain('都市规则怪谈')
+    expect(bible.genre_positioning_contract.platform).toBe('番茄')
+    expect(bible.genre_positioning_contract.selling_points.join('｜')).toContain('莽夫破局')
+    expect(bible.core_contract_radar.source).toBe('oh_story_creation_contract_v1')
+    expect(bible.core_contract_radar.must_serve.join('｜')).toContain('每章都有规则发现')
+    expect(bible.core_contract_radar.no_drift.join('｜')).toContain('不能写成纯打怪')
+    expect(bible.reader_retention_contract.source).toBe('oh_story_creation_contract_v1')
+    expect(bible.reader_retention_contract.opening_hook_rule).toContain('前300字')
+    expect(bible.reader_retention_contract.ending_hook_rule).toContain('下一章')
+    expect(bible.commercial_positioning.reader_promise).toContain('每章都有规则发现')
+    expect(bible.commercial_positioning.selling_points.join('｜')).toContain('规则分析')
+    expect(response.body.reference_config.commercial_positioning.platform).toBe('番茄')
+    expect(response.body.reference_config.commercial_positioning.reader_promise).toContain('每章都有规则发现')
+    expect(response.body.reference_config.commercial_positioning.selling_points.join('｜')).toContain('规则分析')
+    expect(response.body.reference_config.commercial_positioning.risks.join('｜')).toContain('不能写成纯打怪')
   })
 
   test('materialization keeps structural chapter beats out of chapter titles', async () => {

@@ -27,12 +27,17 @@ export function createNovelOriginalIncubatorService() {
     'outlines: array，至少包含 master 和 1-3 个 volume，每项 outline_type,title,summary,conflict_points,turning_points,hook,target_length',
     'chapters: array，生成前 30 章或指定 chapter_count 的章纲，每项 chapter_no,title,chapter_goal,chapter_summary,conflict,ending_hook,must_advance,forbidden_repeats',
     'setting_entities: array，专门用于设定工坊入库；每项 entity_type,name,summary,constraints_json,state_json,payload_json。entity_type 只能是 character/realm/ability/item/boss/rule/faction/location/foreshadowing/timeline。',
-    'writing_bible: {promise,world_rules,mainline,volume_plan,style_lock,safety_policy,forbidden}',
+    'writing_bible: {promise,world_rules,mainline,volume_plan,style_lock,safety_policy,forbidden,target_reader_contract,genre_positioning_contract,core_contract_radar,reader_retention_contract,opening_strategy_contract}',
+    'writing_bible.target_reader_contract: {reader_profile,reader_desires,emotional_gap,chapter_value_test,quality_checks}，必须回答“写给谁看、读者想看什么、本章给什么”。',
+    'writing_bible.genre_positioning_contract: {genre_tags,platform,reader_psychology,core_hook,type_formula,selling_points,long_board,innovation_boundary,quality_checks}，必须包含“拉长板而非补短板”。',
+    'writing_bible.core_contract_radar: {must_serve,no_drift,theme_unity_rules,repair_focus,periodic_drift_check}，periodic_drift_check.question 必须包含“当初吸引读者的卖点还在吗”。',
+    'writing_bible.reader_retention_contract: {retention_double_engine,opening_hook_rule,ending_hook_rule,reward_randomness_rule,quality_checks}，opening_hook_rule 必须包含“前300字”，ending_hook_rule 必须留下下一章动作压力。',
+    'writing_bible.opening_strategy_contract: {hook_type,opening_flow,mainline_graft,first_5_chapter_promise,threshold_ladder,forbidden_mixing,quality_checks}，hook_type 只能取“事件噱头/金手指噱头/人设噱头”之一；必须明确事件噱头和金手指噱头不能混用，写清前5章如何完成吸量承诺、何时嫁接主线、如何用 threshold_ladder 设门槛拉长剧情。',
     'commercial_positioning: {platform,reader_promise,selling_points,tropes,risks}',
     '',
     '必须只输出一个合法 JSON object，不要输出 Markdown、解释、代码块或空对象。',
     '如果无法完整生成，也必须至少输出 commercial_positioning、characters、outlines、chapters 四类内容；chapters 数量不得少于 5。',
-    '要求：主角目标清晰，金手指/能力有代价，前 10 章追读钩子密集，分卷目标明确，避免空泛设定。',
+    '要求：主角目标清晰，金手指/能力有代价，前 10 章追读钩子密集，分卷目标明确；创建阶段必须先立清目标读者、题材定位、核心承诺雷达、追读留存契约和开篇噱头策略，避免空泛设定或开篇承诺混乱。',
   ].join('\n')
 
   const normalizeIncubatorPayload = (payload: any, chapterCount: number) => {

@@ -401,9 +401,16 @@ export function buildSettingRelationshipGraph(input: SettingRelationshipGraphInp
     }
 
     if (STORYLINE_TYPES.has(String(setting.entity_type || ''))) {
-      for (const name of stringValues(payload.related_characters ?? payload.related_factions)) {
-        const target = settingsByName.get(name)
-        if (target) addEdge(edges, { source: settingNodeId(target), target: source, relation_type: 'in_storyline', confidence: 'inferred', start_chapter_no: firstNumber(setting.first_chapter_no, payload.start_chapter_no), evidence: 'payload_json.related_characters' })
+      const storylineRefs = [
+        { value: payload.related_characters, evidence: 'payload_json.related_characters' },
+        { value: payload.related_factions, evidence: 'payload_json.related_factions' },
+        { value: payload.related_foreshadowing, evidence: 'payload_json.related_foreshadowing' },
+      ]
+      for (const refGroup of storylineRefs) {
+        for (const name of stringValues(refGroup.value)) {
+          const target = settingsByName.get(name)
+          if (target) addEdge(edges, { source: settingNodeId(target), target: source, relation_type: 'in_storyline', confidence: 'inferred', start_chapter_no: firstNumber(setting.first_chapter_no, payload.start_chapter_no), evidence: refGroup.evidence })
+        }
       }
     }
   }

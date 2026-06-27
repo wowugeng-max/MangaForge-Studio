@@ -4,9 +4,15 @@ import { readFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import {
+  applySettingRelationshipRepairPatches,
   applyDiscoveredAssetsToProject,
+  buildPendingStateUpdates,
   buildSettingAgentPrompt,
+  buildSettingRelationshipRepairPrompt,
+  normalizeSettingConsistencyStateUpdatesPayload,
   normalizeSettingAgentPayload,
+  normalizeSettingRelationshipRepairPayload,
+  normalizeSettingUsagePayload,
   SETTING_TYPES,
 } from './novel-setting-routes'
 import {
@@ -120,6 +126,45 @@ describe('setting agent workflow', () => {
     expect(entities.find(item => item.name === '打破规则牢笼')?.payload_json).toMatchObject({ priority: 1, expected_payoff: '脱离无限副本' })
   })
 
+  test('normalizes camelCase setting-agent systems into setting entities', () => {
+    const entities = normalizeSettingAgentPayload({
+      abilitySystem: {
+        abilities: [
+          { abilityName: '食兽感应', summary: '能感知妖兽弱点', cost: '消耗气血', owner: '丁松言' },
+        ],
+      },
+      bossLadder: {
+        bosses: [
+          { bossName: '青帝遗影', summary: '远古残影压迫主线', actionLogic: '诱导主角吞噬禁兽' },
+        ],
+      },
+      foreshadowingPlan: [
+        { name: '青铜断齿', summary: '后续揭开食兽源头', payoffChapter: 80 },
+      ],
+      characterArcs: [
+        { name: '丁松言食兽代价线', summary: '力量越强越接近兽化', relatedCharacters: ['丁松言'], nextAdvanceChapter: 8 },
+      ],
+      storylines: [
+        { entityType: 'mainline', name: '食兽重构之路', summary: '主角重构武学体系', startChapterNo: 1, expectedPayoff: '建立新修行路' },
+      ],
+    }, 9)
+
+    expect(entities.map(item => item.entity_type)).toEqual(expect.arrayContaining([
+      'ability',
+      'boss',
+      'foreshadowing',
+      'character_arc',
+      'mainline',
+    ]))
+    expect(entities.find(item => item.name === '食兽感应')?.constraints_json).toMatchObject({ cost: '消耗气血' })
+    expect(entities.find(item => item.name === '食兽感应')?.state_json).toMatchObject({ owner: '丁松言' })
+    expect(entities.find(item => item.name === '青帝遗影')?.constraints_json).toMatchObject({ action_logic: '诱导主角吞噬禁兽' })
+    expect(entities.find(item => item.name === '青铜断齿')?.state_json).toMatchObject({ payoff_chapter: 80 })
+    expect(entities.find(item => item.name === '丁松言食兽代价线')?.state_json).toMatchObject({ next_advance_chapter: 8 })
+    expect(entities.find(item => item.name === '丁松言食兽代价线')?.payload_json).toMatchObject({ related_characters: ['丁松言'] })
+    expect(entities.find(item => item.name === '食兽重构之路')?.payload_json).toMatchObject({ start_chapter_no: 1, expected_payoff: '建立新修行路' })
+  })
+
   test('uses setting-agent in the project setting incubation route', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-setting-routes.ts'), 'utf8')
     const routeStart = source.indexOf("app.post('/api/novel/projects/:id/settings/incubate-from-project'")
@@ -151,6 +196,227 @@ describe('setting agent workflow', () => {
     expect(source).toContain('listNovelChapterSettingUsage')
     expect(source).toContain('listNovelCharacters')
     expect(source).toContain('listNovelChapters')
+  })
+
+  test('asks the setting agent for reviewable relationship repair patches', () => {
+    const prompt = buildSettingRelationshipRepairPrompt(
+      { title: '剑蚀大荒', length_target: 'epic' },
+      [
+        { id: 1, entity_type: 'boss', name: '青帝遗影', summary: '远古残影。' },
+        { id: 2, entity_type: 'mainline', name: '食兽重构之路', summary: '主角重构武学体系。' },
+        { id: 3, entity_type: 'character', name: '丁松言', summary: '主角。' },
+      ],
+      [
+        { type: 'isolated_key_asset', entity_id: 1, entity_name: '青帝遗影', message: '还没有和其他核心资产建立关系' },
+      ],
+      { summary: { isolated_key_asset_count: 1 } },
+    )
+
+    expect(prompt).toContain('relationship repair')
+    expect(prompt).toContain('只输出 JSON')
+    expect(prompt).toContain('patches')
+    expect(prompt).toContain('related_entity_ids')
+    expect(prompt).toContain('state_owner')
+    expect(prompt).toContain('payload_related_characters')
+    expect(prompt).toContain('青帝遗影')
+  })
+
+  test('normalizes model relationship repair output into safe patch objects', () => {
+    const settings = [
+      { id: 1, entity_type: 'boss', name: '青帝遗影' },
+      { id: 2, entity_type: 'mainline', name: '食兽重构之路' },
+      { id: 3, entity_type: 'character', name: '丁松言' },
+      { id: 4, entity_type: 'ability', name: '食兽感应' },
+    ]
+
+    const patches = normalizeSettingRelationshipRepairPayload({
+      patches: [
+        { source_id: 1, target_id: 2, patch_type: 'related_entity_ids', relation_type: 'mainline_pressure', reason: '青帝遗影是主线威胁源', confidence: 0.9 },
+        { source_id: 4, target_id: 3, patch_type: 'state_owner', reason: '能力属于主角', confidence: 0.88 },
+        { source_id: 2, target_id: 3, patch_type: 'payload_related_characters', reason: '主线围绕主角推进', confidence: 0.86 },
+        { source_id: 999, target_id: 3, patch_type: 'related_entity_ids', reason: '不存在资产' },
+        { source_id: 1, target_id: 1, patch_type: 'related_entity_ids', reason: '不能自连' },
+      ],
+    }, settings)
+
+    expect(patches).toEqual([
+      expect.objectContaining({ source_id: 1, target_id: 2, patch_type: 'related_entity_ids', source_name: '青帝遗影', target_name: '食兽重构之路', confidence: 0.9 }),
+      expect.objectContaining({ source_id: 4, target_id: 3, patch_type: 'state_owner', source_name: '食兽感应', target_name: '丁松言', confidence: 0.88 }),
+      expect.objectContaining({ source_id: 2, target_id: 3, patch_type: 'payload_related_characters', source_name: '食兽重构之路', target_name: '丁松言', confidence: 0.86 }),
+    ])
+  })
+
+  test('rejects relationship repair patches that violate source and target type rules', () => {
+    const settings = [
+      { id: 1, entity_type: 'ability', name: '食兽感应' },
+      { id: 2, entity_type: 'mainline', name: '食兽重构之路' },
+      { id: 3, entity_type: 'character', name: '丁松言' },
+      { id: 4, entity_type: 'realm', name: '初入食兽' },
+      { id: 5, entity_type: 'faction', name: '青帝残庭' },
+      { id: 6, entity_type: 'foreshadowing', name: '青铜断齿' },
+    ]
+
+    const patches = normalizeSettingRelationshipRepairPayload({
+      patches: [
+        { source_id: 1, target_id: 2, patch_type: 'state_owner', reason: '能力不能归属于主线' },
+        { source_id: 2, target_id: 1, patch_type: 'state_abilities', reason: '主线不能挂能力状态' },
+        { source_id: 3, target_id: 4, patch_type: 'state_realm', reason: '主角进入境界', confidence: 0.89 },
+        { source_id: 3, target_id: 5, patch_type: 'state_faction', reason: '主角被势力接纳', confidence: 0.85 },
+        { source_id: 2, target_id: 3, patch_type: 'payload_related_characters', reason: '主线围绕主角推进', confidence: 0.87 },
+        { source_id: 2, target_id: 6, patch_type: 'payload_related_foreshadowing', reason: '主线埋下断齿伏笔', confidence: 0.83 },
+        { source_id: 3, target_id: 6, patch_type: 'payload_related_foreshadowing', reason: '角色不是剧情线容器' },
+      ],
+    }, settings)
+
+    expect(patches).toEqual([
+      expect.objectContaining({ source_id: 3, target_id: 4, patch_type: 'state_realm' }),
+      expect.objectContaining({ source_id: 3, target_id: 5, patch_type: 'state_faction' }),
+      expect.objectContaining({ source_id: 2, target_id: 3, patch_type: 'payload_related_characters' }),
+      expect.objectContaining({ source_id: 2, target_id: 6, patch_type: 'payload_related_foreshadowing' }),
+    ])
+  })
+
+  test('accepts camelCase relationship repair payloads from model output', () => {
+    const settings = [
+      { id: 1, entity_type: 'boss', name: '青帝遗影' },
+      { id: 2, entity_type: 'mainline', name: '食兽重构之路' },
+      { id: 3, entity_type: 'character', name: '丁松言' },
+    ]
+
+    const patches = normalizeSettingRelationshipRepairPayload({
+      relationshipPatches: [
+        {
+          sourceId: 1,
+          targetId: 2,
+          patchType: 'related_entity_ids',
+          relationType: 'mainline_pressure',
+          reason: '青帝遗影是主线威胁源',
+          confidence: 0.91,
+        },
+        {
+          entityId: 2,
+          relatedName: '丁松言',
+          patchType: 'payload_related_characters',
+          relationType: 'protagonist_arc',
+          rationale: '主线必须围绕主角推进',
+          confidence: 0.87,
+        },
+      ],
+    }, settings)
+
+    expect(patches).toEqual([
+      expect.objectContaining({ source_id: 1, target_id: 2, patch_type: 'related_entity_ids', relation_type: 'mainline_pressure', confidence: 0.91 }),
+      expect.objectContaining({ source_id: 2, target_id: 3, patch_type: 'payload_related_characters', relation_type: 'protagonist_arc', reason: '主线必须围绕主角推进', confidence: 0.87 }),
+    ])
+  })
+
+  test('applies relationship repair patches to fields consumed by the graph builder', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-relationship-repair-'))
+    const project = await createNovelProject(workspace, { title: '剑蚀大荒', length_target: 'epic' })
+    const boss = await createNovelSettingEntity(workspace, { project_id: project.id, entity_type: 'boss', name: '青帝遗影' } as any)
+    const mainline = await createNovelSettingEntity(workspace, { project_id: project.id, entity_type: 'mainline', name: '食兽重构之路', payload_json: {} } as any)
+    const protagonist = await createNovelSettingEntity(workspace, { project_id: project.id, entity_type: 'character', name: '丁松言', state_json: {} } as any)
+    const ability = await createNovelSettingEntity(workspace, { project_id: project.id, entity_type: 'ability', name: '食兽感应', state_json: {} } as any)
+
+    const result = await applySettingRelationshipRepairPatches(workspace, project.id, [
+      { source_id: boss.id, target_id: mainline.id, patch_type: 'related_entity_ids', reason: '主线威胁源', confidence: 0.9 },
+      { source_id: ability.id, target_id: protagonist.id, patch_type: 'state_owner', reason: '能力属于主角', confidence: 0.88 },
+      { source_id: mainline.id, target_id: protagonist.id, patch_type: 'payload_related_characters', reason: '主线围绕主角推进', confidence: 0.86 },
+    ])
+
+    const settings = await listNovelSettingEntities(workspace, project.id)
+    const updatedBoss = settings.find(item => item.id === boss.id)
+    const updatedAbility = settings.find(item => item.id === ability.id)
+    const updatedMainline = settings.find(item => item.id === mainline.id)
+
+    expect(result.applied).toHaveLength(3)
+    expect(updatedBoss?.related_entity_ids).toContain(mainline.id)
+    expect(updatedAbility?.state_json).toMatchObject({ owner: '丁松言' })
+    expect(updatedMainline?.payload_json?.related_characters).toContain('丁松言')
+  })
+
+  test('exposes relationship repair suggest and apply endpoints', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-setting-routes.ts'), 'utf8')
+
+    expect(source).toContain("app.post('/api/novel/projects/:id/settings/relationship-repair/suggest'")
+    expect(source).toContain("app.post('/api/novel/projects/:id/settings/relationship-repair/apply'")
+    expect(source).toContain('buildSettingRelationshipRepairPrompt')
+    expect(source).toContain('normalizeSettingRelationshipRepairPayload')
+    expect(source).toContain('applySettingRelationshipRepairPatches')
+  })
+
+  test('accepts camelCase setting consistency state updates from review output', () => {
+    const stateUpdates = normalizeSettingConsistencyStateUpdatesPayload({
+      requiredStateUpdates: [
+        {
+          entityId: 5,
+          actualStateChange: { owner: '丁松言', status: '暴露' },
+          reason: '正文已经让主角获得食兽感应',
+        },
+      ],
+    })
+    const pending = buildPendingStateUpdates(
+      stateUpdates,
+      [{ id: 5, entity_type: 'ability', name: '食兽感应', summary: '感知妖兽弱点', state_json: { status: '隐藏' } }],
+      [{ id: 9, entity_id: 5 }],
+      { id: 11, chapter_no: 3 },
+    )
+
+    expect(pending).toEqual([
+      expect.objectContaining({
+        entity_id: 5,
+        name: '食兽感应',
+        usage_id: 9,
+        actual_state_change: { owner: '丁松言', status: '暴露' },
+        next_state: expect.objectContaining({ owner: '丁松言', status: '暴露', last_checked_chapter_no: 3 }),
+        reason: '正文已经让主角获得食兽感应',
+      }),
+    ])
+  })
+
+  test('normalizes camelCase setting and storyline usage suggestions from model output', () => {
+    expect(normalizeSettingUsagePayload({
+      settingUsage: [
+        {
+          entityId: 8,
+          usageType: 'required',
+          revealLevel: 'partial',
+          expectedStateChange: { owner: '丁松言' },
+          actualStateChange: { status: '已使用' },
+        },
+      ],
+    })).toEqual([
+      expect.objectContaining({
+        entity_id: 8,
+        usage_type: 'required',
+        required: true,
+        allowed: true,
+        forbidden: false,
+        reveal_level: 'partial',
+        expected_state_change: { owner: '丁松言' },
+        actual_state_change: { status: '已使用' },
+      }),
+    ])
+
+    expect(normalizeSettingUsagePayload({
+      storylineUsage: [
+        {
+          storylineId: 13,
+          usageType: 'advance',
+          revealLevel: 'hint',
+          expectedStateChange: { current_state: '进入第二阶段' },
+        },
+      ],
+    })).toEqual([
+      expect.objectContaining({
+        entity_id: 13,
+        usage_type: 'advance',
+        required: true,
+        allowed: true,
+        reveal_level: 'hint',
+        expected_state_change: { current_state: '进入第二阶段' },
+      }),
+    ])
   })
 })
 
