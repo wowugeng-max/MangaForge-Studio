@@ -20097,6 +20097,9 @@ describe('chapter pre-draft brief', () => {
     expect(brief.expectation_threshold_contract.dynamic_thresholds.join('｜')).toContain('公开验印会暴露父亲线索')
     expect(brief.expectation_threshold_contract.expectation_before_payoff_rules.join('｜')).toContain('期待感 > 爽点')
     expect(brief.expectation_threshold_contract.expectation_before_payoff_rules.join('｜')).toContain('铺垫的篇幅')
+    expect(brief.expectation_threshold_contract.expectation_relay_rules.join('｜')).toContain('期待接力法')
+    expect(brief.expectation_threshold_contract.expectation_relay_rules.join('｜')).toContain('当一层即将满足时，先铺好下一层的期待')
+    expect(brief.expectation_threshold_contract.expectation_relay_rules.join('｜')).toContain('至少两条期待线并行运行')
     expect(brief.expectation_threshold_contract.three_expectation_lines.plot_expectation).toContain('幕后长老是谁')
     expect(brief.expectation_threshold_contract.three_expectation_lines.theme_payoff).toContain('先过资格门槛')
     expect(brief.expectation_threshold_contract.three_expectation_lines.freshness_hook).toContain('公开验印会暴露父亲线索')
@@ -20108,6 +20111,8 @@ describe('chapter pre-draft brief', () => {
     expect(prompt).toContain('两长一短')
     expect(prompt).toContain('剧情期待 + 主题甜头 + 新鲜感')
     expect(prompt).toContain('期待感 > 爽点')
+    expect(prompt).toContain('期待接力法')
+    expect(prompt).toContain('当一层即将满足时，先铺好下一层的期待')
     expect(prompt).toContain('每跨越一个门槛就立刻设立下一个')
     expect(prompt).toContain('expectation_threshold_checks')
     expect(prompt.indexOf('【期待门槛合同】')).toBeLessThan(prompt.indexOf('【结构化上下文包】'))
@@ -20170,6 +20175,28 @@ describe('chapter pre-draft brief', () => {
     expect(brief.expectation_threshold_contract.thresholds.join('｜')).toContain('公开验明旧印')
     expect(brief.expectation_threshold_contract.dynamic_thresholds.join('｜')).toContain('公开验印会暴露父亲线索')
     expect(brief.expectation_threshold_contract.nested_units.join('｜')).toContain('主角要进入审判庭内层')
+    expect(brief.expectation_threshold_contract.expectation_relay_rules.join('｜')).toContain('期待接力法')
+  })
+
+  test('hydrates explicit expectation relay rules from camel case input', () => {
+    const brief = buildChapterPreDraftBrief(
+      { title: '反证长篇' },
+      {
+        chapter_target: {
+          chapter_no: 16,
+          title: '接力钩子',
+          summary: '主角即将完成当前门槛，但必须先埋下一层期待。',
+          expectation_threshold_contract: {
+            source: 'manual_expectation',
+            expectationRelayRules: ['自定义：旧期待闭环前，新开环必须已经进入场景行动。'],
+          },
+        },
+      },
+    )
+
+    expect(brief.expectation_threshold_contract.source).toBe('manual_expectation')
+    expect(brief.expectation_threshold_contract.expectation_relay_rules).toEqual(['自定义：旧期待闭环前，新开环必须已经进入场景行动。'])
+    expect(brief.expectation_threshold_contract.expectation_before_payoff_rules.join('｜')).toContain('期待感 > 爽点')
   })
 
   test('adds an oh-story target reader contract to pre-draft brief and prose prompt', () => {
@@ -49585,6 +49612,8 @@ describe('chapter context word target source guards', () => {
     expect(repairBlock).toContain('剧情动力合同')
     expect(repairBlock).toContain('信息流合同')
     expect(repairBlock).toContain('期待阈值合同')
+    expect(repairBlock).toContain('expectation_relay_rules')
+    expect(repairBlock).toContain('期待接力法')
     expect(repairBlock).toContain('故事循环合同')
     expect(repairBlock).toContain('正文工艺合同')
     expect(repairBlock).toContain('section_density_rules')
@@ -52810,9 +52839,11 @@ describe('chapter context word target source guards', () => {
     expect(reviewPrompt).toContain('两长一短')
     expect(reviewPrompt).toContain('设门槛')
     expect(reviewPrompt).toContain('期待感 > 爽点')
+    expect(reviewPrompt).toContain('期待接力法')
     expect(revisionPrompt).toContain('expectation_threshold_checks')
     expect(revisionPrompt).toContain('期待门槛')
     expect(revisionPrompt).toContain('期待铺垫')
+    expect(revisionPrompt).toContain('闭环一个期待')
     expect(shouldReviseBlock).toContain('expectation_threshold_checks')
     expect(reviewNormalizeBlock).toContain('expectation_threshold_checks')
     expect(reviewNormalizeBlock).toContain('reviewPayload?.expectation_threshold_checks')

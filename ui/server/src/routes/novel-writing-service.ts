@@ -36198,6 +36198,13 @@ const OH_STORY_EXPECTATION_BEFORE_PAYOFF_RULES = [
   '长篇关键是延迟满足：先用危机、门槛、信息差或将满未满的动作拉长需求，再释放爽点。',
 ]
 
+const OH_STORY_EXPECTATION_RELAY_RULES = [
+  '期待接力法：确保读者脑中有三个好奇的东西，两长一短同时运行。',
+  '当一层即将满足时，先铺好下一层的期待，形成期待链不断裂。',
+  '闭环一个期待时，必须已有下一个开环在运行；在主角得到之前，先套上另一个钩子。',
+  '任何时刻保持至少两条期待线并行运行，大期待与小期待来回穿插。',
+]
+
 const OH_STORY_STORY_LOOP_CHECKS = [
   '循环模式必须由题材 + 金手指 + 主角身份共同推出，三者不能互相打架。',
   '每章必须至少推进一次循环：进入问题/资源/挑战 -> 行动验证 -> 获得反馈 -> 抛出下一轮燃料。',
@@ -39885,6 +39892,7 @@ function buildExpectationThresholdContract(contextPackage: any = {}) {
     const explicitDynamicThresholds = asArray(explicit.dynamic_thresholds || explicit.dynamicThresholds).map((item: any) => compactBriefText(item)).filter(Boolean)
     const explicitNestedUnits = asArray(explicit.nested_units || explicit.nestedUnits).map((item: any) => compactBriefText(item)).filter(Boolean)
     const explicitExpectationBeforePayoffRules = asArray(explicit.expectation_before_payoff_rules || explicit.expectationBeforePayoffRules).map((item: any) => compactBriefText(item)).filter(Boolean)
+    const explicitExpectationRelayRules = asArray(explicit.expectation_relay_rules || explicit.expectationRelayRules).map((item: any) => compactBriefText(item)).filter(Boolean)
     const explicitThreeLines = explicit.three_expectation_lines || explicit.threeExpectationLines || {}
     return {
       version: explicit.version || 'oh_story_expectation_threshold_v1',
@@ -39900,6 +39908,11 @@ function buildExpectationThresholdContract(contextPackage: any = {}) {
         : asArray(derived.expectation_before_payoff_rules).length
           ? asArray(derived.expectation_before_payoff_rules)
           : OH_STORY_EXPECTATION_BEFORE_PAYOFF_RULES,
+      expectation_relay_rules: explicitExpectationRelayRules.length
+        ? explicitExpectationRelayRules
+        : asArray(derived.expectation_relay_rules).length
+          ? asArray(derived.expectation_relay_rules)
+          : OH_STORY_EXPECTATION_RELAY_RULES,
       three_expectation_lines: {
         plot_expectation: compactBriefText(explicitThreeLines.plot_expectation || explicitThreeLines.plotExpectation || explicitThreeLines.story_expectation || explicitThreeLines.storyExpectation)
           || derived.three_expectation_lines?.plot_expectation
@@ -39996,6 +40009,7 @@ function buildExpectationThresholdContract(contextPackage: any = {}) {
     dynamic_thresholds: dynamicThresholds,
     nested_units: nestedUnits,
     expectation_before_payoff_rules: OH_STORY_EXPECTATION_BEFORE_PAYOFF_RULES,
+    expectation_relay_rules: OH_STORY_EXPECTATION_RELAY_RULES,
     three_expectation_lines: threeExpectationLines,
     quality_checks: OH_STORY_EXPECTATION_THRESHOLD_CHECKS,
     revision_priorities: ['补期待铺垫', '补两长一短期待', '拆分系统性门槛', '补动态加码', '补跨单元期待线', '避免一步解决'],
@@ -47877,8 +47891,9 @@ export function createNovelWritingService(ctx: {
       expectationThresholdContract?.dynamic_thresholds?.length ? `动态门槛：${expectationThresholdContract.dynamic_thresholds.join('；')}` : '',
       expectationThresholdContract?.nested_units?.length ? `单元嵌套：${expectationThresholdContract.nested_units.join('；')}` : '',
       expectationThresholdContract?.expectation_before_payoff_rules?.length ? `期待铺垫：${expectationThresholdContract.expectation_before_payoff_rules.join('；')}` : '',
+      expectationThresholdContract?.expectation_relay_rules?.length ? `期待接力法：${expectationThresholdContract.expectation_relay_rules.join('；')}` : '',
       expectationThresholdContract?.quality_checks?.length ? `质量检查：${expectationThresholdContract.quality_checks.join('；')}` : '',
-      expectationThresholdContract ? '交稿自检必须输出 expectation_threshold_checks，并用正文证据检查两长一短、剧情期待 + 主题甜头 + 新鲜感、期待感 > 爽点 / 铺垫不少于释放、门槛拆分、分批提出、动态加码、低密度期待点和下一单元预埋。' : '',
+      expectationThresholdContract ? '交稿自检必须输出 expectation_threshold_checks，并用正文证据检查两长一短、剧情期待 + 主题甜头 + 新鲜感、期待感 > 爽点 / 铺垫不少于释放、期待接力法、门槛拆分、分批提出、动态加码、低密度期待点和下一单元预埋。' : '',
       expectationThresholdContract ? JSON.stringify(expectationThresholdContract, null, 2).slice(0, 2500) : '',
       '',
       deliveryRiskCarryOver ? '【上一章交稿风险承接】' : '',
@@ -49742,8 +49757,8 @@ export function createNovelWritingService(ctx: {
     '43D. style_sample_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),style_dimension,source_technique,adapted_evidence,copied_phrase_rewritten,fix,remaining_risk；style_dimension 写 rhythm/sentence/dialogue/voice/emotion_turn 中最贴近的一类；样章策略未落地、适用场景错配、避用场景误套、对白比例/句式密度/叙述节奏失效、角色口吻丢失，或复制样章桥段、专有设定、角色名、核心梗或原句时必须给出 S1/S2 finding，category=prose 或 rule_boundary。只学习叙述节奏、句式密度、对白比例和情绪转折。',
     '34. 是否兑现 chapter_target.information_flow_contract：按 oh-story 信息团概念检查每个场景/段落是否能一句话概括信息团，信息团之间是否递进，过渡压缩是否执行，前一场悬念是否在后一场回应；过渡压缩必须检查“过渡不是填充，没有信息量就删掉”，纯移动、寒暄、环境描写没有信息量时直接跳过或压缩；必须输出 information_flow_checks。',
     '35. information_flow_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),reveal_order,withheld_question,action_bound_release,conflict_or_cost,evidence,fix,remaining_risk；无关信息团、背景水文、纯过渡、纯移动寒暄环境描写、场景衔接断裂或情绪突然掉线时必须给出 S1/S2 finding，category=structure 或 prose。',
-    '36. 是否兑现 chapter_target.expectation_threshold_contract：按 oh-story 设门槛和大剧情拉期待法检查两长一短期待是否同时在线，剧情期待 + 主题甜头 + 新鲜感三种期待线是否并存，期待感 > 爽点、铺垫篇幅不少于释放篇幅、延迟满足是否可见，目标是否被资源型/成就型/多条件型/动态门槛/收集型条件拆分，门槛是否围绕核心卖点并分批提出；必须输出 expectation_threshold_checks。',
-    '37. expectation_threshold_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),reader_question,stakes,choice_pressure,payoff_promise,next_chapter_pull,evidence,fix,remaining_risk；短期期待过多、长期期待断线、剧情期待/主题甜头/新鲜感任一缺失、没有期待铺垫就立刻释放爽点、大目标一步解决、门槛脱离卖点或跨过门槛后没有新门槛时必须给出 S1/S2 finding，category=structure。',
+    '36. 是否兑现 chapter_target.expectation_threshold_contract：按 oh-story 设门槛、大剧情拉期待法和期待接力法检查两长一短期待是否同时在线，剧情期待 + 主题甜头 + 新鲜感三种期待线是否并存，期待感 > 爽点、铺垫篇幅不少于释放篇幅、延迟满足是否可见，目标是否被资源型/成就型/多条件型/动态门槛/收集型条件拆分，门槛是否围绕核心卖点并分批提出，旧期待闭环前下一开环是否已运行；必须输出 expectation_threshold_checks。',
+    '37. expectation_threshold_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),reader_question,stakes,choice_pressure,payoff_promise,next_chapter_pull,evidence,fix,remaining_risk；短期期待过多、长期期待断线、剧情期待/主题甜头/新鲜感任一缺失、期待接力法断裂、没有期待铺垫就立刻释放爽点、大目标一步解决、门槛脱离卖点或跨过门槛后没有新门槛时必须给出 S1/S2 finding，category=structure。',
     '38. 是否兑现 chapter_target.story_loop_contract：按 oh-story 卡文对策检查“题材 + 金手指 + 主角身份 = 循环模式”是否清晰，本章是否执行指定循环模式、循环燃料、循环步骤、地图资源闭环、地位-环境同步和换地图承接；换地图/换阶段必须检查旧地图核心冲突是否阶段性解决、新地图五件套（新环境/新角色/新规则/新目标/新冲突）是否可见、前5章代入感和期待感是否建立、是否保留贯穿主线、是否做到人际关系动了 -> 主角再动、是否避免旧角色一刀切抛弃和新设定一次性倒出；必须按多级嵌套检查小循环 -> 中循环 -> 大循环是否可见，小循环中是否铺垫大循环的期待，是否避免核心不扩展、只反复用同一个梗换对象；必须输出 story_loop_checks。',
     '39. story_loop_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),setup_question,obstacle,choice,cost,payoff_or_answer_fragment,new_question,evidence,fix,remaining_risk；循环模式缺失、循环燃料断供、案件/扮猪/资源/反转/组织/公路循环步骤不闭合、资源闭环无收益、地位环境不同步、换地图承接缺旧地图收束/新地图五件套/贯穿主线/人际关系先行/前5章期待/循环升级、小循环没有铺垫中循环/大循环期待、核心不扩展或只换对象重复时必须给出 S1/S2 finding，category=structure。',
     '40. 是否兑现 chapter_target.emotional_arc_contract：按 oh-story 情绪弧检查平静 -> 调动 -> 释放 -> 爽 是否有正文证据，弧线类型是否匹配本章效果，是否按爽点倒推法先定爽点类型、再定期待点、最后倒推铺垫，正文是否呈现铺垫 -> 期待升高 -> 爽点释放，是否按装逼层级区分日常小装逼、核心爽点、偏离爽点，核心爽点是否切在主线目标上，是否存在背离主线去别处装逼，是否遵守多爽点密度规则（不要拉长单个爽点铺垫、800-1200 字内有信息增量/能力展示/危机反制/关系变化/小回收），复用同一情绪模块时是否按“戏剧性会磨损，情绪不会磨损”完成换场景/换对手/加新情绪/stakes 重组，是否存在只有调动没有释放、只有释放没有铺垫、爽点递增对比缺影响范围/揭示深度/身份落差、断期待禁止、下行情节缺少安全感；必须输出 emotional_arc_checks。',
@@ -49918,7 +49933,7 @@ export function createNovelWritingService(ctx: {
     '22B. 如果自检结果包含 style_boundary_checks，必须优先修复 status=fail/warn 的文风覆盖边界缺口；按 key/label/evidence/fix 恢复“硬约束永远赢”，删掉任何为了模仿文风而引入的禁用词、Gate F 章末总结体、万能比喻、作者预告、样章桥段/原句复制、字数缩水、剧情/状态/关系/时间线漂移。文风覆盖边界只允许修表达，不允许改事实。',
     '22C. 如果自检结果包含 style_sample_checks，必须优先修复 status=fail/warn 的样章策略缺口；按 key/label/evidence/fix 补足适用场景、避用场景、叙述节奏、句式密度、对白比例、角色口吻和情绪转折。修订只能学习样章的抽象表达策略，不得复制样章桥段、专有设定、角色名、核心梗或原句；修订后必须在 oh_story_delivery_receipts.pre_draft_execution_receipts.style_sample_checks 中逐项更新 delivered/evidence/remaining_risk。',
     '19. 如果自检结果包含 information_flow_checks，必须优先修复 status=fail/warn 的信息团衔接缺口；按 key/label/evidence/fix 压缩无关信息团、补场景递进、回应上一场悬念、修情绪衔接、删无信息量过渡；过渡压缩缺口要直接删除纯移动/寒暄/环境描写，或压成一句并改成信息、风险、情绪余波或下一步目标。',
-    '20. 如果自检结果包含 expectation_threshold_checks，必须优先修复 status=fail/warn 的期待门槛缺口；按 key/label/evidence/fix 补两长一短期待、剧情期待 + 主题甜头 + 新鲜感、期待铺垫、期待感 > 爽点、铺垫不少于释放、系统性门槛、分批提出、动态加码、低密度期待点和下一个门槛。',
+    '20. 如果自检结果包含 expectation_threshold_checks，必须优先修复 status=fail/warn 的期待门槛缺口；按 key/label/evidence/fix 补两长一短期待、剧情期待 + 主题甜头 + 新鲜感、期待铺垫、期待感 > 爽点、铺垫不少于释放、期待接力法、系统性门槛、分批提出、动态加码、低密度期待点和下一个门槛；闭环一个期待前，必须让下一个开环或更大问题已经进入场景行动。',
     '21. 如果自检结果包含 story_loop_checks，必须优先修复 status=fail/warn 的故事循环缺口；按 key/label/evidence/fix 补循环模式、循环燃料、地图资源闭环、地位环境同步、换地图承接，以及“题材 + 金手指 + 主角身份”推导出的本章循环步骤；换地图承接缺口要补旧地图阶段性收束、新地图五件套、前5章期待、贯穿主线/旧关系承接、人际关系动了 -> 主角再动和循环升级，不能旧线全抛或新设定一次性倒完；小循环中必须铺垫大循环的期待，并把同一核心卖点的不同角度/不同矛盾写成正文推进，不能只反复用同一个梗换对象。',
     '22. 如果自检结果包含 emotional_arc_checks，必须优先修复 status=fail/warn 的情绪弧缺口；按 key/label/evidence/fix 补平静 -> 调动 -> 释放 -> 爽、爽点倒推法（先定爽点类型 -> 再定期待点 -> 最后倒推铺垫，正文按铺垫 -> 期待升高 -> 爽点释放呈现）、装逼层级（日常小装逼只维持耐心，核心爽点切在主线目标，偏离主线去别处装逼必须删或改成主线推进）、多爽点密度（不要拉长单个爽点铺垫，每 800-1200 字至少补信息增量/能力展示/危机反制/关系变化/小回收之一）、情绪模块重组（戏剧性会磨损，情绪不会磨损；复用套路必须换场景/换对手/加新情绪或提高 stakes/奖励复杂度）、情绪三板斧（羁绊铺设/情感撕裂/余韵钝痛）、每 3-5 个小节事件触发的情绪转向、弧线类型、爽点递增对比（影响范围/揭示深度/身份落差）、断期待禁止、下行情节安全感和动作/对话/反应外化。',
     '23. 如果自检结果包含 chapter_hook_checks 或 chapter_hook_quality_checks，必须优先修复 status=fail/warn 的章级钩子缺口；按 key/label/evidence/fix 重做前100字章首钩子、最后约100字章尾翻页钩子、钩子强度、兑现路径、现场触发和下一章行动压力，并修掉假悬念、机械降神、低风险钩、过度留白和同类型连用。',
@@ -50945,7 +50960,7 @@ export function createNovelWritingService(ctx: {
               '文风覆盖边界合同 style_boundary_contract 必须按 oh-story style-profile-protocol 输出 style_override_rules, hard_constraints, copy_boundary_rules, conflict_resolution_rules, revision_priorities, quality_checks；hard_constraints 必须包含“硬约束永远赢”、禁用词、Gate F、万能比喻、章末预告、字数下限、剧情/状态/时间线不漂移；copy_boundary_rules 必须包含不得复制样章桥段。',
               '剧情动力合同 plot_dynamics_contract 必须按 oh-story 剧情核心方法输出 goal, obstacle, action, cost_feedback, next_expectation, drive_mode_rules, line_stagger_rules, quality_checks，确保目标→阻碍→行动→代价/反馈→新期待闭环；drive_mode_rules 必须包含事件驱动/情感驱动/混合模式选择：番茄爽文/打脸文每章给外部结果（赢、升级、对手栽），追妻/虐心/世情持续人物心结，混合模式主线事件推进并每 3-5 章插情感停顿；并让主线和支线错开节奏推进，不能同时爆完或同时空转。',
               '信息流合同 information_flow_contract 必须输出 scene_information_units, reveal_order, suspense_responses, transition_compression_rules, no_infodump_guardrails, quality_checks，确保信息随冲突释放，不写背景说明书；transition_compression_rules 必须包含过渡不是填充、没有信息量就删掉、纯移动/寒暄/环境描写直接跳过或压缩。',
-              '期待阈值合同 expectation_threshold_contract 必须输出 current_expectations, payoff_or_delay_plan, next_open_loop, vacuum_guardrails, expectation_before_payoff_rules, three_expectation_lines, quality_checks；expectation_before_payoff_rules 必须包含期待感 > 爽点、铺垫篇幅不少于释放篇幅和延迟满足，确保兑现旧期待前先种下新期待，并保持剧情期待 + 主题甜头 + 新鲜感三线并存。',
+              '期待阈值合同 expectation_threshold_contract 必须输出 current_expectations, payoff_or_delay_plan, next_open_loop, vacuum_guardrails, expectation_before_payoff_rules, expectation_relay_rules, three_expectation_lines, quality_checks；expectation_before_payoff_rules 必须包含期待感 > 爽点、铺垫篇幅不少于释放篇幅和延迟满足；expectation_relay_rules 必须包含期待接力法、旧期待闭环前下一开环已经运行、当一层即将满足时先铺好下一层期待、至少两条期待线并行运行；确保兑现旧期待前先种下新期待，并保持剧情期待 + 主题甜头 + 新鲜感三线并存。',
               '故事循环合同 story_loop_contract 必须输出 setup, escalation, payoff, carry_over, map_transition_rules, nested_loop_rules, quality_checks，确保本章不是孤立事件而是长线循环的一环；map_transition_rules 必须包含旧地图核心冲突阶段性解决、新地图 = 新环境 + 新角色 + 新规则 + 新目标 + 新冲突、前5章建立代入感和期待感、保留贯穿主线、人际关系动了 -> 主角再动、避免旧线全抛和新设定一次性倒出；nested_loop_rules 必须包含“小循环 -> 中循环 -> 大循环”、小循环中必须铺垫大循环的期待，以及同一核心卖点的不同角度/不同矛盾。',
               '正文工艺合同 prose_craft_contract 必须输出 pov_rules, body_detail_rules, scene_weaving_rules, rhythm_rules, object_number_rules, section_structure_rules, section_density_rules, anti_padding_rules, concept_anchor_rules, description_limits, anti_ai_smell_rules, quality_checks；section_structure_rules 必须包含一个主事件、3-5 个子事件、一个情绪变化、一条读者新获知的信息、3-5 轮对话交锋、小节结尾钩子、下一节开头快速接续和情绪跨节递进；section_density_rules 必须包含小节密度诊断，anti_padding_rules 必须禁止为凑字数加环境描写、重复情绪、内心独白总结或无意义动作，concept_anchor_rules 必须要求新名词/新设定首次出现有动作反应、对话半句或物理后果锚点，确保正文不靠抽象心理、堆设定或模板句撑场。',
               '语气标点合同 punctuation_tone_contract 必须输出 tone_targets, punctuation_rules, dialogue_pause_rules, forbidden_punctuation_patterns, quality_checks，确保标点服务语气和人物声线。',
