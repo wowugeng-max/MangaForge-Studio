@@ -48766,6 +48766,12 @@ export function createNovelWritingService(ctx: {
       project?.reference_config?.story_state?.layered_memory_context
       || project?.story_state?.layered_memory_context,
     )
+    const progressSummary = normalizeDailyProgressSummary(
+      project?.reference_config?.story_state?.progress_summary
+      || project?.reference_config?.storyState?.progressSummary
+      || project?.story_state?.progress_summary
+      || project?.storyState?.progressSummary,
+    )
     const [settingEntities, storedChapterSettingUsage, projectSettingUsage] = await Promise.all([
       listNovelSettingEntities(activeWorkspace, project.id).catch(() => []),
       listNovelChapterSettingUsage(activeWorkspace, project.id, chapter.id).catch(() => []),
@@ -48945,6 +48951,7 @@ export function createNovelWritingService(ctx: {
         delivery_risk_carry_over: (chapterRawPreDraftBrief.delivery_risk_carry_over || chapterRawPreDraftBrief.deliveryRiskCarryOver)
           ? normalizeDeliveryRiskCarryOverContext(chapterRawPreDraftBrief.delivery_risk_carry_over || chapterRawPreDraftBrief.deliveryRiskCarryOver)
           : deliveryRiskCarryOverContext,
+        progress_summary: progressSummary,
         continuity_notes: chapter.continuity_notes || [],
         must_advance: asArray(chapter.raw_payload?.must_advance),
         forbidden_repeats: asArray(chapter.raw_payload?.forbidden_repeats),
@@ -48963,6 +48970,7 @@ export function createNovelWritingService(ctx: {
       },
       story_state: {
         global: getStoryState(project),
+        progress_summary: progressSummary,
         recent_state_entries: preflight.recent_state_entries,
         worldbuilding: worldbuilding[0] || null,
         characters: characters.map(char => ({
@@ -49001,6 +49009,7 @@ export function createNovelWritingService(ctx: {
       longform_compass: longformCompass,
       longform_memory_capsule: longformMemoryCapsule,
       layered_memory_context: layeredMemoryContext,
+      progress_summary: progressSummary,
       meme_bank: memeBank,
       style_sample_bank: styleSampleBank,
       style_sample_effectiveness: styleSampleEffectiveness,

@@ -49539,6 +49539,64 @@ describe('chapter context word target source guards', () => {
     expect(context.chapter_target.delivery_risk_carry_over?.required_actions?.join('；') || '').toContain('上一章章末钩子不能空承接')
   })
 
+  test('carries stored daily progress summary into built chapter context package', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'mangaforge-context-progress-summary-'))
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+    const project = {
+      id: 89,
+      title: '万古长夜',
+      genre: '玄幻',
+      synopsis: '李玄追查旧阵塔中的失落印章。',
+      reference_config: {
+        story_state: {
+          progress_summary: {
+            last_completed_chapter: 50,
+            completed_chapter_count: 1,
+            completed_word_count: 3280,
+            active_foreshadowing_count: 3,
+            recent_changed_characters: ['李玄', '林青禾'],
+            next_outline_status: '已有',
+            notes: ['旧印章归属仍不能公开', '第51章先接旧阵塔第七层入口'],
+          },
+        },
+      },
+    }
+    const chapter = {
+      id: 890,
+      project_id: 89,
+      chapter_no: 51,
+      title: '第七层旧影',
+      chapter_summary: '李玄追查旧阵塔第七层的人影。',
+      conflict: '守塔残影拒绝交出印章线索。',
+      ending_hook: '第七层门后传来林青禾的声音。',
+      scene_list: [],
+      raw_payload: {},
+    }
+
+    const context = await service.buildChapterContextPackage(
+      workspace,
+      project,
+      chapter,
+      [chapter],
+      [],
+      [],
+      [],
+      [],
+    )
+    const prompt = service.buildParagraphProseContext(project, context, null, chapter)
+
+    expect(context.progress_summary?.last_completed_chapter).toBe(50)
+    expect(context.chapter_target.progress_summary?.notes).toContain('旧印章归属仍不能公开')
+    expect(context.story_state.progress_summary?.recent_changed_characters).toEqual(['李玄', '林青禾'])
+    expect(prompt).toContain('【日更进度断点】')
+    expect(prompt).toContain('最后完成章节：第50章')
+    expect(prompt).toContain('最近变更角色：李玄、林青禾')
+  })
+
   test('builds relationship graph diagnostics into chapter context for asset linkage planning', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'mangaforge-context-relationship-graph-'))
     const service = createNovelWritingService({
