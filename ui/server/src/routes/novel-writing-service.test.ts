@@ -16597,6 +16597,7 @@ describe('chapter pre-draft brief', () => {
         conflict: '对手逼主角认罪，主角必须证明账本被调包。',
         emotional_curve: '压迫 -> 反证 -> 爽感释放',
         ending_hook: '第二本账册从证人袖中滑落。',
+        word_target: resolveChapterWordTarget({}, { chapter_no: 6 }, {}),
         scene_cards: [
           {
             scene_no: 1,
@@ -16656,6 +16657,16 @@ describe('chapter pre-draft brief', () => {
     expect(brief.chapter_blueprint.plot_lines.mainline).toContain('账本反证')
     expect(brief.chapter_blueprint.character_order).toContain('江辰')
     expect(brief.chapter_blueprint.beat_sequence[0]).toMatchObject({ scene_no: 1, function_tag: '开篇钩子/铺垫' })
+    expect(brief.chapter_blueprint.beat_density_contract).toMatchObject({
+      version: 'oh_story_beat_density_v1',
+      target_word_count: 3000,
+      min_beat_count: 10,
+      target_beat_count: 12,
+      max_beat_count: 15,
+      current_beat_count: 2,
+      density_gap: 8,
+    })
+    expect(brief.chapter_blueprint.beat_density_contract.rule).toContain('200-300 字/个情节点')
     expect(brief.chapter_blueprint.cost_and_reward).toContain('当众打脸')
     expect(brief.chapter_blueprint.ending_contract.next_chapter_pull).toContain('第二本账册')
     expect(confirmedContext.chapter_target.chapter_blueprint.writing_intent).toContain('当众反证')
@@ -16663,6 +16674,10 @@ describe('chapter pre-draft brief', () => {
     expect(prompt).toContain('必须先执行 chapter_target.chapter_blueprint')
     expect(prompt).toContain('目标情绪、开篇钩子、核心回报')
     expect(prompt).toContain('五幕式因果链')
+    expect(prompt).toContain('情节点密度')
+    expect(prompt).toContain('200-300 字/个情节点')
+    expect(prompt).toContain('本章目标 3000 字')
+    expect(prompt).toContain('建议 10-15 个情节点')
     expect(prompt).toContain('种子')
     expect(prompt).toContain('生长')
     expect(prompt).toContain('转折')
@@ -16670,6 +16685,7 @@ describe('chapter pre-draft brief', () => {
     expect(prompt).toContain('完成')
     expect(prompt).toContain('不能跳步、不能乱序')
     expect(prompt).toContain('blueprint_receipts')
+    expect(prompt).toContain('beat_density_contract')
     expect(prompt).toContain('target_emotion、opening_hook、core_payoff')
     expect(prompt.indexOf('【章节蓝图合同】')).toBeLessThan(prompt.indexOf('【结构化上下文包】'))
   })

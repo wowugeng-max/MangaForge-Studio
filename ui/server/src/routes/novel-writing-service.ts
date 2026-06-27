@@ -42249,6 +42249,51 @@ function buildContentRubric(contextPackage: any = {}) {
   return OH_STORY_CONTENT_RUBRIC
 }
 
+const OH_STORY_BEAT_DENSITY_RULE = '按字数目标反推情节点数量：约 200-300 字/个情节点；下限 10 个；常规 3000 字章节 10-15 个；复杂高潮章可到 20 个；超长章硬上限 40 个。'
+
+function buildChapterBlueprintBeatDensityContract(wordTarget: any, beatSequence: any[], explicitValue: any = null) {
+  const explicit = explicitValue && typeof explicitValue === 'object' && !Array.isArray(explicitValue) ? explicitValue : {}
+  const targetWords = Number(
+    explicit.target_word_count
+    || explicit.targetWordCount
+    || wordTarget?.target
+    || wordTarget?.target_word_count
+    || wordTarget?.targetWordCount
+    || 0,
+  )
+  if (!targetWords && !Object.keys(explicit).length) return null
+
+  const hardMax = Number(explicit.hard_max_beat_count || explicit.hardMaxBeatCount || 40) || 40
+  const lowerBound = Number(explicit.lower_bound_beat_count || explicit.lowerBoundBeatCount || 10) || 10
+  const minBeatCount = Number(explicit.min_beat_count || explicit.minBeatCount)
+    || Math.min(hardMax, Math.max(lowerBound, Math.ceil(targetWords / 300)))
+  const targetBeatCount = Number(explicit.target_beat_count || explicit.targetBeatCount)
+    || Math.min(hardMax, Math.max(minBeatCount, Math.ceil(targetWords / 250)))
+  const maxBeatCount = Number(explicit.max_beat_count || explicit.maxBeatCount)
+    || Math.min(hardMax, Math.max(targetBeatCount, Math.ceil(targetWords / 200)))
+  const currentBeatCount = asArray(beatSequence).length
+
+  return {
+    version: explicit.version || 'oh_story_beat_density_v1',
+    source: explicit.source || 'oh_story_chapter_blueprint_density',
+    target_word_count: targetWords,
+    lower_bound_beat_count: lowerBound,
+    min_beat_count: minBeatCount,
+    target_beat_count: targetBeatCount,
+    max_beat_count: maxBeatCount,
+    hard_max_beat_count: hardMax,
+    current_beat_count: currentBeatCount,
+    density_gap: Math.max(0, minBeatCount - currentBeatCount),
+    rule: compactBriefText(explicit.rule || OH_STORY_BEAT_DENSITY_RULE, 320),
+    execution_rules: uniqueBriefStrings([
+      ...asArray(explicit.execution_rules || explicit.executionRules),
+      '每个情节点必须写清“谁做了什么 + 功能标签”，例如铺垫/高潮/爽点/打脸/人物塑造/设定。',
+      '情节点不足时先拆动作过程、对话交锋、信息变化、选择代价、收益兑现和章尾钩子铺垫，不得用环境描写或重复心理凑字数。',
+      '过场点可以带过，卖点/回报点必须展开；不得所有情节点均匀用同样篇幅。',
+    ], 8),
+  }
+}
+
 function buildChapterBlueprintFromContext(contextPackage: any, options: any = {}) {
   const chapterTarget = contextPackage?.chapter_target || {}
   const explicitBlueprint = chapterTarget.chapter_blueprint
@@ -42260,6 +42305,13 @@ function buildChapterBlueprintFromContext(contextPackage: any, options: any = {}
   const explicitCausalChainContract = explicitBlueprint.causal_chain_contract || explicitBlueprint.causalChainContract
   const explicitPlotLines = explicitBlueprint.plot_lines || explicitBlueprint.plotLines || {}
   const explicitEndingContract = explicitBlueprint.ending_contract || explicitBlueprint.endingContract || {}
+  const explicitBeatDensityContract = explicitBlueprint.beat_density_contract || explicitBlueprint.beatDensityContract
+  const wordTarget = options.word_target
+    || options.wordTarget
+    || explicitBlueprint.word_target
+    || explicitBlueprint.wordTarget
+    || chapterTarget.word_target
+    || chapterTarget.wordTarget
   const sceneCards = asArray(chapterTarget.scene_cards || options.scene_cards || options.sceneCards)
   const sceneBriefs = asArray(options.scene_briefs || options.sceneBriefs).length
     ? asArray(options.scene_briefs || options.sceneBriefs)
@@ -42284,7 +42336,7 @@ function buildChapterBlueprintFromContext(contextPackage: any, options: any = {}
   const readerPayoffs = sceneCards.map((scene: any) => compactBriefText(scene.reader_payoff)).filter(Boolean)
   const reversals = sceneCards.map((scene: any) => compactBriefText(scene.reversal || scene.turning_point)).filter(Boolean)
   const endingHook = compactBriefText(chapterTarget.ending_hook || pageTurn.next_chapter_pull || pageTurn.core_question || lastScene.ending_hook_seed)
-  const beatSequence = sceneCards.map((scene: any, index: number) => {
+  const fallbackBeatSequence = sceneCards.map((scene: any, index: number) => {
     const action = compactBriefText([
       scene.purpose || scene.beat || scene.title,
       asArray(scene.required_beats).join('；'),
@@ -42299,6 +42351,9 @@ function buildChapterBlueprintFromContext(contextPackage: any, options: any = {}
       payoff: compactBriefText(scene.reader_payoff || scene.reversal || scene.ending_hook_seed),
     }
   })
+  const explicitBeatSequence = asArray(explicitBlueprint.beat_sequence || explicitBlueprint.beatSequence)
+  const beatSequence = explicitBeatSequence.length ? explicitBeatSequence : fallbackBeatSequence
+  const beatDensityContract = buildChapterBlueprintBeatDensityContract(wordTarget, beatSequence, explicitBeatDensityContract)
   const storylineAdvances = uniqueBriefStrings([
     ...asArray(storylineContext.required),
     ...storylineUsageByType(storylineContext, ['advance']).map((item: any) => item?.name || item?.summary || item),
@@ -42393,9 +42448,8 @@ function buildChapterBlueprintFromContext(contextPackage: any, options: any = {}
     character_order: characterOrder,
     relationship_change: compactBriefText(characterArc.relationship_change || characterArc.growth_node || ''),
     information_gap: compactBriefText(sceneCards.map((scene: any) => scene.information_gap).filter(Boolean).join('；') || pageTurn.core_question),
-    beat_sequence: asArray(explicitBlueprint.beat_sequence || explicitBlueprint.beatSequence).length
-      ? asArray(explicitBlueprint.beat_sequence || explicitBlueprint.beatSequence)
-      : beatSequence,
+    beat_sequence: beatSequence,
+    beat_density_contract: beatDensityContract,
     cost_and_reward: compactBriefText(explicitBlueprint.cost_and_reward || explicitBlueprint.costAndReward || [
       storyDrive.choice_cost ? `代价：${storyDrive.choice_cost}` : '',
       readerPayoffs.length ? `收益：${readerPayoffs.join('；')}` : '',
@@ -42468,6 +42522,7 @@ function buildWritePreparationBrief(contextPackage: any = {}, options: any = {})
     || contextPackage?.chapter_blueprint
     || contextPackage?.pre_draft_brief?.chapter_blueprint
     || {}
+  const beatDensityContract = chapterBlueprint?.beat_density_contract || chapterBlueprint?.beatDensityContract || null
   const readerRetentionBrief = options.reader_retention_brief
     || contextPackage?.chapter_target?.reader_retention_brief
     || contextPackage?.reader_retention_brief
@@ -42504,6 +42559,7 @@ function buildWritePreparationBrief(contextPackage: any = {}, options: any = {})
     chapterBlueprint?.opening_hook ? `开篇钩子：${chapterBlueprint.opening_hook}` : '',
     chapterBlueprint?.core_payoff ? `核心回报：${chapterBlueprint.core_payoff}` : '',
     chapterBlueprint?.target_emotion ? `目标情绪：${chapterBlueprint.target_emotion}` : '',
+    beatDensityContract?.min_beat_count ? `情节点密度：本章目标 ${beatDensityContract.target_word_count || '?'} 字，建议 ${beatDensityContract.min_beat_count}-${beatDensityContract.max_beat_count} 个情节点，当前 ${beatDensityContract.current_beat_count || 0} 个，缺口 ${beatDensityContract.density_gap || 0} 个` : '',
     chapterBlueprint?.ending_contract?.next_chapter_pull ? `章尾拉力：${chapterBlueprint.ending_contract.next_chapter_pull}` : '',
     chapterBlueprint?.writing_intent ? `写作意图：${chapterBlueprint.writing_intent}` : '',
   ], 8)
@@ -46136,6 +46192,7 @@ export function createNovelWritingService(ctx: {
       || contextPackage?.preDraftBrief?.chapter_blueprint
       || contextPackage?.preDraftBrief?.chapterBlueprint
       || null
+    const beatDensityContract = chapterBlueprint?.beat_density_contract || chapterBlueprint?.beatDensityContract || null
     const skipBenchmarkRecall = benchmarkRecallIsNoBenchmark(benchmarkRecallGapsFromContext(contextPackage, {
       style_sample_strategy: styleSampleStrategy,
       chapter_benchmark_strategy: chapterBenchmarkStrategy,
@@ -46412,6 +46469,9 @@ export function createNovelWritingService(ctx: {
       chapterBlueprint?.causal_chain_contract ? '五幕式因果链：按种子 -> 生长 -> 转折 -> 冲刺 -> 完成组织本章；开局埋因，发展让果变下一因，转折必须让冲突性质质变，行动进入白热化，结局收束并埋下一因。不能跳步、不能乱序。' : '',
       chapterBlueprint?.causal_chain_contract?.act_functions ? `五幕功能：${Object.values(chapterBlueprint.causal_chain_contract.act_functions).filter(Boolean).join('；')}` : '',
       chapterBlueprint?.causal_chain_contract?.quality_checks?.length ? `五幕检查：${chapterBlueprint.causal_chain_contract.quality_checks.join('；')}` : '',
+      beatDensityContract ? `情节点密度：${beatDensityContract.rule || OH_STORY_BEAT_DENSITY_RULE}` : '',
+      beatDensityContract ? `密度预算：本章目标 ${beatDensityContract.target_word_count || '?'} 字，建议 ${beatDensityContract.min_beat_count || '?'}-${beatDensityContract.max_beat_count || '?'} 个情节点，目标 ${beatDensityContract.target_beat_count || '?'} 个；当前蓝图 ${beatDensityContract.current_beat_count || 0} 个，缺口 ${beatDensityContract.density_gap || 0} 个。` : '',
+      beatDensityContract?.execution_rules?.length ? `密度执行规则：${beatDensityContract.execution_rules.join('；')}` : '',
       chapterBlueprint ? '执行方式：爽点/高潮出手前必须铺出可指认的危机或期待；装逼、打脸、揭露或反证章必须写出在场角色的差异化反应；过场点带过，卖点/回报点展开，不得均匀注水。' : '',
       chapterBlueprint ? JSON.stringify(chapterBlueprint, null, 2).slice(0, 5000) : '',
       '',
@@ -47273,7 +47333,7 @@ export function createNovelWritingService(ctx: {
       expansionStructureDecision ? '输出附加要求：如果存在 next_batch_brief.expansion_structure_decision，scene_breakdown 的相关场景必须包含 expansion_structure_decision_execution，用 segment_role_delivered、observation_metrics_delivered、redesign_principles_delivered 和 evidence 说明是否真正执行。' : '',
       defaultFiveChapterLaneRedesign ? '输出附加要求：如果存在 default_five_chapter_lane_redesign，expansion_structure_decision_execution 还必须包含 default_lane_segment_duty_delivered、default_lane_conflict_rotation_delivered、default_lane_payoff_density_delivered、default_lane_ending_hook_template_delivered，并分别给出 evidence。' : '',
       defaultFiveChapterLaneTemplate ? '输出附加要求：如果存在 default_five_chapter_lane_template，expansion_structure_decision_execution 必须继续包含 default_lane_segment_duty_delivered、default_lane_conflict_rotation_delivered、default_lane_payoff_density_delivered、default_lane_ending_hook_template_delivered，并用 evidence 说明四项模板在验证批中没有复发。' : '',
-      chapterBlueprint ? '输出附加要求：scene_breakdown 必须包含 blueprint_receipts，逐项回填 target_emotion、opening_hook、core_payoff、content_outline、plot_lines、character_order、beat_sequence、cost_and_reward、ending_contract 是否在正文兑现，并给出 evidence 摘要。' : '',
+      chapterBlueprint ? '输出附加要求：scene_breakdown 必须包含 blueprint_receipts，逐项回填 target_emotion、opening_hook、core_payoff、content_outline、plot_lines、character_order、beat_sequence、beat_density_contract、cost_and_reward、ending_contract 是否在正文兑现，并给出 evidence 摘要。' : '',
       '输出附加要求：scene_breakdown 每个场景必须包含 scene_start_anchor、scene_end_anchor 和 scene_card_receipts；scene_start_anchor/scene_end_anchor 必须摘自该场景正文的起止短句，用来定位该场景文本。scene_card_receipts 字段至少包含 scene_goal, obstacle, action, turn, payoff, state_delta, goal_obstacle_change_delivered(boolean)、purpose_tag_delivered(boolean)、density_level_delivered(boolean)、sensory_anchor_delivered(boolean)、serial_risk_repairs_delivered(boolean)、required_beats_delivered(boolean)、action_beats_delivered(boolean)、dialogue_goals_delivered(boolean)、style_directives_delivered(boolean)、benchmark_recall_directives_delivered(boolean)、concept_anchor_rules_delivered(boolean)、prose_craft_directives_delivered(boolean)、evidence(array)。evidence 必须摘录对应场景正文中的动作、对话、信息变化、关系变化、对白声线或新概念锚点证据，不能只写“已完成”，不能借用其他场景的证据。',
       '输出附加要求：必须在章节对象顶层输出 oh_story_delivery_receipts，用于后续诊断和修复闭环落库。oh_story_delivery_receipts 必须包含 chapter_blueprint、scene_card_receipts、delivery_risk_receipts、revision_receipts、pre_draft_execution_receipts；chapter_blueprint 记录本章蓝图兑现状态，scene_card_receipts 汇总每个场景的场景卡执行回执，delivery_risk_receipts 逐项记录上一章/批次交稿风险是否已兑现，revision_receipts 记录本轮生成中主动修正过的结构、连续性、资产或文风问题，pre_draft_execution_receipts 记录状态筛选、写前准备、意图确认、文风召回和上一章质量续航计划是否真正落入正文。',
       stateTrackingContract ? '输出附加要求：oh_story_delivery_receipts.pre_draft_execution_receipts.status_filter_receipts 必须逐项覆盖【状态筛选合同】中的角色状态、相关伏笔/前史、世界约束、filter_rules 和 source_requirements；每项包含 key,label,used_in_chapter,evidence,excluded_reason,remaining_risk，证明只加载/只使用会影响本章正确性的状态，未使用的信息必须写明为何不会导致本章写错。' : '',
