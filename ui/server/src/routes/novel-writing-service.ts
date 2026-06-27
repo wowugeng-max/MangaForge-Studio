@@ -18371,6 +18371,12 @@ function normalizeDailyContextSnapshot(value: any = {}) {
   }
 }
 
+const OH_STORY_FORESHADOWING_DAILY_SCOPE_RULES = [
+  '日更范围：只确认本轮新增/推进/回收的伏笔已写入追踪/伏笔.md并更新状态。',
+  '不得在日更流程中通读所有 session 或扫描全部正文做全量伏笔审计。',
+  '全量伏笔审计只在 /story-review 或用户明确要求“全面检查伏笔”时执行。',
+]
+
 function normalizeForeshadowingConsistencyRadar(value: any = {}, targetChapterNo = 0) {
   const raw = value?.foreshadowing_consistency_radar
     || value?.foreshadowingConsistencyRadar
@@ -18496,6 +18502,10 @@ function normalizeForeshadowingConsistencyRadar(value: any = {}, targetChapterNo
     overdue_count: Number(raw.overdue_count ?? raw.overdueCount ?? overdue.length) || overdue.length,
     density_warnings: densityWarnings,
     density_warning_count: Number(raw.density_warning_count ?? raw.densityWarningCount ?? densityWarnings.length) || densityWarnings.length,
+    scope_rules: uniqueBriefStrings([
+      ...asArray(raw.scope_rules || raw.scopeRules || raw.daily_scope_rules || raw.dailyScopeRules).map(textItem),
+      ...OH_STORY_FORESHADOWING_DAILY_SCOPE_RULES,
+    ].filter(Boolean), 8),
     guardrails: uniqueBriefStrings([
       ...asArray(raw.guardrails || raw.guardrail || raw.rules).map(textItem),
       '超过50章未回收的伏笔按 S4 关注，下一章要推进、保持存在感或明确暂缓理由。',
@@ -48442,6 +48452,7 @@ export function createNovelWritingService(ctx: {
       foreshadowingConsistencyRadar?.active?.length ? `活跃伏笔清单：${foreshadowingConsistencyRadar.active.join('；')}` : '',
       foreshadowingConsistencyRadar?.overdue?.length ? `超期伏笔清单：${foreshadowingConsistencyRadar.overdue.join('；')}` : '',
       foreshadowingConsistencyRadar?.density_warnings?.length ? `伏笔密度提醒：${foreshadowingConsistencyRadar.density_warnings.join('；')}` : '',
+      foreshadowingConsistencyRadar?.scope_rules?.length ? `伏笔盘点范围：${foreshadowingConsistencyRadar.scope_rules.join('；')}` : '',
       foreshadowingConsistencyRadar?.guardrails?.length ? `一致性红线：${foreshadowingConsistencyRadar.guardrails.join('；')}` : '',
       foreshadowingConsistencyRadar ? JSON.stringify(foreshadowingConsistencyRadar, null, 2).slice(0, 2400) : '',
       '',
