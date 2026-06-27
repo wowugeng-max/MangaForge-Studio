@@ -20667,6 +20667,9 @@ describe('chapter pre-draft brief', () => {
     expect(brief.upgrade_rhythm_contract.goldfinger_multi_dimension_growth_rules.join('｜')).toContain('条件-反馈模型')
     expect(brief.upgrade_rhythm_contract.goldfinger_conflict_balance_rules.join('｜')).toContain('金手指刚好解决当前矛盾')
     expect(brief.upgrade_rhythm_contract.goldfinger_conflict_balance_rules.join('｜')).toContain('暴露更大矛盾')
+    expect(brief.upgrade_rhythm_contract.goldfinger_feedback_rules.join('｜')).toContain('给出金手指后必须有即时变化')
+    expect(brief.upgrade_rhythm_contract.goldfinger_feedback_rules.join('｜')).toContain('掺杂在故事里')
+    expect(brief.upgrade_rhythm_contract.goldfinger_feedback_rules.join('｜')).toContain('打开困境的钥匙')
     expect(brief.upgrade_rhythm_contract.ranking_ladder_rules.join('｜')).toContain('排行榜提供升级动力')
     expect(brief.upgrade_rhythm_contract.ranking_ladder_rules.join('｜')).toContain('新对手')
     expect(brief.upgrade_rhythm_contract.ranking_ladder_rules.join('｜')).toContain('装逼余震')
@@ -20680,6 +20683,8 @@ describe('chapter pre-draft brief', () => {
     expect(prompt).toContain('金手指多维成长')
     expect(prompt).toContain('词条、功能、品质')
     expect(prompt).toContain('刚好解决当前矛盾')
+    expect(prompt).toContain('金手指反馈法')
+    expect(prompt).toContain('把金手指带来变化的过程掺杂在故事里')
     expect(prompt).toContain('排行榜')
     expect(prompt).toContain('新对手')
     expect(prompt).toContain('装逼余震')
@@ -20758,6 +20763,33 @@ describe('chapter pre-draft brief', () => {
     expect(brief.upgrade_rhythm_contract.goldfinger_multi_dimension_growth_rules.join('｜')).toContain('金手指提升要有多维度')
     expect(brief.upgrade_rhythm_contract.goldfinger_multi_dimension_growth_rules.join('｜')).toContain('词条、功能、品质')
     expect(brief.upgrade_rhythm_contract.goldfinger_conflict_balance_rules.join('｜')).toContain('金手指太强')
+    expect(brief.upgrade_rhythm_contract.goldfinger_feedback_rules.join('｜')).toContain('给出金手指后必须有即时变化')
+  })
+
+  test('hydrates explicit upgrade rhythm goldfinger feedback rules from camel case input', () => {
+    const brief = buildChapterPreDraftBrief(
+      {
+        title: '从报废维修师开始逆袭',
+        genre: '都市系统升级',
+        synopsis: '中年维修师绑定职业成长系统，通过订单经验、技能奖励和客户反应逐步翻身。',
+      },
+      {
+        chapter_target: {
+          chapter_no: 3,
+          title: '第一单翻身',
+          summary: '主角接下被同行放弃的维修单，用新手技能修好进口设备。',
+          conflict: '客户和前妻弟弟都质疑主角只是报废维修师。',
+          upgrade_rhythm_contract: {
+            source: 'manual_upgrade',
+            goldfingerFeedbackRules: ['自定义：系统反馈必须先改变主角手上的维修动作。'],
+          },
+        },
+      },
+    )
+
+    expect(brief.upgrade_rhythm_contract.source).toBe('manual_upgrade')
+    expect(brief.upgrade_rhythm_contract.goldfinger_feedback_rules).toEqual(['自定义：系统反馈必须先改变主角手上的维修动作。'])
+    expect(brief.upgrade_rhythm_contract.feedback_loop.join('｜')).toContain('即时反馈')
   })
 
   test('adds an oh-story conflict structure contract to pre-draft brief and prose prompt', () => {
@@ -49628,6 +49660,8 @@ describe('chapter context word target source guards', () => {
     expect(repairBlock).toContain('升级节奏合同')
     expect(repairBlock).toContain('ranking_ladder_rules')
     expect(repairBlock).toContain('排行榜提供升级动力')
+    expect(repairBlock).toContain('goldfinger_feedback_rules')
+    expect(repairBlock).toContain('把金手指带来变化的过程掺杂在故事里')
     expect(repairBlock).toContain('冲突结构合同')
     expect(repairBlock).toContain('maxTokens: 6800')
   })
@@ -53048,6 +53082,8 @@ describe('chapter context word target source guards', () => {
     expect(reviewPrompt).toContain('词条、功能、品质')
     expect(reviewPrompt).toContain('金手指 + 矛盾')
     expect(reviewPrompt).toContain('刚好解决当前矛盾')
+    expect(reviewPrompt).toContain('金手指反馈法')
+    expect(reviewPrompt).toContain('掺杂在故事里')
     expect(revisionPrompt).toContain('upgrade_rhythm_checks')
     expect(revisionPrompt).toContain('升级节奏')
     expect(revisionPrompt).toContain('金手指演进')
@@ -53055,6 +53091,7 @@ describe('chapter context word target source guards', () => {
     expect(revisionPrompt).toContain('金手指多维成长')
     expect(revisionPrompt).toContain('词条、功能、品质')
     expect(revisionPrompt).toContain('金手指必须刚好解决当前矛盾')
+    expect(revisionPrompt).toContain('金手指带来的变化过程掺进故事')
     expect(shouldReviseBlock).toContain('upgrade_rhythm_checks')
     expect(reviewNormalizeBlock).toContain('upgrade_rhythm_checks')
     expect(reviewNormalizeBlock).toContain('reviewPayload?.upgrade_rhythm_checks')

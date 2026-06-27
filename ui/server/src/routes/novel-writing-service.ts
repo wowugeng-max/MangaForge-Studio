@@ -39342,6 +39342,13 @@ const OH_STORY_UPGRADE_RHYTHM_GOLDFINGER_CONFLICT_BALANCE_RULES = [
   '金手指解决当前矛盾后必须暴露更大矛盾、更高门槛或下一目标，形成层层递进。',
 ]
 
+const OH_STORY_UPGRADE_RHYTHM_GOLDFINGER_FEEDBACK_RULES = [
+  '金手指反馈法：给出金手指后必须有即时变化，不能只写绑定成功或说明规则。',
+  '把金手指带来变化的过程掺杂在故事里：通过动作、判断、物件变化、角色反应或局势变化展示反馈。',
+  '金手指必须契合主角当前职业、身份或生活困境，作为打开困境的钥匙。',
+  '金手指可以替换故事流程中的一个环节，但不能替代全部行动链；仍要保留目标、阻碍、行动、代价和新期待。',
+]
+
 const OH_STORY_UPGRADE_RHYTHM_GOLDFINGER_SIMPLICITY_RULES = [
   '金手指简单是核心：游戏化面板一眼就懂最好。',
   '功能、触发条件、奖励反馈和升级规则必须清晰，读者不需要看说明书也能理解。',
@@ -39415,6 +39422,7 @@ function buildUpgradeRhythmContract(project: any = {}, contextPackage: any = {})
     const explicitEmotionModules = asArray(explicit.emotion_modules || explicit.emotionModules).map((item: any) => compactBriefText(item)).filter(Boolean)
     const explicitBridgeRhythm = asArray(explicit.bridge_rhythm || explicit.bridgeRhythm).map((item: any) => compactBriefText(item)).filter(Boolean)
     const explicitGoldfingerConflictBalanceRules = asArray(explicit.goldfinger_conflict_balance_rules || explicit.goldfingerConflictBalanceRules).map((item: any) => compactBriefText(item)).filter(Boolean)
+    const explicitGoldfingerFeedbackRules = asArray(explicit.goldfinger_feedback_rules || explicit.goldfingerFeedbackRules).map((item: any) => compactBriefText(item)).filter(Boolean)
     const explicitGoldfingerSimplicityRules = asArray(explicit.goldfinger_simplicity_rules || explicit.goldfingerSimplicityRules).map((item: any) => compactBriefText(item)).filter(Boolean)
     const explicitGoldfingerMultiDimensionGrowthRules = asArray(explicit.goldfinger_multi_dimension_growth_rules || explicit.goldfingerMultiDimensionGrowthRules).map((item: any) => compactBriefText(item)).filter(Boolean)
     const explicitRankingLadderRules = asArray(explicit.ranking_ladder_rules || explicit.rankingLadderRules).map((item: any) => compactBriefText(item)).filter(Boolean)
@@ -39434,6 +39442,9 @@ function buildUpgradeRhythmContract(project: any = {}, contextPackage: any = {})
       goldfinger_conflict_balance_rules: explicitGoldfingerConflictBalanceRules.length
         ? explicitGoldfingerConflictBalanceRules
         : asArray(derived.goldfinger_conflict_balance_rules).length ? asArray(derived.goldfinger_conflict_balance_rules) : OH_STORY_UPGRADE_RHYTHM_GOLDFINGER_CONFLICT_BALANCE_RULES,
+      goldfinger_feedback_rules: explicitGoldfingerFeedbackRules.length
+        ? explicitGoldfingerFeedbackRules
+        : asArray(derived.goldfinger_feedback_rules).length ? asArray(derived.goldfinger_feedback_rules) : OH_STORY_UPGRADE_RHYTHM_GOLDFINGER_FEEDBACK_RULES,
       goldfinger_simplicity_rules: explicitGoldfingerSimplicityRules.length
         ? explicitGoldfingerSimplicityRules
         : asArray(derived.goldfinger_simplicity_rules).length ? asArray(derived.goldfinger_simplicity_rules) : OH_STORY_UPGRADE_RHYTHM_GOLDFINGER_SIMPLICITY_RULES,
@@ -39514,6 +39525,7 @@ function buildUpgradeRhythmContract(project: any = {}, contextPackage: any = {})
     emotion_modules: inferUpgradeEmotionModules(rawText),
     bridge_rhythm: OH_STORY_UPGRADE_RHYTHM_BRIDGE_RULES,
     goldfinger_conflict_balance_rules: OH_STORY_UPGRADE_RHYTHM_GOLDFINGER_CONFLICT_BALANCE_RULES,
+    goldfinger_feedback_rules: OH_STORY_UPGRADE_RHYTHM_GOLDFINGER_FEEDBACK_RULES,
     goldfinger_simplicity_rules: OH_STORY_UPGRADE_RHYTHM_GOLDFINGER_SIMPLICITY_RULES,
     goldfinger_multi_dimension_growth_rules: OH_STORY_UPGRADE_RHYTHM_GOLDFINGER_MULTI_DIMENSION_GROWTH_RULES,
     ranking_ladder_rules: OH_STORY_UPGRADE_RHYTHM_RANKING_LADDER_RULES,
@@ -47408,6 +47420,7 @@ export function createNovelWritingService(ctx: {
       upgradeRhythmContract ? '执行方式：升级前先铺待遇差距、资源难度或被轻视；升级中给行动反馈；升级后展示以前做不到的能力/地位/资源/关系变化，并立刻引入更大危机、新门槛或下一目标。' : '',
       upgradeRhythmContract ? '金手指演进：核心作用可发展但不能突然换赛道；只能增加新的使用方式、联动系统或应用场景，不能彻底抛弃原核心作用；升华到世界/天道/规则层级前必须有伏笔。' : '',
       upgradeRhythmContract ? '金手指 + 矛盾：金手指必须刚好解决当前矛盾；太强会一键清场变无聊，太弱会让读者焦虑；解决当前矛盾后必须暴露更大矛盾、更高门槛或下一目标。' : '',
+      upgradeRhythmContract ? '金手指反馈法：给出金手指后必须有即时变化；把金手指带来变化的过程掺杂在故事里，用动作、判断、物件变化、角色反应或局势变化展示反馈；金手指可以替换故事流程中的一个环节，但不能替代全部行动链。' : '',
       upgradeRhythmContract ? '金手指简单是核心：功能、触发条件、奖励反馈和升级规则必须一眼就懂；本章只展示一种核心用法，不能写成说明书、规则树或万能外挂。' : '',
       upgradeRhythmContract ? '金手指多维成长：不要只写品质/数值/等级提升；至少让词条、功能、品质、熟练度或条件-反馈中的两条线同步变化，条件升级后可解锁新功能、子能力或新的应用场景。' : '',
       upgradeRhythmContract ? '排行榜/榜单：如果本章出现排名、榜单或位阶参照，必须让它提供升级动力、介绍新对手，并产生装逼余震；排名提升后要让读者期待下一名次、下一碰撞或后续资源变化，不能只写一个名次数字。' : '',
@@ -47417,11 +47430,12 @@ export function createNovelWritingService(ctx: {
       upgradeRhythmContract?.emotion_modules?.length ? `情绪模块：${upgradeRhythmContract.emotion_modules.join('；')}` : '',
       upgradeRhythmContract?.bridge_rhythm?.length ? `桥段节奏：${upgradeRhythmContract.bridge_rhythm.join('；')}` : '',
       upgradeRhythmContract?.goldfinger_conflict_balance_rules?.length ? `金手指矛盾匹配：${upgradeRhythmContract.goldfinger_conflict_balance_rules.join('；')}` : '',
+      upgradeRhythmContract?.goldfinger_feedback_rules?.length ? `金手指反馈法：${upgradeRhythmContract.goldfinger_feedback_rules.join('；')}` : '',
       upgradeRhythmContract?.goldfinger_simplicity_rules?.length ? `金手指简单清晰：${upgradeRhythmContract.goldfinger_simplicity_rules.join('；')}` : '',
       upgradeRhythmContract?.goldfinger_multi_dimension_growth_rules?.length ? `金手指多维成长：${upgradeRhythmContract.goldfinger_multi_dimension_growth_rules.join('；')}` : '',
       upgradeRhythmContract?.ranking_ladder_rules?.length ? `榜单升级动力：${upgradeRhythmContract.ranking_ladder_rules.join('；')}` : '',
       upgradeRhythmContract?.quality_checks?.length ? `upgrade_rhythm_checks：${upgradeRhythmContract.quality_checks.join('；')}` : '',
-      upgradeRhythmContract ? '交稿自检必须输出 upgrade_rhythm_checks，并用正文证据检查升级感三步法、升级前后铺垫、即时反馈、延迟反馈、桥段功能位、升级速度、新危机/新门槛、金手指演进、金手指简单清晰、金手指多维成长和榜单升级动力。' : '',
+      upgradeRhythmContract ? '交稿自检必须输出 upgrade_rhythm_checks，并用正文证据检查升级感三步法、升级前后铺垫、即时反馈、延迟反馈、桥段功能位、升级速度、新危机/新门槛、金手指演进、金手指反馈法、金手指简单清晰、金手指多维成长和榜单升级动力。' : '',
       upgradeRhythmContract ? JSON.stringify(upgradeRhythmContract, null, 2).slice(0, 2500) : '',
       '',
       conflictStructureContract ? '【冲突结构合同】' : '',
@@ -49665,8 +49679,8 @@ export function createNovelWritingService(ctx: {
     '21. genre_positioning_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),genre_tag,core_hook,type_formula,genre_strength,book_title_blurb_alignment,evidence,fix,remaining_risk；核心梗不清、公式缺失、金手指脱离主角生活/职业、微创新超过3个、题材长板未强化、为补短板新增支线稀释核心卖点、平台/类型错位或挂羊头卖狗肉时必须给出 S1/S2 finding，category=platform 或 structure。',
     '21A. 是否兑现 chapter_target.female_audience_contract：按 oh-story 女频长篇口径检查安全感优先、代入感优先、女主主动性、情绪即产品是否落地；检查女频深层需求是否体现被认可、被珍视、被尊重；检查状态→困境→行动→成功和女主成功暗示是否兑现；检查感情线双轴是否让感情升级踩在事业/成长节点上；检查虐戏是否每段虐后有反转或糖，是否避免连续整卷只虐；检查平台对位和货板一致；必须输出 female_audience_checks。',
     '21B. female_audience_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),security_anchor,reader_identification,heroine_agency,relationship_axis,post_abuse_payoff,evidence,fix,remaining_risk；安全感断裂、女主被安排着赢、感情线脱离成长线、为虐而虐、平台节奏错位或书名简介正文货不对板时必须给出 S1/S2 finding，category=character 或 platform。',
-    '22. 是否兑现 chapter_target.upgrade_rhythm_contract：按 oh-story 升级感三步法检查起点、终点、情绪缺口、即时反馈、延迟反馈、升级前后铺垫、桥段功能位、升级后能完成以前做不到的事，以及金手指演进；金手指核心作用可发展但不能突然换赛道，升华到世界/天道/规则层级前必须有伏笔；必须按“金手指 + 矛盾”检查金手指是否刚好解决当前矛盾，解决后是否暴露更大矛盾；必须按“金手指简单是核心”检查功能、触发条件、奖励反馈和升级规则是否一眼就懂，是否避免说明书式规则树和万能外挂；必须按“金手指多维成长”检查词条、功能、品质、熟练度或条件-反馈是否至少两条线同步变化，是否避免只剩品质/数值/等级单线提升；如果出现排行榜/榜单/排名，必须按排行榜三功能检查：排名提升提供升级动力、榜单介绍新对手、榜单出现产生装逼余震；必须输出 upgrade_rhythm_checks。',
-    '23. upgrade_rhythm_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),before_after_contrast,instant_feedback,delayed_feedback,new_threshold,cheat_rule,evidence,fix,remaining_risk；升级前没有缺口、升级后没有变化展示、只有奖励没有新门槛、反馈太慢/太快、桥段功能位混乱、金手指演进丢失核心作用、突然升华无伏笔、金手指太强一键清场或太弱无法改变局势、金手指功能/触发/奖励/升级规则不清晰或不是一眼就懂、金手指只剩品质/数值/等级单线提升或缺词条/功能/品质多维成长、榜单只写排名数字但缺升级动力/新对手/装逼余震时必须给出 S1/S2 finding，category=structure 或 platform。',
+    '22. 是否兑现 chapter_target.upgrade_rhythm_contract：按 oh-story 升级感三步法检查起点、终点、情绪缺口、即时反馈、延迟反馈、升级前后铺垫、桥段功能位、升级后能完成以前做不到的事，以及金手指演进；金手指核心作用可发展但不能突然换赛道，升华到世界/天道/规则层级前必须有伏笔；必须按“金手指 + 矛盾”检查金手指是否刚好解决当前矛盾，解决后是否暴露更大矛盾；必须按金手指反馈法检查给出金手指后是否有即时变化，是否把反馈过程掺杂在故事里，是否用动作/判断/物件变化/角色反应/局势变化展示，而不是只写绑定成功或说明规则；必须按“金手指简单是核心”检查功能、触发条件、奖励反馈和升级规则是否一眼就懂，是否避免说明书式规则树和万能外挂；必须按“金手指多维成长”检查词条、功能、品质、熟练度或条件-反馈是否至少两条线同步变化，是否避免只剩品质/数值/等级单线提升；如果出现排行榜/榜单/排名，必须按排行榜三功能检查：排名提升提供升级动力、榜单介绍新对手、榜单出现产生装逼余震；必须输出 upgrade_rhythm_checks。',
+    '23. upgrade_rhythm_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),before_after_contrast,instant_feedback,delayed_feedback,goldfinger_feedback,new_threshold,cheat_rule,evidence,fix,remaining_risk；升级前没有缺口、升级后没有变化展示、只有奖励没有新门槛、反馈太慢/太快、金手指反馈只停在说明书/绑定成功/弹窗结算、金手指带来的变化没有掺进故事动作链、桥段功能位混乱、金手指演进丢失核心作用、突然升华无伏笔、金手指太强一键清场或太弱无法改变局势、金手指功能/触发/奖励/升级规则不清晰或不是一眼就懂、金手指只剩品质/数值/等级单线提升或缺词条/功能/品质多维成长、榜单只写排名数字但缺升级动力/新对手/装逼余震时必须给出 S1/S2 finding，category=structure 或 platform。',
     '24. 是否兑现 chapter_target.conflict_structure_contract：按 oh-story 矛盾与结构设计检查冲突是否有人阻止主角得到目标，是否满足有进无出（读者相信主角非踏入不可）、是否有死亡赌注/退出代价和黏结剂（杀人理由/工作职责/道德责任/实体场所），是否言语->行动->激烈对抗->决定胜负持续升级，是否压势不压人，是否有明确结果、矛盾网、三层矛盾网和下一冲突种子；矛盾网必须检查同一时刻是否保持2-3条矛盾线，线与线之间是否有因果/利益冲突/信息差，解决一条后是否激活或加深另一条；三层矛盾网必须检查纵向矛盾、横向矛盾、交叉矛盾是否同时运作，并按定地图→定阵营→定角色编织；必须输出 conflict_structure_checks。',
     '25. conflict_structure_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),blocker,no_exit_condition,stakes_or_exit_cost,action_block,win_loss_result,evidence,fix,remaining_risk；没有阻止者、缺有进无出、人物可以随时退出、死亡赌注/退出代价不明、缺黏结剂、冲突只停在嘴炮、没有行动阻拦、胜负不明、主角被动站桩、矛盾线各自无关、缺纵向矛盾、缺横向矛盾、缺交叉矛盾、解决一条后没有激活或加深另一条、解决后没有新危机时必须给出 S1/S2 finding，category=structure。',
     '26. 执行 oh-story 多视角对抗式审查：输出 perspective_verdicts，必须包含 story-architect、character-designer、narrative-writer、consistency-checker 四个视角；每个视角字段 reviewer, verdict(APPROVE|CONCERNS|REJECT), summary, findings, recommendations。',
@@ -49855,7 +49869,7 @@ export function createNovelWritingService(ctx: {
     '12. 如果自检结果包含 target_reader_checks，必须优先修复 status=fail/warn 的目标读者缺口；按 key/label/evidence/fix 补清读者画像、读者想看内容、情绪缺口、本章命中点、平台口味和可见读者回报。情绪缺口缺口必须先补核心痛苦、深层情结、高频情绪关键词和未满足需求，再把它们写成冲突压力、角色选择、即时反馈或尊严/安全感/掌控感补偿。',
     '13. 如果自检结果包含 genre_positioning_checks，必须优先修复 status=fail/warn 的题材定位缺口；按 key/label/evidence/fix 校准题材标签、核心梗、类型公式、金手指贴合、必备场景、微创新边界、长板聚焦和书名简介内容三位一体，修掉挂羊头卖狗肉；拉长题材长板而非补短板，删除会稀释核心卖点的支线，把同一卖点扩成至少 3 个角度的正文证据。',
     '13A. 如果自检结果包含 female_audience_checks，必须优先修复 status=fail/warn 的女频长篇缺口；按 key/label/evidence/fix 补安全感锚点，把女主被动改成女主自己做决定、自己推进，把感情升级踩到事业/成长节点上，虐后补反转或糖，控制连续虐戏剂量，并校准平台安全感密度和货板一致。',
-    '14. 如果自检结果包含 upgrade_rhythm_checks，必须优先修复 status=fail/warn 的升级节奏缺口；按 key/label/evidence/fix 补升级前情绪缺口、即时反馈、延迟反馈、升级后变化、新危机/新门槛、桥段功能位和金手指演进；金手指必须保留核心作用，只增加新的使用方式，升华到世界/规则层级前先补伏笔；金手指必须刚好解决当前矛盾，不能一键清场或完全无效，解决后要暴露更大矛盾、更高门槛或下一目标；金手指简单是核心，功能、触发条件、奖励反馈和升级规则必须一眼就懂，删掉说明书式规则树和万能外挂；金手指多维成长必须补足词条、功能、品质、熟练度或条件-反馈中的至少两条线，避免只剩品质/数值单线提升；榜单缺口要补排名提升后的下一名次/下一目标、通过排行榜介绍新对手，并让装逼余震改变态度、报价、资源、权限或规则评价。',
+    '14. 如果自检结果包含 upgrade_rhythm_checks，必须优先修复 status=fail/warn 的升级节奏缺口；按 key/label/evidence/fix 补升级前情绪缺口、即时反馈、延迟反馈、升级后变化、新危机/新门槛、桥段功能位和金手指演进；金手指必须保留核心作用，只增加新的使用方式，升华到世界/规则层级前先补伏笔；金手指必须刚好解决当前矛盾，不能一键清场或完全无效，解决后要暴露更大矛盾、更高门槛或下一目标；金手指反馈法缺口要把金手指带来的变化过程掺进故事：用主角动作、判断、物件变化、角色反应或局势变化展示即时反馈，删掉只写绑定成功/规则说明/弹窗结算的空反馈；金手指简单是核心，功能、触发条件、奖励反馈和升级规则必须一眼就懂，删掉说明书式规则树和万能外挂；金手指多维成长必须补足词条、功能、品质、熟练度或条件-反馈中的至少两条线，避免只剩品质/数值单线提升；榜单缺口要补排名提升后的下一名次/下一目标、通过排行榜介绍新对手，并让装逼余震改变态度、报价、资源、权限或规则评价。',
     '15. 如果自检结果包含 conflict_structure_checks，必须优先修复 status=fail/warn 的冲突结构缺口；按 key/label/evidence/fix 补阻止者、有进无出、冲突升级阶梯、行动阻拦、明确胜负结果、压势不压人、主角主动破局、矛盾网和下一冲突种子；有进无出缺口要让读者相信主角非踏入不可，明确肉体/身份职场/心理死亡赌注或退出代价，并用杀人理由、工作职责、道德责任或实体场所作为黏结剂，让对立双方都无法轻易脱身；矛盾网缺口必须补到2-3条矛盾线互相牵连，并让解决一条后激活或加深另一条。',
     '16. 如果自检结果包含 perspective_verdicts，必须优先处理 verdict=CONCERNS/REJECT 的多视角审查结论；按 story-architect/character-designer/narrative-writer/consistency-checker 的 findings 与 recommendations 修到正文证据里。',
     '14. 如果自检结果包含 deslop_checks，必须优先修复 status=fail/warn 的去AI味门禁；按 gate/pattern/evidence/fix 处理禁用词、句式套路、心理告知、节奏均匀、对话腔调、章末总结体和解释腔/上帝视角/安排感。',
@@ -50920,7 +50934,7 @@ export function createNovelWritingService(ctx: {
               '目标读者合同 target_reader_contract 必须按 oh-story 自嗨判定法输出 reader_profile, reader_desires, chapter_attractions, validation_questions, correction_methods, quality_checks，确保本章清楚写给谁、满足什么阅读欲望、给出什么可感知回报。',
               '题材定位合同 genre_positioning_contract 必须按 oh-story 题材定位输出 genre_label, reader_psychology, genre_formula, core_hook_rules, goldfinger_fit_rules, must_have_scenes, platform_fit_rules, micro_innovation_rules, longboard_focus_rules, quality_checks，确保题材承诺和正文场景一致；longboard_focus_rules 必须包含“拉长板而非补短板”、题材长板、核心卖点背后的情绪清晰、同一卖点至少 3 个角度和不得稀释核心卖点。',
               '女频长篇合同 female_audience_contract 必须在项目为女频/女生频道/女主导向时按 oh-story female-audience-writing 输出 audience_mode, core_principles, reader_need_rules, copy_promise_rules, longform_genre_rules, romance_axis_rules, abuse_dosage_rules, platform_fit_rules, revision_priorities, quality_checks；core_principles 必须包含安全感优先、代入感优先、女主主动性、情绪即产品；reader_need_rules 必须包含被认可、被珍视、被尊重；romance_axis_rules 必须包含感情线双轴和感情升级踩在事业/成长节点；abuse_dosage_rules 必须包含每段虐后必给反转或糖，避免连续整卷只虐；platform_fit_rules 必须按番茄女生/起点女生/晋江/七猫校准安全感密度和节奏；quality_checks 必须包含货板一致。',
-              '升级节奏合同 upgrade_rhythm_contract 必须按 oh-story 升级感三步法输出 upgrade_gap, upgrade_gain_plan, feedback_loop, emotion_modules, bridge_rhythm, ranking_ladder_rules, goldfinger_simplicity_rules, goldfinger_multi_dimension_growth_rules, quality_checks，确保升级前缺口、升级后变化和即时/延迟反馈都可见；ranking_ladder_rules 必须包含“排行榜提供升级动力”、通过排行榜介绍新对手和榜单出现后要有装逼余震；goldfinger_simplicity_rules 必须包含“金手指简单是核心”和“一眼就懂”，并要求功能、触发条件、奖励反馈和升级规则清晰；goldfinger_multi_dimension_growth_rules 必须包含“金手指提升要有多维度”、词条、功能、品质和条件-反馈模型，避免只剩品质/数值单线提升。',
+              '升级节奏合同 upgrade_rhythm_contract 必须按 oh-story 升级感三步法输出 upgrade_gap, upgrade_gain_plan, feedback_loop, emotion_modules, bridge_rhythm, ranking_ladder_rules, goldfinger_feedback_rules, goldfinger_simplicity_rules, goldfinger_multi_dimension_growth_rules, quality_checks，确保升级前缺口、升级后变化和即时/延迟反馈都可见；ranking_ladder_rules 必须包含“排行榜提供升级动力”、通过排行榜介绍新对手和榜单出现后要有装逼余震；goldfinger_feedback_rules 必须包含“给出金手指后必须有即时变化”、“把金手指带来变化的过程掺杂在故事里”、金手指契合主角当前职业/身份/生活困境，以及金手指不能替代全部行动链；goldfinger_simplicity_rules 必须包含“金手指简单是核心”和“一眼就懂”，并要求功能、触发条件、奖励反馈和升级规则清晰；goldfinger_multi_dimension_growth_rules 必须包含“金手指提升要有多维度”、词条、功能、品质和条件-反馈模型，避免只剩品质/数值单线提升。',
               '冲突结构合同 conflict_structure_contract 必须按 oh-story 矛盾与结构设计输出 conflict_ladder, motivation_sources, antagonist_pressure_rules, protagonist_agency_rules, event_value_changes, next_conflict_seeds, conflict_network_layers, no_exit_rules, quality_checks，确保每个主要场景都有明确阻力、胜负变化、下一冲突种子和有进无出；conflict_network_layers 必须包含 vertical_conflict, horizontal_conflict, cross_conflict, weaving_order，按定地图→定阵营→定角色编织纵向/横向/交叉三层矛盾；no_exit_rules 必须包含主角非踏入不可、死亡赌注/退出代价、黏结剂（杀人理由/工作职责/道德责任/实体场所）和对立双方无法轻易脱身。',
               '要求：蓝图必须承接上一章状态，服务长线主线；不要用“推进本章核心冲突”这类占位句。',
               JSON.stringify({
