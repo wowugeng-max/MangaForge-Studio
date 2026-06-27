@@ -41763,6 +41763,26 @@ function getChapterBlueprintForReadiness(contextPackage: any = {}) {
     || null
 }
 
+function legacyChapterOutlineForReadiness(target: any = {}) {
+  const coreEvent = compactBriefText(target.chapter_goal || target.chapterGoal || target.goal || target.summary || target.core_event || target.coreEvent)
+  const legacyFields = [
+    target.target_emotion || target.targetEmotion || target.emotional_curve || target.emotionalCurve,
+    target.opening_hook || target.openingHook,
+    target.reader_payoff || target.readerPayoff || target.core_payoff || target.corePayoff || target.payoff,
+    target.ending_hook || target.endingHook,
+    target.word_target || target.wordTarget,
+  ].map(compactBriefText).filter(Boolean)
+  if (!coreEvent || legacyFields.length < 2) return null
+  return {
+    target_emotion: target.target_emotion || target.targetEmotion || target.emotional_curve || target.emotionalCurve,
+    opening_hook: target.opening_hook || target.openingHook,
+    core_payoff: target.core_payoff || target.corePayoff || target.reader_payoff || target.readerPayoff || target.payoff,
+    ending_contract: {
+      next_chapter_pull: target.ending_hook || target.endingHook,
+    },
+  }
+}
+
 function missingChapterBlueprintSections(blueprint: any = {}) {
   if (!blueprint || typeof blueprint !== 'object') return ['本章细纲/蓝图']
   const contentOutline = blueprint.content_outline || blueprint.contentOutline || {}
@@ -41900,15 +41920,21 @@ export function buildSourceReadinessPreflightChecks(contextPackage: any = {}) {
     })
   }
   if ((hasBlueprintSourceRow || blueprintForReadiness) && !checks.some((check: any) => check.key === 'source_readiness_chapter_blueprint')) {
-    const missingBlueprintSections = missingChapterBlueprintSections(blueprintForReadiness)
+    const legacyOutline = !blueprintForReadiness ? legacyChapterOutlineForReadiness(target) : null
+    const missingBlueprintSections = missingChapterBlueprintSections(blueprintForReadiness || legacyOutline)
     if (missingBlueprintSections.length) {
+      const isLegacyBackfill = Boolean(legacyOutline)
       checks.push({
         key: 'source_readiness_chapter_blueprint',
         ok: false,
-        severity: 'high',
+        severity: isLegacyBackfill ? 'medium' : 'high',
         label: '本章细纲/蓝图',
-        fix: `补齐本章蓝图核心字段：${missingBlueprintSections.join('、')}。`,
-        evidence: `缺少：${missingBlueprintSections.join('、')}`,
+        fix: isLegacyBackfill
+          ? `旧版细纲缺新版蓝图字段不阻塞日更；本轮需要改纲/补纲时按新版模板回填：${missingBlueprintSections.join('、')}。未知项写 [待补充]，不要杜撰副线或人物关系。`
+          : `补齐本章蓝图核心字段：${missingBlueprintSections.join('、')}。`,
+        evidence: isLegacyBackfill
+          ? `旧版细纲可继续日更；缺少新版蓝图字段：${missingBlueprintSections.join('、')}`
+          : `缺少：${missingBlueprintSections.join('、')}`,
       })
     }
   }

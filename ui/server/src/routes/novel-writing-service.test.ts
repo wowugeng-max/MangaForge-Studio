@@ -6934,6 +6934,46 @@ describe('normalizeSceneCardsPayload', () => {
     expect(checks[0].fix).toContain('章尾承接')
   })
 
+  test('allows legacy outlines missing new blueprint fields as nonblocking backfill warnings', () => {
+    const checks = buildSourceReadinessPreflightChecks({
+      chapter_target: {
+        chapter_no: 18,
+        title: '旧账落印',
+        chapter_goal: '李玄用旧账缺页反证会长换证。',
+        summary: '会长三轮压问，李玄用旧账缺页和袖口暗纹反证。',
+        emotional_curve: '压迫 -> 反证 -> 余波',
+        opening_hook: '雨夜旧账第一行金额不对。',
+        reader_payoff: '李玄夺回审讯解释权。',
+        ending_hook: '旧账缺页背后出现内门编号。',
+        word_target: 3200,
+        state_tracking_contract: {
+          source_readiness: [
+            {
+              key: 'chapter_blueprint',
+              label: '本章细纲/蓝图',
+              status: 'ready',
+              evidence: '旧版细纲已有核心事件、目标情绪、章首钩子、爽点、章尾钩子和字数目标。',
+            },
+          ],
+        },
+      },
+    })
+
+    const blueprintCheck = checks.find((item: any) => item.key === 'source_readiness_chapter_blueprint')
+
+    expect(blueprintCheck).toBeTruthy()
+    expect(blueprintCheck).toMatchObject({
+      key: 'source_readiness_chapter_blueprint',
+      severity: 'medium',
+      ok: false,
+    })
+    expect(blueprintCheck.fix).toContain('不阻塞日更')
+    expect(blueprintCheck.fix).toContain('按新版模板回填')
+    expect(blueprintCheck.fix).toContain('[待补充]')
+    expect(blueprintCheck.fix).toContain('不要杜撰副线或人物关系')
+    expect(blueprintCheck.evidence).toContain('旧版细纲')
+  })
+
   test('blocks prose preflight when scene cards lack goal obstacle or state change', () => {
     const checks = buildSourceReadinessPreflightChecks({
       chapter_target: {
