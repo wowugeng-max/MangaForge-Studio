@@ -42423,6 +42423,15 @@ const BENCHMARK_RECALL_SOURCE_PATH_FIELDS = [
   'anchor_excerpt_paths',
 ]
 
+const BENCHMARK_RECALL_NAMED_SOURCE_PATH_FIELDS = [
+  { key: 'style_profile_path', aliases: ['style_profile_path'] },
+  { key: 'module_source_path', aliases: ['module_source_path'] },
+  { key: 'rhythm_source_path', aliases: ['rhythm_source_path'] },
+  { key: 'matched_chapter_summary_path', aliases: ['matched_chapter_summary_path', 'summary_source_path'] },
+  { key: 'matched_chapter_deep_dive_path', aliases: ['matched_chapter_deep_dive_path', 'matched_deep_dive_path', 'deep_dive_source_path'] },
+  { key: 'fallback_deep_dive_path', aliases: ['fallback_deep_dive_path'] },
+]
+
 const SECONDARY_BENCHMARK_BOUNDARY_RULES = [
   '副对标只用于结构/情绪/设定参考，不参与文风画像和原文锚点。',
   '副书不进文风、不进原文锚点；正文 prompt 不读取副书文风.md、副书原文或副书原句。',
@@ -42444,6 +42453,19 @@ function benchmarkRecallSourcePaths(...strategies: any[]) {
       ...styleRecallList(strategy, field),
     ])
   )), 12)
+}
+
+function benchmarkRecallNamedSourcePaths(...strategies: any[]) {
+  return Object.fromEntries(
+    BENCHMARK_RECALL_NAMED_SOURCE_PATH_FIELDS
+      .map(({ key, aliases }) => {
+        const value = compactBriefText(strategies.map(strategy => (
+          aliases.map(alias => styleRecallValueText(strategy, alias)).find(Boolean)
+        )).find(Boolean))
+        return [key, value]
+      })
+      .filter(([, value]) => Boolean(value)),
+  )
 }
 
 function benchmarkRecallAnchorExcerpts(...strategies: any[]) {
@@ -42530,6 +42552,7 @@ function buildBenchmarkRecallBrief(contextPackage: any = {}, options: any = {}) 
     const profileDegenerate = benchmarkRecallHasGap(effectiveGaps, /profile_degenerate|文风不可用|文风画像退化|profile degenerate/i)
     const secondaryBenchmarkRecallSummary = normalizeSecondaryBenchmarkRecallSummary(explicit, derived)
     const anchorExcerpts = benchmarkRecallAnchorExcerpts(explicit, derived)
+    const namedSourcePaths = benchmarkRecallNamedSourcePaths(explicit, derived)
     const secondaryBenchmarkBoundaryRules = secondaryBenchmarkRecallSummary.length
       ? uniqueBriefStrings([
           ...asArray(explicit.secondary_benchmark_boundary_rules || explicit.secondaryBenchmarkBoundaryRules),
@@ -42554,8 +42577,10 @@ function buildBenchmarkRecallBrief(contextPackage: any = {}, options: any = {}) 
         : asArray(explicit.style_directives || explicit.styleDirectives).length
         ? uniqueBriefStrings(asArray(explicit.style_directives || explicit.styleDirectives), 8)
         : asArray(derived.style_directives),
+      ...namedSourcePaths,
       source_paths: uniqueBriefStrings([
         ...asArray(explicit.source_paths || explicit.sourcePaths),
+        ...Object.values(namedSourcePaths),
         ...asArray(derived.source_paths),
       ], 12),
       anchor_excerpts: anchorExcerpts,
@@ -42631,7 +42656,11 @@ function buildBenchmarkRecallBrief(contextPackage: any = {}, options: any = {}) 
       sample.visual_pattern,
     ]),
   ], 8)
-  const sourcePaths = benchmarkRecallSourcePaths(styleStrategy, benchmarkStrategy)
+  const namedSourcePaths = benchmarkRecallNamedSourcePaths(styleStrategy, benchmarkStrategy)
+  const sourcePaths = uniqueBriefStrings([
+    ...Object.values(namedSourcePaths),
+    ...benchmarkRecallSourcePaths(styleStrategy, benchmarkStrategy),
+  ], 12)
   const anchorExcerpts = benchmarkRecallAnchorExcerpts(styleStrategy, benchmarkStrategy)
   const secondaryBenchmarkRecallSummary = normalizeSecondaryBenchmarkRecallSummary(styleStrategy, benchmarkStrategy)
   const secondaryBenchmarkBoundaryRules = secondaryBenchmarkRecallSummary.length ? SECONDARY_BENCHMARK_BOUNDARY_RULES : []
@@ -42662,6 +42691,7 @@ function buildBenchmarkRecallBrief(contextPackage: any = {}, options: any = {}) 
     matched_chapter: (toneMatchFailed || profileDegenerate) ? '' : matchedChapter,
     matched_chapter_techniques: (toneMatchFailed || profileDegenerate) ? [] : matchedTechniques,
     style_directives: profileDegenerate ? [] : styleDirectives,
+    ...namedSourcePaths,
     source_paths: sourcePaths,
     anchor_excerpts: (toneMatchFailed || profileDegenerate) ? [] : anchorExcerpts,
     canonical_source_rules: OH_STORY_BENCHMARK_CANONICAL_SOURCE_RULES,
@@ -48203,6 +48233,12 @@ export function createNovelWritingService(ctx: {
       benchmarkRecallBrief?.matched_chapter ? `matched_chapter：${benchmarkRecallBrief.matched_chapter}` : '',
       benchmarkRecallBrief?.matched_chapter_techniques?.length ? `matched_chapter_techniques：${benchmarkRecallBrief.matched_chapter_techniques.join('；')}` : '',
       benchmarkRecallBrief?.style_directives?.length ? `style_directives：${benchmarkRecallBrief.style_directives.join('；')}` : '',
+      benchmarkRecallBrief?.style_profile_path ? `style_profile_path：${benchmarkRecallBrief.style_profile_path}` : '',
+      benchmarkRecallBrief?.module_source_path ? `module_source_path：${benchmarkRecallBrief.module_source_path}` : '',
+      benchmarkRecallBrief?.rhythm_source_path ? `rhythm_source_path：${benchmarkRecallBrief.rhythm_source_path}` : '',
+      benchmarkRecallBrief?.matched_chapter_summary_path ? `matched_chapter_summary_path：${benchmarkRecallBrief.matched_chapter_summary_path}` : '',
+      benchmarkRecallBrief?.matched_chapter_deep_dive_path ? `matched_chapter_deep_dive_path：${benchmarkRecallBrief.matched_chapter_deep_dive_path}` : '',
+      benchmarkRecallBrief?.fallback_deep_dive_path ? `fallback_deep_dive_path：${benchmarkRecallBrief.fallback_deep_dive_path}` : '',
       benchmarkRecallBrief?.source_paths?.length ? `source_paths：${benchmarkRecallBrief.source_paths.join('；')}` : '',
       benchmarkRecallBrief?.anchor_excerpts?.length ? '原文锚点片段：只用于学习句长、停顿、潜台词和信息释放手法；不得复制锚点原句、桥段、设定、角色名或专名。' : '',
       benchmarkRecallBrief?.anchor_excerpts?.length ? benchmarkRecallBrief.anchor_excerpts.map((excerpt: string, index: number) => `锚点${index + 1}：${excerpt}`).join('\n') : '',
