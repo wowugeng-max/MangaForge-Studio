@@ -21963,17 +21963,25 @@ function generatedSceneBreakdownFromContext(contextPackage: any = {}) {
   })
 }
 
-function buildProseReviewContextPackage(contextPackage: any = {}, finalSceneBreakdown: any[] = []) {
+function buildProseReviewContextPackage(contextPackage: any = {}, finalSceneBreakdown: any[] = [], wordTargetExpansionPatches: any[] = []) {
   const generatedSceneBreakdown = asArray(finalSceneBreakdown)
-  if (!generatedSceneBreakdown.length) return contextPackage
-  return {
+  const expansionPatches = asArray(wordTargetExpansionPatches).filter(Boolean)
+  if (!generatedSceneBreakdown.length && !expansionPatches.length) return contextPackage
+  const nextPackage: any = {
     ...contextPackage,
-    generated_scene_breakdown: generatedSceneBreakdown,
     chapter_target: {
       ...(contextPackage?.chapter_target || {}),
-      generated_scene_breakdown: generatedSceneBreakdown,
     },
   }
+  if (generatedSceneBreakdown.length) {
+    nextPackage.generated_scene_breakdown = generatedSceneBreakdown
+    nextPackage.chapter_target.generated_scene_breakdown = generatedSceneBreakdown
+  }
+  if (expansionPatches.length) {
+    nextPackage.word_target_expansion_patches = expansionPatches
+    nextPackage.chapter_target.word_target_expansion_patches = expansionPatches
+  }
+  return nextPackage
 }
 
 function sceneCardReceiptEvidenceParts(receipts: any[]) {
@@ -50878,9 +50886,15 @@ export function createNovelWritingService(ctx: {
     let memePolish: any = null
     let readabilityReview: any = null
     await onStage('word_target', { status: 'running', target: wordTarget.target, min: wordTarget.min, max: wordTarget.max, actual: countProseChars(finalText) })
+    const wordTargetExpansionPatches: any[] = []
+    const recordWordTargetExpansionPatch = (wordTargetCheck: any) => {
+      const patch = wordTargetCheck?.expansion?.expansion_blueprint_patch
+      if (patch) wordTargetExpansionPatches.push(patch)
+    }
     try {
       const wordTargetCheck = await ensureProseMeetsWordTarget(activeWorkspace, project, contextPackage, finalText, preferredModelId, llmControlOptions)
       finalText = wordTargetCheck.final_text || finalText
+      recordWordTargetExpansionPatch(wordTargetCheck)
       if (wordTargetCheck.expanded && wordTargetCheck.expansion) {
         finalSceneBreakdown = selectVerifiedSceneBreakdownUpdate(finalSceneBreakdown, wordTargetCheck.expansion.scene_breakdown, finalText)
         finalContinuityNotes = wordTargetCheck.expansion.continuity_notes?.length ? wordTargetCheck.expansion.continuity_notes : finalContinuityNotes
@@ -50947,6 +50961,7 @@ export function createNovelWritingService(ctx: {
     try {
       const postEditorWordTargetCheck = await ensureProseMeetsWordTarget(activeWorkspace, project, contextPackage, finalText, preferredModelId, llmControlOptions)
       finalText = postEditorWordTargetCheck.final_text || finalText
+      recordWordTargetExpansionPatch(postEditorWordTargetCheck)
       if (postEditorWordTargetCheck.expanded && postEditorWordTargetCheck.expansion) {
         finalSceneBreakdown = selectVerifiedSceneBreakdownUpdate(finalSceneBreakdown, postEditorWordTargetCheck.expansion.scene_breakdown, finalText)
         finalContinuityNotes = postEditorWordTargetCheck.expansion.continuity_notes?.length ? postEditorWordTargetCheck.expansion.continuity_notes : finalContinuityNotes
@@ -50977,6 +50992,7 @@ export function createNovelWritingService(ctx: {
     try {
       const postMemeWordTargetCheck = await ensureProseMeetsWordTarget(activeWorkspace, project, contextPackage, finalText, preferredModelId, llmControlOptions)
       finalText = postMemeWordTargetCheck.final_text || finalText
+      recordWordTargetExpansionPatch(postMemeWordTargetCheck)
       if (postMemeWordTargetCheck.expanded && postMemeWordTargetCheck.expansion) {
         finalSceneBreakdown = selectVerifiedSceneBreakdownUpdate(finalSceneBreakdown, postMemeWordTargetCheck.expansion.scene_breakdown, finalText)
         finalContinuityNotes = postMemeWordTargetCheck.expansion.continuity_notes?.length ? postMemeWordTargetCheck.expansion.continuity_notes : finalContinuityNotes
@@ -50987,7 +51003,7 @@ export function createNovelWritingService(ctx: {
       throw error
     }
     await onStage('review', { status: 'running' })
-    let selfCheck = await runProseSelfReviewAndRevision(activeWorkspace, project, buildProseReviewContextPackage(contextPackage, finalSceneBreakdown), finalText, preferredModelId, {
+    let selfCheck = await runProseSelfReviewAndRevision(activeWorkspace, project, buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches), finalText, preferredModelId, {
       revise: !isDraftReviewOnly,
       quality_threshold: qualityThreshold,
       ...llmControlOptions,
@@ -51003,6 +51019,7 @@ export function createNovelWritingService(ctx: {
     try {
       const postReviewWordTargetCheck = await ensureProseMeetsWordTarget(activeWorkspace, project, contextPackage, finalText, preferredModelId, llmControlOptions)
       finalText = postReviewWordTargetCheck.final_text || finalText
+      recordWordTargetExpansionPatch(postReviewWordTargetCheck)
       if (postReviewWordTargetCheck.expanded && postReviewWordTargetCheck.expansion) {
         finalSceneBreakdown = selectVerifiedSceneBreakdownUpdate(finalSceneBreakdown, postReviewWordTargetCheck.expansion.scene_breakdown, finalText)
         finalContinuityNotes = postReviewWordTargetCheck.expansion.continuity_notes?.length ? postReviewWordTargetCheck.expansion.continuity_notes : finalContinuityNotes
@@ -51014,7 +51031,7 @@ export function createNovelWritingService(ctx: {
     }
     if (selfCheck.revised && options.auto_repair_quality_gate === true) {
       await onStage('review', { status: 'running', phase: 'quality_recheck', previous_score: selfCheck?.review?.score ?? null })
-      const qualityRecheck = await runProseSelfReviewAndRevision(activeWorkspace, project, buildProseReviewContextPackage(contextPackage, finalSceneBreakdown), finalText, preferredModelId, {
+      const qualityRecheck = await runProseSelfReviewAndRevision(activeWorkspace, project, buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches), finalText, preferredModelId, {
         revise: false,
         quality_gate_repair: true,
         quality_threshold: qualityThreshold,
@@ -51095,7 +51112,7 @@ export function createNovelWritingService(ctx: {
         phase: 'deterministic_cleanup_repair',
         cleanup_risk_count: deterministicProseCleanup.risk_count,
       })
-      const cleanupRepair = await runProseSelfReviewAndRevision(activeWorkspace, project, buildProseReviewContextPackage(contextPackage, finalSceneBreakdown), finalText, preferredModelId, {
+      const cleanupRepair = await runProseSelfReviewAndRevision(activeWorkspace, project, buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches), finalText, preferredModelId, {
         revise: true,
         deterministic_cleanup_repair: true,
         deterministic_prose_cleanup: deterministicProseCleanup,
@@ -51225,7 +51242,7 @@ export function createNovelWritingService(ctx: {
       revision_receipt_checks: revisionReceiptChecks,
       deslop_repair_checks: [...missingDeslopRepairReceiptChecks, ...deslopRepairChecks],
     }, deterministicProseCleanup)
-    const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown)
+    const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)
     const revisionDeliveryReceipts = selfCheck?.revision?.oh_story_delivery_receipts
       || selfCheck?.revision?.ohStoryDeliveryReceipts
       || {}
@@ -52152,7 +52169,7 @@ export function createNovelWritingService(ctx: {
     }, { versionSource: selfCheck?.revised ? 'repair' : editorRewrite?.edited ? 'editor_rewrite' : 'agent_execute' })
     await onStage('store', { status: 'success', word_count: countProseChars(finalText), scene_status: 'accepted' })
     await onStage('story_state', { status: 'running' })
-    const storyStateUpdate = await updateStoryStateMachine(activeWorkspace, project, updated || chapter, buildProseReviewContextPackage(contextPackage, finalSceneBreakdown), finalText, preferredModelId, llmControlOptions).catch(error => {
+    const storyStateUpdate = await updateStoryStateMachine(activeWorkspace, project, updated || chapter, buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches), finalText, preferredModelId, llmControlOptions).catch(error => {
       if (isAbortError(error)) throw error
       return { error: String(error) }
     })

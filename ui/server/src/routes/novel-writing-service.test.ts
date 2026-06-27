@@ -6125,7 +6125,7 @@ describe('normalizeSceneCardsPayload', () => {
     )
 
     expect(helperBlock).toContain('generated_scene_breakdown')
-    expect(generationBlock).toContain('buildProseReviewContextPackage(contextPackage, finalSceneBreakdown)')
+    expect(generationBlock).toContain('buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)')
   })
 
   test('wires deterministic scene-card density risks into prose craft self review', () => {
@@ -44285,7 +44285,7 @@ describe('story unit sync report', () => {
       source.indexOf("await onStage('story_state'", source.indexOf('const storyStateUpdate = await updateStoryStateMachine')),
     )
 
-    expect(storeBlock).toContain('buildProseReviewContextPackage(contextPackage, finalSceneBreakdown)')
+    expect(storeBlock).toContain('buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)')
   })
 
   test('prose quality review payloads store latest generated scene breakdown context', () => {
@@ -44295,7 +44295,7 @@ describe('story unit sync report', () => {
       source.indexOf('const settingViolations = Array.isArray', source.indexOf('const qualityGateReview = buildQualityGateReviewWithDeterministicCleanup')),
     )
 
-    expect(qualityReviewStorageBlock).toContain('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown)')
+    expect(qualityReviewStorageBlock).toContain('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)')
     expect(qualityReviewStorageBlock).toContain('context_package: finalReviewContextPackage')
     expect(qualityReviewStorageBlock).not.toContain('context_package: contextPackage')
   })
@@ -44341,8 +44341,8 @@ describe('story unit sync report', () => {
       source.indexOf('const storyStateUpdate = await updateStoryStateMachine', source.indexOf('const draftResult = await generateNovelChapterProse')),
     )
     const finalReceiptBlock = generationBlock.slice(
-      generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown)'),
-      generationBlock.indexOf("if (isDraftReviewOnly)", generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown)')),
+      generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)'),
+      generationBlock.indexOf("if (isDraftReviewOnly)", generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)')),
     )
 
     expect(generationBlock).toContain('let ohStoryDeliveryReceipts = normalizeStoredOhStoryDeliveryReceipts')
@@ -44360,8 +44360,8 @@ describe('story unit sync report', () => {
       source.indexOf('const storyStateUpdate = await updateStoryStateMachine', source.indexOf('const draftResult = await generateNovelChapterProse')),
     )
     const finalReceiptBlock = generationBlock.slice(
-      generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown)'),
-      generationBlock.indexOf("if (isDraftReviewOnly)", generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown)')),
+      generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)'),
+      generationBlock.indexOf("if (isDraftReviewOnly)", generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)')),
     )
 
     expect(finalReceiptBlock).toContain('const revisionDeliveryReceipts = selfCheck?.revision?.oh_story_delivery_receipts')
@@ -44377,8 +44377,8 @@ describe('story unit sync report', () => {
       source.indexOf('const storyStateUpdate = await updateStoryStateMachine', source.indexOf('const draftResult = await generateNovelChapterProse')),
     )
     const finalReceiptBlock = generationBlock.slice(
-      generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown)'),
-      generationBlock.indexOf("if (isDraftReviewOnly)", generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown)')),
+      generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)'),
+      generationBlock.indexOf("if (isDraftReviewOnly)", generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)')),
     )
 
     expect(finalReceiptBlock).toContain('deslop_repair_receipts')
@@ -44394,8 +44394,8 @@ describe('story unit sync report', () => {
       source.indexOf('const storyStateUpdate = await updateStoryStateMachine', source.indexOf('const draftResult = await generateNovelChapterProse')),
     )
     const finalReceiptBlock = generationBlock.slice(
-      generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown)'),
-      generationBlock.indexOf("if (isDraftReviewOnly)", generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown)')),
+      generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)'),
+      generationBlock.indexOf("if (isDraftReviewOnly)", generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)')),
     )
 
     expect(source).toContain('function uniqueDeliveryRiskReceipts')
@@ -44409,8 +44409,8 @@ describe('story unit sync report', () => {
       source.indexOf('const storyStateUpdate = await updateStoryStateMachine', source.indexOf('const draftResult = await generateNovelChapterProse')),
     )
     const finalReceiptBlock = generationBlock.slice(
-      generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown)'),
-      generationBlock.indexOf("if (isDraftReviewOnly)", generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown)')),
+      generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)'),
+      generationBlock.indexOf("if (isDraftReviewOnly)", generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)')),
     )
 
     const sceneReceiptMergeBlock = finalReceiptBlock.slice(
@@ -44428,8 +44428,8 @@ describe('story unit sync report', () => {
       source.indexOf('const storyStateUpdate = await updateStoryStateMachine', source.indexOf('const draftResult = await generateNovelChapterProse')),
     )
     const finalReceiptBlock = generationBlock.slice(
-      generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown)'),
-      generationBlock.indexOf("if (isDraftReviewOnly)", generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown)')),
+      generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)'),
+      generationBlock.indexOf("if (isDraftReviewOnly)", generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)')),
     )
     const sceneReceiptMergeBlock = finalReceiptBlock.slice(
       finalReceiptBlock.indexOf('scene_card_receipts: ['),
@@ -44446,8 +44446,8 @@ describe('story unit sync report', () => {
       source.indexOf('const storyStateUpdate = await updateStoryStateMachine', source.indexOf('const draftResult = await generateNovelChapterProse')),
     )
     const finalReceiptBlock = generationBlock.slice(
-      generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown)'),
-      generationBlock.indexOf("if (isDraftReviewOnly)", generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown)')),
+      generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)'),
+      generationBlock.indexOf("if (isDraftReviewOnly)", generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)')),
     )
     const revisionReceiptMergeBlock = finalReceiptBlock.slice(
       finalReceiptBlock.indexOf('revision_receipts: ['),
@@ -48506,6 +48506,22 @@ describe('chapter context word target source guards', () => {
     expect(ensureBlock).toContain('maxExpansionAttempts')
     expect(ensureBlock).toContain('for (let attempt = 1; attempt <= maxExpansionAttempts; attempt += 1)')
     expect(ensureBlock).toContain('attempts.push')
+  })
+
+  test('passes word-target expansion blueprint patches into prose review context', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const helperStart = source.indexOf('function buildProseReviewContextPackage')
+    const helperEnd = source.indexOf('function sceneCardReceiptEvidenceParts', helperStart)
+    const helperBlock = source.slice(helperStart, helperEnd)
+    const generationStart = source.indexOf("await onStage('word_target', { status: 'running'")
+    const generationEnd = source.indexOf('const initialReviewDecision = getQualityGateDecision', generationStart)
+    const generationBlock = source.slice(generationStart, generationEnd)
+
+    expect(helperBlock).toContain('wordTargetExpansionPatches')
+    expect(helperBlock).toContain('word_target_expansion_patches')
+    expect(generationBlock).toContain('const wordTargetExpansionPatches: any[] = []')
+    expect(generationBlock).toContain('wordTargetExpansionPatches.push')
+    expect(generationBlock).toContain('buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)')
   })
 
   test('does not fail chapter production solely because a recovered draft result still has an error field', () => {
