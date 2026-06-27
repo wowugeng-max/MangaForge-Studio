@@ -18256,6 +18256,59 @@ function normalizeDailyProgressSummary(value: any = {}) {
   }
 }
 
+function normalizeDailyContextSnapshot(value: any = {}) {
+  const raw = value?.daily_context_snapshot || value?.dailyContextSnapshot || value || {}
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const textItem = (item: any) => compactBriefText(item?.summary || item?.detail || item?.text || item?.name || item)
+  const currentChapter = Number(
+    raw.current_chapter
+    ?? raw.currentChapter
+    ?? raw.chapter_no
+    ?? raw.chapterNo
+    ?? raw['当前位置/章']
+    ?? raw.当前位置章
+    ?? 0,
+  )
+  const currentScene = compactBriefText(
+    raw.current_scene
+    || raw.currentScene
+    || raw.scene
+    || raw['当前位置/场景']
+    || raw.当前位置场景,
+  )
+  const currentEmotionTarget = compactBriefText(
+    raw.current_emotion_target
+    || raw.currentEmotionTarget
+    || raw.emotion_target
+    || raw.emotionTarget
+    || raw['当前位置/情绪目标']
+    || raw.当前位置情绪目标,
+  )
+  const writingChanges = uniqueBriefStrings(
+    asArray(raw.writing_changes || raw.writingChanges || raw['本次写作变更'] || raw.本次写作变更)
+      .map(textItem)
+      .filter(Boolean),
+    8,
+  )
+  const pendingClues = uniqueBriefStrings(
+    asArray(raw.pending_clues || raw.pendingClues || raw.open_clues || raw.openClues || raw['待处理线索'] || raw.待处理线索)
+      .map(textItem)
+      .filter(Boolean),
+    8,
+  )
+  if (!currentChapter && !currentScene && !currentEmotionTarget && !writingChanges.length && !pendingClues.length) {
+    return null
+  }
+  return {
+    source: compactBriefText(raw.source, 'oh_story_daily_context_snapshot_v1'),
+    current_chapter: currentChapter || null,
+    current_scene: currentScene || null,
+    current_emotion_target: currentEmotionTarget || null,
+    writing_changes: writingChanges,
+    pending_clues: pendingClues,
+  }
+}
+
 export function buildMergedLayeredMemoryContext(prev: any, delta: any, chapter: any = {}) {
   const previous = normalizeLayeredMemoryContext(prev)
   const next = normalizeLayeredMemoryContext(delta)
@@ -43162,6 +43215,25 @@ export function buildChapterPreDraftBrief(project: any, contextPackage: any) {
     || project?.story_state?.progress_summary
     || project?.storyState?.progressSummary,
   )
+  const dailyContextSnapshot = normalizeDailyContextSnapshot(
+    contextPackage?.chapter_target?.daily_context_snapshot
+    || contextPackage?.chapter_target?.dailyContextSnapshot
+    || contextPackage?.pre_draft_brief?.daily_context_snapshot
+    || contextPackage?.pre_draft_brief?.dailyContextSnapshot
+    || contextPackage?.preDraftBrief?.daily_context_snapshot
+    || contextPackage?.preDraftBrief?.dailyContextSnapshot
+    || contextPackage?.daily_context_snapshot
+    || contextPackage?.dailyContextSnapshot
+    || contextPackage?.story_state?.daily_context_snapshot
+    || contextPackage?.story_state?.dailyContextSnapshot
+    || contextPackage?.storyState?.dailyContextSnapshot
+    || project?.reference_config?.story_state?.daily_context_snapshot
+    || project?.reference_config?.story_state?.dailyContextSnapshot
+    || project?.reference_config?.storyState?.dailyContextSnapshot
+    || project?.story_state?.daily_context_snapshot
+    || project?.story_state?.dailyContextSnapshot
+    || project?.storyState?.dailyContextSnapshot,
+  )
   const nextBatchBrief = normalizeNextBatchBrief(nextBatchBriefFromContext(contextPackage), Number(chapterTarget.chapter_no || 0))
   const storyUnitContext = storyUnitContextFromContext(contextPackage, { chapter_no: chapterTarget.chapter_no })
   const readerRetentionBrief = buildReaderRetentionBrief(project, contextPackage, sceneBriefs)
@@ -43450,6 +43522,7 @@ export function buildChapterPreDraftBrief(project: any, contextPackage: any) {
     longform_memory_capsule: longformMemoryCapsule,
     layered_memory_context: layeredMemoryContext,
     progress_summary: progressSummary,
+    daily_context_snapshot: dailyContextSnapshot,
     next_batch_brief: nextBatchBrief,
     story_unit_context: storyUnitContext,
     chapter_blueprint: chapterBlueprint,
@@ -43509,6 +43582,17 @@ export function mergeConfirmedPreDraftBriefIntoContext(contextPackage: any, preD
     || (contextPackage || {}).progressSummary
     || (contextPackage || {}).story_state?.progress_summary
     || (contextPackage || {}).storyState?.progressSummary,
+  )
+  const dailyContextSnapshot = normalizeDailyContextSnapshot(
+    preDraftBrief.daily_context_snapshot
+    || preDraftBrief.dailyContextSnapshot
+    || (contextPackage || {}).chapter_target?.daily_context_snapshot
+    || (contextPackage || {}).chapter_target?.dailyContextSnapshot
+    || (contextPackage || {}).daily_context_snapshot
+    || (contextPackage || {}).dailyContextSnapshot
+    || (contextPackage || {}).story_state?.daily_context_snapshot
+    || (contextPackage || {}).story_state?.dailyContextSnapshot
+    || (contextPackage || {}).storyState?.dailyContextSnapshot,
   )
   const targetChapterNo = Number((contextPackage || {}).chapter_target?.chapter_no || preDraftBrief.chapter_no || 0)
   const nextBatchBrief = normalizeNextBatchBrief(nextBatchBriefFromContext(contextPackage, preDraftBrief), targetChapterNo)
@@ -44026,6 +44110,7 @@ export function mergeConfirmedPreDraftBriefIntoContext(contextPackage: any, preD
     longform_memory_capsule: longformMemoryCapsule || null,
     layered_memory_context: layeredMemoryContext || null,
     progress_summary: progressSummary || null,
+    daily_context_snapshot: dailyContextSnapshot || null,
     next_batch_brief: nextBatchBrief || null,
     story_unit_context: storyUnitContext || null,
     scene_briefs: sceneBriefs,
@@ -44076,6 +44161,7 @@ export function mergeConfirmedPreDraftBriefIntoContext(contextPackage: any, preD
     longform_memory_capsule: longformMemoryCapsule || (contextPackage || {}).longform_memory_capsule || null,
     layered_memory_context: layeredMemoryContext || (contextPackage || {}).layered_memory_context || null,
     progress_summary: progressSummary || (contextPackage || {}).progress_summary || null,
+    daily_context_snapshot: dailyContextSnapshot || (contextPackage || {}).daily_context_snapshot || null,
     next_batch_brief: nextBatchBrief || (contextPackage || {}).next_batch_brief || null,
     story_unit_context: storyUnitContext || (contextPackage || {}).story_unit_context || null,
     reader_drop_risk_brief: readerDropRiskBrief || (contextPackage || {}).reader_drop_risk_brief || (contextPackage || {}).readerDropRiskBrief || null,
@@ -44164,6 +44250,7 @@ export function mergeConfirmedPreDraftBriefIntoContext(contextPackage: any, preD
       longform_memory_capsule: longformMemoryCapsule || (contextPackage || {}).chapter_target?.longform_memory_capsule || null,
       layered_memory_context: layeredMemoryContext || (contextPackage || {}).chapter_target?.layered_memory_context || null,
       progress_summary: progressSummary || (contextPackage || {}).chapter_target?.progress_summary || null,
+      daily_context_snapshot: dailyContextSnapshot || (contextPackage || {}).chapter_target?.daily_context_snapshot || null,
       next_batch_brief: nextBatchBrief || (contextPackage || {}).chapter_target?.next_batch_brief || null,
       story_unit_context: storyUnitContext || (contextPackage || {}).chapter_target?.story_unit_context || null,
       chapter_blueprint: chapterBlueprint,
@@ -46593,6 +46680,23 @@ export function createNovelWritingService(ctx: {
       || project?.story_state?.progress_summary
       || project?.storyState?.progressSummary,
     )
+    const dailyContextSnapshot = normalizeDailyContextSnapshot(
+      contextPackage?.chapter_target?.daily_context_snapshot
+      || contextPackage?.chapter_target?.dailyContextSnapshot
+      || preDraftBrief.daily_context_snapshot
+      || preDraftBrief.dailyContextSnapshot
+      || contextPackage?.daily_context_snapshot
+      || contextPackage?.dailyContextSnapshot
+      || contextPackage?.story_state?.daily_context_snapshot
+      || contextPackage?.story_state?.dailyContextSnapshot
+      || contextPackage?.storyState?.dailyContextSnapshot
+      || project?.reference_config?.story_state?.daily_context_snapshot
+      || project?.reference_config?.story_state?.dailyContextSnapshot
+      || project?.reference_config?.storyState?.dailyContextSnapshot
+      || project?.story_state?.daily_context_snapshot
+      || project?.story_state?.dailyContextSnapshot
+      || project?.storyState?.dailyContextSnapshot,
+    )
     const millionWordRunway = millionWordRunwayFromContext(contextPackage, preDraftBrief)
     const styleSampleStrategy = contextPackage?.chapter_target?.style_sample_strategy || buildStyleSampleStrategy(project, contextPackage)
     const styleFingerprintHandoff = buildStyleFingerprintPromptHandoff(contextPackage, project, styleSampleStrategy)
@@ -47583,6 +47687,15 @@ export function createNovelWritingService(ctx: {
       progressSummary?.notes?.length ? `注意事项：${progressSummary.notes.join('；')}` : '',
       progressSummary ? JSON.stringify(progressSummary, null, 2).slice(0, 2000) : '',
       '',
+      dailyContextSnapshot ? '【日更上下文快照】' : '',
+      dailyContextSnapshot ? '硬性要求：执行 story_state.daily_context_snapshot；这是 oh-story 完成后自动更新的追踪/上下文.md 快照。开篇必须接住当前位置、场景和情绪目标；写作变更要成为本章事实约束，待处理线索要么推进要么保持清晰债务。' : '',
+      dailyContextSnapshot?.current_chapter ? `当前位置/章：第${dailyContextSnapshot.current_chapter}章` : '',
+      dailyContextSnapshot?.current_scene ? `当前位置/场景：${dailyContextSnapshot.current_scene}` : '',
+      dailyContextSnapshot?.current_emotion_target ? `当前位置/情绪目标：${dailyContextSnapshot.current_emotion_target}` : '',
+      dailyContextSnapshot?.writing_changes?.length ? `本次写作变更：${dailyContextSnapshot.writing_changes.join('；')}` : '',
+      dailyContextSnapshot?.pending_clues?.length ? `待处理线索：${dailyContextSnapshot.pending_clues.join('；')}` : '',
+      dailyContextSnapshot ? JSON.stringify(dailyContextSnapshot, null, 2).slice(0, 2000) : '',
+      '',
       styleFingerprintHandoff ? '【文风指纹断点】' : '',
       styleFingerprintHandoff ? '硬性要求：执行 story_state.style_fingerprint；这是 oh-story 追踪/上下文.md 的文风指纹锚。续写只承接剧情、状态和情绪债，不继承可能已漂移的上一章句式节奏。写完后按目标句长带检查碎句、逗号结巴和中长句呼吸。' : '',
       styleFingerprintHandoff?.target_sentence_band ? `目标句长带：${styleFingerprintHandoff.target_sentence_band}` : '',
@@ -47855,10 +47968,11 @@ export function createNovelWritingService(ctx: {
       chapterText.slice(0, 14000),
       '',
       '输出 JSON，字段：',
-      'state_delta: {timeline, current_time, active_locations, character_positions, character_relationships, relationship_graph, known_secrets, secret_visibility, item_ownership, resource_status, foreshadowing_status, payoff_queue, mainline_progress, volume_progress, unresolved_conflicts, open_questions, recent_repeated_information, next_chapter_priorities, layered_memory_context, progress_summary}',
+      'state_delta: {timeline, current_time, active_locations, character_positions, character_relationships, relationship_graph, known_secrets, secret_visibility, item_ownership, resource_status, foreshadowing_status, payoff_queue, mainline_progress, volume_progress, unresolved_conflicts, open_questions, recent_repeated_information, next_chapter_priorities, layered_memory_context, progress_summary, daily_context_snapshot}',
       'state_delta.timeline/current_time/active_locations 要尽量带 source_excerpt 或 evidence：timeline 可用对象数组 {event/source_excerpt}，active_locations 可用对象数组 {name/source_excerpt}；如果 current_time 是字符串，也必须在 timeline 或 location 相关记录中补正文原句证据。',
       'state_delta.layered_memory_context: 按 oh-story 已写内容分层摘要输出完整可覆盖版本，字段包含 recent_chapter_details(array, 只保留最近5章详记，每项写第X章+事件+状态变化+伏笔), ten_chapter_summaries(array, 每10章概要), volume_overview(array, 卷级总览), archive_refs(array, 追踪/归档/第XXX-YYY章.md 等归档索引), red_lines(array)。超过30章时必须维护；每50章或卷结束时保留最近5章详记，将更早内容压缩进 archive_refs 和 ten_chapter_summaries；不足30章也可输出最近章节详记。',
       'state_delta.progress_summary: 按 oh-story Step 4「追踪/上下文.md」输出本章完成后的日更断点摘要，字段包含 last_completed_chapter, updated_at, completed_chapter_count, completed_word_count, active_foreshadowing_count, recent_changed_characters, next_outline_status, notes。notes 是注意事项，只写需要下一章记住的关键决策或变更，不复制详细伏笔表、时间线表或角色状态表。',
+      'state_delta.daily_context_snapshot: 按 oh-story 完成后自动更新「追踪/上下文.md」输出本章结束后的续写快照，字段包含 current_chapter, current_scene, current_emotion_target, writing_changes, pending_clues。current_scene 写下一章开篇必须承接的具体现场；current_emotion_target 写下一章开场要延续或反转的情绪目标；writing_changes 写本章新增且会影响后续的事实变化；pending_clues 写仍未解决但必须保留的线索。',
       'character_updates: array，每项包含 name,current_state,source_excerpt 或 evidence。current_state 可包含 age, location, physical_condition, appearance_delta, outfit, items, item_changes, ability_status, resource_status, emotional_state, relationship_attitudes, knowledge_scope, newly_learned, information_boundaries, secrets_known, injuries, goals, next_intent, last_seen_chapter；source_excerpt/evidence 必须引用本章正文中支撑该状态变化的原句。',
       'setting_updates: array，每项包含 entity_id 或 name, entity_type, state_delta, actual_state_change, source_excerpt 或 evidence。用于更新设定工坊里的境界、能力、物品、Boss、规则、伏笔、地点、时间线等状态；source_excerpt/evidence 必须引用本章正文中支撑资产归属、可见性、触发条件、限制、风险、后果、时间或地点变化的原句。',
       'storyline_updates: array，每项包含 entity_id 或 name, entity_type, actual_state_change, summary。只输出正文明确推进、埋线、回收或触碰的剧情线，entity_type 只能是 mainline/subplot/character_arc/relationship_arc/faction_arc/foreshadowing_arc。',
@@ -47891,6 +48005,7 @@ export function createNovelWritingService(ctx: {
       next_chapter_priorities: asArray(source.next_chapter_priorities || source.nextChapterPriorities),
       layered_memory_context: source.layered_memory_context || source.layeredMemoryContext,
       progress_summary: source.progress_summary || source.progressSummary,
+      daily_context_snapshot: normalizeDailyContextSnapshot(source.daily_context_snapshot || source.dailyContextSnapshot),
       style_fingerprint: source.style_fingerprint ?? source.styleFingerprint,
       style_fingerprint_contract: source.style_fingerprint_contract || source.styleFingerprintContract,
     }
@@ -47913,6 +48028,7 @@ export function createNovelWritingService(ctx: {
     next_chapter_priorities: asArray((delta || {}).next_chapter_priorities).length ? asArray((delta || {}).next_chapter_priorities) : asArray((prev || {}).next_chapter_priorities),
     layered_memory_context: buildMergedLayeredMemoryContext((prev || {}).layered_memory_context, (delta || {}).layered_memory_context, chapter),
     progress_summary: (delta || {}).progress_summary || (prev || {}).progress_summary || null,
+    daily_context_snapshot: (delta || {}).daily_context_snapshot || (prev || {}).daily_context_snapshot || null,
     last_updated_chapter: chapter.chapter_no,
     last_updated_at: new Date().toISOString(),
   })
@@ -48890,6 +49006,14 @@ export function createNovelWritingService(ctx: {
       || project?.story_state?.progress_summary
       || project?.storyState?.progressSummary,
     )
+    const dailyContextSnapshot = normalizeDailyContextSnapshot(
+      project?.reference_config?.story_state?.daily_context_snapshot
+      || project?.reference_config?.story_state?.dailyContextSnapshot
+      || project?.reference_config?.storyState?.dailyContextSnapshot
+      || project?.story_state?.daily_context_snapshot
+      || project?.story_state?.dailyContextSnapshot
+      || project?.storyState?.dailyContextSnapshot,
+    )
     const [settingEntities, storedChapterSettingUsage, projectSettingUsage] = await Promise.all([
       listNovelSettingEntities(activeWorkspace, project.id).catch(() => []),
       listNovelChapterSettingUsage(activeWorkspace, project.id, chapter.id).catch(() => []),
@@ -49070,6 +49194,7 @@ export function createNovelWritingService(ctx: {
           ? normalizeDeliveryRiskCarryOverContext(chapterRawPreDraftBrief.delivery_risk_carry_over || chapterRawPreDraftBrief.deliveryRiskCarryOver)
           : deliveryRiskCarryOverContext,
         progress_summary: progressSummary,
+        daily_context_snapshot: dailyContextSnapshot,
         continuity_notes: chapter.continuity_notes || [],
         must_advance: asArray(chapter.raw_payload?.must_advance),
         forbidden_repeats: asArray(chapter.raw_payload?.forbidden_repeats),
@@ -49089,6 +49214,7 @@ export function createNovelWritingService(ctx: {
       story_state: {
         global: getStoryState(project),
         progress_summary: progressSummary,
+        daily_context_snapshot: dailyContextSnapshot,
         recent_state_entries: preflight.recent_state_entries,
         worldbuilding: worldbuilding[0] || null,
         characters: characters.map(char => ({
@@ -49128,6 +49254,7 @@ export function createNovelWritingService(ctx: {
       longform_memory_capsule: longformMemoryCapsule,
       layered_memory_context: layeredMemoryContext,
       progress_summary: progressSummary,
+      daily_context_snapshot: dailyContextSnapshot,
       meme_bank: memeBank,
       style_sample_bank: styleSampleBank,
       style_sample_effectiveness: styleSampleEffectiveness,

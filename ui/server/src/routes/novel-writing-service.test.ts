@@ -36967,6 +36967,54 @@ describe('chapter pre-draft brief', () => {
     expect(prompt).toContain('第51章先接旧阵塔第七层入口')
   })
 
+  test('carries oh-story daily context snapshot into the next pre-draft brief and prose prompt', () => {
+    const project = {
+      title: '万古长夜',
+      reference_config: {
+        story_state: {
+          daily_context_snapshot: {
+            current_chapter: 50,
+            current_scene: '第七层门影刚露出，李玄停在旧阵塔门前。',
+            current_emotion_target: '压迫后的短冷和新疑问',
+            writing_changes: ['半枚旧印纹会回应旧影', '林青禾仍只能有限作证'],
+            pending_clues: ['第七层门影是谁', '旧印章完整归属不能提前公开'],
+          },
+        },
+      },
+    }
+    const contextPackage = {
+      chapter_target: {
+        chapter_no: 51,
+        title: '第七层旧影',
+        summary: '李玄追查旧阵塔第七层的人影。',
+        scene_cards: [],
+      },
+    }
+
+    const brief = buildChapterPreDraftBrief(project, contextPackage)
+    const context = mergeConfirmedPreDraftBriefIntoContext(contextPackage, {
+      ...brief,
+      confirmed_at: '2026-06-10T08:00:00.000Z',
+    })
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+    const prompt = service.buildParagraphProseContext(project, context, null, { chapter_no: 51, title: '第七层旧影' })
+
+    expect(brief.daily_context_snapshot.current_chapter).toBe(50)
+    expect(brief.daily_context_snapshot.current_scene).toContain('第七层门影')
+    expect(context.chapter_target.daily_context_snapshot.pending_clues).toContain('第七层门影是谁')
+    expect(context.pre_draft_brief.daily_context_snapshot.writing_changes).toContain('半枚旧印纹会回应旧影')
+    expect(prompt).toContain('【日更上下文快照】')
+    expect(prompt).toContain('当前位置/章：第50章')
+    expect(prompt).toContain('当前位置/场景：第七层门影刚露出')
+    expect(prompt).toContain('当前位置/情绪目标：压迫后的短冷和新疑问')
+    expect(prompt).toContain('本次写作变更：半枚旧印纹会回应旧影')
+    expect(prompt).toContain('待处理线索：第七层门影是谁')
+  })
+
   test('injects story-state style fingerprint as a prose prompt handoff anchor', () => {
     const project = {
       title: '万古长夜',
@@ -44598,6 +44646,32 @@ describe('story unit sync report', () => {
     expect(normalizeBlock).toContain('progress_summary')
     expect(normalizeBlock).toContain('progressSummary')
     expect(mergeBlock).toContain('progress_summary')
+  })
+
+  test('story state prompt asks for oh-story daily context snapshot and stores it for the next chapter', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const promptBlock = source.slice(
+      source.indexOf('const buildStoryStatePrompt ='),
+      source.indexOf('const normalizeStoryStateDeltaForStorage =', source.indexOf('const buildStoryStatePrompt =')),
+    )
+    const normalizeBlock = source.slice(
+      source.indexOf('const normalizeStoryStateDeltaForStorage ='),
+      source.indexOf('const mergeStoryState =', source.indexOf('const normalizeStoryStateDeltaForStorage =')),
+    )
+    const mergeBlock = source.slice(
+      source.indexOf('const mergeStoryState ='),
+      source.indexOf('const updateStoryStateMachine =', source.indexOf('const mergeStoryState =')),
+    )
+
+    expect(promptBlock).toContain('daily_context_snapshot')
+    expect(promptBlock).toContain('current_chapter')
+    expect(promptBlock).toContain('current_scene')
+    expect(promptBlock).toContain('current_emotion_target')
+    expect(promptBlock).toContain('writing_changes')
+    expect(promptBlock).toContain('pending_clues')
+    expect(normalizeBlock).toContain('daily_context_snapshot')
+    expect(normalizeBlock).toContain('dailyContextSnapshot')
+    expect(mergeBlock).toContain('daily_context_snapshot')
   })
 
   test('story state prompt uses scene-card receipts for state deltas and next chapter prep', () => {
