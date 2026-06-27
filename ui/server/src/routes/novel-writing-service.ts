@@ -40885,12 +40885,19 @@ const OH_STORY_ASSET_THREE_APPEARANCE_RULES = [
   '关键资产的视觉/物理变化要优先于抽象解释，用可见变化承载震惊、反转或余韵。',
 ]
 
+const OH_STORY_ASSET_PROP_ABILITY_EXPECTATION_RULES = [
+  '道具能力展示的8步期待模板：展示宝物功能强大 -> 配角因信息不足认为鸡肋 -> 展示反派且宝物恰好克制反派 -> 配角拿更强装备失败 -> 主角做针对性方案 -> 主角上场众人不看好 -> 主角用道具压制反派，鸡肋成神器 -> 结果留下新目标或新钩子。',
+  '关键资产承担破局或金手指功能时，必须先制造误判、克制关系和他人失败，再让主角出手兑现期待。',
+  '道具变化要可视化：功能释放必须造成明确的视觉、物理、规则或关系状态变化，不能只写“众人震惊”。',
+]
+
 const OH_STORY_ASSET_LINKAGE_CHECKS = [
   '孤立资产检查：每个关键资产都必须与本章目标、冲突、回报或章尾钩子至少一项相连。',
   '功能链完整：功能、归属、触发条件、限制、后果必须有正文证据。',
   '状态变化可见：资产从开场到结尾至少产生一次意义、归属、可见性或风险变化。',
   '信息跟着冲突走：设定信息必须由事件/对话/行动压力带出，不能大段说明。',
   '贯穿道具按三次出现或本章片段职责执行，不能只点名不使用。',
+  '道具能力展示：关键资产破局时必须按“强大功能 -> 鸡肋误判 -> 克制反派 -> 他人失败 -> 主角方案 -> 众人不看好 -> 鸡肋成神器 -> 新钩子”拉期待。',
   '禁揭/知识边界准确：forbidden 资产不泄漏，角色不能知道 knowledge_scope 外的信息。',
   '新概念不过载：本章新增设定超过 3 个或抢走主线时必须压缩。',
 ]
@@ -40992,6 +40999,7 @@ function buildAssetLinkageContract(contextPackage: any = {}) {
     const explicitLinkagePlan = asArray(explicit.linkage_plan || explicit.linkagePlan).map(assetText).filter(Boolean)
     const explicitStateTracking = asArray(explicit.state_tracking || explicit.stateTracking).map(assetText).filter(Boolean)
     const explicitThreeAppearancePlan = asArray(explicit.three_appearance_plan || explicit.threeAppearancePlan).map(assetText).filter(Boolean)
+    const explicitPropAbilityExpectationRules = asArray(explicit.prop_ability_expectation_rules || explicit.propAbilityExpectationRules || explicit.prop_expectation_rules || explicit.propExpectationRules).map(assetText).filter(Boolean)
     const explicitForbiddenBoundaries = asArray(explicit.forbidden_boundaries || explicit.forbiddenBoundaries).map(assetText).filter(Boolean)
     const explicitRelationshipGraphRisks = asArray(explicit.relationship_graph_risks || explicit.relationshipGraphRisks).map(assetText).filter(Boolean)
     return {
@@ -41009,6 +41017,9 @@ function buildAssetLinkageContract(contextPackage: any = {}) {
       three_appearance_plan: explicitThreeAppearancePlan.length
         ? explicitThreeAppearancePlan
         : asArray(derived.three_appearance_plan).length ? asArray(derived.three_appearance_plan) : OH_STORY_ASSET_THREE_APPEARANCE_RULES,
+      prop_ability_expectation_rules: explicitPropAbilityExpectationRules.length
+        ? explicitPropAbilityExpectationRules
+        : asArray(derived.prop_ability_expectation_rules || derived.propAbilityExpectationRules).length ? asArray(derived.prop_ability_expectation_rules || derived.propAbilityExpectationRules) : OH_STORY_ASSET_PROP_ABILITY_EXPECTATION_RULES,
       forbidden_boundaries: explicitForbiddenBoundaries.length ? explicitForbiddenBoundaries : asArray(derived.forbidden_boundaries),
       relationship_graph_risks: explicitRelationshipGraphRisks.length ? explicitRelationshipGraphRisks : relationshipGraphRisks,
       quality_checks: uniqueBriefStrings([
@@ -41100,6 +41111,7 @@ function buildAssetLinkageContract(contextPackage: any = {}) {
     usage_rules: OH_STORY_ASSET_LINKAGE_RULES,
     state_tracking: stateTracking,
     three_appearance_plan: threeAppearancePlan,
+    prop_ability_expectation_rules: OH_STORY_ASSET_PROP_ABILITY_EXPECTATION_RULES,
     forbidden_boundaries: forbidden,
     relationship_graph_risks: relationshipGraphRisks,
     quality_checks: uniqueBriefStrings([
@@ -47720,16 +47732,17 @@ export function createNovelWritingService(ctx: {
       '',
       assetLinkageContract ? '【资产挂钩合同】' : '',
       assetLinkageContract ? '硬性要求：执行 chapter_target.asset_linkage_contract；这是来自 oh-story artifact-protocols / state-tracking / writing-craft 的资产使用口径，正文必须让关键资产摆脱孤立名词状态。' : '',
-      assetLinkageContract ? '执行方式：每个关键资产都要绑定功能、归属、触发条件、限制、后果；设定信息必须跟着冲突走；贯穿物件按三次出现规则建立意义、制造转折、兑现情绪或证据冲击。' : '',
+      assetLinkageContract ? '执行方式：每个关键资产都要绑定功能、归属、触发条件、限制、后果；设定信息必须跟着冲突走；贯穿物件按三次出现规则建立意义、制造转折、兑现情绪或证据冲击；关键资产破局时按道具能力展示的8步期待模板拉期待。' : '',
       assetLinkageContract?.key_assets?.length ? `关键资产：${assetLinkageContract.key_assets.join('；')}` : '',
       assetLinkageContract?.linkage_plan?.length ? `挂钩计划：${assetLinkageContract.linkage_plan.join('；')}` : '',
       assetLinkageContract?.usage_rules?.length ? `使用规则：${assetLinkageContract.usage_rules.join('；')}` : '',
       assetLinkageContract?.state_tracking?.length ? `状态追踪：${assetLinkageContract.state_tracking.join('；')}` : '',
       assetLinkageContract?.three_appearance_plan?.length ? `三次出现：${assetLinkageContract.three_appearance_plan.join('；')}` : '',
+      assetLinkageContract?.prop_ability_expectation_rules?.length ? `道具能力展示：${assetLinkageContract.prop_ability_expectation_rules.join('；')}` : '',
       assetLinkageContract?.forbidden_boundaries?.length ? `禁揭边界：${assetLinkageContract.forbidden_boundaries.join('；')}` : '',
       assetRelationshipGraphRisks.length ? `关系图风险：${assetRelationshipGraphRisks.join('；')}。不得让这些资产继续孤立、缺归属或悬空引用，必须把它们写成目标、冲突、回报、状态变化或章尾钩子的现场功能。` : '',
       assetLinkageContract?.quality_checks?.length ? `asset_linkage_checks：${assetLinkageContract.quality_checks.join('；')}` : '',
-      assetLinkageContract ? '交稿自检必须输出 asset_linkage_checks，并用正文证据检查孤立资产、功能链、状态变化、信息跟冲突走、贯穿道具三次出现、禁揭/知识边界和新概念负载。' : '',
+      assetLinkageContract ? '交稿自检必须输出 asset_linkage_checks，并用正文证据检查孤立资产、功能链、状态变化、信息跟冲突走、贯穿道具三次出现、道具能力展示的8步期待模板、禁揭/知识边界和新概念负载。' : '',
       assetLinkageContract ? JSON.stringify(assetLinkageContract, null, 2).slice(0, 2500) : '',
       '',
       stateTrackingContract ? '【状态筛选合同】' : '',
@@ -49664,8 +49677,8 @@ export function createNovelWritingService(ctx: {
     '33. character_relation_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),relation_type,protagonist_goal,agency_choice,cost,relation_shift,buffer_zone,evidence,fix,remaining_risk；主角沦为帮别人办事、主角没有自己的诉求/主动选择/代价、角色只负责恋爱/发糖/陪伴/情绪支持、配角站桩、关系没有考验/变化、缺配角攻略缓冲区、所有人你好我好时必须给出 S1/S2 finding，category=character 或 structure。',
     '34. 是否兑现 chapter_target.character_behavior_contract：按 oh-story 角色行为口径检查主角行为三必须、动机链、动机具体性、三层标签反差、人设强关联、展示优于告知、主角逼格反应、记忆锚点、配角功能、反派内在逻辑、反派分量、反派自我叙事和反派层级退场；动机具体性必须检查起因是否具体（不能只写“被欺负/被针对”）、动机是否是情感层面（不能只写“要成为最强/想变强”）、动机演变是否有触发事件或代价铺垫；主角逼格反应必须检查升级线与主角反应线是否分开，升级是否只提升实力/能力而不改变从容反应，面对低级挑衅时是否被牵着走，是否出现暴怒、面红耳赤、歇斯底里式反击；人设强关联必须检查每个重要角色至少 3 个强关联设定是否可见，是否直接影响剧情走向、核心梗装逼爽点或人物碰撞，外貌/爱好/身高体重等弱关联是否喧宾夺主；反派分量必须按反派建立四要素检查实力展示、动机可信、真实威胁、终极意图时机；反派自我叙事必须按“反派也有梦想”检查他是否是自己故事的主人公、是否有旧痛/创伤、优势即致命缺陷和理念冲突；反派层级必须按反派层级表检查篇幅与层级匹配、小反派/中等反派/大弧 Boss/最终 Boss 的功能和退场方式，最终Boss从第一章就有伏笔；必须输出 character_behavior_checks。',
     '35. character_behavior_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),character,concrete_motive,emotional_reason,trigger_change,visible_choice,cost,evidence,fix,remaining_risk；主角行为不可理解/不可共鸣/不可接受、动机链缺失、起因空泛、动机只是“要成为最强/想变强”、动机演变无铺垫、三层标签反差只停在设定、主角升级后被低级挑衅拖入暴怒失态或缺轻描淡写/短句/行动压制、人设强关联少于3个或只剩外貌爱好等弱关联、角色靠旁白贴标签、配角无功能发言、反派降智、反派缺实力展示/真实威胁/终极意图时机、反派只是工具人/纯粹的坏/缺自己的梦想旧痛和理念冲突、反派层级篇幅不匹配、小反派拖太久、大 Boss 草率退场、最终 Boss 无第一章伏笔，或主角赢得没含金量时必须给出 S1/S2 finding，category=character 或 structure。',
-    '36. 是否兑现 chapter_target.asset_linkage_contract：按 oh-story 资产挂钩口径检查关键资产是否绑定功能、归属、触发条件、限制、后果，是否摆脱孤立资产，是否通过冲突释放设定信息；必须输出 asset_linkage_checks。',
-    '37. asset_linkage_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),asset_name,function,ownership,trigger_condition,limitation,consequence,story_link,evidence,fix,remaining_risk；资产只点名不使用、状态不变化、设定大段说明、贯穿物件未按三次出现推进、禁揭/知识边界错误或新增概念过载时必须给出 S1/S2 finding，category=consistency 或 structure。',
+    '36. 是否兑现 chapter_target.asset_linkage_contract：按 oh-story 资产挂钩口径检查关键资产是否绑定功能、归属、触发条件、限制、后果，是否摆脱孤立资产，是否通过冲突释放设定信息；关键资产承担破局或金手指功能时，必须检查道具能力展示的8步期待模板：宝物功能强大、配角因信息不足误判鸡肋、宝物恰好克制反派、他人失败、主角方案、众人不看好、鸡肋成神器、新目标或新钩子；必须输出 asset_linkage_checks。',
+    '37. asset_linkage_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),asset_name,function,ownership,trigger_condition,limitation,consequence,prop_ability_expectation,story_link,evidence,fix,remaining_risk；资产只点名不使用、状态不变化、设定大段说明、贯穿物件未按三次出现推进、道具能力展示缺期待链、禁揭/知识边界错误或新增概念过载时必须给出 S1/S2 finding，category=consistency 或 structure。',
     '38. 是否兑现 chapter_target.state_tracking_contract：按 oh-story 本节速记检查角色状态、相关伏笔/前史、世界约束是否被筛选并落实；必须输出 state_tracking_checks，并按 source_readiness 输出 source_readiness_checks。',
     '39. state_tracking_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),state_subject,state_type,previous_state,allowed_state,used_in_chapter,evidence,excluded_reason,fix,remaining_risk；角色状态漂移、上一章钩子没接住、待回收伏笔无因果、世界约束没有影响行动、无关背景稀释正文或来源边界不清时必须给出 S1/S2 finding，category=consistency 或 causal。',
     '39A. source_readiness_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),evidence,fix；逐项检查来源就绪表，missing/warn 来源被正文当作事实使用、或 ready 来源没有正文承接时必须给出 warn/fail。',
@@ -49845,7 +49858,7 @@ export function createNovelWritingService(ctx: {
     '17. 如果自检结果包含 continuity_heat_checks，必须优先修复 status=fail/warn 的连续性热度缺口；按 key/label/evidence/fix 补 hot 元素推进、warm 元素保温、cold 元素升温、archived 线不误激活或合理休眠说明。',
     '18. 如果自检结果包含 character_relation_checks，必须优先修复 status=fail/warn 的角色关系缺口；按 key/label/evidence/fix 补关系类型、关系考验/变化、主角独立目标、目标归属、角色不止恋爱、配角期待枢纽/人物扣、配角攻略缓冲区、配角主动行动、态度变化和阶段匹配；目标归属缺口要把“帮别人实现目标”改成主角自己的诉求、主动选择和代价，再让配角目标与主角目标摩擦或互补；角色不止恋爱缺口要给关系角色补事业、责任、资源、身份、家族、风险或行动线，让情感推进踩在自己的选择和代价上；配角期待枢纽缺口要选一个关键配角做任务基地，同时挂短期和长期期待，让主角解决事件装完逼后回到该人物处开启下一轮新任务/新剧情，若人物下线则补更大好处来转化损失厌恶；配角攻略缓冲区缺口要补信息差、地位差距、亲密度差距或信任程度，并让配角从旁观/质疑/拒绝/试探转为行动/协助/设限，不能只等主角触发。',
     '19. 如果自检结果包含 character_behavior_checks，必须优先修复 status=fail/warn 的角色行为缺口；按 key/label/evidence/fix 补动机链、动机具体性、主角行为三必须、行为证据、三层标签反差、主角逼格反应、人设强关联、记忆锚点、配角功能、反派内在逻辑、反派分量、反派自我叙事和反派层级退场；动机具体性缺口要把“被欺负/被针对”改成具体事件，把“要成为最强/想变强”改成情感层面的理由，并补动机变化的触发事件、关系压力或代价；主角逼格反应缺口要把升级后暴怒、面红耳赤、歇斯底里或被低级挑衅牵着走，改成升级只提升实力/能力、主角仍轻描淡写、短句反锁或行动压制，必要时用旁观者认知变化放大爽点；强关联缺口要为重要角色补至少3个影响剧情走向、核心梗装逼爽点或人物碰撞的实力/资源/人脉/背景/技能/证据/关系锚点，弱关联只能留作记忆点；反派分量缺口要补真实威胁、可信动机、终极意图时机，并让反派长处照出主角弱点；反派自我叙事缺口要补梦想、创伤/旧痛、让人恨不起来的侧面和理念冲突；反派层级缺口要按小反派/中等反派/大弧 Boss/最终 Boss 修正篇幅、功能和退场方式。',
-    '20. 如果自检结果包含 asset_linkage_checks，必须优先修复 status=fail/warn 的资产挂钩缺口；按 key/label/evidence/fix 补资产功能、归属、触发条件、限制、后果、状态变化、贯穿物件三次出现和设定随冲突释放。',
+    '20. 如果自检结果包含 asset_linkage_checks，必须优先修复 status=fail/warn 的资产挂钩缺口；按 key/label/evidence/fix 补资产功能、归属、触发条件、限制、后果、状态变化、贯穿物件三次出现和设定随冲突释放；道具能力展示缺口要补宝物功能强大、信息不足误判鸡肋、恰好克制反派、他人失败、主角方案、众人不看好、鸡肋成神器和章末新钩子。',
     '21. 如果自检结果包含 state_tracking_checks，必须优先修复 status=fail/warn 的状态筛选缺口；按 key/label/evidence/fix 修角色状态、上一章承接、伏笔前史、世界约束、来源边界和上下文过载问题，并在修订后的 oh_story_delivery_receipts.pre_draft_execution_receipts.status_filter_receipts 中逐项更新 used_in_chapter/evidence/excluded_reason/remaining_risk。',
     '21A. 如果自检结果包含 source_readiness_checks，必须优先修复 status=fail/warn 的来源就绪缺口；按 key/label/evidence/fix 处理 missing/warn 来源，不能把未就绪来源写成既定事实，ready 来源必须在正文中可见承接，并在修订后的 oh_story_delivery_receipts.pre_draft_execution_receipts.source_readiness_checks 中逐项更新 status/evidence/fix。',
     '21B. 如果自检结果包含 write_preparation_checks，必须优先修复 status=fail/warn 的写前准备缺口；按 key/label/evidence/fix 补齐来源缺口、资产风险、上一轮待修复、创作契约清单 creation_contract_checklist、蓝图焦点、读者回报和必确认项；创作契约缺口要分别补目标读者、题材定位、核心承诺、追读留存的正文证据，并在修订后的 oh_story_delivery_receipts.pre_draft_execution_receipts.write_preparation_checks 中逐项更新 delivered/evidence/remaining_risk。',
@@ -50891,7 +50904,7 @@ export function createNovelWritingService(ctx: {
               '连续性热度合同 continuity_heat_contract 必须按 oh-story 连续性追踪输出 heat_states, active_expectations, watch_items, dormant_allowed, revision_priorities, quality_checks，确保 hot/warm/cold/archived 元素都有处理理由。',
               '角色关系合同 character_relation_contract 必须按 oh-story 角色关系输出 relationship_types, important_relationships, independent_goals, goal_ownership_rules, relationship_life_rules, expectation_hub_rules, buffer_zone_rules, tests_or_pressure, attitude_shifts, quality_checks，确保关系变化有类型、压力、行动、配角期待枢纽、配角攻略缓冲区和正文证据；goal_ownership_rules 必须包含主角目标必须属于自己的、不能只是帮别人实现目标、主角必须保留自己的诉求/主动选择/代价；relationship_life_rules 必须包含角色生命中有恋爱之外的内容、不是单薄的情感工具人、关系角色还要有事业/责任/资源/身份/风险/行动线；expectation_hub_rules 必须包含配角期待枢纽/人物扣、任务基地、短期和长期期待、主角解决事件后开启新一轮装逼/新任务/新剧情，以及人物下线时用更大好处转化损失厌恶；buffer_zone_rules 必须包含配角攻略缓冲区、信息差、地位差距、亲密度差距或信任程度，配角不能像 NPC 一样站着等主角触发，并在关键拐点写清配角从旁观/质疑/拒绝/试探到行动/协助/设限的态度变化。',
               '角色行为合同 character_behavior_contract 必须按 oh-story 角色行为输出 motivation_chain, motivation_specificity_rules, layered_tags, behavior_rules, protagonist_composure_rules, strong_association_rules, memory_anchors, supporting_role_functions, antagonist_logic, antagonist_weight_rules, antagonist_self_story_rules, antagonist_tier_exit_rules, quality_checks，确保角色行为由动机链驱动；motivation_specificity_rules 必须包含起因必须具体、不能写“被欺负”这种模糊说法、动机必须是情感层面、不能写“要成为最强”这种空话、动机演变有铺垫；protagonist_composure_rules 必须包含升级线与主角反应线分开管理、升级提升实力但不自动改变从容反应、面对低级挑衅不被牵着走、用轻描淡写/短句/行动压制替代暴怒失态；strong_association_rules 必须包含每个重要角色至少 3 个强关联设定、强关联直接影响剧情走向/核心梗装逼爽点/人物碰撞、弱关联不喧宾夺主；antagonist_weight_rules 必须包含反派建立四要素、实力展示、动机可信、真实威胁和终极意图时机；antagonist_self_story_rules 必须包含反派也有梦想、在反派眼中他是自己故事的主人公、旧痛/创伤、优势即致命缺陷和理念冲突；antagonist_tier_exit_rules 必须包含反派层级表、篇幅与层级匹配、小反派、中等反派、大弧 Boss、最终 Boss、退场方式和最终Boss从第一章就有伏笔。',
-              '资产挂钩合同 asset_linkage_contract 必须按 oh-story 资产协议输出 key_assets, linkage_plan, usage_rules, three_appearance_plan, state_tracking, quality_checks，确保孤立资产挂到冲突、状态和回报上。',
+              '资产挂钩合同 asset_linkage_contract 必须按 oh-story 资产协议输出 key_assets, linkage_plan, usage_rules, three_appearance_plan, prop_ability_expectation_rules, state_tracking, quality_checks，确保孤立资产挂到冲突、状态和回报上；prop_ability_expectation_rules 必须包含道具能力展示的8步期待模板：宝物功能强大、配角误判鸡肋、宝物恰好克制反派、他人失败、主角方案、众人不看好、鸡肋成神器和新钩子。',
               '状态跟踪合同 state_tracking_contract 必须按 oh-story state-tracking 输出 character_states, historical_causality, world_constraints, source_requirements, source_readiness, filter_rules, quality_checks，确保写正文前只保留会影响本章正确性的状态。',
               '意图确认合同 intent_confirmation_contract 必须按 oh-story workflow-daily 输出 confirmed_intent, rhythm_and_style, structure_inputs, logic_line, appearance_order, cost_and_reward, ending_handoff, quality_checks，确保正文按本章意图统一发力。',
               '目标读者合同 target_reader_contract 必须按 oh-story 自嗨判定法输出 reader_profile, reader_desires, chapter_attractions, validation_questions, correction_methods, quality_checks，确保本章清楚写给谁、满足什么阅读欲望、给出什么可感知回报。',
