@@ -17369,6 +17369,97 @@ describe('chapter pre-draft brief', () => {
     expect(prompt.indexOf('【章节蓝图合同】')).toBeLessThan(prompt.indexOf('【结构化上下文包】'))
   })
 
+  test('adds an oh-story outline methods contract to chapter blueprint and prose prompt', () => {
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+    const project = {
+      title: '旧城订单',
+      genre: '都市系统逆袭',
+      synopsis: '中年维修师靠职业成长系统接单翻身，但旧城区维修协会持续打压外来维修师。',
+      reference_config: {
+        writing_bible: {
+          golden_finger: '职业成长系统能识别设备隐藏故障并给出技能反馈',
+          commercial_positioning: {
+            selling_points: ['维修订单升级', '客户态度反转', '系统奖励即时反馈'],
+          },
+        },
+      },
+    }
+    const contextPackage = {
+      chapter_target: {
+        chapter_no: 6,
+        title: '协会封单',
+        summary: '维修协会用封单规则阻止主角接触旧城设备，主角必须当场证明封单规则有漏洞。',
+        conflict: '协会会长不许主角碰设备，客户也担心惹怒协会。',
+        ending_hook: '协会会长拿出第二份封单，指向主角刚接的医院设备。',
+        scene_cards: [
+          {
+            scene_no: 1,
+            title: '口头封单',
+            purpose: '先用言语压迫制造冲突。',
+            conflict: '协会会长当众宣布外来维修师不得接旧城订单。',
+            reader_payoff: '主角被公开压制，读者等待反证。',
+          },
+          {
+            scene_no: 2,
+            title: '设备现场',
+            purpose: '冲突升级到行动阻拦。',
+            conflict: '协会成员挡住设备间门口，不让主角拆机。',
+            action_beats: ['主角绕到旧线路口', '协会成员抢走工具箱', '客户要求立刻给结果'],
+            reader_payoff: '主角必须用别人想不到的方法破局。',
+          },
+          {
+            scene_no: 3,
+            title: '当场反证',
+            purpose: '决定胜负并留下下一冲突。',
+            reversal: '主角用系统识别的隐藏故障证明协会规则掩盖事故。',
+            reader_payoff: '客户从犹豫变成公开支持主角。',
+            ending_hook_seed: '第二份封单指向医院设备。',
+          },
+        ],
+      },
+    }
+
+    const brief = buildChapterPreDraftBrief(project, contextPackage)
+    const confirmedContext = mergeConfirmedPreDraftBriefIntoContext(contextPackage, {
+      ...brief,
+      confirmed_at: '2026-06-22T12:00:00.000Z',
+    })
+    const prompt = service.buildParagraphProseContext(
+      project,
+      confirmedContext,
+      null,
+      { chapter_no: 6, title: '协会封单' },
+    )
+
+    expect(brief.chapter_blueprint.outline_methods_contract.version).toBe('oh_story_outline_methods_v1')
+    expect(brief.chapter_blueprint.outline_methods_contract.five_step_outline.steps.join('｜')).toContain('确定高潮剧情')
+    expect(brief.chapter_blueprint.outline_methods_contract.five_step_outline.story_lines.join('｜')).toContain('地图线')
+    expect(brief.chapter_blueprint.outline_methods_contract.five_step_outline.opening_sequence.join('｜')).toContain('情节钩子')
+    expect(brief.chapter_blueprint.outline_methods_contract.eight_node_story_structure.nodes.join('｜')).toContain('八节点故事结构')
+    expect(brief.chapter_blueprint.outline_methods_contract.sweet_cycle_stages.join('｜')).toContain('爽文五阶段小循环')
+    expect(brief.chapter_blueprint.outline_methods_contract.emotion_zigzag_stages.join('｜')).toContain('情绪拉扯五折线')
+    expect(brief.chapter_blueprint.outline_methods_contract.five_drive_checks.join('｜')).toContain('五项驱动检查')
+    expect(brief.chapter_blueprint.outline_methods_contract.detail_outline_rules.join('｜')).toContain('细纲:正文 = 1:2.5~1:3')
+    expect(brief.chapter_blueprint.outline_methods_contract.similarity_guardrails.join('｜')).toContain('相同金手指逻辑禁止连续使用')
+    expect(brief.chapter_blueprint.outline_methods_contract.reverse_design_rules.join('｜')).toContain('爽点倒推')
+    expect(confirmedContext.chapter_target.chapter_blueprint.outline_methods_contract.quality_checks.join('｜')).toContain('同一套路间隔至少 3 个不同剧情类型')
+    expect(prompt).toContain('【大纲方法合同】')
+    expect(prompt).toContain('执行 chapter_target.chapter_blueprint.outline_methods_contract')
+    expect(prompt).toContain('五步大纲创建法')
+    expect(prompt).toContain('八节点故事结构')
+    expect(prompt).toContain('爽文五阶段小循环')
+    expect(prompt).toContain('情绪拉扯五折线')
+    expect(prompt).toContain('五项驱动检查')
+    expect(prompt).toContain('细纲:正文 = 1:2.5~1:3')
+    expect(prompt).toContain('相同金手指逻辑禁止连续使用')
+    expect(prompt).toContain('outline_methods_checks')
+    expect(prompt.indexOf('【大纲方法合同】')).toBeLessThan(prompt.indexOf('【结构化上下文包】'))
+  })
+
   test('adds an oh-story small-outline four-step contract to chapter blueprint and prose prompt', () => {
     const service = createNovelWritingService({
       getProject: async () => null,
@@ -51372,6 +51463,24 @@ describe('chapter context word target source guards', () => {
     expect(repairBlock).toContain('const repairedChapterBlueprint =')
     expect(repairBlock).toContain('pre_draft_brief:')
     expect(repairBlock).toContain('chapter_blueprint: repairedChapterBlueprint')
+  })
+
+  test('auto-repairs unattended chapter blueprint with an oh-story outline methods contract', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
+    const settingsStart = source.indexOf('let latestSettings = settings', repairStart)
+    const repairBlock = source.slice(repairStart, settingsStart)
+
+    expect(repairStart).toBeGreaterThanOrEqual(0)
+    expect(settingsStart).toBeGreaterThan(repairStart)
+    expect(repairBlock).toContain('outline_methods_contract')
+    expect(repairBlock).toContain('大纲方法合同')
+    expect(repairBlock).toContain('五步大纲创建法')
+    expect(repairBlock).toContain('八节点故事结构')
+    expect(repairBlock).toContain('爽文五阶段小循环')
+    expect(repairBlock).toContain('情绪拉扯五折线')
+    expect(repairBlock).toContain('相同金手指逻辑禁止连续使用')
+    expect(repairBlock).toContain('outline_methods_contract: buildOutlineMethodsContract')
   })
 
   test('auto-repairs unattended chapter blueprint with oh-story emotion and paragraph hook contracts', () => {

@@ -13,25 +13,25 @@ Source reference set: `/private/tmp/oh-story-claudecode/skills/story-long-write/
 <!-- oh-story-progress-summary
 {
   "reference_total": 38,
-  "integrated": 28,
-  "partial": 10,
+  "integrated": 29,
+  "partial": 9,
   "todo": 0,
   "deferred": 0,
-  "remaining_references": 10,
-  "estimated_hours_remaining": 22.0,
-  "estimated_working_days_remaining": 3.67
+  "remaining_references": 9,
+  "estimated_hours_remaining": 20.5,
+  "estimated_working_days_remaining": 3.42
 }
 -->
 
 ## Current Snapshot
 
 - Reference files: 38
-- Integrated enough for current production use: 28
-- Partially integrated, still worth mining: 10
+- Integrated enough for current production use: 29
+- Partially integrated, still worth mining: 9
 - Not systematically reviewed yet: 0
 - Deferred: 0
-- Remaining references to improve: 10
-- Estimated remaining effort: about 22.0 engineering hours, or 3.67 focused working days at 6 hours per day
+- Remaining references to improve: 9
+- Estimated remaining effort: about 20.5 engineering hours, or 3.42 focused working days at 6 hours per day
 
 The estimate assumes the current working pattern: one small oh-story increment at a time, with prompt or workflow changes backed by focused tests, then `test:novel-server` and `check` before push. UI progress surfacing is not included in the remaining estimate; after this ledger stabilizes, exposing it in the novel workspace should be a separate 4-6 hour slice.
 
@@ -68,7 +68,7 @@ The estimate assumes the current working pattern: one small oh-story increment a
 | hooks-suspense.md | integrated | Suspense contract, information gap checks, false-alarm guards, and suspense repair tasks are present. | Keep collecting failure cases. | 0.5h |
 | opening-design.md | integrated | Opening hook, first-50 conflict, first-100 event density, protagonist-entry, and entry-promise checks are implemented. | Keep refining per-genre opening exceptions. | 0.5h |
 | outline-conflict.md | integrated | Conflict structure contract covers ladders, protagonist agency, no-exit rules, next-conflict seeds, conflict-web/network layers, deterministic post-delivery sync, repair carry-over, and now scene-card generation. Scene cards preserve and prompt for per-scene conflict execution fields (`conflict_ladder_step`, `motivation_source`, `opposing_force`, `blocked_desire`, `protagonist_agency_action`, `no_exit_reason`, `event_value_change`, `next_conflict_seed`, `visible_line_role`, `hidden_line_seed`, `ab_weave_role`), and prose prompts require those fields to execute as visible conflict. | Keep tuning field wording from real scene-card misses. | 0.5h |
-| outline-methods.md | partial | Chapter blueprint requires five-part outline, plot lines, character order, beat sequence, and ending contract. | Map more outline-method templates to the planning workspace. | 1.5h |
+| outline-methods.md | integrated | `chapter_blueprint.outline_methods_contract` now carries oh-story five-step outline creation, eight-node story structure, sweet-cycle stages, emotion zigzag, five-drive checks, detail-outline ratio, similarity guardrails, and reverse-design rules into pre-draft briefs, prose prompts, and unattended blueprint repair. Focused tests cover prompt hydration and repair persistence. | Keep tuning node-role inference and repetition guardrails from real generated chapters. | 0.5h |
 | outline-rhythm.md | partial | Bridge unit, batch rhythm, beat cooling, and batch-size guardrails exist. | Add clearer rolling-plan diagnostics for rhythm fatigue before drafting. | 1.5h |
 | outline-structure-theory.md | integrated | Blueprint and structure progression checks cover causal chain and chapter structure. Project creation and seed recovery now inject `writing_bible.longform_structure_contract`; local seed materialization backfills the same contract with structure-level selection, five-act causal-chain rules, five-level outline limits, strong/weak/transition mainline architecture, web-sixth-act afterglow, volume purpose and climax framing, mainline/subline/dark-line layout, map-transition pillars, retention methods, and quality checks. Focused tests cover seed prompt hydration and writing-bible materialization. | Keep tuning structure-mode inference from real project seeds and genre-specific longform failures. | 0.5h |
 | plot-core-methods.md | integrated | Target reader, story drive, plot dynamics, information flow, reader payoff, story power, small-outline, mainline-definition, and next-objective-after-gain gates are present. Story power covers seed/recovery/original-incubation prompts, local writing-bible materialization, pre-draft/prose prompts, self-review, revision, deterministic `buildStoryPowerSyncReport`, story-state sync, and repair carry-over. Small-outline four-step coverage now lives inside `chapter_blueprint.small_outline_contract`, prose prompts, deterministic `small_outline_checks`, blueprint sync, and unattended blueprint repair. Mainline definition now lives in `writing_bible.mainline_definition_contract`, `chapter_blueprint.mainline_definition_contract`, prose prompts, self-review requirements, deterministic `mainline_definition_checks`, and unattended blueprint repair. Information flow now carries `next_objective_rules` into pre-draft briefs, prose prompts, self-review, revision prompts, unattended blueprint generation, and deterministic `next_objective_after_gain` sync checks. | Keep tuning transition and next-objective evidence heuristics from real generated chapters. | 0.5h |
@@ -87,11 +87,11 @@ The estimate assumes the current working pattern: one small oh-story increment a
 
 ## Next Priority Queue
 
-1. `outline-methods.md`: map more outline-method templates to the planning workspace.
-2. `plot-frameworks.md`: decide which frameworks belong in creation, outline, scene-card, or revision stages.
-3. `plot-emotion-system.md`: add formula-level checks for setup before payoff and recurring emotional modules.
-4. `style-genre-modules.md`: add model-facing fallback receipts proving module, rhythm, and matched chapter usage.
-5. `emotional-methods.md`: mine remaining emotion formulas into concise prompt fragments.
+1. `plot-frameworks.md`: decide which frameworks belong in creation, outline, scene-card, or revision stages.
+2. `plot-emotion-system.md`: add formula-level checks for setup before payoff and recurring emotional modules.
+3. `style-genre-modules.md`: add model-facing fallback receipts proving module, rhythm, and matched chapter usage.
+4. `emotional-methods.md`: mine remaining emotion formulas into concise prompt fragments.
+5. `female-audience-writing.md`: add project-level detection and UI confirmation so this contract is active only when intended.
 
 ## Update Rules
 

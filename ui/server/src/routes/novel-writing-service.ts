@@ -45939,6 +45939,192 @@ function buildContentRubric(contextPackage: any = {}) {
 
 const OH_STORY_BEAT_DENSITY_RULE = '按字数目标反推情节点数量：约 200-300 字/个情节点；下限 10 个；常规 3000 字章节 10-15 个；复杂高潮章可到 20 个；超长章硬上限 40 个。'
 
+const OH_STORY_OUTLINE_METHOD_FIVE_STEPS = [
+  '五步大纲创建法 Step1 确定高潮剧情：冲突规模最大、人物最多、情绪最强，先锁定本阶段最值得读者等待的爆点。',
+  '五步大纲创建法 Step2 确定单元剧：每个单元展示不同金手指用法，相邻单元不得使用同一金手指逻辑，单元之间必须有因果关系。',
+  '五步大纲创建法 Step3 八条故事线预埋：地图线、阵营线、人物线、金手指线、世界观线、矛盾线、收集线、感情线都要有提前量。',
+  '五步大纲创建法 Step4 开局阶段：情节钩子 -> 迅速陷入异常状态 -> 获得/介绍金手指 -> 矛盾/欲望出现并运转金手指 -> 目标建立。',
+  '五步大纲创建法 Step5 结尾设计：解决主线/支线高潮，展示影响，给奖励和下一阶段额外奖励，交代角色状态并种下下一卷/下一段钩子。',
+]
+
+const OH_STORY_OUTLINE_METHOD_STORY_LINES = [
+  '地图线：每次空间/场域变化都带出新规则、新资源或新冲突。',
+  '阵营线：阵营态度、利益和站队必须随事件变化，不能只当背景板。',
+  '人物线：重要角色的目标、关系和状态随章节推进发生可见变化。',
+  '金手指线：每个单元展示不同用法，相邻单元不得使用同一金手指逻辑。',
+  '世界观线：设定通过冲突、行动和代价释放，不写背景说明书。',
+  '矛盾线：本章解决一层矛盾时必须种下下一层矛盾。',
+  '收集线：资源、线索、道具或资格的获得必须有代价和用途。',
+  '感情线：关系变化踩在事件、选择或成长节点上，不脱离主线漂浮。',
+]
+
+const OH_STORY_OUTLINE_METHOD_OPENING_SEQUENCE = [
+  '情节钩子',
+  '迅速陷入异常状态',
+  '获得/介绍金手指',
+  '矛盾/欲望出现，主角运转金手指',
+  '目标建立',
+]
+
+const OH_STORY_OUTLINE_METHOD_ENDING_RULES = [
+  '结尾要解决本章主线或支线高潮，展示影响和状态变化。',
+  '结尾奖励要有即时奖励，也要给下一阶段额外奖励或新门槛。',
+  '章尾节奏放慢但不能总结说教，要用动作、对话、物件或信息差把读者推向下一章。',
+]
+
+const OH_STORY_OUTLINE_METHOD_EIGHT_NODES = [
+  '八节点故事结构：1 开篇，建立主角处境、目标和初始不公平。',
+  '八节点故事结构：2 发展，让目标、阻碍和资源开始发生因果互动。',
+  '八节点故事结构：3 转折一，让局势第一次偏离原计划。',
+  '八节点故事结构：4 转折二，让冲突性质升级或信息格局改变。',
+  '八节点故事结构：5 高潮，释放当前阶段最大冲突和情绪。',
+  '八节点故事结构：6 矛盾结果，给出胜负、代价、资源和关系变化。',
+  '八节点故事结构：7 转折三，用余波或新信息把读者推向下一阶段。',
+  '八节点故事结构：8 结局，收束阶段目标并种下新循环。',
+]
+
+const OH_STORY_OUTLINE_METHOD_SWEET_CYCLE = [
+  '爽文五阶段小循环：稳定态/危机潜伏。',
+  '爽文五阶段小循环：危机触发。',
+  '爽文五阶段小循环：破局行动。',
+  '爽文五阶段小循环：收益结算。',
+  '爽文五阶段小循环：新平衡与预埋。',
+]
+
+const OH_STORY_OUTLINE_METHOD_EMOTION_ZIGZAG = [
+  '情绪拉扯五折线：上行，建立期待和压力。',
+  '情绪拉扯五折线：拐点+下行，危机加深但不让锅落在主角身上。',
+  '情绪拉扯五折线：再上行，给主角行动、线索或底牌。',
+  '情绪拉扯五折线：二次拐点+下行，让阻碍升级并扩大读者期待。',
+  '情绪拉扯五折线：爽点爆发，复仇/回报/真相释放必须超过前面压迫强度。',
+]
+
+const OH_STORY_OUTLINE_METHOD_FIVE_DRIVES = [
+  '五项驱动检查：压力来源是否升级。',
+  '五项驱动检查：能力展示是否贴住当前矛盾。',
+  '五项驱动检查：认知反转是否改变读者或角色判断。',
+  '五项驱动检查：资源成长是否带来新用途或新门槛。',
+  '五项驱动检查：悬念扩散是否种下下一章行动理由。',
+]
+
+const OH_STORY_OUTLINE_METHOD_DETAIL_RULES = [
+  '细纲:正文 = 1:2.5~1:3，细纲只写目的、效果、详略和定位，不把正文句子提前写死。',
+  '一个关键事件通常拆 3-5 章，每章必须标注钩子、伏笔、目的和读者效果。',
+  '滚动写作不要过度细化，保留根据上一章正文和读者反馈调整的空间。',
+  '详写核心卖点、关键揭露、打脸、高潮、关系变化和章尾钩子；略写过渡、赶路、时间跳转和重复说明。',
+]
+
+const OH_STORY_OUTLINE_METHOD_SIMILARITY_GUARDS = [
+  '相似度检查维度：冲突类型、金手指用法、情节链段落和结尾形态。',
+  '相同金手指逻辑禁止连续使用，连续单元必须换用法、换对手或换情绪收益。',
+  '同一套路间隔至少 3 个不同剧情类型。',
+  '时空关联:逻辑关联 >= 1:3，不能只靠换地点推进。',
+  '后续情绪价值不得显著低于前一阶段，否则必须补奖励、反转或更高目标。',
+]
+
+const OH_STORY_OUTLINE_METHOD_REVERSE_RULES = [
+  '爽点倒推：先定爽点 -> 再定期待点 -> 最后倒推铺垫。',
+  '真相倒推：先定核心真相 -> 拆成碎片 -> 每个碎片触发行动或转折。',
+  '锚点倒推：从开头和结尾同时确定世界锚、故事锚和角色锚，避免中段漂移。',
+]
+
+const OH_STORY_OUTLINE_METHOD_QUALITY_CHECKS = [
+  '每章至少 1 个微回报，每 3 章解决 1 个冲突，每 7 章给 1 个大回报。',
+  '每 3-5 章检查压力来源、能力展示、认知反转、资源成长和悬念扩散。',
+  '同一套路间隔至少 3 个不同剧情类型。',
+  '相同金手指逻辑禁止连续使用。',
+  '后续情绪价值不得显著低于前一阶段。',
+]
+
+function outlineMethodsObject(value: any) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
+}
+
+function outlineMethodsArray(value: any, fallback: string[], limit = 12) {
+  const rows = asArray(value)
+    .map((item: any) => compactBriefText(item))
+    .filter(Boolean)
+  return uniqueBriefStrings(rows.length ? rows : fallback, limit)
+}
+
+function inferOutlineEightNodeRole(chapterTarget: any = {}, contentOutline: any = {}) {
+  const chapterNo = Number(chapterTarget.chapter_no || chapterTarget.chapterNo || 0)
+  const text = compactBriefText([
+    chapterTarget.title,
+    chapterTarget.summary,
+    chapterTarget.goal,
+    chapterTarget.conflict,
+    chapterTarget.ending_hook,
+    contentOutline.cause,
+    contentOutline.development,
+    contentOutline.turn,
+    contentOutline.climax,
+    contentOutline.ending,
+  ].filter(Boolean).join('；'))
+  if (chapterNo > 0 && chapterNo <= 2) return '开篇'
+  if (/高潮|爆发|最终|决战|收束|结局/.test(text)) return '高潮/结局'
+  if (/转折|反转|质变|真相|暴露|倒戈/.test(text)) return '转折'
+  return '发展'
+}
+
+function buildOutlineMethodsContract(contextPackage: any = {}, options: any = {}) {
+  const chapterTarget = contextPackage?.chapter_target || contextPackage?.chapterTarget || {}
+  const blueprint = options.chapter_blueprint
+    || options.chapterBlueprint
+    || chapterTarget.chapter_blueprint
+    || chapterTarget.chapterBlueprint
+    || contextPackage?.chapter_blueprint
+    || contextPackage?.chapterBlueprint
+    || {}
+  const explicit = outlineMethodsObject(
+    options.explicit
+    || options.outline_methods_contract
+    || options.outlineMethodsContract
+    || blueprint?.outline_methods_contract
+    || blueprint?.outlineMethodsContract
+    || chapterTarget.outline_methods_contract
+    || chapterTarget.outlineMethodsContract
+    || contextPackage?.outline_methods_contract
+    || contextPackage?.outlineMethodsContract
+    || contextPackage?.pre_draft_brief?.outline_methods_contract
+    || contextPackage?.preDraftBrief?.outlineMethodsContract,
+  )
+  const fiveStep = outlineMethodsObject(explicit.five_step_outline || explicit.fiveStepOutline)
+  const eightNode = outlineMethodsObject(explicit.eight_node_story_structure || explicit.eightNodeStoryStructure)
+  const contentOutline = options.content_outline || options.contentOutline || blueprint?.content_outline || blueprint?.contentOutline || {}
+  return {
+    version: explicit.version || 'oh_story_outline_methods_v1',
+    source: explicit.source || 'oh_story_outline_methods',
+    method_route: outlineMethodsArray(explicit.method_route || explicit.methodRoute, [
+      '章级规划以细纲与章纲为主，向上承接五步大纲创建法，向下约束场景卡和正文。',
+      '已有框架细化时用节点设计法 + 三层结构法，先锁大纲，再拆剧情纲，最后落细节纲。',
+      '卡住时用推演与逆推方法，从爽点、真相或锚点倒推铺垫。',
+    ], 8),
+    five_step_outline: {
+      steps: outlineMethodsArray(fiveStep.steps || fiveStep.method_steps || fiveStep.methodSteps, OH_STORY_OUTLINE_METHOD_FIVE_STEPS, 8),
+      story_lines: outlineMethodsArray(fiveStep.story_lines || fiveStep.storyLines, OH_STORY_OUTLINE_METHOD_STORY_LINES, 10),
+      opening_sequence: outlineMethodsArray(fiveStep.opening_sequence || fiveStep.openingSequence, OH_STORY_OUTLINE_METHOD_OPENING_SEQUENCE, 8),
+      ending_rules: outlineMethodsArray(fiveStep.ending_rules || fiveStep.endingRules, OH_STORY_OUTLINE_METHOD_ENDING_RULES, 8),
+    },
+    eight_node_story_structure: {
+      selected_node: compactBriefText(eightNode.selected_node || eightNode.selectedNode || inferOutlineEightNodeRole(chapterTarget, contentOutline)),
+      nodes: outlineMethodsArray(eightNode.nodes || eightNode.node_sequence || eightNode.nodeSequence, OH_STORY_OUTLINE_METHOD_EIGHT_NODES, 10),
+      payoff_rhythm: outlineMethodsArray(eightNode.payoff_rhythm || eightNode.payoffRhythm, [
+        '至少每章 1 个微回报。',
+        '每 3 章解决 1 个冲突。',
+        '每 7 章给 1 个大回报。',
+      ], 8),
+    },
+    sweet_cycle_stages: outlineMethodsArray(explicit.sweet_cycle_stages || explicit.sweetCycleStages, OH_STORY_OUTLINE_METHOD_SWEET_CYCLE, 8),
+    emotion_zigzag_stages: outlineMethodsArray(explicit.emotion_zigzag_stages || explicit.emotionZigzagStages, OH_STORY_OUTLINE_METHOD_EMOTION_ZIGZAG, 8),
+    five_drive_checks: outlineMethodsArray(explicit.five_drive_checks || explicit.fiveDriveChecks, OH_STORY_OUTLINE_METHOD_FIVE_DRIVES, 8),
+    detail_outline_rules: outlineMethodsArray(explicit.detail_outline_rules || explicit.detailOutlineRules, OH_STORY_OUTLINE_METHOD_DETAIL_RULES, 8),
+    similarity_guardrails: outlineMethodsArray(explicit.similarity_guardrails || explicit.similarityGuardrails, OH_STORY_OUTLINE_METHOD_SIMILARITY_GUARDS, 10),
+    reverse_design_rules: outlineMethodsArray(explicit.reverse_design_rules || explicit.reverseDesignRules, OH_STORY_OUTLINE_METHOD_REVERSE_RULES, 8),
+    quality_checks: outlineMethodsArray(explicit.quality_checks || explicit.qualityChecks, OH_STORY_OUTLINE_METHOD_QUALITY_CHECKS, 10),
+  }
+}
+
 function buildChapterBlueprintBeatDensityContract(wordTarget: any, beatSequence: any[], explicitValue: any = null) {
   const explicit = explicitValue && typeof explicitValue === 'object' && !Array.isArray(explicitValue) ? explicitValue : {}
   const targetWords = Number(
@@ -46150,6 +46336,7 @@ function buildChapterBlueprintFromContext(contextPackage: any, options: any = {}
   const explicitBeatDensityContract = explicitBlueprint.beat_density_contract || explicitBlueprint.beatDensityContract
   const explicitSmallOutlineContract = explicitBlueprint.small_outline_contract || explicitBlueprint.smallOutlineContract
   const explicitMainlineDefinitionContract = explicitBlueprint.mainline_definition_contract || explicitBlueprint.mainlineDefinitionContract
+  const explicitOutlineMethodsContract = explicitBlueprint.outline_methods_contract || explicitBlueprint.outlineMethodsContract
   const wordTarget = options.word_target
     || options.wordTarget
     || explicitBlueprint.word_target
@@ -46255,6 +46442,26 @@ function buildChapterBlueprintFromContext(contextPackage: any, options: any = {}
     storyDrive.protagonist_choice ? `主角选择：${storyDrive.protagonist_choice}` : '',
     endingHook ? `章尾钩子：${endingHook}` : '',
   ].filter(Boolean).join('；'))
+  const outlineMethodsContract = buildOutlineMethodsContract({
+    ...contextPackage,
+    chapter_target: {
+      ...chapterTarget,
+      chapter_blueprint: {
+        ...explicitBlueprint,
+        content_outline: contentOutline,
+        plot_lines: resolvedPlotLines,
+      },
+    },
+    chapter_blueprint: {
+      ...explicitBlueprint,
+      content_outline: contentOutline,
+      plot_lines: resolvedPlotLines,
+    },
+  }, {
+    explicit: explicitOutlineMethodsContract,
+    content_outline: contentOutline,
+    scene_cards: sceneCards,
+  })
 
   return {
     version: 'oh_story_chapter_blueprint_v1',
@@ -46324,6 +46531,7 @@ function buildChapterBlueprintFromContext(contextPackage: any, options: any = {}
         : asArray(pageTurn.forbidden_resolution),
     },
     writing_intent: compactBriefText(explicitBlueprint.writing_intent || explicitBlueprint.writingIntent || writingIntent),
+    outline_methods_contract: outlineMethodsContract,
   }
 }
 
@@ -50466,6 +50674,7 @@ export function createNovelWritingService(ctx: {
       || null
     const beatDensityContract = chapterBlueprint?.beat_density_contract || chapterBlueprint?.beatDensityContract || null
     const smallOutlineContract = chapterBlueprint?.small_outline_contract || chapterBlueprint?.smallOutlineContract || null
+    const outlineMethodsContract = chapterBlueprint?.outline_methods_contract || chapterBlueprint?.outlineMethodsContract || null
     const mainlineDefinitionContract = chapterBlueprint?.mainline_definition_contract
       || chapterBlueprint?.mainlineDefinitionContract
       || contextPackage?.chapter_target?.mainline_definition_contract
@@ -50770,6 +50979,24 @@ export function createNovelWritingService(ctx: {
       smallOutlineContract?.purpose_effect_rules?.length ? `目的和效果规则：${smallOutlineContract.purpose_effect_rules.join('；')}` : '',
       smallOutlineContract?.detail_rules?.length ? `详写/略写规则：${smallOutlineContract.detail_rules.join('；')}` : '',
       smallOutlineContract?.locator_rules?.length ? `快速定位规则：${smallOutlineContract.locator_rules.join('；')}` : '',
+      outlineMethodsContract ? '【大纲方法合同】' : '',
+      outlineMethodsContract ? '硬性要求：执行 chapter_target.chapter_blueprint.outline_methods_contract；先用五步大纲创建法校验本章位置，再用八节点故事结构、爽文五阶段小循环、情绪拉扯五折线和五项驱动检查组织正文，最后用相似度防重复和倒推规则检查是否换了冲突、金手指用法、情绪收益和章尾形态。' : '',
+      outlineMethodsContract?.method_route?.length ? `大纲方法路线：${outlineMethodsContract.method_route.join('；')}` : '',
+      outlineMethodsContract?.five_step_outline?.steps?.length ? `五步大纲创建法：${outlineMethodsContract.five_step_outline.steps.join('；')}` : '',
+      outlineMethodsContract?.five_step_outline?.story_lines?.length ? `八条故事线预埋：${outlineMethodsContract.five_step_outline.story_lines.join('；')}` : '',
+      outlineMethodsContract?.five_step_outline?.opening_sequence?.length ? `开局阶段序列：${outlineMethodsContract.five_step_outline.opening_sequence.join(' -> ')}` : '',
+      outlineMethodsContract?.five_step_outline?.ending_rules?.length ? `结尾规则：${outlineMethodsContract.five_step_outline.ending_rules.join('；')}` : '',
+      outlineMethodsContract?.eight_node_story_structure?.selected_node ? `八节点故事结构：本章角色=${outlineMethodsContract.eight_node_story_structure.selected_node}` : '',
+      outlineMethodsContract?.eight_node_story_structure?.nodes?.length ? `八节点序列：${outlineMethodsContract.eight_node_story_structure.nodes.join('；')}` : '',
+      outlineMethodsContract?.eight_node_story_structure?.payoff_rhythm?.length ? `回报节奏：${outlineMethodsContract.eight_node_story_structure.payoff_rhythm.join('；')}` : '',
+      outlineMethodsContract?.sweet_cycle_stages?.length ? `爽文五阶段小循环：${outlineMethodsContract.sweet_cycle_stages.join('；')}` : '',
+      outlineMethodsContract?.emotion_zigzag_stages?.length ? `情绪拉扯五折线：${outlineMethodsContract.emotion_zigzag_stages.join('；')}` : '',
+      outlineMethodsContract?.five_drive_checks?.length ? `五项驱动检查：${outlineMethodsContract.five_drive_checks.join('；')}` : '',
+      outlineMethodsContract?.detail_outline_rules?.length ? `细纲规则：${outlineMethodsContract.detail_outline_rules.join('；')}` : '',
+      outlineMethodsContract?.similarity_guardrails?.length ? `相似度防重复：${outlineMethodsContract.similarity_guardrails.join('；')}` : '',
+      outlineMethodsContract?.reverse_design_rules?.length ? `倒推设计：${outlineMethodsContract.reverse_design_rules.join('；')}` : '',
+      outlineMethodsContract?.quality_checks?.length ? `大纲方法检查：${outlineMethodsContract.quality_checks.join('；')}` : '',
+      outlineMethodsContract ? '交稿自检必须输出 outline_methods_checks，逐项说明五步大纲、八节点、小循环、情绪五折线、五项驱动、详略比例和相似度防重复是否在 chapter_text 中兑现；证据必须引用正文动作、对话、信息变化或章尾钩子。' : '',
       mainlineDefinitionContract ? '【主线定义合同】' : '',
       mainlineDefinitionContract ? '硬性要求：执行 chapter_target.chapter_blueprint.mainline_definition_contract；主线不等于升级，主线是一件事，不是一个元素，升级是主角达成目标的行动。' : '',
       mainlineDefinitionContract?.mainline_event ? `本章主线事件 mainline_event：${mainlineDefinitionContract.mainline_event}` : '',
@@ -54483,7 +54710,7 @@ export function createNovelWritingService(ctx: {
             task: [
               '任务：为无人值守章节写作补齐本章蓝图。只输出 JSON，不写正文。',
               '输出字段：title, chapter_goal, chapter_summary, conflict, ending_hook, chapter_blueprint, emotional_arc_contract, chapter_hook_contract, paragraph_hook_contract, opening_contract, suspense_contract, reversal_contract, showdown_contract, bridge_unit_contract, style_boundary_contract, plot_dynamics_contract, story_power_contract, mainline_definition_contract, information_flow_contract, expectation_threshold_contract, story_loop_contract, prose_craft_contract, punctuation_tone_contract, quality_audit_contract, dialogue_contract, continuity_heat_contract, character_relation_contract, character_behavior_contract, asset_linkage_contract, state_tracking_contract, intent_confirmation_contract, target_reader_contract, genre_positioning_contract, core_contract_radar, female_audience_contract, upgrade_rhythm_contract, conflict_structure_contract, must_advance(array), forbidden_repeats(array), repair_summary。',
-              'chapter_blueprint 必须包含 target_emotion, opening_hook, core_payoff, content_outline(cause/development/turn/climax/ending), small_outline_contract(steps/purpose_effect_rules/detail_rules/locator_rules/segment_cards), mainline_definition_contract(mainline_event/definition_rules/action_rules/handoff_rules/forbidden_mainline_shapes/quality_checks), causal_chain_contract(act_order/act_functions/quality_checks), plot_lines(mainline/subplot/event_line/relationship_line/logic_line), character_order, beat_sequence, beat_density_contract, cost_and_reward, ending_contract(final_state/unresolved_question/next_chapter_pull)；small_outline_contract 必须按 oh-story 小纲四步法输出分段判断、目的和效果、详写/略写、快速定位，segment_cards 每项包含 segment_no,segment,purpose,intended_effect,detail_level,quick_locator；mainline_definition_contract 必须按 oh-story 主线定义输出主线不等于升级、主线是一件事、升级是主角达成目标的行动、不是一个元素和主线完成后的承接规则；causal_chain_contract 必须按 oh-story 五幕式输出种子/生长/转折/冲刺/完成，要求不能跳步、不能乱序；beat_sequence 每项必须包含 beat_no/scene_no/action/function_tag/payoff，function_tag 必须决定展开还是带过，关键揭露/打脸/高潮/爽点必须展开，过渡/赶路/信息交代必须压缩。',
+              'chapter_blueprint 必须包含 target_emotion, opening_hook, core_payoff, content_outline(cause/development/turn/climax/ending), outline_methods_contract(five_step_outline/eight_node_story_structure/sweet_cycle_stages/emotion_zigzag_stages/five_drive_checks/detail_outline_rules/similarity_guardrails/reverse_design_rules/quality_checks), small_outline_contract(steps/purpose_effect_rules/detail_rules/locator_rules/segment_cards), mainline_definition_contract(mainline_event/definition_rules/action_rules/handoff_rules/forbidden_mainline_shapes/quality_checks), causal_chain_contract(act_order/act_functions/quality_checks), plot_lines(mainline/subplot/event_line/relationship_line/logic_line), character_order, beat_sequence, beat_density_contract, cost_and_reward, ending_contract(final_state/unresolved_question/next_chapter_pull)；大纲方法合同 outline_methods_contract 必须按 oh-story outline-methods 输出五步大纲创建法、八节点故事结构、爽文五阶段小循环、情绪拉扯五折线、五项驱动检查、细纲:正文 = 1:2.5~1:3、相同金手指逻辑禁止连续使用、爽点倒推和同一套路间隔至少 3 个不同剧情类型；small_outline_contract 必须按 oh-story 小纲四步法输出分段判断、目的和效果、详写/略写、快速定位，segment_cards 每项包含 segment_no,segment,purpose,intended_effect,detail_level,quick_locator；mainline_definition_contract 必须按 oh-story 主线定义输出主线不等于升级、主线是一件事、升级是主角达成目标的行动、不是一个元素和主线完成后的承接规则；causal_chain_contract 必须按 oh-story 五幕式输出种子/生长/转折/冲刺/完成，要求不能跳步、不能乱序；beat_sequence 每项必须包含 beat_no/scene_no/action/function_tag/payoff，function_tag 必须决定展开还是带过，关键揭露/打脸/高潮/爽点必须展开，过渡/赶路/信息交代必须压缩。',
               '情绪弧合同 emotional_arc_contract 必须按 oh-story 情绪弧与 emotional-methods 输出 arc_shape, emotion_formula, pressure_methods, payoff_types, payoff_reverse_design, payoff_tier_rules, payoff_density_rules, emotion_module_recomposition_rules, payoff_escalation_rules, scene_execution_rules, expectation_rules, safety_rules, bonding_setup_rules, emotional_tear_rules, lingering_aftertaste_rules, emotional_turning_rules, first_impression_rules, peak_end_rules, emotion_layer_rules, reaction_structure_rules, ideological_conflict_rules, failure_mode_guards, quality_checks，明确本章如何完成平静 -> 调动 -> 释放 -> 爽、爽点倒推法（先定爽点类型 -> 再定期待点 -> 最后倒推铺垫，正文按铺垫 -> 期待升高 -> 爽点释放呈现）、场景情绪执行（每个场景标注调动/复现/释放/后反应，闭环当前期待时开启下一开环）、装逼层级（日常小装逼/核心爽点/偏离爽点）、多爽点密度（不要拉长单个爽点铺垫，800-1200 字内要有信息增量/能力展示/危机反制/关系变化/小回收）、先入为主（前100字先给核心矛盾/主角处境/不公平异常，注意否定提前）、峰终定律（结尾情绪必须高于起点，结尾情绪强度虐≥8、爽≥7、治愈≥6，最后一击必须是动作/对话/画面）、三层情绪（角色自己的情绪、文本传递的情绪、读者实际感受分离，角色在哭不等于读者哭，必须转成读者收益）、情绪反应结构（前反应 -> 复现 -> 后反应；以小搏大 -> 士气如虹）、理念矛盾（理念之争比利益之争更能引发深层共鸣，把原则碰撞、追求和牺牲落成具体选择与代价）、情绪模块重组（戏剧性会磨损，情绪不会磨损；复用套路必须换场景/换对手/加新情绪或提高 stakes/奖励复杂度）、情绪三板斧（羁绊铺设/情感撕裂/余韵钝痛）和每 3-5 个小节的事件触发情绪转向，并让连续爽点按影响范围、揭示深度或身份落差递增。',
               '章级钩子合同 chapter_hook_contract 必须按 oh-story 章首/章尾钩子输出 opening_hook_type, ending_hook_type, hook_strength, opening_hook_rules, ending_hook_rules, forbidden_patterns, quality_checks，明确前 100-300 字和最后 300 字如何制造追读。',
               '段落级钩子合同 paragraph_hook_contract 必须按 oh-story 段落级钩子输出 micro_hook_types, hook_combinations, dialogue_escalation, spectator_layers, forbidden_patterns, quality_checks，明确本章每 3-5 段如何制造信息、风险、情绪或关系变化。',
@@ -54553,6 +54780,7 @@ export function createNovelWritingService(ctx: {
       const payloadBlueprint = payload?.chapter_blueprint && typeof payload.chapter_blueprint === 'object' ? payload.chapter_blueprint : {}
       const payloadContentOutline = payloadBlueprint.content_outline || payloadBlueprint.contentOutline || {}
       const payloadCausalChainContract = payloadBlueprint.causal_chain_contract || payloadBlueprint.causalChainContract
+      const payloadOutlineMethodsContract = payloadBlueprint.outline_methods_contract || payloadBlueprint.outlineMethodsContract
       const payloadPlotLines = payloadBlueprint.plot_lines || payloadBlueprint.plotLines || {}
       const payloadEndingContract = payloadBlueprint.ending_contract || payloadBlueprint.endingContract || {}
       const characterOrder = asArray(payloadBlueprint.character_order || payloadBlueprint.characterOrder || payload?.character_order || payload?.characterOrder)
@@ -54639,6 +54867,31 @@ export function createNovelWritingService(ctx: {
           forbidden_resolution: asArray(payloadEndingContract.forbidden_resolution || payloadEndingContract.forbiddenResolution),
         },
         writing_intent: compactBriefText(payloadBlueprint.writing_intent || payloadBlueprint.writingIntent || `第${chapter.chapter_no}章《${nextTitle}》：${nextGoal}；章尾钩子：${nextHook}`),
+        outline_methods_contract: buildOutlineMethodsContract({
+          ...contextPackage,
+          chapter_target: {
+            ...(contextPackage?.chapter_target || {}),
+            chapter_no: chapter.chapter_no,
+            title: nextTitle,
+            summary: nextSummary,
+            conflict: nextConflict,
+            ending_hook: nextHook,
+            chapter_blueprint: {
+              ...payloadBlueprint,
+              content_outline: repairedContentOutline,
+              plot_lines: repairedPlotLines,
+            },
+          },
+          chapter_blueprint: {
+            ...payloadBlueprint,
+            content_outline: repairedContentOutline,
+            plot_lines: repairedPlotLines,
+          },
+        }, {
+          explicit: payloadOutlineMethodsContract,
+          content_outline: repairedContentOutline,
+          scene_cards: smallOutlineScenes,
+        }),
       }
       const repairedEmotionAndHookBrief = buildChapterPreDraftBrief(project, {
         ...contextPackage,
