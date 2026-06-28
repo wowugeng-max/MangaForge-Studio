@@ -11,6 +11,7 @@ describe('original incubator setting assets', () => {
 
     expect(prompt).toContain('target_reader_contract')
     expect(prompt).toContain('genre_positioning_contract')
+    expect(prompt).toContain('story_power_contract')
     expect(prompt).toContain('character_design_contract')
     expect(prompt).toContain('core_contract_radar')
     expect(prompt).toContain('reader_retention_contract')
@@ -18,6 +19,10 @@ describe('original incubator setting assets', () => {
     expect(prompt).toContain('读者想看什么')
     expect(prompt).toContain('本章给什么')
     expect(prompt).toContain('拉长板而非补短板')
+    expect(prompt).toContain('故事五维')
+    expect(prompt).toContain('有动作才是故事')
+    expect(prompt).toContain('有始有终')
+    expect(prompt).toContain('因果反馈')
     expect(prompt).toContain('三层标签')
     expect(prompt).toContain('强/中/弱关联')
     expect(prompt).toContain('角色卡')

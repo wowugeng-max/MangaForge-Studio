@@ -56,6 +56,7 @@ import {
   buildGenrePositioningSyncReport,
   buildFemaleAudienceSyncReport,
   buildPlotDynamicsSyncReport,
+  buildStoryPowerSyncReport,
   buildCharacterRelationSyncReport,
   buildCharacterArcSyncReport,
   buildDeliveryRiskCarryOverContext,
@@ -17678,6 +17679,76 @@ describe('chapter pre-draft brief', () => {
     expect(prompt).toContain('多线错峰')
     expect(prompt).toContain('plot_dynamics_checks')
     expect(prompt.indexOf('【剧情动力合同】')).toBeLessThan(prompt.indexOf('【结构化上下文包】'))
+  })
+
+  test('adds an oh-story story power contract to pre-draft brief and prose prompt', () => {
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+    const contextPackage = {
+      writing_bible: {
+        story_power_contract: {
+          source: 'manual_story_power',
+          action_rules: ['每个场景必须让主角用动作改变局势。'],
+        },
+      },
+      chapter_target: {
+        chapter_no: 11,
+        title: '阵盘入局',
+        summary: '主角要用裂纹阵盘证明旧案有人动手脚。',
+        conflict: '执事封锁证物，证人不敢开口。',
+        ending_hook: '裂纹阵盘反向亮起，指向内门库房。',
+        scene_cards: [
+          {
+            scene_no: 1,
+            title: '封锁证物',
+            goal: '主角要拿到旧案阵盘。',
+            conflict: '执事不许任何人碰证物。',
+            action: '主角当众押上自己的残阵盘换一次验阵机会。',
+            reader_payoff: '阵盘裂纹和旧案证物对上。',
+            state_delta: '主角从被堵门变成掌握验阵资格。',
+          },
+          {
+            scene_no: 2,
+            title: '反向亮阵',
+            goal: '主角证明证物被动过。',
+            conflict: '证人害怕内门报复。',
+            action: '主角用残阵盘逼出反向阵纹。',
+            reader_payoff: '读者看到幕后线索指向内门库房。',
+            exit_state: '旧案从无头案变成可追查的内门线索。',
+          },
+        ],
+      },
+    }
+
+    const brief = buildChapterPreDraftBrief({ title: '寒门阵师' }, contextPackage)
+    const confirmedContext = mergeConfirmedPreDraftBriefIntoContext(contextPackage, {
+      ...brief,
+      confirmed_at: '2026-06-22T12:00:00.000Z',
+    })
+    const prompt = service.buildParagraphProseContext(
+      { title: '寒门阵师' },
+      confirmedContext,
+      null,
+      { chapter_no: 11, title: '阵盘入局' },
+    )
+
+    expect(brief.story_power_contract.source).toBe('manual_story_power')
+    expect(brief.story_power_contract.story_power_dimensions.join('｜')).toContain('故事五维')
+    expect(brief.story_power_contract.action_rules.join('｜')).toContain('每个场景必须让主角用动作改变局势')
+    expect(brief.story_power_contract.beginning_end_rules.join('｜')).toContain('有始有终')
+    expect(brief.story_power_contract.causal_feedback_rules.join('｜')).toContain('因果反馈')
+    expect(confirmedContext.chapter_target.story_power_contract.quality_checks.join('｜')).toContain('行动是否改变局势')
+    expect(prompt).toContain('【故事力合同】')
+    expect(prompt).toContain('执行 chapter_target.story_power_contract')
+    expect(prompt).toContain('故事五维')
+    expect(prompt).toContain('有动作才是故事')
+    expect(prompt).toContain('有始有终')
+    expect(prompt).toContain('因果反馈')
+    expect(prompt).toContain('story_power_checks')
+    expect(prompt.indexOf('【故事力合同】')).toBeLessThan(prompt.indexOf('【结构化上下文包】'))
   })
 
   test('hydrates incomplete explicit plot dynamics contract from scene progression context', () => {
@@ -54240,6 +54311,65 @@ describe('chapter context word target source guards', () => {
     expect(shouldReviseBlock).toContain('plot_dynamics_checks')
     expect(reviewNormalizeBlock).toContain('plot_dynamics_checks')
     expect(reviewNormalizeBlock).toContain('reviewPayload?.plot_dynamics_checks')
+  })
+
+  test('asks prose self review and revision to enforce oh-story story power checks', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const reviewPrompt = source.slice(
+      source.indexOf('const buildProseReviewPrompt'),
+      source.indexOf('const buildProseRevisionPrompt'),
+    )
+    const revisionPrompt = source.slice(
+      source.indexOf('const buildProseRevisionPrompt'),
+      source.indexOf('const shouldReviseProse'),
+    )
+    const shouldReviseBlock = source.slice(
+      source.indexOf('const shouldReviseProse'),
+      source.indexOf('const runProseSelfReviewAndRevision'),
+    )
+    const reviewNormalizeBlock = source.slice(
+      source.indexOf('const normalizedReview = {'),
+      source.indexOf('if (options.revise === false', source.indexOf('const normalizedReview = {')),
+    )
+
+    expect(reviewPrompt).toContain('chapter_target.story_power_contract')
+    expect(reviewPrompt).toContain('story_power_checks')
+    expect(reviewPrompt).toContain('故事五维')
+    expect(reviewPrompt).toContain('有动作才是故事')
+    expect(reviewPrompt).toContain('因果反馈')
+    expect(revisionPrompt).toContain('story_power_checks')
+    expect(revisionPrompt).toContain('故事力')
+    expect(revisionPrompt).toContain('行动改变局势')
+    expect(shouldReviseBlock).toContain('story_power_checks')
+    expect(reviewNormalizeBlock).toContain('story_power_checks')
+    expect(reviewNormalizeBlock).toContain('reviewPayload?.story_power_checks')
+  })
+
+  test('builds a deterministic story power sync report', () => {
+    const contextPackage = {
+      chapter_target: {
+        story_power_contract: {
+          story_power_dimensions: ['故事五维：目标、阻碍、动作、反馈、期待'],
+          action_rules: ['有动作才是故事：主角必须用动作改变局势。'],
+          beginning_end_rules: ['有始有终：开场目标必须在章末形成状态变化。'],
+          causal_feedback_rules: ['因果反馈：动作必须带来代价、信息或关系变化。'],
+          quality_checks: ['行动是否改变局势。'],
+        },
+      },
+    }
+
+    const report = buildStoryPowerSyncReport(
+      { title: '寒门阵师' },
+      { id: 9, chapter_no: 11, title: '阵盘入局' },
+      contextPackage,
+      '主角当众押上裂纹阵盘。执事封锁证物，他没有退，反手启动残阵。阵纹反向亮起，证人脸色发白，内门库房第一次被指向。这个动作让旧案从无头案变成可追查的线索。',
+    )
+
+    expect(report.status).toBe('ok')
+    expect(report.label).toContain('故事力')
+    expect(report.quality_checks.join('｜')).toContain('行动是否改变局势')
+    expect(report.delivered.map((item: any) => item.key).join('｜')).toContain('action_rules')
+    expect(report.delivered.map((item: any) => item.key).join('｜')).toContain('causal_feedback_rules')
   })
 
   test('asks prose self review and revision to enforce oh-story continuity heat checks', () => {

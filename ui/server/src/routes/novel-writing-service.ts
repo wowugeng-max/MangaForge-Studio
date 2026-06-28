@@ -22,6 +22,7 @@ import type { NovelProductionService } from './novel-production-service'
 import type { NovelReferenceService } from './novel-reference-service'
 import { buildSettingRelationshipGraph } from './novel-setting-relationship-graph'
 import { buildOhStoryPlotSpecialTopicsContract } from './novel-plot-special-topics'
+import { buildOhStoryStoryPowerContract } from './novel-story-power-contract'
 import {
   asArray,
   applyBenchmarkRecallPreflightChecks,
@@ -248,6 +249,7 @@ const STRUCTURED_REVIEW_CHECK_FIELDS = [
   ['prose_meta_checks', 'proseMetaChecks'],
   ['dialogue_checks', 'dialogueChecks'],
   ['plot_dynamics_checks', 'plotDynamicsChecks'],
+  ['story_power_checks', 'storyPowerChecks'],
   ['continuity_heat_checks', 'continuityHeatChecks'],
   ['character_relation_checks', 'characterRelationChecks'],
   ['character_behavior_checks', 'characterBehaviorChecks'],
@@ -906,6 +908,18 @@ const STRUCTURED_REVIEW_REQUIRED_FIELDS: Record<string, string[]> = {
     'action',
     'cost_or_feedback',
     'new_expectation',
+    'evidence',
+    'fix',
+    'remaining_risk',
+  ],
+  story_power_checks: [
+    'key',
+    'label',
+    'status',
+    'story_power_dimension',
+    'action_changed_situation',
+    'beginning_to_end_change',
+    'causal_feedback',
     'evidence',
     'fix',
     'remaining_risk',
@@ -10197,6 +10211,7 @@ function serialQualityRiskFromReview(review: any, chapter: any) {
     if (type === 'genre_positioning_sync') return countFrom('missed_count', 'missedCount')
     if (type === 'female_audience_sync') return countFrom('missed_count', 'missedCount')
     if (type === 'plot_dynamics_sync') return countFrom('missed_count', 'missedCount')
+    if (type === 'story_power_sync') return countFrom('missed_count', 'missedCount')
     if (type === 'character_relation_sync') return countFrom('missed_count', 'missedCount')
     if (type === 'reader_retention_sync') return countFrom('missed_count', 'missedCount', 'weak_count', 'weakCount')
     if (type === 'reader_payoff_sync') return countFrom('missed_count', 'missedCount')
@@ -10245,6 +10260,7 @@ function serialQualityRiskFromReview(review: any, chapter: any) {
     genre_positioning_sync: '题材定位',
     female_audience_sync: '女频长篇',
     plot_dynamics_sync: '剧情动力',
+    story_power_sync: '故事力',
     character_relation_sync: '角色关系',
     reader_retention_sync: '追读留存',
     reader_payoff_sync: '读者回报',
@@ -15414,6 +15430,7 @@ export function buildDeliveryRiskCarryOverContext(chapter: any, chapters: any[] 
     { type: 'plot_special_topics_sync', prefix: '补特殊题材', priority: '优先补特殊题材', countKeys: ['missed_count', 'missedCount'] },
     { type: 'female_audience_sync', prefix: '补女频', priority: '优先补女频长篇', countKeys: ['missed_count', 'missedCount'] },
     { type: 'plot_dynamics_sync', prefix: '补动力', priority: '优先补剧情动力', countKeys: ['missed_count', 'missedCount'] },
+    { type: 'story_power_sync', prefix: '补故事力', priority: '优先补故事力', countKeys: ['missed_count', 'missedCount'] },
     { type: 'character_relation_sync', prefix: '补关系线', priority: '优先补角色关系', countKeys: ['missed_count', 'missedCount'] },
     { type: 'character_arc_sync', prefix: '补人物弧光', priority: '', countKeys: ['missed_count', 'missedCount'] },
     { type: 'chapter_blueprint_sync', prefix: '补细纲', priority: '优先补细纲', countKeys: ['missed_count', 'missedCount'] },
@@ -34068,6 +34085,126 @@ export function buildPlotDynamicsSyncReport(project: any, chapter: any, contextP
   }
 }
 
+function storyPowerContractForSync(contextPackage: any, chapter: any = {}) {
+  return buildStoryPowerContract({}, contextWithChapterRawPreDraftForSync(contextPackage, chapter))
+}
+
+function storyPowerArray(values: any) {
+  return asArray(values).map((item: any) => compactBriefText(item)).filter(Boolean)
+}
+
+function storyPowerSignalEvidence(chapterText: string, kind: string) {
+  const text = String(chapterText || '')
+  const evidence: string[] = []
+  const hasAction = /押上|启动|逼出|拆|追|拿到|换一次|当众|反手|验证|反制|选择|证明|亮起|撬开|逼问|追查|行动|动作/.test(text)
+  const hasSituationChange = /改变|变成|转为|指向|资格|线索|第一次|局势|状态|亮起|脸色发白|被迫|暴露|从.+变成/.test(text)
+  const hasFeedback = /代价|反馈|信息|关系|规则|反制|暴露|奖励|证据|线索|指向|脸色|亮起|因此|于是|导致|让/.test(text)
+  const hasExpectation = /章末|下一步|下一章|指向|未解|库房|线索|压力|问题|追查|盯上/.test(text)
+  const hasGoalObstacle = /目标|要|必须|想要|封锁|阻碍|不许|不敢|压|拦|堵/.test(text)
+  if (kind === 'story_power_dimensions') {
+    if (hasGoalObstacle && hasAction && hasFeedback && hasExpectation) evidence.push('目标/阻碍/行动/反馈/期待信号可见')
+  } else if (kind === 'action_rules') {
+    if (hasAction) evidence.push('可见行动信号可见')
+    if (hasAction && hasSituationChange) evidence.push('行动改变局势信号可见')
+  } else if (kind === 'beginning_end_rules') {
+    if (hasGoalObstacle && hasSituationChange && hasExpectation) evidence.push('开场压力到章末状态变化信号可见')
+  } else if (kind === 'causal_feedback_rules') {
+    if (hasAction && hasFeedback) evidence.push('行动带来代价/信息/关系/规则/反制反馈信号可见')
+  } else if (kind === 'chapter_power_loop') {
+    if (hasGoalObstacle && hasAction && hasSituationChange && hasFeedback) evidence.push('本章目标-动作-反馈链路可见')
+  }
+  return evidence
+}
+
+function normalizeStoryPowerCheck(key: string, label: string, values: any, chapterText: string) {
+  const planned = storyPowerArray(values)
+  if (!planned.length) return null
+  const scored = planned.map(item => ({ text: item, match: anchorMatchScore(item, chapterText) }))
+  const matchedEvidence = uniqueBriefStrings(scored.flatMap(item => item.match.matched), 8)
+  const signalEvidence = storyPowerSignalEvidence(chapterText, key)
+  const deliveredItems = scored.filter(item => item.match.score >= 30).length
+  const delivered = deliveredItems >= Math.max(1, Math.ceil(planned.length * 0.35)) || signalEvidence.length > 0
+  return {
+    key,
+    label,
+    text: planned.join('；'),
+    expected: planned.join('；'),
+    score: delivered ? Math.max(84, Math.round((deliveredItems / Math.max(1, planned.length)) * 100)) : 22,
+    story_power_dimension: key === 'story_power_dimensions' ? planned.join('；') : '',
+    action_changed_situation: key === 'action_rules' ? signalEvidence.join('；') : '',
+    beginning_to_end_change: key === 'beginning_end_rules' ? signalEvidence.join('；') : '',
+    causal_feedback: key === 'causal_feedback_rules' ? signalEvidence.join('；') : '',
+    evidence: uniqueBriefStrings([...matchedEvidence, ...signalEvidence], 8),
+    delivered,
+    status: delivered ? 'ok' : 'warn',
+    missed_items: delivered ? [] : planned.filter(item => anchorMatchScore(item, chapterText).score < 30).slice(0, 8),
+    issue: delivered ? '' : `${label}没有落成正文证据。`,
+    fix: delivered ? '' : storyPowerRepairInstruction(key),
+    repair_instruction: delivered ? '' : storyPowerRepairInstruction(key),
+    remaining_risk: delivered ? '' : `${label}缺口会让章节变成解释、旁观或并列事件。`,
+  }
+}
+
+function storyPowerRepairInstruction(key: string) {
+  if (key === 'action_rules') return '补可见行动：把解释、旁观或内心独白改成角色主动验证、对抗、交易、牺牲、追查或反制，并写出行动改变了什么。'
+  if (key === 'beginning_end_rules') return '补有始有终：让开场目标、阻碍或异常在章末形成状态变化、新线索、新代价或下一步选择。'
+  if (key === 'causal_feedback_rules') return '补因果反馈：每个关键动作后立刻给代价、奖励、信息变化、关系变化、规则触发或敌方反制。'
+  if (key === 'chapter_power_loop') return '补本章故事力循环：目标、阻碍、动作、反馈、期待依次落地，并让上一场结果成为下一场原因。'
+  return '补故事五维：目标、阻碍、动作、反馈、期待都必须能在正文中定位。'
+}
+
+function storyPowerPriority(missed: any[]) {
+  if (missed.some(item => item.key === 'action_rules')) return '优先补可见行动'
+  if (missed.some(item => item.key === 'causal_feedback_rules')) return '优先补因果反馈'
+  if (missed.some(item => item.key === 'beginning_end_rules')) return '优先补有始有终'
+  if (missed.some(item => item.key === 'story_power_dimensions')) return '优先补故事五维'
+  return ''
+}
+
+export function buildStoryPowerSyncReport(project: any, chapter: any, contextPackage: any, chapterText: string) {
+  const contract = storyPowerContractForSync(contextPackage, chapter)
+  const checks = [
+    normalizeStoryPowerCheck('story_power_dimensions', '故事五维', contract.story_power_dimensions || contract.storyPowerDimensions, chapterText),
+    normalizeStoryPowerCheck('chapter_power_loop', '本章故事力循环', contract.chapter_power_loop || contract.chapterPowerLoop, chapterText),
+    normalizeStoryPowerCheck('action_rules', '有动作才是故事', contract.action_rules || contract.actionRules, chapterText),
+    normalizeStoryPowerCheck('beginning_end_rules', '有始有终', contract.beginning_end_rules || contract.beginningEndRules, chapterText),
+    normalizeStoryPowerCheck('causal_feedback_rules', '因果反馈', contract.causal_feedback_rules || contract.causalFeedbackRules, chapterText),
+  ].filter(Boolean)
+  const delivered = checks.filter((item: any) => item.delivered)
+  const missed = checks.filter((item: any) => !item.delivered)
+  const missedCount = missed.length
+  const score = Math.max(0, Math.min(100, Math.round(
+    checks.length ? checks.reduce((sum: number, item: any) => sum + Number(item.score || 0), 0) / checks.length : 82,
+  )))
+  const status = missedCount > 0 || score < 78 ? 'warn' : 'ok'
+  const priorityRepair = storyPowerPriority(missed)
+  return {
+    report_id: `story-power-sync-${chapter?.id || chapter?.chapter_no || Date.now()}`,
+    chapter_id: chapter?.id || null,
+    chapter_no: chapter?.chapter_no || null,
+    score,
+    status,
+    label: checks.length === 0 ? '故事力未配置' : status === 'ok' ? '故事力 OK' : `故事力缺口 ${missedCount}`,
+    summary: checks.length === 0
+      ? '本章没有配置 story_power_contract，建议补充故事五维、可见行动、有始有终和因果反馈。'
+      : status === 'ok'
+        ? '正文已基本兑现故事五维、行动改变局势、有始有终和因果反馈。'
+        : `正文有 ${missedCount} 项故事力缺口，${priorityRepair || '优先补可见行动和因果反馈'}。`,
+    missed_count: missedCount,
+    priority_repair: priorityRepair,
+    quality_checks: asArray(contract.quality_checks || contract.qualityChecks).map((item: any) => compactBriefText(item)).filter(Boolean).slice(0, 8),
+    planned: checks,
+    delivered,
+    missed,
+    next_actions: status === 'ok'
+      ? ['保持故事力：故事五维、行动改变局势、章首到章末状态变化和因果反馈都要可见。']
+      : [
+          '下一章必须补故事力：先补目标和阻碍，再写角色主动行动，让行动带来代价、信息、关系、规则或敌方反制反馈。',
+          '开场压力必须在章末转成状态变化、下一步选择或新期待；不要用解释、旁观或内心独白替代行动。',
+        ],
+  }
+}
+
 function normalizeAttractionDimension(key: string, label: string, expected: any, chapterText: string, options: { tailOnly?: boolean; openingOnly?: boolean; threshold?: number } = {}) {
   const expectedText = compactText(expected, 240)
   const scopeText = options.openingOnly ? chapterText.slice(0, 900) : chapterText
@@ -45066,6 +45203,18 @@ function buildPlotDynamicsContract(contextPackage: any = {}) {
   }
 }
 
+function buildStoryPowerContract(project: any = {}, contextPackage: any = {}) {
+  return buildOhStoryStoryPowerContract(
+    project,
+    contextPackage?.writing_bible,
+    contextPackage?.pre_draft_brief,
+    contextPackage?.preDraftBrief,
+    contextPackage?.chapter_target,
+    contextPackage?.chapterTarget,
+    contextPackage,
+  )
+}
+
 function inferDialogueMode(scene: any) {
   const sceneType = String(scene?.scene_type || scene?.sceneType || '').toLowerCase()
   const text = [
@@ -45677,6 +45826,7 @@ function buildCreationContractChecklist(options: any = {}) {
   const targetReaderContract = options.target_reader_contract || options.targetReaderContract || {}
   const genrePositioningContract = options.genre_positioning_contract || options.genrePositioningContract || {}
   const plotSpecialTopicsContract = options.plot_special_topics_contract || options.plotSpecialTopicsContract || {}
+  const storyPowerContract = options.story_power_contract || options.storyPowerContract || {}
   const coreContractRadar = options.core_contract_radar || options.coreContractRadar || {}
   const readerRetentionBrief = options.reader_retention_brief || options.readerRetentionBrief || {}
   const targetReader = compactBriefText(
@@ -45697,6 +45847,12 @@ function buildCreationContractChecklist(options: any = {}) {
     || asArray(plotSpecialTopicsContract.faction_hand_rules || plotSpecialTopicsContract.factionHandRules)[0]
     || asArray(plotSpecialTopicsContract.quality_checks || plotSpecialTopicsContract.qualityChecks)[0],
   )
+  const storyPower = compactBriefText(
+    asArray(storyPowerContract.story_power_dimensions || storyPowerContract.storyPowerDimensions)[0]
+    || asArray(storyPowerContract.action_rules || storyPowerContract.actionRules)[0]
+    || asArray(storyPowerContract.causal_feedback_rules || storyPowerContract.causalFeedbackRules)[0]
+    || asArray(storyPowerContract.quality_checks || storyPowerContract.qualityChecks)[0],
+  )
   const coreContract = compactBriefText(
     asArray(coreContractRadar.must_serve || coreContractRadar.mustServe)[0]
     || coreContractRadar.summary,
@@ -45715,6 +45871,7 @@ function buildCreationContractChecklist(options: any = {}) {
     targetReader ? `目标读者：${targetReader}` : '',
     genrePositioning ? `题材定位：${genrePositioning}` : '',
     plotSpecialTopics ? `特殊题材：${plotSpecialTopics}` : '',
+    storyPower ? `故事力：${storyPower}` : '',
     coreContract ? `核心承诺：${coreContract}` : '',
     retentionContract ? `追读留存：${retentionContract}` : '',
   ], 8)
@@ -46136,6 +46293,7 @@ export function buildChapterPreDraftBrief(project: any, contextPackage: any) {
   const contentRubric = buildContentRubric(contextPackage)
   const dialogueContract = buildDialogueContract(contextPackage)
   const plotDynamicsContract = buildPlotDynamicsContract(contextPackage)
+  const storyPowerContract = buildStoryPowerContract(project, contextPackage)
   const continuityHeatContract = buildContinuityHeatContract(contextPackage)
   const characterRelationContract = buildCharacterRelationContract(contextPackage)
   const characterBehaviorContract = buildCharacterBehaviorContract(contextPackage)
@@ -46173,6 +46331,7 @@ export function buildChapterPreDraftBrief(project: any, contextPackage: any) {
     content_rubric: contentRubric,
     dialogue_contract: dialogueContract,
     plot_dynamics_contract: plotDynamicsContract,
+    story_power_contract: storyPowerContract,
     continuity_heat_contract: continuityHeatContract,
     character_relation_contract: characterRelationContract,
     character_behavior_contract: characterBehaviorContract,
@@ -46226,6 +46385,7 @@ export function buildChapterPreDraftBrief(project: any, contextPackage: any) {
     target_reader_contract: targetReaderContract,
     genre_positioning_contract: genrePositioningContract,
     plot_special_topics_contract: plotSpecialTopicsContract,
+    story_power_contract: storyPowerContract,
     core_contract_radar: coreContractRadar,
   })
 
@@ -46250,6 +46410,7 @@ export function buildChapterPreDraftBrief(project: any, contextPackage: any) {
     content_rubric: contentRubric,
     dialogue_contract: dialogueContract,
     plot_dynamics_contract: plotDynamicsContract,
+    story_power_contract: storyPowerContract,
     continuity_heat_contract: continuityHeatContract,
     character_relation_contract: characterRelationContract,
     character_behavior_contract: characterBehaviorContract,
@@ -46666,6 +46827,13 @@ export function mergeConfirmedPreDraftBriefIntoContext(contextPackage: any, preD
       || (contextPackage || {}).chapter_target?.plot_dynamics_contract
       || (contextPackage || {}).plot_dynamics_contract,
   })
+  const storyPowerContract = buildStoryPowerContract({}, {
+    ...(contextPackage || {}),
+    story_power_contract: preDraftBrief.story_power_contract
+      || preDraftBrief.storyPowerContract
+      || (contextPackage || {}).chapter_target?.story_power_contract
+      || (contextPackage || {}).story_power_contract,
+  })
   const continuityHeatContract = buildContinuityHeatContract({
     ...(contextPackage || {}),
     continuity_heat_contract: preDraftBrief.continuity_heat_contract
@@ -46862,6 +47030,7 @@ export function mergeConfirmedPreDraftBriefIntoContext(contextPackage: any, preD
       state_tracking_contract: stateTrackingContract,
       delivery_risk_carry_over: deliveryRiskCarryOver,
       plot_special_topics_contract: plotSpecialTopicsContract,
+      story_power_contract: storyPowerContract,
     })
   const confirmedPreDraftBrief = {
     ...preDraftBrief,
@@ -46870,6 +47039,7 @@ export function mergeConfirmedPreDraftBriefIntoContext(contextPackage: any, preD
     content_rubric: contentRubric,
     dialogue_contract: dialogueContract,
     plot_dynamics_contract: plotDynamicsContract,
+    story_power_contract: storyPowerContract,
     continuity_heat_contract: continuityHeatContract,
     character_relation_contract: characterRelationContract,
     character_behavior_contract: characterBehaviorContract,
@@ -46939,6 +47109,7 @@ export function mergeConfirmedPreDraftBriefIntoContext(contextPackage: any, preD
     content_rubric: contentRubric,
     dialogue_contract: dialogueContract,
     plot_dynamics_contract: plotDynamicsContract,
+    story_power_contract: storyPowerContract,
     continuity_heat_contract: continuityHeatContract,
     character_relation_contract: characterRelationContract,
     character_behavior_contract: characterBehaviorContract,
@@ -47011,6 +47182,7 @@ export function mergeConfirmedPreDraftBriefIntoContext(contextPackage: any, preD
       content_rubric: contentRubric,
       dialogue_contract: dialogueContract,
       plot_dynamics_contract: plotDynamicsContract,
+      story_power_contract: storyPowerContract,
       continuity_heat_contract: continuityHeatContract,
       character_relation_contract: characterRelationContract,
       character_behavior_contract: characterBehaviorContract,
@@ -49861,6 +50033,10 @@ export function createNovelWritingService(ctx: {
       || contextPackage?.plot_dynamics_contract
       || contextPackage?.pre_draft_brief?.plot_dynamics_contract
       || buildPlotDynamicsContract(contextPackage)
+    const storyPowerContract = contextPackage?.chapter_target?.story_power_contract
+      || contextPackage?.story_power_contract
+      || contextPackage?.pre_draft_brief?.story_power_contract
+      || buildStoryPowerContract(project, contextPackage)
     const continuityHeatContract = contextPackage?.chapter_target?.continuity_heat_contract
       || contextPackage?.continuity_heat_contract
       || contextPackage?.pre_draft_brief?.continuity_heat_contract
@@ -50449,6 +50625,18 @@ export function createNovelWritingService(ctx: {
       plotDynamicsContract ? '交稿自检必须输出 plot_dynamics_checks，并用正文证据检查最小剧情循环、假胜崩解、代价反馈、A/B情绪交替、驱动方式、多线错峰和悬置收尾。' : '',
       plotDynamicsContract ? JSON.stringify(plotDynamicsContract, null, 2).slice(0, 2500) : '',
       '',
+      storyPowerContract ? '【故事力合同】' : '',
+      storyPowerContract ? '硬性要求：执行 chapter_target.story_power_contract；这是来自 oh-story plot-core-methods 的故事力门禁，正文必须同时具备故事五维、有动作才是故事、有始有终和因果反馈。' : '',
+      storyPowerContract ? '执行方式：每个关键场景必须让角色用行动改变局势；开场目标或异常必须在章末形成状态变化；上一场结果必须成为下一场原因，不能只并列摆放事件。' : '',
+      storyPowerContract?.story_power_dimensions?.length ? `故事五维：${storyPowerContract.story_power_dimensions.join('；')}` : '',
+      storyPowerContract?.chapter_power_loop?.length ? `本章故事力循环：${storyPowerContract.chapter_power_loop.join('；')}` : '',
+      storyPowerContract?.action_rules?.length ? `有动作才是故事：${storyPowerContract.action_rules.join('；')}` : '',
+      storyPowerContract?.beginning_end_rules?.length ? `有始有终：${storyPowerContract.beginning_end_rules.join('；')}` : '',
+      storyPowerContract?.causal_feedback_rules?.length ? `因果反馈：${storyPowerContract.causal_feedback_rules.join('；')}` : '',
+      storyPowerContract?.quality_checks?.length ? `质量检查：${storyPowerContract.quality_checks.join('；')}` : '',
+      storyPowerContract ? '交稿自检必须输出 story_power_checks，并用正文证据检查故事五维、行动改变局势、开场到章末状态变化、因果反馈和场景之间的结果接结果。' : '',
+      storyPowerContract ? JSON.stringify(storyPowerContract, null, 2).slice(0, 2500) : '',
+      '',
       continuityHeatContract ? '【连续性热度合同】' : '',
       continuityHeatContract ? '硬性要求：执行 chapter_target.continuity_heat_contract；这是来自 oh-story plot-core-methods 的连续性追踪口径，正文必须管理 hot/warm/cold/archived 元素，避免重要角色、伏笔、支线和关系线断温或突然回收。' : '',
       continuityHeatContract ? '有效触达标准：必须推进事件、施加压力、改变关系、造成真实后果或解释合理休眠；只提名字、空回忆和随机 callback 不算触达。' : '',
@@ -50973,6 +51161,7 @@ export function createNovelWritingService(ctx: {
       '2D+. 执行 chapter_target.reader_drop_risk_brief：正文必须针对弃读点设计开篇抓手、中段反转/行动推进和章末翻页问题；任何 drop_points 中指出的风险都必须用可见事件、对话冲突、信息增量或读者回报修复。',
       '2D++. 执行 chapter_target.story_pressure_brief：本章必须补足压力源、冲突升级、赌注升级和反转逼迫；至少一个场景要让主角付出代价、被迫选择、暴露风险、遭遇反制或得到新的未解问题。',
       '2D+++. 执行 chapter_target.story_drive_brief：必须写出主角主动选择、选择代价、状态变化和下一步因果；主角不能只是旁观、听解释或被事件推着走。',
+      '2D+++.1 执行 chapter_target.story_power_contract：必须让故事五维落成正文证据；每个关键场景都要有行动改变局势，开场压力要在章末形成状态变化，动作必须带来代价、信息、关系、规则或敌方反制反馈。',
       '2D++++. 执行 chapter_target.serial_rhythm_brief：前 300 字必须有开篇钩子；每 800-1200 字至少给一次信息增量、冲突转折、爽点兑现、能力展示、关系变化或小回收；每个场景必须兑现 scene_payoff_budget；章末必须压出追读问题。',
       '2D+++++. 执行 chapter_target.page_turn_hook_brief：最后 300 字必须有可见触发、读者问题和下一章拉力；禁提前解答项不得在本章说明完；结尾不能用“拉开序幕”等模板总结替代现场钩子。',
       '2D++++++. 执行 chapter_target.volume_climax_brief：本章只兑现 current_chapter_role、required_beats 和 climax_promise；不得提前消费 forbidden_payoff 中的卷末爆点、身份答案、终局反转或后续大回报。',
@@ -51779,6 +51968,16 @@ export function createNovelWritingService(ctx: {
       payload: JSON.stringify({ chapter_id: chapter.id, chapter_no: chapter.chapter_no, plot_dynamics_sync: plotDynamicsSync }),
     })
     payload.plot_dynamics_sync = plotDynamicsSync
+    const storyPowerSync = buildStoryPowerSyncReport(project, chapter, contextPackage, chapterText)
+    await createNovelReview(activeWorkspace, {
+      project_id: project.id,
+      review_type: 'story_power_sync',
+      status: storyPowerSync.status === 'ok' ? 'ok' : 'warn',
+      summary: `${storyPowerSync.label}：${storyPowerSync.summary}`,
+      issues: storyPowerSync.missed.map((item: any) => `故事力缺口：${item.label}｜${item.text || item.expected}`).slice(0, 20),
+      payload: JSON.stringify({ chapter_id: chapter.id, chapter_no: chapter.chapter_no, story_power_sync: storyPowerSync }),
+    })
+    payload.story_power_sync = storyPowerSync
     const characterRelationSync = buildCharacterRelationSyncReport(project, chapter, contextPackage, chapterText)
     await createNovelReview(activeWorkspace, {
       project_id: project.id,
@@ -52477,6 +52676,8 @@ export function createNovelWritingService(ctx: {
     '27. dialogue_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),speaker,agenda,subtext,power_shift,information_delta,character_voice,changed_evidence,evidence,fix,remaining_risk；对白缺口影响冲突推进、人物可信度或留存时必须输出 S1/S2 finding，category=character 或 prose；修订后必须在 dialogue_checks.changed_evidence 写明对话执行清单对应场景改成了哪句可定位正文证据。',
     '28. 是否兑现 chapter_target.plot_dynamics_contract：按 oh-story 剧情核心方法检查目标→阻碍→行动→代价/反馈→新期待是否闭环，蓄能→假胜→崩解→交叉死磕→悬置收尾是否形成情绪落差，驱动方式是否匹配题材（番茄爽文/打脸文每章给外部结果：赢、升级、对手栽；追妻/虐心/世情持续保留人物心结；混合模式主线事件推进且每 3-5 章插情感停顿），以及主线和支线错开节奏推进、没有同时爆也没有同时空转；必须输出 plot_dynamics_checks。',
     '29. plot_dynamics_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),goal,obstacle,action,cost_or_feedback,new_expectation,evidence,fix,remaining_risk；缺少行动、代价、反馈、假胜、崩解、悬置收尾或多线错峰时必须给出 S1/S2 finding，category=structure。',
+    '29A. 是否兑现 chapter_target.story_power_contract：按 oh-story 故事力门禁检查故事五维、行动改变局势、有动作才是故事、有始有终、因果反馈是否都有正文证据；如果目标/阻碍/动作/反馈/期待任一缺失，或动作没有改变局势，必须输出 story_power_checks。',
+    '29B. story_power_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),story_power_dimension,action_changed_situation,beginning_to_end_change,causal_feedback,evidence,fix,remaining_risk；故事五维缺项、角色只听解释/内心独白、开场压力没有章末状态变化、动作没有代价/信息/关系/规则/反制反馈时必须给出 S1/S2 finding，category=structure。',
     '30. 是否兑现 chapter_target.continuity_heat_contract：按 oh-story 连续性热度追踪检查 hot/warm/cold/archived 元素；hot 必须推进，warm 必须有效触达，cold 回收前必须升温，archived 不得误激活；必须输出 continuity_heat_checks。',
     '31. continuity_heat_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),heat_state,hot_progress,warm_keepalive,cold_warmup,archived_boundary,evidence,fix,remaining_risk；冷伏笔突然回收、核心角色断温、重要支线无休眠说明、只提名字不推进时必须给出 S1/S2 finding，category=consistency 或 structure。',
     '32. 是否兑现 chapter_target.character_relation_contract：按 oh-story 角色关系手册检查关系类型明确、关系有弧线、主角目标独立、目标归属清楚、角色不止恋爱、配角期待枢纽、配角攻略缓冲区、配角有主动行动、态度变化可见、亲密/好感行为匹配阶段；目标归属必须检查主角目标是否属于自己的，不能只是帮别人实现目标，关系线可以互助但主角必须保留自己的诉求、主动选择和代价；角色不止恋爱必须检查角色生命中是否有恋爱之外的事业、责任、资源、身份、家族、风险或行动线，不能只是发糖/陪伴/情绪支持的情感工具人；配角期待枢纽必须检查是否有一个关键配角作为任务基地，同时承载短期和长期期待，并在主角解决事件后开启新一轮装逼、新任务或新剧情，人物下线时是否带来更大好处来转化损失厌恶；配角攻略缓冲区必须检查信息差、地位差距、亲密度差距或信任程度是否存在，配角不能像 NPC 一样站着等主角触发，关键拐点必须写出态度变化；必须输出 character_relation_checks。',
@@ -52566,6 +52767,7 @@ export function createNovelWritingService(ctx: {
     '必须输出 prose_meta_checks；它是 oh-story workflow-daily 的正文元信息扫描摘要，不得只用“格式没问题”代替。',
     '如果存在 chapter_target.dialogue_contract，必须输出 dialogue_checks；不能只用“对白自然/不自然”一句话带过。',
     '如果存在 chapter_target.plot_dynamics_contract，必须输出 plot_dynamics_checks；不能只用“节奏可以/不可以”一句话带过，必须明确驱动方式是否匹配题材，以及本章是否给出外部结果或保留人物心结。',
+    '如果存在 chapter_target.story_power_contract，必须输出 story_power_checks；不能只用“故事性强/弱”一句话带过，必须明确故事五维、行动改变局势、有始有终和因果反馈是否都有正文证据。',
     '如果存在 chapter_target.continuity_heat_contract，必须输出 continuity_heat_checks；不能只用“伏笔有提到/没提到”一句话带过。',
     '如果存在 chapter_target.character_relation_contract，必须输出 character_relation_checks；不能只用“人物关系正常/不正常”一句话带过。',
     '如果存在 chapter_target.character_behavior_contract，必须输出 character_behavior_checks；不能只用“人物行为正常/不正常”一句话带过，必须明确检查主角逼格反应：升级线与反应线是否分开、低级挑衅是否被轻描淡写或行动压制处理。',
@@ -52599,7 +52801,7 @@ export function createNovelWritingService(ctx: {
     '【待审校正文】',
     chapterText.slice(0, 16000),
     '',
-    '输出 JSON，字段：passed(boolean), score(0-100), rubric, rubric_source, platform_checks(array), content_rubric_source, content_rubric_checks(array), factual_checks(array), innovation_checks(array), chapter_attraction_checks(array), story_drive_checks(array), character_arc_checks(array), chapter_benchmark_checks(array), title_uniqueness_checks(array), prose_meta_checks(array), banned_words_checks(array), blueprint_consumption_checks(array), word_count_checks(array), reader_retention_checks(array), target_reader_checks(array), genre_positioning_checks(array), plot_special_topics_checks(array), core_contract_checks(array), female_audience_checks(array), upgrade_rhythm_checks(array), structure_checks(array), progression_checks(array), information_checks(array), conflict_structure_checks(array), perspective_verdicts(array), deslop_level("无"|"轻度"|"中度"|"重度"), deslop_checks(array), dialogue_checks(array), plot_dynamics_checks(array), continuity_heat_checks(array), character_relation_checks(array), character_behavior_checks(array), asset_linkage_checks(array), state_tracking_checks(array), status_filter_receipts(array), source_readiness_checks(array), write_preparation_checks(array), next_chapter_quality_plan_receipts(array), chapter_handoff_checks(array), intent_confirmation_checks(array), benchmark_recall_checks(array), style_boundary_checks(array), style_sample_checks(array), information_flow_checks(array), expectation_threshold_checks(array), story_loop_checks(array), emotional_arc_checks(array), chapter_hook_checks(array), chapter_hook_quality_checks(array), paragraph_hook_checks(array), suspense_checks(array), reversal_checks(array), showdown_checks(array), bridge_unit_checks(array), opening_checks(array), prose_craft_checks(array), serial_risk_repair_checks(array), revision_receipt_checks(array), deslop_repair_checks(array), punctuation_tone_checks(array), quality_audit_checks(array), longform_checks(array), five_dimension_scores({core_consistency,surface_rewrite,format_consistency,readability,logic_coherence}，每项含 score/evidence/fix), craft_metrics({action_detail_score,description_overuse_score,event_density_score,combat_process_score,setting_consistency_score}), focused_revision_modes(array，可取 expand_action/cut_description/tighten_pacing/add_consequence/restore_hook/repair_setting_violation), setting_violations(array), delivery_risk_receipts(array), next_chapter_quality_plan({version,quality_focus,opening_actions,middle_actions,ending_actions,avoid_repetition,evidence_basis,ending_contract:{final_state,unresolved_question,next_chapter_pull,handoff_to_next}}), issues(array，使用上面的统一 Findings Schema), revision_directives(array), needs_revision(boolean)。只返回 JSON。',
+    '输出 JSON，字段：passed(boolean), score(0-100), rubric, rubric_source, platform_checks(array), content_rubric_source, content_rubric_checks(array), factual_checks(array), innovation_checks(array), chapter_attraction_checks(array), story_drive_checks(array), character_arc_checks(array), chapter_benchmark_checks(array), title_uniqueness_checks(array), prose_meta_checks(array), banned_words_checks(array), blueprint_consumption_checks(array), word_count_checks(array), reader_retention_checks(array), target_reader_checks(array), genre_positioning_checks(array), plot_special_topics_checks(array), core_contract_checks(array), female_audience_checks(array), upgrade_rhythm_checks(array), structure_checks(array), progression_checks(array), information_checks(array), conflict_structure_checks(array), perspective_verdicts(array), deslop_level("无"|"轻度"|"中度"|"重度"), deslop_checks(array), dialogue_checks(array), plot_dynamics_checks(array), story_power_checks(array), continuity_heat_checks(array), character_relation_checks(array), character_behavior_checks(array), asset_linkage_checks(array), state_tracking_checks(array), status_filter_receipts(array), source_readiness_checks(array), write_preparation_checks(array), next_chapter_quality_plan_receipts(array), chapter_handoff_checks(array), intent_confirmation_checks(array), benchmark_recall_checks(array), style_boundary_checks(array), style_sample_checks(array), information_flow_checks(array), expectation_threshold_checks(array), story_loop_checks(array), emotional_arc_checks(array), chapter_hook_checks(array), chapter_hook_quality_checks(array), paragraph_hook_checks(array), suspense_checks(array), reversal_checks(array), showdown_checks(array), bridge_unit_checks(array), opening_checks(array), prose_craft_checks(array), serial_risk_repair_checks(array), revision_receipt_checks(array), deslop_repair_checks(array), punctuation_tone_checks(array), quality_audit_checks(array), longform_checks(array), five_dimension_scores({core_consistency,surface_rewrite,format_consistency,readability,logic_coherence}，每项含 score/evidence/fix), craft_metrics({action_detail_score,description_overuse_score,event_density_score,combat_process_score,setting_consistency_score}), focused_revision_modes(array，可取 expand_action/cut_description/tighten_pacing/add_consequence/restore_hook/repair_setting_violation), setting_violations(array), delivery_risk_receipts(array), next_chapter_quality_plan({version,quality_focus,opening_actions,middle_actions,ending_actions,avoid_repetition,evidence_basis,ending_contract:{final_state,unresolved_question,next_chapter_pull,handoff_to_next}}), issues(array，使用上面的统一 Findings Schema), revision_directives(array), needs_revision(boolean)。只返回 JSON。',
   ].join('\n')
 
   const buildProseRevisionPrompt = (project: any, contextPackage: any, chapterText: string, review: any) => {
@@ -52666,6 +52868,7 @@ export function createNovelWritingService(ctx: {
     '14C. 如果自检结果包含 deterministic_prose_cleanup，必须优先逐项修复 categories/evidence/required_actions 中的硬扫残留；这类问题已经由确定性扫描命中，不要用“风格可接受”跳过。',
     '15. 如果自检结果包含 dialogue_checks，必须优先修复 status=fail/warn 的对白缺口；按 key/label/evidence/fix 补角色声线差异、潜台词与议程、权力博弈、信息嵌入和情绪递进；如果 chapter_target.dialogue_contract.dialogue_execution_checklist 存在，必须按对话执行清单逐场修复 mode、speaker_agendas、line_functions、emotion_flow、information_strategy、voice_differentiation 和 forbidden_patterns，并在 dialogue_checks.changed_evidence 中写明修订后落成的正文句子；按压制/反转/心死模式重排对白，让短句方成为权力上位，亮底牌句压到 ≤10 字，被压制方保留 ≥20 字辩解或失态；把真实目的改成借口、试探、回避或动作反应，按关系、场合、目的重定语气；用命令式、否定式或为你好式压迫制造情绪，按事件→情绪反应→内心思考→采取行动修复跳步，并让对白强化期待、爽感或悬念；把说明书式设定改成角色语气、立场、追问、误导或动作承接，用下行质疑、上行证据和核心信息兑现形成信息拉扯；按口癖、节奏、信息偏好、身份措辞和关系阶段重写角色声线，避免所有角色同腔；按普通人震惊、专业人士分析、特殊身份者反应重排群众/弹幕递进，每条群众反应短小精悍，不代替主线；连续多轮对话后插入换气，紧张段落改短促，关键信息放到对话开头或结尾，动作和表情只保留在关键转折处；读者已知信息改成叙事一句话概括，能用突发状况替代的对话直接替换，用配角对话替代主角旁白平铺直叙，新增配角必须绑定主线戏份；同一场景超过3个配角发言时，只保留功能最强的3个，其余合并为旁观反应、动作、沉默或叙事概括；把梗式对白改成角色说不出来但意思到了的口吻，用梗强化记忆点或高潮落点，不得直接复刻热梗原句；把大量信息必须靠对白展示的段落拆成情节、心理、旁白、环境或动作，把问答式的一问一答改成主动发言、反应、动作、沉默和心理承接，确保遮住角色名仍能区分是谁在说话，单次对话不超过全节 40%，逐句改成自然口语交流，并让对话结尾预示接下来的节奏变化。',
     '16. 如果自检结果包含 plot_dynamics_checks，必须优先修复 status=fail/warn 的剧情动力缺口；按 key/label/evidence/fix 补目标阻碍行动反馈闭环、假胜崩解、代价反馈、A/B情绪交替、驱动方式、多线错峰或悬置收尾；驱动方式缺口要按题材修：番茄爽文/打脸文每章补一个外部结果（赢、升级、对手栽），追妻/虐心/世情补持续人物心结，混合模式让主线事件推进并每 3-5 章插情感停顿。',
+    '16A. 如果自检结果包含 story_power_checks，必须优先修复 status=fail/warn 的故事力缺口；按 key/label/evidence/fix 补故事五维、行动改变局势、有始有终和因果反馈，把解释、旁观或内心独白改成角色主动行动、可见代价、信息变化、关系变化、规则触发或敌方反制。',
     '17. 如果自检结果包含 continuity_heat_checks，必须优先修复 status=fail/warn 的连续性热度缺口；按 key/label/evidence/fix 补 hot 元素推进、warm 元素保温、cold 元素升温、archived 线不误激活或合理休眠说明。',
     '18. 如果自检结果包含 character_relation_checks，必须优先修复 status=fail/warn 的角色关系缺口；按 key/label/evidence/fix 补关系类型、关系考验/变化、主角独立目标、目标归属、角色不止恋爱、配角期待枢纽/人物扣、配角攻略缓冲区、配角主动行动、态度变化和阶段匹配；目标归属缺口要把“帮别人实现目标”改成主角自己的诉求、主动选择和代价，再让配角目标与主角目标摩擦或互补；角色不止恋爱缺口要给关系角色补事业、责任、资源、身份、家族、风险或行动线，让情感推进踩在自己的选择和代价上；配角期待枢纽缺口要选一个关键配角做任务基地，同时挂短期和长期期待，让主角解决事件装完逼后回到该人物处开启下一轮新任务/新剧情，若人物下线则补更大好处来转化损失厌恶；配角攻略缓冲区缺口要补信息差、地位差距、亲密度差距或信任程度，并让配角从旁观/质疑/拒绝/试探转为行动/协助/设限，不能只等主角触发。',
     '19. 如果自检结果包含 character_behavior_checks，必须优先修复 status=fail/warn 的角色行为缺口；按 key/label/evidence/fix 补动机链、动机具体性、主角行为三必须、行为证据、三层标签反差、主角逼格反应、人设强关联、记忆锚点、配角功能、角色卡必备项、配角退场规划、行为重复点、人推事件、主角红线、身份/金手指对齐、反派内在逻辑、反派分量、反派自我叙事和反派层级退场；角色卡缺口要补角色定位、身份标签、外貌特征、核心目标、核心动机、致命弱点、口头禅/标志动作；配角退场缺口要补功能、关系、核心特质、标志性特征和退场方式，并把同场超过3个有台词配角合并；行为重复点缺口要补一个跨场景重复的动作、口头禅或反应；人推事件缺口要从人物动机和选择改写事件推进，删外部硬砸和作者硬编；主角红线缺口要删圣母、无脑、内核邪恶、因蠢犯错和自暴自弃；身份/金手指对齐缺口要把社会身份、身世、金手指和性格统一到世界基调；动机具体性缺口要把“被欺负/被针对”改成具体事件，把“要成为最强/想变强”改成情感层面的理由，并补动机变化的触发事件、关系压力或代价；主角逼格反应缺口要把升级后暴怒、面红耳赤、歇斯底里或被低级挑衅牵着走，改成升级只提升实力/能力、主角仍轻描淡写、短句反锁或行动压制，必要时用旁观者认知变化放大爽点；强关联缺口要为重要角色补至少3个影响剧情走向、核心梗装逼爽点或人物碰撞的实力/资源/人脉/背景/技能/证据/关系锚点，弱关联只能留作记忆点；反派分量缺口要补真实威胁、可信动机、终极意图时机，并让反派长处照出主角弱点；反派自我叙事缺口要补梦想、创伤/旧痛、让人恨不起来的侧面和理念冲突；反派层级缺口要按小反派/中等反派/大弧 Boss/最终 Boss 修正篇幅、功能和退场方式。',
@@ -52783,6 +52986,8 @@ export function createNovelWritingService(ctx: {
     const hasDialogueConcern = dialogueChecks.some(platformCheckNeedsCarryOver)
     const plotDynamicsChecks = asArray(review?.plot_dynamics_checks || review?.plotDynamicsChecks)
     const hasPlotDynamicsConcern = plotDynamicsChecks.some(platformCheckNeedsCarryOver)
+    const storyPowerChecks = asArray(review?.story_power_checks || review?.storyPowerChecks)
+    const hasStoryPowerConcern = storyPowerChecks.some(platformCheckNeedsCarryOver)
     const continuityHeatChecks = asArray(review?.continuity_heat_checks || review?.continuityHeatChecks)
     const hasContinuityHeatConcern = continuityHeatChecks.some(platformCheckNeedsCarryOver)
     const characterRelationChecks = asArray(review?.character_relation_checks || review?.characterRelationChecks)
@@ -52858,7 +53063,7 @@ export function createNovelWritingService(ctx: {
     const hasQualityAuditConcern = qualityAuditChecks.some(platformCheckNeedsCarryOver)
     const hasNextChapterQualityPlanConcern = nextChapterQualityPlanNeedsRepair(review)
     const revisionThreshold = Math.max(78, Number(options.quality_threshold || 0))
-    return Boolean(review?.needs_revision) || Number(review?.score || 100) < revisionThreshold || hasHighIssue || hasPerspectiveConcern || hasDeslopConcern || hasDeslopGateDiagnosticConcern || hasFactualConcern || hasProseMetaConcern || hasDialogueConcern || hasPlotDynamicsConcern || hasContinuityHeatConcern || hasCharacterRelationConcern || hasCharacterBehaviorConcern || hasAssetLinkageConcern || hasStateTrackingConcern || hasSourceReadinessConcern || hasArtifactProtocolConcern || hasWritePreparationConcern || hasNextChapterQualityPlanReceiptConcern || hasChapterHandoffConcern || hasReaderRetentionConcern || hasIntentConfirmationConcern || hasBenchmarkRecallConcern || hasStyleBoundaryConcern || hasStyleSampleConcern || hasInformationFlowConcern || hasExpectationThresholdConcern || hasTargetReaderConcern || hasGenrePositioningConcern || hasPlotSpecialTopicsConcern || hasFemaleAudienceConcern || hasUpgradeRhythmConcern || hasConflictStructureConcern || hasStoryLoopConcern || hasEmotionalArcConcern || hasChapterHookConcern || hasParagraphHookConcern || hasSuspenseConcern || hasReversalConcern || hasShowdownConcern || hasBridgeUnitConcern || hasOpeningConcern || hasProseCraftConcern || hasPunctuationToneConcern || hasQualityAuditConcern || hasNextChapterQualityPlanConcern
+    return Boolean(review?.needs_revision) || Number(review?.score || 100) < revisionThreshold || hasHighIssue || hasPerspectiveConcern || hasDeslopConcern || hasDeslopGateDiagnosticConcern || hasFactualConcern || hasProseMetaConcern || hasDialogueConcern || hasPlotDynamicsConcern || hasStoryPowerConcern || hasContinuityHeatConcern || hasCharacterRelationConcern || hasCharacterBehaviorConcern || hasAssetLinkageConcern || hasStateTrackingConcern || hasSourceReadinessConcern || hasArtifactProtocolConcern || hasWritePreparationConcern || hasNextChapterQualityPlanReceiptConcern || hasChapterHandoffConcern || hasReaderRetentionConcern || hasIntentConfirmationConcern || hasBenchmarkRecallConcern || hasStyleBoundaryConcern || hasStyleSampleConcern || hasInformationFlowConcern || hasExpectationThresholdConcern || hasTargetReaderConcern || hasGenrePositioningConcern || hasPlotSpecialTopicsConcern || hasFemaleAudienceConcern || hasUpgradeRhythmConcern || hasConflictStructureConcern || hasStoryLoopConcern || hasEmotionalArcConcern || hasChapterHookConcern || hasParagraphHookConcern || hasSuspenseConcern || hasReversalConcern || hasShowdownConcern || hasBridgeUnitConcern || hasOpeningConcern || hasProseCraftConcern || hasPunctuationToneConcern || hasQualityAuditConcern || hasNextChapterQualityPlanConcern
   }
 
   const runProseSelfReviewAndRevision = async (activeWorkspace: string, project: any, contextPackage: any, chapterText: string, modelId?: number, options: any = {}) => {
@@ -53083,7 +53288,7 @@ export function createNovelWritingService(ctx: {
     const normalizedReview = {
       // Source guards: these raw model fields are consumed through requiredContractChecks.
       // reviewPayload?.reader_retention_checks reviewPayload?.target_reader_checks reviewPayload?.genre_positioning_checks reviewPayload?.plot_special_topics_checks reviewPayload?.core_contract_checks reviewPayload?.female_audience_checks reviewPayload?.upgrade_rhythm_checks reviewPayload?.conflict_structure_checks
-      // reviewPayload?.dialogue_checks reviewPayload?.plot_dynamics_checks reviewPayload?.continuity_heat_checks reviewPayload?.character_relation_checks
+      // reviewPayload?.dialogue_checks reviewPayload?.plot_dynamics_checks reviewPayload?.story_power_checks reviewPayload?.continuity_heat_checks reviewPayload?.character_relation_checks
       // reviewPayload?.character_behavior_checks reviewPayload?.asset_linkage_checks reviewPayload?.state_tracking_checks reviewPayload?.source_readiness_checks reviewPayload?.chapter_handoff_checks
       // reviewPayload?.intent_confirmation_checks reviewPayload?.information_flow_checks reviewPayload?.expectation_threshold_checks reviewPayload?.story_loop_checks
       // reviewPayload?.emotional_arc_checks reviewPayload?.chapter_hook_checks reviewPayload?.chapter_hook_quality_checks reviewPayload?.paragraph_hook_checks reviewPayload?.suspense_checks
@@ -53184,6 +53389,7 @@ export function createNovelWritingService(ctx: {
         ...deterministicDialogueHardChecks,
       ],
       plot_dynamics_checks: [...requiredContractChecks('plot_dynamics_checks', 'plotDynamicsChecks', 'plot_dynamics_contract', '剧情动力'), ...deterministicLocalVictoryCostChecks, ...deterministicPlotDynamicsChecks],
+      story_power_checks: requiredContractChecks('story_power_checks', 'storyPowerChecks', 'story_power_contract', '故事力'),
       continuity_heat_checks: [...requiredContractChecks('continuity_heat_checks', 'continuityHeatChecks', 'continuity_heat_contract', '连续性热度'), ...deterministicContinuityHeatChecks],
       character_relation_checks: [...requiredContractChecks('character_relation_checks', 'characterRelationChecks', 'character_relation_contract', '角色关系'), ...deterministicRelationshipSceneChangeChecks, ...deterministicCharacterRelationChecks],
       character_behavior_checks: [...requiredContractChecks('character_behavior_checks', 'characterBehaviorChecks', 'character_behavior_contract', '角色行为'), ...deterministicProtagonistComposureChecks, ...deterministicCharacterBehaviorChecks],
@@ -53703,7 +53909,7 @@ export function createNovelWritingService(ctx: {
           const result = await executeNovelAgent('outline-agent', project, {
             task: [
               '任务：为无人值守章节写作补齐本章蓝图。只输出 JSON，不写正文。',
-              '输出字段：title, chapter_goal, chapter_summary, conflict, ending_hook, chapter_blueprint, emotional_arc_contract, chapter_hook_contract, paragraph_hook_contract, opening_contract, suspense_contract, reversal_contract, showdown_contract, bridge_unit_contract, style_boundary_contract, plot_dynamics_contract, information_flow_contract, expectation_threshold_contract, story_loop_contract, prose_craft_contract, punctuation_tone_contract, quality_audit_contract, dialogue_contract, continuity_heat_contract, character_relation_contract, character_behavior_contract, asset_linkage_contract, state_tracking_contract, intent_confirmation_contract, target_reader_contract, genre_positioning_contract, core_contract_radar, female_audience_contract, upgrade_rhythm_contract, conflict_structure_contract, must_advance(array), forbidden_repeats(array), repair_summary。',
+              '输出字段：title, chapter_goal, chapter_summary, conflict, ending_hook, chapter_blueprint, emotional_arc_contract, chapter_hook_contract, paragraph_hook_contract, opening_contract, suspense_contract, reversal_contract, showdown_contract, bridge_unit_contract, style_boundary_contract, plot_dynamics_contract, story_power_contract, information_flow_contract, expectation_threshold_contract, story_loop_contract, prose_craft_contract, punctuation_tone_contract, quality_audit_contract, dialogue_contract, continuity_heat_contract, character_relation_contract, character_behavior_contract, asset_linkage_contract, state_tracking_contract, intent_confirmation_contract, target_reader_contract, genre_positioning_contract, core_contract_radar, female_audience_contract, upgrade_rhythm_contract, conflict_structure_contract, must_advance(array), forbidden_repeats(array), repair_summary。',
               'chapter_blueprint 必须包含 target_emotion, opening_hook, core_payoff, content_outline(cause/development/turn/climax/ending), causal_chain_contract(act_order/act_functions/quality_checks), plot_lines(mainline/subplot/event_line/relationship_line/logic_line), character_order, beat_sequence, beat_density_contract, cost_and_reward, ending_contract(final_state/unresolved_question/next_chapter_pull)；causal_chain_contract 必须按 oh-story 五幕式输出种子/生长/转折/冲刺/完成，要求不能跳步、不能乱序；beat_sequence 每项必须包含 beat_no/scene_no/action/function_tag/payoff，function_tag 必须决定展开还是带过，关键揭露/打脸/高潮/爽点必须展开，过渡/赶路/信息交代必须压缩。',
               '情绪弧合同 emotional_arc_contract 必须按 oh-story 情绪弧与 emotional-methods 输出 arc_shape, emotion_formula, pressure_methods, payoff_types, payoff_reverse_design, payoff_tier_rules, payoff_density_rules, emotion_module_recomposition_rules, payoff_escalation_rules, scene_execution_rules, expectation_rules, safety_rules, bonding_setup_rules, emotional_tear_rules, lingering_aftertaste_rules, emotional_turning_rules, first_impression_rules, peak_end_rules, emotion_layer_rules, reaction_structure_rules, ideological_conflict_rules, failure_mode_guards, quality_checks，明确本章如何完成平静 -> 调动 -> 释放 -> 爽、爽点倒推法（先定爽点类型 -> 再定期待点 -> 最后倒推铺垫，正文按铺垫 -> 期待升高 -> 爽点释放呈现）、场景情绪执行（每个场景标注调动/复现/释放/后反应，闭环当前期待时开启下一开环）、装逼层级（日常小装逼/核心爽点/偏离爽点）、多爽点密度（不要拉长单个爽点铺垫，800-1200 字内要有信息增量/能力展示/危机反制/关系变化/小回收）、先入为主（前100字先给核心矛盾/主角处境/不公平异常，注意否定提前）、峰终定律（结尾情绪必须高于起点，结尾情绪强度虐≥8、爽≥7、治愈≥6，最后一击必须是动作/对话/画面）、三层情绪（角色自己的情绪、文本传递的情绪、读者实际感受分离，角色在哭不等于读者哭，必须转成读者收益）、情绪反应结构（前反应 -> 复现 -> 后反应；以小搏大 -> 士气如虹）、理念矛盾（理念之争比利益之争更能引发深层共鸣，把原则碰撞、追求和牺牲落成具体选择与代价）、情绪模块重组（戏剧性会磨损，情绪不会磨损；复用套路必须换场景/换对手/加新情绪或提高 stakes/奖励复杂度）、情绪三板斧（羁绊铺设/情感撕裂/余韵钝痛）和每 3-5 个小节的事件触发情绪转向，并让连续爽点按影响范围、揭示深度或身份落差递增。',
               '章级钩子合同 chapter_hook_contract 必须按 oh-story 章首/章尾钩子输出 opening_hook_type, ending_hook_type, hook_strength, opening_hook_rules, ending_hook_rules, forbidden_patterns, quality_checks，明确前 100-300 字和最后 300 字如何制造追读。',
@@ -53716,6 +53922,7 @@ export function createNovelWritingService(ctx: {
               '文风覆盖边界合同 style_boundary_contract 必须按 oh-story style-profile-protocol 输出 style_override_rules, hard_constraints, copy_boundary_rules, conflict_resolution_rules, revision_priorities, quality_checks；hard_constraints 必须包含“硬约束永远赢”、禁用词、Gate F、万能比喻、章末预告、字数下限、剧情/状态/时间线不漂移；copy_boundary_rules 必须包含不得复制样章桥段。',
               '核心商业雷达 core_contract_radar 必须按 oh-story commercial-core-methods 输出 must_serve, no_drift, theme_unity_rules, selling_point_execution_rules, repetition_strategy_rules, commercial_rhythm_rules, goldfinger_structure_rules, launch_pressure_rules, repair_focus, checks；selling_point_execution_rules 必须包含卖点四步法、发现比告知爽十倍和开头暗示 -> 中间深化 -> 高潮爆发；repetition_strategy_rules 必须包含重复点和同一卖点至少延展 3 个角度；commercial_rhythm_rules 必须包含追踪/上下文.md、最近3章、连续 2 章没有目标推进/阻碍升级/新信息和大高潮 7-10 天；goldfinger_structure_rules 必须包含金手指可替换故事流程中的任一环节、简单一眼就懂和系统限制；launch_pressure_rules 必须包含开篇 300-500字内交代处境、危险来源和破局希望，以及优先用环境型压力开局。',
               '剧情动力合同 plot_dynamics_contract 必须按 oh-story 剧情核心方法输出 goal, obstacle, action, cost_feedback, next_expectation, drive_mode_rules, line_stagger_rules, quality_checks，确保目标→阻碍→行动→代价/反馈→新期待闭环；drive_mode_rules 必须包含事件驱动/情感驱动/混合模式选择：番茄爽文/打脸文每章给外部结果（赢、升级、对手栽），追妻/虐心/世情持续人物心结，混合模式主线事件推进并每 3-5 章插情感停顿；并让主线和支线错开节奏推进，不能同时爆完或同时空转。',
+              '故事力合同 story_power_contract 必须按 oh-story 剧情核心方法输出 story_power_dimensions, chapter_power_loop, action_rules, beginning_end_rules, causal_feedback_rules, quality_checks，确保故事五维、有动作才是故事、有始有终、因果反馈和行动改变局势都能进入正文门禁。',
               '信息流合同 information_flow_contract 必须输出 scene_information_units, reveal_order, suspense_responses, transition_compression_rules, no_infodump_guardrails, quality_checks，确保信息随冲突释放，不写背景说明书；transition_compression_rules 必须包含过渡不是填充、没有信息量就删掉、纯移动/寒暄/环境描写直接跳过或压缩。',
               '期待阈值合同 expectation_threshold_contract 必须输出 current_expectations, payoff_or_delay_plan, next_open_loop, vacuum_guardrails, expectation_before_payoff_rules, expectation_relay_rules, three_expectation_lines, quality_checks；expectation_before_payoff_rules 必须包含期待感 > 爽点、铺垫篇幅不少于释放篇幅和延迟满足；expectation_relay_rules 必须包含期待接力法、旧期待闭环前下一开环已经运行、当一层即将满足时先铺好下一层期待、至少两条期待线并行运行；确保兑现旧期待前先种下新期待，并保持剧情期待 + 主题甜头 + 新鲜感三线并存。',
               '故事循环合同 story_loop_contract 必须输出 setup, escalation, payoff, carry_over, map_transition_rules, nested_loop_rules, quality_checks，确保本章不是孤立事件而是长线循环的一环；map_transition_rules 必须包含旧地图核心冲突阶段性解决、新地图 = 新环境 + 新角色 + 新规则 + 新目标 + 新冲突、前5章建立代入感和期待感、保留贯穿主线、人际关系动了 -> 主角再动、避免旧线全抛和新设定一次性倒出；nested_loop_rules 必须包含“小循环 -> 中循环 -> 大循环”、小循环中必须铺垫大循环的期待，以及同一核心卖点的不同角度/不同矛盾。',
@@ -53842,6 +54049,7 @@ export function createNovelWritingService(ctx: {
         bridge_unit_contract: payload?.bridge_unit_contract || payload?.bridgeUnitContract || contextPackage?.bridge_unit_contract,
         style_boundary_contract: payload?.style_boundary_contract || payload?.styleBoundaryContract || contextPackage?.style_boundary_contract,
         plot_dynamics_contract: payload?.plot_dynamics_contract || payload?.plotDynamicsContract || contextPackage?.plot_dynamics_contract,
+        story_power_contract: payload?.story_power_contract || payload?.storyPowerContract || contextPackage?.story_power_contract,
         information_flow_contract: payload?.information_flow_contract || payload?.informationFlowContract || contextPackage?.information_flow_contract,
         expectation_threshold_contract: payload?.expectation_threshold_contract || payload?.expectationThresholdContract || contextPackage?.expectation_threshold_contract,
         story_loop_contract: payload?.story_loop_contract || payload?.storyLoopContract || contextPackage?.story_loop_contract,
@@ -53879,6 +54087,7 @@ export function createNovelWritingService(ctx: {
           bridge_unit_contract: payload?.bridge_unit_contract || payload?.bridgeUnitContract || contextPackage?.chapter_target?.bridge_unit_contract,
           style_boundary_contract: payload?.style_boundary_contract || payload?.styleBoundaryContract || contextPackage?.chapter_target?.style_boundary_contract,
           plot_dynamics_contract: payload?.plot_dynamics_contract || payload?.plotDynamicsContract || contextPackage?.chapter_target?.plot_dynamics_contract,
+          story_power_contract: payload?.story_power_contract || payload?.storyPowerContract || contextPackage?.chapter_target?.story_power_contract,
           information_flow_contract: payload?.information_flow_contract || payload?.informationFlowContract || contextPackage?.chapter_target?.information_flow_contract,
           expectation_threshold_contract: payload?.expectation_threshold_contract || payload?.expectationThresholdContract || contextPackage?.chapter_target?.expectation_threshold_contract,
           story_loop_contract: payload?.story_loop_contract || payload?.storyLoopContract || contextPackage?.chapter_target?.story_loop_contract,
@@ -53965,6 +54174,7 @@ export function createNovelWritingService(ctx: {
             bridge_unit_contract: repairedEmotionAndHookBrief.bridge_unit_contract,
             style_boundary_contract: repairedEmotionAndHookBrief.style_boundary_contract,
             plot_dynamics_contract: repairedEmotionAndHookBrief.plot_dynamics_contract,
+            story_power_contract: repairedEmotionAndHookBrief.story_power_contract,
             information_flow_contract: repairedEmotionAndHookBrief.information_flow_contract,
             expectation_threshold_contract: repairedEmotionAndHookBrief.expectation_threshold_contract,
             story_loop_contract: repairedEmotionAndHookBrief.story_loop_contract,
@@ -55188,6 +55398,15 @@ export function createNovelWritingService(ctx: {
         issues: draftPlotDynamicsSync.missed.map((item: any) => `剧情动力缺口：${item.label}｜${item.text || item.expected}`).slice(0, 20),
         payload: JSON.stringify({ chapter_id: chapter.id, chapter_no: chapter.chapter_no, plot_dynamics_sync: draftPlotDynamicsSync }),
       })
+      const draftStoryPowerSync = buildStoryPowerSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)
+      await createNovelReview(activeWorkspace, {
+        project_id: projectId,
+        review_type: 'story_power_sync',
+        status: draftStoryPowerSync.status === 'ok' ? 'ok' : 'warn',
+        summary: `${draftStoryPowerSync.label}：${draftStoryPowerSync.summary}`,
+        issues: draftStoryPowerSync.missed.map((item: any) => `故事力缺口：${item.label}｜${item.text || item.expected}`).slice(0, 20),
+        payload: JSON.stringify({ chapter_id: chapter.id, chapter_no: chapter.chapter_no, story_power_sync: draftStoryPowerSync }),
+      })
       const draftCharacterRelationSync = buildCharacterRelationSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)
       await createNovelReview(activeWorkspace, {
         project_id: projectId,
@@ -55571,7 +55790,7 @@ export function createNovelWritingService(ctx: {
         revised: false,
         production_mode: productionMode,
         completed_stage: 'store',
-        story_state_update: { skipped: true, prose_revision_receipt_sync: proseRevisionReceiptSync, deslop_repair_receipt_sync: deslopRepairReceiptSync, quality_audit_repair_receipt_sync: qualityAuditRepairReceiptSync, next_chapter_quality_plan_receipts_sync: nextChapterQualityPlanReceiptSync, status_filter_receipts_sync: statusFilterReceiptSync, write_preparation_receipts_sync: writePreparationReceiptSync, revision_context_receipts_sync: revisionContextReceiptSync, revision_cascade_impact_sync: revisionCascadeImpactSync, revision_scope_guard_sync: revisionScopeGuardSync, deterministic_prose_cleanup: deterministicProseCleanup, prose_meta_sync: draftProseMetaSync, dialogue_sync: draftDialogueSync, character_behavior_sync: draftCharacterBehaviorSync, asset_linkage_sync: draftAssetLinkageSync, state_tracking_sync: draftStateTrackingSync, source_readiness_sync: draftSourceReadinessSync, intent_confirmation_sync: draftIntentConfirmationSync, continuity_heat_sync: draftContinuityHeatSync, conflict_structure_sync: draftConflictStructureSync, upgrade_rhythm_sync: draftUpgradeRhythmSync, target_reader_sync: draftTargetReaderSync, genre_positioning_sync: draftGenrePositioningSync, plot_special_topics_sync: draftPlotSpecialTopicsSync, female_audience_sync: draftFemaleAudienceSync, plot_dynamics_sync: draftPlotDynamicsSync, character_relation_sync: draftCharacterRelationSync, chapter_attraction_review: draftChapterAttractionReview, story_drive_sync: draftStoryDriveSync, story_loop_sync: draftStoryLoopSync, information_flow_sync: draftInformationFlowSync, emotional_arc_sync: draftEmotionalArcSync, character_arc_sync: draftCharacterArcSync, chapter_blueprint_sync: draftChapterBlueprintSync, scene_card_receipts_sync: draftSceneCardReceiptSync, delivery_risk_receipts_sync: draftDeliveryRiskReceiptSync, chapter_benchmark_sync: draftChapterBenchmarkSync, benchmark_recall_sync: draftBenchmarkRecallSync, style_boundary_sync: draftStyleBoundarySync, style_sample_sync: draftStyleSampleSync, innovation_sync: draftInnovationSync, volume_beat_sync: draftVolumeBeatSync, runway_sync: draftRunwaySync, chapter_title_uniqueness_sync: draftChapterTitleUniquenessSync, chapter_handoff_sync: draftChapterHandoffSync, reader_expectation_sync: draftReaderExpectationSync, expectation_threshold_sync: draftExpectationThresholdSync, chapter_hook_sync: draftChapterHookSync, paragraph_hook_sync: draftParagraphHookSync, suspense_sync: draftSuspenseSync, reversal_sync: draftReversalSync, showdown_sync: draftShowdownSync, opening_sync: draftOpeningSync, prose_craft_sync: draftProseCraftSync, punctuation_tone_sync: draftPunctuationToneSync, quality_audit_sync: draftQualityAuditSync, payoff_setup_sync: draftPayoffSetupSync, spectator_reaction_sync: draftSpectatorReactionSync, bridge_unit_sync: draftBridgeUnitSync, beat_cooling_sync: draftBeatCoolingSync, reader_payoff_sync: draftReaderPayoffSync, reader_retention_sync: draftReaderRetentionSync, signature_scene_sync: draftSignatureSceneSync, story_unit_sync: draftStoryUnitSync, core_drift: draftCoreDrift, core_contract_sync: draftCoreContractSync },
+        story_state_update: { skipped: true, prose_revision_receipt_sync: proseRevisionReceiptSync, deslop_repair_receipt_sync: deslopRepairReceiptSync, quality_audit_repair_receipt_sync: qualityAuditRepairReceiptSync, next_chapter_quality_plan_receipts_sync: nextChapterQualityPlanReceiptSync, status_filter_receipts_sync: statusFilterReceiptSync, write_preparation_receipts_sync: writePreparationReceiptSync, revision_context_receipts_sync: revisionContextReceiptSync, revision_cascade_impact_sync: revisionCascadeImpactSync, revision_scope_guard_sync: revisionScopeGuardSync, deterministic_prose_cleanup: deterministicProseCleanup, prose_meta_sync: draftProseMetaSync, dialogue_sync: draftDialogueSync, character_behavior_sync: draftCharacterBehaviorSync, asset_linkage_sync: draftAssetLinkageSync, state_tracking_sync: draftStateTrackingSync, source_readiness_sync: draftSourceReadinessSync, intent_confirmation_sync: draftIntentConfirmationSync, continuity_heat_sync: draftContinuityHeatSync, conflict_structure_sync: draftConflictStructureSync, upgrade_rhythm_sync: draftUpgradeRhythmSync, target_reader_sync: draftTargetReaderSync, genre_positioning_sync: draftGenrePositioningSync, plot_special_topics_sync: draftPlotSpecialTopicsSync, female_audience_sync: draftFemaleAudienceSync, plot_dynamics_sync: draftPlotDynamicsSync, story_power_sync: draftStoryPowerSync, character_relation_sync: draftCharacterRelationSync, chapter_attraction_review: draftChapterAttractionReview, story_drive_sync: draftStoryDriveSync, story_loop_sync: draftStoryLoopSync, information_flow_sync: draftInformationFlowSync, emotional_arc_sync: draftEmotionalArcSync, character_arc_sync: draftCharacterArcSync, chapter_blueprint_sync: draftChapterBlueprintSync, scene_card_receipts_sync: draftSceneCardReceiptSync, delivery_risk_receipts_sync: draftDeliveryRiskReceiptSync, chapter_benchmark_sync: draftChapterBenchmarkSync, benchmark_recall_sync: draftBenchmarkRecallSync, style_boundary_sync: draftStyleBoundarySync, style_sample_sync: draftStyleSampleSync, innovation_sync: draftInnovationSync, volume_beat_sync: draftVolumeBeatSync, runway_sync: draftRunwaySync, chapter_title_uniqueness_sync: draftChapterTitleUniquenessSync, chapter_handoff_sync: draftChapterHandoffSync, reader_expectation_sync: draftReaderExpectationSync, expectation_threshold_sync: draftExpectationThresholdSync, chapter_hook_sync: draftChapterHookSync, paragraph_hook_sync: draftParagraphHookSync, suspense_sync: draftSuspenseSync, reversal_sync: draftReversalSync, showdown_sync: draftShowdownSync, opening_sync: draftOpeningSync, prose_craft_sync: draftProseCraftSync, punctuation_tone_sync: draftPunctuationToneSync, quality_audit_sync: draftQualityAuditSync, payoff_setup_sync: draftPayoffSetupSync, spectator_reaction_sync: draftSpectatorReactionSync, bridge_unit_sync: draftBridgeUnitSync, beat_cooling_sync: draftBeatCoolingSync, reader_payoff_sync: draftReaderPayoffSync, reader_retention_sync: draftReaderRetentionSync, signature_scene_sync: draftSignatureSceneSync, story_unit_sync: draftStoryUnitSync, core_drift: draftCoreDrift, core_contract_sync: draftCoreContractSync },
         requires_next_chapter_quality_plan_receipts: nextChapterQualityPlanReceiptSync.requires_receipts,
         requires_status_filter_receipts: statusFilterReceiptSync.requires_receipts,
         config_snapshot: configSnapshot,
@@ -55823,6 +56042,7 @@ export function createNovelWritingService(ctx: {
     const plotSpecialTopicsSync = buildPlotSpecialTopicsSyncReport(project, updated, contextPackage, finalText)
     const femaleAudienceSync = buildFemaleAudienceSyncReport(project, updated, contextPackage, finalText)
     const plotDynamicsSync = buildPlotDynamicsSyncReport(project, updated, contextPackage, finalText)
+    const storyPowerSync = buildStoryPowerSyncReport(project, updated, contextPackage, finalText)
     const characterRelationSync = buildCharacterRelationSyncReport(project, updated, contextPackage, finalText)
     const readerRetentionSync = buildReaderRetentionSyncReport(project, updated, contextPackage, finalText)
     const coreContractSync = buildCoreContractSyncReport(project, updated, contextPackage, finalText)
@@ -55897,6 +56117,7 @@ export function createNovelWritingService(ctx: {
     storyStateUpdateWithSync.plot_special_topics_sync = plotSpecialTopicsSync
     storyStateUpdateWithSync.female_audience_sync = femaleAudienceSync
     storyStateUpdateWithSync.plot_dynamics_sync = plotDynamicsSync
+    storyStateUpdateWithSync.story_power_sync = storyPowerSync
     storyStateUpdateWithSync.character_relation_sync = characterRelationSync
     storyStateUpdateWithSync.reader_retention_sync = readerRetentionSync
     storyStateUpdateWithSync.core_contract_sync = coreContractSync
