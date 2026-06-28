@@ -13,25 +13,25 @@ Source reference set: `/private/tmp/oh-story-claudecode/skills/story-long-write/
 <!-- oh-story-progress-summary
 {
   "reference_total": 38,
-  "integrated": 36,
-  "partial": 2,
+  "integrated": 37,
+  "partial": 1,
   "todo": 0,
   "deferred": 0,
-  "remaining_references": 2,
-  "estimated_hours_remaining": 9.5,
-  "estimated_working_days_remaining": 1.58
+  "remaining_references": 1,
+  "estimated_hours_remaining": 8.5,
+  "estimated_working_days_remaining": 1.42
 }
 -->
 
 ## Current Snapshot
 
 - Reference files: 38
-- Integrated enough for current production use: 36
-- Partially integrated, still worth mining: 2
+- Integrated enough for current production use: 37
+- Partially integrated, still worth mining: 1
 - Not systematically reviewed yet: 0
 - Deferred: 0
-- Remaining references to improve: 2
-- Estimated remaining effort: about 9.5 engineering hours, or 1.58 focused working days at 6 hours per day
+- Remaining references to improve: 1
+- Estimated remaining effort: about 8.5 engineering hours, or 1.42 focused working days at 6 hours per day
 
 The estimate assumes the current working pattern: one small oh-story increment at a time, with prompt or workflow changes backed by focused tests, then `test:novel-server` and `check` before push. UI progress surfacing is not included in the remaining estimate; after this ledger stabilizes, exposing it in the novel workspace should be a separate 4-6 hour slice.
 
@@ -79,7 +79,7 @@ The estimate assumes the current working pattern: one small oh-story increment a
 | reversal-toolkit.md | integrated | Reversal setup, fair misdirection, evidence-chain, final-evidence impact, time-bomb proof, and agency checks are implemented. | Keep tuning evidence-chain examples. | 0.5h |
 | state-tracking.md | integrated | State tracking contract, source readiness, status-filter receipts, and source-boundary checks are implemented. | Keep expanding real-world failure examples. | 0.5h |
 | style-combat-face.md | integrated | Showdown contract, combat/face-slap deterministic checks, scene-card public payoff fields (`showoff_stage_chain`, `spectator_interest_shift`, `secondary_showoff_effect`), combat preset fields (`combat_result_type`, `combat_dimension_plan`, `combat_reversal_plan`), prose execution prompts, scene-card receipt fields, and deterministic receipt/consumption checks now cover payoff release, antagonist pressure, public stage chain, spectator interest shifts, secondary showoff effects, combat result type, heart/body/skill dimensions, and counterplay reversals in `ui/server/src/routes/novel-writing-service.ts`. | Keep tuning field wording and evidence matching from real public-payoff/combat scenes. | 0.5h |
-| style-craft.md | partial | Style boundary, punctuation tone, sentence rhythm, subject-name rhythm, and section-density checks are present. | Extract craft rules into shorter prompt snippets to reduce prompt bulk. | 1h |
+| style-craft.md | integrated | Style boundary, punctuation tone, sentence rhythm, subject-name rhythm, section-density checks, prose craft contract fields, compact prose prompt snippets, and unattended blueprint repair 短口径 are present in `ui/server/src/routes/novel-writing-service.ts`; focused tests guard prompt length, removal of raw prose-craft JSON dumps, and compact repair wording. | Keep tuning compact wording from real output misses. | 0.5h |
 | style-genre-modules.md | integrated | Benchmark recall now carries selected emotion module, rhythm reference, source paths, matched chapter techniques, canonical source authority, secondary benchmark boundaries, anchor copy guards, and model-facing `fallback_receipt_requirements` for `module_usage_receipt`, `rhythm_usage_receipt`, and `matched_chapter_usage_receipt`. Prose prompts require `fallback_usage_receipts` inside `benchmark_recall_checks` with `source_type/source_path/expected_application/delivered_evidence/gaps_preserved`, and focused tests cover pre-draft hydration plus prompt enforcement. | Keep tuning real-output evidence wording so model receipts stay locatable and do not become generic “已完成” statements. | 0.5h |
 | workflow-daily.md | integrated | Next-batch workflow rules cover context load, manual fallback table, next chapter numbering, title precheck, benchmark recall, formula loading, research, word count, serial writing, Phase 5 checks, and exact `追踪/上下文.md` progress-summary handoff. | Keep tuning daily workflow rules after real batch-writing failures appear. | 0.5h |
 | workflow-revision.md | integrated | Revision context receipts, revision cascade, scope guard, quality-audit repair, automatic prose revision prompts, editor repair prompts, and editor one-click revision now cover oh-story workflow-revision Step 2/4/5. Editor revision injects actual previous/next chapter, outline, foreshadowing, timeline, character, setting, and relationship slices, enforces the 30%/800字 scope guard, asks for `revision_context_receipts`, `revision_scope_guard`, `revision_receipts.cascade_impacts`, and stores these receipts in the `editor_revision` payload. | Keep tuning revision context slicing from real回炉 cases. | 0.5h |
@@ -87,8 +87,7 @@ The estimate assumes the current working pattern: one small oh-story increment a
 
 ## Next Priority Queue
 
-1. `style-craft.md`: extract craft rules into shorter prompt snippets to reduce prompt bulk.
-2. `format-and-structure.md`: compare all format requirements and add missing deterministic checks.
+1. `format-and-structure.md`: compare all format requirements and add missing deterministic checks.
 
 ## Update Rules
 

@@ -40747,6 +40747,57 @@ const OH_STORY_PROSE_CRAFT_CHECKS = [
   '段落镜头必须有明确拍摄对象，不能连续空泛解释、心理总结或信息水文。',
 ]
 
+const OH_STORY_PROSE_CRAFT_REQUIRED_FIELDS = [
+  'pov_rules',
+  'expression_rules/body_detail_rules',
+  'scene_weaving_rules',
+  'subject_name_rhythm_rules',
+  'indirect_description_rules',
+  'three_camera_rules',
+  'then_what_rules',
+  'core_emotion_alignment_rules',
+  'baimiao_sensory_rules',
+  'dynamic_description_rules',
+  'shot_rhythm_rules',
+  'transition_bridge_rules',
+  'rhythm_rules',
+  'object_number_rules',
+  'section_structure_rules',
+  'section_density_rules',
+  'anti_padding_rules',
+  'concept_anchor_rules',
+  'description_limits',
+  'anti_ai_smell_rules',
+  'quality_checks',
+]
+
+function compactProseCraftItems(values: any, limit = 2) {
+  return asArray(values)
+    .map((item: any) => compactBriefText(item))
+    .filter(Boolean)
+    .slice(0, limit)
+    .join('；')
+}
+
+function formatProseCraftPromptSnippet(contract: any = {}) {
+  const sceneAnchors = compactProseCraftItems(contract.scene_anchors || contract.sceneAnchors, 6)
+  const qualityChecks = compactProseCraftItems(contract.quality_checks || contract.qualityChecks, 4)
+  return [
+    '硬性要求：执行 chapter_target.prose_craft_contract；这是来自 oh-story writing-craft/style-craft 的正文工艺短口径，正文必须用可见动作、身体细节、感官锚点、物件/数字和镜头节奏交付情绪。',
+    '写作四要点：深度限知；身体细节替代情绪词；三维度揉进（发生/感知/身体反应）；一动一静控制节奏，关键道具和具体数字必须承担剧情或情绪功能。',
+    '字段口径：subject_name_rhythm_rules=主语与名字节奏，段首、场景切换、多人同场、视角重置点名，同一动作链/同一段内部段中用代词/省略流动，优先用“他/她”、动作承接或省略主语，不要连续多句都以同一角色名开头，避免每句报名字和指代不清；indirect_description_rules=间接描写法，正面描写只是铺垫，侧面反应才是爽点，不要直接宣布，用配角动作/围观者判断/对手失态/环境变化证明。',
+    '镜头口径：three_camera_rules=三机位法，机位1贴主角近景动作/表情/身体感受，机位2给外部反应或环境反馈，机位3只补冲突触发的必要设定；shot_rhythm_rules=镜头与分镜思维，远景/中景/近景/特写按信息、关系、风险和情绪变化切换，冲突用短句、短段、密集动作。',
+    '推进口径：then_what_rules=“然后呢”基点法，每段信息点后立刻接动作、发现、反应、选择、风险或新疑问；core_emotion_alignment_rules=核心情绪对齐，情节、人设、冲突和每个细节都服务本章情绪目标、读者回报或全书核心情绪。',
+    '画面口径：baimiao_sensory_rules=白描/五感，用最少的字写准信息和情绪，关键场景两到三种感官且必须服务情绪、动作、规则或危险；dynamic_description_rules=动态描写优于静态描写，人物用动作和反应展现，环境在角色行动中穿插点染。',
+    '转场与小节：transition_bridge_rules=场景切换与转场，用相似物/相似五感/相似情绪，时间跳转靠动作或物件，空间跳转靠声音或光影；section_structure_rules=小节内部结构，一个主事件 + 3-5 个子事件 + 一个情绪变化 + 一条读者新获知的信息 + 必要 3-5 轮对话交锋，小节结尾留一个钩子，下一节开头快速接续，情绪跨节递进。',
+    '控水与新概念：section_density_rules=小节密度诊断，偏短不得加环境描写，先查子事件三维度，再补身体动作、感官细节、对话交锋、阻碍/反应/发现/递进或 2-3 句简短回忆；concept_anchor_rules=新概念锚点，新名词/新设定/新道具首次出现必须有动作反应、对话半句或物理后果；description_limits=水分控制，删掉这段后读者不会困惑的环境、心理、旁白、回忆和重复信息必须删除或压缩。',
+    '去AI味：anti_ai_smell_rules=扫描高危词、章末总结体、叠加式描写和心理告知；仿佛/犹如/一丝/一抹/深吸一口气/眼中闪过/嘴角勾起等模板表达高频出现时改成动作、物件、对话或白描。',
+    `字段清单：${OH_STORY_PROSE_CRAFT_REQUIRED_FIELDS.join(', ')}；交稿自检必须输出 prose_craft_checks，并用正文证据检查深度限知、身体细节、三维度揉进、间接描写/侧面反应、三机位、然后呢、核心情绪、白描五感、动态描写、镜头转场、小节结构、新概念锚点、水分控制和去AI味。`,
+    sceneAnchors ? `本章工艺锚点：${sceneAnchors}` : '',
+    qualityChecks ? `prose_craft_checks 摘录：${qualityChecks}` : '',
+  ].filter(Boolean)
+}
+
 const OH_STORY_PUNCTUATION_TONE_MAP = [
   '压迫 / 冷静 / 克制：用短句、逗号、句号或冒号压出判断落点；不为了变化乱加感叹号。',
   '质问 / 试探 / 反问：关键问题用问号和短促追问片段，配合动作停顿；避免连续多句全以问号结尾。',
@@ -52198,45 +52249,7 @@ export function createNovelWritingService(ctx: {
       openingContract ? JSON.stringify(openingContract, null, 2).slice(0, 2500) : '',
       '',
       proseCraftContract ? '【正文工艺合同】' : '',
-      proseCraftContract ? '硬性要求：执行 chapter_target.prose_craft_contract；这是来自 oh-story writing-craft/style-craft 的行文工艺口径，正文必须用可见动作、身体细节、感官锚点、物件/数字和镜头节奏交付情绪。' : '',
-      proseCraftContract ? '执行方式：保持深度限知；用身体细节替代情绪词；每个详写子事件执行三维度揉进（发生、感知、身体反应）；一动一静控制节奏；关键道具和具体数字必须承担剧情或情绪功能。' : '',
-      proseCraftContract ? '间接描写法：正面描写只是铺垫，侧面反应才是爽点；不要直接宣布“很厉害/很震撼”，用配角动作、围观者判断、对手失态、环境变化证明。' : '',
-      proseCraftContract ? '三机位法：机位1近景写主角动作/表情/身体感受，机位2远景写配角反应/环境变化/围观者判断，机位3只在冲突触发时补必要旁白；设定都由冲突引出。' : '',
-      proseCraftContract ? '“然后呢”基点法：每段都要回答读者心中的“然后呢”；写完一个信息点，立刻用下一个信息点接上，接成动作、发现、反应、选择、风险或新疑问。' : '',
-      proseCraftContract ? '核心情绪对齐：围绕核心情绪设计全部情节；情节、人设、冲突和每个细节都要服务本章情绪目标、读者回报或全书核心情绪，不能变成旁枝情绪。' : '',
-      proseCraftContract ? '白描/五感：用最少的字写最准确的信息和情绪；关键场景至少调动两到三种感官，视觉/听觉/触觉/嗅觉/味觉只写主角主动感受到且服务情绪、动作、规则或危险判断的细节。' : '',
-      proseCraftContract ? '动态描写优于静态描写：人物特征用动作和反应展现，不用形容词堆；环境不要大段铺陈，必须在角色行动中穿插点染。' : '',
-      proseCraftContract ? '镜头与分镜思维：每个段落是一个镜头；远景写环境/氛围，中景写人物关系，近景写表情/身体细节，特写写关键物品或情绪触发点；快节奏用短句、短段、密集动作，慢节奏用长句、环境交互和静止镜头。' : '',
-      proseCraftContract ? '场景切换与转场：用相似物、相似五感或相似情绪做转场；时间跳转用动作或物件衔接，空间跳转用声音或光影衔接。' : '',
-      proseCraftContract ? '小节内部结构：每个小节先定一个主事件，再铺 3-5 个子事件；必须有一个情绪变化、一条读者新获知的信息和必要的 3-5 轮对话交锋。小节结尾留一个钩子，下一节开头快速接续，不重新铺垫，情绪跨节递进。' : '',
-      proseCraftContract ? '新概念锚点：新名词/新设定/新道具首次出现时，必须用角色动作反应、对话半句或物理后果带出当下作用；不要整段讲来历/原理/等级，也不要只甩零信息生词。' : '',
-      proseCraftContract ? '描写限额/水分控制：删掉这段后读者不会困惑的环境、心理、旁白、回忆和重复信息就是水，必须删除或压缩；保留内容要承担伏笔、氛围、互动、动作、信息、关系、风险或情绪变化。' : '',
-      proseCraftContract ? '去AI味规则：扫描高危词、章末总结体、叠加式描写和心理告知；仿佛/犹如/一丝/一抹/深吸一口气/眼中闪过/嘴角勾起等模板表达高频出现时必须改成动作、物件、对话或白描。' : '',
-      proseCraftContract?.pov_rules?.length ? `视角规则：${proseCraftContract.pov_rules.join('；')}` : '',
-      proseCraftContract?.expression_rules?.length ? `表达规则：${proseCraftContract.expression_rules.join('；')}` : '',
-      proseCraftContract?.scene_weaving_rules?.length ? `场景写法：${proseCraftContract.scene_weaving_rules.join('；')}` : '',
-      proseCraftContract?.subject_name_rhythm_rules?.length ? `主语与名字节奏：${proseCraftContract.subject_name_rhythm_rules.join('；')}` : '',
-      proseCraftContract?.indirect_description_rules?.length ? `间接描写法：${proseCraftContract.indirect_description_rules.join('；')}` : '',
-      proseCraftContract?.three_camera_rules?.length ? `三机位法：${proseCraftContract.three_camera_rules.join('；')}` : '',
-      proseCraftContract?.then_what_rules?.length ? `“然后呢”基点法：${proseCraftContract.then_what_rules.join('；')}` : '',
-      proseCraftContract?.core_emotion_alignment_rules?.length ? `核心情绪对齐：${proseCraftContract.core_emotion_alignment_rules.join('；')}` : '',
-      proseCraftContract?.baimiao_sensory_rules?.length ? `白描/五感：${proseCraftContract.baimiao_sensory_rules.join('；')}` : '',
-      proseCraftContract?.dynamic_description_rules?.length ? `动态描写优于静态描写：${proseCraftContract.dynamic_description_rules.join('；')}` : '',
-      proseCraftContract?.shot_rhythm_rules?.length ? `镜头与分镜思维：${proseCraftContract.shot_rhythm_rules.join('；')}` : '',
-      proseCraftContract?.transition_bridge_rules?.length ? `场景切换与转场：${proseCraftContract.transition_bridge_rules.join('；')}` : '',
-      proseCraftContract?.rhythm_rules?.length ? `节奏规则：${proseCraftContract.rhythm_rules.join('；')}` : '',
-      proseCraftContract?.object_number_rules?.length ? `道具/数字规则：${proseCraftContract.object_number_rules.join('；')}` : '',
-      proseCraftContract?.section_structure_rules?.length ? `小节内部结构/衔接：${proseCraftContract.section_structure_rules.join('；')}` : '',
-      proseCraftContract?.section_density_rules?.length ? `小节密度诊断：${proseCraftContract.section_density_rules.join('；')}` : '',
-      proseCraftContract?.anti_padding_rules?.length ? `反注水规则：${proseCraftContract.anti_padding_rules.join('；')}` : '',
-      proseCraftContract?.concept_anchor_rules?.length ? `新概念锚点：${proseCraftContract.concept_anchor_rules.join('；')}` : '',
-      proseCraftContract?.description_limits?.length ? `description_limits：${proseCraftContract.description_limits.join('；')}` : '',
-      proseCraftContract?.anti_ai_smell_rules?.length ? `anti_ai_smell_rules：${proseCraftContract.anti_ai_smell_rules.join('；')}` : '',
-      proseCraftContract?.scene_anchors?.length ? `本章工艺锚点：${proseCraftContract.scene_anchors.join('；')}` : '',
-      proseCraftContract?.forbidden_patterns?.length ? `正文工艺禁忌：${proseCraftContract.forbidden_patterns.join('；')}` : '',
-      proseCraftContract?.quality_checks?.length ? `prose_craft_checks：${proseCraftContract.quality_checks.join('；')}` : '',
-      proseCraftContract ? '交稿自检必须输出 prose_craft_checks，并用正文证据检查深度限知、身体细节替代情绪词、三维度揉进、间接描写法/侧面反应/不要直接宣布、三机位法/机位1/机位2/机位3、“然后呢”基点法/信息点接续、核心情绪对齐/情节人设冲突细节服务情绪、白描/五感/感官服务情绪、动态描写优于静态描写/动作和反应/角色行动中穿插点染、镜头与分镜思维/远景/中景/近景/特写/快慢节奏、场景切换与转场/时间跳转/空间跳转、一动一静、道具/数字功能、小节结构、新概念锚点、环境交互、description_limits/水分控制、anti_ai_smell_rules/高危词/章末总结体/叠加式描写和禁用上帝视角/堆叠式描写。' : '',
-      proseCraftContract ? JSON.stringify(proseCraftContract, null, 2).slice(0, 3000) : '',
+      ...(proseCraftContract ? formatProseCraftPromptSnippet(proseCraftContract) : []),
       '',
       punctuationToneContract ? '【语气标点谱系合同】' : '',
       punctuationToneContract ? '硬性要求：执行 chapter_target.punctuation_tone_contract；这是来自 oh-story writing-craft/format-and-structure 的语气标点谱系，标点服务语气、人物声线和情绪节奏，不能通篇句号化，也不能随机堆砌问号/感叹号。' : '',
@@ -55622,7 +55635,7 @@ export function createNovelWritingService(ctx: {
               '信息流合同 information_flow_contract 必须输出 scene_information_units, reveal_order, suspense_responses, transition_compression_rules, next_objective_rules, no_infodump_guardrails, quality_checks，确保信息随冲突释放，不写背景说明书；transition_compression_rules 必须包含过渡不是填充、没有信息量就删掉、纯移动/寒暄/环境描写直接跳过或压缩；next_objective_rules 必须包含每次实力/身份/资源/阶段性目标提升后立即引入新的挑战、目标、代价或更高门槛。',
               '期待阈值合同 expectation_threshold_contract 必须输出 current_expectations, payoff_or_delay_plan, next_open_loop, vacuum_guardrails, expectation_before_payoff_rules, expectation_relay_rules, three_expectation_lines, quality_checks；expectation_before_payoff_rules 必须包含期待感 > 爽点、铺垫篇幅不少于释放篇幅和延迟满足；expectation_relay_rules 必须包含期待接力法、旧期待闭环前下一开环已经运行、当一层即将满足时先铺好下一层期待、至少两条期待线并行运行；确保兑现旧期待前先种下新期待，并保持剧情期待 + 主题甜头 + 新鲜感三线并存。',
               '故事循环合同 story_loop_contract 必须输出 setup, escalation, payoff, carry_over, map_transition_rules, nested_loop_rules, quality_checks，确保本章不是孤立事件而是长线循环的一环；map_transition_rules 必须包含旧地图核心冲突阶段性解决、新地图 = 新环境 + 新角色 + 新规则 + 新目标 + 新冲突、前5章建立代入感和期待感、保留贯穿主线、人际关系动了 -> 主角再动、避免旧线全抛和新设定一次性倒出；nested_loop_rules 必须包含“小循环 -> 中循环 -> 大循环”、小循环中必须铺垫大循环的期待，以及同一核心卖点的不同角度/不同矛盾。',
-              '正文工艺合同 prose_craft_contract 必须输出 pov_rules, body_detail_rules, scene_weaving_rules, subject_name_rhythm_rules, indirect_description_rules, three_camera_rules, then_what_rules, core_emotion_alignment_rules, baimiao_sensory_rules, dynamic_description_rules, shot_rhythm_rules, transition_bridge_rules, rhythm_rules, object_number_rules, section_structure_rules, section_density_rules, anti_padding_rules, concept_anchor_rules, description_limits, anti_ai_smell_rules, quality_checks；subject_name_rhythm_rules 必须包含主语与名字节奏：段首/场景切换/多人同场/视角重置时点名，同一动作链段中用代词/省略/动作承接，避免每句都在报名字和指代不清；indirect_description_rules 必须包含间接描写法：正面描写只是铺垫，侧面反应才是爽点，不要直接宣布“很厉害/很震撼”，要用配角动作、围观者判断、对手失态或环境变化证明；three_camera_rules 必须包含三机位法：机位1近景写主角动作/表情/身体感受，机位2远景写配角反应/环境变化/围观者判断，机位3只补必要设定/背景/人物关系，设定都由冲突引出；then_what_rules 必须包含“然后呢”基点法：每一段文字都要回答读者心中的“然后呢”，写完一个信息点立刻用下一个信息点接上，不能写成静态死段；core_emotion_alignment_rules 必须包含围绕核心情绪设计全部情节、所有情节/人设/冲突/细节服务目标读者核心情绪，以及宏观把控整体节奏、微观把控每段细节和张力；baimiao_sensory_rules 必须包含白描 = 最少的字 + 最准确的信息和情绪、至少调动两到三种感官、视觉/听觉/触觉/嗅觉/味觉只写有效锚点、五感必须服务情绪；dynamic_description_rules 必须包含动态描写优于静态描写、人物特征用动作和反应展现、环境不要大段铺陈、角色行动中穿插点染；shot_rhythm_rules 必须包含镜头与分镜思维、每个段落一个镜头、远景/中景/近景/特写、短句、短段、密集动作和快慢节奏切换；transition_bridge_rules 必须包含场景切换与转场、相似物/相似五感/相似情绪、时间跳转动作或物件衔接、空间跳转声音或光影衔接；section_structure_rules 必须包含一个主事件、3-5 个子事件、一个情绪变化、一条读者新获知的信息、3-5 轮对话交锋、小节结尾钩子、下一节开头快速接续和情绪跨节递进；section_density_rules 必须包含小节密度诊断，anti_padding_rules 必须禁止为凑字数加环境描写、重复情绪、内心独白总结或无意义动作，concept_anchor_rules 必须要求新名词/新设定首次出现有动作反应、对话半句或物理后果锚点；description_limits 必须包含水分控制、删掉这段后读者会不会困惑、不推动剧情也不塑造人物的水分必须删除或压缩；anti_ai_smell_rules 必须包含高危词、章末总结体、叠加式描写、心理告知和模板表达清理，确保正文不靠抽象心理、堆设定、模板句或 AI 味撑场。',
+              '正文工艺合同 prose_craft_contract：正文工艺短口径，必须输出 pov_rules, expression_rules/body_detail_rules, scene_weaving_rules, subject_name_rhythm_rules, indirect_description_rules, three_camera_rules, then_what_rules, core_emotion_alignment_rules, baimiao_sensory_rules, dynamic_description_rules, shot_rhythm_rules, transition_bridge_rules, rhythm_rules, object_number_rules, section_structure_rules, section_density_rules, anti_padding_rules, concept_anchor_rules, description_limits, anti_ai_smell_rules, quality_checks；subject_name_rhythm_rules=主语与名字节奏，段首/场景切换/多人同场/视角重置点名，段中代词/省略/动作承接，避免每句报名字和指代不清；indirect_description_rules=间接描写法，正面描写只是铺垫，侧面反应才是爽点，不要直接宣布，用配角动作/围观者判断/对手失态/环境变化证明；three_camera_rules=三机位法，机位1主角近景，机位2外部反应/环境变化，机位3必要设定，设定都由冲突引出；then_what_rules=“然后呢”基点法，每一段文字接动作/发现/反应/选择/风险；core_emotion_alignment_rules=围绕核心情绪设计全部情节，情节/人设/冲突/细节服务目标读者核心情绪，宏观把控整体节奏，微观控细节；baimiao_sensory_rules=白描、两到三种感官，五感必须服务情绪；dynamic_description_rules=动态描写优于静态描写，动作和反应展现，角色行动中穿插点染；shot_rhythm_rules=镜头与分镜思维，远景/中景/近景/特写，短句、短段、密集动作；transition_bridge_rules=场景切换与转场，相似物/相似五感/相似情绪，时间跳转用动作或物件衔接，空间跳转用声音或光影衔接；section_structure_rules=一个主事件、3-5 个子事件、一个情绪变化、一条读者新获知的信息、3-5 轮对话交锋、小节结尾钩子、下一节开头快速接续和情绪跨节递进；section_density_rules=小节密度诊断；anti_padding_rules=禁止凑字数环境描写/重复情绪/内心独白总结/无意义动作；concept_anchor_rules=新名词/新设定首次出现有动作反应、对话半句或物理后果；description_limits=水分控制，删掉这段后读者会不会困惑；anti_ai_smell_rules=高危词、章末总结体、叠加式描写、心理告知和模板表达清理。',
               '语气标点合同 punctuation_tone_contract 必须输出 tone_targets, punctuation_rules, dialogue_pause_rules, forbidden_punctuation_patterns, quality_checks，确保标点服务语气和人物声线。',
               '质量诊断合同 quality_audit_contract 必须输出 audit_dimensions, chapter_purpose_rules, water_detection_rules, event_content_rules, score_thresholds, required_receipts, quality_checks；chapter_purpose_rules 必须包含每章一句话概括内容，并标注目的词（铺垫/高潮/爽点/打脸/人物塑造/设定）；event_content_rules 必须包含事件内容比重不能小于一半、事件是价值改变的契机、设定尽量通过事件演绎而非旁白强塞，确保交稿自检可诊断结构、吸引力、目的跑偏、水文和事件含量问题。',
               '对白合同 dialogue_contract 必须按 oh-story dialogue-mastery 输出 scene_modes, voice_anchors, dialogue_goals, key_lines, relationship_moves, dialogue_execution_checklist, mode_playbooks, power_length_rules, subtext_agenda_rules, tone_context_rules, emotion_push_rules, emotion_continuity_rules, dialogue_drive_rules, information_embed_rules, information_tension_rules, voice_differentiation_rules, spectator_dialogue_rules, supporting_speaker_limit_rules, dialogue_rhythm_rules, dialogue_volume_rules, dialogue_meme_rules, dialogue_audit_rules, revision_priorities, quality_checks；dialogue_execution_checklist 必须逐场输出 scene_no, scene, mode, speaker_agendas, line_functions, emotion_flow, information_strategy, voice_differentiation, forbidden_patterns, receipt_keys，确保场景卡里的对白要求能被正文和 dialogue_checks 逐场验收；power_length_rules 必须包含“掌控者/主角亮底牌时对白 ≤ 10 字”和“被压制方对白 ≥ 20 字”；subtext_agenda_rules 必须包含“真实动机绝对不能浅显地写在台词里”，tone_context_rules 必须包含“关系 × 场合 × 目的 = 语气”，emotion_push_rules 必须包含“命令式+否定式最能激发读者情绪”，emotion_continuity_rules 必须要求每次情绪转变有事件触发，dialogue_drive_rules 必须要求对白强化期待、爽感或悬念，information_embed_rules 必须包含“用角色的语气和立场包裹信息”，information_tension_rules 必须要求通过质疑、证据和核心信息兑现形成拉扯，voice_differentiation_rules 必须包含口癖和惯用语、说话节奏、信息偏好、身份影响措辞、性格影响语气和关系阶段不同，spectator_dialogue_rules 必须包含普通人震惊、专业人士分析、特殊身份者反应、短小精悍和不代替主线，supporting_speaker_limit_rules 必须包含“同一场景配角不超过 3 个有台词”“没有功能的角色不要出场”和“配角退场要主动规划”，dialogue_rhythm_rules 必须包含连续多轮对话后需要换气、穿插动作描写、紧张段落对话短促、关键信息放对话开头或结尾，dialogue_volume_rules 必须包含读者已知信息、叙事一句话概括、突发状况替代、主角旁白平铺直叙和新人物必须安排主线戏份，dialogue_meme_rules 必须包含说不出来但意思到了、梗或骚话、强化记忆点、高潮点和不得直接复刻，dialogue_audit_rules 必须包含大量信息都必须用对话来展示、问答式的一问一答、依赖对话来推动剧情或人物变化、遮住角色名后能否区分、单次对话不超过全节 40%、自然口语交流和对话结尾能否预示接下来的节奏变化，确保对白推进剧情、增加期待或展示人设，而不是说明书。',
