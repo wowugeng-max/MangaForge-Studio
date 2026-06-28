@@ -13,25 +13,25 @@ Source reference set: `/private/tmp/oh-story-claudecode/skills/story-long-write/
 <!-- oh-story-progress-summary
 {
   "reference_total": 38,
-  "integrated": 31,
-  "partial": 7,
+  "integrated": 32,
+  "partial": 6,
   "todo": 0,
   "deferred": 0,
-  "remaining_references": 7,
-  "estimated_hours_remaining": 17,
-  "estimated_working_days_remaining": 2.83
+  "remaining_references": 6,
+  "estimated_hours_remaining": 15.5,
+  "estimated_working_days_remaining": 2.58
 }
 -->
 
 ## Current Snapshot
 
 - Reference files: 38
-- Integrated enough for current production use: 31
-- Partially integrated, still worth mining: 7
+- Integrated enough for current production use: 32
+- Partially integrated, still worth mining: 6
 - Not systematically reviewed yet: 0
 - Deferred: 0
-- Remaining references to improve: 7
-- Estimated remaining effort: about 17 engineering hours, or 2.83 focused working days at 6 hours per day
+- Remaining references to improve: 6
+- Estimated remaining effort: about 15.5 engineering hours, or 2.58 focused working days at 6 hours per day
 
 The estimate assumes the current working pattern: one small oh-story increment at a time, with prompt or workflow changes backed by focused tests, then `test:novel-server` and `check` before push. UI progress surfacing is not included in the remaining estimate; after this ledger stabilizes, exposing it in the novel workspace should be a separate 4-6 hour slice.
 
@@ -80,18 +80,18 @@ The estimate assumes the current working pattern: one small oh-story increment a
 | state-tracking.md | integrated | State tracking contract, source readiness, status-filter receipts, and source-boundary checks are implemented. | Keep expanding real-world failure examples. | 0.5h |
 | style-combat-face.md | partial | Showdown contract and combat or face-slap deterministic checks cover payoff release, antagonist pressure, and agency. | Add more scene-card level combat and public payoff presets. | 1.5h |
 | style-craft.md | partial | Style boundary, punctuation tone, sentence rhythm, subject-name rhythm, and section-density checks are present. | Extract craft rules into shorter prompt snippets to reduce prompt bulk. | 1h |
-| style-genre-modules.md | partial | Benchmark recall and emotion/rhythm module loading rules exist. | Add model-facing fallback receipts proving module, rhythm, and matched chapter usage. | 1.5h |
+| style-genre-modules.md | integrated | Benchmark recall now carries selected emotion module, rhythm reference, source paths, matched chapter techniques, canonical source authority, secondary benchmark boundaries, anchor copy guards, and model-facing `fallback_receipt_requirements` for `module_usage_receipt`, `rhythm_usage_receipt`, and `matched_chapter_usage_receipt`. Prose prompts require `fallback_usage_receipts` inside `benchmark_recall_checks` with `source_type/source_path/expected_application/delivered_evidence/gaps_preserved`, and focused tests cover pre-draft hydration plus prompt enforcement. | Keep tuning real-output evidence wording so model receipts stay locatable and do not become generic “已完成” statements. | 0.5h |
 | workflow-daily.md | integrated | Next-batch workflow rules cover context load, manual fallback table, next chapter numbering, title precheck, benchmark recall, formula loading, research, word count, serial writing, Phase 5 checks, and exact `追踪/上下文.md` progress-summary handoff. | Keep tuning daily workflow rules after real batch-writing failures appear. | 0.5h |
 | workflow-revision.md | integrated | Revision context receipts, revision cascade, scope guard, quality-audit repair, automatic prose revision prompts, editor repair prompts, and editor one-click revision now cover oh-story workflow-revision Step 2/4/5. Editor revision injects actual previous/next chapter, outline, foreshadowing, timeline, character, setting, and relationship slices, enforces the 30%/800字 scope guard, asks for `revision_context_receipts`, `revision_scope_guard`, `revision_receipts.cascade_impacts`, and stores these receipts in the `editor_revision` payload. | Keep tuning revision context slicing from real回炉 cases. | 0.5h |
 | writing-craft.md | integrated | Natural writing rules, opening density, event ratio, sensory anchor, dialogue-action rhythm, and prose cleanup gates are implemented. | Keep tuning based on generated prose regressions. | 0.5h |
 
 ## Next Priority Queue
 
-1. `style-genre-modules.md`: add model-facing fallback receipts proving module, rhythm, and matched chapter usage.
-2. `emotional-methods.md`: mine remaining emotion formulas into concise prompt fragments.
-3. `female-audience-writing.md`: add project-level detection and UI confirmation so this contract is active only when intended.
-4. `style-combat-face.md`: add more scene-card level combat and public payoff presets.
-5. `outline-rhythm.md`: add clearer rolling-plan diagnostics for rhythm fatigue before drafting.
+1. `emotional-methods.md`: mine remaining emotion formulas into concise prompt fragments.
+2. `female-audience-writing.md`: add project-level detection and UI confirmation so this contract is active only when intended.
+3. `style-combat-face.md`: add more scene-card level combat and public payoff presets.
+4. `outline-rhythm.md`: add clearer rolling-plan diagnostics for rhythm fatigue before drafting.
+5. `style-craft.md`: extract craft rules into shorter prompt snippets to reduce prompt bulk.
 
 ## Update Rules
 

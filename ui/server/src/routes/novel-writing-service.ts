@@ -45200,6 +45200,47 @@ const OH_STORY_BENCHMARK_CANONICAL_SOURCE_RULES = [
   '发生冲突时以情绪模块/节奏为准；冲突必须保留在 gaps 或 benchmark_recall_checks 中，不能用“文风接近”掩盖。',
 ]
 
+function benchmarkRecallFallbackReceiptRequirements(brief: any = {}) {
+  const sourcePaths = asArray(brief?.source_paths || brief?.sourcePaths).map(assetText).filter(Boolean)
+  const modulePath = compactBriefText(
+    brief?.module_source_path
+    || brief?.moduleSourcePath
+    || sourcePaths.find(path => /情绪模块|emotion.*module/i.test(path)),
+    '对标/{书名}/剧情/情绪模块.md',
+  )
+  const rhythmPath = compactBriefText(
+    brief?.rhythm_source_path
+    || brief?.rhythmSourcePath
+    || sourcePaths.find(path => /节奏|rhythm/i.test(path)),
+    '对标/{书名}/剧情/节奏.md',
+  )
+  const matchedPath = compactBriefText(
+    brief?.matched_chapter_summary_path
+    || brief?.matchedChapterSummaryPath
+    || brief?.matched_chapter_deep_dive_path
+    || brief?.matchedChapterDeepDivePath
+    || brief?.fallback_deep_dive_path
+    || brief?.fallbackDeepDivePath
+    || sourcePaths.find(path => /章节|摘要|深度拆解|chapter|deep/i.test(path)),
+    '对标/{书名}/章节/第K章_摘要.md 或 第1-3章_深度拆解.md',
+  )
+  const gaps = uniqueBriefStrings([
+    ...benchmarkRecallGapStrings(brief?.gaps, brief?.recall_gaps, brief?.recallGaps),
+  ], 8).join('；') || '无'
+  return uniqueBriefStrings([
+    ...asArray(brief?.fallback_receipt_requirements || brief?.fallbackReceiptRequirements).map(assetText).filter(Boolean),
+    compactBriefText(brief?.selected_emotion_module || brief?.selectedEmotionModule)
+      ? `module_usage_receipt：fallback_usage_receipts 必须在 benchmark_recall_checks 中证明情绪模块被使用；key=module_usage_receipt, source_type=emotion_module, source_path=${modulePath}, expected_application=把 selected_emotion_module 写成本章情绪目标和回报触发, delivered_evidence 必须引用 chapter_text 动作/对话/反应, gaps_preserved=${gaps}。`
+      : '',
+    compactBriefText(brief?.rhythm_reference || brief?.rhythmReference)
+      ? `rhythm_usage_receipt：fallback_usage_receipts 必须在 benchmark_recall_checks 中证明节奏参照被使用；key=rhythm_usage_receipt, source_type=rhythm, source_path=${rhythmPath}, expected_application=把 rhythm_reference 写成蓄势/爆发/冷却/章尾承接, delivered_evidence 必须引用 chapter_text 节奏证据, gaps_preserved=${gaps}。`
+      : '',
+    asArray(brief?.matched_chapter_techniques || brief?.matchedChapterTechniques).length || compactBriefText(brief?.matched_chapter || brief?.matchedChapter)
+      ? `matched_chapter_usage_receipt：fallback_usage_receipts 必须在 benchmark_recall_checks 中证明匹配章只被抽象学习；key=matched_chapter_usage_receipt, source_type=matched_chapter, source_path=${matchedPath}, expected_application=把 matched_chapter_techniques 改写为本书可见压迫/停顿/潜台词/反应/钩子, delivered_evidence 必须引用 chapter_text 且不得复述对标原句, gaps_preserved=${gaps}。`
+      : '',
+  ], 8)
+}
+
 function benchmarkRecallSourcePaths(...strategies: any[]) {
   return uniqueBriefStrings(strategies.flatMap(strategy => (
     BENCHMARK_RECALL_SOURCE_PATH_FIELDS.flatMap(field => [
@@ -45422,6 +45463,24 @@ function buildBenchmarkRecallBrief(contextPackage: any = {}, options: any = {}) 
         ...asArray(derived.canonical_source_rules),
         ...OH_STORY_BENCHMARK_CANONICAL_SOURCE_RULES,
       ], 8),
+      fallback_receipt_requirements: benchmarkRecallFallbackReceiptRequirements({
+        fallback_receipt_requirements: explicit.fallback_receipt_requirements || explicit.fallbackReceiptRequirements || derived.fallback_receipt_requirements,
+        selected_emotion_module: compactBriefText(explicit.selected_emotion_module || explicit.selectedEmotionModule) || derived.selected_emotion_module || '',
+        rhythm_reference: compactBriefText(explicit.rhythm_reference || explicit.rhythmReference) || derived.rhythm_reference || '',
+        matched_chapter: (toneMatchFailed || profileDegenerate) ? '' : compactBriefText(explicit.matched_chapter || explicit.matchedChapter || explicit.matched_chapter_K || explicit.matchedChapterK) || derived.matched_chapter || '',
+        matched_chapter_techniques: (toneMatchFailed || profileDegenerate)
+          ? []
+          : asArray(explicit.matched_chapter_techniques || explicit.matchedChapterTechniques).length
+          ? uniqueBriefStrings(asArray(explicit.matched_chapter_techniques || explicit.matchedChapterTechniques), 8)
+          : asArray(derived.matched_chapter_techniques),
+        ...namedSourcePaths,
+        source_paths: uniqueBriefStrings([
+          ...asArray(explicit.source_paths || explicit.sourcePaths),
+          ...Object.values(namedSourcePaths),
+          ...asArray(derived.source_paths),
+        ], 12),
+        gaps: effectiveGaps,
+      }),
       secondary_benchmark_recall_summary: secondaryBenchmarkRecallSummary,
       secondary_benchmark_boundary_rules: secondaryBenchmarkBoundaryRules,
       gaps: effectiveGaps,
@@ -45532,6 +45591,15 @@ function buildBenchmarkRecallBrief(contextPackage: any = {}, options: any = {}) 
     source_paths: sourcePaths,
     anchor_excerpts: (toneMatchFailed || profileDegenerate) ? [] : anchorExcerpts,
     canonical_source_rules: OH_STORY_BENCHMARK_CANONICAL_SOURCE_RULES,
+    fallback_receipt_requirements: benchmarkRecallFallbackReceiptRequirements({
+      selected_emotion_module: selectedEmotionModule,
+      rhythm_reference: rhythmReference,
+      matched_chapter: (toneMatchFailed || profileDegenerate) ? '' : matchedChapter,
+      matched_chapter_techniques: (toneMatchFailed || profileDegenerate) ? [] : matchedTechniques,
+      ...namedSourcePaths,
+      source_paths: sourcePaths,
+      gaps: effectiveGaps,
+    }),
     secondary_benchmark_recall_summary: secondaryBenchmarkRecallSummary,
     secondary_benchmark_boundary_rules: secondaryBenchmarkBoundaryRules,
     gaps: effectiveGaps,
@@ -52035,6 +52103,7 @@ export function createNovelWritingService(ctx: {
       benchmarkRecallBrief?.anchor_excerpts?.length ? '原文锚点片段：只用于学习句长、停顿、潜台词和信息释放手法；不得复制锚点原句、桥段、设定、角色名或专名。' : '',
       benchmarkRecallBrief?.anchor_excerpts?.length ? benchmarkRecallBrief.anchor_excerpts.map((excerpt: string, index: number) => `锚点${index + 1}：${excerpt}`).join('\n') : '',
       benchmarkRecallBrief?.canonical_source_rules?.length ? `canonical_source_rules：${benchmarkRecallBrief.canonical_source_rules.join('；')}` : '',
+      benchmarkRecallBrief?.fallback_receipt_requirements?.length ? `fallback_receipt_requirements：${benchmarkRecallBrief.fallback_receipt_requirements.join('；')}` : '',
       benchmarkRecallBrief?.secondary_benchmark_recall_summary?.length ? '副对标召回摘要：' : '',
       benchmarkRecallBrief?.secondary_benchmark_recall_summary?.length ? JSON.stringify(benchmarkRecallBrief.secondary_benchmark_recall_summary, null, 2).slice(0, 2000) : '',
       benchmarkRecallBrief?.secondary_benchmark_boundary_rules?.length ? `secondary_benchmark_boundary：${benchmarkRecallBrief.secondary_benchmark_boundary_rules.join('；')}` : '',
@@ -52498,7 +52567,7 @@ export function createNovelWritingService(ctx: {
       writePreparationBrief ? '输出附加要求：oh_story_delivery_receipts.pre_draft_execution_receipts.write_preparation_checks 必须逐项覆盖【写前准备卡】中的 source_gaps、文风召回缺口和副对标边界、asset_risks、delivery_risk_actions、creation_contract_checklist、blueprint_focus、reader_payoff_focus 和 must_confirm；创作契约必须逐项说明目标读者、题材定位、核心承诺、追读留存是否被正文证据兑现；每项必须有 delivered(boolean)、evidence、remaining_risk，未完成时 delivered=false 并写明下一章需要承接的风险。' : '',
       deliveryRiskCarryOver ? '输出附加要求：oh_story_delivery_receipts.pre_draft_execution_receipts.next_chapter_quality_plan_receipts 必须逐项覆盖上一章质量续航计划和 chapter_target.delivery_risk_carry_over 中的 quality_focus、opening_actions、middle_actions、ending_actions、forbidden_repeats/avoid_repetition、evidence_basis；每项包含 key,label,delivered,evidence,remaining_risk，证明质量续航不是只写在任务书里，而是落成正文动作、信息变化、章末钩子或禁用重复。' : '',
       intentConfirmationContract ? '输出附加要求：oh_story_delivery_receipts.pre_draft_execution_receipts.intent_confirmation_checks 必须逐项覆盖 chapter_target.intent_confirmation_contract 中的 confirmed_intent、rhythm_and_style、structure_inputs、dialogue_tone_baseline、logic_line、appearance_order、cost_and_reward、ending_handoff 和 quality_checks；每项包含 key,label,delivered,evidence,remaining_risk，未完成时 delivered=false 并写明下一章需要承接的意图偏移。' : '',
-      benchmarkRecallBrief ? '输出附加要求：oh_story_delivery_receipts.pre_draft_execution_receipts.benchmark_recall_checks 必须逐项覆盖 chapter_target.benchmark_recall_brief 中的 selected_emotion_module、rhythm_reference、style_profile_summary、matched_chapter_techniques、style_directives、anchor_excerpts、canonical_source_rules、gaps 和 quality_checks；每项包含 key,label,delivered,evidence,remaining_risk，未完成时 delivered=false 并写明下一章需要承接的文风召回缺口；anchor_excerpts 只能证明句长、停顿、潜台词和信息释放手法被抽象学习，evidence 不得复述锚点原句；不得复制对标桥段、设定、角色名或原句。' : '',
+      benchmarkRecallBrief ? '输出附加要求：oh_story_delivery_receipts.pre_draft_execution_receipts.benchmark_recall_checks 必须逐项覆盖 chapter_target.benchmark_recall_brief 中的 selected_emotion_module、rhythm_reference、style_profile_summary、matched_chapter_techniques、style_directives、anchor_excerpts、canonical_source_rules、fallback_receipt_requirements、gaps 和 quality_checks；每项包含 key,label,delivered,evidence,remaining_risk，未完成时 delivered=false 并写明下一章需要承接的文风召回缺口；如果存在 fallback_receipt_requirements，必须额外输出 fallback_usage_receipts 对应的 module_usage_receipt、rhythm_usage_receipt、matched_chapter_usage_receipt，字段必须包含 source_type/source_path/expected_application/delivered_evidence/gaps_preserved；anchor_excerpts 只能证明句长、停顿、潜台词和信息释放手法被抽象学习，evidence 不得复述锚点原句；不得复制对标桥段、设定、角色名或原句。' : '',
       '输出附加要求：oh_story_delivery_receipts 中所有 evidence / changed_evidence 必须引用 chapter_text 中可定位的动作、对话、信息变化或关系变化；changed_evidence 必须引用 chapter_text，不能只写“已完成”“已处理”“见正文”。如果没有完成，delivered 必须为 false 并写 remaining_risk。',
       '输出 JSON，包含 prose_chapters 数组。数组只能有一项，且必须包含 chapter_no, title, chapter_text, scene_breakdown, continuity_notes, oh_story_delivery_receipts。scene_breakdown 要回填每个场景的 scene_type、purpose_tag 目的词执行情况、required_beats/action_beats 完成情况、description_budget 执行情况、density_level 执行情况、scene_start_anchor、scene_end_anchor、scene_card_receipts 和 blueprint_receipts（如有章节蓝图合同）。chapter_text 是完整正文，不要 markdown 标题。',
     ].filter(Boolean).join('\n')
@@ -53967,8 +54036,8 @@ export function createNovelWritingService(ctx: {
     '39A. source_readiness_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),evidence,fix；逐项检查来源就绪表，missing/warn 来源被正文当作事实使用、或 ready 来源没有正文承接时必须给出 warn/fail。',
     '40. 是否兑现 chapter_target.intent_confirmation_contract：按 oh-story 意图确认检查正文是否按情绪+节奏+模块+文风指令执行；内容概括决定起承转合，逻辑线、出场顺序、代价/收益、对白基调约束 dialogue_tone_baseline 和章尾承接必须落地；高压/生死/悲痛 beat 下轻快配角声线必须让位，信息型配角不能当科普嘴，对话必须逐句承接对方情绪；必须输出 intent_confirmation_checks。',
     '41. intent_confirmation_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),intent_field,expected_intent,delivered_evidence,blueprint_link,fix,remaining_risk；intent_field 写 emotion_goal/chapter_intent/handoff/ending_hook/blueprint/craft 中最贴近的一类；情绪目标跑偏、节奏爆发错位、信息差反应不足、代价/收益缺失、章尾承接变弱或文风召回越界时必须给出 S1/S2 finding，category=structure 或 prose。',
-    '42. 是否兑现 chapter_target.benchmark_recall_brief：按 oh-story 文风召回检查 selected_emotion_module、rhythm_reference、style_profile_summary、matched_chapter_techniques、canonical_source_rules、gaps 和副对标召回摘要是否被正文执行；canonical_source_rules 必须检查：情绪模块来自 剧情/情绪模块.md，节奏来自 剧情/节奏.md，文风.md 只管表达层；副对标召回摘要只能作为结构/情绪/设定参考，必须检查 secondary_benchmark_boundary；必须输出 benchmark_recall_checks。',
-    '43. benchmark_recall_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),source_type,source_path,expected_application,delivered_evidence,gaps_preserved,fix,remaining_risk；source_type 写 emotion_module/rhythm/style_profile/matched_chapter/anchor_excerpt/gaps 中最贴近的一类；情绪模块未进入正文、节奏参照失效、匹配章技法缺席、文风摘要被忽略、gaps 被掩盖、冲突时没有以情绪模块/节奏为准、复制对标桥段/原句、副书文风污染、副书原文锚点进入正文或副对标越界成文风指令时必须给出 S1/S2 finding，category=prose 或 structure。',
+    '42. 是否兑现 chapter_target.benchmark_recall_brief：按 oh-story 文风召回检查 selected_emotion_module、rhythm_reference、style_profile_summary、matched_chapter_techniques、canonical_source_rules、fallback_receipt_requirements、gaps 和副对标召回摘要是否被正文执行；canonical_source_rules 必须检查：情绪模块来自 剧情/情绪模块.md，节奏来自 剧情/节奏.md，文风.md 只管表达层；fallback_receipt_requirements 必须检查 module_usage_receipt、rhythm_usage_receipt、matched_chapter_usage_receipt 是否分别有 source_type/source_path/expected_application/delivered_evidence/gaps_preserved；副对标召回摘要只能作为结构/情绪/设定参考，必须检查 secondary_benchmark_boundary；必须输出 benchmark_recall_checks。',
+    '43. benchmark_recall_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),source_type,source_path,expected_application,delivered_evidence,gaps_preserved,fix,remaining_risk；source_type 写 emotion_module/rhythm/style_profile/matched_chapter/anchor_excerpt/gaps 中最贴近的一类；fallback_usage_receipts 必须至少覆盖 module_usage_receipt、rhythm_usage_receipt、matched_chapter_usage_receipt；情绪模块未进入正文、节奏参照失效、匹配章技法缺席、fallback 回执缺 source_path/正文证据、文风摘要被忽略、gaps 被掩盖、冲突时没有以情绪模块/节奏为准、复制对标桥段/原句、副书文风污染、副书原文锚点进入正文或副对标越界成文风指令时必须给出 S1/S2 finding，category=prose 或 structure。',
     '43A. 是否兑现 chapter_target.style_boundary_contract：按 oh-story 文风覆盖边界检查文风是否只覆盖表达层，硬约束永远赢；禁用词、Gate F 章末禁升华、万能比喻、章末预告、字数下限、剧情事实、设定状态、人物状态、关系边界和时间线不得被文风覆盖；必须输出 style_boundary_checks。',
     '43B. style_boundary_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),reference_risk,rewritten_with_local_action,voice_anchor,copied_phrase_removed,evidence,fix,remaining_risk；为了模仿样章/对标章导致禁用词、Gate F 章末总结体、万能比喻、作者预告、字数缩水、剧情/状态漂移或复制样章桥段/原句时必须给出 S1/S2 finding，category=prose 或 rule_boundary。',
     '43C. 是否兑现 chapter_target.style_sample_strategy：按 oh-story 样章策略检查 samples 中的 scene_function、narrative_rhythm、sentence_pattern、dialogue_ratio、voice_rules 是否只作为可迁移表达策略进入正文；必须同时检查 applicable_scenes、avoid_scenes、do_not_copy 和 unsafe_direct_phrases，确认适用场景命中、避用场景没有误套、复制边界没有越界；必须输出 style_sample_checks。',
@@ -54156,7 +54225,7 @@ export function createNovelWritingService(ctx: {
     '21B. 如果自检结果包含 write_preparation_checks，必须优先修复 status=fail/warn 的写前准备缺口；按 key/label/evidence/fix 补齐来源缺口、资产风险、上一轮待修复、创作契约清单 creation_contract_checklist、蓝图焦点、读者回报和必确认项；创作契约缺口要分别补目标读者、题材定位、核心承诺、追读留存的正文证据，并在修订后的 oh_story_delivery_receipts.pre_draft_execution_receipts.write_preparation_checks 中逐项更新 delivered/evidence/remaining_risk。',
     '21C. 如果自检结果包含 chapter_handoff_checks，必须优先修复 status=fail/warn 的章首承接缺口；按 key/label/evidence/fix 修前300字和受影响的场景桥，让 previous_handoff、opening_obligations、must_deliver、keep_alive、overdue 和 chapter_handoff_contract 都落成正文可见动作、对话、信息变化或关系变化。修章首时不得另起新场景替代承接；修章末时必须补清下一章动作压力、未解问题和状态交接。',
     '22. 如果自检结果包含 intent_confirmation_checks，必须优先修复 status=fail/warn 的意图确认缺口；按 key/label/evidence/fix 校准情绪目标、节奏爆发、模块执行、文风指令、内容概括、逻辑线、出场顺序、代价/收益和章尾承接，并在修订后的 oh_story_delivery_receipts.pre_draft_execution_receipts.intent_confirmation_checks 中逐项更新 delivered/evidence/remaining_risk。',
-    '22A. 如果自检结果包含 benchmark_recall_checks，必须优先修复 status=fail/warn 的文风召回缺口；按 key/label/evidence/fix 校准 selected_emotion_module、rhythm_reference、style_profile_summary、matched_chapter_techniques、canonical_source_rules 和 gaps；若文风与模块/节奏冲突，必须以情绪模块/节奏为准，文风.md 只管表达层；删掉任何复制对标桥段或原句的内容，并在修订后的 oh_story_delivery_receipts.pre_draft_execution_receipts.benchmark_recall_checks 中逐项更新 delivered/evidence/remaining_risk。',
+    '22A. 如果自检结果包含 benchmark_recall_checks，必须优先修复 status=fail/warn 的文风召回缺口；按 key/label/evidence/fix 校准 selected_emotion_module、rhythm_reference、style_profile_summary、matched_chapter_techniques、canonical_source_rules、fallback_receipt_requirements 和 gaps；若文风与模块/节奏冲突，必须以情绪模块/节奏为准，文风.md 只管表达层；删掉任何复制对标桥段或原句的内容，并在修订后的 oh_story_delivery_receipts.pre_draft_execution_receipts.benchmark_recall_checks 中逐项更新 delivered/evidence/remaining_risk；fallback_usage_receipts 必须补齐 module_usage_receipt、rhythm_usage_receipt、matched_chapter_usage_receipt 的 source_type/source_path/expected_application/delivered_evidence/gaps_preserved。',
     '22B. 如果自检结果包含 style_boundary_checks，必须优先修复 status=fail/warn 的文风覆盖边界缺口；按 key/label/evidence/fix 恢复“硬约束永远赢”，删掉任何为了模仿文风而引入的禁用词、Gate F 章末总结体、万能比喻、作者预告、样章桥段/原句复制、字数缩水、剧情/状态/关系/时间线漂移。文风覆盖边界只允许修表达，不允许改事实。',
     '22C. 如果自检结果包含 style_sample_checks，必须优先修复 status=fail/warn 的样章策略缺口；按 key/label/evidence/fix 补足适用场景、避用场景、叙述节奏、句式密度、对白比例、角色口吻和情绪转折。修订只能学习样章的抽象表达策略，不得复制样章桥段、专有设定、角色名、核心梗或原句；修订后必须在 oh_story_delivery_receipts.pre_draft_execution_receipts.style_sample_checks 中逐项更新 delivered/evidence/remaining_risk。',
     '19. 如果自检结果包含 information_flow_checks，必须优先修复 status=fail/warn 的信息团衔接缺口；按 key/label/evidence/fix 压缩无关信息团、补场景递进、回应上一场悬念、修情绪衔接、补提升后下一目标、删无信息量过渡；提升/胜利/拿到资格后如果只写“事情进入下一阶段”，必须改成新的挑战、目标、代价或更高门槛；过渡压缩缺口要直接删除纯移动/寒暄/环境描写，或压成一句并改成信息、风险、情绪余波或下一步目标。',

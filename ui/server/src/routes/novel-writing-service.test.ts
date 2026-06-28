@@ -20438,6 +20438,76 @@ describe('chapter pre-draft brief', () => {
     expect(prompt).toContain('未完成时 delivered=false')
   })
 
+  test('adds oh-story benchmark fallback receipt requirements to pre-draft brief and prose prompt', () => {
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+    const contextPackage = {
+      chapter_target: {
+        chapter_no: 18,
+        title: '雨夜反证',
+        summary: '李玄在雨夜审讯中用旧账册反证执事换证。',
+        conflict: '执事抢先定义证词，旁观弟子准备倒向他。',
+        style_sample_strategy: {
+          style_profile_summary: '短句推进审讯压力，对白留半拍。',
+          selected_emotion_module: 'M03 信息差反杀',
+          rhythm_reference: '先压三轮质问，再用证据爆发，爆发后短冷却接章尾钩子',
+          matched_chapter_K: '第12章_雨巷审讯',
+          matched_chapter_techniques: ['三轮压问', '证据晚半拍亮出'],
+          module_source_path: '对标/旧城诡案/剧情/情绪模块.md',
+          rhythm_source_path: '对标/旧城诡案/剧情/节奏.md',
+          style_profile_path: '对标/旧城诡案/文风.md',
+          benchmark_recall: {
+            matched_chapter_summary_path: '对标/旧城诡案/章节/第12章_摘要.md',
+            fallback_deep_dive_path: '对标/旧城诡案/章节/第1-3章_深度拆解.md',
+          },
+          gaps: ['legacy_deconstruction', 'matched_deep_dive_missing'],
+        },
+        scene_cards: [
+          {
+            scene_no: 1,
+            title: '雨夜审讯',
+            purpose: '让执事连续压问，制造证词被抢占的压力。',
+            conflict: '李玄必须在证词被定性前找到反证入口。',
+            reader_payoff: '证据反杀，执事失态。',
+          },
+        ],
+      },
+    }
+
+    const brief = buildChapterPreDraftBrief({ title: '旧城维修师' }, contextPackage)
+    const confirmedContext = mergeConfirmedPreDraftBriefIntoContext(contextPackage, {
+      ...brief,
+      confirmed_at: '2026-06-28T13:00:00.000Z',
+    })
+    const prompt = service.buildParagraphProseContext(
+      { title: '旧城维修师' },
+      confirmedContext,
+      null,
+      { chapter_no: 18, title: '雨夜反证' },
+    )
+    const fallbackRequirements = brief.benchmark_recall_brief.fallback_receipt_requirements.join('｜')
+
+    expect(fallbackRequirements).toContain('module_usage_receipt')
+    expect(fallbackRequirements).toContain('source_type=emotion_module')
+    expect(fallbackRequirements).toContain('对标/旧城诡案/剧情/情绪模块.md')
+    expect(fallbackRequirements).toContain('rhythm_usage_receipt')
+    expect(fallbackRequirements).toContain('source_type=rhythm')
+    expect(fallbackRequirements).toContain('对标/旧城诡案/剧情/节奏.md')
+    expect(fallbackRequirements).toContain('matched_chapter_usage_receipt')
+    expect(fallbackRequirements).toContain('source_type=matched_chapter')
+    expect(fallbackRequirements).toContain('对标/旧城诡案/章节/第12章_摘要.md')
+    expect(fallbackRequirements).toContain('gaps_preserved')
+    expect(prompt).toContain('fallback_receipt_requirements')
+    expect(prompt).toContain('module_usage_receipt')
+    expect(prompt).toContain('rhythm_usage_receipt')
+    expect(prompt).toContain('matched_chapter_usage_receipt')
+    expect(prompt).toContain('fallback_usage_receipts')
+    expect(prompt).toContain('source_type/source_path/expected_application/delivered_evidence/gaps_preserved')
+  })
+
   test('injects mixed-case pre-draft benchmark recall brief into prose prompt', () => {
     const service = createNovelWritingService({
       getProject: async () => null,
