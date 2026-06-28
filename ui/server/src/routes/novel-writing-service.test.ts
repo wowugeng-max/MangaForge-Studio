@@ -20680,6 +20680,77 @@ describe('chapter pre-draft brief', () => {
     expect(prompt.indexOf('【题材定位合同】')).toBeLessThan(prompt.indexOf('【结构化上下文包】'))
   })
 
+  test('routes oh-story genre writing formulas into the genre positioning contract', () => {
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+    const project = {
+      title: '婚礼当天我收回股份',
+      genre: '现代复仇打脸短篇',
+      target_platform: 'fanqie',
+      target_audience: '喜欢公开审判、证据链打脸和冷静复仇的爽文读者',
+      synopsis: '未婚夫在婚礼当天当众背叛，女主冷静收回股份，用监控和合同逐层揭露真相。',
+      reference_config: {
+        writing_bible: {
+          protagonist_identity: '被当众背叛的公司继承人',
+          commercial_positioning: {
+            selling_points: ['当众背叛开场', '证据链公开审判', '反派求饶后彻底出局'],
+            innovation_hook: '婚礼现场变成股权审判场',
+          },
+        },
+      },
+    }
+    const contextPackage = {
+      chapter_target: {
+        chapter_no: 1,
+        title: '婚礼背叛',
+        summary: '婚礼现场男方公开偏袒白月光，女主用股权文件当场反击。',
+        conflict: '反派以为当众羞辱已经赢了，主角必须用证据夺回主动权。',
+        ending_hook: '监控备份开始播放。',
+        scene_cards: [
+          {
+            scene_no: 1,
+            title: '当众背叛',
+            purpose: '让反派先赢，制造公开羞辱。',
+            conflict: '白月光抢走戒指和话筒。',
+            reader_payoff: '主角冷静到可怕地拿出第一份证据。',
+          },
+          {
+            scene_no: 2,
+            title: '证据开场',
+            purpose: '把婚礼现场变成公开审判。',
+            conflict: '反派否认证据真实性。',
+            reader_payoff: '监控和合同逐层揭露。',
+          },
+        ],
+      },
+    }
+
+    const brief = buildChapterPreDraftBrief(project, contextPackage)
+    const confirmedContext = mergeConfirmedPreDraftBriefIntoContext(contextPackage, {
+      ...brief,
+      confirmed_at: '2026-06-28T10:00:00.000Z',
+    })
+    const prompt = service.buildParagraphProseContext(
+      project,
+      confirmedContext,
+      null,
+      { chapter_no: 1, title: '婚礼背叛' },
+    )
+
+    expect(brief.genre_positioning_contract.genre_formula.join('｜')).toContain('公式一：现代复仇/打脸')
+    expect(brief.genre_positioning_contract.genre_formula.join('｜')).toContain('当众背叛 -> 冷静处理 -> 对方反扑 -> 揭示真相 -> 求饶 -> 加冕')
+    expect(brief.genre_positioning_contract.genre_formula.join('｜')).toContain('公式二十一：公开审判式打脸')
+    expect(brief.genre_positioning_contract.must_have_scenes.join('｜')).toContain('当众羞辱开场')
+    expect(brief.genre_positioning_contract.must_have_scenes.join('｜')).toContain('逐层揭露证据')
+    expect(brief.genre_positioning_contract.quality_checks.join('｜')).toContain('公式对位')
+    expect(brief.genre_positioning_contract.quality_checks.join('｜')).toContain('情绪节拍完整')
+    expect(prompt).toContain('公式一：现代复仇/打脸')
+    expect(prompt).toContain('公式二十一：公开审判式打脸')
+  })
+
   test('hydrates incomplete explicit genre positioning contract from project and scene context', () => {
     const project = {
       title: '离婚后系统让我翻盘',
