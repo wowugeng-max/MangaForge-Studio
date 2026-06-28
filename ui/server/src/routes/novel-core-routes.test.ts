@@ -131,6 +131,36 @@ describe('novel project seed prompt', () => {
     expect(xianxiaPrompt).toContain('地图逐层展开')
   })
 
+  test('routes remaining oh-story genre catalog frameworks into creation contracts', async () => {
+    const { buildOhStoryGenreCatalogContract } = await import('./novel-genre-catalog')
+
+    const cases = [
+      ['丈夫出轨转移财产，妻子觉醒独立', '小三/婚恋', '发现过程要有悬念'],
+      ['极品亲戚欺压老实人，熟人社会里恶有恶报', '世情', '靠细节不靠大事件'],
+      ['女主被虐至死，男主死后追悔莫及', '死人文学', '核心是来不及'],
+      ['霸总特殊相遇后极致宠溺，闺蜜震惊', '霸总/甜宠', '甜的密度决定粘性'],
+      ['独特金手指聊天群脑洞文，靠创意设定做核心卖点', '脑洞文', '核心梗决定赛道'],
+      ['凡人流修仙，主角无天赋靠谨慎算计生存', '凡人流', '利弊权衡是核心模式'],
+      ['穿越到架空历史节点，利用现代知识改变命运', '历史/架空历史', '现代认知信息差=最大金手指'],
+      ['同人流派，在已知世界加入新变量并改写名场面', '同人流派', '已知世界 + 新变量 + 名场面改写'],
+      ['长生流主角看沧海桑田和代际传承', '长生流', '凡俗时期最好看'],
+      ['无限流每个游戏副本二十章自成故事', '无限流', '20-30章一个副本'],
+      ['西幻骑士文，从铁匠学徒靠骑士晋升体系崛起', '西幻/骑士文', '骑士自带晋升属性'],
+      ['新媒体文，第一情绪对是不爽到装逼解气', '新媒体文', '一切为情绪服务'],
+      ['搞笑文主角玩梗但必须符合逻辑', '搞笑文', '搞笑必须符合逻辑'],
+      ['悬疑故事靠铺垫和氛围推进真相', '悬疑', '信息释放节奏要控好'],
+      ['后悔流，不写退婚老套外衣，后悔对象换成事业选择', '后悔流', '后悔对象可从爱情转为事业选择'],
+    ] as const
+
+    for (const [idea, framework, expected] of cases) {
+      const contract = buildOhStoryGenreCatalogContract(idea)
+      const serialized = JSON.stringify(contract)
+      expect(contract.matched_framework).toBe(framework)
+      expect(serialized).toContain(expected)
+      expect(contract.quality_checks.join('｜')).toContain('每2000字至少一个悬念/反转/信息差钩子')
+    }
+  })
+
   test('preserves model generated creation contracts while recovering project seeds', async () => {
     const { buildRecoverableProjectSeed } = await import('./novel-core-routes')
 
