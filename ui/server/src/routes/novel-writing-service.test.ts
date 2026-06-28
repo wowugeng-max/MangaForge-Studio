@@ -10068,6 +10068,59 @@ describe('normalizeSceneCardsPayload', () => {
     expect(prompt).toContain('角色当下能感知的事件锚点或相对时间')
   })
 
+  test('adds oh-story format-and-structure guardrails to prose generation, review, and revision prompts', () => {
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+    const prompt = service.buildParagraphProseContext(
+      { title: '袖口旧印' },
+      {
+        chapter_target: {
+          chapter_no: 8,
+          title: '旧楼门牌',
+          summary: '主角接住门牌翻面的现场余波。',
+          conflict: '她必须把旧印来源变成现场证据。',
+          ending_hook: '火漆背面露出第二枚编号。',
+          scene_cards: [{ title: '门牌翻面', conflict: '是否公开旧印来源' }],
+        },
+      },
+      null,
+      { chapter_no: 8, title: '旧楼门牌' },
+    )
+
+    expect(prompt).toContain('正文格式与小节结构')
+    expect(prompt).toContain('全文统一章节标记：###1. / ###第一章 / 1.')
+    expect(prompt).toContain('相邻段落之间只允许一个换行符')
+    expect(prompt).toContain('不得出现空行或连续换行')
+    expect(prompt).toContain('无缩进')
+    expect(prompt).toContain('正文段落中不使用 Markdown')
+    expect(prompt).toContain('对话独立成行')
+    expect(prompt).toContain('引号风格按项目/平台约定')
+    expect(prompt).toContain('quote-mode keep')
+    expect(prompt).toContain('「」')
+    expect(prompt).toContain('一个主事件 + 3-5 个子事件')
+
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const reviewPromptBlock = source.slice(
+      source.indexOf('const buildProseReviewPrompt ='),
+      source.indexOf('const buildProseRevisionPrompt ='),
+    )
+    const revisionPromptBlock = source.slice(
+      source.indexOf('const buildProseRevisionPrompt ='),
+      source.indexOf('const shouldReviseProse ='),
+    )
+
+    expect(reviewPromptBlock).toContain('是否违反 oh-story 正文格式与小节结构')
+    expect(reviewPromptBlock).toContain('章节标记必须统一为 ###1. / ###第一章 / 1. 或项目指定格式')
+    expect(reviewPromptBlock).toContain('相邻段落之间只允许一个换行符')
+    expect(reviewPromptBlock).toContain('quote-mode keep')
+    expect(revisionPromptBlock).toContain('如果自检结果包含正文格式扫描、章节标记格式扫描或 deterministicProseFormatChecks')
+    expect(revisionPromptBlock).toContain('删除空行、缩进和正文 Markdown')
+    expect(revisionPromptBlock).toContain('保留项目/平台指定的合法引号风格')
+  })
+
   test('adds previous chapter ending excerpt to the paragraph prose prompt for serial handoff continuity', () => {
     const service = createNovelWritingService({
       getProject: async () => null,

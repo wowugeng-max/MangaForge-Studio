@@ -13,27 +13,27 @@ Source reference set: `/private/tmp/oh-story-claudecode/skills/story-long-write/
 <!-- oh-story-progress-summary
 {
   "reference_total": 38,
-  "integrated": 37,
-  "partial": 1,
+  "integrated": 38,
+  "partial": 0,
   "todo": 0,
   "deferred": 0,
-  "remaining_references": 1,
-  "estimated_hours_remaining": 8.5,
-  "estimated_working_days_remaining": 1.42
+  "remaining_references": 0,
+  "estimated_hours_remaining": 0,
+  "estimated_working_days_remaining": 0
 }
 -->
 
 ## Current Snapshot
 
 - Reference files: 38
-- Integrated enough for current production use: 37
-- Partially integrated, still worth mining: 1
+- Integrated enough for current production use: 38
+- Partially integrated, still worth mining: 0
 - Not systematically reviewed yet: 0
 - Deferred: 0
-- Remaining references to improve: 1
-- Estimated remaining effort: about 8.5 engineering hours, or 1.42 focused working days at 6 hours per day
+- Remaining references to improve: 0
+- Estimated remaining effort: 0 engineering hours for the current oh-story reference migration backlog
 
-The estimate assumes the current working pattern: one small oh-story increment at a time, with prompt or workflow changes backed by focused tests, then `test:novel-server` and `check` before push. UI progress surfacing is not included in the remaining estimate; after this ledger stabilizes, exposing it in the novel workspace should be a separate 4-6 hour slice.
+The estimate assumes the current working pattern: one small oh-story increment at a time, with prompt or workflow changes backed by focused tests, then `test:novel-server` and `check` before push. Future UI progress surfacing or real-output tuning should be tracked as separate product slices, not as remaining oh-story reference migration backlog.
 
 ## Status Meaning
 
@@ -58,7 +58,7 @@ The estimate assumes the current working pattern: one small oh-story increment a
 | emotional-arc-design.md | integrated | Emotional arc contract now carries scene execution rules, reaction structures, expectation relay, arc shape, pressure, payoff density, peak-end rules, and quality checks into pre-draft briefs, prose prompts, self-review, revision, deterministic `buildEmotionalArcSyncReport`, staged scene-card fields (`emotional_arc_stage`, `reader_emotion_goal`, `reaction_structure`, `expectation_bridge`), and repair carry-over routing. Focused tests cover scene-card projection and post-delivery sync misses. | Keep tuning scene-stage evidence heuristics from real chapters where the model implies stages without labels. | 0.5h |
 | emotional-methods.md | integrated | `emotional_arc_contract` now carries emotion module, payoff setup, emotional turn, reader expectation checks, 情绪三板斧, 情绪拉扯曲线, 题材情感策略, failure guards, prompt/self-review/revision/unattended blueprint coverage, and focused tests in `ui/server/src/routes/novel-writing-service.test.ts`. | Keep tuning prompt wording from real chapters where the model over-applies the full emotion curve. | 0.5h |
 | female-audience-writing.md | integrated | Female-audience contract covers safety, identification, heroine agency, emotion-as-product, reader needs, copy promise, longform genre skeleton, romance/career axis, abuse dosage, platform fit, self-review, revision, sync reports, repair tasks, and unattended blueprint repair. Project-level `reference_config.oh_story_controls.female_audience_mode` now supports `auto` / `enabled` / `disabled`, and the creation wizard exposes a 女频长篇口径 confirmation control so authors can force or suppress activation before drafting. Focused tests cover activation precedence and UI payload wiring. | Keep tuning platform-specific evidence heuristics from real female-channel projects. | 0.5h |
-| format-and-structure.md | partial | Prose format and metadata scans detect title, chapter marker, front matter, and engineering-word violations. | Compare all format requirements and add missing deterministic checks. | 1h |
+| format-and-structure.md | integrated | Prose format and metadata scans detect title, mixed chapter markers, blank lines, indentation, Markdown syntax, front matter, engineering-word violations, punctuation tone risks, and dialogue quote-style risks. Generation, review, and revision prompts now carry the oh-story format-and-structure guardrails for unified `###1.` / `###第一章` / `1.` chapter markers, one-newline paragraph spacing, no indentation, no prose Markdown, dialogue-on-own-line, platform quote preservation including `quote-mode keep`, and beat structure. Focused tests guard prompt coverage and deterministic format cleanup. | Keep tuning platform-specific format defaults from real generated chapters. | 0.5h |
 | genre-catalog.md | integrated | Creation, recovery, original-incubation prompts, and local writing-bible materialization now inject `genre_positioning_contract.genre_catalog_contract` from an oh-story catalog route covering the main route table and quick-reference entries: 追妻火葬场、重生复仇、小三/婚恋、世情、仙侠/玄幻、死人文学、都市高武、霸总/甜宠、同人流派、脑洞文、凡人流、历史/架空历史、文娱/娱乐圈、规则怪谈、长生流、西幻/骑士文、新媒体文、搞笑文、无限流、悬疑、后悔流, plus a generic fallback. Focused tests verify routing and key checks. | Keep tuning route keywords and snippets from real seed-generation misses. | 0.5h |
 | genre-core-mechanics.md | integrated | Genre positioning contract covers core hook, goldfinger fit, must-have scenes, platform fit, micro-innovation, 70/20/10 inspiration, five micro-innovation methods, long-board focus, and prose/review checks. Creation, recovery, original-incubation prompts, and local writing-bible materialization now inject `genre_positioning_contract.genre_core_mechanics_contract` with oh-story core-hook layers, per-chapter loop rules, micro-innovation boundaries, conflict-network rules, goldfinger/worldview fit, threshold escalation, career/love balance, drift checks, and genre presets for 都市高武、仙侠/玄幻、规则怪谈、脑洞文、凡人流 plus fallback validation examples. | Keep tuning mechanism presets from real seed-generation and pre-draft misses. | 0.5h |
 | genre-readers.md | integrated | Target-reader contract now carries reader profile/desires plus genre vitality, platform fit, boundary fit, title/blurb/content alignment, immersion/plasticity, goldfinger-life fit, and commercial-expression rules into pre-draft briefs, prose prompts, self-review, revision, unattended blueprint construction, and deterministic `buildTargetReaderSyncReport`. Focused tests cover prompt hydration, incomplete explicit-contract backfill, post-delivery sync misses, and review/revision enforcement. | Keep tuning platform and title/blurb evidence heuristics from real generated chapters. | 0.5h |
@@ -87,7 +87,7 @@ The estimate assumes the current working pattern: one small oh-story increment a
 
 ## Next Priority Queue
 
-1. `format-and-structure.md`: compare all format requirements and add missing deterministic checks.
+No immediate oh-story reference gaps remain. Track future work as real-output tuning, UI surfacing, or platform-specific workflow improvements.
 
 ## Update Rules
 
