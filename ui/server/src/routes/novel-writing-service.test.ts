@@ -42,6 +42,7 @@ import {
   buildNextChapterQualityPlanReceiptSyncReport,
   buildStatusFilterReceiptSyncReport,
   buildWritePreparationReceiptSyncReport,
+  buildArtifactProtocolReceiptSyncReport,
   buildQualityAuditSyncReport,
   buildDialogueSyncReport,
   buildCharacterBehaviorSyncReport,
@@ -51408,6 +51409,64 @@ describe('chapter context word target source guards', () => {
     expect(source).toContain('reviewPayload?.deliveryRiskReceipts')
   })
 
+  test('builds artifact protocol receipt sync from oh-story project artifact receipts', () => {
+    const report = buildArtifactProtocolReceiptSyncReport(
+      {},
+      { id: 7, chapter_no: 12, title: '禁库门牌' },
+      {
+        oh_story_delivery_receipts: {
+          pre_draft_execution_receipts: {
+            artifact_protocol_receipts: [
+              {
+                key: 'chapter_blueprint',
+                artifact_path: '大纲/细纲_第012章.md',
+                status: 'ready',
+                required_fields: ['内容概括', '情节安排', '情节细化', '结尾设定和钩子'],
+                evidence: '禁库门牌从账册夹层里掉出来，沈霜立刻改变证词。',
+              },
+            ],
+          },
+        },
+      },
+      '禁库门牌从账册夹层里掉出来，沈霜立刻改变证词。',
+    )
+
+    expect(report.status).toBe('warn')
+    expect(report.receipt_count).toBe(1)
+    expect(report.missed_count).toBe(1)
+    expect(report.missed[0].artifact_path).toBe('大纲/细纲_第012章.md')
+    expect(report.missed[0].missing_fields).toContain('人物关系和出场顺序')
+    expect(report.next_actions.join('｜')).toContain('artifact_protocol_receipts')
+  })
+
+  test('accepts complete artifact protocol receipts with locatable chapter evidence', () => {
+    const report = buildArtifactProtocolReceiptSyncReport(
+      {},
+      { id: 7, chapter_no: 12, title: '禁库门牌' },
+      {
+        oh_story_delivery_receipts: {
+          pre_draft_execution_receipts: {
+            artifact_protocol_receipts: [
+              {
+                key: 'chapter_blueprint',
+                artifact_path: '大纲/细纲_第012章.md',
+                status: 'ready',
+                required_fields: ['内容概括', '情节安排', '人物关系和出场顺序', '情节细化', '结尾设定和钩子'],
+                evidence: '禁库门牌从账册夹层里掉出来，沈霜立刻改变证词。',
+                remaining_risk: '',
+              },
+            ],
+          },
+        },
+      },
+      '禁库门牌从账册夹层里掉出来，沈霜立刻改变证词。',
+    )
+
+    expect(report.status).toBe('ok')
+    expect(report.receipt_count).toBe(1)
+    expect(report.missed_count).toBe(0)
+  })
+
   test('falls back to stored oh-story delivery risk receipts when prose review omits them', () => {
     const receipts = normalizeDeliveryRiskReceipts(
       {},
@@ -56011,7 +56070,31 @@ describe('chapter context word target source guards', () => {
     expect(prosePromptBlock).toContain('scene_card_receipts')
     expect(prosePromptBlock).toContain('delivery_risk_receipts')
     expect(prosePromptBlock).toContain('revision_receipts')
+    expect(prosePromptBlock).toContain('artifact_protocol_receipts')
+    expect(prosePromptBlock).toContain('设定/关系.md')
+    expect(prosePromptBlock).toContain('大纲/细纲_第XXX章.md')
+    expect(prosePromptBlock).toContain('追踪/角色状态.md')
     expect(prosePromptBlock).toContain('changed_evidence 必须引用 chapter_text')
+  })
+
+  test('asks prose self review and revision to enforce artifact protocol receipts', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const reviewPrompt = source.slice(
+      source.indexOf('const buildProseReviewPrompt'),
+      source.indexOf('const buildProseRevisionPrompt'),
+    )
+    const revisionPrompt = source.slice(
+      source.indexOf('const buildProseRevisionPrompt'),
+      source.indexOf('const shouldReviseProse'),
+    )
+
+    expect(reviewPrompt).toContain('artifact_protocol_receipts')
+    expect(reviewPrompt).toContain('artifact_path')
+    expect(reviewPrompt).toContain('required_fields')
+    expect(reviewPrompt).toContain('设定/题材定位.md')
+    expect(revisionPrompt).toContain('artifact_protocol_receipts')
+    expect(revisionPrompt).toContain('设定/关系.md')
+    expect(revisionPrompt).toContain('追踪/时间线.md')
   })
 
   test('asks prose self review and revision to verify scene-card execution receipts', () => {

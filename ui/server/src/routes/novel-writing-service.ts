@@ -256,6 +256,7 @@ const STRUCTURED_REVIEW_CHECK_FIELDS = [
   ['story_state_update_checks', 'storyStateUpdateChecks'],
   ['foreshadowing_delta_checks', 'foreshadowingDeltaChecks'],
   ['source_readiness_checks', 'sourceReadinessChecks'],
+  ['artifact_protocol_receipts', 'artifactProtocolReceipts'],
   ['write_preparation_checks', 'writePreparationChecks'],
   ['next_chapter_quality_plan_receipts', 'nextChapterQualityPlanReceipts'],
   ['chapter_handoff_checks', 'chapterHandoffChecks'],
@@ -476,6 +477,17 @@ const STRUCTURED_REVIEW_REQUIRED_FIELDS: Record<string, string[]> = {
     'read_status',
     'used_as_fact',
     'chapter_evidence',
+    'fix',
+    'remaining_risk',
+  ],
+  artifact_protocol_receipts: [
+    'key',
+    'label',
+    'status',
+    'artifact_path',
+    'required_fields',
+    'used_fields',
+    'evidence',
     'fix',
     'remaining_risk',
   ],
@@ -11478,6 +11490,232 @@ function preDraftExecutionReceiptSections(payload: any) {
   ])
 }
 
+const OH_STORY_ARTIFACT_PROTOCOL_REQUIREMENTS = [
+  {
+    key: 'relationship_map',
+    path: '设定/关系.md',
+    match: /关系\.md|relationship/i,
+    required_fields: ['关系总览', '关系演变', '核心冲突关系'],
+  },
+  {
+    key: 'genre_positioning',
+    path: '设定/题材定位.md',
+    match: /题材定位|genre/i,
+    required_fields: ['基本信息', '核心梗三分法', '对标分析', '题材框架'],
+  },
+  {
+    key: 'volume_outline',
+    path: '大纲/卷纲_第X卷.md',
+    match: /卷纲|volume/i,
+    required_fields: ['核心矛盾', '情绪弧线', '爽点节奏', '人物弧线', '本卷伏笔'],
+  },
+  {
+    key: 'chapter_blueprint',
+    path: '大纲/细纲_第XXX章.md',
+    match: /细纲|chapter_blueprint|blueprint/i,
+    required_fields: ['内容概括', '情节安排', '人物关系和出场顺序', '情节细化', '结尾设定和钩子'],
+  },
+  {
+    key: 'foreshadowing_tracking',
+    path: '追踪/伏笔.md',
+    match: /伏笔|foreshadow/i,
+    required_fields: ['伏笔状态表', '回收日志', '过期伏笔'],
+  },
+  {
+    key: 'timeline_tracking',
+    path: '追踪/时间线.md',
+    match: /时间线|timeline/i,
+    required_fields: ['时间刻度', '关键事件时序', '待确认'],
+  },
+  {
+    key: 'character_state_tracking',
+    path: '追踪/角色状态.md',
+    match: /角色状态|character_state/i,
+    required_fields: ['角色状态快照', '状态变化证据', '下一章约束'],
+  },
+  {
+    key: 'context_tracking',
+    path: '追踪/上下文.md',
+    match: /上下文|context/i,
+    required_fields: ['最近章节摘要', '当前开放问题', '下一章承接'],
+  },
+  {
+    key: 'benchmark_report',
+    path: '对标/{对标书名}/拆文报告.md',
+    match: /拆文报告|benchmark|对标/i,
+    required_fields: ['基本信息', '核心发现', '禁止照搬'],
+  },
+]
+
+function artifactProtocolTextList(...values: any[]) {
+  return Array.from(new Set(values
+    .flatMap((value) => {
+      if (Array.isArray(value)) return value
+      if (typeof value === 'string') return value.split(/[、,，;；|｜\n\r]+/g)
+      return value ? [value] : []
+    })
+    .map(item => compactBriefText(item))
+    .filter(Boolean))).slice(0, 24)
+}
+
+function artifactProtocolRequirementForReceipt(receipt: any) {
+  const key = compactBriefText(receipt?.key || receipt?.artifact_key || receipt?.artifactKey)
+  const path = compactBriefText(receipt?.artifact_path || receipt?.artifactPath || receipt?.path || receipt?.source_path || receipt?.sourcePath)
+  return OH_STORY_ARTIFACT_PROTOCOL_REQUIREMENTS.find(spec => {
+    if (key && (key === spec.key || key.includes(spec.key) || spec.key.includes(key))) return true
+    return spec.match.test(path)
+  }) || null
+}
+
+function normalizeArtifactProtocolReceipt(receipt: any = {}, index = 0) {
+  const spec = artifactProtocolRequirementForReceipt(receipt)
+  const artifactPath = compactBriefText(
+    receipt?.artifact_path
+    || receipt?.artifactPath
+    || receipt?.path
+    || receipt?.source_path
+    || receipt?.sourcePath
+    || spec?.path,
+  )
+  const key = compactBriefText(receipt?.key || receipt?.artifact_key || receipt?.artifactKey || spec?.key || `artifact_protocol_${index + 1}`)
+  const label = compactBriefText(receipt?.label || receipt?.title || spec?.path || artifactPath || key, '项目产物协议')
+  const requiredFields = artifactProtocolTextList(receipt?.required_fields, receipt?.requiredFields, receipt?.fields, receipt?.covered_fields, receipt?.coveredFields)
+  const usedFields = artifactProtocolTextList(receipt?.used_fields, receipt?.usedFields, receipt?.used, receipt?.evidence_fields, receipt?.evidenceFields)
+  const evidence = compactBriefText(
+    receipt?.evidence
+    || receipt?.chapter_evidence
+    || receipt?.chapterEvidence
+    || receipt?.used_evidence
+    || receipt?.usedEvidence
+    || receipt?.source_excerpt
+    || receipt?.sourceExcerpt,
+  )
+  if (!key && !artifactPath && !label && requiredFields.length <= 0 && usedFields.length <= 0 && !evidence) return null
+  return {
+    key,
+    label,
+    status: compactBriefText(receipt?.status || receipt?.state || (receipt?.delivered === false ? 'fail' : 'ready')).toLowerCase(),
+    artifact_path: artifactPath,
+    required_fields: requiredFields,
+    used_fields: usedFields,
+    evidence,
+    delivered: receipt?.delivered === undefined ? undefined : receipt?.delivered !== false,
+    fix: compactBriefText(receipt?.fix || receipt?.required_action || receipt?.requiredAction || receipt?.repair_instruction || receipt?.repairInstruction),
+    remaining_risk: compactBriefText(receipt?.remaining_risk || receipt?.remainingRisk || receipt?.risk),
+  }
+}
+
+function artifactProtocolReceiptsFromSource(source: any = {}) {
+  const payload = source?.oh_story_delivery_receipts
+    || source?.ohStoryDeliveryReceipts
+    || source?.delivery_receipts
+    || source?.deliveryReceipts
+    || source
+  const preDraft = payload?.pre_draft_execution_receipts
+    || payload?.preDraftExecutionReceipts
+    || source?.pre_draft_execution_receipts
+    || source?.preDraftExecutionReceipts
+    || {}
+  return [
+    ...asArray(preDraft?.artifact_protocol_receipts || preDraft?.artifactProtocolReceipts),
+    ...asArray(payload?.artifact_protocol_receipts || payload?.artifactProtocolReceipts),
+    ...asArray(source?.artifact_protocol_receipts || source?.artifactProtocolReceipts),
+  ]
+}
+
+function artifactProtocolFieldCovered(actualFields: string[], expected: string) {
+  const expectedText = compactBriefText(expected)
+  if (!expectedText) return true
+  return actualFields.some(field => {
+    const text = compactBriefText(field)
+    return text === expectedText || text.includes(expectedText) || expectedText.includes(text)
+  })
+}
+
+function artifactProtocolReceiptMiss(receipt: any, chapterText = '') {
+  const spec = artifactProtocolRequirementForReceipt(receipt)
+  const expectedFields = spec?.required_fields || []
+  const actualFields = artifactProtocolTextList(receipt?.required_fields, receipt?.used_fields)
+  const missingFields = expectedFields.filter(field => !artifactProtocolFieldCovered(actualFields, field))
+  const status = compactBriefText(receipt?.status, 'ready').toLowerCase()
+  const statusBad = Boolean(status) && !['ok', 'pass', 'ready', 'used', 'delivered', 'done'].includes(status)
+  const deliveredBad = receipt?.delivered === false
+  const remainingRisk = compactBriefText(receipt?.remaining_risk)
+  const evidence = compactBriefText(receipt?.evidence)
+  const evidenceMissing = !evidence
+  const evidenceUnlocated = Boolean(evidence && chapterText && !receiptEvidenceLocatedInProse(evidence, chapterText))
+  if (!missingFields.length && !statusBad && !deliveredBad && !remainingRisk && !evidenceMissing && !evidenceUnlocated) return null
+  const text = [
+    missingFields.length ? `缺字段：${missingFields.join('、')}` : '',
+    statusBad ? `status=${status}` : '',
+    deliveredBad ? 'delivered=false' : '',
+    remainingRisk,
+    evidenceMissing ? '缺少正文 evidence' : '',
+    evidenceUnlocated ? 'evidence 无法定位到 chapter_text' : '',
+  ].filter(Boolean).join('；')
+  return {
+    key: receipt.key,
+    label: receipt.label,
+    artifact_path: receipt.artifact_path || spec?.path || '',
+    missing_fields: missingFields,
+    text,
+    evidence,
+    fix: receipt.fix || `补齐 ${receipt.artifact_path || spec?.path || '项目产物'} 的 artifact_protocol_receipts，required_fields 覆盖 oh-story 模板字段，并用 chapter_text 可定位证据证明本章已使用。`,
+    remaining_risk: remainingRisk || text,
+  }
+}
+
+export function buildArtifactProtocolReceiptSyncReport(project: any = {}, chapter: any = {}, contextPackage: any = {}, chapterText = '') {
+  const sources = uniqueObjectReferences([
+    contextPackage,
+    contextPackage?.chapter_target,
+    contextPackage?.chapterTarget,
+    contextPackage?.delivery_receipts,
+    contextPackage?.deliveryReceipts,
+    contextPackage?.oh_story_delivery_receipts,
+    contextPackage?.ohStoryDeliveryReceipts,
+    chapter?.raw_payload,
+    chapter?.rawPayload,
+    chapter?.raw_payload?.oh_story_delivery_receipts,
+    chapter?.rawPayload?.ohStoryDeliveryReceipts,
+  ])
+  const receipts = sources
+    .flatMap(artifactProtocolReceiptsFromSource)
+    .map(normalizeArtifactProtocolReceipt)
+    .filter(Boolean)
+  const dedupedReceipts = Array.from(new Map(receipts.map((receipt: any) => [
+    `${receipt.key}::${receipt.artifact_path}::${receipt.evidence}`,
+    receipt,
+  ])).values())
+  const missed = dedupedReceipts
+    .map((receipt: any) => artifactProtocolReceiptMiss(receipt, chapterText))
+    .filter(Boolean)
+  const receiptCount = dedupedReceipts.length
+  const missedCount = missed.length
+  const status = missedCount > 0 ? 'warn' : 'ok'
+  return {
+    report_id: `artifact-protocol-receipts-sync-${chapter?.id || chapter?.chapter_no || Date.now()}`,
+    project_id: project?.id || null,
+    chapter_id: chapter?.id || null,
+    chapter_no: chapter?.chapter_no || chapter?.chapterNo || null,
+    status,
+    label: receiptCount === 0 ? '项目产物协议未配置' : status === 'ok' ? '项目产物协议 OK' : `项目产物协议缺口 ${missedCount}`,
+    summary: receiptCount === 0
+      ? '本章没有可复核的 artifact_protocol_receipts。'
+      : status === 'ok'
+        ? `已复核 ${receiptCount} 条 artifact_protocol_receipts，项目产物字段和正文证据可用。`
+        : `已复核 ${receiptCount} 条 artifact_protocol_receipts，仍有 ${missedCount} 条产物协议缺口。`,
+    requires_receipts: receiptCount > 0,
+    receipt_count: receiptCount,
+    missed_count: missedCount,
+    receipts: dedupedReceipts,
+    missed,
+    next_actions: missed.length
+      ? missed.map((item: any) => `补齐 artifact_protocol_receipts：${item.artifact_path || item.label}｜${item.text}`)
+      : [],
+  }
+}
+
 const OH_STORY_REVISION_STRATEGY_ORDER = ['rewrite', 'compress', 'de_ai', 'polish']
 const OH_STORY_FOCUSED_REVISION_MODE_SPECS: Record<string, { strategy: string; label: string; fix: string }> = {
   expand_action: {
@@ -11750,6 +11988,7 @@ export function buildRevisionStrategyBrief(review: any = {}) {
     ['chapter_hook_checks', review?.chapter_hook_checks || review?.chapterHookChecks],
     ['plot_dynamics_checks', review?.plot_dynamics_checks || review?.plotDynamicsChecks],
     ['state_tracking_checks', review?.state_tracking_checks || review?.stateTrackingChecks],
+    ['artifact_protocol_receipts', review?.artifact_protocol_receipts || review?.artifactProtocolReceipts],
     ['write_preparation_checks', review?.write_preparation_checks || review?.writePreparationChecks],
     ['next_chapter_quality_plan_receipts', review?.next_chapter_quality_plan_receipts || review?.nextChapterQualityPlanReceipts],
     ['chapter_handoff_checks', review?.chapter_handoff_checks || review?.chapterHandoffChecks],
@@ -14971,6 +15210,16 @@ function normalizeStoredOhStoryDeliveryReceipts(source: any = {}) {
   const revisionReceipts = asArray(payload?.revision_receipts || payload?.revisionReceipts || source?.revision_receipts || source?.revisionReceipts)
   const deslopRepairReceipts = asArray(payload?.deslop_repair_receipts || payload?.deslopRepairReceipts || source?.deslop_repair_receipts || source?.deslopRepairReceipts)
   const qualityAuditRepairReceipts = asArray(payload?.quality_audit_repair_receipts || payload?.qualityAuditRepairReceipts || source?.quality_audit_repair_receipts || source?.qualityAuditRepairReceipts)
+  const artifactProtocolReceipts = [
+    ...artifactProtocolReceiptsFromSource(payload),
+    ...artifactProtocolReceiptsFromSource(source),
+  ]
+    .map(normalizeArtifactProtocolReceipt)
+    .filter(Boolean)
+  const uniqueArtifactProtocolReceipts = Array.from(new Map(artifactProtocolReceipts.map((receipt: any) => [
+    `${receipt.key}::${receipt.artifact_path}::${receipt.evidence}`,
+    receipt,
+  ])).values())
   const preDraftExecutionReceipts = payload?.pre_draft_execution_receipts
     || payload?.preDraftExecutionReceipts
     || source?.pre_draft_execution_receipts
@@ -14984,6 +15233,7 @@ function normalizeStoredOhStoryDeliveryReceipts(source: any = {}) {
     && revisionReceipts.length <= 0
     && deslopRepairReceipts.length <= 0
     && qualityAuditRepairReceipts.length <= 0
+    && uniqueArtifactProtocolReceipts.length <= 0
     && !preDraftExecutionReceipts
   ) return null
   return {
@@ -14994,6 +15244,7 @@ function normalizeStoredOhStoryDeliveryReceipts(source: any = {}) {
     revision_receipts: revisionReceipts,
     deslop_repair_receipts: deslopRepairReceipts,
     quality_audit_repair_receipts: qualityAuditRepairReceipts,
+    artifact_protocol_receipts: uniqueArtifactProtocolReceipts,
     pre_draft_execution_receipts: preDraftExecutionReceipts,
   }
 }
@@ -49586,9 +49837,10 @@ export function createNovelWritingService(ctx: {
       defaultFiveChapterLaneTemplate ? '输出附加要求：如果存在 default_five_chapter_lane_template，expansion_structure_decision_execution 必须继续包含 default_lane_segment_duty_delivered、default_lane_conflict_rotation_delivered、default_lane_payoff_density_delivered、default_lane_ending_hook_template_delivered，并用 evidence 说明四项模板在验证批中没有复发。' : '',
       chapterBlueprint ? '输出附加要求：scene_breakdown 必须包含 blueprint_receipts，逐项回填 target_emotion、opening_hook、core_payoff、content_outline、plot_lines、character_order、beat_sequence、beat_density_contract、cost_and_reward、ending_contract 是否在正文兑现，并给出 evidence 摘要。' : '',
       '输出附加要求：scene_breakdown 每个场景必须包含 scene_start_anchor、scene_end_anchor 和 scene_card_receipts；scene_start_anchor/scene_end_anchor 必须摘自该场景正文的起止短句，用来定位该场景文本。scene_card_receipts 字段至少包含 scene_goal, obstacle, action, turn, payoff, state_delta, goal_obstacle_change_delivered(boolean)、purpose_tag_delivered(boolean)、density_level_delivered(boolean)、sensory_anchor_delivered(boolean)、serial_risk_repairs_delivered(boolean)、required_beats_delivered(boolean)、action_beats_delivered(boolean)、dialogue_goals_delivered(boolean)、style_directives_delivered(boolean)、benchmark_recall_directives_delivered(boolean)、concept_anchor_rules_delivered(boolean)、prose_craft_directives_delivered(boolean)、evidence(array)。evidence 必须摘录对应场景正文中的动作、对话、信息变化、关系变化、对白声线或新概念锚点证据，不能只写“已完成”，不能借用其他场景的证据。',
-      '输出附加要求：必须在章节对象顶层输出 oh_story_delivery_receipts，用于后续诊断和修复闭环落库。oh_story_delivery_receipts 必须包含 chapter_blueprint、scene_card_receipts、delivery_risk_receipts、revision_receipts、pre_draft_execution_receipts；chapter_blueprint 记录本章蓝图兑现状态，scene_card_receipts 汇总每个场景的场景卡执行回执，delivery_risk_receipts 逐项记录上一章/批次交稿风险是否已兑现，revision_receipts 记录本轮生成中主动修正过的结构、连续性、资产或文风问题，pre_draft_execution_receipts 记录状态筛选、写前准备、意图确认、文风召回和上一章质量续航计划是否真正落入正文。',
+      '输出附加要求：必须在章节对象顶层输出 oh_story_delivery_receipts，用于后续诊断和修复闭环落库。oh_story_delivery_receipts 必须包含 chapter_blueprint、scene_card_receipts、delivery_risk_receipts、revision_receipts、pre_draft_execution_receipts；chapter_blueprint 记录本章蓝图兑现状态，scene_card_receipts 汇总每个场景的场景卡执行回执，delivery_risk_receipts 逐项记录上一章/批次交稿风险是否已兑现，revision_receipts 记录本轮生成中主动修正过的结构、连续性、资产或文风问题，pre_draft_execution_receipts 记录状态筛选、项目产物协议、写前准备、意图确认、文风召回和上一章质量续航计划是否真正落入正文。',
       stateTrackingContract ? '输出附加要求：oh_story_delivery_receipts.pre_draft_execution_receipts.status_filter_receipts 必须逐项覆盖【状态筛选合同】中的角色状态、相关伏笔/前史、世界约束、filter_rules 和 source_requirements；每项包含 key,label,used_in_chapter,evidence,excluded_reason,remaining_risk，证明只加载/只使用会影响本章正确性的状态，未使用的信息必须写明为何不会导致本章写错。' : '',
       stateTrackingContract ? '输出附加要求：oh_story_delivery_receipts.pre_draft_execution_receipts.source_readiness_checks 必须逐项覆盖【来源就绪表】；每项包含 key,label,status(pass|warn|fail),evidence,fix，证明 ready 来源已在正文可见承接，missing/warn 来源没有被当作既定事实使用。' : '',
+      '输出附加要求：oh_story_delivery_receipts.pre_draft_execution_receipts.artifact_protocol_receipts 必须按 oh-story artifact-protocols 记录本章使用或依赖的项目产物；覆盖路径包括 设定/关系.md、设定/题材定位.md、大纲/卷纲_第X卷.md、大纲/细纲_第XXX章.md、追踪/伏笔.md、追踪/时间线.md、追踪/角色状态.md、追踪/上下文.md、对标/{对标书名}/拆文报告.md。每项包含 key,label,status(pass|warn|fail|ready),artifact_path,required_fields,used_fields,evidence,remaining_risk；required_fields 必须按对应模板列出核心字段，evidence 必须引用 chapter_text 中可定位的动作、对话、信息变化或关系变化。',
       writePreparationBrief ? '输出附加要求：oh_story_delivery_receipts.pre_draft_execution_receipts.write_preparation_checks 必须逐项覆盖【写前准备卡】中的 source_gaps、文风召回缺口和副对标边界、asset_risks、delivery_risk_actions、creation_contract_checklist、blueprint_focus、reader_payoff_focus 和 must_confirm；创作契约必须逐项说明目标读者、题材定位、核心承诺、追读留存是否被正文证据兑现；每项必须有 delivered(boolean)、evidence、remaining_risk，未完成时 delivered=false 并写明下一章需要承接的风险。' : '',
       deliveryRiskCarryOver ? '输出附加要求：oh_story_delivery_receipts.pre_draft_execution_receipts.next_chapter_quality_plan_receipts 必须逐项覆盖上一章质量续航计划和 chapter_target.delivery_risk_carry_over 中的 quality_focus、opening_actions、middle_actions、ending_actions、forbidden_repeats/avoid_repetition、evidence_basis；每项包含 key,label,delivered,evidence,remaining_risk，证明质量续航不是只写在任务书里，而是落成正文动作、信息变化、章末钩子或禁用重复。' : '',
       intentConfirmationContract ? '输出附加要求：oh_story_delivery_receipts.pre_draft_execution_receipts.intent_confirmation_checks 必须逐项覆盖 chapter_target.intent_confirmation_contract 中的 confirmed_intent、rhythm_and_style、structure_inputs、dialogue_tone_baseline、logic_line、appearance_order、cost_and_reward、ending_handoff 和 quality_checks；每项包含 key,label,delivered,evidence,remaining_risk，未完成时 delivered=false 并写明下一章需要承接的意图偏移。' : '',
@@ -50999,6 +51251,7 @@ export function createNovelWritingService(ctx: {
     '14A. 如果 chapter_target.delivery_receipts 或 oh_story_delivery_receipts 存在，必须把其中的 chapter_blueprint、scene_card_receipts、delivery_risk_receipts、revision_receipts 当作生成交付回执逐项复核；这些回执是模型自述，不是通过证据。回执写 delivered=true 但 changed_evidence/evidence 不能在 chapter_text 定位时，必须改成 warn/fail 并写入 quality_audit_checks 或 delivery_risk_receipts。',
     '14B. 是否兑现 chapter_target.write_preparation_brief 和 oh_story_delivery_receipts.pre_draft_execution_receipts.write_preparation_checks：逐项检查写前准备卡里的 source_gaps、asset_risks、delivery_risk_actions、creation_contract_checklist、blueprint_focus、reader_payoff_focus、must_confirm 是否真的落成正文中的动作、对话、信息变化或关系变化；creation_contract_checklist 必须逐项确认目标读者、题材定位、核心承诺、追读留存是否有正文证据；必须输出 write_preparation_checks，字段 key,label,status(pass|warn|fail),evidence,fix。状态筛选回执必须输出 status_filter_receipts，每项包含 key,label,used_in_chapter,evidence,excluded_reason,remaining_risk。写前准备回执缺失、回执 delivered=true 但证据无法定位、或缺口仍未修复时，必须给出 S1/S2 finding，category=structure/consistency。',
     '14C. 是否兑现 oh_story_delivery_receipts.pre_draft_execution_receipts.next_chapter_quality_plan_receipts：如果存在 chapter_target.delivery_risk_carry_over、batch_preflight.delivery_risk_carry_over 或上一章质量续航计划，必须复核质量续航回执；逐项检查 quality_focus、opening_actions、middle_actions、ending_actions、avoid_repetition 和 evidence_basis 是否真的落成正文动作、信息变化、章末钩子或禁用重复。next_chapter_quality_plan_receipts 中 opening_actions 的 evidence 必须来自前300字；middle_actions 的 evidence 必须来自中段事件推进；ending_actions 的 evidence 必须来自最后300字。必须输出 next_chapter_quality_plan_receipts，字段 key,label,status(pass|warn|fail),delivered,evidence,fix,remaining_risk；缺回执、回执 delivered=true 但证据无法定位、或质量续航仍未修复时，必须给出 S1/S2 finding，category=structure/consistency。',
+    '14C+. 是否符合 oh-story artifact-protocols 项目产物协议：必须复核并输出 artifact_protocol_receipts；每项包含 key,label,status(pass|warn|fail),artifact_path,required_fields,used_fields,evidence,fix,remaining_risk。artifact_path 必须使用标准路径，例如 设定/关系.md、设定/题材定位.md、大纲/细纲_第XXX章.md、追踪/伏笔.md、追踪/时间线.md、追踪/角色状态.md；required_fields 必须覆盖对应模板核心字段；evidence 必须引用 chapter_text 中可定位的动作、对话、信息变化或关系变化。缺字段、路径泛化、只写“已参考”、或 evidence 无法定位时，必须给出 S1/S2 finding，category=structure/consistency。',
     '14D. 是否兑现 chapter_target.chapter_handoff_contract、batch_preflight.chapter_handoff_contract、previous_handoff、opening_obligations、must_deliver、keep_alive 和 overdue：章首承接必须在前300字接住上一章状态、未解问题、读者期待债和必须兑现项，不能另起炉灶；章末交接必须把本章新增状态、悬念、风险和下一章动作压力交清。必须输出 chapter_handoff_checks，字段 key,label,status(pass|warn|fail),evidence,fix；章首承接缺失、上一章待处理项沉没、overdue 未处理或章末没有可执行交接时，必须给出 S1/S2 finding，category=structure/consistency。',
     '15. 是否兑现 chapter_target.platform_rubric：按 Rubric: fanqie | qidian | zhihu | generic web-fiction 检查目标平台适配；必须逐项输出 platform_checks，字段 key,label,status(pass|warn|fail),evidence,fix。平台不匹配且影响留存/节奏/读者期待时必须输出 S1/S2 finding，category=platform。',
     '16. 是否兑现 chapter_target.content_rubric：按 oh-story 通用网文内容审查基准逐项检查核心卖点、冲突推进、情绪曲线、钩子与期待、角色动机、对话质量、设定一致性、文字自然度、最小剧情循环和高潮构建；必须逐项输出 content_rubric_checks，字段 key,label,status(pass|warn|fail),core_selling_point,conflict_progression,chapter_change,page_turn_reason,evidence,fix,remaining_risk。',
@@ -51105,6 +51358,7 @@ export function createNovelWritingService(ctx: {
     '如果存在 chapter_target.delivery_risk_carry_over、batch_preflight.delivery_risk_carry_over 或 oh_story_delivery_receipts.pre_draft_execution_receipts.next_chapter_quality_plan_receipts，必须输出 next_chapter_quality_plan_receipts；不能只输出 delivery_risk_receipts 或 next_chapter_quality_plan。next_chapter_quality_plan_receipts 必须逐项复核上一章质量续航计划是否在本章落地，字段 key,label,status(pass|warn|fail),delivered,evidence,fix,remaining_risk。',
     '必须输出 next_chapter_quality_plan；它是写后诊断给下一章的质量续航计划，不是本章总结。字段必须包含 version, quality_focus, opening_actions, middle_actions, ending_actions, avoid_repetition, evidence_basis, ending_contract。quality_focus 写下一章最该守住的1-3个质量目标；opening_actions 写前300字必须执行的动作；middle_actions 写中段必须落成的冲突/信息/状态变化；ending_actions 写最后300字必须形成的追读钩子或承接余波；avoid_repetition 写下一章禁止复现的表达、结构或收尾套路；evidence_basis 写这些计划来自本章哪些正文证据、S1/S2/S3问题、五维评分、追读/钩子/承接风险或 oh-story 质量清单；ending_contract 必须包含 final_state, unresolved_question, next_chapter_pull, handoff_to_next，分别记录本章收束状态、未解决问题、下一章推动力、下一章如何开篇承接。',
     '如果存在 batch_preflight.delivery_risk_carry_over.creation_contract_carry_over，必须额外输出 target_reader_checks、genre_positioning_checks、core_contract_checks、reader_retention_checks；delivery_risk_receipts 只能记录承接动作，不能代替四类创作契约复检。',
+    '必须输出 artifact_protocol_receipts；不能只说“已参考设定/大纲/追踪”，要逐项写 artifact_path、required_fields、used_fields、evidence 和 remaining_risk，尤其检查 设定/关系.md、设定/题材定位.md、大纲/细纲_第XXX章.md、追踪/伏笔.md、追踪/时间线.md、追踪/角色状态.md 是否按模板字段被本章正确使用。',
     '如果存在 chapter_target.write_preparation_brief 或 oh_story_delivery_receipts.pre_draft_execution_receipts.write_preparation_checks，必须输出 write_preparation_checks；不能只写“写前准备已处理”，必须用正文证据逐项确认来源缺口、资产风险、上一轮待修复、创作契约清单 creation_contract_checklist、蓝图焦点、读者回报和必确认项是否闭环。',
     '如果存在 chapter_target.chapter_handoff_contract、batch_preflight.chapter_handoff_contract、previous_handoff、opening_obligations、must_deliver、keep_alive 或 overdue，必须输出 chapter_handoff_checks；不能只写“承接自然”，必须用正文证据逐项确认章首承接、上一章待处理、期待债、逾期项和章末交接是否闭环。',
     '如果存在 chapter_target.platform_rubric，必须输出 rubric、rubric_source、platform_checks；rubric_source 优先取 chapter_target.platform_rubric.source。',
@@ -51226,6 +51480,7 @@ export function createNovelWritingService(ctx: {
     '20. 如果自检结果包含 asset_linkage_checks，必须优先修复 status=fail/warn 的资产挂钩缺口；按 key/label/evidence/fix 补资产功能、归属、触发条件、限制、后果、状态变化、贯穿物件三次出现和设定随冲突释放；道具能力展示缺口要补宝物功能强大、信息不足误判鸡肋、恰好克制反派、他人失败、主角方案、众人不看好、鸡肋成神器和章末新钩子。',
     '21. 如果自检结果包含 state_tracking_checks，必须优先修复 status=fail/warn 的状态筛选缺口；按 key/label/evidence/fix 修角色状态、上一章承接、伏笔前史、世界约束、来源边界和上下文过载问题，并在修订后的 oh_story_delivery_receipts.pre_draft_execution_receipts.status_filter_receipts 中逐项更新 used_in_chapter/evidence/excluded_reason/remaining_risk。',
     '21A. 如果自检结果包含 source_readiness_checks，必须优先修复 status=fail/warn 的来源就绪缺口；按 key/label/evidence/fix 处理 missing/warn 来源，不能把未就绪来源写成既定事实，ready 来源必须在正文中可见承接，并在修订后的 oh_story_delivery_receipts.pre_draft_execution_receipts.source_readiness_checks 中逐项更新 status/evidence/fix。',
+    '21A+. 如果自检结果包含 artifact_protocol_receipts，必须优先修复 status=fail/warn 的项目产物协议缺口；按 key/label/artifact_path/required_fields/evidence/fix 补齐 设定/关系.md、设定/题材定位.md、大纲/细纲_第XXX章.md、追踪/伏笔.md、追踪/时间线.md、追踪/角色状态.md 等标准产物字段对应的正文证据，并在修订后的 oh_story_delivery_receipts.pre_draft_execution_receipts.artifact_protocol_receipts 中逐项更新 status、required_fields、used_fields、evidence、remaining_risk。',
     '21B. 如果自检结果包含 write_preparation_checks，必须优先修复 status=fail/warn 的写前准备缺口；按 key/label/evidence/fix 补齐来源缺口、资产风险、上一轮待修复、创作契约清单 creation_contract_checklist、蓝图焦点、读者回报和必确认项；创作契约缺口要分别补目标读者、题材定位、核心承诺、追读留存的正文证据，并在修订后的 oh_story_delivery_receipts.pre_draft_execution_receipts.write_preparation_checks 中逐项更新 delivered/evidence/remaining_risk。',
     '21C. 如果自检结果包含 chapter_handoff_checks，必须优先修复 status=fail/warn 的章首承接缺口；按 key/label/evidence/fix 修前300字和受影响的场景桥，让 previous_handoff、opening_obligations、must_deliver、keep_alive、overdue 和 chapter_handoff_contract 都落成正文可见动作、对话、信息变化或关系变化。修章首时不得另起新场景替代承接；修章末时必须补清下一章动作压力、未解问题和状态交接。',
     '22. 如果自检结果包含 intent_confirmation_checks，必须优先修复 status=fail/warn 的意图确认缺口；按 key/label/evidence/fix 校准情绪目标、节奏爆发、模块执行、文风指令、内容概括、逻辑线、出场顺序、代价/收益和章尾承接，并在修订后的 oh_story_delivery_receipts.pre_draft_execution_receipts.intent_confirmation_checks 中逐项更新 delivered/evidence/remaining_risk。',
@@ -51282,7 +51537,7 @@ export function createNovelWritingService(ctx: {
     '【初稿正文】',
     chapterText.slice(0, 16000),
     '',
-      '请输出 JSON，包含 prose_chapters 数组。数组第一项必须包含 chapter_no, title, chapter_text, scene_breakdown, continuity_notes, revision_context_receipts, revision_receipts, deslop_repair_receipts, quality_audit_repair_receipts, revision_scope_guard, next_chapter_quality_plan, oh_story_delivery_receipts。revision_context_receipts(array) 必须逐项记录 previous_chapter、next_chapter、foreshadowing、character_cards、timeline、setting_context 等上下文核对结果。next_chapter_quality_plan 字段包含 version, quality_focus, opening_actions, middle_actions, ending_actions, avoid_repetition, evidence_basis, ending_contract({final_state,unresolved_question,next_chapter_pull,handoff_to_next})，必须基于修订后终稿正文。oh_story_delivery_receipts 必须包含 chapter_blueprint, scene_card_receipts, delivery_risk_receipts, revision_context_receipts(array), revision_receipts, deslop_repair_receipts, quality_audit_repair_receipts, pre_draft_execution_receipts；所有修订回执必须同时写入 oh_story_delivery_receipts，不能只散落在章节顶层或 scene_breakdown。若修订涉及状态筛选、来源就绪、写前准备、意图确认、文风召回、样章策略或质量续航，必须在 oh_story_delivery_receipts.pre_draft_execution_receipts.status_filter_receipts、oh_story_delivery_receipts.pre_draft_execution_receipts.source_readiness_checks、oh_story_delivery_receipts.pre_draft_execution_receipts.write_preparation_checks、oh_story_delivery_receipts.pre_draft_execution_receipts.intent_confirmation_checks、oh_story_delivery_receipts.pre_draft_execution_receipts.benchmark_recall_checks、oh_story_delivery_receipts.pre_draft_execution_receipts.style_sample_checks、oh_story_delivery_receipts.pre_draft_execution_receipts.next_chapter_quality_plan_receipts 中逐项更新 delivered/evidence/remaining_risk、status/evidence/fix 或 used_in_chapter/evidence/excluded_reason/remaining_risk。scene_breakdown 必须保留并更新 scene_start_anchor、scene_end_anchor 和 scene_card_receipts；scene_start_anchor/scene_end_anchor 必须摘自修订后对应场景正文。revision_receipts 中如修改影响后续伏笔、时间线、角色状态、资产归属或关系边界，必须填写 affected_chapters 和 cascade_impacts。chapter_text 是修订后的完整正文，不要 markdown 标题。',
+      '请输出 JSON，包含 prose_chapters 数组。数组第一项必须包含 chapter_no, title, chapter_text, scene_breakdown, continuity_notes, revision_context_receipts, revision_receipts, deslop_repair_receipts, quality_audit_repair_receipts, revision_scope_guard, next_chapter_quality_plan, oh_story_delivery_receipts。revision_context_receipts(array) 必须逐项记录 previous_chapter、next_chapter、foreshadowing、character_cards、timeline、setting_context 等上下文核对结果。next_chapter_quality_plan 字段包含 version, quality_focus, opening_actions, middle_actions, ending_actions, avoid_repetition, evidence_basis, ending_contract({final_state,unresolved_question,next_chapter_pull,handoff_to_next})，必须基于修订后终稿正文。oh_story_delivery_receipts 必须包含 chapter_blueprint, scene_card_receipts, delivery_risk_receipts, revision_context_receipts(array), revision_receipts, deslop_repair_receipts, quality_audit_repair_receipts, artifact_protocol_receipts, pre_draft_execution_receipts；所有修订回执必须同时写入 oh_story_delivery_receipts，不能只散落在章节顶层或 scene_breakdown。若修订涉及状态筛选、来源就绪、项目产物协议、写前准备、意图确认、文风召回、样章策略或质量续航，必须在 oh_story_delivery_receipts.pre_draft_execution_receipts.status_filter_receipts、oh_story_delivery_receipts.pre_draft_execution_receipts.source_readiness_checks、oh_story_delivery_receipts.pre_draft_execution_receipts.artifact_protocol_receipts、oh_story_delivery_receipts.pre_draft_execution_receipts.write_preparation_checks、oh_story_delivery_receipts.pre_draft_execution_receipts.intent_confirmation_checks、oh_story_delivery_receipts.pre_draft_execution_receipts.benchmark_recall_checks、oh_story_delivery_receipts.pre_draft_execution_receipts.style_sample_checks、oh_story_delivery_receipts.pre_draft_execution_receipts.next_chapter_quality_plan_receipts 中逐项更新 delivered/evidence/remaining_risk、status/evidence/fix 或 used_in_chapter/evidence/excluded_reason/remaining_risk。scene_breakdown 必须保留并更新 scene_start_anchor、scene_end_anchor 和 scene_card_receipts；scene_start_anchor/scene_end_anchor 必须摘自修订后对应场景正文。revision_receipts 中如修改影响后续伏笔、时间线、角色状态、资产归属或关系边界，必须填写 affected_chapters 和 cascade_impacts。chapter_text 是修订后的完整正文，不要 markdown 标题。',
     ].join('\n')
   }
 
@@ -51348,6 +51603,8 @@ export function createNovelWritingService(ctx: {
     const hasStateTrackingConcern = stateTrackingChecks.some(platformCheckNeedsCarryOver)
     const sourceReadinessChecks = asArray(review?.source_readiness_checks || review?.sourceReadinessChecks)
     const hasSourceReadinessConcern = sourceReadinessChecks.some(platformCheckNeedsCarryOver)
+    const artifactProtocolReceipts = asArray(review?.artifact_protocol_receipts || review?.artifactProtocolReceipts)
+    const hasArtifactProtocolConcern = artifactProtocolReceipts.some(preDraftReceiptCheckNeedsCarryOver)
     const writePreparationChecks = asArray(review?.write_preparation_checks || review?.writePreparationChecks)
     const hasWritePreparationConcern = writePreparationChecks.some(platformCheckNeedsCarryOver)
     const nextChapterQualityPlanReceiptChecks = asArray(review?.next_chapter_quality_plan_receipts || review?.nextChapterQualityPlanReceipts)
@@ -51409,7 +51666,7 @@ export function createNovelWritingService(ctx: {
     const hasQualityAuditConcern = qualityAuditChecks.some(platformCheckNeedsCarryOver)
     const hasNextChapterQualityPlanConcern = nextChapterQualityPlanNeedsRepair(review)
     const revisionThreshold = Math.max(78, Number(options.quality_threshold || 0))
-    return Boolean(review?.needs_revision) || Number(review?.score || 100) < revisionThreshold || hasHighIssue || hasPerspectiveConcern || hasDeslopConcern || hasDeslopGateDiagnosticConcern || hasFactualConcern || hasProseMetaConcern || hasDialogueConcern || hasPlotDynamicsConcern || hasContinuityHeatConcern || hasCharacterRelationConcern || hasCharacterBehaviorConcern || hasAssetLinkageConcern || hasStateTrackingConcern || hasSourceReadinessConcern || hasWritePreparationConcern || hasNextChapterQualityPlanReceiptConcern || hasChapterHandoffConcern || hasReaderRetentionConcern || hasIntentConfirmationConcern || hasBenchmarkRecallConcern || hasStyleBoundaryConcern || hasStyleSampleConcern || hasInformationFlowConcern || hasExpectationThresholdConcern || hasTargetReaderConcern || hasGenrePositioningConcern || hasPlotSpecialTopicsConcern || hasFemaleAudienceConcern || hasUpgradeRhythmConcern || hasConflictStructureConcern || hasStoryLoopConcern || hasEmotionalArcConcern || hasChapterHookConcern || hasParagraphHookConcern || hasSuspenseConcern || hasReversalConcern || hasShowdownConcern || hasBridgeUnitConcern || hasOpeningConcern || hasProseCraftConcern || hasPunctuationToneConcern || hasQualityAuditConcern || hasNextChapterQualityPlanConcern
+    return Boolean(review?.needs_revision) || Number(review?.score || 100) < revisionThreshold || hasHighIssue || hasPerspectiveConcern || hasDeslopConcern || hasDeslopGateDiagnosticConcern || hasFactualConcern || hasProseMetaConcern || hasDialogueConcern || hasPlotDynamicsConcern || hasContinuityHeatConcern || hasCharacterRelationConcern || hasCharacterBehaviorConcern || hasAssetLinkageConcern || hasStateTrackingConcern || hasSourceReadinessConcern || hasArtifactProtocolConcern || hasWritePreparationConcern || hasNextChapterQualityPlanReceiptConcern || hasChapterHandoffConcern || hasReaderRetentionConcern || hasIntentConfirmationConcern || hasBenchmarkRecallConcern || hasStyleBoundaryConcern || hasStyleSampleConcern || hasInformationFlowConcern || hasExpectationThresholdConcern || hasTargetReaderConcern || hasGenrePositioningConcern || hasPlotSpecialTopicsConcern || hasFemaleAudienceConcern || hasUpgradeRhythmConcern || hasConflictStructureConcern || hasStoryLoopConcern || hasEmotionalArcConcern || hasChapterHookConcern || hasParagraphHookConcern || hasSuspenseConcern || hasReversalConcern || hasShowdownConcern || hasBridgeUnitConcern || hasOpeningConcern || hasProseCraftConcern || hasPunctuationToneConcern || hasQualityAuditConcern || hasNextChapterQualityPlanConcern
   }
 
   const runProseSelfReviewAndRevision = async (activeWorkspace: string, project: any, contextPackage: any, chapterText: string, modelId?: number, options: any = {}) => {
@@ -51772,6 +52029,10 @@ export function createNovelWritingService(ctx: {
           ...deterministicSourceReadinessChecks,
         ]
       })(),
+      artifact_protocol_receipts: [
+        ...asArray(reviewPayload?.artifact_protocol_receipts || reviewPayload?.artifactProtocolReceipts),
+        ...preDraftReceiptChecks((section: any) => asArray(section?.artifact_protocol_receipts || section?.artifactProtocolReceipts)),
+      ],
       write_preparation_checks: [
         ...appendMissingContractReviewCheck(
           [
@@ -52982,11 +53243,15 @@ export function createNovelWritingService(ctx: {
         ...asArray(resultPayload?.revision_receipts || resultPayload?.revisionReceipts),
         ...asArray(targetProse?.revision_receipts || targetProse?.revisionReceipts),
       ],
+      artifact_protocol_receipts: [
+        ...asArray(resultPayload?.artifact_protocol_receipts || resultPayload?.artifactProtocolReceipts),
+        ...asArray(targetProse?.artifact_protocol_receipts || targetProse?.artifactProtocolReceipts),
+      ],
       pre_draft_execution_receipts: resultPayload?.pre_draft_execution_receipts
         || resultPayload?.preDraftExecutionReceipts
         || targetProse?.pre_draft_execution_receipts
         || targetProse?.preDraftExecutionReceipts,
-    }) || { chapter_blueprint: null, scene_card_receipts: [], delivery_risk_receipts: [], revision_context_receipts: [], revision_receipts: [], deslop_repair_receipts: [], quality_audit_repair_receipts: [], pre_draft_execution_receipts: null }
+    }) || { chapter_blueprint: null, scene_card_receipts: [], delivery_risk_receipts: [], revision_context_receipts: [], revision_receipts: [], deslop_repair_receipts: [], quality_audit_repair_receipts: [], artifact_protocol_receipts: [], pre_draft_execution_receipts: null }
     let finalContinuityNotes = targetProse?.continuity_notes || targetProse?.continuityNotes || resultPayload?.continuity_notes || resultPayload?.continuityNotes || chapter.continuity_notes || []
     let editorRewrite: any = null
     let memePolish: any = null
@@ -53029,6 +53294,7 @@ export function createNovelWritingService(ctx: {
           revision_receipts: ohStoryDeliveryReceipts?.revision_receipts,
           deslop_repair_receipts: ohStoryDeliveryReceipts?.deslop_repair_receipts,
           quality_audit_repair_receipts: ohStoryDeliveryReceipts?.quality_audit_repair_receipts,
+          artifact_protocol_receipts: ohStoryDeliveryReceipts?.artifact_protocol_receipts,
           pre_draft_execution_receipts: ohStoryDeliveryReceipts?.pre_draft_execution_receipts,
         },
         status: 'draft',
@@ -53387,6 +53653,11 @@ export function createNovelWritingService(ctx: {
         ...asArray(selfCheck?.revision?.quality_audit_repair_receipts || selfCheck?.revision?.qualityAuditRepairReceipts),
         ...asArray(ohStoryDeliveryReceipts?.quality_audit_repair_receipts),
       ],
+      artifact_protocol_receipts: [
+        ...asArray(revisionDeliveryReceipts?.artifact_protocol_receipts || revisionDeliveryReceipts?.artifactProtocolReceipts),
+        ...asArray(selfCheck?.revision?.artifact_protocol_receipts || selfCheck?.revision?.artifactProtocolReceipts),
+        ...asArray(ohStoryDeliveryReceipts?.artifact_protocol_receipts),
+      ],
       pre_draft_execution_receipts: revisionDeliveryReceipts?.pre_draft_execution_receipts
         || revisionDeliveryReceipts?.preDraftExecutionReceipts
         || selfCheck?.revision?.pre_draft_execution_receipts
@@ -53431,12 +53702,14 @@ export function createNovelWritingService(ctx: {
     }
     const preStoreSceneCardReceiptSync = buildSceneCardReceiptSyncReport(project, preStoreReceiptSyncChapter, preStoreReceiptSyncContextPackage, finalText)
     const preStoreDeliveryRiskReceiptSync = buildDeliveryRiskReceiptSyncReport(project, preStoreReceiptSyncChapter, preStoreReceiptSyncContextPackage, finalText)
+    const preStoreArtifactProtocolReceiptSync = buildArtifactProtocolReceiptSyncReport(project, preStoreReceiptSyncChapter, preStoreReceiptSyncContextPackage, finalText)
     const postDeliveryReceiptChecks = [
       { sync: nextChapterQualityPlanReceiptSync, sync_key: 'next_chapter_quality_plan_receipts_sync', label: '质量续航回执未闭环' },
       { sync: statusFilterReceiptSync, sync_key: 'status_filter_receipts_sync', label: '状态筛选回执未闭环' },
       { sync: writePreparationReceiptSync, sync_key: 'write_preparation_receipts_sync', label: '写前准备回执未闭环' },
       { sync: preStoreSceneCardReceiptSync, sync_key: 'scene_card_receipts_sync', label: '场景回执未闭环' },
       { sync: preStoreDeliveryRiskReceiptSync, sync_key: 'delivery_risk_receipts_sync', label: '交稿风险回执未闭环' },
+      { sync: preStoreArtifactProtocolReceiptSync, sync_key: 'artifact_protocol_receipts_sync', label: '项目产物协议回执未闭环' },
     ]
       .filter((item: any) => item.sync?.status !== 'ok' && Number(item.sync?.missed_count || 0) > 0)
       .map((item: any) => ({
@@ -53445,7 +53718,7 @@ export function createNovelWritingService(ctx: {
         label: item.label,
         status: 'fail',
         evidence: `${item.sync.label}：${item.sync.summary}`,
-        fix: item.sync.next_actions?.join('；') || '补齐 post-delivery receipt，并用正文证据证明写前准备、状态筛选、质量续航、场景卡或交稿风险已落成。',
+        fix: item.sync.next_actions?.join('；') || '补齐 post-delivery receipt，并用正文证据证明写前准备、状态筛选、项目产物协议、质量续航、场景卡或交稿风险已落成。',
         missed_count: item.sync.missed_count,
       }))
     if (postDeliveryReceiptChecks.length > 0) {
@@ -53572,6 +53845,7 @@ export function createNovelWritingService(ctx: {
           revision_receipts: ohStoryDeliveryReceipts?.revision_receipts,
           deslop_repair_receipts: ohStoryDeliveryReceipts?.deslop_repair_receipts,
           quality_audit_repair_receipts: ohStoryDeliveryReceipts?.quality_audit_repair_receipts,
+          artifact_protocol_receipts: ohStoryDeliveryReceipts?.artifact_protocol_receipts,
           pre_draft_execution_receipts: ohStoryDeliveryReceipts?.pre_draft_execution_receipts,
         },
         status: 'draft',
@@ -54278,6 +54552,7 @@ export function createNovelWritingService(ctx: {
         revision_receipts: ohStoryDeliveryReceipts?.revision_receipts,
         deslop_repair_receipts: ohStoryDeliveryReceipts?.deslop_repair_receipts,
         quality_audit_repair_receipts: ohStoryDeliveryReceipts?.quality_audit_repair_receipts,
+        artifact_protocol_receipts: ohStoryDeliveryReceipts?.artifact_protocol_receipts,
         pre_draft_execution_receipts: ohStoryDeliveryReceipts?.pre_draft_execution_receipts,
       },
       status: 'draft',
@@ -54324,6 +54599,7 @@ export function createNovelWritingService(ctx: {
     const characterBehaviorSync = buildCharacterBehaviorSyncReport(project, updated, contextPackage, finalText)
     const sceneCardReceiptSync = buildSceneCardReceiptSyncReport(project, updated, preStoreReceiptSyncContextPackage, finalText)
     const deliveryRiskReceiptSync = buildDeliveryRiskReceiptSyncReport(project, updated, preStoreReceiptSyncContextPackage, finalText)
+    const artifactProtocolReceiptSync = buildArtifactProtocolReceiptSyncReport(project, updated, preStoreReceiptSyncContextPackage, finalText)
     const assetLinkageSync = buildAssetLinkageSyncReport(project, updated, contextPackage, finalText)
     const stateTrackingSync = buildStateTrackingSyncReport(project, updated, contextPackage, finalText)
     const chapterHandoffSync = buildChapterHandoffSyncReport(project, updated, contextPackage, finalText)
@@ -54397,6 +54673,7 @@ export function createNovelWritingService(ctx: {
     storyStateUpdateWithSync.character_behavior_sync = characterBehaviorSync
     storyStateUpdateWithSync.scene_card_receipts_sync = sceneCardReceiptSync
     storyStateUpdateWithSync.delivery_risk_receipts_sync = deliveryRiskReceiptSync
+    storyStateUpdateWithSync.artifact_protocol_receipts_sync = artifactProtocolReceiptSync
     storyStateUpdateWithSync.asset_linkage_sync = assetLinkageSync
     storyStateUpdateWithSync.state_tracking_sync = stateTrackingSync
     storyStateUpdateWithSync.chapter_handoff_sync = chapterHandoffSync
