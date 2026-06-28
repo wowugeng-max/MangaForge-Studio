@@ -13,27 +13,27 @@ Source reference set: `/private/tmp/oh-story-claudecode/skills/story-long-write/
 <!-- oh-story-progress-summary
 {
   "reference_total": 38,
-  "integrated": 9,
+  "integrated": 10,
   "partial": 25,
-  "todo": 4,
+  "todo": 3,
   "deferred": 0,
-  "remaining_references": 29,
-  "estimated_hours_remaining": 56,
-  "estimated_working_days_remaining": 9.5
+  "remaining_references": 28,
+  "estimated_hours_remaining": 53,
+  "estimated_working_days_remaining": 9
 }
 -->
 
 ## Current Snapshot
 
 - Reference files: 38
-- Integrated enough for current production use: 9
+- Integrated enough for current production use: 10
 - Partially integrated, still worth mining: 25
-- Not systematically reviewed yet: 4
+- Not systematically reviewed yet: 3
 - Deferred: 0
-- Remaining references to improve: 29
-- Estimated remaining effort: about 56 engineering hours, or 9.5 focused working days at 6 hours per day
+- Remaining references to improve: 28
+- Estimated remaining effort: about 53 engineering hours, or 9 focused working days at 6 hours per day
 
-The estimate assumes the current working pattern: one small oh-story increment at a time, with prompt or workflow changes backed by focused tests, then `test:novel-server` and `check` before push. UI progress surfacing is not included in the 56 hours; after this ledger stabilizes, exposing it in the novel workspace should be a separate 4-6 hour slice.
+The estimate assumes the current working pattern: one small oh-story increment at a time, with prompt or workflow changes backed by focused tests, then `test:novel-server` and `check` before push. UI progress surfacing is not included in the 53 hours; after this ledger stabilizes, exposing it in the novel workspace should be a separate 4-6 hour slice.
 
 ## Status Meaning
 
@@ -62,7 +62,7 @@ The estimate assumes the current working pattern: one small oh-story increment a
 | genre-catalog.md | todo | Genre labels exist, but catalog-level guidance has not been mapped. | Build a genre catalog mapping for seed creation, target reader, and must-have scenes. | 2.5h |
 | genre-core-mechanics.md | partial | Genre positioning contract covers core hook, goldfinger fit, must-have scenes, platform fit, and micro-innovation. | Add genre-specific mechanism presets and validation examples. | 2h |
 | genre-readers.md | partial | Target-reader contract and reader expectation checks cover reader profile and desires. | Expand reader profiles into selectable or inferred workbench signals. | 1.5h |
-| genre-writing-formulas.md | todo | Current workflow mentions on-demand formula loading, but formulas are not systematically surfaced. | Add formula-loading rules and focused prompt snippets for expectation, payoff, suspense, and information gap formulas. | 2.5h |
+| genre-writing-formulas.md | partial | Next-batch workflow now loads `references/genre-writing-formulas.md` on demand for expectation, payoff, information-gap, or genre-structure needs instead of always loading it. | Mine the 21 genre formulas into focused prompt snippets and selectable presets for expectation, payoff, suspense, and information-gap execution. | 1.5h |
 | hooks-chapter.md | integrated | Chapter hook contracts, ending contract checks, sudden clue detection, and hook repair carry-over are implemented. | Keep tuning thresholds based on real output. | 0.5h |
 | hooks-paragraph.md | integrated | Paragraph hook checks detect stalled paragraphs and require micro-hook signals. | Keep tuning paragraph-density heuristics. | 0.5h |
 | hooks-suspense.md | integrated | Suspense contract, information gap checks, false-alarm guards, and suspense repair tasks are present. | Keep collecting failure cases. | 0.5h |
@@ -81,17 +81,17 @@ The estimate assumes the current working pattern: one small oh-story increment a
 | style-combat-face.md | partial | Showdown contract and combat or face-slap deterministic checks cover payoff release, antagonist pressure, and agency. | Add more scene-card level combat and public payoff presets. | 1.5h |
 | style-craft.md | partial | Style boundary, punctuation tone, sentence rhythm, subject-name rhythm, and section-density checks are present. | Extract craft rules into shorter prompt snippets to reduce prompt bulk. | 1h |
 | style-genre-modules.md | partial | Benchmark recall and emotion/rhythm module loading rules exist. | Add model-facing fallback receipts proving module, rhythm, and matched chapter usage. | 1.5h |
-| workflow-daily.md | partial | Next-batch workflow rules cover context load, manual fallback table, next chapter numbering, title precheck, benchmark recall, research, word count, serial writing, and Phase 5 checks. | Finish remaining daily workflow slices such as formula loading and exact progress-summary handoff. | 2h |
+| workflow-daily.md | integrated | Next-batch workflow rules cover context load, manual fallback table, next chapter numbering, title precheck, benchmark recall, formula loading, research, word count, serial writing, Phase 5 checks, and exact `追踪/上下文.md` progress-summary handoff. | Keep tuning daily workflow rules after real batch-writing failures appear. | 0.5h |
 | workflow-revision.md | partial | Revision context receipts, revision cascade, scope guard, quality-audit repair, and editor repair prompts exist. | Compare workflow-revision step order against MangaForge editor flow and fill missing handoff receipts. | 2h |
 | writing-craft.md | integrated | Natural writing rules, opening density, event ratio, sensory anchor, dialogue-action rhythm, and prose cleanup gates are implemented. | Keep tuning based on generated prose regressions. | 0.5h |
 
 ## Next Priority Queue
 
-1. `workflow-daily.md`: finish formula-loading discipline and exact `追踪/上下文.md` progress summary handoff.
-2. `genre-writing-formulas.md`: expose formulas only when needed, so prompts gain structure without loading 1500+ lines every chapter.
-3. `quality-checklist.md`: turn broad quality dimensions into a compact cockpit checklist with receipt mapping.
-4. `dialogue-mastery.md`: add deterministic dialogue diagnostics for info-dump and interchangeable voices.
-5. `cross-book-recall.md`: decide how far reference recall should go without increasing similarity or copyright risk.
+1. `genre-writing-formulas.md`: mine the 21 formulas into focused, selectable prompt snippets without loading 1500+ lines every chapter.
+2. `quality-checklist.md`: turn broad quality dimensions into a compact cockpit checklist with receipt mapping.
+3. `dialogue-mastery.md`: add deterministic dialogue diagnostics for info-dump and interchangeable voices.
+4. `cross-book-recall.md`: decide how far reference recall should go without increasing similarity or copyright risk.
+5. `workflow-revision.md`: compare revision step order against MangaForge editor flow and fill missing handoff receipts.
 
 ## Update Rules
 

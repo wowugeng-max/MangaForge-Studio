@@ -37480,6 +37480,18 @@ describe('chapter pre-draft brief', () => {
     expect(brief.next_batch_brief.workflow_rules.join('｜')).toContain('不铺=空洞')
     expect(brief.next_batch_brief.workflow_rules.join('｜')).toContain('在场配角放大成差异化反应')
     expect(brief.next_batch_brief.workflow_rules.join('｜')).toContain('信息型配角不当科普嘴')
+    expect(brief.next_batch_brief.workflow_rules.join('｜')).toContain('按需加载创作公式')
+    expect(brief.next_batch_brief.workflow_rules.join('｜')).toContain('references/genre-writing-formulas.md')
+    expect(brief.next_batch_brief.workflow_rules.join('｜')).toContain('期待感公式、爽点公式、信息差公式')
+    expect(brief.next_batch_brief.workflow_rules.join('｜')).toContain('默认不加载')
+    expect(brief.next_batch_brief.workflow_rules.join('｜')).toContain('避免无条件加载 1500+ 行文件')
+    expect(brief.next_batch_brief.workflow_rules.join('｜')).toContain('批次最终进度摘要')
+    expect(brief.next_batch_brief.workflow_rules.join('｜')).toContain('## 写作进度')
+    expect(brief.next_batch_brief.workflow_rules.join('｜')).toContain('最后完成章节')
+    expect(brief.next_batch_brief.workflow_rules.join('｜')).toContain('本期完成')
+    expect(brief.next_batch_brief.workflow_rules.join('｜')).toContain('## 当前状态')
+    expect(brief.next_batch_brief.workflow_rules.join('｜')).toContain('下一章细纲状态')
+    expect(brief.next_batch_brief.workflow_rules.join('｜')).toContain('注意事项')
   })
 
   test('merges runtime chapterTarget next batch brief into the pre-draft brief when chapter_target already exists', () => {
