@@ -13,27 +13,27 @@ Source reference set: `/private/tmp/oh-story-claudecode/skills/story-long-write/
 <!-- oh-story-progress-summary
 {
   "reference_total": 38,
-  "integrated": 14,
-  "partial": 22,
+  "integrated": 15,
+  "partial": 21,
   "todo": 2,
   "deferred": 0,
-  "remaining_references": 24,
-  "estimated_hours_remaining": 46,
-  "estimated_working_days_remaining": 7.67
+  "remaining_references": 23,
+  "estimated_hours_remaining": 45.5,
+  "estimated_working_days_remaining": 7.58
 }
 -->
 
 ## Current Snapshot
 
 - Reference files: 38
-- Integrated enough for current production use: 14
-- Partially integrated, still worth mining: 22
+- Integrated enough for current production use: 15
+- Partially integrated, still worth mining: 21
 - Not systematically reviewed yet: 2
 - Deferred: 0
-- Remaining references to improve: 24
-- Estimated remaining effort: about 46 engineering hours, or 7.67 focused working days at 6 hours per day
+- Remaining references to improve: 23
+- Estimated remaining effort: about 45.5 engineering hours, or 7.58 focused working days at 6 hours per day
 
-The estimate assumes the current working pattern: one small oh-story increment at a time, with prompt or workflow changes backed by focused tests, then `test:novel-server` and `check` before push. UI progress surfacing is not included in the 46 hours; after this ledger stabilizes, exposing it in the novel workspace should be a separate 4-6 hour slice.
+The estimate assumes the current working pattern: one small oh-story increment at a time, with prompt or workflow changes backed by focused tests, then `test:novel-server` and `check` before push. UI progress surfacing is not included in the 45.5 hours; after this ledger stabilizes, exposing it in the novel workspace should be a separate 4-6 hour slice.
 
 ## Status Meaning
 
@@ -82,16 +82,16 @@ The estimate assumes the current working pattern: one small oh-story increment a
 | style-craft.md | partial | Style boundary, punctuation tone, sentence rhythm, subject-name rhythm, and section-density checks are present. | Extract craft rules into shorter prompt snippets to reduce prompt bulk. | 1h |
 | style-genre-modules.md | partial | Benchmark recall and emotion/rhythm module loading rules exist. | Add model-facing fallback receipts proving module, rhythm, and matched chapter usage. | 1.5h |
 | workflow-daily.md | integrated | Next-batch workflow rules cover context load, manual fallback table, next chapter numbering, title precheck, benchmark recall, formula loading, research, word count, serial writing, Phase 5 checks, and exact `追踪/上下文.md` progress-summary handoff. | Keep tuning daily workflow rules after real batch-writing failures appear. | 0.5h |
-| workflow-revision.md | partial | Revision context receipts, revision cascade, scope guard, quality-audit repair, and editor repair prompts exist; editor one-click revision now names oh-story workflow-revision Step 2/4/5, enforces 30%/800字 scope guard, asks for `revision_context_receipts`, `revision_scope_guard`, `revision_receipts.cascade_impacts`, and stores these receipts in the `editor_revision` payload. | Pass the actual previous/next chapter, outline, foreshadowing, timeline, character, and setting slices directly into editor revision prompts instead of relying on report context. | 1h |
+| workflow-revision.md | integrated | Revision context receipts, revision cascade, scope guard, quality-audit repair, automatic prose revision prompts, editor repair prompts, and editor one-click revision now cover oh-story workflow-revision Step 2/4/5. Editor revision injects actual previous/next chapter, outline, foreshadowing, timeline, character, setting, and relationship slices, enforces the 30%/800字 scope guard, asks for `revision_context_receipts`, `revision_scope_guard`, `revision_receipts.cascade_impacts`, and stores these receipts in the `editor_revision` payload. | Keep tuning revision context slicing from real回炉 cases. | 0.5h |
 | writing-craft.md | integrated | Natural writing rules, opening density, event ratio, sensory anchor, dialogue-action rhythm, and prose cleanup gates are implemented. | Keep tuning based on generated prose regressions. | 0.5h |
 
 ## Next Priority Queue
 
-1. `workflow-revision.md`: compare revision step order against MangaForge editor flow and fill missing handoff receipts.
-2. `genre-catalog.md`: build a genre catalog mapping for seed creation, target reader, and must-have scenes.
-3. `genre-core-mechanics.md`: add genre-specific mechanism presets and validation examples.
-4. `plot-special-topics.md`: review special topics and route them to genre-specific or optional contracts.
-5. `artifact-protocols.md`: compare artifact protocol naming and required fields against MangaForge receipts, then close schema gaps.
+1. `genre-catalog.md`: build a genre catalog mapping for seed creation, target reader, and must-have scenes.
+2. `genre-core-mechanics.md`: add genre-specific mechanism presets and validation examples.
+3. `plot-special-topics.md`: review special topics and route them to genre-specific or optional contracts.
+4. `artifact-protocols.md`: compare artifact protocol naming and required fields against MangaForge receipts, then close schema gaps.
+5. `character-basics.md`: extract missing character-basics rules into pre-draft character constraints and revision checks.
 
 ## Update Rules
 

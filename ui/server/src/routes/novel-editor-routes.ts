@@ -868,9 +868,58 @@ const REVISION_MODE_GUIDE: Record<string, string> = {
   restore_hook: '重点强化章末钩子，同时保持前文因果自然。',
 }
 
+function compactWorkflowRevisionContextValue(value: any, max = 1200) {
+  if (value === null || value === undefined || value === '') return ''
+  const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
+  return String(text || '').slice(0, max)
+}
+
+function buildWorkflowRevisionContextBrief(contextPackage: any = {}, chapter: any = {}) {
+  if (!contextPackage || typeof contextPackage !== 'object') return null
+  const continuity = contextPackage.continuity || {}
+  const chapterTarget = contextPackage.chapter_target || contextPackage.chapterTarget || {}
+  const storyState = contextPackage.story_state || contextPackage.storyState || {}
+  const brief = {
+    previous_chapter: compactWorkflowRevisionContextValue(
+      continuity.previous_chapter || continuity.previousChapter || contextPackage.previous_chapter || contextPackage.previousChapter || chapterTarget.previous_handoff || chapterTarget.previousHandoff,
+    ),
+    current_chapter: compactWorkflowRevisionContextValue({
+      chapter_no: chapter.chapter_no,
+      title: chapter.title,
+      goal: chapterTarget.chapter_goal || chapterTarget.goal || chapterTarget.summary || chapter.chapter_goal || chapter.chapter_summary,
+      conflict: chapterTarget.conflict || chapter.conflict,
+      ending_hook: chapterTarget.ending_hook || chapter.ending_hook,
+    }),
+    next_chapter: compactWorkflowRevisionContextValue(
+      continuity.next_chapter || continuity.nextChapter || contextPackage.next_chapter || contextPackage.nextChapter || chapterTarget.next_chapter_handoff || chapterTarget.nextChapterHandoff,
+    ),
+    outline: compactWorkflowRevisionContextValue(
+      contextPackage.chapter_outline || contextPackage.chapterOutline || contextPackage.outline || contextPackage.current_outline || contextPackage.currentOutline || chapterTarget.chapter_blueprint || chapterTarget.chapterBlueprint,
+    ),
+    foreshadowing: compactWorkflowRevisionContextValue(
+      contextPackage.foreshadowing_context || contextPackage.foreshadowingContext || contextPackage.foreshadowing || storyState.foreshadowing || storyState.foreshadowings,
+    ),
+    character_cards: compactWorkflowRevisionContextValue(
+      contextPackage.character_cards || contextPackage.characterCards || contextPackage.relevant_characters || contextPackage.relevantCharacters || storyState.characters,
+    ),
+    timeline: compactWorkflowRevisionContextValue(
+      contextPackage.timeline_context || contextPackage.timelineContext || contextPackage.timeline || storyState.timeline || storyState.events,
+    ),
+    setting_context: compactWorkflowRevisionContextValue(
+      contextPackage.setting_context || contextPackage.settingContext || contextPackage.worldbuilding || storyState.setting_context || storyState.settingContext,
+    ),
+    relationship_boundaries: compactWorkflowRevisionContextValue(
+      contextPackage.relationship_graph || contextPackage.relationshipGraph || contextPackage.character_relation_contract || contextPackage.characterRelationContract,
+    ),
+  }
+  const compactBrief = Object.fromEntries(Object.entries(brief).filter(([, value]) => Boolean(value)))
+  return Object.keys(compactBrief).length ? compactBrief : null
+}
+
 export function buildEditorRevisionPrompt({
   project,
   chapter,
+  contextPackage,
   report,
   deliveryRiskBrief,
   revisionMode,
@@ -878,6 +927,7 @@ export function buildEditorRevisionPrompt({
 }: {
   project: any
   chapter: any
+  contextPackage?: any
   report: any
   deliveryRiskBrief?: any
   revisionMode: string
@@ -885,6 +935,7 @@ export function buildEditorRevisionPrompt({
 }) {
   const originalText = String(chapter.chapter_text || '')
   const originalLength = originalText.length
+  const workflowRevisionContextBrief = buildWorkflowRevisionContextBrief(contextPackage, chapter)
   return [
     '任务：根据商业编辑报告对当前章节做局部修订补丁。只输出 JSON。',
     `项目：${project.title}`,
@@ -903,6 +954,9 @@ export function buildEditorRevisionPrompt({
     JSON.stringify(report, null, 2).slice(0, 7000),
     '【交稿风险清单】',
     JSON.stringify(deliveryRiskBrief || {}, null, 2).slice(0, 5000),
+    workflowRevisionContextBrief ? '【workflow-revision 上下文包】' : '',
+    workflowRevisionContextBrief ? '以下片段来自 MangaForge 章节上下文包；修订前必须据此完成 Step 2 上下文对照，修订后在 revision_context_receipts 中逐项回执。' : '',
+    workflowRevisionContextBrief ? JSON.stringify(workflowRevisionContextBrief, null, 2).slice(0, 7000) : '',
     '【修订提示】',
     String(userPrompt || report.one_click_revision_prompt || ''),
     '【原章节正文】',
@@ -4328,11 +4382,18 @@ export function registerNovelEditorRoutes(app: Express, ctx: EditorRoutesContext
       const chapters = await listNovelChapters(activeWorkspace, projectId)
       const chapter = chapters.find(item => item.id === chapterId)
       if (!chapter) return res.status(404).json({ error: 'chapter not found' })
+      const [worldbuilding, characters, outlines] = await Promise.all([
+        listNovelWorldbuilding(activeWorkspace, projectId),
+        listNovelCharacters(activeWorkspace, projectId),
+        listNovelOutlines(activeWorkspace, projectId),
+      ])
+      const contextPackage = await ctx.buildChapterContextPackage(activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews)
       const revisionMode = String(req.body.revision_mode || 'from_report')
       const deliveryRiskBrief = buildChapterDeliveryRiskBrief(chapter, reviews)
       const prompt = buildEditorRevisionPrompt({
         project,
         chapter,
+        contextPackage,
         report,
         deliveryRiskBrief,
         revisionMode,
@@ -4449,6 +4510,7 @@ export function registerNovelEditorRoutes(app: Express, ctx: EditorRoutesContext
             ...asArray(resultPayload?.revision_receipts || resultPayload?.prose_chapters?.[0]?.revision_receipts)
               .flatMap((receipt: any) => asArray(receipt?.cascade_impacts || receipt?.cascadeImpacts)),
           ],
+          workflow_revision_context: buildWorkflowRevisionContextBrief(contextPackage, chapter),
           delivery_risk_brief: deliveryRiskBrief,
         }),
       })

@@ -161,6 +161,66 @@ describe('editor revision route safeguards', () => {
     expect(prompt).toContain('affected_chapters')
   })
 
+  test('injects actual workflow-revision context slices into editor revision prompt', () => {
+    const prompt = buildEditorRevisionPrompt({
+      project: { title: '超人的规则怪谈世界' },
+      chapter: {
+        chapter_no: 12,
+        title: '门后名单',
+        chapter_text: '林青禾按住门牌。\n\n周远把名单推到灯下。',
+      },
+      contextPackage: {
+        continuity: {
+          previous_chapter: '第11章尾：水迹名单第一次出现，周远没有拿到原件。',
+          next_chapter: '第13章开篇：名单归属决定广播室门禁。',
+        },
+        chapter_outline: '细纲_第12章：章末只揭示名单半页，不提前公开全部姓名。',
+        foreshadowing_context: ['名单背面的红线是后续伏笔。'],
+        story_state: {
+          characters: [
+            { name: '林青禾', state: '怀疑周远隐瞒名单来源' },
+            { name: '周远', state: '暂时持有名单复印件' },
+          ],
+          timeline: ['门牌翻面后，名单才能被灯照出红线。'],
+        },
+        setting_context: {
+          required: ['广播室门禁', '名单红线'],
+          forbidden: ['提前公布名单全名'],
+        },
+      },
+      report: { must_fix: ['修订后要同步下一章名单伏笔'] },
+      deliveryRiskBrief: { revision_directives: ['下一章必须承接名单归属变化'] },
+      revisionMode: 'from_report',
+      userPrompt: '只改章末名单揭示。',
+    })
+
+    expect(prompt).toContain('【workflow-revision 上下文包】')
+    expect(prompt).toContain('第11章尾')
+    expect(prompt).toContain('第13章开篇')
+    expect(prompt).toContain('细纲_第12章')
+    expect(prompt).toContain('名单背面的红线')
+    expect(prompt).toContain('林青禾')
+    expect(prompt).toContain('周远')
+    expect(prompt).toContain('门牌翻面后')
+    expect(prompt).toContain('广播室门禁')
+    expect(prompt).toContain('提前公布名单全名')
+  })
+
+  test('builds context package before applying editor revision', async () => {
+    const { readFileSync } = await import('fs')
+    const { join } = await import('path')
+    const source = readFileSync(join(import.meta.dir, 'novel-editor-routes.ts'), 'utf8')
+    const routeStart = source.indexOf("app.post('/api/novel/reviews/:reviewId/apply-revision'")
+    const routeBlock = source.slice(routeStart, source.indexOf("app.post('/api/novel/chapters/:chapterId/quality-card'", routeStart))
+
+    expect(routeStart).toBeGreaterThanOrEqual(0)
+    expect(routeBlock).toContain('listNovelWorldbuilding')
+    expect(routeBlock).toContain('listNovelCharacters')
+    expect(routeBlock).toContain('listNovelOutlines')
+    expect(routeBlock).toContain('ctx.buildChapterContextPackage')
+    expect(routeBlock).toContain('contextPackage')
+  })
+
   test('persists editor workflow revision receipts for handoff tracking', async () => {
     const { readFileSync } = await import('fs')
     const { join } = await import('path')
