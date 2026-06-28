@@ -13,25 +13,25 @@ Source reference set: `/private/tmp/oh-story-claudecode/skills/story-long-write/
 <!-- oh-story-progress-summary
 {
   "reference_total": 38,
-  "integrated": 22,
-  "partial": 16,
+  "integrated": 23,
+  "partial": 15,
   "todo": 0,
   "deferred": 0,
-  "remaining_references": 16,
-  "estimated_hours_remaining": 32.5,
-  "estimated_working_days_remaining": 5.42
+  "remaining_references": 15,
+  "estimated_hours_remaining": 31,
+  "estimated_working_days_remaining": 5.17
 }
 -->
 
 ## Current Snapshot
 
 - Reference files: 38
-- Integrated enough for current production use: 22
-- Partially integrated, still worth mining: 16
+- Integrated enough for current production use: 23
+- Partially integrated, still worth mining: 15
 - Not systematically reviewed yet: 0
 - Deferred: 0
-- Remaining references to improve: 16
-- Estimated remaining effort: about 32.5 engineering hours, or 5.42 focused working days at 6 hours per day
+- Remaining references to improve: 15
+- Estimated remaining effort: about 31 engineering hours, or 5.17 focused working days at 6 hours per day
 
 The estimate assumes the current working pattern: one small oh-story increment at a time, with prompt or workflow changes backed by focused tests, then `test:novel-server` and `check` before push. UI progress surfacing is not included in the remaining estimate; after this ledger stabilizes, exposing it in the novel workspace should be a separate 4-6 hour slice.
 
@@ -55,7 +55,7 @@ The estimate assumes the current working pattern: one small oh-story increment a
 | commercial-core-methods.md | integrated | Target reader, bridge unit, reader payoff, retention, expectation threshold, golden-three launch, quality audit, and core-contract radar now cover the reference's commercial method stack. `core_contract_radar` carries selling-point execution, repetition strategy, commercial rhythm, goldfinger structure, and launch-pressure rules into pre-draft briefs, prose prompts, self-review, revision, unattended blueprint construction, deterministic `buildCoreContractSyncReport`, and repair carry-over. Focused tests cover prompt hydration, post-delivery misses, and review/revision enforcement. | Keep tuning evidence heuristics for real chapters where commercial rhythm is implied rather than stated. | 0.5h |
 | cross-book-recall.md | integrated | Benchmark recall brief and prose prompt carry `副对标召回摘要`, secondary benchmark budget/sorting, canonical source rules, `secondary_benchmark_boundary`, review checks, and write-preparation `source_gaps`/`must_confirm` coverage for registry and main-benchmark gaps in `ui/server/src/routes/novel-writing-service.ts`. Focused tests cover secondary benchmark contamination, budget trimming, prompt placement, and write-preparation receipts. | Keep tuning cross-book recall from real multi-benchmark projects. | 0.5h |
 | dialogue-mastery.md | integrated | Dialogue contract covers voice anchors, subtext, power-length rules, spectator dialogue, rhythm, execution checklist, dialogue receipts, deterministic info-dump and interchangeable-voice diagnostics, prose prompt enforcement, self-review coverage, post-delivery sync, and repair carry-over. | Keep tuning scene-level dialogue execution checklist from real generation misses. | 0.5h |
-| emotional-arc-design.md | partial | Emotional arc contract covers arc shape, pressure, payoff density, peak-end rules, and quality checks. | Connect emotion-arc findings more directly to scene-card generation and repair-task routing. | 1.5h |
+| emotional-arc-design.md | integrated | Emotional arc contract now carries scene execution rules, reaction structures, expectation relay, arc shape, pressure, payoff density, peak-end rules, and quality checks into pre-draft briefs, prose prompts, self-review, revision, deterministic `buildEmotionalArcSyncReport`, staged scene-card fields (`emotional_arc_stage`, `reader_emotion_goal`, `reaction_structure`, `expectation_bridge`), and repair carry-over routing. Focused tests cover scene-card projection and post-delivery sync misses. | Keep tuning scene-stage evidence heuristics from real chapters where the model implies stages without labels. | 0.5h |
 | emotional-methods.md | partial | Emotion module, payoff setup, emotional turn, and reader expectation checks are present in pre-draft and review flows. | Mine remaining emotion formulas into concise prompt fragments instead of broad contracts. | 1.5h |
 | female-audience-writing.md | partial | Female-audience contract is conditionally requested for female or female-channel projects. | Add project-level detection and UI confirmation so this contract is active only when intended. | 1.5h |
 | format-and-structure.md | partial | Prose format and metadata scans detect title, chapter marker, front matter, and engineering-word violations. | Compare all format requirements and add missing deterministic checks. | 1h |
@@ -87,11 +87,11 @@ The estimate assumes the current working pattern: one small oh-story increment a
 
 ## Next Priority Queue
 
-1. `emotional-arc-design.md`: connect emotion-arc findings more directly to scene-card generation and repair-task routing.
-2. `character-relations.md`: add clearer relation progression diagnostics before prose, not only after review.
-3. `character-design-methods.md`: mine remaining design methods for project creation and role-card generation prompts.
-4. `plot-core-methods.md`: convert remaining high-level methods into smaller generation-time gates.
-5. `outline-structure-theory.md`: mine structure theory into project-level longform skeleton generation.
+1. `character-relations.md`: add clearer relation progression diagnostics before prose, not only after review.
+2. `character-design-methods.md`: mine remaining design methods for project creation and role-card generation prompts.
+3. `plot-core-methods.md`: convert remaining high-level methods into smaller generation-time gates.
+4. `outline-structure-theory.md`: mine structure theory into project-level longform skeleton generation.
+5. `outline-conflict.md`: tie conflict gaps earlier into outline and scene-card generation.
 
 ## Update Rules
 

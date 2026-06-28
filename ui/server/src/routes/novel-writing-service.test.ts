@@ -1242,6 +1242,44 @@ describe('normalizeSceneCardsPayload', () => {
     expect(sceneCards[2].serial_risk_repairs).toContain('情绪弧')
   })
 
+  test('projects emotional-arc carry-over into staged scene execution fields', () => {
+    const emotionalArcRepair = '下一章必须补情绪弧：每个场景标注当前是调动还是释放；虐点按前反应->复现->后反应，闭环当前期待时开启下一开环。'
+    const sceneCards = normalizeSceneCardsPayload({
+      scene_cards: [
+        {
+          title: '坏信预知',
+          purpose: '让读者先知道坏结果',
+          beat: '信使把血书压在门缝里。',
+        },
+        {
+          title: '血书复现',
+          purpose: '让坏结果真的发生',
+          beat: '妹妹的旧名牌被当众摔碎。',
+        },
+        {
+          title: '反手立誓',
+          purpose: '让主角作出改变并开启新开环',
+          beat: '主角收起碎片，决定查到第三个证人。',
+        },
+      ],
+    }, {
+      chapter_target: {
+        delivery_risk_carry_over: {
+          required_actions: [emotionalArcRepair],
+        },
+      },
+    })
+
+    expect(sceneCards[0].emotional_arc_stage).toContain('调动/前反应')
+    expect(sceneCards[0].reader_emotion_goal).toContain('读者提前知道坏结果')
+    expect(sceneCards[1].emotional_arc_stage).toContain('复现/反制')
+    expect(sceneCards[1].reaction_structure).toContain('复现')
+    expect(sceneCards[2].emotional_arc_stage).toContain('后反应/释放')
+    expect(sceneCards[2].expectation_bridge).toContain('下一开环')
+    expect(sceneCards[2].reader_payoff).toContain(emotionalArcRepair)
+    expect(sceneCards[2].serial_risk_repairs).toContain('情绪弧')
+  })
+
   test('projects reader-retention carry-over into scene hook hunger and payoff fields', () => {
     const readerRetentionRepair = '下一章必须补追读留存：前300字给Hook上瘾触发，信息差植入问号并按剥洋葱卡住关键线索，章末用湿漉漉的旧名单制造翻页问题。'
     const sceneCards = normalizeSceneCardsPayload({
@@ -12960,6 +12998,7 @@ describe('chapter prose word target', () => {
       '铺垫没有只拖一个大爽点：第一段确认旧账册墨色异常形成信息增量，第二段用袖口底牌反制执事催认罪，第三段林青禾公开站到他身侧带来关系变化，最后才反证旧账完成大爽点。',
       '这一次递增先从个人洗清冤屈，扩散到全场弟子改口，再逼宗门长老公开承认旧案牵连整座审判庭；揭示深度也从账册表象推进到账房本质黑幕，最后颠覆执事身份。',
       '这次仍然使用当众打脸的情绪模块，但没有重复同一个戏剧单元：场景从酒楼换到审判庭，对手从路人换成执事，新增“旧案牵连师门”的愧疚情绪，stakes 从个人清白提高到审判资格和宗门规则。',
+      '场景1标注为调动/前反应，让读者提前知道旧账册压罪的坏结果；场景2标注为复现，执事逼认罪让坏结果真的发生；场景3标注为后反应/释放，沈砚作出改变并追查第二个证人，下一开环同时开启。',
       '下行情节中读者一直看得见底牌或潜在解法：旧印章、袖口暗牌和账册墨色都在反击前露过面。',
       '目标达成后，旧印章背面露出第二个证人的名字，新的期待立起来。',
       '下一个期待立起来之前，当前期待没有被散场打断。',
@@ -12980,7 +13019,7 @@ describe('chapter prose word target', () => {
     expect(okReport.status).toBe('ok')
     expect(okReport.label).toBe('情绪弧 OK')
     expect(okReport.missed_count).toBe(0)
-    expect(okReport.delivered.map((item: any) => item.label)).toEqual(expect.arrayContaining(['情绪公式', '调动释放', '爽点倒推法', '装逼层级', '多爽点密度', '情绪模块重组', '爽点递增对比', '下行情节安全感']))
+    expect(okReport.delivered.map((item: any) => item.label)).toEqual(expect.arrayContaining(['情绪公式', '调动释放', '爽点倒推法', '装逼层级', '多爽点密度', '情绪模块重组', '爽点递增对比', '场景情绪执行', '下行情节安全感']))
     expect(warnReport.status).toBe('warn')
     expect(warnReport.label).toContain('情绪弧缺口')
     expect(warnReport.missed.map((item: any) => item.label)).toEqual(expect.arrayContaining(['情绪公式', '调动释放', '爽点倒推法', '装逼层级', '多爽点密度', '情绪模块重组', '爽点递增对比', '下行情节安全感']))
@@ -13041,6 +13080,56 @@ describe('chapter prose word target', () => {
     expect(warnReport.missed.find((item: any) => item.key === 'emotional_turning_rules')?.repair_instruction).toContain('新证据')
     expect(okReport.status).toBe('ok')
     expect(okReport.delivered.find((item: any) => item.key === 'emotional_turning_rules')?.evidence.join('｜')).toContain('事件触发')
+  })
+
+  test('checks emotional arc scene execution and expectation relay after delivery', () => {
+    const project = { title: '长夜账本' }
+    const chapter = { id: 91, chapter_no: 91, title: '血书回声' }
+    const contextPackage = {
+      chapter_target: {
+        emotional_arc_contract: {
+          version: 'oh_story_emotional_arc_v1',
+          scene_execution_rules: [
+            '每个场景必须标注读者当前情绪阶段：调动、复现、释放或后反应。',
+            '虐/悲壮/遗憾场景必须按前反应 -> 复现 -> 后反应执行。',
+            '闭环当前期待时必须同时开启下一开环。',
+          ],
+          reaction_structure_rules: [
+            '前反应：让读者提前知道坏结果。',
+            '复现：让坏结果真的发生。',
+            '后反应：主角真情流露并作出改变。',
+          ],
+          expectation_rules: ['闭环一个期待时，必须同时开启新的期待或更大问题。'],
+          quality_checks: ['场景卡和正文必须能对应调动、复现、后反应、下一开环。'],
+        },
+      },
+    }
+    const okText = [
+      '场景1标注为调动/前反应：读者提前知道坏结果，血书压在门缝里，妹妹还在笑着收拾旧名牌。',
+      '场景2标注为复现：坏结果真的发生，旧名牌被当众摔碎，压迫从预知落到现场。',
+      '场景3标注为后反应/释放：主角真情流露，把碎片收进掌心，作出改变，决定查第三个证人。',
+      '当前期待闭环为旧名牌真相，章尾同时开启下一开环：第三个证人为什么知道血书背面的名字。',
+    ].join('\n')
+    const flatText = [
+      '主角很难过，妹妹也很难过。',
+      '坏事发生了，大家沉默。',
+      '最后他觉得应该振作，事情暂时结束。',
+    ].join('\n')
+
+    const okReport = buildEmotionalArcSyncReport(project, chapter, contextPackage, okText)
+    const warnReport = buildEmotionalArcSyncReport(project, chapter, contextPackage, flatText)
+
+    expect(okReport.delivered.map((item: any) => item.key)).toContain('scene_execution_rules')
+    expect(okReport.delivered.find((item: any) => item.key === 'scene_execution_rules')?.evidence.join('｜')).toContain('下一开环')
+    expect(warnReport.status).toBe('warn')
+    expect(warnReport.missed.find((item: any) => item.key === 'scene_execution_rules')?.label).toBe('场景情绪执行')
+    expect(warnReport.missed.find((item: any) => item.key === 'scene_execution_rules')?.missed_items).toEqual(expect.arrayContaining([
+      '缺场景情绪阶段标注',
+      '缺前反应-复现-后反应链条',
+      '缺闭环期待后的下一开环',
+    ]))
+    expect(warnReport.priority_repair).toBe('优先补场景情绪执行')
+    expect(warnReport.next_actions.join('；')).toContain('每个场景标注调动/复现/释放/后反应')
   })
 
   test('reads emotional arc sync contract from camelCase chapter raw preDraftBrief', () => {
