@@ -23468,6 +23468,99 @@ describe('chapter pre-draft brief', () => {
     expect(brief.bridge_unit_contract.revision_priorities.join('｜')).toContain('补连续期待')
   })
 
+  test('adds an oh-story plot framework contract to route genre frameworks across planning stages', () => {
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+    const project = {
+      title: '失业维修师的系统订单',
+      genre: '都市系统升级',
+      synopsis: '中年维修师绑定订单系统，通过任务、奖励、兑换和新任务循环翻身。',
+      reference_config: {
+        writing_bible: {
+          golden_finger: '订单系统把维修任务转成经验、技能和工具奖励。',
+          commercial_positioning: {
+            selling_points: ['系统订单奖励', '客户态度反转', '维修协会打脸'],
+          },
+        },
+      },
+    }
+    const contextPackage = {
+      chapter_target: {
+        chapter_no: 5,
+        title: '第一张协会黑名单',
+        summary: '维修协会把主角拉进黑名单，主角必须用系统奖励的检测笔证明协会误判。',
+        conflict: '协会会长公开宣布黑名单，客户和围观维修师都不敢让主角碰设备。',
+        ending_hook: '系统弹出兑换页，提示下一单是医院备用电源。',
+        scene_cards: [
+          {
+            scene_no: 1,
+            title: '黑名单公布',
+            purpose: '敌人阵营先出牌，制造协会权威压力。',
+            conflict: '协会会长公开宣布主角没有维修资格。',
+            reader_payoff: '读者看到主角被看低，等待系统奖励反打。',
+          },
+          {
+            scene_no: 2,
+            title: '检测笔反打',
+            purpose: '主角阵营用系统奖励破解设备误判。',
+            action_beats: ['检测笔点亮隐藏故障', '客户态度松动', '围观维修师开始议论'],
+            reader_payoff: '任务奖励变成可见能力，客户态度反转。',
+          },
+          {
+            scene_no: 3,
+            title: '兑换新任务',
+            purpose: '观众阵营震惊后，系统给出新任务和更高门槛。',
+            reader_payoff: '主角获得工具升级和下一单期待。',
+            ending_hook_seed: '医院备用电源任务进入倒计时。',
+          },
+        ],
+      },
+    }
+
+    const brief = buildChapterPreDraftBrief(project, contextPackage)
+    const confirmedContext = mergeConfirmedPreDraftBriefIntoContext(contextPackage, {
+      ...brief,
+      confirmed_at: '2026-06-24T12:00:00.000Z',
+    })
+    const prompt = service.buildParagraphProseContext(
+      project,
+      confirmedContext,
+      null,
+      { chapter_no: 5, title: '第一张协会黑名单' },
+    )
+
+    expect(brief.plot_framework_contract.version).toBe('oh_story_plot_framework_v1')
+    expect(brief.plot_framework_contract.genre_framework_route.primary_framework).toContain('RPG结构与奖励设计')
+    expect(brief.plot_framework_contract.genre_framework_route.core_loop).toContain('任务→奖励→兑换→新任务')
+    expect(brief.plot_framework_contract.selected_frameworks.join('｜')).toContain('RPG结构与奖励设计')
+    expect(brief.plot_framework_contract.selected_frameworks.join('｜')).toContain('套路模板重复法')
+    expect(brief.plot_framework_contract.selected_frameworks.join('｜')).toContain('框架与阵营手牌法')
+    expect(brief.plot_framework_contract.stage_ownership.creation.join('｜')).toContain('题材→框架路由')
+    expect(brief.plot_framework_contract.stage_ownership.outline.join('｜')).toContain('单段剧情结构模板')
+    expect(brief.plot_framework_contract.stage_ownership.scene_card.join('｜')).toContain('阵营手牌法')
+    expect(brief.plot_framework_contract.stage_ownership.prose.join('｜')).toContain('任务→奖励→兑换→新任务')
+    expect(brief.plot_framework_contract.stage_ownership.revision.join('｜')).toContain('五不崩')
+    expect(brief.plot_framework_contract.rpg_reward_loop.rules.join('｜')).toContain('奖励形式要多样化')
+    expect(brief.plot_framework_contract.faction_hand_framework.rules.join('｜')).toContain('主角阵营')
+    expect(brief.plot_framework_contract.faction_hand_framework.rules.join('｜')).toContain('敌人阵营')
+    expect(brief.plot_framework_contract.faction_hand_framework.rules.join('｜')).toContain('观众阵营')
+    expect(brief.plot_framework_contract.routine_variation_rules.join('｜')).toContain('场景更换')
+    expect(brief.plot_framework_contract.global_no_collapse_checks.join('｜')).toContain('目标不缺失')
+    expect(confirmedContext.chapter_target.plot_framework_contract.quality_checks.join('｜')).toContain('主线和支线错开节奏推进')
+    expect(prompt).toContain('【剧情框架合同】')
+    expect(prompt).toContain('执行 chapter_target.plot_framework_contract')
+    expect(prompt).toContain('题材→框架路由')
+    expect(prompt).toContain('RPG结构与奖励设计')
+    expect(prompt).toContain('框架与阵营手牌法')
+    expect(prompt).toContain('套路模板重复法')
+    expect(prompt).toContain('五不崩')
+    expect(prompt).toContain('plot_framework_checks')
+    expect(prompt.indexOf('【剧情框架合同】')).toBeLessThan(prompt.indexOf('【结构化上下文包】'))
+  })
+
   test('adds an oh-story opening contract to early-chapter pre-draft brief and prose prompt', () => {
     const service = createNovelWritingService({
       getProject: async () => null,
@@ -51770,6 +51863,24 @@ describe('chapter context word target source guards', () => {
     expect(repairBlock).toContain('四章一桥段')
     expect(repairBlock).toContain('高潮中埋钩子')
     expect(repairBlock).toContain('连续 2 章没有目标推进')
+  })
+
+  test('auto-repairs unattended chapter blueprint with oh-story plot framework contract', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')
+    const settingsStart = source.indexOf('let latestSettings = settings', repairStart)
+    const repairBlock = source.slice(repairStart, settingsStart)
+
+    expect(repairStart).toBeGreaterThanOrEqual(0)
+    expect(settingsStart).toBeGreaterThan(repairStart)
+    expect(repairBlock).toContain('plot_framework_contract')
+    expect(repairBlock).toContain('plot_framework_contract: repairedEmotionAndHookBrief.plot_framework_contract')
+    expect(repairBlock).toContain('剧情框架合同')
+    expect(repairBlock).toContain('题材→框架路由')
+    expect(repairBlock).toContain('RPG结构与奖励设计')
+    expect(repairBlock).toContain('框架与阵营手牌法')
+    expect(repairBlock).toContain('套路模板重复法')
+    expect(repairBlock).toContain('五不崩')
   })
 
   test('auto-repairs unattended chapter blueprint with oh-story style boundary contract', () => {

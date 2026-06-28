@@ -39736,6 +39736,271 @@ function buildBridgeUnitContract(project: any = {}, contextPackage: any = {}) {
   }
 }
 
+const OH_STORY_PLOT_FRAMEWORK_STAGE_OWNERSHIP = {
+  creation: [
+    '题材→框架路由：创建/重建作品时先确认题材核心循环，再选主用框架和辅助框架。',
+    '核心梗与细化法：一句话主线必须能继续拆成卷纲、章纲和正文，不把框架当摆设。',
+    '大结构设计：确定欺骗式主线、大期待和阶段循环，避免主线过早彻底解决。',
+  ],
+  outline: [
+    '单段剧情结构模板：每段 10-40 章按起因→发展→铺垫→高潮→转折→结局/收获组织。',
+    '多线穿插：战力/装备/情感/声望线错开推进，铺垫线和收获线交替。',
+    '故事本质与六幕结构：事件必须筛选、排序、因果化，并保留第六幕余波。',
+  ],
+  scene_card: [
+    '阵营手牌法：每个主要场景标注主角阵营、敌人阵营、观众阵营分别出什么牌。',
+    '分步骤与缓冲区：把目标拆成阶段动作，给主角非处理不可的近端理由。',
+    '冲突黏结剂：场景卡必须说明杀人理由、工作职责、道德责任或实体场所等有进无出理由。',
+  ],
+  prose: [
+    '任务→奖励→兑换→新任务：系统/升级文正文必须让任务、奖励、兑换或下一任务至少一项可见。',
+    '装逼五步法/三压一爆三震：打脸章按铺压、出手、分层反应和状态变化展开。',
+    '双线法与信息差：主线做事，副线让配角发现或误判，信息差兑现时形成情绪收益。',
+  ],
+  revision: [
+    '五不崩：目标不缺失、卖点不减少、社会关系不空白、上层地位不缺失、成长不停止。',
+    '剧情流检查：主线、世界线、升级线必须交织推进，不能单线空转。',
+    '套路重复检查：同一核心要素组合不能连续重复，重复时必须换场景、人物、情绪或奖励。',
+  ],
+}
+
+const OH_STORY_PLOT_FRAMEWORK_RPG_RULES = [
+  'RPG结构与奖励设计：升级文的核心是反馈点，读者在什么位置获得满足感必须提前设计。',
+  '任务→奖励→兑换→新任务必须形成循环；奖励之后要立刻给新任务、新门槛或新兑换欲望。',
+  '奖励形式要多样化：升级、装备、认可、揭秘、权限、关系态度和环境变化都可以是奖励。',
+  '飞升/换地图必须带来新信息、新人设展开空间和新冲突，不能只是换地名重复。',
+]
+
+const OH_STORY_PLOT_FRAMEWORK_FACTION_HAND_RULES = [
+  '框架与阵营手牌法：框架本质是主线、支线、日常的比重与排列组合。',
+  '主角阵营、敌人阵营、观众阵营按回合出牌；每张牌必须带来反应、后果和下一张牌。',
+  '主角吃瘪时必须从其他角度拉回情绪，例如揭示深层逻辑、意外收获或新底牌影子。',
+  '高阶用螺旋并线：两条以上主线轮流推进，每轮都比上轮升一级，避免单线打到天花板。',
+]
+
+const OH_STORY_PLOT_FRAMEWORK_DOUBLE_LINE_RULES = [
+  '双线法与信息差：主线让主角做事，副线让配角挖掘主角身份、态度、人脉或背后故事。',
+  '主角知道、读者知道、配角不知道的信息差，必须在配角发现时转成震惊、改态或关系变化。',
+  '现实线和副本线/事业线和感情线交替推进，不得长期只有一条线有结果。',
+  '感情线要有明确戏剧性和阶段性，必须与事业线目标绑定或交叉，不能独立漂浮。',
+]
+
+const OH_STORY_PLOT_FRAMEWORK_ROUTINE_RULES = [
+  '套路模板重复法：可以重复核心看点，但必须做场景更换、人物更换、情绪更换或奖励更换，让读者看不出模板。',
+  '通用升级装逼模板：烘托高逼格反派 -> 主角扮猪被看低 -> 最后一刻吃虎超越预期。',
+  '看点重复、人物重复、剧情重复要合并使用；人物固定行为特质必须在不同场景重复展现。',
+  '套路使用要重构或微调，不能直接套经典故事情节；重构时保留情绪模块，换故事构型。',
+]
+
+const OH_STORY_PLOT_FRAMEWORK_LARGE_STRUCTURE_RULES = [
+  '大结构是欺骗式主线：每次接近完成又差一点，悬念永不断。',
+  '起承转合的大框架：起建立世界/主角/金手指，承填充小剧情，转引入更大危机，合解决核心矛盾。',
+  '热门书单段结构：起因、发展、铺垫、高潮、转折、结局/收获，段落结束必须清点收获并铺垫下一段。',
+  '卷末同时解决当前矛盾并开启新地图，卷最后一幕应成为下一卷第一幕。',
+]
+
+const OH_STORY_PLOT_FRAMEWORK_SIX_ACT_RULES = [
+  '故事 = 对事件进行选择、排序、因果化；静态事实不等于故事。',
+  '开篇要找到最有戏剧张力的事件放在最前面。',
+  '转折目的在增加冲突和情绪，必须让冲突性质质变，并做到意料之外、情理之中。',
+  '第六幕余波：明线实力与暗线社会认知每次失衡，都是装逼和地位提升机会。',
+]
+
+const OH_STORY_PLOT_FRAMEWORK_NO_COLLAPSE_CHECKS = [
+  '目标不缺失：主角始终有当前小目标和长线大目标。',
+  '卖点不减少：核心卖点不能中途消失。',
+  '社会关系不空白：主角必须有互动的人际网络。',
+  '上层地位不缺失：要有对上位者、上层资源或更高规则的追求和接触。',
+  '成长不停止：实力、地位、资源、关系或认知的提升持续给出。',
+]
+
+const OH_STORY_PLOT_FRAMEWORK_QUALITY_CHECKS = [
+  '主线和支线错开节奏推进，没有同时爆完也没有同时空转。',
+  '当前段落有起因→发展→高潮→收获的完整闭环。',
+  '段落结尾同时完成收获清点和下一段铺垫。',
+  '冲突有明确黏结剂，读者相信主角不可能随时退出。',
+  '期待感 > 爽点，铺垫篇幅不能明显少于释放篇幅。',
+  '套路重复时更换场景、人物、情绪或奖励。',
+  '没有连续两段使用相同核心要素组合。',
+]
+
+function plotFrameworkExplicitContract(contextPackage: any = {}) {
+  return contextPackage?.chapter_target?.plot_framework_contract
+    || contextPackage?.chapter_target?.plotFrameworkContract
+    || contextPackage?.plot_framework_contract
+    || contextPackage?.plotFrameworkContract
+    || contextPackage?.pre_draft_brief?.plot_framework_contract
+    || contextPackage?.preDraftBrief?.plotFrameworkContract
+}
+
+function inferPlotFrameworkRoute(project: any = {}, contextPackage: any = {}) {
+  const target = contextPackage?.chapter_target || {}
+  const sceneCards = asArray(target.scene_cards || target.sceneCards)
+  const text = compactBriefText([
+    project?.genre,
+    project?.target_platform,
+    project?.synopsis,
+    project?.reference_config?.writing_bible?.golden_finger,
+    project?.reference_config?.writing_bible?.commercial_positioning?.selling_points,
+    target.title,
+    target.summary,
+    target.conflict,
+    target.ending_hook,
+    ...sceneCards.flatMap((scene: any) => [
+      scene.title,
+      scene.purpose,
+      scene.conflict,
+      scene.reader_payoff,
+      scene.reversal,
+      scene.ending_hook_seed,
+    ]),
+  ].flat().filter(Boolean).join('；'))
+
+  if (/系统|无限|任务|奖励|兑换|副本/.test(text)) {
+    return {
+      genre_hint: '系统文/无限流/升级循环',
+      core_loop: '任务→奖励→兑换→新任务',
+      primary_framework: 'RPG结构与奖励设计',
+      auxiliary_frameworks: ['核心梗循环法', '套路模板重复法', '框架与阵营手牌法'],
+      routing_reason: '文本含系统、任务、奖励或兑换信号，优先用反馈点和奖励循环保证读者获得感。',
+    }
+  }
+  if (/升级|玄幻|修仙|异能|战力|境界|飞升/.test(text)) {
+    return {
+      genre_hint: '升级文/玄幻修仙',
+      core_loop: '夺宝+比武+女性/关系/声望三要素轮换',
+      primary_framework: '玄幻框架拆解',
+      auxiliary_frameworks: ['RPG结构与奖励设计', '阵营手牌法', '套路模板重复法'],
+      routing_reason: '文本含升级、境界或战力信号，优先保证奖励、比武/夺宝和声望线错峰。',
+    }
+  }
+  if (/追妻|虐|感情|恋爱|甜宠|先婚|女主|男主/.test(text)) {
+    return {
+      genre_hint: '感情线/追妻/甜宠',
+      core_loop: '伤害/误解→追悔/拉扯→挽回/确认→新情感阻碍',
+      primary_framework: '双线法与信息差',
+      auxiliary_frameworks: ['结构与人物的关系', '悬念与冲突深化', '结构化拆书法'],
+      routing_reason: '文本含感情线或关系拉扯信号，优先让事业线/情感线绑定推进。',
+    }
+  }
+  if (/打脸|装逼|逆袭|公开|审判|震惊|扮猪|吃虎|都市/.test(text)) {
+    return {
+      genre_hint: '都市装逼/打脸逆袭',
+      core_loop: '扮猪→吃虎→震惊→换地图/更高门槛',
+      primary_framework: '套路模板重复法',
+      auxiliary_frameworks: ['框架与阵营手牌法', '装逼五步法', '三压一爆三震'],
+      routing_reason: '文本含打脸、装逼或都市逆袭信号，优先搭舞台、阵营和分层反应。',
+    }
+  }
+  if (/悬疑|解谜|线索|真相|规则怪谈|谜题/.test(text)) {
+    return {
+      genre_hint: '悬疑/解谜/规则',
+      core_loop: '线索→推理→反转→新谜题',
+      primary_framework: '故事本质与六幕结构',
+      auxiliary_frameworks: ['悬念与冲突深化', '双线法与信息差', '核心梗与细化法'],
+      routing_reason: '文本含线索、真相或规则谜题信号，优先保证因果链、悬念和新谜题接力。',
+    }
+  }
+  return {
+    genre_hint: '通用长篇剧情流',
+    core_loop: '目标→阻碍→行动→反馈→新目标',
+    primary_framework: '核心梗与细化法',
+    auxiliary_frameworks: ['故事本质与六幕结构', '分步骤与缓冲区', '剧情流五不崩'],
+    routing_reason: '未命中特定题材框架，使用通用剧情流和因果链框架保证长线不崩。',
+  }
+}
+
+function buildPlotFrameworkRewardPoints(contextPackage: any = {}) {
+  const target = contextPackage?.chapter_target || {}
+  const sceneCards = asArray(target.scene_cards || target.sceneCards)
+  return uniqueBriefStrings([
+    ...sceneCards.map((scene: any) => compactBriefText(scene.reader_payoff || scene.readerPayoff || scene.payoff)),
+    target.ending_hook ? `下一任务/下一门槛：${compactBriefText(target.ending_hook)}` : '',
+    target.summary ? `本章任务：${compactBriefText(target.summary)}` : '',
+  ], 8)
+}
+
+function buildPlotFrameworkFactionCards(contextPackage: any = {}) {
+  const target = contextPackage?.chapter_target || {}
+  const sceneCards = asArray(target.scene_cards || target.sceneCards)
+  const enemyCards = sceneCards.map((scene: any) => compactBriefText(scene.conflict)).filter(Boolean)
+  const protagonistCards = sceneCards.map((scene: any) => compactBriefText(scene.reader_payoff || scene.reversal || scene.purpose)).filter(Boolean)
+  return {
+    protagonist_cards: uniqueBriefStrings(protagonistCards.length ? protagonistCards : [target.summary], 6),
+    enemy_cards: uniqueBriefStrings(enemyCards.length ? enemyCards : [target.conflict], 6),
+    audience_cards: uniqueBriefStrings([
+      ...sceneCards.map((scene: any) => compactBriefText(scene.reader_payoff || scene.ending_hook_seed)).filter(Boolean),
+      target.ending_hook,
+    ], 6),
+  }
+}
+
+function plotFrameworkList(explicit: any, snake: string, camel: string, fallback: any[], limit = 12) {
+  const rows = asArray(explicit?.[snake] || explicit?.[camel]).map((item: any) => compactBriefText(item)).filter(Boolean)
+  return uniqueBriefStrings(rows.length ? rows : fallback, limit)
+}
+
+function buildPlotFrameworkContract(project: any = {}, contextPackage: any = {}, options: any = {}) {
+  const explicit = plotFrameworkExplicitContract(contextPackage)
+  const derivedRoute = inferPlotFrameworkRoute(project, contextPackage)
+  const explicitRoute = explicit && typeof explicit === 'object' && !Array.isArray(explicit)
+    ? explicit.genre_framework_route || explicit.genreFrameworkRoute || {}
+    : {}
+  const route = {
+    genre_hint: compactBriefText(explicitRoute.genre_hint || explicitRoute.genreHint || derivedRoute.genre_hint),
+    core_loop: compactBriefText(explicitRoute.core_loop || explicitRoute.coreLoop || derivedRoute.core_loop),
+    primary_framework: compactBriefText(explicitRoute.primary_framework || explicitRoute.primaryFramework || derivedRoute.primary_framework),
+    auxiliary_frameworks: uniqueBriefStrings([
+      ...asArray(explicitRoute.auxiliary_frameworks || explicitRoute.auxiliaryFrameworks),
+      ...derivedRoute.auxiliary_frameworks,
+    ].map((item: any) => compactBriefText(item)).filter(Boolean), 8),
+    routing_reason: compactBriefText(explicitRoute.routing_reason || explicitRoute.routingReason || derivedRoute.routing_reason),
+  }
+  const explicitObject = explicit && typeof explicit === 'object' && !Array.isArray(explicit) ? explicit : {}
+  const selectedFrameworks = plotFrameworkList(explicitObject, 'selected_frameworks', 'selectedFrameworks', [
+    route.primary_framework,
+    ...route.auxiliary_frameworks,
+    options.showdown_contract ? '装逼五步法/三压一爆三震' : '',
+    options.bridge_unit_contract ? '结构化拆书法（单桥段四章结构）' : '',
+    options.suspense_contract ? '悬念与冲突深化技巧' : '',
+    options.conflict_structure_contract ? '有进无出原则与冲突黏结剂' : '',
+  ].filter(Boolean), 12)
+  const explicitStage = explicitObject.stage_ownership || explicitObject.stageOwnership || {}
+  const rewardExplicit = explicitObject.rpg_reward_loop || explicitObject.rpgRewardLoop || {}
+  const factionExplicit = explicitObject.faction_hand_framework || explicitObject.factionHandFramework || {}
+  const factionCards = buildPlotFrameworkFactionCards(contextPackage)
+  return {
+    version: explicitObject.version || 'oh_story_plot_framework_v1',
+    source: explicitObject.source || 'oh_story_plot_frameworks',
+    genre_framework_route: route,
+    selected_frameworks: selectedFrameworks,
+    stage_ownership: {
+      creation: plotFrameworkList(explicitStage, 'creation', 'creation', OH_STORY_PLOT_FRAMEWORK_STAGE_OWNERSHIP.creation, 8),
+      outline: plotFrameworkList(explicitStage, 'outline', 'outline', OH_STORY_PLOT_FRAMEWORK_STAGE_OWNERSHIP.outline, 8),
+      scene_card: plotFrameworkList(explicitStage, 'scene_card', 'sceneCard', OH_STORY_PLOT_FRAMEWORK_STAGE_OWNERSHIP.scene_card, 8),
+      prose: plotFrameworkList(explicitStage, 'prose', 'prose', OH_STORY_PLOT_FRAMEWORK_STAGE_OWNERSHIP.prose, 8),
+      revision: plotFrameworkList(explicitStage, 'revision', 'revision', OH_STORY_PLOT_FRAMEWORK_STAGE_OWNERSHIP.revision, 8),
+    },
+    rpg_reward_loop: {
+      loop: compactBriefText(rewardExplicit.loop || rewardExplicit.core_loop || rewardExplicit.coreLoop || route.core_loop),
+      reward_points: plotFrameworkList(rewardExplicit, 'reward_points', 'rewardPoints', buildPlotFrameworkRewardPoints(contextPackage), 8),
+      rules: plotFrameworkList(rewardExplicit, 'rules', 'rules', OH_STORY_PLOT_FRAMEWORK_RPG_RULES, 8),
+    },
+    faction_hand_framework: {
+      factions: plotFrameworkList(factionExplicit, 'factions', 'factions', ['主角阵营', '敌人阵营', '观众阵营'], 6),
+      rules: plotFrameworkList(factionExplicit, 'rules', 'rules', OH_STORY_PLOT_FRAMEWORK_FACTION_HAND_RULES, 8),
+      cards: factionExplicit.cards || factionExplicit.scene_cards || factionExplicit.sceneCards || factionCards,
+    },
+    double_line_info_gap_rules: plotFrameworkList(explicitObject, 'double_line_info_gap_rules', 'doubleLineInfoGapRules', OH_STORY_PLOT_FRAMEWORK_DOUBLE_LINE_RULES, 8),
+    routine_variation_rules: plotFrameworkList(explicitObject, 'routine_variation_rules', 'routineVariationRules', OH_STORY_PLOT_FRAMEWORK_ROUTINE_RULES, 8),
+    large_structure_rules: plotFrameworkList(explicitObject, 'large_structure_rules', 'largeStructureRules', OH_STORY_PLOT_FRAMEWORK_LARGE_STRUCTURE_RULES, 8),
+    six_act_story_rules: plotFrameworkList(explicitObject, 'six_act_story_rules', 'sixActStoryRules', OH_STORY_PLOT_FRAMEWORK_SIX_ACT_RULES, 8),
+    global_no_collapse_checks: plotFrameworkList(explicitObject, 'global_no_collapse_checks', 'globalNoCollapseChecks', OH_STORY_PLOT_FRAMEWORK_NO_COLLAPSE_CHECKS, 8),
+    quality_checks: plotFrameworkList(explicitObject, 'quality_checks', 'qualityChecks', OH_STORY_PLOT_FRAMEWORK_QUALITY_CHECKS, 10),
+    revision_priorities: plotFrameworkList(explicitObject, 'revision_priorities', 'revisionPriorities', ['补题材框架路由', '补奖励循环', '补阵营出牌', '补双线信息差', '补五不崩检查'], 8),
+  }
+}
+
 const OH_STORY_OPENING_REQUIRED_BEATS = [
   '从故事最精彩、最有冲突的地方写起。',
   '主角三种状态选一：身处危机 / 令人羡慕 / 被丢入陌生环境。',
@@ -47028,6 +47293,12 @@ export function buildChapterPreDraftBrief(project: any, contextPackage: any) {
   const reversalContract = buildReversalContract(project, contextPackage)
   const showdownContract = buildShowdownContract(project, contextPackage)
   const bridgeUnitContract = buildBridgeUnitContract(project, contextPackage)
+  const plotFrameworkContract = buildPlotFrameworkContract(project, contextPackage, {
+    showdown_contract: showdownContract,
+    bridge_unit_contract: bridgeUnitContract,
+    suspense_contract: suspenseContract,
+    conflict_structure_contract: conflictStructureContract,
+  })
   const openingContract = buildOpeningContract(project, contextPackage)
   const proseCraftContract = buildProseCraftContract(project, contextPackage)
   const punctuationToneContract = buildPunctuationToneContract(project, contextPackage)
@@ -47065,6 +47336,7 @@ export function buildChapterPreDraftBrief(project: any, contextPackage: any) {
     reversal_contract: reversalContract,
     showdown_contract: showdownContract,
     bridge_unit_contract: bridgeUnitContract,
+    plot_framework_contract: plotFrameworkContract,
     style_boundary_contract: styleBoundaryContract,
     opening_contract: openingContract,
     prose_craft_contract: proseCraftContract,
@@ -47147,6 +47419,7 @@ export function buildChapterPreDraftBrief(project: any, contextPackage: any) {
     reversal_contract: reversalContract,
     showdown_contract: showdownContract,
     bridge_unit_contract: bridgeUnitContract,
+    plot_framework_contract: plotFrameworkContract,
     style_boundary_contract: styleBoundaryContract,
     opening_contract: openingContract,
     prose_craft_contract: proseCraftContract,
@@ -47706,6 +47979,18 @@ export function mergeConfirmedPreDraftBriefIntoContext(contextPackage: any, preD
       || (contextPackage || {}).chapter_target?.bridge_unit_contract
       || (contextPackage || {}).bridge_unit_contract,
   })
+  const plotFrameworkContract = buildPlotFrameworkContract({}, {
+    ...(contextPackage || {}),
+    plot_framework_contract: preDraftBrief.plot_framework_contract
+      || preDraftBrief.plotFrameworkContract
+      || (contextPackage || {}).chapter_target?.plot_framework_contract
+      || (contextPackage || {}).plot_framework_contract,
+  }, {
+    showdown_contract: showdownContract,
+    bridge_unit_contract: bridgeUnitContract,
+    suspense_contract: suspenseContract,
+    conflict_structure_contract: conflictStructureContract,
+  })
   const openingContract = buildOpeningContract({}, {
     ...(contextPackage || {}),
     opening_contract: preDraftBrief.opening_contract
@@ -47780,6 +48065,7 @@ export function mergeConfirmedPreDraftBriefIntoContext(contextPackage: any, preD
     reversal_contract: reversalContract,
     showdown_contract: showdownContract,
     bridge_unit_contract: bridgeUnitContract,
+    plot_framework_contract: plotFrameworkContract,
     opening_contract: openingContract,
     prose_craft_contract: proseCraftContract,
     punctuation_tone_contract: punctuationToneContract,
@@ -47849,6 +48135,7 @@ export function mergeConfirmedPreDraftBriefIntoContext(contextPackage: any, preD
     reversal_contract: reversalContract,
     showdown_contract: showdownContract,
     bridge_unit_contract: bridgeUnitContract,
+    plot_framework_contract: plotFrameworkContract,
     opening_contract: openingContract,
     prose_craft_contract: proseCraftContract,
     punctuation_tone_contract: punctuationToneContract,
@@ -47920,6 +48207,7 @@ export function mergeConfirmedPreDraftBriefIntoContext(contextPackage: any, preD
       reversal_contract: reversalContract,
       showdown_contract: showdownContract,
       bridge_unit_contract: bridgeUnitContract,
+      plot_framework_contract: plotFrameworkContract,
       opening_contract: openingContract,
       prose_craft_contract: proseCraftContract,
       punctuation_tone_contract: punctuationToneContract,
@@ -50770,6 +51058,15 @@ export function createNovelWritingService(ctx: {
       || contextPackage?.bridge_unit_contract
       || contextPackage?.pre_draft_brief?.bridge_unit_contract
       || buildBridgeUnitContract(project, contextPackage)
+    const plotFrameworkContract = contextPackage?.chapter_target?.plot_framework_contract
+      || contextPackage?.plot_framework_contract
+      || contextPackage?.pre_draft_brief?.plot_framework_contract
+      || buildPlotFrameworkContract(project, contextPackage, {
+        showdown_contract: showdownContract,
+        bridge_unit_contract: bridgeUnitContract,
+        suspense_contract: suspenseContract,
+        conflict_structure_contract: conflictStructureContract,
+      })
     const openingContract = contextPackage?.chapter_target?.opening_contract
       || contextPackage?.opening_contract
       || contextPackage?.pre_draft_brief?.opening_contract
@@ -51286,6 +51583,23 @@ export function createNovelWritingService(ctx: {
       bridgeUnitContract?.quality_checks?.length ? `bridge_unit_checks：${bridgeUnitContract.quality_checks.join('；')}` : '',
       bridgeUnitContract ? '交稿自检必须输出 bridge_unit_checks，并用正文证据检查四章一桥段位置、连续期待、目标推进、高潮时长、阶段衔接和疲劳修复。' : '',
       bridgeUnitContract ? JSON.stringify(bridgeUnitContract, null, 2).slice(0, 2500) : '',
+      '',
+      plotFrameworkContract ? '【剧情框架合同】' : '',
+      plotFrameworkContract ? '硬性要求：执行 chapter_target.plot_framework_contract；这是来自 oh-story plot-frameworks 的题材→框架路由、单段剧情结构模板、RPG结构与奖励设计、框架与阵营手牌法、双线法与信息差、套路模板重复法和剧情流五不崩口径，正文必须按本章题材框架组织事件，而不是只堆场景。' : '',
+      plotFrameworkContract ? '执行方式：先按 genre_framework_route 判断本章 core_loop；每个场景至少承担一个 selected_frameworks 中的功能。系统/升级文按任务→奖励→兑换→新任务推进；打脸/群像按主角阵营、敌人阵营、观众阵营轮流出牌；重复套路必须换场景、人物、情绪或奖励；章尾要完成收获清点并铺下一段，不能让目标、卖点、社会关系、上层地位或成长停摆。' : '',
+      plotFrameworkContract?.genre_framework_route ? `题材→框架路由：题材=${plotFrameworkContract.genre_framework_route.genre_hint || '未标注'}；核心循环=${plotFrameworkContract.genre_framework_route.core_loop || '目标→阻碍→行动→反馈→新目标'}；主框架=${plotFrameworkContract.genre_framework_route.primary_framework || '核心梗与细化法'}；辅助框架=${asArray(plotFrameworkContract.genre_framework_route.auxiliary_frameworks).join('、') || '故事本质与六幕结构'}；原因=${plotFrameworkContract.genre_framework_route.routing_reason || '按当前题材和章节目标选择框架。'}` : '',
+      plotFrameworkContract?.selected_frameworks?.length ? `选用框架：${plotFrameworkContract.selected_frameworks.join('；')}` : '',
+      plotFrameworkContract?.stage_ownership ? `阶段归属：创建=${asArray(plotFrameworkContract.stage_ownership.creation).join('；')}；大纲=${asArray(plotFrameworkContract.stage_ownership.outline).join('；')}；场景卡=${asArray(plotFrameworkContract.stage_ownership.scene_card).join('；')}；正文=${asArray(plotFrameworkContract.stage_ownership.prose).join('；')}；修订=${asArray(plotFrameworkContract.stage_ownership.revision).join('；')}` : '',
+      plotFrameworkContract?.rpg_reward_loop ? `RPG奖励循环：${plotFrameworkContract.rpg_reward_loop.loop || ''}；奖励点=${asArray(plotFrameworkContract.rpg_reward_loop.reward_points).join('；')}；规则=${asArray(plotFrameworkContract.rpg_reward_loop.rules).join('；')}` : '',
+      plotFrameworkContract?.faction_hand_framework ? `阵营手牌：阵营=${asArray(plotFrameworkContract.faction_hand_framework.factions).join('、')}；规则=${asArray(plotFrameworkContract.faction_hand_framework.rules).join('；')}；手牌=${JSON.stringify(plotFrameworkContract.faction_hand_framework.cards || {}).slice(0, 1200)}` : '',
+      plotFrameworkContract?.double_line_info_gap_rules?.length ? `双线信息差：${plotFrameworkContract.double_line_info_gap_rules.join('；')}` : '',
+      plotFrameworkContract?.routine_variation_rules?.length ? `套路模板重复法：${plotFrameworkContract.routine_variation_rules.join('；')}` : '',
+      plotFrameworkContract?.large_structure_rules?.length ? `大结构/单段结构：${plotFrameworkContract.large_structure_rules.join('；')}` : '',
+      plotFrameworkContract?.six_act_story_rules?.length ? `六幕故事规则：${plotFrameworkContract.six_act_story_rules.join('；')}` : '',
+      plotFrameworkContract?.global_no_collapse_checks?.length ? `五不崩：${plotFrameworkContract.global_no_collapse_checks.join('；')}` : '',
+      plotFrameworkContract?.quality_checks?.length ? `plot_framework_checks：${plotFrameworkContract.quality_checks.join('；')}` : '',
+      plotFrameworkContract ? '交稿自检必须输出 plot_framework_checks，并用正文证据检查题材→框架路由、核心循环、RPG奖励反馈、阵营手牌出牌、双线信息差、套路变体、段落闭环、章尾收获与铺垫，以及五不崩。' : '',
+      plotFrameworkContract ? JSON.stringify(plotFrameworkContract, null, 2).slice(0, 2500) : '',
       '',
       openingContract ? '【开篇设计合同】' : '',
       openingContract ? '硬性要求：执行 chapter_target.opening_contract；这是来自 oh-story opening-design 的新书开篇口径，前3章必须尽快让主角、危机/优势、爽点或期待点和三大基点进入正文。' : '',
@@ -54709,7 +55023,7 @@ export function createNovelWritingService(ctx: {
           const result = await executeNovelAgent('outline-agent', project, {
             task: [
               '任务：为无人值守章节写作补齐本章蓝图。只输出 JSON，不写正文。',
-              '输出字段：title, chapter_goal, chapter_summary, conflict, ending_hook, chapter_blueprint, emotional_arc_contract, chapter_hook_contract, paragraph_hook_contract, opening_contract, suspense_contract, reversal_contract, showdown_contract, bridge_unit_contract, style_boundary_contract, plot_dynamics_contract, story_power_contract, mainline_definition_contract, information_flow_contract, expectation_threshold_contract, story_loop_contract, prose_craft_contract, punctuation_tone_contract, quality_audit_contract, dialogue_contract, continuity_heat_contract, character_relation_contract, character_behavior_contract, asset_linkage_contract, state_tracking_contract, intent_confirmation_contract, target_reader_contract, genre_positioning_contract, core_contract_radar, female_audience_contract, upgrade_rhythm_contract, conflict_structure_contract, must_advance(array), forbidden_repeats(array), repair_summary。',
+              '输出字段：title, chapter_goal, chapter_summary, conflict, ending_hook, chapter_blueprint, emotional_arc_contract, chapter_hook_contract, paragraph_hook_contract, opening_contract, suspense_contract, reversal_contract, showdown_contract, bridge_unit_contract, plot_framework_contract, style_boundary_contract, plot_dynamics_contract, story_power_contract, mainline_definition_contract, information_flow_contract, expectation_threshold_contract, story_loop_contract, prose_craft_contract, punctuation_tone_contract, quality_audit_contract, dialogue_contract, continuity_heat_contract, character_relation_contract, character_behavior_contract, asset_linkage_contract, state_tracking_contract, intent_confirmation_contract, target_reader_contract, genre_positioning_contract, core_contract_radar, female_audience_contract, upgrade_rhythm_contract, conflict_structure_contract, must_advance(array), forbidden_repeats(array), repair_summary。',
               'chapter_blueprint 必须包含 target_emotion, opening_hook, core_payoff, content_outline(cause/development/turn/climax/ending), outline_methods_contract(five_step_outline/eight_node_story_structure/sweet_cycle_stages/emotion_zigzag_stages/five_drive_checks/detail_outline_rules/similarity_guardrails/reverse_design_rules/quality_checks), small_outline_contract(steps/purpose_effect_rules/detail_rules/locator_rules/segment_cards), mainline_definition_contract(mainline_event/definition_rules/action_rules/handoff_rules/forbidden_mainline_shapes/quality_checks), causal_chain_contract(act_order/act_functions/quality_checks), plot_lines(mainline/subplot/event_line/relationship_line/logic_line), character_order, beat_sequence, beat_density_contract, cost_and_reward, ending_contract(final_state/unresolved_question/next_chapter_pull)；大纲方法合同 outline_methods_contract 必须按 oh-story outline-methods 输出五步大纲创建法、八节点故事结构、爽文五阶段小循环、情绪拉扯五折线、五项驱动检查、细纲:正文 = 1:2.5~1:3、相同金手指逻辑禁止连续使用、爽点倒推和同一套路间隔至少 3 个不同剧情类型；small_outline_contract 必须按 oh-story 小纲四步法输出分段判断、目的和效果、详写/略写、快速定位，segment_cards 每项包含 segment_no,segment,purpose,intended_effect,detail_level,quick_locator；mainline_definition_contract 必须按 oh-story 主线定义输出主线不等于升级、主线是一件事、升级是主角达成目标的行动、不是一个元素和主线完成后的承接规则；causal_chain_contract 必须按 oh-story 五幕式输出种子/生长/转折/冲刺/完成，要求不能跳步、不能乱序；beat_sequence 每项必须包含 beat_no/scene_no/action/function_tag/payoff，function_tag 必须决定展开还是带过，关键揭露/打脸/高潮/爽点必须展开，过渡/赶路/信息交代必须压缩。',
               '情绪弧合同 emotional_arc_contract 必须按 oh-story 情绪弧与 emotional-methods 输出 arc_shape, emotion_formula, pressure_methods, payoff_types, payoff_reverse_design, payoff_tier_rules, payoff_density_rules, emotion_module_recomposition_rules, payoff_escalation_rules, scene_execution_rules, expectation_rules, safety_rules, bonding_setup_rules, emotional_tear_rules, lingering_aftertaste_rules, emotional_turning_rules, first_impression_rules, peak_end_rules, emotion_layer_rules, reaction_structure_rules, ideological_conflict_rules, failure_mode_guards, quality_checks，明确本章如何完成平静 -> 调动 -> 释放 -> 爽、爽点倒推法（先定爽点类型 -> 再定期待点 -> 最后倒推铺垫，正文按铺垫 -> 期待升高 -> 爽点释放呈现）、场景情绪执行（每个场景标注调动/复现/释放/后反应，闭环当前期待时开启下一开环）、装逼层级（日常小装逼/核心爽点/偏离爽点）、多爽点密度（不要拉长单个爽点铺垫，800-1200 字内要有信息增量/能力展示/危机反制/关系变化/小回收）、先入为主（前100字先给核心矛盾/主角处境/不公平异常，注意否定提前）、峰终定律（结尾情绪必须高于起点，结尾情绪强度虐≥8、爽≥7、治愈≥6，最后一击必须是动作/对话/画面）、三层情绪（角色自己的情绪、文本传递的情绪、读者实际感受分离，角色在哭不等于读者哭，必须转成读者收益）、情绪反应结构（前反应 -> 复现 -> 后反应；以小搏大 -> 士气如虹）、理念矛盾（理念之争比利益之争更能引发深层共鸣，把原则碰撞、追求和牺牲落成具体选择与代价）、情绪模块重组（戏剧性会磨损，情绪不会磨损；复用套路必须换场景/换对手/加新情绪或提高 stakes/奖励复杂度）、情绪三板斧（羁绊铺设/情感撕裂/余韵钝痛）和每 3-5 个小节的事件触发情绪转向，并让连续爽点按影响范围、揭示深度或身份落差递增。',
               '章级钩子合同 chapter_hook_contract 必须按 oh-story 章首/章尾钩子输出 opening_hook_type, ending_hook_type, hook_strength, opening_hook_rules, ending_hook_rules, forbidden_patterns, quality_checks，明确前 100-300 字和最后 300 字如何制造追读。',
@@ -54719,6 +55033,7 @@ export function createNovelWritingService(ctx: {
               '反转合同 reversal_contract 必须按 oh-story 反转检查输出 reversal_type, setup_clues, misdirection, reveal_timing, emotional_impact, cheat_guardrails, quality_checks，确保反转有铺垫、不靠天降新信息。',
               '高潮对抗合同 showdown_contract 必须按 oh-story style-combat-face / hooks-suspense / plot-frameworks 输出 payoff_release_rules, trump_card_reserve_rules, invincible_protagonist_rules, three_pressure_shock_rules, stage_chain_rules, transmission_channel_rules, shock_chain_rules, combat_design_rules, weak_over_strong_rules, counterplay_layers, emotion_rhythm_rules, revision_priorities, quality_checks；payoff_release_rules 必须包含爽点释放和“反派就要受到对应的压制”，trump_card_reserve_rules 必须包含底牌管理、手里保持2-3个未揭示底牌、每次只出1个、出牌后获得新技能/新后手/新目标，invincible_protagonist_rules 必须包含“主角登场即杀伐果断”、战力前置无敌、主角登场时一点都不能拖拉、不一击必杀时必须有明确理由，three_pressure_shock_rules 必须包含三压一爆三震、友好势力、敌方势力、中立势力、一爆碾压和三方震动，stage_chain_rules 必须包含“群众层 -> 中间层 -> 核心层”，transmission_channel_rules 必须包含“装逼前必须先铺设人际关系，否则没有传递通道”和爽点释放后改变态度/利益/声望/规则评价，shock_chain_rules 必须包含震惊分层基于自身利益和目标，combat_design_rules 必须包含“打斗是一场表演”，counterplay_layers 必须包含“预判反制”和“反预判”，emotion_rhythm_rules 必须包含“急 -> 缓 -> 急”。',
               '桥段节奏合同 bridge_unit_contract 必须按 oh-story outline-rhythm / commercial-core-methods 输出 bridge_position, bridge_unit_plan, four_chapter_roles, expectation_chain_rules, climax_duration_rules, transition_rules, fatigue_repair_rules, revision_priorities, quality_checks；four_chapter_roles 必须包含“四章一桥段”和“结尾必须让主角开始装”，expectation_chain_rules 必须包含“高潮中埋钩子”，transition_rules 必须包含“连续小期待”，fatigue_repair_rules 必须包含“连续 2 章没有目标推进”。',
+              '剧情框架合同 plot_framework_contract 必须按 oh-story plot-frameworks 输出 genre_framework_route, selected_frameworks, stage_ownership(creation/outline/scene_card/prose/revision), rpg_reward_loop, faction_hand_framework, double_line_info_gap_rules, routine_variation_rules, large_structure_rules, six_act_story_rules, global_no_collapse_checks, quality_checks；必须包含题材→框架路由、RPG结构与奖励设计、框架与阵营手牌法、套路模板重复法、五不崩，并说明本章如何把题材框架落到场景卡和正文自检。',
               '文风覆盖边界合同 style_boundary_contract 必须按 oh-story style-profile-protocol 输出 style_override_rules, hard_constraints, copy_boundary_rules, conflict_resolution_rules, revision_priorities, quality_checks；hard_constraints 必须包含“硬约束永远赢”、禁用词、Gate F、万能比喻、章末预告、字数下限、剧情/状态/时间线不漂移；copy_boundary_rules 必须包含不得复制样章桥段。',
               '核心商业雷达 core_contract_radar 必须按 oh-story commercial-core-methods 输出 must_serve, no_drift, theme_unity_rules, selling_point_execution_rules, repetition_strategy_rules, commercial_rhythm_rules, goldfinger_structure_rules, launch_pressure_rules, repair_focus, checks；selling_point_execution_rules 必须包含卖点四步法、发现比告知爽十倍和开头暗示 -> 中间深化 -> 高潮爆发；repetition_strategy_rules 必须包含重复点和同一卖点至少延展 3 个角度；commercial_rhythm_rules 必须包含追踪/上下文.md、最近3章、连续 2 章没有目标推进/阻碍升级/新信息和大高潮 7-10 天；goldfinger_structure_rules 必须包含金手指可替换故事流程中的任一环节、简单一眼就懂和系统限制；launch_pressure_rules 必须包含开篇 300-500字内交代处境、危险来源和破局希望，以及优先用环境型压力开局。',
               '剧情动力合同 plot_dynamics_contract 必须按 oh-story 剧情核心方法输出 goal, obstacle, action, cost_feedback, next_expectation, drive_mode_rules, line_stagger_rules, quality_checks，确保目标→阻碍→行动→代价/反馈→新期待闭环；drive_mode_rules 必须包含事件驱动/情感驱动/混合模式选择：番茄爽文/打脸文每章给外部结果（赢、升级、对手栽），追妻/虐心/世情持续人物心结，混合模式主线事件推进并每 3-5 章插情感停顿；并让主线和支线错开节奏推进，不能同时爆完或同时空转。',
@@ -54903,6 +55218,7 @@ export function createNovelWritingService(ctx: {
         reversal_contract: payload?.reversal_contract || payload?.reversalContract || contextPackage?.reversal_contract,
         showdown_contract: payload?.showdown_contract || payload?.showdownContract || contextPackage?.showdown_contract,
         bridge_unit_contract: payload?.bridge_unit_contract || payload?.bridgeUnitContract || contextPackage?.bridge_unit_contract,
+        plot_framework_contract: payload?.plot_framework_contract || payload?.plotFrameworkContract || contextPackage?.plot_framework_contract,
         style_boundary_contract: payload?.style_boundary_contract || payload?.styleBoundaryContract || contextPackage?.style_boundary_contract,
         plot_dynamics_contract: payload?.plot_dynamics_contract || payload?.plotDynamicsContract || contextPackage?.plot_dynamics_contract,
         story_power_contract: payload?.story_power_contract || payload?.storyPowerContract || contextPackage?.story_power_contract,
@@ -54942,6 +55258,7 @@ export function createNovelWritingService(ctx: {
           reversal_contract: payload?.reversal_contract || payload?.reversalContract || contextPackage?.chapter_target?.reversal_contract,
           showdown_contract: payload?.showdown_contract || payload?.showdownContract || contextPackage?.chapter_target?.showdown_contract,
           bridge_unit_contract: payload?.bridge_unit_contract || payload?.bridgeUnitContract || contextPackage?.chapter_target?.bridge_unit_contract,
+          plot_framework_contract: payload?.plot_framework_contract || payload?.plotFrameworkContract || contextPackage?.chapter_target?.plot_framework_contract,
           style_boundary_contract: payload?.style_boundary_contract || payload?.styleBoundaryContract || contextPackage?.chapter_target?.style_boundary_contract,
           plot_dynamics_contract: payload?.plot_dynamics_contract || payload?.plotDynamicsContract || contextPackage?.chapter_target?.plot_dynamics_contract,
           story_power_contract: payload?.story_power_contract || payload?.storyPowerContract || contextPackage?.chapter_target?.story_power_contract,
@@ -55030,6 +55347,7 @@ export function createNovelWritingService(ctx: {
             reversal_contract: repairedEmotionAndHookBrief.reversal_contract,
             showdown_contract: repairedEmotionAndHookBrief.showdown_contract,
             bridge_unit_contract: repairedEmotionAndHookBrief.bridge_unit_contract,
+            plot_framework_contract: repairedEmotionAndHookBrief.plot_framework_contract,
             style_boundary_contract: repairedEmotionAndHookBrief.style_boundary_contract,
             plot_dynamics_contract: repairedEmotionAndHookBrief.plot_dynamics_contract,
             story_power_contract: repairedEmotionAndHookBrief.story_power_contract,
