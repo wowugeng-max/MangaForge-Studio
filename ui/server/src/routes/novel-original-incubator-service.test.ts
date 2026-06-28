@@ -21,6 +21,23 @@ describe('original incubator setting assets', () => {
     expect(prompt).toContain('前300字')
   })
 
+  test('requires deep incubation to use oh-story genre catalog guidance', () => {
+    const service = createNovelOriginalIncubatorService()
+    const prompt = service.buildOriginalIncubatorPrompt(
+      { title: '超人的规则怪谈世界', length_target: 'epic', genre: '规则怪谈', target_audience: '番茄男频' },
+      { idea: '双主角闯规则副本', chapter_count: 30 },
+    )
+
+    expect(prompt).toContain('genre_catalog_contract')
+    expect(prompt).toContain('oh_story_genre_catalog_v1')
+    expect(prompt).toContain('规则怪谈')
+    expect(prompt).toContain('玩家被抽入规则副本')
+    expect(prompt).toContain('背景故事→规则包装→通关线+dead end')
+    expect(prompt).toContain('别人死→主角装/破局→揭露→升华')
+    expect(prompt).toContain('智斗和金手指负责包合理外衣')
+    expect(prompt).toContain('每2000字至少一个悬念/反转/信息差钩子')
+  })
+
   test('requires original incubation to choose an oh-story opening hook strategy', () => {
     const service = createNovelOriginalIncubatorService()
     const prompt = service.buildOriginalIncubatorPrompt(

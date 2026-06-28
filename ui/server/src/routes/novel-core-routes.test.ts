@@ -109,6 +109,28 @@ describe('novel project seed prompt', () => {
     expect(prompt).toContain('前300字')
   })
 
+  test('injects oh-story genre catalog guidance into seed generation', async () => {
+    const { buildProjectSeedPrompt } = await import('./novel-core-routes')
+
+    const guaitanPrompt = buildProjectSeedPrompt('玩家被抽入规则副本，靠双主角互补通关', '规则测试', 'epic')
+    const xianxiaPrompt = buildProjectSeedPrompt('废材剑修在仙侠宗门从低谷崛起', '剑烛大荒', 'long')
+
+    expect(guaitanPrompt).toContain('genre_catalog_contract')
+    expect(guaitanPrompt).toContain('oh_story_genre_catalog_v1')
+    expect(guaitanPrompt).toContain('规则怪谈')
+    expect(guaitanPrompt).toContain('玩家被抽入规则副本')
+    expect(guaitanPrompt).toContain('背景故事→规则包装→通关线+dead end')
+    expect(guaitanPrompt).toContain('别人死→主角装/破局→揭露→升华')
+    expect(guaitanPrompt).toContain('智斗和金手指负责包合理外衣')
+    expect(guaitanPrompt).toContain('每2000字至少一个悬念/反转/信息差钩子')
+
+    expect(xianxiaPrompt).toContain('仙侠/玄幻')
+    expect(xianxiaPrompt).toContain('力量体系清晰')
+    expect(xianxiaPrompt).toContain('金手指独特有限制')
+    expect(xianxiaPrompt).toContain('战斗有策略非纯数值')
+    expect(xianxiaPrompt).toContain('地图逐层展开')
+  })
+
   test('preserves model generated creation contracts while recovering project seeds', async () => {
     const { buildRecoverableProjectSeed } = await import('./novel-core-routes')
 
@@ -528,6 +550,10 @@ describe('novel project seed prompt', () => {
     expect(bible.genre_positioning_contract.genre_tags.join('｜')).toContain('都市规则怪谈')
     expect(bible.genre_positioning_contract.platform).toBe('番茄')
     expect(bible.genre_positioning_contract.selling_points.join('｜')).toContain('莽夫破局')
+    expect(bible.genre_positioning_contract.genre_catalog_contract.source).toBe('oh_story_genre_catalog_v1')
+    expect(bible.genre_positioning_contract.genre_catalog_contract.matched_framework).toBe('规则怪谈')
+    expect(bible.genre_positioning_contract.genre_catalog_contract.structure_beats.join('｜')).toContain('背景故事')
+    expect(bible.genre_positioning_contract.genre_catalog_contract.quality_checks.join('｜')).toContain('每2000字至少一个悬念/反转/信息差钩子')
     expect(bible.core_contract_radar.source).toBe('oh_story_creation_contract_v1')
     expect(bible.core_contract_radar.must_serve.join('｜')).toContain('每章都有规则发现')
     expect(bible.core_contract_radar.no_drift.join('｜')).toContain('不能写成纯打怪')

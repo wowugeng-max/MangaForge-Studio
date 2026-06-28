@@ -8,9 +8,20 @@ import {
   updateNovelProject,
 } from '../novel'
 import { normalizeSettingAgentPayload } from './novel-setting-routes'
+import { buildOhStoryGenreCatalogContract, formatOhStoryGenreCatalogPrompt } from './novel-genre-catalog'
 
 export function createNovelOriginalIncubatorService() {
-  const buildOriginalIncubatorPrompt = (project: any, body: any) => [
+  const buildOriginalIncubatorPrompt = (project: any, body: any) => {
+    const genreCatalogContract = buildOhStoryGenreCatalogContract(
+      project?.title,
+      project?.genre,
+      project?.target_audience,
+      project?.synopsis,
+      body?.genre,
+      body?.target_audience,
+      body?.idea,
+    )
+    return [
     '任务：进行原创小说项目孵化，不依赖任何指定参考作品。请产出可直接落库的商业网文创作蓝图。',
     `项目标题：${project.title}`,
     `题材：${body.genre || project.genre || '未指定'}`,
@@ -19,6 +30,8 @@ export function createNovelOriginalIncubatorService() {
     `候选方案数：${Math.max(1, Math.min(5, Number(body.variant_count || 1)))}`,
     project.reference_config?.project_seed ? '【已整理项目种子】' : '',
     project.reference_config?.project_seed ? JSON.stringify(project.reference_config.project_seed, null, 2).slice(0, 9000) : '',
+    '',
+    formatOhStoryGenreCatalogPrompt(genreCatalogContract),
     '',
     '请输出 JSON，字段：',
     'directions: array，当候选方案数大于 1 时输出多个方向，每项包含 direction_id,title,commercial_positioning,core_hook,differentiators,risks,first_10_chapters,score,selection_reason',
@@ -29,7 +42,7 @@ export function createNovelOriginalIncubatorService() {
     'setting_entities: array，专门用于设定工坊入库；每项 entity_type,name,summary,constraints_json,state_json,payload_json。entity_type 只能是 character/realm/ability/item/boss/rule/faction/location/foreshadowing/timeline。',
     'writing_bible: {promise,world_rules,mainline,volume_plan,style_lock,safety_policy,forbidden,target_reader_contract,genre_positioning_contract,core_contract_radar,reader_retention_contract,opening_strategy_contract}',
     'writing_bible.target_reader_contract: {reader_profile,reader_desires,emotional_gap,chapter_value_test,quality_checks}，必须回答“写给谁看、读者想看什么、本章给什么”。',
-    'writing_bible.genre_positioning_contract: {genre_tags,platform,reader_psychology,core_hook,type_formula,selling_points,long_board,innovation_boundary,quality_checks}，必须包含“拉长板而非补短板”。',
+    'writing_bible.genre_positioning_contract: {genre_tags,platform,reader_psychology,core_hook,type_formula,selling_points,long_board,innovation_boundary,genre_catalog_contract,quality_checks}，必须包含“拉长板而非补短板”和上方 oh-story 题材目录契约。',
     'writing_bible.core_contract_radar: {must_serve,no_drift,theme_unity_rules,repair_focus,periodic_drift_check}，periodic_drift_check.question 必须包含“当初吸引读者的卖点还在吗”。',
     'writing_bible.reader_retention_contract: {retention_double_engine,opening_hook_rule,ending_hook_rule,reward_randomness_rule,quality_checks}，opening_hook_rule 必须包含“前300字”，ending_hook_rule 必须留下下一章动作压力。',
     'writing_bible.opening_strategy_contract: {hook_type,opening_flow,mainline_graft,first_5_chapter_promise,threshold_ladder,forbidden_mixing,quality_checks}，hook_type 只能取“事件噱头/金手指噱头/人设噱头”之一；必须明确事件噱头和金手指噱头不能混用，写清前5章如何完成吸量承诺、何时嫁接主线、如何用 threshold_ladder 设门槛拉长剧情。',
@@ -39,6 +52,7 @@ export function createNovelOriginalIncubatorService() {
     '如果无法完整生成，也必须至少输出 commercial_positioning、characters、outlines、chapters 四类内容；chapters 数量不得少于 5。',
     '要求：主角目标清晰，金手指/能力有代价，前 10 章追读钩子密集，分卷目标明确；创建阶段必须先立清目标读者、题材定位、核心承诺雷达、追读留存契约和开篇噱头策略，避免空泛设定或开篇承诺混乱。',
   ].join('\n')
+  }
 
   const normalizeIncubatorPayload = (payload: any, chapterCount: number) => {
     const directions = Array.isArray(payload?.directions) ? payload.directions : []

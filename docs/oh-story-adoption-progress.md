@@ -14,12 +14,12 @@ Source reference set: `/private/tmp/oh-story-claudecode/skills/story-long-write/
 {
   "reference_total": 38,
   "integrated": 15,
-  "partial": 21,
-  "todo": 2,
+  "partial": 22,
+  "todo": 1,
   "deferred": 0,
   "remaining_references": 23,
-  "estimated_hours_remaining": 45.5,
-  "estimated_working_days_remaining": 7.58
+  "estimated_hours_remaining": 44,
+  "estimated_working_days_remaining": 7.33
 }
 -->
 
@@ -27,13 +27,13 @@ Source reference set: `/private/tmp/oh-story-claudecode/skills/story-long-write/
 
 - Reference files: 38
 - Integrated enough for current production use: 15
-- Partially integrated, still worth mining: 21
-- Not systematically reviewed yet: 2
+- Partially integrated, still worth mining: 22
+- Not systematically reviewed yet: 1
 - Deferred: 0
 - Remaining references to improve: 23
-- Estimated remaining effort: about 45.5 engineering hours, or 7.58 focused working days at 6 hours per day
+- Estimated remaining effort: about 44 engineering hours, or 7.33 focused working days at 6 hours per day
 
-The estimate assumes the current working pattern: one small oh-story increment at a time, with prompt or workflow changes backed by focused tests, then `test:novel-server` and `check` before push. UI progress surfacing is not included in the 45.5 hours; after this ledger stabilizes, exposing it in the novel workspace should be a separate 4-6 hour slice.
+The estimate assumes the current working pattern: one small oh-story increment at a time, with prompt or workflow changes backed by focused tests, then `test:novel-server` and `check` before push. UI progress surfacing is not included in the 44 hours; after this ledger stabilizes, exposing it in the novel workspace should be a separate 4-6 hour slice.
 
 ## Status Meaning
 
@@ -59,7 +59,7 @@ The estimate assumes the current working pattern: one small oh-story increment a
 | emotional-methods.md | partial | Emotion module, payoff setup, emotional turn, and reader expectation checks are present in pre-draft and review flows. | Mine remaining emotion formulas into concise prompt fragments instead of broad contracts. | 1.5h |
 | female-audience-writing.md | partial | Female-audience contract is conditionally requested for female or female-channel projects. | Add project-level detection and UI confirmation so this contract is active only when intended. | 1.5h |
 | format-and-structure.md | partial | Prose format and metadata scans detect title, chapter marker, front matter, and engineering-word violations. | Compare all format requirements and add missing deterministic checks. | 1h |
-| genre-catalog.md | todo | Genre labels exist, but catalog-level guidance has not been mapped. | Build a genre catalog mapping for seed creation, target reader, and must-have scenes. | 2.5h |
+| genre-catalog.md | partial | Creation, recovery, original-incubation prompts, and local writing-bible materialization now inject `genre_positioning_contract.genre_catalog_contract` from an oh-story catalog route covering 规则怪谈、仙侠/玄幻、重生复仇、都市高武、文娱/娱乐圈、追妻火葬场 plus a generic fallback. | Expand remaining catalog routes and connect genre-catalog checks to later outline/prose diagnostics. | 1h |
 | genre-core-mechanics.md | partial | Genre positioning contract covers core hook, goldfinger fit, must-have scenes, platform fit, and micro-innovation. | Add genre-specific mechanism presets and validation examples. | 2h |
 | genre-readers.md | partial | Target-reader contract and reader expectation checks cover reader profile and desires. | Expand reader profiles into selectable or inferred workbench signals. | 1.5h |
 | genre-writing-formulas.md | integrated | Next-batch workflow loads `references/genre-writing-formulas.md` on demand, and `genre_positioning_contract.genre_formula` now receives compact oh-story formula routes for the reference's formula table, including modern revenge, urban system, suspense, rebirth, palace, abuse, public-trial face-slap, and other genre structures. | Keep tuning route keywords and formula snippets from real generation misses. | 0.5h |
@@ -87,7 +87,7 @@ The estimate assumes the current working pattern: one small oh-story increment a
 
 ## Next Priority Queue
 
-1. `genre-catalog.md`: build a genre catalog mapping for seed creation, target reader, and must-have scenes.
+1. `genre-catalog.md`: expand remaining catalog routes and connect genre-catalog checks to later outline/prose diagnostics.
 2. `genre-core-mechanics.md`: add genre-specific mechanism presets and validation examples.
 3. `plot-special-topics.md`: review special topics and route them to genre-specific or optional contracts.
 4. `artifact-protocols.md`: compare artifact protocol naming and required fields against MangaForge receipts, then close schema gaps.
