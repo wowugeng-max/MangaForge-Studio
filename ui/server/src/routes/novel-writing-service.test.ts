@@ -17263,6 +17263,75 @@ describe('chapter pre-draft brief', () => {
     expect(prompt.indexOf('【章节蓝图合同】')).toBeLessThan(prompt.indexOf('【结构化上下文包】'))
   })
 
+  test('adds an oh-story small-outline four-step contract to chapter blueprint and prose prompt', () => {
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+    const contextPackage = {
+      chapter_target: {
+        chapter_no: 7,
+        title: '缺页定位',
+        summary: '主角把旧账缺页推进成公开证据。',
+        conflict: '执事试图把缺页问题写成文书失误。',
+        ending_hook: '缺页背面露出禁库编号。',
+        word_target: resolveChapterWordTarget({}, { chapter_no: 7 }, {}),
+        scene_cards: [
+          {
+            scene_no: 1,
+            title: '缺页开场',
+            purpose: '让读者确认缺页不是失误而是栽赃入口。',
+            conflict: '执事用文书失误压过缺页。',
+            reader_payoff: '缺页变成公开证据。',
+            required_beats: ['江辰指出缺页页序', '证人被迫重新核对'],
+          },
+          {
+            scene_no: 2,
+            title: '回廊转场',
+            purpose: '把众人从审判庭带到禁库门口。',
+            reader_payoff: '禁库编号进入读者视野。',
+            ending_hook_seed: '缺页背面露出禁库编号。',
+          },
+        ],
+      },
+    }
+
+    const brief = buildChapterPreDraftBrief({ title: '缺页长篇' }, contextPackage)
+    const confirmedContext = mergeConfirmedPreDraftBriefIntoContext(contextPackage, {
+      ...brief,
+      confirmed_at: '2026-06-22T12:00:00.000Z',
+    })
+    const prompt = service.buildParagraphProseContext(
+      { title: '缺页长篇' },
+      confirmedContext,
+      null,
+      { chapter_no: 7, title: '缺页定位' },
+    )
+
+    expect(brief.chapter_blueprint.small_outline_contract.version).toBe('oh_story_small_outline_four_step_v1')
+    expect(brief.chapter_blueprint.small_outline_contract.steps.join('｜')).toContain('分段判断')
+    expect(brief.chapter_blueprint.small_outline_contract.steps.join('｜')).toContain('标注目的和效果')
+    expect(brief.chapter_blueprint.small_outline_contract.steps.join('｜')).toContain('标注详写/略写')
+    expect(brief.chapter_blueprint.small_outline_contract.steps.join('｜')).toContain('快速定位')
+    expect(brief.chapter_blueprint.small_outline_contract.purpose_effect_rules.join('｜')).toContain('不展开情节')
+    expect(brief.chapter_blueprint.small_outline_contract.segment_cards[0]).toMatchObject({
+      segment_no: 1,
+      detail_level: 'expand',
+    })
+    expect(brief.chapter_blueprint.small_outline_contract.segment_cards[0].purpose).toContain('缺页')
+    expect(brief.chapter_blueprint.small_outline_contract.segment_cards[1]).toMatchObject({
+      segment_no: 2,
+      detail_level: 'compress',
+    })
+    expect(prompt).toContain('小纲四步法')
+    expect(prompt).toContain('分段判断')
+    expect(prompt).toContain('目的和效果')
+    expect(prompt).toContain('详写/略写')
+    expect(prompt).toContain('快速定位')
+    expect(prompt).toContain('small_outline_contract')
+  })
+
   test('adds an oh-story platform rubric contract to pre-draft brief and prose prompt', () => {
     const service = createNovelWritingService({
       getProject: async () => null,
@@ -40557,6 +40626,62 @@ describe('readability and restrained meme workflow', () => {
     expect(warnReport.craft_checks.find((item: any) => item.key === 'beat_function_detail_balance')?.status).toBe('warn')
     expect(warnReport.missed.find((item: any) => item.key === 'craft_beat_function_detail_balance')?.text).toContain('关键揭露')
     expect(warnReport.next_actions.join('；')).toContain('目的词详略')
+  })
+
+  test('checks oh-story small-outline four-step delivery after prose is written', () => {
+    const project = { title: '残阵问道', reference_config: {} }
+    const chapter = { id: 34, chapter_no: 34, title: '小纲复核' }
+    const contextPackage = {
+      chapter_target: {
+        chapter_no: 34,
+        chapter_blueprint: {
+          small_outline_contract: {
+            version: 'oh_story_small_outline_four_step_v1',
+            steps: ['分段判断', '标注目的和效果', '标注详写/略写', '快速定位'],
+            segment_cards: [
+              {
+                segment_no: 1,
+                segment: '审判庭缺页',
+                purpose: '让读者确认缺页不是文书失误而是栽赃入口。',
+                intended_effect: '读者感到证据压力升级。',
+                detail_level: 'expand',
+                quick_locator: '审判庭缺页页序',
+              },
+              {
+                segment_no: 2,
+                segment: '回廊转场',
+                purpose: '把众人从审判庭带到禁库门口。',
+                intended_effect: '压缩转场但保留禁库方向。',
+                detail_level: 'compress',
+                quick_locator: '穿过回廊到禁库门口',
+              },
+            ],
+          },
+        },
+      },
+    }
+    const deliveredText = [
+      '审判庭里，江辰把缺页页序摊到众人面前，逼执事承认这不是文书失误，而是有人故意把栽赃入口藏进账册。',
+      '证人重新核对页序时，执事的脸色变了，旁观弟子有人沉默，有人退后，读者能看见证据压力从“口头争执”升级成“现场核验”。',
+      '代价是江辰暴露核验页序的方法，收益是缺页被当众证明为栽赃证据。',
+      '他们穿过回廊到禁库门口，转场只留一笔，缺页背面的禁库编号却被江辰按在门环旁。',
+    ].join('\n')
+    const weakText = [
+      '江辰去了审判庭，大家讨论缺页。',
+      '后来他们穿过很长的回廊，墙上有很多影子，空气很冷。',
+      '事情进入下一阶段。',
+    ].join('\n')
+
+    const okReport = buildChapterBlueprintSyncReport(project, chapter, contextPackage, deliveredText)
+    const warnReport = buildChapterBlueprintSyncReport(project, chapter, contextPackage, weakText)
+
+    expect(okReport.small_outline_checks.find((item: any) => item.key === 'small_outline_contract')?.status).toBe('ok')
+    expect(okReport.status).toBe('ok')
+    expect(warnReport.status).toBe('warn')
+    expect(warnReport.small_outline_checks.find((item: any) => item.key === 'small_outline_contract')?.status).toBe('warn')
+    expect(warnReport.missed.map((item: any) => item.key)).toContain('small_outline_contract')
+    expect(warnReport.missed.find((item: any) => item.key === 'small_outline_contract')?.text).toContain('目的和效果')
+    expect(warnReport.next_actions.join('；')).toContain('小纲四步法')
   })
 
   test('reads chapter blueprint sync contract from camelCase chapter raw preDraftBrief', () => {

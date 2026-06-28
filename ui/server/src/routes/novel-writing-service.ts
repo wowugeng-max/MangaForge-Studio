@@ -24425,6 +24425,129 @@ function buildChapterBlueprintCraftChecks(blueprint: any, chapterText: string) {
   return checks
 }
 
+function smallOutlineContractFromBlueprint(blueprint: any) {
+  return normalizeChapterBlueprintSmallOutlineContract(blueprint?.small_outline_contract || blueprint?.smallOutlineContract)
+}
+
+function smallOutlineSegmentText(row: any) {
+  return compactBriefText([
+    row?.segment,
+    row?.purpose,
+    row?.intended_effect || row?.intendedEffect,
+    row?.quick_locator || row?.quickLocator,
+  ].filter(Boolean).join('；'))
+}
+
+function smallOutlineEvidenceForSegment(row: any, chapterText: string) {
+  const body = proseBodyWithoutTitleLine(chapterText)
+  const candidates = [
+    ...body.split(/\n+/),
+    ...proseParagraphsWithoutTitle(body),
+    ...body.split(/(?<=[。！？!?])/),
+  ]
+    .map(item => compactBriefText(item, 260))
+    .filter(Boolean)
+  const anchor = compactBriefText(row.quick_locator || row.quickLocator || row.purpose || row.segment)
+  const scored = candidates
+    .map(evidence => ({ evidence, match: anchorMatchScore(anchor, evidence) }))
+    .sort((a, b) => {
+      const scoreDelta = b.match.score - a.match.score
+      if (a.match.score >= 18 && b.match.score >= 18 && Math.abs(scoreDelta) <= 12) {
+        return countProseChars(a.evidence) - countProseChars(b.evidence)
+      }
+      return scoreDelta || b.match.matched.length - a.match.matched.length
+    })
+  return scored[0] || { evidence: '', match: { score: 0, matched: [] } }
+}
+
+function smallOutlineHasPurposeEffect(row: any, chapterText: string) {
+  const body = proseBodyWithoutTitleLine(chapterText)
+  const purpose = compactBriefText(row.purpose)
+  const effect = compactBriefText(row.intended_effect || row.intendedEffect)
+  const locator = compactBriefText(row.quick_locator || row.quickLocator || row.segment)
+  const purposeMatch = purpose ? anchorMatchScore(purpose, body) : { score: 80, matched: [] as string[] }
+  const effectMatch = effect ? anchorMatchScore(effect, body) : { score: 80, matched: [] as string[] }
+  const locatorMatch = locator ? anchorMatchScore(locator, body) : { score: 80, matched: [] as string[] }
+  const purposeSignal = /目的|确认|证明|反证|逼|承认|核对|公开|入口|压力|升级|方向|编号|视野|主线/.test(body)
+  const delivered = (purposeMatch.score >= 24 || purposeSignal)
+    && (effectMatch.score >= 20 || /压力|升级|视野|读者|公开|证据|编号|钩子|期待|方向/.test(body))
+    && locatorMatch.score >= 18
+  return {
+    delivered,
+    purpose_score: purposeMatch.score,
+    effect_score: effectMatch.score,
+    locator_score: locatorMatch.score,
+    matched: uniqueBriefStrings([...purposeMatch.matched, ...effectMatch.matched, ...locatorMatch.matched], 8),
+  }
+}
+
+function smallOutlineDetailLevelDelivered(row: any, evidence: string) {
+  const detailLevel = compactBriefText(row.detail_level || row.detailLevel)
+  if (/compress|略|压缩|带过/.test(detailLevel)) {
+    return {
+      delivered: !isCompressedBeatOverwritten(evidence),
+      issue: '该段应略写/压缩，却被写成装饰性过场或均匀水文。',
+    }
+  }
+  const eventSignals = [
+    countProseChars(evidence) >= 38,
+    /[“「]/.test(evidence),
+    /逼|承认|核对|摊|按|抢|挡|问|答|改口|倒戈|站队|露出|证明|反证|选择|代价/.test(evidence),
+    /压力|证据|编号|冲突|信息|关系|状态|钩子|期待/.test(evidence),
+  ].filter(Boolean)
+  return {
+    delivered: eventSignals.length >= 2,
+    issue: '该段应详写/展开，却缺少动作、对话、信息变化、压力升级或结果余波。',
+  }
+}
+
+function buildChapterBlueprintSmallOutlineCheck(blueprint: any, chapterText: string) {
+  const contract = smallOutlineContractFromBlueprint(blueprint)
+  const segments = asArray(contract?.segment_cards || contract?.segmentCards)
+  if (!contract || !segments.length) return null
+  const results = segments.map((row: any, index: number) => {
+    const evidence = smallOutlineEvidenceForSegment(row, chapterText)
+    const purposeEffect = smallOutlineHasPurposeEffect(row, chapterText)
+    const detail = smallOutlineDetailLevelDelivered(row, evidence.evidence)
+    const delivered = purposeEffect.delivered && detail.delivered
+    return {
+      segment_no: Number(row.segment_no || row.segmentNo || index + 1),
+      segment: compactBriefText(row.segment),
+      purpose: compactBriefText(row.purpose),
+      intended_effect: compactBriefText(row.intended_effect || row.intendedEffect),
+      detail_level: compactBriefText(row.detail_level || row.detailLevel),
+      quick_locator: compactBriefText(row.quick_locator || row.quickLocator),
+      evidence: evidence.evidence || `未定位：${smallOutlineSegmentText(row)}`,
+      matched: purposeEffect.matched,
+      status: delivered ? 'ok' : 'warn',
+      delivered,
+      issue: delivered
+        ? ''
+        : [
+            purposeEffect.delivered ? '' : '目的和效果没有落成正文证据。',
+            detail.delivered ? '' : detail.issue,
+          ].filter(Boolean).join('；'),
+    }
+  })
+  const missed = results.filter((item: any) => !item.delivered)
+  return {
+    key: 'small_outline_contract',
+    label: '小纲四步法',
+    status: missed.length ? 'warn' : 'ok',
+    evidence: results
+      .map((item: any) => `S${item.segment_no}${item.detail_level ? `/${item.detail_level}` : ''}：${compactBriefText(item.evidence, 120)}`)
+      .join('；'),
+    expected_count: results.length,
+    missed_count: missed.length,
+    missed_items: missed.map((item: any) => `S${item.segment_no} ${item.segment || item.quick_locator || item.purpose}：${item.issue}`).slice(0, 8),
+    text: '小纲四步法要求分段判断、标注目的和效果、标注详写/略写、快速定位。',
+    fix: missed.length
+      ? `按 oh-story 小纲四步法修复：逐段检查分段判断、目的和效果、详写/略写、快速定位；当前缺口：${missed.map((item: any) => `S${item.segment_no} ${item.issue}`).join('；')}。目的/效果必须写成正文动作、对话、信息变化或章尾钩子；详写段补过程和余波，略写段压缩为 1-2 句。`
+      : '',
+    results,
+  }
+}
+
 function chapterBlueprintCausalChainCheck(blueprint: any, chapterText: string) {
   const contract = normalizeChapterBlueprintCausalChainContract(blueprint?.causal_chain_contract || blueprint?.causalChainContract)
   if (!contract) return null
@@ -24979,6 +25102,8 @@ export function buildChapterBlueprintSyncReport(project: any, chapter: any, cont
   ])
   const checked = planned.map(item => chapterBlueprintBeatMatch(item, chapterText))
   const craftChecks = buildChapterBlueprintCraftChecks(blueprint, chapterText)
+  const smallOutlineCheck = buildChapterBlueprintSmallOutlineCheck(blueprint, chapterText)
+  const smallOutlineChecks = smallOutlineCheck ? [smallOutlineCheck] : []
   const causalChainCheck = chapterBlueprintCausalChainCheck(blueprint, chapterText)
   const causalChainChecks = causalChainCheck ? [causalChainCheck] : []
   const craftMissed = craftChecks
@@ -24998,18 +25123,34 @@ export function buildChapterBlueprintSyncReport(project: any, chapter: any, cont
       ...item,
       text: item.text || item.expected,
     }))
+  const smallOutlineMissed = smallOutlineChecks
+    .filter((item: any) => item.status === 'warn')
+    .map((item: any) => ({
+      key: item.key,
+      label: item.label,
+      text: item.text || item.fix,
+      evidence: item.evidence,
+      delivered: false,
+      status: 'warn',
+      score: 0,
+      missed_items: item.missed_items || [],
+      fix: item.fix,
+    }))
   const beatDensityMissed = craftMissed.some((item: any) => item.key === 'craft_beat_density')
   const beatFunctionDetailMissed = craftMissed.some((item: any) => item.key === 'craft_beat_function_detail_balance')
   const delivered = checked.filter(item => item.delivered)
-  const missed = [...checked.filter(item => !item.delivered), ...craftMissed, ...causalChainMissed]
+  const missed = [...checked.filter(item => !item.delivered), ...craftMissed, ...smallOutlineMissed, ...causalChainMissed]
   const missedCount = missed.length
   const deliveredCausalChainCount = causalChainChecks.filter((item: any) => item.delivered).length
+  const deliveredSmallOutlineCount = smallOutlineChecks.filter((item: any) => item.status === 'ok').length
+  const totalBlueprintChecks = planned.length + craftChecks.length + smallOutlineChecks.length + causalChainChecks.length
   const score = Math.max(0, Math.min(100, Math.round(
-    planned.length || craftChecks.length || causalChainChecks.length
-      ? ((delivered.length + craftChecks.filter((item: any) => item.status === 'ok').length + deliveredCausalChainCount) / Math.max(1, planned.length + craftChecks.length + causalChainChecks.length)) * 100
+    totalBlueprintChecks
+      ? ((delivered.length + craftChecks.filter((item: any) => item.status === 'ok').length + deliveredSmallOutlineCount + deliveredCausalChainCount) / Math.max(1, totalBlueprintChecks)) * 100
       : 82,
   )))
   const status = missedCount > 0 || score < 78 ? 'warn' : 'ok'
+  const hasBlueprintPlan = planned.length || craftChecks.length || smallOutlineChecks.length || causalChainChecks.length
 
   return {
     report_id: `chapter-blueprint-sync-${chapter?.id || chapter?.chapter_no || Date.now()}`,
@@ -25017,17 +25158,18 @@ export function buildChapterBlueprintSyncReport(project: any, chapter: any, cont
     chapter_no: chapter?.chapter_no || null,
     score,
     status,
-    label: planned.length === 0 ? '细纲未配置' : status === 'ok' ? '细纲 OK' : `细纲缺口 ${missedCount}`,
-    summary: planned.length === 0
+    label: !hasBlueprintPlan ? '细纲未配置' : status === 'ok' ? '细纲 OK' : `细纲缺口 ${missedCount}`,
+    summary: !hasBlueprintPlan
       ? '本章没有配置章节细纲蓝图。'
       : status === 'ok'
-        ? '正文已基本兑现章节细纲中的开篇钩子、核心回报、五段式概括、多线推进、人物顺序、代价收益和章尾承接。'
+        ? '正文已基本兑现章节细纲中的开篇钩子、核心回报、小纲四步法、五段式概括、多线推进、人物顺序、代价收益和章尾承接。'
         : `正文有 ${missedCount} 项章节细纲任务未充分落地。`,
     missed_count: missedCount,
     planned,
     delivered,
     missed,
     craft_checks: craftChecks,
+    small_outline_checks: smallOutlineChecks,
     causal_chain_checks: causalChainChecks,
     next_actions: status === 'ok'
       ? ['保持章节细纲闭环：开篇、推进、转折、回报、代价收益和章尾承接都要有正文证据。']
@@ -25036,6 +25178,7 @@ export function buildChapterBlueprintSyncReport(project: any, chapter: any, cont
           causalChainMissed.length ? '按五幕因果链修复：开局埋因，发展让果变下一因，转折让冲突性质质变，行动白热化，结局收束并埋下一因；不能跳步、不能乱序。' : '',
           beatDensityMissed ? '按情节点密度修复：约 200-300 字/个情节点，先补足动作过程、对话交锋、信息变化、选择代价、收益兑现和章尾钩子铺垫，再扩写句子。' : '',
           beatFunctionDetailMissed ? '按目的词详略修复：爽点/打脸/高潮/卖点/关键揭露/反转必须展开，过渡/赶路/信息交代/时间跳转压成 1-2 句，避免平均用力或装饰性水文。' : '',
+          smallOutlineMissed.length ? '按小纲四步法修复：先分段判断，再补每段目的和效果，按详写/略写分配篇幅，并让 quick_locator 在正文中可定位。' : '',
           '按 oh-story craft 修复：爽点前补危机/期待铺垫，揭露/打脸后补在场配角差异化反应，过渡点压缩、卖点和回报点展开。',
           '如果正文只是概述大纲，按章节细纲重排开篇钩子、五段式内容概括、多线推进和章尾承接。',
         ].filter(Boolean),
@@ -45648,6 +45791,160 @@ function buildChapterBlueprintBeatDensityContract(wordTarget: any, beatSequence:
   }
 }
 
+function normalizeChapterBlueprintSmallOutlineContract(value: any) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const segmentCards = asArray(value.segment_cards || value.segmentCards)
+    .map((item: any, index: number) => {
+      const segment = compactBriefText(item?.segment || item?.title || item?.name || item?.scene || item?.summary)
+      const purpose = compactBriefText(item?.purpose || item?.goal || item?.intent)
+      const intendedEffect = compactBriefText(item?.intended_effect || item?.intendedEffect || item?.effect || item?.reader_effect || item?.readerEffect)
+      const detailLevel = compactBriefText(item?.detail_level || item?.detailLevel || item?.detail || item?.allocation)
+      const quickLocator = compactBriefText(item?.quick_locator || item?.quickLocator || item?.locator || item?.anchor)
+      if (!segment && !purpose && !intendedEffect && !quickLocator) return null
+      return {
+        segment_no: Number(item?.segment_no || item?.segmentNo || index + 1),
+        segment,
+        purpose,
+        intended_effect: intendedEffect,
+        detail_level: /略|压缩|带过|compress|skip/i.test(detailLevel) ? 'compress' : 'expand',
+        quick_locator: quickLocator,
+      }
+    })
+    .filter(Boolean)
+  if (!segmentCards.length && !asArray(value.steps || value.method_steps || value.methodSteps).length) return null
+  return {
+    version: value.version || 'oh_story_small_outline_four_step_v1',
+    source: value.source || 'oh_story_plot_core_methods_small_outline',
+    steps: uniqueBriefStrings([
+      ...asArray(value.steps || value.method_steps || value.methodSteps),
+      '分段判断：把大纲按剧情节点分段。',
+      '标注目的和效果：每段只写目的与读者效果，不展开情节。',
+      '标注详写/略写：卖点、转折、打脸、高潮展开；过渡、赶路、信息交代带过。',
+      '快速定位：每段必须有正文可定位的动作、对话、信息变化或章尾钩子。',
+    ], 8),
+    purpose_effect_rules: uniqueBriefStrings([
+      ...asArray(value.purpose_effect_rules || value.purposeEffectRules),
+      '细纲只关注目的和效果，不展开情节；正文生成时再把目的写成动作、对话和信息变化。',
+      '每段都必须能回答：这一段服务什么目的，读者得到什么效果。',
+      '没有目的或效果的段落要删掉、合并，或改成服务主线的信息团。',
+    ], 8),
+    detail_rules: uniqueBriefStrings([
+      ...asArray(value.detail_rules || value.detailRules),
+      '详写：核心卖点、关键揭露、打脸、高潮、强冲突、关系变化和章尾钩子。',
+      '略写：过渡、赶路、时间跳转、重复说明和只承担连接功能的信息交代。',
+      '详略按目的词分配，不能所有段落平均用力。',
+    ], 8),
+    locator_rules: uniqueBriefStrings([
+      ...asArray(value.locator_rules || value.locatorRules),
+      '每段必须有 quick_locator，后续写作和修订能快速定位本段要交付的目的和效果。',
+      'quick_locator 必须落成正文可见证据，不能只写在任务书或回执里。',
+    ], 8),
+    segment_cards: segmentCards,
+  }
+}
+
+function inferSmallOutlineDetailLevel(scene: any, index: number, total: number) {
+  const text = compactBriefText([
+    scene?.title,
+    scene?.purpose,
+    scene?.reader_payoff,
+    scene?.reversal,
+    scene?.turning_point,
+    scene?.function_tag,
+  ].filter(Boolean).join('；'))
+  if (/过渡|转场|赶路|信息交代|回廊|时间跳转|铺陈/.test(text)) return 'compress'
+  if (/爽点|打脸|高潮|关键|揭露|反转|回报|冲突|压迫|证明|反证|钩子/.test(text)) return 'expand'
+  if (index === 0 || index === total - 1) return 'expand'
+  return 'compress'
+}
+
+function smallOutlineScenePurpose(scene: any, chapterTarget: any) {
+  return compactBriefText(
+    scene?.purpose
+    || scene?.goal
+    || scene?.beat
+    || scene?.summary
+    || chapterTarget?.summary
+    || chapterTarget?.goal,
+  )
+}
+
+function smallOutlineSceneEffect(scene: any) {
+  return compactBriefText(
+    scene?.reader_payoff
+    || scene?.payoff
+    || scene?.reversal
+    || scene?.ending_hook_seed
+    || scene?.endingHookSeed
+    || scene?.exit_state
+    || scene?.exitState,
+  )
+}
+
+function buildChapterBlueprintSmallOutlineContract(chapterTarget: any, sceneCards: any[], contentOutline: any, explicitValue: any = null) {
+  const explicit = normalizeChapterBlueprintSmallOutlineContract(explicitValue)
+  if (explicit) return explicit
+  const sourceScenes = asArray(sceneCards).filter((item: any) => item && typeof item === 'object')
+  const segmentCards = sourceScenes.length
+    ? sourceScenes.map((scene: any, index: number) => ({
+        segment_no: Number(scene.scene_no || scene.sceneNo || index + 1),
+        segment: compactBriefText(scene.title || `场景${index + 1}`),
+        purpose: smallOutlineScenePurpose(scene, chapterTarget),
+        intended_effect: smallOutlineSceneEffect(scene),
+        detail_level: inferSmallOutlineDetailLevel(scene, index, sourceScenes.length),
+        quick_locator: compactBriefText([
+          scene.title,
+          scene.opening_hook,
+          asArray(scene.required_beats)[0],
+          asArray(scene.action_beats)[0],
+          scene.ending_hook_seed,
+        ].filter(Boolean).join('：')),
+      }))
+    : [
+        ['cause', '开局分段'],
+        ['development', '发展分段'],
+        ['turn', '转折分段'],
+        ['climax', '高潮分段'],
+        ['ending', '章尾分段'],
+      ].map(([key, label], index) => {
+        const text = compactBriefText(contentOutline?.[key])
+        return text ? {
+          segment_no: index + 1,
+          segment: label,
+          purpose: text,
+          intended_effect: key === 'ending' ? '留下下一步期待。' : '推进本章目的和读者效果。',
+          detail_level: ['turn', 'climax'].includes(key) ? 'expand' : key === 'development' ? 'compress' : 'expand',
+          quick_locator: text,
+        } : null
+      }).filter(Boolean)
+  if (!segmentCards.length) return null
+  return {
+    version: 'oh_story_small_outline_four_step_v1',
+    source: 'oh_story_plot_core_methods_small_outline',
+    steps: [
+      '分段判断：把大纲按剧情节点分段。',
+      '标注目的和效果：每段只写目的与读者效果，不展开情节。',
+      '标注详写/略写：卖点、转折、打脸、高潮展开；过渡、赶路、信息交代带过。',
+      '快速定位：每段必须有正文可定位的动作、对话、信息变化或章尾钩子。',
+    ],
+    purpose_effect_rules: [
+      '细纲只关注目的和效果，不展开情节；正文生成时再把目的写成动作、对话和信息变化。',
+      '每段都必须能回答：这一段服务什么目的，读者得到什么效果。',
+      '没有目的或效果的段落要删掉、合并，或改成服务主线的信息团。',
+    ],
+    detail_rules: [
+      '详写：核心卖点、关键揭露、打脸、高潮、强冲突、关系变化和章尾钩子。',
+      '略写：过渡、赶路、时间跳转、重复说明和只承担连接功能的信息交代。',
+      '详略按目的词分配，不能所有段落平均用力。',
+    ],
+    locator_rules: [
+      '每段必须有 quick_locator，后续写作和修订能快速定位本段要交付的目的和效果。',
+      'quick_locator 必须落成正文可见证据，不能只写在任务书或回执里。',
+    ],
+    segment_cards: segmentCards,
+  }
+}
+
 function buildChapterBlueprintFromContext(contextPackage: any, options: any = {}) {
   const chapterTarget = contextPackage?.chapter_target || {}
   const explicitBlueprint = chapterTarget.chapter_blueprint
@@ -45660,6 +45957,7 @@ function buildChapterBlueprintFromContext(contextPackage: any, options: any = {}
   const explicitPlotLines = explicitBlueprint.plot_lines || explicitBlueprint.plotLines || {}
   const explicitEndingContract = explicitBlueprint.ending_contract || explicitBlueprint.endingContract || {}
   const explicitBeatDensityContract = explicitBlueprint.beat_density_contract || explicitBlueprint.beatDensityContract
+  const explicitSmallOutlineContract = explicitBlueprint.small_outline_contract || explicitBlueprint.smallOutlineContract
   const wordTarget = options.word_target
     || options.wordTarget
     || explicitBlueprint.word_target
@@ -45723,6 +46021,14 @@ function buildChapterBlueprintFromContext(contextPackage: any, options: any = {}
   const turn = compactBriefText(reversals.join('；') || middleScene.reversal || middleScene.turning_point || storyDrive.protagonist_choice)
   const climax = compactBriefText(lastScene.reader_payoff || lastScene.reversal || readerPayoffs.slice(-1)[0] || chapterTarget.conflict)
   const ending = compactBriefText(endingHook || lastScene.ending_hook_seed)
+  const contentOutline = {
+    cause: compactBriefText(explicitContentOutline.cause || cause),
+    development: compactBriefText(explicitContentOutline.development || development),
+    turn: compactBriefText(explicitContentOutline.turn || turn),
+    climax: compactBriefText(explicitContentOutline.climax || climax),
+    ending: compactBriefText(explicitContentOutline.ending || ending),
+  }
+  const smallOutlineContract = buildChapterBlueprintSmallOutlineContract(chapterTarget, sceneCards, contentOutline, explicitSmallOutlineContract)
   const writingIntent = compactBriefText([
     chapterTarget.title ? `第${chapterTarget.chapter_no || '?'}章《${chapterTarget.title}》` : '',
     chapterTarget.summary || chapterTarget.goal,
@@ -45773,20 +46079,8 @@ function buildChapterBlueprintFromContext(contextPackage: any, options: any = {}
     ),
     opening_hook: compactBriefText(explicitBlueprint.opening_hook || explicitBlueprint.openingHook || firstScene.opening_hook || serialRhythm.opening_hook_deadline || chapterTarget.opening_hook),
     core_payoff: compactBriefText(explicitBlueprint.core_payoff || explicitBlueprint.corePayoff || readerPayoffs.join('；') || options.reader_promise || chapterTarget.reader_promise),
-    content_outline: {
-      cause: compactBriefText(explicitContentOutline.cause || cause),
-      development: compactBriefText(explicitContentOutline.development || development),
-      turn: compactBriefText(explicitContentOutline.turn || turn),
-      climax: compactBriefText(explicitContentOutline.climax || climax),
-      ending: compactBriefText(explicitContentOutline.ending || ending),
-    },
-    causal_chain_contract: buildChapterBlueprintCausalChainContract({
-      cause: compactBriefText(explicitContentOutline.cause || cause),
-      development: compactBriefText(explicitContentOutline.development || development),
-      turn: compactBriefText(explicitContentOutline.turn || turn),
-      climax: compactBriefText(explicitContentOutline.climax || climax),
-      ending: compactBriefText(explicitContentOutline.ending || ending),
-    }, explicitCausalChainContract),
+    content_outline: contentOutline,
+    causal_chain_contract: buildChapterBlueprintCausalChainContract(contentOutline, explicitCausalChainContract),
     plot_lines: {
       mainline: compactBriefText(explicitPlotLines.mainline || explicitPlotLines.main_line || explicitPlotLines.mainLine || chapterTarget.summary || chapterTarget.goal),
       subplot: compactBriefText(explicitPlotLines.subplot || storylineAdvances.join('；')),
@@ -45804,6 +46098,7 @@ function buildChapterBlueprintFromContext(contextPackage: any, options: any = {}
     information_gap: compactBriefText(sceneCards.map((scene: any) => scene.information_gap).filter(Boolean).join('；') || pageTurn.core_question),
     beat_sequence: beatSequence,
     beat_density_contract: beatDensityContract,
+    small_outline_contract: smallOutlineContract,
     cost_and_reward: compactBriefText(explicitBlueprint.cost_and_reward || explicitBlueprint.costAndReward || [
       storyDrive.choice_cost ? `代价：${storyDrive.choice_cost}` : '',
       readerPayoffs.length ? `收益：${readerPayoffs.join('；')}` : '',
@@ -49923,6 +50218,7 @@ export function createNovelWritingService(ctx: {
       || contextPackage?.preDraftBrief?.chapterBlueprint
       || null
     const beatDensityContract = chapterBlueprint?.beat_density_contract || chapterBlueprint?.beatDensityContract || null
+    const smallOutlineContract = chapterBlueprint?.small_outline_contract || chapterBlueprint?.smallOutlineContract || null
     const skipBenchmarkRecall = benchmarkRecallIsNoBenchmark(benchmarkRecallGapsFromContext(contextPackage, {
       style_sample_strategy: styleSampleStrategy,
       chapter_benchmark_strategy: chapterBenchmarkStrategy,
@@ -50213,6 +50509,11 @@ export function createNovelWritingService(ctx: {
       beatDensityContract ? `情节点密度：${beatDensityContract.rule || OH_STORY_BEAT_DENSITY_RULE}` : '',
       beatDensityContract ? `密度预算：本章目标 ${beatDensityContract.target_word_count || '?'} 字，建议 ${beatDensityContract.min_beat_count || '?'}-${beatDensityContract.max_beat_count || '?'} 个情节点，目标 ${beatDensityContract.target_beat_count || '?'} 个；当前蓝图 ${beatDensityContract.current_beat_count || 0} 个，缺口 ${beatDensityContract.density_gap || 0} 个。` : '',
       beatDensityContract?.execution_rules?.length ? `密度执行规则：${beatDensityContract.execution_rules.join('；')}` : '',
+      smallOutlineContract ? '小纲四步法：执行 chapter_target.chapter_blueprint.small_outline_contract，先分段判断，再标注目的和效果，再按详写/略写分配篇幅，最后用 quick_locator 快速定位正文证据。' : '',
+      smallOutlineContract?.steps?.length ? `小纲步骤：${smallOutlineContract.steps.join('；')}` : '',
+      smallOutlineContract?.purpose_effect_rules?.length ? `目的和效果规则：${smallOutlineContract.purpose_effect_rules.join('；')}` : '',
+      smallOutlineContract?.detail_rules?.length ? `详写/略写规则：${smallOutlineContract.detail_rules.join('；')}` : '',
+      smallOutlineContract?.locator_rules?.length ? `快速定位规则：${smallOutlineContract.locator_rules.join('；')}` : '',
       chapterBlueprint ? 'beat_sequence.function_tag 决定每个情节点展开或带过：关键揭露/打脸/高潮/爽点必须展开；过渡/赶路/信息交代必须压缩。' : '',
       chapterBlueprint ? '执行方式：爽点/高潮出手前必须铺出可指认的危机或期待；装逼、打脸、揭露或反证章必须写出在场角色的差异化反应；过场点带过，卖点/回报点展开，不得均匀注水。' : '',
       chapterBlueprint ? JSON.stringify(chapterBlueprint, null, 2).slice(0, 5000) : '',
@@ -52633,7 +52934,7 @@ export function createNovelWritingService(ctx: {
     '10A. 执行 oh-story 快速自检口诀：一事一段，镜头自然断；对话要像人说话；心情不写心里话；章尾不搞大升华；打斗不写流水账。发现段落机械断裂、对白书面化、心理告知、章末升华或打斗只有结果时，必须输出 prose_craft_checks、dialogue_checks、chapter_hook_checks 或 deslop_checks，并给出正文证据。',
     '10B. 外部事实查证：如果正文涉及历史年代、地理方位、职业细节、法律/医疗/技术流程、真实机构或真实地名，但上下文没有可靠来源，必须输出 factual_checks，字段 key,label,status(pass|warn|fail),fact_type,claim,verification_status,evidence,fix,remaining_risk；未查证却写成确定事实时必须给出 issue，category=factual。',
     '11. 是否违反 setting_context：境界/战力矛盾、能力代价缺失、物品归属错误、Boss行动逻辑不一致、禁揭设定泄漏、规则触发没有代价、角色知识越界、伏笔误用、预期状态变化缺失。',
-    '12. 是否兑现 chapter_target.chapter_blueprint：目标情绪、开篇钩子、核心回报、五段式内容概括、多线推进、人物出场顺序、情节点功能标签、代价/收益和章尾承接是否都有正文证据。',
+    '12. 是否兑现 chapter_target.chapter_blueprint：目标情绪、开篇钩子、核心回报、小纲四步法（分段判断、目的和效果、详写/略写、快速定位）、五段式内容概括、多线推进、人物出场顺序、情节点功能标签、代价/收益和章尾承接是否都有正文证据。',
     '13. 是否出现写作工程词混入正文：按 oh-story 正文元信息扫描，标题行以外不得出现第[一二三四五六七八九十百千万两0-9]+章|上一章|上章|前一章|本章|这一章|前文|后文|伏笔|细纲|读者；命中必须输出 prose_meta_checks，字段 key,label,status,matched_term,location,replacement,evidence,remaining_risk，并要求改成角色当下能感知的事件锚点或相对时间，除非角色在故事世界内真实讨论。',
     '14. 是否兑现 chapter_target.delivery_risk_carry_over 和 batch_preflight.delivery_risk_carry_over：逐项检查每个 items/required_actions/opening_actions/middle_actions/ending_actions 中的上一章风险承接动作；opening_actions 必须在前300字有正文证据，middle_actions 必须落成中段事件推进，ending_actions 必须在最后300字形成追读钩子或承接余波。必须给出正文证据，未兑现必须输出 S1/S2 finding，尤其是开篇承接、章末翻页、去AI味、审稿修法、修订残留、新资产入库和 IP场面延展。',
     '14+. 是否兑现 batch_preflight.delivery_risk_carry_over.creation_contract_carry_over：如果安全连写预检要求先修创作契约，必须逐项检查目标读者、题材定位、核心承诺、追读留存是否都有正文证据；必须输出 target_reader_checks、genre_positioning_checks、core_contract_checks 和 reader_retention_checks，不能只用 delivery_risk_receipts 汇总。',
@@ -53910,7 +54211,7 @@ export function createNovelWritingService(ctx: {
             task: [
               '任务：为无人值守章节写作补齐本章蓝图。只输出 JSON，不写正文。',
               '输出字段：title, chapter_goal, chapter_summary, conflict, ending_hook, chapter_blueprint, emotional_arc_contract, chapter_hook_contract, paragraph_hook_contract, opening_contract, suspense_contract, reversal_contract, showdown_contract, bridge_unit_contract, style_boundary_contract, plot_dynamics_contract, story_power_contract, information_flow_contract, expectation_threshold_contract, story_loop_contract, prose_craft_contract, punctuation_tone_contract, quality_audit_contract, dialogue_contract, continuity_heat_contract, character_relation_contract, character_behavior_contract, asset_linkage_contract, state_tracking_contract, intent_confirmation_contract, target_reader_contract, genre_positioning_contract, core_contract_radar, female_audience_contract, upgrade_rhythm_contract, conflict_structure_contract, must_advance(array), forbidden_repeats(array), repair_summary。',
-              'chapter_blueprint 必须包含 target_emotion, opening_hook, core_payoff, content_outline(cause/development/turn/climax/ending), causal_chain_contract(act_order/act_functions/quality_checks), plot_lines(mainline/subplot/event_line/relationship_line/logic_line), character_order, beat_sequence, beat_density_contract, cost_and_reward, ending_contract(final_state/unresolved_question/next_chapter_pull)；causal_chain_contract 必须按 oh-story 五幕式输出种子/生长/转折/冲刺/完成，要求不能跳步、不能乱序；beat_sequence 每项必须包含 beat_no/scene_no/action/function_tag/payoff，function_tag 必须决定展开还是带过，关键揭露/打脸/高潮/爽点必须展开，过渡/赶路/信息交代必须压缩。',
+              'chapter_blueprint 必须包含 target_emotion, opening_hook, core_payoff, content_outline(cause/development/turn/climax/ending), small_outline_contract(steps/purpose_effect_rules/detail_rules/locator_rules/segment_cards), causal_chain_contract(act_order/act_functions/quality_checks), plot_lines(mainline/subplot/event_line/relationship_line/logic_line), character_order, beat_sequence, beat_density_contract, cost_and_reward, ending_contract(final_state/unresolved_question/next_chapter_pull)；small_outline_contract 必须按 oh-story 小纲四步法输出分段判断、目的和效果、详写/略写、快速定位，segment_cards 每项包含 segment_no,segment,purpose,intended_effect,detail_level,quick_locator；causal_chain_contract 必须按 oh-story 五幕式输出种子/生长/转折/冲刺/完成，要求不能跳步、不能乱序；beat_sequence 每项必须包含 beat_no/scene_no/action/function_tag/payoff，function_tag 必须决定展开还是带过，关键揭露/打脸/高潮/爽点必须展开，过渡/赶路/信息交代必须压缩。',
               '情绪弧合同 emotional_arc_contract 必须按 oh-story 情绪弧与 emotional-methods 输出 arc_shape, emotion_formula, pressure_methods, payoff_types, payoff_reverse_design, payoff_tier_rules, payoff_density_rules, emotion_module_recomposition_rules, payoff_escalation_rules, scene_execution_rules, expectation_rules, safety_rules, bonding_setup_rules, emotional_tear_rules, lingering_aftertaste_rules, emotional_turning_rules, first_impression_rules, peak_end_rules, emotion_layer_rules, reaction_structure_rules, ideological_conflict_rules, failure_mode_guards, quality_checks，明确本章如何完成平静 -> 调动 -> 释放 -> 爽、爽点倒推法（先定爽点类型 -> 再定期待点 -> 最后倒推铺垫，正文按铺垫 -> 期待升高 -> 爽点释放呈现）、场景情绪执行（每个场景标注调动/复现/释放/后反应，闭环当前期待时开启下一开环）、装逼层级（日常小装逼/核心爽点/偏离爽点）、多爽点密度（不要拉长单个爽点铺垫，800-1200 字内要有信息增量/能力展示/危机反制/关系变化/小回收）、先入为主（前100字先给核心矛盾/主角处境/不公平异常，注意否定提前）、峰终定律（结尾情绪必须高于起点，结尾情绪强度虐≥8、爽≥7、治愈≥6，最后一击必须是动作/对话/画面）、三层情绪（角色自己的情绪、文本传递的情绪、读者实际感受分离，角色在哭不等于读者哭，必须转成读者收益）、情绪反应结构（前反应 -> 复现 -> 后反应；以小搏大 -> 士气如虹）、理念矛盾（理念之争比利益之争更能引发深层共鸣，把原则碰撞、追求和牺牲落成具体选择与代价）、情绪模块重组（戏剧性会磨损，情绪不会磨损；复用套路必须换场景/换对手/加新情绪或提高 stakes/奖励复杂度）、情绪三板斧（羁绊铺设/情感撕裂/余韵钝痛）和每 3-5 个小节的事件触发情绪转向，并让连续爽点按影响范围、揭示深度或身份落差递增。',
               '章级钩子合同 chapter_hook_contract 必须按 oh-story 章首/章尾钩子输出 opening_hook_type, ending_hook_type, hook_strength, opening_hook_rules, ending_hook_rules, forbidden_patterns, quality_checks，明确前 100-300 字和最后 300 字如何制造追读。',
               '段落级钩子合同 paragraph_hook_contract 必须按 oh-story 段落级钩子输出 micro_hook_types, hook_combinations, dialogue_escalation, spectator_layers, forbidden_patterns, quality_checks，明确本章每 3-5 段如何制造信息、风险、情绪或关系变化。',
@@ -53994,26 +54295,34 @@ export function createNovelWritingService(ctx: {
         function_tag: '开篇钩子/推进/章尾承接',
         payoff: nextGoal,
       }]
+      const repairedContentOutline = {
+        cause: compactBriefText(payloadContentOutline.cause || nextSummary),
+        development: compactBriefText(payloadContentOutline.development || nextConflict),
+        turn: compactBriefText(payloadContentOutline.turn || payload?.turning_point || nextGoal),
+        climax: compactBriefText(payloadContentOutline.climax || payload?.climax || nextGoal),
+        ending: compactBriefText(payloadContentOutline.ending || nextHook),
+      }
+      const smallOutlineScenes = repairedBeatSequence.map((beat: any, index: number) => ({
+        scene_no: Number(beat.scene_no || beat.sceneNo || beat.beat_no || beat.beatNo || index + 1),
+        title: compactBriefText(beat.title || `情节点${index + 1}`),
+        purpose: compactBriefText(beat.action || beat.summary || beat.event || nextSummary),
+        reader_payoff: compactBriefText(beat.payoff || nextGoal),
+        function_tag: compactBriefText(beat.function_tag || beat.functionTag),
+      }))
       const repairedChapterBlueprint = {
         version: payloadBlueprint.version || 'oh_story_chapter_blueprint_v1',
         source: payloadBlueprint.source || 'unattended_preflight_repair',
         target_emotion: compactBriefText(payloadBlueprint.target_emotion || payloadBlueprint.targetEmotion || payload?.target_emotion || '承接上一章压力，完成本章推进与章尾追读。'),
         opening_hook: compactBriefText(payloadBlueprint.opening_hook || payloadBlueprint.openingHook || payload?.opening_hook || nextConflict),
         core_payoff: compactBriefText(payloadBlueprint.core_payoff || payloadBlueprint.corePayoff || payload?.core_payoff || nextGoal),
-        content_outline: {
-          cause: compactBriefText(payloadContentOutline.cause || nextSummary),
-          development: compactBriefText(payloadContentOutline.development || nextConflict),
-          turn: compactBriefText(payloadContentOutline.turn || payload?.turning_point || nextGoal),
-          climax: compactBriefText(payloadContentOutline.climax || payload?.climax || nextGoal),
-          ending: compactBriefText(payloadContentOutline.ending || nextHook),
-        },
-        causal_chain_contract: buildChapterBlueprintCausalChainContract({
-          cause: compactBriefText(payloadContentOutline.cause || nextSummary),
-          development: compactBriefText(payloadContentOutline.development || nextConflict),
-          turn: compactBriefText(payloadContentOutline.turn || payload?.turning_point || nextGoal),
-          climax: compactBriefText(payloadContentOutline.climax || payload?.climax || nextGoal),
-          ending: compactBriefText(payloadContentOutline.ending || nextHook),
-        }, payloadCausalChainContract),
+        content_outline: repairedContentOutline,
+        small_outline_contract: buildChapterBlueprintSmallOutlineContract(
+          { ...contextPackage?.chapter_target, summary: nextSummary, goal: nextGoal, ending_hook: nextHook },
+          smallOutlineScenes,
+          repairedContentOutline,
+          payloadBlueprint.small_outline_contract || payloadBlueprint.smallOutlineContract,
+        ),
+        causal_chain_contract: buildChapterBlueprintCausalChainContract(repairedContentOutline, payloadCausalChainContract),
         plot_lines: {
           mainline: compactBriefText(payloadPlotLines.mainline || payloadPlotLines.main_line || payloadPlotLines.mainLine || nextGoal),
           subplot: compactBriefText(payloadPlotLines.subplot || ''),
