@@ -18,8 +18,8 @@ Source reference set: `/private/tmp/oh-story-claudecode/skills/story-long-write/
   "todo": 2,
   "deferred": 0,
   "remaining_references": 24,
-  "estimated_hours_remaining": 47,
-  "estimated_working_days_remaining": 7.83
+  "estimated_hours_remaining": 46,
+  "estimated_working_days_remaining": 7.67
 }
 -->
 
@@ -31,9 +31,9 @@ Source reference set: `/private/tmp/oh-story-claudecode/skills/story-long-write/
 - Not systematically reviewed yet: 2
 - Deferred: 0
 - Remaining references to improve: 24
-- Estimated remaining effort: about 47 engineering hours, or 7.83 focused working days at 6 hours per day
+- Estimated remaining effort: about 46 engineering hours, or 7.67 focused working days at 6 hours per day
 
-The estimate assumes the current working pattern: one small oh-story increment at a time, with prompt or workflow changes backed by focused tests, then `test:novel-server` and `check` before push. UI progress surfacing is not included in the 47 hours; after this ledger stabilizes, exposing it in the novel workspace should be a separate 4-6 hour slice.
+The estimate assumes the current working pattern: one small oh-story increment at a time, with prompt or workflow changes backed by focused tests, then `test:novel-server` and `check` before push. UI progress surfacing is not included in the 46 hours; after this ledger stabilizes, exposing it in the novel workspace should be a separate 4-6 hour slice.
 
 ## Status Meaning
 
@@ -82,7 +82,7 @@ The estimate assumes the current working pattern: one small oh-story increment a
 | style-craft.md | partial | Style boundary, punctuation tone, sentence rhythm, subject-name rhythm, and section-density checks are present. | Extract craft rules into shorter prompt snippets to reduce prompt bulk. | 1h |
 | style-genre-modules.md | partial | Benchmark recall and emotion/rhythm module loading rules exist. | Add model-facing fallback receipts proving module, rhythm, and matched chapter usage. | 1.5h |
 | workflow-daily.md | integrated | Next-batch workflow rules cover context load, manual fallback table, next chapter numbering, title precheck, benchmark recall, formula loading, research, word count, serial writing, Phase 5 checks, and exact `追踪/上下文.md` progress-summary handoff. | Keep tuning daily workflow rules after real batch-writing failures appear. | 0.5h |
-| workflow-revision.md | partial | Revision context receipts, revision cascade, scope guard, quality-audit repair, and editor repair prompts exist. | Compare workflow-revision step order against MangaForge editor flow and fill missing handoff receipts. | 2h |
+| workflow-revision.md | partial | Revision context receipts, revision cascade, scope guard, quality-audit repair, and editor repair prompts exist; editor one-click revision now names oh-story workflow-revision Step 2/4/5, enforces 30%/800字 scope guard, asks for `revision_context_receipts`, `revision_scope_guard`, `revision_receipts.cascade_impacts`, and stores these receipts in the `editor_revision` payload. | Pass the actual previous/next chapter, outline, foreshadowing, timeline, character, and setting slices directly into editor revision prompts instead of relying on report context. | 1h |
 | writing-craft.md | integrated | Natural writing rules, opening density, event ratio, sensory anchor, dialogue-action rhythm, and prose cleanup gates are implemented. | Keep tuning based on generated prose regressions. | 0.5h |
 
 ## Next Priority Queue

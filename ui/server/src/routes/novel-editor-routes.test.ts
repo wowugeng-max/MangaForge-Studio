@@ -127,6 +127,54 @@ describe('editor revision route safeguards', () => {
     expect(prompt).toContain('replace 允许为空字符串')
   })
 
+  test('asks editor revision to follow workflow-revision context and output receipts', () => {
+    const prompt = buildEditorRevisionPrompt({
+      project: { title: '超人的规则怪谈世界' },
+      chapter: {
+        chapter_no: 12,
+        title: '门后名单',
+        chapter_text: '林青禾按住门牌。\n\n周远把名单推到灯下。',
+      },
+      report: { must_fix: ['修订后要同步下一章名单伏笔'] },
+      deliveryRiskBrief: { revision_directives: ['下一章必须承接名单归属变化'] },
+      revisionMode: 'from_report',
+      userPrompt: '只改章末名单揭示。',
+    })
+
+    expect(prompt).toContain('workflow-revision')
+    expect(prompt).toContain('Step 2')
+    expect(prompt).toContain('previous_chapter')
+    expect(prompt).toContain('next_chapter')
+    expect(prompt).toContain('foreshadowing')
+    expect(prompt).toContain('character_cards')
+    expect(prompt).toContain('timeline')
+    expect(prompt).toContain('setting_context')
+    expect(prompt).toContain('正文元信息扫描')
+    expect(prompt).toContain('禁用词扫描')
+    expect(prompt).toContain('原文长度')
+    expect(prompt).toContain('30%')
+    expect(prompt).toContain('800 字')
+    expect(prompt).toContain('revision_context_receipts')
+    expect(prompt).toContain('revision_scope_guard')
+    expect(prompt).toContain('revision_receipts')
+    expect(prompt).toContain('cascade_impacts')
+    expect(prompt).toContain('affected_chapters')
+  })
+
+  test('persists editor workflow revision receipts for handoff tracking', async () => {
+    const { readFileSync } = await import('fs')
+    const { join } = await import('path')
+    const source = readFileSync(join(import.meta.dir, 'novel-editor-routes.ts'), 'utf8')
+    const saveStart = source.indexOf("review_type: 'editor_revision'")
+    const saveBlock = source.slice(saveStart, source.indexOf('})', saveStart))
+
+    expect(saveStart).toBeGreaterThanOrEqual(0)
+    expect(saveBlock).toContain('revision_context_receipts')
+    expect(saveBlock).toContain('revision_receipts')
+    expect(saveBlock).toContain('revision_scope_guard')
+    expect(saveBlock).toContain('cascade_impacts')
+  })
+
   test('builds a compact retry prompt for truncated revision output', () => {
     const prompt = buildCompactEditorRevisionPrompt({
       project: { title: '超人的规则怪谈世界' },

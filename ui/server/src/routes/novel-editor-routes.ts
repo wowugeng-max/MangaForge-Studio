@@ -883,12 +883,19 @@ export function buildEditorRevisionPrompt({
   revisionMode: string
   userPrompt?: string
 }) {
+  const originalText = String(chapter.chapter_text || '')
+  const originalLength = originalText.length
   return [
     '任务：根据商业编辑报告对当前章节做局部修订补丁。只输出 JSON。',
     `项目：${project.title}`,
     '要求：保留当前章节整体结构、节奏、章末钩子和可用文气；只修复报告指出的问题；不得照搬参考作品。',
     `本次修订模式：${revisionMode}。${REVISION_MODE_GUIDE[revisionMode] || REVISION_MODE_GUIDE.from_report}`,
+    `oh-story workflow-revision：本次属于已写章节大修/回炉；修订前按 Step 2 做上下文对照，修订后按 Step 4 做级联检查和 Step 5 质量检查。`,
+    `原文长度：${originalLength} 字；修订后字数差异超过原文 30% 或超过 800 字（取较大值）时，必须在 revision_scope_guard 标记 over_limit=true 并说明是否需要拆成局部二修。`,
+    'workflow-revision 上下文对照：必须逐项核对 previous_chapter、current_chapter、next_chapter 或下一章细纲、foreshadowing、character_cards、timeline、setting_context、资产归属和关系边界；缺来源时 status=warn/fail，不得假设已经一致。',
     '正文工艺硬约束：不要用环境描写替代剧情推进；涉及战斗/行动时必须补足动作链、空间变化、代价和结果；删改时不得破坏连续性。',
+    '级联检查硬约束：如果修订改变伏笔、时间线、角色状态、关系、资产归属或世界观设定，revision_receipts 必须写 affected_chapters 和 cascade_impacts，并说明后续章节或下一章细纲需要如何同步。',
+    '质量检查硬约束：修订后必须做正文元信息扫描和禁用词扫描；标题行以外不得混入“上一章/本章/前文/伏笔/细纲/读者”等写作工程词，命中要改成角色当下可感知的事件锚点。',
     '交稿风险硬约束：如果交稿风险清单不为空，必须优先修复清单中的核心偏移、追读漏项、回报欠账、创新缺口、剧情线风险和出戏风险；不得只按普通润色处理。',
     '为了避免长连接失败，优先输出局部补丁，不要输出完整正文。',
     '补丁长度硬约束：每条 find/anchor 控制在 30-300 字，必须是原文中唯一可精确匹配的短片段；不要把整章或多段长正文塞进 find/anchor。需要大幅删减时拆成多条短 replacement；删除时 replace 允许为空字符串。',
@@ -906,6 +913,9 @@ export function buildEditorRevisionPrompt({
     '  "replacements": [{"find": "原文中可精确匹配的一小段", "replace": "替换后的文字"}],',
     '  "insertions": [{"anchor": "原文中可精确匹配的一小段", "position": "before|after", "text": "要插入的文字"}],',
     '  "continuity_notes": ["修订后的连续性说明"],',
+    '  "revision_context_receipts": [{"key": "previous_chapter|next_chapter|foreshadowing|character_cards|timeline|setting_context|prose_meta|banned_words", "label": "核对项", "status": "pass|warn|fail", "evidence": "修订后正文或上下文证据", "fix": "仍需处理时的修复动作", "source_excerpt": "用于核对的原文/上下文短摘"}],',
+    '  "revision_scope_guard": {"original_word_count": 0, "revised_word_count": 0, "word_delta": 0, "threshold": "max(原文30%, 800字)", "over_limit": false, "action": "局部修订/需要二修/提醒用户确认"},',
+    '  "revision_receipts": [{"required_action": "对应报告或交稿风险的修订动作", "repair_segment": "opening|middle|ending|global", "applied_fix": "实际改法", "changed_evidence": "修订后正文可定位证据", "affected_chapters": [], "cascade_impacts": []}],',
     '  "revision_summary": "简述修了什么"',
     '}',
     '只有在补丁无法表达时，才输出 chapter_text 完整修订正文。',
@@ -4430,6 +4440,15 @@ export function registerNovelEditorRoutes(app: Express, ctx: EditorRoutesContext
           revision_mode: resultPayload?.revision_mode || 'patch',
           applied_patches: patchResult.applied,
           unapplied_patches: patchResult.unapplied,
+          revision_context_receipts: resultPayload?.revision_context_receipts || resultPayload?.prose_chapters?.[0]?.revision_context_receipts || [],
+          revision_receipts: resultPayload?.revision_receipts || resultPayload?.prose_chapters?.[0]?.revision_receipts || [],
+          revision_scope_guard: resultPayload?.revision_scope_guard || resultPayload?.prose_chapters?.[0]?.revision_scope_guard || null,
+          cascade_impacts: [
+            ...asArray(resultPayload?.cascade_impacts || resultPayload?.cascadeImpacts),
+            ...asArray(resultPayload?.prose_chapters?.[0]?.cascade_impacts || resultPayload?.prose_chapters?.[0]?.cascadeImpacts),
+            ...asArray(resultPayload?.revision_receipts || resultPayload?.prose_chapters?.[0]?.revision_receipts)
+              .flatMap((receipt: any) => asArray(receipt?.cascade_impacts || receipt?.cascadeImpacts)),
+          ],
           delivery_risk_brief: deliveryRiskBrief,
         }),
       })
