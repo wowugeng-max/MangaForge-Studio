@@ -18158,6 +18158,7 @@ describe('chapter pre-draft brief', () => {
     expect(brief.write_preparation_brief.asset_risks.join('｜')).toContain('旧钥匙')
     expect(brief.write_preparation_brief.creation_contract_checklist.join('｜')).toContain('目标读者')
     expect(brief.write_preparation_brief.creation_contract_checklist.join('｜')).toContain('题材定位')
+    expect(brief.write_preparation_brief.creation_contract_checklist.join('｜')).toContain('特殊题材')
     expect(brief.write_preparation_brief.creation_contract_checklist.join('｜')).toContain('核心承诺')
     expect(brief.write_preparation_brief.creation_contract_checklist.join('｜')).toContain('追读留存')
     expect(brief.write_preparation_brief.must_confirm.join('｜')).toContain('补上旧钥匙')
@@ -37234,6 +37235,7 @@ describe('chapter pre-draft brief', () => {
     expect(brief.reader_retention_brief.opening_hook).toContain('前300字')
     expect(brief.write_preparation_brief.creation_contract_checklist.join('｜')).toContain('目标读者')
     expect(brief.write_preparation_brief.creation_contract_checklist.join('｜')).toContain('题材定位')
+    expect(brief.write_preparation_brief.creation_contract_checklist.join('｜')).toContain('特殊题材')
     expect(brief.write_preparation_brief.creation_contract_checklist.join('｜')).toContain('核心承诺')
     expect(brief.write_preparation_brief.creation_contract_checklist.join('｜')).toContain('追读留存')
     expect(brief.write_preparation_brief.must_confirm.join('｜')).toContain('创作契约：目标读者')
@@ -53935,6 +53937,52 @@ describe('chapter context word target source guards', () => {
     expect(riskCarryOverBlock).toContain('题材定位')
   })
 
+  test('asks prose self review and revision to enforce oh-story plot special topic checks', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const reviewPrompt = source.slice(
+      source.indexOf('const buildProseReviewPrompt'),
+      source.indexOf('const buildProseRevisionPrompt'),
+    )
+    const revisionPrompt = source.slice(
+      source.indexOf('const buildProseRevisionPrompt'),
+      source.indexOf('const shouldReviseProse'),
+    )
+    const shouldReviseBlock = source.slice(
+      source.indexOf('const shouldReviseProse'),
+      source.indexOf('const runProseSelfReviewAndRevision'),
+    )
+    const reviewNormalizeBlock = source.slice(
+      source.indexOf('const normalizedReview = {'),
+      source.indexOf('if (options.revise === false', source.indexOf('const normalizedReview = {')),
+    )
+    const structuredFieldsBlock = source.slice(
+      source.indexOf('const STRUCTURED_REVIEW_CHECK_FIELDS = ['),
+      source.indexOf('export function hasFailingReviewChecks'),
+    )
+    const riskCarryOverBlock = source.slice(
+      source.indexOf('function proseQualityPlotSpecialTopicsRisks'),
+      source.indexOf('function buildReaderExpectationLedger', source.indexOf('export function buildDeliveryRiskCarryOverContext')),
+    )
+
+    expect(reviewPrompt).toContain('chapter_target.plot_special_topics_contract')
+    expect(reviewPrompt).toContain('plot_special_topics_checks')
+    expect(reviewPrompt).toContain('matched_topics')
+    expect(reviewPrompt).toContain('goldfinger_execution')
+    expect(reviewPrompt).toContain('genre_boundary_execution')
+    expect(reviewPrompt).toContain('launch_checkpoint_execution')
+    expect(reviewPrompt).toContain('faction_hand_execution')
+    expect(reviewPrompt).toContain('题材边界')
+    expect(reviewPrompt).toContain('三万字卡点')
+    expect(revisionPrompt).toContain('plot_special_topics_checks')
+    expect(revisionPrompt).toContain('特殊题材')
+    expect(shouldReviseBlock).toContain('plot_special_topics_checks')
+    expect(reviewNormalizeBlock).toContain('plot_special_topics_checks')
+    expect(reviewNormalizeBlock).toContain('reviewPayload?.plot_special_topics_checks')
+    expect(structuredFieldsBlock).toContain('plot_special_topics_checks')
+    expect(riskCarryOverBlock).toContain('plot_special_topics_checks')
+    expect(riskCarryOverBlock).toContain('特殊题材')
+  })
+
   test('asks prose self review and revision to enforce oh-story female audience checks', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const reviewPrompt = source.slice(
@@ -54793,6 +54841,7 @@ describe('chapter context word target source guards', () => {
     expect(source).toContain('buildUpgradeRhythmSyncReport(project, updated, contextPackage, finalText)')
     expect(source).toContain('buildTargetReaderSyncReport(project, updated, contextPackage, finalText)')
     expect(source).toContain('buildGenrePositioningSyncReport(project, updated, contextPackage, finalText)')
+    expect(source).toContain('buildPlotSpecialTopicsSyncReport(project, updated, contextPackage, finalText)')
     expect(source).toContain('buildFemaleAudienceSyncReport(project, updated, contextPackage, finalText)')
     expect(source).toContain('buildPlotDynamicsSyncReport(project, updated, contextPackage, finalText)')
     expect(source).toContain('buildCharacterRelationSyncReport(project, updated, contextPackage, finalText)')
@@ -54803,11 +54852,44 @@ describe('chapter context word target source guards', () => {
     expect(generationReturnBlock).toContain('upgrade_rhythm_sync')
     expect(generationReturnBlock).toContain('target_reader_sync')
     expect(generationReturnBlock).toContain('genre_positioning_sync')
+    expect(generationReturnBlock).toContain('plot_special_topics_sync')
     expect(generationReturnBlock).toContain('female_audience_sync')
     expect(generationReturnBlock).toContain('plot_dynamics_sync')
     expect(generationReturnBlock).toContain('character_relation_sync')
     expect(generationReturnBlock).toContain('reader_retention_sync')
     expect(generationReturnBlock).toContain('core_contract_sync')
+  })
+
+  test('builds a plot special topics sync report from contract checks and prose evidence', async () => {
+    const { buildPlotSpecialTopicsSyncReport } = await import('./novel-writing-service')
+    expect(typeof buildPlotSpecialTopicsSyncReport).toBe('function')
+
+    const report = buildPlotSpecialTopicsSyncReport(
+      { title: '拳证星河' },
+      { id: 2201, chapter_no: 27, title: '联考前夜' },
+      {
+        chapter_target: {
+          plot_special_topics_contract: {
+            matched_topics: ['金手指拆分与战力防崩', '都市高武情节模板', '三万字卡点倒推', '阵营剧情/手牌法'],
+            goldfinger_design_rules: ['金手指拆分成面板/不倒退/重复提升'],
+            genre_boundary_rules: ['金手指核心卖点循环必须在题材边界内'],
+            urban_high_martial_rules: ['所有目标必须和钱挂钩'],
+            launch_checkpoint_rules: ['三万字内无关卡点的装逼打脸一个字不要写'],
+            faction_hand_rules: ['按实力高低排序各阵营角色'],
+          },
+        },
+      },
+      [
+        '林骁打开面板，熟练度没有倒退，抽卡系统的重复提升让拳力涨了一截。',
+        '全国联考名额和奖金挂钩，他必须先拿下武馆联赛资格。',
+        '几个阵营按实力高低依次出牌，校队队长先压价，武馆教练再给出交换条件。',
+      ].join('\n'),
+    )
+
+    expect(report.status).toBe('warn')
+    expect(report.missed.map((item: any) => item.key)).toContain('launch_checkpoint_execution')
+    expect(report.missed.map((item: any) => item.key)).not.toContain('goldfinger_execution')
+    expect(report.summary).toContain('特殊题材')
   })
 
   test('returns serial quality assurance syncs in full pipeline story state update', () => {

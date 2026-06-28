@@ -21,6 +21,7 @@ import { executeNovelAgent, generateNovelChapterProse, previewNovelKnowledgeInje
 import type { NovelProductionService } from './novel-production-service'
 import type { NovelReferenceService } from './novel-reference-service'
 import { buildSettingRelationshipGraph } from './novel-setting-relationship-graph'
+import { buildOhStoryPlotSpecialTopicsContract } from './novel-plot-special-topics'
 import {
   asArray,
   applyBenchmarkRecallPreflightChecks,
@@ -235,6 +236,7 @@ const STRUCTURED_REVIEW_CHECK_FIELDS = [
   ['reader_retention_checks', 'readerRetentionChecks'],
   ['target_reader_checks', 'targetReaderChecks'],
   ['genre_positioning_checks', 'genrePositioningChecks'],
+  ['plot_special_topics_checks', 'plotSpecialTopicsChecks'],
   ['core_contract_checks', 'coreContractChecks'],
   ['female_audience_checks', 'femaleAudienceChecks'],
   ['upgrade_rhythm_checks', 'upgradeRhythmChecks'],
@@ -579,6 +581,21 @@ const STRUCTURED_REVIEW_REQUIRED_FIELDS: Record<string, string[]> = {
     'rewritten_with_local_action',
     'voice_anchor',
     'copied_phrase_removed',
+    'evidence',
+    'fix',
+    'remaining_risk',
+  ],
+  plot_special_topics_checks: [
+    'key',
+    'label',
+    'status',
+    'matched_topics',
+    'goldfinger_execution',
+    'genre_boundary_execution',
+    'market_benchmark_execution',
+    'urban_high_martial_execution',
+    'launch_checkpoint_execution',
+    'faction_hand_execution',
     'evidence',
     'fix',
     'remaining_risk',
@@ -13617,6 +13634,65 @@ function proseQualityGenrePositioningRisks(payload: any) {
     .filter(Boolean)
 }
 
+function proseQualityPlotSpecialTopicsRisks(payload: any) {
+  const selfCheck = payload?.self_check || payload?.selfCheck || payload || {}
+  const review = selfCheck?.review || selfCheck?.initial_review || payload?.review || payload || {}
+  const checks = [
+    ...asArray(review?.plot_special_topics_checks || review?.plotSpecialTopicsChecks),
+    ...asArray(selfCheck?.plot_special_topics_checks || selfCheck?.plotSpecialTopicsChecks),
+    ...asArray(payload?.plot_special_topics_checks || payload?.plotSpecialTopicsChecks),
+  ]
+  return checks
+    .filter((check: any) => {
+      const normalizedStatus = String(check?.status ?? '').trim().toLowerCase()
+      const explicitPass = check?.status === true || check?.delivered === true || ['pass', 'passed', 'ok', 'ready', 'done', 'true', 'yes'].includes(normalizedStatus)
+      const remainingRisk = compactBriefText(check?.remaining_risk || check?.remainingRisk)
+      const fix = compactBriefText(check?.fix || check?.repair_instruction || check?.repairInstruction || check?.suggestion)
+      if (explicitPass && !remainingRisk && !fix) return false
+      return preDraftReceiptCheckNeedsCarryOver(check)
+    })
+    .map((check: any) => {
+      const label = compactBriefText(check?.label || check?.key || check?.name, '特殊题材')
+      const matchedTopics = uniqueBriefStrings(check?.matched_topics || check?.matchedTopics, 8)
+      const goldfingerExecution = compactBriefText(check?.goldfinger_execution || check?.goldfingerExecution)
+      const genreBoundaryExecution = compactBriefText(check?.genre_boundary_execution || check?.genreBoundaryExecution)
+      const marketBenchmarkExecution = compactBriefText(check?.market_benchmark_execution || check?.marketBenchmarkExecution)
+      const urbanHighMartialExecution = compactBriefText(check?.urban_high_martial_execution || check?.urbanHighMartialExecution)
+      const launchCheckpointExecution = compactBriefText(check?.launch_checkpoint_execution || check?.launchCheckpointExecution)
+      const factionHandExecution = compactBriefText(check?.faction_hand_execution || check?.factionHandExecution)
+      const remainingRisk = compactBriefText(check?.remaining_risk || check?.remainingRisk)
+      const evidence = compactBriefText(check?.evidence || check?.issue || check?.reason || check?.description || launchCheckpointExecution || remainingRisk)
+      const fix = compactBriefText(check?.fix || check?.repair_instruction || check?.repairInstruction || check?.suggestion || remainingRisk)
+      const action = compactBriefText([
+        `plot_special_topics_checks.${label}`,
+        matchedTopics.length ? `matched_topics=${matchedTopics.join('、')}` : '',
+        goldfingerExecution ? `goldfinger_execution=${goldfingerExecution}` : '',
+        genreBoundaryExecution ? `genre_boundary_execution=${genreBoundaryExecution}` : '',
+        marketBenchmarkExecution ? `market_benchmark_execution=${marketBenchmarkExecution}` : '',
+        urbanHighMartialExecution ? `urban_high_martial_execution=${urbanHighMartialExecution}` : '',
+        launchCheckpointExecution ? `launch_checkpoint_execution=${launchCheckpointExecution}` : '',
+        factionHandExecution ? `faction_hand_execution=${factionHandExecution}` : '',
+        fix || remainingRisk || evidence,
+      ].filter(Boolean).join('；'))
+      if (!label && !matchedTopics.length && !goldfingerExecution && !genreBoundaryExecution && !marketBenchmarkExecution && !urbanHighMartialExecution && !launchCheckpointExecution && !factionHandExecution && !evidence && !fix && !remainingRisk) return null
+      return {
+        label,
+        matched_topics: matchedTopics,
+        goldfinger_execution: goldfingerExecution,
+        genre_boundary_execution: genreBoundaryExecution,
+        market_benchmark_execution: marketBenchmarkExecution,
+        urban_high_martial_execution: urbanHighMartialExecution,
+        launch_checkpoint_execution: launchCheckpointExecution,
+        faction_hand_execution: factionHandExecution,
+        evidence,
+        fix,
+        remaining_risk: remainingRisk,
+        action,
+      }
+    })
+    .filter(Boolean)
+}
+
 function proseQualityFemaleAudienceRisks(payload: any) {
   const selfCheck = payload?.self_check || payload?.selfCheck || payload || {}
   const review = selfCheck?.review || selfCheck?.initial_review || payload?.review || payload || {}
@@ -15075,6 +15151,7 @@ export function buildDeliveryRiskCarryOverContext(chapter: any, chapters: any[] 
     { type: 'upgrade_rhythm_sync', prefix: '补升级', priority: '优先补升级节奏', countKeys: ['missed_count', 'missedCount'] },
     { type: 'target_reader_sync', prefix: '补读者', priority: '优先补目标读者', countKeys: ['missed_count', 'missedCount'] },
     { type: 'genre_positioning_sync', prefix: '补题材', priority: '优先补题材定位', countKeys: ['missed_count', 'missedCount'] },
+    { type: 'plot_special_topics_sync', prefix: '补特殊题材', priority: '优先补特殊题材', countKeys: ['missed_count', 'missedCount'] },
     { type: 'female_audience_sync', prefix: '补女频', priority: '优先补女频长篇', countKeys: ['missed_count', 'missedCount'] },
     { type: 'plot_dynamics_sync', prefix: '补动力', priority: '优先补剧情动力', countKeys: ['missed_count', 'missedCount'] },
     { type: 'character_relation_sync', prefix: '补关系线', priority: '优先补角色关系', countKeys: ['missed_count', 'missedCount'] },
@@ -17051,6 +17128,42 @@ export function buildDeliveryRiskCarryOverContext(chapter: any, chapters: any[] 
         ],
         endingActions: [
           `创作契约章尾修复：章尾钩子必须继续服务 genre_strength 和题材长板，不能转成无关支线；${genrePositioningEvidence[1] || genrePositioningEvidence[0] || '章尾继续强化题材定位。'}`,
+        ],
+        sourceReviewId: proseQualityEntry.review?.id || null,
+      })
+    }
+    const plotSpecialTopicsRisks = proseQualityPlotSpecialTopicsRisks(proseQualityEntry.payload || {})
+    if (plotSpecialTopicsRisks.length > 0) {
+      const plotSpecialTopicsEvidence = plotSpecialTopicsRisks
+        .flatMap((item: any) => [
+          item.action,
+          item.fix,
+          item.remaining_risk,
+          ...(item.matched_topics || []),
+          item.goldfinger_execution,
+          item.genre_boundary_execution,
+          item.market_benchmark_execution,
+          item.urban_high_martial_execution,
+          item.launch_checkpoint_execution,
+          item.faction_hand_execution,
+          item.evidence,
+          item.label,
+        ])
+        .filter(Boolean)
+        .slice(0, 8)
+      riskRows.push({
+        count: plotSpecialTopicsRisks.length,
+        item: `创作契约：特殊题材缺口 ${plotSpecialTopicsRisks.length}`,
+        priorityLabel: '优先修特殊题材',
+        evidence: plotSpecialTopicsEvidence,
+        openingActions: [
+          `特殊题材开篇修复：前300字必须执行 plot_special_topics_checks 指出的 matched_topics，把金手指、题材边界、三万字卡点或阵营手牌缺口转成当前场景目标/压力；${plotSpecialTopicsEvidence[0] || '先把特殊题材缺口变成开篇可见压力。'}`,
+        ],
+        middleActions: [
+          `特殊题材中段修复：用金手指反馈、题材边界内的核心期待、都市高武钱/资源/资格目标或阵营逐级出牌推进事件，不能只解释规则；${plotSpecialTopicsEvidence[0] || '把特殊题材规则写成中段事件结果。'}`,
+        ],
+        endingActions: [
+          `特殊题材章尾修复：章尾必须回扣三万字卡点、阶段目标、阵营手牌或金手指下一反馈，形成下一章追读压力；${plotSpecialTopicsEvidence[1] || plotSpecialTopicsEvidence[0] || '章尾继续强化特殊题材承诺。'}`,
         ],
         sourceReviewId: proseQualityEntry.review?.id || null,
       })
@@ -32074,6 +32187,193 @@ export function buildGenrePositioningSyncReport(project: any, chapter: any, cont
   }
 }
 
+function plotSpecialTopicsContractForSync(project: any, contextPackage: any, chapter: any = {}) {
+  const syncContextPackage = contextWithChapterRawPreDraftForSync(contextPackage, chapter)
+  const writingBible = syncContextPackage?.writing_bible || project?.reference_config?.writing_bible || {}
+  const explicit = getContextContract(syncContextPackage, 'plot_special_topics_contract')
+    || writingBible?.plot_special_topics_contract
+    || writingBible?.plotSpecialTopicsContract
+    || project?.reference_config?.plot_special_topics_contract
+    || project?.reference_config?.plotSpecialTopicsContract
+  if (explicit && typeof explicit === 'object' && !Array.isArray(explicit)) return explicit
+  return buildOhStoryPlotSpecialTopicsContract(project, syncContextPackage, chapter)
+}
+
+function plotSpecialTopicsArray(values: any) {
+  return asArray(values).map((item: any) => compactBriefText(item)).filter(Boolean)
+}
+
+function countPlotSpecialTopicsSignals(chapterText: string, patterns: RegExp[]) {
+  const text = String(chapterText || '')
+  return patterns.reduce((count, pattern) => count + (pattern.test(text) ? 1 : 0), 0)
+}
+
+function normalizePlotSpecialTopicsExecutionCheck(
+  key: string,
+  label: string,
+  values: any,
+  chapterText: string,
+  patterns: RegExp[],
+  issue: string,
+  repairInstruction: string,
+  options: { minSignals?: number } = {},
+) {
+  const planned = plotSpecialTopicsArray(values)
+  if (!planned.length) return null
+  const scored = planned.map(item => ({ text: item, match: anchorMatchScore(item, chapterText) }))
+  const deliveredItems = scored.filter(item => item.match.score >= 28).length
+  const signalCount = countPlotSpecialTopicsSignals(chapterText, patterns)
+  const minSignals = Number(options.minSignals || 2)
+  const delivered = deliveredItems >= 1 || signalCount >= minSignals
+  return {
+    key,
+    label,
+    text: planned.join('；'),
+    expected: planned.join('；'),
+    score: delivered ? Math.max(84, Math.round((deliveredItems / Math.max(1, planned.length)) * 100), signalCount * 24) : Math.max(16, signalCount * 18),
+    evidence: uniqueBriefStrings([
+      ...scored.flatMap(item => item.match.matched),
+      signalCount >= minSignals ? `${label}代理信号可见` : '',
+    ], 8),
+    delivered,
+    status: delivered ? 'ok' : 'warn',
+    matched_topics: [],
+    goldfinger_execution: key === 'goldfinger_execution' ? (delivered ? '金手指拆分、多维成长或反馈证据已进入正文。' : '金手指拆分、多维成长或反馈证据不足。') : '',
+    genre_boundary_execution: key === 'genre_boundary_execution' ? (delivered ? '题材边界和核心卖点循环已有正文证据。' : '题材边界和核心卖点循环缺正文证据。') : '',
+    market_benchmark_execution: key === 'market_benchmark_execution' ? (delivered ? '扫榜/对标方法已转成可见桥段或结构证据。' : '扫榜/对标方法未转成正文证据。') : '',
+    urban_high_martial_execution: key === 'urban_high_martial_execution' ? (delivered ? '都市高武的钱、资源、资格或赛事压力已落地。' : '都市高武的钱、资源、资格或赛事压力不足。') : '',
+    launch_checkpoint_execution: key === 'launch_checkpoint_execution' ? (delivered ? '三万字卡点、上架高潮或倒推目标已有正文证据。' : '三万字卡点、上架高潮或倒推目标缺正文证据。') : '',
+    faction_hand_execution: key === 'faction_hand_execution' ? (delivered ? '阵营手牌、逐级出牌或第三方逻辑已有正文证据。' : '阵营手牌、逐级出牌或第三方逻辑缺正文证据。') : '',
+    missed_items: delivered ? [] : planned.filter(item => anchorMatchScore(item, chapterText).score < 28).slice(0, 8),
+    issue: delivered ? '' : issue,
+    fix: delivered ? '' : repairInstruction,
+    repair_instruction: delivered ? '' : repairInstruction,
+    remaining_risk: delivered ? '' : issue,
+  }
+}
+
+function plotSpecialTopicsPriority(missed: any[]) {
+  if (missed.some(item => item.key === 'launch_checkpoint_execution')) return '优先补三万字卡点倒推'
+  if (missed.some(item => item.key === 'goldfinger_execution')) return '优先补金手指执行'
+  if (missed.some(item => item.key === 'genre_boundary_execution')) return '优先校题材边界'
+  if (missed.some(item => item.key === 'faction_hand_execution')) return '优先补阵营手牌'
+  if (missed.some(item => item.key === 'urban_high_martial_execution')) return '优先补都市高武目标'
+  if (missed.some(item => item.key === 'market_benchmark_execution')) return '优先补扫榜对标'
+  return ''
+}
+
+export function buildPlotSpecialTopicsSyncReport(project: any, chapter: any, contextPackage: any, chapterText: string) {
+  const contract = plotSpecialTopicsContractForSync(project, contextPackage, chapter)
+  const matchedTopics = uniqueBriefStrings(contract?.matched_topics || contract?.matchedTopics, 10)
+  const checks = [
+    normalizePlotSpecialTopicsExecutionCheck(
+      'goldfinger_execution',
+      '金手指拆分与战力防崩',
+      [
+        ...asArray(contract?.goldfinger_design_rules || contract?.goldfingerDesignRules),
+        ...asArray(contract?.goldfinger_advanced_rules || contract?.goldfingerAdvancedRules),
+      ],
+      chapterText,
+      [/金手指|系统|面板|抽卡|熟练度|词条|加点|商城|兑换/, /不倒退|没有倒退|重复提升|多维成长|多条线/, /反馈|奖励|条件|阶段|功能/],
+      '金手指没有拆成可循环元素，或后期成长/反馈只剩单线说明。',
+      '补金手指执行：把面板/条件/反馈/重复提升写成行动过程和局势变化，避免只解释规则。',
+    ),
+    normalizePlotSpecialTopicsExecutionCheck(
+      'genre_boundary_execution',
+      '题材边界',
+      contract?.genre_boundary_rules || contract?.genreBoundaryRules,
+      chapterText,
+      [/题材边界|同题材|类型边界|核心期待/, /核心卖点|核心循环|读者.*进来|持续给/, /边界内|不突破|不越界|共同元素/],
+      '正文没有证明核心卖点循环仍在题材边界内，可能出现越界创新或挂羊头卖狗肉。',
+      '补题材边界执行：把当前场景拉回同题材读者买账的共同元素，并让金手指核心循环服务本题材期待。',
+    ),
+    normalizePlotSpecialTopicsExecutionCheck(
+      'market_benchmark_execution',
+      '扫榜对标',
+      [
+        ...asArray(contract?.market_benchmark_rules || contract?.marketBenchmarkRules),
+        ...asArray(contract?.benchmark_selection_rules || contract?.benchmarkSelectionRules),
+        ...asArray(contract?.three_book_fusion_rules || contract?.threeBookFusionRules),
+      ],
+      chapterText,
+      [/扫榜|对标|竞品|拆书|同平台|同题材|同类型/, /精品|万订|读者评论|样本|近期数据/, /结构|情绪|节奏模块|功能位/],
+      '扫榜、对标或三书融合没有转成正文里的结构、情绪或节奏功能证据。',
+      '补扫榜对标执行：只复用功能位和节奏/情绪结构，把对标价值写成当前章节的桥段功能。',
+    ),
+    normalizePlotSpecialTopicsExecutionCheck(
+      'urban_high_martial_execution',
+      '都市高武',
+      contract?.urban_high_martial_rules || contract?.urbanHighMartialRules,
+      chapterText,
+      [/钱|奖金|资源|资格|名额|补贴|收入/, /联考|武馆|军校|治安局|军部|月考|赛事|武道会/, /物质|学业|职业|亲情|激励|感情/],
+      '都市高武目标没有和钱、资源、资格、赛事或现实发展挂钩。',
+      '补都市高武执行：把升级收益换算成钱/资源/资格，并用联考、武馆、赛事、治安局或军部任务承载事件。',
+    ),
+    normalizePlotSpecialTopicsExecutionCheck(
+      'launch_checkpoint_execution',
+      '三万字卡点',
+      contract?.launch_checkpoint_rules || contract?.launchCheckpointRules,
+      chapterText,
+      [/三万字|3万字|上架高潮|首秀|卡点|倒推/, /核心反派|阶段目标|关键爽点|上架/, /围绕.*卡点|卡点.*设计/],
+      '正文没有服务三万字卡点、上架高潮或倒推阶段目标。',
+      '补三万字卡点执行：删掉无关装逼打脸，把核心反派、阶段目标和关键爽点写回卡点倒推链路。',
+    ),
+    normalizePlotSpecialTopicsExecutionCheck(
+      'faction_hand_execution',
+      '阵营手牌',
+      [
+        ...asArray(contract?.faction_hand_rules || contract?.factionHandRules),
+        ...asArray(contract?.faction_motivation_rules || contract?.factionMotivationRules),
+      ],
+      chapterText,
+      [/阵营|友军|敌方|第三方|观众|配角|反派/, /实力高低|依次出牌|逐级递进|先抑后扬|最后出手|手牌/, /队长|教练|高人|大BOSS|boss|碾压/i],
+      '阵营冲突没有按手牌/实力顺序逐级出牌，第三方逻辑或动机铺垫不足。',
+      '补阵营手牌执行：按观众/配角/敌人/主角/大BOSS逐级递进，让不同立场角色对同一事件给出不同态度。',
+    ),
+  ].filter(Boolean)
+    .map((check: any) => ({
+      ...check,
+      matched_topics: matchedTopics,
+    }))
+  const delivered = checks.filter((item: any) => item.delivered)
+  const missed = checks.filter((item: any) => !item.delivered)
+  const missedCount = missed.length
+  const score = Math.max(0, Math.min(100, Math.round(
+    checks.length ? checks.reduce((sum: number, item: any) => sum + Number(item.score || 0), 0) / checks.length : 82,
+  )))
+  const status = missedCount > 0 || score < 78 ? 'warn' : 'ok'
+  const priorityRepair = plotSpecialTopicsPriority(missed)
+
+  return {
+    report_id: `plot-special-topics-sync-${chapter?.id || chapter?.chapter_no || Date.now()}`,
+    chapter_id: chapter?.id || null,
+    chapter_no: chapter?.chapter_no || null,
+    score,
+    status,
+    label: checks.length === 0 ? '特殊题材未配置' : status === 'ok' ? '特殊题材 OK' : `特殊题材缺口 ${missedCount}`,
+    summary: checks.length === 0
+      ? '本章没有配置 plot_special_topics_contract，建议补充金手指、题材边界、扫榜对标、都市高武、三万字卡点和阵营手牌规则。'
+      : status === 'ok'
+        ? '正文已基本兑现特殊题材合同：金手指、题材边界、扫榜对标、都市高武、三万字卡点和阵营手牌均有正文证据。'
+        : `正文有 ${missedCount} 项特殊题材缺口，${priorityRepair || '优先补特殊题材操作证据'}。`,
+    matched_topics: matchedTopics,
+    check_count: checks.length,
+    missed_count: missedCount,
+    priority_repair: priorityRepair,
+    quality_checks: plotSpecialTopicsArray(contract?.quality_checks || contract?.qualityChecks).slice(0, 8),
+    planned: checks,
+    delivered,
+    missed,
+    next_actions: status === 'ok'
+      ? ['保持特殊题材执行：每章继续让金手指、题材边界、阶段卡点和阵营手牌变成正文事件。']
+      : [
+          '下一章必须补特殊题材：把 plot_special_topics_checks 的缺口先转成开篇目标、中段事件或章末卡点。',
+          '金手指与题材边界优先：能力反馈必须参与胜负或资源变化，不能只做说明书。',
+          '如果命中三万字卡点或阵营手牌，删除无关桥段，把阶段目标、核心反派和逐级出牌写成可见正文证据。',
+        ],
+  }
+}
+
 function femaleAudienceContractForSync(project: any, contextPackage: any, chapter: any = {}) {
   return buildFemaleAudienceContract(project, contextWithChapterRawPreDraftForSync(contextPackage, chapter))
 }
@@ -39351,7 +39651,7 @@ function buildTargetReaderContract(project: any = {}, contextPackage: any = {}) 
       scene.purpose,
       scene.ending_hook_seed,
     ]),
-  ], 14)
+  ], 18)
   return {
     version: 'oh_story_target_reader_v1',
     source: 'oh_story_embedded_fallback',
@@ -40392,7 +40692,7 @@ function buildConflictStructureContract(project: any = {}, contextPackage: any =
       const conflict = compactBriefText(scene.conflict || scene.purpose)
       return conflict ? `场景${scene.scene_no || index + 1}阻力：${conflict}` : ''
     }),
-  ], 14)
+  ], 18)
   return {
     version: 'oh_story_conflict_structure_v1',
     source: 'oh_story_embedded_fallback',
@@ -44081,6 +44381,7 @@ function buildChapterBlueprintFromContext(contextPackage: any, options: any = {}
 function buildCreationContractChecklist(options: any = {}) {
   const targetReaderContract = options.target_reader_contract || options.targetReaderContract || {}
   const genrePositioningContract = options.genre_positioning_contract || options.genrePositioningContract || {}
+  const plotSpecialTopicsContract = options.plot_special_topics_contract || options.plotSpecialTopicsContract || {}
   const coreContractRadar = options.core_contract_radar || options.coreContractRadar || {}
   const readerRetentionBrief = options.reader_retention_brief || options.readerRetentionBrief || {}
   const targetReader = compactBriefText(
@@ -44093,6 +44394,13 @@ function buildCreationContractChecklist(options: any = {}) {
     || genrePositioningContract.genreLabel
     || asArray(genrePositioningContract.genre_tags || genrePositioningContract.genreTags)[0]
     || asArray(genrePositioningContract.selling_points || genrePositioningContract.sellingPoints)[0],
+  )
+  const plotSpecialTopics = compactBriefText(
+    asArray(plotSpecialTopicsContract.matched_topics || plotSpecialTopicsContract.matchedTopics)[0]
+    || asArray(plotSpecialTopicsContract.goldfinger_design_rules || plotSpecialTopicsContract.goldfingerDesignRules)[0]
+    || asArray(plotSpecialTopicsContract.launch_checkpoint_rules || plotSpecialTopicsContract.launchCheckpointRules)[0]
+    || asArray(plotSpecialTopicsContract.faction_hand_rules || plotSpecialTopicsContract.factionHandRules)[0]
+    || asArray(plotSpecialTopicsContract.quality_checks || plotSpecialTopicsContract.qualityChecks)[0],
   )
   const coreContract = compactBriefText(
     asArray(coreContractRadar.must_serve || coreContractRadar.mustServe)[0]
@@ -44111,6 +44419,7 @@ function buildCreationContractChecklist(options: any = {}) {
   return uniqueBriefStrings([
     targetReader ? `目标读者：${targetReader}` : '',
     genrePositioning ? `题材定位：${genrePositioning}` : '',
+    plotSpecialTopics ? `特殊题材：${plotSpecialTopics}` : '',
     coreContract ? `核心承诺：${coreContract}` : '',
     retentionContract ? `追读留存：${retentionContract}` : '',
   ], 8)
@@ -44242,7 +44551,7 @@ function buildWritePreparationBrief(contextPackage: any = {}, options: any = {})
     ...deliveryActions,
     ...blueprintFocus.slice(0, 2),
     ...readerPayoffFocus.slice(0, 2).map(item => `读者回报：${item}`),
-  ], 14)
+  ], 18)
   const readinessStatus = sourceGaps.length || assetRisks.length || deliveryActions.length ? 'needs_context' : 'ready'
   return {
     version: 'oh_story_write_preparation_v1',
@@ -44541,6 +44850,7 @@ export function buildChapterPreDraftBrief(project: any, contextPackage: any) {
   const expectationThresholdContract = buildExpectationThresholdContract(contextPackage)
   const targetReaderContract = buildTargetReaderContract(project, contextPackage)
   const genrePositioningContract = buildGenrePositioningContract(project, contextPackage)
+  const plotSpecialTopicsContract = plotSpecialTopicsContractForSync(project, contextPackage)
   const femaleAudienceContract = buildFemaleAudienceContract(project, contextPackage)
   const upgradeRhythmContract = buildUpgradeRhythmContract(project, contextPackage)
   const conflictStructureContract = buildConflictStructureContract(project, contextPackage)
@@ -44620,6 +44930,7 @@ export function buildChapterPreDraftBrief(project: any, contextPackage: any) {
     benchmark_recall_gaps: benchmarkRecallGaps,
     target_reader_contract: targetReaderContract,
     genre_positioning_contract: genrePositioningContract,
+    plot_special_topics_contract: plotSpecialTopicsContract,
     core_contract_radar: coreContractRadar,
   })
 
@@ -44655,6 +44966,7 @@ export function buildChapterPreDraftBrief(project: any, contextPackage: any) {
     expectation_threshold_contract: expectationThresholdContract,
     target_reader_contract: targetReaderContract,
     genre_positioning_contract: genrePositioningContract,
+    plot_special_topics_contract: plotSpecialTopicsContract,
     female_audience_contract: femaleAudienceContract,
     upgrade_rhythm_contract: upgradeRhythmContract,
     conflict_structure_contract: conflictStructureContract,
@@ -45134,6 +45446,13 @@ export function mergeConfirmedPreDraftBriefIntoContext(contextPackage: any, preD
       || (contextPackage || {}).chapter_target?.genre_positioning_contract
       || (contextPackage || {}).genre_positioning_contract,
   })
+  const plotSpecialTopicsContract = plotSpecialTopicsContractForSync({}, {
+    ...(contextPackage || {}),
+    plot_special_topics_contract: preDraftBrief.plot_special_topics_contract
+      || preDraftBrief.plotSpecialTopicsContract
+      || (contextPackage || {}).chapter_target?.plot_special_topics_contract
+      || (contextPackage || {}).plot_special_topics_contract,
+  })
   const femaleAudienceContract = buildFemaleAudienceContract({}, {
     ...(contextPackage || {}),
     female_audience_contract: preDraftBrief.female_audience_contract
@@ -45247,6 +45566,7 @@ export function mergeConfirmedPreDraftBriefIntoContext(contextPackage: any, preD
       asset_linkage_contract: assetLinkageContract,
       state_tracking_contract: stateTrackingContract,
       delivery_risk_carry_over: deliveryRiskCarryOver,
+      plot_special_topics_contract: plotSpecialTopicsContract,
     })
   const confirmedPreDraftBrief = {
     ...preDraftBrief,
@@ -45270,6 +45590,7 @@ export function mergeConfirmedPreDraftBriefIntoContext(contextPackage: any, preD
     expectation_threshold_contract: expectationThresholdContract,
     target_reader_contract: targetReaderContract,
     genre_positioning_contract: genrePositioningContract,
+    plot_special_topics_contract: plotSpecialTopicsContract,
     female_audience_contract: femaleAudienceContract,
     upgrade_rhythm_contract: upgradeRhythmContract,
     conflict_structure_contract: conflictStructureContract,
@@ -48051,6 +48372,10 @@ export function createNovelWritingService(ctx: {
       || contextPackage?.genre_positioning_contract
       || contextPackage?.pre_draft_brief?.genre_positioning_contract
       || buildGenrePositioningContract(project, contextPackage)
+    const plotSpecialTopicsContract = contextPackage?.chapter_target?.plot_special_topics_contract
+      || contextPackage?.plot_special_topics_contract
+      || contextPackage?.pre_draft_brief?.plot_special_topics_contract
+      || plotSpecialTopicsContractForSync(project, contextPackage)
     const femaleAudienceContract = contextPackage?.chapter_target?.female_audience_contract
       || contextPackage?.female_audience_contract
       || contextPackage?.pre_draft_brief?.female_audience_contract
@@ -48211,6 +48536,7 @@ export function createNovelWritingService(ctx: {
         state_tracking_contract: stateTrackingContract,
         delivery_risk_carry_over: deliveryRiskCarryOver,
         benchmark_recall_brief: benchmarkRecallBrief,
+        plot_special_topics_contract: plotSpecialTopicsContract,
       })
     const readerExpectationDebtContext = applyReaderExpectationDebtAging(
       normalizeReaderExpectationDebtContext(
@@ -48347,6 +48673,20 @@ export function createNovelWritingService(ctx: {
       genrePositioningContract?.quality_checks?.length ? `genre_positioning_checks：${genrePositioningContract.quality_checks.join('；')}` : '',
       genrePositioningContract ? '交稿自检必须输出 genre_positioning_checks，并用正文证据检查题材标签、核心梗、类型公式、金手指贴合、必备场景、微创新边界、70/20/10元素法则、五种微创新手法、长板聚焦和书名简介内容三位一体。' : '',
       genrePositioningContract ? JSON.stringify(genrePositioningContract, null, 2).slice(0, 2500) : '',
+      '',
+      plotSpecialTopicsContract ? '【特殊题材操作合同】' : '',
+      plotSpecialTopicsContract ? '硬性要求：执行 chapter_target.plot_special_topics_contract；这是来自 oh-story plot-special-topics 的特殊题材操作口径，正文必须把命中的金手指、题材边界、扫榜对标、都市高武、三万字卡点、阵营手牌等规则写成可见事件。' : '',
+      plotSpecialTopicsContract ? '执行方式：只启用 matched_topics 命中的专题，但质量检查全局执行；金手指要拆成可循环行动机制，题材边界不能越界创新，三万字卡点要倒推阶段目标，阵营手牌要按实力和立场逐级出牌。' : '',
+      plotSpecialTopicsContract?.matched_topics?.length ? `matched_topics：${plotSpecialTopicsContract.matched_topics.join('；')}` : '',
+      plotSpecialTopicsContract?.goldfinger_design_rules?.length ? `goldfinger_execution：${plotSpecialTopicsContract.goldfinger_design_rules.join('；')}` : '',
+      plotSpecialTopicsContract?.genre_boundary_rules?.length ? `genre_boundary_execution：${plotSpecialTopicsContract.genre_boundary_rules.join('；')}` : '',
+      plotSpecialTopicsContract?.market_benchmark_rules?.length ? `market_benchmark_execution：${plotSpecialTopicsContract.market_benchmark_rules.join('；')}` : '',
+      plotSpecialTopicsContract?.urban_high_martial_rules?.length ? `urban_high_martial_execution：${plotSpecialTopicsContract.urban_high_martial_rules.join('；')}` : '',
+      plotSpecialTopicsContract?.launch_checkpoint_rules?.length ? `launch_checkpoint_execution：${plotSpecialTopicsContract.launch_checkpoint_rules.join('；')}` : '',
+      plotSpecialTopicsContract?.faction_hand_rules?.length ? `faction_hand_execution：${plotSpecialTopicsContract.faction_hand_rules.join('；')}` : '',
+      plotSpecialTopicsContract?.quality_checks?.length ? `plot_special_topics_checks：${plotSpecialTopicsContract.quality_checks.join('；')}` : '',
+      plotSpecialTopicsContract ? '交稿自检必须输出 plot_special_topics_checks，并用正文证据检查 matched_topics、goldfinger_execution、genre_boundary_execution、market_benchmark_execution、urban_high_martial_execution、launch_checkpoint_execution 和 faction_hand_execution。' : '',
+      plotSpecialTopicsContract ? JSON.stringify(plotSpecialTopicsContract, null, 2).slice(0, 2500) : '',
       '',
       femaleAudienceContract ? '【女频长篇合同】' : '',
       femaleAudienceContract ? '硬性要求：执行 chapter_target.female_audience_contract；这是来自 oh-story female-audience-writing 的女频长篇口径，正文必须让安全感、代入感、女主主动性和主情绪产品落到场景行动中。' : '',
@@ -50673,6 +51013,8 @@ export function createNovelWritingService(ctx: {
     '19. target_reader_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),target_reader_profile,reader_desire,emotion_gap,chapter_hit,platform_taste,evidence,fix,remaining_risk；目标读者画像空泛、读者渴望和本章卖点错位、情绪缺口缺核心痛苦/深层情结/高频情绪关键词/未满足需求、平台口味错位或只展示作者自嗨设定时必须给出 S1/S2 finding，category=platform 或 structure。',
     '20. 是否兑现 chapter_target.genre_positioning_contract：按 oh-story 题材定位口径检查题材标签、读者心理、核心梗、类型公式、金手指贴合、必备场景、微创新边界、70/20/10元素法则、五种微创新手法、平台适配、拉长板而非补短板、题材长板和书名简介内容三位一体；必须输出 genre_positioning_checks。',
     '21. genre_positioning_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),genre_tag,core_hook,type_formula,genre_strength,book_title_blurb_alignment,evidence,fix,remaining_risk；核心梗不清、公式缺失、金手指脱离主角生活/职业、微创新超过3个、70/20/10元素法则失衡、五种微创新手法选型不清、题材长板未强化、为补短板新增支线稀释核心卖点、平台/类型错位或挂羊头卖狗肉时必须给出 S1/S2 finding，category=platform 或 structure。',
+    '21+. 是否兑现 chapter_target.plot_special_topics_contract：按 oh-story 特殊题材操作口径检查 matched_topics 命中的专题是否写成正文证据；必须检查金手指拆分与战力防崩、题材边界、扫榜对标、都市高武、三万字卡点倒推和阵营手牌法；必须输出 plot_special_topics_checks。',
+    '21++. plot_special_topics_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),matched_topics,goldfinger_execution,genre_boundary_execution,market_benchmark_execution,urban_high_martial_execution,launch_checkpoint_execution,faction_hand_execution,evidence,fix,remaining_risk；金手指只剩说明书、题材边界漂移、对标没有转成结构功能、都市高武目标不和钱/资源/资格挂钩、三万字卡点缺倒推、阵营没有按手牌逐级出牌时必须给出 S1/S2 finding，category=platform 或 structure。',
     '21A. 是否兑现 chapter_target.female_audience_contract：按 oh-story 女频长篇口径检查安全感优先、代入感优先、女主主动性、情绪即产品是否落地；检查女频深层需求是否体现被认可、被珍视、被尊重；检查状态→困境→行动→成功和女主成功暗示是否兑现；检查感情线双轴是否让感情升级踩在事业/成长节点上；检查虐戏是否每段虐后有反转或糖，是否避免连续整卷只虐；检查平台对位和货板一致；必须输出 female_audience_checks。',
     '21B. female_audience_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),security_anchor,reader_identification,heroine_agency,relationship_axis,post_abuse_payoff,evidence,fix,remaining_risk；安全感断裂、女主被安排着赢、感情线脱离成长线、为虐而虐、平台节奏错位或书名简介正文货不对板时必须给出 S1/S2 finding，category=character 或 platform。',
     '22. 是否兑现 chapter_target.upgrade_rhythm_contract：按 oh-story 升级感三步法检查起点、终点、情绪缺口、即时反馈、延迟反馈、升级前后铺垫、桥段功能位、升级后能完成以前做不到的事，以及金手指演进；金手指核心作用可发展但不能突然换赛道，升华到世界/天道/规则层级前必须有伏笔；必须按“金手指 + 矛盾”检查金手指是否刚好解决当前矛盾，解决后是否暴露更大矛盾；必须按金手指反馈法检查给出金手指后是否有即时变化，是否把反馈过程掺杂在故事里，是否用动作/判断/物件变化/角色反应/局势变化展示，而不是只写绑定成功或说明规则；必须按“金手指简单是核心”检查功能、触发条件、奖励反馈和升级规则是否一眼就懂，是否避免说明书式规则树和万能外挂；必须按“金手指多维成长”检查词条、功能、品质、熟练度或条件-反馈是否至少两条线同步变化，是否避免只剩品质/数值/等级单线提升；如果出现排行榜/榜单/排名，必须按排行榜三功能检查：排名提升提供升级动力、榜单介绍新对手、榜单出现产生装逼余震；必须输出 upgrade_rhythm_checks。',
@@ -50770,6 +51112,7 @@ export function createNovelWritingService(ctx: {
     '如果存在 chapter_target.reader_retention_brief，必须输出 reader_retention_checks；不能只用“追读还行/不行”一句话带过，必须明确留存四大支柱的升级、资源困境、目标、解密，留存双引擎的情绪 + 饥饿、信息差植入问号、剥洋葱卡关键信息，以及 Hook上瘾模型的触发 -> 行动 -> 奖励 -> 投入和奖励随机性是否落地。',
     '如果存在 chapter_target.target_reader_contract，必须输出 target_reader_checks；不能只用“读者会喜欢/不喜欢”一句话带过，必须明确目标读者画像、读者欲望、情绪缺口、核心痛苦、深层情结、高频情绪关键词、未满足需求和本章可感知回报是否都有正文证据。',
     '如果存在 chapter_target.genre_positioning_contract，必须输出 genre_positioning_checks；不能只用“题材清楚/不清楚”一句话带过。',
+    '如果存在 chapter_target.plot_special_topics_contract，必须输出 plot_special_topics_checks；不能只用“特殊题材有/没有”一句话带过，必须明确 matched_topics、金手指、题材边界、扫榜对标、都市高武、三万字卡点和阵营手牌是否都有正文证据。',
     '如果存在 chapter_target.female_audience_contract，必须输出 female_audience_checks；不能只用“女频感还行/不行”一句话带过。',
     '如果存在 chapter_target.upgrade_rhythm_contract，必须输出 upgrade_rhythm_checks；不能只用“升级感有/没有”一句话带过。',
     '如果存在 chapter_target.conflict_structure_contract，必须输出 conflict_structure_checks；不能只用“冲突有/没有”一句话带过。',
@@ -50811,7 +51154,7 @@ export function createNovelWritingService(ctx: {
     '【待审校正文】',
     chapterText.slice(0, 16000),
     '',
-    '输出 JSON，字段：passed(boolean), score(0-100), rubric, rubric_source, platform_checks(array), content_rubric_source, content_rubric_checks(array), factual_checks(array), innovation_checks(array), chapter_attraction_checks(array), story_drive_checks(array), character_arc_checks(array), chapter_benchmark_checks(array), title_uniqueness_checks(array), prose_meta_checks(array), banned_words_checks(array), blueprint_consumption_checks(array), word_count_checks(array), reader_retention_checks(array), target_reader_checks(array), genre_positioning_checks(array), core_contract_checks(array), female_audience_checks(array), upgrade_rhythm_checks(array), structure_checks(array), progression_checks(array), information_checks(array), conflict_structure_checks(array), perspective_verdicts(array), deslop_level("无"|"轻度"|"中度"|"重度"), deslop_checks(array), dialogue_checks(array), plot_dynamics_checks(array), continuity_heat_checks(array), character_relation_checks(array), character_behavior_checks(array), asset_linkage_checks(array), state_tracking_checks(array), status_filter_receipts(array), source_readiness_checks(array), write_preparation_checks(array), next_chapter_quality_plan_receipts(array), chapter_handoff_checks(array), intent_confirmation_checks(array), benchmark_recall_checks(array), style_boundary_checks(array), style_sample_checks(array), information_flow_checks(array), expectation_threshold_checks(array), story_loop_checks(array), emotional_arc_checks(array), chapter_hook_checks(array), chapter_hook_quality_checks(array), paragraph_hook_checks(array), suspense_checks(array), reversal_checks(array), showdown_checks(array), bridge_unit_checks(array), opening_checks(array), prose_craft_checks(array), serial_risk_repair_checks(array), revision_receipt_checks(array), deslop_repair_checks(array), punctuation_tone_checks(array), quality_audit_checks(array), longform_checks(array), five_dimension_scores({core_consistency,surface_rewrite,format_consistency,readability,logic_coherence}，每项含 score/evidence/fix), craft_metrics({action_detail_score,description_overuse_score,event_density_score,combat_process_score,setting_consistency_score}), focused_revision_modes(array，可取 expand_action/cut_description/tighten_pacing/add_consequence/restore_hook/repair_setting_violation), setting_violations(array), delivery_risk_receipts(array), next_chapter_quality_plan({version,quality_focus,opening_actions,middle_actions,ending_actions,avoid_repetition,evidence_basis,ending_contract:{final_state,unresolved_question,next_chapter_pull,handoff_to_next}}), issues(array，使用上面的统一 Findings Schema), revision_directives(array), needs_revision(boolean)。只返回 JSON。',
+    '输出 JSON，字段：passed(boolean), score(0-100), rubric, rubric_source, platform_checks(array), content_rubric_source, content_rubric_checks(array), factual_checks(array), innovation_checks(array), chapter_attraction_checks(array), story_drive_checks(array), character_arc_checks(array), chapter_benchmark_checks(array), title_uniqueness_checks(array), prose_meta_checks(array), banned_words_checks(array), blueprint_consumption_checks(array), word_count_checks(array), reader_retention_checks(array), target_reader_checks(array), genre_positioning_checks(array), plot_special_topics_checks(array), core_contract_checks(array), female_audience_checks(array), upgrade_rhythm_checks(array), structure_checks(array), progression_checks(array), information_checks(array), conflict_structure_checks(array), perspective_verdicts(array), deslop_level("无"|"轻度"|"中度"|"重度"), deslop_checks(array), dialogue_checks(array), plot_dynamics_checks(array), continuity_heat_checks(array), character_relation_checks(array), character_behavior_checks(array), asset_linkage_checks(array), state_tracking_checks(array), status_filter_receipts(array), source_readiness_checks(array), write_preparation_checks(array), next_chapter_quality_plan_receipts(array), chapter_handoff_checks(array), intent_confirmation_checks(array), benchmark_recall_checks(array), style_boundary_checks(array), style_sample_checks(array), information_flow_checks(array), expectation_threshold_checks(array), story_loop_checks(array), emotional_arc_checks(array), chapter_hook_checks(array), chapter_hook_quality_checks(array), paragraph_hook_checks(array), suspense_checks(array), reversal_checks(array), showdown_checks(array), bridge_unit_checks(array), opening_checks(array), prose_craft_checks(array), serial_risk_repair_checks(array), revision_receipt_checks(array), deslop_repair_checks(array), punctuation_tone_checks(array), quality_audit_checks(array), longform_checks(array), five_dimension_scores({core_consistency,surface_rewrite,format_consistency,readability,logic_coherence}，每项含 score/evidence/fix), craft_metrics({action_detail_score,description_overuse_score,event_density_score,combat_process_score,setting_consistency_score}), focused_revision_modes(array，可取 expand_action/cut_description/tighten_pacing/add_consequence/restore_hook/repair_setting_violation), setting_violations(array), delivery_risk_receipts(array), next_chapter_quality_plan({version,quality_focus,opening_actions,middle_actions,ending_actions,avoid_repetition,evidence_basis,ending_contract:{final_state,unresolved_question,next_chapter_pull,handoff_to_next}}), issues(array，使用上面的统一 Findings Schema), revision_directives(array), needs_revision(boolean)。只返回 JSON。',
   ].join('\n')
 
   const buildProseRevisionPrompt = (project: any, contextPackage: any, chapterText: string, review: any) => {
@@ -50865,6 +51208,7 @@ export function createNovelWritingService(ctx: {
     '11A. 如果自检结果包含 reader_retention_checks，必须优先修复 status=fail/warn 的追读雷达缺口；按 key/label/evidence/fix 补前300字钩子、可见爽点、信息缺口、章末追读、留存四大支柱（升级、资源困境、目标、解密）、留存双引擎的情绪 + 饥饿，以及 Hook上瘾模型的触发 -> 行动 -> 奖励 -> 投入。四支柱缺口至少补两项：升级写成实力/地位/资源变化，资源困境写成当前资源压力，目标写成大目标 + 小目标 + 假目标，解密写成冰山一角到层层解密；饥饿缺口必须用信息差植入问号并按剥洋葱把关键信息卡到章末；奖励缺口必须补奖励随机性：在预期回报之外给出出乎意料的额外收获、线索、权限、关系或地位变化，并形成沉没投入。',
     '12. 如果自检结果包含 target_reader_checks，必须优先修复 status=fail/warn 的目标读者缺口；按 key/label/evidence/fix 补清读者画像、读者想看内容、情绪缺口、本章命中点、平台口味和可见读者回报。情绪缺口缺口必须先补核心痛苦、深层情结、高频情绪关键词和未满足需求，再把它们写成冲突压力、角色选择、即时反馈或尊严/安全感/掌控感补偿。',
     '13. 如果自检结果包含 genre_positioning_checks，必须优先修复 status=fail/warn 的题材定位缺口；按 key/label/evidence/fix 校准题材标签、核心梗、类型公式、金手指贴合、必备场景、微创新边界、70/20/10元素法则、五种微创新手法、长板聚焦和书名简介内容三位一体，修掉挂羊头卖狗肉；微创新修复必须按70/20/10元素法则稳住模板底座，并从精炼法、升级法、加料法、反套路法、组合法中选一种服务当前核心梗；拉长题材长板而非补短板，删除会稀释核心卖点的支线，把同一卖点扩成至少 3 个角度的正文证据。',
+    '13+. 如果自检结果包含 plot_special_topics_checks，必须优先修复 status=fail/warn 的特殊题材缺口；按 key/label/evidence/fix 补 matched_topics 对应专题的正文证据：金手指要写成行动机制和反馈变化，题材边界要压回核心期待，扫榜对标只复用功能位，都市高武目标要和钱/资源/资格挂钩，三万字卡点要服务上架高潮倒推，阵营手牌要按实力和立场逐级出牌。',
     '13A. 如果自检结果包含 female_audience_checks，必须优先修复 status=fail/warn 的女频长篇缺口；按 key/label/evidence/fix 补安全感锚点，把女主被动改成女主自己做决定、自己推进，把感情升级踩到事业/成长节点上，虐后补反转或糖，控制连续虐戏剂量，并校准平台安全感密度和货板一致。',
     '14. 如果自检结果包含 upgrade_rhythm_checks，必须优先修复 status=fail/warn 的升级节奏缺口；按 key/label/evidence/fix 补升级前情绪缺口、即时反馈、延迟反馈、升级后变化、新危机/新门槛、桥段功能位和金手指演进；金手指必须保留核心作用，只增加新的使用方式，升华到世界/规则层级前先补伏笔；金手指必须刚好解决当前矛盾，不能一键清场或完全无效，解决后要暴露更大矛盾、更高门槛或下一目标；金手指反馈法缺口要把金手指带来的变化过程掺进故事：用主角动作、判断、物件变化、角色反应或局势变化展示即时反馈，删掉只写绑定成功/规则说明/弹窗结算的空反馈；金手指简单是核心，功能、触发条件、奖励反馈和升级规则必须一眼就懂，删掉说明书式规则树和万能外挂；金手指多维成长必须补足词条、功能、品质、熟练度或条件-反馈中的至少两条线，避免只剩品质/数值单线提升；榜单缺口要补排名提升后的下一名次/下一目标、通过排行榜介绍新对手，并让装逼余震改变态度、报价、资源、权限或规则评价。',
     '15. 如果自检结果包含 conflict_structure_checks，必须优先修复 status=fail/warn 的冲突结构缺口；按 key/label/evidence/fix 补阻止者、有进无出、冲突升级阶梯、行动阻拦、明确胜负结果、压势不压人、主角主动破局、矛盾网和下一冲突种子；有进无出缺口要让读者相信主角非踏入不可，明确肉体/身份职场/心理死亡赌注或退出代价，并用杀人理由、工作职责、道德责任或实体场所作为黏结剂，让对立双方都无法轻易脱身；矛盾网缺口必须补到2-3条矛盾线互相牵连，并让解决一条后激活或加深另一条。',
@@ -51028,6 +51372,8 @@ export function createNovelWritingService(ctx: {
     const hasTargetReaderConcern = targetReaderChecks.some(platformCheckNeedsCarryOver)
     const genrePositioningChecks = asArray(review?.genre_positioning_checks || review?.genrePositioningChecks)
     const hasGenrePositioningConcern = genrePositioningChecks.some(platformCheckNeedsCarryOver)
+    const plotSpecialTopicsChecks = asArray(review?.plot_special_topics_checks || review?.plotSpecialTopicsChecks)
+    const hasPlotSpecialTopicsConcern = plotSpecialTopicsChecks.some(platformCheckNeedsCarryOver)
     const femaleAudienceChecks = asArray(review?.female_audience_checks || review?.femaleAudienceChecks)
     const hasFemaleAudienceConcern = femaleAudienceChecks.some(platformCheckNeedsCarryOver)
     const upgradeRhythmChecks = asArray(review?.upgrade_rhythm_checks || review?.upgradeRhythmChecks)
@@ -51063,7 +51409,7 @@ export function createNovelWritingService(ctx: {
     const hasQualityAuditConcern = qualityAuditChecks.some(platformCheckNeedsCarryOver)
     const hasNextChapterQualityPlanConcern = nextChapterQualityPlanNeedsRepair(review)
     const revisionThreshold = Math.max(78, Number(options.quality_threshold || 0))
-    return Boolean(review?.needs_revision) || Number(review?.score || 100) < revisionThreshold || hasHighIssue || hasPerspectiveConcern || hasDeslopConcern || hasDeslopGateDiagnosticConcern || hasFactualConcern || hasProseMetaConcern || hasDialogueConcern || hasPlotDynamicsConcern || hasContinuityHeatConcern || hasCharacterRelationConcern || hasCharacterBehaviorConcern || hasAssetLinkageConcern || hasStateTrackingConcern || hasSourceReadinessConcern || hasWritePreparationConcern || hasNextChapterQualityPlanReceiptConcern || hasChapterHandoffConcern || hasReaderRetentionConcern || hasIntentConfirmationConcern || hasBenchmarkRecallConcern || hasStyleBoundaryConcern || hasStyleSampleConcern || hasInformationFlowConcern || hasExpectationThresholdConcern || hasTargetReaderConcern || hasGenrePositioningConcern || hasFemaleAudienceConcern || hasUpgradeRhythmConcern || hasConflictStructureConcern || hasStoryLoopConcern || hasEmotionalArcConcern || hasChapterHookConcern || hasParagraphHookConcern || hasSuspenseConcern || hasReversalConcern || hasShowdownConcern || hasBridgeUnitConcern || hasOpeningConcern || hasProseCraftConcern || hasPunctuationToneConcern || hasQualityAuditConcern || hasNextChapterQualityPlanConcern
+    return Boolean(review?.needs_revision) || Number(review?.score || 100) < revisionThreshold || hasHighIssue || hasPerspectiveConcern || hasDeslopConcern || hasDeslopGateDiagnosticConcern || hasFactualConcern || hasProseMetaConcern || hasDialogueConcern || hasPlotDynamicsConcern || hasContinuityHeatConcern || hasCharacterRelationConcern || hasCharacterBehaviorConcern || hasAssetLinkageConcern || hasStateTrackingConcern || hasSourceReadinessConcern || hasWritePreparationConcern || hasNextChapterQualityPlanReceiptConcern || hasChapterHandoffConcern || hasReaderRetentionConcern || hasIntentConfirmationConcern || hasBenchmarkRecallConcern || hasStyleBoundaryConcern || hasStyleSampleConcern || hasInformationFlowConcern || hasExpectationThresholdConcern || hasTargetReaderConcern || hasGenrePositioningConcern || hasPlotSpecialTopicsConcern || hasFemaleAudienceConcern || hasUpgradeRhythmConcern || hasConflictStructureConcern || hasStoryLoopConcern || hasEmotionalArcConcern || hasChapterHookConcern || hasParagraphHookConcern || hasSuspenseConcern || hasReversalConcern || hasShowdownConcern || hasBridgeUnitConcern || hasOpeningConcern || hasProseCraftConcern || hasPunctuationToneConcern || hasQualityAuditConcern || hasNextChapterQualityPlanConcern
   }
 
   const runProseSelfReviewAndRevision = async (activeWorkspace: string, project: any, contextPackage: any, chapterText: string, modelId?: number, options: any = {}) => {
@@ -51287,7 +51633,7 @@ export function createNovelWritingService(ctx: {
       }))
     const normalizedReview = {
       // Source guards: these raw model fields are consumed through requiredContractChecks.
-      // reviewPayload?.reader_retention_checks reviewPayload?.target_reader_checks reviewPayload?.genre_positioning_checks reviewPayload?.core_contract_checks reviewPayload?.female_audience_checks reviewPayload?.upgrade_rhythm_checks reviewPayload?.conflict_structure_checks
+      // reviewPayload?.reader_retention_checks reviewPayload?.target_reader_checks reviewPayload?.genre_positioning_checks reviewPayload?.plot_special_topics_checks reviewPayload?.core_contract_checks reviewPayload?.female_audience_checks reviewPayload?.upgrade_rhythm_checks reviewPayload?.conflict_structure_checks
       // reviewPayload?.dialogue_checks reviewPayload?.plot_dynamics_checks reviewPayload?.continuity_heat_checks reviewPayload?.character_relation_checks
       // reviewPayload?.character_behavior_checks reviewPayload?.asset_linkage_checks reviewPayload?.state_tracking_checks reviewPayload?.source_readiness_checks reviewPayload?.chapter_handoff_checks
       // reviewPayload?.intent_confirmation_checks reviewPayload?.information_flow_checks reviewPayload?.expectation_threshold_checks reviewPayload?.story_loop_checks
@@ -51349,6 +51695,7 @@ export function createNovelWritingService(ctx: {
       reader_retention_checks: requiredContractChecks('reader_retention_checks', 'readerRetentionChecks', 'reader_retention_brief', '追读雷达'),
       target_reader_checks: [...requiredContractChecks('target_reader_checks', 'targetReaderChecks', 'target_reader_contract', '目标读者'), ...deterministicTargetReaderChecks],
       genre_positioning_checks: [...requiredContractChecks('genre_positioning_checks', 'genrePositioningChecks', 'genre_positioning_contract', '题材定位'), ...deterministicGenrePositioningChecks],
+      plot_special_topics_checks: requiredContractChecks('plot_special_topics_checks', 'plotSpecialTopicsChecks', 'plot_special_topics_contract', '特殊题材'),
       core_contract_checks: [...reviewChecks('core_contract_checks', 'coreContractChecks'), ...deterministicCoreContractChecks],
       female_audience_checks: [...requiredContractChecks('female_audience_checks', 'femaleAudienceChecks', 'female_audience_contract', '女频长篇'), ...deterministicFemaleAudienceChecks],
       upgrade_rhythm_checks: [...requiredContractChecks('upgrade_rhythm_checks', 'upgradeRhythmChecks', 'upgrade_rhythm_contract', '升级节奏'), ...deterministicUpgradeAftermathChecks, ...deterministicUpgradeRhythmChecks],
@@ -53347,6 +53694,15 @@ export function createNovelWritingService(ctx: {
         issues: draftGenrePositioningSync.missed.map((item: any) => `题材定位缺口：${item.label}｜${item.text || item.expected}`).slice(0, 20),
         payload: JSON.stringify({ chapter_id: chapter.id, chapter_no: chapter.chapter_no, genre_positioning_sync: draftGenrePositioningSync }),
       })
+      const draftPlotSpecialTopicsSync = buildPlotSpecialTopicsSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)
+      await createNovelReview(activeWorkspace, {
+        project_id: projectId,
+        review_type: 'plot_special_topics_sync',
+        status: draftPlotSpecialTopicsSync.status === 'ok' ? 'ok' : 'warn',
+        summary: `${draftPlotSpecialTopicsSync.label}：${draftPlotSpecialTopicsSync.summary}`,
+        issues: draftPlotSpecialTopicsSync.missed.map((item: any) => `特殊题材缺口：${item.label}｜${item.text || item.expected}`).slice(0, 20),
+        payload: JSON.stringify({ chapter_id: chapter.id, chapter_no: chapter.chapter_no, plot_special_topics_sync: draftPlotSpecialTopicsSync }),
+      })
       const draftFemaleAudienceSync = buildFemaleAudienceSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)
       await createNovelReview(activeWorkspace, {
         project_id: projectId,
@@ -53748,7 +54104,7 @@ export function createNovelWritingService(ctx: {
         revised: false,
         production_mode: productionMode,
         completed_stage: 'store',
-        story_state_update: { skipped: true, prose_revision_receipt_sync: proseRevisionReceiptSync, deslop_repair_receipt_sync: deslopRepairReceiptSync, quality_audit_repair_receipt_sync: qualityAuditRepairReceiptSync, next_chapter_quality_plan_receipts_sync: nextChapterQualityPlanReceiptSync, status_filter_receipts_sync: statusFilterReceiptSync, write_preparation_receipts_sync: writePreparationReceiptSync, revision_context_receipts_sync: revisionContextReceiptSync, revision_cascade_impact_sync: revisionCascadeImpactSync, revision_scope_guard_sync: revisionScopeGuardSync, deterministic_prose_cleanup: deterministicProseCleanup, prose_meta_sync: draftProseMetaSync, dialogue_sync: draftDialogueSync, character_behavior_sync: draftCharacterBehaviorSync, asset_linkage_sync: draftAssetLinkageSync, state_tracking_sync: draftStateTrackingSync, source_readiness_sync: draftSourceReadinessSync, intent_confirmation_sync: draftIntentConfirmationSync, continuity_heat_sync: draftContinuityHeatSync, conflict_structure_sync: draftConflictStructureSync, upgrade_rhythm_sync: draftUpgradeRhythmSync, target_reader_sync: draftTargetReaderSync, genre_positioning_sync: draftGenrePositioningSync, female_audience_sync: draftFemaleAudienceSync, plot_dynamics_sync: draftPlotDynamicsSync, character_relation_sync: draftCharacterRelationSync, chapter_attraction_review: draftChapterAttractionReview, story_drive_sync: draftStoryDriveSync, story_loop_sync: draftStoryLoopSync, information_flow_sync: draftInformationFlowSync, emotional_arc_sync: draftEmotionalArcSync, character_arc_sync: draftCharacterArcSync, chapter_blueprint_sync: draftChapterBlueprintSync, scene_card_receipts_sync: draftSceneCardReceiptSync, delivery_risk_receipts_sync: draftDeliveryRiskReceiptSync, chapter_benchmark_sync: draftChapterBenchmarkSync, benchmark_recall_sync: draftBenchmarkRecallSync, style_boundary_sync: draftStyleBoundarySync, style_sample_sync: draftStyleSampleSync, innovation_sync: draftInnovationSync, volume_beat_sync: draftVolumeBeatSync, runway_sync: draftRunwaySync, chapter_title_uniqueness_sync: draftChapterTitleUniquenessSync, chapter_handoff_sync: draftChapterHandoffSync, reader_expectation_sync: draftReaderExpectationSync, expectation_threshold_sync: draftExpectationThresholdSync, chapter_hook_sync: draftChapterHookSync, paragraph_hook_sync: draftParagraphHookSync, suspense_sync: draftSuspenseSync, reversal_sync: draftReversalSync, showdown_sync: draftShowdownSync, opening_sync: draftOpeningSync, prose_craft_sync: draftProseCraftSync, punctuation_tone_sync: draftPunctuationToneSync, quality_audit_sync: draftQualityAuditSync, payoff_setup_sync: draftPayoffSetupSync, spectator_reaction_sync: draftSpectatorReactionSync, bridge_unit_sync: draftBridgeUnitSync, beat_cooling_sync: draftBeatCoolingSync, reader_payoff_sync: draftReaderPayoffSync, reader_retention_sync: draftReaderRetentionSync, signature_scene_sync: draftSignatureSceneSync, story_unit_sync: draftStoryUnitSync, core_drift: draftCoreDrift, core_contract_sync: draftCoreContractSync },
+        story_state_update: { skipped: true, prose_revision_receipt_sync: proseRevisionReceiptSync, deslop_repair_receipt_sync: deslopRepairReceiptSync, quality_audit_repair_receipt_sync: qualityAuditRepairReceiptSync, next_chapter_quality_plan_receipts_sync: nextChapterQualityPlanReceiptSync, status_filter_receipts_sync: statusFilterReceiptSync, write_preparation_receipts_sync: writePreparationReceiptSync, revision_context_receipts_sync: revisionContextReceiptSync, revision_cascade_impact_sync: revisionCascadeImpactSync, revision_scope_guard_sync: revisionScopeGuardSync, deterministic_prose_cleanup: deterministicProseCleanup, prose_meta_sync: draftProseMetaSync, dialogue_sync: draftDialogueSync, character_behavior_sync: draftCharacterBehaviorSync, asset_linkage_sync: draftAssetLinkageSync, state_tracking_sync: draftStateTrackingSync, source_readiness_sync: draftSourceReadinessSync, intent_confirmation_sync: draftIntentConfirmationSync, continuity_heat_sync: draftContinuityHeatSync, conflict_structure_sync: draftConflictStructureSync, upgrade_rhythm_sync: draftUpgradeRhythmSync, target_reader_sync: draftTargetReaderSync, genre_positioning_sync: draftGenrePositioningSync, plot_special_topics_sync: draftPlotSpecialTopicsSync, female_audience_sync: draftFemaleAudienceSync, plot_dynamics_sync: draftPlotDynamicsSync, character_relation_sync: draftCharacterRelationSync, chapter_attraction_review: draftChapterAttractionReview, story_drive_sync: draftStoryDriveSync, story_loop_sync: draftStoryLoopSync, information_flow_sync: draftInformationFlowSync, emotional_arc_sync: draftEmotionalArcSync, character_arc_sync: draftCharacterArcSync, chapter_blueprint_sync: draftChapterBlueprintSync, scene_card_receipts_sync: draftSceneCardReceiptSync, delivery_risk_receipts_sync: draftDeliveryRiskReceiptSync, chapter_benchmark_sync: draftChapterBenchmarkSync, benchmark_recall_sync: draftBenchmarkRecallSync, style_boundary_sync: draftStyleBoundarySync, style_sample_sync: draftStyleSampleSync, innovation_sync: draftInnovationSync, volume_beat_sync: draftVolumeBeatSync, runway_sync: draftRunwaySync, chapter_title_uniqueness_sync: draftChapterTitleUniquenessSync, chapter_handoff_sync: draftChapterHandoffSync, reader_expectation_sync: draftReaderExpectationSync, expectation_threshold_sync: draftExpectationThresholdSync, chapter_hook_sync: draftChapterHookSync, paragraph_hook_sync: draftParagraphHookSync, suspense_sync: draftSuspenseSync, reversal_sync: draftReversalSync, showdown_sync: draftShowdownSync, opening_sync: draftOpeningSync, prose_craft_sync: draftProseCraftSync, punctuation_tone_sync: draftPunctuationToneSync, quality_audit_sync: draftQualityAuditSync, payoff_setup_sync: draftPayoffSetupSync, spectator_reaction_sync: draftSpectatorReactionSync, bridge_unit_sync: draftBridgeUnitSync, beat_cooling_sync: draftBeatCoolingSync, reader_payoff_sync: draftReaderPayoffSync, reader_retention_sync: draftReaderRetentionSync, signature_scene_sync: draftSignatureSceneSync, story_unit_sync: draftStoryUnitSync, core_drift: draftCoreDrift, core_contract_sync: draftCoreContractSync },
         requires_next_chapter_quality_plan_receipts: nextChapterQualityPlanReceiptSync.requires_receipts,
         requires_status_filter_receipts: statusFilterReceiptSync.requires_receipts,
         config_snapshot: configSnapshot,
@@ -53995,6 +54351,7 @@ export function createNovelWritingService(ctx: {
     const upgradeRhythmSync = buildUpgradeRhythmSyncReport(project, updated, contextPackage, finalText)
     const targetReaderSync = buildTargetReaderSyncReport(project, updated, contextPackage, finalText)
     const genrePositioningSync = buildGenrePositioningSyncReport(project, updated, contextPackage, finalText)
+    const plotSpecialTopicsSync = buildPlotSpecialTopicsSyncReport(project, updated, contextPackage, finalText)
     const femaleAudienceSync = buildFemaleAudienceSyncReport(project, updated, contextPackage, finalText)
     const plotDynamicsSync = buildPlotDynamicsSyncReport(project, updated, contextPackage, finalText)
     const characterRelationSync = buildCharacterRelationSyncReport(project, updated, contextPackage, finalText)
@@ -54067,6 +54424,7 @@ export function createNovelWritingService(ctx: {
     storyStateUpdateWithSync.upgrade_rhythm_sync = upgradeRhythmSync
     storyStateUpdateWithSync.target_reader_sync = targetReaderSync
     storyStateUpdateWithSync.genre_positioning_sync = genrePositioningSync
+    storyStateUpdateWithSync.plot_special_topics_sync = plotSpecialTopicsSync
     storyStateUpdateWithSync.female_audience_sync = femaleAudienceSync
     storyStateUpdateWithSync.plot_dynamics_sync = plotDynamicsSync
     storyStateUpdateWithSync.character_relation_sync = characterRelationSync

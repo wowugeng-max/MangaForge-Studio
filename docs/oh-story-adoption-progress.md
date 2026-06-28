@@ -13,25 +13,25 @@ Source reference set: `/private/tmp/oh-story-claudecode/skills/story-long-write/
 <!-- oh-story-progress-summary
 {
   "reference_total": 38,
-  "integrated": 17,
-  "partial": 21,
+  "integrated": 18,
+  "partial": 20,
   "todo": 0,
   "deferred": 0,
-  "remaining_references": 21,
-  "estimated_hours_remaining": 40,
-  "estimated_working_days_remaining": 6.67
+  "remaining_references": 20,
+  "estimated_hours_remaining": 39,
+  "estimated_working_days_remaining": 6.5
 }
 -->
 
 ## Current Snapshot
 
 - Reference files: 38
-- Integrated enough for current production use: 17
-- Partially integrated, still worth mining: 21
+- Integrated enough for current production use: 18
+- Partially integrated, still worth mining: 20
 - Not systematically reviewed yet: 0
 - Deferred: 0
-- Remaining references to improve: 21
-- Estimated remaining effort: about 40 engineering hours, or 6.67 focused working days at 6 hours per day
+- Remaining references to improve: 20
+- Estimated remaining effort: about 39 engineering hours, or 6.5 focused working days at 6 hours per day
 
 The estimate assumes the current working pattern: one small oh-story increment at a time, with prompt or workflow changes backed by focused tests, then `test:novel-server` and `check` before push. UI progress surfacing is not included in the 40 hours; after this ledger stabilizes, exposing it in the novel workspace should be a separate 4-6 hour slice.
 
@@ -74,7 +74,7 @@ The estimate assumes the current working pattern: one small oh-story increment a
 | plot-core-methods.md | partial | Target reader, story drive, plot dynamics, information flow, and reader payoff contracts are present. | Convert remaining high-level methods into smaller generation-time gates. | 2h |
 | plot-emotion-system.md | partial | Payoff setup, emotional arc,爽点 setup, and craft rules are present in pre-draft and prose prompts. | Add formula-level checks for setup before payoff and recurring emotional modules. | 1.5h |
 | plot-frameworks.md | partial | Showdown, suspense, conflict, and bridge-unit contracts cover major framework pieces. | Decide which frameworks belong in creation, outline, scene-card, or revision stages. | 2h |
-| plot-special-topics.md | partial | Creation, recovery, original-incubation prompts, and local writing-bible materialization now inject `writing_bible.plot_special_topics_contract` from an oh-story special-topic route covering goldfinger decomposition, advanced systems, brainstorm framework, genre boundary, market benchmarking, fanfic/original rhythm, urban high martial templates, identity behavior, love line, adaptation, 30k launch checkpoint, faction motivation, faction hand, common diagnostics, and three-book fusion. Focused tests verify prompt injection and materialized writing-bible fields. | Connect the contract to pre-draft/write-preparation diagnostics and post-prose quality repair routing. | 1h |
+| plot-special-topics.md | integrated | Creation, recovery, original-incubation prompts, and local writing-bible materialization inject `writing_bible.plot_special_topics_contract`; pre-draft write-preparation `creation_contract_checklist` now includes special topics; prose generation executes `chapter_target.plot_special_topics_contract`; self-review and revision prompts require `plot_special_topics_checks`; `buildPlotSpecialTopicsSyncReport` verifies goldfinger execution, genre boundary, market benchmark, urban high martial, launch checkpoint, and faction hand evidence; prose-quality risks and `plot_special_topics_sync` now carry gaps into next-chapter repair routing. Focused tests cover write-preparation surfacing, prompt enforcement, full-pipeline story-state return, and deterministic sync behavior. | Keep tuning topic-specific evidence heuristics from real generated chapters. | 0.5h |
 | quality-checklist.md | integrated | Quality audit contract covers structure, purpose tags, progression, information load, event ratio, longform continuity, five-dimension scoring, selling-point expression, phase-level checklist mapping, prose prompt enforcement, self-review receipt coverage, quality gates, post-delivery sync, and repair tasks. | Keep tuning phase checklist mappings from real review misses. | 0.5h |
 | reversal-toolkit.md | integrated | Reversal setup, fair misdirection, evidence-chain, final-evidence impact, time-bomb proof, and agency checks are implemented. | Keep tuning evidence-chain examples. | 0.5h |
 | state-tracking.md | integrated | State tracking contract, source readiness, status-filter receipts, and source-boundary checks are implemented. | Keep expanding real-world failure examples. | 0.5h |
@@ -87,11 +87,11 @@ The estimate assumes the current working pattern: one small oh-story increment a
 
 ## Next Priority Queue
 
-1. `plot-special-topics.md`: connect the creation-time special-topic contract to pre-draft/write-preparation diagnostics and post-prose quality repair routing.
-2. `artifact-protocols.md`: compare artifact protocol naming and required fields against MangaForge receipts, then close schema gaps.
-3. `character-basics.md`: extract missing character-basics rules into pre-draft character constraints and revision checks.
-4. `genre-readers.md`: expand reader profiles into selectable or inferred workbench signals.
-5. `commercial-core-methods.md`: convert more commercial-core heuristics into creation-time and batch-planning gates.
+1. `artifact-protocols.md`: compare artifact protocol naming and required fields against MangaForge receipts, then close schema gaps.
+2. `character-basics.md`: extract missing character-basics rules into pre-draft character constraints and revision checks.
+3. `genre-readers.md`: expand reader profiles into selectable or inferred workbench signals.
+4. `commercial-core-methods.md`: convert more commercial-core heuristics into creation-time and batch-planning gates.
+5. `emotional-arc-design.md`: connect emotion-arc findings more directly to scene-card generation and repair-task routing.
 
 ## Update Rules
 
