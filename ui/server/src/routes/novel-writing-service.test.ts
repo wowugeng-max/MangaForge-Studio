@@ -368,6 +368,74 @@ describe('normalizeSceneCardsPayload', () => {
     expect(briefBlock).toContain('relationship_next_hook')
   })
 
+  test('preserves oh-story conflict execution fields for scene-card handoff', () => {
+    const sceneCards = normalizeSceneCardsPayload({
+      scene_cards: [
+        {
+          title: '封门抢票',
+          purpose: '主角必须拿到设备间临时票。',
+          conflict: '协会执事用资质规则挡门。',
+          conflict_ladder_step: '行动阻拦：协会执事扣住临时票并要求客户签封单。',
+          motivation_source: '世界背景：协会资质规则卡住旧城维修权限。',
+          opposing_force: '协会执事、资质规则和客户授权流程。',
+          blocked_desire: '主角想进入设备间拿到故障证据。',
+          protagonist_agency_action: '做别人不敢做的事：当众挑战协会封单规则。',
+          no_exit_reason: '客户设备停摆会导致整层停电，主角非踏入不可。',
+          event_value_change: '设备间权限从拒绝到临时开放。',
+          next_conflict_seed: '第二份封单指向医院设备。',
+          visible_line_role: '明线：主角查设备间故障。',
+          hidden_line_seed: '暗线：协会会长提前篡改封单。',
+          ab_weave_role: 'B线拉出矛盾：规则封门；A线升级线等待故障证据回报。',
+        },
+      ],
+    })
+
+    expect(sceneCards[0].conflict_ladder_step).toContain('行动阻拦')
+    expect(sceneCards[0].motivation_source).toContain('世界背景')
+    expect(sceneCards[0].opposing_force).toContain('协会执事')
+    expect(sceneCards[0].blocked_desire).toContain('进入设备间')
+    expect(sceneCards[0].protagonist_agency_action).toContain('做别人不敢做')
+    expect(sceneCards[0].no_exit_reason).toContain('非踏入不可')
+    expect(sceneCards[0].event_value_change).toContain('临时开放')
+    expect(sceneCards[0].next_conflict_seed).toContain('第二份封单')
+    expect(sceneCards[0].visible_line_role).toContain('明线')
+    expect(sceneCards[0].hidden_line_seed).toContain('暗线')
+    expect(sceneCards[0].ab_weave_role).toContain('B线拉出矛盾')
+  })
+
+  test('asks scene-card generation to split conflict-structure contracts into per-scene execution fields', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const promptStart = source.indexOf('const buildSceneCardsPrompt =')
+    const promptEnd = source.indexOf('const buildHeuristicSettingUsage =', promptStart)
+    const promptBlock = source.slice(promptStart, promptEnd)
+    const proseStart = source.indexOf('const buildParagraphProseContext =')
+    const proseEnd = source.indexOf('const reviewPrompt', proseStart)
+    const proseBlock = source.slice(proseStart, proseEnd)
+
+    expect(promptStart).toBeGreaterThanOrEqual(0)
+    expect(promptBlock).toContain('chapter_target.conflict_structure_contract')
+    expect(promptBlock).toContain('conflict_ladder_step')
+    expect(promptBlock).toContain('motivation_source')
+    expect(promptBlock).toContain('opposing_force')
+    expect(promptBlock).toContain('blocked_desire')
+    expect(promptBlock).toContain('protagonist_agency_action')
+    expect(promptBlock).toContain('no_exit_reason')
+    expect(promptBlock).toContain('event_value_change')
+    expect(promptBlock).toContain('next_conflict_seed')
+    expect(promptBlock).toContain('visible_line_role')
+    expect(promptBlock).toContain('hidden_line_seed')
+    expect(promptBlock).toContain('ab_weave_role')
+    expect(promptBlock).toContain('有人阻止主角得到他想要的东西')
+    expect(promptBlock).toContain('第一幕陷阱')
+    expect(promptBlock).toContain('明线')
+    expect(promptBlock).toContain('暗线')
+    expect(promptBlock).toContain('A线')
+    expect(promptBlock).toContain('B线')
+    expect(proseBlock).toContain('scene_cards.conflict_ladder_step')
+    expect(proseBlock).toContain('scene_cards.visible_line_role')
+    expect(proseBlock).toContain('scene_cards.ab_weave_role')
+  })
+
   test('maps delivery-risk carry-over into normalized scene cards before prose execution', () => {
     const sceneCards = normalizeSceneCardsPayload({
       scene_cards: [
