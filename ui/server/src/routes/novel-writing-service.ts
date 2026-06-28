@@ -35053,7 +35053,53 @@ function buildInformationFlowTransitionCompressionCheck(contract: any, chapterTe
   }
 }
 
+function buildInformationFlowNextObjectiveCheck(contract: any, chapterText: string) {
+  const planned = informationFlowArray(
+    contract.next_objective_rules,
+    contract.nextObjectiveRules,
+  )
+  if (!planned.length) return null
+  const text = String(chapterText || '')
+  const gainSignals = uniqueBriefStrings([
+    /突破|晋升|升级|升阶|实力提升|境界提升|身份提升|资源到账|奖励到账|收获/.test(text) ? '实力/身份/资源提升' : '',
+    /拿到(?:资格|名额|令牌|资源|灵石|法器|权限)|获得(?:资格|名额|令牌|资源|权限)|通过(?:考核|门槛|试炼|测试)/.test(text) ? '阶段性目标达成' : '',
+    /赢下|取胜|胜利|达成目标|完成目标|过关|破局|解封|觉醒|掌握/.test(text) ? '胜利/破局信号' : '',
+  ], 6)
+  if (!gainSignals.length) return null
+  const nextObjectiveSignals = uniqueBriefStrings([
+    /下一步|下一关|新目标|新挑战|新门槛|更高门槛|新的代价|下一目标/.test(text) ? '下一目标明示' : '',
+    /三日内|七日内|期限|资格作废|否则|必须[^。！？!?]{0,36}(?:取回|查明|赶往|面对|完成|证明|拿到|通过)/.test(text) ? '目标带期限/代价' : '',
+    /禁库|试炼|追查|赶往|面对(?:新|更强|下一)|更强(?:对手|敌人)|新任务|新线索|更大问题/.test(text) ? '新挑战/新线索可见' : '',
+  ], 8)
+  const vacuumRisks = uniqueBriefStrings([
+    /事情进入下一阶段|一切告一段落|暂时没有新的目标|没有新的目标|之后再说|暂无下一步/.test(text) ? '提升后只写概括或目标真空' : '',
+    /欢呼许久|庆祝了许久|终于可以休息|众人散去/.test(text) && !nextObjectiveSignals.length ? '提升后停在庆祝/休息' : '',
+  ], 6)
+  const delivered = nextObjectiveSignals.length > 0 && !vacuumRisks.length
+  return {
+    key: 'next_objective_after_gain',
+    label: '提升后下一目标',
+    text: planned.join('；'),
+    expected: planned.join('；'),
+    score: delivered ? 88 : Math.max(12, nextObjectiveSignals.length * 28),
+    evidence: uniqueBriefStrings([
+      ...gainSignals,
+      ...nextObjectiveSignals,
+      ...vacuumRisks,
+    ], 8),
+    delivered,
+    status: delivered ? 'ok' : 'warn',
+    missed_items: delivered ? [] : uniqueBriefStrings([
+      ...vacuumRisks,
+      !nextObjectiveSignals.length ? '缺提升后的新挑战/目标/代价/更高门槛' : '',
+    ], 8),
+    issue: delivered ? '' : '主角实力、身份、资源或阶段性目标提升后，正文没有立刻给出下一步要争什么。',
+    repair_instruction: delivered ? '' : '按 oh-story 剧情过渡修复：每次提升后立即引入新的挑战、目标、代价或更高门槛；把“事情进入下一阶段”改成场景内可见的下一步行动。',
+  }
+}
+
 function informationFlowPriority(missed: any[]) {
+  if (missed.some(item => item.key === 'next_objective_after_gain')) return '优先补提升后下一目标'
   if (missed.some(item => item.key === 'no_infodump_guardrails')) return '优先删背景说明书'
   if (missed.some(item => item.key === 'transition_compression_rules')) return '优先删无信息量过渡'
   if (missed.some(item => item.key === 'reveal_order')) return '优先修揭示顺序'
@@ -35102,6 +35148,7 @@ export function buildInformationFlowSyncReport(project: any, chapter: any, conte
       chapterText,
       '回应、升级或明确延迟上一场悬念，不能断裂换题。',
     ),
+    buildInformationFlowNextObjectiveCheck(contract, chapterText),
     buildInformationFlowTransitionCompressionCheck(contract, chapterText),
     buildInformationFlowInfodumpCheck(contract, chapterText),
   ].filter(Boolean)
@@ -35133,9 +35180,9 @@ export function buildInformationFlowSyncReport(project: any, chapter: any, conte
     delivered,
     missed,
     next_actions: status === 'ok'
-      ? ['保持信息流：每个场景都有可概括信息团，信息随冲突释放，揭示顺序递进，悬念有回应或明确延迟，无信息量过渡直接删除或压缩。']
+      ? ['保持信息流：每个场景都有可概括信息团，信息随冲突释放，揭示顺序递进，悬念有回应或明确延迟，提升后立刻给出下一目标，无信息量过渡直接删除或压缩。']
       : [
-          '下一次修订必须补足信息流：信息随冲突释放，按揭示顺序递进，回应上一场悬念，删无信息量过渡和背景说明书。',
+          '下一次修订必须补足信息流：信息随冲突释放，按揭示顺序递进，回应上一场悬念，提升后补下一目标，删无信息量过渡和背景说明书。',
           '每个场景至少交付一个可概括信息团；纯移动、寒暄、环境描写和设定说明没有信息量时直接删除或压缩。',
         ],
   }
@@ -38041,6 +38088,11 @@ const OH_STORY_INFORMATION_TRANSITION_COMPRESSION_RULES = [
   '过渡场景该跳过就跳过，不拖泥带水。',
   '纯移动、寒暄、环境描写没有信息量时直接跳过或压缩。',
   '过场要么交付信息、风险、情绪余波或下一步目标，要么只用一句话带过。',
+]
+
+const OH_STORY_INFORMATION_NEXT_OBJECTIVE_RULES = [
+  '每次实力、身份、资源或阶段性目标提升后，必须立即引入新的挑战、目标、代价或更高门槛。',
+  '兑现当前信息或胜利后，下一步干什么要在场景内可见，不能只写事情进入下一阶段。',
 ]
 
 const OH_STORY_EXPECTATION_THRESHOLD_CHECKS = [
@@ -42483,6 +42535,7 @@ function buildInformationFlowContract(contextPackage: any = {}) {
     const explicitProgressionChain = asArray(explicit.progression_chain || explicit.progressionChain).map((item: any) => compactBriefText(item)).filter(Boolean)
     const explicitTransitionRules = asArray(explicit.transition_rules || explicit.transitionRules).map((item: any) => compactBriefText(item)).filter(Boolean)
     const explicitTransitionCompressionRules = asArray(explicit.transition_compression_rules || explicit.transitionCompressionRules).map((item: any) => compactBriefText(item)).filter(Boolean)
+    const explicitNextObjectiveRules = asArray(explicit.next_objective_rules || explicit.nextObjectiveRules).map((item: any) => compactBriefText(item)).filter(Boolean)
     const explicitWaterRiskGuards = asArray(explicit.water_risk_guards || explicit.waterRiskGuards).map((item: any) => compactBriefText(item)).filter(Boolean)
     return {
       version: explicit.version || 'oh_story_information_flow_v1',
@@ -42495,6 +42548,9 @@ function buildInformationFlowContract(contextPackage: any = {}) {
       transition_compression_rules: explicitTransitionCompressionRules.length
         ? explicitTransitionCompressionRules
         : asArray(derived.transition_compression_rules).length ? asArray(derived.transition_compression_rules) : OH_STORY_INFORMATION_TRANSITION_COMPRESSION_RULES,
+      next_objective_rules: explicitNextObjectiveRules.length
+        ? explicitNextObjectiveRules
+        : asArray(derived.next_objective_rules).length ? asArray(derived.next_objective_rules) : OH_STORY_INFORMATION_NEXT_OBJECTIVE_RULES,
       water_risk_guards: explicitWaterRiskGuards.length ? explicitWaterRiskGuards : asArray(derived.water_risk_guards),
       quality_checks: asArray(explicit.quality_checks || explicit.qualityChecks).length
         ? asArray(explicit.quality_checks || explicit.qualityChecks).map((item: any) => compactBriefText(item)).filter(Boolean)
@@ -42549,6 +42605,7 @@ function buildInformationFlowContract(contextPackage: any = {}) {
     progression_chain: progressionChain,
     transition_rules: OH_STORY_INFORMATION_TRANSITION_RULES,
     transition_compression_rules: OH_STORY_INFORMATION_TRANSITION_COMPRESSION_RULES,
+    next_objective_rules: OH_STORY_INFORMATION_NEXT_OBJECTIVE_RULES,
     water_risk_guards: waterRiskGuards,
     quality_checks: OH_STORY_INFORMATION_FLOW_CHECKS,
     revision_priorities: ['压缩无关信息团', '补场景间递进', '回应上一场悬念', '修情绪衔接', '删无信息量过渡'],
@@ -51249,13 +51306,15 @@ export function createNovelWritingService(ctx: {
       informationFlowContract ? '硬性要求：执行 chapter_target.information_flow_contract；这是来自 oh-story plot-core-methods 的信息团和场景衔接口径，正文每个场景必须交付一个可概括的信息单元，并让信息团之间递进。' : '',
       informationFlowContract ? '执行方式：每个信息团必须能一句话概括；前一个场景留下悬念，后一个场景回应、验证、反转或升级；过渡不是填充，没有信息量就删掉；无关背景、纯移动、纯寒暄和无信息量过渡必须删掉或改成证据。' : '',
       informationFlowContract ? '过渡压缩：纯移动、寒暄、环境描写没有信息量时直接跳过或压缩；过场要么交付信息、风险、情绪余波或下一步目标，要么只用一句话带过。' : '',
+      informationFlowContract ? '提升后下一目标：每次实力、身份、资源或阶段性目标提升后，必须立即引入新的挑战、目标、代价或更高门槛；不能只写“事情进入下一阶段”。' : '',
       informationFlowContract?.information_units?.length ? `信息团：${informationFlowContract.information_units.join('；')}` : '',
       informationFlowContract?.progression_chain?.length ? `递进链：${informationFlowContract.progression_chain.join('；')}` : '',
       informationFlowContract?.transition_rules?.length ? `衔接规则：${informationFlowContract.transition_rules.join('；')}` : '',
       informationFlowContract?.transition_compression_rules?.length ? `过渡压缩：${informationFlowContract.transition_compression_rules.join('；')}` : '',
+      informationFlowContract?.next_objective_rules?.length ? `提升后下一目标：${informationFlowContract.next_objective_rules.join('；')}` : '',
       informationFlowContract?.water_risk_guards?.length ? `水章防线：${informationFlowContract.water_risk_guards.join('；')}` : '',
       informationFlowContract?.quality_checks?.length ? `质量检查：${informationFlowContract.quality_checks.join('；')}` : '',
-      informationFlowContract ? '交稿自检必须输出 information_flow_checks，并用正文证据检查信息团可概括、场景递进、悬念回应、过渡压缩、情绪衔接和无关信息团清理。' : '',
+      informationFlowContract ? '交稿自检必须输出 information_flow_checks，并用正文证据检查信息团可概括、场景递进、悬念回应、过渡压缩、情绪衔接、提升后下一目标和无关信息团清理。' : '',
       informationFlowContract ? JSON.stringify(informationFlowContract, null, 2).slice(0, 2500) : '',
       '',
       expectationThresholdContract ? '【期待门槛合同】' : '',
@@ -53160,8 +53219,8 @@ export function createNovelWritingService(ctx: {
     '43B. style_boundary_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),reference_risk,rewritten_with_local_action,voice_anchor,copied_phrase_removed,evidence,fix,remaining_risk；为了模仿样章/对标章导致禁用词、Gate F 章末总结体、万能比喻、作者预告、字数缩水、剧情/状态漂移或复制样章桥段/原句时必须给出 S1/S2 finding，category=prose 或 rule_boundary。',
     '43C. 是否兑现 chapter_target.style_sample_strategy：按 oh-story 样章策略检查 samples 中的 scene_function、narrative_rhythm、sentence_pattern、dialogue_ratio、voice_rules 是否只作为可迁移表达策略进入正文；必须同时检查 applicable_scenes、avoid_scenes、do_not_copy 和 unsafe_direct_phrases，确认适用场景命中、避用场景没有误套、复制边界没有越界；必须输出 style_sample_checks。',
     '43D. style_sample_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),style_dimension,source_technique,adapted_evidence,copied_phrase_rewritten,fix,remaining_risk；style_dimension 写 rhythm/sentence/dialogue/voice/emotion_turn 中最贴近的一类；样章策略未落地、适用场景错配、避用场景误套、对白比例/句式密度/叙述节奏失效、角色口吻丢失，或复制样章桥段、专有设定、角色名、核心梗或原句时必须给出 S1/S2 finding，category=prose 或 rule_boundary。只学习叙述节奏、句式密度、对白比例和情绪转折。',
-    '34. 是否兑现 chapter_target.information_flow_contract：按 oh-story 信息团概念检查每个场景/段落是否能一句话概括信息团，信息团之间是否递进，过渡压缩是否执行，前一场悬念是否在后一场回应；过渡压缩必须检查“过渡不是填充，没有信息量就删掉”，纯移动、寒暄、环境描写没有信息量时直接跳过或压缩；必须输出 information_flow_checks。',
-    '35. information_flow_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),reveal_order,withheld_question,action_bound_release,conflict_or_cost,evidence,fix,remaining_risk；无关信息团、背景水文、纯过渡、纯移动寒暄环境描写、场景衔接断裂或情绪突然掉线时必须给出 S1/S2 finding，category=structure 或 prose。',
+    '34. 是否兑现 chapter_target.information_flow_contract：按 oh-story 信息团概念检查每个场景/段落是否能一句话概括信息团，信息团之间是否递进，过渡压缩是否执行，前一场悬念是否在后一场回应；每次实力、身份、资源或阶段性目标提升后，必须检查是否立即引入新的挑战、目标、代价或更高门槛；过渡压缩必须检查“过渡不是填充，没有信息量就删掉”，纯移动、寒暄、环境描写没有信息量时直接跳过或压缩；必须输出 information_flow_checks。',
+    '35. information_flow_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),reveal_order,withheld_question,next_objective_after_gain,action_bound_release,conflict_or_cost,evidence,fix,remaining_risk；无关信息团、背景水文、提升后目标真空、纯过渡、纯移动寒暄环境描写、场景衔接断裂或情绪突然掉线时必须给出 S1/S2 finding，category=structure 或 prose。',
     '36. 是否兑现 chapter_target.expectation_threshold_contract：按 oh-story 设门槛、大剧情拉期待法和期待接力法检查两长一短期待是否同时在线，剧情期待 + 主题甜头 + 新鲜感三种期待线是否并存，期待感 > 爽点、铺垫篇幅不少于释放篇幅、延迟满足是否可见，目标是否被资源型/成就型/多条件型/动态门槛/收集型条件拆分，门槛是否围绕核心卖点并分批提出，旧期待闭环前下一开环是否已运行；必须输出 expectation_threshold_checks。',
     '37. expectation_threshold_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),reader_question,stakes,choice_pressure,payoff_promise,next_chapter_pull,evidence,fix,remaining_risk；短期期待过多、长期期待断线、剧情期待/主题甜头/新鲜感任一缺失、期待接力法断裂、没有期待铺垫就立刻释放爽点、大目标一步解决、门槛脱离卖点或跨过门槛后没有新门槛时必须给出 S1/S2 finding，category=structure。',
     '38. 是否兑现 chapter_target.story_loop_contract：按 oh-story 卡文对策检查“题材 + 金手指 + 主角身份 = 循环模式”是否清晰，本章是否执行指定循环模式、循环燃料、循环步骤、地图资源闭环、地位-环境同步和换地图承接；换地图/换阶段必须检查旧地图核心冲突是否阶段性解决、新地图五件套（新环境/新角色/新规则/新目标/新冲突）是否可见、前5章代入感和期待感是否建立、是否保留贯穿主线、是否做到人际关系动了 -> 主角再动、是否避免旧角色一刀切抛弃和新设定一次性倒出；必须按多级嵌套检查小循环 -> 中循环 -> 大循环是否可见，小循环中是否铺垫大循环的期待，是否避免核心不扩展、只反复用同一个梗换对象；必须输出 story_loop_checks。',
@@ -53346,7 +53405,7 @@ export function createNovelWritingService(ctx: {
     '22A. 如果自检结果包含 benchmark_recall_checks，必须优先修复 status=fail/warn 的文风召回缺口；按 key/label/evidence/fix 校准 selected_emotion_module、rhythm_reference、style_profile_summary、matched_chapter_techniques、canonical_source_rules 和 gaps；若文风与模块/节奏冲突，必须以情绪模块/节奏为准，文风.md 只管表达层；删掉任何复制对标桥段或原句的内容，并在修订后的 oh_story_delivery_receipts.pre_draft_execution_receipts.benchmark_recall_checks 中逐项更新 delivered/evidence/remaining_risk。',
     '22B. 如果自检结果包含 style_boundary_checks，必须优先修复 status=fail/warn 的文风覆盖边界缺口；按 key/label/evidence/fix 恢复“硬约束永远赢”，删掉任何为了模仿文风而引入的禁用词、Gate F 章末总结体、万能比喻、作者预告、样章桥段/原句复制、字数缩水、剧情/状态/关系/时间线漂移。文风覆盖边界只允许修表达，不允许改事实。',
     '22C. 如果自检结果包含 style_sample_checks，必须优先修复 status=fail/warn 的样章策略缺口；按 key/label/evidence/fix 补足适用场景、避用场景、叙述节奏、句式密度、对白比例、角色口吻和情绪转折。修订只能学习样章的抽象表达策略，不得复制样章桥段、专有设定、角色名、核心梗或原句；修订后必须在 oh_story_delivery_receipts.pre_draft_execution_receipts.style_sample_checks 中逐项更新 delivered/evidence/remaining_risk。',
-    '19. 如果自检结果包含 information_flow_checks，必须优先修复 status=fail/warn 的信息团衔接缺口；按 key/label/evidence/fix 压缩无关信息团、补场景递进、回应上一场悬念、修情绪衔接、删无信息量过渡；过渡压缩缺口要直接删除纯移动/寒暄/环境描写，或压成一句并改成信息、风险、情绪余波或下一步目标。',
+    '19. 如果自检结果包含 information_flow_checks，必须优先修复 status=fail/warn 的信息团衔接缺口；按 key/label/evidence/fix 压缩无关信息团、补场景递进、回应上一场悬念、修情绪衔接、补提升后下一目标、删无信息量过渡；提升/胜利/拿到资格后如果只写“事情进入下一阶段”，必须改成新的挑战、目标、代价或更高门槛；过渡压缩缺口要直接删除纯移动/寒暄/环境描写，或压成一句并改成信息、风险、情绪余波或下一步目标。',
     '20. 如果自检结果包含 expectation_threshold_checks，必须优先修复 status=fail/warn 的期待门槛缺口；按 key/label/evidence/fix 补两长一短期待、剧情期待 + 主题甜头 + 新鲜感、期待铺垫、期待感 > 爽点、铺垫不少于释放、期待接力法、系统性门槛、分批提出、动态加码、低密度期待点和下一个门槛；闭环一个期待前，必须让下一个开环或更大问题已经进入场景行动。',
     '21. 如果自检结果包含 story_loop_checks，必须优先修复 status=fail/warn 的故事循环缺口；按 key/label/evidence/fix 补循环模式、循环燃料、地图资源闭环、地位环境同步、换地图承接，以及“题材 + 金手指 + 主角身份”推导出的本章循环步骤；换地图承接缺口要补旧地图阶段性收束、新地图五件套、前5章期待、贯穿主线/旧关系承接、人际关系动了 -> 主角再动和循环升级，不能旧线全抛或新设定一次性倒完；小循环中必须铺垫大循环的期待，并把同一核心卖点的不同角度/不同矛盾写成正文推进，不能只反复用同一个梗换对象。',
     '22. 如果自检结果包含 emotional_arc_checks，必须优先修复 status=fail/warn 的情绪弧缺口；按 key/label/evidence/fix 补平静 -> 调动 -> 释放 -> 爽、爽点倒推法（先定爽点类型 -> 再定期待点 -> 最后倒推铺垫，正文按铺垫 -> 期待升高 -> 爽点释放呈现）、装逼层级（日常小装逼只维持耐心，核心爽点切在主线目标，偏离主线去别处装逼必须删或改成主线推进）、多爽点密度（不要拉长单个爽点铺垫，每 800-1200 字至少补信息增量/能力展示/危机反制/关系变化/小回收之一）、先入为主（前100字补核心矛盾/主角处境/不公平异常并调整否定提前顺序）、峰终定律（结尾情绪必须高于起点，结尾情绪强度补到虐≥8、爽≥7、治愈≥6，并落成具体动作/对话/画面）、三层情绪（分清角色自己的情绪、文本传递的情绪、读者实际感受，把角色在哭/屈辱/恐惧转成读者爽前蓄力、安全感、尊严感、期待感或余韵）、情绪反应结构（虐/悲壮/遗憾补前反应 -> 复现 -> 后反应；热血/逆袭补以小搏大和士气如虹）、理念矛盾（将关键冲突从利益之争升级为理念之争，把公平/权威、理想/现实、规则/人心等原则碰撞落成具体选择、代价、追求和牺牲）、情绪模块重组（戏剧性会磨损，情绪不会磨损；复用套路必须换场景/换对手/加新情绪或提高 stakes/奖励复杂度）、情绪三板斧（羁绊铺设/情感撕裂/余韵钝痛）、每 3-5 个小节事件触发的情绪转向、弧线类型、爽点递增对比（影响范围/揭示深度/身份落差）、断期待禁止、下行情节安全感和动作/对话/反应外化。',
@@ -54389,7 +54448,7 @@ export function createNovelWritingService(ctx: {
               '剧情动力合同 plot_dynamics_contract 必须按 oh-story 剧情核心方法输出 goal, obstacle, action, cost_feedback, next_expectation, drive_mode_rules, line_stagger_rules, quality_checks，确保目标→阻碍→行动→代价/反馈→新期待闭环；drive_mode_rules 必须包含事件驱动/情感驱动/混合模式选择：番茄爽文/打脸文每章给外部结果（赢、升级、对手栽），追妻/虐心/世情持续人物心结，混合模式主线事件推进并每 3-5 章插情感停顿；并让主线和支线错开节奏推进，不能同时爆完或同时空转。',
               '故事力合同 story_power_contract 必须按 oh-story 剧情核心方法输出 story_power_dimensions, chapter_power_loop, action_rules, beginning_end_rules, causal_feedback_rules, quality_checks，确保故事五维、有动作才是故事、有始有终、因果反馈和行动改变局势都能进入正文门禁。',
               '主线定义合同 mainline_definition_contract 必须按 oh-story 剧情核心方法输出 mainline_event, definition_rules, action_rules, handoff_rules, forbidden_mainline_shapes, quality_checks，确保主线不等于升级、主线是一件事、升级只是达成目标的行动。',
-              '信息流合同 information_flow_contract 必须输出 scene_information_units, reveal_order, suspense_responses, transition_compression_rules, no_infodump_guardrails, quality_checks，确保信息随冲突释放，不写背景说明书；transition_compression_rules 必须包含过渡不是填充、没有信息量就删掉、纯移动/寒暄/环境描写直接跳过或压缩。',
+              '信息流合同 information_flow_contract 必须输出 scene_information_units, reveal_order, suspense_responses, transition_compression_rules, next_objective_rules, no_infodump_guardrails, quality_checks，确保信息随冲突释放，不写背景说明书；transition_compression_rules 必须包含过渡不是填充、没有信息量就删掉、纯移动/寒暄/环境描写直接跳过或压缩；next_objective_rules 必须包含每次实力/身份/资源/阶段性目标提升后立即引入新的挑战、目标、代价或更高门槛。',
               '期待阈值合同 expectation_threshold_contract 必须输出 current_expectations, payoff_or_delay_plan, next_open_loop, vacuum_guardrails, expectation_before_payoff_rules, expectation_relay_rules, three_expectation_lines, quality_checks；expectation_before_payoff_rules 必须包含期待感 > 爽点、铺垫篇幅不少于释放篇幅和延迟满足；expectation_relay_rules 必须包含期待接力法、旧期待闭环前下一开环已经运行、当一层即将满足时先铺好下一层期待、至少两条期待线并行运行；确保兑现旧期待前先种下新期待，并保持剧情期待 + 主题甜头 + 新鲜感三线并存。',
               '故事循环合同 story_loop_contract 必须输出 setup, escalation, payoff, carry_over, map_transition_rules, nested_loop_rules, quality_checks，确保本章不是孤立事件而是长线循环的一环；map_transition_rules 必须包含旧地图核心冲突阶段性解决、新地图 = 新环境 + 新角色 + 新规则 + 新目标 + 新冲突、前5章建立代入感和期待感、保留贯穿主线、人际关系动了 -> 主角再动、避免旧线全抛和新设定一次性倒出；nested_loop_rules 必须包含“小循环 -> 中循环 -> 大循环”、小循环中必须铺垫大循环的期待，以及同一核心卖点的不同角度/不同矛盾。',
               '正文工艺合同 prose_craft_contract 必须输出 pov_rules, body_detail_rules, scene_weaving_rules, subject_name_rhythm_rules, indirect_description_rules, three_camera_rules, then_what_rules, core_emotion_alignment_rules, baimiao_sensory_rules, dynamic_description_rules, shot_rhythm_rules, transition_bridge_rules, rhythm_rules, object_number_rules, section_structure_rules, section_density_rules, anti_padding_rules, concept_anchor_rules, description_limits, anti_ai_smell_rules, quality_checks；subject_name_rhythm_rules 必须包含主语与名字节奏：段首/场景切换/多人同场/视角重置时点名，同一动作链段中用代词/省略/动作承接，避免每句都在报名字和指代不清；indirect_description_rules 必须包含间接描写法：正面描写只是铺垫，侧面反应才是爽点，不要直接宣布“很厉害/很震撼”，要用配角动作、围观者判断、对手失态或环境变化证明；three_camera_rules 必须包含三机位法：机位1近景写主角动作/表情/身体感受，机位2远景写配角反应/环境变化/围观者判断，机位3只补必要设定/背景/人物关系，设定都由冲突引出；then_what_rules 必须包含“然后呢”基点法：每一段文字都要回答读者心中的“然后呢”，写完一个信息点立刻用下一个信息点接上，不能写成静态死段；core_emotion_alignment_rules 必须包含围绕核心情绪设计全部情节、所有情节/人设/冲突/细节服务目标读者核心情绪，以及宏观把控整体节奏、微观把控每段细节和张力；baimiao_sensory_rules 必须包含白描 = 最少的字 + 最准确的信息和情绪、至少调动两到三种感官、视觉/听觉/触觉/嗅觉/味觉只写有效锚点、五感必须服务情绪；dynamic_description_rules 必须包含动态描写优于静态描写、人物特征用动作和反应展现、环境不要大段铺陈、角色行动中穿插点染；shot_rhythm_rules 必须包含镜头与分镜思维、每个段落一个镜头、远景/中景/近景/特写、短句、短段、密集动作和快慢节奏切换；transition_bridge_rules 必须包含场景切换与转场、相似物/相似五感/相似情绪、时间跳转动作或物件衔接、空间跳转声音或光影衔接；section_structure_rules 必须包含一个主事件、3-5 个子事件、一个情绪变化、一条读者新获知的信息、3-5 轮对话交锋、小节结尾钩子、下一节开头快速接续和情绪跨节递进；section_density_rules 必须包含小节密度诊断，anti_padding_rules 必须禁止为凑字数加环境描写、重复情绪、内心独白总结或无意义动作，concept_anchor_rules 必须要求新名词/新设定首次出现有动作反应、对话半句或物理后果锚点；description_limits 必须包含水分控制、删掉这段后读者会不会困惑、不推动剧情也不塑造人物的水分必须删除或压缩；anti_ai_smell_rules 必须包含高危词、章末总结体、叠加式描写、心理告知和模板表达清理，确保正文不靠抽象心理、堆设定、模板句或 AI 味撑场。',

@@ -12867,6 +12867,44 @@ describe('chapter prose word target', () => {
     expect(warnReport.next_actions.join('；')).toContain('信息随冲突释放')
   })
 
+  test('checks next objective after gain in oh-story information flow sync', () => {
+    const project = { title: '残阵问道' }
+    const chapter = { id: 18, chapter_no: 18, title: '筑基新门' }
+    const contextPackage = {
+      chapter_target: {
+        chapter_no: 18,
+        information_flow_contract: {
+          version: 'oh_story_information_flow_v1',
+          scene_information_units: ['沈砚突破筑基', '内门令牌指向禁库试炼'],
+          next_objective_rules: [
+            '每次实力、身份、资源或阶段性目标提升后，必须立即引入新的挑战、目标、代价或更高门槛。',
+            '兑现当前信息或胜利后，下一步干什么要在场景内可见，不能只写事情进入下一阶段。',
+          ],
+          transition_compression_rules: ['过渡不是填充，没有信息量就删掉。'],
+          quality_checks: ['提升后立刻给出下一目标，避免主角变强但下一步干什么不清楚。'],
+        },
+      },
+    }
+    const okText = [
+      '沈砚突破筑基，内门令牌当场亮起。',
+      '执事没有让欢呼落地，立刻把禁库试炼的新目标压到他面前：三日内取回残阵核心，否则筑基资格作废。',
+      '突破后的下一步目标、三日期限和更高门槛同时落进场景。',
+    ].join('\n')
+    const vacuumText = [
+      '沈砚终于突破筑基，众人欢呼许久。',
+      '他收起灵力，事情进入下一阶段。',
+      '众人散去，他暂时没有新的目标。',
+    ].join('\n')
+
+    const okReport = buildInformationFlowSyncReport(project, chapter, contextPackage, okText)
+    const warnReport = buildInformationFlowSyncReport(project, chapter, contextPackage, vacuumText)
+
+    expect(okReport.delivered.map((item: any) => item.key)).toContain('next_objective_after_gain')
+    expect(warnReport.missed.map((item: any) => item.key)).toContain('next_objective_after_gain')
+    expect(warnReport.missed.find((item: any) => item.key === 'next_objective_after_gain')?.label).toBe('提升后下一目标')
+    expect(warnReport.next_actions.join('；')).toContain('提升后')
+  })
+
   test('reads information flow sync contract from camelCase chapter raw preDraftBrief', () => {
     const project = { title: '残阵问道' }
     const chapter = {
@@ -20866,6 +20904,7 @@ describe('chapter pre-draft brief', () => {
     expect(brief.information_flow_contract.transition_rules.join('｜')).toContain('前一个场景留下悬念')
     expect(brief.information_flow_contract.transition_compression_rules.join('｜')).toContain('过渡不是填充')
     expect(brief.information_flow_contract.transition_compression_rules.join('｜')).toContain('没有信息量就删掉')
+    expect(brief.information_flow_contract.next_objective_rules.join('｜')).toContain('每次实力、身份、资源或阶段性目标提升后')
     expect(brief.information_flow_contract.water_risk_guards.join('｜')).toContain('反派背景')
     expect(confirmedContext.chapter_target.information_flow_contract.quality_checks.join('｜')).toContain('信息团')
     expect(prompt).toContain('【信息团与场景衔接合同】')
@@ -20873,6 +20912,8 @@ describe('chapter pre-draft brief', () => {
     expect(prompt).toContain('每个信息团必须能一句话概括')
     expect(prompt).toContain('过渡压缩')
     expect(prompt).toContain('过渡不是填充')
+    expect(prompt).toContain('提升后下一目标')
+    expect(prompt).toContain('每次实力、身份、资源或阶段性目标提升后')
     expect(prompt).toContain('information_flow_checks')
     expect(prompt.indexOf('【信息团与场景衔接合同】')).toBeLessThan(prompt.indexOf('【结构化上下文包】'))
   })
