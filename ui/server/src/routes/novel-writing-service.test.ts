@@ -19526,6 +19526,66 @@ describe('chapter pre-draft brief', () => {
     expect(prompt).toContain('裁剪召回条目，不删除书目记录')
   })
 
+  test('carries secondary benchmark boundaries into write preparation checks', () => {
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+    const contextPackage = {
+      chapter_target: {
+        chapter_no: 18,
+        title: '雨夜反证',
+        summary: '李玄在雨夜审讯中用旧账册反证执事换证。',
+        conflict: '执事抢先定义证词，旁观弟子准备倒向他。',
+        benchmark_recall_brief: {
+          selected_emotion_module: 'M03 信息差反杀',
+          rhythm_reference: '先压三轮质问，再用证据爆发。',
+          style_profile_summary: '主对标文风：短句推进审讯压力，对白留半拍。',
+          gaps: ['gaps.main_benchmark_unspecified: true'],
+          benchmark_registry_missing: true,
+          secondary_benchmark_recall_summary: [
+            {
+              book_title: '副书A',
+              citation_strength: '辅',
+              relevance: '同题材',
+              recall_stage: '大纲',
+              recall_count: 2,
+              usage: '只参考证据链分批释放结构，不进入文风/原文锚点。',
+            },
+          ],
+        },
+        scene_cards: [],
+      },
+    }
+
+    const brief = buildChapterPreDraftBrief({ title: '旧城维修师' }, contextPackage)
+    const confirmedContext = mergeConfirmedPreDraftBriefIntoContext(contextPackage, {
+      ...brief,
+      confirmed_at: '2026-06-28T12:00:00.000Z',
+    })
+    const prompt = service.buildParagraphProseContext(
+      { title: '旧城维修师' },
+      confirmedContext,
+      null,
+      { chapter_no: 18, title: '雨夜反证' },
+    )
+    const writePreparationBrief = brief.write_preparation_brief
+
+    expect(writePreparationBrief.readiness_status).toBe('needs_context')
+    expect(writePreparationBrief.source_gaps.join('｜')).toContain('benchmark_registry_missing')
+    expect(writePreparationBrief.source_gaps.join('｜')).toContain('main_benchmark_unspecified')
+    expect(writePreparationBrief.must_confirm.join('｜')).toContain('主对标最多 1 本')
+    expect(writePreparationBrief.must_confirm.join('｜')).toContain('副书不进文风、不进原文锚点')
+    expect(writePreparationBrief.execution_order.join('｜')).toContain('secondary_benchmark_boundary')
+    expect(prompt).toContain('文风召回：benchmark_registry_missing')
+    expect(prompt).toContain('benchmark_registry_missing')
+    expect(prompt).toContain('写前必确认')
+    expect(prompt).toContain('副书不进文风、不进原文锚点')
+    expect(prompt).toContain('文风召回缺口和副对标边界')
+    expect(prompt.indexOf('benchmark_registry_missing')).toBeLessThan(prompt.indexOf('【结构化上下文包】'))
+  })
+
   test('asks prose generation to output intent confirmation and benchmark recall execution receipts', () => {
     const service = createNovelWritingService({
       getProject: async () => null,

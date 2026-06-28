@@ -13,27 +13,27 @@ Source reference set: `/private/tmp/oh-story-claudecode/skills/story-long-write/
 <!-- oh-story-progress-summary
 {
   "reference_total": 38,
-  "integrated": 13,
+  "integrated": 14,
   "partial": 22,
-  "todo": 3,
+  "todo": 2,
   "deferred": 0,
-  "remaining_references": 25,
-  "estimated_hours_remaining": 49.5,
-  "estimated_working_days_remaining": 8.25
+  "remaining_references": 24,
+  "estimated_hours_remaining": 47,
+  "estimated_working_days_remaining": 7.83
 }
 -->
 
 ## Current Snapshot
 
 - Reference files: 38
-- Integrated enough for current production use: 13
+- Integrated enough for current production use: 14
 - Partially integrated, still worth mining: 22
-- Not systematically reviewed yet: 3
+- Not systematically reviewed yet: 2
 - Deferred: 0
-- Remaining references to improve: 25
-- Estimated remaining effort: about 49.5 engineering hours, or 8.25 focused working days at 6 hours per day
+- Remaining references to improve: 24
+- Estimated remaining effort: about 47 engineering hours, or 7.83 focused working days at 6 hours per day
 
-The estimate assumes the current working pattern: one small oh-story increment at a time, with prompt or workflow changes backed by focused tests, then `test:novel-server` and `check` before push. UI progress surfacing is not included in the 49.5 hours; after this ledger stabilizes, exposing it in the novel workspace should be a separate 4-6 hour slice.
+The estimate assumes the current working pattern: one small oh-story increment at a time, with prompt or workflow changes backed by focused tests, then `test:novel-server` and `check` before push. UI progress surfacing is not included in the 47 hours; after this ledger stabilizes, exposing it in the novel workspace should be a separate 4-6 hour slice.
 
 ## Status Meaning
 
@@ -53,7 +53,7 @@ The estimate assumes the current working pattern: one small oh-story increment a
 | character-design-methods.md | partial | Character behavior contract covers motivation chains, strong associations, antagonist logic, and composure. | Mine remaining design methods for project creation and role-card generation prompts. | 2h |
 | character-relations.md | partial | Character relation contract and relationship graph workflows cover pressure, attitude shifts, and relationship evidence. | Add clearer relation progression diagnostics before prose, not only after review. | 1.5h |
 | commercial-core-methods.md | partial | Target reader, bridge unit, reader payoff, retention, and longform guardrails exist across pre-draft and quality contracts. | Convert more commercial-core heuristics into creation-time and batch-planning gates. | 2h |
-| cross-book-recall.md | todo | No systematic migration pass found. | Decide how reference recall should interact with MangaForge reference-engineering and safety boundaries. | 2.5h |
+| cross-book-recall.md | integrated | Benchmark recall brief and prose prompt carry `副对标召回摘要`, secondary benchmark budget/sorting, canonical source rules, `secondary_benchmark_boundary`, review checks, and write-preparation `source_gaps`/`must_confirm` coverage for registry and main-benchmark gaps in `ui/server/src/routes/novel-writing-service.ts`. Focused tests cover secondary benchmark contamination, budget trimming, prompt placement, and write-preparation receipts. | Keep tuning cross-book recall from real multi-benchmark projects. | 0.5h |
 | dialogue-mastery.md | integrated | Dialogue contract covers voice anchors, subtext, power-length rules, spectator dialogue, rhythm, execution checklist, dialogue receipts, deterministic info-dump and interchangeable-voice diagnostics, prose prompt enforcement, self-review coverage, post-delivery sync, and repair carry-over. | Keep tuning scene-level dialogue execution checklist from real generation misses. | 0.5h |
 | emotional-arc-design.md | partial | Emotional arc contract covers arc shape, pressure, payoff density, peak-end rules, and quality checks. | Connect emotion-arc findings more directly to scene-card generation and repair-task routing. | 1.5h |
 | emotional-methods.md | partial | Emotion module, payoff setup, emotional turn, and reader expectation checks are present in pre-draft and review flows. | Mine remaining emotion formulas into concise prompt fragments instead of broad contracts. | 1.5h |
@@ -87,11 +87,11 @@ The estimate assumes the current working pattern: one small oh-story increment a
 
 ## Next Priority Queue
 
-1. `cross-book-recall.md`: decide how far reference recall should go without increasing similarity or copyright risk.
-2. `workflow-revision.md`: compare revision step order against MangaForge editor flow and fill missing handoff receipts.
-3. `genre-catalog.md`: build a genre catalog mapping for seed creation, target reader, and must-have scenes.
-4. `genre-core-mechanics.md`: add genre-specific mechanism presets and validation examples.
-5. `plot-special-topics.md`: review special topics and route them to genre-specific or optional contracts.
+1. `workflow-revision.md`: compare revision step order against MangaForge editor flow and fill missing handoff receipts.
+2. `genre-catalog.md`: build a genre catalog mapping for seed creation, target reader, and must-have scenes.
+3. `genre-core-mechanics.md`: add genre-specific mechanism presets and validation examples.
+4. `plot-special-topics.md`: review special topics and route them to genre-specific or optional contracts.
+5. `artifact-protocols.md`: compare artifact protocol naming and required fields against MangaForge receipts, then close schema gaps.
 
 ## Update Rules
 

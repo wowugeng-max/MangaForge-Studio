@@ -44116,6 +44116,53 @@ function buildCreationContractChecklist(options: any = {}) {
   ], 8)
 }
 
+function buildWritePreparationBenchmarkRecallContext(contextPackage: any = {}, options: any = {}) {
+  const benchmarkRecallBrief = options.benchmark_recall_brief
+    || options.benchmarkRecallBrief
+    || benchmarkRecallExplicitBrief(contextPackage)
+    || buildBenchmarkRecallBrief(contextPackage, options)
+  if (!benchmarkRecallBrief) {
+    return {
+      source_gaps: [],
+      must_confirm: [],
+      execution_order: [],
+    }
+  }
+  const secondaryBenchmarkRecallSummary = normalizeSecondaryBenchmarkRecallSummary(benchmarkRecallBrief)
+  const secondaryBenchmarkBoundaryRules = uniqueBriefStrings([
+    ...asArray(benchmarkRecallBrief.secondary_benchmark_boundary_rules || benchmarkRecallBrief.secondaryBenchmarkBoundaryRules),
+    ...(secondaryBenchmarkRecallSummary.length ? SECONDARY_BENCHMARK_BOUNDARY_RULES : []),
+  ], 8)
+  const benchmarkRecallGaps = uniqueBriefStrings([
+    ...benchmarkRecallGapStrings(
+      options.benchmark_recall_gaps,
+      options.benchmarkRecallGaps,
+      benchmarkRecallBrief.gaps,
+      benchmarkRecallBrief.recall_gaps,
+      benchmarkRecallBrief.recallGaps,
+      benchmarkRecallBrief.benchmark_recall_gaps,
+      benchmarkRecallBrief.benchmarkRecallGaps,
+    ),
+    secondaryBenchmarkRegistryMissing(benchmarkRecallBrief) ? 'benchmark_registry_missing' : '',
+  ], 8)
+  return {
+    source_gaps: uniqueBriefStrings(
+      benchmarkRecallGaps.map(gap => `文风召回：${gap}`),
+      8,
+    ),
+    must_confirm: uniqueBriefStrings([
+      ...benchmarkRecallGaps.map(gap => `文风召回缺口：${gap}`),
+      ...secondaryBenchmarkBoundaryRules.slice(0, 4).map(rule => `副对标边界：${rule}`),
+      secondaryBenchmarkRecallSummary.length
+        ? `副对标召回摘要：${secondaryBenchmarkRecallSummary.map((row: any) => row.book_title).filter(Boolean).join('、')} 只作为结构/情绪/设定参考。`
+        : '',
+    ], 8),
+    execution_order: secondaryBenchmarkBoundaryRules.length
+      ? ['Step 2.3 文风召回：先确认主对标最多 1 本，保留 secondary_benchmark_boundary；副对标召回摘要只进结构/情绪/设定，不进文风、不进原文锚点。']
+      : [],
+  }
+}
+
 function buildWritePreparationBrief(contextPackage: any = {}, options: any = {}) {
   const stateTrackingContract = options.state_tracking_contract
     || contextPackage?.chapter_target?.state_tracking_contract
@@ -44145,15 +44192,20 @@ function buildWritePreparationBrief(contextPackage: any = {}, options: any = {})
       || contextPackage?.delivery_risk_carry_over
       || contextPackage?.pre_draft_brief?.delivery_risk_carry_over,
   )
+  const benchmarkRecallPreparation = buildWritePreparationBenchmarkRecallContext(contextPackage, options)
   const sourceRows = normalizeStateSourceReadiness(stateTrackingContract?.source_readiness || stateTrackingContract?.sourceReadiness)
-  const sourceGaps = uniqueBriefStrings(sourceRows
+  const stateSourceGaps = sourceRows
     .filter((row: any) => !['ready', 'optional', 'pass', 'ok'].includes(String(row?.status || '').toLowerCase()))
     .map((row: any) => compactBriefText([
       row.label || row.key,
       row.status ? `状态=${row.status}` : '',
       row.evidence,
     ].filter(Boolean).join('｜')))
-    .filter(Boolean), 8)
+    .filter(Boolean)
+  const sourceGaps = uniqueBriefStrings([
+    ...stateSourceGaps,
+    ...benchmarkRecallPreparation.source_gaps,
+  ], 12)
   const assetRisks = uniqueBriefStrings(asArray(assetLinkageContract?.relationship_graph_risks || assetLinkageContract?.relationshipGraphRisks)
     .map(assetText)
     .filter(Boolean), 8)
@@ -44184,6 +44236,7 @@ function buildWritePreparationBrief(contextPackage: any = {}, options: any = {})
   ].flat().map((item: any) => compactBriefText(item)).filter(Boolean), 8)
   const mustConfirm = uniqueBriefStrings([
     ...creationContractChecklist.map(item => `创作契约：${item}`),
+    ...benchmarkRecallPreparation.must_confirm,
     ...sourceGaps.map(item => `来源就绪：${item}`),
     ...assetRisks.map(item => `关系图风险：${item}`),
     ...deliveryActions,
@@ -44205,6 +44258,7 @@ function buildWritePreparationBrief(contextPackage: any = {}, options: any = {})
     execution_order: [
       'Step 2.2 状态筛选：上一章承接、角色状态、伏笔/时间线和世界约束只保留会影响本章正确性的内容。',
       'Step 2.3 文风召回：确认情绪模块、节奏参照、文风摘要、匹配章技巧和 gaps；无对标时明确标记，不让文风覆盖情绪/节奏目标。',
+      ...benchmarkRecallPreparation.execution_order,
       'Step 2.4 意图确认：用一句话锁定本章情绪、节奏、模块、文风边界、内容概括、逻辑线、出场顺序、代价收益和章尾承接。',
       '再锁定章节蓝图与资产：目标、冲突、开篇钩子、核心回报、关键资产归属/触发/代价和角色状态变化必须接到现场功能。',
       '最后生成正文：按场景卡顺序写可见行动、对话压力、信息变化和回执证据。',
@@ -44562,6 +44616,8 @@ export function buildChapterPreDraftBrief(project: any, contextPackage: any) {
     asset_linkage_contract: assetLinkageContract,
     state_tracking_contract: stateTrackingContract,
     delivery_risk_carry_over: deliveryRiskCarryOver,
+    benchmark_recall_brief: benchmarkRecallBrief,
+    benchmark_recall_gaps: benchmarkRecallGaps,
     target_reader_contract: targetReaderContract,
     genre_positioning_contract: genrePositioningContract,
     core_contract_radar: coreContractRadar,
@@ -48154,6 +48210,7 @@ export function createNovelWritingService(ctx: {
         asset_linkage_contract: assetLinkageContract,
         state_tracking_contract: stateTrackingContract,
         delivery_risk_carry_over: deliveryRiskCarryOver,
+        benchmark_recall_brief: benchmarkRecallBrief,
       })
     const readerExpectationDebtContext = applyReaderExpectationDebtAging(
       normalizeReaderExpectationDebtContext(
@@ -48227,7 +48284,7 @@ export function createNovelWritingService(ctx: {
       writePreparationBrief?.reader_payoff_focus?.length ? `读者回报焦点：${writePreparationBrief.reader_payoff_focus.join('；')}` : '',
       writePreparationBrief?.must_confirm?.length ? `写前必确认：${writePreparationBrief.must_confirm.join('；')}` : '',
       writePreparationBrief?.execution_order?.length ? `执行顺序：${writePreparationBrief.execution_order.join('；')}` : '',
-      writePreparationBrief ? '写前准备回执：最终 JSON 必须在 oh_story_delivery_receipts.pre_draft_execution_receipts.write_preparation_checks 中逐项说明来源缺口、资产风险、上一轮待修复、创作契约清单 creation_contract_checklist、蓝图焦点和读者回报是否已在 chapter_text 中兑现；每项包含 key,label,delivered,evidence,remaining_risk，evidence 必须引用正文可定位动作、对话或信息变化。' : '',
+      writePreparationBrief ? '写前准备回执：最终 JSON 必须在 oh_story_delivery_receipts.pre_draft_execution_receipts.write_preparation_checks 中逐项说明来源缺口、文风召回缺口和副对标边界、资产风险、上一轮待修复、创作契约清单 creation_contract_checklist、蓝图焦点和读者回报是否已在 chapter_text 中兑现；每项包含 key,label,delivered,evidence,remaining_risk，evidence 必须引用正文可定位动作、对话或信息变化。' : '',
       '',
       chapterBlueprint ? '【章节蓝图合同】' : '',
       chapterBlueprint ? '硬性要求：必须先执行 chapter_target.chapter_blueprint，再展开正文。它是本章写作合同，优先级高于散落的材料摘要；正文必须按目标情绪、开篇钩子、核心回报、五段式内容概括、多线推进、人物出场顺序、情节点功能标签、代价/收益和章尾承接来组织。' : '',
@@ -49192,7 +49249,7 @@ export function createNovelWritingService(ctx: {
       '输出附加要求：必须在章节对象顶层输出 oh_story_delivery_receipts，用于后续诊断和修复闭环落库。oh_story_delivery_receipts 必须包含 chapter_blueprint、scene_card_receipts、delivery_risk_receipts、revision_receipts、pre_draft_execution_receipts；chapter_blueprint 记录本章蓝图兑现状态，scene_card_receipts 汇总每个场景的场景卡执行回执，delivery_risk_receipts 逐项记录上一章/批次交稿风险是否已兑现，revision_receipts 记录本轮生成中主动修正过的结构、连续性、资产或文风问题，pre_draft_execution_receipts 记录状态筛选、写前准备、意图确认、文风召回和上一章质量续航计划是否真正落入正文。',
       stateTrackingContract ? '输出附加要求：oh_story_delivery_receipts.pre_draft_execution_receipts.status_filter_receipts 必须逐项覆盖【状态筛选合同】中的角色状态、相关伏笔/前史、世界约束、filter_rules 和 source_requirements；每项包含 key,label,used_in_chapter,evidence,excluded_reason,remaining_risk，证明只加载/只使用会影响本章正确性的状态，未使用的信息必须写明为何不会导致本章写错。' : '',
       stateTrackingContract ? '输出附加要求：oh_story_delivery_receipts.pre_draft_execution_receipts.source_readiness_checks 必须逐项覆盖【来源就绪表】；每项包含 key,label,status(pass|warn|fail),evidence,fix，证明 ready 来源已在正文可见承接，missing/warn 来源没有被当作既定事实使用。' : '',
-      writePreparationBrief ? '输出附加要求：oh_story_delivery_receipts.pre_draft_execution_receipts.write_preparation_checks 必须逐项覆盖【写前准备卡】中的 source_gaps、asset_risks、delivery_risk_actions、creation_contract_checklist、blueprint_focus、reader_payoff_focus 和 must_confirm；创作契约必须逐项说明目标读者、题材定位、核心承诺、追读留存是否被正文证据兑现；每项必须有 delivered(boolean)、evidence、remaining_risk，未完成时 delivered=false 并写明下一章需要承接的风险。' : '',
+      writePreparationBrief ? '输出附加要求：oh_story_delivery_receipts.pre_draft_execution_receipts.write_preparation_checks 必须逐项覆盖【写前准备卡】中的 source_gaps、文风召回缺口和副对标边界、asset_risks、delivery_risk_actions、creation_contract_checklist、blueprint_focus、reader_payoff_focus 和 must_confirm；创作契约必须逐项说明目标读者、题材定位、核心承诺、追读留存是否被正文证据兑现；每项必须有 delivered(boolean)、evidence、remaining_risk，未完成时 delivered=false 并写明下一章需要承接的风险。' : '',
       deliveryRiskCarryOver ? '输出附加要求：oh_story_delivery_receipts.pre_draft_execution_receipts.next_chapter_quality_plan_receipts 必须逐项覆盖上一章质量续航计划和 chapter_target.delivery_risk_carry_over 中的 quality_focus、opening_actions、middle_actions、ending_actions、forbidden_repeats/avoid_repetition、evidence_basis；每项包含 key,label,delivered,evidence,remaining_risk，证明质量续航不是只写在任务书里，而是落成正文动作、信息变化、章末钩子或禁用重复。' : '',
       intentConfirmationContract ? '输出附加要求：oh_story_delivery_receipts.pre_draft_execution_receipts.intent_confirmation_checks 必须逐项覆盖 chapter_target.intent_confirmation_contract 中的 confirmed_intent、rhythm_and_style、structure_inputs、dialogue_tone_baseline、logic_line、appearance_order、cost_and_reward、ending_handoff 和 quality_checks；每项包含 key,label,delivered,evidence,remaining_risk，未完成时 delivered=false 并写明下一章需要承接的意图偏移。' : '',
       benchmarkRecallBrief ? '输出附加要求：oh_story_delivery_receipts.pre_draft_execution_receipts.benchmark_recall_checks 必须逐项覆盖 chapter_target.benchmark_recall_brief 中的 selected_emotion_module、rhythm_reference、style_profile_summary、matched_chapter_techniques、style_directives、anchor_excerpts、canonical_source_rules、gaps 和 quality_checks；每项包含 key,label,delivered,evidence,remaining_risk，未完成时 delivered=false 并写明下一章需要承接的文风召回缺口；anchor_excerpts 只能证明句长、停顿、潜台词和信息释放手法被抽象学习，evidence 不得复述锚点原句；不得复制对标桥段、设定、角色名或原句。' : '',
