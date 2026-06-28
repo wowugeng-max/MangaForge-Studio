@@ -21966,6 +21966,47 @@ describe('chapter pre-draft brief', () => {
     expect(brief.female_audience_contract.revision_priorities.join('｜')).toContain('补安全感锚点')
   })
 
+  test('uses project-level female audience activation mode before keyword auto detection', () => {
+    const disabledProject = {
+      title: '换亲以后',
+      genre: '年代先婚后爱女频',
+      target_audience: '番茄女生读者',
+      synopsis: '女主换亲后先婚后爱。',
+      reference_config: {
+        oh_story_controls: {
+          female_audience_mode: 'disabled',
+        },
+      },
+    }
+    const neutralContext = {
+      chapter_target: {
+        chapter_no: 1,
+        title: '新婚第一日',
+        summary: '新婚第一日出现误会。',
+      },
+    }
+
+    const disabledBrief = buildChapterPreDraftBrief(disabledProject, neutralContext)
+    expect(disabledBrief.female_audience_contract).toBeNull()
+
+    const forcedProject = {
+      title: '她在废土修灯塔',
+      genre: '末世科幻',
+      target_audience: '全向读者',
+      synopsis: '女主在废土修复灯塔，带领社区重建。',
+      reference_config: {
+        oh_story_controls: {
+          female_audience_mode: 'enabled',
+        },
+      },
+    }
+
+    const forcedBrief = buildChapterPreDraftBrief(forcedProject, neutralContext)
+    expect(forcedBrief.female_audience_contract.version).toBe('oh_story_female_audience_v1')
+    expect(forcedBrief.female_audience_contract.activation_mode).toBe('enabled')
+    expect(forcedBrief.female_audience_contract.activation_source).toContain('project.reference_config.oh_story_controls.female_audience_mode')
+  })
+
   test('adds an oh-story upgrade rhythm contract to pre-draft brief and prose prompt', () => {
     const service = createNovelWritingService({
       getProject: async () => null,

@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react'
-import { Alert, Button, Card, Form, Input, List, Modal, Popconfirm, Result, Select, Space, Steps, Tag, Typography, message } from 'antd'
+import { Alert, Button, Card, Form, Input, List, Modal, Popconfirm, Result, Segmented, Select, Space, Steps, Tag, Typography, message } from 'antd'
 import { ArrowLeftOutlined, ArrowRightOutlined, CheckCircleOutlined, DeleteOutlined, FolderOpenOutlined, RocketOutlined, SaveOutlined } from '@ant-design/icons'
 import apiClient from '../api/client'
 import {
@@ -30,6 +30,7 @@ interface NovelFormValues {
   sub_genres: string[]
   length_target: string
   target_audience: string
+  female_audience_mode: string
   style_tags: string[]
   commercial_tags: string[]
   synopsis: string
@@ -71,6 +72,12 @@ const AUDIENCES = [
   { value: '轻小说', label: '轻小说' },
   { value: '漫剧', label: '漫剧读者' },
   { value: 'Z世代', label: 'Z世代' },
+]
+
+const FEMALE_AUDIENCE_MODES = [
+  { value: 'auto', label: '自动识别' },
+  { value: 'enabled', label: '强制启用' },
+  { value: 'disabled', label: '强制关闭' },
 ]
 
 const STYLE_TAGS = [
@@ -214,6 +221,7 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
     sub_genres: [] as string[],
     length_target: 'medium',
     target_audience: '',
+    female_audience_mode: 'auto',
     style_tags: [] as string[],
     commercial_tags: [] as string[],
     synopsis: '',
@@ -376,6 +384,9 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
           raw_idea: seedIdea,
           derived_at: new Date().toISOString(),
         },
+        oh_story_controls: {
+          female_audience_mode: payloadData.female_audience_mode || 'auto',
+        },
         writing_bible: projectSeed?.writing_bible || {},
         commercial_positioning: {
           reader_promise: payloadLaunchpad.reader_promise || projectSeed?.logline || projectSeed?.synopsis || '',
@@ -398,6 +409,7 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
       sub_genres: asStringArray(normalizedSeed.sub_genres).length ? asStringArray(normalizedSeed.sub_genres) : data.sub_genres,
       length_target: normalizeLengthTarget(normalizedSeed.length_target || data.length_target),
       target_audience: String(normalizedSeed.target_audience || data.target_audience || '').trim(),
+      female_audience_mode: data.female_audience_mode || 'auto',
       style_tags: asStringArray(normalizedSeed.style_tags).length ? asStringArray(normalizedSeed.style_tags).slice(0, 5) : data.style_tags,
       commercial_tags: asStringArray(normalizedSeed.commercial_tags).length ? asStringArray(normalizedSeed.commercial_tags).slice(0, 3) : data.commercial_tags,
       synopsis: String(normalizedSeed.synopsis || normalizedSeed.logline || data.synopsis || '').trim().slice(0, 500),
@@ -535,6 +547,7 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
       sub_genres: [],
       length_target: 'medium',
       target_audience: '',
+      female_audience_mode: 'auto',
       style_tags: [],
       commercial_tags: [],
       synopsis: '',
@@ -593,6 +606,7 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
       sub_genres: asStringArray(normalizedSeed.sub_genres).length ? asStringArray(normalizedSeed.sub_genres) : data.sub_genres,
       length_target: normalizeLengthTarget(normalizedSeed.length_target || data.length_target),
       target_audience: String(normalizedSeed.target_audience || data.target_audience || '').trim(),
+      female_audience_mode: data.female_audience_mode || 'auto',
       style_tags: asStringArray(normalizedSeed.style_tags).length ? asStringArray(normalizedSeed.style_tags).slice(0, 5) : data.style_tags,
       commercial_tags: asStringArray(normalizedSeed.commercial_tags).length ? asStringArray(normalizedSeed.commercial_tags).slice(0, 3) : data.commercial_tags,
       synopsis: String(normalizedSeed.synopsis || normalizedSeed.logline || data.synopsis || '').trim().slice(0, 500),
@@ -1282,6 +1296,13 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: NovelCr
                   <Select
                     placeholder="选择目标读者群体"
                     options={AUDIENCES}
+                  />
+                </Form.Item>
+
+                <Form.Item name="female_audience_mode" label="女频长篇口径">
+                  <Segmented
+                    block
+                    options={FEMALE_AUDIENCE_MODES}
                   />
                 </Form.Item>
 

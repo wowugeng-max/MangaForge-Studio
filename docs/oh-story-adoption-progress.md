@@ -13,25 +13,25 @@ Source reference set: `/private/tmp/oh-story-claudecode/skills/story-long-write/
 <!-- oh-story-progress-summary
 {
   "reference_total": 38,
-  "integrated": 33,
-  "partial": 5,
+  "integrated": 34,
+  "partial": 4,
   "todo": 0,
   "deferred": 0,
-  "remaining_references": 5,
-  "estimated_hours_remaining": 14,
-  "estimated_working_days_remaining": 2.33
+  "remaining_references": 4,
+  "estimated_hours_remaining": 12.5,
+  "estimated_working_days_remaining": 2.08
 }
 -->
 
 ## Current Snapshot
 
 - Reference files: 38
-- Integrated enough for current production use: 33
-- Partially integrated, still worth mining: 5
+- Integrated enough for current production use: 34
+- Partially integrated, still worth mining: 4
 - Not systematically reviewed yet: 0
 - Deferred: 0
-- Remaining references to improve: 5
-- Estimated remaining effort: about 14 engineering hours, or 2.33 focused working days at 6 hours per day
+- Remaining references to improve: 4
+- Estimated remaining effort: about 12.5 engineering hours, or 2.08 focused working days at 6 hours per day
 
 The estimate assumes the current working pattern: one small oh-story increment at a time, with prompt or workflow changes backed by focused tests, then `test:novel-server` and `check` before push. UI progress surfacing is not included in the remaining estimate; after this ledger stabilizes, exposing it in the novel workspace should be a separate 4-6 hour slice.
 
@@ -57,7 +57,7 @@ The estimate assumes the current working pattern: one small oh-story increment a
 | dialogue-mastery.md | integrated | Dialogue contract covers voice anchors, subtext, power-length rules, spectator dialogue, rhythm, execution checklist, dialogue receipts, deterministic info-dump and interchangeable-voice diagnostics, prose prompt enforcement, self-review coverage, post-delivery sync, and repair carry-over. | Keep tuning scene-level dialogue execution checklist from real generation misses. | 0.5h |
 | emotional-arc-design.md | integrated | Emotional arc contract now carries scene execution rules, reaction structures, expectation relay, arc shape, pressure, payoff density, peak-end rules, and quality checks into pre-draft briefs, prose prompts, self-review, revision, deterministic `buildEmotionalArcSyncReport`, staged scene-card fields (`emotional_arc_stage`, `reader_emotion_goal`, `reaction_structure`, `expectation_bridge`), and repair carry-over routing. Focused tests cover scene-card projection and post-delivery sync misses. | Keep tuning scene-stage evidence heuristics from real chapters where the model implies stages without labels. | 0.5h |
 | emotional-methods.md | integrated | `emotional_arc_contract` now carries emotion module, payoff setup, emotional turn, reader expectation checks, 情绪三板斧, 情绪拉扯曲线, 题材情感策略, failure guards, prompt/self-review/revision/unattended blueprint coverage, and focused tests in `ui/server/src/routes/novel-writing-service.test.ts`. | Keep tuning prompt wording from real chapters where the model over-applies the full emotion curve. | 0.5h |
-| female-audience-writing.md | partial | Female-audience contract is conditionally requested for female or female-channel projects. | Add project-level detection and UI confirmation so this contract is active only when intended. | 1.5h |
+| female-audience-writing.md | integrated | Female-audience contract covers safety, identification, heroine agency, emotion-as-product, reader needs, copy promise, longform genre skeleton, romance/career axis, abuse dosage, platform fit, self-review, revision, sync reports, repair tasks, and unattended blueprint repair. Project-level `reference_config.oh_story_controls.female_audience_mode` now supports `auto` / `enabled` / `disabled`, and the creation wizard exposes a 女频长篇口径 confirmation control so authors can force or suppress activation before drafting. Focused tests cover activation precedence and UI payload wiring. | Keep tuning platform-specific evidence heuristics from real female-channel projects. | 0.5h |
 | format-and-structure.md | partial | Prose format and metadata scans detect title, chapter marker, front matter, and engineering-word violations. | Compare all format requirements and add missing deterministic checks. | 1h |
 | genre-catalog.md | integrated | Creation, recovery, original-incubation prompts, and local writing-bible materialization now inject `genre_positioning_contract.genre_catalog_contract` from an oh-story catalog route covering the main route table and quick-reference entries: 追妻火葬场、重生复仇、小三/婚恋、世情、仙侠/玄幻、死人文学、都市高武、霸总/甜宠、同人流派、脑洞文、凡人流、历史/架空历史、文娱/娱乐圈、规则怪谈、长生流、西幻/骑士文、新媒体文、搞笑文、无限流、悬疑、后悔流, plus a generic fallback. Focused tests verify routing and key checks. | Keep tuning route keywords and snippets from real seed-generation misses. | 0.5h |
 | genre-core-mechanics.md | integrated | Genre positioning contract covers core hook, goldfinger fit, must-have scenes, platform fit, micro-innovation, 70/20/10 inspiration, five micro-innovation methods, long-board focus, and prose/review checks. Creation, recovery, original-incubation prompts, and local writing-bible materialization now inject `genre_positioning_contract.genre_core_mechanics_contract` with oh-story core-hook layers, per-chapter loop rules, micro-innovation boundaries, conflict-network rules, goldfinger/worldview fit, threshold escalation, career/love balance, drift checks, and genre presets for 都市高武、仙侠/玄幻、规则怪谈、脑洞文、凡人流 plus fallback validation examples. | Keep tuning mechanism presets from real seed-generation and pre-draft misses. | 0.5h |
@@ -87,11 +87,10 @@ The estimate assumes the current working pattern: one small oh-story increment a
 
 ## Next Priority Queue
 
-1. `female-audience-writing.md`: add project-level detection and UI confirmation so this contract is active only when intended.
-2. `style-combat-face.md`: add more scene-card level combat and public payoff presets.
-3. `outline-rhythm.md`: add clearer rolling-plan diagnostics for rhythm fatigue before drafting.
-4. `style-craft.md`: extract craft rules into shorter prompt snippets to reduce prompt bulk.
-5. `format-and-structure.md`: compare all format requirements and add missing deterministic checks.
+1. `style-combat-face.md`: add more scene-card level combat and public payoff presets.
+2. `outline-rhythm.md`: add clearer rolling-plan diagnostics for rhythm fatigue before drafting.
+3. `style-craft.md`: extract craft rules into shorter prompt snippets to reduce prompt bulk.
+4. `format-and-structure.md`: compare all format requirements and add missing deterministic checks.
 
 ## Update Rules
 

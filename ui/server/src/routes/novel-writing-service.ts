@@ -42156,7 +42156,68 @@ function femaleAudienceExplicitContract(contextPackage: any = {}) {
     || contextPackage?.preDraftBrief?.femaleAudienceContract
 }
 
-function isFemaleAudienceContext(project: any = {}, contextPackage: any = {}) {
+function normalizeFemaleAudienceActivationMode(value: any) {
+  if (value === true) return 'enabled'
+  if (value === false) return 'disabled'
+  const raw = String(value ?? '').trim().toLowerCase()
+  if (!raw || raw === 'auto' || raw === 'detect' || raw === 'keyword' || raw === 'keyword_detection') return 'auto'
+  if (['enabled', 'enable', 'on', 'true', 'yes', 'force', 'forced', 'always', 'confirmed'].includes(raw)) return 'enabled'
+  if (['disabled', 'disable', 'off', 'false', 'no', 'never', 'disabled_by_author'].includes(raw)) return 'disabled'
+  return 'auto'
+}
+
+function femaleAudienceActivationCandidates(project: any = {}, contextPackage: any = {}) {
+  const projectConfig = project?.reference_config || project?.referenceConfig || {}
+  const projectControls = projectConfig?.oh_story_controls || projectConfig?.ohStoryControls || {}
+  const contextControls = contextPackage?.oh_story_controls || contextPackage?.ohStoryControls || {}
+  const writingBible = contextPackage?.writing_bible
+    || contextPackage?.writingBible
+    || projectConfig?.writing_bible
+    || projectConfig?.writingBible
+    || {}
+  const chapterTarget = contextPackage?.chapter_target || contextPackage?.chapterTarget || {}
+  return [
+    ['chapter_target.female_audience_mode', chapterTarget?.female_audience_mode ?? chapterTarget?.femaleAudienceMode],
+    ['context.oh_story_controls.female_audience_mode', contextControls?.female_audience_mode ?? contextControls?.femaleAudienceMode],
+    ['project.reference_config.oh_story_controls.female_audience_mode', projectControls?.female_audience_mode ?? projectControls?.femaleAudienceMode],
+    ['project.reference_config.oh_story_controls.female_audience_enabled', projectControls?.female_audience_enabled ?? projectControls?.femaleAudienceEnabled],
+    ['writing_bible.female_audience_mode', writingBible?.female_audience_mode ?? writingBible?.femaleAudienceMode],
+    ['writing_bible.female_audience_enabled', writingBible?.female_audience_enabled ?? writingBible?.femaleAudienceEnabled],
+  ]
+}
+
+function resolveFemaleAudienceActivation(project: any = {}, contextPackage: any = {}) {
+  for (const [source, value] of femaleAudienceActivationCandidates(project, contextPackage)) {
+    if (value === undefined || value === null || String(value).trim() === '') continue
+    const mode = normalizeFemaleAudienceActivationMode(value)
+    if (mode === 'enabled') {
+      return {
+        mode,
+        source,
+        reason: '作者已在项目级配置中确认启用女频长篇口径。',
+      }
+    }
+    if (mode === 'disabled') {
+      return {
+        mode,
+        source,
+        reason: '作者已在项目级配置中关闭女频长篇口径，跳过关键词自动识别。',
+      }
+    }
+    return {
+      mode: 'auto',
+      source,
+      reason: '作者选择自动识别女频长篇口径。',
+    }
+  }
+  return {
+    mode: 'auto',
+    source: 'keyword_detection',
+    reason: '未设置项目级女频长篇开关，使用关键词自动识别。',
+  }
+}
+
+function detectFemaleAudienceContext(project: any = {}, contextPackage: any = {}) {
   const writingBible = contextPackage?.writing_bible || project?.reference_config?.writing_bible || {}
   const rawText = [
     project?.title,
@@ -42177,8 +42238,21 @@ function isFemaleAudienceContext(project: any = {}, contextPackage: any = {}) {
   return /女频|女生|女性|女主|番茄女生|起点女生|晋江|七猫|先婚后爱|追妻|火葬场|强取豪夺|宅斗|宫斗|换亲|萌宝|带球跑/.test(rawText)
 }
 
+function isFemaleAudienceContext(project: any = {}, contextPackage: any = {}) {
+  const activation = resolveFemaleAudienceActivation(project, contextPackage)
+  if (activation.mode === 'enabled') return true
+  if (activation.mode === 'disabled') return false
+  return detectFemaleAudienceContext(project, contextPackage)
+}
+
 function buildFemaleAudienceContract(project: any = {}, contextPackage: any = {}) {
   const explicit = femaleAudienceExplicitContract(contextPackage)
+  const activation = resolveFemaleAudienceActivation(project, contextPackage)
+  const explicitActivationMode = explicit && typeof explicit === 'object' && !Array.isArray(explicit)
+    ? normalizeFemaleAudienceActivationMode(explicit.activation_mode ?? explicit.activationMode ?? explicit.female_audience_mode ?? explicit.femaleAudienceMode ?? explicit.enabled)
+    : 'auto'
+  if (explicit && typeof explicit === 'object' && !Array.isArray(explicit) && explicitActivationMode === 'disabled') return null
+  if (activation.mode === 'disabled' && explicitActivationMode !== 'enabled') return null
   if (explicit && typeof explicit === 'object' && !Array.isArray(explicit)) {
     const derived = buildFemaleAudienceContract(project, {
       ...(contextPackage || {}),
@@ -42216,6 +42290,9 @@ function buildFemaleAudienceContract(project: any = {}, contextPackage: any = {}
     return {
       version: explicit.version || 'oh_story_female_audience_v1',
       source: explicit.source || 'oh_story_embedded_fallback',
+      activation_mode: explicitActivationMode === 'enabled' ? 'enabled' : activation.mode,
+      activation_source: explicitActivationMode === 'enabled' ? 'explicit.female_audience_contract' : activation.source,
+      activation_reason: explicitActivationMode === 'enabled' ? '显式女频长篇合同已启用。' : activation.reason,
       audience_mode: compactBriefText(explicit.audience_mode || explicit.audienceMode || derived.audience_mode || 'female_longform'),
       core_principles: explicitCorePrinciples.length ? explicitCorePrinciples : asArray(derived.core_principles),
       reader_need_rules: explicitReaderNeedRules.length ? explicitReaderNeedRules : asArray(derived.reader_need_rules),
@@ -42233,7 +42310,8 @@ function buildFemaleAudienceContract(project: any = {}, contextPackage: any = {}
     }
   }
 
-  if (!isFemaleAudienceContext(project, contextPackage)) return null
+  const autoDetected = detectFemaleAudienceContext(project, contextPackage)
+  if (activation.mode !== 'enabled' && !autoDetected) return null
   const platformText = [
     project?.target_platform,
     project?.target_audience,
@@ -42246,6 +42324,9 @@ function buildFemaleAudienceContract(project: any = {}, contextPackage: any = {}
   return {
     version: 'oh_story_female_audience_v1',
     source: 'oh_story_embedded_fallback',
+    activation_mode: activation.mode,
+    activation_source: activation.source,
+    activation_reason: activation.mode === 'enabled' ? activation.reason : '关键词自动识别命中女频/女生频道/女主导向信号。',
     audience_mode: 'female_longform',
     core_principles: OH_STORY_FEMALE_AUDIENCE_CORE_PRINCIPLES,
     reader_need_rules: OH_STORY_FEMALE_AUDIENCE_READER_NEED_RULES,
