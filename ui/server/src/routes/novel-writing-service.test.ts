@@ -342,6 +342,31 @@ describe('normalizeSceneCardsPayload', () => {
     expect(source).toContain('prose_craft_directives(array)')
   })
 
+  test('asks scene-card generation to emit character relation progression fields', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const promptStart = source.indexOf('const buildSceneCardsPrompt =')
+    const promptEnd = source.indexOf('const buildHeuristicSettingUsage =', promptStart)
+    const promptBlock = source.slice(promptStart, promptEnd)
+    const briefStart = source.indexOf('function sceneBriefFromCard')
+    const briefEnd = source.indexOf('function buildReaderRetentionBrief', briefStart)
+    const briefBlock = source.slice(briefStart, briefEnd)
+
+    expect(promptStart).toBeGreaterThanOrEqual(0)
+    expect(briefStart).toBeGreaterThanOrEqual(0)
+    expect(promptBlock).toContain('relationship_progression_plan')
+    expect(promptBlock).toContain('relationship_buffer_zone')
+    expect(promptBlock).toContain('supporting_character_action')
+    expect(promptBlock).toContain('attitude_shift_checkpoint')
+    expect(promptBlock).toContain('relationship_next_hook')
+    expect(promptBlock).toContain('配角攻略缓冲区')
+    expect(promptBlock).toContain('信息差、地位差距、亲密度差距或信任程度')
+    expect(briefBlock).toContain('relationship_progression_plan')
+    expect(briefBlock).toContain('relationship_buffer_zone')
+    expect(briefBlock).toContain('supporting_character_action')
+    expect(briefBlock).toContain('attitude_shift_checkpoint')
+    expect(briefBlock).toContain('relationship_next_hook')
+  })
+
   test('maps delivery-risk carry-over into normalized scene cards before prose execution', () => {
     const sceneCards = normalizeSceneCardsPayload({
       scene_cards: [
@@ -1167,6 +1192,43 @@ describe('normalizeSceneCardsPayload', () => {
     expect(sceneCards[1].state_changes_expected).toContain(relationRepair)
     expect(sceneCards[0].serial_risk_repairs).toContain('角色关系')
     expect(sceneCards[1].serial_risk_repairs).toContain('角色关系')
+  })
+
+  test('projects character-relation carry-over into staged relationship progression fields', () => {
+    const relationRepair = '下一章必须补角色关系：维持配角攻略缓冲区，林青禾从旁观/质疑转为主动协助，主角解决追责后回到她这里开启下一轮账册任务。'
+    const sceneCards = normalizeSceneCardsPayload({
+      scene_cards: [
+        {
+          title: '仍有信息差',
+          purpose: '保留互信但仍有边界',
+          beat: '林青禾只交出半页账册，不说钥匙来源。',
+        },
+        {
+          title: '主动作证',
+          purpose: '让配角带着自己的目标行动',
+          beat: '林青禾为了洗清代签责任主动拿出证词。',
+        },
+        {
+          title: '下一轮任务',
+          purpose: '主角回到林青禾这里承接新任务',
+          beat: '追责结束后，她递出新账册编号。',
+        },
+      ],
+    }, {
+      chapter_target: {
+        delivery_risk_carry_over: {
+          required_actions: [relationRepair],
+        },
+      },
+    })
+
+    expect(sceneCards[0].relationship_progression_plan).toContain('关系类型/边界')
+    expect(sceneCards[0].relationship_buffer_zone).toContain('信息差')
+    expect(sceneCards[1].supporting_character_action).toContain('配角主动行动')
+    expect(sceneCards[1].attitude_shift_checkpoint).toContain('旁观/质疑')
+    expect(sceneCards[2].relationship_next_hook).toContain('下一轮')
+    expect(sceneCards[2].state_changes_expected).toContain(relationRepair)
+    expect(sceneCards[2].serial_risk_repairs).toContain('角色关系')
   })
 
   test('projects story-loop carry-over into scene loop and payoff fields', () => {
@@ -5243,6 +5305,36 @@ describe('normalizeSceneCardsPayload', () => {
     expect(checks[0].key).toBe('scene_card_1_execution_directives')
     expect(checks[0].evidence).toContain('灼手反应')
     expect(checks[0].fix).toContain('动作反应')
+  })
+
+  test('detects scene-card character relation progression directives missing from final prose', () => {
+    const checks = buildSceneCardConsumptionChecks({
+      chapter_target: {
+        scene_cards: [
+          {
+            scene_no: 1,
+            title: '半页账册',
+            purpose: '林青禾用账册线索逼主角确认合作边界。',
+            conflict: '她要洗清代签责任，主角却必须先判断账册是否可信。',
+            reader_payoff: '合作关系出现新的信任压力。',
+            relationship_progression_plan: '关系类型/边界：联盟型，合作互信但仍有边界。',
+            relationship_buffer_zone: '配角攻略缓冲区：保留信息差、地位差距、亲密度差距或信任程度之一。',
+            supporting_character_action: '配角主动行动：林青禾为了自己的代签责任先联系账房拿到证词。',
+            attitude_shift_checkpoint: '态度变化拐点：从旁观/质疑转为行动/协助/设限。',
+            relationship_next_hook: '关系下一轮期待：主角解决追责后回到林青禾这里开启新任务。',
+          },
+        ],
+      },
+    }, [
+      '半页账册这一场，林青禾用账册线索逼主角确认合作边界。',
+      '她说账册就在这里，沈砚必须先判断它是否可信。',
+      '合作关系出现新的信任压力。',
+    ].join('\n'))
+
+    const relationDirective = checks.find(check => check.key === 'scene_card_1_execution_directives')
+    expect(relationDirective?.evidence).toContain('配角攻略缓冲区')
+    expect(relationDirective?.evidence).toContain('态度变化')
+    expect(relationDirective?.fix).toContain('配角')
   })
 
   test('detects scene-card forbidden craft directives violated in final prose', () => {
@@ -9867,6 +9959,12 @@ describe('normalizeSceneCardsPayload', () => {
     expect(prompt).toContain('scene_cards.benchmark_recall_directives')
     expect(prompt).toContain('scene_cards.concept_anchor_rules')
     expect(prompt).toContain('scene_cards.prose_craft_directives')
+    expect(prompt).toContain('scene_cards.relationship_progression_plan')
+    expect(prompt).toContain('scene_cards.relationship_buffer_zone')
+    expect(prompt).toContain('scene_cards.supporting_character_action')
+    expect(prompt).toContain('scene_cards.attitude_shift_checkpoint')
+    expect(prompt).toContain('scene_cards.relationship_next_hook')
+    expect(prompt).toContain('配角攻略缓冲区')
   })
 
   test('persists a non-duplicate generated title only when title uniqueness repair is active', () => {
@@ -16630,14 +16728,61 @@ describe('chapter prose word target', () => {
     expect(okReport.delivered.map((item: any) => item.label)).toEqual(expect.arrayContaining(['关系类型', '独立目标', '目标归属', '角色不止恋爱', '配角期待枢纽', '关系压力', '态度变化']))
     expect(warnReport.status).toBe('warn')
     expect(warnReport.label).toContain('角色关系缺口')
-    expect(warnReport.missed.map((item: any) => item.label)).toEqual(expect.arrayContaining(['关系弧线', '独立目标', '目标归属', '角色不止恋爱', '配角期待枢纽', '角色关系硬伤']))
+    expect(warnReport.missed.map((item: any) => item.label)).toEqual(expect.arrayContaining(['关系弧线', '独立目标', '目标归属', '角色不止恋爱', '配角期待枢纽', '配角攻略缓冲区', '角色关系硬伤']))
     expect(warnReport.missed.map((item: any) => item.key)).toContain('goal_ownership_rules')
     expect(warnReport.missed.map((item: any) => item.key)).toContain('relationship_life_rules')
     expect(warnReport.missed.map((item: any) => item.key)).toContain('expectation_hub_rules')
-    expect(warnReport.priority_repair).toContain('配角期待枢纽')
+    expect(warnReport.missed.map((item: any) => item.key)).toContain('buffer_zone_rules')
+    expect(warnReport.priority_repair).toContain('配角攻略缓冲区')
     expect(warnReport.next_actions.join('；')).toMatch(/关系类型|独立目标|压力/)
     expect(warnReport.next_actions.join('；')).toMatch(/任务基地|新一轮期待/)
     expect(warnReport.next_actions.join('；')).toContain('主角自己的目标')
+  })
+
+  test('checks character relation buffer-zone progression after delivery', () => {
+    const project = { title: '旧城设备师' }
+    const chapter = { id: 42, chapter_no: 42, title: '半页账册' }
+    const contextPackage = {
+      chapter_target: {
+        character_relation_contract: {
+          relationship_types: ['主角与林青禾：联盟型，合作互信但仍有边界。'],
+          buffer_zone_rules: [
+            '配角攻略缓冲区必须始终存在：信息差、地位差距、亲密度差距或信任程度至少保留一种。',
+            '关键拐点必须写清配角从旁观/质疑/拒绝/试探到行动/协助/设限的态度变化。',
+            '配角不能像 NPC 一样站着等主角触发，必须有自己的行动和动机。',
+          ],
+          attitude_shifts: ['林青禾从旁观/质疑转为主动协助，但仍设下账册来源边界。'],
+          quality_checks: ['缓冲区、配角主动行动和态度变化必须有正文证据。'],
+        },
+      },
+    }
+    const progressedText = [
+      '两人的关系类型是联盟型，合作互信但仍有边界。',
+      '配角攻略缓冲区仍在：林青禾只交出半页账册，保留钥匙来源这个信息差；她信任沈砚查账，却还没有共享家族账册全貌。',
+      '关键拐点写清态度变化：她从旁观/质疑转为主动协助并设限，同时为了洗清自己的代签责任行动。',
+      '林青禾不是 NPC 式站桩等待触发，她先联系账房、拿到证词，再设下“只查半页、不碰家族钥匙”的边界。',
+    ].join('\n')
+    const flatText = [
+      '林青禾站在旁边等主角问话。',
+      '她完全信任主角，把所有信息一次性交出来。',
+      '两人关系很好，没有信息差、没有地位差距、没有信任程度变化。',
+      '她没有自己的行动和动机，也没有从旁观质疑到协助设限的态度变化。',
+    ].join('\n')
+
+    const okReport = buildCharacterRelationSyncReport(project, chapter, contextPackage, progressedText)
+    const warnReport = buildCharacterRelationSyncReport(project, chapter, contextPackage, flatText)
+
+    expect(okReport.delivered.map((item: any) => item.key)).toContain('buffer_zone_rules')
+    expect(okReport.delivered.find((item: any) => item.key === 'buffer_zone_rules')?.evidence.join('｜')).toContain('信息差')
+    expect(warnReport.status).toBe('warn')
+    expect(warnReport.missed.find((item: any) => item.key === 'buffer_zone_rules')?.label).toBe('配角攻略缓冲区')
+    expect(warnReport.missed.find((item: any) => item.key === 'buffer_zone_rules')?.missed_items).toEqual(expect.arrayContaining([
+      '缺信息差/地位差距/亲密度差距/信任程度缓冲区',
+      '配角像 NPC 一样站桩等待触发',
+      '缺旁观/质疑/拒绝/试探到行动/协助/设限的态度变化',
+    ]))
+    expect(warnReport.priority_repair).toBe('优先补配角攻略缓冲区')
+    expect(warnReport.next_actions.join('；')).toContain('配角攻略缓冲区')
   })
 
   test('story state sync persists a character_relation_sync review', () => {

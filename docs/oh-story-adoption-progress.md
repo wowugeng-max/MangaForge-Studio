@@ -13,25 +13,25 @@ Source reference set: `/private/tmp/oh-story-claudecode/skills/story-long-write/
 <!-- oh-story-progress-summary
 {
   "reference_total": 38,
-  "integrated": 23,
-  "partial": 15,
+  "integrated": 24,
+  "partial": 14,
   "todo": 0,
   "deferred": 0,
-  "remaining_references": 15,
-  "estimated_hours_remaining": 31,
-  "estimated_working_days_remaining": 5.17
+  "remaining_references": 14,
+  "estimated_hours_remaining": 29.5,
+  "estimated_working_days_remaining": 4.92
 }
 -->
 
 ## Current Snapshot
 
 - Reference files: 38
-- Integrated enough for current production use: 23
-- Partially integrated, still worth mining: 15
+- Integrated enough for current production use: 24
+- Partially integrated, still worth mining: 14
 - Not systematically reviewed yet: 0
 - Deferred: 0
-- Remaining references to improve: 15
-- Estimated remaining effort: about 31 engineering hours, or 5.17 focused working days at 6 hours per day
+- Remaining references to improve: 14
+- Estimated remaining effort: about 29.5 engineering hours, or 4.92 focused working days at 6 hours per day
 
 The estimate assumes the current working pattern: one small oh-story increment at a time, with prompt or workflow changes backed by focused tests, then `test:novel-server` and `check` before push. UI progress surfacing is not included in the remaining estimate; after this ledger stabilizes, exposing it in the novel workspace should be a separate 4-6 hour slice.
 
@@ -51,7 +51,7 @@ The estimate assumes the current working pattern: one small oh-story increment a
 | banned-words.md | integrated | `OH_STORY_LEVEL_ONE_BANNED_WORDS`, weak-adverb density, context-sensitive scans, and deterministic cleanup gates are implemented. | Periodically sync banned word source list. | 0.5h |
 | character-basics.md | integrated | Character behavior contract now carries protagonist role-card requirements, supporting-role exit planning, behavior repeat points, character-driven event rules, protagonist red lines, and identity/goldfinger alignment into pre-draft briefs, prose prompts, self-review, revision, deterministic `buildCharacterBehaviorSyncReport`, repair carry-over, and unattended blueprint construction. Focused tests cover prompt hydration, incomplete explicit-contract backfill, post-delivery sync misses, and review/revision enforcement. | Keep tuning role-card and behavior-repeat evidence heuristics from real generated chapters. | 0.5h |
 | character-design-methods.md | partial | Character behavior contract covers motivation chains, strong associations, antagonist logic, and composure. | Mine remaining design methods for project creation and role-card generation prompts. | 2h |
-| character-relations.md | partial | Character relation contract and relationship graph workflows cover pressure, attitude shifts, and relationship evidence. | Add clearer relation progression diagnostics before prose, not only after review. | 1.5h |
+| character-relations.md | integrated | Character relation contract, relationship graph workflows, staged scene-card fields (`relationship_progression_plan`, `relationship_buffer_zone`, `supporting_character_action`, `attitude_shift_checkpoint`, `relationship_next_hook`), prose execution prompts, deterministic scene-card directive checks, buffer-zone post-delivery diagnostics, and repair carry-over now cover pressure, attitude shifts, 配角期待枢纽, 配角攻略缓冲区, active supporting-character action, and relationship evidence. | Keep tuning buffer-zone evidence heuristics from real chapters where relation changes are implied rather than named. | 0.5h |
 | commercial-core-methods.md | integrated | Target reader, bridge unit, reader payoff, retention, expectation threshold, golden-three launch, quality audit, and core-contract radar now cover the reference's commercial method stack. `core_contract_radar` carries selling-point execution, repetition strategy, commercial rhythm, goldfinger structure, and launch-pressure rules into pre-draft briefs, prose prompts, self-review, revision, unattended blueprint construction, deterministic `buildCoreContractSyncReport`, and repair carry-over. Focused tests cover prompt hydration, post-delivery misses, and review/revision enforcement. | Keep tuning evidence heuristics for real chapters where commercial rhythm is implied rather than stated. | 0.5h |
 | cross-book-recall.md | integrated | Benchmark recall brief and prose prompt carry `副对标召回摘要`, secondary benchmark budget/sorting, canonical source rules, `secondary_benchmark_boundary`, review checks, and write-preparation `source_gaps`/`must_confirm` coverage for registry and main-benchmark gaps in `ui/server/src/routes/novel-writing-service.ts`. Focused tests cover secondary benchmark contamination, budget trimming, prompt placement, and write-preparation receipts. | Keep tuning cross-book recall from real multi-benchmark projects. | 0.5h |
 | dialogue-mastery.md | integrated | Dialogue contract covers voice anchors, subtext, power-length rules, spectator dialogue, rhythm, execution checklist, dialogue receipts, deterministic info-dump and interchangeable-voice diagnostics, prose prompt enforcement, self-review coverage, post-delivery sync, and repair carry-over. | Keep tuning scene-level dialogue execution checklist from real generation misses. | 0.5h |
@@ -87,11 +87,11 @@ The estimate assumes the current working pattern: one small oh-story increment a
 
 ## Next Priority Queue
 
-1. `character-relations.md`: add clearer relation progression diagnostics before prose, not only after review.
-2. `character-design-methods.md`: mine remaining design methods for project creation and role-card generation prompts.
-3. `plot-core-methods.md`: convert remaining high-level methods into smaller generation-time gates.
-4. `outline-structure-theory.md`: mine structure theory into project-level longform skeleton generation.
-5. `outline-conflict.md`: tie conflict gaps earlier into outline and scene-card generation.
+1. `character-design-methods.md`: mine remaining design methods for project creation and role-card generation prompts.
+2. `plot-core-methods.md`: convert remaining high-level methods into smaller generation-time gates.
+3. `outline-structure-theory.md`: mine structure theory into project-level longform skeleton generation.
+4. `outline-conflict.md`: tie conflict gaps earlier into outline and scene-card generation.
+5. `outline-methods.md`: map more outline-method templates to the planning workspace.
 
 ## Update Rules
 

@@ -5411,6 +5411,11 @@ function sceneBriefFromCard(card: any, index: number) {
     benchmark_recall_directives: asArray(card?.benchmark_recall_directives || card?.benchmarkRecallDirectives || card?.benchmark_directives || card?.benchmarkDirectives).map((item: any) => compactBriefText(item)).filter(Boolean),
     concept_anchor_rules: asArray(card?.concept_anchor_rules || card?.conceptAnchorRules || card?.new_concept_anchor_rules || card?.newConceptAnchorRules).map((item: any) => compactBriefText(item)).filter(Boolean),
     prose_craft_directives: asArray(card?.prose_craft_directives || card?.proseCraftDirectives || card?.prose_craft_rules || card?.proseCraftRules).map((item: any) => compactBriefText(item)).filter(Boolean),
+    relationship_progression_plan: compactBriefText(card?.relationship_progression_plan || card?.relationshipProgressionPlan),
+    relationship_buffer_zone: compactBriefText(card?.relationship_buffer_zone || card?.relationshipBufferZone),
+    supporting_character_action: compactBriefText(card?.supporting_character_action || card?.supportingCharacterAction),
+    attitude_shift_checkpoint: compactBriefText(card?.attitude_shift_checkpoint || card?.attitudeShiftCheckpoint),
+    relationship_next_hook: compactBriefText(card?.relationship_next_hook || card?.relationshipNextHook),
     emotional_tone: compactBriefText(card?.emotional_tone || card?.emotionalTone || card?.tone),
     emotional_arc_stage: compactBriefText(card?.emotional_arc_stage || card?.emotionalArcStage || card?.emotion_stage || card?.emotionStage),
     reader_emotion_goal: compactBriefText(card?.reader_emotion_goal || card?.readerEmotionGoal),
@@ -22937,10 +22942,15 @@ function sceneCardExecutionDirectiveParts(scene: any) {
     ...asArray(scene?.dialogue_goals || scene?.dialogueGoals || scene?.dialogue_contract_goals || scene?.dialogueContractGoals),
     ...asArray(scene?.concept_anchor_rules || scene?.conceptAnchorRules || scene?.new_concept_anchor_rules || scene?.newConceptAnchorRules),
     ...asArray(scene?.prose_craft_directives || scene?.proseCraftDirectives || scene?.prose_craft_rules || scene?.proseCraftRules),
+    scene?.relationship_progression_plan || scene?.relationshipProgressionPlan,
+    scene?.relationship_buffer_zone || scene?.relationshipBufferZone,
+    scene?.supporting_character_action || scene?.supportingCharacterAction,
+    scene?.attitude_shift_checkpoint || scene?.attitudeShiftCheckpoint,
+    scene?.relationship_next_hook || scene?.relationshipNextHook,
   ].map((item: any) => compactBriefText(item)).filter(Boolean)
   return uniqueBriefStrings(directives.filter(item => {
     if (/^(不得|不能|不要|禁止|严禁|避免|不可)/.test(item)) return false
-    return /新概念|新名词|新设定|首次出现|动作反应|对话半句|物理后果|作用锚点|对白|对话|潜台词|说漏|逼问|声线|科普嘴/.test(item)
+    return /新概念|新名词|新设定|首次出现|动作反应|对话半句|物理后果|作用锚点|对白|对话|潜台词|说漏|逼问|声线|科普嘴|关系类型|关系边界|关系阶段|关系推进|配角攻略缓冲区|信息差|地位差距|亲密度差距|信任程度|配角主动行动|独立目标|态度变化|旁观|质疑|拒绝|试探|协助|设限|关系下一轮|任务基地|下一轮期待/.test(item)
   }), 10)
 }
 
@@ -22996,7 +23006,7 @@ export function buildSceneCardConsumptionChecks(contextPackage: any = {}, chapte
           status: 'warn',
           score: combinedDirectiveScore,
           evidence: `场景${sceneNo}《${compactBriefText(scene?.title || scene?.purpose || '', 36)}》未充分兑现 oh-story 执行指令：${compactBriefText(missedDirectives.map(item => item.part).join('；'), 180)}`,
-          fix: '按场景卡补回对白目标或新概念锚点：用角色差异化对话、潜台词、动作反应、对话半句或物理后果证明执行，不要只写来历说明或旁白概括。',
+          fix: '按场景卡补回对白目标、新概念锚点或角色关系推进：用角色差异化对话、潜台词、动作反应、对话半句、物理后果、配角主动行动、缓冲区和态度变化证明执行，不要只写来历说明或旁白概括。',
           matched: directiveMatches.flatMap(item => asArray(item.match.matched).map((match: any) => String(match))).slice(0, 8),
         })
       }
@@ -42489,6 +42499,48 @@ function normalizeCharacterRelationExpectationHubCheck(values: any, chapterText:
   }
 }
 
+function normalizeCharacterRelationBufferZoneCheck(values: any, chapterText: string) {
+  const planned = characterRelationArray(values)
+  if (!planned.length) return null
+  const text = String(chapterText || '')
+  const noBuffer = /没有(?:信息差|地位差距|亲密度差距|信任程度|缓冲区)|完全信任|所有信息一次性交出来|没有[^。！？\n]{0,24}信任程度变化/.test(text)
+  const rawNpcRisk = /NPC|站桩|等主角|等待(?:主角)?触发|站在旁边等/.test(text)
+  const negatedNpcRisk = /(?:不是|不能|不再|避免|不得)[^。！？\n]{0,12}(?:NPC|站桩|等主角|等待(?:主角)?触发|站在旁边等)/.test(text)
+  const npcRisk = rawNpcRisk && !negatedNpcRisk
+  const noAttitudeShift = /没有[^。！？\n]{0,24}(?:态度变化|从旁观|从质疑|协助|设限)/.test(text)
+  const hasBuffer = !noBuffer && /配角攻略缓冲区|信息差|地位差距|亲密度差距|信任程度|仍有边界|保留[^。！？\n]{0,16}边界|半页账册|钥匙来源|不共享/.test(text)
+  const hasActiveAction = !npcRisk && /主动|先联系|拿到证词|作证|协助|设下|洗清|为了[^。！？\n]{0,20}(?:目标|责任|授权|账册)|带着[^。！？\n]{0,18}(?:目标|责任|动机)/.test(text)
+  const hasAttitudeShift = !noAttitudeShift && /从[^。！？\n]{0,18}(?:旁观|质疑|拒绝|试探)[^。！？\n]{0,28}转为[^。！？\n]{0,24}(?:行动|协助|设限|主动作证)|(?:旁观|质疑|拒绝|试探)[^。！？\n]{0,24}(?:随后|终于|转为)[^。！？\n]{0,24}(?:行动|协助|设限|主动作证)|态度变化/.test(text)
+  const delivered = hasBuffer && hasActiveAction && hasAttitudeShift
+  return {
+    key: 'buffer_zone_rules',
+    label: '配角攻略缓冲区',
+    text: planned.join('；'),
+    expected: planned.join('；'),
+    score: delivered ? 90 : Math.max(12, [hasBuffer, hasActiveAction, hasAttitudeShift].filter(Boolean).length * 28 - [noBuffer, npcRisk, noAttitudeShift].filter(Boolean).length * 8),
+    evidence: delivered
+      ? uniqueBriefStrings([
+          hasBuffer ? '信息差/边界缓冲区可见' : '',
+          hasActiveAction ? '配角带着自己的目标主动行动' : '',
+          hasAttitudeShift ? '旁观/质疑/拒绝/试探到行动/协助/设限的态度变化可见' : '',
+        ], 8)
+      : uniqueBriefStrings([
+          noBuffer ? '关系缺少缓冲区或一次性交出全部信息' : '',
+          npcRisk ? '配角像 NPC 一样站桩等待触发' : '',
+          noAttitudeShift ? '正文显式缺少态度变化' : '',
+        ], 8),
+    delivered,
+    status: delivered ? 'ok' : 'warn',
+    missed_items: delivered ? [] : uniqueBriefStrings([
+      !hasBuffer ? '缺信息差/地位差距/亲密度差距/信任程度缓冲区' : '',
+      !hasActiveAction ? '配角像 NPC 一样站桩等待触发' : '',
+      !hasAttitudeShift ? '缺旁观/质疑/拒绝/试探到行动/协助/设限的态度变化' : '',
+    ], 8),
+    issue: delivered ? '' : '配角攻略缓冲区没有落成正文证据：配角可能一次性交出全部信任，或只是站桩等待主角触发。',
+    repair_instruction: delivered ? '' : '按 oh-story 配角攻略缓冲区修复：始终保留信息差、地位差距、亲密度差距或信任程度之一；让配角带着自己的目标主动行动；在关键拐点写清从旁观/质疑/拒绝/试探到行动/协助/设限的态度变化。',
+  }
+}
+
 function normalizeCharacterRelationQualityCheck(values: any, chapterText: string) {
   const planned = characterRelationArray(values)
   if (!planned.length) return null
@@ -42566,6 +42618,7 @@ function buildCharacterRelationDeterministicCheck(chapterText: string) {
 }
 
 function characterRelationPriority(missed: any[]) {
+  if (missed.some(item => item.key === 'buffer_zone_rules')) return '优先补配角攻略缓冲区'
   if (missed.some(item => item.key === 'expectation_hub_rules')) return '优先补配角期待枢纽'
   if (missed.some(item => item.key === 'character_relation_forbidden')) return '优先清关系硬伤'
   if (missed.some(item => item.key === 'goal_ownership_rules')) return '优先补目标归属'
@@ -42611,6 +42664,7 @@ export function buildCharacterRelationSyncReport(project: any, chapter: any, con
     normalizeCharacterRelationGoalOwnershipCheck(contract.goal_ownership_rules || contract.goalOwnershipRules, chapterText),
     normalizeCharacterRelationLifeRuleCheck(contract.relationship_life_rules || contract.relationshipLifeRules, chapterText),
     normalizeCharacterRelationExpectationHubCheck(contract.expectation_hub_rules || contract.expectationHubRules, chapterText),
+    normalizeCharacterRelationBufferZoneCheck(contract.buffer_zone_rules || contract.bufferZoneRules, chapterText),
     normalizeCharacterRelationCheck(
       'tests_or_pressure',
       '关系压力',
@@ -42663,6 +42717,7 @@ export function buildCharacterRelationSyncReport(project: any, chapter: any, con
       ? ['保持角色关系兑现：关系类型、独立目标、目标归属、角色非恋爱行动线、配角期待枢纽、压力测试、态度变化和阶段边界都要可见。']
       : [
           '下一章必须补角色关系：先明确关系类型和边界，再让双方带着独立目标和恋爱之外的行动线进入同一场压力测试；尤其要写清主角自己的目标，不能只是在帮别人完成目标。',
+          '补配角攻略缓冲区：始终保留信息差、地位差距、亲密度差距或信任程度；配角不能站桩等触发，关键拐点要写出从旁观/质疑/拒绝/试探到行动/协助/设限。',
           '补配角期待枢纽：选一个关键配角做任务基地，同时挂短期和长期期待，让主角解决事件后回到这里开启新一轮期待、新任务或新剧情。',
           '关系变化必须由行动兑现：配角要主动做事，主角要保留关键选择和代价，态度变化要有正文证据。',
       ],
@@ -47097,6 +47152,11 @@ export function normalizeSceneCardsPayload(payload: any, contextPackage: any = {
     sensory_anchor: String(card?.sensory_anchor || card?.sensoryAnchor || ''),
     serial_risk_repairs: asArray(card?.serial_risk_repairs || card?.serialRiskRepairs || card?.risk_repairs || card?.riskRepairs).map((item: any) => String(typeof item === 'string' ? item : JSON.stringify(item))).filter(Boolean),
     recent_fatigue_action: String(card?.recent_fatigue_action || card?.recentFatigueAction || card?.fatigue_repair_action || card?.fatigueRepairAction || ''),
+    relationship_progression_plan: String(card?.relationship_progression_plan || card?.relationshipProgressionPlan || ''),
+    relationship_buffer_zone: String(card?.relationship_buffer_zone || card?.relationshipBufferZone || ''),
+    supporting_character_action: String(card?.supporting_character_action || card?.supportingCharacterAction || ''),
+    attitude_shift_checkpoint: String(card?.attitude_shift_checkpoint || card?.attitudeShiftCheckpoint || ''),
+    relationship_next_hook: String(card?.relationship_next_hook || card?.relationshipNextHook || ''),
     emotional_tone: String(card?.emotional_tone || card?.emotionalTone || card?.tone || ''),
     emotional_arc_stage: String(card?.emotional_arc_stage || card?.emotionalArcStage || card?.emotion_stage || card?.emotionStage || ''),
     reader_emotion_goal: String(card?.reader_emotion_goal || card?.readerEmotionGoal || ''),
@@ -47485,7 +47545,54 @@ function deliveryRiskCharacterRelationActions(carryOvers: any[]) {
     ...asArray(carryOver?.ending_actions),
   ])
     .map((item: any) => deliveryRiskItemText(item))
-    .filter((item: string) => /角色关系|character_relation|关系弧线|关系考验|合作互信.{0,16}边界|仍有边界|独立目标|主动作证|目标归属|配角期待枢纽|人物扣|态度变化|关系角色/i.test(item)), 8)
+    .filter((item: string) => /角色关系|character_relation|关系弧线|关系考验|合作互信.{0,16}边界|仍有边界|独立目标|主动作证|目标归属|配角期待枢纽|人物扣|配角攻略缓冲区|信息差|地位差距|亲密度差距|信任程度|NPC|站桩|态度变化|旁观\/质疑|关系角色/i.test(item)), 8)
+}
+
+function characterRelationSceneProgressionPlan(actions: string[], index: number, firstIndex: number, middleIndex: number, lastIndex: number) {
+  const actionText = compactBriefText(actions.join('；'), 240)
+  if (firstIndex === lastIndex) {
+    return {
+      progression: `关系类型/边界：明确当前关系类型、互信程度和阶段边界；${actionText}`,
+      buffer: '配角攻略缓冲区：保留信息差、地位差距、亲密度差距或信任程度之一，不能一次性交出全部信任。',
+      action: '配角主动行动：带着自己的目标、责任或风险行动，不站桩等主角触发。',
+      shift: '态度变化拐点：从旁观/质疑/拒绝/试探转为行动/协助/设限，并写出代价。',
+      nextHook: '关系下一轮期待：主角解决事件后回到配角任务基地，开启下一轮任务、线索或关系压力。',
+    }
+  }
+  if (index === firstIndex) {
+    return {
+      progression: `关系类型/边界：先让读者知道当前是冲突/联盟/亲密/权威哪一类，以及互信但仍有边界；${actionText}`,
+      buffer: '配角攻略缓冲区：保留信息差、地位差距、亲密度差距或信任程度之一，给后续态度变化留期待。',
+      action: '',
+      shift: '',
+      nextHook: '',
+    }
+  }
+  if (index === middleIndex) {
+    return {
+      progression: `关系压力测试：让双方独立目标在同一场事件里互相摩擦或互补；${actionText}`,
+      buffer: '配角攻略缓冲区：不要让关系一步到位，关键资料、信任、身份或亲密动作至少留一个未完全开放。',
+      action: '配角主动行动：配角带着自己的目标、动机、资源或代价先行动，而不是站在旁边等主角触发。',
+      shift: '态度变化拐点：写清从旁观/质疑/拒绝/试探到行动/协助/设限的变化。',
+      nextHook: '',
+    }
+  }
+  if (index === lastIndex) {
+    return {
+      progression: `关系阶段收束：交付本章态度变化、信任变化、利益变化或阶段边界；${actionText}`,
+      buffer: '',
+      action: '配角主动行动后必须留下代价、责任或新限制，不能只负责夸赞和陪伴。',
+      shift: '态度变化拐点：用动作、证词、边界或代价证明关系已经变化。',
+      nextHook: '关系下一轮期待：主角解决事件后回到配角任务基地，开启下一轮任务、线索或关系压力；人物下线时带来更大好处。',
+    }
+  }
+  return {
+    progression: `关系过渡：承接上一场边界，补一处新信息、关系压力或独立目标摩擦；${actionText}`,
+    buffer: '配角攻略缓冲区：保留信息差、地位差距、亲密度差距或信任程度。',
+    action: '配角主动行动：不能只是被主角带着走。',
+    shift: '',
+    nextHook: '',
+  }
 }
 
 function deliveryRiskStoryLoopActions(carryOvers: any[]) {
@@ -48624,9 +48731,18 @@ function applyDeliveryRiskCarryOverToSceneCards(sceneCards: any[], contextPackag
       if (index === lastIndex) next.ending_hook_seed = appendSceneCardText(next.ending_hook_seed, plotDynamicsActions)
     }
     if (characterRelationActions.length) {
+      const relationPlan = characterRelationSceneProgressionPlan(characterRelationActions, index, firstIndex, middleIndex, lastIndex)
+      next.relationship_progression_plan = appendSceneCardText(next.relationship_progression_plan, [relationPlan.progression], 360)
+      if (relationPlan.buffer) next.relationship_buffer_zone = appendSceneCardText(next.relationship_buffer_zone, [relationPlan.buffer], 280)
+      if (relationPlan.action) next.supporting_character_action = appendSceneCardText(next.supporting_character_action, [relationPlan.action], 280)
+      if (relationPlan.shift) next.attitude_shift_checkpoint = appendSceneCardText(next.attitude_shift_checkpoint, [relationPlan.shift], 280)
+      if (relationPlan.nextHook) next.relationship_next_hook = appendSceneCardText(next.relationship_next_hook, [relationPlan.nextHook], 300)
       next.action_beats = mergeSceneCardStringList(next.action_beats, characterRelationActions)
       next.character_voice = appendSceneCardText(next.character_voice, characterRelationActions)
       next.state_changes_expected = mergeSceneCardStringList(next.state_changes_expected, characterRelationActions)
+      if (index === firstIndex) next.required_information = mergeSceneCardStringList(next.required_information, [relationPlan.buffer])
+      if (index === middleIndex) next.action_beats = mergeSceneCardStringList(next.action_beats, [relationPlan.action, relationPlan.shift])
+      if (index === lastIndex) next.ending_hook_seed = appendSceneCardText(next.ending_hook_seed, [relationPlan.nextHook])
     }
     if (storyLoopActions.length) {
       next.purpose_tags = mergeSceneCardStringList(next.purpose_tags, storyLoopActions)
@@ -49167,7 +49283,7 @@ export function createNovelWritingService(ctx: {
     '【结构化上下文包】',
     JSON.stringify(contextPackage, null, 2).slice(0, 9000),
     '',
-    '输出 JSON，字段 scene_cards(array)。每个场景卡包含：scene_no, title, scene_type, location, characters_present(array), purpose_tag, purpose_tags(array), purpose, conflict, required_beats(array), action_beats(array), beat, opening_hook, reader_payoff, fear_point, rule_pressure, information_gap, reversal, ending_hook_seed, character_voice, dialogue_goals(array), style_directives(array), benchmark_recall_directives(array), concept_anchor_rules(array), prose_craft_directives(array), sensory_anchor, serial_risk_repairs(array), recent_fatigue_action, emotional_tone, key_dialogue, dialogue_goal, required_information(array), used_settings(array), revealed_settings(array), forbidden_settings(array), ability_beats(array), item_beats(array), boss_move, rule_trigger, state_changes_expected(array), turning_point, description_budget, density_level, transition_from_previous, exit_state。',
+    '输出 JSON，字段 scene_cards(array)。每个场景卡包含：scene_no, title, scene_type, location, characters_present(array), purpose_tag, purpose_tags(array), purpose, conflict, required_beats(array), action_beats(array), beat, opening_hook, reader_payoff, fear_point, rule_pressure, information_gap, reversal, ending_hook_seed, character_voice, dialogue_goals(array), style_directives(array), benchmark_recall_directives(array), concept_anchor_rules(array), prose_craft_directives(array), relationship_progression_plan, relationship_buffer_zone, supporting_character_action, attitude_shift_checkpoint, relationship_next_hook, sensory_anchor, serial_risk_repairs(array), recent_fatigue_action, emotional_tone, key_dialogue, dialogue_goal, required_information(array), used_settings(array), revealed_settings(array), forbidden_settings(array), ability_beats(array), item_beats(array), boss_move, rule_trigger, state_changes_expected(array), turning_point, description_budget, density_level, transition_from_previous, exit_state。',
     'scene_type 只能取：action/combat/chase/investigation/dialogue/reveal/emotion/transition/hook。凡是本章有战斗、追逐、灾祸、清剿、冲突升级，必须至少有一个 action/combat/chase 场景。',
     '商业读者钩子：每个场景至少落实 opening_hook/reader_payoff/fear_point/rule_pressure/information_gap/reversal/ending_hook_seed 中的一项，不允许只写剧情摘要。',
     '近章连载风险：如果 contextPackage.chapter_target.recent_fatigue_brief 存在，必须在场景卡阶段读取 recent_fatigue_brief.risk_signals 与 recent_fatigue_brief.next_actions；正文生成前先把 two_chapter_momentum_stall、five_chapter_texture_gap、conflict_thrill_overrun 等风险转成可执行场景安排。',
@@ -49185,6 +49301,7 @@ export function createNovelWritingService(ctx: {
     '前三章第一场必须有 opening_hook；最后一个场景必须有 ending_hook_seed；规则怪谈、恐怖、悬疑类章节必须把 rule_pressure 与 fear_point 写成具体可见风险。',
     'reader_payoff 要说明这一场给读者的爽点、惊点、信息回收或关系变化；character_voice 要标出主要角色的差异化说话方式。',
     '对白/文风/正文工艺：如果 chapter_target.dialogue_contract、benchmark_recall_brief、style_boundary_contract 或 prose_craft_contract 存在，必须把相关要求拆进对应场景的 dialogue_goals、style_directives、benchmark_recall_directives、concept_anchor_rules 或 prose_craft_directives；新名词/新设定首次出现的场景必须写 concept_anchor_rules，要求用动作反应、对话半句或物理后果建立当下作用锚点，禁止整段来历/等级解释。',
+    '角色关系推进：如果 chapter_target.character_relation_contract、delivery_risk_carry_over 或上一章诊断提示角色关系缺口，必须把关系修复拆进 relationship_progression_plan、relationship_buffer_zone、supporting_character_action、attitude_shift_checkpoint、relationship_next_hook；配角攻略缓冲区必须保留信息差、地位差距、亲密度差距或信任程度，配角要主动行动，关键拐点要写清从旁观/质疑/拒绝/试探到行动/协助/设限的态度变化。',
     'action_beats 必须写成可见动作链：起手/试探/受阻/受伤或代价/反制/结果。非动作场景也要写 required_beats，避免只写氛围。',
     'description_budget 写 low/medium/high。默认 low；只有新地点首次登场或诡异规则首次显形时才允许 medium/high。',
     '疏密分配：每个场景必须写 density_level，取 dense/medium/sparse，并与 purpose_tag 一致。',
@@ -50842,7 +50959,7 @@ export function createNovelWritingService(ctx: {
       '2. 每个场景必须完成 purpose、conflict、required_beats、required_information、turning_point 和 exit_state；不能只写气氛、设定说明或心理总结。',
       '2+. 场景执行门禁：每个 scene_cards 必须按 goal -> obstacle -> action -> turn -> payoff -> state_delta 写成因果链；turn 必须优先来自 turning_point/reversal/information_gain，payoff 必须优先来自 reader_payoff/core_payoff/scene_payoff_budget，state_delta 必须写清本场景改变了角色、资产、关系、伏笔、规则或读者期待中的哪一项。',
       '2A. 每个场景必须把 opening_hook、reader_payoff、fear_point、rule_pressure、information_gap、reversal、ending_hook_seed、character_voice 中已有的商业意图落实到正文里；这些字段不是备注，必须转成动作、对话、危险、反转或章末疑问。',
-      '2A+. 执行 scene_cards.dialogue_goals、scene_cards.style_directives、scene_cards.benchmark_recall_directives、scene_cards.concept_anchor_rules 和 scene_cards.prose_craft_directives：对白目标必须变成角色差异化对话和潜台词，文风/对标召回只学习节奏与句式呼吸，新名词/新设定首次出现必须用动作反应、对话半句或物理后果建立当下作用锚点，不得写整段来历、原理或等级说明。',
+      '2A+. 执行 scene_cards.dialogue_goals、scene_cards.style_directives、scene_cards.benchmark_recall_directives、scene_cards.concept_anchor_rules、scene_cards.prose_craft_directives、scene_cards.relationship_progression_plan、scene_cards.relationship_buffer_zone、scene_cards.supporting_character_action、scene_cards.attitude_shift_checkpoint 和 scene_cards.relationship_next_hook：对白目标必须变成角色差异化对话和潜台词，文风/对标召回只学习节奏与句式呼吸，新名词/新设定首次出现必须用动作反应、对话半句或物理后果建立当下作用锚点，不得写整段来历、原理或等级说明；关系推进必须写出关系类型/边界、配角攻略缓冲区、配角主动行动、从旁观/质疑/拒绝/试探到行动/协助/设限的态度变化，以及下一轮关系期待。',
       '2A+. 如果存在 chapter_target.previous_handoff 或 continuity.previous_chapter，开篇前 300 字必须承接上一章最后一幕或章末钩子，先处理连续危机、角色反应和期待欠账，再展开新的场景信息。',
       '2A++. 执行 chapter_target.delivery_risk_carry_over：上一章交稿后残留的吸引力、追读、创新、故事力、剧情线、强场面或可读性风险，必须在本章变成可见修复动作；尤其优先级指向开篇或章末时，必须在前 300 字或最后 300 字落地。',
       '2B. 执行 chapter_target.reader_retention_brief：开篇钩子必须在前 300 字落地；爽点承诺、信息缺口、情绪回报和短剧化场面必须转成可见行动；retention_double_engine 必须按留存=情绪+饥饿落地，情绪让读者快速代入，饥饿用信息差植入问号并按剥洋葱把关键信息卡到章末；retention_pillars 必须按留存四大支柱落地，升级、资源困境、目标、解密至少两项要转成正文证据；hook_addiction_model 必须按触发 -> 行动 -> 奖励 -> 投入落地，并用奖励随机性给出出乎意料的额外收获或沉没投入；章末追读问题必须压到最后一幕。',
@@ -50910,7 +51027,7 @@ export function createNovelWritingService(ctx: {
       defaultFiveChapterLaneRedesign ? '输出附加要求：如果存在 default_five_chapter_lane_redesign，expansion_structure_decision_execution 还必须包含 default_lane_segment_duty_delivered、default_lane_conflict_rotation_delivered、default_lane_payoff_density_delivered、default_lane_ending_hook_template_delivered，并分别给出 evidence。' : '',
       defaultFiveChapterLaneTemplate ? '输出附加要求：如果存在 default_five_chapter_lane_template，expansion_structure_decision_execution 必须继续包含 default_lane_segment_duty_delivered、default_lane_conflict_rotation_delivered、default_lane_payoff_density_delivered、default_lane_ending_hook_template_delivered，并用 evidence 说明四项模板在验证批中没有复发。' : '',
       chapterBlueprint ? '输出附加要求：scene_breakdown 必须包含 blueprint_receipts，逐项回填 target_emotion、opening_hook、core_payoff、content_outline、plot_lines、character_order、beat_sequence、beat_density_contract、cost_and_reward、ending_contract 是否在正文兑现，并给出 evidence 摘要。' : '',
-      '输出附加要求：scene_breakdown 每个场景必须包含 scene_start_anchor、scene_end_anchor 和 scene_card_receipts；scene_start_anchor/scene_end_anchor 必须摘自该场景正文的起止短句，用来定位该场景文本。scene_card_receipts 字段至少包含 scene_goal, obstacle, action, turn, payoff, state_delta, goal_obstacle_change_delivered(boolean)、purpose_tag_delivered(boolean)、density_level_delivered(boolean)、sensory_anchor_delivered(boolean)、serial_risk_repairs_delivered(boolean)、required_beats_delivered(boolean)、action_beats_delivered(boolean)、dialogue_goals_delivered(boolean)、style_directives_delivered(boolean)、benchmark_recall_directives_delivered(boolean)、concept_anchor_rules_delivered(boolean)、prose_craft_directives_delivered(boolean)、evidence(array)。evidence 必须摘录对应场景正文中的动作、对话、信息变化、关系变化、对白声线或新概念锚点证据，不能只写“已完成”，不能借用其他场景的证据。',
+      '输出附加要求：scene_breakdown 每个场景必须包含 scene_start_anchor、scene_end_anchor 和 scene_card_receipts；scene_start_anchor/scene_end_anchor 必须摘自该场景正文的起止短句，用来定位该场景文本。scene_card_receipts 字段至少包含 scene_goal, obstacle, action, turn, payoff, state_delta, goal_obstacle_change_delivered(boolean)、purpose_tag_delivered(boolean)、density_level_delivered(boolean)、sensory_anchor_delivered(boolean)、serial_risk_repairs_delivered(boolean)、required_beats_delivered(boolean)、action_beats_delivered(boolean)、dialogue_goals_delivered(boolean)、style_directives_delivered(boolean)、benchmark_recall_directives_delivered(boolean)、concept_anchor_rules_delivered(boolean)、prose_craft_directives_delivered(boolean)、relationship_progression_delivered(boolean)、relationship_buffer_zone_delivered(boolean)、supporting_character_action_delivered(boolean)、attitude_shift_delivered(boolean)、relationship_next_hook_delivered(boolean)、evidence(array)。evidence 必须摘录对应场景正文中的动作、对话、信息变化、关系变化、对白声线、新概念锚点、配角主动行动、缓冲区或态度变化证据，不能只写“已完成”，不能借用其他场景的证据。',
       '输出附加要求：必须在章节对象顶层输出 oh_story_delivery_receipts，用于后续诊断和修复闭环落库。oh_story_delivery_receipts 必须包含 chapter_blueprint、scene_card_receipts、delivery_risk_receipts、revision_receipts、pre_draft_execution_receipts；chapter_blueprint 记录本章蓝图兑现状态，scene_card_receipts 汇总每个场景的场景卡执行回执，delivery_risk_receipts 逐项记录上一章/批次交稿风险是否已兑现，revision_receipts 记录本轮生成中主动修正过的结构、连续性、资产或文风问题，pre_draft_execution_receipts 记录状态筛选、项目产物协议、写前准备、意图确认、文风召回和上一章质量续航计划是否真正落入正文。',
       stateTrackingContract ? '输出附加要求：oh_story_delivery_receipts.pre_draft_execution_receipts.status_filter_receipts 必须逐项覆盖【状态筛选合同】中的角色状态、相关伏笔/前史、世界约束、filter_rules 和 source_requirements；每项包含 key,label,used_in_chapter,evidence,excluded_reason,remaining_risk，证明只加载/只使用会影响本章正确性的状态，未使用的信息必须写明为何不会导致本章写错。' : '',
       stateTrackingContract ? '输出附加要求：oh_story_delivery_receipts.pre_draft_execution_receipts.source_readiness_checks 必须逐项覆盖【来源就绪表】；每项包含 key,label,status(pass|warn|fail),evidence,fix，证明 ready 来源已在正文可见承接，missing/warn 来源没有被当作既定事实使用。' : '',
