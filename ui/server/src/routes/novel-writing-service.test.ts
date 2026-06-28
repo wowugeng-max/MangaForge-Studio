@@ -343,6 +343,31 @@ describe('normalizeSceneCardsPayload', () => {
     expect(source).toContain('prose_craft_directives(array)')
   })
 
+  test('preserves showdown scene-card public payoff and combat execution fields', () => {
+    const sceneCards = normalizeSceneCardsPayload({
+      scene_cards: [
+        {
+          title: '审判台反压',
+          purpose: '主角公开亮出第二本账册完成打脸。',
+          showoffStageChain: '群众层质疑 -> 中间层验账 -> 核心层长老改判。',
+          spectatorInterestShift: '旁观商户意识到旧账规则会影响自己的矿票资格。',
+          secondaryShowoffEffect: '展示不只让人震惊，还迫使长老席重算利益和站队。',
+          combatResultType: '碾压',
+          combatDimensionPlan: '心/体/技：心态稳住审判台，技能拆账，身体挡住护卫逼近。',
+          combatReversalPlan: '反派出A假账册，主角提前准备B原始封印克制，反派针对A时被引进预设B。',
+        },
+      ],
+    })
+
+    expect(sceneCards[0].showoff_stage_chain).toContain('群众层')
+    expect(sceneCards[0].spectator_interest_shift).toContain('这跟我有关系')
+    expect(sceneCards[0].spectator_interest_shift).toContain('矿票资格')
+    expect(sceneCards[0].secondary_showoff_effect).toContain('重算利益')
+    expect(sceneCards[0].combat_result_type).toBe('碾压')
+    expect(sceneCards[0].combat_dimension_plan).toContain('心/体/技')
+    expect(sceneCards[0].combat_reversal_plan).toContain('反派出A')
+  })
+
   test('asks scene-card generation to emit character relation progression fields', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const promptStart = source.indexOf('const buildSceneCardsPrompt =')
@@ -401,6 +426,35 @@ describe('normalizeSceneCardsPayload', () => {
     expect(sceneCards[0].visible_line_role).toContain('明线')
     expect(sceneCards[0].hidden_line_seed).toContain('暗线')
     expect(sceneCards[0].ab_weave_role).toContain('B线拉出矛盾')
+  })
+
+  test('asks scene-card generation to split showdown contracts into public payoff and combat presets', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const promptStart = source.indexOf('const buildSceneCardsPrompt =')
+    const promptEnd = source.indexOf('const buildHeuristicSettingUsage =', promptStart)
+    const promptBlock = source.slice(promptStart, promptEnd)
+    const proseStart = source.indexOf('const buildParagraphProseContext =')
+    const proseEnd = source.indexOf('const reviewPrompt', proseStart)
+    const proseBlock = source.slice(proseStart, proseEnd)
+
+    expect(promptStart).toBeGreaterThanOrEqual(0)
+    expect(promptBlock).toContain('chapter_target.showdown_contract')
+    expect(promptBlock).toContain('showoff_stage_chain')
+    expect(promptBlock).toContain('spectator_interest_shift')
+    expect(promptBlock).toContain('secondary_showoff_effect')
+    expect(promptBlock).toContain('combat_result_type')
+    expect(promptBlock).toContain('combat_dimension_plan')
+    expect(promptBlock).toContain('combat_reversal_plan')
+    expect(promptBlock).toContain('群众层 -> 中间层 -> 核心层')
+    expect(promptBlock).toContain('这跟我有关系')
+    expect(promptBlock).toContain('碾压 / 以弱胜强 / 逃走进入第二阶段')
+    expect(promptBlock).toContain('心/体/技')
+    expect(proseBlock).toContain('scene_cards.showoff_stage_chain')
+    expect(proseBlock).toContain('scene_cards.spectator_interest_shift')
+    expect(proseBlock).toContain('scene_cards.secondary_showoff_effect')
+    expect(proseBlock).toContain('scene_cards.combat_result_type')
+    expect(proseBlock).toContain('scene_cards.combat_dimension_plan')
+    expect(proseBlock).toContain('scene_cards.combat_reversal_plan')
   })
 
   test('asks scene-card generation to split conflict-structure contracts into per-scene execution fields', () => {
@@ -5406,6 +5460,39 @@ describe('normalizeSceneCardsPayload', () => {
     expect(relationDirective?.fix).toContain('配角')
   })
 
+  test('detects scene-card showdown public payoff and combat presets missing from final prose', () => {
+    const checks = buildSceneCardConsumptionChecks({
+      chapter_target: {
+        scene_cards: [
+          {
+            scene_no: 1,
+            title: '审判台反压',
+            purpose: '江辰公开亮出第二本账册完成打脸。',
+            conflict: '会长逼众人相信旧账本是铁证。',
+            reader_payoff: '主角公开反压会长。',
+            showoff_stage_chain: '群众层质疑 -> 中间层验账 -> 核心层长老改判。',
+            spectator_interest_shift: '这跟我有关系：旁观商户意识到旧账规则会影响自己的矿票资格。',
+            secondary_showoff_effect: '二级装逼效果：展示迫使长老席重算利益和站队。',
+            combat_result_type: '碾压',
+            combat_dimension_plan: '心/体/技：心态稳住审判台，技能拆账，身体挡住护卫逼近。',
+            combat_reversal_plan: '反派出A假账册，主角提前准备B原始封印克制。',
+          },
+        ],
+      },
+    }, [
+      '审判台反压这一场，江辰公开亮出第二本账册。',
+      '会长脸色一白，台下众人震惊。',
+      '长老席沉默片刻，只说重新验账。',
+    ].join('\n'))
+
+    const showdownDirective = checks.find(check => check.key === 'scene_card_1_execution_directives')
+    expect(showdownDirective?.evidence).toContain('群众层质疑')
+    expect(showdownDirective?.evidence).toContain('矿票资格')
+    expect(showdownDirective?.evidence).toContain('心/体/技')
+    expect(showdownDirective?.fix).toContain('公开舞台')
+    expect(showdownDirective?.fix).toContain('战斗反制')
+  })
+
   test('detects scene-card forbidden craft directives violated in final prose', () => {
     const checks = buildSceneCardConsumptionChecks({
       chapter_target: {
@@ -5838,6 +5925,31 @@ describe('normalizeSceneCardsPayload', () => {
     expect(checks[0].key).toBe('scene_card_receipt_1_undelivered')
     expect(checks[0].fields).toEqual(expect.arrayContaining(['新概念锚点', '正文工艺指令']))
     expect(checks[0].evidence).toContain('新概念锚点')
+  })
+
+  test('detects undelivered showdown scene-card receipt fields', () => {
+    const checks = scanSceneCardReceiptRisks({
+      generated_scene_breakdown: [
+        {
+          scene_no: 1,
+          title: '审判台反压',
+          scene_card_receipts: {
+            showoff_stage_chain_delivered: false,
+            spectator_interest_shift_delivered: false,
+            secondary_showoff_effect_delivered: false,
+            combat_result_type_delivered: false,
+            combat_dimension_plan_delivered: false,
+            combat_reversal_plan_delivered: false,
+            evidence: ['江辰公开亮出第二本账册。'],
+          },
+        },
+      ],
+    }, '江辰公开亮出第二本账册。')
+
+    expect(checks).toHaveLength(1)
+    expect(checks[0].key).toBe('scene_card_receipt_1_undelivered')
+    expect(checks[0].fields).toEqual(expect.arrayContaining(['公开舞台层级', '旁观者利益变化', '战斗维度计划', '战斗反转计划']))
+    expect(checks[0].evidence).toContain('公开舞台层级')
   })
 
   test('blocks quality gate when scene-card receipt evidence is missing even if score passes', () => {

@@ -5418,6 +5418,7 @@ function normalizeBatchChapterHandoffContract(value: any) {
 }
 
 function sceneBriefFromCard(card: any, index: number) {
+  const spectatorInterestShift = compactBriefText(card?.spectator_interest_shift || card?.spectatorInterestShift)
   return {
     scene_no: Number(card?.scene_no || index + 1),
     title: compactBriefText(card?.title, `场景${index + 1}`),
@@ -5455,6 +5456,14 @@ function sceneBriefFromCard(card: any, index: number) {
     supporting_character_action: compactBriefText(card?.supporting_character_action || card?.supportingCharacterAction),
     attitude_shift_checkpoint: compactBriefText(card?.attitude_shift_checkpoint || card?.attitudeShiftCheckpoint),
     relationship_next_hook: compactBriefText(card?.relationship_next_hook || card?.relationshipNextHook),
+    showoff_stage_chain: compactBriefText(card?.showoff_stage_chain || card?.showoffStageChain),
+    spectator_interest_shift: spectatorInterestShift && !/这跟我有关系/.test(spectatorInterestShift)
+      ? compactBriefText(`这跟我有关系：${spectatorInterestShift}`)
+      : spectatorInterestShift,
+    secondary_showoff_effect: compactBriefText(card?.secondary_showoff_effect || card?.secondaryShowoffEffect),
+    combat_result_type: compactBriefText(card?.combat_result_type || card?.combatResultType),
+    combat_dimension_plan: compactBriefText(card?.combat_dimension_plan || card?.combatDimensionPlan),
+    combat_reversal_plan: compactBriefText(card?.combat_reversal_plan || card?.combatReversalPlan),
     emotional_tone: compactBriefText(card?.emotional_tone || card?.emotionalTone || card?.tone),
     emotional_arc_stage: compactBriefText(card?.emotional_arc_stage || card?.emotionalArcStage || card?.emotion_stage || card?.emotionStage),
     reader_emotion_goal: compactBriefText(card?.reader_emotion_goal || card?.readerEmotionGoal),
@@ -22989,10 +22998,16 @@ function sceneCardExecutionDirectiveParts(scene: any) {
     scene?.supporting_character_action || scene?.supportingCharacterAction,
     scene?.attitude_shift_checkpoint || scene?.attitudeShiftCheckpoint,
     scene?.relationship_next_hook || scene?.relationshipNextHook,
+    scene?.showoff_stage_chain || scene?.showoffStageChain,
+    scene?.spectator_interest_shift || scene?.spectatorInterestShift,
+    scene?.secondary_showoff_effect || scene?.secondaryShowoffEffect,
+    scene?.combat_result_type || scene?.combatResultType,
+    scene?.combat_dimension_plan || scene?.combatDimensionPlan,
+    scene?.combat_reversal_plan || scene?.combatReversalPlan,
   ].map((item: any) => compactBriefText(item)).filter(Boolean)
   return uniqueBriefStrings(directives.filter(item => {
     if (/^(不得|不能|不要|禁止|严禁|避免|不可)/.test(item)) return false
-    return /新概念|新名词|新设定|首次出现|动作反应|对话半句|物理后果|作用锚点|对白|对话|潜台词|说漏|逼问|声线|科普嘴|关系类型|关系边界|关系阶段|关系推进|配角攻略缓冲区|信息差|地位差距|亲密度差距|信任程度|配角主动行动|独立目标|态度变化|旁观|质疑|拒绝|试探|协助|设限|关系下一轮|任务基地|下一轮期待/.test(item)
+    return /新概念|新名词|新设定|首次出现|动作反应|对话半句|物理后果|作用锚点|对白|对话|潜台词|说漏|逼问|声线|科普嘴|关系类型|关系边界|关系阶段|关系推进|配角攻略缓冲区|信息差|地位差距|亲密度差距|信任程度|配角主动行动|独立目标|态度变化|旁观|质疑|拒绝|试探|协助|设限|关系下一轮|任务基地|下一轮期待|群众层|中间层|核心层|这跟我有关系|利益|目标|站队|计划|二级装逼|公开舞台|公开打脸|长老席|旁观者|战斗维度|心\/体\/技|反派出A|主角提前准备B|预判反制|反预判|碾压|以弱胜强|逃走进入第二阶段/.test(item)
   }), 10)
 }
 
@@ -23048,7 +23063,7 @@ export function buildSceneCardConsumptionChecks(contextPackage: any = {}, chapte
           status: 'warn',
           score: combinedDirectiveScore,
           evidence: `场景${sceneNo}《${compactBriefText(scene?.title || scene?.purpose || '', 36)}》未充分兑现 oh-story 执行指令：${compactBriefText(missedDirectives.map(item => item.part).join('；'), 180)}`,
-          fix: '按场景卡补回对白目标、新概念锚点或角色关系推进：用角色差异化对话、潜台词、动作反应、对话半句、物理后果、配角主动行动、缓冲区和态度变化证明执行，不要只写来历说明或旁白概括。',
+          fix: '按场景卡补回对白目标、新概念锚点、角色关系推进、公开舞台层级、旁观者利益变化和战斗反制：用角色差异化对话、潜台词、动作反应、对话半句、物理后果、配角主动行动、缓冲区、态度变化、群众层/中间层/核心层反应、利益站队变化、心/体/技维度和预判反制证明执行，不要只写来历说明或旁白概括。',
           matched: directiveMatches.flatMap(item => asArray(item.match.matched).map((match: any) => String(match))).slice(0, 8),
         })
       }
@@ -23221,6 +23236,12 @@ export function scanSceneCardReceiptRisks(contextPackage: any = {}, chapterText:
     ['benchmark_recall_directives_delivered', 'benchmarkRecallDirectivesDelivered', '文风召回指令'],
     ['concept_anchor_rules_delivered', 'conceptAnchorRulesDelivered', '新概念锚点'],
     ['prose_craft_directives_delivered', 'proseCraftDirectivesDelivered', '正文工艺指令'],
+    ['showoff_stage_chain_delivered', 'showoffStageChainDelivered', '公开舞台层级'],
+    ['spectator_interest_shift_delivered', 'spectatorInterestShiftDelivered', '旁观者利益变化'],
+    ['secondary_showoff_effect_delivered', 'secondaryShowoffEffectDelivered', '二级装逼效果'],
+    ['combat_result_type_delivered', 'combatResultTypeDelivered', '战斗结果类型'],
+    ['combat_dimension_plan_delivered', 'combatDimensionPlanDelivered', '战斗维度计划'],
+    ['combat_reversal_plan_delivered', 'combatReversalPlanDelivered', '战斗反转计划'],
   ] as const
 
   breakdown.forEach((scene: any, index: number) => {
@@ -39750,6 +39771,18 @@ function buildShowdownContract(project: any = {}, contextPackage: any = {}) {
       scene.reversal,
       scene.turning_point,
       scene.ending_hook_seed,
+      scene.showoff_stage_chain,
+      scene.showoffStageChain,
+      scene.spectator_interest_shift,
+      scene.spectatorInterestShift,
+      scene.secondary_showoff_effect,
+      scene.secondaryShowoffEffect,
+      scene.combat_result_type,
+      scene.combatResultType,
+      scene.combat_dimension_plan,
+      scene.combatDimensionPlan,
+      scene.combat_reversal_plan,
+      scene.combatReversalPlan,
       ...asArray(scene.action_beats || scene.actionBeats),
     ]),
   ].filter(Boolean).join(' ')
@@ -48633,6 +48666,12 @@ export function normalizeSceneCardsPayload(payload: any, contextPackage: any = {
         reversal: outline?.reversal || outline?.turning_point || '',
         ending_hook_seed: outline?.ending_hook_seed || outline?.ending_hook || '',
         character_voice: outline?.character_voice || '',
+        showoff_stage_chain: outline?.showoff_stage_chain || outline?.showoffStageChain || '',
+        spectator_interest_shift: outline?.spectator_interest_shift || outline?.spectatorInterestShift || '',
+        secondary_showoff_effect: outline?.secondary_showoff_effect || outline?.secondaryShowoffEffect || '',
+        combat_result_type: outline?.combat_result_type || outline?.combatResultType || '',
+        combat_dimension_plan: outline?.combat_dimension_plan || outline?.combatDimensionPlan || '',
+        combat_reversal_plan: outline?.combat_reversal_plan || outline?.combatReversalPlan || '',
         sensory_anchor: outline?.sensory_anchor || outline?.sensoryAnchor || '',
         serial_risk_repairs: asArray(outline?.serial_risk_repairs || outline?.serialRiskRepairs || outline?.risk_repairs || outline?.riskRepairs),
         recent_fatigue_action: outline?.recent_fatigue_action || outline?.recentFatigueAction || outline?.fatigue_repair_action || outline?.fatigueRepairAction || '',
@@ -48685,6 +48724,15 @@ export function normalizeSceneCardsPayload(payload: any, contextPackage: any = {
     supporting_character_action: String(card?.supporting_character_action || card?.supportingCharacterAction || ''),
     attitude_shift_checkpoint: String(card?.attitude_shift_checkpoint || card?.attitudeShiftCheckpoint || ''),
     relationship_next_hook: String(card?.relationship_next_hook || card?.relationshipNextHook || ''),
+    showoff_stage_chain: String(card?.showoff_stage_chain || card?.showoffStageChain || ''),
+    spectator_interest_shift: (() => {
+      const shift = String(card?.spectator_interest_shift || card?.spectatorInterestShift || '')
+      return shift && !/这跟我有关系/.test(shift) ? `这跟我有关系：${shift}` : shift
+    })(),
+    secondary_showoff_effect: String(card?.secondary_showoff_effect || card?.secondaryShowoffEffect || ''),
+    combat_result_type: String(card?.combat_result_type || card?.combatResultType || ''),
+    combat_dimension_plan: String(card?.combat_dimension_plan || card?.combatDimensionPlan || ''),
+    combat_reversal_plan: String(card?.combat_reversal_plan || card?.combatReversalPlan || ''),
     emotional_tone: String(card?.emotional_tone || card?.emotionalTone || card?.tone || ''),
     emotional_arc_stage: String(card?.emotional_arc_stage || card?.emotionalArcStage || card?.emotion_stage || card?.emotionStage || ''),
     reader_emotion_goal: String(card?.reader_emotion_goal || card?.readerEmotionGoal || ''),
@@ -50822,7 +50870,7 @@ export function createNovelWritingService(ctx: {
     '【结构化上下文包】',
     JSON.stringify(contextPackage, null, 2).slice(0, 9000),
     '',
-    '输出 JSON，字段 scene_cards(array)。每个场景卡包含：scene_no, title, scene_type, location, characters_present(array), purpose_tag, purpose_tags(array), purpose, conflict, conflict_ladder_step, motivation_source, opposing_force, blocked_desire, protagonist_agency_action, no_exit_reason, event_value_change, next_conflict_seed, visible_line_role, hidden_line_seed, ab_weave_role, required_beats(array), action_beats(array), beat, opening_hook, reader_payoff, fear_point, rule_pressure, information_gap, reversal, ending_hook_seed, character_voice, dialogue_goals(array), style_directives(array), benchmark_recall_directives(array), concept_anchor_rules(array), prose_craft_directives(array), relationship_progression_plan, relationship_buffer_zone, supporting_character_action, attitude_shift_checkpoint, relationship_next_hook, sensory_anchor, serial_risk_repairs(array), recent_fatigue_action, emotional_tone, key_dialogue, dialogue_goal, required_information(array), used_settings(array), revealed_settings(array), forbidden_settings(array), ability_beats(array), item_beats(array), boss_move, rule_trigger, state_changes_expected(array), turning_point, description_budget, density_level, transition_from_previous, exit_state。',
+    '输出 JSON，字段 scene_cards(array)。每个场景卡包含：scene_no, title, scene_type, location, characters_present(array), purpose_tag, purpose_tags(array), purpose, conflict, conflict_ladder_step, motivation_source, opposing_force, blocked_desire, protagonist_agency_action, no_exit_reason, event_value_change, next_conflict_seed, visible_line_role, hidden_line_seed, ab_weave_role, required_beats(array), action_beats(array), beat, opening_hook, reader_payoff, fear_point, rule_pressure, information_gap, reversal, ending_hook_seed, character_voice, dialogue_goals(array), style_directives(array), benchmark_recall_directives(array), concept_anchor_rules(array), prose_craft_directives(array), relationship_progression_plan, relationship_buffer_zone, supporting_character_action, attitude_shift_checkpoint, relationship_next_hook, showoff_stage_chain, spectator_interest_shift, secondary_showoff_effect, combat_result_type, combat_dimension_plan, combat_reversal_plan, sensory_anchor, serial_risk_repairs(array), recent_fatigue_action, emotional_tone, key_dialogue, dialogue_goal, required_information(array), used_settings(array), revealed_settings(array), forbidden_settings(array), ability_beats(array), item_beats(array), boss_move, rule_trigger, state_changes_expected(array), turning_point, description_budget, density_level, transition_from_previous, exit_state。',
     'scene_type 只能取：action/combat/chase/investigation/dialogue/reveal/emotion/transition/hook。凡是本章有战斗、追逐、灾祸、清剿、冲突升级，必须至少有一个 action/combat/chase 场景。',
     '商业读者钩子：每个场景至少落实 opening_hook/reader_payoff/fear_point/rule_pressure/information_gap/reversal/ending_hook_seed 中的一项，不允许只写剧情摘要。',
     '近章连载风险：如果 contextPackage.chapter_target.recent_fatigue_brief 存在，必须在场景卡阶段读取 recent_fatigue_brief.risk_signals 与 recent_fatigue_brief.next_actions；正文生成前先把 two_chapter_momentum_stall、five_chapter_texture_gap、conflict_thrill_overrun 等风险转成可执行场景安排。',
@@ -50845,6 +50893,7 @@ export function createNovelWritingService(ctx: {
     'reader_payoff 要说明这一场给读者的爽点、惊点、信息回收或关系变化；character_voice 要标出主要角色的差异化说话方式。',
     '对白/文风/正文工艺：如果 chapter_target.dialogue_contract、benchmark_recall_brief、style_boundary_contract 或 prose_craft_contract 存在，必须把相关要求拆进对应场景的 dialogue_goals、style_directives、benchmark_recall_directives、concept_anchor_rules 或 prose_craft_directives；新名词/新设定首次出现的场景必须写 concept_anchor_rules，要求用动作反应、对话半句或物理后果建立当下作用锚点，禁止整段来历/等级解释。',
     '角色关系推进：如果 chapter_target.character_relation_contract、delivery_risk_carry_over 或上一章诊断提示角色关系缺口，必须把关系修复拆进 relationship_progression_plan、relationship_buffer_zone、supporting_character_action、attitude_shift_checkpoint、relationship_next_hook；配角攻略缓冲区必须保留信息差、地位差距、亲密度差距或信任程度，配角要主动行动，关键拐点要写清从旁观/质疑/拒绝/试探到行动/协助/设限的态度变化。',
+    '高潮对抗/公开打脸：如果 chapter_target.showdown_contract 存在，必须把装逼打脸和战斗/智斗口径拆进 showoff_stage_chain、spectator_interest_shift、secondary_showoff_effect、combat_result_type、combat_dimension_plan、combat_reversal_plan；showoff_stage_chain 按群众层 -> 中间层 -> 核心层铺舞台，spectator_interest_shift 必须回答“这跟我有关系”的利益/目标变化，secondary_showoff_effect 写展示如何改变旁观者计划、利益或站队，combat_result_type 取 碾压 / 以弱胜强 / 逃走进入第二阶段 / 平局留钩，combat_dimension_plan 至少覆盖心/体/技一项，combat_reversal_plan 写预判反制或反预判。',
     'action_beats 必须写成可见动作链：起手/试探/受阻/受伤或代价/反制/结果。非动作场景也要写 required_beats，避免只写氛围。',
     'description_budget 写 low/medium/high。默认 low；只有新地点首次登场或诡异规则首次显形时才允许 medium/high。',
     '疏密分配：每个场景必须写 density_level，取 dense/medium/sparse，并与 purpose_tag 一致。',
@@ -52600,6 +52649,7 @@ export function createNovelWritingService(ctx: {
       '2+. 场景执行门禁：每个 scene_cards 必须按 goal -> obstacle -> action -> turn -> payoff -> state_delta 写成因果链；turn 必须优先来自 turning_point/reversal/information_gain，payoff 必须优先来自 reader_payoff/core_payoff/scene_payoff_budget，state_delta 必须写清本场景改变了角色、资产、关系、伏笔、规则或读者期待中的哪一项。',
       '2A. 每个场景必须把 opening_hook、reader_payoff、fear_point、rule_pressure、information_gap、reversal、ending_hook_seed、character_voice 中已有的商业意图落实到正文里；这些字段不是备注，必须转成动作、对话、危险、反转或章末疑问。',
       '2A+. 执行 scene_cards.dialogue_goals、scene_cards.style_directives、scene_cards.benchmark_recall_directives、scene_cards.concept_anchor_rules、scene_cards.prose_craft_directives、scene_cards.relationship_progression_plan、scene_cards.relationship_buffer_zone、scene_cards.supporting_character_action、scene_cards.attitude_shift_checkpoint 和 scene_cards.relationship_next_hook：对白目标必须变成角色差异化对话和潜台词，文风/对标召回只学习节奏与句式呼吸，新名词/新设定首次出现必须用动作反应、对话半句或物理后果建立当下作用锚点，不得写整段来历、原理或等级说明；关系推进必须写出关系类型/边界、配角攻略缓冲区、配角主动行动、从旁观/质疑/拒绝/试探到行动/协助/设限的态度变化，以及下一轮关系期待。',
+      '2A+showdown. 执行 scene_cards.showoff_stage_chain、scene_cards.spectator_interest_shift、scene_cards.secondary_showoff_effect、scene_cards.combat_result_type、scene_cards.combat_dimension_plan 和 scene_cards.combat_reversal_plan：公开爽点必须按群众层 -> 中间层 -> 核心层落成不同反应；旁观者反应必须回答“这跟我有关系”的利益、目标、计划或站队变化；二级装逼效果必须让展示改变旁观者行动；战斗/智斗必须明确结果类型、心/体/技维度和预判反制/反预判链条。',
       '2A+. 如果存在 chapter_target.previous_handoff 或 continuity.previous_chapter，开篇前 300 字必须承接上一章最后一幕或章末钩子，先处理连续危机、角色反应和期待欠账，再展开新的场景信息。',
       '2A++. 执行 chapter_target.delivery_risk_carry_over：上一章交稿后残留的吸引力、追读、创新、故事力、剧情线、强场面或可读性风险，必须在本章变成可见修复动作；尤其优先级指向开篇或章末时，必须在前 300 字或最后 300 字落地。',
       '2B. 执行 chapter_target.reader_retention_brief：开篇钩子必须在前 300 字落地；爽点承诺、信息缺口、情绪回报和短剧化场面必须转成可见行动；retention_double_engine 必须按留存=情绪+饥饿落地，情绪让读者快速代入，饥饿用信息差植入问号并按剥洋葱把关键信息卡到章末；retention_pillars 必须按留存四大支柱落地，升级、资源困境、目标、解密至少两项要转成正文证据；hook_addiction_model 必须按触发 -> 行动 -> 奖励 -> 投入落地，并用奖励随机性给出出乎意料的额外收获或沉没投入；章末追读问题必须压到最后一幕。',
@@ -52670,7 +52720,7 @@ export function createNovelWritingService(ctx: {
       defaultFiveChapterLaneRedesign ? '输出附加要求：如果存在 default_five_chapter_lane_redesign，expansion_structure_decision_execution 还必须包含 default_lane_segment_duty_delivered、default_lane_conflict_rotation_delivered、default_lane_payoff_density_delivered、default_lane_ending_hook_template_delivered，并分别给出 evidence。' : '',
       defaultFiveChapterLaneTemplate ? '输出附加要求：如果存在 default_five_chapter_lane_template，expansion_structure_decision_execution 必须继续包含 default_lane_segment_duty_delivered、default_lane_conflict_rotation_delivered、default_lane_payoff_density_delivered、default_lane_ending_hook_template_delivered，并用 evidence 说明四项模板在验证批中没有复发。' : '',
       chapterBlueprint ? '输出附加要求：scene_breakdown 必须包含 blueprint_receipts，逐项回填 target_emotion、opening_hook、core_payoff、content_outline、plot_lines、character_order、beat_sequence、beat_density_contract、small_outline_contract、mainline_definition_contract、cost_and_reward、ending_contract 是否在正文兑现，并给出 evidence 摘要。' : '',
-      '输出附加要求：scene_breakdown 每个场景必须包含 scene_start_anchor、scene_end_anchor 和 scene_card_receipts；scene_start_anchor/scene_end_anchor 必须摘自该场景正文的起止短句，用来定位该场景文本。scene_card_receipts 字段至少包含 scene_goal, obstacle, action, turn, payoff, state_delta, goal_obstacle_change_delivered(boolean)、purpose_tag_delivered(boolean)、density_level_delivered(boolean)、sensory_anchor_delivered(boolean)、serial_risk_repairs_delivered(boolean)、required_beats_delivered(boolean)、action_beats_delivered(boolean)、dialogue_goals_delivered(boolean)、style_directives_delivered(boolean)、benchmark_recall_directives_delivered(boolean)、concept_anchor_rules_delivered(boolean)、prose_craft_directives_delivered(boolean)、relationship_progression_delivered(boolean)、relationship_buffer_zone_delivered(boolean)、supporting_character_action_delivered(boolean)、attitude_shift_delivered(boolean)、relationship_next_hook_delivered(boolean)、evidence(array)。evidence 必须摘录对应场景正文中的动作、对话、信息变化、关系变化、对白声线、新概念锚点、配角主动行动、缓冲区或态度变化证据，不能只写“已完成”，不能借用其他场景的证据。',
+      '输出附加要求：scene_breakdown 每个场景必须包含 scene_start_anchor、scene_end_anchor 和 scene_card_receipts；scene_start_anchor/scene_end_anchor 必须摘自该场景正文的起止短句，用来定位该场景文本。scene_card_receipts 字段至少包含 scene_goal, obstacle, action, turn, payoff, state_delta, goal_obstacle_change_delivered(boolean)、purpose_tag_delivered(boolean)、density_level_delivered(boolean)、sensory_anchor_delivered(boolean)、serial_risk_repairs_delivered(boolean)、required_beats_delivered(boolean)、action_beats_delivered(boolean)、dialogue_goals_delivered(boolean)、style_directives_delivered(boolean)、benchmark_recall_directives_delivered(boolean)、concept_anchor_rules_delivered(boolean)、prose_craft_directives_delivered(boolean)、relationship_progression_delivered(boolean)、relationship_buffer_zone_delivered(boolean)、supporting_character_action_delivered(boolean)、attitude_shift_delivered(boolean)、relationship_next_hook_delivered(boolean)、showoff_stage_chain_delivered(boolean)、spectator_interest_shift_delivered(boolean)、secondary_showoff_effect_delivered(boolean)、combat_result_type_delivered(boolean)、combat_dimension_plan_delivered(boolean)、combat_reversal_plan_delivered(boolean)、evidence(array)。evidence 必须摘录对应场景正文中的动作、对话、信息变化、关系变化、对白声线、新概念锚点、配角主动行动、缓冲区、态度变化、公开舞台层级、旁观者利益变化或战斗反制证据，不能只写“已完成”，不能借用其他场景的证据。',
       '输出附加要求：必须在章节对象顶层输出 oh_story_delivery_receipts，用于后续诊断和修复闭环落库。oh_story_delivery_receipts 必须包含 chapter_blueprint、scene_card_receipts、delivery_risk_receipts、revision_receipts、pre_draft_execution_receipts；chapter_blueprint 记录本章蓝图兑现状态，scene_card_receipts 汇总每个场景的场景卡执行回执，delivery_risk_receipts 逐项记录上一章/批次交稿风险是否已兑现，revision_receipts 记录本轮生成中主动修正过的结构、连续性、资产或文风问题，pre_draft_execution_receipts 记录状态筛选、项目产物协议、写前准备、意图确认、文风召回和上一章质量续航计划是否真正落入正文。',
       stateTrackingContract ? '输出附加要求：oh_story_delivery_receipts.pre_draft_execution_receipts.status_filter_receipts 必须逐项覆盖【状态筛选合同】中的角色状态、相关伏笔/前史、世界约束、filter_rules 和 source_requirements；每项包含 key,label,used_in_chapter,evidence,excluded_reason,remaining_risk，证明只加载/只使用会影响本章正确性的状态，未使用的信息必须写明为何不会导致本章写错。' : '',
       stateTrackingContract ? '输出附加要求：oh_story_delivery_receipts.pre_draft_execution_receipts.source_readiness_checks 必须逐项覆盖【来源就绪表】；每项包含 key,label,status(pass|warn|fail),evidence,fix，证明 ready 来源已在正文可见承接，missing/warn 来源没有被当作既定事实使用。' : '',
