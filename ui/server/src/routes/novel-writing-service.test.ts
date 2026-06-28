@@ -42805,6 +42805,117 @@ describe('readability and restrained meme workflow', () => {
     expect(prompt).toContain('更换压迫来源')
   })
 
+  test('adds rolling rhythm preflight to write preparation before drafting', () => {
+    const project = { title: '寒门阵师', synopsis: '废柴阵师靠残阵翻盘。', reference_config: {} }
+    const contextPackage = {
+      recent_fatigue_radar: {
+        status: 'needs_attention',
+        chapter_range_label: '第13-15章',
+        signals: [
+          {
+            key: 'expectation_chain_break_gap',
+            label: '连续断期待',
+            status: 'warn',
+            detail: '连续兑现旧目标后没有先立起下一开环。',
+          },
+          {
+            key: 'repeated_reader_payoff_type',
+            label: '回报形态重复',
+            status: 'warn',
+            detail: '同一核心梗连续3次以上无差异化：公开打脸连续复用。',
+          },
+          {
+            key: 'reader_need_coverage_gap',
+            label: '读者需求命中缺口',
+            status: 'warn',
+            detail: '爽点满足的需求偏向材料流程，偏离废柴靠残阵翻盘的书籍卖点。',
+          },
+        ],
+        fatigue_risks: [
+          '期待清空后没有新目标，可能形成期待真空。',
+          '公开打脸连续3次以上无差异化。',
+          '卖点偏移：章节在材料流程里打转。',
+        ],
+        next_actions: [
+          '下一章必须在当前目标完成前提前铺设下一目标线索。',
+          '下一章必须避开公开打脸，改用信息解锁或超额收获。',
+        ],
+      },
+      batch_preflight: {
+        guardrail_status: 'caution',
+        guardrails: [
+          { label: '批次节奏', status: 'warn', detail: '第16章缺少明确章末钩子，容易断期待。' },
+        ],
+        warnings: ['批次任务书提示：卖点偏移风险，不能把核心回报写成材料流水账。'],
+      },
+      chapter_target: {
+        chapter_no: 16,
+        title: '残阵再鸣',
+        summary: '主角转向藏书阁追查残阵新线索。',
+        conflict: '执事余党想把残阵线索封回旧账册。',
+        ending_hook: '残阵鸣声指向禁库第二层。',
+        scene_cards: [
+          {
+            title: '藏书阁封门',
+            conflict: '执事余党封住藏书阁门禁。',
+            reader_payoff: '主角不用公开打脸，而是用残阵反向定位禁库线索。',
+          },
+        ],
+      },
+    }
+    const brief = buildChapterPreDraftBrief(project, contextPackage)
+    const context = mergeConfirmedPreDraftBriefIntoContext(contextPackage, {
+      ...brief,
+      confirmed_at: '2026-06-28T12:00:00.000Z',
+    })
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+    const prompt = service.buildParagraphProseContext(project, context, null, { chapter_no: 16, title: '残阵再鸣' })
+
+    expect(brief.write_preparation_brief.rolling_rhythm_preflight.status).toBe('needs_attention')
+    expect(brief.write_preparation_brief.rolling_rhythm_preflight.principle).toContain('拉期待速度 > 断期待速度')
+    expect(brief.write_preparation_brief.rolling_rhythm_preflight.expectation_vacuum_risks.join('；')).toContain('期待真空')
+    expect(brief.write_preparation_brief.rolling_rhythm_preflight.expectation_first_aid.join('；')).toContain('反派视角转接')
+    expect(brief.write_preparation_brief.rolling_rhythm_preflight.expectation_first_aid.join('；')).toContain('突发意外')
+    expect(brief.write_preparation_brief.rolling_rhythm_preflight.expectation_first_aid.join('；')).toContain('配角杠杆')
+    expect(brief.write_preparation_brief.rolling_rhythm_preflight.expectation_first_aid.join('；')).toContain('超额收获')
+    expect(brief.write_preparation_brief.rolling_rhythm_preflight.repetition_boundary_risks.join('；')).toContain('同一核心梗连续3次以上无差异化')
+    expect(brief.write_preparation_brief.rolling_rhythm_preflight.selling_point_drift_risks.join('；')).toContain('卖点偏移')
+    expect(brief.write_preparation_brief.must_confirm.join('；')).toContain('拉期待速度 > 断期待速度')
+    expect(context.chapter_target.write_preparation_brief.rolling_rhythm_preflight.next_actions.join('；')).toContain('提前铺设下一目标线索')
+    expect(prompt).toContain('滚动节奏预检 rolling_rhythm_preflight')
+    expect(prompt).toContain('拉期待速度 > 断期待速度')
+    expect(prompt).toContain('期待真空期急救')
+    expect(prompt).toContain('反派视角转接')
+    expect(prompt).toContain('卖点偏移')
+    expect(prompt).toContain('同一核心梗连续3次以上无差异化')
+  })
+
+  test('does not add rolling rhythm preflight without concrete rhythm risks', () => {
+    const project = { title: '寒门阵师', synopsis: '废柴阵师靠残阵翻盘。', reference_config: {} }
+    const brief = buildChapterPreDraftBrief(project, {
+      chapter_target: {
+        chapter_no: 16,
+        title: '残阵再鸣',
+        summary: '主角转向藏书阁追查残阵新线索。',
+        conflict: '执事余党想把残阵线索封回旧账册。',
+        ending_hook: '残阵鸣声指向禁库第二层。',
+        scene_cards: [
+          {
+            title: '藏书阁封门',
+            conflict: '执事余党封住藏书阁门禁。',
+            reader_payoff: '主角用残阵反向定位禁库线索。',
+          },
+        ],
+      },
+    })
+
+    expect(brief.write_preparation_brief.rolling_rhythm_preflight).toBeNull()
+  })
+
   test('builds serial momentum brief for recent five-chapter low progress and weak conflict streaks', () => {
     const brief = buildSerialMomentumBrief(
       { chapter_no: 16, title: '旧阵异响' },
@@ -51622,6 +51733,26 @@ describe('chapter context word target source guards', () => {
     expect(promptBlock).toContain('目标推进、阻碍升级、新信息')
     expect(promptBlock).toContain('关系/世界调剂')
     expect(promptBlock).toContain('冲突冷却')
+  })
+
+  test('requires scene-card prompts to consume rolling rhythm preflight before prose generation', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const promptStart = source.indexOf('const buildSceneCardsPrompt =')
+    const promptEnd = source.indexOf('const buildHeuristicSettingUsage =', promptStart)
+    const promptBlock = source.slice(promptStart, promptEnd)
+
+    expect(promptStart).toBeGreaterThanOrEqual(0)
+    expect(promptBlock).toContain('rolling_rhythm_preflight')
+    expect(promptBlock).toContain('拉期待速度 > 断期待速度')
+    expect(promptBlock).toContain('期待真空期急救')
+    expect(promptBlock).toContain('反派视角转接')
+    expect(promptBlock).toContain('突发意外')
+    expect(promptBlock).toContain('配角杠杆')
+    expect(promptBlock).toContain('超额收获')
+    expect(promptBlock).toContain('卖点偏移')
+    expect(promptBlock).toContain('同一核心梗连续3次以上无差异化')
+    expect(promptBlock).toContain('serial_risk_repairs')
+    expect(promptBlock).toContain('recent_fatigue_action')
   })
 
   test('requires scene-card prompts to plan delivery-risk carry-over before prose generation', () => {

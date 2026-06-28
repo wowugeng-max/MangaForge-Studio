@@ -13,25 +13,25 @@ Source reference set: `/private/tmp/oh-story-claudecode/skills/story-long-write/
 <!-- oh-story-progress-summary
 {
   "reference_total": 38,
-  "integrated": 35,
-  "partial": 3,
+  "integrated": 36,
+  "partial": 2,
   "todo": 0,
   "deferred": 0,
-  "remaining_references": 3,
-  "estimated_hours_remaining": 11,
-  "estimated_working_days_remaining": 1.83
+  "remaining_references": 2,
+  "estimated_hours_remaining": 9.5,
+  "estimated_working_days_remaining": 1.58
 }
 -->
 
 ## Current Snapshot
 
 - Reference files: 38
-- Integrated enough for current production use: 35
-- Partially integrated, still worth mining: 3
+- Integrated enough for current production use: 36
+- Partially integrated, still worth mining: 2
 - Not systematically reviewed yet: 0
 - Deferred: 0
-- Remaining references to improve: 3
-- Estimated remaining effort: about 11 engineering hours, or 1.83 focused working days at 6 hours per day
+- Remaining references to improve: 2
+- Estimated remaining effort: about 9.5 engineering hours, or 1.58 focused working days at 6 hours per day
 
 The estimate assumes the current working pattern: one small oh-story increment at a time, with prompt or workflow changes backed by focused tests, then `test:novel-server` and `check` before push. UI progress surfacing is not included in the remaining estimate; after this ledger stabilizes, exposing it in the novel workspace should be a separate 4-6 hour slice.
 
@@ -69,7 +69,7 @@ The estimate assumes the current working pattern: one small oh-story increment a
 | opening-design.md | integrated | Opening hook, first-50 conflict, first-100 event density, protagonist-entry, and entry-promise checks are implemented. | Keep refining per-genre opening exceptions. | 0.5h |
 | outline-conflict.md | integrated | Conflict structure contract covers ladders, protagonist agency, no-exit rules, next-conflict seeds, conflict-web/network layers, deterministic post-delivery sync, repair carry-over, and now scene-card generation. Scene cards preserve and prompt for per-scene conflict execution fields (`conflict_ladder_step`, `motivation_source`, `opposing_force`, `blocked_desire`, `protagonist_agency_action`, `no_exit_reason`, `event_value_change`, `next_conflict_seed`, `visible_line_role`, `hidden_line_seed`, `ab_weave_role`), and prose prompts require those fields to execute as visible conflict. | Keep tuning field wording from real scene-card misses. | 0.5h |
 | outline-methods.md | integrated | `chapter_blueprint.outline_methods_contract` now carries oh-story five-step outline creation, eight-node story structure, sweet-cycle stages, emotion zigzag, five-drive checks, detail-outline ratio, similarity guardrails, and reverse-design rules into pre-draft briefs, prose prompts, and unattended blueprint repair. Focused tests cover prompt hydration and repair persistence. | Keep tuning node-role inference and repetition guardrails from real generated chapters. | 0.5h |
-| outline-rhythm.md | partial | Bridge unit, batch rhythm, beat cooling, and batch-size guardrails exist. | Add clearer rolling-plan diagnostics for rhythm fatigue before drafting. | 1.5h |
+| outline-rhythm.md | integrated | Bridge unit, batch rhythm, beat cooling, batch-size guardrails, recent fatigue radar, and `write_preparation_brief.rolling_rhythm_preflight` now cover 拉期待速度 > 断期待速度, 期待真空期急救, 卖点偏移, repetition boundary, and scene-card repair handoff before drafting in `ui/server/src/routes/novel-writing-service.ts`. Focused tests cover write-preparation hydration, prose prompt surfacing, and scene-card prompt consumption. | Keep tuning rhythm preflight mappings from real rolling-plan misses. | 0.5h |
 | outline-structure-theory.md | integrated | Blueprint and structure progression checks cover causal chain and chapter structure. Project creation and seed recovery now inject `writing_bible.longform_structure_contract`; local seed materialization backfills the same contract with structure-level selection, five-act causal-chain rules, five-level outline limits, strong/weak/transition mainline architecture, web-sixth-act afterglow, volume purpose and climax framing, mainline/subline/dark-line layout, map-transition pillars, retention methods, and quality checks. Focused tests cover seed prompt hydration and writing-bible materialization. | Keep tuning structure-mode inference from real project seeds and genre-specific longform failures. | 0.5h |
 | plot-core-methods.md | integrated | Target reader, story drive, plot dynamics, information flow, reader payoff, story power, small-outline, mainline-definition, and next-objective-after-gain gates are present. Story power covers seed/recovery/original-incubation prompts, local writing-bible materialization, pre-draft/prose prompts, self-review, revision, deterministic `buildStoryPowerSyncReport`, story-state sync, and repair carry-over. Small-outline four-step coverage now lives inside `chapter_blueprint.small_outline_contract`, prose prompts, deterministic `small_outline_checks`, blueprint sync, and unattended blueprint repair. Mainline definition now lives in `writing_bible.mainline_definition_contract`, `chapter_blueprint.mainline_definition_contract`, prose prompts, self-review requirements, deterministic `mainline_definition_checks`, and unattended blueprint repair. Information flow now carries `next_objective_rules` into pre-draft briefs, prose prompts, self-review, revision prompts, unattended blueprint generation, and deterministic `next_objective_after_gain` sync checks. | Keep tuning transition and next-objective evidence heuristics from real generated chapters. | 0.5h |
 | plot-emotion-system.md | integrated | `emotional_arc_contract` now carries plot-emotion-system formula-level rules for 爽点倒推法, 装逼层级, 多爽点密度, 情绪模块重组, 爽点递增对比, 递进对抗, 梗四段式, and 读者欲望四步公式 into pre-draft briefs, confirmed context, prose prompts, self-review/revision prompts, unattended blueprint repair, and deterministic `buildEmotionalArcSyncReport`. Focused tests cover prompt hydration and post-delivery formula checks. | Keep tuning regex evidence for real chapters where formula execution is implied rather than named. | 0.5h |
@@ -87,9 +87,8 @@ The estimate assumes the current working pattern: one small oh-story increment a
 
 ## Next Priority Queue
 
-1. `outline-rhythm.md`: add clearer rolling-plan diagnostics for rhythm fatigue before drafting.
-2. `style-craft.md`: extract craft rules into shorter prompt snippets to reduce prompt bulk.
-3. `format-and-structure.md`: compare all format requirements and add missing deterministic checks.
+1. `style-craft.md`: extract craft rules into shorter prompt snippets to reduce prompt bulk.
+2. `format-and-structure.md`: compare all format requirements and add missing deterministic checks.
 
 ## Update Rules
 

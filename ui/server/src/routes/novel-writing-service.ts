@@ -6387,12 +6387,147 @@ function normalizeRecentFatigueBrief(value: any) {
     chapter_range_label: compactBriefText(raw.chapter_range_label || raw.chapterRangeLabel || raw.range_label || raw.rangeLabel),
     summary: compactBriefText(raw.summary),
     fatigue_risks: fatigueRisks,
+    risk_signals: signals,
     conflict_variation: conflictVariation,
     payoff_variation: payoffVariation,
     hook_variation: hookVariation,
     scene_freshness: sceneFreshness,
     next_actions: nextActions,
     signals,
+  }
+}
+
+function buildRollingRhythmPreflight(contextPackage: any = {}, options: any = {}) {
+  const target = contextPackage?.chapter_target || {}
+  const recentFatigueSource = options.recent_fatigue_brief
+    || options.recentFatigueBrief
+    || target.recent_fatigue_brief
+    || target.recentFatigueBrief
+    || target.recent_fatigue_radar
+    || target.recentFatigueRadar
+    || contextPackage?.recent_fatigue_brief
+    || contextPackage?.recentFatigueBrief
+    || contextPackage?.recent_fatigue_radar
+    || contextPackage?.recentFatigueRadar
+  const rawRecentFatigue = recentFatigueSource?.recent_fatigue_brief
+    || recentFatigueSource?.recentFatigueBrief
+    || recentFatigueSource?.recent_fatigue_radar
+    || recentFatigueSource?.recentFatigueRadar
+    || recentFatigueSource
+  const hasConcreteRecentFatigue = Boolean(
+    typeof rawRecentFatigue === 'string'
+      ? compactBriefText(rawRecentFatigue)
+      : compactBriefText(rawRecentFatigue?.summary || rawRecentFatigue?.risk_summary || rawRecentFatigue?.riskSummary)
+        || asArray(rawRecentFatigue?.signals || rawRecentFatigue?.risk_signals || rawRecentFatigue?.fatigue_signals || rawRecentFatigue?.fatigueSignals).length
+        || uniqueBriefStrings([
+          rawRecentFatigue?.fatigue_risks,
+          rawRecentFatigue?.fatigueRisks,
+          rawRecentFatigue?.next_actions,
+          rawRecentFatigue?.nextActions,
+          rawRecentFatigue?.required_actions,
+          rawRecentFatigue?.requiredActions,
+        ].flat(), 1).length,
+  )
+  const recentFatigueBrief = hasConcreteRecentFatigue ? normalizeRecentFatigueBrief(rawRecentFatigue) : null
+  const batchPreflight = options.batch_preflight
+    || options.batchPreflight
+    || target.batch_preflight
+    || target.batchPreflight
+    || contextPackage?.batch_preflight
+    || contextPackage?.batchPreflight
+    || {}
+  const readerExpectationDebt = options.reader_expectation_debt_context
+    || options.readerExpectationDebtContext
+    || target.reader_expectation_debt_context
+    || target.readerExpectationDebtContext
+    || contextPackage?.reader_expectation_debt_context
+    || contextPackage?.readerExpectationDebtContext
+    || {}
+  const signalRows = asArray(recentFatigueBrief?.signals || recentFatigueBrief?.risk_signals)
+    .map((signal: any) => normalizeRecentFatigueSignal(signal))
+    .filter(Boolean)
+  const batchGuardrailTexts = [
+    ...asArray(batchPreflight?.guardrails),
+    ...asArray(batchPreflight?.warnings),
+    ...asArray(batchPreflight?.warning),
+  ]
+    .map((item: any) => compactBriefText(typeof item === 'string' ? item : [item?.label, item?.status, item?.detail || item?.summary || item?.text].filter(Boolean).join('：')))
+    .filter(Boolean)
+  const debtTexts = uniqueBriefStrings([
+    readerExpectationDebt?.summary,
+    readerExpectationDebt?.risk_summary,
+    readerExpectationDebt?.riskSummary,
+    readerExpectationDebt?.status,
+    readerExpectationDebt?.overdue,
+    readerExpectationDebt?.keep_alive,
+    readerExpectationDebt?.keepAlive,
+    readerExpectationDebt?.must_deliver,
+    readerExpectationDebt?.mustDeliver,
+  ].flat(), 8)
+  const signalTexts = uniqueBriefStrings([
+    recentFatigueBrief?.summary,
+    recentFatigueBrief?.fatigue_risks,
+    recentFatigueBrief?.next_actions,
+    recentFatigueBrief?.conflict_variation,
+    recentFatigueBrief?.payoff_variation,
+    recentFatigueBrief?.hook_variation,
+    recentFatigueBrief?.scene_freshness,
+    ...signalRows.map((signal: any) => [signal.key, signal.label, signal.detail].filter(Boolean).join('：')),
+    ...batchGuardrailTexts,
+    ...debtTexts,
+  ].flat(), 18)
+  const signalBlob = signalTexts.join('；')
+  const signalKeys = signalRows.map((signal: any) => String(signal?.key || '')).join('；')
+  const hasRisk = signalRows.some((signal: any) => !['ok', 'ready', 'pass', 'passed'].includes(String(signal?.status || '').toLowerCase()))
+    || signalTexts.some(text => /warn|needs_attention|风险|缺口|断期待|期待真空|卖点偏移|重复|疲劳|同质|缺少/.test(text))
+  if (!hasRisk) return null
+
+  const expectationVacuumRough = /expectation_chain_break|ending_suspense_hook_gap|ending_harvest_handoff_gap|expectation_ladder_gap|payoff_interval|recent_payoff_drought|断期待|期待真空|期待清空|没有新期待|缺少明确章末钩子|章末钩子缺|延迟满足|爽点间隔|回报不足/.test(`${signalKeys}；${signalBlob}`)
+  const sellingPointDriftRough = /reader_need_coverage_gap|core_hook_absence_gap|core_hook_angle_repetition_gap|genre_positioning|target_reader|卖点偏移|核心梗|核心卖点|题材长板|读者需求|偏离/.test(`${signalKeys}；${signalBlob}`)
+  const repetitionBoundaryRough = /repeated_reader_payoff_type|repeated_ending_hook_type|repeated_core_element_combo|core_hook_angle_repetition_gap|同一核心梗|连续3次|连续三次|连续.*无差异化|重复|同质化|回报形态重复|钩子类型重复/.test(`${signalKeys}；${signalBlob}`)
+  const expectationVacuumRisks = uniqueBriefStrings([
+    expectationVacuumRough ? `期待真空：${firstMatchingBrief(signalTexts, /断期待|期待真空|期待清空|没有新期待|缺少明确章末钩子|延迟满足|爽点间隔|回报不足/) || '当前目标兑现、延迟满足或章末钩子缺口会让读者短期期待断线。'}` : '',
+    expectationVacuumRough ? '拉期待速度 > 断期待速度：当前目标完成前提前铺设下一目标线索，满足当前期待后迅速给出新期待。' : '',
+  ], 4)
+  const sellingPointDriftRisks = uniqueBriefStrings([
+    sellingPointDriftRough ? `卖点偏移：${firstMatchingBrief(signalTexts, /卖点偏移|核心梗|核心卖点|题材长板|读者需求|偏离/) || '爽点满足的需求可能偏离题材卖点或本书核心承诺。'}` : '',
+  ], 4)
+  const repetitionBoundaryRisks = uniqueBriefStrings([
+    repetitionBoundaryRough ? `同一核心梗连续3次以上无差异化：${firstMatchingBrief(signalTexts, /同一核心梗|连续3次|连续三次|连续.*无差异化|重复|同质化|回报形态重复|钩子类型重复/) || '连续同类回报、同类钩子或同一核心梗角度会触发审美疲劳。'}` : '',
+  ], 4)
+  const expectationFirstAid = expectationVacuumRisks.length
+    ? [
+      '反派视角转接：展示反派行动或误判，制造读者知道而主角暂未知的信息差。',
+      '突发意外：让不按计划发展的事件强行介入，立刻恢复现场压力。',
+      '配角杠杆：用配角危机、立场变化或主动求助重新制造紧迫感。',
+      '超额收获：给出远超预期的额外奖励、线索或代价，把旧期待兑现转成新期待。',
+    ]
+    : []
+  const nextActions = uniqueBriefStrings([
+    recentFatigueBrief?.next_actions,
+    '先执行拉期待速度 > 断期待速度：当前目标完成前提前铺设下一目标线索。',
+    expectationVacuumRisks.length ? '期待真空期急救至少选一项：反派视角转接、突发意外、配角杠杆或超额收获。' : '',
+    sellingPointDriftRisks.length ? '卖点偏移纠偏：把本章爽点重新接回题材卖点、书籍卖点和目标读者需求。' : '',
+    repetitionBoundaryRisks.length ? '重复边界纠偏：同一核心梗连续3次以上无差异化时，必须更换冲突来源、回报形态、影响范围或章末问题。' : '',
+  ].flat(), 10)
+  return {
+    version: 'oh_story_rolling_rhythm_preflight_v1',
+    status: 'needs_attention',
+    source: 'outline-rhythm.md',
+    principle: '拉期待速度 > 断期待速度',
+    risk_signals: signalRows,
+    risk_summary: signalTexts,
+    expectation_vacuum_risks: expectationVacuumRisks,
+    expectation_first_aid: expectationFirstAid,
+    selling_point_drift_risks: sellingPointDriftRisks,
+    repetition_boundary_risks: repetitionBoundaryRisks,
+    next_actions: nextActions,
+    execution_order: [
+      'Step 2.35 滚动节奏预检：先判断期待真空、卖点偏移和重复边界，再生成场景卡。',
+      '当前目标完成前提前铺设下一目标线索；满足当前期待后迅速给出新期待。',
+      '如果触发期待真空期急救，场景卡必须把反派视角转接、突发意外、配角杠杆或超额收获拆成可见事件。',
+      '如果触发卖点偏移或同一核心梗连续3次以上无差异化，场景卡必须更换冲突来源、回报形态、影响范围或章末问题。',
+    ],
   }
 }
 
@@ -10394,6 +10529,17 @@ function mergeRecentFatigueBriefs(...briefs: any[]) {
       const seen = new Set<string>()
       const rows: any[] = []
       for (const signal of normalized.flatMap((brief: any) => asArray(brief.signals))) {
+        const key = compactBriefText(signal?.key || signal?.label || signal?.detail)
+        if (!key || seen.has(key)) continue
+        seen.add(key)
+        rows.push(signal)
+      }
+      return rows.slice(0, 12)
+    })(),
+    risk_signals: (() => {
+      const seen = new Set<string>()
+      const rows: any[] = []
+      for (const signal of normalized.flatMap((brief: any) => asArray(brief.risk_signals || brief.signals))) {
         const key = compactBriefText(signal?.key || signal?.label || signal?.detail)
         if (!key || seen.has(key)) continue
         seen.add(key)
@@ -47297,6 +47443,24 @@ function buildWritePreparationBrief(contextPackage: any = {}, options: any = {})
       || contextPackage?.delivery_risk_carry_over
       || contextPackage?.pre_draft_brief?.delivery_risk_carry_over,
   )
+  const recentFatigueSource = options.recent_fatigue_brief
+    || options.recentFatigueBrief
+    || contextPackage?.chapter_target?.recent_fatigue_brief
+    || contextPackage?.chapter_target?.recentFatigueBrief
+    || contextPackage?.chapter_target?.recent_fatigue_radar
+    || contextPackage?.chapter_target?.recentFatigueRadar
+    || contextPackage?.pre_draft_brief?.recent_fatigue_brief
+    || contextPackage?.preDraftBrief?.recentFatigueBrief
+    || contextPackage?.recent_fatigue_brief
+    || contextPackage?.recentFatigueBrief
+    || contextPackage?.recent_fatigue_radar
+    || contextPackage?.recentFatigueRadar
+  const recentFatigueBrief = recentFatigueSource ? normalizeRecentFatigueBrief(recentFatigueSource) : null
+  const rollingRhythmPreflight = buildRollingRhythmPreflight(contextPackage, {
+    recent_fatigue_brief: recentFatigueBrief,
+    batch_preflight: options.batch_preflight || options.batchPreflight || contextPackage?.chapter_target?.batch_preflight || contextPackage?.batch_preflight,
+    reader_expectation_debt_context: options.reader_expectation_debt_context || options.readerExpectationDebtContext || contextPackage?.chapter_target?.reader_expectation_debt_context || contextPackage?.reader_expectation_debt_context,
+  })
   const benchmarkRecallPreparation = buildWritePreparationBenchmarkRecallContext(contextPackage, options)
   const sourceRows = normalizeStateSourceReadiness(stateTrackingContract?.source_readiness || stateTrackingContract?.sourceReadiness)
   const stateSourceGaps = sourceRows
@@ -47345,10 +47509,12 @@ function buildWritePreparationBrief(contextPackage: any = {}, options: any = {})
     ...sourceGaps.map(item => `来源就绪：${item}`),
     ...assetRisks.map(item => `关系图风险：${item}`),
     ...deliveryActions,
+    rollingRhythmPreflight?.principle ? `滚动节奏预检：${rollingRhythmPreflight.principle}` : '',
+    rollingRhythmPreflight?.next_actions,
     ...blueprintFocus.slice(0, 2),
     ...readerPayoffFocus.slice(0, 2).map(item => `读者回报：${item}`),
-  ], 18)
-  const readinessStatus = sourceGaps.length || assetRisks.length || deliveryActions.length ? 'needs_context' : 'ready'
+  ].flat(), 22)
+  const readinessStatus = sourceGaps.length || assetRisks.length || deliveryActions.length || rollingRhythmPreflight ? 'needs_context' : 'ready'
   return {
     version: 'oh_story_write_preparation_v1',
     source: 'mangaforge_pre_draft_brief',
@@ -47356,6 +47522,7 @@ function buildWritePreparationBrief(contextPackage: any = {}, options: any = {})
     source_gaps: sourceGaps,
     asset_risks: assetRisks,
     delivery_risk_actions: deliveryActions,
+    rolling_rhythm_preflight: rollingRhythmPreflight,
     creation_contract_checklist: creationContractChecklist,
     blueprint_focus: blueprintFocus,
     reader_payoff_focus: readerPayoffFocus,
@@ -47365,6 +47532,7 @@ function buildWritePreparationBrief(contextPackage: any = {}, options: any = {})
       'Step 2.3 文风召回：确认情绪模块、节奏参照、文风摘要、匹配章技巧和 gaps；无对标时明确标记，不让文风覆盖情绪/节奏目标。',
       ...benchmarkRecallPreparation.execution_order,
       'Step 2.4 意图确认：用一句话锁定本章情绪、节奏、模块、文风边界、内容概括、逻辑线、出场顺序、代价收益和章尾承接。',
+      ...(rollingRhythmPreflight?.execution_order || []),
       '再锁定章节蓝图与资产：目标、冲突、开篇钩子、核心回报、关键资产归属/触发/代价和角色状态变化必须接到现场功能。',
       '最后生成正文：按场景卡顺序写可见行动、对话压力、信息变化和回执证据。',
     ],
@@ -47733,6 +47901,9 @@ export function buildChapterPreDraftBrief(project: any, contextPackage: any) {
     delivery_risk_carry_over: deliveryRiskCarryOver,
     benchmark_recall_brief: benchmarkRecallBrief,
     benchmark_recall_gaps: benchmarkRecallGaps,
+    recent_fatigue_brief: recentFatigueBrief,
+    batch_preflight: contextPackage?.chapter_target?.batch_preflight || contextPackage?.batch_preflight,
+    reader_expectation_debt_context: readerExpectationDebtContext,
     target_reader_contract: targetReaderContract,
     genre_positioning_contract: genrePositioningContract,
     plot_special_topics_contract: plotSpecialTopicsContract,
@@ -48393,6 +48564,9 @@ export function mergeConfirmedPreDraftBriefIntoContext(contextPackage: any, preD
       asset_linkage_contract: assetLinkageContract,
       state_tracking_contract: stateTrackingContract,
       delivery_risk_carry_over: deliveryRiskCarryOver,
+      recent_fatigue_brief: recentFatigueBrief,
+      batch_preflight: (contextPackage || {}).chapter_target?.batch_preflight || (contextPackage || {}).batch_preflight,
+      reader_expectation_debt_context: readerExpectationDebtContext,
       plot_special_topics_contract: plotSpecialTopicsContract,
       story_power_contract: storyPowerContract,
     })
@@ -50876,6 +51050,9 @@ export function createNovelWritingService(ctx: {
     '近章连载风险：如果 contextPackage.chapter_target.recent_fatigue_brief 存在，必须在场景卡阶段读取 recent_fatigue_brief.risk_signals 与 recent_fatigue_brief.next_actions；正文生成前先把 two_chapter_momentum_stall、five_chapter_texture_gap、conflict_thrill_overrun 等风险转成可执行场景安排。',
     '执行 next_actions：two_chapter_momentum_stall 用目标推进、阻碍升级、新信息修复；five_chapter_texture_gap 补关系/世界调剂；conflict_thrill_overrun 安排冲突冷却或余波承接；不得等到正文阶段再临场补救。',
     '每个风险修复场景都必须写入 serial_risk_repairs，列出命中的风险 key；同时写入 recent_fatigue_action，用一句话说明本场怎样执行 next_actions。',
+    '滚动节奏预检：如果 contextPackage.chapter_target.write_preparation_brief.rolling_rhythm_preflight 存在，场景卡阶段必须先执行 rolling_rhythm_preflight.principle：拉期待速度 > 断期待速度；读取 expectation_vacuum_risks、selling_point_drift_risks、repetition_boundary_risks 和 next_actions。',
+    '期待真空期急救：rolling_rhythm_preflight 触发期待真空时，必须至少选择反派视角转接、突发意外、配角杠杆、超额收获之一拆成可见场景；不得让当前目标兑现后只剩等待或整理。',
+    '卖点偏移与重复边界：rolling_rhythm_preflight 触发卖点偏移或同一核心梗连续3次以上无差异化时，必须更换冲突来源、回报形态、影响范围或章末问题，并把修复写入 serial_risk_repairs 与 recent_fatigue_action。',
     '交稿风险/质量续航：如果 contextPackage.chapter_target.delivery_risk_carry_over 或 contextPackage.batch_preflight.delivery_risk_carry_over 存在，必须在场景卡阶段读取 delivery_risk_carry_over.items、required_actions、opening_actions、middle_actions、ending_actions、forbidden_repeats；正文生成前先把质量续航计划拆成可执行场景安排。',
     '执行 delivery_risk_carry_over：opening_actions 必须进入第一场 opening_hook、purpose 或 required_beats；middle_actions 必须进入中段场景的 conflict、turning_point 或 state_changes_expected；ending_actions 必须进入最后一场 ending_hook_seed；forbidden_repeats 必须写入对应场景的 serial_risk_repairs，提醒正文不得复现该套路。',
     '每个承接上一章/批次风险的场景都必须在 serial_risk_repairs 写入 delivery_risk_carry_over 或 质量续航，并用 recent_fatigue_action 或 required_beats 说明本场如何把承接风险转成可见目标推进、阻碍升级、新信息、关系/状态变化或章末追读钩子。',
@@ -51568,6 +51745,8 @@ export function createNovelWritingService(ctx: {
         asset_linkage_contract: assetLinkageContract,
         state_tracking_contract: stateTrackingContract,
         delivery_risk_carry_over: deliveryRiskCarryOver,
+        recent_fatigue_brief: recentFatigueBrief,
+        batch_preflight: contextPackage?.chapter_target?.batch_preflight || contextPackage?.batch_preflight,
         benchmark_recall_brief: benchmarkRecallBrief,
         plot_special_topics_contract: plotSpecialTopicsContract,
       })
@@ -51638,12 +51817,18 @@ export function createNovelWritingService(ctx: {
       writePreparationBrief?.asset_risks?.length ? `关系图风险：${writePreparationBrief.asset_risks.join('；')}` : '',
       writePreparationBrief?.delivery_risk_actions?.length ? `上一轮待修复：${writePreparationBrief.delivery_risk_actions.join('；')}` : '',
       writePreparationBrief?.delivery_risk_actions?.length ? '上一轮待修复硬性落点：开篇动作必须在前300字形成正文证据；中段动作必须落成中段事件推进、证据变化或角色选择；章末动作必须在最后300字形成追读钩子、状态余波或新风险。不得只在旁白中声明已处理。' : '',
+      writePreparationBrief?.rolling_rhythm_preflight ? `滚动节奏预检 rolling_rhythm_preflight：${writePreparationBrief.rolling_rhythm_preflight.principle || '拉期待速度 > 断期待速度'}；状态=${writePreparationBrief.rolling_rhythm_preflight.status || 'needs_attention'}` : '',
+      writePreparationBrief?.rolling_rhythm_preflight?.expectation_vacuum_risks?.length ? `期待真空风险：${writePreparationBrief.rolling_rhythm_preflight.expectation_vacuum_risks.join('；')}` : '',
+      writePreparationBrief?.rolling_rhythm_preflight?.expectation_first_aid?.length ? `期待真空期急救：${writePreparationBrief.rolling_rhythm_preflight.expectation_first_aid.join('；')}` : '',
+      writePreparationBrief?.rolling_rhythm_preflight?.selling_point_drift_risks?.length ? `卖点偏移风险：${writePreparationBrief.rolling_rhythm_preflight.selling_point_drift_risks.join('；')}` : '',
+      writePreparationBrief?.rolling_rhythm_preflight?.repetition_boundary_risks?.length ? `重复边界风险：${writePreparationBrief.rolling_rhythm_preflight.repetition_boundary_risks.join('；')}` : '',
+      writePreparationBrief?.rolling_rhythm_preflight?.next_actions?.length ? `滚动节奏动作：${writePreparationBrief.rolling_rhythm_preflight.next_actions.join('；')}` : '',
       writePreparationBrief?.creation_contract_checklist?.length ? `创作契约清单 creation_contract_checklist：${writePreparationBrief.creation_contract_checklist.join('；')}` : '',
       writePreparationBrief?.blueprint_focus?.length ? `蓝图焦点：${writePreparationBrief.blueprint_focus.join('；')}` : '',
       writePreparationBrief?.reader_payoff_focus?.length ? `读者回报焦点：${writePreparationBrief.reader_payoff_focus.join('；')}` : '',
       writePreparationBrief?.must_confirm?.length ? `写前必确认：${writePreparationBrief.must_confirm.join('；')}` : '',
       writePreparationBrief?.execution_order?.length ? `执行顺序：${writePreparationBrief.execution_order.join('；')}` : '',
-      writePreparationBrief ? '写前准备回执：最终 JSON 必须在 oh_story_delivery_receipts.pre_draft_execution_receipts.write_preparation_checks 中逐项说明来源缺口、文风召回缺口和副对标边界、资产风险、上一轮待修复、创作契约清单 creation_contract_checklist、蓝图焦点和读者回报是否已在 chapter_text 中兑现；每项包含 key,label,delivered,evidence,remaining_risk，evidence 必须引用正文可定位动作、对话或信息变化。' : '',
+      writePreparationBrief ? '写前准备回执：最终 JSON 必须在 oh_story_delivery_receipts.pre_draft_execution_receipts.write_preparation_checks 中逐项说明来源缺口、文风召回缺口和副对标边界、资产风险、上一轮待修复、滚动节奏预检 rolling_rhythm_preflight、创作契约清单 creation_contract_checklist、蓝图焦点和读者回报是否已在 chapter_text 中兑现；每项包含 key,label,delivered,evidence,remaining_risk，evidence 必须引用正文可定位动作、对话或信息变化。' : '',
       '',
       chapterBlueprint ? '【章节蓝图合同】' : '',
       chapterBlueprint ? '硬性要求：必须先执行 chapter_target.chapter_blueprint，再展开正文。它是本章写作合同，优先级高于散落的材料摘要；正文必须按目标情绪、开篇钩子、核心回报、五段式内容概括、多线推进、人物出场顺序、情节点功能标签、代价/收益和章尾承接来组织。' : '',
