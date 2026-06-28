@@ -31,6 +31,7 @@ import { executeNovelAgent, previewNovelKnowledgeInjection } from '../llm'
 import { extractLLMText, parseJsonLikePayload } from './novel-route-utils'
 import { purgeMemoryPalaceProject } from '../memory-service'
 import { buildOhStoryGenreCatalogContract, formatOhStoryGenreCatalogPrompt } from './novel-genre-catalog'
+import { buildOhStoryGenreCoreMechanicsContract, formatOhStoryGenreCoreMechanicsPrompt } from './novel-genre-core-mechanics'
 
 function parseOptionalBoolean(value: any) {
   if (value === undefined) return undefined
@@ -980,6 +981,15 @@ export function buildProjectSeedRecoveryPrompt(seed: any, diagnostics: any, idea
     seed?.commercial_tags,
     seed?.writing_bible?.genre_positioning_contract,
   )
+  const genreCoreMechanicsContract = buildOhStoryGenreCoreMechanicsContract(
+    idea,
+    requestedTitle,
+    seed?.title,
+    seed?.genre,
+    seed?.sub_genres,
+    seed?.commercial_tags,
+    seed?.writing_bible?.genre_positioning_contract,
+  )
   return [
     '任务：上一次项目种子输出偏薄，但里面有可用灵感。请基于这些有效信息补齐小说项目种子。只输出 JSON object，不要 Markdown，不要解释。',
     '关键原则：不要要求作者更换模型；不要丢弃已有线索；不要重新开一个无关故事；必须保留已有有效信息，并围绕缺口清单补齐。',
@@ -993,6 +1003,8 @@ export function buildProjectSeedRecoveryPrompt(seed: any, diagnostics: any, idea
     JSON.stringify(seed || {}, null, 2).slice(0, 26000),
     '',
     formatOhStoryGenreCatalogPrompt(genreCatalogContract),
+    '',
+    formatOhStoryGenreCoreMechanicsPrompt(genreCoreMechanicsContract),
     '',
     '【缺口清单】',
     asSeedArray(diagnostics?.missing_fields).length ? asSeedArray(diagnostics.missing_fields).join('、') : '请复查所有必填字段是否足够支撑项目创建。',
@@ -1012,7 +1024,7 @@ export function buildProjectSeedRecoveryPrompt(seed: any, diagnostics: any, idea
     '4. 超长篇至少5卷，长篇至少3卷；中篇至少2卷；短篇可1卷。',
     '5. 长篇/超长篇 chapter_outlines 至少前30章，每章包含 chapter_no,title,summary,conflict,ending_hook。',
     '6. target_reader_contract 必须回答“写给谁看、读者想看什么、本章给什么”，并给出 reader_profile, reader_desires, emotional_gap, chapter_value_test, quality_checks。',
-    '7. genre_positioning_contract 必须给出题材标签、平台口味、核心梗、卖点、创新边界、genre_catalog_contract 和“拉长板而非补短板”的质量检查。',
+    '7. genre_positioning_contract 必须给出题材标签、平台口味、核心梗、卖点、创新边界、genre_catalog_contract、genre_core_mechanics_contract 和“拉长板而非补短板”的质量检查。',
     '8. core_contract_radar 必须给出 must_serve, no_drift, theme_unity_rules, repair_focus，并包含“当初吸引读者的卖点还在吗”的十章复核问题。',
     '9. reader_retention_contract 必须要求前300字承接上一章压力，章末留下下一章动作压力。',
     '10. 不要生成正文；不要照搬任何现有作品专有设定、角色名、桥段或原句。',
@@ -1022,6 +1034,7 @@ export function buildProjectSeedRecoveryPrompt(seed: any, diagnostics: any, idea
 export function buildProjectSeedPrompt(idea: string, requestedTitle = '', requestedLengthTarget = '') {
   const normalizedLengthTarget = normalizeLengthTarget(requestedLengthTarget) || 'medium'
   const genreCatalogContract = buildOhStoryGenreCatalogContract(idea, requestedTitle)
+  const genreCoreMechanicsContract = buildOhStoryGenreCoreMechanicsContract(idea, requestedTitle)
   return [
     '任务：把用户碎片化小说想法整理成可创建项目的结构化项目种子。只输出 JSON object，不要 Markdown，不要解释。',
     requestedTitle ? `用户指定作品名：${requestedTitle}` : '',
@@ -1031,6 +1044,8 @@ export function buildProjectSeedPrompt(idea: string, requestedTitle = '', reques
     idea.slice(0, 20000) || '用户只提供了作品名。请基于作品名生成一个原创、可商业连载的项目种子，不要套用现有作品。',
     '',
     formatOhStoryGenreCatalogPrompt(genreCatalogContract),
+    '',
+    formatOhStoryGenreCoreMechanicsPrompt(genreCoreMechanicsContract),
     '',
     '硬性要求：即使用户只提供作品名，也必须原创扩写完整项目种子；synopsis、logline、core_premise、main_conflict、protagonist、worldbuilding、volume_outlines、chapter_outlines 不得为空。',
     '',
@@ -1052,7 +1067,7 @@ export function buildProjectSeedPrompt(idea: string, requestedTitle = '', reques
     'plot_engine: {inciting_incident, long_term_goal, volume_arc_suggestions, first_10_chapters_direction}',
     'writing_bible: {promise, mainline, world_rules, style_lock, forbidden, safety_policy, target_reader_contract, genre_positioning_contract, core_contract_radar, reader_retention_contract}',
     'writing_bible.target_reader_contract: {reader_profile, reader_desires, emotional_gap, chapter_value_test, quality_checks}，必须回答“写给谁看、读者想看什么、本章给什么”',
-    'writing_bible.genre_positioning_contract: {genre_tags, platform, reader_psychology, core_hook, type_formula, selling_points, long_board, innovation_boundary, genre_catalog_contract, quality_checks}，必须包含“拉长板而非补短板”和上方 oh-story 题材目录契约',
+    'writing_bible.genre_positioning_contract: {genre_tags, platform, reader_psychology, core_hook, type_formula, selling_points, long_board, innovation_boundary, genre_catalog_contract, genre_core_mechanics_contract, quality_checks}，必须包含“拉长板而非补短板”和上方 oh-story 题材目录/核心机制契约',
     'writing_bible.core_contract_radar: {must_serve, no_drift, theme_unity_rules, repair_focus, periodic_drift_check}，periodic_drift_check.question 必须包含“当初吸引读者的卖点还在吗”',
     'writing_bible.reader_retention_contract: {retention_double_engine, opening_hook_rule, ending_hook_rule, reward_randomness_rule, quality_checks}，opening_hook_rule 必须包含“前300字”',
     'commercial_positioning: {platform, reader_promise, selling_points, tropes, risks}',
@@ -1399,6 +1414,21 @@ function buildFallbackWritingBible(seed: any, project: any = {}) {
     root.logline,
     root.core_premise,
   )
+  const genreCoreMechanicsContract = buildOhStoryGenreCoreMechanicsContract(
+    root.title,
+    project.title,
+    root.genre,
+    project.genre,
+    asSeedArray(root.sub_genres),
+    asSeedArray(project.sub_genres),
+    asSeedArray(root.commercial_tags),
+    root.synopsis,
+    root.logline,
+    root.core_premise,
+    root.plot_engine,
+    root.worldbuilding,
+    root.protagonist,
+  )
   const readerDesires = uniqueSeedTexts([
     readerPromise,
     ...sellingPoints,
@@ -1444,6 +1474,7 @@ function buildFallbackWritingBible(seed: any, project: any = {}) {
     long_board: firstSeedText(sellingPoints[0], innovationHook, readerPromise),
     innovation_boundary: '微创新必须服务核心卖点和目标读者，不新增会稀释主线的复杂机制。',
     genre_catalog_contract: genreCatalogContract,
+    genre_core_mechanics_contract: genreCoreMechanicsContract,
     quality_checks: [
       '题材标签、读者心理、核心梗、平台口味和章节场景必须一致。',
       '拉长板而非补短板：优先强化最能吸引目标读者的核心卖点。',

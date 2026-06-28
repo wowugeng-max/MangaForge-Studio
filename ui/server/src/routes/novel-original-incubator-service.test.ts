@@ -38,6 +38,24 @@ describe('original incubator setting assets', () => {
     expect(prompt).toContain('每2000字至少一个悬念/反转/信息差钩子')
   })
 
+  test('requires deep incubation to use oh-story genre core mechanics', () => {
+    const service = createNovelOriginalIncubatorService()
+    const prompt = service.buildOriginalIncubatorPrompt(
+      { title: '拳证星河', length_target: 'epic', genre: '都市高武', target_audience: '番茄男频' },
+      { idea: '底层学生靠碎片化金手指升级打怪挣钱', chapter_count: 30 },
+    )
+
+    expect(prompt).toContain('genre_core_mechanics_contract')
+    expect(prompt).toContain('oh_story_genre_core_mechanics_v1')
+    expect(prompt).toContain('主题(立意)→题材核心(吸引力)→核心情绪(体验链条)')
+    expect(prompt).toContain('每章至少有期待点或爽点之一')
+    expect(prompt).toContain('微创新不超3个')
+    expect(prompt).toContain('纵向+横向+交叉')
+    expect(prompt).toContain('金手指类型与世界观压迫特征对应')
+    expect(prompt).toContain('常规升级流')
+    expect(prompt).toContain('碎片化/解锁型')
+  })
+
   test('requires original incubation to choose an oh-story opening hook strategy', () => {
     const service = createNovelOriginalIncubatorService()
     const prompt = service.buildOriginalIncubatorPrompt(

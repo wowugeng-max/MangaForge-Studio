@@ -131,6 +131,23 @@ describe('novel project seed prompt', () => {
     expect(xianxiaPrompt).toContain('地图逐层展开')
   })
 
+  test('injects oh-story genre core mechanics into seed generation', async () => {
+    const { buildProjectSeedPrompt } = await import('./novel-core-routes')
+
+    const prompt = buildProjectSeedPrompt('都市高武，底层学生靠碎片化金手指升级打怪挣钱', '拳证星河', 'epic')
+
+    expect(prompt).toContain('genre_core_mechanics_contract')
+    expect(prompt).toContain('oh_story_genre_core_mechanics_v1')
+    expect(prompt).toContain('主题(立意)→题材核心(吸引力)→核心情绪(体验链条)')
+    expect(prompt).toContain('每章至少有期待点或爽点之一')
+    expect(prompt).toContain('微创新不超3个')
+    expect(prompt).toContain('纵向+横向+交叉')
+    expect(prompt).toContain('金手指类型与世界观压迫特征对应')
+    expect(prompt).toContain('常规升级流')
+    expect(prompt).toContain('碎片化/解锁型')
+    expect(prompt).toContain('后一个爽点在影响力/层级/收获/认知至少一个维度上超过前一个')
+  })
+
   test('routes remaining oh-story genre catalog frameworks into creation contracts', async () => {
     const { buildOhStoryGenreCatalogContract } = await import('./novel-genre-catalog')
 
@@ -584,6 +601,13 @@ describe('novel project seed prompt', () => {
     expect(bible.genre_positioning_contract.genre_catalog_contract.matched_framework).toBe('规则怪谈')
     expect(bible.genre_positioning_contract.genre_catalog_contract.structure_beats.join('｜')).toContain('背景故事')
     expect(bible.genre_positioning_contract.genre_catalog_contract.quality_checks.join('｜')).toContain('每2000字至少一个悬念/反转/信息差钩子')
+    expect(bible.genre_positioning_contract.genre_core_mechanics_contract.source).toBe('oh_story_genre_core_mechanics_v1')
+    expect(bible.genre_positioning_contract.genre_core_mechanics_contract.core_hook_layers.join('｜')).toContain('主题(立意)')
+    expect(bible.genre_positioning_contract.genre_core_mechanics_contract.chapter_loop_rules.join('｜')).toContain('每章至少有期待点或爽点之一')
+    expect(bible.genre_positioning_contract.genre_core_mechanics_contract.micro_innovation_rules.join('｜')).toContain('微创新不超3个')
+    expect(bible.genre_positioning_contract.genre_core_mechanics_contract.conflict_network_rules.join('｜')).toContain('纵向+横向+交叉')
+    expect(bible.genre_positioning_contract.genre_core_mechanics_contract.goldfinger_worldview_fit.worldview_type).toBeTruthy()
+    expect(bible.genre_positioning_contract.genre_core_mechanics_contract.threshold_escalation_rules.join('｜')).toContain('后一个爽点')
     expect(bible.core_contract_radar.source).toBe('oh_story_creation_contract_v1')
     expect(bible.core_contract_radar.must_serve.join('｜')).toContain('每章都有规则发现')
     expect(bible.core_contract_radar.no_drift.join('｜')).toContain('不能写成纯打怪')
