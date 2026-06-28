@@ -18193,6 +18193,36 @@ const CORE_CONTRACT_CHECK_LABELS: Record<string, string> = {
   forbidden_content: '不可偏移',
 }
 
+const OH_STORY_CORE_CONTRACT_SELLING_POINT_EXECUTION_RULES = [
+  '卖点四步法：想清楚整本书卖点、书名卖点、简介卖点和每段剧情卖点，并让它们对齐同一核心情绪。',
+  '卖点表达必须发现比告知爽十倍：用剧情、对话、动作结果和角色反应隐性展示，不要直接宣布“这是核心卖点/本章很爽”。',
+  '卖点递进必须形成开头暗示 -> 中间深化 -> 高潮爆发；每章一句话概括内容并标注目的词，盯紧章纲目的来写。',
+]
+
+const OH_STORY_CORE_CONTRACT_REPETITION_STRATEGY_RULES = [
+  '重复点是商业长篇的稳定器：人物重复点、套路重复点、剧情重复点要围绕核心看点服务同一卖点。',
+  '同一卖点至少延展 3 个角度，用正写、反套路、持续反、反了再正等方式换壳换场景换人物。',
+  '核心看点在当前样本/读者反馈中稳定时保持重复策略；反馈下降时升级重复方式，避免爽点重复导致审美疲劳。',
+]
+
+const OH_STORY_CORE_CONTRACT_COMMERCIAL_RHYTHM_RULES = [
+  '节奏自检：写前读取追踪/上下文.md 与最近 3 章摘要；连续 2 章没有目标推进、阻碍升级或新信息时，下一章提高冲突密度。',
+  '过快自检：连续 2 章只爆点不留反应余波时，插入 1-2 个承接场景，但必须推进关系、伏笔、状态或下一目标。',
+  '高潮节奏标尺：大高潮 7-10 天完成，小高潮约 3 天，高潮后 1-2 章过渡；平淡过渡必须用目标或冲突拉回节奏。',
+]
+
+const OH_STORY_CORE_CONTRACT_GOLDFINGER_STRUCTURE_RULES = [
+  '金手指可替换故事流程中的任一环节：建立目标、克服困难、准备环节、激励事件或收获奖励，但不能破坏行动链。',
+  '金手指简单是核心，一眼就懂；系统限制必须保证故事结构完整，让主角一步步行动。',
+  '给出金手指后必须有即时变化，并契合主角当前职业、生活困境或打开困境的钥匙；刚好解决当前矛盾后暴露更大矛盾。',
+]
+
+const OH_STORY_CORE_CONTRACT_LAUNCH_PRESSURE_RULES = [
+  '开篇 300-500字内交代处境、危险来源和破局希望；前两万字优先解决“活下去”。',
+  '优先用环境型压力开局，主角一开始不能完美，要形成否极泰来的起点。',
+  '轻松向开篇也要让主角一无所有 + 金手指一眼就知道怎么用，不能先铺背景或大段世界观。',
+]
+
 function uniqueBriefStrings(values: any[], limit = 12) {
   return Array.from(new Set(values
     .flatMap(value => Array.isArray(value) ? value : [value])
@@ -18284,6 +18314,11 @@ function normalizeCoreContractRadar(value: any) {
     coreEmotion ? `一本书从头到尾要有统一的核心情绪：${coreEmotion}` : '',
     coreEmotion ? '小情绪服从大情绪；随机翻开一章，情绪必须指向全书核心。' : '',
   ], 8)
+  const sellingPointExecutionRules = uniqueBriefStrings(raw.selling_point_execution_rules || raw.sellingPointExecutionRules || raw.selling_point_rules || raw.sellingPointRules || [], 8)
+  const repetitionStrategyRules = uniqueBriefStrings(raw.repetition_strategy_rules || raw.repetitionStrategyRules || raw.repeat_strategy_rules || raw.repeatStrategyRules || [], 8)
+  const commercialRhythmRules = uniqueBriefStrings(raw.commercial_rhythm_rules || raw.commercialRhythmRules || raw.rhythm_meter_rules || raw.rhythmMeterRules || [], 8)
+  const goldfingerStructureRules = uniqueBriefStrings(raw.goldfinger_structure_rules || raw.goldfingerStructureRules || raw.goldfinger_process_rules || raw.goldfingerProcessRules || [], 8)
+  const launchPressureRules = uniqueBriefStrings(raw.launch_pressure_rules || raw.launchPressureRules || raw.opening_pressure_rules || raw.openingPressureRules || [], 8)
   const repairFocus = uniqueBriefStrings(raw.repair_focus || raw.repairFocus || raw.required_actions || raw.requiredActions || [], 10)
   const periodicDriftCheck = normalizeCoreContractPeriodicDriftCheck(raw.periodic_drift_check || raw.periodicDriftCheck)
   const seenCheckKeys = new Set<string>()
@@ -18311,12 +18346,30 @@ function normalizeCoreContractRadar(value: any) {
   const summary = compactBriefText(raw.summary || raw.detail || raw.reason || (
     mustServe.length ? `本章必须服务：${mustServe.slice(0, 3).join('；')}` : ''
   ))
-  if (!summary && !mustServe.length && !noDrift.length && !themeUnityRules.length && !repairFocus.length && !checks.length && !periodicDriftCheck) return null
+  if (
+    !summary
+    && !mustServe.length
+    && !noDrift.length
+    && !themeUnityRules.length
+    && !sellingPointExecutionRules.length
+    && !repetitionStrategyRules.length
+    && !commercialRhythmRules.length
+    && !goldfingerStructureRules.length
+    && !launchPressureRules.length
+    && !repairFocus.length
+    && !checks.length
+    && !periodicDriftCheck
+  ) return null
   return {
     summary,
     must_serve: mustServe,
     no_drift: noDrift,
     theme_unity_rules: themeUnityRules,
+    selling_point_execution_rules: sellingPointExecutionRules,
+    repetition_strategy_rules: repetitionStrategyRules,
+    commercial_rhythm_rules: commercialRhythmRules,
+    goldfinger_structure_rules: goldfingerStructureRules,
+    launch_pressure_rules: launchPressureRules,
     repair_focus: repairFocus,
     checks,
     periodic_drift_check: periodicDriftCheck,
@@ -18464,6 +18517,11 @@ function buildCoreContractRadar(project: any, contextPackage: any, sceneBriefs: 
     must_serve: mustServe,
     no_drift: noDrift,
     theme_unity_rules: themeUnityRules,
+    selling_point_execution_rules: OH_STORY_CORE_CONTRACT_SELLING_POINT_EXECUTION_RULES,
+    repetition_strategy_rules: OH_STORY_CORE_CONTRACT_REPETITION_STRATEGY_RULES,
+    commercial_rhythm_rules: OH_STORY_CORE_CONTRACT_COMMERCIAL_RHYTHM_RULES,
+    goldfinger_structure_rules: OH_STORY_CORE_CONTRACT_GOLDFINGER_STRUCTURE_RULES,
+    launch_pressure_rules: OH_STORY_CORE_CONTRACT_LAUNCH_PRESSURE_RULES,
     repair_focus: repairFocus,
     checks,
     periodic_drift_check: periodicDriftCheck,
@@ -22249,6 +22307,186 @@ function normalizeCoreContractThemeUnityCheck(values: any, chapterText: string) 
   }
 }
 
+function countCoreContractSignals(chapterText: string, patterns: RegExp[]) {
+  const text = String(chapterText || '')
+  return patterns.reduce((count, pattern) => count + (pattern.test(text) ? 1 : 0), 0)
+}
+
+function normalizeCoreContractSellingPointExecutionCheck(values: any, chapterText: string) {
+  const planned = coreContractArray(values)
+  if (!planned.length) return null
+  const text = String(chapterText || '')
+  const fourStepSignals = countCoreContractSignals(text, [/卖点四步法|整本书卖点|书名卖点|简介卖点|段落卖点|每段剧情卖点/])
+  const implicitSignals = countCoreContractSignals(text, [/发现比告知爽十倍|隐性展示|剧情、对话和反应|剧情\/对话\/反应|读者.*自己发现/])
+  const progressionSignals = countCoreContractSignals(text, [/开头暗示.*中间深化.*高潮爆发|开头暗示|中间深化|高潮爆发|目的词|章纲目的/])
+  const directTell = (/直接告诉读者.*核心卖点|这是核心卖点|本章很爽|只靠旁白宣布卖点|文青书名.*无法传递核心卖点/.test(text))
+    && !/不是被告知本章很爽|没有直接告诉读者|不直接告诉读者|避免直接告诉读者/.test(text)
+  const delivered = !directTell && fourStepSignals >= 1 && implicitSignals >= 1 && progressionSignals >= 1
+  return {
+    key: 'selling_point_execution_rules',
+    label: '卖点执行',
+    text: planned.join('；'),
+    expected: planned.join('；'),
+    score: delivered ? 88 : Math.max(16, (fourStepSignals + implicitSignals + progressionSignals) * 18 - (directTell ? 18 : 0)),
+    evidence: uniqueBriefStrings([
+      fourStepSignals ? '卖点四步法信号可见' : '',
+      implicitSignals ? '隐性展示/发现比告知爽十倍可见' : '',
+      progressionSignals ? '开头暗示-中间深化-高潮爆发可见' : '',
+      directTell ? '直接宣布卖点或爽感' : '',
+    ], 8),
+    delivered,
+    status: delivered ? 'ok' : 'warn',
+    missed_items: delivered ? [] : uniqueBriefStrings([
+      !fourStepSignals ? '缺整本书/书名/简介/段落卖点对齐' : '',
+      !implicitSignals ? '缺剧情/对话/反应隐性展示卖点' : '',
+      !progressionSignals ? '缺开头暗示 -> 中间深化 -> 高潮爆发递进或目的词' : '',
+      directTell ? '不能直接告诉读者这是核心卖点/本章很爽' : '',
+    ], 8),
+    issue: delivered ? '' : '商业卖点没有按四步法和隐性展示落成正文。',
+    repair_instruction: delivered ? '' : '补卖点执行：按卖点四步法对齐全书、书名、简介和段落卖点，用剧情/对话/反应隐性展示，并形成开头暗示 -> 中间深化 -> 高潮爆发。',
+  }
+}
+
+function normalizeCoreContractRepetitionStrategyCheck(values: any, chapterText: string) {
+  const planned = coreContractArray(values)
+  if (!planned.length) return null
+  const text = String(chapterText || '')
+  const repeatSignals = countCoreContractSignals(text, [/重复点|核心看点|同一卖点.*(?:3|三).*角度|至少延展.*(?:3|三).*角度/])
+  const variationSignals = countCoreContractSignals(text, [/正写|反套路|持续反|反了再正|换壳换场景换人物|内核一致|升级重复方式/])
+  const fatigueSignals = countCoreContractSignals(text, [/审美疲劳|爽点重复|反馈下降|读者反馈/])
+  const fatigueFailure = /爽点重复到读者审美疲劳|核心看点抓不住|临时换看点|成绩也没了/.test(text)
+  const delivered = !fatigueFailure && repeatSignals >= 1 && variationSignals >= 1 && fatigueSignals >= 1
+  return {
+    key: 'repetition_strategy_rules',
+    label: '重复策略',
+    text: planned.join('；'),
+    expected: planned.join('；'),
+    score: delivered ? 86 : Math.max(16, (repeatSignals + variationSignals + fatigueSignals) * 18 - (fatigueFailure ? 18 : 0)),
+    evidence: uniqueBriefStrings([
+      repeatSignals ? '重复点/核心看点信号可见' : '',
+      variationSignals ? '同卖点多角度变化可见' : '',
+      fatigueSignals ? '审美疲劳/反馈策略可见' : '',
+      fatigueFailure ? '爽点重复或临时换看点' : '',
+    ], 8),
+    delivered,
+    status: delivered ? 'ok' : 'warn',
+    missed_items: delivered ? [] : uniqueBriefStrings([
+      !repeatSignals ? '缺核心重复点或同一卖点多角度规划' : '',
+      !variationSignals ? '缺正写/反套路/持续反/换壳换场景等变化方式' : '',
+      !fatigueSignals ? '缺审美疲劳或反馈下降时的升级策略' : '',
+      fatigueFailure ? '核心看点抓不住或爽点重复导致审美疲劳' : '',
+    ], 8),
+    issue: delivered ? '' : '重复策略没有证明同一核心卖点能持续换角度交付。',
+    repair_instruction: delivered ? '' : '补重复策略：围绕核心看点保留重复点，把同一卖点拆出至少3个角度，用正写、反套路、持续反或换壳换场景升级重复方式。',
+  }
+}
+
+function normalizeCoreContractCommercialRhythmCheck(values: any, chapterText: string) {
+  const planned = coreContractArray(values)
+  if (!planned.length) return null
+  const text = String(chapterText || '')
+  const contextSignals = countCoreContractSignals(text, [/追踪\/上下文\.md|最近\s*3\s*章|最近3章|节奏自检/])
+  const progressSignals = countCoreContractSignals(text, [/目标推进|阻碍升级|新信息|冲突密度|每500字.*转折点|500字.*转折/])
+  const aftermathSignals = countCoreContractSignals(text, [/反应余波|承接场景|推进关系|推进.*关系|推进伏笔|推进状态|下一目标/])
+  const climaxSignals = countCoreContractSignals(text, [/大高潮.*7-10|7-10天|小高潮.*3天|高潮后.*1-2章|1-2章过渡/])
+  const rhythmFailure = (/连续\s*2\s*章没有目标推进|连续2章没有目标推进|连续\s*2\s*章只爆点不留反应余波|连续2章只爆点不留反应余波|拖沓|流水账/.test(text))
+    && !/没有拖沓|无拖沓|不是连续爆点无余波|不是连续\s*2\s*章只爆点不留反应余波|避免连续\s*2\s*章|确认没有拖沓/.test(text)
+  const delivered = !rhythmFailure && contextSignals >= 1 && progressSignals >= 1 && aftermathSignals >= 1 && climaxSignals >= 1
+  return {
+    key: 'commercial_rhythm_rules',
+    label: '商业节奏',
+    text: planned.join('；'),
+    expected: planned.join('；'),
+    score: delivered ? 88 : Math.max(16, (contextSignals + progressSignals + aftermathSignals + climaxSignals) * 16 - (rhythmFailure ? 18 : 0)),
+    evidence: uniqueBriefStrings([
+      contextSignals ? '最近3章/追踪上下文节奏自检可见' : '',
+      progressSignals ? '目标推进/阻碍升级/新信息可见' : '',
+      aftermathSignals ? '爆点后反应余波/承接推进可见' : '',
+      climaxSignals ? '高潮节奏标尺可见' : '',
+      rhythmFailure ? '连续章节拖沓、过快或流水账' : '',
+    ], 8),
+    delivered,
+    status: delivered ? 'ok' : 'warn',
+    missed_items: delivered ? [] : uniqueBriefStrings([
+      !contextSignals ? '缺追踪/上下文与最近3章节奏自检' : '',
+      !progressSignals ? '缺目标推进、阻碍升级、新信息或冲突密度' : '',
+      !aftermathSignals ? '缺爆点后的反应余波或承接场景推进' : '',
+      !climaxSignals ? '缺大高潮/小高潮/过渡章节奏标尺' : '',
+      rhythmFailure ? '存在连续2章拖沓、过快或流水账信号' : '',
+    ], 8),
+    issue: delivered ? '' : '商业节奏没有按最近章节状态和高潮标尺校准。',
+    repair_instruction: delivered ? '' : '补节奏自检：读取追踪/上下文.md 与最近3章摘要，连续2章无推进就提高冲突密度，连续爆点无余波就加承接场景，并按大高潮7-10天、小高潮3天、高潮后1-2章过渡校准。',
+  }
+}
+
+function normalizeCoreContractGoldfingerStructureCheck(values: any, chapterText: string) {
+  const planned = coreContractArray(values)
+  if (!planned.length) return null
+  const text = String(chapterText || '')
+  const processSignals = countCoreContractSignals(text, [/金手指可替换故事流程|替换故事流程|建立目标|克服困难|准备环节|激励事件|收获奖励/])
+  const simplicitySignals = countCoreContractSignals(text, [/一眼就懂|金手指简单|系统限制|一步步行动|行动链/])
+  const feedbackSignals = countCoreContractSignals(text, [/即时变化|当前职业|生活困境|打开困境|刚好解决当前矛盾|暴露更大矛盾/])
+  const badGoldfinger = /说明书式万能外挂|万能外挂|一键清场|太强所以无聊|太弱.*焦虑|和职业无关|生活职业无关/.test(text)
+  const delivered = !badGoldfinger && processSignals >= 1 && simplicitySignals >= 1 && feedbackSignals >= 1
+  return {
+    key: 'goldfinger_structure_rules',
+    label: '金手指结构',
+    text: planned.join('；'),
+    expected: planned.join('；'),
+    score: delivered ? 88 : Math.max(16, (processSignals + simplicitySignals + feedbackSignals) * 18 - (badGoldfinger ? 18 : 0)),
+    evidence: uniqueBriefStrings([
+      processSignals ? '金手指替换故事流程环节可见' : '',
+      simplicitySignals ? '一眼就懂/系统限制/行动链可见' : '',
+      feedbackSignals ? '即时变化/职业契合/更大矛盾可见' : '',
+      badGoldfinger ? '金手指万能、无聊或脱离职业' : '',
+    ], 8),
+    delivered,
+    status: delivered ? 'ok' : 'warn',
+    missed_items: delivered ? [] : uniqueBriefStrings([
+      !processSignals ? '缺金手指替换故事流程环节说明' : '',
+      !simplicitySignals ? '缺一眼就懂、系统限制或主角行动链' : '',
+      !feedbackSignals ? '缺即时变化、职业契合或更大矛盾暴露' : '',
+      badGoldfinger ? '金手指变成说明书式万能外挂或一键清场' : '',
+    ], 8),
+    issue: delivered ? '' : '金手指没有按商业流程结构服务目标、行动、阻碍和奖励。',
+    repair_instruction: delivered ? '' : '补金手指结构：明确它替换故事流程哪个环节，保持一眼就懂和系统限制，给出即时变化并契合职业/困境，解决当前矛盾后暴露更大矛盾。',
+  }
+}
+
+function normalizeCoreContractLaunchPressureCheck(values: any, chapterText: string) {
+  const planned = coreContractArray(values)
+  if (!planned.length) return null
+  const text = String(chapterText || '')
+  const openingSignals = countCoreContractSignals(text, [/300-500字|300到500字|处境.*危险来源.*破局希望|危险来源.*破局希望|活下去/])
+  const pressureSignals = countCoreContractSignals(text, [/环境型压力|冲突型压力|一无所有|不能完美|不完美|否极泰来/])
+  const hopeSignals = countCoreContractSignals(text, [/破局希望|金手指.*一眼就知道怎么用|打开困境|轻松向开篇/])
+  const badLaunch = /开篇主角完美无缺|先铺背景|大段世界观|没有危险来源|没有破局希望|先铺.*世界观/.test(text)
+  const delivered = !badLaunch && openingSignals >= 1 && pressureSignals >= 1 && hopeSignals >= 1
+  return {
+    key: 'launch_pressure_rules',
+    label: '开篇压力',
+    text: planned.join('；'),
+    expected: planned.join('；'),
+    score: delivered ? 86 : Math.max(16, (openingSignals + pressureSignals + hopeSignals) * 18 - (badLaunch ? 18 : 0)),
+    evidence: uniqueBriefStrings([
+      openingSignals ? '300-500字处境/危险/希望可见' : '',
+      pressureSignals ? '环境型压力或否极泰来起点可见' : '',
+      hopeSignals ? '破局希望/金手指低门槛可见' : '',
+      badLaunch ? '开篇完美主角、背景铺陈或无危险/希望' : '',
+    ], 8),
+    delivered,
+    status: delivered ? 'ok' : 'warn',
+    missed_items: delivered ? [] : uniqueBriefStrings([
+      !openingSignals ? '缺开篇300-500字处境、危险来源和破局希望' : '',
+      !pressureSignals ? '缺环境型压力、主角不完美或否极泰来起点' : '',
+      !hopeSignals ? '缺破局希望或金手指低门槛可懂' : '',
+      badLaunch ? '开篇先铺背景/大段世界观或主角过于完美' : '',
+    ], 8),
+    issue: delivered ? '' : '开篇压力没有按商业留存要求建立处境、危险和破局希望。',
+    repair_instruction: delivered ? '' : '补开篇压力：前300-500字交代处境、危险来源和破局希望，优先环境型压力，让主角不完美并形成否极泰来的起点。',
+  }
+}
+
 function normalizeCoreContractRepairFocusCheck(values: any, chapterText: string) {
   const planned = coreContractArray(values)
   if (!planned.length) return null
@@ -22432,6 +22670,11 @@ function buildCoreContractDeterministicCheck(chapterText: string) {
 function coreContractPriority(missed: any[]) {
   if (missed.some(item => item.key === 'core_conflict_premature_resolution')) return '优先守核心节奏'
   if (missed.some(item => item.key === 'ten_chapter_selling_point')) return '优先补核心卖点'
+  if (missed.some(item => item.key === 'selling_point_execution_rules')) return '优先补卖点执行'
+  if (missed.some(item => item.key === 'commercial_rhythm_rules')) return '优先校准商业节奏'
+  if (missed.some(item => item.key === 'goldfinger_structure_rules')) return '优先修金手指结构'
+  if (missed.some(item => item.key === 'repetition_strategy_rules')) return '优先升级重复策略'
+  if (missed.some(item => item.key === 'launch_pressure_rules')) return '优先补开篇压力'
   if (missed.some(item => item.key === 'core_contract_forbidden')) return '优先清核心硬伤'
   if (missed.some(item => item.key === 'theme_unity_rules')) return '优先守主题统一'
   if (missed.some(item => item.key === 'no_drift')) return '优先修核心漂移'
@@ -22457,6 +22700,11 @@ export function buildCoreContractSyncReport(project: any, chapter: any, contextP
     normalizeCoreContractServeCheck(radar.must_serve, chapterText),
     normalizeCoreContractNoDriftCheck(radar.no_drift, chapterText),
     normalizeCoreContractThemeUnityCheck(radar.theme_unity_rules || radar.themeUnityRules, chapterText),
+    normalizeCoreContractSellingPointExecutionCheck(radar.selling_point_execution_rules || radar.sellingPointExecutionRules, chapterText),
+    normalizeCoreContractRepetitionStrategyCheck(radar.repetition_strategy_rules || radar.repetitionStrategyRules, chapterText),
+    normalizeCoreContractCommercialRhythmCheck(radar.commercial_rhythm_rules || radar.commercialRhythmRules, chapterText),
+    normalizeCoreContractGoldfingerStructureCheck(radar.goldfinger_structure_rules || radar.goldfingerStructureRules, chapterText),
+    normalizeCoreContractLaunchPressureCheck(radar.launch_pressure_rules || radar.launchPressureRules, chapterText),
     normalizeCoreContractRepairFocusCheck(radar.repair_focus, chapterText),
     normalizeCoreContractPeriodicSellingPointCheck(radar.periodic_drift_check || radar.periodicDriftCheck, radar.must_serve, chapterText),
     buildCoreConflictRhythmProtectionCheck(project, chapter, contextPackage, chapterText, radar),
@@ -22479,9 +22727,9 @@ export function buildCoreContractSyncReport(project: any, chapter: any, contextP
     status,
     label: checks.length === 0 ? '核心契约未配置' : status === 'ok' ? '核心契约 OK' : `核心契约缺口 ${missedCount}`,
     summary: checks.length === 0
-      ? '本章没有配置 core_contract_radar，建议补充 must_serve、no_drift 和 repair_focus。'
+      ? '本章没有配置 core_contract_radar，建议补充 must_serve、no_drift、商业卖点执行、重复策略、节奏自检、金手指结构、开篇压力和 repair_focus。'
       : status === 'ok'
-        ? '正文已基本服务核心承诺，未触碰漂移红线，并把修复焦点落成事件、选择或章末问题。'
+        ? '正文已基本服务核心承诺，未触碰漂移红线，并把商业卖点、重复策略、节奏自检、金手指结构、开篇压力和修复焦点落成正文证据。'
         : `正文有 ${missedCount} 项核心契约缺口，${priorityRepair || '优先补核心承诺和漂移红线'}。`,
     missed_count: missedCount,
     priority_repair: priorityRepair,
@@ -22501,6 +22749,21 @@ export function buildCoreContractSyncReport(project: any, chapter: any, contextP
             : '',
           missed.some((item: any) => item.key === 'ten_chapter_selling_point')
             ? '第10/20/30章必须回答“当初吸引读者的卖点还在吗”：把核心卖点重新写成冲突、能力使用、规则限制、读者回报或章末新期待。'
+            : '',
+          missed.some((item: any) => item.key === 'selling_point_execution_rules')
+            ? '补卖点四步法：对齐全书卖点、书名卖点、简介卖点和段落卖点，用剧情/对话/反应让读者自己发现卖点。'
+            : '',
+          missed.some((item: any) => item.key === 'repetition_strategy_rules')
+            ? '补重复策略：保留核心重复点，把同一卖点拆出至少3个角度，避免爽点重复导致审美疲劳。'
+            : '',
+          missed.some((item: any) => item.key === 'commercial_rhythm_rules')
+            ? '补节奏自检：读取追踪/上下文.md 与最近3章摘要，连续2章无推进就提高冲突密度，连续爆点无余波就补承接场景。'
+            : '',
+          missed.some((item: any) => item.key === 'goldfinger_structure_rules')
+            ? '补金手指结构：明确替换故事流程哪个环节，保持一眼就懂和系统限制，给出即时变化并暴露更大矛盾。'
+            : '',
+          missed.some((item: any) => item.key === 'launch_pressure_rules')
+            ? '补开篇压力：前300-500字交代处境、危险来源和破局希望，优先环境型压力和否极泰来的起点。'
             : '',
         ].filter(Boolean),
   }
@@ -50152,10 +50415,15 @@ export function createNovelWritingService(ctx: {
       governanceRecheckMemory ? JSON.stringify(governanceRecheckMemory, null, 2).slice(0, 3000) : '',
       '',
       coreContractRadar ? '【核心契约】' : '',
-      coreContractRadar ? '硬性要求：执行 chapter_target.core_contract_radar；must_serve 是本章必须服务的全书承诺、核心冲突、创新卖点和读者回报；no_drift 是不得漂移的红线；theme_unity_rules 是主题统一规则，要求全书核心情绪一以贯之，小情绪服从大情绪；repair_focus 必须写成可见事件、选择、代价、规则判定、主线推进或章末问题。' : '',
+      coreContractRadar ? '硬性要求：执行 chapter_target.core_contract_radar；must_serve 是本章必须服务的全书承诺、核心冲突、创新卖点和读者回报；no_drift 是不得漂移的红线；theme_unity_rules 是主题统一规则，要求全书核心情绪一以贯之，小情绪服从大情绪；selling_point_execution_rules 必须按卖点四步法和发现比告知爽十倍执行；repetition_strategy_rules 必须守重复策略；commercial_rhythm_rules 必须做节奏自检；goldfinger_structure_rules 必须校准金手指结构；launch_pressure_rules 必须守开篇压力；repair_focus 必须写成可见事件、选择、代价、规则判定、主线推进或章末问题。' : '',
       coreContractRadar ? `必须服务：${coreContractRadar.must_serve.join('；') || '按长篇罗盘与本章任务书执行'}` : '',
       coreContractRadar ? `不得漂移：${coreContractRadar.no_drift.join('；') || '不得改写全书核心承诺、主角驱动和长期方向'}` : '',
       coreContractRadar?.theme_unity_rules?.length ? `主题统一：${coreContractRadar.theme_unity_rules.join('；')}` : '',
+      coreContractRadar?.selling_point_execution_rules?.length ? `卖点四步法：${coreContractRadar.selling_point_execution_rules.join('；')}` : '',
+      coreContractRadar?.repetition_strategy_rules?.length ? `重复策略：${coreContractRadar.repetition_strategy_rules.join('；')}` : '',
+      coreContractRadar?.commercial_rhythm_rules?.length ? `节奏自检：${coreContractRadar.commercial_rhythm_rules.join('；')}` : '',
+      coreContractRadar?.goldfinger_structure_rules?.length ? `金手指结构：${coreContractRadar.goldfinger_structure_rules.join('；')}` : '',
+      coreContractRadar?.launch_pressure_rules?.length ? `开篇压力：${coreContractRadar.launch_pressure_rules.join('；')}` : '',
       coreContractRadar?.repair_focus?.length ? `优先修正：${coreContractRadar.repair_focus.join('；')}` : '',
       coreContractRadar ? JSON.stringify(coreContractRadar, null, 2).slice(0, 4000) : '',
       '',
@@ -51925,7 +52193,7 @@ export function createNovelWritingService(ctx: {
     '13. 是否出现写作工程词混入正文：按 oh-story 正文元信息扫描，标题行以外不得出现第[一二三四五六七八九十百千万两0-9]+章|上一章|上章|前一章|本章|这一章|前文|后文|伏笔|细纲|读者；命中必须输出 prose_meta_checks，字段 key,label,status,matched_term,location,replacement,evidence,remaining_risk，并要求改成角色当下能感知的事件锚点或相对时间，除非角色在故事世界内真实讨论。',
     '14. 是否兑现 chapter_target.delivery_risk_carry_over 和 batch_preflight.delivery_risk_carry_over：逐项检查每个 items/required_actions/opening_actions/middle_actions/ending_actions 中的上一章风险承接动作；opening_actions 必须在前300字有正文证据，middle_actions 必须落成中段事件推进，ending_actions 必须在最后300字形成追读钩子或承接余波。必须给出正文证据，未兑现必须输出 S1/S2 finding，尤其是开篇承接、章末翻页、去AI味、审稿修法、修订残留、新资产入库和 IP场面延展。',
     '14+. 是否兑现 batch_preflight.delivery_risk_carry_over.creation_contract_carry_over：如果安全连写预检要求先修创作契约，必须逐项检查目标读者、题材定位、核心承诺、追读留存是否都有正文证据；必须输出 target_reader_checks、genre_positioning_checks、core_contract_checks 和 reader_retention_checks，不能只用 delivery_risk_receipts 汇总。',
-    '14++. core_contract_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),core_promise,mainline_service,core_emotion,rule_judgement,ending_question,evidence,fix,remaining_risk；核心承诺漂移、主线不服务卖点、核心情绪散乱、规则/金手指不参与胜负或章尾没有新问题时必须给出 S1/S2 finding，category=structure 或 platform。',
+    '14++. core_contract_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),core_promise,mainline_service,core_emotion,rule_judgement,ending_question,selling_point_execution,repetition_strategy,commercial_rhythm,goldfinger_structure,launch_pressure,evidence,fix,remaining_risk；核心承诺漂移、主线不服务卖点、核心情绪散乱、规则/金手指不参与胜负、章尾没有新问题、卖点四步法缺失、未做到发现比告知爽十倍、同一卖点至少延展不足、连续 2 章没有目标推进/阻碍升级/新信息、金手指可替换故事流程不清或开篇 300-500字内交代处境、危险来源和破局希望缺失时必须给出 S1/S2 finding，category=structure 或 platform。',
     '14A. 如果 chapter_target.delivery_receipts 或 oh_story_delivery_receipts 存在，必须把其中的 chapter_blueprint、scene_card_receipts、delivery_risk_receipts、revision_receipts 当作生成交付回执逐项复核；这些回执是模型自述，不是通过证据。回执写 delivered=true 但 changed_evidence/evidence 不能在 chapter_text 定位时，必须改成 warn/fail 并写入 quality_audit_checks 或 delivery_risk_receipts。',
     '14B. 是否兑现 chapter_target.write_preparation_brief 和 oh_story_delivery_receipts.pre_draft_execution_receipts.write_preparation_checks：逐项检查写前准备卡里的 source_gaps、asset_risks、delivery_risk_actions、creation_contract_checklist、blueprint_focus、reader_payoff_focus、must_confirm 是否真的落成正文中的动作、对话、信息变化或关系变化；creation_contract_checklist 必须逐项确认目标读者、题材定位、核心承诺、追读留存是否有正文证据；必须输出 write_preparation_checks，字段 key,label,status(pass|warn|fail),evidence,fix。状态筛选回执必须输出 status_filter_receipts，每项包含 key,label,used_in_chapter,evidence,excluded_reason,remaining_risk。写前准备回执缺失、回执 delivered=true 但证据无法定位、或缺口仍未修复时，必须给出 S1/S2 finding，category=structure/consistency。',
     '14C. 是否兑现 oh_story_delivery_receipts.pre_draft_execution_receipts.next_chapter_quality_plan_receipts：如果存在 chapter_target.delivery_risk_carry_over、batch_preflight.delivery_risk_carry_over 或上一章质量续航计划，必须复核质量续航回执；逐项检查 quality_focus、opening_actions、middle_actions、ending_actions、avoid_repetition 和 evidence_basis 是否真的落成正文动作、信息变化、章末钩子或禁用重复。next_chapter_quality_plan_receipts 中 opening_actions 的 evidence 必须来自前300字；middle_actions 的 evidence 必须来自中段事件推进；ending_actions 的 evidence 必须来自最后300字。必须输出 next_chapter_quality_plan_receipts，字段 key,label,status(pass|warn|fail),delivered,evidence,fix,remaining_risk；缺回执、回执 delivered=true 但证据无法定位、或质量续航仍未修复时，必须给出 S1/S2 finding，category=structure/consistency。',
@@ -52124,6 +52392,7 @@ export function createNovelWritingService(ctx: {
     '7. 对每条结构化 findings，必须按 issues[].evidence 定位原文问题，并按 issues[].fix 执行修订；不要只泛泛润色。',
     '7A. 修订守恒：只修自检证据、delivery_risk_receipts、deterministic_prose_cleanup 和各类 checks 指出的缺口；不得新增支线、替换核心梗、重排长期方向、改写主角长期目标或改变未被 findings 要求的正史。',
     '7B. 修订前必须对照 chapter_target.core_contract_radar 与自检中的 chapter_core_drift/core_drift：must_serve 必须继续服务，no_drift 不得漂移，theme_unity_rules 必须守住主题统一和全书核心情绪；若必须改动伏笔、时间线、角色状态、资产归属或关系边界，必须在 revision_receipts.cascade_impacts 中说明原因、证据和后续同步动作。',
+    '7B+. 修订 core_contract_checks 时必须补商业核心雷达：按卖点四步法对齐全书/书名/简介/段落卖点，用剧情/对话/反应做到发现比告知爽十倍；保留核心重复点并升级重复策略；按追踪/上下文.md 与最近3章做节奏自检；金手指结构必须一眼就懂、有系统限制、替换明确故事流程环节并给出即时变化。',
     '7B0. 如果自检结果包含 theme_unity_rules 或主题统一缺口，必须把本章小情绪重新压回全书核心情绪：随机翻开这一章也要能看出它服务大情绪；删除或改写不服务核心情绪的旁枝情绪线。',
     '7B+. 如果自检结果或 revision_directives 包含 ten_chapter_selling_point，说明核心卖点被稀释或替换：必须把“当初吸引读者的卖点还在吗”落实为正文事件，补核心卖点、能力使用、规则限制、读者回报或章末新期待；不得把第十章改成新主题或新卖点。',
     '7C. 不改长期方向：rewrite 只能重写问题段落的剧情落点和表达方式，不能把本章改成新主题、新地图、新敌人、新关系线或新的长期承诺；compress/de_ai/polish 只能改表达密度和自然度，不能删除有功能信息。',
@@ -53189,7 +53458,7 @@ export function createNovelWritingService(ctx: {
           const result = await executeNovelAgent('outline-agent', project, {
             task: [
               '任务：为无人值守章节写作补齐本章蓝图。只输出 JSON，不写正文。',
-              '输出字段：title, chapter_goal, chapter_summary, conflict, ending_hook, chapter_blueprint, emotional_arc_contract, chapter_hook_contract, paragraph_hook_contract, opening_contract, suspense_contract, reversal_contract, showdown_contract, bridge_unit_contract, style_boundary_contract, plot_dynamics_contract, information_flow_contract, expectation_threshold_contract, story_loop_contract, prose_craft_contract, punctuation_tone_contract, quality_audit_contract, dialogue_contract, continuity_heat_contract, character_relation_contract, character_behavior_contract, asset_linkage_contract, state_tracking_contract, intent_confirmation_contract, target_reader_contract, genre_positioning_contract, female_audience_contract, upgrade_rhythm_contract, conflict_structure_contract, must_advance(array), forbidden_repeats(array), repair_summary。',
+              '输出字段：title, chapter_goal, chapter_summary, conflict, ending_hook, chapter_blueprint, emotional_arc_contract, chapter_hook_contract, paragraph_hook_contract, opening_contract, suspense_contract, reversal_contract, showdown_contract, bridge_unit_contract, style_boundary_contract, plot_dynamics_contract, information_flow_contract, expectation_threshold_contract, story_loop_contract, prose_craft_contract, punctuation_tone_contract, quality_audit_contract, dialogue_contract, continuity_heat_contract, character_relation_contract, character_behavior_contract, asset_linkage_contract, state_tracking_contract, intent_confirmation_contract, target_reader_contract, genre_positioning_contract, core_contract_radar, female_audience_contract, upgrade_rhythm_contract, conflict_structure_contract, must_advance(array), forbidden_repeats(array), repair_summary。',
               'chapter_blueprint 必须包含 target_emotion, opening_hook, core_payoff, content_outline(cause/development/turn/climax/ending), causal_chain_contract(act_order/act_functions/quality_checks), plot_lines(mainline/subplot/event_line/relationship_line/logic_line), character_order, beat_sequence, beat_density_contract, cost_and_reward, ending_contract(final_state/unresolved_question/next_chapter_pull)；causal_chain_contract 必须按 oh-story 五幕式输出种子/生长/转折/冲刺/完成，要求不能跳步、不能乱序；beat_sequence 每项必须包含 beat_no/scene_no/action/function_tag/payoff，function_tag 必须决定展开还是带过，关键揭露/打脸/高潮/爽点必须展开，过渡/赶路/信息交代必须压缩。',
               '情绪弧合同 emotional_arc_contract 必须按 oh-story 情绪弧与 emotional-methods 输出 arc_shape, emotion_formula, pressure_methods, payoff_types, payoff_reverse_design, payoff_tier_rules, payoff_density_rules, emotion_module_recomposition_rules, payoff_escalation_rules, expectation_rules, safety_rules, bonding_setup_rules, emotional_tear_rules, lingering_aftertaste_rules, emotional_turning_rules, first_impression_rules, peak_end_rules, emotion_layer_rules, reaction_structure_rules, ideological_conflict_rules, failure_mode_guards, quality_checks，明确本章如何完成平静 -> 调动 -> 释放 -> 爽、爽点倒推法（先定爽点类型 -> 再定期待点 -> 最后倒推铺垫，正文按铺垫 -> 期待升高 -> 爽点释放呈现）、装逼层级（日常小装逼/核心爽点/偏离爽点）、多爽点密度（不要拉长单个爽点铺垫，800-1200 字内要有信息增量/能力展示/危机反制/关系变化/小回收）、先入为主（前100字先给核心矛盾/主角处境/不公平异常，注意否定提前）、峰终定律（结尾情绪必须高于起点，结尾情绪强度虐≥8、爽≥7、治愈≥6，最后一击必须是动作/对话/画面）、三层情绪（角色自己的情绪、文本传递的情绪、读者实际感受分离，角色在哭不等于读者哭，必须转成读者收益）、情绪反应结构（前反应 -> 复现 -> 后反应；以小搏大 -> 士气如虹）、理念矛盾（理念之争比利益之争更能引发深层共鸣，把原则碰撞、追求和牺牲落成具体选择与代价）、情绪模块重组（戏剧性会磨损，情绪不会磨损；复用套路必须换场景/换对手/加新情绪或提高 stakes/奖励复杂度）、情绪三板斧（羁绊铺设/情感撕裂/余韵钝痛）和每 3-5 个小节的事件触发情绪转向，并让连续爽点按影响范围、揭示深度或身份落差递增。',
               '章级钩子合同 chapter_hook_contract 必须按 oh-story 章首/章尾钩子输出 opening_hook_type, ending_hook_type, hook_strength, opening_hook_rules, ending_hook_rules, forbidden_patterns, quality_checks，明确前 100-300 字和最后 300 字如何制造追读。',
@@ -53200,6 +53469,7 @@ export function createNovelWritingService(ctx: {
               '高潮对抗合同 showdown_contract 必须按 oh-story style-combat-face / hooks-suspense / plot-frameworks 输出 payoff_release_rules, trump_card_reserve_rules, invincible_protagonist_rules, three_pressure_shock_rules, stage_chain_rules, transmission_channel_rules, shock_chain_rules, combat_design_rules, weak_over_strong_rules, counterplay_layers, emotion_rhythm_rules, revision_priorities, quality_checks；payoff_release_rules 必须包含爽点释放和“反派就要受到对应的压制”，trump_card_reserve_rules 必须包含底牌管理、手里保持2-3个未揭示底牌、每次只出1个、出牌后获得新技能/新后手/新目标，invincible_protagonist_rules 必须包含“主角登场即杀伐果断”、战力前置无敌、主角登场时一点都不能拖拉、不一击必杀时必须有明确理由，three_pressure_shock_rules 必须包含三压一爆三震、友好势力、敌方势力、中立势力、一爆碾压和三方震动，stage_chain_rules 必须包含“群众层 -> 中间层 -> 核心层”，transmission_channel_rules 必须包含“装逼前必须先铺设人际关系，否则没有传递通道”和爽点释放后改变态度/利益/声望/规则评价，shock_chain_rules 必须包含震惊分层基于自身利益和目标，combat_design_rules 必须包含“打斗是一场表演”，counterplay_layers 必须包含“预判反制”和“反预判”，emotion_rhythm_rules 必须包含“急 -> 缓 -> 急”。',
               '桥段节奏合同 bridge_unit_contract 必须按 oh-story outline-rhythm / commercial-core-methods 输出 bridge_position, bridge_unit_plan, four_chapter_roles, expectation_chain_rules, climax_duration_rules, transition_rules, fatigue_repair_rules, revision_priorities, quality_checks；four_chapter_roles 必须包含“四章一桥段”和“结尾必须让主角开始装”，expectation_chain_rules 必须包含“高潮中埋钩子”，transition_rules 必须包含“连续小期待”，fatigue_repair_rules 必须包含“连续 2 章没有目标推进”。',
               '文风覆盖边界合同 style_boundary_contract 必须按 oh-story style-profile-protocol 输出 style_override_rules, hard_constraints, copy_boundary_rules, conflict_resolution_rules, revision_priorities, quality_checks；hard_constraints 必须包含“硬约束永远赢”、禁用词、Gate F、万能比喻、章末预告、字数下限、剧情/状态/时间线不漂移；copy_boundary_rules 必须包含不得复制样章桥段。',
+              '核心商业雷达 core_contract_radar 必须按 oh-story commercial-core-methods 输出 must_serve, no_drift, theme_unity_rules, selling_point_execution_rules, repetition_strategy_rules, commercial_rhythm_rules, goldfinger_structure_rules, launch_pressure_rules, repair_focus, checks；selling_point_execution_rules 必须包含卖点四步法、发现比告知爽十倍和开头暗示 -> 中间深化 -> 高潮爆发；repetition_strategy_rules 必须包含重复点和同一卖点至少延展 3 个角度；commercial_rhythm_rules 必须包含追踪/上下文.md、最近3章、连续 2 章没有目标推进/阻碍升级/新信息和大高潮 7-10 天；goldfinger_structure_rules 必须包含金手指可替换故事流程中的任一环节、简单一眼就懂和系统限制；launch_pressure_rules 必须包含开篇 300-500字内交代处境、危险来源和破局希望，以及优先用环境型压力开局。',
               '剧情动力合同 plot_dynamics_contract 必须按 oh-story 剧情核心方法输出 goal, obstacle, action, cost_feedback, next_expectation, drive_mode_rules, line_stagger_rules, quality_checks，确保目标→阻碍→行动→代价/反馈→新期待闭环；drive_mode_rules 必须包含事件驱动/情感驱动/混合模式选择：番茄爽文/打脸文每章给外部结果（赢、升级、对手栽），追妻/虐心/世情持续人物心结，混合模式主线事件推进并每 3-5 章插情感停顿；并让主线和支线错开节奏推进，不能同时爆完或同时空转。',
               '信息流合同 information_flow_contract 必须输出 scene_information_units, reveal_order, suspense_responses, transition_compression_rules, no_infodump_guardrails, quality_checks，确保信息随冲突释放，不写背景说明书；transition_compression_rules 必须包含过渡不是填充、没有信息量就删掉、纯移动/寒暄/环境描写直接跳过或压缩。',
               '期待阈值合同 expectation_threshold_contract 必须输出 current_expectations, payoff_or_delay_plan, next_open_loop, vacuum_guardrails, expectation_before_payoff_rules, expectation_relay_rules, three_expectation_lines, quality_checks；expectation_before_payoff_rules 必须包含期待感 > 爽点、铺垫篇幅不少于释放篇幅和延迟满足；expectation_relay_rules 必须包含期待接力法、旧期待闭环前下一开环已经运行、当一层即将满足时先铺好下一层期待、至少两条期待线并行运行；确保兑现旧期待前先种下新期待，并保持剧情期待 + 主题甜头 + 新鲜感三线并存。',

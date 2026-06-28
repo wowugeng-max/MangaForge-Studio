@@ -20276,9 +20276,20 @@ describe('chapter pre-draft brief', () => {
     expect(prosePromptBlock).toContain('主题统一')
     expect(prosePromptBlock).toContain('全书核心情绪')
     expect(prosePromptBlock).toContain('小情绪服从大情绪')
+    expect(prosePromptBlock).toContain('卖点四步法')
+    expect(prosePromptBlock).toContain('发现比告知爽十倍')
+    expect(prosePromptBlock).toContain('重复策略')
+    expect(prosePromptBlock).toContain('节奏自检')
+    expect(prosePromptBlock).toContain('金手指结构')
+    expect(prosePromptBlock).toContain('开篇压力')
     expect(reviewPromptBlock).toContain('主题统一')
     expect(reviewPromptBlock).toContain('随机翻开一章')
     expect(reviewPromptBlock).toContain('core_contract_radar')
+    expect(reviewPromptBlock).toContain('卖点四步法')
+    expect(reviewPromptBlock).toContain('同一卖点至少延展')
+    expect(reviewPromptBlock).toContain('连续 2 章没有目标推进')
+    expect(reviewPromptBlock).toContain('金手指可替换故事流程')
+    expect(reviewPromptBlock).toContain('300-500字内交代处境、危险来源和破局希望')
     expect(revisionPromptBlock).toContain('修订守恒')
     expect(revisionPromptBlock).toContain('不得新增支线')
     expect(revisionPromptBlock).toContain('不改长期方向')
@@ -20287,6 +20298,10 @@ describe('chapter pre-draft brief', () => {
     expect(revisionPromptBlock).toContain('chapter_core_drift')
     expect(revisionPromptBlock).toContain('主题统一')
     expect(revisionPromptBlock).toContain('全书核心情绪')
+    expect(revisionPromptBlock).toContain('卖点四步法')
+    expect(revisionPromptBlock).toContain('重复策略')
+    expect(revisionPromptBlock).toContain('节奏自检')
+    expect(revisionPromptBlock).toContain('金手指结构')
   })
 
   test('asks prose self review and revision to enforce ten-chapter core selling point drift checks', () => {
@@ -37180,6 +37195,17 @@ describe('chapter pre-draft brief', () => {
     expect(brief.core_contract_radar.theme_unity_rules.join('｜')).toContain('小情绪服从大情绪')
     expect(brief.core_contract_radar.theme_unity_rules.join('｜')).toContain('随机翻开一章')
     expect(brief.core_contract_radar.theme_unity_rules.join('｜')).toContain('力量被规则反制后的紧张与破局爽')
+    expect(brief.core_contract_radar.selling_point_execution_rules.join('｜')).toContain('卖点四步法')
+    expect(brief.core_contract_radar.selling_point_execution_rules.join('｜')).toContain('发现比告知爽十倍')
+    expect(brief.core_contract_radar.selling_point_execution_rules.join('｜')).toContain('开头暗示')
+    expect(brief.core_contract_radar.repetition_strategy_rules.join('｜')).toContain('重复点')
+    expect(brief.core_contract_radar.repetition_strategy_rules.join('｜')).toContain('同一卖点至少延展 3 个角度')
+    expect(brief.core_contract_radar.commercial_rhythm_rules.join('｜')).toContain('连续 2 章没有目标推进、阻碍升级或新信息')
+    expect(brief.core_contract_radar.commercial_rhythm_rules.join('｜')).toContain('大高潮 7-10 天')
+    expect(brief.core_contract_radar.goldfinger_structure_rules.join('｜')).toContain('金手指可替换故事流程中的任一环节')
+    expect(brief.core_contract_radar.goldfinger_structure_rules.join('｜')).toContain('一眼就懂')
+    expect(brief.core_contract_radar.launch_pressure_rules.join('｜')).toContain('300-500字内交代处境、危险来源和破局希望')
+    expect(brief.core_contract_radar.launch_pressure_rules.join('｜')).toContain('优先用环境型压力开局')
     expect(brief.core_contract_radar.checks.map((check: any) => check.key)).toContain('theme_unity')
     expect(brief.core_contract_radar.repair_focus.join('｜')).toContain('本章必须推进午夜校园规则调查')
     expect(brief.core_contract_radar.checks.map((check: any) => check.label)).toContain('主线服务')
@@ -48950,6 +48976,29 @@ describe('chapter core drift report', () => {
             '补足规则判定反制蛮力',
             '章末必须留下广播来源的新问题',
           ],
+          selling_point_execution_rules: [
+            '卖点四步法：整本书卖点、书名卖点、简介卖点、每段剧情卖点都要能对齐。',
+            '卖点表达必须发现比告知爽十倍，用剧情/对话/反应隐性展示，并按开头暗示 -> 中间深化 -> 高潮爆发递进。',
+            '每章一句话概括内容并标注目的词，盯紧章纲目的来写。',
+          ],
+          repetition_strategy_rules: [
+            '同一卖点至少延展 3 个角度，用正写、反套路、持续反、反了再正等方式换壳换场景换人物。',
+            '当核心看点在当前样本/读者反馈中稳定时保持重复策略；反馈下降时升级重复方式，避免爽点重复导致审美疲劳。',
+          ],
+          commercial_rhythm_rules: [
+            '写前读取追踪/上下文.md 与最近 3 章摘要；连续 2 章没有目标推进、阻碍升级或新信息时，下一章提高冲突密度。',
+            '连续 2 章只爆点不留反应余波时，插入 1-2 个承接场景，但必须推进关系/伏笔。',
+            '大高潮 7-10 天完成，小高潮约 3 天，高潮后 1-2 章过渡。',
+          ],
+          goldfinger_structure_rules: [
+            '金手指可替换故事流程中的任一环节：建立目标、克服困难、准备环节、激励事件或收获奖励。',
+            '金手指简单是核心，一眼就懂；系统限制必须保证主角一步步行动。',
+            '给出金手指后必须有即时变化，并契合主角当前职业或打开困境。',
+          ],
+          launch_pressure_rules: [
+            '开篇 300-500字内交代处境、危险来源和破局希望。',
+            '优先用环境型压力开局，主角一开始不能完美，形成否极泰来的起点。',
+          ],
           checks: [
             { key: 'reader_promise', label: '读者承诺', status: 'warn', reason: '规则反制必须可见。' },
           ],
@@ -48962,12 +49011,24 @@ describe('chapter core drift report', () => {
       '玻璃暗号让广播来源调查第一次推进，声音来自废弃广播室。',
       '他没有靠蛮力无代价通关，手臂被规则反噬得发麻。',
       '本章的小情绪是门外紧张验证，但仍然指向全书核心情绪：力量被规则反制后的破局爽。',
+      '卖点四步法在本章落地：整本书卖点是规则反制，书名卖点是玻璃暗号，简介卖点是超人蛮力遇上规则，段落卖点靠剧情、对话和反应隐性展示。',
+      '开头暗示玻璃暗号，中间深化广播来源，高潮爆发在规则反噬现场，读者是自己发现卖点，不是被告知本章很爽。',
+      '同一卖点至少延展 3 个角度：正写规则判定、反套路限制蛮力、持续反让广播每次误导主角，换壳换场景换人物但内核一致，并避免审美疲劳。',
+      '写前读取追踪/上下文.md 和最近3章摘要后确认没有拖沓，本章有目标推进、阻碍升级和新信息；冲突密度按每500字一个转折点提高。',
+      '本章不是连续爆点无余波，受伤反应推进双主角关系；大高潮仍控制在7-10天内，小高潮约3天，高潮后预留1-2章过渡。',
+      '金手指可替换故事流程中的克服困难环节，但系统限制保证主角一步步行动；规则识别一眼就懂，给出后立刻出现即时变化，并契合设备师职业打开困境。',
+      '开篇300-500字内交代处境、危险来源和破局希望，用环境型压力让主角先不完美，再形成否极泰来的起点。',
       '章末新的问题留下：废弃广播室里是谁提前录好了他的名字？',
     ].join('\n')
     const driftText = [
       '本章完全偏离核心契约。',
       '众人把规则怪谈写成纯打怪，主角靠蛮力无代价通关。',
       '广播来源没有推进，大家聊天后回宿舍休息。',
+      '作者直接告诉读者这是核心卖点、本章很爽，但没有通过剧情、对话或反应让读者自己发现。',
+      '爽点重复到读者审美疲劳，核心看点抓不住，临时换看点。',
+      '连续2章没有目标推进、阻碍升级或新信息，连续2章只爆点不留反应余波，段落像流水账。',
+      '金手指成了说明书式万能外挂，太强所以无聊，一键清场且和职业无关。',
+      '开篇主角完美无缺，先铺背景和大段世界观，没有危险来源，也没有破局希望。',
     ].join('\n')
 
     const okReport = buildCoreContractSyncReport(project, chapter, contextPackage, alignedText)
@@ -48976,13 +49037,39 @@ describe('chapter core drift report', () => {
     expect(okReport.status).toBe('ok')
     expect(okReport.label).toBe('核心契约 OK')
     expect(okReport.missed_count).toBe(0)
-    expect(okReport.delivered.map((item: any) => item.label)).toEqual(expect.arrayContaining(['必须服务', '不得漂移', '主题统一', '修复焦点']))
+    expect(okReport.delivered.map((item: any) => item.label)).toEqual(expect.arrayContaining([
+      '必须服务',
+      '不得漂移',
+      '主题统一',
+      '修复焦点',
+      '卖点执行',
+      '重复策略',
+      '商业节奏',
+      '金手指结构',
+      '开篇压力',
+    ]))
     expect(warnReport.status).toBe('warn')
     expect(warnReport.label).toContain('核心契约缺口')
-    expect(warnReport.missed.map((item: any) => item.label)).toEqual(expect.arrayContaining(['必须服务', '不得漂移', '主题统一', '核心契约硬伤']))
+    expect(warnReport.missed.map((item: any) => item.label)).toEqual(expect.arrayContaining([
+      '必须服务',
+      '不得漂移',
+      '主题统一',
+      '卖点执行',
+      '重复策略',
+      '商业节奏',
+      '金手指结构',
+      '开篇压力',
+      '核心契约硬伤',
+    ]))
     expect(warnReport.missed.map((item: any) => item.key)).toContain('theme_unity_rules')
+    expect(warnReport.missed.map((item: any) => item.key)).toContain('selling_point_execution_rules')
+    expect(warnReport.missed.map((item: any) => item.key)).toContain('commercial_rhythm_rules')
+    expect(warnReport.missed.map((item: any) => item.key)).toContain('goldfinger_structure_rules')
     expect(warnReport.next_actions.join('；')).toMatch(/核心承诺|不得漂移|章末/)
     expect(warnReport.next_actions.join('；')).toContain('全书核心情绪')
+    expect(warnReport.next_actions.join('；')).toContain('卖点四步法')
+    expect(warnReport.next_actions.join('；')).toContain('最近3章')
+    expect(warnReport.next_actions.join('；')).toContain('金手指')
   })
 
   test('checks ten-chapter core selling point drift after chapter text is written', () => {
