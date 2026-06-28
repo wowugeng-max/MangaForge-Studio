@@ -9600,6 +9600,13 @@ describe('normalizeSceneCardsPayload', () => {
     expect(source).toContain('appendMissingContractReviewCheck')
   })
 
+  test('asks prose self review and revision to cover dialogue execution checklist', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    expect(source).toContain('dialogue_execution_checklist')
+    expect(source).toContain('必须按对话执行清单逐场覆盖 dialogue_checks')
+    expect(source).toContain('dialogue_checks.changed_evidence')
+  })
+
   test('aligns normalized review passed flag with failing structured checks', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const reviewBlock = source.slice(
@@ -17140,6 +17147,19 @@ describe('chapter pre-draft brief', () => {
     expect(brief.dialogue_contract.dialogue_audit_rules.join('｜')).toContain('单次对话不超过全节 40%')
     expect(brief.dialogue_contract.dialogue_audit_rules.join('｜')).toContain('自然口语交流')
     expect(brief.dialogue_contract.dialogue_audit_rules.join('｜')).toContain('对话结尾能否预示接下来的节奏变化')
+    expect(brief.dialogue_contract.dialogue_execution_checklist).toHaveLength(1)
+    expect(brief.dialogue_contract.dialogue_execution_checklist[0]).toMatchObject({
+      scene_no: 1,
+      scene: '公开试探',
+      mode: '反转模式',
+      receipt_keys: ['dialogue_checks', 'scene_card_receipts'],
+    })
+    expect(brief.dialogue_contract.dialogue_execution_checklist[0].line_functions.join('｜')).toContain('每句对白至少承担推进剧情、增加期待感或展示人设之一')
+    expect(brief.dialogue_contract.dialogue_execution_checklist[0].emotion_flow.join('｜')).toContain('逐句回应上一句对方的情绪状态')
+    expect(brief.dialogue_contract.dialogue_execution_checklist[0].information_strategy.join('｜')).toContain('用角色语气、立场、追问、误导或动作承接信息')
+    expect(brief.dialogue_contract.dialogue_execution_checklist[0].voice_differentiation.join('｜')).toContain('李玄短句反问')
+    expect(brief.dialogue_contract.dialogue_execution_checklist[0].forbidden_patterns.join('｜')).toContain('说明书式对白')
+    expect(confirmedContext.chapter_target.dialogue_contract.dialogue_execution_checklist[0].mode).toBe('反转模式')
     expect(confirmedContext.chapter_target.dialogue_contract.quality_checks.join('｜')).toContain('每句对白至少承担推进剧情')
     expect(prompt).toContain('【对话质量合同】')
     expect(prompt).toContain('执行 chapter_target.dialogue_contract')
@@ -17181,6 +17201,10 @@ describe('chapter pre-draft brief', () => {
     expect(prompt).toContain('单次对话不超过全节 40%')
     expect(prompt).toContain('自然口语交流')
     expect(prompt).toContain('对话结尾能否预示接下来的节奏变化')
+    expect(prompt).toContain('对话执行清单')
+    expect(prompt).toContain('场景1 公开试探｜mode=反转模式')
+    expect(prompt).toContain('line_functions=每句对白至少承担推进剧情、增加期待感或展示人设之一')
+    expect(prompt).toContain('receipt_keys=dialogue_checks,scene_card_receipts')
     expect(prompt).toContain('dialogue_checks')
     expect(prompt.indexOf('【对话质量合同】')).toBeLessThan(prompt.indexOf('【结构化上下文包】'))
   })
@@ -17258,6 +17282,10 @@ describe('chapter pre-draft brief', () => {
     expect(brief.dialogue_contract.dialogue_audit_rules.join('｜')).toContain('单次对话不超过全节 40%')
     expect(brief.dialogue_contract.dialogue_audit_rules.join('｜')).toContain('自然口语交流')
     expect(brief.dialogue_contract.dialogue_audit_rules.join('｜')).toContain('对话结尾能否预示接下来的节奏变化')
+    expect(brief.dialogue_contract.dialogue_execution_checklist).toHaveLength(1)
+    expect(brief.dialogue_contract.dialogue_execution_checklist[0].scene).toBe('公开试探')
+    expect(brief.dialogue_contract.dialogue_execution_checklist[0].mode).toBe('反转模式')
+    expect(brief.dialogue_contract.dialogue_execution_checklist[0].receipt_keys).toEqual(['dialogue_checks', 'scene_card_receipts'])
     expect(brief.dialogue_contract.revision_priorities.join('｜')).toContain('修角色声线差异')
   })
 

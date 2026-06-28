@@ -43489,6 +43489,134 @@ function inferDialogueMode(scene: any) {
   return '日常模式'
 }
 
+const OH_STORY_DIALOGUE_EXECUTION_LINE_FUNCTIONS = [
+  '每句对白至少承担推进剧情、增加期待感或展示人设之一',
+  '对话结束必须让信息差、关系、危险或下一步期待发生变化',
+]
+
+const OH_STORY_DIALOGUE_EXECUTION_EMOTION_FLOW = [
+  '逐句回应上一句对方的情绪状态（承接/偏转/升级/退缩）',
+  '情绪转变必须有事件、新信息、动作或代价触发',
+]
+
+const OH_STORY_DIALOGUE_EXECUTION_INFORMATION_STRATEGY = [
+  '用角色语气、立场、追问、误导或动作承接信息',
+  '设定只带当下用到的一点，不能一次讲完前因后果',
+]
+
+const OH_STORY_DIALOGUE_EXECUTION_FORBIDDEN_PATTERNS = [
+  '说明书式对白',
+  '问答式一问一答',
+  '读者已知信息互相解释',
+  '所有角色同腔',
+  '配角无脑夸主角',
+]
+
+function normalizeDialogueExecutionChecklist(value: any) {
+  return asArray(value)
+    .map((item: any, index: number) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) {
+        const text = compactBriefText(item)
+        if (!text) return null
+        return {
+          scene_no: index + 1,
+          scene: text,
+          mode: '潜台词与议程',
+          speaker_agendas: [],
+          line_functions: OH_STORY_DIALOGUE_EXECUTION_LINE_FUNCTIONS,
+          emotion_flow: OH_STORY_DIALOGUE_EXECUTION_EMOTION_FLOW,
+          information_strategy: OH_STORY_DIALOGUE_EXECUTION_INFORMATION_STRATEGY,
+          voice_differentiation: [],
+          forbidden_patterns: OH_STORY_DIALOGUE_EXECUTION_FORBIDDEN_PATTERNS,
+          receipt_keys: ['dialogue_checks', 'scene_card_receipts'],
+        }
+      }
+      const sceneNo = Number(item.scene_no ?? item.sceneNo ?? index + 1) || index + 1
+      const scene = compactBriefText(item.scene || item.title || item.scene_title || item.sceneTitle || `场景${sceneNo}`)
+      const mode = compactBriefText(item.mode || item.dialogue_mode || item.dialogueMode || '潜台词与议程')
+      return {
+        scene_no: sceneNo,
+        scene,
+        mode,
+        speaker_agendas: asArray(item.speaker_agendas || item.speakerAgendas).map((row: any) => compactBriefText(row)).filter(Boolean).slice(0, 6),
+        line_functions: asArray(item.line_functions || item.lineFunctions).map((row: any) => compactBriefText(row)).filter(Boolean).slice(0, 6),
+        emotion_flow: asArray(item.emotion_flow || item.emotionFlow).map((row: any) => compactBriefText(row)).filter(Boolean).slice(0, 6),
+        information_strategy: asArray(item.information_strategy || item.informationStrategy).map((row: any) => compactBriefText(row)).filter(Boolean).slice(0, 6),
+        voice_differentiation: asArray(item.voice_differentiation || item.voiceDifferentiation).map((row: any) => compactBriefText(row)).filter(Boolean).slice(0, 6),
+        forbidden_patterns: asArray(item.forbidden_patterns || item.forbiddenPatterns).map((row: any) => compactBriefText(row)).filter(Boolean).slice(0, 6),
+        receipt_keys: asArray(item.receipt_keys || item.receiptKeys).map((row: any) => compactBriefText(row)).filter(Boolean).slice(0, 6),
+      }
+    })
+    .filter(Boolean)
+    .map((item: any, index: number) => ({
+      scene_no: item.scene_no || index + 1,
+      scene: item.scene || `场景${index + 1}`,
+      mode: item.mode || '潜台词与议程',
+      speaker_agendas: item.speaker_agendas?.length ? item.speaker_agendas : [],
+      line_functions: item.line_functions?.length ? item.line_functions : OH_STORY_DIALOGUE_EXECUTION_LINE_FUNCTIONS,
+      emotion_flow: item.emotion_flow?.length ? item.emotion_flow : OH_STORY_DIALOGUE_EXECUTION_EMOTION_FLOW,
+      information_strategy: item.information_strategy?.length ? item.information_strategy : OH_STORY_DIALOGUE_EXECUTION_INFORMATION_STRATEGY,
+      voice_differentiation: item.voice_differentiation?.length ? item.voice_differentiation : [],
+      forbidden_patterns: item.forbidden_patterns?.length ? item.forbidden_patterns : OH_STORY_DIALOGUE_EXECUTION_FORBIDDEN_PATTERNS,
+      receipt_keys: item.receipt_keys?.length ? item.receipt_keys : ['dialogue_checks', 'scene_card_receipts'],
+    }))
+}
+
+function buildDialogueExecutionChecklist(sceneCards: any[], characterArc: any = {}, target: any = {}) {
+  const scenes = sceneCards.length ? sceneCards : [target].filter(Boolean)
+  return normalizeDialogueExecutionChecklist(scenes.slice(0, 8).map((scene: any, index: number) => {
+    const sceneNo = Number(scene?.scene_no ?? scene?.sceneNo ?? index + 1) || index + 1
+    const sceneTitle = compactBriefText(scene?.title || scene?.scene_title || scene?.sceneTitle || scene?.purpose || target?.title || `场景${sceneNo}`)
+    const characters = asArray(scene?.characters_present || scene?.charactersPresent || scene?.characters)
+      .map((item: any) => compactBriefText(item))
+      .filter(Boolean)
+      .slice(0, 4)
+    const voiceAnchors = uniqueBriefStrings([
+      scene?.character_voice,
+      scene?.voice_focus,
+      scene?.voice_rule,
+      characterArc?.voice_anchor,
+      characterArc?.voiceAnchor,
+    ].map((item: any) => compactBriefText(item)).filter(Boolean), 6)
+    const speakerAgendas = uniqueBriefStrings([
+      scene?.dialogue_goal ? `对白目标：${compactBriefText(scene.dialogue_goal)}` : '',
+      scene?.dialogueGoal ? `对白目标：${compactBriefText(scene.dialogueGoal)}` : '',
+      scene?.conflict ? `议程碰撞：${compactBriefText(scene.conflict)}` : '',
+      characters.length ? `出场角色：${characters.join('、')}；每人必须承担信息提供、情绪放大或冲突制造之一` : '',
+    ], 6)
+    return {
+      scene_no: sceneNo,
+      scene: sceneTitle,
+      mode: inferDialogueMode(scene),
+      speaker_agendas: speakerAgendas,
+      line_functions: OH_STORY_DIALOGUE_EXECUTION_LINE_FUNCTIONS,
+      emotion_flow: OH_STORY_DIALOGUE_EXECUTION_EMOTION_FLOW,
+      information_strategy: OH_STORY_DIALOGUE_EXECUTION_INFORMATION_STRATEGY,
+      voice_differentiation: voiceAnchors.length
+        ? voiceAnchors
+        : ['遮住角色名后仍能靠口癖、句长、信息偏好、身份措辞和关系阶段区分说话人'],
+      forbidden_patterns: OH_STORY_DIALOGUE_EXECUTION_FORBIDDEN_PATTERNS,
+      receipt_keys: ['dialogue_checks', 'scene_card_receipts'],
+    }
+  }))
+}
+
+function formatDialogueExecutionChecklist(items: any) {
+  return normalizeDialogueExecutionChecklist(items)
+    .map((item: any) => [
+      `场景${item.scene_no} ${item.scene}`,
+      `mode=${item.mode}`,
+      item.speaker_agendas?.length ? `speaker_agendas=${item.speaker_agendas.join('/')}` : '',
+      item.line_functions?.length ? `line_functions=${item.line_functions.join('/')}` : '',
+      item.emotion_flow?.length ? `emotion_flow=${item.emotion_flow.join('/')}` : '',
+      item.information_strategy?.length ? `information_strategy=${item.information_strategy.join('/')}` : '',
+      item.voice_differentiation?.length ? `voice_differentiation=${item.voice_differentiation.join('/')}` : '',
+      item.forbidden_patterns?.length ? `forbidden=${item.forbidden_patterns.join('/')}` : '',
+      item.receipt_keys?.length ? `receipt_keys=${item.receipt_keys.join(',')}` : '',
+    ].filter(Boolean).join('｜'))
+    .join('；')
+}
+
 function buildDialogueContract(contextPackage: any = {}) {
   const explicit = contextPackage?.chapter_target?.dialogue_contract
     || contextPackage?.chapter_target?.dialogueContract
@@ -43544,6 +43672,7 @@ function buildDialogueContract(contextPackage: any = {}) {
     const explicitDialogueVolumeRules = asArray(explicit.dialogue_volume_rules || explicit.dialogueVolumeRules).map((item: any) => compactBriefText(item)).filter(Boolean)
     const explicitDialogueMemeRules = asArray(explicit.dialogue_meme_rules || explicit.dialogueMemeRules).map((item: any) => compactBriefText(item)).filter(Boolean)
     const explicitDialogueAuditRules = asArray(explicit.dialogue_audit_rules || explicit.dialogueAuditRules).map((item: any) => compactBriefText(item)).filter(Boolean)
+    const explicitDialogueExecutionChecklist = normalizeDialogueExecutionChecklist(explicit.dialogue_execution_checklist || explicit.dialogueExecutionChecklist)
     const explicitQualityChecks = asArray(explicit.quality_checks || explicit.qualityChecks).map((item: any) => compactBriefText(item)).filter(Boolean)
     const explicitRevisionPriorities = asArray(explicit.revision_priorities || explicit.revisionPriorities).map((item: any) => compactBriefText(item)).filter(Boolean)
     return {
@@ -43602,6 +43731,9 @@ function buildDialogueContract(contextPackage: any = {}) {
       dialogue_audit_rules: explicitDialogueAuditRules.length
         ? explicitDialogueAuditRules
         : (asArray(derived.dialogue_audit_rules).length ? asArray(derived.dialogue_audit_rules) : OH_STORY_DIALOGUE_AUDIT_RULES),
+      dialogue_execution_checklist: explicitDialogueExecutionChecklist.length
+        ? explicitDialogueExecutionChecklist
+        : normalizeDialogueExecutionChecklist(derived.dialogue_execution_checklist || derived.dialogueExecutionChecklist),
       quality_checks: explicitQualityChecks.length
         ? explicitQualityChecks
         : (asArray(derived.quality_checks).length ? asArray(derived.quality_checks) : OH_STORY_DIALOGUE_QUALITY_CHECKS),
@@ -43654,6 +43786,7 @@ function buildDialogueContract(contextPackage: any = {}) {
     dialogue_volume_rules: OH_STORY_DIALOGUE_VOLUME_RULES,
     dialogue_meme_rules: OH_STORY_DIALOGUE_MEME_RULES,
     dialogue_audit_rules: OH_STORY_DIALOGUE_AUDIT_RULES,
+    dialogue_execution_checklist: buildDialogueExecutionChecklist(sceneCards, characterArc, target),
     quality_checks: OH_STORY_DIALOGUE_QUALITY_CHECKS,
     revision_priorities: ['修角色声线差异', '删说明书式对话', '补潜台词与议程', '强化权力博弈', '补情绪递进'],
   }
@@ -48460,6 +48593,7 @@ export function createNovelWritingService(ctx: {
       dialogueContract?.voice_anchors?.length ? `声线锚点：${dialogueContract.voice_anchors.join('；')}` : '',
       dialogueContract?.dialogue_goals?.length ? `对白目标：${dialogueContract.dialogue_goals.join('；')}` : '',
       dialogueContract?.key_lines?.length ? `关键台词：${dialogueContract.key_lines.join('；')}` : '',
+      dialogueContract?.dialogue_execution_checklist?.length ? `对话执行清单：${formatDialogueExecutionChecklist(dialogueContract.dialogue_execution_checklist)}` : '',
       dialogueContract?.mode_playbooks?.length ? `对白模式剧本：${dialogueContract.mode_playbooks.join('；')}` : '',
       dialogueContract?.power_length_rules?.length ? `权力长度规则：${dialogueContract.power_length_rules.join('；')}` : '',
       dialogueContract?.subtext_agenda_rules?.length ? `潜台词与议程：${dialogueContract.subtext_agenda_rules.join('；')}` : '',
@@ -48477,7 +48611,7 @@ export function createNovelWritingService(ctx: {
       dialogueContract?.dialogue_meme_rules?.length ? `梗式对白：${dialogueContract.dialogue_meme_rules.join('；')}` : '',
       dialogueContract?.dialogue_audit_rules?.length ? `对话质量审计：${dialogueContract.dialogue_audit_rules.join('；')}` : '',
       dialogueContract?.quality_checks?.length ? `质量检查：${dialogueContract.quality_checks.join('；')}` : '',
-      dialogueContract ? '交稿自检必须输出 dialogue_checks，并用正文证据检查潜台词、议程、声线差异、信息嵌入、权力博弈和对话质量审计。' : '',
+      dialogueContract ? '交稿自检必须输出 dialogue_checks，并用正文证据检查潜台词、议程、声线差异、信息嵌入、权力博弈和对话质量审计；如果存在 dialogue_execution_checklist，必须按对话执行清单逐场覆盖 dialogue_checks，检查每场 mode、speaker_agendas、line_functions、emotion_flow、information_strategy、voice_differentiation 和 forbidden_patterns 是否落成正文证据。' : '',
       dialogueContract ? JSON.stringify(dialogueContract, null, 2).slice(0, 2500) : '',
       '',
       plotDynamicsContract ? '【剧情动力合同】' : '',
@@ -50496,8 +50630,8 @@ export function createNovelWritingService(ctx: {
     '25. deslop_checks 字段为数组，每项包含 gate, pattern, status(pass|warn|fail), evidence, fix；去AI味只改表达，不改剧情、人设、设定、关系或时间线，不得整段删除有功能信息。',
     '25A. 主语与名字节奏检查归入 Gate B：角色名只负责段首、场景切换、多人同场、视角重置和关键强调；同一动作链/同一段内部连续用角色名开头、读起来像每句都在报名字时必须输出 deslop_checks。修法要用代词、省略主语、动作承接、物件/感官开句，但不能为了省主语造成指代不清。',
     '25B. banned_words_checks 字段为数组，每项包含 key,label,status,matched_word,level,location,replacement,evidence,remaining_risk。deslop_repair_checks 字段为数组，每项包含 key,label,status,gate,original_risk,rewritten_evidence,changed_evidence,receipt_synced,fix,remaining_risk。revision_receipt_checks 字段为数组，每项包含 key,label,status,required_action,repair_segment,applied_fix,changed_evidence,evidence,fix,remaining_risk。',
-    '26. 是否兑现 chapter_target.dialogue_contract：按 oh-story dialogue-mastery 检查对白是否推进剧情/增加期待/展示人设，是否有潜台词与议程，真实动机绝对不能浅显地写在台词里，每句对白必须能看出动机和借口；是否按“关系 × 场合 × 目的 = 语气”匹配措辞；是否用命令式+否定式最能激发读者情绪、为你好式软压迫或直接否定制造有效情绪；情绪变化是否每次转变需对应事件触发；是否做到对话本身带来/强化某个核心驱动力；信息展示是否用角色的语气和立场包裹信息，设定用到哪个稍微带出来，避免机械陈述设定或一次讲完前因后果；人物语言差异化必须检查口癖和惯用语、说话节奏、信息偏好、身份影响措辞、性格影响语气和关系阶段不同；弹幕/群众对话必须检查是否从普通人震惊、专业人士分析到特殊身份者反应递进，是否短小精悍、不同人格化语气、只在关键爽点/燃点/泪点前后使用，且不代替主线；配角台词人数必须检查同一场景配角不超过3个有台词，没有功能的角色不要出场，超过时合并为旁观反应、动作或叙事概括；对话节奏/呼吸感必须检查连续多轮对话后需要换气、是否穿插动作描写/环境变化/心理活动、紧张段落对话短促、舒缓段落可长、关键信息放对话开头或结尾、动作和表情只在关键转折处使用；对话篇幅控制必须检查读者已知信息是否被冗余对白重复、能否用突发状况替代解释段、对话过少时是否让主角旁白平铺直叙、是否引入有主线戏份的配角参与冲突；梗式对白必须检查是否用“说不出来但意思到了”的角色口吻制造趣味，是否强化主角或重要配角记忆点，是否只抽象为吐槽节奏/情绪共鸣/传播点，是否不得直接复刻热梗原句或破坏严肃情绪；对话质量审计必须检查是否存在大量信息都必须用对话来展示、问答式的一问一答、依赖对话来推动剧情或人物变化，遮住角色名后能否区分，单次对话不超过全节 40%，对白是否像自然口语交流，以及对话结尾能否预示接下来的节奏变化；是否体现“对话长度 = 权力地位”，是否有角色声线差异，是否避免说明书式对话；压制模式/反转模式/心死模式必须各自按场景功能落地，掌控者/主角亮底牌时对白 ≤ 10 字，被压制方对白 ≥ 20 字，权力易主必须体现为话语长度突变；必须输出 dialogue_checks。',
-    '27. dialogue_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),speaker,agenda,subtext,power_shift,information_delta,character_voice,evidence,fix,remaining_risk；对白缺口影响冲突推进、人物可信度或留存时必须输出 S1/S2 finding，category=character 或 prose。',
+    '26. 是否兑现 chapter_target.dialogue_contract：按 oh-story dialogue-mastery 检查对白是否推进剧情/增加期待/展示人设，是否有潜台词与议程，真实动机绝对不能浅显地写在台词里，每句对白必须能看出动机和借口；是否按“关系 × 场合 × 目的 = 语气”匹配措辞；是否用命令式+否定式最能激发读者情绪、为你好式软压迫或直接否定制造有效情绪；情绪变化是否每次转变需对应事件触发；是否做到对话本身带来/强化某个核心驱动力；信息展示是否用角色的语气和立场包裹信息，设定用到哪个稍微带出来，避免机械陈述设定或一次讲完前因后果；人物语言差异化必须检查口癖和惯用语、说话节奏、信息偏好、身份影响措辞、性格影响语气和关系阶段不同；弹幕/群众对话必须检查是否从普通人震惊、专业人士分析到特殊身份者反应递进，是否短小精悍、不同人格化语气、只在关键爽点/燃点/泪点前后使用，且不代替主线；配角台词人数必须检查同一场景配角不超过3个有台词，没有功能的角色不要出场，超过时合并为旁观反应、动作或叙事概括；对话节奏/呼吸感必须检查连续多轮对话后需要换气、是否穿插动作描写/环境变化/心理活动、紧张段落对话短促、舒缓段落可长、关键信息放对话开头或结尾、动作和表情只在关键转折处使用；对话篇幅控制必须检查读者已知信息是否被冗余对白重复、能否用突发状况替代解释段、对话过少时是否让主角旁白平铺直叙、是否引入有主线戏份的配角参与冲突；梗式对白必须检查是否用“说不出来但意思到了”的角色口吻制造趣味，是否强化主角或重要配角记忆点，是否只抽象为吐槽节奏/情绪共鸣/传播点，是否不得直接复刻热梗原句或破坏严肃情绪；对话质量审计必须检查是否存在大量信息都必须用对话来展示、问答式的一问一答、依赖对话来推动剧情或人物变化，遮住角色名后能否区分，单次对话不超过全节 40%，对白是否像自然口语交流，以及对话结尾能否预示接下来的节奏变化；如果 chapter_target.dialogue_contract.dialogue_execution_checklist 存在，必须按对话执行清单逐场覆盖 dialogue_checks，逐场核对 mode、speaker_agendas、line_functions、emotion_flow、information_strategy、voice_differentiation、forbidden_patterns 和 receipt_keys；是否体现“对话长度 = 权力地位”，是否有角色声线差异，是否避免说明书式对话；压制模式/反转模式/心死模式必须各自按场景功能落地，掌控者/主角亮底牌时对白 ≤ 10 字，被压制方对白 ≥ 20 字，权力易主必须体现为话语长度突变；必须输出 dialogue_checks。',
+    '27. dialogue_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),speaker,agenda,subtext,power_shift,information_delta,character_voice,changed_evidence,evidence,fix,remaining_risk；对白缺口影响冲突推进、人物可信度或留存时必须输出 S1/S2 finding，category=character 或 prose；修订后必须在 dialogue_checks.changed_evidence 写明对话执行清单对应场景改成了哪句可定位正文证据。',
     '28. 是否兑现 chapter_target.plot_dynamics_contract：按 oh-story 剧情核心方法检查目标→阻碍→行动→代价/反馈→新期待是否闭环，蓄能→假胜→崩解→交叉死磕→悬置收尾是否形成情绪落差，驱动方式是否匹配题材（番茄爽文/打脸文每章给外部结果：赢、升级、对手栽；追妻/虐心/世情持续保留人物心结；混合模式主线事件推进且每 3-5 章插情感停顿），以及主线和支线错开节奏推进、没有同时爆也没有同时空转；必须输出 plot_dynamics_checks。',
     '29. plot_dynamics_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),goal,obstacle,action,cost_or_feedback,new_expectation,evidence,fix,remaining_risk；缺少行动、代价、反馈、假胜、崩解、悬置收尾或多线错峰时必须给出 S1/S2 finding，category=structure。',
     '30. 是否兑现 chapter_target.continuity_heat_contract：按 oh-story 连续性热度追踪检查 hot/warm/cold/archived 元素；hot 必须推进，warm 必须有效触达，cold 回收前必须升温，archived 不得误激活；必须输出 continuity_heat_checks。',
@@ -50683,7 +50817,7 @@ export function createNovelWritingService(ctx: {
     '14B. 如果 deslop_checks 指出主语与名字节奏问题，必须按 oh-story 写法修句子：段首点名建立主语，段中用代词/省略流动、动作承接或物件/感官开句；关键转折再点名强化。不得为了省主语造成指代不清，也不得改变剧情、人设或因果。',
     '14B. 输出 deslop_repair_receipts：逐条对应已处理的 Gate A-G 缺口，字段 gate,label,original_evidence,applied_fix,changed_evidence,remaining_risk。changed_evidence 必须引用修订后正文的具体句子；如果某个门禁仍未完全解决，remaining_risk 写清楚。',
     '14C. 如果自检结果包含 deterministic_prose_cleanup，必须优先逐项修复 categories/evidence/required_actions 中的硬扫残留；这类问题已经由确定性扫描命中，不要用“风格可接受”跳过。',
-    '15. 如果自检结果包含 dialogue_checks，必须优先修复 status=fail/warn 的对白缺口；按 key/label/evidence/fix 补角色声线差异、潜台词与议程、权力博弈、信息嵌入和情绪递进；按压制/反转/心死模式重排对白，让短句方成为权力上位，亮底牌句压到 ≤10 字，被压制方保留 ≥20 字辩解或失态；把真实目的改成借口、试探、回避或动作反应，按关系、场合、目的重定语气；用命令式、否定式或为你好式压迫制造情绪，按事件→情绪反应→内心思考→采取行动修复跳步，并让对白强化期待、爽感或悬念；把说明书式设定改成角色语气、立场、追问、误导或动作承接，用下行质疑、上行证据和核心信息兑现形成信息拉扯；按口癖、节奏、信息偏好、身份措辞和关系阶段重写角色声线，避免所有角色同腔；按普通人震惊、专业人士分析、特殊身份者反应重排群众/弹幕递进，每条群众反应短小精悍，不代替主线；连续多轮对话后插入换气，紧张段落改短促，关键信息放到对话开头或结尾，动作和表情只保留在关键转折处；读者已知信息改成叙事一句话概括，能用突发状况替代的对话直接替换，用配角对话替代主角旁白平铺直叙，新增配角必须绑定主线戏份；同一场景超过3个配角发言时，只保留功能最强的3个，其余合并为旁观反应、动作、沉默或叙事概括；把梗式对白改成角色说不出来但意思到了的口吻，用梗强化记忆点或高潮落点，不得直接复刻热梗原句；把大量信息必须靠对白展示的段落拆成情节、心理、旁白、环境或动作，把问答式的一问一答改成主动发言、反应、动作、沉默和心理承接，确保遮住角色名仍能区分是谁在说话，单次对话不超过全节 40%，逐句改成自然口语交流，并让对话结尾预示接下来的节奏变化。',
+    '15. 如果自检结果包含 dialogue_checks，必须优先修复 status=fail/warn 的对白缺口；按 key/label/evidence/fix 补角色声线差异、潜台词与议程、权力博弈、信息嵌入和情绪递进；如果 chapter_target.dialogue_contract.dialogue_execution_checklist 存在，必须按对话执行清单逐场修复 mode、speaker_agendas、line_functions、emotion_flow、information_strategy、voice_differentiation 和 forbidden_patterns，并在 dialogue_checks.changed_evidence 中写明修订后落成的正文句子；按压制/反转/心死模式重排对白，让短句方成为权力上位，亮底牌句压到 ≤10 字，被压制方保留 ≥20 字辩解或失态；把真实目的改成借口、试探、回避或动作反应，按关系、场合、目的重定语气；用命令式、否定式或为你好式压迫制造情绪，按事件→情绪反应→内心思考→采取行动修复跳步，并让对白强化期待、爽感或悬念；把说明书式设定改成角色语气、立场、追问、误导或动作承接，用下行质疑、上行证据和核心信息兑现形成信息拉扯；按口癖、节奏、信息偏好、身份措辞和关系阶段重写角色声线，避免所有角色同腔；按普通人震惊、专业人士分析、特殊身份者反应重排群众/弹幕递进，每条群众反应短小精悍，不代替主线；连续多轮对话后插入换气，紧张段落改短促，关键信息放到对话开头或结尾，动作和表情只保留在关键转折处；读者已知信息改成叙事一句话概括，能用突发状况替代的对话直接替换，用配角对话替代主角旁白平铺直叙，新增配角必须绑定主线戏份；同一场景超过3个配角发言时，只保留功能最强的3个，其余合并为旁观反应、动作、沉默或叙事概括；把梗式对白改成角色说不出来但意思到了的口吻，用梗强化记忆点或高潮落点，不得直接复刻热梗原句；把大量信息必须靠对白展示的段落拆成情节、心理、旁白、环境或动作，把问答式的一问一答改成主动发言、反应、动作、沉默和心理承接，确保遮住角色名仍能区分是谁在说话，单次对话不超过全节 40%，逐句改成自然口语交流，并让对话结尾预示接下来的节奏变化。',
     '16. 如果自检结果包含 plot_dynamics_checks，必须优先修复 status=fail/warn 的剧情动力缺口；按 key/label/evidence/fix 补目标阻碍行动反馈闭环、假胜崩解、代价反馈、A/B情绪交替、驱动方式、多线错峰或悬置收尾；驱动方式缺口要按题材修：番茄爽文/打脸文每章补一个外部结果（赢、升级、对手栽），追妻/虐心/世情补持续人物心结，混合模式让主线事件推进并每 3-5 章插情感停顿。',
     '17. 如果自检结果包含 continuity_heat_checks，必须优先修复 status=fail/warn 的连续性热度缺口；按 key/label/evidence/fix 补 hot 元素推进、warm 元素保温、cold 元素升温、archived 线不误激活或合理休眠说明。',
     '18. 如果自检结果包含 character_relation_checks，必须优先修复 status=fail/warn 的角色关系缺口；按 key/label/evidence/fix 补关系类型、关系考验/变化、主角独立目标、目标归属、角色不止恋爱、配角期待枢纽/人物扣、配角攻略缓冲区、配角主动行动、态度变化和阶段匹配；目标归属缺口要把“帮别人实现目标”改成主角自己的诉求、主动选择和代价，再让配角目标与主角目标摩擦或互补；角色不止恋爱缺口要给关系角色补事业、责任、资源、身份、家族、风险或行动线，让情感推进踩在自己的选择和代价上；配角期待枢纽缺口要选一个关键配角做任务基地，同时挂短期和长期期待，让主角解决事件装完逼后回到该人物处开启下一轮新任务/新剧情，若人物下线则补更大好处来转化损失厌恶；配角攻略缓冲区缺口要补信息差、地位差距、亲密度差距或信任程度，并让配角从旁观/质疑/拒绝/试探转为行动/协助/设限，不能只等主角触发。',
@@ -51730,7 +51864,7 @@ export function createNovelWritingService(ctx: {
               '正文工艺合同 prose_craft_contract 必须输出 pov_rules, body_detail_rules, scene_weaving_rules, subject_name_rhythm_rules, indirect_description_rules, three_camera_rules, then_what_rules, core_emotion_alignment_rules, baimiao_sensory_rules, dynamic_description_rules, shot_rhythm_rules, transition_bridge_rules, rhythm_rules, object_number_rules, section_structure_rules, section_density_rules, anti_padding_rules, concept_anchor_rules, description_limits, anti_ai_smell_rules, quality_checks；subject_name_rhythm_rules 必须包含主语与名字节奏：段首/场景切换/多人同场/视角重置时点名，同一动作链段中用代词/省略/动作承接，避免每句都在报名字和指代不清；indirect_description_rules 必须包含间接描写法：正面描写只是铺垫，侧面反应才是爽点，不要直接宣布“很厉害/很震撼”，要用配角动作、围观者判断、对手失态或环境变化证明；three_camera_rules 必须包含三机位法：机位1近景写主角动作/表情/身体感受，机位2远景写配角反应/环境变化/围观者判断，机位3只补必要设定/背景/人物关系，设定都由冲突引出；then_what_rules 必须包含“然后呢”基点法：每一段文字都要回答读者心中的“然后呢”，写完一个信息点立刻用下一个信息点接上，不能写成静态死段；core_emotion_alignment_rules 必须包含围绕核心情绪设计全部情节、所有情节/人设/冲突/细节服务目标读者核心情绪，以及宏观把控整体节奏、微观把控每段细节和张力；baimiao_sensory_rules 必须包含白描 = 最少的字 + 最准确的信息和情绪、至少调动两到三种感官、视觉/听觉/触觉/嗅觉/味觉只写有效锚点、五感必须服务情绪；dynamic_description_rules 必须包含动态描写优于静态描写、人物特征用动作和反应展现、环境不要大段铺陈、角色行动中穿插点染；shot_rhythm_rules 必须包含镜头与分镜思维、每个段落一个镜头、远景/中景/近景/特写、短句、短段、密集动作和快慢节奏切换；transition_bridge_rules 必须包含场景切换与转场、相似物/相似五感/相似情绪、时间跳转动作或物件衔接、空间跳转声音或光影衔接；section_structure_rules 必须包含一个主事件、3-5 个子事件、一个情绪变化、一条读者新获知的信息、3-5 轮对话交锋、小节结尾钩子、下一节开头快速接续和情绪跨节递进；section_density_rules 必须包含小节密度诊断，anti_padding_rules 必须禁止为凑字数加环境描写、重复情绪、内心独白总结或无意义动作，concept_anchor_rules 必须要求新名词/新设定首次出现有动作反应、对话半句或物理后果锚点；description_limits 必须包含水分控制、删掉这段后读者会不会困惑、不推动剧情也不塑造人物的水分必须删除或压缩；anti_ai_smell_rules 必须包含高危词、章末总结体、叠加式描写、心理告知和模板表达清理，确保正文不靠抽象心理、堆设定、模板句或 AI 味撑场。',
               '语气标点合同 punctuation_tone_contract 必须输出 tone_targets, punctuation_rules, dialogue_pause_rules, forbidden_punctuation_patterns, quality_checks，确保标点服务语气和人物声线。',
               '质量诊断合同 quality_audit_contract 必须输出 audit_dimensions, chapter_purpose_rules, water_detection_rules, event_content_rules, score_thresholds, required_receipts, quality_checks；chapter_purpose_rules 必须包含每章一句话概括内容，并标注目的词（铺垫/高潮/爽点/打脸/人物塑造/设定）；event_content_rules 必须包含事件内容比重不能小于一半、事件是价值改变的契机、设定尽量通过事件演绎而非旁白强塞，确保交稿自检可诊断结构、吸引力、目的跑偏、水文和事件含量问题。',
-              '对白合同 dialogue_contract 必须按 oh-story dialogue-mastery 输出 scene_modes, voice_anchors, dialogue_goals, key_lines, relationship_moves, mode_playbooks, power_length_rules, subtext_agenda_rules, tone_context_rules, emotion_push_rules, emotion_continuity_rules, dialogue_drive_rules, information_embed_rules, information_tension_rules, voice_differentiation_rules, spectator_dialogue_rules, supporting_speaker_limit_rules, dialogue_rhythm_rules, dialogue_volume_rules, dialogue_meme_rules, dialogue_audit_rules, revision_priorities, quality_checks；power_length_rules 必须包含“掌控者/主角亮底牌时对白 ≤ 10 字”和“被压制方对白 ≥ 20 字”；subtext_agenda_rules 必须包含“真实动机绝对不能浅显地写在台词里”，tone_context_rules 必须包含“关系 × 场合 × 目的 = 语气”，emotion_push_rules 必须包含“命令式+否定式最能激发读者情绪”，emotion_continuity_rules 必须要求每次情绪转变有事件触发，dialogue_drive_rules 必须要求对白强化期待、爽感或悬念，information_embed_rules 必须包含“用角色的语气和立场包裹信息”，information_tension_rules 必须要求通过质疑、证据和核心信息兑现形成拉扯，voice_differentiation_rules 必须包含口癖和惯用语、说话节奏、信息偏好、身份影响措辞、性格影响语气和关系阶段不同，spectator_dialogue_rules 必须包含普通人震惊、专业人士分析、特殊身份者反应、短小精悍和不代替主线，supporting_speaker_limit_rules 必须包含“同一场景配角不超过 3 个有台词”“没有功能的角色不要出场”和“配角退场要主动规划”，dialogue_rhythm_rules 必须包含连续多轮对话后需要换气、穿插动作描写、紧张段落对话短促、关键信息放对话开头或结尾，dialogue_volume_rules 必须包含读者已知信息、叙事一句话概括、突发状况替代、主角旁白平铺直叙和新人物必须安排主线戏份，dialogue_meme_rules 必须包含说不出来但意思到了、梗或骚话、强化记忆点、高潮点和不得直接复刻，dialogue_audit_rules 必须包含大量信息都必须用对话来展示、问答式的一问一答、依赖对话来推动剧情或人物变化、遮住角色名后能否区分、单次对话不超过全节 40%、自然口语交流和对话结尾能否预示接下来的节奏变化，确保对白推进剧情、增加期待或展示人设，而不是说明书。',
+              '对白合同 dialogue_contract 必须按 oh-story dialogue-mastery 输出 scene_modes, voice_anchors, dialogue_goals, key_lines, relationship_moves, dialogue_execution_checklist, mode_playbooks, power_length_rules, subtext_agenda_rules, tone_context_rules, emotion_push_rules, emotion_continuity_rules, dialogue_drive_rules, information_embed_rules, information_tension_rules, voice_differentiation_rules, spectator_dialogue_rules, supporting_speaker_limit_rules, dialogue_rhythm_rules, dialogue_volume_rules, dialogue_meme_rules, dialogue_audit_rules, revision_priorities, quality_checks；dialogue_execution_checklist 必须逐场输出 scene_no, scene, mode, speaker_agendas, line_functions, emotion_flow, information_strategy, voice_differentiation, forbidden_patterns, receipt_keys，确保场景卡里的对白要求能被正文和 dialogue_checks 逐场验收；power_length_rules 必须包含“掌控者/主角亮底牌时对白 ≤ 10 字”和“被压制方对白 ≥ 20 字”；subtext_agenda_rules 必须包含“真实动机绝对不能浅显地写在台词里”，tone_context_rules 必须包含“关系 × 场合 × 目的 = 语气”，emotion_push_rules 必须包含“命令式+否定式最能激发读者情绪”，emotion_continuity_rules 必须要求每次情绪转变有事件触发，dialogue_drive_rules 必须要求对白强化期待、爽感或悬念，information_embed_rules 必须包含“用角色的语气和立场包裹信息”，information_tension_rules 必须要求通过质疑、证据和核心信息兑现形成拉扯，voice_differentiation_rules 必须包含口癖和惯用语、说话节奏、信息偏好、身份影响措辞、性格影响语气和关系阶段不同，spectator_dialogue_rules 必须包含普通人震惊、专业人士分析、特殊身份者反应、短小精悍和不代替主线，supporting_speaker_limit_rules 必须包含“同一场景配角不超过 3 个有台词”“没有功能的角色不要出场”和“配角退场要主动规划”，dialogue_rhythm_rules 必须包含连续多轮对话后需要换气、穿插动作描写、紧张段落对话短促、关键信息放对话开头或结尾，dialogue_volume_rules 必须包含读者已知信息、叙事一句话概括、突发状况替代、主角旁白平铺直叙和新人物必须安排主线戏份，dialogue_meme_rules 必须包含说不出来但意思到了、梗或骚话、强化记忆点、高潮点和不得直接复刻，dialogue_audit_rules 必须包含大量信息都必须用对话来展示、问答式的一问一答、依赖对话来推动剧情或人物变化、遮住角色名后能否区分、单次对话不超过全节 40%、自然口语交流和对话结尾能否预示接下来的节奏变化，确保对白推进剧情、增加期待或展示人设，而不是说明书。',
               '连续性热度合同 continuity_heat_contract 必须按 oh-story 连续性追踪输出 heat_states, active_expectations, watch_items, dormant_allowed, revision_priorities, quality_checks，确保 hot/warm/cold/archived 元素都有处理理由。',
               '角色关系合同 character_relation_contract 必须按 oh-story 角色关系输出 relationship_types, important_relationships, independent_goals, goal_ownership_rules, relationship_life_rules, expectation_hub_rules, buffer_zone_rules, tests_or_pressure, attitude_shifts, quality_checks，确保关系变化有类型、压力、行动、配角期待枢纽、配角攻略缓冲区和正文证据；goal_ownership_rules 必须包含主角目标必须属于自己的、不能只是帮别人实现目标、主角必须保留自己的诉求/主动选择/代价；relationship_life_rules 必须包含角色生命中有恋爱之外的内容、不是单薄的情感工具人、关系角色还要有事业/责任/资源/身份/风险/行动线；expectation_hub_rules 必须包含配角期待枢纽/人物扣、任务基地、短期和长期期待、主角解决事件后开启新一轮装逼/新任务/新剧情，以及人物下线时用更大好处转化损失厌恶；buffer_zone_rules 必须包含配角攻略缓冲区、信息差、地位差距、亲密度差距或信任程度，配角不能像 NPC 一样站着等主角触发，并在关键拐点写清配角从旁观/质疑/拒绝/试探到行动/协助/设限的态度变化。',
               '角色行为合同 character_behavior_contract 必须按 oh-story 角色行为输出 motivation_chain, motivation_specificity_rules, layered_tags, behavior_rules, protagonist_composure_rules, strong_association_rules, memory_anchors, supporting_role_functions, antagonist_logic, antagonist_weight_rules, antagonist_self_story_rules, antagonist_tier_exit_rules, quality_checks，确保角色行为由动机链驱动；motivation_specificity_rules 必须包含起因必须具体、不能写“被欺负”这种模糊说法、动机必须是情感层面、不能写“要成为最强”这种空话、动机演变有铺垫；protagonist_composure_rules 必须包含升级线与主角反应线分开管理、升级提升实力但不自动改变从容反应、面对低级挑衅不被牵着走、用轻描淡写/短句/行动压制替代暴怒失态；strong_association_rules 必须包含每个重要角色至少 3 个强关联设定、强关联直接影响剧情走向/核心梗装逼爽点/人物碰撞、弱关联不喧宾夺主；antagonist_weight_rules 必须包含反派建立四要素、实力展示、动机可信、真实威胁和终极意图时机；antagonist_self_story_rules 必须包含反派也有梦想、在反派眼中他是自己故事的主人公、旧痛/创伤、优势即致命缺陷和理念冲突；antagonist_tier_exit_rules 必须包含反派层级表、篇幅与层级匹配、小反派、中等反派、大弧 Boss、最终 Boss、退场方式和最终Boss从第一章就有伏笔。',
