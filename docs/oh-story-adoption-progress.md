@@ -13,25 +13,25 @@ Source reference set: `/private/tmp/oh-story-claudecode/skills/story-long-write/
 <!-- oh-story-progress-summary
 {
   "reference_total": 38,
-  "integrated": 26,
-  "partial": 12,
+  "integrated": 27,
+  "partial": 11,
   "todo": 0,
   "deferred": 0,
-  "remaining_references": 12,
-  "estimated_hours_remaining": 25.5,
-  "estimated_working_days_remaining": 4.25
+  "remaining_references": 11,
+  "estimated_hours_remaining": 23.5,
+  "estimated_working_days_remaining": 3.92
 }
 -->
 
 ## Current Snapshot
 
 - Reference files: 38
-- Integrated enough for current production use: 26
-- Partially integrated, still worth mining: 12
+- Integrated enough for current production use: 27
+- Partially integrated, still worth mining: 11
 - Not systematically reviewed yet: 0
 - Deferred: 0
-- Remaining references to improve: 12
-- Estimated remaining effort: about 25.5 engineering hours, or 4.25 focused working days at 6 hours per day
+- Remaining references to improve: 11
+- Estimated remaining effort: about 23.5 engineering hours, or 3.92 focused working days at 6 hours per day
 
 The estimate assumes the current working pattern: one small oh-story increment at a time, with prompt or workflow changes backed by focused tests, then `test:novel-server` and `check` before push. UI progress surfacing is not included in the remaining estimate; after this ledger stabilizes, exposing it in the novel workspace should be a separate 4-6 hour slice.
 
@@ -70,7 +70,7 @@ The estimate assumes the current working pattern: one small oh-story increment a
 | outline-conflict.md | partial | Conflict structure contract covers ladders, protagonist agency, no-exit rules, and next-conflict seeds. | Tie conflict gaps earlier into outline and scene-card generation. | 1.5h |
 | outline-methods.md | partial | Chapter blueprint requires five-part outline, plot lines, character order, beat sequence, and ending contract. | Map more outline-method templates to the planning workspace. | 1.5h |
 | outline-rhythm.md | partial | Bridge unit, batch rhythm, beat cooling, and batch-size guardrails exist. | Add clearer rolling-plan diagnostics for rhythm fatigue before drafting. | 1.5h |
-| outline-structure-theory.md | partial | Blueprint and structure progression checks cover causal chain and chapter structure. | Mine structure theory into project-level longform skeleton generation. | 2h |
+| outline-structure-theory.md | integrated | Blueprint and structure progression checks cover causal chain and chapter structure. Project creation and seed recovery now inject `writing_bible.longform_structure_contract`; local seed materialization backfills the same contract with structure-level selection, five-act causal-chain rules, five-level outline limits, strong/weak/transition mainline architecture, web-sixth-act afterglow, volume purpose and climax framing, mainline/subline/dark-line layout, map-transition pillars, retention methods, and quality checks. Focused tests cover seed prompt hydration and writing-bible materialization. | Keep tuning structure-mode inference from real project seeds and genre-specific longform failures. | 0.5h |
 | plot-core-methods.md | integrated | Target reader, story drive, plot dynamics, information flow, reader payoff, story power, small-outline, mainline-definition, and next-objective-after-gain gates are present. Story power covers seed/recovery/original-incubation prompts, local writing-bible materialization, pre-draft/prose prompts, self-review, revision, deterministic `buildStoryPowerSyncReport`, story-state sync, and repair carry-over. Small-outline four-step coverage now lives inside `chapter_blueprint.small_outline_contract`, prose prompts, deterministic `small_outline_checks`, blueprint sync, and unattended blueprint repair. Mainline definition now lives in `writing_bible.mainline_definition_contract`, `chapter_blueprint.mainline_definition_contract`, prose prompts, self-review requirements, deterministic `mainline_definition_checks`, and unattended blueprint repair. Information flow now carries `next_objective_rules` into pre-draft briefs, prose prompts, self-review, revision prompts, unattended blueprint generation, and deterministic `next_objective_after_gain` sync checks. | Keep tuning transition and next-objective evidence heuristics from real generated chapters. | 0.5h |
 | plot-emotion-system.md | partial | Payoff setup, emotional arc,爽点 setup, and craft rules are present in pre-draft and prose prompts. | Add formula-level checks for setup before payoff and recurring emotional modules. | 1.5h |
 | plot-frameworks.md | partial | Showdown, suspense, conflict, and bridge-unit contracts cover major framework pieces. | Decide which frameworks belong in creation, outline, scene-card, or revision stages. | 2h |
@@ -87,11 +87,11 @@ The estimate assumes the current working pattern: one small oh-story increment a
 
 ## Next Priority Queue
 
-1. `outline-structure-theory.md`: mine structure theory into project-level longform skeleton generation.
-2. `outline-conflict.md`: tie conflict gaps earlier into outline and scene-card generation.
-3. `outline-methods.md`: map more outline-method templates to the planning workspace.
-4. `plot-frameworks.md`: decide which frameworks belong in creation, outline, scene-card, or revision stages.
-5. `plot-emotion-system.md`: add formula-level checks for setup before payoff and recurring emotional modules.
+1. `outline-conflict.md`: tie conflict gaps earlier into outline and scene-card generation.
+2. `outline-methods.md`: map more outline-method templates to the planning workspace.
+3. `plot-frameworks.md`: decide which frameworks belong in creation, outline, scene-card, or revision stages.
+4. `plot-emotion-system.md`: add formula-level checks for setup before payoff and recurring emotional modules.
+5. `style-genre-modules.md`: add model-facing fallback receipts proving module, rhythm, and matched chapter usage.
 
 ## Update Rules
 

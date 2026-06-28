@@ -36,6 +36,7 @@ import { buildOhStoryPlotSpecialTopicsContract, formatOhStoryPlotSpecialTopicsPr
 import { buildOhStoryCharacterDesignContract, formatOhStoryCharacterDesignPrompt } from './novel-character-design-contract'
 import { buildOhStoryStoryPowerContract, formatOhStoryStoryPowerPrompt } from './novel-story-power-contract'
 import { buildOhStoryMainlineDefinitionContract, formatOhStoryMainlineDefinitionPrompt } from './novel-mainline-definition-contract'
+import { buildOhStoryLongformStructureContract, formatOhStoryLongformStructurePrompt } from './novel-longform-structure-contract'
 
 function parseOptionalBoolean(value: any) {
   if (value === undefined) return undefined
@@ -1025,6 +1026,13 @@ export function buildProjectSeedRecoveryPrompt(seed: any, diagnostics: any, idea
     seed,
     seed?.writing_bible,
   )
+  const longformStructureContract = buildOhStoryLongformStructureContract(
+    idea,
+    requestedTitle,
+    seed,
+    { length_target: lengthTarget },
+    seed?.writing_bible,
+  )
   return [
     '任务：上一次项目种子输出偏薄，但里面有可用灵感。请基于这些有效信息补齐小说项目种子。只输出 JSON object，不要 Markdown，不要解释。',
     '关键原则：不要要求作者更换模型；不要丢弃已有线索；不要重新开一个无关故事；必须保留已有有效信息，并围绕缺口清单补齐。',
@@ -1049,6 +1057,8 @@ export function buildProjectSeedRecoveryPrompt(seed: any, diagnostics: any, idea
     '',
     formatOhStoryCharacterDesignPrompt(characterDesignContract),
     '',
+    formatOhStoryLongformStructurePrompt(longformStructureContract),
+    '',
     '【缺口清单】',
     asSeedArray(diagnostics?.missing_fields).length ? asSeedArray(diagnostics.missing_fields).join('、') : '请复查所有必填字段是否足够支撑项目创建。',
     '',
@@ -1056,7 +1066,7 @@ export function buildProjectSeedRecoveryPrompt(seed: any, diagnostics: any, idea
     'title, genre, sub_genres, target_audience, length_target, style_tags, commercial_tags',
     'synopsis, logline, core_premise, main_conflict',
     'protagonist, antagonist, worldbuilding, plot_engine, writing_bible, characters',
-    'writing_bible 必须包含 target_reader_contract, genre_positioning_contract, plot_special_topics_contract, mainline_definition_contract, story_power_contract, character_design_contract, core_contract_radar, reader_retention_contract',
+    'writing_bible 必须包含 target_reader_contract, genre_positioning_contract, plot_special_topics_contract, mainline_definition_contract, story_power_contract, character_design_contract, longform_structure_contract, core_contract_radar, reader_retention_contract',
     'commercial_positioning 必须包含 platform, reader_promise, selling_points, risks',
     'master_outline, volume_outlines, chapter_outlines, foreshadowing_plan, open_questions, next_steps',
     '',
@@ -1072,9 +1082,10 @@ export function buildProjectSeedRecoveryPrompt(seed: any, diagnostics: any, idea
     '9. mainline_definition_contract 必须包含主线不等于升级、主线是一件事、升级是主角达成目标的行动、不是一个元素和主线完成后的承接规则。',
     '10. story_power_contract 必须包含故事五维、有动作才是故事、有始有终、因果反馈和行动改变局势检查。',
     '11. character_design_contract 必须包含三层标签、强/中/弱关联、角色卡、配角功能化、反派自我叙事、金手指绑架人设、代入感和安全感规则。',
-    '12. core_contract_radar 必须给出 must_serve, no_drift, theme_unity_rules, repair_focus，并包含“当初吸引读者的卖点还在吗”的十章复核问题。',
-    '13. reader_retention_contract 必须要求前300字承接上一章压力，章末留下下一章动作压力。',
-    '14. 不要生成正文；不要照搬任何现有作品专有设定、角色名、桥段或原句。',
+    '12. longform_structure_contract 必须包含一级/二级/三级结构选择、五幕因果链、五级大纲不超过3级、每卷目的+高潮、主线+支线/暗线布局、换地图顶层势力柱子和人际关系先行规则。',
+    '13. core_contract_radar 必须给出 must_serve, no_drift, theme_unity_rules, repair_focus，并包含“当初吸引读者的卖点还在吗”的十章复核问题。',
+    '14. reader_retention_contract 必须要求前300字承接上一章压力，章末留下下一章动作压力。',
+    '15. 不要生成正文；不要照搬任何现有作品专有设定、角色名、桥段或原句。',
   ].filter(Boolean).join('\n')
 }
 
@@ -1086,6 +1097,7 @@ export function buildProjectSeedPrompt(idea: string, requestedTitle = '', reques
   const mainlineDefinitionContract = buildOhStoryMainlineDefinitionContract(idea, requestedTitle)
   const storyPowerContract = buildOhStoryStoryPowerContract(idea, requestedTitle)
   const characterDesignContract = buildOhStoryCharacterDesignContract(idea, requestedTitle)
+  const longformStructureContract = buildOhStoryLongformStructureContract(idea, requestedTitle, { length_target: normalizedLengthTarget })
   return [
     '任务：把用户碎片化小说想法整理成可创建项目的结构化项目种子。只输出 JSON object，不要 Markdown，不要解释。',
     requestedTitle ? `用户指定作品名：${requestedTitle}` : '',
@@ -1106,6 +1118,8 @@ export function buildProjectSeedPrompt(idea: string, requestedTitle = '', reques
     '',
     formatOhStoryCharacterDesignPrompt(characterDesignContract),
     '',
+    formatOhStoryLongformStructurePrompt(longformStructureContract),
+    '',
     '硬性要求：即使用户只提供作品名，也必须原创扩写完整项目种子；synopsis、logline、core_premise、main_conflict、protagonist、worldbuilding、volume_outlines、chapter_outlines 不得为空。',
     '',
     '请输出字段：',
@@ -1124,13 +1138,14 @@ export function buildProjectSeedPrompt(idea: string, requestedTitle = '', reques
     'antagonist: {name, identity, goal, method, hidden_truth}',
     'worldbuilding: {world_summary, history_secret, power_system, ancient_gods, outer_gods, rules, taboos}',
     'plot_engine: {inciting_incident, long_term_goal, volume_arc_suggestions, first_10_chapters_direction}',
-    'writing_bible: {promise, mainline, world_rules, style_lock, forbidden, safety_policy, target_reader_contract, genre_positioning_contract, plot_special_topics_contract, mainline_definition_contract, story_power_contract, character_design_contract, core_contract_radar, reader_retention_contract}',
+    'writing_bible: {promise, mainline, world_rules, style_lock, forbidden, safety_policy, target_reader_contract, genre_positioning_contract, plot_special_topics_contract, mainline_definition_contract, story_power_contract, character_design_contract, longform_structure_contract, core_contract_radar, reader_retention_contract}',
     'writing_bible.target_reader_contract: {reader_profile, reader_desires, emotional_gap, chapter_value_test, quality_checks}，必须回答“写给谁看、读者想看什么、本章给什么”',
     'writing_bible.genre_positioning_contract: {genre_tags, platform, reader_psychology, core_hook, type_formula, selling_points, long_board, innovation_boundary, genre_catalog_contract, genre_core_mechanics_contract, quality_checks}，必须包含“拉长板而非补短板”和上方 oh-story 题材目录/核心机制契约',
     'writing_bible.plot_special_topics_contract: 必须完整写入上方 oh-story 特殊题材操作契约，按 matched_topics 约束金手指、题材边界、扫榜对标、都市高武、三万字卡点、阵营手牌等专题',
     'writing_bible.mainline_definition_contract: 必须完整写入上方 oh-story 主线定义合同，覆盖主线不等于升级、主线是一件事、升级是主角达成目标的行动、不是一个元素和主线完成后的承接规则',
     'writing_bible.story_power_contract: 必须完整写入上方 oh-story 故事力合同，覆盖故事五维、有动作才是故事、有始有终、因果反馈和行动改变局势',
     'writing_bible.character_design_contract: 必须完整写入上方 oh-story 角色设计合同，覆盖三层标签、强/中/弱关联、角色卡、配角功能、反派自我叙事、金手指绑架人设、代入感和安全感',
+    'writing_bible.longform_structure_contract: 必须完整写入上方 oh-story 长篇结构骨架合同，覆盖一级/二级/三级结构选择、五幕因果链、五级大纲、每卷目的+高潮、支线服务主线、顶层势力柱子和人际关系先行换地图',
     'writing_bible.core_contract_radar: {must_serve, no_drift, theme_unity_rules, repair_focus, periodic_drift_check}，periodic_drift_check.question 必须包含“当初吸引读者的卖点还在吗”',
     'writing_bible.reader_retention_contract: {retention_double_engine, opening_hook_rule, ending_hook_rule, reward_randomness_rule, quality_checks}，opening_hook_rule 必须包含“前300字”',
     'commercial_positioning: {platform, reader_promise, selling_points, tropes, risks}',
@@ -1609,6 +1624,7 @@ function buildFallbackWritingBible(seed: any, project: any = {}) {
   const storyPowerContract = buildOhStoryStoryPowerContract(root, project, existing)
   const mainlineDefinitionContract = buildOhStoryMainlineDefinitionContract(root, project, existing)
   const characterDesignContract = buildOhStoryCharacterDesignContract(root, project, existing)
+  const longformStructureContract = buildOhStoryLongformStructureContract(root, project, existing)
   const commercialPositioning = {
     platform,
     reader_promise: readerPromise,
@@ -1647,6 +1663,7 @@ function buildFallbackWritingBible(seed: any, project: any = {}) {
     mainline_definition_contract: mainlineDefinitionContract,
     story_power_contract: storyPowerContract,
     character_design_contract: characterDesignContract,
+    longform_structure_contract: longformStructureContract,
     core_contract_radar: coreContractRadar,
     reader_retention_contract: readerRetentionContract,
     commercial_positioning: commercialPositioning,
