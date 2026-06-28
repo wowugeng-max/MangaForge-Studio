@@ -16152,6 +16152,13 @@ describe('chapter prose word target', () => {
             '未满足需求：快速反馈、安全感和尊严补偿。',
           ],
           chapter_attractions: ['超人蛮力被规则反制后，主角用信息差反制规则。', '门外水声逼出新选择，旧钥匙缺口给出可见线索。'],
+          genre_vitality_rules: ['题材生命力必须用当前目标平台样本验证，判断新鲜期 / 成熟期 / 审美疲劳期，不能把历史经验当作当前事实。'],
+          platform_fit_rules: ['不能用A网站的样本直接套到B网站；番茄要强情绪和爽感直给，起点可接受慢节奏代入。'],
+          boundary_fit_rules: ['确认边界感：当前素材、知识储备和篇幅能支撑所选题材，成熟题材稳边界，创新题材降篇幅和创新数量。'],
+          title_blurb_alignment_rules: ['书名3秒抓人，简介必须有安全感+钩子，书名简介内容三位一体，不能货不对板。'],
+          immersion_plasticity_rules: ['正文必须有代入感且无塑料感：世界观自洽、画风统一，避免仙侠搞科研式撕裂。'],
+          goldfinger_life_fit_rules: ['金手指必须与主角生活/职业息息相关，并服务主线，不要频繁开新金手指。'],
+          commercial_expression_rules: ['私人表达不得超过全篇5%，且必须服务核心卖点，不能独立于主线剧情存在。'],
           validation_questions: ['我这书写给谁看？', '目标读者想看什么？', '本章给了什么可感知回报？'],
           correction_methods: ['对照目标读者画像删掉作者自嗨设定展示。', '把卖点落成动作、反应、结果和章尾期待。'],
           quality_checks: ['三问必须都有正文证据。'],
@@ -16164,6 +16171,13 @@ describe('chapter prose word target', () => {
       '协会搬出资质规则，超人蛮力刚要破门，主角却用信息差指出规则边界：钥匙缺口对应旧备案，不公平当场被拿掉。',
       '旧钥匙缺口在门框上亮出可见线索，门外水声逼出新选择，升级后的识别能力立刻给出即时反馈。',
       '客户的反应、协会的退让和章尾账本编号一起落成回报，也留下下一章必须追的章尾期待。',
+      '当前番茄样本验证显示规则怪谈处在成熟期，所以本章稳定兑现边界期待，只做旧备案缺口这一处微创新。',
+      '写法没有把起点慢节奏样本硬套到番茄，而是用强情绪、爽感直给和目标平台节奏校准读者期待与雷点。',
+      '素材、知识储备和篇幅都压在宿舍规则和门槛白线内，边界感清晰，没有扩成无法支撑的宏大设定。',
+      '书名的旧钥匙缺口、简介承诺的安全感加钩子、正文交付的门框线索三位一体，没有货不对板。',
+      '世界观自洽，宿舍规则、备案钥匙和门外水声保持同一画风，代入感稳定，没有仙侠搞科研式塑料感。',
+      '识别钥匙缺口的能力与主角设备师职业和当下生活处境息息相关，金手指服务主线而不是硬贴外挂。',
+      '所有私人表达都服务核心卖点，没有超过5%去讲作者自己的观点。',
       '正文没有停在设定展示，而是把卖点写成动作、反应、结果。',
     ].join('\n')
     const selfIndulgentText = [
@@ -16171,6 +16185,13 @@ describe('chapter prose word target', () => {
       '大家会喜欢这章。',
       '作者觉得世界观很有意思。',
       '本章主要展示设定，没有明显回报。',
+      '题材曾经很火，所以不用当前样本验证，也不用判断新鲜期成熟期或审美疲劳期。',
+      '直接把A网站慢热样本套到B网站，不需要看番茄强情绪或起点慢节奏的差异。',
+      '素材、知识储备和篇幅都不够，但先硬写混搭大设定。',
+      '书名、简介和正文可以各写各的，货不对板也没关系。',
+      '仙侠世界突然搞科研，画风撕裂，塑料感很明显。',
+      '医生主角配隐身金手指，和生活职业无关。',
+      '作者私人表达占了很多篇幅，独立于主线卖点。',
     ].join('\n')
 
     const okReport = buildTargetReaderSyncReport(project, chapter, contextPackage, readerFacingText)
@@ -16179,13 +16200,44 @@ describe('chapter prose word target', () => {
     expect(okReport.status).toBe('ok')
     expect(okReport.label).toBe('目标读者 OK')
     expect(okReport.missed_count).toBe(0)
-    expect(okReport.delivered.map((item: any) => item.label)).toEqual(expect.arrayContaining(['读者画像', '读者欲望', '情绪缺口', '本章吸引点', '三问验证', '修正方法']))
+    expect(okReport.delivered.map((item: any) => item.label)).toEqual(expect.arrayContaining([
+      '读者画像',
+      '读者欲望',
+      '情绪缺口',
+      '本章吸引点',
+      '题材生命力',
+      '平台适配',
+      '题材边界',
+      '书名简介一致',
+      '代入与塑料感',
+      '金手指生活关联',
+      '商业表达',
+      '三问验证',
+      '修正方法',
+    ]))
     expect(warnReport.status).toBe('warn')
     expect(warnReport.label).toContain('目标读者缺口')
-    expect(warnReport.missed.map((item: any) => item.label)).toEqual(expect.arrayContaining(['读者欲望', '情绪缺口', '本章吸引点', '目标读者硬伤']))
+    expect(warnReport.missed.map((item: any) => item.label)).toEqual(expect.arrayContaining([
+      '读者欲望',
+      '情绪缺口',
+      '本章吸引点',
+      '题材生命力',
+      '平台适配',
+      '题材边界',
+      '书名简介一致',
+      '代入与塑料感',
+      '金手指生活关联',
+      '商业表达',
+      '目标读者硬伤',
+    ]))
     expect(warnReport.missed.map((item: any) => item.key)).toContain('emotional_gap_analysis')
+    expect(warnReport.missed.map((item: any) => item.key)).toContain('genre_vitality_rules')
+    expect(warnReport.missed.map((item: any) => item.key)).toContain('platform_fit_rules')
+    expect(warnReport.missed.map((item: any) => item.key)).toContain('title_blurb_alignment_rules')
     expect(warnReport.next_actions.join('；')).toMatch(/目标读者|可感知回报/)
     expect(warnReport.next_actions.join('；')).toContain('核心痛苦')
+    expect(warnReport.next_actions.join('；')).toContain('目标平台样本')
+    expect(warnReport.next_actions.join('；')).toContain('书名简介内容')
   })
 
   test('wires deterministic target reader hard risks into normalized self review', () => {
@@ -20673,6 +20725,26 @@ describe('chapter pre-draft brief', () => {
     expect(brief.target_reader_contract.emotional_gap_analysis.join('｜')).toContain('未满足需求')
     expect(brief.target_reader_contract.emotional_gap_analysis.join('｜')).toContain('掌控感')
     expect(brief.target_reader_contract.chapter_attractions.join('｜')).toContain('超人蛮力被规则反制')
+    expect(brief.target_reader_contract.genre_vitality_rules.join('｜')).toContain('样本验证')
+    expect(brief.target_reader_contract.genre_vitality_rules.join('｜')).toContain('新鲜期')
+    expect(brief.target_reader_contract.genre_vitality_rules.join('｜')).toContain('成熟期')
+    expect(brief.target_reader_contract.genre_vitality_rules.join('｜')).toContain('审美疲劳期')
+    expect(brief.target_reader_contract.platform_fit_rules.join('｜')).toContain('不能用A网站的样本直接套到B网站')
+    expect(brief.target_reader_contract.platform_fit_rules.join('｜')).toContain('番茄')
+    expect(brief.target_reader_contract.platform_fit_rules.join('｜')).toContain('强情绪')
+    expect(brief.target_reader_contract.platform_fit_rules.join('｜')).toContain('起点')
+    expect(brief.target_reader_contract.platform_fit_rules.join('｜')).toContain('慢节奏')
+    expect(brief.target_reader_contract.boundary_fit_rules.join('｜')).toContain('边界感')
+    expect(brief.target_reader_contract.boundary_fit_rules.join('｜')).toContain('素材、知识储备和篇幅')
+    expect(brief.target_reader_contract.title_blurb_alignment_rules.join('｜')).toContain('书名3秒抓人')
+    expect(brief.target_reader_contract.title_blurb_alignment_rules.join('｜')).toContain('简介有安全感+钩子')
+    expect(brief.target_reader_contract.title_blurb_alignment_rules.join('｜')).toContain('书名简介内容三位一体')
+    expect(brief.target_reader_contract.immersion_plasticity_rules.join('｜')).toContain('代入感')
+    expect(brief.target_reader_contract.immersion_plasticity_rules.join('｜')).toContain('塑料感')
+    expect(brief.target_reader_contract.immersion_plasticity_rules.join('｜')).toContain('世界观自洽')
+    expect(brief.target_reader_contract.goldfinger_life_fit_rules.join('｜')).toContain('金手指必须与主角生活/职业息息相关')
+    expect(brief.target_reader_contract.commercial_expression_rules.join('｜')).toContain('私人表达')
+    expect(brief.target_reader_contract.commercial_expression_rules.join('｜')).toContain('5%')
     expect(brief.target_reader_contract.validation_questions.join('｜')).toContain('我这书写给谁看')
     expect(confirmedContext.chapter_target.target_reader_contract.quality_checks.join('｜')).toContain('三问')
     expect(prompt).toContain('【目标读者合同】')
@@ -20681,6 +20753,11 @@ describe('chapter pre-draft brief', () => {
     expect(prompt).toContain('情绪缺口')
     expect(prompt).toContain('核心痛苦')
     expect(prompt).toContain('高频情绪关键词')
+    expect(prompt).toContain('题材生命力')
+    expect(prompt).toContain('目标平台样本')
+    expect(prompt).toContain('书名简介内容三位一体')
+    expect(prompt).toContain('代入感/塑料感')
+    expect(prompt).toContain('金手指生活关联')
     expect(prompt).toContain('target_reader_checks')
     expect(prompt.indexOf('【目标读者合同】')).toBeLessThan(prompt.indexOf('【结构化上下文包】'))
   })
@@ -20741,6 +20818,13 @@ describe('chapter pre-draft brief', () => {
     expect(brief.target_reader_contract.emotional_gap_analysis.join('｜')).toContain('核心痛苦')
     expect(brief.target_reader_contract.emotional_gap_analysis.join('｜')).toContain('深层情结')
     expect(brief.target_reader_contract.chapter_attractions.join('｜')).toContain('超人蛮力被规则反制')
+    expect(brief.target_reader_contract.genre_vitality_rules.join('｜')).toContain('样本验证')
+    expect(brief.target_reader_contract.platform_fit_rules.join('｜')).toContain('不能用A网站的样本直接套到B网站')
+    expect(brief.target_reader_contract.boundary_fit_rules.join('｜')).toContain('素材、知识储备和篇幅')
+    expect(brief.target_reader_contract.title_blurb_alignment_rules.join('｜')).toContain('书名简介内容三位一体')
+    expect(brief.target_reader_contract.immersion_plasticity_rules.join('｜')).toContain('世界观自洽')
+    expect(brief.target_reader_contract.goldfinger_life_fit_rules.join('｜')).toContain('生活/职业')
+    expect(brief.target_reader_contract.commercial_expression_rules.join('｜')).toContain('私人表达')
     expect(brief.target_reader_contract.validation_questions.join('｜')).toContain('我这书写给谁看')
     expect(brief.target_reader_contract.correction_methods.join('｜')).toContain('目标读者画像')
   })
@@ -54005,11 +54089,22 @@ describe('chapter context word target source guards', () => {
     expect(reviewPrompt).toContain('核心痛苦')
     expect(reviewPrompt).toContain('深层情结')
     expect(reviewPrompt).toContain('高频情绪关键词')
+    expect(reviewPrompt).toContain('题材生命力')
+    expect(reviewPrompt).toContain('目标平台样本')
+    expect(reviewPrompt).toContain('题材边界')
+    expect(reviewPrompt).toContain('书名简介内容三位一体')
+    expect(reviewPrompt).toContain('代入感/塑料感')
+    expect(reviewPrompt).toContain('金手指生活关联')
+    expect(reviewPrompt).toContain('私人表达')
     expect(revisionPrompt).toContain('target_reader_checks')
     expect(revisionPrompt).toContain('目标读者')
     expect(revisionPrompt).toContain('情绪缺口')
     expect(revisionPrompt).toContain('核心痛苦')
     expect(revisionPrompt).toContain('未满足需求')
+    expect(revisionPrompt).toContain('目标平台样本')
+    expect(revisionPrompt).toContain('书名简介内容')
+    expect(revisionPrompt).toContain('世界观自洽')
+    expect(revisionPrompt).toContain('私人表达')
     expect(shouldReviseBlock).toContain('target_reader_checks')
     expect(reviewNormalizeBlock).toContain('target_reader_checks')
     expect(reviewNormalizeBlock).toContain('reviewPayload?.target_reader_checks')

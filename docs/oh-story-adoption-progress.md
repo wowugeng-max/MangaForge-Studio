@@ -13,25 +13,25 @@ Source reference set: `/private/tmp/oh-story-claudecode/skills/story-long-write/
 <!-- oh-story-progress-summary
 {
   "reference_total": 38,
-  "integrated": 20,
-  "partial": 18,
+  "integrated": 21,
+  "partial": 17,
   "todo": 0,
   "deferred": 0,
-  "remaining_references": 18,
-  "estimated_hours_remaining": 36,
-  "estimated_working_days_remaining": 6
+  "remaining_references": 17,
+  "estimated_hours_remaining": 34.5,
+  "estimated_working_days_remaining": 5.75
 }
 -->
 
 ## Current Snapshot
 
 - Reference files: 38
-- Integrated enough for current production use: 20
-- Partially integrated, still worth mining: 18
+- Integrated enough for current production use: 21
+- Partially integrated, still worth mining: 17
 - Not systematically reviewed yet: 0
 - Deferred: 0
-- Remaining references to improve: 18
-- Estimated remaining effort: about 36 engineering hours, or 6 focused working days at 6 hours per day
+- Remaining references to improve: 17
+- Estimated remaining effort: about 34.5 engineering hours, or 5.75 focused working days at 6 hours per day
 
 The estimate assumes the current working pattern: one small oh-story increment at a time, with prompt or workflow changes backed by focused tests, then `test:novel-server` and `check` before push. UI progress surfacing is not included in the remaining estimate; after this ledger stabilizes, exposing it in the novel workspace should be a separate 4-6 hour slice.
 
@@ -61,7 +61,7 @@ The estimate assumes the current working pattern: one small oh-story increment a
 | format-and-structure.md | partial | Prose format and metadata scans detect title, chapter marker, front matter, and engineering-word violations. | Compare all format requirements and add missing deterministic checks. | 1h |
 | genre-catalog.md | integrated | Creation, recovery, original-incubation prompts, and local writing-bible materialization now inject `genre_positioning_contract.genre_catalog_contract` from an oh-story catalog route covering the main route table and quick-reference entries: 追妻火葬场、重生复仇、小三/婚恋、世情、仙侠/玄幻、死人文学、都市高武、霸总/甜宠、同人流派、脑洞文、凡人流、历史/架空历史、文娱/娱乐圈、规则怪谈、长生流、西幻/骑士文、新媒体文、搞笑文、无限流、悬疑、后悔流, plus a generic fallback. Focused tests verify routing and key checks. | Keep tuning route keywords and snippets from real seed-generation misses. | 0.5h |
 | genre-core-mechanics.md | integrated | Genre positioning contract covers core hook, goldfinger fit, must-have scenes, platform fit, micro-innovation, 70/20/10 inspiration, five micro-innovation methods, long-board focus, and prose/review checks. Creation, recovery, original-incubation prompts, and local writing-bible materialization now inject `genre_positioning_contract.genre_core_mechanics_contract` with oh-story core-hook layers, per-chapter loop rules, micro-innovation boundaries, conflict-network rules, goldfinger/worldview fit, threshold escalation, career/love balance, drift checks, and genre presets for 都市高武、仙侠/玄幻、规则怪谈、脑洞文、凡人流 plus fallback validation examples. | Keep tuning mechanism presets from real seed-generation and pre-draft misses. | 0.5h |
-| genre-readers.md | partial | Target-reader contract and reader expectation checks cover reader profile and desires. | Expand reader profiles into selectable or inferred workbench signals. | 1.5h |
+| genre-readers.md | integrated | Target-reader contract now carries reader profile/desires plus genre vitality, platform fit, boundary fit, title/blurb/content alignment, immersion/plasticity, goldfinger-life fit, and commercial-expression rules into pre-draft briefs, prose prompts, self-review, revision, unattended blueprint construction, and deterministic `buildTargetReaderSyncReport`. Focused tests cover prompt hydration, incomplete explicit-contract backfill, post-delivery sync misses, and review/revision enforcement. | Keep tuning platform and title/blurb evidence heuristics from real generated chapters. | 0.5h |
 | genre-writing-formulas.md | integrated | Next-batch workflow loads `references/genre-writing-formulas.md` on demand, and `genre_positioning_contract.genre_formula` now receives compact oh-story formula routes for the reference's formula table, including modern revenge, urban system, suspense, rebirth, palace, abuse, public-trial face-slap, and other genre structures. | Keep tuning route keywords and formula snippets from real generation misses. | 0.5h |
 | hooks-chapter.md | integrated | Chapter hook contracts, ending contract checks, sudden clue detection, and hook repair carry-over are implemented. | Keep tuning thresholds based on real output. | 0.5h |
 | hooks-paragraph.md | integrated | Paragraph hook checks detect stalled paragraphs and require micro-hook signals. | Keep tuning paragraph-density heuristics. | 0.5h |
@@ -87,11 +87,11 @@ The estimate assumes the current working pattern: one small oh-story increment a
 
 ## Next Priority Queue
 
-1. `genre-readers.md`: expand reader profiles into selectable or inferred workbench signals.
-2. `commercial-core-methods.md`: convert more commercial-core heuristics into creation-time and batch-planning gates.
-3. `emotional-arc-design.md`: connect emotion-arc findings more directly to scene-card generation and repair-task routing.
-4. `character-relations.md`: add clearer relation progression diagnostics before prose, not only after review.
-5. `character-design-methods.md`: mine remaining design methods for project creation and role-card generation prompts.
+1. `commercial-core-methods.md`: convert more commercial-core heuristics into creation-time and batch-planning gates.
+2. `emotional-arc-design.md`: connect emotion-arc findings more directly to scene-card generation and repair-task routing.
+3. `character-relations.md`: add clearer relation progression diagnostics before prose, not only after review.
+4. `character-design-methods.md`: mine remaining design methods for project creation and role-card generation prompts.
+5. `plot-core-methods.md`: convert remaining high-level methods into smaller generation-time gates.
 
 ## Update Rules
 

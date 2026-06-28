@@ -32079,6 +32079,238 @@ function normalizeTargetReaderAttractionCheck(values: any[], chapterText: string
   }
 }
 
+function normalizeTargetReaderGenreVitalityCheck(values: any[], chapterText: string) {
+  const planned = targetReaderArray(values)
+  if (!planned.length) return null
+  const text = String(chapterText || '')
+  const sampleSignals = countTargetReaderSignals(text, [/当前.*样本|目标平台样本|近期样本|样本验证|scan|analyze/])
+  const stageSignals = countTargetReaderSignals(text, [/新鲜期|成熟期|审美疲劳期/])
+  const actionSignals = countTargetReaderSignals(text, [/边界期待|微创新|新切入点|保守满足|当前事实/])
+  const historicalAssumption = /曾经很火|不用.*样本验证|不需要.*样本|不用.*判断.*新鲜期|不用.*判断.*成熟期|历史经验.*当前事实|历史热度.*当前事实/.test(text)
+  const delivered = !historicalAssumption && sampleSignals >= 1 && stageSignals >= 1 && actionSignals >= 1
+  return {
+    key: 'genre_vitality_rules',
+    label: '题材生命力',
+    text: planned.join('；'),
+    expected: planned.join('；'),
+    score: delivered ? 88 : Math.max(16, (sampleSignals + stageSignals + actionSignals) * 18 - (historicalAssumption ? 18 : 0)),
+    evidence: uniqueBriefStrings([
+      sampleSignals ? '当前目标平台样本验证可见' : '',
+      stageSignals ? '题材阶段判断可见' : '',
+      actionSignals ? '阶段对应写法可见' : '',
+      historicalAssumption ? '用历史热度或否定样本验证替代当前事实' : '',
+    ], 8),
+    delivered,
+    status: delivered ? 'ok' : 'warn',
+    missed_items: delivered ? [] : uniqueBriefStrings([
+      !sampleSignals ? '缺当前目标平台样本验证' : '',
+      !stageSignals ? '缺新鲜期/成熟期/审美疲劳期判断' : '',
+      !actionSignals ? '缺阶段对应写法' : '',
+      historicalAssumption ? '不能把历史经验当作当前事实' : '',
+    ], 8),
+    issue: delivered ? '' : '题材生命力没有用当前目标平台样本和阶段判断校准。',
+    repair_instruction: delivered ? '' : '补题材生命力：用当前目标平台样本验证题材阶段，明确新鲜期/成熟期/审美疲劳期下本章该稳边界还是给新切入点。',
+  }
+}
+
+function normalizeTargetReaderPlatformFitCheck(values: any[], chapterText: string) {
+  const planned = targetReaderArray(values)
+  if (!planned.length) return null
+  const text = String(chapterText || '')
+  const crossSiteSignals = countTargetReaderSignals(text, [/不能用A网站.*B网站|A网站.*样本.*B网站|不同平台|同一题材.*不同平台|没有把.*样本.*硬套|不.*样本.*硬套/])
+  const targetPlatformSignals = countTargetReaderSignals(text, [/目标平台|平台.*校准|读者期待|节奏|雷点/])
+  const platformTasteSignals = countTargetReaderSignals(text, [/番茄.*强情绪|强情绪.*番茄|爽感直给|起点.*慢节奏|慢节奏.*起点|正常剧情推进/])
+  const copiedPlatform = /直接.*A网站.*套.*B网站|把A网站.*套到B网站|不用看.*番茄.*起点|不需要看.*平台.*差异/.test(text)
+  const delivered = !copiedPlatform && targetPlatformSignals >= 1 && platformTasteSignals >= 1 && crossSiteSignals >= 1
+  return {
+    key: 'platform_fit_rules',
+    label: '平台适配',
+    text: planned.join('；'),
+    expected: planned.join('；'),
+    score: delivered ? 88 : Math.max(16, (crossSiteSignals + targetPlatformSignals + platformTasteSignals) * 18 - (copiedPlatform ? 18 : 0)),
+    evidence: uniqueBriefStrings([
+      crossSiteSignals ? '跨网站差异意识可见' : '',
+      targetPlatformSignals ? '目标平台样本校准可见' : '',
+      platformTasteSignals ? '平台口味差异可见' : '',
+      copiedPlatform ? '直接套用其他平台样本' : '',
+    ], 8),
+    delivered,
+    status: delivered ? 'ok' : 'warn',
+    missed_items: delivered ? [] : uniqueBriefStrings([
+      !crossSiteSignals ? '缺跨网站样本不可直接套用的约束' : '',
+      !targetPlatformSignals ? '缺目标平台样本校准' : '',
+      !platformTasteSignals ? '缺番茄/起点等平台口味差异' : '',
+      copiedPlatform ? '不能把A网站样本硬套到B网站' : '',
+    ], 8),
+    issue: delivered ? '' : '平台适配没有落到目标平台样本、节奏、读者期待或雷点校准。',
+    repair_instruction: delivered ? '' : '补平台适配：用目标平台样本校准写法，明确番茄强情绪/爽感直给、起点慢节奏代入等差异，禁止A站样本硬套B站。',
+  }
+}
+
+function normalizeTargetReaderBoundaryFitCheck(values: any[], chapterText: string) {
+  const planned = targetReaderArray(values)
+  if (!planned.length) return null
+  const text = String(chapterText || '')
+  const boundarySignals = countTargetReaderSignals(text, [/边界感|题材边界|成熟题材|创新题材|混搭/])
+  const supportSignals = countTargetReaderSignals(text, [/素材、知识储备和篇幅|素材.*知识储备.*篇幅|能支撑|支撑所选题材|降低篇幅|创新数量/])
+  const unsupported = /素材.*不够|知识储备.*不够|篇幅.*不够|硬写混搭|边界.*漂移/.test(text)
+    || (/无法支撑/.test(text) && !/没有.*无法支撑|避免.*无法支撑|不.*无法支撑/.test(text))
+  const delivered = !unsupported && boundarySignals >= 1 && supportSignals >= 1
+  return {
+    key: 'boundary_fit_rules',
+    label: '题材边界',
+    text: planned.join('；'),
+    expected: planned.join('；'),
+    score: delivered ? 86 : Math.max(16, (boundarySignals + supportSignals) * 22 - (unsupported ? 18 : 0)),
+    evidence: uniqueBriefStrings([
+      boundarySignals ? '题材边界意识可见' : '',
+      supportSignals ? '素材/知识/篇幅支撑可见' : '',
+      unsupported ? '明知素材/知识/篇幅不支撑仍硬写' : '',
+    ], 8),
+    delivered,
+    status: delivered ? 'ok' : 'warn',
+    missed_items: delivered ? [] : uniqueBriefStrings([
+      !boundarySignals ? '缺题材边界感确认' : '',
+      !supportSignals ? '缺素材、知识储备和篇幅支撑判断' : '',
+      unsupported ? '题材混搭或创新超出当前支撑能力' : '',
+    ], 8),
+    issue: delivered ? '' : '题材边界没有确认素材、知识储备和篇幅是否支撑。',
+    repair_instruction: delivered ? '' : '补题材边界：压回当前素材、知识储备和篇幅能支撑的范围；创新题材降低篇幅和创新数量，成熟题材稳住边界期待。',
+  }
+}
+
+function normalizeTargetReaderTitleBlurbAlignmentCheck(values: any[], chapterText: string) {
+  const planned = targetReaderArray(values)
+  if (!planned.length) return null
+  const text = String(chapterText || '')
+  const titleSignals = countTargetReaderSignals(text, [/书名.*3秒|3秒.*抓人|书名.*核心卖点|书名.*钩子/])
+  const blurbSignals = countTargetReaderSignals(text, [/简介.*安全感.*钩子|安全感.*钩子|主角会赢|悬念/])
+  const alignmentSignals = countTargetReaderSignals(text, [/书名简介内容.*三位一体|书名.*简介.*正文|货板一致|货不对板/])
+  const mismatch = /书名、简介和正文.*各写各的|各写各的|货不对板.*没关系|卖点.*不一致/.test(text)
+  const delivered = !mismatch && titleSignals >= 1 && blurbSignals >= 1 && alignmentSignals >= 1
+  return {
+    key: 'title_blurb_alignment_rules',
+    label: '书名简介一致',
+    text: planned.join('；'),
+    expected: planned.join('；'),
+    score: delivered ? 88 : Math.max(16, (titleSignals + blurbSignals + alignmentSignals) * 18 - (mismatch ? 18 : 0)),
+    evidence: uniqueBriefStrings([
+      titleSignals ? '书名3秒钩子可见' : '',
+      blurbSignals ? '简介安全感+钩子可见' : '',
+      alignmentSignals ? '书名简介内容一致性可见' : '',
+      mismatch ? '书名简介正文货不对板' : '',
+    ], 8),
+    delivered,
+    status: delivered ? 'ok' : 'warn',
+    missed_items: delivered ? [] : uniqueBriefStrings([
+      !titleSignals ? '缺书名3秒抓人/核心卖点信号' : '',
+      !blurbSignals ? '缺简介安全感+钩子信号' : '',
+      !alignmentSignals ? '缺书名简介内容三位一体' : '',
+      mismatch ? '存在货不对板风险' : '',
+    ], 8),
+    issue: delivered ? '' : '书名、简介和正文承诺没有证明同一核心卖点。',
+    repair_instruction: delivered ? '' : '补书名简介内容一致：书名3秒传卖点，简介给安全感+钩子，正文兑现同一件事，修掉货不对板。',
+  }
+}
+
+function normalizeTargetReaderImmersionPlasticityCheck(values: any[], chapterText: string) {
+  const planned = targetReaderArray(values)
+  if (!planned.length) return null
+  const text = String(chapterText || '')
+  const immersionSignals = countTargetReaderSignals(text, [/代入感|读者代入|投射进主角/])
+  const cohesionSignals = countTargetReaderSignals(text, [/世界观自洽|画风统一|同一画风|规则.*自洽|像真实存在/])
+  const plasticitySignals = countTargetReaderSignals(text, [/塑料感|仙侠搞科研|画风撕裂|不仙|不侠/])
+  const rupture = (/塑料感.*明显|画风撕裂|仙侠世界.*搞科研|仙侠.*搞科研|武侠不侠/.test(text))
+    && !/没有.*塑料感|无塑料感|避免.*塑料感|没有.*仙侠.*搞科研|避免.*仙侠.*搞科研|画风统一/.test(text)
+  const delivered = !rupture && immersionSignals >= 1 && cohesionSignals >= 1 && plasticitySignals >= 1
+  return {
+    key: 'immersion_plasticity_rules',
+    label: '代入与塑料感',
+    text: planned.join('；'),
+    expected: planned.join('；'),
+    score: delivered ? 86 : Math.max(16, (immersionSignals + cohesionSignals + plasticitySignals) * 18 - (rupture ? 18 : 0)),
+    evidence: uniqueBriefStrings([
+      immersionSignals ? '代入感信号可见' : '',
+      cohesionSignals ? '世界观自洽/画风统一可见' : '',
+      plasticitySignals ? '塑料感防线可见' : '',
+      rupture ? '画风撕裂或塑料感明显' : '',
+    ], 8),
+    delivered,
+    status: delivered ? 'ok' : 'warn',
+    missed_items: delivered ? [] : uniqueBriefStrings([
+      !immersionSignals ? '缺代入感锚点' : '',
+      !cohesionSignals ? '缺世界观自洽/画风统一' : '',
+      !plasticitySignals ? '缺塑料感风险检查' : '',
+      rupture ? '存在仙侠搞科研式画风撕裂' : '',
+    ], 8),
+    issue: delivered ? '' : '代入感与塑料感没有被校准，世界规则或画风可能撕裂。',
+    repair_instruction: delivered ? '' : '补代入与去塑料感：让主角行动、世界规则和读者期待同向，保持世界观自洽和画风统一，删掉撕裂设定。',
+  }
+}
+
+function normalizeTargetReaderGoldfingerLifeFitCheck(values: any[], chapterText: string) {
+  const planned = targetReaderArray(values)
+  if (!planned.length) return null
+  const text = String(chapterText || '')
+  const lifeFitSignals = countTargetReaderSignals(text, [/金手指.*生活\/职业|金手指.*生活.*职业|生活\/职业.*息息相关|职业.*息息相关|当下生活处境/])
+  const mainlineSignals = countTargetReaderSignals(text, [/服务主线|主线.*有关|技能.*升级|一个技能.*不同效果|职业技能|资源变化/])
+  const unrelated = (/和生活职业无关|职业无关|生活无关|硬贴外挂|医生.*隐身|频繁开新金手指/.test(text))
+    && !/不是硬贴外挂|不是.*硬贴|不.*硬贴|避免.*硬贴|不要.*硬贴/.test(text)
+  const delivered = !unrelated && lifeFitSignals >= 1 && mainlineSignals >= 1
+  return {
+    key: 'goldfinger_life_fit_rules',
+    label: '金手指生活关联',
+    text: planned.join('；'),
+    expected: planned.join('；'),
+    score: delivered ? 86 : Math.max(16, (lifeFitSignals + mainlineSignals) * 22 - (unrelated ? 18 : 0)),
+    evidence: uniqueBriefStrings([
+      lifeFitSignals ? '金手指与生活/职业关联可见' : '',
+      mainlineSignals ? '金手指服务主线可见' : '',
+      unrelated ? '金手指与主角生活/职业脱节' : '',
+    ], 8),
+    delivered,
+    status: delivered ? 'ok' : 'warn',
+    missed_items: delivered ? [] : uniqueBriefStrings([
+      !lifeFitSignals ? '缺金手指与主角生活/职业关联' : '',
+      !mainlineSignals ? '缺金手指服务主线或升级反馈' : '',
+      unrelated ? '金手指硬贴且脱离人物处境' : '',
+    ], 8),
+    issue: delivered ? '' : '金手指没有证明与主角生活/职业和主线处境紧密相关。',
+    repair_instruction: delivered ? '' : '补金手指生活关联：把能力绑定主角职业、生活困境、主线问题和可升级反馈，删除硬贴外挂或无关新能力。',
+  }
+}
+
+function normalizeTargetReaderCommercialExpressionCheck(values: any[], chapterText: string) {
+  const planned = targetReaderArray(values)
+  if (!planned.length) return null
+  const text = String(chapterText || '')
+  const ratioSignals = countTargetReaderSignals(text, [/私人表达.*5%|没有超过5%|不超过全篇5%/])
+  const serviceSignals = countTargetReaderSignals(text, [/服务核心卖点|服务.*主线|不能独立于主线|不得独立于主线|没有.*作者自己的观点/])
+  const overExpressed = /私人表达占.*很多|私人表达.*很多篇幅|独立于主线卖点|作者自己的观点.*很多|打断叙事节奏/.test(text)
+  const delivered = !overExpressed && ratioSignals >= 1 && serviceSignals >= 1
+  return {
+    key: 'commercial_expression_rules',
+    label: '商业表达',
+    text: planned.join('；'),
+    expected: planned.join('；'),
+    score: delivered ? 86 : Math.max(16, (ratioSignals + serviceSignals) * 22 - (overExpressed ? 18 : 0)),
+    evidence: uniqueBriefStrings([
+      ratioSignals ? '私人表达占比控制可见' : '',
+      serviceSignals ? '私人表达服务核心卖点/主线可见' : '',
+      overExpressed ? '私人表达过量或脱离主线' : '',
+    ], 8),
+    delivered,
+    status: delivered ? 'ok' : 'warn',
+    missed_items: delivered ? [] : uniqueBriefStrings([
+      !ratioSignals ? '缺私人表达不超过5%的占比约束' : '',
+      !serviceSignals ? '缺私人表达服务核心卖点/主线约束' : '',
+      overExpressed ? '私人表达过量或独立于主线' : '',
+    ], 8),
+    issue: delivered ? '' : '商业表达没有证明私人表达受控并服务核心卖点。',
+    repair_instruction: delivered ? '' : '补商业表达控制：私人表达不超过5%，且必须服务核心卖点和主线剧情；删掉独立观点输出。',
+  }
+}
+
 function normalizeTargetReaderValidationCheck(values: any[], chapterText: string) {
   const planned = targetReaderArray(values)
   if (!planned.length) return null
@@ -32180,6 +32412,13 @@ function buildTargetReaderDeterministicCheck(chapterText: string) {
 
 function targetReaderPriority(missed: any[]) {
   if (missed.some(item => item.key === 'target_reader_forbidden')) return '优先清目标读者硬伤'
+  if (missed.some(item => item.key === 'genre_vitality_rules')) return '优先补题材生命力样本验证'
+  if (missed.some(item => item.key === 'platform_fit_rules')) return '优先校准目标平台写法'
+  if (missed.some(item => item.key === 'title_blurb_alignment_rules')) return '优先修书名简介正文一致'
+  if (missed.some(item => item.key === 'boundary_fit_rules')) return '优先压回题材边界'
+  if (missed.some(item => item.key === 'immersion_plasticity_rules')) return '优先修代入感和塑料感'
+  if (missed.some(item => item.key === 'goldfinger_life_fit_rules')) return '优先修金手指生活关联'
+  if (missed.some(item => item.key === 'commercial_expression_rules')) return '优先收束私人表达'
   if (missed.some(item => item.key === 'emotional_gap_analysis')) return '优先补情绪缺口'
   if (missed.some(item => item.key === 'reader_desires')) return '优先补读者欲望'
   if (missed.some(item => item.key === 'chapter_attractions')) return '优先补本章吸引点'
@@ -32196,6 +32435,13 @@ export function buildTargetReaderSyncReport(project: any, chapter: any, contextP
     normalizeTargetReaderDesireCheck(contract.reader_desires || contract.readerDesires || contract.desires, chapterText),
     normalizeTargetReaderEmotionalGapCheck(contract.emotional_gap_analysis || contract.emotionalGapAnalysis, chapterText),
     normalizeTargetReaderAttractionCheck(contract.chapter_attractions || contract.chapterAttractions || contract.attractions, chapterText),
+    normalizeTargetReaderGenreVitalityCheck(contract.genre_vitality_rules || contract.genreVitalityRules || contract.genre_lifecycle_rules || contract.genreLifecycleRules, chapterText),
+    normalizeTargetReaderPlatformFitCheck(contract.platform_fit_rules || contract.platformFitRules || contract.platform_adaptation_rules || contract.platformAdaptationRules, chapterText),
+    normalizeTargetReaderBoundaryFitCheck(contract.boundary_fit_rules || contract.boundaryFitRules || contract.genre_boundary_rules || contract.genreBoundaryRules, chapterText),
+    normalizeTargetReaderTitleBlurbAlignmentCheck(contract.title_blurb_alignment_rules || contract.titleBlurbAlignmentRules || contract.copy_alignment_rules || contract.copyAlignmentRules, chapterText),
+    normalizeTargetReaderImmersionPlasticityCheck(contract.immersion_plasticity_rules || contract.immersionPlasticityRules || contract.immersion_rules || contract.immersionRules, chapterText),
+    normalizeTargetReaderGoldfingerLifeFitCheck(contract.goldfinger_life_fit_rules || contract.goldfingerLifeFitRules || contract.goldfinger_fit_rules || contract.goldfingerFitRules, chapterText),
+    normalizeTargetReaderCommercialExpressionCheck(contract.commercial_expression_rules || contract.commercialExpressionRules || contract.private_expression_rules || contract.privateExpressionRules, chapterText),
     normalizeTargetReaderValidationCheck(contract.validation_questions || contract.validationQuestions, chapterText),
     normalizeTargetReaderCorrectionMethodCheck(contract.correction_methods || contract.correctionMethods, chapterText),
     buildTargetReaderDeterministicCheck(chapterText),
@@ -32217,9 +32463,9 @@ export function buildTargetReaderSyncReport(project: any, chapter: any, contextP
     status,
     label: checks.length === 0 ? '目标读者未配置' : status === 'ok' ? '目标读者 OK' : `目标读者缺口 ${missedCount}`,
     summary: checks.length === 0
-      ? '本章没有配置 target_reader_contract，建议补充读者画像、读者欲望、本章吸引点、三问验证和修正方法。'
+      ? '本章没有配置 target_reader_contract，建议补充读者画像、读者欲望、题材生命力、平台适配、题材边界、书名简介内容一致、本章吸引点、三问验证和修正方法。'
       : status === 'ok'
-        ? '正文已基本兑现目标读者画像、读者欲望、情绪缺口、本章吸引点、三问验证和修正方法。'
+        ? '正文已基本兑现目标读者画像、读者欲望、情绪缺口、题材生命力、平台适配、题材边界、书名简介一致、代入感、金手指生活关联、商业表达、本章吸引点、三问验证和修正方法。'
         : `正文有 ${missedCount} 项目标读者缺口，${priorityRepair || '优先补目标读者三问和可感知回报'}。`,
     missed_count: missedCount,
     priority_repair: priorityRepair,
@@ -32231,6 +32477,9 @@ export function buildTargetReaderSyncReport(project: any, chapter: any, contextP
       ? ['保持目标读者兑现：写给谁、想看什么、本章回报和章尾期待都要有正文证据。']
       : [
           '下一章必须补目标读者：先写清本章给谁看、目标读者想看什么，再把卖点写成现场行动。',
+          '补 genre-readers 适配：用当前目标平台样本判断题材生命力，校准平台写法、题材边界、代入感和雷点。',
+          '修书名简介内容三位一体：书名3秒传核心卖点，简介给安全感+钩子，正文兑现同一承诺，避免货不对板。',
+          '校准金手指和商业表达：金手指必须贴住主角生活/职业并服务主线，私人表达不超过5%且服务核心卖点。',
           '补情绪缺口：从核心痛苦、深层情结、高频情绪关键词和未满足需求里挑一项，写成角色当下压力和读者可见回报。',
           '把规则反制、信息差、不公平移除或升级反馈落成可感知回报，避免只说读者会喜欢或只展示设定。',
         ],
@@ -39757,9 +40006,58 @@ const OH_STORY_TARGET_READER_CHECKS = [
   '三问必须全部回答清楚：写给谁、读者想看什么、本书本章给什么。',
   '目标读者画像必须具体到年龄段、职业/生活状态、性别倾向、常用平台和普遍渴望。',
   '情绪缺口必须明确：从核心痛苦、深层情结、高频情绪关键词和未满足需求反推本章压力与回报。',
+  '题材生命力必须用当前目标平台样本验证，判断新鲜期 / 成熟期 / 审美疲劳期，不能把历史经验当作当前事实。',
+  '平台适配必须以目标平台样本校准，不能用A网站的样本直接套到B网站。',
+  '题材边界必须确认当前素材、知识储备和篇幅能支撑所选题材，创新题材要降低篇幅和创新数量。',
+  '书名、简介和正文必须货板一致：书名3秒抓人，简介有安全感+钩子，正文兑现同一个核心卖点。',
+  '代入感必须稳定，世界观自洽且画风统一，避免仙侠搞科研式塑料感。',
+  '金手指必须与主角生活/职业息息相关，并服务主线，不得硬贴或频繁开新能力。',
+  '私人表达不得超过全篇5%，且必须服务核心卖点和主线剧情。',
   '本章场景选择必须能反向校验目标读者想看的内容，不能只服务作者自嗨设定。',
   '章节核心卖点、开篇钩子、冲突和回报必须至少命中一个读者高频渴望。',
   '如果读者画像、平台口味和本章卖点错位，必须调整场景选择、信息释放或回报方式。',
+]
+
+const OH_STORY_TARGET_READER_GENRE_VITALITY_RULES = [
+  '题材生命力必须按当前目标平台样本验证，不把历史经验或历史热度当作当前事实。',
+  '写前判断题材阶段：新鲜期优先提炼创意方向，成熟期优先稳定交付边界期待，审美疲劳期必须给出新切入点。',
+  '无法确认阶段时按成熟期处理：保守满足边界期待，微创新不超过 3 个。',
+]
+
+const OH_STORY_TARGET_READER_PLATFORM_FIT_RULES = [
+  '不能用A网站的样本直接套到B网站；必须用目标平台样本校准读者期待、节奏和雷点。',
+  '番茄优先强情绪、噱头和爽感直给；起点可以接受更慢节奏的正常剧情推进和代入感。',
+  '同一题材在不同平台必须调整写法，不能只沿用旧平台经验。',
+]
+
+const OH_STORY_TARGET_READER_BOUNDARY_FIT_RULES = [
+  '确认题材边界感：当前素材、知识储备和篇幅能支撑所选题材。',
+  '成熟题材优先稳定边界期待；无边界感/创新题材风险高，必须降低篇幅和创新数量。',
+  '混搭题材不得突破读者对核心类型的基础期待。',
+]
+
+const OH_STORY_TARGET_READER_TITLE_BLURB_ALIGNMENT_RULES = [
+  '书名3秒抓人：在目标平台命名规则内传递核心卖点或钩子。',
+  '简介有安全感+钩子：至少暗示主角会赢，同时留下悬念。',
+  '书名简介内容三位一体：书名暗示的卖点 = 简介承诺的内容 = 正文实际交付，禁止货不对板。',
+]
+
+const OH_STORY_TARGET_READER_IMMERSION_PLASTICITY_RULES = [
+  '正文必须维持代入感：主角行动、世界规则和读者期待要同向。',
+  '世界观自洽且画风统一，避免仙侠搞科研、武侠不侠等塑料感。',
+  '新设定必须像真实存在于世界中，而不是纸糊的设定说明。',
+]
+
+const OH_STORY_TARGET_READER_GOLDFINGER_LIFE_FIT_RULES = [
+  '金手指必须与主角生活/职业息息相关，例如医生配医术秘籍，不要医生硬配隐身。',
+  '金手指要服务主线，技能能升级，一个技能衍生不同效果，不要频繁开新金手指。',
+  '能力反馈必须落到现实问题、职业技能、关系处境或资源变化里。',
+]
+
+const OH_STORY_TARGET_READER_COMMERCIAL_EXPRESSION_RULES = [
+  '私人表达不得超过全篇5%，且不得打断叙事节奏。',
+  '所有私人表达必须服务核心卖点，不得独立于主线剧情存在。',
+  '商业化不是故意恶心读者，而是让表达服从目标读者的核心阅读需求。',
 ]
 
 function storyLoopExplicitContract(contextPackage: any = {}) {
@@ -40056,6 +40354,27 @@ function buildTargetReaderContract(project: any = {}, contextPackage: any = {}) 
     const explicitChapterAttractions = asArray(explicit.chapter_attractions || explicit.chapterAttractions || explicit.attractions || explicit.chapter_selling_points || explicit.chapterSellingPoints)
       .map((item: any) => compactBriefText(item))
       .filter(Boolean)
+    const explicitGenreVitalityRules = asArray(explicit.genre_vitality_rules || explicit.genreVitalityRules || explicit.genre_lifecycle_rules || explicit.genreLifecycleRules)
+      .map((item: any) => compactBriefText(item))
+      .filter(Boolean)
+    const explicitPlatformFitRules = asArray(explicit.platform_fit_rules || explicit.platformFitRules || explicit.platform_adaptation_rules || explicit.platformAdaptationRules)
+      .map((item: any) => compactBriefText(item))
+      .filter(Boolean)
+    const explicitBoundaryFitRules = asArray(explicit.boundary_fit_rules || explicit.boundaryFitRules || explicit.genre_boundary_rules || explicit.genreBoundaryRules)
+      .map((item: any) => compactBriefText(item))
+      .filter(Boolean)
+    const explicitTitleBlurbAlignmentRules = asArray(explicit.title_blurb_alignment_rules || explicit.titleBlurbAlignmentRules || explicit.copy_alignment_rules || explicit.copyAlignmentRules)
+      .map((item: any) => compactBriefText(item))
+      .filter(Boolean)
+    const explicitImmersionPlasticityRules = asArray(explicit.immersion_plasticity_rules || explicit.immersionPlasticityRules || explicit.immersion_rules || explicit.immersionRules)
+      .map((item: any) => compactBriefText(item))
+      .filter(Boolean)
+    const explicitGoldfingerLifeFitRules = asArray(explicit.goldfinger_life_fit_rules || explicit.goldfingerLifeFitRules || explicit.goldfinger_fit_rules || explicit.goldfingerFitRules)
+      .map((item: any) => compactBriefText(item))
+      .filter(Boolean)
+    const explicitCommercialExpressionRules = asArray(explicit.commercial_expression_rules || explicit.commercialExpressionRules || explicit.private_expression_rules || explicit.privateExpressionRules)
+      .map((item: any) => compactBriefText(item))
+      .filter(Boolean)
     const explicitValidationQuestions = asArray(explicit.validation_questions || explicit.validationQuestions || explicit.chapter_value_test || explicit.chapterValueTest)
       .map((item: any) => compactBriefText(item))
       .filter(Boolean)
@@ -40069,6 +40388,27 @@ function buildTargetReaderContract(project: any = {}, contextPackage: any = {}) 
       reader_desires: explicitReaderDesires.length ? explicitReaderDesires : asArray(derived.reader_desires),
       emotional_gap_analysis: explicitEmotionalGapAnalysis.length ? explicitEmotionalGapAnalysis : asArray(derived.emotional_gap_analysis),
       chapter_attractions: explicitChapterAttractions.length ? explicitChapterAttractions : asArray(derived.chapter_attractions),
+      genre_vitality_rules: explicitGenreVitalityRules.length
+        ? explicitGenreVitalityRules
+        : asArray(derived.genre_vitality_rules).length ? asArray(derived.genre_vitality_rules) : OH_STORY_TARGET_READER_GENRE_VITALITY_RULES,
+      platform_fit_rules: explicitPlatformFitRules.length
+        ? explicitPlatformFitRules
+        : asArray(derived.platform_fit_rules).length ? asArray(derived.platform_fit_rules) : OH_STORY_TARGET_READER_PLATFORM_FIT_RULES,
+      boundary_fit_rules: explicitBoundaryFitRules.length
+        ? explicitBoundaryFitRules
+        : asArray(derived.boundary_fit_rules).length ? asArray(derived.boundary_fit_rules) : OH_STORY_TARGET_READER_BOUNDARY_FIT_RULES,
+      title_blurb_alignment_rules: explicitTitleBlurbAlignmentRules.length
+        ? explicitTitleBlurbAlignmentRules
+        : asArray(derived.title_blurb_alignment_rules).length ? asArray(derived.title_blurb_alignment_rules) : OH_STORY_TARGET_READER_TITLE_BLURB_ALIGNMENT_RULES,
+      immersion_plasticity_rules: explicitImmersionPlasticityRules.length
+        ? explicitImmersionPlasticityRules
+        : asArray(derived.immersion_plasticity_rules).length ? asArray(derived.immersion_plasticity_rules) : OH_STORY_TARGET_READER_IMMERSION_PLASTICITY_RULES,
+      goldfinger_life_fit_rules: explicitGoldfingerLifeFitRules.length
+        ? explicitGoldfingerLifeFitRules
+        : asArray(derived.goldfinger_life_fit_rules).length ? asArray(derived.goldfinger_life_fit_rules) : OH_STORY_TARGET_READER_GOLDFINGER_LIFE_FIT_RULES,
+      commercial_expression_rules: explicitCommercialExpressionRules.length
+        ? explicitCommercialExpressionRules
+        : asArray(derived.commercial_expression_rules).length ? asArray(derived.commercial_expression_rules) : OH_STORY_TARGET_READER_COMMERCIAL_EXPRESSION_RULES,
       validation_questions: explicitValidationQuestions.length
         ? explicitValidationQuestions
         : asArray(derived.validation_questions).length ? asArray(derived.validation_questions) : OH_STORY_TARGET_READER_QUESTIONS,
@@ -40120,6 +40460,13 @@ function buildTargetReaderContract(project: any = {}, contextPackage: any = {}) 
     reader_desires: readerDesires,
     emotional_gap_analysis: buildTargetReaderEmotionalGapAnalysis(project, contextPackage, configured, readerDesires),
     chapter_attractions: chapterAttractions,
+    genre_vitality_rules: OH_STORY_TARGET_READER_GENRE_VITALITY_RULES,
+    platform_fit_rules: OH_STORY_TARGET_READER_PLATFORM_FIT_RULES,
+    boundary_fit_rules: OH_STORY_TARGET_READER_BOUNDARY_FIT_RULES,
+    title_blurb_alignment_rules: OH_STORY_TARGET_READER_TITLE_BLURB_ALIGNMENT_RULES,
+    immersion_plasticity_rules: OH_STORY_TARGET_READER_IMMERSION_PLASTICITY_RULES,
+    goldfinger_life_fit_rules: OH_STORY_TARGET_READER_GOLDFINGER_LIFE_FIT_RULES,
+    commercial_expression_rules: OH_STORY_TARGET_READER_COMMERCIAL_EXPRESSION_RULES,
     validation_questions: OH_STORY_TARGET_READER_QUESTIONS,
     correction_methods: ['分析同类书读者评论的高频正面关键词', '对比同类书高互动与低互动段落差异', '用目标读者画像反向校验本章情节选择'],
     quality_checks: OH_STORY_TARGET_READER_CHECKS,
@@ -49213,10 +49560,17 @@ export function createNovelWritingService(ctx: {
       targetReaderContract?.reader_desires?.length ? `读者想看：${targetReaderContract.reader_desires.join('；')}` : '',
       targetReaderContract?.emotional_gap_analysis?.length ? `情绪缺口：${targetReaderContract.emotional_gap_analysis.join('；')}` : '',
       targetReaderContract?.chapter_attractions?.length ? `本章命中点：${targetReaderContract.chapter_attractions.join('；')}` : '',
+      targetReaderContract?.genre_vitality_rules?.length ? `题材生命力：${targetReaderContract.genre_vitality_rules.join('；')}` : '',
+      targetReaderContract?.platform_fit_rules?.length ? `平台适配：${targetReaderContract.platform_fit_rules.join('；')}` : '',
+      targetReaderContract?.boundary_fit_rules?.length ? `题材边界：${targetReaderContract.boundary_fit_rules.join('；')}` : '',
+      targetReaderContract?.title_blurb_alignment_rules?.length ? `书名简介一致：${targetReaderContract.title_blurb_alignment_rules.join('；')}` : '',
+      targetReaderContract?.immersion_plasticity_rules?.length ? `代入感/塑料感：${targetReaderContract.immersion_plasticity_rules.join('；')}` : '',
+      targetReaderContract?.goldfinger_life_fit_rules?.length ? `金手指生活关联：${targetReaderContract.goldfinger_life_fit_rules.join('；')}` : '',
+      targetReaderContract?.commercial_expression_rules?.length ? `商业表达：${targetReaderContract.commercial_expression_rules.join('；')}` : '',
       targetReaderContract?.validation_questions?.length ? `自嗨判定三问：${targetReaderContract.validation_questions.join('；')}` : '',
       targetReaderContract?.correction_methods?.length ? `纠偏方法：${targetReaderContract.correction_methods.join('；')}` : '',
       targetReaderContract?.quality_checks?.length ? `质量检查：${targetReaderContract.quality_checks.join('；')}` : '',
-      targetReaderContract ? '交稿自检必须输出 target_reader_checks，并用正文证据检查目标读者画像、读者渴望、情绪缺口、本章命中点、平台口味和自嗨风险。' : '',
+      targetReaderContract ? '交稿自检必须输出 target_reader_checks，并用正文证据检查目标读者画像、读者渴望、情绪缺口、本章命中点、题材生命力、目标平台样本、题材边界、书名简介内容三位一体、代入感/塑料感、金手指生活关联、商业表达和自嗨风险。' : '',
       targetReaderContract ? JSON.stringify(targetReaderContract, null, 2).slice(0, 2500) : '',
       '',
       genrePositioningContract ? '【题材定位合同】' : '',
@@ -51586,8 +51940,8 @@ export function createNovelWritingService(ctx: {
     '17D. 如果 chapter_target.core_contract_radar.theme_unity_rules 存在，必须执行主题统一检查：随机翻开一章，情绪是否仍指向全书核心；升级/复仇/寻宝/日常等小情绪是否服从大情绪；情绪散乱、多头并行或旁枝情绪线稀释核心时，必须在 issues 或 core_contract_checks 中输出 key=theme_unity_rules。',
     '17A. 是否兑现 chapter_target.reader_retention_brief：检查开篇钩子、爽点承诺、信息缺口、情绪回报、短剧化场面、章末追读；如果存在 retention_double_engine，必须按留存双引擎检查情绪 + 饥饿是否同时落地，情绪是否快速代入，饥饿是否用信息差植入问号并剥洋葱卡住关键信息；如果存在 retention_pillars，必须按留存四大支柱检查升级、资源困境、目标、解密是否至少两项落成正文证据；如果存在 hook_addiction_model，必须按 Hook上瘾模型检查触发 -> 行动 -> 奖励 -> 投入，并确认奖励随机性是否给出出乎意料的额外收获或沉没投入；必须输出 reader_retention_checks。',
     '17B. reader_retention_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),retention_engine,retention_pillars,emotional_payoff,information_hunger,page_turn_question,evidence,fix,remaining_risk；缺前300字钩子、缺正文可见回报、缺信息缺口、章尾无追读、留存四大支柱不足两项、留存双引擎缺情绪或饥饿、Hook上瘾模型缺奖励随机性或投入沉没成本时必须给出 S1/S2 finding，category=structure 或 platform。',
-    '18. 是否兑现 chapter_target.target_reader_contract：按 oh-story 自嗨判定法检查“我这书写给谁看、目标读者想看什么、本书本章给了什么”三问是否都有正文证据；同时执行情绪缺口分析，检查核心痛苦、深层情结、高频情绪关键词和未满足需求是否被写成角色当下压力与读者回报；必须输出 target_reader_checks。',
-    '19. target_reader_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),target_reader_profile,reader_desire,emotion_gap,chapter_hit,platform_taste,evidence,fix,remaining_risk；目标读者画像空泛、读者渴望和本章卖点错位、情绪缺口缺核心痛苦/深层情结/高频情绪关键词/未满足需求、平台口味错位或只展示作者自嗨设定时必须给出 S1/S2 finding，category=platform 或 structure。',
+    '18. 是否兑现 chapter_target.target_reader_contract：按 oh-story 自嗨判定法检查“我这书写给谁看、目标读者想看什么、本书本章给了什么”三问是否都有正文证据；同时执行情绪缺口分析，检查核心痛苦、深层情结、高频情绪关键词和未满足需求是否被写成角色当下压力与读者回报；并按 genre-readers 检查题材生命力、目标平台样本、题材边界、书名简介内容三位一体、代入感/塑料感、金手指生活关联和私人表达；必须输出 target_reader_checks。',
+    '19. target_reader_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),target_reader_profile,reader_desire,emotion_gap,chapter_hit,platform_taste,genre_vitality,platform_sample,boundary_fit,title_blurb_alignment,immersion_plasticity,goldfinger_life_fit,commercial_expression,evidence,fix,remaining_risk；目标读者画像空泛、读者渴望和本章卖点错位、情绪缺口缺核心痛苦/深层情结/高频情绪关键词/未满足需求、平台口味错位、缺当前目标平台样本、题材边界失控、书名简介内容货不对板、世界观自洽不足、画风撕裂有塑料感、金手指脱离生活/职业、私人表达超过5%或只展示作者自嗨设定时必须给出 S1/S2 finding，category=platform 或 structure。',
     '20. 是否兑现 chapter_target.genre_positioning_contract：按 oh-story 题材定位口径检查题材标签、读者心理、核心梗、类型公式、金手指贴合、必备场景、微创新边界、70/20/10元素法则、五种微创新手法、平台适配、拉长板而非补短板、题材长板和书名简介内容三位一体；必须输出 genre_positioning_checks。',
     '21. genre_positioning_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),genre_tag,core_hook,type_formula,genre_strength,book_title_blurb_alignment,evidence,fix,remaining_risk；核心梗不清、公式缺失、金手指脱离主角生活/职业、微创新超过3个、70/20/10元素法则失衡、五种微创新手法选型不清、题材长板未强化、为补短板新增支线稀释核心卖点、平台/类型错位或挂羊头卖狗肉时必须给出 S1/S2 finding，category=platform 或 structure。',
     '21+. 是否兑现 chapter_target.plot_special_topics_contract：按 oh-story 特殊题材操作口径检查 matched_topics 命中的专题是否写成正文证据；必须检查金手指拆分与战力防崩、题材边界、扫榜对标、都市高武、三万字卡点倒推和阵营手牌法；必须输出 plot_special_topics_checks。',
@@ -51688,7 +52042,7 @@ export function createNovelWritingService(ctx: {
     '如果存在 chapter_target.platform_rubric，必须输出 rubric、rubric_source、platform_checks；rubric_source 优先取 chapter_target.platform_rubric.source。',
     '如果存在 chapter_target.content_rubric，必须输出 content_rubric_source、content_rubric_checks；content_rubric_source 优先取 chapter_target.content_rubric.source。',
     '如果存在 chapter_target.reader_retention_brief，必须输出 reader_retention_checks；不能只用“追读还行/不行”一句话带过，必须明确留存四大支柱的升级、资源困境、目标、解密，留存双引擎的情绪 + 饥饿、信息差植入问号、剥洋葱卡关键信息，以及 Hook上瘾模型的触发 -> 行动 -> 奖励 -> 投入和奖励随机性是否落地。',
-    '如果存在 chapter_target.target_reader_contract，必须输出 target_reader_checks；不能只用“读者会喜欢/不喜欢”一句话带过，必须明确目标读者画像、读者欲望、情绪缺口、核心痛苦、深层情结、高频情绪关键词、未满足需求和本章可感知回报是否都有正文证据。',
+    '如果存在 chapter_target.target_reader_contract，必须输出 target_reader_checks；不能只用“读者会喜欢/不喜欢”一句话带过，必须明确目标读者画像、读者欲望、情绪缺口、核心痛苦、深层情结、高频情绪关键词、未满足需求、本章可感知回报、题材生命力、目标平台样本、题材边界、书名简介内容三位一体、代入感/塑料感、金手指生活关联和私人表达是否都有正文证据。',
     '如果存在 chapter_target.genre_positioning_contract，必须输出 genre_positioning_checks；不能只用“题材清楚/不清楚”一句话带过。',
     '如果存在 chapter_target.plot_special_topics_contract，必须输出 plot_special_topics_checks；不能只用“特殊题材有/没有”一句话带过，必须明确 matched_topics、金手指、题材边界、扫榜对标、都市高武、三万字卡点和阵营手牌是否都有正文证据。',
     '如果存在 chapter_target.female_audience_contract，必须输出 female_audience_checks；不能只用“女频感还行/不行”一句话带过。',
@@ -51784,7 +52138,7 @@ export function createNovelWritingService(ctx: {
     '11. 如果自检结果包含 content_rubric_checks，必须优先修复 status=fail/warn 的内容基准缺口；按 label/evidence/fix 补核心卖点、冲突推进、剧情循环反馈、角色动机、章末期待或自然文字证据。',
     '11B. 如果自检结果包含 factual_checks，必须优先处理 status=fail/warn 的外部事实查证缺口；按 claim 和 verification_status 降级或删除未查证断言，把真实世界细节改成架空可控设定、角色正在核验的疑问，或只保留上下文已有证据支持的事实。',
     '11A. 如果自检结果包含 reader_retention_checks，必须优先修复 status=fail/warn 的追读雷达缺口；按 key/label/evidence/fix 补前300字钩子、可见爽点、信息缺口、章末追读、留存四大支柱（升级、资源困境、目标、解密）、留存双引擎的情绪 + 饥饿，以及 Hook上瘾模型的触发 -> 行动 -> 奖励 -> 投入。四支柱缺口至少补两项：升级写成实力/地位/资源变化，资源困境写成当前资源压力，目标写成大目标 + 小目标 + 假目标，解密写成冰山一角到层层解密；饥饿缺口必须用信息差植入问号并按剥洋葱把关键信息卡到章末；奖励缺口必须补奖励随机性：在预期回报之外给出出乎意料的额外收获、线索、权限、关系或地位变化，并形成沉没投入。',
-    '12. 如果自检结果包含 target_reader_checks，必须优先修复 status=fail/warn 的目标读者缺口；按 key/label/evidence/fix 补清读者画像、读者想看内容、情绪缺口、本章命中点、平台口味和可见读者回报。情绪缺口缺口必须先补核心痛苦、深层情结、高频情绪关键词和未满足需求，再把它们写成冲突压力、角色选择、即时反馈或尊严/安全感/掌控感补偿。',
+    '12. 如果自检结果包含 target_reader_checks，必须优先修复 status=fail/warn 的目标读者缺口；按 key/label/evidence/fix 补清读者画像、读者想看内容、情绪缺口、本章命中点、平台口味、目标平台样本、题材边界、书名简介内容三位一体、世界观自洽、代入感/塑料感、金手指生活关联、私人表达和可见读者回报。情绪缺口缺口必须先补核心痛苦、深层情结、高频情绪关键词和未满足需求，再把它们写成冲突压力、角色选择、即时反馈或尊严/安全感/掌控感补偿；平台/题材缺口必须用当前目标平台样本校准，不得把历史经验当当前事实；货板缺口必须让书名、简介和正文兑现同一核心卖点。',
     '13. 如果自检结果包含 genre_positioning_checks，必须优先修复 status=fail/warn 的题材定位缺口；按 key/label/evidence/fix 校准题材标签、核心梗、类型公式、金手指贴合、必备场景、微创新边界、70/20/10元素法则、五种微创新手法、长板聚焦和书名简介内容三位一体，修掉挂羊头卖狗肉；微创新修复必须按70/20/10元素法则稳住模板底座，并从精炼法、升级法、加料法、反套路法、组合法中选一种服务当前核心梗；拉长题材长板而非补短板，删除会稀释核心卖点的支线，把同一卖点扩成至少 3 个角度的正文证据。',
     '13+. 如果自检结果包含 plot_special_topics_checks，必须优先修复 status=fail/warn 的特殊题材缺口；按 key/label/evidence/fix 补 matched_topics 对应专题的正文证据：金手指要写成行动机制和反馈变化，题材边界要压回核心期待，扫榜对标只复用功能位，都市高武目标要和钱/资源/资格挂钩，三万字卡点要服务上架高潮倒推，阵营手牌要按实力和立场逐级出牌。',
     '13A. 如果自检结果包含 female_audience_checks，必须优先修复 status=fail/warn 的女频长篇缺口；按 key/label/evidence/fix 补安全感锚点，把女主被动改成女主自己做决定、自己推进，把感情升级踩到事业/成长节点上，虐后补反转或糖，控制连续虐戏剂量，并校准平台安全感密度和货板一致。',
@@ -52860,7 +53214,7 @@ export function createNovelWritingService(ctx: {
               '资产挂钩合同 asset_linkage_contract 必须按 oh-story 资产协议输出 key_assets, linkage_plan, usage_rules, three_appearance_plan, prop_ability_expectation_rules, state_tracking, quality_checks，确保孤立资产挂到冲突、状态和回报上；prop_ability_expectation_rules 必须包含道具能力展示的8步期待模板：宝物功能强大、配角误判鸡肋、宝物恰好克制反派、他人失败、主角方案、众人不看好、鸡肋成神器和新钩子。',
               '状态跟踪合同 state_tracking_contract 必须按 oh-story state-tracking 输出 character_states, historical_causality, world_constraints, source_requirements, source_readiness, filter_rules, quality_checks，确保写正文前只保留会影响本章正确性的状态。',
               '意图确认合同 intent_confirmation_contract 必须按 oh-story workflow-daily 输出 confirmed_intent, rhythm_and_style, structure_inputs, logic_line, appearance_order, cost_and_reward, ending_handoff, quality_checks，确保正文按本章意图统一发力。',
-              '目标读者合同 target_reader_contract 必须按 oh-story 自嗨判定法输出 reader_profile, reader_desires, chapter_attractions, validation_questions, correction_methods, quality_checks，确保本章清楚写给谁、满足什么阅读欲望、给出什么可感知回报。',
+              '目标读者合同 target_reader_contract 必须按 oh-story 自嗨判定法和 genre-readers 输出 reader_profile, reader_desires, chapter_attractions, genre_vitality_rules, platform_fit_rules, boundary_fit_rules, title_blurb_alignment_rules, immersion_plasticity_rules, goldfinger_life_fit_rules, commercial_expression_rules, validation_questions, correction_methods, quality_checks，确保本章清楚写给谁、满足什么阅读欲望、用当前目标平台样本验证题材生命力、校准平台写法、守住题材边界、做到书名简介内容三位一体、避免代入感/塑料感断裂、让金手指贴住生活/职业并给出可感知回报。',
               '题材定位合同 genre_positioning_contract 必须按 oh-story 题材定位输出 genre_label, reader_psychology, genre_formula, core_hook_rules, goldfinger_fit_rules, must_have_scenes, platform_fit_rules, micro_innovation_rules, micro_innovation_702010_rules, micro_innovation_methods, longboard_focus_rules, quality_checks，确保题材承诺和正文场景一致；micro_innovation_702010_rules 必须包含“70%来自过去经历和记忆”“20%来自当前生活状态”“10%来自时事热点话题和趋势”；micro_innovation_methods 必须包含精炼法、升级法、加料法、反套路法和组合法；longboard_focus_rules 必须包含“拉长板而非补短板”、题材长板、核心卖点背后的情绪清晰、同一卖点至少 3 个角度和不得稀释核心卖点。',
               '女频长篇合同 female_audience_contract 必须在项目为女频/女生频道/女主导向时按 oh-story female-audience-writing 输出 audience_mode, core_principles, reader_need_rules, copy_promise_rules, longform_genre_rules, romance_axis_rules, abuse_dosage_rules, platform_fit_rules, revision_priorities, quality_checks；core_principles 必须包含安全感优先、代入感优先、女主主动性、情绪即产品；reader_need_rules 必须包含被认可、被珍视、被尊重；romance_axis_rules 必须包含感情线双轴和感情升级踩在事业/成长节点；abuse_dosage_rules 必须包含每段虐后必给反转或糖，避免连续整卷只虐；platform_fit_rules 必须按番茄女生/起点女生/晋江/七猫校准安全感密度和节奏；quality_checks 必须包含货板一致。',
               '升级节奏合同 upgrade_rhythm_contract 必须按 oh-story 升级感三步法输出 upgrade_gap, upgrade_gain_plan, feedback_loop, emotion_modules, bridge_rhythm, ranking_ladder_rules, goldfinger_feedback_rules, goldfinger_simplicity_rules, goldfinger_multi_dimension_growth_rules, quality_checks，确保升级前缺口、升级后变化和即时/延迟反馈都可见；ranking_ladder_rules 必须包含“排行榜提供升级动力”、通过排行榜介绍新对手和榜单出现后要有装逼余震；goldfinger_feedback_rules 必须包含“给出金手指后必须有即时变化”、“把金手指带来变化的过程掺杂在故事里”、金手指契合主角当前职业/身份/生活困境，以及金手指不能替代全部行动链；goldfinger_simplicity_rules 必须包含“金手指简单是核心”和“一眼就懂”，并要求功能、触发条件、奖励反馈和升级规则清晰；goldfinger_multi_dimension_growth_rules 必须包含“金手指提升要有多维度”、词条、功能、品质和条件-反馈模型，避免只剩品质/数值单线提升。',
