@@ -148,6 +148,22 @@ describe('novel project seed prompt', () => {
     expect(prompt).toContain('后一个爽点在影响力/层级/收获/认知至少一个维度上超过前一个')
   })
 
+  test('injects oh-story plot special topics into seed generation', async () => {
+    const { buildProjectSeedPrompt } = await import('./novel-core-routes')
+
+    const prompt = buildProjectSeedPrompt('都市高武，底层学生靠抽卡系统升级打怪挣钱，三万字上架高潮打全国联考', '拳证星河', 'epic')
+
+    expect(prompt).toContain('plot_special_topics_contract')
+    expect(prompt).toContain('oh_story_plot_special_topics_v1')
+    expect(prompt).toContain('金手指拆分成面板/不倒退/重复提升')
+    expect(prompt).toContain('条件-反馈模型')
+    expect(prompt).toContain('所有目标必须和钱挂钩')
+    expect(prompt).toContain('高中->大学，武馆->天下第一武道会')
+    expect(prompt).toContain('题材边界')
+    expect(prompt).toContain('同平台、同题材、同类型')
+    expect(prompt).toContain('三万字内无关卡点的装逼打脸一个字不要写')
+  })
+
   test('routes remaining oh-story genre catalog frameworks into creation contracts', async () => {
     const { buildOhStoryGenreCatalogContract } = await import('./novel-genre-catalog')
 
@@ -608,6 +624,11 @@ describe('novel project seed prompt', () => {
     expect(bible.genre_positioning_contract.genre_core_mechanics_contract.conflict_network_rules.join('｜')).toContain('纵向+横向+交叉')
     expect(bible.genre_positioning_contract.genre_core_mechanics_contract.goldfinger_worldview_fit.worldview_type).toBeTruthy()
     expect(bible.genre_positioning_contract.genre_core_mechanics_contract.threshold_escalation_rules.join('｜')).toContain('后一个爽点')
+    expect(bible.plot_special_topics_contract.source).toBe('oh_story_plot_special_topics_v1')
+    expect(bible.plot_special_topics_contract.goldfinger_design_rules.join('｜')).toContain('面板')
+    expect(bible.plot_special_topics_contract.genre_boundary_rules.join('｜')).toContain('题材边界')
+    expect(bible.plot_special_topics_contract.market_benchmark_rules.join('｜')).toContain('同平台、同题材、同类型')
+    expect(bible.plot_special_topics_contract.faction_hand_rules.join('｜')).toContain('按实力高低排序各阵营角色')
     expect(bible.core_contract_radar.source).toBe('oh_story_creation_contract_v1')
     expect(bible.core_contract_radar.must_serve.join('｜')).toContain('每章都有规则发现')
     expect(bible.core_contract_radar.no_drift.join('｜')).toContain('不能写成纯打怪')

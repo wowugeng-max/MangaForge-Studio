@@ -32,6 +32,7 @@ import { extractLLMText, parseJsonLikePayload } from './novel-route-utils'
 import { purgeMemoryPalaceProject } from '../memory-service'
 import { buildOhStoryGenreCatalogContract, formatOhStoryGenreCatalogPrompt } from './novel-genre-catalog'
 import { buildOhStoryGenreCoreMechanicsContract, formatOhStoryGenreCoreMechanicsPrompt } from './novel-genre-core-mechanics'
+import { buildOhStoryPlotSpecialTopicsContract, formatOhStoryPlotSpecialTopicsPrompt } from './novel-plot-special-topics'
 
 function parseOptionalBoolean(value: any) {
   if (value === undefined) return undefined
@@ -990,6 +991,19 @@ export function buildProjectSeedRecoveryPrompt(seed: any, diagnostics: any, idea
     seed?.commercial_tags,
     seed?.writing_bible?.genre_positioning_contract,
   )
+  const plotSpecialTopicsContract = buildOhStoryPlotSpecialTopicsContract(
+    idea,
+    requestedTitle,
+    seed?.title,
+    seed?.genre,
+    seed?.sub_genres,
+    seed?.commercial_tags,
+    seed?.writing_bible?.genre_positioning_contract,
+    seed?.writing_bible?.plot_special_topics_contract,
+    seed?.plot_engine,
+    seed?.worldbuilding,
+    seed?.protagonist,
+  )
   return [
     '任务：上一次项目种子输出偏薄，但里面有可用灵感。请基于这些有效信息补齐小说项目种子。只输出 JSON object，不要 Markdown，不要解释。',
     '关键原则：不要要求作者更换模型；不要丢弃已有线索；不要重新开一个无关故事；必须保留已有有效信息，并围绕缺口清单补齐。',
@@ -1006,6 +1020,8 @@ export function buildProjectSeedRecoveryPrompt(seed: any, diagnostics: any, idea
     '',
     formatOhStoryGenreCoreMechanicsPrompt(genreCoreMechanicsContract),
     '',
+    formatOhStoryPlotSpecialTopicsPrompt(plotSpecialTopicsContract),
+    '',
     '【缺口清单】',
     asSeedArray(diagnostics?.missing_fields).length ? asSeedArray(diagnostics.missing_fields).join('、') : '请复查所有必填字段是否足够支撑项目创建。',
     '',
@@ -1013,7 +1029,7 @@ export function buildProjectSeedRecoveryPrompt(seed: any, diagnostics: any, idea
     'title, genre, sub_genres, target_audience, length_target, style_tags, commercial_tags',
     'synopsis, logline, core_premise, main_conflict',
     'protagonist, antagonist, worldbuilding, plot_engine, writing_bible, characters',
-    'writing_bible 必须包含 target_reader_contract, genre_positioning_contract, core_contract_radar, reader_retention_contract',
+    'writing_bible 必须包含 target_reader_contract, genre_positioning_contract, plot_special_topics_contract, core_contract_radar, reader_retention_contract',
     'commercial_positioning 必须包含 platform, reader_promise, selling_points, risks',
     'master_outline, volume_outlines, chapter_outlines, foreshadowing_plan, open_questions, next_steps',
     '',
@@ -1025,9 +1041,10 @@ export function buildProjectSeedRecoveryPrompt(seed: any, diagnostics: any, idea
     '5. 长篇/超长篇 chapter_outlines 至少前30章，每章包含 chapter_no,title,summary,conflict,ending_hook。',
     '6. target_reader_contract 必须回答“写给谁看、读者想看什么、本章给什么”，并给出 reader_profile, reader_desires, emotional_gap, chapter_value_test, quality_checks。',
     '7. genre_positioning_contract 必须给出题材标签、平台口味、核心梗、卖点、创新边界、genre_catalog_contract、genre_core_mechanics_contract 和“拉长板而非补短板”的质量检查。',
-    '8. core_contract_radar 必须给出 must_serve, no_drift, theme_unity_rules, repair_focus，并包含“当初吸引读者的卖点还在吗”的十章复核问题。',
-    '9. reader_retention_contract 必须要求前300字承接上一章压力，章末留下下一章动作压力。',
-    '10. 不要生成正文；不要照搬任何现有作品专有设定、角色名、桥段或原句。',
+    '8. plot_special_topics_contract 必须包含上方 oh-story 特殊题材操作契约，特别是金手指、题材边界、扫榜对标、都市高武、三万字卡点和阵营手牌规则。',
+    '9. core_contract_radar 必须给出 must_serve, no_drift, theme_unity_rules, repair_focus，并包含“当初吸引读者的卖点还在吗”的十章复核问题。',
+    '10. reader_retention_contract 必须要求前300字承接上一章压力，章末留下下一章动作压力。',
+    '11. 不要生成正文；不要照搬任何现有作品专有设定、角色名、桥段或原句。',
   ].filter(Boolean).join('\n')
 }
 
@@ -1035,6 +1052,7 @@ export function buildProjectSeedPrompt(idea: string, requestedTitle = '', reques
   const normalizedLengthTarget = normalizeLengthTarget(requestedLengthTarget) || 'medium'
   const genreCatalogContract = buildOhStoryGenreCatalogContract(idea, requestedTitle)
   const genreCoreMechanicsContract = buildOhStoryGenreCoreMechanicsContract(idea, requestedTitle)
+  const plotSpecialTopicsContract = buildOhStoryPlotSpecialTopicsContract(idea, requestedTitle)
   return [
     '任务：把用户碎片化小说想法整理成可创建项目的结构化项目种子。只输出 JSON object，不要 Markdown，不要解释。',
     requestedTitle ? `用户指定作品名：${requestedTitle}` : '',
@@ -1046,6 +1064,8 @@ export function buildProjectSeedPrompt(idea: string, requestedTitle = '', reques
     formatOhStoryGenreCatalogPrompt(genreCatalogContract),
     '',
     formatOhStoryGenreCoreMechanicsPrompt(genreCoreMechanicsContract),
+    '',
+    formatOhStoryPlotSpecialTopicsPrompt(plotSpecialTopicsContract),
     '',
     '硬性要求：即使用户只提供作品名，也必须原创扩写完整项目种子；synopsis、logline、core_premise、main_conflict、protagonist、worldbuilding、volume_outlines、chapter_outlines 不得为空。',
     '',
@@ -1065,9 +1085,10 @@ export function buildProjectSeedPrompt(idea: string, requestedTitle = '', reques
     'antagonist: {name, identity, goal, method, hidden_truth}',
     'worldbuilding: {world_summary, history_secret, power_system, ancient_gods, outer_gods, rules, taboos}',
     'plot_engine: {inciting_incident, long_term_goal, volume_arc_suggestions, first_10_chapters_direction}',
-    'writing_bible: {promise, mainline, world_rules, style_lock, forbidden, safety_policy, target_reader_contract, genre_positioning_contract, core_contract_radar, reader_retention_contract}',
+    'writing_bible: {promise, mainline, world_rules, style_lock, forbidden, safety_policy, target_reader_contract, genre_positioning_contract, plot_special_topics_contract, core_contract_radar, reader_retention_contract}',
     'writing_bible.target_reader_contract: {reader_profile, reader_desires, emotional_gap, chapter_value_test, quality_checks}，必须回答“写给谁看、读者想看什么、本章给什么”',
     'writing_bible.genre_positioning_contract: {genre_tags, platform, reader_psychology, core_hook, type_formula, selling_points, long_board, innovation_boundary, genre_catalog_contract, genre_core_mechanics_contract, quality_checks}，必须包含“拉长板而非补短板”和上方 oh-story 题材目录/核心机制契约',
+    'writing_bible.plot_special_topics_contract: 必须完整写入上方 oh-story 特殊题材操作契约，按 matched_topics 约束金手指、题材边界、扫榜对标、都市高武、三万字卡点、阵营手牌等专题',
     'writing_bible.core_contract_radar: {must_serve, no_drift, theme_unity_rules, repair_focus, periodic_drift_check}，periodic_drift_check.question 必须包含“当初吸引读者的卖点还在吗”',
     'writing_bible.reader_retention_contract: {retention_double_engine, opening_hook_rule, ending_hook_rule, reward_randomness_rule, quality_checks}，opening_hook_rule 必须包含“前300字”',
     'commercial_positioning: {platform, reader_promise, selling_points, tropes, risks}',
@@ -1429,6 +1450,25 @@ function buildFallbackWritingBible(seed: any, project: any = {}) {
     root.worldbuilding,
     root.protagonist,
   )
+  const plotSpecialTopicsContract = {
+    ...buildOhStoryPlotSpecialTopicsContract(
+      root.title,
+      project.title,
+      root.genre,
+      project.genre,
+      asSeedArray(root.sub_genres),
+      asSeedArray(project.sub_genres),
+      asSeedArray(root.commercial_tags),
+      root.synopsis,
+      root.logline,
+      root.core_premise,
+      root.plot_engine,
+      root.worldbuilding,
+      root.protagonist,
+      existing.genre_positioning_contract,
+    ),
+    ...parseNestedSeed(existing.plot_special_topics_contract),
+  }
   const readerDesires = uniqueSeedTexts([
     readerPromise,
     ...sellingPoints,
@@ -1558,6 +1598,7 @@ function buildFallbackWritingBible(seed: any, project: any = {}) {
     safety_policy: firstSeedText(existing.safety_policy, '生成内容必须服务原创设定，避免照搬现有作品专有表达、角色关系和桥段。'),
     target_reader_contract: targetReaderContract,
     genre_positioning_contract: genrePositioningContract,
+    plot_special_topics_contract: plotSpecialTopicsContract,
     core_contract_radar: coreContractRadar,
     reader_retention_contract: readerRetentionContract,
     commercial_positioning: commercialPositioning,

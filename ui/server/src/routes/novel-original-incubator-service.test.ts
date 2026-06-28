@@ -56,6 +56,21 @@ describe('original incubator setting assets', () => {
     expect(prompt).toContain('碎片化/解锁型')
   })
 
+  test('requires deep incubation to use oh-story plot special topics', () => {
+    const service = createNovelOriginalIncubatorService()
+    const prompt = service.buildOriginalIncubatorPrompt(
+      { title: '拳证星河', length_target: 'epic', genre: '都市高武', target_audience: '番茄男频' },
+      { idea: '底层学生靠抽卡系统升级打怪挣钱，三万字上架高潮打全国联考', chapter_count: 30 },
+    )
+
+    expect(prompt).toContain('plot_special_topics_contract')
+    expect(prompt).toContain('oh_story_plot_special_topics_v1')
+    expect(prompt).toContain('金手指拆分成面板/不倒退/重复提升')
+    expect(prompt).toContain('题材边界')
+    expect(prompt).toContain('同平台、同题材、同类型')
+    expect(prompt).toContain('三万字内无关卡点的装逼打脸一个字不要写')
+  })
+
   test('requires original incubation to choose an oh-story opening hook strategy', () => {
     const service = createNovelOriginalIncubatorService()
     const prompt = service.buildOriginalIncubatorPrompt(
