@@ -23076,6 +23076,22 @@ describe('chapter pre-draft brief', () => {
     expect(brief.quality_audit_contract.selling_point_expression_rules.join('｜')).toContain('开头暗示')
     expect(brief.quality_audit_contract.selling_point_expression_rules.join('｜')).toContain('中间深化')
     expect(brief.quality_audit_contract.selling_point_expression_rules.join('｜')).toContain('高潮爆发')
+    expect(brief.quality_audit_contract.phase_checklist.map((item: any) => item.phase)).toEqual([
+      '写前目的锁定',
+      '开篇抓取',
+      '中段推进',
+      '信息负载',
+      '章尾拉力',
+      '连载连续性',
+      '精修策略',
+    ])
+    expect(brief.quality_audit_contract.phase_checklist[0].receipt_keys).toEqual(['quality_audit_checks'])
+    expect(brief.quality_audit_contract.phase_checklist[1].receipt_keys).toEqual(['structure_checks', 'opening_checks'])
+    expect(brief.quality_audit_contract.phase_checklist[2].receipt_keys).toEqual(['progression_checks', 'quality_audit_checks'])
+    expect(brief.quality_audit_contract.phase_checklist[3].receipt_keys).toEqual(['information_checks'])
+    expect(brief.quality_audit_contract.phase_checklist[4].receipt_keys).toEqual(['structure_checks', 'chapter_hook_checks'])
+    expect(brief.quality_audit_contract.phase_checklist[5].receipt_keys).toEqual(['longform_checks', 'state_tracking_checks'])
+    expect(brief.quality_audit_contract.phase_checklist[6].receipt_keys).toEqual(['quality_audit_checks', 'prose_craft_checks'])
     expect(brief.quality_audit_contract.revision_strategies.join('｜')).toContain('rewrite')
     expect(confirmedContext.chapter_target.quality_audit_contract.quality_checks.join('｜')).toContain('五维评分')
     expect(prompt).toContain('【质量诊断合同】')
@@ -23090,6 +23106,14 @@ describe('chapter pre-draft brief', () => {
     expect(prompt).toContain('开头暗示')
     expect(prompt).toContain('中间深化')
     expect(prompt).toContain('高潮爆发')
+    expect(prompt).toContain('阶段质量清单')
+    expect(prompt).toContain('写前目的锁定 -> quality_audit_checks')
+    expect(prompt).toContain('开篇抓取 -> structure_checks/opening_checks')
+    expect(prompt).toContain('中段推进 -> progression_checks/quality_audit_checks')
+    expect(prompt).toContain('信息负载 -> information_checks')
+    expect(prompt).toContain('章尾拉力 -> structure_checks/chapter_hook_checks')
+    expect(prompt).toContain('连载连续性 -> longform_checks/state_tracking_checks')
+    expect(prompt).toContain('精修策略 -> quality_audit_checks/prose_craft_checks')
     expect(prompt).toContain('quality_audit_checks')
     expect(prompt.indexOf('【质量诊断合同】')).toBeLessThan(prompt.indexOf('【结构化上下文包】'))
   })
@@ -23143,6 +23167,7 @@ describe('chapter pre-draft brief', () => {
     expect(brief.quality_audit_contract.revision_strategies.join('｜')).toContain('rewrite')
     expect(brief.quality_audit_contract.five_dimension_rubric.join('｜')).toContain('核心一致度')
     expect(brief.quality_audit_contract.selling_point_expression_rules.join('｜')).toContain('发现比告知爽十倍')
+    expect(brief.quality_audit_contract.phase_checklist.map((item: any) => item.phase)).toContain('写前目的锁定')
   })
 
   test('detects oh-story new concept overload from explicit chapter usage', () => {
@@ -55880,6 +55905,8 @@ describe('chapter context word target source guards', () => {
     expect(reviewPrompt).toContain('开头暗示')
     expect(reviewPrompt).toContain('中间深化')
     expect(reviewPrompt).toContain('高潮爆发')
+    expect(reviewPrompt).toContain('phase_checklist')
+    expect(reviewPrompt).toContain('按阶段质量清单逐项覆盖对应 receipt_keys')
     expect(revisionPrompt).toContain('quality_audit_checks')
     expect(revisionPrompt).toContain('质量诊断')
     expect(revisionPrompt).toContain('卖点表达')

@@ -38817,6 +38817,73 @@ function buildQualityAuditChapterFocus(target: any = {}, sceneCards: any[] = [])
   ], 10)
 }
 
+const OH_STORY_QUALITY_AUDIT_PHASE_CHECKLIST = [
+  {
+    phase: '写前目的锁定',
+    check: '先用一句话概括本章内容，并标注目的词：铺垫/高潮/爽点/打脸/人物塑造/设定。',
+    receipt_keys: ['quality_audit_checks'],
+  },
+  {
+    phase: '开篇抓取',
+    check: '前300-500字必须有钩子、主角快速出场、卖点或危机可见，不能从天气/风景/日常开场。',
+    receipt_keys: ['structure_checks', 'opening_checks'],
+  },
+  {
+    phase: '中段推进',
+    check: '中段必须有核心事件、目标、阻碍和局势变化；删掉本章会影响理解。',
+    receipt_keys: ['progression_checks', 'quality_audit_checks'],
+  },
+  {
+    phase: '信息负载',
+    check: '信息跟着冲突走，一章不超过3个新概念，没有大段设定说明书。',
+    receipt_keys: ['information_checks'],
+  },
+  {
+    phase: '章尾拉力',
+    check: '结尾落在具体变化、危机、决定、发现或反转上，不写总结式结尾。',
+    receipt_keys: ['structure_checks', 'chapter_hook_checks'],
+  },
+  {
+    phase: '连载连续性',
+    check: '最近5章有明确进展，伏笔和状态没有遗忘，故事引擎仍在运转。',
+    receipt_keys: ['longform_checks', 'state_tracking_checks'],
+  },
+  {
+    phase: '精修策略',
+    check: '按五维评分找最低分维度，选择 rewrite/compress/de_ai/polish，并给正文证据。',
+    receipt_keys: ['quality_audit_checks', 'prose_craft_checks'],
+  },
+]
+
+function normalizeQualityAuditPhaseChecklist(value: any) {
+  return asArray(value)
+    .map((item: any) => {
+      const phase = compactBriefText(item?.phase || item?.label || item?.name)
+      const check = compactBriefText(item?.check || item?.rule || item?.detail || item?.description)
+      const receiptKeys = uniqueBriefStrings(item?.receipt_keys || item?.receiptKeys || item?.receipts || [], 6)
+      if (!phase || !check || !receiptKeys.length) return null
+      return {
+        phase,
+        check,
+        receipt_keys: receiptKeys,
+      }
+    })
+    .filter(Boolean)
+    .slice(0, 10)
+}
+
+function formatQualityAuditPhaseChecklist(items: any[] = []) {
+  return asArray(items)
+    .map((item: any) => {
+      const phase = compactBriefText(item?.phase)
+      const receipts = uniqueBriefStrings(item?.receipt_keys || item?.receiptKeys || [], 6)
+      if (!phase || !receipts.length) return ''
+      return `${phase} -> ${receipts.join('/')}`
+    })
+    .filter(Boolean)
+    .join('；')
+}
+
 function buildQualityAuditContract(project: any = {}, contextPackage: any = {}) {
   const explicit = qualityAuditExplicitContract(contextPackage)
   if (explicit && typeof explicit === 'object' && !Array.isArray(explicit)) {
@@ -38857,6 +38924,8 @@ function buildQualityAuditContract(project: any = {}, contextPackage: any = {}) 
     const explicitChapterFocus = asArray(explicit.chapter_focus || explicit.chapterFocus).map((item: any) => compactBriefText(item)).filter(Boolean)
     const explicitRevisionStrategies = asArray(explicit.revision_strategies || explicit.revisionStrategies).map((item: any) => compactBriefText(item)).filter(Boolean)
     const explicitQualityChecks = asArray(explicit.quality_checks || explicit.qualityChecks).map((item: any) => compactBriefText(item)).filter(Boolean)
+    const explicitPhaseChecklist = normalizeQualityAuditPhaseChecklist(explicit.phase_checklist || explicit.phaseChecklist)
+    const derivedPhaseChecklist = normalizeQualityAuditPhaseChecklist(derived.phase_checklist || derived.phaseChecklist)
     return {
       version: explicit.version || 'oh_story_quality_audit_v1',
       source: explicit.source || 'oh_story_embedded_fallback',
@@ -38891,6 +38960,9 @@ function buildQualityAuditContract(project: any = {}, contextPackage: any = {}) 
       quality_checks: explicitQualityChecks.length
         ? explicitQualityChecks
         : (asArray(derived.quality_checks).length ? asArray(derived.quality_checks) : OH_STORY_QUALITY_AUDIT_CHECKS),
+      phase_checklist: explicitPhaseChecklist.length
+        ? explicitPhaseChecklist
+        : (derivedPhaseChecklist.length ? derivedPhaseChecklist : OH_STORY_QUALITY_AUDIT_PHASE_CHECKLIST),
     }
   }
 
@@ -38910,6 +38982,7 @@ function buildQualityAuditContract(project: any = {}, contextPackage: any = {}) 
     chapter_focus: buildQualityAuditChapterFocus(target, sceneCards),
     revision_strategies: OH_STORY_QUALITY_AUDIT_REVISION_STRATEGIES,
     quality_checks: OH_STORY_QUALITY_AUDIT_CHECKS,
+    phase_checklist: OH_STORY_QUALITY_AUDIT_PHASE_CHECKLIST,
   }
 }
 
@@ -48374,6 +48447,7 @@ export function createNovelWritingService(ctx: {
       qualityAuditContract?.five_dimension_rubric?.length ? `五维评分标准：${qualityAuditContract.five_dimension_rubric.join('；')}` : '',
       qualityAuditContract?.selling_point_expression_rules?.length ? `卖点表达：${qualityAuditContract.selling_point_expression_rules.join('；')}` : '',
       qualityAuditContract?.chapter_focus?.length ? `本章诊断重点：${qualityAuditContract.chapter_focus.join('；')}` : '',
+      qualityAuditContract?.phase_checklist?.length ? `阶段质量清单：${formatQualityAuditPhaseChecklist(qualityAuditContract.phase_checklist)}` : '',
       qualityAuditContract?.revision_strategies?.length ? `精修策略：${qualityAuditContract.revision_strategies.join('；')}` : '',
       qualityAuditContract?.quality_checks?.length ? `quality_audit_checks：${qualityAuditContract.quality_checks.join('；')}` : '',
       qualityAuditContract ? '交稿自检必须输出 quality_audit_checks，并用正文证据检查开头钩子、中段推进、局势变化、章尾翻页、章纲目的词、水文检测、信息跟冲突走、最近5章进展、五维评分和精修策略。' : '',
@@ -50487,6 +50561,7 @@ export function createNovelWritingService(ctx: {
     '55A. 语气标点功能拍检查：被打断 / 拖长音是否用动作打断、换行、短句或未完成动作承接；信息揭示 / 判断落点是否用冒号或短句落下判断；残留破折号硬停顿或论文式长分号链时必须输出 punctuation_tone_checks。',
     '56. 是否兑现 chapter_target.quality_audit_contract：按 oh-story 网文质量检查清单和章纲目的法检查章节结构、开篇、中段推进、局势变化、章尾、每章一句话概括、目的词（铺垫/高潮/爽点/打脸/人物塑造/设定）、信息传递、水文检测、事件内容比重、长篇连续性、五维评分标准和卖点表达；事件内容比重不能小于一半，设定尽量通过事件演绎，不能旁白强塞；卖点表达必须遵守“发现比告知爽十倍”，用剧情、对话、反应隐性展示，并按开头暗示 -> 中间深化 -> 高潮爆发递进；必须输出 quality_audit_checks。',
     '57. quality_audit_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),strategy,purpose_tag,density_change,conflict_bound_info,changed_evidence,fix,remaining_risk；缺一句话概括和目的词、删掉本章不影响理解、没有局势变化、事件内容比重低于一半、大段设定说明、新概念超过3个、最近5章无进展、五维评分低于78、直接告知“这是核心卖点/本章很爽/读者会喜欢”或缺少开头暗示/中间深化/高潮爆发时必须给出 S1/S2 finding。quality_audit_contract 的专项数组也要单独输出：structure_checks 每项包含 key,label,status,opening_hook,middle_progression,situation_change,ending_page_turn,evidence,fix,remaining_risk；progression_checks 每项包含 key,label,status,non_deletable_change,mainline_shift,relationship_or_state_change,compressed_water,evidence,fix,remaining_risk；information_checks 每项包含 key,label,status,new_concept_count,action_bound_info,conflict_release,reader_first_scene,evidence,fix,remaining_risk。',
+    '57+. 如果 chapter_target.quality_audit_contract.phase_checklist 存在，必须按阶段质量清单逐项覆盖对应 receipt_keys：写前目的锁定、开篇抓取、中段推进、信息负载、章尾拉力、连载连续性、精修策略都要能在对应回执字段中找到正文证据；不能只输出散点问题而漏掉阶段。',
     '57A. longform_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),recent_5_chapter_progress,payoff_interval,stage_goal_shift,next_stage_pull,context_layer,evidence,fix,remaining_risk；最近5章无明确进展、爽点间隔过长、阶段目标未换挡、下一阶段牵引不足或上下文层断裂时必须给出 S1/S2 finding，category=structure。',
     '',
     '【统一 Findings Schema】',

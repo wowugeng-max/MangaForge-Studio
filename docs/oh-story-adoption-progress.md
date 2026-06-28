@@ -13,27 +13,27 @@ Source reference set: `/private/tmp/oh-story-claudecode/skills/story-long-write/
 <!-- oh-story-progress-summary
 {
   "reference_total": 38,
-  "integrated": 11,
-  "partial": 24,
+  "integrated": 12,
+  "partial": 23,
   "todo": 3,
   "deferred": 0,
-  "remaining_references": 27,
-  "estimated_hours_remaining": 52,
-  "estimated_working_days_remaining": 8.7
+  "remaining_references": 26,
+  "estimated_hours_remaining": 51,
+  "estimated_working_days_remaining": 8.5
 }
 -->
 
 ## Current Snapshot
 
 - Reference files: 38
-- Integrated enough for current production use: 11
-- Partially integrated, still worth mining: 24
+- Integrated enough for current production use: 12
+- Partially integrated, still worth mining: 23
 - Not systematically reviewed yet: 3
 - Deferred: 0
-- Remaining references to improve: 27
-- Estimated remaining effort: about 52 engineering hours, or 8.7 focused working days at 6 hours per day
+- Remaining references to improve: 26
+- Estimated remaining effort: about 51 engineering hours, or 8.5 focused working days at 6 hours per day
 
-The estimate assumes the current working pattern: one small oh-story increment at a time, with prompt or workflow changes backed by focused tests, then `test:novel-server` and `check` before push. UI progress surfacing is not included in the 52 hours; after this ledger stabilizes, exposing it in the novel workspace should be a separate 4-6 hour slice.
+The estimate assumes the current working pattern: one small oh-story increment at a time, with prompt or workflow changes backed by focused tests, then `test:novel-server` and `check` before push. UI progress surfacing is not included in the 51 hours; after this ledger stabilizes, exposing it in the novel workspace should be a separate 4-6 hour slice.
 
 ## Status Meaning
 
@@ -75,7 +75,7 @@ The estimate assumes the current working pattern: one small oh-story increment a
 | plot-emotion-system.md | partial | Payoff setup, emotional arc,爽点 setup, and craft rules are present in pre-draft and prose prompts. | Add formula-level checks for setup before payoff and recurring emotional modules. | 1.5h |
 | plot-frameworks.md | partial | Showdown, suspense, conflict, and bridge-unit contracts cover major framework pieces. | Decide which frameworks belong in creation, outline, scene-card, or revision stages. | 2h |
 | plot-special-topics.md | todo | No systematic migration pass found. | Review special topics and route them to genre-specific or optional contracts. | 2.5h |
-| quality-checklist.md | partial | Content rubric, platform rubric, quality gates, post-delivery sync, and repair tasks are implemented. | Build a concise phase-level checklist view and ensure all checklist dimensions map to receipts. | 1.5h |
+| quality-checklist.md | integrated | Quality audit contract covers structure, purpose tags, progression, information load, event ratio, longform continuity, five-dimension scoring, selling-point expression, phase-level checklist mapping, prose prompt enforcement, self-review receipt coverage, quality gates, post-delivery sync, and repair tasks. | Keep tuning phase checklist mappings from real review misses. | 0.5h |
 | reversal-toolkit.md | integrated | Reversal setup, fair misdirection, evidence-chain, final-evidence impact, time-bomb proof, and agency checks are implemented. | Keep tuning evidence-chain examples. | 0.5h |
 | state-tracking.md | integrated | State tracking contract, source readiness, status-filter receipts, and source-boundary checks are implemented. | Keep expanding real-world failure examples. | 0.5h |
 | style-combat-face.md | partial | Showdown contract and combat or face-slap deterministic checks cover payoff release, antagonist pressure, and agency. | Add more scene-card level combat and public payoff presets. | 1.5h |
@@ -87,11 +87,11 @@ The estimate assumes the current working pattern: one small oh-story increment a
 
 ## Next Priority Queue
 
-1. `quality-checklist.md`: turn broad quality dimensions into a compact cockpit checklist with receipt mapping.
-2. `dialogue-mastery.md`: add deterministic dialogue diagnostics for info-dump and interchangeable voices.
-3. `cross-book-recall.md`: decide how far reference recall should go without increasing similarity or copyright risk.
-4. `workflow-revision.md`: compare revision step order against MangaForge editor flow and fill missing handoff receipts.
-5. `genre-catalog.md`: build a genre catalog mapping for seed creation, target reader, and must-have scenes.
+1. `dialogue-mastery.md`: add deterministic dialogue diagnostics for info-dump and interchangeable voices.
+2. `cross-book-recall.md`: decide how far reference recall should go without increasing similarity or copyright risk.
+3. `workflow-revision.md`: compare revision step order against MangaForge editor flow and fill missing handoff receipts.
+4. `genre-catalog.md`: build a genre catalog mapping for seed creation, target reader, and must-have scenes.
+5. `genre-core-mechanics.md`: add genre-specific mechanism presets and validation examples.
 
 ## Update Rules
 
