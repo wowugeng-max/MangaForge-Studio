@@ -29364,6 +29364,199 @@ function normalizeCharacterBehaviorSupportingRoleCheck(values: any[], chapterTex
   }
 }
 
+function normalizeCharacterBehaviorRoleCardCheck(values: any[], chapterText: string) {
+  const planned = characterBehaviorArray(values)
+  if (!planned.length) return null
+  const text = String(chapterText || '')
+  const hasPosition = /角色定位|身份标签|账房学徒|落魄|证人|主角|职业/.test(text)
+  const hasAppearanceOrAnchor = /外貌特征|旧夹克|左手有疤|口头禅|标志动作|袖口|短句反问/.test(text)
+  const hasCoreGoal = /核心目标|全书终点|夺回|拿回|保住|守住|证明/.test(text)
+  const hasCoreMotive = /核心动机|情感驱动|亲情|尊严|羞辱|亏欠|母亲|保护/.test(text)
+  const hasFatalFlaw = /致命弱点|弱点|藏招|退让|犯错|选择压力|关键情节/.test(text)
+  const explicitMissing = /角色卡缺失|没有角色定位|核心目标不清|核心动机不清|致命弱点没有|口头禅和标志动作写着写着忘了/.test(text)
+  const signalCount = [hasPosition, hasAppearanceOrAnchor, hasCoreGoal, hasCoreMotive, hasFatalFlaw].filter(Boolean).length
+  const delivered = !explicitMissing && signalCount >= 4
+  return {
+    key: 'role_card_requirements',
+    label: '角色卡必备项',
+    text: planned.join('；'),
+    expected: planned.join('；'),
+    score: delivered ? 86 : Math.max(14, signalCount * 18 - (explicitMissing ? 18 : 0)),
+    evidence: [
+      hasPosition ? '角色定位/身份标签' : '',
+      hasAppearanceOrAnchor ? '外貌/口头禅/标志动作' : '',
+      hasCoreGoal ? '核心目标' : '',
+      hasCoreMotive ? '核心动机' : '',
+      hasFatalFlaw ? '致命弱点' : '',
+      explicitMissing ? '角色卡字段缺失' : '',
+    ].filter(Boolean),
+    delivered,
+    status: delivered ? 'ok' : 'warn',
+    missed_items: delivered ? [] : uniqueBriefStrings([
+      !hasPosition ? '缺角色定位或身份标签' : '',
+      !hasAppearanceOrAnchor ? '缺外貌记忆点、口头禅或标志动作' : '',
+      !hasCoreGoal ? '缺核心目标' : '',
+      !hasCoreMotive ? '缺情感层面的核心动机' : '',
+      !hasFatalFlaw ? '缺会导致选择压力或犯错的致命弱点' : '',
+      explicitMissing ? '角色卡必备项被正文显式否定' : '',
+    ], 8),
+    issue: delivered ? '' : '角色卡必备项没有落成正文证据或写前合同：角色定位、身份标签、核心目标、核心动机、致命弱点、口头禅/标志动作不完整。',
+    repair_instruction: delivered ? '' : '补角色卡必备项：用一两处可定位文本写清角色定位/身份标签、核心目标、情感动机、致命弱点，以及读者能记住的外貌、口头禅或标志动作。',
+  }
+}
+
+function normalizeCharacterBehaviorSupportingRoleExitCheck(values: any[], chapterText: string) {
+  const planned = characterBehaviorArray(values)
+  if (!planned.length) return null
+  const text = String(chapterText || '')
+  const hasFunction = /配角功能|事实证人|情报源|导师|盟友|同盟|牺牲品|镜像对照|阻碍|证据|核心特质|标志性特征/.test(text)
+  const hasExitPlan = /退场方式|退场规划|退到|退出|下线|离场|主动退|暂退|后续退场/.test(text)
+  const tooManySpeakers = /五个配角一直发言|超过\s*3\s*个有台词|同一场景[^。！？!?]{0,24}超过\s*3|配角[^。！？!?]{0,20}一直发言/.test(text)
+  const forgotten = /配角退场方式没有规划|退场方式没有规划|配角[^。！？!?]{0,40}写着写着忘了|退场[^。！？!?]{0,40}写着写着忘了|没有功能的角色/.test(text)
+  const delivered = !tooManySpeakers && !forgotten && hasFunction && hasExitPlan
+  return {
+    key: 'supporting_role_exit_rules',
+    label: '配角退场规划',
+    text: planned.join('；'),
+    expected: planned.join('；'),
+    score: delivered ? 86 : Math.max(12, [hasFunction, hasExitPlan, !tooManySpeakers, !forgotten].filter(Boolean).length * 20),
+    evidence: [
+      hasFunction ? '配角功能/特质可见' : '',
+      hasExitPlan ? '退场方式可见' : '',
+      tooManySpeakers ? '同场配角发言过多' : '',
+      forgotten ? '退场规划缺失' : '',
+    ].filter(Boolean),
+    delivered,
+    status: delivered ? 'ok' : 'warn',
+    missed_items: delivered ? [] : uniqueBriefStrings([
+      !hasFunction ? '缺配角功能、关系、核心特质或标志性特征' : '',
+      !hasExitPlan ? '缺配角退场方式或暂退安排' : '',
+      tooManySpeakers ? '同一场景配角有台词人数超过 3 个' : '',
+      forgotten ? '配角写着写着忘了或无功能占场' : '',
+    ], 8),
+    issue: delivered ? '' : '配角卡缺少功能、特质、退场方式，或同一场景配角台词人数失控。',
+    repair_instruction: delivered ? '' : '补配角卡：明确每个有台词配角的现场功能、与主角关系、核心特质、标志性特征和退场方式；同场超过3个配角时合并为旁观反应、动作或叙事概括。',
+  }
+}
+
+function normalizeCharacterBehaviorRepeatCheck(values: any[], chapterText: string) {
+  const planned = characterBehaviorArray(values)
+  if (!planned.length) return null
+  const text = String(chapterText || '')
+  const repeatedAnchorHits = (text.match(/旧夹克|袖口|短句反问|看字|标志动作|口头禅|按住/g) || []).length
+  const hasRepeatFrame = /行为重复点|不同场景重复|反复写|重复出现|每到关键|开场[^。！？!?]{0,24}中段[^。！？!?]{0,24}章尾/.test(text)
+  const forgotten = /没有行为重复点|口头禅和标志动作写着写着忘了|标志动作写着写着忘了/.test(text)
+  const delivered = !forgotten && (hasRepeatFrame || repeatedAnchorHits >= 3)
+  return {
+    key: 'behavior_repeat_rules',
+    label: '行为重复点',
+    text: planned.join('；'),
+    expected: planned.join('；'),
+    score: delivered ? 86 : Math.max(12, (hasRepeatFrame ? 46 : 0) + Math.min(30, repeatedAnchorHits * 10) - (forgotten ? 18 : 0)),
+    evidence: [
+      hasRepeatFrame ? '行为重复框架可见' : '',
+      repeatedAnchorHits >= 3 ? '记忆动作多次出现' : '',
+      forgotten ? '行为重复点丢失' : '',
+    ].filter(Boolean),
+    delivered,
+    status: delivered ? 'ok' : 'warn',
+    missed_items: delivered ? [] : uniqueBriefStrings([
+      !hasRepeatFrame && repeatedAnchorHits < 3 ? '缺跨场景重复的行为特质' : '',
+      forgotten ? '口头禅或标志动作写着写着忘了' : '',
+    ], 6),
+    issue: delivered ? '' : '主要角色缺少行为重复点，长篇人设容易写散。',
+    repair_instruction: delivered ? '' : '补行为重复点：选一个读者喜欢的行为特质，具体化为动作/口头禅/反应，并在开场、中段或章尾以不同功能重复。',
+  }
+}
+
+function normalizeCharacterDrivenEventCheck(values: any[], chapterText: string) {
+  const planned = characterBehaviorArray(values)
+  if (!planned.length) return null
+  const text = String(chapterText || '')
+  const rawHardPlot = /剧情需要|硬编剧情|外部事件突然|外部事件硬砸|和他的动机无关|事情自己解决|莫名其妙针对/.test(text)
+  const negatedHardPlot = /不是外部事件硬砸|不靠(?:作者)?硬编剧情|不要硬编剧情|不能硬编剧情|避免硬编剧情/.test(text)
+  const hardPlot = rawHardPlot && !negatedHardPlot
+  const hasMotive = /动机|因为|为了|保住|守住|亲情|尊严|安全|目标/.test(text)
+  const hasChoice = /选择|反问|决定|行动|自然推|推出|推出来|人推事件|人物性格/.test(text)
+  const delivered = !hardPlot && hasMotive && hasChoice
+  return {
+    key: 'character_driven_event_rules',
+    label: '人推事件',
+    text: planned.join('；'),
+    expected: planned.join('；'),
+    score: delivered ? 86 : Math.max(12, [hasMotive, hasChoice, !hardPlot].filter(Boolean).length * 26 - (hardPlot ? 18 : 0)),
+    evidence: [
+      hasMotive ? '人物动机可见' : '',
+      hasChoice ? '人物选择/行动可见' : '',
+      hardPlot ? '剧情硬推或硬编' : '',
+    ].filter(Boolean),
+    delivered,
+    status: delivered ? 'ok' : 'warn',
+    missed_items: delivered ? [] : uniqueBriefStrings([
+      !hasMotive ? '缺人物动机作为方向来源' : '',
+      !hasChoice ? '缺人物选择把事件推出' : '',
+      hardPlot ? '事件靠外部硬砸或作者硬编' : '',
+    ], 6),
+    issue: delivered ? '' : '情节没有从人物动机和选择自然推出，出现事件推人或硬编剧情风险。',
+    repair_instruction: delivered ? '' : '改成人推事件：先写角色想要什么、怕失去什么，再让他的选择触发冲突、代价和后续事件。',
+  }
+}
+
+function normalizeProtagonistRedLineCheck(values: any[], chapterText: string) {
+  const planned = characterBehaviorArray(values)
+  if (!planned.length) return null
+  const text = String(chapterText || '')
+  const redLineHit = /圣母型主角|无脑战斗机器|内核邪恶|因蠢(?:\/圣母)?犯错|圣母犯错|自暴自弃|让读者看不起/.test(text)
+  const negated = /没有触碰主角红线|不圣母|不无脑战斗机器|不内核邪恶|不因蠢犯错|不自暴自弃|不能写圣母/.test(text)
+  const violation = redLineHit && !negated
+  const hasPositiveChoice = /选择|智斗|底线|尊严|从容|不被[^。！？!?]{0,16}牵着走|压势不压人/.test(text)
+  const delivered = !violation
+  return {
+    key: 'protagonist_red_line_rules',
+    label: '主角红线',
+    text: planned.join('；'),
+    expected: planned.join('；'),
+    score: delivered ? (hasPositiveChoice ? 88 : 78) : 18,
+    evidence: [
+      hasPositiveChoice ? '主角选择/底线可见' : '',
+      negated ? '红线规避说明' : '',
+      violation ? '触碰主角红线' : '',
+    ].filter(Boolean),
+    delivered,
+    status: delivered ? 'ok' : 'warn',
+    missed_items: delivered ? [] : ['触碰圣母、无脑战斗机器、内核邪恶、因蠢/圣母犯错或自暴自弃等主角红线'],
+    issue: delivered ? '' : '主角触碰红线，会削弱代入和读者认同。',
+    repair_instruction: delivered ? '' : '修主角红线：删圣母、无脑、内核邪恶、因蠢犯错和自暴自弃；改成有底线、有选择、有代价的智斗或行动。',
+  }
+}
+
+function normalizeIdentityGoldfingerAlignmentCheck(values: any[], chapterText: string) {
+  const planned = characterBehaviorArray(values)
+  if (!planned.length) return null
+  const text = String(chapterText || '')
+  const mismatch = /身份、身世、金手指、性格完全不统一|社会身份[^。！？!?]{0,30}不统一|金手指脱离|突然靠[^。！？!?]{0,24}系统|毫无铺垫[^。！？!?]{0,24}系统|金手指[^。！？!?]{0,24}(?:无关|不相符|不贴合)/.test(text)
+  const hasAlignment = /身份\/金手指对齐|社会身份、身世、金手指、性格高度统一|显性身份[^。！？!?]{0,40}隐性身世[^。！？!?]{0,40}金手指|显性金手指[^。！？!?]{0,40}隐性金手指/.test(text)
+  const mentionsGoldfinger = /金手指|系统|玉坠|重生记忆|显性身份|隐性身份|显性金手指|隐性金手指/.test(text)
+  const delivered = !mismatch && (hasAlignment || !mentionsGoldfinger)
+  return {
+    key: 'identity_goldfinger_alignment_rules',
+    label: '身份/金手指对齐',
+    text: planned.join('；'),
+    expected: planned.join('；'),
+    score: delivered ? (hasAlignment ? 88 : 80) : 18,
+    evidence: [
+      hasAlignment ? '社会身份/身世/金手指/性格对齐' : '',
+      !mentionsGoldfinger ? '本章未触发金手指对齐风险' : '',
+      mismatch ? '身份与金手指不统一' : '',
+    ].filter(Boolean),
+    delivered,
+    status: delivered ? 'ok' : 'warn',
+    missed_items: delivered ? [] : ['社会身份、身世、金手指、性格没有和世界基调统一'],
+    issue: delivered ? '' : '主角身份、身世、金手指或性格脱节，容易造成题材气质和主角逻辑漂移。',
+    repair_instruction: delivered ? '' : '补身份/金手指对齐：把显性身份接到前期矛盾，把隐性身世接到中后期矛盾；金手指必须贴合主角职业、身份或生活困境，隐性金手指落到性格优势。',
+  }
+}
+
 function normalizeCharacterBehaviorAntagonistLogicCheck(values: any[], chapterText: string) {
   const planned = characterBehaviorArray(values)
   if (!planned.length) return null
@@ -29552,6 +29745,12 @@ function characterBehaviorPriority(missed: any[]) {
   if (missed.some(item => item.key === 'antagonist_self_story_rules')) return '优先补反派自我叙事'
   if (missed.some(item => item.key === 'antagonist_tier_exit_rules')) return '优先补反派层级退场'
   if (missed.some(item => item.key === 'antagonist_logic')) return '优先补反派逻辑'
+  if (missed.some(item => item.key === 'character_driven_event_rules')) return '优先改成人推事件'
+  if (missed.some(item => item.key === 'protagonist_red_line_rules')) return '优先修主角红线'
+  if (missed.some(item => item.key === 'identity_goldfinger_alignment_rules')) return '优先校准身份/金手指'
+  if (missed.some(item => item.key === 'behavior_repeat_rules')) return '优先补行为重复点'
+  if (missed.some(item => item.key === 'supporting_role_exit_rules')) return '优先补配角退场'
+  if (missed.some(item => item.key === 'role_card_requirements')) return '优先补角色卡'
   if (missed.some(item => item.key === 'supporting_role_functions')) return '优先补配角功能'
   if (missed.some(item => item.key === 'strong_association_rules')) return '优先补人设强关联'
   if (missed.some(item => item.key === 'memory_anchors')) return '优先补记忆锚点'
@@ -29570,6 +29769,12 @@ export function buildCharacterBehaviorSyncReport(project: any, chapter: any, con
     normalizeCharacterBehaviorStrongAssociationCheck(contract.strong_association_rules || contract.strongAssociationRules, chapterText),
     normalizeCharacterBehaviorMemoryAnchorCheck(contract.memory_anchors || contract.memoryAnchors, chapterText),
     normalizeCharacterBehaviorSupportingRoleCheck(contract.supporting_role_functions || contract.supportingRoleFunctions, chapterText),
+    normalizeCharacterBehaviorRoleCardCheck(contract.role_card_requirements || contract.roleCardRequirements, chapterText),
+    normalizeCharacterBehaviorSupportingRoleExitCheck(contract.supporting_role_exit_rules || contract.supportingRoleExitRules, chapterText),
+    normalizeCharacterBehaviorRepeatCheck(contract.behavior_repeat_rules || contract.behaviorRepeatRules, chapterText),
+    normalizeCharacterDrivenEventCheck(contract.character_driven_event_rules || contract.characterDrivenEventRules, chapterText),
+    normalizeProtagonistRedLineCheck(contract.protagonist_red_line_rules || contract.protagonistRedLineRules, chapterText),
+    normalizeIdentityGoldfingerAlignmentCheck(contract.identity_goldfinger_alignment_rules || contract.identityGoldfingerAlignmentRules, chapterText),
     normalizeCharacterBehaviorAntagonistLogicCheck(contract.antagonist_logic || contract.antagonistLogic, chapterText),
     normalizeCharacterBehaviorAntagonistWeightCheck(contract.antagonist_weight_rules || contract.antagonistWeightRules, chapterText),
     normalizeCharacterBehaviorAntagonistSelfStoryCheck(contract.antagonist_self_story_rules || contract.antagonistSelfStoryRules, chapterText),
@@ -29593,10 +29798,10 @@ export function buildCharacterBehaviorSyncReport(project: any, chapter: any, con
     status,
     label: checks.length === 0 ? '角色行为未配置' : status === 'ok' ? '角色行为 OK' : `角色行为缺口 ${missedCount}`,
     summary: checks.length === 0
-      ? '本章没有配置 character_behavior_contract，建议补充动机链、动机具体性、三层标签、行为规则、主角逼格反应、人设强关联、记忆锚点、配角功能、反派逻辑、反派分量、反派自我叙事和反派层级退场。'
+      ? '本章没有配置 character_behavior_contract，建议补充动机链、动机具体性、三层标签、行为规则、主角逼格反应、人设强关联、记忆锚点、配角功能、角色卡必备项、配角退场规划、行为重复点、人推事件、主角红线、身份/金手指对齐、反派逻辑、反派分量、反派自我叙事和反派层级退场。'
       : status === 'ok'
-        ? '正文已基本兑现动机链、动机具体性、三层标签、行为规则、主角逼格反应、人设强关联、记忆锚点、配角功能、反派逻辑、反派分量、反派自我叙事和反派层级退场。'
-        : `正文有 ${missedCount} 项角色行为缺口，${priorityRepair || '优先补动机链、起因具体性、行为证据、主角逼格反应、人设强关联、反派逻辑、反派分量、反派自我叙事和反派层级退场'}。`,
+        ? '正文已基本兑现动机链、动机具体性、三层标签、行为规则、主角逼格反应、人设强关联、记忆锚点、配角功能、角色卡必备项、配角退场规划、行为重复点、人推事件、主角红线、身份/金手指对齐、反派逻辑、反派分量、反派自我叙事和反派层级退场。'
+        : `正文有 ${missedCount} 项角色行为缺口，${priorityRepair || '优先补动机链、起因具体性、行为证据、主角逼格反应、人设强关联、角色卡、配角退场规划、行为重复点、人推事件、主角红线、身份/金手指对齐、反派逻辑、反派分量、反派自我叙事和反派层级退场'}。`,
     missed_count: missedCount,
     priority_repair: priorityRepair,
     quality_checks: asArray(contract.quality_checks || contract.qualityChecks).map((item: any) => compactBriefText(item)).filter(Boolean).slice(0, 8),
@@ -29604,11 +29809,16 @@ export function buildCharacterBehaviorSyncReport(project: any, chapter: any, con
     delivered,
     missed,
     next_actions: status === 'ok'
-      ? ['保持角色行为：行动继续由动机链驱动，起因具体、动机有情感层面且演变有铺垫；升级线与主角反应线分开，面对低级挑衅保持轻描淡写、短句或行动压制；重要角色保留至少3个能推动剧情/爽点/人物碰撞的强关联；用动作、对白和反应展示人设，配角有功能，反派有内在逻辑、真实分量、自我叙事和层级匹配的退场规划。']
+      ? ['保持角色行为：行动继续由动机链驱动，起因具体、动机有情感层面且演变有铺垫；升级线与主角反应线分开，面对低级挑衅保持轻描淡写、短句或行动压制；重要角色保留至少3个能推动剧情/爽点/人物碰撞的强关联；角色卡必备项、配角退场规划、行为重复点、人推事件、主角红线和身份/金手指对齐继续有证据；用动作、对白和反应展示人设，配角有功能，反派有内在逻辑、真实分量、自我叙事和层级匹配的退场规划。']
       : [
           '下一章必须补角色行为：先写清起因、意图、约束、风险；起因具体到谁、何时、当众如何伤害，动机落到情感层面，再让关键行动从这条动机链推出。',
           '修主角逼格反应：升级线与主角反应线分开管理，升级只提升实力/能力；面对低级挑衅时删掉暴怒、面红耳赤和歇斯底里，改成轻描淡写、短句反锁或动作压制。',
           '补人设强关联：每个重要角色至少3个强关联设定，直接影响剧情走向、核心梗、装逼爽点或人物碰撞；外貌、爱好、身高体重只能做弱关联记忆点。',
+          '补角色卡必备项：角色定位、身份标签、外貌特征、核心目标、核心动机、致命弱点、口头禅/标志动作必须能被正文或写前合同定位。',
+          '补配角退场规划：每个有台词配角要有现场功能、与主角关系、核心特质、标志性特征和退场方式；同一场景配角不超过3个有台词。',
+          '补行为重复点：选一个读者喜欢的动作、口头禅或反应，在不同场景重复并承担不同功能。',
+          '改成人推事件：从人物动机和选择找方向，不要让剧情需要、外部事件或作者硬编剧情替角色做决定。',
+          '守主角红线和身份/金手指对齐：删圣母、无脑、内核邪恶、因蠢犯错和自暴自弃；社会身份、身世、金手指、性格必须和世界基调统一。',
           '把人设写成动作、对白和反应；配角必须承担证据、阻碍、反应或代价功能，反派必须从自身目标和约束出发行动。',
           '补反派分量：先展示实力/手段和可信动机，制造真实威胁或至少一次压制；真实目的留到关键反转点，反派长处要照出主角弱点。',
           '补反派自我叙事：让反派在自己眼中是主人公，补梦想/旧痛/避免的痛苦，并把他的优势写成会继续制造冲突的致命缺陷。',
@@ -41804,6 +42014,48 @@ const OH_STORY_CHARACTER_STRONG_ASSOCIATION_RULES = [
   '弱关联不喧宾夺主：外貌、爱好、身高体重只能丰富记忆点，不能替代强关联。',
 ]
 
+const OH_STORY_CHARACTER_ROLE_CARD_REQUIREMENTS = [
+  '主角卡必备项：角色定位、身份标签、外貌特征、性格关键词、核心目标、核心动机、致命弱点、口头禅/标志动作。',
+  '核心动机必须是情感驱动，不用“要成为最强/想变强”这种空话。',
+  '致命弱点必须会在关键情节导致选择压力或犯错，否则不是有效弱点。',
+  '外貌特征、口头禅和标志动作必须成为读者能秒认的记忆锚点。',
+]
+
+const OH_STORY_CHARACTER_SUPPORTING_ROLE_EXIT_RULES = [
+  '配角卡必备项：角色功能、与主角关系、核心特质、标志性特征、退场方式。',
+  '每个配角必须有明确功能：导师、盟友、情报源、牺牲品、镜像对照、阻碍或证据承接。',
+  '配角退场要主动规划，不能写着写着忘了。',
+  '同一场景配角不超过 3 个有台词；没有功能的角色合并为旁观反应、动作或叙事概括。',
+]
+
+const OH_STORY_CHARACTER_BEHAVIOR_REPEAT_RULES = [
+  '人物行为重复点：抓住一个读者喜欢的人物行为特质反复写。',
+  '构建方法：确定读者喜欢什么类型 -> 具体化为行为 -> 不同场景重复。',
+  '人物看点和核心看点要循环产生差异化；反派/配角也需要可重复看点。',
+  '行为、语言、思维必须围绕人设展开；为了剧情需要违背人设时，先改剧情，不改人设。',
+]
+
+const OH_STORY_CHARACTER_DRIVEN_EVENT_RULES = [
+  '人推事件优先：情节是人物性格、动机和选择的自然结果，用事件深化人物弧光。',
+  '事件推人只用于打破平衡并暴露真实自我，不能替代角色主动选择。',
+  '卡文时从人物动机找方向，不要硬编剧情。',
+  '矛盾来源必须来自角色利益、三观、成长环境或世界观差异，不靠反派莫名其妙针对主角。',
+]
+
+const OH_STORY_CHARACTER_PROTAGONIST_RED_LINE_RULES = [
+  '主角红线：不写圣母型主角、无脑战斗机器、内核邪恶、因蠢/圣母犯错、自暴自弃。',
+  '主角可以不完美，但不能让读者看不起；压势不压人，压低气势和期待，不打压主角能力和尊严。',
+  '主角开篇必须用选择立人设，智斗型选择优先于单纯暴力。',
+  '成长不只体现在实力上，也体现在心智和选择上；每次成长要有触发事件和内在反思。',
+]
+
+const OH_STORY_CHARACTER_IDENTITY_GOLDFINGER_ALIGNMENT_RULES = [
+  '身份/金手指对齐：主角人设必须与世界基调相符，社会身份、身世、金手指、性格高度统一。',
+  '显性身份负责汇集前期矛盾，必须能不断升级或更换；隐性身份负责汇集中后期矛盾。',
+  '显性金手指负责开局贯穿全书，隐性金手指是主角性格中让他与众不同的部分。',
+  '前期以金手指装逼，剧情推进中逐步把人设写清楚，不能让金手指脱离主角职业、身份或生活困境。',
+]
+
 const OH_STORY_CHARACTER_MOTIVATION_SPECIFICITY_RULES = [
   '起因必须具体：不能写“被欺负”这种模糊说法，要写成“在众目睽睽下被打耳光”这类可见事件。',
   '动机必须是情感层面的：为母亲复仇、守住尊严、保护具体的人，优于“要成为最强”这种空话。',
@@ -41854,6 +42106,12 @@ const OH_STORY_CHARACTER_BEHAVIOR_CHECKS = [
   '主角逼格反应必须可见：升级线与主角反应线分开管理，面对低级挑衅不暴怒失态，改用轻描淡写、短句或行动压制。',
   '人设强关联必须可见：每个重要角色至少3个强关联设定，直接影响剧情走向、核心梗装逼爽点或人物碰撞。',
   '每个有台词配角必须有功能；无功能角色不得占用冲突段落。',
+  '角色卡必备项必须可见：角色定位、身份标签、外貌特征、核心目标、核心动机、致命弱点、口头禅/标志动作至少要有正文证据或写前合同。',
+  '配角退场规划必须清楚：角色功能、关系、核心特质、标志性特征和退场方式不能缺，同一场景配角不超过 3 个有台词。',
+  '行为重复点必须可见：主要角色、反派或关键配角要在不同场景重复可识别行为。',
+  '人推事件优先：情节应从人物动机和选择自然推出，不要靠外部事件硬砸或作者硬编剧情。',
+  '主角红线不得触碰：圣母、无脑战斗机器、内核邪恶、因蠢/圣母犯错、自暴自弃必须修掉。',
+  '身份/金手指对齐：社会身份、身世、金手指、性格要和世界基调统一。',
   '反派行为有内在逻辑，不能降智送赢或只站桩嘲讽。',
   '反派分量必须可见：实力展示、动机可信、真实威胁和终极意图时机要有正文证据。',
   '反派自我叙事必须可见：他在自己故事里的梦想、旧痛、致命缺陷和理念冲突要有正文证据。',
@@ -41921,6 +42179,12 @@ function buildCharacterBehaviorContract(contextPackage: any = {}) {
     const explicitStrongAssociationRules = asArray(explicit.strong_association_rules || explicit.strongAssociationRules).map((item: any) => compactBriefText(item)).filter(Boolean)
     const explicitMemoryAnchors = asArray(explicit.memory_anchors || explicit.memoryAnchors).map((item: any) => compactBriefText(item)).filter(Boolean)
     const explicitSupportingRoleFunctions = asArray(explicit.supporting_role_functions || explicit.supportingRoleFunctions).map((item: any) => compactBriefText(item)).filter(Boolean)
+    const explicitRoleCardRequirements = asArray(explicit.role_card_requirements || explicit.roleCardRequirements).map((item: any) => compactBriefText(item)).filter(Boolean)
+    const explicitSupportingRoleExitRules = asArray(explicit.supporting_role_exit_rules || explicit.supportingRoleExitRules).map((item: any) => compactBriefText(item)).filter(Boolean)
+    const explicitBehaviorRepeatRules = asArray(explicit.behavior_repeat_rules || explicit.behaviorRepeatRules).map((item: any) => compactBriefText(item)).filter(Boolean)
+    const explicitCharacterDrivenEventRules = asArray(explicit.character_driven_event_rules || explicit.characterDrivenEventRules).map((item: any) => compactBriefText(item)).filter(Boolean)
+    const explicitProtagonistRedLineRules = asArray(explicit.protagonist_red_line_rules || explicit.protagonistRedLineRules).map((item: any) => compactBriefText(item)).filter(Boolean)
+    const explicitIdentityGoldfingerAlignmentRules = asArray(explicit.identity_goldfinger_alignment_rules || explicit.identityGoldfingerAlignmentRules).map((item: any) => compactBriefText(item)).filter(Boolean)
     const explicitAntagonistLogic = asArray(explicit.antagonist_logic || explicit.antagonistLogic).map((item: any) => compactBriefText(item)).filter(Boolean)
     const explicitAntagonistWeightRules = asArray(explicit.antagonist_weight_rules || explicit.antagonistWeightRules).map((item: any) => compactBriefText(item)).filter(Boolean)
     const explicitAntagonistSelfStoryRules = asArray(explicit.antagonist_self_story_rules || explicit.antagonistSelfStoryRules).map((item: any) => compactBriefText(item)).filter(Boolean)
@@ -41946,6 +42210,24 @@ function buildCharacterBehaviorContract(contextPackage: any = {}) {
         : asArray(derived.strong_association_rules || derived.strongAssociationRules).length ? asArray(derived.strong_association_rules || derived.strongAssociationRules) : OH_STORY_CHARACTER_STRONG_ASSOCIATION_RULES,
       memory_anchors: explicitMemoryAnchors.length ? explicitMemoryAnchors : asArray(derived.memory_anchors),
       supporting_role_functions: explicitSupportingRoleFunctions.length ? explicitSupportingRoleFunctions : asArray(derived.supporting_role_functions),
+      role_card_requirements: explicitRoleCardRequirements.length
+        ? explicitRoleCardRequirements
+        : asArray(derived.role_card_requirements || derived.roleCardRequirements).length ? asArray(derived.role_card_requirements || derived.roleCardRequirements) : OH_STORY_CHARACTER_ROLE_CARD_REQUIREMENTS,
+      supporting_role_exit_rules: explicitSupportingRoleExitRules.length
+        ? explicitSupportingRoleExitRules
+        : asArray(derived.supporting_role_exit_rules || derived.supportingRoleExitRules).length ? asArray(derived.supporting_role_exit_rules || derived.supportingRoleExitRules) : OH_STORY_CHARACTER_SUPPORTING_ROLE_EXIT_RULES,
+      behavior_repeat_rules: explicitBehaviorRepeatRules.length
+        ? explicitBehaviorRepeatRules
+        : asArray(derived.behavior_repeat_rules || derived.behaviorRepeatRules).length ? asArray(derived.behavior_repeat_rules || derived.behaviorRepeatRules) : OH_STORY_CHARACTER_BEHAVIOR_REPEAT_RULES,
+      character_driven_event_rules: explicitCharacterDrivenEventRules.length
+        ? explicitCharacterDrivenEventRules
+        : asArray(derived.character_driven_event_rules || derived.characterDrivenEventRules).length ? asArray(derived.character_driven_event_rules || derived.characterDrivenEventRules) : OH_STORY_CHARACTER_DRIVEN_EVENT_RULES,
+      protagonist_red_line_rules: explicitProtagonistRedLineRules.length
+        ? explicitProtagonistRedLineRules
+        : asArray(derived.protagonist_red_line_rules || derived.protagonistRedLineRules).length ? asArray(derived.protagonist_red_line_rules || derived.protagonistRedLineRules) : OH_STORY_CHARACTER_PROTAGONIST_RED_LINE_RULES,
+      identity_goldfinger_alignment_rules: explicitIdentityGoldfingerAlignmentRules.length
+        ? explicitIdentityGoldfingerAlignmentRules
+        : asArray(derived.identity_goldfinger_alignment_rules || derived.identityGoldfingerAlignmentRules).length ? asArray(derived.identity_goldfinger_alignment_rules || derived.identityGoldfingerAlignmentRules) : OH_STORY_CHARACTER_IDENTITY_GOLDFINGER_ALIGNMENT_RULES,
       antagonist_logic: explicitAntagonistLogic.length
         ? explicitAntagonistLogic
         : asArray(derived.antagonist_logic).length ? asArray(derived.antagonist_logic) : OH_STORY_CHARACTER_ANTAGONIST_LOGIC,
@@ -42036,6 +42318,30 @@ function buildCharacterBehaviorContract(contextPackage: any = {}) {
     }),
     ...sceneCards.flatMap((scene: any) => asArray(scene.characters_present || scene.charactersPresent).map((name: any) => `出场功能待验证：${name}`)),
   ], 12)
+  const roleCardRequirements = uniqueBriefStrings([
+    ...OH_STORY_CHARACTER_ROLE_CARD_REQUIREMENTS,
+    protagonistName ? `主角姓名/角色定位：${protagonistName}` : '',
+    protagonist?.role || protagonist?.identity || protagonist?.profile?.identity ? `身份标签：${compactBriefText(protagonist?.role || protagonist?.identity || protagonist?.profile?.identity)}` : '',
+    traits.length ? `性格关键词：${traits.join('、')}` : '',
+    protagonist?.goal ? `核心目标：${protagonist.goal}` : '',
+    characterArc.desire ? `核心动机：${characterArc.desire}` : '',
+    protagonist?.flaw || characterArc.flaw_pressure ? `致命弱点：${compactBriefText(protagonist?.flaw || characterArc.flaw_pressure)}` : '',
+    memoryAnchors.length ? `口头禅/标志动作：${memoryAnchors.slice(0, 3).join('、')}` : '',
+  ], 16)
+  const supportingRoleExitRules = uniqueBriefStrings([
+    ...OH_STORY_CHARACTER_SUPPORTING_ROLE_EXIT_RULES,
+    ...characters.slice(1).map((item: any) => {
+      const name = compactBriefText(item?.name || item?.profile?.name || item?.role)
+      const role = compactBriefText(item?.role || item?.function || item?.profile?.role)
+      const exitPlan = compactBriefText(item?.exit_plan || item?.exitPlan || item?.departure || item?.profile?.exit_plan)
+      return name ? `${name}：功能=${role || '待明确'}；退场方式=${exitPlan || '待规划'}` : ''
+    }),
+  ], 14)
+  const behaviorRepeatRules = uniqueBriefStrings([
+    ...OH_STORY_CHARACTER_BEHAVIOR_REPEAT_RULES,
+    memoryAnchors.length ? `本章优先重复的行为/记忆点：${memoryAnchors.slice(0, 4).join('、')}` : '',
+    ...sceneCards.flatMap((scene: any) => asArray(scene.action_beats || scene.actionBeats).filter((item: any) => /按|摸|看|笑|问|短句|反问|沉默|旧夹克|录音|标志/.test(String(item))).map((item: any) => `场景行为重复点：${compactBriefText(item)}`)),
+  ], 14)
   return {
     version: 'oh_story_character_behavior_v1',
     source: 'oh_story_embedded_fallback',
@@ -42047,6 +42353,12 @@ function buildCharacterBehaviorContract(contextPackage: any = {}) {
     strong_association_rules: strongAssociationRules.length ? strongAssociationRules : OH_STORY_CHARACTER_STRONG_ASSOCIATION_RULES,
     memory_anchors: memoryAnchors,
     supporting_role_functions: supportingRoleFunctions,
+    role_card_requirements: roleCardRequirements,
+    supporting_role_exit_rules: supportingRoleExitRules,
+    behavior_repeat_rules: behaviorRepeatRules,
+    character_driven_event_rules: OH_STORY_CHARACTER_DRIVEN_EVENT_RULES,
+    protagonist_red_line_rules: OH_STORY_CHARACTER_PROTAGONIST_RED_LINE_RULES,
+    identity_goldfinger_alignment_rules: OH_STORY_CHARACTER_IDENTITY_GOLDFINGER_ALIGNMENT_RULES,
     antagonist_logic: OH_STORY_CHARACTER_ANTAGONIST_LOGIC,
     antagonist_weight_rules: OH_STORY_CHARACTER_ANTAGONIST_WEIGHT_RULES,
     antagonist_self_story_rules: OH_STORY_CHARACTER_ANTAGONIST_SELF_STORY_RULES,
@@ -49312,6 +49624,12 @@ export function createNovelWritingService(ctx: {
       characterBehaviorContract ? '执行方式：主角行为三必须（可理解、可共鸣、可接受）；三层标签反差（身份标签、表现标签、内核标签）必须落到行为对比；展示优于告知；每个有台词配角必须有功能；反派不能降智送赢。' : '',
       characterBehaviorContract ? '主角逼格反应：升级线与主角反应线分开管理；升级只提升实力/能力，不自动改变主角从容反应。面对低级挑衅时，主角不能被牵着走，必须用轻描淡写、短句反锁、行动压制或旁观者反应放大爽点，禁止暴怒、面红耳赤、歇斯底里式反击。' : '',
       characterBehaviorContract ? '人设强关联：每个重要角色至少 3 个强关联设定，直接影响剧情走向、核心梗装逼爽点或人物碰撞；外貌、爱好、身高体重只能做弱关联记忆点，不能喧宾夺主。' : '',
+      characterBehaviorContract ? '角色卡必备项：主角卡必须覆盖角色定位、身份标签、外貌特征、核心目标、核心动机、致命弱点、口头禅/标志动作；核心动机要是情感驱动，弱点必须能造成选择压力或犯错。' : '',
+      characterBehaviorContract ? '配角退场规划：配角卡必须覆盖角色功能、与主角关系、核心特质、标志性特征、退场方式；同一场景配角不超过 3 个有台词，无功能角色合并为旁观反应、动作或叙事概括。' : '',
+      characterBehaviorContract ? '行为重复点：抓住一个读者喜欢的人物行为特质，在不同场景重复；行为、语言、思维必须围绕人设展开，为了剧情需要违背人设时先改剧情。' : '',
+      characterBehaviorContract ? '人推事件：情节要从人物性格、动机和选择自然推出；卡文时从人物动机找方向，不要让外部事件硬砸或作者硬编剧情。' : '',
+      characterBehaviorContract ? '主角红线：不得写圣母型主角、无脑战斗机器、内核邪恶、因蠢/圣母犯错、自暴自弃；压势不压人，不能让读者看不起主角。' : '',
+      characterBehaviorContract ? '身份/金手指对齐：社会身份、身世、金手指、性格必须与世界基调统一；显性金手指贴合职业/身份/生活困境，隐性金手指落在性格优势。' : '',
       characterBehaviorContract ? '反派分量：执行反派建立四要素（实力展示、动机可信、真实威胁、终极意图时机）；反派弱则主角赢没意义，真实目的不要开场说尽，反派长处要照出主角弱点。' : '',
       characterBehaviorContract ? '反派自我叙事：执行“反派也有梦想”，在反派眼中他是自己故事的主人公；补旧痛/创伤、让人恨不起来的侧面和理念冲突，优势本身也要成为致命缺陷。' : '',
       characterBehaviorContract ? '反派层级：按反派层级表匹配篇幅、功能和退场；小反派干脆利落，中等反派正面击败有爽感，大弧 Boss 有仪式感终战，最终 Boss 必须从第一章就有伏笔。' : '',
@@ -49323,12 +49641,18 @@ export function createNovelWritingService(ctx: {
       characterBehaviorContract?.strong_association_rules?.length ? `人设强关联：${characterBehaviorContract.strong_association_rules.join('；')}` : '',
       characterBehaviorContract?.memory_anchors?.length ? `记忆锚点：${characterBehaviorContract.memory_anchors.join('；')}` : '',
       characterBehaviorContract?.supporting_role_functions?.length ? `配角功能：${characterBehaviorContract.supporting_role_functions.join('；')}` : '',
+      characterBehaviorContract?.role_card_requirements?.length ? `角色卡必备项：${characterBehaviorContract.role_card_requirements.join('；')}` : '',
+      characterBehaviorContract?.supporting_role_exit_rules?.length ? `配角退场规划：${characterBehaviorContract.supporting_role_exit_rules.join('；')}` : '',
+      characterBehaviorContract?.behavior_repeat_rules?.length ? `行为重复点：${characterBehaviorContract.behavior_repeat_rules.join('；')}` : '',
+      characterBehaviorContract?.character_driven_event_rules?.length ? `人推事件：${characterBehaviorContract.character_driven_event_rules.join('；')}` : '',
+      characterBehaviorContract?.protagonist_red_line_rules?.length ? `主角红线：${characterBehaviorContract.protagonist_red_line_rules.join('；')}` : '',
+      characterBehaviorContract?.identity_goldfinger_alignment_rules?.length ? `身份/金手指对齐：${characterBehaviorContract.identity_goldfinger_alignment_rules.join('；')}` : '',
       characterBehaviorContract?.antagonist_logic?.length ? `反派逻辑：${characterBehaviorContract.antagonist_logic.join('；')}` : '',
       characterBehaviorContract?.antagonist_weight_rules?.length ? `反派分量：${characterBehaviorContract.antagonist_weight_rules.join('；')}` : '',
       characterBehaviorContract?.antagonist_self_story_rules?.length ? `反派自我叙事：${characterBehaviorContract.antagonist_self_story_rules.join('；')}` : '',
       characterBehaviorContract?.antagonist_tier_exit_rules?.length ? `反派层级退场：${characterBehaviorContract.antagonist_tier_exit_rules.join('；')}` : '',
       characterBehaviorContract?.quality_checks?.length ? `character_behavior_checks：${characterBehaviorContract.quality_checks.join('；')}` : '',
-      characterBehaviorContract ? '交稿自检必须输出 character_behavior_checks，并用正文证据检查主角行为三必须、动机链、动机具体性、三层标签反差、展示优于告知、主角逼格反应、记忆锚点、配角功能、反派内在逻辑、反派分量、反派自我叙事和反派层级退场。' : '',
+      characterBehaviorContract ? '交稿自检必须输出 character_behavior_checks，并用正文证据检查主角行为三必须、动机链、动机具体性、三层标签反差、展示优于告知、主角逼格反应、记忆锚点、配角功能、角色卡必备项、配角退场规划、行为重复点、人推事件、主角红线、身份/金手指对齐、反派内在逻辑、反派分量、反派自我叙事和反派层级退场。' : '',
       characterBehaviorContract ? JSON.stringify(characterBehaviorContract, null, 2).slice(0, 2500) : '',
       '',
       assetLinkageContract ? '【资产挂钩合同】' : '',
@@ -51290,7 +51614,7 @@ export function createNovelWritingService(ctx: {
     '31. continuity_heat_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),heat_state,hot_progress,warm_keepalive,cold_warmup,archived_boundary,evidence,fix,remaining_risk；冷伏笔突然回收、核心角色断温、重要支线无休眠说明、只提名字不推进时必须给出 S1/S2 finding，category=consistency 或 structure。',
     '32. 是否兑现 chapter_target.character_relation_contract：按 oh-story 角色关系手册检查关系类型明确、关系有弧线、主角目标独立、目标归属清楚、角色不止恋爱、配角期待枢纽、配角攻略缓冲区、配角有主动行动、态度变化可见、亲密/好感行为匹配阶段；目标归属必须检查主角目标是否属于自己的，不能只是帮别人实现目标，关系线可以互助但主角必须保留自己的诉求、主动选择和代价；角色不止恋爱必须检查角色生命中是否有恋爱之外的事业、责任、资源、身份、家族、风险或行动线，不能只是发糖/陪伴/情绪支持的情感工具人；配角期待枢纽必须检查是否有一个关键配角作为任务基地，同时承载短期和长期期待，并在主角解决事件后开启新一轮装逼、新任务或新剧情，人物下线时是否带来更大好处来转化损失厌恶；配角攻略缓冲区必须检查信息差、地位差距、亲密度差距或信任程度是否存在，配角不能像 NPC 一样站着等主角触发，关键拐点必须写出态度变化；必须输出 character_relation_checks。',
     '33. character_relation_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),relation_type,protagonist_goal,agency_choice,cost,relation_shift,buffer_zone,evidence,fix,remaining_risk；主角沦为帮别人办事、主角没有自己的诉求/主动选择/代价、角色只负责恋爱/发糖/陪伴/情绪支持、配角站桩、关系没有考验/变化、缺配角攻略缓冲区、所有人你好我好时必须给出 S1/S2 finding，category=character 或 structure。',
-    '34. 是否兑现 chapter_target.character_behavior_contract：按 oh-story 角色行为口径检查主角行为三必须、动机链、动机具体性、三层标签反差、人设强关联、展示优于告知、主角逼格反应、记忆锚点、配角功能、反派内在逻辑、反派分量、反派自我叙事和反派层级退场；动机具体性必须检查起因是否具体（不能只写“被欺负/被针对”）、动机是否是情感层面（不能只写“要成为最强/想变强”）、动机演变是否有触发事件或代价铺垫；主角逼格反应必须检查升级线与主角反应线是否分开，升级是否只提升实力/能力而不改变从容反应，面对低级挑衅时是否被牵着走，是否出现暴怒、面红耳赤、歇斯底里式反击；人设强关联必须检查每个重要角色至少 3 个强关联设定是否可见，是否直接影响剧情走向、核心梗装逼爽点或人物碰撞，外貌/爱好/身高体重等弱关联是否喧宾夺主；反派分量必须按反派建立四要素检查实力展示、动机可信、真实威胁、终极意图时机；反派自我叙事必须按“反派也有梦想”检查他是否是自己故事的主人公、是否有旧痛/创伤、优势即致命缺陷和理念冲突；反派层级必须按反派层级表检查篇幅与层级匹配、小反派/中等反派/大弧 Boss/最终 Boss 的功能和退场方式，最终Boss从第一章就有伏笔；必须输出 character_behavior_checks。',
+    '34. 是否兑现 chapter_target.character_behavior_contract：按 oh-story 角色行为口径检查主角行为三必须、动机链、动机具体性、三层标签反差、人设强关联、展示优于告知、主角逼格反应、记忆锚点、配角功能、角色卡必备项、配角退场规划、行为重复点、人推事件、主角红线、身份/金手指对齐、反派内在逻辑、反派分量、反派自我叙事和反派层级退场；角色卡必备项必须检查角色定位、身份标签、外貌特征、核心目标、核心动机、致命弱点、口头禅/标志动作是否可见；配角退场规划必须检查角色功能、与主角关系、核心特质、标志性特征、退场方式以及同一场景配角不超过 3 个有台词；行为重复点必须检查主要角色是否有跨场景重复的可识别行为；人推事件必须检查情节是否从人物动机和选择自然推出，而不是外部事件硬砸或作者硬编剧情；主角红线必须检查圣母、无脑战斗机器、内核邪恶、因蠢/圣母犯错、自暴自弃；身份/金手指对齐必须检查社会身份、身世、金手指、性格是否和世界基调统一；动机具体性必须检查起因是否具体（不能只写“被欺负/被针对”）、动机是否是情感层面（不能只写“要成为最强/想变强”）、动机演变是否有触发事件或代价铺垫；主角逼格反应必须检查升级线与主角反应线是否分开，升级是否只提升实力/能力而不改变从容反应，面对低级挑衅时是否被牵着走，是否出现暴怒、面红耳赤、歇斯底里式反击；人设强关联必须检查每个重要角色至少 3 个强关联设定是否可见，是否直接影响剧情走向、核心梗装逼爽点或人物碰撞，外貌/爱好/身高体重等弱关联是否喧宾夺主；反派分量必须按反派建立四要素检查实力展示、动机可信、真实威胁、终极意图时机；反派自我叙事必须按“反派也有梦想”检查他是否是自己故事的主人公、是否有旧痛/创伤、优势即致命缺陷和理念冲突；反派层级必须按反派层级表检查篇幅与层级匹配、小反派/中等反派/大弧 Boss/最终 Boss 的功能和退场方式，最终Boss从第一章就有伏笔；必须输出 character_behavior_checks。',
     '35. character_behavior_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),character,concrete_motive,emotional_reason,trigger_change,visible_choice,cost,evidence,fix,remaining_risk；主角行为不可理解/不可共鸣/不可接受、动机链缺失、起因空泛、动机只是“要成为最强/想变强”、动机演变无铺垫、三层标签反差只停在设定、主角升级后被低级挑衅拖入暴怒失态或缺轻描淡写/短句/行动压制、人设强关联少于3个或只剩外貌爱好等弱关联、角色靠旁白贴标签、配角无功能发言、反派降智、反派缺实力展示/真实威胁/终极意图时机、反派只是工具人/纯粹的坏/缺自己的梦想旧痛和理念冲突、反派层级篇幅不匹配、小反派拖太久、大 Boss 草率退场、最终 Boss 无第一章伏笔，或主角赢得没含金量时必须给出 S1/S2 finding，category=character 或 structure。',
     '36. 是否兑现 chapter_target.asset_linkage_contract：按 oh-story 资产挂钩口径检查关键资产是否绑定功能、归属、触发条件、限制、后果，是否摆脱孤立资产，是否通过冲突释放设定信息；关键资产承担破局或金手指功能时，必须检查道具能力展示的8步期待模板：宝物功能强大、配角因信息不足误判鸡肋、宝物恰好克制反派、他人失败、主角方案、众人不看好、鸡肋成神器、新目标或新钩子；必须输出 asset_linkage_checks。',
     '37. asset_linkage_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),asset_name,function,ownership,trigger_condition,limitation,consequence,prop_ability_expectation,story_link,evidence,fix,remaining_risk；资产只点名不使用、状态不变化、设定大段说明、贯穿物件未按三次出现推进、道具能力展示缺期待链、禁揭/知识边界错误或新增概念过载时必须给出 S1/S2 finding，category=consistency 或 structure。',
@@ -51476,7 +51800,7 @@ export function createNovelWritingService(ctx: {
     '16. 如果自检结果包含 plot_dynamics_checks，必须优先修复 status=fail/warn 的剧情动力缺口；按 key/label/evidence/fix 补目标阻碍行动反馈闭环、假胜崩解、代价反馈、A/B情绪交替、驱动方式、多线错峰或悬置收尾；驱动方式缺口要按题材修：番茄爽文/打脸文每章补一个外部结果（赢、升级、对手栽），追妻/虐心/世情补持续人物心结，混合模式让主线事件推进并每 3-5 章插情感停顿。',
     '17. 如果自检结果包含 continuity_heat_checks，必须优先修复 status=fail/warn 的连续性热度缺口；按 key/label/evidence/fix 补 hot 元素推进、warm 元素保温、cold 元素升温、archived 线不误激活或合理休眠说明。',
     '18. 如果自检结果包含 character_relation_checks，必须优先修复 status=fail/warn 的角色关系缺口；按 key/label/evidence/fix 补关系类型、关系考验/变化、主角独立目标、目标归属、角色不止恋爱、配角期待枢纽/人物扣、配角攻略缓冲区、配角主动行动、态度变化和阶段匹配；目标归属缺口要把“帮别人实现目标”改成主角自己的诉求、主动选择和代价，再让配角目标与主角目标摩擦或互补；角色不止恋爱缺口要给关系角色补事业、责任、资源、身份、家族、风险或行动线，让情感推进踩在自己的选择和代价上；配角期待枢纽缺口要选一个关键配角做任务基地，同时挂短期和长期期待，让主角解决事件装完逼后回到该人物处开启下一轮新任务/新剧情，若人物下线则补更大好处来转化损失厌恶；配角攻略缓冲区缺口要补信息差、地位差距、亲密度差距或信任程度，并让配角从旁观/质疑/拒绝/试探转为行动/协助/设限，不能只等主角触发。',
-    '19. 如果自检结果包含 character_behavior_checks，必须优先修复 status=fail/warn 的角色行为缺口；按 key/label/evidence/fix 补动机链、动机具体性、主角行为三必须、行为证据、三层标签反差、主角逼格反应、人设强关联、记忆锚点、配角功能、反派内在逻辑、反派分量、反派自我叙事和反派层级退场；动机具体性缺口要把“被欺负/被针对”改成具体事件，把“要成为最强/想变强”改成情感层面的理由，并补动机变化的触发事件、关系压力或代价；主角逼格反应缺口要把升级后暴怒、面红耳赤、歇斯底里或被低级挑衅牵着走，改成升级只提升实力/能力、主角仍轻描淡写、短句反锁或行动压制，必要时用旁观者认知变化放大爽点；强关联缺口要为重要角色补至少3个影响剧情走向、核心梗装逼爽点或人物碰撞的实力/资源/人脉/背景/技能/证据/关系锚点，弱关联只能留作记忆点；反派分量缺口要补真实威胁、可信动机、终极意图时机，并让反派长处照出主角弱点；反派自我叙事缺口要补梦想、创伤/旧痛、让人恨不起来的侧面和理念冲突；反派层级缺口要按小反派/中等反派/大弧 Boss/最终 Boss 修正篇幅、功能和退场方式。',
+    '19. 如果自检结果包含 character_behavior_checks，必须优先修复 status=fail/warn 的角色行为缺口；按 key/label/evidence/fix 补动机链、动机具体性、主角行为三必须、行为证据、三层标签反差、主角逼格反应、人设强关联、记忆锚点、配角功能、角色卡必备项、配角退场规划、行为重复点、人推事件、主角红线、身份/金手指对齐、反派内在逻辑、反派分量、反派自我叙事和反派层级退场；角色卡缺口要补角色定位、身份标签、外貌特征、核心目标、核心动机、致命弱点、口头禅/标志动作；配角退场缺口要补功能、关系、核心特质、标志性特征和退场方式，并把同场超过3个有台词配角合并；行为重复点缺口要补一个跨场景重复的动作、口头禅或反应；人推事件缺口要从人物动机和选择改写事件推进，删外部硬砸和作者硬编；主角红线缺口要删圣母、无脑、内核邪恶、因蠢犯错和自暴自弃；身份/金手指对齐缺口要把社会身份、身世、金手指和性格统一到世界基调；动机具体性缺口要把“被欺负/被针对”改成具体事件，把“要成为最强/想变强”改成情感层面的理由，并补动机变化的触发事件、关系压力或代价；主角逼格反应缺口要把升级后暴怒、面红耳赤、歇斯底里或被低级挑衅牵着走，改成升级只提升实力/能力、主角仍轻描淡写、短句反锁或行动压制，必要时用旁观者认知变化放大爽点；强关联缺口要为重要角色补至少3个影响剧情走向、核心梗装逼爽点或人物碰撞的实力/资源/人脉/背景/技能/证据/关系锚点，弱关联只能留作记忆点；反派分量缺口要补真实威胁、可信动机、终极意图时机，并让反派长处照出主角弱点；反派自我叙事缺口要补梦想、创伤/旧痛、让人恨不起来的侧面和理念冲突；反派层级缺口要按小反派/中等反派/大弧 Boss/最终 Boss 修正篇幅、功能和退场方式。',
     '20. 如果自检结果包含 asset_linkage_checks，必须优先修复 status=fail/warn 的资产挂钩缺口；按 key/label/evidence/fix 补资产功能、归属、触发条件、限制、后果、状态变化、贯穿物件三次出现和设定随冲突释放；道具能力展示缺口要补宝物功能强大、信息不足误判鸡肋、恰好克制反派、他人失败、主角方案、众人不看好、鸡肋成神器和章末新钩子。',
     '21. 如果自检结果包含 state_tracking_checks，必须优先修复 status=fail/warn 的状态筛选缺口；按 key/label/evidence/fix 修角色状态、上一章承接、伏笔前史、世界约束、来源边界和上下文过载问题，并在修订后的 oh_story_delivery_receipts.pre_draft_execution_receipts.status_filter_receipts 中逐项更新 used_in_chapter/evidence/excluded_reason/remaining_risk。',
     '21A. 如果自检结果包含 source_readiness_checks，必须优先修复 status=fail/warn 的来源就绪缺口；按 key/label/evidence/fix 处理 missing/warn 来源，不能把未就绪来源写成既定事实，ready 来源必须在正文中可见承接，并在修订后的 oh_story_delivery_receipts.pre_draft_execution_receipts.source_readiness_checks 中逐项更新 status/evidence/fix。',
@@ -52532,7 +52856,7 @@ export function createNovelWritingService(ctx: {
               '对白合同 dialogue_contract 必须按 oh-story dialogue-mastery 输出 scene_modes, voice_anchors, dialogue_goals, key_lines, relationship_moves, dialogue_execution_checklist, mode_playbooks, power_length_rules, subtext_agenda_rules, tone_context_rules, emotion_push_rules, emotion_continuity_rules, dialogue_drive_rules, information_embed_rules, information_tension_rules, voice_differentiation_rules, spectator_dialogue_rules, supporting_speaker_limit_rules, dialogue_rhythm_rules, dialogue_volume_rules, dialogue_meme_rules, dialogue_audit_rules, revision_priorities, quality_checks；dialogue_execution_checklist 必须逐场输出 scene_no, scene, mode, speaker_agendas, line_functions, emotion_flow, information_strategy, voice_differentiation, forbidden_patterns, receipt_keys，确保场景卡里的对白要求能被正文和 dialogue_checks 逐场验收；power_length_rules 必须包含“掌控者/主角亮底牌时对白 ≤ 10 字”和“被压制方对白 ≥ 20 字”；subtext_agenda_rules 必须包含“真实动机绝对不能浅显地写在台词里”，tone_context_rules 必须包含“关系 × 场合 × 目的 = 语气”，emotion_push_rules 必须包含“命令式+否定式最能激发读者情绪”，emotion_continuity_rules 必须要求每次情绪转变有事件触发，dialogue_drive_rules 必须要求对白强化期待、爽感或悬念，information_embed_rules 必须包含“用角色的语气和立场包裹信息”，information_tension_rules 必须要求通过质疑、证据和核心信息兑现形成拉扯，voice_differentiation_rules 必须包含口癖和惯用语、说话节奏、信息偏好、身份影响措辞、性格影响语气和关系阶段不同，spectator_dialogue_rules 必须包含普通人震惊、专业人士分析、特殊身份者反应、短小精悍和不代替主线，supporting_speaker_limit_rules 必须包含“同一场景配角不超过 3 个有台词”“没有功能的角色不要出场”和“配角退场要主动规划”，dialogue_rhythm_rules 必须包含连续多轮对话后需要换气、穿插动作描写、紧张段落对话短促、关键信息放对话开头或结尾，dialogue_volume_rules 必须包含读者已知信息、叙事一句话概括、突发状况替代、主角旁白平铺直叙和新人物必须安排主线戏份，dialogue_meme_rules 必须包含说不出来但意思到了、梗或骚话、强化记忆点、高潮点和不得直接复刻，dialogue_audit_rules 必须包含大量信息都必须用对话来展示、问答式的一问一答、依赖对话来推动剧情或人物变化、遮住角色名后能否区分、单次对话不超过全节 40%、自然口语交流和对话结尾能否预示接下来的节奏变化，确保对白推进剧情、增加期待或展示人设，而不是说明书。',
               '连续性热度合同 continuity_heat_contract 必须按 oh-story 连续性追踪输出 heat_states, active_expectations, watch_items, dormant_allowed, revision_priorities, quality_checks，确保 hot/warm/cold/archived 元素都有处理理由。',
               '角色关系合同 character_relation_contract 必须按 oh-story 角色关系输出 relationship_types, important_relationships, independent_goals, goal_ownership_rules, relationship_life_rules, expectation_hub_rules, buffer_zone_rules, tests_or_pressure, attitude_shifts, quality_checks，确保关系变化有类型、压力、行动、配角期待枢纽、配角攻略缓冲区和正文证据；goal_ownership_rules 必须包含主角目标必须属于自己的、不能只是帮别人实现目标、主角必须保留自己的诉求/主动选择/代价；relationship_life_rules 必须包含角色生命中有恋爱之外的内容、不是单薄的情感工具人、关系角色还要有事业/责任/资源/身份/风险/行动线；expectation_hub_rules 必须包含配角期待枢纽/人物扣、任务基地、短期和长期期待、主角解决事件后开启新一轮装逼/新任务/新剧情，以及人物下线时用更大好处转化损失厌恶；buffer_zone_rules 必须包含配角攻略缓冲区、信息差、地位差距、亲密度差距或信任程度，配角不能像 NPC 一样站着等主角触发，并在关键拐点写清配角从旁观/质疑/拒绝/试探到行动/协助/设限的态度变化。',
-              '角色行为合同 character_behavior_contract 必须按 oh-story 角色行为输出 motivation_chain, motivation_specificity_rules, layered_tags, behavior_rules, protagonist_composure_rules, strong_association_rules, memory_anchors, supporting_role_functions, antagonist_logic, antagonist_weight_rules, antagonist_self_story_rules, antagonist_tier_exit_rules, quality_checks，确保角色行为由动机链驱动；motivation_specificity_rules 必须包含起因必须具体、不能写“被欺负”这种模糊说法、动机必须是情感层面、不能写“要成为最强”这种空话、动机演变有铺垫；protagonist_composure_rules 必须包含升级线与主角反应线分开管理、升级提升实力但不自动改变从容反应、面对低级挑衅不被牵着走、用轻描淡写/短句/行动压制替代暴怒失态；strong_association_rules 必须包含每个重要角色至少 3 个强关联设定、强关联直接影响剧情走向/核心梗装逼爽点/人物碰撞、弱关联不喧宾夺主；antagonist_weight_rules 必须包含反派建立四要素、实力展示、动机可信、真实威胁和终极意图时机；antagonist_self_story_rules 必须包含反派也有梦想、在反派眼中他是自己故事的主人公、旧痛/创伤、优势即致命缺陷和理念冲突；antagonist_tier_exit_rules 必须包含反派层级表、篇幅与层级匹配、小反派、中等反派、大弧 Boss、最终 Boss、退场方式和最终Boss从第一章就有伏笔。',
+              '角色行为合同 character_behavior_contract 必须按 oh-story 角色行为输出 motivation_chain, motivation_specificity_rules, layered_tags, behavior_rules, protagonist_composure_rules, strong_association_rules, memory_anchors, supporting_role_functions, role_card_requirements, supporting_role_exit_rules, behavior_repeat_rules, character_driven_event_rules, protagonist_red_line_rules, identity_goldfinger_alignment_rules, antagonist_logic, antagonist_weight_rules, antagonist_self_story_rules, antagonist_tier_exit_rules, quality_checks，确保角色行为由动机链驱动；role_card_requirements 必须包含角色定位、身份标签、外貌特征、核心目标、核心动机、致命弱点、口头禅/标志动作；supporting_role_exit_rules 必须包含配角功能、与主角关系、核心特质、标志性特征、退场方式和同一场景配角不超过 3 个有台词；behavior_repeat_rules 必须包含行为重复点和不同场景重复；character_driven_event_rules 必须包含人推事件、从人物动机找方向和不要硬编剧情；protagonist_red_line_rules 必须包含圣母、无脑战斗机器、内核邪恶、因蠢/圣母犯错、自暴自弃；identity_goldfinger_alignment_rules 必须包含社会身份、身世、金手指、性格高度统一；motivation_specificity_rules 必须包含起因必须具体、不能写“被欺负”这种模糊说法、动机必须是情感层面、不能写“要成为最强”这种空话、动机演变有铺垫；protagonist_composure_rules 必须包含升级线与主角反应线分开管理、升级提升实力但不自动改变从容反应、面对低级挑衅不被牵着走、用轻描淡写/短句/行动压制替代暴怒失态；strong_association_rules 必须包含每个重要角色至少 3 个强关联设定、强关联直接影响剧情走向/核心梗装逼爽点/人物碰撞、弱关联不喧宾夺主；antagonist_weight_rules 必须包含反派建立四要素、实力展示、动机可信、真实威胁和终极意图时机；antagonist_self_story_rules 必须包含反派也有梦想、在反派眼中他是自己故事的主人公、旧痛/创伤、优势即致命缺陷和理念冲突；antagonist_tier_exit_rules 必须包含反派层级表、篇幅与层级匹配、小反派、中等反派、大弧 Boss、最终 Boss、退场方式和最终Boss从第一章就有伏笔。',
               '资产挂钩合同 asset_linkage_contract 必须按 oh-story 资产协议输出 key_assets, linkage_plan, usage_rules, three_appearance_plan, prop_ability_expectation_rules, state_tracking, quality_checks，确保孤立资产挂到冲突、状态和回报上；prop_ability_expectation_rules 必须包含道具能力展示的8步期待模板：宝物功能强大、配角误判鸡肋、宝物恰好克制反派、他人失败、主角方案、众人不看好、鸡肋成神器和新钩子。',
               '状态跟踪合同 state_tracking_contract 必须按 oh-story state-tracking 输出 character_states, historical_causality, world_constraints, source_requirements, source_readiness, filter_rules, quality_checks，确保写正文前只保留会影响本章正确性的状态。',
               '意图确认合同 intent_confirmation_contract 必须按 oh-story workflow-daily 输出 confirmed_intent, rhythm_and_style, structure_inputs, logic_line, appearance_order, cost_and_reward, ending_handoff, quality_checks，确保正文按本章意图统一发力。',

@@ -15190,6 +15190,24 @@ describe('chapter prose word target', () => {
           ],
           memory_anchors: ['李玄习惯先按住旧夹克袖口，再用短句反问。'],
           supporting_role_functions: ['林青禾：只给事实证据，不替主角解释。'],
+          role_card_requirements: [
+            '主角卡必须包含角色定位、身份标签、外貌特征、核心目标、核心动机、致命弱点、口头禅/标志动作。',
+          ],
+          supporting_role_exit_rules: [
+            '配角卡必须包含角色功能、与主角关系、核心特质、标志性特征、退场方式；同一场景配角不超过 3 个有台词。',
+          ],
+          behavior_repeat_rules: [
+            '人物行为重复点：抓住读者喜欢的人物行为特质，并在不同场景重复。',
+          ],
+          character_driven_event_rules: [
+            '人推事件优先：情节从人物性格、动机和选择自然推出；卡文时从人物动机找方向，不要硬编剧情。',
+          ],
+          protagonist_red_line_rules: [
+            '主角红线：不能写圣母型主角、无脑战斗机器、内核邪恶、因蠢/圣母犯错、自暴自弃。',
+          ],
+          identity_goldfinger_alignment_rules: [
+            '主角人设必须与全书气质相符：社会身份、身世、金手指、性格高度统一。',
+          ],
           antagonist_logic: ['周薄森为了保住账本来源，必须先用身份压人再转移证据焦点。'],
           antagonist_weight_rules: [
             '反派建立四要素：实力展示、动机可信、真实威胁、终极意图时机缺一不可。',
@@ -15223,6 +15241,7 @@ describe('chapter prose word target', () => {
       '反派学徒低声骂他废物，李玄没有被这句低级挑衅牵着走，只轻描淡写地把封条推到灯下：“看字。”',
       '这次旧印升级只提升他的验印能力，没有改变他的从容反应；他的压制来自短句和动作，而不是暴怒反击。',
       '林青禾没有替他解释，只把今晨开的封条放到案边。',
+      '林青禾的配角功能是事实证人，与李玄是互相保密的同盟；她的核心特质是谨慎，标志性特征是只递证据不解释，退场方式已规划为封条作证完成后主动退到旁听席。',
       '周薄森为了保住账本来源，先用长老席身份压人，又急着转移证据焦点，反倒露出昨夜进祠堂的破绽。',
       '周薄森先亮出长老席背书和账房封锁令，展示实力和手段；他想保住账本来源，这个动机从他的视角说得通。',
       '他没有立刻说出终极意图，只用资格封锁和证据反咬压住李玄一次，让李玄短暂失去主动。',
@@ -15234,6 +15253,11 @@ describe('chapter prose word target', () => {
       '这个动机是羞辱、亲情和亏欠压出来的情感驱动，不是“要成为最强”这种空话；他后续从隐忍到公开反问，也有封条递上案边作为铺垫。',
       '李玄的人设强关联有三条：第一是账房审证能力，能直接拆伪账本；第二是母亲旧铺的人脉，能调动林青禾作证；第三是旧夹克里的录音证据，能制造当堂反转和装逼爽点。',
       '这些强关联都影响剧情走向和人物碰撞，不只是身高、外貌、爱吃甜糕这种弱关联爱好。',
+      '李玄的角色定位是落魄账房证人，身份标签是被逐出宗祠的账房学徒；外貌特征是瘦高、旧夹克、左手有疤，核心目标是夺回母亲旧铺，核心动机是守住亲情和尊严，致命弱点是面对权威先藏招，口头禅和标志动作是按住旧夹克袖口后短句反问。',
+      '他每到关键选择都会先按住旧夹克袖口，这个行为重复点在开场藏证据、中段推封条、章尾反问前重复出现。',
+      '这场不是外部事件硬砸他，而是李玄保住母亲旧铺和林青禾安全的动机，把当堂反问自然推出来；情节坚持人推事件，不靠作者硬编剧情。',
+      '他没有触碰主角红线：不圣母、不无脑战斗机器、不内核邪恶、不因蠢犯错、不自暴自弃。',
+      '他的显性身份是落魄账房学徒，隐性身世连到母亲旧铺账权，显性金手指是验印能力，隐性金手指是克制短句，社会身份、身世、金手指、性格高度统一。',
       '这场戏按反派层级表定位为中等反派阶段：周薄森是一卷主要对手，靠账房资源和长老席权谋连续施压。',
       '他已经短暂赢主角一次，后续退场规划是被李玄用证据链正面击败，揭穿账权骗局并给读者爽感。',
     ].join('\n')
@@ -15251,6 +15275,11 @@ describe('chapter prose word target', () => {
       '他是脸谱化疯子怪物，只是纯粹的坏。',
       '反派层级和篇幅不匹配，小反派拖成三十章，大弧 Boss 像路人一样随便退场。',
       '最终 Boss 没有第一章伏笔，也没有信念，只是突然冒出来的怪物。',
+      '配角退场方式没有规划，写着写着忘了，五个配角一直发言。',
+      '他没有行为重复点，口头禅和标志动作写着写着忘了。',
+      '剧情需要一个外部事件突然砸来，和他的动机无关；作者硬编剧情让事情自己解决。',
+      '他是圣母型主角，明知道对方会害人仍因蠢犯错原谅反派，后来又自暴自弃。',
+      '他开场职业是账房，突然靠毫无铺垫的战神系统横扫所有人，社会身份、身世、金手指、性格完全不统一。',
       '事情很快解决，旁观者都觉得主角做得对。',
     ].join('\n')
 
@@ -15260,16 +15289,21 @@ describe('chapter prose word target', () => {
     expect(okReport.status).toBe('ok')
     expect(okReport.label).toBe('角色行为 OK')
     expect(okReport.missed_count).toBe(0)
-    expect(okReport.delivered.map((item: any) => item.label)).toEqual(expect.arrayContaining(['动机链', '动机具体性', '行为规则', '主角逼格反应', '人设强关联', '记忆锚点', '配角功能', '反派逻辑', '反派分量', '反派自我叙事', '反派层级退场']))
+    expect(okReport.delivered.map((item: any) => item.label)).toEqual(expect.arrayContaining(['动机链', '动机具体性', '行为规则', '主角逼格反应', '人设强关联', '记忆锚点', '配角功能', '角色卡必备项', '配角退场规划', '行为重复点', '人推事件', '主角红线', '身份/金手指对齐', '反派逻辑', '反派分量', '反派自我叙事', '反派层级退场']))
     expect(warnReport.status).toBe('warn')
     expect(warnReport.label).toContain('角色行为缺口')
-    expect(warnReport.missed.map((item: any) => item.label)).toEqual(expect.arrayContaining(['动机链', '动机具体性', '主角逼格反应', '人设强关联', '反派逻辑', '反派分量', '反派自我叙事', '反派层级退场', '角色行为硬伤']))
+    expect(warnReport.missed.map((item: any) => item.label)).toEqual(expect.arrayContaining(['动机链', '动机具体性', '主角逼格反应', '人设强关联', '配角退场规划', '行为重复点', '人推事件', '主角红线', '身份/金手指对齐', '反派逻辑', '反派分量', '反派自我叙事', '反派层级退场', '角色行为硬伤']))
     expect(warnReport.missed.map((item: any) => item.key)).toContain('protagonist_composure_rules')
     expect(warnReport.missed.map((item: any) => item.key)).toContain('strong_association_rules')
     expect(warnReport.missed.map((item: any) => item.key)).toContain('motivation_specificity_rules')
     expect(warnReport.missed.map((item: any) => item.key)).toContain('antagonist_weight_rules')
     expect(warnReport.missed.map((item: any) => item.key)).toContain('antagonist_self_story_rules')
     expect(warnReport.missed.map((item: any) => item.key)).toContain('antagonist_tier_exit_rules')
+    expect(warnReport.missed.map((item: any) => item.key)).toContain('supporting_role_exit_rules')
+    expect(warnReport.missed.map((item: any) => item.key)).toContain('behavior_repeat_rules')
+    expect(warnReport.missed.map((item: any) => item.key)).toContain('character_driven_event_rules')
+    expect(warnReport.missed.map((item: any) => item.key)).toContain('protagonist_red_line_rules')
+    expect(warnReport.missed.map((item: any) => item.key)).toContain('identity_goldfinger_alignment_rules')
     expect(warnReport.next_actions.join('；')).toContain('强关联')
     expect(warnReport.next_actions.join('；')).toContain('动机链')
     expect(warnReport.next_actions.join('；')).toContain('起因具体')
@@ -15277,6 +15311,8 @@ describe('chapter prose word target', () => {
     expect(warnReport.next_actions.join('；')).toMatch(/反派分量|真实威胁/)
     expect(warnReport.next_actions.join('；')).toMatch(/反派自我叙事|自己的故事/)
     expect(warnReport.next_actions.join('；')).toMatch(/反派层级|退场/)
+    expect(warnReport.next_actions.join('；')).toContain('人推事件')
+    expect(warnReport.next_actions.join('；')).toContain('行为重复点')
   })
 
   test('story state sync persists a character_behavior_sync review', () => {
@@ -17799,6 +17835,27 @@ describe('chapter pre-draft brief', () => {
     expect(brief.character_behavior_contract.strong_association_rules.join('｜')).toContain('核心梗装逼爽点')
     expect(brief.character_behavior_contract.strong_association_rules.join('｜')).toContain('弱关联不喧宾夺主')
     expect(brief.character_behavior_contract.memory_anchors.join('｜')).toContain('旧夹克')
+    expect((brief.character_behavior_contract.role_card_requirements || []).join('｜')).toContain('角色定位')
+    expect((brief.character_behavior_contract.role_card_requirements || []).join('｜')).toContain('身份标签')
+    expect((brief.character_behavior_contract.role_card_requirements || []).join('｜')).toContain('外貌特征')
+    expect((brief.character_behavior_contract.role_card_requirements || []).join('｜')).toContain('核心目标')
+    expect((brief.character_behavior_contract.role_card_requirements || []).join('｜')).toContain('核心动机')
+    expect((brief.character_behavior_contract.role_card_requirements || []).join('｜')).toContain('致命弱点')
+    expect((brief.character_behavior_contract.role_card_requirements || []).join('｜')).toContain('口头禅/标志动作')
+    expect((brief.character_behavior_contract.supporting_role_exit_rules || []).join('｜')).toContain('退场方式')
+    expect((brief.character_behavior_contract.supporting_role_exit_rules || []).join('｜')).toContain('同一场景配角不超过 3 个有台词')
+    expect((brief.character_behavior_contract.behavior_repeat_rules || []).join('｜')).toContain('行为重复点')
+    expect((brief.character_behavior_contract.behavior_repeat_rules || []).join('｜')).toContain('不同场景重复')
+    expect((brief.character_behavior_contract.character_driven_event_rules || []).join('｜')).toContain('人推事件')
+    expect((brief.character_behavior_contract.character_driven_event_rules || []).join('｜')).toContain('从人物动机找方向')
+    expect((brief.character_behavior_contract.character_driven_event_rules || []).join('｜')).toContain('不要硬编剧情')
+    expect((brief.character_behavior_contract.protagonist_red_line_rules || []).join('｜')).toContain('圣母')
+    expect((brief.character_behavior_contract.protagonist_red_line_rules || []).join('｜')).toContain('无脑战斗机器')
+    expect((brief.character_behavior_contract.protagonist_red_line_rules || []).join('｜')).toContain('自暴自弃')
+    expect((brief.character_behavior_contract.identity_goldfinger_alignment_rules || []).join('｜')).toContain('社会身份')
+    expect((brief.character_behavior_contract.identity_goldfinger_alignment_rules || []).join('｜')).toContain('身世')
+    expect((brief.character_behavior_contract.identity_goldfinger_alignment_rules || []).join('｜')).toContain('金手指')
+    expect((brief.character_behavior_contract.identity_goldfinger_alignment_rules || []).join('｜')).toContain('性格')
     expect(brief.character_behavior_contract.antagonist_logic.join('｜')).toContain('反派的行为必须有内在逻辑')
     expect(brief.character_behavior_contract.antagonist_weight_rules.join('｜')).toContain('反派建立四要素')
     expect(brief.character_behavior_contract.antagonist_weight_rules.join('｜')).toContain('实力展示')
@@ -17824,6 +17881,12 @@ describe('chapter pre-draft brief', () => {
     expect(prompt).toContain('低级挑衅')
     expect(prompt).toContain('人设强关联')
     expect(prompt).toContain('每个重要角色至少 3 个强关联')
+    expect(prompt).toContain('角色卡必备项')
+    expect(prompt).toContain('配角退场规划')
+    expect(prompt).toContain('行为重复点')
+    expect(prompt).toContain('人推事件')
+    expect(prompt).toContain('主角红线')
+    expect(prompt).toContain('身份/金手指对齐')
     expect(prompt).toContain('反派建立四要素')
     expect(prompt).toContain('反派分量')
     expect(prompt).toContain('反派自我叙事')
@@ -17889,6 +17952,12 @@ describe('chapter pre-draft brief', () => {
     expect(brief.character_behavior_contract.strong_association_rules.join('｜')).toContain('每个重要角色至少 3 个强关联设定')
     expect(brief.character_behavior_contract.memory_anchors.join('｜')).toContain('旧夹克')
     expect(brief.character_behavior_contract.supporting_role_functions.join('｜')).toContain('执事')
+    expect((brief.character_behavior_contract.role_card_requirements || []).join('｜')).toContain('角色定位')
+    expect((brief.character_behavior_contract.supporting_role_exit_rules || []).join('｜')).toContain('退场方式')
+    expect((brief.character_behavior_contract.behavior_repeat_rules || []).join('｜')).toContain('行为重复点')
+    expect((brief.character_behavior_contract.character_driven_event_rules || []).join('｜')).toContain('人推事件')
+    expect((brief.character_behavior_contract.protagonist_red_line_rules || []).join('｜')).toContain('圣母')
+    expect((brief.character_behavior_contract.identity_goldfinger_alignment_rules || []).join('｜')).toContain('金手指')
     expect(brief.character_behavior_contract.antagonist_logic.join('｜')).toContain('反派的行为必须有内在逻辑')
     expect(brief.character_behavior_contract.antagonist_weight_rules.join('｜')).toContain('反派建立四要素')
     expect(brief.character_behavior_contract.antagonist_weight_rules.join('｜')).toContain('真实威胁')
@@ -54350,6 +54419,12 @@ describe('chapter context word target source guards', () => {
     expect(reviewPrompt).toContain('反派层级表')
     expect(reviewPrompt).toContain('篇幅与层级匹配')
     expect(reviewPrompt).toContain('最终Boss从第一章就有伏笔')
+    expect(reviewPrompt).toContain('角色卡必备项')
+    expect(reviewPrompt).toContain('配角退场规划')
+    expect(reviewPrompt).toContain('行为重复点')
+    expect(reviewPrompt).toContain('人推事件')
+    expect(reviewPrompt).toContain('主角红线')
+    expect(reviewPrompt).toContain('身份/金手指对齐')
     expect(revisionPrompt).toContain('character_behavior_checks')
     expect(revisionPrompt).toContain('角色行为')
     expect(revisionPrompt).toContain('强关联')
@@ -54359,6 +54434,9 @@ describe('chapter context word target source guards', () => {
     expect(revisionPrompt).toContain('创伤')
     expect(revisionPrompt).toContain('反派层级')
     expect(revisionPrompt).toContain('退场')
+    expect(revisionPrompt).toContain('行为重复点')
+    expect(revisionPrompt).toContain('人推事件')
+    expect(revisionPrompt).toContain('主角红线')
     expect(shouldReviseBlock).toContain('character_behavior_checks')
     expect(reviewNormalizeBlock).toContain('character_behavior_checks')
     expect(reviewNormalizeBlock).toContain('reviewPayload?.character_behavior_checks')

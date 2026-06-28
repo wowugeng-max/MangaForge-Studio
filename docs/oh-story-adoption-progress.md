@@ -13,27 +13,27 @@ Source reference set: `/private/tmp/oh-story-claudecode/skills/story-long-write/
 <!-- oh-story-progress-summary
 {
   "reference_total": 38,
-  "integrated": 19,
-  "partial": 19,
+  "integrated": 20,
+  "partial": 18,
   "todo": 0,
   "deferred": 0,
-  "remaining_references": 19,
-  "estimated_hours_remaining": 37.5,
-  "estimated_working_days_remaining": 6.3
+  "remaining_references": 18,
+  "estimated_hours_remaining": 36,
+  "estimated_working_days_remaining": 6
 }
 -->
 
 ## Current Snapshot
 
 - Reference files: 38
-- Integrated enough for current production use: 19
-- Partially integrated, still worth mining: 19
+- Integrated enough for current production use: 20
+- Partially integrated, still worth mining: 18
 - Not systematically reviewed yet: 0
 - Deferred: 0
-- Remaining references to improve: 19
-- Estimated remaining effort: about 37.5 engineering hours, or 6.3 focused working days at 6 hours per day
+- Remaining references to improve: 18
+- Estimated remaining effort: about 36 engineering hours, or 6 focused working days at 6 hours per day
 
-The estimate assumes the current working pattern: one small oh-story increment at a time, with prompt or workflow changes backed by focused tests, then `test:novel-server` and `check` before push. UI progress surfacing is not included in the 40 hours; after this ledger stabilizes, exposing it in the novel workspace should be a separate 4-6 hour slice.
+The estimate assumes the current working pattern: one small oh-story increment at a time, with prompt or workflow changes backed by focused tests, then `test:novel-server` and `check` before push. UI progress surfacing is not included in the remaining estimate; after this ledger stabilizes, exposing it in the novel workspace should be a separate 4-6 hour slice.
 
 ## Status Meaning
 
@@ -49,7 +49,7 @@ The estimate assumes the current working pattern: one small oh-story increment a
 | anti-ai-writing.md | integrated | Deterministic AI-pattern scans, cleanup repair prompts, deslop receipts in `ui/server/src/routes/novel-writing-service.ts`. | Keep updating examples when new prose failure modes appear. | 0.5h |
 | artifact-protocols.md | integrated | `artifact_protocol_receipts` now map oh-story standard project artifacts (`设定/关系.md`, `设定/题材定位.md`, `大纲/卷纲_第X卷.md`, `大纲/细纲_第XXX章.md`, `追踪/伏笔.md`, `追踪/时间线.md`, `追踪/角色状态.md`, `追踪/上下文.md`, `对标/{对标书名}/拆文报告.md`) into prose generation, self-review, revision, stored `oh_story_delivery_receipts`, deterministic `buildArtifactProtocolReceiptSyncReport`, post-delivery gates, and full-pipeline `story_state_update`. Focused tests cover schema gaps, locatable evidence, prompt enforcement, and top-level receipt storage. | Keep tuning required-field aliases from real project artifacts. | 0.5h |
 | banned-words.md | integrated | `OH_STORY_LEVEL_ONE_BANNED_WORDS`, weak-adverb density, context-sensitive scans, and deterministic cleanup gates are implemented. | Periodically sync banned word source list. | 0.5h |
-| character-basics.md | partial | Character state, behavior, and continuity checks exist in chapter contracts and post-delivery syncs. | Extract missing character-basics rules into pre-draft character constraints and revision checks. | 1.5h |
+| character-basics.md | integrated | Character behavior contract now carries protagonist role-card requirements, supporting-role exit planning, behavior repeat points, character-driven event rules, protagonist red lines, and identity/goldfinger alignment into pre-draft briefs, prose prompts, self-review, revision, deterministic `buildCharacterBehaviorSyncReport`, repair carry-over, and unattended blueprint construction. Focused tests cover prompt hydration, incomplete explicit-contract backfill, post-delivery sync misses, and review/revision enforcement. | Keep tuning role-card and behavior-repeat evidence heuristics from real generated chapters. | 0.5h |
 | character-design-methods.md | partial | Character behavior contract covers motivation chains, strong associations, antagonist logic, and composure. | Mine remaining design methods for project creation and role-card generation prompts. | 2h |
 | character-relations.md | partial | Character relation contract and relationship graph workflows cover pressure, attitude shifts, and relationship evidence. | Add clearer relation progression diagnostics before prose, not only after review. | 1.5h |
 | commercial-core-methods.md | partial | Target reader, bridge unit, reader payoff, retention, and longform guardrails exist across pre-draft and quality contracts. | Convert more commercial-core heuristics into creation-time and batch-planning gates. | 2h |
@@ -87,11 +87,11 @@ The estimate assumes the current working pattern: one small oh-story increment a
 
 ## Next Priority Queue
 
-1. `character-basics.md`: extract missing character-basics rules into pre-draft character constraints and revision checks.
-2. `genre-readers.md`: expand reader profiles into selectable or inferred workbench signals.
-3. `commercial-core-methods.md`: convert more commercial-core heuristics into creation-time and batch-planning gates.
-4. `emotional-arc-design.md`: connect emotion-arc findings more directly to scene-card generation and repair-task routing.
-5. `character-relations.md`: add clearer relation progression diagnostics before prose, not only after review.
+1. `genre-readers.md`: expand reader profiles into selectable or inferred workbench signals.
+2. `commercial-core-methods.md`: convert more commercial-core heuristics into creation-time and batch-planning gates.
+3. `emotional-arc-design.md`: connect emotion-arc findings more directly to scene-card generation and repair-task routing.
+4. `character-relations.md`: add clearer relation progression diagnostics before prose, not only after review.
+5. `character-design-methods.md`: mine remaining design methods for project creation and role-card generation prompts.
 
 ## Update Rules
 
