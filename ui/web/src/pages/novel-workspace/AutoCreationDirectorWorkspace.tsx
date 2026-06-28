@@ -1241,6 +1241,7 @@ export function AutoCreationDirectorWorkspace({
                   label: '生成风险修复任务',
                   description: model.deliveryRiskGate.summary,
                   modelCall: false,
+                  payload: { source: 'delivery_risk_gate', deliveryRiskGate: model.deliveryRiskGate },
                 }}
                 loadingActionKey={loadingActionKey}
                 onAction={onAction}

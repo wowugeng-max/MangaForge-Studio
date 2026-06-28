@@ -8,9 +8,54 @@ import {
   updateNovelProject,
 } from '../novel'
 import { normalizeSettingAgentPayload } from './novel-setting-routes'
+import { buildOhStoryGenreCatalogContract, formatOhStoryGenreCatalogPrompt } from './novel-genre-catalog'
+import { buildOhStoryGenreCoreMechanicsContract, formatOhStoryGenreCoreMechanicsPrompt } from './novel-genre-core-mechanics'
+import { buildOhStoryPlotSpecialTopicsContract, formatOhStoryPlotSpecialTopicsPrompt } from './novel-plot-special-topics'
+import { buildOhStoryCharacterDesignContract, formatOhStoryCharacterDesignPrompt } from './novel-character-design-contract'
+import { buildOhStoryStoryPowerContract, formatOhStoryStoryPowerPrompt } from './novel-story-power-contract'
 
 export function createNovelOriginalIncubatorService() {
-  const buildOriginalIncubatorPrompt = (project: any, body: any) => [
+  const buildOriginalIncubatorPrompt = (project: any, body: any) => {
+    const genreCatalogContract = buildOhStoryGenreCatalogContract(
+      project?.title,
+      project?.genre,
+      project?.target_audience,
+      project?.synopsis,
+      body?.genre,
+      body?.target_audience,
+      body?.idea,
+    )
+    const genreCoreMechanicsContract = buildOhStoryGenreCoreMechanicsContract(
+      project?.title,
+      project?.genre,
+      project?.target_audience,
+      project?.synopsis,
+      body?.genre,
+      body?.target_audience,
+      body?.idea,
+    )
+    const plotSpecialTopicsContract = buildOhStoryPlotSpecialTopicsContract(
+      project?.title,
+      project?.genre,
+      project?.target_audience,
+      project?.synopsis,
+      body?.genre,
+      body?.target_audience,
+      body?.idea,
+    )
+    const characterDesignContract = buildOhStoryCharacterDesignContract(
+      project,
+      body,
+      project?.reference_config?.project_seed,
+      project?.reference_config?.writing_bible,
+    )
+    const storyPowerContract = buildOhStoryStoryPowerContract(
+      project,
+      body,
+      project?.reference_config?.project_seed,
+      project?.reference_config?.writing_bible,
+    )
+    return [
     '任务：进行原创小说项目孵化，不依赖任何指定参考作品。请产出可直接落库的商业网文创作蓝图。',
     `项目标题：${project.title}`,
     `题材：${body.genre || project.genre || '未指定'}`,
@@ -20,20 +65,39 @@ export function createNovelOriginalIncubatorService() {
     project.reference_config?.project_seed ? '【已整理项目种子】' : '',
     project.reference_config?.project_seed ? JSON.stringify(project.reference_config.project_seed, null, 2).slice(0, 9000) : '',
     '',
+    formatOhStoryGenreCatalogPrompt(genreCatalogContract),
+    '',
+    formatOhStoryGenreCoreMechanicsPrompt(genreCoreMechanicsContract),
+    '',
+    formatOhStoryPlotSpecialTopicsPrompt(plotSpecialTopicsContract),
+    '',
+    formatOhStoryStoryPowerPrompt(storyPowerContract),
+    '',
+    formatOhStoryCharacterDesignPrompt(characterDesignContract),
+    '',
     '请输出 JSON，字段：',
     'directions: array，当候选方案数大于 1 时输出多个方向，每项包含 direction_id,title,commercial_positioning,core_hook,differentiators,risks,first_10_chapters,score,selection_reason',
     'worldbuilding: {world_summary,rules,known_unknowns}',
-    'characters: array，每项 name, role_type, archetype, age, gender, identity, faction, appearance, personality, abilities, items, knowledge_scope, information_boundaries, motivation, goal, conflict, backstory, secret, relationships, growth_arc, current_state',
+    'characters: array，每项 name, role_type, archetype, age, gender, identity, faction, appearance, personality, abilities, items, knowledge_scope, information_boundaries, motivation, goal, conflict, backstory, secret, relationships, growth_arc, current_state, role_card, layered_tags, strong_associations, memory_anchor, supporting_function, exit_plan',
     'outlines: array，至少包含 master 和 1-3 个 volume，每项 outline_type,title,summary,conflict_points,turning_points,hook,target_length',
     'chapters: array，生成前 30 章或指定 chapter_count 的章纲，每项 chapter_no,title,chapter_goal,chapter_summary,conflict,ending_hook,must_advance,forbidden_repeats',
     'setting_entities: array，专门用于设定工坊入库；每项 entity_type,name,summary,constraints_json,state_json,payload_json。entity_type 只能是 character/realm/ability/item/boss/rule/faction/location/foreshadowing/timeline。',
-    'writing_bible: {promise,world_rules,mainline,volume_plan,style_lock,safety_policy,forbidden}',
+    'writing_bible: {promise,world_rules,mainline,volume_plan,style_lock,safety_policy,forbidden,target_reader_contract,genre_positioning_contract,plot_special_topics_contract,story_power_contract,character_design_contract,core_contract_radar,reader_retention_contract,opening_strategy_contract}',
+    'writing_bible.target_reader_contract: {reader_profile,reader_desires,emotional_gap,chapter_value_test,quality_checks}，必须回答“写给谁看、读者想看什么、本章给什么”。',
+    'writing_bible.genre_positioning_contract: {genre_tags,platform,reader_psychology,core_hook,type_formula,selling_points,long_board,innovation_boundary,genre_catalog_contract,genre_core_mechanics_contract,quality_checks}，必须包含“拉长板而非补短板”和上方 oh-story 题材目录/核心机制契约。',
+    'writing_bible.plot_special_topics_contract: 必须完整写入上方 oh-story 特殊题材操作契约，按 matched_topics 约束金手指、题材边界、扫榜对标、都市高武、三万字卡点、阵营手牌等专题。',
+    'writing_bible.story_power_contract: 必须完整写入上方 oh-story 故事力合同，覆盖故事五维、有动作才是故事、有始有终、因果反馈和行动改变局势。',
+    'writing_bible.character_design_contract: 必须完整写入上方 oh-story 角色设计合同，覆盖三层标签、强/中/弱关联、角色卡、配角功能、反派自我叙事、金手指绑架人设、代入感和安全感。',
+    'writing_bible.core_contract_radar: {must_serve,no_drift,theme_unity_rules,repair_focus,periodic_drift_check}，periodic_drift_check.question 必须包含“当初吸引读者的卖点还在吗”。',
+    'writing_bible.reader_retention_contract: {retention_double_engine,opening_hook_rule,ending_hook_rule,reward_randomness_rule,quality_checks}，opening_hook_rule 必须包含“前300字”，ending_hook_rule 必须留下下一章动作压力。',
+    'writing_bible.opening_strategy_contract: {hook_type,opening_flow,mainline_graft,first_5_chapter_promise,threshold_ladder,forbidden_mixing,quality_checks}，hook_type 只能取“事件噱头/金手指噱头/人设噱头”之一；必须明确事件噱头和金手指噱头不能混用，写清前5章如何完成吸量承诺、何时嫁接主线、如何用 threshold_ladder 设门槛拉长剧情。',
     'commercial_positioning: {platform,reader_promise,selling_points,tropes,risks}',
     '',
     '必须只输出一个合法 JSON object，不要输出 Markdown、解释、代码块或空对象。',
     '如果无法完整生成，也必须至少输出 commercial_positioning、characters、outlines、chapters 四类内容；chapters 数量不得少于 5。',
-    '要求：主角目标清晰，金手指/能力有代价，前 10 章追读钩子密集，分卷目标明确，避免空泛设定。',
+    '要求：主角目标清晰，金手指/能力有代价，前 10 章追读钩子密集，分卷目标明确；创建阶段必须先立清目标读者、题材定位、核心承诺雷达、追读留存契约和开篇噱头策略，避免空泛设定或开篇承诺混乱。',
   ].join('\n')
+  }
 
   const normalizeIncubatorPayload = (payload: any, chapterCount: number) => {
     const directions = Array.isArray(payload?.directions) ? payload.directions : []

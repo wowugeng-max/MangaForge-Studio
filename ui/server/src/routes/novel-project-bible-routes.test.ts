@@ -6,9 +6,46 @@ import * as bibleRoutes from './novel-project-bible-routes'
 const {
   buildStyleSampleCandidatesFromChapters,
   buildStyleSampleEffectivenessReport,
+  normalizeGeneratedWritingBible,
 } = bibleRoutes
 
 describe('writing bible style sample candidates', () => {
+  test('normalizes generated writing bible into creation contract fields', () => {
+    const writingBible = normalizeGeneratedWritingBible(
+      {
+        title: '剑烛大荒',
+        genre: '仙侠',
+        synopsis: '少年用符火审案破局。',
+        target_audience: '男频',
+        length_target: 'epic',
+        style_tags: [],
+        reference_config: {},
+      },
+      {
+        promise: '每章都有符火破局爽点。',
+        mainline: {
+          protagonist_drive: '主角必须夺回被夺走的火种。',
+          core_conflict: '旧规与新火的冲突。',
+          longform_capacity: '九卷大荒门派和火种谜团支撑百万字推进。',
+        },
+        volume_plan: [{ goal: '进入大荒门并建立第一阶段规则优势。' }],
+        commercial_positioning: {
+          selling_points: ['符火审案'],
+          retention_strategy: '前三十章完成入门、立敌、第一次公开破局。',
+        },
+      },
+      {},
+    )
+
+    expect(writingBible.reader_promise).toContain('符火破局')
+    expect(writingBible.protagonist_drive).toContain('火种')
+    expect(writingBible.core_conflict).toContain('旧规')
+    expect(writingBible.current_volume_goal).toContain('大荒门')
+    expect(writingBible.innovation_hook).toContain('符火审案')
+    expect(writingBible.first30_plan).toContain('前三十章')
+    expect(writingBible.longform_capacity).toContain('百万字')
+  })
+
   test('extracts abstract style sample candidates from high-score chapters without source prose', () => {
     const chapters = [
       {

@@ -92,6 +92,166 @@ describe('novel project seed prompt', () => {
     expect(epicPrompt).toContain('长期追读')
   })
 
+  test('asks seed generation to output oh-story creation contracts', async () => {
+    const { buildProjectSeedPrompt } = await import('./novel-core-routes')
+
+    const prompt = buildProjectSeedPrompt('双主角规则怪谈', '规则测试', 'epic')
+
+    expect(prompt).toContain('target_reader_contract')
+    expect(prompt).toContain('genre_positioning_contract')
+    expect(prompt).toContain('mainline_definition_contract')
+    expect(prompt).toContain('story_power_contract')
+    expect(prompt).toContain('character_design_contract')
+    expect(prompt).toContain('core_contract_radar')
+    expect(prompt).toContain('reader_retention_contract')
+    expect(prompt).toContain('longform_structure_contract')
+    expect(prompt).toContain('写给谁看')
+    expect(prompt).toContain('读者想看什么')
+    expect(prompt).toContain('本章给什么')
+    expect(prompt).toContain('拉长板而非补短板')
+    expect(prompt).toContain('主线不等于升级')
+    expect(prompt).toContain('主线是一件事')
+    expect(prompt).toContain('升级是主角达成目标的行动')
+    expect(prompt).toContain('故事五维')
+    expect(prompt).toContain('有动作才是故事')
+    expect(prompt).toContain('有始有终')
+    expect(prompt).toContain('因果反馈')
+    expect(prompt).toContain('三层标签')
+    expect(prompt).toContain('强/中/弱关联')
+    expect(prompt).toContain('角色卡')
+    expect(prompt).toContain('金手指绑架人设')
+    expect(prompt).toContain('当初吸引读者的卖点还在吗')
+    expect(prompt).toContain('前300字')
+    expect(prompt).toContain('一级/二级/三级')
+    expect(prompt).toContain('五级大纲')
+    expect(prompt).toContain('每卷目的')
+    expect(prompt).toContain('顶层势力')
+    expect(prompt).toContain('强主线')
+    expect(prompt).toContain('弱主线')
+    expect(prompt).toContain('明线')
+    expect(prompt).toContain('暗线')
+  })
+
+  test('injects oh-story genre catalog guidance into seed generation', async () => {
+    const { buildProjectSeedPrompt } = await import('./novel-core-routes')
+
+    const guaitanPrompt = buildProjectSeedPrompt('玩家被抽入规则副本，靠双主角互补通关', '规则测试', 'epic')
+    const xianxiaPrompt = buildProjectSeedPrompt('废材剑修在仙侠宗门从低谷崛起', '剑烛大荒', 'long')
+
+    expect(guaitanPrompt).toContain('genre_catalog_contract')
+    expect(guaitanPrompt).toContain('oh_story_genre_catalog_v1')
+    expect(guaitanPrompt).toContain('规则怪谈')
+    expect(guaitanPrompt).toContain('玩家被抽入规则副本')
+    expect(guaitanPrompt).toContain('背景故事→规则包装→通关线+dead end')
+    expect(guaitanPrompt).toContain('别人死→主角装/破局→揭露→升华')
+    expect(guaitanPrompt).toContain('智斗和金手指负责包合理外衣')
+    expect(guaitanPrompt).toContain('每2000字至少一个悬念/反转/信息差钩子')
+
+    expect(xianxiaPrompt).toContain('仙侠/玄幻')
+    expect(xianxiaPrompt).toContain('力量体系清晰')
+    expect(xianxiaPrompt).toContain('金手指独特有限制')
+    expect(xianxiaPrompt).toContain('战斗有策略非纯数值')
+    expect(xianxiaPrompt).toContain('地图逐层展开')
+  })
+
+  test('injects oh-story genre core mechanics into seed generation', async () => {
+    const { buildProjectSeedPrompt } = await import('./novel-core-routes')
+
+    const prompt = buildProjectSeedPrompt('都市高武，底层学生靠碎片化金手指升级打怪挣钱', '拳证星河', 'epic')
+
+    expect(prompt).toContain('genre_core_mechanics_contract')
+    expect(prompt).toContain('oh_story_genre_core_mechanics_v1')
+    expect(prompt).toContain('主题(立意)→题材核心(吸引力)→核心情绪(体验链条)')
+    expect(prompt).toContain('每章至少有期待点或爽点之一')
+    expect(prompt).toContain('微创新不超3个')
+    expect(prompt).toContain('纵向+横向+交叉')
+    expect(prompt).toContain('金手指类型与世界观压迫特征对应')
+    expect(prompt).toContain('常规升级流')
+    expect(prompt).toContain('碎片化/解锁型')
+    expect(prompt).toContain('后一个爽点在影响力/层级/收获/认知至少一个维度上超过前一个')
+  })
+
+  test('injects oh-story plot special topics into seed generation', async () => {
+    const { buildProjectSeedPrompt } = await import('./novel-core-routes')
+
+    const prompt = buildProjectSeedPrompt('都市高武，底层学生靠抽卡系统升级打怪挣钱，三万字上架高潮打全国联考', '拳证星河', 'epic')
+
+    expect(prompt).toContain('plot_special_topics_contract')
+    expect(prompt).toContain('oh_story_plot_special_topics_v1')
+    expect(prompt).toContain('金手指拆分成面板/不倒退/重复提升')
+    expect(prompt).toContain('条件-反馈模型')
+    expect(prompt).toContain('所有目标必须和钱挂钩')
+    expect(prompt).toContain('高中->大学，武馆->天下第一武道会')
+    expect(prompt).toContain('题材边界')
+    expect(prompt).toContain('同平台、同题材、同类型')
+    expect(prompt).toContain('三万字内无关卡点的装逼打脸一个字不要写')
+  })
+
+  test('routes remaining oh-story genre catalog frameworks into creation contracts', async () => {
+    const { buildOhStoryGenreCatalogContract } = await import('./novel-genre-catalog')
+
+    const cases = [
+      ['丈夫出轨转移财产，妻子觉醒独立', '小三/婚恋', '发现过程要有悬念'],
+      ['极品亲戚欺压老实人，熟人社会里恶有恶报', '世情', '靠细节不靠大事件'],
+      ['女主被虐至死，男主死后追悔莫及', '死人文学', '核心是来不及'],
+      ['霸总特殊相遇后极致宠溺，闺蜜震惊', '霸总/甜宠', '甜的密度决定粘性'],
+      ['独特金手指聊天群脑洞文，靠创意设定做核心卖点', '脑洞文', '核心梗决定赛道'],
+      ['凡人流修仙，主角无天赋靠谨慎算计生存', '凡人流', '利弊权衡是核心模式'],
+      ['穿越到架空历史节点，利用现代知识改变命运', '历史/架空历史', '现代认知信息差=最大金手指'],
+      ['同人流派，在已知世界加入新变量并改写名场面', '同人流派', '已知世界 + 新变量 + 名场面改写'],
+      ['长生流主角看沧海桑田和代际传承', '长生流', '凡俗时期最好看'],
+      ['无限流每个游戏副本二十章自成故事', '无限流', '20-30章一个副本'],
+      ['西幻骑士文，从铁匠学徒靠骑士晋升体系崛起', '西幻/骑士文', '骑士自带晋升属性'],
+      ['新媒体文，第一情绪对是不爽到装逼解气', '新媒体文', '一切为情绪服务'],
+      ['搞笑文主角玩梗但必须符合逻辑', '搞笑文', '搞笑必须符合逻辑'],
+      ['悬疑故事靠铺垫和氛围推进真相', '悬疑', '信息释放节奏要控好'],
+      ['后悔流，不写退婚老套外衣，后悔对象换成事业选择', '后悔流', '后悔对象可从爱情转为事业选择'],
+    ] as const
+
+    for (const [idea, framework, expected] of cases) {
+      const contract = buildOhStoryGenreCatalogContract(idea)
+      const serialized = JSON.stringify(contract)
+      expect(contract.matched_framework).toBe(framework)
+      expect(serialized).toContain(expected)
+      expect(contract.quality_checks.join('｜')).toContain('每2000字至少一个悬念/反转/信息差钩子')
+    }
+  })
+
+  test('preserves model generated creation contracts while recovering project seeds', async () => {
+    const { buildRecoverableProjectSeed } = await import('./novel-core-routes')
+
+    const recovered = buildRecoverableProjectSeed({
+      title: '灰域双生',
+      genre: '都市规则怪谈',
+      synopsis: '双主角进入灰域规则副本。',
+      logline: '一个负责打到怪物露出规则，一个负责拆出胜利条件。',
+      worldbuilding: { world_summary: '灰域污染现实地点。' },
+      protagonist: { name: '林野', goal: '打穿灰域' },
+      commercial_positioning: {
+        platform: '番茄',
+        reader_promise: '每章都有规则发现、代价压力和反制爽点。',
+        selling_points: ['莽夫破局', '规则分析'],
+        risks: ['不能写成纯打怪'],
+      },
+      writing_bible: {
+        target_reader_contract: { reader_profile: '番茄男频规则怪谈读者' },
+        genre_positioning_contract: { genre_tags: ['都市规则怪谈'] },
+        core_contract_radar: { must_serve: ['规则发现'] },
+        reader_retention_contract: { opening_hook_rule: '前300字承接上一章压力' },
+      },
+      volume_outlines: [{ title: '第一卷', summary: '员工餐厅副本' }],
+      chapter_outlines: [{ chapter_no: 1, title: '午夜入职', summary: '读到第一份规则' }],
+    }, '双主角规则怪谈', '灰域双生', 'epic')
+
+    expect(recovered.seed.commercial_positioning.platform).toBe('番茄')
+    expect(recovered.seed.commercial_positioning.reader_promise).toContain('每章都有规则发现')
+    expect(recovered.seed.commercial_positioning.risks.join('｜')).toContain('不能写成纯打怪')
+    expect(recovered.seed.writing_bible.target_reader_contract.reader_profile).toContain('番茄男频')
+    expect(recovered.seed.writing_bible.genre_positioning_contract.genre_tags.join('｜')).toContain('都市规则怪谈')
+    expect(recovered.seed.writing_bible.core_contract_radar.must_serve.join('｜')).toContain('规则发现')
+    expect(recovered.seed.writing_bible.reader_retention_contract.opening_hook_rule).toContain('前300字')
+  })
+
   test('rejects sparse seeds that would render an empty deep draft review', async () => {
     const { hasUsableProjectSeed } = await import('./novel-core-routes')
 
@@ -408,10 +568,131 @@ describe('novel project seed prompt', () => {
     expect(response.statusCode).toBe(200)
     expect(response.body.seed_materialization.chapters).toBe(30)
     expect(response.body.reference_config.writing_bible.promise).toContain('山海经异文')
+    expect(response.body.reference_config.writing_bible.reader_promise).toContain('山海经异文')
+    expect(response.body.reference_config.writing_bible.protagonist_drive).toContain('破解大荒规则')
+    expect(response.body.reference_config.writing_bible.core_conflict).toContain('异兽规则')
+    expect(response.body.reference_config.writing_bible.current_volume_goal).toContain('九婴焚世')
+    expect(response.body.reference_config.writing_bible.innovation_hook).toContain('山海经')
+    expect(response.body.reference_config.writing_bible.first30_plan).toContain('前30章')
+    expect(response.body.reference_config.writing_bible.longform_capacity).toContain('epic')
     expect(response.body.reference_config.writing_bible.mainline.hook).toBeTruthy()
     const chapters = await listNovelChapters(workspace, response.body.id)
     expect(chapters).toHaveLength(30)
     expect(chapters[0].title).toBe('第1章')
+  })
+
+  test('materializes oh-story creation contracts into the writing bible', async () => {
+    const workspace = await tempDir('mangaforge-novel-materialize-creation-contracts-')
+    const { registerNovelCoreRoutes } = await import('./novel-core-routes')
+    const { app, handlers } = createRouteHarness()
+    registerNovelCoreRoutes(app as any, () => workspace)
+    const createProject = handlers.get('POST /api/novel/projects')
+    expect(createProject).toBeTruthy()
+
+    const seed = {
+      title: '灰域双生',
+      genre: '都市规则怪谈',
+      sub_genres: ['双主角', '无限流'],
+      length_target: 'epic',
+      target_audience: '18-30 岁番茄男频读者，喜欢规则破解、强反差搭档和持续追更钩子。',
+      synopsis: '莽夫林野和规则分析师沈砚被卷入灰域副本，用武力试错和规则推演反制怪谈。',
+      logline: '一个负责把怪物打到暴露规则，一个负责把规则拆成胜利条件。',
+      main_conflict: '灰域规则不断升级，双主角必须在代价失控前找出副本漏洞。',
+      commercial_tags: ['规则破解爽点', '双主角互补', '副本升级'],
+      commercial_positioning: {
+        platform: '番茄',
+        reader_promise: '每章都有规则发现、代价压力和一次可感知反制。',
+        selling_points: ['莽夫破局制造反差', '规则分析带来智斗爽感'],
+        risks: ['不能写成纯打怪', '不能让规则分析停留在解释'],
+      },
+      protagonist: { name: '林野', goal: '打穿灰域副本并救出妹妹', motivation: '把不可控规则变成可打破的秩序' },
+      worldbuilding: {
+        world_summary: '灰域会把现实地点污染成带规则的副本。',
+        rules: ['违反规则会支付记忆或身体代价', '副本漏洞必须由行动触发'],
+      },
+      volume_outlines: [{ title: '第一卷：午夜员工餐厅', summary: '建立双主角互补和灰域规则升级压力。' }],
+      chapter_outlines: [{ chapter_no: 1, title: '午夜入职', summary: '两人第一次读到员工餐厅规则。' }],
+    }
+
+    const response = await callRoute(createProject, {
+      body: {
+        title: seed.title,
+        genre: seed.genre,
+        length_target: seed.length_target,
+        target_audience: seed.target_audience,
+        synopsis: seed.synopsis,
+        reference_config: { project_seed: seed },
+        auto_materialize_seed: true,
+      },
+    })
+
+    expect(response.statusCode).toBe(200)
+    const bible = response.body.reference_config.writing_bible
+    expect(bible.target_reader_contract.source).toBe('oh_story_creation_contract_v1')
+    expect(bible.target_reader_contract.reader_profile).toContain('18-30')
+    expect(bible.target_reader_contract.reader_desires.join('｜')).toContain('规则破解爽点')
+    expect(bible.target_reader_contract.chapter_value_test.join('｜')).toContain('写给谁看')
+    expect(bible.genre_positioning_contract.source).toBe('oh_story_creation_contract_v1')
+    expect(bible.genre_positioning_contract.genre_tags.join('｜')).toContain('都市规则怪谈')
+    expect(bible.genre_positioning_contract.platform).toBe('番茄')
+    expect(bible.genre_positioning_contract.selling_points.join('｜')).toContain('莽夫破局')
+    expect(bible.genre_positioning_contract.genre_catalog_contract.source).toBe('oh_story_genre_catalog_v1')
+    expect(bible.genre_positioning_contract.genre_catalog_contract.matched_framework).toBe('规则怪谈')
+    expect(bible.genre_positioning_contract.genre_catalog_contract.structure_beats.join('｜')).toContain('背景故事')
+    expect(bible.genre_positioning_contract.genre_catalog_contract.quality_checks.join('｜')).toContain('每2000字至少一个悬念/反转/信息差钩子')
+    expect(bible.genre_positioning_contract.genre_core_mechanics_contract.source).toBe('oh_story_genre_core_mechanics_v1')
+    expect(bible.genre_positioning_contract.genre_core_mechanics_contract.core_hook_layers.join('｜')).toContain('主题(立意)')
+    expect(bible.genre_positioning_contract.genre_core_mechanics_contract.chapter_loop_rules.join('｜')).toContain('每章至少有期待点或爽点之一')
+    expect(bible.genre_positioning_contract.genre_core_mechanics_contract.micro_innovation_rules.join('｜')).toContain('微创新不超3个')
+    expect(bible.genre_positioning_contract.genre_core_mechanics_contract.conflict_network_rules.join('｜')).toContain('纵向+横向+交叉')
+    expect(bible.genre_positioning_contract.genre_core_mechanics_contract.goldfinger_worldview_fit.worldview_type).toBeTruthy()
+    expect(bible.genre_positioning_contract.genre_core_mechanics_contract.threshold_escalation_rules.join('｜')).toContain('后一个爽点')
+    expect(bible.mainline_definition_contract.source).toBe('oh_story_plot_core_mainline_definition_v1')
+    expect(bible.mainline_definition_contract.definition_rules.join('｜')).toContain('主线不等于升级')
+    expect(bible.mainline_definition_contract.definition_rules.join('｜')).toContain('主线是一件事')
+    expect(bible.mainline_definition_contract.action_rules.join('｜')).toContain('升级是主角达成目标的行动')
+    expect(bible.mainline_definition_contract.quality_checks.join('｜')).toContain('不是一个元素')
+    expect(bible.story_power_contract.source).toBe('oh_story_plot_core_story_power_v1')
+    expect(bible.story_power_contract.story_power_dimensions.join('｜')).toContain('故事五维')
+    expect(bible.story_power_contract.action_rules.join('｜')).toContain('有动作才是故事')
+    expect(bible.story_power_contract.beginning_end_rules.join('｜')).toContain('有始有终')
+    expect(bible.story_power_contract.causal_feedback_rules.join('｜')).toContain('因果反馈')
+    expect(bible.character_design_contract.source).toBe('oh_story_character_design_methods_v1')
+    expect(bible.character_design_contract.layered_tag_rules.join('｜')).toContain('三层标签')
+    expect(bible.character_design_contract.association_rules.join('｜')).toContain('强/中/弱关联')
+    expect(bible.character_design_contract.role_card_schema.join('｜')).toContain('角色定位')
+    expect(bible.character_design_contract.supporting_role_rules.join('｜')).toContain('配角功能')
+    expect(bible.character_design_contract.antagonist_design_rules.join('｜')).toContain('反派也有梦想')
+    expect(bible.character_design_contract.protagonist_alignment_rules.join('｜')).toContain('金手指绑架人设')
+    expect(bible.character_design_contract.immersion_safety_rules.join('｜')).toContain('靠山过度')
+    expect(bible.plot_special_topics_contract.source).toBe('oh_story_plot_special_topics_v1')
+    expect(bible.plot_special_topics_contract.goldfinger_design_rules.join('｜')).toContain('面板')
+    expect(bible.plot_special_topics_contract.genre_boundary_rules.join('｜')).toContain('题材边界')
+    expect(bible.plot_special_topics_contract.market_benchmark_rules.join('｜')).toContain('同平台、同题材、同类型')
+    expect(bible.plot_special_topics_contract.faction_hand_rules.join('｜')).toContain('按实力高低排序各阵营角色')
+    expect(bible.core_contract_radar.source).toBe('oh_story_creation_contract_v1')
+    expect(bible.core_contract_radar.must_serve.join('｜')).toContain('每章都有规则发现')
+    expect(bible.core_contract_radar.no_drift.join('｜')).toContain('不能写成纯打怪')
+    expect(bible.reader_retention_contract.source).toBe('oh_story_creation_contract_v1')
+    expect(bible.reader_retention_contract.opening_hook_rule).toContain('前300字')
+    expect(bible.reader_retention_contract.ending_hook_rule).toContain('下一章')
+    expect(bible.longform_structure_contract.source).toBe('oh_story_outline_structure_theory_v1')
+    expect(bible.longform_structure_contract.structure_level_rules.join('｜')).toContain('一级/二级/三级')
+    expect(bible.longform_structure_contract.five_act_causal_chain_rules.join('｜')).toContain('五幕式')
+    expect(bible.longform_structure_contract.outline_expansion_rules.join('｜')).toContain('下一级服务上一级')
+    expect(bible.longform_structure_contract.volume_framework_rules.join('｜')).toContain('每卷目的')
+    expect(bible.longform_structure_contract.map_transition_rules.join('｜')).toContain('顶层势力')
+    expect(bible.longform_structure_contract.line_layout_rules.join('｜')).toContain('支线')
+    expect(bible.longform_structure_contract.architecture_choice_rules.join('｜')).toContain('强主线')
+    expect(bible.longform_structure_contract.architecture_choice_rules.join('｜')).toContain('弱主线')
+    expect(bible.longform_structure_contract.sixth_act_afterglow_rules.join('｜')).toContain('明线')
+    expect(bible.longform_structure_contract.sixth_act_afterglow_rules.join('｜')).toContain('暗线')
+    expect(bible.commercial_positioning.reader_promise).toContain('每章都有规则发现')
+    expect(bible.commercial_positioning.selling_points.join('｜')).toContain('规则分析')
+    expect(response.body.reference_config.commercial_positioning.platform).toBe('番茄')
+    expect(response.body.reference_config.commercial_positioning.reader_promise).toContain('每章都有规则发现')
+    expect(response.body.reference_config.commercial_positioning.selling_points.join('｜')).toContain('规则分析')
+    expect(response.body.reference_config.commercial_positioning.risks.join('｜')).toContain('不能写成纯打怪')
   })
 
   test('materialization keeps structural chapter beats out of chapter titles', async () => {

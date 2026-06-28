@@ -59,7 +59,83 @@ export function getNovelPayload(result: any) {
     const payload = parseJsonLikePayload(candidate)
     if (payload && typeof payload === 'object' && !Array.isArray(payload)) return payload
   }
+  for (const candidate of candidates) {
+    const payload = recoverPartialProseJsonPayload(candidate)
+    if (payload) return payload
+  }
   return {}
+}
+
+function recoverPartialProseJsonPayload(value: any) {
+  const raw = typeof value === 'string' ? value : textFromContentValue(value)
+  if (!raw || !/chapter_text/.test(raw)) return null
+  const baseCandidates = [
+    raw,
+    raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, ''),
+    raw.match(/```(?:json)?\s*([\s\S]*)/i)?.[1] || '',
+  ].filter(Boolean)
+  const candidates = baseCandidates.flatMap(candidate => {
+    const decoded = decodeEscapedJsonCandidate(candidate)
+    return decoded ? [candidate, decoded] : [candidate]
+  })
+  for (const candidate of candidates) {
+    const chapterText = readClosedJsonStringField(candidate, 'chapter_text')
+    if (!chapterText || chapterText.replace(/\s/g, '').length < 200) continue
+    const chapterNo = readJsonNumberField(candidate, 'chapter_no') || readJsonNumberField(candidate, 'chapterNo')
+    const title = readClosedJsonStringField(candidate, 'title')
+    return {
+      recovered_from_partial_json: true,
+      chapter_text: chapterText,
+      prose_chapters: [
+        {
+          ...(chapterNo ? { chapter_no: chapterNo } : {}),
+          ...(title ? { title } : {}),
+          chapter_text: chapterText,
+        },
+      ],
+    }
+  }
+  return null
+}
+
+function readJsonNumberField(text: string, field: string) {
+  const match = new RegExp(`"${field}"\\s*:\\s*(-?\\d+(?:\\.\\d+)?)`).exec(text)
+  return match ? Number(match[1]) : 0
+}
+
+function readClosedJsonStringField(text: string, field: string) {
+  const regex = new RegExp(`"${field}"\\s*:\\s*"`, 'g')
+  let match: RegExpExecArray | null
+  while ((match = regex.exec(text))) {
+    const quoteIndex = match.index + match[0].length - 1
+    const parsed = readClosedJsonStringAt(text, quoteIndex)
+    if (parsed) return parsed
+  }
+  return ''
+}
+
+function readClosedJsonStringAt(text: string, quoteIndex: number) {
+  if (text[quoteIndex] !== '"') return ''
+  let escaped = false
+  for (let i = quoteIndex + 1; i < text.length; i += 1) {
+    const char = text[i]
+    if (escaped) {
+      escaped = false
+      continue
+    }
+    if (char === '\\') {
+      escaped = true
+      continue
+    }
+    if (char === '"') {
+      try {
+        return JSON.parse(text.slice(quoteIndex, i + 1))
+      } catch {
+        return ''
+      }
+    }
+  }
+  return ''
 }
 
 function textFromOutputParts(parts: any[]) {
@@ -191,12 +267,38 @@ export function stableTextHash(value: any) {
 
 export function normalizeIssue(issue: any) {
   if (typeof issue === 'string') return { severity: 'medium', type: 'general', description: issue, suggestion: '' }
+  const category = String(issue?.category || issue?.type || issue?.issue_type || issue?.label || issue?.key || 'general')
+  const fix = String(issue?.fix || issue?.suggestion || issue?.suggested_fix || '')
+  const sceneNo = Number(issue?.scene_no || issue?.sceneNo || 0)
+  const fields = Array.isArray(issue?.fields) ? issue.fields.map((item: any) => String(item)).filter(Boolean) : []
+  const location = String(issue?.location || issue?.segment || (sceneNo ? `场景${sceneNo}` : ''))
+  const descriptionParts = [
+    issue?.description || issue?.message || issue?.issue || issue?.reason || issue?.label || issue?.key || '',
+    issue?.key && issue?.label ? issue.key : '',
+    fields.length ? `字段：${fields.join('、')}` : '',
+  ].filter(Boolean)
   return {
-    severity: String(issue?.severity || 'medium'),
-    type: String(issue?.type || issue?.issue_type || 'general'),
-    description: String(issue?.description || issue?.message || issue?.issue || ''),
-    suggestion: String(issue?.suggestion || issue?.suggested_fix || ''),
+    severity: String(issue?.severity || issue?.status || 'medium'),
+    type: category,
+    category,
+    location,
+    evidence: Array.isArray(issue?.evidence) ? issue.evidence.map((item: any) => String(item)).join('；') : String(issue?.evidence || issue?.quote || ''),
+    description: descriptionParts.join('｜'),
+    fix,
+    suggestion: fix,
   }
+}
+
+export function formatReviewIssueForStorage(issue: any) {
+  const normalized = normalizeIssue(issue)
+  return [
+    normalized.severity || 'medium',
+    normalized.category || normalized.type || 'general',
+    normalized.location,
+    normalized.description || String(issue || ''),
+    normalized.evidence ? `证据：${normalized.evidence}` : '',
+    normalized.fix ? `修法：${normalized.fix}` : '',
+  ].filter(Boolean).join('｜')
 }
 
 export function deepMergeObjects(base: any, override: any): any {
@@ -258,26 +360,334 @@ export function getQualityGate(project: any) {
   }
 }
 
+const QUALITY_GATE_STRUCTURED_CHECK_FIELDS = [
+  ['platform_checks', 'platformChecks'],
+  ['content_rubric_checks', 'contentRubricChecks'],
+  ['target_reader_checks', 'targetReaderChecks'],
+  ['genre_positioning_checks', 'genrePositioningChecks'],
+  ['upgrade_rhythm_checks', 'upgradeRhythmChecks'],
+  ['conflict_structure_checks', 'conflictStructureChecks'],
+  ['deslop_checks', 'deslopChecks'],
+  ['prose_meta_checks', 'proseMetaChecks'],
+  ['dialogue_checks', 'dialogueChecks'],
+  ['plot_dynamics_checks', 'plotDynamicsChecks'],
+  ['continuity_heat_checks', 'continuityHeatChecks'],
+  ['character_relation_checks', 'characterRelationChecks'],
+  ['character_behavior_checks', 'characterBehaviorChecks'],
+  ['asset_linkage_checks', 'assetLinkageChecks'],
+  ['state_tracking_checks', 'stateTrackingChecks'],
+  ['source_readiness_checks', 'sourceReadinessChecks'],
+  ['intent_confirmation_checks', 'intentConfirmationChecks'],
+  ['benchmark_recall_checks', 'benchmarkRecallChecks'],
+  ['information_flow_checks', 'informationFlowChecks'],
+  ['expectation_threshold_checks', 'expectationThresholdChecks'],
+  ['story_loop_checks', 'storyLoopChecks'],
+  ['emotional_arc_checks', 'emotionalArcChecks'],
+  ['chapter_hook_checks', 'chapterHookChecks'],
+  ['paragraph_hook_checks', 'paragraphHookChecks'],
+  ['suspense_checks', 'suspenseChecks'],
+  ['reversal_checks', 'reversalChecks'],
+  ['opening_checks', 'openingChecks'],
+  ['prose_craft_checks', 'proseCraftChecks'],
+  ['punctuation_tone_checks', 'punctuationToneChecks'],
+  ['quality_audit_checks', 'qualityAuditChecks'],
+  ['revision_receipt_checks', 'revisionReceiptChecks'],
+  ['deslop_repair_checks', 'deslopRepairChecks'],
+]
+
+function collectFailedStructuredReviewChecks(review: any) {
+  const directChecks = QUALITY_GATE_STRUCTURED_CHECK_FIELDS
+    .flatMap(([snakeField, camelField]) => asArray(review?.[snakeField] || review?.[camelField]))
+  const diagnostics = review?.deslop_gate_diagnostics || review?.deslopGateDiagnostics || {}
+  const diagnosticGates = asArray(diagnostics?.gates)
+  return [...directChecks, ...diagnosticGates]
+    .filter((check: any) => String(check?.status || '').toLowerCase() === 'fail')
+    .map((check: any) => compactText(check?.label || check?.key || check?.name || check?.evidence || '结构化自检失败', 80))
+    .filter(Boolean)
+}
+
+function collectUndeliveredDeliveryRiskReceipts(review: any) {
+  return asArray(review?.delivery_risk_receipts || review?.deliveryRiskReceipts)
+    .filter((receipt: any) => {
+      const remainingRisk = compactText(receipt?.remaining_risk || receipt?.remainingRisk || receipt?.risk || '', 120)
+      const normalizedRemainingRisk = remainingRisk.toLowerCase()
+      const hasRemainingRisk = Boolean(remainingRisk) && !['无', 'none', 'no', 'n/a', 'null', 'false', '0'].includes(normalizedRemainingRisk)
+      return receipt?.delivered === false || hasRemainingRisk
+    })
+    .map((receipt: any) => compactText(
+      receipt?.risk_item
+      || receipt?.riskItem
+      || receipt?.required_action
+      || receipt?.requiredAction
+      || receipt?.remaining_risk
+      || receipt?.remainingRisk
+      || '上一章承接风险未兑现',
+      80,
+    ))
+    .filter(Boolean)
+}
+
+function hasUsableNextChapterQualityPlan(review: any) {
+  const deliveryReceipts = review?.oh_story_delivery_receipts || review?.ohStoryDeliveryReceipts || {}
+  const plan = review?.next_chapter_quality_plan
+    || review?.nextChapterQualityPlan
+    || deliveryReceipts?.next_chapter_quality_plan
+    || deliveryReceipts?.nextChapterQualityPlan
+    || null
+  if (!plan || typeof plan !== 'object') return false
+  const qualityFocus = asArray(plan?.quality_focus || plan?.qualityFocus)
+  const openingActions = asArray(plan?.opening_actions || plan?.openingActions)
+  const middleActions = asArray(plan?.middle_actions || plan?.middleActions)
+  const endingActions = asArray(plan?.ending_actions || plan?.endingActions)
+  const avoidRepetition = asArray(plan?.avoid_repetition || plan?.avoidRepetition)
+  const evidenceBasis = asArray(plan?.evidence_basis || plan?.evidenceBasis)
+  return [
+    qualityFocus,
+    openingActions,
+    middleActions,
+    endingActions,
+    avoidRepetition,
+    evidenceBasis,
+  ].every(items => items.some((item: any) => compactText(item, 120)))
+}
+
 export function getQualityGateDecision(project: any, review: any, safetyDecision: any = null) {
   const gate = getQualityGate(project)
   const issues = Array.isArray(review?.issues) ? review.issues.map(normalizeIssue) : []
   const criticalCount = issues.filter(issue => String(issue.severity || '').toLowerCase() === 'critical').length
   const highCount = issues.filter(issue => String(issue.severity || '').toLowerCase() === 'high').length
   const score = Number(review?.score || 0)
+  const failedStructuredChecks = collectFailedStructuredReviewChecks(review)
+  const undeliveredDeliveryRiskReceipts = collectUndeliveredDeliveryRiskReceipts(review)
+  const missingNextChapterQualityPlan = !hasUsableNextChapterQualityPlan(review)
   const reasons = [
     score && score < gate.min_score ? `质检评分 ${score} 低于入库阈值 ${gate.min_score}` : '',
     gate.require_revision_before_store && review?.needs_revision && !review?.revised ? '自检要求修订，但当前没有可用修订稿' : '',
     criticalCount > gate.max_critical_issues ? `严重问题 ${criticalCount} 个超过上限 ${gate.max_critical_issues}` : '',
     highCount > gate.max_high_issues ? `高风险问题 ${highCount} 个超过上限 ${gate.max_high_issues}` : '',
+    failedStructuredChecks.length ? `结构化自检失败 ${failedStructuredChecks.length} 项：${failedStructuredChecks.slice(0, 5).join('；')}` : '',
+    undeliveredDeliveryRiskReceipts.length ? `承接回执未兑现 ${undeliveredDeliveryRiskReceipts.length} 项：${undeliveredDeliveryRiskReceipts.slice(0, 5).join('；')}` : '',
+    missingNextChapterQualityPlan ? '下一章质量续航计划缺失：必须输出 next_chapter_quality_plan，包含质量目标、开篇/中段/章末动作、禁用重复和证据依据' : '',
     gate.block_on_safety && safetyDecision?.blocked ? `仿写安全未通过：${(safetyDecision.reasons || []).join('；')}` : '',
   ].filter(Boolean)
   return { gate, passed: !gate.enabled || reasons.length === 0, reasons, score, critical_count: criticalCount, high_count: highCount }
 }
 
+const BENCHMARK_RECALL_ALWAYS_HARD_GAPS = ['missing_primary_contract', 'profile_missing']
+const BENCHMARK_RECALL_V12_HARD_GAPS = ['module_missing', 'rhythm_missing']
+const BENCHMARK_RECALL_LEGACY_GAPS = ['legacy_deconstruction']
+const BENCHMARK_RECALL_IGNORED_GAPS = ['no_benchmark']
+const BENCHMARK_RECALL_SOURCE_PATH_FIELDS = [
+  'source_paths',
+  'style_profile_path',
+  'module_source_path',
+  'rhythm_source_path',
+  'matched_chapter_path',
+  'matched_chapter_source_path',
+  'matched_chapter_summary_path',
+  'matched_chapter_deep_dive_path',
+  'matched_deep_dive_path',
+  'fallback_deep_dive_path',
+  'summary_source_path',
+  'deep_dive_source_path',
+  'anchor_excerpt_paths',
+]
+
+function collectBenchmarkRecallGapStrings(...values: any[]) {
+  const rows: string[] = []
+  const visit = (value: any, prefix = '') => {
+    if (value == null || value === false) return
+    if (typeof value === 'string' || typeof value === 'number') {
+      const text = compactText(value, 180)
+      if (text) rows.push(prefix ? `${prefix}: ${text}` : text)
+      return
+    }
+    if (value === true) {
+      if (prefix) rows.push(prefix)
+      return
+    }
+    if (Array.isArray(value)) {
+      value.forEach(item => visit(item, prefix))
+      return
+    }
+    if (typeof value === 'object') {
+      for (const [key, item] of Object.entries(value)) {
+        visit(item, prefix ? `${prefix}.${key}` : key)
+      }
+    }
+  }
+  values.forEach(value => visit(value))
+  return Array.from(new Set(rows.map(item => item.trim()).filter(Boolean))).slice(0, 12)
+}
+
+function benchmarkRecallGapValues(source: any = {}) {
+  const target = source?.chapter_target || source?.chapterTarget || {}
+  const preDraft = source?.pre_draft_brief || source?.preDraftBrief || {}
+  const styleStrategy = source?.style_sample_strategy || source?.styleSampleStrategy || target?.style_sample_strategy || target?.styleSampleStrategy || preDraft?.style_sample_strategy || preDraft?.styleSampleStrategy || {}
+  const benchmarkStrategy = source?.chapter_benchmark_strategy || source?.chapterBenchmarkStrategy || target?.chapter_benchmark_strategy || target?.chapterBenchmarkStrategy || preDraft?.chapter_benchmark_strategy || preDraft?.chapterBenchmarkStrategy || {}
+  const briefs = [
+    source,
+    source?.benchmark_recall_brief,
+    source?.benchmarkRecallBrief,
+    target?.benchmark_recall_brief,
+    target?.benchmarkRecallBrief,
+    preDraft?.benchmark_recall_brief,
+    preDraft?.benchmarkRecallBrief,
+  ].filter(Boolean)
+  return [
+    ...briefs.flatMap((item: any) => [item?.gaps, item?.recall_gaps, item?.recallGaps]),
+    styleStrategy?.gaps,
+    styleStrategy?.style_recall?.gaps,
+    styleStrategy?.styleRecall?.gaps,
+    styleStrategy?.benchmark_recall?.gaps,
+    styleStrategy?.benchmarkRecall?.gaps,
+    benchmarkStrategy?.gaps,
+    benchmarkStrategy?.benchmark_recall?.gaps,
+    benchmarkStrategy?.benchmarkRecall?.gaps,
+  ]
+}
+
+function benchmarkRecallTextField(source: any = {}, key: string) {
+  const camelKey = key.replace(/_([a-z])/g, (_match, letter) => String(letter || '').toUpperCase())
+  return source?.[key] || source?.[camelKey]
+}
+
+function benchmarkRecallListField(source: any = {}, key: string) {
+  const value = benchmarkRecallTextField(source, key)
+  return Array.isArray(value) ? value : value ? [value] : []
+}
+
+function benchmarkRecallNestedObjects(source: any = {}) {
+  return [
+    source,
+    source?.style_recall,
+    source?.styleRecall,
+    source?.benchmark_recall,
+    source?.benchmarkRecall,
+  ].filter(Boolean)
+}
+
+function benchmarkRecallSourcePathValues(source: any = {}) {
+  const target = source?.chapter_target || source?.chapterTarget || {}
+  const preDraft = source?.pre_draft_brief || source?.preDraftBrief || {}
+  const styleStrategy = source?.style_sample_strategy || source?.styleSampleStrategy || target?.style_sample_strategy || target?.styleSampleStrategy || preDraft?.style_sample_strategy || preDraft?.styleSampleStrategy || {}
+  const benchmarkStrategy = source?.chapter_benchmark_strategy || source?.chapterBenchmarkStrategy || target?.chapter_benchmark_strategy || target?.chapterBenchmarkStrategy || preDraft?.chapter_benchmark_strategy || preDraft?.chapterBenchmarkStrategy || {}
+  const briefs = [
+    source?.benchmark_recall_brief,
+    source?.benchmarkRecallBrief,
+    target?.benchmark_recall_brief,
+    target?.benchmarkRecallBrief,
+    preDraft?.benchmark_recall_brief,
+    preDraft?.benchmarkRecallBrief,
+  ].filter(Boolean)
+  return [
+    ...briefs,
+    styleStrategy,
+    benchmarkStrategy,
+  ].flatMap((item: any) => benchmarkRecallNestedObjects(item).flatMap((nested: any) => (
+    BENCHMARK_RECALL_SOURCE_PATH_FIELDS.flatMap(field => benchmarkRecallListField(nested, field))
+  )))
+}
+
+function hasBenchmarkRecallContentWithoutSourcePaths(source: any = {}) {
+  const target = source?.chapter_target || source?.chapterTarget || {}
+  const preDraft = source?.pre_draft_brief || source?.preDraftBrief || {}
+  const briefs = [
+    source?.benchmark_recall_brief,
+    source?.benchmarkRecallBrief,
+    target?.benchmark_recall_brief,
+    target?.benchmarkRecallBrief,
+    preDraft?.benchmark_recall_brief,
+    preDraft?.benchmarkRecallBrief,
+  ].filter(Boolean)
+  const hasRecallContent = briefs.some((brief: any) => [
+    'selected_emotion_module',
+    'rhythm_reference',
+    'style_profile_summary',
+    'matched_chapter',
+    'matched_chapter_techniques',
+    'style_directives',
+  ].some(field => benchmarkRecallListField(brief, field).some(value => compactText(value))))
+  if (!hasRecallContent) return false
+  return collectBenchmarkRecallGapStrings(benchmarkRecallSourcePathValues(source)).length === 0
+}
+
+export function buildBenchmarkRecallPreflightChecks(source: any = {}) {
+  const rawGaps = collectBenchmarkRecallGapStrings(...benchmarkRecallGapValues(source))
+  if (rawGaps.some(item => BENCHMARK_RECALL_IGNORED_GAPS.some(key => item.toLowerCase().includes(key)))) return []
+  const gaps = rawGaps
+
+  const hasLegacyFallback = gaps.some(item => {
+    const normalized = item.toLowerCase()
+    return BENCHMARK_RECALL_LEGACY_GAPS.some(key => normalized.includes(key))
+  })
+  const hardGaps = gaps.filter(item => {
+    const normalized = item.toLowerCase()
+    return BENCHMARK_RECALL_ALWAYS_HARD_GAPS.some(key => normalized.includes(key))
+      || (!hasLegacyFallback && BENCHMARK_RECALL_V12_HARD_GAPS.some(key => normalized.includes(key)))
+  })
+  const softGaps = gaps.filter(item => !hardGaps.includes(item))
+  const checks: any[] = []
+  if (hardGaps.length) {
+    checks.push({
+      key: 'benchmark_recall_gate',
+      ok: false,
+      severity: 'high',
+      label: '文风召回门禁',
+      fix: '先补齐 oh-story Step 2.3 的主模块/节奏/文风画像召回，再进入正文生成。',
+      gaps: hardGaps,
+    })
+  }
+  if (softGaps.length) {
+    checks.push({
+      key: 'benchmark_recall_gaps',
+      ok: false,
+      severity: 'medium',
+      label: '文风召回缺口',
+      fix: '旧版模块、节奏或冲突缺口可继续写作，但必须在意图确认和自检中保留并解释优先级。',
+      gaps: softGaps,
+    })
+  }
+  if (hasBenchmarkRecallContentWithoutSourcePaths(source)) {
+    checks.push({
+      key: 'benchmark_recall_source_paths',
+      ok: false,
+      severity: 'medium',
+      label: '文风召回来源缺失',
+      fix: '补充 oh-story Step 2.3 实际读取的 source_paths，包括文风、情绪模块、节奏、匹配章摘要/深度拆解路径。',
+      gaps: ['Step 2.3 source_paths_missing'],
+    })
+  }
+  return checks
+}
+
+export function applyBenchmarkRecallPreflightChecks(preflight: any, source: any = {}) {
+  if (!preflight) return preflight
+  const checks = buildBenchmarkRecallPreflightChecks(source)
+  if (!checks.length) return preflight
+
+  const existingKeys = new Set(asArray(preflight.checks).map((item: any) => String(item?.key || '')))
+  const nextChecks = checks.filter(item => !existingKeys.has(item.key))
+  if (!nextChecks.length) return preflight
+
+  preflight.checks = [...asArray(preflight.checks), ...nextChecks]
+  preflight.warnings = [
+    ...asArray(preflight.warnings),
+    ...nextChecks.filter(item => !item.ok).map(item => `${item.label}：${asArray(item.gaps).join('、') || item.fix}`),
+  ]
+  preflight.blockers = [
+    ...asArray(preflight.blockers),
+    ...nextChecks.filter(item => !item.ok && item.severity === 'high'),
+  ]
+  preflight.ready = preflight.blockers.length === 0
+  preflight.strict_ready = preflight.checks.every((item: any) => item.ok || item.severity === 'low')
+  return preflight
+}
+
 export function normalizeSceneProduction(sceneCards: any[] = [], previous: any[] = [], status = 'pending') {
-  const byNo = new Map(previous.map((item: any) => [Number(item.scene_no || item.index || 0), item]))
+  const byNo = new Map(previous.map((item: any) => [Number(item.scene_no || item.sceneNo || item.index || 0), item]))
   return sceneCards.map((card: any, index: number) => {
-    const sceneNo = Number(card.scene_no || index + 1)
+    const sceneNo = Number(card.scene_no || card.sceneNo || index + 1)
     const prev = byNo.get(sceneNo) || {}
     return {
       ...card,
@@ -346,12 +756,12 @@ export function buildPreflightChecks(project: any, chapter: any, previousChapter
   ]
   const blockers = checks.filter(item => !item.ok && item.severity === 'high')
   const warnings = checks.filter(item => !item.ok).map(item => `${item.label}不足`)
-  return {
+  return applyBenchmarkRecallPreflightChecks({
     ready: blockers.length === 0,
     strict_ready: checks.every(item => item.ok || item.severity === 'low'),
     checks,
     blockers,
     warnings,
     recent_state_entries: collectRecentFacts(reviews),
-  }
+  }, chapter?.raw_payload || chapter || {})
 }

@@ -4,6 +4,8 @@ import {
   BookOutlined,
   DownOutlined,
   EditOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined,
   RightOutlined,
   UnorderedListOutlined,
 } from '@ant-design/icons'
@@ -13,6 +15,8 @@ import { chapterStatusTag, displayValue, wc } from './utils'
 const { Text } = Typography
 
 export function ChapterDirectorySidebar({
+  collapsed = false,
+  onCollapsedChange,
   planningMode = false,
   selectedModelId,
   stepOutlineLoading,
@@ -57,6 +61,8 @@ export function ChapterDirectorySidebar({
   onCreateChapter,
   onSelectChapter,
 }: {
+  collapsed?: boolean
+  onCollapsedChange?: (collapsed: boolean) => void
   planningMode?: boolean
   selectedModelId?: number
   stepOutlineLoading: boolean
@@ -103,13 +109,64 @@ export function ChapterDirectorySidebar({
 }) {
   const [chaptersCollapsed, setChaptersCollapsed] = React.useState(false)
 
+  if (collapsed) {
+    return (
+      <div className="chapter-directory-sidebar is-collapsed">
+        <div className="chapter-directory-sidebar-collapsed-rail">
+          <Tooltip title="展开目录" placement="right">
+            <Button
+              type="text"
+              size="small"
+              icon={<MenuUnfoldOutlined />}
+              onClick={() => onCollapsedChange?.(false)}
+              aria-label="展开目录"
+            />
+          </Tooltip>
+          <Tooltip title="章节目录" placement="right">
+            <Button
+              type="text"
+              size="small"
+              icon={<UnorderedListOutlined />}
+              onClick={onOpenChapterDrawer}
+              aria-label="章节目录"
+            />
+          </Tooltip>
+          {activeTaskCount > 0 && (
+            <Tooltip title="任务中心" placement="right">
+              <Button
+                type="text"
+                size="small"
+                onClick={onOpenTaskCenter}
+                aria-label="任务中心"
+              >
+                {activeTaskCount > 99 ? '99+' : activeTaskCount}
+              </Button>
+            </Tooltip>
+          )}
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div style={{
-      width: 240, flexShrink: 0, background: '#fff',
+    <div className="chapter-directory-sidebar" style={{
+      width: '100%', flexShrink: 0, background: '#fff',
       borderRight: '1px solid #f0f0f0', display: 'flex', flexDirection: 'column',
       overflow: 'hidden', minHeight: 0,
     }}>
       <div style={{ flex: 1, minHeight: 0, overflow: 'auto', paddingBottom: 24 }}>
+        <div className="chapter-directory-sidebar-toolbar">
+          <Text strong style={{ fontSize: 13 }}>小说目录</Text>
+          <Tooltip title="收起目录" placement="right">
+            <Button
+              type="text"
+              size="small"
+              icon={<MenuFoldOutlined />}
+              onClick={() => onCollapsedChange?.(true)}
+              aria-label="收起目录"
+            />
+          </Tooltip>
+        </div>
         {!planningMode && (
           <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0' }}>
             <ProductionGuidePanel

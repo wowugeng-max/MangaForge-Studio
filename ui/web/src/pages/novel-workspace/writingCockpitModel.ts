@@ -18,6 +18,7 @@ export type WritingCockpitActionKey =
   | 'fix_continuity'
   | 'update_canon'
   | 'open_task_center'
+  | 'open_story_assets'
   | 'refresh_context_package'
   | 'open_generation_diagnostics'
   | 'confirm_plan_and_write_draft'
@@ -118,6 +119,36 @@ export interface ChapterPlanningDeskSceneCard {
   conflict: string
   turn: string
   endingHook: string
+  requiredBeats: string[]
+  stateChangesExpected: string[]
+  serialRiskRepairs: string[]
+  recentFatigueAction: string
+  characterVoice: string
+  dialogueGoals: string[]
+  styleDirectives: string[]
+  benchmarkRecallDirectives: string[]
+  conceptAnchorRules: string[]
+  proseCraftDirectives: string[]
+}
+
+export interface ChapterQualityContinuitySceneMapItem {
+  sceneNo: number
+  title: string
+  stage: 'opening' | 'middle' | 'ending'
+  action: string
+  riskTags: string[]
+  forbiddenRepeats: string[]
+}
+
+export interface ChapterWritePreparationBrief {
+  readinessStatus: 'ready' | 'needs_context'
+  sourceGaps: string[]
+  assetRisks: string[]
+  deliveryRiskActions: string[]
+  blueprintFocus: string[]
+  readerPayoffFocus: string[]
+  mustConfirm: string[]
+  executionOrder: string[]
 }
 
 export interface ChapterPlanningDeskModel {
@@ -131,6 +162,7 @@ export interface ChapterPlanningDeskModel {
     label: string
   }
   shouldAutoExpandPlanner: boolean
+  writePreparationBrief: ChapterWritePreparationBrief | null
   episodePlan: {
     chapterObjective: string
     previousHandoff: string
@@ -216,13 +248,16 @@ export interface ChapterPlanningDeskModel {
       label: string
       priorityLabel: string
       items: string[]
+      evidence: string[]
       requiredActions: string[]
       openingActions: string[]
       middleActions: string[]
       endingActions: string[]
+      forbiddenRepeats: string[]
     }
   }
   sceneCards: ChapterPlanningDeskSceneCard[]
+  qualityContinuitySceneMap: ChapterQualityContinuitySceneMapItem[]
 }
 
 export type ChapterAcceptanceStatus =
@@ -233,6 +268,22 @@ export type ChapterAcceptanceStatus =
   | 'needs_state_sync'
   | 'ready_to_accept'
   | 'delivered'
+
+export interface DeslopGateDiagnosticsModel {
+  version: string
+  total: number
+  concernGateCount: number
+  summary: string
+  gates: Array<{
+    gate: string
+    label: string
+    status: string
+    count: number
+    patterns: string[]
+    evidence: string[]
+    fix: string
+  }>
+}
 
 export interface ChapterAcceptanceDeskModel {
   visible: boolean
@@ -297,10 +348,15 @@ export interface ChapterAcceptanceDeskModel {
     payoffDensityScore: number | null
     payoffDensityLabel: string
     payoffDensityRisk: boolean
+    aiSmellLabel: string
+    aiSmellRisk: boolean
+    aiSmellHitCount: number
+    aiSmellTactics: string[]
     memeLabel: string
     riskLabel: string
     riskCount: number
   } | null
+  deslopGateDiagnostics: DeslopGateDiagnosticsModel | null
   coreDrift: {
     status: 'ok' | 'warn'
     label: string
@@ -329,6 +385,329 @@ export interface ChapterAcceptanceDeskModel {
     scoreLabel: string
     missedCount: number
     openingHandoffMissedCount: number
+  } | null
+  qualityAuditSync: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    evidence: string[]
+    nextActions: string[]
+  } | null
+  qualityAuditRepairReceiptSync: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    receiptCount: number
+    evidence: string[]
+    nextActions: string[]
+  } | null
+  chapterHandoffSync: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    evidence: string[]
+    nextActions: string[]
+  } | null
+  chapterHandoffDeltaSync: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    evidence: string[]
+    nextActions: string[]
+  } | null
+  writePreparation: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    evidence: string[]
+    nextActions: string[]
+  } | null
+  intentConfirmationSync: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    evidence: string[]
+    nextActions: string[]
+  } | null
+  benchmarkRecallSync: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    evidence: string[]
+    nextActions: string[]
+  } | null
+  sourceReadiness: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    evidence: string[]
+    nextActions: string[]
+  } | null
+  stateTracking: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    evidence: string[]
+    nextActions: string[]
+  } | null
+  styleBoundary: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    evidence: string[]
+    nextActions: string[]
+  } | null
+  informationFlow: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    evidence: string[]
+    nextActions: string[]
+  } | null
+  expectationThreshold: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    evidence: string[]
+    nextActions: string[]
+  } | null
+  storyLoop: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    evidence: string[]
+    nextActions: string[]
+  } | null
+  emotionalArc: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    evidence: string[]
+    nextActions: string[]
+  } | null
+  chapterHook: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    evidence: string[]
+    nextActions: string[]
+  } | null
+  paragraphHook: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    evidence: string[]
+    nextActions: string[]
+  } | null
+  suspense: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    evidence: string[]
+    nextActions: string[]
+  } | null
+  assetLinkage: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    evidence: string[]
+    nextActions: string[]
+  } | null
+  dialogue: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    evidence: string[]
+    nextActions: string[]
+  } | null
+  plotDynamics: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    evidence: string[]
+    nextActions: string[]
+  } | null
+  characterRelation: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    evidence: string[]
+    nextActions: string[]
+  } | null
+  characterBehavior: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    evidence: string[]
+    nextActions: string[]
+  } | null
+  conflictStructure: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    evidence: string[]
+    nextActions: string[]
+  } | null
+  bridgeUnit: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    evidence: string[]
+    nextActions: string[]
+  } | null
+  reversal: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    evidence: string[]
+    nextActions: string[]
+  } | null
+  showdown: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    evidence: string[]
+    nextActions: string[]
+  } | null
+  opening: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    evidence: string[]
+    nextActions: string[]
+  } | null
+  proseCraft: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    evidence: string[]
+    nextActions: string[]
+  } | null
+  punctuationTone: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    evidence: string[]
+    nextActions: string[]
+  } | null
+  contentRubric: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    evidence: string[]
+    nextActions: string[]
+  } | null
+  targetReader: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    evidence: string[]
+    nextActions: string[]
+  } | null
+  genrePositioning: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    evidence: string[]
+    nextActions: string[]
+  } | null
+  femaleAudience: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    evidence: string[]
+    nextActions: string[]
+  } | null
+  upgradeRhythm: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    evidence: string[]
+    nextActions: string[]
+  } | null
+  chapterStructure: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    evidence: string[]
+    nextActions: string[]
+  } | null
+  chapterProgression: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    evidence: string[]
+    nextActions: string[]
+  } | null
+  informationLoad: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    evidence: string[]
+    nextActions: string[]
+  } | null
+  longformContinuity: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    evidence: string[]
+    nextActions: string[]
+  } | null
+  coreContractCheck: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    evidence: string[]
+    nextActions: string[]
+  } | null
+  continuityHeat: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    evidence: string[]
+    nextActions: string[]
+  } | null
+  revisionReceiptCheck: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    evidence: string[]
+    nextActions: string[]
+  } | null
+  deslopRepairCheck: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    evidence: string[]
+    nextActions: string[]
+  } | null
+  proseMeta: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    evidence: string[]
+    nextActions: string[]
+  } | null
+  serialRiskRepair: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    evidence: string[]
+    nextActions: string[]
+  } | null
+  chapterHookQuality: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    evidence: string[]
+    nextActions: string[]
+  } | null
+  readerRetentionCheck: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    evidence: string[]
+    nextActions: string[]
   } | null
   readerRetentionSync: {
     status: 'ok' | 'warn'
@@ -395,6 +774,73 @@ export interface ChapterAcceptanceDeskModel {
     scoreLabel: string
     missedCount: number
   } | null
+  blueprintReceipt: {
+    status: 'ok' | 'warn'
+    label: string
+    scoreLabel: string
+    deliveredCount: number
+    totalCount: number
+    missedCount: number
+    evidence: string[]
+    missed: string[]
+  } | null
+  revisionReceipt: {
+    status: 'ok' | 'warn'
+    label: string
+    scoreLabel: string
+    closedCount: number
+    totalCount: number
+    riskCount: number
+    evidence: string[]
+    risks: string[]
+  } | null
+  deliveryRiskReceipt: {
+    status: 'ok' | 'warn'
+    label: string
+    scoreLabel: string
+    closedCount: number
+    totalCount: number
+    riskCount: number
+    evidence: string[]
+    risks: string[]
+  } | null
+  sceneCardReceipt: {
+    status: 'ok' | 'warn'
+    label: string
+    riskCount: number
+    evidence: string[]
+    scenes: string[]
+    fields: string[]
+  } | null
+  qualityAudit: {
+    status: 'ok' | 'warn'
+    label: string
+    riskCount: number
+    evidence: string[]
+    checks: string[]
+    fixes: string[]
+    strategies: string[]
+  } | null
+  platformRubric: {
+    status: 'ok' | 'warn'
+    label: string
+    scoreLabel: string
+    rubric: string
+    rubricSource: string
+    passedCount: number
+    totalCount: number
+    missedCount: number
+    missed: string[]
+    evidence: string[]
+  } | null
+  approvalBlocker: {
+    type: 'quality_gate' | 'low_score' | 'draft' | 'safety' | 'reference_safety_blocked'
+    status: 'warn'
+    label: string
+    detail: string
+    scoreLabel: string
+    reasons: string[]
+  } | null
   governanceRecheckSync: {
     status: 'ok' | 'warn'
     label: string
@@ -460,6 +906,34 @@ export interface ChapterHandoffDeskModel {
   actionLabel: string
 }
 
+export type LongformWorkflowStageKey =
+  | 'creation_setup'
+  | 'pre_draft'
+  | 'post_draft_review'
+  | 'quality_continuity'
+
+export type LongformWorkflowStageStatus = 'ready' | 'needs_action' | 'blocked' | 'waiting'
+
+export interface LongformWorkflowStageModel {
+  key: LongformWorkflowStageKey
+  label: string
+  status: LongformWorkflowStageStatus
+  actionKey: WritingCockpitActionKey
+  actionLabel: string
+  evidence: string[]
+  riskCount: number
+}
+
+export interface LongformWorkflowModel {
+  stages: LongformWorkflowStageModel[]
+  currentStage: LongformWorkflowStageModel
+  primaryAction: {
+    key: WritingCockpitActionKey
+    label: string
+  }
+  riskCount: number
+}
+
 export interface WritingCockpitModel {
   topStatus: {
     projectTitle: string
@@ -474,6 +948,7 @@ export interface WritingCockpitModel {
   chapterPlanningDesk: ChapterPlanningDeskModel
   chapterAcceptanceDesk: ChapterAcceptanceDeskModel
   chapterHandoffDesk: ChapterHandoffDeskModel
+  longformWorkflow: LongformWorkflowModel
   primaryActionKey: WritingCockpitActionKey
   recommendedRole: WritingCockpitRole
   readiness: {
@@ -560,6 +1035,7 @@ const ACTION_LABELS: Record<WritingCockpitActionKey, string> = {
   fix_continuity: '修复连续性',
   update_canon: '同步故事状态',
   open_task_center: '打开任务中心',
+  open_story_assets: '打开设定资产',
   refresh_context_package: '刷新上下文包',
   open_generation_diagnostics: '查看生成诊断',
   confirm_plan_and_write_draft: '确认计划，进入初稿',
@@ -588,6 +1064,549 @@ function firstNonEmpty(...values: any[]) {
     if (normalized) return normalized
   }
   return ''
+}
+
+function deliveryReceiptsFrom(value?: AnyRecord | null): AnyRecord {
+  if (!value || typeof value !== 'object') return {}
+  const rawPayload = value.raw_payload || value.rawPayload || {}
+  return value.oh_story_delivery_receipts
+    || value.ohStoryDeliveryReceipts
+    || rawPayload.oh_story_delivery_receipts
+    || rawPayload.ohStoryDeliveryReceipts
+    || {}
+}
+
+function uniqueObjects(values: any[]) {
+  const seen = new Set<any>()
+  return values.filter((value) => {
+    if (!value || typeof value !== 'object') return false
+    if (seen.has(value)) return false
+    seen.add(value)
+    return true
+  })
+}
+
+function blueprintReceiptLabel(key: string) {
+  const labels: Record<string, string> = {
+    target_emotion: '目标情绪',
+    opening_hook: '开篇钩子',
+    core_payoff: '核心回报',
+    content_outline: '五段式',
+    plot_lines: '多线推进',
+    character_order: '人物顺序',
+    relationship_change: '关系变化',
+    information_gap: '信息缺口',
+    beat_sequence: '节拍功能',
+    cost_and_reward: '代价收益',
+    ending_contract: '章尾承接',
+    writing_intent: '写作意图',
+  }
+  return labels[key] || key
+}
+
+function blueprintReceiptDelivered(value: any) {
+  if (value === true) return true
+  if (value === false) return false
+  if (!value || typeof value !== 'object') return false
+  const status = text(value.status || value.result).toLowerCase()
+  if (['ok', 'pass', 'passed', 'delivered', 'fulfilled', 'met', 'done'].includes(status)) return true
+  if (['warn', 'missed', 'missing', 'failed', 'fail', 'false'].includes(status)) return false
+  if (value.delivered === true || value.ok === true || value.met === true || value.fulfilled === true) return true
+  if (value.delivered === false || value.ok === false || value.met === false || value.fulfilled === false) return false
+  return false
+}
+
+function blueprintReceiptEvidence(value: any) {
+  if (!value || typeof value !== 'object') return ''
+  return firstNonEmpty(value.evidence, value.summary, value.detail, value.text)
+}
+
+function isBlueprintReceiptValue(value: any) {
+  if (typeof value === 'boolean') return true
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  return 'delivered' in value
+    || 'ok' in value
+    || 'met' in value
+    || 'fulfilled' in value
+    || 'status' in value
+    || 'result' in value
+    || Boolean(firstNonEmpty(value.evidence, value.summary, value.detail, value.text))
+}
+
+function blueprintReceiptEntries(raw: any) {
+  if (!raw || typeof raw !== 'object') return []
+  if (Array.isArray(raw)) {
+    return raw
+      .filter(item => item && typeof item === 'object')
+      .map(item => ({
+        key: firstNonEmpty(item.key, item.field, item.name, item.label, 'blueprint'),
+        value: item,
+      }))
+      .filter(item => isBlueprintReceiptValue(item.value))
+  }
+
+  const nested = raw.receipts
+    || raw.blueprint_receipts
+    || raw.blueprintReceipts
+    || raw.chapter_blueprint_receipts
+    || raw.chapterBlueprintReceipts
+    || null
+  if (nested && nested !== raw) return blueprintReceiptEntries(nested)
+
+  const entries = Object.entries(raw)
+    .map(([key, value]) => ({ key, value }))
+    .filter(item => isBlueprintReceiptValue(item.value))
+  return entries.length > 0 ? entries : []
+}
+
+function buildBlueprintReceiptSummary(chapter?: AnyRecord | null): ChapterAcceptanceDeskModel['blueprintReceipt'] {
+  const chapterDeliveryReceipts = deliveryReceiptsFrom(chapter)
+  const rawChapterBlueprint = chapterDeliveryReceipts?.chapter_blueprint || chapterDeliveryReceipts?.chapterBlueprint || null
+  const scenes = [
+    ...arrayValue(chapter?.scene_breakdown),
+    ...arrayValue(chapter?.scene_list),
+  ]
+  const receiptSources = [
+    ...scenes.map(scene => scene?.blueprint_receipts || scene?.blueprintReceipts || null),
+    rawChapterBlueprint,
+    chapterDeliveryReceipts?.chapter_blueprint_receipts || chapterDeliveryReceipts?.chapterBlueprintReceipts || null,
+    chapterDeliveryReceipts?.blueprint_receipts || chapterDeliveryReceipts?.blueprintReceipts || null,
+  ]
+  const receipts = receiptSources.flatMap(raw => {
+    return blueprintReceiptEntries(raw).map(({ key, value }) => ({
+      key,
+      label: blueprintReceiptLabel(key),
+      delivered: blueprintReceiptDelivered(value),
+      evidence: blueprintReceiptEvidence(value),
+    }))
+  })
+  const totalCount = receipts.length
+  if (totalCount <= 0) return null
+  const deliveredCount = receipts.filter(item => item.delivered).length
+  const missed = receipts.filter(item => !item.delivered).map(item => item.label)
+  const missedCount = missed.length
+
+  return {
+    status: missedCount > 0 ? 'warn' : 'ok',
+    label: missedCount > 0 ? `蓝图缺口 ${missedCount}` : '蓝图已兑现',
+    scoreLabel: `蓝图兑现 ${deliveredCount}/${totalCount}`,
+    deliveredCount,
+    totalCount,
+    missedCount,
+    evidence: receipts.map(item => item.evidence).filter(Boolean).slice(0, 4),
+    missed,
+  }
+}
+
+function revisionReceiptRemainingRisk(value: any) {
+  const risk = firstNonEmpty(value?.remaining_risk, value?.remainingRisk, value?.risk)
+  if (!risk) return ''
+  const normalized = risk.toLowerCase()
+  if (['无', 'none', 'no', 'n/a', 'null', 'false', '0'].includes(normalized)) return ''
+  return risk
+}
+
+function revisionReceiptSyncPayload(value?: AnyRecord | null) {
+  const source = value || {}
+  const result = source?.result || {}
+  return source?.prose_revision_receipt_sync
+    || source?.proseRevisionReceiptSync
+    || result?.prose_revision_receipt_sync
+    || result?.proseRevisionReceiptSync
+    || null
+}
+
+function revisionReceiptSyncRiskSummary(sync: AnyRecord | null) {
+  if (!sync) {
+    return {
+      riskCount: 0,
+      closedCount: 0,
+      receiptCount: 0,
+      label: '',
+      risks: [] as string[],
+      evidence: [] as string[],
+    }
+  }
+  const missedRows = arrayValue(sync?.missed)
+  const missedCountValue = Number(sync?.missed_count ?? sync?.missedCount)
+  const completedCountValue = Number(sync?.completed_count ?? sync?.completedCount)
+  const receiptCountValue = Number(sync?.receipt_count ?? sync?.receiptCount)
+  const statusWarn = text(sync?.status).toLowerCase() === 'warn'
+  const riskCount = Number.isFinite(missedCountValue)
+    ? missedCountValue
+    : statusWarn && missedRows.length === 0
+      ? 1
+      : missedRows.length
+  const closedCount = Number.isFinite(completedCountValue) ? completedCountValue : 0
+  const receiptCount = Number.isFinite(receiptCountValue) ? receiptCountValue : 0
+  return {
+    riskCount,
+    closedCount,
+    receiptCount,
+    label: text(sync?.label),
+    risks: missedRows
+      .map(item => firstNonEmpty(item?.text, item?.risk, item?.remaining_risk, item?.remainingRisk, item?.label))
+      .filter(Boolean)
+      .slice(0, 4),
+    evidence: missedRows
+      .map(item => firstNonEmpty(item?.evidence, item?.changed_evidence, item?.changedEvidence, item?.applied_fix, item?.appliedFix))
+      .filter(Boolean)
+      .slice(0, 4),
+  }
+}
+
+function buildRevisionReceiptSummary(payload?: AnyRecord | null, receiptSyncPayload?: AnyRecord | null): ChapterAcceptanceDeskModel['revisionReceipt'] {
+  const selfCheck = payload?.self_check || payload?.selfCheck || payload || {}
+  const revision = selfCheck?.revision || selfCheck?.revised_revision || payload?.revision || {}
+  const revisionDeliveryReceipts = revision?.oh_story_delivery_receipts || revision?.ohStoryDeliveryReceipts || {}
+  const revisionReceipts = [
+    ...arrayValue(revisionDeliveryReceipts?.revision_receipts || revisionDeliveryReceipts?.revisionReceipts),
+    ...arrayValue(revision?.revision_receipts || revision?.revisionReceipts),
+    ...arrayValue(selfCheck?.revision_receipts || selfCheck?.revisionReceipts),
+    ...arrayValue(payload?.revision_receipts || payload?.revisionReceipts),
+  ]
+  const deslopRepairReceipts = [
+    ...arrayValue(revisionDeliveryReceipts?.deslop_repair_receipts || revisionDeliveryReceipts?.deslopRepairReceipts),
+    ...arrayValue(revision?.deslop_repair_receipts || revision?.deslopRepairReceipts),
+    ...arrayValue(selfCheck?.deslop_repair_receipts || selfCheck?.deslopRepairReceipts),
+    ...arrayValue(payload?.deslop_repair_receipts || payload?.deslopRepairReceipts),
+  ]
+  const receipts = [...revisionReceipts, ...deslopRepairReceipts]
+  const totalCount = receipts.length
+  const proseSyncSummary = revisionReceiptSyncRiskSummary(revisionReceiptSyncPayload(receiptSyncPayload))
+  if (totalCount <= 0) {
+    if (proseSyncSummary.riskCount > 0 || proseSyncSummary.receiptCount > 0) {
+      const syncTotalCount = Math.max(proseSyncSummary.riskCount + proseSyncSummary.closedCount, proseSyncSummary.receiptCount)
+      return {
+        status: proseSyncSummary.riskCount > 0 ? 'warn' : 'ok',
+        label: proseSyncSummary.label || (proseSyncSummary.riskCount > 0 ? `修订残留 ${proseSyncSummary.riskCount}` : '修订已闭环'),
+        scoreLabel: `修订闭环 ${proseSyncSummary.closedCount}/${syncTotalCount}`,
+        closedCount: proseSyncSummary.closedCount,
+        totalCount: syncTotalCount,
+        riskCount: proseSyncSummary.riskCount,
+        evidence: proseSyncSummary.evidence,
+        risks: proseSyncSummary.risks,
+      }
+    }
+    const sync = receiptSyncPayload?.deslop_repair_receipt_sync
+      || receiptSyncPayload?.deslopRepairReceiptSync
+      || receiptSyncPayload?.result?.deslop_repair_receipt_sync
+      || receiptSyncPayload?.result?.deslopRepairReceiptSync
+      || null
+    const missedRows = arrayValue(sync?.missed)
+    const missedCountValue = Number(sync?.missed_count ?? sync?.missedCount)
+    const completedCountValue = Number(sync?.completed_count ?? sync?.completedCount)
+    const receiptCountValue = Number(sync?.receipt_count ?? sync?.receiptCount)
+    const riskCount = Number.isFinite(missedCountValue) ? missedCountValue : missedRows.length
+    const closedCount = Number.isFinite(completedCountValue) ? completedCountValue : 0
+    const syncTotalCount = Math.max(
+      riskCount + closedCount,
+      Number.isFinite(receiptCountValue) ? receiptCountValue : 0,
+    )
+    if (!sync || syncTotalCount <= 0) return null
+    return {
+      status: riskCount > 0 || text(sync?.status).toLowerCase() === 'warn' ? 'warn' : 'ok',
+      label: text(sync?.label) || (riskCount > 0 ? `去AI味残留 ${riskCount}` : '去AI味已闭环'),
+      scoreLabel: `去AI味闭环 ${closedCount}/${syncTotalCount}`,
+      closedCount,
+      totalCount: syncTotalCount,
+      riskCount,
+      evidence: missedRows.map(item => firstNonEmpty(item?.evidence, item?.changed_evidence, item?.changedEvidence, item?.applied_fix, item?.appliedFix)).filter(Boolean).slice(0, 4),
+      risks: missedRows.map(item => firstNonEmpty(item?.text, item?.risk, item?.remaining_risk, item?.remainingRisk)).filter(Boolean).slice(0, 4),
+    }
+  }
+
+  const risks = receipts.map(revisionReceiptRemainingRisk).filter(Boolean).slice(0, 4)
+  const riskCount = receipts.filter(item => revisionReceiptRemainingRisk(item)).length
+  const closedCount = Math.max(0, totalCount - riskCount)
+  const combinedRiskCount = riskCount + proseSyncSummary.riskCount
+  const combinedClosedCount = Math.max(closedCount, proseSyncSummary.closedCount)
+  const combinedTotalCount = Math.max(totalCount, proseSyncSummary.receiptCount, combinedClosedCount + combinedRiskCount)
+  const deslopOnly = revisionReceipts.length === 0 && deslopRepairReceipts.length > 0
+  return {
+    status: combinedRiskCount > 0 ? 'warn' : 'ok',
+    label: proseSyncSummary.riskCount > 0 && proseSyncSummary.label
+      ? proseSyncSummary.label
+      : combinedRiskCount > 0 ? `${deslopOnly ? '去AI味' : '修订'}残留 ${combinedRiskCount}` : `${deslopOnly ? '去AI味' : '修订'}已闭环`,
+    scoreLabel: `${deslopOnly ? '去AI味' : '修订'}闭环 ${combinedClosedCount}/${combinedTotalCount}`,
+    closedCount: combinedClosedCount,
+    totalCount: combinedTotalCount,
+    riskCount: combinedRiskCount,
+    evidence: [
+      ...receipts.map(item => firstNonEmpty(item?.changed_evidence, item?.changedEvidence, item?.applied_fix, item?.appliedFix)).filter(Boolean),
+      ...proseSyncSummary.evidence,
+    ].slice(0, 4),
+    risks: [...risks, ...proseSyncSummary.risks].slice(0, 4),
+  }
+}
+
+function deliveryRiskReceiptRemainingRisk(value: any) {
+  const risk = firstNonEmpty(value?.remaining_risk, value?.remainingRisk, value?.risk)
+  if (risk) {
+    const normalized = risk.toLowerCase()
+    if (!['无', 'none', 'no', 'n/a', 'null', 'false', '0'].includes(normalized)) return risk
+  }
+  if (value?.delivered === false) return firstNonEmpty(value?.required_action, value?.requiredAction, value?.risk_item, value?.riskItem, '承接动作未闭环')
+  return ''
+}
+
+function buildDeliveryRiskReceiptSummary(payload?: AnyRecord | null): ChapterAcceptanceDeskModel['deliveryRiskReceipt'] {
+  const selfCheck = payload?.self_check || payload?.selfCheck || payload || {}
+  const review = selfCheck?.review || payload?.review || {}
+  const payloadDeliveryReceipts = payload?.oh_story_delivery_receipts || payload?.ohStoryDeliveryReceipts || {}
+  const selfCheckDeliveryReceipts = selfCheck?.oh_story_delivery_receipts || selfCheck?.ohStoryDeliveryReceipts || {}
+  const reviewDeliveryReceipts = review?.oh_story_delivery_receipts || review?.ohStoryDeliveryReceipts || {}
+  const receipts = [
+    ...arrayValue(reviewDeliveryReceipts?.delivery_risk_receipts || reviewDeliveryReceipts?.deliveryRiskReceipts),
+    ...arrayValue(review?.delivery_risk_receipts || review?.deliveryRiskReceipts),
+    ...arrayValue(selfCheckDeliveryReceipts?.delivery_risk_receipts || selfCheckDeliveryReceipts?.deliveryRiskReceipts),
+    ...arrayValue(selfCheck?.delivery_risk_receipts || selfCheck?.deliveryRiskReceipts),
+    ...arrayValue(payloadDeliveryReceipts?.delivery_risk_receipts || payloadDeliveryReceipts?.deliveryRiskReceipts),
+    ...arrayValue(payload?.delivery_risk_receipts || payload?.deliveryRiskReceipts),
+  ]
+  const totalCount = receipts.length
+  if (totalCount <= 0) return null
+
+  const risks = receipts.map(deliveryRiskReceiptRemainingRisk).filter(Boolean).slice(0, 4)
+  const riskCount = receipts.filter(item => deliveryRiskReceiptRemainingRisk(item)).length
+  const closedCount = Math.max(0, totalCount - riskCount)
+  return {
+    status: riskCount > 0 ? 'warn' : 'ok',
+    label: riskCount > 0 ? `承接残留 ${riskCount}` : '承接已闭环',
+    scoreLabel: `承接闭环 ${closedCount}/${totalCount}`,
+    closedCount,
+    totalCount,
+    riskCount,
+    evidence: receipts.map(item => firstNonEmpty(item?.evidence, item?.required_action, item?.requiredAction, item?.risk_item, item?.riskItem)).filter(Boolean).slice(0, 4),
+    risks,
+  }
+}
+
+function sceneCardReceiptCheckText(value: any) {
+  if (typeof value === 'string') return text(value)
+  return [
+    value?.key,
+    value?.label,
+    value?.title,
+    value?.status,
+    value?.evidence,
+    value?.fix,
+    value?.message,
+    value?.summary,
+    value?.text,
+    value?.remaining_risk,
+    value?.remainingRisk,
+    value?.required_action,
+    value?.requiredAction,
+    ...stringArray(value?.fields),
+  ].map(item => text(item)).filter(Boolean).join(' ')
+}
+
+function sceneCardReceiptCheckFailed(value: any) {
+  if (typeof value === 'string') return value.toLowerCase().includes('scene_card_receipt')
+  const status = text(value?.status || value?.result || value?.severity).toLowerCase()
+  if (['pass', 'passed', 'ok', 'done', 'true'].includes(status)) return false
+  if (['fail', 'failed', 'warn', 'warning', 'missing', 'missed', 'false', 'blocker'].includes(status)) return true
+  if (value?.passed === true || value?.delivered === true || value?.ok === true) return false
+  if (value?.passed === false || value?.delivered === false || value?.ok === false) return true
+  return true
+}
+
+function buildSceneCardReceiptSummary(payload?: AnyRecord | null): ChapterAcceptanceDeskModel['sceneCardReceipt'] {
+  const selfCheck = payload?.self_check || payload?.selfCheck || payload || {}
+  const review = selfCheck?.review || payload?.review || {}
+  const payloadDeliveryReceipts = deliveryReceiptsFrom(payload)
+  const selfCheckDeliveryReceipts = deliveryReceiptsFrom(selfCheck)
+  const reviewDeliveryReceipts = deliveryReceiptsFrom(review)
+  const auditChecks = [
+    ...arrayValue(review?.quality_audit_checks || review?.qualityAuditChecks),
+    ...arrayValue(selfCheck?.quality_audit_checks || selfCheck?.qualityAuditChecks),
+    ...arrayValue(payload?.quality_audit_checks || payload?.qualityAuditChecks),
+    ...arrayValue(review?.issues),
+    ...arrayValue(selfCheck?.issues),
+    ...arrayValue(payload?.issues),
+  ].filter(item => sceneCardReceiptCheckText(item).toLowerCase().includes('scene_card_receipt'))
+    .filter(sceneCardReceiptCheckFailed)
+  const nestedReceipts = [
+    ...arrayValue(reviewDeliveryReceipts?.scene_card_receipts || reviewDeliveryReceipts?.sceneCardReceipts),
+    ...arrayValue(review?.scene_card_receipts || review?.sceneCardReceipts),
+    ...arrayValue(selfCheckDeliveryReceipts?.scene_card_receipts || selfCheckDeliveryReceipts?.sceneCardReceipts),
+    ...arrayValue(selfCheck?.scene_card_receipts || selfCheck?.sceneCardReceipts),
+    ...arrayValue(payloadDeliveryReceipts?.scene_card_receipts || payloadDeliveryReceipts?.sceneCardReceipts),
+    ...arrayValue(payload?.scene_card_receipts || payload?.sceneCardReceipts),
+  ].filter(sceneCardReceiptCheckFailed)
+  const checks = [...auditChecks, ...nestedReceipts]
+
+  const riskCount = checks.length
+  if (riskCount <= 0) return null
+
+  const scenes = Array.from(new Set(checks.map(item => {
+    const sceneNo = Number(item?.scene_no ?? item?.sceneNo)
+    if (Number.isFinite(sceneNo) && sceneNo > 0) return `场景${sceneNo}`
+    const match = sceneCardReceiptCheckText(item).match(/场景\s*(\d+)/)
+    return match?.[1] ? `场景${match[1]}` : ''
+  }).filter(Boolean))).slice(0, 4)
+  const fields = Array.from(new Set(checks.flatMap(item => stringArray(item?.fields)).filter(Boolean))).slice(0, 6)
+  const evidence = checks.map(item => firstNonEmpty(
+    item?.remaining_risk,
+    item?.remainingRisk,
+    item?.evidence,
+    item?.message,
+    item?.summary,
+    item?.text,
+    item?.fix,
+    sceneCardReceiptCheckText(item),
+  )).filter(Boolean).slice(0, 4)
+
+  return {
+    status: 'warn',
+    label: `场景回执缺口 ${riskCount}`,
+    riskCount,
+    evidence,
+    scenes,
+    fields,
+  }
+}
+
+function qualityAuditCheckText(value: any) {
+  if (typeof value === 'string') return text(value)
+  return [
+    value?.key,
+    value?.label,
+    value?.status,
+    value?.evidence,
+    value?.fix,
+    value?.message,
+    value?.summary,
+    value?.text,
+    value?.strategy,
+  ].map(item => text(item)).filter(Boolean).join(' ')
+}
+
+function qualityAuditCheckFailed(value: any) {
+  if (typeof value === 'string') return true
+  const status = text(value?.status || value?.result || value?.severity).toLowerCase()
+  const score = Number(value?.score)
+  if (['pass', 'passed', 'ok', 'done', 'true'].includes(status)) return false
+  if (['fail', 'failed', 'warn', 'warning', 'missing', 'missed', 'false', 'blocker'].includes(status)) return true
+  return Number.isFinite(score) && score < 78
+}
+
+function buildQualityAuditSummary(payload?: AnyRecord | null): ChapterAcceptanceDeskModel['qualityAudit'] {
+  const selfCheck = payload?.self_check || payload?.selfCheck || payload || {}
+  const review = selfCheck?.review || payload?.review || {}
+  const checks = [
+    ...arrayValue(review?.quality_audit_checks || review?.qualityAuditChecks),
+    ...arrayValue(selfCheck?.quality_audit_checks || selfCheck?.qualityAuditChecks),
+    ...arrayValue(payload?.quality_audit_checks || payload?.qualityAuditChecks),
+  ].filter(item => !qualityAuditCheckText(item).toLowerCase().includes('scene_card_receipt'))
+    .filter(qualityAuditCheckFailed)
+
+  const riskCount = checks.length
+  if (riskCount <= 0) return null
+
+  return {
+    status: 'warn',
+    label: `质量诊断缺口 ${riskCount}`,
+    riskCount,
+    evidence: checks.map(item => firstNonEmpty(item?.evidence, item?.message, item?.summary, item?.text, qualityAuditCheckText(item))).filter(Boolean).slice(0, 4),
+    checks: Array.from(new Set(checks.map(item => firstNonEmpty(item?.label, item?.key, item?.type, qualityAuditCheckText(item))).filter(Boolean))).slice(0, 6),
+    fixes: checks.map(item => firstNonEmpty(item?.fix, item?.action)).filter(Boolean).slice(0, 4),
+    strategies: Array.from(new Set(checks.map(item => text(item?.strategy)).filter(Boolean))).slice(0, 4),
+  }
+}
+
+function approvalBlockerLabel(type: string) {
+  if (type === 'reference_safety_blocked') return '仿写安全阻断'
+  if (type === 'safety') return '仿写安全待确认'
+  if (type === 'low_score') return '低分待确认'
+  if (type === 'draft') return '正文入库待确认'
+  return '质量门禁阻断'
+}
+
+function buildApprovalBlockerSummary(payload?: AnyRecord | null): ChapterAcceptanceDeskModel['approvalBlocker'] {
+  if (!payload) return null
+  const qualityGate = payload?.quality_gate || payload?.qualityGate || {}
+  const safetyDecision = payload?.safety_decision || payload?.safetyDecision || payload?.reference_safety || payload?.referenceSafety || {}
+  const explicitType = text(payload?.approval_type || payload?.approvalType).toLowerCase()
+  const type = explicitType || (safetyDecision?.blocked ? 'reference_safety_blocked' : qualityGate?.passed === false ? 'quality_gate' : '')
+  if (!['quality_gate', 'low_score', 'draft', 'safety', 'reference_safety_blocked'].includes(type)) return null
+  const scoreValue = payload?.self_check?.review?.score
+    ?? payload?.selfCheck?.review?.score
+    ?? payload?.review?.score
+    ?? safetyDecision?.score
+    ?? qualityGate?.score
+  const score = scoreValue === null || scoreValue === undefined || scoreValue === '' ? null : Number(scoreValue)
+  const safeScore = Number.isFinite(score) ? score : null
+  const safetyReasons = stringArray(safetyDecision?.reasons)
+  const gateReasons = stringArray(qualityGate?.reasons)
+  const issueReasons = arrayValue(payload?.self_check?.review?.issues || payload?.selfCheck?.review?.issues || payload?.review?.issues)
+    .map(issueText)
+    .filter(Boolean)
+  const reasons = Array.from(new Set([...safetyReasons, ...gateReasons, ...issueReasons])).slice(0, 5)
+  const copyHitCount = Number(safetyDecision?.copy_hit_count ?? safetyDecision?.copyHitCount)
+  const detail = reasons[0]
+    || (Number.isFinite(copyHitCount) && copyHitCount > 0 ? `参考相似命中 ${copyHitCount}` : '')
+    || text(payload?.summary)
+    || '入库前需要人工确认或修订处理。'
+  return {
+    type: type as NonNullable<ChapterAcceptanceDeskModel['approvalBlocker']>['type'],
+    status: 'warn',
+    label: approvalBlockerLabel(type),
+    detail,
+    scoreLabel: safeScore === null ? '入库阻断' : `入库阻断 ${safeScore}`,
+    reasons,
+  }
+}
+
+function platformRubricLabel(value: any) {
+  const normalized = firstNonEmpty(value).toLowerCase()
+  if (normalized.includes('fanqie') || normalized.includes('番茄')) return '番茄'
+  if (normalized.includes('qidian') || normalized.includes('起点')) return '起点'
+  if (normalized.includes('zhihu') || normalized.includes('知乎') || normalized.includes('盐言')) return '知乎'
+  if (normalized.includes('generic') || normalized.includes('通用')) return '通用'
+  return firstNonEmpty(value, '通用')
+}
+
+function platformCheckPassed(value: any) {
+  if (value === true) return true
+  if (value === false) return false
+  const status = firstNonEmpty(value?.status, value?.result, value?.passed).toLowerCase()
+  if (['pass', 'passed', 'ok', 'true', 'met', 'done'].includes(status)) return true
+  if (['warn', 'warning', 'fail', 'failed', 'missing', 'missed', 'false'].includes(status)) return false
+  if (value?.passed === true || value?.delivered === true || value?.ok === true) return true
+  return false
+}
+
+function buildPlatformRubricSummary(payload?: AnyRecord | null): ChapterAcceptanceDeskModel['platformRubric'] {
+  const selfCheck = payload?.self_check || payload?.selfCheck || payload || {}
+  const review = selfCheck?.review || payload?.review || {}
+  const checks = [
+    ...arrayValue(review?.platform_checks || review?.platformChecks),
+    ...arrayValue(selfCheck?.platform_checks || selfCheck?.platformChecks),
+    ...arrayValue(payload?.platform_checks || payload?.platformChecks),
+  ]
+  const rubric = firstNonEmpty(review?.rubric, selfCheck?.rubric, payload?.rubric, review?.platform, payload?.platform)
+  if (checks.length <= 0 && !rubric) return null
+
+  const totalCount = checks.length
+  const missedChecks = checks.filter(item => !platformCheckPassed(item))
+  const missed = missedChecks.map(item => firstNonEmpty(item?.label, item?.key, item?.fix, item?.evidence)).filter(Boolean).slice(0, 4)
+  const missedCount = missedChecks.length
+  const passedCount = Math.max(0, totalCount - missedCount)
+  const label = platformRubricLabel(rubric)
+  return {
+    status: missedCount > 0 ? 'warn' : 'ok',
+    label: `平台基准：${label}`,
+    scoreLabel: totalCount > 0 ? `平台达标 ${passedCount}/${totalCount}` : `平台基准：${label}`,
+    rubric,
+    rubricSource: firstNonEmpty(review?.rubric_source, review?.rubricSource, selfCheck?.rubric_source, payload?.rubric_source, payload?.rubricSource),
+    passedCount,
+    totalCount,
+    missedCount,
+    missed,
+    evidence: checks.map(item => firstNonEmpty(item?.evidence, item?.fix, item?.label, item?.key)).filter(Boolean).slice(0, 4),
+  }
 }
 
 function compactWordCount(value: any) {
@@ -1035,16 +2054,37 @@ function normalizeDeliveryRiskCarryOverPlan(contextPackage?: AnyRecord | null, t
     || {}
   const totalCount = Number(raw?.total_count ?? raw?.totalCount ?? raw?.count)
   const items = stringArray(raw?.items || raw?.risk_items || raw?.riskItems || raw?.risks)
+  const evidence = stringArray(raw?.evidence || raw?.evidences || raw?.risk_evidence || raw?.riskEvidence)
   const requiredActions = stringArray(raw?.required_actions || raw?.requiredActions || raw?.next_actions || raw?.nextActions || raw?.actions)
   const stagedActions = categorizeDeliveryRiskActions(requiredActions)
+  const openingActions = uniqueStrings([
+    ...stringArray(raw?.opening_actions || raw?.openingActions),
+    ...stagedActions.openingActions,
+  ])
+  const middleActions = uniqueStrings([
+    ...stringArray(raw?.middle_actions || raw?.middleActions),
+    ...stagedActions.middleActions,
+  ])
+  const endingActions = uniqueStrings([
+    ...stringArray(raw?.ending_actions || raw?.endingActions),
+    ...stagedActions.endingActions,
+  ])
+  const forbiddenRepeats = uniqueStrings(stringArray(raw?.forbidden_repeats || raw?.forbiddenRepeats))
   return {
     label: firstNonEmpty(raw?.label, Number.isFinite(totalCount) && totalCount > 0 ? `待修复 ${totalCount}` : ''),
     priorityLabel: firstNonEmpty(raw?.priority_label, raw?.priorityLabel, raw?.priority, raw?.focus),
     items,
-    requiredActions,
-    openingActions: stagedActions.openingActions,
-    middleActions: stagedActions.middleActions,
-    endingActions: stagedActions.endingActions,
+    evidence,
+    requiredActions: uniqueStrings([
+      ...requiredActions,
+      ...openingActions,
+      ...middleActions,
+      ...endingActions,
+    ]),
+    openingActions,
+    middleActions,
+    endingActions,
+    forbiddenRepeats,
   }
 }
 
@@ -1312,6 +2352,172 @@ function contextTarget(contextPackage?: AnyRecord | null) {
   return contextPackage?.chapter_target || contextPackage?.context_package?.chapter_target || {}
 }
 
+function relationshipGraphRiskTexts(contextPackage?: AnyRecord | null) {
+  const target = contextTarget(contextPackage)
+  const contracts = [
+    target?.asset_linkage_contract,
+    target?.assetLinkageContract,
+    contextPackage?.asset_linkage_contract,
+    contextPackage?.assetLinkageContract,
+    contextPackage?.pre_draft_brief?.asset_linkage_contract,
+    contextPackage?.preDraftBrief?.assetLinkageContract,
+  ]
+  const explicitRisks = contracts.flatMap(contract => stringArray(contract?.relationship_graph_risks || contract?.relationshipGraphRisks))
+  const graph = contextPackage?.relationship_graph
+    || contextPackage?.relationshipGraph
+    || contextPackage?.setting_relationship_graph
+    || contextPackage?.settingRelationshipGraph
+    || contextPackage?.setting_context?.relationship_graph
+    || contextPackage?.settingContext?.relationshipGraph
+  const diagnosticRisks = arrayValue(graph?.diagnostics)
+    .filter(item => ['isolated_key_asset', 'missing_owner', 'dangling_relation', 'owner_ability_mismatch'].includes(String(item?.type || '')))
+    .map(item => {
+      const name = firstNonEmpty(item?.entity_name, item?.entityName, item?.source_name, item?.sourceName, item?.target_name, item?.targetName)
+      const message = firstNonEmpty(item?.message, item?.detail, item?.reason, item?.label)
+      return [name, message].filter(Boolean).join('：')
+    })
+    .filter(Boolean)
+  return Array.from(new Set([...explicitRisks, ...diagnosticRisks])).slice(0, 6)
+}
+
+function sourceGapTextsFromStateTracking(contract: AnyRecord = {}) {
+  return arrayValue(contract?.source_readiness || contract?.sourceReadiness)
+    .filter(row => !['ready', 'optional', 'pass', 'ok'].includes(String(row?.status || '').toLowerCase()))
+    .map(row => [firstNonEmpty(row?.label, row?.key), row?.status ? `状态=${row.status}` : '', row?.evidence]
+      .filter(Boolean)
+      .join('｜'))
+    .map(item => text(item))
+    .filter(Boolean)
+}
+
+function normalizeWritePreparationBrief(contextPackage?: AnyRecord | null): ChapterWritePreparationBrief | null {
+  if (!contextPackage) return null
+  const target = contextTarget(contextPackage)
+  const raw = target?.write_preparation_brief
+    || target?.writePreparationBrief
+    || contextPackage?.write_preparation_brief
+    || contextPackage?.writePreparationBrief
+    || contextPackage?.pre_draft_brief?.write_preparation_brief
+    || contextPackage?.pre_draft_brief?.writePreparationBrief
+    || contextPackage?.preDraftBrief?.write_preparation_brief
+    || contextPackage?.preDraftBrief?.writePreparationBrief
+    || {}
+  const hasRaw = Boolean(raw && typeof raw === 'object' && Object.keys(raw).length > 0)
+  const stateTrackingContract = target?.state_tracking_contract
+    || target?.stateTrackingContract
+    || contextPackage?.state_tracking_contract
+    || contextPackage?.stateTrackingContract
+    || contextPackage?.pre_draft_brief?.state_tracking_contract
+    || contextPackage?.pre_draft_brief?.stateTrackingContract
+    || contextPackage?.preDraftBrief?.state_tracking_contract
+    || contextPackage?.preDraftBrief?.stateTrackingContract
+    || {}
+  const chapterBlueprint = target?.chapter_blueprint
+    || target?.chapterBlueprint
+    || contextPackage?.chapter_blueprint
+    || contextPackage?.chapterBlueprint
+    || contextPackage?.pre_draft_brief?.chapter_blueprint
+    || contextPackage?.preDraftBrief?.chapterBlueprint
+    || {}
+  const readerRetentionBrief = target?.reader_retention_brief
+    || target?.readerRetentionBrief
+    || contextPackage?.reader_retention_brief
+    || contextPackage?.readerRetentionBrief
+    || contextPackage?.pre_draft_brief?.reader_retention_brief
+    || contextPackage?.preDraftBrief?.readerRetentionBrief
+    || {}
+  const deliveryRiskCarryOver = normalizeDeliveryRiskCarryOverPlan(contextPackage, target)
+  const endingContract = chapterBlueprint?.ending_contract || chapterBlueprint?.endingContract || {}
+  const sourceGaps = uniqueStrings([
+    ...stringArray(raw?.source_gaps || raw?.sourceGaps),
+    ...sourceGapTextsFromStateTracking(stateTrackingContract),
+  ]).slice(0, 8)
+  const assetRisks = uniqueStrings([
+    ...stringArray(raw?.asset_risks || raw?.assetRisks),
+    ...relationshipGraphRiskTexts(contextPackage),
+  ]).slice(0, 8)
+  const deliveryRiskActions = uniqueStrings([
+    ...stringArray(raw?.delivery_risk_actions || raw?.deliveryRiskActions),
+    ...deliveryRiskCarryOver.requiredActions,
+    ...deliveryRiskCarryOver.forbiddenRepeats.map(item => `禁用重复：${item}`),
+  ]).slice(0, 8)
+  const blueprintFocus = uniqueStrings([
+    ...stringArray(raw?.blueprint_focus || raw?.blueprintFocus),
+    chapterBlueprint?.opening_hook ? `开篇钩子：${text(chapterBlueprint.opening_hook)}` : '',
+    chapterBlueprint?.core_payoff ? `核心回报：${text(chapterBlueprint.core_payoff)}` : '',
+    chapterBlueprint?.target_emotion ? `目标情绪：${text(chapterBlueprint.target_emotion)}` : '',
+    firstNonEmpty(endingContract?.next_chapter_pull, endingContract?.nextChapterPull)
+      ? `章尾拉力：${firstNonEmpty(endingContract?.next_chapter_pull, endingContract?.nextChapterPull)}`
+      : '',
+    chapterBlueprint?.writing_intent ? `写作意图：${text(chapterBlueprint.writing_intent)}` : '',
+  ]).slice(0, 8)
+  const readerPayoffFocus = uniqueStrings([
+    ...stringArray(raw?.reader_payoff_focus || raw?.readerPayoffFocus),
+    ...stringArray([
+      readerRetentionBrief?.opening_hook,
+      readerRetentionBrief?.hook_signal,
+      readerRetentionBrief?.reader_payoff,
+      readerRetentionBrief?.ending_pull,
+      readerRetentionBrief?.page_turn_question,
+      readerRetentionBrief?.core_question,
+    ]),
+    ...stringArray(readerRetentionBrief?.must_deliver || readerRetentionBrief?.mustDeliver),
+  ]).slice(0, 8)
+  const mustConfirm = uniqueStrings([
+    ...stringArray(raw?.must_confirm || raw?.mustConfirm),
+    ...sourceGaps.map(item => `来源就绪：${item}`),
+    ...assetRisks.map(item => `关系图风险：${item}`),
+    ...deliveryRiskActions,
+    ...blueprintFocus.slice(0, 2),
+    ...readerPayoffFocus.slice(0, 2).map(item => `读者回报：${item}`),
+  ]).slice(0, 14)
+  const hasNonAssetDerivedContent = Boolean(
+    sourceGaps.length
+    || deliveryRiskActions.length
+    || blueprintFocus.length
+    || readerPayoffFocus.length
+    || (hasRaw && mustConfirm.length),
+  )
+  const hasDerivedContent = Boolean(hasNonAssetDerivedContent || (hasRaw && assetRisks.length))
+  const executionOrder = uniqueStrings([
+    ...stringArray(raw?.execution_order || raw?.executionOrder),
+    ...(hasRaw || hasDerivedContent
+      ? [
+          '先确认来源就绪：上一章承接、角色状态、伏笔/时间线和世界约束只保留会影响本章正确性的内容。',
+          '再锁定章节蓝图：目标、冲突、开篇钩子、核心回报、代价和章尾拉力。',
+          '再处理资产与状态：关系图风险、关键资产归属/触发/代价、角色状态变化必须接到现场功能。',
+          '最后生成正文：按场景卡顺序写可见行动、对话压力、信息变化和回执证据。',
+        ]
+      : []),
+  ]).slice(0, 4)
+  if (!hasRaw && !hasNonAssetDerivedContent && !executionOrder.length) return null
+  const explicitStatus = text(raw?.readiness_status || raw?.readinessStatus).toLowerCase()
+  const readinessStatus: ChapterWritePreparationBrief['readinessStatus'] = explicitStatus === 'needs_context'
+    || sourceGaps.length > 0
+    || assetRisks.length > 0
+    ? 'needs_context'
+    : 'ready'
+  return {
+    readinessStatus,
+    sourceGaps,
+    assetRisks,
+    deliveryRiskActions,
+    blueprintFocus,
+    readerPayoffFocus,
+    mustConfirm,
+    executionOrder,
+  }
+}
+
+function writePreparationReasonTexts(brief: ChapterWritePreparationBrief | null): string[] {
+  if (!brief) return []
+  return [
+    ...brief.sourceGaps.map(item => `来源缺口：${item}`),
+    ...brief.assetRisks.map(item => `关系图风险：${item}`),
+    ...brief.deliveryRiskActions.map(item => `交稿动作：${item}`),
+  ]
+}
+
 function blockerTexts(value: any): string[] {
   if (!Array.isArray(value)) return []
   return value.map(item => {
@@ -1340,11 +2546,26 @@ function diagnosticsBlockers(diagnostics?: AnyRecord | null): string[] {
   return blockerTexts(preflight?.blockers)
 }
 
-function chapterSceneCards(chapter?: AnyRecord | null): ChapterPlanningDeskSceneCard[] {
-  const rawCards = Array.isArray(chapter?.scene_list) && chapter.scene_list.length > 0
-    ? chapter.scene_list
-    : (Array.isArray(chapter?.scene_breakdown) ? chapter.scene_breakdown : [])
+function rawChapterSceneCards(chapter?: AnyRecord | null, contextPackage?: AnyRecord | null): AnyRecord[] {
+  if (Array.isArray(chapter?.scene_list) && chapter.scene_list.length > 0) return chapter.scene_list
+  if (Array.isArray(chapter?.scene_breakdown) && chapter.scene_breakdown.length > 0) return chapter.scene_breakdown
 
+  const target = contextTarget(contextPackage)
+  const contextCandidates = [
+    target?.scene_cards,
+    target?.sceneCards,
+    contextPackage?.scene_cards,
+    contextPackage?.sceneCards,
+    contextPackage?.pre_draft_brief?.scene_cards,
+    contextPackage?.pre_draft_brief?.sceneCards,
+    contextPackage?.preDraftBrief?.scene_cards,
+    contextPackage?.preDraftBrief?.sceneCards,
+  ]
+  return contextCandidates.find(candidate => Array.isArray(candidate) && candidate.length > 0) || []
+}
+
+function chapterSceneCards(chapter?: AnyRecord | null, contextPackage?: AnyRecord | null): ChapterPlanningDeskSceneCard[] {
+  const rawCards = rawChapterSceneCards(chapter, contextPackage)
   return rawCards.map((scene: AnyRecord, index: number) => {
     const sceneNo = Number(scene?.scene_no)
     const card = {
@@ -1354,9 +2575,67 @@ function chapterSceneCards(chapter?: AnyRecord | null): ChapterPlanningDeskScene
       conflict: firstNonEmpty(scene?.conflict, scene?.tension),
       turn: firstNonEmpty(scene?.turn, scene?.reveal, scene?.beat),
       endingHook: firstNonEmpty(scene?.ending_hook, scene?.endingHook, scene?.exit_state, scene?.hook),
+      requiredBeats: stringArray(scene?.required_beats || scene?.requiredBeats || scene?.beats),
+      stateChangesExpected: stringArray(scene?.state_changes_expected || scene?.stateChangesExpected),
+      serialRiskRepairs: stringArray(scene?.serial_risk_repairs || scene?.serialRiskRepairs || scene?.risk_repairs || scene?.riskRepairs),
+      recentFatigueAction: firstNonEmpty(scene?.recent_fatigue_action, scene?.recentFatigueAction, scene?.fatigue_repair_action, scene?.fatigueRepairAction),
+      characterVoice: firstNonEmpty(scene?.character_voice, scene?.characterVoice, scene?.voice_anchor, scene?.voiceAnchor),
+      dialogueGoals: stringArray(scene?.dialogue_goals || scene?.dialogueGoals || scene?.dialogue_contract_goals || scene?.dialogueContractGoals),
+      styleDirectives: stringArray(scene?.style_directives || scene?.styleDirectives || scene?.style_boundary_directives || scene?.styleBoundaryDirectives),
+      benchmarkRecallDirectives: stringArray(scene?.benchmark_recall_directives || scene?.benchmarkRecallDirectives || scene?.benchmark_directives || scene?.benchmarkDirectives),
+      conceptAnchorRules: stringArray(scene?.concept_anchor_rules || scene?.conceptAnchorRules || scene?.new_concept_anchor_rules || scene?.newConceptAnchorRules),
+      proseCraftDirectives: stringArray(scene?.prose_craft_directives || scene?.proseCraftDirectives || scene?.prose_craft_rules || scene?.proseCraftRules),
     }
     return card
   }).filter(card => Boolean(card.purpose || card.conflict || card.turn || card.endingHook))
+}
+
+function qualityContinuityStage(action: string, index: number, total: number): ChapterQualityContinuitySceneMapItem['stage'] {
+  if (/开篇|前\s*300|前300|首场|第一场/.test(action)) return 'opening'
+  if (/章末|最后|尾声|结尾|追读|ending/.test(action)) return 'ending'
+  if (index === 0) return 'opening'
+  if (index === total - 1) return 'ending'
+  return 'middle'
+}
+
+function buildQualityContinuitySceneMap(sceneCards: ChapterPlanningDeskSceneCard[]): ChapterQualityContinuitySceneMapItem[] {
+  return sceneCards.flatMap((scene, index) => {
+    const riskTags = scene.serialRiskRepairs.filter(item => /delivery_risk_carry_over|质量续航|next_chapter_quality_plan|续航|dialogue_checks|dialogue_contract|对白|对话|声线|科普嘴|benchmark_recall|style_boundary|prose_craft|concept_anchor|文风|风格|文风指纹|文风召回|style_drift|正文工艺|新概念|新名词|新设定|首次出现|作用锚点/.test(item))
+    const forbiddenRepeats = scene.serialRiskRepairs.filter(item => !riskTags.includes(item))
+    const actions = Array.from(new Set([
+      scene.recentFatigueAction,
+      scene.characterVoice,
+      ...scene.requiredBeats,
+      ...scene.stateChangesExpected,
+      ...scene.dialogueGoals,
+      ...scene.styleDirectives,
+      ...scene.benchmarkRecallDirectives,
+      ...scene.conceptAnchorRules,
+      ...scene.proseCraftDirectives,
+      scene.endingHook,
+    ].map(item => text(item)).filter(Boolean)))
+    const hasQualityContinuity = riskTags.length > 0 || actions.some(item => /质量续航|delivery_risk_carry_over|前\s*300|前300|中段|章末|追读|禁用重复|对白|对话|声线|科普嘴|潜台词|文风|风格|文风指纹|文风召回|逗号结巴|句长|benchmark_recall|style_boundary|prose_craft|concept_anchor|正文工艺|新概念|新名词|新设定|首次出现|动作反应|对话半句|物理后果|作用锚点|整段来历|等级解释/.test(item))
+    if (!hasQualityContinuity || actions.length === 0) return []
+    const action = actions.find(item => !/delivery_risk_carry_over|质量续航/.test(item)) || actions[0]
+    return [{
+      sceneNo: scene.sceneNo,
+      title: scene.title,
+      stage: qualityContinuityStage(action, index, sceneCards.length),
+      action,
+      riskTags,
+      forbiddenRepeats,
+    }]
+  }).slice(0, 8)
+}
+
+function deliveryRiskCarryOverNeedsSceneMapping(deliveryRiskCarryOver: ChapterPlanningDeskModel['episodePlan']['deliveryRiskCarryOver']) {
+  return Boolean(
+    deliveryRiskCarryOver.requiredActions.length
+    || deliveryRiskCarryOver.openingActions.length
+    || deliveryRiskCarryOver.middleActions.length
+    || deliveryRiskCarryOver.endingActions.length
+    || deliveryRiskCarryOver.forbiddenRepeats.length,
+  )
 }
 
 const QUALITY_PASS_THRESHOLD = 78
@@ -1462,6 +2741,38 @@ function latestReviewRef(reviews: AnyRecord[], chapter: AnyRecord | null, type: 
 function qualityPayload(review?: AnyRecord | null) {
   const payload = review ? reviewPayload(review) : {}
   return payload?.self_check?.review || payload?.review || payload?.quality || payload?.result || {}
+}
+
+function buildDeslopGateDiagnosticsSummary(quality: AnyRecord): ChapterAcceptanceDeskModel['deslopGateDiagnostics'] {
+  const raw = quality?.deslop_gate_diagnostics || quality?.deslopGateDiagnostics
+  const gates = arrayValue(raw?.gates)
+    .map((gate: AnyRecord) => {
+      const gateKey = text(gate?.gate)
+      const label = text(gate?.label)
+      const status = text(gate?.status, 'pass')
+      const countValue = Number(gate?.count ?? gate?.hit_count ?? gate?.hitCount ?? 0)
+      return {
+        gate: gateKey,
+        label,
+        status,
+        count: Number.isFinite(countValue) ? countValue : 0,
+        patterns: stringArray(gate?.patterns),
+        evidence: stringArray(gate?.evidence),
+        fix: text(gate?.fix),
+      }
+    })
+    .filter(gate => gate.gate || gate.label)
+
+  if (!raw || gates.length === 0) return null
+  const totalValue = Number(raw?.total ?? gates.reduce((sum, gate) => sum + gate.count, 0))
+  const concernValue = Number(raw?.concern_gate_count ?? raw?.concernGateCount ?? gates.filter(gate => gate.status !== 'pass' && gate.status !== 'ok').length)
+  return {
+    version: text(raw?.version, 'oh_story_deslop_gate_diagnostics_v1'),
+    total: Number.isFinite(totalValue) ? totalValue : 0,
+    concernGateCount: Number.isFinite(concernValue) ? concernValue : 0,
+    summary: text(raw?.summary, concernValue > 0 ? `A-G 门禁 ${concernValue} 项需处理` : 'A-G 门禁已通过'),
+    gates,
+  }
 }
 
 function qualityReviewFinalText(payload: AnyRecord) {
@@ -1683,6 +2994,14 @@ function buildReadabilityReviewSummary(review?: AnyRecord | null): ChapterAccept
   const safePayoffScore = Number.isFinite(payoffScore) ? payoffScore : null
   const payoffDensityRisk = safePayoffScore !== null && safePayoffScore > 0 && safePayoffScore < 70
   const memeSense = payload?.meme_sense || {}
+  const aiSmell = payload?.ai_smell || payload?.aiSmell || {}
+  const aiSmellLevel = firstNonEmpty(aiSmell?.level, payload?.ai_smell_level, payload?.aiSmellLevel)
+  const aiSmellHitCount = arrayValue(aiSmell?.pattern_hits || aiSmell?.patternHits).length
+  const aiSmellTactics = arrayValue(aiSmell?.rewrite_tactics || aiSmell?.rewriteTactics)
+    .map(item => text(item))
+    .filter(Boolean)
+  const aiSmellRisk = Boolean(aiSmellLevel && !['无', 'none', '低', 'clean'].includes(aiSmellLevel.toLowerCase?.() || aiSmellLevel)) || aiSmellHitCount > 0
+  const aiSmellLabel = aiSmellRisk ? `AI味${aiSmellLevel || '待降'} ${aiSmellHitCount}` : 'AI味 0'
   const immersionRiskCount = Array.isArray(memeSense?.immersion_risks)
     ? memeSense.immersion_risks.length
     : countArray(payload?.immersion_risks)
@@ -1691,6 +3010,7 @@ function buildReadabilityReviewSummary(review?: AnyRecord | null): ChapterAccept
     + (endingHookRisk ? 1 : 0)
     + (sceneReadabilityRisk ? 1 : 0)
     + (payoffDensityRisk ? 1 : 0)
+    + (aiSmellRisk ? Math.max(1, aiSmellHitCount) : 0)
   const intensity = firstNonEmpty(memeSense?.intensity, payload?.meme_intensity, '')
 
   return {
@@ -1708,6 +3028,10 @@ function buildReadabilityReviewSummary(review?: AnyRecord | null): ChapterAccept
     payoffDensityScore: safePayoffScore,
     payoffDensityLabel: safePayoffScore === null ? '爽点密度 -' : `爽点密度 ${safePayoffScore}`,
     payoffDensityRisk,
+    aiSmellLabel,
+    aiSmellRisk,
+    aiSmellHitCount,
+    aiSmellTactics,
     memeLabel: intensity ? `网感${intensity}` : '网感未评',
     riskLabel: openingHookRisk
       ? `开篇吸引力弱 ${safeOpeningScore}`
@@ -1717,6 +3041,8 @@ function buildReadabilityReviewSummary(review?: AnyRecord | null): ChapterAccept
           ? `场景推进弱 ${safeSceneScore}`
           : payoffDensityRisk
             ? `爽点密度弱 ${safePayoffScore}`
+            : aiSmellRisk
+              ? aiSmellLabel
         : immersionRiskCount > 0 ? `出戏风险 ${immersionRiskCount}` : '出戏风险 0',
     riskCount,
   }
@@ -1840,6 +3166,353 @@ function buildReaderExpectationSyncSummary(review?: AnyRecord | null): ChapterAc
     scoreLabel: safeScore === null ? '期待兑现 -' : `期待兑现 ${safeScore}`,
     missedCount,
     openingHandoffMissedCount,
+  }
+}
+
+function qualityAuditSyncPayload(review?: AnyRecord | null) {
+  const payload = review ? reviewPayload(review) : {}
+  return payload?.quality_audit_sync || payload?.result?.quality_audit_sync || payload?.result || payload
+}
+
+function qualityAuditSyncEvidence(value: any) {
+  const label = text(value?.label || value?.name || value?.key)
+  const detail = firstNonEmpty(value?.text, value?.evidence, value?.message, value?.summary, value?.detail)
+  if (label && detail) return `${label}：${detail}`
+  return firstNonEmpty(
+    detail,
+    label,
+  )
+}
+
+function buildQualityAuditSyncSummary(review?: AnyRecord | null): ChapterAcceptanceDeskModel['qualityAuditSync'] {
+  if (!review) return null
+  const payload = qualityAuditSyncPayload(review)
+  const payloadMissedCount = Number(payload?.missed_count ?? payload?.missedCount)
+  const missed = arrayValue(payload?.missed || payload?.gaps || payload?.issues)
+  const missedCount = Number.isFinite(payloadMissedCount) ? payloadMissedCount : missed.length
+  const status: 'ok' | 'warn' = text(payload?.status || review?.status).toLowerCase() === 'ok' && missedCount === 0 ? 'ok' : 'warn'
+  const evidence = [
+    text(payload?.summary),
+    ...missed.map(qualityAuditSyncEvidence),
+  ].filter(Boolean).slice(0, 5)
+  const nextActions = arrayValue(payload?.next_actions || payload?.nextActions || payload?.required_actions || payload?.requiredActions)
+    .map(item => text(item))
+    .filter(Boolean)
+    .slice(0, 4)
+
+  return {
+    status,
+    label: status === 'ok' ? '诊断承接 OK' : text(payload?.label) || `诊断承接缺口 ${missedCount}`,
+    missedCount,
+    evidence,
+    nextActions,
+  }
+}
+
+function chapterHandoffSyncPayload(review: AnyRecord | null | undefined, snakeKey: string, camelKey: string) {
+  const payload = review ? reviewPayload(review) : {}
+  return payload?.[snakeKey]
+    || payload?.[camelKey]
+    || payload?.result?.[snakeKey]
+    || payload?.result?.[camelKey]
+    || payload?.result
+    || payload
+}
+
+function buildChapterHandoffSyncSummary(
+  review: AnyRecord | null | undefined,
+  snakeKey: string,
+  camelKey: string,
+  okLabel: string,
+  fallbackPrefix: string,
+): ChapterAcceptanceDeskModel['chapterHandoffSync'] {
+  if (!review) return null
+  const payload = chapterHandoffSyncPayload(review, snakeKey, camelKey)
+  const payloadMissedCount = Number(payload?.missed_count ?? payload?.missedCount)
+  const missed = arrayValue(payload?.missed || payload?.gaps || payload?.issues)
+  const missedCount = Number.isFinite(payloadMissedCount) ? payloadMissedCount : missed.length
+  const status: 'ok' | 'warn' = text(payload?.status || review?.status).toLowerCase() === 'ok' && missedCount === 0 ? 'ok' : 'warn'
+  const evidence = [
+    text(payload?.summary),
+    ...missed.map(qualityAuditSyncEvidence),
+  ].filter(Boolean).slice(0, 5)
+  const nextActions = arrayValue(payload?.next_actions || payload?.nextActions || payload?.required_actions || payload?.requiredActions)
+    .map(item => text(item))
+    .filter(Boolean)
+    .slice(0, 4)
+
+  return {
+    status,
+    label: status === 'ok' ? okLabel : text(payload?.label) || `${fallbackPrefix} ${missedCount}`,
+    missedCount,
+    evidence,
+    nextActions,
+  }
+}
+
+function qualityAuditRepairReceiptSyncPayload(review?: AnyRecord | null) {
+  const payload = review ? reviewPayload(review) : {}
+  return payload?.quality_audit_repair_receipt_sync
+    || payload?.qualityAuditRepairReceiptSync
+    || payload?.result?.quality_audit_repair_receipt_sync
+    || payload?.result?.qualityAuditRepairReceiptSync
+    || payload?.result
+    || payload
+}
+
+function buildQualityAuditRepairReceiptSyncSummary(review?: AnyRecord | null): ChapterAcceptanceDeskModel['qualityAuditRepairReceiptSync'] {
+  if (!review) return null
+  const payload = qualityAuditRepairReceiptSyncPayload(review)
+  const missed = arrayValue(payload?.missed || payload?.gaps || payload?.issues)
+  const payloadMissedCount = Number(payload?.missed_count ?? payload?.missedCount)
+  const missedCount = Number.isFinite(payloadMissedCount) ? payloadMissedCount : missed.length
+  const payloadReceiptCount = Number(payload?.receipt_count ?? payload?.receiptCount)
+  const receiptCount = Number.isFinite(payloadReceiptCount) ? payloadReceiptCount : countArray(payload?.completed) + missed.length
+  const status: 'ok' | 'warn' = text(payload?.status || review?.status).toLowerCase() === 'ok' && missedCount === 0 ? 'ok' : 'warn'
+  const evidence = [
+    text(payload?.summary),
+    ...missed.map(qualityAuditSyncEvidence),
+  ].filter(Boolean).slice(0, 5)
+  const nextActions = arrayValue(payload?.next_actions || payload?.nextActions || payload?.required_actions || payload?.requiredActions)
+    .map(item => text(item))
+    .filter(Boolean)
+    .slice(0, 4)
+
+  return {
+    status,
+    label: status === 'ok' ? '质量修复回执 OK' : text(payload?.label) || `质量诊断修复回执缺口 ${missedCount}`,
+    missedCount,
+    receiptCount,
+    evidence,
+    nextActions,
+  }
+}
+
+function contractSyncPayload(review: AnyRecord | null | undefined, snakeKey: string, camelKey: string) {
+  const payload = review ? reviewPayload(review) : {}
+  return payload?.[snakeKey]
+    || payload?.[camelKey]
+    || payload?.result?.[snakeKey]
+    || payload?.result?.[camelKey]
+    || payload?.result
+    || payload
+}
+
+function preDraftExecutionReceiptSections(payload?: AnyRecord | null) {
+  const selfCheck = payload?.self_check || payload?.selfCheck || payload || {}
+  const review = selfCheck?.review || selfCheck?.initial_review || payload?.review || payload || {}
+  const receiptSources = uniqueObjects([
+    deliveryReceiptsFrom(review),
+    deliveryReceiptsFrom(selfCheck),
+    deliveryReceiptsFrom(payload),
+  ])
+  return uniqueObjects([
+    review?.pre_draft_execution_receipts || review?.preDraftExecutionReceipts,
+    selfCheck?.pre_draft_execution_receipts || selfCheck?.preDraftExecutionReceipts,
+    payload?.pre_draft_execution_receipts || payload?.preDraftExecutionReceipts,
+    ...receiptSources.map(source => source?.pre_draft_execution_receipts || source?.preDraftExecutionReceipts),
+  ])
+}
+
+function preDraftExecutionCheckNeedsRepair(value: any) {
+  const status = text(value?.status).toLowerCase()
+  if (['fail', 'failed', 'warn', 'warning', 'missing', 'missed', 'false', 'no', '0'].includes(status)) return true
+  if (value?.delivered === false) return true
+  return Boolean(firstNonEmpty(value?.remaining_risk, value?.remainingRisk))
+}
+
+function buildPreDraftExecutionSyncSummary(
+  payload: AnyRecord | null,
+  snakeKey: string,
+  camelKey: string,
+  label: string,
+): ChapterAcceptanceDeskModel['intentConfirmationSync'] {
+  const sections = preDraftExecutionReceiptSections(payload)
+  const checks = sections.flatMap(section => arrayValue(section?.[snakeKey] || section?.[camelKey]))
+  const missed = checks.filter(preDraftExecutionCheckNeedsRepair)
+  if (checks.length <= 0 && missed.length <= 0) return null
+  const missedCount = missed.length
+  const evidence = missed
+    .map(item => firstNonEmpty(item?.remaining_risk, item?.remainingRisk, item?.evidence, item?.issue, item?.reason, item?.description, item?.label, item?.key))
+    .filter(Boolean)
+    .slice(0, 5)
+  const nextActions = missed
+    .map(item => firstNonEmpty(item?.fix, item?.repair_instruction, item?.repairInstruction, item?.suggestion, item?.remaining_risk, item?.remainingRisk))
+    .filter(Boolean)
+    .slice(0, 4)
+  return {
+    status: missedCount > 0 ? 'warn' : 'ok',
+    label: missedCount > 0 ? `${label}缺口 ${missedCount}` : `${label} OK`,
+    missedCount,
+    evidence,
+    nextActions,
+  }
+}
+
+function mergeContractSyncSummary(
+  explicitSummary: ChapterAcceptanceDeskModel['intentConfirmationSync'],
+  receiptSummary: ChapterAcceptanceDeskModel['intentConfirmationSync'],
+  label: string,
+) {
+  if (!explicitSummary) return receiptSummary
+  if (!receiptSummary) return explicitSummary
+  const missedCount = explicitSummary.missedCount + receiptSummary.missedCount
+  return {
+    status: missedCount > 0 ? 'warn' as const : 'ok' as const,
+    label: missedCount > 0 ? `${label}缺口 ${missedCount}` : `${label} OK`,
+    missedCount,
+    evidence: uniqueStrings([...explicitSummary.evidence, ...receiptSummary.evidence]).slice(0, 5),
+    nextActions: uniqueStrings([...explicitSummary.nextActions, ...receiptSummary.nextActions]).slice(0, 4),
+  }
+}
+
+function qualityCheckNeedsRepair(value: any) {
+  if (typeof value === 'string') return true
+  const status = text(value?.status || value?.result || value?.severity).toLowerCase()
+  if (['pass', 'passed', 'ok', 'done', 'true', 'yes'].includes(status)) return false
+  if (['fail', 'failed', 'warn', 'warning', 'missing', 'missed', 'blocked', 'error', 'false', 'no', '0'].includes(status)) return true
+  if (value?.ready === false || value?.passed === false || value?.delivered === false || value?.ok === false) return true
+  if (value?.ready === true || value?.passed === true || value?.delivered === true || value?.ok === true) return false
+  return Boolean(firstNonEmpty(value?.remaining_risk, value?.remainingRisk, value?.fix, value?.evidence))
+}
+
+function buildQualityCheckSummary(
+  payload: AnyRecord | null,
+  snakeKey: string,
+  camelKey: string,
+  label: string,
+): ChapterAcceptanceDeskModel['sourceReadiness'] {
+  if (!payload) return null
+  const selfCheck = payload?.self_check || payload?.selfCheck || payload || {}
+  const review = selfCheck?.review || payload?.review || {}
+  const checks = [
+    ...arrayValue(review?.[snakeKey] || review?.[camelKey]),
+    ...arrayValue(selfCheck?.[snakeKey] || selfCheck?.[camelKey]),
+    ...arrayValue(payload?.[snakeKey] || payload?.[camelKey]),
+  ]
+  if (checks.length <= 0) return null
+
+  const missed = checks.filter(qualityCheckNeedsRepair)
+  const missedCount = missed.length
+  return {
+    status: missedCount > 0 ? 'warn' : 'ok',
+    label: missedCount > 0 ? `${label}缺口 ${missedCount}` : `${label} OK`,
+    missedCount,
+    evidence: missed
+      .map(item => firstNonEmpty(item?.evidence, item?.message, item?.summary, item?.text, item?.remaining_risk, item?.remainingRisk, item?.label, item?.key))
+      .filter(Boolean)
+      .slice(0, 5),
+    nextActions: missed
+      .map(item => firstNonEmpty(item?.fix, item?.action, item?.required_action, item?.requiredAction, item?.suggestion, item?.remaining_risk, item?.remainingRisk))
+      .filter(Boolean)
+      .slice(0, 4),
+  }
+}
+
+function sceneCardDirectiveCheckText(value: any) {
+  if (typeof value === 'string') return text(value)
+  return [
+    value?.key,
+    value?.label,
+    value?.type,
+    value?.status,
+    value?.evidence,
+    value?.fix,
+    value?.message,
+    value?.summary,
+    value?.text,
+    value?.remaining_risk,
+    value?.remainingRisk,
+    value?.required_action,
+    value?.requiredAction,
+  ].map(item => text(item)).filter(Boolean).join(' ')
+}
+
+function sceneCardDirectiveCheckMatches(value: any) {
+  const valueText = sceneCardDirectiveCheckText(value)
+  return /scene[_\s-]*card[_\s-]*\d+[_\s-]*(execution[_\s-]*directives|forbidden[_\s-]*directives)/i.test(valueText)
+    || /场景卡(执行|禁令)/.test(valueText)
+}
+
+function buildSceneCardDirectiveSummary(payload: AnyRecord | null): ChapterAcceptanceDeskModel['proseCraft'] {
+  if (!payload) return null
+  const selfCheck = payload?.self_check || payload?.selfCheck || payload || {}
+  const review = selfCheck?.review || payload?.review || {}
+  const checks = [
+    ...arrayValue(review?.prose_craft_checks || review?.proseCraftChecks),
+    ...arrayValue(selfCheck?.prose_craft_checks || selfCheck?.proseCraftChecks),
+    ...arrayValue(payload?.prose_craft_checks || payload?.proseCraftChecks),
+    ...arrayValue(review?.quality_audit_checks || review?.qualityAuditChecks),
+    ...arrayValue(selfCheck?.quality_audit_checks || selfCheck?.qualityAuditChecks),
+    ...arrayValue(payload?.quality_audit_checks || payload?.qualityAuditChecks),
+  ].filter(sceneCardDirectiveCheckMatches)
+
+  const missed = checks.filter(qualityCheckNeedsRepair)
+  const missedCount = missed.length
+  if (missedCount <= 0) return null
+
+  return {
+    status: 'warn',
+    label: `场景卡执行缺口 ${missedCount}`,
+    missedCount,
+    evidence: missed
+      .map(item => firstNonEmpty(item?.evidence, item?.message, item?.summary, item?.text, item?.remaining_risk, item?.remainingRisk, sceneCardDirectiveCheckText(item)))
+      .filter(Boolean)
+      .slice(0, 5),
+    nextActions: missed
+      .map(item => firstNonEmpty(item?.fix, item?.action, item?.required_action, item?.requiredAction, item?.suggestion, item?.remaining_risk, item?.remainingRisk))
+      .filter(Boolean)
+      .slice(0, 4),
+  }
+}
+
+function buildIntentConfirmationSyncSummary(review?: AnyRecord | null): ChapterAcceptanceDeskModel['intentConfirmationSync'] {
+  if (!review) return null
+  const payload = contractSyncPayload(review, 'intent_confirmation_sync', 'intentConfirmationSync')
+  const missed = arrayValue(payload?.missed || payload?.gaps || payload?.issues)
+  const payloadMissedCount = Number(payload?.missed_count ?? payload?.missedCount)
+  const missedCount = Number.isFinite(payloadMissedCount) ? payloadMissedCount : missed.length
+  const status: 'ok' | 'warn' = text(payload?.status || review?.status).toLowerCase() === 'ok' && missedCount === 0 ? 'ok' : 'warn'
+  const evidence = [
+    text(payload?.summary),
+    ...missed.map(qualityAuditSyncEvidence),
+  ].filter(Boolean).slice(0, 5)
+  const nextActions = arrayValue(payload?.next_actions || payload?.nextActions || payload?.required_actions || payload?.requiredActions)
+    .map(item => text(item))
+    .filter(Boolean)
+    .slice(0, 4)
+
+  return {
+    status,
+    label: status === 'ok' ? '意图确认 OK' : text(payload?.label) || `意图确认缺口 ${missedCount}`,
+    missedCount,
+    evidence,
+    nextActions,
+  }
+}
+
+function buildBenchmarkRecallSyncSummary(review?: AnyRecord | null): ChapterAcceptanceDeskModel['benchmarkRecallSync'] {
+  if (!review) return null
+  const payload = contractSyncPayload(review, 'benchmark_recall_sync', 'benchmarkRecallSync')
+  const missed = arrayValue(payload?.missed || payload?.gaps || payload?.issues)
+  const payloadMissedCount = Number(payload?.missed_count ?? payload?.missedCount)
+  const missedCount = Number.isFinite(payloadMissedCount) ? payloadMissedCount : missed.length
+  const status: 'ok' | 'warn' = text(payload?.status || review?.status).toLowerCase() === 'ok' && missedCount === 0 ? 'ok' : 'warn'
+  const evidence = [
+    text(payload?.summary),
+    ...missed.map(qualityAuditSyncEvidence),
+  ].filter(Boolean).slice(0, 5)
+  const nextActions = arrayValue(payload?.next_actions || payload?.nextActions || payload?.required_actions || payload?.requiredActions)
+    .map(item => text(item))
+    .filter(Boolean)
+    .slice(0, 4)
+
+  return {
+    status,
+    label: status === 'ok' ? '文风召回 OK' : text(payload?.label) || `文风召回缺口 ${missedCount}`,
+    missedCount,
+    evidence,
+    nextActions,
   }
 }
 
@@ -2074,6 +3747,53 @@ function buildDeliveryRiskQueue(args: {
   runwaySync: ChapterAcceptanceDeskModel['runwaySync']
   readerPayoffSync: ChapterAcceptanceDeskModel['readerPayoffSync']
   readerExpectationSync: ChapterAcceptanceDeskModel['readerExpectationSync']
+  qualityAuditSync: ChapterAcceptanceDeskModel['qualityAuditSync']
+  qualityAuditRepairReceiptSync: ChapterAcceptanceDeskModel['qualityAuditRepairReceiptSync']
+  chapterHandoffSync: ChapterAcceptanceDeskModel['chapterHandoffSync']
+  chapterHandoffDeltaSync: ChapterAcceptanceDeskModel['chapterHandoffDeltaSync']
+  writePreparation: ChapterAcceptanceDeskModel['writePreparation']
+  intentConfirmationSync: ChapterAcceptanceDeskModel['intentConfirmationSync']
+  benchmarkRecallSync: ChapterAcceptanceDeskModel['benchmarkRecallSync']
+  sourceReadiness: ChapterAcceptanceDeskModel['sourceReadiness']
+  stateTracking: ChapterAcceptanceDeskModel['stateTracking']
+  styleBoundary: ChapterAcceptanceDeskModel['styleBoundary']
+  informationFlow: ChapterAcceptanceDeskModel['informationFlow']
+  expectationThreshold: ChapterAcceptanceDeskModel['expectationThreshold']
+  storyLoop: ChapterAcceptanceDeskModel['storyLoop']
+  emotionalArc: ChapterAcceptanceDeskModel['emotionalArc']
+  chapterHook: ChapterAcceptanceDeskModel['chapterHook']
+  paragraphHook: ChapterAcceptanceDeskModel['paragraphHook']
+  suspense: ChapterAcceptanceDeskModel['suspense']
+  assetLinkage: ChapterAcceptanceDeskModel['assetLinkage']
+  dialogue: ChapterAcceptanceDeskModel['dialogue']
+  plotDynamics: ChapterAcceptanceDeskModel['plotDynamics']
+  characterRelation: ChapterAcceptanceDeskModel['characterRelation']
+  characterBehavior: ChapterAcceptanceDeskModel['characterBehavior']
+  conflictStructure: ChapterAcceptanceDeskModel['conflictStructure']
+  bridgeUnit: ChapterAcceptanceDeskModel['bridgeUnit']
+  reversal: ChapterAcceptanceDeskModel['reversal']
+  showdown: ChapterAcceptanceDeskModel['showdown']
+  opening: ChapterAcceptanceDeskModel['opening']
+  proseCraft: ChapterAcceptanceDeskModel['proseCraft']
+  sceneCardDirective: ChapterAcceptanceDeskModel['proseCraft']
+  punctuationTone: ChapterAcceptanceDeskModel['punctuationTone']
+  contentRubric: ChapterAcceptanceDeskModel['contentRubric']
+  targetReader: ChapterAcceptanceDeskModel['targetReader']
+  genrePositioning: ChapterAcceptanceDeskModel['genrePositioning']
+  femaleAudience: ChapterAcceptanceDeskModel['femaleAudience']
+  upgradeRhythm: ChapterAcceptanceDeskModel['upgradeRhythm']
+  chapterStructure: ChapterAcceptanceDeskModel['chapterStructure']
+  chapterProgression: ChapterAcceptanceDeskModel['chapterProgression']
+  informationLoad: ChapterAcceptanceDeskModel['informationLoad']
+  longformContinuity: ChapterAcceptanceDeskModel['longformContinuity']
+  coreContractCheck: ChapterAcceptanceDeskModel['coreContractCheck']
+  continuityHeat: ChapterAcceptanceDeskModel['continuityHeat']
+  revisionReceiptCheck: ChapterAcceptanceDeskModel['revisionReceiptCheck']
+  deslopRepairCheck: ChapterAcceptanceDeskModel['deslopRepairCheck']
+  proseMeta: ChapterAcceptanceDeskModel['proseMeta']
+  serialRiskRepair: ChapterAcceptanceDeskModel['serialRiskRepair']
+  chapterHookQuality: ChapterAcceptanceDeskModel['chapterHookQuality']
+  readerRetentionCheck: ChapterAcceptanceDeskModel['readerRetentionCheck']
   readerRetentionSync: ChapterAcceptanceDeskModel['readerRetentionSync']
   chapterAttraction: ChapterAcceptanceDeskModel['chapterAttraction']
   storyDriveSync: ChapterAcceptanceDeskModel['storyDriveSync']
@@ -2082,9 +3802,24 @@ function buildDeliveryRiskQueue(args: {
   styleSampleSync: ChapterAcceptanceDeskModel['styleSampleSync']
   innovationSync: ChapterAcceptanceDeskModel['innovationSync']
   volumeBeatSync: ChapterAcceptanceDeskModel['volumeBeatSync']
+  blueprintReceipt: ChapterAcceptanceDeskModel['blueprintReceipt']
+  revisionReceipt: ChapterAcceptanceDeskModel['revisionReceipt']
+  deliveryRiskReceipt: ChapterAcceptanceDeskModel['deliveryRiskReceipt']
+  sceneCardReceipt: ChapterAcceptanceDeskModel['sceneCardReceipt']
+  qualityAudit: ChapterAcceptanceDeskModel['qualityAudit']
+  platformRubric: ChapterAcceptanceDeskModel['platformRubric']
+  approvalBlocker: ChapterAcceptanceDeskModel['approvalBlocker']
   governanceRecheckSync: ChapterAcceptanceDeskModel['governanceRecheckSync']
 }): ChapterAcceptanceDeskModel['deliveryRiskQueue'] {
-  const risks: Array<{ count: number; item: string; priorityLabel: string }> = []
+  const risks: Array<{ count: number; item: string; priorityLabel: string; priorityRank?: number }> = []
+  if (args.approvalBlocker) {
+    risks.push({
+      count: 1,
+      item: `处理入库阻断：${args.approvalBlocker.label} · ${args.approvalBlocker.detail}`,
+      priorityLabel: '优先处理入库阻断',
+      priorityRank: 0,
+    })
+  }
   if (args.governanceRecheckSync && args.governanceRecheckSync.missedCount > 0) {
     risks.push({
       count: args.governanceRecheckSync.missedCount,
@@ -2094,6 +3829,354 @@ function buildDeliveryRiskQueue(args: {
   }
   if (args.coreDrift && args.coreDrift.riskCount > 0) {
     risks.push({ count: args.coreDrift.riskCount, item: `守核心：${args.coreDrift.label}`, priorityLabel: '优先补核心' })
+  }
+  if (args.blueprintReceipt && args.blueprintReceipt.missedCount > 0) {
+    risks.push({ count: args.blueprintReceipt.missedCount, item: `补蓝图：${args.blueprintReceipt.label}`, priorityLabel: '优先补蓝图' })
+  }
+  if (args.revisionReceipt && args.revisionReceipt.riskCount > 0) {
+    risks.push({ count: args.revisionReceipt.riskCount, item: `复核修订：${args.revisionReceipt.label}`, priorityLabel: '优先复核修订' })
+  }
+  if (args.deliveryRiskReceipt && args.deliveryRiskReceipt.riskCount > 0) {
+    risks.push({ count: args.deliveryRiskReceipt.riskCount, item: `复核承接：${args.deliveryRiskReceipt.label}`, priorityLabel: '优先复核承接' })
+  }
+  if (args.sceneCardReceipt && args.sceneCardReceipt.riskCount > 0) {
+    risks.push({ count: args.sceneCardReceipt.riskCount, item: `复核场景回执：${args.sceneCardReceipt.label}`, priorityLabel: '优先复核场景' })
+  }
+  if (args.sceneCardDirective && args.sceneCardDirective.missedCount > 0) {
+    risks.push({
+      count: args.sceneCardDirective.missedCount,
+      item: `修场景卡：${args.sceneCardDirective.label}`,
+      priorityLabel: '优先修场景卡',
+      priorityRank: 1,
+    })
+  }
+  if (args.qualityAudit && args.qualityAudit.riskCount > 0) {
+    risks.push({ count: args.qualityAudit.riskCount, item: `修质量诊断：${args.qualityAudit.label}`, priorityLabel: '优先修质量诊断' })
+  }
+  if (args.qualityAuditSync && args.qualityAuditSync.missedCount > 0) {
+    risks.push({ count: args.qualityAuditSync.missedCount, item: `补诊断承接：${args.qualityAuditSync.label}`, priorityLabel: '优先补质量诊断' })
+  }
+  if (args.qualityAuditRepairReceiptSync && args.qualityAuditRepairReceiptSync.missedCount > 0) {
+    risks.push({
+      count: args.qualityAuditRepairReceiptSync.missedCount,
+      item: `复核质量修复回执：${args.qualityAuditRepairReceiptSync.label}`,
+      priorityLabel: '优先补质量回执',
+    })
+  }
+  if (args.chapterHandoffSync && args.chapterHandoffSync.missedCount > 0) {
+    risks.push({
+      count: args.chapterHandoffSync.missedCount,
+      item: `补章首承接：${args.chapterHandoffSync.label}`,
+      priorityLabel: '优先补章首承接',
+    })
+  }
+  if (args.chapterHandoffDeltaSync && args.chapterHandoffDeltaSync.missedCount > 0) {
+    risks.push({
+      count: args.chapterHandoffDeltaSync.missedCount,
+      item: `补章末交接：${args.chapterHandoffDeltaSync.label}`,
+      priorityLabel: '优先补章末交接',
+    })
+  }
+  if (args.writePreparation && args.writePreparation.missedCount > 0) {
+    risks.push({
+      count: args.writePreparation.missedCount,
+      item: `补写前准备：${args.writePreparation.label}`,
+      priorityLabel: '优先补写前准备',
+    })
+  }
+  if (args.intentConfirmationSync && args.intentConfirmationSync.missedCount > 0) {
+    risks.push({
+      count: args.intentConfirmationSync.missedCount,
+      item: `补意图确认：${args.intentConfirmationSync.label}`,
+      priorityLabel: '优先补意图确认',
+    })
+  }
+  if (args.benchmarkRecallSync && args.benchmarkRecallSync.missedCount > 0) {
+    risks.push({
+      count: args.benchmarkRecallSync.missedCount,
+      item: `补文风召回：${args.benchmarkRecallSync.label}`,
+      priorityLabel: '优先补文风召回',
+    })
+  }
+  if (args.sourceReadiness && args.sourceReadiness.missedCount > 0) {
+    risks.push({
+      count: args.sourceReadiness.missedCount,
+      item: `补来源就绪：${args.sourceReadiness.label}`,
+      priorityLabel: '优先补来源',
+    })
+  }
+  if (args.stateTracking && args.stateTracking.missedCount > 0) {
+    risks.push({
+      count: args.stateTracking.missedCount,
+      item: `补状态跟踪：${args.stateTracking.label}`,
+      priorityLabel: '优先补状态',
+    })
+  }
+  if (args.styleBoundary && args.styleBoundary.missedCount > 0) {
+    risks.push({
+      count: args.styleBoundary.missedCount,
+      item: `校风格边界：${args.styleBoundary.label}`,
+      priorityLabel: '优先校风格边界',
+    })
+  }
+  if (args.informationFlow && args.informationFlow.missedCount > 0) {
+    risks.push({
+      count: args.informationFlow.missedCount,
+      item: `调信息流：${args.informationFlow.label}`,
+      priorityLabel: '优先调信息流',
+    })
+  }
+  if (args.expectationThreshold && args.expectationThreshold.missedCount > 0) {
+    risks.push({
+      count: args.expectationThreshold.missedCount,
+      item: `补期待阈值：${args.expectationThreshold.label}`,
+      priorityLabel: '优先补期待阈值',
+    })
+  }
+  if (args.storyLoop && args.storyLoop.missedCount > 0) {
+    risks.push({
+      count: args.storyLoop.missedCount,
+      item: `补故事闭环：${args.storyLoop.label}`,
+      priorityLabel: '优先补闭环',
+    })
+  }
+  if (args.emotionalArc && args.emotionalArc.missedCount > 0) {
+    risks.push({
+      count: args.emotionalArc.missedCount,
+      item: `补情绪弧：${args.emotionalArc.label}`,
+      priorityLabel: '优先补情绪弧',
+    })
+  }
+  if (args.chapterHook && args.chapterHook.missedCount > 0) {
+    risks.push({
+      count: args.chapterHook.missedCount,
+      item: `补章级钩子：${args.chapterHook.label}`,
+      priorityLabel: '优先补章钩',
+    })
+  }
+  if (args.paragraphHook && args.paragraphHook.missedCount > 0) {
+    risks.push({
+      count: args.paragraphHook.missedCount,
+      item: `补段落钩子：${args.paragraphHook.label}`,
+      priorityLabel: '优先补段钩',
+    })
+  }
+  if (args.suspense && args.suspense.missedCount > 0) {
+    risks.push({
+      count: args.suspense.missedCount,
+      item: `补悬念编排：${args.suspense.label}`,
+      priorityLabel: '优先补悬念',
+    })
+  }
+  if (args.assetLinkage && args.assetLinkage.missedCount > 0) {
+    risks.push({
+      count: args.assetLinkage.missedCount,
+      item: `挂资产：${args.assetLinkage.label}`,
+      priorityLabel: '优先补资产挂钩',
+    })
+  }
+  if (args.dialogue && args.dialogue.missedCount > 0) {
+    risks.push({
+      count: args.dialogue.missedCount,
+      item: `修对白：${args.dialogue.label}`,
+      priorityLabel: '优先修对白',
+    })
+  }
+  if (args.plotDynamics && args.plotDynamics.missedCount > 0) {
+    risks.push({
+      count: args.plotDynamics.missedCount,
+      item: `补动力：${args.plotDynamics.label}`,
+      priorityLabel: '优先补剧情动力',
+    })
+  }
+  if (args.characterRelation && args.characterRelation.missedCount > 0) {
+    risks.push({
+      count: args.characterRelation.missedCount,
+      item: `修关系：${args.characterRelation.label}`,
+      priorityLabel: '优先修角色关系',
+    })
+  }
+  if (args.characterBehavior && args.characterBehavior.missedCount > 0) {
+    risks.push({
+      count: args.characterBehavior.missedCount,
+      item: `修行为：${args.characterBehavior.label}`,
+      priorityLabel: '优先修角色行为',
+    })
+  }
+  if (args.conflictStructure && args.conflictStructure.missedCount > 0) {
+    risks.push({
+      count: args.conflictStructure.missedCount,
+      item: `加冲突：${args.conflictStructure.label}`,
+      priorityLabel: '优先修冲突结构',
+    })
+  }
+  if (args.bridgeUnit && args.bridgeUnit.missedCount > 0) {
+    risks.push({
+      count: args.bridgeUnit.missedCount,
+      item: `补桥段：${args.bridgeUnit.label}`,
+      priorityLabel: '优先补桥段节奏',
+    })
+  }
+  if (args.reversal && args.reversal.missedCount > 0) {
+    risks.push({
+      count: args.reversal.missedCount,
+      item: `补反转：${args.reversal.label}`,
+      priorityLabel: '优先补反转设计',
+    })
+  }
+  if (args.showdown && args.showdown.missedCount > 0) {
+    risks.push({
+      count: args.showdown.missedCount,
+      item: `补高潮：${args.showdown.label}`,
+      priorityLabel: '优先补高潮对抗',
+    })
+  }
+  if (args.opening && args.opening.missedCount > 0) {
+    risks.push({
+      count: args.opening.missedCount,
+      item: `改开篇：${args.opening.label}`,
+      priorityLabel: '优先修开篇',
+    })
+  }
+  if (args.proseCraft && args.proseCraft.missedCount > 0) {
+    risks.push({
+      count: args.proseCraft.missedCount,
+      item: `修工艺：${args.proseCraft.label}`,
+      priorityLabel: '优先修正文工艺',
+    })
+  }
+  if (args.punctuationTone && args.punctuationTone.missedCount > 0) {
+    risks.push({
+      count: args.punctuationTone.missedCount,
+      item: `调语气：${args.punctuationTone.label}`,
+      priorityLabel: '优先修语气标点',
+    })
+  }
+  if (args.contentRubric && args.contentRubric.missedCount > 0) {
+    risks.push({
+      count: args.contentRubric.missedCount,
+      item: `补内容：${args.contentRubric.label}`,
+      priorityLabel: '优先修内容基准',
+    })
+  }
+  if (args.targetReader && args.targetReader.missedCount > 0) {
+    risks.push({
+      count: args.targetReader.missedCount,
+      item: `创作契约：目标读者缺口 ${args.targetReader.missedCount}`,
+      priorityLabel: '优先修创作契约',
+      priorityRank: 1,
+    })
+  }
+  if (args.genrePositioning && args.genrePositioning.missedCount > 0) {
+    risks.push({
+      count: args.genrePositioning.missedCount,
+      item: `创作契约：题材定位缺口 ${args.genrePositioning.missedCount}`,
+      priorityLabel: '优先修创作契约',
+      priorityRank: 1,
+    })
+  }
+  if (args.femaleAudience && args.femaleAudience.missedCount > 0) {
+    risks.push({
+      count: args.femaleAudience.missedCount,
+      item: `补女频：${args.femaleAudience.label}`,
+      priorityLabel: '优先补女频长篇',
+    })
+  }
+  if (args.upgradeRhythm && args.upgradeRhythm.missedCount > 0) {
+    risks.push({
+      count: args.upgradeRhythm.missedCount,
+      item: `补升级：${args.upgradeRhythm.label}`,
+      priorityLabel: '优先补升级节奏',
+    })
+  }
+  if (args.chapterStructure && args.chapterStructure.missedCount > 0) {
+    risks.push({
+      count: args.chapterStructure.missedCount,
+      item: `补结构：${args.chapterStructure.label}`,
+      priorityLabel: '优先补章节结构',
+    })
+  }
+  if (args.chapterProgression && args.chapterProgression.missedCount > 0) {
+    risks.push({
+      count: args.chapterProgression.missedCount,
+      item: `补推进：${args.chapterProgression.label}`,
+      priorityLabel: '优先补章节推进',
+    })
+  }
+  if (args.informationLoad && args.informationLoad.missedCount > 0) {
+    risks.push({
+      count: args.informationLoad.missedCount,
+      item: `压信息：${args.informationLoad.label}`,
+      priorityLabel: '优先压信息负载',
+    })
+  }
+  if (args.longformContinuity && args.longformContinuity.missedCount > 0) {
+    risks.push({
+      count: args.longformContinuity.missedCount,
+      item: `保长篇：${args.longformContinuity.label}`,
+      priorityLabel: '优先保长篇连续性',
+    })
+  }
+  if (args.coreContractCheck && args.coreContractCheck.missedCount > 0) {
+    risks.push({
+      count: args.coreContractCheck.missedCount,
+      item: `创作契约：核心承诺缺口 ${args.coreContractCheck.missedCount}`,
+      priorityLabel: '优先修创作契约',
+      priorityRank: 1,
+    })
+  }
+  if (args.continuityHeat && args.continuityHeat.missedCount > 0) {
+    risks.push({
+      count: args.continuityHeat.missedCount,
+      item: `补热度：${args.continuityHeat.label}`,
+      priorityLabel: '优先补连续性热度',
+    })
+  }
+  if (args.revisionReceiptCheck && args.revisionReceiptCheck.missedCount > 0) {
+    risks.push({
+      count: args.revisionReceiptCheck.missedCount,
+      item: `补回执：${args.revisionReceiptCheck.label}`,
+      priorityLabel: '优先补修订回执',
+    })
+  }
+  if (args.deslopRepairCheck && args.deslopRepairCheck.missedCount > 0) {
+    risks.push({
+      count: args.deslopRepairCheck.missedCount,
+      item: `补去味：${args.deslopRepairCheck.label}`,
+      priorityLabel: '优先补去AI味修复',
+    })
+  }
+  if (args.proseMeta && args.proseMeta.missedCount > 0) {
+    risks.push({
+      count: args.proseMeta.missedCount,
+      item: `删元叙：${args.proseMeta.label}`,
+      priorityLabel: '优先删正文元叙事',
+    })
+  }
+  if (args.serialRiskRepair && args.serialRiskRepair.missedCount > 0) {
+    risks.push({
+      count: args.serialRiskRepair.missedCount,
+      item: `补连修：${args.serialRiskRepair.label}`,
+      priorityLabel: '优先补连续风险修复',
+    })
+  }
+  if (args.chapterHookQuality && args.chapterHookQuality.missedCount > 0) {
+    risks.push({
+      count: args.chapterHookQuality.missedCount,
+      item: `强章钩：${args.chapterHookQuality.label}`,
+      priorityLabel: '优先强章钩质量',
+    })
+  }
+  if (args.readerRetentionCheck && args.readerRetentionCheck.missedCount > 0) {
+    risks.push({
+      count: args.readerRetentionCheck.missedCount,
+      item: `创作契约：追读留存缺口 ${args.readerRetentionCheck.missedCount}`,
+      priorityLabel: '优先修创作契约',
+      priorityRank: 1,
+    })
+  }
+  if (args.platformRubric && args.platformRubric.missedCount > 0) {
+    risks.push({ count: args.platformRubric.missedCount, item: `平台适配：平台缺口 ${args.platformRubric.missedCount}`, priorityLabel: '优先修平台适配' })
   }
   if (args.runwaySync && args.runwaySync.riskCount > 0) {
     risks.push({ count: args.runwaySync.riskCount, item: `补航线：${args.runwaySync.label}`, priorityLabel: '优先补航线' })
@@ -2165,17 +4248,22 @@ function buildDeliveryRiskQueue(args: {
           ? { count: args.readabilityReview.riskCount, item: `修场景推进：${args.readabilityReview.riskLabel}`, priorityLabel: '优先修场景' }
           : args.readabilityReview.payoffDensityRisk
             ? { count: args.readabilityReview.riskCount, item: `补爽点密度：${args.readabilityReview.riskLabel}`, priorityLabel: '优先补爽点' }
+            : args.readabilityReview.aiSmellRisk
+              ? { count: args.readabilityReview.riskCount, item: `去AI味：${args.readabilityReview.riskLabel}`, priorityLabel: '优先去AI味' }
       : { count: args.readabilityReview.riskCount, item: `调可读性：${args.readabilityReview.riskLabel}`, priorityLabel: '优先调可读性' })
   }
 
   const totalCount = risks.reduce((sum, risk) => sum + risk.count, 0)
   if (totalCount <= 0) return null
+  const orderedRisks = risks
+    .map((risk, index) => ({ ...risk, index }))
+    .sort((left, right) => (left.priorityRank ?? 2) - (right.priorityRank ?? 2) || left.index - right.index)
 
   return {
     totalCount,
     label: `待修复 ${totalCount}`,
-    priorityLabel: risks[0]?.priorityLabel || '优先复盘本章',
-    items: risks.map(risk => risk.item),
+    priorityLabel: orderedRisks[0]?.priorityLabel || '优先复盘本章',
+    items: orderedRisks.map(risk => risk.item),
   }
 }
 
@@ -2309,10 +4397,57 @@ function buildHiddenAcceptanceDesk(): ChapterAcceptanceDeskModel {
     ipSceneIntake: null,
     signatureSceneSync: null,
     readabilityReview: null,
+    deslopGateDiagnostics: null,
     coreDrift: null,
     runwaySync: null,
     readerPayoffSync: null,
     readerExpectationSync: null,
+    qualityAuditSync: null,
+    qualityAuditRepairReceiptSync: null,
+    chapterHandoffSync: null,
+    chapterHandoffDeltaSync: null,
+    writePreparation: null,
+    intentConfirmationSync: null,
+    benchmarkRecallSync: null,
+    sourceReadiness: null,
+    stateTracking: null,
+    styleBoundary: null,
+    informationFlow: null,
+    expectationThreshold: null,
+    storyLoop: null,
+    emotionalArc: null,
+    chapterHook: null,
+    paragraphHook: null,
+    suspense: null,
+    assetLinkage: null,
+    dialogue: null,
+    plotDynamics: null,
+    characterRelation: null,
+    characterBehavior: null,
+    conflictStructure: null,
+    bridgeUnit: null,
+    reversal: null,
+    showdown: null,
+    opening: null,
+    proseCraft: null,
+    punctuationTone: null,
+    contentRubric: null,
+    targetReader: null,
+    genrePositioning: null,
+    femaleAudience: null,
+    upgradeRhythm: null,
+    chapterStructure: null,
+    chapterProgression: null,
+    informationLoad: null,
+    longformContinuity: null,
+    coreContractCheck: null,
+    continuityHeat: null,
+    revisionReceiptCheck: null,
+    deslopRepairCheck: null,
+    proseMeta: null,
+    serialRiskRepair: null,
+    chapterHookQuality: null,
+    readerRetentionCheck: null,
     readerRetentionSync: null,
     chapterAttraction: null,
     storyDriveSync: null,
@@ -2322,6 +4457,13 @@ function buildHiddenAcceptanceDesk(): ChapterAcceptanceDeskModel {
     first30RetentionRecheck: null,
     innovationSync: null,
     volumeBeatSync: null,
+    blueprintReceipt: null,
+    revisionReceipt: null,
+    deliveryRiskReceipt: null,
+    sceneCardReceipt: null,
+    qualityAudit: null,
+    platformRubric: null,
+    approvalBlocker: null,
     governanceRecheckSync: null,
     deliveryRiskQueue: null,
     deliveryRiskConvergence: null,
@@ -2360,6 +4502,7 @@ function buildChapterAcceptanceDesk(args: {
   const latestStorylineSyncRef = latestReviewRef(args.reviews, args.nextChapter, 'storyline_sync')
   const latestStoryUnitSyncRef = latestReviewRef(args.reviews, args.nextChapter, 'story_unit_sync')
   const latestAssetIntakeRef = latestReviewRef(args.reviews, args.nextChapter, 'asset_intake')
+  const latestAssetLinkageSyncRef = latestReviewRef(args.reviews, args.nextChapter, 'asset_linkage_sync')
   const latestIpSceneIntakeRef = latestReviewRef(args.reviews, args.nextChapter, 'ip_scene_intake')
   const latestSignatureSceneSyncRef = latestReviewRef(args.reviews, args.nextChapter, 'signature_scene_sync')
   const latestReadabilityRef = latestReviewRef(args.reviews, args.nextChapter, 'readability_review')
@@ -2367,6 +4510,12 @@ function buildChapterAcceptanceDesk(args: {
   const latestRunwaySyncRef = latestReviewRef(args.reviews, args.nextChapter, 'runway_sync')
   const latestReaderPayoffSyncRef = latestReviewRef(args.reviews, args.nextChapter, 'reader_payoff_sync')
   const latestReaderExpectationSyncRef = latestReviewRef(args.reviews, args.nextChapter, 'reader_expectation_sync')
+  const latestQualityAuditSyncRef = latestReviewRef(args.reviews, args.nextChapter, 'quality_audit_sync')
+  const latestQualityAuditRepairReceiptSyncRef = latestReviewRef(args.reviews, args.nextChapter, 'quality_audit_repair_receipt_sync')
+  const latestChapterHandoffSyncRef = latestReviewRef(args.reviews, args.nextChapter, 'chapter_handoff_sync')
+  const latestChapterHandoffDeltaSyncRef = latestReviewRef(args.reviews, args.nextChapter, 'chapter_handoff_delta_sync')
+  const latestIntentConfirmationSyncRef = latestReviewRef(args.reviews, args.nextChapter, 'intent_confirmation_sync')
+  const latestBenchmarkRecallSyncRef = latestReviewRef(args.reviews, args.nextChapter, 'benchmark_recall_sync')
   const latestReaderRetentionSyncRef = latestReviewRef(args.reviews, args.nextChapter, 'reader_retention_sync')
   const latestChapterAttractionRef = latestReviewRef(args.reviews, args.nextChapter, 'chapter_attraction_review')
   const latestStoryDriveSyncRef = latestReviewRef(args.reviews, args.nextChapter, 'story_drive_sync')
@@ -2377,9 +4526,12 @@ function buildChapterAcceptanceDesk(args: {
   const latestVolumeBeatSyncRef = latestReviewRef(args.reviews, args.nextChapter, 'volume_beat_sync')
   const latestGovernanceRecheckSyncRef = latestReviewRef(args.reviews, args.nextChapter, 'governance_recheck_sync')
   const latestDeliveryRiskConvergenceRef = latestReviewRef(args.reviews, args.nextChapter, 'delivery_risk_convergence')
+  const latestDeslopRepairReceiptSyncRef = latestReviewRef(args.reviews, args.nextChapter, 'deslop_repair_receipt_sync')
+  const latestProseRevisionReceiptSyncRef = latestReviewRef(args.reviews, args.nextChapter, 'prose_revision_receipt_sync')
   const latestQuality = latestQualityRef?.review || null
   const latestReport = latestReportRef?.review || null
   const latestRevision = latestRevisionRef?.review || null
+  const latestQualityPayload = reviewPayload(latestQuality)
   const storylineSync = buildStorylineSyncSummary(latestStorylineSyncRef?.review || null)
   const storyUnitSync = buildStoryUnitSyncSummary(latestStoryUnitSyncRef?.review || null)
   const assetIntake = buildAssetIntakeSummary(latestAssetIntakeRef?.review || null)
@@ -2390,6 +4542,91 @@ function buildChapterAcceptanceDesk(args: {
   const runwaySync = buildRunwaySyncSummary(latestRunwaySyncRef?.review || null)
   const readerPayoffSync = buildReaderPayoffSyncSummary(latestReaderPayoffSyncRef?.review || null)
   const readerExpectationSync = buildReaderExpectationSyncSummary(latestReaderExpectationSyncRef?.review || null)
+  const qualityAuditSync = buildQualityAuditSyncSummary(latestQualityAuditSyncRef?.review || null)
+  const qualityAuditRepairReceiptSync = buildQualityAuditRepairReceiptSyncSummary(latestQualityAuditRepairReceiptSyncRef?.review || null)
+  const chapterHandoffSync = mergeContractSyncSummary(
+    buildChapterHandoffSyncSummary(
+      latestChapterHandoffSyncRef?.review || null,
+      'chapter_handoff_sync',
+      'chapterHandoffSync',
+      '章首承接 OK',
+      '章首承接缺口',
+    ),
+    buildQualityCheckSummary(latestQualityPayload, 'chapter_handoff_checks', 'chapterHandoffChecks', '章首承接'),
+    '章首承接',
+  )
+  const chapterHandoffDeltaSync = buildChapterHandoffSyncSummary(
+    latestChapterHandoffDeltaSyncRef?.review || null,
+    'chapter_handoff_delta_sync',
+    'chapterHandoffDeltaSync',
+    '章末交接 OK',
+    '章末交接缺口',
+  )
+  const writePreparation = mergeContractSyncSummary(
+    buildQualityCheckSummary(latestQualityPayload, 'write_preparation_checks', 'writePreparationChecks', '写前准备'),
+    buildPreDraftExecutionSyncSummary(latestQualityPayload, 'write_preparation_checks', 'writePreparationChecks', '写前准备'),
+    '写前准备',
+  )
+  const intentConfirmationSync = mergeContractSyncSummary(
+    buildIntentConfirmationSyncSummary(latestIntentConfirmationSyncRef?.review || null),
+    buildPreDraftExecutionSyncSummary(latestQualityPayload, 'intent_confirmation_checks', 'intentConfirmationChecks', '意图确认'),
+    '意图确认',
+  )
+  const benchmarkRecallSync = mergeContractSyncSummary(
+    buildBenchmarkRecallSyncSummary(latestBenchmarkRecallSyncRef?.review || null),
+    buildPreDraftExecutionSyncSummary(latestQualityPayload, 'benchmark_recall_checks', 'benchmarkRecallChecks', '文风召回'),
+    '文风召回',
+  )
+  const sourceReadiness = buildQualityCheckSummary(latestQualityPayload, 'source_readiness_checks', 'sourceReadinessChecks', '来源就绪')
+  const stateTracking = buildQualityCheckSummary(latestQualityPayload, 'state_tracking_checks', 'stateTrackingChecks', '状态跟踪')
+  const styleBoundary = buildQualityCheckSummary(latestQualityPayload, 'style_boundary_checks', 'styleBoundaryChecks', '风格边界')
+  const informationFlow = buildQualityCheckSummary(latestQualityPayload, 'information_flow_checks', 'informationFlowChecks', '信息流')
+  const expectationThreshold = buildQualityCheckSummary(latestQualityPayload, 'expectation_threshold_checks', 'expectationThresholdChecks', '期待阈值')
+  const storyLoop = buildQualityCheckSummary(latestQualityPayload, 'story_loop_checks', 'storyLoopChecks', '故事闭环')
+  const emotionalArc = buildQualityCheckSummary(latestQualityPayload, 'emotional_arc_checks', 'emotionalArcChecks', '情绪弧')
+  const chapterHook = buildQualityCheckSummary(latestQualityPayload, 'chapter_hook_checks', 'chapterHookChecks', '章级钩子')
+  const paragraphHook = buildQualityCheckSummary(latestQualityPayload, 'paragraph_hook_checks', 'paragraphHookChecks', '段落级钩子')
+  const suspense = buildQualityCheckSummary(latestQualityPayload, 'suspense_checks', 'suspenseChecks', '悬念编排')
+  const assetLinkage = mergeContractSyncSummary(
+    buildChapterHandoffSyncSummary(
+      latestAssetLinkageSyncRef?.review || null,
+      'asset_linkage_sync',
+      'assetLinkageSync',
+      '资产挂钩 OK',
+      '资产挂钩缺口',
+    ),
+    buildQualityCheckSummary(latestQualityPayload, 'asset_linkage_checks', 'assetLinkageChecks', '资产挂钩'),
+    '资产挂钩',
+  )
+  const dialogue = buildQualityCheckSummary(latestQualityPayload, 'dialogue_checks', 'dialogueChecks', '对白质量')
+  const plotDynamics = buildQualityCheckSummary(latestQualityPayload, 'plot_dynamics_checks', 'plotDynamicsChecks', '剧情动力')
+  const characterRelation = buildQualityCheckSummary(latestQualityPayload, 'character_relation_checks', 'characterRelationChecks', '角色关系')
+  const characterBehavior = buildQualityCheckSummary(latestQualityPayload, 'character_behavior_checks', 'characterBehaviorChecks', '角色行为')
+  const conflictStructure = buildQualityCheckSummary(latestQualityPayload, 'conflict_structure_checks', 'conflictStructureChecks', '冲突结构')
+  const bridgeUnit = buildQualityCheckSummary(latestQualityPayload, 'bridge_unit_checks', 'bridgeUnitChecks', '桥段节奏')
+  const reversal = buildQualityCheckSummary(latestQualityPayload, 'reversal_checks', 'reversalChecks', '反转设计')
+  const showdown = buildQualityCheckSummary(latestQualityPayload, 'showdown_checks', 'showdownChecks', '高潮对抗')
+  const opening = buildQualityCheckSummary(latestQualityPayload, 'opening_checks', 'openingChecks', '开篇设计')
+  const proseCraft = buildQualityCheckSummary(latestQualityPayload, 'prose_craft_checks', 'proseCraftChecks', '正文工艺')
+  const sceneCardDirective = buildSceneCardDirectiveSummary(latestQualityPayload)
+  const punctuationTone = buildQualityCheckSummary(latestQualityPayload, 'punctuation_tone_checks', 'punctuationToneChecks', '语气标点')
+  const contentRubric = buildQualityCheckSummary(latestQualityPayload, 'content_rubric_checks', 'contentRubricChecks', '内容基准')
+  const targetReader = buildQualityCheckSummary(latestQualityPayload, 'target_reader_checks', 'targetReaderChecks', '目标读者')
+  const genrePositioning = buildQualityCheckSummary(latestQualityPayload, 'genre_positioning_checks', 'genrePositioningChecks', '题材定位')
+  const femaleAudience = buildQualityCheckSummary(latestQualityPayload, 'female_audience_checks', 'femaleAudienceChecks', '女频长篇')
+  const upgradeRhythm = buildQualityCheckSummary(latestQualityPayload, 'upgrade_rhythm_checks', 'upgradeRhythmChecks', '升级节奏')
+  const chapterStructure = buildQualityCheckSummary(latestQualityPayload, 'structure_checks', 'structureChecks', '章节结构')
+  const chapterProgression = buildQualityCheckSummary(latestQualityPayload, 'progression_checks', 'progressionChecks', '章节推进')
+  const informationLoad = buildQualityCheckSummary(latestQualityPayload, 'information_checks', 'informationChecks', '信息负载')
+  const longformContinuity = buildQualityCheckSummary(latestQualityPayload, 'longform_checks', 'longformChecks', '长篇连续性')
+  const coreContractCheck = buildQualityCheckSummary(latestQualityPayload, 'core_contract_checks', 'coreContractChecks', '核心契约')
+  const continuityHeat = buildQualityCheckSummary(latestQualityPayload, 'continuity_heat_checks', 'continuityHeatChecks', '连续性热度')
+  const revisionReceiptCheck = buildQualityCheckSummary(latestQualityPayload, 'revision_receipt_checks', 'revisionReceiptChecks', '修订回执')
+  const deslopRepairCheck = buildQualityCheckSummary(latestQualityPayload, 'deslop_repair_checks', 'deslopRepairChecks', '去AI味修复')
+  const proseMeta = buildQualityCheckSummary(latestQualityPayload, 'prose_meta_checks', 'proseMetaChecks', '正文元叙事')
+  const serialRiskRepair = buildQualityCheckSummary(latestQualityPayload, 'serial_risk_repair_checks', 'serialRiskRepairChecks', '连续风险修复')
+  const chapterHookQuality = buildQualityCheckSummary(latestQualityPayload, 'chapter_hook_quality_checks', 'chapterHookQualityChecks', '章钩质量')
+  const readerRetentionCheck = buildQualityCheckSummary(latestQualityPayload, 'reader_retention_checks', 'readerRetentionChecks', '追读雷达')
   const readerRetentionSync = buildReaderRetentionSyncSummary(latestReaderRetentionSyncRef?.review || null)
   const chapterAttraction = buildChapterAttractionSummary(latestChapterAttractionRef?.review || null)
   const storyDriveSync = buildStoryDriveSyncSummary(latestStoryDriveSyncRef?.review || null)
@@ -2399,9 +4636,22 @@ function buildChapterAcceptanceDesk(args: {
   const first30RetentionRecheck = buildFirst30RetentionRecheckSummary(args.nextChapter, args.reviews)
   const innovationSync = buildInnovationSyncSummary(latestInnovationSyncRef?.review || null)
   const volumeBeatSync = buildVolumeBeatSyncSummary(latestVolumeBeatSyncRef?.review || null)
+  const blueprintReceipt = buildBlueprintReceiptSummary(args.nextChapter)
+  const revisionReceipt = buildRevisionReceiptSummary(
+    reviewPayload(latestQuality),
+    {
+      ...reviewPayload(latestDeslopRepairReceiptSyncRef?.review || null),
+      ...reviewPayload(latestProseRevisionReceiptSyncRef?.review || null),
+    },
+  )
+  const deliveryRiskReceipt = buildDeliveryRiskReceiptSummary(reviewPayload(latestQuality))
+  const sceneCardReceipt = buildSceneCardReceiptSummary(reviewPayload(latestQuality))
+  const qualityAudit = buildQualityAuditSummary(reviewPayload(latestQuality))
+  const platformRubric = buildPlatformRubricSummary(reviewPayload(latestQuality))
   const governanceRecheckSync = buildGovernanceRecheckSyncSummary(latestGovernanceRecheckSyncRef?.review || null)
   const deliveryRiskConvergence = buildDeliveryRiskConvergenceSummary(latestDeliveryRiskConvergenceRef?.review || null)
   const quality = qualityPayload(latestQuality)
+  const approvalBlocker = buildApprovalBlockerSummary(reviewPayload(latestQuality))
   const report = reportPayload(latestReport)
   const revision = revisionPayload(latestRevision)
   const score = extractQualityScore(quality)
@@ -2411,6 +4661,7 @@ function buildChapterAcceptanceDesk(args: {
     qualityRef: latestQualityRef,
     revisionRef: latestRevisionRef,
   }) ? report : {}
+  const deslopGateDiagnostics = buildDeslopGateDiagnosticsSummary(quality)
   const mustFix = extractMustFix(quality, currentReport)
   const optionalImprovements = extractOptionalImprovements(quality, report)
   const deliveryRiskQueue = buildDeliveryRiskQueue({
@@ -2423,6 +4674,53 @@ function buildChapterAcceptanceDesk(args: {
     runwaySync,
     readerPayoffSync,
     readerExpectationSync,
+    qualityAuditSync,
+    qualityAuditRepairReceiptSync,
+    chapterHandoffSync,
+    chapterHandoffDeltaSync,
+    writePreparation,
+    intentConfirmationSync,
+    benchmarkRecallSync,
+    sourceReadiness,
+    stateTracking,
+    styleBoundary,
+    informationFlow,
+    expectationThreshold,
+    storyLoop,
+    emotionalArc,
+    chapterHook,
+    paragraphHook,
+    suspense,
+    assetLinkage,
+    dialogue,
+    plotDynamics,
+    characterRelation,
+    characterBehavior,
+    conflictStructure,
+    bridgeUnit,
+    reversal,
+    showdown,
+    opening,
+    proseCraft,
+    sceneCardDirective,
+    punctuationTone,
+    contentRubric,
+    targetReader,
+    genrePositioning,
+    femaleAudience,
+    upgradeRhythm,
+    chapterStructure,
+    chapterProgression,
+    informationLoad,
+    longformContinuity,
+    coreContractCheck,
+    continuityHeat,
+    revisionReceiptCheck,
+    deslopRepairCheck,
+    proseMeta,
+    serialRiskRepair,
+    chapterHookQuality,
+    readerRetentionCheck,
     readerRetentionSync,
     chapterAttraction,
     storyDriveSync,
@@ -2431,6 +4729,13 @@ function buildChapterAcceptanceDesk(args: {
     styleSampleSync,
     innovationSync,
     volumeBeatSync,
+    blueprintReceipt,
+    revisionReceipt,
+    deliveryRiskReceipt,
+    sceneCardReceipt,
+    qualityAudit,
+    platformRubric,
+    approvalBlocker,
     governanceRecheckSync,
   })
   const storyStateSynced = Number(args.storyState?.last_updated_chapter || 0) >= Number(args.nextChapter?.chapter_no || 0)
@@ -2445,6 +4750,7 @@ function buildChapterAcceptanceDesk(args: {
   const qualityNeedsRevision = Boolean(
     scoreNeedsRevision
     || mustFix.length > 0
+    || Boolean(approvalBlocker)
     || quality?.needs_revision === true
     || quality?.passed === false,
   )
@@ -2466,10 +4772,57 @@ function buildChapterAcceptanceDesk(args: {
       ipSceneIntake,
       signatureSceneSync,
       readabilityReview,
+      deslopGateDiagnostics,
       coreDrift,
       runwaySync,
       readerPayoffSync,
       readerExpectationSync,
+      qualityAuditSync,
+      qualityAuditRepairReceiptSync,
+      chapterHandoffSync,
+      chapterHandoffDeltaSync,
+      writePreparation,
+      intentConfirmationSync,
+      benchmarkRecallSync,
+      sourceReadiness,
+      stateTracking,
+      styleBoundary,
+      informationFlow,
+      expectationThreshold,
+      storyLoop,
+      emotionalArc,
+      chapterHook,
+      paragraphHook,
+      suspense,
+      assetLinkage,
+      dialogue,
+      plotDynamics,
+      characterRelation,
+      characterBehavior,
+      conflictStructure,
+      bridgeUnit,
+      reversal,
+      showdown,
+      opening,
+      proseCraft,
+      punctuationTone,
+      contentRubric,
+      targetReader,
+      genrePositioning,
+      femaleAudience,
+      upgradeRhythm,
+      chapterStructure,
+      chapterProgression,
+      informationLoad,
+      longformContinuity,
+      coreContractCheck,
+      continuityHeat,
+      revisionReceiptCheck,
+      deslopRepairCheck,
+      proseMeta,
+      serialRiskRepair,
+      chapterHookQuality,
+      readerRetentionCheck,
       readerRetentionSync,
       chapterAttraction,
       storyDriveSync,
@@ -2479,6 +4832,13 @@ function buildChapterAcceptanceDesk(args: {
       first30RetentionRecheck,
       innovationSync,
       volumeBeatSync,
+      blueprintReceipt,
+      revisionReceipt,
+      deliveryRiskReceipt,
+      sceneCardReceipt,
+      qualityAudit,
+      platformRubric,
+      approvalBlocker,
       governanceRecheckSync,
       deliveryRiskQueue,
       deliveryRiskConvergence,
@@ -2510,10 +4870,57 @@ function buildChapterAcceptanceDesk(args: {
       ipSceneIntake,
       signatureSceneSync,
       readabilityReview,
+      deslopGateDiagnostics,
       coreDrift,
       runwaySync,
       readerPayoffSync,
       readerExpectationSync,
+      qualityAuditSync,
+      qualityAuditRepairReceiptSync,
+      chapterHandoffSync,
+      chapterHandoffDeltaSync,
+      writePreparation,
+      intentConfirmationSync,
+      benchmarkRecallSync,
+      sourceReadiness,
+      stateTracking,
+      styleBoundary,
+      informationFlow,
+      expectationThreshold,
+      storyLoop,
+      emotionalArc,
+      chapterHook,
+      paragraphHook,
+      suspense,
+      assetLinkage,
+      dialogue,
+      plotDynamics,
+      characterRelation,
+      characterBehavior,
+      conflictStructure,
+      bridgeUnit,
+      reversal,
+      showdown,
+      opening,
+      proseCraft,
+      punctuationTone,
+      contentRubric,
+      targetReader,
+      genrePositioning,
+      femaleAudience,
+      upgradeRhythm,
+      chapterStructure,
+      chapterProgression,
+      informationLoad,
+      longformContinuity,
+      coreContractCheck,
+      continuityHeat,
+      revisionReceiptCheck,
+      deslopRepairCheck,
+      proseMeta,
+      serialRiskRepair,
+      chapterHookQuality,
+      readerRetentionCheck,
       readerRetentionSync,
       chapterAttraction,
       storyDriveSync,
@@ -2523,6 +4930,13 @@ function buildChapterAcceptanceDesk(args: {
       first30RetentionRecheck,
       innovationSync,
       volumeBeatSync,
+      blueprintReceipt,
+      revisionReceipt,
+      deliveryRiskReceipt,
+      sceneCardReceipt,
+      qualityAudit,
+      platformRubric,
+      approvalBlocker,
       governanceRecheckSync,
       deliveryRiskQueue,
       deliveryRiskConvergence,
@@ -2550,6 +4964,7 @@ function buildChapterAcceptanceDesk(args: {
       acceptanceStatus: 'needs_revision',
       statusLabel: '需修订',
       acceptanceReasons: [
+        approvalBlocker ? `${approvalBlocker.label}：${approvalBlocker.detail}` : '',
         scoreNeedsRevision ? `质量分 ${score} 低于 ${QUALITY_PASS_THRESHOLD}` : '',
         mustFix.length > 0 ? `必须修复：${mustFix.slice(0, 2).join('；')}` : '',
       ].filter(Boolean).slice(0, 3),
@@ -2559,10 +4974,57 @@ function buildChapterAcceptanceDesk(args: {
       ipSceneIntake,
       signatureSceneSync,
       readabilityReview,
+      deslopGateDiagnostics,
       coreDrift,
       runwaySync,
       readerPayoffSync,
       readerExpectationSync,
+      qualityAuditSync,
+      qualityAuditRepairReceiptSync,
+      chapterHandoffSync,
+      chapterHandoffDeltaSync,
+      writePreparation,
+      intentConfirmationSync,
+      benchmarkRecallSync,
+      sourceReadiness,
+      stateTracking,
+      styleBoundary,
+      informationFlow,
+      expectationThreshold,
+      storyLoop,
+      emotionalArc,
+      chapterHook,
+      paragraphHook,
+      suspense,
+      assetLinkage,
+      dialogue,
+      plotDynamics,
+      characterRelation,
+      characterBehavior,
+      conflictStructure,
+      bridgeUnit,
+      reversal,
+      showdown,
+      opening,
+      proseCraft,
+      punctuationTone,
+      contentRubric,
+      targetReader,
+      genrePositioning,
+      femaleAudience,
+      upgradeRhythm,
+      chapterStructure,
+      chapterProgression,
+      informationLoad,
+      longformContinuity,
+      coreContractCheck,
+      continuityHeat,
+      revisionReceiptCheck,
+      deslopRepairCheck,
+      proseMeta,
+      serialRiskRepair,
+      chapterHookQuality,
+      readerRetentionCheck,
       readerRetentionSync,
       chapterAttraction,
       storyDriveSync,
@@ -2572,6 +5034,13 @@ function buildChapterAcceptanceDesk(args: {
       first30RetentionRecheck,
       innovationSync,
       volumeBeatSync,
+      blueprintReceipt,
+      revisionReceipt,
+      deliveryRiskReceipt,
+      sceneCardReceipt,
+      qualityAudit,
+      platformRubric,
+      approvalBlocker,
       governanceRecheckSync,
       deliveryRiskQueue,
       deliveryRiskConvergence,
@@ -2603,10 +5072,57 @@ function buildChapterAcceptanceDesk(args: {
       ipSceneIntake,
       signatureSceneSync,
       readabilityReview,
+      deslopGateDiagnostics,
       coreDrift,
       runwaySync,
       readerPayoffSync,
       readerExpectationSync,
+      qualityAuditSync,
+      qualityAuditRepairReceiptSync,
+      chapterHandoffSync,
+      chapterHandoffDeltaSync,
+      writePreparation,
+      intentConfirmationSync,
+      benchmarkRecallSync,
+      sourceReadiness,
+      stateTracking,
+      styleBoundary,
+      informationFlow,
+      expectationThreshold,
+      storyLoop,
+      emotionalArc,
+      chapterHook,
+      paragraphHook,
+      suspense,
+      assetLinkage,
+      dialogue,
+      plotDynamics,
+      characterRelation,
+      characterBehavior,
+      conflictStructure,
+      bridgeUnit,
+      reversal,
+      showdown,
+      opening,
+      proseCraft,
+      punctuationTone,
+      contentRubric,
+      targetReader,
+      genrePositioning,
+      femaleAudience,
+      upgradeRhythm,
+      chapterStructure,
+      chapterProgression,
+      informationLoad,
+      longformContinuity,
+      coreContractCheck,
+      continuityHeat,
+      revisionReceiptCheck,
+      deslopRepairCheck,
+      proseMeta,
+      serialRiskRepair,
+      chapterHookQuality,
+      readerRetentionCheck,
       readerRetentionSync,
       chapterAttraction,
       storyDriveSync,
@@ -2616,6 +5132,13 @@ function buildChapterAcceptanceDesk(args: {
       first30RetentionRecheck,
       innovationSync,
       volumeBeatSync,
+      blueprintReceipt,
+      revisionReceipt,
+      deliveryRiskReceipt,
+      sceneCardReceipt,
+      qualityAudit,
+      platformRubric,
+      approvalBlocker,
       governanceRecheckSync,
       deliveryRiskQueue,
       deliveryRiskConvergence,
@@ -2646,10 +5169,57 @@ function buildChapterAcceptanceDesk(args: {
     ipSceneIntake,
     signatureSceneSync,
     readabilityReview,
+    deslopGateDiagnostics,
     coreDrift,
     runwaySync,
     readerPayoffSync,
     readerExpectationSync,
+    qualityAuditSync,
+    qualityAuditRepairReceiptSync,
+    chapterHandoffSync,
+    chapterHandoffDeltaSync,
+    writePreparation,
+    intentConfirmationSync,
+    benchmarkRecallSync,
+    sourceReadiness,
+    stateTracking,
+    styleBoundary,
+    informationFlow,
+    expectationThreshold,
+    storyLoop,
+    emotionalArc,
+    chapterHook,
+    paragraphHook,
+    suspense,
+    assetLinkage,
+    dialogue,
+    plotDynamics,
+    characterRelation,
+    characterBehavior,
+    conflictStructure,
+    bridgeUnit,
+    reversal,
+    showdown,
+    opening,
+    proseCraft,
+    punctuationTone,
+    contentRubric,
+    targetReader,
+    genrePositioning,
+    femaleAudience,
+    upgradeRhythm,
+    chapterStructure,
+    chapterProgression,
+    informationLoad,
+    longformContinuity,
+    coreContractCheck,
+    continuityHeat,
+    revisionReceiptCheck,
+    deslopRepairCheck,
+    proseMeta,
+    serialRiskRepair,
+    chapterHookQuality,
+    readerRetentionCheck,
     readerRetentionSync,
     chapterAttraction,
     storyDriveSync,
@@ -2659,6 +5229,13 @@ function buildChapterAcceptanceDesk(args: {
     first30RetentionRecheck,
     innovationSync,
     volumeBeatSync,
+    blueprintReceipt,
+    revisionReceipt,
+    deliveryRiskReceipt,
+    sceneCardReceipt,
+    qualityAudit,
+    platformRubric,
+    approvalBlocker,
     governanceRecheckSync,
     deliveryRiskQueue,
     deliveryRiskConvergence,
@@ -2779,11 +5356,20 @@ function buildChapterPlanningDesk(args: {
   diagnostics?: AnyRecord | null
 }): ChapterPlanningDeskModel {
   const contextStatus = contextPackageStatus(args.contextPackage)
-  const sceneCards = chapterSceneCards(args.nextChapter)
+  const sceneCards = chapterSceneCards(args.nextChapter, args.contextPackage)
+  const qualityContinuitySceneMap = buildQualityContinuitySceneMap(sceneCards)
   const scenePlanStatus: ChapterScenePlanStatus = sceneCards.length > 0 ? 'ready' : 'missing'
   const diagnosticBlockers = diagnosticsBlockers(args.diagnostics)
   const preflightBlockers = blockerTexts(contextPreflight(args.contextPackage)?.blockers)
+  const relationshipGraphRisks = relationshipGraphRiskTexts(args.contextPackage)
+  const writePreparationBrief = normalizeWritePreparationBrief(args.contextPackage)
+  const writePreparationReasons = writePreparationReasonTexts(writePreparationBrief)
   const episodePlan = buildEpisodePlan(args)
+  const qualityContinuityNeedsSceneMapping = deliveryRiskCarryOverNeedsSceneMapping(episodePlan.deliveryRiskCarryOver)
+    && sceneCards.length > 0
+    && qualityContinuitySceneMap.length === 0
+    && !writePreparationBrief?.sourceGaps.length
+    && !writePreparationBrief?.assetRisks.length
 
   if (!args.nextChapter) {
     return {
@@ -2794,8 +5380,10 @@ function buildChapterPlanningDesk(args: {
       reasons: ['需要先创建或选择章节。'],
       recommendedPlannerAction: { key: 'open_outline_panel', label: ACTION_LABELS.open_outline_panel },
       shouldAutoExpandPlanner: true,
+      writePreparationBrief,
       episodePlan,
       sceneCards,
+      qualityContinuitySceneMap,
     }
   }
 
@@ -2808,8 +5396,10 @@ function buildChapterPlanningDesk(args: {
       reasons: diagnosticBlockers.slice(0, 3).map(item => `生成诊断阻塞：${item}`),
       recommendedPlannerAction: { key: 'open_generation_diagnostics', label: ACTION_LABELS.open_generation_diagnostics },
       shouldAutoExpandPlanner: true,
+      writePreparationBrief,
       episodePlan,
       sceneCards,
+      qualityContinuitySceneMap,
     }
   }
 
@@ -2822,8 +5412,10 @@ function buildChapterPlanningDesk(args: {
       reasons: ['本章还没有加载上下文包。'],
       recommendedPlannerAction: { key: 'refresh_context_package', label: ACTION_LABELS.refresh_context_package },
       shouldAutoExpandPlanner: true,
+      writePreparationBrief,
       episodePlan,
       sceneCards,
+      qualityContinuitySceneMap,
     }
   }
 
@@ -2839,8 +5431,62 @@ function buildChapterPlanningDesk(args: {
       reasons,
       recommendedPlannerAction: { key: 'open_generation_diagnostics', label: ACTION_LABELS.open_generation_diagnostics },
       shouldAutoExpandPlanner: true,
+      writePreparationBrief,
       episodePlan,
       sceneCards,
+      qualityContinuitySceneMap,
+    }
+  }
+
+  if (qualityContinuityNeedsSceneMapping) {
+    return {
+      readiness: 'needs_scene_plan',
+      statusLabel: '需补质量续航落点',
+      contextPackageStatus: contextStatus,
+      scenePlanStatus,
+      reasons: ['检测到 delivery_risk_carry_over / 质量续航动作，但当前场景卡没有写入 serial_risk_repairs、recent_fatigue_action、required_beats 或章末钩子落点。'],
+      recommendedPlannerAction: { key: 'build_scene_plan', label: ACTION_LABELS.build_scene_plan },
+      shouldAutoExpandPlanner: true,
+      writePreparationBrief,
+      episodePlan,
+      sceneCards,
+      qualityContinuitySceneMap,
+    }
+  }
+
+  if (writePreparationBrief?.readinessStatus === 'needs_context' && writePreparationReasons.length > 0) {
+    const actionKey: WritingCockpitActionKey = writePreparationBrief.sourceGaps.length > 0
+      || writePreparationBrief.deliveryRiskActions.length > 0
+      ? 'open_generation_diagnostics'
+      : 'open_story_assets'
+    return {
+      readiness: 'needs_context',
+      statusLabel: '写前准备待确认',
+      contextPackageStatus: contextStatus,
+      scenePlanStatus,
+      reasons: writePreparationReasons.slice(0, 3),
+      recommendedPlannerAction: { key: actionKey, label: ACTION_LABELS[actionKey] },
+      shouldAutoExpandPlanner: true,
+      writePreparationBrief,
+      episodePlan,
+      sceneCards,
+      qualityContinuitySceneMap,
+    }
+  }
+
+  if (relationshipGraphRisks.length > 0) {
+    return {
+      readiness: 'needs_context',
+      statusLabel: '资产关系待确认',
+      contextPackageStatus: contextStatus,
+      scenePlanStatus,
+      reasons: relationshipGraphRisks.slice(0, 3).map(item => `关系图风险：${item}`),
+      recommendedPlannerAction: { key: 'open_story_assets', label: ACTION_LABELS.open_story_assets },
+      shouldAutoExpandPlanner: true,
+      writePreparationBrief,
+      episodePlan,
+      sceneCards,
+      qualityContinuitySceneMap,
     }
   }
 
@@ -2853,8 +5499,10 @@ function buildChapterPlanningDesk(args: {
       reasons: ['本章还没有可用场景卡。'],
       recommendedPlannerAction: { key: 'build_scene_plan', label: ACTION_LABELS.build_scene_plan },
       shouldAutoExpandPlanner: true,
+      writePreparationBrief,
       episodePlan,
       sceneCards,
+      qualityContinuitySceneMap,
     }
   }
 
@@ -2867,8 +5515,10 @@ function buildChapterPlanningDesk(args: {
       reasons: ['本章已有正文，优先进入审阅修订。'],
       recommendedPlannerAction: { key: 'review_draft', label: ACTION_LABELS.review_draft },
       shouldAutoExpandPlanner: false,
+      writePreparationBrief,
       episodePlan,
       sceneCards,
+      qualityContinuitySceneMap,
     }
   }
 
@@ -2880,8 +5530,169 @@ function buildChapterPlanningDesk(args: {
     reasons: ['本章场景计划已就绪，可以进入初稿。'],
     recommendedPlannerAction: { key: 'confirm_plan_and_write_draft', label: ACTION_LABELS.confirm_plan_and_write_draft },
     shouldAutoExpandPlanner: false,
+    writePreparationBrief,
     episodePlan,
     sceneCards,
+    qualityContinuitySceneMap,
+  }
+}
+
+const LONGFORM_SETUP_CHECK_KEYS = new Set<WritingReadinessCheck['key']>([
+  'writing_bible_missing',
+  'writing_bible_ready',
+  'volume_goal_missing',
+  'volume_goal_ready',
+  'chapter_missing',
+  'chapter_ready',
+  'chapter_outline_missing',
+  'chapter_outline_ready',
+  'materials_not_ready',
+  'materials_ready',
+  'memory_unavailable',
+  'memory_ready',
+])
+
+function workflowStatusFromChecks(checks: WritingReadinessCheck[]): LongformWorkflowStageStatus {
+  if (checks.some(check => check.status === 'blocker')) return 'blocked'
+  if (checks.some(check => check.status === 'warning')) return 'needs_action'
+  return 'ready'
+}
+
+function workflowStatusFromPlanning(readiness: ChapterPlanningReadiness): LongformWorkflowStageStatus {
+  if (readiness === 'blocked') return 'blocked'
+  if (readiness === 'ready') return 'ready'
+  return 'needs_action'
+}
+
+function compactWorkflowEvidence(items: string[], fallback: string) {
+  const evidence = items.map(item => text(item)).filter(Boolean)
+  return evidence.length ? evidence.slice(0, 6) : [fallback]
+}
+
+function buildLongformWorkflow(args: {
+  readinessChecks: WritingReadinessCheck[]
+  chapterPlanningDesk: ChapterPlanningDeskModel
+  chapterAcceptanceDesk: ChapterAcceptanceDeskModel
+}): LongformWorkflowModel {
+  const setupChecks = args.readinessChecks.filter(check => LONGFORM_SETUP_CHECK_KEYS.has(check.key))
+  const setupIssues = setupChecks.filter(check => check.status !== 'pass')
+  const setupAction = setupIssues[0]?.actionKey || 'open_writing_bible'
+  const setupStage: LongformWorkflowStageModel = {
+    key: 'creation_setup',
+    label: '开书设定',
+    status: workflowStatusFromChecks(setupChecks),
+    actionKey: setupAction,
+    actionLabel: ACTION_LABELS[setupAction],
+    evidence: compactWorkflowEvidence(
+      setupIssues.map(check => check.label),
+      '写作圣经、卷目标、目标章节和材料已就绪。',
+    ),
+    riskCount: setupIssues.length,
+  }
+
+  const planning = args.chapterPlanningDesk
+  const preDraftEvidence = [
+    `上下文包：${planning.contextPackageStatus === 'ready' ? '已就绪' : planning.contextPackageStatus === 'insufficient' ? '不足' : '缺失'}`,
+    `场景卡：${planning.scenePlanStatus === 'ready' ? `${planning.sceneCards.length} 个` : '缺失'}`,
+    ...planning.reasons,
+  ]
+  const preDraftStage: LongformWorkflowStageModel = {
+    key: 'pre_draft',
+    label: '写前准备',
+    status: workflowStatusFromPlanning(planning.readiness),
+    actionKey: planning.recommendedPlannerAction.key,
+    actionLabel: planning.recommendedPlannerAction.label,
+    evidence: compactWorkflowEvidence(preDraftEvidence, '上下文、场景卡和写前意图已就绪。'),
+    riskCount: planning.readiness === 'ready' ? 0 : Math.max(1, planning.reasons.length),
+  }
+
+  const acceptance = args.chapterAcceptanceDesk
+  const deliveryRiskCount = Number(acceptance.deliveryRiskQueue?.totalCount || 0)
+  const reviewRiskCount = deliveryRiskCount + acceptance.mustFix.length
+  const postDraftStatus: LongformWorkflowStageStatus = !acceptance.visible
+    ? 'waiting'
+    : reviewRiskCount > 0
+      || ['needs_quality_check', 'needs_revision', 'needs_recheck'].includes(acceptance.acceptanceStatus)
+      ? 'needs_action'
+      : 'ready'
+  const postDraftAction: WritingCockpitActionKey = reviewRiskCount > 0
+    ? 'open_task_center'
+    : acceptance.visible
+      ? acceptance.recommendedAcceptanceAction.key
+      : 'write_draft'
+  const postDraftStage: LongformWorkflowStageModel = {
+    key: 'post_draft_review',
+    label: '写后诊断',
+    status: postDraftStatus,
+    actionKey: postDraftAction,
+    actionLabel: ACTION_LABELS[postDraftAction],
+    evidence: compactWorkflowEvidence(
+      acceptance.visible
+        ? [
+            acceptance.statusLabel,
+            ...acceptance.acceptanceReasons,
+            ...(acceptance.deliveryRiskQueue?.items || []),
+            acceptance.chapterAttraction?.label || '',
+            acceptance.readerRetentionSync?.label || '',
+            acceptance.storyUnitSync?.label || '',
+            acceptance.signatureSceneSync?.label || '',
+          ]
+        : ['正文未生成，等待初稿。'],
+      '交稿复检和章节诊断已通过。',
+    ),
+    riskCount: reviewRiskCount,
+  }
+
+  const repairReceiptRisk = Number(acceptance.qualityAuditRepairReceiptSync?.missedCount || 0)
+    + Number(acceptance.revisionReceipt?.riskCount || 0)
+    + Number(acceptance.deliveryRiskReceipt?.riskCount || 0)
+    + Number(acceptance.deliveryRiskConvergence?.residualCount || 0)
+  const continuityRiskCount = (!acceptance.visible || acceptance.storyStateSynced ? 0 : 1) + repairReceiptRisk
+  const continuityStatus: LongformWorkflowStageStatus = !acceptance.visible
+    ? 'waiting'
+    : continuityRiskCount > 0
+      ? 'needs_action'
+      : 'ready'
+  const continuityAction: WritingCockpitActionKey = acceptance.visible && !acceptance.storyStateSynced
+    ? 'sync_story_state'
+    : repairReceiptRisk > 0
+      ? 'open_task_center'
+      : acceptance.visible
+        ? acceptance.recommendedAcceptanceAction.key
+        : 'write_draft'
+  const continuityStage: LongformWorkflowStageModel = {
+    key: 'quality_continuity',
+    label: '质量续航',
+    status: continuityStatus,
+    actionKey: continuityAction,
+    actionLabel: ACTION_LABELS[continuityAction],
+    evidence: compactWorkflowEvidence(
+      acceptance.visible
+        ? [
+            acceptance.storyStateSynced ? '故事状态已同步' : '故事状态待同步',
+            acceptance.qualityAuditRepairReceiptSync?.label || '',
+            acceptance.revisionReceipt?.label || '',
+            acceptance.deliveryRiskReceipt?.label || '',
+            acceptance.deliveryRiskConvergence?.label || '',
+          ]
+        : ['等待正文和交稿复检后同步故事状态。'],
+      '修复回执、故事状态和下一章交接已闭环。',
+    ),
+    riskCount: continuityRiskCount,
+  }
+
+  const stages = [setupStage, preDraftStage, postDraftStage, continuityStage]
+  const currentStage = stages.find(stage => stage.status === 'blocked' || stage.status === 'needs_action')
+    || stages.find(stage => stage.status === 'waiting')
+    || continuityStage
+  return {
+    stages,
+    currentStage,
+    primaryAction: {
+      key: currentStage.actionKey,
+      label: currentStage.actionLabel,
+    },
+    riskCount: stages.reduce((sum, stage) => sum + stage.riskCount, 0),
   }
 }
 
@@ -2948,6 +5759,11 @@ export function buildWritingCockpitModel(input: BuildWritingCockpitModelInput): 
     acceptanceDesk: chapterAcceptanceDesk,
     reviews,
   })
+  const longformWorkflow = buildLongformWorkflow({
+    readinessChecks,
+    chapterPlanningDesk,
+    chapterAcceptanceDesk,
+  })
   const fallbackPrimary = resolvePrimaryAction({
     writingBibleReady,
     hasChapter,
@@ -2978,6 +5794,7 @@ export function buildWritingCockpitModel(input: BuildWritingCockpitModelInput): 
     chapterPlanningDesk,
     chapterAcceptanceDesk,
     chapterHandoffDesk,
+    longformWorkflow,
     primaryActionKey: action,
     recommendedRole: role,
     readiness: {

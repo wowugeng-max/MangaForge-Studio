@@ -1,4 +1,4 @@
-import type { WritingCockpitActionKey } from './writingCockpitModel'
+import type { DeslopGateDiagnosticsModel, WritingCockpitActionKey } from './writingCockpitModel'
 
 export type NovelWritingRecommendedActionKey = 'diagnostics' | 'scene_cards' | 'repair_generate' | 'generate' | 'quality_card'
 export type NovelDeliveryActionKey = WritingCockpitActionKey
@@ -81,7 +81,12 @@ export type NovelDeliverySummaryInput = {
     memeLabel: string
     riskLabel: string
     riskCount: number
+    aiSmellLabel?: string
+    aiSmellRisk?: boolean
+    aiSmellHitCount?: number
+    aiSmellTactics?: string[]
   } | null
+  deslopGateDiagnostics?: DeslopGateDiagnosticsModel | null
   coreDrift?: {
     status: 'ok' | 'warn'
     label: string
@@ -109,6 +114,42 @@ export type NovelDeliverySummaryInput = {
     score: number | null
     scoreLabel: string
     missedCount: number
+  } | null
+  qualityAuditSync?: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    evidence: string[]
+    nextActions: string[]
+  } | null
+  qualityAuditRepairReceiptSync?: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    receiptCount: number
+    evidence: string[]
+    nextActions: string[]
+  } | null
+  chapterHandoffSync?: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    evidence: string[]
+    nextActions: string[]
+  } | null
+  chapterHandoffDeltaSync?: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    evidence: string[]
+    nextActions: string[]
+  } | null
+  writePreparation?: {
+    status: 'ok' | 'warn'
+    label: string
+    missedCount: number
+    evidence: string[]
+    nextActions: string[]
   } | null
   readerRetentionSync?: {
     status: 'ok' | 'warn'
@@ -175,6 +216,73 @@ export type NovelDeliverySummaryInput = {
     scoreLabel: string
     missedCount: number
   } | null
+  blueprintReceipt?: {
+    status: 'ok' | 'warn'
+    label: string
+    scoreLabel: string
+    deliveredCount: number
+    totalCount: number
+    missedCount: number
+    evidence: string[]
+    missed: string[]
+  } | null
+  revisionReceipt?: {
+    status: 'ok' | 'warn'
+    label: string
+    scoreLabel: string
+    closedCount: number
+    totalCount: number
+    riskCount: number
+    evidence: string[]
+    risks: string[]
+  } | null
+  deliveryRiskReceipt?: {
+    status: 'ok' | 'warn'
+    label: string
+    scoreLabel: string
+    closedCount: number
+    totalCount: number
+    riskCount: number
+    evidence: string[]
+    risks: string[]
+  } | null
+  sceneCardReceipt?: {
+    status: 'ok' | 'warn'
+    label: string
+    riskCount: number
+    evidence: string[]
+    scenes: string[]
+    fields: string[]
+  } | null
+  qualityAudit?: {
+    status: 'ok' | 'warn'
+    label: string
+    riskCount: number
+    evidence: string[]
+    checks: string[]
+    fixes: string[]
+    strategies: string[]
+  } | null
+  platformRubric?: {
+    status: 'ok' | 'warn'
+    label: string
+    scoreLabel: string
+    rubric: string
+    rubricSource: string
+    passedCount: number
+    totalCount: number
+    missedCount: number
+    missed: string[]
+    evidence: string[]
+  } | null
+  approvalBlocker?: {
+    type: 'quality_gate' | 'low_score' | 'draft' | 'safety' | 'reference_safety_blocked'
+    status: 'warn'
+    label: string
+    detail: string
+    scoreLabel: string
+    reasons: string[]
+  } | null
   deliveryRiskQueue?: {
     totalCount: number
     label: string
@@ -207,10 +315,16 @@ export type NovelDeliverySummary = {
   ipSceneIntake: NovelDeliverySummaryInput['ipSceneIntake']
   signatureSceneSync: NovelDeliverySummaryInput['signatureSceneSync']
   readabilityReview: NovelDeliverySummaryInput['readabilityReview']
+  deslopGateDiagnostics: NovelDeliverySummaryInput['deslopGateDiagnostics']
   coreDrift: NovelDeliverySummaryInput['coreDrift']
   runwaySync: NovelDeliverySummaryInput['runwaySync']
   readerPayoffSync: NovelDeliverySummaryInput['readerPayoffSync']
   readerExpectationSync: NovelDeliverySummaryInput['readerExpectationSync']
+  qualityAuditSync: NovelDeliverySummaryInput['qualityAuditSync']
+  qualityAuditRepairReceiptSync: NovelDeliverySummaryInput['qualityAuditRepairReceiptSync']
+  chapterHandoffSync: NovelDeliverySummaryInput['chapterHandoffSync']
+  chapterHandoffDeltaSync: NovelDeliverySummaryInput['chapterHandoffDeltaSync']
+  writePreparation: NovelDeliverySummaryInput['writePreparation']
   readerRetentionSync: NovelDeliverySummaryInput['readerRetentionSync']
   chapterAttraction: NovelDeliverySummaryInput['chapterAttraction']
   storyDriveSync: NovelDeliverySummaryInput['storyDriveSync']
@@ -220,6 +334,13 @@ export type NovelDeliverySummary = {
   first30RetentionRecheck: NovelDeliverySummaryInput['first30RetentionRecheck']
   innovationSync: NovelDeliverySummaryInput['innovationSync']
   volumeBeatSync: NovelDeliverySummaryInput['volumeBeatSync']
+  blueprintReceipt: NovelDeliverySummaryInput['blueprintReceipt']
+  revisionReceipt: NovelDeliverySummaryInput['revisionReceipt']
+  deliveryRiskReceipt: NovelDeliverySummaryInput['deliveryRiskReceipt']
+  sceneCardReceipt: NovelDeliverySummaryInput['sceneCardReceipt']
+  qualityAudit: NovelDeliverySummaryInput['qualityAudit']
+  platformRubric: NovelDeliverySummaryInput['platformRubric']
+  approvalBlocker: NovelDeliverySummaryInput['approvalBlocker']
   deliveryRiskQueue: NovelDeliverySummaryInput['deliveryRiskQueue']
   deliveryRiskConvergence: NovelDeliverySummaryInput['deliveryRiskConvergence']
   actionKey: NovelDeliveryActionKey | null
@@ -234,6 +355,66 @@ export type NovelPreDraftBrief = {
   reader_promise?: string
   core_conflict?: string
   emotional_curve?: string
+  write_preparation_brief?: {
+    version?: string
+    readiness_status?: string
+    source_gaps?: string[]
+    asset_risks?: string[]
+    delivery_risk_actions?: string[]
+    blueprint_focus?: string[]
+    reader_payoff_focus?: string[]
+    must_confirm?: string[]
+    execution_order?: string[]
+  }
+  platform_rubric?: {
+    platform?: string
+    label?: string
+    source?: string
+    checks?: string[]
+    revision_priorities?: string[]
+  }
+  chapter_blueprint?: {
+    version?: string
+    platform_rubric?: {
+      platform?: string
+      label?: string
+      source?: string
+      checks?: string[]
+      revision_priorities?: string[]
+    }
+    target_emotion?: string
+    opening_hook?: string
+    core_payoff?: string
+    content_outline?: {
+      cause?: string
+      development?: string
+      turn?: string
+      climax?: string
+      ending?: string
+    }
+    plot_lines?: {
+      mainline?: string
+      subplot?: string
+      event_line?: string
+      relationship_line?: string
+      logic_line?: string
+    }
+    character_order?: string[]
+    relationship_change?: string
+    information_gap?: string
+    beat_sequence?: Array<{
+      scene_no?: number | null
+      title?: string
+      function_tag?: string
+      required_payoff?: string
+    }>
+    cost_and_reward?: string
+    ending_contract?: {
+      final_image?: string
+      next_chapter_pull?: string
+    }
+    writing_intent?: string
+  }
   previous_handoff?: string
   previousHandoff?: string
   key_settings?: string[]
@@ -446,6 +627,10 @@ export type NovelPreDraftBrief = {
     priority_label?: string
     items?: string[]
     required_actions?: string[]
+    opening_actions?: string[]
+    middle_actions?: string[]
+    ending_actions?: string[]
+    evidence?: string[]
   }
   governance_recheck_memory?: {
     source_run_id?: number | string | null
@@ -513,6 +698,19 @@ export type NovelDraftBriefSummary = {
     readerPromise: string
     coreConflict: string
     emotionalCurve: string
+    blueprintVersion: string
+    blueprintTargetEmotion: string
+    blueprintOpeningHook: string
+    blueprintCorePayoff: string
+    blueprintOutline: string
+    blueprintPlotLines: string
+    blueprintCharacterOrder: string
+    blueprintRelationshipChange: string
+    blueprintInformationGap: string
+    blueprintBeatSequence: string
+    blueprintCostAndReward: string
+    blueprintEndingContract: string
+    blueprintWritingIntent: string
     keySettings: string
     forbiddenContent: string
     storylineAdvances: string
@@ -551,6 +749,14 @@ export type NovelDraftBriefSummary = {
     pageTurnTrigger: string
     pageTurnPull: string
     pageTurnForbidden: string
+    writePreparationStatus: string
+    writePreparationSourceGaps: string
+    writePreparationAssetRisks: string
+    writePreparationDeliveryActions: string
+    writePreparationBlueprintFocus: string
+    writePreparationReaderPayoff: string
+    writePreparationMustConfirm: string
+    writePreparationExecutionOrder: string
     expectationCarryOver: string
     expectationDebtMustCarry: string
     expectationDebtKeepAlive: string
@@ -562,6 +768,16 @@ export type NovelDraftBriefSummary = {
     deliveryRiskItems: string
     deliveryRiskPriority: string
     deliveryRiskActions: string
+    deliveryRiskOpeningActions: string
+    deliveryRiskMiddleActions: string
+    deliveryRiskEndingActions: string
+    deliveryRiskEvidence: string
+    nextChapterQualityFocus: string
+    nextChapterQualityOpening: string
+    nextChapterQualityMiddle: string
+    nextChapterQualityEnding: string
+    nextChapterQualityAvoid: string
+    nextChapterQualityEvidence: string
     governanceMemoryStatus: string
     governanceMemorySummary: string
     governanceMemoryEvidence: string
@@ -642,13 +858,30 @@ export type NovelDraftBriefSummary = {
   }
 }
 
+function snakeCaseKey(key: string) {
+  return String(key || '').replace(/([a-z0-9])([A-Z])/g, '$1_$2').replace(/-/g, '_').toLowerCase()
+}
+
+function normalizeBriefKeys<T = any>(value: T): T {
+  if (Array.isArray(value)) return value.map(item => normalizeBriefKeys(item)) as T
+  if (!value || typeof value !== 'object') return value
+  const result: Record<string, any> = {}
+  Object.entries(value as Record<string, any>).forEach(([key, rawValue]) => {
+    const normalizedValue = normalizeBriefKeys(rawValue)
+    result[key] = normalizedValue
+    const snakeKey = snakeCaseKey(key)
+    if (!(snakeKey in result)) result[snakeKey] = normalizedValue
+  })
+  return result as T
+}
+
 export function buildNovelDraftBriefSummary({
   activeWordCount,
   chapterGoal,
   conflict,
   endingHook,
   sceneCardCount,
-  preDraftBrief,
+  preDraftBrief: rawPreDraftBrief,
 }: {
   activeWordCount: number
   chapterGoal?: string | null
@@ -657,6 +890,7 @@ export function buildNovelDraftBriefSummary({
   sceneCardCount: number
   preDraftBrief?: NovelPreDraftBrief | null
 }): NovelDraftBriefSummary {
+  const preDraftBrief = rawPreDraftBrief ? normalizeBriefKeys<NovelPreDraftBrief>(rawPreDraftBrief) : null
   const expectationListText = (items?: Array<{ text?: string; label?: string }>) => Array.isArray(items)
     ? items.map(item => item?.text || item?.label).filter(Boolean).join('、')
     : ''
@@ -665,6 +899,49 @@ export function buildNovelDraftBriefSummary({
       if (typeof item === 'string') return item.trim()
       return String(item?.text || item?.label || item?.summary || item?.detail || item?.title || item?.name || '').trim()
     }).filter(Boolean).join('、')
+    : ''
+  const textValueOrList = (value: any) => Array.isArray(value) ? textList(value) : String(value || '').trim()
+  const labeledText = (label: string, value?: string | null) => {
+    const text = String(value || '').trim()
+    return text ? `${label}：${text}` : ''
+  }
+  const chapterBlueprint = preDraftBrief?.chapter_blueprint || null
+  const nextChapterQualityPlan = preDraftBrief?.next_chapter_quality_plan
+    || preDraftBrief?.oh_story_delivery_receipts?.next_chapter_quality_plan
+    || null
+  const writePreparationBrief = preDraftBrief?.write_preparation_brief || null
+  const platformRubric = preDraftBrief?.platform_rubric || chapterBlueprint?.platform_rubric || null
+  const blueprintOutlineText = chapterBlueprint?.content_outline
+    ? [
+      labeledText('起因', chapterBlueprint.content_outline.cause),
+      labeledText('发展', chapterBlueprint.content_outline.development),
+      labeledText('转折', chapterBlueprint.content_outline.turn),
+      labeledText('高潮', chapterBlueprint.content_outline.climax),
+      labeledText('收束', chapterBlueprint.content_outline.ending),
+    ].filter(Boolean).join('；')
+    : ''
+  const blueprintPlotLinesText = chapterBlueprint?.plot_lines
+    ? [
+      labeledText('主线', chapterBlueprint.plot_lines.mainline),
+      labeledText('副线', chapterBlueprint.plot_lines.subplot),
+      labeledText('事件线', chapterBlueprint.plot_lines.event_line),
+      labeledText('关系线', chapterBlueprint.plot_lines.relationship_line),
+      labeledText('逻辑线', chapterBlueprint.plot_lines.logic_line),
+    ].filter(Boolean).join('；')
+    : ''
+  const blueprintBeatSequenceText = Array.isArray(chapterBlueprint?.beat_sequence)
+    ? chapterBlueprint.beat_sequence.map((beat, index) => [
+      `场景${beat?.scene_no || index + 1}`,
+      beat?.title ? ` ${beat.title}` : '',
+      beat?.function_tag ? `：${beat.function_tag}` : '',
+      beat?.required_payoff ? `，回报：${beat.required_payoff}` : '',
+    ].join('').trim()).filter(Boolean).join('；')
+    : ''
+  const blueprintEndingContractText = chapterBlueprint?.ending_contract
+    ? [
+      labeledText('终幕', chapterBlueprint.ending_contract.final_image),
+      labeledText('下章拉力', chapterBlueprint.ending_contract.next_chapter_pull),
+    ].filter(Boolean).join('；')
     : ''
   const longformBattleLaneText = (items?: NovelPreDraftBrief['longform_battle_context']['risk_lanes']) => Array.isArray(items)
     ? items.map(item => [
@@ -705,6 +982,23 @@ export function buildNovelDraftBriefSummary({
     readerPromise: preDraftBrief?.reader_promise?.trim() || '',
     coreConflict: preDraftBrief?.core_conflict?.trim() || conflict?.trim() || '',
     emotionalCurve: preDraftBrief?.emotional_curve?.trim() || '',
+    blueprintVersion: chapterBlueprint?.version?.trim() || '',
+    blueprintTargetEmotion: chapterBlueprint?.target_emotion?.trim() || '',
+    blueprintOpeningHook: chapterBlueprint?.opening_hook?.trim() || '',
+    blueprintCorePayoff: chapterBlueprint?.core_payoff?.trim() || '',
+    blueprintOutline: blueprintOutlineText,
+    blueprintPlotLines: blueprintPlotLinesText,
+    blueprintCharacterOrder: Array.isArray(chapterBlueprint?.character_order) ? chapterBlueprint.character_order.filter(Boolean).join('、') : '',
+    blueprintRelationshipChange: chapterBlueprint?.relationship_change?.trim() || '',
+    blueprintInformationGap: chapterBlueprint?.information_gap?.trim() || '',
+    blueprintBeatSequence: blueprintBeatSequenceText,
+    blueprintCostAndReward: chapterBlueprint?.cost_and_reward?.trim() || '',
+    blueprintEndingContract: blueprintEndingContractText,
+    blueprintWritingIntent: chapterBlueprint?.writing_intent?.trim() || '',
+    platformRubricLabel: platformRubric?.label?.trim() || platformRubric?.platform?.trim() || '',
+    platformRubricSource: platformRubric?.source?.trim() || '',
+    platformRubricChecks: textList(platformRubric?.checks),
+    platformRubricPriorities: textList(platformRubric?.revision_priorities),
     keySettings: Array.isArray(preDraftBrief?.key_settings) ? preDraftBrief.key_settings.filter(Boolean).join('、') : '',
     forbiddenContent: Array.isArray(preDraftBrief?.forbidden_content) ? preDraftBrief.forbidden_content.filter(Boolean).join('、') : '',
     storylineAdvances: Array.isArray(preDraftBrief?.storyline_advances) ? preDraftBrief.storyline_advances.filter(Boolean).join('、') : '',
@@ -754,6 +1048,14 @@ export function buildNovelDraftBriefSummary({
     pageTurnTrigger: preDraftBrief?.page_turn_hook_brief?.visible_trigger?.trim() || '',
     pageTurnPull: preDraftBrief?.page_turn_hook_brief?.next_chapter_pull?.trim() || '',
     pageTurnForbidden: Array.isArray(preDraftBrief?.page_turn_hook_brief?.forbidden_resolution) ? preDraftBrief.page_turn_hook_brief.forbidden_resolution.filter(Boolean).join('、') : '',
+    writePreparationStatus: writePreparationBrief?.readiness_status?.trim() || '',
+    writePreparationSourceGaps: Array.isArray(writePreparationBrief?.source_gaps) ? writePreparationBrief.source_gaps.filter(Boolean).join('、') : '',
+    writePreparationAssetRisks: Array.isArray(writePreparationBrief?.asset_risks) ? writePreparationBrief.asset_risks.filter(Boolean).join('、') : '',
+    writePreparationDeliveryActions: Array.isArray(writePreparationBrief?.delivery_risk_actions) ? writePreparationBrief.delivery_risk_actions.filter(Boolean).join('、') : '',
+    writePreparationBlueprintFocus: Array.isArray(writePreparationBrief?.blueprint_focus) ? writePreparationBrief.blueprint_focus.filter(Boolean).join('、') : '',
+    writePreparationReaderPayoff: Array.isArray(writePreparationBrief?.reader_payoff_focus) ? writePreparationBrief.reader_payoff_focus.filter(Boolean).join('、') : '',
+    writePreparationMustConfirm: Array.isArray(writePreparationBrief?.must_confirm) ? writePreparationBrief.must_confirm.filter(Boolean).join('、') : '',
+    writePreparationExecutionOrder: Array.isArray(writePreparationBrief?.execution_order) ? writePreparationBrief.execution_order.filter(Boolean).join('、') : '',
     expectationCarryOver: expectationListText(preDraftBrief?.reader_expectation_ledger?.carry_over),
     expectationDebtMustCarry: expectationListText(preDraftBrief?.reader_expectation_debt?.must_carry),
     expectationDebtKeepAlive: expectationListText(preDraftBrief?.reader_expectation_debt?.keep_alive),
@@ -770,6 +1072,16 @@ export function buildNovelDraftBriefSummary({
     deliveryRiskItems: Array.isArray(preDraftBrief?.delivery_risk_carry_over?.items) ? preDraftBrief.delivery_risk_carry_over.items.filter(Boolean).join('、') : '',
     deliveryRiskPriority: preDraftBrief?.delivery_risk_carry_over?.priority_label?.trim() || '',
     deliveryRiskActions: Array.isArray(preDraftBrief?.delivery_risk_carry_over?.required_actions) ? preDraftBrief.delivery_risk_carry_over.required_actions.filter(Boolean).join('、') : '',
+    deliveryRiskOpeningActions: Array.isArray(preDraftBrief?.delivery_risk_carry_over?.opening_actions) ? preDraftBrief.delivery_risk_carry_over.opening_actions.filter(Boolean).join('、') : '',
+    deliveryRiskMiddleActions: Array.isArray(preDraftBrief?.delivery_risk_carry_over?.middle_actions) ? preDraftBrief.delivery_risk_carry_over.middle_actions.filter(Boolean).join('、') : '',
+    deliveryRiskEndingActions: Array.isArray(preDraftBrief?.delivery_risk_carry_over?.ending_actions) ? preDraftBrief.delivery_risk_carry_over.ending_actions.filter(Boolean).join('、') : '',
+    deliveryRiskEvidence: Array.isArray(preDraftBrief?.delivery_risk_carry_over?.evidence) ? preDraftBrief.delivery_risk_carry_over.evidence.filter(Boolean).join('、') : '',
+    nextChapterQualityFocus: textValueOrList(nextChapterQualityPlan?.quality_focus),
+    nextChapterQualityOpening: textValueOrList(nextChapterQualityPlan?.opening_actions),
+    nextChapterQualityMiddle: textValueOrList(nextChapterQualityPlan?.middle_actions),
+    nextChapterQualityEnding: textValueOrList(nextChapterQualityPlan?.ending_actions),
+    nextChapterQualityAvoid: textValueOrList(nextChapterQualityPlan?.avoid_repetition),
+    nextChapterQualityEvidence: textValueOrList(nextChapterQualityPlan?.evidence_basis),
     governanceMemoryStatus: [
       preDraftBrief?.governance_recheck_memory?.label?.trim(),
       preDraftBrief?.governance_recheck_memory?.source_run_id ? `#${preDraftBrief.governance_recheck_memory.source_run_id}` : '',
@@ -989,11 +1301,15 @@ export function buildNovelWritingRecommendation({
   materialRecommendations,
   sceneCardCount,
   activeWordCount,
+  deliveryRiskCarryOverActionCount = 0,
+  qualityContinuitySceneMapCount = 0,
 }: {
   materialReady: boolean
   materialRecommendations: string[]
   sceneCardCount: number
   activeWordCount: number
+  deliveryRiskCarryOverActionCount?: number
+  qualityContinuitySceneMapCount?: number
 }): NovelWritingRecommendation {
   if (!materialReady) {
     return {
@@ -1009,6 +1325,14 @@ export function buildNovelWritingRecommendation({
       phase: 'prep',
       label: '场景卡',
       reason: '当前章缺少场景节拍，先拆场景能降低正文跑偏。',
+    }
+  }
+  if (activeWordCount === 0 && deliveryRiskCarryOverActionCount > 0 && qualityContinuitySceneMapCount === 0) {
+    return {
+      key: 'scene_cards',
+      phase: 'prep',
+      label: '补续航场景',
+      reason: '质量续航/交稿风险还没有落到具体场景卡，先补 serial_risk_repairs、recent_fatigue_action 和首中尾动作，再进入正文。',
     }
   }
   if (activeWordCount === 0) {
@@ -1042,7 +1366,9 @@ export function buildNovelWritingResponsibility(recommendation: NovelWritingReco
         roleLabel: '分集策划',
         phaseLabel: '写前准备',
         actionLabel: recommendation.label,
-        focus: '把本章目标拆成可执行场景节拍，锁定冲突、转折和章末钩子。',
+        focus: recommendation.label === '补续航场景'
+          ? '把质量续航/交稿风险挂到具体场景节拍，锁定首场承接、中段推进和章末追读。'
+          : '把本章目标拆成可执行场景节拍，锁定冲突、转折和章末钩子。',
         tone: 'planner',
       }
     case 'repair_generate':
@@ -1087,10 +1413,16 @@ export function buildNovelDeliverySummary(desk?: NovelDeliverySummaryInput | nul
       ipSceneIntake: null,
       signatureSceneSync: null,
       readabilityReview: null,
+      deslopGateDiagnostics: null,
       coreDrift: null,
       runwaySync: null,
       readerPayoffSync: null,
       readerExpectationSync: null,
+      qualityAuditSync: null,
+      qualityAuditRepairReceiptSync: null,
+      chapterHandoffSync: null,
+      chapterHandoffDeltaSync: null,
+      writePreparation: null,
       readerRetentionSync: null,
       chapterAttraction: null,
       storyDriveSync: null,
@@ -1100,6 +1432,13 @@ export function buildNovelDeliverySummary(desk?: NovelDeliverySummaryInput | nul
       first30RetentionRecheck: null,
       innovationSync: null,
       volumeBeatSync: null,
+      blueprintReceipt: null,
+      revisionReceipt: null,
+      deliveryRiskReceipt: null,
+      sceneCardReceipt: null,
+      qualityAudit: null,
+      platformRubric: null,
+      approvalBlocker: null,
       deliveryRiskQueue: null,
       deliveryRiskConvergence: null,
       actionKey: null,
@@ -1128,10 +1467,16 @@ export function buildNovelDeliverySummary(desk?: NovelDeliverySummaryInput | nul
     ipSceneIntake: desk.ipSceneIntake || null,
     signatureSceneSync: desk.signatureSceneSync || null,
     readabilityReview: desk.readabilityReview || null,
+    deslopGateDiagnostics: desk.deslopGateDiagnostics || null,
     coreDrift: desk.coreDrift || null,
     runwaySync: desk.runwaySync || null,
     readerPayoffSync: desk.readerPayoffSync || null,
     readerExpectationSync: desk.readerExpectationSync || null,
+    qualityAuditSync: desk.qualityAuditSync || null,
+    qualityAuditRepairReceiptSync: desk.qualityAuditRepairReceiptSync || null,
+    chapterHandoffSync: desk.chapterHandoffSync || null,
+    chapterHandoffDeltaSync: desk.chapterHandoffDeltaSync || null,
+    writePreparation: desk.writePreparation || null,
     readerRetentionSync: desk.readerRetentionSync || null,
     chapterAttraction: desk.chapterAttraction || null,
     storyDriveSync: desk.storyDriveSync || null,
@@ -1141,6 +1486,13 @@ export function buildNovelDeliverySummary(desk?: NovelDeliverySummaryInput | nul
     first30RetentionRecheck: desk.first30RetentionRecheck || null,
     innovationSync: desk.innovationSync || null,
     volumeBeatSync: desk.volumeBeatSync || null,
+    blueprintReceipt: desk.blueprintReceipt || null,
+    revisionReceipt: desk.revisionReceipt || null,
+    deliveryRiskReceipt: desk.deliveryRiskReceipt || null,
+    sceneCardReceipt: desk.sceneCardReceipt || null,
+    qualityAudit: desk.qualityAudit || null,
+    platformRubric: desk.platformRubric || null,
+    approvalBlocker: desk.approvalBlocker || null,
     deliveryRiskQueue: desk.deliveryRiskQueue || null,
     deliveryRiskConvergence: desk.deliveryRiskConvergence || null,
     actionKey: desk.recommendedAcceptanceAction.key,

@@ -51,6 +51,30 @@ function isRepairTaskRunType(runType: any) {
   return REPAIR_TASK_RUN_TYPES.has(String(runType || ''))
 }
 
+function publicWorkerState(worker: any = {}) {
+  const { current_abort_controller: _controller, ...publicWorker } = worker || {}
+  return publicWorker
+}
+
+function isAbortLikeError(error: any) {
+  const message = String(error?.message || error || '').toLowerCase()
+  return error?.name === 'AbortError'
+    || error?.code === 'REQUEST_CANCELED'
+    || message.includes('request canceled')
+    || message.includes('aborted')
+    || message.includes('abort')
+}
+
+function clampNumber(value: any, fallback: number, min: number, max: number) {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return fallback
+  return Math.max(min, Math.min(max, parsed))
+}
+
+function sleep(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
 function compactAuditText(value: any, limit = 160) {
   return String(value || '').replace(/\s+/g, ' ').trim().slice(0, limit)
 }
@@ -63,46 +87,93 @@ function firstPresent(...values: any[]) {
   return values.find(value => value !== undefined && value !== null && value !== '')
 }
 
-function extractModelTrace(payload: any, inputPayload: any = {}) {
+function runtimeModelTrace(item: any = {}) {
+  const selection = item?.runtimeSelection || item?.runtime_selection || null
+  if (!selection) return {}
+  return {
+    modelName: selection.model?.modelName || selection.model?.model_name || selection.modelName || selection.model_name,
+    modelId: selection.model?.id || selection.model?.model_id || selection.modelId || selection.model_id,
+    providerId: selection.provider?.id || selection.providerId || selection.provider_id,
+  }
+}
+
+function findApprovalBlockerResumeGuard(payload: any = {}) {
+  const chapters = Array.isArray(payload.chapters) ? payload.chapters : []
+  const current = chapters[Number(payload.current_index || 0)] || null
+  const lastError = payload.last_error || payload.lastError || {}
+  const code = String(lastError.error_code || lastError.errorCode || current?.error_code || current?.errorCode || '')
+  const stage = String(lastError.approval_stage || lastError.approvalStage || current?.approval_stage || current?.approvalStage || '')
+  if (code !== 'APPROVAL_BLOCKER' && stage !== 'approval_blocker') return null
+  return {
+    error: '当前章节存在入库阻断，不能直接继续无人值守。',
+    error_code: 'APPROVAL_BLOCKER_REQUIRES_REPAIR',
+    chapter_id: current?.id || lastError.id || null,
+    chapter_no: current?.chapter_no || current?.chapterNo || lastError.chapter_no || lastError.chapterNo || null,
+    approval_stage: 'approval_blocker',
+    approval_context: current?.approval_context || current?.approvalContext || lastError.approval_context || lastError.approvalContext || null,
+    recovery_plan: lastError.recovery_plan || lastError.recoveryPlan || current?.recovery_plan || current?.recoveryPlan || {
+      type: 'approval_blocker',
+      actions: ['按入库阻断原因修订正文', '重新运行正文质检和入库门禁', '确认阻断解除后再继续后续章节生成'],
+    },
+  }
+}
+
+export function extractModelTrace(payload: any, inputPayload: any = {}) {
   const candidates = Array.isArray(payload) ? payload : [
     payload,
     payload?.result,
     payload?.llm_result,
+    payload?.llmResult,
     payload?.self_check?.review,
+    payload?.selfCheck?.review,
     payload?.self_check?.revision,
+    payload?.selfCheck?.revision,
     payload?.chapters?.find?.((item: any) => item?.modelName || item?.model_name),
     ...(Array.isArray(payload?.pipeline) ? payload.pipeline : []),
     ...(Array.isArray(payload?.results) ? payload.results : []),
   ]
-  const modelHit = candidates.find((item: any) => item && (item.modelName || item.model_name || item.modelId || item.model_id || item.providerId || item.provider_id)) || {}
-  const usageHit = candidates.find((item: any) => item?.usage || item?.token_usage) || {}
+  const modelHit = candidates.find((item: any) => {
+    const runtime = runtimeModelTrace(item)
+    return item && (item.modelName || item.model_name || item.modelId || item.model_id || item.providerId || item.provider_id || runtime.modelName || runtime.modelId || runtime.providerId)
+  }) || {}
+  const runtimeHit = runtimeModelTrace(modelHit)
+  const usageHit = candidates.find((item: any) => item?.usage || item?.token_usage || item?.tokenUsage) || {}
   return {
-    model_name: firstPresent(modelHit.modelName, modelHit.model_name, inputPayload.model_name),
-    model_id: firstPresent(modelHit.modelId, modelHit.model_id, inputPayload.model_id),
-    provider_id: firstPresent(modelHit.providerId, modelHit.provider_id),
-    usage: usageHit.usage || usageHit.token_usage || payload?.usage || null,
+    model_name: firstPresent(modelHit.modelName, modelHit.model_name, runtimeHit.modelName, inputPayload.model_name, inputPayload.modelName),
+    model_id: firstPresent(modelHit.modelId, modelHit.model_id, runtimeHit.modelId, inputPayload.model_id, inputPayload.modelId),
+    provider_id: firstPresent(modelHit.providerId, modelHit.provider_id, runtimeHit.providerId, inputPayload.provider_id, inputPayload.providerId),
+    usage: usageHit.usage || usageHit.token_usage || usageHit.tokenUsage || payload?.usage || payload?.token_usage || payload?.tokenUsage || null,
   }
 }
 
-function extractChapterRef(payload: any, inputPayload: any, record: any, chaptersById: Map<number, any>, chaptersByNo: Map<number, any>) {
+export function extractChapterRef(payload: any, inputPayload: any, record: any, chaptersById: Map<number, any>, chaptersByNo: Map<number, any>) {
   const source = Array.isArray(payload) ? {} : (payload || {})
   const context = source.context_package || source.contextPackage || {}
-  const chapterTarget = context.chapter_target || context.chapter || {}
+  const chapterTarget = context.chapter_target || context.chapterTarget || context.chapter || {}
   const rawChapterNo = firstPresent(
     source.chapter_no,
+    source.chapterNo,
     source.chapter?.chapter_no,
+    source.chapter?.chapterNo,
     chapterTarget.chapter_no,
+    chapterTarget.chapterNo,
     source.quality_card?.chapter_no,
+    source.qualityCard?.chapterNo,
     inputPayload?.chapter_no,
+    inputPayload?.chapterNo,
     String(record.step_name || '').match(/chapter-(\d+)/)?.[1],
   )
   const rawChapterId = firstPresent(
     source.chapter_id,
+    source.chapterId,
     source.chapter?.id,
     source.quality_card?.chapter_id,
+    source.qualityCard?.chapterId,
     chapterTarget.chapter_id,
+    chapterTarget.chapterId,
     chapterTarget.id,
     inputPayload?.chapter_id,
+    inputPayload?.chapterId,
   )
   const chapterId = Number(rawChapterId || 0) || undefined
   const chapterNo = Number(rawChapterNo || 0) || undefined
@@ -116,18 +187,23 @@ function extractChapterRef(payload: any, inputPayload: any, record: any, chapter
   }
 }
 
-function extractMaterialTrace(payload: any) {
+export function extractMaterialTrace(payload: any) {
   const source = Array.isArray(payload) ? {} : (payload || {})
   const context = source.context_package || source.contextPackage || null
   const preflight = context?.preflight || source.preflight || null
-  const chapterTarget = context?.chapter_target || {}
-  const sceneCards = firstPresent(chapterTarget.scene_cards, source.scene_cards, source.confirmed_scene_cards, source.scene_breakdown)
+  const chapterTarget = context?.chapter_target || context?.chapterTarget || {}
+  const sceneCards = firstPresent(chapterTarget.scene_cards, chapterTarget.sceneCards, source.scene_cards, source.sceneCards, source.confirmed_scene_cards, source.confirmedSceneCards, source.scene_breakdown, source.sceneBreakdown)
   const referenceEntries = firstPresent(
     context?.reference_preview?.entries,
+    context?.referencePreview?.entries,
     context?.reference_entries,
+    context?.referenceEntries,
     source.reference_preview?.entries,
+    source.referencePreview?.entries,
     source.reference_report?.entries,
+    source.referenceReport?.entries,
     source.reference_report?.matched_entries,
+    source.referenceReport?.matchedEntries,
   )
   const blockers = asAuditArray(preflight?.blockers).map((item: any) => item.label || item.fix || item.key || item).filter(Boolean)
   const warnings = [
@@ -143,10 +219,10 @@ function extractMaterialTrace(payload: any) {
     warnings: warnings.slice(0, 10),
     scene_cards_count: Array.isArray(sceneCards) ? sceneCards.length : 0,
     reference_entries_count: Array.isArray(referenceEntries) ? referenceEntries.length : 0,
-    character_count: Array.isArray(context?.characters) ? context.characters.length : Array.isArray(context?.character_states) ? context.character_states.length : 0,
-    has_previous_tail: Boolean(context?.previous_chapter || context?.previous_chapters || context?.continuity?.previous_tail),
-    has_writing_bible: Boolean(context?.writing_bible || context?.style_lock),
-    has_story_state: Boolean(context?.story_state || context?.state_machine || source.story_state_update),
+    character_count: Array.isArray(context?.characters) ? context.characters.length : Array.isArray(context?.character_states) ? context.character_states.length : Array.isArray(context?.characterStates) ? context.characterStates.length : 0,
+    has_previous_tail: Boolean(context?.previous_chapter || context?.previousChapter || context?.previous_chapters || context?.previousChapters || context?.continuity?.previous_tail || context?.continuity?.previousTail),
+    has_writing_bible: Boolean(context?.writing_bible || context?.writingBible || context?.style_lock || context?.styleLock),
+    has_story_state: Boolean(context?.story_state || context?.storyState || context?.state_machine || context?.stateMachine || source.story_state_update || source.storyStateUpdate),
   }
 }
 
@@ -165,20 +241,23 @@ function extractSafetyTrace(payload: any) {
   }
 }
 
-function extractConfigTrace(payload: any) {
+export function extractConfigTrace(payload: any) {
   const source = Array.isArray(payload) ? {} : (payload || {})
   const snapshot = source.config_snapshot
+    || source.configSnapshot
     || source.agent_config_snapshot
-    || source.pipeline?.find?.((item: any) => item.config_snapshot)?.config_snapshot
+    || source.agentConfigSnapshot
+    || source.pipeline?.find?.((item: any) => item.config_snapshot || item.configSnapshot)?.config_snapshot
+    || source.pipeline?.find?.((item: any) => item.config_snapshot || item.configSnapshot)?.configSnapshot
     || null
   return {
     has_snapshot: Boolean(snapshot),
-    snapshot_id: snapshot?.snapshot_id || '',
+    snapshot_id: snapshot?.snapshot_id || snapshot?.snapshotId || '',
     fingerprint: snapshot?.fingerprint || '',
-    agent_prompt_version: snapshot?.agent_prompt_version || null,
-    prompt_keys: Array.isArray(snapshot?.prompt_keys) ? snapshot.prompt_keys : [],
-    writing_bible_hash: snapshot?.writing_bible_hash || '',
-    model_strategy_stages: snapshot?.model_strategy?.stages ? Object.keys(snapshot.model_strategy.stages) : [],
+    agent_prompt_version: snapshot?.agent_prompt_version || snapshot?.agentPromptVersion || null,
+    prompt_keys: Array.isArray(snapshot?.prompt_keys) ? snapshot.prompt_keys : Array.isArray(snapshot?.promptKeys) ? snapshot.promptKeys : [],
+    writing_bible_hash: snapshot?.writing_bible_hash || snapshot?.writingBibleHash || '',
+    model_strategy_stages: (snapshot?.model_strategy || snapshot?.modelStrategy)?.stages ? Object.keys((snapshot?.model_strategy || snapshot?.modelStrategy).stages) : [],
   }
 }
 
@@ -490,7 +569,7 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
     const project = await ctx.getProject(activeWorkspace, projectId)
     const persistentWorker = project?.reference_config?.run_queue_worker || null
     const worker = ctx.runQueueWorkers.get(projectId) || (persistentWorker?.status === 'running' ? { ...persistentWorker, status: 'stale', phase: '后端进程已重启，可点击恢复 worker' } : persistentWorker) || { status: 'idle' }
-    res.json({ ok: true, worker })
+    res.json({ ok: true, worker: publicWorkerState(worker) })
   })
 
   app.post('/api/novel/projects/:id/run-queue/recover', async (req, res) => {
@@ -517,10 +596,10 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
         updated_at: new Date().toISOString(),
       }
       const updated = await updateNovelProject(activeWorkspace, project.id, {
-        reference_config: { ...(project.reference_config || {}), run_queue_worker: worker },
+        reference_config: { ...(project.reference_config || {}), run_queue_worker: publicWorkerState(worker) },
       } as any)
       ctx.runQueueWorkers.set(project.id, worker)
-      res.json({ ok: true, worker, project: updated, recovered_runs: recoveredRuns })
+      res.json({ ok: true, worker: publicWorkerState(worker), project: updated, recovered_runs: recoveredRuns })
     } catch (error) {
       res.status(500).json({ error: String(error) })
     }
@@ -532,7 +611,7 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
       const project = await ctx.getProject(activeWorkspace, Number(req.params.id))
       if (!project) return res.status(404).json({ error: 'project not found' })
       const existing = ctx.runQueueWorkers.get(project.id)
-      if (['running', 'stopping'].includes(existing?.status)) return res.json({ ok: true, worker: existing, message: '后台 worker 已在运行' })
+      if (['running', 'stopping'].includes(existing?.status)) return res.json({ ok: true, worker: publicWorkerState(existing), message: '后台 worker 已在运行' })
       const staleRuns = (await listNovelRuns(activeWorkspace, project.id)).filter(item => item.run_type === 'chapter_group_generation' && item.status === 'running')
       for (const staleRun of staleRuns) {
         const stalePayload = parseJsonLikePayload(staleRun.output_ref) || {}
@@ -552,12 +631,26 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
       }
       ctx.runQueueWorkers.set(project.id, worker)
       await updateNovelProject(activeWorkspace, project.id, {
-        reference_config: { ...(project.reference_config || {}), run_queue_worker: worker },
+        reference_config: { ...(project.reference_config || {}), run_queue_worker: publicWorkerState(worker) },
       } as any)
       const maxRuns = Math.max(1, Math.min(200, Number(req.body.max_runs || 200)))
       const maxChaptersPerRun = Math.max(1, Math.min(10, Number(req.body.max_chapters_per_run || 1)))
+      const chapterTimeoutMs = Math.max(30_000, Math.min(1_800_000, Number(req.body.chapter_timeout_ms || req.body.chapterTimeoutMs || project.reference_config?.production_budget?.chapter_timeout_ms || 600_000)))
+      const idleWaitMs = clampNumber(
+        req.body.idle_wait_ms ?? req.body.idleWaitMs ?? project.reference_config?.production_budget?.idle_wait_ms ?? 0,
+        0,
+        0,
+        300_000,
+      )
+      const idlePollMs = clampNumber(
+        req.body.idle_poll_ms ?? req.body.idlePollMs ?? project.reference_config?.production_budget?.idle_poll_ms ?? 1_000,
+        1_000,
+        10,
+        30_000,
+      )
       void (async () => {
         try {
+          let idleStartedAt: number | null = null
           while (!worker.stop_requested && worker.processed_runs < maxRuns) {
             const latestBudgetProject = await ctx.getProject(activeWorkspace, project.id)
             const budgetProject = latestBudgetProject || project
@@ -569,7 +662,7 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
               worker.phase = `预算熔断：${budgetDecision.reasons.join('；')}`
               worker.updated_at = new Date().toISOString()
               await updateNovelProject(activeWorkspace, project.id, {
-                reference_config: { ...(budgetProject.reference_config || {}), run_queue_worker: { ...worker } },
+                reference_config: { ...(budgetProject.reference_config || {}), run_queue_worker: publicWorkerState(worker) },
               } as any).catch(() => null)
               break
             }
@@ -580,19 +673,61 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
               if (!current?.next_run_at) return true
               return new Date(String(current.next_run_at)).getTime() <= Date.now()
             }
+            const getNextRunAt = (item: any) => {
+              const payload = parseJsonLikePayload(item.output_ref) || {}
+              const chapters = Array.isArray(payload.chapters) ? payload.chapters : []
+              const current = chapters[Number(payload.current_index || 0)] || null
+              const nextRunAt = current?.next_run_at ? new Date(String(current.next_run_at)).getTime() : 0
+              return Number.isFinite(nextRunAt) ? nextRunAt : 0
+            }
             const run = runs
               .filter(item => item.run_type === 'chapter_group_generation' && ['queued', 'ready'].includes(item.status) && isRunDue(item))
               .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))[0]
-            if (!run) break
+            if (!run) {
+              const now = Date.now()
+              const nextDueAt = runs
+                .filter(item => item.run_type === 'chapter_group_generation' && ['queued', 'ready'].includes(item.status))
+                .map(getNextRunAt)
+                .filter(nextRunAt => nextRunAt > now)
+                .sort((a, b) => a - b)[0]
+              if (!idleWaitMs || !nextDueAt) break
+              if (idleStartedAt === null) idleStartedAt = now
+              const remainingWaitMs = idleWaitMs - (now - idleStartedAt)
+              if (remainingWaitMs <= 0) break
+              const waitMs = Math.max(1, Math.min(idlePollMs, nextDueAt - now, remainingWaitMs))
+              worker.phase = `等待下次重试：${new Date(nextDueAt).toISOString()}`
+              worker.updated_at = new Date().toISOString()
+              await sleep(waitMs)
+              continue
+            }
+            idleStartedAt = null
             worker.current_run_id = run.id
             worker.phase = `执行任务 ${run.step_name || run.id}`
             worker.updated_at = new Date().toISOString()
-            const result = await ctx.executeChapterGroupRunRecord(activeWorkspace, budgetProject, run, {
-              ...req.body,
-              max_chapters: maxChaptersPerRun,
-              model_id: req.body.model_id,
-              lock_owner: `worker-${project.id}-${worker.started_at}`,
-            })
+            const chapterAbortController = new AbortController()
+            worker.current_abort_controller = chapterAbortController
+            worker.chapter_timeout_ms = chapterTimeoutMs
+            const chapterTimeout = setTimeout(() => {
+              chapterAbortController.abort()
+              worker.stop_requested = true
+              worker.phase = `章节执行超时：${Math.round(chapterTimeoutMs / 1000)} 秒`
+              worker.updated_at = new Date().toISOString()
+            }, chapterTimeoutMs)
+            let result: any
+            try {
+              result = await ctx.executeChapterGroupRunRecord(activeWorkspace, budgetProject, run, {
+                ...req.body,
+                max_chapters: maxChaptersPerRun,
+                model_id: req.body.model_id,
+                lock_owner: `worker-${project.id}-${worker.started_at}`,
+                abortSignal: chapterAbortController.signal,
+                llmTimeoutMs: chapterTimeoutMs,
+                chapter_timeout_ms: chapterTimeoutMs,
+              })
+            } finally {
+              clearTimeout(chapterTimeout)
+              if (worker.current_abort_controller === chapterAbortController) delete worker.current_abort_controller
+            }
             worker.processed_runs += 1
             worker.processed_chapters += Number(result.processed || 0)
             worker.last_run_status = result.status
@@ -600,7 +735,7 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
             const latestProject = await ctx.getProject(activeWorkspace, project.id).catch(() => null)
             if (latestProject) {
               await updateNovelProject(activeWorkspace, project.id, {
-                reference_config: { ...(latestProject.reference_config || {}), run_queue_worker: { ...worker } },
+                reference_config: { ...(latestProject.reference_config || {}), run_queue_worker: publicWorkerState(worker) },
               } as any).catch(() => null)
             }
           }
@@ -609,8 +744,14 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
           worker.finished_at = new Date().toISOString()
           worker.updated_at = worker.finished_at
         } catch (error: any) {
-          worker.status = 'failed'
-          worker.last_error = String(error?.message || error)
+          if (worker.stop_requested || isAbortLikeError(error)) {
+            worker.status = 'stopped'
+            worker.phase = worker.phase || '已停止'
+            worker.last_error = ''
+          } else {
+            worker.status = 'failed'
+            worker.last_error = String(error?.message || error)
+          }
           worker.finished_at = new Date().toISOString()
           worker.updated_at = worker.finished_at
         } finally {
@@ -618,12 +759,12 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
           const latestProject = await ctx.getProject(activeWorkspace, project.id).catch(() => null)
           if (latestProject) {
             await updateNovelProject(activeWorkspace, project.id, {
-              reference_config: { ...(latestProject.reference_config || {}), run_queue_worker: { ...worker } },
+              reference_config: { ...(latestProject.reference_config || {}), run_queue_worker: publicWorkerState(worker) },
             } as any).catch(() => null)
           }
         }
       })()
-      res.json({ ok: true, worker, message: '后台 worker 已启动' })
+      res.json({ ok: true, worker: publicWorkerState(worker), message: '后台 worker 已启动' })
     } catch (error) {
       res.status(500).json({ error: String(error) })
     }
@@ -636,14 +777,15 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
     const worker = ctx.runQueueWorkers.get(projectId) || project?.reference_config?.run_queue_worker || { status: 'idle' }
     worker.stop_requested = true
     worker.status = worker.status === 'running' ? 'stopping' : worker.status
+    worker.current_abort_controller?.abort()
     worker.updated_at = new Date().toISOString()
     ctx.runQueueWorkers.set(projectId, worker)
     if (project) {
       await updateNovelProject(activeWorkspace, projectId, {
-        reference_config: { ...(project.reference_config || {}), run_queue_worker: worker },
+        reference_config: { ...(project.reference_config || {}), run_queue_worker: publicWorkerState(worker) },
       } as any).catch(() => null)
     }
-    res.json({ ok: true, worker })
+    res.json({ ok: true, worker: publicWorkerState(worker) })
   })
 
   app.post('/api/novel/projects/:id/run-queue/drain', async (req, res) => {
@@ -691,6 +833,8 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
       if (!run) return res.status(404).json({ error: 'run not found' })
       const payload = parseJsonLikePayload(run.output_ref) || {}
       if (run.run_type === 'chapter_group_generation') {
+        const approvalBlockerGuard = findApprovalBlockerResumeGuard(payload)
+        if (approvalBlockerGuard) return res.status(409).json(approvalBlockerGuard)
         const updated = await updateNovelRun(activeWorkspace, run.id, {
           status: 'ready',
           output_ref: JSON.stringify({ ...payload, phase: '等待继续执行', resumed_at: new Date().toISOString() }),

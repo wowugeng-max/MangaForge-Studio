@@ -30,6 +30,13 @@ import {
 import { executeNovelAgent, previewNovelKnowledgeInjection } from '../llm'
 import { extractLLMText, parseJsonLikePayload } from './novel-route-utils'
 import { purgeMemoryPalaceProject } from '../memory-service'
+import { buildOhStoryGenreCatalogContract, formatOhStoryGenreCatalogPrompt } from './novel-genre-catalog'
+import { buildOhStoryGenreCoreMechanicsContract, formatOhStoryGenreCoreMechanicsPrompt } from './novel-genre-core-mechanics'
+import { buildOhStoryPlotSpecialTopicsContract, formatOhStoryPlotSpecialTopicsPrompt } from './novel-plot-special-topics'
+import { buildOhStoryCharacterDesignContract, formatOhStoryCharacterDesignPrompt } from './novel-character-design-contract'
+import { buildOhStoryStoryPowerContract, formatOhStoryStoryPowerPrompt } from './novel-story-power-contract'
+import { buildOhStoryMainlineDefinitionContract, formatOhStoryMainlineDefinitionPrompt } from './novel-mainline-definition-contract'
+import { buildOhStoryLongformStructureContract, formatOhStoryLongformStructurePrompt } from './novel-longform-structure-contract'
 
 function parseOptionalBoolean(value: any) {
   if (value === undefined) return undefined
@@ -817,6 +824,7 @@ function normalizeProjectSeedPayload(payload: any, rawIdea: string, requestedLen
     worldbuilding,
     plot_engine: plotEngine,
     writing_bible: writingBible,
+    commercial_positioning: commercial,
     volume_outlines: volumeOutlines,
     chapter_outlines: chapterOutlines,
     foreshadowing_plan: asSeedArray(source.foreshadowing_plan).length ? asSeedArray(source.foreshadowing_plan) : asSeedArray(root.foreshadowing_plan),
@@ -969,6 +977,62 @@ export function buildRecoverableProjectSeed(seed: any, idea = '', requestedTitle
 
 export function buildProjectSeedRecoveryPrompt(seed: any, diagnostics: any, idea = '', requestedTitle = '', requestedLengthTarget = '') {
   const lengthTarget = normalizeLengthTarget(requestedLengthTarget || seed?.length_target) || 'medium'
+  const genreCatalogContract = buildOhStoryGenreCatalogContract(
+    idea,
+    requestedTitle,
+    seed?.title,
+    seed?.genre,
+    seed?.sub_genres,
+    seed?.commercial_tags,
+    seed?.writing_bible?.genre_positioning_contract,
+  )
+  const genreCoreMechanicsContract = buildOhStoryGenreCoreMechanicsContract(
+    idea,
+    requestedTitle,
+    seed?.title,
+    seed?.genre,
+    seed?.sub_genres,
+    seed?.commercial_tags,
+    seed?.writing_bible?.genre_positioning_contract,
+  )
+  const plotSpecialTopicsContract = buildOhStoryPlotSpecialTopicsContract(
+    idea,
+    requestedTitle,
+    seed?.title,
+    seed?.genre,
+    seed?.sub_genres,
+    seed?.commercial_tags,
+    seed?.writing_bible?.genre_positioning_contract,
+    seed?.writing_bible?.plot_special_topics_contract,
+    seed?.plot_engine,
+    seed?.worldbuilding,
+    seed?.protagonist,
+  )
+  const characterDesignContract = buildOhStoryCharacterDesignContract(
+    idea,
+    requestedTitle,
+    seed,
+    seed?.writing_bible,
+  )
+  const storyPowerContract = buildOhStoryStoryPowerContract(
+    idea,
+    requestedTitle,
+    seed,
+    seed?.writing_bible,
+  )
+  const mainlineDefinitionContract = buildOhStoryMainlineDefinitionContract(
+    idea,
+    requestedTitle,
+    seed,
+    seed?.writing_bible,
+  )
+  const longformStructureContract = buildOhStoryLongformStructureContract(
+    idea,
+    requestedTitle,
+    seed,
+    { length_target: lengthTarget },
+    seed?.writing_bible,
+  )
   return [
     '任务：上一次项目种子输出偏薄，但里面有可用灵感。请基于这些有效信息补齐小说项目种子。只输出 JSON object，不要 Markdown，不要解释。',
     '关键原则：不要要求作者更换模型；不要丢弃已有线索；不要重新开一个无关故事；必须保留已有有效信息，并围绕缺口清单补齐。',
@@ -981,6 +1045,20 @@ export function buildProjectSeedRecoveryPrompt(seed: any, diagnostics: any, idea
     '【已有可用信息/恢复草稿】',
     JSON.stringify(seed || {}, null, 2).slice(0, 26000),
     '',
+    formatOhStoryGenreCatalogPrompt(genreCatalogContract),
+    '',
+    formatOhStoryGenreCoreMechanicsPrompt(genreCoreMechanicsContract),
+    '',
+    formatOhStoryPlotSpecialTopicsPrompt(plotSpecialTopicsContract),
+    '',
+    formatOhStoryMainlineDefinitionPrompt(mainlineDefinitionContract),
+    '',
+    formatOhStoryStoryPowerPrompt(storyPowerContract),
+    '',
+    formatOhStoryCharacterDesignPrompt(characterDesignContract),
+    '',
+    formatOhStoryLongformStructurePrompt(longformStructureContract),
+    '',
     '【缺口清单】',
     asSeedArray(diagnostics?.missing_fields).length ? asSeedArray(diagnostics.missing_fields).join('、') : '请复查所有必填字段是否足够支撑项目创建。',
     '',
@@ -988,6 +1066,8 @@ export function buildProjectSeedRecoveryPrompt(seed: any, diagnostics: any, idea
     'title, genre, sub_genres, target_audience, length_target, style_tags, commercial_tags',
     'synopsis, logline, core_premise, main_conflict',
     'protagonist, antagonist, worldbuilding, plot_engine, writing_bible, characters',
+    'writing_bible 必须包含 target_reader_contract, genre_positioning_contract, plot_special_topics_contract, mainline_definition_contract, story_power_contract, character_design_contract, longform_structure_contract, core_contract_radar, reader_retention_contract',
+    'commercial_positioning 必须包含 platform, reader_promise, selling_points, risks',
     'master_outline, volume_outlines, chapter_outlines, foreshadowing_plan, open_questions, next_steps',
     '',
     '要求：',
@@ -996,12 +1076,28 @@ export function buildProjectSeedRecoveryPrompt(seed: any, diagnostics: any, idea
     '3. worldbuilding 必须有 world_summary, power_system, rules, taboos。',
     '4. 超长篇至少5卷，长篇至少3卷；中篇至少2卷；短篇可1卷。',
     '5. 长篇/超长篇 chapter_outlines 至少前30章，每章包含 chapter_no,title,summary,conflict,ending_hook。',
-    '6. 不要生成正文；不要照搬任何现有作品专有设定、角色名、桥段或原句。',
+    '6. target_reader_contract 必须回答“写给谁看、读者想看什么、本章给什么”，并给出 reader_profile, reader_desires, emotional_gap, chapter_value_test, quality_checks。',
+    '7. genre_positioning_contract 必须给出题材标签、平台口味、核心梗、卖点、创新边界、genre_catalog_contract、genre_core_mechanics_contract 和“拉长板而非补短板”的质量检查。',
+    '8. plot_special_topics_contract 必须包含上方 oh-story 特殊题材操作契约，特别是金手指、题材边界、扫榜对标、都市高武、三万字卡点和阵营手牌规则。',
+    '9. mainline_definition_contract 必须包含主线不等于升级、主线是一件事、升级是主角达成目标的行动、不是一个元素和主线完成后的承接规则。',
+    '10. story_power_contract 必须包含故事五维、有动作才是故事、有始有终、因果反馈和行动改变局势检查。',
+    '11. character_design_contract 必须包含三层标签、强/中/弱关联、角色卡、配角功能化、反派自我叙事、金手指绑架人设、代入感和安全感规则。',
+    '12. longform_structure_contract 必须包含一级/二级/三级结构选择、五幕因果链、五级大纲不超过3级、每卷目的+高潮、主线+支线/暗线布局、换地图顶层势力柱子和人际关系先行规则。',
+    '13. core_contract_radar 必须给出 must_serve, no_drift, theme_unity_rules, repair_focus，并包含“当初吸引读者的卖点还在吗”的十章复核问题。',
+    '14. reader_retention_contract 必须要求前300字承接上一章压力，章末留下下一章动作压力。',
+    '15. 不要生成正文；不要照搬任何现有作品专有设定、角色名、桥段或原句。',
   ].filter(Boolean).join('\n')
 }
 
 export function buildProjectSeedPrompt(idea: string, requestedTitle = '', requestedLengthTarget = '') {
   const normalizedLengthTarget = normalizeLengthTarget(requestedLengthTarget) || 'medium'
+  const genreCatalogContract = buildOhStoryGenreCatalogContract(idea, requestedTitle)
+  const genreCoreMechanicsContract = buildOhStoryGenreCoreMechanicsContract(idea, requestedTitle)
+  const plotSpecialTopicsContract = buildOhStoryPlotSpecialTopicsContract(idea, requestedTitle)
+  const mainlineDefinitionContract = buildOhStoryMainlineDefinitionContract(idea, requestedTitle)
+  const storyPowerContract = buildOhStoryStoryPowerContract(idea, requestedTitle)
+  const characterDesignContract = buildOhStoryCharacterDesignContract(idea, requestedTitle)
+  const longformStructureContract = buildOhStoryLongformStructureContract(idea, requestedTitle, { length_target: normalizedLengthTarget })
   return [
     '任务：把用户碎片化小说想法整理成可创建项目的结构化项目种子。只输出 JSON object，不要 Markdown，不要解释。',
     requestedTitle ? `用户指定作品名：${requestedTitle}` : '',
@@ -1009,6 +1105,20 @@ export function buildProjectSeedPrompt(idea: string, requestedTitle = '', reques
     '',
     '用户原始想法：',
     idea.slice(0, 20000) || '用户只提供了作品名。请基于作品名生成一个原创、可商业连载的项目种子，不要套用现有作品。',
+    '',
+    formatOhStoryGenreCatalogPrompt(genreCatalogContract),
+    '',
+    formatOhStoryGenreCoreMechanicsPrompt(genreCoreMechanicsContract),
+    '',
+    formatOhStoryPlotSpecialTopicsPrompt(plotSpecialTopicsContract),
+    '',
+    formatOhStoryMainlineDefinitionPrompt(mainlineDefinitionContract),
+    '',
+    formatOhStoryStoryPowerPrompt(storyPowerContract),
+    '',
+    formatOhStoryCharacterDesignPrompt(characterDesignContract),
+    '',
+    formatOhStoryLongformStructurePrompt(longformStructureContract),
     '',
     '硬性要求：即使用户只提供作品名，也必须原创扩写完整项目种子；synopsis、logline、core_premise、main_conflict、protagonist、worldbuilding、volume_outlines、chapter_outlines 不得为空。',
     '',
@@ -1028,8 +1138,18 @@ export function buildProjectSeedPrompt(idea: string, requestedTitle = '', reques
     'antagonist: {name, identity, goal, method, hidden_truth}',
     'worldbuilding: {world_summary, history_secret, power_system, ancient_gods, outer_gods, rules, taboos}',
     'plot_engine: {inciting_incident, long_term_goal, volume_arc_suggestions, first_10_chapters_direction}',
-    'writing_bible: {promise, mainline, world_rules, style_lock, forbidden, safety_policy}',
-    'characters: array，列出关键人物 name, role_type, motivation, goal, conflict, current_state',
+    'writing_bible: {promise, mainline, world_rules, style_lock, forbidden, safety_policy, target_reader_contract, genre_positioning_contract, plot_special_topics_contract, mainline_definition_contract, story_power_contract, character_design_contract, longform_structure_contract, core_contract_radar, reader_retention_contract}',
+    'writing_bible.target_reader_contract: {reader_profile, reader_desires, emotional_gap, chapter_value_test, quality_checks}，必须回答“写给谁看、读者想看什么、本章给什么”',
+    'writing_bible.genre_positioning_contract: {genre_tags, platform, reader_psychology, core_hook, type_formula, selling_points, long_board, innovation_boundary, genre_catalog_contract, genre_core_mechanics_contract, quality_checks}，必须包含“拉长板而非补短板”和上方 oh-story 题材目录/核心机制契约',
+    'writing_bible.plot_special_topics_contract: 必须完整写入上方 oh-story 特殊题材操作契约，按 matched_topics 约束金手指、题材边界、扫榜对标、都市高武、三万字卡点、阵营手牌等专题',
+    'writing_bible.mainline_definition_contract: 必须完整写入上方 oh-story 主线定义合同，覆盖主线不等于升级、主线是一件事、升级是主角达成目标的行动、不是一个元素和主线完成后的承接规则',
+    'writing_bible.story_power_contract: 必须完整写入上方 oh-story 故事力合同，覆盖故事五维、有动作才是故事、有始有终、因果反馈和行动改变局势',
+    'writing_bible.character_design_contract: 必须完整写入上方 oh-story 角色设计合同，覆盖三层标签、强/中/弱关联、角色卡、配角功能、反派自我叙事、金手指绑架人设、代入感和安全感',
+    'writing_bible.longform_structure_contract: 必须完整写入上方 oh-story 长篇结构骨架合同，覆盖一级/二级/三级结构选择、五幕因果链、五级大纲、每卷目的+高潮、支线服务主线、顶层势力柱子和人际关系先行换地图',
+    'writing_bible.core_contract_radar: {must_serve, no_drift, theme_unity_rules, repair_focus, periodic_drift_check}，periodic_drift_check.question 必须包含“当初吸引读者的卖点还在吗”',
+    'writing_bible.reader_retention_contract: {retention_double_engine, opening_hook_rule, ending_hook_rule, reward_randomness_rule, quality_checks}，opening_hook_rule 必须包含“前300字”',
+    'commercial_positioning: {platform, reader_promise, selling_points, tropes, risks}',
+    'characters: array，列出关键人物 name, role_type, motivation, goal, conflict, current_state, role_card, layered_tags, strong_associations, memory_anchor, supporting_function, exit_plan',
     'master_outline: {title, summary, hook}',
     'volume_outlines: array，按用户指定篇幅决定分卷数量；短篇可1卷，中篇2-3卷，长篇3-5卷，超长篇5卷以上。每项 title, summary, hook, chapter_count',
     'chapter_outlines: array，按用户指定篇幅决定细纲范围；短篇可10-20章，中篇/长篇/超长篇至少前30章。每项 chapter_no,title,summary,conflict,ending_hook',
@@ -1037,7 +1157,7 @@ export function buildProjectSeedPrompt(idea: string, requestedTitle = '', reques
     'open_questions: array，需要用户后续确认的问题',
     'next_steps: array，进入工作台后建议优先做什么',
     '',
-    '要求：保留用户设定中的核心因果；补齐缺失但不要推翻原意；如果名字缺失可以给暂定名；不要直接生成正文；避免照搬任何现有作品的专有设定、角色名、桥段或原句；不要返回只有标题、题材、标签的稀薄 JSON。',
+    '要求：保留用户设定中的核心因果；补齐缺失但不要推翻原意；创建阶段必须先立清目标读者、题材定位、核心承诺雷达和追读留存契约；如果名字缺失可以给暂定名；不要直接生成正文；避免照搬任何现有作品的专有设定、角色名、桥段或原句；不要返回只有标题、题材、标签的稀薄 JSON。',
   ].filter(Boolean).join('\n')
 }
 
@@ -1302,28 +1422,251 @@ function buildFallbackWritingBible(seed: any, project: any = {}) {
   const world = parseNestedSeed(root.worldbuilding)
   const plotEngine = parseNestedSeed(root.plot_engine)
   const existing = parseNestedSeed(root.writing_bible)
-  if (hasUsableWritingBible(existing)) return existing
   const promise = firstSeedText(root.logline, root.synopsis, root.core_premise, project.synopsis, `${root.title || project.title || '本书'}的核心读者承诺待补齐`)
   const mainlineGoal = firstSeedText(root.main_conflict, plotEngine.long_term_goal, root.core_premise, promise)
+  const volumePlan = asSeedArray(existing.volume_plan).length ? asSeedArray(existing.volume_plan) : asSeedArray(root.volume_outlines).map((volume: any, index: number) => ({
+    title: firstSeedText(volume?.title, volume?.name, `第${index + 1}卷`),
+    goal: firstSeedText(volume?.goal, volume?.summary, volume?.hook, `完成第${index + 1}卷阶段承诺`),
+    chapter_count: volume?.chapter_count || '',
+  }))
+  const firstVolume = volumePlan[0] || {}
+  const protagonist = parseNestedSeed(root.protagonist)
+  const protagonistDrive = firstSeedText(
+    existing.protagonist_drive,
+    existing.mainline?.protagonist_drive,
+    protagonist.goal,
+    protagonist.motivation,
+    protagonist.wound_or_need,
+    asSeedArray(root.characters).find((item: any) => item?.goal || item?.motivation)?.goal,
+  )
+  const coreConflict = firstSeedText(existing.core_conflict, existing.mainline?.core_conflict, root.main_conflict, plotEngine.long_term_goal, root.synopsis, mainlineGoal)
+  const currentVolumeGoal = firstSeedText(
+    existing.current_volume_goal,
+    existing.volume_goal,
+    firstVolume.title && firstVolume.goal ? `${firstVolume.title}：${firstVolume.goal}` : '',
+    firstVolume.goal,
+    firstVolume.summary,
+  )
+  const innovationHook = firstSeedText(existing.innovation_hook, root.logline, root.core_premise, asSeedArray(root.commercial_tags)[0], promise)
+  const first30Plan = firstSeedText(
+    existing.first30_plan,
+    plotEngine.first_10_chapters_direction,
+    asSeedArray(root.chapter_outlines).length ? `前30章围绕「${promise}」推进，完成开局压迫、能力验证、敌对势力亮相和阶段钩子。` : '',
+  )
+  const longformCapacity = firstSeedText(
+    existing.longform_capacity,
+    existing.mainline?.longform_capacity,
+    `${project.length_target || root.length_target || 'longform'}：${volumePlan.map((volume: any) => firstSeedText(volume.title, volume.goal)).filter(Boolean).join(' / ')}`,
+  )
+  const commercial = parseNestedSeed(root.commercial_positioning)
+  const platform = firstSeedText(commercial.platform, root.platform, project.platform, '未指定平台')
+  const targetAudience = firstSeedText(root.target_audience, project.target_audience, commercial.target_audience, '目标读者画像待补齐')
+  const readerPromise = firstSeedText(commercial.reader_promise, existing.reader_promise, promise)
+  const genreTags = uniqueSeedTexts([
+    root.genre,
+    project.genre,
+    ...asSeedArray(root.sub_genres),
+    ...asSeedArray(project.sub_genres),
+    ...asSeedArray(root.commercial_tags),
+  ], 10)
+  const sellingPoints = uniqueSeedTexts([
+    ...asSeedArray(commercial.selling_points),
+    ...asSeedArray(root.selling_points),
+    ...asSeedArray(root.commercial_tags),
+    innovationHook,
+  ], 8)
+  const positioningRisks = uniqueSeedTexts([
+    ...asSeedArray(commercial.risks),
+    '不能偏离核心读者承诺、主角驱动力和题材长板。',
+    '不能把核心卖点写成解释性设定，必须落到行动、选择、代价和回报。',
+  ], 8)
+  const genreCatalogContract = buildOhStoryGenreCatalogContract(
+    root.title,
+    project.title,
+    root.genre,
+    project.genre,
+    asSeedArray(root.sub_genres),
+    asSeedArray(project.sub_genres),
+    asSeedArray(root.commercial_tags),
+    root.synopsis,
+    root.logline,
+    root.core_premise,
+  )
+  const genreCoreMechanicsContract = buildOhStoryGenreCoreMechanicsContract(
+    root.title,
+    project.title,
+    root.genre,
+    project.genre,
+    asSeedArray(root.sub_genres),
+    asSeedArray(project.sub_genres),
+    asSeedArray(root.commercial_tags),
+    root.synopsis,
+    root.logline,
+    root.core_premise,
+    root.plot_engine,
+    root.worldbuilding,
+    root.protagonist,
+  )
+  const plotSpecialTopicsContract = {
+    ...buildOhStoryPlotSpecialTopicsContract(
+      root.title,
+      project.title,
+      root.genre,
+      project.genre,
+      asSeedArray(root.sub_genres),
+      asSeedArray(project.sub_genres),
+      asSeedArray(root.commercial_tags),
+      root.synopsis,
+      root.logline,
+      root.core_premise,
+      root.plot_engine,
+      root.worldbuilding,
+      root.protagonist,
+      existing.genre_positioning_contract,
+    ),
+    ...parseNestedSeed(existing.plot_special_topics_contract),
+  }
+  const readerDesires = uniqueSeedTexts([
+    readerPromise,
+    ...sellingPoints,
+    protagonistDrive,
+    coreConflict,
+  ], 8)
+  const targetReaderContract = {
+    source: 'oh_story_creation_contract_v1',
+    reader_profile: targetAudience,
+    reader_desires: readerDesires,
+    emotional_gap: uniqueSeedTexts([
+      `核心痛苦/未满足需求：${targetAudience}`,
+      coreConflict,
+      protagonistDrive,
+    ], 5),
+    chapter_value_test: [
+      '写给谁看：每章开写前必须能说清目标读者画像。',
+      '读者想看什么：每章必须服务 reader_desires 中至少一个明确欲望。',
+      '本章给什么：正文必须给出可感知的行动、信息、代价、爽点或情绪回报。',
+    ],
+    quality_checks: [
+      '目标读者、读者欲望和本章回报必须在正文证据中闭环。',
+      '不能只写作者自嗨设定，必须让读者承诺落成可见事件。',
+    ],
+    ...parseNestedSeed(existing.target_reader_contract),
+  }
+  const genrePositioningContract = {
+    source: 'oh_story_creation_contract_v1',
+    genre_tags: genreTags,
+    platform,
+    reader_psychology: uniqueSeedTexts([
+      targetAudience,
+      readerPromise,
+      ...sellingPoints,
+    ], 8),
+    core_hook: innovationHook,
+    type_formula: uniqueSeedTexts([
+      root.logline,
+      root.core_premise,
+      `${firstSeedText(root.genre, project.genre, '题材')} + ${firstSeedText(sellingPoints[0], innovationHook, '核心卖点')} + ${firstSeedText(protagonistDrive, '主角驱动力')}`,
+    ], 5),
+    selling_points: sellingPoints,
+    long_board: firstSeedText(sellingPoints[0], innovationHook, readerPromise),
+    innovation_boundary: '微创新必须服务核心卖点和目标读者，不新增会稀释主线的复杂机制。',
+    genre_catalog_contract: genreCatalogContract,
+    genre_core_mechanics_contract: genreCoreMechanicsContract,
+    quality_checks: [
+      '题材标签、读者心理、核心梗、平台口味和章节场景必须一致。',
+      '拉长板而非补短板：优先强化最能吸引目标读者的核心卖点。',
+      '书名、简介、内容承诺必须三位一体。',
+    ],
+    ...parseNestedSeed(existing.genre_positioning_contract),
+  }
+  const coreContractRadar = {
+    source: 'oh_story_creation_contract_v1',
+    summary: firstSeedText(readerPromise, promise),
+    must_serve: uniqueSeedTexts([
+      readerPromise,
+      promise,
+      protagonistDrive,
+      coreConflict,
+      currentVolumeGoal,
+      innovationHook,
+      ...sellingPoints,
+    ], 10),
+    no_drift: positioningRisks,
+    theme_unity_rules: [
+      '一本书从头到尾必须服务同一核心情绪和读者承诺。',
+      '支线、升级、日常和新资产只能放大核心卖点，不能替换核心卖点。',
+      '每10章复核一次：当初吸引读者的卖点还在吗？',
+    ],
+    repair_focus: [
+      '缺主线时，优先补核心冲突的行动推进。',
+      '缺爽点时，优先补目标读者能感知的选择、代价、反制或奖励。',
+      '缺题材味时，优先补题材长板和核心梗的场景证据。',
+    ],
+    ...parseNestedSeed(existing.core_contract_radar),
+  }
+  const readerRetentionContract = {
+    source: 'oh_story_creation_contract_v1',
+    retention_double_engine: uniqueSeedTexts([
+      '外部问题持续升级，内部回报持续兑现。',
+      readerPromise,
+      currentVolumeGoal,
+    ], 5),
+    opening_hook_rule: '每章前300字必须接住上一章状态、未解问题、读者期待债或新的行动压力。',
+    ending_hook_rule: '章末必须留下下一章可执行压力：新问题、新代价、新敌意、新奖励或新选择。',
+    reward_randomness_rule: '奖励和反转要有意外感，但必须由已知规则、角色选择或伏笔触发。',
+    quality_checks: [
+      '开头不能另起炉灶，必须承接上一章读者期待。',
+      '结尾不能只总结情绪，必须交出下一章追读理由。',
+      '回报必须可感知，不能停留在解释设定。',
+    ],
+    ...parseNestedSeed(existing.reader_retention_contract),
+  }
+  const storyPowerContract = buildOhStoryStoryPowerContract(root, project, existing)
+  const mainlineDefinitionContract = buildOhStoryMainlineDefinitionContract(root, project, existing)
+  const characterDesignContract = buildOhStoryCharacterDesignContract(root, project, existing)
+  const longformStructureContract = buildOhStoryLongformStructureContract(root, project, existing)
+  const commercialPositioning = {
+    platform,
+    reader_promise: readerPromise,
+    selling_points: sellingPoints,
+    target_audience: targetAudience,
+    risks: positioningRisks,
+    ...parseNestedSeed(existing.commercial_positioning),
+  }
   return {
     ...existing,
     promise,
     reader_promise: firstSeedText(existing.reader_promise, promise),
+    protagonist_drive: protagonistDrive,
+    core_conflict: coreConflict,
+    current_volume_goal: currentVolumeGoal,
+    innovation_hook: innovationHook,
+    first30_plan: first30Plan,
+    longform_capacity: longformCapacity,
     mainline: {
       ...parseNestedSeed(existing.mainline),
       title: firstSeedText(existing.mainline?.title, root.title, project.title, '全书主线'),
       hook: firstSeedText(existing.mainline?.hook, root.logline, root.main_conflict, promise),
       goal: firstSeedText(existing.mainline?.goal, mainlineGoal),
+      protagonist_drive: firstSeedText(existing.mainline?.protagonist_drive, protagonistDrive),
+      core_conflict: firstSeedText(existing.mainline?.core_conflict, coreConflict),
+      longform_capacity: firstSeedText(existing.mainline?.longform_capacity, longformCapacity),
     },
     world_rules: firstSeedText(existing.world_rules, world.power_system, asSeedArray(world.rules).join('；'), world.world_summary, root.core_premise),
-    volume_plan: asSeedArray(existing.volume_plan).length ? asSeedArray(existing.volume_plan) : asSeedArray(root.volume_outlines).map((volume: any, index: number) => ({
-      title: firstSeedText(volume?.title, volume?.name, `第${index + 1}卷`),
-      goal: firstSeedText(volume?.goal, volume?.summary, volume?.hook, `完成第${index + 1}卷阶段承诺`),
-      chapter_count: volume?.chapter_count || '',
-    })),
+    volume_plan: volumePlan,
     style_lock: firstSeedText(existing.style_lock, asSeedArray(root.style_tags).join('、'), '保持强情节推进、清晰因果、持续悬念和商业连载节奏。'),
     forbidden: firstSeedText(existing.forbidden, '不得推翻已确认主角动机、世界规则、章节细纲和伏笔回收计划；不得用无代价巧合解决核心冲突。'),
     safety_policy: firstSeedText(existing.safety_policy, '生成内容必须服务原创设定，避免照搬现有作品专有表达、角色关系和桥段。'),
+    target_reader_contract: targetReaderContract,
+    genre_positioning_contract: genrePositioningContract,
+    plot_special_topics_contract: plotSpecialTopicsContract,
+    mainline_definition_contract: mainlineDefinitionContract,
+    story_power_contract: storyPowerContract,
+    character_design_contract: characterDesignContract,
+    longform_structure_contract: longformStructureContract,
+    core_contract_radar: coreContractRadar,
+    reader_retention_contract: readerRetentionContract,
+    commercial_positioning: commercialPositioning,
     source: firstSeedText(existing.source, 'project_seed_fallback'),
   }
 }
@@ -1424,7 +1767,10 @@ async function materializeProjectSeed(activeWorkspace: string, project: any, see
       ...writingBible,
       updated_at: new Date().toISOString(),
     },
-    commercial_positioning: project.reference_config?.commercial_positioning || {
+    commercial_positioning: Object.keys(parseNestedSeed(project.reference_config?.commercial_positioning)).length
+      && project.reference_config?.commercial_positioning?.seed !== true
+      ? project.reference_config?.commercial_positioning
+      : writingBible.commercial_positioning || {
       reader_promise: seed.logline || seed.synopsis || '',
       selling_points: asSeedArray(seed.commercial_tags),
       seed: true,
@@ -1474,7 +1820,8 @@ async function createProjectFromSeed(activeWorkspace: string, seed: any, options
       project_seed: seedForProject,
       writing_bible: repairedSeed.writing_bible || {},
       commercial_positioning: {
-        reader_promise: repairedSeed.logline || repairedSeed.synopsis || '',
+        ...(repairedSeed.commercial_positioning || {}),
+        reader_promise: repairedSeed.commercial_positioning?.reader_promise || repairedSeed.logline || repairedSeed.synopsis || '',
         selling_points: asSeedArray(repairedSeed.commercial_positioning?.selling_points).length
           ? asSeedArray(repairedSeed.commercial_positioning?.selling_points)
           : asSeedArray(repairedSeed.commercial_tags),

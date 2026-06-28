@@ -1,7 +1,17 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, Button, Card, Checkbox, Empty, Form, Input, InputNumber, List, message, Modal, Select, Space, Tabs, Tag, Typography } from 'antd'
+import { Alert, Button, Card, Checkbox, Empty, Form, Input, InputNumber, List, message, Modal, Segmented, Select, Space, Tabs, Tag, Typography } from 'antd'
 import apiClient from '../../api/client'
 import { displayValue } from './utils'
+import {
+  buildCompactSettingTags,
+  buildUsageSummary,
+  filterSettingsForUsage,
+  normalizeUsageType,
+  revealSegmentOptions,
+  type SettingUsageFilter,
+  usageFilterOptions,
+  usageSegmentOptions,
+} from './settingUsageWorkbenchModel'
 import './SettingWorkshopPanel.css'
 
 const { Text, Paragraph } = Typography
@@ -38,6 +48,8 @@ const settingTypes = [
   { value: 'faction_arc', label: '势力线' },
   { value: 'foreshadowing_arc', label: '伏笔线' },
 ]
+
+const EMPTY_INITIAL_SETTINGS: any[] = []
 
 function splitList(value: any) {
   if (Array.isArray(value)) return value.map(item => String(item)).map(item => item.trim()).filter(Boolean)
@@ -117,6 +129,7 @@ export function SettingWorkshopPanel({
   projectId,
   activeChapter,
   selectedModelId,
+  initialSettings = EMPTY_INITIAL_SETTINGS,
   layout = 'compact',
   focusDiscoveredAssetsToken = 0,
   onAssetsApplied,
@@ -124,13 +137,14 @@ export function SettingWorkshopPanel({
   projectId: number
   activeChapter?: any | null
   selectedModelId?: number
+  initialSettings?: any[]
   layout?: 'compact' | 'workspace'
   focusDiscoveredAssetsToken?: number
   onAssetsApplied?: () => void
 }) {
   const [loading, setLoading] = useState(false)
   const [actionLoadingKey, setActionLoadingKey] = useState<SettingWorkshopActionKey | ''>('')
-  const [settings, setSettings] = useState<any[]>([])
+  const [settings, setSettings] = useState<any[]>(initialSettings)
   const [usage, setUsage] = useState<any[]>([])
   const [discoveredAssets, setDiscoveredAssets] = useState<any[]>([])
   const [selectedDiscoveredAssetKeys, setSelectedDiscoveredAssetKeys] = useState<string[]>([])
@@ -138,6 +152,7 @@ export function SettingWorkshopPanel({
   const [pendingStateUpdates, setPendingStateUpdates] = useState<any[]>([])
   const [selectedStateUpdateKeys, setSelectedStateUpdateKeys] = useState<string[]>([])
   const [activeType, setActiveType] = useState('character')
+  const [activeUsageFilter, setActiveUsageFilter] = useState<SettingUsageFilter>('configured')
   const [editing, setEditing] = useState<any | null>(null)
   const [editorOpen, setEditorOpen] = useState(false)
   const [form] = Form.useForm()
@@ -189,6 +204,10 @@ export function SettingWorkshopPanel({
     void load()
   }, [projectId, activeChapter?.id])
 
+  useEffect(() => {
+    setSettings(initialSettings)
+  }, [projectId, initialSettings])
+
   const grouped = useMemo(() => settings.reduce((acc: Record<string, any[]>, item) => {
     const key = item.entity_type || 'rule'
     acc[key] = acc[key] || []
@@ -197,7 +216,8 @@ export function SettingWorkshopPanel({
   }, {}), [settings])
 
   const usageMap = useMemo(() => new Map(usage.map(item => [Number(item.entity_id), item])), [usage])
-  const currentTypeSettings = grouped[activeType] || []
+  const usageSummary = useMemo(() => buildUsageSummary(usage), [usage])
+  const activeUsageFilterLabel = usageFilterOptions.find(item => item.key === activeUsageFilter)?.label || '本章相关'
   const isActionBusy = Boolean(actionLoadingKey)
   const isActionLoading = (key: SettingWorkshopActionKey) => actionLoadingKey === key
   const commandClass = (key: SettingWorkshopActionKey, modelCall = false) => [
@@ -211,8 +231,6 @@ export function SettingWorkshopPanel({
     if (!focusDiscoveredAssetsToken || discoveredAssets.length === 0) return
     discoveredAssetsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }, [focusDiscoveredAssetsToken, discoveredAssets.length])
-  const requiredCount = usage.filter(item => item.required && !item.forbidden).length
-  const forbiddenCount = usage.filter(item => item.forbidden).length
   const stateUpdateKey = (item: any, index: number) => `${item.entity_id || item.name || 'setting'}-${index}`
   const mergeTargetOptions = useMemo(() => settings.map(item => ({
     value: Number(item.id),
@@ -503,14 +521,44 @@ export function SettingWorkshopPanel({
         <Button size="small" onClick={load} loading={loading} disabled={isActionBusy}>刷新</Button>
       </Space>
 
-      <Card size="small" title={activeChapter ? `本章设定调用：第${activeChapter.chapter_no}章` : '本章设定调用'}>
-        <Space wrap size={6}>
-          <Tag color="blue" bordered={false}>必用 {requiredCount}</Tag>
-          <Tag color="red" bordered={false}>禁揭 {forbiddenCount}</Tag>
-          <Tag bordered={false}>已配置 {usage.length}</Tag>
-        </Space>
-        <Button size="small" block style={{ marginTop: 8 }} type="primary" onClick={saveUsage} loading={isActionLoading('save_usage')} disabled={disabledForAction('save_usage', !activeChapter?.id)}>保存本章调用</Button>
-      </Card>
+      <section className="setting-workshop-usage-board" aria-label="本章设定调用确认">
+        <div className="setting-workshop-usage-board-header">
+          <div className="setting-workshop-usage-board-title">
+            <Text strong>{activeChapter ? `第${activeChapter.chapter_no}章 · ${activeChapter.title || activeChapter.name || '本章调用确认'}` : '本章调用确认'}</Text>
+            <Text type="secondary">写正文前确认资产出现、隐藏、推进和回收。</Text>
+          </div>
+          <Button
+            size="small"
+            type="primary"
+            onClick={saveUsage}
+            loading={isActionLoading('save_usage')}
+            disabled={disabledForAction('save_usage', !activeChapter?.id)}
+          >
+            保存本章调用
+          </Button>
+        </div>
+        <div className="setting-workshop-usage-metrics">
+          <Tag color="blue" bordered={false}>已配置 {usageSummary.configured}</Tag>
+          <Tag color="green" bordered={false}>必用 {usageSummary.required}</Tag>
+          <Tag color="red" bordered={false}>禁揭 {usageSummary.forbidden}</Tag>
+          <Tag color="purple" bordered={false}>推进 {usageSummary.advance}</Tag>
+          <Tag color="cyan" bordered={false}>埋线 {usageSummary.plant}</Tag>
+          <Tag color="gold" bordered={false}>回收 {usageSummary.payoff}</Tag>
+          <Tag bordered={false}>暂停 {usageSummary.pause}</Tag>
+        </div>
+        <div className="setting-workshop-filter-strip" role="list" aria-label="按本章调用状态筛选设定资产">
+          {usageFilterOptions.map(option => (
+            <Button
+              key={option.key}
+              size="small"
+              type={activeUsageFilter === option.key ? 'primary' : 'default'}
+              onClick={() => setActiveUsageFilter(option.key)}
+            >
+              {option.label}
+            </Button>
+          ))}
+        </div>
+      </section>
 
       {discoveredAssets.length > 0 && (
         <div ref={discoveredAssetsRef} className="setting-workshop-discovered-anchor">
@@ -643,70 +691,94 @@ export function SettingWorkshopPanel({
         activeKey={activeType}
         onChange={setActiveType}
         size="small"
-        items={settingTypes.map(item => ({
-          key: item.value,
-          label: `${item.label}${grouped[item.value]?.length ? ` ${grouped[item.value].length}` : ''}`,
-          children: currentTypeSettings.length ? (
-            <List
-              size="small"
-              dataSource={currentTypeSettings}
-              renderItem={(setting: any) => {
-                const current = usageFromMap(usageMap, setting)
-                return (
-                  <List.Item>
-                    <Card size="small" style={{ width: '100%' }} title={<Space size={4}><Text strong>{setting.name}</Text><Tag bordered={false}>{typeLabel(setting.entity_type)}</Tag></Space>}
-                      extra={<Space size={4}><Button size="small" type="link" onClick={() => openEditor(setting)}>编辑</Button><Button size="small" type="link" danger onClick={() => deleteSetting(setting)}>删除</Button></Space>}
-                    >
-                      <Paragraph style={{ marginBottom: 8, fontSize: 12 }} ellipsis={{ rows: 3, expandable: true, symbol: '展开' }}>{setting.summary || '-'}</Paragraph>
-                      <Space direction="vertical" size={6} style={{ width: '100%' }}>
-                        <Space wrap size={6}>
-                          <Select
+        items={settingTypes.map(item => {
+          const typeSettings = filterSettingsForUsage(settings, usageMap, item.value, activeUsageFilter)
+          return {
+            key: item.value,
+            label: `${item.label}${grouped[item.value]?.length ? ` ${grouped[item.value].length}` : ''}`,
+            children: typeSettings.length ? (
+              <List
+                className="setting-workshop-asset-list"
+                size="small"
+                dataSource={typeSettings}
+                renderItem={(setting: any) => {
+                  const current = usageFromMap(usageMap, setting)
+                  const compactTags = buildCompactSettingTags(setting)
+                  const usageType = normalizeUsageType(current)
+                  return (
+                    <List.Item>
+                      <article className={`setting-workshop-asset-card setting-workshop-asset-${usageType}`}>
+                        <header className="setting-workshop-asset-header">
+                          <div className="setting-workshop-asset-titleblock">
+                            <Space size={6} wrap>
+                              <Text strong className="setting-workshop-asset-name">{setting.name}</Text>
+                              <Tag bordered={false}>{typeLabel(setting.entity_type)}</Tag>
+                              {setting.status && <Tag bordered={false}>{setting.status === 'active' ? '启用' : setting.status === 'retired' ? '退场' : '草稿'}</Tag>}
+                              {setting.visibility && <Tag color={setting.visibility === 'spoiler' ? 'red' : setting.visibility === 'hidden' ? 'gold' : 'blue'} bordered={false}>{setting.visibility === 'public' ? '公开' : setting.visibility === 'hidden' ? '隐藏' : '剧透'}</Tag>}
+                              {setting.first_chapter_no && <Tag bordered={false}>初登 第{setting.first_chapter_no}章</Tag>}
+                              {setting.last_chapter_no && <Tag bordered={false}>末次 第{setting.last_chapter_no}章</Tag>}
+                            </Space>
+                            <Paragraph className="setting-workshop-asset-summary" ellipsis={{ rows: 2, expandable: true, symbol: '展开' }}>
+                              {setting.summary || '暂无摘要'}
+                            </Paragraph>
+                          </div>
+                          <Space size={4} className="setting-workshop-asset-actions">
+                            <Button size="small" type="link" onClick={() => openEditor(setting)}>编辑</Button>
+                            <Button size="small" type="link" danger onClick={() => deleteSetting(setting)}>删除</Button>
+                          </Space>
+                        </header>
+
+                        <div className="setting-workshop-asset-controls">
+                          <div className="setting-workshop-control-row">
+                            <Text type="secondary">用途</Text>
+                            <Segmented
+                              className="setting-workshop-usage-segment"
+                              size="small"
+                              value={usageType}
+                              options={usageSegmentOptions}
+                              onChange={value => updateUsage(setting, { usage_type: String(value) })}
+                            />
+                          </div>
+                          <div className="setting-workshop-control-row">
+                            <Text type="secondary">揭示</Text>
+                            <Segmented
+                              className="setting-workshop-reveal-segment"
+                              size="small"
+                              value={current.reveal_level || 'none'}
+                              options={revealSegmentOptions}
+                              onChange={value => updateUsage(setting, { reveal_level: String(value) })}
+                            />
+                          </div>
+                        </div>
+
+                        {compactTags.length > 0 && (
+                          <div className="setting-workshop-asset-tags">
+                            {compactTags.map(tag => (
+                              <Tag key={`${tag.group}:${tag.label}`} color={tag.group === 'constraint' ? 'volcano' : 'geekblue'} bordered={false}>
+                                {tag.label}
+                              </Tag>
+                            ))}
+                          </div>
+                        )}
+
+                        <details className="setting-workshop-state-change">
+                          <summary>本章状态变化</summary>
+                          <Input.TextArea
                             size="small"
-                            value={current.usage_type || 'allowed'}
-                            style={{ width: 96 }}
-                            options={[
-                              { value: 'allowed', label: '允许' },
-                              { value: 'required', label: '必用' },
-                              { value: 'forbidden', label: '禁揭' },
-                              { value: 'advance', label: '推进' },
-                              { value: 'plant', label: '埋线' },
-                              { value: 'payoff', label: '回收' },
-                              { value: 'pause', label: '暂停' },
-                            ]}
-                            onChange={value => updateUsage(setting, { usage_type: value })}
+                            rows={2}
+                            placeholder="例如：断臂神纹首次灼痛；某物品转移给迟正"
+                            value={displayValue(current.expected_state_change || '')}
+                            onChange={e => updateUsage(setting, { expected_state_change: e.target.value ? { note: e.target.value } : {} })}
                           />
-                          <Select
-                            size="small"
-                            value={current.reveal_level || 'none'}
-                            style={{ width: 112 }}
-                            options={[
-                              { value: 'none', label: '不揭示' },
-                              { value: 'hint', label: '只埋线索' },
-                              { value: 'partial', label: '部分揭示' },
-                              { value: 'full', label: '完整揭示' },
-                            ]}
-                            onChange={value => updateUsage(setting, { reveal_level: value })}
-                          />
-                          <Checkbox checked={Boolean(current.required)} onChange={e => updateUsage(setting, { required: e.target.checked, usage_type: e.target.checked ? 'required' : 'allowed' })}>必用</Checkbox>
-                          <Checkbox checked={Boolean(current.forbidden)} onChange={e => updateUsage(setting, { forbidden: e.target.checked, usage_type: e.target.checked ? 'forbidden' : 'allowed' })}>禁揭</Checkbox>
-                        </Space>
-                        <Input.TextArea
-                          size="small"
-                          rows={2}
-                          placeholder="本章预期状态变化，例如：断臂神纹首次灼痛；某物品转移给迟正"
-                          value={displayValue(current.expected_state_change || '')}
-                          onChange={e => updateUsage(setting, { expected_state_change: e.target.value ? { note: e.target.value } : {} })}
-                        />
-                        {(setting.constraints_json && Object.keys(setting.constraints_json).length > 0) && <Text type="secondary" style={{ fontSize: 12 }}>约束：{displayValue(setting.constraints_json).slice(0, 120)}</Text>}
-                        {(setting.state_json && Object.keys(setting.state_json).length > 0) && <Text type="secondary" style={{ fontSize: 12 }}>状态：{displayValue(setting.state_json).slice(0, 120)}</Text>}
-                      </Space>
-                    </Card>
-                  </List.Item>
-                )
-              }}
-            />
-          ) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无设定" />,
-        }))}
+                        </details>
+                      </article>
+                    </List.Item>
+                  )
+                }}
+              />
+            ) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={`${typeLabel(item.value)}没有命中「${activeUsageFilterLabel}」的设定`} />,
+          }
+        })}
       />
 
       <Modal

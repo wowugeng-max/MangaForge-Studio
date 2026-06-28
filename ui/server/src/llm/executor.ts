@@ -426,6 +426,8 @@ export async function executeNovelAgent(
     streamTaskId?: string
     responseMode?: 'auto' | 'stream' | 'non_stream'
     skipMemory?: boolean
+    signal?: AbortSignal
+    timeoutMs?: number
   } = {},
 ): Promise<LLMResponse> {
   const { modelId, activeWorkspace, temperature = 0.7, maxTokens = 4000, responseMode, skipMemory } = options
@@ -448,6 +450,10 @@ export async function executeNovelAgent(
       response_format: 'text',
     },
     preferredModelId,
+    {
+      signal: options.signal,
+      timeoutMs: options.timeoutMs,
+    },
   )
 
   // ── Memory Palace: store agent output ──
@@ -740,6 +746,8 @@ export async function generateNovelChapterProse(
     characters?: any;
     outline?: any;
     prevChapters?: Array<Record<string, any>>;
+    abortSignal?: AbortSignal;
+    llmTimeoutMs?: number;
   },
   options: {
     modelId?: string
@@ -820,7 +828,7 @@ export async function generateNovelChapterProse(
       outline: context.outline,
       task: prosePrompt,
     },
-    { modelId, activeWorkspace, skipMemory: false, maxTokens, temperature: 0.8 },
+    { modelId, activeWorkspace, skipMemory: false, maxTokens, temperature: 0.8, signal: (context as any).abortSignal, timeoutMs: (context as any).llmTimeoutMs },
   )
 
   // ── Memory Palace: verify and store ──

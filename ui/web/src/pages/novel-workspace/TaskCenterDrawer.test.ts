@@ -10,13 +10,149 @@ import {
   buildRecoveryEvidenceReviewRows,
   buildRecoveryEvidenceRegovernanceSummary,
   buildRecoveryEvidenceSourceRiskProfileSnapshot,
+  buildPostBatchQualityCheckSummary,
+  buildNextChapterQualityPlanPreview,
   buildRepairClosureHighlights,
+  buildRepairTaskIssueTagMeta,
   buildSafeBatchExpansionPolicySnapshot,
   buildSafeBatchRecoveryFocusReviewState,
+  chapterGroupActionState,
+  chapterGroupRunActionState,
   recoveryEvidenceSourceRecheckAction,
   repairTaskActionLabel,
   safeBatchRecoveryFocusMatchesTask,
 } from './TaskCenterDrawer'
+
+describe('buildPostBatchQualityCheckSummary', () => {
+  test('summarizes oh-story batch quality checks from chapter group output', () => {
+    const summary = buildPostBatchQualityCheckSummary({
+      run_type: 'chapter_group_generation',
+      output_ref: JSON.stringify({
+        post_batch_quality_check: {
+          source: 'oh_story_step_3',
+          status: 'warn',
+          completed_count: 3,
+          chapter_nos: [21, 22, 23],
+          revised_count: 1,
+          average_score: 82,
+          checks: [
+            { key: 'title_uniqueness', label: '标题去重', status: 'ok', checked_count: 3, warn_count: 0 },
+            { key: 'prose_meta', label: '正文元信息', status: 'warn', checked_count: 3, warn_count: 1, summaries: ['第22章仍残留作者说明'] },
+            { key: 'chapter_hook', label: '章尾钩子', status: 'ok', checked_count: 3, warn_count: 0 },
+            { key: 'blueprint_consumption', label: '细纲兑现', status: 'ok', checked_count: 3, warn_count: 0 },
+            { key: 'foreshadowing_delta', label: '伏笔增量', status: 'warn', checked_count: 3, warn_count: 1 },
+            { key: 'deterministic_cleanup', label: '确定性清理', status: 'ok', checked_count: 3, warn_count: 0 },
+            { key: 'story_state', label: '状态机更新', status: 'ok', checked_count: 3, warn_count: 0 },
+          ],
+        },
+      }),
+    })
+
+    expect(summary).toMatchObject({
+      visible: true,
+      title: '批次质检',
+      source: 'oh_story_step_3',
+      status: 'warn',
+      statusLabel: '需复核',
+      statusColor: 'gold',
+      completedCount: 3,
+      chapterNos: [21, 22, 23],
+      revisedCount: 1,
+      averageScore: 82,
+      warningCount: 2,
+    })
+    expect(summary?.chapterText).toBe('第21-23章')
+    expect(summary?.checks).toHaveLength(7)
+    expect(summary?.checks.find(check => check.key === 'prose_meta')).toMatchObject({
+      label: '正文元信息',
+      status: 'warn',
+      statusLabel: '需复核',
+      warningCount: 1,
+      summaries: ['第22章仍残留作者说明'],
+    })
+  })
+
+  test('stays hidden when chapter group output has no post batch quality check', () => {
+    expect(buildPostBatchQualityCheckSummary({
+      run_type: 'chapter_group_generation',
+      output_ref: JSON.stringify({ chapters: [] }),
+    })).toBeNull()
+  })
+})
+
+describe('chapterGroupActionState', () => {
+  test('does not offer manual approval for approval-blocker chapters', () => {
+    const state = chapterGroupActionState({
+      status: 'needs_approval',
+      approval_stage: 'approval_blocker',
+      error_code: 'APPROVAL_BLOCKER',
+      error: '仿写安全阻断：参考桥段相似度过高',
+    })
+
+    expect(state.canApprove).toBe(false)
+    expect(state.canRetry).toBe(false)
+    expect(state.canSkip).toBe(false)
+    expect(state.blockedByApprovalBlocker).toBe(true)
+    expect(state.actionHint).toContain('先修复入库阻断')
+  })
+
+  test('keeps manual confirmation available for ordinary approval stages', () => {
+    const state = chapterGroupActionState({
+      status: 'needs_approval',
+      approval_stage: 'scene_cards',
+    })
+
+    expect(state.canApprove).toBe(true)
+    expect(state.canRetry).toBe(true)
+    expect(state.canSkip).toBe(true)
+    expect(state.blockedByApprovalBlocker).toBe(false)
+  })
+})
+
+describe('chapterGroupRunActionState', () => {
+  test('does not offer run-level continue or execute for approval-blocker runs', () => {
+    const state = chapterGroupRunActionState({
+      run_type: 'chapter_group_generation',
+      status: 'paused',
+      output_ref: JSON.stringify({
+        current_index: 0,
+        chapters: [
+          {
+            id: 901,
+            chapter_no: 21,
+            status: 'needs_approval',
+            approval_stage: 'approval_blocker',
+            error_code: 'APPROVAL_BLOCKER',
+          },
+        ],
+        last_error: {
+          approval_stage: 'approval_blocker',
+          error_code: 'APPROVAL_BLOCKER',
+        },
+      }),
+    })
+
+    expect(state.blockedByApprovalBlocker).toBe(true)
+    expect(state.canResume).toBe(false)
+    expect(state.canExecute).toBe(false)
+    expect(state.actionHint).toContain('先修复入库阻断')
+  })
+
+  test('keeps run-level continue and execute available for ordinary paused chapter groups', () => {
+    const state = chapterGroupRunActionState({
+      run_type: 'chapter_group_generation',
+      status: 'paused',
+      output_ref: JSON.stringify({
+        current_index: 0,
+        chapters: [{ id: 902, chapter_no: 22, status: 'needs_approval', approval_stage: 'scene_cards' }],
+      }),
+    })
+
+    expect(state.blockedByApprovalBlocker).toBe(false)
+    expect(state.canResume).toBe(true)
+    expect(state.canExecute).toBe(true)
+  })
+})
 
 describe('buildRepairClosureHighlights', () => {
   test('summarizes resolved delivery risk repair tasks for task center closure evidence', () => {
@@ -50,6 +186,51 @@ describe('buildRepairClosureHighlights', () => {
     expect(highlights[0]?.detail).toContain('修复审计已闭环')
   })
 
+  test('normalizes resolved annotation categories when issue type is missing', () => {
+    const highlights = buildRepairClosureHighlights([
+      {
+        source: 'review_annotation_risk',
+        task_type: 'repair_quality',
+        annotation_category: 'delivery_core',
+        task_status: 'resolved',
+        chapter_no: 8,
+      },
+      {
+        source: 'review_annotation_risk',
+        task_type: 'repair_quality',
+        annotation_category: 'reader_payoff',
+        task_status: 'resolved',
+        chapter_no: 9,
+      },
+      {
+        source: 'review_annotation_risk',
+        task_type: 'repair_quality',
+        issue_type: 'volume_beat_missed',
+        annotation_category: 'delivery_core',
+        task_status: 'resolved',
+        chapter_no: 10,
+      },
+    ])
+
+    expect(highlights).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        label: '核心偏移风险已清',
+        chapterNos: [8],
+        issueTypes: ['core_drift'],
+      }),
+      expect.objectContaining({
+        label: '回报欠账风险已清',
+        chapterNos: [9],
+        issueTypes: ['reader_payoff_debt'],
+      }),
+      expect.objectContaining({
+        label: '爆点风险已清',
+        chapterNos: [10],
+        issueTypes: ['volume_beat_missed'],
+      }),
+    ]))
+  })
+
   test('groups resolved safe-batch repair aliases by longform risk category', () => {
     const highlights = buildRepairClosureHighlights([
       {
@@ -77,6 +258,65 @@ describe('buildRepairClosureHighlights', () => {
     expect(highlights[0]?.chapterNos).toEqual([9, 10])
     expect(highlights[0]?.issueTypes).toEqual(['reader_pull_missed', 'reader_expectation_debt'])
     expect(highlights[0]?.detail).toContain('第9、10章')
+  })
+
+  test('summarizes resolved next-chapter quality plan repairs as quality continuity closure', () => {
+    const highlights = buildRepairClosureHighlights([
+      {
+        source: 'review_annotation_risk',
+        task_type: 'repair_quality',
+        issue_type: 'next_chapter_quality_plan',
+        task_status: 'resolved',
+        chapter_no: 12,
+        message: '下一章质量续航计划缺失：必须输出 next_chapter_quality_plan。',
+      },
+      {
+        source: 'review_annotation_risk',
+        task_type: 'repair_quality',
+        annotation_category: 'approval_blocker',
+        task_status: 'resolved',
+        chapter_no: 13,
+        detail: '下一章质量续航计划缺失',
+      },
+    ], { status: 'closed' })
+
+    expect(highlights).toEqual([
+      expect.objectContaining({
+        label: '质量续航风险已清',
+        color: 'gold',
+        count: 2,
+        chapterNos: [12, 13],
+        issueTypes: ['next_chapter_quality_plan'],
+      }),
+    ])
+    expect(highlights[0]?.detail).toContain('第12、13章')
+    expect(highlights[0]?.detail).toContain('修复审计已闭环')
+  })
+
+  test('groups resolved scene-card execution directive repairs as scene-card closure evidence', () => {
+    const highlights = buildRepairClosureHighlights([
+      {
+        source: 'review_annotation_risk',
+        task_type: 'repair_quality',
+        issue_type: 'scene_card_1_forbidden_directives',
+        task_status: 'resolved',
+        chapter_no: 12,
+        message: '场景1《蓝晶灼手》违反场景卡禁令：不得用整段来历/等级解释蓝晶。',
+      },
+    ], { status: 'closed' })
+
+    expect(highlights).toEqual([
+      expect.objectContaining({
+        key: 'scene_card_directive',
+        label: '场景卡执行风险已清',
+        color: 'volcano',
+        count: 1,
+        chapterNos: [12],
+        issueTypes: ['scene_card_1_forbidden_directives'],
+      }),
+    ])
+    expect(highlights[0]?.detail).toContain('第12章')
+    expect(highlights[0]?.detail).toContain('场景卡执行风险已处理')
   })
 
   test('groups resolved safe-batch expansion segment repairs as rollback evidence', () => {
@@ -144,6 +384,93 @@ describe('buildRepairClosureHighlights', () => {
     expect(highlights[0]?.detail).toContain('修复审计已闭环')
   })
 
+  test('labels resolved repair receipt and revision guard risks by concrete closure category', () => {
+    const highlights = buildRepairClosureHighlights([
+      {
+        source: 'review_annotation_risk',
+        task_status: 'resolved',
+        issue_type: 'quality_audit_repair_receipt',
+        annotation_category: 'quality_audit_repair_receipt',
+        chapter_no: 8,
+      },
+      {
+        source: 'review_annotation_risk',
+        task_status: 'resolved',
+        issue_type: 'deslop_repair_receipt',
+        annotation_category: 'deslop_repair_receipt',
+        chapter_no: 8,
+      },
+      {
+        source: 'review_annotation_risk',
+        task_status: 'resolved',
+        issue_type: 'revision_cascade_impact',
+        annotation_category: 'revision_cascade_impact',
+        chapter_no: 9,
+      },
+      {
+        source: 'review_annotation_risk',
+        task_status: 'resolved',
+        issue_type: 'revision_scope_guard',
+        annotation_category: 'revision_scope_guard',
+        chapter_no: 9,
+      },
+    ])
+
+    expect(highlights.map(item => item.label)).toEqual(expect.arrayContaining([
+      '质量回执风险已清',
+      '去AI味回执风险已清',
+      '级联修订风险已清',
+      '修订幅度风险已清',
+    ]))
+    expect(highlights).toHaveLength(4)
+  })
+
+  test('labels resolved prose revision sync and delivery receipt repairs by closure category', () => {
+    const highlights = buildRepairClosureHighlights([
+      {
+        source: 'review_annotation_risk',
+        task_status: 'resolved',
+        issue_type: 'prose_revision_receipt',
+        annotation_category: 'prose_revision_receipt',
+        chapter_no: 12,
+      },
+      {
+        source: 'review_annotation_risk',
+        task_status: 'resolved',
+        issue_type: 'prose_revision_receipt_sync',
+        annotation_category: 'prose_revision_receipt_sync',
+        chapter_no: 12,
+      },
+      {
+        source: 'review_annotation_risk',
+        task_status: 'resolved',
+        issue_type: 'delivery_risk_receipts',
+        annotation_category: 'delivery_risk_receipt',
+        chapter_no: 12,
+      },
+    ], { status: 'closed' })
+
+    expect(highlights).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        key: 'prose_revision_receipt',
+        label: '修订回执风险已清',
+        chapterNos: [12],
+      }),
+      expect.objectContaining({
+        key: 'prose_revision_receipt_sync',
+        label: '修订回执风险已清',
+        chapterNos: [12],
+      }),
+      expect.objectContaining({
+        key: 'delivery_risk_receipt',
+        label: '交稿回执风险已清',
+        chapterNos: [12],
+      }),
+    ]))
+    expect(highlights.map(item => item.detail).join('\n')).toContain('修订回执风险已处理')
+    expect(highlights.map(item => item.detail).join('\n')).toContain('交稿回执风险已处理')
+  })
+
   test('ignores open repair tasks and non-risk maintenance tasks', () => {
     const highlights = buildRepairClosureHighlights([
       { issue_type: 'reader_pull_missed', task_status: 'needs_review', chapter_no: 9 },
@@ -151,6 +478,417 @@ describe('buildRepairClosureHighlights', () => {
     ])
 
     expect(highlights).toEqual([])
+  })
+})
+
+describe('buildRepairTaskIssueTagMeta', () => {
+  test('normalizes annotation categories for task center issue tags', () => {
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      annotation_category: 'reader_retention',
+    })).toEqual({ label: '追读', color: 'orange' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      annotation_category: 'innovation',
+    })).toEqual({ label: '创新/IP', color: 'geekblue' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'volume_segment_missed',
+      annotation_category: 'reader_retention',
+    })).toEqual({ label: '卷级阶段', color: 'gold' })
+  })
+
+  test('labels pre-draft execution repair tasks by the missed contract', () => {
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'intent_confirmation_gap',
+    })).toEqual({ label: '意图确认', color: 'blue' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'benchmark_recall_gap',
+    })).toEqual({ label: '文风召回', color: 'purple' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      annotation_category: 'pre_draft_execution',
+    })).toEqual({ label: '意图确认', color: 'blue' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'source_readiness_gap',
+    })).toEqual({ label: '来源就绪', color: 'cyan' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      annotation_category: 'source_readiness',
+    })).toEqual({ label: '来源就绪', color: 'cyan' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'state_tracking_gap',
+    })).toEqual({ label: '状态跟踪', color: 'blue' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      annotation_category: 'state_tracking',
+    })).toEqual({ label: '状态跟踪', color: 'blue' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'style_boundary_gap',
+    })).toEqual({ label: '风格边界', color: 'purple' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'story_drive_gap',
+    })).toEqual({ label: '故事驱动力', color: 'blue' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'character_arc_gap',
+    })).toEqual({ label: '人物弧光', color: 'pink' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'runway_gap',
+    })).toEqual({ label: '连载航线', color: 'gold' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'quality_audit_gap',
+    })).toEqual({ label: '质量诊断', color: 'gold' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'beat_cooling_gap',
+    })).toEqual({ label: '冷却节奏', color: 'cyan' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'reader_expectation_debt',
+    })).toEqual({ label: '读者期待', color: 'gold' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'reader_payoff_debt',
+    })).toEqual({ label: '读者回报', color: 'orange' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      annotation_category: 'information_flow',
+    })).toEqual({ label: '信息流', color: 'geekblue' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'expectation_threshold_gap',
+    })).toEqual({ label: '期待阈值', color: 'gold' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      annotation_category: 'story_loop',
+    })).toEqual({ label: '故事闭环', color: 'cyan' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'emotional_arc_gap',
+    })).toEqual({ label: '情绪弧', color: 'magenta' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'chapter_hook_gap',
+    })).toEqual({ label: '章级钩子', color: 'gold' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'paragraph_hook_gap',
+    })).toEqual({ label: '段落级钩子', color: 'lime' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'suspense_gap',
+    })).toEqual({ label: '悬念编排', color: 'volcano' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'asset_linkage_gap',
+    })).toEqual({ label: '资产挂钩', color: 'cyan' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'dialogue_gap',
+    })).toEqual({ label: '对白质量', color: 'blue' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'scene_card_receipts_gap',
+    })).toEqual({ label: '场景回执', color: 'volcano' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'delivery_risk_receipts_gap',
+    })).toEqual({ label: '交稿回执', color: 'volcano' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'revision_context_receipts_gap',
+    })).toEqual({ label: '修订上下文', color: 'geekblue' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'plot_dynamics_gap',
+    })).toEqual({ label: '剧情动力', color: 'geekblue' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'character_relation_gap',
+    })).toEqual({ label: '角色关系', color: 'purple' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'character_behavior_gap',
+    })).toEqual({ label: '角色行为', color: 'magenta' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'conflict_structure_gap',
+    })).toEqual({ label: '冲突结构', color: 'red' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'opening_gap',
+    })).toEqual({ label: '开篇设计', color: 'orange' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'bridge_unit_gap',
+    })).toEqual({ label: '桥段节奏', color: 'gold' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'reversal_gap',
+    })).toEqual({ label: '反转设计', color: 'volcano' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'showdown_gap',
+    })).toEqual({ label: '高潮对抗', color: 'red' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'prose_craft_gap',
+    })).toEqual({ label: '正文工艺', color: 'purple' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'chapter_handoff_gap',
+    })).toEqual({ label: '章首承接', color: 'gold' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'payoff_setup_gap',
+    })).toEqual({ label: '爽点铺垫', color: 'gold' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'spectator_reaction_gap',
+    })).toEqual({ label: '围观反应', color: 'magenta' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'punctuation_tone_gap',
+    })).toEqual({ label: '语气标点', color: 'geekblue' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'content_rubric_gap',
+    })).toEqual({ label: '内容基准', color: 'orange' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'reader_retention_gap',
+    })).toEqual({ label: '追读雷达', color: 'orange' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'target_reader_gap',
+    })).toEqual({ label: '目标读者', color: 'magenta' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'genre_positioning_gap',
+    })).toEqual({ label: '题材定位', color: 'purple' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'female_audience_gap',
+    })).toEqual({ label: '女频长篇', color: 'magenta' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'upgrade_rhythm_gap',
+    })).toEqual({ label: '升级节奏', color: 'gold' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'chapter_structure_gap',
+    })).toEqual({ label: '章节结构', color: 'blue' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'chapter_progression_gap',
+    })).toEqual({ label: '章节推进', color: 'gold' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'information_load_gap',
+    })).toEqual({ label: '信息负载', color: 'cyan' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'longform_continuity_gap',
+    })).toEqual({ label: '长篇连续性', color: 'blue' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'core_contract_gap',
+    })).toEqual({ label: '核心契约', color: 'red' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'continuity_heat_gap',
+    })).toEqual({ label: '连续性热度', color: 'orange' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'revision_receipt_gap',
+    })).toEqual({ label: '修订回执', color: 'purple' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'deslop_repair_gap',
+    })).toEqual({ label: '去AI味修复', color: 'red' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'prose_meta_gap',
+    })).toEqual({ label: '正文元叙事', color: 'red' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'serial_risk_repair_gap',
+    })).toEqual({ label: '连续风险修复', color: 'gold' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'auto_creation_safe_batch_risk',
+      issue_type: 'chapter_hook_quality_gap',
+    })).toEqual({ label: '章钩质量', color: 'orange' })
+  })
+
+  test('labels oh-story revision closure sync tasks from annotation category fallback', () => {
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'review_annotation_risk',
+      annotation_category: 'prose_revision_receipt',
+    })).toEqual({ label: '修订回执', color: 'geekblue' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'review_annotation_risk',
+      annotation_category: 'deslop_repair_receipt_sync',
+    })).toEqual({ label: '去AI味回执', color: 'cyan' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'review_annotation_risk',
+      annotation_category: 'revision_cascade_impact_sync',
+    })).toEqual({ label: '级联修订', color: 'geekblue' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'review_annotation_risk',
+      annotation_category: 'revision_scope_guard_sync',
+    })).toEqual({ label: '修订幅度', color: 'orange' })
+  })
+
+  test('labels missing next-chapter quality plans as quality continuity work', () => {
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'review_annotation_risk',
+      issue_type: 'next_chapter_quality_plan',
+      message: '下一章质量续航计划缺失：必须输出 next_chapter_quality_plan。',
+    })).toEqual({ label: '质量续航', color: 'gold' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'review_annotation_risk',
+      annotation_category: 'approval_blocker',
+      detail: '下一章质量续航计划缺失：必须输出 next_chapter_quality_plan。',
+    })).toEqual({ label: '质量续航', color: 'gold' })
+
+    expect(buildRepairTaskIssueTagMeta({
+      source: 'review_annotation_risk',
+      issue_type: 'next_chapter_quality_plan_receipts_gap',
+      detail: '质量续航回执缺失：必须输出 next_chapter_quality_plan_receipts。',
+    })).toEqual({ label: '质量续航', color: 'gold' })
+  })
+})
+
+describe('buildNextChapterQualityPlanPreview', () => {
+  test('extracts nested next-chapter quality plans for task detail previews', () => {
+    const preview = buildNextChapterQualityPlanPreview({
+      source: 'review_annotation_risk',
+      issue_type: 'next_chapter_quality_plan',
+      payload: {
+        oh_story_delivery_receipts: {
+          next_chapter_quality_plan: {
+            quality_focus: ['守住上章公审后的压迫余波'],
+            opening_actions: ['前300字先让证据反噬到家族长辈'],
+            middle_actions: ['中段必须让女主主动选择公开下一份证据'],
+            ending_actions: ['章末留下新证人倒戈钩子'],
+            avoid_repetition: ['不要再用“这只是开始”收尾'],
+            evidence_basis: ['第12章结尾证据链已公开但代价未落地'],
+          },
+        },
+      },
+    })
+
+    expect(preview).toMatchObject({
+      visible: true,
+      label: '质量续航计划',
+      qualityFocus: ['守住上章公审后的压迫余波'],
+      openingActions: ['前300字先让证据反噬到家族长辈'],
+      middleActions: ['中段必须让女主主动选择公开下一份证据'],
+      endingActions: ['章末留下新证人倒戈钩子'],
+      avoidRepetition: ['不要再用“这只是开始”收尾'],
+      evidenceBasis: ['第12章结尾证据链已公开但代价未落地'],
+    })
+  })
+
+  test('keeps the missing quality plan reason visible when no plan exists yet', () => {
+    const preview = buildNextChapterQualityPlanPreview({
+      source: 'review_annotation_risk',
+      annotation_category: 'approval_blocker',
+      detail: '下一章质量续航计划缺失：必须输出 next_chapter_quality_plan。',
+    })
+
+    expect(preview).toMatchObject({
+      visible: true,
+      label: '质量续航计划',
+      missingReason: '下一章质量续航计划缺失：必须输出 next_chapter_quality_plan。',
+    })
+    expect(preview?.qualityFocus).toEqual([])
+  })
+
+  test('keeps the missing quality receipt reason visible when no receipt exists yet', () => {
+    const preview = buildNextChapterQualityPlanPreview({
+      source: 'review_annotation_risk',
+      issue_type: 'next_chapter_quality_plan_receipts_gap',
+      detail: '质量续航回执缺失：必须输出 next_chapter_quality_plan_receipts。',
+    })
+
+    expect(preview).toMatchObject({
+      visible: true,
+      label: '质量续航计划',
+      missingReason: '质量续航回执缺失：必须输出 next_chapter_quality_plan_receipts。',
+    })
+    expect(preview?.qualityFocus).toEqual([])
   })
 })
 
@@ -2030,6 +2768,30 @@ describe('buildSafeBatchExpansionPolicySnapshot', () => {
     })).toBe(false)
   })
 
+  test('normalizes annotation categories before matching safe batch recovery focus tasks', () => {
+    const focus = {
+      layerKey: 'reader_retention_recovery',
+      layerLabel: '追读恢复',
+      actionLabel: '补追读恢复',
+      targetView: 'repair_task',
+      issueType: 'reader_retention_missed',
+      source: 'safe_batch_reader_retention_trend',
+      taskStatuses: ['open', 'needs_review'],
+      taskCenterFilterLabel: '追读',
+    }
+
+    expect(safeBatchRecoveryFocusMatchesTask(focus, {
+      annotation_category: 'reader_retention',
+      task_status: 'needs_review',
+    })).toBe(true)
+
+    expect(safeBatchRecoveryFocusMatchesTask(focus, {
+      issue_type: 'volume_segment_missed',
+      annotation_category: 'reader_retention',
+      task_status: 'needs_review',
+    })).toBe(false)
+  })
+
   test('matches default lane template focus only to structure decision tasks with default lane gaps', () => {
     const focus = {
       layerKey: 'structure_decision_execution',
@@ -2756,6 +3518,428 @@ describe('repairTaskActionLabel', () => {
       source: 'auto_creation_safe_batch_risk',
       issue_type: 'safe_batch_expansion_structure_decision_mismatch',
     })).toBe('查结构决策')
+  })
+
+  test('normalizes annotation categories before choosing repair task action labels', () => {
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      annotation_category: 'reader_retention',
+    })).toBe('补追读')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      annotation_category: 'innovation',
+    })).toBe('补创新')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      issue_type: 'volume_segment_missed',
+      annotation_category: 'reader_retention',
+    })).toBe('补阶段结算')
+  })
+
+  test('uses targeted action labels for oh-story revision closure sync tasks', () => {
+    expect(repairTaskActionLabel({
+      source: 'review_annotation_risk',
+      annotation_category: 'prose_revision_receipt',
+    })).toBe('补回执')
+
+    expect(repairTaskActionLabel({
+      source: 'review_annotation_risk',
+      issue_type: 'quality_audit_repair_receipt',
+    })).toBe('补质检')
+
+    expect(repairTaskActionLabel({
+      source: 'review_annotation_risk',
+      issue_type: 'deslop_repair_receipt',
+    })).toBe('补去味')
+
+    expect(repairTaskActionLabel({
+      source: 'review_annotation_risk',
+      issue_type: 'revision_cascade_impact',
+    })).toBe('补级联')
+
+    expect(repairTaskActionLabel({
+      source: 'review_annotation_risk',
+      issue_type: 'revision_scope_guard',
+    })).toBe('稳幅度')
+
+    expect(repairTaskActionLabel({
+      source: 'review_annotation_risk',
+      annotation_category: 'prose_revision_receipt_sync',
+    })).toBe('补回执')
+
+    expect(repairTaskActionLabel({
+      source: 'review_annotation_risk',
+      annotation_category: 'quality_audit_repair_receipt_sync',
+    })).toBe('补质检')
+
+    expect(repairTaskActionLabel({
+      source: 'review_annotation_risk',
+      annotation_category: 'deslop_repair_receipt_sync',
+    })).toBe('补去味')
+
+    expect(repairTaskActionLabel({
+      source: 'review_annotation_risk',
+      annotation_category: 'revision_cascade_impact_sync',
+    })).toBe('补级联')
+
+    expect(repairTaskActionLabel({
+      source: 'review_annotation_risk',
+      annotation_category: 'revision_scope_guard_sync',
+    })).toBe('稳幅度')
+  })
+
+  test('uses a targeted action for missing next-chapter quality plans', () => {
+    expect(repairTaskActionLabel({
+      source: 'review_annotation_risk',
+      issue_type: 'next_chapter_quality_plan',
+      message: '下一章质量续航计划缺失：必须输出 next_chapter_quality_plan。',
+    })).toBe('补续航')
+
+    expect(repairTaskActionLabel({
+      source: 'review_annotation_risk',
+      annotation_category: 'approval_blocker',
+      detail: '下一章质量续航计划缺失：必须输出 next_chapter_quality_plan。',
+    })).toBe('补续航')
+
+    expect(repairTaskActionLabel({
+      source: 'review_annotation_risk',
+      issue_type: 'next_chapter_quality_plan_receipts_gap',
+      message: '质量续航回执缺失：必须输出 next_chapter_quality_plan_receipts。',
+    })).toBe('补续航')
+  })
+
+  test('uses targeted labels for scene-card execution directive repairs', () => {
+    const task = {
+      source: 'review_annotation_risk',
+      issue_type: 'scene_card_1_forbidden_directives',
+      message: '场景1《蓝晶灼手》违反场景卡禁令：不得用整段来历/等级解释蓝晶。',
+      action: '删掉说明书式来历、原理和等级解释，改成角色当下动作反应、对话半句、物理后果或证据判断变化。',
+    }
+
+    expect(repairTaskActionLabel(task)).toBe('修场景卡')
+    expect(buildRepairTaskIssueTagMeta(task)).toEqual({ label: '场景卡执行', color: 'volcano' })
+  })
+
+  test('uses targeted labels for unattended Step 3 post-delivery repairs', () => {
+    const cases = [
+      ['title_uniqueness_gap', '改标题', { label: '标题去重', color: 'blue' }],
+      ['blueprint_consumption_gap', '兑现细纲', { label: '细纲兑现', color: 'gold' }],
+      ['foreshadowing_delta_gap', '补伏笔', { label: '伏笔增量', color: 'purple' }],
+      ['deterministic_cleanup_gap', '清AI味', { label: '确定性清理', color: 'red' }],
+      ['story_state_update_gap', '写状态', { label: '状态写回', color: 'cyan' }],
+      ['write_preparation_receipts_gap', '补写前', { label: '写前准备', color: 'cyan' }],
+      ['status_filter_receipts_gap', '补状态筛选', { label: '状态筛选', color: 'blue' }],
+      ['source_readiness_gap', '补来源', { label: '来源就绪', color: 'cyan' }],
+      ['intent_confirmation_gap', '补意图确认', { label: '意图确认', color: 'blue' }],
+      ['benchmark_recall_gap', '补文风召回', { label: '文风召回', color: 'purple' }],
+      ['style_sample_gap', '校样章', { label: '风格', color: 'purple' }],
+    ] as const
+
+    for (const [issueType, actionLabel, tagMeta] of cases) {
+      const task = {
+        source: 'unattended_post_delivery_quality',
+        task_type: 'repair_quality',
+        issue_type: issueType,
+      }
+
+      expect(repairTaskActionLabel(task)).toBe(actionLabel)
+      expect(buildRepairTaskIssueTagMeta(task)).toEqual(tagMeta)
+    }
+  })
+
+  test('shows targeted actions for pre-draft execution repair tasks', () => {
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      issue_type: 'intent_confirmation_gap',
+    })).toBe('补意图确认')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      issue_type: 'benchmark_recall_gap',
+    })).toBe('补文风召回')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      annotation_category: 'pre_draft_execution',
+    })).toBe('补意图确认')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      issue_type: 'source_readiness_gap',
+    })).toBe('补来源')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      issue_type: 'state_tracking_gap',
+    })).toBe('补状态')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      issue_type: 'style_boundary_gap',
+    })).toBe('校风格')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      issue_type: 'story_drive_gap',
+    })).toBe('补驱动')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      issue_type: 'character_arc_gap',
+    })).toBe('补弧光')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      issue_type: 'runway_gap',
+    })).toBe('补航线')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      issue_type: 'quality_audit_gap',
+    })).toBe('补诊断')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      issue_type: 'beat_cooling_gap',
+    })).toBe('补冷却')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      issue_type: 'reader_expectation_debt',
+    })).toBe('补期待')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      issue_type: 'reader_payoff_debt',
+    })).toBe('补回报')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      issue_type: 'information_flow_gap',
+    })).toBe('调信息')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      issue_type: 'expectation_threshold_gap',
+    })).toBe('补期待')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      issue_type: 'story_loop_gap',
+    })).toBe('补闭环')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      issue_type: 'emotional_arc_gap',
+    })).toBe('补情绪')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      issue_type: 'chapter_hook_gap',
+    })).toBe('补章钩')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      issue_type: 'paragraph_hook_gap',
+    })).toBe('补段钩')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      issue_type: 'suspense_gap',
+    })).toBe('补悬念')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      issue_type: 'asset_linkage_gap',
+    })).toBe('挂资产')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      issue_type: 'dialogue_gap',
+    })).toBe('修对白')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      issue_type: 'scene_card_receipts_gap',
+    })).toBe('修回执')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      issue_type: 'delivery_risk_receipts_gap',
+    })).toBe('补交稿')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      issue_type: 'revision_context_receipts_gap',
+    })).toBe('补上下文')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      issue_type: 'plot_dynamics_gap',
+    })).toBe('补动力')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      issue_type: 'character_relation_gap',
+    })).toBe('修关系')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      issue_type: 'character_behavior_gap',
+    })).toBe('修行为')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      issue_type: 'conflict_structure_gap',
+    })).toBe('加冲突')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      issue_type: 'opening_gap',
+    })).toBe('改开篇')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      issue_type: 'bridge_unit_gap',
+    })).toBe('补桥段')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      issue_type: 'reversal_gap',
+    })).toBe('补反转')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      issue_type: 'showdown_gap',
+    })).toBe('补高潮')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      issue_type: 'prose_craft_gap',
+    })).toBe('修工艺')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      issue_type: 'chapter_handoff_gap',
+    })).toBe('接章首')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      issue_type: 'payoff_setup_gap',
+    })).toBe('补铺垫')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      issue_type: 'spectator_reaction_gap',
+    })).toBe('补围观')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      issue_type: 'punctuation_tone_gap',
+    })).toBe('调语气')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      issue_type: 'content_rubric_gap',
+    })).toBe('补内容')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      issue_type: 'reader_retention_gap',
+    })).toBe('补追读')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      issue_type: 'target_reader_gap',
+    })).toBe('补读者')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      issue_type: 'genre_positioning_gap',
+    })).toBe('校题材')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      issue_type: 'female_audience_gap',
+    })).toBe('补女频')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      issue_type: 'upgrade_rhythm_gap',
+    })).toBe('补升级')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      issue_type: 'chapter_structure_gap',
+    })).toBe('补结构')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      issue_type: 'chapter_progression_gap',
+    })).toBe('补推进')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      issue_type: 'information_load_gap',
+    })).toBe('压信息')
+
+    expect(repairTaskActionLabel({
+      source: 'auto_creation_safe_batch_risk',
+      task_type: 'repair_quality',
+      issue_type: 'longform_continuity_gap',
+    })).toBe('保长篇')
   })
 
   test('labels recovery evidence governance queue actions by their closure flow', () => {

@@ -1,0 +1,279 @@
+.setting-asset-graph-panel {
+  min-width: 0;
+  margin-bottom: 14px;
+  padding: 16px;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+}
+
+.setting-asset-graph-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+
+.setting-asset-graph-header h5.ant-typography {
+  margin: 0;
+}
+
+.setting-asset-graph-title-icon {
+  color: #0891b2;
+  font-size: 17px;
+}
+
+.setting-asset-graph-alert {
+  margin-bottom: 12px;
+}
+
+.setting-asset-graph-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.setting-asset-graph-locator {
+  width: min(320px, 45%);
+}
+
+.setting-asset-graph-workspace {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.setting-asset-graph-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.setting-asset-graph-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 12px;
+  min-width: 0;
+}
+
+.setting-asset-graph-body.is-detail-collapsed {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.setting-asset-graph-canvas {
+  min-width: 0;
+  height: 460px;
+  overflow: hidden;
+  border: 1px solid #edf0f5;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.setting-asset-graph-modal {
+  top: 32px;
+}
+
+.setting-asset-graph-modal .ant-modal-body {
+  padding-top: 8px;
+}
+
+.setting-asset-graph-modal-body {
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+}
+
+.setting-asset-graph-modal-canvas {
+  height: min(72vh, 760px);
+  min-height: 560px;
+}
+
+.setting-asset-graph-modal-detail {
+  max-height: min(72vh, 760px);
+}
+
+.setting-asset-graph-canvas .ant-spin-nested-loading,
+.setting-asset-graph-canvas .ant-spin-container {
+  height: 100%;
+}
+
+.setting-asset-graph-canvas .ant-empty {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.setting-asset-graph-node {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+}
+
+.setting-asset-graph-node strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.setting-asset-graph-node span {
+  color: #64748b;
+  font-size: 11px;
+}
+
+.setting-asset-graph-detail {
+  min-width: 0;
+  max-height: 460px;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid #edf0f5;
+  border-radius: 8px;
+  background: #fbfdff;
+}
+
+.setting-asset-graph-detail-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.setting-asset-graph-detail-title .ant-typography {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.setting-asset-graph-detail-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.setting-asset-graph-detail-row {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+
+.setting-asset-graph-detail-row .ant-typography:last-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.setting-asset-graph-relations {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid #edf0f5;
+}
+
+.setting-asset-graph-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid #edf0f5;
+}
+
+.setting-asset-graph-change-item {
+  width: 100%;
+  min-width: 0;
+}
+
+.setting-asset-graph-change-item .ant-typography {
+  overflow-wrap: anywhere;
+}
+
+.setting-asset-graph-diagnostics {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #edf0f5;
+}
+
+.setting-asset-graph-diagnostics-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.setting-asset-graph-repair-item {
+  min-width: 0;
+}
+
+.setting-asset-graph-repair-item .ant-typography {
+  overflow-wrap: anywhere;
+}
+
+.setting-asset-graph-diagnostics .ant-list-item,
+.setting-asset-graph-relations .ant-list-item,
+.setting-asset-graph-timeline .ant-list-item {
+  padding-inline: 0;
+}
+
+@media (max-width: 980px) {
+  .setting-asset-graph-header {
+    flex-direction: column;
+  }
+
+  .setting-asset-graph-controls {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .setting-asset-graph-diagnostics-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .setting-asset-graph-locator {
+    width: 100%;
+  }
+
+  .setting-asset-graph-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .setting-asset-graph-modal-canvas {
+    min-height: 520px;
+  }
+
+  .setting-asset-graph-detail {
+    max-height: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .setting-asset-graph-panel {
+    padding: 12px;
+  }
+
+  .setting-asset-graph-canvas {
+    height: 380px;
+  }
+
+  .setting-asset-graph-modal-canvas {
+    height: min(70vh, 620px);
+    min-height: 420px;
+  }
+}

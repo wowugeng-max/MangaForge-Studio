@@ -1,6 +1,7 @@
 import React from 'react'
 import { Button, Card, Space, Statistic, Tag, Typography } from 'antd'
 import { BookOutlined, DatabaseOutlined, SettingOutlined, TeamOutlined } from '@ant-design/icons'
+import { SettingAssetGraphPanel } from './SettingAssetGraphPanel'
 import { SettingWorkshopPanel } from './SettingWorkshopPanel'
 import './StoryAssetsWorkspace.css'
 
@@ -10,6 +11,7 @@ export function StoryAssetsWorkspace({
   projectId,
   activeChapter,
   selectedModelId,
+  projectSettings,
   worldbuildingCount,
   characterCount,
   outlineCount,
@@ -24,6 +26,7 @@ export function StoryAssetsWorkspace({
   projectId: number
   activeChapter?: any | null
   selectedModelId?: number
+  projectSettings?: any[]
   worldbuildingCount: number
   characterCount: number
   outlineCount: number
@@ -65,11 +68,14 @@ export function StoryAssetsWorkspace({
         <Card size="small"><Statistic title="当前章节" value={activeChapter?.chapter_no || '-'} prefix="第" suffix={activeChapter?.chapter_no ? '章' : ''} /></Card>
       </div>
 
+      <SettingAssetGraphPanel projectId={projectId} selectedModelId={selectedModelId} />
+
       <Card className="novel-story-assets-workbench" bordered={false}>
         <SettingWorkshopPanel
           projectId={projectId}
           activeChapter={activeChapter}
           selectedModelId={selectedModelId}
+          initialSettings={projectSettings}
           layout="workspace"
           focusDiscoveredAssetsToken={focusDiscoveredAssetsToken}
           onAssetsApplied={onAssetsApplied}

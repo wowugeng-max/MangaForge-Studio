@@ -63,7 +63,9 @@
     "is_active": true,
     "icon": "",
     "endpoints": {},
-    "custom_headers": {}
+    "custom_headers": {
+      "User-Agent": "Codex Desktop/0.142.0-alpha.1 (Mac OS 15.7.5; x86_64) dumb (codex_exec; 0.142.0-alpha.1)"
+    }
   },
   {
     "id": "free",
