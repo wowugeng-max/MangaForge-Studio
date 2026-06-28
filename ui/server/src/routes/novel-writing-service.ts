@@ -35851,6 +35851,120 @@ function normalizeEmotionalSceneExecutionRulesCheck(contract: any, chapterText: 
   }
 }
 
+function normalizeProgressiveConfrontationRulesCheck(contract: any, chapterText: string) {
+  const planned = emotionalArcArray(
+    contract.progressive_confrontation_rules,
+    contract.progressiveConfrontationRules,
+  )
+  if (!planned.length) return null
+  const text = String(chapterText || '')
+  const hasAngleNotCrush = /角力而非碾压|不是一路碾压|不能一路平推|不是平推|不是一路平推|主角与反派是角力/.test(text)
+  const hasSmallWin = /小胜|稍占上风|第一轮|第一回合|只用|对三|对A|先赢一手|顶住压力/.test(text)
+  const hasOpponentEscalation = /反派.*加码|对手.*加码|会长.*加码|继续加码|加压|升级|停业单|更高门槛|反派对四|反派对2|逼到/.test(text)
+  const hasFinalTrump = /王炸|一锤定音|最后才|最终.*底牌|备份订单|公开备份|底牌.*定音|大胜利/.test(text)
+  const delivered = hasAngleNotCrush && hasSmallWin && hasOpponentEscalation && hasFinalTrump
+  return {
+    key: 'progressive_confrontation_rules',
+    label: '递进对抗',
+    text: planned.join('；'),
+    expected: planned.join('；'),
+    score: delivered ? 88 : Math.max(12, [hasAngleNotCrush, hasSmallWin, hasOpponentEscalation, hasFinalTrump].filter(Boolean).length * 22),
+    evidence: uniqueBriefStrings([
+      hasAngleNotCrush ? '角力而非碾压' : '',
+      hasSmallWin ? '主角小胜/稍占上风' : '',
+      hasOpponentEscalation ? '对手继续加码' : '',
+      hasFinalTrump ? '最后王炸/一锤定音' : '',
+    ], 8),
+    delivered,
+    status: delivered ? 'ok' : 'warn',
+    missed_items: delivered ? [] : uniqueBriefStrings([
+      !hasAngleNotCrush ? '缺角力而非碾压' : '',
+      !hasSmallWin ? '缺主角小胜/稍占上风' : '',
+      !hasOpponentEscalation ? '缺反派继续加码' : '',
+      !hasFinalTrump ? '缺最后王炸一锤定音' : '',
+    ], 8),
+    issue: delivered ? '' : '正文没有形成 oh-story 递进对抗：主角不能一上来碾压，需要小胜、对手加码、最后王炸。',
+    repair_instruction: delivered ? '' : '按 oh-story 递进对抗修复：把对抗改成角力而非碾压；先让主角小胜或稍占上风，再让对手继续加码，最后才释放底牌/王炸一锤定音。',
+  }
+}
+
+function normalizeMemePlotFormulaRulesCheck(contract: any, chapterText: string) {
+  const planned = emotionalArcArray(
+    contract.meme_plot_formula_rules,
+    contract.memePlotFormulaRules,
+  )
+  if (!planned.length) return null
+  const text = String(chapterText || '')
+  const explicitFormula = /发生\s*[-—>→]+\s*发展\s*[-—>→]+\s*转折\s*[-—>→]+\s*高潮|梗四段式/.test(text)
+  const hasOccur = /发生|前提条件|初始情境|压到门口|停业单|开局情境|引出梗/.test(text)
+  const hasDevelop = /发展|反复挫败|积累|撤单|误判|不断|推向触发点|围观/.test(text)
+  const hasTurn = /转折|关键手段|金手指|系统订单|反向证明|反转|记录反证|规则漏洞/.test(text)
+  const hasClimax = /高潮|完整释放|前后反差|当场改口|公开.*记录|全场|释放/.test(text)
+  const delivered = (explicitFormula || (hasOccur && hasDevelop && hasTurn && hasClimax)) && hasTurn && hasClimax
+  return {
+    key: 'meme_plot_formula_rules',
+    label: '梗四段式',
+    text: planned.join('；'),
+    expected: planned.join('；'),
+    score: delivered ? 88 : Math.max(12, [hasOccur, hasDevelop, hasTurn, hasClimax].filter(Boolean).length * 22),
+    evidence: uniqueBriefStrings([
+      hasOccur ? '发生/前提条件可见' : '',
+      hasDevelop ? '发展/挫败积累可见' : '',
+      hasTurn ? '转折/关键手段可见' : '',
+      hasClimax ? '高潮/完整释放可见' : '',
+    ], 8),
+    delivered,
+    status: delivered ? 'ok' : 'warn',
+    missed_items: delivered ? [] : uniqueBriefStrings([
+      !hasOccur ? '缺发生/前提条件' : '',
+      !hasDevelop ? '缺发展/挫败积累' : '',
+      !hasTurn ? '缺转折/关键手段' : '',
+      !hasClimax ? '缺高潮/完整释放' : '',
+    ], 8),
+    issue: delivered ? '' : '正文没有完成 oh-story 以梗构建剧情四段式，容易从前提直接跳到高潮或写成流水账。',
+    repair_instruction: delivered ? '' : '按 oh-story 梗四段式修复：发生 -> 发展 -> 转折 -> 高潮。先建立梗的前提条件，再用挫败或积累推向触发点，中段用金手指/关键手段转折，最后完整释放前后反差。',
+  }
+}
+
+function normalizeReaderDesireFormulaRulesCheck(contract: any, chapterText: string) {
+  const planned = emotionalArcArray(
+    contract.reader_desire_formula_rules,
+    contract.readerDesireFormulaRules,
+  )
+  if (!planned.length) return null
+  const text = String(chapterText || '')
+  const hasDemand = /生产诉求|低地位|困境|迫在眉睫|不曾拥有|不公|不该如此|失业|强权|被.*停业|被.*诬/.test(text)
+  const hasHope = /给予希望|希望|金手指|底牌|潜在解法|检测笔|备份订单|提前露面|盟友|规则漏洞/.test(text)
+  const hasEffort = /努力解决|行动过程|逐项|核对|顶住|承压|代价|中段|一步步|不断解决/.test(text)
+  const hasFulfilled = /得偿所愿|阶段回报|兑现|作废|恢复授权|收获|完成|拿到|态度转变|客户恢复|停业单作废/.test(text)
+  const hasCarry = /新困境|新矛盾|新目标|更高层级|医院备用电源|下一|抛出/.test(text)
+  const delivered = hasDemand && hasHope && hasEffort && hasFulfilled
+  return {
+    key: 'reader_desire_formula_rules',
+    label: '读者欲望四步公式',
+    text: planned.join('；'),
+    expected: planned.join('；'),
+    score: delivered ? 88 : Math.max(12, [hasDemand, hasHope, hasEffort, hasFulfilled].filter(Boolean).length * 22 + (hasCarry ? 6 : 0)),
+    evidence: uniqueBriefStrings([
+      hasDemand ? '生产诉求/不该如此可见' : '',
+      hasHope ? '给予希望/潜在解法可见' : '',
+      hasEffort ? '努力解决/行动过程可见' : '',
+      hasFulfilled ? '得偿所愿/阶段回报可见' : '',
+      hasCarry ? '得偿后新困境/新目标可见' : '',
+    ], 8),
+    delivered,
+    status: delivered ? 'ok' : 'warn',
+    missed_items: delivered ? [] : uniqueBriefStrings([
+      !hasDemand ? '缺生产诉求' : '',
+      !hasHope ? '缺给予希望' : '',
+      !hasEffort ? '缺努力解决' : '',
+      !hasFulfilled ? '缺得偿所愿' : '',
+    ], 8),
+    issue: delivered ? '' : '正文没有走完 oh-story 驱动读者欲望四步公式，读者可能没有先产生诉求就看到结果。',
+    repair_instruction: delivered ? '' : '按 oh-story 读者欲望四步公式修复：生产诉求 -> 给予希望 -> 努力解决 -> 得偿所愿。先写低地位/困境/不公让读者生出“不该如此”，再给希望或潜在解法，中段写行动过程和代价，最后兑现阶段回报并抛出新困境。',
+  }
+}
+
 function buildEmotionalArcDeterministicCheck(chapterText: string) {
   const risks = [
     ...scanEmotionalStasisRisks(chapterText),
@@ -35885,6 +35999,9 @@ function emotionalArcPriority(missed: any[]) {
   if (missed.some(item => item.key === 'payoff_density_rules')) return '优先补多爽点密度'
   if (missed.some(item => item.key === 'emotion_module_recomposition_rules')) return '优先重组情绪模块'
   if (missed.some(item => item.key === 'payoff_escalation_rules')) return '优先补爽点递增'
+  if (missed.some(item => item.key === 'progressive_confrontation_rules')) return '优先补递进对抗'
+  if (missed.some(item => item.key === 'meme_plot_formula_rules')) return '优先补梗四段式'
+  if (missed.some(item => item.key === 'reader_desire_formula_rules')) return '优先补读者欲望四步公式'
   if (missed.some(item => item.key === 'scene_execution_rules')) return '优先补场景情绪执行'
   if (missed.some(item => item.key === 'scene_emotion_steps')) return '优先补调动释放'
   if (missed.some(item => item.key === 'emotion_formula')) return '优先补情绪公式'
@@ -35937,6 +36054,9 @@ export function buildEmotionalArcSyncReport(project: any, chapter: any, contextP
     normalizePayoffDensityRulesCheck(contract, chapterText),
     normalizeEmotionModuleRecompositionRulesCheck(contract, chapterText),
     normalizePayoffEscalationRulesCheck(contract, chapterText),
+    normalizeProgressiveConfrontationRulesCheck(contract, chapterText),
+    normalizeMemePlotFormulaRulesCheck(contract, chapterText),
+    normalizeReaderDesireFormulaRulesCheck(contract, chapterText),
     normalizeEmotionalSceneExecutionRulesCheck(contract, chapterText),
     normalizeEmotionalArcCheck(
       'expectation_rules',
@@ -35995,9 +36115,9 @@ export function buildEmotionalArcSyncReport(project: any, chapter: any, contextP
     status,
     label: checks.length === 0 ? '情绪弧未配置' : status === 'ok' ? '情绪弧 OK' : `情绪弧缺口 ${missedCount}`,
     summary: checks.length === 0
-      ? '本章没有配置 emotional_arc_contract，建议补充情绪公式、调动释放、爽点类型、爽点倒推法、装逼层级、多爽点密度、情绪模块重组、爽点递增对比、期待规则和安全感规则。'
+      ? '本章没有配置 emotional_arc_contract，建议补充情绪公式、调动释放、爽点类型、爽点倒推法、装逼层级、多爽点密度、情绪模块重组、爽点递增对比、递进对抗、梗四段式、读者欲望四步公式、期待规则和安全感规则。'
       : status === 'ok'
-        ? '正文已基本兑现情绪公式、调动释放、爽点释放、爽点倒推法、装逼层级、多爽点密度、情绪模块重组、爽点递增对比和下行情节安全感。'
+        ? '正文已基本兑现情绪公式、调动释放、爽点释放、爽点倒推法、装逼层级、多爽点密度、情绪模块重组、爽点递增对比、递进对抗、梗四段式、读者欲望四步公式和下行情节安全感。'
         : `正文有 ${missedCount} 项情绪弧缺口，${priorityRepair || '优先补调动释放和安全感'}。`,
     missed_count: missedCount,
     priority_repair: priorityRepair,
@@ -36006,9 +36126,9 @@ export function buildEmotionalArcSyncReport(project: any, chapter: any, contextP
     delivered,
     missed,
     next_actions: status === 'ok'
-      ? ['保持情绪弧：平静 -> 调动 -> 释放 -> 爽，先按爽点类型 -> 期待点 -> 铺垫倒推章纲，正文再按铺垫 -> 期待升高 -> 爽点释放呈现；核心爽点切在主线上，日常小装逼只维持耐心，避免偏离爽点；不要拉长单个爽点铺垫，800-1200 字内要有信息增量、能力展示、危机反制、关系变化或小回收；复用同一情绪模块时换场景/换对手/加新情绪或提高 stakes；爽点按影响范围、揭示深度或身份落差递增，下压有安全感。']
+      ? ['保持情绪弧：平静 -> 调动 -> 释放 -> 爽，先按爽点类型 -> 期待点 -> 铺垫倒推章纲，正文再按铺垫 -> 期待升高 -> 爽点释放呈现；核心爽点切在主线上，日常小装逼只维持耐心，避免偏离爽点；不要拉长单个爽点铺垫，800-1200 字内要有信息增量、能力展示、危机反制、关系变化或小回收；复用同一情绪模块时换场景/换对手/加新情绪或提高 stakes；递进对抗保持角力而非碾压，梗按发生 -> 发展 -> 转折 -> 高潮，读者欲望按生产诉求 -> 给予希望 -> 努力解决 -> 得偿所愿；爽点按影响范围、揭示深度或身份落差递增，下压有安全感。']
       : [
-          '下一次修订必须补情绪弧：每个场景标注调动/复现/释放/后反应，恢复平静 -> 调动 -> 释放 -> 爽；先定爽点类型，再拉期待点，最后倒推铺垫；正文按铺垫 -> 期待升高 -> 爽点释放呈现，核心爽点必须服务主线目标，删掉或改写偏离主线的爽点；不要拉长单个爽点铺垫，要拆出多个小回报；复用同一情绪模块时必须换场景/换对手/加新情绪或提高 stakes，并按影响范围、揭示深度或身份落差兑现递增释放。',
+          '下一次修订必须补情绪弧：每个场景标注调动/复现/释放/后反应，恢复平静 -> 调动 -> 释放 -> 爽；先定爽点类型，再拉期待点，最后倒推铺垫；正文按铺垫 -> 期待升高 -> 爽点释放呈现，核心爽点必须服务主线目标，删掉或改写偏离主线的爽点；不要拉长单个爽点铺垫，要拆出多个小回报；复用同一情绪模块时必须换场景/换对手/加新情绪或提高 stakes；递进对抗必须角力而非碾压，梗四段式必须发生 -> 发展 -> 转折 -> 高潮，读者欲望四步公式必须生产诉求 -> 给予希望 -> 努力解决 -> 得偿所愿，并按影响范围、揭示深度或身份落差兑现递增释放。',
           '连续下压不能只让主角受辱受损；必须给出底牌、潜在解法、盟友动作、规则漏洞、反击窗口或明确读者收益。',
         ],
   }
@@ -38204,6 +38324,9 @@ const OH_STORY_EMOTIONAL_ARC_CHECKS = [
   '峰终定律：结尾情绪必须高于起点，结尾情绪强度按题材校验，虐≥8、爽≥7、治愈≥6；章尾必须是具体动作/对话/画面，禁止总结式反思。',
   '三层情绪必须分离：角色自己的情绪、文本传递的情绪、读者实际感受不能混为一谈；负面角色情绪必须转成读者收益。',
   '情绪反应结构必须按题材选型：虐/悲壮/遗憾用前反应 -> 复现 -> 后反应，热血/逆袭用以小搏大 -> 士气如虹。',
+  '递进对抗必须是角力而非碾压：主角小胜、对手加码、最后王炸一锤定音。',
+  '梗四段式必须完整：发生 -> 发展 -> 转折 -> 高潮，不能缺转折直接跳高潮。',
+  '读者欲望四步公式必须走完：生产诉求 -> 给予希望 -> 努力解决 -> 得偿所愿。',
   '断期待禁止：闭合一个期待时，下一个开环必须已经在运行。',
   '下行情节要给读者安全感：锅是别人的，功是主角的，并保留潜在解法、底牌或收获。',
   '情绪表达优先写行为、动作、对话和场面反应，避免只用抽象心理词告诉读者该怎么感受。',
@@ -38221,6 +38344,26 @@ const OH_STORY_EMOTIONAL_EXPECTATION_RULES = [
   '断期待禁止：下一个期待立起来之前，不能结束当前期待。',
   '闭环一个期待时，必须同时开启新的期待或更大问题。',
   '下行情节安全原则：锅是别人的，功是主角的，读者要看见潜在解法或收获。',
+]
+
+const OH_STORY_PROGRESSIVE_CONFRONTATION_RULES = [
+  '递进对抗写法：主角与反派是角力而非碾压，不能一路平推。',
+  '每次小角力主角稍占上风，反派必须继续加码，最后主角王炸一锤定音。',
+  '对抗过程要有“主角对三 -> 反派对四 -> 主角对A -> 反派对2 -> 主角王炸”的递进感。',
+]
+
+const OH_STORY_MEME_PLOT_FORMULA_RULES = [
+  '以梗构建剧情法：发生 -> 发展 -> 转折 -> 高潮。',
+  '发生建立梗的前提条件，发展用挫败或积累推向触发点，转折用金手指或关键手段反转，高潮释放前后反差。',
+  '用梗作为高潮点倒推剧情，天然避免流水账。',
+]
+
+const OH_STORY_READER_DESIRE_FORMULA_RULES = [
+  '驱动读者欲望四步公式：生产诉求 -> 给予希望 -> 努力解决 -> 得偿所愿。',
+  '生产诉求要用低地位、困境、迫在眉睫的威胁、不曾拥有或不公平，让读者生出“不该如此”。',
+  '给予希望必须让读者看见金手指、底牌、潜在解法、盟友或规则漏洞。',
+  '努力解决要有行动过程和代价，不断解决现有矛盾并制造新矛盾。',
+  '得偿所愿要兑现阶段回报，同时抛出新困境或更高层级目标。',
 ]
 
 const OH_STORY_EMOTIONAL_PRESSURE_METHODS = [
@@ -38497,6 +38640,9 @@ function buildEmotionalArcContract(project: any = {}, contextPackage: any = {}) 
     const explicitReactionStructureRules = asArray(explicit.reaction_structure_rules || explicit.reactionStructureRules).map((item: any) => compactBriefText(item)).filter(Boolean)
     const explicitIdeologicalConflictRules = asArray(explicit.ideological_conflict_rules || explicit.ideologicalConflictRules).map((item: any) => compactBriefText(item)).filter(Boolean)
     const explicitFailureModeGuards = asArray(explicit.failure_mode_guards || explicit.failureModeGuards).map((item: any) => compactBriefText(item)).filter(Boolean)
+    const explicitProgressiveConfrontationRules = asArray(explicit.progressive_confrontation_rules || explicit.progressiveConfrontationRules).map((item: any) => compactBriefText(item)).filter(Boolean)
+    const explicitMemePlotFormulaRules = asArray(explicit.meme_plot_formula_rules || explicit.memePlotFormulaRules).map((item: any) => compactBriefText(item)).filter(Boolean)
+    const explicitReaderDesireFormulaRules = asArray(explicit.reader_desire_formula_rules || explicit.readerDesireFormulaRules).map((item: any) => compactBriefText(item)).filter(Boolean)
     return {
       version: explicit.version || 'oh_story_emotional_arc_v1',
       source: explicit.source || 'oh_story_embedded_fallback',
@@ -38557,6 +38703,15 @@ function buildEmotionalArcContract(project: any = {}, contextPackage: any = {}) 
       failure_mode_guards: explicitFailureModeGuards.length
         ? explicitFailureModeGuards
         : asArray(derived.failure_mode_guards).length ? asArray(derived.failure_mode_guards) : OH_STORY_EMOTIONAL_FAILURE_MODE_GUARDS,
+      progressive_confrontation_rules: explicitProgressiveConfrontationRules.length
+        ? explicitProgressiveConfrontationRules
+        : asArray(derived.progressive_confrontation_rules).length ? asArray(derived.progressive_confrontation_rules) : OH_STORY_PROGRESSIVE_CONFRONTATION_RULES,
+      meme_plot_formula_rules: explicitMemePlotFormulaRules.length
+        ? explicitMemePlotFormulaRules
+        : asArray(derived.meme_plot_formula_rules).length ? asArray(derived.meme_plot_formula_rules) : OH_STORY_MEME_PLOT_FORMULA_RULES,
+      reader_desire_formula_rules: explicitReaderDesireFormulaRules.length
+        ? explicitReaderDesireFormulaRules
+        : asArray(derived.reader_desire_formula_rules).length ? asArray(derived.reader_desire_formula_rules) : OH_STORY_READER_DESIRE_FORMULA_RULES,
       quality_checks: asArray(explicit.quality_checks || explicit.qualityChecks).length
         ? asArray(explicit.quality_checks || explicit.qualityChecks).map((item: any) => compactBriefText(item)).filter(Boolean)
         : OH_STORY_EMOTIONAL_ARC_CHECKS,
@@ -38608,6 +38763,9 @@ function buildEmotionalArcContract(project: any = {}, contextPackage: any = {}) 
     reaction_structure_rules: OH_STORY_EMOTIONAL_REACTION_STRUCTURE_RULES,
     ideological_conflict_rules: OH_STORY_EMOTIONAL_IDEOLOGICAL_CONFLICT_RULES,
     failure_mode_guards: OH_STORY_EMOTIONAL_FAILURE_MODE_GUARDS,
+    progressive_confrontation_rules: OH_STORY_PROGRESSIVE_CONFRONTATION_RULES,
+    meme_plot_formula_rules: OH_STORY_MEME_PLOT_FORMULA_RULES,
+    reader_desire_formula_rules: OH_STORY_READER_DESIRE_FORMULA_RULES,
     quality_checks: OH_STORY_EMOTIONAL_ARC_CHECKS,
     revision_priorities: ['补调动铺垫', '补释放爽点', '修断期待', '补下行情节安全感', '让爽点递增'],
   }
@@ -51462,6 +51620,9 @@ export function createNovelWritingService(ctx: {
       emotionalArcContract ? '三层情绪：每个关键场景必须分清角色自己的情绪、文本传递的情绪、读者实际感受；角色在哭不等于读者要哭，角色屈辱/压迫/恐惧要转成读者的爽前蓄力、安全感、尊严感、期待感或余韵。' : '',
       emotionalArcContract ? '情绪反应结构：虐/悲壮/遗憾场景按前反应 -> 复现 -> 后反应执行；热血/逆袭场景按以小搏大执行，铺弱者之苦、强者到来、弱势方被救、士气如虹。' : '',
       emotionalArcContract ? '理念矛盾：关键场景不要只写利益争夺；把公平/权威、理想/现实、规则/人心等原则碰撞落成具体选择、代价、追求和牺牲。' : '',
+      emotionalArcContract ? '递进对抗：主角与反派是角力而非碾压；每次小角力主角稍占上风，对手继续加码，最后主角王炸一锤定音。' : '',
+      emotionalArcContract ? '梗四段式：以梗构建剧情必须完成发生 -> 发展 -> 转折 -> 高潮；用梗作为高潮点倒推剧情，不得从前提直接跳到高潮。' : '',
+      emotionalArcContract ? '读者欲望四步公式：生产诉求 -> 给予希望 -> 努力解决 -> 得偿所愿；先让读者生出“不该如此”，再给希望/潜在解法，中段写行动和代价，最后兑现阶段回报并抛出新困境。' : '',
       emotionalArcContract?.emotion_formula ? `情绪公式：${emotionalArcContract.emotion_formula}` : '',
       emotionalArcContract?.arc_shape ? `弧线类型：${emotionalArcContract.arc_shape}` : '',
       emotionalArcContract?.scene_emotion_steps?.length ? `场景情绪步骤：${emotionalArcContract.scene_emotion_steps.join('；')}` : '',
@@ -51485,8 +51646,11 @@ export function createNovelWritingService(ctx: {
       emotionalArcContract?.reaction_structure_rules?.length ? `情绪反应结构：${emotionalArcContract.reaction_structure_rules.join('；')}` : '',
       emotionalArcContract?.ideological_conflict_rules?.length ? `理念矛盾：${emotionalArcContract.ideological_conflict_rules.join('；')}` : '',
       emotionalArcContract?.failure_mode_guards?.length ? `情绪失败模式防线：${emotionalArcContract.failure_mode_guards.join('；')}` : '',
+      emotionalArcContract?.progressive_confrontation_rules?.length ? `递进对抗：${emotionalArcContract.progressive_confrontation_rules.join('；')}` : '',
+      emotionalArcContract?.meme_plot_formula_rules?.length ? `梗四段式：${emotionalArcContract.meme_plot_formula_rules.join('；')}` : '',
+      emotionalArcContract?.reader_desire_formula_rules?.length ? `读者欲望四步公式：${emotionalArcContract.reader_desire_formula_rules.join('；')}` : '',
       emotionalArcContract?.quality_checks?.length ? `质量检查：${emotionalArcContract.quality_checks.join('；')}` : '',
-      emotionalArcContract ? '交稿自检必须输出 emotional_arc_checks，并用正文证据检查调动/释放、弧线类型、场景情绪执行（每个场景标注调动/复现/释放/后反应）、情绪三板斧（羁绊铺设/情感撕裂/余韵钝痛）、每 3-5 个小节情绪转向、先入为主/第一印象、峰终定律/结尾情绪强度、三层情绪（角色自己的情绪/文本传递的情绪/读者实际感受）、情绪反应结构（前反应/复现/后反应/以小搏大/士气如虹）、闭环期待后的下一开环、理念矛盾/理念之争/追求和牺牲、情绪模块重组（换场景/换对手/加新情绪/stakes）、爽点递增对比（影响范围、揭示深度、身份落差）、断期待禁止、下行情节安全感和情绪外化。' : '',
+      emotionalArcContract ? '交稿自检必须输出 emotional_arc_checks，并用正文证据检查调动/释放、弧线类型、场景情绪执行（每个场景标注调动/复现/释放/后反应）、情绪三板斧（羁绊铺设/情感撕裂/余韵钝痛）、每 3-5 个小节情绪转向、先入为主/第一印象、峰终定律/结尾情绪强度、三层情绪（角色自己的情绪/文本传递的情绪/读者实际感受）、情绪反应结构（前反应/复现/后反应/以小搏大/士气如虹）、闭环期待后的下一开环、理念矛盾/理念之争/追求和牺牲、情绪模块重组（换场景/换对手/加新情绪/stakes）、爽点递增对比（影响范围、揭示深度、身份落差）、递进对抗（角力而非碾压/对手加码/最后王炸）、梗四段式（发生/发展/转折/高潮）、读者欲望四步公式（生产诉求/给予希望/努力解决/得偿所愿）、断期待禁止、下行情节安全感和情绪外化。' : '',
       emotionalArcContract ? JSON.stringify(emotionalArcContract, null, 2).slice(0, 2500) : '',
       '',
       chapterHookContract ? '【章级钩子合同】' : '',
@@ -53815,7 +53979,7 @@ export function createNovelWritingService(ctx: {
     '37. expectation_threshold_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),reader_question,stakes,choice_pressure,payoff_promise,next_chapter_pull,evidence,fix,remaining_risk；短期期待过多、长期期待断线、剧情期待/主题甜头/新鲜感任一缺失、期待接力法断裂、没有期待铺垫就立刻释放爽点、大目标一步解决、门槛脱离卖点或跨过门槛后没有新门槛时必须给出 S1/S2 finding，category=structure。',
     '38. 是否兑现 chapter_target.story_loop_contract：按 oh-story 卡文对策检查“题材 + 金手指 + 主角身份 = 循环模式”是否清晰，本章是否执行指定循环模式、循环燃料、循环步骤、地图资源闭环、地位-环境同步和换地图承接；换地图/换阶段必须检查旧地图核心冲突是否阶段性解决、新地图五件套（新环境/新角色/新规则/新目标/新冲突）是否可见、前5章代入感和期待感是否建立、是否保留贯穿主线、是否做到人际关系动了 -> 主角再动、是否避免旧角色一刀切抛弃和新设定一次性倒出；必须按多级嵌套检查小循环 -> 中循环 -> 大循环是否可见，小循环中是否铺垫大循环的期待，是否避免核心不扩展、只反复用同一个梗换对象；必须输出 story_loop_checks。',
     '39. story_loop_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),setup_question,obstacle,choice,cost,payoff_or_answer_fragment,new_question,evidence,fix,remaining_risk；循环模式缺失、循环燃料断供、案件/扮猪/资源/反转/组织/公路循环步骤不闭合、资源闭环无收益、地位环境不同步、换地图承接缺旧地图收束/新地图五件套/贯穿主线/人际关系先行/前5章期待/循环升级、小循环没有铺垫中循环/大循环期待、核心不扩展或只换对象重复时必须给出 S1/S2 finding，category=structure。',
-    '40. 是否兑现 chapter_target.emotional_arc_contract：按 oh-story 情绪弧检查平静 -> 调动 -> 释放 -> 爽 是否有正文证据，弧线类型是否匹配本章效果，是否按爽点倒推法先定爽点类型、再定期待点、最后倒推铺垫，正文是否呈现铺垫 -> 期待升高 -> 爽点释放，是否按场景情绪执行逐场标注调动/复现/释放/后反应，闭环当前期待时是否开启下一开环，是否按装逼层级区分日常小装逼、核心爽点、偏离爽点，核心爽点是否切在主线目标上，是否存在背离主线去别处装逼，是否遵守多爽点密度规则（不要拉长单个爽点铺垫、800-1200 字内有信息增量/能力展示/危机反制/关系变化/小回收），是否执行先入为主：前100字给核心矛盾/主角处境/不公平异常并正确排序否定提前，是否执行峰终定律：结尾情绪必须高于起点且结尾情绪强度达到虐≥8、爽≥7、治愈≥6，是否执行三层情绪：角色自己的情绪、文本传递的情绪、读者实际感受分离，角色在哭时读者实际感受仍被转成爽前蓄力/安全感/尊严感/期待感/余韵，是否执行情绪反应结构：虐/悲壮/遗憾场景有前反应 -> 复现 -> 后反应，热血/逆袭场景有以小搏大和士气如虹，是否执行理念矛盾：关键冲突不能只停在利益之争，必须把理念之争、原则碰撞、追求和牺牲落成具体选择与代价，复用同一情绪模块时是否按“戏剧性会磨损，情绪不会磨损”完成换场景/换对手/加新情绪/stakes 重组，是否存在只有调动没有释放、只有释放没有铺垫、爽点递增对比缺影响范围/揭示深度/身份落差、断期待禁止、下行情节缺少安全感；必须输出 emotional_arc_checks。',
+    '40. 是否兑现 chapter_target.emotional_arc_contract：按 oh-story 情绪弧检查平静 -> 调动 -> 释放 -> 爽 是否有正文证据，弧线类型是否匹配本章效果，是否按爽点倒推法先定爽点类型、再定期待点、最后倒推铺垫，正文是否呈现铺垫 -> 期待升高 -> 爽点释放，是否按场景情绪执行逐场标注调动/复现/释放/后反应，闭环当前期待时是否开启下一开环，是否按装逼层级区分日常小装逼、核心爽点、偏离爽点，核心爽点是否切在主线目标上，是否存在背离主线去别处装逼，是否遵守多爽点密度规则（不要拉长单个爽点铺垫、800-1200 字内有信息增量/能力展示/危机反制/关系变化/小回收），是否执行递进对抗：角力而非碾压、主角小胜、对手加码、最后王炸一锤定音，是否执行梗四段式：发生 -> 发展 -> 转折 -> 高潮，是否执行读者欲望四步公式：生产诉求 -> 给予希望 -> 努力解决 -> 得偿所愿，是否执行先入为主：前100字给核心矛盾/主角处境/不公平异常并正确排序否定提前，是否执行峰终定律：结尾情绪必须高于起点且结尾情绪强度达到虐≥8、爽≥7、治愈≥6，是否执行三层情绪：角色自己的情绪、文本传递的情绪、读者实际感受分离，角色在哭时读者实际感受仍被转成爽前蓄力/安全感/尊严感/期待感/余韵，是否执行情绪反应结构：虐/悲壮/遗憾场景有前反应 -> 复现 -> 后反应，热血/逆袭场景有以小搏大和士气如虹，是否执行理念矛盾：关键冲突不能只停在利益之争，必须把理念之争、原则碰撞、追求和牺牲落成具体选择与代价，复用同一情绪模块时是否按“戏剧性会磨损，情绪不会磨损”完成换场景/换对手/加新情绪/stakes 重组，是否存在只有调动没有释放、只有释放没有铺垫、爽点递增对比缺影响范围/揭示深度/身份落差、断期待禁止、下行情节缺少安全感；必须输出 emotional_arc_checks。',
     '40A. 情绪三板斧必须单独检查：羁绊铺设是否用具体物件、具体数字、重复动作建立关系质感；情感撕裂是否用反差法、错位法或延迟真相法制造“读者以为 A 实际是 B”的情绪落差；余韵钝痛是否用安静细节、物件回声或“不解释/不回头/不流泪”收束，而不是大段抒情。每 3-5 个小节应有一次由事件触发的情绪转向；结尾必须是具体动作/对话/画面而不是总结/反思；出现太平/太赶/假虐/割裂/烂尾/人设崩时必须写入 emotional_arc_checks。',
     '41. emotional_arc_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),calm_or_pressure,mobilization,counteraction,release,reader_payoff,evidence,fix,remaining_risk；情绪弧不清、情绪三板斧缺证据、先入为主失败、前100字没有核心矛盾、峰终定律失败、结尾情绪强度不足、三层情绪混淆、只写角色情绪没有读者实际感受、前反应缺失、复现只靠旁白、后反应没有改变行动、以小搏大没有铺弱者之苦或士气如虹、关键冲突只有利益之争没有理念矛盾、理念之争没有落到选择/代价/追求和牺牲、重复同一个戏剧单元且没有换场景/换对手/加新情绪/stakes、爽点未按影响范围/揭示深度/身份落差递增、期待闭环后没有新开环、负面情绪没有转成读者收益、情绪转向无事件触发或情绪只靠抽象心理词时必须给出 S1/S2 finding，category=structure 或 prose。',
     '42. 是否兑现 chapter_target.chapter_hook_contract：按 oh-story 章级钩子检查章首 7 式、章尾 13 式、钩子强度与章节阶段匹配、前 100 字钩子、最后约 100 字翻页钩子、兑现路径和钩子禁忌；必须输出 chapter_hook_checks。',
@@ -53893,7 +54057,7 @@ export function createNovelWritingService(ctx: {
     '如果存在 chapter_target.information_flow_contract，必须输出 information_flow_checks；不能只用“节奏还行/不行”一句话带过。',
     '如果存在 chapter_target.expectation_threshold_contract，必须输出 expectation_threshold_checks；不能只用“期待感还行/不行”一句话带过，必须明确两长一短、剧情期待 + 主题甜头 + 新鲜感、期待感 > 爽点 / 铺垫篇幅不少于释放篇幅、延迟满足、门槛拆分、动态加码和下一开环是否都有正文证据。',
     '如果存在 chapter_target.story_loop_contract，必须输出 story_loop_checks；不能只用“剧情循环还行/不行”一句话带过。',
-    '如果存在 chapter_target.emotional_arc_contract，必须输出 emotional_arc_checks；不能只用“情绪还行/不行”一句话带过，必须明确爽点倒推法、装逼层级、多爽点密度、场景情绪执行、调动/复现/释放/后反应、闭环后的下一开环、先入为主、峰终定律、结尾情绪强度、三层情绪、读者实际感受、前反应-复现-后反应、以小搏大、理念矛盾、理念之争、调动释放、爽点类型、递增对比和下行情节安全感是否都有正文证据。',
+    '如果存在 chapter_target.emotional_arc_contract，必须输出 emotional_arc_checks；不能只用“情绪还行/不行”一句话带过，必须明确爽点倒推法、装逼层级、多爽点密度、递进对抗、梗四段式、读者欲望四步公式、场景情绪执行、调动/复现/释放/后反应、闭环后的下一开环、先入为主、峰终定律、结尾情绪强度、三层情绪、读者实际感受、前反应-复现-后反应、以小搏大、理念矛盾、理念之争、调动释放、爽点类型、递增对比和下行情节安全感是否都有正文证据。',
     '如果存在 chapter_target.chapter_hook_contract，必须输出 chapter_hook_checks 和 chapter_hook_quality_checks；不能只用“钩子还行/不行”一句话带过。',
     '如果存在 chapter_target.paragraph_hook_contract，必须输出 paragraph_hook_checks；不能只用“段落有吸引力/没吸引力”一句话带过。',
     '如果存在 chapter_target.suspense_contract，必须输出 suspense_checks；不能只用“悬念还行/不行”一句话带过。',
@@ -55025,7 +55189,7 @@ export function createNovelWritingService(ctx: {
               '任务：为无人值守章节写作补齐本章蓝图。只输出 JSON，不写正文。',
               '输出字段：title, chapter_goal, chapter_summary, conflict, ending_hook, chapter_blueprint, emotional_arc_contract, chapter_hook_contract, paragraph_hook_contract, opening_contract, suspense_contract, reversal_contract, showdown_contract, bridge_unit_contract, plot_framework_contract, style_boundary_contract, plot_dynamics_contract, story_power_contract, mainline_definition_contract, information_flow_contract, expectation_threshold_contract, story_loop_contract, prose_craft_contract, punctuation_tone_contract, quality_audit_contract, dialogue_contract, continuity_heat_contract, character_relation_contract, character_behavior_contract, asset_linkage_contract, state_tracking_contract, intent_confirmation_contract, target_reader_contract, genre_positioning_contract, core_contract_radar, female_audience_contract, upgrade_rhythm_contract, conflict_structure_contract, must_advance(array), forbidden_repeats(array), repair_summary。',
               'chapter_blueprint 必须包含 target_emotion, opening_hook, core_payoff, content_outline(cause/development/turn/climax/ending), outline_methods_contract(five_step_outline/eight_node_story_structure/sweet_cycle_stages/emotion_zigzag_stages/five_drive_checks/detail_outline_rules/similarity_guardrails/reverse_design_rules/quality_checks), small_outline_contract(steps/purpose_effect_rules/detail_rules/locator_rules/segment_cards), mainline_definition_contract(mainline_event/definition_rules/action_rules/handoff_rules/forbidden_mainline_shapes/quality_checks), causal_chain_contract(act_order/act_functions/quality_checks), plot_lines(mainline/subplot/event_line/relationship_line/logic_line), character_order, beat_sequence, beat_density_contract, cost_and_reward, ending_contract(final_state/unresolved_question/next_chapter_pull)；大纲方法合同 outline_methods_contract 必须按 oh-story outline-methods 输出五步大纲创建法、八节点故事结构、爽文五阶段小循环、情绪拉扯五折线、五项驱动检查、细纲:正文 = 1:2.5~1:3、相同金手指逻辑禁止连续使用、爽点倒推和同一套路间隔至少 3 个不同剧情类型；small_outline_contract 必须按 oh-story 小纲四步法输出分段判断、目的和效果、详写/略写、快速定位，segment_cards 每项包含 segment_no,segment,purpose,intended_effect,detail_level,quick_locator；mainline_definition_contract 必须按 oh-story 主线定义输出主线不等于升级、主线是一件事、升级是主角达成目标的行动、不是一个元素和主线完成后的承接规则；causal_chain_contract 必须按 oh-story 五幕式输出种子/生长/转折/冲刺/完成，要求不能跳步、不能乱序；beat_sequence 每项必须包含 beat_no/scene_no/action/function_tag/payoff，function_tag 必须决定展开还是带过，关键揭露/打脸/高潮/爽点必须展开，过渡/赶路/信息交代必须压缩。',
-              '情绪弧合同 emotional_arc_contract 必须按 oh-story 情绪弧与 emotional-methods 输出 arc_shape, emotion_formula, pressure_methods, payoff_types, payoff_reverse_design, payoff_tier_rules, payoff_density_rules, emotion_module_recomposition_rules, payoff_escalation_rules, scene_execution_rules, expectation_rules, safety_rules, bonding_setup_rules, emotional_tear_rules, lingering_aftertaste_rules, emotional_turning_rules, first_impression_rules, peak_end_rules, emotion_layer_rules, reaction_structure_rules, ideological_conflict_rules, failure_mode_guards, quality_checks，明确本章如何完成平静 -> 调动 -> 释放 -> 爽、爽点倒推法（先定爽点类型 -> 再定期待点 -> 最后倒推铺垫，正文按铺垫 -> 期待升高 -> 爽点释放呈现）、场景情绪执行（每个场景标注调动/复现/释放/后反应，闭环当前期待时开启下一开环）、装逼层级（日常小装逼/核心爽点/偏离爽点）、多爽点密度（不要拉长单个爽点铺垫，800-1200 字内要有信息增量/能力展示/危机反制/关系变化/小回收）、先入为主（前100字先给核心矛盾/主角处境/不公平异常，注意否定提前）、峰终定律（结尾情绪必须高于起点，结尾情绪强度虐≥8、爽≥7、治愈≥6，最后一击必须是动作/对话/画面）、三层情绪（角色自己的情绪、文本传递的情绪、读者实际感受分离，角色在哭不等于读者哭，必须转成读者收益）、情绪反应结构（前反应 -> 复现 -> 后反应；以小搏大 -> 士气如虹）、理念矛盾（理念之争比利益之争更能引发深层共鸣，把原则碰撞、追求和牺牲落成具体选择与代价）、情绪模块重组（戏剧性会磨损，情绪不会磨损；复用套路必须换场景/换对手/加新情绪或提高 stakes/奖励复杂度）、情绪三板斧（羁绊铺设/情感撕裂/余韵钝痛）和每 3-5 个小节的事件触发情绪转向，并让连续爽点按影响范围、揭示深度或身份落差递增。',
+              '情绪弧合同 emotional_arc_contract 必须按 oh-story 情绪弧与 emotional-methods/plot-emotion-system 输出 arc_shape, emotion_formula, pressure_methods, payoff_types, payoff_reverse_design, payoff_tier_rules, payoff_density_rules, emotion_module_recomposition_rules, payoff_escalation_rules, progressive_confrontation_rules, meme_plot_formula_rules, reader_desire_formula_rules, scene_execution_rules, expectation_rules, safety_rules, bonding_setup_rules, emotional_tear_rules, lingering_aftertaste_rules, emotional_turning_rules, first_impression_rules, peak_end_rules, emotion_layer_rules, reaction_structure_rules, ideological_conflict_rules, failure_mode_guards, quality_checks，明确本章如何完成平静 -> 调动 -> 释放 -> 爽、爽点倒推法（先定爽点类型 -> 再定期待点 -> 最后倒推铺垫，正文按铺垫 -> 期待升高 -> 爽点释放呈现）、场景情绪执行（每个场景标注调动/复现/释放/后反应，闭环当前期待时开启下一开环）、装逼层级（日常小装逼/核心爽点/偏离爽点）、多爽点密度（不要拉长单个爽点铺垫，800-1200 字内要有信息增量/能力展示/危机反制/关系变化/小回收）、先入为主（前100字先给核心矛盾/主角处境/不公平异常，注意否定提前）、峰终定律（结尾情绪必须高于起点，结尾情绪强度虐≥8、爽≥7、治愈≥6，最后一击必须是动作/对话/画面）、三层情绪（角色自己的情绪、文本传递的情绪、读者实际感受分离，角色在哭不等于读者哭，必须转成读者收益）、情绪反应结构（前反应 -> 复现 -> 后反应；以小搏大 -> 士气如虹）、理念矛盾（理念之争比利益之争更能引发深层共鸣，把原则碰撞、追求和牺牲落成具体选择与代价）、情绪模块重组（戏剧性会磨损，情绪不会磨损；复用套路必须换场景/换对手/加新情绪或提高 stakes/奖励复杂度）、递进对抗（角力而非碾压、主角小胜、对手加码、最后王炸）、梗四段式（发生 -> 发展 -> 转折 -> 高潮）、读者欲望四步公式（生产诉求 -> 给予希望 -> 努力解决 -> 得偿所愿）、情绪三板斧（羁绊铺设/情感撕裂/余韵钝痛）和每 3-5 个小节的事件触发情绪转向，并让连续爽点按影响范围、揭示深度或身份落差递增。',
               '章级钩子合同 chapter_hook_contract 必须按 oh-story 章首/章尾钩子输出 opening_hook_type, ending_hook_type, hook_strength, opening_hook_rules, ending_hook_rules, forbidden_patterns, quality_checks，明确前 100-300 字和最后 300 字如何制造追读。',
               '段落级钩子合同 paragraph_hook_contract 必须按 oh-story 段落级钩子输出 micro_hook_types, hook_combinations, dialogue_escalation, spectator_layers, forbidden_patterns, quality_checks，明确本章每 3-5 段如何制造信息、风险、情绪或关系变化。',
               '开篇合同 opening_contract 必须按 oh-story 开篇检查输出 protagonist_entry, first_100_char_hook, event_density, body_anchor, five_essentials_rules, forbidden_opening_patterns, quality_checks；five_essentials_rules 必须包含开头五要诀“简单/不偏/快/爽/不平”，确保开篇不是风景/醒来/解释起手。',

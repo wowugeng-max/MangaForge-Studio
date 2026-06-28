@@ -13246,6 +13246,53 @@ describe('chapter prose word target', () => {
     expect(warnReport.next_actions.join('；')).toContain('影响范围')
   })
 
+  test('checks oh-story plot emotion formulas after delivery', () => {
+    const project = { title: '维修订单系统' }
+    const chapter = { id: 33, chapter_no: 33, title: '停业单反杀' }
+    const contextPackage = {
+      chapter_target: {
+        chapter_no: 33,
+        emotional_arc_contract: {
+          version: 'oh_story_emotional_arc_v1',
+          progressive_confrontation_rules: [
+            '递进对抗写法：主角与反派是角力而非碾压。',
+            '每次小角力主角稍占上风，反派继续加码，最后主角王炸一锤定音。',
+          ],
+          meme_plot_formula_rules: [
+            '以梗构建剧情法：发生 -> 发展 -> 转折 -> 高潮。',
+            '用梗作为高潮点倒推剧情，避免流水账。',
+          ],
+          reader_desire_formula_rules: [
+            '驱动读者欲望四步公式：生产诉求 -> 给予希望 -> 努力解决 -> 得偿所愿。',
+            '困境层级层层递进，解决方式也要多样。',
+          ],
+          quality_checks: ['递进对抗、梗四段式和读者欲望四步公式都必须有正文证据。'],
+        },
+      },
+    }
+    const formulaText = [
+      '这一章的递进对抗不是一路碾压，而是角力而非碾压：第一轮主角只用检测笔小胜，会长马上加码拿出停业单，第二轮主角用客户记录顶住压力，最后才用备份订单王炸一锤定音。',
+      '梗四段式完整落地：发生是协会停业单压到门口，发展是客户不断撤单和围观维修师误判，转折是系统订单记录反向证明会长造假，高潮是主角公开备份记录让协会当场改口。',
+      '读者欲望四步公式也跑完：先生产诉求，让读者看见失业维修师被强权停业的不公；再给予希望，检测笔和备份订单提前露面；中段努力解决，主角逐项核对客户记录；最后得偿所愿，停业单作废、客户恢复授权，并抛出医院备用电源的新困境。',
+    ].join('\n')
+    const flatText = [
+      '会长拿出停业单，主角立刻打开系统赢了。',
+      '众人都震惊，协会也认错。',
+      '事情结束，主角回家休息。',
+    ].join('\n')
+
+    const okReport = buildEmotionalArcSyncReport(project, chapter, contextPackage, formulaText)
+    const warnReport = buildEmotionalArcSyncReport(project, chapter, contextPackage, flatText)
+
+    expect(okReport.status).toBe('ok')
+    expect(okReport.delivered.map((item: any) => item.label)).toEqual(expect.arrayContaining(['递进对抗', '梗四段式', '读者欲望四步公式']))
+    expect(warnReport.status).toBe('warn')
+    expect(warnReport.missed.map((item: any) => item.label)).toEqual(expect.arrayContaining(['递进对抗', '梗四段式', '读者欲望四步公式']))
+    expect(warnReport.next_actions.join('；')).toContain('角力而非碾压')
+    expect(warnReport.next_actions.join('；')).toContain('发生 -> 发展 -> 转折 -> 高潮')
+    expect(warnReport.next_actions.join('；')).toContain('生产诉求 -> 给予希望 -> 努力解决 -> 得偿所愿')
+  })
+
   test('flags emotional turning self-claims when no triggering event is visible', () => {
     const project = { title: '长夜账本' }
     const chapter = { id: 88, chapter_no: 88, title: '忽然释然' }
@@ -22476,11 +22523,16 @@ describe('chapter pre-draft brief', () => {
     expect(brief.emotional_arc_contract.ideological_conflict_rules.join('｜')).toContain('人设认同')
     expect(brief.emotional_arc_contract.ideological_conflict_rules.join('｜')).toContain('追求和牺牲')
     expect(brief.emotional_arc_contract.failure_mode_guards.join('｜')).toContain('假虐')
+    expect(brief.emotional_arc_contract.progressive_confrontation_rules.join('｜')).toContain('角力而非碾压')
+    expect(brief.emotional_arc_contract.progressive_confrontation_rules.join('｜')).toContain('最后主角王炸')
+    expect(brief.emotional_arc_contract.meme_plot_formula_rules.join('｜')).toContain('发生 -> 发展 -> 转折 -> 高潮')
+    expect(brief.emotional_arc_contract.reader_desire_formula_rules.join('｜')).toContain('生产诉求 -> 给予希望 -> 努力解决 -> 得偿所愿')
     expect(confirmedContext.chapter_target.emotional_arc_contract.quality_checks.join('｜')).toContain('调动')
     expect(confirmedContext.chapter_target.emotional_arc_contract.quality_checks.join('｜')).toContain('先入为主')
     expect(confirmedContext.chapter_target.emotional_arc_contract.quality_checks.join('｜')).toContain('峰终定律')
     expect(confirmedContext.chapter_target.emotional_arc_contract.quality_checks.join('｜')).toContain('三层情绪')
     expect(confirmedContext.chapter_target.emotional_arc_contract.quality_checks.join('｜')).toContain('前反应')
+    expect(confirmedContext.chapter_target.emotional_arc_contract.quality_checks.join('｜')).toContain('读者欲望四步公式')
     expect(prompt).toContain('【情绪弧合同】')
     expect(prompt).toContain('执行 chapter_target.emotional_arc_contract')
     expect(prompt).toContain('情绪三板斧')
@@ -22516,6 +22568,12 @@ describe('chapter pre-draft brief', () => {
     expect(prompt).toContain('理念矛盾')
     expect(prompt).toContain('理念之争')
     expect(prompt).toContain('追求和牺牲')
+    expect(prompt).toContain('递进对抗')
+    expect(prompt).toContain('角力而非碾压')
+    expect(prompt).toContain('梗四段式')
+    expect(prompt).toContain('发生 -> 发展 -> 转折 -> 高潮')
+    expect(prompt).toContain('读者欲望四步公式')
+    expect(prompt).toContain('生产诉求 -> 给予希望 -> 努力解决 -> 得偿所愿')
     expect(prompt).toContain('emotional_arc_checks')
     expect(prompt.indexOf('【情绪弧合同】')).toBeLessThan(prompt.indexOf('【结构化上下文包】'))
   })

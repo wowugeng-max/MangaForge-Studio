@@ -13,25 +13,25 @@ Source reference set: `/private/tmp/oh-story-claudecode/skills/story-long-write/
 <!-- oh-story-progress-summary
 {
   "reference_total": 38,
-  "integrated": 30,
-  "partial": 8,
+  "integrated": 31,
+  "partial": 7,
   "todo": 0,
   "deferred": 0,
-  "remaining_references": 8,
-  "estimated_hours_remaining": 18.5,
-  "estimated_working_days_remaining": 3.08
+  "remaining_references": 7,
+  "estimated_hours_remaining": 17,
+  "estimated_working_days_remaining": 2.83
 }
 -->
 
 ## Current Snapshot
 
 - Reference files: 38
-- Integrated enough for current production use: 30
-- Partially integrated, still worth mining: 8
+- Integrated enough for current production use: 31
+- Partially integrated, still worth mining: 7
 - Not systematically reviewed yet: 0
 - Deferred: 0
-- Remaining references to improve: 8
-- Estimated remaining effort: about 18.5 engineering hours, or 3.08 focused working days at 6 hours per day
+- Remaining references to improve: 7
+- Estimated remaining effort: about 17 engineering hours, or 2.83 focused working days at 6 hours per day
 
 The estimate assumes the current working pattern: one small oh-story increment at a time, with prompt or workflow changes backed by focused tests, then `test:novel-server` and `check` before push. UI progress surfacing is not included in the remaining estimate; after this ledger stabilizes, exposing it in the novel workspace should be a separate 4-6 hour slice.
 
@@ -72,7 +72,7 @@ The estimate assumes the current working pattern: one small oh-story increment a
 | outline-rhythm.md | partial | Bridge unit, batch rhythm, beat cooling, and batch-size guardrails exist. | Add clearer rolling-plan diagnostics for rhythm fatigue before drafting. | 1.5h |
 | outline-structure-theory.md | integrated | Blueprint and structure progression checks cover causal chain and chapter structure. Project creation and seed recovery now inject `writing_bible.longform_structure_contract`; local seed materialization backfills the same contract with structure-level selection, five-act causal-chain rules, five-level outline limits, strong/weak/transition mainline architecture, web-sixth-act afterglow, volume purpose and climax framing, mainline/subline/dark-line layout, map-transition pillars, retention methods, and quality checks. Focused tests cover seed prompt hydration and writing-bible materialization. | Keep tuning structure-mode inference from real project seeds and genre-specific longform failures. | 0.5h |
 | plot-core-methods.md | integrated | Target reader, story drive, plot dynamics, information flow, reader payoff, story power, small-outline, mainline-definition, and next-objective-after-gain gates are present. Story power covers seed/recovery/original-incubation prompts, local writing-bible materialization, pre-draft/prose prompts, self-review, revision, deterministic `buildStoryPowerSyncReport`, story-state sync, and repair carry-over. Small-outline four-step coverage now lives inside `chapter_blueprint.small_outline_contract`, prose prompts, deterministic `small_outline_checks`, blueprint sync, and unattended blueprint repair. Mainline definition now lives in `writing_bible.mainline_definition_contract`, `chapter_blueprint.mainline_definition_contract`, prose prompts, self-review requirements, deterministic `mainline_definition_checks`, and unattended blueprint repair. Information flow now carries `next_objective_rules` into pre-draft briefs, prose prompts, self-review, revision prompts, unattended blueprint generation, and deterministic `next_objective_after_gain` sync checks. | Keep tuning transition and next-objective evidence heuristics from real generated chapters. | 0.5h |
-| plot-emotion-system.md | partial | Payoff setup, emotional arc,爽点 setup, and craft rules are present in pre-draft and prose prompts. | Add formula-level checks for setup before payoff and recurring emotional modules. | 1.5h |
+| plot-emotion-system.md | integrated | `emotional_arc_contract` now carries plot-emotion-system formula-level rules for 爽点倒推法, 装逼层级, 多爽点密度, 情绪模块重组, 爽点递增对比, 递进对抗, 梗四段式, and 读者欲望四步公式 into pre-draft briefs, confirmed context, prose prompts, self-review/revision prompts, unattended blueprint repair, and deterministic `buildEmotionalArcSyncReport`. Focused tests cover prompt hydration and post-delivery formula checks. | Keep tuning regex evidence for real chapters where formula execution is implied rather than named. | 0.5h |
 | plot-frameworks.md | integrated | `plot_framework_contract` now routes genre to framework choices, selected frameworks, stage ownership for creation/outline/scene_card/prose/revision, RPG reward loops, faction-hand cards, double-line information gaps, routine variation, large-structure/six-act rules, and five-no-collapse checks into pre-draft briefs, confirmed context, prose prompts, and unattended blueprint repair. Focused tests cover prompt hydration and repair persistence. | Keep tuning framework routing keywords from real multi-model/genre projects. | 0.5h |
 | plot-special-topics.md | integrated | Creation, recovery, original-incubation prompts, and local writing-bible materialization inject `writing_bible.plot_special_topics_contract`; pre-draft write-preparation `creation_contract_checklist` now includes special topics; prose generation executes `chapter_target.plot_special_topics_contract`; self-review and revision prompts require `plot_special_topics_checks`; `buildPlotSpecialTopicsSyncReport` verifies goldfinger execution, genre boundary, market benchmark, urban high martial, launch checkpoint, and faction hand evidence; prose-quality risks and `plot_special_topics_sync` now carry gaps into next-chapter repair routing. Focused tests cover write-preparation surfacing, prompt enforcement, full-pipeline story-state return, and deterministic sync behavior. | Keep tuning topic-specific evidence heuristics from real generated chapters. | 0.5h |
 | quality-checklist.md | integrated | Quality audit contract covers structure, purpose tags, progression, information load, event ratio, longform continuity, five-dimension scoring, selling-point expression, phase-level checklist mapping, prose prompt enforcement, self-review receipt coverage, quality gates, post-delivery sync, and repair tasks. | Keep tuning phase checklist mappings from real review misses. | 0.5h |
@@ -87,11 +87,11 @@ The estimate assumes the current working pattern: one small oh-story increment a
 
 ## Next Priority Queue
 
-1. `plot-emotion-system.md`: add formula-level checks for setup before payoff and recurring emotional modules.
-2. `style-genre-modules.md`: add model-facing fallback receipts proving module, rhythm, and matched chapter usage.
-3. `emotional-methods.md`: mine remaining emotion formulas into concise prompt fragments.
-4. `female-audience-writing.md`: add project-level detection and UI confirmation so this contract is active only when intended.
-5. `style-combat-face.md`: add more scene-card level combat and public payoff presets.
+1. `style-genre-modules.md`: add model-facing fallback receipts proving module, rhythm, and matched chapter usage.
+2. `emotional-methods.md`: mine remaining emotion formulas into concise prompt fragments.
+3. `female-audience-writing.md`: add project-level detection and UI confirmation so this contract is active only when intended.
+4. `style-combat-face.md`: add more scene-card level combat and public payoff presets.
+5. `outline-rhythm.md`: add clearer rolling-plan diagnostics for rhythm fatigue before drafting.
 
 ## Update Rules
 
