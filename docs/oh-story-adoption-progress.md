@@ -18,8 +18,8 @@ Source reference set: `/private/tmp/oh-story-claudecode/skills/story-long-write/
   "todo": 0,
   "deferred": 0,
   "remaining_references": 13,
-  "estimated_hours_remaining": 26.25,
-  "estimated_working_days_remaining": 4.38
+  "estimated_hours_remaining": 25.75,
+  "estimated_working_days_remaining": 4.29
 }
 -->
 
@@ -31,7 +31,7 @@ Source reference set: `/private/tmp/oh-story-claudecode/skills/story-long-write/
 - Not systematically reviewed yet: 0
 - Deferred: 0
 - Remaining references to improve: 13
-- Estimated remaining effort: about 26.25 engineering hours, or 4.38 focused working days at 6 hours per day
+- Estimated remaining effort: about 25.75 engineering hours, or 4.29 focused working days at 6 hours per day
 
 The estimate assumes the current working pattern: one small oh-story increment at a time, with prompt or workflow changes backed by focused tests, then `test:novel-server` and `check` before push. UI progress surfacing is not included in the remaining estimate; after this ledger stabilizes, exposing it in the novel workspace should be a separate 4-6 hour slice.
 
@@ -71,7 +71,7 @@ The estimate assumes the current working pattern: one small oh-story increment a
 | outline-methods.md | partial | Chapter blueprint requires five-part outline, plot lines, character order, beat sequence, and ending contract. | Map more outline-method templates to the planning workspace. | 1.5h |
 | outline-rhythm.md | partial | Bridge unit, batch rhythm, beat cooling, and batch-size guardrails exist. | Add clearer rolling-plan diagnostics for rhythm fatigue before drafting. | 1.5h |
 | outline-structure-theory.md | partial | Blueprint and structure progression checks cover causal chain and chapter structure. | Mine structure theory into project-level longform skeleton generation. | 2h |
-| plot-core-methods.md | partial | Target reader, story drive, plot dynamics, information flow, reader payoff, story power, and small-outline contracts are present. Story power covers seed/recovery/original-incubation prompts, local writing-bible materialization, pre-draft/prose prompts, self-review, revision, deterministic `buildStoryPowerSyncReport`, story-state sync, and repair carry-over. Small-outline four-step coverage now lives inside `chapter_blueprint.small_outline_contract`, prose prompts, deterministic `small_outline_checks`, blueprint sync, and unattended blueprint repair. | Continue converting remaining high-level methods such as mainline definition, transitions, thresholds, suspense routes, and information-group routes into generation-time gates. | 0.75h |
+| plot-core-methods.md | partial | Target reader, story drive, plot dynamics, information flow, reader payoff, story power, small-outline, and mainline-definition contracts are present. Story power covers seed/recovery/original-incubation prompts, local writing-bible materialization, pre-draft/prose prompts, self-review, revision, deterministic `buildStoryPowerSyncReport`, story-state sync, and repair carry-over. Small-outline four-step coverage now lives inside `chapter_blueprint.small_outline_contract`, prose prompts, deterministic `small_outline_checks`, blueprint sync, and unattended blueprint repair. Mainline definition now lives in `writing_bible.mainline_definition_contract`, `chapter_blueprint.mainline_definition_contract`, prose prompts, self-review requirements, deterministic `mainline_definition_checks`, and unattended blueprint repair. | Continue converting the last high-level transition/information-routing methods into compact generation-time gates. | 0.25h |
 | plot-emotion-system.md | partial | Payoff setup, emotional arc,爽点 setup, and craft rules are present in pre-draft and prose prompts. | Add formula-level checks for setup before payoff and recurring emotional modules. | 1.5h |
 | plot-frameworks.md | partial | Showdown, suspense, conflict, and bridge-unit contracts cover major framework pieces. | Decide which frameworks belong in creation, outline, scene-card, or revision stages. | 2h |
 | plot-special-topics.md | integrated | Creation, recovery, original-incubation prompts, and local writing-bible materialization inject `writing_bible.plot_special_topics_contract`; pre-draft write-preparation `creation_contract_checklist` now includes special topics; prose generation executes `chapter_target.plot_special_topics_contract`; self-review and revision prompts require `plot_special_topics_checks`; `buildPlotSpecialTopicsSyncReport` verifies goldfinger execution, genre boundary, market benchmark, urban high martial, launch checkpoint, and faction hand evidence; prose-quality risks and `plot_special_topics_sync` now carry gaps into next-chapter repair routing. Focused tests cover write-preparation surfacing, prompt enforcement, full-pipeline story-state return, and deterministic sync behavior. | Keep tuning topic-specific evidence heuristics from real generated chapters. | 0.5h |

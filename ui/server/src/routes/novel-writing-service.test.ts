@@ -17332,6 +17332,63 @@ describe('chapter pre-draft brief', () => {
     expect(prompt).toContain('small_outline_contract')
   })
 
+  test('adds an oh-story mainline definition contract to chapter blueprint and prose prompt', () => {
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+    const contextPackage = {
+      writing_bible: {
+        mainline: {
+          title: '旧账反证主线',
+          goal: '查清旧账被调包这一件事。',
+          core_conflict: '执事和会长把旧账调包伪装成文书失误。',
+        },
+      },
+      chapter_target: {
+        chapter_no: 8,
+        title: '旧账反证',
+        summary: '主角把旧账调包推进到公开核验。',
+        conflict: '执事试图把旧账问题解释成境界不够导致的误判。',
+        ending_hook: '旧账背面露出会长私印。',
+        scene_cards: [
+          {
+            scene_no: 1,
+            title: '公开核验',
+            purpose: '把旧账调包这一件事推进到现场证据。',
+            conflict: '执事用境界差距压住主角。',
+            reader_payoff: '主角证明旧账不是修为误判而是被换过。',
+          },
+        ],
+      },
+    }
+
+    const brief = buildChapterPreDraftBrief({ title: '旧账长篇' }, contextPackage)
+    const confirmedContext = mergeConfirmedPreDraftBriefIntoContext(contextPackage, {
+      ...brief,
+      confirmed_at: '2026-06-22T12:00:00.000Z',
+    })
+    const prompt = service.buildParagraphProseContext(
+      { title: '旧账长篇' },
+      confirmedContext,
+      null,
+      { chapter_no: 8, title: '旧账反证' },
+    )
+
+    expect(brief.chapter_blueprint.mainline_definition_contract.version).toBe('oh_story_mainline_definition_v1')
+    expect(brief.chapter_blueprint.mainline_definition_contract.definition_rules.join('｜')).toContain('主线不等于升级')
+    expect(brief.chapter_blueprint.mainline_definition_contract.definition_rules.join('｜')).toContain('主线是一件事')
+    expect(brief.chapter_blueprint.mainline_definition_contract.action_rules.join('｜')).toContain('升级是主角达成目标的行动')
+    expect(brief.chapter_blueprint.mainline_definition_contract.mainline_event).toContain('旧账')
+    expect(prompt).toContain('主线定义合同')
+    expect(prompt).toContain('mainline_definition_contract')
+    expect(prompt).toContain('主线不等于升级')
+    expect(prompt).toContain('主线是一件事')
+    expect(prompt).toContain('升级是主角达成目标的行动')
+    expect(prompt).toContain('不是一个元素')
+  })
+
   test('adds an oh-story platform rubric contract to pre-draft brief and prose prompt', () => {
     const service = createNovelWritingService({
       getProject: async () => null,
@@ -40682,6 +40739,47 @@ describe('readability and restrained meme workflow', () => {
     expect(warnReport.missed.map((item: any) => item.key)).toContain('small_outline_contract')
     expect(warnReport.missed.find((item: any) => item.key === 'small_outline_contract')?.text).toContain('目的和效果')
     expect(warnReport.next_actions.join('；')).toContain('小纲四步法')
+  })
+
+  test('checks oh-story mainline definition after prose is written', () => {
+    const project = { title: '残阵问道', reference_config: {} }
+    const chapter = { id: 35, chapter_no: 35, title: '主线复核' }
+    const contextPackage = {
+      chapter_target: {
+        chapter_no: 35,
+        chapter_blueprint: {
+          mainline_definition_contract: {
+            version: 'oh_story_mainline_definition_v1',
+            mainline_event: '查清旧账被调包这一件事。',
+            action_role: '升级和验阵只是达成旧账反证目标的行动。',
+            forbidden_mainline_shapes: ['境界升级条', '金手指元素列表', '地图/设定罗列'],
+            quality_checks: ['主线必须是一件事，不是一个元素。'],
+          },
+        },
+      },
+    }
+    const deliveredText = [
+      '这一章只推进一件事：查清旧账被调包。',
+      '江辰的验阵升级没有单独变成主线，只是他达成旧账反证目标的行动。',
+      '他把旧账、私印和证人页序串成现场证据，逼执事承认账册被换过。',
+      '章末旧账背面露出会长私印，第二条主线还没替换当前目标，只作为下一步铺垫。',
+    ].join('\n')
+    const weakText = [
+      '江辰突破了新境界，金手指也升级成第二形态。',
+      '新地图、新阵法、新榜单和新门派设定都出现了。',
+      '大家讨论这些元素很重要，旧账调包的事以后再说。',
+    ].join('\n')
+
+    const okReport = buildChapterBlueprintSyncReport(project, chapter, contextPackage, deliveredText)
+    const warnReport = buildChapterBlueprintSyncReport(project, chapter, contextPackage, weakText)
+
+    expect(okReport.mainline_definition_checks.find((item: any) => item.key === 'mainline_definition_contract')?.status).toBe('ok')
+    expect(okReport.status).toBe('ok')
+    expect(warnReport.status).toBe('warn')
+    expect(warnReport.mainline_definition_checks.find((item: any) => item.key === 'mainline_definition_contract')?.status).toBe('warn')
+    expect(warnReport.missed.map((item: any) => item.key)).toContain('mainline_definition_contract')
+    expect(warnReport.missed.find((item: any) => item.key === 'mainline_definition_contract')?.text).toContain('主线是一件事')
+    expect(warnReport.next_actions.join('；')).toContain('主线不等于升级')
   })
 
   test('reads chapter blueprint sync contract from camelCase chapter raw preDraftBrief', () => {

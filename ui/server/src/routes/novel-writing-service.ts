@@ -23,6 +23,7 @@ import type { NovelReferenceService } from './novel-reference-service'
 import { buildSettingRelationshipGraph } from './novel-setting-relationship-graph'
 import { buildOhStoryPlotSpecialTopicsContract } from './novel-plot-special-topics'
 import { buildOhStoryStoryPowerContract } from './novel-story-power-contract'
+import { buildOhStoryMainlineDefinitionContract } from './novel-mainline-definition-contract'
 import {
   asArray,
   applyBenchmarkRecallPreflightChecks,
@@ -209,10 +210,22 @@ function mergedContextChapterTargetPreferRuntime(contextPackage: any = {}) {
 
 export function getContextContract(contextPackage: any, contractField: string) {
   const camelField = camelizeSnakeField(contractField)
+  const targetBlueprint = contextPackage?.chapter_target?.chapter_blueprint
+    || contextPackage?.chapter_target?.chapterBlueprint
+    || contextPackage?.chapterTarget?.chapter_blueprint
+    || contextPackage?.chapterTarget?.chapterBlueprint
+    || contextPackage?.chapter_blueprint
+    || contextPackage?.chapterBlueprint
+    || contextPackage?.pre_draft_brief?.chapter_blueprint
+    || contextPackage?.pre_draft_brief?.chapterBlueprint
+    || contextPackage?.preDraftBrief?.chapter_blueprint
+    || contextPackage?.preDraftBrief?.chapterBlueprint
   return contextPackage?.chapter_target?.[contractField]
     || contextPackage?.chapter_target?.[camelField]
     || contextPackage?.chapterTarget?.[contractField]
     || contextPackage?.chapterTarget?.[camelField]
+    || targetBlueprint?.[contractField]
+    || targetBlueprint?.[camelField]
     || contextPackage?.[contractField]
     || contextPackage?.[camelField]
     || contextPackage?.pre_draft_brief?.[contractField]
@@ -249,6 +262,7 @@ const STRUCTURED_REVIEW_CHECK_FIELDS = [
   ['prose_meta_checks', 'proseMetaChecks'],
   ['dialogue_checks', 'dialogueChecks'],
   ['plot_dynamics_checks', 'plotDynamicsChecks'],
+  ['mainline_definition_checks', 'mainlineDefinitionChecks'],
   ['story_power_checks', 'storyPowerChecks'],
   ['continuity_heat_checks', 'continuityHeatChecks'],
   ['character_relation_checks', 'characterRelationChecks'],
@@ -24548,6 +24562,60 @@ function buildChapterBlueprintSmallOutlineCheck(blueprint: any, chapterText: str
   }
 }
 
+function mainlineDefinitionContractFromBlueprint(blueprint: any) {
+  const explicit = blueprint?.mainline_definition_contract || blueprint?.mainlineDefinitionContract
+  if (!explicit) return null
+  return buildOhStoryMainlineDefinitionContract({ mainline_definition_contract: explicit })
+}
+
+function buildChapterBlueprintMainlineDefinitionCheck(blueprint: any, chapterText: string) {
+  const contract = mainlineDefinitionContractFromBlueprint(blueprint)
+  if (!contract) return null
+  const body = proseBodyWithoutTitleLine(chapterText)
+  const compactBody = body.replace(/\s+/g, '')
+  const mainlineEvent = compactBriefText(contract.mainline_event || contract.mainlineEvent)
+  const eventMatch = mainlineEvent ? anchorMatchScore(mainlineEvent, body) : { score: 80, matched: [] as string[] }
+  const oneThingSignal = /一件事|这一件事|只推进|唯一主线|一条主线/.test(body)
+  const upgradeActionSignal = /升级.{0,18}(只是|只作为|行动|工具|没有单独变成主线|不是主线)|不是.{0,12}升级|升级不等于主线|主线不等于升级/.test(body)
+  const stateChangeSignal = /推进|查清|查明|证明|反证|证据|承认|改口|揭露|完成|改变|状态|现场|结果|代价|下一步/.test(body)
+  const handoffSignal = /第二条主线|下一条主线|铺垫|完结|章末|下一步|自然引出/.test(body)
+  const elementListRisk = /突破.*境界|境界.*突破|金手指.*升级|新地图|新阵法|新榜单|新门派|设定.*罗列|元素.*重要/.test(compactBody)
+  const deferralRisk = /以后再说|以后再讲|之后再说|以后再处理|暂时不管|先不处理/.test(body)
+  const eventDelivered = !mainlineEvent || eventMatch.score >= 22 || oneThingSignal
+  const missedItems = [
+    eventDelivered && oneThingSignal ? '' : '主线是一件事，不是一个元素；正文必须明确本章只推进哪一件事。',
+    upgradeActionSignal ? '' : '主线不等于升级；升级是主角达成目标的行动，不能顶替主线。',
+    stateChangeSignal ? '' : '本章必须让 mainline_event 发生可见状态变化。',
+    handoffSignal ? '' : '主线完成后必须铺垫第二条主线或选择完结，不能突兀换线。',
+    elementListRisk || deferralRisk ? '正文疑似把升级条、金手指、地图/设定罗列或“以后再说”当成主线。' : '',
+  ].filter(Boolean)
+  const delivered = !missedItems.length
+  return {
+    key: 'mainline_definition_contract',
+    label: '主线定义',
+    status: delivered ? 'ok' : 'warn',
+    text: '主线是一件事，不是一个元素；主线不等于升级，升级是主角达成目标的行动。',
+    expected: mainlineEvent,
+    evidence: compactBriefText([
+      eventMatch.matched?.length ? `命中：${eventMatch.matched.join('、')}` : '',
+      compactBriefText(body, 220),
+    ].filter(Boolean).join('；'), 260),
+    missed_items: missedItems,
+    fix: delivered
+      ? ''
+      : `按 oh-story 主线定义修复：先写清 mainline_event「${mainlineEvent || '本章那一件事'}」，再把升级/金手指/地图/资源改成达成这个目标的行动或工具；删除只罗列元素却不改变那一件事的段落，并在章末给出状态变化、第二条主线铺垫或完结选择。`,
+    results: {
+      event_score: eventMatch.score,
+      one_thing_signal: oneThingSignal,
+      upgrade_action_signal: upgradeActionSignal,
+      state_change_signal: stateChangeSignal,
+      handoff_signal: handoffSignal,
+      element_list_risk: elementListRisk,
+      deferral_risk: deferralRisk,
+    },
+  }
+}
+
 function chapterBlueprintCausalChainCheck(blueprint: any, chapterText: string) {
   const contract = normalizeChapterBlueprintCausalChainContract(blueprint?.causal_chain_contract || blueprint?.causalChainContract)
   if (!contract) return null
@@ -25076,6 +25144,26 @@ export function scanGoldenThreeExecutionRisks(contextPackage: any = {}, chapterT
   return checks
 }
 
+function hasChapterBlueprintCraftPlan(blueprint: any) {
+  const contentOutline = blueprint?.content_outline || blueprint?.contentOutline || {}
+  const plotLines = blueprint?.plot_lines || blueprint?.plotLines || {}
+  return Boolean(
+    blueprint?.target_emotion
+    || blueprint?.targetEmotion
+    || blueprint?.opening_hook
+    || blueprint?.openingHook
+    || blueprint?.core_payoff
+    || blueprint?.corePayoff
+    || Object.values(contentOutline || {}).some(Boolean)
+    || Object.values(plotLines || {}).some(Boolean)
+    || asArray(blueprint?.character_order || blueprint?.characterOrder).length
+    || asArray(blueprint?.beat_sequence || blueprint?.beatSequence).length
+    || blueprint?.cost_and_reward
+    || blueprint?.costAndReward
+    || Object.keys(blueprint?.ending_contract || blueprint?.endingContract || {}).length
+  )
+}
+
 export function buildChapterBlueprintSyncReport(project: any, chapter: any, contextPackage: any, chapterText: string) {
   const blueprint = chapterBlueprintFromContext(contextPackage, chapter)
   const contentOutline = blueprint?.content_outline || blueprint?.contentOutline || {}
@@ -25101,9 +25189,11 @@ export function buildChapterBlueprintSyncReport(project: any, chapter: any, cont
     chapterBlueprintBeat('ending_contract_next_pull', '章尾承接', endingContract?.next_chapter_pull || endingContract?.nextChapterPull || blueprint?.ending_hook || blueprint?.endingHook, 'tail'),
   ])
   const checked = planned.map(item => chapterBlueprintBeatMatch(item, chapterText))
-  const craftChecks = buildChapterBlueprintCraftChecks(blueprint, chapterText)
+  const craftChecks = hasChapterBlueprintCraftPlan(blueprint) ? buildChapterBlueprintCraftChecks(blueprint, chapterText) : []
   const smallOutlineCheck = buildChapterBlueprintSmallOutlineCheck(blueprint, chapterText)
   const smallOutlineChecks = smallOutlineCheck ? [smallOutlineCheck] : []
+  const mainlineDefinitionCheck = buildChapterBlueprintMainlineDefinitionCheck(blueprint, chapterText)
+  const mainlineDefinitionChecks = mainlineDefinitionCheck ? [mainlineDefinitionCheck] : []
   const causalChainCheck = chapterBlueprintCausalChainCheck(blueprint, chapterText)
   const causalChainChecks = causalChainCheck ? [causalChainCheck] : []
   const craftMissed = craftChecks
@@ -25136,21 +25226,35 @@ export function buildChapterBlueprintSyncReport(project: any, chapter: any, cont
       missed_items: item.missed_items || [],
       fix: item.fix,
     }))
+  const mainlineDefinitionMissed = mainlineDefinitionChecks
+    .filter((item: any) => item.status === 'warn')
+    .map((item: any) => ({
+      key: item.key,
+      label: item.label,
+      text: item.text || item.fix,
+      evidence: item.evidence,
+      delivered: false,
+      status: 'warn',
+      score: 0,
+      missed_items: item.missed_items || [],
+      fix: item.fix,
+    }))
   const beatDensityMissed = craftMissed.some((item: any) => item.key === 'craft_beat_density')
   const beatFunctionDetailMissed = craftMissed.some((item: any) => item.key === 'craft_beat_function_detail_balance')
   const delivered = checked.filter(item => item.delivered)
-  const missed = [...checked.filter(item => !item.delivered), ...craftMissed, ...smallOutlineMissed, ...causalChainMissed]
+  const missed = [...checked.filter(item => !item.delivered), ...craftMissed, ...smallOutlineMissed, ...mainlineDefinitionMissed, ...causalChainMissed]
   const missedCount = missed.length
   const deliveredCausalChainCount = causalChainChecks.filter((item: any) => item.delivered).length
   const deliveredSmallOutlineCount = smallOutlineChecks.filter((item: any) => item.status === 'ok').length
-  const totalBlueprintChecks = planned.length + craftChecks.length + smallOutlineChecks.length + causalChainChecks.length
+  const deliveredMainlineDefinitionCount = mainlineDefinitionChecks.filter((item: any) => item.status === 'ok').length
+  const totalBlueprintChecks = planned.length + craftChecks.length + smallOutlineChecks.length + mainlineDefinitionChecks.length + causalChainChecks.length
   const score = Math.max(0, Math.min(100, Math.round(
     totalBlueprintChecks
-      ? ((delivered.length + craftChecks.filter((item: any) => item.status === 'ok').length + deliveredSmallOutlineCount + deliveredCausalChainCount) / Math.max(1, totalBlueprintChecks)) * 100
+      ? ((delivered.length + craftChecks.filter((item: any) => item.status === 'ok').length + deliveredSmallOutlineCount + deliveredMainlineDefinitionCount + deliveredCausalChainCount) / Math.max(1, totalBlueprintChecks)) * 100
       : 82,
   )))
   const status = missedCount > 0 || score < 78 ? 'warn' : 'ok'
-  const hasBlueprintPlan = planned.length || craftChecks.length || smallOutlineChecks.length || causalChainChecks.length
+  const hasBlueprintPlan = planned.length || craftChecks.length || smallOutlineChecks.length || mainlineDefinitionChecks.length || causalChainChecks.length
 
   return {
     report_id: `chapter-blueprint-sync-${chapter?.id || chapter?.chapter_no || Date.now()}`,
@@ -25162,7 +25266,7 @@ export function buildChapterBlueprintSyncReport(project: any, chapter: any, cont
     summary: !hasBlueprintPlan
       ? '本章没有配置章节细纲蓝图。'
       : status === 'ok'
-        ? '正文已基本兑现章节细纲中的开篇钩子、核心回报、小纲四步法、五段式概括、多线推进、人物顺序、代价收益和章尾承接。'
+        ? '正文已基本兑现章节细纲中的开篇钩子、核心回报、小纲四步法、主线定义、五段式概括、多线推进、人物顺序、代价收益和章尾承接。'
         : `正文有 ${missedCount} 项章节细纲任务未充分落地。`,
     missed_count: missedCount,
     planned,
@@ -25170,6 +25274,7 @@ export function buildChapterBlueprintSyncReport(project: any, chapter: any, cont
     missed,
     craft_checks: craftChecks,
     small_outline_checks: smallOutlineChecks,
+    mainline_definition_checks: mainlineDefinitionChecks,
     causal_chain_checks: causalChainChecks,
     next_actions: status === 'ok'
       ? ['保持章节细纲闭环：开篇、推进、转折、回报、代价收益和章尾承接都要有正文证据。']
@@ -25179,6 +25284,7 @@ export function buildChapterBlueprintSyncReport(project: any, chapter: any, cont
           beatDensityMissed ? '按情节点密度修复：约 200-300 字/个情节点，先补足动作过程、对话交锋、信息变化、选择代价、收益兑现和章尾钩子铺垫，再扩写句子。' : '',
           beatFunctionDetailMissed ? '按目的词详略修复：爽点/打脸/高潮/卖点/关键揭露/反转必须展开，过渡/赶路/信息交代/时间跳转压成 1-2 句，避免平均用力或装饰性水文。' : '',
           smallOutlineMissed.length ? '按小纲四步法修复：先分段判断，再补每段目的和效果，按详写/略写分配篇幅，并让 quick_locator 在正文中可定位。' : '',
+          mainlineDefinitionMissed.length ? '按主线定义修复：主线不等于升级，主线是一件事，不是一个元素；把升级、金手指、地图和资源改成达成 mainline_event 的行动，并写出那一件事的状态变化。' : '',
           '按 oh-story craft 修复：爽点前补危机/期待铺垫，揭露/打脸后补在场配角差异化反应，过渡点压缩、卖点和回报点展开。',
           '如果正文只是概述大纲，按章节细纲重排开篇钩子、五段式内容概括、多线推进和章尾承接。',
         ].filter(Boolean),
@@ -45358,6 +45464,23 @@ function buildStoryPowerContract(project: any = {}, contextPackage: any = {}) {
   )
 }
 
+function buildMainlineDefinitionContract(project: any = {}, contextPackage: any = {}, explicitValue: any = null) {
+  return buildOhStoryMainlineDefinitionContract(
+    project,
+    contextPackage?.writing_bible,
+    contextPackage?.pre_draft_brief,
+    contextPackage?.preDraftBrief,
+    contextPackage?.chapter_target,
+    contextPackage?.chapterTarget,
+    contextPackage?.chapter_target?.chapter_blueprint,
+    contextPackage?.chapterTarget?.chapterBlueprint,
+    contextPackage?.chapter_blueprint,
+    contextPackage?.chapterBlueprint,
+    contextPackage,
+    explicitValue ? { mainline_definition_contract: explicitValue } : {},
+  )
+}
+
 function inferDialogueMode(scene: any) {
   const sceneType = String(scene?.scene_type || scene?.sceneType || '').toLowerCase()
   const text = [
@@ -45958,6 +46081,7 @@ function buildChapterBlueprintFromContext(contextPackage: any, options: any = {}
   const explicitEndingContract = explicitBlueprint.ending_contract || explicitBlueprint.endingContract || {}
   const explicitBeatDensityContract = explicitBlueprint.beat_density_contract || explicitBlueprint.beatDensityContract
   const explicitSmallOutlineContract = explicitBlueprint.small_outline_contract || explicitBlueprint.smallOutlineContract
+  const explicitMainlineDefinitionContract = explicitBlueprint.mainline_definition_contract || explicitBlueprint.mainlineDefinitionContract
   const wordTarget = options.word_target
     || options.wordTarget
     || explicitBlueprint.word_target
@@ -46028,7 +46152,35 @@ function buildChapterBlueprintFromContext(contextPackage: any, options: any = {}
     climax: compactBriefText(explicitContentOutline.climax || climax),
     ending: compactBriefText(explicitContentOutline.ending || ending),
   }
+  const resolvedPlotLines = {
+    mainline: compactBriefText(explicitPlotLines.mainline || explicitPlotLines.main_line || explicitPlotLines.mainLine || chapterTarget.summary || chapterTarget.goal),
+    subplot: compactBriefText(explicitPlotLines.subplot || storylineAdvances.join('；')),
+    event_line: compactBriefText(explicitPlotLines.event_line || explicitPlotLines.eventLine || scenePurposes.join(' -> ')),
+    relationship_line: compactBriefText(explicitPlotLines.relationship_line || explicitPlotLines.relationshipLine || characterArc.relationship_change || characterArc.growth_node || characterArc.arc_hint || ''),
+    logic_line: compactBriefText(explicitPlotLines.logic_line || explicitPlotLines.logicLine || [
+      storyDrive.obstacle || development,
+      storyDrive.protagonist_choice || turn,
+      storyDrive.state_change || climax,
+      storyDrive.causal_next_step || ending,
+    ].filter(Boolean).join(' -> ')),
+  }
   const smallOutlineContract = buildChapterBlueprintSmallOutlineContract(chapterTarget, sceneCards, contentOutline, explicitSmallOutlineContract)
+  const mainlineDefinitionContract = buildMainlineDefinitionContract({}, {
+    ...contextPackage,
+    chapter_target: {
+      ...chapterTarget,
+      chapter_blueprint: {
+        ...explicitBlueprint,
+        content_outline: contentOutline,
+        plot_lines: resolvedPlotLines,
+      },
+    },
+    chapter_blueprint: {
+      ...explicitBlueprint,
+      content_outline: contentOutline,
+      plot_lines: resolvedPlotLines,
+    },
+  }, explicitMainlineDefinitionContract)
   const writingIntent = compactBriefText([
     chapterTarget.title ? `第${chapterTarget.chapter_no || '?'}章《${chapterTarget.title}》` : '',
     chapterTarget.summary || chapterTarget.goal,
@@ -46081,24 +46233,14 @@ function buildChapterBlueprintFromContext(contextPackage: any, options: any = {}
     core_payoff: compactBriefText(explicitBlueprint.core_payoff || explicitBlueprint.corePayoff || readerPayoffs.join('；') || options.reader_promise || chapterTarget.reader_promise),
     content_outline: contentOutline,
     causal_chain_contract: buildChapterBlueprintCausalChainContract(contentOutline, explicitCausalChainContract),
-    plot_lines: {
-      mainline: compactBriefText(explicitPlotLines.mainline || explicitPlotLines.main_line || explicitPlotLines.mainLine || chapterTarget.summary || chapterTarget.goal),
-      subplot: compactBriefText(explicitPlotLines.subplot || storylineAdvances.join('；')),
-      event_line: compactBriefText(explicitPlotLines.event_line || explicitPlotLines.eventLine || scenePurposes.join(' -> ')),
-      relationship_line: compactBriefText(explicitPlotLines.relationship_line || explicitPlotLines.relationshipLine || characterArc.relationship_change || characterArc.growth_node || characterArc.arc_hint || ''),
-      logic_line: compactBriefText(explicitPlotLines.logic_line || explicitPlotLines.logicLine || [
-        storyDrive.obstacle || development,
-        storyDrive.protagonist_choice || turn,
-        storyDrive.state_change || climax,
-        storyDrive.causal_next_step || ending,
-      ].filter(Boolean).join(' -> ')),
-    },
+    plot_lines: resolvedPlotLines,
     character_order: characterOrder,
     relationship_change: compactBriefText(characterArc.relationship_change || characterArc.growth_node || ''),
     information_gap: compactBriefText(sceneCards.map((scene: any) => scene.information_gap).filter(Boolean).join('；') || pageTurn.core_question),
     beat_sequence: beatSequence,
     beat_density_contract: beatDensityContract,
     small_outline_contract: smallOutlineContract,
+    mainline_definition_contract: mainlineDefinitionContract,
     cost_and_reward: compactBriefText(explicitBlueprint.cost_and_reward || explicitBlueprint.costAndReward || [
       storyDrive.choice_cost ? `代价：${storyDrive.choice_cost}` : '',
       readerPayoffs.length ? `收益：${readerPayoffs.join('；')}` : '',
@@ -50219,6 +50361,15 @@ export function createNovelWritingService(ctx: {
       || null
     const beatDensityContract = chapterBlueprint?.beat_density_contract || chapterBlueprint?.beatDensityContract || null
     const smallOutlineContract = chapterBlueprint?.small_outline_contract || chapterBlueprint?.smallOutlineContract || null
+    const mainlineDefinitionContract = chapterBlueprint?.mainline_definition_contract
+      || chapterBlueprint?.mainlineDefinitionContract
+      || contextPackage?.chapter_target?.mainline_definition_contract
+      || contextPackage?.chapter_target?.mainlineDefinitionContract
+      || contextPackage?.mainline_definition_contract
+      || contextPackage?.mainlineDefinitionContract
+      || contextPackage?.pre_draft_brief?.mainline_definition_contract
+      || contextPackage?.preDraftBrief?.mainlineDefinitionContract
+      || null
     const skipBenchmarkRecall = benchmarkRecallIsNoBenchmark(benchmarkRecallGapsFromContext(contextPackage, {
       style_sample_strategy: styleSampleStrategy,
       chapter_benchmark_strategy: chapterBenchmarkStrategy,
@@ -50514,6 +50665,14 @@ export function createNovelWritingService(ctx: {
       smallOutlineContract?.purpose_effect_rules?.length ? `目的和效果规则：${smallOutlineContract.purpose_effect_rules.join('；')}` : '',
       smallOutlineContract?.detail_rules?.length ? `详写/略写规则：${smallOutlineContract.detail_rules.join('；')}` : '',
       smallOutlineContract?.locator_rules?.length ? `快速定位规则：${smallOutlineContract.locator_rules.join('；')}` : '',
+      mainlineDefinitionContract ? '【主线定义合同】' : '',
+      mainlineDefinitionContract ? '硬性要求：执行 chapter_target.chapter_blueprint.mainline_definition_contract；主线不等于升级，主线是一件事，不是一个元素，升级是主角达成目标的行动。' : '',
+      mainlineDefinitionContract?.mainline_event ? `本章主线事件 mainline_event：${mainlineDefinitionContract.mainline_event}` : '',
+      mainlineDefinitionContract?.action_role ? `升级/金手指/地图/资源角色：${mainlineDefinitionContract.action_role}` : '',
+      mainlineDefinitionContract?.definition_rules?.length ? `主线定义规则：${mainlineDefinitionContract.definition_rules.join('；')}` : '',
+      mainlineDefinitionContract?.action_rules?.length ? `行动规则：${mainlineDefinitionContract.action_rules.join('；')}` : '',
+      mainlineDefinitionContract?.handoff_rules?.length ? `承接规则：${mainlineDefinitionContract.handoff_rules.join('；')}` : '',
+      mainlineDefinitionContract?.quality_checks?.length ? `主线检查：${mainlineDefinitionContract.quality_checks.join('；')}` : '',
       chapterBlueprint ? 'beat_sequence.function_tag 决定每个情节点展开或带过：关键揭露/打脸/高潮/爽点必须展开；过渡/赶路/信息交代必须压缩。' : '',
       chapterBlueprint ? '执行方式：爽点/高潮出手前必须铺出可指认的危机或期待；装逼、打脸、揭露或反证章必须写出在场角色的差异化反应；过场点带过，卖点/回报点展开，不得均匀注水。' : '',
       chapterBlueprint ? JSON.stringify(chapterBlueprint, null, 2).slice(0, 5000) : '',
@@ -51463,6 +51622,7 @@ export function createNovelWritingService(ctx: {
       '2D++. 执行 chapter_target.story_pressure_brief：本章必须补足压力源、冲突升级、赌注升级和反转逼迫；至少一个场景要让主角付出代价、被迫选择、暴露风险、遭遇反制或得到新的未解问题。',
       '2D+++. 执行 chapter_target.story_drive_brief：必须写出主角主动选择、选择代价、状态变化和下一步因果；主角不能只是旁观、听解释或被事件推着走。',
       '2D+++.1 执行 chapter_target.story_power_contract：必须让故事五维落成正文证据；每个关键场景都要有行动改变局势，开场压力要在章末形成状态变化，动作必须带来代价、信息、关系、规则或敌方反制反馈。',
+      '2D+++.2 执行 chapter_target.chapter_blueprint.mainline_definition_contract：主线不等于升级，主线是一件事，不是一个元素，升级是主角达成目标的行动；每章必须让 mainline_event 发生状态变化，不能把境界升级、金手指展示、地图或设定罗列写成主线。',
       '2D++++. 执行 chapter_target.serial_rhythm_brief：前 300 字必须有开篇钩子；每 800-1200 字至少给一次信息增量、冲突转折、爽点兑现、能力展示、关系变化或小回收；每个场景必须兑现 scene_payoff_budget；章末必须压出追读问题。',
       '2D+++++. 执行 chapter_target.page_turn_hook_brief：最后 300 字必须有可见触发、读者问题和下一章拉力；禁提前解答项不得在本章说明完；结尾不能用“拉开序幕”等模板总结替代现场钩子。',
       '2D++++++. 执行 chapter_target.volume_climax_brief：本章只兑现 current_chapter_role、required_beats 和 climax_promise；不得提前消费 forbidden_payoff 中的卷末爆点、身份答案、终局反转或后续大回报。',
@@ -51516,7 +51676,7 @@ export function createNovelWritingService(ctx: {
       expansionStructureDecision ? '输出附加要求：如果存在 next_batch_brief.expansion_structure_decision，scene_breakdown 的相关场景必须包含 expansion_structure_decision_execution，用 segment_role_delivered、observation_metrics_delivered、redesign_principles_delivered 和 evidence 说明是否真正执行。' : '',
       defaultFiveChapterLaneRedesign ? '输出附加要求：如果存在 default_five_chapter_lane_redesign，expansion_structure_decision_execution 还必须包含 default_lane_segment_duty_delivered、default_lane_conflict_rotation_delivered、default_lane_payoff_density_delivered、default_lane_ending_hook_template_delivered，并分别给出 evidence。' : '',
       defaultFiveChapterLaneTemplate ? '输出附加要求：如果存在 default_five_chapter_lane_template，expansion_structure_decision_execution 必须继续包含 default_lane_segment_duty_delivered、default_lane_conflict_rotation_delivered、default_lane_payoff_density_delivered、default_lane_ending_hook_template_delivered，并用 evidence 说明四项模板在验证批中没有复发。' : '',
-      chapterBlueprint ? '输出附加要求：scene_breakdown 必须包含 blueprint_receipts，逐项回填 target_emotion、opening_hook、core_payoff、content_outline、plot_lines、character_order、beat_sequence、beat_density_contract、cost_and_reward、ending_contract 是否在正文兑现，并给出 evidence 摘要。' : '',
+      chapterBlueprint ? '输出附加要求：scene_breakdown 必须包含 blueprint_receipts，逐项回填 target_emotion、opening_hook、core_payoff、content_outline、plot_lines、character_order、beat_sequence、beat_density_contract、small_outline_contract、mainline_definition_contract、cost_and_reward、ending_contract 是否在正文兑现，并给出 evidence 摘要。' : '',
       '输出附加要求：scene_breakdown 每个场景必须包含 scene_start_anchor、scene_end_anchor 和 scene_card_receipts；scene_start_anchor/scene_end_anchor 必须摘自该场景正文的起止短句，用来定位该场景文本。scene_card_receipts 字段至少包含 scene_goal, obstacle, action, turn, payoff, state_delta, goal_obstacle_change_delivered(boolean)、purpose_tag_delivered(boolean)、density_level_delivered(boolean)、sensory_anchor_delivered(boolean)、serial_risk_repairs_delivered(boolean)、required_beats_delivered(boolean)、action_beats_delivered(boolean)、dialogue_goals_delivered(boolean)、style_directives_delivered(boolean)、benchmark_recall_directives_delivered(boolean)、concept_anchor_rules_delivered(boolean)、prose_craft_directives_delivered(boolean)、relationship_progression_delivered(boolean)、relationship_buffer_zone_delivered(boolean)、supporting_character_action_delivered(boolean)、attitude_shift_delivered(boolean)、relationship_next_hook_delivered(boolean)、evidence(array)。evidence 必须摘录对应场景正文中的动作、对话、信息变化、关系变化、对白声线、新概念锚点、配角主动行动、缓冲区或态度变化证据，不能只写“已完成”，不能借用其他场景的证据。',
       '输出附加要求：必须在章节对象顶层输出 oh_story_delivery_receipts，用于后续诊断和修复闭环落库。oh_story_delivery_receipts 必须包含 chapter_blueprint、scene_card_receipts、delivery_risk_receipts、revision_receipts、pre_draft_execution_receipts；chapter_blueprint 记录本章蓝图兑现状态，scene_card_receipts 汇总每个场景的场景卡执行回执，delivery_risk_receipts 逐项记录上一章/批次交稿风险是否已兑现，revision_receipts 记录本轮生成中主动修正过的结构、连续性、资产或文风问题，pre_draft_execution_receipts 记录状态筛选、项目产物协议、写前准备、意图确认、文风召回和上一章质量续航计划是否真正落入正文。',
       stateTrackingContract ? '输出附加要求：oh_story_delivery_receipts.pre_draft_execution_receipts.status_filter_receipts 必须逐项覆盖【状态筛选合同】中的角色状态、相关伏笔/前史、世界约束、filter_rules 和 source_requirements；每项包含 key,label,used_in_chapter,evidence,excluded_reason,remaining_risk，证明只加载/只使用会影响本章正确性的状态，未使用的信息必须写明为何不会导致本章写错。' : '',
@@ -52934,7 +53094,7 @@ export function createNovelWritingService(ctx: {
     '10A. 执行 oh-story 快速自检口诀：一事一段，镜头自然断；对话要像人说话；心情不写心里话；章尾不搞大升华；打斗不写流水账。发现段落机械断裂、对白书面化、心理告知、章末升华或打斗只有结果时，必须输出 prose_craft_checks、dialogue_checks、chapter_hook_checks 或 deslop_checks，并给出正文证据。',
     '10B. 外部事实查证：如果正文涉及历史年代、地理方位、职业细节、法律/医疗/技术流程、真实机构或真实地名，但上下文没有可靠来源，必须输出 factual_checks，字段 key,label,status(pass|warn|fail),fact_type,claim,verification_status,evidence,fix,remaining_risk；未查证却写成确定事实时必须给出 issue，category=factual。',
     '11. 是否违反 setting_context：境界/战力矛盾、能力代价缺失、物品归属错误、Boss行动逻辑不一致、禁揭设定泄漏、规则触发没有代价、角色知识越界、伏笔误用、预期状态变化缺失。',
-    '12. 是否兑现 chapter_target.chapter_blueprint：目标情绪、开篇钩子、核心回报、小纲四步法（分段判断、目的和效果、详写/略写、快速定位）、五段式内容概括、多线推进、人物出场顺序、情节点功能标签、代价/收益和章尾承接是否都有正文证据。',
+    '12. 是否兑现 chapter_target.chapter_blueprint：目标情绪、开篇钩子、核心回报、小纲四步法（分段判断、目的和效果、详写/略写、快速定位）、主线定义（主线是一件事、升级只是行动）、五段式内容概括、多线推进、人物出场顺序、情节点功能标签、代价/收益和章尾承接是否都有正文证据。',
     '13. 是否出现写作工程词混入正文：按 oh-story 正文元信息扫描，标题行以外不得出现第[一二三四五六七八九十百千万两0-9]+章|上一章|上章|前一章|本章|这一章|前文|后文|伏笔|细纲|读者；命中必须输出 prose_meta_checks，字段 key,label,status,matched_term,location,replacement,evidence,remaining_risk，并要求改成角色当下能感知的事件锚点或相对时间，除非角色在故事世界内真实讨论。',
     '14. 是否兑现 chapter_target.delivery_risk_carry_over 和 batch_preflight.delivery_risk_carry_over：逐项检查每个 items/required_actions/opening_actions/middle_actions/ending_actions 中的上一章风险承接动作；opening_actions 必须在前300字有正文证据，middle_actions 必须落成中段事件推进，ending_actions 必须在最后300字形成追读钩子或承接余波。必须给出正文证据，未兑现必须输出 S1/S2 finding，尤其是开篇承接、章末翻页、去AI味、审稿修法、修订残留、新资产入库和 IP场面延展。',
     '14+. 是否兑现 batch_preflight.delivery_risk_carry_over.creation_contract_carry_over：如果安全连写预检要求先修创作契约，必须逐项检查目标读者、题材定位、核心承诺、追读留存是否都有正文证据；必须输出 target_reader_checks、genre_positioning_checks、core_contract_checks 和 reader_retention_checks，不能只用 delivery_risk_receipts 汇总。',
@@ -52979,6 +53139,8 @@ export function createNovelWritingService(ctx: {
     '29. plot_dynamics_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),goal,obstacle,action,cost_or_feedback,new_expectation,evidence,fix,remaining_risk；缺少行动、代价、反馈、假胜、崩解、悬置收尾或多线错峰时必须给出 S1/S2 finding，category=structure。',
     '29A. 是否兑现 chapter_target.story_power_contract：按 oh-story 故事力门禁检查故事五维、行动改变局势、有动作才是故事、有始有终、因果反馈是否都有正文证据；如果目标/阻碍/动作/反馈/期待任一缺失，或动作没有改变局势，必须输出 story_power_checks。',
     '29B. story_power_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),story_power_dimension,action_changed_situation,beginning_to_end_change,causal_feedback,evidence,fix,remaining_risk；故事五维缺项、角色只听解释/内心独白、开场压力没有章末状态变化、动作没有代价/信息/关系/规则/反制反馈时必须给出 S1/S2 finding，category=structure。',
+    '29C. 是否兑现 chapter_target.chapter_blueprint.mainline_definition_contract：按 oh-story 主线定义检查主线是否明确为一件事、不是一个元素；升级是否只是主角达成目标的行动；本章是否让 mainline_event 发生状态变化；主线完成后是否铺垫第二条主线或选择完结；必须输出 mainline_definition_checks。',
+    '29D. mainline_definition_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),mainline_event,one_thing,upgrade_as_action,state_change,handoff,evidence,fix,remaining_risk；把主线写成境界升级条、金手指元素列表、地图/设定罗列，或只写变强但不改变那一件事时，必须给出 S1/S2 finding，category=structure。',
     '30. 是否兑现 chapter_target.continuity_heat_contract：按 oh-story 连续性热度追踪检查 hot/warm/cold/archived 元素；hot 必须推进，warm 必须有效触达，cold 回收前必须升温，archived 不得误激活；必须输出 continuity_heat_checks。',
     '31. continuity_heat_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),heat_state,hot_progress,warm_keepalive,cold_warmup,archived_boundary,evidence,fix,remaining_risk；冷伏笔突然回收、核心角色断温、重要支线无休眠说明、只提名字不推进时必须给出 S1/S2 finding，category=consistency 或 structure。',
     '32. 是否兑现 chapter_target.character_relation_contract：按 oh-story 角色关系手册检查关系类型明确、关系有弧线、主角目标独立、目标归属清楚、角色不止恋爱、配角期待枢纽、配角攻略缓冲区、配角有主动行动、态度变化可见、亲密/好感行为匹配阶段；目标归属必须检查主角目标是否属于自己的，不能只是帮别人实现目标，关系线可以互助但主角必须保留自己的诉求、主动选择和代价；角色不止恋爱必须检查角色生命中是否有恋爱之外的事业、责任、资源、身份、家族、风险或行动线，不能只是发糖/陪伴/情绪支持的情感工具人；配角期待枢纽必须检查是否有一个关键配角作为任务基地，同时承载短期和长期期待，并在主角解决事件后开启新一轮装逼、新任务或新剧情，人物下线时是否带来更大好处来转化损失厌恶；配角攻略缓冲区必须检查信息差、地位差距、亲密度差距或信任程度是否存在，配角不能像 NPC 一样站着等主角触发，关键拐点必须写出态度变化；必须输出 character_relation_checks。',
@@ -53069,6 +53231,7 @@ export function createNovelWritingService(ctx: {
     '如果存在 chapter_target.dialogue_contract，必须输出 dialogue_checks；不能只用“对白自然/不自然”一句话带过。',
     '如果存在 chapter_target.plot_dynamics_contract，必须输出 plot_dynamics_checks；不能只用“节奏可以/不可以”一句话带过，必须明确驱动方式是否匹配题材，以及本章是否给出外部结果或保留人物心结。',
     '如果存在 chapter_target.story_power_contract，必须输出 story_power_checks；不能只用“故事性强/弱”一句话带过，必须明确故事五维、行动改变局势、有始有终和因果反馈是否都有正文证据。',
+    '如果存在 chapter_target.chapter_blueprint.mainline_definition_contract，必须输出 mainline_definition_checks；不能只用“主线清楚/不清楚”一句话带过，必须明确主线是否是一件事、升级是否只是行动、mainline_event 是否发生状态变化。',
     '如果存在 chapter_target.continuity_heat_contract，必须输出 continuity_heat_checks；不能只用“伏笔有提到/没提到”一句话带过。',
     '如果存在 chapter_target.character_relation_contract，必须输出 character_relation_checks；不能只用“人物关系正常/不正常”一句话带过。',
     '如果存在 chapter_target.character_behavior_contract，必须输出 character_behavior_checks；不能只用“人物行为正常/不正常”一句话带过，必须明确检查主角逼格反应：升级线与反应线是否分开、低级挑衅是否被轻描淡写或行动压制处理。',
@@ -53691,6 +53854,7 @@ export function createNovelWritingService(ctx: {
       ],
       plot_dynamics_checks: [...requiredContractChecks('plot_dynamics_checks', 'plotDynamicsChecks', 'plot_dynamics_contract', '剧情动力'), ...deterministicLocalVictoryCostChecks, ...deterministicPlotDynamicsChecks],
       story_power_checks: requiredContractChecks('story_power_checks', 'storyPowerChecks', 'story_power_contract', '故事力'),
+      mainline_definition_checks: requiredContractChecks('mainline_definition_checks', 'mainlineDefinitionChecks', 'mainline_definition_contract', '主线定义'),
       continuity_heat_checks: [...requiredContractChecks('continuity_heat_checks', 'continuityHeatChecks', 'continuity_heat_contract', '连续性热度'), ...deterministicContinuityHeatChecks],
       character_relation_checks: [...requiredContractChecks('character_relation_checks', 'characterRelationChecks', 'character_relation_contract', '角色关系'), ...deterministicRelationshipSceneChangeChecks, ...deterministicCharacterRelationChecks],
       character_behavior_checks: [...requiredContractChecks('character_behavior_checks', 'characterBehaviorChecks', 'character_behavior_contract', '角色行为'), ...deterministicProtagonistComposureChecks, ...deterministicCharacterBehaviorChecks],
@@ -54210,8 +54374,8 @@ export function createNovelWritingService(ctx: {
           const result = await executeNovelAgent('outline-agent', project, {
             task: [
               '任务：为无人值守章节写作补齐本章蓝图。只输出 JSON，不写正文。',
-              '输出字段：title, chapter_goal, chapter_summary, conflict, ending_hook, chapter_blueprint, emotional_arc_contract, chapter_hook_contract, paragraph_hook_contract, opening_contract, suspense_contract, reversal_contract, showdown_contract, bridge_unit_contract, style_boundary_contract, plot_dynamics_contract, story_power_contract, information_flow_contract, expectation_threshold_contract, story_loop_contract, prose_craft_contract, punctuation_tone_contract, quality_audit_contract, dialogue_contract, continuity_heat_contract, character_relation_contract, character_behavior_contract, asset_linkage_contract, state_tracking_contract, intent_confirmation_contract, target_reader_contract, genre_positioning_contract, core_contract_radar, female_audience_contract, upgrade_rhythm_contract, conflict_structure_contract, must_advance(array), forbidden_repeats(array), repair_summary。',
-              'chapter_blueprint 必须包含 target_emotion, opening_hook, core_payoff, content_outline(cause/development/turn/climax/ending), small_outline_contract(steps/purpose_effect_rules/detail_rules/locator_rules/segment_cards), causal_chain_contract(act_order/act_functions/quality_checks), plot_lines(mainline/subplot/event_line/relationship_line/logic_line), character_order, beat_sequence, beat_density_contract, cost_and_reward, ending_contract(final_state/unresolved_question/next_chapter_pull)；small_outline_contract 必须按 oh-story 小纲四步法输出分段判断、目的和效果、详写/略写、快速定位，segment_cards 每项包含 segment_no,segment,purpose,intended_effect,detail_level,quick_locator；causal_chain_contract 必须按 oh-story 五幕式输出种子/生长/转折/冲刺/完成，要求不能跳步、不能乱序；beat_sequence 每项必须包含 beat_no/scene_no/action/function_tag/payoff，function_tag 必须决定展开还是带过，关键揭露/打脸/高潮/爽点必须展开，过渡/赶路/信息交代必须压缩。',
+              '输出字段：title, chapter_goal, chapter_summary, conflict, ending_hook, chapter_blueprint, emotional_arc_contract, chapter_hook_contract, paragraph_hook_contract, opening_contract, suspense_contract, reversal_contract, showdown_contract, bridge_unit_contract, style_boundary_contract, plot_dynamics_contract, story_power_contract, mainline_definition_contract, information_flow_contract, expectation_threshold_contract, story_loop_contract, prose_craft_contract, punctuation_tone_contract, quality_audit_contract, dialogue_contract, continuity_heat_contract, character_relation_contract, character_behavior_contract, asset_linkage_contract, state_tracking_contract, intent_confirmation_contract, target_reader_contract, genre_positioning_contract, core_contract_radar, female_audience_contract, upgrade_rhythm_contract, conflict_structure_contract, must_advance(array), forbidden_repeats(array), repair_summary。',
+              'chapter_blueprint 必须包含 target_emotion, opening_hook, core_payoff, content_outline(cause/development/turn/climax/ending), small_outline_contract(steps/purpose_effect_rules/detail_rules/locator_rules/segment_cards), mainline_definition_contract(mainline_event/definition_rules/action_rules/handoff_rules/forbidden_mainline_shapes/quality_checks), causal_chain_contract(act_order/act_functions/quality_checks), plot_lines(mainline/subplot/event_line/relationship_line/logic_line), character_order, beat_sequence, beat_density_contract, cost_and_reward, ending_contract(final_state/unresolved_question/next_chapter_pull)；small_outline_contract 必须按 oh-story 小纲四步法输出分段判断、目的和效果、详写/略写、快速定位，segment_cards 每项包含 segment_no,segment,purpose,intended_effect,detail_level,quick_locator；mainline_definition_contract 必须按 oh-story 主线定义输出主线不等于升级、主线是一件事、升级是主角达成目标的行动、不是一个元素和主线完成后的承接规则；causal_chain_contract 必须按 oh-story 五幕式输出种子/生长/转折/冲刺/完成，要求不能跳步、不能乱序；beat_sequence 每项必须包含 beat_no/scene_no/action/function_tag/payoff，function_tag 必须决定展开还是带过，关键揭露/打脸/高潮/爽点必须展开，过渡/赶路/信息交代必须压缩。',
               '情绪弧合同 emotional_arc_contract 必须按 oh-story 情绪弧与 emotional-methods 输出 arc_shape, emotion_formula, pressure_methods, payoff_types, payoff_reverse_design, payoff_tier_rules, payoff_density_rules, emotion_module_recomposition_rules, payoff_escalation_rules, scene_execution_rules, expectation_rules, safety_rules, bonding_setup_rules, emotional_tear_rules, lingering_aftertaste_rules, emotional_turning_rules, first_impression_rules, peak_end_rules, emotion_layer_rules, reaction_structure_rules, ideological_conflict_rules, failure_mode_guards, quality_checks，明确本章如何完成平静 -> 调动 -> 释放 -> 爽、爽点倒推法（先定爽点类型 -> 再定期待点 -> 最后倒推铺垫，正文按铺垫 -> 期待升高 -> 爽点释放呈现）、场景情绪执行（每个场景标注调动/复现/释放/后反应，闭环当前期待时开启下一开环）、装逼层级（日常小装逼/核心爽点/偏离爽点）、多爽点密度（不要拉长单个爽点铺垫，800-1200 字内要有信息增量/能力展示/危机反制/关系变化/小回收）、先入为主（前100字先给核心矛盾/主角处境/不公平异常，注意否定提前）、峰终定律（结尾情绪必须高于起点，结尾情绪强度虐≥8、爽≥7、治愈≥6，最后一击必须是动作/对话/画面）、三层情绪（角色自己的情绪、文本传递的情绪、读者实际感受分离，角色在哭不等于读者哭，必须转成读者收益）、情绪反应结构（前反应 -> 复现 -> 后反应；以小搏大 -> 士气如虹）、理念矛盾（理念之争比利益之争更能引发深层共鸣，把原则碰撞、追求和牺牲落成具体选择与代价）、情绪模块重组（戏剧性会磨损，情绪不会磨损；复用套路必须换场景/换对手/加新情绪或提高 stakes/奖励复杂度）、情绪三板斧（羁绊铺设/情感撕裂/余韵钝痛）和每 3-5 个小节的事件触发情绪转向，并让连续爽点按影响范围、揭示深度或身份落差递增。',
               '章级钩子合同 chapter_hook_contract 必须按 oh-story 章首/章尾钩子输出 opening_hook_type, ending_hook_type, hook_strength, opening_hook_rules, ending_hook_rules, forbidden_patterns, quality_checks，明确前 100-300 字和最后 300 字如何制造追读。',
               '段落级钩子合同 paragraph_hook_contract 必须按 oh-story 段落级钩子输出 micro_hook_types, hook_combinations, dialogue_escalation, spectator_layers, forbidden_patterns, quality_checks，明确本章每 3-5 段如何制造信息、风险、情绪或关系变化。',
@@ -54224,6 +54388,7 @@ export function createNovelWritingService(ctx: {
               '核心商业雷达 core_contract_radar 必须按 oh-story commercial-core-methods 输出 must_serve, no_drift, theme_unity_rules, selling_point_execution_rules, repetition_strategy_rules, commercial_rhythm_rules, goldfinger_structure_rules, launch_pressure_rules, repair_focus, checks；selling_point_execution_rules 必须包含卖点四步法、发现比告知爽十倍和开头暗示 -> 中间深化 -> 高潮爆发；repetition_strategy_rules 必须包含重复点和同一卖点至少延展 3 个角度；commercial_rhythm_rules 必须包含追踪/上下文.md、最近3章、连续 2 章没有目标推进/阻碍升级/新信息和大高潮 7-10 天；goldfinger_structure_rules 必须包含金手指可替换故事流程中的任一环节、简单一眼就懂和系统限制；launch_pressure_rules 必须包含开篇 300-500字内交代处境、危险来源和破局希望，以及优先用环境型压力开局。',
               '剧情动力合同 plot_dynamics_contract 必须按 oh-story 剧情核心方法输出 goal, obstacle, action, cost_feedback, next_expectation, drive_mode_rules, line_stagger_rules, quality_checks，确保目标→阻碍→行动→代价/反馈→新期待闭环；drive_mode_rules 必须包含事件驱动/情感驱动/混合模式选择：番茄爽文/打脸文每章给外部结果（赢、升级、对手栽），追妻/虐心/世情持续人物心结，混合模式主线事件推进并每 3-5 章插情感停顿；并让主线和支线错开节奏推进，不能同时爆完或同时空转。',
               '故事力合同 story_power_contract 必须按 oh-story 剧情核心方法输出 story_power_dimensions, chapter_power_loop, action_rules, beginning_end_rules, causal_feedback_rules, quality_checks，确保故事五维、有动作才是故事、有始有终、因果反馈和行动改变局势都能进入正文门禁。',
+              '主线定义合同 mainline_definition_contract 必须按 oh-story 剧情核心方法输出 mainline_event, definition_rules, action_rules, handoff_rules, forbidden_mainline_shapes, quality_checks，确保主线不等于升级、主线是一件事、升级只是达成目标的行动。',
               '信息流合同 information_flow_contract 必须输出 scene_information_units, reveal_order, suspense_responses, transition_compression_rules, no_infodump_guardrails, quality_checks，确保信息随冲突释放，不写背景说明书；transition_compression_rules 必须包含过渡不是填充、没有信息量就删掉、纯移动/寒暄/环境描写直接跳过或压缩。',
               '期待阈值合同 expectation_threshold_contract 必须输出 current_expectations, payoff_or_delay_plan, next_open_loop, vacuum_guardrails, expectation_before_payoff_rules, expectation_relay_rules, three_expectation_lines, quality_checks；expectation_before_payoff_rules 必须包含期待感 > 爽点、铺垫篇幅不少于释放篇幅和延迟满足；expectation_relay_rules 必须包含期待接力法、旧期待闭环前下一开环已经运行、当一层即将满足时先铺好下一层期待、至少两条期待线并行运行；确保兑现旧期待前先种下新期待，并保持剧情期待 + 主题甜头 + 新鲜感三线并存。',
               '故事循环合同 story_loop_contract 必须输出 setup, escalation, payoff, carry_over, map_transition_rules, nested_loop_rules, quality_checks，确保本章不是孤立事件而是长线循环的一环；map_transition_rules 必须包含旧地图核心冲突阶段性解决、新地图 = 新环境 + 新角色 + 新规则 + 新目标 + 新冲突、前5章建立代入感和期待感、保留贯穿主线、人际关系动了 -> 主角再动、避免旧线全抛和新设定一次性倒出；nested_loop_rules 必须包含“小循环 -> 中循环 -> 大循环”、小循环中必须铺垫大循环的期待，以及同一核心卖点的不同角度/不同矛盾。',
@@ -54302,6 +54467,13 @@ export function createNovelWritingService(ctx: {
         climax: compactBriefText(payloadContentOutline.climax || payload?.climax || nextGoal),
         ending: compactBriefText(payloadContentOutline.ending || nextHook),
       }
+      const repairedPlotLines = {
+        mainline: compactBriefText(payloadPlotLines.mainline || payloadPlotLines.main_line || payloadPlotLines.mainLine || nextGoal),
+        subplot: compactBriefText(payloadPlotLines.subplot || ''),
+        event_line: compactBriefText(payloadPlotLines.event_line || payloadPlotLines.eventLine || nextSummary),
+        relationship_line: compactBriefText(payloadPlotLines.relationship_line || payloadPlotLines.relationshipLine || ''),
+        logic_line: compactBriefText(payloadPlotLines.logic_line || payloadPlotLines.logicLine || [nextSummary, nextConflict, nextGoal, nextHook].filter(Boolean).join(' -> ')),
+      }
       const smallOutlineScenes = repairedBeatSequence.map((beat: any, index: number) => ({
         scene_no: Number(beat.scene_no || beat.sceneNo || beat.beat_no || beat.beatNo || index + 1),
         title: compactBriefText(beat.title || `情节点${index + 1}`),
@@ -54322,14 +54494,28 @@ export function createNovelWritingService(ctx: {
           repairedContentOutline,
           payloadBlueprint.small_outline_contract || payloadBlueprint.smallOutlineContract,
         ),
+        mainline_definition_contract: buildMainlineDefinitionContract(project, {
+          ...contextPackage,
+          chapter_target: {
+            ...(contextPackage?.chapter_target || {}),
+            summary: nextSummary,
+            goal: nextGoal,
+            conflict: nextConflict,
+            ending_hook: nextHook,
+            chapter_blueprint: {
+              ...payloadBlueprint,
+              content_outline: repairedContentOutline,
+              plot_lines: repairedPlotLines,
+            },
+          },
+          chapter_blueprint: {
+            ...payloadBlueprint,
+            content_outline: repairedContentOutline,
+            plot_lines: repairedPlotLines,
+          },
+        }, payloadBlueprint.mainline_definition_contract || payloadBlueprint.mainlineDefinitionContract || payload?.mainline_definition_contract || payload?.mainlineDefinitionContract),
         causal_chain_contract: buildChapterBlueprintCausalChainContract(repairedContentOutline, payloadCausalChainContract),
-        plot_lines: {
-          mainline: compactBriefText(payloadPlotLines.mainline || payloadPlotLines.main_line || payloadPlotLines.mainLine || nextGoal),
-          subplot: compactBriefText(payloadPlotLines.subplot || ''),
-          event_line: compactBriefText(payloadPlotLines.event_line || payloadPlotLines.eventLine || nextSummary),
-          relationship_line: compactBriefText(payloadPlotLines.relationship_line || payloadPlotLines.relationshipLine || ''),
-          logic_line: compactBriefText(payloadPlotLines.logic_line || payloadPlotLines.logicLine || [nextSummary, nextConflict, nextGoal, nextHook].filter(Boolean).join(' -> ')),
-        },
+        plot_lines: repairedPlotLines,
         character_order: characterOrder.length ? characterOrder : fallbackCharacterOrder,
         beat_sequence: repairedBeatSequence,
         beat_density_contract: buildChapterBlueprintBeatDensityContract(
@@ -54359,6 +54545,7 @@ export function createNovelWritingService(ctx: {
         style_boundary_contract: payload?.style_boundary_contract || payload?.styleBoundaryContract || contextPackage?.style_boundary_contract,
         plot_dynamics_contract: payload?.plot_dynamics_contract || payload?.plotDynamicsContract || contextPackage?.plot_dynamics_contract,
         story_power_contract: payload?.story_power_contract || payload?.storyPowerContract || contextPackage?.story_power_contract,
+        mainline_definition_contract: payload?.mainline_definition_contract || payload?.mainlineDefinitionContract || contextPackage?.mainline_definition_contract,
         information_flow_contract: payload?.information_flow_contract || payload?.informationFlowContract || contextPackage?.information_flow_contract,
         expectation_threshold_contract: payload?.expectation_threshold_contract || payload?.expectationThresholdContract || contextPackage?.expectation_threshold_contract,
         story_loop_contract: payload?.story_loop_contract || payload?.storyLoopContract || contextPackage?.story_loop_contract,
@@ -54397,6 +54584,7 @@ export function createNovelWritingService(ctx: {
           style_boundary_contract: payload?.style_boundary_contract || payload?.styleBoundaryContract || contextPackage?.chapter_target?.style_boundary_contract,
           plot_dynamics_contract: payload?.plot_dynamics_contract || payload?.plotDynamicsContract || contextPackage?.chapter_target?.plot_dynamics_contract,
           story_power_contract: payload?.story_power_contract || payload?.storyPowerContract || contextPackage?.chapter_target?.story_power_contract,
+          mainline_definition_contract: payload?.mainline_definition_contract || payload?.mainlineDefinitionContract || contextPackage?.chapter_target?.mainline_definition_contract,
           information_flow_contract: payload?.information_flow_contract || payload?.informationFlowContract || contextPackage?.chapter_target?.information_flow_contract,
           expectation_threshold_contract: payload?.expectation_threshold_contract || payload?.expectationThresholdContract || contextPackage?.chapter_target?.expectation_threshold_contract,
           story_loop_contract: payload?.story_loop_contract || payload?.storyLoopContract || contextPackage?.chapter_target?.story_loop_contract,
@@ -54484,6 +54672,7 @@ export function createNovelWritingService(ctx: {
             style_boundary_contract: repairedEmotionAndHookBrief.style_boundary_contract,
             plot_dynamics_contract: repairedEmotionAndHookBrief.plot_dynamics_contract,
             story_power_contract: repairedEmotionAndHookBrief.story_power_contract,
+            mainline_definition_contract: repairedChapterBlueprint.mainline_definition_contract,
             information_flow_contract: repairedEmotionAndHookBrief.information_flow_contract,
             expectation_threshold_contract: repairedEmotionAndHookBrief.expectation_threshold_contract,
             story_loop_contract: repairedEmotionAndHookBrief.story_loop_contract,
