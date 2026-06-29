@@ -52590,6 +52590,48 @@ describe('chapter context word target source guards', () => {
     expect(context.chapter_target.delivery_risk_carry_over?.required_actions?.join('；') || '').toContain('上一章章末钩子不能空承接')
   })
 
+  test('builds pre-draft core contract radar when saved fields are objects', () => {
+    const brief = buildChapterPreDraftBrief(
+      {
+        id: 90,
+        title: '旧城维修师',
+        genre: '都市奇谈',
+        synopsis: '主角用旧城维修规则解决异常危机。',
+        reference_config: {
+          writing_bible: {
+            coreContractRadar: {
+              summary: '旧城维修规则必须持续服务主线爽点。',
+              mustServe: {
+                promise: '主角用维修规则解决旧城危机',
+              },
+              noDrift: {
+                redLine: '不得把维修主线改成纯恋爱',
+              },
+              repairFocus: {
+                action: '第2章必须把旧钥匙变成现场证据',
+              },
+            },
+          },
+        },
+      },
+      {
+        chapter_target: {
+          chapter_no: 2,
+          title: '旧钥匙',
+          summary: '主角拿到旧钥匙并发现维修规则。',
+          conflict: '旧城管理员阻止主角检查门锁。',
+          scene_cards: [
+            { scene_no: 1, title: '旧钥匙', reader_payoff: '主角把旧钥匙变成现场证据。' },
+          ],
+        },
+      },
+    )
+
+    expect(brief.core_contract_radar.must_serve).toContain('主角用维修规则解决旧城危机')
+    expect(brief.core_contract_radar.no_drift).toContain('不得把维修主线改成纯恋爱')
+    expect(brief.core_contract_radar.repair_focus).toContain('第2章必须把旧钥匙变成现场证据')
+  })
+
   test('carries stored daily progress summary into built chapter context package', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'mangaforge-context-progress-summary-'))
     const service = createNovelWritingService({

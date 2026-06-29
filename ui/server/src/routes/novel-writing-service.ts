@@ -18429,9 +18429,13 @@ const OH_STORY_CORE_CONTRACT_LAUNCH_PRESSURE_RULES = [
   '轻松向开篇也要让主角一无所有 + 金手指一眼就知道怎么用，不能先铺背景或大段世界观。',
 ]
 
-function uniqueBriefStrings(values: any[], limit = 12) {
-  return Array.from(new Set(values
-    .flatMap(value => Array.isArray(value) ? value : [value])
+function uniqueBriefStrings(values: any, limit = 12) {
+  const flattenBriefValues = (value: any): any[] => {
+    if (Array.isArray(value)) return value.flatMap(item => flattenBriefValues(item))
+    if (value && typeof value === 'object') return Object.values(value).flatMap(item => flattenBriefValues(item))
+    return value ? [value] : []
+  }
+  return Array.from(new Set(flattenBriefValues(values)
     .map(value => compactBriefText(value))
     .filter(Boolean))).slice(0, limit)
 }
