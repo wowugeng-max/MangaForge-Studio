@@ -210,6 +210,7 @@ const ACTION_EXECUTION_LABELS: Record<ActionExecutionKind, string> = {
 
 function actionExecutionMeta(action: AutoCreationDirectorAction): { kind: ActionExecutionKind; label: string } {
   const key = String(action.key)
+  if (key === 'auto_repair_blockers') return { kind: 'background', label: ACTION_EXECUTION_LABELS.background }
   if (key === 'start_safe_batch_generation') return { kind: 'background', label: ACTION_EXECUTION_LABELS.background }
   if (action.modelCall) return { kind: 'model', label: ACTION_EXECUTION_LABELS.model }
   if (key.startsWith('create_') || key.includes('repair') || key.includes('_queue')) {
@@ -528,6 +529,30 @@ export function AutoCreationDirectorWorkspace({
           <Text strong>{model.mainAction.label}</Text>
           <Paragraph>{model.mainAction.description}</Paragraph>
           {model.mainAction.modelCall && <Text className="auto-director-model-note">会调用大模型，长文本任务保持流式/后台任务执行。</Text>}
+          {model.repairPlan.visible && (
+            <div className="auto-director-repair-plan">
+              <div className="auto-director-repair-plan-copy">
+                <Text strong>一键处理当前阻塞</Text>
+                <Text type="secondary">{model.repairPlan.summary}</Text>
+              </div>
+              <ActionButton
+                primary
+                action={model.repairPlan.primaryAction}
+                loadingActionKey={loadingActionKey}
+                onAction={onAction}
+              />
+              <div className="auto-director-repair-plan-actions">
+                {model.repairPlan.actions.slice(0, 4).map(action => (
+                  <Tag key={`${action.area}-${action.key}`} bordered={false}>
+                    {action.label}
+                  </Tag>
+                ))}
+                {model.repairPlan.actions.length > 4 && (
+                  <Tag bordered={false}>另 {model.repairPlan.actions.length - 4} 项</Tag>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

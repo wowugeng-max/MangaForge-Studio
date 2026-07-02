@@ -1399,10 +1399,18 @@
 
 .novel-deslop-gate-summary .ant-typography {
   min-width: 0;
+  flex: 1;
   font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.novel-deslop-gate-action {
+  flex: 0 0 auto;
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 750;
 }
 
 .novel-deslop-gate-grid {

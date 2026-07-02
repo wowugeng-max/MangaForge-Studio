@@ -7,6 +7,7 @@ import {
   createNovelOutline,
   createNovelProject,
   createNovelProjectSeedDraft,
+  createNovelSettingEntity,
   createNovelWorldbuilding,
   deleteNovelChapter,
   deleteNovelOutline,
@@ -21,6 +22,7 @@ import {
   listNovelProjectSeedDrafts,
   listNovelWorldbuilding,
   rollbackChapterVersion,
+  syncNovelChapterPlanByNumber,
   updateNovelCharacter,
   updateNovelChapter,
   updateNovelOutline,
@@ -37,6 +39,7 @@ import { buildOhStoryCharacterDesignContract, formatOhStoryCharacterDesignPrompt
 import { buildOhStoryStoryPowerContract, formatOhStoryStoryPowerPrompt } from './novel-story-power-contract'
 import { buildOhStoryMainlineDefinitionContract, formatOhStoryMainlineDefinitionPrompt } from './novel-mainline-definition-contract'
 import { buildOhStoryLongformStructureContract, formatOhStoryLongformStructurePrompt } from './novel-longform-structure-contract'
+import { normalizeSettingAgentPayload } from './novel-setting-routes'
 
 function parseOptionalBoolean(value: any) {
   if (value === undefined) return undefined
@@ -1671,13 +1674,146 @@ function buildFallbackWritingBible(seed: any, project: any = {}) {
   }
 }
 
+function normalizeSeedCurrentState(value: any, fallback: any = {}) {
+  if (typeof value === 'string') {
+    const parsed = parseNestedSeed(value)
+    return Object.keys(parsed).length ? parsed : { summary: value }
+  }
+  const parsed = parseNestedSeed(value)
+  return Object.keys(parsed).length ? parsed : parseNestedSeed(fallback)
+}
+
+function seedCharacterName(character: any) {
+  return firstSeedText(character?.name, character?.title, character?.alias)
+}
+
+function buildMaterializedSeedCharacters(seed: any) {
+  const root = parseNestedSeed(seed)
+  const seen = new Set<string>()
+  const output: any[] = []
+  const add = (character: any, defaults: any = {}) => {
+    const parsed = { ...defaults, ...parseNestedSeed(character) }
+    const name = seedCharacterName(parsed)
+    if (!name || seen.has(name)) return
+    seen.add(name)
+    output.push({ ...parsed, name })
+  }
+  asSeedArray(root.characters).forEach(character => add(character))
+  add(root.protagonist, { role_type: 'protagonist' })
+  add(root.antagonist, { role_type: 'antagonist' })
+  return output
+}
+
+function buildProjectSeedStoryState(seed: any, project: any, characters: any[]) {
+  const existing = parseNestedSeed(project?.reference_config?.story_state)
+  const currentPhase = firstSeedText(
+    existing.current_phase,
+    seed?.opening_phase,
+    asSeedArray(seed?.chapter_outlines)[0]?.title,
+    '开篇准备',
+  )
+  const stateCharacters = characters.map((character: any) => {
+    const currentState = normalizeSeedCurrentState(character.current_state, {
+      status: '待写入正文',
+      goal: character.goal || '',
+      pressure: character.conflict || '',
+    })
+    return {
+      name: seedCharacterName(character),
+      role_type: firstSeedText(character.role_type, character.role),
+      goal: firstSeedText(character.goal, character.motivation),
+      motivation: firstSeedText(character.motivation),
+      conflict: firstSeedText(character.conflict),
+      current_state: currentState,
+      source: 'project_seed_materialization',
+    }
+  }).filter((character: any) => character.name)
+  return {
+    ...existing,
+    source: existing.source || 'project_seed_materialization',
+    current_phase: currentPhase,
+    progress_summary: firstSeedText(existing.progress_summary, seed?.synopsis, project?.synopsis),
+    active_threads: asSeedArray(existing.active_threads).length
+      ? existing.active_threads
+      : uniqueSeedTexts([
+        seed?.main_conflict,
+        seed?.logline,
+        seed?.core_premise,
+      ], 5),
+    characters: asSeedArray(existing.characters).length ? existing.characters : stateCharacters,
+    updated_at: new Date().toISOString(),
+  }
+}
+
+function normalizeSeedSceneCards(chapter: any, characters: any[]) {
+  const rawCards = firstNonEmptySeedArray(
+    chapter.scene_cards,
+    chapter.sceneCards,
+    chapter.scene_breakdown,
+    chapter.sceneBreakdown,
+    chapter.scene_list,
+    chapter.sceneList,
+    chapter.scenes,
+  )
+  const characterNames = characters.map(seedCharacterName).filter(Boolean).slice(0, 4)
+  if (rawCards.length) {
+    return rawCards.map((card: any, index: number) => ({
+      scene_no: Number(card?.scene_no || card?.sceneNo || index + 1),
+      title: firstSeedText(card?.title, card?.name, `场景${index + 1}`),
+      purpose: firstSeedText(card?.purpose, card?.goal, card?.function_tag, chapter.chapter_goal, '推进本章目标'),
+      summary: firstSeedText(card?.summary, card?.content, card?.beats, chapter.chapter_summary),
+      conflict: firstSeedText(card?.conflict, card?.obstacle, chapter.conflict),
+      characters: asSeedArray(card?.characters).length ? asSeedArray(card.characters) : characterNames,
+      expected_state_change: firstSeedText(card?.expected_state_change, card?.state_change, chapter.raw_payload?.must_advance),
+      ending_hook_seed: firstSeedText(card?.ending_hook_seed, card?.hook, index === rawCards.length - 1 ? chapter.ending_hook : ''),
+      density_level: firstSeedText(card?.density_level, card?.densityLevel, index === rawCards.length - 1 ? 'dense' : 'medium'),
+      purpose_tag: firstSeedText(card?.purpose_tag, card?.purposeTag, index === rawCards.length - 1 ? '章尾钩子' : '推进'),
+      source: firstSeedText(card?.source, 'project_seed'),
+      raw_payload: card,
+    }))
+  }
+  const goal = firstSeedText(chapter.chapter_goal, chapter.raw_payload?.goal, '推进本章核心目标')
+  const summary = firstSeedText(chapter.chapter_summary, chapter.raw_payload?.summary, goal)
+  const conflict = firstSeedText(chapter.conflict, chapter.raw_payload?.conflict, '让目标遭遇明确阻碍')
+  const endingHook = firstSeedText(chapter.ending_hook, chapter.raw_payload?.ending_hook, chapter.raw_payload?.hook)
+  const cards = [
+    {
+      scene_no: 1,
+      title: '目标入场',
+      purpose: goal,
+      summary,
+      conflict,
+      characters: characterNames,
+      expected_state_change: goal,
+      density_level: 'medium',
+      purpose_tag: '开场承接',
+      source: 'project_seed_materialization',
+    },
+    {
+      scene_no: 2,
+      title: endingHook ? '章尾钩子' : '目标推进',
+      purpose: endingHook ? '把本章冲突推到章尾追读压力' : '完成本章目标推进',
+      summary: endingHook ? `${summary}；章尾留下：${endingHook}` : summary,
+      conflict,
+      characters: characterNames,
+      expected_state_change: firstSeedText(endingHook, conflict, goal),
+      ending_hook_seed: endingHook,
+      density_level: endingHook ? 'dense' : 'medium',
+      purpose_tag: endingHook ? '章尾钩子' : '推进',
+      source: 'project_seed_materialization',
+    },
+  ]
+  return cards
+}
+
 async function materializeProjectSeed(activeWorkspace: string, project: any, seed: any) {
   const raw = getSeedRaw(seed)
   const master = parseNestedSeed(raw.master_outline || seed.master_outline)
   const volumeOutlines = getSeedVolumeOutlines(seed)
   const chapterOutlines = getSeedChapterOutlines(seed).map((chapter: any, index: number) => normalizeChapterSeed(chapter, index, seed))
   const writingBible = buildFallbackWritingBible(seed, project)
-  const created: any = { worldbuilding: 0, characters: 0, outlines: 0, chapters: 0 }
+  const materializedCharacters = buildMaterializedSeedCharacters(seed)
+  const created: any = { worldbuilding: 0, characters: 0, outlines: 0, chapters: 0, setting_entities: 0 }
 
   const world = parseNestedSeed(seed.worldbuilding)
   const worldSummary = firstSeedText(world.world_summary, world.history_secret, world.power_system, seed.core_premise, master.summary, project.synopsis)
@@ -1697,8 +1833,7 @@ async function materializeProjectSeed(activeWorkspace: string, project: any, see
     created.worldbuilding += 1
   }
 
-  const characters = asSeedArray(seed.characters)
-  for (const character of characters) {
+  for (const character of materializedCharacters) {
     if (!character?.name) continue
     await createNovelCharacter(activeWorkspace, {
       project_id: project.id,
@@ -1713,6 +1848,16 @@ async function materializeProjectSeed(activeWorkspace: string, project: any, see
       raw_payload: { ...character, source: 'project_seed' },
     })
     created.characters += 1
+  }
+
+  const settingEntities = firstNonEmptySeedArray(raw.setting_entities, seed.setting_entities)
+  for (const entity of normalizeSettingAgentPayload({ settings: settingEntities }, project.id)) {
+    await createNovelSettingEntity(activeWorkspace, {
+      ...entity,
+      project_id: project.id,
+      payload_json: { ...(entity.payload_json || {}), source: entity.payload_json?.source || 'project_seed_materialization' },
+    } as any)
+    created.setting_entities += 1
   }
 
   const masterOutline = await createNovelOutline(activeWorkspace, {
@@ -1743,7 +1888,8 @@ async function materializeProjectSeed(activeWorkspace: string, project: any, see
 
   for (const chapter of chapterOutlines) {
     if (!chapter.chapter_no) continue
-    await createNovelChapter(activeWorkspace, {
+    const sceneCards = normalizeSeedSceneCards(chapter, materializedCharacters)
+    await syncNovelChapterPlanByNumber(activeWorkspace, {
       project_id: project.id,
       chapter_no: chapter.chapter_no,
       title: chapter.title,
@@ -1751,8 +1897,10 @@ async function materializeProjectSeed(activeWorkspace: string, project: any, see
       chapter_summary: chapter.chapter_summary,
       conflict: chapter.conflict,
       ending_hook: chapter.ending_hook,
-      raw_payload: { ...chapter.raw_payload, source: 'project_seed' },
-    })
+      scene_breakdown: sceneCards,
+      scene_list: sceneCards,
+      raw_payload: { ...chapter.raw_payload, scene_cards_source: 'project_seed_materialization', source: 'project_seed' },
+    }, { parent_id: masterOutline.id, source: 'project_seed' })
     created.chapters += 1
   }
 
@@ -1767,6 +1915,7 @@ async function materializeProjectSeed(activeWorkspace: string, project: any, see
       ...writingBible,
       updated_at: new Date().toISOString(),
     },
+    story_state: buildProjectSeedStoryState(seed, project, materializedCharacters),
     commercial_positioning: Object.keys(parseNestedSeed(project.reference_config?.commercial_positioning)).length
       && project.reference_config?.commercial_positioning?.seed !== true
       ? project.reference_config?.commercial_positioning

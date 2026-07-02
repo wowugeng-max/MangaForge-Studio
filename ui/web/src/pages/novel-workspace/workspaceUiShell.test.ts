@@ -40,6 +40,11 @@ describe('commercial writing workspace UI shell', () => {
     expect(component).toContain('novel-editor-command-pill')
     expect(component).toContain('novel-word-preset')
     expect(component).toContain('novel-editor-toolbar-meta')
+    expect(component).not.toContain('novel-editor-action-group-draft')
+    expect(component).not.toContain('生成正文</Text>')
+    expect(component).not.toContain('onStartChapterPipeline}>流水线')
+    expect(component).not.toContain('onRepairAndGenerateCurrentChapter}>\n            补齐并生成')
+    expect(component).not.toContain('onGenerateCurrentChapterProse}>\n          生成')
     expect(component).not.toContain('NOVEL_WRITING_DESK_COLLAPSED_KEY')
     expect(component).not.toContain('setWritingDeskCollapsed')
     expect(component).not.toContain('novel-editor-desk-toggle')
@@ -63,6 +68,31 @@ describe('commercial writing workspace UI shell', () => {
     expect(css).not.toContain('.novel-editor-action-flow')
     expect(css).not.toContain('.novel-editor-collapsed-actions')
     expect(css).toContain('flex-shrink: 0')
+  })
+
+  test('keeps pipeline and model team as status displays instead of duplicate writing actions', () => {
+    const cockpit = source('WritingCockpitPanel.tsx')
+    const projectWorkspace = source('../NovelProjectWorkspace.tsx')
+    const projectWorkspaceCss = source('../NovelProjectWorkspace.css')
+
+    expect(cockpit).toContain('writing-cockpit-role-strip')
+    expect(cockpit).not.toContain('onClick={() => onAction(role.actionKey)}')
+    expect(cockpit).not.toContain('type={role.active ? \'primary\' : \'default\'}')
+    expect(projectWorkspace).toContain('下一步：{serialPipelineModel.primaryAction.label || \'查看下一步\'}')
+    expect(projectWorkspace).not.toContain('handleSerialPipelineAction(serialPipelineModel.primaryAction.key)')
+    expect(projectWorkspace).not.toContain('novel-serial-pipeline-guide-action')
+    expect(projectWorkspace).not.toContain('onClick={() => handleSerialPipelineAction(stage.action.key)}')
+    expect(projectWorkspaceCss).not.toContain('.novel-serial-pipeline-guide-action')
+    expect(projectWorkspaceCss).not.toContain('.novel-serial-pipeline-agent:hover')
+  })
+
+  test('keeps chapter writing to one guidance layer by hiding global cockpit and pipeline there', () => {
+    const projectWorkspace = source('../NovelProjectWorkspace.tsx')
+
+    expect(projectWorkspace).toContain('showGlobalWritingGuidance')
+    expect(projectWorkspace).toContain("workspaceArea !== 'chapterWriting'")
+    expect(projectWorkspace).toContain('{showGlobalWritingGuidance && (')
+    expect(projectWorkspace).toContain('{showGlobalWritingGuidance && renderSerialPipeline()}')
   })
 
   test('shows a compact writing queue in the chapter workspace', () => {
@@ -90,6 +120,9 @@ describe('commercial writing workspace UI shell', () => {
     expect(component).toContain('本章开写就绪')
     expect(component).toContain('处理本章开写')
     expect(component).toContain('runDraftBriefAction')
+    expect(component).toContain('novel-draft-brief-action')
+    expect(component).toContain('{draftBriefSummary.actionLabel}')
+    expect(component).toContain('onClick={runDraftBriefAction}')
     expect(component).toContain('本章待质检')
     expect(component).toContain('处理交稿质检')
     expect(component).toContain('runQueueDeliveryAction')
@@ -479,6 +512,31 @@ describe('commercial writing workspace UI shell', () => {
     expect(projectWorkspace).toContain('`提${stage.warningCount}`')
     expect(css).toContain('grid-template-columns: repeat(6, minmax(0, 1fr))')
     expect(css).toContain('.novel-serial-pipeline-stage .ant-tag')
+  })
+
+  test('surfaces the shared novel pipeline as a blocker repair guide', () => {
+    const projectWorkspace = source('../NovelProjectWorkspace.tsx')
+    const css = source('../NovelProjectWorkspace.css')
+
+    expect(projectWorkspace).toContain('novel-serial-pipeline-guide')
+    expect(projectWorkspace).toContain('当前卡点')
+    expect(projectWorkspace).toContain('去哪里修')
+    expect(projectWorkspace).toContain('修完验证')
+    expect(projectWorkspace).toContain('serialPipelineModel.repairGuide')
+    expect(css).toContain('.novel-serial-pipeline-guide')
+    expect(css).toContain('.novel-serial-pipeline-guide-steps')
+  })
+
+  test('offers a direct de-ai gate repair action from the chapter writing desk', () => {
+    const workspaceCenter = source('WorkspaceCenter.tsx')
+    const projectWorkspace = source('../NovelProjectWorkspace.tsx')
+
+    expect(workspaceCenter).toContain('onRepairDeslopGate')
+    expect(workspaceCenter).toContain('修复去AI味并复检')
+    expect(workspaceCenter).toContain('novel-deslop-gate-action')
+    expect(projectWorkspace).toContain('repairActiveDeslopGate')
+    expect(projectWorkspace).toContain("revisionMode: 'tighten_pacing'")
+    expect(projectWorkspace).toContain("source: 'deslop_gate_repair'")
   })
 
   test('exposes creation contract fields in the writing bible editor', () => {
@@ -1270,6 +1328,22 @@ describe('commercial writing workspace UI shell', () => {
     expect(taskCenter).toContain('setFocusedTaskIndex(sourceTaskIndex)')
   })
 
+  test('renders task center runs as clear lifecycle cards instead of ambiguous status chips', () => {
+    const taskCenter = source('TaskCenterDrawer.tsx')
+
+    expect(taskCenter).toContain('buildTaskRunCardModel')
+    expect(taskCenter).toContain('TaskRunCard')
+    expect(taskCenter).toContain('task-run-card')
+    expect(taskCenter).toContain('运行状态')
+    expect(taskCenter).toContain('执行方式')
+    expect(taskCenter).toContain('闭环状态')
+    expect(taskCenter).toContain('model.timeline.map')
+    expect(taskCenter).toContain('model.primaryAction.label')
+    expect(taskCenter).toContain('处理下一项')
+    expect(taskCenter).toContain('复查任务')
+    expect(taskCenter).toContain('查看失败')
+  })
+
   test('shows recovery evidence production block hints after source recheck', () => {
     const taskCenter = source('TaskCenterDrawer.tsx')
 
@@ -1972,12 +2046,16 @@ describe('commercial writing workspace UI shell', () => {
     expect(directorWorkspace).toContain('自动创作总控台')
     expect(directorWorkspace).toContain('唯一下一步')
     expect(directorWorkspace).toContain('当前判断')
+    expect(directorWorkspace).toContain('auto-director-repair-plan')
+    expect(directorWorkspace).toContain('model.repairPlan.primaryAction')
     expect(directorWorkspace).toContain('model.governanceClosureBrief.status')
     expect(directorWorkspace).toContain('治理闭环')
     expect(directorModel).toContain('review_governance_closure')
     expect(directorModel).toContain('治理复查台')
     expect(projectWorkspace).toContain("action.key === 'review_governance_closure'")
     expect(projectWorkspace).toContain('generateLongformRepairAuditSummary(repairRun)')
+    expect(projectWorkspace).toContain("action.key === 'auto_repair_blockers'")
+    expect(projectWorkspace).toContain('runAutoCreationRepairPlan')
     expect(directorWorkspace).toContain('auto-director-judgement-card')
     expect(directorWorkspace).not.toContain('auto-director-next-card')
     expect(directorWorkspace).toContain('生产许可')
@@ -2162,6 +2240,7 @@ describe('commercial writing workspace UI shell', () => {
     expect(directorWorkspace).toContain('onSelectChapter')
     expect(directorCss).toContain('.auto-director-shell')
     expect(directorCss).toContain('.auto-director-judgement-card')
+    expect(directorCss).toContain('.auto-director-repair-plan')
     expect(directorCss).not.toContain('.auto-director-next-card')
     expect(directorCss).toContain('.auto-director-daily-panel')
     expect(directorCss).toContain('.auto-director-daily-step')

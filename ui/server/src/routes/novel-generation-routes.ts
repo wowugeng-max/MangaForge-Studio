@@ -66,6 +66,51 @@ function futureSkeletonFromOutline(outline: any) {
   }
 }
 
+function hasPlanningText(value: any, minLength = 1) {
+  return String(value || '').replace(/\s/g, '').length >= minLength
+}
+
+function hasChapterPlanningMaterial(chapter: any, outline: any) {
+  const skeleton = outline ? futureSkeletonFromOutline(outline) : null
+  const goal = chapter?.chapter_goal || skeleton?.chapter_goal || outline?.summary || ''
+  const summary = chapter?.chapter_summary || skeleton?.payoff || skeleton?.commercial_purpose || outline?.summary || ''
+  const conflict = chapter?.conflict || skeleton?.conflict || asArray(outline?.conflict_points)[0] || ''
+  const hook = chapter?.ending_hook || skeleton?.ending_hook || outline?.hook || ''
+  const sceneCount = asArray(chapter?.scene_breakdown).length
+    || asArray(chapter?.scene_list).length
+    || asArray(outline?.scene_breakdown).length
+    || asArray(outline?.scene_list).length
+    || asArray(outline?.raw_payload?.scene_breakdown).length
+    || asArray(outline?.raw_payload?.scene_list).length
+  return hasPlanningText(goal, 8)
+    && hasPlanningText(summary)
+    && hasPlanningText(conflict)
+    && hasPlanningText(hook)
+    && sceneCount > 0
+}
+
+function collectMissingPlanningChapterNos(startNo: number, targetNo: number, chapterByNo: Map<number, any>, outlinesByChapterNo: Map<number, any>) {
+  const missing: number[] = []
+  for (let chapterNo = startNo; chapterNo <= targetNo; chapterNo += 1) {
+    if (!hasChapterPlanningMaterial(chapterByNo.get(chapterNo), outlinesByChapterNo.get(chapterNo))) {
+      missing.push(chapterNo)
+    }
+  }
+  return missing
+}
+
+function compactPlanningEnsureResult(result: any = {}) {
+  return {
+    ok: result?.ok !== false,
+    status: result?.status || (result?.ok === false ? 'warn' : 'success'),
+    repaired_count: asArray(result?.repaired_chapters).length,
+    created_count: asArray(result?.created_chapters).length,
+    updated_count: asArray(result?.updated_chapters).length,
+    detail_count: asArray(result?.detail_chapters).length,
+    error: result?.error ? String(result.error).slice(0, 300) : '',
+  }
+}
+
 function scoreFutureSkeletonChapter(item: any) {
   const checks = [
     item.title ? 14 : 0,
@@ -166,6 +211,14 @@ type GenerationRoutesContext = {
     outlines: any[],
     reviews: any[],
   ) => Promise<any>
+  autoRepairChapterPreflightGaps?: (
+    workspace: string,
+    project: any,
+    chapter: any,
+    contextPackage: any,
+    modelId?: number,
+    options?: any,
+  ) => Promise<any>
   generateSceneCardsForChapter: (workspace: string, project: any, contextPackage: any, modelId?: number) => Promise<any>
   getReferenceMigrationPlanForChapter: (workspace: string, project: any, chapter: any) => Promise<any>
   buildParagraphProseContext: (project: any, contextPackage: any, migrationPlan?: any, chapterDraft?: any) => string[]
@@ -178,6 +231,7 @@ type GenerationRoutesContext = {
   explainReferenceSafety: (referenceReport: any, safetyDecision: any) => any
   buildMigrationAudit: (project: any, referenceReport: any, safetyExplanation: any) => any
   updateStoryStateMachine: (workspace: string, project: any, chapter: any, contextPackage: any, chapterText: string, modelId?: number) => Promise<any>
+  ensureChapterPlanningForRange?: (workspace: string, project: any, options: any) => Promise<any>
 }
 
 function buildTextDiffSummary(before: string, after: string) {
@@ -648,7 +702,7 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
       const project = await ctx.getProject(activeWorkspace, Number(req.params.id))
       if (!project) return res.status(404).json({ error: 'project not found' })
       let chapters = await listNovelChapters(activeWorkspace, project.id)
-      const outlines = await listNovelOutlines(activeWorkspace, project.id)
+      let outlines = await listNovelOutlines(activeWorkspace, project.id)
       const firstUnwritten = chapters.find(chapter => !chapter.chapter_text)
       const startNo = Math.max(1, Number(req.body.start_chapter || firstUnwritten?.chapter_no || activeChapterNo(chapters) + 1 || 1))
       const rawTargetNo = Number(req.body.target_chapter || req.body.target_chapter_no || 0)
@@ -662,11 +716,88 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
       const createMissing = req.body.create_missing !== false
       const syncChapterFields = req.body.sync_chapter_fields !== false
       const includeWritten = req.body.include_written === true
-      const chapterByNo = new Map(chapters.map(chapter => [Number(chapter.chapter_no || 0), chapter]))
-      const outlinesByChapterNo = new Map(outlines
+      let chapterByNo = new Map(chapters.map(chapter => [Number(chapter.chapter_no || 0), chapter]))
+      let outlinesByChapterNo = new Map(outlines
         .filter(outline => String(outline.outline_type || '') === 'chapter')
         .map(outline => [outlineChapterNo(outline), outline])
         .filter(([chapterNo]) => Number(chapterNo || 0) > 0) as Array<[number, any]>)
+      const rebuildPlanningMaps = () => {
+        chapterByNo = new Map(chapters.map(chapter => [Number(chapter.chapter_no || 0), chapter]))
+        outlinesByChapterNo = new Map(outlines
+          .filter(outline => String(outline.outline_type || '') === 'chapter')
+          .map(outline => [outlineChapterNo(outline), outline])
+          .filter(([chapterNo]) => Number(chapterNo || 0) > 0) as Array<[number, any]>)
+      }
+      let planningPreflight: any = {
+        enabled: req.body.auto_plan_missing !== false,
+        status: 'skipped',
+        missing_chapter_nos: [],
+      }
+      if (req.body.auto_plan_missing !== false) {
+        const missingPlanningNos = collectMissingPlanningChapterNos(startNo, targetNo, chapterByNo, outlinesByChapterNo)
+        planningPreflight = {
+          enabled: true,
+          status: missingPlanningNos.length ? 'missing' : 'ready',
+          missing_chapter_nos: missingPlanningNos,
+        }
+        if (missingPlanningNos.length > 0 && ctx.ensureChapterPlanningForRange) {
+          try {
+            const ensureResult = await ctx.ensureChapterPlanningForRange(activeWorkspace, project, {
+              start_chapter: startNo,
+              target_chapter: targetNo,
+              chapter_count: targetNo - startNo + 1,
+              continue_from: startNo > 1 ? startNo - 1 : 0,
+              model_id: Number(req.body.model_id || 0) || undefined,
+              missing_chapter_nos: missingPlanningNos,
+              user_outline: req.body.user_outline || req.body.prompt || '',
+              source: 'start-unattended',
+            })
+            chapters = await listNovelChapters(activeWorkspace, project.id)
+            outlines = await listNovelOutlines(activeWorkspace, project.id)
+            rebuildPlanningMaps()
+            const remainingMissingNos = collectMissingPlanningChapterNos(startNo, targetNo, chapterByNo, outlinesByChapterNo)
+            planningPreflight = {
+              enabled: true,
+              status: remainingMissingNos.length ? 'warn' : 'success',
+              missing_chapter_nos: missingPlanningNos,
+              remaining_missing_chapter_nos: remainingMissingNos,
+              result: compactPlanningEnsureResult(ensureResult),
+            }
+          } catch (planningError) {
+            chapters = await listNovelChapters(activeWorkspace, project.id)
+            outlines = await listNovelOutlines(activeWorkspace, project.id)
+            rebuildPlanningMaps()
+            planningPreflight = {
+              enabled: true,
+              status: 'failed',
+              missing_chapter_nos: missingPlanningNos,
+              error: String(planningError).slice(0, 300),
+            }
+          }
+        } else if (missingPlanningNos.length > 0) {
+          planningPreflight = {
+            ...planningPreflight,
+            status: 'skipped_no_ensure_hook',
+          }
+        }
+      }
+      const strictPlanningPreflight = req.body.allow_planning_fallback !== true
+      const planningStillMissing = asArray(planningPreflight.remaining_missing_chapter_nos).length > 0
+        || (planningPreflight.status === 'failed' && asArray(planningPreflight.missing_chapter_nos).length > 0)
+      if (strictPlanningPreflight && ['failed', 'warn'].includes(String(planningPreflight.status || '')) && planningStillMissing) {
+        return res.status(424).json({
+          error: '无人值守章节规划补齐失败，已停止入队，避免使用浅层兜底规划继续生成。',
+          error_code: 'UNATTENDED_PLANNING_PREFLIGHT_FAILED',
+          start_chapter: startNo,
+          target_chapter: targetNo,
+          planning_preflight: planningPreflight,
+          recovery_plan: {
+            type: 'planning_preflight_failed',
+            summary: '自动写作前置规划没有补齐，不能继续创建正文队列。',
+            actions: ['检查模型和 Key 是否可用', '缩小目标章节范围后重试', '先在章节规划面板生成大纲/细纲，再重新启动无人值守'],
+          },
+        })
+      }
       const createdChapters: any[] = []
       const updatedChapters: any[] = []
       const skipped: any[] = []
@@ -785,6 +916,7 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
           auto_repair_missing_material: true,
           auto_repair_quality_gate: true,
         },
+        planning_preflight: planningPreflight,
       }
       const run = await appendNovelRun(activeWorkspace, {
         project_id: project.id,
@@ -1133,7 +1265,7 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
       let chapters = await listNovelChapters(activeWorkspace, projectId)
       let chapter = chapters.find(item => item.id === chapterId)
       if (!chapter) return res.status(404).json({ error: 'chapter not found' })
-      const [worldbuilding, characters, outlines, reviews] = await Promise.all([listNovelWorldbuilding(activeWorkspace, projectId), listNovelCharacters(activeWorkspace, projectId), listNovelOutlines(activeWorkspace, projectId), listNovelReviews(activeWorkspace, projectId)])
+      let [worldbuilding, characters, outlines, reviews] = await Promise.all([listNovelWorldbuilding(activeWorkspace, projectId), listNovelCharacters(activeWorkspace, projectId), listNovelOutlines(activeWorkspace, projectId), listNovelReviews(activeWorkspace, projectId)])
       const pipeline: any[] = []
       const markStage = (key: string, label: string, status: string, detail = '', extra: any = {}) => {
         const stage = { key, label, status, detail, at: new Date().toISOString(), ...extra }
@@ -1167,6 +1299,40 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
         contextPackage.preflight.warnings.join('；'),
         { context_package: contextPackage },
       )
+      if (!contextPackage.preflight.ready && ctx.autoRepairChapterPreflightGaps) {
+        markStage('material_repair', '自动补齐写作前置材料', 'running', contextPackage.preflight.warnings.join('；'))
+        const repairResult = await ctx.autoRepairChapterPreflightGaps(activeWorkspace, project, chapter, contextPackage, modelId)
+        chapters = await listNovelChapters(activeWorkspace, projectId)
+        chapter = chapters.find(item => item.id === chapterId) || chapter
+        const repairedMaterials = await Promise.all([
+          listNovelWorldbuilding(activeWorkspace, projectId),
+          listNovelCharacters(activeWorkspace, projectId),
+          listNovelOutlines(activeWorkspace, projectId),
+          listNovelReviews(activeWorkspace, projectId),
+        ])
+        worldbuilding = repairedMaterials[0]
+        characters = repairedMaterials[1]
+        outlines = repairedMaterials[2]
+        reviews = repairedMaterials[3]
+        wordTarget = resolveChapterWordTarget(project, chapter, req.body || {})
+        contextPackage = applyChapterWordTargetToContext(
+          await ctx.buildChapterContextPackage(activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews),
+          wordTarget,
+        )
+        contextPackage = applyRequestLongformCompass(contextPackage, req)
+        contextPackage = applyRequestLongformBattleContext(contextPackage, req)
+        contextPackage = applyRequestNextBatchBrief(contextPackage, req)
+        contextPackage = applyRequestChapterLaunchGate(contextPackage, req)
+        contextPackage = applyRequestBatchPreflight(contextPackage, req)
+        contextPackage = applyRequestMillionWordRunway(contextPackage, req)
+        markStage(
+          'material_repair',
+          contextPackage.preflight.ready ? '前置材料已自动补齐' : '前置材料自动补齐后仍有缺口',
+          contextPackage.preflight.ready ? 'success' : 'warn',
+          contextPackage.preflight.ready ? '' : contextPackage.preflight.warnings.join('；'),
+          { repair_result: repairResult, context_package: contextPackage },
+        )
+      }
       if (!contextPackage.preflight.ready && req.body?.allow_incomplete !== true) {
         const errorPayload = {
           error: '章节生成前置检查未通过',

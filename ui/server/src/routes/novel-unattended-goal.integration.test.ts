@@ -12,6 +12,7 @@ import {
   listNovelChapters,
   listNovelRuns,
   updateNovelRun,
+  upsertNovelChapterByNumber,
 } from '../novel'
 
 let workspaces: string[] = []
@@ -400,6 +401,97 @@ describe('unattended chapter goal integration', () => {
     expect(response.body.group.policy.quality_threshold).toBe(91)
     expect(response.body.summary.quality_threshold).toBe(91)
     expect(storedGroup.policy.quality_threshold).toBe(91)
+  })
+
+  test('runs chapter planning ensure before queuing unattended chapters with missing planning', async () => {
+    const workspace = await tempWorkspace()
+    const production = createNovelProductionService()
+    const project = await createNovelProject(workspace, { title: '自动补齐规划', length_target: 'epic', reference_config: {} })
+    const ensureCalls: any[] = []
+    const { app, handlers } = createRouteHarness()
+    registerNovelGenerationRoutes(app as any, generationCtx(workspace, production, {
+      ensureChapterPlanningForRange: async (_workspace: string, ensuredProject: any, options: any) => {
+        ensureCalls.push({ workspace: _workspace, project_id: ensuredProject.id, ...options })
+        for (const chapterNo of options.missing_chapter_nos || []) {
+          await upsertNovelChapterByNumber(workspace, {
+            project_id: project.id,
+            chapter_no: chapterNo,
+            title: `第${chapterNo}章 已规划`,
+            chapter_goal: `第${chapterNo}章自动规划目标，承接主线并制造明确推进。`,
+            chapter_summary: `第${chapterNo}章自动规划摘要`,
+            conflict: `第${chapterNo}章核心冲突`,
+            ending_hook: `第${chapterNo}章结尾钩子`,
+            scene_breakdown: [{ title: `第${chapterNo}章场景一`, goal: '推进冲突' }],
+          } as any)
+        }
+        return {
+          ok: true,
+          status: 'success',
+          repaired_chapters: (options.missing_chapter_nos || []).map((chapterNo: number) => ({ chapter_no: chapterNo })),
+        }
+      },
+    }) as any)
+    const startUnattended = handlers.get('POST /api/novel/projects/:id/chapter-groups/start-unattended')
+
+    const response = await callRoute(startUnattended, {
+      params: { id: String(project.id) },
+      body: { start_chapter: 1, target_chapter: 2, create_missing: true, model_id: 7 },
+    })
+    const chapters = await listNovelChapters(workspace, project.id)
+
+    expect(response.statusCode).toBe(200)
+    expect(ensureCalls).toHaveLength(1)
+    expect(ensureCalls[0]).toMatchObject({
+      workspace,
+      project_id: project.id,
+      start_chapter: 1,
+      target_chapter: 2,
+      chapter_count: 2,
+      continue_from: 0,
+      model_id: 7,
+      missing_chapter_nos: [1, 2],
+    })
+    expect(chapters.map(chapter => chapter.title)).toEqual(['第1章 已规划', '第2章 已规划'])
+    expect(chapters.every(chapter => chapter.raw_payload?.unattended_goal?.needs_agent_completion !== true)).toBe(true)
+    expect(response.body.group.planning_preflight).toMatchObject({
+      enabled: true,
+      status: 'success',
+      missing_chapter_nos: [1, 2],
+    })
+    expect(response.body.group.chapters.map((chapter: any) => chapter.title)).toEqual(['第1章 已规划', '第2章 已规划'])
+    expect(response.body.group.chapters.every((chapter: any) => chapter.material_score === 80)).toBe(true)
+  })
+
+  test('blocks unattended queue creation when planning ensure fails', async () => {
+    const workspace = await tempWorkspace()
+    const production = createNovelProductionService()
+    const project = await createNovelProject(workspace, { title: '规划失败阻断', length_target: 'epic', reference_config: {} })
+    const { app, handlers } = createRouteHarness()
+    registerNovelGenerationRoutes(app as any, generationCtx(workspace, production, {
+      ensureChapterPlanningForRange: async () => {
+        throw new Error('规划模型返回空细纲')
+      },
+    }) as any)
+    const startUnattended = handlers.get('POST /api/novel/projects/:id/chapter-groups/start-unattended')
+
+    const response = await callRoute(startUnattended, {
+      params: { id: String(project.id) },
+      body: { start_chapter: 1, target_chapter: 2, create_missing: true, model_id: 7 },
+    })
+
+    expect(response.statusCode).toBe(424)
+    expect(response.body).toMatchObject({
+      error_code: 'UNATTENDED_PLANNING_PREFLIGHT_FAILED',
+      start_chapter: 1,
+      target_chapter: 2,
+    })
+    expect(response.body.planning_preflight).toMatchObject({
+      enabled: true,
+      status: 'failed',
+      missing_chapter_nos: [1, 2],
+    })
+    expect(await listNovelChapters(workspace, project.id)).toHaveLength(0)
+    expect(await listNovelRuns(workspace, project.id)).toHaveLength(0)
   })
 
   test('creates missing target chapters without outlines and carries agent material repair into execution', async () => {

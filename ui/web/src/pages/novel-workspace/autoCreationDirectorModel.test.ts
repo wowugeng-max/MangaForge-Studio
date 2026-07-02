@@ -1368,6 +1368,78 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(model.manualTestReadiness.handoffChecklist).toContain('先跑长篇创作健康诊断，确认核心不偏、故事强度、创新差异和读者吸引。')
   })
 
+  test('builds a single repair plan for blocked auto creation gates', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: {
+        ...basePlanning,
+        topStatus: {
+          ...basePlanning.topStatus,
+          targetWords: 10000000,
+        },
+        first30Retention: {
+          ...basePlanning.first30Retention,
+          status: 'missing',
+          score: 45,
+          summary: '尚未运行前30章留存诊断。',
+          actionKey: 'run_first30_retention',
+        },
+      },
+      writing: baseWriting,
+      activeTasks: [],
+      selectedModelId: 12,
+      reviews: [
+        {
+          id: 205,
+          chapter_id: 8,
+          review_type: 'prose_quality',
+          created_at: '2026-06-04T01:04:00.000Z',
+          status: 'warn',
+          payload: JSON.stringify({
+            chapter_id: 8,
+            chapter_no: 8,
+            self_check: {
+              review: {
+                score: 84,
+                passed: false,
+                status: 'warn',
+                quality_audit_checks: [
+                  {
+                    key: 'reader_retention_open_loop',
+                    label: '读者追读',
+                    status: 'fail',
+                    evidence: '章末没有留下未解决问题。',
+                    fix: '重做章末追读钩子。',
+                  },
+                ],
+              },
+            },
+          }),
+        },
+      ],
+      storyState: {
+        last_updated_chapter: 7,
+        global: {
+          core_promise: '寒门少年以阵法反压宗门秩序',
+          current_volume_goal: '进入内门视野',
+        },
+      },
+    })
+
+    expect(model.repairPlan.visible).toBe(true)
+    expect(model.repairPlan.primaryAction.key).toBe('auto_repair_blockers')
+    expect(model.repairPlan.primaryAction.label).toBe('自动修复阻塞')
+    expect(model.repairPlan.actions.map(action => action.key)).toEqual([
+      'longform_creation_diagnosis',
+      'run_first30_retention',
+      'run_reader_trial_review',
+      'longform_pressure',
+      'create_delivery_risk_repair',
+    ])
+    expect(model.repairPlan.autoActionCount).toBe(5)
+    expect(model.repairPlan.panelActionCount).toBe(0)
+    expect(model.repairPlan.summary).toContain('5项')
+  })
+
   test('marks first manual test calibration ready only after commercial, reader and long-run reports pass', () => {
     const model = buildAutoCreationDirectorModel({
       planning: {

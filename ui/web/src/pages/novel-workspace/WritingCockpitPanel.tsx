@@ -1002,21 +1002,18 @@ export function WritingCockpitPanel({
 
           <Row gutter={[12, 8]} align="top">
             <Col xs={24} lg={15}>
-              <Space wrap size={[6, 6]}>
+              <Space className="writing-cockpit-role-strip" wrap size={[6, 6]}>
                 <Tag icon={<TeamOutlined />} color="purple" bordered={false}>模型团队</Tag>
                 {model.modelTeam.roles.map(role => (
-                  <Button
+                  <Tag
                     key={role.key}
-                    size="small"
-                    type={role.active ? 'primary' : 'default'}
                     icon={roleIcon(role.key)}
-                    disabled={loading}
-                    onClick={() => onAction(role.actionKey)}
+                    color={role.active ? 'blue' : 'default'}
+                    bordered={!role.active}
                     title={role.description}
-                    style={{ whiteSpace: 'normal', height: 'auto', lineHeight: 1.25, paddingTop: 3, paddingBottom: 3 }}
                   >
                     {role.label}
-                  </Button>
+                  </Tag>
                 ))}
               </Space>
             </Col>

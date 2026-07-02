@@ -74,6 +74,20 @@ describe('serial pipeline view model', () => {
     })
   })
 
+  test('builds a current blocker repair guide from the active stage', () => {
+    const model = buildSerialPipelineViewModel(basePipeline)
+
+    expect(model.repairGuide).toMatchObject({
+      title: '当前阻塞修复向导',
+      severity: 'blocked',
+      blockerLabel: '交稿验收：质量复检',
+      reason: '当前正文缺少通过的质量复检。',
+      repairAreaLabel: '质检修订',
+      repairActionLabel: '复检当前正文',
+      verificationLabel: '复检、修订和状态同步完成后，回到流水线确认交稿验收通过。',
+    })
+  })
+
   test('returns an invisible fallback for missing pipeline data', () => {
     const model = buildSerialPipelineViewModel(null)
 
@@ -82,5 +96,6 @@ describe('serial pipeline view model', () => {
     expect(model.currentIssues).toEqual([])
     expect(model.currentAgentSteps).toEqual([])
     expect(model.primaryAction.key).toBe('')
+    expect(model.repairGuide).toBeNull()
   })
 })

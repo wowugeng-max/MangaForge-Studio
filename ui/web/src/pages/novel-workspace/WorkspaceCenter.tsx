@@ -64,11 +64,20 @@ function deslopGateTone(status: string) {
   return 'pass'
 }
 
-function DeslopGateDiagnosticsPanel({ diagnostics }: { diagnostics?: DeslopGateDiagnosticsModel | null }) {
+function DeslopGateDiagnosticsPanel({
+  diagnostics,
+  onRepairDeslopGate,
+  repairLoading,
+}: {
+  diagnostics?: DeslopGateDiagnosticsModel | null
+  onRepairDeslopGate?: () => void
+  repairLoading?: boolean
+}) {
   if (!diagnostics?.gates?.length) return null
   const concernGates = diagnostics.gates.filter(gate => deslopGateTone(gate.status) !== 'pass' || gate.count > 0)
   const visibleGates = (concernGates.length ? concernGates : diagnostics.gates).slice(0, 7)
   const hasConcern = concernGates.length > 0 || diagnostics.concernGateCount > 0
+  const canRepair = hasConcern && Boolean(onRepairDeslopGate)
 
   return (
     <details className={`novel-deslop-gate-panel novel-deslop-gate-panel-${hasConcern ? 'warn' : 'pass'}`} open={hasConcern}>
@@ -76,6 +85,21 @@ function DeslopGateDiagnosticsPanel({ diagnostics }: { diagnostics?: DeslopGateD
         <span>去AI味门禁</span>
         <Tag color={hasConcern ? 'gold' : 'green'} bordered={false}>{hasConcern ? `需处理 ${diagnostics.concernGateCount || concernGates.length}` : '已通过'}</Tag>
         <Text type="secondary">{diagnostics.summary}</Text>
+        {canRepair && (
+          <Button
+            className="novel-deslop-gate-action"
+            size="small"
+            type="primary"
+            loading={repairLoading}
+            onClick={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+              onRepairDeslopGate?.()
+            }}
+          >
+            修复去AI味并复检
+          </Button>
+        )}
       </summary>
       <div className="novel-deslop-gate-grid">
         {visibleGates.map(gate => {
@@ -405,6 +429,7 @@ export function WorkspaceCenter({
   chapterHandoffDesk,
   deliveryActionLoading,
   onDeliveryAction,
+  onRepairDeslopGate,
 }: {
   isEmptyProject: boolean
   selectedProject: any | null
@@ -465,6 +490,7 @@ export function WorkspaceCenter({
   chapterHandoffDesk?: ChapterHandoffDeskModel | null
   deliveryActionLoading?: boolean
   onDeliveryAction?: (key: NovelDeliveryActionKey) => void
+  onRepairDeslopGate?: () => void
 }) {
   const [editorDisplayPrefs, setEditorDisplayPrefs] = React.useState<EditorDisplayPrefs>(() => loadEditorDisplayPrefs())
   const [writingAuxCollapsed, setWritingAuxCollapsed] = React.useState(() => loadWritingAuxCollapsed())
@@ -613,6 +639,13 @@ export function WorkspaceCenter({
     if (draftBriefSummary.actionKey === 'confirm_brief') onConfirmPreDraftBrief?.()
     if (draftBriefSummary.actionKey === 'generate') onGenerateCurrentChapterProse()
   }
+  const draftBriefActionLoading = draftBriefSummary.actionKey === 'scene_cards'
+    ? generatingSceneCards
+    : ['build_brief', 'confirm_brief'].includes(String(draftBriefSummary.actionKey || ''))
+      ? Boolean(preDraftBriefLoading)
+      : draftBriefSummary.actionKey === 'generate'
+        ? generatingProse
+        : false
   const runQueueDeliveryAction = () => {
     if (deliverySummary.actionKey) {
       onDeliveryAction?.(deliverySummary.actionKey)
@@ -706,22 +739,6 @@ export function WorkspaceCenter({
         <Button size="small" className={commandClass('diagnostics')} loading={diagnosticsLoading} onClick={onOpenGenerationDiagnostics}>诊断</Button>
         <Button size="small" className={commandClass('scene_cards')} icon={<FileTextOutlined />} loading={generatingSceneCards} onClick={onGenerateSceneCards}>场景卡</Button>
         <Button size="small" className={commandClass(undefined, 'novel-editor-muted-command')} onClick={onEditActiveChapter} icon={<EditOutlined />}>元数据</Button>
-      </div>
-      <div className="novel-editor-action-group novel-editor-action-group-draft">
-        <div className="novel-editor-action-group-heading">
-          <Text className="novel-editor-action-group-label">生成正文</Text>
-          {recommendedBadge('draft')}
-        </div>
-        <Button size="small" className={commandClass(undefined, 'novel-editor-muted-command')} loading={pipelineLoading} onClick={onStartChapterPipeline}>流水线</Button>
-        {!materialReady && (
-          <Button type="primary" size="small" className={commandClass('repair_generate', 'novel-editor-primary-command')} icon={<PlayCircleOutlined />} loading={generatingProse} onClick={onRepairAndGenerateCurrentChapter}>
-            补齐并生成
-          </Button>
-        )}
-        <Button type={materialReady ? 'primary' : 'default'} size="small" className={commandClass('generate', materialReady ? 'novel-editor-primary-command' : '')} icon={<PlayCircleOutlined />} loading={generatingProse} onClick={onGenerateCurrentChapterProse}>
-          生成
-        </Button>
-        {renderWordTargetControl()}
       </div>
       <div className="novel-editor-action-group novel-editor-action-group-review">
         <div className="novel-editor-action-group-heading">
@@ -1426,7 +1443,11 @@ export function WorkspaceCenter({
             </div>
           )}
 
-          <DeslopGateDiagnosticsPanel diagnostics={deliverySummary.deslopGateDiagnostics} />
+          <DeslopGateDiagnosticsPanel
+            diagnostics={deliverySummary.deslopGateDiagnostics}
+            onRepairDeslopGate={onRepairDeslopGate}
+            repairLoading={deliveryActionLoading}
+          />
 
           {chapterHandoffDesk?.visible && (
             <div className={`novel-chapter-handoff-strip novel-chapter-handoff-strip-${chapterHandoffDesk.status}`}>
@@ -1493,6 +1514,17 @@ export function WorkspaceCenter({
                     <Tag key={check} bordered={false}>{check}</Tag>
                   ))}
                   <Text className="novel-draft-brief-focus">{draftBriefSummary.focus}</Text>
+                  {draftBriefSummary.actionKey && (
+                    <Button
+                      className="novel-draft-brief-action"
+                      size="small"
+                      type={draftBriefSummary.actionKey === 'build_brief' ? 'primary' : 'default'}
+                      loading={draftBriefActionLoading}
+                      onClick={runDraftBriefAction}
+                    >
+                      {draftBriefSummary.actionLabel}
+                    </Button>
+                  )}
                 </div>
                 <div className="novel-draft-brief-grid">
                   <div><span>本章目标</span><strong>{draftBriefSummary.briefFields.chapterGoal || '待补齐'}</strong></div>

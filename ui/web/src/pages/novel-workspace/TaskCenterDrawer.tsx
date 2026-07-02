@@ -136,6 +136,269 @@ function parseJsonValue(value: any) {
   }
 }
 
+type TaskRunCardTone = 'default' | 'blue' | 'green' | 'gold' | 'red'
+
+export type TaskRunCardModel = {
+  title: string
+  stepName: string
+  lifecycle: {
+    key: string
+    label: string
+    color: TaskRunCardTone
+  }
+  execution: {
+    key: 'auto' | 'manual'
+    label: string
+    color: TaskRunCardTone
+  }
+  timeline: Array<{
+    key: 'created' | 'started' | 'ended' | 'updated'
+    label: string
+    value: string
+  }>
+  closure: {
+    total: number
+    pending: number
+    needsReview: number
+    resolved: number
+    failed: number
+    summary: string
+  }
+  progress: number
+  primaryAction: {
+    key: 'process_repair' | 'recheck' | 'resume' | 'execute' | 'view_failure' | 'none'
+    label: string
+  }
+}
+
+function taskRunTimeValue(...values: any[]) {
+  for (const value of values) {
+    const raw = String(value || '').trim()
+    if (!raw) continue
+    const time = Date.parse(raw)
+    if (!Number.isFinite(time)) return raw
+    return new Intl.DateTimeFormat('zh-CN', {
+      timeZone: 'Asia/Shanghai',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).format(new Date(time)).replace(/\//g, '-')
+  }
+  return ''
+}
+
+function taskRunLifecycle(status: any): TaskRunCardModel['lifecycle'] {
+  const normalized = String(status || '').toLowerCase()
+  if (['completed', 'success', 'ok', 'done', 'closed', 'resolved'].includes(normalized)) return { key: normalized || 'completed', label: '已完成', color: 'green' }
+  if (['failed', 'error'].includes(normalized)) return { key: normalized, label: '失败', color: 'red' }
+  if (['running', 'in_progress', 'processing'].includes(normalized)) return { key: normalized, label: '运行中', color: 'blue' }
+  if (['queued', 'pending'].includes(normalized)) return { key: normalized, label: '排队中', color: 'blue' }
+  if (normalized === 'ready') return { key: normalized, label: '待启动', color: 'default' }
+  if (normalized === 'paused') return { key: normalized, label: '已暂停', color: 'gold' }
+  if (['needs_approval', 'needs_confirmation'].includes(normalized)) return { key: normalized, label: '待确认', color: 'gold' }
+  if (['canceled', 'cancelled'].includes(normalized)) return { key: normalized, label: '已取消', color: 'default' }
+  return { key: normalized || 'unknown', label: normalized || '未知', color: 'default' }
+}
+
+function taskRunPayloads(run: any) {
+  return {
+    input: parseJsonValue(run?.input_ref || run?.inputRef) || run?.input || {},
+    output: parseJsonValue(run?.output_ref || run?.outputRef) || run?.payload || {},
+  }
+}
+
+function taskRunExecutionMode(run: any): TaskRunCardModel['execution'] {
+  const { input, output } = taskRunPayloads(run)
+  const source = [
+    run?.source,
+    run?.source_mode,
+    run?.sourceMode,
+    input?.source,
+    input?.source_mode,
+    input?.sourceMode,
+    output?.source,
+    output?.report?.source,
+  ].map(item => String(item || '').toLowerCase()).join(' ')
+  const unattended = Boolean(
+    run?.unattended
+    || run?.is_auto
+    || run?.isAuto
+    || input?.unattended
+    || input?.policy?.unattended
+    || output?.unattended,
+  )
+  const runType = String(run?.run_type || '')
+  const auto = unattended
+    || source.includes('auto_creation')
+    || source.includes('unattended')
+    || ['batch_generate_prose', 'chapter_group_generation'].includes(runType) && Boolean(input?.unattended || input?.policy?.unattended || input?.target_chapter)
+  if (auto) return { key: 'auto', label: '自动运行', color: 'blue' }
+  return { key: 'manual', label: ['longform_production_repair', 'first30_retention_repair', 'mechanical_qa_repair'].includes(runType) ? '手工处理' : '手工操作', color: 'default' }
+}
+
+function taskRunClosureFromTasks(tasks: any[]) {
+  const total = tasks.length
+  const failed = tasks.filter((task: any) => ['failed', 'error'].includes(String(task?.task_status ?? task?.status ?? '').toLowerCase())).length
+  const needsReview = tasks.filter((task: any) => String(task?.task_status ?? task?.status ?? '').toLowerCase() === 'needs_review').length
+  const resolved = tasks.filter((task: any) => ['resolved', 'closed', 'done', 'completed', 'success', 'ok'].includes(String(task?.task_status ?? task?.status ?? '').toLowerCase())).length
+  const pending = Math.max(0, total - failed - needsReview - resolved)
+  return { total, pending, needsReview, resolved, failed }
+}
+
+function taskRunClosure(run: any): TaskRunCardModel['closure'] {
+  const { output } = taskRunPayloads(run)
+  const tasks = Array.isArray(output.tasks) ? output.tasks : []
+  const chapters = Array.isArray(output.chapters) ? output.chapters : []
+  const base = tasks.length
+    ? taskRunClosureFromTasks(tasks)
+    : chapters.length
+      ? {
+        total: Number(output.total ?? chapters.length) || chapters.length,
+        pending: chapters.filter((chapter: any) => ['ready', 'queued', 'running', 'pending', 'needs_approval'].includes(String(chapter?.status || '').toLowerCase())).length,
+        needsReview: chapters.filter((chapter: any) => String(chapter?.status || '').toLowerCase() === 'needs_review').length,
+        resolved: chapters.filter((chapter: any) => ['success', 'completed', 'ok', 'done'].includes(String(chapter?.status || '').toLowerCase())).length,
+        failed: chapters.filter((chapter: any) => ['failed', 'error'].includes(String(chapter?.status || '').toLowerCase())).length,
+      }
+      : {
+        total: Number(output.total || 0) || 0,
+        pending: 0,
+        needsReview: 0,
+        resolved: Number(output.success ?? output.completed ?? 0) || 0,
+        failed: Number(output.failed || 0) || (['failed', 'error'].includes(String(run?.status || '').toLowerCase()) ? 1 : 0),
+      }
+  const summaryParts = [
+    base.pending ? `待处理 ${base.pending} 项` : '',
+    base.needsReview ? `需复查 ${base.needsReview} 项` : '',
+    base.failed ? `失败 ${base.failed} 项` : '',
+    base.total ? `已完成 ${base.resolved}/${base.total}` : base.resolved ? `已完成 ${base.resolved}` : '',
+  ].filter(Boolean)
+  return {
+    ...base,
+    summary: summaryParts.join('，') || '暂无可处理项',
+  }
+}
+
+export function buildTaskRunCardModel(run: any, options: {
+  canProcessRepairTasks?: boolean
+  canResume?: boolean
+  canExecute?: boolean
+} = {}): TaskRunCardModel {
+  const lifecycle = taskRunLifecycle(run?.status)
+  const execution = taskRunExecutionMode(run)
+  const closure = taskRunClosure(run)
+  const explicitProgress = Number(run?.progress)
+  const progress = Number.isFinite(explicitProgress)
+    ? Math.max(0, Math.min(100, explicitProgress))
+    : closure.total > 0
+      ? Math.max(0, Math.min(100, Math.round((closure.resolved / closure.total) * 100)))
+      : lifecycle.color === 'green' ? 100 : 0
+  const primaryAction: TaskRunCardModel['primaryAction'] = (() => {
+    if (lifecycle.color === 'red' || closure.failed > 0) return { key: 'view_failure', label: '查看失败' }
+    if (options.canProcessRepairTasks || closure.pending > 0 && ['longform_production_repair', 'first30_retention_repair', 'mechanical_qa_repair'].includes(String(run?.run_type || ''))) return { key: 'process_repair', label: '处理下一项' }
+    if (closure.needsReview > 0) return { key: 'recheck', label: '复查任务' }
+    if (options.canResume) return { key: 'resume', label: '继续' }
+    if (options.canExecute) return { key: 'execute', label: '执行' }
+    return { key: 'none', label: '' }
+  })()
+  return {
+    title: run?.type_label || runTypeLabel(run?.run_type),
+    stepName: String(run?.step_name || run?.stepName || 'step'),
+    lifecycle,
+    execution,
+    timeline: [
+      { key: 'created', label: '创建', value: taskRunTimeValue(run?.created_at, run?.createdAt) || '-' },
+      { key: 'started', label: '开始', value: taskRunTimeValue(run?.started_at, run?.startedAt, run?.startedAtMs) || '未开始' },
+      { key: 'ended', label: '结束', value: taskRunTimeValue(run?.completed_at, run?.completedAt, run?.finished_at, run?.finishedAt, run?.ended_at, run?.endedAt) || '未结束' },
+      { key: 'updated', label: '更新', value: taskRunTimeValue(run?.updated_at, run?.updatedAt, run?.completed_at, run?.completedAt, run?.created_at, run?.createdAt) || '-' },
+    ],
+    closure,
+    progress,
+    primaryAction,
+  }
+}
+
+function taskRunCardPrimaryActionType(actionKey: TaskRunCardModel['primaryAction']['key']) {
+  if (['process_repair', 'recheck', 'resume', 'execute'].includes(actionKey)) return 'primary' as const
+  return 'default' as const
+}
+
+function TaskRunCard({
+  run,
+  model,
+  extraTags = null,
+  errorText = '',
+  recoveryPlan = null,
+  onPrimaryAction,
+  onDetail,
+  onPause,
+}: {
+  run: any
+  model: TaskRunCardModel
+  extraTags?: React.ReactNode
+  errorText?: string
+  recoveryPlan?: any
+  onPrimaryAction?: () => void
+  onDetail: () => void
+  onPause?: () => void
+}) {
+  return (
+    <div className="task-run-card" style={{ padding: 12, border: '1px solid #e5e7eb', borderRadius: 8 }}>
+      <Space direction="vertical" size={8} style={{ width: '100%' }}>
+        <Space style={{ width: '100%', justifyContent: 'space-between' }} align="start">
+          <Space direction="vertical" size={4} style={{ minWidth: 0 }}>
+            <Space wrap size={[6, 4]}>
+              <Tag color={model.lifecycle.color === 'default' ? undefined : model.lifecycle.color} bordered={false}>运行状态：{model.lifecycle.label}</Tag>
+              <Tag color={model.execution.color === 'default' ? undefined : model.execution.color} bordered={false}>执行方式：{model.execution.label}</Tag>
+              <Text strong>{model.title}</Text>
+              <Tag bordered={false}>{model.stepName}</Tag>
+              {extraTags}
+            </Space>
+            <Space wrap size={[6, 4]} className="task-run-card-timeline">
+              {model.timeline.map(item => (
+                <Text key={item.key} type="secondary" style={{ fontSize: 12 }}>
+                  {item.label}：{item.value}
+                </Text>
+              ))}
+            </Space>
+          </Space>
+          <Button size="small" type="link" onClick={onDetail}>详情</Button>
+        </Space>
+        <Progress percent={Math.max(0, Math.min(100, Number(model.progress || 0)))} size="small" />
+        <Space wrap size={[6, 4]}>
+          <Tag color={model.closure.pending ? 'gold' : 'default'} bordered={false}>待处理 {model.closure.pending}</Tag>
+          <Tag color={model.closure.needsReview ? 'gold' : 'default'} bordered={false}>需复查 {model.closure.needsReview}</Tag>
+          <Tag color={model.closure.resolved ? 'green' : 'default'} bordered={false}>已完成 {model.closure.resolved}/{model.closure.total || 0}</Tag>
+          <Tag color={model.closure.failed ? 'red' : 'default'} bordered={false}>失败 {model.closure.failed}</Tag>
+        </Space>
+        <Text type="secondary" style={{ fontSize: 12 }}>闭环状态：{model.closure.summary}</Text>
+        {errorText && <Text type="danger" style={{ fontSize: 12 }}>{errorText}</Text>}
+        {recoveryPlan && (
+          <Paragraph style={{ marginBottom: 0, fontSize: 12 }} ellipsis={{ rows: 2, expandable: true }}>
+            恢复方案：{safeJsonPreview(recoveryPlan)}
+          </Paragraph>
+        )}
+        <Space wrap>
+          {model.primaryAction.key !== 'none' && onPrimaryAction && (
+            <Button
+              size="small"
+              type={taskRunCardPrimaryActionType(model.primaryAction.key)}
+              onClick={onPrimaryAction}
+            >
+              {model.primaryAction.label}
+            </Button>
+          )}
+          {onPause && ['running', 'queued'].includes(String(run?.status || '')) && (
+            <Button size="small" icon={<PauseCircleOutlined />} onClick={onPause}>暂停</Button>
+          )}
+        </Space>
+      </Space>
+    </div>
+  )
+}
+
 const SAFE_REPAIR_TASK_CATEGORY_ISSUE_TYPES = new Set([
   'benchmark_recall_gap',
   'chapter_attraction_gap',
@@ -5358,54 +5621,49 @@ export function TaskCenterDrawer({
                 <Space direction="vertical" size={8} style={{ width: '100%' }}>
                   {normalizedTasks.slice(0, 8).map((task: any) => {
                     const runActionState = chapterGroupRunActionState(task)
+                    const canResume = Boolean(task.can_resume && (task.run_type !== 'chapter_group_generation' || runActionState.canResume) && onResumeRun)
+                    const canExecute = Boolean(
+                      task.can_execute && runActionState.canExecute && onExecuteChapterGroup
+                      || ['release_quality_batch', 'release_similarity_batch'].includes(task.run_type) && ['queued', 'ready', 'failed'].includes(task.status) && onExecuteReleaseRepairRun,
+                    )
+                    const model = buildTaskRunCardModel(task, {
+                      canProcessRepairTasks: Boolean(task.can_process_repair_tasks),
+                      canResume,
+                      canExecute,
+                    })
+                    const handlePrimaryAction = () => {
+                      if (model.primaryAction.key === 'process_repair' || model.primaryAction.key === 'recheck' || model.primaryAction.key === 'view_failure') {
+                        openTaskDetail(task)
+                        return
+                      }
+                      if (model.primaryAction.key === 'resume' && onResumeRun) {
+                        onResumeRun(task)
+                        return
+                      }
+                      if (model.primaryAction.key === 'execute') {
+                        if (task.run_type === 'chapter_group_generation' && onExecuteChapterGroup) onExecuteChapterGroup(task)
+                        else if (['release_quality_batch', 'release_similarity_batch'].includes(task.run_type) && onExecuteReleaseRepairRun) onExecuteReleaseRepairRun(task)
+                      }
+                    }
                     return (
-                      <div key={`${task.run_type}-${task.id}`} style={{ padding: 10, border: '1px solid #e5e7eb', borderRadius: 8 }}>
-                        <Space direction="vertical" size={6} style={{ width: '100%' }}>
-                          <Space style={{ width: '100%', justifyContent: 'space-between' }} align="start">
-                            <Space wrap>
-                              {statusTag(task.status)}
-                              <Text strong>{task.type_label || runTypeLabel(task.run_type)}</Text>
-                              <Tag bordered={false}>{task.step_name || '-'}</Tag>
-                              {productionModeLabel(task.production_mode || task.payload?.production_mode || task.payload?.policy?.production_mode) && (
-                                <Tag color="purple" bordered={false}>{productionModeLabel(task.production_mode || task.payload?.production_mode || task.payload?.policy?.production_mode)}</Tag>
-                              )}
-                            </Space>
-                            <Button size="small" type="link" onClick={() => openTaskDetail(task)}>详情</Button>
-                          </Space>
-                          <Progress percent={Math.max(0, Math.min(100, Number(task.progress || 0)))} size="small" />
-                          <Text type="secondary" style={{ fontSize: 12 }}>{task.phase || task.created_at || '-'}</Text>
-                          {task.error && <Text type="danger" style={{ fontSize: 12 }}>{task.error}</Text>}
-                          {runActionState.blockedByApprovalBlocker && <Text type="secondary" style={{ fontSize: 12 }}>{runActionState.actionHint}</Text>}
-                          {task.recovery_plan && (
-                            <Paragraph style={{ marginBottom: 0, fontSize: 12 }} ellipsis={{ rows: 2, expandable: true }}>
-                              恢复方案：{safeJsonPreview(task.recovery_plan)}
-                            </Paragraph>
-                          )}
-                          <Space wrap>
-                            {task.can_process_repair_tasks && (
-                              <Button size="small" type="primary" onClick={() => openTaskDetail(task)}>处理修复</Button>
+                      <TaskRunCard
+                        key={`${task.run_type}-${task.id}`}
+                        run={task}
+                        model={model}
+                        errorText={task.error || (runActionState.blockedByApprovalBlocker ? runActionState.actionHint : '')}
+                        recoveryPlan={task.recovery_plan}
+                        extraTags={(
+                          <>
+                            {productionModeLabel(task.production_mode || task.payload?.production_mode || task.payload?.policy?.production_mode) && (
+                              <Tag color="purple" bordered={false}>{productionModeLabel(task.production_mode || task.payload?.production_mode || task.payload?.policy?.production_mode)}</Tag>
                             )}
-                            {task.can_pause && onPauseRun && (
-                              <Button size="small" icon={<PauseCircleOutlined />} onClick={() => onPauseRun(task)}>暂停</Button>
-                            )}
-                            {task.can_resume && task.run_type !== 'chapter_group_generation' && onResumeRun && (
-                              <Button size="small" type="primary" icon={<PlayCircleOutlined />} onClick={() => onResumeRun(task)}>继续</Button>
-                            )}
-                            {task.can_resume && runActionState.canResume && onResumeRun && (
-                              <Button size="small" type="primary" icon={<PlayCircleOutlined />} onClick={() => onResumeRun(task)}>继续</Button>
-                            )}
-                            {task.can_execute && runActionState.canExecute && onExecuteChapterGroup && (
-                              <Button size="small" loading={chapterGroupExecutingId === task.id} onClick={() => onExecuteChapterGroup(task)}>执行</Button>
-                            )}
-                            {['release_quality_batch', 'release_similarity_batch'].includes(task.run_type) && ['queued', 'ready', 'failed'].includes(task.status) && onExecuteReleaseRepairRun && (
-                              <Button size="small" type="primary" loading={releaseRepairExecutingId === task.id} onClick={() => onExecuteReleaseRepairRun(task)}>执行发布批量</Button>
-                            )}
-                            {task.error && (
-                              <Button size="small" type="link" onClick={() => openTaskDetail(task)}>查看恢复</Button>
-                            )}
-                          </Space>
-                        </Space>
-                      </div>
+                            {runActionState.blockedByApprovalBlocker && <Tag color="red" bordered={false}>入库阻断</Tag>}
+                          </>
+                        )}
+                        onDetail={() => openTaskDetail(task)}
+                        onPrimaryAction={handlePrimaryAction}
+                        onPause={task.can_pause && onPauseRun ? () => onPauseRun(task) : undefined}
+                      />
                     )
                   })}
                 </Space>
@@ -5464,6 +5722,7 @@ export function TaskCenterDrawer({
               </Space>
             </Card>
           )}
+
 
           {reviewTasks.length > 0 && (
             <Card
@@ -5577,46 +5836,63 @@ export function TaskCenterDrawer({
             {sortedRuns.length === 0 ? (
               <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无历史运行记录" />
             ) : (
-              <List
-                size="small"
-                dataSource={sortedRuns.slice(0, 80)}
-                renderItem={(run: any) => {
+              <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                {sortedRuns.slice(0, 80).map((run: any) => {
                   const runActionState = chapterGroupRunActionState(run)
+                  const canResume = Boolean(
+                    (run.run_type === 'chapter_generation_pipeline' && ['paused', 'failed', 'ready'].includes(run.status) && onResumeRun)
+                    || (runActionState.canResume && onResumeRun),
+                  )
+                  const canExecute = Boolean(
+                    (runActionState.canExecute && onExecuteChapterGroup)
+                    || (['release_quality_batch', 'release_similarity_batch'].includes(run.run_type) && ['queued', 'ready', 'failed'].includes(run.status) && onExecuteReleaseRepairRun),
+                  )
+                  const canProcessRepairTasks = ['longform_production_repair', 'first30_retention_repair', 'mechanical_qa_repair'].includes(run.run_type) && ['ready', 'paused', 'failed', 'running'].includes(run.status)
+                  const model = buildTaskRunCardModel(run, { canProcessRepairTasks, canResume, canExecute })
+                  const payload = getRunPayload(run)
+                  const modeLabel = run.run_type === 'chapter_group_generation'
+                    ? productionModeLabel(payload.production_mode || payload.policy?.production_mode)
+                    : ''
+                  const handlePrimaryAction = () => {
+                    if (model.primaryAction.key === 'process_repair' || model.primaryAction.key === 'recheck' || model.primaryAction.key === 'view_failure') {
+                      setDetailRun(run)
+                      return
+                    }
+                    if (model.primaryAction.key === 'resume' && onResumeRun) {
+                      onResumeRun(run)
+                      return
+                    }
+                    if (model.primaryAction.key === 'execute') {
+                      if (run.run_type === 'chapter_group_generation' && onExecuteChapterGroup) onExecuteChapterGroup(run)
+                      else if (['release_quality_batch', 'release_similarity_batch'].includes(run.run_type) && onExecuteReleaseRepairRun) onExecuteReleaseRepairRun(run)
+                    }
+                  }
                   return (
-                    <List.Item
-                      actions={[
-                        run.run_type === 'chapter_generation_pipeline' && run.status !== 'paused' && onPauseRun ? <Button key="pause" type="link" size="small" onClick={() => onPauseRun(run)}>暂停</Button> : null,
-                        run.run_type === 'chapter_generation_pipeline' && ['paused', 'failed', 'ready'].includes(run.status) && onResumeRun ? <Button key="resume" type="link" size="small" onClick={() => onResumeRun(run)}>继续</Button> : null,
-                        runActionState.canResume && onResumeRun ? <Button key="resume-group" type="link" size="small" onClick={() => onResumeRun(run)}>继续</Button> : null,
-                        runActionState.canExecute && onExecuteChapterGroup ? <Button key="execute-group" type="link" size="small" loading={chapterGroupExecutingId === run.id} onClick={() => onExecuteChapterGroup(run)}>执行</Button> : null,
-                        ['release_quality_batch', 'release_similarity_batch'].includes(run.run_type) && ['queued', 'ready', 'failed'].includes(run.status) && onExecuteReleaseRepairRun ? <Button key="execute-release" type="link" size="small" loading={releaseRepairExecutingId === run.id} onClick={() => onExecuteReleaseRepairRun(run)}>执行发布批量</Button> : null,
-                        ['longform_production_repair', 'first30_retention_repair', 'mechanical_qa_repair'].includes(run.run_type) && ['ready', 'paused', 'failed', 'running'].includes(run.status) ? <Button key="process-repair" type="link" size="small" onClick={() => setDetailRun(run)}>处理修复</Button> : null,
-                        run.run_type === 'chapter_group_generation' && run.status === 'running' && onPauseRun ? <Button key="pause-group" type="link" size="small" onClick={() => onPauseRun(run)}>暂停</Button> : null,
-                        <Button key="detail" type="link" size="small" onClick={() => setDetailRun(run)}>详情</Button>,
-                      ].filter(Boolean)}
-                    >
-                      <List.Item.Meta
-                        title={(
-                          <Space wrap>
-                            {statusTag(run.status)}
-                            <Text strong>{runTypeLabel(run.run_type)}</Text>
-                            <Tag bordered={false}>{run.step_name || 'step'}</Tag>
-                            {runActionState.blockedByApprovalBlocker && <Tag color="red" bordered={false}>入库阻断</Tag>}
-                          </Space>
-                        )}
-                      description={(
-                        <Space direction="vertical" size={2} style={{ width: '100%' }}>
-                          <Text type="secondary" style={{ fontSize: 12 }}>{run.created_at || '-'}</Text>
-                          {run.run_type === 'chapter_group_generation' && productionModeLabel(getRunPayload(run).production_mode || getRunPayload(run).policy?.production_mode) && (
-                            <Text type="secondary" style={{ fontSize: 12 }}>模式：{productionModeLabel(getRunPayload(run).production_mode || getRunPayload(run).policy?.production_mode)}</Text>
-                          )}
-                          {run.error_message && <Text type="danger" style={{ fontSize: 12 }}>{run.error_message}</Text>}
-                        </Space>
+                    <TaskRunCard
+                      key={`${run.run_type}-${run.id}`}
+                      run={run}
+                      model={model}
+                      errorText={run.error_message || (runActionState.blockedByApprovalBlocker ? runActionState.actionHint : '')}
+                      extraTags={(
+                        <>
+                          {modeLabel && <Tag color="purple" bordered={false}>{modeLabel}</Tag>}
+                          {runActionState.blockedByApprovalBlocker && <Tag color="red" bordered={false}>入库阻断</Tag>}
+                        </>
                       )}
+                      onDetail={() => setDetailRun(run)}
+                      onPrimaryAction={handlePrimaryAction}
+                      onPause={
+                        (
+                          run.run_type === 'chapter_generation_pipeline' && run.status !== 'paused' && onPauseRun
+                          || run.run_type === 'chapter_group_generation' && run.status === 'running' && onPauseRun
+                        )
+                          ? () => onPauseRun?.(run)
+                          : undefined
+                      }
                     />
-                  </List.Item>
-                )}}
-              />
+                  )
+                })}
+              </Space>
             )}
           </Card>
         </Space>

@@ -13,6 +13,7 @@ import { registerNovelMemoryRoutes } from './novel-memory-routes'
 import { registerNovelModuleRoutes } from './novel-module-routes'
 import { createNovelOriginalIncubatorService } from './novel-original-incubator-service'
 import { registerNovelPipelineRoutes } from './novel-pipeline-routes'
+import { ensureChapterPlanningForRange } from './novel-planning-ensure-service'
 import { registerNovelPlanningRoutes } from './novel-planning-routes'
 import { registerNovelPlanRoutes } from './novel-plan-routes'
 import { createNovelProductionService, createNovelRunExecutionService } from './novel-production-service'
@@ -136,6 +137,7 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
     buildPipelineSteps: productionService.buildPipelineSteps,
     updatePipelineStep: productionService.updatePipelineStep,
     buildChapterContextPackage: writingService.buildChapterContextPackage,
+    autoRepairChapterPreflightGaps: writingService.autoRepairChapterPreflightGaps,
     generateSceneCardsForChapter: writingService.generateSceneCardsForChapter,
     getReferenceMigrationPlanForChapter: referenceService.getReferenceMigrationPlanForChapter,
     buildParagraphProseContext: writingService.buildParagraphProseContext,
@@ -148,6 +150,7 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
     explainReferenceSafety: referenceService.explainReferenceSafety,
     buildMigrationAudit: referenceService.buildMigrationAudit,
     updateStoryStateMachine: writingService.updateStoryStateMachine,
+    ensureChapterPlanningForRange,
   })
 
   registerNovelEditorRoutes(app, {

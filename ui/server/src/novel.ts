@@ -605,6 +605,85 @@ export async function upsertNovelChapterByNumber(activeWorkspace: string, data: 
   if (existing) return updateNovelChapter(activeWorkspace, existing.id, data, { createVersion: false })
   return createNovelChapter(activeWorkspace, data)
 }
+function outlineChapterNo(outline: Partial<NovelOutlineRecord>) {
+  const raw = outline.raw_payload || {}
+  const rawNo = Number((raw as any).chapter_no || (raw as any).chapterNo || (raw as any).future100?.chapter_no || (raw as any).rollingPlan?.chapter_no || 0)
+  if (rawNo) return rawNo
+  const match = String(outline.title || '').match(/第\s*(\d+)\s*章/)
+  return match ? Number(match[1]) : 0
+}
+function cleanChapterPlanTitle(chapterNo: number, title: any) {
+  const text = String(title || '').trim()
+  if (!text) return `第${chapterNo}章`
+  return text
+    .replace(new RegExp(`^第\\s*${chapterNo}\\s*章[\\s:：、-]*`), '')
+    .replace(/^第\s*\d+\s*章[\s:：、-]*/, '')
+    .trim() || `第${chapterNo}章`
+}
+function chapterPlanOutlineTitle(chapterNo: number, title: any) {
+  const cleanTitle = cleanChapterPlanTitle(chapterNo, title)
+  return cleanTitle === `第${chapterNo}章` ? cleanTitle : `第${chapterNo}章 ${cleanTitle}`
+}
+function chapterPlanOutlineSummary(data: Partial<NovelChapterRecord>) {
+  return [
+    data.chapter_goal ? `目标：${data.chapter_goal}` : '',
+    data.chapter_summary ? `摘要：${data.chapter_summary}` : '',
+  ].filter(Boolean).join('\n')
+}
+export async function syncNovelChapterPlanByNumber(activeWorkspace: string, data: Partial<NovelChapterRecord>, options: {
+  parent_id?: number | null
+  source?: string
+} = {}) {
+  const projectId = Number(data.project_id || 0)
+  const chapterNo = Number(data.chapter_no || 0)
+  if (!projectId || !chapterNo) return null
+  const cleanTitle = cleanChapterPlanTitle(chapterNo, data.title)
+  const existingChapters = await listNovelChapters(activeWorkspace, projectId)
+  const existingChapter = existingChapters.find(item => Number(item.chapter_no) === chapterNo)
+  const outlines = await listNovelOutlines(activeWorkspace, projectId)
+  const preferredOutlineId = Number(data.outline_id || existingChapter?.outline_id || 0)
+  const existingOutline = outlines.find(outline => Number(outline.id) === preferredOutlineId && String(outline.outline_type || '') === 'chapter')
+    || outlines
+      .filter(outline => String(outline.outline_type || '') === 'chapter' && outlineChapterNo(outline) === chapterNo)
+      .sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')) || Number(b.id || 0) - Number(a.id || 0))[0]
+    || null
+  const source = options.source || (data.raw_payload as any)?.source || (data.raw_payload as any)?.agent_sync?.source || 'chapter_plan'
+  const outlineData: Partial<NovelOutlineRecord> = {
+    project_id: projectId,
+    outline_type: 'chapter',
+    parent_id: options.parent_id ?? existingOutline?.parent_id ?? null,
+    title: chapterPlanOutlineTitle(chapterNo, cleanTitle),
+    summary: chapterPlanOutlineSummary(data),
+    conflict_points: data.conflict ? [String(data.conflict)] : [],
+    turning_points: toAnyArray((data.raw_payload as any)?.must_advance ?? (data.raw_payload as any)?.rollingPlan?.payoff ?? []),
+    hook: String(data.ending_hook || ''),
+    raw_payload: {
+      ...(existingOutline?.raw_payload || {}),
+      ...(data.raw_payload || {}),
+      source,
+      chapter_no: chapterNo,
+      synced_from_chapter_plan_at: nowIso(),
+    },
+  }
+  const outline = existingOutline?.id
+    ? await updateNovelOutline(activeWorkspace, existingOutline.id, outlineData)
+    : await createNovelOutline(activeWorkspace, outlineData)
+  if (!outline) return null
+  const chapter = await upsertNovelChapterByNumber(activeWorkspace, {
+    ...data,
+    project_id: projectId,
+    outline_id: outline.id,
+    chapter_no: chapterNo,
+    title: cleanTitle,
+    raw_payload: {
+      ...(data.raw_payload || {}),
+      source,
+      chapter_outline_id: outline.id,
+      chapter_no: chapterNo,
+    },
+  } as Partial<NovelChapterRecord>)
+  return { outline, chapter }
+}
 type UpdateNovelChapterOptions = { createVersion?: boolean; versionSource?: NovelChapterVersionSource; forceVersion?: boolean }
 function versionedChapterSnapshotChanged(current: NovelChapterRecord, next: NovelChapterRecord) {
   return (

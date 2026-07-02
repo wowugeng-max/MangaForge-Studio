@@ -1,10 +1,10 @@
 import {
-  createNovelChapter,
   createNovelCharacter,
   createNovelOutline,
   createNovelSettingEntity,
   createNovelWorldbuilding,
   listNovelChapters,
+  syncNovelChapterPlanByNumber,
   updateNovelProject,
 } from '../novel'
 import { normalizeSettingAgentPayload } from './novel-setting-routes'
@@ -240,7 +240,7 @@ export function createNovelOriginalIncubatorService() {
     for (const chapter of payload.chapters || []) {
       const chapterNo = Number(chapter.chapter_no || 0)
       if (!chapterNo || existingChapters.some(item => item.chapter_no === chapterNo)) continue
-      await createNovelChapter(activeWorkspace, {
+      await syncNovelChapterPlanByNumber(activeWorkspace, {
         project_id: project.id,
         chapter_no: chapterNo,
         title: chapter.title || `第${chapterNo}章`,
@@ -253,7 +253,7 @@ export function createNovelOriginalIncubatorService() {
           must_advance: chapter.must_advance || [],
           forbidden_repeats: chapter.forbidden_repeats || [],
         },
-      })
+      }, { source: 'original_incubator' })
     }
     return await updateNovelProject(activeWorkspace, project.id, {
       synopsis: project.synopsis || payload.commercial_positioning?.reader_promise || '',

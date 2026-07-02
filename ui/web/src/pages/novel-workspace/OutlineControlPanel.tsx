@@ -52,31 +52,31 @@ export function OutlineControlPanel({
   }
 
   return (
-    <Modal title={<Space><BookOutlined /> 大纲生成设置</Space>} open={open} onCancel={onClose} footer={null} width={680}>
+    <Modal title={<Space><BookOutlined /> 章节规划生成设置</Space>} open={open} onCancel={onClose} footer={null} width={680}>
       <Space direction="vertical" size={20} style={{ width: '100%' }}>
         <Card size="small" title="生成模式" styles={{ body: { padding: '12px 16px' } }}>
           <Space size="large">
             <div onClick={() => handleModeChange('create')} style={{ cursor: 'pointer', textAlign: 'center' }}>
               <Tag color={mode === 'create' ? 'blue' : 'default'} style={{ padding: '4px 12px', fontSize: 14 }}>✨ 从头生成</Tag>
-              <div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>生成全新的细纲</div>
+              <div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>生成新的章节规划</div>
             </div>
             <div onClick={() => handleModeChange('continue')} style={{ cursor: 'pointer', textAlign: 'center' }}>
               <Tag color={mode === 'continue' ? 'blue' : 'default'} style={{ padding: '4px 12px', fontSize: 14 }}>➡️ 续写</Tag>
-              <div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>从已有细纲继续</div>
+              <div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>从已有章节继续规划</div>
             </div>
             <div onClick={() => handleModeChange('expand')} style={{ cursor: 'pointer', textAlign: 'center' }}>
               <Tag color={mode === 'expand' ? 'blue' : 'default'} style={{ padding: '4px 12px', fontSize: 14 }}>📝 扩展</Tag>
-              <div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>基于你的大纲扩展</div>
+              <div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>基于你的大纲扩展规划</div>
             </div>
           </Space>
         </Card>
 
-        <Card size="small" title="细纲数量" styles={{ body: { padding: '12px 16px' } }}>
+        <Card size="small" title="规划数量" styles={{ body: { padding: '12px 16px' } }}>
           <Space align="center" size={12}>
             <Text>生成</Text>
             <InputNumber min={1} max={200} value={chapterCount} onChange={(v) => setChapterCount(v || 10)} style={{ width: 120 }} />
-            <Text>章细纲</Text>
-            <Text type="secondary" style={{ fontSize: 12 }}>(每章对应一条细纲)</Text>
+            <Text>章规划</Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>(每章对应一个章节目标和场景拆分)</Text>
           </Space>
         </Card>
 
@@ -93,7 +93,7 @@ export function OutlineControlPanel({
                 {lastChapterNo > 0 && `，最后一章为第 ${lastChapterNo} 章`}
               </Text>
               <div style={{ padding: '6px 12px', background: '#f0f5ff', borderRadius: 6, fontSize: 12, color: '#1677ff' }}>
-                💡 将生成第 {continueFrom + 1} ~ 第 {continueFrom + chapterCount} 章的细纲
+                💡 将生成第 {continueFrom + 1} ~ 第 {continueFrom + chapterCount} 章的规划
               </div>
             </Space>
           </Card>
@@ -120,7 +120,7 @@ export function OutlineControlPanel({
           <Space direction="vertical" size={4} style={{ width: '100%' }}>
             <Text style={{ fontSize: 13, color: '#52c41a' }}>📋 生成时将同步完成：</Text>
             <div style={{ fontSize: 12, color: '#666' }}>
-              ✓ 总纲生成（如尚未存在）<br />✓ 细纲生成（{chapterCount} 章）<br />✓ 世界观同步更新<br />✓ 角色信息同步更新<br />✓ 连续性预检<br />✓ 角色知识追踪快照
+              ✓ 总纲/章纲生成（如尚未存在）<br />✓ 章节规划生成（{chapterCount} 章）<br />✓ 世界观同步更新<br />✓ 角色信息同步更新<br />✓ 连续性预检<br />✓ 角色知识追踪快照
             </div>
           </Space>
         </div>

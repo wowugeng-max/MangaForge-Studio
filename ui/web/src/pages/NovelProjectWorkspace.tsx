@@ -280,6 +280,7 @@ export default function NovelProjectWorkspace() {
   const [autoDirectorActionLoadingKey, setAutoDirectorActionLoadingKey] = useState('')
 
   const isWritingFocusMode = focusWritingMode && workspaceArea === 'chapterWriting'
+  const showGlobalWritingGuidance = workspaceArea !== 'chapterWriting'
   const directoryShellClassName = directoryCollapsed ? 'novel-workspace-directory-shell is-collapsed' : 'novel-workspace-directory-shell'
 
   useEffect(() => {
@@ -985,6 +986,11 @@ export default function NovelProjectWorkspace() {
     return reviewId ? findReviewById(reviewId) : null
   }
 
+  const latestCockpitQualityReport = () => {
+    const reviewId = writingCockpitModel.chapterAcceptanceDesk.latestQualityReviewId
+    return reviewId ? findReviewById(reviewId) : null
+  }
+
   useEffect(() => {
     const loadDiagnostics = async () => {
       const chapterId = Number(activeChapter?.id || 0)
@@ -1127,7 +1133,7 @@ export default function NovelProjectWorkspace() {
     try {
       const agents = ['market-agent', 'world-agent', 'character-agent', 'outline-agent', 'detail-outline-agent', 'continuity-check-agent']
       const payload: Record<string, any> = {
-        chapterCount: opts.continueMode ? undefined : opts.chapterCount,
+        chapterCount: opts.chapterCount,
         continueFrom: opts.continueMode ? opts.continueFrom : undefined,
         userOutline: opts.userOutline && opts.userOutline.trim() ? opts.userOutline.trim() : undefined,
       }
@@ -1147,7 +1153,7 @@ export default function NovelProjectWorkspace() {
       const execution = res.data || null
       setAgentExecution(execution)
 
-      const summary = summarizeOutlineExecution(execution, opts.continueMode ? undefined : opts.chapterCount)
+      const summary = summarizeOutlineExecution(execution, opts.chapterCount)
       if (summary.failedSteps.length > 0) {
         const firstError = summary.outlineError || summary.detailError || summary.continuityError || summary.failedSteps[0]?.error || '生成失败'
         throw new Error(firstError)
@@ -1157,7 +1163,7 @@ export default function NovelProjectWorkspace() {
       }
 
       await loadProjectModules()
-      message.success(`大纲 + 细纲 + 连续性预检 完成${summary.actualCount > 0 ? `（实际生成 ${summary.actualCount} 章）` : ''}`)
+      message.success(`章节规划 + 连续性预检完成${summary.actualCount > 0 ? `（实际生成 ${summary.actualCount} 章）` : ''}`)
     } catch (e: any) {
       const errorCode = e?.response?.data?.error_code
       const backendMessage = e?.response?.data?.message
@@ -2505,6 +2511,50 @@ export default function NovelProjectWorkspace() {
     }
   }
 
+  const repairActiveDeslopGate = async () => {
+    if (!activeChapter) return message.warning('请先选择章节')
+    if (!selectedModelId) return message.warning('请先选择模型')
+    if (!await flushPendingSave()) return
+
+    setProseQualityLoading(true)
+    try {
+      let report = latestCockpitQualityReport()
+      if (!report) {
+        const qualityRes = await apiClient.post(`/novel/chapters/${activeChapter.id}/prose-quality`, {
+          project_id: projectId,
+          model_id: selectedModelId,
+          source: 'deslop_gate_repair',
+        })
+        report = qualityRes.data?.review || null
+      }
+
+      if (!report?.id) {
+        message.warning('还没有可用于去AI味修订的正文自检报告。')
+        setRightPanelOpen(true)
+        setRightPanelTab('proseQuality')
+        return
+      }
+
+      await applyEditorRevision(report, {
+        revisionMode: 'tighten_pacing',
+        prompt: [
+          '重点修复 story-deslop Gate A-G 去AI味门禁。',
+          '逐条处理 fail/warn 项：禁用词/模板表达、句式套路、抽象心理告知、重复描写、无功能环境、万能转折、节奏均匀等。',
+          '修订后必须输出 deslop_repair_receipts.changed_evidence，引用修订后正文里的具体句子、动作、对白或语序变化，不能只写“已修复”。',
+          '修订完成后自动复检，目标是 deslop_gate_diagnostics 与 deslop_repair_checks 清零或转 pass。',
+        ].join('\n'),
+        skipConfirm: true,
+        targetChapterId: activeChapter.id,
+        autoStoryState: true,
+        source: 'deslop_gate_repair',
+      })
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '去AI味修复失败')
+    } finally {
+      setProseQualityLoading(false)
+    }
+  }
+
   const refreshProseQualityForChapter = async (chapterId: number, source = 'manual_refresh') => {
     const chapter = sortedChapters.find(item => Number(item.id) === Number(chapterId))
       || (Number(activeChapter?.id) === Number(chapterId) ? activeChapter : null)
@@ -2599,7 +2649,7 @@ export default function NovelProjectWorkspace() {
     }
   }
 
-  const applyEditorRevision = async (report: any, options: { revisionMode?: string; prompt?: string; skipConfirm?: boolean; targetChapterId?: number; autoStoryState?: boolean; sourceTask?: any; sourceRun?: any; sourceTaskIndex?: number } = {}) => {
+  const applyEditorRevision = async (report: any, options: { revisionMode?: string; prompt?: string; skipConfirm?: boolean; targetChapterId?: number; autoStoryState?: boolean; source?: string; sourceTask?: any; sourceRun?: any; sourceTaskIndex?: number } = {}) => {
     if (!selectedModelId) return message.warning('请先选择模型')
     const isSelfCheckRevision = report?.review_type === 'prose_quality'
     const isDeliveryRiskRevision = [
@@ -2632,6 +2682,7 @@ export default function NovelProjectWorkspace() {
           model_id: selectedModelId,
           revision_mode: revisionMode,
           prompt: options.prompt || '',
+          source: options.source || undefined,
           auto_quality_check: true,
           auto_story_state: options.autoStoryState !== false,
         })
@@ -5829,8 +5880,143 @@ export default function NovelProjectWorkspace() {
     }
   }
 
+  const runAutoCreationRepairAction = async (repairAction: AutoCreationDirectorAction) => {
+    if (!repairAction || repairAction.disabled || repairAction.key === 'auto_repair_blockers') return false
+    switch (repairAction.key) {
+      case 'longform_creation_diagnosis':
+        await runLongformCreationDiagnosis()
+        return true
+      case 'run_first30_retention':
+        await runFirst30RetentionDiagnosis()
+        return true
+      case 'create_first30_repair':
+        await createFirst30RetentionRepairQueue()
+        return true
+      case 'run_reader_trial_review':
+        await runReaderTrialReview()
+        return true
+      case 'create_reader_trial_repair':
+        await createReaderTrialRepairQueue()
+        return true
+      case 'longform_pressure':
+        await runLongformPressureTest()
+        return true
+      case 'sync_story_state':
+        await syncStoryStateForChapter()
+        return true
+      case 'create_delivery_risk_repair':
+        await createDeliveryRiskRepairQueue(repairAction.payload)
+        return true
+      case 'create_safe_batch_risk_repair':
+        await createSafeBatchRiskRepairQueue()
+        return true
+      case 'create_style_sample_batch_repair':
+        await createStyleSampleBatchRepairQueue()
+        return true
+      case 'create_recovery_evidence_governance_queue':
+        await createRecoveryEvidenceGovernanceQueue(repairAction.payload)
+        return true
+      case 'create_script_room_repair':
+        await createScriptRoomRepairQueue()
+        return true
+      case 'open_generation_diagnostics':
+        await openGenerationDiagnostics()
+        return true
+      case 'open_story_assets':
+        openStoryAssetsWorkspace()
+        return true
+      case 'open_task_center':
+        setTaskCenterRecoveryFocus(safeBatchRecoveryFocusFromPayload(repairAction.payload))
+        setTaskCenterOpen(true)
+        return true
+      case 'select_model':
+        message.info('请先在顶部选择一个可用模型。')
+        return true
+      case 'complete_volume_plan':
+        setOutlinePanelOpen(true)
+        return true
+      case 'open_outline_tree':
+        setOutlineTreeOpen(true)
+        return true
+      case 'enter_story_planning':
+        setWorkspaceArea('storyPlanning')
+        return true
+      case 'enter_chapter_writing':
+        setWorkspaceArea('chapterWriting')
+        return true
+      case 'open_writing_bible':
+        await openWritingBibleEditor()
+        return true
+      case 'repair_materials':
+        await openMaterialRepairPlan()
+        return true
+      case 'refresh_context_package':
+        await loadActiveChapterContextPackage()
+        return true
+      case 'refresh_current_quality':
+        if (activeChapter) await refreshActiveProseQuality('auto_creation_repair')
+        return true
+      case 'create_editor_report':
+        await createEditorReport()
+        return true
+      case 'apply_editor_revision':
+        handleWritingCockpitAction('apply_editor_revision')
+        return true
+      case 'update_rolling_plan':
+        await Promise.resolve(handlePlanningAction('update_rolling_plan', { intent: repairAction.payload }))
+        return true
+      case 'record_storyline_diff_decision':
+        await recordStorylineDiffDecision(repairAction.payload)
+        return true
+      case 'create_storyline_decision_tasks':
+        await createStorylineDecisionTasks()
+        return true
+      default:
+        if (repairAction.area === 'planning' || repairAction.area === 'assets') {
+          await Promise.resolve(handlePlanningAction(repairAction.key as PlanningActionKey, { intent: repairAction.payload }))
+          return true
+        }
+        if (repairAction.area === 'writing' || repairAction.area === 'quality') {
+          await Promise.resolve(handleWritingCockpitAction(repairAction.key as WritingCockpitActionKey))
+          return true
+        }
+        return false
+    }
+  }
+
+  const runAutoCreationRepairPlan = async (action: AutoCreationDirectorAction) => {
+    const payloadActions = Array.isArray(action.payload?.actions) ? action.payload.actions : []
+    const repairActions = payloadActions.length ? payloadActions : autoCreationDirectorModel.repairPlan.actions
+    const executableActions = repairActions.filter((item: AutoCreationDirectorAction) => item && !item.disabled && item.key !== 'auto_repair_blockers')
+    if (!executableActions.length) {
+      message.info('当前没有可自动修复的阻塞。')
+      return
+    }
+    setAutoDirectorActionLoadingKey('auto_repair_blockers')
+    let completed = 0
+    try {
+      for (const repairAction of executableActions) {
+        const handled = await runAutoCreationRepairAction(repairAction)
+        if (handled) completed += 1
+        setAutoDirectorActionLoadingKey('auto_repair_blockers')
+      }
+      await loadProjectModules()
+      await loadProductionTasks()
+      setTaskCenterOpen(true)
+      message.success(`已处理自动修复阻塞：${completed}/${executableActions.length} 项`)
+    } catch (error: any) {
+      message.error(error?.response?.data?.error || error?.message || '自动修复阻塞失败')
+    } finally {
+      setAutoDirectorActionLoadingKey('')
+    }
+  }
+
   const handleAutoCreationDirectorAction = (action: AutoCreationDirectorAction) => {
     if (action.disabled) return
+    if (action.key === 'auto_repair_blockers') {
+      void runAutoCreationRepairPlan(action)
+      return
+    }
     if (action.modelCall) setAutoDirectorActionLoadingKey(String(action.key))
 
     if (action.area === 'planning' || action.area === 'assets') {
@@ -5968,6 +6154,7 @@ export default function NovelProjectWorkspace() {
 
   const renderSerialPipeline = () => {
     if (!serialPipelineModel.visible) return null
+    const repairGuide = serialPipelineModel.repairGuide
     const tagColor = (tone: string) => {
       if (tone === 'done') return 'green'
       if (tone === 'active') return 'blue'
@@ -5982,15 +6169,38 @@ export default function NovelProjectWorkspace() {
             <Text strong>小说流水线 · {serialPipelineModel.currentStageLabel || '待同步'}</Text>
             <Text type="secondary">{serialPipelineModel.summary || '按创建契约、规划、正文、验收、批次、治理推进。'}</Text>
           </Space>
-          <Button
-            size="small"
-            type="primary"
-            onClick={() => handleSerialPipelineAction(serialPipelineModel.primaryAction.key)}
-          >
-            {serialPipelineModel.primaryAction.label || '查看下一步'}
-          </Button>
+          <Tag color={tagColor(serialPipelineModel.primaryAction.tone || 'active')} bordered={false}>
+            下一步：{serialPipelineModel.primaryAction.label || '查看下一步'}
+          </Tag>
         </div>
-        {serialPipelineModel.currentIssues.length > 0 && (
+        {repairGuide && (
+          <div className={`novel-serial-pipeline-guide is-${repairGuide.severity}`}>
+            <div className="novel-serial-pipeline-guide-head">
+              <Tag
+                color={repairGuide.severity === 'blocked' ? 'red' : repairGuide.severity === 'warning' ? 'gold' : repairGuide.severity === 'ready' ? 'green' : 'blue'}
+                bordered={false}
+              >
+                {repairGuide.title}
+              </Tag>
+              <Text strong>{repairGuide.blockerLabel}</Text>
+            </div>
+            <div className="novel-serial-pipeline-guide-steps">
+              <div className="novel-serial-pipeline-guide-step">
+                <span>当前卡点</span>
+                <strong>{repairGuide.reason}</strong>
+              </div>
+              <div className="novel-serial-pipeline-guide-step">
+                <span>去哪里修</span>
+                <strong>{repairGuide.repairAreaLabel} · {repairGuide.repairActionLabel}</strong>
+              </div>
+              <div className="novel-serial-pipeline-guide-step">
+                <span>修完验证</span>
+                <strong>{repairGuide.verificationLabel}</strong>
+              </div>
+            </div>
+          </div>
+        )}
+        {!repairGuide && serialPipelineModel.currentIssues.length > 0 && (
           <div className="novel-serial-pipeline-issues">
             {serialPipelineModel.currentIssues.map(issue => (
               <span key={`${issue.status}-${issue.label}`} className={`novel-serial-pipeline-issue is-${issue.status}`}>
@@ -6000,29 +6210,25 @@ export default function NovelProjectWorkspace() {
             ))}
           </div>
         )}
-        {serialPipelineModel.currentAgentSteps.length > 0 && (
+        {!repairGuide && serialPipelineModel.currentAgentSteps.length > 0 && (
           <div className="novel-serial-pipeline-agent-strip" aria-label="当前阶段能力链">
             {serialPipelineModel.currentAgentSteps.map(agent => (
-              <button
+              <span
                 key={agent.key}
-                type="button"
                 className="novel-serial-pipeline-agent"
-                onClick={() => handleSerialPipelineAction(agent.actionKey || serialPipelineModel.primaryAction.key)}
                 title={agent.description}
               >
                 <span className="novel-serial-pipeline-agent-name">{agent.label}</span>
                 {agent.agent && <span className="novel-serial-pipeline-agent-id">{agent.agent}</span>}
-              </button>
+              </span>
             ))}
           </div>
         )}
         <div className="novel-serial-pipeline-stages">
           {serialPipelineModel.stageCards.map(stage => (
-            <button
+            <div
               key={stage.key}
-              type="button"
               className={`novel-serial-pipeline-stage is-${stage.tone}`}
-              onClick={() => handleSerialPipelineAction(stage.action.key)}
               title={stage.summary}
             >
               <span className="novel-serial-pipeline-stage-label">{stage.label}</span>
@@ -6034,7 +6240,7 @@ export default function NovelProjectWorkspace() {
                   {stage.blockerCount ? `阻${stage.blockerCount}` : `提${stage.warningCount}`}
                 </span>
               )}
-            </button>
+            </div>
           ))}
         </div>
       </div>
@@ -6208,6 +6414,7 @@ export default function NovelProjectWorkspace() {
           chapterHandoffDesk={writingCockpitModel.chapterHandoffDesk}
           deliveryActionLoading={proseQualityLoading || editorReportLoading || generatingProse}
           onDeliveryAction={handleWritingCockpitAction}
+          onRepairDeslopGate={repairActiveDeslopGate}
           onChapterTextChange={(next) => {
             const chapterId = activeChapterId
             setChapters(prev => prev.map(c => c.id === chapterId ? { ...c, chapter_text: next } : c))
@@ -6489,17 +6696,19 @@ export default function NovelProjectWorkspace() {
         </div>
 
         <div className="novel-workspace-main" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          <div className="novel-workspace-cockpit" style={{ flexShrink: 1, minHeight: 0 }}>
-            <WritingCockpitPanel
-              model={writingCockpitModel}
-              loading={stepProseLoading || generatingProse || generatingSceneCards || diagnosticsLoading || contextPackageLoading || commercialToolLoading === 'storyStateSync'}
-              forceCollapsed={isWritingFocusMode}
-              primaryActionOverride={cockpitPrimaryActionOverride}
-              onOpenProductionOps={() => setWorkspaceArea('productionOps')}
-              onAction={handleWritingCockpitAction}
-            />
-          </div>
-          {renderSerialPipeline()}
+          {showGlobalWritingGuidance && (
+            <div className="novel-workspace-cockpit" style={{ flexShrink: 1, minHeight: 0 }}>
+              <WritingCockpitPanel
+                model={writingCockpitModel}
+                loading={stepProseLoading || generatingProse || generatingSceneCards || diagnosticsLoading || contextPackageLoading || commercialToolLoading === 'storyStateSync'}
+                forceCollapsed={isWritingFocusMode}
+                primaryActionOverride={cockpitPrimaryActionOverride}
+                onOpenProductionOps={() => setWorkspaceArea('productionOps')}
+                onAction={handleWritingCockpitAction}
+              />
+            </div>
+          )}
+          {showGlobalWritingGuidance && renderSerialPipeline()}
           <Suspense fallback={null}>
             {renderWorkspaceArea()}
           </Suspense>

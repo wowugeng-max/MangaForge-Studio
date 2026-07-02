@@ -1,5 +1,22 @@
-import { describe, expect, test } from 'bun:test'
+import { afterEach, describe, expect, test } from 'bun:test'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { createNovelProject, listNovelChapters, listNovelOutlines } from '../novel'
 import { createNovelOriginalIncubatorService } from './novel-original-incubator-service'
+
+let workspaces: string[] = []
+
+async function tempWorkspace() {
+  const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-original-incubator-test-'))
+  workspaces.push(workspace)
+  return workspace
+}
+
+afterEach(async () => {
+  await Promise.all(workspaces.map(workspace => rm(workspace, { recursive: true, force: true })))
+  workspaces = []
+})
 
 describe('original incubator setting assets', () => {
   test('requires deep incubation to output oh-story creation contracts', () => {
@@ -154,5 +171,39 @@ describe('original incubator setting assets', () => {
     expect(payload.writing_bible.opening_strategy_contract.hook_type).toBe('事件噱头')
     expect(payload.writing_bible.opening_strategy_contract.mainline_graft).toContain('校园主线')
     expect(payload.writing_bible.opening_strategy_contract.threshold_ladder).toContain('十点门槛')
+  })
+
+  test('stores incubated chapter plans as a single synced outline and chapter title source', async () => {
+    const workspace = await tempWorkspace()
+    const service = createNovelOriginalIncubatorService()
+    const project = await createNovelProject(workspace, { title: '规则怪谈新书' })
+
+    await service.storeOriginalIncubatorPayload(workspace, project, {
+      outlines: [
+        { outline_type: 'master', title: '怪谈世界：我是超人，怪谈你随意', summary: '总纲。' },
+      ],
+      chapters: [
+        {
+          chapter_no: 1,
+          title: '拉入恐惧之隙',
+          chapter_goal: '建立规则怪谈入口。',
+          chapter_summary: '主角被迫进入灰色光幕。',
+          conflict: '必须判断规则真假。',
+          ending_hook: '光幕喊出了他的真名。',
+        },
+      ],
+      writing_bible: {},
+      commercial_positioning: {},
+    })
+
+    const chapters = await listNovelChapters(workspace, project.id)
+    const outlines = await listNovelOutlines(workspace, project.id)
+    const chapterOutline = outlines.find(item => item.outline_type === 'chapter' && Number(item.raw_payload?.chapter_no || 0) === 1)
+
+    expect(chapters).toHaveLength(1)
+    expect(chapters[0].title).toBe('拉入恐惧之隙')
+    expect(chapterOutline?.title).toBe('第1章 拉入恐惧之隙')
+    expect(chapterOutline?.summary).toContain('建立规则怪谈入口')
+    expect(chapters[0].outline_id).toBe(chapterOutline?.id)
   })
 })

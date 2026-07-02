@@ -454,6 +454,39 @@ describe('novel generate prose route source guards', () => {
     expect(refreshIndex).toBeGreaterThan(contextIndex)
   })
 
+  test('auto-repairs standalone prose preflight gaps before returning blocked', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
+    const contextTypeStart = source.indexOf('type GenerationRoutesContext =')
+    const contextTypeEnd = source.indexOf('function buildTextDiffSummary', contextTypeStart)
+    const contextTypeBlock = source.slice(contextTypeStart, contextTypeEnd)
+    const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'")
+    const blockedStart = source.indexOf("if (!contextPackage.preflight.ready && req.body?.allow_incomplete !== true)", routeStart)
+    const beforeBlockedBlock = source.slice(routeStart, blockedStart)
+
+    expect(routeStart).toBeGreaterThanOrEqual(0)
+    expect(blockedStart).toBeGreaterThan(routeStart)
+    expect(contextTypeBlock).toContain('autoRepairChapterPreflightGaps?:')
+    expect(beforeBlockedBlock).toContain('ctx.autoRepairChapterPreflightGaps')
+    expect(beforeBlockedBlock).toContain("markStage('material_repair'")
+    expect(beforeBlockedBlock).toContain('chapters = await listNovelChapters(activeWorkspace, projectId)')
+    expect(beforeBlockedBlock).toContain('contextPackage = applyChapterWordTargetToContext(')
+  })
+
+  test('reuses refreshed materials after standalone preflight repair', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
+    const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/generate-prose'")
+    const blockedStart = source.indexOf("if (!contextPackage.preflight.ready && req.body?.allow_incomplete !== true)", routeStart)
+    const beforeBlockedBlock = source.slice(routeStart, blockedStart)
+
+    expect(routeStart).toBeGreaterThanOrEqual(0)
+    expect(beforeBlockedBlock).toContain('let [worldbuilding, characters, outlines, reviews]')
+    expect(beforeBlockedBlock).toContain('const repairedMaterials = await Promise.all')
+    expect(beforeBlockedBlock).toContain('worldbuilding = repairedMaterials[0]')
+    expect(beforeBlockedBlock).toContain('characters = repairedMaterials[1]')
+    expect(beforeBlockedBlock).toContain('outlines = repairedMaterials[2]')
+    expect(beforeBlockedBlock).toContain('reviews = repairedMaterials[3]')
+  })
+
   test('applies word target context in the standalone scene-cards route', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
     const routeStart = source.indexOf("app.post('/api/novel/chapters/:chapterId/scene-cards'")

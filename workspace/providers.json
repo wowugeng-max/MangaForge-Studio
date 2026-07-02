@@ -9,7 +9,7 @@
     "supported_modalities": [
       "chat"
     ],
-    "default_base_url": "https://api.aicomic.site/v1",
+    "default_base_url": "https://cpa.mailyplus.com/v1",
     "is_active": true,
     "icon": "",
     "endpoints": {},
@@ -114,6 +114,23 @@
       "image_to_image"
     ],
     "default_base_url": "https://gpt2api.mailyplus.com/v1",
+    "is_active": true,
+    "icon": "",
+    "endpoints": {},
+    "custom_headers": {}
+  },
+  {
+    "id": "gemini",
+    "display_name": "Google Gemini",
+    "service_type": "llm",
+    "api_format": "openai_compatible",
+    "auth_type": "Bearer",
+    "response_mode": "stream",
+    "supported_modalities": [
+      "chat",
+      "vision"
+    ],
+    "default_base_url": "https://goai.mailyplus.com/v1",
     "is_active": true,
     "icon": "",
     "endpoints": {},

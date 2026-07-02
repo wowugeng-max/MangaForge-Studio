@@ -548,6 +548,8 @@ export async function executeNovelAgentChain(
     modelId?: string
     activeWorkspace?: string
     skipMemory?: boolean
+    chapterCount?: number
+    userOutline?: string
     continueFrom?: number
     existingChapters?: Array<any>
   } | string = {},
@@ -566,10 +568,12 @@ export async function executeNovelAgentChain(
     : {
         activeWorkspace: activeWorkspaceArg,
         modelId: modelIdArg ? String(modelIdArg) : undefined,
+        chapterCount: chainOptions?.chapterCount,
+        userOutline: chainOptions?.userOutline,
         continueFrom: chainOptions?.continueFrom,
         existingChapters: chainOptions?.existingChapters,
       }
-  const { modelId, activeWorkspace, skipMemory, continueFrom, existingChapters } = normalizedOptions
+  const { modelId, activeWorkspace, skipMemory, chapterCount, userOutline, continueFrom, existingChapters } = normalizedOptions
 
   const knowledgeForTask = async (taskType: string) => {
     try {
@@ -653,6 +657,8 @@ export async function executeNovelAgentChain(
       knowledgeInjectionText,
       outlineParams: {
         task: '生成故事大纲',
+        chapterCount,
+        userOutline,
         continueFrom,
         existingChapters,
       },

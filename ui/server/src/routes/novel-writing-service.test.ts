@@ -3,8 +3,16 @@ import { mkdtempSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import {
+  createNovelChapter,
+  createNovelCharacter,
   createNovelProject,
   createNovelSettingEntity,
+  createNovelWorldbuilding,
+  listNovelChapters,
+  listNovelCharacters,
+  listNovelOutlines,
+  listNovelReviews,
+  listNovelWorldbuilding,
 } from '../novel'
 import {
   buildCommercialEditorRewritePrompt,
@@ -10157,6 +10165,49 @@ describe('normalizeSceneCardsPayload', () => {
     expect(prompt).toContain(previousEnding)
     expect(prompt).toContain('前300字必须接住上一章最后一幕')
     expect(prompt).toContain('不能只复述摘要或改写成新的开场')
+  })
+
+  test('preserves true final previous chapter handoff when ending excerpt is long', () => {
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+    const earlyResolvedAction = '规则三已经完成：关门键失效，江哲用身体挡住电梯门，倒计时结束，电梯危机暂时解除。'.repeat(8)
+    const trueFinalMoment = '最后，规则五索要右臂，巨大鬼手卡在门框上，江哲看见血字下方的金色符文，意识到规则曾被篡改，随即踏入红雾。'
+    const prompt = service.buildParagraphProseContext(
+      { title: '怪谈世界：我是超人，怪谈你随意' },
+      {
+        continuity: {
+          previous_chapter: {
+            chapter_no: 1,
+            title: '异常入局',
+            ending_hook: '规则背后还有更高层力量在博弈。',
+            ending_excerpt: `${earlyResolvedAction}${trueFinalMoment}`,
+          },
+        },
+        chapter_target: {
+          chapter_no: 2,
+          title: '旧法失准',
+          summary: '江哲进入红雾后发现旧办法不再可靠。',
+          conflict: '暴力硬抗会导致规则牢笼崩坏。',
+          ending_hook: '旧答案指向更危险的证据。',
+          scene_cards: [{ title: '红雾深处', conflict: '是否继续用蛮力破局', purpose: '承接规则五与金色符文的未解问题' }],
+        },
+      },
+      null,
+      { chapter_no: 2, title: '旧法失准' },
+    )
+
+    const handoffStart = prompt.indexOf('【上一章尾段原文承接】')
+    const handoffEnd = prompt.indexOf('【写前准备卡】', handoffStart)
+    const handoffBlock = prompt.slice(handoffStart, handoffEnd === -1 ? handoffStart + 900 : handoffEnd)
+
+    expect(handoffBlock).toContain('【上一章尾段原文承接】')
+    expect(handoffBlock).toContain('第1章《异常入局》')
+    expect(handoffBlock).toContain('规则五')
+    expect(handoffBlock).toContain('金色符文')
+    expect(handoffBlock).toContain('踏入红雾')
   })
 
   test('asks paragraph prose prompt to execute oh-story scene-card directive fields', () => {
@@ -52076,7 +52127,7 @@ describe('chapter context word target source guards', () => {
     expect(repairBlock).toContain('opening_contract')
     expect(repairBlock).toContain('suspense_contract')
     expect(repairBlock).toContain('reversal_contract')
-    expect(repairBlock).toContain('const repairedEmotionAndHookBrief = buildChapterPreDraftBrief')
+    expect(repairBlock).toContain('let repairedEmotionAndHookBrief = buildChapterPreDraftBrief')
     expect(repairBlock).toContain('emotional_arc_contract: repairedEmotionAndHookBrief.emotional_arc_contract')
     expect(repairBlock).toContain('chapter_hook_contract: repairedEmotionAndHookBrief.chapter_hook_contract')
     expect(repairBlock).toContain('paragraph_hook_contract: repairedEmotionAndHookBrief.paragraph_hook_contract')
@@ -52456,6 +52507,147 @@ describe('chapter context word target source guards', () => {
     expect(repairBlock).toContain('scene_briefs: repairedEmotionAndHookBrief.scene_briefs')
     expect(repairBlock).toContain('word_budget: repairedEmotionAndHookBrief.word_budget')
     expect(repairBlock).toContain('generated_at: repairedEmotionAndHookBrief.generated_at')
+  })
+
+  test('auto-repairs unattended preflight source paths, timeline readiness, and blueprint fields', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'mangaforge-preflight-repair-sources-'))
+    const project = await createNovelProject(workspace, {
+      title: '红雾电梯',
+      genre: '规则怪谈',
+      synopsis: '主角进入红雾规则区，发现旧规则被篡改。',
+      reference_config: {},
+    })
+    await createNovelWorldbuilding(workspace, {
+      project_id: project.id,
+      world_summary: '红雾规则区会把错误解法放大成封印裂缝。',
+      rules: ['规则被篡改后会留下金色符文痕迹。'],
+    })
+    await createNovelCharacter(workspace, {
+      project_id: project.id,
+      name: '江哲',
+      role_type: '主角',
+      current_state: '刚踏入红雾，发现规则五被篡改。',
+    })
+    await createNovelChapter(workspace, {
+      project_id: project.id,
+      chapter_no: 1,
+      title: '异常入局',
+      chapter_summary: '江哲发现规则五被篡改。',
+      ending_hook: '金色符文说明规则背后有人动手脚。',
+      chapter_text: '江哲看见规则五下方的金色符文，随即踏入红雾。',
+    })
+    const chapter = await createNovelChapter(workspace, {
+      project_id: project.id,
+      chapter_no: 2,
+      title: '旧法失准',
+      chapter_goal: '江哲进入红雾后确认旧办法不再可靠。',
+      chapter_summary: '江哲进入红雾后确认旧办法不再可靠。',
+      conflict: '暴力硬抗会让封印裂缝扩大。',
+      ending_hook: '旧答案指向更危险的证据。',
+      scene_list: [
+        {
+          scene_no: 1,
+          title: '红雾深处',
+          purpose: '承接规则五和金色符文',
+          conflict: '旧办法会扩大封印裂缝',
+          reader_payoff: '确认规则曾被篡改',
+        },
+      ],
+      raw_payload: {
+        pre_draft_brief: {
+          benchmark_recall_brief: {
+            selected_emotion_module: '调动：旧答案失效后的规则压力。',
+            rhythm_reference: '蓄势 -> 误判 -> 反证 -> 新钩子。',
+            source_paths: [],
+          },
+          state_tracking_contract: {
+            version: 'oh_story_state_tracking_v1',
+            source_requirements: [
+              '本章细纲/场景卡',
+              '上一章正文或上一章承接',
+              '追踪/时间线.md',
+            ],
+            source_readiness: [
+              { key: 'chapter_blueprint', label: '本章细纲/蓝图', status: 'ready', evidence: '江哲进入红雾后确认旧办法不再可靠。' },
+              { key: 'previous_chapter', label: '上一章正文/章尾钩子', status: 'ready', evidence: '金色符文说明规则背后有人动手脚。' },
+              { key: 'timeline_tracking', label: '追踪/时间线', status: 'warn', evidence: '', fix: '补齐追踪/时间线.md。' },
+            ],
+          },
+        },
+      },
+    })
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+    const contextPackage = {
+      preflight: {
+        checks: [
+          { key: 'benchmark_recall_source_paths', ok: false, severity: 'medium' },
+          { key: 'source_readiness_timeline_tracking', ok: false, severity: 'medium' },
+          { key: 'source_readiness_chapter_blueprint', ok: false, severity: 'high' },
+        ],
+        warnings: ['文风召回来源缺失', '追踪/时间线缺失', '本章细纲/蓝图缺核心字段'],
+      },
+      chapter_target: {
+        chapter_no: 2,
+        title: '旧法失准',
+        summary: chapter.chapter_summary,
+        conflict: chapter.conflict,
+        ending_hook: chapter.ending_hook,
+        scene_cards: chapter.scene_list,
+      },
+      continuity: {
+        previous_chapter: {
+          chapter_no: 1,
+          title: '异常入局',
+          ending_hook: '金色符文说明规则背后有人动手脚。',
+          ending_excerpt: '江哲看见规则五下方的金色符文，随即踏入红雾。',
+        },
+      },
+      story_state: {
+        characters: [{ name: '江哲', current_state: { location: '红雾入口', knowledge_scope: '知道规则五被篡改' } }],
+      },
+    }
+
+    await service.autoRepairChapterPreflightGaps(workspace, project, chapter, contextPackage, undefined)
+    const repaired = (await listNovelChapters(workspace, project.id)).find(item => item.id === chapter.id)
+    const preDraft = repaired?.raw_payload?.pre_draft_brief || {}
+    const sourceReadiness = preDraft.state_tracking_contract?.source_readiness || []
+    const timelineRow = sourceReadiness.find((item: any) => item.key === 'timeline_tracking')
+    const sourcePaths = preDraft.benchmark_recall_brief?.source_paths || []
+    const blueprint = preDraft.chapter_blueprint || {}
+
+    expect(sourcePaths.length).toBeGreaterThan(0)
+    expect(sourcePaths.join('｜')).toContain('MangaForge')
+    expect(timelineRow?.status).toBe('ready')
+    expect(timelineRow?.evidence).toContain('当前时间')
+    expect(timelineRow?.evidence).toContain('当前地点')
+    expect(blueprint.target_emotion).toBeTruthy()
+    expect(blueprint.content_outline?.cause).toBeTruthy()
+    expect(blueprint.plot_lines?.logic_line).toBeTruthy()
+    expect(blueprint.ending_contract?.next_chapter_pull).toBeTruthy()
+
+    const rebuiltChapters = await listNovelChapters(workspace, project.id)
+    const rebuiltChapter = rebuiltChapters.find(item => item.id === chapter.id)
+    const rebuiltContext = await service.buildChapterContextPackage(
+      workspace,
+      project,
+      rebuiltChapter,
+      rebuiltChapters,
+      await listNovelWorldbuilding(workspace, project.id),
+      await listNovelCharacters(workspace, project.id),
+      await listNovelOutlines(workspace, project.id),
+      await listNovelReviews(workspace, project.id),
+    )
+    const remainingKeys = (rebuiltContext.preflight?.checks || [])
+      .filter((item: any) => !item.ok)
+      .map((item: any) => item.key)
+
+    expect(remainingKeys).not.toContain('benchmark_recall_source_paths')
+    expect(remainingKeys).not.toContain('source_readiness_timeline_tracking')
+    expect(remainingKeys).not.toContain('source_readiness_chapter_blueprint')
   })
 
   test('feeds unconfirmed unattended pre-draft brief into paragraph prose planning', () => {
@@ -57373,6 +57565,77 @@ describe('chapter context word target source guards', () => {
     expect(prompt).toContain('中段用新证据推动目标并改变盟友立场')
     expect(prompt).toContain('"ending_hook_seed": "章末抛出第三个名字作为追读钩子"')
     expect(prompt).toContain('不要再用旁白宣布风险已修复')
+  })
+
+  test('keeps paragraph prose prompt within budget when context package has bulky assets', () => {
+    const noisyText = 'RAW_NOISE_BLOCK_不要把整段资产噪音塞进正文任务。'.repeat(1000)
+    const project = {
+      title: '灰域双生',
+      reference_config: {},
+    }
+    const contextPackage = {
+      chapter_target: {
+        chapter_no: 2,
+        title: '玻璃娃娃的眼泪',
+        summary: '主角必须确认玻璃娃娃和旧账之间的关系。',
+        conflict: '旧账执事阻止主角触碰玻璃娃娃。',
+        ending_hook: '玻璃娃娃眼眶里浮出第三个名字。',
+        scene_cards: [
+          {
+            scene_no: 1,
+            title: '旧账压门',
+            purpose: '主角带着旧账进入审判厅',
+            conflict: '执事拒绝承认旧账缺页',
+            reader_payoff: '确认玻璃娃娃不是装饰，而是证据容器。',
+          },
+        ],
+      },
+      setting_context: {
+        entities: Array.from({ length: 80 }, (_, index) => ({
+          id: index + 1,
+          name: `资产${index + 1}`,
+          entity_type: 'item',
+          summary: noisyText,
+          constraints_json: { knowledge_scope: noisyText, forbidden_reveal: noisyText },
+          state_json: { current_owner: noisyText, risk: noisyText },
+        })),
+      },
+      story_state: {
+        progress_summary: { notes: noisyText },
+        daily_context_snapshot: { current_scene: noisyText, pending_clues: [noisyText] },
+        character_positions: Object.fromEntries(
+          Array.from({ length: 40 }, (_, index) => [`角色${index + 1}`, noisyText]),
+        ),
+      },
+      relationship_graph: {
+        diagnostics: Array.from({ length: 120 }, (_, index) => ({
+          id: index + 1,
+          issue: noisyText,
+        })),
+      },
+      writing_bible: {
+        style: noisyText,
+        forbidden: noisyText,
+      },
+      preflight: { ready: true, blockers: [] },
+    }
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+    const prompt = service.buildParagraphProseContext(
+      project,
+      contextPackage,
+      { generation_prompt_addendum: noisyText },
+      { chapter_no: 2, title: '玻璃娃娃的眼泪' },
+    )
+
+    expect(prompt.length).toBeLessThanOrEqual(180000)
+    expect(prompt).toContain('【结构化上下文包】')
+    expect(prompt).toContain('玻璃娃娃的眼泪')
+    expect(prompt).toContain('旧账压门')
+    expect(prompt).not.toContain(noisyText.slice(0, 1000))
   })
 
   test('asks prose self review and revision to enforce oh-story prose craft checks', () => {

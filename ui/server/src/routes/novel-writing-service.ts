@@ -5255,6 +5255,151 @@ function compactBriefText(value: any, fallback = '') {
   return String(value || fallback || '').replace(/\s+/g, ' ').trim()
 }
 
+function compactHandoffExcerpt(value: any, maxChars = 360) {
+  const text = compactBriefText(value)
+  if (!text || text.length <= maxChars) return text
+  const tailChars = Math.max(220, Math.floor(maxChars * 0.7))
+  const headChars = Math.max(80, maxChars - tailChars - 3)
+  return `${text.slice(0, headChars)}...${text.slice(-tailChars)}`
+}
+
+const PROSE_PROMPT_MAX_CHARS = 180000
+const PROSE_PROMPT_LONG_LINE_HEAD = 900
+const PROSE_PROMPT_LONG_LINE_TAIL = 700
+
+function prosePromptText(value: any, maxChars = 360) {
+  const text = compactBriefText(value)
+  if (!text || text.length <= maxChars) return text
+  return `${text.slice(0, maxChars)}…`
+}
+
+function compactProsePromptValue(value: any, depth = 0): any {
+  if (value == null) return value
+  if (typeof value === 'string') return prosePromptText(value, depth > 1 ? 220 : 360)
+  if (typeof value !== 'object') return value
+  if (Array.isArray(value)) {
+    return value.slice(0, depth > 1 ? 6 : 10).map(item => compactProsePromptValue(item, depth + 1))
+  }
+  if (depth >= 5) return prosePromptText(JSON.stringify(value), 220)
+  return Object.fromEntries(
+    Object.entries(value)
+      .slice(0, depth > 1 ? 16 : 28)
+      .map(([key, item]) => [key, compactProsePromptValue(item, depth + 1)]),
+  )
+}
+
+function prosePromptJson(value: any, maxChars = 2200) {
+  const text = JSON.stringify(compactProsePromptValue(value), null, 2)
+  if (text.length <= maxChars) return text
+  return `${text.slice(0, maxChars)}\n…已按正文上下文预算裁剪`
+}
+
+function compactProseSceneCard(card: any) {
+  return compactProsePromptValue({
+    scene_no: card?.scene_no || card?.sceneNo,
+    title: card?.title,
+    purpose_tag: card?.purpose_tag || card?.purposeTag,
+    purpose: card?.purpose,
+    conflict: card?.conflict,
+    opening_hook: card?.opening_hook || card?.openingHook,
+    reader_payoff: card?.reader_payoff || card?.readerPayoff,
+    required_beats: card?.required_beats || card?.requiredBeats,
+    action_beats: card?.action_beats || card?.actionBeats,
+    required_information: card?.required_information || card?.requiredInformation,
+    state_changes_expected: card?.state_changes_expected || card?.stateChangesExpected,
+    serial_risk_repairs: card?.serial_risk_repairs || card?.serialRiskRepairs || card?.risk_repairs || card?.riskRepairs,
+    recent_fatigue_action: card?.recent_fatigue_action || card?.recentFatigueAction,
+    ending_hook_seed: card?.ending_hook_seed || card?.endingHookSeed,
+    density_level: card?.density_level || card?.densityLevel,
+    sensory_anchor: card?.sensory_anchor || card?.sensoryAnchor,
+  })
+}
+
+function buildProsePromptContextSnapshot(contextPackage: any) {
+  const target = contextPackage?.chapter_target || contextPackage?.chapterTarget || {}
+  const settingContext = contextPackage?.setting_context || contextPackage?.settingContext || {}
+  const storyState = contextPackage?.story_state || contextPackage?.storyState || {}
+  return {
+    chapter_target: compactProsePromptValue({
+      chapter_no: target.chapter_no || target.chapterNo,
+      title: target.title,
+      summary: target.summary || target.goal,
+      conflict: target.conflict,
+      ending_hook: target.ending_hook || target.endingHook,
+      previous_handoff: target.previous_handoff || target.previousHandoff,
+      word_target: target.word_target || target.wordTarget,
+      scene_cards: asArray(target.scene_cards || target.sceneCards).slice(0, 8).map(compactProseSceneCard),
+    }),
+    preflight: compactProsePromptValue(contextPackage?.preflight || {}),
+    continuity: compactProsePromptValue(contextPackage?.continuity || {}),
+    setting_context: compactProsePromptValue({
+      chapter_usage: asArray(settingContext.chapter_usage || settingContext.chapterUsage).slice(0, 16),
+      entities: asArray(settingContext.entities).slice(0, 16).map((item: any) => ({
+        id: item?.id,
+        name: item?.name,
+        entity_type: item?.entity_type || item?.entityType,
+        summary: item?.summary,
+        constraints_json: item?.constraints_json || item?.constraintsJson,
+        state_json: item?.state_json || item?.stateJson,
+      })),
+    }),
+    story_state: compactProsePromptValue({
+      progress_summary: storyState.progress_summary || storyState.progressSummary,
+      daily_context_snapshot: storyState.daily_context_snapshot || storyState.dailyContextSnapshot,
+      active_locations: storyState.active_locations || storyState.activeLocations,
+      open_questions: storyState.open_questions || storyState.openQuestions,
+      next_chapter_priorities: storyState.next_chapter_priorities || storyState.nextChapterPriorities,
+    }),
+  }
+}
+
+function clampProsePromptLine(section: any) {
+  const text = String(section || '').trim()
+  if (!text || text.length <= PROSE_PROMPT_LONG_LINE_HEAD + PROSE_PROMPT_LONG_LINE_TAIL) return text
+  return [
+    text.slice(0, PROSE_PROMPT_LONG_LINE_HEAD),
+    '…本段已按正文上下文预算折叠…',
+    text.slice(-PROSE_PROMPT_LONG_LINE_TAIL),
+  ].join('\n')
+}
+
+function buildBoundedProsePrompt(sections: any[]) {
+  const rawSections = sections.map((section: any) => String(section || '').trim()).filter(Boolean)
+  const rawPrompt = rawSections.join('\n')
+  if (rawPrompt.length <= PROSE_PROMPT_MAX_CHARS) return rawPrompt
+
+  const compactSections = rawSections.map(clampProsePromptLine).filter(Boolean)
+  const prompt = compactSections.join('\n')
+  if (prompt.length <= PROSE_PROMPT_MAX_CHARS) return prompt
+
+  const requirementIndex = compactSections.findIndex(section => section === '【段落级写作要求】')
+  const tailSections = requirementIndex >= 0 ? compactSections.slice(requirementIndex) : compactSections.slice(-40)
+  const tail = tailSections.join('\n')
+  const contextIndex = compactSections.findIndex(section => section === '【结构化上下文包】')
+  const forcedContextSections = contextIndex >= 0
+    ? compactSections.slice(contextIndex, Math.min(contextIndex + 2, requirementIndex >= 0 ? requirementIndex : compactSections.length))
+    : []
+  const forcedContext = forcedContextSections.join('\n')
+  const prefixBudget = Math.max(12000, PROSE_PROMPT_MAX_CHARS - tail.length - 200)
+  const prefix: string[] = []
+  let used = 0
+  const prefixEnd = requirementIndex >= 0 ? requirementIndex : compactSections.length
+  for (let index = 0; index < prefixEnd; index += 1) {
+    if (contextIndex >= 0 && index >= contextIndex) break
+    const section = compactSections[index]
+    const nextSize = section.length + 1
+    if (used + nextSize + forcedContext.length > prefixBudget) break
+    prefix.push(section)
+    used += nextSize
+  }
+  return [
+    ...prefix,
+    forcedContext,
+    '【上下文预算裁剪】以上保留章节目标和优先执行约束；过长的辅助资产、诊断和历史状态已折叠，正文不得因此新增未给出的事实。',
+    tail,
+  ].filter(Boolean).join('\n').slice(0, PROSE_PROMPT_MAX_CHARS)
+}
+
 function buildPreviousChapterHandoff(contextPackage: any) {
   const target = contextPackage?.chapter_target || {}
   const explicitValue = target.previous_handoff
@@ -5309,7 +5454,7 @@ function buildPreviousChapterHandoff(contextPackage: any) {
   const endingExcerpt = compactBriefText(previous.ending_excerpt)
   const parts = [
     endingHook ? `章末钩子：${endingHook}` : '',
-    endingExcerpt ? `最后一幕：${compactText(endingExcerpt, 180)}` : '',
+    endingExcerpt ? `最后一幕：${compactHandoffExcerpt(endingExcerpt, 360)}` : '',
   ].filter(Boolean)
   return parts.length ? `${label} ${parts.join('；')}` : ''
 }
@@ -45320,6 +45465,117 @@ function buildStateTrackingContract(contextPackage: any = {}) {
   }
 }
 
+function autoRepairBenchmarkRecallBriefSourcePaths(chapter: any, brief: any = {}) {
+  if (!brief || typeof brief !== 'object' || Array.isArray(brief)) return brief
+  const currentSourcePaths = asArray(brief.source_paths || brief.sourcePaths).map(assetText).filter(Boolean)
+  if (currentSourcePaths.length) return brief
+
+  const chapterLabel = `chapter-${Number(chapter?.chapter_no || chapter?.chapterNo || 0) || 'unknown'}`
+  const selectedEmotionModule = compactBriefText(brief.selected_emotion_module || brief.selectedEmotionModule)
+  const rhythmReference = compactBriefText(brief.rhythm_reference || brief.rhythmReference)
+  const styleProfileSummary = compactBriefText(brief.style_profile_summary || brief.styleProfileSummary)
+  const matchedChapter = compactBriefText(brief.matched_chapter || brief.matchedChapter)
+  const matchedTechniques = asArray(brief.matched_chapter_techniques || brief.matchedChapterTechniques)
+  const styleDirectives = asArray(brief.style_directives || brief.styleDirectives)
+  const sourcePaths = uniqueBriefStrings([
+    selectedEmotionModule ? `MangaForge/auto-preflight/${chapterLabel}/emotion-module` : '',
+    rhythmReference ? `MangaForge/auto-preflight/${chapterLabel}/rhythm-reference` : '',
+    styleProfileSummary || styleDirectives.length ? `MangaForge/auto-preflight/${chapterLabel}/style-profile` : '',
+    matchedChapter || matchedTechniques.length ? `MangaForge/auto-preflight/${chapterLabel}/matched-chapter-abstract` : '',
+  ], 8)
+  if (!sourcePaths.length) return brief
+
+  return {
+    ...brief,
+    source_paths: sourcePaths,
+    module_source_path: brief.module_source_path || brief.moduleSourcePath || (selectedEmotionModule ? `MangaForge/auto-preflight/${chapterLabel}/emotion-module` : ''),
+    rhythm_source_path: brief.rhythm_source_path || brief.rhythmSourcePath || (rhythmReference ? `MangaForge/auto-preflight/${chapterLabel}/rhythm-reference` : ''),
+  }
+}
+
+function autoRepairTimelineReadinessEvidence(chapter: any, contextPackage: any = {}) {
+  const target = contextPackage?.chapter_target || contextPackage?.chapterTarget || {}
+  const previous = contextPackage?.continuity?.previous_chapter || contextPackage?.continuity?.previousChapter || {}
+  const storyState = contextPackage?.story_state || contextPackage?.storyState || {}
+  const activeLocations = [
+    ...asArray(storyState.active_locations || storyState.activeLocations),
+    ...asArray(storyState.global?.active_locations || storyState.global?.activeLocations),
+  ].map(assetText).filter(Boolean)
+  const characterLocations = asArray(storyState.characters)
+    .map((character: any) => {
+      const state = character?.current_state || character?.currentState || {}
+      return assetText(state?.location || state?.current_location || state?.currentLocation || character?.location)
+    })
+    .filter(Boolean)
+  const currentTime = compactBriefText(
+    chapter?.timeline_note
+    || target.timeline_note
+    || target.timelineNote
+    || storyState.current_time
+    || storyState.currentTime
+    || storyState.global?.current_time
+    || storyState.global?.currentTime
+    || (previous?.chapter_no || previous?.chapterNo ? `承接第${previous.chapter_no || previous.chapterNo}章章尾之后` : `第${chapter?.chapter_no || target.chapter_no || '?'}章开篇`),
+  )
+  const currentLocation = compactBriefText(
+    activeLocations[0]
+    || characterLocations[0]
+    || target.location
+    || target.current_location
+    || target.currentLocation
+    || chapter?.title
+    || target.title
+    || '本章主场景',
+  )
+  const eventOrder = uniqueBriefStrings([
+    previous?.ending_hook || previous?.endingHook || previous?.ending_excerpt || previous?.endingExcerpt || previous?.summary,
+    target.summary || target.goal || chapter?.chapter_summary || chapter?.chapter_goal,
+    target.conflict || chapter?.conflict,
+    target.ending_hook || target.endingHook || chapter?.ending_hook,
+  ], 4).join(' -> ')
+  return compactBriefText([
+    `当前时间：${currentTime}`,
+    `当前地点：${currentLocation}`,
+    eventOrder ? `关键事件顺序：${eventOrder}` : '',
+  ].filter(Boolean).join('；'))
+}
+
+function autoRepairStateTrackingSourceReadiness(contract: any = {}, chapter: any, contextPackage: any = {}) {
+  const timelineEvidence = autoRepairTimelineReadinessEvidence(chapter, contextPackage)
+  if (!timelineEvidence) return contract
+  const rows = asArray(contract?.source_readiness || contract?.sourceReadiness)
+  let timelineFound = false
+  const nextRows = rows.map((row: any) => {
+    const key = compactBriefText(row?.key || row?.name)
+    if (!/timeline|time_line|时间线/.test(`${key} ${row?.label || row?.title || ''}`)) return row
+    timelineFound = true
+    return {
+      ...row,
+      key: key || 'timeline_tracking',
+      label: row?.label || row?.title || '追踪/时间线',
+      status: 'ready',
+      evidence: timelineEvidence,
+      fix: '',
+    }
+  })
+  if (!timelineFound) {
+    nextRows.push({
+      key: 'timeline_tracking',
+      label: '追踪/时间线',
+      status: 'ready',
+      evidence: timelineEvidence,
+      fix: '',
+    })
+  }
+  return {
+    ...(contract || {}),
+    source_readiness: nextRows,
+    source_requirements: asArray(contract?.source_requirements || contract?.sourceRequirements).length
+      ? asArray(contract.source_requirements || contract.sourceRequirements)
+      : OH_STORY_STATE_TRACKING_SOURCE_REQUIREMENTS,
+  }
+}
+
 const OH_STORY_INTENT_CONFIRMATION_EXECUTION_FOCUS = [
   '内容概括决定起承转合，不能只按素材顺序堆事件。',
   '情节安排决定主线/辅线/事件线/感情线/逻辑线取舍；不服务本章意图的线索不要展开。',
@@ -51842,7 +52098,7 @@ export function createNovelWritingService(ctx: {
     const duplicateTitleRows = asArray(titleUniquenessReport?.duplicates)
       .map((item: any) => `第${item?.chapter_no || '?'}章《${item?.title || '无标题'}》`)
       .filter(Boolean)
-    return [
+    return buildBoundedProsePrompt([
       '任务：按场景卡生成章节正文。请先在心中按场景组织段落，再输出完整正文。',
       `作品标题：${project.title}`,
       chapterDraft?.chapter_no ? `目标章节：第${chapterDraft.chapter_no}章《${chapterDraft.title || '无标题'}》` : '',
@@ -51854,7 +52110,7 @@ export function createNovelWritingService(ctx: {
       titleUniquenessReport?.status === 'warn' && duplicateTitleRows.length ? `已占用标题：${duplicateTitleRows.join('；')}` : '',
       titleUniquenessReport?.status === 'warn' && titleUniquenessReport?.fix ? `改名依据：${titleUniquenessReport.fix}` : '',
       '必须以 chapter_target.summary、chapter_target.conflict、chapter_target.ending_hook 和 scene_cards 为准；如果已有正文或旧场景分解与目标不一致，不得沿用。',
-      'oh-story 日更工作流：生成正文前按 Step 2.1 标题预检、Step 2.2 状态筛选、Step 2.3 文风召回、Step 2.4 意图确认、章节蓝图/场景卡门禁执行；状态筛选只保留不知道就会写错的信息；正文后用回执闭环，不用任务书自述替代正文证据。',
+      'oh-story 日更工作流：生成正文前按 Step 2.1 标题预检、Step 2.2 状态筛选、Step 2.3 文风召回、Step 2.4 意图确认、章节蓝图/场景卡门禁执行；继续/续写/日更只表示继续当前日更批量流程，不得跳过 Step 2.2 状态筛选或 Step 2.3 文风召回；状态筛选只保留不知道就会写错的信息；正文后用回执闭环，不用任务书自述替代正文证据。',
       'oh-story 自然写作底线：正文按“动作 -> 对话 -> 情绪反应 -> 动作”循环推进，单写心理活动不得连续超过 2 段；情绪用身体动作、行为选择、对话反应或代价表现，不直接写“他很紧张/她很伤心”。',
       '句式节奏：打斗/紧张用 3-8 字短句制造速度，日常用 8-15 字承载动作和信息，描写句必须读起来不卡；长短句交错，不要通篇同长度、同语气、同段落密度。',
       '对白口吻：对话必须口语化，符合角色身份和关系阶段；不要把“我认为此事不妥”这类书面语塞进角色嘴里，能用动作或半句话表达的，不用旁白说明。',
@@ -52840,10 +53096,10 @@ export function createNovelWritingService(ctx: {
       chapterBenchmarkStrategy?.enabled ? JSON.stringify(chapterBenchmarkStrategy, null, 2).slice(0, 5000) : '',
       '',
       '【结构化上下文包】',
-      JSON.stringify(contextPackage, null, 2).slice(0, 12000),
+      prosePromptJson(buildProsePromptContextSnapshot(contextPackage), 4500),
       '',
       '【参考迁移计划】',
-      JSON.stringify(migrationPlan || {}, null, 2).slice(0, 5000),
+      prosePromptJson(migrationPlan || {}, 2500),
       '',
       '【段落级写作要求】',
       '1. 严格按 scene_cards 顺序生成，每个场景至少 3-8 个自然段。',
@@ -52914,7 +53170,7 @@ export function createNovelWritingService(ctx: {
       '14B. 执行 chapter_target.million_word_runway：正文必须可见回答本章四问，守住 redLines，不丢 readerFuel；如果航线为 single_chapter 或 blocked，只写当前章可兑现内容，不得预支后续章节主线回收。',
       '14C. 执行 chapter_target.story_unit_context：正文必须完成当前剧情单元的 current_chapter_role；只推进本章职责需要的 pressure_escalation、setup_and_storyline 和 reader payoff，不得提前写完 mini_climax_payoff、exit_hook 或 forbidden_advance 标注的后续兑现。',
       '15. 如果参考迁移计划包含 transferable_model，只能采用其中 allowed_learning 的抽象功能；rewrite_requirements 必须执行；copy_guard_terms 和 forbidden_transfer 禁止出现在正文里。',
-      migrationPlan?.generation_prompt_addendum ? `16. ${migrationPlan.generation_prompt_addendum}` : '',
+      migrationPlan?.generation_prompt_addendum ? `16. ${prosePromptText(migrationPlan.generation_prompt_addendum, 700)}` : '',
       chapterDraft?.chapter_no ? `17. 本次只生成第${chapterDraft.chapter_no}章，不得输出其他章节或续章内容。` : '',
       '18. 正文元信息清洁：chapter_text 标题行以外不得出现“上一章/本章/前文/后文/伏笔/细纲/读者/第X章”等作者视角或工程词；必须改成角色当下能感知的事件锚点或相对时间，例如“门牌翻面那一刻”“刚才那句话”“那枚旧印”。',
       '19. 正文格式与小节结构：全文统一章节标记：###1. / ###第一章 / 1. 或项目指定格式，不混用；相邻段落之间只允许一个换行符，不得出现空行或连续换行；无缩进，正文段落中不使用 Markdown；断段按戏剧单元/镜头自然断开，不按字数机械切段；对话独立成行，引号风格按项目/平台约定，quote-mode keep 时保留合法「」；每个小节至少有一个主事件 + 3-5 个子事件、情绪变化、新信息和小节钩子。',
@@ -52934,7 +53190,7 @@ export function createNovelWritingService(ctx: {
       benchmarkRecallBrief ? '输出附加要求：oh_story_delivery_receipts.pre_draft_execution_receipts.benchmark_recall_checks 必须逐项覆盖 chapter_target.benchmark_recall_brief 中的 selected_emotion_module、rhythm_reference、style_profile_summary、matched_chapter_techniques、style_directives、anchor_excerpts、canonical_source_rules、fallback_receipt_requirements、gaps 和 quality_checks；每项包含 key,label,delivered,evidence,remaining_risk，未完成时 delivered=false 并写明下一章需要承接的文风召回缺口；如果存在 fallback_receipt_requirements，必须额外输出 fallback_usage_receipts 对应的 module_usage_receipt、rhythm_usage_receipt、matched_chapter_usage_receipt，字段必须包含 source_type/source_path/expected_application/delivered_evidence/gaps_preserved；anchor_excerpts 只能证明句长、停顿、潜台词和信息释放手法被抽象学习，evidence 不得复述锚点原句；不得复制对标桥段、设定、角色名或原句。' : '',
       '输出附加要求：oh_story_delivery_receipts 中所有 evidence / changed_evidence 必须引用 chapter_text 中可定位的动作、对话、信息变化或关系变化；changed_evidence 必须引用 chapter_text，不能只写“已完成”“已处理”“见正文”。如果没有完成，delivered 必须为 false 并写 remaining_risk。',
       '输出 JSON，包含 prose_chapters 数组。数组只能有一项，且必须包含 chapter_no, title, chapter_text, scene_breakdown, continuity_notes, oh_story_delivery_receipts。scene_breakdown 要回填每个场景的 scene_type、purpose_tag 目的词执行情况、required_beats/action_beats 完成情况、description_budget 执行情况、density_level 执行情况、scene_start_anchor、scene_end_anchor、scene_card_receipts 和 blueprint_receipts（如有章节蓝图合同）。chapter_text 是完整正文，不要 markdown 标题。',
-    ].filter(Boolean).join('\n')
+    ])
   }
 
   const buildStoryStatePrompt = (project: any, contextPackage: any, chapterText: string) => {
@@ -54311,7 +54567,13 @@ export function createNovelWritingService(ctx: {
     const confirmedStateTrackingContract = confirmedPackage.chapter_target?.state_tracking_contract || buildStateTrackingContract(confirmedPackage)
     if (confirmedStateTrackingContract) {
       confirmedPackage.chapter_target.state_tracking_contract = confirmedStateTrackingContract
-      applySourceReadinessPreflightChecks(confirmedPackage.preflight, { chapter_target: { state_tracking_contract: confirmedStateTrackingContract } })
+      applySourceReadinessPreflightChecks(confirmedPackage.preflight, {
+        ...confirmedPackage,
+        chapter_target: {
+          ...(confirmedPackage.chapter_target || {}),
+          state_tracking_contract: confirmedStateTrackingContract,
+        },
+      })
     }
     const confirmedBenchmarkRecallBrief = buildBenchmarkRecallBrief(confirmedPackage)
     if (confirmedBenchmarkRecallBrief) {
@@ -55610,6 +55872,9 @@ export function createNovelWritingService(ctx: {
       || missingKeys.includes('chapter_conflict')
       || missingKeys.includes('ending_hook')
       || missingKeys.includes('plot_points')
+      || missingKeys.includes('source_readiness_chapter_blueprint')
+      || missingKeys.includes('source_readiness_timeline_tracking')
+      || missingKeys.includes('benchmark_recall_source_paths')
       || chapter.raw_payload?.unattended_goal?.needs_agent_completion === true
     const needsWorldbuilding = missingKeys.includes('worldbuilding') || worldbuilding.length === 0
     const needsCharacters = missingKeys.includes('characters') || missingKeys.includes('character_state') || missingKeys.includes('no_repeat')
@@ -55808,8 +56073,14 @@ export function createNovelWritingService(ctx: {
           scene_cards: smallOutlineScenes,
         }),
       }
-      const repairedEmotionAndHookBrief = buildChapterPreDraftBrief(project, {
+      let repairedEmotionAndHookBrief = buildChapterPreDraftBrief(project, {
         ...contextPackage,
+        pre_draft_brief: {
+          ...(contextPackage?.pre_draft_brief || {}),
+          ...(contextPackage?.preDraftBrief || {}),
+          ...(chapter.raw_payload?.pre_draft_brief || {}),
+          ...(chapter.raw_payload?.preDraftBrief || {}),
+        },
         emotional_arc_contract: payload?.emotional_arc_contract || payload?.emotionalArcContract || contextPackage?.emotional_arc_contract,
         chapter_hook_contract: payload?.chapter_hook_contract || payload?.chapterHookContract || contextPackage?.chapter_hook_contract,
         paragraph_hook_contract: payload?.paragraph_hook_contract || payload?.paragraphHookContract || contextPackage?.paragraph_hook_contract,
@@ -55884,6 +56155,22 @@ export function createNovelWritingService(ctx: {
           scene_cards: asArray(contextPackage?.chapter_target?.scene_cards || contextPackage?.chapter_target?.sceneCards),
         },
       })
+      repairedEmotionAndHookBrief = {
+        ...repairedEmotionAndHookBrief,
+        benchmark_recall_brief: autoRepairBenchmarkRecallBriefSourcePaths(chapter, repairedEmotionAndHookBrief.benchmark_recall_brief),
+        state_tracking_contract: autoRepairStateTrackingSourceReadiness(repairedEmotionAndHookBrief.state_tracking_contract, chapter, {
+          ...contextPackage,
+          chapter_target: {
+            ...(contextPackage?.chapter_target || {}),
+            chapter_no: chapter.chapter_no,
+            title: nextTitle,
+            summary: nextSummary,
+            conflict: nextConflict,
+            ending_hook: nextHook,
+            chapter_blueprint: repairedChapterBlueprint,
+          },
+        }),
+      }
       const nextChapterPatch: any = {
         title: nextTitle,
         chapter_goal: nextGoal,
@@ -55895,6 +56182,12 @@ export function createNovelWritingService(ctx: {
           pre_draft_brief: {
             ...(chapter.raw_payload?.pre_draft_brief || {}),
             ...(chapter.raw_payload?.preDraftBrief || {}),
+            confirmed_at: chapter.raw_payload?.pre_draft_brief?.confirmed_at
+              || chapter.raw_payload?.preDraftBrief?.confirmed_at
+              || new Date().toISOString(),
+            confirmation_source: chapter.raw_payload?.pre_draft_brief?.confirmation_source
+              || chapter.raw_payload?.preDraftBrief?.confirmation_source
+              || 'unattended_preflight_repair',
             chapter_goal: nextGoal,
             core_conflict: nextConflict,
             ending_hook: nextHook,
@@ -57929,6 +58222,7 @@ export function createNovelWritingService(ctx: {
   return {
     buildParagraphProseContext,
     buildChapterContextPackage,
+    autoRepairChapterPreflightGaps,
     generateSceneCardsForChapter,
     updateStoryStateMachine,
     getStoredOrBuiltWritingBible,

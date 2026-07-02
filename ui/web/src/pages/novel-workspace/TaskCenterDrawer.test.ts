@@ -14,6 +14,7 @@ import {
   buildNextChapterQualityPlanPreview,
   buildRepairClosureHighlights,
   buildRepairTaskIssueTagMeta,
+  buildTaskRunCardModel,
   buildSafeBatchExpansionPolicySnapshot,
   buildSafeBatchRecoveryFocusReviewState,
   chapterGroupActionState,
@@ -22,6 +23,62 @@ import {
   repairTaskActionLabel,
   safeBatchRecoveryFocusMatchesTask,
 } from './TaskCenterDrawer'
+
+describe('buildTaskRunCardModel', () => {
+  test('summarizes repair runs with lifecycle, operation mode, timeline, closure and one primary action', () => {
+    const model = buildTaskRunCardModel({
+      id: 17,
+      run_type: 'longform_production_repair',
+      status: 'ready',
+      step_name: 'reader-trial-repair-1',
+      created_at: '2026-06-30T08:10:00.000Z',
+      updated_at: '2026-06-30T08:15:00.000Z',
+      output_ref: JSON.stringify({
+        tasks: [
+          { task_status: 'open', title: '补章末追读' },
+          { task_status: 'needs_review', title: '复查试读修复' },
+          { task_status: 'resolved', title: '补开篇钩子' },
+        ],
+      }),
+    }, { canProcessRepairTasks: true })
+
+    expect(model.lifecycle.label).toBe('待启动')
+    expect(model.execution.label).toBe('手工处理')
+    expect(model.timeline).toEqual([
+      { key: 'created', label: '创建', value: '2026-06-30 16:10' },
+      { key: 'started', label: '开始', value: '未开始' },
+      { key: 'ended', label: '结束', value: '未结束' },
+      { key: 'updated', label: '更新', value: '2026-06-30 16:15' },
+    ])
+    expect(model.closure).toMatchObject({
+      total: 3,
+      pending: 1,
+      needsReview: 1,
+      resolved: 1,
+      failed: 0,
+      summary: '待处理 1 项，需复查 1 项，已完成 1/3',
+    })
+    expect(model.primaryAction).toEqual({ key: 'process_repair', label: '处理下一项' })
+  })
+
+  test('marks unattended and completed runs without adding a primary action', () => {
+    const model = buildTaskRunCardModel({
+      id: 18,
+      run_type: 'chapter_group_generation',
+      status: 'completed',
+      step_name: 'unattended-to-10',
+      input_ref: JSON.stringify({ unattended: { enabled: true } }),
+      output_ref: JSON.stringify({ chapters: [{ status: 'success' }, { status: 'success' }] }),
+      started_at: '2026-06-30T09:00:00.000Z',
+      completed_at: '2026-06-30T09:05:00.000Z',
+    })
+
+    expect(model.lifecycle.label).toBe('已完成')
+    expect(model.execution.label).toBe('自动运行')
+    expect(model.closure.summary).toBe('已完成 2/2')
+    expect(model.primaryAction).toEqual({ key: 'none', label: '' })
+  })
+})
 
 describe('buildPostBatchQualityCheckSummary', () => {
   test('summarizes oh-story batch quality checks from chapter group output', () => {

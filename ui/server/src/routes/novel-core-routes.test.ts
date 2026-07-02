@@ -695,6 +695,62 @@ describe('novel project seed prompt', () => {
     expect(response.body.reference_config.commercial_positioning.risks.join('｜')).toContain('不能写成纯打怪')
   })
 
+  test('materializes seed projects with prose-ready story state and scene cards', async () => {
+    const workspace = await tempDir('mangaforge-novel-materialize-prose-ready-')
+    const { registerNovelCoreRoutes } = await import('./novel-core-routes')
+    const { listNovelChapters } = await import('../novel')
+    const { app, handlers } = createRouteHarness()
+    registerNovelCoreRoutes(app as any, () => workspace)
+    const createProject = handlers.get('POST /api/novel/projects')
+    expect(createProject).toBeTruthy()
+
+    const seed = {
+      title: '雾灯归航',
+      genre: '都市奇幻',
+      synopsis: '失忆修灯人陆珩在雾港修复能照出谎言的灯塔。',
+      logline: '每修好一盏灯，就照出一个被城市藏起来的谎言。',
+      protagonist: { name: '陆珩', goal: '找回失去的海雾记忆', current_state: { location: '雾港旧码头', pressure: '灯塔即将熄灭' } },
+      characters: [
+        { name: '陆珩', role_type: 'protagonist', motivation: '找回失去的海雾记忆', goal: '修复灯塔', conflict: '每次点灯都会失去一段新记忆', current_state: { location: '雾港旧码头', pressure: '灯塔即将熄灭' } },
+        { name: '沈照', role_type: 'ally', motivation: '保护雾港居民', goal: '查清灯塔失控原因', conflict: '她知道陆珩遗忘的真相', current_state: { location: '巡夜署', pressure: '不能说出禁忌真相' } },
+      ],
+      worldbuilding: { world_summary: '雾港的灯能照出谎言，也会吞掉点灯人的记忆。' },
+      chapter_outlines: [
+        {
+          chapter_no: 1,
+          title: '旧码头的灯',
+          chapter_goal: '陆珩发现第一盏雾灯失控。',
+          chapter_summary: '陆珩回到旧码头修灯，灯光照出船主撒谎，雾里出现他遗忘的名字。',
+          conflict: '修灯会让陆珩继续失忆，但不修灯全港会陷入雾灾。',
+          ending_hook: '灯芯里浮出沈照藏起来的半枚巡夜徽章。',
+        },
+      ],
+    }
+
+    const response = await callRoute(createProject, {
+      body: {
+        title: seed.title,
+        genre: seed.genre,
+        length_target: 'medium',
+        synopsis: seed.synopsis,
+        reference_config: { project_seed: seed },
+        auto_materialize_seed: true,
+      },
+    })
+
+    expect(response.statusCode).toBe(200)
+    const storyState = response.body.reference_config.story_state
+    expect(storyState.characters.map((character: any) => character.name)).toEqual(['陆珩', '沈照'])
+    expect(storyState.characters[0].current_state.pressure).toContain('灯塔')
+    expect(storyState.source).toBe('project_seed_materialization')
+
+    const chapters = await listNovelChapters(workspace, response.body.id)
+    expect(chapters[0].scene_breakdown.length).toBeGreaterThanOrEqual(2)
+    expect(chapters[0].scene_breakdown[0].purpose).toContain('陆珩发现第一盏雾灯失控')
+    expect(chapters[0].scene_breakdown.at(-1)?.ending_hook_seed).toContain('沈照')
+    expect(chapters[0].raw_payload.scene_cards_source).toBe('project_seed_materialization')
+  })
+
   test('materialization keeps structural chapter beats out of chapter titles', async () => {
     const workspace = await tempDir('mangaforge-novel-materialize-structural-title-')
     const { registerNovelCoreRoutes } = await import('./novel-core-routes')

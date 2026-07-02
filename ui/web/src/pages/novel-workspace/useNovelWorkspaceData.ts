@@ -16,6 +16,13 @@ export function resolveSelectedWorkspaceModelId(currentId: number | undefined, m
   return models.find((model: any) => model.is_favorite)?.id || models[0]?.id
 }
 
+export function resolveActiveWorkspaceChapterId(currentId: number | null, chapters: any[]) {
+  if (!Array.isArray(chapters) || chapters.length === 0) return null
+  if (currentId && chapters.some((chapter: any) => Number(chapter.id) === Number(currentId))) return currentId
+  const fallback = chapters.find?.((chapter: any) => chapter.chapter_text) || chapters[0] || null
+  return fallback?.id || null
+}
+
 export function useNovelWorkspaceData({
   projectId,
   chapterSearch,
@@ -71,8 +78,7 @@ export function useNovelWorkspaceData({
       setPipeline(plr.data?.pipeline || null)
       setModels(nextModels)
       setSelectedModelId(prev => resolveSelectedWorkspaceModelId(prev, nextModels))
-      const act = nextChapters.find?.((c: any) => c.chapter_text) || nextChapters[0] || null
-      setActiveChapterId(act?.id || null)
+      setActiveChapterId(prev => resolveActiveWorkspaceChapterId(prev, nextChapters))
     } catch {
       message.error('无法加载项目工作台')
     } finally {

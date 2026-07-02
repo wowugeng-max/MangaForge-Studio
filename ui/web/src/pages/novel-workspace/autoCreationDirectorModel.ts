@@ -24,6 +24,7 @@ export type AutoCreationDirectorActionKey =
   | 'create_recovery_evidence_governance_queue'
   | 'create_delivery_risk_repair'
   | 'create_script_room_repair'
+  | 'auto_repair_blockers'
   | 'select_model'
 
 export type AutoCreationPipelineStatus = 'done' | 'active' | 'pending' | 'blocked' | 'warning'
@@ -54,6 +55,15 @@ export interface AutoCreationDirectorAction {
   modelCall: boolean
   disabled?: boolean
   payload?: AnyRecord
+}
+
+export interface AutoCreationRepairPlan {
+  visible: boolean
+  summary: string
+  actions: AutoCreationDirectorAction[]
+  autoActionCount: number
+  panelActionCount: number
+  primaryAction: AutoCreationDirectorAction
 }
 
 export interface AutoCreationPipelineStep {
@@ -755,6 +765,7 @@ export interface AutoCreationDirectorModel {
   } | null
   mainAction: AutoCreationDirectorAction
   secondaryActions: AutoCreationDirectorAction[]
+  repairPlan: AutoCreationRepairPlan
   blockers: string[]
   confirmations: string[]
   queue: {
@@ -877,6 +888,7 @@ const MODEL_CALL_ACTIONS = new Set<string>([
   'refresh_context_package',
   'review_governance_closure',
   'start_safe_batch_generation',
+  'auto_repair_blockers',
 ])
 
 function arrayValue(value: any): any[] {
@@ -925,7 +937,7 @@ function writingAction(key: WritingCockpitActionKey, description: string, label?
 }
 
 function opsAction(
-  key: 'open_task_center' | 'select_model' | 'review_governance_closure' | 'start_safe_batch_generation' | 'create_safe_batch_risk_repair' | 'create_style_sample_batch_repair' | 'create_recovery_evidence_governance_queue' | 'create_delivery_risk_repair' | 'create_script_room_repair',
+  key: 'open_task_center' | 'select_model' | 'review_governance_closure' | 'start_safe_batch_generation' | 'create_safe_batch_risk_repair' | 'create_style_sample_batch_repair' | 'create_recovery_evidence_governance_queue' | 'create_delivery_risk_repair' | 'create_script_room_repair' | 'auto_repair_blockers',
   label: string,
   description: string,
   disabled = false,
@@ -15878,6 +15890,120 @@ function fallbackSecondaryActions(planning: PlanningWorkspaceModel, writing: Wri
   return actions.slice(0, 4)
 }
 
+function isPanelRepairAction(action: AutoCreationDirectorAction) {
+  const key = text(action.key)
+  return key.startsWith('open_')
+    || key.startsWith('enter_')
+    || key === 'select_model'
+    || key === 'complete_volume_plan'
+}
+
+const AUTO_REPAIR_ACTION_PRIORITY = new Map<string, number>([
+  ['longform_creation_diagnosis', 10],
+  ['run_first30_retention', 20],
+  ['create_first30_repair', 30],
+  ['run_reader_trial_review', 40],
+  ['create_reader_trial_repair', 50],
+  ['longform_pressure', 60],
+  ['sync_story_state', 70],
+  ['create_delivery_risk_repair', 80],
+  ['create_safe_batch_risk_repair', 90],
+  ['create_style_sample_batch_repair', 100],
+  ['create_recovery_evidence_governance_queue', 110],
+  ['create_script_room_repair', 120],
+  ['open_generation_diagnostics', 200],
+  ['open_story_assets', 210],
+  ['open_task_center', 220],
+])
+
+function dedupeRepairActions(actions: AutoCreationDirectorAction[]) {
+  const seen = new Set<string>()
+  const unique: AutoCreationDirectorAction[] = []
+  for (const action of actions) {
+    const key = text(action.key)
+    if (!key || seen.has(key) || action.disabled) continue
+    seen.add(key)
+    unique.push(action)
+  }
+  return unique.sort((left, right) => {
+    const leftPriority = AUTO_REPAIR_ACTION_PRIORITY.get(text(left.key)) ?? 150
+    const rightPriority = AUTO_REPAIR_ACTION_PRIORITY.get(text(right.key)) ?? 150
+    return leftPriority - rightPriority
+  })
+}
+
+function buildAutoCreationRepairPlan(args: {
+  status: AutoCreationDirectorStatus
+  mainAction: AutoCreationDirectorAction
+  planning: PlanningWorkspaceModel
+  manualTestReadiness: AutoCreationManualTestReadiness
+  deliveryRiskGate: AutoCreationDeliveryRiskGate
+  rollingScriptRoom: AutoCreationRollingScriptRoom
+  batchReviewQueue: AutoCreationBatchReviewQueue
+  chapterLaunchGate: AutoCreationChapterLaunchGate
+}) : AutoCreationRepairPlan {
+  const candidates: AutoCreationDirectorAction[] = []
+
+  if (args.manualTestReadiness.status !== 'ready') {
+    candidates.push(
+      ...args.manualTestReadiness.gates
+        .filter(gate => gate.status !== 'ok')
+        .map(gate => gate.action),
+    )
+  }
+
+  if (retentionNeedsAction(args.planning)) {
+    candidates.push(planningAction(
+      (args.planning.first30Retention.actionKey || 'run_first30_retention') as PlanningActionKey,
+      args.planning.first30Retention.summary || '运行或刷新前30章留存诊断。',
+    ))
+  }
+
+  if (args.deliveryRiskGate.status === 'block' || args.deliveryRiskGate.highOpen > 0) {
+    candidates.push(opsAction('create_delivery_risk_repair', '生成风险修复任务', args.deliveryRiskGate.summary, false, deliveryRiskRepairPayload(args.deliveryRiskGate)))
+  }
+
+  if (args.rollingScriptRoom.status === 'blocked') {
+    candidates.push(args.rollingScriptRoom.repairAction)
+  }
+
+  if (args.batchReviewQueue.visible && ['warn', 'risk'].includes(args.batchReviewQueue.status)) {
+    candidates.push(args.batchReviewQueue.nextAction)
+  }
+
+  if (args.chapterLaunchGate.status === 'blocked') {
+    candidates.push(args.chapterLaunchGate.action)
+  }
+
+  if (!['ready', 'running'].includes(args.status) && args.mainAction.key !== 'select_model') {
+    candidates.push(args.mainAction)
+  }
+
+  const actions = dedupeRepairActions(candidates)
+  const autoActionCount = actions.filter(action => !isPanelRepairAction(action)).length
+  const panelActionCount = actions.length - autoActionCount
+  const visible = actions.length > 0 && args.status !== 'ready' && args.status !== 'running'
+  const summary = visible
+    ? `检测到 ${actions.length}项可处理阻塞：${autoActionCount}项可自动执行${panelActionCount ? `，${panelActionCount}项需打开面板确认` : ''}。`
+    : '当前没有需要一键修复的阻塞。'
+  const primaryAction = opsAction(
+    'auto_repair_blockers',
+    '自动修复阻塞',
+    summary,
+    !visible,
+    { actions },
+  )
+  primaryAction.modelCall = actions.some(action => action.modelCall)
+  return {
+    visible,
+    summary,
+    actions,
+    autoActionCount,
+    panelActionCount,
+    primaryAction,
+  }
+}
+
 function buildDirectorBattleDesk(planning: PlanningWorkspaceModel): PlanningWorkspaceModel['longformBattleDesk'] {
   if ((planning as any).longformBattleDesk?.lanes?.length) return (planning as any).longformBattleDesk
   const rhythm = planning.longformRhythm || {
@@ -16632,6 +16758,16 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
     mainAction,
     serialWorkflow,
   })
+  const repairPlan = buildAutoCreationRepairPlan({
+    status,
+    mainAction,
+    planning,
+    manualTestReadiness,
+    deliveryRiskGate,
+    rollingScriptRoom,
+    batchReviewQueue,
+    chapterLaunchGate,
+  })
 
   return {
     status,
@@ -16641,6 +16777,7 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
     targetChapter: chapter,
     mainAction,
     secondaryActions: fallbackSecondaryActions(planning, writing).filter(action => action.key !== mainAction.key),
+    repairPlan,
     blockers,
     confirmations,
     queue: {
