@@ -24,6 +24,7 @@ import { buildSettingRelationshipGraph } from './novel-setting-relationship-grap
 import { buildOhStoryPlotSpecialTopicsContract } from './novel-plot-special-topics'
 import { buildOhStoryStoryPowerContract } from './novel-story-power-contract'
 import { buildOhStoryMainlineDefinitionContract } from './novel-mainline-definition-contract'
+import { buildOhStoryDirectorForPreDraft } from './novel-oh-story-director'
 import {
   asArray,
   applyBenchmarkRecallPreflightChecks,
@@ -42,14 +43,32 @@ import {
   getVolumePlan,
   normalizeIssue,
   parseJsonLikePayload,
-  safeJsonStringify,
 } from './novel-route-utils'
 
 const STORYLINE_TYPES = ['mainline', 'subplot', 'character_arc', 'relationship_arc', 'faction_arc', 'foreshadowing_arc']
 const DISCOVERED_ASSET_TYPES = ['character', 'item', 'ability', 'faction', 'location', 'foreshadowing']
 
+function safeJsonStringify(value: any, fallback?: string, maxLength = 0) {
+  try {
+    const text = JSON.stringify(value)
+    if (maxLength > 0 && text.length > maxLength) return `${text.slice(0, maxLength)}...`
+    return text
+  } catch {
+    return fallback || ''
+  }
+}
+
 function proseQualityJson(value: any) {
   return safeJsonStringify(value, undefined, 0)
+}
+
+function attachOhStoryDirectorToContextPackage(contextPackage: any) {
+  const director = buildOhStoryDirectorForPreDraft(contextPackage)
+  return {
+    ...contextPackage,
+    oh_story_director: director,
+    ohStoryDirector: director,
+  }
 }
 
 const DESLOP_GATE_DEFINITIONS = [
@@ -54673,7 +54692,8 @@ export function createNovelWritingService(ctx: {
       applyBenchmarkRecallPreflightChecks(confirmedPackage.preflight, { benchmark_recall_brief: confirmedBenchmarkRecallBrief })
     }
     const override = chapter.raw_payload?.context_package_override || null
-    return override ? deepMergeObjects(confirmedPackage, override) : confirmedPackage
+    const finalPackage = override ? deepMergeObjects(confirmedPackage, override) : confirmedPackage
+    return attachOhStoryDirectorToContextPackage(finalPackage)
   }
 
   const buildProseReviewPrompt = (project: any, contextPackage: any, chapterText: string) => [

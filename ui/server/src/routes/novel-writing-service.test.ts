@@ -52803,6 +52803,70 @@ describe('chapter context word target source guards', () => {
     expect(context.chapter_target.recent_fatigue_brief?.next_actions?.join('；') || '').toContain('减少解释，改成现场危险')
     expect(context.chapter_target.reader_expectation_debt_context?.must_carry?.map((item: any) => item.text).join('；') || '').toContain('镜面规则欠账必须推进')
     expect(context.chapter_target.delivery_risk_carry_over?.required_actions?.join('；') || '').toContain('上一章章末钩子不能空承接')
+    expect(context.oh_story_director.stage).toBe('pre_draft')
+    expect(context.ohStoryDirector).toBe(context.oh_story_director)
+    expect(['needs_repair', 'blocked']).toContain(context.oh_story_director.readiness)
+    expect(['repair_pre_draft_materials', 'confirm_missing_choice']).toContain(context.oh_story_director.primary_action.key)
+    expect(context.oh_story_director.required_repairs.map((item: any) => item.category)).toEqual(
+      expect.arrayContaining(['missing_blueprint']),
+    )
+  })
+
+  test('builds pre-draft director from final context package after override preflight is merged', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'mangaforge-context-director-override-'))
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+    const chapter = {
+      id: 809,
+      project_id: 89,
+      chapter_no: 9,
+      title: '改线确认',
+      chapter_summary: '主角发现旧规则可能需要改线确认。',
+      conflict: '是否沿用原本主线。',
+      ending_hook: '旧档案翻出反向证词。',
+      scene_list: [
+        {
+          title: '档案室',
+          goal: '找出旧规则反向证据',
+          conflict: '继续主线还是改线',
+          turning_point: '反向证词出现',
+        },
+      ],
+      raw_payload: {
+        context_package_override: {
+          preflight: {
+            ready: false,
+            strict_ready: false,
+            checks: [],
+            blockers: [],
+            warnings: ['先人工确认主线方向是否改变'],
+          },
+        },
+      },
+    }
+
+    const context = await service.buildChapterContextPackage(
+      workspace,
+      { id: 89, title: '镜城规则', genre: '规则怪谈', reference_config: {} },
+      chapter,
+      [chapter],
+      [{ id: 1, project_id: 89, world_summary: '镜城规则会反向记录证据。', rules: ['镜面证据不可直接改写'] }],
+      [{ id: 1, project_id: 89, name: '林镜', role: 'protagonist', goal: '找出镜城源头' }],
+      [],
+      [],
+    )
+
+    expect(context.preflight.warnings).toContain('先人工确认主线方向是否改变')
+    expect(context.oh_story_director.stage).toBe('pre_draft')
+    expect(context.ohStoryDirector).toBe(context.oh_story_director)
+    expect(context.oh_story_director.readiness).toBe('blocked')
+    expect(context.oh_story_director.primary_action.key).toBe('confirm_missing_choice')
+    expect(context.oh_story_director.required_repairs).toContainEqual(expect.objectContaining({
+      category: 'manual_confirmation_required',
+    }))
   })
 
   test('builds pre-draft core contract radar when saved fields are objects', () => {
