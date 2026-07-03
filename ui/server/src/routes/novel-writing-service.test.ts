@@ -52671,6 +52671,18 @@ describe('chapter context word target source guards', () => {
     expect(remainingKeys).not.toContain('benchmark_recall_source_paths')
     expect(remainingKeys).not.toContain('source_readiness_timeline_tracking')
     expect(remainingKeys).not.toContain('source_readiness_chapter_blueprint')
+    expect(rebuiltContext.oh_story_director.stage).toBe('pre_draft')
+    expect(rebuiltContext.ohStoryDirector).toBe(rebuiltContext.oh_story_director)
+    expect(rebuiltContext.oh_story_director.readiness).not.toBe('blocked')
+    if (rebuiltContext.oh_story_director.readiness === 'ready') {
+      expect(rebuiltContext.oh_story_director.primary_action.key).toBe('generate_prose')
+    } else {
+      expect(rebuiltContext.oh_story_director.primary_action.key).toBe('repair_pre_draft_materials')
+    }
+    const rebuiltRepairCategories = rebuiltContext.oh_story_director.required_repairs.map((item: any) => item.category)
+    expect(rebuiltRepairCategories).not.toContain('missing_source_evidence')
+    expect(rebuiltRepairCategories).not.toContain('missing_context')
+    expect(rebuiltRepairCategories).not.toContain('missing_blueprint')
   })
 
   test('feeds unconfirmed unattended pre-draft brief into paragraph prose planning', () => {
