@@ -1058,6 +1058,39 @@ function arrayValue(value: any): any[] {
   return Array.isArray(value) ? value : []
 }
 
+function normalizeOhStoryDirector(value?: AnyRecord | null): AnyRecord | null {
+  if (!value || typeof value !== 'object') return null
+  const director = value.oh_story_director || value.ohStoryDirector
+  return director && typeof director === 'object' ? director : null
+}
+
+function directorPlannerAction(director?: AnyRecord | null): WritingCockpitActionKey | null {
+  const action = director?.primary_action || director?.primaryAction || {}
+  const key = text(action?.key)
+  if (key === 'generate_prose' || key === 'write_chapter_prose') return 'confirm_plan_and_write_draft'
+  if (key === 'repair_pre_draft_materials' || key === 'auto_repair_pre_draft' || key === 'repair_materials') {
+    return 'repair_materials'
+  }
+  if (key === 'confirm_missing_choice' || key === 'manual_confirmation_required') return 'open_generation_diagnostics'
+  return null
+}
+
+function directorActionLabel(director: AnyRecord, actionKey: WritingCockpitActionKey) {
+  const action = director.primary_action || director.primaryAction || {}
+  return text(action?.label, ACTION_LABELS[actionKey])
+}
+
+function directorPlanningReasons(director: AnyRecord, fallback: string) {
+  const summary = firstNonEmpty(director.blocking_summary, director.blockingSummary)
+  const repairReasons = arrayValue(director.required_repairs || director.requiredRepairs)
+    .map(repair => typeof repair === 'object'
+      ? firstNonEmpty(repair.detail, repair.label, repair.summary, repair.message)
+      : text(repair))
+    .filter(Boolean)
+  const reasons = [summary, ...repairReasons].filter(Boolean)
+  return reasons.length ? reasons.slice(0, 3) : [fallback]
+}
+
 function firstNonEmpty(...values: any[]) {
   for (const value of values) {
     const normalized = text(value)
@@ -5365,6 +5398,8 @@ function buildChapterPlanningDesk(args: {
   const writePreparationBrief = normalizeWritePreparationBrief(args.contextPackage)
   const writePreparationReasons = writePreparationReasonTexts(writePreparationBrief)
   const episodePlan = buildEpisodePlan(args)
+  const director = normalizeOhStoryDirector(args.contextPackage)
+  const directorActionKey = directorPlannerAction(director)
   const qualityContinuityNeedsSceneMapping = deliveryRiskCarryOverNeedsSceneMapping(episodePlan.deliveryRiskCarryOver)
     && sceneCards.length > 0
     && qualityContinuitySceneMap.length === 0
@@ -5396,6 +5431,31 @@ function buildChapterPlanningDesk(args: {
       reasons: diagnosticBlockers.slice(0, 3).map(item => `生成诊断阻塞：${item}`),
       recommendedPlannerAction: { key: 'open_generation_diagnostics', label: ACTION_LABELS.open_generation_diagnostics },
       shouldAutoExpandPlanner: true,
+      writePreparationBrief,
+      episodePlan,
+      sceneCards,
+      qualityContinuitySceneMap,
+    }
+  }
+
+  if (director && directorActionKey) {
+    const directorReadiness = text(director.readiness)
+    const ready = directorReadiness === 'ready'
+    const blocked = directorReadiness === 'blocked'
+    const reasons = ready
+      ? directorPlanningReasons(director, '总导演判断本章写前材料可用。')
+      : directorPlanningReasons(director, blocked ? '总导演判断需要人工确认后继续。' : '总导演判断本章写前材料需要修复。')
+    return {
+      readiness: ready ? 'ready' : blocked ? 'blocked' : 'needs_context',
+      statusLabel: ready ? '可继续' : blocked ? '需要确认' : '需要修复',
+      contextPackageStatus: contextStatus,
+      scenePlanStatus,
+      reasons,
+      recommendedPlannerAction: {
+        key: directorActionKey,
+        label: directorActionLabel(director, directorActionKey),
+      },
+      shouldAutoExpandPlanner: !ready,
       writePreparationBrief,
       episodePlan,
       sceneCards,

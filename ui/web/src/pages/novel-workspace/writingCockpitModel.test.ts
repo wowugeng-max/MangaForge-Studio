@@ -1550,6 +1550,105 @@ describe('buildWritingCockpitModel', () => {
     expect(model.chapterPlanningDesk.recommendedPlannerAction.key).toBe('open_generation_diagnostics')
   })
 
+  test('director needs_repair owns the single planning desk status and action', () => {
+    const model = buildWritingCockpitModel({
+      project,
+      outlines,
+      chapters,
+      activeChapter: chapters[1],
+      contextPackage: {
+        ...contextPackage,
+        preflight: {
+          ready: false,
+          blockers: ['旧预检缺少章节目标'],
+        },
+        oh_story_director: {
+          stage: 'pre_draft',
+          readiness: 'needs_repair',
+          primary_action: {
+            key: 'repair_pre_draft_materials',
+            label: '补齐并继续',
+            mode: 'automatic',
+          },
+          blocking_summary: '本章蓝图缺核心字段',
+          required_repairs: [
+            { detail: '补齐 chapter_blueprint.core_conflict' },
+            { label: '确认章末钩子' },
+          ],
+        },
+      },
+      materialScore: { score: 82, can_generate: true },
+    })
+
+    expect(model.chapterPlanningDesk.statusLabel).toBe('需要修复')
+    expect(model.chapterPlanningDesk.recommendedPlannerAction.key).toBe('repair_materials')
+    expect(model.chapterPlanningDesk.recommendedPlannerAction.label).toBe('补齐并继续')
+    expect(model.chapterPlanningDesk.reasons.join('｜')).toContain('本章蓝图缺核心字段')
+    expect(model.chapterPlanningDesk.reasons.join('｜')).toContain('补齐 chapter_blueprint.core_conflict')
+    expect(model.chapterPlanningDesk.reasons.join('｜')).not.toContain('旧预检缺少章节目标')
+  })
+
+  test('director ready owns the single planning desk action without repair prompts', () => {
+    const model = buildWritingCockpitModel({
+      project,
+      outlines,
+      chapters: [chapters[0], sceneCardChapter],
+      activeChapter: sceneCardChapter,
+      contextPackage: {
+        ...contextPackage,
+        preflight: { ready: true, blockers: [] },
+        oh_story_director: {
+          stage: 'pre_draft',
+          readiness: 'ready',
+          primary_action: {
+            key: 'generate_prose',
+            label: '生成正文',
+            mode: 'automatic',
+          },
+        },
+      },
+      materialScore: { score: 82, can_generate: true },
+    })
+
+    expect(model.chapterPlanningDesk.statusLabel).toBe('可继续')
+    expect(model.chapterPlanningDesk.recommendedPlannerAction.key).toBe('confirm_plan_and_write_draft')
+    expect(model.chapterPlanningDesk.recommendedPlannerAction.label).toBe('生成正文')
+    expect(model.chapterPlanningDesk.shouldAutoExpandPlanner).toBe(false)
+    expect(model.chapterPlanningDesk.reasons.join('｜')).not.toContain('修复')
+  })
+
+  test('camelCase director action and repairs are supported', () => {
+    const model = buildWritingCockpitModel({
+      project,
+      outlines,
+      chapters,
+      activeChapter: chapters[1],
+      contextPackage: {
+        ...contextPackage,
+        ohStoryDirector: {
+          stage: 'pre_draft',
+          readiness: 'blocked',
+          primaryAction: {
+            key: 'manual_confirmation_required',
+            label: '查看缺口',
+            mode: 'manual',
+          },
+          blockingSummary: '需要人工确认角色选择',
+          requiredRepairs: [
+            { detail: '确认谢怀安是否公开旧臣身份' },
+          ],
+        },
+      },
+      materialScore: { score: 82, can_generate: true },
+    })
+
+    expect(model.chapterPlanningDesk.statusLabel).toBe('需要确认')
+    expect(model.chapterPlanningDesk.recommendedPlannerAction.key).toBe('open_generation_diagnostics')
+    expect(model.chapterPlanningDesk.recommendedPlannerAction.label).toBe('查看缺口')
+    expect(model.chapterPlanningDesk.reasons.join('｜')).toContain('需要人工确认角色选择')
+    expect(model.chapterPlanningDesk.reasons.join('｜')).toContain('确认谢怀安是否公开旧臣身份')
+  })
+
   test('planning desk asks for scene cards when context is ready but scene plan is missing', () => {
     const model = buildWritingCockpitModel({
       project,
