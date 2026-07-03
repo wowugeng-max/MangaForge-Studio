@@ -221,16 +221,21 @@ function taskRunPayloads(run: any) {
 }
 
 function taskRunDirectorPayload(run: any) {
-  const { input, output } = taskRunPayloads(run)
-  return output?.oh_story_director
-    || output?.ohStoryDirector
-    || input?.oh_story_director
-    || input?.ohStoryDirector
-    || output?.contextPackage?.oh_story_director
-    || output?.contextPackage?.ohStoryDirector
-    || input?.contextPackage?.oh_story_director
-    || input?.contextPackage?.ohStoryDirector
-    || null
+  const candidates = [
+    parseJsonValue(run?.output_ref || run?.outputRef),
+    run?.output,
+    run?.payload,
+    parseJsonValue(run?.input_ref || run?.inputRef),
+    run?.input,
+  ].filter(Boolean)
+  for (const candidate of candidates) {
+    const direct = candidate?.oh_story_director || candidate?.ohStoryDirector
+    if (direct) return direct
+    const contextPackage = candidate?.contextPackage || candidate?.context_package
+    const nested = contextPackage?.oh_story_director || contextPackage?.ohStoryDirector
+    if (nested) return nested
+  }
+  return null
 }
 
 function taskRunDirectorStage(run: any): TaskRunCardModel['directorStage'] {

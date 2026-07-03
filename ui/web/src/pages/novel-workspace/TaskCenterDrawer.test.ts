@@ -124,6 +124,48 @@ describe('buildTaskRunCardModel', () => {
     expect(model.blocking.key).toBe('non_blocking')
     expect(model.blocking.label).toBe('不阻塞')
   })
+
+  test('director stage reads director metadata from payload when output ref has no director', () => {
+    const model = buildTaskRunCardModel({
+      id: 21,
+      run_type: 'generate_prose',
+      status: 'completed',
+      output_ref: JSON.stringify({ chapters: [] }),
+      payload: {
+        oh_story_director: {
+          stage: 'handoff',
+          readiness: 'needs_user_confirmation',
+          required_repairs: [{ blocking: true }],
+        },
+      },
+    })
+
+    expect(model.directorStage?.key).toBe('handoff')
+    expect(model.directorStage?.label).toBe('章节交接')
+    expect(model.blocking.key).toBe('blocking')
+  })
+
+  test('director stage reads director metadata from input context package when input ref has no director', () => {
+    const model = buildTaskRunCardModel({
+      id: 22,
+      run_type: 'generate_prose',
+      status: 'completed',
+      input_ref: JSON.stringify({ unattended: false }),
+      input: {
+        contextPackage: {
+          ohStoryDirector: {
+            stage: 'drafting',
+            readiness: 'ready',
+            requiredRepairs: [],
+          },
+        },
+      },
+    })
+
+    expect(model.directorStage?.key).toBe('drafting')
+    expect(model.directorStage?.label).toBe('正文生成')
+    expect(model.blocking.key).toBe('non_blocking')
+  })
 })
 
 describe('buildPostBatchQualityCheckSummary', () => {
