@@ -244,4 +244,38 @@ describe('oh-story director core', () => {
     expect(director.required_repairs.map(item => item.category)).toContain('quality_revision_required')
     expect(director.blocking_findings.map(item => item.key)).toContain('deslop_gate')
   })
+
+  test('normalizes singleton post-draft story power misses and revision receipts', () => {
+    const carryoverDirector = buildOhStoryDirectorForPostDraft({
+      quality: {
+        story_power_sync: { status: 'warn', missed: { key: 'feedback', fix: '下一章开篇补代价反馈' } },
+      },
+      receipts: {
+        revision_receipts: { required_action: '补对白口吻', applied_fix: '已完成', changed_evidence: '“你别碰那枚令。”' },
+      },
+    })
+
+    expect(carryoverDirector.acceptance).toBe('accepted_with_carryover')
+    expect(carryoverDirector.carryover_findings).toContainEqual(expect.objectContaining({
+      key: 'story_power',
+      detail: expect.stringContaining('下一章开篇补代价反馈'),
+    }))
+    expect(carryoverDirector.resolved_findings).toContainEqual(expect.objectContaining({
+      key: 'revision_receipt',
+      detail: expect.stringContaining('你别碰那枚令'),
+    }))
+
+    const blockingDirector = buildOhStoryDirectorForPostDraft({
+      quality: {
+        story_power_sync: { status: 'fail', missed: '缺少动作反馈闭环' },
+      },
+      receipts: { revision_receipts: null },
+    })
+
+    expect(blockingDirector.acceptance).toBe('needs_revision')
+    expect(blockingDirector.blocking_findings).toContainEqual(expect.objectContaining({
+      key: 'story_power',
+      detail: expect.stringContaining('缺少动作反馈闭环'),
+    }))
+  })
 })

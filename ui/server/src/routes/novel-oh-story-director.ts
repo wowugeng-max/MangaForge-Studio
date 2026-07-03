@@ -182,6 +182,14 @@ function repairLabelForCategory(category: OhStoryDirectorBlockerCategory): strin
   }
 }
 
+function storyPowerMissDetail(item: unknown): string {
+  if (item && typeof item === 'object') {
+    const record = item as RecordLike
+    return String(record.fix ?? record.key ?? record.detail ?? record.message ?? JSON.stringify(record))
+  }
+  return issueText(item)
+}
+
 export function classifyOhStoryDirectorBlocker(message: unknown): OhStoryDirectorBlockerCategory {
   const text = issueText(message).toLowerCase()
 
@@ -430,12 +438,13 @@ export function buildOhStoryDirectorForPostDraft(input: RecordLike): OhStoryDire
     evidenceItems.push(evidence('deslop_gate', 'ready', 'quality.deslop_gate_diagnostics'))
   }
 
-  const storyPowerMissed = quality?.story_power_sync?.missed ?? []
+  const storyPowerMissed = asArray(quality?.story_power_sync?.missed)
+  const storyPowerMissDetailText = storyPowerMissed.map(storyPowerMissDetail).filter(Boolean).join('; ')
   if (quality?.story_power_sync?.status === 'fail') {
-    blocking_findings.push(repair('story_power', 'quality_revision_required', 'Story power sync failed', storyPowerMissed.map((item: RecordLike) => item?.fix ?? item?.key).filter(Boolean).join('; ') || 'Story power revision is required.', true))
+    blocking_findings.push(repair('story_power', 'quality_revision_required', 'Story power sync failed', storyPowerMissDetailText || 'Story power revision is required.', true))
     evidenceItems.push(evidence('story_power', 'blocked', 'quality.story_power_sync'))
   } else if (quality?.story_power_sync?.status === 'warn' || storyPowerMissed.length > 0) {
-    carryover_findings.push(repair('story_power', 'quality_revision_required', 'Story power carry-over', storyPowerMissed.map((item: RecordLike) => item?.fix ?? item?.key).filter(Boolean).join('; ') || 'Carry story power fix into the next chapter.', false))
+    carryover_findings.push(repair('story_power', 'quality_revision_required', 'Story power carry-over', storyPowerMissDetailText || 'Carry story power fix into the next chapter.', false))
     evidenceItems.push(evidence('story_power', 'warn', 'quality.story_power_sync'))
   } else {
     evidenceItems.push(evidence('story_power', 'ready', 'quality.story_power_sync'))
@@ -446,7 +455,7 @@ export function buildOhStoryDirectorForPostDraft(input: RecordLike): OhStoryDire
     evidenceItems.push(evidence('delivery_risk', 'warn', 'quality.delivery_risk_receipt_sync'))
   }
 
-  for (const item of receipts?.revision_receipts ?? []) {
+  for (const item of asArray(receipts?.revision_receipts)) {
     if (hasText(item?.applied_fix) || hasText(item?.changed_evidence)) {
       resolved_findings.push(repair('revision_receipt', 'quality_revision_required', String(item?.required_action ?? 'Revision receipt resolved'), String(item?.changed_evidence ?? item?.applied_fix), false))
     }
