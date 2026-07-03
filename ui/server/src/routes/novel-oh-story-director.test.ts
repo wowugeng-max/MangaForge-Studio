@@ -135,6 +135,26 @@ describe('oh-story director core', () => {
     expect(confirmationDirector.primary_action.mode).toBe('manual')
   })
 
+  test('treats pre-draft blockers as canonical blocking repairs', () => {
+    const director = buildOhStoryDirectorForPreDraft({
+      preflight: {
+        blockers: ['本章细纲/蓝图：补齐本章蓝图核心字段'],
+        warnings: [],
+      },
+    })
+
+    expect(director.stage).toBe('pre_draft')
+    expect(director.readiness).toBe('needs_repair')
+    expect(director.primary_action.key).toBe('repair_pre_draft_materials')
+    expect(director.primary_action.mode).toBe('automatic')
+    expect(director.required_repairs.map(item => item.category)).toContain('missing_blueprint')
+    expect(director.evidence).toContainEqual(expect.objectContaining({
+      key: 'chapter_blueprint',
+      status: 'blocked',
+      source: 'preflight.blockers',
+    }))
+  })
+
   test('separates post-draft blockers from next-chapter carry-over', () => {
     const director = buildOhStoryDirectorForPostDraft({
       quality: {

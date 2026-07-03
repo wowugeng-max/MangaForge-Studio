@@ -322,15 +322,20 @@ export function buildOhStoryDirectorForProjectSeed(seed: RecordLike): OhStoryDir
 }
 
 export function buildOhStoryDirectorForPreDraft(input: RecordLike): OhStoryDirector {
+  const blockers = input?.preflight?.blockers ?? input?.blockers ?? []
   const warnings = input?.preflight?.warnings ?? input?.warnings ?? []
-  const required_repairs = warnings.map((warning: unknown, index: number) => {
-    const category = classifyOhStoryDirectorBlocker(warning)
-    return repair(category === 'missing_blueprint' ? 'chapter_blueprint' : `${category}_${index + 1}`, category, String(warning ?? ''), String(warning ?? ''), true)
+  const preflightIssues = [
+    ...blockers.map((message: unknown) => ({ message, source: 'preflight.blockers' })),
+    ...warnings.map((message: unknown) => ({ message, source: 'preflight.warnings' })),
+  ]
+  const required_repairs = preflightIssues.map((issue, index: number) => {
+    const category = classifyOhStoryDirectorBlocker(issue.message)
+    return repair(category === 'missing_blueprint' ? 'chapter_blueprint' : `${category}_${index + 1}`, category, String(issue.message ?? ''), String(issue.message ?? ''), true)
   })
   const contractSelection = selectOhStoryDirectorContracts({
     stage: 'drafting',
     chapter_target: input?.chapter_target ?? {},
-    preflight: { warnings },
+    preflight: { warnings: preflightIssues.map(issue => issue.message) },
   })
   const hasManualConfirmation = required_repairs.some(item => item.category === 'manual_confirmation_required')
   const readiness: OhStoryDirectorReadiness = hasManualConfirmation ? 'blocked' : required_repairs.length > 0 ? 'needs_repair' : 'ready'
@@ -346,7 +351,7 @@ export function buildOhStoryDirectorForPreDraft(input: RecordLike): OhStoryDirec
     suppressed_contracts: contractSelection.suppressed_contracts,
     prompt_budget_plan: contractSelection.prompt_budget_plan,
     evidence: required_repairs.length > 0
-      ? required_repairs.map(item => evidence(item.key, item.category === 'manual_confirmation_required' ? 'blocked' : 'blocked', 'preflight.warnings', item.detail))
+      ? required_repairs.map((item, index) => evidence(item.key, 'blocked', preflightIssues[index]?.source ?? 'preflight.warnings', item.detail))
       : [evidence('preflight', 'ready', 'preflight.warnings')],
     blocking_findings: required_repairs,
   }
