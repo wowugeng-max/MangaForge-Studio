@@ -695,9 +695,11 @@ function mergeGeneratedFields(existing: any, additions: string[]) {
 
 function attachProjectSeedDirector(seed: any) {
   if (!seed || typeof seed !== 'object' || Array.isArray(seed) || !Object.keys(seed).length) return seed
+  const director = buildOhStoryDirectorForProjectSeed(seed)
   return {
     ...seed,
-    oh_story_director: buildOhStoryDirectorForProjectSeed(seed),
+    oh_story_director: director,
+    ohStoryDirector: director,
   }
 }
 

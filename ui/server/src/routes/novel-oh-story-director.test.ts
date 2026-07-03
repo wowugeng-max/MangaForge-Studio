@@ -158,6 +158,33 @@ describe('oh-story director core', () => {
     }))
   })
 
+  test('keeps ready pre-draft warnings as deferred evidence instead of blocking drafting', () => {
+    const director = buildOhStoryDirectorForPreDraft({
+      preflight: {
+        ready: true,
+        blockers: [],
+        warnings: [
+          '文风召回缺口：旧版模块可继续写作，但必须在自检中保留优先级。',
+          '文风召回来源缺失：Step 2.3 source_paths_missing',
+        ],
+      },
+      chapter_target: {
+        story_power_contract: { quality_checks: ['目标阻碍动作反馈期待'] },
+      },
+    })
+
+    expect(director.readiness).toBe('ready')
+    expect(director.primary_action.key).toBe('generate_prose')
+    expect(director.required_repairs).toHaveLength(0)
+    expect(director.deferred_repairs.map(item => item.category)).toContain('missing_source_evidence')
+    expect(director.deferred_repairs.every(item => item.blocking === false)).toBe(true)
+    expect(director.evidence).toContainEqual(expect.objectContaining({
+      key: 'pre_draft_missing_source_evidence',
+      status: 'warn',
+      source: 'preflight.warnings',
+    }))
+  })
+
   test('normalizes non-array pre-draft warnings and blockers without dropping categories', () => {
     const director = buildOhStoryDirectorForPreDraft({
       preflight: {

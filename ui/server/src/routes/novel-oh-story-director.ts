@@ -388,21 +388,37 @@ export function buildOhStoryDirectorForProjectSeed(seed: RecordLike): OhStoryDir
 }
 
 export function buildOhStoryDirectorForPreDraft(input: RecordLike): OhStoryDirector {
-  const blockers = asArray(input?.preflight?.blockers ?? input?.blockers)
-  const warnings = asArray(input?.preflight?.warnings ?? input?.warnings)
-  const preflightIssues = [
+  const preflight = input?.preflight ?? {}
+  const blockers = asArray(preflight?.blockers ?? input?.blockers)
+  const warnings = asArray(preflight?.warnings ?? input?.warnings)
+  const preflightReady = preflight?.ready === true
+  const blockingIssues = [
     ...blockers.map((message: unknown) => ({ message, source: 'preflight.blockers' })),
-    ...warnings.map((message: unknown) => ({ message, source: 'preflight.warnings' })),
+    ...(preflightReady ? [] : warnings.map((message: unknown) => ({ message, source: 'preflight.warnings' }))),
   ]
+  const advisoryIssues = preflightReady
+    ? warnings.map((message: unknown) => ({ message, source: 'preflight.warnings' }))
+    : []
+  const preflightIssues = [...blockingIssues, ...advisoryIssues]
   const groupedIssues = new Map<OhStoryDirectorBlockerCategory, Array<{ detail: string; source: string }>>()
-  for (const issue of preflightIssues) {
+  for (const issue of blockingIssues) {
     const category = classifyOhStoryDirectorBlocker(issue.message)
     const detail = issueText(issue.message)
     groupedIssues.set(category, [...(groupedIssues.get(category) ?? []), { detail, source: issue.source }])
   }
+  const groupedAdvisories = new Map<OhStoryDirectorBlockerCategory, Array<{ detail: string; source: string }>>()
+  for (const issue of advisoryIssues) {
+    const category = classifyOhStoryDirectorBlocker(issue.message)
+    const detail = issueText(issue.message)
+    groupedAdvisories.set(category, [...(groupedAdvisories.get(category) ?? []), { detail, source: issue.source }])
+  }
   const required_repairs = Array.from(groupedIssues.entries()).map(([category, issues]) => {
     const detail = issues.map(issue => issue.detail).join('\n')
     return repair(repairKeyForPreDraftCategory(category), category, repairLabelForCategory(category), detail, true)
+  })
+  const deferred_repairs = Array.from(groupedAdvisories.entries()).map(([category, issues]) => {
+    const detail = issues.map(issue => issue.detail).join('\n')
+    return repair(repairKeyForPreDraftCategory(category), category, repairLabelForCategory(category), detail, false)
   })
   const contractSelection = selectOhStoryDirectorContracts({
     stage: 'drafting',
@@ -420,6 +436,16 @@ export function buildOhStoryDirectorForPreDraft(input: RecordLike): OhStoryDirec
       issues.filter(issue => issue.source === source).map(issue => issue.detail).join('\n'),
     ))
   })
+  const advisoryEvidenceItems = Array.from(groupedAdvisories.entries()).flatMap(([category, issues]) => {
+    const key = repairKeyForPreDraftCategory(category)
+    return unique(issues.map(issue => issue.source)).map(source => evidence(
+      key,
+      'warn',
+      source,
+      issues.filter(issue => issue.source === source).map(issue => issue.detail).join('\n'),
+    ))
+  })
+  const issueEvidenceItems = [...evidenceItems, ...advisoryEvidenceItems]
 
   return {
     stage: 'pre_draft',
@@ -427,12 +453,12 @@ export function buildOhStoryDirectorForPreDraft(input: RecordLike): OhStoryDirec
     primary_action: hasManualConfirmation ? ACTIONS.confirm_missing_choice : required_repairs.length > 0 ? ACTIONS.repair_pre_draft_materials : ACTIONS.generate_prose,
     blocking_summary: summarizeRepairs(required_repairs, 'Ready to generate prose.'),
     required_repairs,
-    deferred_repairs: [],
+    deferred_repairs,
     selected_contracts: contractSelection.selected_contracts,
     suppressed_contracts: contractSelection.suppressed_contracts,
     prompt_budget_plan: contractSelection.prompt_budget_plan,
-    evidence: required_repairs.length > 0
-      ? evidenceItems
+    evidence: issueEvidenceItems.length > 0
+      ? issueEvidenceItems
       : [evidence('preflight', 'ready', 'preflight.warnings')],
     blocking_findings: required_repairs,
   }

@@ -442,6 +442,7 @@ describe('novel project seed prompt', () => {
     expect(repaired.oh_story_director.readiness).toBe('ready')
     expect(repaired.oh_story_director.primary_action.key).toBe('enter_workspace')
     expect(repaired.oh_story_director.primary_action.mode).toBeTruthy()
+    expect(repaired.ohStoryDirector).toEqual(repaired.oh_story_director)
   })
 
   test('asks for user confirmation when repaired project seed still lacks main conflict', async () => {
