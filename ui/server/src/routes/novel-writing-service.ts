@@ -5426,10 +5426,102 @@ function compactProseSceneCard(card: any) {
   })
 }
 
+function getOhStoryDirector(contextPackage: any) {
+  return contextPackage?.oh_story_director || contextPackage?.ohStoryDirector || {}
+}
+
+function compactOhStoryDirectorContracts(value: any, maxItems: number) {
+  return asArray(value)
+    .slice(0, maxItems)
+    .map((item: any) => {
+      if (typeof item === 'string') return prosePromptText(item, 180)
+      const key = prosePromptText(item?.key || item?.contract_key || item?.contractKey || item?.name, 80)
+      const detailLevel = prosePromptText(item?.detail_level || item?.detailLevel, 80)
+      const reason = prosePromptText(item?.reason, 180)
+      const parts = [
+        key || 'unknown_contract',
+        detailLevel ? `detail=${detailLevel}` : '',
+        reason ? `reason=${reason}` : '',
+      ].filter(Boolean)
+      return parts.join(' / ')
+    })
+    .filter(Boolean)
+}
+
+function compactOhStoryDirectorBudgetList(value: any) {
+  return asArray(value)
+    .map((item: any) => prosePromptText(item?.key || item?.contract_key || item?.contractKey || item, 100))
+    .filter(Boolean)
+}
+
+function buildOhStoryDirectorSnapshot(contextPackage: any) {
+  const director = getOhStoryDirector(contextPackage)
+  if (!director?.stage) return undefined
+  const primaryAction = director.primary_action || director.primaryAction || {}
+  const budgetPlan = director.prompt_budget_plan || director.promptBudgetPlan || {}
+  return compactProsePromptValue({
+    stage: director.stage,
+    readiness: director.readiness || director.readiness_status || director.readinessStatus,
+    primary_action: {
+      key: primaryAction.key,
+      label: primaryAction.label,
+    },
+    blocking_summary: director.blocking_summary || director.blockingSummary,
+    selected_contracts: asArray(director.selected_contracts || director.selectedContracts).slice(0, 8),
+    suppressed_contracts: asArray(director.suppressed_contracts || director.suppressedContracts).slice(0, 6),
+    prompt_budget_plan: {
+      full: compactOhStoryDirectorBudgetList(budgetPlan.full),
+      compact: compactOhStoryDirectorBudgetList(budgetPlan.compact),
+      reference: compactOhStoryDirectorBudgetList(budgetPlan.reference),
+      omit: compactOhStoryDirectorBudgetList(budgetPlan.omit),
+    },
+  })
+}
+
+function buildOhStoryDirectorPromptBlock(contextPackage: any) {
+  const director = getOhStoryDirector(contextPackage)
+  if (!director?.stage) return ''
+  const primaryAction = director.primary_action || director.primaryAction || {}
+  const budgetPlan = director.prompt_budget_plan || director.promptBudgetPlan || {}
+  const selectedContracts = compactOhStoryDirectorContracts(
+    director.selected_contracts || director.selectedContracts,
+    8,
+  )
+  const suppressedContracts = compactOhStoryDirectorContracts(
+    director.suppressed_contracts || director.suppressedContracts,
+    6,
+  )
+  const budgetLines = [
+    `full=${compactOhStoryDirectorBudgetList(budgetPlan.full).join('、') || '无'}`,
+    `compact=${compactOhStoryDirectorBudgetList(budgetPlan.compact).join('、') || '无'}`,
+    `reference=${compactOhStoryDirectorBudgetList(budgetPlan.reference).join('、') || '无'}`,
+    `omit=${compactOhStoryDirectorBudgetList(budgetPlan.omit).join('、') || '无'}`,
+  ]
+  return [
+    '【oh-story 总导演】',
+    `阶段：${prosePromptText(director.stage, 120)}`,
+    director.readiness || director.readiness_status || director.readinessStatus
+      ? `readiness：${prosePromptText(director.readiness || director.readiness_status || director.readinessStatus, 160)}`
+      : '',
+    primaryAction?.label || primaryAction?.key
+      ? `primary action：${prosePromptText(primaryAction.label || '', 120)}${primaryAction.key ? ` / key=${prosePromptText(primaryAction.key, 120)}` : ''}`
+      : '',
+    director.blocking_summary || director.blockingSummary
+      ? `blocking_summary：${prosePromptText(director.blocking_summary || director.blockingSummary, 300)}`
+      : '',
+    selectedContracts.length ? `selected_contracts：${selectedContracts.join('；')}` : '',
+    suppressedContracts.length ? `suppressed_contracts：${suppressedContracts.join('；')}` : '',
+    `prompt_budget_plan：${budgetLines.join('；')}`,
+  ].filter(Boolean).join('\n')
+}
+
 function buildProsePromptContextSnapshot(contextPackage: any) {
   const target = contextPackage?.chapter_target || contextPackage?.chapterTarget || {}
   const settingContext = contextPackage?.setting_context || contextPackage?.settingContext || {}
   const storyState = contextPackage?.story_state || contextPackage?.storyState || {}
+  const director = getOhStoryDirector(contextPackage)
+  const budgetPlan = director?.prompt_budget_plan || director?.promptBudgetPlan || {}
+  const omittedContracts = new Set(compactOhStoryDirectorBudgetList(budgetPlan.omit))
   return {
     chapter_target: compactProsePromptValue({
       chapter_no: target.chapter_no || target.chapterNo,
@@ -5440,7 +5532,11 @@ function buildProsePromptContextSnapshot(contextPackage: any) {
       previous_handoff: target.previous_handoff || target.previousHandoff,
       word_target: target.word_target || target.wordTarget,
       scene_cards: asArray(target.scene_cards || target.sceneCards).slice(0, 8).map(compactProseSceneCard),
+      longform_structure_contract: omittedContracts.has('longform_structure_contract')
+        ? undefined
+        : target.longform_structure_contract || target.longformStructureContract,
     }),
+    oh_story_director: buildOhStoryDirectorSnapshot(contextPackage),
     preflight: compactProsePromptValue(contextPackage?.preflight || {}),
     continuity: compactProsePromptValue(contextPackage?.continuity || {}),
     setting_context: compactProsePromptValue({
@@ -52209,6 +52305,7 @@ export function createNovelWritingService(ctx: {
     const duplicateTitleRows = asArray(titleUniquenessReport?.duplicates)
       .map((item: any) => `第${item?.chapter_no || '?'}章《${item?.title || '无标题'}》`)
       .filter(Boolean)
+    const ohStoryDirectorPromptBlock = buildOhStoryDirectorPromptBlock(contextPackage)
     return buildBoundedProsePrompt([
       '任务：按场景卡生成章节正文。请先在心中按场景组织段落，再输出完整正文。',
       `作品标题：${project.title}`,
@@ -52222,6 +52319,7 @@ export function createNovelWritingService(ctx: {
       titleUniquenessReport?.status === 'warn' && titleUniquenessReport?.fix ? `改名依据：${titleUniquenessReport.fix}` : '',
       '必须以 chapter_target.summary、chapter_target.conflict、chapter_target.ending_hook 和 scene_cards 为准；如果已有正文或旧场景分解与目标不一致，不得沿用。',
       'oh-story 日更工作流：生成正文前按 Step 2.1 标题预检、Step 2.2 状态筛选、Step 2.3 文风召回、Step 2.4 意图确认、章节蓝图/场景卡门禁执行；继续/续写/日更只表示继续当前日更批量流程，不得跳过 Step 2.2 状态筛选或 Step 2.3 文风召回；状态筛选只保留不知道就会写错的信息；正文后用回执闭环，不用任务书自述替代正文证据。',
+      ohStoryDirectorPromptBlock,
       'oh-story 自然写作底线：正文按“动作 -> 对话 -> 情绪反应 -> 动作”循环推进，单写心理活动不得连续超过 2 段；情绪用身体动作、行为选择、对话反应或代价表现，不直接写“他很紧张/她很伤心”。',
       '句式节奏：打斗/紧张用 3-8 字短句制造速度，日常用 8-15 字承载动作和信息，描写句必须读起来不卡；长短句交错，不要通篇同长度、同语气、同段落密度。',
       '对白口吻：对话必须口语化，符合角色身份和关系阶段；不要把“我认为此事不妥”这类书面语塞进角色嘴里，能用动作或半句话表达的，不用旁白说明。',

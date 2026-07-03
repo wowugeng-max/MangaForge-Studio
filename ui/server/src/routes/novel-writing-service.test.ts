@@ -39326,6 +39326,136 @@ describe('chapter pre-draft brief', () => {
     expect(prompt).toContain('待处理线索：第七层门影是谁')
   })
 
+  test('director budget omits longform structure contract content from prose prompt snapshot', () => {
+    const project = { title: '万古长夜' }
+    const contextPackage = {
+      oh_story_director: {
+        stage: 'draft_prose',
+        readiness: 'ready',
+        primary_action: {
+          key: 'write_chapter_prose',
+          label: '生成章节正文',
+        },
+        blocking_summary: '无阻塞，按预算执行选用合同。',
+        selected_contracts: [
+          {
+            key: 'story_power',
+            reason: '目标阻碍动作反馈XYZ_STORY_POWER_SELECTED',
+            detail_level: 'full',
+          },
+        ],
+        suppressed_contracts: [
+          {
+            key: 'longform_structure_contract',
+            reason: '本章只需列名，不带入长合同正文。',
+            detail_level: 'omit',
+          },
+        ],
+        prompt_budget_plan: {
+          full: ['story_power'],
+          compact: ['chapter_blueprint'],
+          reference: ['continuity'],
+          omit: ['longform_structure_contract'],
+        },
+      },
+      chapter_target: {
+        chapter_no: 51,
+        title: '第七层旧影',
+        summary: '李玄追查旧阵塔第七层的人影。',
+        conflict: '旧阵塔门前出现反制。',
+        ending_hook: '门影主动回应。',
+        longform_structure_contract: {
+          note: '开局埋因XYZ_LONGFORM_SHOULD_BE_OMITTED',
+        },
+        story_power_contract: {
+          execution: '目标阻碍动作反馈XYZ_STORY_POWER_SELECTED',
+        },
+        scene_cards: [
+          {
+            scene_no: 1,
+            title: '旧塔门前',
+            purpose: '承接上一章钩子。',
+            conflict: '门影不让李玄靠近。',
+          },
+        ],
+      },
+    }
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+
+    const prompt = service.buildParagraphProseContext(project, contextPackage, null, { chapter_no: 51, title: '第七层旧影' })
+
+    expect(prompt).toContain('【oh-story 总导演】')
+    expect(prompt).toContain('story_power')
+    expect(prompt).toContain('目标阻碍动作反馈XYZ_STORY_POWER_SELECTED')
+    expect(prompt).toContain('longform_structure_contract')
+    expect(prompt).toContain('omit')
+    expect(prompt).not.toContain('XYZ_LONGFORM_SHOULD_BE_OMITTED')
+  })
+
+  test('director budget keeps longform structure contract content when not omitted from prose prompt snapshot', () => {
+    const project = { title: '万古长夜' }
+    const contextPackage = {
+      oh_story_director: {
+        stage: 'draft_prose',
+        readiness: 'ready',
+        primary_action: {
+          key: 'write_chapter_prose',
+          label: '生成章节正文',
+        },
+        selected_contracts: [
+          {
+            key: 'story_power',
+            reason: '目标阻碍动作反馈XYZ_STORY_POWER_SELECTED',
+            detail_level: 'full',
+          },
+        ],
+        suppressed_contracts: [],
+        prompt_budget_plan: {
+          full: ['story_power'],
+          compact: ['longform_structure_contract'],
+          reference: [],
+          omit: [],
+        },
+      },
+      chapter_target: {
+        chapter_no: 51,
+        title: '第七层旧影',
+        summary: '李玄追查旧阵塔第七层的人影。',
+        conflict: '旧阵塔门前出现反制。',
+        ending_hook: '门影主动回应。',
+        longform_structure_contract: {
+          note: '开局埋因XYZ_LONGFORM_SHOULD_BE_INCLUDED',
+        },
+        story_power_contract: {
+          execution: '目标阻碍动作反馈XYZ_STORY_POWER_SELECTED',
+        },
+        scene_cards: [
+          {
+            scene_no: 1,
+            title: '旧塔门前',
+            purpose: '承接上一章钩子。',
+            conflict: '门影不让李玄靠近。',
+          },
+        ],
+      },
+    }
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+
+    const prompt = service.buildParagraphProseContext(project, contextPackage, null, { chapter_no: 51, title: '第七层旧影' })
+
+    expect(prompt).toContain('【oh-story 总导演】')
+    expect(prompt).toContain('目标阻碍动作反馈XYZ_STORY_POWER_SELECTED')
+    expect(prompt).toContain('XYZ_LONGFORM_SHOULD_BE_INCLUDED')
+  })
+
   test('carries oh-story foreshadowing consistency radar into the next pre-draft brief and prose prompt', () => {
     const project = {
       title: '万古长夜',
