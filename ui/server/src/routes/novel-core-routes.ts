@@ -693,6 +693,14 @@ function mergeGeneratedFields(existing: any, additions: string[]) {
     .filter(item => item && !seen.has(item) && seen.add(item))
 }
 
+function attachProjectSeedDirector(seed: any) {
+  if (!seed || typeof seed !== 'object' || Array.isArray(seed) || !Object.keys(seed).length) return seed
+  return {
+    ...seed,
+    oh_story_director: buildOhStoryDirectorForProjectSeed(seed),
+  }
+}
+
 export function repairProjectSeedGaps(seed: any, idea = '') {
   const root = parseNestedSeed(seed)
   if (!root || !Object.keys(root).length) return root
@@ -715,10 +723,7 @@ export function repairProjectSeedGaps(seed: any, idea = '') {
       generated_fields: mergeGeneratedFields(seedDiagnostics.generated_fields, generated),
     },
   }
-  return {
-    ...repaired,
-    oh_story_director: buildOhStoryDirectorForProjectSeed(repaired),
-  }
+  return attachProjectSeedDirector(repaired)
 }
 
 export function buildProjectSeedDiagnostics(seed: any, idea = '', result: any = null) {
@@ -1222,8 +1227,9 @@ async function deriveProjectSeedWithModel(activeWorkspace: string, idea: string,
     temperature: 0.42,
     skipMemory: true,
   })
-  const seed = repairProjectSeedGaps(normalizeProjectSeedPayload((result as any).output || parseJsonLikePayload((result as any).content) || {}, idea, lengthTarget), idea)
+  let seed = repairProjectSeedGaps(normalizeProjectSeedPayload((result as any).output || parseJsonLikePayload((result as any).content) || {}, idea, lengthTarget), idea)
   if (requestedTitle && !seed.title) seed.title = requestedTitle
+  seed = attachProjectSeedDirector(seed)
   return { seed, result }
 }
 
@@ -1251,8 +1257,9 @@ async function finalizeProjectSeedWithModel(activeWorkspace: string, draft: any,
     temperature: 0.35,
     skipMemory: true,
   })
-  const seed = repairProjectSeedGaps(normalizeProjectSeedPayload((result as any).output || parseJsonLikePayload((result as any).content) || {}, idea, draft?.length_target), idea)
+  let seed = repairProjectSeedGaps(normalizeProjectSeedPayload((result as any).output || parseJsonLikePayload((result as any).content) || {}, idea, draft?.length_target), idea)
   if (requestedTitle && !seed.title) seed.title = requestedTitle
+  seed = attachProjectSeedDirector(seed)
   return { seed, result }
 }
 
@@ -1292,8 +1299,9 @@ async function expandThinProjectSeedWithModel(
       temperature: 0.36,
       skipMemory: true,
     })
-    const expandedSeed = repairProjectSeedGaps(normalizeProjectSeedPayload((recoveryResult as any).output || parseJsonLikePayload((recoveryResult as any).content) || {}, idea, lengthTarget), idea)
+    let expandedSeed = repairProjectSeedGaps(normalizeProjectSeedPayload((recoveryResult as any).output || parseJsonLikePayload((recoveryResult as any).content) || {}, idea, lengthTarget), idea)
     if (requestedTitle && !expandedSeed.title) expandedSeed.title = requestedTitle
+    expandedSeed = attachProjectSeedDirector(expandedSeed)
     if (!(recoveryResult as any).error && hasUsableProjectSeed(expandedSeed)) {
       const diagnostics = {
         ...buildProjectSeedDiagnostics(expandedSeed, idea, recoveryResult),
@@ -1305,7 +1313,7 @@ async function expandThinProjectSeedWithModel(
         suggestion: '首轮返回偏薄，系统已保留有效线索并让同一模型补齐为可审阅项目种子。',
       }
       return {
-        seed: { ...expandedSeed, seed_diagnostics: diagnostics },
+        seed: attachProjectSeedDirector({ ...expandedSeed, seed_diagnostics: diagnostics }),
         result: {
           ...recoveryResult,
           seed_recovery: {
@@ -1326,7 +1334,7 @@ async function expandThinProjectSeedWithModel(
       suggestion: '同一模型二次补种子仍偏薄。系统已保留有效材料并生成可编辑草稿，请作者先审阅补几处关键设定后再定稿。',
     }
     return {
-      seed: { ...recovered.seed, seed_diagnostics: diagnostics },
+      seed: attachProjectSeedDirector({ ...recovered.seed, seed_diagnostics: diagnostics }),
       result: {
         ...recoveryResult,
         seed_recovery: {
@@ -1345,7 +1353,7 @@ async function expandThinProjectSeedWithModel(
       suggestion: '同一模型二次补种子调用失败。系统已保留有效材料并生成可编辑草稿，请作者先审阅补几处关键设定后再定稿。',
     }
     return {
-      seed: { ...recovered.seed, seed_diagnostics: diagnostics },
+      seed: attachProjectSeedDirector({ ...recovered.seed, seed_diagnostics: diagnostics }),
       result: {
         error: String(error?.message || error),
         seed_recovery: {
@@ -2073,12 +2081,12 @@ async function materializeProjectSeed(activeWorkspace: string, project: any, see
 async function createProjectFromSeed(activeWorkspace: string, seed: any, options: { title?: string; idea?: string } = {}) {
   const repairedSeed = repairProjectSeedGaps(seed, options.idea || seed.raw_idea || '')
   const title = firstSeedText(options.title, repairedSeed.title, repairedSeed.logline, '未命名小说').slice(0, 64)
-  const seedForProject = {
+  const seedForProject = attachProjectSeedDirector({
     ...repairedSeed,
     title,
     raw_idea: options.idea || repairedSeed.raw_idea || '',
     derived_at: repairedSeed.derived_at || new Date().toISOString(),
-  }
+  })
   const project = await createNovelProject(activeWorkspace, {
     title,
     genre: repairedSeed.genre || '',

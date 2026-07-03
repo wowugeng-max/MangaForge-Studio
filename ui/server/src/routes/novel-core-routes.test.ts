@@ -455,6 +455,30 @@ describe('novel project seed prompt', () => {
     expect(repaired.oh_story_director.required_repairs.map((item: any) => item.key)).toContain('main_conflict')
   })
 
+  test('recomputes project seed director after auto-create fills the requested title', async () => {
+    const workspace = await tempDir('mangaforge-novel-auto-create-director-title-')
+    const { registerNovelCoreRoutes } = await import('./novel-core-routes')
+    const { app, handlers } = createRouteHarness()
+    registerNovelCoreRoutes(app as any, () => workspace)
+    const autoCreate = handlers.get('POST /api/novel/projects/auto-create')
+    expect(autoCreate).toBeTruthy()
+
+    const seed = completeProjectSeed({ title: '' })
+    const response = await callRoute(autoCreate, {
+      body: {
+        title: '星火令',
+        idea: '星火令边境学院升级文。',
+        length_target: 'medium',
+        seed,
+      },
+    })
+
+    expect(response.statusCode).toBe(200)
+    const projectSeed = response.body.project.reference_config.project_seed
+    expect(projectSeed.title).toBe('星火令')
+    expect(projectSeed.oh_story_director.required_repairs.map((item: any) => item.key)).not.toContain('title')
+  })
+
   test('preserves real protagonist antagonist and nested outlines during thin seed recovery', async () => {
     const { buildRecoverableProjectSeed } = await import('./novel-core-routes')
     const recovered = buildRecoverableProjectSeed(
