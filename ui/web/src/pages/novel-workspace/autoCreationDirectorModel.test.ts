@@ -17649,4 +17649,49 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(model.mainAction.label).toBe('复检当前版本')
     expect(model.pipeline.find(step => step.key === 'quality_gate')?.status).toBe('active')
   })
+
+  test('uses post-draft oh-story director recommended continuation as the main action', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: basePlanning,
+      writing: {
+        ...baseWriting,
+        chapterAcceptanceDesk: {
+          ...baseWriting.chapterAcceptanceDesk,
+          visible: false,
+        },
+      },
+      activeTasks: [],
+      selectedModelId: 12,
+      chapters: [
+        {
+          id: 2,
+          chapter_no: 2,
+          title: '巡考夺令',
+          status: 'drafted',
+          raw_payload: {
+            oh_story_director: {
+              stage: 'post_draft',
+              readiness: 'ready',
+              acceptance: 'accepted_with_carryover',
+              primary_action: { key: 'continue_next_chapter', label: '继续下一章', mode: 'automatic' },
+              carryover_findings: [
+                { key: 'story_power', label: '故事力续航', detail: '下一章开篇补代价反馈', blocking: false },
+              ],
+              required_repairs: [],
+              deferred_repairs: [],
+              selected_contracts: [],
+              prompt_budget_plan: { full: [], compact: ['quality_carryover'], reference: [], omit: [] },
+              evidence: [],
+            },
+          },
+        },
+      ],
+    } as any)
+
+    expect(model.status).toBe('needs_acceptance')
+    expect(model.statusLabel).toBe('可继续，有承接')
+    expect(model.mainAction.key).toBe('accept_chapter_and_continue')
+    expect(model.mainAction.label).toBe('继续下一章')
+    expect(model.summary).toContain('下一章开篇补代价反馈')
+  })
 })

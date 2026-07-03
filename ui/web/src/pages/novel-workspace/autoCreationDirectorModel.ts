@@ -936,6 +936,37 @@ function writingAction(key: WritingCockpitActionKey, description: string, label?
   }
 }
 
+function chapterOrderNumber(chapter: AnyRecord): number {
+  const value = Number(chapter?.chapter_no ?? chapter?.chapterNo ?? chapter?.no ?? 0)
+  return Number.isFinite(value) ? value : 0
+}
+
+function latestChapterOhStoryDirector(chapters: AnyRecord[]): AnyRecord | null {
+  return [...chapters]
+    .sort((a, b) => chapterOrderNumber(b) - chapterOrderNumber(a))
+    .map(chapter => chapter?.raw_payload?.oh_story_director
+      || chapter?.raw_payload?.ohStoryDirector
+      || chapter?.rawPayload?.oh_story_director
+      || chapter?.rawPayload?.ohStoryDirector
+      || chapter?.oh_story_director
+      || chapter?.ohStoryDirector)
+    .find(director => director && typeof director === 'object') || null
+}
+
+function postDraftDirectorAction(director: AnyRecord | null): AutoCreationDirectorAction | null {
+  if (!director || text(director.stage) !== 'post_draft') return null
+  const acceptance = text(director.acceptance)
+  if (!['accepted', 'accepted_with_carryover'].includes(acceptance)) return null
+  if (arrayValue(director.required_repairs || director.requiredRepairs).length > 0) return null
+  const primaryAction = director.primary_action || director.primaryAction || {}
+  if (text(primaryAction.key) !== 'continue_next_chapter') return null
+  return writingAction(
+    'accept_chapter_and_continue',
+    text(director.blocking_summary || director.blockingSummary, '总导演验收通过，承接到下一章。'),
+    text(primaryAction.label, '继续下一章'),
+  )
+}
+
 function opsAction(
   key: 'open_task_center' | 'select_model' | 'review_governance_closure' | 'start_safe_batch_generation' | 'create_safe_batch_risk_repair' | 'create_style_sample_batch_repair' | 'create_recovery_evidence_governance_queue' | 'create_delivery_risk_repair' | 'create_script_room_repair' | 'auto_repair_blockers',
   label: string,
@@ -16478,6 +16509,7 @@ function buildSerialCockpit(args: {
 export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorModelInput): AutoCreationDirectorModel {
   const planning = input.planning
   const writing = input.writing
+  const chapters = arrayValue(input.chapters)
   const activeTasks = arrayValue(input.activeTasks)
   const runRecords = arrayValue(input.runRecords)
   const reviews = arrayValue(input.reviews)
@@ -16500,25 +16532,27 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
     planning,
     writing,
     reviews,
-    chapters: arrayValue(input.chapters),
+    chapters,
     storyState: input.storyState || {},
   })
   const canonRunway = buildCanonRunway(writing)
   const deliveryRiskGate = buildDeliveryRiskGate({
     reviews,
     runRecords,
-    chapters: arrayValue(input.chapters),
+    chapters,
   })
   const storylineDecisionGate = buildStorylineDecisionGate(runRecords)
   const governanceClosureBrief = buildGovernanceClosureBrief({ runRecords, storylineDecisionGate })
   const governanceRecheckMemory = buildGovernanceRecheckMemory({ runRecords, storylineDecisionGate })
   let batchReviewQueue = buildBatchReviewQueue({
     runRecords,
-    chapters: arrayValue(input.chapters),
+    chapters,
     reviews,
     planning,
     storyState: input.storyState || {},
   })
+  const postDraftDirector = latestChapterOhStoryDirector(chapters)
+  const postDraftContinuationAction = postDraftDirectorAction(postDraftDirector)
   const blockers: string[] = []
   const confirmations: string[] = []
   const writingQueueFocus = buildWritingQueueFocus(writing)
@@ -16619,6 +16653,18 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
     summary = canonRunway.detail
     confirmations.push('故事状态需要同步')
     mainAction = canonRunway.action
+  } else if (postDraftContinuationAction) {
+    const carryoverFindings = arrayValue(postDraftDirector?.carryover_findings || postDraftDirector?.carryoverFindings)
+    const acceptance = text(postDraftDirector?.acceptance)
+    status = 'needs_acceptance'
+    statusLabel = acceptance === 'accepted_with_carryover' ? '可继续，有承接' : '可继续'
+    headline = chapter ? `第 ${chapter.chapterNo} 章已通过总导演验收` : '当前章已通过总导演验收'
+    summary = carryoverFindings
+      .map((finding: AnyRecord) => firstText(finding.detail, finding.label, finding.key))
+      .filter(Boolean)
+      .join('；') || text(postDraftDirector?.blocking_summary || postDraftDirector?.blockingSummary, '总导演验收通过，可以继续下一章。')
+    confirmations.push(statusLabel)
+    mainAction = postDraftContinuationAction
   } else if (writing.chapterAcceptanceDesk.visible) {
     const action = writing.chapterAcceptanceDesk.recommendedAcceptanceAction
     status = 'needs_acceptance'

@@ -47575,6 +47575,37 @@ describe('story unit sync report', () => {
     expect(generationBlock.match(/revision_receipts: ohStoryDeliveryReceipts\?\.revision_receipts/g)?.length || 0).toBeGreaterThanOrEqual(3)
   })
 
+  test('prose generation stores post-draft oh-story director after delivery receipts and quality review', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const generationBlock = source.slice(
+      source.indexOf('const draftResult = await generateNovelChapterProse'),
+      source.indexOf('const storyStateUpdate = await updateStoryStateMachine', source.indexOf('const draftResult = await generateNovelChapterProse')),
+    )
+    const fullGenerationBlock = source.slice(
+      source.indexOf('const draftResult = await generateNovelChapterProse'),
+      source.indexOf('const settingViolations = Array.isArray', source.indexOf('const draftResult = await generateNovelChapterProse')),
+    )
+    const draftOnlyBlock = generationBlock.slice(
+      generationBlock.indexOf('if (isDraftOnly)'),
+      generationBlock.indexOf("await onStage('editor'", generationBlock.indexOf('if (isDraftOnly)')),
+    )
+    const postReviewBlock = generationBlock.slice(
+      generationBlock.indexOf('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)'),
+      generationBlock.indexOf('const storyStateUpdate = await updateStoryStateMachine'),
+    )
+
+    expect(source).toContain('buildOhStoryDirectorForPostDraft')
+    expect(postReviewBlock).toContain('const postDraftDirector = buildOhStoryDirectorForPostDraft')
+    expect(postReviewBlock.indexOf('const postDraftDirector = buildOhStoryDirectorForPostDraft')).toBeGreaterThan(postReviewBlock.indexOf('const postDeliveryReceiptChecks = ['))
+    expect(postReviewBlock).toContain('story_power_sync: qualityGateReview?.story_power_sync || qualityGateReview?.storyPowerSync || selfCheck?.review?.story_power_sync || selfCheck?.review?.storyPowerSync')
+    expect(postReviewBlock).toContain('delivery_risk_receipt_sync: preStoreDeliveryRiskReceiptSync')
+    expect(postReviewBlock).toContain('deslop_gate_diagnostics: qualityGateReview?.deslop_gate_diagnostics || qualityGateReview?.deslopGateDiagnostics || selfCheck?.review?.deslop_gate_diagnostics || selfCheck?.review?.deslopGateDiagnostics')
+    expect(fullGenerationBlock.match(/oh_story_director: postDraftDirector/g)?.length || 0).toBeGreaterThanOrEqual(4)
+    expect(fullGenerationBlock.match(/ohStoryDirector: postDraftDirector/g)?.length || 0).toBeGreaterThanOrEqual(4)
+    expect(fullGenerationBlock.match(/payload: JSON\.stringify\(\{[\s\S]*?oh_story_director: postDraftDirector[\s\S]*?ohStoryDirector: postDraftDirector/g)?.length || 0).toBeGreaterThanOrEqual(2)
+    expect(draftOnlyBlock).not.toContain('postDraftDirector')
+  })
+
   test('prose generation preserves pre-draft execution receipts for write-preparation diagnostics', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const normalizeBlock = source.slice(

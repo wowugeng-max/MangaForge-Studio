@@ -89,6 +89,8 @@ The estimate assumes the current working pattern: one small oh-story increment a
 
 No immediate oh-story reference gaps remain. Track future work as real-output tuning, UI surfacing, or platform-specific workflow improvements.
 
+The 38-reference migration remains complete. The next product slice is orchestration: the oh-story director layer stages existing contracts, gates, receipts, and repairs so the workspace exposes one readiness state, one primary action, and scoped prompt-budget selection instead of raw rule accumulation.
+
 ## Update Rules
 
 - Every oh-story-driven prompt, workflow, diagnostic, receipt, or UI improvement must update this file in the same commit when it changes migration status or remaining work.
