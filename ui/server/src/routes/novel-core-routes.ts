@@ -39,6 +39,7 @@ import { buildOhStoryCharacterDesignContract, formatOhStoryCharacterDesignPrompt
 import { buildOhStoryStoryPowerContract, formatOhStoryStoryPowerPrompt } from './novel-story-power-contract'
 import { buildOhStoryMainlineDefinitionContract, formatOhStoryMainlineDefinitionPrompt } from './novel-mainline-definition-contract'
 import { buildOhStoryLongformStructureContract, formatOhStoryLongformStructurePrompt } from './novel-longform-structure-contract'
+import { buildOhStoryDirectorForProjectSeed } from './novel-oh-story-director'
 import { normalizeSettingAgentPayload } from './novel-setting-routes'
 
 function parseOptionalBoolean(value: any) {
@@ -704,7 +705,7 @@ export function repairProjectSeedGaps(seed: any, idea = '') {
   const authorConfirmations = existingConfirmations.length ? existingConfirmations : (openQuestions.length ? buildAuthorConfirmations(root, idea) : [])
   if (!existingConfirmations.length && authorConfirmations.length) generated.push('author_confirmations')
   const seedDiagnostics = parseNestedSeed(root.seed_diagnostics)
-  return {
+  const repaired = {
     ...root,
     foreshadowing_plan: foreshadowingPlan,
     author_confirmations: authorConfirmations,
@@ -713,6 +714,10 @@ export function repairProjectSeedGaps(seed: any, idea = '') {
       ...seedDiagnostics,
       generated_fields: mergeGeneratedFields(seedDiagnostics.generated_fields, generated),
     },
+  }
+  return {
+    ...repaired,
+    oh_story_director: buildOhStoryDirectorForProjectSeed(repaired),
   }
 }
 

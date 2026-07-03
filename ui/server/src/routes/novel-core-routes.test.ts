@@ -48,6 +48,38 @@ async function callDeleteProject(handler: any, projectId: number) {
   return callRoute(handler, { params: { id: String(projectId) } })
 }
 
+function completeProjectSeed(overrides: Record<string, any> = {}) {
+  return {
+    title: '星火令',
+    genre: '边境学院',
+    synopsis: '少年带着失效星火令进入边境学院，发现星火令能改写势力手牌。',
+    logline: '失效令牌成为改写边境秩序的唯一钥匙。',
+    main_conflict: '林澈要查清星火令来源，边境三方势力要夺令灭口。',
+    protagonist: { name: '林澈', goal: '查明父亲失踪真相' },
+    worldbuilding: {
+      world_summary: '边境学院由军府、商盟、旧神教共同控制。',
+      rules: ['星火令只能改写一次阵营手牌'],
+    },
+    writing_bible: {
+      target_reader_contract: { reader_profile: '男频升级爽文读者' },
+      story_power_contract: { quality_checks: ['目标阻碍动作反馈期待'] },
+      character_design_contract: { character_pool_tiers: ['protagonist', 'primary_supporting'] },
+      longform_structure_contract: { structure_mode: '二级结构' },
+    },
+    chapter_outlines: [
+      { chapter_no: 1, title: '失效令牌', summary: '林澈被迫入局', conflict: '军府扣人', ending_hook: '星火令亮起' },
+      { chapter_no: 2, title: '边境入学', summary: '林澈进入学院', conflict: '商盟试探', ending_hook: '旧神教现身' },
+      { chapter_no: 3, title: '手牌改写', summary: '林澈验证令牌规则', conflict: '三方夺令', ending_hook: '父亲旧案翻出' },
+    ],
+    character_pool: {
+      protagonist: [{ name: '林澈' }],
+      primary_supporting: [{ name: '许照夜' }, { name: '唐眉' }, { name: '周砚' }],
+      antagonist_primary: [{ name: '沈归墟', antagonist_logic: { desire: '夺回旧神令权' } }],
+    },
+    ...overrides,
+  }
+}
+
 afterEach(async () => {
   await Promise.all(workspaces.map(workspace => rm(workspace, { recursive: true, force: true })))
   workspaces = []
@@ -399,6 +431,28 @@ describe('novel project seed prompt', () => {
     expect(repaired.open_questions).toEqual([])
     expect(repaired.seed_diagnostics.generated_fields).toContain('foreshadowing_plan')
     expect(repaired.seed_diagnostics.generated_fields).toContain('author_confirmations')
+  })
+
+  test('adds ready project creation director after repairing a complete project seed', async () => {
+    const { repairProjectSeedGaps } = await import('./novel-core-routes')
+
+    const repaired = repairProjectSeedGaps(completeProjectSeed(), '星火令边境学院升级文。')
+
+    expect(repaired.oh_story_director.stage).toBe('project_creation')
+    expect(repaired.oh_story_director.readiness).toBe('ready')
+    expect(repaired.oh_story_director.primary_action.key).toBe('enter_workspace')
+    expect(repaired.oh_story_director.primary_action.mode).toBeTruthy()
+  })
+
+  test('asks for user confirmation when repaired project seed still lacks main conflict', async () => {
+    const { repairProjectSeedGaps } = await import('./novel-core-routes')
+    const seed = completeProjectSeed({ main_conflict: '' })
+
+    const repaired = repairProjectSeedGaps(seed, '星火令边境学院升级文。')
+
+    expect(repaired.oh_story_director.readiness).toBe('needs_user_confirmation')
+    expect(repaired.oh_story_director.primary_action.key).toBe('ask_user_confirmation')
+    expect(repaired.oh_story_director.required_repairs.map((item: any) => item.key)).toContain('main_conflict')
   })
 
   test('preserves real protagonist antagonist and nested outlines during thin seed recovery', async () => {
@@ -796,6 +850,7 @@ describe('novel project seed prompt', () => {
     })
 
     expect(response.statusCode).toBe(200)
+    expect(response.body.reference_config.project_seed.oh_story_director.stage).toBe('project_creation')
     const storyState = response.body.reference_config.story_state
     expect(storyState.characters.map((character: any) => character.name)).toEqual(['陆珩', '沈照'])
     expect(storyState.characters[0].current_state.pressure).toContain('灯塔')
