@@ -146,9 +146,56 @@ function unique(values: string[]): string[] {
   return Array.from(new Set(values))
 }
 
-export function classifyOhStoryDirectorBlocker(message: unknown): OhStoryDirectorBlockerCategory {
-  const text = String(message ?? '').toLowerCase()
+function asArray(value: unknown): unknown[] {
+  if (value == null) return []
+  return Array.isArray(value) ? value : [value]
+}
 
+function issueText(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (value && typeof value === 'object') {
+    const record = value as RecordLike
+    return String(record.message ?? record.detail ?? record.reason ?? record.label ?? JSON.stringify(record))
+  }
+  return String(value ?? '')
+}
+
+function repairKeyForPreDraftCategory(category: OhStoryDirectorBlockerCategory): string {
+  return `pre_draft_${category}`
+}
+
+function repairLabelForCategory(category: OhStoryDirectorBlockerCategory): string {
+  switch (category) {
+    case 'missing_blueprint':
+      return 'Missing chapter blueprint'
+    case 'missing_context':
+      return 'Missing chapter context'
+    case 'missing_source_evidence':
+      return 'Missing source evidence'
+    case 'manual_confirmation_required':
+      return 'Manual confirmation required'
+    case 'quality_revision_required':
+      return 'Quality revision required'
+    case 'missing_materials':
+    default:
+      return 'Missing pre-draft materials'
+  }
+}
+
+export function classifyOhStoryDirectorBlocker(message: unknown): OhStoryDirectorBlockerCategory {
+  const text = issueText(message).toLowerCase()
+
+  if (
+    text.includes('确认') ||
+    text.includes('manual') ||
+    text.includes('人工') ||
+    text.includes('是否') ||
+    text.includes('core direction') ||
+    text.includes('主线方向') ||
+    text.includes('核心承诺')
+  ) {
+    return 'manual_confirmation_required'
+  }
   if (
     text.includes('source_paths_missing') ||
     text.includes('文风召回') ||
@@ -157,7 +204,13 @@ export function classifyOhStoryDirectorBlocker(message: unknown): OhStoryDirecto
   ) {
     return 'missing_source_evidence'
   }
-  if (text.includes('蓝图') || text.includes('细纲') || text.includes('scene card') || text.includes('chapter_blueprint')) {
+  if (
+    text.includes('蓝图') ||
+    text.includes('细纲') ||
+    text.includes('场景卡') ||
+    text.includes('scene card') ||
+    text.includes('chapter_blueprint')
+  ) {
     return 'missing_blueprint'
   }
   if (
@@ -170,17 +223,6 @@ export function classifyOhStoryDirectorBlocker(message: unknown): OhStoryDirecto
   ) {
     return 'missing_context'
   }
-  if (
-    text.includes('确认') ||
-    text.includes('manual') ||
-    text.includes('人工') ||
-    text.includes('是否') ||
-    text.includes('core direction') ||
-    text.includes('主线方向') ||
-    text.includes('核心承诺')
-  ) {
-    return 'manual_confirmation_required'
-  }
   return 'missing_materials'
 }
 
@@ -190,8 +232,8 @@ export function selectOhStoryDirectorContracts(input: RecordLike): {
   prompt_budget_plan: OhStoryDirectorPromptBudgetPlan
 } {
   const chapterTarget = input?.chapter_target ?? {}
-  const warnings = input?.preflight?.warnings ?? []
-  const warningText = warnings.join('\n')
+  const warnings = asArray(input?.preflight?.warnings ?? [])
+  const warningText = warnings.map(issueText).join('\n')
   const selected_contracts: OhStoryDirectorContractSelection[] = []
   const suppressed_contracts: OhStoryDirectorContractSelection[] = []
   const budget = cloneBudget()
@@ -322,15 +364,21 @@ export function buildOhStoryDirectorForProjectSeed(seed: RecordLike): OhStoryDir
 }
 
 export function buildOhStoryDirectorForPreDraft(input: RecordLike): OhStoryDirector {
-  const blockers = input?.preflight?.blockers ?? input?.blockers ?? []
-  const warnings = input?.preflight?.warnings ?? input?.warnings ?? []
+  const blockers = asArray(input?.preflight?.blockers ?? input?.blockers)
+  const warnings = asArray(input?.preflight?.warnings ?? input?.warnings)
   const preflightIssues = [
     ...blockers.map((message: unknown) => ({ message, source: 'preflight.blockers' })),
     ...warnings.map((message: unknown) => ({ message, source: 'preflight.warnings' })),
   ]
-  const required_repairs = preflightIssues.map((issue, index: number) => {
+  const groupedIssues = new Map<OhStoryDirectorBlockerCategory, Array<{ detail: string; source: string }>>()
+  for (const issue of preflightIssues) {
     const category = classifyOhStoryDirectorBlocker(issue.message)
-    return repair(category === 'missing_blueprint' ? 'chapter_blueprint' : `${category}_${index + 1}`, category, String(issue.message ?? ''), String(issue.message ?? ''), true)
+    const detail = issueText(issue.message)
+    groupedIssues.set(category, [...(groupedIssues.get(category) ?? []), { detail, source: issue.source }])
+  }
+  const required_repairs = Array.from(groupedIssues.entries()).map(([category, issues]) => {
+    const detail = issues.map(issue => issue.detail).join('\n')
+    return repair(repairKeyForPreDraftCategory(category), category, repairLabelForCategory(category), detail, true)
   })
   const contractSelection = selectOhStoryDirectorContracts({
     stage: 'drafting',
@@ -339,6 +387,15 @@ export function buildOhStoryDirectorForPreDraft(input: RecordLike): OhStoryDirec
   })
   const hasManualConfirmation = required_repairs.some(item => item.category === 'manual_confirmation_required')
   const readiness: OhStoryDirectorReadiness = hasManualConfirmation ? 'blocked' : required_repairs.length > 0 ? 'needs_repair' : 'ready'
+  const evidenceItems = Array.from(groupedIssues.entries()).flatMap(([category, issues]) => {
+    const key = repairKeyForPreDraftCategory(category)
+    return unique(issues.map(issue => issue.source)).map(source => evidence(
+      key,
+      'blocked',
+      source,
+      issues.filter(issue => issue.source === source).map(issue => issue.detail).join('\n'),
+    ))
+  })
 
   return {
     stage: 'pre_draft',
@@ -351,7 +408,7 @@ export function buildOhStoryDirectorForPreDraft(input: RecordLike): OhStoryDirec
     suppressed_contracts: contractSelection.suppressed_contracts,
     prompt_budget_plan: contractSelection.prompt_budget_plan,
     evidence: required_repairs.length > 0
-      ? required_repairs.map((item, index) => evidence(item.key, 'blocked', preflightIssues[index]?.source ?? 'preflight.warnings', item.detail))
+      ? evidenceItems
       : [evidence('preflight', 'ready', 'preflight.warnings')],
     blocking_findings: required_repairs,
   }

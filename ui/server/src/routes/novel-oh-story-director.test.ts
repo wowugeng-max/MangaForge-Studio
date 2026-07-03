@@ -48,6 +48,9 @@ describe('oh-story director core', () => {
     expect(classifyOhStoryDirectorBlocker('handoff 追踪/时间线.md 缺少 current time 和 current place')).toBe('missing_context')
     expect(classifyOhStoryDirectorBlocker('先确认 core direction / 主线方向 / 核心承诺 是否更换')).toBe('manual_confirmation_required')
     expect(classifyOhStoryDirectorBlocker('缺少章节目标')).toBe('missing_materials')
+    expect(classifyOhStoryDirectorBlocker('先人工确认本章蓝图是否更换')).toBe('manual_confirmation_required')
+    expect(classifyOhStoryDirectorBlocker('场景卡缺目标')).toBe('missing_blueprint')
+    expect(classifyOhStoryDirectorBlocker('场景卡戏剧单元缺目标、阻碍、变化')).toBe('missing_blueprint')
   })
 
   test('requires user confirmation when a project seed lacks the core conflict direction', () => {
@@ -149,10 +152,54 @@ describe('oh-story director core', () => {
     expect(director.primary_action.mode).toBe('automatic')
     expect(director.required_repairs.map(item => item.category)).toContain('missing_blueprint')
     expect(director.evidence).toContainEqual(expect.objectContaining({
-      key: 'chapter_blueprint',
+      key: 'pre_draft_missing_blueprint',
       status: 'blocked',
       source: 'preflight.blockers',
     }))
+  })
+
+  test('normalizes non-array pre-draft warnings and blockers without dropping categories', () => {
+    const director = buildOhStoryDirectorForPreDraft({
+      preflight: {
+        blockers: '场景卡缺目标',
+        warnings: { message: '先人工确认本章蓝图是否更换' },
+      },
+      chapter_target: {
+        story_power_contract: { quality_checks: ['目标阻碍动作反馈期待'] },
+      },
+    })
+
+    expect(director.readiness).toBe('blocked')
+    expect(director.primary_action.key).toBe('confirm_missing_choice')
+    expect(director.primary_action.mode).toBe('manual')
+    expect(director.required_repairs.map(item => item.category)).toContain('missing_blueprint')
+    expect(director.required_repairs.map(item => item.category)).toContain('manual_confirmation_required')
+    expect(director.selected_contracts.map(item => item.key)).toContain('story_power')
+  })
+
+  test('aggregates duplicate pre-draft issue categories into stable repair keys', () => {
+    const director = buildOhStoryDirectorForPreDraft({
+      preflight: {
+        blockers: [
+          '本章细纲/蓝图：补齐本章蓝图核心字段',
+          '场景卡戏剧单元缺目标、阻碍、变化',
+        ],
+        warnings: ['chapter_blueprint 缺少转折'],
+      },
+    })
+
+    expect(director.required_repairs.filter(item => item.category === 'missing_blueprint')).toHaveLength(1)
+    expect(director.required_repairs[0]).toEqual(expect.objectContaining({
+      key: 'pre_draft_missing_blueprint',
+      category: 'missing_blueprint',
+      blocking: true,
+    }))
+    expect(director.required_repairs[0].detail).toContain('本章细纲/蓝图')
+    expect(director.required_repairs[0].detail).toContain('场景卡戏剧单元缺目标')
+    expect(director.required_repairs[0].detail).toContain('chapter_blueprint')
+    expect(director.evidence.filter(item => item.key === 'pre_draft_missing_blueprint')).toHaveLength(2)
+    expect(director.evidence.map(item => item.source)).toContain('preflight.blockers')
+    expect(director.evidence.map(item => item.source)).toContain('preflight.warnings')
   })
 
   test('separates post-draft blockers from next-chapter carry-over', () => {
