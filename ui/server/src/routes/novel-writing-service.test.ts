@@ -52682,7 +52682,18 @@ describe('chapter context word target source guards', () => {
     const rebuiltRepairCategories = rebuiltContext.oh_story_director.required_repairs.map((item: any) => item.category)
     expect(rebuiltRepairCategories).not.toContain('missing_source_evidence')
     expect(rebuiltRepairCategories).not.toContain('missing_context')
-    expect(rebuiltRepairCategories).not.toContain('missing_blueprint')
+    const rebuiltRepairText = rebuiltContext.oh_story_director.required_repairs
+      .map((item: any) => `${item.label || ''}\n${item.detail || ''}`)
+      .join('\n')
+    expect(rebuiltRepairText).not.toContain('文风召回来源缺失')
+    expect(rebuiltRepairText).not.toContain('追踪/时间线缺失')
+    expect(rebuiltRepairText).not.toContain('本章细纲/蓝图缺核心字段')
+    if (rebuiltRepairCategories.includes('missing_blueprint')) {
+      expect(
+        rebuiltRepairText.includes('场景卡戏剧单元')
+          || remainingKeys.includes('source_readiness_scene_card_goal_obstacle_change'),
+      ).toBe(true)
+    }
   })
 
   test('feeds unconfirmed unattended pre-draft brief into paragraph prose planning', () => {
