@@ -78,6 +78,52 @@ describe('buildTaskRunCardModel', () => {
     expect(model.closure.summary).toBe('已完成 2/2')
     expect(model.primaryAction).toEqual({ key: 'none', label: '' })
   })
+
+  test('director stage summarizes oh-story director stage, blocking status and lifecycle metadata', () => {
+    const model = buildTaskRunCardModel({
+      id: 19,
+      run_type: 'generate_prose',
+      status: 'completed',
+      created_at: '2026-06-30T08:10:00.000Z',
+      started_at: '2026-06-30T08:12:00.000Z',
+      completed_at: '2026-06-30T08:18:00.000Z',
+      input: { unattended: true },
+      payload: {
+        oh_story_director: {
+          stage: 'pre_draft',
+          readiness: 'needs_repair',
+          primary_action: { key: 'repair_pre_draft_materials', label: '补齐并继续', mode: 'automatic' },
+          required_repairs: [{ key: 'blueprint', label: '补蓝图', blocking: true }],
+        },
+      },
+    })
+
+    expect(model.execution.key).toBe('auto')
+    expect(model.directorStage?.key).toBe('pre_draft')
+    expect(model.directorStage?.label).toBe('写前准备')
+    expect(model.blocking.key).toBe('blocking')
+    expect(model.timeline.find(item => item.key === 'started')?.value).toContain('2026')
+    expect(model.timeline.find(item => item.key === 'ended')?.value).toContain('2026')
+  })
+
+  test('director stage marks ready post-draft director runs as non-blocking', () => {
+    const model = buildTaskRunCardModel({
+      id: 20,
+      run_type: 'generate_prose',
+      status: 'completed',
+      output_ref: JSON.stringify({
+        ohStoryDirector: {
+          stage: 'post_draft',
+          readiness: 'ready',
+          requiredRepairs: [],
+        },
+      }),
+    })
+
+    expect(model.directorStage?.label).toBe('写后诊断')
+    expect(model.blocking.key).toBe('non_blocking')
+    expect(model.blocking.label).toBe('不阻塞')
+  })
 })
 
 describe('buildPostBatchQualityCheckSummary', () => {

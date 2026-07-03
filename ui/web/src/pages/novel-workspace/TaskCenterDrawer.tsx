@@ -151,6 +151,16 @@ export type TaskRunCardModel = {
     label: string
     color: TaskRunCardTone
   }
+  directorStage?: {
+    key: string
+    label: string
+    color: TaskRunCardTone
+  }
+  blocking: {
+    key: 'blocking' | 'non_blocking'
+    label: string
+    color: TaskRunCardTone
+  }
   timeline: Array<{
     key: 'created' | 'started' | 'ended' | 'updated'
     label: string
@@ -206,8 +216,51 @@ function taskRunLifecycle(status: any): TaskRunCardModel['lifecycle'] {
 function taskRunPayloads(run: any) {
   return {
     input: parseJsonValue(run?.input_ref || run?.inputRef) || run?.input || {},
-    output: parseJsonValue(run?.output_ref || run?.outputRef) || run?.payload || {},
+    output: parseJsonValue(run?.output_ref || run?.outputRef) || run?.output || run?.payload || {},
   }
+}
+
+function taskRunDirectorPayload(run: any) {
+  const { input, output } = taskRunPayloads(run)
+  return output?.oh_story_director
+    || output?.ohStoryDirector
+    || input?.oh_story_director
+    || input?.ohStoryDirector
+    || output?.contextPackage?.oh_story_director
+    || output?.contextPackage?.ohStoryDirector
+    || input?.contextPackage?.oh_story_director
+    || input?.contextPackage?.ohStoryDirector
+    || null
+}
+
+function taskRunDirectorStage(run: any): TaskRunCardModel['directorStage'] {
+  const director = taskRunDirectorPayload(run)
+  const stage = String(director?.stage || '').trim()
+  if (!stage) return undefined
+  const labels: Record<string, string> = {
+    project_creation: '项目创建',
+    pre_draft: '写前准备',
+    drafting: '正文生成',
+    post_draft: '写后诊断',
+    handoff: '章节交接',
+  }
+  return { key: stage, label: labels[stage] || stage, color: 'blue' }
+}
+
+function taskRunBlockingState(run: any): TaskRunCardModel['blocking'] {
+  const director = taskRunDirectorPayload(run)
+  if (!director) return { key: 'non_blocking', label: '不阻塞', color: 'default' }
+  const requiredRepairs = Array.isArray(director.required_repairs)
+    ? director.required_repairs
+    : Array.isArray(director.requiredRepairs)
+      ? director.requiredRepairs
+      : []
+  const hasBlockingRepair = requiredRepairs.some((repair: any) => repair?.blocking !== false)
+  const readiness = String(director.readiness || '').toLowerCase()
+  if (hasBlockingRepair || ['blocked', 'needs_repair', 'needs_user_confirmation'].includes(readiness)) {
+    return { key: 'blocking', label: '阻塞进度', color: 'red' }
+  }
+  return { key: 'non_blocking', label: '不阻塞', color: 'default' }
 }
 
 function taskRunExecutionMode(run: any): TaskRunCardModel['execution'] {
@@ -288,6 +341,8 @@ export function buildTaskRunCardModel(run: any, options: {
 } = {}): TaskRunCardModel {
   const lifecycle = taskRunLifecycle(run?.status)
   const execution = taskRunExecutionMode(run)
+  const directorStage = taskRunDirectorStage(run)
+  const blocking = taskRunBlockingState(run)
   const closure = taskRunClosure(run)
   const explicitProgress = Number(run?.progress)
   const progress = Number.isFinite(explicitProgress)
@@ -308,6 +363,8 @@ export function buildTaskRunCardModel(run: any, options: {
     stepName: String(run?.step_name || run?.stepName || 'step'),
     lifecycle,
     execution,
+    directorStage,
+    blocking,
     timeline: [
       { key: 'created', label: '创建', value: taskRunTimeValue(run?.created_at, run?.createdAt) || '-' },
       { key: 'started', label: '开始', value: taskRunTimeValue(run?.started_at, run?.startedAt, run?.startedAtMs) || '未开始' },
@@ -352,6 +409,10 @@ function TaskRunCard({
             <Space wrap size={[6, 4]}>
               <Tag color={model.lifecycle.color === 'default' ? undefined : model.lifecycle.color} bordered={false}>运行状态：{model.lifecycle.label}</Tag>
               <Tag color={model.execution.color === 'default' ? undefined : model.execution.color} bordered={false}>执行方式：{model.execution.label}</Tag>
+              {model.directorStage && (
+                <Tag color={model.directorStage.color === 'default' ? undefined : model.directorStage.color} bordered={false}>阶段：{model.directorStage.label}</Tag>
+              )}
+              <Tag color={model.blocking.color === 'default' ? undefined : model.blocking.color} bordered={false}>状态：{model.blocking.label}</Tag>
               <Text strong>{model.title}</Text>
               <Tag bordered={false}>{model.stepName}</Tag>
               {extraTags}
