@@ -1068,7 +1068,7 @@ export function buildProjectSeedRecoveryPrompt(seed: any, diagnostics: any, idea
     '【必须补齐】',
     'title, genre, sub_genres, target_audience, length_target, style_tags, commercial_tags',
     'synopsis, logline, core_premise, main_conflict',
-    'protagonist, antagonist, worldbuilding, plot_engine, writing_bible, characters',
+    'protagonist, antagonist, worldbuilding, plot_engine, writing_bible, characters, character_pool',
     'writing_bible 必须包含 target_reader_contract, genre_positioning_contract, plot_special_topics_contract, mainline_definition_contract, story_power_contract, character_design_contract, longform_structure_contract, core_contract_radar, reader_retention_contract',
     'commercial_positioning 必须包含 platform, reader_promise, selling_points, risks',
     'master_outline, volume_outlines, chapter_outlines, foreshadowing_plan, open_questions, next_steps',
@@ -1084,7 +1084,8 @@ export function buildProjectSeedRecoveryPrompt(seed: any, diagnostics: any, idea
     '8. plot_special_topics_contract 必须包含上方 oh-story 特殊题材操作契约，特别是金手指、题材边界、扫榜对标、都市高武、三万字卡点和阵营手牌规则。',
     '9. mainline_definition_contract 必须包含主线不等于升级、主线是一件事、升级是主角达成目标的行动、不是一个元素和主线完成后的承接规则。',
     '10. story_power_contract 必须包含故事五维、有动作才是故事、有始有终、因果反馈和行动改变局势检查。',
-    '11. character_design_contract 必须包含三层标签、强/中/弱关联、角色卡、配角功能化、反派自我叙事、金手指绑架人设、代入感和安全感规则。',
+    '11. character_design_contract 必须包含三层标签、强/中/弱关联、角色卡、角色池分层、配角功能化、反派自我叙事、antagonist_logic、金手指绑架人设、代入感和安全感规则。',
+    '11.1 characters/character_pool 必须覆盖 protagonist, primary_supporting, secondary_supporting, cameo_supporting, antagonist_primary, antagonist_arc, antagonist_minor, faction_agent；每个角色包含 tier, narrative_function, relationship_to_protagonist, first_appearance_chapter, active_range, voice_anchor, signature_action, secret_or_pressure, exit_or_turning_point；反派层必须包含 antagonist_logic。',
     '12. longform_structure_contract 必须包含一级/二级/三级结构选择、五幕因果链、五级大纲不超过3级、每卷目的+高潮、主线+支线/暗线布局、换地图顶层势力柱子和人际关系先行规则。',
     '13. core_contract_radar 必须给出 must_serve, no_drift, theme_unity_rules, repair_focus，并包含“当初吸引读者的卖点还在吗”的十章复核问题。',
     '14. reader_retention_contract 必须要求前300字承接上一章压力，章末留下下一章动作压力。',
@@ -1147,12 +1148,13 @@ export function buildProjectSeedPrompt(idea: string, requestedTitle = '', reques
     'writing_bible.plot_special_topics_contract: 必须完整写入上方 oh-story 特殊题材操作契约，按 matched_topics 约束金手指、题材边界、扫榜对标、都市高武、三万字卡点、阵营手牌等专题',
     'writing_bible.mainline_definition_contract: 必须完整写入上方 oh-story 主线定义合同，覆盖主线不等于升级、主线是一件事、升级是主角达成目标的行动、不是一个元素和主线完成后的承接规则',
     'writing_bible.story_power_contract: 必须完整写入上方 oh-story 故事力合同，覆盖故事五维、有动作才是故事、有始有终、因果反馈和行动改变局势',
-    'writing_bible.character_design_contract: 必须完整写入上方 oh-story 角色设计合同，覆盖三层标签、强/中/弱关联、角色卡、配角功能、反派自我叙事、金手指绑架人设、代入感和安全感',
+    'writing_bible.character_design_contract: 必须完整写入上方 oh-story 角色设计合同，覆盖三层标签、强/中/弱关联、角色卡、角色池分层、配角功能、反派自我叙事、antagonist_logic、金手指绑架人设、代入感和安全感',
     'writing_bible.longform_structure_contract: 必须完整写入上方 oh-story 长篇结构骨架合同，覆盖一级/二级/三级结构选择、五幕因果链、五级大纲、每卷目的+高潮、支线服务主线、顶层势力柱子和人际关系先行换地图',
     'writing_bible.core_contract_radar: {must_serve, no_drift, theme_unity_rules, repair_focus, periodic_drift_check}，periodic_drift_check.question 必须包含“当初吸引读者的卖点还在吗”',
     'writing_bible.reader_retention_contract: {retention_double_engine, opening_hook_rule, ending_hook_rule, reward_randomness_rule, quality_checks}，opening_hook_rule 必须包含“前300字”',
     'commercial_positioning: {platform, reader_promise, selling_points, tropes, risks}',
-    'characters: array，列出关键人物 name, role_type, motivation, goal, conflict, current_state, role_card, layered_tags, strong_associations, memory_anchor, supporting_function, exit_plan',
+    'characters: array，列出关键人物 name, role_type, tier, narrative_function, motivation, goal, conflict, relationship_to_protagonist, first_appearance_chapter, active_range, voice_anchor, signature_action, secret_or_pressure, current_state, role_card, layered_tags, strong_associations, memory_anchor, supporting_function, exit_or_turning_point, antagonist_logic',
+    'character_pool: object，可按角色池分层输出 protagonist, primary_supporting, secondary_supporting, cameo_supporting, antagonist_primary, antagonist_arc, antagonist_minor, faction_agent；每项角色字段同 characters，反派层必须填写 antagonist_logic',
     'master_outline: {title, summary, hook}',
     'volume_outlines: array，按用户指定篇幅决定分卷数量；短篇可1卷，中篇2-3卷，长篇3-5卷，超长篇5卷以上。每项 title, summary, hook, chapter_count',
     'chapter_outlines: array，按用户指定篇幅决定细纲范围；短篇可10-20章，中篇/长篇/超长篇至少前30章。每项 chapter_no,title,summary,conflict,ending_hook',
@@ -1160,7 +1162,7 @@ export function buildProjectSeedPrompt(idea: string, requestedTitle = '', reques
     'open_questions: array，需要用户后续确认的问题',
     'next_steps: array，进入工作台后建议优先做什么',
     '',
-    '要求：保留用户设定中的核心因果；补齐缺失但不要推翻原意；创建阶段必须先立清目标读者、题材定位、核心承诺雷达和追读留存契约；如果名字缺失可以给暂定名；不要直接生成正文；避免照搬任何现有作品的专有设定、角色名、桥段或原句；不要返回只有标题、题材、标签的稀薄 JSON。',
+    '要求：保留用户设定中的核心因果；补齐缺失但不要推翻原意；创建阶段必须先立清目标读者、题材定位、核心承诺雷达、追读留存契约和角色池分层；如果名字缺失可以给暂定名；不要直接生成正文；避免照搬任何现有作品的专有设定、角色名、桥段或原句；不要返回只有标题、题材、标签的稀薄 JSON。',
   ].filter(Boolean).join('\n')
 }
 
@@ -1177,12 +1179,13 @@ function buildFinalizeProjectSeedPrompt(draft: any, idea: string, requestedTitle
     '',
     '请在不推翻用户修改的前提下，补齐并规范以下字段：',
     'title, genre, sub_genres, target_audience, length_target, style_tags, commercial_tags, synopsis, logline, core_premise, main_conflict',
-    'protagonist, antagonist, worldbuilding, plot_engine, writing_bible, characters',
+    'protagonist, antagonist, worldbuilding, plot_engine, writing_bible, characters, character_pool',
     'master_outline, volume_outlines, chapter_outlines, foreshadowing_plan, open_questions, next_steps',
     '',
     '要求：',
     '1. 用户草稿中明确写出的名字、因果、限制、角色关系必须保留。',
     '2. characters 要尽量包含年龄、身份、外貌、能力、物品、认知范围、信息边界、当前状态。',
+    '2.1 character_pool/characters 必须按角色池分层覆盖 protagonist, primary_supporting, secondary_supporting, cameo_supporting, antagonist_primary, antagonist_arc, antagonist_minor, faction_agent；每个角色包含 tier, narrative_function, relationship_to_protagonist, first_appearance_chapter, active_range, voice_anchor, signature_action, secret_or_pressure, exit_or_turning_point；反派层必须包含 antagonist_logic。',
     '3. worldbuilding 要包含核心规则、力量体系、禁忌、地点、势力、关键物品。',
     '4. chapter_outlines 至少 30 章；每章包含 chapter_no,title,summary,conflict,ending_hook,must_advance,forbidden_repeats。',
     '5. 不要生成正文；不要照搬任何现有作品专有设定、角色名、桥段或原句。',
@@ -1687,21 +1690,137 @@ function seedCharacterName(character: any) {
   return firstSeedText(character?.name, character?.title, character?.alias)
 }
 
+const SEED_CHARACTER_POOL_TIERS = [
+  'protagonist',
+  'primary_supporting',
+  'secondary_supporting',
+  'cameo_supporting',
+  'antagonist_primary',
+  'antagonist_arc',
+  'antagonist_minor',
+  'faction_agent',
+]
+
+function seedTierCamelKey(tier: string) {
+  return tier.replace(/_([a-z])/g, (_, letter) => String(letter || '').toUpperCase())
+}
+
+function seedArrayOrSingle(value: any) {
+  if (Array.isArray(value)) return value
+  const parsed = parseNestedSeed(value)
+  return Object.keys(parsed).length ? [parsed] : []
+}
+
+function seedValueMissing(value: any) {
+  if (value === undefined || value === null) return true
+  if (typeof value === 'string') return !value.trim()
+  if (Array.isArray(value)) return value.length === 0
+  if (typeof value === 'object') return Object.keys(value).length === 0
+  return false
+}
+
+function mergeMissingSeedCharacterFields(target: any, source: any) {
+  for (const [key, value] of Object.entries(source || {})) {
+    if (key === 'name') continue
+    if (seedValueMissing(value)) continue
+    if (seedValueMissing(target[key])) {
+      target[key] = value
+    } else if (
+      target[key]
+      && value
+      && typeof target[key] === 'object'
+      && typeof value === 'object'
+      && !Array.isArray(target[key])
+      && !Array.isArray(value)
+    ) {
+      target[key] = { ...value, ...target[key] }
+    }
+  }
+}
+
+function inferSeedCharacterTier(character: any, fallbackTier = '') {
+  const raw = firstSeedText(
+    character?.tier,
+    character?.role_type,
+    character?.role,
+    character?.identity,
+    character?.supporting_function,
+    fallbackTier,
+  )
+  const normalized = raw.toLowerCase()
+  if (SEED_CHARACTER_POOL_TIERS.includes(normalized)) return normalized
+  if (/主角|protagonist|视角/.test(raw)) return 'protagonist'
+  if (/核心反派|最终反派|primary.*antagonist|antagonist.*primary|boss|大boss|总boss/i.test(raw)) return 'antagonist_primary'
+  if (/阶段反派|分卷反派|arc.*antagonist|antagonist.*arc|阶段对手/i.test(raw)) return 'antagonist_arc'
+  if (/小反派|反派配角|minor.*antagonist|antagonist.*minor|局部阻碍|喽啰/i.test(raw)) return 'antagonist_minor'
+  if (/势力执行|组织执行|faction.*agent|agent|执事|巡考|守卫|管事/i.test(raw)) return 'faction_agent'
+  if (/主要配角|核心配角|primary.*support|support.*primary/i.test(raw)) return 'primary_supporting'
+  if (/次要配角|secondary.*support|support.*secondary/i.test(raw)) return 'secondary_supporting'
+  if (/龙套|功能配角|cameo|walk.?on|证人|路人/i.test(raw)) return 'cameo_supporting'
+  return fallbackTier
+}
+
+function collectGroupedSeedCharacters(root: any) {
+  const grouped: any[] = []
+  const containers = [
+    root.character_pool,
+    root.characterPool,
+    root.role_pool,
+    root.rolePool,
+    root.characters_by_tier,
+    root.charactersByTier,
+    root.role_groups,
+    root.roleGroups,
+    root,
+  ]
+  for (const container of containers) {
+    const parsed = parseNestedSeed(container)
+    if (!Object.keys(parsed).length) continue
+    for (const tier of SEED_CHARACTER_POOL_TIERS) {
+      const rows = [
+        ...seedArrayOrSingle(parsed[tier]),
+        ...seedArrayOrSingle(parsed[seedTierCamelKey(tier)]),
+      ]
+      for (const row of rows) {
+        grouped.push({ tier, character: row })
+      }
+    }
+  }
+  return grouped
+}
+
 function buildMaterializedSeedCharacters(seed: any) {
   const root = parseNestedSeed(seed)
-  const seen = new Set<string>()
+  const byName = new Map<string, any>()
   const output: any[] = []
-  const add = (character: any, defaults: any = {}) => {
+  const add = (character: any, defaults: any = {}, roleGroup = '') => {
     const parsed = { ...defaults, ...parseNestedSeed(character) }
+    const tier = inferSeedCharacterTier(parsed, roleGroup)
+    if (tier) {
+      if (!firstSeedText(parsed.tier)) parsed.tier = tier
+      if (!firstSeedText(parsed.role_type, parsed.role)) parsed.role_type = tier
+    }
+    if (roleGroup) parsed.raw_role_group = firstSeedText(parsed.raw_role_group, roleGroup)
     const name = seedCharacterName(parsed)
-    if (!name || seen.has(name)) return
-    seen.add(name)
-    output.push({ ...parsed, name })
+    if (!name) return
+    const existing = byName.get(name)
+    if (existing) {
+      mergeMissingSeedCharacterFields(existing, parsed)
+      return
+    }
+    const next = { ...parsed, name }
+    byName.set(name, next)
+    output.push(next)
   }
   asSeedArray(root.characters).forEach(character => add(character))
+  collectGroupedSeedCharacters(root).forEach(item => add(item.character, { role_type: item.tier, tier: item.tier }, item.tier))
   add(root.protagonist, { role_type: 'protagonist' })
   add(root.antagonist, { role_type: 'antagonist' })
   return output
+}
+
+export function buildMaterializedSeedCharactersForTest(seed: any) {
+  return buildMaterializedSeedCharacters(seed)
 }
 
 function buildProjectSeedStoryState(seed: any, project: any, characters: any[]) {

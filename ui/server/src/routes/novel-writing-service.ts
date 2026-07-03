@@ -42,10 +42,15 @@ import {
   getVolumePlan,
   normalizeIssue,
   parseJsonLikePayload,
+  safeJsonStringify,
 } from './novel-route-utils'
 
 const STORYLINE_TYPES = ['mainline', 'subplot', 'character_arc', 'relationship_arc', 'faction_arc', 'foreshadowing_arc']
 const DISCOVERED_ASSET_TYPES = ['character', 'item', 'ability', 'faction', 'location', 'foreshadowing']
+
+function proseQualityJson(value: any) {
+  return safeJsonStringify(value, undefined, 0)
+}
 
 const DESLOP_GATE_DEFINITIONS = [
   { gate: 'A', label: '禁用词/模板表达' },
@@ -5253,6 +5258,93 @@ export function buildCommercialEditorRewritePrompt(project: any, contextPackage:
 
 function compactBriefText(value: any, fallback = '') {
   return String(value || fallback || '').replace(/\s+/g, ' ').trim()
+}
+
+function compactJsonBriefText(value: any, fallback = '') {
+  if (typeof value === 'string') return compactBriefText(value, fallback)
+  return compactBriefText(safeJsonStringify(value, undefined, 1200), fallback)
+}
+
+const CHARACTER_REPAIR_TIER_LIMITS = [
+  { tier: 'protagonist', limit: 1 },
+  { tier: 'antagonist_primary', limit: 1 },
+  { tier: 'primary_supporting', limit: 2 },
+  { tier: 'secondary_supporting', limit: 3 },
+  { tier: 'cameo_supporting', limit: 3 },
+  { tier: 'antagonist_minor', limit: 2 },
+  { tier: 'antagonist_arc', limit: 2 },
+  { tier: 'faction_agent', limit: 2 },
+  { tier: 'supporting', limit: 2 },
+]
+
+function inferCharacterRepairTier(character: any) {
+  const raw = compactBriefText([
+    character?.tier,
+    character?.role_type,
+    character?.role,
+    character?.identity,
+    character?.archetype,
+    character?.narrative_function,
+    character?.supporting_function,
+    character?.raw_payload?.tier,
+    character?.raw_payload?.original?.tier,
+    character?.raw_payload?.original?.role_type,
+  ].filter(Boolean).join(' '))
+  const normalized = raw.toLowerCase()
+  if (CHARACTER_REPAIR_TIER_LIMITS.some(item => item.tier === normalized)) return normalized
+  if (/主角|protagonist|视角/.test(raw)) return 'protagonist'
+  if (/核心反派|最终反派|primary.*antagonist|antagonist.*primary|boss|大boss|总boss|antagonist$/i.test(raw)) return 'antagonist_primary'
+  if (/阶段反派|分卷反派|arc.*antagonist|antagonist.*arc|阶段对手/i.test(raw)) return 'antagonist_arc'
+  if (/小反派|反派配角|minor.*antagonist|antagonist.*minor|局部阻碍|地头蛇|打手|喽啰/i.test(raw)) return 'antagonist_minor'
+  if (/势力执行|组织执行|faction.*agent|agent|执事|巡考|守卫|管事|监察|审查/i.test(raw)) return 'faction_agent'
+  if (/主要配角|核心配角|primary.*support|support.*primary|队友|搭档|盟友/i.test(raw)) return 'primary_supporting'
+  if (/次要配角|secondary.*support|support.*secondary|支线|同学|同事/i.test(raw)) return 'secondary_supporting'
+  if (/龙套|功能配角|cameo|walk.?on|证人|路人|摊主|店员|受害者|围观/i.test(raw)) return 'cameo_supporting'
+  return 'supporting'
+}
+
+function selectTierAwareCharacterRepairCandidates(candidates: any[] = [], existingCharacters: any[] = []) {
+  const existingCounts = new Map<string, number>()
+  for (const character of asArray(existingCharacters)) {
+    const tier = inferCharacterRepairTier(character)
+    existingCounts.set(tier, (existingCounts.get(tier) || 0) + 1)
+  }
+  const seenNames = new Set<string>()
+  const normalizedCandidates = asArray(candidates)
+    .map((candidate: any) => {
+      const name = compactBriefText(candidate?.name)
+      if (!name || seenNames.has(name)) return null
+      seenNames.add(name)
+      const tier = inferCharacterRepairTier(candidate)
+      return {
+        ...candidate,
+        role_type: compactBriefText(candidate?.role_type || candidate?.role || tier || 'supporting'),
+        tier,
+        raw_payload: {
+          ...(candidate?.raw_payload || {}),
+          tier,
+        },
+      }
+    })
+    .filter(Boolean) as any[]
+  const selected: any[] = []
+  const selectedNames = new Set<string>()
+  const addCandidate = (candidate: any) => {
+    if (!candidate?.name || selectedNames.has(candidate.name) || selected.length >= 12) return
+    selectedNames.add(candidate.name)
+    selected.push(candidate)
+  }
+  for (const rule of CHARACTER_REPAIR_TIER_LIMITS) {
+    const existingCount = existingCounts.get(rule.tier) || 0
+    const availableSlots = Math.max(0, rule.limit - Math.min(existingCount, rule.limit))
+    if (availableSlots <= 0) continue
+    normalizedCandidates
+      .filter(candidate => candidate.tier === rule.tier)
+      .slice(0, availableSlots)
+      .forEach(addCandidate)
+  }
+  if (selected.length === 0) normalizedCandidates.slice(0, 6).forEach(addCandidate)
+  return selected
 }
 
 function compactHandoffExcerpt(value: any, maxChars = 360) {
@@ -56340,10 +56432,13 @@ export function createNovelWritingService(ctx: {
             task: [
               '任务：为无人值守章节写作自动补齐前置材料。只输出 JSON。',
               '只补材料，不写正文。输出 characters, character_updates, forbidden_repeats, must_advance, repair_summary。',
+              'characters 只输出缺失或明显欠完整的角色；必须按角色池分层补齐 primary_supporting, secondary_supporting, cameo_supporting, antagonist_minor, antagonist_arc, faction_agent，必要时补 protagonist 或 antagonist_primary。',
+              '每个角色必须包含 name, role_type, tier, narrative_function, motivation, goal, conflict, relationship_to_protagonist, first_appearance_chapter, active_range, voice_anchor, signature_action, secret_or_pressure, exit_or_turning_point；反派层必须包含 antagonist_logic。',
+              '不要改写 existing_characters 里已有角色名；同名角色只输出 character_updates，不要重复创建。',
               JSON.stringify({
                 project: { title: project.title, genre: project.genre, synopsis: project.synopsis },
                 chapter: { chapter_no: chapter.chapter_no, title: chapter.title, goal: chapter.chapter_goal, summary: chapter.chapter_summary, conflict: chapter.conflict, ending_hook: chapter.ending_hook },
-                existing_characters: characters.slice(0, 24).map(item => ({ name: item.name, role_type: item.role_type, motivation: item.motivation, goal: item.goal, current_state: item.current_state })),
+                existing_characters: characters.slice(0, 24).map(item => ({ name: item.name, role_type: item.role_type, tier: item.raw_payload?.tier || item.raw_payload?.original?.tier, motivation: item.motivation, goal: item.goal, current_state: item.current_state })),
                 recent_chapters: chapters.filter(item => item.chapter_no <= chapter.chapter_no).slice(-4).map(item => ({ chapter_no: item.chapter_no, title: item.title, summary: item.chapter_summary, ending_hook: item.ending_hook })),
                 preflight_warnings: contextPackage?.preflight?.warnings || [],
               }, null, 2).slice(0, 9000),
@@ -56365,20 +56460,33 @@ export function createNovelWritingService(ctx: {
       }
       const existingNames = new Set(characters.map(item => String(item.name || '').trim()).filter(Boolean))
       const characterCandidates = asArray(payload?.characters)
-        .map((item: any) => ({
-          project_id: project.id,
-          name: String(item?.name || '').trim(),
-          role_type: String(item?.role_type || item?.role || 'supporting'),
-          archetype: String(item?.archetype || ''),
-          motivation: String(item?.motivation || item?.goal || chapter.chapter_goal || ''),
-          goal: String(item?.goal || chapter.chapter_goal || ''),
-          conflict: String(item?.conflict || chapter.conflict || ''),
-          appearance: String(item?.appearance || ''),
-          personality: asArray(item?.personality).map(String),
-          abilities: asArray(item?.abilities).map(String),
-          current_state: item?.current_state && typeof item.current_state === 'object' ? item.current_state : { last_seen_chapter: chapter.chapter_no },
-          raw_payload: { source: 'unattended_preflight_repair', original: item },
-        }))
+        .map((item: any) => {
+          const tier = inferCharacterRepairTier(item)
+          return {
+            project_id: project.id,
+            name: String(item?.name || '').trim(),
+            role_type: String(item?.role_type || item?.role || tier || 'supporting'),
+            archetype: String(item?.archetype || item?.narrative_function || ''),
+            motivation: String(item?.motivation || item?.goal || chapter.chapter_goal || ''),
+            goal: String(item?.goal || chapter.chapter_goal || ''),
+            conflict: String(item?.conflict || chapter.conflict || ''),
+            appearance: String(item?.appearance || ''),
+            personality: asArray(item?.personality).map(String),
+            abilities: asArray(item?.abilities).map(String),
+            current_state: item?.current_state && typeof item.current_state === 'object' ? item.current_state : { last_seen_chapter: chapter.chapter_no },
+            tier,
+            narrative_function: item?.narrative_function,
+            relationship_to_protagonist: item?.relationship_to_protagonist,
+            first_appearance_chapter: item?.first_appearance_chapter,
+            active_range: item?.active_range,
+            voice_anchor: item?.voice_anchor,
+            signature_action: item?.signature_action,
+            secret_or_pressure: item?.secret_or_pressure,
+            exit_or_turning_point: item?.exit_or_turning_point,
+            antagonist_logic: item?.antagonist_logic,
+            raw_payload: { source: 'unattended_preflight_repair', tier, original: item },
+          }
+        })
         .filter((item: any) => item.name && !existingNames.has(item.name))
       if (characterCandidates.length === 0 && characters.length === 0) {
         characterCandidates.push({
@@ -56393,10 +56501,11 @@ export function createNovelWritingService(ctx: {
           personality: [],
           abilities: [],
           current_state: { last_seen_chapter: chapter.chapter_no, location: '当前章节现场' },
-          raw_payload: { source: 'unattended_preflight_repair_fallback' },
+          tier: 'protagonist',
+          raw_payload: { source: 'unattended_preflight_repair_fallback', tier: 'protagonist' },
         })
       }
-      for (const candidate of characterCandidates.slice(0, 6)) {
+      for (const candidate of selectTierAwareCharacterRepairCandidates(characterCandidates, characters)) {
         const created = await createNovelCharacter(activeWorkspace, candidate as any)
         existingNames.add(created.name)
         repaired.push({ type: 'character_created', id: created.id, name: created.name })

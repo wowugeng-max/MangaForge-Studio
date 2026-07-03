@@ -52316,6 +52316,29 @@ describe('chapter context word target source guards', () => {
     expect(repairBlock).toContain('意图确认合同')
   })
 
+  test('unattended character repair asks for layered missing role pools', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const repairStart = source.indexOf('任务：为无人值守章节写作自动补齐前置材料')
+    const characterCreateStart = source.indexOf('const existingNames = new Set', repairStart)
+    const repairBlock = source.slice(repairStart, characterCreateStart)
+
+    expect(repairStart).toBeGreaterThanOrEqual(0)
+    expect(characterCreateStart).toBeGreaterThan(repairStart)
+    expect(repairBlock).toContain('primary_supporting')
+    expect(repairBlock).toContain('secondary_supporting')
+    expect(repairBlock).toContain('cameo_supporting')
+    expect(repairBlock).toContain('antagonist_minor')
+    expect(repairBlock).toContain('faction_agent')
+    expect(repairBlock).toContain('antagonist_logic')
+  })
+
+  test('unattended character repair uses tier-aware candidate limits instead of first six', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+
+    expect(source).toContain('selectTierAwareCharacterRepairCandidates')
+    expect(source).not.toContain('characterCandidates.slice(0, 6)')
+  })
+
   test('auto-repairs unattended chapter blueprint with oh-story reader genre upgrade and conflict contracts', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const repairStart = source.indexOf('const autoRepairChapterPreflightGaps =')

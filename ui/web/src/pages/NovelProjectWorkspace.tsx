@@ -127,6 +127,58 @@ function formatRunResumeErrorMessage(error: any) {
   return payload?.error || error?.message || '任务继续失败'
 }
 
+const INCUBATION_CHARACTER_TIER_LABELS: Record<string, string> = {
+  protagonist: '主角',
+  primary_supporting: '主要配角',
+  secondary_supporting: '次要配角',
+  cameo_supporting: '龙套/功能配角',
+  antagonist_primary: '核心反派',
+  antagonist_arc: '阶段反派',
+  antagonist_minor: '反派配角',
+  faction_agent: '势力执行者',
+  supporting: '配角',
+}
+
+function normalizeIncubationCharacterTier(character: any) {
+  const raw = String(character?.tier || character?.role_type || character?.role || 'supporting').trim()
+  if (INCUBATION_CHARACTER_TIER_LABELS[raw]) return raw
+  if (/主角|protagonist/i.test(raw)) return 'protagonist'
+  if (/核心反派|最终反派|boss|antagonist_primary/i.test(raw)) return 'antagonist_primary'
+  if (/阶段反派|分卷反派|antagonist_arc/i.test(raw)) return 'antagonist_arc'
+  if (/小反派|反派配角|antagonist_minor/i.test(raw)) return 'antagonist_minor'
+  if (/势力|执行|faction/i.test(raw)) return 'faction_agent'
+  if (/主要配角|primary/i.test(raw)) return 'primary_supporting'
+  if (/次要配角|secondary/i.test(raw)) return 'secondary_supporting'
+  if (/龙套|功能|cameo/i.test(raw)) return 'cameo_supporting'
+  return raw || 'supporting'
+}
+
+function flattenIncubationCharacters(payload: any) {
+  const rows: any[] = Array.isArray(payload?.characters) ? [...payload.characters] : []
+  const pool = payload?.character_pool || payload?.characterPool || {}
+  for (const [tier, value] of Object.entries(pool || {})) {
+    if (!Array.isArray(value)) continue
+    rows.push(...value.map((item: any) => ({ ...item, tier: item?.tier || tier })))
+  }
+  const seen = new Set<string>()
+  return rows.filter((item: any) => {
+    const key = String(item?.name || item?.title || '').trim()
+    if (!key || seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+function groupIncubationCharacters(payload: any) {
+  const groups = new Map<string, any[]>()
+  for (const item of flattenIncubationCharacters(payload)) {
+    const tier = normalizeIncubationCharacterTier(item)
+    if (!groups.has(tier)) groups.set(tier, [])
+    groups.get(tier)!.push(item)
+  }
+  return Array.from(groups.entries()).map(([tier, rows]) => ({ tier, rows: rows.slice(0, 10) }))
+}
+
 type EditorReportForChapterOptions = {
   sourceTask?: any
   sourceRun?: any
@@ -1816,6 +1868,7 @@ export default function NovelProjectWorkspace() {
             || (direction.direction_id && direction.direction_id === selectedDirection.direction_id)
             || (direction.title && direction.title === selectedDirection.title)
           )
+          const characterGroups = groupIncubationCharacters(payload)
           Modal.confirm({
             title: '确认原创孵化方案',
             width: 860,
@@ -1846,9 +1899,26 @@ export default function NovelProjectWorkspace() {
                   </Paragraph>
                 </Card>
                 <Card size="small" title="主要角色">
-                  <Space wrap>
-                    {(payload.characters || []).slice(0, 12).map((char: any) => <Tag key={char.name} bordered={false}>{char.name} · {char.role_type || char.role || '-'}</Tag>)}
-                  </Space>
+                  {characterGroups.length > 0 ? (
+                    <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                      {characterGroups.map(group => (
+                        <div key={group.tier}>
+                          <Text type="secondary" style={{ display: 'block', marginBottom: 4 }}>
+                            {INCUBATION_CHARACTER_TIER_LABELS[group.tier] || group.tier}
+                          </Text>
+                          <Space wrap>
+                            {group.rows.map((char: any) => (
+                              <Tag key={char.name || char.title} bordered={false}>
+                                {char.name || char.title} · {char.narrative_function || char.supporting_function || char.role_type || char.role || '-'}
+                              </Tag>
+                            ))}
+                          </Space>
+                        </div>
+                      ))}
+                    </Space>
+                  ) : (
+                    <Text type="secondary">暂无角色预览</Text>
+                  )}
                 </Card>
                 <Card size="small" title="章节方向">
                   <Paragraph style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }} ellipsis={{ rows: 6, expandable: true }}>

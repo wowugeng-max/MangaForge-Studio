@@ -132,6 +132,40 @@ describe('novel project seed prompt', () => {
     expect(prompt).toContain('暗线')
   })
 
+  test('project seed prompt requires layered supporting and antagonist character pools', async () => {
+    const { buildProjectSeedPrompt } = await import('./novel-core-routes')
+
+    const prompt = buildProjectSeedPrompt('都市高武，底层学生靠碎片化金手指升级打怪挣钱', '拳证星河', 'epic')
+
+    expect(prompt).toContain('primary_supporting')
+    expect(prompt).toContain('secondary_supporting')
+    expect(prompt).toContain('cameo_supporting')
+    expect(prompt).toContain('antagonist_primary')
+    expect(prompt).toContain('antagonist_arc')
+    expect(prompt).toContain('antagonist_minor')
+    expect(prompt).toContain('faction_agent')
+    expect(prompt).toContain('antagonist_logic')
+    expect(prompt).toContain('relationship_to_protagonist')
+    expect(prompt).toContain('first_appearance_chapter')
+  })
+
+  test('project seed recovery prompt keeps layered character pool requirements', async () => {
+    const { buildProjectSeedRecoveryPrompt } = await import('./novel-core-routes')
+
+    const prompt = buildProjectSeedRecoveryPrompt(
+      { title: '拳证星河', characters: [{ name: '周凛', role_type: 'protagonist' }] },
+      { missing_fields: ['characters'] },
+      '都市高武，底层学生靠碎片化金手指升级打怪挣钱',
+      '拳证星河',
+      'long',
+    )
+
+    expect(prompt).toContain('角色池分层')
+    expect(prompt).toContain('primary_supporting')
+    expect(prompt).toContain('antagonist_minor')
+    expect(prompt).toContain('faction_agent')
+  })
+
   test('injects oh-story genre catalog guidance into seed generation', async () => {
     const { buildProjectSeedPrompt } = await import('./novel-core-routes')
 
@@ -693,6 +727,29 @@ describe('novel project seed prompt', () => {
     expect(response.body.reference_config.commercial_positioning.reader_promise).toContain('每章都有规则发现')
     expect(response.body.reference_config.commercial_positioning.selling_points.join('｜')).toContain('规则分析')
     expect(response.body.reference_config.commercial_positioning.risks.join('｜')).toContain('不能写成纯打怪')
+  })
+
+  test('normalizes grouped layered seed roles into deduplicated materialized characters', async () => {
+    const { buildMaterializedSeedCharactersForTest } = await import('./novel-core-routes')
+
+    const characters = buildMaterializedSeedCharactersForTest({
+      protagonist: { name: '周凛', goal: '保住妹妹手术费' },
+      character_pool: {
+        primary_supporting: [{ name: '林澈', goal: '查清黑钱来源', relationship_to_protagonist: '互相利用' }],
+        antagonist_minor: [{ name: '赵衡', antagonist_logic: { belief: '资源只配给强者' } }],
+        faction_agent: [{ name: '巡考员甲', narrative_function: '执行联考规则压迫' }],
+      },
+      characters: [{ name: '林澈', role_type: 'primary_supporting', motivation: '避免被家族牺牲' }],
+    })
+
+    expect(characters.map((item: any) => item.name)).toEqual(['林澈', '赵衡', '巡考员甲', '周凛'])
+    expect(characters.find((item: any) => item.name === '林澈')).toMatchObject({
+      role_type: 'primary_supporting',
+      tier: 'primary_supporting',
+      relationship_to_protagonist: '互相利用',
+      motivation: '避免被家族牺牲',
+    })
+    expect(characters.find((item: any) => item.name === '赵衡')?.raw_role_group || '').toBe('antagonist_minor')
   })
 
   test('materializes seed projects with prose-ready story state and scene cards', async () => {
