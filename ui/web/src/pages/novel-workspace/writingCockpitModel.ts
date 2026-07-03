@@ -5422,22 +5422,6 @@ function buildChapterPlanningDesk(args: {
     }
   }
 
-  if (diagnosticBlockers.length > 0) {
-    return {
-      readiness: 'blocked',
-      statusLabel: '诊断阻塞',
-      contextPackageStatus: contextStatus,
-      scenePlanStatus,
-      reasons: diagnosticBlockers.slice(0, 3).map(item => `生成诊断阻塞：${item}`),
-      recommendedPlannerAction: { key: 'open_generation_diagnostics', label: ACTION_LABELS.open_generation_diagnostics },
-      shouldAutoExpandPlanner: true,
-      writePreparationBrief,
-      episodePlan,
-      sceneCards,
-      qualityContinuitySceneMap,
-    }
-  }
-
   if (director && directorActionKey) {
     const directorReadiness = text(director.readiness)
     const ready = directorReadiness === 'ready'
@@ -5456,6 +5440,22 @@ function buildChapterPlanningDesk(args: {
         label: directorActionLabel(director, directorActionKey),
       },
       shouldAutoExpandPlanner: !ready,
+      writePreparationBrief,
+      episodePlan,
+      sceneCards,
+      qualityContinuitySceneMap,
+    }
+  }
+
+  if (diagnosticBlockers.length > 0) {
+    return {
+      readiness: 'blocked',
+      statusLabel: '诊断阻塞',
+      contextPackageStatus: contextStatus,
+      scenePlanStatus,
+      reasons: diagnosticBlockers.slice(0, 3).map(item => `生成诊断阻塞：${item}`),
+      recommendedPlannerAction: { key: 'open_generation_diagnostics', label: ACTION_LABELS.open_generation_diagnostics },
+      shouldAutoExpandPlanner: true,
       writePreparationBrief,
       episodePlan,
       sceneCards,

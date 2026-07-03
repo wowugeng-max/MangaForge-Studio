@@ -1588,6 +1588,45 @@ describe('buildWritingCockpitModel', () => {
     expect(model.chapterPlanningDesk.reasons.join('｜')).not.toContain('旧预检缺少章节目标')
   })
 
+  test('director needs_repair overrides legacy diagnostics blockers', () => {
+    const model = buildWritingCockpitModel({
+      project,
+      outlines,
+      chapters,
+      activeChapter: chapters[1],
+      contextPackage: {
+        ...contextPackage,
+        oh_story_director: {
+          stage: 'pre_draft',
+          readiness: 'needs_repair',
+          primary_action: {
+            key: 'repair_pre_draft_materials',
+            label: '总导演修复',
+            mode: 'automatic',
+          },
+          blocking_summary: '总导演要求补齐写前材料',
+          required_repairs: [
+            { detail: '补齐本章蓝图的核心冲突' },
+          ],
+        },
+      },
+      diagnostics: {
+        preflight: {
+          ready: false,
+          blockers: ['旧诊断缺少上一章承接'],
+        },
+      },
+      materialScore: { score: 82, can_generate: true },
+    })
+
+    expect(model.chapterPlanningDesk.statusLabel).toBe('需要修复')
+    expect(model.chapterPlanningDesk.recommendedPlannerAction.key).toBe('repair_materials')
+    expect(model.chapterPlanningDesk.recommendedPlannerAction.label).toBe('总导演修复')
+    expect(model.chapterPlanningDesk.reasons.join('｜')).toContain('总导演要求补齐写前材料')
+    expect(model.chapterPlanningDesk.reasons.join('｜')).not.toContain('诊断阻塞')
+    expect(model.chapterPlanningDesk.reasons.join('｜')).not.toContain('旧诊断缺少上一章承接')
+  })
+
   test('director ready owns the single planning desk action without repair prompts', () => {
     const model = buildWritingCockpitModel({
       project,
