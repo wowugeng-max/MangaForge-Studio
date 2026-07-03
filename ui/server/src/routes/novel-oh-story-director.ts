@@ -190,6 +190,22 @@ function storyPowerMissDetail(item: unknown): string {
   return issueText(item)
 }
 
+function deslopGateFailureCount(diagnostics: RecordLike = {}): number {
+  const explicitCount = Number(
+    diagnostics?.failed_count
+      ?? diagnostics?.failedCount
+      ?? diagnostics?.concern_gate_count
+      ?? diagnostics?.concernGateCount
+      ?? NaN,
+  )
+  if (Number.isFinite(explicitCount) && explicitCount > 0) return explicitCount
+  const gates = asArray(diagnostics?.gates)
+  return gates.filter((gate: any) => {
+    const status = String(gate?.status || '').trim().toLowerCase()
+    return status && !['pass', 'ok', 'ready', 'cleared'].includes(status)
+  }).length
+}
+
 export function classifyOhStoryDirectorBlocker(message: unknown): OhStoryDirectorBlockerCategory {
   const text = issueText(message).toLowerCase()
 
@@ -429,7 +445,7 @@ export function buildOhStoryDirectorForPostDraft(input: RecordLike): OhStoryDire
   const carryover_findings: OhStoryDirectorRepair[] = []
   const resolved_findings: OhStoryDirectorRepair[] = []
   const evidenceItems: OhStoryDirectorEvidence[] = []
-  const failedCount = Number(quality?.deslop_gate_diagnostics?.failed_count ?? 0)
+  const failedCount = deslopGateFailureCount(quality?.deslop_gate_diagnostics)
 
   if (failedCount > 0) {
     blocking_findings.push(repair('deslop_gate', 'quality_revision_required', 'Deslop gate failed', `${failedCount} quality checks failed.`, true))

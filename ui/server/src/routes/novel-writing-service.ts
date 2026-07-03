@@ -57436,6 +57436,11 @@ export function createNovelWritingService(ctx: {
       },
       receipts: ohStoryDeliveryReceipts,
     })
+    const postDraftDirectorPayload = {
+      oh_story_delivery_receipts: ohStoryDeliveryReceipts,
+      oh_story_director: postDraftDirector,
+      ohStoryDirector: postDraftDirector,
+    }
     const draftQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)
     const storeProseRevisionReceiptSync = async () => {
       if (Number(proseRevisionReceiptSync.receipt_count || 0) <= 0 && Number(proseRevisionReceiptSync.missed_count || 0) <= 0) return
@@ -57569,7 +57574,7 @@ export function createNovelWritingService(ctx: {
         status: draftQualityDecision.passed ? 'ok' : 'warn',
         summary: `章节群质检评分 ${selfCheck?.review?.score ?? '-'}`,
         issues: Array.isArray(selfCheck?.review?.issues) ? selfCheck.review.issues.map(formatReviewIssueForStorage) : [],
-        payload: JSON.stringify({ chapter_id: chapter.id, context_package: finalReviewContextPackage, editor_rewrite: editorRewrite, meme_polish: memePolish, readability_review: readabilityReview, self_check: selfCheck, quality_gate: draftQualityDecision, oh_story_delivery_receipts: ohStoryDeliveryReceipts, oh_story_director: postDraftDirector, ohStoryDirector: postDraftDirector, production_mode: productionMode, config_snapshot: configSnapshot }),
+        payload: JSON.stringify({ chapter_id: chapter.id, context_package: finalReviewContextPackage, editor_rewrite: editorRewrite, meme_polish: memePolish, readability_review: readabilityReview, self_check: selfCheck, quality_gate: draftQualityDecision, ...postDraftDirectorPayload, production_mode: productionMode, config_snapshot: configSnapshot }),
       })
       const draftProseMetaSync = buildProseMetaSyncReport(project, chapter, contextPackage, finalText)
       await createNovelReview(activeWorkspace, {
@@ -58121,6 +58126,7 @@ export function createNovelWritingService(ctx: {
           readability_review: readabilityReview,
           self_check: selfCheck,
           quality_gate: preStoreQualityDecision,
+          ...postDraftDirectorPayload,
           production_mode: productionMode,
           config_snapshot: configSnapshot,
         }),
@@ -58144,6 +58150,7 @@ export function createNovelWritingService(ctx: {
           self_check: selfCheck,
           quality_gate: preStoreQualityDecision,
           approval_type: 'low_score',
+          ...postDraftDirectorPayload,
           production_mode: productionMode,
           config_snapshot: configSnapshot,
         }),
@@ -58167,6 +58174,7 @@ export function createNovelWritingService(ctx: {
           self_check: selfCheck,
           quality_gate: preStoreQualityDecision,
           approval_type: 'draft',
+          ...postDraftDirectorPayload,
           production_mode: productionMode,
           config_snapshot: configSnapshot,
         }),
@@ -58199,6 +58207,7 @@ export function createNovelWritingService(ctx: {
           migration_audit: migrationAudit,
           quality_gate: finalQualityDecision,
           approval_type: 'reference_safety_blocked',
+          ...postDraftDirectorPayload,
           production_mode: productionMode,
           config_snapshot: configSnapshot,
         }),
@@ -58224,6 +58233,7 @@ export function createNovelWritingService(ctx: {
           safety_decision: safetyDecision,
           migration_audit: migrationAudit,
           quality_gate: finalQualityDecision,
+          ...postDraftDirectorPayload,
           production_mode: productionMode,
           config_snapshot: configSnapshot,
         }),
@@ -58251,6 +58261,7 @@ export function createNovelWritingService(ctx: {
           migration_audit: migrationAudit,
           quality_gate: finalQualityDecision,
           approval_type: 'safety',
+          ...postDraftDirectorPayload,
           production_mode: productionMode,
           config_snapshot: configSnapshot,
         }),
@@ -58292,7 +58303,7 @@ export function createNovelWritingService(ctx: {
       status: finalQualityDecision.passed ? 'ok' : 'warn',
       summary: `章节群质检评分 ${selfCheck?.review?.score ?? '-'}`,
       issues: Array.isArray(selfCheck?.review?.issues) ? selfCheck.review.issues.map(formatReviewIssueForStorage) : [],
-        payload: JSON.stringify({ chapter_id: chapter.id, context_package: finalReviewContextPackage, editor_rewrite: editorRewrite, meme_polish: memePolish, readability_review: readabilityReview, self_check: selfCheck, reference_report: referenceReport, safety_decision: safetyDecision, migration_audit: migrationAudit, quality_gate: finalQualityDecision, oh_story_delivery_receipts: ohStoryDeliveryReceipts, oh_story_director: postDraftDirector, ohStoryDirector: postDraftDirector, production_mode: productionMode, config_snapshot: configSnapshot }),
+        payload: JSON.stringify({ chapter_id: chapter.id, context_package: finalReviewContextPackage, editor_rewrite: editorRewrite, meme_polish: memePolish, readability_review: readabilityReview, self_check: selfCheck, reference_report: referenceReport, safety_decision: safetyDecision, migration_audit: migrationAudit, quality_gate: finalQualityDecision, ...postDraftDirectorPayload, production_mode: productionMode, config_snapshot: configSnapshot }),
     })
     const settingViolations = Array.isArray(selfCheck?.review?.setting_violations) ? selfCheck.review.setting_violations : []
     if (contextPackage?.setting_context?.chapter_usage?.length || settingViolations.length > 0) {

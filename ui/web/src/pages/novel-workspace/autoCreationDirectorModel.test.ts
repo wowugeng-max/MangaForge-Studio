@@ -17655,6 +17655,7 @@ describe('buildAutoCreationDirectorModel', () => {
       planning: basePlanning,
       writing: {
         ...baseWriting,
+        nextChapter: { ...baseWriting.nextChapter, id: 2, chapterNo: 2, title: '巡考夺令', wordCount: 3200, hasProse: true },
         chapterAcceptanceDesk: {
           ...baseWriting.chapterAcceptanceDesk,
           visible: false,
@@ -17693,5 +17694,53 @@ describe('buildAutoCreationDirectorModel', () => {
     expect(model.mainAction.key).toBe('accept_chapter_and_continue')
     expect(model.mainAction.label).toBe('继续下一章')
     expect(model.summary).toContain('下一章开篇补代价反馈')
+  })
+
+  test('keeps current chapter acceptance repair ahead of an older post-draft oh-story director', () => {
+    const model = buildAutoCreationDirectorModel({
+      planning: basePlanning,
+      writing: {
+        ...baseWriting,
+        nextChapter: { ...baseWriting.nextChapter, id: 8, chapterNo: 8, title: '试炼前夜', wordCount: 3200, hasProse: true },
+        chapterAcceptanceDesk: {
+          ...baseWriting.chapterAcceptanceDesk,
+          visible: true,
+          acceptanceStatus: 'needs_revision',
+          statusLabel: '需修订',
+          acceptanceReasons: ['当前章编辑报告仍有必须修复项。'],
+          recommendedAcceptanceAction: { key: 'apply_editor_revision', label: '生成修订稿' },
+        },
+        topStatus: { ...baseWriting.topStatus, nextActionLabel: '生成修订稿', primaryActionKey: 'apply_editor_revision' },
+        primaryActionKey: 'apply_editor_revision',
+      },
+      activeTasks: [],
+      selectedModelId: 12,
+      chapters: [
+        {
+          id: 2,
+          chapter_no: 2,
+          title: '巡考夺令',
+          status: 'drafted',
+          raw_payload: {
+            oh_story_director: {
+              stage: 'post_draft',
+              readiness: 'ready',
+              acceptance: 'accepted',
+              primary_action: { key: 'continue_next_chapter', label: '继续下一章', mode: 'automatic' },
+              carryover_findings: [],
+              required_repairs: [],
+              deferred_repairs: [],
+              selected_contracts: [],
+              prompt_budget_plan: { full: [], compact: [], reference: [], omit: [] },
+              evidence: [],
+            },
+          },
+        },
+      ],
+    } as any)
+
+    expect(model.status).toBe('needs_acceptance')
+    expect(model.mainAction.key).toBe('apply_editor_revision')
+    expect(model.mainAction.key).not.toBe('accept_chapter_and_continue')
   })
 })

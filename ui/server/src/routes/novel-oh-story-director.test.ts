@@ -245,6 +245,26 @@ describe('oh-story director core', () => {
     expect(director.blocking_findings.map(item => item.key)).toContain('deslop_gate')
   })
 
+  test('treats real deslop diagnostics concern gates as post-draft revision blockers', () => {
+    const director = buildOhStoryDirectorForPostDraft({
+      quality: {
+        deslop_gate_diagnostics: {
+          concern_gate_count: 1,
+          gates: [{ gate: 'B', status: 'warn', label: '句式套路' }],
+        },
+      },
+      receipts: { revision_receipts: [] },
+    })
+
+    expect(director.stage).toBe('post_draft')
+    expect(director.acceptance).toBe('needs_revision')
+    expect(director.primary_action.key).toBe('run_revision')
+    expect(director.required_repairs).toContainEqual(expect.objectContaining({
+      key: 'deslop_gate',
+      category: 'quality_revision_required',
+    }))
+  })
+
   test('normalizes singleton post-draft story power misses and revision receipts', () => {
     const carryoverDirector = buildOhStoryDirectorForPostDraft({
       quality: {

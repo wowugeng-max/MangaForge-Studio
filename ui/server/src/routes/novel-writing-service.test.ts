@@ -47600,9 +47600,26 @@ describe('story unit sync report', () => {
     expect(postReviewBlock).toContain('story_power_sync: qualityGateReview?.story_power_sync || qualityGateReview?.storyPowerSync || selfCheck?.review?.story_power_sync || selfCheck?.review?.storyPowerSync')
     expect(postReviewBlock).toContain('delivery_risk_receipt_sync: preStoreDeliveryRiskReceiptSync')
     expect(postReviewBlock).toContain('deslop_gate_diagnostics: qualityGateReview?.deslop_gate_diagnostics || qualityGateReview?.deslopGateDiagnostics || selfCheck?.review?.deslop_gate_diagnostics || selfCheck?.review?.deslopGateDiagnostics')
-    expect(fullGenerationBlock.match(/oh_story_director: postDraftDirector/g)?.length || 0).toBeGreaterThanOrEqual(4)
-    expect(fullGenerationBlock.match(/ohStoryDirector: postDraftDirector/g)?.length || 0).toBeGreaterThanOrEqual(4)
-    expect(fullGenerationBlock.match(/payload: JSON\.stringify\(\{[\s\S]*?oh_story_director: postDraftDirector[\s\S]*?ohStoryDirector: postDraftDirector/g)?.length || 0).toBeGreaterThanOrEqual(2)
+    expect(postReviewBlock).toContain('const postDraftDirectorPayload = {')
+    expect(postReviewBlock).toContain('oh_story_delivery_receipts: ohStoryDeliveryReceipts')
+    expect(postReviewBlock).toContain('oh_story_director: postDraftDirector')
+    expect(postReviewBlock).toContain('ohStoryDirector: postDraftDirector')
+    expect(fullGenerationBlock.match(/oh_story_director: postDraftDirector/g)?.length || 0).toBeGreaterThanOrEqual(3)
+    expect(fullGenerationBlock.match(/ohStoryDirector: postDraftDirector/g)?.length || 0).toBeGreaterThanOrEqual(3)
+    expect(fullGenerationBlock.match(/\.\.\.postDraftDirectorPayload/g)?.length || 0).toBeGreaterThanOrEqual(8)
+    for (const marker of [
+      "quality_gate', '章节质量门禁未通过，正文未入库'",
+      "approval_type: 'low_score'",
+      "approval_type: 'draft'",
+      "approval_type: 'reference_safety_blocked'",
+      "quality_gate', '章节质量门禁未通过，正文未入库', finalQualityDecision",
+      "approval_type: 'safety'",
+    ]) {
+      const markerIndex = fullGenerationBlock.indexOf(marker)
+      expect(markerIndex).toBeGreaterThanOrEqual(0)
+      const payloadBlock = fullGenerationBlock.slice(Math.max(0, markerIndex - 900), markerIndex + 900)
+      expect(payloadBlock).toContain('...postDraftDirectorPayload')
+    }
     expect(draftOnlyBlock).not.toContain('postDraftDirector')
   })
 

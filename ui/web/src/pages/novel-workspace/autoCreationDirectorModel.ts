@@ -941,16 +941,20 @@ function chapterOrderNumber(chapter: AnyRecord): number {
   return Number.isFinite(value) ? value : 0
 }
 
-function latestChapterOhStoryDirector(chapters: AnyRecord[]): AnyRecord | null {
-  return [...chapters]
+function latestChapterOhStoryDirectorEntry(chapters: AnyRecord[]): { chapter: AnyRecord, director: AnyRecord } | null {
+  const entry = [...chapters]
     .sort((a, b) => chapterOrderNumber(b) - chapterOrderNumber(a))
-    .map(chapter => chapter?.raw_payload?.oh_story_director
-      || chapter?.raw_payload?.ohStoryDirector
-      || chapter?.rawPayload?.oh_story_director
-      || chapter?.rawPayload?.ohStoryDirector
-      || chapter?.oh_story_director
-      || chapter?.ohStoryDirector)
-    .find(director => director && typeof director === 'object') || null
+    .map(chapter => ({
+      chapter,
+      director: chapter?.raw_payload?.oh_story_director
+        || chapter?.raw_payload?.ohStoryDirector
+        || chapter?.rawPayload?.oh_story_director
+        || chapter?.rawPayload?.ohStoryDirector
+        || chapter?.oh_story_director
+        || chapter?.ohStoryDirector,
+    }))
+    .find(item => item.director && typeof item.director === 'object')
+  return entry ? { chapter: entry.chapter, director: entry.director } : null
 }
 
 function postDraftDirectorAction(director: AnyRecord | null): AutoCreationDirectorAction | null {
@@ -965,6 +969,22 @@ function postDraftDirectorAction(director: AnyRecord | null): AutoCreationDirect
     text(director.blocking_summary || director.blockingSummary, '总导演验收通过，承接到下一章。'),
     text(primaryAction.label, '继续下一章'),
   )
+}
+
+function sameChapterIdentity(a: AnyRecord | null | undefined, b: AnyRecord | null | undefined): boolean {
+  if (!a || !b) return false
+  const aId = text(a.id)
+  const bId = text(b.id)
+  if (aId && bId && aId === bId) return true
+  const aNo = Number(a.chapter_no ?? a.chapterNo)
+  const bNo = Number(b.chapter_no ?? b.chapterNo)
+  return Number.isFinite(aNo) && Number.isFinite(bNo) && aNo === bNo
+}
+
+function acceptanceDeskBlocksDirector(acceptance: AnyRecord | null | undefined): boolean {
+  if (!acceptance?.visible) return false
+  const status = text(acceptance.acceptanceStatus || acceptance.status)
+  return !['ready_to_accept', 'delivered'].includes(status)
 }
 
 function opsAction(
@@ -16551,7 +16571,8 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
     planning,
     storyState: input.storyState || {},
   })
-  const postDraftDirector = latestChapterOhStoryDirector(chapters)
+  const postDraftDirectorEntry = latestChapterOhStoryDirectorEntry(chapters)
+  const postDraftDirector = postDraftDirectorEntry?.director || null
   const postDraftContinuationAction = postDraftDirectorAction(postDraftDirector)
   const blockers: string[] = []
   const confirmations: string[] = []
@@ -16653,12 +16674,17 @@ export function buildAutoCreationDirectorModel(input: BuildAutoCreationDirectorM
     summary = canonRunway.detail
     confirmations.push('故事状态需要同步')
     mainAction = canonRunway.action
-  } else if (postDraftContinuationAction) {
+  } else if (
+    postDraftContinuationAction
+    && !acceptanceDeskBlocksDirector(writing.chapterAcceptanceDesk)
+    && (sameChapterIdentity(postDraftDirectorEntry?.chapter, chapter) || !writing.chapterAcceptanceDesk?.visible)
+  ) {
     const carryoverFindings = arrayValue(postDraftDirector?.carryover_findings || postDraftDirector?.carryoverFindings)
     const acceptance = text(postDraftDirector?.acceptance)
+    const directorChapterNo = Number(postDraftDirectorEntry?.chapter?.chapter_no ?? postDraftDirectorEntry?.chapter?.chapterNo)
     status = 'needs_acceptance'
     statusLabel = acceptance === 'accepted_with_carryover' ? '可继续，有承接' : '可继续'
-    headline = chapter ? `第 ${chapter.chapterNo} 章已通过总导演验收` : '当前章已通过总导演验收'
+    headline = Number.isFinite(directorChapterNo) ? `第 ${directorChapterNo} 章已通过总导演验收` : '当前章已通过总导演验收'
     summary = carryoverFindings
       .map((finding: AnyRecord) => firstText(finding.detail, finding.label, finding.key))
       .filter(Boolean)
