@@ -1,13 +1,29 @@
 import { appendNovelRun, listNovelRuns, updateNovelRun } from '../novel'
-import { advanceSceneProduction, compactText, getQualityGate, getSafetyPolicy, getStyleLock, normalizeSceneProduction, parseJsonLikePayload } from './novel-route-utils'
+import { advanceSceneProduction, compactText, getQualityGate, getSafetyPolicy, getStyleLock, normalizeSceneProduction, parseJsonLikePayload, safeJsonStringify } from './novel-route-utils'
 
-function stableStringify(value: any): string {
+function stableStringify(value: any, seen = new WeakSet<object>()): string {
   if (value === null || value === undefined) return 'null'
-  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`
+  if (typeof value === 'bigint') return JSON.stringify(String(value))
+  if (typeof value === 'function') return JSON.stringify('[Function]')
+  if (Array.isArray(value)) {
+    if (seen.has(value)) return JSON.stringify('[Circular]')
+    seen.add(value)
+    const text = `[${value.map(item => stableStringify(item, seen)).join(',')}]`
+    seen.delete(value)
+    return text
+  }
   if (typeof value === 'object') {
-    return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(',')}}`
+    if (seen.has(value)) return JSON.stringify('[Circular]')
+    seen.add(value)
+    const text = `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableStringify(value[key], seen)}`).join(',')}}`
+    seen.delete(value)
+    return text
   }
   return JSON.stringify(value)
+}
+
+function runJson(value: any) {
+  return safeJsonStringify(value, undefined, 0)
 }
 
 function hashText(value: any) {
@@ -727,7 +743,7 @@ async function appendPostDeliveryQualityRepairRun(
       chapter_id: chapter.id || null,
       chapter_no: chapterNo,
     }),
-    output_ref: JSON.stringify({
+    output_ref: runJson({
       report: {
         source: 'unattended_post_delivery_quality',
         status: 'needs_repair',
@@ -985,7 +1001,7 @@ export function createNovelRunExecutionService(ctx: {
         expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
       },
     }
-    await updateRun(activeWorkspace, run.id, { status: 'running', output_ref: JSON.stringify(payload) })
+    await updateRun(activeWorkspace, run.id, { status: 'running', output_ref: runJson(payload) })
     const chapters = Array.isArray(payload.chapters) ? payload.chapters : []
     const maxChapters = Math.max(1, Math.min(50, Number(options.max_chapters || chapters.length || 10)))
     const retryLimit = Math.max(0, Math.min(5, Number(options.retry_limit ?? payload.model_strategy?.cost_policy?.retry_limit ?? 2)))
@@ -996,7 +1012,7 @@ export function createNovelRunExecutionService(ctx: {
     let errorMessage = ''
     await updateRun(activeWorkspace, run.id, {
       status: 'running',
-      output_ref: JSON.stringify({ ...payload, started_at: payload.started_at || new Date().toISOString(), phase: '自动执行章节群' }),
+      output_ref: runJson({ ...payload, started_at: payload.started_at || new Date().toISOString(), phase: '自动执行章节群' }),
     })
 
     const persistStage = async (index: number, stage: string, patch: any = {}) => {
@@ -1018,7 +1034,7 @@ export function createNovelRunExecutionService(ctx: {
       }
       chapters[index] = { ...item, scenes, stages, current_step: summary.current_step, current_label: summary.current_label }
       payload = { ...payload, chapters, current_index: index, phase: `第${item.chapter_no}章：${summary.current_label}` }
-      await updateRun(activeWorkspace, run.id, { status: 'running', output_ref: JSON.stringify(payload), duration_ms: Date.now() - startedAt })
+      await updateRun(activeWorkspace, run.id, { status: 'running', output_ref: runJson(payload), duration_ms: Date.now() - startedAt })
     }
 
     for (let index = Number(payload.current_index || 0); index < chapters.length && processed < maxChapters; index += 1) {
@@ -1040,19 +1056,19 @@ export function createNovelRunExecutionService(ctx: {
       if (!item?.id) continue
       if (item.next_run_at && new Date(String(item.next_run_at)).getTime() > Date.now()) {
         payload = { ...payload, chapters, current_index: index, phase: `第${item.chapter_no}章等待重试窗口` }
-        await updateRun(activeWorkspace, run.id, { status: 'ready', output_ref: JSON.stringify(payload) })
+        await updateRun(activeWorkspace, run.id, { status: 'ready', output_ref: runJson(payload) })
         status = 'ready'
         break
       }
       if (item.status === 'written' && options.regenerate !== true) {
         chapters[index] = { ...item, status: 'skipped', skipped_reason: '已有正文' }
         payload = { ...payload, chapters, current_index: index + 1 }
-        await updateRun(activeWorkspace, run.id, { status: 'running', output_ref: JSON.stringify(payload) })
+        await updateRun(activeWorkspace, run.id, { status: 'running', output_ref: runJson(payload) })
         continue
       }
       chapters[index] = { ...item, status: 'running', started_at: new Date().toISOString(), stages: item.stages?.length ? item.stages : ctx.production.buildChapterGroupStages() }
       payload = { ...payload, chapters, current_index: index, phase: `生成第${item.chapter_no}章` }
-      await updateRun(activeWorkspace, run.id, { status: 'running', output_ref: JSON.stringify(payload) })
+      await updateRun(activeWorkspace, run.id, { status: 'running', output_ref: runJson(payload) })
       try {
         const productionMode = options.production_mode || payload.production_mode || payload.policy?.production_mode || 'draft_review_revise_store'
         const approvalPolicy = productionMode === 'full_auto'
@@ -1119,7 +1135,7 @@ export function createNovelRunExecutionService(ctx: {
             phase: `第${item.chapter_no}章入库阻断未解除，已暂停`,
             last_error: resultItem,
           }
-          await updateRun(activeWorkspace, run.id, { status, output_ref: JSON.stringify(payload), error_message: errorMessage })
+          await updateRun(activeWorkspace, run.id, { status, output_ref: runJson(payload), error_message: errorMessage })
           break
         }
         const storyStateError = compactText((chapterResult.story_state_update as any)?.error || '', 300)
@@ -1196,7 +1212,7 @@ export function createNovelRunExecutionService(ctx: {
             phase: `第${item.chapter_no}章状态机更新失败，已暂停`,
             last_error: resultItem,
           }
-          await updateRun(activeWorkspace, run.id, { status, output_ref: JSON.stringify(payload), error_message: errorMessage })
+          await updateRun(activeWorkspace, run.id, { status, output_ref: runJson(payload), error_message: errorMessage })
           break
         }
         if (postDeliveryQualityError) {
@@ -1210,7 +1226,7 @@ export function createNovelRunExecutionService(ctx: {
             phase: `第${item.chapter_no}章交付后质检未闭环，已暂停`,
             last_error: resultItem,
           }
-          await updateRun(activeWorkspace, run.id, { status, output_ref: JSON.stringify(payload), error_message: errorMessage })
+          await updateRun(activeWorkspace, run.id, { status, output_ref: runJson(payload), error_message: errorMessage })
           break
         }
       } catch (chapterError: any) {
@@ -1238,7 +1254,7 @@ export function createNovelRunExecutionService(ctx: {
             phase: `第${item.chapter_no}章已停止，可继续执行`,
             last_error: null,
           }
-          await updateRun(activeWorkspace, run.id, { status, output_ref: JSON.stringify(payload), error_message: '' })
+          await updateRun(activeWorkspace, run.id, { status, output_ref: runJson(payload), error_message: '' })
           break
         }
         const isApproval = chapterError?.code === 'APPROVAL_REQUIRED'
@@ -1279,14 +1295,14 @@ export function createNovelRunExecutionService(ctx: {
             phase: isApproval ? `第${item.chapter_no}章等待人工确认` : canRetry ? `第${item.chapter_no}章失败，等待重试` : `第${item.chapter_no}章失败，已暂停`,
             last_error: resultItem,
           }
-          await updateRun(activeWorkspace, run.id, { status, output_ref: JSON.stringify(payload), error_message: errorMessage })
+          await updateRun(activeWorkspace, run.id, { status, output_ref: runJson(payload), error_message: errorMessage })
           break
         }
       }
       payload = { ...payload, chapters, results, current_index: index + 1, phase: '自动执行章节群' }
       await updateRun(activeWorkspace, run.id, {
         status: 'running',
-        output_ref: JSON.stringify(payload),
+        output_ref: runJson(payload),
         duration_ms: Date.now() - startedAt,
       })
     }
@@ -1298,7 +1314,7 @@ export function createNovelRunExecutionService(ctx: {
     }
     const updated = await updateRun(activeWorkspace, run.id, {
       status,
-      output_ref: JSON.stringify({ ...payload, chapters, results, lock: null, phase: status === 'success' ? '章节群已完成' : payload.phase, finished_at: status === 'success' ? new Date().toISOString() : undefined }),
+      output_ref: runJson({ ...payload, chapters, results, lock: null, phase: status === 'success' ? '章节群已完成' : payload.phase, finished_at: status === 'success' ? new Date().toISOString() : undefined }),
       duration_ms: Date.now() - startedAt,
       error_message: errorMessage,
     })

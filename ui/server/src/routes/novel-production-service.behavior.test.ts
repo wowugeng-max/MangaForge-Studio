@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test'
+import { readFileSync } from 'fs'
+import { join } from 'path'
 import { createNovelProductionService, createNovelRunExecutionService } from './novel-production-service'
 
 const makeRunHarness = (output: any) => {
@@ -180,6 +182,76 @@ describe('executeChapterGroupRunRecord behavior', () => {
       auto_repair_quality_gate: true,
     })
     expect(generateCalls[0].options.approval_policy.allow_full_auto).toBe(true)
+  })
+
+  test('persists unattended run progress when chapter diagnostics contain circular references', async () => {
+    const production = createNovelProductionService()
+    const harness = makeRunHarness({
+      chapters: [
+        { id: 31, chapter_no: 5, title: '第五章', status: 'pending', stages: production.buildChapterGroupStages() },
+      ],
+      current_index: 0,
+      production_mode: 'full_auto',
+      unattended: { enabled: true, allow_incomplete: false },
+      policy: { quality_threshold: 88, allow_incomplete: false },
+    })
+    const service = createNovelRunExecutionService({
+      getProject: async () => ({ id: 77, title: '长篇项目', reference_config: {} }),
+      production,
+      listNovelRuns: harness.listNovelRuns,
+      updateNovelRun: harness.updateNovelRun,
+      generateChapterForGroup: async (_workspace, _projectId, _chapterId, options) => {
+        await options.onStage('draft', { status: 'success' })
+        const configSnapshot: any = { snapshot_id: 'cyclic-config' }
+        configSnapshot.self = configSnapshot
+        return {
+          score: 92,
+          revised: false,
+          config_snapshot: configSnapshot,
+          story_state_update: {
+            chapter_title_uniqueness_sync: { status: 'ok' },
+            prose_meta_sync: { status: 'ok' },
+            chapter_hook_sync: { status: 'ok' },
+            chapter_blueprint_sync: { status: 'ok' },
+            foreshadowing_delta_sync: { status: 'ok' },
+            deterministic_prose_cleanup: { status: 'ok', risk_count: 0 },
+          },
+        }
+      },
+    } as any)
+
+    const result = await service.executeChapterGroupRunRecord('test-workspace', { id: 77, reference_config: {} }, harness.run, {
+      max_chapters: 1,
+      lock_owner: 'behavior-test',
+    })
+    const group = result.group
+
+    expect(result.status).toBe('success')
+    expect(group.results[0].config_snapshot).toMatchObject({
+      snapshot_id: 'cyclic-config',
+      self: '[Circular]',
+    })
+  })
+
+  test('builds agent config snapshots when writing bible contains circular references', () => {
+    const production = createNovelProductionService()
+    const writingBible: any = { tone: '紧凑' }
+    writingBible.self = writingBible
+
+    const snapshot = production.buildAgentConfigSnapshot({
+      id: 77,
+      title: '长篇项目',
+      reference_config: { writing_bible: writingBible },
+    }, 136)
+
+    expect(snapshot.snapshot_id).toMatch(/^agentcfg-v1-/)
+    expect(snapshot.writing_bible_hash).toMatch(/^[0-9a-f]{8}$/)
+  })
+
+  test('uses safe json for release repair reviews that include context packages', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-delivery-repair-runner.ts'), 'utf8')
+
+    expect(source).not.toContain("payload: JSON.stringify({ chapter_id: chapter.id, chapter_no: chapter.chapter_no, context_package: contextPackage")
   })
 
   test('pauses unattended production when a chapter returns unknown post-delivery sync evidence', async () => {

@@ -15,7 +15,7 @@ import {
   updateNovelSettingEntity,
 } from '../novel'
 import { executeNovelAgent } from '../llm'
-import { formatReviewIssueForStorage, getNovelPayload, parseJsonLikePayload } from './novel-route-utils'
+import { formatReviewIssueForStorage, getNovelPayload, parseJsonLikePayload, safeJsonStringify } from './novel-route-utils'
 import { buildSettingRelationshipGraph } from './novel-setting-relationship-graph'
 
 type NovelSettingRoutesContext = {
@@ -38,6 +38,10 @@ const RELATIONSHIP_REPAIR_PATCH_TYPES = [
   'payload_related_factions',
   'payload_related_foreshadowing',
 ]
+
+function settingJson(value: any, maxChars = 0) {
+  return safeJsonStringify(value, 2, maxChars)
+}
 
 export type SettingRelationshipRepairPatch = {
   source_id: number
@@ -532,7 +536,7 @@ function heuristicUsageSuggestions(chapter: any, settings: any[]) {
     chapter.chapter_summary,
     chapter.conflict,
     chapter.ending_hook,
-    JSON.stringify(chapter.raw_payload || {}),
+    settingJson(chapter.raw_payload || {}),
   ].join(' ')
   const scored = settings.map(setting => {
     const text = settingText(setting)
@@ -1145,7 +1149,7 @@ export function registerNovelSettingRoutes(app: Express, ctx: NovelSettingRoutes
     const prompt = [
       '任务：检查章节正文是否违反设定工坊约束。只输出 JSON。',
       '检查项：境界/战力矛盾、能力非法使用、物品归属或状态错误、Boss行动逻辑不一致、禁揭设定泄漏、规则触发没有代价、角色知道了不该知道的信息、伏笔误用、预期状态变化未发生。',
-      JSON.stringify({ setting_context: contextPackage.setting_context, settings, usage }, null, 2).slice(0, 9000),
+      settingJson({ setting_context: contextPackage.setting_context, settings, usage }, 9000),
       '【正文】',
       String(chapter.chapter_text || '').slice(0, 16000),
       '输出字段：passed, score, issues(array severity/type/setting_name/description/suggestion), required_state_updates(array entity_id/name/actual_state_change)。',

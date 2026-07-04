@@ -478,4 +478,10 @@ describe('writing bible style sample candidates', () => {
     expect(source).toContain("step_name: 'style_sample_adjustment_post_apply_review'")
     expect(source).toContain('style_sample_patch_review')
   })
+
+  test('uses safe json when hashing generated writing bible output', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-project-bible-routes.ts'), 'utf8')
+
+    expect(source).not.toContain('stableTextHash(JSON.stringify(writingBible))')
+  })
 })

@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test'
+import { readFileSync } from 'fs'
+import { join } from 'path'
 import {
   buildReviewAnnotations,
   buildReviewAnnotationRepairTasks,
@@ -767,6 +769,43 @@ describe('chapter delivery risk brief', () => {
     expect(revisionPrompt).toContain('补回报：回报欠账 1')
     expect(revisionPrompt).toContain('补强场面：强场面漏写 2')
     expect(revisionPrompt).toContain('补创新：创新缺口 2')
+  })
+
+  test('serializes circular context packages in editor report and revision prompts', () => {
+    const contextPackage: any = {
+      chapter_target: { chapter_goal: '规则边界首次显形' },
+      continuity: { previous_chapter: '上一章结尾：门牌裂开。' },
+    }
+    contextPackage.self = contextPackage
+    contextPackage.chapter_outline = contextPackage
+
+    const reportPrompt = buildEditorReportPrompt({
+      project: { title: '循环测试' },
+      contextPackage,
+      chapter: { chapter_text: '正文' },
+      latestQuality: null,
+      latestReference: null,
+    })
+    const revisionPrompt = buildEditorRevisionPrompt({
+      project: { title: '循环测试' },
+      chapter: { chapter_no: 2, title: '第二章', chapter_text: '正文' },
+      contextPackage,
+      report: { must_fix: ['补衔接'] },
+      revisionMode: 'from_report',
+      userPrompt: '',
+    })
+
+    expect(reportPrompt).toContain('[Circular]')
+    expect(revisionPrompt).toContain('[Circular]')
+    expect(revisionPrompt).toContain('上一章结尾')
+  })
+
+  test('uses safe json for editor payloads that include context packages', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-editor-routes.ts'), 'utf8')
+
+    expect(source).not.toContain('payload: JSON.stringify({ chapter_id: chapter.id, report, context_package')
+    expect(source).not.toContain('payload: JSON.stringify({ chapter_id: chapter.id, plan, context_package')
+    expect(source).not.toContain('JSON.stringify(contextPackage, null, 2).slice(0, 7000)')
   })
 
   test('builds a convergence report after revision reduces delivery risks', () => {

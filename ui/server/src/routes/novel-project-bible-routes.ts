@@ -16,6 +16,7 @@ import {
   getNovelPayload,
   getStyleLock,
   parseJsonLikePayload,
+  safeJsonStringify,
   stableTextHash,
 } from './novel-route-utils'
 import { normalizeStyleSampleBank } from './novel-writing-service'
@@ -29,6 +30,10 @@ type ProjectBibleRoutesContext = {
 
 function compactControlText(value: any, limit = 600) {
   return String(value || '').replace(/\s+/g, ' ').trim().slice(0, limit)
+}
+
+function bibleJson(value: any, maxChars = 0) {
+  return safeJsonStringify(value, 2, maxChars)
 }
 
 function proseChars(value: any) {
@@ -852,7 +857,7 @@ export function registerNovelProjectBibleRoutes(app: Express, ctx: ProjectBibleR
         '  "generation_rules": ["每章生成必须遵守的硬规则"]',
         '}',
         '【项目材料】',
-        JSON.stringify(material, null, 2).slice(0, 18000),
+        bibleJson(material, 18000),
       ].join('\n')
       const result = await executeNovelAgent('outline-agent', project, { task: prompt }, {
         activeWorkspace,
@@ -879,7 +884,7 @@ export function registerNovelProjectBibleRoutes(app: Express, ctx: ProjectBibleR
           step_name: 'generate',
           status: 'success',
           input_ref: JSON.stringify({ model_id: modelId, save: req.body?.save !== false }),
-          output_ref: JSON.stringify({ writing_bible_hash: stableTextHash(JSON.stringify(writingBible)), modelName: (result as any).modelName }),
+          output_ref: JSON.stringify({ writing_bible_hash: stableTextHash(safeJsonStringify(writingBible, undefined, 0)), modelName: (result as any).modelName }),
         })
       }
       res.json({ ok: true, writing_bible: writingBible, project: updated, result })

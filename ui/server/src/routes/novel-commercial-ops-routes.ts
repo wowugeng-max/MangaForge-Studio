@@ -22,7 +22,7 @@ import { readKeys } from '../key-store'
 import { readModels } from '../model-store'
 import { readProviders } from '../provider-store'
 import { executeNovelAgent } from '../llm'
-import { asArray, compactText, parseJsonLikePayload } from './novel-route-utils'
+import { asArray, compactText, parseJsonLikePayload, safeJsonStringify } from './novel-route-utils'
 
 type CommercialOpsContext = {
   getWorkspace: () => string
@@ -88,6 +88,10 @@ const genreTemplates = [
 
 function textHash(value: string) {
   return createHash('sha256').update(value).digest('hex').slice(0, 16)
+}
+
+function opsJson(value: any) {
+  return safeJsonStringify(value, undefined, 0)
 }
 
 function wc(text: string) {
@@ -1614,7 +1618,7 @@ export function registerNovelCommercialOpsRoutes(app: Express, ctx: CommercialOp
           ...asArray(aiReport.confirmed_issues).slice(0, 12).map((item: any) => `确认：第${item.chapter_no || '-'}章 ${item.issue || item.fix || ''}`),
           ...asArray(aiReport.missed_issues).slice(0, 12).map((item: any) => `漏检：第${item.chapter_no || '-'}章 ${item.issue || item.fix || ''}`),
         ].filter(Boolean),
-        payload: JSON.stringify({ local_report: report, ai_report: aiReport, llm_result: result }),
+        payload: opsJson({ local_report: report, ai_report: aiReport, llm_result: result }),
       })
       const run = await appendNovelRun(activeWorkspace, {
         project_id: project.id,
@@ -1622,7 +1626,7 @@ export function registerNovelCommercialOpsRoutes(app: Express, ctx: CommercialOp
         step_name: 'llm-review',
         status: (result as any).error ? 'warn' : 'success',
         input_ref: JSON.stringify({ model_id: modelId, local_report_id: report.report_id }),
-        output_ref: JSON.stringify({ local_report: report, ai_report: aiReport, review_id: review.id, llm_result: result }),
+        output_ref: opsJson({ local_report: report, ai_report: aiReport, review_id: review.id, llm_result: result }),
         error_message: (result as any).error || '',
       })
       res.json({ ok: true, report, ai_report: aiReport, llm_result: result, review, run })
@@ -1949,7 +1953,7 @@ export function registerNovelCommercialOpsRoutes(app: Express, ctx: CommercialOp
           ...asArray(aiPlan.do_not_generate_until).slice(0, 12).map((item: any) => `生成前阻塞：${item}`),
           ...asArray(aiPlan.repair_plan).slice(0, 12).map((item: any) => `${item.target || '修复'}：${item.action || item.reason || ''}`),
         ].filter(Boolean),
-        payload: JSON.stringify({ local_report: report, ai_plan: aiPlan, llm_result: result }),
+        payload: opsJson({ local_report: report, ai_plan: aiPlan, llm_result: result }),
       })
       const run = await appendNovelRun(activeWorkspace, {
         project_id: project.id,
@@ -1957,7 +1961,7 @@ export function registerNovelCommercialOpsRoutes(app: Express, ctx: CommercialOp
         step_name: 'llm-plan',
         status: (result as any).error ? 'warn' : 'success',
         input_ref: JSON.stringify({ model_id: modelId, local_report_id: report.debt_id }),
-        output_ref: JSON.stringify({ local_report: report, ai_plan: aiPlan, review_id: review.id, llm_result: result }),
+        output_ref: opsJson({ local_report: report, ai_plan: aiPlan, review_id: review.id, llm_result: result }),
         error_message: (result as any).error || '',
       })
       res.json({ ok: true, report, ai_plan: aiPlan, llm_result: result, project: updated, review, run })
@@ -2057,7 +2061,7 @@ export function registerNovelCommercialOpsRoutes(app: Express, ctx: CommercialOp
         run_type: 'genre_template_apply',
         step_name: template.id,
         status: 'success',
-        output_ref: JSON.stringify({ template, writing_bible: writingBible }),
+        output_ref: opsJson({ template, writing_bible: writingBible }),
       })
       res.json({ ok: true, template, writing_bible: writingBible, project: updated })
     } catch (error) {

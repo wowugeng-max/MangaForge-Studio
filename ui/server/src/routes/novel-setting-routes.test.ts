@@ -493,4 +493,11 @@ describe('discovered asset intake route', () => {
     expect(source).toContain("app.post('/api/novel/chapters/:chapterId/discovered-assets/apply'")
     expect(source).toContain('applyDiscoveredAssetsToProject(')
   })
+
+  test('uses safe json for setting prompts that include runtime chapter context', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-setting-routes.ts'), 'utf8')
+
+    expect(source).not.toContain('JSON.stringify(chapter.raw_payload || {})')
+    expect(source).not.toContain('JSON.stringify({ setting_context: contextPackage.setting_context, settings, usage }, null, 2).slice(0, 9000)')
+  })
 })

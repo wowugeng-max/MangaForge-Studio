@@ -15,12 +15,16 @@ import {
   buildReleaseRepairTasks,
   getDeliveryReleasePolicy,
 } from './novel-delivery-release-audit'
-import { clampScore, parseJsonLikePayload } from './novel-route-utils'
+import { clampScore, parseJsonLikePayload, safeJsonStringify } from './novel-route-utils'
 
 type ReleaseRepairRunnerContext = {
   buildChapterContextPackage: (workspace: string, project: any, chapter: any, chapters: any[], worldbuilding: any[], characters: any[], outlines: any[], reviews: any[]) => Promise<any>
   buildReferenceUsageReport: (workspace: string, project: any, taskType: string, generatedText?: string) => Promise<any>
   buildStructuralSimilarityReport: (chapter: any, referenceReport: any) => any
+}
+
+function releaseJson(value: any) {
+  return safeJsonStringify(value, undefined, 0)
 }
 
 function releaseChapterGroupStages() {
@@ -98,7 +102,7 @@ export async function executeReleaseBatchRun(activeWorkspace: string, project: a
   const startedAt = Date.now()
   await updateNovelRun(activeWorkspace, run.id, {
     status: 'running',
-    output_ref: JSON.stringify({ ...payload, phase: '发布批量任务执行中', started_at: new Date().toISOString(), processed: 0 }),
+    output_ref: releaseJson({ ...payload, phase: '发布批量任务执行中', started_at: new Date().toISOString(), processed: 0 }),
   })
   const results: any[] = []
   for (const chapter of targets) {
@@ -112,7 +116,7 @@ export async function executeReleaseBatchRun(activeWorkspace: string, project: a
           status: review.passed ? 'ok' : 'warn',
           summary: `发布前质检评分 ${review.score}`,
           issues: review.issues.map((issue: any) => `${issue.severity}｜${issue.description}`),
-          payload: JSON.stringify({ chapter_id: chapter.id, chapter_no: chapter.chapter_no, context_package: contextPackage, self_check: { review }, source: 'release_quality_batch', run_id: run.id }),
+          payload: releaseJson({ chapter_id: chapter.id, chapter_no: chapter.chapter_no, context_package: contextPackage, self_check: { review }, source: 'release_quality_batch', run_id: run.id }),
         })
         results.push({ chapter_id: chapter.id, chapter_no: chapter.chapter_no, status: 'success', score: review.score, review_id: saved.id })
       } else if (run.run_type === 'release_similarity_batch') {
@@ -153,14 +157,14 @@ export async function executeReleaseBatchRun(activeWorkspace: string, project: a
     }
     await updateNovelRun(activeWorkspace, run.id, {
       status: 'running',
-      output_ref: JSON.stringify({ ...payload, phase: `已处理 ${results.length}/${targets.length}`, target_chapter_nos: targetChapterNos, results, processed: results.length }),
+      output_ref: releaseJson({ ...payload, phase: `已处理 ${results.length}/${targets.length}`, target_chapter_nos: targetChapterNos, results, processed: results.length }),
       duration_ms: Date.now() - startedAt,
     })
   }
   const failed = results.filter(item => item.status === 'failed')
   const updated = await updateNovelRun(activeWorkspace, run.id, {
     status: failed.length ? 'failed' : 'success',
-    output_ref: JSON.stringify({
+    output_ref: releaseJson({
       ...payload,
       phase: failed.length ? '发布批量任务存在失败项' : '发布批量任务执行完成',
       target_chapter_nos: targetChapterNos,

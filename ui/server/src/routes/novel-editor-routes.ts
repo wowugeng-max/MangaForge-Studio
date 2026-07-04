@@ -13,7 +13,7 @@ import {
   updateNovelChapter,
 } from '../novel'
 import { executeNovelAgent, previewNovelKnowledgeInjection } from '../llm'
-import { asArray, buildLLMResultDiagnostics, clampScore, extractLLMText, getNovelPayload, getSafetyPolicy, normalizeIssue, parseJsonLikePayload } from './novel-route-utils'
+import { asArray, buildLLMResultDiagnostics, clampScore, extractLLMText, getNovelPayload, getSafetyPolicy, normalizeIssue, parseJsonLikePayload, safeJsonStringify } from './novel-route-utils'
 
 type EditorRoutesContext = {
   getWorkspace: () => string
@@ -39,6 +39,10 @@ type EditorRoutesContext = {
 
 const REVISION_MAX_TOKENS = 8000
 const COMPACT_REVISION_RETRY_MAX_TOKENS = 5000
+
+function editorJson(value: any, maxChars = 0) {
+  return safeJsonStringify(value, 2, maxChars)
+}
 
 async function loadChapterBundle(ctx: EditorRoutesContext, projectId: number, chapterId: number) {
   const activeWorkspace = ctx.getWorkspace()
@@ -849,13 +853,13 @@ export function buildEditorReportPrompt({
     '如果存在交稿风险清单，报告 must_fix 和 one_click_revision_prompt 必须优先覆盖这些风险，不得只做普通润色。',
     '最后输出 overall_score, must_fix, optional_improvements, one_click_revision_prompt。',
     '【上下文包】',
-    JSON.stringify(contextPackage, null, 2).slice(0, 9000),
+    editorJson(contextPackage, 9000),
     '【交稿风险清单】',
-    JSON.stringify(deliveryRiskBrief || {}, null, 2).slice(0, 5000),
+    editorJson(deliveryRiskBrief || {}, 5000),
     '【章节正文】',
     String(chapter.chapter_text || '').slice(0, 14000),
     '【已有质检】',
-    JSON.stringify({ latestQuality, latestReference }, null, 2).slice(0, 4000),
+    editorJson({ latestQuality, latestReference }, 4000),
   ].join('\n')
 }
 
@@ -870,7 +874,7 @@ const REVISION_MODE_GUIDE: Record<string, string> = {
 
 function compactWorkflowRevisionContextValue(value: any, max = 1200) {
   if (value === null || value === undefined || value === '') return ''
-  const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
+  const text = typeof value === 'string' ? value : editorJson(value)
   return String(text || '').slice(0, max)
 }
 
@@ -951,12 +955,12 @@ export function buildEditorRevisionPrompt({
     '为了避免长连接失败，优先输出局部补丁，不要输出完整正文。',
     '补丁长度硬约束：每条 find/anchor 控制在 30-300 字，必须是原文中唯一可精确匹配的短片段；不要把整章或多段长正文塞进 find/anchor。需要大幅删减时拆成多条短 replacement；删除时 replace 允许为空字符串。',
     '【编辑报告】',
-    JSON.stringify(report, null, 2).slice(0, 7000),
+    editorJson(report, 7000),
     '【交稿风险清单】',
-    JSON.stringify(deliveryRiskBrief || {}, null, 2).slice(0, 5000),
+    editorJson(deliveryRiskBrief || {}, 5000),
     workflowRevisionContextBrief ? '【workflow-revision 上下文包】' : '',
     workflowRevisionContextBrief ? '以下片段来自 MangaForge 章节上下文包；修订前必须据此完成 Step 2 上下文对照，修订后在 revision_context_receipts 中逐项回执。' : '',
-    workflowRevisionContextBrief ? JSON.stringify(workflowRevisionContextBrief, null, 2).slice(0, 7000) : '',
+    workflowRevisionContextBrief ? editorJson(workflowRevisionContextBrief, 7000) : '',
     '【修订提示】',
     String(userPrompt || report.one_click_revision_prompt || ''),
     '【原章节正文】',
@@ -1003,9 +1007,9 @@ export function buildCompactEditorRevisionPrompt({
     'insertion 限制：anchor 控制在 20-160 字，text 控制在 20-900 字。',
     '如果修不完，只修最高优先级的 1-3 个问题，保证 JSON 完整闭合。',
     '【编辑报告】',
-    JSON.stringify(report, null, 2).slice(0, 3000),
+    editorJson(report, 3000),
     '【交稿风险清单】',
-    JSON.stringify(deliveryRiskBrief || {}, null, 2).slice(0, 2500),
+    editorJson(deliveryRiskBrief || {}, 2500),
     '【修订提示】',
     String(userPrompt || report.one_click_revision_prompt || ''),
     '【上一次被截断输出片段，仅用于避免重复犯错】',
@@ -1040,7 +1044,7 @@ function buildProseQualityPrompt(project: any, contextPackage: any, chapterText:
     '11. 每 3-5 段是否有可见行动、选择、信息变化或关系变化。',
     '',
     '【结构化上下文包】',
-    JSON.stringify(contextPackage, null, 2).slice(0, 6000),
+    editorJson(contextPackage, 6000),
     '',
     '【待复检正文】',
     String(chapterText || '').slice(0, 16000),
@@ -1090,7 +1094,7 @@ async function createProseQualityReview(ctx: EditorRoutesContext, activeWorkspac
     status: normalizedReview.passed === false || Number(normalizedReview.score || 100) < 78 ? 'warn' : 'ok',
     summary: `当前版本质检评分 ${normalizedReview.score ?? '-'}`,
     issues: normalizedReview.issues.map((issue: any) => `${issue.severity || 'medium'}｜${issue.description || issue}`),
-    payload: JSON.stringify({
+    payload: editorJson({
       chapter_id: currentChapter.id,
       chapter_updated_at: currentChapter.updated_at || '',
       content_hash: contentHash,
@@ -4352,7 +4356,7 @@ export function registerNovelEditorRoutes(app: Express, ctx: EditorRoutesContext
         status: Number(report.overall_score || 0) >= 78 ? 'ok' : 'warn',
         summary: `编辑报告评分 ${report.overall_score ?? '-'}`,
         issues: asArray(report.must_fix).map((item: any) => String(item)),
-        payload: JSON.stringify({ chapter_id: chapter.id, report, context_package: contextPackage, delivery_risk_brief: deliveryRiskBrief }),
+        payload: editorJson({ chapter_id: chapter.id, report, context_package: contextPackage, delivery_risk_brief: deliveryRiskBrief }),
       })
       res.json({ ok: true, report, review: saved, result })
     } catch (error) {
@@ -4493,7 +4497,7 @@ export function registerNovelEditorRoutes(app: Express, ctx: EditorRoutesContext
         status: 'ok',
         summary: `已根据编辑报告 ${review.id} 生成修订稿`,
         issues: [],
-        payload: JSON.stringify({
+        payload: editorJson({
           chapter_id: chapter.id,
           source_review_id: review.id,
           requested_revision_mode: revisionMode,
@@ -4814,9 +4818,9 @@ export function registerNovelEditorRoutes(app: Express, ctx: EditorRoutesContext
         '【安全策略】',
         JSON.stringify(safety, null, 2),
         '【章节上下文包】',
-        JSON.stringify(contextPackage, null, 2).slice(0, 7000),
+        editorJson(contextPackage, 7000),
         '【参考注入预览】',
-        JSON.stringify({
+        editorJson({
           active_references: preview.active_references,
           entries: (preview.entries || []).slice(0, 20).map((entry: any) => ({
             title: entry.title,
@@ -4825,7 +4829,7 @@ export function registerNovelEditorRoutes(app: Express, ctx: EditorRoutesContext
             match_reason: entry.match_reason,
           })),
           warnings: preview.warnings,
-        }, null, 2).slice(0, 7000),
+        }, 7000),
       ].join('\n')
       const modelId = ctx.getStageModelId(project, 'safety', Number(req.body.model_id || 0) || undefined)
       const result = await executeNovelAgent('review-agent', project, { task: prompt }, { activeWorkspace, modelId: modelId ? String(modelId) : undefined, maxTokens: 4000, temperature: ctx.getStageTemperature(project, 'safety', 0.15), skipMemory: true })
@@ -4836,7 +4840,7 @@ export function registerNovelEditorRoutes(app: Express, ctx: EditorRoutesContext
         status: 'ok',
         summary: `第${chapter.chapter_no}章参考迁移计划`,
         issues: asArray(plan.forbidden_transfer_layers).map((item: any) => String(item)).slice(0, 20),
-        payload: JSON.stringify({ chapter_id: chapter.id, plan, context_package: contextPackage, preview }),
+        payload: editorJson({ chapter_id: chapter.id, plan, context_package: contextPackage, preview }),
       })
       res.json({ ok: true, plan, review: saved, result })
     } catch (error) {

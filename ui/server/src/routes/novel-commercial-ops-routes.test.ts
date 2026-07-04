@@ -265,4 +265,14 @@ describe('longform creation diagnosis', () => {
     expect(source).toContain("source: 'reader_trial_review'")
     expect(source).toContain("run_type: 'longform_production_repair'")
   })
+
+  test('uses safe json for commercial ops payloads that include llm results or writing bible', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-commercial-ops-routes.ts'), 'utf8')
+
+    expect(source).not.toContain('payload: JSON.stringify({ local_report: report, ai_report: aiReport, llm_result: result })')
+    expect(source).not.toContain('output_ref: JSON.stringify({ local_report: report, ai_report: aiReport, review_id: review.id, llm_result: result })')
+    expect(source).not.toContain('payload: JSON.stringify({ local_report: report, ai_plan: aiPlan, llm_result: result })')
+    expect(source).not.toContain('output_ref: JSON.stringify({ local_report: report, ai_plan: aiPlan, review_id: review.id, llm_result: result })')
+    expect(source).not.toContain('output_ref: JSON.stringify({ template, writing_bible: writingBible })')
+  })
 })
