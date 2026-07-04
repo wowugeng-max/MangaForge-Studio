@@ -525,6 +525,26 @@ describe('novel project seed prompt', () => {
     expect(recovered.seed.chapter_outlines[0].title).toBe('蛾虫入药')
   })
 
+  test('recovers project seeds with circular raw payloads', async () => {
+    const { buildRecoverableProjectSeed } = await import('./novel-core-routes')
+    const rawPayload: any = {
+      title: '循环种子',
+      synopsis: '陆珩捡到能记录灾厄回声的旧铜铃。',
+      protagonist: { name: '陆珩', goal: '查清铜铃来源' },
+      worldbuilding: { world_summary: '灾厄回声会把旧案投射到现实。' },
+    }
+    rawPayload.self = rawPayload
+
+    const recovered = buildRecoverableProjectSeed({
+      title: '循环种子',
+      raw_payload: rawPayload,
+    }, '陆珩靠旧铜铃调查灾厄回声。', '循环种子')
+
+    expect(recovered.seed.title).toBe('循环种子')
+    expect(recovered.seed.protagonist.name).toBe('陆珩')
+    expect(recovered.seed.raw_payload.self).toBe('[Circular]')
+  })
+
   test('extracts real characters and outlines from model text before using recovery templates', async () => {
     const { buildRecoverableProjectSeed } = await import('./novel-core-routes')
     const modelText = `

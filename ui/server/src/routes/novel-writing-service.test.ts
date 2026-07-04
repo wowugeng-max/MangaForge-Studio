@@ -17413,6 +17413,14 @@ describe('chapter prose word target', () => {
     expect(prompt).toContain('循环改稿')
   })
 
+  test('uses safe json for prose quality review payloads that include context packages', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+
+    expect(source).not.toContain('payload: JSON.stringify({ chapter_id: chapter.id, context_package')
+    expect(source).not.toContain('payload: JSON.stringify({\n          chapter_id: chapter.id,\n          context_package: finalReviewContextPackage')
+    expect(source).not.toContain('JSON.stringify(chapter.raw_payload || {})')
+  })
+
   test('reads runtime camelCase chapterTarget word target when building editor rewrite prompts', () => {
     const runtimeTarget = resolveChapterWordTarget({}, { chapter_no: 8 }, { word_target_mode: 'custom', target_word_count: 5200 })
     const prompt = buildCommercialEditorRewritePrompt(
@@ -52950,6 +52958,230 @@ describe('chapter context word target source guards', () => {
           || remainingKeys.includes('source_readiness_scene_card_goal_obstacle_change'),
       ).toBe(true)
     }
+  })
+
+  test('auto-repairs unattended preflight scene cards and tracking context gaps', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'mangaforge-preflight-repair-scene-cards-'))
+    const project = await createNovelProject(workspace, {
+      title: '红雾电梯',
+      genre: '规则怪谈',
+      synopsis: '主角进入红雾规则区，发现旧规则被篡改。',
+      reference_config: {},
+    })
+    await createNovelWorldbuilding(workspace, {
+      project_id: project.id,
+      world_summary: '红雾规则区会把错误解法放大成封印裂缝。',
+      rules: ['规则被篡改后会留下金色符文痕迹。'],
+    })
+    await createNovelCharacter(workspace, {
+      project_id: project.id,
+      name: '江哲',
+      role_type: '主角',
+      current_state: {
+        location: '红雾入口',
+        knowledge_scope: '知道规则五被篡改，但不知道谁改了规则。',
+      },
+    })
+    await createNovelChapter(workspace, {
+      project_id: project.id,
+      chapter_no: 1,
+      title: '异常入局',
+      chapter_summary: '江哲发现规则五被金色符文篡改。',
+      ending_hook: '金色符文说明规则背后有人动手脚。',
+      chapter_text: '江哲看见规则五下方的金色符文，随即踏入红雾。',
+    })
+    const chapter = await createNovelChapter(workspace, {
+      project_id: project.id,
+      chapter_no: 2,
+      title: '旧法失准',
+      chapter_goal: '江哲进入红雾后确认旧办法不再可靠。',
+      chapter_summary: '江哲进入红雾后确认旧办法不再可靠，并把旧答案反推成新的危险证据。',
+      conflict: '暴力硬抗会让封印裂缝扩大。',
+      ending_hook: '旧答案指向更危险的证据。',
+      scene_list: [{ scene_no: 1, title: '红雾深处' }],
+      raw_payload: {
+        pre_draft_brief: {
+          benchmark_recall_brief: {
+            selected_emotion_module: '调动：旧答案失效后的规则压力。',
+            rhythm_reference: '蓄势 -> 误判 -> 反证 -> 新钩子。',
+            source_paths: [],
+          },
+          state_tracking_contract: {
+            version: 'oh_story_state_tracking_v1',
+            source_requirements: [
+              '本章细纲/场景卡',
+              '上一章正文或上一章承接',
+              '追踪/上下文.md',
+              '追踪/时间线.md',
+            ],
+            source_readiness: [
+              { key: 'chapter_blueprint', label: '本章细纲/蓝图', status: 'ready', evidence: '江哲进入红雾后确认旧办法不再可靠。' },
+              { key: 'previous_chapter', label: '上一章正文/章尾钩子', status: 'ready', evidence: '金色符文说明规则背后有人动手脚。' },
+              { key: 'context_tracking', label: '追踪/上下文', status: 'warn', evidence: '', fix: '补齐追踪上下文。' },
+              { key: 'timeline_tracking', label: '追踪/时间线', status: 'warn', evidence: '', fix: '补齐追踪/时间线.md。' },
+            ],
+          },
+        },
+      },
+    })
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+    const contextPackage = {
+      preflight: {
+        checks: [
+          { key: 'scene_cards', ok: false, severity: 'medium' },
+          { key: 'benchmark_recall_source_paths', ok: false, severity: 'medium' },
+          { key: 'source_readiness_context_tracking', ok: false, severity: 'medium' },
+          { key: 'source_readiness_timeline_tracking', ok: false, severity: 'medium' },
+          { key: 'source_readiness_chapter_blueprint', ok: false, severity: 'high' },
+          { key: 'source_readiness_scene_card_goal_obstacle_change', ok: false, severity: 'high' },
+        ],
+        warnings: ['场景卡不足', '追踪上下文缺失', '追踪/时间线缺失', '本章细纲/蓝图缺核心字段'],
+      },
+      chapter_target: {
+        chapter_no: 2,
+        title: '旧法失准',
+        summary: chapter.chapter_summary,
+        conflict: chapter.conflict,
+        ending_hook: chapter.ending_hook,
+        scene_cards: chapter.scene_list,
+      },
+      continuity: {
+        previous_chapter: {
+          chapter_no: 1,
+          title: '异常入局',
+          ending_hook: '金色符文说明规则背后有人动手脚。',
+          ending_excerpt: '江哲看见规则五下方的金色符文，随即踏入红雾。',
+        },
+      },
+      story_state: {
+        current_time: '承接第一章章尾之后',
+        active_locations: ['红雾入口'],
+        recent_state_entries: ['规则五被金色符文篡改；江哲已踏入红雾。'],
+        characters: [{ name: '江哲', current_state: { location: '红雾入口', knowledge_scope: '知道规则五被篡改' } }],
+      },
+    }
+
+    await service.autoRepairChapterPreflightGaps(workspace, project, chapter, contextPackage, undefined)
+    const repaired = (await listNovelChapters(workspace, project.id)).find(item => item.id === chapter.id)
+    const preDraft = repaired?.raw_payload?.pre_draft_brief || {}
+    const sourceReadiness = preDraft.state_tracking_contract?.source_readiness || []
+    const contextRow = sourceReadiness.find((item: any) => item.key === 'context_tracking')
+    const timelineRow = sourceReadiness.find((item: any) => item.key === 'timeline_tracking')
+    const repairedSceneCards = repaired?.scene_list || []
+
+    expect(contextRow?.status).toBe('ready')
+    expect(contextRow?.evidence).toContain('最后完成章节')
+    expect(timelineRow?.status).toBe('ready')
+    expect(repairedSceneCards.length).toBeGreaterThanOrEqual(2)
+    expect(repairedSceneCards.length).toBeLessThanOrEqual(6)
+    for (const scene of repairedSceneCards) {
+      expect(scene.purpose || scene.goal || scene.scene_goal).toBeTruthy()
+      expect(scene.conflict || scene.obstacle || scene.rule_pressure).toBeTruthy()
+      expect(scene.reader_payoff || scene.turning_point || scene.event_value_change || scene.exit_state || scene.state_changes_expected?.length).toBeTruthy()
+    }
+
+    const rebuiltChapters = await listNovelChapters(workspace, project.id)
+    const rebuiltChapter = rebuiltChapters.find(item => item.id === chapter.id)
+    const rebuiltContext = await service.buildChapterContextPackage(
+      workspace,
+      project,
+      rebuiltChapter,
+      rebuiltChapters,
+      await listNovelWorldbuilding(workspace, project.id),
+      await listNovelCharacters(workspace, project.id),
+      await listNovelOutlines(workspace, project.id),
+      await listNovelReviews(workspace, project.id),
+    )
+    const remainingKeys = (rebuiltContext.preflight?.checks || [])
+      .filter((item: any) => !item.ok)
+      .map((item: any) => item.key)
+
+    expect(remainingKeys).not.toContain('scene_cards')
+    expect(remainingKeys).not.toContain('source_readiness_context_tracking')
+    expect(remainingKeys).not.toContain('source_readiness_scene_card_goal_obstacle_change')
+    expect(rebuiltContext.oh_story_director.stage).toBe('pre_draft')
+    expect(rebuiltContext.ohStoryDirector).toBe(rebuiltContext.oh_story_director)
+  })
+
+  test('auto-repairs scene card gaps without overflowing on cyclic scene metadata', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'mangaforge-preflight-repair-cyclic-scene-'))
+    const project = await createNovelProject(workspace, {
+      title: '红雾电梯',
+      genre: '规则怪谈',
+      synopsis: '主角进入红雾规则区，发现旧规则被篡改。',
+      reference_config: {},
+    })
+    await createNovelWorldbuilding(workspace, {
+      project_id: project.id,
+      world_summary: '红雾规则区会把错误解法放大成封印裂缝。',
+      rules: ['规则被篡改后会留下金色符文痕迹。'],
+    })
+    await createNovelCharacter(workspace, {
+      project_id: project.id,
+      name: '江哲',
+      role_type: '主角',
+      current_state: { location: '红雾入口' },
+    })
+    const chapter = await createNovelChapter(workspace, {
+      project_id: project.id,
+      chapter_no: 2,
+      title: '旧法失准',
+      chapter_goal: '江哲进入红雾后确认旧办法不再可靠。',
+      chapter_summary: '江哲进入红雾后确认旧办法不再可靠。',
+      conflict: '暴力硬抗会让封印裂缝扩大。',
+      ending_hook: '旧答案指向更危险的证据。',
+      scene_list: [{ scene_no: 1, title: '红雾深处' }],
+    })
+    const cyclicScene: any = {
+      scene_no: 1,
+      title: '红雾深处',
+      purpose_tags: ['铺垫'],
+      state_changes_expected: [],
+    }
+    cyclicScene.state_changes_expected.push(cyclicScene)
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+
+    await service.autoRepairChapterPreflightGaps(workspace, project, chapter, {
+      preflight: {
+        checks: [
+          { key: 'source_readiness_chapter_blueprint', ok: false, severity: 'high' },
+          { key: 'source_readiness_scene_card_goal_obstacle_change', ok: false, severity: 'high' },
+        ],
+        warnings: ['场景卡戏剧单元缺口'],
+      },
+      chapter_target: {
+        chapter_no: 2,
+        title: '旧法失准',
+        summary: chapter.chapter_summary,
+        conflict: chapter.conflict,
+        ending_hook: chapter.ending_hook,
+        scene_cards: [cyclicScene],
+      },
+      continuity: {
+        previous_chapter: {
+          chapter_no: 1,
+          title: '异常入局',
+          ending_hook: '金色符文说明规则背后有人动手脚。',
+        },
+      },
+      story_state: {
+        recent_state_entries: ['规则五被金色符文篡改。'],
+      },
+    }, undefined)
+
+    const repaired = (await listNovelChapters(workspace, project.id)).find(item => item.id === chapter.id)
+    expect(repaired?.scene_list?.length).toBeGreaterThanOrEqual(2)
+    expect(repaired?.scene_list?.[0]?.state_changes_expected?.join('；') || '').toContain('确认')
+    expect(() => JSON.stringify(repaired?.scene_list || [])).not.toThrow()
+    expect(() => JSON.stringify(repaired?.raw_payload?.pre_draft_brief || {})).not.toThrow()
   })
 
   test('feeds unconfirmed unattended pre-draft brief into paragraph prose planning', () => {

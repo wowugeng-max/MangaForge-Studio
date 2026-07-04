@@ -30,7 +30,7 @@ import {
   updateNovelWorldbuilding,
 } from '../novel'
 import { executeNovelAgent, previewNovelKnowledgeInjection } from '../llm'
-import { extractLLMText, parseJsonLikePayload } from './novel-route-utils'
+import { extractLLMText, parseJsonLikePayload, safeJsonStringify } from './novel-route-utils'
 import { purgeMemoryPalaceProject } from '../memory-service'
 import { buildOhStoryGenreCatalogContract, formatOhStoryGenreCatalogPrompt } from './novel-genre-catalog'
 import { buildOhStoryGenreCoreMechanicsContract, formatOhStoryGenreCoreMechanicsPrompt } from './novel-genre-core-mechanics'
@@ -137,7 +137,7 @@ function uniqueSeedTexts(values: any[], limit = 8) {
     .flatMap(value => {
       if (!value) return []
       if (typeof value === 'string') return value.split(/\r?\n/)
-      if (typeof value === 'object') return [JSON.stringify(value)]
+      if (typeof value === 'object') return [safeJsonStringify(value, undefined, 0)]
       return [String(value)]
     })
     .map(value => compactSeedText(value, 260))
@@ -792,7 +792,7 @@ function normalizeProjectSeedPayload(payload: any, rawIdea: string, requestedLen
     item.title || item.project_title || item.book_title || item.synopsis || item.summary || item.logline || item.core_premise || item.worldbuilding || item.protagonist
   )) || root
   const masterOutline = parseNestedSeed(source.master_outline || root.master_outline)
-  const rawForInference = JSON.stringify(root).slice(0, 5000) + rawIdea.slice(0, 5000)
+  const rawForInference = safeJsonStringify(root, undefined, 5000) + rawIdea.slice(0, 5000)
   const commercial = parseNestedSeed(source.commercial_positioning || root.commercial_positioning)
   const worldbuilding = parseNestedSeed(source.worldbuilding || root.worldbuilding)
   const plotEngine = parseNestedSeed(source.plot_engine || root.plot_engine)
@@ -856,7 +856,7 @@ export function buildRecoverableProjectSeed(seed: any, idea = '', requestedTitle
   const rawText = [
     idea,
     resultContentText(result),
-    JSON.stringify(parseNestedSeed(seed?.raw_payload || seed || {})),
+    safeJsonStringify(parseNestedSeed(seed?.raw_payload || seed || {}), undefined, 0),
   ].filter(Boolean).join('\n')
   const extractedFacts = extractProjectSeedFactsFromText(rawText)
   const mergedSeed = mergeProjectSeedInput(seed || {}, extractedFacts)
@@ -1058,7 +1058,7 @@ export function buildProjectSeedRecoveryPrompt(seed: any, diagnostics: any, idea
     idea.slice(0, 12000) || '用户只提供了标题或很短的灵感，请在不推翻标题/灵感的前提下原创扩写。',
     '',
     '【已有可用信息/恢复草稿】',
-    JSON.stringify(seed || {}, null, 2).slice(0, 26000),
+    safeJsonStringify(seed || {}, 2, 26000),
     '',
     formatOhStoryGenreCatalogPrompt(genreCatalogContract),
     '',
@@ -1187,7 +1187,7 @@ function buildFinalizeProjectSeedPrompt(draft: any, idea: string, requestedTitle
     idea.slice(0, 12000),
     '',
     '【用户确认/修改后的草稿】',
-    JSON.stringify(draft || {}, null, 2).slice(0, 24000),
+    safeJsonStringify(draft || {}, 2, 24000),
     '',
     '请在不推翻用户修改的前提下，补齐并规范以下字段：',
     'title, genre, sub_genres, target_audience, length_target, style_tags, commercial_tags, synopsis, logline, core_premise, main_conflict',
@@ -1409,7 +1409,7 @@ function normalizeChapterSeed(chapter: any, index: number, seed: any = {}) {
       firstSeedText(seed?.title, seed?.logline, '本书'),
       firstSeedText(cleanSeedCharacterName(protagonist.name), cleanSeedCharacterName(protagonist.title), '主角'),
       firstSeedText(chapter?.chapter_summary, chapter?.summary, chapter?.chapter_goal, chapter?.goal),
-      compactSeedText(JSON.stringify(seed || {}).slice(0, 1200), 1200),
+      compactSeedText(safeJsonStringify(seed || {}, undefined, 1200), 1200),
     )
     : firstSeedText(rawTitle, `第${chapterNo}章`)
   return {
@@ -2074,8 +2074,8 @@ async function materializeProjectSeed(activeWorkspace: string, project: any, see
     run_type: 'project_seed_materialize',
     step_name: 'create-project-from-seed',
     status: 'success',
-    input_ref: JSON.stringify({ seed_title: seed.title || '', source: 'project_seed' }),
-    output_ref: JSON.stringify({ created }),
+    input_ref: safeJsonStringify({ seed_title: seed.title || '', source: 'project_seed' }, undefined, 0),
+    output_ref: safeJsonStringify({ created }, undefined, 0),
   })
   return { created, project: updated }
 }
