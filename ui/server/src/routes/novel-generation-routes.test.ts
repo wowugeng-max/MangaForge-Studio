@@ -1,9 +1,25 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'fs'
 import { join } from 'path'
-import { applyRequestBatchPreflight, extractOhStoryDeliveryReceipts, refreshOhStoryDeliveryReceiptsAfterRevision, selectTargetProsePayload } from './novel-generation-routes'
+import { applyRequestBatchPreflight, extractOhStoryDeliveryReceipts, refreshOhStoryDeliveryReceiptsAfterRevision, selectTargetProsePayload, stringifyNovelGenerationPayload } from './novel-generation-routes'
 
 describe('novel generate prose route source guards', () => {
+  test('serializes circular generation payloads without losing shared arrays', () => {
+    const shared = [{ chapter_no: 1, status: 'success' }]
+    const payload: any = {
+      chapters: shared,
+      results: shared,
+      context_package: { label: '上下文' },
+    }
+    payload.context_package.self = payload.context_package
+
+    const parsed = JSON.parse(stringifyNovelGenerationPayload(payload))
+
+    expect(parsed.chapters[0]).toEqual({ chapter_no: 1, status: 'success' })
+    expect(parsed.results[0]).toEqual({ chapter_no: 1, status: 'success' })
+    expect(parsed.context_package.self).toBe('[Circular]')
+  })
+
   test('selects camelCase prose chapter payloads from direct draft generation', () => {
     const selected = selectTargetProsePayload({
       proseChapters: [

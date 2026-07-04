@@ -15,8 +15,16 @@ import {
 } from '../novel'
 import { generateNovelChapterProse } from '../llm'
 import { buildMaterialScore } from './novel-chapter-context-routes'
-import { asArray, buildLLMResultDiagnostics, extractPlainProseFallback, formatReviewIssueForStorage, getNovelPayload, normalizeSceneProduction, parseJsonLikePayload } from './novel-route-utils'
+import { asArray, buildLLMResultDiagnostics, extractPlainProseFallback, formatReviewIssueForStorage, getNovelPayload, normalizeSceneProduction, parseJsonLikePayload, safeJsonStringify } from './novel-route-utils'
 import { applyChapterWordTargetToContext, countProseChars, normalizeDeliveryRiskReceipts, proseMaxTokensForWordTarget, resolveChapterWordTarget } from './novel-writing-service'
+
+export function stringifyNovelGenerationPayload(value: any) {
+  return safeJsonStringify(value, undefined, 0)
+}
+
+function sseData(value: any) {
+  return `data: ${stringifyNovelGenerationPayload(value)}\n\n`
+}
 
 function outlineChapterNo(outline: any) {
   const rawNo = Number(outline.raw_payload?.chapter_no || outline.raw_payload?.future100?.chapter_no || 0)
@@ -1271,7 +1279,7 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
         const stage = { key, label, status, detail, at: new Date().toISOString(), ...extra }
         pipeline.push(stage)
         if (wantsStream && !res.writableEnded) {
-          res.write(`data: ${JSON.stringify({ type: 'progress', progress: label, pipeline, stage })}\n\n`)
+          res.write(sseData({ type: 'progress', progress: label, pipeline, stage }))
         }
         return stage
       }
@@ -1342,9 +1350,9 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
           preflight: contextPackage.preflight,
           pipeline,
         }
-        await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'failed', input_ref: JSON.stringify(req.body), output_ref: JSON.stringify(errorPayload), error_message: '章节生成前置检查未通过' })
+        await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'failed', input_ref: stringifyNovelGenerationPayload(req.body), output_ref: stringifyNovelGenerationPayload(errorPayload), error_message: '章节生成前置检查未通过' })
         if (wantsStream) {
-          res.write(`data: ${JSON.stringify({ type: 'error', ...errorPayload })}\n\n`)
+          res.write(sseData({ type: 'error', ...errorPayload }))
           res.end()
           return
         }
@@ -1408,9 +1416,9 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
         targetProse = selectTargetProsePayload(resultPayload, Number(chapter.chapter_no || 0))
       } catch (selectionError) {
         const errorPayload = { error: String(selectionError), error_code: 'PROSE_TARGET_MISMATCH', result, pipeline, context_package: contextPackage, config_snapshot: configSnapshot }
-        await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'failed', input_ref: JSON.stringify(req.body), output_ref: JSON.stringify(errorPayload), error_message: String(selectionError) })
+        await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'failed', input_ref: stringifyNovelGenerationPayload(req.body), output_ref: stringifyNovelGenerationPayload(errorPayload), error_message: String(selectionError) })
         if (wantsStream) {
-          res.write(`data: ${JSON.stringify({ type: 'error', ...errorPayload })}\n\n`)
+          res.write(sseData({ type: 'error', ...errorPayload }))
           res.end()
           return
         }
@@ -1432,10 +1440,10 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
           runtime_selection: (result as any).runtimeSelection || null,
           llm_diagnostics: buildLLMResultDiagnostics(result),
         }
-        await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'failed', input_ref: JSON.stringify(req.body), output_ref: JSON.stringify({ ...(resultPayload || {}), ...runtimeDiagnostics, config_snapshot: configSnapshot }), error_message: resultError })
+        await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'failed', input_ref: stringifyNovelGenerationPayload(req.body), output_ref: stringifyNovelGenerationPayload({ ...(resultPayload || {}), ...runtimeDiagnostics, config_snapshot: configSnapshot }), error_message: resultError })
         const errorPayload = { error: resultError, ...runtimeDiagnostics, result, pipeline, context_package: contextPackage, config_snapshot: configSnapshot }
         if (wantsStream) {
-          res.write(`data: ${JSON.stringify({ type: 'error', ...errorPayload })}\n\n`)
+          res.write(sseData({ type: 'error', ...errorPayload }))
           res.end()
           return
         }
@@ -1477,9 +1485,9 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
           config_snapshot: configSnapshot,
         }
         markStage('word_target', '章节正文低于字数下限', 'failed', errorPayload.error, { word_target_check: errorPayload.word_target_check })
-        await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'failed', input_ref: JSON.stringify(req.body), output_ref: JSON.stringify(errorPayload), error_message: errorPayload.error })
+        await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'failed', input_ref: stringifyNovelGenerationPayload(req.body), output_ref: stringifyNovelGenerationPayload(errorPayload), error_message: errorPayload.error })
         if (wantsStream) {
-          res.write(`data: ${JSON.stringify({ type: 'error', ...errorPayload })}\n\n`)
+          res.write(sseData({ type: 'error', ...errorPayload }))
           res.end()
           return
         }
@@ -1529,9 +1537,9 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
           config_snapshot: configSnapshot,
         }
         markStage('word_target', '主编改稿后正文低于字数下限', 'failed', errorPayload.error, { word_target_check: errorPayload.word_target_check })
-        await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'failed', input_ref: JSON.stringify(req.body), output_ref: JSON.stringify(errorPayload), error_message: errorPayload.error })
+        await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'failed', input_ref: stringifyNovelGenerationPayload(req.body), output_ref: stringifyNovelGenerationPayload(errorPayload), error_message: errorPayload.error })
         if (wantsStream) {
-          res.write(`data: ${JSON.stringify({ type: 'error', ...errorPayload })}\n\n`)
+          res.write(sseData({ type: 'error', ...errorPayload }))
           res.end()
           return
         }
@@ -1580,9 +1588,9 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
           config_snapshot: configSnapshot,
         }
         markStage('word_target', '自检后正文仍低于字数下限', 'failed', errorPayload.error, { word_target_check: errorPayload.word_target_check })
-        await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'failed', input_ref: JSON.stringify(req.body), output_ref: JSON.stringify(errorPayload), error_message: errorPayload.error })
+        await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'failed', input_ref: stringifyNovelGenerationPayload(req.body), output_ref: stringifyNovelGenerationPayload(errorPayload), error_message: errorPayload.error })
         if (wantsStream) {
-          res.write(`data: ${JSON.stringify({ type: 'error', ...errorPayload })}\n\n`)
+          res.write(sseData({ type: 'error', ...errorPayload }))
           res.end()
           return
         }
@@ -1598,7 +1606,7 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
           status: review.passed === false || Number(review.score || 100) < 78 ? 'warn' : 'ok',
           summary: `章节自检评分 ${review.score ?? '-'}${selfCheck?.revised ? '，已生成修订稿' : ''}`,
           issues: Array.isArray(review.issues) ? review.issues.map(formatReviewIssueForStorage) : [],
-          payload: JSON.stringify({ chapter_id: chapter.id, context_package: contextPackage, editor_rewrite: editorRewrite, self_check: selfCheck, pipeline, config_snapshot: configSnapshot }),
+          payload: stringifyNovelGenerationPayload({ chapter_id: chapter.id, context_package: contextPackage, editor_rewrite: editorRewrite, self_check: selfCheck, pipeline, config_snapshot: configSnapshot }),
         })
       } catch (reviewStoreError) {
         console.warn('[prose-quality] Failed to store review:', String(reviewStoreError).slice(0, 200))
@@ -1621,9 +1629,9 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
       if (!migrationAudit && referenceReport && safetyExplanation) migrationAudit = ctx.buildMigrationAudit(project, referenceReport, safetyExplanation)
       if (safetyDecision?.blocked) {
         const errorPayload = { error: '仿写安全阈值未通过，正文未入库', error_code: 'REFERENCE_SAFETY_BLOCKED', reference_report: referenceReport, safety_decision: safetyDecision, safety_explanation: safetyExplanation, migration_audit: migrationAudit, context_package: contextPackage, self_check: selfCheck, pipeline, config_snapshot: configSnapshot }
-        await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'failed', input_ref: JSON.stringify(req.body), output_ref: JSON.stringify(errorPayload), error_message: safetyDecision.reasons?.join('；') || '仿写安全阈值未通过' })
+        await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'failed', input_ref: stringifyNovelGenerationPayload(req.body), output_ref: stringifyNovelGenerationPayload(errorPayload), error_message: safetyDecision.reasons?.join('；') || '仿写安全阈值未通过' })
         if (wantsStream) {
-          res.write(`data: ${JSON.stringify({ type: 'error', ...errorPayload })}\n\n`)
+          res.write(sseData({ type: 'error', ...errorPayload }))
           res.end()
           return
         }
@@ -1661,21 +1669,21 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
         markStage('story_state', '故事状态机更新失败', 'warn', String(stateError).slice(0, 200))
       }
       const pipelineResult = { context_package: contextPackage, editor_rewrite: editorRewrite, self_check: selfCheck, oh_story_delivery_receipts: ohStoryDeliveryReceipts, pipeline, diff: generationDiff, previous_version: previousVersion, config_snapshot: configSnapshot }
-      await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'success', input_ref: JSON.stringify(req.body), output_ref: JSON.stringify({ outputSource: (result as any).outputSource, modelId: (result as any).modelId, modelName: (result as any).modelName, providerId: (result as any).providerId, usage: (result as any).usage, reference_report: referenceReport, safety_decision: safetyDecision, safety_explanation: safetyExplanation, migration_audit: migrationAudit, story_state_update: storyStateUpdate, ...pipelineResult }) })
+      await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'success', input_ref: stringifyNovelGenerationPayload(req.body), output_ref: stringifyNovelGenerationPayload({ outputSource: (result as any).outputSource, modelId: (result as any).modelId, modelName: (result as any).modelName, providerId: (result as any).providerId, usage: (result as any).usage, reference_report: referenceReport, safety_decision: safetyDecision, safety_explanation: safetyExplanation, migration_audit: migrationAudit, story_state_update: storyStateUpdate, ...pipelineResult }) })
       if (!wantsStream) return res.json({ chapter: updated, result, reference_report: referenceReport, safety_decision: safetyDecision, safety_explanation: safetyExplanation, migration_audit: migrationAudit, story_state_update: storyStateUpdate, ...pipelineResult })
       const fullText = String(finalText || '')
       const chunkSize = Math.max(40, Math.ceil(fullText.length / 12))
-      res.write(`data: ${JSON.stringify({ type: 'progress', progress: '生成完成，开始输出正文...', pipeline })}\n\n`)
+      res.write(sseData({ type: 'progress', progress: '生成完成，开始输出正文...', pipeline }))
       for (let i = 0; i < fullText.length; i += chunkSize) {
         const chunk = fullText.slice(i, i + chunkSize)
-        res.write(`data: ${JSON.stringify({ type: 'chunk', text: chunk })}\n\n`)
+        res.write(sseData({ type: 'chunk', text: chunk }))
         await new Promise(resolve => setTimeout(resolve, 40))
       }
-      res.write(`data: ${JSON.stringify({ type: 'done', chapter: updated, result, reference_report: referenceReport, safety_decision: safetyDecision, safety_explanation: safetyExplanation, migration_audit: migrationAudit, story_state_update: storyStateUpdate, ...pipelineResult })}\n\n`)
+      res.write(sseData({ type: 'done', chapter: updated, result, reference_report: referenceReport, safety_decision: safetyDecision, safety_explanation: safetyExplanation, migration_audit: migrationAudit, story_state_update: storyStateUpdate, ...pipelineResult }))
       res.end()
     } catch (error) {
       if (res.headersSent) {
-        res.write(`data: ${JSON.stringify({ type: 'error', error: String(error) })}\n\n`)
+        res.write(sseData({ type: 'error', error: String(error) }))
         res.end()
         return
       }

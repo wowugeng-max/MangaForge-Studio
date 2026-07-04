@@ -60,3 +60,28 @@ describe('upsertNovelChapterByNumber', () => {
     expect(chapters[0].scene_breakdown).toEqual([{ title: '新场景' }])
   })
 })
+
+describe('novel persistence json safety', () => {
+  test('sanitizes circular chapter planning payloads before persistence', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: '循环载荷测试' })
+    const scene: any = { title: '循环场景' }
+    scene.self = scene
+
+    await createNovelChapter(workspace, {
+      project_id: project.id,
+      chapter_no: 1,
+      title: '循环章节',
+      scene_breakdown: [scene],
+      raw_payload: { source: 'test', scene },
+    })
+
+    const chapters = await listNovelChapters(workspace, project.id)
+
+    expect(chapters[0].scene_breakdown[0]).toMatchObject({
+      title: '循环场景',
+      self: '[Circular]',
+    })
+    expect(chapters[0].raw_payload.scene.self).toBe('[Circular]')
+  })
+})

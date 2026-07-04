@@ -205,7 +205,7 @@ export function buildLLMResultDiagnostics(result: any, limit = 1200) {
     stream_tail: streamTail.slice(-5).map((chunk: any) => ({
       type: String(chunk?.type || chunk?.event || ''),
       keys: chunk && typeof chunk === 'object' ? Object.keys(chunk) : [],
-      preview: compactText(JSON.stringify(chunk || {}), 500),
+      preview: compactText(safeJsonStringify(chunk || {}, undefined, 500), 500),
     })),
   }
 }
@@ -301,17 +301,70 @@ export function formatReviewIssueForStorage(issue: any) {
   ].filter(Boolean).join('｜')
 }
 
-export function deepMergeObjects(base: any, override: any): any {
-  if (!override || typeof override !== 'object' || Array.isArray(override)) return base
-  const next = { ...(base || {}) }
-  for (const [key, value] of Object.entries(override)) {
-    if (value && typeof value === 'object' && !Array.isArray(value) && base?.[key] && typeof base[key] === 'object' && !Array.isArray(base[key])) {
-      next[key] = deepMergeObjects(base[key], value)
-    } else {
-      next[key] = value
-    }
+export function sanitizeJsonValue(value: any, options: { maxDepth?: number; maxArrayLength?: number; maxObjectKeys?: number } = {}, seen = new WeakSet<object>(), depth = 0): any {
+  const maxDepth = options.maxDepth ?? 24
+  const maxArrayLength = options.maxArrayLength ?? 200
+  const maxObjectKeys = options.maxObjectKeys ?? 200
+  if (value === null || value === undefined) return value
+  const valueType = typeof value
+  if (valueType === 'string' || valueType === 'number' || valueType === 'boolean') return value
+  if (valueType === 'bigint') return String(value)
+  if (valueType === 'function') return '[Function]'
+  if (valueType !== 'object') return String(value)
+  if (seen.has(value)) return '[Circular]'
+  if (depth >= maxDepth) return '[MaxDepth]'
+  seen.add(value)
+  if (Array.isArray(value)) {
+    const items = value.slice(0, maxArrayLength).map(item => sanitizeJsonValue(item, options, seen, depth + 1))
+    if (value.length > maxArrayLength) items.push(`[Truncated ${value.length - maxArrayLength} items]`)
+    seen.delete(value)
+    return items
   }
-  return next
+  const output: Record<string, any> = {}
+  const entries = Object.entries(value).slice(0, maxObjectKeys)
+  for (const [key, item] of entries) output[key] = sanitizeJsonValue(item, options, seen, depth + 1)
+  const extraKeyCount = Object.keys(value).length - entries.length
+  if (extraKeyCount > 0) output.__truncated_keys = extraKeyCount
+  seen.delete(value)
+  return output
+}
+
+export function safeJsonStringify(value: any, space?: number, maxChars = 8000) {
+  try {
+    const text = JSON.stringify(sanitizeJsonValue(value), null, space)
+    if (text === undefined) return 'null'
+    return maxChars > 0 && text.length > maxChars ? text.slice(0, maxChars) : text
+  } catch {
+    return JSON.stringify(String(value ?? ''))
+  }
+}
+
+function isMergeableObject(value: any) {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value))
+}
+
+export function deepMergeObjects(base: any, override: any): any {
+  if (!isMergeableObject(override)) return base
+  const seen = new WeakSet<object>()
+  const merge = (currentBase: any, currentOverride: any, depth = 0): any => {
+    if (!isMergeableObject(currentOverride)) return sanitizeJsonValue(currentOverride)
+    if (seen.has(currentOverride)) return '[Circular]'
+    if (depth >= 24) return sanitizeJsonValue(currentOverride, { maxDepth: 2 })
+    seen.add(currentOverride)
+    const next = isMergeableObject(currentBase) ? { ...sanitizeJsonValue(currentBase) } : {}
+    for (const [key, value] of Object.entries(currentOverride)) {
+      if (value && typeof value === 'object' && seen.has(value)) {
+        next[key] = '[Circular]'
+      } else if (isMergeableObject(value) && isMergeableObject(currentBase?.[key])) {
+        next[key] = merge(currentBase[key], value, depth + 1)
+      } else {
+        next[key] = sanitizeJsonValue(value)
+      }
+    }
+    seen.delete(currentOverride)
+    return next
+  }
+  return merge(base, override)
 }
 
 export function getStyleLock(project: any) {

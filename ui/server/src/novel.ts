@@ -66,11 +66,39 @@ function getNovelDbPath(activeWorkspace: string) { return join(activeWorkspace, 
 function toStringArray(value: any, fallback: string[] = []) { return Array.isArray(value) ? value.map(item => String(item)).filter(Boolean) : fallback }
 function toAnyArray(value: any, fallback: any[] = []) { return Array.isArray(value) ? value : fallback }
 function toJsonable(value: any, fallback: any = null) { return value === undefined ? fallback : value }
-function jsonText(value: any, fallback: any = []) { return JSON.stringify(value === undefined ? fallback : value) }
-function textValue(value: any, fallback = '') { return value === undefined || value === null ? fallback : (typeof value === 'string' ? value : JSON.stringify(value)) }
+function sanitizeJsonValue(value: any, seen = new WeakSet<object>(), depth = 0): any {
+  if (value === null || value === undefined) return value
+  const valueType = typeof value
+  if (valueType === 'string' || valueType === 'number' || valueType === 'boolean') return value
+  if (valueType === 'bigint') return String(value)
+  if (valueType === 'function') return '[Function]'
+  if (valueType !== 'object') return String(value)
+  if (seen.has(value)) return '[Circular]'
+  if (depth >= 40) return '[MaxDepth]'
+  seen.add(value)
+  if (Array.isArray(value)) {
+    const items = value.map(item => sanitizeJsonValue(item, seen, depth + 1))
+    seen.delete(value)
+    return items
+  }
+  const output: Record<string, any> = {}
+  for (const [key, item] of Object.entries(value)) output[key] = sanitizeJsonValue(item, seen, depth + 1)
+  seen.delete(value)
+  return output
+}
+function safeJsonText(value: any, space?: number) {
+  try {
+    const text = JSON.stringify(sanitizeJsonValue(value), null, space)
+    return text === undefined ? 'null' : text
+  } catch {
+    return JSON.stringify(String(value ?? ''))
+  }
+}
+function jsonText(value: any, fallback: any = []) { return safeJsonText(value === undefined ? fallback : value) }
+function textValue(value: any, fallback = '') { return value === undefined || value === null ? fallback : (typeof value === 'string' ? value : jsonText(value, fallback)) }
 function normalizeStore(store: Partial<NovelStore> | null | undefined): NovelStore { return { projects: Array.isArray(store?.projects) ? store!.projects : [], worldbuilding: Array.isArray(store?.worldbuilding) ? store!.worldbuilding : [], characters: Array.isArray(store?.characters) ? store!.characters : [], outlines: Array.isArray(store?.outlines) ? store!.outlines : [], chapters: Array.isArray(store?.chapters) ? store!.chapters : [], chapter_versions: Array.isArray(store?.chapter_versions) ? store!.chapter_versions : [], reviews: Array.isArray(store?.reviews) ? store!.reviews : [], runs: Array.isArray(store?.runs) ? store!.runs : [], setting_entities: Array.isArray(store?.setting_entities) ? store!.setting_entities : [], chapter_setting_usage: Array.isArray(store?.chapter_setting_usage) ? store!.chapter_setting_usage : [] } }
 async function readJsonStore(activeWorkspace: string): Promise<NovelStore> { try { return normalizeStore(JSON.parse(await readFile(getNovelStorePath(activeWorkspace), 'utf8')) as Partial<NovelStore>) } catch { return normalizeStore(null) } }
-async function writeJsonStore(activeWorkspace: string, store: NovelStore) { await writeFile(getNovelStorePath(activeWorkspace), `${JSON.stringify(normalizeStore(store), null, 2)}\n`, 'utf8') }
+async function writeJsonStore(activeWorkspace: string, store: NovelStore) { await writeFile(getNovelStorePath(activeWorkspace), `${safeJsonText(normalizeStore(store), 2)}\n`, 'utf8') }
 function dbPathFromEnv() { const raw = process.env.SQLITE_DATABASE_URL || process.env.DATABASE_URL || ''; if (!raw) return ''; if (raw.startsWith('file:')) return raw.slice(5).split('?', 1)[0]; return raw }
 function openDb(activeWorkspace: string) { return new Database(dbPathFromEnv() || getNovelDbPath(activeWorkspace)) }
 function parseDbArray(value: any) { try { return value ? JSON.parse(String(value)) : [] } catch { return [] } }
@@ -369,8 +397,8 @@ async function writeStore(activeWorkspace: string, store: NovelStore) {
     for (const c of normalized.characters) insert('INSERT INTO characters (id,project_id,name,role,role_type,archetype,personality,motivation,goal,conflict,abilities,backstory,relationships,relationship_graph,growth_arc,arc_hint,current_state,secret,appearance,status,version,raw_payload,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', [c.id,c.project_id,c.name,c.role||'',c.role_type||c.role||'',c.archetype||'',jsonText(c.personality),c.motivation||'',c.goal||'',c.conflict||'',jsonText(c.abilities),c.backstory||'',jsonText(c.relationships),jsonText(c.relationship_graph, {}),c.growth_arc||'',c.arc_hint||'',jsonText(c.current_state, {}),c.secret||'',c.appearance||'',c.status||'active',c.version||1,jsonText(c.raw_payload || c, {}),c.created_at||c.updated_at||nowIso(),c.updated_at||nowIso()])
     for (const o of normalized.outlines) insert('INSERT INTO outlines (id,project_id,outline_type,title,summary,beats,conflict_points,turning_points,hook,target_length,version,parent_id,raw_payload,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', [o.id,o.project_id,o.outline_type||'master',o.title,o.summary||'',jsonText(o.beats),jsonText(o.conflict_points),jsonText(o.turning_points),o.hook||'',o.target_length||'',o.version||1,o.parent_id ?? null,jsonText(o.raw_payload || o, {}),o.created_at||nowIso(),o.updated_at||nowIso()])
     for (const c of normalized.chapters) insert('INSERT INTO chapters (id,project_id,outline_id,chapter_no,title,chapter_goal,chapter_summary,conflict,ending_hook,chapter_text,scene_breakdown,scene_list,continuity_notes,items_in_play,foreshadowing,timeline_note,status,version,published_at,raw_payload,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', [c.id,c.project_id,c.outline_id ?? null,c.chapter_no,c.title,c.chapter_goal||'',c.chapter_summary||'',c.conflict||'',c.ending_hook||'',c.chapter_text||'',jsonText(c.scene_breakdown),jsonText(c.scene_list || c.scene_breakdown),jsonText(c.continuity_notes),jsonText(c.items_in_play),jsonText(c.foreshadowing),c.timeline_note||'',c.status||'draft',c.version||1,c.published_at||null,jsonText(c.raw_payload || c, {}),c.created_at||nowIso(),c.updated_at||nowIso()])
-    for (const v of normalized.chapter_versions) insert('INSERT INTO chapter_versions (id,chapter_id,project_id,version_no,chapter_text,scene_breakdown,continuity_notes,source,created_at) VALUES (?,?,?,?,?,?,?,?,?)', [v.id,v.chapter_id,v.project_id,v.version_no,v.chapter_text||'',JSON.stringify(v.scene_breakdown||[]),JSON.stringify(v.continuity_notes||[]),v.source||'manual_edit',v.created_at||nowIso()])
-    for (const r of normalized.reviews) insert('INSERT INTO reviews (id,project_id,review_type,status,summary,issues,payload,created_at) VALUES (?,?,?,?,?,?,?,?)', [r.id,r.project_id,r.review_type,r.status,r.summary||'',JSON.stringify(r.issues||[]),r.payload||'',r.created_at||nowIso()])
+    for (const v of normalized.chapter_versions) insert('INSERT INTO chapter_versions (id,chapter_id,project_id,version_no,chapter_text,scene_breakdown,continuity_notes,source,created_at) VALUES (?,?,?,?,?,?,?,?,?)', [v.id,v.chapter_id,v.project_id,v.version_no,v.chapter_text||'',jsonText(v.scene_breakdown||[]),jsonText(v.continuity_notes||[]),v.source||'manual_edit',v.created_at||nowIso()])
+    for (const r of normalized.reviews) insert('INSERT INTO reviews (id,project_id,review_type,status,summary,issues,payload,created_at) VALUES (?,?,?,?,?,?,?,?)', [r.id,r.project_id,r.review_type,r.status,r.summary||'',jsonText(r.issues||[]),r.payload||'',r.created_at||nowIso()])
     for (const r of normalized.runs) insert('INSERT INTO runs (id,project_id,run_type,step_name,status,input_ref,output_ref,duration_ms,error_message,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)', [r.id,r.project_id,r.run_type,r.step_name,r.status,r.input_ref||'',r.output_ref||'',r.duration_ms||0,r.error_message||'',r.created_at||nowIso()])
     for (const s of normalized.setting_entities) insert('INSERT INTO setting_entities (id,project_id,entity_type,name,summary,status,visibility,first_chapter_no,last_chapter_no,related_character_ids,related_chapter_ids,related_entity_ids,constraints_json,state_json,payload_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', [s.id,s.project_id,s.entity_type||'rule',s.name,s.summary||'',s.status||'active',s.visibility||'public',s.first_chapter_no ?? null,s.last_chapter_no ?? null,jsonText(s.related_character_ids, []),jsonText(s.related_chapter_ids, []),jsonText(s.related_entity_ids, []),jsonText(s.constraints_json, {}),jsonText(s.state_json, {}),jsonText(s.payload_json || s, {}),s.created_at||nowIso(),s.updated_at||nowIso()])
     for (const u of normalized.chapter_setting_usage) insert('INSERT INTO chapter_setting_usage (id,project_id,chapter_id,entity_id,usage_type,required,allowed,forbidden,reveal_level,expected_state_change,actual_state_change,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)', [u.id,u.project_id,u.chapter_id,u.entity_id,u.usage_type||'allowed',u.required ? 1 : 0,u.allowed === false ? 0 : 1,u.forbidden ? 1 : 0,u.reveal_level||'none',jsonText(u.expected_state_change, {}),jsonText(u.actual_state_change, {}),u.created_at||nowIso(),u.updated_at||nowIso()])
@@ -688,8 +716,8 @@ type UpdateNovelChapterOptions = { createVersion?: boolean; versionSource?: Nove
 function versionedChapterSnapshotChanged(current: NovelChapterRecord, next: NovelChapterRecord) {
   return (
     String(current.chapter_text || '') !== String(next.chapter_text || '') ||
-    JSON.stringify(current.scene_breakdown || []) !== JSON.stringify(next.scene_breakdown || []) ||
-    JSON.stringify(current.continuity_notes || []) !== JSON.stringify(next.continuity_notes || [])
+    jsonText(current.scene_breakdown || []) !== jsonText(next.scene_breakdown || []) ||
+    jsonText(current.continuity_notes || []) !== jsonText(next.continuity_notes || [])
   )
 }
 function createChapterVersionRecord(store: NovelStore, data: Partial<NovelChapterVersionRecord>): NovelChapterVersionRecord { return { id: store.chapter_versions.reduce((max, item) => Math.max(max, item.id), 0) + 1, chapter_id: Number(data.chapter_id || 0), project_id: Number(data.project_id || 0), version_no: Number(data.version_no || 1), chapter_text: String(data.chapter_text || ''), scene_breakdown: toAnyArray(data.scene_breakdown), continuity_notes: toStringArray(data.continuity_notes), source: data.source || 'manual_edit', created_at: String(data.created_at || nowIso()) } }

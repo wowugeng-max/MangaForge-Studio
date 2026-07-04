@@ -43,19 +43,15 @@ import {
   getVolumePlan,
   normalizeIssue,
   parseJsonLikePayload,
+  safeJsonStringify as stringifyRouteJsonSafely,
 } from './novel-route-utils'
 
 const STORYLINE_TYPES = ['mainline', 'subplot', 'character_arc', 'relationship_arc', 'faction_arc', 'foreshadowing_arc']
 const DISCOVERED_ASSET_TYPES = ['character', 'item', 'ability', 'faction', 'location', 'foreshadowing']
 
 function safeJsonStringify(value: any, fallback?: string, maxLength = 0) {
-  try {
-    const text = JSON.stringify(value)
-    if (maxLength > 0 && text.length > maxLength) return `${text.slice(0, maxLength)}...`
-    return text
-  } catch {
-    return fallback || ''
-  }
+  const text = stringifyRouteJsonSafely(value, undefined, maxLength)
+  return text || fallback || ''
 }
 
 function proseQualityJson(value: any) {
@@ -5209,7 +5205,7 @@ export function buildProseWordTargetExpansionPrompt(project: any, contextPackage
     '如果原文有跳跃、略写或只写结果的段落，请在原位置自然补充过程；如果对话过少，请补充带冲突目标的对话；如果章末钩子过弱，请强化但不要开启下一章剧情。',
     '',
     '【结构化上下文包】',
-    JSON.stringify(contextPackage || {}, null, 2).slice(0, 9000),
+    stringifyRouteJsonSafely(contextPackage || {}, 2, 9000),
     '',
     '【当前过短正文】',
     chapterText.slice(0, 18000),
@@ -5266,7 +5262,7 @@ export function buildCommercialEditorRewritePrompt(project: any, contextPackage:
     '12. 修订守恒：不得改写主线事实，不得新增支线、设定、关系或时间线；只能压缩水文、补足缺过程的动作/对话/反应、替换 AI 腔表达，并保留原本有效的伏笔、钩子、角色状态和设定边界。',
     '',
     '【结构化上下文包】',
-    JSON.stringify(contextPackage || {}, null, 2).slice(0, 10000),
+    stringifyRouteJsonSafely(contextPackage || {}, 2, 10000),
     '',
     '【待改稿正文】',
     chapterText.slice(0, 22000),
@@ -5795,7 +5791,7 @@ function sceneBriefFromCard(card: any, index: number) {
     reversal: compactBriefText(card?.reversal || card?.turning_point),
     ending_hook_seed: compactBriefText(card?.ending_hook_seed || card?.ending_hook || card?.exit_state),
     word_budget: compactBriefText(card?.word_budget || card?.description_budget),
-    serial_risk_repairs: asArray(card?.serial_risk_repairs || card?.serialRiskRepairs || card?.risk_repairs || card?.riskRepairs).map((item: any) => compactBriefText(typeof item === 'string' ? item : JSON.stringify(item))).filter(Boolean),
+    serial_risk_repairs: asArray(card?.serial_risk_repairs || card?.serialRiskRepairs || card?.risk_repairs || card?.riskRepairs).map((item: any) => compactJsonBriefText(item)).filter(Boolean),
     recent_fatigue_action: compactBriefText(card?.recent_fatigue_action || card?.recentFatigueAction || card?.fatigue_repair_action || card?.fatigueRepairAction),
     character_voice: compactBriefText(card?.character_voice || card?.characterVoice || card?.voice_focus || card?.voiceFocus),
     dialogue_goals: asArray(card?.dialogue_goals || card?.dialogueGoals || card?.dialogue_contract_goals || card?.dialogueContractGoals).map((item: any) => compactBriefText(item)).filter(Boolean),
@@ -49409,7 +49405,7 @@ export function normalizeSceneCardsPayload(payload: any, contextPackage: any = {
     concept_anchor_rules: asArray(card?.concept_anchor_rules || card?.conceptAnchorRules || card?.new_concept_anchor_rules || card?.newConceptAnchorRules).map((item: any) => String(item)).filter(Boolean),
     prose_craft_directives: asArray(card?.prose_craft_directives || card?.proseCraftDirectives || card?.prose_craft_rules || card?.proseCraftRules).map((item: any) => String(item)).filter(Boolean),
     sensory_anchor: String(card?.sensory_anchor || card?.sensoryAnchor || ''),
-    serial_risk_repairs: asArray(card?.serial_risk_repairs || card?.serialRiskRepairs || card?.risk_repairs || card?.riskRepairs).map((item: any) => String(typeof item === 'string' ? item : JSON.stringify(item))).filter(Boolean),
+    serial_risk_repairs: asArray(card?.serial_risk_repairs || card?.serialRiskRepairs || card?.risk_repairs || card?.riskRepairs).map((item: any) => compactJsonBriefText(item)).filter(Boolean),
     recent_fatigue_action: String(card?.recent_fatigue_action || card?.recentFatigueAction || card?.fatigue_repair_action || card?.fatigueRepairAction || ''),
     relationship_progression_plan: String(card?.relationship_progression_plan || card?.relationshipProgressionPlan || ''),
     relationship_buffer_zone: String(card?.relationship_buffer_zone || card?.relationshipBufferZone || ''),
@@ -49440,7 +49436,7 @@ export function normalizeSceneCardsPayload(payload: any, contextPackage: any = {
     item_beats: asArray(card?.item_beats || card?.itemBeats).map((item: any) => String(item)).filter(Boolean),
     boss_move: String(card?.boss_move || card?.bossMove || ''),
     rule_trigger: String(card?.rule_trigger || card?.ruleTrigger || ''),
-    state_changes_expected: asArray(card?.state_changes_expected || card?.stateChangesExpected).map((item: any) => String(typeof item === 'string' ? item : JSON.stringify(item))).filter(Boolean),
+    state_changes_expected: asArray(card?.state_changes_expected || card?.stateChangesExpected).map((item: any) => compactJsonBriefText(item)).filter(Boolean),
     turning_point: String(card?.turning_point || card?.turningPoint || ''),
     description_budget: String(card?.description_budget || card?.descriptionBudget || card?.sensory_budget || card?.sensoryBudget || 'low'),
     density_level: String(card?.density_level || card?.densityLevel || ''),

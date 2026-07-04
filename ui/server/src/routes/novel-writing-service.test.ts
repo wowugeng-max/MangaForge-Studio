@@ -235,9 +235,44 @@ import {
   proseMaxTokensForWordTarget,
   resolveChapterWordTarget,
 } from './novel-writing-service'
-import { buildLLMResultDiagnostics, buildPreflightChecks, extractPlainProseFallback, formatReviewIssueForStorage, getNovelPayload, getQualityGateDecision, getStyleLock, normalizeIssue } from './novel-route-utils'
+import { buildLLMResultDiagnostics, buildPreflightChecks, deepMergeObjects, extractPlainProseFallback, formatReviewIssueForStorage, getNovelPayload, getQualityGateDecision, getStyleLock, normalizeIssue } from './novel-route-utils'
+
+describe('deepMergeObjects', () => {
+  test('merges cyclic overrides without overflowing', () => {
+    const override: any = { chapter_target: { title: '旧法失准' } }
+    override.chapter_target.self = override.chapter_target
+
+    const merged = deepMergeObjects({ chapter_target: { chapter_no: 2, title: '旧题' } }, override)
+
+    expect(merged.chapter_target.chapter_no).toBe(2)
+    expect(merged.chapter_target.title).toBe('旧法失准')
+    expect(merged.chapter_target.self).toBe('[Circular]')
+  })
+})
 
 describe('normalizeSceneCardsPayload', () => {
+  test('normalizes cyclic repair arrays without overflowing', () => {
+    const cyclicRepair: any = { key: 'delivery_risk_carry_over', risk: '承接风险' }
+    cyclicRepair.self = cyclicRepair
+    const cyclicChange: any = { change: '局势改变' }
+    cyclicChange.self = cyclicChange
+
+    const sceneCards = normalizeSceneCardsPayload({
+      scene_cards: [{
+        title: '红雾深处',
+        purpose: '江哲确认旧办法是否失效。',
+        conflict: '规则反噬会扩大裂缝。',
+        reader_payoff: '旧答案变成新证据。',
+        serial_risk_repairs: [cyclicRepair],
+        state_changes_expected: [cyclicChange],
+      }],
+    })
+
+    expect(sceneCards).toHaveLength(1)
+    expect(sceneCards[0].serial_risk_repairs.join('；')).toContain('delivery_risk_carry_over')
+    expect(sceneCards[0].state_changes_expected.join('；')).toContain('局势改变')
+  })
+
   test('preserves scene-card sensory anchors for prose execution', () => {
     const sceneCards = normalizeSceneCardsPayload({
       scene_cards: [
@@ -10403,6 +10438,29 @@ describe('chapter prose word target', () => {
     expect(prompt).toContain('扩写动作过程、选择代价、对话交锋、章末钩子铺垫')
   })
 
+  test('serializes circular context packages in expansion prompts', () => {
+    const target = resolveChapterWordTarget({}, { chapter_no: 1 }, {})
+    const evaluation = evaluateProseWordTarget('字'.repeat(1732), target)
+    const contextPackage: any = {
+      chapter_target: {
+        chapter_no: 1,
+        title: '循环上下文',
+        word_target: target,
+      },
+    }
+    contextPackage.self = contextPackage
+
+    const prompt = buildProseWordTargetExpansionPrompt(
+      { title: '循环测试' },
+      contextPackage,
+      '字'.repeat(1732),
+      evaluation,
+    )
+
+    expect(prompt).toContain('[Circular]')
+    expect(prompt).toContain('循环上下文')
+  })
+
   test('requires word-target expansion to preserve scene anchors and execution receipts', () => {
     const target = resolveChapterWordTarget({}, { chapter_no: 1 }, {})
     const evaluation = evaluateProseWordTarget('字'.repeat(1732), target)
@@ -17333,6 +17391,26 @@ describe('chapter prose word target', () => {
     expect(prompt).toContain('修订守恒')
     expect(prompt).toContain('不得改写主线事实')
     expect(prompt).toContain('不得新增支线、设定、关系或时间线')
+  })
+
+  test('serializes circular context packages in commercial editor rewrite prompts', () => {
+    const contextPackage: any = {
+      chapter_target: {
+        chapter_no: 2,
+        title: '循环改稿',
+        word_target: resolveChapterWordTarget({}, { chapter_no: 2 }, {}),
+      },
+    }
+    contextPackage.self = contextPackage
+
+    const prompt = buildCommercialEditorRewritePrompt(
+      { title: '循环测试' },
+      contextPackage,
+      '初稿正文',
+    )
+
+    expect(prompt).toContain('[Circular]')
+    expect(prompt).toContain('循环改稿')
   })
 
   test('reads runtime camelCase chapterTarget word target when building editor rewrite prompts', () => {
