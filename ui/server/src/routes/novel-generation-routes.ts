@@ -439,8 +439,8 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
         run_type: 'chapter_group_generation',
         step_name: `chapter-${startNo}-${startNo + count - 1}`,
         status: 'ready',
-        input_ref: JSON.stringify(req.body || {}),
-        output_ref: JSON.stringify(output),
+        input_ref: stringifyNovelGenerationPayload(req.body || {}),
+        output_ref: stringifyNovelGenerationPayload(output),
       })
       res.json({ ok: true, run, group: output })
     } catch (error) {
@@ -530,8 +530,8 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
         run_type: 'chapter_group_generation',
         step_name: `ready-chapter-${firstNo}-${lastNo}`,
         status: 'ready',
-        input_ref: JSON.stringify(req.body || {}),
-        output_ref: JSON.stringify(output),
+        input_ref: stringifyNovelGenerationPayload(req.body || {}),
+        output_ref: stringifyNovelGenerationPayload(output),
       })
       res.json({
         ok: true,
@@ -683,8 +683,8 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
         run_type: 'chapter_group_generation',
         step_name: `future100-chapter-${firstNo}-${lastNo}`,
         status: 'ready',
-        input_ref: JSON.stringify(req.body || {}),
-        output_ref: JSON.stringify(output),
+        input_ref: stringifyNovelGenerationPayload(req.body || {}),
+        output_ref: stringifyNovelGenerationPayload(output),
       })
       res.json({
         ok: true,
@@ -931,8 +931,8 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
         run_type: 'chapter_group_generation',
         step_name: `unattended-chapter-${startNo}-${targetNo}`,
         status: 'ready',
-        input_ref: JSON.stringify(req.body || {}),
-        output_ref: JSON.stringify(output),
+        input_ref: stringifyNovelGenerationPayload(req.body || {}),
+        output_ref: stringifyNovelGenerationPayload(output),
       })
       res.json({
         ok: true,
@@ -1010,7 +1010,7 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
       }
       const updated = await updateNovelRun(activeWorkspace, run.id, {
         status: 'ready',
-        output_ref: JSON.stringify({ ...payload, chapters, current_index: index, phase: `第${item.chapter_no}章已确认，等待继续执行`, approved_at: new Date().toISOString() }),
+        output_ref: stringifyNovelGenerationPayload({ ...payload, chapters, current_index: index, phase: `第${item.chapter_no}章已确认，等待继续执行`, approved_at: new Date().toISOString() }),
         error_message: '',
       })
       res.json({ ok: true, run: updated, group: parseJsonLikePayload(updated?.output_ref) })
@@ -1037,7 +1037,7 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
       chapters[index] = { ...chapters[index], status: 'ready', next_run_at: '', error: '', error_code: '' }
       const updated = await updateNovelRun(activeWorkspace, run.id, {
         status: 'ready',
-        output_ref: JSON.stringify({ ...payload, chapters, current_index: index, phase: `第${chapters[index].chapter_no}章已加入立即重试` }),
+        output_ref: stringifyNovelGenerationPayload({ ...payload, chapters, current_index: index, phase: `第${chapters[index].chapter_no}章已加入立即重试` }),
         error_message: '',
       })
       res.json({ ok: true, run: updated, group: parseJsonLikePayload(updated?.output_ref) })
@@ -1076,7 +1076,7 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
       }
       const updated = await updateNovelRun(activeWorkspace, run.id, {
         status: 'ready',
-        output_ref: JSON.stringify({
+        output_ref: stringifyNovelGenerationPayload({
           ...payload,
           chapters,
           current_index: nextIndex,
@@ -1124,7 +1124,7 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
       const run = runs.find(item => item.id === Number(req.params.id))
       if (!run) return res.status(404).json({ error: 'run not found' })
       const payload = parseJsonLikePayload(run.output_ref) || {}
-      const plan = ctx.classifyGenerationFailure({ message: run.error_message || payload?.error || payload?.last_error?.error || JSON.stringify(payload).slice(0, 500), code: payload?.last_error?.error_code || payload?.error_code })
+      const plan = ctx.classifyGenerationFailure({ message: run.error_message || payload?.error || payload?.last_error?.error || stringifyNovelGenerationPayload(payload).slice(0, 500), code: payload?.last_error?.error_code || payload?.error_code })
       res.json({ ok: true, plan, run_id: run.id, status: run.status })
     } catch (error) {
       res.status(500).json({ error: String(error) })
@@ -1199,8 +1199,8 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
         run_type: 'chapter_generation_pipeline',
         step_name: `chapter-${chapter.chapter_no}`,
         status: req.body?.generate_scene_cards === true ? 'paused' : 'ready',
-        input_ref: JSON.stringify(req.body || {}),
-        output_ref: JSON.stringify(output),
+        input_ref: stringifyNovelGenerationPayload(req.body || {}),
+        output_ref: stringifyNovelGenerationPayload(output),
       })
       res.json({ ok: true, run, pipeline: output, chapter: updatedChapter })
     } catch (error) {
@@ -1242,8 +1242,8 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
           run_type: 'scene_cards',
           step_name: `chapter-${chapter.chapter_no}`,
           status: 'failed',
-          input_ref: JSON.stringify(req.body),
-          output_ref: JSON.stringify({ error: '模型未返回场景卡', llm_diagnostics: diagnostics, runtime_selection: (result.result as any)?.runtimeSelection || null, config_snapshot: configSnapshot }),
+          input_ref: stringifyNovelGenerationPayload(req.body),
+          output_ref: stringifyNovelGenerationPayload({ error: '模型未返回场景卡', llm_diagnostics: diagnostics, runtime_selection: (result.result as any)?.runtimeSelection || null, config_snapshot: configSnapshot }),
           error_message: '模型未返回场景卡',
         })
         return res.status(502).json({ error: '模型未返回场景卡', result: result.result, llm_diagnostics: diagnostics })
@@ -1253,7 +1253,7 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
         scene_list: result.sceneCards,
         raw_payload: { ...(chapter.raw_payload || {}), scene_cards_source: 'manual_pipeline' },
       } as any, { createVersion: false })
-      await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'scene_cards', step_name: `chapter-${chapter.chapter_no}`, status: 'success', input_ref: JSON.stringify(req.body), output_ref: JSON.stringify({ scene_cards: result.sceneCards, modelName: (result.result as any).modelName, config_snapshot: configSnapshot }) })
+      await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'scene_cards', step_name: `chapter-${chapter.chapter_no}`, status: 'success', input_ref: stringifyNovelGenerationPayload(req.body), output_ref: stringifyNovelGenerationPayload({ scene_cards: result.sceneCards, modelName: (result.result as any).modelName, config_snapshot: configSnapshot }) })
       res.json({ chapter: updated, scene_cards: result.sceneCards, result: result.result })
     } catch (error) {
       res.status(500).json({ error: String(error) })

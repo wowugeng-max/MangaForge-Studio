@@ -20,6 +20,18 @@ describe('novel generate prose route source guards', () => {
     expect(parsed.context_package.self).toBe('[Circular]')
   })
 
+  test('uses safe serialization for generation run payloads', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-generation-routes.ts'), 'utf8')
+
+    expect(source).not.toContain('input_ref: JSON.stringify(req.body || {})')
+    expect(source).not.toContain('output_ref: JSON.stringify(output)')
+    expect(source).not.toContain('output_ref: JSON.stringify({ ...payload, chapters')
+    expect(source).not.toContain('JSON.stringify(payload).slice(0, 500)')
+    expect(source).not.toContain('input_ref: JSON.stringify(req.body)')
+    expect(source).not.toContain("output_ref: JSON.stringify({ error: '模型未返回场景卡'")
+    expect(source).not.toContain('output_ref: JSON.stringify({ scene_cards: result.sceneCards')
+  })
+
   test('selects camelCase prose chapter payloads from direct draft generation', () => {
     const selected = selectTargetProsePayload({
       proseChapters: [
