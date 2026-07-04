@@ -10711,6 +10711,12 @@ describe('chapter prose word target', () => {
     expect(target.label).toContain('标准章')
   })
 
+  test('budgets enough output tokens for reasoning-heavy prose models on standard chapters', () => {
+    const target = resolveChapterWordTarget({}, { chapter_no: 3 }, {})
+
+    expect(proseMaxTokensForWordTarget(target)).toBeGreaterThanOrEqual(16000)
+  })
+
   test('injects long chapter target into paragraph prose prompt and raises token budget', () => {
     const target = resolveChapterWordTarget({}, { chapter_no: 12 }, { word_target_mode: 'long' })
     const service = createNovelWritingService({

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'fs'
 import { join } from 'path'
-import { applyRequestBatchPreflight, extractOhStoryDeliveryReceipts, refreshOhStoryDeliveryReceiptsAfterRevision, selectTargetProsePayload, stringifyNovelGenerationPayload } from './novel-generation-routes'
+import { applyRequestBatchPreflight, compactGenerationRequestOverride, extractOhStoryDeliveryReceipts, refreshOhStoryDeliveryReceiptsAfterRevision, selectTargetProsePayload, stringifyNovelGenerationPayload } from './novel-generation-routes'
 
 describe('novel generate prose route source guards', () => {
   test('serializes circular generation payloads without losing shared arrays', () => {
@@ -30,6 +30,41 @@ describe('novel generate prose route source guards', () => {
     expect(source).not.toContain('input_ref: JSON.stringify(req.body)')
     expect(source).not.toContain("output_ref: JSON.stringify({ error: '模型未返回场景卡'")
     expect(source).not.toContain('output_ref: JSON.stringify({ scene_cards: result.sceneCards')
+  })
+
+  test('compacts bulky generate-prose request overrides before injecting them into model context', () => {
+    const huge = '诊断详情'.repeat(20000)
+    const compacted = compactGenerationRequestOverride({
+      status: 'blocked',
+      label: '本章开写门禁未通过',
+      summary: huge,
+      signals: Array.from({ length: 30 }, (_, index) => ({
+        key: `signal-${index}`,
+        label: `信号 ${index}`,
+        status: index === 0 ? 'block' : 'ok',
+        detail: huge,
+        debug: { chapters: Array.from({ length: 100 }, () => huge) },
+      })),
+      pipeline: Array.from({ length: 200 }, () => ({ detail: huge })),
+      context_package: { huge },
+      raw_payload: { huge },
+    })
+    const text = JSON.stringify(compacted)
+
+    expect(text.length).toBeLessThan(12000)
+    expect(text).not.toContain(huge)
+    expect(compacted).toMatchObject({
+      status: 'blocked',
+      label: '本章开写门禁未通过',
+    })
+    expect(compacted.summary.length).toBeLessThan(900)
+    expect(compacted.signals).toHaveLength(12)
+    expect(compacted.signals[0]).toMatchObject({
+      key: 'signal-0',
+      status: 'block',
+    })
+    expect(compacted.context_package).toBeUndefined()
+    expect(compacted.raw_payload).toBeUndefined()
   })
 
   test('selects camelCase prose chapter payloads from direct draft generation', () => {
@@ -548,7 +583,8 @@ describe('novel generate prose route source guards', () => {
 
     expect(setupBlock).toContain('applyRequestLongformCompass(')
     expect(source).toContain('req.body?.longform_compass')
-    expect(source).toContain('chapter_target: { ...contextPackage.chapter_target, longform_compass: req.body.longform_compass }')
+    expect(source).toContain('const longformCompass = compactGenerationRequestOverride(req.body.longform_compass)')
+    expect(source).toContain('chapter_target: { ...contextPackage.chapter_target, longform_compass: longformCompass }')
   })
 
   test('applies longform battle context override from generate-prose requests', () => {
@@ -559,7 +595,8 @@ describe('novel generate prose route source guards', () => {
 
     expect(setupBlock).toContain('applyRequestLongformBattleContext(')
     expect(source).toContain('req.body?.longform_battle_context')
-    expect(source).toContain('chapter_target: { ...contextPackage.chapter_target, longform_battle_context: req.body.longform_battle_context }')
+    expect(source).toContain('const longformBattleContext = compactGenerationRequestOverride(req.body.longform_battle_context)')
+    expect(source).toContain('chapter_target: { ...contextPackage.chapter_target, longform_battle_context: longformBattleContext }')
   })
 
   test('applies next batch brief override from generate-prose requests', () => {
@@ -570,7 +607,8 @@ describe('novel generate prose route source guards', () => {
 
     expect(setupBlock).toContain('applyRequestNextBatchBrief(')
     expect(source).toContain('req.body?.next_batch_brief')
-    expect(source).toContain('chapter_target: { ...contextPackage.chapter_target, next_batch_brief: req.body.next_batch_brief }')
+    expect(source).toContain('const nextBatchBrief = compactGenerationRequestOverride(req.body.next_batch_brief)')
+    expect(source).toContain('chapter_target: { ...contextPackage.chapter_target, next_batch_brief: nextBatchBrief }')
   })
 
   test('applies chapter launch gate override from generate-prose requests', () => {
@@ -581,7 +619,8 @@ describe('novel generate prose route source guards', () => {
 
     expect(setupBlock).toContain('applyRequestChapterLaunchGate(')
     expect(source).toContain('req.body?.chapter_launch_gate')
-    expect(source).toContain('chapter_target: { ...contextPackage.chapter_target, chapter_launch_gate: req.body.chapter_launch_gate }')
+    expect(source).toContain('const chapterLaunchGate = compactGenerationRequestOverride(req.body.chapter_launch_gate)')
+    expect(source).toContain('chapter_target: { ...contextPackage.chapter_target, chapter_launch_gate: chapterLaunchGate }')
   })
 
   test('applies safe batch preflight override from generate-prose requests', () => {
@@ -592,10 +631,11 @@ describe('novel generate prose route source guards', () => {
 
     expect(setupBlock).toContain('applyRequestBatchPreflight(')
     expect(source).toContain('req.body?.batch_preflight || req.body?.batchPreflight')
-    expect(source).toContain('const deliveryRiskCarryOver = batchPreflight?.delivery_risk_carry_over')
-    expect(source).toContain('const chapterHandoffContract = batchPreflight?.chapter_handoff_contract')
+    expect(source).toContain('const deliveryRiskCarryOver = compactGenerationRequestOverride(batchPreflight?.delivery_risk_carry_over')
+    expect(source).toContain('const chapterHandoffContract = compactGenerationRequestOverride(batchPreflight?.chapter_handoff_contract')
     expect(source).toContain('const previousHandoff = chapterHandoffContract?.previous_handoff')
-    expect(source).toContain('batch_preflight: batchPreflight')
+    expect(source).toContain('const compactBatchPreflight = compactGenerationRequestOverride(batchPreflight)')
+    expect(source).toContain('batch_preflight: compactBatchPreflight')
     expect(source).toContain('delivery_risk_carry_over: deliveryRiskCarryOver')
     expect(source).toContain('chapter_handoff_contract: chapterHandoffContract')
     expect(source).toContain('previous_handoff: previousHandoff')
@@ -641,7 +681,8 @@ describe('novel generate prose route source guards', () => {
 
     expect(setupBlock).toContain('applyRequestMillionWordRunway(')
     expect(source).toContain('req.body?.million_word_runway')
-    expect(source).toContain('chapter_target: { ...contextPackage.chapter_target, million_word_runway: req.body.million_word_runway }')
+    expect(source).toContain('const millionWordRunway = compactGenerationRequestOverride(req.body.million_word_runway)')
+    expect(source).toContain('chapter_target: { ...contextPackage.chapter_target, million_word_runway: millionWordRunway }')
   })
 
   test('runs commercial editor rewrite after word-target expansion and before self-review', () => {

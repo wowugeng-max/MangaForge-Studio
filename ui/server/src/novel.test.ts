@@ -1,11 +1,18 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdtemp, rm } from 'fs/promises'
+import { mkdtemp, rm, stat, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
+import { Database } from 'bun:sqlite'
 import {
+  appendNovelRun,
+  compactNovelStorage,
   createNovelChapter,
   createNovelProject,
+  createNovelReview,
   listNovelChapters,
+  listNovelProjects,
+  listNovelReviews,
+  listNovelRuns,
   upsertNovelChapterByNumber,
 } from './novel'
 
@@ -17,9 +24,182 @@ async function tempWorkspace() {
   return workspace
 }
 
+async function exists(path: string) {
+  try {
+    await stat(path)
+    return true
+  } catch {
+    return false
+  }
+}
+
 afterEach(async () => {
   await Promise.all(workspaces.map(workspace => rm(workspace, { recursive: true, force: true })))
   workspaces = []
+})
+
+describe('novel sqlite persistence', () => {
+  test('does not create the legacy json mirror during normal writes', async () => {
+    const workspace = await tempWorkspace()
+
+    await createNovelProject(workspace, { title: '只写 SQLite' })
+
+    expect(await exists(join(workspace, 'novel.sqlite'))).toBe(true)
+    expect(await exists(join(workspace, 'novel-store.json'))).toBe(false)
+  })
+
+  test('imports legacy json only when sqlite is empty', async () => {
+    const workspace = await tempWorkspace()
+    const legacyStore = {
+      projects: [{ id: 77, title: '旧 JSON 项目', updated_at: '2026-01-01T00:00:00.000Z' }],
+      worldbuilding: [],
+      characters: [],
+      outlines: [],
+      chapters: [],
+      chapter_versions: [],
+      reviews: [],
+      runs: [],
+      setting_entities: [],
+      chapter_setting_usage: [],
+    }
+    await writeFile(join(workspace, 'novel-store.json'), `${JSON.stringify(legacyStore)}\n`, 'utf8')
+
+    const projects = await listNovelProjects(workspace)
+    await writeFile(join(workspace, 'novel-store.json'), `${JSON.stringify({
+      ...legacyStore,
+      projects: [{ id: 88, title: '不应覆盖 SQLite', updated_at: '2026-01-02T00:00:00.000Z' }],
+    })}\n`, 'utf8')
+    const projectsAfterJsonChange = await listNovelProjects(workspace)
+
+    expect(projects.map(item => item.title)).toEqual(['旧 JSON 项目'])
+    expect(projectsAfterJsonChange.map(item => item.title)).toEqual(['旧 JSON 项目'])
+  })
+})
+
+describe('novel diagnostic payload compaction', () => {
+  test('caps oversized run refs and review payloads before persistence', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: '日志压缩测试' })
+    const hugeText = '上下文'.repeat(40000)
+
+    await appendNovelRun(workspace, {
+      project_id: project.id,
+      run_type: 'generate_prose',
+      step_name: 'chapter-1',
+      status: 'success',
+      input_ref: hugeText,
+      output_ref: JSON.stringify({ context_package: { hugeText }, final_text: '正文' }),
+    })
+    await createNovelReview(workspace, {
+      project_id: project.id,
+      review_type: 'prose_quality',
+      status: 'ok',
+      summary: '诊断摘要',
+      payload: JSON.stringify({ context_package: { hugeText }, issues: [] }),
+    })
+
+    const [run] = await listNovelRuns(workspace, project.id)
+    const [review] = await listNovelReviews(workspace, project.id)
+
+    expect(run.input_ref.length).toBeLessThan(70000)
+    expect(run.output_ref.length).toBeLessThan(70000)
+    expect(review.payload?.length || 0).toBeLessThan(70000)
+    expect(run.input_ref).toContain('"truncated":true')
+    expect(run.output_ref).toContain('"omitted":true')
+    expect(review.payload).toContain('"omitted":true')
+    expect(run.output_ref).not.toContain(hugeText)
+    expect(review.payload).not.toContain(hugeText)
+  })
+
+  test('compacts existing oversized sqlite payload columns without loading the full store', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: '历史清理测试' })
+    const chapter = await createNovelChapter(workspace, {
+      project_id: project.id,
+      chapter_no: 1,
+      title: '第一章',
+      raw_payload: { keep: '章节蓝图', context_package: { hugeText: '旧上下文'.repeat(50000) } },
+    })
+    await appendNovelRun(workspace, {
+      project_id: project.id,
+      run_type: 'generate_prose',
+      step_name: 'chapter-1',
+      status: 'success',
+      output_ref: '旧输出'.repeat(50000),
+    })
+    await createNovelReview(workspace, {
+      project_id: project.id,
+      review_type: 'prose_quality',
+      status: 'ok',
+      payload: '旧诊断'.repeat(50000),
+    })
+
+    const db = new Database(join(workspace, 'novel.sqlite'))
+    try {
+      db.query('UPDATE runs SET output_ref=?').run('历史 run'.repeat(50000))
+      db.query('UPDATE reviews SET payload=?').run('历史 review'.repeat(50000))
+      db.query('UPDATE chapters SET raw_payload=? WHERE id=?').run(JSON.stringify({
+        keep: '章节蓝图',
+        context_package: { hugeText: '历史上下文'.repeat(50000) },
+      }), chapter.id)
+    } finally {
+      db.close()
+    }
+
+    const result = await compactNovelStorage(workspace)
+    const dbAfter = new Database(join(workspace, 'novel.sqlite'))
+    try {
+      const lengths = dbAfter.query(`
+        SELECT
+          (SELECT length(output_ref) FROM runs LIMIT 1) AS run_bytes,
+          (SELECT length(payload) FROM reviews LIMIT 1) AS review_bytes,
+          (SELECT length(raw_payload) FROM chapters WHERE id=? LIMIT 1) AS chapter_bytes
+      `).get(chapter.id) as any
+      const chapterPayload = JSON.parse(String((dbAfter.query('SELECT raw_payload FROM chapters WHERE id=?').get(chapter.id) as any).raw_payload || '{}'))
+
+      expect(result.compacted).toBeGreaterThanOrEqual(3)
+      expect(lengths.run_bytes).toBeLessThan(70000)
+      expect(lengths.review_bytes).toBeLessThan(70000)
+      expect(lengths.chapter_bytes).toBeLessThan(70000)
+      expect(chapterPayload.keep).toBe('章节蓝图')
+      expect(chapterPayload.context_package).toMatchObject({ omitted: true, reason: 'storage_compaction' })
+    } finally {
+      dbAfter.close()
+    }
+  })
+
+  test('does not persist nested raw payload or chapter text copies inside chapter raw payload', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: '章节原始载荷去重测试' })
+    const chapter = await createNovelChapter(workspace, {
+      project_id: project.id,
+      chapter_no: 1,
+      title: '第一章',
+      chapter_text: '正文内容'.repeat(1000),
+      raw_payload: {
+        blueprint: '保留蓝图',
+        raw_payload: { nested: '不应该继续嵌套' },
+      },
+    })
+
+    const updated = await createNovelChapter(workspace, {
+      project_id: project.id,
+      chapter_no: 2,
+      title: '第二章',
+      raw_payload: {
+        previous: chapter.raw_payload,
+        chapter_text: '正文副本'.repeat(1000),
+      },
+    })
+    const chapters = await listNovelChapters(workspace, project.id)
+    const second = chapters.find(item => item.id === updated.id)!
+
+    expect(second.raw_payload.previous.blueprint).toBe('保留蓝图')
+    expect(second.raw_payload.raw_payload).toBeUndefined()
+    expect(second.raw_payload.previous.raw_payload).toBeUndefined()
+    expect(second.raw_payload.chapter_text).toEqual({ omitted: true, reason: 'storage_compaction' })
+    expect(JSON.stringify(second.raw_payload).length).toBeLessThan(5000)
+  })
 })
 
 describe('upsertNovelChapterByNumber', () => {

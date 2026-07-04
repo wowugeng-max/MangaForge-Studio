@@ -1,4 +1,4 @@
-import { readFile, writeFile } from 'fs/promises'
+import { readFile } from 'fs/promises'
 import { join } from 'path'
 import { Database } from 'bun:sqlite'
 
@@ -94,11 +94,134 @@ function safeJsonText(value: any, space?: number) {
     return JSON.stringify(String(value ?? ''))
   }
 }
+const MAX_PERSISTED_DIAGNOSTIC_CHARS = 60000
+const STORAGE_PREVIEW_CHARS = 4000
+const LARGE_DIAGNOSTIC_KEYS = new Set([
+  'context_package',
+  'contextPackage',
+  'paragraph_task',
+  'paragraphTask',
+  'prompt',
+  'raw_prompt',
+  'rawPrompt',
+  'full_prompt',
+  'fullPrompt',
+  'messages',
+  'chapter_text',
+  'chapterText',
+  'final_text',
+  'finalText',
+  'revised_text',
+  'revisedText',
+  'full_text',
+  'fullText',
+])
+const NESTED_STORAGE_KEYS = new Set(['raw_payload', 'rawPayload'])
+
+function storageOmitted(reason = 'storage_compaction', extra: Record<string, any> = {}) {
+  return { omitted: true, reason, ...extra }
+}
+
+function compactContextPackageForStorage(value: any) {
+  const target = value?.chapter_target || value?.chapterTarget || {}
+  const project = value?.project || {}
+  const preflight = value?.preflight || {}
+  return storageOmitted('storage_compaction', {
+    summary: {
+      project_id: value?.project_id ?? project?.id ?? null,
+      project_title: value?.project_title ?? project?.title ?? '',
+      chapter_id: value?.chapter_id ?? target?.chapter_id ?? target?.id ?? null,
+      chapter_no: value?.chapter_no ?? target?.chapter_no ?? target?.chapterNo ?? null,
+      chapter_title: value?.chapter_title ?? target?.title ?? '',
+      preflight_ready: typeof preflight?.ready === 'boolean' ? preflight.ready : null,
+      preflight_warnings: Array.isArray(preflight?.warnings) ? preflight.warnings.slice(0, 12) : [],
+      scene_card_count: Array.isArray(target?.scene_cards) ? target.scene_cards.length : 0,
+    },
+  })
+}
+
+function compactJsonPayloadForStorage(value: any, key = '', seen = new WeakSet<object>(), depth = 0): any {
+  if (NESTED_STORAGE_KEYS.has(key)) return undefined
+  if (value === null || value === undefined) return value
+  if (LARGE_DIAGNOSTIC_KEYS.has(key)) {
+    return key === 'context_package' || key === 'contextPackage'
+      ? compactContextPackageForStorage(value)
+      : storageOmitted('storage_compaction')
+  }
+  const valueType = typeof value
+  if (valueType === 'string') {
+    if (value.length <= MAX_PERSISTED_DIAGNOSTIC_CHARS) return value
+    return storageOmitted('storage_compaction', {
+      truncated: true,
+      original_chars: value.length,
+      preview: value.slice(0, STORAGE_PREVIEW_CHARS),
+    })
+  }
+  if (valueType === 'number' || valueType === 'boolean') return value
+  if (valueType === 'bigint') return String(value)
+  if (valueType === 'function') return '[Function]'
+  if (valueType !== 'object') return String(value)
+  if (seen.has(value)) return '[Circular]'
+  if (depth >= 12) return storageOmitted('storage_compaction', { max_depth: depth })
+  seen.add(value)
+  if (Array.isArray(value)) {
+    if (value.length > 80) {
+      const preview = value.slice(0, 8).map(item => compactJsonPayloadForStorage(item, '', seen, depth + 1))
+      seen.delete(value)
+      return storageOmitted('storage_compaction', {
+        truncated: true,
+        original_count: value.length,
+        preview,
+      })
+    }
+    const items = value.map(item => compactJsonPayloadForStorage(item, '', seen, depth + 1))
+    seen.delete(value)
+    return items
+  }
+  const output: Record<string, any> = {}
+  for (const [childKey, item] of Object.entries(value)) {
+    const compacted = compactJsonPayloadForStorage(item, childKey, seen, depth + 1)
+    if (compacted !== undefined) output[childKey] = compacted
+  }
+  seen.delete(value)
+  return output
+}
+
+function compactPersistedText(value: any, maxChars = MAX_PERSISTED_DIAGNOSTIC_CHARS) {
+  const text = String(value ?? '')
+  if (!text) return ''
+  const trimmed = text.trim()
+  if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+    try {
+      const compacted = compactJsonPayloadForStorage(JSON.parse(trimmed))
+      const compactedText = safeJsonText(compacted)
+      if (compactedText.length <= maxChars) return compactedText
+      return safeJsonText({
+        truncated: true,
+        reason: 'storage_compaction',
+        original_chars: compactedText.length,
+        preview: compactedText.slice(0, STORAGE_PREVIEW_CHARS),
+      })
+    } catch {
+      /* fall through to plain text truncation */
+    }
+  }
+  if (text.length <= maxChars) return text
+  return safeJsonText({
+    truncated: true,
+    reason: 'storage_compaction',
+    original_chars: text.length,
+    preview: text.slice(0, STORAGE_PREVIEW_CHARS),
+  })
+}
+
+function compactRawPayloadForStorage(value: any) {
+  return compactJsonPayloadForStorage(value)
+}
 function jsonText(value: any, fallback: any = []) { return safeJsonText(value === undefined ? fallback : value) }
 function textValue(value: any, fallback = '') { return value === undefined || value === null ? fallback : (typeof value === 'string' ? value : jsonText(value, fallback)) }
 function normalizeStore(store: Partial<NovelStore> | null | undefined): NovelStore { return { projects: Array.isArray(store?.projects) ? store!.projects : [], worldbuilding: Array.isArray(store?.worldbuilding) ? store!.worldbuilding : [], characters: Array.isArray(store?.characters) ? store!.characters : [], outlines: Array.isArray(store?.outlines) ? store!.outlines : [], chapters: Array.isArray(store?.chapters) ? store!.chapters : [], chapter_versions: Array.isArray(store?.chapter_versions) ? store!.chapter_versions : [], reviews: Array.isArray(store?.reviews) ? store!.reviews : [], runs: Array.isArray(store?.runs) ? store!.runs : [], setting_entities: Array.isArray(store?.setting_entities) ? store!.setting_entities : [], chapter_setting_usage: Array.isArray(store?.chapter_setting_usage) ? store!.chapter_setting_usage : [] } }
 async function readJsonStore(activeWorkspace: string): Promise<NovelStore> { try { return normalizeStore(JSON.parse(await readFile(getNovelStorePath(activeWorkspace), 'utf8')) as Partial<NovelStore>) } catch { return normalizeStore(null) } }
-async function writeJsonStore(activeWorkspace: string, store: NovelStore) { await writeFile(getNovelStorePath(activeWorkspace), `${safeJsonText(normalizeStore(store), 2)}\n`, 'utf8') }
 function dbPathFromEnv() { const raw = process.env.SQLITE_DATABASE_URL || process.env.DATABASE_URL || ''; if (!raw) return ''; if (raw.startsWith('file:')) return raw.slice(5).split('?', 1)[0]; return raw }
 function openDb(activeWorkspace: string) { return new Database(dbPathFromEnv() || getNovelDbPath(activeWorkspace)) }
 function parseDbArray(value: any) { try { return value ? JSON.parse(String(value)) : [] } catch { return [] } }
@@ -371,6 +494,7 @@ async function readStore(activeWorkspace: string): Promise<NovelStore> {
   const db = openDb(activeWorkspace)
   try {
     const dbStore = loadStoreFromOpenDb(db)
+    if (storeScore(dbStore) > 0) return dbStore
     const jsonStore = await readJsonStore(activeWorkspace)
     if (storeScore(jsonStore) > storeScore(dbStore)) {
       db.close()
@@ -404,7 +528,6 @@ async function writeStore(activeWorkspace: string, store: NovelStore) {
     for (const u of normalized.chapter_setting_usage) insert('INSERT INTO chapter_setting_usage (id,project_id,chapter_id,entity_id,usage_type,required,allowed,forbidden,reveal_level,expected_state_change,actual_state_change,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)', [u.id,u.project_id,u.chapter_id,u.entity_id,u.usage_type||'allowed',u.required ? 1 : 0,u.allowed === false ? 0 : 1,u.forbidden ? 1 : 0,u.reveal_level||'none',jsonText(u.expected_state_change, {}),jsonText(u.actual_state_change, {}),u.created_at||nowIso(),u.updated_at||nowIso()])
     db.exec('COMMIT')
     committed = true
-    await writeJsonStore(activeWorkspace, normalized)
   } catch (e) { if (!committed) db.exec('ROLLBACK'); throw e } finally { db.close() }
 }
 function normalizeReferenceConfig(value: any): NovelReferenceConfig {
@@ -519,13 +642,13 @@ function normalizeChapterRecord(data: Partial<NovelChapterRecord>, existing?: Pa
     version: Number(data.version ?? existing?.version ?? 1),
     published_at: data.published_at ?? existing?.published_at ?? null,
     outline_id: data.outline_id ?? existing?.outline_id ?? null,
-    raw_payload: raw,
+    raw_payload: compactRawPayloadForStorage(raw),
     created_at: String(existing?.created_at ?? data.created_at ?? nowIso()),
     updated_at: String(data.updated_at ?? nowIso()),
   }
 }
-function normalizeReviewRecord(data: Partial<NovelReviewRecord>, existing?: Partial<NovelReviewRecord>): NovelReviewRecord { return { id: Number(existing?.id || data.id || 0), project_id: Number(data.project_id ?? existing?.project_id ?? 0), review_type: String(data.review_type ?? existing?.review_type ?? 'continuity'), status: String(data.status ?? existing?.status ?? 'ok'), summary: String(data.summary ?? existing?.summary ?? ''), issues: toStringArray(data.issues ?? existing?.issues), created_at: String(existing?.created_at ?? data.created_at ?? nowIso()), payload: String(data.payload ?? existing?.payload ?? '') } }
-function normalizeRunRecord(data: Partial<NovelRunRecord>, existing?: Partial<NovelRunRecord>): NovelRunRecord { return { id: Number(existing?.id || data.id || 0), project_id: Number(data.project_id ?? existing?.project_id ?? 0), run_type: String(data.run_type ?? existing?.run_type ?? 'plan'), step_name: String(data.step_name ?? existing?.step_name ?? 'step'), status: String(data.status ?? existing?.status ?? 'pending'), input_ref: String(data.input_ref ?? existing?.input_ref ?? ''), output_ref: String(data.output_ref ?? existing?.output_ref ?? ''), duration_ms: Number(data.duration_ms ?? existing?.duration_ms ?? 0), error_message: String(data.error_message ?? existing?.error_message ?? ''), created_at: String(existing?.created_at ?? data.created_at ?? nowIso()) } }
+function normalizeReviewRecord(data: Partial<NovelReviewRecord>, existing?: Partial<NovelReviewRecord>): NovelReviewRecord { return { id: Number(existing?.id || data.id || 0), project_id: Number(data.project_id ?? existing?.project_id ?? 0), review_type: String(data.review_type ?? existing?.review_type ?? 'continuity'), status: String(data.status ?? existing?.status ?? 'ok'), summary: String(data.summary ?? existing?.summary ?? ''), issues: toStringArray(data.issues ?? existing?.issues), created_at: String(existing?.created_at ?? data.created_at ?? nowIso()), payload: compactPersistedText(data.payload ?? existing?.payload ?? '') } }
+function normalizeRunRecord(data: Partial<NovelRunRecord>, existing?: Partial<NovelRunRecord>): NovelRunRecord { return { id: Number(existing?.id || data.id || 0), project_id: Number(data.project_id ?? existing?.project_id ?? 0), run_type: String(data.run_type ?? existing?.run_type ?? 'plan'), step_name: String(data.step_name ?? existing?.step_name ?? 'step'), status: String(data.status ?? existing?.status ?? 'pending'), input_ref: compactPersistedText(data.input_ref ?? existing?.input_ref ?? ''), output_ref: compactPersistedText(data.output_ref ?? existing?.output_ref ?? ''), duration_ms: Number(data.duration_ms ?? existing?.duration_ms ?? 0), error_message: String(data.error_message ?? existing?.error_message ?? ''), created_at: String(existing?.created_at ?? data.created_at ?? nowIso()) } }
 function normalizeProjectSeedDraftRecord(data: Partial<NovelProjectSeedDraftRecord>, existing?: Partial<NovelProjectSeedDraftRecord>): NovelProjectSeedDraftRecord {
   const seed = data.seed ?? existing?.seed ?? {}
   const title = String(data.title ?? existing?.title ?? seed?.title ?? seed?.project_title ?? '未命名孵化草稿').trim() || '未命名孵化草稿'
@@ -733,6 +856,84 @@ export async function createNovelReview(activeWorkspace: string, data: Partial<N
 export async function listNovelRuns(activeWorkspace: string, projectId: number) { const store = await readStore(activeWorkspace); return store.runs.filter(item => item.project_id === projectId).sort((a, b) => b.created_at.localeCompare(a.created_at)) }
 export async function appendNovelRun(activeWorkspace: string, data: Partial<NovelRunRecord>) { const store = await readStore(activeWorkspace); const record = normalizeRunRecord(data, { id: store.runs.reduce((max, item) => Math.max(max, item.id), 0) + 1 }); store.runs.push(record); await writeStore(activeWorkspace, store); return record }
 export async function updateNovelRun(activeWorkspace: string, id: number, data: Partial<NovelRunRecord>) { const store = await readStore(activeWorkspace); const idx = store.runs.findIndex(item => item.id === id); if (idx < 0) return null; store.runs[idx] = normalizeRunRecord(data, store.runs[idx]); await writeStore(activeWorkspace, store); return store.runs[idx] }
+export async function compactNovelStorage(activeWorkspace: string, options: { vacuum?: boolean; maxChars?: number } = {}) {
+  const maxChars = Number(options.maxChars || MAX_PERSISTED_DIAGNOSTIC_CHARS)
+  const shouldVacuum = options.vacuum !== false
+  const db = openDb(activeWorkspace)
+  let scanned = 0
+  let compacted = 0
+  let committed = false
+  const contextPattern = '%context_package%'
+  const camelContextPattern = '%contextPackage%'
+  try {
+    ensureSqliteSchema(db)
+    db.exec('BEGIN')
+
+    const runRows = db.query(`
+      SELECT id, input_ref, output_ref FROM runs
+      WHERE length(coalesce(input_ref,'')) > ?
+        OR length(coalesce(output_ref,'')) > ?
+        OR input_ref LIKE ?
+        OR output_ref LIKE ?
+        OR input_ref LIKE ?
+        OR output_ref LIKE ?
+    `).all(maxChars, maxChars, contextPattern, contextPattern, camelContextPattern, camelContextPattern) as any[]
+    const updateRun = db.query('UPDATE runs SET input_ref=?, output_ref=? WHERE id=?')
+    for (const row of runRows) {
+      scanned += 1
+      const nextInput = compactPersistedText(row.input_ref || '', maxChars)
+      const nextOutput = compactPersistedText(row.output_ref || '', maxChars)
+      if (nextInput !== String(row.input_ref || '') || nextOutput !== String(row.output_ref || '')) {
+        updateRun.run(nextInput, nextOutput, row.id)
+        compacted += 1
+      }
+    }
+
+    const reviewRows = db.query(`
+      SELECT id, payload FROM reviews
+      WHERE length(coalesce(payload,'')) > ?
+        OR payload LIKE ?
+        OR payload LIKE ?
+    `).all(maxChars, contextPattern, camelContextPattern) as any[]
+    const updateReview = db.query('UPDATE reviews SET payload=? WHERE id=?')
+    for (const row of reviewRows) {
+      scanned += 1
+      const nextPayload = compactPersistedText(row.payload || '', maxChars)
+      if (nextPayload !== String(row.payload || '')) {
+        updateReview.run(nextPayload, row.id)
+        compacted += 1
+      }
+    }
+
+    const chapterRows = db.query(`
+      SELECT id, raw_payload FROM chapters
+      WHERE length(coalesce(raw_payload,'')) > ?
+        OR raw_payload LIKE ?
+        OR raw_payload LIKE ?
+    `).all(maxChars, contextPattern, camelContextPattern) as any[]
+    const updateChapter = db.query('UPDATE chapters SET raw_payload=? WHERE id=?')
+    for (const row of chapterRows) {
+      scanned += 1
+      const nextPayload = compactPersistedText(row.raw_payload || '{}', maxChars)
+      if (nextPayload !== String(row.raw_payload || '')) {
+        updateChapter.run(nextPayload, row.id)
+        compacted += 1
+      }
+    }
+
+    db.exec('COMMIT')
+    committed = true
+    if (shouldVacuum && compacted > 0) db.exec('VACUUM')
+    return { scanned, compacted, vacuumed: shouldVacuum && compacted > 0, max_chars: maxChars }
+  } catch (error) {
+    if (!committed) {
+      try { db.exec('ROLLBACK') } catch { /* transaction may already be closed */ }
+    }
+    throw error
+  } finally {
+    db.close()
+  }
+}
 export async function listNovelProjectSeedDrafts(activeWorkspace: string) {
   const db = openDb(activeWorkspace)
   try {

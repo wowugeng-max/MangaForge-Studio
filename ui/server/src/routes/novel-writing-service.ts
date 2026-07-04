@@ -1203,9 +1203,9 @@ export function applyChapterWordTargetToContext(contextPackage: any, target: Cha
 
 export function proseMaxTokensForWordTarget(target: ChapterWordTarget | null | undefined) {
   const targetWords = Number(target?.target || 3000)
-  if (targetWords >= 9000) return 18000
-  if (targetWords >= 6000) return 14000
-  return 8000
+  if (targetWords >= 9000) return 32000
+  if (targetWords >= 6000) return 24000
+  return 18000
 }
 
 export type ProseWordTargetEvaluation = {

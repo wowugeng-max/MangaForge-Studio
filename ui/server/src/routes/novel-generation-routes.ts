@@ -130,57 +130,114 @@ function scoreFutureSkeletonChapter(item: any) {
   return checks.reduce((sum, value) => sum + value, 0)
 }
 
+const REQUEST_OVERRIDE_MAX_STRING = 800
+const REQUEST_OVERRIDE_MAX_ARRAY = 12
+const REQUEST_OVERRIDE_MAX_DEPTH = 5
+const REQUEST_OVERRIDE_DROP_KEYS = new Set([
+  'context_package',
+  'contextPackage',
+  'raw_payload',
+  'rawPayload',
+  'pipeline',
+  'chapters',
+  'chapter_text',
+  'chapterText',
+  'full_text',
+  'fullText',
+  'prompt',
+  'messages',
+  'debug',
+  'diagnostics',
+])
+
+export function compactGenerationRequestOverride(value: any, key = '', depth = 0, seen = new WeakSet<object>()): any {
+  if (REQUEST_OVERRIDE_DROP_KEYS.has(key)) return undefined
+  if (value === null || value === undefined) return value
+  const valueType = typeof value
+  if (valueType === 'string') {
+    const text = value.trim()
+    return text.length > REQUEST_OVERRIDE_MAX_STRING
+      ? `${text.slice(0, REQUEST_OVERRIDE_MAX_STRING)}...`
+      : text
+  }
+  if (valueType === 'number' || valueType === 'boolean') return value
+  if (valueType === 'bigint') return String(value)
+  if (valueType !== 'object') return String(value)
+  if (seen.has(value)) return '[Circular]'
+  if (depth >= REQUEST_OVERRIDE_MAX_DEPTH) return undefined
+  seen.add(value)
+  if (Array.isArray(value)) {
+    const items = value.slice(0, REQUEST_OVERRIDE_MAX_ARRAY)
+      .map(item => compactGenerationRequestOverride(item, '', depth + 1, seen))
+      .filter(item => item !== undefined)
+    seen.delete(value)
+    return items
+  }
+  const output: Record<string, any> = {}
+  for (const [childKey, childValue] of Object.entries(value)) {
+    const compacted = compactGenerationRequestOverride(childValue, childKey, depth + 1, seen)
+    if (compacted !== undefined) output[childKey] = compacted
+  }
+  seen.delete(value)
+  return output
+}
+
 function applyRequestLongformCompass(contextPackage: any, req: any) {
   if (!req.body?.longform_compass) return contextPackage
+  const longformCompass = compactGenerationRequestOverride(req.body.longform_compass)
   return {
     ...contextPackage,
-    longform_compass: req.body.longform_compass,
-    chapter_target: { ...contextPackage.chapter_target, longform_compass: req.body.longform_compass },
+    longform_compass: longformCompass,
+    chapter_target: { ...contextPackage.chapter_target, longform_compass: longformCompass },
   }
 }
 
 function applyRequestLongformBattleContext(contextPackage: any, req: any) {
   if (!req.body?.longform_battle_context) return contextPackage
+  const longformBattleContext = compactGenerationRequestOverride(req.body.longform_battle_context)
   return {
     ...contextPackage,
-    longform_battle_context: req.body.longform_battle_context,
-    chapter_target: { ...contextPackage.chapter_target, longform_battle_context: req.body.longform_battle_context },
+    longform_battle_context: longformBattleContext,
+    chapter_target: { ...contextPackage.chapter_target, longform_battle_context: longformBattleContext },
   }
 }
 
 function applyRequestNextBatchBrief(contextPackage: any, req: any) {
   if (!req.body?.next_batch_brief) return contextPackage
+  const nextBatchBrief = compactGenerationRequestOverride(req.body.next_batch_brief)
   return {
     ...contextPackage,
-    next_batch_brief: req.body.next_batch_brief,
-    chapter_target: { ...contextPackage.chapter_target, next_batch_brief: req.body.next_batch_brief },
+    next_batch_brief: nextBatchBrief,
+    chapter_target: { ...contextPackage.chapter_target, next_batch_brief: nextBatchBrief },
   }
 }
 
 function applyRequestChapterLaunchGate(contextPackage: any, req: any) {
   if (!req.body?.chapter_launch_gate) return contextPackage
+  const chapterLaunchGate = compactGenerationRequestOverride(req.body.chapter_launch_gate)
   return {
     ...contextPackage,
-    chapter_launch_gate: req.body.chapter_launch_gate,
-    chapter_target: { ...contextPackage.chapter_target, chapter_launch_gate: req.body.chapter_launch_gate },
+    chapter_launch_gate: chapterLaunchGate,
+    chapter_target: { ...contextPackage.chapter_target, chapter_launch_gate: chapterLaunchGate },
   }
 }
 
 export function applyRequestBatchPreflight(contextPackage: any, req: any) {
   const batchPreflight = req.body?.batch_preflight || req.body?.batchPreflight
   if (!batchPreflight) return contextPackage
-  const deliveryRiskCarryOver = batchPreflight?.delivery_risk_carry_over || batchPreflight?.deliveryRiskCarryOver || null
-  const chapterHandoffContract = batchPreflight?.chapter_handoff_contract || batchPreflight?.chapterHandoffContract || null
+  const compactBatchPreflight = compactGenerationRequestOverride(batchPreflight)
+  const deliveryRiskCarryOver = compactGenerationRequestOverride(batchPreflight?.delivery_risk_carry_over || batchPreflight?.deliveryRiskCarryOver || null)
+  const chapterHandoffContract = compactGenerationRequestOverride(batchPreflight?.chapter_handoff_contract || batchPreflight?.chapterHandoffContract || null)
   const previousHandoff = chapterHandoffContract?.previous_handoff || chapterHandoffContract?.previousHandoff || null
   return {
     ...contextPackage,
-    batch_preflight: batchPreflight,
+    batch_preflight: compactBatchPreflight,
     ...(deliveryRiskCarryOver ? { delivery_risk_carry_over: deliveryRiskCarryOver } : {}),
     ...(chapterHandoffContract ? { chapter_handoff_contract: chapterHandoffContract } : {}),
     ...(previousHandoff ? { previous_handoff: previousHandoff } : {}),
     chapter_target: {
       ...contextPackage.chapter_target,
-      batch_preflight: batchPreflight,
+      batch_preflight: compactBatchPreflight,
       ...(deliveryRiskCarryOver ? { delivery_risk_carry_over: deliveryRiskCarryOver } : {}),
       ...(chapterHandoffContract ? { chapter_handoff_contract: chapterHandoffContract } : {}),
       ...(previousHandoff ? { previous_handoff: previousHandoff } : {}),
@@ -190,10 +247,11 @@ export function applyRequestBatchPreflight(contextPackage: any, req: any) {
 
 function applyRequestMillionWordRunway(contextPackage: any, req: any) {
   if (!req.body?.million_word_runway) return contextPackage
+  const millionWordRunway = compactGenerationRequestOverride(req.body.million_word_runway)
   return {
     ...contextPackage,
-    million_word_runway: req.body.million_word_runway,
-    chapter_target: { ...contextPackage.chapter_target, million_word_runway: req.body.million_word_runway },
+    million_word_runway: millionWordRunway,
+    chapter_target: { ...contextPackage.chapter_target, million_word_runway: millionWordRunway },
   }
 }
 
