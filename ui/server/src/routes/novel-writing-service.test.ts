@@ -19958,6 +19958,68 @@ describe('chapter pre-draft brief', () => {
     ]))
   })
 
+  test('hydrates camelCase explicit state tracking contract without recursive overflow', () => {
+    const contextPackage = {
+      continuity: {
+        previous_chapter: {
+          chapter_no: 1,
+          title: '异常入局',
+          ending_hook: '金色符文说明规则背后有人动手脚。',
+        },
+      },
+      story_state: {
+        characters: [
+          {
+            name: '江哲',
+            current_state: {
+              location: '红雾公寓门口',
+              items: ['规则纸条'],
+              knowledge_scope: ['知道规则五被篡改'],
+            },
+          },
+        ],
+      },
+      setting_context: {
+        required: ['规则五'],
+        entities: [
+          {
+            entity_type: 'rule',
+            name: '规则五',
+            summary: '红雾公寓里被篡改的旧规则。',
+            constraints: { trigger: '照旧法行动', cost: '扩大封印裂缝' },
+          },
+        ],
+      },
+      chapterTarget: {
+        chapterNo: 2,
+        title: '旧法失准',
+        summary: '江哲按旧法试探规则，发现旧答案已经失准。',
+        conflict: '旧办法会扩大封印裂缝。',
+        stateTrackingContract: {
+          version: 'oh_story_state_tracking_v1',
+          source: 'manual_camel_incomplete',
+          qualityChecks: ['必须先确认 camelCase 状态来源再写正文。'],
+        },
+        sceneCards: [
+          { sceneNo: 1, title: '红雾门口', charactersPresent: ['江哲'], purpose: '确认规则五失准。' },
+        ],
+      },
+    }
+
+    const brief = buildChapterPreDraftBrief({ title: '红雾电梯' }, contextPackage)
+
+    expect(brief.state_tracking_contract.source).toBe('manual_camel_incomplete')
+    expect(brief.state_tracking_contract.quality_checks).toEqual(['必须先确认 camelCase 状态来源再写正文。'])
+    expect(brief.state_tracking_contract.character_states.join('｜')).toContain('江哲')
+    expect(brief.state_tracking_contract.historical_causality.join('｜')).toContain('金色符文')
+    expect(brief.state_tracking_contract.world_constraints.join('｜')).toContain('规则五')
+    expect(brief.state_tracking_contract.source_readiness.map((item: any) => item.key)).toEqual(expect.arrayContaining([
+      'previous_chapter',
+      'character_state',
+      'world_constraints',
+    ]))
+  })
+
   test('adds an oh-story intent confirmation contract to pre-draft brief and prose prompt', () => {
     const service = createNovelWritingService({
       getProject: async () => null,

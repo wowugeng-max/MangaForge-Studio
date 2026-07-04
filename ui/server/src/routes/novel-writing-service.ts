@@ -45479,6 +45479,13 @@ function buildStateTrackingContract(contextPackage: any = {}) {
             stateTrackingContract: null,
           }
         : contextPackage?.chapter_target,
+      chapterTarget: contextPackage?.chapterTarget
+        ? {
+            ...(contextPackage.chapterTarget || {}),
+            state_tracking_contract: null,
+            stateTrackingContract: null,
+          }
+        : contextPackage?.chapterTarget,
     })
     const explicitCharacterStates = asArray(explicit.character_states || explicit.characterStates).map(assetText).filter(Boolean)
     const explicitHistoricalCausality = asArray(explicit.historical_causality || explicit.historicalCausality).map(assetText).filter(Boolean)
