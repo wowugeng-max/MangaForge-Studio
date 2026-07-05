@@ -23,7 +23,7 @@ function stableStringify(value: any, seen = new WeakSet<object>()): string {
 }
 
 function runJson(value: any) {
-  return safeJsonStringify(value, undefined, 0)
+  return safeJsonStringify(compactRunPayload(value), undefined, 0)
 }
 
 function hashText(value: any) {
@@ -34,6 +34,181 @@ function hashText(value: any) {
     hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24)
   }
   return (hash >>> 0).toString(16).padStart(8, '0')
+}
+
+const RUN_STATE_TEXT_LIMIT = 700
+const RUN_STATE_LONG_TEXT_LIMIT = 1400
+const RUN_STATE_ARRAY_LIMIT = 20
+const RUN_STATE_DEPTH_LIMIT = 6
+const RUN_STATE_DROP_KEYS = new Set([
+  'chapter_text',
+  'chapterText',
+  'final_text',
+  'finalText',
+  'revised_text',
+  'revisedText',
+  'full_text',
+  'fullText',
+  'context_package',
+  'contextPackage',
+  'paragraph_task',
+  'paragraphTask',
+  'prompt',
+  'raw_prompt',
+  'rawPrompt',
+  'messages',
+  'diagnostics',
+  'debug',
+  'raw',
+])
+const RUN_STATE_SCENE_KEYS = new Set([
+  'scene_cards',
+  'sceneCards',
+  'scene_breakdown',
+  'sceneBreakdown',
+  'scene_list',
+  'sceneList',
+  'scenes',
+])
+
+function compactRunStateText(value: any, limit = RUN_STATE_TEXT_LIMIT) {
+  const text = String(value || '').replace(/\s+/g, ' ').trim()
+  if (text.length <= limit) return text
+  return `${text.slice(0, limit)}...`
+}
+
+function compactRunSceneCard(item: any = {}) {
+  if (!item || typeof item !== 'object') return compactRunStateText(item)
+  return {
+    scene_no: item.scene_no ?? item.sceneNo ?? null,
+    title: compactRunStateText(item.title || item.name || '', 120),
+    purpose: compactRunStateText(item.purpose || item.goal || item.scene_goal || item.sceneGoal || '', 240),
+    conflict: compactRunStateText(item.conflict || item.obstacle || item.blocker || '', 260),
+    change: compactRunStateText(item.change || item.state_change || item.stateChange || item.result || '', 240),
+    status: item.status || item.scene_status || item.sceneStatus || undefined,
+  }
+}
+
+function compactRunStateValue(value: any, key = '', depth = 0, seen = new WeakSet<object>()): any {
+  if (RUN_STATE_DROP_KEYS.has(key)) return undefined
+  if (value === null || value === undefined) return value
+  const valueType = typeof value
+  if (valueType === 'string') {
+    const limit = ['error', 'summary', 'detail', 'evidence', 'fix', 'reason'].includes(key)
+      ? RUN_STATE_LONG_TEXT_LIMIT
+      : RUN_STATE_TEXT_LIMIT
+    return compactRunStateText(value, limit)
+  }
+  if (valueType === 'number' || valueType === 'boolean') return value
+  if (valueType === 'bigint') return String(value)
+  if (valueType === 'function') return '[Function]'
+  if (valueType !== 'object') return compactRunStateText(value)
+  if (seen.has(value)) return '[Circular]'
+  if (depth >= RUN_STATE_DEPTH_LIMIT) return '[CompactDepthLimit]'
+  seen.add(value)
+  if (Array.isArray(value)) {
+    const source = RUN_STATE_SCENE_KEYS.has(key) ? value.map(compactRunSceneCard) : value
+    const items = source
+      .slice(0, RUN_STATE_ARRAY_LIMIT)
+      .map(item => compactRunStateValue(item, '', depth + 1, seen))
+      .filter(item => item !== undefined)
+    if (source.length > RUN_STATE_ARRAY_LIMIT) items.push(`[Truncated ${source.length - RUN_STATE_ARRAY_LIMIT} items]`)
+    seen.delete(value)
+    return items
+  }
+  const output: Record<string, any> = {}
+  for (const [childKey, childValue] of Object.entries(value)) {
+    if (RUN_STATE_SCENE_KEYS.has(childKey) && Array.isArray(childValue)) {
+      output[childKey] = childValue.slice(0, RUN_STATE_ARRAY_LIMIT).map(compactRunSceneCard)
+      if (childValue.length > RUN_STATE_ARRAY_LIMIT) output[`${childKey}_truncated_count`] = childValue.length - RUN_STATE_ARRAY_LIMIT
+      continue
+    }
+    const compacted = compactRunStateValue(childValue, childKey, depth + 1, seen)
+    if (compacted !== undefined) output[childKey] = compacted
+  }
+  seen.delete(value)
+  return output
+}
+
+function compactRunConfigSnapshot(snapshot: any = {}) {
+  if (!snapshot || typeof snapshot !== 'object') return snapshot || null
+  return compactRunStateValue(snapshot)
+}
+
+function compactRunStage(stage: any = {}) {
+  if (!stage || typeof stage !== 'object') return stage
+  return compactRunStateValue({
+    key: stage.key,
+    label: stage.label,
+    status: stage.status,
+    score: stage.score,
+    phase: stage.phase,
+    detail: stage.detail,
+    error: stage.error,
+    warnings: stage.warnings,
+    blockers: stage.blockers,
+    count: stage.count,
+    word_count: stage.word_count,
+    scene_status: stage.scene_status || stage.sceneStatus,
+    quality_gate: stage.quality_gate || stage.qualityGate,
+    scene_cards: stage.scene_cards || stage.sceneCards,
+    updated_at: stage.updated_at || stage.updatedAt,
+  })
+}
+
+function compactRunChapterItem(item: any = {}) {
+  if (!item || typeof item !== 'object') return item
+  return compactRunStateValue({
+    id: item.id,
+    chapter_id: item.chapter_id || item.chapterId,
+    chapter_no: item.chapter_no ?? item.chapterNo,
+    title: item.title,
+    status: item.status,
+    current_step: item.current_step || item.currentStep,
+    current_label: item.current_label || item.currentLabel,
+    score: item.score,
+    revised: item.revised,
+    attempts: item.attempts,
+    next_run_at: item.next_run_at ?? item.nextRunAt ?? '',
+    approval_stage: item.approval_stage || item.approvalStage,
+    approval_context: item.approval_context || item.approvalContext,
+    error: item.error,
+    error_code: item.error_code || item.errorCode,
+    recovery_plan: item.recovery_plan || item.recoveryPlan,
+    repair_run_id: item.repair_run_id || item.repairRunId,
+    repair_queue: item.repair_queue || item.repairQueue,
+    production_mode: item.production_mode || item.productionMode,
+    config_snapshot: compactRunConfigSnapshot(item.config_snapshot || item.configSnapshot),
+    scenes: Array.isArray(item.scenes) ? item.scenes.map(compactRunSceneCard) : [],
+    stages: Array.isArray(item.stages) ? item.stages.map(compactRunStage) : [],
+    post_delivery_quality: item.post_delivery_quality || item.postDeliveryQuality,
+    started_at: item.started_at || item.startedAt,
+    completed_at: item.completed_at || item.completedAt,
+    failed_at: item.failed_at || item.failedAt,
+    stopped_at: item.stopped_at || item.stoppedAt,
+  })
+}
+
+function compactRunPayload(value: any) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return compactRunStateValue(value)
+  const chapters = Array.isArray(value.chapters) ? value.chapters.map(compactRunChapterItem) : []
+  const results = Array.isArray(value.results) ? value.results.map(compactRunChapterItem) : []
+  return compactRunStateValue({
+    ...value,
+    chapters,
+    results,
+    last_error: value.last_error || value.lastError ? compactRunChapterItem(value.last_error || value.lastError) : null,
+    config_snapshot: compactRunConfigSnapshot(value.config_snapshot || value.configSnapshot),
+  })
+}
+
+function requestRuntimeGc() {
+  try {
+    const gc = (globalThis as any).Bun?.gc
+    if (typeof gc === 'function') gc(true)
+  } catch {
+    // GC is opportunistic; never let it affect chapter execution.
+  }
 }
 
 function isAbortLikeError(error: any) {
@@ -973,7 +1148,7 @@ export function createNovelRunExecutionService(ctx: {
     const listRuns = ctx.listNovelRuns || listNovelRuns
     const updateRun = ctx.updateNovelRun || updateNovelRun
     const appendRun = ctx.appendNovelRun || appendNovelRun
-    let payload = parseJsonLikePayload(run.output_ref) || {}
+    let payload = compactRunPayload(parseJsonLikePayload(run.output_ref) || {})
     const existingApprovalBlocker = findExistingApprovalBlocker(payload)
     if (existingApprovalBlocker) {
       return {
@@ -992,7 +1167,7 @@ export function createNovelRunExecutionService(ctx: {
     if (lock.owner && lock.owner !== lockOwner && lockExpiresAt > Date.now()) {
       return { run, group: payload, processed: 0, status: 'locked', locked_by: lock.owner }
     }
-    payload = {
+    payload = compactRunPayload({
       ...payload,
       lock: {
         owner: lockOwner,
@@ -1000,7 +1175,7 @@ export function createNovelRunExecutionService(ctx: {
         heartbeat_at: new Date().toISOString(),
         expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
       },
-    }
+    })
     await updateRun(activeWorkspace, run.id, { status: 'running', output_ref: runJson(payload) })
     const chapters = Array.isArray(payload.chapters) ? payload.chapters : []
     const maxChapters = Math.max(1, Math.min(50, Number(options.max_chapters || chapters.length || 10)))
@@ -1018,22 +1193,24 @@ export function createNovelRunExecutionService(ctx: {
     const persistStage = async (index: number, stage: string, patch: any = {}) => {
       const item = chapters[index]
       if (!item) return
-      const stages = ctx.production.updateChapterStages(item.stages || [], stage, patch)
+      const compactPatch = compactRunStateValue(patch) || {}
+      const stages = ctx.production.updateChapterStages(item.stages || [], stage, compactPatch)
       const summary = ctx.production.summarizeChapterStages(stages)
       let scenes = Array.isArray(item.scenes) ? item.scenes : []
-      const sceneCards = Array.isArray(patch.scene_cards)
+      const rawSceneCards = Array.isArray(patch.scene_cards)
         ? patch.scene_cards
         : Array.isArray(patch.sceneCards)
           ? patch.sceneCards
           : []
+      const sceneCards = rawSceneCards.map(compactRunSceneCard)
       if (stage === 'scene_cards' && sceneCards.length > 0) {
         scenes = normalizeSceneProduction(sceneCards, scenes, 'planned')
       }
       if (patch.scene_status) {
         scenes = advanceSceneProduction(scenes, patch.scene_status, stage === 'draft' ? { generated_at: new Date().toISOString() } : {})
       }
-      chapters[index] = { ...item, scenes, stages, current_step: summary.current_step, current_label: summary.current_label }
-      payload = { ...payload, chapters, current_index: index, phase: `第${item.chapter_no}章：${summary.current_label}` }
+      chapters[index] = compactRunChapterItem({ ...item, scenes, stages, current_step: summary.current_step, current_label: summary.current_label })
+      payload = compactRunPayload({ ...payload, chapters, current_index: index, phase: `第${item.chapter_no}章：${summary.current_label}` })
       await updateRun(activeWorkspace, run.id, { status: 'running', output_ref: runJson(payload), duration_ms: Date.now() - startedAt })
     }
 
@@ -1045,29 +1222,29 @@ export function createNovelRunExecutionService(ctx: {
         break
       }
       const item = chapters[index]
-      payload = {
-        ...payload,
-        lock: {
-          ...(payload.lock || {}),
-          heartbeat_at: new Date().toISOString(),
-          expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
-        },
-      }
+        payload = compactRunPayload({
+          ...payload,
+          lock: {
+            ...(payload.lock || {}),
+            heartbeat_at: new Date().toISOString(),
+            expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+          },
+        })
       if (!item?.id) continue
       if (item.next_run_at && new Date(String(item.next_run_at)).getTime() > Date.now()) {
-        payload = { ...payload, chapters, current_index: index, phase: `第${item.chapter_no}章等待重试窗口` }
+        payload = compactRunPayload({ ...payload, chapters, current_index: index, phase: `第${item.chapter_no}章等待重试窗口` })
         await updateRun(activeWorkspace, run.id, { status: 'ready', output_ref: runJson(payload) })
         status = 'ready'
         break
       }
       if (item.status === 'written' && options.regenerate !== true) {
-        chapters[index] = { ...item, status: 'skipped', skipped_reason: '已有正文' }
-        payload = { ...payload, chapters, current_index: index + 1 }
+        chapters[index] = compactRunChapterItem({ ...item, status: 'skipped', skipped_reason: '已有正文' })
+        payload = compactRunPayload({ ...payload, chapters, current_index: index + 1 })
         await updateRun(activeWorkspace, run.id, { status: 'running', output_ref: runJson(payload) })
         continue
       }
-      chapters[index] = { ...item, status: 'running', started_at: new Date().toISOString(), stages: item.stages?.length ? item.stages : ctx.production.buildChapterGroupStages() }
-      payload = { ...payload, chapters, current_index: index, phase: `生成第${item.chapter_no}章` }
+      chapters[index] = compactRunChapterItem({ ...item, status: 'running', started_at: new Date().toISOString(), stages: item.stages?.length ? item.stages : ctx.production.buildChapterGroupStages() })
+      payload = compactRunPayload({ ...payload, chapters, current_index: index, phase: `生成第${item.chapter_no}章` })
       await updateRun(activeWorkspace, run.id, { status: 'running', output_ref: runJson(payload) })
       try {
         const productionMode = options.production_mode || payload.production_mode || payload.policy?.production_mode || 'draft_review_revise_store'
@@ -1123,18 +1300,19 @@ export function createNovelRunExecutionService(ctx: {
             },
             failed_at: new Date().toISOString(),
           }
-          chapters[index] = resultItem
-          results.push(resultItem)
+          const storedResultItem = compactRunChapterItem(resultItem)
+          chapters[index] = storedResultItem
+          results.push(storedResultItem)
           status = 'paused'
-          errorMessage = resultItem.error
-          payload = {
+          errorMessage = storedResultItem.error
+          payload = compactRunPayload({
             ...payload,
             chapters,
             results,
             current_index: index,
             phase: `第${item.chapter_no}章入库阻断未解除，已暂停`,
-            last_error: resultItem,
-          }
+            last_error: storedResultItem,
+          })
           await updateRun(activeWorkspace, run.id, { status, output_ref: runJson(payload), error_message: errorMessage })
           break
         }
@@ -1198,34 +1376,35 @@ export function createNovelRunExecutionService(ctx: {
             }
           }
         }
-        chapters[index] = resultItem
-        results.push(resultItem)
+        const storedResultItem = compactRunChapterItem(resultItem)
+        chapters[index] = storedResultItem
+        results.push(storedResultItem)
         processed += 1
         if (storyStateError) {
           status = 'paused'
           errorMessage = storyStateError
-          payload = {
+          payload = compactRunPayload({
             ...payload,
             chapters,
             results,
             current_index: index,
             phase: `第${item.chapter_no}章状态机更新失败，已暂停`,
-            last_error: resultItem,
-          }
+            last_error: storedResultItem,
+          })
           await updateRun(activeWorkspace, run.id, { status, output_ref: runJson(payload), error_message: errorMessage })
           break
         }
         if (postDeliveryQualityError) {
           status = 'paused'
           errorMessage = postDeliveryQualityError
-          payload = {
+          payload = compactRunPayload({
             ...payload,
             chapters,
             results,
             current_index: index,
             phase: `第${item.chapter_no}章交付后质检未闭环，已暂停`,
-            last_error: resultItem,
-          }
+            last_error: storedResultItem,
+          })
           await updateRun(activeWorkspace, run.id, { status, output_ref: runJson(payload), error_message: errorMessage })
           break
         }
@@ -1233,7 +1412,7 @@ export function createNovelRunExecutionService(ctx: {
         const wasCanceled = options.abortSignal?.aborted || isAbortLikeError(chapterError)
         if (wasCanceled) {
           const currentStages = chapters[index]?.stages || ctx.production.buildChapterGroupStages()
-          const resultItem = {
+          const resultItem = compactRunChapterItem({
             ...item,
             status: 'ready',
             stages: currentStages,
@@ -1242,64 +1421,93 @@ export function createNovelRunExecutionService(ctx: {
             error: '',
             error_code: 'REQUEST_CANCELED',
             stopped_at: new Date().toISOString(),
-          }
+          })
           chapters[index] = resultItem
           status = 'ready'
           errorMessage = ''
-          payload = {
+          payload = compactRunPayload({
             ...payload,
             chapters,
             results,
             current_index: index,
             phase: `第${item.chapter_no}章已停止，可继续执行`,
             last_error: null,
-          }
+          })
           await updateRun(activeWorkspace, run.id, { status, output_ref: runJson(payload), error_message: '' })
           break
         }
         const isApproval = chapterError?.code === 'APPROVAL_REQUIRED'
+        const autoRetryQualityGate = isApproval
+          && String(chapterError?.approval_stage || '') === 'quality_gate'
+          && payload.unattended?.enabled === true
+          && (
+            options.auto_repair_quality_gate === true
+            || payload.policy?.auto_repair_quality_gate === true
+            || payload.unattended?.auto_repair_quality_gate === true
+          )
+        const blocksForApproval = isApproval && !autoRetryQualityGate
         const failedStages = (() => {
           const current = chapters[index]?.stages || ctx.production.buildChapterGroupStages()
           const active = current.find((step: any) => ['running', 'ready', 'needs_confirmation'].includes(step.status)) || current.find((step: any) => step.status === 'pending') || current[0]
-          return active ? ctx.production.updateChapterStages(current, active.key, { status: isApproval ? 'needs_confirmation' : 'failed', error: String(chapterError?.message || chapterError), approval_stage: chapterError?.approval_stage || '' }) : current
+          return active ? ctx.production.updateChapterStages(current, active.key, {
+            status: blocksForApproval ? 'needs_confirmation' : 'failed',
+            error: String(chapterError?.message || chapterError),
+            approval_stage: blocksForApproval ? chapterError?.approval_stage || '' : '',
+          }) : current
         })()
-        const attempts = Number(item.attempts || 0) + (isApproval ? 0 : 1)
-        const canRetry = !isApproval && attempts <= retryLimit
-        const nextRunAt = canRetry ? new Date(Date.now() + Math.min(15, attempts * 2) * 60000).toISOString() : ''
-        const resultItem = {
+        const attempts = Number(item.attempts || 0) + (blocksForApproval ? 0 : 1)
+        const canRetry = !blocksForApproval && attempts <= retryLimit
+        const nextRunAt = canRetry
+          ? autoRetryQualityGate
+            ? ''
+            : new Date(Date.now() + Math.min(15, attempts * 2) * 60000).toISOString()
+          : ''
+        const resultItem = compactRunChapterItem({
           id: item.id,
           chapter_no: item.chapter_no,
           title: item.title,
-          status: isApproval ? 'needs_approval' : (canRetry ? 'ready' : 'failed'),
+          status: blocksForApproval ? 'needs_approval' : (canRetry ? 'ready' : 'failed'),
           stages: failedStages,
           attempts,
           next_run_at: nextRunAt,
-          approval_stage: chapterError?.approval_stage || '',
-          approval_context: chapterError?.approval_context || null,
+          approval_stage: blocksForApproval ? chapterError?.approval_stage || '' : '',
+          approval_context: blocksForApproval ? chapterError?.approval_context || null : null,
           config_snapshot: payload.config_snapshot || ctx.production.buildAgentConfigSnapshot(project, options.model_id || payload.model_strategy?.preferred_model_id),
           error: String(chapterError?.message || chapterError),
-          error_code: chapterError?.code || '',
-          recovery_plan: ctx.production.classifyGenerationFailure(chapterError),
+          error_code: autoRetryQualityGate ? 'QUALITY_GATE_RETRY_REQUIRED' : chapterError?.code || '',
+          recovery_plan: autoRetryQualityGate
+            ? {
+                type: 'quality_gate_retry',
+                summary: '无人值守质量门禁未通过，已转为自动重试当前章；不会进入人工审批卡点。',
+                actions: ['重新生成或修订当前章正文', '沿用质量门禁原因强化下一次提示', '达到重试上限后再暂停人工处理'],
+              }
+            : ctx.production.classifyGenerationFailure(chapterError),
           failed_at: new Date().toISOString(),
-        }
+        })
         chapters[index] = resultItem
         results.push(resultItem)
         errorMessage = resultItem.error
-        if (isApproval || canRetry || payload.policy?.stop_on_failure !== false) {
-          status = isApproval ? 'paused' : (canRetry ? 'ready' : 'paused')
-          payload = {
+        if (blocksForApproval || canRetry || payload.policy?.stop_on_failure !== false) {
+          status = blocksForApproval ? 'paused' : (canRetry ? 'ready' : 'paused')
+          payload = compactRunPayload({
             ...payload,
             chapters,
             results,
             current_index: index,
-            phase: isApproval ? `第${item.chapter_no}章等待人工确认` : canRetry ? `第${item.chapter_no}章失败，等待重试` : `第${item.chapter_no}章失败，已暂停`,
+            phase: blocksForApproval
+              ? `第${item.chapter_no}章等待人工确认`
+              : autoRetryQualityGate && canRetry
+                ? `第${item.chapter_no}章质量门禁未通过，准备自动重试`
+                : canRetry
+                  ? `第${item.chapter_no}章失败，等待重试`
+                  : `第${item.chapter_no}章失败，已暂停`,
             last_error: resultItem,
-          }
+          })
           await updateRun(activeWorkspace, run.id, { status, output_ref: runJson(payload), error_message: errorMessage })
           break
         }
       }
-      payload = { ...payload, chapters, results, current_index: index + 1, phase: '自动执行章节群' }
+      payload = compactRunPayload({ ...payload, chapters, results, current_index: index + 1, phase: '自动执行章节群' })
       await updateRun(activeWorkspace, run.id, {
         status: 'running',
         output_ref: runJson(payload),
@@ -1310,14 +1518,15 @@ export function createNovelRunExecutionService(ctx: {
       status = chapters.every((item: any) => ['success', 'skipped', 'written'].includes(item.status)) ? 'success' : 'ready'
     }
     if (status === 'success') {
-      payload = { ...payload, post_batch_quality_check: buildOhStoryBatchQualityCheck(chapters, results) }
+      payload = compactRunPayload({ ...payload, post_batch_quality_check: buildOhStoryBatchQualityCheck(chapters, results) })
     }
     const updated = await updateRun(activeWorkspace, run.id, {
       status,
-      output_ref: runJson({ ...payload, chapters, results, lock: null, phase: status === 'success' ? '章节群已完成' : payload.phase, finished_at: status === 'success' ? new Date().toISOString() : undefined }),
+      output_ref: runJson(compactRunPayload({ ...payload, chapters, results, lock: null, phase: status === 'success' ? '章节群已完成' : payload.phase, finished_at: status === 'success' ? new Date().toISOString() : undefined })),
       duration_ms: Date.now() - startedAt,
       error_message: errorMessage,
     })
+    requestRuntimeGc()
     return { run: updated, group: parseJsonLikePayload(updated?.output_ref), processed, status }
   }
 

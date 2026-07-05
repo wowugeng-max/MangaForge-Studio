@@ -111,6 +111,112 @@ describe('novel diagnostic payload compaction', () => {
     expect(review.payload).not.toContain(hugeText)
   })
 
+  test('keeps prose quality review payload readable after compaction', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: '质检摘要压缩测试' })
+    const hugeFinding = '这一项质检问题需要保留为可读摘要，但不能把整段模型诊断都塞进数据库。'.repeat(2000)
+
+    await createNovelReview(workspace, {
+      project_id: project.id,
+      review_type: 'prose_quality',
+      status: 'warn',
+      summary: '章节自检评分 72',
+      payload: JSON.stringify({
+        chapter_id: 9,
+        chapter_updated_at: '2026-07-05T01:00:00.000Z',
+        content_hash: 'abcdef1234567890',
+        source: 'manual_refresh',
+        context_package: {
+          preflight: {
+            ready: false,
+            warnings: ['上下文缺口：追踪/时间线缺失', hugeFinding],
+            checks: [
+              { key: 'timeline_tracking', label: '追踪/时间线', ok: false, severity: 'medium', fix: hugeFinding },
+            ],
+          },
+          chapter_target: {
+            id: 9,
+            chapter_no: 9,
+            title: '第九章',
+            scene_cards: [{ title: '巨量场景', purpose: hugeFinding }],
+          },
+          continuity: {
+            previous_chapter: { chapter_no: 8, title: '第八章', ending_hook: hugeFinding },
+          },
+        },
+        self_check: {
+          final_text: '正文全文'.repeat(30000),
+          revised: false,
+          review: {
+            passed: false,
+            score: 72,
+            needs_revision: true,
+            craft_metrics: {
+              action_detail_score: 41,
+              event_density_score: 52,
+              description_overuse_score: 88,
+            },
+            focused_revision_modes: ['expand_action', 'tighten_pacing', 'add_consequence'],
+            revision_directives: [hugeFinding, '补足主角动作选择。'],
+            issues: Array.from({ length: 10 }, (_, index) => ({
+              severity: index < 2 ? 'high' : 'medium',
+              type: `issue_${index}`,
+              message: hugeFinding,
+              fix: hugeFinding,
+            })),
+            platform_checks: Array.from({ length: 12 }, (_, index) => ({ key: `platform_${index}`, label: hugeFinding, status: 'warn', evidence: hugeFinding })),
+            content_rubric_checks: Array.from({ length: 12 }, (_, index) => ({ key: `rubric_${index}`, label: hugeFinding, status: 'warn', fix: hugeFinding })),
+          },
+        },
+        pipeline: [{ key: 'review', label: '章节级自检', status: 'failed', detail: hugeFinding }],
+      }),
+    })
+
+    const [review] = await listNovelReviews(workspace, project.id)
+    const payload = JSON.parse(String(review.payload || '{}'))
+    const payloadText = JSON.stringify(payload)
+
+    expect(payload.truncated).toBeUndefined()
+    expect(payloadText.length).toBeLessThan(60000)
+    expect(payloadText).not.toContain(hugeFinding.slice(0, 2000))
+    expect(payload.chapter_id).toBe(9)
+    expect(payload.context_package.chapter_target.chapter_no).toBe(9)
+    expect(payload.context_package.chapter_target.title).toBe('第九章')
+    expect(payload.context_package.preflight.ready).toBe(false)
+    expect(payload.context_package.preflight.warnings[0]).toContain('上下文缺口')
+    expect(payload.self_check.review.score).toBe(72)
+    expect(payload.self_check.review.issues[0].severity).toBe('high')
+    expect(payload.self_check.review.revision_directives[1]).toBe('补足主角动作选择。')
+    expect(payload.self_check.final_text).toEqual({ omitted: true, reason: 'storage_compaction' })
+    expect(payload.pipeline[0]).toMatchObject({ key: 'review', label: '章节级自检', status: 'failed' })
+  })
+
+  test('keeps unrecoverable prose quality preview payloads intact', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: '历史质检预览保护测试' })
+    const compactedPreview = {
+      truncated: true,
+      reason: 'storage_compaction',
+      original_chars: 143327,
+      preview: '{"chapter_id":6,"context_package":{"summary":{"chapter_title":"小镇追索"}',
+    }
+
+    await createNovelReview(workspace, {
+      project_id: project.id,
+      review_type: 'prose_quality',
+      status: 'warn',
+      summary: '章节自检评分 80',
+      payload: JSON.stringify(compactedPreview),
+    })
+
+    const [review] = await listNovelReviews(workspace, project.id)
+    const payload = JSON.parse(String(review.payload || '{}'))
+
+    expect(payload).toMatchObject(compactedPreview)
+    expect(payload.self_check).toBeUndefined()
+    expect(payload.context_package).toBeUndefined()
+  })
+
   test('compacts existing oversized sqlite payload columns without loading the full store', async () => {
     const workspace = await tempWorkspace()
     const project = await createNovelProject(workspace, { title: '历史清理测试' })
@@ -199,6 +305,110 @@ describe('novel diagnostic payload compaction', () => {
     expect(second.raw_payload.previous.raw_payload).toBeUndefined()
     expect(second.raw_payload.chapter_text).toEqual({ omitted: true, reason: 'storage_compaction' })
     expect(JSON.stringify(second.raw_payload).length).toBeLessThan(5000)
+  })
+
+  test('compacts repeated scene diagnostics inside chapter raw payload', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: '场景诊断压缩测试' })
+    const mediumDiagnostic = '上一章交付风险必须在本章承接。'.repeat(6000)
+    await createNovelChapter(workspace, {
+      project_id: project.id,
+      chapter_no: 1,
+      title: '第一章',
+      raw_payload: {
+        blueprint: '保留蓝图',
+        scene_breakdown: [
+          {
+            scene_no: 1,
+            title: '目标入场',
+            purpose: mediumDiagnostic,
+            conflict: mediumDiagnostic,
+            change: mediumDiagnostic,
+            purpose_tags: Array.from({ length: 18 }, (_, index) => `${index}-${mediumDiagnostic}`),
+          },
+        ],
+        generated_scene_breakdown: [
+          {
+            scene_no: 1,
+            title: '生成场景',
+            purpose: mediumDiagnostic,
+            conflict: mediumDiagnostic,
+          },
+        ],
+      },
+    })
+
+    const [chapter] = await listNovelChapters(workspace, project.id)
+    const rawText = JSON.stringify(chapter.raw_payload)
+
+    expect(chapter.raw_payload.blueprint).toBe('保留蓝图')
+    expect(rawText.length).toBeLessThan(20000)
+    expect(rawText).not.toContain(mediumDiagnostic.slice(0, 2000))
+    expect(chapter.raw_payload.scene_breakdown[0].title).toBe('目标入场')
+    expect(chapter.raw_payload.scene_breakdown[0].purpose.length).toBeLessThan(500)
+    expect(chapter.raw_payload.scene_breakdown[0].purpose_tags.length).toBeLessThanOrEqual(6)
+  })
+
+  test('compacts oversized pre draft brief contracts while preserving writing cues', async () => {
+    const workspace = await tempWorkspace()
+    const project = await createNovelProject(workspace, { title: '写前准备压缩测试' })
+    const hugeContract = '合同细则必须在正文中逐项兑现。'.repeat(30000)
+    const hugeSceneText = '场景目标、阻碍、变化需要持续跟踪。'.repeat(8000)
+
+    await createNovelChapter(workspace, {
+      project_id: project.id,
+      chapter_no: 1,
+      title: '第一章',
+      raw_payload: {
+        pre_draft_brief: {
+          chapter_goal: '确认主角进入禁区的代价',
+          reader_promise: '本章兑现一次明确的冒险回报',
+          core_conflict: '主角必须在救人和保密之间选择',
+          emotional_curve: '紧张 -> 侥幸 -> 代价显现',
+          chapter_blueprint: {
+            target_emotion: hugeContract,
+            opening_hook: '禁区钟声提前响起',
+            core_payoff: hugeContract,
+            content_outline: [hugeContract, hugeContract, hugeContract],
+          },
+          next_chapter_quality_plan: { quality_focus: hugeContract },
+          write_preparation_brief: { checklist: [hugeContract, hugeContract] },
+          style_sample_strategy: { sample: hugeContract },
+          chapter_benchmark_strategy: { benchmark: hugeContract },
+          scene_briefs: [
+            {
+              scene_no: 1,
+              title: '禁区入口',
+              purpose: hugeSceneText,
+              obstacle: hugeSceneText,
+              change: hugeSceneText,
+            },
+          ],
+          character_behavior_contract: { rules: hugeContract, evidence: hugeContract },
+          plot_framework_contract: { rules: hugeContract, evidence: hugeContract },
+          plot_dynamics_contract: { rules: hugeContract, evidence: hugeContract },
+          target_reader_contract: { rules: hugeContract, evidence: hugeContract },
+          dialogue_contract: { rules: hugeContract, evidence: hugeContract },
+          continuity_heat_contract: { rules: hugeContract, evidence: hugeContract },
+          asset_linkage_contract: { rules: hugeContract, evidence: hugeContract },
+          information_flow_contract: { rules: hugeContract, evidence: hugeContract },
+        },
+      },
+    })
+
+    const [chapter] = await listNovelChapters(workspace, project.id)
+    const rawText = JSON.stringify(chapter.raw_payload)
+    const brief = chapter.raw_payload.pre_draft_brief
+
+    expect(rawText.length).toBeLessThan(30000)
+    expect(rawText).not.toContain(hugeContract.slice(0, 2000))
+    expect(rawText).not.toContain(hugeSceneText.slice(0, 2000))
+    expect(brief.chapter_goal).toBe('确认主角进入禁区的代价')
+    expect(brief.reader_promise).toBe('本章兑现一次明确的冒险回报')
+    expect(brief.core_conflict).toBe('主角必须在救人和保密之间选择')
+    expect(brief.scene_briefs[0].title).toBe('禁区入口')
+    expect(brief.scene_briefs[0].purpose.length).toBeLessThan(500)
+    expect(brief.character_behavior_contract).toMatchObject({ omitted: true, reason: 'storage_compaction' })
   })
 })
 

@@ -1830,6 +1830,125 @@ describe('executeChapterGroupRunRecord behavior', () => {
     expect(group.chapters[1]).toMatchObject({ status: 'success', revised: false, score: 90 })
   })
 
+  test('keeps unattended quality gate failures retryable instead of turning them into manual approval', async () => {
+    const production = createNovelProductionService()
+    const harness = makeRunHarness({
+      chapters: [
+        { id: 91, chapter_no: 21, title: '第二十一章', status: 'pending', stages: production.buildChapterGroupStages() },
+        { id: 92, chapter_no: 22, title: '第二十二章', status: 'pending', stages: production.buildChapterGroupStages() },
+      ],
+      current_index: 0,
+      production_mode: 'full_auto',
+      unattended: {
+        enabled: true,
+        auto_repair_quality_gate: true,
+        allow_incomplete: false,
+      },
+      policy: {
+        quality_threshold: 90,
+        auto_repair_quality_gate: true,
+        allow_incomplete: false,
+      },
+      results: [],
+    })
+    const generateCalls: number[] = []
+    const service = createNovelRunExecutionService({
+      getProject: async () => ({ id: 77, title: '长篇项目', reference_config: {} }),
+      production,
+      listNovelRuns: harness.listNovelRuns,
+      updateNovelRun: harness.updateNovelRun,
+      generateChapterForGroup: async (_workspace, _projectId, chapterId) => {
+        generateCalls.push(chapterId)
+        throw Object.assign(new Error('章节质量门禁未通过，正文未入库'), {
+          code: 'APPROVAL_REQUIRED',
+          approval_stage: 'quality_gate',
+          approval_context: { passed: false, score: 72, min_score: 90, reasons: ['钩子弱'] },
+        })
+      },
+    } as any)
+
+    const result = await service.executeChapterGroupRunRecord('test-workspace', { id: 77, reference_config: {} }, harness.run, {
+      max_chapters: 2,
+      lock_owner: 'behavior-test',
+      retry_limit: 2,
+    })
+    const group = result.group
+
+    expect(result.status).toBe('ready')
+    expect(result.processed).toBe(0)
+    expect(generateCalls).toEqual([91])
+    expect(group.current_index).toBe(0)
+    expect(group.chapters[0]).toMatchObject({
+      status: 'ready',
+      attempts: 1,
+      error_code: 'QUALITY_GATE_RETRY_REQUIRED',
+    })
+    expect(group.chapters[0].approval_stage || '').toBe('')
+    expect(group.chapters[0].next_run_at || '').toBe('')
+    expect(group.chapters[1].status).toBe('pending')
+    expect(group.last_error.error_code).toBe('QUALITY_GATE_RETRY_REQUIRED')
+  })
+
+  test('compacts bulky unattended stage payloads while preserving resumable group state', async () => {
+    const production = createNovelProductionService()
+    const hugeText = '质量诊断重复文本'.repeat(20000)
+    const harness = makeRunHarness({
+      chapters: [
+        { id: 95, chapter_no: 25, title: '第二十五章', status: 'pending', stages: production.buildChapterGroupStages() },
+      ],
+      current_index: 0,
+      production_mode: 'full_auto',
+      policy: {
+        quality_threshold: 88,
+        auto_repair_quality_gate: true,
+        allow_incomplete: false,
+      },
+      results: [],
+    })
+    const service = createNovelRunExecutionService({
+      getProject: async () => ({ id: 77, title: '长篇项目', reference_config: {} }),
+      production,
+      listNovelRuns: harness.listNovelRuns,
+      updateNovelRun: harness.updateNovelRun,
+      generateChapterForGroup: async (_workspace, _projectId, _chapterId, options) => {
+        await options.onStage('scene_cards', {
+          status: 'success',
+          scene_cards: [
+            {
+              scene_no: 1,
+              title: '巨量场景卡',
+              purpose: hugeText,
+              conflict: hugeText,
+              goal: hugeText,
+              obstacle: hugeText,
+              change: hugeText,
+            },
+          ],
+          diagnostics: { raw_prompt: hugeText, model_response: hugeText },
+        })
+        throw new Error('模拟后续失败')
+      },
+    } as any)
+
+    const result = await service.executeChapterGroupRunRecord('test-workspace', { id: 77, reference_config: {} }, harness.run, {
+      max_chapters: 1,
+      lock_owner: 'behavior-test',
+      retry_limit: 0,
+    })
+    const persisted = JSON.parse(harness.run.output_ref)
+
+    expect(result.status).toBe('paused')
+    expect(harness.run.output_ref.length).toBeLessThan(30000)
+    expect(persisted.chapters).toHaveLength(1)
+    expect(persisted.chapters[0]).toMatchObject({
+      id: 95,
+      chapter_no: 25,
+      status: 'failed',
+      error: '模拟后续失败',
+    })
+    expect(JSON.stringify(persisted)).not.toContain(hugeText.slice(0, 2000))
+  })
+
   test('pauses unattended continuation when a returned chapter result still has an approval blocker', async () => {
     const production = createNovelProductionService()
     const harness = makeRunHarness({

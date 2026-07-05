@@ -38,6 +38,75 @@ function issueSeverity(issue: any) {
   return String(issue?.severity || 'medium').toLowerCase()
 }
 
+function parseQualitySummaryScore(summary: any) {
+  const text = String(summary || '')
+  const scoreMatch = text.match(/(?:评分|score)\s*[:：]?\s*(\d+(?:\.\d+)?)/i) || text.match(/(\d+(?:\.\d+)?)\s*分/)
+  return scoreMatch ? Number(scoreMatch[1]) : 0
+}
+
+function qualityReportIssues(report: any, review: any) {
+  if (Array.isArray(review?.issues) && review.issues.length > 0) return review.issues
+  if (Array.isArray(report?.issues) && report.issues.length > 0) return report.issues
+  if (typeof report?.issues === 'string') {
+    try {
+      const parsed = JSON.parse(report.issues)
+      return Array.isArray(parsed) ? parsed : []
+    } catch {
+      return report.issues ? [report.issues] : []
+    }
+  }
+  return []
+}
+
+function compactedPreviewChapterTarget(payload: any) {
+  const preview = typeof payload?.preview === 'string' ? payload.preview : ''
+  if (!payload?.truncated || !preview) return {}
+  const chapterId = Number(preview.match(/"chapter_id"\s*:\s*(\d+)/)?.[1] || 0)
+  const chapterNo = Number(preview.match(/"chapter_no"\s*:\s*(\d+)/)?.[1] || chapterId || 0)
+  const title = preview.match(/"chapter_title"\s*:\s*"([^"]+)"/)?.[1] || preview.match(/"title"\s*:\s*"([^"]+)"/)?.[1] || ''
+  return {
+    ...(chapterId ? { id: chapterId, chapter_id: chapterId } : {}),
+    ...(chapterNo ? { chapter_no: chapterNo } : {}),
+    ...(title ? { title } : {}),
+  }
+}
+
+export function resolveQualityReportView(report: any) {
+  const payload = parseReviewPayload(report)
+  const selfCheck = payload.self_check || {}
+  const review = selfCheck.review || payload.review || {}
+  const contextPackage = payload.context_package || {}
+  const chapterTarget = {
+    ...compactedPreviewChapterTarget(payload),
+    ...(contextPackage.chapter_target || {}),
+  }
+  const score = Number(review.score ?? payload.score ?? parseQualitySummaryScore(report?.summary) ?? 0)
+  const craftMetrics = review.craft_metrics || {}
+  const focusedModes = Array.isArray(review.focused_revision_modes) ? review.focused_revision_modes : []
+  const issues = qualityReportIssues(report, review)
+  const pipeline = Array.isArray(payload.pipeline) ? payload.pipeline : []
+  const preflight = contextPackage.preflight || {}
+  const checks = Array.isArray(preflight.checks) ? preflight.checks : []
+  const warnings = Array.isArray(preflight.warnings) ? preflight.warnings : []
+  const previousChapter = contextPackage.continuity?.previous_chapter || null
+  return {
+    payload,
+    selfCheck,
+    review,
+    score,
+    craftMetrics,
+    focusedModes,
+    issues,
+    pipeline,
+    contextPackage,
+    chapterTarget,
+    preflight,
+    checks,
+    warnings,
+    previousChapter,
+  }
+}
+
 function scoreColor(score: number) {
   if (score >= 85) return 'green'
   if (score >= 78) return 'blue'
@@ -527,23 +596,25 @@ export function ReferencePanel({
                   <Collapse
                     size="small"
                     bordered={false}
-                    style={{ background: 'transparent', margin: 8 }}
-                    items={proseQualityReports.slice(0, 16).map((report) => {
-                      const payload = parseReviewPayload(report)
-                      const selfCheck = payload.self_check || {}
-                      const review = selfCheck.review || {}
-                      const score = Number(review.score ?? 0)
-                      const craftMetrics = review.craft_metrics || {}
-                      const focusedModes = Array.isArray(review.focused_revision_modes) ? review.focused_revision_modes : []
-                      const issues = Array.isArray(review.issues) ? review.issues : (Array.isArray(report.issues) ? report.issues : [])
-                      const pipeline = Array.isArray(payload.pipeline) ? payload.pipeline : []
-                      const contextPackage = payload.context_package || {}
-                      const chapterTarget = contextPackage.chapter_target || {}
-                      const preflight = contextPackage.preflight || {}
-                      const checks = Array.isArray(preflight.checks) ? preflight.checks : []
-                      const warnings = Array.isArray(preflight.warnings) ? preflight.warnings : []
-                      const previousChapter = contextPackage.continuity?.previous_chapter || null
-                      const isCurrent = activeChapterId !== null && Number(payload.chapter_id) === Number(activeChapterId)
+	                    style={{ background: 'transparent', margin: 8 }}
+	                    items={proseQualityReports.slice(0, 16).map((report) => {
+	                      const {
+	                        payload,
+	                        selfCheck,
+	                        review,
+	                        score,
+	                        craftMetrics,
+	                        focusedModes,
+	                        issues,
+	                        pipeline,
+	                        chapterTarget,
+	                        preflight,
+	                        checks,
+	                        warnings,
+	                        previousChapter,
+	                      } = resolveQualityReportView(report)
+	                      const reportChapterId = Number(payload.chapter_id || chapterTarget.chapter_id || chapterTarget.id || 0)
+	                      const isCurrent = activeChapterId !== null && reportChapterId === Number(activeChapterId)
                       const reportTime = timeValue(report.created_at)
                       const chapterTime = timeValue(activeChapterUpdatedAt)
                       const payloadChapterTime = timeValue(payload.chapter_updated_at)
