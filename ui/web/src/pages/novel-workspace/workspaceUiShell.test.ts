@@ -597,17 +597,23 @@ describe('commercial writing workspace UI shell', () => {
     expect(projectWorkspace).toContain('void syncStoryStateForChapter')
   })
 
-  test('uses a production guide command system instead of stacked block buttons', () => {
+  test('keeps the left production guide as a compact status summary', () => {
     const component = source('ProductionGuidePanel.tsx')
     const css = source('ProductionGuidePanel.css')
 
     expect(component).toContain("import './ProductionGuidePanel.css'")
-    expect(component).toContain('production-guide-primary-command')
-    expect(component).toContain('production-guide-secondary-command')
-    expect(component).toContain('production-guide-step-status')
-    expect(component).not.toContain('block\\n                      type={step.status')
-    expect(css).toContain('.production-guide-secondary-command')
-    expect(css).toContain('.production-guide-step-active')
+    expect(component).toContain('production-guide-summary-panel')
+    expect(component).toContain('production-guide-summary-grid')
+    expect(component).toContain('production-guide-summary-action')
+    expect(component).toContain('项目进度')
+    expect(component).not.toContain('GuideStep')
+    expect(component).not.toContain('production-guide-primary-command')
+    expect(component).not.toContain('production-guide-secondary-command')
+    expect(component).not.toContain('primaryLabel')
+    expect(css).toContain('.production-guide-summary-panel')
+    expect(css).toContain('.production-guide-summary-grid')
+    expect(css).not.toContain('.production-guide-step-active')
+    expect(css).not.toContain('.production-guide-secondary-command')
   })
 
   test('separates the writing cockpit from delivery and collapsed workspace bars', () => {

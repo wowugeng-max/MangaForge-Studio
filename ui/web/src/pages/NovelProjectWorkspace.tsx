@@ -6720,44 +6720,15 @@ export default function NovelProjectWorkspace() {
             collapsed={directoryCollapsed}
             onCollapsedChange={setDirectoryCollapsed}
             planningMode={workspaceArea === 'storyPlanning'}
-            selectedModelId={selectedModelId}
-            stepOutlineLoading={stepOutlineLoading}
-            stepProseLoading={stepProseLoading}
-            stepRepairLoading={stepRepairLoading}
-            incubatingOriginal={incubatingOriginal}
-            bookReviewLoading={bookReviewLoading}
-            commercialToolLoading={commercialToolLoading}
             proseProgress={proseProgress}
             chapters={sortedChapters}
             proseChapterCount={proseChapters.length}
             activeChapterId={activeChapterId}
-            referenceCount={referenceSummary.count}
-            outlineCount={outlines.length}
-            worldbuildingCount={worldbuilding.length}
-            characterCount={characters.length}
-            hasWritingBible={Boolean(selectedProject?.reference_config?.writing_bible)}
             materialScore={activeChapterDiagnosticsData?.material_score}
             commercialReadiness={commercialReadiness}
             activeTaskCount={activeTasks.length + activeKnowledgeJobCount}
-            onOpenOutlinePanel={() => setOutlinePanelOpen(true)}
-            onGenerateProse={stepGenerateProse}
-            onCancelGenerateProse={cancelStepGenerateProse}
-            onRunRepair={stepRunRepair}
-            onOpenReferenceConfig={() => setReferenceConfigOpen(true)}
-            onOpenReferenceEngineering={() => setReferenceEngineeringOpen(true)}
-            onOpenCreativeCards={() => setCreativeCardsOpen(true)}
-            onRunOriginalIncubator={() => { void runOriginalIncubator() }}
-            onOpenWritingBibleEditor={() => { void openWritingBibleEditor() }}
-            onOpenMaterialRepairPlan={() => { void openMaterialRepairPlan() }}
-            onStartReadyChapterGroupGeneration={() => { void startReadyChapterGroupGeneration() }}
-            onStartChapterGroupGeneration={() => { void startChapterGroupGeneration() }}
             onOpenProductionDesk={() => navigate(`/novel/workspace/${projectId}/production`)}
             onOpenTaskCenter={() => setTaskCenterOpen(true)}
-            onOpenConsistencyGraph={() => setConsistencyGraphOpen(true)}
-            onOpenQualityBenchmark={() => setQualityBenchmarkOpen(true)}
-            onRunBookReview={() => { void runBookReview() }}
-            onOpenCommercialTools={() => setCommercialToolsOpen(true)}
-            onOpenExportDelivery={() => setExportDeliveryOpen(true)}
             onOpenOutlineTree={() => setOutlineTreeOpen(true)}
             onOpenChapterDrawer={() => setChapterDrawerOpen(true)}
             onCreateChapter={() => openEditor('chapter')}

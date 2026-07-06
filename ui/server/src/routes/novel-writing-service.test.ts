@@ -182,6 +182,7 @@ import {
   scanSpecificCharacterCountExpressionRisks,
   scanProseFormatRisks,
   scanProseMetaLeaks,
+  scanModelDegenerationRisks,
   buildProseMetaSyncReport,
   scanChapterBlueprintCraftRisks,
   scanCharacterOrderExecutionRisks,
@@ -384,6 +385,57 @@ describe('normalizeSceneCardsPayload', () => {
     expect(source).toContain('benchmark_recall_directives(array)')
     expect(source).toContain('concept_anchor_rules(array)')
     expect(source).toContain('prose_craft_directives(array)')
+  })
+
+  test('preserves oh-story chapter positioning and benchmark structure coordinates for scene-card handoff', () => {
+    const sceneCards = normalizeSceneCardsPayload({
+      scene_cards: [
+        {
+          title: '雨后喘息',
+          purpose: '高潮后让两人确认旧账册的代价。',
+          chapterPositioning: '低压生活',
+          pressureLevel: 1,
+          chapterPositioningRole: '高潮后喘息，关系升温但保留下一目标。',
+          benchmarkStructureCoordinate: {
+            normalized_position: '中点',
+            source_event: '对标卷中点用低压关系章缓冲上个爆点。',
+            local_event: '本卷中点让旧账册余波落到两人信任变化。',
+            event_type: '转折',
+          },
+        },
+      ],
+    })
+
+    expect(sceneCards[0].chapter_positioning).toBe('低压生活')
+    expect(sceneCards[0].pressure_level).toBe(1)
+    expect(sceneCards[0].chapter_positioning_role).toContain('关系升温')
+    expect(sceneCards[0].benchmark_structure_coordinate.normalized_position).toBe('中点')
+    expect(sceneCards[0].benchmark_structure_coordinate.local_event).toContain('信任变化')
+  })
+
+  test('wires chapter positioning and benchmark structure coordinates into scene-card and prose prompts', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const promptStart = source.indexOf('const buildSceneCardsPrompt =')
+    const promptEnd = source.indexOf('const buildHeuristicSettingUsage =', promptStart)
+    const promptBlock = source.slice(promptStart, promptEnd)
+    const proseStart = source.indexOf('const buildParagraphProseContext =')
+    const proseEnd = source.indexOf('const buildStoryStatePrompt =', proseStart)
+    const proseBlock = source.slice(proseStart, proseEnd)
+    const reviewStart = source.indexOf('const buildProseReviewPrompt =')
+    const reviewEnd = source.indexOf('const buildProseRevisionPrompt =', reviewStart)
+    const reviewBlock = source.slice(reviewStart, reviewEnd)
+
+    expect(promptStart).toBeGreaterThanOrEqual(0)
+    expect(proseStart).toBeGreaterThanOrEqual(0)
+    expect(reviewStart).toBeGreaterThanOrEqual(0)
+    expect(promptBlock).toContain('chapter_positioning')
+    expect(promptBlock).toContain('benchmark_structure_coordinate')
+    expect(promptBlock).toContain('高压/推进/修炼试错/关系回收/低压生活/信息整理')
+    expect(promptBlock).toContain('对标结构坐标')
+    expect(proseBlock).toContain('chapter_target.chapter_positioning_brief')
+    expect(proseBlock).toContain('scene_cards.chapter_positioning')
+    expect(proseBlock).toContain('低压/过场章可弱钩子')
+    expect(reviewBlock).toContain('chapter_positioning_checks')
   })
 
   test('preserves showdown scene-card public payoff and combat execution fields', () => {
@@ -54944,6 +54996,65 @@ describe('chapter context word target source guards', () => {
     expect(report.priority_repair).toBe('优先清理工程词')
     expect(report.required_actions.join('｜')).toContain('角色当下能感知')
     expect(report.evidence.join('｜')).toContain('上一章的伏笔')
+  })
+
+  test('detects model degeneration risks with deterministic blocking and advisory severity', () => {
+    const checks = scanModelDegenerationRisks([
+      '第三章 风起',
+      '门外的铜铃忽然响了，所有人都停在原地。',
+      '门外的铜铃忽然响了，所有人都停在原地。',
+      '门外的铜铃忽然响了，所有人都停在原地。',
+      '任务描述：继续生成本章正文。',
+      '作为AI，我无法继续生成本章。',
+      '门缝里只剩',
+    ].join('\n'))
+
+    expect(checks.map((item: any) => item.type)).toEqual(expect.arrayContaining([
+      'repetition',
+      'engineering_meta',
+      'ai_self_reference',
+      'truncation',
+    ]))
+    expect(checks.filter((item: any) => item.severity === 'blocking').map((item: any) => item.type)).toEqual(expect.arrayContaining([
+      'repetition',
+      'engineering_meta',
+      'ai_self_reference',
+      'truncation',
+    ]))
+    expect(checks.map((item: any) => item.fix).join('｜')).toContain('重写受影响段落')
+  })
+
+  test('includes model degeneration as the first deterministic cleanup priority', () => {
+    const report = buildDeterministicProseCleanupReport({
+      id: 42,
+      chapter_no: 3,
+    }, [
+      '第三章 风起',
+      '门外的铜铃忽然响了，所有人都停在原地。',
+      '门外的铜铃忽然响了，所有人都停在原地。',
+      '门外的铜铃忽然响了，所有人都停在原地。',
+      '任务描述：继续生成本章正文。',
+      '门缝里只剩',
+    ].join('\n'))
+
+    expect(report.status).toBe('warn')
+    expect(report.categories.map((item: any) => item.type)).toContain('model_degeneration')
+    expect(report.priority_repair).toBe('优先处理模型退化')
+    expect(report.required_actions.join('｜')).toContain('重写受影响段落')
+    expect(report.evidence.join('｜')).toContain('任务描述')
+  })
+
+  test('revision prompt uses delete-first deslop repair before polishing', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const revisionStart = source.indexOf('const buildProseRevisionPrompt =')
+    const revisionEnd = source.indexOf('const nextChapterQualityPlanNeedsRepair =', revisionStart)
+    const revisionBlock = source.slice(revisionStart, revisionEnd)
+
+    expect(revisionStart).toBeGreaterThanOrEqual(0)
+    expect(revisionBlock).toContain('删除优先')
+    expect(revisionBlock).toContain('删后不丢伏笔')
+    expect(revisionBlock).toContain('删不掉才润色')
+    expect(revisionBlock).toContain('跌破字数下限')
   })
 
   test('ignores yaml front matter when building deterministic prose cleanup report', () => {

@@ -18,44 +18,15 @@ export function ChapterDirectorySidebar({
   collapsed = false,
   onCollapsedChange,
   planningMode = false,
-  selectedModelId,
-  stepOutlineLoading,
-  stepProseLoading,
-  stepRepairLoading,
-  incubatingOriginal,
-  bookReviewLoading,
-  commercialToolLoading,
   proseProgress,
   chapters,
   proseChapterCount,
   activeChapterId,
-  referenceCount,
-  outlineCount,
-  worldbuildingCount,
-  characterCount,
-  hasWritingBible,
   materialScore,
   commercialReadiness,
   activeTaskCount,
-  onOpenOutlinePanel,
-  onGenerateProse,
-  onCancelGenerateProse,
-  onRunRepair,
-  onOpenReferenceConfig,
-  onOpenReferenceEngineering,
-  onOpenCreativeCards,
-  onRunOriginalIncubator,
-  onOpenWritingBibleEditor,
-  onOpenMaterialRepairPlan,
-  onStartReadyChapterGroupGeneration,
-  onStartChapterGroupGeneration,
   onOpenProductionDesk,
   onOpenTaskCenter,
-  onOpenConsistencyGraph,
-  onOpenQualityBenchmark,
-  onRunBookReview,
-  onOpenCommercialTools,
-  onOpenExportDelivery,
   onOpenOutlineTree,
   onOpenChapterDrawer,
   onCreateChapter,
@@ -64,44 +35,15 @@ export function ChapterDirectorySidebar({
   collapsed?: boolean
   onCollapsedChange?: (collapsed: boolean) => void
   planningMode?: boolean
-  selectedModelId?: number
-  stepOutlineLoading: boolean
-  stepProseLoading: boolean
-  stepRepairLoading: boolean
-  incubatingOriginal: boolean
-  bookReviewLoading: boolean
-  commercialToolLoading: string
   proseProgress: { current: number; total: number }
   chapters: any[]
   proseChapterCount: number
   activeChapterId: number | null
-  referenceCount: number
-  outlineCount: number
-  worldbuildingCount: number
-  characterCount: number
-  hasWritingBible: boolean
   materialScore?: any
   commercialReadiness?: any
   activeTaskCount: number
-  onOpenOutlinePanel: () => void
-  onGenerateProse: () => void
-  onCancelGenerateProse: () => void
-  onRunRepair: () => void
-  onOpenReferenceConfig: () => void
-  onOpenReferenceEngineering: () => void
-  onOpenCreativeCards: () => void
-  onRunOriginalIncubator: () => void
-  onOpenWritingBibleEditor: () => void
-  onOpenMaterialRepairPlan: () => void
-  onStartReadyChapterGroupGeneration: () => void
-  onStartChapterGroupGeneration: () => void
   onOpenProductionDesk: () => void
   onOpenTaskCenter: () => void
-  onOpenConsistencyGraph: () => void
-  onOpenQualityBenchmark: () => void
-  onRunBookReview: () => void
-  onOpenCommercialTools: () => void
-  onOpenExportDelivery: () => void
   onOpenOutlineTree: () => void
   onOpenChapterDrawer: () => void
   onCreateChapter: () => void
@@ -170,43 +112,14 @@ export function ChapterDirectorySidebar({
         {!planningMode && (
           <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0' }}>
             <ProductionGuidePanel
-              selectedModelId={selectedModelId}
-              stepOutlineLoading={stepOutlineLoading}
-              stepProseLoading={stepProseLoading}
-              stepRepairLoading={stepRepairLoading}
-              incubatingOriginal={incubatingOriginal}
-              bookReviewLoading={bookReviewLoading}
-              commercialToolLoading={commercialToolLoading}
               proseProgress={proseProgress}
               chapterCount={chapters.length}
               proseChapterCount={proseChapterCount}
-              referenceCount={referenceCount}
-              outlineCount={outlineCount}
-              worldbuildingCount={worldbuildingCount}
-              characterCount={characterCount}
-              hasWritingBible={hasWritingBible}
               materialScore={materialScore}
               commercialReadiness={commercialReadiness}
               activeTaskCount={activeTaskCount}
-              onOpenOutlinePanel={onOpenOutlinePanel}
-              onGenerateProse={onGenerateProse}
-              onCancelGenerateProse={onCancelGenerateProse}
-              onRunRepair={onRunRepair}
-              onOpenReferenceConfig={onOpenReferenceConfig}
-              onOpenReferenceEngineering={onOpenReferenceEngineering}
-              onOpenCreativeCards={onOpenCreativeCards}
-              onRunOriginalIncubator={onRunOriginalIncubator}
-              onOpenWritingBibleEditor={onOpenWritingBibleEditor}
-              onOpenMaterialRepairPlan={onOpenMaterialRepairPlan}
-              onStartReadyChapterGroupGeneration={onStartReadyChapterGroupGeneration}
-              onStartChapterGroupGeneration={onStartChapterGroupGeneration}
               onOpenProductionDesk={onOpenProductionDesk}
               onOpenTaskCenter={onOpenTaskCenter}
-              onOpenConsistencyGraph={onOpenConsistencyGraph}
-              onOpenQualityBenchmark={onOpenQualityBenchmark}
-              onRunBookReview={onRunBookReview}
-              onOpenCommercialTools={onOpenCommercialTools}
-              onOpenExportDelivery={onOpenExportDelivery}
             />
           </div>
         )}

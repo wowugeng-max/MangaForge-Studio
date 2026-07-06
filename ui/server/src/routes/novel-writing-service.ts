@@ -1267,6 +1267,132 @@ export function scanProseMetaLeaks(text: string) {
   return hits
 }
 
+const MODEL_DEGENERATION_TERMINAL_PUNCTUATION = /[。！？!?；;」』”’）】》]$/
+const MODEL_DEGENERATION_TIER1_META_PATTERN = /细纲|情节点|卷纲|功能标签|目标情绪|字数目标|章首钩子|章尾钩子|任务描述/g
+const MODEL_DEGENERATION_TIER2_META_PATTERN = /第[一二三四五六七八九十百千万两0-9]+章|本章|这一章|上一章|下一章|上章|下章|前一章|后一章|前文|后文|伏笔|读者/g
+const MODEL_DEGENERATION_PLACEHOLDER_PATTERNS = [
+  { type: 'ai_self_reference', pattern: /作为(一个)?(AI|人工智能|大?语言模型|智能助手|聊天助手)(?=[，,。、；;：:！!？?\s）)」』"】]|我|无法|不能|没法|$)/ },
+  { type: 'generation_refusal', pattern: /我(无法|不能)(继续(写|创作|生成|下去)|生成(内容|文本|正文)?|创作|续写|完成(这个|本)?(章|篇|创作|请求))/ },
+  { type: 'placeholder', pattern: /[（(](此处|以下|这里|下文|后续)?\s*(省略|略)(去|过)?[^）)]{0,10}[）)]|未完待续|TODO|占位符|placeholder/ },
+  { type: 'garbled_text', pattern: /�/ },
+  { type: 'english_ai_voice', pattern: /^(Sure|Certainly|Here'?s|As an AI|I (?:cannot|can't|am unable|apologize))/ },
+]
+
+function isLikelyDialogueOnlyLine(line: string) {
+  const text = String(line || '').trim()
+  return /^["“「『].*["”」』]$/.test(text)
+}
+
+function normalizeDegenerationRepeatText(text: string) {
+  return String(text || '')
+    .replace(/[“”"「」『』（）()《》【】\s]/g, '')
+    .trim()
+}
+
+export function scanModelDegenerationRisks(text: string) {
+  const lines = String(text || '').split(/\r?\n/)
+  const firstContentLine = lines.findIndex(line => String(line || '').trim())
+  const hits: Array<{
+    key: string
+    label: string
+    type: string
+    severity: 'blocking' | 'advisory'
+    status: 'warn'
+    evidence: string
+    fix: string
+    line: number
+  }> = []
+  const bodyRows = lines
+    .map((line, index) => ({ line: String(line || ''), evidence: String(line || '').trim(), index }))
+    .filter(row => row.evidence && !(row.index === firstContentLine && isLikelyChapterTitleLine(row.line)))
+
+  const sentences = splitProseSentences(bodyRows.map(row => row.evidence).join('\n'))
+    .map(sentence => normalizeDegenerationRepeatText(sentence))
+    .filter(sentence => countProseChars(sentence) >= 12)
+  const sentenceCounts = new Map<string, number>()
+  for (const sentence of sentences) sentenceCounts.set(sentence, (sentenceCounts.get(sentence) || 0) + 1)
+  const repeatedSentence = Array.from(sentenceCounts.entries()).find(([, count]) => count >= 3)
+  if (repeatedSentence) {
+    hits.push({
+      key: 'model_repetition_sentence',
+      label: '模型退化扫描',
+      type: 'repetition',
+      severity: 'blocking',
+      status: 'warn',
+      evidence: repeatedSentence[0],
+      fix: '重写受影响段落：删除复读/打转句，把同一信息改成一次有效动作、一次新信息或一次状态变化。',
+      line: 0,
+    })
+  }
+
+  for (let index = 1; index < bodyRows.length; index += 1) {
+    const previous = normalizeDegenerationRepeatText(bodyRows[index - 1].evidence)
+    const current = normalizeDegenerationRepeatText(bodyRows[index].evidence)
+    if (!previous || previous !== current || countProseChars(current) < 8) continue
+    hits.push({
+      key: `model_repetition_adjacent_line_${bodyRows[index].index + 1}`,
+      label: '模型退化扫描',
+      type: 'repetition',
+      severity: 'blocking',
+      status: 'warn',
+      evidence: bodyRows[index].evidence,
+      fix: '重写受影响段落：相邻整行复读属于模型打转，保留一次有效信息，其余改成新的动作推进或删除。',
+      line: bodyRows[index].index + 1,
+    })
+    break
+  }
+
+  const lastRow = bodyRows[bodyRows.length - 1]
+  if (lastRow && countProseChars(lastRow.evidence) >= 4 && !MODEL_DEGENERATION_TERMINAL_PUNCTUATION.test(lastRow.evidence)) {
+    hits.push({
+      key: `model_truncation_line_${lastRow.index + 1}`,
+      label: '模型退化扫描',
+      type: 'truncation',
+      severity: 'blocking',
+      status: 'warn',
+      evidence: lastRow.evidence,
+      fix: '重写受影响段落：正文末尾疑似中途截断，补成完整动作、信息变化和章尾承接后再入库。',
+      line: lastRow.index + 1,
+    })
+  }
+
+  for (const row of bodyRows) {
+    for (const item of MODEL_DEGENERATION_PLACEHOLDER_PATTERNS) {
+      if (!item.pattern.test(row.evidence)) continue
+      hits.push({
+        key: `model_${item.type}_line_${row.index + 1}`,
+        label: '模型退化扫描',
+        type: item.type,
+        severity: isLikelyDialogueOnlyLine(row.evidence) ? 'advisory' : 'blocking',
+        status: 'warn',
+        evidence: row.evidence,
+        fix: '重写受影响段落：删除 AI 自指、拒绝语、占位符或乱码，只保留故事世界内可感知的动作和信息。',
+        line: row.index + 1,
+      })
+    }
+
+    const tier1Terms = Array.from(row.evidence.matchAll(MODEL_DEGENERATION_TIER1_META_PATTERN)).map(match => match[0])
+    const tier2Terms = Array.from(row.evidence.matchAll(MODEL_DEGENERATION_TIER2_META_PATTERN)).map(match => match[0])
+    const terms = Array.from(new Set([...tier1Terms, ...tier2Terms]))
+      .filter(term => !isLikelyInWorldChapterTextReference(row.evidence, term))
+    if (!terms.length) continue
+    const tier1TermSet = new Set(tier1Terms)
+    const hasTier1 = terms.some(term => tier1TermSet.has(term))
+    hits.push({
+      key: `model_engineering_meta_line_${row.index + 1}`,
+      label: '模型退化扫描',
+      type: 'engineering_meta',
+      severity: hasTier1 && !isLikelyDialogueOnlyLine(row.evidence) ? 'blocking' : 'advisory',
+      status: 'warn',
+      evidence: row.evidence,
+      fix: `重写受影响段落：把 ${terms.join('、')} 等写作工程词改成角色当下能感知的事件锚点、物件状态、相对时间或对话信息。`,
+      line: row.index + 1,
+    })
+  }
+
+  return hits
+}
+
 export function buildProseMetaSyncReport(project: any, chapter: any, contextPackage: any, chapterText: string) {
   const missed = scanProseMetaLeaks(chapterText).map((item: any) => ({
     ...item,
@@ -1842,6 +1968,7 @@ function cleanupReportItemText(value: any) {
 
 export function buildDeterministicProseCleanupReport(chapter: any, text: string) {
   const proseScanText = maskYamlFrontMatterForProseScans(text)
+  const modelDegenerationChecks = scanModelDegenerationRisks(proseScanText)
   const proseMetaChecks = scanProseMetaLeaks(proseScanText)
   const proseFormatChecks = scanProseFormatRisks(proseScanText)
   const fillerChecks = scanRecapFillerRisks(proseScanText)
@@ -1860,6 +1987,12 @@ export function buildDeterministicProseCleanupReport(chapter: any, text: string)
   ]
   const punctuationToneChecks = scanPunctuationToneRisks(proseScanText)
   const categories = [
+    {
+      type: 'model_degeneration',
+      label: '模型退化硬伤',
+      priority_repair: '优先处理模型退化',
+      checks: modelDegenerationChecks,
+    },
     {
       type: 'prose_meta',
       label: '工程词泄露',
@@ -1902,10 +2035,14 @@ export function buildDeterministicProseCleanupReport(chapter: any, text: string)
     count: category.checks.length,
     status: category.checks.length > 0 ? 'warn' : 'ok',
     priority_repair: category.priority_repair,
+    has_blocking: category.checks.some((item: any) => String(item?.severity || '').toLowerCase() === 'blocking'),
     evidence: category.checks.map((item: any) => compactBriefText(item?.evidence)).filter(Boolean).slice(0, 6),
     required_actions: category.checks.map(cleanupReportItemText).filter(Boolean).slice(0, 6),
   }))
   const failedCategories = categories.filter(category => category.count > 0)
+  const priorityCategory = failedCategories.find(category => category.type === 'model_degeneration' && category.has_blocking)
+    || failedCategories.find(category => category.type !== 'model_degeneration')
+    || failedCategories[0]
   const riskCount = failedCategories.reduce((sum, category) => sum + category.count, 0)
   return {
     version: 'oh_story_deterministic_prose_cleanup_v1',
@@ -1914,10 +2051,10 @@ export function buildDeterministicProseCleanupReport(chapter: any, text: string)
     status: riskCount > 0 ? 'warn' : 'ok',
     label: `确定性清理 ${riskCount}`,
     summary: riskCount > 0
-      ? `确定性清理发现 ${riskCount} 项工程词、正文格式、复述水字数、去AI味或语气标点风险。`
+      ? `确定性清理发现 ${riskCount} 项模型退化、工程词、正文格式、复述水字数、去AI味或语气标点风险。`
       : '确定性清理未发现工程词、正文格式、复述水字数、去AI味或语气标点硬伤。',
     risk_count: riskCount,
-    priority_repair: failedCategories[0]?.priority_repair || '无需确定性清理',
+    priority_repair: priorityCategory?.priority_repair || '无需确定性清理',
     categories,
     required_actions: failedCategories.flatMap(category => category.required_actions).slice(0, 12),
     evidence: failedCategories.flatMap(category => category.evidence).slice(0, 12),
@@ -5370,6 +5507,99 @@ function compactHandoffExcerpt(value: any, maxChars = 360) {
   return `${text.slice(0, headChars)}...${text.slice(-tailChars)}`
 }
 
+const CHAPTER_POSITIONING_OPTIONS = ['高压', '推进', '修炼试错', '关系回收', '低压生活', '信息整理']
+
+function normalizePressureLevel(value: any) {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric) || numeric <= 0) return ''
+  return Math.min(5, Math.max(1, Math.round(numeric)))
+}
+
+function normalizeBenchmarkStructureCoordinates(raw: any, sceneBriefs: any[] = []) {
+  const values = [
+    ...(Array.isArray(raw) ? raw : raw ? [raw] : []),
+    ...sceneBriefs.map((scene: any) => scene?.benchmark_structure_coordinate || scene?.benchmarkStructureCoordinate).filter(Boolean),
+  ]
+  return values
+    .map((item: any) => {
+      if (typeof item === 'string') return { summary: compactBriefText(item, '') }
+      return {
+        normalized_position: compactBriefText(item?.normalized_position || item?.normalizedPosition || item?.position),
+        volume_chapter_range: compactBriefText(item?.volume_chapter_range || item?.volumeChapterRange || item?.chapter_range || item?.chapterRange),
+        source_event: compactBriefText(item?.source_event || item?.sourceEvent || item?.benchmark_event || item?.benchmarkEvent),
+        local_event: compactBriefText(item?.local_event || item?.localEvent || item?.current_event || item?.currentEvent),
+        event_type: compactBriefText(item?.event_type || item?.eventType || item?.type),
+        summary: compactBriefText(item?.summary),
+      }
+    })
+    .filter((item: any) => Object.values(item).some(value => compactBriefText(value)))
+    .slice(0, 8)
+}
+
+function normalizeChapterPositioningBrief(contextPackage: any = {}, sceneBriefs: any[] = []) {
+  const target = {
+    ...(contextPackage?.chapter_target || {}),
+    ...(contextPackage?.chapterTarget || {}),
+  }
+  const brief = {
+    ...(contextPackage?.pre_draft_brief || {}),
+    ...(contextPackage?.preDraftBrief || {}),
+  }
+  const blueprint = target.chapter_blueprint || target.chapterBlueprint || brief.chapter_blueprint || brief.chapterBlueprint || contextPackage?.chapter_blueprint || {}
+  const chapterPositioning = compactBriefText(
+    target.chapter_positioning
+      || target.chapterPositioning
+      || target.chapter_role
+      || target.chapterRole
+      || blueprint.chapter_positioning
+      || blueprint.chapterPositioning
+      || brief.chapter_positioning
+      || brief.chapterPositioning
+      || sceneBriefs.map((scene: any) => scene?.chapter_positioning || scene?.chapterPositioning).find(Boolean)
+      || '推进',
+  )
+  const pressureLevel = normalizePressureLevel(
+    target.pressure_level
+      || target.pressureLevel
+      || blueprint.pressure_level
+      || blueprint.pressureLevel
+      || brief.pressure_level
+      || brief.pressureLevel
+      || sceneBriefs.map((scene: any) => scene?.pressure_level || scene?.pressureLevel).find(Boolean),
+  )
+  const benchmarkStructureCoordinates = normalizeBenchmarkStructureCoordinates(
+    target.benchmark_structure_coordinates
+      || target.benchmarkStructureCoordinates
+      || target.benchmark_structure_coordinate
+      || target.benchmarkStructureCoordinate
+      || blueprint.benchmark_structure_coordinates
+      || blueprint.benchmarkStructureCoordinates
+      || brief.benchmark_structure_coordinates
+      || brief.benchmarkStructureCoordinates
+      || contextPackage?.benchmark_structure_coordinates
+      || contextPackage?.benchmarkStructureCoordinates,
+    sceneBriefs,
+  )
+  return {
+    version: 'oh_story_chapter_positioning_v1',
+    chapter_positioning: chapterPositioning,
+    pressure_level: pressureLevel,
+    positioning_options: CHAPTER_POSITIONING_OPTIONS,
+    benchmark_structure_coordinates: benchmarkStructureCoordinates,
+    rules: [
+      '章节定位决定爆发/冲突烈度，不等于情绪强度；关系回收章可以低压力但高情绪。',
+      '低压生活/信息整理/过场章允许弱钩子或无显性爽点，但必须保留往下看的理由。',
+      '高压/推进章必须有明确冲突升级、信息变化或读者回报；不要所有章节同一力度。',
+      '相邻 3-4 章避免同一情绪母题扎堆，必要时用关系、世界调剂或信息整理降压。',
+    ],
+    quality_checks: [
+      'chapter_positioning_checks：本章钩子、爽点密度、详略和章尾拉力是否匹配章节定位。',
+      '对标结构坐标：有对标时检查 1/4 / 中点 / 3/4 功能位是否换素材迁移，而不是照搬桥段。',
+      '低压/过场章仍要有阶段目标、微好奇或关系期待；不能裸奔无钩子。',
+    ],
+  }
+}
+
 const PROSE_PROMPT_MAX_CHARS = 180000
 const PROSE_PROMPT_LONG_LINE_HEAD = 900
 const PROSE_PROMPT_LONG_LINE_TAIL = 700
@@ -5406,8 +5636,13 @@ function compactProseSceneCard(card: any) {
     scene_no: card?.scene_no || card?.sceneNo,
     title: card?.title,
     purpose_tag: card?.purpose_tag || card?.purposeTag,
+    goal: card?.goal || card?.scene_goal || card?.sceneGoal,
     purpose: card?.purpose,
+    obstacle: card?.obstacle,
     conflict: card?.conflict,
+    protagonist_agency_action: card?.protagonist_agency_action || card?.protagonistAgencyAction,
+    no_exit_reason: card?.no_exit_reason || card?.noExitReason,
+    event_value_change: card?.event_value_change || card?.eventValueChange,
     opening_hook: card?.opening_hook || card?.openingHook,
     reader_payoff: card?.reader_payoff || card?.readerPayoff,
     required_beats: card?.required_beats || card?.requiredBeats,
@@ -5416,6 +5651,10 @@ function compactProseSceneCard(card: any) {
     state_changes_expected: card?.state_changes_expected || card?.stateChangesExpected,
     serial_risk_repairs: card?.serial_risk_repairs || card?.serialRiskRepairs || card?.risk_repairs || card?.riskRepairs,
     recent_fatigue_action: card?.recent_fatigue_action || card?.recentFatigueAction,
+    chapter_positioning: card?.chapter_positioning || card?.chapterPositioning,
+    pressure_level: card?.pressure_level || card?.pressureLevel,
+    chapter_positioning_role: card?.chapter_positioning_role || card?.chapterPositioningRole,
+    benchmark_structure_coordinate: card?.benchmark_structure_coordinate || card?.benchmarkStructureCoordinate,
     ending_hook_seed: card?.ending_hook_seed || card?.endingHookSeed,
     density_level: card?.density_level || card?.densityLevel,
     sensory_anchor: card?.sensory_anchor || card?.sensoryAnchor,
@@ -5528,6 +5767,7 @@ function buildProsePromptContextSnapshot(contextPackage: any) {
       previous_handoff: target.previous_handoff || target.previousHandoff,
       word_target: target.word_target || target.wordTarget,
       scene_cards: asArray(target.scene_cards || target.sceneCards).slice(0, 8).map(compactProseSceneCard),
+      chapter_positioning_brief: target.chapter_positioning_brief || target.chapterPositioningBrief,
       longform_structure_contract: omittedContracts.has('longform_structure_contract')
         ? undefined
         : target.longform_structure_contract || target.longformStructureContract,
@@ -5770,8 +6010,11 @@ function sceneBriefFromCard(card: any, index: number) {
   return {
     scene_no: Number(card?.scene_no || index + 1),
     title: compactBriefText(card?.title, `场景${index + 1}`),
+    goal: compactBriefText(card?.goal || card?.scene_goal || card?.sceneGoal),
+    scene_goal: compactBriefText(card?.scene_goal || card?.sceneGoal || card?.goal),
     purpose: compactBriefText(card?.purpose || card?.beat),
     conflict: compactBriefText(card?.conflict),
+    obstacle: compactBriefText(card?.obstacle),
     conflict_ladder_step: compactBriefText(card?.conflict_ladder_step || card?.conflictLadderStep),
     motivation_source: compactBriefText(card?.motivation_source || card?.motivationSource),
     opposing_force: compactBriefText(card?.opposing_force || card?.opposingForce),
@@ -5783,6 +6026,10 @@ function sceneBriefFromCard(card: any, index: number) {
     visible_line_role: compactBriefText(card?.visible_line_role || card?.visibleLineRole),
     hidden_line_seed: compactBriefText(card?.hidden_line_seed || card?.hiddenLineSeed),
     ab_weave_role: compactBriefText(card?.ab_weave_role || card?.abWeaveRole),
+    chapter_positioning: compactBriefText(card?.chapter_positioning || card?.chapterPositioning),
+    pressure_level: normalizePressureLevel(card?.pressure_level || card?.pressureLevel),
+    chapter_positioning_role: compactBriefText(card?.chapter_positioning_role || card?.chapterPositioningRole || card?.positioning_role || card?.positioningRole),
+    benchmark_structure_coordinate: card?.benchmark_structure_coordinate || card?.benchmarkStructureCoordinate || null,
     opening_hook: compactBriefText(card?.opening_hook || card?.hook_opening),
     reader_payoff: compactBriefText(card?.reader_payoff || card?.payoff),
     fear_point: compactBriefText(card?.fear_point || card?.terror_point),
@@ -5790,6 +6037,9 @@ function sceneBriefFromCard(card: any, index: number) {
     information_gap: compactBriefText(card?.information_gap),
     reversal: compactBriefText(card?.reversal || card?.turning_point),
     ending_hook_seed: compactBriefText(card?.ending_hook_seed || card?.ending_hook || card?.exit_state),
+    turning_point: compactBriefText(card?.turning_point || card?.turningPoint),
+    exit_state: compactBriefText(card?.exit_state || card?.exitState),
+    state_changes_expected: asArray(card?.state_changes_expected || card?.stateChangesExpected).map((item: any) => compactJsonBriefText(item)).filter(Boolean),
     word_budget: compactBriefText(card?.word_budget || card?.description_budget),
     serial_risk_repairs: asArray(card?.serial_risk_repairs || card?.serialRiskRepairs || card?.risk_repairs || card?.riskRepairs).map((item: any) => compactJsonBriefText(item)).filter(Boolean),
     recent_fatigue_action: compactBriefText(card?.recent_fatigue_action || card?.recentFatigueAction || card?.fatigue_repair_action || card?.fatigueRepairAction),
@@ -45201,6 +45451,10 @@ function sceneCardGoalObstacleChangeGaps(scene: any = {}) {
     scene?.goal,
     scene?.scene_goal,
     scene?.sceneGoal,
+    scene?.blocked_desire,
+    scene?.blockedDesire,
+    scene?.protagonist_agency_action,
+    scene?.protagonistAgencyAction,
     scene?.beat,
     ...asArray(scene?.required_beats || scene?.requiredBeats),
     ...asArray(scene?.action_beats || scene?.actionBeats),
@@ -45214,6 +45468,10 @@ function sceneCardGoalObstacleChangeGaps(scene: any = {}) {
     scene?.fearPoint,
     scene?.information_gap,
     scene?.informationGap,
+    scene?.opposing_force,
+    scene?.opposingForce,
+    scene?.no_exit_reason,
+    scene?.noExitReason,
     scene?.boss_move,
     scene?.bossMove,
     scene?.rule_trigger,
@@ -45224,6 +45482,8 @@ function sceneCardGoalObstacleChangeGaps(scene: any = {}) {
     scene?.turningPoint,
     scene?.exit_state,
     scene?.exitState,
+    scene?.event_value_change,
+    scene?.eventValueChange,
     scene?.reader_payoff,
     scene?.readerPayoff,
     scene?.reversal,
@@ -45886,6 +46146,27 @@ function autoRepairSceneCardDramaticUnit(scene: any = {}, index = 0, total = 1, 
     || beatPayoff
     || (index === total - 1 ? endingHook : chapterGoal || chapterSummary),
   )
+  const protagonistActionSeed = compactBriefText(
+    sourceScene?.protagonist_agency_action
+    || sourceScene?.protagonistAgencyAction
+    || `主角必须主动确认${goalSeed || chapterGoal || chapterSummary}，用行动验证旧判断并推进下一步。`,
+  )
+  const blockedDesireSeed = compactBriefText(
+    sourceScene?.blocked_desire
+    || sourceScene?.blockedDesire
+    || `主角想完成${goalSeed || chapterGoal || chapterSummary}。`,
+  )
+  const opposingForceSeed = compactBriefText(
+    sourceScene?.opposing_force
+    || sourceScene?.opposingForce
+    || obstacleSeed
+    || chapterConflict,
+  )
+  const noExitSeed = compactBriefText(
+    sourceScene?.no_exit_reason
+    || sourceScene?.noExitReason
+    || `否则${obstacleSeed || chapterConflict || '当前阻碍'}会继续扩大，主角不能退出。`,
+  )
   const next = {
     ...sourceScene,
     scene_no: Number(sourceScene?.scene_no || sourceScene?.sceneNo || index + 1),
@@ -45893,8 +46174,15 @@ function autoRepairSceneCardDramaticUnit(scene: any = {}, index = 0, total = 1, 
     scene_type: compactBriefText(sourceScene?.scene_type || sourceScene?.sceneType || sourceScene?.type || (index === total - 1 ? 'hook' : index === 0 ? 'investigation' : 'reveal')),
     purpose_tag: compactBriefText(sourceScene?.purpose_tag || sourceScene?.purposeTag || (index === total - 1 ? '反转' : index === 0 ? '铺垫' : '关键揭露')),
     purpose_tags: uniqueBriefStrings([...(asArray(sourceScene?.purpose_tags || sourceScene?.purposeTags)), sourceScene?.purpose_tag || sourceScene?.purposeTag || (index === total - 1 ? '反转' : index === 0 ? '铺垫' : '关键揭露')], 4),
+    goal: compactBriefText(sourceScene?.goal || sourceScene?.scene_goal || sourceScene?.sceneGoal || goalSeed),
+    scene_goal: compactBriefText(sourceScene?.scene_goal || sourceScene?.sceneGoal || sourceScene?.goal || goalSeed),
     purpose: compactBriefText(sourceScene?.purpose, goalSeed),
     conflict: compactBriefText(sourceScene?.conflict, obstacleSeed),
+    obstacle: compactBriefText(sourceScene?.obstacle || obstacleSeed),
+    blocked_desire: blockedDesireSeed,
+    opposing_force: opposingForceSeed,
+    protagonist_agency_action: protagonistActionSeed,
+    no_exit_reason: noExitSeed,
     reader_payoff: compactBriefText(sourceScene?.reader_payoff || sourceScene?.readerPayoff, changeSeed),
     turning_point: compactBriefText(sourceScene?.turning_point || sourceScene?.turningPoint, changeSeed),
     event_value_change: compactBriefText(sourceScene?.event_value_change || sourceScene?.eventValueChange || `确认${changeSeed || chapterGoal || chapterSummary}，局势变成下一步必须处理的新状态。`),
@@ -45950,9 +46238,12 @@ function autoRepairSceneCardDramaticUnit(scene: any = {}, index = 0, total = 1, 
   }
   if (!textHasSceneGoal(gapText.goal)) {
     next.purpose = compactBriefText(`必须${goalSeed || chapterGoal || '完成本场目标'}。`)
+    next.goal = next.goal || next.purpose
+    next.scene_goal = next.scene_goal || next.purpose
   }
   if (!textHasSceneObstacle(gapText.obstacle)) {
     next.conflict = compactBriefText(`但${obstacleSeed || chapterConflict || '当前规则/对手阻止主角达成目标，并要求付出代价。'}`)
+    next.obstacle = next.obstacle || next.conflict
   }
   if (!textHasSceneChange(gapText.change)) {
     const repairedChange = compactBriefText(`确认${changeSeed || chapterGoal || chapterSummary}，局势变成下一步必须处理的新状态。`)
@@ -48343,6 +48634,7 @@ export function buildChapterPreDraftBrief(project: any, contextPackage: any) {
       ? normalizeSceneCardsPayload({ sceneCards: chapterTarget.sceneCards }, contextPackage)
       : []
   const sceneBriefs = sceneCards.map(sceneBriefFromCard)
+  const chapterPositioningBrief = normalizeChapterPositioningBrief(contextPackage, sceneBriefs)
   const readerPayoffs = sceneBriefs.map(item => item.reader_payoff).filter(Boolean)
   const emotionalCurve = [
     sceneCards[0]?.emotional_tone,
@@ -48631,6 +48923,7 @@ export function buildChapterPreDraftBrief(project: any, contextPackage: any) {
     reader_promise: readerPayoffs.join('；') || contextPackage?.writing_bible?.promise || project?.synopsis,
     story_drive_brief: storyDriveBrief,
     serial_rhythm_brief: serialRhythmBrief,
+    chapter_positioning_brief: chapterPositioningBrief,
     page_turn_hook_brief: pageTurnHookBrief,
     character_arc_brief: characterArcBrief,
     platform_rubric: platformRubric,
@@ -48757,6 +49050,7 @@ export function buildChapterPreDraftBrief(project: any, contextPackage: any) {
     story_pressure_brief: storyPressureBrief,
     story_drive_brief: storyDriveBrief,
     serial_rhythm_brief: serialRhythmBrief,
+    chapter_positioning_brief: chapterPositioningBrief,
     page_turn_hook_brief: pageTurnHookBrief,
     volume_climax_brief: volumeClimaxBrief,
     recent_fatigue_brief: recentFatigueBrief,
@@ -49616,6 +49910,10 @@ export function normalizeSceneCardsPayload(payload: any, contextPackage: any = {
         visible_line_role: outline?.visible_line_role || outline?.visibleLineRole || '',
         hidden_line_seed: outline?.hidden_line_seed || outline?.hiddenLineSeed || '',
         ab_weave_role: outline?.ab_weave_role || outline?.abWeaveRole || '',
+        chapter_positioning: outline?.chapter_positioning || outline?.chapterPositioning || contextPackage?.chapter_target?.chapter_positioning || contextPackage?.chapter_target?.chapterPositioning || '',
+        pressure_level: outline?.pressure_level || outline?.pressureLevel || contextPackage?.chapter_target?.pressure_level || contextPackage?.chapter_target?.pressureLevel || '',
+        chapter_positioning_role: outline?.chapter_positioning_role || outline?.chapterPositioningRole || '',
+        benchmark_structure_coordinate: outline?.benchmark_structure_coordinate || outline?.benchmarkStructureCoordinate || contextPackage?.chapter_target?.benchmark_structure_coordinate || contextPackage?.chapter_target?.benchmarkStructureCoordinate || null,
         required_beats: asArray(outline?.required_beats || outline?.beats).length
           ? asArray(outline?.required_beats || outline?.beats)
           : [outline?.summary, outline?.conflict, outline?.ending_hook].filter(Boolean),
@@ -49649,8 +49947,11 @@ export function normalizeSceneCardsPayload(payload: any, contextPackage: any = {
     characters_present: asArray(card?.characters_present || card?.charactersPresent).map((item: any) => String(item)).filter(Boolean),
     purpose_tag: String(card?.purpose_tag || card?.purposeTag || asArray(card?.purpose_tags || card?.purposeTags)[0] || ''),
     purpose_tags: asArray(card?.purpose_tags || card?.purposeTags || card?.purpose_tag || card?.purposeTag).map((item: any) => String(item)).filter(Boolean),
+    goal: String(card?.goal || card?.scene_goal || card?.sceneGoal || ''),
+    scene_goal: String(card?.scene_goal || card?.sceneGoal || card?.goal || ''),
     purpose: String(card?.purpose || ''),
     conflict: String(card?.conflict || ''),
+    obstacle: String(card?.obstacle || ''),
     conflict_ladder_step: String(card?.conflict_ladder_step || card?.conflictLadderStep || ''),
     motivation_source: String(card?.motivation_source || card?.motivationSource || ''),
     opposing_force: String(card?.opposing_force || card?.opposingForce || ''),
@@ -49662,6 +49963,10 @@ export function normalizeSceneCardsPayload(payload: any, contextPackage: any = {
     visible_line_role: String(card?.visible_line_role || card?.visibleLineRole || ''),
     hidden_line_seed: String(card?.hidden_line_seed || card?.hiddenLineSeed || ''),
     ab_weave_role: String(card?.ab_weave_role || card?.abWeaveRole || ''),
+    chapter_positioning: String(card?.chapter_positioning || card?.chapterPositioning || contextPackage?.chapter_target?.chapter_positioning || contextPackage?.chapter_target?.chapterPositioning || ''),
+    pressure_level: normalizePressureLevel(card?.pressure_level || card?.pressureLevel || contextPackage?.chapter_target?.pressure_level || contextPackage?.chapter_target?.pressureLevel || ''),
+    chapter_positioning_role: String(card?.chapter_positioning_role || card?.chapterPositioningRole || card?.positioning_role || card?.positioningRole || ''),
+    benchmark_structure_coordinate: card?.benchmark_structure_coordinate || card?.benchmarkStructureCoordinate || contextPackage?.chapter_target?.benchmark_structure_coordinate || contextPackage?.chapter_target?.benchmarkStructureCoordinate || null,
     required_beats: asArray(card?.required_beats || card?.requiredBeats || card?.beats).map((item: any) => String(item)).filter(Boolean),
     action_beats: asArray(card?.action_beats || card?.actionBeats || card?.combat_beats || card?.combatBeats).map((item: any) => String(item)).filter(Boolean),
     beat: String(card?.beat || card?.action || card?.description || ''),
@@ -51832,7 +52137,9 @@ export function createNovelWritingService(ctx: {
     '【结构化上下文包】',
     JSON.stringify(contextPackage, null, 2).slice(0, 9000),
     '',
-    '输出 JSON，字段 scene_cards(array)。每个场景卡包含：scene_no, title, scene_type, location, characters_present(array), purpose_tag, purpose_tags(array), purpose, conflict, conflict_ladder_step, motivation_source, opposing_force, blocked_desire, protagonist_agency_action, no_exit_reason, event_value_change, next_conflict_seed, visible_line_role, hidden_line_seed, ab_weave_role, required_beats(array), action_beats(array), beat, opening_hook, reader_payoff, fear_point, rule_pressure, information_gap, reversal, ending_hook_seed, character_voice, dialogue_goals(array), style_directives(array), benchmark_recall_directives(array), concept_anchor_rules(array), prose_craft_directives(array), relationship_progression_plan, relationship_buffer_zone, supporting_character_action, attitude_shift_checkpoint, relationship_next_hook, showoff_stage_chain, spectator_interest_shift, secondary_showoff_effect, combat_result_type, combat_dimension_plan, combat_reversal_plan, sensory_anchor, serial_risk_repairs(array), recent_fatigue_action, emotional_tone, key_dialogue, dialogue_goal, required_information(array), used_settings(array), revealed_settings(array), forbidden_settings(array), ability_beats(array), item_beats(array), boss_move, rule_trigger, state_changes_expected(array), turning_point, description_budget, density_level, transition_from_previous, exit_state。',
+    '输出 JSON，字段 scene_cards(array)。每个场景卡包含：scene_no, title, scene_type, location, characters_present(array), purpose_tag, purpose_tags(array), chapter_positioning, pressure_level, chapter_positioning_role, benchmark_structure_coordinate, purpose, conflict, conflict_ladder_step, motivation_source, opposing_force, blocked_desire, protagonist_agency_action, no_exit_reason, event_value_change, next_conflict_seed, visible_line_role, hidden_line_seed, ab_weave_role, required_beats(array), action_beats(array), beat, opening_hook, reader_payoff, fear_point, rule_pressure, information_gap, reversal, ending_hook_seed, character_voice, dialogue_goals(array), style_directives(array), benchmark_recall_directives(array), concept_anchor_rules(array), prose_craft_directives(array), relationship_progression_plan, relationship_buffer_zone, supporting_character_action, attitude_shift_checkpoint, relationship_next_hook, showoff_stage_chain, spectator_interest_shift, secondary_showoff_effect, combat_result_type, combat_dimension_plan, combat_reversal_plan, sensory_anchor, serial_risk_repairs(array), recent_fatigue_action, emotional_tone, key_dialogue, dialogue_goal, required_information(array), used_settings(array), revealed_settings(array), forbidden_settings(array), ability_beats(array), item_beats(array), boss_move, rule_trigger, state_changes_expected(array), turning_point, description_budget, density_level, transition_from_previous, exit_state。',
+    '章节定位：每张场景卡必须填写 chapter_positioning，取值参考 高压/推进/修炼试错/关系回收/低压生活/信息整理；pressure_level 用 1-5 表示冲突压力；chapter_positioning_role 写明本场怎样服务本章定位，避免所有章节同一强度。',
+    '对标结构坐标：如果 contextPackage.chapter_target.chapter_positioning_brief.benchmark_structure_coordinates 或场景已有 benchmark_structure_coordinate，必须把对标结构坐标迁移为本章本场的 normalized_position/source_event/local_event/event_type，学习结构功能位，不复制桥段。',
     'scene_type 只能取：action/combat/chase/investigation/dialogue/reveal/emotion/transition/hook。凡是本章有战斗、追逐、灾祸、清剿、冲突升级，必须至少有一个 action/combat/chase 场景。',
     '商业读者钩子：每个场景至少落实 opening_hook/reader_payoff/fear_point/rule_pressure/information_gap/reversal/ending_hook_seed 中的一项，不允许只写剧情摘要。',
     '近章连载风险：如果 contextPackage.chapter_target.recent_fatigue_brief 存在，必须在场景卡阶段读取 recent_fatigue_brief.risk_signals 与 recent_fatigue_brief.next_actions；正文生成前先把 two_chapter_momentum_stall、five_chapter_texture_gap、conflict_thrill_overrun 等风险转成可执行场景安排。',
@@ -52006,6 +52313,25 @@ export function createNovelWritingService(ctx: {
     const sceneBriefs = chapterSceneCards.length
       ? chapterSceneCards.map(sceneBriefFromCard)
       : preDraftSceneBriefs.map(sceneBriefFromCard)
+    const chapterPositioningBrief = normalizeChapterPositioningBrief(contextPackage, sceneBriefs)
+    chapterTarget = {
+      ...chapterTarget,
+      chapter_positioning_brief: chapterPositioningBrief,
+      chapterPositioningBrief,
+    }
+    contextPackage = {
+      ...contextPackage,
+      chapter_target: chapterTarget,
+      chapterTarget: contextPackage?.chapterTarget
+        ? {
+            ...contextPackage.chapterTarget,
+            chapter_positioning_brief: chapterPositioningBrief,
+            chapterPositioningBrief,
+          }
+        : {
+            ...chapterTarget,
+          },
+    }
     const readerRetentionBrief = chapterTarget.reader_retention_brief
       || chapterTarget.readerRetentionBrief
       || preDraftBrief.reader_retention_brief
@@ -52583,6 +52909,13 @@ export function createNovelWritingService(ctx: {
       chapterDraft?.chapter_no ? `只允许输出这一章的正文，不得混入其他章节内容。chapter_no 必须严格等于 ${chapterDraft.chapter_no}` : '',
       contextPackage?.chapter_target?.word_target ? `本章目标字数：约 ${contextPackage.chapter_target.word_target.target} 字；可接受范围：${contextPackage.chapter_target.word_target.min}-${contextPackage.chapter_target.word_target.max} 字；类型：${contextPackage.chapter_target.word_target.label}。` : '',
       contextPackage?.chapter_target?.word_target ? '字数执行要求：每个场景分配明确字数预算，正文不得只写剧情摘要；如果低于目标范围，必须扩写动作过程、选择代价、对话交锋和章末钩子铺垫，而不是堆砌环境描写。' : '',
+      chapterPositioningBrief ? '【章节定位与对标结构坐标】' : '',
+      chapterPositioningBrief ? '硬性要求：执行 chapter_target.chapter_positioning_brief；按章节定位决定冲突烈度、爽点密度、详略和章尾拉力。高压/推进章要有明确升级或回报；低压/过场章可弱钩子，但必须保留阶段目标、微好奇或关系期待。' : '',
+      chapterPositioningBrief ? `chapter_target.chapter_positioning_brief：${JSON.stringify(chapterPositioningBrief).slice(0, 1800)}` : '',
+      sceneBriefs.length ? `scene_cards.chapter_positioning：${sceneBriefs.map((scene: any) => `${scene.scene_no || ''}.${scene.title || '场景'}=${scene.chapter_positioning || chapterPositioningBrief.chapter_positioning || '推进'}${scene.pressure_level ? `/P${scene.pressure_level}` : ''}${scene.chapter_positioning_role ? `/${scene.chapter_positioning_role}` : ''}`).join('；')}` : '',
+      chapterPositioningBrief?.benchmark_structure_coordinates?.length ? `对标结构坐标：${JSON.stringify(chapterPositioningBrief.benchmark_structure_coordinates).slice(0, 1600)}；只迁移结构功能位和节奏位置，不复制对标桥段、设定、人物或原句。` : '',
+      sceneBriefs.length ? '【场景卡执行摘要】' : '',
+      sceneBriefs.length ? JSON.stringify({ scene_cards: sceneBriefs.slice(0, 8).map(compactProseSceneCard) }, null, 2).slice(0, 3600) : '',
       titleUniquenessReport?.status === 'warn' ? '【章节标题去重】' : '',
       titleUniquenessReport?.status === 'warn' ? '硬性要求：按 oh-story Step 2.1 标题预检处理。当前标题与既有章节重复；输出 JSON 的 title 必须改成不重复的新标题，按本章核心事件、冲突转折、关键资产或章尾钩子命名，不得继续使用重复标题，并同步章节标题；同步细纲标题与正文文件名。' : '',
       titleUniquenessReport?.status === 'warn' && duplicateTitleRows.length ? `已占用标题：${duplicateTitleRows.join('；')}` : '',
@@ -55085,6 +55418,8 @@ export function createNovelWritingService(ctx: {
     '12. 是否兑现 chapter_target.chapter_blueprint：目标情绪、开篇钩子、核心回报、小纲四步法（分段判断、目的和效果、详写/略写、快速定位）、主线定义（主线是一件事、升级只是行动）、五段式内容概括、多线推进、人物出场顺序、情节点功能标签、代价/收益和章尾承接是否都有正文证据。',
     '13. 是否出现写作工程词混入正文：按 oh-story 正文元信息扫描，标题行以外不得出现第[一二三四五六七八九十百千万两0-9]+章|上一章|上章|前一章|本章|这一章|前文|后文|伏笔|细纲|读者；命中必须输出 prose_meta_checks，字段 key,label,status,matched_term,location,replacement,evidence,remaining_risk，并要求改成角色当下能感知的事件锚点或相对时间，除非角色在故事世界内真实讨论。',
     '13A. 是否违反 oh-story 正文格式与小节结构：章节标记必须统一为 ###1. / ###第一章 / 1. 或项目指定格式；相邻段落之间只允许一个换行符，不得出现空行或连续换行；无缩进，正文段落中不使用 Markdown；对话独立成行，引号风格按项目/平台约定，quote-mode keep 时不得把合法「」改成 ""；小节必须有主事件、3-5 个子事件、情绪变化、新信息和钩子接续。命中必须输出 quality_audit_checks、prose_craft_checks、dialogue_checks 或 punctuation_tone_checks，并给出正文行证据。',
+    '13B. 是否出现模型退化：检查逐字复读/打转、末尾截断、AI 自指或拒绝语、占位符、乱码、任务描述/情节点/字数目标/下一章等工程词泄漏；必须输出 model_degeneration_checks，字段 key,label,type,severity(blocking|advisory),status,evidence,fix,line。blocking 项必须要求重写受影响段落，advisory 项必须说明例外判断。',
+    '13C. 是否兑现 chapter_target.chapter_positioning_brief：检查本章钩子强度、冲突压力、爽点密度、详略分配、章尾拉力是否匹配 chapter_positioning/pressure_level；低压生活/信息整理/过场章可弱钩子但必须保留阶段目标、微好奇或关系期待；有 benchmark_structure_coordinates 时必须检查对标结构坐标是否换素材迁移而非照搬。必须输出 chapter_positioning_checks。',
     '14. 是否兑现 chapter_target.delivery_risk_carry_over 和 batch_preflight.delivery_risk_carry_over：逐项检查每个 items/required_actions/opening_actions/middle_actions/ending_actions 中的上一章风险承接动作；opening_actions 必须在前300字有正文证据，middle_actions 必须落成中段事件推进，ending_actions 必须在最后300字形成追读钩子或承接余波。必须给出正文证据，未兑现必须输出 S1/S2 finding，尤其是开篇承接、章末翻页、去AI味、审稿修法、修订残留、新资产入库和 IP场面延展。',
     '14+. 是否兑现 batch_preflight.delivery_risk_carry_over.creation_contract_carry_over：如果安全连写预检要求先修创作契约，必须逐项检查目标读者、题材定位、核心承诺、追读留存是否都有正文证据；必须输出 target_reader_checks、genre_positioning_checks、core_contract_checks 和 reader_retention_checks，不能只用 delivery_risk_receipts 汇总。',
     '14++. core_contract_checks 字段为数组，每项包含 key,label,status(pass|warn|fail),core_promise,mainline_service,core_emotion,rule_judgement,ending_question,selling_point_execution,repetition_strategy,commercial_rhythm,goldfinger_structure,launch_pressure,evidence,fix,remaining_risk；核心承诺漂移、主线不服务卖点、核心情绪散乱、规则/金手指不参与胜负、章尾没有新问题、卖点四步法缺失、未做到发现比告知爽十倍、同一卖点至少延展不足、连续 2 章没有目标推进/阻碍升级/新信息、金手指可替换故事流程不清或开篇 300-500字内交代处境、危险来源和破局希望缺失时必须给出 S1/S2 finding，category=structure 或 platform。',
@@ -55255,7 +55590,7 @@ export function createNovelWritingService(ctx: {
     '【待审校正文】',
     chapterText.slice(0, 16000),
     '',
-    '输出 JSON，字段：passed(boolean), score(0-100), rubric, rubric_source, platform_checks(array), content_rubric_source, content_rubric_checks(array), factual_checks(array), innovation_checks(array), chapter_attraction_checks(array), story_drive_checks(array), character_arc_checks(array), chapter_benchmark_checks(array), title_uniqueness_checks(array), prose_meta_checks(array), banned_words_checks(array), blueprint_consumption_checks(array), word_count_checks(array), reader_retention_checks(array), target_reader_checks(array), genre_positioning_checks(array), plot_special_topics_checks(array), core_contract_checks(array), female_audience_checks(array), upgrade_rhythm_checks(array), structure_checks(array), progression_checks(array), information_checks(array), conflict_structure_checks(array), perspective_verdicts(array), deslop_level("无"|"轻度"|"中度"|"重度"), deslop_checks(array), dialogue_checks(array), plot_dynamics_checks(array), story_power_checks(array), continuity_heat_checks(array), character_relation_checks(array), character_behavior_checks(array), asset_linkage_checks(array), state_tracking_checks(array), status_filter_receipts(array), source_readiness_checks(array), write_preparation_checks(array), next_chapter_quality_plan_receipts(array), chapter_handoff_checks(array), intent_confirmation_checks(array), benchmark_recall_checks(array), style_boundary_checks(array), style_sample_checks(array), information_flow_checks(array), expectation_threshold_checks(array), story_loop_checks(array), emotional_arc_checks(array), chapter_hook_checks(array), chapter_hook_quality_checks(array), paragraph_hook_checks(array), suspense_checks(array), reversal_checks(array), showdown_checks(array), bridge_unit_checks(array), opening_checks(array), prose_craft_checks(array), serial_risk_repair_checks(array), revision_receipt_checks(array), deslop_repair_checks(array), punctuation_tone_checks(array), quality_audit_checks(array), longform_checks(array), five_dimension_scores({core_consistency,surface_rewrite,format_consistency,readability,logic_coherence}，每项含 score/evidence/fix), craft_metrics({action_detail_score,description_overuse_score,event_density_score,combat_process_score,setting_consistency_score}), focused_revision_modes(array，可取 expand_action/cut_description/tighten_pacing/add_consequence/restore_hook/repair_setting_violation), setting_violations(array), delivery_risk_receipts(array), next_chapter_quality_plan({version,quality_focus,opening_actions,middle_actions,ending_actions,avoid_repetition,evidence_basis,ending_contract:{final_state,unresolved_question,next_chapter_pull,handoff_to_next}}), issues(array，使用上面的统一 Findings Schema), revision_directives(array), needs_revision(boolean)。只返回 JSON。',
+    '输出 JSON，字段：passed(boolean), score(0-100), rubric, rubric_source, platform_checks(array), content_rubric_source, content_rubric_checks(array), factual_checks(array), model_degeneration_checks(array), chapter_positioning_checks(array), innovation_checks(array), chapter_attraction_checks(array), story_drive_checks(array), character_arc_checks(array), chapter_benchmark_checks(array), title_uniqueness_checks(array), prose_meta_checks(array), banned_words_checks(array), blueprint_consumption_checks(array), word_count_checks(array), reader_retention_checks(array), target_reader_checks(array), genre_positioning_checks(array), plot_special_topics_checks(array), core_contract_checks(array), female_audience_checks(array), upgrade_rhythm_checks(array), structure_checks(array), progression_checks(array), information_checks(array), conflict_structure_checks(array), perspective_verdicts(array), deslop_level("无"|"轻度"|"中度"|"重度"), deslop_checks(array), dialogue_checks(array), plot_dynamics_checks(array), story_power_checks(array), continuity_heat_checks(array), character_relation_checks(array), character_behavior_checks(array), asset_linkage_checks(array), state_tracking_checks(array), status_filter_receipts(array), source_readiness_checks(array), write_preparation_checks(array), next_chapter_quality_plan_receipts(array), chapter_handoff_checks(array), intent_confirmation_checks(array), benchmark_recall_checks(array), style_boundary_checks(array), style_sample_checks(array), information_flow_checks(array), expectation_threshold_checks(array), story_loop_checks(array), emotional_arc_checks(array), chapter_hook_checks(array), chapter_hook_quality_checks(array), paragraph_hook_checks(array), suspense_checks(array), reversal_checks(array), showdown_checks(array), bridge_unit_checks(array), opening_checks(array), prose_craft_checks(array), serial_risk_repair_checks(array), revision_receipt_checks(array), deslop_repair_checks(array), punctuation_tone_checks(array), quality_audit_checks(array), longform_checks(array), five_dimension_scores({core_consistency,surface_rewrite,format_consistency,readability,logic_coherence}，每项含 score/evidence/fix), craft_metrics({action_detail_score,description_overuse_score,event_density_score,combat_process_score,setting_consistency_score}), focused_revision_modes(array，可取 expand_action/cut_description/tighten_pacing/add_consequence/restore_hook/repair_setting_violation), setting_violations(array), delivery_risk_receipts(array), next_chapter_quality_plan({version,quality_focus,opening_actions,middle_actions,ending_actions,avoid_repetition,evidence_basis,ending_contract:{final_state,unresolved_question,next_chapter_pull,handoff_to_next}}), issues(array，使用上面的统一 Findings Schema), revision_directives(array), needs_revision(boolean)。只返回 JSON。',
   ].join('\n')
 
   const buildProseRevisionPrompt = (project: any, contextPackage: any, chapterText: string, review: any) => {
@@ -55321,6 +55656,8 @@ export function createNovelWritingService(ctx: {
     '14B. 如果 deslop_checks 指出主语与名字节奏问题，必须按 oh-story 写法修句子：段首点名建立主语，段中用代词/省略流动、动作承接或物件/感官开句；关键转折再点名强化。不得为了省主语造成指代不清，也不得改变剧情、人设或因果。',
     '14B. 输出 deslop_repair_receipts：逐条对应已处理的 Gate A-G 缺口，字段 gate,label,original_evidence,applied_fix,changed_evidence,remaining_risk。changed_evidence 必须引用修订后正文的具体句子；如果某个门禁仍未完全解决，remaining_risk 写清楚。',
     '14C. 如果自检结果包含 deterministic_prose_cleanup，必须优先逐项修复 categories/evidence/required_actions 中的硬扫残留；这类问题已经由确定性扫描命中，不要用“风格可接受”跳过。',
+    '14D. 删除优先：每条 AI 味、水分句、解释腔、心理告知、重复描写或模板表达先判断能否删除；删后不丢伏笔/钩子/角色特征/情节推进/必要信息/必要转折的，直接删除；删不掉才润色，只改“怎么说”不删“说什么”。删除受比例上限和字数下限约束，若跌破字数下限，改为补真实动作、冲突、代价或信息变化，不要删完再用新废话凑字。',
+    '14E. 如果自检结果包含 model_degeneration_checks 或 deterministic_prose_cleanup.model_degeneration，blocking 项必须重写受影响段落：复读只保留一次有效信息，截断补完整动作和章尾承接，AI 自指/拒绝语/占位符/乱码删除，任务描述/情节点/字数目标等工程词改为角色当下可感知表达；advisory 项先判断是否为故事内合法文本，再决定保留或改写。',
     '15. 如果自检结果包含 dialogue_checks，必须优先修复 status=fail/warn 的对白缺口；按 key/label/evidence/fix 补角色声线差异、潜台词与议程、权力博弈、信息嵌入和情绪递进；如果 chapter_target.dialogue_contract.dialogue_execution_checklist 存在，必须按对话执行清单逐场修复 mode、speaker_agendas、line_functions、emotion_flow、information_strategy、voice_differentiation 和 forbidden_patterns，并在 dialogue_checks.changed_evidence 中写明修订后落成的正文句子；按压制/反转/心死模式重排对白，让短句方成为权力上位，亮底牌句压到 ≤10 字，被压制方保留 ≥20 字辩解或失态；把真实目的改成借口、试探、回避或动作反应，按关系、场合、目的重定语气；用命令式、否定式或为你好式压迫制造情绪，按事件→情绪反应→内心思考→采取行动修复跳步，并让对白强化期待、爽感或悬念；把说明书式设定改成角色语气、立场、追问、误导或动作承接，用下行质疑、上行证据和核心信息兑现形成信息拉扯；按口癖、节奏、信息偏好、身份措辞和关系阶段重写角色声线，避免所有角色同腔；按普通人震惊、专业人士分析、特殊身份者反应重排群众/弹幕递进，每条群众反应短小精悍，不代替主线；连续多轮对话后插入换气，紧张段落改短促，关键信息放到对话开头或结尾，动作和表情只保留在关键转折处；读者已知信息改成叙事一句话概括，能用突发状况替代的对话直接替换，用配角对话替代主角旁白平铺直叙，新增配角必须绑定主线戏份；同一场景超过3个配角发言时，只保留功能最强的3个，其余合并为旁观反应、动作、沉默或叙事概括；把梗式对白改成角色说不出来但意思到了的口吻，用梗强化记忆点或高潮落点，不得直接复刻热梗原句；把大量信息必须靠对白展示的段落拆成情节、心理、旁白、环境或动作，把问答式的一问一答改成主动发言、反应、动作、沉默和心理承接，确保遮住角色名仍能区分是谁在说话，单次对话不超过全节 40%，逐句改成自然口语交流，并让对话结尾预示接下来的节奏变化。',
     '16. 如果自检结果包含 plot_dynamics_checks，必须优先修复 status=fail/warn 的剧情动力缺口；按 key/label/evidence/fix 补目标阻碍行动反馈闭环、假胜崩解、代价反馈、A/B情绪交替、驱动方式、多线错峰或悬置收尾；驱动方式缺口要按题材修：番茄爽文/打脸文每章补一个外部结果（赢、升级、对手栽），追妻/虐心/世情补持续人物心结，混合模式让主线事件推进并每 3-5 章插情感停顿。',
     '16A. 如果自检结果包含 story_power_checks，必须优先修复 status=fail/warn 的故事力缺口；按 key/label/evidence/fix 补故事五维、行动改变局势、有始有终和因果反馈，把解释、旁观或内心独白改成角色主动行动、可见代价、信息变化、关系变化、规则触发或敌方反制。',
@@ -55537,6 +55874,7 @@ export function createNovelWritingService(ctx: {
       timeoutMs: options.llmTimeoutMs,
     })
     const reviewPayload = getNovelPayload(reviewResult)
+    const deterministicModelDegenerationChecks = scanModelDegenerationRisks(chapterText)
     const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)
     const deterministicProseFormatChecks = scanProseFormatRisks(chapterText)
     const deterministicBannedWordChecks = scanBannedWordLeaks(chapterText)
@@ -55792,6 +56130,11 @@ export function createNovelWritingService(ctx: {
           ? reviewPayload.contentRubricChecks
           : [],
       factual_checks: reviewChecks('factual_checks', 'factualChecks'),
+      model_degeneration_checks: [
+        ...asArray(reviewPayload?.model_degeneration_checks || reviewPayload?.modelDegenerationChecks),
+        ...deterministicModelDegenerationChecks,
+      ],
+      chapter_positioning_checks: reviewChecks('chapter_positioning_checks', 'chapterPositioningChecks'),
       innovation_checks: asArray(reviewPayload?.innovation_checks || reviewPayload?.innovationChecks),
       chapter_attraction_checks: asArray(reviewPayload?.chapter_attraction_checks || reviewPayload?.chapterAttractionChecks),
       story_drive_checks: asArray(reviewPayload?.story_drive_checks || reviewPayload?.storyDriveChecks),
@@ -55949,6 +56292,7 @@ export function createNovelWritingService(ctx: {
       punctuation_tone_checks: [...requiredContractChecks('punctuation_tone_checks', 'punctuationToneChecks', 'punctuation_tone_contract', '语气标点'), ...deterministicPunctuationToneChecks, ...deterministicPeriodMonotonyChecks, ...deterministicPunctuationToneHardChecks],
       quality_audit_checks: [
         ...requiredContractChecks('quality_audit_checks', 'qualityAuditChecks', 'quality_audit_contract', '质量诊断'),
+        ...deterministicModelDegenerationChecks,
         ...deterministicProseFormatChecks,
         ...deterministicSceneCardChecks,
         ...deterministicSceneCardReceiptChecks,

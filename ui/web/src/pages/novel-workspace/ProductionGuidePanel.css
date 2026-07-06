@@ -1,111 +1,47 @@
-.production-guide-panel {
-  --guide-blue: #2563eb;
-  --guide-green: #16a34a;
-  --guide-orange: #d97706;
-  --guide-ink: #172033;
-  --guide-muted: #6b7280;
+.production-guide-summary-panel {
+  padding: 10px 12px;
+  border: 1px solid #e6edf6;
+  border-radius: 8px;
+  background: #fbfdff;
 }
 
-.production-guide-header {
+.production-guide-summary-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 10px;
+  gap: 8px;
+  margin-bottom: 8px;
 }
 
-.production-guide-title-command.ant-btn {
+.production-guide-summary-action.ant-btn {
   height: 26px;
-  padding: 0 4px;
-  color: #536176;
+  padding-inline: 8px;
+  color: #355071;
   font-size: 12px;
   font-weight: 700;
 }
 
-.production-guide-step {
-  position: relative;
-  padding: 11px 11px 11px 13px;
-  border: 1px solid #e4e9f1;
-  border-radius: 8px;
-  background: #fff;
-  box-shadow: inset 3px 0 0 #cbd5e1, 0 1px 2px rgba(15, 23, 42, 0.035);
-}
-
-.production-guide-step-done {
-  border-color: #bde8c5;
-  background: linear-gradient(90deg, rgba(240, 253, 244, 0.96), #fbfff7);
-  box-shadow: inset 3px 0 0 var(--guide-green), 0 1px 2px rgba(22, 163, 74, 0.08);
-}
-
-.production-guide-step-active {
-  border-color: #a8c8ff;
-  background: linear-gradient(90deg, rgba(239, 246, 255, 0.98), #ffffff);
-  box-shadow: inset 3px 0 0 var(--guide-blue), 0 6px 18px rgba(37, 99, 235, 0.08);
-}
-
-.production-guide-step-blocked {
-  border-color: #fecaca;
-  background: #fff7f7;
-  box-shadow: inset 3px 0 0 #dc2626, 0 1px 2px rgba(220, 38, 38, 0.07);
-}
-
-.production-guide-step-status.ant-tag {
-  min-width: 26px;
-  height: 26px;
-  display: inline-grid;
-  place-items: center;
-  margin-right: 0;
-  border-radius: 7px;
-  font-size: 13px;
-  font-weight: 800;
-}
-
-.production-guide-primary-command.ant-btn {
-  width: auto;
-  min-width: 136px;
-  height: 32px;
-  padding-inline: 14px;
-  border-radius: 999px;
-  font-weight: 800;
-  box-shadow: none;
-}
-
-.production-guide-primary-command.ant-btn-default {
-  border-color: #d8dee8;
-  background: rgba(255, 255, 255, 0.86);
-  color: var(--guide-ink);
-}
-
-.production-guide-secondary-row {
-  display: flex;
-  flex-wrap: wrap;
+.production-guide-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 6px;
+  margin-bottom: 8px;
 }
 
-.production-guide-secondary-command.ant-btn {
-  width: auto;
+.production-guide-summary-grid > div {
   min-width: 0;
-  height: 26px;
-  padding-inline: 10px;
-  border-radius: 999px;
-  border: 1px solid #dde5f0;
-  background: rgba(255, 255, 255, 0.74);
-  color: #405066;
-  font-weight: 700;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  border-radius: 7px;
+  background: #fff;
+  border: 1px solid #edf1f6;
 }
 
-.production-guide-secondary-command.ant-btn:hover {
-  border-color: #9bbcff;
-  background: #f7fbff;
-  color: var(--guide-blue);
-}
-
-.production-guide-stop-command.ant-btn {
-  margin-top: 6px;
-  border-radius: 999px;
-  font-weight: 700;
-}
-
-.production-guide-collapsed-metrics .ant-tag {
-  border-radius: 999px;
+.production-guide-summary-grid .ant-tag {
+  width: fit-content;
+  max-width: 100%;
+  margin-right: 0;
   font-weight: 700;
 }
