@@ -6710,23 +6710,11 @@ export default function NovelProjectWorkspace() {
                 popupMatchSelectWidth={440}
                 placeholder="选择模型"
               />
-              <Space className="novel-workspace-topbar-meta" size={6}>
-                {referenceSummary.count > 0 && (
-                  <Tag color="purple" bordered={false}>{referenceSummary.strengthLabel} · {referenceSummary.count} 部参考</Tag>
-                )}
-                {commercialReadiness && (
-                  <Tooltip title={(commercialReadiness.next_actions || []).slice(0, 3).join('；') || '查看商业化就绪度'}>
-                    <Tag
-                      color={commercialReadiness.can_batch_generate ? 'green' : Number(commercialReadiness.score || 0) >= 70 ? 'gold' : 'red'}
-                      bordered={false}
-                      style={{ cursor: 'pointer' }}
-                      onClick={() => showCommercialReadinessModal(commercialReadiness)}
-                    >
-                      就绪 {commercialReadiness.score ?? '-'}%
-                    </Tag>
-                  </Tooltip>
-                )}
-              </Space>
+              {referenceSummary.count > 0 && (
+                <Tag className="novel-workspace-topbar-meta" color="purple" bordered={false}>
+                  {referenceSummary.strengthLabel} · {referenceSummary.count} 部参考
+                </Tag>
+              )}
               <Tooltip title="进入无人值守生产入口">
                 <Button
                   className={`novel-unattended-topbar-entry ${workspaceArea === 'productionOps' ? 'is-active' : ''}`}
