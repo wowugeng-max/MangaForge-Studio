@@ -254,6 +254,97 @@ async function buildKnowledgeInjectionText(
   }
 }
 
+function compactProseText(value: any, limit = 500) {
+  return String(value || '').replace(/\s+/g, ' ').trim().slice(0, limit)
+}
+
+function compactProsePreviousChapters(prevChapters: Array<Record<string, any>> = []) {
+  return Array.isArray(prevChapters)
+    ? prevChapters.slice(-3).map(chapter => {
+        const chapterText = String(chapter?.chapter_text || chapter?.chapterText || '')
+        const endingExcerpt = compactProseText(chapter?.ending_excerpt || chapter?.endingExcerpt || chapterText.slice(-800), 900)
+        return {
+          chapter_no: chapter?.chapter_no ?? chapter?.chapterNo,
+          title: chapter?.title || '',
+          chapter_summary: chapter?.chapter_summary || chapter?.summary || compactProseText(chapterText, 240),
+          ending_hook: chapter?.ending_hook || chapter?.endingHook || '',
+          ending_excerpt: endingExcerpt,
+          chapter_text: endingExcerpt,
+        }
+      })
+    : []
+}
+
+function hasBoundedParagraphTask(context: Record<string, any>) {
+  const task = context?.paragraphTask
+  if (Array.isArray(task)) return task.some(item => String(item || '').trim())
+  return Boolean(String(task || '').trim())
+}
+
+function llmResponseContentText(response: any) {
+  if (typeof response?.content === 'string') return response.content.trim()
+  if (Array.isArray(response?.content)) {
+    return response.content
+      .map((item: any) => String(item?.text || item?.content || ''))
+      .filter(Boolean)
+      .join('\n')
+      .trim()
+  }
+  return ''
+}
+
+function streamTailUsageDetails(response: any) {
+  const tail = Array.isArray(response?.raw?.stream_chunks_tail)
+    ? response.raw.stream_chunks_tail
+    : Array.isArray(response?.stream_chunks_tail)
+      ? response.stream_chunks_tail
+      : []
+  const usage = [...tail].reverse().map((chunk: any) => chunk?.usage).find(Boolean) || {}
+  return usage?.completion_tokens_details || usage?.completionTokensDetails || {}
+}
+
+function shouldRetryReasoningOnlyEmptyProse(response: any) {
+  if (llmResponseContentText(response)) return false
+  const usage = response?.usage || {}
+  const details = streamTailUsageDetails(response)
+  const outputTokens = Number(
+    usage.output_tokens
+    ?? usage.completion_tokens
+    ?? usage.completionTokens
+    ?? 0,
+  ) || 0
+  const reasoningTokens = Number(
+    details.reasoning_tokens
+    ?? details.reasoningTokens
+    ?? usage.reasoning_tokens
+    ?? usage.reasoningTokens
+    ?? 0,
+  ) || 0
+  const outputTextTokens = Number(
+    details.output_text_tokens
+    ?? details.outputTextTokens
+    ?? usage.output_text_tokens
+    ?? usage.outputTextTokens
+    ?? 0,
+  )
+  return outputTokens >= 1000 && (reasoningTokens >= 1000 || outputTextTokens === 0)
+}
+
+function directOutputRetryMaxTokens(maxTokens: number) {
+  const base = Number(maxTokens || 0) || 8000
+  return Math.min(64000, Math.max(base + 12000, Math.ceil(base * 1.8), 32000))
+}
+
+function compactPreviousChapterUpstream(prevChapters: Array<Record<string, any>> = []) {
+  return prevChapters.map(chapter => ({
+    chapter_no: chapter.chapter_no,
+    title: chapter.title,
+    chapter_summary: chapter.chapter_summary,
+    ending_hook: chapter.ending_hook,
+    ending_excerpt: chapter.ending_excerpt,
+  }))
+}
+
 export async function previewNovelKnowledgeInjection(project: NovelProjectRecord, taskType: string) {
   const context = await buildKnowledgeInjectionContext(project, taskType || '大纲生成')
   return {
@@ -766,6 +857,12 @@ export async function generateNovelChapterProse(
     ? options
     : { activeWorkspace: options, modelId: modelIdArg ? String(modelIdArg) : undefined }
   const { modelId, activeWorkspace, skipMemory } = normalizedOptions
+  const boundedParagraphTask = hasBoundedParagraphTask(context as any)
+  const compactPrevChapters = compactProsePreviousChapters(context.prevChapters)
+  const compactPromptContext = {
+    ...(context as any),
+    prevChapters: compactPrevChapters,
+  }
 
   // ── Memory Palace: recall chapter-specific memory ──
   let memoryInjection = ''
@@ -788,7 +885,7 @@ export async function generateNovelChapterProse(
         outline: context.outline,
         chapterTitle: chapterDraft.title,
         chapterSummary: chapterDraft.chapter_summary,
-        prevChapters: context.prevChapters,
+        prevChapters: compactPrevChapters,
       })
       memoryInjection = memResult.text || ''
     } catch (err) {
@@ -810,37 +907,90 @@ export async function generateNovelChapterProse(
     `禁止输出其他章节、续章、目录、分卷总结或额外解释。`,
     `若输出 prose_chapters 数组，数组只能包含这一章，且 chapter_no 必须严格等于 ${chapterDraft.chapter_no}。`,
   ].join('\n')
-  const prosePrompt = `${strictTargetPrompt}\n\n${(context as any).paragraphTask || buildProsePrompt(project, chapterDraft, context)}`
+  const prosePrompt = `${strictTargetPrompt}\n\n${(context as any).paragraphTask || buildProsePrompt(project, chapterDraft, compactPromptContext)}`
 
-  const upstreamContext = memoryInjection ? { memoryInjectionText: memoryInjection } : {}
+  const memoryContext = memoryInjection ? { memoryInjectionText: memoryInjection } : {}
   const knowledgeContext = knowledgeInjection ? { knowledgeInjectionText: knowledgeInjection } : {}
+  const proseUpstreamContext = boundedParagraphTask
+    ? {
+        prose_context_mode: 'bounded_paragraph_task',
+        previous_chapters: compactPreviousChapterUpstream(compactPrevChapters),
+      }
+    : {
+        worldbuilding: context.worldbuilding,
+        characters: context.characters,
+        outline: context.outline,
+        prevChapters: compactPrevChapters,
+      }
+  const agentContext = boundedParagraphTask
+    ? {
+        ...memoryContext,
+        ...knowledgeContext,
+        upstreamContext: proseUpstreamContext,
+        task: prosePrompt,
+      }
+    : {
+        ...memoryContext,
+        ...knowledgeContext,
+        upstreamContext: proseUpstreamContext,
+        worldbuilding: context.worldbuilding,
+        characters: context.characters,
+        outline: context.outline,
+        task: prosePrompt,
+      }
 
   // Execute prose agent
   const maxTokens = Number((context as any).maxTokens || 8000)
   const response = await executeNovelAgent(
     'prose-agent',
     project,
-    {
-      ...upstreamContext,
-      ...knowledgeContext,
-      upstreamContext: {
-        worldbuilding: context.worldbuilding,
-        characters: context.characters,
-        outline: context.outline,
-        prevChapters: context.prevChapters,
-      },
-      worldbuilding: context.worldbuilding,
-      characters: context.characters,
-      outline: context.outline,
-      task: prosePrompt,
-    },
+    agentContext,
     { modelId, activeWorkspace, skipMemory: false, maxTokens, temperature: 0.8, signal: (context as any).abortSignal, timeoutMs: (context as any).llmTimeoutMs },
   )
+  let finalResponse = response
+  if (shouldRetryReasoningOnlyEmptyProse(response)) {
+    const retryPrompt = [
+      prosePrompt,
+      '',
+      '【空输出重试约束】',
+      '上一轮模型消耗了输出额度但没有返回正文。不要输出思考过程、分析、解释、提纲或计划。',
+      `直接输出第 ${chapterDraft.chapter_no} 章《${chapterDraft.title || '无标题'}》的完整正文 JSON；如果使用 prose_chapters，只允许包含本章。`,
+      'chapter_text 必须是可入库的简体中文正文。',
+    ].join('\n')
+    const retryResponse = await executeNovelAgent(
+      'prose-agent',
+      project,
+      {
+        ...agentContext,
+        task: retryPrompt,
+      },
+      {
+        modelId,
+        activeWorkspace,
+        skipMemory: false,
+        maxTokens: directOutputRetryMaxTokens(maxTokens),
+        temperature: 0.65,
+        responseMode: 'non_stream',
+        signal: (context as any).abortSignal,
+        timeoutMs: (context as any).llmTimeoutMs,
+      },
+    )
+    if (llmResponseContentText(retryResponse)) {
+      finalResponse = {
+        ...retryResponse,
+        empty_reasoning_retry: {
+          triggered: true,
+          previous_usage: response.usage,
+          previous_finish_reason: response.finish_reason,
+        },
+      }
+    }
+  }
 
   // ── Memory Palace: verify and store ──
   if (!skipMemory) {
     try {
-      const proseContent = typeof response.content === 'string' ? response.content : JSON.stringify(response.content)
+      const proseContent = typeof finalResponse.content === 'string' ? finalResponse.content : JSON.stringify(finalResponse.content)
       await verifyAndStoreAgentOutputForProject(
         project.id,
         project.title,
@@ -853,7 +1003,7 @@ export async function generateNovelChapterProse(
     }
   }
 
-  return response
+  return finalResponse
 }
 
 // ── Init Memory Palace on module load ──

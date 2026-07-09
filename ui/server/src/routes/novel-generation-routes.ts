@@ -15,8 +15,14 @@ import {
 } from '../novel'
 import { generateNovelChapterProse } from '../llm'
 import { buildMaterialScore } from './novel-chapter-context-routes'
-import { asArray, buildLLMResultDiagnostics, extractPlainProseFallback, formatReviewIssueForStorage, getNovelPayload, normalizeSceneProduction, parseJsonLikePayload, safeJsonStringify } from './novel-route-utils'
+import { asArray, buildLLMResultDiagnostics, compactPreviousChaptersForProse, extractPlainProseFallback, formatReviewIssueForStorage, getNovelPayload, getQualityGateDecision, normalizeSceneProduction, parseJsonLikePayload, safeJsonStringify } from './novel-route-utils'
 import { applyChapterWordTargetToContext, countProseChars, normalizeDeliveryRiskReceipts, proseMaxTokensForWordTarget, resolveChapterWordTarget } from './novel-writing-service'
+import { getChapterLaunchGateBlocker, selectUsableRevisionText } from '../novel-writing/prose-quality-contracts'
+import {
+  normalizeDeterministicProseLanguageFragments,
+  resolveProseLanguageRiskReview,
+  stripProseEngineeringAppendix,
+} from '../novel-writing/prose-format'
 
 export function stringifyNovelGenerationPayload(value: any) {
   return safeJsonStringify(value, undefined, 0)
@@ -182,6 +188,86 @@ export function compactGenerationRequestOverride(value: any, key = '', depth = 0
   return output
 }
 
+const STANDALONE_PROGRESS_MAX_STRING = 240
+const STANDALONE_PROGRESS_MAX_ARRAY = 6
+const STANDALONE_PROGRESS_MAX_DEPTH = 4
+const STANDALONE_PROGRESS_DROP_KEYS = new Set([
+  ...REQUEST_OVERRIDE_DROP_KEYS,
+  'scene_cards',
+  'sceneCards',
+  'context_package',
+  'contextPackage',
+  'raw_payload',
+  'rawPayload',
+  'final_text',
+  'finalText',
+  'chapter_text',
+  'chapterText',
+  'full_text',
+  'fullText',
+  'prompt',
+  'messages',
+  'debug',
+  'diagnostics',
+])
+
+function compactStandaloneProgressText(value: any, maxLength = STANDALONE_PROGRESS_MAX_STRING) {
+  const text = String(value || '').trim()
+  return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text
+}
+
+function compactStandaloneQualityGate(value: any, seen: WeakSet<object>) {
+  if (!value || typeof value !== 'object') return value
+  return {
+    passed: value.passed,
+    score: value.score,
+    critical_count: value.critical_count ?? value.criticalCount,
+    high_count: value.high_count ?? value.highCount,
+    reasons: asArray(value.reasons)
+      .map((item: any) => compactStandaloneProgressText(item))
+      .filter(Boolean)
+      .slice(0, STANDALONE_PROGRESS_MAX_ARRAY),
+    gate: compactStandaloneProseProgressValue(value.gate, 'gate', 1, seen),
+  }
+}
+
+function compactStandaloneProseProgressValue(value: any, key = '', depth = 0, seen = new WeakSet<object>()): any {
+  if (STANDALONE_PROGRESS_DROP_KEYS.has(key)) return undefined
+  if (value === null || value === undefined) return value
+  if (key === 'quality_gate' || key === 'qualityGate') return compactStandaloneQualityGate(value, seen)
+  const valueType = typeof value
+  if (valueType === 'string') return compactStandaloneProgressText(value)
+  if (valueType === 'number' || valueType === 'boolean') return value
+  if (valueType === 'bigint') return String(value)
+  if (valueType !== 'object') return String(value)
+  if (seen.has(value)) return '[Circular]'
+  if (depth >= STANDALONE_PROGRESS_MAX_DEPTH) return undefined
+  seen.add(value)
+  if (Array.isArray(value)) {
+    const items = value.slice(0, STANDALONE_PROGRESS_MAX_ARRAY)
+      .map(item => compactStandaloneProseProgressValue(item, '', depth + 1, seen))
+      .filter(item => item !== undefined)
+    seen.delete(value)
+    return items
+  }
+  const output: Record<string, any> = {}
+  for (const [childKey, childValue] of Object.entries(value)) {
+    const compacted = compactStandaloneProseProgressValue(childValue, childKey, depth + 1, seen)
+    if (compacted !== undefined) output[childKey] = compacted
+  }
+  seen.delete(value)
+  return output
+}
+
+export function compactStandaloneProseProgressStage(stage: any = {}) {
+  const sceneCards = asArray(stage?.scene_cards || stage?.sceneCards)
+  const compacted = compactStandaloneProseProgressValue(stage) || {}
+  if (sceneCards.length > 0 && compacted.scene_card_count === undefined) {
+    compacted.scene_card_count = sceneCards.length
+  }
+  return compacted
+}
+
 function applyRequestLongformCompass(contextPackage: any, req: any) {
   if (!req.body?.longform_compass) return contextPackage
   const longformCompass = compactGenerationRequestOverride(req.body.longform_compass)
@@ -220,6 +306,17 @@ function applyRequestChapterLaunchGate(contextPackage: any, req: any) {
     chapter_launch_gate: chapterLaunchGate,
     chapter_target: { ...contextPackage.chapter_target, chapter_launch_gate: chapterLaunchGate },
   }
+}
+
+function standaloneChapterLaunchGateFromContext(contextPackage: any = {}, chapter: any = {}) {
+  const rawPayload = chapter?.raw_payload || chapter?.rawPayload || {}
+  return contextPackage?.chapter_launch_gate
+    || contextPackage?.chapterLaunchGate
+    || contextPackage?.chapter_target?.chapter_launch_gate
+    || contextPackage?.chapterTarget?.chapterLaunchGate
+    || rawPayload?.chapter_launch_gate
+    || rawPayload?.chapterLaunchGate
+    || null
 }
 
 export function applyRequestBatchPreflight(contextPackage: any, req: any) {
@@ -265,6 +362,7 @@ type GenerationRoutesContext = {
   updateChapterStages: (stages: any[], key: string, patch?: any) => any[]
   classifyGenerationFailure: (error: any) => any
   executeChapterGroupRunRecord: (workspace: string, project: any, run: any, options?: any) => Promise<any>
+  generateChapterForGroup?: (workspace: string, projectId: number, chapterId: number, options?: any) => Promise<any>
   buildPipelineSteps: () => any[]
   updatePipelineStep: (steps: any[], key: string, patch: any) => any[]
   buildChapterContextPackage: (
@@ -290,7 +388,7 @@ type GenerationRoutesContext = {
   buildParagraphProseContext: (project: any, contextPackage: any, migrationPlan?: any, chapterDraft?: any) => string[]
   getStageModelId: (project: any, stage: string, preferredModelId?: number) => number | undefined
   runCommercialEditorRewrite: (workspace: string, project: any, contextPackage: any, chapterText: string, modelId?: number, options?: any) => Promise<any>
-  runProseSelfReviewAndRevision: (workspace: string, project: any, contextPackage: any, chapterText: string, modelId?: number) => Promise<any>
+  runProseSelfReviewAndRevision: (workspace: string, project: any, contextPackage: any, chapterText: string, modelId?: number, options?: any) => Promise<any>
   ensureProseMeetsWordTarget: (workspace: string, project: any, contextPackage: any, chapterText: string, modelId?: number, options?: any) => Promise<any>
   buildReferenceUsageReport: (workspace: string, project: any, taskType: string, generatedText?: string) => Promise<any>
   getReferenceSafetyDecision: (project: any, referenceReport: any) => any
@@ -453,6 +551,63 @@ export function refreshOhStoryDeliveryReceiptsAfterRevision(currentReceipts: any
     quality_audit_repair_receipts: qualityAuditRepairReceipts.length > 0
       ? qualityAuditRepairReceipts
       : asArray(currentReceipts?.quality_audit_repair_receipts || currentReceipts?.qualityAuditRepairReceipts),
+  }
+}
+
+function standaloneProseServiceStageLabel(key: string) {
+  const labels: Record<string, string> = {
+    context: '构建续写上下文包',
+    material_repair: '自动补齐写作前置材料',
+    scene_cards: '生成章节场景卡',
+    migration_plan: '生成/读取参考迁移计划',
+    draft: '段落级正文生成',
+    word_target: '核对章节字数目标',
+    editor: '商业主编改稿',
+    meme_polish: '网感润色',
+    review: '执行章节自检',
+    revise: '应用修订稿',
+    readability_review: '可读性复检',
+    safety: '参考安全检查',
+    store: '写入章节正文与版本',
+    story_state: '更新故事状态机',
+  }
+  return labels[key] || key
+}
+
+function standaloneProseServiceStageDetail(payload: any = {}) {
+  if (typeof payload === 'string') return payload
+  if (payload?.error) return String(payload.error)
+  if (payload?.reason) return String(payload.reason)
+  if (Array.isArray(payload?.warnings) && payload.warnings.length) return payload.warnings.join('；')
+  if (Array.isArray(payload?.blockers) && payload.blockers.length) return payload.blockers.join('；')
+  if (Array.isArray(payload?.issues) && payload.issues.length) return payload.issues.slice(0, 3).map((item: any) => item?.message || item?.summary || item?.label || String(item)).join('；')
+  if (payload?.quality_gate?.reasons?.length) return payload.quality_gate.reasons.join('；')
+  if (Number.isFinite(Number(payload?.word_count))) return `${Number(payload.word_count)} 字`
+  if (Number.isFinite(Number(payload?.score))) return `评分 ${Number(payload.score)}`
+  if (Number.isFinite(Number(payload?.count))) return `${Number(payload.count)} 个`
+  return ''
+}
+
+function standaloneProseServiceErrorStatus(error: any) {
+  const code = String(error?.code || error?.error_code || '')
+  const message = String(error?.message || error || '')
+  if (code.includes('PREFLIGHT') || code.includes('LAUNCH_GATE') || code.includes('SCENE_CARDS')) return 412
+  if (code.includes('REFERENCE_SAFETY') || code.includes('QUALITY') || code.includes('APPROVAL')) return 409
+  if (message.includes('project not found') || message.includes('chapter not found')) return 404
+  return 500
+}
+
+function standaloneProseServiceApprovals(approvals: any = {}) {
+  const sceneCardApproval = approvals?.scene_cards && typeof approvals.scene_cards === 'object'
+    ? approvals.scene_cards
+    : {}
+  return {
+    ...(approvals || {}),
+    scene_cards: {
+      ...sceneCardApproval,
+      approved: true,
+      source: sceneCardApproval.source || 'standalone_generate_prose',
+    },
   }
 }
 
@@ -1325,9 +1480,149 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
       const projectId = Number(req.body.project_id || 0)
       const modelId = Number(req.body.model_id || 0) || undefined
       const wantsStream = String(req.headers.accept || '').includes('text/event-stream') || String(req.query.stream || '') === '1'
+      const autoRepairQualityGate = req.body?.auto_repair_quality_gate === true || req.body?.quality_gate_repair === true
       const project = await ctx.getProject(activeWorkspace, projectId)
       if (!project) return res.status(404).json({ error: 'project not found' })
       const configSnapshot = ctx.buildAgentConfigSnapshot(project, modelId)
+      if (ctx.generateChapterForGroup) {
+        const pipeline: any[] = []
+        const markServiceStage = async (key: string, payload: any = {}) => {
+          const normalizedPayload = payload && typeof payload === 'object' ? payload : { detail: payload }
+          const stage = compactStandaloneProseProgressStage({
+            key,
+            label: standaloneProseServiceStageLabel(key),
+            status: normalizedPayload.status || 'running',
+            detail: standaloneProseServiceStageDetail(normalizedPayload),
+            at: new Date().toISOString(),
+            ...normalizedPayload,
+          })
+          pipeline.push(stage)
+          if (wantsStream && !res.writableEnded) {
+            res.write(sseData({ type: 'progress', progress: stage.label, pipeline, stage }))
+          }
+        }
+        if (wantsStream) {
+          res.setHeader('Content-Type', 'text/event-stream; charset=utf-8')
+          res.setHeader('Cache-Control', 'no-cache, no-transform')
+          res.setHeader('Connection', 'keep-alive')
+        }
+        // Standalone prose generation auto-confirms only scene_cards: { approved: true }.
+        const serviceApprovals = standaloneProseServiceApprovals(req.body?.approvals)
+        const abortController = new AbortController()
+        let standaloneProseCompleted = false
+        const abortStandaloneProseGeneration = () => {
+          if (standaloneProseCompleted || abortController.signal.aborted) return
+          abortController.abort()
+        }
+        const standaloneProseAbortPoll = setInterval(() => {
+          if (
+            req.aborted
+            || res.destroyed
+            || req.socket?.destroyed
+            || res.socket?.destroyed
+          ) {
+            abortStandaloneProseGeneration()
+          }
+        }, 1000)
+        const writeStandaloneProseHeartbeat = () => {
+          if (!wantsStream || standaloneProseCompleted || abortController.signal.aborted) return
+          if (
+            res.writableEnded
+            || res.destroyed
+            || req.aborted
+            || req.socket?.destroyed
+            || res.socket?.destroyed
+          ) {
+            abortStandaloneProseGeneration()
+            return
+          }
+          try {
+            res.write(': mangaforge-prose-heartbeat\n\n')
+          } catch {
+            abortStandaloneProseGeneration()
+          }
+        }
+        const standaloneProseHeartbeat = setInterval(writeStandaloneProseHeartbeat, 15000)
+        const cleanupStandaloneProseAbortListeners = () => {
+          clearInterval(standaloneProseAbortPoll)
+          clearInterval(standaloneProseHeartbeat)
+          req.off('aborted', abortStandaloneProseGeneration)
+          res.off('close', abortStandaloneProseGeneration)
+          req.socket?.off('close', abortStandaloneProseGeneration)
+          res.socket?.off('close', abortStandaloneProseGeneration)
+        }
+        req.on('aborted', abortStandaloneProseGeneration)
+        res.on('close', abortStandaloneProseGeneration)
+        req.socket?.on('close', abortStandaloneProseGeneration)
+        res.socket?.on('close', abortStandaloneProseGeneration)
+        try {
+          const serviceResult = await ctx.generateChapterForGroup(activeWorkspace, projectId, chapterId, {
+            ...(req.body || {}),
+            ...(modelId ? { model_id: modelId } : {}),
+            auto_repair_quality_gate: autoRepairQualityGate,
+            approvals: serviceApprovals,
+            onStage: markServiceStage,
+            abortSignal: abortController.signal,
+          })
+          standaloneProseCompleted = true
+          cleanupStandaloneProseAbortListeners()
+          const updated = serviceResult?.chapter || null
+          const finalText = String(updated?.chapter_text || '')
+          const stepName = `chapter-${updated?.chapter_no || chapterId}`
+          await appendNovelRun(activeWorkspace, {
+            project_id: projectId,
+            run_type: 'generate_prose',
+            step_name: stepName,
+            status: 'success',
+            input_ref: stringifyNovelGenerationPayload(req.body),
+            output_ref: stringifyNovelGenerationPayload({
+              ...serviceResult,
+              pipeline,
+              config_snapshot: serviceResult?.config_snapshot || configSnapshot,
+              chapter_text_length: countProseChars(finalText),
+            }),
+          })
+          if (!wantsStream) return res.json({ ...serviceResult, result: serviceResult, pipeline, config_snapshot: serviceResult?.config_snapshot || configSnapshot })
+          const chunkSize = Math.max(40, Math.ceil(finalText.length / 12))
+          res.write(sseData({ type: 'progress', progress: '生成完成，开始输出正文...', pipeline }))
+          for (let i = 0; i < finalText.length; i += chunkSize) {
+            res.write(sseData({ type: 'chunk', text: finalText.slice(i, i + chunkSize) }))
+            await new Promise(resolve => setTimeout(resolve, 40))
+          }
+          res.write(sseData({ type: 'done', ...serviceResult, result: serviceResult, pipeline, config_snapshot: serviceResult?.config_snapshot || configSnapshot }))
+          res.end()
+          return
+        } catch (serviceError: any) {
+          standaloneProseCompleted = true
+          cleanupStandaloneProseAbortListeners()
+          const errorPayload = {
+            error: String(serviceError?.message || serviceError),
+            error_code: serviceError?.code || serviceError?.error_code || 'PROSE_GENERATION_FAILED',
+            pipeline,
+            context_package: serviceError?.contextPackage || serviceError?.context_package,
+            launch_gate_blocker: serviceError?.launchGateBlocker || serviceError?.launch_gate_blocker,
+            reference_report: serviceError?.referenceReport || serviceError?.reference_report,
+            safety_decision: serviceError?.safetyDecision || serviceError?.safety_decision,
+            config_snapshot: configSnapshot,
+          }
+          await appendNovelRun(activeWorkspace, {
+            project_id: projectId,
+            run_type: 'generate_prose',
+            step_name: `chapter-${chapterId}`,
+            status: 'failed',
+            input_ref: stringifyNovelGenerationPayload(req.body),
+            output_ref: stringifyNovelGenerationPayload(errorPayload),
+            error_message: errorPayload.error,
+          })
+          const status = standaloneProseServiceErrorStatus(serviceError)
+          if (wantsStream) {
+            res.write(sseData({ type: 'error', ...errorPayload }))
+            res.end()
+            return
+          }
+          return res.status(status).json(errorPayload)
+        }
+      }
       let chapters = await listNovelChapters(activeWorkspace, projectId)
       let chapter = chapters.find(item => item.id === chapterId)
       if (!chapter) return res.status(404).json({ error: 'chapter not found' })
@@ -1416,6 +1711,26 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
         }
         return res.status(412).json(errorPayload)
       }
+      const launchGateBlocker = getChapterLaunchGateBlocker(standaloneChapterLaunchGateFromContext(contextPackage, chapter))
+      if (launchGateBlocker && req.body?.allow_incomplete !== true) {
+        const errorPayload = {
+          error: `开写门禁未通过：${launchGateBlocker.summary}`,
+          error_code: 'PROSE_LAUNCH_GATE_BLOCKED',
+          launch_gate_blocker: launchGateBlocker,
+          context_package: contextPackage,
+          config_snapshot: configSnapshot,
+          preflight: contextPackage.preflight,
+          pipeline,
+        }
+        markStage('context', '开写门禁未通过', 'failed', launchGateBlocker.summary, { launch_gate_blocker: launchGateBlocker })
+        await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'failed', input_ref: stringifyNovelGenerationPayload(req.body), output_ref: stringifyNovelGenerationPayload(errorPayload), error_message: errorPayload.error })
+        if (wantsStream) {
+          res.write(sseData({ type: 'error', ...errorPayload }))
+          res.end()
+          return
+        }
+        return res.status(412).json(errorPayload)
+      }
 
       if (!contextPackage.chapter_target.scene_cards.length || req.body?.force_scene_cards === true) {
         markStage('scene_cards', '生成章节场景卡', 'running')
@@ -1449,10 +1764,7 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
         }
       }
 
-      const prevChapters = chapters
-        .filter(ch => ch.chapter_no < chapter.chapter_no && ch.chapter_text)
-        .slice(-3)
-        .map(ch => ({ chapter_no: ch.chapter_no, title: ch.title, chapter_summary: ch.chapter_summary || '', ending_hook: ch.ending_hook || '', chapter_text: ch.chapter_text }))
+      const prevChapters = compactPreviousChaptersForProse(chapters, chapter.chapter_no)
       markStage('migration_plan', '生成/读取参考迁移计划', 'running')
       const migrationPlan = await ctx.getReferenceMigrationPlanForChapter(activeWorkspace, project, chapter).catch(error => ({ error: String(error) }))
       markStage('migration_plan', (migrationPlan as any)?.error ? '参考迁移计划读取失败，继续保守生成' : '参考迁移计划已就绪', (migrationPlan as any)?.error ? 'warn' : 'success', (migrationPlan as any)?.error || '', { migration_plan: migrationPlan })
@@ -1512,6 +1824,10 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
       let finalText = String(chapterText || '')
       let finalSceneBreakdown = sceneBreakdown
       let finalContinuityNotes = continuityNotes
+      const draftAppendixStrip = stripProseEngineeringAppendix(finalText)
+      if (draftAppendixStrip.changed) {
+        finalText = draftAppendixStrip.text
+      }
       markStage('draft', '章节初稿已生成', 'success', `${countProseChars(finalText)} 字`)
       markStage('word_target', '核对章节字数目标', 'running', `当前 ${countProseChars(finalText)} 字 / 目标 ${wordTarget.target} 字`)
       try {
@@ -1554,8 +1870,12 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
       markStage('editor', '商业主编改稿', 'running')
       try {
         editorRewrite = await ctx.runCommercialEditorRewrite(activeWorkspace, project, contextPackage, finalText, modelId)
-        finalText = editorRewrite.final_text || finalText
-        if (editorRewrite.edited && editorRewrite.revision) {
+        const editorRevisionSelection = selectUsableRevisionText(finalText, editorRewrite)
+        finalText = editorRevisionSelection.text
+        if (!editorRevisionSelection.accepted && editorRevisionSelection.reason) {
+          editorRewrite = { ...editorRewrite, final_text_rejected: true, rejected_final_text_reason: editorRevisionSelection.reason }
+        }
+        if (editorRevisionSelection.accepted && editorRewrite.edited && editorRewrite.revision) {
           finalSceneBreakdown = editorRewrite.revision.scene_breakdown?.length ? editorRewrite.revision.scene_breakdown : finalSceneBreakdown
           finalContinuityNotes = editorRewrite.revision.continuity_notes?.length ? editorRewrite.revision.continuity_notes : finalContinuityNotes
         }
@@ -1605,15 +1925,21 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
       }
       markStage('review', '执行章节自检', 'running')
       try {
-        selfCheck = await ctx.runProseSelfReviewAndRevision(activeWorkspace, project, contextPackage, finalText, modelId)
-        finalText = selfCheck.final_text || finalText
-        if (selfCheck.revised && selfCheck.revision) {
+        selfCheck = await ctx.runProseSelfReviewAndRevision(activeWorkspace, project, contextPackage, finalText, modelId, {
+          ...(autoRepairQualityGate ? { fill_missing_structured_checks: false } : {}),
+        })
+        const selfCheckRevisionSelection = selectUsableRevisionText(finalText, selfCheck)
+        finalText = selfCheckRevisionSelection.text
+        if (!selfCheckRevisionSelection.accepted && selfCheckRevisionSelection.reason) {
+          selfCheck = { ...selfCheck, final_text_rejected: true, rejected_final_text_reason: selfCheckRevisionSelection.reason }
+        }
+        if (selfCheckRevisionSelection.accepted && selfCheck.revised && selfCheck.revision) {
           finalSceneBreakdown = selfCheck.revision.scene_breakdown?.length ? selfCheck.revision.scene_breakdown : finalSceneBreakdown
           finalContinuityNotes = selfCheck.revision.continuity_notes?.length ? selfCheck.revision.continuity_notes : finalContinuityNotes
         }
         markStage(
           'review',
-          selfCheck.revised ? '自检完成，已应用修订稿' : '自检完成，初稿可用',
+          selfCheck.revised && selfCheckRevisionSelection.accepted ? '自检完成，已应用修订稿' : '自检完成，初稿可用',
           selfCheck.review?.passed === false ? 'warn' : 'success',
           `评分 ${selfCheck.review?.score ?? '-'}`,
           { self_check: selfCheck.review, revised: selfCheck.revised },
@@ -1654,6 +1980,110 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
         }
         return res.status(502).json(errorPayload)
       }
+      const appendixStrip = stripProseEngineeringAppendix(finalText)
+      if (appendixStrip.changed) {
+        finalText = appendixStrip.text
+        markStage('review', '确定性工程附录剥离', 'success', `${appendixStrip.removed_line_count} 行`, {
+          phase: 'deterministic_engineering_appendix_strip',
+        })
+      }
+      if (autoRepairQualityGate && !selfCheck?.error) {
+        markStage('review', '修订后正文质量复检', 'running', '', { phase: 'quality_recheck' })
+        const finalQualityRecheck = await ctx.runProseSelfReviewAndRevision(activeWorkspace, project, contextPackage, finalText, modelId, {
+          revise: false,
+          quality_gate_repair: true,
+        })
+        const finalQualityRecheckSelection = selectUsableRevisionText(finalText, finalQualityRecheck)
+        finalText = finalQualityRecheckSelection.text
+        selfCheck = {
+          ...selfCheck,
+          review: finalQualityRecheck.review,
+          final_text: finalText,
+          initial_review: selfCheck?.review || null,
+          quality_recheck: finalQualityRecheck.review,
+          revised: Boolean(selfCheck?.revised),
+          ...(!finalQualityRecheckSelection.accepted && finalQualityRecheckSelection.reason ? {
+            final_text_recheck_rejected: true,
+            rejected_final_text_recheck_reason: finalQualityRecheckSelection.reason,
+          } : {}),
+        }
+        markStage('review', '修订后正文质量复检完成', 'success', `评分 ${selfCheck.review?.score ?? '-'}`, {
+          phase: 'quality_recheck',
+          self_check: selfCheck.review,
+        })
+      }
+      const languageNormalization = normalizeDeterministicProseLanguageFragments(finalText)
+      if (languageNormalization.changed) {
+        finalText = languageNormalization.text
+        if (selfCheck?.review) {
+          selfCheck = {
+            ...selfCheck,
+            review: resolveProseLanguageRiskReview(selfCheck.review, finalText),
+          }
+        }
+        markStage('review', '确定性语言碎片清理', 'success', `${languageNormalization.change_count} 处`, {
+          phase: 'deterministic_language_normalize',
+          language_rules: languageNormalization.rules,
+        })
+      }
+      let qualityGateDecision = getQualityGateDecision(project, { ...(selfCheck?.review || {}), revised: Boolean(selfCheck?.revised) })
+      if (!qualityGateDecision.passed && autoRepairQualityGate) {
+        markStage('quality_repair', '质量门禁自动修复', 'running', qualityGateDecision.reasons.join('；'), { quality_gate: qualityGateDecision })
+        try {
+          const qualityRepair = await ctx.runProseSelfReviewAndRevision(activeWorkspace, project, contextPackage, finalText, modelId, {
+            fill_missing_structured_checks: false,
+          })
+          const qualityRepairSelection = selectUsableRevisionText(finalText, qualityRepair)
+          finalText = qualityRepairSelection.text
+          selfCheck = {
+            ...qualityRepair,
+            quality_repair_attempted: true,
+            previous_review: selfCheck?.review || null,
+            ...(!qualityRepairSelection.accepted && qualityRepairSelection.reason ? {
+              final_text_rejected: true,
+              rejected_final_text_reason: qualityRepairSelection.reason,
+            } : {}),
+          }
+          if (qualityRepairSelection.accepted && qualityRepair.revised && qualityRepair.revision) {
+            finalSceneBreakdown = qualityRepair.revision.scene_breakdown?.length ? qualityRepair.revision.scene_breakdown : finalSceneBreakdown
+            finalContinuityNotes = qualityRepair.revision.continuity_notes?.length ? qualityRepair.revision.continuity_notes : finalContinuityNotes
+          }
+          const postQualityRepairWordTargetCheck = await ctx.ensureProseMeetsWordTarget(activeWorkspace, project, contextPackage, finalText, modelId)
+          finalText = postQualityRepairWordTargetCheck.final_text || finalText
+          const qualityRepairRecheck = await ctx.runProseSelfReviewAndRevision(activeWorkspace, project, contextPackage, finalText, modelId, {
+            revise: false,
+            quality_gate_repair: true,
+          })
+          const qualityRepairRecheckSelection = selectUsableRevisionText(finalText, qualityRepairRecheck)
+          finalText = qualityRepairRecheckSelection.text
+          selfCheck = {
+            ...selfCheck,
+            review: qualityRepairRecheck.review,
+            final_text: finalText,
+            quality_recheck: qualityRepairRecheck.review,
+            revised: Boolean(selfCheck?.revised),
+            ...(!qualityRepairRecheckSelection.accepted && qualityRepairRecheckSelection.reason ? {
+              final_text_recheck_rejected: true,
+              rejected_final_text_recheck_reason: qualityRepairRecheckSelection.reason,
+            } : {}),
+          }
+          qualityGateDecision = getQualityGateDecision(project, { ...(selfCheck?.review || {}), revised: Boolean(selfCheck?.revised) })
+          markStage('review', '质量门禁修复后复检完成', qualityGateDecision.passed ? 'success' : 'warn', qualityGateDecision.reasons.join('；'), {
+            quality_gate: qualityGateDecision,
+            self_check: selfCheck?.review,
+            phase: 'quality_recheck',
+          })
+          markStage(
+            'quality_repair',
+            qualityGateDecision.passed ? '质量门禁自动修复通过' : '质量门禁自动修复后仍未通过',
+            qualityGateDecision.passed ? 'success' : 'warn',
+            qualityGateDecision.reasons.join('；'),
+            { quality_gate: qualityGateDecision, self_check: selfCheck?.review, word_target_check: postQualityRepairWordTargetCheck },
+          )
+        } catch (qualityRepairError) {
+          markStage('quality_repair', '质量门禁自动修复失败', 'warn', String(qualityRepairError).slice(0, 200), { quality_gate: qualityGateDecision })
+        }
+      }
       ohStoryDeliveryReceipts = refreshOhStoryDeliveryReceiptsAfterRevision(ohStoryDeliveryReceipts, selfCheck, finalText, finalSceneBreakdown, contextPackage)
 
       try {
@@ -1661,13 +2091,33 @@ export function registerNovelGenerationRoutes(app: Express, ctx: GenerationRoute
         await createNovelReview(activeWorkspace, {
           project_id: projectId,
           review_type: 'prose_quality',
-          status: review.passed === false || Number(review.score || 100) < 78 ? 'warn' : 'ok',
+          status: qualityGateDecision.passed ? 'ok' : 'warn',
           summary: `章节自检评分 ${review.score ?? '-'}${selfCheck?.revised ? '，已生成修订稿' : ''}`,
           issues: Array.isArray(review.issues) ? review.issues.map(formatReviewIssueForStorage) : [],
-          payload: stringifyNovelGenerationPayload({ chapter_id: chapter.id, context_package: contextPackage, editor_rewrite: editorRewrite, self_check: selfCheck, pipeline, config_snapshot: configSnapshot }),
+          payload: stringifyNovelGenerationPayload({ chapter_id: chapter.id, context_package: contextPackage, editor_rewrite: editorRewrite, self_check: selfCheck, quality_gate: qualityGateDecision, pipeline, config_snapshot: configSnapshot }),
         })
       } catch (reviewStoreError) {
         console.warn('[prose-quality] Failed to store review:', String(reviewStoreError).slice(0, 200))
+      }
+      if (!qualityGateDecision.passed && req.body?.allow_incomplete !== true) {
+        const errorPayload = {
+          error: '章节质量门禁未通过，正文未入库',
+          error_code: 'PROSE_QUALITY_GATE_BLOCKED',
+          quality_gate: qualityGateDecision,
+          context_package: contextPackage,
+          self_check: selfCheck,
+          editor_rewrite: editorRewrite,
+          pipeline,
+          config_snapshot: configSnapshot,
+        }
+        markStage('review', '章节质量门禁未通过', 'failed', qualityGateDecision.reasons.join('；'), { quality_gate: qualityGateDecision })
+        await appendNovelRun(activeWorkspace, { project_id: projectId, run_type: 'generate_prose', step_name: `chapter-${chapter.chapter_no}`, status: 'failed', input_ref: stringifyNovelGenerationPayload(req.body), output_ref: stringifyNovelGenerationPayload(errorPayload), error_message: errorPayload.error })
+        if (wantsStream) {
+          res.write(sseData({ type: 'error', ...errorPayload }))
+          res.end()
+          return
+        }
+        return res.status(409).json(errorPayload)
       }
       let referenceReport: any = null
       let safetyDecision: any = null

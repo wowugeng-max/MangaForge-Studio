@@ -1,0 +1,105 @@
+import { describe, expect, test } from 'bun:test'
+import {
+  buildBoundedProsePrompt,
+  buildOhStoryDirectorPromptBlock,
+  buildProsePromptContextSnapshot,
+  prosePromptJson,
+} from './prose-prompt-context'
+
+describe('prose prompt context helpers', () => {
+  test('builds compact context snapshots with director budget omissions', () => {
+    const snapshot = buildProsePromptContextSnapshot({
+      chapter_target: {
+        chapter_no: 5,
+        title: '旧账开封',
+        summary: '主角进入审判庭。',
+        longform_structure_contract: { should_be_omitted: true },
+        scene_cards: [
+          {
+            scene_no: 1,
+            title: '封条破裂',
+            required_beats: ['账册翻页'.repeat(100)],
+            sensory_anchor: '纸灰落在掌心',
+          },
+        ],
+      },
+      oh_story_director: {
+        stage: 'pre_draft',
+        selected_contracts: [{ key: 'quality_audit_contract', detail_level: 'full', reason: '本章要交稿' }],
+        prompt_budget_plan: {
+          omit: ['longform_structure_contract'],
+          full: ['quality_audit_contract'],
+        },
+      },
+    })
+
+    expect(snapshot.chapter_target.chapter_no).toBe(5)
+    expect(snapshot.chapter_target.scene_cards[0].required_beats[0].length).toBeLessThanOrEqual(225)
+    expect(snapshot.chapter_target.longform_structure_contract).toBeUndefined()
+    expect(snapshot.oh_story_director.prompt_budget_plan.full).toEqual(['quality_audit_contract'])
+  })
+
+  test('removes diagnostic noise from compact scene-card repair fields', () => {
+    const snapshot = buildProsePromptContextSnapshot({
+      chapter_target: {
+        chapter_no: 9,
+        title: '会长私印',
+        scene_cards: [
+          {
+            scene_no: 1,
+            title: '会长室对峙',
+            serial_risk_repairs: [
+              '近章风险修复：把上一章封条复响改成当前阻碍；remaining_risk delivery_risk_receipts scene_cards.serial_risk_repairs 未闭环；只保留这条可写动作',
+            ],
+            risk_repairs: [
+              '模型自检：prose_craft_checks missed next_actions；补主角主动逼问',
+            ],
+          },
+        ],
+      },
+    })
+
+    const serialized = prosePromptJson(snapshot, 6000)
+
+    expect(serialized).toContain('会长室对峙')
+    expect(serialized).toContain('只保留这条可写动作')
+    expect(serialized).not.toContain('remaining_risk')
+    expect(serialized).not.toContain('delivery_risk_receipts')
+    expect(serialized).not.toContain('prose_craft_checks')
+  })
+
+  test('builds director prompt blocks and bounded prompts without dropping required tail', () => {
+    const directorBlock = buildOhStoryDirectorPromptBlock({
+      oh_story_director: {
+        stage: 'draft',
+        readiness: 'ready',
+        primary_action: { key: 'write_prose', label: '写正文' },
+        selected_contracts: [{ key: 'dialogue_contract', detail_level: 'full', reason: '对白驱动' }],
+        suppressed_contracts: ['secondary_worldbuilding'],
+        prompt_budget_plan: {
+          full: ['dialogue_contract'],
+          compact: ['state_tracking_contract'],
+          reference: ['style_boundary_contract'],
+          omit: ['longform_structure_contract'],
+        },
+      },
+    })
+
+    const bulkySections = Array.from({ length: 140 }, (_, index) => `【辅助资料${index + 1}】\n${'资料'.repeat(2000)}`)
+    const bounded = buildBoundedProsePrompt([
+      ...bulkySections,
+      '【结构化上下文包】',
+      prosePromptJson({ bulky: '资料'.repeat(200000) }, 200000),
+      '【段落级写作要求】',
+      '必须保留 scene_card_receipts 和 ending_hook。',
+    ])
+
+    expect(directorBlock).toContain('【oh-story 总导演】')
+    expect(directorBlock).toContain('selected_contracts：dialogue_contract / detail=full / reason=对白驱动')
+    expect(directorBlock).toContain('prompt_budget_plan：full=dialogue_contract')
+    expect(bounded.length).toBeLessThanOrEqual(180000)
+    expect(bounded).toContain('【上下文预算裁剪】')
+    expect(bounded).toContain('【段落级写作要求】')
+    expect(bounded).toContain('scene_card_receipts')
+  })
+})

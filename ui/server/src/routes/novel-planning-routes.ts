@@ -15,7 +15,7 @@ import {
   upsertNovelChapterByNumber,
 } from '../novel'
 import { executeNovelAgent, generateNovelChapterProse } from '../llm'
-import { asArray, clampScore, compactText, deepMergeObjects, getNovelPayload, parseJsonLikePayload } from './novel-route-utils'
+import { asArray, clampScore, compactPreviousChaptersForProse, compactText, deepMergeObjects, getNovelPayload, parseJsonLikePayload } from './novel-route-utils'
 
 type PlanningRoutesContext = {
   getWorkspace: () => string
@@ -1108,10 +1108,7 @@ export function registerNovelPlanningRoutes(app: Express, ctx: PlanningRoutesCon
         try {
           const contextPackage = await ctx.buildChapterContextPackage(activeWorkspace, candidateProject, chapter, chapters, worldbuilding, characters, outlines, reviews)
           const migrationPlan = await ctx.getReferenceMigrationPlanForChapter(activeWorkspace, candidateProject, chapter).catch(error => ({ error: String(error) }))
-          const prevChapters = chapters
-            .filter(item => Number(item.chapter_no || 0) < Number(chapter.chapter_no || 0) && item.chapter_text)
-            .slice(-3)
-            .map(item => ({ chapter_no: item.chapter_no, title: item.title, chapter_summary: item.chapter_summary || '', ending_hook: item.ending_hook || '', chapter_text: item.chapter_text }))
+          const prevChapters = compactPreviousChaptersForProse(chapters, chapter.chapter_no)
           const stageModelId = ctx.getStageModelId(candidateProject, 'draft', preferredModelId)
           const result = await generateNovelChapterProse(candidateProject, chapter, {
             worldbuilding,

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdtemp, rm, stat, writeFile } from 'fs/promises'
+import { mkdtemp, readFile, rm, stat, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { Database } from 'bun:sqlite'
@@ -73,6 +73,27 @@ describe('novel sqlite persistence', () => {
 
     expect(projects.map(item => item.title)).toEqual(['旧 JSON 项目'])
     expect(projectsAfterJsonChange.map(item => item.title)).toEqual(['旧 JSON 项目'])
+  })
+
+  test('appends reviews and runs through sqlite without reloading the full novel store', async () => {
+    const source = await readFile(join(import.meta.dir, 'novel.ts'), 'utf8')
+    const createReviewStart = source.indexOf('export async function createNovelReview')
+    const createReviewEnd = source.indexOf('export async function listNovelRuns', createReviewStart)
+    const createReviewBlock = source.slice(createReviewStart, createReviewEnd)
+    const appendRunStart = source.indexOf('export async function appendNovelRun')
+    const appendRunEnd = source.indexOf('export async function updateNovelRun', appendRunStart)
+    const appendRunBlock = source.slice(appendRunStart, appendRunEnd)
+
+    expect(createReviewStart).toBeGreaterThanOrEqual(0)
+    expect(createReviewEnd).toBeGreaterThan(createReviewStart)
+    expect(appendRunStart).toBeGreaterThanOrEqual(0)
+    expect(appendRunEnd).toBeGreaterThan(appendRunStart)
+    expect(createReviewBlock).toContain('INSERT INTO reviews')
+    expect(createReviewBlock).not.toContain('readStore(activeWorkspace)')
+    expect(createReviewBlock).not.toContain('writeStore(activeWorkspace')
+    expect(appendRunBlock).toContain('INSERT INTO runs')
+    expect(appendRunBlock).not.toContain('readStore(activeWorkspace)')
+    expect(appendRunBlock).not.toContain('writeStore(activeWorkspace')
   })
 })
 

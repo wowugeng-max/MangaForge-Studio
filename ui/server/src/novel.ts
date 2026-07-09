@@ -1282,9 +1282,49 @@ export async function deleteNovelChapter(activeWorkspace: string, chapterId: num
 export async function deleteNovelOutline(activeWorkspace: string, outlineId: number) { const store = await readStore(activeWorkspace); const outline = store.outlines.find(item => item.id === outlineId); if (!outline) return false; store.outlines = store.outlines.filter(item => item.id !== outlineId); store.chapters = store.chapters.map(chapter => chapter.outline_id === outlineId ? { ...chapter, outline_id: null } : chapter); await writeStore(activeWorkspace, store); return true }
 export async function deleteNovelProject(activeWorkspace: string, projectId: number) { const store = await readStore(activeWorkspace); const project = store.projects.find(item => item.id === projectId); if (!project) return false; store.projects = store.projects.filter(item => item.id !== projectId); store.worldbuilding = store.worldbuilding.filter(item => item.project_id !== projectId); store.characters = store.characters.filter(item => item.project_id !== projectId); store.outlines = store.outlines.filter(item => item.project_id !== projectId); store.chapters = store.chapters.filter(item => item.project_id !== projectId); store.chapter_versions = store.chapter_versions.filter(item => item.project_id !== projectId); store.reviews = store.reviews.filter(item => item.project_id !== projectId); store.runs = store.runs.filter(item => item.project_id !== projectId); store.setting_entities = store.setting_entities.filter(item => item.project_id !== projectId); store.chapter_setting_usage = store.chapter_setting_usage.filter(item => item.project_id !== projectId); await writeStore(activeWorkspace, store); return true }
 export async function listNovelReviews(activeWorkspace: string, projectId: number) { const store = await readStore(activeWorkspace); return store.reviews.filter(item => item.project_id === projectId) }
-export async function createNovelReview(activeWorkspace: string, data: Partial<NovelReviewRecord>) { const store = await readStore(activeWorkspace); const record = normalizeReviewRecord(data, { id: store.reviews.reduce((max, item) => Math.max(max, item.id), 0) + 1 }); store.reviews.push(record); await writeStore(activeWorkspace, store); return record }
+export async function createNovelReview(activeWorkspace: string, data: Partial<NovelReviewRecord>) {
+  const record = normalizeReviewRecord(data)
+  const db = openDb(activeWorkspace)
+  try {
+    ensureSqliteSchema(db)
+    const result = db.query('INSERT INTO reviews (project_id,review_type,status,summary,issues,payload,created_at) VALUES (?,?,?,?,?,?,?)').run(
+      record.project_id,
+      record.review_type,
+      record.status,
+      record.summary || '',
+      jsonText(record.issues || []),
+      record.payload || '',
+      record.created_at,
+    ) as any
+    const id = Number(result?.lastInsertRowid || (db.query('SELECT last_insert_rowid() AS id').get() as any)?.id || 0)
+    return { ...record, id }
+  } finally {
+    db.close()
+  }
+}
 export async function listNovelRuns(activeWorkspace: string, projectId: number) { const store = await readStore(activeWorkspace); return store.runs.filter(item => item.project_id === projectId).sort((a, b) => b.created_at.localeCompare(a.created_at)) }
-export async function appendNovelRun(activeWorkspace: string, data: Partial<NovelRunRecord>) { const store = await readStore(activeWorkspace); const record = normalizeRunRecord(data, { id: store.runs.reduce((max, item) => Math.max(max, item.id), 0) + 1 }); store.runs.push(record); await writeStore(activeWorkspace, store); return record }
+export async function appendNovelRun(activeWorkspace: string, data: Partial<NovelRunRecord>) {
+  const record = normalizeRunRecord(data)
+  const db = openDb(activeWorkspace)
+  try {
+    ensureSqliteSchema(db)
+    const result = db.query('INSERT INTO runs (project_id,run_type,step_name,status,input_ref,output_ref,duration_ms,error_message,created_at) VALUES (?,?,?,?,?,?,?,?,?)').run(
+      record.project_id,
+      record.run_type,
+      record.step_name,
+      record.status,
+      record.input_ref || '',
+      record.output_ref || '',
+      record.duration_ms || 0,
+      record.error_message || '',
+      record.created_at,
+    ) as any
+    const id = Number(result?.lastInsertRowid || (db.query('SELECT last_insert_rowid() AS id').get() as any)?.id || 0)
+    return { ...record, id }
+  } finally {
+    db.close()
+  }
+}
 export async function updateNovelRun(activeWorkspace: string, id: number, data: Partial<NovelRunRecord>) { const store = await readStore(activeWorkspace); const idx = store.runs.findIndex(item => item.id === id); if (idx < 0) return null; store.runs[idx] = normalizeRunRecord(data, store.runs[idx]); await writeStore(activeWorkspace, store); return store.runs[idx] }
 export async function compactNovelStorage(activeWorkspace: string, options: { vacuum?: boolean; maxChars?: number } = {}) {
   const maxChars = Number(options.maxChars || MAX_PERSISTED_DIAGNOSTIC_CHARS)

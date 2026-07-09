@@ -211,6 +211,11 @@ import {
   buildRelationshipDeltaSyncReport,
   buildChapterHandoffDeltaSyncReport,
   buildProseRevisionReceiptSyncReport,
+  applyDeterministicWordCountIssueGuard,
+  mergeProseRevisionArtifacts,
+  mergeQualityRecheckReviewWithStructuredEvidence,
+  mergePostDeliveryReceiptSyncIntoQualityGateReview,
+  mergeStructuredReviewFillPayload,
   buildDeslopRepairReceiptSyncReport,
   buildRevisionCascadeImpactSyncReport,
   buildRevisionScopeGuardSyncReport,
@@ -237,6 +242,14 @@ import {
   resolveChapterWordTarget,
 } from './novel-writing-service'
 import { buildLLMResultDiagnostics, buildPreflightChecks, deepMergeObjects, extractPlainProseFallback, formatReviewIssueForStorage, getNovelPayload, getQualityGateDecision, getStyleLock, normalizeIssue } from './novel-route-utils'
+import { buildProsePromptContextSnapshot } from '../novel-writing/prose-prompt-context'
+
+const readSceneCardsPromptSource = () => readFileSync(join(import.meta.dir, '../novel-writing/scene-cards-prompt.ts'), 'utf8')
+const readPostDeliveryStoryStateUpdateSource = () => readFileSync(join(import.meta.dir, '../novel-writing/post-delivery-story-state-update.ts'), 'utf8')
+const readProseQualityReviewRecordSource = () => readFileSync(join(import.meta.dir, '../novel-writing/prose-quality-review-record.ts'), 'utf8')
+const readChapterProseStoragePatchSource = () => readFileSync(join(import.meta.dir, '../novel-writing/chapter-prose-storage-patch.ts'), 'utf8')
+const readPostDeliverySyncReviewRecordSource = () => readFileSync(join(import.meta.dir, '../novel-writing/post-delivery-sync-review-record.ts'), 'utf8')
+const readDraftSyncReviewRecordSource = () => readFileSync(join(import.meta.dir, '../novel-writing/draft-sync-review-record.ts'), 'utf8')
 
 describe('deepMergeObjects', () => {
   test('merges cyclic overrides without overflowing', () => {
@@ -248,6 +261,211 @@ describe('deepMergeObjects', () => {
     expect(merged.chapter_target.chapter_no).toBe(2)
     expect(merged.chapter_target.title).toBe('旧法失准')
     expect(merged.chapter_target.self).toBe('[Circular]')
+  })
+})
+
+describe('mergeQualityRecheckReviewWithStructuredEvidence', () => {
+  test('preserves filled oh-story checks when a follow-up recheck returns missing placeholders', () => {
+    const previousReview = {
+      score: 82,
+      issues: [{ severity: 'high', message: '旧稿质量问题' }],
+      target_reader_checks: [
+        { key: 'target_reader_match', status: 'pass', evidence: '目标读者回报明确。' },
+      ],
+      quality_audit_checks: [
+        { key: 'quality_audit_density', status: 'pass', evidence: '旧稿已完成质量诊断。' },
+      ],
+    }
+    const recheckReview = {
+      score: 88,
+      passed: true,
+      issues: [],
+      target_reader_checks: [
+        { key: 'missing_target_reader_checks', status: 'fail', label: '缺少目标读者自检', evidence: '模型没有输出 target_reader_checks。' },
+      ],
+      quality_audit_checks: [
+        { key: 'deterministic_paragraph_format', status: 'fail', evidence: '复检确定性扫描发现段落过长。' },
+        { key: 'missing_quality_audit_checks', status: 'fail', label: '缺少质量诊断自检', evidence: '模型没有输出 quality_audit_checks。' },
+      ],
+    }
+
+    const merged = mergeQualityRecheckReviewWithStructuredEvidence(previousReview, recheckReview)
+
+    expect(merged.score).toBe(88)
+    expect(merged.issues).toEqual([])
+    expect(merged.target_reader_checks).toEqual(previousReview.target_reader_checks)
+    expect(merged.quality_audit_checks.map((item: any) => item.key)).toEqual([
+      'deterministic_paragraph_format',
+      'quality_audit_density',
+    ])
+    expect(merged.quality_recheck_structured_evidence_preserved.fields).toEqual([
+      'target_reader_checks',
+      'quality_audit_checks',
+    ])
+  })
+})
+
+describe('mergePostDeliveryReceiptSyncIntoQualityGateReview', () => {
+  test('clears missing receipt placeholders when deterministic sync reports are ok', () => {
+    const merged = mergePostDeliveryReceiptSyncIntoQualityGateReview({
+      state_tracking_checks: [
+        {
+          key: 'missing_status_filter_receipts',
+          label: '缺少状态筛选回执',
+          status: 'fail',
+          evidence: '模型没有输出 status_filter_receipts。',
+        },
+      ],
+      next_chapter_quality_plan_receipts: [
+        {
+          key: 'missing_next_chapter_quality_plan_receipts',
+          label: '缺少质量续航回执',
+          status: 'fail',
+          evidence: '模型没有输出 next_chapter_quality_plan_receipts。',
+        },
+      ],
+      quality_audit_checks: [
+        {
+          key: 'scene_card_receipt_2_scope_invalid',
+          label: '场景卡回执证据复核',
+          status: 'fail',
+          evidence: 'scene_start_anchor 无法定位到正文对应场景。',
+        },
+      ],
+    }, {
+      statusFilterReceiptSync: {
+        status: 'ok',
+        label: '状态筛选回执 OK',
+        summary: '状态筛选回执均可定位。',
+        receipt_count: 2,
+        requires_receipts: true,
+      },
+      nextChapterQualityPlanReceiptSync: {
+        status: 'ok',
+        label: '质量续航回执 OK',
+        summary: '质量续航回执均可定位。',
+        receipt_count: 1,
+        requires_receipts: true,
+      },
+      sceneCardReceiptSync: {
+        status: 'ok',
+        label: '场景回执 OK',
+        summary: '场景卡回执均可定位。',
+        receipt_count: 2,
+      },
+    })
+
+    expect(merged.state_tracking_checks.map((item: any) => item.key)).not.toContain('missing_status_filter_receipts')
+    expect(merged.next_chapter_quality_plan_receipts.map((item: any) => item.key)).not.toContain('missing_next_chapter_quality_plan_receipts')
+    expect(merged.quality_audit_checks.map((item: any) => item.key)).not.toContain('scene_card_receipt_2_scope_invalid')
+    expect(merged.state_tracking_checks).toContainEqual(expect.objectContaining({
+      key: 'status_filter_receipts_sync_ok',
+      status: 'pass',
+    }))
+    expect(merged.quality_audit_checks).toContainEqual(expect.objectContaining({
+      key: 'scene_card_receipts_sync_ok',
+      status: 'pass',
+    }))
+  })
+})
+
+describe('mergeStructuredReviewFillPayload', () => {
+  test('promotes nested pre-draft execution receipts into structured review fields', () => {
+    const review = {
+      intent_confirmation_checks: [
+        { key: 'missing_intent_confirmation_checks', status: 'fail', label: '缺少意图确认自检', evidence: '模型没有输出 intent_confirmation_checks。' },
+      ],
+      benchmark_recall_checks: [
+        { key: 'missing_benchmark_recall_checks', status: 'fail', label: '缺少文风召回自检', evidence: '模型没有输出 benchmark_recall_checks。' },
+      ],
+    }
+    const payload = {
+      oh_story_delivery_receipts: {
+        pre_draft_execution_receipts: {
+          intent_confirmation_checks: [{
+            key: 'intent_emotion_goal',
+            label: '意图确认',
+            delivered: true,
+            intent_field: 'emotion_goal',
+            expected_intent: '压迫感中推进镇门危局',
+            delivered_evidence: '砖缝里的黑血被履带碾开，江哲没有退。',
+            blueprint_link: 'chapter_blueprint.emotion_goal',
+            fix: '无',
+            remaining_risk: '无',
+          }],
+          benchmark_recall_checks: [{
+            key: 'rhythm_usage_receipt',
+            label: '文风召回',
+            delivered: true,
+            source_type: 'rhythm',
+            source_path: '剧情/节奏.md',
+            expected_application: '高压推进，章尾留新危险。',
+            delivered_evidence: '诱捕序列启动，镇门后的遗物成为下一章拉力。',
+            gaps_preserved: '不复制对标桥段。',
+            fix: '无',
+            remaining_risk: '无',
+          }],
+        },
+      },
+    }
+
+    const merged = mergeStructuredReviewFillPayload(review, payload, {}, '')
+
+    expect(merged.intent_confirmation_checks).toEqual([
+      expect.objectContaining({
+        key: 'intent_emotion_goal',
+        status: 'pass',
+        delivered_evidence: '砖缝里的黑血被履带碾开，江哲没有退。',
+      }),
+    ])
+    expect(merged.benchmark_recall_checks).toEqual([
+      expect.objectContaining({
+        key: 'rhythm_usage_receipt',
+        status: 'pass',
+        delivered_evidence: '诱捕序列启动，镇门后的遗物成为下一章拉力。',
+      }),
+    ])
+  })
+})
+
+describe('applyDeterministicWordCountIssueGuard', () => {
+  test('ignores LLM word-count shortage findings contradicted by deterministic count', () => {
+    const text = '江哲抬手压住镇门。'.repeat(420)
+    const result = applyDeterministicWordCountIssueGuard([
+      {
+        severity: 'S2',
+        category: 'structure',
+        evidence: '当前章节字数约1650字',
+        description: '字数严重不足，未达到大纲要求的2800-3500字标准。',
+        fix: '继续扩写。',
+      },
+    ], 75, text, { min: 2800, target: 3000, max: 3500 }, 85)
+
+    expect(result.issues).toEqual([])
+    expect(result.ignored_issues).toHaveLength(1)
+    expect(result.score).toBe(85)
+  })
+
+  test('keeps low score when non-word-count high severity issues remain', () => {
+    const text = '江哲抬手压住镇门。'.repeat(420)
+    const result = applyDeterministicWordCountIssueGuard([
+      {
+        severity: 'S2',
+        category: 'structure',
+        evidence: '当前章节字数约1650字',
+        description: '字数严重不足，未达到大纲要求的2800-3500字标准。',
+      },
+      {
+        severity: 'S2',
+        category: 'continuity',
+        evidence: '上一章黑袍人追到门外，本章没有接住。',
+        description: '章首承接断裂。',
+      },
+    ], 75, text, { min: 2800, target: 3000, max: 3500 }, 85)
+
+    expect(result.issues).toHaveLength(1)
+    expect(result.issues[0].category).toBe('continuity')
+    expect(result.score).toBe(75)
   })
 })
 
@@ -378,7 +596,7 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('asks scene-card generation to emit oh-story execution directive fields', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const source = readSceneCardsPromptSource()
 
     expect(source).toContain('dialogue_goals(array)')
     expect(source).toContain('style_directives(array)')
@@ -415,9 +633,7 @@ describe('normalizeSceneCardsPayload', () => {
 
   test('wires chapter positioning and benchmark structure coordinates into scene-card and prose prompts', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const promptStart = source.indexOf('const buildSceneCardsPrompt =')
-    const promptEnd = source.indexOf('const buildHeuristicSettingUsage =', promptStart)
-    const promptBlock = source.slice(promptStart, promptEnd)
+    const promptBlock = readSceneCardsPromptSource()
     const proseStart = source.indexOf('const buildParagraphProseContext =')
     const proseEnd = source.indexOf('const buildStoryStatePrompt =', proseStart)
     const proseBlock = source.slice(proseStart, proseEnd)
@@ -425,7 +641,6 @@ describe('normalizeSceneCardsPayload', () => {
     const reviewEnd = source.indexOf('const buildProseRevisionPrompt =', reviewStart)
     const reviewBlock = source.slice(reviewStart, reviewEnd)
 
-    expect(promptStart).toBeGreaterThanOrEqual(0)
     expect(proseStart).toBeGreaterThanOrEqual(0)
     expect(reviewStart).toBeGreaterThanOrEqual(0)
     expect(promptBlock).toContain('chapter_positioning')
@@ -464,15 +679,11 @@ describe('normalizeSceneCardsPayload', () => {
   })
 
   test('asks scene-card generation to emit character relation progression fields', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const promptStart = source.indexOf('const buildSceneCardsPrompt =')
-    const promptEnd = source.indexOf('const buildHeuristicSettingUsage =', promptStart)
-    const promptBlock = source.slice(promptStart, promptEnd)
-    const briefStart = source.indexOf('function sceneBriefFromCard')
-    const briefEnd = source.indexOf('function buildReaderRetentionBrief', briefStart)
-    const briefBlock = source.slice(briefStart, briefEnd)
+    const promptBlock = readSceneCardsPromptSource()
+    const sceneBriefSource = readFileSync(join(import.meta.dir, '../novel-writing/scene-briefs.ts'), 'utf8')
+    const briefStart = sceneBriefSource.indexOf('export function sceneBriefFromCard')
+    const briefBlock = sceneBriefSource.slice(briefStart)
 
-    expect(promptStart).toBeGreaterThanOrEqual(0)
     expect(briefStart).toBeGreaterThanOrEqual(0)
     expect(promptBlock).toContain('relationship_progression_plan')
     expect(promptBlock).toContain('relationship_buffer_zone')
@@ -525,14 +736,11 @@ describe('normalizeSceneCardsPayload', () => {
 
   test('asks scene-card generation to split showdown contracts into public payoff and combat presets', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const promptStart = source.indexOf('const buildSceneCardsPrompt =')
-    const promptEnd = source.indexOf('const buildHeuristicSettingUsage =', promptStart)
-    const promptBlock = source.slice(promptStart, promptEnd)
+    const promptBlock = readSceneCardsPromptSource()
     const proseStart = source.indexOf('const buildParagraphProseContext =')
     const proseEnd = source.indexOf('const reviewPrompt', proseStart)
     const proseBlock = source.slice(proseStart, proseEnd)
 
-    expect(promptStart).toBeGreaterThanOrEqual(0)
     expect(promptBlock).toContain('chapter_target.showdown_contract')
     expect(promptBlock).toContain('showoff_stage_chain')
     expect(promptBlock).toContain('spectator_interest_shift')
@@ -554,14 +762,11 @@ describe('normalizeSceneCardsPayload', () => {
 
   test('asks scene-card generation to split conflict-structure contracts into per-scene execution fields', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const promptStart = source.indexOf('const buildSceneCardsPrompt =')
-    const promptEnd = source.indexOf('const buildHeuristicSettingUsage =', promptStart)
-    const promptBlock = source.slice(promptStart, promptEnd)
+    const promptBlock = readSceneCardsPromptSource()
     const proseStart = source.indexOf('const buildParagraphProseContext =')
     const proseEnd = source.indexOf('const reviewPrompt', proseStart)
     const proseBlock = source.slice(proseStart, proseEnd)
 
-    expect(promptStart).toBeGreaterThanOrEqual(0)
     expect(promptBlock).toContain('chapter_target.conflict_structure_contract')
     expect(promptBlock).toContain('conflict_ladder_step')
     expect(promptBlock).toContain('motivation_source')
@@ -624,6 +829,190 @@ describe('normalizeSceneCardsPayload', () => {
     expect(sceneCards[2].ending_hook_seed).toContain('章末抛出第三个名字作为追读钩子')
     expect(sceneCards[2].required_beats).toContain('章末抛出第三个名字作为追读钩子')
     expect(sceneCards[2].serial_risk_repairs).toContain('不要再用旁白宣布风险已修复')
+  })
+
+  test('keeps sync-risk diagnostic noise out of scene-card core drama fields', () => {
+    const noisyRisk = '主角要同时保住身份、线索和身边人的安全。；同步风险开篇承接：前300字先回应 story_drive_sync 的上一章缺口，把它转成当前场景目标、阻碍、证据或状态压力；本章目标：本章目标未充分兑现：江哲不再被动逃避；同步风险中段兑现：中段必须按 character_state_delta_sync 的 missed/next_actions 写出可见行动；同步风险中段兑现：中段必须按 chapter_handoff_delta_syn...；换地图承接：换地图/换阶段没有完成旧地图收束；章末追读：敌人没有退走，而是换了更高权限的人来；开篇钩子：每章前300字必须接住上一章状态；下一次修订优先补足 reader_fuel_missed，避免章节只完成事件但不服务长期追读。'
+    const sceneCards = normalizeSceneCardsPayload({
+      scene_cards: [{
+        title: '镇门封锁',
+        purpose: '封锁令压到主角门前',
+        conflict: noisyRisk,
+        obstacle: noisyRisk,
+        opposing_force: noisyRisk,
+        no_exit_reason: `否则${noisyRisk}`,
+        reader_payoff: noisyRisk,
+        turning_point: noisyRisk,
+        exit_state: noisyRisk,
+        state_changes_expected: [noisyRisk],
+        event_value_change: '确认同步风险开篇承接：前300字先回应 story_loop_sync 的上一章缺口，把它转成当前场景目标；换地图承接：换地图/换阶段没有完成旧地图收束；开篇钩子：每章前300字必须接住上一章状态。',
+      }],
+    }, {
+      chapter_target: {
+        delivery_risk_carry_over: {
+          opening_actions: ['前300字让封锁令压到门前'],
+          middle_actions: ['中段让线索代价可见'],
+          ending_actions: ['章尾抛出诱捕钩子'],
+        },
+      },
+    })
+
+    const coreText = [
+      sceneCards[0].conflict,
+      sceneCards[0].obstacle,
+      sceneCards[0].opposing_force,
+      sceneCards[0].no_exit_reason,
+      sceneCards[0].reader_payoff,
+      sceneCards[0].turning_point,
+      sceneCards[0].event_value_change,
+      sceneCards[0].exit_state,
+      ...(sceneCards[0].state_changes_expected || []),
+    ].join('；')
+    expect(sceneCards[0].conflict).toBe('主角要同时保住身份、线索和身边人的安全。')
+    expect(coreText).not.toContain('同步风险')
+    expect(coreText).not.toContain('_sync')
+    expect(coreText).not.toContain('_syn')
+    expect(coreText).not.toContain('换地图承接')
+    expect(coreText).not.toContain('开篇钩子')
+    expect(coreText).not.toContain('章末追读')
+    expect(coreText).not.toContain('下一次修订')
+    expect(sceneCards[0].required_beats).toContain('前300字让封锁令压到门前')
+    expect(sceneCards[0].serial_risk_repairs).toContain('delivery_risk_carry_over')
+  })
+
+  test('keeps engineering repair diagnostics out of prose-driving scene card fields', () => {
+    const noisyOpening = '同步风险开篇承接：前300字先回应 story_loop_sync 的上一章缺口；开篇钩子：每章前300字必须接住上一章状态；吸引力中段修复：中段必须把吸引力缺口写成目标、阻碍、转折、回报或可复述场面；章末追读：敌人没有退走，而是换了更高权限的人来。'
+    const noisySetting = '同步风险中段兑现：中段必须按 asset_state_delta_sync 的 missed/next_actions 写出可见行动；诡序之主：通过不断降临怪谈副本，彻底蚕食蓝星人类的理智。'
+    const noisySettingRepair = '修复：不要重写全设定表；只处理本章计划触达且正文实际改变的关键资产。'
+    const sceneCards = normalizeSceneCardsPayload({
+      scene_cards: [{
+        title: '镇门封锁',
+        purpose_tag: noisyOpening,
+        purpose_tags: [noisyOpening, '关键揭露'],
+        conflict: `主角要同时保住身份、线索和身边人的安全。；${noisySetting}`,
+        event_value_change: `确认吸引力中段修复：中段必须把吸引力缺口写成目标、阻碍、转折、回报或可复述场面；江哲：主角`,
+        opening_hook: noisyOpening,
+        transition_from_previous: noisyOpening,
+        information_gap: noisyOpening,
+        ending_hook_seed: noisyOpening,
+        emotional_tone: noisySetting,
+        dialogue_goals: [noisyOpening, '逼出门禁规则'],
+        style_directives: [noisySettingRepair, '短句落点'],
+        used_settings: [noisySetting, noisySettingRepair, '镇门封条：贴上后会触发门禁怪谈'],
+        revealed_settings: [noisySetting, noisySettingRepair],
+        state_changes_expected: [noisyOpening, noisySettingRepair, '江哲公开承认掌握门禁规则'],
+      }],
+    }, {
+      chapter_target: {
+        delivery_risk_carry_over: {
+          opening_actions: ['前300字让封锁令压到门前'],
+        },
+      },
+    })
+
+    const proseDrivingText = [
+      sceneCards[0].purpose_tag,
+      ...(sceneCards[0].purpose_tags || []),
+      sceneCards[0].conflict,
+      sceneCards[0].event_value_change,
+      sceneCards[0].opening_hook,
+      sceneCards[0].transition_from_previous,
+      sceneCards[0].information_gap,
+      sceneCards[0].ending_hook_seed,
+      sceneCards[0].emotional_tone,
+      ...(sceneCards[0].dialogue_goals || []),
+      ...(sceneCards[0].style_directives || []),
+      ...(sceneCards[0].used_settings || []),
+      ...(sceneCards[0].revealed_settings || []),
+      ...(sceneCards[0].state_changes_expected || []),
+    ].join('；')
+
+    expect(sceneCards[0].purpose_tag).toBe('关键揭露')
+    expect(sceneCards[0].purpose_tags).toEqual(['关键揭露'])
+    expect(sceneCards[0].conflict).toBe('主角要同时保住身份、线索和身边人的安全。')
+    expect(sceneCards[0].event_value_change).toBe('')
+    expect(sceneCards[0].opening_hook).toBe('前300字让封锁令压到门前')
+    expect(sceneCards[0].transition_from_previous).toBe('')
+    expect(sceneCards[0].information_gap).toBe('')
+    expect(sceneCards[0].ending_hook_seed).toBe('')
+    expect(sceneCards[0].emotional_tone).toBe('')
+    expect(sceneCards[0].dialogue_goals).toEqual(['逼出门禁规则'])
+    expect(sceneCards[0].style_directives).toEqual(['短句落点'])
+    expect(sceneCards[0].used_settings).toEqual(['镇门封条：贴上后会触发门禁怪谈'])
+    expect(sceneCards[0].revealed_settings).toEqual([])
+    expect(sceneCards[0].state_changes_expected).toEqual(['江哲公开承认掌握门禁规则'])
+    expect(proseDrivingText).not.toContain('同步风险')
+    expect(proseDrivingText).not.toContain('_sync')
+    expect(proseDrivingText).not.toContain('missed')
+    expect(proseDrivingText).not.toContain('吸引力中段修复')
+    expect(proseDrivingText).not.toContain('不要重写全设定表')
+    expect(proseDrivingText).not.toContain('开篇钩子')
+    expect(proseDrivingText).not.toContain('章末追读')
+    expect(sceneCards[0].required_beats).toContain('前300字让封锁令压到门前')
+  })
+
+  test('strips delivery-risk diagnostics from story-facing carry-over scene-card arrays', () => {
+    const diagnosticOpening = '同步风险开篇承接：前300字先回应 story_loop_sync 的上一章缺口，把它转成当前场景目标、阻碍、证据或状态压力。'
+    const diagnosticMiddle = '同步风险中段兑现：中段必须按 character_state_delta_sync 的 missed/next_actions 写出可见行动。'
+    const diagnosticEnding = '吸引力章尾修复：章末必须补足 delivery_risk_receipts/revision_receipts 的 remaining_risk。'
+    const sceneCards = normalizeSceneCardsPayload({
+      scene_cards: [
+        {
+          title: '镇门封锁',
+          purpose: '主角在镇门前确认封条异常',
+          beat: '封条亮起，守门人退后。',
+        },
+        {
+          title: '证据转向',
+          purpose: '主角用旧账册逼出门禁规则',
+          beat: '账册缺页和封条编号对上。',
+        },
+        {
+          title: '危局留钩',
+          purpose: '更高权限的镇门人现身',
+          beat: '新令牌压住旧账册。',
+        },
+      ],
+    }, {
+      chapter_target: {
+        delivery_risk_carry_over: {
+          opening_actions: [diagnosticOpening, '前300字让封锁令压到镇门，逼主角当场验封条'],
+          middle_actions: [diagnosticMiddle, '中段用账册缺页改变守门人的立场'],
+          ending_actions: [diagnosticEnding, '章末让更高权限的镇门人带新令牌入场'],
+          required_actions: [
+            diagnosticMiddle,
+            '状态变化：主角从被拦在门外，变成掌握封条编号的主动追问者',
+          ],
+        },
+      },
+    })
+
+    const snapshot = buildProsePromptContextSnapshot({
+      chapter_target: {
+        scene_cards: sceneCards,
+      },
+    })
+    const promptSceneCards = snapshot.chapter_target.scene_cards || []
+    const storyFacingText = promptSceneCards.map((card: any) => [
+      ...(card.required_beats || []),
+      ...(card.action_beats || []),
+      ...(card.required_information || []),
+      ...(card.state_changes_expected || []),
+      card.recent_fatigue_action,
+      card.opening_hook,
+      card.ending_hook_seed,
+    ].filter(Boolean).join('；')).join('；')
+
+    expect(storyFacingText).toContain('前300字让封锁令压到镇门')
+    expect(storyFacingText).toContain('中段用账册缺页改变守门人的立场')
+    expect(storyFacingText).toContain('章末让更高权限的镇门人带新令牌入场')
+    expect(storyFacingText).not.toContain('同步风险')
+    expect(storyFacingText).not.toContain('_sync')
+    expect(storyFacingText).not.toContain('missed')
+    expect(storyFacingText).not.toContain('next_actions')
+    expect(storyFacingText).not.toContain('delivery_risk_receipts')
+    expect(storyFacingText).not.toContain('revision_receipts')
+    expect(storyFacingText).not.toContain('吸引力章尾修复')
   })
 
   test('projects style-fingerprint carry-over into scene style directives', () => {
@@ -974,7 +1363,7 @@ describe('normalizeSceneCardsPayload', () => {
       },
     })
 
-    expect(sceneCards[0].purpose_tags).toContain(ipSceneRepair)
+    expect(sceneCards[0].purpose_tags).not.toContain(ipSceneRepair)
     expect(sceneCards[0].required_beats).toContain(ipSceneRepair)
     expect(sceneCards[1].action_beats).toContain(ipSceneRepair)
     expect(sceneCards[1].sensory_anchor).toContain(ipSceneRepair)
@@ -1336,8 +1725,8 @@ describe('normalizeSceneCardsPayload', () => {
       },
     })
 
-    expect(sceneCards[0].purpose_tags).toContain(beatCoolingRepair)
-    expect(sceneCards[1].purpose_tags).toContain(beatCoolingRepair)
+    expect(sceneCards[0].purpose_tags).not.toContain(beatCoolingRepair)
+    expect(sceneCards[1].purpose_tags).not.toContain(beatCoolingRepair)
     expect(sceneCards[0].required_beats).toContain(beatCoolingRepair)
     expect(sceneCards[0].transition_from_previous).toContain(beatCoolingRepair)
     expect(sceneCards[0].serial_risk_repairs).toContain('节奏冷却')
@@ -1477,7 +1866,7 @@ describe('normalizeSceneCardsPayload', () => {
       },
     })
 
-    expect(sceneCards[0].purpose_tags).toContain(storyLoopRepair)
+    expect(sceneCards[0].purpose_tags).not.toContain(storyLoopRepair)
     expect(sceneCards[1].required_beats).toContain(storyLoopRepair)
     expect(sceneCards[2].reader_payoff).toContain(storyLoopRepair)
     expect(sceneCards[2].ending_hook_seed).toContain(storyLoopRepair)
@@ -1710,6 +2099,7 @@ describe('normalizeSceneCardsPayload', () => {
 
   test('projects storyline-sync carry-over into scene storyline fields', () => {
     const storylineRepair = '下一章必须校剧情线：storyline_sync 发现 missed 主线节点、unplanned 旁支悬疑和 forbidden_touched 禁用支线；本章要把账本主线拉回当前目标，用现场阻碍、状态变化和章末主线钩子修复。'
+    const actionableStorylineRepair = '本章要把账本主线拉回当前目标，用现场阻碍、状态变化和章末主线钩子修复。'
     const sceneCards = normalizeSceneCardsPayload({
       scene_cards: [
         {
@@ -1738,7 +2128,9 @@ describe('normalizeSceneCardsPayload', () => {
 
     expect(sceneCards[0].required_information).toContain(storylineRepair)
     expect(sceneCards[1].required_beats).toContain(storylineRepair)
-    expect(sceneCards[1].conflict).toContain(storylineRepair)
+    expect(sceneCards[1].conflict).toContain(actionableStorylineRepair)
+    expect(sceneCards[1].conflict).not.toContain('storyline_sync')
+    expect(sceneCards[1].conflict).not.toContain('missed')
     expect(sceneCards[1].state_changes_expected).toContain(storylineRepair)
     expect(sceneCards[2].ending_hook_seed).toContain(storylineRepair)
     expect(sceneCards[0].serial_risk_repairs).toContain('剧情线')
@@ -1810,7 +2202,7 @@ describe('normalizeSceneCardsPayload', () => {
       },
     })
 
-    expect(sceneCards[0].purpose_tags).toContain(innovationRepair)
+    expect(sceneCards[0].purpose_tags).not.toContain(innovationRepair)
     expect(sceneCards[1].required_beats).toContain(innovationRepair)
     expect(sceneCards[1].action_beats).toContain(innovationRepair)
     expect(sceneCards[2].sensory_anchor).toContain(innovationRepair)
@@ -1884,7 +2276,7 @@ describe('normalizeSceneCardsPayload', () => {
       },
     })
 
-    expect(sceneCards[0].purpose_tags).toContain(coreDriftRepair)
+    expect(sceneCards[0].purpose_tags).not.toContain(coreDriftRepair)
     expect(sceneCards[1].required_beats).toContain(coreDriftRepair)
     expect(sceneCards[0].conflict).toContain(coreDriftRepair)
     expect(sceneCards[1].state_changes_expected).toContain(coreDriftRepair)
@@ -2364,7 +2756,7 @@ describe('normalizeSceneCardsPayload', () => {
       },
     })
 
-    expect(sceneCards[0].purpose_tags).toContain(coreScoreRepair)
+    expect(sceneCards[0].purpose_tags).not.toContain(coreScoreRepair)
     expect(sceneCards[0].conflict).toContain(coreScoreRepair)
     expect(sceneCards[1].prose_craft_directives).toContain(surfaceScoreRepair)
     expect(sceneCards[1].style_directives).toContain(surfaceScoreRepair)
@@ -2405,7 +2797,7 @@ describe('normalizeSceneCardsPayload', () => {
       },
     })
 
-    expect(sceneCards[0].purpose_tags).toContain(structureRepair)
+    expect(sceneCards[0].purpose_tags).not.toContain(structureRepair)
     expect(sceneCards[0].opening_hook).toContain(structureRepair)
     expect(sceneCards[2].ending_hook_seed).toContain(structureRepair)
     expect(sceneCards[1].required_beats).toContain(progressionRepair)
@@ -2449,7 +2841,7 @@ describe('normalizeSceneCardsPayload', () => {
     expect(sceneCards[0].opening_hook).toContain(platformRepair)
     expect(sceneCards[2].reader_payoff).toContain(platformRepair)
     expect(sceneCards[2].ending_hook_seed).toContain(platformRepair)
-    expect(sceneCards[0].purpose_tags).toContain(contentRepair)
+    expect(sceneCards[0].purpose_tags).not.toContain(contentRepair)
     expect(sceneCards[1].conflict).toContain(contentRepair)
     expect(sceneCards[1].required_beats).toContain(contentRepair)
     expect(sceneCards[2].ending_hook_seed).toContain(contentRepair)
@@ -2648,9 +3040,9 @@ describe('normalizeSceneCardsPayload', () => {
       },
     })
 
-    expect(sceneCards[0].purpose_tags).toContain(titleRepair)
+    expect(sceneCards[0].purpose_tags).not.toContain(titleRepair)
     expect(sceneCards[0].required_information).toContain(titleRepair)
-    expect(sceneCards[0].opening_hook).toContain(titleRepair)
+    expect(sceneCards[0].opening_hook).not.toContain(titleRepair)
     expect(sceneCards[1].required_beats).toContain(titleRepair)
     expect(sceneCards[2].reader_payoff).toContain(titleRepair)
     expect(sceneCards[2].ending_hook_seed).toContain(titleRepair)
@@ -2689,7 +3081,7 @@ describe('normalizeSceneCardsPayload', () => {
     expect(sceneCards[0].prose_craft_directives).toContain(qualityGateRepair)
     expect(sceneCards[1].required_beats).toContain(qualityGateRepair)
     expect(sceneCards[1].action_beats).toContain(qualityGateRepair)
-    expect(sceneCards[0].purpose_tags).toContain(qualityGateRepair)
+    expect(sceneCards[0].purpose_tags).not.toContain(qualityGateRepair)
     expect(sceneCards[2].reader_payoff).toContain(qualityGateRepair)
     expect(sceneCards[0].serial_risk_repairs).toContain('质量门禁')
     expect(sceneCards[2].serial_risk_repairs).toContain('质量门禁')
@@ -2761,7 +3153,7 @@ describe('normalizeSceneCardsPayload', () => {
     })
 
     expect(sceneCards[0].prose_craft_directives).toContain(perspectiveRepair)
-    expect(sceneCards[0].purpose_tags).toContain(perspectiveRepair)
+    expect(sceneCards[0].purpose_tags).not.toContain(perspectiveRepair)
     expect(sceneCards[1].required_beats).toContain(perspectiveRepair)
     expect(sceneCards[1].conflict).toContain(perspectiveRepair)
     expect(sceneCards[2].reader_payoff).toContain(perspectiveRepair)
@@ -2983,7 +3375,7 @@ describe('normalizeSceneCardsPayload', () => {
       },
     })
 
-    expect(sceneCards[0].purpose_tags).toContain(writePreparationRepair)
+    expect(sceneCards[0].purpose_tags).not.toContain(writePreparationRepair)
     expect(sceneCards[0].required_information).toContain(writePreparationRepair)
     expect(sceneCards[0].used_settings).toContain(writePreparationRepair)
     expect(sceneCards[1].required_beats).toContain(writePreparationRepair)
@@ -3015,8 +3407,8 @@ describe('normalizeSceneCardsPayload', () => {
       },
     })
 
-    expect(sceneCards[0].purpose_tags).toContain(targetReaderRepair)
-    expect(sceneCards[1].purpose_tags).toContain(targetReaderRepair)
+    expect(sceneCards[0].purpose_tags).not.toContain(targetReaderRepair)
+    expect(sceneCards[1].purpose_tags).not.toContain(targetReaderRepair)
     expect(sceneCards[0].action_beats).toContain(targetReaderRepair)
     expect(sceneCards[1].action_beats).toContain(targetReaderRepair)
     expect(sceneCards[0].reader_payoff).toContain(targetReaderRepair)
@@ -3080,8 +3472,8 @@ describe('normalizeSceneCardsPayload', () => {
       },
     })
 
-    expect(sceneCards[0].purpose_tags).toContain(genrePositioningRepair)
-    expect(sceneCards[1].purpose_tags).toContain(genrePositioningRepair)
+    expect(sceneCards[0].purpose_tags).not.toContain(genrePositioningRepair)
+    expect(sceneCards[1].purpose_tags).not.toContain(genrePositioningRepair)
     expect(sceneCards[0].required_beats).toContain(genrePositioningRepair)
     expect(sceneCards[1].required_beats).toContain(genrePositioningRepair)
     expect(sceneCards[1].reader_payoff).toContain(genrePositioningRepair)
@@ -3207,8 +3599,8 @@ describe('normalizeSceneCardsPayload', () => {
       },
     })
 
-    expect(sceneCards[0].purpose_tags).toContain(intentConfirmationRepair)
-    expect(sceneCards[1].purpose_tags).toContain(intentConfirmationRepair)
+    expect(sceneCards[0].purpose_tags).not.toContain(intentConfirmationRepair)
+    expect(sceneCards[1].purpose_tags).not.toContain(intentConfirmationRepair)
     expect(sceneCards[0].required_beats).toContain(intentConfirmationRepair)
     expect(sceneCards[1].required_beats).toContain(intentConfirmationRepair)
     expect(sceneCards[0].state_changes_expected).toContain(intentConfirmationRepair)
@@ -3338,8 +3730,8 @@ describe('normalizeSceneCardsPayload', () => {
       },
     })
 
-    expect(sceneCards[0].purpose_tags).toContain(coreContractRepair)
-    expect(sceneCards[1].purpose_tags).toContain(coreContractRepair)
+    expect(sceneCards[0].purpose_tags).not.toContain(coreContractRepair)
+    expect(sceneCards[1].purpose_tags).not.toContain(coreContractRepair)
     expect(sceneCards[0].conflict).toContain(coreContractRepair)
     expect(sceneCards[1].reader_payoff).toContain(coreContractRepair)
     expect(sceneCards[1].ending_hook_seed).toContain(coreContractRepair)
@@ -3466,8 +3858,8 @@ describe('normalizeSceneCardsPayload', () => {
       },
     })
 
-    expect(sceneCards[0].purpose_tags).toContain(runwayRepair)
-    expect(sceneCards[1].purpose_tags).toContain(runwayRepair)
+    expect(sceneCards[0].purpose_tags).not.toContain(runwayRepair)
+    expect(sceneCards[1].purpose_tags).not.toContain(runwayRepair)
     expect(sceneCards[0].required_beats).toContain(runwayRepair)
     expect(sceneCards[1].state_changes_expected).toContain(runwayRepair)
     expect(sceneCards[1].ending_hook_seed).toContain(runwayRepair)
@@ -3498,7 +3890,7 @@ describe('normalizeSceneCardsPayload', () => {
       },
     })
 
-    expect(sceneCards[0].purpose_tags).toContain(longformRepair)
+    expect(sceneCards[0].purpose_tags).not.toContain(longformRepair)
     expect(sceneCards[0].required_beats).toContain(longformRepair)
     expect(sceneCards[1].state_changes_expected).toContain(longformRepair)
     expect(sceneCards[1].reader_payoff).toContain(longformRepair)
@@ -3561,7 +3953,7 @@ describe('normalizeSceneCardsPayload', () => {
       },
     })
 
-    expect(sceneCards[0].purpose_tags).toContain(storyUnitRepair)
+    expect(sceneCards[0].purpose_tags).not.toContain(storyUnitRepair)
     expect(sceneCards[0].required_beats).toContain(storyUnitRepair)
     expect(sceneCards[1].required_beats).toContain(storyUnitRepair)
     expect(sceneCards[1].reader_payoff).toContain(storyUnitRepair)
@@ -7245,7 +7637,7 @@ describe('normalizeSceneCardsPayload', () => {
   test('story state sync persists a source_readiness_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'source_readiness_sync'")
+    expect(source).toContain("reviewType: 'source_readiness_sync', payloadKey: 'source_readiness_sync'")
     expect(source).toContain('buildSourceReadinessSyncReport(project, chapter, contextPackage, chapterText)')
     expect(source).toContain('payload.source_readiness_sync = sourceReadinessSync')
   })
@@ -7300,7 +7692,7 @@ describe('normalizeSceneCardsPayload', () => {
   test('story state sync persists a prose_meta_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'prose_meta_sync'")
+    expect(source).toMatch(/reviewType: 'prose_meta_sync'[\s\S]*payloadKey: 'prose_meta_sync'/)
     expect(source).toContain('buildProseMetaSyncReport(project, chapter, contextPackage, chapterText)')
     expect(source).toContain('payload.prose_meta_sync = proseMetaSync')
   })
@@ -8034,9 +8426,9 @@ describe('normalizeSceneCardsPayload', () => {
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
     )
-    const cleanupBlock = source.slice(
-      source.indexOf('export function buildDeterministicProseCleanupReport'),
-      source.indexOf('export function buildQualityGateReviewWithDeterministicCleanup'),
+    const cleanupBlock = readFileSync(join(import.meta.dir, '../novel-writing/deterministic-prose-cleanup.ts'), 'utf8').slice(
+      readFileSync(join(import.meta.dir, '../novel-writing/deterministic-prose-cleanup.ts'), 'utf8').indexOf('export function buildDeterministicProseCleanupReport'),
+      readFileSync(join(import.meta.dir, '../novel-writing/deterministic-prose-cleanup.ts'), 'utf8').indexOf('export function buildQualityGateReviewWithDeterministicCleanup'),
     )
 
     expect(reviewBlock).toContain('const deterministicRecapFillerChecks = scanRecapFillerRisks(chapterText)')
@@ -8265,9 +8657,9 @@ describe('normalizeSceneCardsPayload', () => {
       source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
       source.indexOf('if (options.revise === false || !shouldReviseProse', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
     )
-    const cleanupBlock = source.slice(
-      source.indexOf('export function buildDeterministicProseCleanupReport'),
-      source.indexOf('const categories = [', source.indexOf('export function buildDeterministicProseCleanupReport')),
+    const cleanupBlock = readFileSync(join(import.meta.dir, '../novel-writing/deterministic-prose-cleanup.ts'), 'utf8').slice(
+      readFileSync(join(import.meta.dir, '../novel-writing/deterministic-prose-cleanup.ts'), 'utf8').indexOf('export function buildDeterministicProseCleanupReport'),
+      readFileSync(join(import.meta.dir, '../novel-writing/deterministic-prose-cleanup.ts'), 'utf8').indexOf('const categories = [', readFileSync(join(import.meta.dir, '../novel-writing/deterministic-prose-cleanup.ts'), 'utf8').indexOf('export function buildDeterministicProseCleanupReport')),
     )
 
     expect(reviewBlock).toContain('const deterministicPayoffDensityChecks = scanPayoffDensityRisks(chapterText)')
@@ -9548,6 +9940,19 @@ describe('normalizeSceneCardsPayload', () => {
     expect(checks[0].fix).toContain('dialogue_checks')
   })
 
+  test('does not add missing-contract fail checks on lightweight structured review paths', () => {
+    const checks = appendMissingContractReviewCheck(
+      [],
+      { version: 'oh_story_dialogue_contract_v1' },
+      'dialogue_checks',
+      'dialogue_contract',
+      '对白质量',
+      { emit_missing_check: false },
+    )
+
+    expect(checks).toEqual([])
+  })
+
   test('does not add a missing-contract fail check when model checks exist', () => {
     const checks = appendMissingContractReviewCheck(
       [{ key: 'voice', label: '声线差异', status: 'pass' }],
@@ -10007,6 +10412,22 @@ describe('normalizeSceneCardsPayload', () => {
     expect(source).toContain('appendMissingContractReviewCheck')
   })
 
+  test('marks normalized self review score as defaulted only when model omits score', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const scoreStart = source.indexOf('const rawReviewScore = Number(reviewPayload?.score)')
+    const reviewBlock = source.slice(
+      scoreStart,
+      source.indexOf('if (options.revise === false', scoreStart),
+    )
+
+    expect(scoreStart).toBeGreaterThan(0)
+    expect(reviewBlock).toContain('const rawReviewScore = Number(reviewPayload?.score)')
+    expect(reviewBlock).toContain('const reviewScoreDefaulted = !Number.isFinite(rawReviewScore)')
+    expect(reviewBlock).toContain('const deterministicWordCountIssueGuard = applyDeterministicWordCountIssueGuard')
+    expect(reviewBlock).toContain('score: reviewScoreDefaulted ? 80 : deterministicWordCountIssueGuard.score')
+    expect(reviewBlock).toContain('score_defaulted: reviewScoreDefaulted')
+  })
+
   test('asks prose self review and revision to cover dialogue execution checklist', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     expect(source).toContain('dialogue_execution_checklist')
@@ -10032,6 +10453,17 @@ describe('normalizeSceneCardsPayload', () => {
     )
 
     expect(reviewBlock).toContain('normalizedReview.needs_revision = normalizedReview.needs_revision || hasReviewChecksNeedingRepair(normalizedReview)')
+  })
+
+  test('does not synthesize missing structured contract failures when structured fill is disabled', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const reviewBlock = source.slice(
+      source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)'),
+      source.indexOf('const structuredFillReview = await fillMissingStructuredReviewChecks', source.indexOf('const deterministicProseMetaChecks = scanProseMetaLeaks(chapterText)')),
+    )
+
+    expect(reviewBlock).toContain('const emitMissingStructuredContractChecks = options.fill_missing_structured_checks !== false')
+    expect(reviewBlock).toContain('emit_missing_check: emitMissingStructuredContractChecks')
   })
 
   test('wires foreshadowing delta checks into normalized self review', () => {
@@ -10082,7 +10514,7 @@ describe('normalizeSceneCardsPayload', () => {
   test('story state sync persists a chapter_title_uniqueness_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'chapter_title_uniqueness_sync'")
+    expect(source).toContain("reviewType: 'chapter_title_uniqueness_sync'")
     expect(source).toContain('buildChapterTitleUniquenessSyncReport(chapters, chapter)')
     expect(source).toContain('payload.chapter_title_uniqueness_sync = chapterTitleUniquenessSync')
   })
@@ -10187,8 +10619,8 @@ describe('normalizeSceneCardsPayload', () => {
 
     expect(prompt).toContain('正文格式与小节结构')
     expect(prompt).toContain('全文统一章节标记：###1. / ###第一章 / 1.')
-    expect(prompt).toContain('相邻段落之间只允许一个换行符')
-    expect(prompt).toContain('不得出现空行或连续换行')
+    expect(prompt).toContain('段间保留一个空行')
+    expect(prompt).toContain('不得出现两个以上连续空行')
     expect(prompt).toContain('无缩进')
     expect(prompt).toContain('正文段落中不使用 Markdown')
     expect(prompt).toContain('对话独立成行')
@@ -10209,11 +10641,39 @@ describe('normalizeSceneCardsPayload', () => {
 
     expect(reviewPromptBlock).toContain('是否违反 oh-story 正文格式与小节结构')
     expect(reviewPromptBlock).toContain('章节标记必须统一为 ###1. / ###第一章 / 1. 或项目指定格式')
-    expect(reviewPromptBlock).toContain('相邻段落之间只允许一个换行符')
+    expect(reviewPromptBlock).toContain('段间保留一个空行')
     expect(reviewPromptBlock).toContain('quote-mode keep')
     expect(revisionPromptBlock).toContain('如果自检结果包含正文格式扫描、章节标记格式扫描或 deterministicProseFormatChecks')
-    expect(revisionPromptBlock).toContain('删除空行、缩进和正文 Markdown')
+    expect(revisionPromptBlock).toContain('合并多余空行、删除缩进和正文 Markdown')
     expect(revisionPromptBlock).toContain('保留项目/平台指定的合法引号风格')
+  })
+
+  test('adds web-novel paragraph rhythm guardrails to prose prompt', () => {
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+
+    const prompt = service.buildParagraphProseContext(
+      { title: '袖口旧印' },
+      {
+        chapter_target: {
+          chapter_no: 8,
+          title: '旧楼门牌',
+          summary: '主角接住门牌翻面的现场余波。',
+          conflict: '她必须把旧印来源变成现场证据。',
+          ending_hook: '火漆背面露出第二枚编号。',
+          scene_cards: [{ title: '门牌翻面', conflict: '是否公开旧印来源' }],
+        },
+      },
+      null,
+      { chapter_no: 8, title: '旧楼门牌' },
+    )
+
+    expect(prompt).toContain('段间保留一个空行')
+    expect(prompt).toContain('断段按戏剧单元/镜头自然断开')
+    expect(prompt).not.toContain('不得出现空行或连续换行')
   })
 
   test('adds previous chapter ending excerpt to the paragraph prose prompt for serial handoff continuity', () => {
@@ -10353,11 +10813,13 @@ describe('normalizeSceneCardsPayload', () => {
 
   test('wires generated duplicate-title repair into every chapter store path', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const storagePatchSource = readChapterProseStoragePatchSource()
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const groupBlock = source.slice(groupStart, source.indexOf('const routes', groupStart) > 0 ? source.indexOf('const routes', groupStart) : source.indexOf('return { generateChapterForGroup', groupStart))
 
     expect(groupBlock).toContain('const generatedTitlePatch = buildGeneratedChapterTitlePatch')
-    expect((groupBlock.match(/\.\.\.generatedTitlePatch/g) || []).length).toBeGreaterThanOrEqual(3)
+    expect((groupBlock.match(/generatedTitlePatch,/g) || []).length).toBeGreaterThanOrEqual(3)
+    expect(storagePatchSource).toContain('...(input.generatedTitlePatch || {})')
   })
 
   test('converts target chapter outlines into fallback scene cards', () => {
@@ -10436,9 +10898,42 @@ describe('chapter prose word target', () => {
     expect(evaluation.passed).toBe(false)
     expect(evaluation.too_short).toBe(true)
     expect(evaluation.actual).toBe(1732)
-    expect(evaluation.deficit).toBe(1068)
-    expect(evaluation.min).toBe(2800)
-    expect(evaluateProseWordTarget('字'.repeat(2800), target).passed).toBe(true)
+    expect(evaluation.deficit).toBe(1468)
+    expect(evaluation.min).toBe(3200)
+    expect(evaluateProseWordTarget('字'.repeat(3200), target).passed).toBe(true)
+  })
+
+  test('rejects a standard chapter draft above the maximum word target', () => {
+    const target = resolveChapterWordTarget({}, { chapter_no: 1 }, {})
+    const evaluation = evaluateProseWordTarget('字'.repeat(12389), target)
+
+    expect(evaluation.passed).toBe(false)
+    expect(evaluation.too_long).toBe(true)
+    expect(evaluation.actual).toBe(12389)
+    expect(evaluation.max).toBe(5200)
+  })
+
+  test('contracts over-target prose before word-target expansion attempts', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const ensureStart = source.indexOf('const ensureProseMeetsWordTarget =')
+    const ensureEnd = source.indexOf('const autoRepairChapterPreflightGaps =', ensureStart)
+    const ensureBlock = source.slice(ensureStart, ensureEnd)
+    const tooLongStart = ensureBlock.indexOf('if (evaluation.too_long && options.contract !== false)')
+    const contractionStart = ensureBlock.indexOf('const maxContractionAttempts', tooLongStart)
+    const expansionStart = ensureBlock.indexOf('const maxExpansionAttempts')
+    const softCapStart = ensureBlock.indexOf('isWithinProseWordTargetSoftCap(evaluation)')
+
+    expect(ensureStart).toBeGreaterThanOrEqual(0)
+    expect(softCapStart).toBeGreaterThanOrEqual(0)
+    expect(softCapStart).toBeLessThan(tooLongStart)
+    expect(tooLongStart).toBeGreaterThanOrEqual(0)
+    expect(contractionStart).toBeGreaterThan(tooLongStart)
+    expect(expansionStart).toBeGreaterThan(contractionStart)
+    expect(ensureBlock).toContain('options.maxContractionAttempts || options.max_contraction_attempts || 3')
+    expect(ensureBlock).toContain('buildProseWordTargetContractionPrompt')
+    expect(ensureBlock).toContain('!finalEvaluation.too_short')
+    expect(ensureBlock).toContain('PROSE_WORD_TARGET_LONG')
+    expect(ensureBlock).toContain('contraction_attempts')
   })
 
   test('preserves runtime camelCase chapterTarget when applying chapter word target', () => {
@@ -10484,13 +10979,13 @@ describe('chapter prose word target', () => {
     )
 
     expect(prompt).toContain('当前正文约 1732 字')
-    expect(prompt).toContain('目标 3000 字')
-    expect(prompt).toContain('至少 2800 字')
+    expect(prompt).toContain('目标 4200 字')
+    expect(prompt).toContain('至少 3200 字')
     expect(prompt).toContain('不得删改已有效内容')
     expect(prompt).toContain('扩写动作过程、选择代价、对话交锋、章末钩子铺垫')
   })
 
-  test('serializes circular context packages in expansion prompts', () => {
+  test('uses compact context snapshots for expansion prompts without leaking circular context', () => {
     const target = resolveChapterWordTarget({}, { chapter_no: 1 }, {})
     const evaluation = evaluateProseWordTarget('字'.repeat(1732), target)
     const contextPackage: any = {
@@ -10498,6 +10993,12 @@ describe('chapter prose word target', () => {
         chapter_no: 1,
         title: '循环上下文',
         word_target: target,
+        scene_cards: [
+          {
+            title: '循环场景',
+            purpose: `逼问广播来源；${'同步风险：delivery_risk_receipts 未闭环；'.repeat(20)}保留可写动作`,
+          },
+        ],
       },
     }
     contextPackage.self = contextPackage
@@ -10509,8 +11010,11 @@ describe('chapter prose word target', () => {
       evaluation,
     )
 
-    expect(prompt).toContain('[Circular]')
     expect(prompt).toContain('循环上下文')
+    expect(prompt).toContain('循环场景')
+    expect(prompt).toContain('保留可写动作')
+    expect(prompt).not.toContain('[Circular]')
+    expect(prompt).not.toContain('delivery_risk_receipts 未闭环')
   })
 
   test('requires word-target expansion to preserve scene anchors and execution receipts', () => {
@@ -10627,7 +11131,7 @@ describe('chapter prose word target', () => {
     )
 
     expect(prompt).toContain('第 2 轮补写')
-    expect(prompt).toContain('仍缺至少 246 字')
+    expect(prompt).toContain('仍缺至少 646 字')
     expect(prompt).toContain('本轮必须优先补足缺口')
     expect(prompt).toContain('返回扩写后的完整正文')
   })
@@ -10753,13 +11257,27 @@ describe('chapter prose word target', () => {
     expect(payload.recovered_from_partial_json).toBe(true)
   })
 
-  test('defaults normal chapters to roughly 3000 Chinese characters', () => {
+  test('recovers open chapter text from a length-truncated prose JSON envelope', () => {
+    const chapterText = '丁松言听见瓦片后面传来第二个人的呼吸。他没有回头，只把残骨压进掌心，逼着自己数清脚步。'.repeat(80)
+    const payload = getNovelPayload({
+      content: `{"prose_chapters":[{"chapter_no":4,"title":"瓦后呼吸","chapter_text":"${chapterText}`,
+      finish_reason: 'length',
+    })
+
+    expect(payload.prose_chapters?.[0]?.chapter_no).toBe(4)
+    expect(payload.prose_chapters?.[0]?.title).toBe('瓦后呼吸')
+    expect(payload.prose_chapters?.[0]?.chapter_text).toBe(chapterText)
+    expect(payload.recovered_from_partial_json).toBe(true)
+    expect(payload.partial_json_open_string_recovered).toBe(true)
+  })
+
+  test('defaults normal chapters to roughly 4200 Chinese characters', () => {
     const target = resolveChapterWordTarget({ length_target: 'epic' }, { chapter_no: 1 }, {})
 
     expect(target.mode).toBe('standard')
-    expect(target.target).toBe(3000)
-    expect(target.min).toBe(2800)
-    expect(target.max).toBe(3500)
+    expect(target.target).toBe(4200)
+    expect(target.min).toBe(3200)
+    expect(target.max).toBe(5200)
     expect(target.label).toContain('标准章')
   })
 
@@ -13065,7 +13583,7 @@ describe('chapter prose word target', () => {
   test('story state sync persists a story_drive_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'story_drive_sync'")
+    expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: storyDriveSync, reviewType: 'story_drive_sync'")
     expect(source).toContain('buildStoryDriveSyncReport(project, chapter, contextPackage, chapterText)')
     expect(source).toContain('payload.story_drive_sync = storyDriveSync')
   })
@@ -13207,7 +13725,7 @@ describe('chapter prose word target', () => {
   test('story state sync persists a story_loop_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'story_loop_sync'")
+    expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: storyLoopSync, reviewType: 'story_loop_sync'")
     expect(source).toContain('buildStoryLoopSyncReport(project, chapter, contextPackage, chapterText)')
     expect(source).toContain('payload.story_loop_sync = storyLoopSync')
   })
@@ -13341,7 +13859,7 @@ describe('chapter prose word target', () => {
   test('story state sync persists an information_flow_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'information_flow_sync'")
+    expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: informationFlowSync, reviewType: 'information_flow_sync'")
     expect(source).toContain('buildInformationFlowSyncReport(project, chapter, contextPackage, chapterText)')
     expect(source).toContain('payload.information_flow_sync = informationFlowSync')
   })
@@ -13472,7 +13990,8 @@ describe('chapter prose word target', () => {
   test('story state sync persists an expectation_threshold_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'expectation_threshold_sync'")
+    expect(source).toContain("reviewType: 'expectation_threshold_sync'")
+    expect(source).toContain("payloadKey: 'expectation_threshold_sync'")
     expect(source).toContain('buildExpectationThresholdSyncReport(project, chapter, contextPackage, chapterText)')
     expect(source).toContain('payload.expectation_threshold_sync = expectationThresholdSync')
   })
@@ -13752,7 +14271,7 @@ describe('chapter prose word target', () => {
   test('story state sync persists an emotional_arc_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'emotional_arc_sync'")
+    expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: emotionalArcSync, reviewType: 'emotional_arc_sync'")
     expect(source).toContain('buildEmotionalArcSyncReport(project, chapter, contextPackage, chapterText)')
     expect(source).toContain('payload.emotional_arc_sync = emotionalArcSync')
   })
@@ -13834,7 +14353,8 @@ describe('chapter prose word target', () => {
   test('story state sync persists a chapter_hook_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'chapter_hook_sync'")
+    expect(source).toContain("reviewType: 'chapter_hook_sync'")
+    expect(source).toContain("payloadKey: 'chapter_hook_sync'")
     expect(source).toContain('buildChapterHookSyncReport(project, chapter, contextPackage, chapterText)')
     expect(source).toContain('payload.chapter_hook_sync = chapterHookSync')
   })
@@ -13923,7 +14443,8 @@ describe('chapter prose word target', () => {
   test('story state sync persists a paragraph_hook_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'paragraph_hook_sync'")
+    expect(source).toContain("reviewType: 'paragraph_hook_sync'")
+    expect(source).toContain("payloadKey: 'paragraph_hook_sync'")
     expect(source).toContain('buildParagraphHookSyncReport(project, chapter, contextPackage, chapterText)')
     expect(source).toContain('payload.paragraph_hook_sync = paragraphHookSync')
   })
@@ -14127,7 +14648,8 @@ describe('chapter prose word target', () => {
   test('story state sync persists a suspense_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'suspense_sync'")
+    expect(source).toContain("reviewType: 'suspense_sync'")
+    expect(source).toContain("payloadKey: 'suspense_sync'")
     expect(source).toContain('buildSuspenseSyncReport(project, chapter, contextPackage, chapterText)')
     expect(source).toContain('payload.suspense_sync = suspenseSync')
   })
@@ -14217,7 +14739,8 @@ describe('chapter prose word target', () => {
   test('story state sync persists a reversal_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'reversal_sync'")
+    expect(source).toContain("reviewType: 'reversal_sync'")
+    expect(source).toContain("payloadKey: 'reversal_sync'")
     expect(source).toContain('buildReversalSyncReport(project, chapter, contextPackage, chapterText)')
     expect(source).toContain('payload.reversal_sync = reversalSync')
   })
@@ -14481,7 +15004,8 @@ describe('chapter prose word target', () => {
   test('story state sync persists a showdown_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'showdown_sync'")
+    expect(source).toContain("reviewType: 'showdown_sync'")
+    expect(source).toContain("payloadKey: 'showdown_sync'")
     expect(source).toContain('buildShowdownSyncReport(project, chapter, contextPackage, chapterText)')
     expect(source).toContain('payload.showdown_sync = showdownSync')
   })
@@ -14489,7 +15013,7 @@ describe('chapter prose word target', () => {
   test('story state sync persists a spectator_reaction_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'spectator_reaction_sync'")
+    expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: spectatorReactionSync, reviewType: 'spectator_reaction_sync'")
     expect(source).toContain('buildSpectatorReactionSyncReport(project, chapter, contextPackage, chapterText)')
     expect(source).toContain('payload.spectator_reaction_sync = spectatorReactionSync')
   })
@@ -14497,7 +15021,7 @@ describe('chapter prose word target', () => {
   test('story state sync persists a payoff_setup_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'payoff_setup_sync'")
+    expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: payoffSetupSync, reviewType: 'payoff_setup_sync'")
     expect(source).toContain('buildPayoffSetupSyncReport(project, chapter, contextPackage, chapterText)')
     expect(source).toContain('payload.payoff_setup_sync = payoffSetupSync')
   })
@@ -14617,7 +15141,7 @@ describe('chapter prose word target', () => {
   test('story state sync persists a bridge_unit_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'bridge_unit_sync'")
+    expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: bridgeUnitSync, reviewType: 'bridge_unit_sync'")
     expect(source).toContain('buildBridgeUnitSyncReport(project, chapter, contextPackage, chapterText)')
     expect(source).toContain('payload.bridge_unit_sync = bridgeUnitSync')
   })
@@ -15182,7 +15706,7 @@ describe('chapter prose word target', () => {
   test('story state sync persists a beat_cooling_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'beat_cooling_sync'")
+    expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: beatCoolingSync, reviewType: 'beat_cooling_sync'")
     expect(source).toContain('buildBeatCoolingSyncReport(project, chapter, contextPackage, chapterText)')
     expect(source).toContain('payload.beat_cooling_sync = beatCoolingSync')
   })
@@ -15283,7 +15807,7 @@ describe('chapter prose word target', () => {
   test('story state sync persists an opening_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'opening_sync'")
+    expect(source).toContain("reviewType: 'opening_sync', payloadKey: 'opening_sync'")
     expect(source).toContain('buildOpeningSyncReport(project, chapter, contextPackage, chapterText)')
     expect(source).toContain('payload.opening_sync = openingSync')
   })
@@ -15362,7 +15886,7 @@ describe('chapter prose word target', () => {
   test('story state sync persists a prose_craft_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'prose_craft_sync'")
+    expect(source).toContain("reviewType: 'prose_craft_sync', payloadKey: 'prose_craft_sync'")
     expect(source).toContain('buildProseCraftSyncReport(project, chapter, contextPackage, chapterText)')
     expect(source).toContain('payload.prose_craft_sync = proseCraftSync')
   })
@@ -15426,7 +15950,7 @@ describe('chapter prose word target', () => {
   test('story state sync persists a punctuation_tone_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'punctuation_tone_sync'")
+    expect(source).toContain("reviewType: 'punctuation_tone_sync', payloadKey: 'punctuation_tone_sync'")
     expect(source).toContain('buildPunctuationToneSyncReport(project, chapter, contextPackage, chapterText)')
     expect(source).toContain('payload.punctuation_tone_sync = punctuationToneSync')
   })
@@ -15524,7 +16048,7 @@ describe('chapter prose word target', () => {
   test('story state sync persists a quality_audit_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'quality_audit_sync'")
+    expect(source).toContain("reviewType: 'quality_audit_sync', payloadKey: 'quality_audit_sync'")
     expect(source).toContain('buildQualityAuditSyncReport(project, chapter, contextPackage, chapterText)')
     expect(source).toContain('payload.quality_audit_sync = qualityAuditSync')
   })
@@ -15824,7 +16348,7 @@ describe('chapter prose word target', () => {
   test('story state sync persists a dialogue_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'dialogue_sync'")
+    expect(source).toContain("reviewType: 'dialogue_sync', payloadKey: 'dialogue_sync'")
     expect(source).toContain('buildDialogueSyncReport(project, chapter, contextPackage, chapterText)')
     expect(source).toContain('payload.dialogue_sync = dialogueSync')
   })
@@ -15991,7 +16515,7 @@ describe('chapter prose word target', () => {
   test('story state sync persists a character_behavior_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'character_behavior_sync'")
+    expect(source).toContain("reviewType: 'character_behavior_sync', payloadKey: 'character_behavior_sync'")
     expect(source).toContain('buildCharacterBehaviorSyncReport(project, chapter, contextPackage, chapterText)')
     expect(source).toContain('payload.character_behavior_sync = characterBehaviorSync')
   })
@@ -16092,7 +16616,7 @@ describe('chapter prose word target', () => {
   test('story state sync persists an asset_linkage_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'asset_linkage_sync'")
+    expect(source).toContain("reviewType: 'asset_linkage_sync', payloadKey: 'asset_linkage_sync'")
     expect(source).toContain('buildAssetLinkageSyncReport(project, chapter, contextPackage, chapterText)')
     expect(source).toContain('payload.asset_linkage_sync = assetLinkageSync')
   })
@@ -16173,7 +16697,7 @@ describe('chapter prose word target', () => {
   test('story state sync persists a state_tracking_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'state_tracking_sync'")
+    expect(source).toContain("reviewType: 'state_tracking_sync', payloadKey: 'state_tracking_sync'")
     expect(source).toContain('buildStateTrackingSyncReport(project, chapter, contextPackage, chapterText)')
     expect(source).toContain('payload.state_tracking_sync = stateTrackingSync')
   })
@@ -16284,7 +16808,7 @@ describe('chapter prose word target', () => {
   test('story state sync persists an intent_confirmation_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'intent_confirmation_sync'")
+    expect(source).toContain("reviewType: 'intent_confirmation_sync', payloadKey: 'intent_confirmation_sync'")
     expect(source).toContain('buildIntentConfirmationSyncReport(project, chapter, contextPackage, chapterText)')
     expect(source).toContain('payload.intent_confirmation_sync = intentConfirmationSync')
   })
@@ -16346,7 +16870,7 @@ describe('chapter prose word target', () => {
   test('story state sync persists a continuity_heat_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'continuity_heat_sync'")
+    expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: continuityHeatSync, reviewType: 'continuity_heat_sync'")
     expect(source).toContain('buildContinuityHeatSyncReport(project, chapter, contextPackage, chapterText)')
     expect(source).toContain('payload.continuity_heat_sync = continuityHeatSync')
   })
@@ -16591,7 +17115,7 @@ describe('chapter prose word target', () => {
   test('story state sync persists a conflict_structure_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'conflict_structure_sync'")
+    expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: conflictStructureSync, reviewType: 'conflict_structure_sync'")
     expect(source).toContain('buildConflictStructureSyncReport(project, chapter, contextPackage, chapterText)')
     expect(source).toContain('payload.conflict_structure_sync = conflictStructureSync')
   })
@@ -16803,7 +17327,7 @@ describe('chapter prose word target', () => {
   test('story state sync persists an upgrade_rhythm_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'upgrade_rhythm_sync'")
+    expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: upgradeRhythmSync, reviewType: 'upgrade_rhythm_sync'")
     expect(source).toContain('buildUpgradeRhythmSyncReport(project, chapter, contextPackage, chapterText)')
     expect(source).toContain('payload.upgrade_rhythm_sync = upgradeRhythmSync')
   })
@@ -16927,7 +17451,7 @@ describe('chapter prose word target', () => {
   test('story state sync persists a target_reader_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'target_reader_sync'")
+    expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: targetReaderSync, reviewType: 'target_reader_sync'")
     expect(source).toContain('buildTargetReaderSyncReport(project, chapter, contextPackage, chapterText)')
     expect(source).toContain('payload.target_reader_sync = targetReaderSync')
   })
@@ -17003,7 +17527,7 @@ describe('chapter prose word target', () => {
   test('story state sync persists a genre_positioning_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'genre_positioning_sync'")
+    expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: genrePositioningSync, reviewType: 'genre_positioning_sync'")
     expect(source).toContain('buildGenrePositioningSyncReport(project, chapter, contextPackage, chapterText)')
     expect(source).toContain('payload.genre_positioning_sync = genrePositioningSync')
   })
@@ -17059,7 +17583,7 @@ describe('chapter prose word target', () => {
   test('story state sync persists a female_audience_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'female_audience_sync'")
+    expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: femaleAudienceSync, reviewType: 'female_audience_sync'")
     expect(source).toContain('buildFemaleAudienceSyncReport(project, chapter, contextPackage, chapterText)')
     expect(source).toContain('payload.female_audience_sync = femaleAudienceSync')
   })
@@ -17147,7 +17671,7 @@ describe('chapter prose word target', () => {
   test('story state sync persists a plot_dynamics_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'plot_dynamics_sync'")
+    expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: plotDynamicsSync, reviewType: 'plot_dynamics_sync'")
     expect(source).toContain('buildPlotDynamicsSyncReport(project, chapter, contextPackage, chapterText)')
     expect(source).toContain('payload.plot_dynamics_sync = plotDynamicsSync')
   })
@@ -17274,7 +17798,7 @@ describe('chapter prose word target', () => {
   test('story state sync persists a character_relation_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'character_relation_sync'")
+    expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: characterRelationSync, reviewType: 'character_relation_sync'")
     expect(source).toContain('buildCharacterRelationSyncReport(project, chapter, contextPackage, chapterText)')
     expect(source).toContain('payload.character_relation_sync = characterRelationSync')
   })
@@ -17370,7 +17894,7 @@ describe('chapter prose word target', () => {
   test('story state sync persists a character_arc_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'character_arc_sync'")
+    expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: characterArcSync, reviewType: 'character_arc_sync'")
     expect(source).toContain('buildCharacterArcSyncReport(project, chapter, contextPackage, chapterText)')
     expect(source).toContain('payload.character_arc_sync = characterArcSync')
   })
@@ -17451,12 +17975,18 @@ describe('chapter prose word target', () => {
     expect(prompt).toContain('不得新增支线、设定、关系或时间线')
   })
 
-  test('serializes circular context packages in commercial editor rewrite prompts', () => {
+  test('uses compact context snapshots for commercial editor prompts without leaking circular context', () => {
     const contextPackage: any = {
       chapter_target: {
         chapter_no: 2,
         title: '循环改稿',
         word_target: resolveChapterWordTarget({}, { chapter_no: 2 }, {}),
+        scene_cards: [
+          {
+            title: '门锁回响',
+            goal: `逼主角立刻处理上一章钩子；${'模型自检：scene_cards.goal_obstacle_change_delivered=false；'.repeat(20)}`,
+          },
+        ],
       },
     }
     contextPackage.self = contextPackage
@@ -17467,8 +17997,11 @@ describe('chapter prose word target', () => {
       '初稿正文',
     )
 
-    expect(prompt).toContain('[Circular]')
     expect(prompt).toContain('循环改稿')
+    expect(prompt).toContain('门锁回响')
+    expect(prompt).toContain('逼主角立刻处理上一章钩子')
+    expect(prompt).not.toContain('[Circular]')
+    expect(prompt).not.toContain('goal_obstacle_change_delivered=false')
   })
 
   test('uses safe json for prose quality review payloads that include context packages', () => {
@@ -17622,7 +18155,7 @@ describe('chapter pre-draft brief', () => {
     expect(brief.core_conflict).toContain('蛮力')
     expect(brief.key_settings).toContain('午夜校园规则')
     expect(brief.forbidden_content).toContain('规则源头真相')
-    expect(brief.word_budget).toContain('3000')
+    expect(brief.word_budget).toContain('4200')
     expect(brief.ending_hook).toContain('九点五十八分')
     expect(brief.scene_briefs[0].reader_payoff).toContain('规则空间')
   })
@@ -17742,12 +18275,12 @@ describe('chapter pre-draft brief', () => {
     expect(brief.chapter_blueprint.beat_sequence[0]).toMatchObject({ scene_no: 1, function_tag: '开篇钩子/铺垫' })
     expect(brief.chapter_blueprint.beat_density_contract).toMatchObject({
       version: 'oh_story_beat_density_v1',
-      target_word_count: 3000,
-      min_beat_count: 10,
-      target_beat_count: 12,
-      max_beat_count: 15,
+      target_word_count: 4200,
+      min_beat_count: 14,
+      target_beat_count: 17,
+      max_beat_count: 21,
       current_beat_count: 2,
-      density_gap: 8,
+      density_gap: 12,
     })
     expect(brief.chapter_blueprint.beat_density_contract.rule).toContain('200-300 字/个情节点')
     expect(brief.chapter_blueprint.cost_and_reward).toContain('当众打脸')
@@ -17762,8 +18295,8 @@ describe('chapter pre-draft brief', () => {
     expect(prompt).toContain('beat_sequence.function_tag 决定每个情节点展开或带过')
     expect(prompt).toContain('关键揭露/打脸/高潮/爽点必须展开')
     expect(prompt).toContain('过渡/赶路/信息交代必须压缩')
-    expect(prompt).toContain('本章目标 3000 字')
-    expect(prompt).toContain('建议 10-15 个情节点')
+    expect(prompt).toContain('本章目标 4200 字')
+    expect(prompt).toContain('建议 14-21 个情节点')
     expect(prompt).toContain('种子')
     expect(prompt).toContain('生长')
     expect(prompt).toContain('转折')
@@ -19735,7 +20268,7 @@ describe('chapter pre-draft brief', () => {
     expect(deliveryRiskCarryOver?.items.join('｜')).toContain('章末追读')
     expect(deliveryRiskCarryOver?.required_actions.join('｜')).toContain('下一章开篇必须用旧印第二个名字制造现场追证压力')
     expect(deliveryRiskCarryOver?.evidence.join('｜')).toContain('章末问题没有转成下一章可见追证动作')
-    expect(deliveryRiskCarryOver?.opening_actions.join('｜')).toContain('已存回执开篇承接')
+    expect(deliveryRiskCarryOver?.opening_actions.join('｜')).toContain('开篇承接')
     expect(deliveryRiskCarryOver?.middle_actions.join('｜')).toContain('现场追证压力')
     expect(deliveryRiskCarryOver?.ending_actions.join('｜')).toContain('章末问题没有转成下一章可见追证动作')
     expect(brief.state_tracking_contract.historical_causality.join('｜')).toContain('下一章开篇必须用旧印第二个名字制造现场追证压力')
@@ -21427,8 +21960,12 @@ describe('chapter pre-draft brief', () => {
 
   test('asks prose revision to preserve core direction and only repair evidenced findings', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const prosePromptBlock = source.slice(
-      source.indexOf("coreContractRadar ? '【核心契约】'"),
+    const prosePromptSource = readFileSync(join(import.meta.dir, '../novel-writing/prose-generation-prompt-sections.ts'), 'utf8')
+    const prosePromptBlock = prosePromptSource.slice(
+      prosePromptSource.indexOf('export function buildCoreContractRadarPromptSection'),
+    )
+    const prosePromptCallBlock = source.slice(
+      source.indexOf('...buildLongformCompassPromptSection(longformCompass)'),
       source.indexOf("nextBatchBrief ? '【本批连载任务书】'"),
     )
     const reviewPromptBlock = source.slice(
@@ -21440,6 +21977,7 @@ describe('chapter pre-draft brief', () => {
       source.indexOf('const shouldReviseProse ='),
     )
 
+    expect(prosePromptCallBlock).toContain('buildCoreContractRadarPromptSection(coreContractRadar)')
     expect(prosePromptBlock).toContain('主题统一')
     expect(prosePromptBlock).toContain('全书核心情绪')
     expect(prosePromptBlock).toContain('小情绪服从大情绪')
@@ -24951,6 +25489,37 @@ describe('chapter pre-draft brief', () => {
     expect(brief.directives.join('｜')).toContain('盟友关系发生明确变化')
   })
 
+  test('uses deterministic payoff-density cleanup residuals to choose rewrite revision strategy', () => {
+    const brief = buildRevisionStrategyBrief({
+      deterministic_prose_cleanup: {
+        risk_count: 7,
+        categories: [
+          {
+            type: 'payoff_density',
+            label: '可见读者回报密度',
+            count: 1,
+            evidence: ['第1-21段连续约1680字缺少可见读者回报。'],
+            required_actions: ['把长铺垫切成短周期事件，补主角反制、信息收益、关系变化或阶段结算。'],
+          },
+          {
+            type: 'deslop',
+            label: '去AI味',
+            count: 6,
+            evidence: ['连续使用“仿佛有生命一般”等万能比喻。'],
+            required_actions: ['删掉万能比喻，改成动作、感官和角色反应。'],
+          },
+        ],
+      },
+    })
+
+    expect(brief.primary_strategy).toBe('rewrite')
+    expect(brief.strategy_order).toEqual(['rewrite', 'de_ai'])
+    expect(brief.directives.join('｜')).toContain('短周期事件')
+    expect(brief.directives.join('｜')).toContain('主角反制')
+    expect(brief.directives.join('｜')).toContain('去AI味')
+    expect(brief.reasons.join('｜')).toContain('可见读者回报密度')
+  })
+
   test('uses focused revision modes to build oh-story revision strategy directives', () => {
     const brief = buildRevisionStrategyBrief({
       focused_revision_modes: ['expand_action', 'cut_description', 'restore_hook'],
@@ -25713,7 +26282,7 @@ describe('chapter pre-draft brief', () => {
     expect(brief.delivery_risk_carry_over.required_actions.join('｜')).toContain('守将动机仍需下一章补证据')
     expect(brief.delivery_risk_carry_over.opening_actions.join('｜')).toContain('复核修订开篇修复')
     expect(brief.delivery_risk_carry_over.middle_actions.join('｜')).toContain('补证据')
-    expect(brief.delivery_risk_carry_over.ending_actions.join('｜')).toContain('remaining_risk')
+    expect(brief.delivery_risk_carry_over.ending_actions.join('｜')).toContain('守将动机仍需下一章补证据')
     expect(prompt).toContain('复核修订：修订残留 1')
     expect(prompt).toContain('守将动机仍需下一章补证据')
   })
@@ -29028,7 +29597,7 @@ describe('chapter pre-draft brief', () => {
     expect(brief.delivery_risk_carry_over.required_actions.join('｜')).not.toContain('开头有禁库门响')
     expect(brief.delivery_risk_carry_over.opening_actions.join('｜')).toContain('blueprint_field')
     expect(brief.delivery_risk_carry_over.middle_actions.join('｜')).toContain('expected')
-    expect(brief.delivery_risk_carry_over.ending_actions.join('｜')).toContain('remaining_risk')
+    expect(brief.delivery_risk_carry_over.ending_actions.join('｜')).toContain('章尾还要把门卡权限转成下一章承接')
     expect(prompt).toContain('细纲兑现：执行缺口 1')
     expect(prompt).toContain('正文只写主角拿到门卡')
     expect(prompt).toContain('章尾还要把门卡权限转成下一章承接')
@@ -29520,7 +30089,7 @@ describe('chapter pre-draft brief', () => {
     expect(brief.delivery_risk_carry_over.required_actions.join('｜')).not.toContain('对白无标签污染')
     expect(brief.delivery_risk_carry_over.opening_actions.join('｜')).toContain('matched_word')
     expect(brief.delivery_risk_carry_over.middle_actions.join('｜')).toContain('replacement')
-    expect(brief.delivery_risk_carry_over.ending_actions.join('｜')).toContain('remaining_risk')
+    expect(brief.delivery_risk_carry_over.ending_actions.join('｜')).toContain('命运齿轮开始转动')
     expect(prompt).toContain('禁用词：硬禁缺口 1')
     expect(prompt).toContain('命运齿轮开始转动')
     expect(prompt).toContain('下一章不得复现命运齿轮')
@@ -30951,7 +31520,8 @@ describe('chapter pre-draft brief', () => {
     expect(brief.delivery_risk_carry_over.required_actions.join('｜')).not.toContain('章末用现场反转收束')
     expect(brief.delivery_risk_carry_over.opening_actions.join('｜')).toContain('开篇追查湿漉漉学生身份')
     expect(brief.delivery_risk_carry_over.middle_actions.join('｜')).toContain('只写了宿舍环境')
-    expect(brief.delivery_risk_carry_over.ending_actions.join('｜')).toContain('remaining_risk')
+    expect(brief.delivery_risk_carry_over.ending_actions.join('｜')).toContain('湿漉漉学生身份仍没有被追查')
+    expect(brief.delivery_risk_carry_over.ending_actions.join('｜')).not.toContain('不得拖到中段或章末补一句')
     expect(prompt).toContain('复核承接：承接残留 1')
     expect(prompt).toContain('湿漉漉学生身份仍没有被追查')
   })
@@ -41503,7 +42073,7 @@ describe('readability and restrained meme workflow', () => {
   test('story state sync persists a chapter_benchmark_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'chapter_benchmark_sync'")
+    expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: chapterBenchmarkSync, reviewType: 'chapter_benchmark_sync'")
     expect(source).toContain('buildChapterBenchmarkSyncReport(project, chapter, contextPackage, chapterText)')
     expect(source).toContain('payload.chapter_benchmark_sync = chapterBenchmarkSync')
   })
@@ -41995,7 +42565,7 @@ describe('readability and restrained meme workflow', () => {
   test('story state sync persists a chapter_blueprint_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'chapter_blueprint_sync'")
+    expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: chapterBlueprintSync, reviewType: 'chapter_blueprint_sync'")
     expect(source).toContain('buildChapterBlueprintSyncReport(project, chapter, contextPackage, chapterText)')
     expect(source).toContain('payload.chapter_blueprint_sync = chapterBlueprintSync')
   })
@@ -42283,7 +42853,7 @@ describe('readability and restrained meme workflow', () => {
   test('story state sync persists a benchmark_recall_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'benchmark_recall_sync'")
+    expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: benchmarkRecallSync, reviewType: 'benchmark_recall_sync'")
     expect(source).toContain('buildBenchmarkRecallSyncReport(project, chapter, contextPackage, chapterText)')
     expect(source).toContain('payload.benchmark_recall_sync = benchmarkRecallSync')
   })
@@ -42388,7 +42958,7 @@ describe('readability and restrained meme workflow', () => {
   test('story state sync persists a style_boundary_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'style_boundary_sync'")
+    expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: styleBoundarySync, reviewType: 'style_boundary_sync'")
     expect(source).toContain('buildStyleBoundarySyncReport(project, chapter, contextPackage, chapterText)')
     expect(source).toContain('payload.style_boundary_sync = styleBoundarySync')
   })
@@ -42572,7 +43142,7 @@ describe('readability and restrained meme workflow', () => {
   test('story state sync persists a style_sample_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'style_sample_sync'")
+    expect(source).toContain("reviewType: 'style_sample_sync'")
     expect(source).toContain('buildStyleSampleSyncReport(project, chapter, contextPackage, chapterText)')
     expect(source).toContain('payload.style_sample_sync = styleSampleSync')
   })
@@ -47524,7 +48094,7 @@ describe('readability and restrained meme workflow', () => {
   test('source creates readability review and stores meme bank in reference config', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'readability_review'")
+    expect(source).toContain('buildReadabilityReviewRecord')
     expect(source).toContain('runReadabilityReview')
     expect(source).toContain('ending_hook_score: Number(payload?.ending_hook_score')
     expect(source).toContain('runMemePolish')
@@ -47627,7 +48197,7 @@ describe('story unit sync report', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
     expect(source).toContain('buildStoryUnitSyncReport(project, chapter, contextPackage, chapterText)')
-    expect(source).toContain("review_type: 'story_unit_sync'")
+    expect(source).toContain("reviewType: 'story_unit_sync'")
     expect(source).toContain('payload.story_unit_sync = storyUnitSync')
   })
 
@@ -47660,10 +48230,7 @@ describe('story unit sync report', () => {
 
   test('story state prompt asks for layered memory context and merge stores it in project story state', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const promptBlock = source.slice(
-      source.indexOf('const buildStoryStatePrompt ='),
-      source.indexOf('const mergeStoryState =', source.indexOf('const buildStoryStatePrompt =')),
-    )
+    const promptBlock = readFileSync(join(import.meta.dir, '../novel-writing/story-state-prompt.ts'), 'utf8')
     const mergeBlock = source.slice(
       source.indexOf('const mergeStoryState ='),
       source.indexOf('const updateStoryStateMachine =', source.indexOf('const mergeStoryState =')),
@@ -47679,10 +48246,7 @@ describe('story unit sync report', () => {
 
   test('story state prompt asks for oh-story daily progress summary and stores it for the next chapter', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const promptBlock = source.slice(
-      source.indexOf('const buildStoryStatePrompt ='),
-      source.indexOf('const normalizeStoryStateDeltaForStorage =', source.indexOf('const buildStoryStatePrompt =')),
-    )
+    const promptBlock = readFileSync(join(import.meta.dir, '../novel-writing/story-state-prompt.ts'), 'utf8')
     const normalizeBlock = source.slice(
       source.indexOf('const normalizeStoryStateDeltaForStorage ='),
       source.indexOf('const mergeStoryState =', source.indexOf('const normalizeStoryStateDeltaForStorage =')),
@@ -47705,10 +48269,7 @@ describe('story unit sync report', () => {
 
   test('story state prompt asks for oh-story daily context snapshot and stores it for the next chapter', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const promptBlock = source.slice(
-      source.indexOf('const buildStoryStatePrompt ='),
-      source.indexOf('const normalizeStoryStateDeltaForStorage =', source.indexOf('const buildStoryStatePrompt =')),
-    )
+    const promptBlock = readFileSync(join(import.meta.dir, '../novel-writing/story-state-prompt.ts'), 'utf8')
     const normalizeBlock = source.slice(
       source.indexOf('const normalizeStoryStateDeltaForStorage ='),
       source.indexOf('const mergeStoryState =', source.indexOf('const normalizeStoryStateDeltaForStorage =')),
@@ -47732,11 +48293,7 @@ describe('story unit sync report', () => {
   })
 
   test('story state prompt uses scene-card receipts for state deltas and next chapter prep', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const promptBlock = source.slice(
-      source.indexOf('const buildStoryStatePrompt ='),
-      source.indexOf('const mergeStoryState =', source.indexOf('const buildStoryStatePrompt =')),
-    )
+    const promptBlock = readFileSync(join(import.meta.dir, '../novel-writing/story-state-prompt.ts'), 'utf8')
 
     expect(promptBlock).toContain('scene_card_receipts')
     expect(promptBlock).toContain('已验证场景回执')
@@ -47754,35 +48311,27 @@ describe('story unit sync report', () => {
     expect(storeBlock).toContain('buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)')
   })
 
-  test('prose quality review payloads store latest generated scene breakdown context', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const qualityReviewStorageBlock = source.slice(
-      source.indexOf('const qualityGateReview = buildQualityGateReviewWithDeterministicCleanup'),
-      source.indexOf('const settingViolations = Array.isArray', source.indexOf('const qualityGateReview = buildQualityGateReviewWithDeterministicCleanup')),
-    )
-
-    expect(qualityReviewStorageBlock).toContain('const finalReviewContextPackage = buildProseReviewContextPackage(contextPackage, finalSceneBreakdown, wordTargetExpansionPatches)')
-    expect(qualityReviewStorageBlock).toContain('context_package: finalReviewContextPackage')
-    expect(qualityReviewStorageBlock).not.toContain('context_package: contextPackage')
-  })
-
   test('prose generation stores oh-story delivery receipts in every chapter store branch', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const storagePatchSource = readChapterProseStoragePatchSource()
     const generationBlock = source.slice(
       source.indexOf('const draftResult = await generateNovelChapterProse'),
       source.indexOf('const storyStateUpdate = await updateStoryStateMachine', source.indexOf('const draftResult = await generateNovelChapterProse')),
     )
 
     expect(generationBlock).toContain('let ohStoryDeliveryReceipts = normalizeStoredOhStoryDeliveryReceipts')
-    expect(generationBlock.match(/oh_story_delivery_receipts: ohStoryDeliveryReceipts/g)?.length || 0).toBeGreaterThanOrEqual(3)
-    expect(generationBlock.match(/chapter_blueprint: ohStoryDeliveryReceipts\?\.chapter_blueprint/g)?.length || 0).toBeGreaterThanOrEqual(3)
-    expect(generationBlock.match(/scene_card_receipts: ohStoryDeliveryReceipts\?\.scene_card_receipts/g)?.length || 0).toBeGreaterThanOrEqual(3)
-    expect(generationBlock.match(/delivery_risk_receipts: ohStoryDeliveryReceipts\?\.delivery_risk_receipts/g)?.length || 0).toBeGreaterThanOrEqual(3)
-    expect(generationBlock.match(/revision_receipts: ohStoryDeliveryReceipts\?\.revision_receipts/g)?.length || 0).toBeGreaterThanOrEqual(3)
+    expect(generationBlock.match(/buildChapterProseStoragePatch\(/g)?.length || 0).toBeGreaterThanOrEqual(3)
+    expect(generationBlock.match(/ohStoryDeliveryReceipts,/g)?.length || 0).toBeGreaterThanOrEqual(3)
+    expect(storagePatchSource).toContain('oh_story_delivery_receipts: input.ohStoryDeliveryReceipts')
+    expect(storagePatchSource).toContain('chapter_blueprint: receipts?.chapter_blueprint')
+    expect(storagePatchSource).toContain('scene_card_receipts: receipts?.scene_card_receipts')
+    expect(storagePatchSource).toContain('delivery_risk_receipts: receipts?.delivery_risk_receipts')
+    expect(storagePatchSource).toContain('revision_receipts: receipts?.revision_receipts')
   })
 
   test('prose generation stores post-draft oh-story director after delivery receipts and quality review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const storagePatchSource = readChapterProseStoragePatchSource()
     const generationBlock = source.slice(
       source.indexOf('const draftResult = await generateNovelChapterProse'),
       source.indexOf('const storyStateUpdate = await updateStoryStateMachine', source.indexOf('const draftResult = await generateNovelChapterProse')),
@@ -47810,27 +48359,29 @@ describe('story unit sync report', () => {
     expect(postReviewBlock).toContain('oh_story_delivery_receipts: ohStoryDeliveryReceipts')
     expect(postReviewBlock).toContain('oh_story_director: postDraftDirector')
     expect(postReviewBlock).toContain('ohStoryDirector: postDraftDirector')
-    expect(fullGenerationBlock.match(/oh_story_director: postDraftDirector/g)?.length || 0).toBeGreaterThanOrEqual(3)
-    expect(fullGenerationBlock.match(/ohStoryDirector: postDraftDirector/g)?.length || 0).toBeGreaterThanOrEqual(3)
-    expect(fullGenerationBlock.match(/\.\.\.postDraftDirectorPayload/g)?.length || 0).toBeGreaterThanOrEqual(8)
+    expect(fullGenerationBlock.match(/postDraftDirector,/g)?.length || 0).toBeGreaterThanOrEqual(2)
+    expect(storagePatchSource).toContain('rawPayload.oh_story_director = input.postDraftDirector')
+    expect(storagePatchSource).toContain('rawPayload.ohStoryDirector = input.postDraftDirector')
+    expect(postReviewBlock).toContain('postDraftDirectorPayload,')
     for (const marker of [
       "quality_gate', '章节质量门禁未通过，正文未入库'",
-      "approval_type: 'low_score'",
-      "approval_type: 'draft'",
-      "approval_type: 'reference_safety_blocked'",
+      "approvalType: 'low_score'",
+      "approvalType: 'draft'",
+      "approvalType: 'reference_safety_blocked'",
       "quality_gate', '章节质量门禁未通过，正文未入库', finalQualityDecision",
-      "approval_type: 'safety'",
+      "approvalType: 'safety'",
     ]) {
       const markerIndex = fullGenerationBlock.indexOf(marker)
       expect(markerIndex).toBeGreaterThanOrEqual(0)
       const payloadBlock = fullGenerationBlock.slice(Math.max(0, markerIndex - 900), markerIndex + 900)
-      expect(payloadBlock).toContain('...postDraftDirectorPayload')
+      expect(payloadBlock).toContain('buildProseQualityReview')
     }
     expect(draftOnlyBlock).not.toContain('postDraftDirector')
   })
 
   test('prose generation preserves pre-draft execution receipts for write-preparation diagnostics', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const storagePatchSource = readChapterProseStoragePatchSource()
     const normalizeBlock = source.slice(
       source.indexOf('function normalizeStoredOhStoryDeliveryReceipts'),
       source.indexOf('function deliveryRiskReceiptsFromContext', source.indexOf('function normalizeStoredOhStoryDeliveryReceipts')),
@@ -47842,7 +48393,7 @@ describe('story unit sync report', () => {
 
     expect(normalizeBlock).toContain('pre_draft_execution_receipts')
     expect(normalizeBlock).toContain('preDraftExecutionReceipts')
-    expect(generationBlock).toContain('pre_draft_execution_receipts: ohStoryDeliveryReceipts?.pre_draft_execution_receipts')
+    expect(storagePatchSource).toContain('pre_draft_execution_receipts: receipts?.pre_draft_execution_receipts')
     expect(generationBlock).toContain('resultPayload?.pre_draft_execution_receipts')
     expect(generationBlock).toContain('targetProse?.pre_draft_execution_receipts')
     expect(generationBlock).toContain('revisionDeliveryReceipts?.pre_draft_execution_receipts')
@@ -48005,11 +48556,12 @@ describe('storyline sync backfill', () => {
 
   test('story state prompt asks for storyline updates and sync review is created', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const postDeliverySource = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('storyline_updates')
     expect(source).toContain('buildStorylineSyncReport(')
-    expect(source).toContain("review_type: 'storyline_sync'")
-    expect(source).toContain('story_state_update.storyline_sync')
+    expect(source).toContain('buildStorylineSyncReviewRecord({ projectId: project.id, chapter, storylineSync })')
+    expect(postDeliverySource).toContain("'storyline_sync'")
   })
 
   test('accepts camelCase story state agent payloads before persistence', () => {
@@ -48116,7 +48668,7 @@ describe('storyline sync backfill', () => {
   test('story state sync persists a state delta completeness review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'state_delta_completeness'")
+    expect(source).toContain("reviewType: 'state_delta_completeness'")
     expect(source).toContain('buildStateDeltaCompletenessReport(chapter, chapterText, stateDelta')
     expect(source).toContain('payload.state_delta_completeness = stateDeltaCompleteness')
   })
@@ -48170,11 +48722,12 @@ describe('storyline sync backfill', () => {
 
   test('story state sync persists a foreshadowing_delta_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const postDeliverySource = readPostDeliveryStoryStateUpdateSource()
 
-    expect(source).toContain("review_type: 'foreshadowing_delta_sync'")
+    expect(source).toContain("reviewType: 'foreshadowing_delta_sync'")
     expect(source).toContain('buildForeshadowingDeltaSyncReport(chapter, contextPackage, storylineUpdates, discoveredAssets, payload?.foreshadowing_status || payload?.foreshadowingStatus || {})')
     expect(source).toContain('payload.foreshadowing_delta_sync = foreshadowingDeltaSync')
-    expect(source).toContain('foreshadowing_delta_sync: story_state_update.foreshadowing_delta_sync')
+    expect(postDeliverySource).toContain("'foreshadowing_delta_sync'")
   })
 
   test('builds timeline delta sync from current-chapter time, location, and scene order only', () => {
@@ -48258,11 +48811,12 @@ describe('storyline sync backfill', () => {
 
   test('story state sync persists a timeline_delta_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const promptSource = readFileSync(join(import.meta.dir, '../novel-writing/story-state-prompt.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'timeline_delta_sync'")
+    expect(source).toContain("reviewType: 'timeline_delta_sync'")
     expect(source).toContain('buildTimelineDeltaSyncReport(chapter, contextPackage, stateDelta, settingUpdates)')
     expect(source).toContain('payload.timeline_delta_sync = timelineDeltaSync')
-    expect(source).toContain('state_delta.timeline/current_time/active_locations 要尽量带 source_excerpt 或 evidence')
+    expect(promptSource).toContain('state_delta.timeline/current_time/active_locations 要尽量带 source_excerpt 或 evidence')
   })
 
   test('builds character state delta sync from current-chapter involved characters only', () => {
@@ -48341,7 +48895,7 @@ describe('storyline sync backfill', () => {
   test('story state sync persists a character_state_delta_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'character_state_delta_sync'")
+    expect(source).toContain("reviewType: 'character_state_delta_sync'")
     expect(source).toContain('buildCharacterStateDeltaSyncReport(chapter, contextPackage, stateDelta, characterUpdates)')
     expect(source).toContain('payload.character_state_delta_sync = characterStateDeltaSync')
     expect(source).toContain('source_excerpt')
@@ -48435,11 +48989,12 @@ describe('storyline sync backfill', () => {
 
   test('story state sync persists an asset_state_delta_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const promptSource = readFileSync(join(import.meta.dir, '../novel-writing/story-state-prompt.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'asset_state_delta_sync'")
+    expect(source).toContain("reviewType: 'asset_state_delta_sync'")
     expect(source).toContain('buildAssetStateDeltaSyncReport(chapter, contextPackage, stateDelta, settingUpdates, discoveredAssets)')
     expect(source).toContain('payload.asset_state_delta_sync = assetStateDeltaSync')
-    expect(source).toContain('setting_updates: array，每项包含 entity_id 或 name, entity_type, state_delta, actual_state_change, source_excerpt 或 evidence')
+    expect(promptSource).toContain('setting_updates: array，每项包含 entity_id 或 name, entity_type, state_delta, actual_state_change, source_excerpt 或 evidence')
   })
 
   test('builds relationship delta sync from current-chapter relation contract and relationship graph updates', () => {
@@ -48502,7 +49057,7 @@ describe('storyline sync backfill', () => {
   test('story state sync persists a relationship_delta_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'relationship_delta_sync'")
+    expect(source).toContain("reviewType: 'relationship_delta_sync'")
     expect(source).toContain('buildRelationshipDeltaSyncReport(chapter, contextPackage, stateDelta, storylineUpdates)')
     expect(source).toContain('payload.relationship_delta_sync = relationshipDeltaSync')
   })
@@ -48601,7 +49156,7 @@ describe('storyline sync backfill', () => {
   test('story state sync persists a chapter_handoff_delta_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'chapter_handoff_delta_sync'")
+    expect(source).toContain("reviewType: 'chapter_handoff_delta_sync'")
     expect(source).toContain('buildChapterHandoffDeltaSyncReport(chapter, contextPackage, stateDelta)')
     expect(source).toContain('payload.chapter_handoff_delta_sync = chapterHandoffDeltaSync')
   })
@@ -48647,6 +49202,51 @@ describe('storyline sync backfill', () => {
     expect(report.missed[0].text).toContain('抽象心理描写')
     expect(report.missed[0].evidence).toContain('他把账册按在案上')
     expect(report.next_actions.join('；')).toContain('只补修订后仍残留')
+  })
+
+  test('merges multi-pass revision artifacts instead of dropping earlier quality repair receipts', () => {
+    const merged = mergeProseRevisionArtifacts({
+      revision_receipts: [
+        {
+          issue_index: 1,
+          applied_fix: '修复承接风险',
+          changed_evidence: '江哲把清算倒计时压进最后三十息。',
+        },
+      ],
+      oh_story_delivery_receipts: {
+        delivery_risk_receipts: [
+          {
+            risk_item: '质量续航',
+            required_action: '维持冲突压力与章尾翻页',
+            delivered: true,
+            evidence: '清算倒计时：三十息。',
+            remaining_risk: '',
+          },
+        ],
+      },
+    }, {
+      deslop_repair_receipts: [
+        {
+          gate: 'A',
+          changed_evidence: '枪身符文倒卷，勒住追索者食指。',
+          remaining_risk: '',
+        },
+      ],
+      oh_story_delivery_receipts: {
+        deslop_repair_receipts: [
+          {
+            gate: 'A',
+            changed_evidence: '枪身符文倒卷，勒住追索者食指。',
+            remaining_risk: '',
+          },
+        ],
+      },
+    })
+
+    expect(merged.revision_receipts).toHaveLength(1)
+    expect(merged.deslop_repair_receipts).toHaveLength(1)
+    expect(merged.oh_story_delivery_receipts.delivery_risk_receipts).toHaveLength(1)
+    expect(merged.oh_story_delivery_receipts.deslop_repair_receipts).toHaveLength(1)
   })
 
   test('warns when prose was revised but revision receipts are missing', () => {
@@ -49815,13 +50415,19 @@ describe('storyline sync backfill', () => {
     expect(report.missed.map((item: any) => item.text).join('｜')).toContain('最后300字')
   })
 
-  test('warns when state tracking contract lacks status filter receipts', () => {
+  test('builds fallback status filter receipts from state tracking contract when model omits them', () => {
     const report = buildStatusFilterReceiptSyncReport(
-      { id: 9, chapter_no: 9, title: '状态筛选未闭环' },
+      {
+        id: 9,
+        chapter_no: 9,
+        title: '状态筛选兜底闭环',
+        chapter_text: '林青禾只递出半枚旧印，没有说出完整名单。',
+      },
       {
         chapter_target: {
           state_tracking_contract: {
             character_states: ['林青禾：只知道半枚旧印，不知道完整旧案名单'],
+            world_constraints: ['外城禁令只影响城门场景'],
             filter_rules: ['只加载本章会写错的角色认知和伏笔前史'],
           },
         },
@@ -49832,12 +50438,20 @@ describe('storyline sync backfill', () => {
       },
     )
 
-    expect(report.status).toBe('warn')
+    expect(report.status).toBe('ok')
     expect(report.requires_receipts).toBe(true)
-    expect(report.receipt_count).toBe(0)
-    expect(report.missed_count).toBe(1)
-    expect(report.missed[0].key).toBe('status_filter_receipts')
-    expect(report.next_actions.join('；')).toContain('status_filter_receipts')
+    expect(report.receipt_count).toBeGreaterThanOrEqual(2)
+    expect(report.missed_count).toBe(0)
+    expect(report.completed.map((item: any) => item.key)).toEqual(expect.arrayContaining([
+      'character_states_1',
+      'world_constraints_1',
+    ]))
+    expect(report.completed.find((item: any) => item.key === 'character_states_1')).toMatchObject({
+      used_in_chapter: true,
+    })
+    expect(report.completed.find((item: any) => item.key === 'world_constraints_1')).toMatchObject({
+      used_in_chapter: false,
+    })
   })
 
   test('closes status filter receipt sync when used and excluded states are accounted for', () => {
@@ -49853,6 +50467,7 @@ describe('storyline sync backfill', () => {
         },
       },
       {
+        revised: true,
         review: {
           oh_story_delivery_receipts: {
             pre_draft_execution_receipts: {
@@ -49897,6 +50512,7 @@ describe('storyline sync backfill', () => {
         },
       },
       {
+        revised: true,
         review: {
           oh_story_delivery_receipts: {
             pre_draft_execution_receipts: {
@@ -49940,6 +50556,7 @@ describe('storyline sync backfill', () => {
         },
       },
       {
+        revised: true,
         review: {
           oh_story_delivery_receipts: {
             pre_draft_execution_receipts: {
@@ -50013,6 +50630,52 @@ describe('storyline sync backfill', () => {
       label: '林青禾认知边界',
     })
     expect(report.missed[0].text).toContain('无法定位')
+  })
+
+  test('falls back to state tracking contract when model status receipts are stale after revision', () => {
+    const report = buildStatusFilterReceiptSyncReport(
+      {
+        id: 9,
+        chapter_no: 9,
+        title: '状态筛选兜底修复',
+        chapter_text: '林青禾只递出半枚旧印，没有说出完整名单。',
+      },
+      {
+        chapter_target: {
+          state_tracking_contract: {
+            character_states: ['林青禾：只知道半枚旧印，不知道完整旧案名单'],
+            world_constraints: ['外城禁令只影响城门场景'],
+            filter_rules: ['只加载本章会写错的角色认知和伏笔前史'],
+          },
+        },
+      },
+      {
+        revised: true,
+        review: {
+          oh_story_delivery_receipts: {
+            pre_draft_execution_receipts: {
+              status_filter_receipts: [
+                {
+                  key: 'stale_character_state',
+                  label: '林青禾认知边界',
+                  used_in_chapter: true,
+                  evidence: '林青禾当场说出完整旧案名单。',
+                  remaining_risk: '',
+                },
+              ],
+            },
+          },
+        },
+      },
+    )
+
+    expect(report.status).toBe('ok')
+    expect(report.fallback_generated).toBe(true)
+    expect(report.missed_count).toBe(0)
+    expect(report.completed.map((item: any) => item.key)).toEqual(expect.arrayContaining([
+      'character_states_1',
+      'world_constraints_1',
+    ]))
   })
 
   test('warns when revision changes chapter length beyond oh-story scope guard', () => {
@@ -50258,37 +50921,49 @@ describe('storyline sync backfill', () => {
 
   test('prose quality stores a revision_cascade_impact_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const postDeliverySource = readPostDeliveryStoryStateUpdateSource()
+    const reviewRecordSource = readPostDeliverySyncReviewRecordSource()
 
-    expect(source).toContain("review_type: 'revision_cascade_impact_sync'")
+    expect(source).toContain('buildRevisionCascadeImpactSyncReviewRecord({ projectId, chapter, sync: revisionCascadeImpactSync })')
+    expect(reviewRecordSource).toContain("review_type: 'revision_cascade_impact_sync'")
     expect(source).toContain('buildRevisionCascadeImpactSyncReport(chapter, selfCheck)')
-    expect(source).toContain('storyStateUpdateWithSync.revision_cascade_impact_sync = revisionCascadeImpactSync')
+    expect(postDeliverySource).toContain("['revisionCascadeImpactSync', 'revision_cascade_impact_sync']")
     expect(source).toContain('cascade_impacts 必须逐项写 type, target, impact, required_action, evidence 或 source_excerpt')
   })
 
   test('prose quality stores a revision_scope_guard_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const postDeliverySource = readPostDeliveryStoryStateUpdateSource()
+    const reviewRecordSource = readPostDeliverySyncReviewRecordSource()
 
-    expect(source).toContain("review_type: 'revision_scope_guard_sync'")
+    expect(source).toContain('buildRevisionScopeGuardSyncReviewRecord({ projectId, chapter, selfCheck, sync: revisionScopeGuardSync })')
+    expect(reviewRecordSource).toContain("review_type: 'revision_scope_guard_sync'")
     expect(source).toContain('buildRevisionScopeGuardSyncReport(chapter, selfCheck)')
-    expect(source).toContain('storyStateUpdateWithSync.revision_scope_guard_sync = revisionScopeGuardSync')
+    expect(postDeliverySource).toContain("['revisionScopeGuardSync', 'revision_scope_guard_sync']")
     expect(source).toContain('revision_scope_guard')
   })
 
   test('prose quality stores a prose_revision_receipt_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const postDeliverySource = readPostDeliveryStoryStateUpdateSource()
+    const reviewRecordSource = readPostDeliverySyncReviewRecordSource()
 
-    expect(source).toContain("review_type: 'prose_revision_receipt_sync'")
+    expect(source).toContain("reviewType: 'prose_revision_receipt_sync'")
+    expect(reviewRecordSource).toContain('review_type: input.reviewType')
     expect(source).toContain('buildProseRevisionReceiptSyncReport(chapter, selfCheck)')
-    expect(source).toContain('storyStateUpdateWithSync.prose_revision_receipt_sync = proseRevisionReceiptSync')
+    expect(postDeliverySource).toContain("['proseRevisionReceiptSync', 'prose_revision_receipt_sync']")
   })
 
   test('prose quality stores a deslop_repair_receipt_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const postDeliverySource = readPostDeliveryStoryStateUpdateSource()
+    const reviewRecordSource = readPostDeliverySyncReviewRecordSource()
 
-    expect(source).toContain("review_type: 'deslop_repair_receipt_sync'")
+    expect(source).toContain("reviewType: 'deslop_repair_receipt_sync'")
+    expect(reviewRecordSource).toContain('review_type: input.reviewType')
     expect(source).toContain('buildDeslopRepairReceiptSyncReport(chapter, selfCheck)')
-    expect(source).toContain('storyStateUpdateWithSync.deslop_repair_receipt_sync = deslopRepairReceiptSync')
-    expect(source).toContain('story_state_update: { skipped: true, prose_revision_receipt_sync: proseRevisionReceiptSync, deslop_repair_receipt_sync: deslopRepairReceiptSync')
+    expect(postDeliverySource).toContain("['deslopRepairReceiptSync', 'deslop_repair_receipt_sync']")
+    expect(source).toContain('buildSkippedPostDeliveryStoryStateUpdate({')
   })
 })
 
@@ -50419,7 +51094,7 @@ describe('chapter handoff sync report', () => {
   test('story state sync persists a chapter_handoff_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'chapter_handoff_sync'")
+    expect(source).toContain("reviewType: 'chapter_handoff_sync'")
     expect(source).toContain('buildChapterHandoffSyncReport(project, chapter, contextPackage, chapterText)')
     expect(source).toContain('payload.chapter_handoff_sync = chapterHandoffSync')
   })
@@ -50669,7 +51344,7 @@ describe('chapter core drift report', () => {
   test('story state sync persists a chapter_core_drift review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'chapter_core_drift'")
+    expect(source).toContain("reviewType: 'chapter_core_drift'")
     expect(source).toContain('buildChapterCoreDriftReport(project, chapter, contextPackage, chapterText, storylineSync)')
     expect(source).toContain('payload.core_drift = coreDrift')
   })
@@ -50933,7 +51608,7 @@ describe('chapter core drift report', () => {
   test('story state sync persists a core_contract_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'core_contract_sync'")
+    expect(source).toContain("reviewType: 'core_contract_sync'")
     expect(source).toContain('buildCoreContractSyncReport(project, chapter, contextPackage, chapterText)')
     expect(source).toContain('payload.core_contract_sync = coreContractSync')
   })
@@ -51020,7 +51695,7 @@ describe('reader payoff sync report', () => {
   test('story state sync persists a reader_payoff_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'reader_payoff_sync'")
+    expect(source).toContain("reviewType: 'reader_payoff_sync'")
     expect(source).toContain('buildReaderPayoffSyncReport(project, chapter, contextPackage, chapterText, payload)')
     expect(source).toContain('payload.reader_payoff_sync = readerPayoffSync')
   })
@@ -51148,7 +51823,8 @@ describe('reader expectation sync report', () => {
   test('story state sync persists a reader_expectation_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'reader_expectation_sync'")
+    expect(source).toContain("reviewType: 'reader_expectation_sync'")
+    expect(source).toContain("payloadKey: 'reader_expectation_sync'")
     expect(source).toContain('buildReaderExpectationSyncReport(project, chapter, contextPackage, chapterText)')
     expect(source).toContain('payload.reader_expectation_sync = readerExpectationSync')
   })
@@ -51392,7 +52068,7 @@ describe('reader retention sync report', () => {
   test('story state sync persists a reader_retention_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'reader_retention_sync'")
+    expect(source).toContain("reviewType: 'reader_retention_sync'")
     expect(source).toContain('buildReaderRetentionSyncReport(project, chapter, contextPackage, chapterText)')
     expect(source).toContain('payload.reader_retention_sync = readerRetentionSync')
   })
@@ -51400,7 +52076,7 @@ describe('reader retention sync report', () => {
   test('story state sync persists a chapter_attraction_review review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'chapter_attraction_review'")
+    expect(source).toContain("reviewType: 'chapter_attraction_review'")
     expect(source).toContain('buildChapterAttractionReviewReport(project, chapter, contextPackage, chapterText)')
     expect(source).toContain('payload.chapter_attraction_review = chapterAttractionReview')
   })
@@ -51482,7 +52158,7 @@ describe('innovation sync report', () => {
   test('story state sync persists an innovation_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'innovation_sync'")
+    expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: innovationSync, reviewType: 'innovation_sync'")
     expect(source).toContain('buildInnovationSyncReport(project, chapter, contextPackage, chapterText)')
     expect(source).toContain('payload.innovation_sync = innovationSync')
   })
@@ -51565,7 +52241,7 @@ describe('signature scene sync report', () => {
   test('story state sync persists a signature_scene_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'signature_scene_sync'")
+    expect(source).toContain("reviewType: 'signature_scene_sync'")
     expect(source).toContain('buildSignatureSceneSyncReport(project, chapter, contextPackage, chapterText)')
     expect(source).toContain('payload.signature_scene_sync = signatureSceneSync')
   })
@@ -51693,7 +52369,7 @@ describe('volume beat sync report', () => {
   test('story state sync persists a volume_beat_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'volume_beat_sync'")
+    expect(source).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: volumeBeatSync, reviewType: 'volume_beat_sync'")
     expect(source).toContain('buildVolumeBeatSyncReport(project, chapter, contextPackage, chapterText)')
     expect(source).toContain('payload.volume_beat_sync = volumeBeatSync')
   })
@@ -51784,7 +52460,7 @@ describe('million word runway sync report', () => {
   test('story state sync persists a runway_sync review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
 
-    expect(source).toContain("review_type: 'runway_sync'")
+    expect(source).toContain("reviewType: 'runway_sync'")
     expect(source).toContain('buildRunwaySyncReport(project, chapter, contextPackage, chapterText)')
     expect(source).toContain('payload.runway_sync = runwaySync')
   })
@@ -51820,7 +52496,7 @@ describe('discovered asset intake', () => {
 
     expect(source).toContain('discovered_assets')
     expect(source).toContain('normalizeDiscoveredAssets(')
-    expect(source).toContain("review_type: 'asset_intake'")
+    expect(source).toContain('buildAssetIntakeReviewRecord({ projectId: project.id, chapter, discoveredAssets })')
     expect(source).toContain('asset_intake')
   })
 })
@@ -51859,7 +52535,7 @@ describe('ip scene intake', () => {
 
     expect(source).toContain('ip_scene_candidates')
     expect(source).toContain('normalizeIpSceneCandidates(')
-    expect(source).toContain("review_type: 'ip_scene_intake'")
+    expect(source).toContain('buildIpSceneIntakeReviewRecord({ projectId: project.id, chapter, ipSceneCandidates })')
     expect(source).toContain('payload.ip_scene_intake')
   })
 })
@@ -51872,7 +52548,7 @@ describe('commercial web novel style defaults', () => {
     expect(styleLock.sentence_length).toContain('短中句')
     expect(styleLock.dialogue_ratio).toContain('35%-45%')
     expect(styleLock.payoff_density).toContain('800-1200字')
-    expect(styleLock.chapter_word_range).toContain('2800-3500字')
+    expect(styleLock.chapter_word_range).toContain('3200-5200字')
     expect(styleLock.preferred_words).toContain('爽点回收')
   })
 
@@ -52189,12 +52865,8 @@ describe('chapter context word target source guards', () => {
   })
 
   test('requires scene-card prompts to plan commercial reader hooks before prose generation', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const promptStart = source.indexOf('const buildSceneCardsPrompt =')
-    const promptEnd = source.indexOf('const buildHeuristicSettingUsage =', promptStart)
-    const promptBlock = source.slice(promptStart, promptEnd)
+    const promptBlock = readSceneCardsPromptSource()
 
-    expect(promptStart).toBeGreaterThanOrEqual(0)
     expect(promptBlock).toContain('opening_hook')
     expect(promptBlock).toContain('reader_payoff')
     expect(promptBlock).toContain('fear_point')
@@ -52210,12 +52882,8 @@ describe('chapter context word target source guards', () => {
   })
 
   test('requires scene-card prompts to repair recent serial fatigue before prose generation', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const promptStart = source.indexOf('const buildSceneCardsPrompt =')
-    const promptEnd = source.indexOf('const buildHeuristicSettingUsage =', promptStart)
-    const promptBlock = source.slice(promptStart, promptEnd)
+    const promptBlock = readSceneCardsPromptSource()
 
-    expect(promptStart).toBeGreaterThanOrEqual(0)
     expect(promptBlock).toContain('recent_fatigue_brief')
     expect(promptBlock).toContain('risk_signals')
     expect(promptBlock).toContain('next_actions')
@@ -52230,12 +52898,8 @@ describe('chapter context word target source guards', () => {
   })
 
   test('requires scene-card prompts to consume rolling rhythm preflight before prose generation', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const promptStart = source.indexOf('const buildSceneCardsPrompt =')
-    const promptEnd = source.indexOf('const buildHeuristicSettingUsage =', promptStart)
-    const promptBlock = source.slice(promptStart, promptEnd)
+    const promptBlock = readSceneCardsPromptSource()
 
-    expect(promptStart).toBeGreaterThanOrEqual(0)
     expect(promptBlock).toContain('rolling_rhythm_preflight')
     expect(promptBlock).toContain('拉期待速度 > 断期待速度')
     expect(promptBlock).toContain('期待真空期急救')
@@ -52250,12 +52914,8 @@ describe('chapter context word target source guards', () => {
   })
 
   test('requires scene-card prompts to plan delivery-risk carry-over before prose generation', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const promptStart = source.indexOf('const buildSceneCardsPrompt =')
-    const promptEnd = source.indexOf('const buildHeuristicSettingUsage =', promptStart)
-    const promptBlock = source.slice(promptStart, promptEnd)
+    const promptBlock = readSceneCardsPromptSource()
 
-    expect(promptStart).toBeGreaterThanOrEqual(0)
     expect(promptBlock).toContain('delivery_risk_carry_over')
     expect(promptBlock).toContain('质量续航')
     expect(promptBlock).toContain('opening_actions')
@@ -52269,15 +52929,11 @@ describe('chapter context word target source guards', () => {
   })
 
   test('requires scene-card prompts and briefs to preserve serial risk repair fields', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const promptStart = source.indexOf('const buildSceneCardsPrompt =')
-    const promptEnd = source.indexOf('const buildHeuristicSettingUsage =', promptStart)
-    const promptBlock = source.slice(promptStart, promptEnd)
-    const briefStart = source.indexOf('function sceneBriefFromCard')
-    const briefEnd = source.indexOf('function buildReaderRetentionBrief', briefStart)
-    const briefBlock = source.slice(briefStart, briefEnd)
+    const sceneBriefSource = readFileSync(join(import.meta.dir, '../novel-writing/scene-briefs.ts'), 'utf8')
+    const promptBlock = readSceneCardsPromptSource()
+    const briefStart = sceneBriefSource.indexOf('export function sceneBriefFromCard')
+    const briefBlock = sceneBriefSource.slice(briefStart)
 
-    expect(promptStart).toBeGreaterThanOrEqual(0)
     expect(briefStart).toBeGreaterThanOrEqual(0)
     expect(promptBlock).toContain('serial_risk_repairs(array)')
     expect(promptBlock).toContain('recent_fatigue_action')
@@ -52290,14 +52946,11 @@ describe('chapter context word target source guards', () => {
 
   test('requires scene-card prompts to plan and prose prompts to execute beat density levels', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const scenePromptStart = source.indexOf('const buildSceneCardsPrompt =')
-    const scenePromptEnd = source.indexOf('const buildHeuristicSettingUsage =', scenePromptStart)
-    const scenePromptBlock = source.slice(scenePromptStart, scenePromptEnd)
+    const scenePromptBlock = readSceneCardsPromptSource()
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
     const prosePromptEnd = source.indexOf('const ensureProseMeetsWordTarget =', prosePromptStart)
     const prosePromptBlock = source.slice(prosePromptStart, prosePromptEnd)
 
-    expect(scenePromptStart).toBeGreaterThanOrEqual(0)
     expect(prosePromptStart).toBeGreaterThanOrEqual(0)
     expect(scenePromptBlock).toContain('density_level')
     expect(scenePromptBlock).toContain('疏密分配')
@@ -52330,9 +52983,7 @@ describe('chapter context word target source guards', () => {
 
   test('requires scene-card prompts and prose prompts to preserve purpose tags for detail allocation', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const scenePromptStart = source.indexOf('const buildSceneCardsPrompt =')
-    const scenePromptEnd = source.indexOf('const buildHeuristicSettingUsage =', scenePromptStart)
-    const scenePromptBlock = source.slice(scenePromptStart, scenePromptEnd)
+    const scenePromptBlock = readSceneCardsPromptSource()
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
     const prosePromptEnd = source.indexOf('const ensureProseMeetsWordTarget =', prosePromptStart)
     const prosePromptBlock = source.slice(prosePromptStart, prosePromptEnd)
@@ -52345,7 +52996,6 @@ describe('chapter context word target source guards', () => {
       source.indexOf('const shouldReviseProse'),
     )
 
-    expect(scenePromptStart).toBeGreaterThanOrEqual(0)
     expect(prosePromptStart).toBeGreaterThanOrEqual(0)
     expect(scenePromptBlock).toContain('purpose_tag')
     expect(scenePromptBlock).toContain('目的词')
@@ -52363,14 +53013,11 @@ describe('chapter context word target source guards', () => {
 
   test('requires scene-card prompts to plan and prose prompts to execute sensory anchors', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const scenePromptStart = source.indexOf('const buildSceneCardsPrompt =')
-    const scenePromptEnd = source.indexOf('const buildHeuristicSettingUsage =', scenePromptStart)
-    const scenePromptBlock = source.slice(scenePromptStart, scenePromptEnd)
+    const scenePromptBlock = readSceneCardsPromptSource()
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
     const prosePromptEnd = source.indexOf('const ensureProseMeetsWordTarget =', prosePromptStart)
     const prosePromptBlock = source.slice(prosePromptStart, prosePromptEnd)
 
-    expect(scenePromptStart).toBeGreaterThanOrEqual(0)
     expect(prosePromptStart).toBeGreaterThanOrEqual(0)
     expect(scenePromptBlock).toContain('sensory_anchor')
     expect(scenePromptBlock).toContain('感知素材库')
@@ -53500,6 +54147,125 @@ describe('chapter context word target source guards', () => {
     }))
   })
 
+  test('sanitizes stored scene-card diagnostic noise when building chapter context', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'mangaforge-context-stored-scene-noise-'))
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+    const noisyRisk = '主角必须同时保住身份、线索和身边人的安全。；同步风险开篇承接：前300字先回应 story_drive_sync 的上一章缺口；同步风险中段兑现：按 character_state_delta_sync 的 missed/next_actions 写出可见行动；下一次修订优先补足 reader_fuel_missed。'
+    const chapter = {
+      id: 810,
+      project_id: 90,
+      chapter_no: 10,
+      title: '镇门危局',
+      chapter_summary: '江哲在封锁令压到门前时守住身份和线索。',
+      conflict: '镇门封锁会暴露江哲的异常身份。',
+      ending_hook: '门外传来第二份封锁令。',
+      scene_list: [
+        {
+          scene_no: 1,
+          title: '封锁压门',
+          purpose: '封锁令压到江哲门前。',
+          conflict: noisyRisk,
+          obstacle: noisyRisk,
+          opposing_force: noisyRisk,
+          no_exit_reason: `否则${noisyRisk}`,
+          event_value_change: '确认同步风险开篇承接：前300字先回应 story_loop_sync 的上一章缺口。',
+        },
+      ],
+      raw_payload: {},
+    }
+
+    const context = await service.buildChapterContextPackage(
+      workspace,
+      { id: 90, title: '怪谈世界', genre: '规则怪谈', reference_config: {} },
+      chapter,
+      [chapter],
+      [{ id: 1, project_id: 90, world_summary: '镇门封锁会放大异常身份风险。', rules: ['封锁令必须当场处理'] }],
+      [{ id: 1, project_id: 90, name: '江哲', role: 'protagonist', goal: '保住身份并追出封锁源头' }],
+      [],
+      [],
+    )
+    const scene = context.chapter_target.scene_cards[0]
+    const coreText = [
+      scene.conflict,
+      scene.obstacle,
+      scene.opposing_force,
+      scene.no_exit_reason,
+      scene.event_value_change,
+    ].join('；')
+
+    expect(scene.conflict).toContain('主角必须同时保住身份、线索和身边人的安全')
+    expect(coreText).not.toContain('同步风险')
+    expect(coreText).not.toContain('_sync')
+    expect(coreText).not.toContain('missed')
+    expect(coreText).not.toContain('下一次修订')
+  })
+
+  test('sanitizes confirmed pre-draft scene briefs before prose context handoff', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'mangaforge-context-confirmed-scene-noise-'))
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {} as any,
+      reference: {} as any,
+    })
+    const noisyRisk = '江哲必须守住镇门线索。；同步风险中段兑现：按 asset_state_delta_sync 的 missed/next_actions 写出资产变化；下一次修订优先补 chapter_handoff_delta_sync。'
+    const chapter = {
+      id: 811,
+      project_id: 91,
+      chapter_no: 11,
+      title: '镇门反证',
+      chapter_summary: '江哲用镇门线索反证封锁令来源。',
+      conflict: '封锁令来源被人伪装。',
+      ending_hook: '镇门背后亮起第二枚印记。',
+      scene_list: [
+        {
+          scene_no: 1,
+          title: '干净兜底',
+          purpose: '保留干净旧场景。',
+          conflict: '伪装来源阻止江哲确认真相。',
+        },
+      ],
+      raw_payload: {
+        pre_draft_brief: {
+          confirmed_at: '2026-07-07T10:00:00.000Z',
+          scene_briefs: [
+            {
+              scene_no: 1,
+              title: '反证封锁',
+              purpose: '江哲用镇门线索反证封锁令来源。',
+              conflict: noisyRisk,
+              obstacle: noisyRisk,
+              event_value_change: '确认同步风险开篇承接：回应 story_loop_sync。',
+            },
+          ],
+        },
+      },
+    }
+
+    const context = await service.buildChapterContextPackage(
+      workspace,
+      { id: 91, title: '怪谈世界', genre: '规则怪谈', reference_config: {} },
+      chapter,
+      [chapter],
+      [{ id: 1, project_id: 91, world_summary: '镇门印记会记录封锁令来源。', rules: ['封锁令来源不可被旁白直接解释'] }],
+      [{ id: 1, project_id: 91, name: '江哲', role: 'protagonist', goal: '查出封锁令源头' }],
+      [],
+      [],
+    )
+    const scene = context.chapter_target.scene_cards[0]
+    const coreText = [scene.conflict, scene.obstacle, scene.event_value_change].join('；')
+
+    expect(scene.conflict).toContain('江哲必须守住镇门线索')
+    expect(scene.event_value_change || scene.reader_payoff || scene.turning_point || scene.exit_state).toContain('局势变成下一步必须处理的新状态')
+    expect(coreText).not.toContain('同步风险')
+    expect(coreText).not.toContain('_sync')
+    expect(coreText).not.toContain('missed')
+    expect(coreText).not.toContain('下一次修订')
+  })
+
   test('builds pre-draft core contract radar when saved fields are objects', () => {
     const brief = buildChapterPreDraftBrief(
       {
@@ -53695,6 +54461,324 @@ describe('chapter context word target source guards', () => {
     expect(selfCheckBlock).toContain('quality_threshold: qualityThreshold')
   })
 
+  test('keeps initial unattended quality-gate review lightweight when auto repair is enabled', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const groupStart = source.indexOf('const generateChapterForGroup =')
+    const selfCheckStart = source.indexOf('let selfCheck = await runProseSelfReviewAndRevision', groupStart)
+    const initialDecisionStart = source.indexOf('const initialReviewDecision = getQualityGateDecision', selfCheckStart)
+    const selfCheckBlock = source.slice(selfCheckStart, initialDecisionStart)
+
+    expect(groupStart).toBeGreaterThanOrEqual(0)
+    expect(selfCheckStart).toBeGreaterThan(groupStart)
+    expect(initialDecisionStart).toBeGreaterThan(selfCheckStart)
+    expect(selfCheckBlock).toContain('options.auto_repair_quality_gate === true ? { fill_missing_structured_checks: false } : {}')
+  })
+
+  test('auto-repairs a failed quality gate even when the first self-review produced no usable revision', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const groupStart = source.indexOf('const generateChapterForGroup =')
+    const initialDecisionStart = source.indexOf('const initialReviewDecision = getQualityGateDecision', groupStart)
+    const preStoreStart = source.indexOf('const preStoreQualityDecision = getQualityGateDecision', initialDecisionStart)
+    const beforeGateBlock = source.slice(initialDecisionStart, preStoreStart)
+
+    expect(groupStart).toBeGreaterThanOrEqual(0)
+    expect(initialDecisionStart).toBeGreaterThan(groupStart)
+    expect(preStoreStart).toBeGreaterThan(initialDecisionStart)
+    expect(beforeGateBlock).toContain('!initialReviewDecision.passed && options.auto_repair_quality_gate === true && !isDraftReviewOnly')
+    expect(beforeGateBlock).toContain('const qualityGateRepair = await runProseRevisionFromExistingReview')
+    expect(beforeGateBlock).toContain('base_review: selfCheck.review')
+    expect(beforeGateBlock).toContain('quality_gate: initialReviewDecision')
+    expect(beforeGateBlock).toContain('quality_gate_repair: true')
+    expect(beforeGateBlock).toContain('revise: true')
+  })
+
+  test('keeps quality gate repair timeout as a gate warning instead of losing the reviewed draft', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const groupStart = source.indexOf('const generateChapterForGroup =')
+    const repairStart = source.indexOf("phase: 'quality_gate_repair'", groupStart)
+    const readabilityStart = source.indexOf('if (shouldRunSynchronousReadabilityReview(options, project))', repairStart)
+    const repairBlock = source.slice(repairStart, readabilityStart)
+
+    expect(groupStart).toBeGreaterThanOrEqual(0)
+    expect(repairStart).toBeGreaterThan(groupStart)
+    expect(readabilityStart).toBeGreaterThan(repairStart)
+    expect(repairBlock).toContain('try {')
+    expect(repairBlock).toContain('catch (qualityGateRepairError')
+    expect(repairBlock).toContain("phase: 'quality_gate_repair_failed'")
+    expect(repairBlock).toContain('quality_gate_repair_error')
+    expect(repairBlock).toContain('if (isAbortError(qualityGateRepairError)) throw qualityGateRepairError')
+  })
+
+  test('skips quality recheck when quality gate repair produced no usable revision', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const groupStart = source.indexOf('const generateChapterForGroup =')
+    const repairStart = source.indexOf("phase: 'quality_gate_repair'", groupStart)
+    const readabilityStart = source.indexOf('if (shouldRunSynchronousReadabilityReview(options, project))', repairStart)
+    const repairBlock = source.slice(repairStart, readabilityStart)
+
+    expect(groupStart).toBeGreaterThanOrEqual(0)
+    expect(repairStart).toBeGreaterThan(groupStart)
+    expect(readabilityStart).toBeGreaterThan(repairStart)
+    expect(repairBlock).toContain('const shouldRunQualityRepairRecheck = Boolean(qualityGateRepairSelection.accepted && qualityGateRepair.revised)')
+    expect(repairBlock).toContain('if (shouldRunQualityRepairRecheck) {')
+    expect(repairBlock).toContain("phase: 'quality_recheck_skipped'")
+  })
+
+  test('keeps accepted quality repair when the follow-up quality recheck times out', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const groupStart = source.indexOf('const generateChapterForGroup =')
+    const repairStart = source.indexOf("phase: 'quality_gate_repair'", groupStart)
+    const recheckStart = source.indexOf("phase: 'quality_recheck'", repairStart)
+    const recheckCatchStart = source.indexOf('catch (qualityRecheckError', recheckStart)
+    const noUsableRevisionStart = source.indexOf('} else {', recheckCatchStart)
+    const recheckCatchBlock = source.slice(recheckCatchStart, noUsableRevisionStart)
+
+    expect(groupStart).toBeGreaterThanOrEqual(0)
+    expect(repairStart).toBeGreaterThan(groupStart)
+    expect(recheckStart).toBeGreaterThan(repairStart)
+    expect(recheckCatchStart).toBeGreaterThan(recheckStart)
+    expect(recheckCatchBlock).toContain('quality_recheck_error')
+    expect(recheckCatchBlock).toContain("phase: 'quality_recheck_failed'")
+    expect(recheckCatchBlock).toContain("status: 'warn'")
+    expect(recheckCatchBlock).toContain('buildAcceptedQualityRepairFallbackReview')
+    expect(recheckCatchBlock).not.toContain('quality_gate_repair_failed')
+  })
+
+  test('keeps quality gate auto repair on a bounded lightweight review path', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const groupStart = source.indexOf('const generateChapterForGroup =')
+    const groupBlock = source.slice(groupStart, source.indexOf('return { generateChapterForGroup', groupStart))
+    const initialDecisionStart = source.indexOf('const initialReviewDecision = getQualityGateDecision', groupStart)
+    const preStoreStart = source.indexOf('const preStoreQualityDecision = getQualityGateDecision', initialDecisionStart)
+    const beforeGateBlock = source.slice(initialDecisionStart, preStoreStart)
+    const recheckStart = beforeGateBlock.indexOf("phase: 'quality_recheck'")
+    const recheckEnd = beforeGateBlock.indexOf('catch (qualityRecheckError', recheckStart)
+    const recheckBlock = beforeGateBlock.slice(recheckStart, recheckEnd)
+
+    expect(groupStart).toBeGreaterThanOrEqual(0)
+    expect(groupBlock).toContain('const qualityRepairLlmControlOptions =')
+    expect(groupBlock).toContain('quality_repair_llm_timeout_ms')
+    expect(groupBlock).toContain('revisionLlmTimeoutMs: qualityRepairTimeoutMs')
+    expect(groupBlock).toContain('revision_llm_timeout_ms: qualityRepairTimeoutMs')
+    expect(beforeGateBlock).toContain('qualityRepairLlmControlOptions')
+    expect(recheckStart).toBeGreaterThanOrEqual(0)
+    expect(recheckEnd).toBeGreaterThan(recheckStart)
+    expect(recheckBlock).toContain('fill_missing_structured_checks: false')
+    expect(recheckBlock).toContain('mergeQualityRecheckReviewWithStructuredEvidence')
+    expect(beforeGateBlock).toContain("phase: 'quality_recheck'")
+  })
+
+  test('repairs failed quality gates by revising from the existing self-review instead of running a second full self-review', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const groupStart = source.indexOf('const generateChapterForGroup =')
+    const qualityRepairStart = source.indexOf("phase: 'quality_gate_repair'", groupStart)
+    const qualityRecheckStart = source.indexOf("phase: 'quality_recheck'", qualityRepairStart)
+    const qualityRepairBlock = source.slice(qualityRepairStart, qualityRecheckStart)
+    const cleanupRepairStart = source.indexOf("phase: 'deterministic_cleanup_repair'", qualityRecheckStart)
+    const cleanupRepairEnd = source.indexOf('if (deterministicReviewTextChanged', cleanupRepairStart)
+    const cleanupRepairBlock = source.slice(cleanupRepairStart, cleanupRepairEnd)
+    const directRepairStart = source.indexOf('const runProseRevisionFromExistingReview = async')
+    const selfReviewStart = source.indexOf('const runProseSelfReviewAndRevision = async')
+
+    expect(directRepairStart).toBeGreaterThanOrEqual(0)
+    expect(selfReviewStart).toBeGreaterThan(directRepairStart)
+    expect(qualityRepairStart).toBeGreaterThan(groupStart)
+    expect(qualityRecheckStart).toBeGreaterThan(qualityRepairStart)
+    expect(qualityRepairBlock).toContain('const qualityGateRepair = await runProseRevisionFromExistingReview')
+    expect(qualityRepairBlock).toContain('base_review: selfCheck.review')
+    expect(qualityRepairBlock).toContain('quality_gate: initialReviewDecision')
+    expect(qualityRepairBlock).not.toContain('runProseSelfReviewAndRevision')
+    expect(cleanupRepairStart).toBeGreaterThan(qualityRecheckStart)
+    expect(cleanupRepairEnd).toBeGreaterThan(cleanupRepairStart)
+    expect(cleanupRepairBlock).toContain('const cleanupRepair = await runProseRevisionFromExistingReview')
+    expect(cleanupRepairBlock).toContain('base_review: selfCheck.review')
+    expect(cleanupRepairBlock).toContain('deterministic_prose_cleanup: deterministicProseCleanup')
+    expect(cleanupRepairBlock).not.toContain('runProseSelfReviewAndRevision')
+  })
+
+  test('reports scene-card progress as summaries instead of full card payloads', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const groupStart = source.indexOf('const generateChapterForGroup =')
+    const sceneTitlesStart = source.indexOf('scene_card_titles', groupStart)
+    const sceneSuccessStart = source.lastIndexOf("await onStage('scene_cards'", sceneTitlesStart)
+    const sceneSuccessBlock = source.slice(sceneSuccessStart, source.indexOf("if (!contextPackage.chapter_target.scene_cards.length", sceneSuccessStart))
+
+    expect(groupStart).toBeGreaterThanOrEqual(0)
+    expect(sceneTitlesStart).toBeGreaterThan(groupStart)
+    expect(sceneSuccessStart).toBeGreaterThan(groupStart)
+    expect(sceneSuccessBlock).toContain('scene_card_titles')
+    expect(sceneSuccessBlock).not.toContain('scene_cards: contextPackage.chapter_target.scene_cards')
+  })
+
+  test('fails visibly when the core prose review LLM request fails', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const reviewStart = source.indexOf('const runProseSelfReviewAndRevision = async')
+    const reviewResultStart = source.indexOf('const reviewResult = await executeNovelAgent', reviewStart)
+    const reviewPayloadStart = source.indexOf('const reviewPayload = getNovelPayload(reviewResult)', reviewResultStart)
+    const errorGuardBlock = source.slice(reviewResultStart, reviewPayloadStart)
+
+    expect(reviewStart).toBeGreaterThanOrEqual(0)
+    expect(reviewResultStart).toBeGreaterThan(reviewStart)
+    expect(reviewPayloadStart).toBeGreaterThan(reviewResultStart)
+    expect(errorGuardBlock).toContain('(reviewResult as any).error')
+    expect(errorGuardBlock).toContain('PROSE_REVIEW_FAILED')
+    expect(errorGuardBlock).toContain('buildLLMResultDiagnostics(reviewResult)')
+  })
+
+  test('stops structured review fill after a batch LLM failure', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const fillStart = source.indexOf('const fillMissingStructuredReviewChecks')
+    const loopStart = source.indexOf('for (const batchFields of batches)', fillStart)
+    const payloadStart = source.indexOf('const payload = getNovelPayload(result)', loopStart)
+    const batchGuardBlock = source.slice(loopStart, payloadStart)
+
+    expect(fillStart).toBeGreaterThanOrEqual(0)
+    expect(loopStart).toBeGreaterThan(fillStart)
+    expect(payloadStart).toBeGreaterThan(loopStart)
+    expect(batchGuardBlock).toContain('(result as any).error')
+    expect(batchGuardBlock).toContain('structured_fill_failed')
+    expect(batchGuardBlock).toContain('break')
+  })
+
+  test('reports internal prose review progress and bounds structured fill timeout', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const reviewStart = source.indexOf('const runProseSelfReviewAndRevision = async')
+    const reviewEnd = source.indexOf('const runCommercialEditorRewrite = async', reviewStart)
+    const reviewBlock = source.slice(reviewStart, reviewEnd)
+    const fillStart = source.indexOf('const fillMissingStructuredReviewChecks')
+    const fillEnd = source.indexOf('const shouldReviseProse =', fillStart)
+    const fillBlock = source.slice(fillStart, fillEnd)
+    const groupStart = source.indexOf('const generateChapterForGroup =')
+    const firstSelfCheckStart = source.indexOf('let selfCheck = await runProseSelfReviewAndRevision', groupStart)
+    const firstSelfCheckEnd = source.indexOf('const initialReviewDecision =', firstSelfCheckStart)
+    const firstSelfCheckBlock = source.slice(firstSelfCheckStart, firstSelfCheckEnd)
+
+    expect(reviewStart).toBeGreaterThanOrEqual(0)
+    expect(reviewBlock).toContain('const emitReviewProgress =')
+    expect(reviewBlock).toContain("emitReviewProgress('self_review_llm'")
+    expect(reviewBlock).toContain("emitReviewProgress('structured_review_fill'")
+    expect(reviewBlock).toContain("emitReviewProgress('revision_llm'")
+    expect(fillBlock).toContain('structuredReviewLlmTimeoutMs')
+    expect(fillBlock).toContain('timeoutMs: structuredReviewLlmTimeoutMs')
+    expect(firstSelfCheckBlock).toContain('onReviewProgress')
+  })
+
+  test('passes run-level structured review timeout from chapter group into prose self review', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const groupStart = source.indexOf('const generateChapterForGroup =')
+    const controlStart = source.indexOf('const llmControlOptions =', groupStart)
+    const controlEnd = source.indexOf('const reviewProgressDetail =', controlStart)
+    const controlBlock = source.slice(controlStart, controlEnd)
+    const firstSelfCheckStart = source.indexOf('let selfCheck = await runProseSelfReviewAndRevision', groupStart)
+    const firstSelfCheckEnd = source.indexOf('const initialReviewDecision =', firstSelfCheckStart)
+    const firstSelfCheckBlock = source.slice(firstSelfCheckStart, firstSelfCheckEnd)
+
+    expect(groupStart).toBeGreaterThanOrEqual(0)
+    expect(controlStart).toBeGreaterThan(groupStart)
+    expect(controlEnd).toBeGreaterThan(controlStart)
+    expect(controlBlock).toContain('structuredReviewLlmTimeoutMs: options.structured_review_llm_timeout_ms || options.structuredReviewLlmTimeoutMs')
+    expect(controlBlock).toContain('structured_review_llm_timeout_ms: options.structured_review_llm_timeout_ms || options.structuredReviewLlmTimeoutMs')
+    expect(firstSelfCheckBlock).toContain('...llmControlOptions')
+  })
+
+  test('bounds prose self-review LLM timeout and reports the effective limit', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const reviewStart = source.indexOf('const runProseSelfReviewAndRevision = async')
+    const reviewResultStart = source.indexOf('const reviewResult = await executeNovelAgent', reviewStart)
+    const reviewPayloadStart = source.indexOf('const reviewPayload = getNovelPayload(reviewResult)', reviewResultStart)
+    const reviewBlock = source.slice(reviewStart, reviewPayloadStart)
+    const groupStart = source.indexOf('const generateChapterForGroup =')
+    const controlStart = source.indexOf('const llmControlOptions =', groupStart)
+    const controlEnd = source.indexOf('const reviewProgressDetail =', controlStart)
+    const controlBlock = source.slice(controlStart, controlEnd)
+    const qualityControlStart = source.indexOf('const qualityRepairLlmControlOptions =', groupStart)
+    const qualityControlEnd = source.indexOf('const throwIfChapterGenerationAborted', qualityControlStart)
+    const qualityControlBlock = source.slice(qualityControlStart, qualityControlEnd)
+
+    expect(reviewStart).toBeGreaterThanOrEqual(0)
+    expect(reviewResultStart).toBeGreaterThan(reviewStart)
+    expect(reviewPayloadStart).toBeGreaterThan(reviewResultStart)
+    expect(controlBlock).toContain('reviewLlmTimeoutMs: options.review_llm_timeout_ms || options.reviewLlmTimeoutMs')
+    expect(controlBlock).toContain('review_llm_timeout_ms: options.review_llm_timeout_ms || options.reviewLlmTimeoutMs')
+    expect(reviewBlock).toContain('const reviewLlmTimeoutMs =')
+    expect(reviewBlock).toContain('options.reviewLlmTimeoutMs || options.review_llm_timeout_ms')
+    expect(reviewBlock).toContain('review_llm_timeout_ms: reviewLlmTimeoutMs')
+    expect(reviewBlock).toContain('timeoutMs: reviewLlmTimeoutMs')
+    expect(qualityControlBlock).toContain('reviewLlmTimeoutMs: qualityRepairTimeoutMs')
+    expect(qualityControlBlock).toContain('review_llm_timeout_ms: qualityRepairTimeoutMs')
+  })
+
+  test('bounds prose revision LLM timeout and preserves current text on revision failure', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const reviewStart = source.indexOf('const runProseSelfReviewAndRevision = async')
+    const revisionProgressStart = source.indexOf("await emitReviewProgress('revision_llm'", reviewStart)
+    const revisionCallStart = source.indexOf("revisionResult = await executeNovelAgent('prose-agent'", revisionProgressStart)
+    const revisionPayloadStart = source.indexOf('const revisionPayload = getNovelPayload(revisionResult)', revisionCallStart)
+    const revisionBlock = source.slice(revisionProgressStart, revisionPayloadStart)
+
+    expect(reviewStart).toBeGreaterThanOrEqual(0)
+    expect(revisionProgressStart).toBeGreaterThan(reviewStart)
+    expect(revisionCallStart).toBeGreaterThan(revisionProgressStart)
+    expect(revisionPayloadStart).toBeGreaterThan(revisionCallStart)
+    expect(revisionBlock).toContain('const revisionLlmTimeoutMs =')
+    expect(revisionBlock).toContain('options.revisionLlmTimeoutMs || options.revision_llm_timeout_ms')
+    expect(revisionBlock).toContain('revision_llm_timeout_ms: revisionLlmTimeoutMs')
+    expect(revisionBlock).toContain('try {')
+    expect(revisionBlock).toContain('timeoutMs: revisionLlmTimeoutMs')
+    expect(revisionBlock).toContain('catch (revisionError')
+    expect(revisionBlock).toContain('if (isAbortError(revisionError)) throw revisionError')
+    expect(revisionBlock).toContain('final_text: chapterText')
+    expect(revisionBlock).toContain('revised: false')
+  })
+
+  test('uses compact prose context snapshots in review and revision prompts', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const reviewPromptStart = source.indexOf('const buildProseReviewPrompt =')
+    const revisionPromptStart = source.indexOf('const buildProseRevisionPrompt =', reviewPromptStart)
+    const reviewPromptBlock = source.slice(reviewPromptStart, revisionPromptStart)
+    const revisionPromptEnd = source.indexOf('const runCommercialEditorRewrite', revisionPromptStart)
+    const revisionPromptBlock = source.slice(revisionPromptStart, revisionPromptEnd)
+
+    expect(reviewPromptStart).toBeGreaterThanOrEqual(0)
+    expect(revisionPromptStart).toBeGreaterThan(reviewPromptStart)
+    expect(revisionPromptEnd).toBeGreaterThan(revisionPromptStart)
+    expect(reviewPromptBlock).toContain('prosePromptJson(buildProsePromptContextSnapshot(contextPackage)')
+    expect(reviewPromptBlock).not.toContain('JSON.stringify(contextPackage, null, 2).slice')
+    expect(revisionPromptBlock).toContain('prosePromptJson(buildProsePromptContextSnapshot(contextPackage)')
+    expect(revisionPromptBlock).not.toContain('JSON.stringify(contextPackage, null, 2).slice')
+  })
+
+  test('surfaces prose revision failure diagnostics instead of reporting a skipped revision', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const groupStart = source.indexOf('const generateChapterForGroup =')
+    const reviseStageStart = source.indexOf("await onStage('revise'", groupStart)
+    const postReviewWordTargetStart = source.indexOf('const postReviewWordTargetCheck = await ensureProseMeetsWordTarget', reviseStageStart)
+    const reviseStageBlock = source.slice(reviseStageStart, postReviewWordTargetStart)
+
+    expect(reviseStageStart).toBeGreaterThan(groupStart)
+    expect(postReviewWordTargetStart).toBeGreaterThan(reviseStageStart)
+    expect(reviseStageBlock).toContain('const revisionStageStatus = selfCheck.revised ?')
+    expect(reviseStageBlock).toContain("selfCheck?.revision?.error ? 'warn' : 'skipped'")
+    expect(reviseStageBlock).toContain('revision_error: selfCheck?.revision?.error ||')
+  })
+
+  test('feeds quality gate failure reasons into the oh-story revision strategy brief', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const strategyStart = source.indexOf('export function buildRevisionStrategyBrief')
+    const strategyEnd = source.indexOf('function proseQualityPlatformRubricRisks', strategyStart)
+    const strategyBlock = source.slice(strategyStart, strategyEnd)
+    const revisionPrompt = source.slice(
+      source.indexOf('const buildProseRevisionPrompt'),
+      source.indexOf('const shouldReviseProse'),
+    )
+
+    expect(strategyStart).toBeGreaterThanOrEqual(0)
+    expect(strategyEnd).toBeGreaterThan(strategyStart)
+    expect(strategyBlock).toContain('const qualityGateFailureRisks = proseQualityGateFailureRisks(review)')
+    expect(strategyBlock).toContain("field: 'quality_gate'")
+    expect(revisionPrompt).toContain('若无法输出严格 JSON，也必须直接输出修订后的完整正文')
+  })
+
   test('passes run-level quality threshold from chapter group worker into chapter generation', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-production-service.ts'), 'utf8')
     const executeStart = source.indexOf('const chapterResult = await ctx.generateChapterForGroup')
@@ -53724,6 +54808,64 @@ describe('chapter context word target source guards', () => {
     expect(generateChapterBlock).toContain('abortSignal: options.abortSignal')
     expect(generateChapterBlock).toContain('llmTimeoutMs: options.llmTimeoutMs')
     expect(generateChapterBlock).toContain('signal: options.abortSignal')
+  })
+
+  test('passes compact previous chapter handoffs into prose draft generation', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const utilsSource = readFileSync(join(import.meta.dir, 'novel-route-utils.ts'), 'utf8')
+    const groupStart = source.indexOf('const generateChapterForGroup = async')
+    const prevChaptersStart = source.indexOf('const prevChapters = compactPreviousChaptersForProse', groupStart)
+    const draftCallStart = source.indexOf('const draftResult = await generateNovelChapterProse', prevChaptersStart)
+    const previousChapterBlock = source.slice(prevChaptersStart, draftCallStart)
+    const draftCallBlock = source.slice(draftCallStart, source.indexOf('const resultPayload = getNovelPayload', draftCallStart))
+    const helperStart = utilsSource.indexOf('export function compactPreviousChaptersForProse')
+    const helperBlock = utilsSource.slice(helperStart, utilsSource.indexOf('export const COMMERCIAL_WEB_NOVEL_STYLE_LOCK_DEFAULTS', helperStart))
+
+    expect(groupStart).toBeGreaterThanOrEqual(0)
+    expect(prevChaptersStart).toBeGreaterThan(groupStart)
+    expect(draftCallStart).toBeGreaterThan(prevChaptersStart)
+    expect(helperStart).toBeGreaterThanOrEqual(0)
+    expect(previousChapterBlock).toContain('compactPreviousChaptersForProse')
+    expect(previousChapterBlock).not.toContain('chapter_text: ch.chapter_text')
+    expect(helperBlock).toContain('ending_excerpt')
+    expect(helperBlock).toContain('chapter_text: endingExcerpt')
+    expect(helperBlock).not.toContain('chapter_text: chapter.chapter_text')
+    expect(draftCallBlock).toContain('prevChapters')
+    expect(draftCallBlock).toContain('paragraphTask: buildParagraphProseContext')
+  })
+
+  test('checks abort signal between expensive chapter prose pipeline stages', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const groupStart = source.indexOf('const generateChapterForGroup =')
+    const groupBlock = source.slice(groupStart, source.indexOf('return { generateChapterForGroup', groupStart))
+    const checkpoints = groupBlock.match(/throwIfChapterGenerationAborted\(\)/g) || []
+
+    expect(groupStart).toBeGreaterThanOrEqual(0)
+    expect(groupBlock).toContain('const throwIfChapterGenerationAborted = () => throwIfAborted(llmControlOptions)')
+    expect(checkpoints.length).toBeGreaterThanOrEqual(14)
+    expect(groupBlock).toContain("throwIfChapterGenerationAborted()\n    await onStage('draft'")
+    expect(groupBlock).toContain("throwIfChapterGenerationAborted()\n    await onStage('editor'")
+    expect(groupBlock).toContain("throwIfChapterGenerationAborted()\n    await onStage('meme_polish'")
+    expect(groupBlock).toContain("throwIfChapterGenerationAborted()\n    await onStage('review'")
+    expect(groupBlock).toContain("throwIfChapterGenerationAborted()\n    await onStage('story_state'")
+  })
+
+  test('defers non-blocking readability review without weakening core oh-story gates', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const groupStart = source.indexOf('const generateChapterForGroup =')
+    const selfReviewStart = source.indexOf('let selfCheck = await runProseSelfReviewAndRevision', groupStart)
+    const readabilityStart = source.indexOf('if (shouldRunSynchronousReadabilityReview(options, project))', selfReviewStart)
+    const qualityGateStart = source.indexOf('const preStoreQualityDecision = getQualityGateDecision', selfReviewStart)
+    const readabilityBlock = source.slice(readabilityStart, source.indexOf('let proseRevisionReceiptSync', readabilityStart))
+
+    expect(groupStart).toBeGreaterThanOrEqual(0)
+    expect(selfReviewStart).toBeGreaterThan(groupStart)
+    expect(readabilityStart).toBeGreaterThan(selfReviewStart)
+    expect(qualityGateStart).toBeGreaterThan(readabilityStart)
+    expect(readabilityBlock).toContain('shouldRunSynchronousReadabilityReview(options, project)')
+    expect(readabilityBlock).toContain("status: 'skipped'")
+    expect(readabilityBlock).toContain('deferred: true')
+    expect(readabilityBlock).toContain('run_readability_review')
   })
 
   test('keeps aborted unattended chapters resumable instead of consuming retry attempts', () => {
@@ -53896,7 +55038,7 @@ describe('chapter context word target source guards', () => {
 
     expect(reviewBlock).toContain('const deterministicDialogueHardChecks = [buildDialogueDeterministicCheck(chapterText)].filter(Boolean)')
     expect(reviewBlock).toContain('const deterministicCharacterBehaviorChecks = [buildCharacterBehaviorDeterministicCheck(chapterText)].filter(Boolean)')
-    expect(reviewBlock).toContain('const deterministicEmotionalArcChecks = [buildEmotionalArcDeterministicCheck(chapterText)].filter(Boolean)')
+    expect(reviewBlock).toMatch(/const deterministicEmotionalArcChecks = \[buildEmotionalArcDeterministicCheck\(chapterText, \{[\s\S]*scanEmotionalStasisRisks[\s\S]*scanDownwardSafetyRisks[\s\S]*scanOppressionPurposeRisks[\s\S]*scanPayoffDensityRisks[\s\S]*scanPayoffEscalationRisks[\s\S]*scanTrumpCardEffectRisks/)
     expect(reviewBlock).toContain('const deterministicSuspenseHardChecks = [buildSuspenseDeterministicCheck(chapterText)].filter(Boolean)')
     expect(reviewBlock).toContain('const deterministicReversalHardChecks = [buildReversalDeterministicCheck(chapterText)].filter(Boolean)')
     expect(reviewBlock).toContain('const deterministicShowdownHardChecks = [buildShowdownDeterministicCheck(chapterText)].filter(Boolean)')
@@ -54077,7 +55219,7 @@ describe('chapter context word target source guards', () => {
     expect(receipts[0].risk_item).toContain('IP场面延展')
     expect(receipts[0].required_action).toContain('玻璃门内外对峙')
     expect(receipts[0].delivered).toBe(false)
-    expect(receipts[0].remaining_risk).toContain('缺少 delivery_risk_receipts')
+    expect(receipts[0].remaining_risk).toContain('承接回执缺失')
   })
 
   test('creates a failed delivery risk receipt for omitted safe-batch carry-over receipts', () => {
@@ -54097,7 +55239,7 @@ describe('chapter context word target source guards', () => {
     expect(receipts[0].risk_item).toContain('安全连写承接')
     expect(receipts[0].required_action).toContain('广播室名单')
     expect(receipts[0].delivered).toBe(false)
-    expect(receipts[0].remaining_risk).toContain('缺少 delivery_risk_receipts')
+    expect(receipts[0].remaining_risk).toContain('承接回执缺失')
   })
 
   test('creates failed receipts for every carry-over row when review omits all receipts', () => {
@@ -54221,7 +55363,7 @@ describe('chapter context word target source guards', () => {
     expect(receipts[1].risk_item).toContain('IP场面延展')
     expect(receipts[1].required_action).toContain('玻璃门内外对峙')
     expect(receipts[1].delivered).toBe(false)
-    expect(receipts[1].remaining_risk).toContain('缺少 delivery_risk_receipts')
+    expect(receipts[1].remaining_risk).toContain('承接回执缺失')
   })
 
   test('creates failed receipts for required actions omitted under one carry-over item', () => {
@@ -54254,7 +55396,7 @@ describe('chapter context word target source guards', () => {
     expect(receipts).toHaveLength(2)
     expect(receipts[1].required_action).toContain('广播室名单翻页')
     expect(receipts[1].delivered).toBe(false)
-    expect(receipts[1].remaining_risk).toContain('缺少 delivery_risk_receipts')
+    expect(receipts[1].remaining_risk).toContain('承接回执缺失')
   })
 
   test('creates failed receipts for omitted forbidden repeat carry-over checks', () => {
@@ -54277,7 +55419,7 @@ describe('chapter context word target source guards', () => {
     expect(receipts[1].required_action).toContain('禁用重复')
     expect(receipts[1].required_action).toContain('不要再用“他知道，这只是开始”总结体收尾')
     expect(receipts[1].delivered).toBe(false)
-    expect(receipts[1].remaining_risk).toContain('缺少 delivery_risk_receipts')
+    expect(receipts[1].remaining_risk).toContain('承接回执缺失')
   })
 
   test('carries deslop repair receipt residual risks into the next pre-draft brief and prose prompt', () => {
@@ -55126,7 +56268,7 @@ describe('chapter context word target source guards', () => {
     expect(result.text).not.toContain('-门')
     expect(result.text.split('\n')).not.toContain('---')
     expect(result.changed).toBe(true)
-    expect(result.change_count).toBeGreaterThanOrEqual(5)
+    expect(result.change_count).toBeGreaterThanOrEqual(4)
     expect(result.rules).toEqual(expect.arrayContaining([
       'ellipsis_to_comma',
       'dash_to_comma',
@@ -55206,16 +56348,17 @@ describe('chapter context word target source guards', () => {
       '第三章 风起',
       '他停在门口。',
       '',
+      '',
       '　　门外的影子动了一下。',
       '**这不是正文应该保留的加粗标记。**',
     ].join('\n'))
 
     expect(checks.map((item: any) => item.key)).toEqual(expect.arrayContaining([
-      'format_blank_line_3',
-      'format_indentation_line_4',
-      'format_markdown_line_5',
+      'format_blank_line_4',
+      'format_indentation_line_5',
+      'format_markdown_line_6',
     ]))
-    expect(checks.map((item: any) => item.fix).join('｜')).toContain('按戏剧单元紧密排列')
+    expect(checks.map((item: any) => item.fix).join('｜')).toContain('合并多余空行')
     expect(checks.map((item: any) => item.fix).join('｜')).toContain('删除正文 Markdown')
   })
 
@@ -55250,15 +56393,15 @@ describe('chapter context word target source guards', () => {
 
     expect(result.text).toBe([
       '第三章 风起',
+      '',
       '门外的影子动了一下。',
       '他把门推开。',
       '走廊里没有脚步声。',
       '水迹停在门缝外。',
     ].join('\n'))
     expect(result.changed).toBe(true)
-    expect(result.change_count).toBeGreaterThanOrEqual(5)
+    expect(result.change_count).toBeGreaterThanOrEqual(4)
     expect(result.rules).toEqual(expect.arrayContaining([
-      'blank_lines_removed',
       'indentation_removed',
       'markdown_bold_removed',
       'markdown_quote_marker_removed',
@@ -55285,12 +56428,12 @@ describe('chapter context word target source guards', () => {
       'stage: draft',
       '---',
       '第三章 风起',
+      '',
       '门外的影子动了一下。',
       '他把门推开。',
     ].join('\n'))
     expect(result.changed).toBe(true)
     expect(result.rules).toEqual(expect.arrayContaining([
-      'blank_lines_removed',
       'indentation_removed',
       'markdown_bold_removed',
     ]))
@@ -55445,22 +56588,30 @@ describe('chapter context word target source guards', () => {
 
   test('prose generation stores deterministic prose cleanup review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const postDeliverySource = readPostDeliveryStoryStateUpdateSource()
+    const reviewRecordSource = readPostDeliverySyncReviewRecordSource()
 
     expect(source).toContain('let deterministicProseCleanup = buildDeterministicProseCleanupReport(chapter, finalText)')
-    expect(source).toContain("review_type: 'deterministic_prose_cleanup'")
-    expect(source).toContain('storyStateUpdateWithSync.deterministic_prose_cleanup = deterministicProseCleanup')
-    expect(source).toContain('deterministic_prose_cleanup: deterministicProseCleanup')
+    expect(source).toContain('buildDeterministicProseCleanupReviewRecord({')
+    expect(reviewRecordSource).toContain("review_type: 'deterministic_prose_cleanup'")
+    expect(postDeliverySource).toContain("['deterministicProseCleanup', 'deterministic_prose_cleanup']")
+    expect(source).toContain('deterministicProseCleanup,')
   })
 
   test('stores deterministic normalization audits with deterministic cleanup review', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const storeStart = source.indexOf('const storeDeterministicProseCleanup = async () => {')
+    const reviewRecordSource = readPostDeliverySyncReviewRecordSource()
+    const storeStart = source.indexOf('buildDeterministicProseCleanupReviewRecord({')
     const storeEnd = source.indexOf('if (isDraftReviewOnly)', storeStart)
     const storeBlock = source.slice(storeStart, storeEnd)
 
-    expect(storeBlock).toContain('Number(deterministicProseCleanup.risk_count || 0) <= 0 && !formatNormalization.changed && !punctuationNormalization.changed')
-    expect(storeBlock).toContain('deterministic_format_normalization: formatNormalization')
-    expect(storeBlock).toContain('deterministic_punctuation_normalization: punctuationNormalization')
+    expect(storeBlock).toContain('formatNormalization,')
+    expect(storeBlock).toContain('punctuationNormalization,')
+    expect(reviewRecordSource).toContain('Number(cleanup.risk_count || 0) <= 0')
+    expect(reviewRecordSource).toContain('!input.formatNormalization?.changed')
+    expect(reviewRecordSource).toContain('!input.punctuationNormalization?.changed')
+    expect(reviewRecordSource).toContain('deterministic_format_normalization: input.formatNormalization')
+    expect(reviewRecordSource).toContain('deterministic_punctuation_normalization: input.punctuationNormalization')
   })
 
   test('turns deterministic prose cleanup residuals into quality gate blockers', () => {
@@ -55495,11 +56646,145 @@ describe('chapter context word target source guards', () => {
     expect(decision.reasons.join('｜')).toContain('严重问题')
   })
 
+  test('does not promote nonblocking deterministic cleanup warnings to critical gate failures', () => {
+    const review = buildQualityGateReviewWithDeterministicCleanup({
+      passed: true,
+      score: 92,
+      issues: [],
+      revised: true,
+      next_chapter_quality_plan: {
+        quality_focus: ['继续压住规则危机'],
+        opening_actions: ['承接清算倒计时'],
+        middle_actions: ['兑现资产代价'],
+        ending_actions: ['留下镇门钩子'],
+        avoid_repetition: ['不要解释设定'],
+        evidence_basis: ['上一章门禁'],
+      },
+    }, {
+      risk_count: 2,
+      categories: [
+        {
+          type: 'payoff_density',
+          label: '回报密度不足',
+          count: 1,
+          has_blocking: false,
+          evidence: ['中段偏长'],
+          required_actions: ['下一章继续补阶段回报'],
+        },
+        {
+          type: 'deslop',
+          label: '去AI味硬伤',
+          count: 1,
+          has_blocking: false,
+          evidence: ['冰冷'],
+          required_actions: ['替换冰冷'],
+        },
+      ],
+    })
+
+    expect(review.issues.map((item: any) => item.severity)).not.toContain('critical')
+    const decision = getQualityGateDecision({
+      reference_config: {
+        quality_gate: {
+          enabled: true,
+          min_score: 78,
+          max_critical_issues: 0,
+          max_high_issues: 1,
+        },
+      },
+    }, review)
+    expect(decision.passed).toBe(true)
+  })
+
+  test('uses a conservative passing score only when score was defaulted and cleanup is clean', () => {
+    const review = buildQualityGateReviewWithDeterministicCleanup({
+      passed: true,
+      score: 80,
+      score_defaulted: true,
+      issues: [],
+      revised: true,
+      next_chapter_quality_plan: {
+        quality_focus: ['继续压住规则危机'],
+        opening_actions: ['承接清算倒计时'],
+        middle_actions: ['兑现资产代价'],
+        ending_actions: ['留下镇门钩子'],
+        avoid_repetition: ['不要解释设定'],
+        evidence_basis: ['上一章门禁'],
+      },
+    }, {
+      status: 'ok',
+      risk_count: 0,
+      categories: [],
+    })
+
+    expect(review.score).toBeGreaterThanOrEqual(85)
+    expect(review.score_defaulted).toBe(true)
+    expect(review.deterministic_score_fallback.reason).toBe('clean_after_deterministic_cleanup')
+
+    const decision = getQualityGateDecision({
+      reference_config: {
+        quality_gate: {
+          enabled: true,
+          min_score: 85,
+          max_critical_issues: 0,
+          max_high_issues: 1,
+        },
+      },
+    }, review)
+    expect(decision.passed).toBe(true)
+  })
+
+  test('keeps a defaulted review below gate when deterministic cleanup still has residuals', () => {
+    const review = buildQualityGateReviewWithDeterministicCleanup({
+      passed: true,
+      score: 80,
+      score_defaulted: true,
+      issues: [],
+      revised: true,
+      next_chapter_quality_plan: {
+        quality_focus: ['继续压住规则危机'],
+        opening_actions: ['承接清算倒计时'],
+        middle_actions: ['兑现资产代价'],
+        ending_actions: ['留下镇门钩子'],
+        avoid_repetition: ['不要解释设定'],
+        evidence_basis: ['上一章门禁'],
+      },
+    }, {
+      risk_count: 1,
+      categories: [
+        {
+          type: 'deslop',
+          label: '去AI味硬伤',
+          count: 1,
+          has_blocking: false,
+          evidence: ['缓缓'],
+          required_actions: ['替换缓缓'],
+        },
+      ],
+    })
+
+    expect(review.score).toBeLessThan(85)
+    expect(review.deterministic_score_fallback.reason).toBe('deterministic_cleanup_residuals')
+
+    const decision = getQualityGateDecision({
+      reference_config: {
+        quality_gate: {
+          enabled: true,
+          min_score: 85,
+          max_critical_issues: 0,
+          max_high_issues: 1,
+        },
+      },
+    }, review)
+    expect(decision.passed).toBe(false)
+    expect(decision.reasons.join('｜')).toContain('质检评分')
+  })
+
   test('quality gates evaluate deterministic prose cleanup residuals before storing prose', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const cleanupStart = source.indexOf('let deterministicProseCleanup = buildDeterministicProseCleanupReport(chapter, finalText)', groupStart)
-    const gateReviewStart = source.indexOf('const qualityGateReview = buildQualityGateReviewWithDeterministicCleanup', cleanupStart)
+    const gateReviewStart = source.indexOf('let qualityGateReview = buildQualityGateReviewWithDeterministicCleanup', cleanupStart)
     const preStoreStart = source.indexOf('const preStoreQualityDecision =', gateReviewStart)
     const finalStart = source.indexOf('const finalQualityDecision =', preStoreStart)
     const gateBlock = source.slice(cleanupStart, finalStart + 260)
@@ -55516,11 +56801,55 @@ describe('chapter context word target source guards', () => {
     expect(gateBlock).toContain('getQualityGateDecision(qualityGateProject, qualityGateReview, safetyDecision)')
   })
 
+  test('runs bounded deterministic cleanup repairs and language normalization before quality gate', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const groupStart = source.indexOf('const generateChapterForGroup =')
+    const cleanupStart = source.indexOf('let deterministicProseCleanup = buildDeterministicProseCleanupReport(chapter, finalText)', groupStart)
+    const gateReviewStart = source.indexOf('let qualityGateReview = buildQualityGateReviewWithDeterministicCleanup', cleanupStart)
+    const cleanupBlock = source.slice(cleanupStart, gateReviewStart)
+    const preCleanupBlock = source.slice(groupStart, cleanupStart)
+
+    expect(cleanupStart).toBeGreaterThan(groupStart)
+    expect(gateReviewStart).toBeGreaterThan(cleanupStart)
+    expect(preCleanupBlock).toContain('const deslopTermNormalization = normalizeDeterministicProseDeslopTerms(finalText)')
+    expect(preCleanupBlock).toContain("phase: 'deterministic_deslop_term_normalize'")
+    expect(source.indexOf('normalizeDeterministicProseDeslopTerms(finalText)', groupStart)).toBeLessThan(cleanupStart)
+    expect(cleanupBlock).toContain('deterministicCleanupRepairMaxAttempts')
+    expect(cleanupBlock).toContain('cleanupRepairAttempt <=')
+    expect(cleanupBlock).toContain('normalizeDeterministicProseLanguageFragments(finalText)')
+    expect(cleanupBlock).toContain('normalizeDeterministicProseDeslopTerms(finalText)')
+    expect(cleanupBlock).toContain("phase: 'deterministic_cleanup_repair_language_normalize'")
+    expect(cleanupBlock).toContain("phase: 'deterministic_cleanup_repair_deslop_term_normalize'")
+    expect(cleanupBlock).toContain('resolveProseLanguageRiskReview(selfCheck.review, finalText)')
+  })
+
+  test('rechecks quality after deterministic cleanup repair before the final quality gate', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const groupStart = source.indexOf('const generateChapterForGroup =')
+    const cleanupStart = source.indexOf('let deterministicProseCleanup = buildDeterministicProseCleanupReport(chapter, finalText)', groupStart)
+    const syncStart = source.indexOf('const syncChapterForReceiptEvidence', cleanupStart)
+    const gateReviewStart = source.indexOf('let qualityGateReview = buildQualityGateReviewWithDeterministicCleanup', cleanupStart)
+    const cleanupBlock = source.slice(cleanupStart, gateReviewStart)
+    const recheckStart = cleanupBlock.indexOf("phase: 'deterministic_cleanup_recheck'")
+    const recheckEnd = cleanupBlock.indexOf('deterministicProseCleanup = buildDeterministicProseCleanupReport(chapter, finalText)', recheckStart)
+    const recheckBlock = cleanupBlock.slice(recheckStart, recheckEnd)
+
+    expect(cleanupStart).toBeGreaterThan(groupStart)
+    expect(syncStart).toBeGreaterThan(cleanupStart)
+    expect(gateReviewStart).toBeGreaterThan(syncStart)
+    expect(recheckStart).toBeGreaterThanOrEqual(0)
+    expect(recheckEnd).toBeGreaterThan(recheckStart)
+    expect(recheckBlock).toContain('runProseSelfReviewAndRevision')
+    expect(recheckBlock).toContain('revise: false')
+    expect(recheckBlock).toContain('fill_missing_structured_checks: false')
+    expect(recheckBlock).toContain('mergeQualityRecheckReviewWithStructuredEvidence')
+  })
+
   test('quality gates include prose revision receipt sync failures before storing prose', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const syncStart = source.indexOf('let proseRevisionReceiptSync = buildProseRevisionReceiptSyncReport(chapter, selfCheck)', groupStart)
-    const gateReviewStart = source.indexOf('const qualityGateReview =', syncStart)
+    const gateReviewStart = source.indexOf('let qualityGateReview =', syncStart)
     const preStoreStart = source.indexOf('const preStoreQualityDecision =', gateReviewStart)
     const gateBlock = source.slice(syncStart, preStoreStart)
 
@@ -55536,7 +56865,7 @@ describe('chapter context word target source guards', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const deslopCheckStart = source.indexOf('let deslopRepairReceiptSync = buildDeslopRepairReceiptSyncReport(chapter, selfCheck)', groupStart)
-    const gateReviewStart = source.indexOf('const qualityGateReview =', deslopCheckStart)
+    const gateReviewStart = source.indexOf('let qualityGateReview =', deslopCheckStart)
     const preStoreStart = source.indexOf('const preStoreQualityDecision =', gateReviewStart)
     const gateBlock = source.slice(deslopCheckStart, preStoreStart)
 
@@ -55556,7 +56885,7 @@ describe('chapter context word target source guards', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const qualityCheckStart = source.indexOf('let qualityAuditRepairReceiptSync = buildQualityAuditRepairReceiptSyncReport(chapter, selfCheck)', groupStart)
-    const gateReviewStart = source.indexOf('const qualityGateReview =', qualityCheckStart)
+    const gateReviewStart = source.indexOf('let qualityGateReview =', qualityCheckStart)
     const preStoreStart = source.indexOf('const preStoreQualityDecision =', gateReviewStart)
     const gateBlock = source.slice(qualityCheckStart, preStoreStart)
 
@@ -55574,7 +56903,7 @@ describe('chapter context word target source guards', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const syncChapterStart = source.indexOf('const syncChapterForReceiptEvidence = { ...chapter, chapter_text: finalText }', groupStart)
-    const gateReviewStart = source.indexOf('const qualityGateReview =', syncChapterStart)
+    const gateReviewStart = source.indexOf('let qualityGateReview =', syncChapterStart)
     const syncBlock = source.slice(syncChapterStart, gateReviewStart)
 
     expect(syncChapterStart).toBeGreaterThan(groupStart)
@@ -55586,23 +56915,7 @@ describe('chapter context word target source guards', () => {
     expect(syncBlock).toContain('proseQualityDeslopRepairReceiptRisks({ self_check: selfCheck }, finalText)')
   })
 
-  test('quality gates include revision cascade evidence failures before storing prose', () => {
-    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const groupStart = source.indexOf('const generateChapterForGroup =')
-    const cascadeCheckStart = source.indexOf('const revisionCascadeImpactChecks =', groupStart)
-    const gateReviewStart = source.indexOf('const qualityGateReview =', cascadeCheckStart)
-    const gateBlock = source.slice(cascadeCheckStart, gateReviewStart + 420)
-
-    expect(cascadeCheckStart).toBeGreaterThan(groupStart)
-    expect(gateReviewStart).toBeGreaterThan(cascadeCheckStart)
-    expect(gateBlock).toContain('revisionCascadeImpactSync.evidence_missing')
-    expect(gateBlock).toContain('revisionCascadeImpactSync.evidence_unlocated')
-    expect(gateBlock).toContain("key: 'revision_cascade_impact_evidence'")
-    expect(gateBlock).toContain('修订级联影响证据未闭环')
-    expect(gateBlock).toContain('...revisionCascadeImpactChecks')
-  })
-
-  test('quality gates include post-delivery receipt sync failures before storing prose', () => {
+  test('quality gates keep post-delivery receipt sync failures as advisory diagnostics before storing prose', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const postDeliveryCheckStart = source.indexOf('const postDeliveryReceiptChecks =', groupStart)
@@ -55619,34 +56932,39 @@ describe('chapter context word target source guards', () => {
     expect(gateBlock).toContain("sync_key: 'scene_card_receipts_sync'")
     expect(gateBlock).toContain("sync_key: 'delivery_risk_receipts_sync'")
     expect(gateBlock).toContain('post_delivery_receipt_sync')
-    expect(gateBlock).toContain('qualityGateReview.quality_audit_checks =')
+    expect(gateBlock).toContain('qualityGateReview.post_delivery_receipt_checks = postDeliveryReceiptChecks')
+    expect(gateBlock).not.toContain('qualityGateReview.quality_audit_checks =')
   })
 
-  test('draft review quality decision includes post-delivery receipt sync failures', () => {
+  test('draft review quality decision excludes post-delivery receipt sync advisories from the hard gate', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const postDeliveryCheckStart = source.indexOf('const postDeliveryReceiptChecks =', groupStart)
-    const postDeliveryMergeStart = source.indexOf('qualityGateReview.quality_audit_checks =', postDeliveryCheckStart)
+    const postDeliveryAdvisoryStart = source.indexOf('qualityGateReview.post_delivery_receipt_checks = postDeliveryReceiptChecks', postDeliveryCheckStart)
     const draftQualityDecisionStart = source.indexOf('const draftQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', groupStart)
     const draftReviewOnlyStart = source.indexOf('if (isDraftReviewOnly)', groupStart)
 
     expect(postDeliveryCheckStart).toBeGreaterThan(groupStart)
-    expect(postDeliveryMergeStart).toBeGreaterThan(postDeliveryCheckStart)
-    expect(draftQualityDecisionStart).toBeGreaterThan(postDeliveryMergeStart)
+    expect(postDeliveryAdvisoryStart).toBeGreaterThan(postDeliveryCheckStart)
+    expect(draftQualityDecisionStart).toBeGreaterThan(postDeliveryAdvisoryStart)
     expect(draftReviewOnlyStart).toBeGreaterThan(draftQualityDecisionStart)
   })
 
   test('returns quality audit repair receipt sync in story state update summaries', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const postDeliverySource = readPostDeliveryStoryStateUpdateSource()
+    const reviewRecordSource = readPostDeliverySyncReviewRecordSource()
 
-    expect(source).toContain("review_type: 'quality_audit_repair_receipt_sync'")
+    expect(source).toContain("reviewType: 'quality_audit_repair_receipt_sync'")
+    expect(reviewRecordSource).toContain('review_type: input.reviewType')
     expect(source).toContain('buildQualityAuditRepairReceiptSyncReport(chapter, selfCheck)')
-    expect(source).toContain('storyStateUpdateWithSync.quality_audit_repair_receipt_sync = qualityAuditRepairReceiptSync')
-    expect(source).toContain('quality_audit_repair_receipt_sync: qualityAuditRepairReceiptSync')
+    expect(postDeliverySource).toContain("['qualityAuditRepairReceiptSync', 'quality_audit_repair_receipt_sync']")
+    expect(source).toContain('qualityAuditRepairReceiptSync,')
   })
 
   test('returns deterministic prose hygiene sync in draft review only summaries', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const draftReviewRecordSource = readDraftSyncReviewRecordSource()
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const draftReviewOnlyStart = source.indexOf('if (isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
@@ -55654,10 +56972,12 @@ describe('chapter context word target source guards', () => {
 
     expect(draftBlock).toContain('const draftProseMetaSync = buildProseMetaSyncReport(project, chapter, contextPackage, finalText)')
     expect(draftBlock).toContain('const draftSourceReadinessSync = buildSourceReadinessSyncReport(project, chapter, contextPackage, finalText)')
-    expect(draftBlock).toContain("review_type: 'prose_meta_sync'")
-    expect(draftBlock).toContain("review_type: 'source_readiness_sync'")
-    expect(draftBlock).toContain('prose_meta_sync: draftProseMetaSync')
-    expect(draftBlock).toContain('source_readiness_sync: draftSourceReadinessSync')
+    expect(draftBlock).toContain("reviewType: 'prose_meta_sync'")
+    expect(draftBlock).toContain("payloadKey: 'prose_meta_sync'")
+    expect(draftBlock).toContain("reviewType: 'source_readiness_sync'")
+    expect(draftBlock).toContain("payloadKey: 'source_readiness_sync'")
+    expect(draftReviewRecordSource).toContain('review_type: input.reviewType')
+    expect(draftReviewRecordSource).toContain('[input.payloadKey]: sync')
   })
 
   test('returns chapter title uniqueness sync in draft review only summaries', () => {
@@ -55669,8 +56989,8 @@ describe('chapter context word target source guards', () => {
 
     expect(draftBlock).toContain('const draftChapters = await listNovelChapters(activeWorkspace, projectId)')
     expect(draftBlock).toContain('const draftChapterTitleUniquenessSync = buildChapterTitleUniquenessSyncReport(draftChapters, updatedReviewedDraft || chapter)')
-    expect(draftBlock).toContain("review_type: 'chapter_title_uniqueness_sync'")
-    expect(draftBlock).toContain('chapter_title_uniqueness_sync: draftChapterTitleUniquenessSync')
+    expect(draftBlock).toContain('buildChapterTitleUniquenessDraftReviewRecord({ projectId, chapter, sync: draftChapterTitleUniquenessSync })')
+    expect(draftBlock).toContain('chapterTitleUniquenessSync: draftChapterTitleUniquenessSync')
   })
 
   test('returns chapter handoff sync in draft review only summaries', () => {
@@ -55681,8 +57001,8 @@ describe('chapter context word target source guards', () => {
     const draftBlock = source.slice(draftReviewOnlyStart, draftReviewOnlyEnd)
 
     expect(draftBlock).toContain('const draftChapterHandoffSync = buildChapterHandoffSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
-    expect(draftBlock).toContain("review_type: 'chapter_handoff_sync'")
-    expect(draftBlock).toContain('chapter_handoff_sync: draftChapterHandoffSync')
+    expect(draftBlock).toContain('buildChapterHandoffDraftReviewRecord({ projectId, chapter, sync: draftChapterHandoffSync })')
+    expect(draftBlock).toContain('chapterHandoffSync: draftChapterHandoffSync')
   })
 
   test('returns reader expectation sync in draft review only summaries', () => {
@@ -55693,8 +57013,8 @@ describe('chapter context word target source guards', () => {
     const draftBlock = source.slice(draftReviewOnlyStart, draftReviewOnlyEnd)
 
     expect(draftBlock).toContain('const draftReaderExpectationSync = buildReaderExpectationSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
-    expect(draftBlock).toContain("review_type: 'reader_expectation_sync'")
-    expect(draftBlock).toContain('reader_expectation_sync: draftReaderExpectationSync')
+    expect(draftBlock).toContain("reviewType: 'reader_expectation_sync'")
+    expect(draftBlock).toContain("payloadKey: 'reader_expectation_sync'")
   })
 
   test('returns reader payoff and retention sync in draft review only summaries', () => {
@@ -55705,11 +57025,11 @@ describe('chapter context word target source guards', () => {
     const draftBlock = source.slice(draftReviewOnlyStart, draftReviewOnlyEnd)
 
     expect(draftBlock).toContain('const draftReaderPayoffSync = buildReaderPayoffSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText, {})')
-    expect(draftBlock).toContain("review_type: 'reader_payoff_sync'")
-    expect(draftBlock).toContain('reader_payoff_sync: draftReaderPayoffSync')
+    expect(draftBlock).toContain('buildReaderPayoffDraftReviewRecord({ projectId, chapter, sync: draftReaderPayoffSync })')
+    expect(draftBlock).toContain('readerPayoffSync: draftReaderPayoffSync')
     expect(draftBlock).toContain('const draftReaderRetentionSync = buildReaderRetentionSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
-    expect(draftBlock).toContain("review_type: 'reader_retention_sync'")
-    expect(draftBlock).toContain('reader_retention_sync: draftReaderRetentionSync')
+    expect(draftBlock).toContain("reviewType: 'reader_retention_sync'")
+    expect(draftBlock).toContain("payloadKey: 'reader_retention_sync'")
   })
 
   test('returns expectation threshold sync in draft review only summaries', () => {
@@ -55720,8 +57040,8 @@ describe('chapter context word target source guards', () => {
     const draftBlock = source.slice(draftReviewOnlyStart, draftReviewOnlyEnd)
 
     expect(draftBlock).toContain('const draftExpectationThresholdSync = buildExpectationThresholdSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
-    expect(draftBlock).toContain("review_type: 'expectation_threshold_sync'")
-    expect(draftBlock).toContain('expectation_threshold_sync: draftExpectationThresholdSync')
+    expect(draftBlock).toContain("reviewType: 'expectation_threshold_sync'")
+    expect(draftBlock).toContain("payloadKey: 'expectation_threshold_sync'")
   })
 
   test('returns hook sync in draft review only summaries', () => {
@@ -55732,11 +57052,11 @@ describe('chapter context word target source guards', () => {
     const draftBlock = source.slice(draftReviewOnlyStart, draftReviewOnlyEnd)
 
     expect(draftBlock).toContain('const draftChapterHookSync = buildChapterHookSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
-    expect(draftBlock).toContain("review_type: 'chapter_hook_sync'")
-    expect(draftBlock).toContain('chapter_hook_sync: draftChapterHookSync')
+    expect(draftBlock).toContain("reviewType: 'chapter_hook_sync'")
+    expect(draftBlock).toContain("payloadKey: 'chapter_hook_sync'")
     expect(draftBlock).toContain('const draftParagraphHookSync = buildParagraphHookSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
-    expect(draftBlock).toContain("review_type: 'paragraph_hook_sync'")
-    expect(draftBlock).toContain('paragraph_hook_sync: draftParagraphHookSync')
+    expect(draftBlock).toContain("reviewType: 'paragraph_hook_sync'")
+    expect(draftBlock).toContain("payloadKey: 'paragraph_hook_sync'")
   })
 
   test('returns prose craft quality sync in draft review only summaries', () => {
@@ -55747,14 +57067,14 @@ describe('chapter context word target source guards', () => {
     const draftBlock = source.slice(draftReviewOnlyStart, draftReviewOnlyEnd)
 
     expect(draftBlock).toContain('const draftOpeningSync = buildOpeningSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
-    expect(draftBlock).toContain("review_type: 'opening_sync'")
-    expect(draftBlock).toContain('opening_sync: draftOpeningSync')
+    expect(draftBlock).toContain("reviewType: 'opening_sync'")
+    expect(draftBlock).toContain("payloadKey: 'opening_sync'")
     expect(draftBlock).toContain('const draftProseCraftSync = buildProseCraftSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
-    expect(draftBlock).toContain("review_type: 'prose_craft_sync'")
-    expect(draftBlock).toContain('prose_craft_sync: draftProseCraftSync')
+    expect(draftBlock).toContain("reviewType: 'prose_craft_sync'")
+    expect(draftBlock).toContain("payloadKey: 'prose_craft_sync'")
     expect(draftBlock).toContain('const draftQualityAuditSync = buildQualityAuditSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
-    expect(draftBlock).toContain("review_type: 'quality_audit_sync'")
-    expect(draftBlock).toContain('quality_audit_sync: draftQualityAuditSync')
+    expect(draftBlock).toContain("reviewType: 'quality_audit_sync'")
+    expect(draftBlock).toContain("payloadKey: 'quality_audit_sync'")
   })
 
   test('returns payoff and scene rhythm sync in draft review only summaries', () => {
@@ -55765,17 +57085,17 @@ describe('chapter context word target source guards', () => {
     const draftBlock = source.slice(draftReviewOnlyStart, draftReviewOnlyEnd)
 
     expect(draftBlock).toContain('const draftPayoffSetupSync = buildPayoffSetupSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
-    expect(draftBlock).toContain("review_type: 'payoff_setup_sync'")
-    expect(draftBlock).toContain('payoff_setup_sync: draftPayoffSetupSync')
+    expect(draftBlock).toContain("reviewType: 'payoff_setup_sync'")
+    expect(draftBlock).toContain("payloadKey: 'payoff_setup_sync'")
     expect(draftBlock).toContain('const draftSpectatorReactionSync = buildSpectatorReactionSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
-    expect(draftBlock).toContain("review_type: 'spectator_reaction_sync'")
-    expect(draftBlock).toContain('spectator_reaction_sync: draftSpectatorReactionSync')
+    expect(draftBlock).toContain("reviewType: 'spectator_reaction_sync'")
+    expect(draftBlock).toContain("payloadKey: 'spectator_reaction_sync'")
     expect(draftBlock).toContain('const draftBridgeUnitSync = buildBridgeUnitSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
-    expect(draftBlock).toContain("review_type: 'bridge_unit_sync'")
-    expect(draftBlock).toContain('bridge_unit_sync: draftBridgeUnitSync')
+    expect(draftBlock).toContain("reviewType: 'bridge_unit_sync'")
+    expect(draftBlock).toContain("payloadKey: 'bridge_unit_sync'")
     expect(draftBlock).toContain('const draftBeatCoolingSync = buildBeatCoolingSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
-    expect(draftBlock).toContain("review_type: 'beat_cooling_sync'")
-    expect(draftBlock).toContain('beat_cooling_sync: draftBeatCoolingSync')
+    expect(draftBlock).toContain("reviewType: 'beat_cooling_sync'")
+    expect(draftBlock).toContain("payloadKey: 'beat_cooling_sync'")
   })
 
   test('returns dramatic turn sync in draft review only summaries', () => {
@@ -55786,35 +57106,38 @@ describe('chapter context word target source guards', () => {
     const draftBlock = source.slice(draftReviewOnlyStart, draftReviewOnlyEnd)
 
     expect(draftBlock).toContain('const draftSuspenseSync = buildSuspenseSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
-    expect(draftBlock).toContain("review_type: 'suspense_sync'")
-    expect(draftBlock).toContain('suspense_sync: draftSuspenseSync')
+    expect(draftBlock).toContain("reviewType: 'suspense_sync'")
+    expect(draftBlock).toContain("payloadKey: 'suspense_sync'")
     expect(draftBlock).toContain('const draftReversalSync = buildReversalSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
-    expect(draftBlock).toContain("review_type: 'reversal_sync'")
-    expect(draftBlock).toContain('reversal_sync: draftReversalSync')
+    expect(draftBlock).toContain("reviewType: 'reversal_sync'")
+    expect(draftBlock).toContain("payloadKey: 'reversal_sync'")
     expect(draftBlock).toContain('const draftShowdownSync = buildShowdownSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
-    expect(draftBlock).toContain("review_type: 'showdown_sync'")
-    expect(draftBlock).toContain('showdown_sync: draftShowdownSync')
+    expect(draftBlock).toContain("reviewType: 'showdown_sync'")
+    expect(draftBlock).toContain("payloadKey: 'showdown_sync'")
   })
 
   test('returns character asset state sync in draft review only summaries', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const draftReviewRecordSource = readDraftSyncReviewRecordSource()
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const draftReviewOnlyStart = source.indexOf('if (isDraftReviewOnly)', groupStart)
     const draftReviewOnlyEnd = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', draftReviewOnlyStart)
     const draftBlock = source.slice(draftReviewOnlyStart, draftReviewOnlyEnd)
 
     expect(draftBlock).toContain('const draftDialogueSync = buildDialogueSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
-    expect(draftBlock).toContain("review_type: 'dialogue_sync'")
-    expect(draftBlock).toContain('dialogue_sync: draftDialogueSync')
+    expect(draftBlock).toContain("reviewType: 'dialogue_sync'")
+    expect(draftBlock).toContain("payloadKey: 'dialogue_sync'")
     expect(draftBlock).toContain('const draftCharacterBehaviorSync = buildCharacterBehaviorSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
-    expect(draftBlock).toContain("review_type: 'character_behavior_sync'")
-    expect(draftBlock).toContain('character_behavior_sync: draftCharacterBehaviorSync')
+    expect(draftBlock).toContain("reviewType: 'character_behavior_sync'")
+    expect(draftBlock).toContain("payloadKey: 'character_behavior_sync'")
     expect(draftBlock).toContain('const draftAssetLinkageSync = buildAssetLinkageSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
-    expect(draftBlock).toContain("review_type: 'asset_linkage_sync'")
-    expect(draftBlock).toContain('asset_linkage_sync: draftAssetLinkageSync')
+    expect(draftBlock).toContain("reviewType: 'asset_linkage_sync'")
+    expect(draftBlock).toContain("payloadKey: 'asset_linkage_sync'")
     expect(draftBlock).toContain('const draftStateTrackingSync = buildStateTrackingSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
-    expect(draftBlock).toContain("review_type: 'state_tracking_sync'")
-    expect(draftBlock).toContain('state_tracking_sync: draftStateTrackingSync')
+    expect(draftBlock).toContain("reviewType: 'state_tracking_sync'")
+    expect(draftBlock).toContain("payloadKey: 'state_tracking_sync'")
+    expect(draftReviewRecordSource).toContain('summary: `${sync.label}：${sync.summary}`')
+    expect(draftReviewRecordSource).toContain('issues: (sync.missed || [])')
   })
 
   test('returns receipt syncs in draft review only summaries from the same pre-store receipt context as quality gates', () => {
@@ -55825,13 +57148,14 @@ describe('chapter context word target source guards', () => {
     const draftBlock = source.slice(draftReviewOnlyStart, draftReviewOnlyEnd)
 
     expect(draftBlock).toContain('const draftSceneCardReceiptSync = buildSceneCardReceiptSyncReport(project, updatedReviewedDraft || chapter, preStoreReceiptSyncContextPackage, finalText)')
-    expect(draftBlock).toContain('scene_card_receipts_sync: draftSceneCardReceiptSync')
+    expect(draftBlock).toContain('buildSceneCardReceiptsDraftReviewRecord({ projectId, chapter, sync: draftSceneCardReceiptSync })')
     expect(draftBlock).toContain('const draftDeliveryRiskReceiptSync = buildDeliveryRiskReceiptSyncReport(project, updatedReviewedDraft || chapter, preStoreReceiptSyncContextPackage, finalText)')
-    expect(draftBlock).toContain('delivery_risk_receipts_sync: draftDeliveryRiskReceiptSync')
+    expect(draftBlock).toContain('buildDeliveryRiskReceiptsDraftReviewRecord({ projectId, chapter, sync: draftDeliveryRiskReceiptSync })')
   })
 
   test('returns dialogue and character behavior sync in full pipeline story state update', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const postDeliverySource = readPostDeliveryStoryStateUpdateSource()
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const fullPipelineStart = source.indexOf('const story_state_update: any = storyStateUpdate || {}', groupStart)
     const fullPipelineEnd = source.indexOf('return {', fullPipelineStart)
@@ -55839,34 +57163,37 @@ describe('chapter context word target source guards', () => {
 
     expect(fullPipelineBlock).toContain('const dialogueSync = buildDialogueSyncReport(project, updated, contextPackage, finalText)')
     expect(fullPipelineBlock).toContain('const characterBehaviorSync = buildCharacterBehaviorSyncReport(project, updated, contextPackage, finalText)')
-    expect(fullPipelineBlock).toContain('storyStateUpdateWithSync.dialogue_sync = dialogueSync')
-    expect(fullPipelineBlock).toContain('storyStateUpdateWithSync.character_behavior_sync = characterBehaviorSync')
+    expect(postDeliverySource).toContain("['dialogueSync', 'dialogue_sync']")
+    expect(postDeliverySource).toContain("['characterBehaviorSync', 'character_behavior_sync']")
   })
 
   test('returns scene-card receipt sync in full pipeline story state update', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const postDeliverySource = readPostDeliveryStoryStateUpdateSource()
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const fullPipelineStart = source.indexOf('const story_state_update: any = storyStateUpdate || {}', groupStart)
     const fullPipelineEnd = source.indexOf('return {', fullPipelineStart)
     const fullPipelineBlock = source.slice(fullPipelineStart, fullPipelineEnd)
 
     expect(fullPipelineBlock).toContain('const sceneCardReceiptSync = buildSceneCardReceiptSyncReport(project, updated, preStoreReceiptSyncContextPackage, finalText)')
-    expect(fullPipelineBlock).toContain('storyStateUpdateWithSync.scene_card_receipts_sync = sceneCardReceiptSync')
+    expect(postDeliverySource).toContain("['sceneCardReceiptSync', 'scene_card_receipts_sync']")
   })
 
   test('returns delivery-risk receipt sync in full pipeline story state update', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const postDeliverySource = readPostDeliveryStoryStateUpdateSource()
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const fullPipelineStart = source.indexOf('const story_state_update: any = storyStateUpdate || {}', groupStart)
     const fullPipelineEnd = source.indexOf('return {', fullPipelineStart)
     const fullPipelineBlock = source.slice(fullPipelineStart, fullPipelineEnd)
 
     expect(fullPipelineBlock).toContain('const deliveryRiskReceiptSync = buildDeliveryRiskReceiptSyncReport(project, updated, preStoreReceiptSyncContextPackage, finalText)')
-    expect(fullPipelineBlock).toContain('storyStateUpdateWithSync.delivery_risk_receipts_sync = deliveryRiskReceiptSync')
+    expect(postDeliverySource).toContain("['deliveryRiskReceiptSync', 'delivery_risk_receipts_sync']")
   })
 
   test('returns revision-context receipt sync in full pipeline story state update', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const postDeliverySource = readPostDeliveryStoryStateUpdateSource()
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const fullPipelineStart = source.indexOf('const story_state_update: any = storyStateUpdate || {}', groupStart)
     const fullPipelineEnd = source.indexOf('return {', fullPipelineStart)
@@ -55874,7 +57201,38 @@ describe('chapter context word target source guards', () => {
 
     expect(source).toContain('let revisionContextReceiptSync = buildRevisionContextReceiptSyncReport(chapter, selfCheck)')
     expect(source).toContain('revisionContextReceiptSync = buildRevisionContextReceiptSyncReport(chapter, selfCheck)')
-    expect(fullPipelineBlock).toContain('storyStateUpdateWithSync.revision_context_receipts_sync = revisionContextReceiptSync')
+    expect(postDeliverySource).toContain("['revisionContextReceiptSync', 'revision_context_receipts_sync']")
+  })
+
+  test('stores common post-delivery sync reviews through the shared record builder', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const reviewRecordSource = readPostDeliverySyncReviewRecordSource()
+    const updateStoryStateStart = source.indexOf('const updateStoryStateMachine = async')
+    const updateStoryStateEnd = source.indexOf('const buildWritingBible =', updateStoryStateStart)
+    const updateStoryStateBlock = source.slice(updateStoryStateStart, updateStoryStateEnd)
+
+    expect(updateStoryStateBlock).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: chapterHandoffSync, reviewType: 'chapter_handoff_sync'")
+    expect(updateStoryStateBlock).toContain('sync: readerExpectationSync')
+    expect(updateStoryStateBlock).toContain("reviewType: 'reader_expectation_sync'")
+    expect(updateStoryStateBlock).toContain("payloadKey: 'reader_expectation_sync'")
+    expect(updateStoryStateBlock).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: expectationThresholdSync, reviewType: 'expectation_threshold_sync'")
+    expect(updateStoryStateBlock).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: chapterHookSync, reviewType: 'chapter_hook_sync'")
+    expect(updateStoryStateBlock).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: paragraphHookSync, reviewType: 'paragraph_hook_sync'")
+    expect(updateStoryStateBlock).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: suspenseSync, reviewType: 'suspense_sync'")
+    expect(updateStoryStateBlock).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: reversalSync, reviewType: 'reversal_sync'")
+    expect(updateStoryStateBlock).toContain("buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: showdownSync, reviewType: 'showdown_sync'")
+    ;["buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: openingSync, reviewType: 'opening_sync'", "buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: proseCraftSync, reviewType: 'prose_craft_sync'", "buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: punctuationToneSync, reviewType: 'punctuation_tone_sync'", "buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: qualityAuditSync, reviewType: 'quality_audit_sync'"].forEach((token) => expect(updateStoryStateBlock).toContain(token))
+    expect(updateStoryStateBlock).toContain('sync: proseMetaSync')
+    expect(updateStoryStateBlock).toContain("reviewType: 'prose_meta_sync'")
+    expect(updateStoryStateBlock).toContain("payloadKey: 'prose_meta_sync'")
+    ;["buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: dialogueSync, reviewType: 'dialogue_sync'", "buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: characterBehaviorSync, reviewType: 'character_behavior_sync'", "buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: assetLinkageSync, reviewType: 'asset_linkage_sync'", "buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: stateTrackingSync, reviewType: 'state_tracking_sync'", "buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: sourceReadinessSync, reviewType: 'source_readiness_sync'", "buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: intentConfirmationSync, reviewType: 'intent_confirmation_sync'"].forEach((token) => expect(updateStoryStateBlock).toContain(token))
+    ;["buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: payoffSetupSync, reviewType: 'payoff_setup_sync'", "buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: spectatorReactionSync, reviewType: 'spectator_reaction_sync'", "buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: bridgeUnitSync, reviewType: 'bridge_unit_sync'", "buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: beatCoolingSync, reviewType: 'beat_cooling_sync'"].forEach((token) => expect(updateStoryStateBlock).toContain(token))
+    ;["buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: continuityHeatSync, reviewType: 'continuity_heat_sync'", "buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: conflictStructureSync, reviewType: 'conflict_structure_sync'", "buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: upgradeRhythmSync, reviewType: 'upgrade_rhythm_sync'", "buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: targetReaderSync, reviewType: 'target_reader_sync'", "buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: genrePositioningSync, reviewType: 'genre_positioning_sync'", "buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: femaleAudienceSync, reviewType: 'female_audience_sync'", "buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: plotDynamicsSync, reviewType: 'plot_dynamics_sync'", "buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: storyPowerSync, reviewType: 'story_power_sync'", "buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: characterRelationSync, reviewType: 'character_relation_sync'"].forEach((token) => expect(updateStoryStateBlock).toContain(token))
+    ;["buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: storyDriveSync, reviewType: 'story_drive_sync'", "buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: storyLoopSync, reviewType: 'story_loop_sync'", "buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: informationFlowSync, reviewType: 'information_flow_sync'", "buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: emotionalArcSync, reviewType: 'emotional_arc_sync'", "buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: characterArcSync, reviewType: 'character_arc_sync'", "buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: chapterBlueprintSync, reviewType: 'chapter_blueprint_sync'", "buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: chapterBenchmarkSync, reviewType: 'chapter_benchmark_sync'", "buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: benchmarkRecallSync, reviewType: 'benchmark_recall_sync'", "buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: styleBoundarySync, reviewType: 'style_boundary_sync'", "buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: innovationSync, reviewType: 'innovation_sync'", "buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: volumeBeatSync, reviewType: 'volume_beat_sync'"].forEach((token) => expect(updateStoryStateBlock).toContain(token))
+    ;["buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: chapterTitleUniquenessSync, reviewType: 'chapter_title_uniqueness_sync'", "buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: characterStateDeltaSync, reviewType: 'character_state_delta_sync'", "buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: timelineDeltaSync, reviewType: 'timeline_delta_sync'", "buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: chapterHandoffDeltaSync, reviewType: 'chapter_handoff_delta_sync'", "buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: assetStateDeltaSync, reviewType: 'asset_state_delta_sync'", "buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: relationshipDeltaSync, reviewType: 'relationship_delta_sync'", "buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: foreshadowingDeltaSync, reviewType: 'foreshadowing_delta_sync'", "buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: stateDeltaCompleteness, reviewType: 'state_delta_completeness'"].forEach((token) => expect(updateStoryStateBlock).toContain(token))
+    ;["buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: signatureSceneSync, reviewType: 'signature_scene_sync'", "buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: storyUnitSync, reviewType: 'story_unit_sync'", "buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: coreDrift, reviewType: 'chapter_core_drift'", "buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: coreContractSync, reviewType: 'core_contract_sync'", "buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: readerPayoffSync, reviewType: 'reader_payoff_sync'", "buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: readerRetentionSync, reviewType: 'reader_retention_sync'", "buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: chapterAttractionReview, reviewType: 'chapter_attraction_review'", "buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: styleSampleSync, reviewType: 'style_sample_sync'", "buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: runwaySync, reviewType: 'runway_sync'"].forEach((token) => expect(updateStoryStateBlock.replace(/\s+/g, ' ')).toContain(token))
+    expect(reviewRecordSource).toContain('export function buildPostDeliverySyncReviewRecord')
+    expect(reviewRecordSource).toContain('payload: chapterPayload(input.chapter, input.payloadKey, sync)')
   })
 
   test('returns continuity and conflict sync in draft review only summaries', () => {
@@ -55885,17 +57243,17 @@ describe('chapter context word target source guards', () => {
     const draftBlock = source.slice(draftReviewOnlyStart, draftReviewOnlyEnd)
 
     expect(draftBlock).toContain('const draftIntentConfirmationSync = buildIntentConfirmationSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
-    expect(draftBlock).toContain("review_type: 'intent_confirmation_sync'")
-    expect(draftBlock).toContain('intent_confirmation_sync: draftIntentConfirmationSync')
+    expect(draftBlock).toContain("reviewType: 'intent_confirmation_sync'")
+    expect(draftBlock).toContain("payloadKey: 'intent_confirmation_sync'")
     expect(draftBlock).toContain('const draftContinuityHeatSync = buildContinuityHeatSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
-    expect(draftBlock).toContain("review_type: 'continuity_heat_sync'")
-    expect(draftBlock).toContain('continuity_heat_sync: draftContinuityHeatSync')
+    expect(draftBlock).toContain("reviewType: 'continuity_heat_sync'")
+    expect(draftBlock).toContain("payloadKey: 'continuity_heat_sync'")
     expect(draftBlock).toContain('const draftConflictStructureSync = buildConflictStructureSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
-    expect(draftBlock).toContain("review_type: 'conflict_structure_sync'")
-    expect(draftBlock).toContain('conflict_structure_sync: draftConflictStructureSync')
+    expect(draftBlock).toContain("reviewType: 'conflict_structure_sync'")
+    expect(draftBlock).toContain("payloadKey: 'conflict_structure_sync'")
     expect(draftBlock).toContain('const draftUpgradeRhythmSync = buildUpgradeRhythmSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
-    expect(draftBlock).toContain("review_type: 'upgrade_rhythm_sync'")
-    expect(draftBlock).toContain('upgrade_rhythm_sync: draftUpgradeRhythmSync')
+    expect(draftBlock).toContain("reviewType: 'upgrade_rhythm_sync'")
+    expect(draftBlock).toContain("payloadKey: 'upgrade_rhythm_sync'")
   })
 
   test('returns market promise sync in draft review only summaries', () => {
@@ -55906,20 +57264,20 @@ describe('chapter context word target source guards', () => {
     const draftBlock = source.slice(draftReviewOnlyStart, draftReviewOnlyEnd)
 
     expect(draftBlock).toContain('const draftTargetReaderSync = buildTargetReaderSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
-    expect(draftBlock).toContain("review_type: 'target_reader_sync'")
-    expect(draftBlock).toContain('target_reader_sync: draftTargetReaderSync')
+    expect(draftBlock).toContain("reviewType: 'target_reader_sync'")
+    expect(draftBlock).toContain("payloadKey: 'target_reader_sync'")
     expect(draftBlock).toContain('const draftGenrePositioningSync = buildGenrePositioningSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
-    expect(draftBlock).toContain("review_type: 'genre_positioning_sync'")
-    expect(draftBlock).toContain('genre_positioning_sync: draftGenrePositioningSync')
+    expect(draftBlock).toContain("reviewType: 'genre_positioning_sync'")
+    expect(draftBlock).toContain("payloadKey: 'genre_positioning_sync'")
     expect(draftBlock).toContain('const draftFemaleAudienceSync = buildFemaleAudienceSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
-    expect(draftBlock).toContain("review_type: 'female_audience_sync'")
-    expect(draftBlock).toContain('female_audience_sync: draftFemaleAudienceSync')
+    expect(draftBlock).toContain("reviewType: 'female_audience_sync'")
+    expect(draftBlock).toContain("payloadKey: 'female_audience_sync'")
     expect(draftBlock).toContain('const draftPlotDynamicsSync = buildPlotDynamicsSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
-    expect(draftBlock).toContain("review_type: 'plot_dynamics_sync'")
-    expect(draftBlock).toContain('plot_dynamics_sync: draftPlotDynamicsSync')
+    expect(draftBlock).toContain("reviewType: 'plot_dynamics_sync'")
+    expect(draftBlock).toContain("payloadKey: 'plot_dynamics_sync'")
     expect(draftBlock).toContain('const draftCharacterRelationSync = buildCharacterRelationSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
-    expect(draftBlock).toContain("review_type: 'character_relation_sync'")
-    expect(draftBlock).toContain('character_relation_sync: draftCharacterRelationSync')
+    expect(draftBlock).toContain("reviewType: 'character_relation_sync'")
+    expect(draftBlock).toContain("payloadKey: 'character_relation_sync'")
   })
 
   test('returns story structure sync in draft review only summaries', () => {
@@ -55930,20 +57288,20 @@ describe('chapter context word target source guards', () => {
     const draftBlock = source.slice(draftReviewOnlyStart, draftReviewOnlyEnd)
 
     expect(draftBlock).toContain('const draftStoryDriveSync = buildStoryDriveSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
-    expect(draftBlock).toContain("review_type: 'story_drive_sync'")
-    expect(draftBlock).toContain('story_drive_sync: draftStoryDriveSync')
+    expect(draftBlock).toContain("reviewType: 'story_drive_sync'")
+    expect(draftBlock).toContain("payloadKey: 'story_drive_sync'")
     expect(draftBlock).toContain('const draftStoryLoopSync = buildStoryLoopSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
-    expect(draftBlock).toContain("review_type: 'story_loop_sync'")
-    expect(draftBlock).toContain('story_loop_sync: draftStoryLoopSync')
+    expect(draftBlock).toContain("reviewType: 'story_loop_sync'")
+    expect(draftBlock).toContain("payloadKey: 'story_loop_sync'")
     expect(draftBlock).toContain('const draftInformationFlowSync = buildInformationFlowSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
-    expect(draftBlock).toContain("review_type: 'information_flow_sync'")
-    expect(draftBlock).toContain('information_flow_sync: draftInformationFlowSync')
+    expect(draftBlock).toContain("reviewType: 'information_flow_sync'")
+    expect(draftBlock).toContain("payloadKey: 'information_flow_sync'")
     expect(draftBlock).toContain('const draftEmotionalArcSync = buildEmotionalArcSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
-    expect(draftBlock).toContain("review_type: 'emotional_arc_sync'")
-    expect(draftBlock).toContain('emotional_arc_sync: draftEmotionalArcSync')
+    expect(draftBlock).toContain("reviewType: 'emotional_arc_sync'")
+    expect(draftBlock).toContain("payloadKey: 'emotional_arc_sync'")
     expect(draftBlock).toContain('const draftCharacterArcSync = buildCharacterArcSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
-    expect(draftBlock).toContain("review_type: 'character_arc_sync'")
-    expect(draftBlock).toContain('character_arc_sync: draftCharacterArcSync')
+    expect(draftBlock).toContain("reviewType: 'character_arc_sync'")
+    expect(draftBlock).toContain("payloadKey: 'character_arc_sync'")
   })
 
   test('returns blueprint benchmark style sync in draft review only summaries', () => {
@@ -55954,29 +57312,29 @@ describe('chapter context word target source guards', () => {
     const draftBlock = source.slice(draftReviewOnlyStart, draftReviewOnlyEnd)
 
     expect(draftBlock).toContain('const draftChapterBlueprintSync = buildChapterBlueprintSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
-    expect(draftBlock).toContain("review_type: 'chapter_blueprint_sync'")
-    expect(draftBlock).toContain('chapter_blueprint_sync: draftChapterBlueprintSync')
+    expect(draftBlock).toContain("reviewType: 'chapter_blueprint_sync'")
+    expect(draftBlock).toContain("payloadKey: 'chapter_blueprint_sync'")
     expect(draftBlock).toContain('const draftChapterBenchmarkSync = buildChapterBenchmarkSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
-    expect(draftBlock).toContain("review_type: 'chapter_benchmark_sync'")
-    expect(draftBlock).toContain('chapter_benchmark_sync: draftChapterBenchmarkSync')
+    expect(draftBlock).toContain("reviewType: 'chapter_benchmark_sync'")
+    expect(draftBlock).toContain("payloadKey: 'chapter_benchmark_sync'")
     expect(draftBlock).toContain('const draftBenchmarkRecallSync = buildBenchmarkRecallSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
-    expect(draftBlock).toContain("review_type: 'benchmark_recall_sync'")
-    expect(draftBlock).toContain('benchmark_recall_sync: draftBenchmarkRecallSync')
+    expect(draftBlock).toContain("reviewType: 'benchmark_recall_sync'")
+    expect(draftBlock).toContain("payloadKey: 'benchmark_recall_sync'")
     expect(draftBlock).toContain('const draftStyleBoundarySync = buildStyleBoundarySyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
-    expect(draftBlock).toContain("review_type: 'style_boundary_sync'")
-    expect(draftBlock).toContain('style_boundary_sync: draftStyleBoundarySync')
+    expect(draftBlock).toContain("reviewType: 'style_boundary_sync'")
+    expect(draftBlock).toContain("payloadKey: 'style_boundary_sync'")
     expect(draftBlock).toContain('const draftStyleSampleSync = buildStyleSampleSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
-    expect(draftBlock).toContain("review_type: 'style_sample_sync'")
-    expect(draftBlock).toContain('style_sample_sync: draftStyleSampleSync')
+    expect(draftBlock).toContain('buildStyleSampleDraftReviewRecord({ projectId, chapter, sync: draftStyleSampleSync })')
+    expect(draftBlock).toContain('styleSampleSync: draftStyleSampleSync')
     expect(draftBlock).toContain('const draftInnovationSync = buildInnovationSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
-    expect(draftBlock).toContain("review_type: 'innovation_sync'")
-    expect(draftBlock).toContain('innovation_sync: draftInnovationSync')
+    expect(draftBlock).toContain("reviewType: 'innovation_sync'")
+    expect(draftBlock).toContain("payloadKey: 'innovation_sync'")
     expect(draftBlock).toContain('const draftVolumeBeatSync = buildVolumeBeatSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
-    expect(draftBlock).toContain("review_type: 'volume_beat_sync'")
-    expect(draftBlock).toContain('volume_beat_sync: draftVolumeBeatSync')
+    expect(draftBlock).toContain("reviewType: 'volume_beat_sync'")
+    expect(draftBlock).toContain("payloadKey: 'volume_beat_sync'")
     expect(draftBlock).toContain('const draftRunwaySync = buildRunwaySyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
-    expect(draftBlock).toContain("review_type: 'runway_sync'")
-    expect(draftBlock).toContain('runway_sync: draftRunwaySync')
+    expect(draftBlock).toContain("reviewType: 'runway_sync'")
+    expect(draftBlock).toContain("payloadKey: 'runway_sync'")
   })
 
   test('returns remaining deterministic story sync in draft review only summaries', () => {
@@ -55987,17 +57345,17 @@ describe('chapter context word target source guards', () => {
     const draftBlock = source.slice(draftReviewOnlyStart, draftReviewOnlyEnd)
 
     expect(draftBlock).toContain('const draftChapterAttractionReview = buildChapterAttractionReviewReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
-    expect(draftBlock).toContain("review_type: 'chapter_attraction_review'")
-    expect(draftBlock).toContain('chapter_attraction_review: draftChapterAttractionReview')
+    expect(draftBlock).toContain('buildChapterAttractionDraftReviewRecord({ projectId, chapter, sync: draftChapterAttractionReview })')
+    expect(draftBlock).toContain('chapterAttractionReview: draftChapterAttractionReview')
     expect(draftBlock).toContain('const draftPunctuationToneSync = buildPunctuationToneSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
-    expect(draftBlock).toContain("review_type: 'punctuation_tone_sync'")
-    expect(draftBlock).toContain('punctuation_tone_sync: draftPunctuationToneSync')
+    expect(draftBlock).toContain("reviewType: 'punctuation_tone_sync'")
+    expect(draftBlock).toContain("payloadKey: 'punctuation_tone_sync'")
     expect(draftBlock).toContain('const draftSignatureSceneSync = buildSignatureSceneSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
-    expect(draftBlock).toContain("review_type: 'signature_scene_sync'")
-    expect(draftBlock).toContain('signature_scene_sync: draftSignatureSceneSync')
+    expect(draftBlock).toContain('buildSignatureSceneDraftReviewRecord({ projectId, chapter, sync: draftSignatureSceneSync })')
+    expect(draftBlock).toContain('signatureSceneSync: draftSignatureSceneSync')
     expect(draftBlock).toContain('const draftStoryUnitSync = buildStoryUnitSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
-    expect(draftBlock).toContain("review_type: 'story_unit_sync'")
-    expect(draftBlock).toContain('story_unit_sync: draftStoryUnitSync')
+    expect(draftBlock).toContain('buildStoryUnitDraftReviewRecord({ projectId, chapter, sync: draftStoryUnitSync })')
+    expect(draftBlock).toContain('storyUnitSync: draftStoryUnitSync')
   })
 
   test('returns core drift and contract sync in draft review only summaries', () => {
@@ -56008,25 +57366,25 @@ describe('chapter context word target source guards', () => {
     const draftBlock = source.slice(draftReviewOnlyStart, draftReviewOnlyEnd)
 
     expect(draftBlock).toContain('const draftCoreDrift = buildChapterCoreDriftReport(project, updatedReviewedDraft || chapter, contextPackage, finalText, { missed: [], forbidden_touched: [] })')
-    expect(draftBlock).toContain("review_type: 'chapter_core_drift'")
-    expect(draftBlock).toContain('core_drift: draftCoreDrift')
+    expect(draftBlock).toContain('buildChapterCoreDriftDraftReviewRecord({ projectId, chapter, sync: draftCoreDrift })')
+    expect(draftBlock).toContain('coreDrift: draftCoreDrift')
     expect(draftBlock).toContain('const draftCoreContractSync = buildCoreContractSyncReport(project, updatedReviewedDraft || chapter, contextPackage, finalText)')
-    expect(draftBlock).toContain("review_type: 'core_contract_sync'")
-    expect(draftBlock).toContain('core_contract_sync: draftCoreContractSync')
+    expect(draftBlock).toContain('buildCoreContractDraftReviewRecord({ projectId, chapter, sync: draftCoreContractSync })')
+    expect(draftBlock).toContain('coreContractSync: draftCoreContractSync')
   })
 
   test('stores prose sync diagnostics before a quality gate can block storage', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
-    const storeFnsStart = source.indexOf('const storeProseRevisionReceiptSync = async () =>', groupStart)
+    const storeFnsStart = source.indexOf('const storeGeneratedReviewRecord = async (record: any) =>', groupStart)
     const draftReviewOnlyStart = source.indexOf('if (isDraftReviewOnly)', storeFnsStart)
     const preGateStart = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', storeFnsStart)
-    const firstStoreProseStart = source.indexOf('await storeProseRevisionReceiptSync()', storeFnsStart)
-    const firstStoreDeslopStart = source.indexOf('await storeDeslopRepairReceiptSync()', storeFnsStart)
-    const firstStoreQualityAuditStart = source.indexOf('await storeQualityAuditRepairReceiptSync()', storeFnsStart)
-    const firstStoreCascadeStart = source.indexOf('await storeRevisionCascadeImpactSync()', storeFnsStart)
-    const firstStoreScopeStart = source.indexOf('await storeRevisionScopeGuardSync()', storeFnsStart)
-    const firstStoreCleanupStart = source.indexOf('await storeDeterministicProseCleanup()', storeFnsStart)
+    const firstStoreProseStart = source.indexOf("buildReceiptSyncReviewRecord({ projectId, chapter, sync: proseRevisionReceiptSync, reviewType: 'prose_revision_receipt_sync'", storeFnsStart)
+    const firstStoreDeslopStart = source.indexOf("buildReceiptSyncReviewRecord({ projectId, chapter, sync: deslopRepairReceiptSync, reviewType: 'deslop_repair_receipt_sync'", storeFnsStart)
+    const firstStoreQualityAuditStart = source.indexOf("buildReceiptSyncReviewRecord({ projectId, chapter, sync: qualityAuditRepairReceiptSync, reviewType: 'quality_audit_repair_receipt_sync'", storeFnsStart)
+    const firstStoreCascadeStart = source.indexOf('buildRevisionCascadeImpactSyncReviewRecord({ projectId, chapter, sync: revisionCascadeImpactSync })', storeFnsStart)
+    const firstStoreScopeStart = source.indexOf('buildRevisionScopeGuardSyncReviewRecord({ projectId, chapter, selfCheck, sync: revisionScopeGuardSync })', storeFnsStart)
+    const firstStoreCleanupStart = source.indexOf('buildDeterministicProseCleanupReviewRecord({', storeFnsStart)
 
     expect(storeFnsStart).toBeGreaterThan(groupStart)
     expect(draftReviewOnlyStart).toBeGreaterThan(storeFnsStart)
@@ -56047,6 +57405,7 @@ describe('chapter context word target source guards', () => {
 
   test('stores prose quality review before pre-store quality gate approval errors', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const reviewRecordSource = readProseQualityReviewRecordSource()
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const preGateStart = source.indexOf('const preStoreQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)', groupStart)
     const preGateFailStart = source.indexOf('if (!preStoreQualityDecision.passed && !approvals?.quality_gate?.approved)', preGateStart)
@@ -56056,15 +57415,15 @@ describe('chapter context word target source guards', () => {
     expect(preGateStart).toBeGreaterThan(groupStart)
     expect(preGateFailStart).toBeGreaterThan(preGateStart)
     expect(preGateThrowStart).toBeGreaterThan(preGateFailStart)
-    expect(preGateFailBlock).toContain('await createNovelReview(activeWorkspace, {')
-    expect(preGateFailBlock).toContain("review_type: 'prose_quality'")
-    expect(preGateFailBlock).toContain("status: 'warn'")
-    expect(preGateFailBlock).toContain('quality_gate: preStoreQualityDecision')
-    expect(preGateFailBlock).toContain('self_check: selfCheck')
+    expect(preGateFailBlock).toContain("await createNovelReview(activeWorkspace, buildProseQualityReview('warn', preStoreQualityDecision, '质量门禁未通过'))")
+    expect(reviewRecordSource).toContain("review_type: 'prose_quality'")
+    expect(reviewRecordSource).toContain('payload.quality_gate = input.qualityGate')
+    expect(reviewRecordSource).toContain('self_check: input.selfCheck')
   })
 
   test('stores prose quality review before final quality gate approval errors', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const reviewRecordSource = readProseQualityReviewRecordSource()
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const finalGateStart = source.indexOf('const finalQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview, safetyDecision)', groupStart)
     const finalGateFailStart = source.indexOf('if (!finalQualityDecision.passed && !approvals?.quality_gate?.approved)', finalGateStart)
@@ -56074,16 +57433,16 @@ describe('chapter context word target source guards', () => {
     expect(finalGateStart).toBeGreaterThan(groupStart)
     expect(finalGateFailStart).toBeGreaterThan(finalGateStart)
     expect(finalGateThrowStart).toBeGreaterThan(finalGateFailStart)
-    expect(finalGateFailBlock).toContain('await createNovelReview(activeWorkspace, {')
-    expect(finalGateFailBlock).toContain("review_type: 'prose_quality'")
-    expect(finalGateFailBlock).toContain("status: 'warn'")
-    expect(finalGateFailBlock).toContain('quality_gate: finalQualityDecision')
-    expect(finalGateFailBlock).toContain('reference_report: referenceReport')
-    expect(finalGateFailBlock).toContain('safety_decision: safetyDecision')
+    expect(finalGateFailBlock).toContain("await createNovelReview(activeWorkspace, buildProseQualityReview('warn', finalQualityDecision, '最终质量门禁未通过'")
+    expect(finalGateFailBlock).toContain('referenceReport')
+    expect(finalGateFailBlock).toContain('safetyDecision')
+    expect(reviewRecordSource).toContain("appendIfDefined(payload, 'reference_report', input.referenceReport)")
+    expect(reviewRecordSource).toContain("appendIfDefined(payload, 'safety_decision', input.safetyDecision)")
   })
 
   test('stores prose quality review before low-score and draft approval errors', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const reviewRecordSource = readProseQualityReviewRecordSource()
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const lowScoreStart = source.indexOf("if (ctx.production.approvalRequired(approvalPolicy, 'low_score'", groupStart)
     const lowScoreThrowStart = source.indexOf("throw ctx.production.buildApprovalError('low_score'", lowScoreStart)
@@ -56094,21 +57453,21 @@ describe('chapter context word target source guards', () => {
 
     expect(lowScoreStart).toBeGreaterThan(groupStart)
     expect(lowScoreThrowStart).toBeGreaterThan(lowScoreStart)
-    expect(lowScoreBlock).toContain('await createNovelReview(activeWorkspace, {')
-    expect(lowScoreBlock).toContain("review_type: 'prose_quality'")
-    expect(lowScoreBlock).toContain("approval_type: 'low_score'")
-    expect(lowScoreBlock).toContain('self_check: selfCheck')
+    expect(lowScoreBlock).toContain("await createNovelReview(activeWorkspace, buildProseQualityReview('warn', preStoreQualityDecision, '低分等待人工确认'")
+    expect(lowScoreBlock).toContain("approvalType: 'low_score'")
+    expect(reviewRecordSource).toContain("appendIfDefined(payload, 'approval_type', input.approvalType)")
+    expect(reviewRecordSource).toContain('self_check: input.selfCheck')
 
     expect(draftStart).toBeGreaterThan(lowScoreThrowStart)
     expect(draftThrowStart).toBeGreaterThan(draftStart)
-    expect(draftBlock).toContain('await createNovelReview(activeWorkspace, {')
-    expect(draftBlock).toContain("review_type: 'prose_quality'")
-    expect(draftBlock).toContain("approval_type: 'draft'")
-    expect(draftBlock).toContain('self_check: selfCheck')
+    expect(draftBlock).toContain("await createNovelReview(activeWorkspace, buildProseQualityReview('warn', preStoreQualityDecision, '正文入库等待人工确认'")
+    expect(draftBlock).toContain("approvalType: 'draft'")
+    expect(reviewRecordSource).toContain("review_type: 'prose_quality'")
   })
 
   test('stores prose quality review before reference safety approval errors', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const reviewRecordSource = readProseQualityReviewRecordSource()
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const safetyBlockedStart = source.indexOf('if (safetyDecision.blocked)', groupStart)
     const safetyBlockedThrowStart = source.indexOf("throw Object.assign(new Error('仿写安全阈值未通过')", safetyBlockedStart)
@@ -56119,21 +57478,21 @@ describe('chapter context word target source guards', () => {
 
     expect(safetyBlockedStart).toBeGreaterThan(groupStart)
     expect(safetyBlockedThrowStart).toBeGreaterThan(safetyBlockedStart)
-    expect(safetyBlockedBlock).toContain('await createNovelReview(activeWorkspace, {')
-    expect(safetyBlockedBlock).toContain("review_type: 'prose_quality'")
-    expect(safetyBlockedBlock).toContain("approval_type: 'reference_safety_blocked'")
-    expect(safetyBlockedBlock).toContain('reference_report: referenceReport')
-    expect(safetyBlockedBlock).toContain('safety_decision: safetyDecision')
-    expect(safetyBlockedBlock).toContain('migration_audit: migrationAudit')
+    expect(safetyBlockedBlock).toContain("await createNovelReview(activeWorkspace, buildProseQualityReview('warn', finalQualityDecision, '仿写安全阈值未通过'")
+    expect(safetyBlockedBlock).toContain("approvalType: 'reference_safety_blocked'")
+    expect(safetyBlockedBlock).toContain('referenceReport')
+    expect(safetyBlockedBlock).toContain('safetyDecision')
+    expect(safetyBlockedBlock).toContain('migrationAudit')
 
     expect(safetyApprovalStart).toBeGreaterThan(safetyBlockedThrowStart)
     expect(safetyApprovalThrowStart).toBeGreaterThan(safetyApprovalStart)
-    expect(safetyApprovalBlock).toContain('await createNovelReview(activeWorkspace, {')
-    expect(safetyApprovalBlock).toContain("review_type: 'prose_quality'")
-    expect(safetyApprovalBlock).toContain("approval_type: 'safety'")
-    expect(safetyApprovalBlock).toContain('reference_report: referenceReport')
-    expect(safetyApprovalBlock).toContain('safety_decision: safetyDecision')
-    expect(safetyApprovalBlock).toContain('migration_audit: migrationAudit')
+    expect(safetyApprovalBlock).toContain("await createNovelReview(activeWorkspace, buildProseQualityReview('warn', finalQualityDecision, '仿写安全报告等待人工确认'")
+    expect(safetyApprovalBlock).toContain("approvalType: 'safety'")
+    expect(safetyApprovalBlock).toContain('referenceReport')
+    expect(safetyApprovalBlock).toContain('safetyDecision')
+    expect(safetyApprovalBlock).toContain('migrationAudit')
+    expect(reviewRecordSource).toContain("appendIfDefined(payload, 'migration_audit', input.migrationAudit)")
+    expect(reviewRecordSource).toContain("appendIfDefined(payload, 'safety_explanation', input.safetyExplanation)")
   })
 
   test('recomputes prose revision receipt sync after deterministic cleanup repair', () => {
@@ -56173,7 +57532,7 @@ describe('chapter context word target source guards', () => {
   test('merges deterministic cleanup repair revision before recomputing sync reports', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
-    const cleanupRepairStart = source.indexOf('const cleanupRepair = await runProseSelfReviewAndRevision', groupStart)
+    const cleanupRepairStart = source.indexOf('const cleanupRepair = await runProseRevisionFromExistingReview', groupStart)
     const mergeStart = source.indexOf('selfCheck = {', cleanupRepairStart)
     const recomputeStart = source.indexOf('proseRevisionReceiptSync = buildProseRevisionReceiptSyncReport(chapter, selfCheck)', mergeStart)
     const mergeBlock = source.slice(mergeStart, recomputeStart)
@@ -56181,34 +57540,76 @@ describe('chapter context word target source guards', () => {
     expect(cleanupRepairStart).toBeGreaterThan(groupStart)
     expect(mergeStart).toBeGreaterThan(cleanupRepairStart)
     expect(recomputeStart).toBeGreaterThan(mergeStart)
-    expect(mergeBlock).toContain('revision: cleanupRepair.revision || selfCheck.revision')
+    expect(mergeBlock).toContain('revision: mergeProseRevisionArtifacts(selfCheck.revision, cleanupRepair.revision)')
   })
 
   test('auto-repairs deterministic prose cleanup residuals before the quality gate', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const groupStart = source.indexOf('const generateChapterForGroup =')
     const cleanupStart = source.indexOf('let deterministicProseCleanup = buildDeterministicProseCleanupReport(chapter, finalText)', groupStart)
-    const gateReviewStart = source.indexOf('const qualityGateReview = buildQualityGateReviewWithDeterministicCleanup', cleanupStart)
+    const gateReviewStart = source.indexOf('let qualityGateReview = buildQualityGateReviewWithDeterministicCleanup', cleanupStart)
     const repairBlock = source.slice(cleanupStart, gateReviewStart)
 
     expect(cleanupStart).toBeGreaterThan(groupStart)
     expect(gateReviewStart).toBeGreaterThan(cleanupStart)
     expect(repairBlock).toContain('Number(deterministicProseCleanup.risk_count || 0) > 0 && options.auto_repair_quality_gate === true && !isDraftReviewOnly')
     expect(repairBlock).toContain("phase: 'deterministic_cleanup_repair'")
-    expect(repairBlock).toContain('const cleanupRepair = await runProseSelfReviewAndRevision')
+    expect(repairBlock).toContain('const cleanupRepair = await runProseRevisionFromExistingReview')
+    expect(repairBlock).toContain('base_review: selfCheck.review')
     expect(repairBlock).toContain('deterministic_cleanup_repair: true')
     expect(repairBlock).toContain('deterministic_prose_cleanup: deterministicProseCleanup')
-    expect(repairBlock).toContain('finalText = selfCheck.final_text || finalText')
+    expect(repairBlock).toContain('selectUsableRevisionText(finalText, selfCheck')
     expect(repairBlock).toContain('deterministicProseCleanup = buildDeterministicProseCleanupReport(chapter, finalText)')
+  })
+
+  test('rejects deterministic cleanup repair attempts that do not reduce deterministic risk', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const groupStart = source.indexOf('const generateChapterForGroup =')
+    const cleanupStart = source.indexOf('let deterministicProseCleanup = buildDeterministicProseCleanupReport(chapter, finalText)', groupStart)
+    const gateReviewStart = source.indexOf('let qualityGateReview = buildQualityGateReviewWithDeterministicCleanup', cleanupStart)
+    const repairBlock = source.slice(cleanupStart, gateReviewStart)
+
+    expect(cleanupStart).toBeGreaterThan(groupStart)
+    expect(gateReviewStart).toBeGreaterThan(cleanupStart)
+    expect(repairBlock).toContain('const previousCleanupRiskCount = Number(deterministicProseCleanup.risk_count || 0)')
+    expect(repairBlock).toContain('const previousSelfCheck = selfCheck')
+    expect(repairBlock).toContain('const previousRevisionTextSelection = revisionTextSelection')
+    expect(repairBlock).toContain('const previousFinalSceneBreakdown = finalSceneBreakdown')
+    expect(repairBlock).toContain('const previousFinalContinuityNotes = finalContinuityNotes')
+    expect(repairBlock).toContain('const nextCleanupRiskCount = Number(deterministicProseCleanup.risk_count || 0)')
+    expect(repairBlock).toContain('if (nextCleanupRiskCount >= previousCleanupRiskCount)')
+    expect(repairBlock).toContain('finalText = cleanupRepairTextBefore')
+    expect(repairBlock).toContain('selfCheck = {')
+    expect(repairBlock).toContain('deterministic_cleanup_repair_rejected: true')
+    expect(repairBlock).toContain("phase: 'deterministic_cleanup_repair_rejected'")
+    expect(repairBlock).toContain('break')
+  })
+
+  test('keeps deterministic cleanup repair on the bounded quality repair timeout path', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const groupStart = source.indexOf('const generateChapterForGroup =')
+    const cleanupRepairStart = source.indexOf('const cleanupRepair = await runProseRevisionFromExistingReview', groupStart)
+    const cleanupRepairEnd = source.indexOf('const syncChapterForReceiptEvidence', cleanupRepairStart)
+    const cleanupRepairBlock = source.slice(cleanupRepairStart, cleanupRepairEnd)
+
+    expect(cleanupRepairStart).toBeGreaterThan(groupStart)
+    expect(cleanupRepairEnd).toBeGreaterThan(cleanupRepairStart)
+    expect(cleanupRepairBlock).toContain('deterministic_cleanup_repair: true')
+    expect(cleanupRepairBlock).toContain('...qualityRepairLlmControlOptions')
+    expect(cleanupRepairBlock).not.toContain('...llmControlOptions')
+    expect(cleanupRepairBlock).toContain('catch (cleanupRepairError')
+    expect(cleanupRepairBlock).toContain('if (isAbortError(cleanupRepairError)) throw cleanupRepairError')
+    expect(cleanupRepairBlock).toContain('deterministic_cleanup_repair_failed')
   })
 
   test('normalizes deterministic prose again after deterministic cleanup repair before rescan', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const reviewRecordSource = readPostDeliverySyncReviewRecordSource()
     const groupStart = source.indexOf('const generateChapterForGroup =')
-    const cleanupRepairStart = source.indexOf('const cleanupRepair = await runProseSelfReviewAndRevision', groupStart)
+    const cleanupRepairStart = source.indexOf('const cleanupRepair = await runProseRevisionFromExistingReview', groupStart)
     const rescanStart = source.indexOf('deterministicProseCleanup = buildDeterministicProseCleanupReport(chapter, finalText)', cleanupRepairStart)
     const repairBlock = source.slice(cleanupRepairStart, rescanStart)
-    const storeStart = source.indexOf('const storeDeterministicProseCleanup = async () => {', groupStart)
+    const storeStart = source.indexOf('buildDeterministicProseCleanupReviewRecord({', groupStart)
     const storeEnd = source.indexOf('if (isDraftReviewOnly)', storeStart)
     const storeBlock = source.slice(storeStart, storeEnd)
 
@@ -56218,11 +57619,29 @@ describe('chapter context word target source guards', () => {
     expect(repairBlock).toContain('finalText = cleanupRepairFormatNormalization.text')
     expect(repairBlock).toContain('cleanupRepairPunctuationNormalization = normalizeDeterministicProsePunctuation(finalText)')
     expect(repairBlock).toContain('finalText = cleanupRepairPunctuationNormalization.text')
+    expect(repairBlock).toContain('cleanupRepairDeslopTermNormalization = normalizeDeterministicProseDeslopTerms(finalText)')
+    expect(repairBlock).toContain('finalText = cleanupRepairDeslopTermNormalization.text')
     expect(source.indexOf('cleanupRepairPunctuationNormalization = normalizeDeterministicProsePunctuation(finalText)', cleanupRepairStart)).toBeLessThan(rescanStart)
-    expect(storeBlock).toContain('!cleanupRepairFormatNormalization?.changed')
-    expect(storeBlock).toContain('!cleanupRepairPunctuationNormalization?.changed')
-    expect(storeBlock).toContain('deterministic_cleanup_repair_format_normalization: cleanupRepairFormatNormalization')
-    expect(storeBlock).toContain('deterministic_cleanup_repair_punctuation_normalization: cleanupRepairPunctuationNormalization')
+    expect(source.indexOf('cleanupRepairDeslopTermNormalization = normalizeDeterministicProseDeslopTerms(finalText)', cleanupRepairStart)).toBeLessThan(rescanStart)
+    expect(storeBlock).toContain('cleanupRepairFormatNormalization,')
+    expect(storeBlock).toContain('cleanupRepairPunctuationNormalization,')
+    expect(reviewRecordSource).toContain('!input.cleanupRepairFormatNormalization?.changed')
+    expect(reviewRecordSource).toContain('!input.cleanupRepairPunctuationNormalization?.changed')
+    expect(reviewRecordSource).toContain('deterministic_cleanup_repair_format_normalization: input.cleanupRepairFormatNormalization')
+    expect(reviewRecordSource).toContain('deterministic_cleanup_repair_punctuation_normalization: input.cleanupRepairPunctuationNormalization')
+  })
+
+  test('keeps verified scene-card receipts when deterministic cleanup repair returns incomplete scene breakdown', () => {
+    const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const groupStart = source.indexOf('const generateChapterForGroup =')
+    const cleanupRepairStart = source.indexOf('const cleanupRepair = await runProseRevisionFromExistingReview', groupStart)
+    const cleanupRepairEnd = source.indexOf('cleanupRepairFormatNormalization = normalizeDeterministicProseFormat(finalText)', cleanupRepairStart)
+    const repairBlock = source.slice(cleanupRepairStart, cleanupRepairEnd)
+
+    expect(cleanupRepairStart).toBeGreaterThan(groupStart)
+    expect(cleanupRepairEnd).toBeGreaterThan(cleanupRepairStart)
+    expect(repairBlock).toContain('selectVerifiedSceneBreakdownUpdate(finalSceneBreakdown, cleanupRepair.revision.scene_breakdown, finalText)')
+    expect(repairBlock).not.toContain('finalSceneBreakdown = cleanupRepair.revision.scene_breakdown?.length ? cleanupRepair.revision.scene_breakdown : finalSceneBreakdown')
   })
 
   test('passes deterministic cleanup report into cleanup repair prompts', () => {
@@ -56238,6 +57657,8 @@ describe('chapter context word target source guards', () => {
 
     expect(revisionPrompt).toContain('deterministic_prose_cleanup')
     expect(revisionPrompt).toContain('【确定性清理报告 deterministic_prose_cleanup】')
+    expect(revisionPrompt).toContain('deterministic_prose_cleanup.payoff_density')
+    expect(revisionPrompt).toContain('短周期读者回报')
     expect(reviewNormalizeBlock).toContain('deterministic_prose_cleanup')
     expect(reviewNormalizeBlock).toContain('options.deterministic_prose_cleanup')
   })
@@ -57269,19 +58690,12 @@ describe('chapter context word target source guards', () => {
 
   test('returns next-chapter quality plan receipt sync for unattended post-delivery gates', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const generationReturnBlock = source.slice(
-      source.indexOf('const storyStateUpdateWithSync = {'),
-      source.indexOf('return {', source.indexOf('const storyStateUpdateWithSync = {')),
-    )
-    const finalReturnBlock = source.slice(
-      source.indexOf('return {', source.indexOf('const storyStateUpdateWithSync = {')),
-      source.indexOf('}\n  }', source.indexOf('return {', source.indexOf('const storyStateUpdateWithSync = {'))),
-    )
+    const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildNextChapterQualityPlanReceiptSyncReport')
     expect(generationReturnBlock).toContain('next_chapter_quality_plan_receipts_sync')
-    expect(finalReturnBlock).toContain('requires_next_chapter_quality_plan_receipts')
-    expect(finalReturnBlock).toContain('nextChapterQualityPlanReceiptSync.requires_receipts')
+    expect(source).toContain('requires_next_chapter_quality_plan_receipts')
+    expect(source).toContain('nextChapterQualityPlanReceiptSync.requires_receipts')
   })
 
   test('builds write-preparation receipt sync from pre-draft execution receipts', () => {
@@ -57448,14 +58862,8 @@ describe('chapter context word target source guards', () => {
 
   test('returns write-preparation receipt sync for unattended post-delivery gates', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const draftReturnBlock = source.slice(
-      source.indexOf('story_state_update: { skipped: true, prose_revision_receipt_sync'),
-      source.indexOf('return {', source.indexOf('story_state_update: { skipped: true, prose_revision_receipt_sync')),
-    )
-    const generationReturnBlock = source.slice(
-      source.indexOf('const storyStateUpdateWithSync = {'),
-      source.indexOf('return {', source.indexOf('const storyStateUpdateWithSync = {')),
-    )
+    const draftReturnBlock = readPostDeliveryStoryStateUpdateSource()
+    const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildWritePreparationReceiptSyncReport')
     expect(draftReturnBlock).toContain('write_preparation_receipts_sync')
@@ -57464,10 +58872,7 @@ describe('chapter context word target source guards', () => {
 
   test('returns Step 2 preparation syncs in full pipeline story state update', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const generationReturnBlock = source.slice(
-      source.indexOf('const storyStateUpdateWithSync = {'),
-      source.indexOf('return {', source.indexOf('const storyStateUpdateWithSync = {')),
-    )
+    const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildSourceReadinessSyncReport(project, updated, finalReviewContextPackage, finalText)')
     expect(source).toContain('buildIntentConfirmationSyncReport(project, updated, finalReviewContextPackage, finalText)')
@@ -57494,27 +58899,17 @@ describe('chapter context word target source guards', () => {
 
   test('returns status filter receipt sync for unattended post-delivery gates', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const generationReturnBlock = source.slice(
-      source.indexOf('const storyStateUpdateWithSync = {'),
-      source.indexOf('return {', source.indexOf('const storyStateUpdateWithSync = {')),
-    )
-    const finalReturnBlock = source.slice(
-      source.indexOf('return {', source.indexOf('const storyStateUpdateWithSync = {')),
-      source.indexOf('}\n  }', source.indexOf('return {', source.indexOf('const storyStateUpdateWithSync = {'))),
-    )
+    const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildStatusFilterReceiptSyncReport')
     expect(generationReturnBlock).toContain('status_filter_receipts_sync')
-    expect(finalReturnBlock).toContain('requires_status_filter_receipts')
-    expect(finalReturnBlock).toContain('statusFilterReceiptSync.requires_receipts')
+    expect(source).toContain('requires_status_filter_receipts')
+    expect(source).toContain('statusFilterReceiptSync.requires_receipts')
   })
 
   test('returns prose craft step-3 syncs for unattended post-delivery gates', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const generationReturnBlock = source.slice(
-      source.indexOf('const storyStateUpdateWithSync = {'),
-      source.indexOf('return {', source.indexOf('const storyStateUpdateWithSync = {')),
-    )
+    const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildProseCraftSyncReport(project, updated, contextPackage, finalText)')
     expect(source).toContain('buildPayoffSetupSyncReport(project, updated, contextPackage, finalText)')
@@ -57526,10 +58921,7 @@ describe('chapter context word target source guards', () => {
 
   test('returns story quality step-3 syncs in full pipeline story state update', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const generationReturnBlock = source.slice(
-      source.indexOf('const storyStateUpdateWithSync = {'),
-      source.indexOf('return {', source.indexOf('const storyStateUpdateWithSync = {')),
-    )
+    const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildStoryLoopSyncReport(project, updated, contextPackage, finalText)')
     expect(source).toContain('buildInformationFlowSyncReport(project, updated, contextPackage, finalText)')
@@ -57543,10 +58935,7 @@ describe('chapter context word target source guards', () => {
 
   test('returns narrative technique step-3 syncs in full pipeline story state update', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const generationReturnBlock = source.slice(
-      source.indexOf('const storyStateUpdateWithSync = {'),
-      source.indexOf('return {', source.indexOf('const storyStateUpdateWithSync = {')),
-    )
+    const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildChapterHookSyncReport(project, updated, contextPackage, finalText)')
     expect(source).toContain('buildParagraphHookSyncReport(project, updated, contextPackage, finalText)')
@@ -57566,10 +58955,7 @@ describe('chapter context word target source guards', () => {
 
   test('returns long-form contract syncs in full pipeline story state update', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const generationReturnBlock = source.slice(
-      source.indexOf('const storyStateUpdateWithSync = {'),
-      source.indexOf('return {', source.indexOf('const storyStateUpdateWithSync = {')),
-    )
+    const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildContinuityHeatSyncReport(project, updated, contextPackage, finalText)')
     expect(source).toContain('buildConflictStructureSyncReport(project, updated, contextPackage, finalText)')
@@ -57629,10 +59015,7 @@ describe('chapter context word target source guards', () => {
 
   test('returns serial quality assurance syncs in full pipeline story state update', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const generationReturnBlock = source.slice(
-      source.indexOf('const storyStateUpdateWithSync = {'),
-      source.indexOf('return {', source.indexOf('const storyStateUpdateWithSync = {')),
-    )
+    const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildStoryDriveSyncReport(project, updated, contextPackage, finalText)')
     expect(source).toContain('buildCharacterArcSyncReport(project, updated, contextPackage, finalText)')
@@ -57656,10 +59039,7 @@ describe('chapter context word target source guards', () => {
 
   test('returns deterministic base step-3 syncs in full pipeline story state update', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const generationReturnBlock = source.slice(
-      source.indexOf('const storyStateUpdateWithSync = {'),
-      source.indexOf('return {', source.indexOf('const storyStateUpdateWithSync = {')),
-    )
+    const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildProseMetaSyncReport(project, updated, contextPackage, finalText)')
     expect(source).toContain('buildChapterBlueprintSyncReport(project, updated, contextPackage, finalText)')
@@ -57671,10 +59051,7 @@ describe('chapter context word target source guards', () => {
 
   test('returns chapter handoff sync for unattended post-delivery gates', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const generationReturnBlock = source.slice(
-      source.indexOf('const storyStateUpdateWithSync = {'),
-      source.indexOf('return {', source.indexOf('const storyStateUpdateWithSync = {')),
-    )
+    const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildChapterHandoffSyncReport(project, updated, contextPackage, finalText)')
     expect(generationReturnBlock).toContain('chapter_handoff_sync')
@@ -57682,10 +59059,7 @@ describe('chapter context word target source guards', () => {
 
   test('returns state tracking sync for unattended post-delivery gates', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const generationReturnBlock = source.slice(
-      source.indexOf('const storyStateUpdateWithSync = {'),
-      source.indexOf('return {', source.indexOf('const storyStateUpdateWithSync = {')),
-    )
+    const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildStateTrackingSyncReport(project, updated, contextPackage, finalText)')
     expect(generationReturnBlock).toContain('state_tracking_sync')
@@ -57693,10 +59067,7 @@ describe('chapter context word target source guards', () => {
 
   test('returns punctuation tone sync for unattended post-delivery gates', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const generationReturnBlock = source.slice(
-      source.indexOf('const storyStateUpdateWithSync = {'),
-      source.indexOf('return {', source.indexOf('const storyStateUpdateWithSync = {')),
-    )
+    const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildPunctuationToneSyncReport(project, updated, contextPackage, finalText)')
     expect(generationReturnBlock).toContain('punctuation_tone_sync')
@@ -57704,10 +59075,7 @@ describe('chapter context word target source guards', () => {
 
   test('returns asset linkage sync for unattended post-delivery gates', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const generationReturnBlock = source.slice(
-      source.indexOf('const storyStateUpdateWithSync = {'),
-      source.indexOf('return {', source.indexOf('const storyStateUpdateWithSync = {')),
-    )
+    const generationReturnBlock = readPostDeliveryStoryStateUpdateSource()
 
     expect(source).toContain('buildAssetLinkageSyncReport(project, updated, contextPackage, finalText)')
     expect(generationReturnBlock).toContain('asset_linkage_sync')
@@ -58505,12 +59873,13 @@ describe('chapter context word target source guards', () => {
 
   test('asks prose generation self review and revision to enforce oh-story subject name rhythm', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const promptSectionsSource = readFileSync(join(import.meta.dir, '../novel-writing/prose-generation-prompt-sections.ts'), 'utf8')
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
     const prosePromptEnd = source.indexOf('const ensureProseMeetsWordTarget =', prosePromptStart)
     const prosePromptBlock = source.slice(prosePromptStart, prosePromptEnd)
-    const proseCraftSnippetStart = source.indexOf('function formatProseCraftPromptSnippet')
-    const proseCraftSnippetEnd = source.indexOf('const OH_STORY_PUNCTUATION_TONE_MAP', proseCraftSnippetStart)
-    const proseCraftPromptSource = `${prosePromptBlock}\n${source.slice(proseCraftSnippetStart, proseCraftSnippetEnd)}`
+    const proseCraftSnippetStart = promptSectionsSource.indexOf('function formatProseCraftPromptSnippet')
+    const proseCraftSnippetEnd = promptSectionsSource.indexOf('function formatQualityAuditPhaseChecklist', proseCraftSnippetStart)
+    const proseCraftPromptSource = `${prosePromptBlock}\n${promptSectionsSource.slice(proseCraftSnippetStart, proseCraftSnippetEnd)}`
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -58641,12 +60010,13 @@ describe('chapter context word target source guards', () => {
 
   test('asks prose generation self review and revision to enforce oh-story section density diagnosis', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const promptSectionsSource = readFileSync(join(import.meta.dir, '../novel-writing/prose-generation-prompt-sections.ts'), 'utf8')
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
     const prosePromptEnd = source.indexOf('const ensureProseMeetsWordTarget =', prosePromptStart)
     const prosePromptBlock = source.slice(prosePromptStart, prosePromptEnd)
-    const proseCraftSnippetStart = source.indexOf('function formatProseCraftPromptSnippet')
-    const proseCraftSnippetEnd = source.indexOf('const OH_STORY_PUNCTUATION_TONE_MAP', proseCraftSnippetStart)
-    const proseCraftPromptSource = `${prosePromptBlock}\n${source.slice(proseCraftSnippetStart, proseCraftSnippetEnd)}`
+    const proseCraftSnippetStart = promptSectionsSource.indexOf('function formatProseCraftPromptSnippet')
+    const proseCraftSnippetEnd = promptSectionsSource.indexOf('function formatQualityAuditPhaseChecklist', proseCraftSnippetStart)
+    const proseCraftPromptSource = `${prosePromptBlock}\n${promptSectionsSource.slice(proseCraftSnippetStart, proseCraftSnippetEnd)}`
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -58690,9 +60060,12 @@ describe('chapter context word target source guards', () => {
 
   test('asks prose generation self review and revision to enforce oh-story event content ratio', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
+    const promptSectionsSource = readFileSync(join(import.meta.dir, '../novel-writing/prose-generation-prompt-sections.ts'), 'utf8')
     const prosePromptStart = source.indexOf('任务：按场景卡生成章节正文')
     const prosePromptEnd = source.indexOf('const ensureProseMeetsWordTarget =', prosePromptStart)
     const prosePromptBlock = source.slice(prosePromptStart, prosePromptEnd)
+    const qualityAuditPromptStart = promptSectionsSource.indexOf('export function buildQualityAuditPromptSection')
+    const prosePromptSource = `${prosePromptBlock}\n${promptSectionsSource.slice(qualityAuditPromptStart)}`
     const reviewPrompt = source.slice(
       source.indexOf('const buildProseReviewPrompt'),
       source.indexOf('const buildProseRevisionPrompt'),
@@ -58703,9 +60076,10 @@ describe('chapter context word target source guards', () => {
     )
 
     expect(prosePromptStart).toBeGreaterThanOrEqual(0)
-    expect(prosePromptBlock).toContain('事件内容比重不能小于一半')
-    expect(prosePromptBlock).toContain('事件是价值改变的契机')
-    expect(prosePromptBlock).toContain('设定尽量通过事件演绎')
+    expect(qualityAuditPromptStart).toBeGreaterThanOrEqual(0)
+    expect(prosePromptSource).toContain('事件内容比重不能小于一半')
+    expect(prosePromptSource).toContain('事件是价值改变的契机')
+    expect(prosePromptSource).toContain('设定尽量通过事件演绎')
     expect(reviewPrompt).toContain('事件内容比重')
     expect(reviewPrompt).toContain('设定尽量通过事件演绎')
     expect(reviewPrompt).toContain('quality_audit_checks')
@@ -59123,6 +60497,46 @@ describe('chapter context word target source guards', () => {
     expect(decision.reasons.join('｜')).toContain('质量诊断自检')
   })
 
+  test('summarizes anonymous structured gate failures without leaking prose excerpts', () => {
+    const proseExcerpt = '江哲却注意到，老陈说出“诡序天平”四个字时，所有追索者的枪口同时向下沉了半寸。不是害怕，是训练出来的避让。'
+    const decision = getQualityGateDecision(
+      {
+        reference_config: {
+          quality_gate: {
+            enabled: true,
+            min_score: 78,
+          },
+        },
+      },
+      {
+        passed: true,
+        revised: true,
+        score: 88,
+        issues: [],
+        next_chapter_quality_plan: {
+          quality_focus: ['继续压住公开诱捕压力。'],
+          opening_actions: ['用镇门封锁承接。'],
+          middle_actions: ['让规则复核升级。'],
+          ending_actions: ['章末留下镇门诱捕。'],
+          avoid_repetition: ['不重复解释天平规则。'],
+          evidence_basis: ['本章已经写出诡序天平反制。'],
+        },
+        quality_audit_checks: [
+          {
+            status: 'fail',
+            evidence: proseExcerpt,
+            fix: '补成可复核的质量诊断回执。',
+          },
+        ],
+      },
+    )
+
+    const reasonText = decision.reasons.join('｜')
+    expect(decision.passed).toBe(false)
+    expect(reasonText).toContain('质量诊断')
+    expect(reasonText).not.toContain('江哲却注意到')
+  })
+
   test('blocks quality gate when prose revision receipts are missing after revision', () => {
     const decision = getQualityGateDecision(
       {
@@ -59183,6 +60597,329 @@ describe('chapter context word target source guards', () => {
 
     expect(decision.passed).toBe(false)
     expect(decision.reasons.join('｜')).toContain('去AI味修复回执未闭环')
+  })
+
+  test('does not block quality gate on post-repair sync carry-over when prose score and hard issues pass', () => {
+    const decision = getQualityGateDecision(
+      {
+        reference_config: {
+          quality_gate: {
+            enabled: true,
+            min_score: 85,
+            max_critical_issues: 0,
+            max_high_issues: 1,
+          },
+        },
+      },
+      {
+        passed: true,
+        revised: true,
+        score: 85,
+        issues: [],
+        next_chapter_quality_plan: {
+          version: 'oh_story_next_chapter_quality_plan_v1',
+          quality_focus: ['下一章继续兑现镇门诱捕。'],
+          opening_actions: ['从江哲踏上石板路后的第一步写起。'],
+          middle_actions: ['让镇门筛口触发一次真实代价。'],
+          ending_actions: ['露出陆长风遗留物的一角。'],
+          avoid_repetition: ['不要重复一次天平复核。'],
+          evidence_basis: ['本章结尾已经完成镇门邀请和捕兽夹钩子。'],
+        },
+        quality_audit_checks: [
+          {
+            key: 'pre_store_structural_sync',
+            sync_key: 'chapter_blueprint_sync',
+            label: '细纲兑现未闭环',
+            status: 'fail',
+            evidence: '章节蓝图同步：仍有 2 项需要写回追踪。',
+            fix: '后续同步章节蓝图和追踪文档。',
+            missed_count: 2,
+          },
+          {
+            key: 'quality_audit_repair_receipt_sync',
+            label: '质量诊断修复回执未闭环',
+            status: 'fail',
+            evidence: '质量诊断修复回执残留 3：需要下一轮继续处理。',
+            fix: '下一轮优先处理剩余质量诊断回执。',
+            missed_count: 3,
+          },
+          {
+            key: 'revision_cascade_impact_evidence',
+            label: '修订级联影响证据未闭环',
+            status: 'fail',
+            evidence: '资产状态需同步到后续章节。',
+            fix: '写入状态追踪，不影响本章正文入库。',
+          },
+        ],
+        revision_receipt_checks: [
+          {
+            key: 'prose_revision_receipt_sync',
+            label: '修订回执未闭环',
+            status: 'fail',
+            evidence: '修订回执残留 5：需要下一章或同步任务继续处理。',
+            fix: '下一章继续处理回执残留。',
+            missed_count: 5,
+          },
+        ],
+        deslop_repair_checks: [
+          {
+            key: 'deslop_repair_receipt_sync',
+            label: '去AI味修复回执未闭环',
+            status: 'fail',
+            evidence: '去AI味修复回执残留 2：仍有轻度模板风险需下轮继续压。',
+            fix: '下一轮继续压去AI味残留。',
+            missed_count: 2,
+          },
+        ],
+      },
+    )
+
+    expect(decision.passed).toBe(true)
+    expect(decision.reasons.join('｜')).not.toContain('结构化自检失败')
+  })
+
+  test('does not block quality gate on benchmark recall sync and Gate B carry-over after successful repair', () => {
+    const decision = getQualityGateDecision(
+      {
+        reference_config: {
+          quality_gate: {
+            enabled: true,
+            min_score: 85,
+            max_critical_issues: 0,
+            max_high_issues: 1,
+          },
+        },
+      },
+      {
+        passed: true,
+        revised: true,
+        score: 86,
+        issues: [],
+        next_chapter_quality_plan: {
+          version: 'oh_story_next_chapter_quality_plan_v1',
+          quality_focus: ['下一章进入镇门内部，减少同类颜色词重复。'],
+          opening_actions: ['前300字从镇门门槛和老陈伤势承接。'],
+          middle_actions: ['中段让封锁令权限和秩序核心代价继续压迫主角。'],
+          ending_actions: ['章末露出陆长风线索的下一层钩子。'],
+          avoid_repetition: ['不要重复废墟封锁和天平复核。'],
+          evidence_basis: ['本章已经写出镇门邀请、秩序核心耗损和陆长风线索钩子。'],
+        },
+        benchmark_recall_checks: [
+          {
+            key: 'benchmark_recall_sync',
+            label: '文风召回未闭环',
+            status: 'fail',
+            evidence: '文风召回同步：本章已按三轮压问推进，剩余节奏差异写入下一章继续处理。',
+            fix: '下一章继续把对标节奏转成镇门内部的压迫、爆发、冷却和反应。',
+            missed_count: 1,
+          },
+        ],
+        deslop_repair_checks: [
+          {
+            key: 'deslop_repair_receipt_sync',
+            label: '去AI味修复回执未闭环',
+            status: 'fail',
+            evidence: 'Gate B 句式套路与主语节奏：多人对峙场景仍需保持主语清晰，不能过度省略。',
+            fix: '下一章多人对峙仍需继续用物件和动作承接。',
+            missed_count: 1,
+          },
+          {
+            key: 'deslop_repair_receipt_sync',
+            label: '去AI味修复回执未闭环',
+            status: 'fail',
+            evidence: 'Gate B 句式套路与主语节奏：多人对峙场景仍需清晰点名，未完全消除人名起句。',
+            fix: '下一轮继续压去AI味残留，但不重写整章。',
+            missed_count: 1,
+          },
+        ],
+      },
+    )
+
+    expect(decision.passed).toBe(true)
+    expect(decision.reasons.join('｜')).not.toContain('文风召回未闭环')
+    expect(decision.reasons.join('｜')).not.toContain('去AI味修复回执未闭环')
+  })
+
+  test('does not block quality gate on repaired receipt evidence-location misses and state carry-over', () => {
+    const decision = getQualityGateDecision(
+      {
+        reference_config: {
+          quality_gate: {
+            enabled: true,
+            min_score: 85,
+            max_critical_issues: 0,
+            max_high_issues: 1,
+          },
+        },
+      },
+      {
+        passed: true,
+        revised: true,
+        score: 85,
+        issues: [],
+        next_chapter_quality_plan: {
+          version: 'oh_story_next_chapter_quality_plan_v1',
+          quality_focus: ['下一章继续压住镇门内部识别机制和左手代价。'],
+          opening_actions: ['前300字从镇门封锁和老陈伤势承接。'],
+          middle_actions: ['中段让第二枚秩序核心来源进入可见代价。'],
+          ending_actions: ['章末留下诡序之主资产状态的下一层钩子。'],
+          avoid_repetition: ['不要重复雾、复眼、符文同组意象。'],
+          evidence_basis: ['本章已经写出镇门邀请、秩序核心耗损和规则反制。'],
+        },
+        quality_audit_checks: [
+          {
+            key: 'pre_store_structural_sync',
+            sync_key: 'chapter_blueprint_sync',
+            label: '细纲兑现未闭环',
+            status: 'fail',
+            evidence: '章节蓝图同步：当前正文部分目标未充分落地，但第二枚秩序核心来源需后续同步写回。',
+            fix: '下一章继续解释镇门内部识别机制，但不能一次性讲完。',
+            missed_count: 1,
+          },
+          {
+            key: 'pre_store_structural_sync',
+            sync_key: 'benchmark_recall_sync',
+            label: '文风召回未闭环',
+            status: 'fail',
+            evidence: '文风召回同步：当前正文部分节奏未充分落地；剩余节奏差异进入下一章继续处理。',
+            fix: '后续继续压住压迫、爆发、冷却和反应。',
+            missed_count: 1,
+          },
+          {
+            key: 'quality_audit_repair_receipt_sync',
+            label: '质量诊断修复回执未闭环',
+            status: 'fail',
+            evidence: 'changed_evidence 无法定位到修订后正文。',
+            fix: '后续需延续左手代价。',
+            remaining_risk: '镇门内部识别机制需下一章继续解释但不能一次性讲完。',
+          },
+          {
+            key: 'revision_cascade_impact_evidence',
+            label: '修订级联影响证据未闭环',
+            status: 'fail',
+            evidence: '第二枚秩序核心、暗金信件、江哲左掌代价需同步到后续追踪。',
+            fix: '写入状态追踪，不影响本章正文入库。',
+            remaining_risk: '资产状态写回义务。',
+          },
+        ],
+        revision_receipt_checks: [
+          {
+            key: 'prose_revision_receipt_sync',
+            label: '修订回执未闭环',
+            status: 'fail',
+            evidence: 'changed_evidence 无法定位到修订后正文。',
+            fix: '诡序之主本体仍未直接出场，符合当前认知边界；下一章需从镇门前继续。',
+            remaining_risk: '下一章继续承接敌方视觉体系。',
+          },
+        ],
+        deslop_repair_checks: [
+          {
+            key: 'deslop_repair_receipt_sync',
+            label: '去AI味修复回执未闭环',
+            status: 'fail',
+            evidence: 'Gate A changed_evidence 无法定位到修订后正文。',
+            fix: '旧回执证据片段已被修订改写，后续继续避免模板表达。',
+            remaining_risk: 'changed_evidence 无法定位到修订后正文。',
+          },
+          {
+            key: 'deslop_repair_receipt_sync',
+            label: '去AI味修复回执未闭环',
+            status: 'fail',
+            evidence: 'Gate G changed_evidence 无法定位到修订后正文。',
+            fix: '旧回执证据片段已被修订改写，下一章继续避免章末总结体。',
+            remaining_risk: 'changed_evidence 无法定位到修订后正文。',
+          },
+        ],
+        delivery_risk_receipts: [
+          {
+            risk_item: '补资产状态：诡序之主',
+            required_action: '补资产状态：诡序之主。',
+            delivered: false,
+            evidence: '诡序之主本体仍未直接出场，符合当前认知边界。',
+            remaining_risk: '承接回执缺失：补资产状态：诡序之主。',
+          },
+          {
+            risk_item: '补角色状态：江哲',
+            required_action: '补角色状态：江哲左掌代价。',
+            delivered: false,
+            evidence: '江哲左掌代价已经进入下一章质量续航计划。',
+            remaining_risk: '承接回执缺失：补角色状态：角色状态增量缺口 2｜修复：江哲：主角。',
+          },
+        ],
+      },
+    )
+
+    expect(decision.passed).toBe(true)
+    expect(decision.reasons.join('｜')).not.toContain('结构化自检失败')
+    expect(decision.reasons.join('｜')).not.toContain('承接回执未兑现')
+  })
+
+  test('does not block quality gate on benchmark recall sync wording and quality-continuation delivery receipts', () => {
+    const decision = getQualityGateDecision(
+      {
+        reference_config: {
+          quality_gate: {
+            enabled: true,
+            min_score: 85,
+            max_critical_issues: 0,
+            max_high_issues: 1,
+          },
+        },
+      },
+      {
+        passed: true,
+        revised: true,
+        score: 86,
+        issues: [],
+        next_chapter_quality_plan: {
+          version: 'oh_story_next_chapter_quality_plan_v1',
+          quality_focus: ['下一章直接验证镇门内陆长风声音真假。'],
+          opening_actions: ['前300字承接镇门声音和江哲即时选择。'],
+          middle_actions: ['中段让镇门夹缝触发一次规则反制。'],
+          ending_actions: ['章末留下陆长风真实状态碎片。'],
+          avoid_repetition: ['不要重复封锁令宣读。'],
+          evidence_basis: ['本章已经留下镇门内声音和核心裂痕代价。'],
+        },
+        quality_audit_checks: [
+          {
+            key: 'pre_store_structural_sync',
+            sync_key: 'benchmark_recall_sync',
+            label: '文风召回未闭环',
+            status: 'fail',
+            evidence: '召回缺口 1：正文有 1 项文风召回要求未充分落地。',
+            fix: '下一次修订优先补足文风召回 missed 项；保留 gaps 中的缺口，不要把缺失的深度拆解、冲突来源或文风偏差误判为已经解决。',
+            missed_count: 1,
+          },
+        ],
+        delivery_risk_receipts: [
+          {
+            risk_item: '补追读：漏追读 7',
+            required_action: '把反派长期目标转入下一章追读计划。',
+            delivered: false,
+            evidence: '自检没有提供可定位正文证据，无法证明承接风险已兑现。',
+            remaining_risk: '承接回执缺失：补追读：漏追读 7｜修复：诡序之主：通过不断降临怪谈副本，彻底蚕食蓝星人类的理智，将蓝星转化为怪谈世界的一部分，实现真身降临。',
+          },
+          {
+            risk_item: '修吸引力：吸引力缺口 4',
+            required_action: '把核心卖点转入下一章质量续航。',
+            delivered: false,
+            evidence: '自检没有提供可定位正文证据，无法证明承接风险已兑现。',
+            remaining_risk: '承接回执缺失：修吸引力：吸引力缺口 4｜修复：江哲：破解怪谈世界：我是超人，怪谈你随意的核心规则。',
+          },
+          {
+            risk_item: '补循环：故事循环缺口 2',
+            required_action: '把资产状态写回下一轮状态更新。',
+            delivered: false,
+            evidence: '自检没有提供可定位正文证据，无法证明承接风险已兑现。',
+            remaining_risk: '承接回执缺失：补循环：故事循环缺口 2｜修复：不要重写全设定表；只处理本章计划触达且正文实际改变的关键资产。',
+          },
+        ],
+      },
+    )
+
+    expect(decision.passed).toBe(true)
+    expect(decision.reasons.join('｜')).not.toContain('文风召回未闭环')
+    expect(decision.reasons.join('｜')).not.toContain('承接回执未兑现')
   })
 
   test('blocks quality gate when deslop diagnostic gates fail even if the score passes', () => {
@@ -59299,25 +61036,87 @@ describe('chapter context word target source guards', () => {
     expect(decision.reasons.join('｜')).not.toContain('承接回执未兑现')
   })
 
+  test('does not block quality gate for delivery risk receipts that only need post-delivery sync or next-chapter carry-over', () => {
+    const decision = getQualityGateDecision(
+      {
+        reference_config: {
+          quality_gate: {
+            enabled: true,
+            min_score: 78,
+          },
+        },
+      },
+      {
+        passed: true,
+        revised: true,
+        score: 90,
+        issues: [],
+        next_chapter_quality_plan: {
+          version: 'oh_story_next_chapter_quality_plan_v1',
+          quality_focus: ['下一章继续压住镇门危局。'],
+          opening_actions: ['前300字原地承接镇门倒计时。'],
+          middle_actions: ['中段用资产代价换一次规则反制。'],
+          ending_actions: ['章末留下镇门新权限钩子。'],
+          avoid_repetition: ['不要重复解释镇门来历。'],
+          evidence_basis: ['本章已经写出镇门封锁和资产消耗。'],
+        },
+        delivery_risk_receipts: [
+          {
+            risk_item: '资产挂钩',
+            required_action: '让关键资产参与胜负。',
+            delivered: false,
+            evidence: '秩序残核白光与照胆鼎残影共同压住完美超人基因。',
+            remaining_risk: '资产台账需同步。',
+          },
+          {
+            risk_item: '伏笔追踪',
+            required_action: '把新门名写入追踪。',
+            delivered: false,
+            evidence: '入门者，留名。',
+            remaining_risk: '需更新追踪/伏笔.md。',
+          },
+          {
+            risk_item: '回报密度',
+            required_action: '保持阶段性物理爽点。',
+            delivered: false,
+            evidence: '复核前不得强夺随身物。',
+            remaining_risk: '下一章需补更强物理爽点或规则反制。',
+          },
+          {
+            risk_item: '状态跟踪',
+            required_action: '中段跟踪江哲、老陈、敌方封锁状态。',
+            delivered: false,
+            evidence: '江哲黑符收紧且临时通行；老陈污染爬向喉咙；追索者被令牌约束但履带车跟随。',
+            remaining_risk: 'delivery_risk_receipts middle_actions 的 evidence 未落在中段事件推进。',
+          },
+        ],
+      },
+    )
+
+    expect(decision.passed).toBe(true)
+    expect(decision.reasons.join('｜')).not.toContain('承接回执未兑现')
+  })
+
   test('stores prose quality review status from quality gate decisions', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
-    const qualityGateStart = source.indexOf('const qualityGateReview = buildQualityGateReviewWithDeterministicCleanup')
+    const reviewRecordSource = readProseQualityReviewRecordSource()
+    const qualityGateStart = source.indexOf('let qualityGateReview = buildQualityGateReviewWithDeterministicCleanup')
     const storeBlock = source.slice(
       qualityGateStart,
       source.indexOf('const settingViolations =', qualityGateStart),
     )
 
     expect(storeBlock).toContain('const draftQualityDecision = getQualityGateDecision(qualityGateProject, qualityGateReview)')
-    expect(storeBlock).toContain("status: draftQualityDecision.passed ? 'ok' : 'warn'")
-    expect(storeBlock).toContain("status: finalQualityDecision.passed ? 'ok' : 'warn'")
-    expect(storeBlock).toContain('quality_gate: draftQualityDecision')
-    expect(storeBlock).toContain('quality_gate: finalQualityDecision')
+    expect(storeBlock).toContain("buildProseQualityReview(draftQualityDecision.passed ? 'ok' : 'warn', draftQualityDecision)")
+    expect(storeBlock).toContain("buildProseQualityReview(finalQualityDecision.passed ? 'ok' : 'warn', finalQualityDecision")
+    expect(reviewRecordSource).toContain('status: input.status')
+    expect(reviewRecordSource).toContain('payload.quality_gate = input.qualityGate')
   })
 
   test('reports review stage status from quality gate decisions', () => {
     const source = readFileSync(join(import.meta.dir, 'novel-writing-service.ts'), 'utf8')
     const reviewStart = source.indexOf("await onStage('review', { status: 'running' })")
-    const qualityGateStart = source.indexOf('const qualityGateReview = buildQualityGateReviewWithDeterministicCleanup')
+    const qualityGateStart = source.indexOf('let qualityGateReview = buildQualityGateReviewWithDeterministicCleanup')
     const reviewBlock = source.slice(reviewStart, qualityGateStart)
 
     expect(reviewBlock).toContain('const initialReviewDecision = getQualityGateDecision(qualityGateProject')

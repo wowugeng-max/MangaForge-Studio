@@ -134,6 +134,7 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string) {
     updateChapterStages: productionService.updateChapterStages,
     classifyGenerationFailure: productionService.classifyGenerationFailure,
     executeChapterGroupRunRecord: runExecutionService.executeChapterGroupRunRecord,
+    generateChapterForGroup: writingService.generateChapterForGroup,
     buildPipelineSteps: productionService.buildPipelineSteps,
     updatePipelineStep: productionService.updatePipelineStep,
     buildChapterContextPackage: writingService.buildChapterContextPackage,

@@ -756,7 +756,46 @@ export function buildProviderRequestBody(request: LLMRequest, selection: Runtime
   return toOpenAIBody(request, selection)
 }
 
-async function readClaudeCodeStream(response: Response): Promise<any> {
+function runtimeRequestCanceledError() {
+  return Object.assign(new Error('Request canceled'), { code: 'REQUEST_CANCELED' })
+}
+
+async function readStreamChunk(reader: ReadableStreamDefaultReader<Uint8Array>, signal?: AbortSignal) {
+  if (signal?.aborted) throw runtimeRequestCanceledError()
+  if (!signal) return reader.read()
+  return await new Promise<ReadableStreamReadResult<Uint8Array>>((resolve, reject) => {
+    let settled = false
+    const cleanup = () => signal.removeEventListener('abort', onAbort)
+    const onAbort = () => {
+      if (settled) return
+      settled = true
+      cleanup()
+      reader.cancel().catch(() => {})
+      reject(runtimeRequestCanceledError())
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+    reader.read()
+      .then(result => {
+        if (settled) return
+        settled = true
+        cleanup()
+        if (signal.aborted) {
+          reader.cancel().catch(() => {})
+          reject(runtimeRequestCanceledError())
+          return
+        }
+        resolve(result)
+      })
+      .catch(error => {
+        if (settled) return
+        settled = true
+        cleanup()
+        reject(signal.aborted ? runtimeRequestCanceledError() : error)
+      })
+  })
+}
+
+async function readClaudeCodeStream(response: Response, signal?: AbortSignal): Promise<any> {
   if (!response.body) throw new Error('Streaming response has no body')
 
   const reader = response.body.getReader()
@@ -784,7 +823,7 @@ async function readClaudeCodeStream(response: Response): Promise<any> {
   }
 
   while (true) {
-    const { value, done } = await reader.read()
+    const { value, done } = await readStreamChunk(reader, signal)
     if (done) break
     const chunkText = decoder.decode(value, { stream: true })
     rawText += chunkText
@@ -813,7 +852,7 @@ async function readClaudeCodeStream(response: Response): Promise<any> {
   }
 }
 
-async function readOpenAIStream(response: Response): Promise<any> {
+async function readOpenAIStream(response: Response, signal?: AbortSignal): Promise<any> {
   if (!response.body) throw new Error('Streaming response has no body')
 
   const reader = response.body.getReader()
@@ -841,7 +880,7 @@ async function readOpenAIStream(response: Response): Promise<any> {
   }
 
   while (true) {
-    const { value, done } = await reader.read()
+    const { value, done } = await readStreamChunk(reader, signal)
     if (done) break
     buffer += decoder.decode(value, { stream: true })
     const lines = buffer.split(/\r?\n/)
@@ -860,7 +899,7 @@ async function readOpenAIStream(response: Response): Promise<any> {
   }
 }
 
-async function readResponsesStream(response: Response): Promise<any> {
+async function readResponsesStream(response: Response, signal?: AbortSignal): Promise<any> {
   if (!response.body) throw new Error('Streaming response has no body')
 
   const reader = response.body.getReader()
@@ -944,7 +983,7 @@ async function readResponsesStream(response: Response): Promise<any> {
   }
 
   while (true) {
-    const { value, done } = await reader.read()
+    const { value, done } = await readStreamChunk(reader, signal)
     if (done) break
     buffer += decoder.decode(value, { stream: true })
     const lines = buffer.split(/\r?\n/)
@@ -965,10 +1004,10 @@ async function readResponsesStream(response: Response): Promise<any> {
   }
 }
 
-export async function readProviderStream(response: Response, selection: RuntimeModelSelection): Promise<any> {
-  if (isClaudeCodeFormat(selection.apiFormat)) return readClaudeCodeStream(response)
-  if (isCodexResponsesFormat(selection.apiFormat)) return readResponsesStream(response)
-  return readOpenAIStream(response)
+export async function readProviderStream(response: Response, selection: RuntimeModelSelection, signal?: AbortSignal): Promise<any> {
+  if (isClaudeCodeFormat(selection.apiFormat)) return readClaudeCodeStream(response, signal)
+  if (isCodexResponsesFormat(selection.apiFormat)) return readResponsesStream(response, signal)
+  return readOpenAIStream(response, signal)
 }
 
 export function parseProviderResponsePayload<T = any>(raw: any, selection: RuntimeModelSelection): LLMResponse<T> {
@@ -1364,7 +1403,7 @@ async function postProviderJson<T = any>(
       const jitter = Math.random() * 0.25 * baseDelay
       const delay = baseDelay + jitter
       console.log(`[provider-runtime] Attempt ${attempt}/${maxRetries + 1}, retrying in ${Math.round(delay)}ms...`)
-      await new Promise(resolve => setTimeout(resolve, delay))
+      await waitForPollInterval(delay, options.signal)
     }
 
     const controller = new AbortController()
@@ -1489,13 +1528,30 @@ async function postProviderJson<T = any>(
     // Success — parse response
     let raw: any
     if (isStreaming) {
+      const streamController = new AbortController()
+      let streamTimedOut = false
+      const abortStreamFromParent = () => streamController.abort()
+      if (options.signal) {
+        if (options.signal.aborted) streamController.abort()
+        else options.signal.addEventListener('abort', abortStreamFromParent, { once: true })
+      }
+      const streamTimeout = setTimeout(() => {
+        streamTimedOut = true
+        streamController.abort()
+        console.warn(`[provider-runtime] ⏰ Stream read timed out after ${timeoutMs}ms`)
+      }, timeoutMs)
       try {
         console.log(`[provider-runtime] Response: ${response.status} | ${routedSelection.model.model_name} | streaming | ${elapsed}s`)
-        raw = await readProviderStream(response, routedSelection)
+        raw = await readProviderStream(response, routedSelection, streamController.signal)
       } catch (error) {
+        if (options.signal?.aborted) throw runtimeRequestCanceledError()
+        if (streamTimedOut) throw new Error(`Request timed out after ${timeoutMs}ms while reading provider stream`)
         lastError = describeFetchError(error)
         console.error(`[provider-runtime] Stream read error: ${lastError}`)
-        continue
+        throw new Error(`Provider stream read failed: ${lastError}`)
+      } finally {
+        clearTimeout(streamTimeout)
+        if (options.signal) options.signal.removeEventListener('abort', abortStreamFromParent)
       }
     } else {
       const text = await response.text()

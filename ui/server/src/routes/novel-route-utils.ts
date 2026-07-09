@@ -79,12 +79,18 @@ function recoverPartialProseJsonPayload(value: any) {
     return decoded ? [candidate, decoded] : [candidate]
   })
   for (const candidate of candidates) {
-    const chapterText = readClosedJsonStringField(candidate, 'chapter_text')
+    let partialJsonOpenStringRecovered = false
+    let chapterText = readClosedJsonStringField(candidate, 'chapter_text')
+    if (!chapterText) {
+      chapterText = readOpenJsonStringField(candidate, 'chapter_text')
+      partialJsonOpenStringRecovered = Boolean(chapterText)
+    }
     if (!chapterText || chapterText.replace(/\s/g, '').length < 200) continue
     const chapterNo = readJsonNumberField(candidate, 'chapter_no') || readJsonNumberField(candidate, 'chapterNo')
     const title = readClosedJsonStringField(candidate, 'title')
     return {
       recovered_from_partial_json: true,
+      partial_json_open_string_recovered: partialJsonOpenStringRecovered,
       chapter_text: chapterText,
       prose_chapters: [
         {
@@ -136,6 +142,52 @@ function readClosedJsonStringAt(text: string, quoteIndex: number) {
     }
   }
   return ''
+}
+
+function readOpenJsonStringField(text: string, field: string) {
+  const regex = new RegExp(`"${field}"\\s*:\\s*"`, 'g')
+  let match: RegExpExecArray | null
+  while ((match = regex.exec(text))) {
+    const start = match.index + match[0].length
+    let escaped = false
+    for (let i = start; i < text.length; i += 1) {
+      const char = text[i]
+      if (escaped) {
+        escaped = false
+        continue
+      }
+      if (char === '\\') {
+        escaped = true
+        continue
+      }
+      if (char === '"') return ''
+    }
+    let fragment = text.slice(start)
+    if (escaped) fragment = fragment.slice(0, -1)
+    return decodeJsonStringFragment(fragment)
+  }
+  return ''
+}
+
+function decodeJsonStringFragment(fragment: string) {
+  const raw = String(fragment || '')
+  if (!raw) return ''
+  const safe = raw.replace(/[\u0000-\u001f]/g, char => {
+    if (char === '\n') return '\\n'
+    if (char === '\r') return '\\r'
+    if (char === '\t') return '\\t'
+    return ''
+  })
+  try {
+    return JSON.parse(`"${safe}"`)
+  } catch {
+    return raw
+      .replace(/\\n/g, '\n')
+      .replace(/\\r/g, '\r')
+      .replace(/\\t/g, '\t')
+      .replace(/\\"/g, '"')
+      .replace(/\\\\/g, '\\')
+  }
 }
 
 function textFromOutputParts(parts: any[]) {
@@ -214,6 +266,25 @@ export const compactText = (value: any, limit = 500) => String(value || '').repl
 export const asArray = (value: any) => Array.isArray(value) ? value : []
 export const clampScore = (value: number) => Math.max(0, Math.min(100, Math.round(value)))
 
+export function compactPreviousChaptersForProse(chapters: any[] = [], targetChapterNo?: any, limit = 3) {
+  const targetNo = Number(targetChapterNo || 0)
+  return asArray(chapters)
+    .filter(chapter => (!targetNo || Number(chapter?.chapter_no || 0) < targetNo) && String(chapter?.chapter_text || chapter?.chapterText || '').trim())
+    .slice(-Math.max(1, Math.min(5, Number(limit || 3))))
+    .map(chapter => {
+      const chapterText = String(chapter.chapter_text || chapter.chapterText || '')
+      const endingExcerpt = compactText(chapter.ending_excerpt || chapter.endingExcerpt || chapterText.slice(-800), 900)
+      return {
+        chapter_no: chapter.chapter_no,
+        title: chapter.title,
+        chapter_summary: chapter.chapter_summary || chapter.summary || compactText(chapterText, 240),
+        ending_hook: chapter.ending_hook || chapter.endingHook || '',
+        ending_excerpt: endingExcerpt,
+        chapter_text: endingExcerpt,
+      }
+    })
+}
+
 export const COMMERCIAL_WEB_NOVEL_STYLE_LOCK_DEFAULTS = {
   narrative_person: '第三人称有限视角为主，紧贴主角即时判断；关键情绪段可短暂内心独白，避免全知解释。',
   sentence_length: '短中句为主，长句只用于高潮铺压；单段控制在2-4句，动作、反应、信息按快切推进。',
@@ -221,7 +292,7 @@ export const COMMERCIAL_WEB_NOVEL_STYLE_LOCK_DEFAULTS = {
   banter_density: '中等偏高：紧张场景用短吐槽泄压，但不拆恐怖、战斗或悬疑张力。',
   payoff_density: '高密度：每800-1200字至少一次小爽点、反转、收获或信息差揭示，每章结尾保留升级钩子。',
   description_density: '低到中：环境描写只服务规则、危险、情绪和线索，避免静态大段铺陈。',
-  chapter_word_range: '标准章2800-3500字；高潮、战斗、阶段收束可写8000-10000字长章。',
+  chapter_word_range: '标准章3200-5200字；高潮、战斗、阶段收束可写8000-10000字长章。',
   ending_policy: '每章末必须留下选择、危机、奖励、身份、规则反转或新目标之一，推动下一章点击。',
   banned_words: [
     '一股莫名的感觉',
@@ -448,14 +519,101 @@ const QUALITY_GATE_STRUCTURED_CHECK_FIELDS = [
   ['deslop_repair_checks', 'deslopRepairChecks'],
 ]
 
+const QUALITY_GATE_STRUCTURED_CHECK_LABELS: Record<string, string> = {
+  platform_checks: '平台检查',
+  content_rubric_checks: '内容基准',
+  target_reader_checks: '目标读者',
+  genre_positioning_checks: '题材定位',
+  upgrade_rhythm_checks: '升级节奏',
+  conflict_structure_checks: '冲突结构',
+  deslop_checks: '去AI味',
+  prose_meta_checks: '正文元信息',
+  dialogue_checks: '对白质量',
+  plot_dynamics_checks: '剧情动力',
+  continuity_heat_checks: '连续性热度',
+  character_relation_checks: '角色关系',
+  character_behavior_checks: '角色行为',
+  asset_linkage_checks: '资产挂钩',
+  state_tracking_checks: '状态跟踪',
+  source_readiness_checks: '来源就绪',
+  intent_confirmation_checks: '意图确认',
+  benchmark_recall_checks: '文风召回',
+  information_flow_checks: '信息流',
+  expectation_threshold_checks: '期待阈值',
+  story_loop_checks: '故事循环',
+  emotional_arc_checks: '情绪弧',
+  chapter_hook_checks: '章级钩子',
+  paragraph_hook_checks: '段落钩子',
+  suspense_checks: '悬念编排',
+  reversal_checks: '反转设计',
+  opening_checks: '开篇设计',
+  prose_craft_checks: '正文工艺',
+  punctuation_tone_checks: '语气标点',
+  quality_audit_checks: '质量诊断',
+  revision_receipt_checks: '修订回执',
+  deslop_repair_checks: '去AI味修复回执',
+  deslop_gate_diagnostics: '去AI味门禁',
+}
+
+function structuredReviewCheckSummary(check: any, field: string) {
+  return compactText(
+    check?.label
+    || check?.key
+    || check?.name
+    || QUALITY_GATE_STRUCTURED_CHECK_LABELS[field]
+    || field
+    || '结构化自检失败',
+    80,
+  )
+}
+
+function isPostRepairCarryOverStructuredCheck(check: any, field: string) {
+  const status = String(check?.status || '').toLowerCase()
+  if (status !== 'fail') return false
+  const key = String(check?.key || '').trim()
+  const syncKey = String(check?.sync_key || check?.syncKey || '').trim()
+  const label = compactText(check?.label || check?.name || '', 120)
+  const evidence = compactText(check?.evidence || check?.summary || check?.reason || '', 240)
+  const fix = compactText(check?.fix || check?.suggestion || '', 240)
+  const remainingRisk = compactText(check?.remaining_risk || check?.remainingRisk || check?.risk || '', 240)
+  const text = [key, syncKey, label, evidence, fix, remainingRisk].filter(Boolean).join('；')
+  const postRepairCarryOver = /轻度|残留|下一章|下一轮|下一次|后续|继续|继续压|非阻塞|仍需|未完全|下轮|同步|写入|追踪|台账|状态/.test(text)
+  const evidenceLocationMiss = /changed_evidence|changedEvidence|旧回执|证据片段|无法定位到修订后正文|定位不到修订后正文|证据未落在|evidence\s*未落在/i.test(text)
+  const postDeliverySyncLike = postRepairCarryOver
+    || evidenceLocationMiss
+    || /状态写回|状态同步|资产状态|角色状态|增量缺口|台账|追踪|文档|入库|后续需|需同步|需要同步/.test(text)
+  const hardCurrentFailure = /正文(?:没有|缺少|未写出|没有写出|未呈现|没有呈现|未兑现|没有兑现)|没有执行|未执行|未落成正文|没有落成正文/.test(text)
+  const hardProofFailure = /无法证明|证据不足/.test(text) && !evidenceLocationMiss && !postDeliverySyncLike
+  const deslopGateSignal = /Gate\s*(?:A|C|D|E|F|G)|章末总结体|模板表达|解释腔|上帝视角|AI味硬伤|禁用词/.test(text)
+  const deslopResidualSignal = /仍残留|仍有|仍存在|仍未|未消除|没有消除|未修掉|未修复|未清理|正文仍|正文有|正文出现|硬伤仍|依然|残留风险/.test(text)
+  const hardDeslopFailure = deslopGateSignal && deslopResidualSignal
+  const hardBenchmarkSourceMissing = /source_paths_missing|missing_primary_contract|profile_missing|module_missing|rhythm_missing|来源缺失|文风召回来源缺失/i.test(text)
+  if (/未生成|缺少|missing/i.test(key)) return false
+  if (/未生成|没有输出|无可用/.test(text)) return false
+  if (hardBenchmarkSourceMissing) return false
+  if (/缺少|缺失/.test(text) && !postDeliverySyncLike && key !== 'pre_store_structural_sync') return false
+  if (hardCurrentFailure || hardProofFailure) return false
+  if (key === 'pre_store_structural_sync') return true
+  if (key === 'revision_cascade_impact_evidence') return true
+  if (key === 'quality_audit_repair_receipt_sync') return true
+  if ((key === 'benchmark_recall_sync' || syncKey === 'benchmark_recall_sync' || field === 'benchmark_recall_checks') && postRepairCarryOver) return true
+  if (key === 'prose_revision_receipt_sync' && postRepairCarryOver) return true
+  if (key === 'deslop_repair_receipt_sync' && (postRepairCarryOver || evidenceLocationMiss) && !hardDeslopFailure) return true
+  if (field === 'quality_audit_checks' && /_sync$/.test(syncKey)) return true
+  return false
+}
+
 function collectFailedStructuredReviewChecks(review: any) {
   const directChecks = QUALITY_GATE_STRUCTURED_CHECK_FIELDS
-    .flatMap(([snakeField, camelField]) => asArray(review?.[snakeField] || review?.[camelField]))
+    .flatMap(([snakeField, camelField]) => asArray(review?.[snakeField] || review?.[camelField])
+      .map((check: any) => ({ check, field: snakeField })))
   const diagnostics = review?.deslop_gate_diagnostics || review?.deslopGateDiagnostics || {}
   const diagnosticGates = asArray(diagnostics?.gates)
+    .map((check: any) => ({ check, field: 'deslop_gate_diagnostics' }))
   return [...directChecks, ...diagnosticGates]
-    .filter((check: any) => String(check?.status || '').toLowerCase() === 'fail')
-    .map((check: any) => compactText(check?.label || check?.key || check?.name || check?.evidence || '结构化自检失败', 80))
+    .filter((item: any) => String(item?.check?.status || '').toLowerCase() === 'fail')
+    .filter((item: any) => !isPostRepairCarryOverStructuredCheck(item.check, item.field))
+    .map((item: any) => structuredReviewCheckSummary(item.check, item.field))
     .filter(Boolean)
 }
 
@@ -465,7 +623,8 @@ function collectUndeliveredDeliveryRiskReceipts(review: any) {
       const remainingRisk = compactText(receipt?.remaining_risk || receipt?.remainingRisk || receipt?.risk || '', 120)
       const normalizedRemainingRisk = remainingRisk.toLowerCase()
       const hasRemainingRisk = Boolean(remainingRisk) && !['无', 'none', 'no', 'n/a', 'null', 'false', '0'].includes(normalizedRemainingRisk)
-      return receipt?.delivered === false || hasRemainingRisk
+      if (!(receipt?.delivered === false || hasRemainingRisk)) return false
+      return !isPostDeliveryOnlyDeliveryRiskReceipt(receipt, remainingRisk)
     })
     .map((receipt: any) => compactText(
       receipt?.risk_item
@@ -478,6 +637,24 @@ function collectUndeliveredDeliveryRiskReceipts(review: any) {
       80,
     ))
     .filter(Boolean)
+}
+
+function isPostDeliveryOnlyDeliveryRiskReceipt(receipt: any, remainingRisk = '') {
+  const evidence = compactText(
+    receipt?.evidence
+    || receipt?.changed_evidence
+    || receipt?.changedEvidence
+    || receipt?.source_excerpt
+    || receipt?.sourceExcerpt,
+    240,
+  )
+  if (!evidence) return false
+  const risk = compactText(remainingRisk || receipt?.remaining_risk || receipt?.remainingRisk || receipt?.risk || '', 240)
+  if (!risk) return false
+  if (/正文(没有|未|缺少)|无法证明|证据不足|未落成正文|没有落成正文/.test(risk)) return false
+  const qualityContinuationCarryOver = /承接回执缺失：(?:补追读|修吸引力|补循环|补期待|补故事力|补章末交接)|漏追读|吸引力缺口|故事循环缺口|期待欠账|故事力缺口/.test(risk)
+  if (qualityContinuationCarryOver) return true
+  return /(?:资产台账|资产文档|状态更新|状态写回|追踪\/|追踪\\|追踪\/|追踪|伏笔\.md|时间线\.md|角色状态|资产状态|文档|台账|入库|后续需|后续|下一章|下一轮|下轮|状态同步|同步状态|同步资产|需同步|需要同步|需更新|需要更新|写回状态|补更强|evidence\s*未落在|证据未落在)/i.test(risk)
 }
 
 function hasUsableNextChapterQualityPlan(review: any) {

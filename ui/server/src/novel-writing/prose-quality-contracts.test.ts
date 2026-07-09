@@ -1,0 +1,122 @@
+import { describe, expect, test } from 'bun:test'
+import {
+  compactDeliveryRiskCarryOverText,
+  getChapterLaunchGateBlocker,
+  selectUsableRevisionText,
+  shouldRunSynchronousReadabilityReview,
+} from './prose-quality-contracts'
+
+describe('prose quality contracts', () => {
+  test('defers auxiliary readability review unless explicitly requested', () => {
+    expect(shouldRunSynchronousReadabilityReview()).toBe(false)
+    expect(shouldRunSynchronousReadabilityReview({ auxiliary_review_mode: 'deferred' })).toBe(false)
+    expect(shouldRunSynchronousReadabilityReview({ run_readability_review: true })).toBe(true)
+    expect(shouldRunSynchronousReadabilityReview({ auxiliary_review_mode: 'sync' })).toBe(true)
+    expect(shouldRunSynchronousReadabilityReview({}, {
+      reference_config: { quality_pipeline: { run_readability_review: true } },
+    })).toBe(true)
+  })
+
+  test('blocks prose generation when chapter launch gate has hard failures', () => {
+    const blocker = getChapterLaunchGateBlocker({
+      status: 'ready',
+      signals: [
+        { key: 'reader_promise', label: '读者承诺', status: 'ok', detail: '承诺清晰。' },
+        { key: 'ending_hook', label: '章末钩子', status: 'blocked', reason: '章末钩子为空，不能开写。' },
+      ],
+    })
+
+    expect(blocker).toMatchObject({
+      code: 'PROSE_LAUNCH_GATE_BLOCKED',
+      label: '开写门禁未通过',
+    })
+    expect(blocker?.blocked_checks.map(item => item.key)).toContain('ending_hook')
+    expect(blocker?.summary).toContain('章末钩子')
+  })
+
+  test('allows warning-only chapter launch gate to enter draft repair loop', () => {
+    const blocker = getChapterLaunchGateBlocker({
+      status: 'warn',
+      summary: '本章钩子偏弱，但已有可写场景卡。',
+      signals: [
+        { key: 'reader_promise', label: '读者承诺', status: 'warn', detail: '需要在前300字强化。' },
+      ],
+    })
+
+    expect(blocker).toBeNull()
+  })
+
+  test('rejects tiny self-review final_text so it cannot overwrite full prose', () => {
+    const currentText = [
+      '第八章 会长私印',
+      '',
+      '门槛白线往后退了一寸，玻璃门里的灯同时熄灭。',
+      '',
+      '李超没有急着动手。他先把那枚私印按在掌心，听见印面下面传来第二个人的呼吸。',
+    ].join('\n') + '现场动作。'.repeat(480)
+
+    const selected = selectUsableRevisionText(currentText, {
+      revised: true,
+      final_text: '已生成修订稿。',
+      revision: null,
+    })
+
+    expect(selected.accepted).toBe(false)
+    expect(selected.text).toBe(currentText)
+    expect(selected.reason).toContain('过短')
+  })
+
+  test('accepts a complete self-review final_text when it preserves prose scale', () => {
+    const currentText = '正文动作。'.repeat(900)
+    const revisedText = `${currentText}\n\n章尾多出新的规则脚印。`
+
+    const selected = selectUsableRevisionText(currentText, {
+      revised: true,
+      final_text: revisedText,
+      revision: {
+        revision_receipts: [
+          { changed_evidence: '章尾多出新的规则脚印。' },
+        ],
+      },
+    })
+
+    expect(selected.accepted).toBe(true)
+    expect(selected.text).toBe(revisedText)
+    expect(selected.reason).toBe('')
+  })
+
+  test('strips engineering appendix before accepting self-review final_text', () => {
+    const currentText = '正文动作。'.repeat(200)
+    const revisedText = [
+      currentText,
+      '',
+      '章尾多出新的规则脚印。',
+      '',
+      '---',
+      '',
+      '### oh_story_delivery_receipts',
+      '- **target_emotion**: 已兑现。',
+    ].join('\n')
+
+    const selected = selectUsableRevisionText(currentText, {
+      revised: true,
+      final_text: revisedText,
+    })
+
+    expect(selected.accepted).toBe(true)
+    expect(selected.text).toContain('章尾多出新的规则脚印。')
+    expect(selected.text).not.toContain('oh_story_delivery_receipts')
+    expect(selected.text).not.toContain('target_emotion')
+  })
+
+  test('compacts recursive delivery-risk receipt noise into actionable prose tasks', () => {
+    const text = compactDeliveryRiskCarryOverText(
+      '修复：缺少 delivery_risk_receipts；模型自检未逐项输出 next_chapter_quality_plan_receipts；复核承接：前300字用带血腰牌直接引出阵堂旧案，中段把账册缺页变成现场阻碍。',
+    )
+
+    expect(text).toContain('前300字用带血腰牌直接引出阵堂旧案')
+    expect(text).toContain('中段把账册缺页变成现场阻碍')
+    expect(text).not.toContain('delivery_risk_receipts')
+    expect(text).not.toContain('模型自检未逐项输出')
+  })
+})

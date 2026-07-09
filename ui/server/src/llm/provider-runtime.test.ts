@@ -1913,6 +1913,56 @@ describe('codex responses provider runtime', () => {
     }
   })
 
+  test('aborts retry backoff before issuing another provider request', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-runtime-retry-abort-'))
+    try {
+      await writeFile(join(workspace, 'providers.json'), JSON.stringify([
+        {
+          id: 'retry-abort-provider',
+          display_name: 'Retry Abort Provider',
+          service_type: 'llm',
+          api_format: 'openai_compatible',
+          auth_type: 'bearer',
+          response_mode: 'json',
+          supported_modalities: ['chat'],
+          default_base_url: 'https://retry-abort.example/v1',
+          is_active: true,
+          endpoints: {},
+          custom_headers: {},
+        },
+      ]))
+      await writeFile(join(workspace, 'keys.json'), JSON.stringify([
+        { id: 19, provider: 'retry-abort-provider', key: 'secret-key', is_active: true },
+      ]))
+      await writeFile(join(workspace, 'models.json'), JSON.stringify([
+        { id: 19, api_key_id: 19, provider: 'retry-abort-provider', display_name: 'Retry Abort Model', model_name: 'retry-abort-model', capabilities: { chat: true }, health_status: 'healthy' },
+      ]))
+
+      const controller = new AbortController()
+      let calls = 0
+      globalThis.fetch = (async () => {
+        calls += 1
+        if (calls === 1) {
+          setTimeout(() => controller.abort(), 50)
+          return new Response(JSON.stringify({ error: 'temporary overload' }), { status: 500 })
+        }
+        return new Response(JSON.stringify({ choices: [{ message: { content: 'second request should not run' } }] }), { status: 200 })
+      }) as typeof fetch
+
+      const result = await executeWithRuntimeModel(workspace, {
+        model: 'balanced',
+        messages: [{ role: 'user', content: 'hello' }],
+        response_format: 'text',
+      } as any, 19, { maxRetries: 1, signal: controller.signal })
+
+      expect(calls).toBe(1)
+      expect(result.finish_reason).toBe('error')
+      expect(result.error).toContain('Request canceled')
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
   test('polls config-driven async tasks using fallback task id fields when no extractor is configured', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-runtime-fallback-poll-'))
     try {
@@ -2644,6 +2694,159 @@ describe('codex responses provider runtime', () => {
     const raw = await readProviderStream(new Response(stream), selection())
 
     expect(raw.content).toBe(fullText)
+  })
+
+  test('aborts provider stream reads when the parent signal is canceled', async () => {
+    const encoder = new TextEncoder()
+    let streamController: ReadableStreamDefaultController<Uint8Array> | null = null
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        streamController = controller
+        controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"开头"}}]}\n\n'))
+      },
+    })
+    const abortController = new AbortController()
+
+    const readPromise = readProviderStream(new Response(stream), selection({ apiFormat: 'openai_compatible' }), abortController.signal)
+    abortController.abort()
+    setTimeout(() => {
+      try {
+        streamController?.close()
+      } catch {}
+    }, 20)
+
+    await expect(readPromise).rejects.toThrow('Request canceled')
+  })
+
+  test('applies runtime timeout to streaming body reads, not just response headers', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-runtime-stream-timeout-'))
+    let streamController: ReadableStreamDefaultController<Uint8Array> | null = null
+    try {
+      await writeFile(join(workspace, 'providers.json'), JSON.stringify([
+        {
+          id: 'slow-stream',
+          display_name: 'Slow Stream',
+          service_type: 'llm',
+          api_format: 'openai_compatible',
+          auth_type: 'bearer',
+          response_mode: 'stream',
+          supported_modalities: ['chat'],
+          default_base_url: 'https://slow.example/v1',
+          is_active: true,
+          endpoints: {},
+          custom_headers: {},
+        },
+      ]))
+      await writeFile(join(workspace, 'keys.json'), JSON.stringify([
+        { id: 1, provider: 'slow-stream', key: 'sk-test', is_active: true },
+      ]))
+      await writeFile(join(workspace, 'models.json'), JSON.stringify([
+        {
+          id: 1,
+          api_key_id: 1,
+          provider: 'slow-stream',
+          display_name: 'Slow GPT',
+          model_name: 'slow-gpt',
+          capabilities: { chat: true },
+          health_status: 'healthy',
+          context_ui_params: {},
+        },
+      ]))
+
+      const encoder = new TextEncoder()
+      globalThis.fetch = (async () => new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          streamController = controller
+          controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"开头"}}]}\n\n'))
+        },
+      }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } })) as typeof fetch
+
+      const execution = executeWithRuntimeModel(workspace, {
+        model: 'balanced',
+        messages: [{ role: 'user', content: 'ping' }],
+        response_format: 'text',
+        stream: true,
+      }, 1, { maxRetries: 0, timeoutMs: 25 })
+        .then(result => ({ kind: 'resolved' as const, message: String((result as any)?.error || result.content || '') }))
+        .catch(error => ({ kind: 'rejected' as const, message: String(error?.message || error) }))
+
+      const outcome = await Promise.race([
+        execution,
+        new Promise<{ kind: 'pending'; message: string }>(resolve => setTimeout(() => resolve({ kind: 'pending', message: 'stream read did not respect timeout' }), 160)),
+      ])
+
+      if (outcome.kind === 'pending') {
+        try {
+          streamController?.error(new Error('test cleanup'))
+        } catch {}
+      }
+
+      expect(outcome.kind).not.toBe('pending')
+      expect(outcome.message).toContain('timed out')
+    } finally {
+      try {
+        streamController?.close()
+      } catch {}
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('does not retry a completed streaming response when the body read fails', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-runtime-stream-no-retry-'))
+    try {
+      await writeFile(join(workspace, 'providers.json'), JSON.stringify([
+        {
+          id: 'flaky-stream',
+          display_name: 'Flaky Stream',
+          service_type: 'llm',
+          api_format: 'openai_compatible',
+          auth_type: 'bearer',
+          response_mode: 'stream',
+          supported_modalities: ['chat'],
+          default_base_url: 'https://flaky.example/v1',
+          is_active: true,
+          endpoints: {},
+          custom_headers: {},
+        },
+      ]))
+      await writeFile(join(workspace, 'keys.json'), JSON.stringify([
+        { id: 1, provider: 'flaky-stream', key: 'sk-test', is_active: true },
+      ]))
+      await writeFile(join(workspace, 'models.json'), JSON.stringify([
+        {
+          id: 1,
+          api_key_id: 1,
+          provider: 'flaky-stream',
+          display_name: 'Flaky GPT',
+          model_name: 'flaky-gpt',
+          capabilities: { chat: true },
+          health_status: 'healthy',
+          context_ui_params: {},
+        },
+      ]))
+
+      let fetchCalls = 0
+      globalThis.fetch = (async () => {
+        fetchCalls += 1
+        return new Response(new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.error(new Error('upstream stream disconnected'))
+          },
+        }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+      }) as typeof fetch
+
+      const result = await executeWithRuntimeModel(workspace, {
+        model: 'balanced',
+        messages: [{ role: 'user', content: 'write chapter' }],
+        response_format: 'text',
+        stream: true,
+      }, 1, { maxRetries: 2, timeoutMs: 1000 })
+
+      expect(result.error).toContain('upstream stream disconnected')
+      expect(fetchCalls).toBe(1)
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
   })
 
   test('summarizes Codex request bodies without leaking prompt text', () => {

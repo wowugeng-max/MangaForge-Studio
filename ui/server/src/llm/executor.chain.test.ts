@@ -7,6 +7,51 @@ mock.module('./provider-runtime', () => ({
     runtimeRequests.push(request)
     const userPrompt = String(request.messages?.find((item: any) => item.role === 'user')?.content || '')
 
+    if (userPrompt.includes('RETRY_EMPTY_PROSE_TEST')) {
+      const attempt = runtimeRequests.filter((item) => {
+        const prompt = String(item.messages?.find((message: any) => message.role === 'user')?.content || '')
+        return prompt.includes('RETRY_EMPTY_PROSE_TEST')
+      }).length
+      if (attempt === 1) {
+        return {
+          content: '',
+          finish_reason: 'stop',
+          usage: {
+            input_tokens: 250000,
+            output_tokens: 9000,
+            total_tokens: 259000,
+          },
+          raw: {
+            stream_chunks_tail: [
+              {
+                choices: [{ delta: {}, finish_reason: 'stop', index: 0 }],
+                usage: {
+                  completion_tokens: 9000,
+                  completion_tokens_details: {
+                    output_text_tokens: 0,
+                    reasoning_tokens: 9000,
+                  },
+                },
+              },
+            ],
+          },
+        }
+      }
+      return {
+        content: JSON.stringify({
+          prose_chapters: [
+            {
+              chapter_no: 10,
+              title: '空输出重试',
+              chapter_text: '第二次请求直接写出了正文。',
+              scene_breakdown: [],
+              continuity_notes: [],
+            },
+          ],
+        }),
+      }
+    }
+
     if (userPrompt.includes('请构建完整的故事大纲')) {
       return {
         content: JSON.stringify({
@@ -101,5 +146,96 @@ describe('executeNovelAgentChain outline params', () => {
     expect(outlinePrompt).toContain('主角从破庙拿到账本')
     expect(outlinePrompt).toContain('前 3 章已经存在')
     expect(outlinePrompt).toContain('第 4 章开始继续生成')
+  })
+
+  test('keeps prose paragraph task bounded without duplicating full upstream context into agent messages', async () => {
+    runtimeRequests.length = 0
+    const { generateNovelChapterProse } = await import('./executor')
+
+    await generateNovelChapterProse(
+      {
+        id: 102,
+        title: '正文瘦身测试',
+        genre: '都市',
+        style_tags: ['网文'],
+        reference_config: {},
+      } as any,
+      {
+        chapter_no: 10,
+        title: '暗门',
+        chapter_summary: '主角追进旧楼，发现证据被提前转移。',
+        conflict: '追查与阻拦',
+        ending_hook: '门后传来熟人的声音',
+      },
+      {
+        worldbuilding: { world_summary: 'FULL_WORLDBUILDING_SHOULD_NOT_DUPLICATE', rules: ['FULL_RULE_SHOULD_NOT_DUPLICATE'] },
+        characters: [{ name: 'FULL_CHARACTER_SHOULD_NOT_DUPLICATE', motivation: '查清真相' }],
+        outline: [{ title: 'FULL_OUTLINE_SHOULD_NOT_DUPLICATE', summary: '长线大纲' }],
+        prevChapters: [
+          {
+            chapter_no: 9,
+            title: '旧楼之前',
+            chapter_summary: '上一章摘要',
+            ending_hook: '上一章钩子',
+            chapter_text: `FULL_PREVIOUS_CHAPTER_BODY_SHOULD_NOT_DUPLICATE${'中段正文。'.repeat(600)}上一章末尾片段可以保留。`,
+          },
+        ],
+        paragraphTask: 'BOUNDED_PARAGRAPH_TASK_WITH_OH_STORY_RULES',
+      } as any,
+      { activeWorkspace: 'test-workspace', skipMemory: true, modelId: '1' },
+    )
+
+    const proseRequest = runtimeRequests.find((request) => {
+      const userPrompt = String(request.messages?.find((item: any) => item.role === 'user')?.content || '')
+      return userPrompt.includes('BOUNDED_PARAGRAPH_TASK_WITH_OH_STORY_RULES')
+    })
+    const combinedPrompt = JSON.stringify(proseRequest?.messages || [])
+
+    expect(proseRequest).toBeTruthy()
+    expect(combinedPrompt).toContain('BOUNDED_PARAGRAPH_TASK_WITH_OH_STORY_RULES')
+    expect(combinedPrompt).not.toContain('FULL_WORLDBUILDING_SHOULD_NOT_DUPLICATE')
+    expect(combinedPrompt).not.toContain('FULL_CHARACTER_SHOULD_NOT_DUPLICATE')
+    expect(combinedPrompt).not.toContain('FULL_OUTLINE_SHOULD_NOT_DUPLICATE')
+    expect(combinedPrompt).not.toContain('FULL_PREVIOUS_CHAPTER_BODY_SHOULD_NOT_DUPLICATE')
+  })
+
+  test('retries prose draft once in direct-output non-stream mode when streaming returns reasoning-only content', async () => {
+    runtimeRequests.length = 0
+    const { generateNovelChapterProse } = await import('./executor')
+
+    const result = await generateNovelChapterProse(
+      {
+        id: 103,
+        title: '空输出重试测试',
+        genre: '都市',
+        style_tags: ['网文'],
+        reference_config: {},
+      } as any,
+      {
+        chapter_no: 10,
+        title: '空输出',
+        chapter_summary: '测试 Gemini reasoning-only 空正文重试。',
+      },
+      {
+        paragraphTask: 'RETRY_EMPTY_PROSE_TEST 请生成本章正文。',
+        maxTokens: 18000,
+      } as any,
+      { activeWorkspace: 'test-workspace', skipMemory: true, modelId: '217' },
+    )
+
+    const proseRequests = runtimeRequests.filter((request) => {
+      const userPrompt = String(request.messages?.find((item: any) => item.role === 'user')?.content || '')
+      return userPrompt.includes('RETRY_EMPTY_PROSE_TEST')
+    })
+
+    expect(proseRequests).toHaveLength(2)
+    expect(proseRequests[0].stream).toBe(true)
+    expect(proseRequests[1]).toMatchObject({
+      stream: false,
+      response_mode: 'non_stream',
+    })
+    expect(proseRequests[1].max_tokens).toBeGreaterThan(proseRequests[0].max_tokens)
+    expect(String(proseRequests[1].messages?.find((item: any) => item.role === 'user')?.content || '')).toContain('不要输出思考过程')
+    expect(result.content).toContain('第二次请求直接写出了正文')
   })
 })
