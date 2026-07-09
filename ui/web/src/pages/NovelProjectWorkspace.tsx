@@ -6533,6 +6533,7 @@ export default function NovelProjectWorkspace() {
           deliveryActionLoading={proseQualityLoading || editorReportLoading || generatingProse}
           onDeliveryAction={handleWritingCockpitAction}
           onRepairDeslopGate={repairActiveDeslopGate}
+          isImmersiveShell={isImmersiveShell}
           onChapterTextChange={(next) => {
             const chapterId = activeChapterId
             setChapters(prev => prev.map(c => c.id === chapterId ? { ...c, chapter_text: next } : c))

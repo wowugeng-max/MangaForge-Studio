@@ -40,6 +40,7 @@ import {
   type NovelWritingRecommendation,
 } from './writingRecommendationModel'
 import type { ChapterHandoffDeskModel, DeslopGateDiagnosticsModel, WritingQueueItem, WritingQueueModel } from './writingCockpitModel'
+import { pickWritingAuxFocusTags } from './writingAuxFocusModel'
 import './WorkspaceCenter.css'
 
 const { Title, Text, Paragraph } = Typography
@@ -430,6 +431,7 @@ export function WorkspaceCenter({
   deliveryActionLoading,
   onDeliveryAction,
   onRepairDeslopGate,
+  isImmersiveShell = false,
 }: {
   isEmptyProject: boolean
   selectedProject: any | null
@@ -491,9 +493,11 @@ export function WorkspaceCenter({
   deliveryActionLoading?: boolean
   onDeliveryAction?: (key: NovelDeliveryActionKey) => void
   onRepairDeslopGate?: () => void
+  isImmersiveShell?: boolean
 }) {
   const [editorDisplayPrefs, setEditorDisplayPrefs] = React.useState<EditorDisplayPrefs>(() => loadEditorDisplayPrefs())
   const [writingAuxCollapsed, setWritingAuxCollapsed] = React.useState(() => loadWritingAuxCollapsed())
+  const [immersiveAuxOpen, setImmersiveAuxOpen] = React.useState(false)
   const [blueprintEditorOpen, setBlueprintEditorOpen] = React.useState(false)
   const [blueprintEditorText, setBlueprintEditorText] = React.useState('')
   const [blueprintEditorError, setBlueprintEditorError] = React.useState('')
@@ -729,6 +733,10 @@ export function WorkspaceCenter({
     saveWritingAuxCollapsed(writingAuxCollapsed)
   }, [writingAuxCollapsed])
 
+  React.useEffect(() => {
+    if (!isImmersiveShell) setImmersiveAuxOpen(false)
+  }, [isImmersiveShell])
+
   const secondaryActionMenu = (
     <div className="novel-editor-action-popover novel-editor-secondary-actions">
       <div className="novel-editor-action-group novel-editor-action-group-prep">
@@ -751,135 +759,8 @@ export function WorkspaceCenter({
     </div>
   )
 
-  return (
-    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: '#fafbfc' }}>
-      {isEmptyProject && (
-        <div style={{ flex: 1, display: 'grid', placeItems: 'center', padding: 32 }}>
-          <div style={{ maxWidth: 860, width: '100%' }}>
-            <div style={{ textAlign: 'center', marginBottom: 24 }}>
-              <Title level={3} style={{ marginBottom: 8 }}>开始创作《{selectedProject?.title}》</Title>
-              <Text type="secondary">
-                先选择原创或参考路线，再建立写作圣经、章节规划和正文生产流水线。
-              </Text>
-            </div>
-            <Text type="secondary" style={{ display: 'block', marginBottom: 32 }}>
-              推荐按以下路径起步；后续左侧生产向导会持续提示下一步。
-            </Text>
-            <Row gutter={24} justify="center">
-              {[
-                {
-                  icon: <ExperimentOutlined />,
-                  title: '原创孵化',
-                  desc: '从题材定位、读者承诺、世界观、主角和前 30 章章纲开始。',
-                  btn: <Button type="primary" loading={incubatingOriginal} onClick={onRunOriginalIncubator}>生成原创方案</Button>,
-                },
-                {
-                  icon: <BookOutlined />,
-                  title: '参考仿写',
-                  desc: '先配置参考作品，提炼节奏、结构和爽点模型，再进入安全迁移。',
-                  btn: <Button onClick={onOpenReferenceConfig}>配置参考作品</Button>,
-                },
-                {
-                  icon: <SettingOutlined />,
-                  title: '手动起步',
-                  desc: '人工创建大纲、写作圣经或第一章，适合已有完整构思的项目。',
-                  btn: (
-                    <Space>
-                      <Button loading={planning} onClick={onRunPlan}>AI 规划</Button>
-                      <Button onClick={onOpenWritingBibleEditor}>写作圣经</Button>
-                      <Button onClick={onCreateOutline}>创建大纲</Button>
-                      <Button onClick={onCreateChapter}>第一章</Button>
-                    </Space>
-                  ),
-                },
-              ].map(card => (
-                <Col key={card.title} xs={24} md={8}>
-                  <Card hoverable style={{ borderRadius: 8, height: '100%' }}
-                    styles={{ body: { padding: 20, display: 'flex', flexDirection: 'column', height: '100%' } }}>
-                    <div style={{ fontSize: 28, color: '#1677ff', marginBottom: 12 }}>{card.icon}</div>
-                    <Title level={5} style={{ marginTop: 0 }}>{card.title}</Title>
-                    <Text type="secondary" style={{ display: 'block', marginBottom: 18, minHeight: 66 }}>{card.desc}</Text>
-                    <div style={{ marginTop: 'auto' }}>
-                    {card.btn}
-                    </div>
-                  </Card>
-                </Col>
-              ))}
-            </Row>
-          </div>
-        </div>
-      )}
-
-      {!isEmptyProject && activeChapter && (
-        <>
-          <div className="novel-editor-toolbar" style={{
-            flexShrink: 0,
-          }}>
-            <div className="novel-editor-toolbar-meta">
-              <Title className="novel-editor-title" level={5} style={{ margin: 0 }}>
-                第{activeChapter.chapter_no}章《{displayValue(activeChapter.title) || '无标题'}》
-              </Title>
-              <div className="novel-editor-status-stack">
-                {chapterStatusTag(activeChapter)}
-                {materialScore && (
-                  <Tooltip title={(materialScore.recommendations || []).slice(0, 4).join('；') || '材料完整度'}>
-                    <Tag color={materialScore.can_generate ? 'green' : Number(materialScore.score || 0) >= 65 ? 'gold' : 'red'} bordered={false}>
-                      材料 {materialScore.score ?? '-'}%
-                    </Tag>
-                  </Tooltip>
-                )}
-              </div>
-            </div>
-            <div className="novel-editor-primary-entry">
-              <Tag className="novel-editor-primary-phase" bordered={false}>{aiResponsibility.phaseLabel}</Tag>
-              <Tooltip title={`${recommendedAction.label}：${recommendedAction.reason}`}>
-                <Button
-                  type="primary"
-                  size="small"
-                  className={commandClass(recommendedAction.key, 'novel-editor-primary-command novel-editor-primary-action-main')}
-                  icon={<PlayCircleOutlined />}
-                  loading={recommendedToolbarLoading}
-                  onClick={runRecommendedToolbarAction}
-                >
-                  {recommendedAction.label}
-                </Button>
-              </Tooltip>
-              {recommendedAction.phase === 'draft' && renderWordTargetControl()}
-            </div>
-            <div className="novel-editor-toolbar-controls">
-              <Text className="novel-editor-word-count" type="secondary">{wc(activeChapter.chapter_text)} 字</Text>
-              <SaveIndicator status={saveStatus} />
-              <EditorDisplayControls prefs={editorDisplayPrefs} onChange={setEditorDisplayPrefs} />
-              <Popover content={secondaryActionMenu} trigger="click" placement="bottomRight">
-                <Button className="novel-editor-more-actions" size="small" icon={<MoreOutlined />}>更多</Button>
-              </Popover>
-            </div>
-          </div>
-
-          <div className={`novel-writing-aux-rail ${writingAuxCollapsed ? 'is-collapsed' : 'is-expanded'}`} aria-label="写作辅助面板状态">
-            <div className="novel-writing-aux-summary">
-              {writingQueue?.visible && <Tag bordered={false}>队列 {writingAuxQueueSummary}</Tag>}
-              {deliverySummary.visible && <Tag bordered={false}>交稿 {deliverySummary.statusLabel}</Tag>}
-              {chapterHandoffDesk?.visible && <Tag bordered={false}>交接 {chapterHandoffDesk.label}</Tag>}
-              {draftBriefSummary.visible && <Tag bordered={false}>任务书 {draftBriefSummary.statusLabel}</Tag>}
-            </div>
-            <Space className="novel-writing-aux-controls" size={6} wrap>
-              <Tooltip title={writingAuxToggleHint}>
-                <Button
-                  size="small"
-                  className="novel-writing-aux-toggle"
-                  icon={writingAuxCollapsed ? <DownOutlined /> : <UpOutlined />}
-                  aria-expanded={!writingAuxCollapsed}
-                  onClick={() => setWritingAuxCollapsed(prev => !prev)}
-                >
-                  {writingAuxToggleLabel}
-                </Button>
-              </Tooltip>
-            </Space>
-          </div>
-
-          {!writingAuxCollapsed && (
-            <div className="novel-writing-support-stack" aria-label="写作辅助面板">
+  const writingSupportBody = (
+    <>
           {writingQueue?.visible && (
             <div className="novel-writing-queue-strip" aria-label="写作队列，滚动规划章节会自动进入">
               <div className="novel-writing-queue-head">
@@ -1873,8 +1754,189 @@ export function WorkspaceCenter({
               {blueprintEditorError && <Text type="danger">{blueprintEditorError}</Text>}
             </Space>
           </Modal>
+    </>
+  )
+
+  return (
+    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: '#fafbfc' }}>
+      {isEmptyProject && (
+        <div style={{ flex: 1, display: 'grid', placeItems: 'center', padding: 32 }}>
+          <div style={{ maxWidth: 860, width: '100%' }}>
+            <div style={{ textAlign: 'center', marginBottom: 24 }}>
+              <Title level={3} style={{ marginBottom: 8 }}>开始创作《{selectedProject?.title}》</Title>
+              <Text type="secondary">
+                先选择原创或参考路线，再建立写作圣经、章节规划和正文生产流水线。
+              </Text>
             </div>
+            <Text type="secondary" style={{ display: 'block', marginBottom: 32 }}>
+              推荐按以下路径起步；后续左侧生产向导会持续提示下一步。
+            </Text>
+            <Row gutter={24} justify="center">
+              {[
+                {
+                  icon: <ExperimentOutlined />,
+                  title: '原创孵化',
+                  desc: '从题材定位、读者承诺、世界观、主角和前 30 章章纲开始。',
+                  btn: <Button type="primary" loading={incubatingOriginal} onClick={onRunOriginalIncubator}>生成原创方案</Button>,
+                },
+                {
+                  icon: <BookOutlined />,
+                  title: '参考仿写',
+                  desc: '先配置参考作品，提炼节奏、结构和爽点模型，再进入安全迁移。',
+                  btn: <Button onClick={onOpenReferenceConfig}>配置参考作品</Button>,
+                },
+                {
+                  icon: <SettingOutlined />,
+                  title: '手动起步',
+                  desc: '人工创建大纲、写作圣经或第一章，适合已有完整构思的项目。',
+                  btn: (
+                    <Space>
+                      <Button loading={planning} onClick={onRunPlan}>AI 规划</Button>
+                      <Button onClick={onOpenWritingBibleEditor}>写作圣经</Button>
+                      <Button onClick={onCreateOutline}>创建大纲</Button>
+                      <Button onClick={onCreateChapter}>第一章</Button>
+                    </Space>
+                  ),
+                },
+              ].map(card => (
+                <Col key={card.title} xs={24} md={8}>
+                  <Card hoverable style={{ borderRadius: 8, height: '100%' }}
+                    styles={{ body: { padding: 20, display: 'flex', flexDirection: 'column', height: '100%' } }}>
+                    <div style={{ fontSize: 28, color: '#1677ff', marginBottom: 12 }}>{card.icon}</div>
+                    <Title level={5} style={{ marginTop: 0 }}>{card.title}</Title>
+                    <Text type="secondary" style={{ display: 'block', marginBottom: 18, minHeight: 66 }}>{card.desc}</Text>
+                    <div style={{ marginTop: 'auto' }}>
+                    {card.btn}
+                    </div>
+                  </Card>
+                </Col>
+              ))}
+            </Row>
+          </div>
+        </div>
+      )}
+
+      {!isEmptyProject && activeChapter && (
+        <>
+          <div className="novel-editor-toolbar" style={{
+            flexShrink: 0,
+          }}>
+            <div className="novel-editor-toolbar-meta">
+              <Title className="novel-editor-title" level={5} style={{ margin: 0 }}>
+                第{activeChapter.chapter_no}章《{displayValue(activeChapter.title) || '无标题'}》
+              </Title>
+              <div className="novel-editor-status-stack">
+                {chapterStatusTag(activeChapter)}
+                {materialScore && (
+                  <Tooltip title={(materialScore.recommendations || []).slice(0, 4).join('；') || '材料完整度'}>
+                    <Tag color={materialScore.can_generate ? 'green' : Number(materialScore.score || 0) >= 65 ? 'gold' : 'red'} bordered={false}>
+                      材料 {materialScore.score ?? '-'}%
+                    </Tag>
+                  </Tooltip>
+                )}
+              </div>
+            </div>
+            <div className="novel-editor-primary-entry">
+              <Tag className="novel-editor-primary-phase" bordered={false}>{aiResponsibility.phaseLabel}</Tag>
+              <Tooltip title={`${recommendedAction.label}：${recommendedAction.reason}`}>
+                <Button
+                  type="primary"
+                  size="small"
+                  className={commandClass(recommendedAction.key, 'novel-editor-primary-command novel-editor-primary-action-main')}
+                  icon={<PlayCircleOutlined />}
+                  loading={recommendedToolbarLoading}
+                  onClick={runRecommendedToolbarAction}
+                >
+                  {recommendedAction.label}
+                </Button>
+              </Tooltip>
+              {recommendedAction.phase === 'draft' && renderWordTargetControl()}
+            </div>
+            <div className="novel-editor-toolbar-controls">
+              <Text className="novel-editor-word-count" type="secondary">{wc(activeChapter.chapter_text)} 字</Text>
+              <SaveIndicator status={saveStatus} />
+              <EditorDisplayControls prefs={editorDisplayPrefs} onChange={setEditorDisplayPrefs} />
+              <Popover content={secondaryActionMenu} trigger="click" placement="bottomRight">
+                <Button className="novel-editor-more-actions" size="small" icon={<MoreOutlined />}>更多</Button>
+              </Popover>
+              {isImmersiveShell && (
+                <div className="novel-writing-immersive-aux">
+                  <div className="novel-writing-immersive-aux-tags">
+                    {pickWritingAuxFocusTags({
+                      delivery: deliverySummary.visible
+                        ? {
+                            visible: true,
+                            statusLabel: deliverySummary.statusLabel,
+                            risky: /风险|待|阻断|失败|需/.test(String(deliverySummary.statusLabel || '')),
+                          }
+                        : null,
+                      queue: writingQueue?.visible
+                        ? { visible: true, summary: writingAuxQueueSummary }
+                        : null,
+                      brief: draftBriefSummary.visible
+                        ? {
+                            visible: true,
+                            statusLabel: draftBriefSummary.statusLabel,
+                            hasGap: /缺口|待|未/.test(String(draftBriefSummary.statusLabel || '')),
+                          }
+                        : null,
+                      handoff: chapterHandoffDesk?.visible
+                        ? { visible: true, label: chapterHandoffDesk.label }
+                        : null,
+                    }).map(tag => (
+                      <Tag key={tag.key} color={tag.color} bordered={false}>{tag.label}</Tag>
+                    ))}
+                  </div>
+                  <Popover
+                    trigger="click"
+                    open={immersiveAuxOpen}
+                    onOpenChange={setImmersiveAuxOpen}
+                    placement="bottomRight"
+                    overlayClassName="novel-writing-immersive-aux-popover"
+                    content={
+                      <div className="novel-writing-immersive-aux-panel" aria-label="写作辅助面板">
+                        {writingSupportBody}
+                      </div>
+                    }
+                  >
+                    <Button size="small" className="novel-writing-immersive-aux-trigger">辅助</Button>
+                  </Popover>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {!isImmersiveShell && (
+            <>
+              <div className={`novel-writing-aux-rail ${writingAuxCollapsed ? 'is-collapsed' : 'is-expanded'}`} aria-label="写作辅助面板状态">
+                <div className="novel-writing-aux-summary">
+                  {writingQueue?.visible && <Tag bordered={false}>队列 {writingAuxQueueSummary}</Tag>}
+                  {deliverySummary.visible && <Tag bordered={false}>交稿 {deliverySummary.statusLabel}</Tag>}
+                  {chapterHandoffDesk?.visible && <Tag bordered={false}>交接 {chapterHandoffDesk.label}</Tag>}
+                  {draftBriefSummary.visible && <Tag bordered={false}>任务书 {draftBriefSummary.statusLabel}</Tag>}
+                </div>
+                <Space className="novel-writing-aux-controls" size={6} wrap>
+                  <Tooltip title={writingAuxToggleHint}>
+                    <Button
+                      size="small"
+                      className="novel-writing-aux-toggle"
+                      icon={writingAuxCollapsed ? <DownOutlined /> : <UpOutlined />}
+                      aria-expanded={!writingAuxCollapsed}
+                      onClick={() => setWritingAuxCollapsed(prev => !prev)}
+                    >
+                      {writingAuxToggleLabel}
+                    </Button>
+                  </Tooltip>
+                </Space>
+              </div>
+              {!writingAuxCollapsed && (
+                <div className="novel-writing-support-stack" aria-label="写作辅助面板">
+                  {writingSupportBody}
+                </div>
+              )}
+            </>
           )}
+
 
           {streamingChapterId === activeChapter.id && (
             <div style={{ flexShrink: 0, padding: '12px 24px', background: '#f0f7ff', borderBottom: '1px solid #d6e4ff' }}>
