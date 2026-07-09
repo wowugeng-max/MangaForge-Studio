@@ -1,0 +1,72 @@
+.novel-theme-root {
+  --novel-color-primary: #1677ff;
+  --novel-color-primary-soft: #eff6ff;
+  --novel-color-success: #16a34a;
+  --novel-color-success-soft: #f0fdf4;
+  --novel-color-warning: #d97706;
+  --novel-color-warning-soft: #fffbeb;
+  --novel-color-danger: #dc2626;
+  --novel-color-danger-soft: #fef2f2;
+  --novel-color-text: #0f172a;
+  --novel-color-text-secondary: #64748b;
+  --novel-color-border: #e8eef5;
+  --novel-color-border-strong: #dfe7f1;
+  --novel-color-bg: #ffffff;
+  --novel-color-bg-muted: #f5f7fb;
+  --novel-color-bg-canvas: #fbfcfe;
+
+  --novel-radius-sm: 6px;
+  --novel-radius-md: 8px;
+  --novel-radius-lg: 10px;
+  --novel-radius-pill: 999px;
+
+  --novel-space-1: 4px;
+  --novel-space-2: 8px;
+  --novel-space-3: 12px;
+  --novel-space-4: 16px;
+  --novel-space-5: 20px;
+  --novel-space-6: 24px;
+
+  --novel-font-size-xs: 12px;
+  --novel-font-size-sm: 13px;
+  --novel-font-size-md: 14px;
+  --novel-font-size-lg: 16px;
+  --novel-font-weight-regular: 400;
+  --novel-font-weight-medium: 600;
+  --novel-font-weight-bold: 700;
+
+  --novel-control-height-sm: 28px;
+  --novel-control-height-md: 32px;
+  --novel-control-height-lg: 36px;
+
+  --novel-progress-height-sm: 6px;
+  --novel-progress-height-md: 8px;
+
+  --novel-shell-topbar-height: 48px;
+  --novel-shell-directory-width: 240px;
+  --novel-shell-directory-collapsed: 48px;
+
+  color: var(--novel-color-text);
+  background: var(--novel-color-bg);
+}
+
+/* Shared novel control helpers (optional classes for pill CTAs / progress) */
+.novel-theme-root .novel-btn-pill.ant-btn {
+  border-radius: var(--novel-radius-pill) !important;
+  font-weight: var(--novel-font-weight-bold);
+}
+
+.novel-theme-root .ant-progress-line .ant-progress-outer,
+.novel-theme-root .ant-progress-line .ant-progress-inner {
+  border-radius: var(--novel-radius-pill);
+}
+
+.novel-theme-root .ant-progress-bg {
+  height: var(--novel-progress-height-sm) !important;
+  border-radius: var(--novel-radius-pill) !important;
+}
+
+.novel-theme-root .ant-tag {
+  border-radius: var(--novel-radius-pill);
+  font-weight: var(--novel-font-weight-medium);
+}
