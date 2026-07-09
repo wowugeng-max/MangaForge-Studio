@@ -364,13 +364,17 @@ export default function NovelProjectWorkspace() {
   }, [])
 
   // Apply immersive panel defaults only on false→true edge (e.g. restored preference
-  // + land on chapterWriting). Avoids fighting manual expand while staying immersive.
+  // + land on chapterWriting). On true→false (area change OR toggle), restore workbench
+  // directory preference so leaving chapterWriting while immersive does not keep the
+  // directory collapsed. setShellMode('workbench') also restores — both are idempotent.
   const wasImmersiveRef = useRef(false)
   useEffect(() => {
     if (isImmersiveShell && !wasImmersiveRef.current) {
       const defaults = immersiveEnterPanelDefaults()
       setDirectoryCollapsed(defaults.directoryCollapsed)
       setRightPanelOpen(defaults.rightPanelOpen)
+    } else if (!isImmersiveShell && wasImmersiveRef.current) {
+      setDirectoryCollapsed(loadWorkbenchDirectoryCollapsed())
     }
     wasImmersiveRef.current = isImmersiveShell
   }, [isImmersiveShell])

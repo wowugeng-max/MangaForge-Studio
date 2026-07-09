@@ -69,25 +69,31 @@
   flex-shrink: 0;
   height: 48px;
   display: grid;
-  grid-template-columns: minmax(140px, 0.9fr) minmax(0, 1.6fr) minmax(200px, 1.1fr);
+  grid-template-columns: minmax(120px, auto) minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
   padding: 0 12px 0 8px;
   background: #fff;
   border-bottom: 1px solid #e8eef5;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .novel-workspace-topbar-left,
 .novel-workspace-topbar-center,
 .novel-workspace-topbar-right {
-  min-width: 0;
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
+.novel-workspace-topbar-left {
+  min-width: 0;
+  flex-shrink: 1;
+}
+
 .novel-workspace-topbar-center {
+  min-width: 0;
   justify-content: center;
   overflow-x: auto;
   scrollbar-width: none;
@@ -98,6 +104,7 @@
 }
 
 .novel-workspace-topbar-right {
+  flex-shrink: 0;
   justify-content: flex-end;
   flex-wrap: nowrap;
 }
@@ -400,7 +407,6 @@
 }
 
 .novel-workspace-topbar-meta,
-.novel-workspace-focus-toggle,
 .novel-workspace-task-entry,
 .novel-unattended-topbar-entry,
 .novel-workspace-shell-toggle,
@@ -529,7 +535,7 @@
   }
 
   .novel-workspace-topbar {
-    grid-template-columns: minmax(100px, 0.8fr) minmax(0, 1.4fr) minmax(160px, 1.2fr);
+    grid-template-columns: minmax(100px, auto) minmax(0, 1fr) auto;
     gap: 6px;
     padding: 0 8px 0 4px;
   }
