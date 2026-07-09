@@ -66,13 +66,49 @@
 }
 
 .novel-workspace-topbar {
+  flex-shrink: 0;
+  height: 48px;
+  display: grid;
+  grid-template-columns: minmax(140px, 0.9fr) minmax(0, 1.6fr) minmax(200px, 1.1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px 0 8px;
+  background: #fff;
+  border-bottom: 1px solid #e8eef5;
+  overflow: hidden;
+}
+
+.novel-workspace-topbar-left,
+.novel-workspace-topbar-center,
+.novel-workspace-topbar-right {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.novel-workspace-topbar-center {
+  justify-content: center;
   overflow-x: auto;
-  overflow-y: hidden;
   scrollbar-width: none;
 }
 
-.novel-workspace-topbar::-webkit-scrollbar {
+.novel-workspace-topbar-center::-webkit-scrollbar {
   display: none;
+}
+
+.novel-workspace-topbar-right {
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+}
+
+.novel-workspace-title.ant-typography {
+  margin: 0 !important;
+  min-width: 0;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .novel-workspace-model-select {
@@ -349,9 +385,14 @@
 }
 
 .novel-workspace-area-tabs {
-  flex: 0 0 auto !important;
-  min-width: max-content !important;
-  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 10px;
+  background: #f5f7fb;
+  border: 1px solid #e8eef5;
+  min-width: max-content;
 }
 
 .novel-workspace-area-tabs .ant-space-item {
@@ -361,8 +402,14 @@
 .novel-workspace-topbar-meta,
 .novel-workspace-focus-toggle,
 .novel-workspace-task-entry,
-.novel-unattended-topbar-entry {
+.novel-unattended-topbar-entry,
+.novel-workspace-shell-toggle,
+.novel-workspace-topbar-more {
   flex: 0 0 auto;
+}
+
+.novel-workspace-shell-toggle {
+  font-weight: 700;
 }
 
 .novel-unattended-topbar-entry {
@@ -380,10 +427,10 @@
 }
 
 .novel-mode-tab {
-  border-radius: 8px;
+  border-radius: 8px !important;
   color: #475569;
   font-weight: 600;
-  border: 1px solid transparent;
+  border: 1px solid transparent !important;
 }
 
 .novel-mode-tab:hover {
@@ -391,7 +438,8 @@
 }
 
 .novel-mode-tab.is-active {
-  box-shadow: inset 0 -2px 0 currentColor;
+  box-shadow: none;
+  font-weight: 700;
 }
 
 .novel-mode-tab-autoCreation.is-active {
@@ -466,13 +514,9 @@
   }
 
   .novel-workspace-topbar {
-    overflow-x: auto;
-    overflow-y: hidden;
-    scrollbar-width: none;
-  }
-
-  .novel-workspace-topbar::-webkit-scrollbar {
-    display: none;
+    grid-template-columns: minmax(100px, 0.8fr) minmax(0, 1.4fr) minmax(160px, 1.2fr);
+    gap: 6px;
+    padding: 0 8px 0 4px;
   }
 
   .novel-workspace-model-select {
@@ -482,8 +526,7 @@
   }
 
   .novel-workspace-area-tabs {
-    flex: 0 0 auto !important;
-    min-width: max-content !important;
+    min-width: max-content;
   }
 
   .novel-serial-pipeline-main {

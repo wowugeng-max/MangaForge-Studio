@@ -1,6 +1,6 @@
 import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Alert, Badge, Button, Card, Checkbox, Form, Input, InputNumber, List, message, Modal, Progress, Select, Space, Typography, Tooltip, Tag,
+  Alert, Badge, Button, Card, Checkbox, Dropdown, Form, Input, InputNumber, List, message, Modal, Progress, Select, Space, Typography, Tooltip, Tag,
 } from 'antd'
 import {
   ArrowLeftOutlined,
@@ -12,6 +12,7 @@ import {
   EditOutlined,
   FullscreenExitOutlined,
   FullscreenOutlined,
+  MoreOutlined,
   ReloadOutlined,
   RocketOutlined,
   SafetyOutlined,
@@ -6653,94 +6654,158 @@ export default function NovelProjectWorkspace() {
     >
 
       {/* ═══ TOP BAR ═══ */}
-      <div className="novel-workspace-topbar" style={{
-        flexShrink: 0, height: 48, display: 'flex', alignItems: 'center',
-        padding: '0 16px', background: '#fff', borderBottom: '1px solid #f0f0f0', gap: 10,
-      }}>
-        <Button type="text" size="small" icon={<ArrowLeftOutlined />} onClick={() => navigate('/novel')} />
-        <Title level={5} style={{ margin: 0, minWidth: 120, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {selectedProject?.title || '小说项目工作台'}
-        </Title>
-        <Select
-          className="novel-workspace-model-select"
-          size="small" value={selectedModelId}
-          onChange={(v) => setSelectedModelId(v)}
-          options={modelOptions}
-          popupMatchSelectWidth={440}
-          placeholder="选择模型"
-        />
-        <Space className="novel-workspace-area-tabs" size={4} style={{ flex: 1, minWidth: 0 }}>
-          {workspaceAreaTabs.map(tab => (
-            <Button
-              key={tab.key}
-              size="small"
-              type="text"
-              icon={tab.icon}
-              className={`novel-mode-tab novel-mode-tab-${tab.key} ${workspaceArea === tab.key ? 'is-active' : ''}`}
-              onClick={() => setWorkspaceArea(tab.key)}
-            >
-              {tab.label}
-            </Button>
-          ))}
-        </Space>
-        <Tooltip title="进入无人值守生产入口">
-          <Button
-            className={`novel-unattended-topbar-entry ${workspaceArea === 'productionOps' ? 'is-active' : ''}`}
-            size="small"
-            icon={<RocketOutlined />}
-            onClick={() => setWorkspaceArea('productionOps')}
-          >
-            无人值守
-          </Button>
-        </Tooltip>
-        <Space className="novel-workspace-topbar-meta" size={6}>
-          {referenceSummary.count > 0 && (
-            <Tag color="purple" bordered={false}>{referenceSummary.strengthLabel} · {referenceSummary.count} 部参考</Tag>
-          )}
-          {commercialReadiness && (
-            <Tooltip title={(commercialReadiness.next_actions || []).slice(0, 3).join('；') || '查看商业化就绪度'}>
-              <Tag
-                color={commercialReadiness.can_batch_generate ? 'green' : Number(commercialReadiness.score || 0) >= 70 ? 'gold' : 'red'}
-                bordered={false}
-                style={{ cursor: 'pointer' }}
-                onClick={() => showCommercialReadinessModal(commercialReadiness)}
+      <div className="novel-workspace-topbar">
+        <div className="novel-workspace-topbar-left">
+          <Button type="text" size="small" icon={<ArrowLeftOutlined />} onClick={() => navigate('/novel')} />
+          <Title level={5} className="novel-workspace-title">
+            {selectedProject?.title || '小说项目工作台'}
+          </Title>
+        </div>
+
+        <div className="novel-workspace-topbar-center">
+          <div className="novel-workspace-area-tabs" role="tablist" aria-label="工作区">
+            {workspaceAreaTabs.map(tab => (
+              <Button
+                key={tab.key}
+                size="small"
+                type="text"
+                icon={tab.icon}
+                role="tab"
+                aria-selected={workspaceArea === tab.key}
+                className={`novel-mode-tab novel-mode-tab-${tab.key} ${workspaceArea === tab.key ? 'is-active' : ''}`}
+                onClick={() => setWorkspaceArea(tab.key)}
               >
-                就绪 {commercialReadiness.score ?? '-'}%
-              </Tag>
-            </Tooltip>
+                <span className="novel-mode-tab-label">{tab.label}</span>
+              </Button>
+            ))}
+          </div>
+        </div>
+
+        <div className="novel-workspace-topbar-right">
+          {!isImmersiveShell && (
+            <>
+              <Select
+                className="novel-workspace-model-select"
+                size="small"
+                value={selectedModelId}
+                onChange={(v) => setSelectedModelId(v)}
+                options={modelOptions}
+                popupMatchSelectWidth={440}
+                placeholder="选择模型"
+              />
+              <Space className="novel-workspace-topbar-meta" size={6}>
+                {referenceSummary.count > 0 && (
+                  <Tag color="purple" bordered={false}>{referenceSummary.strengthLabel} · {referenceSummary.count} 部参考</Tag>
+                )}
+                {commercialReadiness && (
+                  <Tooltip title={(commercialReadiness.next_actions || []).slice(0, 3).join('；') || '查看商业化就绪度'}>
+                    <Tag
+                      color={commercialReadiness.can_batch_generate ? 'green' : Number(commercialReadiness.score || 0) >= 70 ? 'gold' : 'red'}
+                      bordered={false}
+                      style={{ cursor: 'pointer' }}
+                      onClick={() => showCommercialReadinessModal(commercialReadiness)}
+                    >
+                      就绪 {commercialReadiness.score ?? '-'}%
+                    </Tag>
+                  </Tooltip>
+                )}
+              </Space>
+              <Tooltip title="进入无人值守生产入口">
+                <Button
+                  className={`novel-unattended-topbar-entry ${workspaceArea === 'productionOps' ? 'is-active' : ''}`}
+                  size="small"
+                  icon={<RocketOutlined />}
+                  onClick={() => setWorkspaceArea('productionOps')}
+                >
+                  无人值守
+                </Button>
+              </Tooltip>
+              <Tooltip title="打开当前节点的创作参谋建议">
+                <Button type="text" size="small" icon={<BulbOutlined />} onClick={openCreativeAssistant}>
+                  创作参谋
+                </Button>
+              </Tooltip>
+              <Tooltip title="刷新">
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<ReloadOutlined />}
+                  loading={loading}
+                  onClick={async () => { if (await flushPendingSave()) await loadProjectModules() }}
+                />
+              </Tooltip>
+            </>
           )}
-        </Space>
-        <Tooltip title="打开当前节点的创作参谋建议">
-          <Button
-            type="text"
-            size="small"
-            icon={<BulbOutlined />}
-            onClick={openCreativeAssistant}
-          >
-            创作参谋
-          </Button>
-        </Tooltip>
-        {workspaceArea === 'chapterWriting' && (
-          <Button
-            className="novel-workspace-shell-toggle"
-            type={isImmersiveShell ? 'default' : 'primary'}
-            size="small"
-            icon={isImmersiveShell ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
-            onClick={() => setShellMode(isImmersiveShell ? 'workbench' : 'immersive')}
-          >
-            {isImmersiveShell ? '展开工作台' : '沉浸写作'}
-          </Button>
-        )}
-        <Tooltip title="查看运行中任务和历史运行记录">
-          <Badge className="novel-workspace-task-entry" count={activeTasks.length + activeKnowledgeJobCount} size="small">
-            <Button type="text" size="small" icon={<ClockCircleOutlined />} onClick={() => setTaskCenterOpen(true)}>
-              任务中心
+
+          {isImmersiveShell && (
+            <Dropdown
+              menu={{
+                items: [
+                  {
+                    key: 'model',
+                    label: (
+                      <div onClick={(e) => e.stopPropagation()}>
+                        <Select
+                          className="novel-workspace-model-select novel-workspace-model-select-menu"
+                          size="small"
+                          value={selectedModelId}
+                          onChange={(v) => setSelectedModelId(v)}
+                          options={modelOptions}
+                          popupMatchSelectWidth={440}
+                          placeholder="选择模型"
+                          style={{ width: 200 }}
+                        />
+                      </div>
+                    ),
+                  },
+                  {
+                    key: 'assistant',
+                    icon: <BulbOutlined />,
+                    label: '创作参谋',
+                    onClick: () => openCreativeAssistant(),
+                  },
+                  {
+                    key: 'unattended',
+                    icon: <RocketOutlined />,
+                    label: '无人值守',
+                    onClick: () => setWorkspaceArea('productionOps'),
+                  },
+                  {
+                    key: 'refresh',
+                    icon: <ReloadOutlined />,
+                    label: '刷新',
+                    onClick: async () => { if (await flushPendingSave()) await loadProjectModules() },
+                  },
+                ],
+              }}
+              trigger={['click']}
+            >
+              <Button type="text" size="small" className="novel-workspace-topbar-more" icon={<MoreOutlined />}>
+                更多
+              </Button>
+            </Dropdown>
+          )}
+
+          {workspaceArea === 'chapterWriting' && (
+            <Button
+              className="novel-workspace-shell-toggle"
+              type={isImmersiveShell ? 'default' : 'primary'}
+              size="small"
+              icon={isImmersiveShell ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
+              onClick={() => setShellMode(isImmersiveShell ? 'workbench' : 'immersive')}
+            >
+              {isImmersiveShell ? '展开工作台' : '沉浸写作'}
             </Button>
-          </Badge>
-        </Tooltip>
-        <Tooltip title="刷新">
-          <Button type="text" size="small" icon={<ReloadOutlined />} loading={loading} onClick={async () => { if (await flushPendingSave()) await loadProjectModules() }} />
-        </Tooltip>
+          )}
+
+          <Tooltip title="查看运行中任务和历史运行记录">
+            <Badge className="novel-workspace-task-entry" count={activeTasks.length + activeKnowledgeJobCount} size="small">
+              <Button type="text" size="small" icon={<ClockCircleOutlined />} onClick={() => setTaskCenterOpen(true)}>
+                任务中心
+              </Button>
+            </Badge>
+          </Tooltip>
+        </div>
       </div>
 
       {/* ═══ BODY: 3-column layout ═══ */}
