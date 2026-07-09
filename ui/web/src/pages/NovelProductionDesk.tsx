@@ -3,6 +3,7 @@ import { Alert, Button, Card, Empty, Form, Input, List, message, Modal, Progress
 import { ArrowLeftOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useNavigate, useParams } from 'react-router-dom'
 import apiClient from '../api/client'
+import './NovelProductionDesk.css'
 
 const { Title, Text, Paragraph } = Typography
 
@@ -171,8 +172,8 @@ export default function NovelProductionDesk() {
   }
 
   return (
-    <div style={{ height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column', background: '#fff' }}>
-      <div style={{ height: 48, flexShrink: 0, borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', padding: '0 16px', gap: 12 }}>
+    <div className="novel-production-desk">
+      <div className="novel-production-desk__topbar">
         <Button type="text" size="small" icon={<ArrowLeftOutlined />} onClick={() => navigate(`/novel/workspace/${projectId}`)} />
         <Title level={5} style={{ margin: 0, flex: 1 }}>{dashboard.title || '章节生产台'}</Title>
         <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={load}>刷新</Button>
@@ -184,11 +185,11 @@ export default function NovelProductionDesk() {
         <Button size="small" danger onClick={stopWorker}>停止 worker</Button>
       </div>
 
-      <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'grid', gridTemplateColumns: '320px minmax(0, 1fr) 320px', gap: 12, padding: 12 }}>
+      <div className="novel-production-desk__body">
         <Card size="small" title="章节队列" styles={{ body: { height: 'calc(100vh - 126px)', overflow: 'auto' } }}>
           <Space direction="vertical" size={8} style={{ width: '100%' }}>
             {(dashboard.chapter_trends || []).map((chapter: any) => (
-              <div key={chapter.chapter_id} style={{ border: '1px solid #f0f0f0', borderRadius: 6, padding: 8 }}>
+              <div key={chapter.chapter_id} className="novel-production-desk__panel">
                 <Space wrap>
                   <Tag bordered={false}>第{chapter.chapter_no}章</Tag>
                   <Tag color={chapter.has_text ? 'green' : 'default'} bordered={false}>{chapter.has_text ? '已写' : '未写'}</Tag>
@@ -244,7 +245,7 @@ export default function NovelProductionDesk() {
 
         <Card size="small" title="卷级/参考覆盖" styles={{ body: { height: 'calc(100vh - 126px)', overflow: 'auto' } }}>
           <Space direction="vertical" size={10} style={{ width: '100%' }}>
-            <div style={{ padding: 8, border: '1px solid #f0f0f0', borderRadius: 6 }}>
+            <div className="novel-production-desk__panel">
               <Space wrap>
                 <Text strong>参考覆盖</Text>
                 <Tag color={(coverage.overall_score || 100) >= 80 ? 'green' : (coverage.overall_score || 0) >= 50 ? 'gold' : 'red'} bordered={false}>{coverage.overall_score ?? 100}分</Tag>
@@ -258,7 +259,7 @@ export default function NovelProductionDesk() {
               {(coverage.recommendations || []).slice(0, 3).map((item: string) => <Paragraph key={item} style={{ margin: '4px 0 0', fontSize: 12 }} type="secondary">{item}</Paragraph>)}
             </div>
             {(dashboard.volume_controls || []).length ? dashboard.volume_controls.map((volume: any) => (
-              <div key={volume.id || volume.title} style={{ padding: 8, border: '1px solid #f0f0f0', borderRadius: 6 }}>
+              <div key={volume.id || volume.title} className="novel-production-desk__panel">
                 <Text strong>{volume.title}</Text>
                 <Progress percent={volume.progress || 0} size="small" />
                 <Paragraph style={{ marginBottom: 0, fontSize: 12 }} ellipsis={{ rows: 3 }}>{volume.summary}</Paragraph>
@@ -280,7 +281,7 @@ export default function NovelProductionDesk() {
                 {payload.lock?.owner && <Tag color="blue" bordered={false}>锁 {payload.lock.owner}</Tag>}
               </Space>
               {chapters.map((chapter: any) => (
-                <div key={chapter.id || chapter.chapter_no} style={{ padding: 8, border: '1px solid #f0f0f0', borderRadius: 6 }}>
+                <div key={chapter.id || chapter.chapter_no} className="novel-production-desk__panel">
                   <Space style={{ width: '100%', justifyContent: 'space-between' }}>
                     <Space wrap>
                       <Tag color={statusColor(chapter.status)} bordered={false}>第{chapter.chapter_no}章 · {chapter.status}</Tag>

@@ -1,0 +1,74 @@
+/* NovelStudio page — token-scoped Ant Design surfaces (Phase 3) */
+
+.novel-studio-page {
+  color: var(--novel-color-text);
+}
+
+.novel-studio-page .ant-btn {
+  font-weight: var(--novel-font-weight-bold);
+  border-radius: var(--novel-radius-md);
+}
+
+.novel-studio-page .ant-btn-sm {
+  border-radius: var(--novel-radius-lg);
+}
+
+.novel-studio-page .ant-btn-primary {
+  box-shadow: 0 10px 24px rgba(22, 119, 255, 0.22);
+}
+
+.novel-studio-page .ant-card {
+  border-radius: var(--novel-radius-md);
+}
+
+.novel-studio-page .ant-card-bordered {
+  border-color: var(--novel-color-border);
+}
+
+.novel-studio-page .ant-tag {
+  border-radius: var(--novel-radius-pill);
+  font-weight: var(--novel-font-weight-medium);
+}
+
+.novel-studio-page .ant-progress-line .ant-progress-outer,
+.novel-studio-page .ant-progress-line .ant-progress-inner,
+.novel-studio-page .ant-progress-bg {
+  border-radius: var(--novel-radius-pill);
+}
+
+.novel-studio-page .ant-progress-bg {
+  height: var(--novel-progress-height-sm) !important;
+}
+
+.novel-studio-page .ant-input,
+.novel-studio-page .ant-input-affix-wrapper,
+.novel-studio-page .ant-select-selector,
+.novel-studio-page .ant-input-number {
+  border-radius: var(--novel-radius-md) !important;
+}
+
+/* Shell chrome */
+.novel-studio-page__shell {
+  border-radius: 24px;
+  box-shadow: 0 20px 60px rgba(15, 23, 42, 0.08);
+  overflow: hidden;
+}
+
+.novel-studio-page__toolbar-btn.ant-btn {
+  border-radius: var(--novel-radius-lg);
+}
+
+.novel-studio-page__primary-cta.ant-btn {
+  border-radius: var(--novel-radius-lg);
+  box-shadow: 0 10px 24px rgba(22, 119, 255, 0.25);
+}
+
+.novel-studio-page__project-card.ant-card {
+  border-radius: 18px;
+  height: 100%;
+}
+
+.novel-studio-page__search-card.ant-card {
+  border-radius: 18px;
+  margin-bottom: var(--novel-space-4);
+}

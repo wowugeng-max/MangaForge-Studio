@@ -1,0 +1,69 @@
+/* NovelProductionDesk — token-scoped Ant Design surfaces (Phase 3) */
+
+.novel-production-desk {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--novel-color-bg);
+  color: var(--novel-color-text);
+}
+
+.novel-production-desk__topbar {
+  height: var(--novel-shell-topbar-height);
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--novel-color-border);
+  display: flex;
+  align-items: center;
+  padding: 0 var(--novel-space-4);
+  gap: var(--novel-space-3);
+}
+
+.novel-production-desk__body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr) 320px;
+  gap: var(--novel-space-3);
+  padding: var(--novel-space-3);
+}
+
+.novel-production-desk .ant-btn {
+  font-weight: var(--novel-font-weight-bold);
+  border-radius: var(--novel-radius-md);
+}
+
+.novel-production-desk .ant-btn-sm {
+  height: var(--novel-control-height-sm);
+}
+
+.novel-production-desk .ant-card {
+  border-radius: var(--novel-radius-md);
+  border-color: var(--novel-color-border);
+}
+
+.novel-production-desk .ant-card-bordered {
+  border-color: var(--novel-color-border);
+}
+
+.novel-production-desk .ant-tag {
+  border-radius: var(--novel-radius-pill);
+  font-weight: var(--novel-font-weight-medium);
+}
+
+.novel-production-desk .ant-progress-line .ant-progress-outer,
+.novel-production-desk .ant-progress-line .ant-progress-inner,
+.novel-production-desk .ant-progress-bg {
+  border-radius: var(--novel-radius-pill);
+}
+
+.novel-production-desk .ant-progress-bg {
+  height: var(--novel-progress-height-sm) !important;
+}
+
+.novel-production-desk__panel {
+  border: 1px solid var(--novel-color-border);
+  border-radius: var(--novel-radius-sm);
+  padding: var(--novel-space-2);
+}

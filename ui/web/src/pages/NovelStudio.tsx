@@ -7,6 +7,7 @@ import MemoryPalacePanel from '../components/MemoryPalacePanel'
 import NovelCreateWizard from '../components/NovelCreateWizard'
 import NovelLobbyDashboard from './novel-lobby/NovelLobbyDashboard'
 import { buildNovelLobbyModel } from './novel-lobby/novelLobbyModel'
+import './NovelStudio.css'
 
 const { Title, Text, Paragraph } = Typography
 
@@ -44,24 +45,24 @@ const fieldLabelStyle: React.CSSProperties = {
   marginBottom: 6,
   fontSize: 13,
   fontWeight: 600,
-  color: '#334155',
+  color: 'var(--novel-color-text-secondary)',
 }
 
 const panelStyle: React.CSSProperties = {
-  border: '1px solid #e5e7eb',
-  borderRadius: 10,
+  border: '1px solid var(--novel-color-border)',
+  borderRadius: 'var(--novel-radius-lg)',
   padding: 14,
-  background: '#ffffff',
+  background: 'var(--novel-color-bg)',
 }
 
 const softPanelStyle: React.CSSProperties = {
-  border: '1px solid #dbeafe',
-  borderRadius: 10,
+  border: '1px solid var(--novel-color-border-strong)',
+  borderRadius: 'var(--novel-radius-lg)',
   padding: 14,
-  background: '#f8fbff',
+  background: 'var(--novel-color-primary-soft)',
 }
 
-const inputStyle: React.CSSProperties = { borderRadius: 8 }
+const inputStyle: React.CSSProperties = { borderRadius: 'var(--novel-radius-md)' }
 const knowledgeExtractModelStorageKey = 'knowledge.extract.model_id'
 const knowledgeIngestJobStorageKey = 'knowledge.ingest.last_job_id'
 
@@ -1158,8 +1159,8 @@ export default function NovelStudio() {
   )
 
   return (
-    <div style={{ minHeight: '100vh', padding: 24, background: 'linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%)' }}>
-      <Card bordered={false} style={{ borderRadius: 24, boxShadow: '0 20px 60px rgba(15,23,42,0.08)', overflow: 'hidden' }} bodyStyle={{ padding: 0 }}>
+    <div className="novel-studio-page" style={{ minHeight: '100vh', padding: 24, background: 'linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%)' }}>
+      <Card bordered={false} className="novel-studio-page__shell" bodyStyle={{ padding: 0 }}>
         <div style={{ padding: 28, borderBottom: '1px solid rgba(148,163,184,0.16)', background: 'linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.96))' }}>
           <Row justify="space-between" align="middle" gutter={24}>
             <Col flex="auto">
@@ -1180,11 +1181,11 @@ export default function NovelStudio() {
             </Col>
             <Col>
               <Space>
-                <Button icon={<ReadOutlined />} onClick={handleOpenKnowledge} style={{ borderRadius: 12 }}>知识库</Button>
-                <Button icon={<FileTextOutlined />} onClick={handleOpenSourceCache} style={{ borderRadius: 12 }}>正文缓存</Button>
-                <Button icon={<DatabaseOutlined />} onClick={handleOpenMemoryPalace} style={{ borderRadius: 12 }}>记忆宫殿</Button>
-                <Button icon={<ReloadOutlined />} onClick={loadProjects} loading={loading} style={{ borderRadius: 12 }}>刷新</Button>
-                <Button type="primary" icon={<PlusOutlined />} onClick={() => setWizardOpen(true)} style={{ borderRadius: 12, boxShadow: '0 10px 24px rgba(24, 144, 255, 0.25)' }}>新建商业长篇</Button>
+                <Button className="novel-studio-page__toolbar-btn" icon={<ReadOutlined />} onClick={handleOpenKnowledge}>知识库</Button>
+                <Button className="novel-studio-page__toolbar-btn" icon={<FileTextOutlined />} onClick={handleOpenSourceCache}>正文缓存</Button>
+                <Button className="novel-studio-page__toolbar-btn" icon={<DatabaseOutlined />} onClick={handleOpenMemoryPalace}>记忆宫殿</Button>
+                <Button className="novel-studio-page__toolbar-btn" icon={<ReloadOutlined />} onClick={loadProjects} loading={loading}>刷新</Button>
+                <Button className="novel-studio-page__primary-cta" type="primary" icon={<PlusOutlined />} onClick={() => setWizardOpen(true)}>新建商业长篇</Button>
               </Space>
             </Col>
           </Row>
@@ -1197,12 +1198,12 @@ export default function NovelStudio() {
             onCreateProject={() => setWizardOpen(true)}
           />
 
-          <Card size="small" title="项目检索" style={{ borderRadius: 18, marginBottom: 16 }}>
+          <Card size="small" title="项目检索" className="novel-studio-page__search-card">
             <Input prefix={<SearchOutlined />} value={searchText} onChange={e => setSearchText(e.target.value)} placeholder="搜索项目标题、题材、状态、目标读者" allowClear />
           </Card>
 
           {projects.length > 0 && filteredProjects.length === 0 ? (
-            <Card style={{ borderRadius: 18, textAlign: 'center', padding: 40 }}>
+            <Card className="novel-studio-page__project-card" style={{ textAlign: 'center', padding: 40 }}>
               <Title level={5}>未找到匹配项目</Title>
               <Text type="secondary">调整搜索条件后重试。</Text>
             </Card>
@@ -1212,7 +1213,7 @@ export default function NovelStudio() {
                 <Col xs={24} md={12} xl={8} key={project.id} style={{ marginBottom: 16 }}>
                   <Card
                     hoverable
-                    style={{ borderRadius: 18, height: '100%' }}
+                    className="novel-studio-page__project-card"
                     bodyStyle={{ display: 'flex', flexDirection: 'column', gap: 12 }}
                     onClick={() => navigate(`/novel/workspace/${project.id}`)}
                   >
@@ -1252,7 +1253,7 @@ export default function NovelStudio() {
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 'auto' }}>
                       <Text type="secondary" style={{ fontSize: 12 }}>{projectCardById.get(project.id)?.nextAction || '点击进入工作台'}</Text>
                       <Space>
-                        <Button type="primary" size="small" style={{ borderRadius: 10 }} onClick={(e) => { e.stopPropagation(); navigate(`/novel/workspace/${project.id}`) }}>进入</Button>
+                        <Button type="primary" size="small" onClick={(e) => { e.stopPropagation(); navigate(`/novel/workspace/${project.id}`) }}>进入</Button>
                         <Popconfirm
                           title="删除项目"
                           description={`确定删除《${project.title}》吗？此操作不可撤销。`}
@@ -1260,7 +1261,7 @@ export default function NovelStudio() {
                           okButtonProps={{ danger: true }}
                           onConfirm={(e) => { e?.stopPropagation(); handleDeleteProject(project.id) }}
                         >
-                          <Button danger size="small" icon={<DeleteOutlined />} style={{ borderRadius: 10 }} onClick={(e) => e.stopPropagation()}>删除</Button>
+                          <Button danger size="small" icon={<DeleteOutlined />} onClick={(e) => e.stopPropagation()}>删除</Button>
                         </Popconfirm>
                       </Space>
                     </div>
