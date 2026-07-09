@@ -64,6 +64,17 @@ import {
   wc,
 } from './novel-workspace/utils'
 import { buildSerialPipelineViewModel } from './novel-workspace/serialPipelineModel'
+import {
+  immersiveEnterPanelDefaults,
+  isImmersiveShell as deriveIsImmersiveShell,
+  loadWorkbenchDirectoryCollapsed,
+  loadWorkspaceShellMode,
+  rootShellClassName,
+  saveWorkbenchDirectoryCollapsed,
+  saveWorkspaceShellMode,
+  shellModeForWorkspaceArea,
+  type WorkspaceShellMode,
+} from './novel-workspace/workspaceShellModel'
 import './NovelProjectWorkspace.css'
 
 type AnyRecord = Record<string, any>
@@ -326,18 +337,38 @@ export default function NovelProjectWorkspace() {
   const [rightPanelOpen, setRightPanelOpen] = useState(false)
   const [rightPanelTab, setRightPanelTab] = useState('worldbuilding')
   const [workspaceArea, setWorkspaceArea] = useState<WorkspaceArea>('autoCreation')
-  const [focusWritingMode, setFocusWritingMode] = useState(false)
-  const [directoryCollapsed, setDirectoryCollapsed] = useState(false)
+  const [writingShellMode, setWritingShellMode] = useState<WorkspaceShellMode>(() => loadWorkspaceShellMode())
+  const [directoryCollapsed, setDirectoryCollapsed] = useState(() => loadWorkbenchDirectoryCollapsed())
   const [storyAssetsFocusDiscoveredToken, setStoryAssetsFocusDiscoveredToken] = useState(0)
   const [autoDirectorActionLoadingKey, setAutoDirectorActionLoadingKey] = useState('')
 
-  const isWritingFocusMode = focusWritingMode && workspaceArea === 'chapterWriting'
+  const shellMode = shellModeForWorkspaceArea(workspaceArea, writingShellMode)
+  const isImmersiveShell = deriveIsImmersiveShell(shellMode, workspaceArea)
   const showGlobalWritingGuidance = workspaceArea !== 'chapterWriting'
-  const directoryShellClassName = directoryCollapsed ? 'novel-workspace-directory-shell is-collapsed' : 'novel-workspace-directory-shell'
+  const directoryShellClassName = directoryCollapsed
+    ? 'novel-workspace-directory-shell is-collapsed'
+    : 'novel-workspace-directory-shell'
 
-  useEffect(() => {
-    if (workspaceArea !== 'chapterWriting') setFocusWritingMode(false)
-  }, [workspaceArea])
+  const setShellMode = useCallback((mode: WorkspaceShellMode) => {
+    setWritingShellMode(mode)
+    saveWorkspaceShellMode(mode)
+    if (mode === 'immersive') {
+      const defaults = immersiveEnterPanelDefaults()
+      setDirectoryCollapsed(defaults.directoryCollapsed)
+      setRightPanelOpen(defaults.rightPanelOpen)
+    } else {
+      // restore workbench directory preference when leaving immersive
+      setDirectoryCollapsed(loadWorkbenchDirectoryCollapsed())
+    }
+  }, [])
+
+  // Persist workbench directory fold when user toggles while not immersive
+  const handleDirectoryCollapsedChange = useCallback((collapsed: boolean) => {
+    setDirectoryCollapsed(collapsed)
+    if (!isImmersiveShell) {
+      saveWorkbenchDirectoryCollapsed(collapsed)
+    }
+  }, [isImmersiveShell])
 
   const proseEditorRef = useRef<EditorView | null>(null)
 
@@ -6617,7 +6648,7 @@ export default function NovelProjectWorkspace() {
 
   return (
     <div
-      className={`novel-project-workspace ${isWritingFocusMode ? 'novel-workspace-focus-mode' : ''}`}
+      className={`novel-project-workspace ${rootShellClassName(isImmersiveShell)}`}
       style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, overflow: 'hidden', background: '#fff' }}
     >
 
@@ -6691,13 +6722,13 @@ export default function NovelProjectWorkspace() {
         </Tooltip>
         {workspaceArea === 'chapterWriting' && (
           <Button
-            className="novel-workspace-focus-toggle"
-            type={isWritingFocusMode ? 'primary' : 'default'}
+            className="novel-workspace-shell-toggle"
+            type={isImmersiveShell ? 'default' : 'primary'}
             size="small"
-            icon={isWritingFocusMode ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
-            onClick={() => setFocusWritingMode(prev => !prev)}
+            icon={isImmersiveShell ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
+            onClick={() => setShellMode(isImmersiveShell ? 'workbench' : 'immersive')}
           >
-            {isWritingFocusMode ? '退出专注' : '专注写作'}
+            {isImmersiveShell ? '展开工作台' : '沉浸写作'}
           </Button>
         )}
         <Tooltip title="查看运行中任务和历史运行记录">
@@ -6715,10 +6746,10 @@ export default function NovelProjectWorkspace() {
       {/* ═══ BODY: 3-column layout ═══ */}
       <div className="novel-workspace-body" style={{ flex: 1, minHeight: 0, display: 'flex', overflow: 'hidden' }}>
 
-        <div className={directoryShellClassName} aria-hidden={isWritingFocusMode || undefined}>
+        <div className={directoryShellClassName}>
           <ChapterDirectorySidebar
             collapsed={directoryCollapsed}
-            onCollapsedChange={setDirectoryCollapsed}
+            onCollapsedChange={handleDirectoryCollapsedChange}
             planningMode={workspaceArea === 'storyPlanning'}
             proseProgress={proseProgress}
             chapters={sortedChapters}
@@ -6742,7 +6773,7 @@ export default function NovelProjectWorkspace() {
               <WritingCockpitPanel
                 model={writingCockpitModel}
                 loading={stepProseLoading || generatingProse || generatingSceneCards || diagnosticsLoading || contextPackageLoading || commercialToolLoading === 'storyStateSync'}
-                forceCollapsed={isWritingFocusMode}
+                forceCollapsed={isImmersiveShell}
                 primaryActionOverride={cockpitPrimaryActionOverride}
                 onOpenProductionOps={() => setWorkspaceArea('productionOps')}
                 onAction={handleWritingCockpitAction}
