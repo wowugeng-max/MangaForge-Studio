@@ -14,17 +14,17 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-weight: 650;
+  font-weight: var(--novel-font-weight-medium);
 }
 
 .novel-outline-tree-chapter-no {
   min-width: 56px;
   color: #2563eb;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: var(--novel-font-weight-bold);
   text-align: center;
   border: 1px solid #bfdbfe;
-  border-radius: 999px;
+  border-radius: var(--novel-radius-pill);
   background: #eff6ff;
 }
 

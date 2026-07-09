@@ -2,7 +2,7 @@
   width: 28px;
   flex-shrink: 0;
   background: #fafafa;
-  border-left: 1px solid #f0f0f0;
+  border-left: 1px solid var(--novel-color-border);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -35,7 +35,7 @@
 }
 
 .novel-reference-header-command.ant-btn {
-  border-radius: 999px;
+  border-radius: var(--novel-radius-pill);
   color: #2563eb;
   font-weight: 700;
 }
@@ -57,7 +57,7 @@
   min-width: 0;
   height: 31px;
   padding-inline: 9px;
-  border-radius: 8px;
+  border-radius: var(--novel-radius-md);
   display: inline-flex;
   align-items: center;
   justify-content: space-between;
@@ -91,7 +91,7 @@
   max-width: 44px;
   margin-left: 5px;
   padding: 0 5px;
-  border-radius: 999px;
+  border-radius: var(--novel-radius-pill);
   background: #e8f1ff;
   color: #2563eb;
   font-size: 10px;
@@ -114,11 +114,11 @@
 .novel-reference-revision-chip.ant-btn {
   height: 26px;
   padding-inline: 9px;
-  border-radius: 999px;
+  border-radius: var(--novel-radius-pill);
   border: 1px solid #fde2a8;
   background: #fffaf0;
   color: #a15c07;
-  font-weight: 750;
+  font-weight: var(--novel-font-weight-bold);
 }
 
 .novel-reference-revision-chip.ant-btn:hover {

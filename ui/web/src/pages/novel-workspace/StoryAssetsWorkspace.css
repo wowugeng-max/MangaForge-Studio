@@ -14,7 +14,7 @@
   margin-bottom: 14px;
   padding: 16px 18px;
   border: 1px solid #dbeafe;
-  border-radius: 8px;
+  border-radius: var(--novel-radius-md);
   background: linear-gradient(180deg, #ffffff, #f8fbff);
 }
 
@@ -42,11 +42,11 @@
 }
 
 .novel-story-assets-stats .ant-card {
-  border-radius: 8px;
+  border-radius: var(--novel-radius-md);
 }
 
 .novel-story-assets-workbench.ant-card {
-  border-radius: 8px;
+  border-radius: var(--novel-radius-md);
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
 }
 

@@ -1,7 +1,7 @@
 .production-guide-summary-panel {
   padding: 10px 12px;
   border: 1px solid #e6edf6;
-  border-radius: 8px;
+  border-radius: var(--novel-radius-md);
   background: #fbfdff;
 }
 
@@ -34,7 +34,7 @@
   flex-direction: column;
   gap: 2px;
   padding: 6px;
-  border-radius: 7px;
+  border-radius: var(--novel-radius-sm);
   background: #fff;
   border: 1px solid #edf1f6;
 }

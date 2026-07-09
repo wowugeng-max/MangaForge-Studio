@@ -8,7 +8,7 @@
 }
 
 .setting-workshop-panel-workspace > .ant-alert {
-  border-radius: 8px;
+  border-radius: var(--novel-radius-md);
 }
 
 .setting-workshop-panel-workspace .ant-tabs-nav {
@@ -64,7 +64,7 @@
   min-width: 0;
   padding: 12px;
   border: 1px solid #dbeafe;
-  border-radius: 8px;
+  border-radius: var(--novel-radius-md);
   background: #f8fbff;
 }
 
@@ -112,7 +112,7 @@
   min-width: 0;
   padding: 12px;
   border: 1px solid #e5e7eb;
-  border-radius: 8px;
+  border-radius: var(--novel-radius-md);
   background: #fff;
 }
 
