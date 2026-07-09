@@ -2485,7 +2485,7 @@ describe('commercial writing workspace UI shell', () => {
     expect(projectWorkspace).toContain('{showGlobalWritingGuidance && (')
     expect(projectWorkspace).toContain('{showGlobalWritingGuidance && renderSerialPipeline()}')
     expect(projectWorkspaceCss).toContain('.novel-workspace-directory-shell.is-collapsed')
-    expect(projectWorkspaceCss).toContain('flex: 0 0 48px')
+    expect(projectWorkspaceCss).toContain('flex: 0 0 var(--novel-shell-directory-collapsed)')
   })
 
   test('immersive writing aux uses toolbar popover instead of in-flow aux rail', () => {
