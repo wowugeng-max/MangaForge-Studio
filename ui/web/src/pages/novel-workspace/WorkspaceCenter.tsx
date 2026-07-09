@@ -1818,18 +1818,19 @@ export function WorkspaceCenter({
 
       {!isEmptyProject && activeChapter && (
         <>
-          <div className="novel-editor-toolbar" style={{
-            flexShrink: 0,
-          }}>
+          <div className="novel-editor-toolbar">
             <div className="novel-editor-toolbar-meta">
-              <Title className="novel-editor-title" level={5} style={{ margin: 0 }}>
+              <Title className="novel-editor-title" level={5}>
                 第{activeChapter.chapter_no}章《{displayValue(activeChapter.title) || '无标题'}》
               </Title>
               <div className="novel-editor-status-stack">
                 {chapterStatusTag(activeChapter)}
                 {materialScore && (
                   <Tooltip title={(materialScore.recommendations || []).slice(0, 4).join('；') || '材料完整度'}>
-                    <Tag color={materialScore.can_generate ? 'green' : Number(materialScore.score || 0) >= 65 ? 'gold' : 'red'} bordered={false}>
+                    <Tag
+                      className={`novel-editor-material-tag${materialScore.can_generate ? ' is-ready' : Number(materialScore.score || 0) >= 65 ? ' is-warn' : ' is-blocked'}`}
+                      bordered={false}
+                    >
                       材料 {materialScore.score ?? '-'}%
                     </Tag>
                   </Tooltip>
@@ -1837,19 +1838,21 @@ export function WorkspaceCenter({
               </div>
             </div>
             <div className="novel-editor-primary-entry">
-              <Tag className="novel-editor-primary-phase" bordered={false}>{aiResponsibility.phaseLabel}</Tag>
-              <Tooltip title={`${recommendedAction.label}：${recommendedAction.reason}`}>
-                <Button
-                  type="primary"
-                  size="small"
-                  className={commandClass(recommendedAction.key, 'novel-editor-primary-command novel-editor-primary-action-main')}
-                  icon={<PlayCircleOutlined />}
-                  loading={recommendedToolbarLoading}
-                  onClick={runRecommendedToolbarAction}
-                >
-                  {recommendedAction.label}
-                </Button>
-              </Tooltip>
+              <div className="novel-editor-primary-cluster">
+                <Tag className="novel-editor-primary-phase" bordered={false}>{aiResponsibility.phaseLabel}</Tag>
+                <Tooltip title={`${recommendedAction.label}：${recommendedAction.reason}`}>
+                  <Button
+                    type="primary"
+                    size="small"
+                    className={commandClass(recommendedAction.key, 'novel-editor-primary-command novel-editor-primary-action-main')}
+                    icon={<PlayCircleOutlined />}
+                    loading={recommendedToolbarLoading}
+                    onClick={runRecommendedToolbarAction}
+                  >
+                    {recommendedAction.label}
+                  </Button>
+                </Tooltip>
+              </div>
               {recommendedAction.phase === 'draft' && renderWordTargetControl()}
             </div>
             <div className="novel-editor-toolbar-controls">

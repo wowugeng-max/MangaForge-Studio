@@ -1,13 +1,14 @@
 .novel-editor-toolbar {
-  min-height: 48px;
+  flex-shrink: 0;
+  min-height: 52px;
   display: grid;
-  grid-template-columns: minmax(260px, 1fr) minmax(340px, auto) auto;
+  grid-template-columns: minmax(200px, 1.1fr) minmax(280px, auto) minmax(160px, auto);
   align-items: center;
-  gap: 8px 12px;
-  padding-top: 8px !important;
-  padding-bottom: 8px !important;
-  background: #fff;
-  border-bottom: 1px solid #edf1f6;
+  gap: 10px 16px;
+  padding: 8px 16px !important;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcfe 100%);
+  border-bottom: 1px solid var(--novel-color-border);
+  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.02);
 }
 
 .novel-editor-toolbar-meta {
@@ -17,11 +18,17 @@
   gap: 10px;
 }
 
-.novel-editor-title {
+.novel-editor-title.ant-typography {
+  margin: 0 !important;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: 14px !important;
+  font-weight: var(--novel-font-weight-bold) !important;
+  letter-spacing: -0.01em;
+  color: var(--novel-color-text) !important;
+  line-height: 1.3 !important;
 }
 
 .novel-editor-status-stack {
@@ -31,8 +38,44 @@
   flex-shrink: 0;
 }
 
+.novel-editor-status-stack .ant-tag {
+  margin-inline-end: 0;
+  height: 22px;
+  line-height: 20px;
+  padding-inline: 8px;
+  border-radius: var(--novel-radius-pill);
+  font-size: 12px;
+  font-weight: var(--novel-font-weight-medium);
+}
+
+.novel-editor-material-tag.ant-tag {
+  border: 1px solid transparent;
+}
+
+.novel-editor-material-tag.is-ready.ant-tag {
+  color: #15803d;
+  background: #f0fdf4;
+  border-color: rgba(22, 163, 74, 0.16);
+}
+
+.novel-editor-material-tag.is-warn.ant-tag {
+  color: #b45309;
+  background: #fffbeb;
+  border-color: rgba(217, 119, 6, 0.18);
+}
+
+.novel-editor-material-tag.is-blocked.ant-tag {
+  color: #b91c1c;
+  background: #fef2f2;
+  border-color: rgba(220, 38, 38, 0.16);
+}
+
 .novel-editor-word-count {
   white-space: nowrap;
+  font-size: 12px;
+  font-weight: var(--novel-font-weight-medium);
+  color: var(--novel-color-text-secondary) !important;
+  padding: 0 4px;
 }
 
 .novel-editor-toolbar-controls {
@@ -40,7 +83,7 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 10px;
+  gap: 6px;
 }
 
 .novel-editor-action-row {
@@ -52,24 +95,44 @@
   min-width: 0;
   display: flex;
   align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.novel-editor-primary-cluster {
+  display: inline-flex;
+  align-items: center;
   gap: 8px;
-  justify-content: flex-end;
+  min-width: 0;
 }
 
 .novel-editor-primary-phase.ant-tag {
   flex: 0 0 auto;
   margin-inline-end: 0;
+  height: 24px;
+  line-height: 22px;
+  padding-inline: 10px;
   border-radius: var(--novel-radius-pill);
+  border: 1px solid rgba(37, 99, 235, 0.12);
   color: #1d4ed8;
-  background: #e8f1ff;
+  background: #eff6ff;
+  font-size: 12px;
   font-weight: var(--novel-font-weight-medium);
 }
 
 .novel-editor-primary-action-main.ant-btn {
-  height: var(--novel-control-height-md);
-  min-width: 112px;
+  height: var(--novel-control-height-md) !important;
+  min-width: 120px;
+  padding-inline: 16px !important;
   border-radius: var(--novel-radius-pill) !important;
-  font-weight: var(--novel-font-weight-bold);
+  font-size: 13px !important;
+  font-weight: var(--novel-font-weight-bold) !important;
+  box-shadow: 0 1px 2px rgba(22, 119, 255, 0.18), 0 1px 3px rgba(22, 119, 255, 0.1);
+}
+
+.novel-editor-primary-action-main.ant-btn .anticon {
+  font-size: 14px;
 }
 
 .novel-editor-primary-entry .novel-word-target-control {
@@ -77,11 +140,33 @@
 }
 
 .novel-editor-more-actions.ant-btn {
+  height: var(--novel-control-height-sm) !important;
+  padding-inline: 10px !important;
+  border: 1px solid var(--novel-color-border-strong) !important;
+  border-radius: var(--novel-radius-pill) !important;
+  background: #fff !important;
+  color: #405066 !important;
+  font-weight: var(--novel-font-weight-medium) !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+}
+
+.novel-editor-more-actions.ant-btn:hover {
+  border-color: #c5d0de !important;
+  color: var(--novel-color-text) !important;
+  background: var(--novel-color-bg-muted) !important;
+}
+
+.novel-editor-toolbar-controls .ant-btn {
   height: var(--novel-control-height-sm);
-  padding-inline: 10px;
-  border: 1px solid #dfe7f1;
-  border-radius: var(--novel-radius-pill);
-  font-weight: var(--novel-font-weight-bold);
+  border-radius: var(--novel-radius-md);
+}
+
+.novel-writing-immersive-aux-trigger.ant-btn {
+  height: var(--novel-control-height-sm) !important;
+  padding-inline: 10px !important;
+  border-radius: var(--novel-radius-pill) !important;
+  border: 1px solid var(--novel-color-border-strong);
+  font-weight: var(--novel-font-weight-medium);
 }
 
 .novel-writing-aux-rail {
@@ -245,30 +330,31 @@
   height: var(--novel-control-height-sm);
   padding-inline: 11px;
   border-radius: var(--novel-radius-pill) !important;
-  border-color: #d8e0ea;
-  background: rgba(255, 255, 255, 0.84);
-  color: #263244;
-  font-weight: var(--novel-font-weight-bold);
+  border-color: var(--novel-color-border-strong);
+  background: #fff;
+  color: #334155;
+  font-weight: var(--novel-font-weight-medium);
   box-shadow: none;
 }
 
 .novel-editor-command-pill.ant-btn-primary,
 .novel-editor-primary-command.ant-btn-primary {
-  border-color: #2563eb;
-  background: #2563eb;
-  color: #fff;
+  border-color: transparent !important;
+  background: var(--novel-color-primary) !important;
+  color: #fff !important;
 }
 
 .novel-editor-command-pill.ant-btn:hover {
-  border-color: #7aa7ff;
-  color: #1d4ed8;
+  border-color: #b6c6db !important;
+  color: #1e3a5f !important;
+  background: #f8fafc !important;
 }
 
 .novel-editor-command-pill.ant-btn-primary:hover,
 .novel-editor-primary-command.ant-btn-primary:hover {
-  border-color: #1d4ed8;
-  background: #1d4ed8;
-  color: #fff;
+  border-color: transparent !important;
+  background: #0958d9 !important;
+  color: #fff !important;
 }
 
 .novel-editor-icon-command.ant-btn {
@@ -281,35 +367,65 @@
 }
 
 .novel-word-target-control {
-  display: grid;
-  grid-template-columns: auto auto minmax(78px, 96px) auto;
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
-  margin-top: 2px;
-  min-height: 24px;
+  gap: 4px;
+  min-height: 32px;
+  padding: 3px;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #eef2f7 0%, #e8edf4 100%);
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.65);
 }
 
 .novel-word-target-control .novel-word-preset.ant-btn {
-  height: 26px;
-  padding-inline: 9px;
-  border-radius: var(--novel-radius-pill);
-  font-weight: var(--novel-font-weight-bold);
+  height: 26px !important;
+  padding-inline: 10px !important;
+  border-radius: 8px !important;
+  border: 1px solid transparent !important;
+  font-size: 12px !important;
+  font-weight: var(--novel-font-weight-medium) !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  color: #64748b !important;
+}
+
+.novel-word-target-control .novel-word-preset.ant-btn-primary {
+  color: var(--novel-color-primary) !important;
+  background: #fff !important;
+  border-color: rgba(15, 23, 42, 0.04) !important;
+  font-weight: var(--novel-font-weight-bold) !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06) !important;
 }
 
 .novel-word-target-control .ant-input-number {
-  width: 100%;
-  border-color: #cbd5e1;
+  width: 72px;
+  height: 26px;
+  border-color: transparent !important;
+  border-radius: 8px !important;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.novel-word-target-control .ant-input-number .ant-input-number-input {
+  height: 24px;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: var(--novel-font-weight-medium);
+  text-align: center;
 }
 
 .novel-word-target-control .ant-input-number.is-custom {
-  border-color: #2563eb;
-  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
+  border-color: rgba(22, 119, 255, 0.35) !important;
+  background: #fff;
+  box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.1);
 }
 
 .novel-word-target-unit {
   color: var(--novel-color-text-secondary);
-  font-size: 12px;
-  font-weight: 700;
+  font-size: 11px;
+  font-weight: var(--novel-font-weight-medium);
+  padding-right: 6px;
+  user-select: none;
 }
 
 .novel-editor-recommended-badge {
@@ -366,10 +482,33 @@
 @media (max-width: 1180px) {
   .novel-editor-toolbar {
     grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px 12px;
   }
 
   .novel-editor-primary-entry {
     grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+
+  .novel-editor-toolbar-controls {
+    grid-column: 2;
+    grid-row: 1;
+  }
+}
+
+@media (max-width: 720px) {
+  .novel-editor-toolbar {
+    grid-template-columns: 1fr;
+    padding: 10px 12px !important;
+  }
+
+  .novel-editor-toolbar-controls {
+    grid-column: auto;
+    grid-row: auto;
+    justify-content: flex-start;
+  }
+
+  .novel-editor-primary-entry {
     justify-content: flex-start;
   }
 }
