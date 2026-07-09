@@ -840,12 +840,21 @@ export function WritingCockpitPanel({
 }) {
   const recommendedRole = model.modelTeam.recommendedRole
   const [cockpitCollapsed, setCockpitCollapsed] = useState(true)
+  const [cockpitDetailsOpen, setCockpitDetailsOpen] = useState(false)
   const nextChapterLabel = model.nextChapter
     ? `第${model.nextChapter.chapterNo}章 · ${model.nextChapter.title || '未命名章节'}`
     : '等待规划下一章'
   const whyItMatters = model.nextChapter?.whyItMatters || '先补齐章节规划，再确认本章要服务的卷目标。'
   const previousHook = model.nextChapter?.previousEnding || model.previousChapter?.endingHook || '暂无上一章钩子，请先确认承接点。'
   const percent = readinessPercent(model)
+  const readinessTagColor = model.readiness.blockers.length ? 'red' : model.readiness.warnings.length ? 'gold' : 'green'
+  const concernChecks = model.readiness.checks.filter(check => check.status !== 'pass').slice(0, 3)
+  const primaryKey = primaryActionOverride?.actionKey || model.topStatus.primaryActionKey
+  const primaryLabel = primaryActionOverride?.label || model.topStatus.nextActionLabel
+  const runPrimary = () => {
+    if (primaryActionOverride?.onClick) primaryActionOverride.onClick()
+    else onAction(primaryKey)
+  }
 
   useEffect(() => {
     if (forceCollapsed) setCockpitCollapsed(true)
@@ -860,35 +869,41 @@ export function WritingCockpitPanel({
           loading={loading && model.readiness.checks.length === 0}
           styles={{ body: { padding: '6px 10px' } }}
         >
-          <Row className="writing-cockpit-collapsed-row" gutter={[10, 8]} align="middle">
-            <Col flex="auto" style={{ minWidth: 0 }}>
-              <Space className="writing-cockpit-collapsed-meta" wrap size={[6, 4]}>
-                <Tag color="blue" bordered={false}>{model.topStatus.currentRoleLabel}</Tag>
-                <Tag bordered={false}>{model.topStatus.currentVolume}</Tag>
-                <Tag color={model.readiness.blockers.length ? 'red' : model.readiness.warnings.length ? 'gold' : 'green'} bordered={false}>
-                  准备度 {percent}%
-                </Tag>
-                {model.readiness.blockers.slice(0, 2).map(blocker => (
-                  <Tag key={blocker.key} color="red" bordered={false}>{blocker.label}</Tag>
-                ))}
-                <Text strong style={{ maxWidth: 520, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {nextChapterLabel}
-                </Text>
-              </Space>
-            </Col>
-            <Col flex="none">
-              <Space className="writing-cockpit-collapsed-controls" wrap size={[6, 6]} style={{ justifyContent: 'flex-end' }}>
-                {onOpenProductionOps && (
-                  <Button size="small" icon={<RocketOutlined />} onClick={onOpenProductionOps}>
-                    无人值守
-                  </Button>
-                )}
-                <Button size="small" icon={<DownOutlined />} onClick={() => setCockpitCollapsed(false)}>
-                  展开写作指挥台
+          <div className="writing-cockpit-summary-strip">
+            <div className="writing-cockpit-summary-left">
+              <Tag color="blue" bordered={false}>{model.topStatus.currentRoleLabel}</Tag>
+              <Text strong className="writing-cockpit-summary-chapter">{nextChapterLabel}</Text>
+            </div>
+            <div className="writing-cockpit-summary-center">
+              <Tag color={readinessTagColor} bordered={false}>准备度 {percent}%</Tag>
+              {model.readiness.blockers[0] && (
+                <Tag color="red" bordered={false}>{model.readiness.blockers[0].label}</Tag>
+              )}
+              {model.readiness.blockers.length > 1 && (
+                <Tag bordered={false}>+{model.readiness.blockers.length - 1}</Tag>
+              )}
+            </div>
+            <div className="writing-cockpit-summary-right">
+              {onOpenProductionOps && (
+                <Button size="small" icon={<RocketOutlined />} onClick={onOpenProductionOps}>
+                  无人值守
                 </Button>
-              </Space>
-            </Col>
-          </Row>
+              )}
+              <Button
+                type="primary"
+                size="small"
+                className="writing-cockpit-summary-primary"
+                loading={loading}
+                icon={actionIcon(primaryKey, recommendedRole)}
+                onClick={runPrimary}
+              >
+                {primaryLabel}
+              </Button>
+              <Button size="small" icon={<DownOutlined />} onClick={() => setCockpitCollapsed(false)}>
+                展开详情
+              </Button>
+            </div>
+          </div>
         </Card>
       </div>
     )
@@ -918,7 +933,7 @@ export function WritingCockpitPanel({
                   </Button>
                 )}
                 <Button size="small" icon={<UpOutlined />} onClick={() => setCockpitCollapsed(true)}>
-                  收起写作指挥台
+                  收起
                 </Button>
               </Space>
             </Col>
@@ -944,15 +959,15 @@ export function WritingCockpitPanel({
               <Space className="writing-cockpit-readiness-block" direction="vertical" size={4} style={{ width: '100%' }}>
                 <Space size={6}>
                   <Text type="secondary" style={{ fontSize: 12 }}>准备度</Text>
-                  <Tag color={model.readiness.blockers.length ? 'red' : model.readiness.warnings.length ? 'gold' : 'green'} bordered={false}>
+                  <Tag color={readinessTagColor} bordered={false}>
                     {model.readiness.blockers.length ? `${model.readiness.blockers.length} 阻塞` : model.readiness.warnings.length ? `${model.readiness.warnings.length} 警告` : '可写'}
                   </Tag>
                 </Space>
                 <Progress percent={percent} size="small" status={readinessStatus(model)} />
                 <Space wrap size={[4, 4]}>
-                  {model.readiness.checks.map(check => (
+                  {concernChecks.map(check => (
                     <Tag key={check.key} color={checkColor(check.status)} bordered={false}>
-                      {check.status === 'pass' ? <CheckCircleOutlined /> : check.status === 'warning' ? <WarningOutlined /> : <ExclamationCircleOutlined />}
+                      {check.status === 'warning' ? <WarningOutlined /> : <ExclamationCircleOutlined />}
                       {' '}
                       {check.label}
                     </Tag>
@@ -970,9 +985,6 @@ export function WritingCockpitPanel({
                   </Tag>
                   {model.nextChapter?.hasProse && <Tag color="green" bordered={false}>已有正文</Tag>}
                 </Space>
-                <Paragraph ellipsis={{ rows: 2 }} style={{ marginBottom: 0, fontSize: 12 }}>
-                  {previousHook}
-                </Paragraph>
               </Space>
             </Col>
 
@@ -981,11 +993,11 @@ export function WritingCockpitPanel({
                 type="primary"
                 block
                 loading={loading}
-                icon={actionIcon(model.topStatus.primaryActionKey, recommendedRole)}
-                onClick={() => onAction(model.topStatus.primaryActionKey)}
+                icon={actionIcon(primaryKey, recommendedRole)}
+                onClick={runPrimary}
                 style={{ whiteSpace: 'normal', height: 'auto', minHeight: 36, lineHeight: 1.3, paddingTop: 6, paddingBottom: 6 }}
               >
-                {model.topStatus.nextActionLabel}
+                {primaryLabel}
               </Button>
             </Col>
           </Row>
@@ -994,41 +1006,54 @@ export function WritingCockpitPanel({
 
           {blockerAlert(model, loading, onAction)}
 
-          {model.chapterAcceptanceDesk.visible ? (
-            <ChapterAcceptanceDesk model={model} loading={loading} onAction={onAction} />
-          ) : (
-            <ChapterPlanningDesk model={model} loading={loading} onAction={onAction} />
-          )}
+          <details
+            className="writing-cockpit-details"
+            open={cockpitDetailsOpen}
+            onToggle={(e) => setCockpitDetailsOpen((e.target as HTMLDetailsElement).open)}
+          >
+            <summary className="writing-cockpit-details-summary">写作详情</summary>
+            <div className="writing-cockpit-details-body">
+              <Paragraph type="secondary" style={{ marginBottom: 0, fontSize: 12 }}>
+                承接钩子：{previousHook}
+              </Paragraph>
 
-          <Row gutter={[12, 8]} align="top">
-            <Col xs={24} lg={15}>
-              <Space className="writing-cockpit-role-strip" wrap size={[6, 6]}>
-                <Tag icon={<TeamOutlined />} color="purple" bordered={false}>模型团队</Tag>
-                {model.modelTeam.roles.map(role => (
-                  <Tag
-                    key={role.key}
-                    icon={roleIcon(role.key)}
-                    color={role.active ? 'blue' : 'default'}
-                    bordered={!role.active}
-                    title={role.description}
-                  >
-                    {role.label}
-                  </Tag>
-                ))}
-              </Space>
-            </Col>
-            <Col xs={24} lg={9}>
-              <Space wrap size={[6, 6]} style={{ justifyContent: 'flex-start', width: '100%' }}>
-                <Tag icon={<AuditOutlined />} bordered={false}>推荐：{model.topStatus.currentRoleLabel}</Tag>
-                {model.readiness.blockers.map(blocker => (
-                  <Tag key={blocker.key} color="red" bordered={false}>{blocker.label}</Tag>
-                ))}
-                {model.readiness.warnings.map(warning => (
-                  <Tag key={warning.key} color="gold" bordered={false}>{warning.label}</Tag>
-                ))}
-              </Space>
-            </Col>
-          </Row>
+              {model.chapterAcceptanceDesk.visible ? (
+                <ChapterAcceptanceDesk model={model} loading={loading} onAction={onAction} />
+              ) : (
+                <ChapterPlanningDesk model={model} loading={loading} onAction={onAction} />
+              )}
+
+              <Row gutter={[12, 8]} align="top">
+                <Col xs={24} lg={15}>
+                  <Space className="writing-cockpit-role-strip" wrap size={[6, 6]}>
+                    <Tag icon={<TeamOutlined />} color="purple" bordered={false}>模型团队</Tag>
+                    {model.modelTeam.roles.map(role => (
+                      <Tag
+                        key={role.key}
+                        icon={roleIcon(role.key)}
+                        color={role.active ? 'blue' : 'default'}
+                        bordered={!role.active}
+                        title={role.description}
+                      >
+                        {role.label}
+                      </Tag>
+                    ))}
+                  </Space>
+                </Col>
+                <Col xs={24} lg={9}>
+                  <Space wrap size={[6, 6]} style={{ justifyContent: 'flex-start', width: '100%' }}>
+                    <Tag icon={<AuditOutlined />} bordered={false}>推荐：{model.topStatus.currentRoleLabel}</Tag>
+                    {model.readiness.blockers.map(blocker => (
+                      <Tag key={blocker.key} color="red" bordered={false}>{blocker.label}</Tag>
+                    ))}
+                    {model.readiness.warnings.map(warning => (
+                      <Tag key={warning.key} color="gold" bordered={false}>{warning.label}</Tag>
+                    ))}
+                  </Space>
+                </Col>
+              </Row>
+            </div>
+          </details>
         </Space>
       </Card>
     </div>

@@ -329,30 +329,72 @@
   line-height: 1.35;
 }
 
-.writing-cockpit-collapsed-row {
-  min-height: 38px;
+.writing-cockpit-summary-strip {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr) auto;
+  gap: 8px 12px;
+  align-items: center;
 }
 
-.writing-cockpit-collapsed-meta {
+.writing-cockpit-summary-left,
+.writing-cockpit-summary-center,
+.writing-cockpit-summary-right {
   min-width: 0;
   display: flex;
   align-items: center;
-  padding: 3px 0;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
-.writing-cockpit-collapsed-meta .ant-tag {
+.writing-cockpit-summary-left .ant-tag,
+.writing-cockpit-summary-center .ant-tag {
   border-radius: 999px;
   font-weight: 750;
 }
 
-.writing-cockpit-collapsed-controls {
-  padding-left: 10px;
-  border-left: 1px solid #e6ebf2;
+.writing-cockpit-summary-right {
+  justify-content: flex-end;
+  flex-wrap: nowrap;
 }
 
-.writing-cockpit-collapsed-controls .ant-btn {
+.writing-cockpit-summary-right .ant-btn {
   border-radius: 999px;
   font-weight: 750;
+}
+
+.writing-cockpit-summary-chapter {
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.writing-cockpit-summary-primary.ant-btn {
+  font-weight: 800;
+}
+
+.writing-cockpit-details {
+  border: 1px solid #e8eef5;
+  border-radius: 8px;
+  background: #fbfcfe;
+  padding: 0 10px 10px;
+}
+
+.writing-cockpit-details-summary {
+  cursor: pointer;
+  font-weight: 750;
+  padding: 8px 0;
+  list-style: none;
+}
+
+.writing-cockpit-details-summary::-webkit-details-marker {
+  display: none;
+}
+
+.writing-cockpit-details-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 @media (max-width: 900px) {
@@ -363,6 +405,15 @@
 
   .writing-cockpit-workflow-stages {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .writing-cockpit-summary-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .writing-cockpit-summary-right {
+    justify-content: flex-start;
+    flex-wrap: wrap;
   }
 }
 
@@ -384,12 +435,5 @@
 
   .writing-cockpit-workflow-stages {
     grid-template-columns: 1fr;
-  }
-
-  .writing-cockpit-collapsed-controls {
-    width: 100%;
-    padding-left: 0;
-    border-left: 0;
-    justify-content: flex-start !important;
   }
 }
