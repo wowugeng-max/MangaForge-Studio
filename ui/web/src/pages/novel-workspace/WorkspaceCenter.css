@@ -779,12 +779,12 @@
 }
 
 .novel-delivery-status-strip {
-  min-height: 38px;
   flex-shrink: 0;
-  padding: 6px 20px;
+  min-height: 0;
+  padding: 10px 16px 12px;
   border-bottom: 1px solid #e6ebf2;
   display: flex;
-  align-items: center;
+  align-items: stretch;
   gap: 10px;
   background: #fff;
 }
@@ -813,8 +813,36 @@
   min-width: 0;
   flex: 1;
   display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.novel-delivery-status-head {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: 6px 8px;
+  min-width: 0;
+}
+
+.novel-delivery-status-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  min-width: 0;
+  width: 100%;
+}
+
+.novel-delivery-status-chips .ant-tag {
+  margin-inline-end: 0 !important;
+  max-width: 100%;
+  white-space: normal;
+  height: auto;
+  line-height: 1.35;
+  padding-top: 3px;
+  padding-bottom: 3px;
 }
 
 .novel-delivery-status-label {
@@ -831,6 +859,17 @@
   color: #0f172a;
   background: rgba(255, 255, 255, 0.82);
   border: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.novel-delivery-status-reason {
+  display: block;
+  width: 100%;
+  margin: 0 !important;
+  color: var(--novel-color-text-secondary) !important;
+  font-size: 12px !important;
+  line-height: 1.45 !important;
+  white-space: normal;
+  word-break: break-word;
 }
 
 .novel-delivery-risk-tag {
@@ -1624,13 +1663,17 @@
 }
 
 .novel-delivery-status-reason {
+  display: block;
   min-width: 0;
-  color: #475569;
-  font-size: 12px;
-  line-height: 1.35;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  width: 100%;
+  margin: 0 !important;
+  color: var(--novel-color-text-secondary) !important;
+  font-size: 12px !important;
+  line-height: 1.45 !important;
+  white-space: normal;
+  word-break: break-word;
+  overflow: visible;
+  text-overflow: unset;
 }
 
 .novel-delivery-status-action {

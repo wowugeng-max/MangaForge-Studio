@@ -839,10 +839,13 @@ export function WorkspaceCenter({
           {deliverySummary.visible && (
             <div className={`novel-delivery-status-strip novel-delivery-status-strip-${deliverySummary.tone}`}>
               <div className="novel-delivery-status-main">
-                <span className="novel-delivery-status-label">交稿状态</span>
-                <Tag className="novel-delivery-status-tag" bordered={false}>{deliverySummary.statusLabel}</Tag>
-                <Tag bordered={false}>{deliverySummary.qualityLabel}</Tag>
-                <Tag bordered={false}>{deliverySummary.storyStateLabel}</Tag>
+                <div className="novel-delivery-status-head">
+                  <span className="novel-delivery-status-label">交稿状态</span>
+                  <Tag className="novel-delivery-status-tag" bordered={false}>{deliverySummary.statusLabel}</Tag>
+                  <Tag bordered={false}>{deliverySummary.qualityLabel}</Tag>
+                  <Tag bordered={false}>{deliverySummary.storyStateLabel}</Tag>
+                </div>
+                <div className="novel-delivery-status-chips">
                 {deliverySummary.deliveryRiskQueue && (
                   <Tooltip title={deliverySummary.deliveryRiskQueue.items.join('；')}>
                     <Tag
@@ -1319,7 +1322,10 @@ export function WorkspaceCenter({
                     )}
                   </>
                 )}
-                <Text className="novel-delivery-status-reason">{deliverySummary.reason}</Text>
+                </div>
+                {deliverySummary.reason && (
+                  <Text className="novel-delivery-status-reason">{deliverySummary.reason}</Text>
+                )}
               </div>
             </div>
           )}
