@@ -14,9 +14,10 @@ describe('commercial writing workspace UI shell', () => {
 
     expect(projectWorkspace).toContain('directoryCollapsed')
     expect(projectWorkspace).toContain('setDirectoryCollapsed')
+    expect(projectWorkspace).toContain('handleDirectoryCollapsedChange')
     expect(projectWorkspace).toContain("novel-workspace-directory-shell is-collapsed")
     expect(projectWorkspace).toContain('collapsed={directoryCollapsed}')
-    expect(projectWorkspace).toContain('onCollapsedChange={setDirectoryCollapsed}')
+    expect(projectWorkspace).toContain('onCollapsedChange={handleDirectoryCollapsedChange}')
     expect(projectWorkspace).toContain('novel-workspace-task-entry')
     expect(directorySidebar).toContain('collapsed = false')
     expect(directorySidebar).toContain('onCollapsedChange')
@@ -2437,5 +2438,50 @@ describe('commercial writing workspace UI shell', () => {
     expect(panel).toContain('creative-assistant-card')
     expect(css).toContain('.creative-assistant-panel')
     expect(css).toContain('.creative-assistant-card')
+  })
+
+  test('dual-mode shell replaces focus mode with immersive/workbench classes and always-on task center', () => {
+    const projectWorkspace = source('../NovelProjectWorkspace.tsx')
+    const projectWorkspaceCss = source('../NovelProjectWorkspace.css')
+    const shellModel = source('workspaceShellModel.ts')
+
+    expect(shellModel).toContain("export type WorkspaceShellMode = 'immersive' | 'workbench'")
+    expect(shellModel).toContain('novel.workspace.shellMode')
+    expect(shellModel).toContain('isImmersiveShell')
+
+    expect(projectWorkspace).toContain('writingShellMode')
+    expect(projectWorkspace).toContain('setShellMode')
+    expect(projectWorkspace).toContain('rootShellClassName')
+    expect(projectWorkspace).toContain('展开工作台')
+    expect(projectWorkspace).toContain('沉浸写作')
+    expect(projectWorkspace).toContain('novel-workspace-topbar-left')
+    expect(projectWorkspace).toContain('novel-workspace-topbar-center')
+    expect(projectWorkspace).toContain('novel-workspace-topbar-right')
+    expect(projectWorkspace).toContain('novel-workspace-topbar-more')
+    expect(projectWorkspace).toContain('novel-workspace-task-entry')
+
+    expect(projectWorkspace).not.toContain('focusWritingMode')
+    expect(projectWorkspace).not.toContain('isWritingFocusMode')
+    expect(projectWorkspace).not.toContain('专注写作')
+    expect(projectWorkspace).not.toContain('退出专注')
+    expect(projectWorkspace).not.toContain('novel-workspace-focus-mode')
+
+    expect(projectWorkspaceCss).toContain('.novel-workspace-shell-immersive')
+    expect(projectWorkspaceCss).toContain('.novel-workspace-shell-workbench')
+    expect(projectWorkspaceCss).toContain('.novel-workspace-topbar-left')
+    expect(projectWorkspaceCss).not.toContain('.novel-workspace-focus-mode .novel-workspace-task-entry')
+    expect(projectWorkspaceCss).not.toContain('.novel-workspace-focus-mode .novel-workspace-directory-shell')
+  })
+
+  test('immersive writing keeps global cockpit hidden and does not zero-hide directory by focus class', () => {
+    const projectWorkspace = source('../NovelProjectWorkspace.tsx')
+    const projectWorkspaceCss = source('../NovelProjectWorkspace.css')
+
+    expect(projectWorkspace).toContain('showGlobalWritingGuidance')
+    expect(projectWorkspace).toContain("workspaceArea !== 'chapterWriting'")
+    expect(projectWorkspace).toContain('{showGlobalWritingGuidance && (')
+    expect(projectWorkspace).toContain('{showGlobalWritingGuidance && renderSerialPipeline()}')
+    expect(projectWorkspaceCss).toContain('.novel-workspace-directory-shell.is-collapsed')
+    expect(projectWorkspaceCss).toContain('flex: 0 0 48px')
   })
 })
