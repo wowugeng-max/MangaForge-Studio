@@ -25,7 +25,7 @@ describe('commercial writing workspace UI shell', () => {
     expect(directorySidebar).toContain('展开目录')
     expect(directorySidebar).toContain('chapter-directory-sidebar is-collapsed')
     expect(projectWorkspaceCss).toContain('.novel-workspace-directory-shell.is-collapsed')
-    expect(projectWorkspaceCss).toContain('flex: 0 0 48px')
+    expect(projectWorkspaceCss).toContain('flex: 0 0 var(--novel-shell-directory-collapsed)')
     expect(projectWorkspaceCss).toContain('.chapter-directory-sidebar-collapsed-rail')
   })
 

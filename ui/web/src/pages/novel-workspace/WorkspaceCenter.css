@@ -59,17 +59,17 @@
 .novel-editor-primary-phase.ant-tag {
   flex: 0 0 auto;
   margin-inline-end: 0;
-  border-radius: 999px;
+  border-radius: var(--novel-radius-pill);
   color: #1d4ed8;
   background: #e8f1ff;
-  font-weight: 800;
+  font-weight: var(--novel-font-weight-medium);
 }
 
 .novel-editor-primary-action-main.ant-btn {
-  height: 32px;
+  height: var(--novel-control-height-md);
   min-width: 112px;
-  border-radius: 999px !important;
-  font-weight: 800;
+  border-radius: var(--novel-radius-pill) !important;
+  font-weight: var(--novel-font-weight-bold);
 }
 
 .novel-editor-primary-entry .novel-word-target-control {
@@ -77,11 +77,11 @@
 }
 
 .novel-editor-more-actions.ant-btn {
-  height: 28px;
+  height: var(--novel-control-height-sm);
   padding-inline: 10px;
   border: 1px solid #dfe7f1;
-  border-radius: 999px;
-  font-weight: 800;
+  border-radius: var(--novel-radius-pill);
+  font-weight: var(--novel-font-weight-bold);
 }
 
 .novel-writing-aux-rail {
@@ -112,7 +112,7 @@
   flex: 0 0 auto;
   max-width: 180px;
   margin-inline-end: 0;
-  font-weight: 750;
+  font-weight: var(--novel-font-weight-medium);
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -127,7 +127,7 @@
   max-width: min(380px, 30vw);
   color: #9a4b20 !important;
   font-size: 13px;
-  font-weight: 800;
+  font-weight: var(--novel-font-weight-bold);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -139,9 +139,9 @@
 }
 
 .novel-writing-aux-toggle.ant-btn {
-  height: 28px;
-  border-radius: 999px;
-  font-weight: 750;
+  height: var(--novel-control-height-sm);
+  border-radius: var(--novel-radius-pill);
+  font-weight: var(--novel-font-weight-bold);
   flex-shrink: 0;
 }
 
@@ -177,7 +177,7 @@
   padding: 8px 10px;
   border: 1px solid #e6ebf2;
   border-left-width: 4px;
-  border-radius: 8px;
+  border-radius: var(--novel-radius-md);
   background: #fff;
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
@@ -189,7 +189,7 @@
 .novel-editor-action-group-label {
   font-size: 11px;
   line-height: 1.1;
-  color: #64748b;
+  color: var(--novel-color-text-secondary);
   font-weight: 700;
   white-space: nowrap;
 }
@@ -202,12 +202,12 @@
 }
 
 .novel-editor-action-group-primary .novel-editor-action-group-label {
-  color: #1677ff;
+  color: var(--novel-color-primary);
 }
 
 .novel-editor-action-group-prep {
   border-color: #dbeafe;
-  border-left-color: #64748b;
+  border-left-color: var(--novel-color-text-secondary);
   background: #f8fafc;
 }
 
@@ -242,13 +242,13 @@
 }
 
 .novel-editor-command-pill.ant-btn {
-  height: 28px;
+  height: var(--novel-control-height-sm);
   padding-inline: 11px;
-  border-radius: 999px !important;
+  border-radius: var(--novel-radius-pill) !important;
   border-color: #d8e0ea;
   background: rgba(255, 255, 255, 0.84);
   color: #263244;
-  font-weight: 750;
+  font-weight: var(--novel-font-weight-bold);
   box-shadow: none;
 }
 
@@ -292,8 +292,8 @@
 .novel-word-target-control .novel-word-preset.ant-btn {
   height: 26px;
   padding-inline: 9px;
-  border-radius: 999px;
-  font-weight: 750;
+  border-radius: var(--novel-radius-pill);
+  font-weight: var(--novel-font-weight-bold);
 }
 
 .novel-word-target-control .ant-input-number {
@@ -307,14 +307,14 @@
 }
 
 .novel-word-target-unit {
-  color: #64748b;
+  color: var(--novel-color-text-secondary);
   font-size: 12px;
   font-weight: 700;
 }
 
 .novel-editor-recommended-badge {
   padding: 1px 5px;
-  border-radius: 999px;
+  border-radius: var(--novel-radius-pill);
   background: #fff7e6;
   color: #b45309;
   font-size: 10px;
@@ -424,7 +424,7 @@
   flex: 0 0 auto;
   color: #334155;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: var(--novel-font-weight-bold);
 }
 
 .novel-ai-responsibility-role {
@@ -481,7 +481,7 @@
 .novel-writing-queue-label {
   color: #253044;
   font-size: 12px;
-  font-weight: 850;
+  font-weight: var(--novel-font-weight-bold);
   white-space: nowrap;
 }
 
@@ -492,7 +492,7 @@
   color: #92400e;
   background: #fff7df;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: var(--novel-font-weight-bold);
 }
 
 .novel-writing-queue-list {
@@ -514,7 +514,7 @@
   padding: 6px 8px;
   border: 1px solid #dfe7f1;
   border-left-width: 4px;
-  border-radius: 8px;
+  border-radius: var(--novel-radius-md);
   background: #fbfcfe;
   cursor: pointer;
   outline: none;
@@ -549,9 +549,9 @@
 }
 
 .novel-writing-queue-no {
-  color: #64748b;
+  color: var(--novel-color-text-secondary);
   font-size: 11px;
-  font-weight: 800;
+  font-weight: var(--novel-font-weight-bold);
   white-space: nowrap;
 }
 
@@ -567,9 +567,9 @@
 .novel-writing-queue-source,
 .novel-writing-queue-status,
 .novel-writing-queue-action {
-  color: #64748b;
+  color: var(--novel-color-text-secondary);
   font-size: 11px;
-  font-weight: 750;
+  font-weight: var(--novel-font-weight-bold);
   white-space: nowrap;
 }
 
@@ -583,7 +583,7 @@
   grid-column: 2 / 4;
   width: fit-content;
   padding: 1px 7px;
-  border-radius: 999px;
+  border-radius: var(--novel-radius-pill);
   color: #1e3a8a;
   background: rgba(59, 130, 246, 0.1);
 }
@@ -596,7 +596,7 @@
   gap: 12px;
   padding: 8px 10px;
   border: 1px solid #f3d38b;
-  border-radius: 8px;
+  border-radius: var(--novel-radius-md);
   background: #fffbeb;
 }
 
@@ -619,7 +619,7 @@
 .novel-writing-queue-focus-main span {
   color: #92400e;
   font-size: 11px;
-  font-weight: 850;
+  font-weight: var(--novel-font-weight-bold);
 }
 
 .novel-writing-queue-focus-draft .novel-writing-queue-focus-main span {
@@ -682,7 +682,7 @@
   flex: 0 0 auto;
   color: #334155;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: var(--novel-font-weight-bold);
 }
 
 .novel-delivery-status-tag {
@@ -698,7 +698,7 @@
   flex: 0 0 auto;
   margin-inline-end: 0;
   max-width: 220px;
-  font-weight: 800;
+  font-weight: var(--novel-font-weight-bold);
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -713,7 +713,7 @@
   flex: 0 0 auto;
   margin-inline-end: 0;
   max-width: 168px;
-  font-weight: 800;
+  font-weight: var(--novel-font-weight-bold);
   overflow: hidden;
   text-overflow: ellipsis;
   border: 1px solid transparent;
@@ -1394,7 +1394,7 @@
   flex: 0 0 auto;
   color: #334155;
   font-size: 12px;
-  font-weight: 850;
+  font-weight: var(--novel-font-weight-bold);
 }
 
 .novel-deslop-gate-summary .ant-typography {
@@ -1410,7 +1410,7 @@
   flex: 0 0 auto;
   margin-left: auto;
   font-size: 12px;
-  font-weight: 750;
+  font-weight: var(--novel-font-weight-bold);
 }
 
 .novel-deslop-gate-grid {
@@ -1428,7 +1428,7 @@
   padding: 8px 10px;
   border: 1px solid #e2e8f0;
   border-left-width: 3px;
-  border-radius: 8px;
+  border-radius: var(--novel-radius-md);
   background: rgba(255, 255, 255, 0.86);
 }
 
@@ -1454,7 +1454,7 @@
 .novel-deslop-gate-card-head .ant-tag {
   flex: 0 0 auto;
   margin-inline-end: 0;
-  font-weight: 800;
+  font-weight: var(--novel-font-weight-medium);
 }
 
 .novel-deslop-gate-card-head strong {
@@ -1469,9 +1469,9 @@
 
 .novel-deslop-gate-card-head span {
   flex: 0 0 auto;
-  color: #64748b;
+  color: var(--novel-color-text-secondary);
   font-size: 12px;
-  font-weight: 750;
+  font-weight: var(--novel-font-weight-bold);
 }
 
 .novel-deslop-gate-evidence,
@@ -1540,7 +1540,7 @@
   flex: 0 0 auto;
   color: #334155;
   font-size: 12px;
-  font-weight: 850;
+  font-weight: var(--novel-font-weight-bold);
 }
 
 .novel-chapter-handoff-status {
@@ -1549,14 +1549,14 @@
   color: #0f172a;
   background: rgba(255, 255, 255, 0.82);
   border: 1px solid rgba(15, 23, 42, 0.08);
-  font-weight: 800;
+  font-weight: var(--novel-font-weight-bold);
 }
 
 .novel-chapter-handoff-route {
   flex: 0 0 auto;
   color: #475569;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: var(--novel-font-weight-bold);
 }
 
 .novel-chapter-handoff-grid {
@@ -1569,16 +1569,16 @@
   min-width: 0;
   padding: 5px 8px;
   border: 1px solid rgba(15, 23, 42, 0.08);
-  border-radius: 7px;
+  border-radius: var(--novel-radius-sm);
   background: rgba(255, 255, 255, 0.72);
 }
 
 .novel-chapter-handoff-grid span {
   display: block;
   margin-bottom: 2px;
-  color: #64748b;
+  color: var(--novel-color-text-secondary);
   font-size: 11px;
-  font-weight: 800;
+  font-weight: var(--novel-font-weight-bold);
 }
 
 .novel-chapter-handoff-grid strong {
@@ -1635,7 +1635,7 @@
   flex: 0 0 auto;
   color: #334155;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: var(--novel-font-weight-bold);
 }
 
 .novel-draft-brief-status {
@@ -1672,14 +1672,14 @@
   min-width: 0;
   padding: 6px 8px;
   border: 1px solid rgba(59, 130, 246, 0.14);
-  border-radius: 6px;
+  border-radius: var(--novel-radius-sm);
   background: rgba(255, 255, 255, 0.72);
 }
 
 .novel-draft-brief-grid span {
   display: block;
   margin-bottom: 2px;
-  color: #64748b;
+  color: var(--novel-color-text-secondary);
   font-size: 11px;
   line-height: 1.2;
 }
@@ -1689,7 +1689,7 @@
   min-width: 0;
   color: #0f172a;
   font-size: 12px;
-  font-weight: 650;
+  font-weight: var(--novel-font-weight-medium);
   line-height: 1.35;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1704,14 +1704,14 @@
   margin-top: 8px;
   padding: 7px 8px;
   border: 1px solid rgba(14, 165, 233, 0.18);
-  border-radius: 6px;
+  border-radius: var(--novel-radius-sm);
   background: rgba(240, 249, 255, 0.9);
 }
 
 .novel-draft-brief-storylines span {
   color: #0369a1;
   font-size: 11px;
-  font-weight: 800;
+  font-weight: var(--novel-font-weight-bold);
   white-space: nowrap;
 }
 
@@ -1719,7 +1719,7 @@
   min-width: 0;
   color: #0f172a;
   font-size: 12px;
-  font-weight: 650;
+  font-weight: var(--novel-font-weight-medium);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1733,7 +1733,7 @@
   margin-top: 8px;
   padding: 7px 8px;
   border: 1px solid rgba(13, 148, 136, 0.2);
-  border-radius: 6px;
+  border-radius: var(--novel-radius-sm);
   background: rgba(240, 253, 250, 0.92);
 }
 
@@ -1745,14 +1745,14 @@
   margin-top: 8px;
   padding: 7px 8px;
   border: 1px solid rgba(217, 119, 6, 0.22);
-  border-radius: 6px;
+  border-radius: var(--novel-radius-sm);
   background: rgba(255, 251, 235, 0.94);
 }
 
 .novel-draft-brief-write-preparation span {
   color: #92400e;
   font-size: 11px;
-  font-weight: 800;
+  font-weight: var(--novel-font-weight-bold);
   white-space: nowrap;
 }
 
@@ -1760,7 +1760,7 @@
   min-width: 0;
   color: #0f172a;
   font-size: 12px;
-  font-weight: 650;
+  font-weight: var(--novel-font-weight-medium);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1769,7 +1769,7 @@
 .novel-draft-brief-blueprint span {
   color: #0f766e;
   font-size: 11px;
-  font-weight: 800;
+  font-weight: var(--novel-font-weight-bold);
   white-space: nowrap;
 }
 
@@ -1777,7 +1777,7 @@
   min-width: 0;
   color: #0f172a;
   font-size: 12px;
-  font-weight: 650;
+  font-weight: var(--novel-font-weight-medium);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1798,14 +1798,14 @@
   margin-top: 6px;
   padding: 7px 8px;
   border: 1px solid rgba(217, 70, 239, 0.18);
-  border-radius: 6px;
+  border-radius: var(--novel-radius-sm);
   background: rgba(253, 244, 255, 0.92);
 }
 
 .novel-draft-brief-character-arc span {
   color: #a21caf;
   font-size: 11px;
-  font-weight: 800;
+  font-weight: var(--novel-font-weight-bold);
   white-space: nowrap;
 }
 
@@ -1813,7 +1813,7 @@
   min-width: 0;
   color: #0f172a;
   font-size: 12px;
-  font-weight: 650;
+  font-weight: var(--novel-font-weight-medium);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1827,14 +1827,14 @@
   margin-top: 6px;
   padding: 7px 8px;
   border: 1px solid rgba(16, 185, 129, 0.2);
-  border-radius: 6px;
+  border-radius: var(--novel-radius-sm);
   background: rgba(240, 253, 244, 0.92);
 }
 
 .novel-draft-brief-story-unit span {
   color: #047857;
   font-size: 11px;
-  font-weight: 800;
+  font-weight: var(--novel-font-weight-bold);
   white-space: nowrap;
 }
 
@@ -1842,7 +1842,7 @@
   min-width: 0;
   color: #0f172a;
   font-size: 12px;
-  font-weight: 650;
+  font-weight: var(--novel-font-weight-medium);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1856,14 +1856,14 @@
   margin-top: 8px;
   padding: 7px 8px;
   border: 1px solid rgba(245, 158, 11, 0.2);
-  border-radius: 6px;
+  border-radius: var(--novel-radius-sm);
   background: rgba(255, 251, 235, 0.92);
 }
 
 .novel-draft-brief-retention span {
   color: #92400e;
   font-size: 11px;
-  font-weight: 800;
+  font-weight: var(--novel-font-weight-bold);
   white-space: nowrap;
 }
 
@@ -1871,7 +1871,7 @@
   min-width: 0;
   color: #0f172a;
   font-size: 12px;
-  font-weight: 650;
+  font-weight: var(--novel-font-weight-medium);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1885,14 +1885,14 @@
   margin-top: 6px;
   padding: 7px 8px;
   border: 1px solid rgba(220, 38, 38, 0.2);
-  border-radius: 6px;
+  border-radius: var(--novel-radius-sm);
   background: rgba(254, 242, 242, 0.92);
 }
 
 .novel-draft-brief-reader-drop span {
   color: #b91c1c;
   font-size: 11px;
-  font-weight: 800;
+  font-weight: var(--novel-font-weight-bold);
   white-space: nowrap;
 }
 
@@ -1900,7 +1900,7 @@
   min-width: 0;
   color: #0f172a;
   font-size: 12px;
-  font-weight: 650;
+  font-weight: var(--novel-font-weight-medium);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1914,14 +1914,14 @@
   margin-top: 6px;
   padding: 7px 8px;
   border: 1px solid rgba(37, 99, 235, 0.2);
-  border-radius: 6px;
+  border-radius: var(--novel-radius-sm);
   background: rgba(239, 246, 255, 0.92);
 }
 
 .novel-draft-brief-story-pull span {
   color: #1d4ed8;
   font-size: 11px;
-  font-weight: 800;
+  font-weight: var(--novel-font-weight-bold);
   white-space: nowrap;
 }
 
@@ -1929,7 +1929,7 @@
   min-width: 0;
   color: #0f172a;
   font-size: 12px;
-  font-weight: 650;
+  font-weight: var(--novel-font-weight-medium);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1943,14 +1943,14 @@
   margin-top: 6px;
   padding: 7px 8px;
   border: 1px solid rgba(99, 102, 241, 0.2);
-  border-radius: 6px;
+  border-radius: var(--novel-radius-sm);
   background: rgba(238, 242, 255, 0.92);
 }
 
 .novel-draft-brief-battle span {
   color: #4338ca;
   font-size: 11px;
-  font-weight: 800;
+  font-weight: var(--novel-font-weight-bold);
   white-space: nowrap;
 }
 
@@ -1958,7 +1958,7 @@
   min-width: 0;
   color: #0f172a;
   font-size: 12px;
-  font-weight: 650;
+  font-weight: var(--novel-font-weight-medium);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1972,14 +1972,14 @@
   margin-top: 6px;
   padding: 7px 8px;
   border: 1px solid rgba(20, 184, 166, 0.22);
-  border-radius: 6px;
+  border-radius: var(--novel-radius-sm);
   background: rgba(240, 253, 250, 0.94);
 }
 
 .novel-draft-brief-expectations span {
   color: #0f766e;
   font-size: 11px;
-  font-weight: 800;
+  font-weight: var(--novel-font-weight-bold);
   white-space: nowrap;
 }
 
@@ -1987,7 +1987,7 @@
   min-width: 0;
   color: #0f172a;
   font-size: 12px;
-  font-weight: 650;
+  font-weight: var(--novel-font-weight-medium);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2001,14 +2001,14 @@
   margin-top: 6px;
   padding: 7px 8px;
   border: 1px solid rgba(239, 68, 68, 0.18);
-  border-radius: 6px;
+  border-radius: var(--novel-radius-sm);
   background: rgba(254, 242, 242, 0.92);
 }
 
 .novel-draft-brief-expectation-debt span {
   color: #b91c1c;
   font-size: 11px;
-  font-weight: 800;
+  font-weight: var(--novel-font-weight-bold);
   white-space: nowrap;
 }
 
@@ -2016,7 +2016,7 @@
   min-width: 0;
   color: #0f172a;
   font-size: 12px;
-  font-weight: 650;
+  font-weight: var(--novel-font-weight-medium);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2030,14 +2030,14 @@
   margin-top: 6px;
   padding: 7px 8px;
   border: 1px solid rgba(20, 184, 166, 0.2);
-  border-radius: 6px;
+  border-radius: var(--novel-radius-sm);
   background: rgba(240, 253, 250, 0.92);
 }
 
 .novel-draft-brief-governance-memory span {
   color: #0f766e;
   font-size: 11px;
-  font-weight: 800;
+  font-weight: var(--novel-font-weight-bold);
   white-space: nowrap;
 }
 
@@ -2045,7 +2045,7 @@
   min-width: 0;
   color: #0f172a;
   font-size: 12px;
-  font-weight: 650;
+  font-weight: var(--novel-font-weight-medium);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2059,14 +2059,14 @@
   margin-top: 6px;
   padding: 7px 8px;
   border: 1px solid rgba(59, 130, 246, 0.18);
-  border-radius: 6px;
+  border-radius: var(--novel-radius-sm);
   background: rgba(239, 246, 255, 0.92);
 }
 
 .novel-draft-brief-handoff span {
   color: #1d4ed8;
   font-size: 11px;
-  font-weight: 800;
+  font-weight: var(--novel-font-weight-bold);
   white-space: nowrap;
 }
 
@@ -2074,7 +2074,7 @@
   min-width: 0;
   color: #0f172a;
   font-size: 12px;
-  font-weight: 650;
+  font-weight: var(--novel-font-weight-medium);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2088,14 +2088,14 @@
   margin-top: 6px;
   padding: 7px 8px;
   border: 1px solid rgba(217, 119, 6, 0.2);
-  border-radius: 6px;
+  border-radius: var(--novel-radius-sm);
   background: rgba(255, 251, 235, 0.94);
 }
 
 .novel-draft-brief-next-quality span {
   color: #92400e;
   font-size: 11px;
-  font-weight: 800;
+  font-weight: var(--novel-font-weight-bold);
   white-space: nowrap;
 }
 
@@ -2103,7 +2103,7 @@
   min-width: 0;
   color: #0f172a;
   font-size: 12px;
-  font-weight: 650;
+  font-weight: var(--novel-font-weight-medium);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2117,14 +2117,14 @@
   margin-top: 6px;
   padding: 7px 8px;
   border: 1px solid rgba(217, 119, 6, 0.2);
-  border-radius: 6px;
+  border-radius: var(--novel-radius-sm);
   background: rgba(255, 251, 235, 0.92);
 }
 
 .novel-draft-brief-delivery-risk span {
   color: #92400e;
   font-size: 11px;
-  font-weight: 800;
+  font-weight: var(--novel-font-weight-bold);
   white-space: nowrap;
 }
 
@@ -2132,7 +2132,7 @@
   min-width: 0;
   color: #0f172a;
   font-size: 12px;
-  font-weight: 650;
+  font-weight: var(--novel-font-weight-medium);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2146,14 +2146,14 @@
   margin-top: 6px;
   padding: 7px 8px;
   border: 1px solid rgba(217, 119, 6, 0.22);
-  border-radius: 6px;
+  border-radius: var(--novel-radius-sm);
   background: rgba(255, 247, 237, 0.92);
 }
 
 .novel-draft-brief-first30 span {
   color: #9a3412;
   font-size: 11px;
-  font-weight: 800;
+  font-weight: var(--novel-font-weight-bold);
   white-space: nowrap;
 }
 
@@ -2161,7 +2161,7 @@
   min-width: 0;
   color: #0f172a;
   font-size: 12px;
-  font-weight: 650;
+  font-weight: var(--novel-font-weight-medium);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2175,14 +2175,14 @@
   margin-top: 6px;
   padding: 7px 8px;
   border: 1px solid rgba(225, 29, 72, 0.18);
-  border-radius: 6px;
+  border-radius: var(--novel-radius-sm);
   background: rgba(255, 241, 242, 0.9);
 }
 
 .novel-draft-brief-recent-fatigue span {
   color: #be123c;
   font-size: 11px;
-  font-weight: 800;
+  font-weight: var(--novel-font-weight-bold);
   white-space: nowrap;
 }
 
@@ -2190,7 +2190,7 @@
   min-width: 0;
   color: #0f172a;
   font-size: 12px;
-  font-weight: 650;
+  font-weight: var(--novel-font-weight-medium);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2204,14 +2204,14 @@
   margin-top: 8px;
   padding: 7px 8px;
   border: 1px solid rgba(14, 165, 233, 0.22);
-  border-radius: 6px;
+  border-radius: var(--novel-radius-sm);
   background: rgba(240, 249, 255, 0.9);
 }
 
 .novel-draft-brief-innovation span {
   color: #0369a1;
   font-size: 11px;
-  font-weight: 800;
+  font-weight: var(--novel-font-weight-bold);
   white-space: nowrap;
 }
 
@@ -2219,7 +2219,7 @@
   min-width: 0;
   color: #0f172a;
   font-size: 12px;
-  font-weight: 650;
+  font-weight: var(--novel-font-weight-medium);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2233,14 +2233,14 @@
   margin-top: 8px;
   padding: 7px 8px;
   border: 1px solid rgba(234, 88, 12, 0.24);
-  border-radius: 6px;
+  border-radius: var(--novel-radius-sm);
   background: rgba(255, 247, 237, 0.92);
 }
 
 .novel-draft-brief-signature-scene span {
   color: #c2410c;
   font-size: 11px;
-  font-weight: 800;
+  font-weight: var(--novel-font-weight-bold);
   white-space: nowrap;
 }
 
@@ -2248,7 +2248,7 @@
   min-width: 0;
   color: #0f172a;
   font-size: 12px;
-  font-weight: 650;
+  font-weight: var(--novel-font-weight-medium);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2262,14 +2262,14 @@
   margin-top: 6px;
   padding: 7px 8px;
   border: 1px solid rgba(124, 58, 237, 0.18);
-  border-radius: 6px;
+  border-radius: var(--novel-radius-sm);
   background: rgba(245, 243, 255, 0.9);
 }
 
 .novel-draft-brief-batch span {
   color: #6d28d9;
   font-size: 11px;
-  font-weight: 800;
+  font-weight: var(--novel-font-weight-bold);
   white-space: nowrap;
 }
 
@@ -2277,7 +2277,7 @@
   min-width: 0;
   color: #0f172a;
   font-size: 12px;
-  font-weight: 650;
+  font-weight: var(--novel-font-weight-medium);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2291,14 +2291,14 @@
   margin-top: 6px;
   padding: 7px 8px;
   border: 1px solid rgba(147, 51, 234, 0.2);
-  border-radius: 6px;
+  border-radius: var(--novel-radius-sm);
   background: rgba(250, 245, 255, 0.92);
 }
 
 .novel-draft-brief-volume-climax span {
   color: #7e22ce;
   font-size: 11px;
-  font-weight: 800;
+  font-weight: var(--novel-font-weight-bold);
   white-space: nowrap;
 }
 
@@ -2306,7 +2306,7 @@
   min-width: 0;
   color: #0f172a;
   font-size: 12px;
-  font-weight: 650;
+  font-weight: var(--novel-font-weight-medium);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2320,14 +2320,14 @@
   margin-top: 6px;
   padding: 7px 8px;
   border: 1px solid rgba(16, 185, 129, 0.18);
-  border-radius: 6px;
+  border-radius: var(--novel-radius-sm);
   background: rgba(240, 253, 244, 0.9);
 }
 
 .novel-draft-brief-meme span {
   color: #047857;
   font-size: 11px;
-  font-weight: 800;
+  font-weight: var(--novel-font-weight-bold);
   white-space: nowrap;
 }
 
@@ -2335,7 +2335,7 @@
   min-width: 0;
   color: #0f172a;
   font-size: 12px;
-  font-weight: 650;
+  font-weight: var(--novel-font-weight-medium);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2349,14 +2349,14 @@
   margin-top: 6px;
   padding: 7px 8px;
   border: 1px solid rgba(14, 165, 233, 0.18);
-  border-radius: 6px;
+  border-radius: var(--novel-radius-sm);
   background: rgba(240, 249, 255, 0.92);
 }
 
 .novel-draft-brief-style-samples span {
   color: #0369a1;
   font-size: 11px;
-  font-weight: 800;
+  font-weight: var(--novel-font-weight-bold);
   white-space: nowrap;
 }
 
@@ -2364,7 +2364,7 @@
   min-width: 0;
   color: #0f172a;
   font-size: 12px;
-  font-weight: 650;
+  font-weight: var(--novel-font-weight-medium);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2392,14 +2392,14 @@
   margin-top: 6px;
   padding: 7px 8px;
   border: 1px solid rgba(124, 58, 237, 0.18);
-  border-radius: 6px;
+  border-radius: var(--novel-radius-sm);
   background: rgba(245, 243, 255, 0.92);
 }
 
 .novel-draft-brief-benchmark-samples span {
   color: #6d28d9;
   font-size: 11px;
-  font-weight: 800;
+  font-weight: var(--novel-font-weight-bold);
   white-space: nowrap;
 }
 
@@ -2407,7 +2407,7 @@
   min-width: 0;
   color: #0f172a;
   font-size: 12px;
-  font-weight: 650;
+  font-weight: var(--novel-font-weight-medium);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2451,7 +2451,7 @@
   margin-right: 6px;
   border-radius: 4px;
   background: #e8f1ff;
-  color: #1677ff;
+  color: var(--novel-color-primary);
   font-weight: 700;
 }
 
@@ -2466,13 +2466,13 @@
   gap: 6px;
   padding: 4px 8px;
   border: 1px solid #e6ebf2;
-  border-radius: 6px;
+  border-radius: var(--novel-radius-sm);
   background: #fff;
 }
 
 .novel-context-pill strong {
   flex: 0 0 auto;
-  color: #1677ff;
+  color: var(--novel-color-primary);
   font-size: 12px;
 }
 
@@ -2495,7 +2495,7 @@
   min-width: 0;
   padding: 10px 12px;
   border: 1px solid #e6ebf2;
-  border-radius: 8px;
+  border-radius: var(--novel-radius-md);
   background: #fbfcfe;
   display: flex;
   flex-direction: column;
@@ -3061,9 +3061,9 @@
 }
 
 .novel-writing-immersive-aux-trigger.ant-btn {
-  height: 28px;
-  border-radius: 999px;
-  font-weight: 750;
+  height: var(--novel-control-height-sm);
+  border-radius: var(--novel-radius-pill);
+  font-weight: var(--novel-font-weight-bold);
   flex-shrink: 0;
 }
 
