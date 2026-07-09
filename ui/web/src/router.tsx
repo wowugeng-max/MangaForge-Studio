@@ -1,6 +1,7 @@
 import React, { Suspense, lazy } from 'react'
-import { Navigate, createBrowserRouter } from 'react-router-dom'
+import { Navigate, Outlet, createBrowserRouter } from 'react-router-dom'
 import Layout from './components/Layout'
+import { NovelThemeProvider } from './styles/NovelThemeProvider'
 
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const StudioHome = lazy(() => import('./pages/StudioHome'))
@@ -53,9 +54,22 @@ const router = createBrowserRouter([
       { path: 'rules', element: page(<RulesPage />) },
       { path: 'canvas', element: page(<CanvasPage />) },
       { path: 'providers', element: page(<ProviderManager />) },
-      { path: 'novel', element: page(<NovelStudio />) },
-      { path: 'novel/workspace/:id', element: page(<NovelProjectWorkspace />) },
-      { path: 'novel/workspace/:id/production', element: page(<NovelProductionDesk />) },
+      {
+        path: 'novel',
+        element: (
+          <NovelThemeProvider>
+            <Suspense fallback={<PageFallback />}>
+              <Outlet />
+            </Suspense>
+          </NovelThemeProvider>
+        ),
+        children: [
+          { index: true, element: <NovelStudio /> },
+          { path: 'workspace/:id', element: <NovelProjectWorkspace /> },
+          { path: 'workspace/:id/production', element: <NovelProductionDesk /> },
+        ],
+      },
+
     ],
   },
   {
