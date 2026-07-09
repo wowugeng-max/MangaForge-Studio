@@ -478,28 +478,43 @@
   border-color: #bbf7d0;
 }
 
-.novel-workspace-focus-mode .novel-workspace-model-select,
-.novel-workspace-focus-mode .novel-workspace-topbar-meta,
-.novel-workspace-focus-mode .novel-workspace-task-entry {
-  display: none !important;
+/* Dual-mode shell roots: immersive keeps side rails; workbench is full chrome */
+.novel-project-workspace.novel-workspace-shell-immersive,
+.novel-project-workspace.novel-workspace-shell-workbench {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: #fff;
 }
 
-.novel-workspace-focus-mode .novel-workspace-directory-shell,
-.novel-workspace-focus-mode .novel-workspace-reference-shell {
-  width: 0 !important;
-  flex: 0 0 0 !important;
-  min-width: 0 !important;
-  overflow: hidden !important;
-  opacity: 0;
-  pointer-events: none;
+.novel-workspace-shell-immersive .novel-workspace-main {
+  background: #fbfcfe;
 }
 
-.novel-workspace-focus-mode .novel-workspace-main {
-  background: #f8fafc;
-}
-
-.novel-workspace-focus-mode .novel-workspace-cockpit {
+/* Immersive: prefer editor height; lighter chrome */
+.novel-workspace-shell-immersive .novel-workspace-cockpit {
   max-height: 54px;
+}
+
+.novel-workspace-shell-workbench .novel-workspace-main {
+  background: #fff;
+}
+
+/* Collapsed directory stays an interactive 48px rail in immersive (not width:0) */
+.novel-workspace-shell-immersive .novel-workspace-directory-shell.is-collapsed {
+  width: 48px;
+  flex: 0 0 48px;
+  opacity: 1;
+  pointer-events: auto;
+  overflow: hidden;
+}
+
+/* Immersive More menu model select: fixed width, no flex grow */
+.novel-workspace-model-select-menu {
+  width: 200px !important;
+  flex: none;
 }
 
 @media (min-width: 769px) {
@@ -606,12 +621,14 @@
     width: min(320px, 82vw) !important;
   }
 
-  .novel-workspace-focus-mode .novel-workspace-directory-shell {
-    display: none !important;
-    width: 0 !important;
-    flex: 0 0 0 !important;
-    height: 0 !important;
-    min-height: 0 !important;
-    border-bottom: 0 !important;
+  /* Immersive mobile: keep collapsed directory as a usable rail, not zeroed */
+  .novel-workspace-shell-immersive .novel-workspace-directory-shell.is-collapsed {
+    display: flex;
+    width: 100% !important;
+    flex: 0 0 48px !important;
+    height: 48px !important;
+    min-height: 48px !important;
+    opacity: 1;
+    pointer-events: auto;
   }
 }
