@@ -3,7 +3,9 @@ import {
   compileProseContractPrompt,
   ProseCorePromptBudgetError,
 } from './prose-contract-prompt'
+import { buildProseGenerationContract } from './prose-generation-contract'
 import { selectOhStoryDirectorContracts } from '../routes/novel-oh-story-director'
+import { compileParagraphProseContext } from '../routes/novel-writing-service'
 
 const requiredSections = [
   { key: 'task', text: 'CORE_TASK' },
@@ -93,6 +95,57 @@ describe('prose contract prompt compiler', () => {
     expect(thrown.code).toBe('PROSE_CORE_PROMPT_BUDGET_EXCEEDED')
     expect(thrown.diagnostics.required_chars).toBe(48_001)
     expect(thrown.diagnostics.budget_chars).toBe(48_000)
+  })
+
+  test('production required content preserves a previous handoff beyond the legacy field cap', () => {
+    const tailSentinel = 'PRODUCTION_HANDOFF_TAIL_SENTINEL'
+    const contract = buildProseGenerationContract({
+      chapter_target: {
+        chapter_no: 10,
+        title: '合围破局',
+        goal: '打穿追捕圈',
+        conflict: '追捕队封死四面出口',
+        ending_hook: '幕后指挥者现身',
+        previous_handoff: `${'承接'.repeat(2_101)}${tailSentinel}`,
+        scene_cards: [],
+      },
+      preflight: { ready: true, strict_ready: true, checks: [] },
+      oh_story_director: { readiness: 'ready', selected_contracts: [] },
+    })
+
+    const compiled = compileParagraphProseContext({ title: '怪谈世界' }, contract)
+
+    expect(compiled.diagnostics.required_chars).toBeLessThan(48_000)
+    expect(compiled.prompt).toContain(tailSentinel)
+  })
+
+  test('production required content rejects an oversized core instead of returning a truncated prompt', () => {
+    const contract = buildProseGenerationContract({
+      chapter_target: {
+        chapter_no: 10,
+        title: '合围破局',
+        goal: '打穿追捕圈',
+        conflict: '追捕队封死四面出口',
+        ending_hook: '幕后指挥者现身',
+        previous_handoff: '承'.repeat(48_001),
+        scene_cards: [],
+      },
+      preflight: { ready: true, strict_ready: true, checks: [] },
+      oh_story_director: { readiness: 'ready', selected_contracts: [] },
+    })
+    let compiled: ReturnType<typeof compileParagraphProseContext> | null = null
+    let thrown: any = null
+
+    try {
+      compiled = compileParagraphProseContext({ title: '怪谈世界' }, contract)
+    } catch (error) {
+      thrown = error
+    }
+
+    expect(compiled).toBeNull()
+    expect(thrown).toBeInstanceOf(ProseCorePromptBudgetError)
+    expect(thrown.code).toBe('PROSE_CORE_PROMPT_BUDGET_EXCEEDED')
+    expect(thrown.diagnostics.required_chars).toBeGreaterThan(48_000)
   })
 
   test('loads no more than four director-selected risk contracts', () => {

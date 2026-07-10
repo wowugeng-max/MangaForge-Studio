@@ -1003,6 +1003,14 @@ function proseRiskSection(key: string, value: string | string[]): ProseRiskPromp
   }
 }
 
+function requiredProsePromptText(value: any) {
+  return String(value ?? '').replace(/\s+/g, ' ').trim()
+}
+
+function requiredProsePromptJson(value: any) {
+  return safeJsonStringify(value, undefined, 0)
+}
+
 function proseContractValue(context: any, key: string) {
   return getContextContract(context, `${key}_contract`)
 }
@@ -1014,10 +1022,9 @@ function buildRequiredProseCoreSections(
   const context: any = contract.context || {}
   const target: any = mergedContextChapterTargetPreferRuntime(context)
   const previousHandoff = contract.chapter.previous_handoff || buildPreviousChapterHandoff(context)
-  const sceneCards = asArray(contract.chapter.scene_cards).slice(0, 8).map(compactProseSceneCard)
+  const sceneCards = asArray(contract.chapter.scene_cards)
   const failedChecks = asArray(contract.preflight?.checks)
     .filter((item: any) => item?.ok === false)
-    .slice(0, 8)
     .map((item: any) => ({
       key: item?.key,
       severity: item?.severity,
@@ -1070,43 +1077,43 @@ function buildRequiredProseCoreSections(
     core_contract_radar: {
       reader_promise: coreRadar?.reader_promise || coreRadar?.readerPromise,
       core_conflict: coreRadar?.core_conflict || coreRadar?.coreConflict,
-      must_serve: asArray(coreRadar?.must_serve || coreRadar?.mustServe).slice(0, 8),
-      no_drift: asArray(coreRadar?.no_drift || coreRadar?.noDrift).slice(0, 8),
+      must_serve: asArray(coreRadar?.must_serve || coreRadar?.mustServe),
+      no_drift: asArray(coreRadar?.no_drift || coreRadar?.noDrift),
     },
     request_longform_compass: {
       reader_promise: longformCompass?.reader_promise || longformCompass?.readerPromise,
       core_conflict: longformCompass?.core_conflict || longformCompass?.coreConflict,
-      must_serve: asArray(longformCompass?.must_serve || longformCompass?.mustServe).slice(0, 8),
-      no_drift: asArray(longformCompass?.no_drift || longformCompass?.noDrift || longformCompass?.red_lines || longformCompass?.redLines).slice(0, 8),
+      must_serve: asArray(longformCompass?.must_serve || longformCompass?.mustServe),
+      no_drift: asArray(longformCompass?.no_drift || longformCompass?.noDrift || longformCompass?.red_lines || longformCompass?.redLines),
     },
     request_longform_battle: {
       core_guard: longformBattle?.core_guard || longformBattle?.coreGuard,
-      blocked_risks: asArray(longformBattle?.blocked_risks || longformBattle?.blockedRisks).slice(0, 6),
-      required_actions: asArray(longformBattle?.required_actions || longformBattle?.requiredActions).slice(0, 8),
+      blocked_risks: asArray(longformBattle?.blocked_risks || longformBattle?.blockedRisks),
+      required_actions: asArray(longformBattle?.required_actions || longformBattle?.requiredActions),
     },
     request_batch_role: {
       batch_goal: nextBatchBrief?.batch_goal || nextBatchBrief?.batchGoal,
       current_chapter_role: nextBatchBrief?.current_chapter_role || nextBatchBrief?.currentChapterRole,
-      must_deliver: asArray(nextBatchBrief?.must_deliver || nextBatchBrief?.mustDeliver).slice(0, 8),
+      must_deliver: asArray(nextBatchBrief?.must_deliver || nextBatchBrief?.mustDeliver),
     },
     request_delivery_risk: {
-      quality_focus: asArray(deliveryRisk?.quality_focus || deliveryRisk?.qualityFocus).slice(0, 6),
-      opening_actions: asArray(deliveryRisk?.opening_actions || deliveryRisk?.openingActions).slice(0, 8),
-      middle_actions: asArray(deliveryRisk?.middle_actions || deliveryRisk?.middleActions).slice(0, 8),
-      ending_actions: asArray(deliveryRisk?.ending_actions || deliveryRisk?.endingActions).slice(0, 8),
-      avoid_repetition: asArray(deliveryRisk?.avoid_repetition || deliveryRisk?.avoidRepetition || deliveryRisk?.forbidden_repeats || deliveryRisk?.forbiddenRepeats).slice(0, 8),
+      quality_focus: asArray(deliveryRisk?.quality_focus || deliveryRisk?.qualityFocus),
+      opening_actions: asArray(deliveryRisk?.opening_actions || deliveryRisk?.openingActions),
+      middle_actions: asArray(deliveryRisk?.middle_actions || deliveryRisk?.middleActions),
+      ending_actions: asArray(deliveryRisk?.ending_actions || deliveryRisk?.endingActions),
+      avoid_repetition: asArray(deliveryRisk?.avoid_repetition || deliveryRisk?.avoidRepetition || deliveryRisk?.forbidden_repeats || deliveryRisk?.forbiddenRepeats),
     },
     request_million_word_runway: {
       mode: millionWordRunway?.mode,
-      four_questions: asArray(millionWordRunway?.four_questions || millionWordRunway?.fourQuestions).slice(0, 8),
-      reader_fuel: asArray(millionWordRunway?.reader_fuel || millionWordRunway?.readerFuel).slice(0, 8),
-      red_lines: asArray(millionWordRunway?.red_lines || millionWordRunway?.redLines).slice(0, 8),
+      four_questions: asArray(millionWordRunway?.four_questions || millionWordRunway?.fourQuestions),
+      reader_fuel: asArray(millionWordRunway?.reader_fuel || millionWordRunway?.readerFuel),
+      red_lines: asArray(millionWordRunway?.red_lines || millionWordRunway?.redLines),
     },
   }
   const directorSnapshot = {
     readiness: contract.director?.readiness,
     primary_action: contract.director?.primary_action || contract.director?.primaryAction,
-    required_repairs: asArray(contract.director?.required_repairs || contract.director?.requiredRepairs).slice(0, 6),
+    required_repairs: asArray(contract.director?.required_repairs || contract.director?.requiredRepairs),
     selected_contracts: asArray(contract.director?.selected_contracts || contract.director?.selectedContracts).slice(0, 4),
   }
 
@@ -1121,30 +1128,30 @@ function buildRequiredProseCoreSections(
     {
       key: 'chapter',
       text: [
-        `作品：${prosePromptText(project?.title || '', 240)}`,
-        `章节：第${contract.chapter.chapter_no}章《${prosePromptText(contract.chapter.title || '无标题', 160)}》`,
-        `目标：${prosePromptText(contract.chapter.goal || contract.chapter.summary, 900)}`,
-        `冲突：${prosePromptText(contract.chapter.conflict, 900)}`,
-        `读者回报：${prosePromptText(target?.reader_payoff || target?.readerPayoff || target?.core_payoff || target?.corePayoff, 900)}`,
-        `章末钩子：${prosePromptText(contract.chapter.ending_hook, 900)}`,
-        `字数：${prosePromptJson(contract.chapter.word_target || {}, 1200)}`,
+        `作品：${requiredProsePromptText(project?.title || '')}`,
+        `章节：第${contract.chapter.chapter_no}章《${requiredProsePromptText(contract.chapter.title || '无标题')}》`,
+        `目标：${requiredProsePromptText(contract.chapter.goal || contract.chapter.summary)}`,
+        `冲突：${requiredProsePromptText(contract.chapter.conflict)}`,
+        `读者回报：${requiredProsePromptText(target?.reader_payoff || target?.readerPayoff || target?.core_payoff || target?.corePayoff)}`,
+        `章末钩子：${requiredProsePromptText(contract.chapter.ending_hook)}`,
+        `字数：${requiredProsePromptJson(contract.chapter.word_target || {})}`,
       ],
     },
     {
       key: 'handoff',
       text: previousHandoff
-        ? ['【上一章尾段承接】', prosePromptText(previousHandoff, 4200)]
+        ? ['【上一章尾段承接】', requiredProsePromptText(previousHandoff)]
         : [],
     },
     {
       key: 'scene-causality',
-      text: ['【场景卡因果链】', prosePromptJson({ scene_cards: sceneCards }, 12_000)],
+      text: ['【场景卡因果链】', requiredProsePromptJson({ scene_cards: sceneCards })],
     },
     {
       key: 'gate',
       text: [
         '【开写门禁通过快照】',
-        prosePromptJson({
+        requiredProsePromptJson({
           preflight: {
             ready: contract.preflight?.ready,
             strict_ready: contract.preflight?.strict_ready,
@@ -1152,12 +1159,12 @@ function buildRequiredProseCoreSections(
           },
           director: directorSnapshot,
           chapter_launch_gate: launchGate,
-        }, 5000),
+        }),
       ],
     },
     {
       key: 'core-promise',
-      text: ['【不可变核心承诺】', prosePromptJson(corePromise, 5000)],
+      text: ['【不可变核心承诺】', requiredProsePromptJson(corePromise)],
     },
     {
       key: 'safety-style',
