@@ -63,6 +63,7 @@ import {
   applyProseWordTargetSoftCap,
   countProseChars,
   evaluateProseWordTarget,
+  proseContractionMaxTokensForAttempt,
   proseMaxTokensForWordTarget,
   resolveChapterWordTarget,
   type ChapterWordTarget,
@@ -43858,7 +43859,7 @@ export function createNovelWritingService(ctx: {
         }, {
           activeWorkspace,
           modelId: reviseModelId ? String(reviseModelId) : undefined,
-          maxTokens: proseMaxTokensForWordTarget(wordTarget),
+          maxTokens: proseContractionMaxTokensForAttempt(wordTarget, attempt),
           temperature: Math.min(0.55, ctx.production.getStageTemperature(project, 'revise', 0.55)),
           skipMemory: true,
           signal: options.abortSignal,

@@ -1,10 +1,13 @@
 import { describe, expect, test } from 'bun:test'
+import { readFileSync } from 'fs'
+import { join } from 'path'
 import {
   applyChapterWordTargetToContext,
   applyProseWordTargetSoftCap,
   countProseChars,
   evaluateProseWordTarget,
   isWithinProseWordTargetSoftCap,
+  proseContractionMaxTokensForAttempt,
   proseMaxTokensForWordTarget,
   resolveChapterWordTarget,
 } from './word-target'
@@ -77,6 +80,30 @@ describe('novel writing word target utilities', () => {
       too_long: true,
       passed: false,
     })
+  })
+
+  test('raises contraction retries from each target budget and caps reachable attempts at the provider limit', () => {
+    const standard = resolveChapterWordTarget({}, { chapter_no: 1 }, {})
+    const custom = resolveChapterWordTarget({}, { chapter_no: 1 }, { word_target_mode: 'custom', target_word_count: 6000 })
+    const long = resolveChapterWordTarget({}, { chapter_no: 1 }, { word_target_mode: 'long' })
+
+    expect([1, 2, 3].map(attempt => proseContractionMaxTokensForAttempt(standard, attempt))).toEqual([18_000, 32_000, 48_000])
+    expect([1, 2, 3].map(attempt => proseContractionMaxTokensForAttempt(custom, attempt))).toEqual([24_000, 36_000, 54_000])
+    expect([1, 2, 3].map(attempt => proseContractionMaxTokensForAttempt(long, attempt))).toEqual([32_000, 48_000, 64_000])
+  })
+
+  test('bounds non-finite and oversized contraction attempt inputs before iterating', () => {
+    const source = readFileSync(join(import.meta.dir, 'word-target.ts'), 'utf8')
+    const helperStart = source.indexOf('export function proseContractionMaxTokensForAttempt')
+    const helperEnd = source.indexOf('\n}\n', helperStart)
+    const helperSource = source.slice(helperStart, helperEnd)
+    const target = resolveChapterWordTarget({}, { chapter_no: 1 }, {})
+
+    expect(helperSource).toContain('Number.isFinite(rawAttempt)')
+    expect(helperSource).toContain('Math.min(4, Math.floor(rawAttempt))')
+    expect(proseContractionMaxTokensForAttempt(target, Number.NaN)).toBe(18_000)
+    expect(proseContractionMaxTokensForAttempt(target, Number.POSITIVE_INFINITY)).toBe(18_000)
+    expect(proseContractionMaxTokensForAttempt(target, Number.MAX_SAFE_INTEGER)).toBe(64_000)
   })
 
   test('allows tiny over-target drift as a soft cap but rejects substantial overruns', () => {

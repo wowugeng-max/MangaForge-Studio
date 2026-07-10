@@ -11374,7 +11374,7 @@ describe('chapter prose word target', () => {
     expect(expansionStart).toBeGreaterThan(contractionStart)
     expect(ensureBlock).toContain('options.maxContractionAttempts || options.max_contraction_attempts || 3')
     expect(ensureBlock).toContain('buildProseWordTargetContractionPrompt')
-    expect(contractionBlock).toContain('maxTokens: proseMaxTokensForWordTarget(wordTarget)')
+    expect(contractionBlock).toContain('maxTokens: proseContractionMaxTokensForAttempt(wordTarget, attempt)')
     expect(contractionBlock).toContain('const finishReason = normalizeProseContractionFinishReason(contractionResult)')
     expect(contractionBlock).toContain('finish_reason: finishReason')
     expect(contractionBlock).toContain('model_usage: (contractionResult as any).usage')

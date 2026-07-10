@@ -124,6 +124,43 @@ describe('novel writing service prose quality wiring', () => {
     expect(attempt).not.toHaveProperty('prompt')
   })
 
+  test('increases the contraction output budget after truncated attempts', async () => {
+    const originalText = '原'.repeat(1400)
+    const candidateText = '缩'.repeat(1000)
+    const maxTokensByAttempt: number[] = []
+    const service = createNovelWritingService({
+      getProject: async () => null,
+      production: {
+        getStageModelId: (_project: any, _stage: string, fallback?: number) => fallback || 217,
+        getStageTemperature: (_project: any, _stage: string, fallback: number) => fallback,
+      } as any,
+      reference: {} as any,
+      runtime: {
+        executeAgent: async (_agentId: string, _project: any, _context: any, options: any) => {
+          maxTokensByAttempt.push(options.maxTokens)
+          return {
+            content: `{"prose_chapters":[{"chapter_no":1,"chapter_text":"${candidateText}`,
+            finish_reason: 'length',
+          }
+        },
+      },
+    })
+
+    const error = await service.ensureProseMeetsWordTarget(
+      '/tmp/mangaforge-contraction-budget',
+      { id: 1, title: '测试作品' },
+      { chapter_target: { chapter_no: 1, word_target: contractionWordTarget } },
+      originalText,
+      217,
+      { maxContractionAttempts: 3 },
+    ).then(() => null, (caught: any) => caught)
+
+    expect(error?.code).toBe('PROSE_WORD_TARGET_LONG')
+    expect(maxTokensByAttempt).toEqual([18_000, 32_000, 48_000])
+    expect(error?.contraction_attempts).toHaveLength(3)
+    expect(error?.contraction_attempts.every((attempt: any) => attempt.candidate_rejected === true)).toBe(true)
+  })
+
   test('restores the valid pre-editor prose when optional editor output cannot meet the word target', async () => {
     const draftText = buildPipelineProse(
       '江澈踏碎路面，飞石逼退第一排追兵，铁门前终于露出缺口。',

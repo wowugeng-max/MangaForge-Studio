@@ -88,6 +88,18 @@ export function proseMaxTokensForWordTarget(target: ChapterWordTarget | null | u
   return 18000
 }
 
+export function proseContractionMaxTokensForAttempt(target: ChapterWordTarget | null | undefined, attempt: number) {
+  let maxTokens = proseMaxTokensForWordTarget(target)
+  const rawAttempt = Number(attempt)
+  const normalizedAttempt = Number.isFinite(rawAttempt)
+    ? Math.max(1, Math.min(4, Math.floor(rawAttempt)))
+    : 1
+  for (let retry = 1; retry < normalizedAttempt; retry += 1) {
+    maxTokens = Math.min(64_000, Math.max(32_000, maxTokens + 12_000, Math.ceil(maxTokens * 1.5)))
+  }
+  return maxTokens
+}
+
 export function countProseChars(text: string) {
   return String(text || '').replace(/\s/g, '').length
 }
