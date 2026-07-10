@@ -341,6 +341,52 @@ export function normalizeDeterministicProseLanguageFragments(text: string) {
   }
 }
 
+export function normalizeProseQualityRepairResidue(text: string) {
+  const rules = new Set<string>()
+  let changeCount = 0
+  const lines = String(text || '').split(/\r?\n/)
+  const yamlFrontMatterEndIndex = getYamlFrontMatterEndIndex(lines)
+  let inFence = false
+  const replacements: Array<{ pattern: RegExp; replacement: string; rule: string }> = [
+    { pattern: /([\u3400-\u9fff])\s+and\s+([\u3400-\u9fff])/g, replacement: '$1和$2', rule: 'latin_and_to_chinese' },
+    { pattern: /([\u3400-\u9fff])\s+or\s+([\u3400-\u9fff])/g, replacement: '$1或$2', rule: 'latin_or_to_chinese' },
+    { pattern: /([\u3400-\u9fff])\s+of\s*([\u3400-\u9fff])/gi, replacement: '$1的$2', rule: 'latin_of_to_chinese' },
+    { pattern: /([\u3400-\u9fff])\s+but\s+([\u3400-\u9fff])/g, replacement: '$1，但$2', rule: 'latin_but_to_chinese' },
+    { pattern: /微微(?=鼓胀)/g, replacement: '', rule: 'quality_repair_weak_adverb_removed' },
+    { pattern: /缓缓(?=收回|收手)/g, replacement: '', rule: 'quality_repair_weak_adverb_removed' },
+    { pattern: /轻轻(?=敲|敲击)/g, replacement: '', rule: 'quality_repair_weak_adverb_removed' },
+    { pattern: /没有一丝(?=多余)/g, replacement: '没有', rule: 'quality_repair_weak_quantifier_removed' },
+    { pattern: /犹如实质的(?=毒液)/g, replacement: '像泼下的', rule: 'quality_repair_stock_metaphor_grounded' },
+  ]
+  const nextLines = lines.map((line, index) => {
+    let next = String(line || '')
+    if (next.trim().startsWith('```')) {
+      inFence = !inFence
+      return next
+    }
+    if (inFence || (yamlFrontMatterEndIndex >= 0 && index <= yamlFrontMatterEndIndex)) return next
+    for (const { pattern, replacement, rule } of replacements) {
+      next = next.replace(pattern, (...args: any[]) => {
+        const original = args[0]
+        const replaced = replacement.replace(/\$(\d+)/g, (_match, groupIndex) => args[Number(groupIndex)] || '')
+        if (replaced !== original) {
+          rules.add(rule)
+          changeCount += 1
+        }
+        return replaced
+      })
+    }
+    return next
+  })
+  const normalized = nextLines.join('\n')
+  return {
+    text: normalized,
+    changed: normalized !== String(text || ''),
+    change_count: changeCount,
+    rules: Array.from(rules),
+  }
+}
+
 export function normalizeDeterministicProseDeslopTerms(text: string) {
   const rules = new Set<string>()
   let changeCount = 0

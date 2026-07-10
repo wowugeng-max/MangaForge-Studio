@@ -6,6 +6,7 @@ import {
   normalizeDeterministicProseDeslopTerms,
   normalizeDeterministicProseLanguageFragments,
   normalizeDeterministicProsePunctuation,
+  normalizeProseQualityRepairResidue,
   resolveProseLanguageRiskReview,
   scanPeriodMonotonyRisks,
   scanProseLanguageRisks,
@@ -269,6 +270,41 @@ describe('prose format and punctuation utilities', () => {
       '冰冷',
       '隐约',
     ]))
+  })
+
+  test('normalizes language and deslop residue observed after a final prose repair', () => {
+    const result = normalizeProseQualityRepairResidue([
+      '十倍反震的因果律，被他用纯肉身力量 and 一种借力卸力技巧踩碎。',
+      '他的手臂在气血滋养下微微鼓胀，没有一丝多余的颤音。',
+      '他缓缓收回右手，在灰色卫衣的袖口上轻轻敲击。',
+      '那灯光犹如实质的毒液流过墙面。',
+    ].join('\n'))
+
+    expect(result.text).not.toContain(' and ')
+    expect(result.text).not.toContain('微微')
+    expect(result.text).not.toContain('一丝')
+    expect(result.text).not.toContain('缓缓')
+    expect(result.text).not.toContain('轻轻')
+    expect(result.text).not.toContain('犹如')
+    expect(scanProseLanguageRisks(result.text)).toHaveLength(0)
+    expect(scanBannedWordLeaks(result.text).map((item: any) => item.pattern)).not.toEqual(expect.arrayContaining([
+      '微微',
+      '一丝',
+      '缓缓',
+      '轻轻',
+      '犹如',
+    ]))
+  })
+
+  test('keeps unrelated prose semantics outside the narrow quality-repair residue rules', () => {
+    const source = '空气中弥漫着松脂气味，他带着药箱走过冰冷的石门。桌上的纸页微微卷起。'
+
+    expect(normalizeProseQualityRepairResidue(source)).toMatchObject({
+      text: source,
+      changed: false,
+      change_count: 0,
+      rules: [],
+    })
   })
 
   test('normalizes real repair residue from oh-story deslop gate evidence', () => {

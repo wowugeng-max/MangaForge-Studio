@@ -99,14 +99,20 @@ export function buildProseWordTargetContractionPrompt(project: any, contextPacka
   const targetCount = Number(evaluation.target || target.target || 4200)
   const safeMax = Math.max(min, Math.min(max, Math.round((targetCount + max) / 2)))
   const excess = Math.max(0, Number(evaluation.actual || 0) - max)
+  const requiredReduction = Math.max(0, Number(evaluation.actual || 0) - safeMax)
+  const laterAttempt = attempt > 1
   return [
     '任务：将本章正文压缩到商业网文标准章节长度。',
     `作品标题：${project.title || '未命名作品'}`,
     `目标章节：第${chapterTarget?.chapter_no || chapterTarget?.chapterNo || '?'}章《${chapterTarget?.title || '无标题'}》`,
     maxAttempts > 1 ? `这是第 ${attempt} 轮压缩，共最多 ${maxAttempts} 轮。` : '',
     `当前正文约 ${evaluation.actual} 字，目标 ${targetCount} 字，可接受范围 ${min}-${max} 字。`,
+    '唯一计数口径：chapter_text 去掉所有空白字符后的程序字符数，包括全角空格等不可见空白；不按中文词数、token 或估算字数计数。',
     `压缩验收：建议落在 ${min}-${safeMax} 字，绝不能超过 ${max} 字；如果不确定，宁可靠近 ${targetCount} 字，不要贴着上限写。`,
+    requiredReduction > 0 ? `硬删减预算：本轮至少净删 ${requiredReduction} 个字符，输出前必须按上述口径自检 chapter_text。` : '',
     excess > 0 ? `当前至少超出 ${excess} 字；本轮必须压到上限以内，优先压到目标附近。` : '',
+    laterAttempt ? '上一轮仍超上限，本轮不得只做换词和局部删句；改用场景功能保真的重构式压缩。' : '',
+    laterAttempt ? '重构规则：每个场景只保留一条完整行动链，把重复的感官、解释、反应和对话合并进行动或后果；保留事件功能不等于保留原句。' : '',
     '硬性要求：不得删主线事实、角色状态、章末钩子、关键设定触发、爽点回报和已经成立的连续性。',
     '压缩优先级：删除重复解释、设定说明、空泛心理、环境铺陈、同义反复；合并功能相同的对话、动作、反应和旁白。',
     '保留优先级：开篇钩子、每张场景卡的目标/阻碍/转折/回报、主角选择与代价、角色关系变化、关键信息增量、章末翻页钩子。',
@@ -117,9 +123,10 @@ export function buildProseWordTargetContractionPrompt(project: any, contextPacka
     proseContextPromptJson(contextPackage, 7000),
     '',
     '【当前过长正文】',
-    chapterText.slice(0, 26000),
+    chapterText,
     '',
-    '输出 JSON，包含 prose_chapters 数组。数组只能有一项，且必须包含 chapter_no, title, chapter_text, scene_breakdown, continuity_notes。scene_breakdown 必须保留并更新 scene_start_anchor、scene_end_anchor 和 scene_card_receipts。额外输出 contraction_report: {removed_types(array), preserved_story_functions(array), preserved_receipts(array), word_count_estimate(number)}。chapter_text 必须返回压缩后的完整正文，不要只返回删减说明，不要 markdown 标题。',
+    `最终硬验收：chapter_text 按去空白字符口径必须为 ${min}-${safeMax} 个字符；超过 ${max} 即整个输出作废。`,
+    '输出 JSON，包含 prose_chapters 数组。数组只能有一项，且必须包含 chapter_no, title, chapter_text, scene_breakdown, continuity_notes。scene_breakdown 必须保留并更新 scene_start_anchor、scene_end_anchor 和 scene_card_receipts。额外输出 contraction_report: {removed_types(array), preserved_story_functions(array), preserved_receipts(array), non_whitespace_character_count(number)}。chapter_text 必须返回压缩后的完整正文，不要只返回删减说明，不要 markdown 标题。',
   ].filter(Boolean).join('\n')
 }
 

@@ -77,7 +77,7 @@ describe('prose prompt builders', () => {
     const prompt = buildProseWordTargetContractionPrompt(
       { title: '超人的规则怪谈世界' },
       contextPackage,
-      '正文'.repeat(3800),
+      '字'.repeat(7200),
       evaluation,
       { attempt: 1, maxAttempts: 2 },
     )
@@ -86,11 +86,45 @@ describe('prose prompt builders', () => {
     expect(prompt).toContain('当前正文约 7200 字')
     expect(prompt).toContain('可接受范围 3200-5200 字')
     expect(prompt).toContain('建议落在 3200-4700 字')
+    expect(prompt).toContain('去掉所有空白字符后的程序字符数')
+    expect(prompt).toContain('本轮至少净删 2500 个字符')
     expect(prompt).toContain('绝不能超过 5200 字')
     expect(prompt).toContain('不得删主线事实、角色状态、章末钩子')
     expect(prompt).toContain('scene_card_receipts')
     expect(prompt).toContain('oh-story 压缩守恒')
+    expect(prompt).toContain('non_whitespace_character_count(number)')
+    expect(prompt).not.toContain('word_count_estimate(number)')
     expect(prompt).not.toContain('[Circular]')
+  })
+
+  test('escalates later contraction attempts after a previous over-target rewrite', () => {
+    const target = resolveChapterWordTarget({}, { chapter_no: 10 }, {})
+    const evaluation = evaluateProseWordTarget('字'.repeat(6093), target)
+    const prompt = buildProseWordTargetContractionPrompt(
+      { title: '超人的规则怪谈世界' },
+      { chapter_target: { chapter_no: 10, title: '镇门诱捕', word_target: target } },
+      '字'.repeat(6093),
+      evaluation,
+      { attempt: 2, maxAttempts: 3 },
+    )
+
+    expect(prompt).toContain('上一轮仍超上限')
+    expect(prompt).toContain('改用场景功能保真的重构式压缩')
+    expect(prompt).toContain('每个场景只保留一条完整行动链')
+    expect(prompt).toContain('本轮至少净删 1393 个字符')
+  })
+
+  test('keeps the complete over-target chapter including its ending hook', () => {
+    const target = resolveChapterWordTarget({}, { chapter_no: 10 }, {})
+    const chapterText = `${'围'.repeat(27_000)}ENDING_HOOK_SENTINEL`
+    const prompt = buildProseWordTargetContractionPrompt(
+      { title: '超人的规则怪谈世界' },
+      { chapter_target: { chapter_no: 10, title: '镇门诱捕', word_target: target } },
+      chapterText,
+      evaluateProseWordTarget(chapterText, target),
+    )
+
+    expect(prompt).toContain('ENDING_HOOK_SENTINEL')
   })
 
   test('builds commercial editor prompts with compact prose context snapshots and word targets', () => {
