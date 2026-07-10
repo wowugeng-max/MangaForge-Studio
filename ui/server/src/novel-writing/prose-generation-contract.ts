@@ -20,6 +20,7 @@ export interface ProseGenerationContract {
 }
 
 export const PROSE_RISK_CONTRACT_LIMIT = 4
+export const PROSE_PROMPT_MAX_CHARS = 48_000
 
 export type ProsePreDraftGateCode =
   | 'PROSE_PREFLIGHT_BLOCKED'
