@@ -148,6 +148,55 @@ describe('prose contract prompt compiler', () => {
     expect(thrown.diagnostics.required_chars).toBeGreaterThan(48_000)
   })
 
+  test('production required content preserves every scene card within the total budget', () => {
+    const tailSentinel = 'PRODUCTION_SCENE_CARD_201_SENTINEL'
+    const contract = buildProseGenerationContract({
+      chapter_target: {
+        chapter_no: 10,
+        title: '合围破局',
+        goal: '打穿追捕圈',
+        conflict: '追捕队封死四面出口',
+        ending_hook: '幕后指挥者现身',
+        scene_cards: Array.from({ length: 201 }, (_, index) => ({
+          scene_no: index + 1,
+          goal: index === 200 ? tailSentinel : `场景${index + 1}`,
+        })),
+      },
+      preflight: { ready: true, strict_ready: true, checks: [] },
+      oh_story_director: { readiness: 'ready', selected_contracts: [] },
+    })
+
+    const compiled = compileParagraphProseContext({ title: '怪谈世界' }, contract)
+
+    expect(compiled.diagnostics.required_chars).toBeLessThan(48_000)
+    expect(compiled.prompt).toContain(tailSentinel)
+    expect(compiled.prompt).not.toContain('[Truncated 1 items]')
+  })
+
+  test('production required content preserves nested values within the total budget', () => {
+    const depthSentinel = 'PRODUCTION_REQUIRED_DEPTH_SENTINEL'
+    let nested: any = { value: depthSentinel }
+    for (let depth = 0; depth < 25; depth += 1) nested = { next: nested }
+    const contract = buildProseGenerationContract({
+      chapter_target: {
+        chapter_no: 10,
+        title: '合围破局',
+        goal: '打穿追捕圈',
+        conflict: '追捕队封死四面出口',
+        ending_hook: '幕后指挥者现身',
+        scene_cards: [{ scene_no: 1, required_information: nested }],
+      },
+      preflight: { ready: true, strict_ready: true, checks: [] },
+      oh_story_director: { readiness: 'ready', selected_contracts: [] },
+    })
+
+    const compiled = compileParagraphProseContext({ title: '怪谈世界' }, contract)
+
+    expect(compiled.diagnostics.required_chars).toBeLessThan(48_000)
+    expect(compiled.prompt).toContain(depthSentinel)
+    expect(compiled.prompt).not.toContain('[MaxDepth]')
+  })
+
   test('loads no more than four director-selected risk contracts', () => {
     const contractSections = Array.from({ length: 6 }, (_, index) => ({
       key: `risk_${index + 1}`,

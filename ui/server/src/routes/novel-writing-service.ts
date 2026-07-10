@@ -57,6 +57,7 @@ import {
   normalizeIssue,
   parseJsonLikePayload,
   safeJsonStringify as stringifyRouteJsonSafely,
+  sanitizeJsonValue,
 } from './novel-route-utils'
 import {
   applyChapterWordTargetToContext,
@@ -1008,7 +1009,16 @@ function requiredProsePromptText(value: any) {
 }
 
 function requiredProsePromptJson(value: any) {
-  return safeJsonStringify(value, undefined, 0)
+  try {
+    const text = JSON.stringify(sanitizeJsonValue(value, {
+      maxDepth: Infinity,
+      maxArrayLength: Infinity,
+      maxObjectKeys: Infinity,
+    }))
+    return text === undefined ? 'null' : text
+  } catch {
+    return JSON.stringify(String(value ?? ''))
+  }
 }
 
 function proseContractValue(context: any, key: string) {
