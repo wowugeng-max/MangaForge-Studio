@@ -23,6 +23,7 @@ import {
   resolveProseLanguageRiskReview,
   stripProseEngineeringAppendix,
 } from '../novel-writing/prose-format'
+import { compactProseGenerationOverride } from '../novel-writing/prose-generation-contract'
 
 export function stringifyNovelGenerationPayload(value: any) {
   return safeJsonStringify(value, undefined, 0)
@@ -136,63 +137,16 @@ function scoreFutureSkeletonChapter(item: any) {
   return checks.reduce((sum, value) => sum + value, 0)
 }
 
-const REQUEST_OVERRIDE_MAX_STRING = 800
-const REQUEST_OVERRIDE_MAX_ARRAY = 12
-const REQUEST_OVERRIDE_MAX_DEPTH = 5
-const REQUEST_OVERRIDE_DROP_KEYS = new Set([
-  'context_package',
-  'contextPackage',
-  'raw_payload',
-  'rawPayload',
-  'pipeline',
-  'chapters',
-  'chapter_text',
-  'chapterText',
-  'full_text',
-  'fullText',
-  'prompt',
-  'messages',
-  'debug',
-  'diagnostics',
-])
-
 export function compactGenerationRequestOverride(value: any, key = '', depth = 0, seen = new WeakSet<object>()): any {
-  if (REQUEST_OVERRIDE_DROP_KEYS.has(key)) return undefined
-  if (value === null || value === undefined) return value
-  const valueType = typeof value
-  if (valueType === 'string') {
-    const text = value.trim()
-    return text.length > REQUEST_OVERRIDE_MAX_STRING
-      ? `${text.slice(0, REQUEST_OVERRIDE_MAX_STRING)}...`
-      : text
-  }
-  if (valueType === 'number' || valueType === 'boolean') return value
-  if (valueType === 'bigint') return String(value)
-  if (valueType !== 'object') return String(value)
-  if (seen.has(value)) return '[Circular]'
-  if (depth >= REQUEST_OVERRIDE_MAX_DEPTH) return undefined
-  seen.add(value)
-  if (Array.isArray(value)) {
-    const items = value.slice(0, REQUEST_OVERRIDE_MAX_ARRAY)
-      .map(item => compactGenerationRequestOverride(item, '', depth + 1, seen))
-      .filter(item => item !== undefined)
-    seen.delete(value)
-    return items
-  }
-  const output: Record<string, any> = {}
-  for (const [childKey, childValue] of Object.entries(value)) {
-    const compacted = compactGenerationRequestOverride(childValue, childKey, depth + 1, seen)
-    if (compacted !== undefined) output[childKey] = compacted
-  }
-  seen.delete(value)
-  return output
+  return compactProseGenerationOverride(value, key, depth, seen)
 }
 
 const STANDALONE_PROGRESS_MAX_STRING = 240
 const STANDALONE_PROGRESS_MAX_ARRAY = 6
 const STANDALONE_PROGRESS_MAX_DEPTH = 4
 const STANDALONE_PROGRESS_DROP_KEYS = new Set([
-  ...REQUEST_OVERRIDE_DROP_KEYS,
+  'pipeline',
+  'chapters',
   'scene_cards',
   'sceneCards',
   'context_package',
